@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.1 - 2026-03-09
+
+- 新增 Windows `portable` 免安装打包目标，可生成直接运行的单文件 `exe`。
+- 新增 `npm run dist:win:portable` 和 `npm run dist:win:setup` 脚本。
+- 调整 `npm run dist:win`，默认同时生成安装版和免安装版。
+- GitHub Actions 现在同时上传 `windows-installer` 和 `windows-portable-exe` 产物。
+- 为 Windows 主进程补充 `AppUserModelId` 设置，提升便携版系统集成兼容性。
+
 ## 1.0.0 - 2026-03-09
 
 - 初始化 Electron 桌面端应用骨架，支持 Windows 10 / 11。

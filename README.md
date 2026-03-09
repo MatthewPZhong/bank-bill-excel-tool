@@ -20,23 +20,43 @@ npm run init:enum
 npm start
 ```
 
-## 打包 Windows 安装包
+## 打包 Windows 可执行文件
 
 ```bash
 npm run dist:win
 ```
 
-打包后的安装程序默认位于：
+默认会同时生成安装包和免安装可执行文件：
 
 ```bash
-dist/清结算网银账单Excel生成小工具-1.0.0-setup.exe
+dist/清结算网银账单Excel生成小工具-1.0.1-setup.exe
+dist/清结算网银账单Excel生成小工具-1.0.1-portable.exe
+```
+
+如果只想生成免安装的单文件 exe：
+
+```bash
+npm run dist:win:portable
+```
+
+如果只想生成安装包：
+
+```bash
+npm run dist:win:setup
 ```
 
 ## GitHub 下载说明
 
 - GitHub 网页上的 `Download ZIP` 下载的是源码，不包含已构建的 `exe`。
 - 如果需要现成安装程序，请到仓库的 `Actions` 页面下载 `windows-installer` 构建产物。
-- 如果是在本地 Windows 机器上自行生成 `exe`，执行 `npm install` 后运行 `npm run dist:win`。
+- 如果需要直接运行的单文件 exe，请下载 `windows-portable-exe` 构建产物。
+- 如果是在本地 Windows 机器上自行生成，执行 `npm install` 后运行 `npm run dist:win`。
+
+## 产物说明
+
+- `setup.exe`：安装版，适合正式分发给终端用户。
+- `portable.exe`：免安装版，下载后可直接运行。
+- 根据 electron-builder 官方文档，Windows `portable` 目标是“portable app without installation”，而自动更新能力对应的是 NSIS 目标，因此如果后续要做自动更新，仍建议优先保留安装版。
 
 ## 数据和日志目录
 

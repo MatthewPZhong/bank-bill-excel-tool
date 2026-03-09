@@ -10,6 +10,10 @@ const {
 } = require('./backend/file-service');
 const { appendLog } = require('./backend/logger');
 
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.openai.bankbillexceltool');
+}
+
 let mainWindow = null;
 let database = null;
 let lastGeneratedFile = null;
