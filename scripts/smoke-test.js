@@ -41,6 +41,12 @@ function run() {
     headers
   });
 
+  db.setEnumConfig({
+    filePath: enumPath,
+    sourceFileName: '测试枚举.xlsx'
+  });
+  assert.strictEqual(db.getEnumConfig().sourceFileName, '测试枚举.xlsx');
+
   db.saveMappings(template.id, [
     { templateField: '原字段A', mappedField: '字段A' },
     { templateField: '原字段B', mappedField: '字段B' }

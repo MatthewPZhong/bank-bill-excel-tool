@@ -4,11 +4,20 @@ const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const { AppDatabase } = require('./backend/database');
 const {
   FileValidationError,
+  extractEnumValuesFromImportedFile,
   extractHeaders,
   loadEnumValues,
   transformFileToWorkbook
 } = require('./backend/file-service');
 const { appendLog } = require('./backend/logger');
+
+if (process.env.APP_USER_DATA_DIR) {
+  app.setPath('userData', process.env.APP_USER_DATA_DIR);
+}
+
+if (process.env.APP_DOCUMENTS_DIR) {
+  app.setPath('documents', process.env.APP_DOCUMENTS_DIR);
+}
 
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.openai.bankbillexceltool');
@@ -23,7 +32,7 @@ function pad(value) {
 }
 
 function getStorageRoot() {
-  return path.join(app.getPath('documents'), '清结算网银账单Excel生成小工具');
+  return path.join(app.getPath('documents'), '网银账单生成小助手');
 }
 
 function ensureStorageRoot() {
@@ -32,14 +41,14 @@ function ensureStorageRoot() {
   return storageRoot;
 }
 
-function resolveEnumFilePath() {
-  const candidates = [
-    path.join(app.getAppPath(), 'COMMON枚举.xlsx'),
-    path.join(process.cwd(), 'COMMON枚举.xlsx'),
-    path.join(process.resourcesPath || '', 'COMMON枚举.xlsx')
-  ];
+function getImportedEnumConfig() {
+  const enumConfig = database.getEnumConfig();
 
-  return candidates.find((candidate) => candidate && fs.existsSync(candidate)) || null;
+  if (!enumConfig || !enumConfig.filePath || !fs.existsSync(enumConfig.filePath)) {
+    return null;
+  }
+
+  return enumConfig;
 }
 
 function getToday() {
@@ -90,6 +99,21 @@ function createWindow() {
   mainWindow.loadFile(path.join(app.getAppPath(), 'index.html'));
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+    sendWindowState();
+
+    if (process.env.APP_CAPTURE_PATH) {
+      setTimeout(async () => {
+        try {
+          const image = await mainWindow.webContents.capturePage();
+          fs.mkdirSync(path.dirname(process.env.APP_CAPTURE_PATH), { recursive: true });
+          fs.writeFileSync(process.env.APP_CAPTURE_PATH, image.toPNG());
+        } catch (error) {
+          console.error(error);
+        } finally {
+          app.quit();
+        }
+      }, Number(process.env.APP_CAPTURE_DELAY_MS || 1800));
+    }
   });
   mainWindow.on('maximize', sendWindowState);
   mainWindow.on('unmaximize', sendWindowState);
@@ -128,10 +152,64 @@ function registerWindowHandlers() {
 
 function registerAppHandlers() {
   ipcMain.handle('app:get-info', () => {
+    const enumConfig = getImportedEnumConfig();
     return {
       version: app.getVersion(),
-      storageRoot: ensureStorageRoot()
+      storageRoot: ensureStorageRoot(),
+      hasEnum: Boolean(enumConfig),
+      enumFileName: enumConfig ? enumConfig.sourceFileName : ''
     };
+  });
+}
+
+function registerEnumHandlers() {
+  ipcMain.handle('enum:import', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [
+        {
+          name: 'Excel',
+          extensions: ['xlsx']
+        }
+      ]
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { status: 'cancelled' };
+    }
+
+    const selectedPath = result.filePaths[0];
+
+    try {
+      extractEnumValuesFromImportedFile(selectedPath);
+      const enumDir = path.join(ensureStorageRoot(), 'enum');
+      const targetPath = path.join(enumDir, '网银账单枚举表.xlsx');
+
+      fs.mkdirSync(enumDir, { recursive: true });
+      if (path.resolve(selectedPath) !== path.resolve(targetPath)) {
+        fs.copyFileSync(selectedPath, targetPath);
+      }
+
+      database.setEnumConfig({
+        filePath: targetPath,
+        sourceFileName: path.basename(selectedPath)
+      });
+
+      return {
+        status: 'success',
+        message: `网银账单枚举表导入成功：${path.basename(selectedPath)}`,
+        enumFileName: path.basename(selectedPath)
+      };
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return {
+          status: 'error',
+          message: error.message
+        };
+      }
+
+      throw error;
+    }
   });
 }
 
@@ -190,12 +268,12 @@ function registerTemplateHandlers() {
       };
     }
 
-    const enumFilePath = resolveEnumFilePath();
+    const enumConfig = getImportedEnumConfig();
 
-    if (!enumFilePath) {
+    if (!enumConfig) {
       return {
         status: 'error',
-        message: 'COMMON枚举.xlsx 不存在，请放置在应用根目录后重试'
+        message: '请先导入网银账单枚举表'
       };
     }
 
@@ -204,13 +282,13 @@ function registerTemplateHandlers() {
         status: 'success',
         template: buildTemplateSummary(mappingSet.template),
         mappings: mappingSet.mappings,
-        enumValues: loadEnumValues(enumFilePath)
+        enumValues: loadEnumValues(enumConfig.filePath)
       };
     } catch (error) {
       if (error instanceof FileValidationError) {
         return {
           status: 'error',
-          message: 'COMMON枚举.xlsx 不存在或不可读，请检查后重试'
+          message: '网银账单枚举表为空或不可读，请重新导入'
         };
       }
 
@@ -242,6 +320,13 @@ function registerTemplateHandlers() {
 
 function registerFileHandlers() {
   ipcMain.handle('file:import', async (_event, templateId) => {
+    if (!getImportedEnumConfig()) {
+      return {
+        status: 'error',
+        message: '请先导入网银账单枚举表'
+      };
+    }
+
     if (!templateId) {
       return {
         status: 'error',
@@ -354,6 +439,7 @@ app.whenReady().then(() => {
 
   registerWindowHandlers();
   registerAppHandlers();
+  registerEnumHandlers();
   registerTemplateHandlers();
   registerFileHandlers();
   createWindow();

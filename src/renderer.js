@@ -2,7 +2,9 @@ const state = {
   templates: [],
   selectedTemplateId: '',
   canExport: false,
-  isMaximized: false
+  isMaximized: false,
+  hasEnum: false,
+  enumFileName: ''
 };
 
 const elements = {
@@ -22,6 +24,12 @@ const elements = {
 function setStatus(message, tone = 'info') {
   elements.statusBox.textContent = message;
   elements.statusBox.dataset.tone = tone;
+}
+
+function getEnumStatusMessage() {
+  return state.hasEnum
+    ? `已导入枚举表：${state.enumFileName}（点击可覆盖）`
+    : '请导入网银账单枚举表';
 }
 
 function setExportEnabled(enabled) {
@@ -168,8 +176,7 @@ function createTemplateManagerDialog() {
   const dialog = document.createElement('div');
   dialog.className = 'modal-card manager-card';
   dialog.innerHTML = `
-    <div class="dialog-header">
-      <div class="dialog-title">模版管理</div>
+    <div class="dialog-header compact">
       <button class="icon-close" type="button">×</button>
     </div>
     <div class="table-wrapper">
@@ -287,6 +294,11 @@ async function handleImportTemplate() {
 }
 
 async function handleImportFile() {
+  if (!state.hasEnum) {
+    await handleImportEnum();
+    return;
+  }
+
   const templateId = Number(state.selectedTemplateId);
   const result = await window.desktopApi.files.importFile(templateId);
 
@@ -299,6 +311,22 @@ async function handleImportFile() {
   if (result.status === 'success') {
     setExportEnabled(true);
   }
+}
+
+async function handleImportEnum() {
+  const result = await window.desktopApi.enums.importEnum();
+
+  if (result.status === 'cancelled') {
+    return;
+  }
+
+  if (result.status === 'success') {
+    state.hasEnum = true;
+    state.enumFileName = result.enumFileName;
+    setExportEnabled(false);
+  }
+
+  setStatus(result.message, result.status === 'success' ? 'success' : 'error');
 }
 
 async function handleExportFile() {
@@ -314,8 +342,12 @@ async function handleExportFile() {
 async function initialize() {
   const info = await window.desktopApi.app.getInfo();
   elements.appVersion.textContent = info.version;
+  state.hasEnum = info.hasEnum;
+  state.enumFileName = info.enumFileName || '';
   await refreshTemplates();
   setExportEnabled(false);
+  setStatus(getEnumStatusMessage());
+  elements.statusBox.title = '点击可导入或覆盖网银账单枚举表';
 
   elements.importTemplateBtn.addEventListener('click', handleImportTemplate);
   elements.manageTemplateBtn.addEventListener('click', () => {
@@ -323,6 +355,7 @@ async function initialize() {
   });
   elements.importFileBtn.addEventListener('click', handleImportFile);
   elements.exportFileBtn.addEventListener('click', handleExportFile);
+  elements.statusBox.addEventListener('click', handleImportEnum);
   elements.templateSelect.addEventListener('change', (event) => {
     state.selectedTemplateId = event.target.value;
   });

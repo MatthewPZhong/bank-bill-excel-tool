@@ -32,6 +32,12 @@ class AppDatabase {
         FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE,
         UNIQUE(template_id, row_index)
       );
+
+      CREATE TABLE IF NOT EXISTS app_settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
     `);
   }
 
@@ -183,6 +189,49 @@ class AppDatabase {
       this.db.exec('ROLLBACK');
       throw error;
     }
+  }
+
+  getSetting(settingKey) {
+    const row = this.db
+      .prepare(`
+        SELECT setting_value AS settingValue
+        FROM app_settings
+        WHERE setting_key = ?
+      `)
+      .get(settingKey);
+
+    return row ? row.settingValue : null;
+  }
+
+  setSetting(settingKey, settingValue) {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(`
+        INSERT INTO app_settings (setting_key, setting_value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(setting_key) DO UPDATE
+        SET setting_value = excluded.setting_value,
+            updated_at = excluded.updated_at
+      `)
+      .run(settingKey, settingValue, now);
+  }
+
+  getEnumConfig() {
+    const raw = this.getSetting('enum_config');
+
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  setEnumConfig(enumConfig) {
+    this.setSetting('enum_config', JSON.stringify(enumConfig));
   }
 }
 

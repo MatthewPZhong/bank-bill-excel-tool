@@ -4,6 +4,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
   app: {
     getInfo: () => ipcRenderer.invoke('app:get-info')
   },
+  enums: {
+    importEnum: () => ipcRenderer.invoke('enum:import')
+  },
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),

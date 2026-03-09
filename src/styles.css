@@ -91,10 +91,23 @@ select {
 .page-title {
   margin: 40px 0 52px;
   text-align: center;
-  font-family: "SimSun", "Songti SC", serif;
-  font-size: 34px;
+  font-family: "OpenAI Sans", "PingFang SC", "Noto Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  font-size: 46px;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 4px;
+}
+
+.corner-gif {
+  position: fixed;
+  top: 0.5cm;
+  left: 0.5cm;
+  width: 1.5cm;
+  height: 1.5cm;
+  object-fit: cover;
+  border-radius: 22px;
+  box-shadow: 0 20px 42px rgba(53, 39, 20, 0.18);
+  pointer-events: none;
+  z-index: 2;
 }
 
 .control-board {
@@ -214,6 +227,13 @@ select {
   text-align: center;
   line-height: 1.5;
   color: var(--text);
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.status-box:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(100, 74, 35, 0.12);
 }
 
 .status-box[data-tone="success"] {
@@ -227,14 +247,23 @@ select {
 }
 
 .page-footer {
+  position: fixed;
+  right: 28px;
+  bottom: 20px;
   display: flex;
   justify-content: flex-end;
-  padding: 8px 28px 22px;
+  z-index: 2;
 }
 
 .version-text {
   color: var(--muted);
   font-size: 14px;
+  font-family: "Courier New", monospace;
+  letter-spacing: 0.4px;
+}
+
+.version-label {
+  margin-right: 6px;
 }
 
 .modal-overlay {
@@ -274,6 +303,11 @@ select {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 18px;
+}
+
+.dialog-header.compact {
+  justify-content: flex-end;
+  margin-bottom: 12px;
 }
 
 .dialog-title {

@@ -120,6 +120,23 @@ function loadEnumValues(enumFilePath) {
   return values;
 }
 
+function extractEnumValuesFromImportedFile(filePath) {
+  const extension = path.extname(filePath).toLowerCase();
+  const fileName = path.basename(filePath);
+
+  if (extension !== '.xlsx' || !fileName.includes('枚举')) {
+    throw new FileValidationError('FILE_TYPE', '请导入文件名带有“枚举”的xlsx文件');
+  }
+
+  const values = loadEnumValues(filePath);
+
+  if (!values.length) {
+    throw new FileValidationError('FILE_READ', '枚举表为空或不可读，请重新导入');
+  }
+
+  return values;
+}
+
 function transformFileToWorkbook({ inputFilePath, mappingByField, outputFilePath }) {
   const rows = readRows(inputFilePath);
   const headerRow = rows[0] || [];
@@ -144,6 +161,7 @@ module.exports = {
   FileValidationError,
   SUPPORTED_EXTENSIONS,
   ensureSupportedFile,
+  extractEnumValuesFromImportedFile,
   extractHeaders,
   loadEnumValues,
   normalizeCell,

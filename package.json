@@ -1,7 +1,7 @@
 {
   "name": "bank-bill-excel-tool",
-  "version": "1.0.1",
-  "description": "清结算网银账单Excel生成小工具",
+  "version": "1.0.6",
+  "description": "网银账单小助手",
   "main": "src/main.js",
   "author": "OpenAI Codex",
   "license": "MIT",
@@ -10,23 +10,24 @@
     "dist:win": "electron-builder --win",
     "dist:win:setup": "electron-builder --win nsis",
     "dist:win:portable": "electron-builder --win portable",
+    "preview": "node scripts/render-preview.js",
     "smoke": "node scripts/smoke-test.js",
     "init:enum": "node scripts/create-common-enum.js"
   },
   "build": {
     "appId": "com.openai.bankbillexceltool",
-    "productName": "清结算网银账单Excel生成小工具",
+    "productName": "网银账单小助手",
     "directories": {
       "output": "dist"
     },
     "files": [
+      "assets/**/*",
       "index.html",
       "src/**/*",
       "scripts/**/*",
       "CHANGELOG.md",
       "README.md",
       "docs/**/*",
-      "COMMON枚举.xlsx",
       "package.json"
     ],
     "win": {
