@@ -12,6 +12,7 @@ const elements = {
   exportFileBtn: document.getElementById('exportFileBtn'),
   importTemplateBtn: document.getElementById('importTemplateBtn'),
   manageTemplateBtn: document.getElementById('manageTemplateBtn'),
+  accountMappingBtn: document.getElementById('accountMappingBtn'),
   templateSelect: document.getElementById('templateSelect'),
   statusBox: document.getElementById('statusBox'),
   appVersion: document.getElementById('appVersion'),
@@ -279,6 +280,116 @@ function createMappingDialog(payload) {
   return overlay;
 }
 
+function createAccountMappingDialog(payload) {
+  const overlay = createOverlay();
+  const dialog = document.createElement('div');
+  dialog.className = 'modal-card manager-card account-card';
+  dialog.innerHTML = `
+    <div class="dialog-header compact">
+      <button class="icon-close" type="button">×</button>
+    </div>
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>网银大账户ID</th>
+            <th>清结算系统大账户ID</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="dialog-actions right">
+      <button class="primary-btn small" type="button" data-action="done">完成</button>
+    </div>
+  `;
+
+  const tbody = dialog.querySelector('tbody');
+
+  function createInputRow(bankAccountId = '', clearingAccountId = '') {
+    const row = document.createElement('tr');
+    const bankCell = document.createElement('td');
+    const clearingCell = document.createElement('td');
+    const bankInput = document.createElement('input');
+    const clearingInput = document.createElement('input');
+
+    bankInput.className = 'mapping-text-input';
+    bankInput.type = 'text';
+    bankInput.spellcheck = false;
+    bankInput.value = bankAccountId;
+
+    clearingInput.className = 'mapping-text-input';
+    clearingInput.type = 'text';
+    clearingInput.spellcheck = false;
+    clearingInput.value = clearingAccountId;
+
+    bankCell.appendChild(bankInput);
+    clearingCell.appendChild(clearingInput);
+    row.appendChild(bankCell);
+    row.appendChild(clearingCell);
+    return row;
+  }
+
+  function createAddRow() {
+    const row = document.createElement('tr');
+    row.className = 'add-row';
+    row.innerHTML = `
+      <td><button class="text-action" type="button" data-action="add">新增</button></td>
+      <td></td>
+    `;
+
+    row.querySelector('[data-action="add"]').addEventListener('click', () => {
+      tbody.insertBefore(createInputRow('', ''), row);
+    });
+
+    return row;
+  }
+
+  payload.mappings.forEach((mapping) => {
+    tbody.appendChild(createInputRow(mapping.bankAccountId, mapping.clearingAccountId));
+  });
+  tbody.appendChild(createAddRow());
+
+  dialog.querySelector('.icon-close').addEventListener('click', closeModal);
+  dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+    const mappings = Array.from(dialog.querySelectorAll('.mapping-text-input'))
+      .reduce((accumulator, input, index) => {
+        const rowIndex = Math.floor(index / 2);
+
+        if (!accumulator[rowIndex]) {
+          accumulator[rowIndex] = {
+            bankAccountId: '',
+            clearingAccountId: ''
+          };
+        }
+
+        if (index % 2 === 0) {
+          accumulator[rowIndex].bankAccountId = input.value;
+        } else {
+          accumulator[rowIndex].clearingAccountId = input.value;
+        }
+
+        return accumulator;
+      }, []);
+
+    const result = await window.desktopApi.accountMappings.save(mappings);
+
+    openModal(createAlertDialog(result.message));
+    if (result.status === 'success') {
+      const info = await window.desktopApi.app.getInfo();
+      setStatus(result.message, 'success');
+      elements.statusBox.title = info.accountMappingCount
+        ? `当前账户映射条数：${info.accountMappingCount}，点击可导入或覆盖网银账单枚举表`
+        : '点击可导入或覆盖网银账单枚举表';
+    } else {
+      setStatus(result.message, 'error');
+    }
+  });
+
+  overlay.appendChild(dialog);
+  return overlay;
+}
+
 async function handleImportTemplate() {
   const result = await window.desktopApi.templates.importTemplate();
 
@@ -291,6 +402,18 @@ async function handleImportTemplate() {
   if (result.status === 'success') {
     await refreshTemplates();
   }
+}
+
+async function handleOpenAccountMappings() {
+  const result = await window.desktopApi.accountMappings.list();
+
+  if (result.status !== 'success') {
+    setStatus(result.message, 'error');
+    openModal(createAlertDialog(result.message));
+    return;
+  }
+
+  openModal(createAccountMappingDialog(result));
 }
 
 async function handleImportFile() {
@@ -353,6 +476,7 @@ async function initialize() {
   elements.manageTemplateBtn.addEventListener('click', () => {
     openModal(createTemplateManagerDialog());
   });
+  elements.accountMappingBtn.addEventListener('click', handleOpenAccountMappings);
   elements.importFileBtn.addEventListener('click', handleImportFile);
   elements.exportFileBtn.addEventListener('click', handleExportFile);
   elements.statusBox.addEventListener('click', handleImportEnum);
@@ -372,6 +496,14 @@ async function initialize() {
     state.isMaximized = value;
     elements.maximizeBtn.textContent = value ? '❐' : '□';
   });
+
+  if (info.previewModal === 'account-mapping') {
+    setTimeout(() => {
+      handleOpenAccountMappings().catch((error) => {
+        console.error(error);
+      });
+    }, 120);
+  }
 }
 
 initialize().catch((error) => {

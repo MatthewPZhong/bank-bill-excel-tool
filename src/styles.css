@@ -141,6 +141,15 @@ select {
   gap: 12px;
 }
 
+.button-stack {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .cell.right {
   justify-self: center;
 }
@@ -208,6 +217,16 @@ select {
   min-width: 260px;
   height: 44px;
   border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: #fffdf8;
+  padding: 0 14px;
+  color: var(--text);
+}
+
+.mapping-text-input {
+  width: 100%;
+  height: 42px;
+  border-radius: 12px;
   border: 1px solid var(--line-strong);
   background: #fffdf8;
   padding: 0 14px;
@@ -289,6 +308,10 @@ select {
   min-height: 360px;
 }
 
+.account-card {
+  width: min(100%, 920px);
+}
+
 .mapping-card {
   width: min(100%, 1120px);
 }
@@ -365,6 +388,10 @@ select {
   display: flex;
   gap: 16px;
   align-items: center;
+}
+
+.add-row td {
+  background: rgba(255, 250, 241, 0.7);
 }
 
 .text-action {

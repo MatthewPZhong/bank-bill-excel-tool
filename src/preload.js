@@ -7,6 +7,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
   enums: {
     importEnum: () => ipcRenderer.invoke('enum:import')
   },
+  accountMappings: {
+    list: () => ipcRenderer.invoke('account-mapping:list'),
+    save: (mappings) => ipcRenderer.invoke('account-mapping:save', mappings)
+  },
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),

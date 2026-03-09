@@ -1,6 +1,6 @@
 {
   "name": "bank-bill-excel-tool",
-  "version": "1.0.6",
+  "version": "1.0.9",
   "description": "网银账单小助手",
   "main": "src/main.js",
   "author": "OpenAI Codex",
@@ -11,6 +11,7 @@
     "dist:win:setup": "electron-builder --win nsis",
     "dist:win:portable": "electron-builder --win portable",
     "preview": "node scripts/render-preview.js",
+    "preview:account": "node scripts/render-account-mapping-preview.js",
     "smoke": "node scripts/smoke-test.js",
     "init:enum": "node scripts/create-common-enum.js"
   },

@@ -157,9 +157,64 @@ function registerAppHandlers() {
       version: app.getVersion(),
       storageRoot: ensureStorageRoot(),
       hasEnum: Boolean(enumConfig),
-      enumFileName: enumConfig ? enumConfig.sourceFileName : ''
+      enumFileName: enumConfig ? enumConfig.sourceFileName : '',
+      accountMappingCount: database.listAccountMappings().length,
+      previewModal: process.env.APP_PREVIEW_MODAL || ''
     };
   });
+}
+
+function validateAccountMappings(mappings) {
+  const cleanedMappings = [];
+  const bankAccountSeen = new Set();
+
+  for (const mapping of mappings) {
+    const bankAccountId = String(mapping.bankAccountId || '').trim();
+    const clearingAccountId = String(mapping.clearingAccountId || '').trim();
+
+    if (!bankAccountId && !clearingAccountId) {
+      continue;
+    }
+
+    if (!bankAccountId || !clearingAccountId) {
+      return {
+        status: 'error',
+        message: '账户映射存在未填写完整的行，请补全后再保存'
+      };
+    }
+
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(bankAccountId)) {
+      return {
+        status: 'error',
+        message: '网银大账户ID仅支持1-64位字母、数字、下划线、中划线'
+      };
+    }
+
+    if (bankAccountSeen.has(bankAccountId)) {
+      return {
+        status: 'error',
+        message: '网银大账户ID不可重复，请重新确认'
+      };
+    }
+
+    if (clearingAccountId.length > 128) {
+      return {
+        status: 'error',
+        message: '清结算系统大账户ID长度不能超过128位'
+      };
+    }
+
+    bankAccountSeen.add(bankAccountId);
+    cleanedMappings.push({
+      bankAccountId,
+      clearingAccountId
+    });
+  }
+
+  return {
+    status: 'success',
+    mappings: cleanedMappings
+  };
 }
 
 function registerEnumHandlers() {
@@ -210,6 +265,29 @@ function registerEnumHandlers() {
 
       throw error;
     }
+  });
+}
+
+function registerAccountMappingHandlers() {
+  ipcMain.handle('account-mapping:list', () => {
+    return {
+      status: 'success',
+      mappings: database.listAccountMappings()
+    };
+  });
+
+  ipcMain.handle('account-mapping:save', (_event, mappings) => {
+    const validationResult = validateAccountMappings(mappings);
+
+    if (validationResult.status !== 'success') {
+      return validationResult;
+    }
+
+    database.saveAccountMappings(validationResult.mappings);
+    return {
+      status: 'success',
+      message: '账户映射保存成功'
+    };
   });
 }
 
@@ -368,12 +446,21 @@ function registerFileHandlers() {
       accumulator[item.templateField] = item.mappedField;
       return accumulator;
     }, {});
+    const merchantSourceFields = usableMappings
+      .filter((mapping) => mapping.mappedField.trim() === 'MerchantId')
+      .map((mapping) => mapping.templateField);
+    const accountMappingByBankId = database.listAccountMappings().reduce((accumulator, mapping) => {
+      accumulator[mapping.bankAccountId] = mapping.clearingAccountId;
+      return accumulator;
+    }, {});
 
     try {
       const { outputFilePath, date } = buildOutputFilePath(templatePayload.template.name);
       transformFileToWorkbook({
         inputFilePath,
         mappingByField,
+        merchantSourceFields,
+        accountMappingByBankId,
         outputFilePath
       });
       lastGeneratedFile = outputFilePath;
@@ -440,6 +527,7 @@ app.whenReady().then(() => {
   registerWindowHandlers();
   registerAppHandlers();
   registerEnumHandlers();
+  registerAccountMappingHandlers();
   registerTemplateHandlers();
   registerFileHandlers();
   createWindow();

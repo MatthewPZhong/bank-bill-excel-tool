@@ -38,6 +38,15 @@ class AppDatabase {
         setting_value TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS account_mappings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bank_account_id TEXT NOT NULL UNIQUE,
+        clearing_account_id TEXT NOT NULL,
+        row_index INTEGER NOT NULL UNIQUE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
     `);
   }
 
@@ -232,6 +241,50 @@ class AppDatabase {
 
   setEnumConfig(enumConfig) {
     this.setSetting('enum_config', JSON.stringify(enumConfig));
+  }
+
+  listAccountMappings() {
+    return this.db
+      .prepare(`
+        SELECT
+          id,
+          bank_account_id AS bankAccountId,
+          clearing_account_id AS clearingAccountId,
+          row_index AS rowIndex
+        FROM account_mappings
+        ORDER BY row_index ASC, id ASC
+      `)
+      .all();
+  }
+
+  saveAccountMappings(mappings) {
+    const now = new Date().toISOString();
+    this.db.exec('BEGIN');
+
+    try {
+      this.db.exec('DELETE FROM account_mappings');
+
+      const insertStatement = this.db.prepare(`
+        INSERT INTO account_mappings (
+          bank_account_id, clearing_account_id, row_index, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?)
+      `);
+
+      mappings.forEach((mapping, index) => {
+        insertStatement.run(
+          mapping.bankAccountId,
+          mapping.clearingAccountId,
+          index,
+          now,
+          now
+        );
+      });
+
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 }
 

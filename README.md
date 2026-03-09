@@ -7,6 +7,8 @@
 - 导入 Excel / CSV 作为模版文件。
 - 首次运行通过状态框导入网银账单枚举表，后续支持点击状态框覆盖导入。
 - 导入 Excel / CSV 账单文件并按映射替换表头。
+- 支持账户映射模块，将模板中映射为 `MerchantId` 的字段值按大账户映射表转换为清结算系统大账户ID。
+- 导出文件中 `Credit Amount` / `Debit Amount` 强制输出为数字格式，`BillDate` / `ValueDate` 强制输出为日期格式，`MerchantId` / `Channel` 强制输出为文本格式。
 - 生成 `模版名-COMMON-执行日期.xlsx` 文件到按日期创建的目录中。
 - 支持另存为导出生成文件。
 - 将模版和映射关系持久化到 SQLite。
@@ -26,6 +28,12 @@ npm start
 npm run preview
 ```
 
+生成账户映射页预览图：
+
+```bash
+npm run preview:account
+```
+
 ## 打包 Windows 可执行文件
 
 ```bash
@@ -35,8 +43,8 @@ npm run dist:win
 默认会同时生成安装包和免安装可执行文件：
 
 ```bash
-dist/网银账单生成小助手-1.0.2-setup.exe
-dist/网银账单生成小助手-1.0.2-portable.exe
+dist/网银账单小助手-1.0.9-setup.exe
+dist/网银账单小助手-1.0.9-portable.exe
 ```
 
 如果只想生成免安装的单文件 exe：
@@ -74,3 +82,9 @@ npm run dist:win:setup
 
 - 枚举表不再从应用根目录自动读取，需在首次打开后点击状态框导入文件名带有“枚举”的 `.xlsx` 文件。
 - 如果重复导入同名模版，系统会保留模版名称并重置旧映射关系，需重新维护映射。
+
+## 已知风险
+
+- 当前依赖 `xlsx@0.18.5` 存在 `npm audit` 报告的 1 个高危漏洞。
+- 该问题来自 `sheetjs` 的已知安全公告，当前 `npm audit fix` 无法自动修复。
+- 后续每次版本迭代前，建议继续复核该漏洞状态，并评估是否迁移到其他 Excel 读写库。

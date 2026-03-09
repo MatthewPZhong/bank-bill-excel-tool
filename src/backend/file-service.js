@@ -137,18 +137,207 @@ function extractEnumValuesFromImportedFile(filePath) {
   return values;
 }
 
-function transformFileToWorkbook({ inputFilePath, mappingByField, outputFilePath }) {
+function parseNumericValue(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  const normalized = normalizeCell(value).replaceAll(',', '');
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (!/^-?\d+(\.\d+)?$/.test(normalized)) {
+    return null;
+  }
+
+  return Number(normalized);
+}
+
+function parseDateValue(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const parsed = XLSX.SSF.parse_date_code(value);
+
+    if (!parsed) {
+      return null;
+    }
+
+    return new Date(parsed.y, parsed.m - 1, parsed.d);
+  }
+
+  const normalized = normalizeCell(value)
+    .replaceAll('年', '-')
+    .replaceAll('月', '-')
+    .replaceAll('日', '')
+    .replaceAll('/', '-')
+    .replaceAll('.', '-');
+
+  if (/^\d{8}$/.test(normalized)) {
+    const year = Number(normalized.slice(0, 4));
+    const month = Number(normalized.slice(4, 6));
+    const day = Number(normalized.slice(6, 8));
+    const date = new Date(year, month - 1, day);
+
+    if (!Number.isNaN(date.getTime())) {
+      return date;
+    }
+  }
+
+  const match = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+
+  if (match) {
+    const [, year, month, day] = match;
+    const date = new Date(Number(year), Number(month) - 1, Number(day));
+
+    if (!Number.isNaN(date.getTime())) {
+      return date;
+    }
+  }
+
+  const fallback = new Date(normalized);
+  if (!Number.isNaN(fallback.getTime())) {
+    return new Date(fallback.getFullYear(), fallback.getMonth(), fallback.getDate());
+  }
+
+  return null;
+}
+
+function toExcelSerial(date) {
+  const utcValue = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  const excelEpoch = Date.UTC(1899, 11, 30);
+  return (utcValue - excelEpoch) / 86400000;
+}
+
+function applyExportFieldFormats(worksheet, rows) {
+  const headerRow = rows[0] || [];
+  const fieldIndexMap = new Map();
+
+  headerRow.forEach((header, index) => {
+    const normalizedHeader = normalizeCell(header);
+
+    if (!fieldIndexMap.has(normalizedHeader)) {
+      fieldIndexMap.set(normalizedHeader, []);
+    }
+
+    fieldIndexMap.get(normalizedHeader).push(index);
+  });
+
+  const numericFields = ['Credit Amount', 'Debit Amount'];
+  const dateFields = ['BillDate', 'ValueDate'];
+  const textFields = ['MerchantId', 'Channel'];
+
+  rows.slice(1).forEach((row, rowIndex) => {
+    const sheetRowIndex = rowIndex + 1;
+
+    numericFields.forEach((fieldName) => {
+      (fieldIndexMap.get(fieldName) || []).forEach((columnIndex) => {
+        const numericValue = parseNumericValue(row[columnIndex]);
+
+        if (numericValue === null) {
+          return;
+        }
+
+        const cellAddress = XLSX.utils.encode_cell({ c: columnIndex, r: sheetRowIndex });
+        worksheet[cellAddress] = {
+          t: 'n',
+          v: numericValue,
+          z: '0.00'
+        };
+      });
+    });
+
+    dateFields.forEach((fieldName) => {
+      (fieldIndexMap.get(fieldName) || []).forEach((columnIndex) => {
+        const dateValue = parseDateValue(row[columnIndex]);
+
+        if (!dateValue) {
+          return;
+        }
+
+        const cellAddress = XLSX.utils.encode_cell({ c: columnIndex, r: sheetRowIndex });
+        worksheet[cellAddress] = {
+          t: 'n',
+          v: toExcelSerial(dateValue),
+          z: 'yyyy-mm-dd'
+        };
+      });
+    });
+
+    textFields.forEach((fieldName) => {
+      (fieldIndexMap.get(fieldName) || []).forEach((columnIndex) => {
+        const textValue = row[columnIndex];
+
+        if (textValue === null || textValue === undefined || textValue === '') {
+          return;
+        }
+
+        const cellAddress = XLSX.utils.encode_cell({ c: columnIndex, r: sheetRowIndex });
+        worksheet[cellAddress] = {
+          t: 's',
+          v: String(textValue),
+          z: '@'
+        };
+      });
+    });
+  });
+}
+
+function transformFileToWorkbook({
+  inputFilePath,
+  mappingByField,
+  merchantSourceFields = [],
+  accountMappingByBankId = {},
+  outputFilePath
+}) {
   const rows = readRows(inputFilePath);
   const headerRow = rows[0] || [];
-  const updatedHeaderRow = headerRow.map((cell) => {
+  const merchantFieldSet = new Set(merchantSourceFields.map((field) => normalizeCell(field)));
+  const merchantIndexes = [];
+  const updatedHeaderRow = headerRow.map((cell, columnIndex) => {
     const original = normalizeCell(cell);
+
+    if (merchantFieldSet.has(original)) {
+      merchantIndexes.push(columnIndex);
+    }
+
     return mappingByField[original] || original;
   });
 
   rows[0] = updatedHeaderRow;
 
+  if (merchantIndexes.length) {
+    rows.slice(1).forEach((row) => {
+      merchantIndexes.forEach((columnIndex) => {
+        const originalValue = normalizeCell(row[columnIndex]);
+
+        if (!originalValue) {
+          row[columnIndex] = '';
+          return;
+        }
+
+        row[columnIndex] = Object.prototype.hasOwnProperty.call(accountMappingByBankId, originalValue)
+          ? String(accountMappingByBankId[originalValue])
+          : String(originalValue);
+      });
+    });
+  }
+
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.aoa_to_sheet(rows);
+  applyExportFieldFormats(worksheet, rows);
 
   XLSX.utils.book_append_sheet(workbook, worksheet, 'COMMON');
   fs.mkdirSync(path.dirname(outputFilePath), { recursive: true });
@@ -165,6 +354,8 @@ module.exports = {
   extractHeaders,
   loadEnumValues,
   normalizeCell,
+  parseDateValue,
+  parseNumericValue,
   readRows,
   transformFileToWorkbook
 };
