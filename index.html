@@ -61,7 +61,7 @@
               </div>
               <div class="cell center">
                 <div class="button-stack">
-                  <button id="manageTemplateBtn" class="secondary-btn" type="button">管理模版</button>
+                  <button id="manageTemplateBtn" class="secondary-btn" type="button">模版管理</button>
                   <button id="accountMappingBtn" class="secondary-btn" type="button">账户映射</button>
                 </div>
               </div>
@@ -71,9 +71,37 @@
             </div>
           </section>
 
-          <section id="newAccountModulePanel" class="control-board module-placeholder" hidden>
-            <div class="module-placeholder-title">新开账户生成网银账单</div>
-            <div class="module-placeholder-copy">该模块入口已预留，本次版本先完成网银明细账单生成与余额账单导出能力。</div>
+          <section id="newAccountModulePanel" class="control-board new-account-panel" hidden>
+            <div class="new-account-title">仅支持开户至今未发生交易的账户余额导出</div>
+            <div class="new-account-form-row">
+              <label class="new-account-field">
+                <span class="new-account-label">银行名称</span>
+                <input id="newAccountBankNameInput" class="new-account-input" type="text" spellcheck="false" />
+              </label>
+              <label class="new-account-field">
+                <span class="new-account-label">所在地</span>
+                <input id="newAccountLocationInput" class="new-account-input" type="text" spellcheck="false" />
+              </label>
+              <label class="new-account-field">
+                <span class="new-account-label">币种</span>
+                <input id="newAccountCurrencyInput" class="new-account-input" type="text" spellcheck="false" />
+              </label>
+              <label class="new-account-field">
+                <span class="new-account-label">银行账号</span>
+                <input id="newAccountBankAccountInput" class="new-account-input" type="text" spellcheck="false" />
+              </label>
+              <label class="new-account-field">
+                <span class="new-account-label">开户日期</span>
+                <input id="newAccountOpenDateInput" class="new-account-input" type="date" />
+              </label>
+            </div>
+            <div class="new-account-actions-row">
+              <div id="newAccountStatusBox" class="status-box new-account-status-box">等待生成</div>
+              <div class="new-account-actions">
+                <button id="newAccountGenerateBtn" class="primary-btn" type="button" disabled>生成</button>
+                <button id="newAccountExportBtn" class="secondary-btn" type="button" disabled>导出</button>
+              </div>
+            </div>
           </section>
         </section>
       </main>

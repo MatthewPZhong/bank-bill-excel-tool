@@ -349,6 +349,10 @@ select {
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
 
+.status-box.is-clickable {
+  cursor: pointer;
+}
+
 .status-box:hover {
   box-shadow: 0 12px 28px rgba(100, 74, 35, 0.12);
 }
@@ -363,26 +367,66 @@ select {
   border-color: rgba(165, 61, 48, 0.35);
 }
 
-.module-placeholder {
-  min-height: 260px;
+.new-account-panel {
+  min-height: 280px;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 18px;
-  text-align: center;
+  gap: 28px;
 }
 
-.module-placeholder-title {
-  font-size: 32px;
+.new-account-title {
+  font-size: 22px;
   font-weight: 700;
-  letter-spacing: 2px;
+  letter-spacing: 1px;
+  text-align: left;
 }
 
-.module-placeholder-copy {
-  max-width: 620px;
-  margin: 0 auto;
+.new-account-form-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  align-items: end;
+}
+
+.new-account-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.new-account-label {
+  font-size: 14px;
   color: var(--muted);
-  line-height: 1.8;
+}
+
+.new-account-input {
+  width: 100%;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: #fffdf8;
+  padding: 0 14px;
+  color: var(--text);
+}
+
+.new-account-actions-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  align-items: center;
+}
+
+.new-account-actions {
+  display: flex;
+  gap: 12px;
+  grid-column: 4 / 6;
+  justify-content: flex-start;
+  justify-self: end;
+}
+
+.new-account-status-box {
+  grid-column: 3 / 4;
+  width: 100%;
 }
 
 .page-footer {
@@ -663,6 +707,17 @@ select {
   max-height: 520px;
 }
 
+.mapping-field-editor {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mapping-custom-input {
+  flex: 1 1 220px;
+  min-width: 220px;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -760,6 +815,25 @@ select {
 
   .status-box {
     width: min(100%, 320px);
+  }
+
+  .new-account-form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .new-account-actions-row {
+    grid-template-columns: 1fr;
+  }
+
+  .new-account-status-box {
+    grid-column: auto;
+    width: min(100%, 320px);
+  }
+
+  .new-account-actions {
+    grid-column: auto;
+    justify-content: center;
+    flex-wrap: wrap;
   }
 
   .export-actions {

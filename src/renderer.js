@@ -7,6 +7,7 @@ const DEFAULT_BACKGROUND_SETTINGS = Object.freeze({
 });
 const DEFAULT_SPECTRUM_PICK_COLOR = '#ffffff';
 const BACKGROUND_FILE_HINT = '支持 PNG/JPG/JPEG/WEBP，大小不超过 5MB，建议使用横版高清图片';
+const MERCHANT_ID_SELF_INPUT_OPTION = '自己输入';
 const MODULES = Object.freeze({
   statementGenerator: {
     id: 'statement-generator',
@@ -23,9 +24,13 @@ const state = {
   selectedTemplateId: '',
   canExportDetail: false,
   canExportBalance: false,
+  canExportNewAccount: false,
   isMaximized: false,
   hasEnum: false,
   enumFileName: '',
+  accountMappingCount: 0,
+  hasErrorReport: false,
+  newAccountHasErrorReport: false,
   backgroundSettings: { ...DEFAULT_BACKGROUND_SETTINGS },
   backgroundDraft: { ...DEFAULT_BACKGROUND_SETTINGS },
   isBackgroundPaletteOpen: false,
@@ -45,11 +50,19 @@ const elements = {
   importFileBtn: document.getElementById('importFileBtn'),
   exportDetailBtn: document.getElementById('exportDetailBtn'),
   exportBalanceBtn: document.getElementById('exportBalanceBtn'),
+  newAccountGenerateBtn: document.getElementById('newAccountGenerateBtn'),
+  newAccountExportBtn: document.getElementById('newAccountExportBtn'),
   importTemplateBtn: document.getElementById('importTemplateBtn'),
   manageTemplateBtn: document.getElementById('manageTemplateBtn'),
   accountMappingBtn: document.getElementById('accountMappingBtn'),
   templateSelect: document.getElementById('templateSelect'),
   statusBox: document.getElementById('statusBox'),
+  newAccountStatusBox: document.getElementById('newAccountStatusBox'),
+  newAccountBankNameInput: document.getElementById('newAccountBankNameInput'),
+  newAccountLocationInput: document.getElementById('newAccountLocationInput'),
+  newAccountCurrencyInput: document.getElementById('newAccountCurrencyInput'),
+  newAccountBankAccountInput: document.getElementById('newAccountBankAccountInput'),
+  newAccountOpenDateInput: document.getElementById('newAccountOpenDateInput'),
   appVersion: document.getElementById('appVersion'),
   modalRoot: document.getElementById('modalRoot'),
   minimizeBtn: document.getElementById('minimizeBtn'),
@@ -72,9 +85,33 @@ const elements = {
   backgroundResetBtn: document.getElementById('backgroundResetBtn')
 };
 
-function setStatus(message, tone = 'info') {
-  elements.statusBox.textContent = message;
-  elements.statusBox.dataset.tone = tone;
+function updateStatusBox(box, message, tone = 'info', options = {}) {
+  const {
+    errorReportReady = false,
+    idleTitle = ''
+  } = options;
+
+  box.textContent = message;
+  box.dataset.tone = tone;
+  box.dataset.errorReportReady = errorReportReady ? 'true' : 'false';
+  box.classList.toggle('is-clickable', errorReportReady);
+  box.title = errorReportReady ? '点击导出报错文件' : idleTitle;
+}
+
+function setStatus(message, tone = 'info', options = {}) {
+  state.hasErrorReport = Boolean(options.errorReportReady);
+  updateStatusBox(elements.statusBox, message, tone, {
+    errorReportReady: state.hasErrorReport,
+    idleTitle: options.idleTitle ?? getStatusBoxTitle(state.accountMappingCount)
+  });
+}
+
+function setNewAccountStatus(message, tone = 'info', options = {}) {
+  state.newAccountHasErrorReport = Boolean(options.errorReportReady);
+  updateStatusBox(elements.newAccountStatusBox, message, tone, {
+    errorReportReady: state.newAccountHasErrorReport,
+    idleTitle: options.idleTitle ?? '请完整填写开户信息后点击生成'
+  });
 }
 
 function getEnumStatusMessage() {
@@ -91,11 +128,62 @@ function getStatusBoxTitle(accountMappingCount) {
   return `${mappingSummary}；应用已内置 COMMON 枚举表`;
 }
 
+function getNewAccountStatusTitle() {
+  return state.canExportNewAccount
+    ? '新开账户余额账单已生成，可点击导出'
+    : '请完整填写开户信息后点击生成';
+}
+
+async function handleExportLastError(target = 'main') {
+  const hasErrorReport = target === 'main' ? state.hasErrorReport : state.newAccountHasErrorReport;
+
+  if (!hasErrorReport) {
+    return;
+  }
+
+  const result = await window.desktopApi.errors.exportLast();
+
+  if (result.status === 'cancelled' || result.status === 'empty') {
+    return;
+  }
+
+  if (target === 'main') {
+    setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+      errorReportReady: result.status === 'success' ? true : Boolean(result.errorReportReady)
+    });
+    return;
+  }
+
+  setNewAccountStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+    errorReportReady: result.status === 'success' ? true : Boolean(result.errorReportReady)
+  });
+}
+
+function isNewAccountFormComplete() {
+  return [
+    elements.newAccountBankNameInput.value,
+    elements.newAccountLocationInput.value,
+    elements.newAccountCurrencyInput.value,
+    elements.newAccountBankAccountInput.value,
+    elements.newAccountOpenDateInput.value
+  ].every((value) => String(value || '').trim() !== '');
+}
+
+function updateNewAccountGenerateAvailability() {
+  const isComplete = isNewAccountFormComplete();
+  elements.newAccountGenerateBtn.disabled = !isComplete;
+}
+
 function setExportAvailability({ detailEnabled = state.canExportDetail, balanceEnabled = state.canExportBalance }) {
   state.canExportDetail = detailEnabled;
   state.canExportBalance = balanceEnabled;
   elements.exportDetailBtn.disabled = !detailEnabled;
   elements.exportBalanceBtn.disabled = !balanceEnabled;
+}
+
+function setNewAccountExportAvailability(enabled = state.canExportNewAccount) {
+  state.canExportNewAccount = enabled;
+  elements.newAccountExportBtn.disabled = !enabled;
 }
 
 function setCurrentModule(moduleId) {
@@ -409,7 +497,9 @@ async function handleBackgroundImportFile() {
   }
 
   if (result.status !== 'success') {
-    setStatus(result.message, 'error');
+    setStatus(result.message, 'error', {
+      errorReportReady: Boolean(result.errorReportReady)
+    });
     openModal(createAlertDialog(result.message));
     return;
   }
@@ -434,7 +524,9 @@ async function handleBackgroundSave() {
   });
 
   if (result.status !== 'success') {
-    setStatus(result.message, 'error');
+    setStatus(result.message, 'error', {
+      errorReportReady: Boolean(result.errorReportReady)
+    });
     openModal(createAlertDialog(result.message));
     return;
   }
@@ -457,7 +549,9 @@ function handleBackgroundReset() {
         closeModal();
 
         if (result.status !== 'success') {
-          setStatus(result.message, 'error');
+          setStatus(result.message, 'error', {
+            errorReportReady: Boolean(result.errorReportReady)
+          });
           openModal(createAlertDialog(result.message));
           return;
         }
@@ -586,7 +680,9 @@ function renderTemplateTableRows(tableBody) {
       const result = await window.desktopApi.templates.getMappings(template.id);
 
       if (result.status !== 'success') {
-        setStatus(result.message, 'error');
+        setStatus(result.message, 'error', {
+          errorReportReady: Boolean(result.errorReportReady)
+        });
         openModal(createAlertDialog(result.message));
         return;
       }
@@ -666,7 +762,7 @@ function createMappingDialog(payload) {
   `;
 
   const tbody = dialog.querySelector('tbody');
-  const savedMap = new Map(payload.mappings.map((item) => [item.templateField, item.mappedField]));
+  const savedMap = new Map(payload.mappings.map((item) => [item.templateField, item]));
   const headerOptions = payload.template.headers.map((header) => {
     const escapedHeader = escapeHtml(header || '(空白字段)');
     const value = escapeHtml(header);
@@ -675,20 +771,39 @@ function createMappingDialog(payload) {
 
   payload.targetFields.forEach((fieldName) => {
     const row = document.createElement('tr');
+    row.dataset.templateField = fieldName;
     const isBalanceField = fieldName === 'Balance';
+    const isMerchantIdField = fieldName === 'MerchantId';
+    const savedMapping = savedMap.get(fieldName) || {
+      mappedField: isBalanceField ? '无' : '',
+      customValue: ''
+    };
     const selectOptions = [isBalanceField ? '<option value="无">无</option>' : '<option value=""></option>']
+      .concat(isMerchantIdField ? [`<option value="${MERCHANT_ID_SELF_INPUT_OPTION}">${MERCHANT_ID_SELF_INPUT_OPTION}</option>`] : [])
       .concat(headerOptions)
       .join('');
     row.innerHTML = `
       <td>${escapeHtml(fieldName)}</td>
       <td>
-        <select class="mapping-select">${selectOptions}</select>
+        <div class="mapping-field-editor">
+          <select class="mapping-select">${selectOptions}</select>
+          ${isMerchantIdField ? '<input class="mapping-text-input mapping-custom-input" type="text" spellcheck="false" placeholder="请输入固定 MerchantId" />' : ''}
+        </div>
       </td>
     `;
 
     const select = row.querySelector('select');
-    select.value = savedMap.get(fieldName) || (isBalanceField ? '无' : '');
-    select.dataset.templateField = fieldName;
+    const customInput = row.querySelector('.mapping-custom-input');
+    select.value = savedMapping.mappedField || (isBalanceField ? '无' : '');
+
+    if (customInput) {
+      customInput.value = savedMapping.customValue || '';
+      customInput.hidden = select.value !== MERCHANT_ID_SELF_INPUT_OPTION;
+      select.addEventListener('change', () => {
+        customInput.hidden = select.value !== MERCHANT_ID_SELF_INPUT_OPTION;
+      });
+    }
+
     tbody.appendChild(row);
   });
 
@@ -697,17 +812,25 @@ function createMappingDialog(payload) {
   });
 
   dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
-    const mappings = Array.from(dialog.querySelectorAll('.mapping-select')).map((select) => ({
-      templateField: select.dataset.templateField,
-      mappedField: select.value
-    }));
+    const mappings = Array.from(tbody.querySelectorAll('tr')).map((row) => {
+      const select = row.querySelector('.mapping-select');
+      const customInput = row.querySelector('.mapping-custom-input');
+
+      return {
+        templateField: row.dataset.templateField,
+        mappedField: select.value,
+        customValue: customInput ? customInput.value : ''
+      };
+    });
     const result = await window.desktopApi.templates.saveMappings({
       templateId: payload.template.id,
       mappings
     });
 
     openModal(createAlertDialog(result.message));
-    setStatus(result.message, result.status === 'success' ? 'success' : 'error');
+    setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+      errorReportReady: Boolean(result.errorReportReady)
+    });
 
     if (result.status === 'success') {
       await refreshTemplates();
@@ -815,10 +938,12 @@ function createAccountMappingDialog(payload) {
     openModal(createAlertDialog(result.message));
     if (result.status === 'success') {
       const info = await window.desktopApi.app.getInfo();
+      state.accountMappingCount = info.accountMappingCount;
       setStatus(result.message, 'success');
-      elements.statusBox.title = getStatusBoxTitle(info.accountMappingCount);
     } else {
-      setStatus(result.message, 'error');
+      setStatus(result.message, 'error', {
+        errorReportReady: Boolean(result.errorReportReady)
+      });
     }
   });
 
@@ -833,7 +958,9 @@ async function handleImportTemplate() {
     return;
   }
 
-  setStatus(result.message, result.status === 'success' ? 'success' : 'error');
+  setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+    errorReportReady: Boolean(result.errorReportReady)
+  });
 
   if (result.status === 'success') {
     await refreshTemplates();
@@ -844,7 +971,9 @@ async function handleOpenAccountMappings() {
   const result = await window.desktopApi.accountMappings.list();
 
   if (result.status !== 'success') {
-    setStatus(result.message, 'error');
+    setStatus(result.message, 'error', {
+      errorReportReady: Boolean(result.errorReportReady)
+    });
     openModal(createAlertDialog(result.message));
     return;
   }
@@ -865,14 +994,22 @@ async function handleImportFile() {
     return;
   }
 
-  setStatus(result.message, result.status === 'success' ? 'success' : 'error');
+  setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+    errorReportReady: Boolean(result.errorReportReady)
+  });
 
-  if (result.status === 'success') {
+  if (result.status === 'success' || result.status === 'warning') {
     setExportAvailability({
       detailEnabled: Boolean(result.detailReady),
       balanceEnabled: Boolean(result.balanceReady)
     });
+    return;
   }
+
+  setExportAvailability({
+    detailEnabled: false,
+    balanceEnabled: false
+  });
 }
 
 async function handleExportDetail() {
@@ -882,7 +1019,9 @@ async function handleExportDetail() {
     return;
   }
 
-  setStatus(result.message, result.status === 'success' ? 'success' : 'error');
+  setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+    errorReportReady: Boolean(result.errorReportReady)
+  });
 }
 
 async function handleExportBalance() {
@@ -892,7 +1031,66 @@ async function handleExportBalance() {
     return;
   }
 
-  setStatus(result.message, result.status === 'success' ? 'success' : 'error');
+  setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+    errorReportReady: Boolean(result.errorReportReady)
+  });
+}
+
+function getNewAccountPayload() {
+  return {
+    bankName: elements.newAccountBankNameInput.value,
+    location: elements.newAccountLocationInput.value,
+    currency: elements.newAccountCurrencyInput.value,
+    bankAccount: elements.newAccountBankAccountInput.value,
+    openingDate: elements.newAccountOpenDateInput.value
+  };
+}
+
+function applyNewAccountPreviewState() {
+  setCurrentModule(MODULES.newAccountGenerator.id);
+  elements.newAccountBankNameInput.value = '中国银行';
+  elements.newAccountLocationInput.value = '香港';
+  elements.newAccountCurrencyInput.value = 'USD';
+  elements.newAccountBankAccountInput.value = '6222000000000001';
+  elements.newAccountOpenDateInput.value = '2026-01-01';
+  updateNewAccountGenerateAvailability();
+  setNewAccountExportAvailability(true);
+  setNewAccountStatus('新开账户余额账单可导出', 'success', {
+    errorReportReady: false,
+    idleTitle: getNewAccountStatusTitle()
+  });
+}
+
+async function handleNewAccountGenerate() {
+  const result = await window.desktopApi.newAccount.generate(getNewAccountPayload());
+
+  if (result.status === 'cancelled') {
+    return;
+  }
+
+  if (result.status === 'success') {
+    setNewAccountExportAvailability(Boolean(result.exportReady));
+  } else {
+    setNewAccountExportAvailability(false);
+  }
+
+  setNewAccountStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+    errorReportReady: Boolean(result.errorReportReady),
+    idleTitle: getNewAccountStatusTitle()
+  });
+}
+
+async function handleNewAccountExport() {
+  const result = await window.desktopApi.newAccount.exportFile();
+
+  if (result.status === 'cancelled') {
+    return;
+  }
+
+  setNewAccountStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+    errorReportReady: Boolean(result.errorReportReady),
+    idleTitle: getNewAccountStatusTitle()
+  });
 }
 
 async function initialize() {
@@ -902,6 +1100,8 @@ async function initialize() {
   elements.appVersion.textContent = info.version;
   state.hasEnum = info.hasEnum;
   state.enumFileName = info.enumFileName || '';
+  state.accountMappingCount = info.accountMappingCount || 0;
+  state.hasErrorReport = Boolean(info.hasErrorReport);
   state.backgroundSettings = cloneBackgroundSettings(info.backgroundConfig);
   state.backgroundDraft = cloneBackgroundSettings(info.backgroundConfig);
   applyBackgroundSettings(state.backgroundSettings);
@@ -910,10 +1110,17 @@ async function initialize() {
     detailEnabled: false,
     balanceEnabled: false
   });
+  setNewAccountExportAvailability(false);
+  updateNewAccountGenerateAvailability();
   setCurrentModule(MODULES.statementGenerator.id);
   closeModuleMenu();
-  setStatus(getEnumStatusMessage(), state.hasEnum ? 'info' : 'error');
-  elements.statusBox.title = getStatusBoxTitle(info.accountMappingCount);
+  setStatus(getEnumStatusMessage(), state.hasEnum ? 'info' : 'error', {
+    errorReportReady: false
+  });
+  setNewAccountStatus('请完整填写开户信息后点击生成', 'info', {
+    errorReportReady: false,
+    idleTitle: getNewAccountStatusTitle()
+  });
 
   elements.importTemplateBtn.addEventListener('click', handleImportTemplate);
   elements.manageTemplateBtn.addEventListener('click', () => {
@@ -923,11 +1130,41 @@ async function initialize() {
   elements.importFileBtn.addEventListener('click', handleImportFile);
   elements.exportDetailBtn.addEventListener('click', handleExportDetail);
   elements.exportBalanceBtn.addEventListener('click', handleExportBalance);
+  elements.newAccountGenerateBtn.addEventListener('click', handleNewAccountGenerate);
+  elements.newAccountExportBtn.addEventListener('click', handleNewAccountExport);
+  elements.statusBox.addEventListener('click', () => {
+    handleExportLastError('main').catch((error) => {
+      console.error(error);
+      setStatus('报错文件导出失败，请查看控制台', 'error');
+    });
+  });
+  elements.newAccountStatusBox.addEventListener('click', () => {
+    handleExportLastError('new-account').catch((error) => {
+      console.error(error);
+      setNewAccountStatus('报错文件导出失败，请查看控制台', 'error');
+    });
+  });
   elements.templateSelect.addEventListener('change', (event) => {
     state.selectedTemplateId = event.target.value;
     setExportAvailability({
       detailEnabled: false,
       balanceEnabled: false
+    });
+  });
+  [
+    elements.newAccountBankNameInput,
+    elements.newAccountLocationInput,
+    elements.newAccountCurrencyInput,
+    elements.newAccountBankAccountInput,
+    elements.newAccountOpenDateInput
+  ].forEach((input) => {
+    input.addEventListener('input', () => {
+      updateNewAccountGenerateAvailability();
+      setNewAccountExportAvailability(false);
+      setNewAccountStatus('请完整填写开户信息后点击生成', 'info', {
+        errorReportReady: false,
+        idleTitle: getNewAccountStatusTitle()
+      });
     });
   });
   elements.moduleSwitcherBtn.addEventListener('click', () => {
@@ -1039,6 +1276,10 @@ async function initialize() {
       handleOpenAccountMappings().catch((error) => {
         console.error(error);
       });
+    }, 120);
+  } else if (info.previewModal === 'new-account') {
+    setTimeout(() => {
+      applyNewAccountPreviewState();
     }, 120);
   } else if (info.previewModal === 'background-palette') {
     setTimeout(() => {

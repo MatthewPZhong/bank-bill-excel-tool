@@ -4,6 +4,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
   app: {
     getInfo: () => ipcRenderer.invoke('app:get-info')
   },
+  errors: {
+    exportLast: () => ipcRenderer.invoke('error:export-last')
+  },
   background: {
     selectFile: () => ipcRenderer.invoke('background:select-file'),
     save: (payload) => ipcRenderer.invoke('background:save', payload),
@@ -32,5 +35,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     importFile: (templateId) => ipcRenderer.invoke('file:import', templateId),
     exportDetail: () => ipcRenderer.invoke('file:export-detail'),
     exportBalance: () => ipcRenderer.invoke('file:export-balance')
+  },
+  newAccount: {
+    generate: (payload) => ipcRenderer.invoke('new-account:generate', payload),
+    exportFile: () => ipcRenderer.invoke('new-account:export')
   }
 });
