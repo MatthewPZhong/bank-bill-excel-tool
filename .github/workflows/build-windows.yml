@@ -23,9 +23,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Ensure COMMON enum file exists
-        run: npm run init:enum
-
       - name: Run smoke test
         run: npm run smoke
 
