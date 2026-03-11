@@ -1938,6 +1938,7 @@ function prepareGeneratedFiles({
   });
   const warnings = Array.isArray(detailRows.issues) ? detailRows.issues.slice() : [];
   const detailExportRows = buildDetailExportRows(detailRows);
+  const effectiveDetailRows = Array.isArray(detailExportRows.sourceRows) ? detailExportRows.sourceRows : detailRows;
   const skippedDetailRows = Array.isArray(detailExportRows.skippedRows) ? detailExportRows.skippedRows : [];
   const simultaneousAmountRows = Array.isArray(detailExportRows.simultaneousRows)
     ? detailExportRows.simultaneousRows
@@ -2017,7 +2018,7 @@ function prepareGeneratedFiles({
       }
 
       const balanceResult = deriveBalanceRecords({
-        detailRows,
+        detailRows: effectiveDetailRows,
         templateName: template.name,
         balanceTemplateFields,
         mode: balanceMode,

@@ -133,7 +133,7 @@
 
 校验规则：
 
-1. 如果一条记录的 `Credit Amount` 与 `Debit Amount` 同时为 `0` 或空值，该记录不会写入导出的明细账单。
+1. 如果一条记录的 `Credit Amount` 与 `Debit Amount` 同时为 `0` 或空值，该记录不会参与导出的明细账单和余额账单生成。
 2. 如果一条记录的 `Credit Amount` 与 `Debit Amount` 同时都有值，系统会中止本次导入，并生成详细报错文件。
 
 #### 3. Currency

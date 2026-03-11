@@ -49,6 +49,7 @@ function run() {
   const unmappedDataPath = path.join(root, 'input-unmapped.xlsx');
   const amountMappingDataPath = path.join(root, 'amount-mapping-input.xlsx');
   const simultaneousAmountDataPath = path.join(root, 'input-simultaneous.xlsx');
+  const skippedAmountDataPath = path.join(root, 'input-skipped-amounts.xlsx');
   const detailOutputPath = path.join(root, '2026-03-09', 'detail', 'template-COMMON-2026-03-09~2026-03-10.xlsx');
   const balanceTemplatePath = path.join(root, 'balance-template.xlsx');
   const balanceOutputPath = path.join(root, '2026-03-09', 'balance', 'template-Balance-2026-03-09.xlsx');
@@ -77,6 +78,12 @@ function run() {
   makeWorkbook(simultaneousAmountDataPath, [
     ['原字段A', '原字段B', '原字段C', '原字段D', '原字段E', '原字段F', '原字段G', '原字段H'],
     ['100', '200', '2026-03-09', '20260310', 'NET_001', 88, '美元', '456.78']
+  ]);
+  makeWorkbook(skippedAmountDataPath, [
+    ['原字段A', '原字段B', '原字段C', '原字段D', '原字段E', '原字段F', '原字段G', '原字段H'],
+    ['100', '', '2026-03-09', '20260310', 'NET_001', 88, '美元', '456.78'],
+    ['', '', '2026-03-10', '20260311', 'NET_001', 88, '美元', '460.00'],
+    ['0', '0', '2026-03-11', '20260312', 'NET_001', 88, '美元', '470.00']
   ]);
   makeWorkbook(balanceTemplatePath, [
     ['银行名称', '所在地', '币种', '银行账号', '账单日期', '期初余额', '期初可用余额', '期末余额', '期末可用余额', '扩展字段'],
@@ -246,6 +253,30 @@ function run() {
   assert.strictEqual(simultaneousExportRows.skippedRows.length, 0);
   assert.strictEqual(simultaneousExportRows.simultaneousRows.length, 1);
   assert.strictEqual(simultaneousExportRows.simultaneousRows[0].sourceRowNumber, 2);
+
+  const skippedAmountRows = buildMappedRows({
+    inputFilePath: skippedAmountDataPath,
+    mappingByField: {
+      Balance: '原字段H',
+      BillDate: '原字段C',
+      ValueDate: '原字段D',
+      Channel: `${FIXED_FIELD_VALUE_PREFIX}CHB`,
+      MerchantId: `${FIXED_FIELD_VALUE_PREFIX}SELF_INPUT_001`,
+      Currency: '原字段G',
+      'Credit Amount': '原字段A',
+      'Debit Amount': '原字段B'
+    },
+    orderedTargetFields: ['Balance', 'BillDate', 'ValueDate', 'Channel', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount']
+  });
+  const filteredExportRows = buildDetailExportRows(skippedAmountRows);
+  assert.strictEqual(filteredExportRows.length, 2);
+  assert.strictEqual(filteredExportRows.skippedRows.length, 2);
+  assert.deepStrictEqual(filteredExportRows[1], ['2026-03-09', '20260310', 'CHB', 'SELF_INPUT_001', '美元', '100', '']);
+  assert.strictEqual(filteredExportRows.sourceRows.length, 2);
+  assert.strictEqual(filteredExportRows.sourceRows.rowMetas.length, 1);
+  assert.strictEqual(filteredExportRows.sourceRows[1][0], '456.78');
+  assert.strictEqual(filteredExportRows.sourceRows[1][6], '100');
+  assert.strictEqual(filteredExportRows.sourceRows[1][7], '');
 
   assert.strictEqual(
     inferEndingBalance({

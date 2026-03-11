@@ -702,8 +702,10 @@ function buildDetailExportRows(rows) {
     ? sourceHeaderRow.slice()
     : sourceHeaderRow.filter((_fieldName, index) => index !== balanceIndex);
   const exportRows = [headerRow];
+  const sourceRows = [sourceHeaderRow.slice()];
   const skippedRows = [];
   const simultaneousRows = [];
+  const sourceRowMetas = [];
 
   sourceHeaderRow.forEach((fieldName, index) => {
     const normalizedField = normalizeCell(fieldName);
@@ -717,9 +719,10 @@ function buildDetailExportRows(rows) {
   const debitAmountIndex = fieldIndexMap.get('Debit Amount');
 
   rows.slice(1).forEach((row, index) => {
-    const exportRow = Array.isArray(row) ? row.slice() : [];
-    const creditAmountValue = creditAmountIndex === undefined ? '' : exportRow[creditAmountIndex];
-    const debitAmountValue = debitAmountIndex === undefined ? '' : exportRow[debitAmountIndex];
+    const sourceRow = Array.isArray(row) ? row.slice() : [];
+    const exportRow = sourceRow.slice();
+    const creditAmountValue = creditAmountIndex === undefined ? '' : sourceRow[creditAmountIndex];
+    const debitAmountValue = debitAmountIndex === undefined ? '' : sourceRow[debitAmountIndex];
     const creditAmountNumeric = parseNumericValue(creditAmountValue);
     const debitAmountNumeric = parseNumericValue(debitAmountValue);
     const isCreditAmountZeroOrBlank = normalizeCell(creditAmountValue) === '' || creditAmountNumeric === 0;
@@ -753,6 +756,9 @@ function buildDetailExportRows(rows) {
       return;
     }
 
+    sourceRows.push(sourceRow);
+    sourceRowMetas.push(rowMetas[index] || null);
+
     if (balanceIndex >= 0) {
       exportRow.splice(balanceIndex, 1);
     }
@@ -760,8 +766,10 @@ function buildDetailExportRows(rows) {
     exportRows.push(exportRow);
   });
 
+  sourceRows.rowMetas = sourceRowMetas;
   exportRows.skippedRows = skippedRows;
   exportRows.simultaneousRows = simultaneousRows;
+  exportRows.sourceRows = sourceRows;
   return exportRows;
 }
 
