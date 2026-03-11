@@ -5,6 +5,7 @@ const path = require('node:path');
 const XLSX = require('xlsx');
 const { AppDatabase } = require('../src/backend/database');
 const {
+  calculateEndingBalanceFromAmounts,
   buildDetailExportRows,
   buildMappedRows,
   extractHeaders,
@@ -21,6 +22,7 @@ const {
   writeErrorReport
 } = require('../src/backend/logger');
 const {
+  BALANCE_SEED_GENERATION_METHODS,
   findPreviousBalanceSeed,
   readBalanceSeedRecords,
   upsertBalanceSeedRecord
@@ -264,6 +266,22 @@ function run() {
     }),
     466784381.89
   );
+  assert.strictEqual(
+    calculateEndingBalanceFromAmounts({
+      previousEndBalance: 456.78,
+      entries: [
+        {
+          creditAmount: 100,
+          debitAmount: 0
+        },
+        {
+          creditAmount: 0,
+          debitAmount: 25.5
+        }
+      ]
+    }),
+    531.28
+  );
 
   writeBalanceWorkbook({
     templateFilePath: balanceTemplatePath,
@@ -345,6 +363,7 @@ function run() {
   });
   assert.strictEqual(firstSeedWrite.status, 'success');
   assert.strictEqual(readBalanceSeedRecords(storageRoot, 'LusoBank').length, 1);
+  assert.strictEqual(readBalanceSeedRecords(storageRoot, 'LusoBank')[0].generationMethod, BALANCE_SEED_GENERATION_METHODS.manual);
   const seedLookup = findPreviousBalanceSeed(storageRoot, {
     bankName: 'LusoBank',
     merchantId: 'SELF_INPUT_001',
@@ -366,19 +385,37 @@ function run() {
     currency: 'USD',
     billDate: '2026-01-31',
     endBalance: 500.12,
+    generationMethod: BALANCE_SEED_GENERATION_METHODS.calculated,
     overwrite: true
   });
   assert.strictEqual(overwriteSeedWrite.status, 'success');
   assert.strictEqual(readBalanceSeedRecords(storageRoot, 'LusoBank')[0].endBalance, 500.12);
+  assert.strictEqual(readBalanceSeedRecords(storageRoot, 'LusoBank')[0].generationMethod, BALANCE_SEED_GENERATION_METHODS.calculated);
+  fs.mkdirSync(path.join(storageRoot, 'balance-seeds'), { recursive: true });
+  fs.writeFileSync(
+    path.join(storageRoot, 'balance-seeds', 'LegacyBank.json'),
+    JSON.stringify([
+      {
+        merchantId: 'LEGACY_001',
+        currency: 'HKD',
+        billDate: '2026-01-31',
+        endBalance: 88.66,
+        templateName: 'LegacyBank-HK',
+        updatedAt: '2026-03-11T00:00:00.000Z'
+      }
+    ], null, 2),
+    'utf8'
+  );
+  assert.strictEqual(readBalanceSeedRecords(storageRoot, 'LegacyBank')[0].generationMethod, BALANCE_SEED_GENERATION_METHODS.manual);
 
   ensureActivityLogFile(activityLogPath);
   appendActivityRecord(activityLogPath, {
     level: 'info',
     message: '执行导出',
-    details: ['模版名：template']
+    details: ['模板名：template']
   });
   const activityLogContent = fs.readFileSync(activityLogPath, 'utf8');
-  assert(activityLogContent.includes('[INFO] 执行导出 | 模版名：template'));
+  assert(activityLogContent.includes('[INFO] 执行导出 | 模板名：template'));
 
   console.log('smoke test passed');
 }

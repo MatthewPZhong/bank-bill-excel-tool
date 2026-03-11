@@ -204,6 +204,12 @@ function inferEndingBalance({ previousEndBalance, entries, dateLabel }) {
   throw new FileValidationError('FILE_READ', `${dateLabel} 的期末余额无法根据收支金额推导`);
 }
 
+function calculateEndingBalanceFromAmounts({ previousEndBalance, entries }) {
+  const creditAmountSum = entries.reduce((sum, entry) => sum + entry.creditAmount, 0);
+  const debitAmountSum = entries.reduce((sum, entry) => sum + entry.debitAmount, 0);
+  return roundAmount(previousEndBalance + creditAmountSum - debitAmountSum);
+}
+
 function sanitizeAmountValue(value) {
   if (value === null || value === undefined || value === '') {
     return '';
@@ -785,7 +791,7 @@ function writeBalanceWorkbook({
   const sheetName = workbook.SheetNames[0];
 
   if (!sheetName) {
-    throw new FileValidationError('FILE_READ', '余额账单模版不可读，请重新确认');
+    throw new FileValidationError('FILE_READ', '余额账单模板不可读，请重新确认');
   }
 
   const worksheet = workbook.Sheets[sheetName];
@@ -799,7 +805,7 @@ function writeBalanceWorkbook({
     : (fallbackRows[0] || []).map((value) => normalizeCell(value)).filter((value) => value !== '');
 
   if (!headerFields.length) {
-    throw new FileValidationError('FILE_READ', '余额账单模版为空或不可读，请重新确认');
+    throw new FileValidationError('FILE_READ', '余额账单模板为空或不可读，请重新确认');
   }
 
   const columnCount = headerFields.length;
@@ -879,6 +885,7 @@ function transformFileToWorkbook({
 }
 
 module.exports = {
+  calculateEndingBalanceFromAmounts,
   buildMappedRows,
   buildDetailExportRows,
   FileValidationError,

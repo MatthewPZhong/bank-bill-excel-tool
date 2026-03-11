@@ -7,6 +7,8 @@ const DEFAULT_BACKGROUND_SETTINGS = Object.freeze({
 });
 const DEFAULT_SPECTRUM_PICK_COLOR = '#ffffff';
 const BACKGROUND_FILE_HINT = '支持 PNG/JPG/JPEG/WEBP，大小不超过 5MB，建议使用横版高清图片';
+const BALANCE_DISABLED_OPTION = '无';
+const BALANCE_CALCULATED_OPTION = '通过发生额计算';
 const MERCHANT_ID_SELF_INPUT_OPTION = '自己输入';
 const AMOUNT_BASED_NAME_MAPPING_FIELD = '根据发生额做映射的户名';
 const AMOUNT_BASED_ACCOUNT_MAPPING_FIELD = '根据发生额做映射的账户号';
@@ -898,7 +900,7 @@ function updateTemplateSelect() {
 
   const placeholder = document.createElement('option');
   placeholder.value = '';
-  placeholder.textContent = state.templates.length ? '请选择模版' : '暂无模版';
+  placeholder.textContent = state.templates.length ? '请选择模板' : '暂无模板';
   elements.templateSelect.appendChild(placeholder);
 
   state.templates.forEach((template) => {
@@ -929,7 +931,7 @@ function renderTemplateTableRows(tableBody) {
   if (!state.templates.length) {
     const emptyRow = document.createElement('tr');
     emptyRow.innerHTML = `
-      <td class="empty-cell">暂无模版</td>
+      <td class="empty-cell">暂无模板</td>
       <td class="empty-cell">-</td>
     `;
     tableBody.appendChild(emptyRow);
@@ -941,7 +943,7 @@ function renderTemplateTableRows(tableBody) {
     row.innerHTML = `
       <td>${template.name}</td>
       <td class="action-cell">
-        <button class="text-action" type="button" data-action="manage">模版管理</button>
+        <button class="text-action" type="button" data-action="manage">模板管理</button>
         <button class="text-action danger" type="button" data-action="delete">删除</button>
       </td>
     `;
@@ -991,7 +993,7 @@ function createTemplateManagerDialog() {
       <table class="data-table">
         <thead>
           <tr>
-            <th>模版名称</th>
+            <th>模板名称</th>
             <th>执行操作</th>
           </tr>
         </thead>
@@ -1022,7 +1024,7 @@ function createMappingDialog(payload) {
       <table class="data-table">
         <thead>
           <tr>
-            <th>模版字段</th>
+            <th>模板字段</th>
             <th>映射字段</th>
           </tr>
         </thead>
@@ -1057,10 +1059,11 @@ function createMappingDialog(payload) {
     const isCurrencyField = fieldName === 'Currency';
     const supportsCustomInput = isMerchantIdField || isCurrencyField;
     const savedMapping = savedMap.get(fieldName) || {
-      mappedField: isBalanceField ? '无' : '',
+      mappedField: isBalanceField ? BALANCE_DISABLED_OPTION : '',
       customValue: ''
     };
-    const selectOptions = [isBalanceField ? '<option value="无">无</option>' : '<option value=""></option>']
+    const selectOptions = [isBalanceField ? `<option value="${BALANCE_DISABLED_OPTION}">${BALANCE_DISABLED_OPTION}</option>` : '<option value=""></option>']
+      .concat(isBalanceField ? [`<option value="${BALANCE_CALCULATED_OPTION}">${BALANCE_CALCULATED_OPTION}</option>`] : [])
       .concat(supportsCustomInput ? [`<option value="${MERCHANT_ID_SELF_INPUT_OPTION}">${MERCHANT_ID_SELF_INPUT_OPTION}</option>`] : [])
       .concat(headerOptions)
       .join('');
@@ -1076,7 +1079,7 @@ function createMappingDialog(payload) {
 
     const select = row.querySelector('select');
     const customInput = row.querySelector('.mapping-custom-input');
-    select.value = savedMapping.mappedField || (isBalanceField ? '无' : '');
+    select.value = savedMapping.mappedField || (isBalanceField ? BALANCE_DISABLED_OPTION : '');
 
     if (customInput) {
       customInput.value = savedMapping.customValue || '';

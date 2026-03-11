@@ -2,6 +2,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { FileValidationError, normalizeCell, parseNumericValue } = require('./file-service');
 
+const BALANCE_SEED_GENERATION_METHODS = Object.freeze({
+  statement: '账单里的余额',
+  calculated: '通过发生额计算',
+  manual: '人工录入'
+});
+
 function sanitizeFileName(value) {
   return String(value || '')
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, '-')
@@ -49,6 +55,7 @@ function readBalanceSeedRecords(storageRoot, bankName) {
         billDate: normalizeCell(record.billDate),
         endBalance: parseNumericValue(record.endBalance),
         templateName: normalizeCell(record.templateName),
+        generationMethod: normalizeCell(record['生成方式'] || record.generationMethod) || BALANCE_SEED_GENERATION_METHODS.manual,
         updatedAt: normalizeCell(record.updatedAt)
       }))
       .filter((record) => record.merchantId !== '' && record.billDate !== '' && record.endBalance !== null);
@@ -73,6 +80,7 @@ function writeBalanceSeedRecords(storageRoot, bankName, records) {
       billDate: normalizeCell(record.billDate),
       endBalance: parseNumericValue(record.endBalance),
       templateName: normalizeCell(record.templateName),
+      '生成方式': normalizeCell(record.generationMethod || record['生成方式']) || BALANCE_SEED_GENERATION_METHODS.manual,
       updatedAt: normalizeCell(record.updatedAt)
     }))
     .filter((record) => record.merchantId !== '' && record.billDate !== '' && record.endBalance !== null)
@@ -108,6 +116,7 @@ function upsertBalanceSeedRecord(
     currency,
     billDate,
     endBalance,
+    generationMethod = BALANCE_SEED_GENERATION_METHODS.manual,
     overwrite = false
   }
 ) {
@@ -119,6 +128,7 @@ function upsertBalanceSeedRecord(
     billDate: normalizeCell(billDate),
     endBalance: parseNumericValue(endBalance),
     templateName: normalizeCell(templateName),
+    generationMethod: normalizeCell(generationMethod) || BALANCE_SEED_GENERATION_METHODS.manual,
     updatedAt: new Date().toISOString()
   };
   const existingIndex = records.findIndex((record) => {
@@ -151,6 +161,7 @@ function upsertBalanceSeedRecord(
 }
 
 module.exports = {
+  BALANCE_SEED_GENERATION_METHODS,
   findPreviousBalanceSeed,
   getBalanceSeedFilePath,
   getBalanceSeedsDir,
