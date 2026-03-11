@@ -66,8 +66,8 @@ npm run dist:win
 默认会同时生成安装包和免安装可执行文件：
 
 ```bash
-dist/网银账单小助手-1.2.10-setup.exe
-dist/网银账单小助手-1.2.10-portable.exe
+dist/网银账单小助手-1.2.13-setup.exe
+dist/网银账单小助手-1.2.13-portable.exe
 ```
 
 如果只想生成免安装的单文件 exe：
