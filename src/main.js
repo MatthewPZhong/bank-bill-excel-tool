@@ -3,6 +3,11 @@ const path = require('node:path');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage } = require('electron');
 const { AppDatabase } = require('./backend/database');
 const {
+  findPreviousBalanceSeed,
+  upsertBalanceSeedRecord,
+  splitTemplateName
+} = require('./backend/balance-seed-store');
+const {
   buildDetailExportRows,
   buildMappedRows,
   FileValidationError,
@@ -17,7 +22,12 @@ const {
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('./backend/file-service');
-const { appendLog, writeErrorReport } = require('./backend/logger');
+const {
+  appendActivityRecord,
+  appendLog,
+  ensureActivityLogFile,
+  writeErrorReport
+} = require('./backend/logger');
 
 if (process.env.APP_USER_DATA_DIR) {
   app.setPath('userData', process.env.APP_USER_DATA_DIR);
@@ -39,6 +49,9 @@ let lastGeneratedExports = {
   newAccount: null
 };
 let lastErrorReport = null;
+let activityLogFilePath = '';
+let lastFileImportContext = null;
+let lastManualBalancePrompt = null;
 
 const DEFAULT_BACKGROUND_COLOR = '#efe8da';
 const BUNDLED_ENUM_FILE_NAME = 'COMMON枚举.xlsx';
@@ -46,6 +59,10 @@ const CURRENCY_MAPPING_FILE_NAME = '币种映射表.xlsx';
 const MISSING_ENUM_MESSAGE = '内置网银账单枚举表缺失，请检查安装包';
 const MERCHANT_ID_SELF_INPUT_OPTION = '自己输入';
 const CUSTOM_INPUT_TARGET_FIELDS = new Set(['MerchantId', 'Currency']);
+const AMOUNT_BASED_NAME_MAPPING_FIELD = '根据发生额做映射的户名';
+const AMOUNT_BASED_ACCOUNT_MAPPING_FIELD = '根据发生额做映射的账户号';
+const ADVANCED_MAPPING_FIELDS = [AMOUNT_BASED_NAME_MAPPING_FIELD, AMOUNT_BASED_ACCOUNT_MAPPING_FIELD];
+const NEW_ACCOUNT_EXPORT_NAME = 'NEW_BALANCE';
 const BACKGROUND_IMAGE_LIMITS = Object.freeze({
   maxSizeBytes: 5 * 1024 * 1024,
   minWidth: 1200,
@@ -67,6 +84,14 @@ function sanitizeFileName(value) {
     .trim();
 }
 
+function getAppRootDirectory() {
+  if (app.isPackaged) {
+    return path.dirname(process.execPath);
+  }
+
+  return app.getAppPath();
+}
+
 function getStorageRoot() {
   return path.join(app.getPath('documents'), '网银账单生成小助手');
 }
@@ -79,6 +104,44 @@ function ensureStorageRoot() {
 
 function getBackgroundAssetsDir() {
   return path.join(ensureStorageRoot(), 'background');
+}
+
+function getActivityLogFallbackFilePath() {
+  return path.join(ensureStorageRoot(), 'app_activity_log.txt');
+}
+
+function initializeActivityLog() {
+  if (activityLogFilePath) {
+    return activityLogFilePath;
+  }
+
+  const rootCandidate = path.join(getAppRootDirectory(), 'app_activity_log.txt');
+
+  try {
+    activityLogFilePath = ensureActivityLogFile(rootCandidate);
+  } catch (error) {
+    activityLogFilePath = ensureActivityLogFile(getActivityLogFallbackFilePath());
+  }
+
+  appendActivityLogEntry({
+    level: 'info',
+    message: '应用启动',
+    details: [`版本：${app.getVersion()}`]
+  });
+  return activityLogFilePath;
+}
+
+function appendActivityLogEntry({ level = 'info', message, details = [] }) {
+  try {
+    const targetPath = activityLogFilePath || initializeActivityLog();
+    appendActivityRecord(targetPath, {
+      level,
+      message,
+      details
+    });
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 function getBundledIconPath() {
@@ -103,6 +166,47 @@ function clearLastErrorReport() {
   lastErrorReport = null;
 }
 
+function clearPendingManualBalancePrompt() {
+  lastManualBalancePrompt = null;
+}
+
+function rememberLastFileImportContext(context = null) {
+  lastFileImportContext = context
+    ? {
+        templateId: context.templateId,
+        template: context.template,
+        mappings: Array.isArray(context.mappings) ? context.mappings.map((mapping) => ({ ...mapping })) : [],
+        orderedTargetFields: Array.isArray(context.orderedTargetFields) ? context.orderedTargetFields.slice() : [],
+        inputFilePath: context.inputFilePath
+      }
+    : null;
+}
+
+function buildManualBalanceRequiredResult(prompt, generatedFiles) {
+  clearLastErrorReport();
+  lastManualBalancePrompt = prompt ? { ...prompt } : null;
+  appendActivityLogEntry({
+    level: 'info',
+    message: '等待补录上一账单日余额',
+    details: [
+      `模版名：${prompt?.templateName || 'N/A'}`,
+      `银行账号：${prompt?.merchantId || 'N/A'}`,
+      `币种：${prompt?.currency || '(空)'}`,
+      `当前账单日期：${prompt?.targetBillDate || 'N/A'}`
+    ]
+  });
+
+  return {
+    status: 'manual-balance-required',
+    message: '因首次导入余额，请导入上一个账单日余额用于余额校验',
+    detailReady: Boolean(generatedFiles?.detail),
+    balanceReady: false,
+    errorReportReady: false,
+    manualBalancePromptReady: true,
+    manualBalancePrompt: prompt ? { ...prompt } : null
+  };
+}
+
 function createErrorReport(payload) {
   const report = writeErrorReport(ensureStorageRoot(), payload);
   lastErrorReport = report;
@@ -116,6 +220,7 @@ function createErrorResult({
   errorType = '业务校验错误',
   detailLines = [],
   context = {},
+  templateName = '',
   originalError = null
 }) {
   const report = createErrorReport({
@@ -125,9 +230,20 @@ function createErrorResult({
     errorType,
     detailLines,
     context,
+    templateName,
     originalError
   });
   lastErrorReport = report;
+  appendActivityLogEntry({
+    level: 'error',
+    message: `${step}失败`,
+    details: [
+      `模版名：${templateName || context.templateName || context.moduleName || 'N/A'}`,
+      `错误摘要：${message}`,
+      `错误代码：${errorCode}`,
+      ...detailLines
+    ]
+  });
 
   return {
     status: 'error',
@@ -145,7 +261,8 @@ function createWarningResult({
   detailLines = [],
   context = {},
   errorCode = 'BUSINESS_WARNING',
-  errorType = '业务校验错误'
+  errorType = '业务校验错误',
+  templateName = ''
 }) {
   const report = createErrorReport({
     step,
@@ -153,7 +270,17 @@ function createWarningResult({
     errorCode,
     errorType,
     detailLines,
-    context
+    context,
+    templateName
+  });
+  appendActivityLogEntry({
+    level: 'warn',
+    message: `${step}告警`,
+    details: [
+      `模版名：${templateName || context.templateName || context.moduleName || 'N/A'}`,
+      `告警摘要：${message}`,
+      ...detailLines
+    ]
   });
 
   return {
@@ -437,6 +564,10 @@ function buildMappingTargetFields(enumValues) {
   return buildExportTargetFields(enumValues).filter((value) => value !== 'Channel');
 }
 
+function buildManagedMappingFields(enumValues) {
+  return buildMappingTargetFields(enumValues).concat(ADVANCED_MAPPING_FIELDS);
+}
+
 function getBalanceTemplatePath() {
   const appRoot = app.getAppPath();
   return path.join(appRoot, 'assets', '余额账单模版.xlsx');
@@ -532,7 +663,7 @@ function decodeCustomInputMappingValue(rawValue) {
 }
 
 function resolveCurrentMappings({ template, mappings, enumValues }) {
-  const targetFields = buildMappingTargetFields(enumValues);
+  const targetFields = buildManagedMappingFields(enumValues);
   const targetFieldSet = new Set(targetFields);
   const sourceFieldSet = new Set(template.headers.map((header) => normalizeCell(header)));
   const currentOrientationScore = mappings.filter((mapping) => targetFieldSet.has(mapping.templateField)).length;
@@ -552,7 +683,7 @@ function resolveCurrentMappings({ template, mappings, enumValues }) {
 }
 
 function normalizeMappingRows({ template, mappings, enumValues }) {
-  const targetFields = buildMappingTargetFields(enumValues);
+  const targetFields = buildManagedMappingFields(enumValues);
   const currentMappings = resolveCurrentMappings({
     template,
     mappings,
@@ -581,7 +712,7 @@ function normalizeMappingRows({ template, mappings, enumValues }) {
 }
 
 function normalizeExportMappingRows({ template, mappings, enumValues }) {
-  const targetFields = buildMappingTargetFields(enumValues);
+  const targetFields = buildManagedMappingFields(enumValues);
   const currentMappings = resolveCurrentMappings({
     template,
     mappings,
@@ -631,7 +762,8 @@ function getTemplateMappingConfig(templateId) {
   return {
     template: templatePayload.template,
     enumValues,
-    targetFields: buildMappingTargetFields(enumValues),
+    targetFields: buildManagedMappingFields(enumValues),
+    advancedMappingFields: ADVANCED_MAPPING_FIELDS.slice(),
     exportTargetFields: buildExportTargetFields(enumValues),
     mappings,
     exportMappings
@@ -761,15 +893,6 @@ function pickSingleTextValue(values, fieldName) {
   return uniqueValues[0] || '';
 }
 
-function splitTemplateName(templateName) {
-  const [bankName, ...locationParts] = String(templateName || '').split('-');
-
-  return {
-    bankName: bankName || '',
-    location: locationParts.join('-')
-  };
-}
-
 function buildBalanceTemplateRow(balanceTemplateFields, valuesByField) {
   const normalizedValues = new Map(
     Object.entries(valuesByField).map(([fieldName, value]) => [normalizeCell(fieldName), value])
@@ -781,10 +904,29 @@ function buildBalanceTemplateRow(balanceTemplateFields, valuesByField) {
   });
 }
 
-function deriveBalanceRecords({ detailRows, templateName, balanceTemplateFields }) {
+function hasMultipleEndingBalances(entries) {
+  const uniqueBalances = Array.from(
+    new Set(
+      entries
+        .filter((entry) => entry.balanceValue !== null)
+        .map((entry) => Number(Number(entry.balanceValue).toFixed(2)))
+    )
+  );
+
+  return uniqueBalances.length > 1;
+}
+
+function deriveBalanceRecords({
+  detailRows,
+  templateName,
+  balanceTemplateFields,
+  resolvePreviousEndBalance = null
+}) {
   const fieldIndexMap = buildFieldIndexMap(detailRows[0] || []);
   const balanceIndex = fieldIndexMap.get('Balance');
   const billDateIndex = fieldIndexMap.get('BillDate');
+  const merchantIdIndex = fieldIndexMap.get('MerchantId');
+  const rowMetas = Array.isArray(detailRows.rowMetas) ? detailRows.rowMetas : [];
 
   if (balanceIndex === undefined) {
     throw new FileValidationError('FILE_READ', '当前模版未配置 Balance 字段，无法生成余额账单');
@@ -794,12 +936,17 @@ function deriveBalanceRecords({ detailRows, templateName, balanceTemplateFields 
     throw new FileValidationError('FILE_READ', '当前模版必须映射 BillDate 字段');
   }
 
+  if (merchantIdIndex === undefined) {
+    throw new FileValidationError('FILE_READ', '当前模版启用 Balance 时必须映射 MerchantId 字段');
+  }
+
   const groupedRows = new Map();
   const bankNameParts = splitTemplateName(templateName);
   const currencies = [];
   const bankAccounts = [];
+  const missingMerchantIdRows = [];
 
-  detailRows.slice(1).forEach((row) => {
+  detailRows.slice(1).forEach((row, rowIndex) => {
     const billDateRaw = row[billDateIndex];
     const normalizedBillDate = normalizeCell(billDateRaw);
 
@@ -829,8 +976,16 @@ function deriveBalanceRecords({ detailRows, templateName, balanceTemplateFields 
       dateLabel,
       allowBlank: false
     });
-    const currency = getMappedFieldValue(row, fieldIndexMap, 'Currency');
-    const bankAccount = getMappedFieldValue(row, fieldIndexMap, 'MerchantId');
+    const currency = normalizeCell(getMappedFieldValue(row, fieldIndexMap, 'Currency'));
+    const bankAccount = normalizeCell(getMappedFieldValue(row, fieldIndexMap, 'MerchantId'));
+
+    if (!bankAccount) {
+      missingMerchantIdRows.push({
+        sourceRowNumber: rowMetas[rowIndex]?.sourceRowNumber || rowIndex + 2,
+        dateLabel
+      });
+      return;
+    }
 
     currencies.push(currency);
     bankAccounts.push(bankAccount);
@@ -846,6 +1001,19 @@ function deriveBalanceRecords({ detailRows, templateName, balanceTemplateFields 
     });
   });
 
+  if (missingMerchantIdRows.length) {
+    throw new FileValidationError(
+      'FILE_READ',
+      '当前模版启用 Balance 时，导入文件中的 MerchantId 不能为空',
+      {
+        detailLines: missingMerchantIdRows.map((row) => `第${row.sourceRowNumber}行，账单日期：${row.dateLabel}`),
+        context: {
+          templateName
+        }
+      }
+    );
+  }
+
   const dateKeys = Array.from(groupedRows.keys()).sort();
 
   if (!dateKeys.length) {
@@ -859,8 +1027,40 @@ function deriveBalanceRecords({ detailRows, templateName, balanceTemplateFields 
 
   dateKeys.forEach((dateLabel) => {
     const entries = groupedRows.get(dateLabel);
+    let effectivePreviousEndBalance = previousEndBalance;
+
+    if (effectivePreviousEndBalance === null && hasMultipleEndingBalances(entries)) {
+      const seededBalance = typeof resolvePreviousEndBalance === 'function'
+        ? resolvePreviousEndBalance({
+            templateName,
+            bankName: bankNameParts.bankName,
+            merchantId: bankAccount,
+            currency,
+            targetBillDate: dateLabel
+          })
+        : null;
+
+      if (seededBalance !== null && seededBalance !== undefined) {
+        effectivePreviousEndBalance = seededBalance;
+      } else {
+        throw new FileValidationError(
+          'BALANCE_SEED_REQUIRED',
+          '因首次导入余额，请导入上一个账单日余额用于余额校验',
+          {
+            context: {
+              templateName,
+              bankName: bankNameParts.bankName,
+              merchantId: bankAccount,
+              currency,
+              targetBillDate: dateLabel
+            }
+          }
+        );
+      }
+    }
+
     const endBalance = inferEndingBalance({
-      previousEndBalance,
+      previousEndBalance: effectivePreviousEndBalance,
       entries,
       dateLabel
     });
@@ -1153,6 +1353,11 @@ function registerBackgroundHandlers() {
     try {
       const backgroundConfig = saveBackgroundConfig(payload);
       clearLastErrorReport();
+      appendActivityLogEntry({
+        level: 'info',
+        message: '保存背景设置成功',
+        details: [backgroundConfig.filePath ? `背景文件：${backgroundConfig.sourceFileName}` : `背景色：${backgroundConfig.colorHex}`]
+      });
       return {
         status: 'success',
         message: backgroundConfig.filePath ? '背景已更新' : '背景色已更新',
@@ -1185,6 +1390,11 @@ function registerBackgroundHandlers() {
         keepExistingImage: false
       });
       clearLastErrorReport();
+      appendActivityLogEntry({
+        level: 'info',
+        message: '重置背景设置成功',
+        details: [`背景色：${backgroundConfig.colorHex}`]
+      });
 
       return {
         status: 'success',
@@ -1280,6 +1490,11 @@ function registerAccountMappingHandlers() {
 
       database.saveAccountMappings(validationResult.mappings);
       clearLastErrorReport();
+      appendActivityLogEntry({
+        level: 'info',
+        message: '保存账户映射成功',
+        details: [`映射条数：${validationResult.mappings.length}`]
+      });
       return {
         status: 'success',
         message: '账户映射保存成功'
@@ -1298,7 +1513,7 @@ function registerAccountMappingHandlers() {
 }
 
 function validateTemplateMappings({ template, mappings, enumValues }) {
-  const targetFields = buildMappingTargetFields(enumValues);
+  const targetFields = buildManagedMappingFields(enumValues);
   const targetFieldSet = new Set(targetFields);
   const sourceFieldSet = new Set(template.headers.map((header) => normalizeCell(header)));
   const mappingByTarget = new Map();
@@ -1400,6 +1615,11 @@ function registerTemplateHandlers() {
         headers
       });
       clearLastErrorReport();
+      appendActivityLogEntry({
+        level: 'info',
+        message: '导入模版文件成功',
+        details: [`模版名：${templateName}`, `源文件：${selectedPath}`]
+      });
 
       return {
         status: 'success',
@@ -1429,14 +1649,20 @@ function registerTemplateHandlers() {
   });
 
   ipcMain.handle('template:delete', (_event, templateId) => {
+    const template = database.getTemplate(templateId);
     database.deleteTemplate(templateId);
+    appendActivityLogEntry({
+      level: 'info',
+      message: '删除模版成功',
+      details: [`模版名：${template?.name || templateId}`]
+    });
     return { status: 'success' };
   });
 
   ipcMain.handle('template:get-mappings', (_event, templateId) => {
     if (!getEnumConfig()) {
       return createErrorResult({
-        step: '打开映射关系设置',
+        step: '打开映射关系管理',
         message: MISSING_ENUM_MESSAGE,
         errorCode: 'ENUM_MISSING'
       });
@@ -1447,7 +1673,7 @@ function registerTemplateHandlers() {
 
       if (!mappingConfig) {
         return createErrorResult({
-          step: '打开映射关系设置',
+          step: '打开映射关系管理',
           message: '未找到对应模版',
           errorCode: 'TEMPLATE_NOT_FOUND',
           context: { templateId }
@@ -1458,13 +1684,14 @@ function registerTemplateHandlers() {
         status: 'success',
         template: buildTemplateSummary(mappingConfig.template),
         targetFields: mappingConfig.targetFields,
+        advancedMappingFields: mappingConfig.advancedMappingFields,
         exportTargetFields: mappingConfig.exportTargetFields,
         mappings: mappingConfig.mappings
       };
     } catch (error) {
       if (error instanceof FileValidationError) {
         return createErrorResult({
-          step: '打开映射关系设置',
+          step: '打开映射关系管理',
           message: '内置网银账单枚举表为空或不可读，请检查安装包',
           errorCode: error.code,
           originalError: error
@@ -1472,8 +1699,8 @@ function registerTemplateHandlers() {
       }
 
       return createErrorResult({
-        step: '打开映射关系设置',
-        message: '映射关系设置打开失败，请导出报错文件查看详情',
+        step: '打开映射关系管理',
+        message: '映射关系管理打开失败，请导出报错文件查看详情',
         errorCode: 'TEMPLATE_MAPPING_OPEN_RUNTIME',
         errorType: '系统错误',
         originalError: error,
@@ -1483,9 +1710,11 @@ function registerTemplateHandlers() {
   });
 
   ipcMain.handle('template:save-mappings', (_event, payload) => {
+    let template = null;
+
     try {
       const enumConfig = getEnumConfig();
-      const template = database.getTemplate(payload.templateId);
+      template = database.getTemplate(payload.templateId);
 
       if (!enumConfig) {
         return createErrorResult({
@@ -1512,6 +1741,11 @@ function registerTemplateHandlers() {
 
       database.saveMappings(payload.templateId, mappings);
       clearLastErrorReport();
+      appendActivityLogEntry({
+        level: 'info',
+        message: '保存模版映射成功',
+        details: [`模版名：${template.name}`]
+      });
       return {
         status: 'success',
         message: '模版映射保存成功'
@@ -1523,7 +1757,11 @@ function registerTemplateHandlers() {
           message: error.message,
           errorCode: error.code,
           originalError: error,
-          context: { templateId: payload.templateId }
+          context: {
+            templateId: payload.templateId,
+            templateName: template?.name || ''
+          },
+          templateName: template?.name || ''
         });
       }
 
@@ -1533,7 +1771,11 @@ function registerTemplateHandlers() {
         errorCode: 'TEMPLATE_MAPPING_SAVE_RUNTIME',
         errorType: '系统错误',
         originalError: error,
-        context: { templateId: payload.templateId }
+        context: {
+          templateId: payload.templateId,
+          templateName: template?.name || ''
+        },
+        templateName: template?.name || ''
       });
     }
   });
@@ -1559,8 +1801,11 @@ function prepareGeneratedFiles({
 
     return mapping.mappedField !== '';
   });
+  const selectedExportMappings = selectedMappings.filter((mapping) => {
+    return !ADVANCED_MAPPING_FIELDS.includes(mapping.templateField);
+  });
 
-  if (!selectedMappings.length) {
+  if (!selectedExportMappings.length) {
     throw new FileValidationError('FILE_READ', '当前模版尚未设置映射关系');
   }
 
@@ -1603,11 +1848,34 @@ function prepareGeneratedFiles({
     orderedTargetFields: exportTargetFields,
     mappingByField: mappingByTargetField,
     accountMappingByBankId,
-    currencyMappings
+    currencyMappings,
+    amountMappingRules: {
+      nameSourceField: mappingByTargetField[AMOUNT_BASED_NAME_MAPPING_FIELD],
+      accountSourceField: mappingByTargetField[AMOUNT_BASED_ACCOUNT_MAPPING_FIELD]
+    }
   });
   const warnings = Array.isArray(detailRows.issues) ? detailRows.issues.slice() : [];
   const detailExportRows = buildDetailExportRows(detailRows);
   const skippedDetailRows = Array.isArray(detailExportRows.skippedRows) ? detailExportRows.skippedRows : [];
+  const simultaneousAmountRows = Array.isArray(detailExportRows.simultaneousRows)
+    ? detailExportRows.simultaneousRows
+    : [];
+
+  if (simultaneousAmountRows.length) {
+    throw new FileValidationError(
+      'FILE_READ',
+      `存在${simultaneousAmountRows.length}条明细的 Credit Amount 与 Debit Amount 同时有值`,
+      {
+        detailLines: simultaneousAmountRows.map((row) => {
+          return `第${row.sourceRowNumber}行，Credit Amount="${row.creditAmount || '(空)'}"，Debit Amount="${row.debitAmount || '(空)'}"`;
+        }),
+        context: {
+          inputFilePath,
+          templateName: template.name
+        }
+      }
+    );
+  }
 
   skippedDetailRows.forEach((row) => {
     warnings.push({
@@ -1637,7 +1905,8 @@ function prepareGeneratedFiles({
   const result = {
     detail: {
       filePath: detailOutput.outputFilePath,
-      fileName: detailOutput.outputFileName
+      fileName: detailOutput.outputFileName,
+      templateName: template.name
     },
     balance: null,
     message: '明细账单可导出',
@@ -1646,6 +1915,10 @@ function prepareGeneratedFiles({
   };
 
   if (mappingByTargetField.Balance) {
+    if (!mappingByTargetField.MerchantId) {
+      throw new FileValidationError('FILE_READ', '当前模版启用 Balance 时必须映射 MerchantId 字段');
+    }
+
     try {
       const balanceTemplatePath = getBalanceTemplatePath();
 
@@ -1662,7 +1935,17 @@ function prepareGeneratedFiles({
       const balanceResult = deriveBalanceRecords({
         detailRows,
         templateName: template.name,
-        balanceTemplateFields
+        balanceTemplateFields,
+        resolvePreviousEndBalance: ({ bankName, merchantId, currency, targetBillDate }) => {
+          const seedRecord = findPreviousBalanceSeed(ensureStorageRoot(), {
+            bankName,
+            merchantId,
+            currency,
+            beforeBillDate: targetBillDate
+          });
+
+          return seedRecord ? seedRecord.endBalance : null;
+        }
       });
       const balanceOutput = buildStatementOutputFilePath({
         kind: 'balance',
@@ -1680,15 +1963,30 @@ function prepareGeneratedFiles({
 
       result.balance = {
         filePath: balanceOutput.outputFilePath,
-        fileName: balanceOutput.outputFileName
+        fileName: balanceOutput.outputFileName,
+        templateName: template.name
       };
       result.message = '明细账单可导出，余额账单可导出';
     } catch (error) {
       if (error instanceof FileValidationError) {
-        warnings.push({
-          type: 'balance-generate-failed',
-          message: error.message
-        });
+        if (error.code === 'BALANCE_SEED_REQUIRED') {
+          warnings.push({
+            type: 'balance-seed-required',
+            message: error.message,
+            prompt: {
+              templateName: template.name,
+              bankName: error.context?.bankName || splitTemplateName(template.name).bankName,
+              merchantId: normalizeCell(error.context?.merchantId),
+              currency: normalizeCell(error.context?.currency),
+              targetBillDate: normalizeCell(error.context?.targetBillDate)
+            }
+          });
+        } else {
+          warnings.push({
+            type: 'balance-generate-failed',
+            message: error.message
+          });
+        }
       } else {
         const logPath = appendLog(ensureStorageRoot(), error);
         warnings.push({
@@ -1708,7 +2006,8 @@ async function exportGeneratedFile(generatedFile, emptyMessage, step) {
     return createErrorResult({
       step,
       message: emptyMessage,
-      errorCode: 'EXPORT_EMPTY'
+      errorCode: 'EXPORT_EMPTY',
+      templateName: generatedFile?.templateName || ''
     });
   }
 
@@ -1729,6 +2028,14 @@ async function exportGeneratedFile(generatedFile, emptyMessage, step) {
   try {
     fs.copyFileSync(generatedFile.filePath, saveResult.filePath);
     clearLastErrorReport();
+    appendActivityLogEntry({
+      level: 'info',
+      message: `${step}成功`,
+      details: [
+        `模版名：${generatedFile.templateName || 'N/A'}`,
+        `导出路径：${saveResult.filePath}`
+      ]
+    });
     return {
       status: 'success',
       message: '文件导出成功',
@@ -1744,9 +2051,72 @@ async function exportGeneratedFile(generatedFile, emptyMessage, step) {
       context: {
         sourceFilePath: generatedFile.filePath,
         targetFilePath: saveResult.filePath
-      }
+      },
+      templateName: generatedFile.templateName || ''
     });
   }
+}
+
+function extractManualBalancePromptWarning(warnings = []) {
+  return warnings.find((warning) => warning.type === 'balance-seed-required') || null;
+}
+
+function buildImportResultFromGeneratedFiles({
+  generatedFiles,
+  templateId,
+  templateName,
+  inputFilePath
+}) {
+  const manualBalanceWarning = extractManualBalancePromptWarning(generatedFiles.warnings);
+
+  if (manualBalanceWarning) {
+    return buildManualBalanceRequiredResult(manualBalanceWarning.prompt, generatedFiles);
+  }
+
+  if (generatedFiles.warnings.length) {
+    clearPendingManualBalancePrompt();
+    const detailReady = Boolean(generatedFiles.detail);
+    const balanceReady = Boolean(generatedFiles.balance);
+    const message = buildImportWarningMessage({
+      warnings: generatedFiles.warnings,
+      balanceReady,
+      balanceRequested: generatedFiles.balanceRequested
+    });
+
+    return createWarningResult({
+      step: '导入网银明细文件',
+      message,
+      detailReady,
+      balanceReady,
+      detailLines: buildImportWarningDetailLines(generatedFiles.warnings),
+      context: {
+        templateId,
+        inputFilePath,
+        templateName
+      },
+      errorCode: 'FILE_IMPORT_WARNING',
+      templateName
+    });
+  }
+
+  clearPendingManualBalancePrompt();
+  clearLastErrorReport();
+  appendActivityLogEntry({
+    level: 'info',
+    message: '导入网银明细文件成功',
+    details: [
+      `模版名：${templateName}`,
+      `源文件：${inputFilePath}`,
+      generatedFiles.balance ? '已生成余额账单' : '仅生成明细账单'
+    ]
+  });
+
+  return {
+    status: 'success',
+    message: generatedFiles.message,
+    detailReady: Boolean(generatedFiles.detail),
+    balanceReady: Boolean(generatedFiles.balance)
+  };
 }
 
 function registerFileHandlers() {
@@ -1767,8 +2137,11 @@ function registerFileHandlers() {
       });
     }
 
+    let templateConfig = null;
+
     try {
-      const templateConfig = getTemplateMappingConfig(templateId);
+      clearPendingManualBalancePrompt();
+      templateConfig = getTemplateMappingConfig(templateId);
 
       if (!templateConfig) {
         return createErrorResult({
@@ -1789,6 +2162,13 @@ function registerFileHandlers() {
       }
 
       const inputFilePath = result.filePaths[0];
+      rememberLastFileImportContext({
+        templateId,
+        template: templateConfig.template,
+        mappings: templateConfig.exportMappings,
+        orderedTargetFields: templateConfig.exportTargetFields,
+        inputFilePath
+      });
       const generatedFiles = prepareGeneratedFiles({
         template: templateConfig.template,
         mappings: templateConfig.exportMappings,
@@ -1800,40 +2180,15 @@ function registerFileHandlers() {
         balance: generatedFiles.balance,
         newAccount: lastGeneratedExports.newAccount
       };
-
-      if (generatedFiles.warnings.length) {
-        const detailReady = Boolean(generatedFiles.detail);
-        const balanceReady = Boolean(generatedFiles.balance);
-        const message = buildImportWarningMessage({
-          warnings: generatedFiles.warnings,
-          balanceReady,
-          balanceRequested: generatedFiles.balanceRequested
-        });
-
-        return createWarningResult({
-          step: '导入网银明细文件',
-          message,
-          detailReady,
-          balanceReady,
-          detailLines: buildImportWarningDetailLines(generatedFiles.warnings),
-          context: {
-            templateId,
-            inputFilePath
-          },
-          errorCode: 'FILE_IMPORT_WARNING'
-        });
-      }
-
-      clearLastErrorReport();
-
-      return {
-        status: 'success',
-        message: generatedFiles.message,
-        detailReady: Boolean(generatedFiles.detail),
-        balanceReady: Boolean(generatedFiles.balance)
-      };
+      return buildImportResultFromGeneratedFiles({
+        generatedFiles,
+        templateId,
+        templateName: templateConfig.template.name,
+        inputFilePath
+      });
     } catch (error) {
       clearGeneratedExports();
+      clearPendingManualBalancePrompt();
 
       if (error instanceof FileValidationError) {
         return createErrorResult({
@@ -1841,9 +2196,13 @@ function registerFileHandlers() {
           message: error.message,
           errorCode: error.code,
           originalError: error,
+          detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
           context: {
-            templateId
-          }
+            templateId,
+            templateName: templateConfig?.template?.name || '',
+            ...(error.context || {})
+          },
+          templateName: templateConfig?.template?.name || ''
         });
       }
 
@@ -1858,8 +2217,136 @@ function registerFileHandlers() {
           `日志文件：${logPath}`
         ],
         context: {
-          templateId
+          templateId,
+          templateName: templateConfig?.template?.name || ''
         },
+        originalError: error,
+        templateName: templateConfig?.template?.name || ''
+      });
+    }
+  });
+
+  ipcMain.handle('file:save-balance-seed', (_event, payload = {}) => {
+    const pendingPrompt = lastManualBalancePrompt;
+    const importContext = lastFileImportContext;
+
+    if (!pendingPrompt || !importContext) {
+      return createErrorResult({
+        step: '补录上一账单日余额',
+        message: '当前没有待补录的余额校验任务，请重新导入文件',
+        errorCode: 'BALANCE_SEED_CONTEXT_MISSING',
+        templateName: importContext?.template?.name || ''
+      });
+    }
+
+    try {
+      const seedDate = parseDateValue(payload.billDate);
+      const targetDate = parseDateValue(pendingPrompt.targetBillDate);
+      const normalizedSeedDate = seedDate ? formatDateLabel(seedDate) : '';
+      const normalizedTargetDate = targetDate ? formatDateLabel(targetDate) : '';
+      const endBalance = parseNumericValue(payload.endBalance);
+
+      function buildManualBalanceInvalidResult(message) {
+        return {
+          status: 'manual-balance-invalid',
+          message,
+          detailReady: Boolean(lastGeneratedExports.detail),
+          balanceReady: Boolean(lastGeneratedExports.balance),
+          errorReportReady: false,
+          manualBalancePromptReady: true,
+          manualBalancePrompt: { ...pendingPrompt }
+        };
+      }
+
+      if (!normalizedSeedDate) {
+        return buildManualBalanceInvalidResult('请选择上一账单日日期');
+      }
+
+      if (normalizedTargetDate && normalizedSeedDate >= normalizedTargetDate) {
+        return buildManualBalanceInvalidResult('上一账单日日期必须早于当前需要校验的账单日期');
+      }
+
+      if (endBalance === null) {
+        return buildManualBalanceInvalidResult('请输入有效的上一账单日余额');
+      }
+
+      const upsertResult = upsertBalanceSeedRecord(ensureStorageRoot(), {
+        templateName: importContext.template.name,
+        merchantId: pendingPrompt.merchantId,
+        currency: pendingPrompt.currency,
+        billDate: normalizedSeedDate,
+        endBalance,
+        overwrite: Boolean(payload.overwrite)
+      });
+
+      if (upsertResult.status === 'confirm-overwrite') {
+        return {
+          status: 'confirm-overwrite',
+          message: '该日期的余额已存在，确认覆盖吗？',
+          existingRecord: upsertResult.existingRecord,
+          incomingRecord: upsertResult.incomingRecord
+        };
+      }
+
+      appendActivityLogEntry({
+        level: 'info',
+        message: '补录上一账单日余额成功',
+        details: [
+          `模版名：${importContext.template.name}`,
+          `银行账号：${pendingPrompt.merchantId}`,
+          `币种：${pendingPrompt.currency || '(空)'}`,
+          `账单日期：${normalizedSeedDate}`,
+          `余额：${endBalance}`
+        ]
+      });
+
+      const generatedFiles = prepareGeneratedFiles({
+        template: importContext.template,
+        mappings: importContext.mappings,
+        orderedTargetFields: importContext.orderedTargetFields,
+        inputFilePath: importContext.inputFilePath
+      });
+      lastGeneratedExports = {
+        detail: generatedFiles.detail,
+        balance: generatedFiles.balance,
+        newAccount: lastGeneratedExports.newAccount
+      };
+
+      return buildImportResultFromGeneratedFiles({
+        generatedFiles,
+        templateId: importContext.templateId,
+        templateName: importContext.template.name,
+        inputFilePath: importContext.inputFilePath
+      });
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        clearPendingManualBalancePrompt();
+        return createErrorResult({
+          step: '补录上一账单日余额',
+          message: error.message,
+          errorCode: error.code,
+          detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+          context: {
+            templateName: importContext.template.name,
+            ...(error.context || {})
+          },
+          templateName: importContext.template.name,
+          originalError: error
+        });
+      }
+
+      const logPath = appendLog(ensureStorageRoot(), error);
+      clearPendingManualBalancePrompt();
+      return createErrorResult({
+        step: '补录上一账单日余额',
+        message: '余额补录失败，请导出报错文件查看详情',
+        errorCode: 'BALANCE_SEED_SAVE_RUNTIME',
+        errorType: '系统错误',
+        detailLines: [`日志文件：${logPath}`],
+        context: {
+          templateName: importContext.template.name
+        },
+        templateName: importContext.template.name,
         originalError: error
       });
     }
@@ -1905,7 +2392,11 @@ function registerNewAccountHandlers() {
         step: '生成新开账户余额账单',
         message: '请完整填写所有必填项',
         errorCode: 'NEW_ACCOUNT_REQUIRED',
-        detailLines: [`缺少字段：${missingFields.map(([label]) => label).join('、')}`]
+        detailLines: [`缺少字段：${missingFields.map(([label]) => label).join('、')}`],
+        templateName: NEW_ACCOUNT_EXPORT_NAME,
+        context: {
+          moduleName: NEW_ACCOUNT_EXPORT_NAME
+        }
       });
     }
 
@@ -1913,7 +2404,11 @@ function registerNewAccountHandlers() {
       return createErrorResult({
         step: '生成新开账户余额账单',
         message: '多币种账户至少需要勾选一个币种',
-        errorCode: 'NEW_ACCOUNT_MULTI_CURRENCY_REQUIRED'
+        errorCode: 'NEW_ACCOUNT_MULTI_CURRENCY_REQUIRED',
+        templateName: NEW_ACCOUNT_EXPORT_NAME,
+        context: {
+          moduleName: NEW_ACCOUNT_EXPORT_NAME
+        }
       });
     }
 
@@ -1922,7 +2417,11 @@ function registerNewAccountHandlers() {
         step: '生成新开账户余额账单',
         message: '开户日期不是有效日期',
         errorCode: 'NEW_ACCOUNT_OPEN_DATE_INVALID',
-        context: { openingDate: payload.openingDate }
+        context: {
+          openingDate: payload.openingDate,
+          moduleName: NEW_ACCOUNT_EXPORT_NAME
+        },
+        templateName: NEW_ACCOUNT_EXPORT_NAME
       });
     }
 
@@ -1933,7 +2432,11 @@ function registerNewAccountHandlers() {
         return createErrorResult({
           step: '生成新开账户余额账单',
           message: '未找到余额账单模版，请确认文件已放入 assets 目录',
-          errorCode: 'BALANCE_TEMPLATE_MISSING'
+          errorCode: 'BALANCE_TEMPLATE_MISSING',
+          templateName: NEW_ACCOUNT_EXPORT_NAME,
+          context: {
+            moduleName: NEW_ACCOUNT_EXPORT_NAME
+          }
         });
       }
 
@@ -1943,7 +2446,11 @@ function registerNewAccountHandlers() {
         return createErrorResult({
           step: '生成新开账户余额账单',
           message: '余额账单模版为空或不可读，请重新确认',
-          errorCode: 'BALANCE_TEMPLATE_INVALID'
+          errorCode: 'BALANCE_TEMPLATE_INVALID',
+          templateName: NEW_ACCOUNT_EXPORT_NAME,
+          context: {
+            moduleName: NEW_ACCOUNT_EXPORT_NAME
+          }
         });
       }
 
@@ -1956,11 +2463,10 @@ function registerNewAccountHandlers() {
         openingDate,
         balanceTemplateFields
       });
-      const dateRangeLabel = buildDateRangeLabel(generated.billDates);
       const currencyLabel = isMultiCurrency ? '多币种' : generated.currencies[0];
       const output = buildOutputFilePath({
         kind: 'new-account',
-        outputFileName: `${bankName}-${location}-${bankAccount}-${currencyLabel}-新开银行账户余额录入-${dateRangeLabel}.xlsx`
+        outputFileName: `${bankName}-${location}-${bankAccount}-${currencyLabel}-${NEW_ACCOUNT_EXPORT_NAME}.xlsx`
       });
 
       writeBalanceWorkbook({
@@ -1975,10 +2481,20 @@ function registerNewAccountHandlers() {
         balance: lastGeneratedExports.balance,
         newAccount: {
           filePath: output.outputFilePath,
-          fileName: output.outputFileName
+          fileName: output.outputFileName,
+          templateName: NEW_ACCOUNT_EXPORT_NAME
         }
       };
       clearLastErrorReport();
+      appendActivityLogEntry({
+        level: 'info',
+        message: '生成新开账户余额账单成功',
+        details: [
+          `导出文件：${output.outputFileName}`,
+          `币种：${currencyLabel}`,
+          `账单日期数量：${generated.billDates.length}`
+        ]
+      });
 
       return {
         status: 'success',
@@ -2004,8 +2520,10 @@ function registerNewAccountHandlers() {
             currency,
             currencies: selectedCurrencies,
             bankAccount,
-            openingDate: formatDateLabel(openingDate)
-          }
+            openingDate: formatDateLabel(openingDate),
+            moduleName: NEW_ACCOUNT_EXPORT_NAME
+          },
+          templateName: NEW_ACCOUNT_EXPORT_NAME
         });
       }
 
@@ -2016,7 +2534,11 @@ function registerNewAccountHandlers() {
         errorCode: 'NEW_ACCOUNT_RUNTIME',
         errorType: '系统错误',
         detailLines: [`日志文件：${logPath}`],
-        originalError: error
+        originalError: error,
+        templateName: NEW_ACCOUNT_EXPORT_NAME,
+        context: {
+          moduleName: NEW_ACCOUNT_EXPORT_NAME
+        }
       });
     }
   });
@@ -2030,6 +2552,7 @@ app.whenReady().then(() => {
   const dataPath = path.join(app.getPath('userData'), 'tool-data.sqlite');
   database = new AppDatabase(dataPath);
   database.init();
+  initializeActivityLog();
 
   registerWindowHandlers();
   registerAppHandlers();

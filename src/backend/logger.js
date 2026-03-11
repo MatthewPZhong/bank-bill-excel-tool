@@ -13,6 +13,10 @@ function formatLocalTimestamp(date) {
   return `${formatLocalDate(date)} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
+function formatCompactLocalTimestamp(date) {
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
 function sanitizeFileNamePart(value) {
   return String(value || '')
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, '-')
@@ -44,10 +48,16 @@ function writeErrorReport(reportRoot, payload = {}) {
   const date = formatLocalDate(now);
   const time = formatLocalTimestamp(now);
   const safeStep = sanitizeFileNamePart(payload.step || 'unknown-step');
+  const safeTemplateName = sanitizeFileNamePart(
+    payload.templateName ||
+      payload.context?.templateName ||
+      payload.context?.moduleName ||
+      'APP'
+  );
   const targetDir = path.join(reportRoot, 'error-reports', date);
   const targetFile = path.join(
     targetDir,
-    `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}-${safeStep}.txt`
+    `${formatCompactLocalTimestamp(now)}-${safeTemplateName}-${safeStep}.txt`
   );
   const detailLines = Array.isArray(payload.detailLines)
     ? payload.detailLines.filter((line) => String(line || '').trim() !== '')
@@ -82,7 +92,47 @@ function writeErrorReport(reportRoot, payload = {}) {
   };
 }
 
+function ensureActivityLogFile(filePath) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(filePath, '', 'utf8');
+  }
+
+  return filePath;
+}
+
+function appendActivityRecord(filePath, payload = {}) {
+  const now = new Date();
+  const date = formatLocalDate(now);
+  const time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  const level = String(payload.level || 'INFO').toUpperCase();
+  const message = String(payload.message || '').trim() || '未命名操作';
+  const detailText = Array.isArray(payload.details)
+    ? payload.details.map((line) => String(line || '').trim()).filter((line) => line !== '').join('；')
+    : String(payload.details || '').trim();
+  const bodyLine = detailText ? `${message} | ${detailText}` : message;
+  const logFilePath = ensureActivityLogFile(filePath);
+  const currentContent = fs.readFileSync(logFilePath, 'utf8');
+  const dateHeader = `[${date}]`;
+  const nextLines = [];
+
+  if (!currentContent.includes(dateHeader)) {
+    if (currentContent.trim() !== '') {
+      nextLines.push('');
+    }
+
+    nextLines.push(dateHeader);
+  }
+
+  nextLines.push(`[${time}] [${level}] ${bodyLine}`);
+  fs.appendFileSync(logFilePath, `${nextLines.join('\n')}\n`, 'utf8');
+  return logFilePath;
+}
+
 module.exports = {
   appendLog,
+  appendActivityRecord,
+  ensureActivityLogFile,
   writeErrorReport
 };

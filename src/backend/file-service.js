@@ -6,10 +6,12 @@ const SUPPORTED_EXTENSIONS = new Set(['.xlsx', '.xls', '.csv']);
 const FIXED_FIELD_VALUE_PREFIX = '__FIXED__:';
 
 class FileValidationError extends Error {
-  constructor(code, message) {
+  constructor(code, message, options = {}) {
     super(message);
     this.name = 'FileValidationError';
     this.code = code;
+    this.detailLines = Array.isArray(options.detailLines) ? options.detailLines.slice() : [];
+    this.context = options.context && typeof options.context === 'object' ? { ...options.context } : {};
   }
 }
 
@@ -227,6 +229,17 @@ function sanitizeAmountValue(value) {
   }
 
   return sanitized.startsWith('.') ? `0${sanitized}` : sanitized;
+}
+
+function hasEffectiveAmount(rawValue) {
+  const sanitized = sanitizeAmountValue(rawValue);
+
+  if (!sanitized) {
+    return false;
+  }
+
+  const numericValue = parseNumericValue(sanitized);
+  return numericValue !== null && numericValue !== 0;
 }
 
 function normalizeCurrencyAlias(value) {
@@ -554,13 +567,16 @@ function buildMappedRows({
   orderedTargetFields,
   mappingByField,
   accountMappingByBankId = {},
-  currencyMappings = []
+  currencyMappings = [],
+  amountMappingRules = {}
 }) {
   const rows = readRows(inputFilePath);
   const sourceHeaders = rows[0] || [];
   const sourceIndexByField = new Map();
   const issues = [];
   const rowMetas = [];
+  const nameSourceField = normalizeCell(amountMappingRules.nameSourceField);
+  const accountSourceField = normalizeCell(amountMappingRules.accountSourceField);
 
   sourceHeaders.forEach((header, index) => {
     const normalizedHeader = normalizeCell(header);
@@ -571,7 +587,25 @@ function buildMappedRows({
   });
   const mappedRows = [orderedTargetFields.slice()];
 
+  function resolveRawValueByMapping(mappingValue, row) {
+    const normalizedMappingValue = normalizeCell(mappingValue);
+
+    if (!normalizedMappingValue) {
+      return '';
+    }
+
+    if (normalizedMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
+      return normalizedMappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
+    }
+
+    const sourceIndex = sourceIndexByField.get(normalizedMappingValue);
+    return sourceIndex === undefined ? '' : row[sourceIndex];
+  }
+
   rows.slice(1).forEach((row, rowIndex) => {
+    const hasCreditAmount = hasEffectiveAmount(resolveRawValueByMapping(mappingByField['Credit Amount'], row));
+    const hasDebitAmount = hasEffectiveAmount(resolveRawValueByMapping(mappingByField['Debit Amount'], row));
+
     rowMetas.push({
       sourceRowNumber: rowIndex + 2
     });
@@ -594,6 +628,26 @@ function buildMappedRows({
 
       if (targetField === 'Credit Amount' || targetField === 'Debit Amount') {
         return sanitizeAmountValue(rawValue);
+      }
+
+      if (nameSourceField && mappingValue === nameSourceField) {
+        if (targetField === 'Drawee Name') {
+          return hasCreditAmount && !hasDebitAmount ? rawValue ?? '' : '';
+        }
+
+        if (targetField === 'Payee Name') {
+          return hasDebitAmount && !hasCreditAmount ? rawValue ?? '' : '';
+        }
+      }
+
+      if (accountSourceField && mappingValue === accountSourceField) {
+        if (targetField === 'Drawee CardNo') {
+          return hasCreditAmount && !hasDebitAmount ? rawValue ?? '' : '';
+        }
+
+        if (targetField === 'Payee Cardno' || targetField === 'Payee CardNo') {
+          return hasDebitAmount && !hasCreditAmount ? rawValue ?? '' : '';
+        }
       }
 
       if (targetField === 'Currency') {
@@ -643,6 +697,7 @@ function buildDetailExportRows(rows) {
     : sourceHeaderRow.filter((_fieldName, index) => index !== balanceIndex);
   const exportRows = [headerRow];
   const skippedRows = [];
+  const simultaneousRows = [];
 
   sourceHeaderRow.forEach((fieldName, index) => {
     const normalizedField = normalizeCell(fieldName);
@@ -667,6 +722,20 @@ function buildDetailExportRows(rows) {
     if (
       creditAmountIndex !== undefined &&
       debitAmountIndex !== undefined &&
+      !isCreditAmountZeroOrBlank &&
+      !isDebitAmountZeroOrBlank
+    ) {
+      simultaneousRows.push({
+        sourceRowNumber: rowMetas[index]?.sourceRowNumber || index + 2,
+        creditAmount: normalizeCell(creditAmountValue),
+        debitAmount: normalizeCell(debitAmountValue)
+      });
+      return;
+    }
+
+    if (
+      creditAmountIndex !== undefined &&
+      debitAmountIndex !== undefined &&
       isCreditAmountZeroOrBlank &&
       isDebitAmountZeroOrBlank
     ) {
@@ -686,6 +755,7 @@ function buildDetailExportRows(rows) {
   });
 
   exportRows.skippedRows = skippedRows;
+  exportRows.simultaneousRows = simultaneousRows;
   return exportRows;
 }
 

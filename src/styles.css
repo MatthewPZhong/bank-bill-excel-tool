@@ -420,8 +420,8 @@ select {
 .new-account-currency-input,
 .new-account-currency-dropdown-wrap {
   flex: 0 0 auto;
-  width: calc(4ch + 34px);
-  min-width: 74px;
+  width: 1.9cm;
+  min-width: 118px;
 }
 
 .new-account-currency-dropdown-wrap {
@@ -433,6 +433,8 @@ select {
   padding: 0 24px 0 10px;
   text-align: left;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .new-account-currency-dropdown-btn::after {
@@ -518,6 +520,12 @@ select {
 .new-account-status-box {
   grid-column: 3 / 4;
   width: 100%;
+}
+
+.mapping-section-row td {
+  background: rgba(224, 208, 182, 0.22);
+  color: var(--text);
+  font-weight: 700;
 }
 
 .page-footer {
@@ -755,6 +763,32 @@ select {
   padding: 34px 28px 28px;
 }
 
+.manual-balance-card {
+  width: min(100%, 560px);
+}
+
+.manual-balance-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.manual-balance-row {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.manual-balance-label {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.manual-balance-input {
+  min-width: 0;
+}
+
 .dialog-header {
   display: flex;
   align-items: center;
@@ -936,6 +970,10 @@ select {
     grid-column: auto;
     justify-content: center;
     flex-wrap: wrap;
+  }
+
+  .manual-balance-row {
+    grid-template-columns: 1fr;
   }
 
   .export-actions {

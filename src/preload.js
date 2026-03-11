@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
   },
   files: {
     importFile: (templateId) => ipcRenderer.invoke('file:import', templateId),
+    saveBalanceSeed: (payload) => ipcRenderer.invoke('file:save-balance-seed', payload),
     exportDetail: () => ipcRenderer.invoke('file:export-detail'),
     exportBalance: () => ipcRenderer.invoke('file:export-balance')
   },

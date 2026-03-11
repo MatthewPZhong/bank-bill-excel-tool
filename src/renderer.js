@@ -8,6 +8,9 @@ const DEFAULT_BACKGROUND_SETTINGS = Object.freeze({
 const DEFAULT_SPECTRUM_PICK_COLOR = '#ffffff';
 const BACKGROUND_FILE_HINT = '支持 PNG/JPG/JPEG/WEBP，大小不超过 5MB，建议使用横版高清图片';
 const MERCHANT_ID_SELF_INPUT_OPTION = '自己输入';
+const AMOUNT_BASED_NAME_MAPPING_FIELD = '根据发生额做映射的户名';
+const AMOUNT_BASED_ACCOUNT_MAPPING_FIELD = '根据发生额做映射的账户号';
+const ADVANCED_MAPPING_FIELDS = [AMOUNT_BASED_NAME_MAPPING_FIELD, AMOUNT_BASED_ACCOUNT_MAPPING_FIELD];
 const MODULES = Object.freeze({
   statementGenerator: {
     id: 'statement-generator',
@@ -37,6 +40,8 @@ const state = {
   currentModule: MODULES.statementGenerator.id,
   isModuleMenuOpen: false,
   currencyOptions: [],
+  manualBalancePromptReady: false,
+  manualBalancePrompt: null,
   selectedNewAccountCurrencies: [],
   isNewAccountCurrencyDropdownOpen: false,
   isBackgroundSpectrumDragging: false,
@@ -95,20 +100,31 @@ const elements = {
 function updateStatusBox(box, message, tone = 'info', options = {}) {
   const {
     errorReportReady = false,
+    manualBalancePromptReady = false,
     idleTitle = ''
   } = options;
 
   box.textContent = message;
   box.dataset.tone = tone;
   box.dataset.errorReportReady = errorReportReady ? 'true' : 'false';
-  box.classList.toggle('is-clickable', errorReportReady);
-  box.title = errorReportReady ? '点击导出报错文件' : idleTitle;
+  box.dataset.manualBalancePromptReady = manualBalancePromptReady ? 'true' : 'false';
+  box.classList.toggle('is-clickable', errorReportReady || manualBalancePromptReady);
+  box.title = manualBalancePromptReady
+    ? '点击补录上一账单日余额'
+    : errorReportReady
+      ? '点击导出报错文件'
+      : idleTitle;
 }
 
 function setStatus(message, tone = 'info', options = {}) {
   state.hasErrorReport = Boolean(options.errorReportReady);
+  state.manualBalancePromptReady = Boolean(options.manualBalancePromptReady);
+  state.manualBalancePrompt = state.manualBalancePromptReady && options.manualBalancePrompt
+    ? { ...options.manualBalancePrompt }
+    : null;
   updateStatusBox(elements.statusBox, message, tone, {
     errorReportReady: state.hasErrorReport,
+    manualBalancePromptReady: state.manualBalancePromptReady,
     idleTitle: options.idleTitle ?? getStatusBoxTitle(state.accountMappingCount)
   });
 }
@@ -164,6 +180,43 @@ async function handleExportLastError(target = 'main') {
   setNewAccountStatus(result.message, result.status === 'success' ? 'success' : 'error', {
     errorReportReady: result.status === 'success' ? true : Boolean(result.errorReportReady)
   });
+}
+
+function applyStatementResult(result) {
+  if (result.status === 'cancelled') {
+    return false;
+  }
+
+  const tone = result.status === 'success'
+    ? 'success'
+    : result.manualBalancePromptReady
+      ? 'info'
+      : 'error';
+
+  setStatus(result.message, tone, {
+    errorReportReady: Boolean(result.errorReportReady),
+    manualBalancePromptReady: Boolean(result.manualBalancePromptReady),
+    manualBalancePrompt: result.manualBalancePrompt || null
+  });
+
+  if (
+    result.status === 'success' ||
+    result.status === 'warning' ||
+    result.status === 'manual-balance-required' ||
+    result.status === 'manual-balance-invalid'
+  ) {
+    setExportAvailability({
+      detailEnabled: Boolean(result.detailReady),
+      balanceEnabled: Boolean(result.balanceReady)
+    });
+    return true;
+  }
+
+  setExportAvailability({
+    detailEnabled: false,
+    balanceEnabled: false
+  });
+  return true;
 }
 
 function isNewAccountFormComplete() {
@@ -338,6 +391,15 @@ function syncNewAccountCurrencyMode() {
   }
 
   updateNewAccountCurrencyDropdownLabel();
+}
+
+function syncNewAccountOpenDateInputType() {
+  elements.newAccountOpenDateInput.type = elements.newAccountOpenDateInput.value ? 'date' : 'text';
+}
+
+function setNewAccountOpenDateValue(value) {
+  elements.newAccountOpenDateInput.type = value ? 'date' : 'text';
+  elements.newAccountOpenDateInput.value = value;
 }
 
 function normalizeColorHex(colorHex) {
@@ -741,6 +803,87 @@ function createConfirmDialog({ message, confirmText, cancelText, onConfirm }) {
   return overlay;
 }
 
+function createManualBalanceSeedDialog(prompt, draft = {}) {
+  const overlay = createOverlay();
+  const dialog = document.createElement('div');
+  dialog.className = 'modal-card manual-balance-card';
+  dialog.innerHTML = `
+    <div class="dialog-header">
+      <div class="dialog-title">补录上一账单日余额</div>
+      <button class="icon-close" type="button">×</button>
+    </div>
+    <div class="manual-balance-form">
+      <label class="manual-balance-row">
+        <span class="manual-balance-label">请选择上一账单日日期</span>
+        <input class="mapping-text-input manual-balance-input manual-balance-date-input" type="text" value="" />
+      </label>
+      <label class="manual-balance-row">
+        <span class="manual-balance-label">请输入上一账单日余额</span>
+        <input class="mapping-text-input manual-balance-input manual-balance-amount-input" type="text" spellcheck="false" value="" />
+      </label>
+    </div>
+    <div class="dialog-actions right">
+      <button class="primary-btn small" type="button" data-action="done">完成</button>
+    </div>
+  `;
+
+  const dateInput = dialog.querySelector('.manual-balance-date-input');
+  const amountInput = dialog.querySelector('.manual-balance-amount-input');
+  dateInput.value = draft.billDate || '';
+  dateInput.type = dateInput.value ? 'date' : 'text';
+  amountInput.value = draft.endBalance || '';
+
+  dateInput.addEventListener('focus', () => {
+    if (dateInput.type !== 'date') {
+      dateInput.type = 'date';
+    }
+
+    dateInput.showPicker?.();
+  });
+  dateInput.addEventListener('blur', () => {
+    if (!dateInput.value) {
+      dateInput.type = 'text';
+    }
+  });
+  dialog.querySelector('.icon-close').addEventListener('click', closeModal);
+  dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+    const payload = {
+      billDate: dateInput.value,
+      endBalance: amountInput.value
+    };
+    const result = await window.desktopApi.files.saveBalanceSeed(payload);
+
+    if (result.status === 'confirm-overwrite') {
+      openModal(
+        createConfirmDialog({
+          message: '该日期的余额已存在，确认覆盖吗？',
+          confirmText: '确认覆盖',
+          cancelText: '取消',
+          onConfirm: async () => {
+            const overwriteResult = await window.desktopApi.files.saveBalanceSeed({
+              ...payload,
+              overwrite: true
+            });
+            closeModal();
+            applyStatementResult(overwriteResult);
+          }
+        })
+      );
+      return;
+    }
+
+    closeModal();
+    applyStatementResult(result);
+
+    if (result.status === 'error' && !result.manualBalancePromptReady) {
+      openModal(createAlertDialog(result.message));
+    }
+  });
+
+  overlay.appendChild(dialog);
+  return overlay;
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -798,7 +941,7 @@ function renderTemplateTableRows(tableBody) {
     row.innerHTML = `
       <td>${template.name}</td>
       <td class="action-cell">
-        <button class="text-action" type="button" data-action="manage">修改</button>
+        <button class="text-action" type="button" data-action="manage">模版管理</button>
         <button class="text-action danger" type="button" data-action="delete">删除</button>
       </td>
     `;
@@ -866,10 +1009,13 @@ function createTemplateManagerDialog() {
 function createMappingDialog(payload) {
   const overlay = createOverlay();
   const dialog = document.createElement('div');
+  const advancedMappingFields = Array.isArray(payload.advancedMappingFields) && payload.advancedMappingFields.length
+    ? payload.advancedMappingFields
+    : ADVANCED_MAPPING_FIELDS;
   dialog.className = 'modal-card mapping-card';
   dialog.innerHTML = `
     <div class="dialog-header">
-      <div class="dialog-title">映射关系设置</div>
+      <div class="dialog-title">映射关系管理</div>
       <button class="icon-close" type="button">×</button>
     </div>
     <div class="table-wrapper mapping-wrapper">
@@ -897,6 +1043,13 @@ function createMappingDialog(payload) {
   });
 
   payload.targetFields.forEach((fieldName) => {
+    if (fieldName === advancedMappingFields[0]) {
+      const sectionRow = document.createElement('tr');
+      sectionRow.className = 'mapping-section-row';
+      sectionRow.innerHTML = '<td colspan="2"><strong>映射关系设置</strong></td>';
+      tbody.appendChild(sectionRow);
+    }
+
     const row = document.createElement('tr');
     row.dataset.templateField = fieldName;
     const isBalanceField = fieldName === 'Balance';
@@ -941,14 +1094,14 @@ function createMappingDialog(payload) {
   });
 
   dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
-    const mappings = Array.from(tbody.querySelectorAll('tr')).map((row) => {
+    const mappings = Array.from(tbody.querySelectorAll('tr[data-template-field]')).map((row) => {
       const select = row.querySelector('.mapping-select');
       const customInput = row.querySelector('.mapping-custom-input');
 
       return {
-        templateField: row.dataset.templateField,
-        mappedField: select.value,
-        customValue: customInput ? customInput.value : ''
+      templateField: row.dataset.templateField,
+      mappedField: select.value,
+      customValue: customInput ? customInput.value : ''
       };
     });
     const result = await window.desktopApi.templates.saveMappings({
@@ -1123,22 +1276,7 @@ async function handleImportFile() {
     return;
   }
 
-  setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
-    errorReportReady: Boolean(result.errorReportReady)
-  });
-
-  if (result.status === 'success' || result.status === 'warning') {
-    setExportAvailability({
-      detailEnabled: Boolean(result.detailReady),
-      balanceEnabled: Boolean(result.balanceReady)
-    });
-    return;
-  }
-
-  setExportAvailability({
-    detailEnabled: false,
-    balanceEnabled: false
-  });
+  applyStatementResult(result);
 }
 
 async function handleExportDetail() {
@@ -1186,7 +1324,7 @@ function applyNewAccountPreviewState() {
   elements.newAccountLocationInput.value = '香港';
   elements.newAccountCurrencyInput.value = 'USD';
   elements.newAccountBankAccountInput.value = '6222000000000001';
-  elements.newAccountOpenDateInput.value = '2026-01-01';
+  setNewAccountOpenDateValue('2026-01-01');
   updateNewAccountGenerateAvailability();
   setNewAccountExportAvailability(true);
   setNewAccountStatus('新开账户余额账单可导出', 'success', {
@@ -1243,7 +1381,7 @@ async function initialize() {
   elements.newAccountMultiCurrencyCheckbox.checked = false;
   state.selectedNewAccountCurrencies = [];
   renderNewAccountCurrencyOptions();
-  elements.newAccountOpenDateInput.value = '';
+  setNewAccountOpenDateValue('');
   syncNewAccountCurrencyMode();
   await refreshTemplates();
   setExportAvailability({
@@ -1280,6 +1418,11 @@ async function initialize() {
     handleNewAccountFormMutation();
   });
   elements.statusBox.addEventListener('click', () => {
+    if (state.manualBalancePromptReady && state.manualBalancePrompt) {
+      openModal(createManualBalanceSeedDialog(state.manualBalancePrompt));
+      return;
+    }
+
     handleExportLastError('main').catch((error) => {
       console.error(error);
       setStatus('报错文件导出失败，请查看控制台', 'error');
@@ -1302,10 +1445,23 @@ async function initialize() {
     elements.newAccountBankNameInput,
     elements.newAccountLocationInput,
     elements.newAccountCurrencyInput,
-    elements.newAccountBankAccountInput,
-    elements.newAccountOpenDateInput
+    elements.newAccountBankAccountInput
   ].forEach((input) => {
     input.addEventListener('input', handleNewAccountFormMutation);
+  });
+  elements.newAccountOpenDateInput.addEventListener('focus', () => {
+    if (elements.newAccountOpenDateInput.type !== 'date') {
+      elements.newAccountOpenDateInput.type = 'date';
+    }
+
+    elements.newAccountOpenDateInput.showPicker?.();
+  });
+  elements.newAccountOpenDateInput.addEventListener('blur', () => {
+    syncNewAccountOpenDateInputType();
+  });
+  elements.newAccountOpenDateInput.addEventListener('change', () => {
+    syncNewAccountOpenDateInputType();
+    handleNewAccountFormMutation();
   });
   elements.moduleSwitcherBtn.addEventListener('click', () => {
     if (state.isModuleMenuOpen) {
