@@ -8,6 +8,23 @@
   - `CHANGELOG.md`
   - `docs/VERSION_FEATURE_HISTORY.md`
 
+## 1.3.3
+
+### 新增
+
+- 无
+
+### 变更
+
+- 映射关系管理中，`MerchantId` 选择 `自己输入` 后改为直接由“维护大账号”接管 `MerchantId + Currency`；当只维护出 1 条 `大账号 / 币种` 组合时，导入时会自动直通，不再弹选择框。
+- `Currency` 行全局移除 `自己输入` 选项；在 `MerchantId=自己输入` 模式下，`Currency` 行直接隐藏，最终值取自“维护大账号”里的币种配置。
+- 映射关系管理保存失败时，系统会先弹出错误提示，确认后回到原编辑内容继续修改，不再丢失当前草稿。
+- 收掉了 `MerchantId / Currency` “选择自己输入后必须填写内容”的旧强校验实现，并兼容历史上使用固定 `MerchantId / Currency` 的模板配置。
+
+### 移除
+
+- `Currency` 的“自己输入”能力。
+
 ## 1.3.2
 
 ### 新增

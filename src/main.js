@@ -67,7 +67,7 @@ const BALANCE_DISABLED_OPTION = '无';
 const BALANCE_CALCULATED_OPTION = '通过发生额计算';
 const MERCHANT_ID_SELF_INPUT_OPTION = '自己输入';
 const MERCHANT_ID_MULTI_ACCOUNT_MARKER = '__MULTI_BIG_ACCOUNT__';
-const CUSTOM_INPUT_TARGET_FIELDS = new Set(['MerchantId', 'Currency']);
+const CUSTOM_INPUT_TARGET_FIELDS = new Set(['MerchantId']);
 const SIGNED_AMOUNT_MAPPING_FIELD = '按正负号拆分的发生额';
 const AMOUNT_BASED_NAME_MAPPING_FIELD = '根据发生额做映射的户名';
 const AMOUNT_BASED_ACCOUNT_MAPPING_FIELD = '根据发生额做映射的账户号';
@@ -811,6 +811,56 @@ function decodeCustomInputMappingValue(rawValue) {
   };
 }
 
+function extractFixedMappingValue(rawValue) {
+  const normalizedValue = normalizeCell(rawValue);
+
+  if (!normalizedValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
+    return '';
+  }
+
+  return normalizedValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
+}
+
+function buildCompatibleBigAccounts({ mappings, bigAccounts = [] }) {
+  if (Array.isArray(bigAccounts) && bigAccounts.length) {
+    return bigAccounts.map((item) => ({
+      merchantId: normalizeCell(item.merchantId),
+      currencies: Array.from(
+        new Set(
+          (Array.isArray(item.currencies) ? item.currencies : [])
+            .map((value) => normalizeCell(value))
+            .filter((value) => value !== '')
+        )
+      ),
+      isMultiCurrency: Boolean(item.isMultiCurrency)
+    }));
+  }
+
+  const mappingMap = new Map(
+    (Array.isArray(mappings) ? mappings : []).map((mapping) => [
+      normalizeCell(mapping.templateField),
+      normalizeCell(mapping.mappedField)
+    ])
+  );
+  const merchantIdCustomInput = decodeCustomInputMappingValue(mappingMap.get('MerchantId') || '');
+
+  if (
+    !merchantIdCustomInput.isCustomInput ||
+    merchantIdCustomInput.isMultiBigAccount ||
+    !merchantIdCustomInput.customValue
+  ) {
+    return [];
+  }
+
+  const fixedCurrencyValue = extractFixedMappingValue(mappingMap.get('Currency') || '');
+
+  return [{
+    merchantId: merchantIdCustomInput.customValue,
+    currencies: fixedCurrencyValue ? [fixedCurrencyValue] : [],
+    isMultiCurrency: false
+  }];
+}
+
 function resolveCurrentMappings({ template, mappings, enumValues }) {
   const targetFields = buildManagedMappingFields(enumValues);
   const targetFieldSet = new Set(targetFields);
@@ -831,7 +881,7 @@ function resolveCurrentMappings({ template, mappings, enumValues }) {
   return currentMappings;
 }
 
-function normalizeMappingRows({ template, mappings, enumValues }) {
+function normalizeMappingRows({ template, mappings, enumValues, bigAccounts = [] }) {
   const targetFields = buildManagedMappingFields(enumValues);
   const currentMappings = resolveCurrentMappings({
     template,
@@ -839,24 +889,42 @@ function normalizeMappingRows({ template, mappings, enumValues }) {
     enumValues
   });
   const savedMap = new Map(currentMappings.map((mapping) => [mapping.templateField, normalizeCell(mapping.mappedField)]));
+  const merchantIdSavedValue = savedMap.get('MerchantId') || '';
+  const merchantIdCustomInput = decodeCustomInputMappingValue(merchantIdSavedValue);
+  const merchantIdManagedByBigAccounts = merchantIdCustomInput.isCustomInput;
 
   return targetFields.map((fieldName) => {
     const savedValue = savedMap.get(fieldName) || '';
     const customInputMapping = CUSTOM_INPUT_TARGET_FIELDS.has(fieldName)
       ? decodeCustomInputMappingValue(savedValue)
       : null;
+    const hasSavedBigAccounts = Array.isArray(bigAccounts) && bigAccounts.length > 0;
 
     return {
       templateField: fieldName,
       mappedField: fieldName === 'Balance'
         ? savedValue || BALANCE_DISABLED_OPTION
-        : customInputMapping
-          ? customInputMapping.mappedField
-          : savedValue === BALANCE_DISABLED_OPTION
+        : fieldName === 'MerchantId' && merchantIdManagedByBigAccounts
+          ? MERCHANT_ID_SELF_INPUT_OPTION
+          : fieldName === 'Currency' && merchantIdManagedByBigAccounts
             ? ''
-            : savedValue || '',
-      customValue: customInputMapping ? customInputMapping.customValue : '',
-      isMultiBigAccount: customInputMapping ? customInputMapping.isMultiBigAccount : false
+            : fieldName === 'Currency' && savedValue.startsWith(FIXED_FIELD_VALUE_PREFIX)
+              ? ''
+              : customInputMapping
+                ? customInputMapping.mappedField
+                : savedValue === BALANCE_DISABLED_OPTION
+                  ? ''
+                  : savedValue || '',
+      customValue: fieldName === 'MerchantId'
+        ? ''
+        : customInputMapping
+          ? customInputMapping.customValue
+          : '',
+      isMultiBigAccount: fieldName === 'MerchantId'
+        ? hasSavedBigAccounts
+        : customInputMapping
+          ? customInputMapping.isMultiBigAccount
+          : false
     };
   });
 }
@@ -898,10 +966,15 @@ function getTemplateMappingConfig(templateId) {
   }
 
   const enumValues = loadEnumValues(enumConfig.filePath);
+  const compatibleBigAccounts = buildCompatibleBigAccounts({
+    mappings: templatePayload.mappings,
+    bigAccounts: templatePayload.bigAccounts
+  });
   const mappings = normalizeMappingRows({
     template: templatePayload.template,
     mappings: templatePayload.mappings,
-    enumValues
+    enumValues,
+    bigAccounts: compatibleBigAccounts
   });
   const exportMappings = normalizeExportMappingRows({
     template: templatePayload.template,
@@ -917,7 +990,7 @@ function getTemplateMappingConfig(templateId) {
     exportTargetFields: buildExportTargetFields(enumValues),
     mappings,
     exportMappings,
-    bigAccounts: Array.isArray(templatePayload.bigAccounts) ? templatePayload.bigAccounts : []
+    bigAccounts: compatibleBigAccounts
   };
 }
 
@@ -1771,6 +1844,7 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     customValue: '',
     isMultiBigAccount: false
   };
+  const merchantIdManagedByBigAccounts = merchantIdMapping.mappedField === MERCHANT_ID_SELF_INPUT_OPTION;
   const signedAmountSourceField = normalizeCell(mappingByTarget.get(SIGNED_AMOUNT_MAPPING_FIELD)?.mappedField);
   const creditAmountSourceField = normalizeCell(mappingByTarget.get('Credit Amount')?.mappedField);
   const debitAmountSourceField = normalizeCell(mappingByTarget.get('Debit Amount')?.mappedField);
@@ -1785,7 +1859,7 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     throw new FileValidationError('FILE_READ', `映射字段不存在：${signedAmountSourceField}`);
   }
 
-  const cleanedBigAccounts = merchantIdMapping.isMultiBigAccount
+  const cleanedBigAccounts = merchantIdManagedByBigAccounts
     ? bigAccounts.map((item) => ({
         merchantId: normalizeCell(item.merchantId),
         currencies: Array.from(
@@ -1828,6 +1902,14 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
       return;
     }
 
+    if (merchantIdManagedByBigAccounts && targetField === 'Currency') {
+      cleanedMappings.push({
+        templateField: targetField,
+        mappedField: ''
+      });
+      return;
+    }
+
     if (!normalizedSourceField) {
       cleanedMappings.push({
         templateField: targetField,
@@ -1836,24 +1918,34 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
       return;
     }
 
-    if (CUSTOM_INPUT_TARGET_FIELDS.has(targetField) && normalizedSourceField === MERCHANT_ID_SELF_INPUT_OPTION) {
-      if (targetField === 'MerchantId' && selectedMapping.isMultiBigAccount) {
-        cleanedMappings.push({
-          templateField: targetField,
-          mappedField: `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`
-        });
-        return;
-      }
-
-      const customValue = selectedMapping.customValue;
-
-      if (!customValue) {
-        throw new FileValidationError('FILE_READ', `${targetField} 选择“自己输入”后必须填写内容`);
-      }
-
+    if (targetField === 'MerchantId' && normalizedSourceField === MERCHANT_ID_SELF_INPUT_OPTION) {
       cleanedMappings.push({
         templateField: targetField,
-        mappedField: `${FIXED_FIELD_VALUE_PREFIX}${customValue}`
+        mappedField: `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`
+      });
+      return;
+    }
+
+    if (targetField === 'Currency' && normalizedSourceField === MERCHANT_ID_SELF_INPUT_OPTION) {
+      cleanedMappings.push({
+        templateField: targetField,
+        mappedField: ''
+      });
+      return;
+    }
+
+    if (targetField === 'MerchantId' && normalizedSourceField.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
+      cleanedMappings.push({
+        templateField: targetField,
+        mappedField: normalizedSourceField
+      });
+      return;
+    }
+
+    if (targetField === 'Currency' && normalizedSourceField.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
+      cleanedMappings.push({
+        templateField: targetField,
+        mappedField: merchantIdManagedByBigAccounts ? '' : normalizedSourceField
       });
       return;
     }
@@ -1868,7 +1960,7 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     });
   });
 
-  if (merchantIdMapping.isMultiBigAccount) {
+  if (merchantIdManagedByBigAccounts) {
     if (!cleanedBigAccounts.length) {
       throw new FileValidationError('FILE_READ', '请至少维护 1 条大账号配置');
     }
@@ -2736,7 +2828,7 @@ function registerFileHandlers() {
       const inputFilePath = result.filePaths[0];
       const bigAccountOptions = expandBigAccountConfigurations(templateConfig.bigAccounts);
 
-      if (bigAccountOptions.length) {
+      if (bigAccountOptions.length > 1) {
         rememberPendingBigAccountSelection({
           templateId,
           template: templateConfig.template,
@@ -2748,20 +2840,27 @@ function registerFileHandlers() {
         return buildBigAccountSelectionRequiredResult(bigAccountOptions);
       }
 
+      const selectedBigAccount = bigAccountOptions.length === 1
+        ? {
+            merchantId: bigAccountOptions[0].merchantId,
+            currency: bigAccountOptions[0].currency
+          }
+        : null;
+
       rememberLastFileImportContext({
         templateId,
         template: templateConfig.template,
         mappings: templateConfig.exportMappings,
         orderedTargetFields: templateConfig.exportTargetFields,
         inputFilePath,
-        selectedBigAccount: null
+        selectedBigAccount
       });
       const generatedFiles = prepareGeneratedFiles({
         template: templateConfig.template,
         mappings: templateConfig.exportMappings,
         orderedTargetFields: templateConfig.exportTargetFields,
         inputFilePath,
-        selectedBigAccount: null
+        selectedBigAccount
       });
       lastGeneratedExports = {
         detail: generatedFiles.detail,

@@ -1,6 +1,6 @@
 {
   "name": "bank-bill-excel-tool",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "网银账单小助手",
   "main": "src/main.js",
   "author": "OpenAI Codex",

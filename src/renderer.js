@@ -776,7 +776,8 @@ function createOverlay() {
   return overlay;
 }
 
-function createAlertDialog(message) {
+function createAlertDialog(message, options = {}) {
+  const { onConfirm = null } = options;
   const overlay = createOverlay();
   const dialog = document.createElement('div');
   dialog.className = 'modal-card alert-card';
@@ -786,7 +787,10 @@ function createAlertDialog(message) {
       <button class="primary-btn small" type="button">确认</button>
     </div>
   `;
-  dialog.querySelector('button').addEventListener('click', closeModal);
+  dialog.querySelector('button').addEventListener('click', () => {
+    closeModal();
+    onConfirm?.();
+  });
   overlay.appendChild(dialog);
   return overlay;
 }
@@ -1623,6 +1627,7 @@ function createMappingDialog(payload) {
   `;
 
   const tbody = dialog.querySelector('tbody');
+  const rowByField = new Map();
   const savedMap = new Map(payload.mappings.map((item) => [item.templateField, item]));
   const headerOptions = payload.template.headers.map((header) => {
     const escapedHeader = escapeHtml(header || '(空白字段)');
@@ -1642,8 +1647,7 @@ function createMappingDialog(payload) {
     row.dataset.templateField = fieldName;
     const isBalanceField = fieldName === 'Balance';
     const isMerchantIdField = fieldName === 'MerchantId';
-    const isCurrencyField = fieldName === 'Currency';
-    const supportsCustomInput = isMerchantIdField || isCurrencyField;
+    const supportsSelfInputOption = isMerchantIdField;
     const savedMapping = savedMap.get(fieldName) || {
       mappedField: isBalanceField ? BALANCE_DISABLED_OPTION : '',
       customValue: '',
@@ -1651,7 +1655,7 @@ function createMappingDialog(payload) {
     };
     const selectOptions = [isBalanceField ? `<option value="${BALANCE_DISABLED_OPTION}">${BALANCE_DISABLED_OPTION}</option>` : '<option value=""></option>']
       .concat(isBalanceField ? [`<option value="${BALANCE_CALCULATED_OPTION}">${BALANCE_CALCULATED_OPTION}</option>`] : [])
-      .concat(supportsCustomInput ? [`<option value="${MERCHANT_ID_SELF_INPUT_OPTION}">${MERCHANT_ID_SELF_INPUT_OPTION}</option>`] : [])
+      .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_SELF_INPUT_OPTION}">${MERCHANT_ID_SELF_INPUT_OPTION}</option>`] : [])
       .concat(headerOptions)
       .join('');
     row.innerHTML = `
@@ -1659,12 +1663,7 @@ function createMappingDialog(payload) {
       <td>
         <div class="mapping-field-editor">
           <select class="mapping-select">${selectOptions}</select>
-          ${supportsCustomInput ? `<input class="mapping-text-input mapping-custom-input mapping-custom-input-compact" type="text" spellcheck="false" placeholder="${isMerchantIdField ? '请输入固定 MerchantId' : '请输入固定 Currency'}" />` : ''}
           ${isMerchantIdField ? `
-            <label class="new-account-checkbox-label mapping-big-account-label" hidden>
-              <input class="new-account-checkbox mapping-big-account-toggle" type="checkbox" />
-              <span class="mapping-big-account-label-text">模板里存在多个大账号</span>
-            </label>
             <button class="secondary-btn small mapping-big-account-manage-btn" type="button" hidden>维护大账号</button>
           ` : ''}
         </div>
@@ -1672,36 +1671,15 @@ function createMappingDialog(payload) {
     `;
 
     const select = row.querySelector('.mapping-select');
-    const customInput = row.querySelector('.mapping-custom-input');
-    const bigAccountLabel = row.querySelector('.mapping-big-account-label');
-    const bigAccountToggle = row.querySelector('.mapping-big-account-toggle');
     const manageBigAccountBtn = row.querySelector('.mapping-big-account-manage-btn');
     select.value = savedMapping.mappedField || (isBalanceField ? BALANCE_DISABLED_OPTION : '');
 
     function syncEditorState() {
       const isCustomInput = select.value === MERCHANT_ID_SELF_INPUT_OPTION;
-      const isMultiBigAccount = Boolean(bigAccountToggle?.checked);
-
-      if (customInput) {
-        customInput.hidden = !isCustomInput || (isMerchantIdField && isMultiBigAccount);
-      }
-
-      if (bigAccountLabel) {
-        bigAccountLabel.hidden = !isCustomInput;
-      }
 
       if (manageBigAccountBtn) {
-        manageBigAccountBtn.hidden = !isCustomInput || !isMultiBigAccount;
+        manageBigAccountBtn.hidden = !isCustomInput;
       }
-    }
-
-    if (customInput) {
-      customInput.value = savedMapping.customValue || '';
-    }
-
-    if (bigAccountToggle) {
-      bigAccountToggle.checked = Boolean(savedMapping.isMultiBigAccount);
-      bigAccountToggle.addEventListener('change', syncEditorState);
     }
 
     if (manageBigAccountBtn) {
@@ -1710,14 +1688,13 @@ function createMappingDialog(payload) {
         openModal(createBigAccountManagerDialog({
           bigAccounts: currentBigAccounts,
           onDone: (nextBigAccounts) => {
-            const nextMappings = draftMappings.map((mapping) => {
-              return mapping.templateField === 'MerchantId'
-                ? { ...mapping, isMultiBigAccount: true }
-                : mapping;
-            });
             openModal(createMappingDialog({
               ...payload,
-              mappings: nextMappings,
+              mappings: draftMappings.map((mapping) => {
+                return mapping.templateField === 'MerchantId'
+                  ? { ...mapping, mappedField: MERCHANT_ID_SELF_INPUT_OPTION }
+                  : mapping;
+              }),
               bigAccounts: nextBigAccounts
             }));
           },
@@ -1734,8 +1711,24 @@ function createMappingDialog(payload) {
 
     select.addEventListener('change', syncEditorState);
     syncEditorState();
+    rowByField.set(fieldName, row);
     tbody.appendChild(row);
   });
+
+  function syncMerchantIdDependentRows() {
+    const merchantRow = rowByField.get('MerchantId');
+    const currencyRow = rowByField.get('Currency');
+    const merchantSelect = merchantRow?.querySelector('.mapping-select');
+    const isManagedByBigAccount = merchantSelect?.value === MERCHANT_ID_SELF_INPUT_OPTION;
+
+    if (currencyRow) {
+      currencyRow.hidden = Boolean(isManagedByBigAccount);
+    }
+  }
+
+  const merchantSelect = rowByField.get('MerchantId')?.querySelector('.mapping-select');
+  merchantSelect?.addEventListener('change', syncMerchantIdDependentRows);
+  syncMerchantIdDependentRows();
 
   dialog.querySelector('.icon-close').addEventListener('click', () => {
     openModal(createTemplateManagerDialog());
@@ -1743,10 +1736,11 @@ function createMappingDialog(payload) {
 
   dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
     const mappings = collectMappingDraftFromTable(tbody);
+    const draftBigAccounts = cloneBigAccountItems(currentBigAccounts);
     const result = await window.desktopApi.templates.saveMappings({
       templateId: payload.template.id,
       mappings,
-      bigAccounts: currentBigAccounts
+      bigAccounts: draftBigAccounts
     });
 
     setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
@@ -1759,7 +1753,15 @@ function createMappingDialog(payload) {
       return;
     }
 
-    openModal(createAlertDialog(result.message));
+    openModal(createAlertDialog(result.message, {
+      onConfirm: () => {
+        openModal(createMappingDialog({
+          ...payload,
+          mappings,
+          bigAccounts: draftBigAccounts
+        }));
+      }
+    }));
   });
 
   overlay.appendChild(dialog);
@@ -2047,7 +2049,7 @@ function buildPreviewMappingPayload() {
       { templateField: 'Debit Amount', mappedField: '', customValue: '', isMultiBigAccount: false },
       { templateField: 'Balance', mappedField: BALANCE_CALCULATED_OPTION, customValue: '', isMultiBigAccount: false },
       { templateField: 'MerchantId', mappedField: MERCHANT_ID_SELF_INPUT_OPTION, customValue: '', isMultiBigAccount: true },
-      { templateField: 'Currency', mappedField: MERCHANT_ID_SELF_INPUT_OPTION, customValue: 'USD', isMultiBigAccount: false },
+      { templateField: 'Currency', mappedField: '', customValue: '', isMultiBigAccount: false },
       { templateField: 'Payee Name', mappedField: '', customValue: '', isMultiBigAccount: false },
       { templateField: 'Payee Cardno', mappedField: '', customValue: '', isMultiBigAccount: false },
       { templateField: 'Drawee Name', mappedField: '', customValue: '', isMultiBigAccount: false },

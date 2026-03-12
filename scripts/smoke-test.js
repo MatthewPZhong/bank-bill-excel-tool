@@ -325,6 +325,30 @@ function run() {
   assert.strictEqual(customCurrencyRows[1][5], 'USD_FIXED');
   assert.deepStrictEqual(customCurrencyRows.issues, []);
 
+  const selectedBigAccountRows = buildMappedRows({
+    inputFilePath: dataPath,
+    mappingByField: {
+      Balance: '原字段H',
+      BillDate: '原字段C',
+      ValueDate: '原字段D',
+      Channel: `${FIXED_FIELD_VALUE_PREFIX}CHB`,
+      MerchantId: '原字段E',
+      Currency: '原字段G',
+      'Credit Amount': '原字段A',
+      'Debit Amount': '原字段B'
+    },
+    orderedTargetFields: ['Balance', 'BillDate', 'ValueDate', 'Channel', 'MerchantId', 'Currency', 'Credit Amount', 'Debit Amount'],
+    currencyMappings,
+    selectedBigAccount: {
+      merchantId: 'BIG_ACCOUNT_001',
+      currency: 'JPY'
+    }
+  });
+  assert.strictEqual(selectedBigAccountRows[1][4], 'BIG_ACCOUNT_001');
+  assert.strictEqual(selectedBigAccountRows[1][5], 'JPY');
+  assert.strictEqual(selectedBigAccountRows[2][4], 'BIG_ACCOUNT_001');
+  assert.strictEqual(selectedBigAccountRows[2][5], 'JPY');
+
   const amountMappingRows = buildMappedRows({
     inputFilePath: amountMappingDataPath,
     mappingByField: {
