@@ -14,6 +14,7 @@ const {
   inferEndingBalance,
   loadCurrencyMappings,
   loadEnumValues,
+  normalizeDateExportValue,
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('../src/backend/file-service');
@@ -139,7 +140,7 @@ function run() {
   ]);
   makeWorkbook(signedAmountDataPath, [
     ['账单日期', '发生额', '银行账号'],
-    ['26-1-1 09:01:19', '+123.45', 'NET_001'],
+    ['11/02/26 09:01:19', '+123.45', 'NET_001'],
     ['2026/1/2 09:01:19', '-54.3', 'NET_001']
   ]);
   makeWorkbook(simultaneousAmountDataPath, [
@@ -243,6 +244,39 @@ function run() {
   assert(fs.existsSync(buildIconPath));
   const enumValues = loadEnumValues(bundledEnumPath);
   const currencyMappings = loadCurrencyMappings(currencyMappingPath);
+  assert.deepStrictEqual(normalizeDateExportValue('2026-01-01'), {
+    value: '2026-01-01',
+    date: new Date(2026, 0, 1),
+    displayFormat: 'yyyy-mm-dd'
+  });
+  assert.deepStrictEqual(normalizeDateExportValue('2026/01/01'), {
+    value: '2026/01/01',
+    date: new Date(2026, 0, 1),
+    displayFormat: 'yyyy/mm/dd'
+  });
+  assert.deepStrictEqual(normalizeDateExportValue('20260101'), {
+    value: '20260101',
+    date: new Date(2026, 0, 1),
+    displayFormat: 'yyyymmdd'
+  });
+  assert.strictEqual(normalizeDateExportValue('260101').value, '2026-01-01');
+  assert.deepStrictEqual(normalizeDateExportValue('31-1-26'), {
+    value: '2026-01-31',
+    date: new Date(2026, 0, 31),
+    displayFormat: 'yyyy-mm-dd'
+  });
+  assert.strictEqual(normalizeDateExportValue('31-01-2026').value, '2026-01-31');
+  assert.strictEqual(normalizeDateExportValue('1/2/26').value, '2026-02-01');
+  assert.deepStrictEqual(normalizeDateExportValue('11/02/26 02:08:07'), {
+    value: '2026-02-11',
+    date: new Date(2026, 1, 11),
+    displayFormat: 'yyyy-mm-dd'
+  });
+  assert.strictEqual(normalizeDateExportValue('01022026').value, '2026-02-01');
+  assert.strictEqual(normalizeDateExportValue('31122026').value, '2026-12-31');
+  assert.strictEqual(normalizeDateExportValue('31-02-2026').value, '');
+  assert.strictEqual(normalizeDateExportValue('32012026').value, '');
+  assert.strictEqual(normalizeDateExportValue('000000').value, '');
   assert.strictEqual(enumValues[0], 'BillDate');
   assert(enumValues.includes('Credit Amount'));
   assert(enumValues.includes('MerchantId'));
@@ -387,7 +421,7 @@ function run() {
       signedAmountSourceField: '发生额'
     }
   });
-  assert.strictEqual(signedAmountRows[1][0], '2026-01-01');
+  assert.strictEqual(signedAmountRows[1][0], '2026-02-11');
   assert.strictEqual(signedAmountRows[1][3], '123.45');
   assert.strictEqual(signedAmountRows[1][4], '');
   assert.strictEqual(signedAmountRows[2][0], '2026-01-02');

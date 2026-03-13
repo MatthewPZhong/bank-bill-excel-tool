@@ -561,53 +561,49 @@ function stripDateTimeSuffix(rawValue) {
   return withoutIsoTime.split(/\s+/)[0] || withoutIsoTime;
 }
 
+function buildNormalizedDateResult(date, displayFormat = 'yyyy-mm-dd', value = '') {
+  return {
+    value,
+    date,
+    displayFormat
+  };
+}
+
 function normalizeDateExportValue(value) {
   if (value === null || value === undefined || value === '') {
-    return {
-      value: '',
-      date: null,
-      displayFormat: 'yyyy-mm-dd'
-    };
+    return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
   }
 
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     const date = new Date(value.getFullYear(), value.getMonth(), value.getDate());
-    return {
-      value: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
+    return buildNormalizedDateResult(
       date,
-      displayFormat: 'yyyy-mm-dd'
-    };
+      'yyyy-mm-dd',
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    );
   }
 
   if (typeof value === 'number' && Number.isFinite(value)) {
     const parsed = XLSX.SSF.parse_date_code(value);
 
     if (!parsed) {
-      return {
-        value: '',
-        date: null,
-        displayFormat: 'yyyy-mm-dd'
-      };
+      return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
     }
 
     const date = buildDateObject(parsed.y, parsed.m, parsed.d);
-    return {
-      value: date
-        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-        : '',
+    return buildNormalizedDateResult(
       date,
-      displayFormat: 'yyyy-mm-dd'
-    };
+      'yyyy-mm-dd',
+      date
+        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+        : ''
+    );
   }
 
   const candidateValue = stripDateTimeSuffix(value);
 
   if (!candidateValue) {
-    return {
-      value: '',
-      date: null,
-      displayFormat: 'yyyy-mm-dd'
-    };
+    return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
   }
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(candidateValue)) {
@@ -616,11 +612,7 @@ function normalizeDateExportValue(value) {
       candidateValue.slice(5, 7),
       candidateValue.slice(8, 10)
     );
-    return {
-      value: date ? candidateValue : '',
-      date,
-      displayFormat: 'yyyy-mm-dd'
-    };
+    return buildNormalizedDateResult(date, 'yyyy-mm-dd', date ? candidateValue : '');
   }
 
   if (/^\d{4}\/\d{2}\/\d{2}$/.test(candidateValue)) {
@@ -629,24 +621,33 @@ function normalizeDateExportValue(value) {
       candidateValue.slice(5, 7),
       candidateValue.slice(8, 10)
     );
-    return {
-      value: date ? candidateValue : '',
-      date,
-      displayFormat: 'yyyy/mm/dd'
-    };
+    return buildNormalizedDateResult(date, 'yyyy/mm/dd', date ? candidateValue : '');
   }
 
   if (/^\d{8}$/.test(candidateValue)) {
-    const date = buildDateObject(
+    const yearFirstDate = buildDateObject(
       candidateValue.slice(0, 4),
       candidateValue.slice(4, 6),
       candidateValue.slice(6, 8)
     );
-    return {
-      value: date ? candidateValue : '',
-      date,
-      displayFormat: 'yyyymmdd'
-    };
+
+    if (yearFirstDate) {
+      return buildNormalizedDateResult(yearFirstDate, 'yyyymmdd', candidateValue);
+    }
+
+    const dayFirstDate = buildDateObject(
+      candidateValue.slice(4, 8),
+      candidateValue.slice(2, 4),
+      candidateValue.slice(0, 2)
+    );
+
+    return buildNormalizedDateResult(
+      dayFirstDate,
+      'yyyy-mm-dd',
+      dayFirstDate
+        ? `${dayFirstDate.getFullYear()}-${String(dayFirstDate.getMonth() + 1).padStart(2, '0')}-${String(dayFirstDate.getDate()).padStart(2, '0')}`
+        : ''
+    );
   }
 
   const normalizedValue = candidateValue
@@ -659,57 +660,66 @@ function normalizeDateExportValue(value) {
 
   if (matchedParts) {
     const date = buildDateObject(matchedParts[1], matchedParts[2], matchedParts[3]);
-    return {
-      value: date
-        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-        : '',
+    return buildNormalizedDateResult(
       date,
-      displayFormat: 'yyyy-mm-dd'
-    };
+      'yyyy-mm-dd',
+      date
+        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+        : ''
+    );
   }
 
-  matchedParts = normalizedValue.match(/^(\d{2})-(\d{1,2})-(\d{1,2})$/);
+  matchedParts = normalizedValue.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
 
   if (matchedParts) {
-    const fullYear = `20${matchedParts[1]}`;
-    const date = buildDateObject(fullYear, matchedParts[2], matchedParts[3]);
-    return {
-      value: date
-        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-        : '',
+    const date = buildDateObject(matchedParts[3], matchedParts[2], matchedParts[1]);
+    return buildNormalizedDateResult(
       date,
-      displayFormat: 'yyyy-mm-dd'
-    };
+      'yyyy-mm-dd',
+      date
+        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+        : ''
+    );
+  }
+
+  matchedParts = normalizedValue.match(/^(\d{1,2})-(\d{1,2})-(\d{2})$/);
+
+  if (matchedParts) {
+    const fullYear = `20${matchedParts[3]}`;
+    const date = buildDateObject(fullYear, matchedParts[2], matchedParts[1]);
+    return buildNormalizedDateResult(
+      date,
+      'yyyy-mm-dd',
+      date
+        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+        : ''
+    );
   }
 
   if (/^\d{6}$/.test(normalizedValue)) {
     const fullYear = `20${normalizedValue.slice(0, 2)}`;
     const date = buildDateObject(fullYear, normalizedValue.slice(2, 4), normalizedValue.slice(4, 6));
-    return {
-      value: date
-        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-        : '',
+    return buildNormalizedDateResult(
       date,
-      displayFormat: 'yyyy-mm-dd'
-    };
+      'yyyy-mm-dd',
+      date
+        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+        : ''
+    );
   }
 
   const fallback = new Date(candidateValue);
 
   if (!Number.isNaN(fallback.getTime())) {
     const date = new Date(fallback.getFullYear(), fallback.getMonth(), fallback.getDate());
-    return {
-      value: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
+    return buildNormalizedDateResult(
       date,
-      displayFormat: 'yyyy-mm-dd'
-    };
+      'yyyy-mm-dd',
+      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    );
   }
 
-  return {
-    value: '',
-    date: null,
-    displayFormat: 'yyyy-mm-dd'
-  };
+  return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
 }
 
 function parseDateValue(value) {
@@ -1257,6 +1267,7 @@ module.exports = {
   loadCurrencyMappings,
   loadEnumValues,
   normalizeCell,
+  normalizeDateExportValue,
   parseDateValue,
   parseNumericValue,
   readRows,
