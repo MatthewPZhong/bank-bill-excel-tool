@@ -142,23 +142,15 @@ function normalizeInputFilePaths(inputFilePathOrPaths, { dedupe = true } = {}) {
   return dedupe ? Array.from(new Set(normalizedPaths)) : normalizedPaths;
 }
 
-function getStatementSessionKey({ templateId, selectedBigAccount = null }) {
-  const merchantId = normalizeCell(selectedBigAccount?.merchantId);
-  const currency = normalizeCell(selectedBigAccount?.currency);
-  return `${templateId || ''}::${merchantId}::${currency}`;
+function getStatementSessionKey({ templateId }) {
+  return String(templateId || '');
 }
 
-function createStatementImportSession({ templateId, templateName, selectedBigAccount = null }) {
+function createStatementImportSession({ templateId, templateName }) {
   return {
-    key: getStatementSessionKey({ templateId, selectedBigAccount }),
+    key: getStatementSessionKey({ templateId }),
     templateId,
     templateName,
-    selectedBigAccount: selectedBigAccount
-      ? {
-          merchantId: normalizeCell(selectedBigAccount.merchantId),
-          currency: normalizeCell(selectedBigAccount.currency)
-        }
-      : null,
     importCount: 0,
     currentBatchId: '',
     fileEntries: [],
@@ -166,13 +158,13 @@ function createStatementImportSession({ templateId, templateName, selectedBigAcc
   };
 }
 
-function getOrCreateStatementImportSession({ templateId, templateName, selectedBigAccount = null }) {
-  const sessionKey = getStatementSessionKey({ templateId, selectedBigAccount });
+function getOrCreateStatementImportSession({ templateId, templateName }) {
+  const sessionKey = getStatementSessionKey({ templateId });
 
   if (!statementImportSessions.has(sessionKey)) {
     statementImportSessions.set(
       sessionKey,
-      createStatementImportSession({ templateId, templateName, selectedBigAccount })
+      createStatementImportSession({ templateId, templateName })
     );
   }
 
@@ -291,6 +283,30 @@ function mergeMappedDetailRows(mappedRowsList = []) {
   mergedRows.rowMetas = mergedRowMetas;
   mergedRows.issues = mergedIssues;
   return mergedRows;
+}
+
+function resolveSinglePreparedFieldValue(detailRows, fieldName) {
+  if (!Array.isArray(detailRows) || detailRows.length <= 1) {
+    return '';
+  }
+
+  const fieldIndexMap = buildFieldIndexMap(detailRows[0] || []);
+  const fieldIndex = fieldIndexMap.get(normalizeCell(fieldName));
+
+  if (fieldIndex === undefined) {
+    return '';
+  }
+
+  const uniqueValues = Array.from(
+    new Set(
+      detailRows
+        .slice(1)
+        .map((row) => normalizeCell(Array.isArray(row) ? row[fieldIndex] : ''))
+        .filter((value) => value !== '')
+    )
+  );
+
+  return uniqueValues.length === 1 ? uniqueValues[0] : '';
 }
 
 function getAppRootDirectory() {
@@ -1328,18 +1344,6 @@ function ensureNumericValue(rawValue, { fieldName, dateLabel, allowBlank = false
   return parsedValue;
 }
 
-function pickSingleTextValue(values, fieldName) {
-  const uniqueValues = Array.from(
-    new Set(values.map((value) => normalizeCell(value)).filter((value) => value !== ''))
-  );
-
-  if (uniqueValues.length > 1) {
-    throw new FileValidationError('FILE_READ', `${fieldName} 存在多个不同取值，无法生成余额账单`);
-  }
-
-  return uniqueValues[0] || '';
-}
-
 function buildBalanceTemplateRow(balanceTemplateFields, valuesByField) {
   const normalizedValues = new Map(
     Object.entries(valuesByField).map(([fieldName, value]) => [normalizeCell(fieldName), value])
@@ -1451,7 +1455,6 @@ function deriveBalanceRecords({
 
   const groupedRows = new Map();
   const bankNameParts = splitTemplateName(templateName);
-  const bankAccounts = [];
   const missingMerchantIdRows = [];
 
   detailRows.slice(1).forEach((row, rowIndex) => {
@@ -1497,17 +1500,23 @@ function deriveBalanceRecords({
       return;
     }
 
-    bankAccounts.push(bankAccount);
+    const groupKey = `${bankAccount}@@${currency}`;
 
-    if (!groupedRows.has(currency)) {
-      groupedRows.set(currency, new Map());
+    if (!groupedRows.has(groupKey)) {
+      groupedRows.set(groupKey, {
+        merchantId: bankAccount,
+        currency,
+        dateMap: new Map()
+      });
     }
 
-    if (!groupedRows.get(currency).has(dateLabel)) {
-      groupedRows.get(currency).set(dateLabel, []);
+    const targetGroup = groupedRows.get(groupKey);
+
+    if (!targetGroup.dateMap.has(dateLabel)) {
+      targetGroup.dateMap.set(dateLabel, []);
     }
 
-    groupedRows.get(currency).get(dateLabel).push({
+    targetGroup.dateMap.get(dateLabel).push({
       balanceValue,
       creditAmount,
       debitAmount
@@ -1527,29 +1536,35 @@ function deriveBalanceRecords({
     );
   }
 
-  const groupedCurrencies = Array.from(groupedRows.keys()).sort();
+  const groupedEntries = Array.from(groupedRows.values()).sort((left, right) => {
+    const merchantCompare = left.merchantId.localeCompare(right.merchantId, 'zh-Hans-CN');
 
-  if (!groupedCurrencies.length) {
+    if (merchantCompare !== 0) {
+      return merchantCompare;
+    }
+
+    return left.currency.localeCompare(right.currency, 'zh-Hans-CN');
+  });
+
+  if (!groupedEntries.length) {
     throw new FileValidationError('FILE_READ', '导入文件中未找到可用于余额账单的账单日期');
   }
 
-  const bankAccount = pickSingleTextValue(bankAccounts, '银行账号');
   const records = [];
   const seedRecords = [];
   const allBillDates = new Set();
 
-  groupedCurrencies.forEach((currency) => {
-    const currencyDateMap = groupedRows.get(currency);
-    const dateKeys = Array.from(currencyDateMap.keys()).sort();
+  groupedEntries.forEach((group) => {
+    const dateKeys = Array.from(group.dateMap.keys()).sort();
     let previousEndBalance = null;
 
     dateKeys.forEach((dateLabel) => {
-      const entries = currencyDateMap.get(dateLabel);
+      const entries = group.dateMap.get(dateLabel);
       const promptContext = buildBalanceSeedPrompt({
         templateName,
         bankName: bankNameParts.bankName,
-        merchantId: bankAccount,
-        currency,
+        merchantId: group.merchantId,
+        currency: group.currency,
         targetBillDate: dateLabel
       });
       let endBalance = null;
@@ -1589,8 +1604,8 @@ function deriveBalanceRecords({
       records.push(buildBalanceTemplateRow(balanceTemplateFields, {
         银行名称: bankNameParts.bankName,
         所在地: bankNameParts.location,
-        币种: currency,
-        银行账号: bankAccount,
+        币种: group.currency,
+        银行账号: group.merchantId,
         账单日期: dateLabel,
         期初余额: '',
         期初可用余额: '',
@@ -1598,8 +1613,8 @@ function deriveBalanceRecords({
         期末可用余额: ''
       }));
       seedRecords.push({
-        merchantId: bankAccount,
-        currency,
+        merchantId: group.merchantId,
+        currency: group.currency,
         billDate: dateLabel,
         endBalance,
         generationMethod: mode === 'calculated'
@@ -2659,7 +2674,8 @@ function buildStatementGenerationConfig({
   template,
   mappings,
   orderedTargetFields,
-  selectedBigAccount = null
+  selectedBigAccount = null,
+  allowManagedMerchantWithoutSelection = false
 }) {
   const selectedMappings = mappings.filter((mapping) => {
     if (mapping.templateField === 'Balance') {
@@ -2691,7 +2707,7 @@ function buildStatementGenerationConfig({
     throw new FileValidationError('FILE_READ', '当前模板必须映射 BillDate 字段');
   }
 
-  if (isMultiBigAccountTemplate && !selectedMerchantId) {
+  if (isMultiBigAccountTemplate && !selectedMerchantId && !allowManagedMerchantWithoutSelection) {
     throw new FileValidationError('FILE_READ', '当前模板存在多个大账号，请先选择本次使用的大账号');
   }
 
@@ -2763,14 +2779,16 @@ function buildMappedRowsForFile({
 
 function buildPreparedStatementBatchFromEntries({ config, fileEntries = [] }) {
   const detailRows = mergeMappedDetailRows(fileEntries.map((entry) => entry.detailRows));
+  const selectedMerchantId = config.selectedMerchantId || resolveSinglePreparedFieldValue(detailRows, 'MerchantId');
+  const selectedCurrency = config.selectedCurrency || resolveSinglePreparedFieldValue(detailRows, 'Currency');
 
   return {
     detailRows,
     warnings: Array.isArray(detailRows.issues) ? detailRows.issues.slice() : [],
     balanceRequested: Boolean(config.balanceRequested),
     balanceMode: config.balanceMode,
-    selectedMerchantId: config.selectedMerchantId,
-    selectedCurrency: config.selectedCurrency,
+    selectedMerchantId,
+    selectedCurrency,
     inputFilePaths: fileEntries.map((entry) => entry.filePath)
   };
 }
@@ -2839,6 +2857,7 @@ function generateStatementFiles({
     : parseRequiredBillDates(detailRows);
   const dateRangeLabel = buildDateRangeLabel(billDates);
   const internalSuffix = scope === 'all' ? 'all' : '';
+  const outputMerchantId = scope === 'all' ? '' : preparedBatch.selectedMerchantId;
 
   const result = {
     detail: null,
@@ -2852,7 +2871,7 @@ function generateStatementFiles({
     const detailOutput = buildStatementOutputFilePath({
       kind: 'detail',
       templateName: config.template.name,
-      merchantId: preparedBatch.selectedMerchantId,
+      merchantId: outputMerchantId,
       outputTag: 'COMMON',
       dateRangeLabel,
       internalSuffix
@@ -2911,7 +2930,7 @@ function generateStatementFiles({
       const balanceOutput = buildStatementOutputFilePath({
         kind: 'balance',
         templateName: config.template.name,
-        merchantId: preparedBatch.selectedMerchantId,
+        merchantId: outputMerchantId,
         outputTag: 'BALANCE',
         dateRangeLabel: buildDateRangeLabel(balanceResult.billDates),
         internalSuffix
@@ -3276,7 +3295,8 @@ function generateFilesFromRememberedContext(context) {
     template: context.template,
     mappings: context.mappings,
     orderedTargetFields: context.orderedTargetFields,
-    selectedBigAccount: context.selectedBigAccount
+    selectedBigAccount: context.selectedBigAccount,
+    allowManagedMerchantWithoutSelection: Boolean(context.preparedDetailRows)
   });
   const preparedBatch = context.preparedDetailRows
     ? buildPreparedStatementBatchFromEntries({
@@ -3341,7 +3361,7 @@ function buildStatementSessionGenerationContext({
     template,
     mappings,
     orderedTargetFields,
-    selectedBigAccount: session.selectedBigAccount
+    allowManagedMerchantWithoutSelection: true
   });
   const preparedBatch = buildPreparedBatchFromStatementSession({
     session,
@@ -3414,7 +3434,6 @@ async function exportStatementByScope(kind, scope = 'auto') {
         template: templateConfig.template,
         mappings: templateConfig.exportMappings,
         orderedTargetFields: templateConfig.exportTargetFields,
-        selectedBigAccount: session.selectedBigAccount,
         preparedDetailRows: preparedBatch.detailRows,
         scope: 'all',
         statementSessionKey: session.key,
@@ -3529,8 +3548,7 @@ function registerFileHandlers() {
 
       const session = getOrCreateStatementImportSession({
         templateId,
-        templateName: templateConfig.template.name,
-        selectedBigAccount
+        templateName: templateConfig.template.name
       });
       const selectionResult = await resolveImportFileSelection({
         templateName: templateConfig.template.name,
@@ -3652,8 +3670,7 @@ function registerFileHandlers() {
       };
       const session = getOrCreateStatementImportSession({
         templateId: pendingContext.templateId,
-        templateName: pendingContext.template.name,
-        selectedBigAccount
+        templateName: pendingContext.template.name
       });
       const selectionResult = await resolveImportFileSelection({
         templateName: pendingContext.template.name,
