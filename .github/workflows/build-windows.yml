@@ -20,7 +20,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
 
       - name: Install dependencies
         run: npm ci
@@ -35,6 +34,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: windows-installer
+          retention-days: 1
           path: |
             dist/*-setup.exe
             dist/latest*.yml
@@ -44,6 +44,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: windows-portable-exe
+          retention-days: 1
           path: |
             dist/*-portable.exe
           if-no-files-found: error
