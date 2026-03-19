@@ -1,7 +1,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
-const { ensureTemplateKeySupport, hasColumn } = require('./database/migrations');
+const {
+  ensureTemplateKeySupport,
+  ensureTemplateMappingEnhancements,
+  hasColumn
+} = require('./database/migrations');
 const settingsRepository = require('./database/settings-repository');
 const templateRepository = require('./database/template-repository');
 
@@ -31,6 +35,7 @@ class AppDatabase {
         template_id INTEGER NOT NULL,
         template_field TEXT NOT NULL,
         mapped_field TEXT NOT NULL,
+        mapped_fields_json TEXT NOT NULL DEFAULT '[]',
         row_index INTEGER NOT NULL,
         created_at TEXT NOT NULL,
         FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE,
@@ -47,6 +52,18 @@ class AppDatabase {
         updated_at TEXT NOT NULL,
         FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE,
         UNIQUE(template_id, merchant_id, currency)
+      );
+
+      CREATE TABLE IF NOT EXISTS template_fixed_assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL,
+        merchant_id TEXT NOT NULL,
+        currency TEXT NOT NULL,
+        row_index INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE,
+        UNIQUE(template_id, row_index)
       );
 
       CREATE TABLE IF NOT EXISTS app_settings (
@@ -66,6 +83,7 @@ class AppDatabase {
     `);
 
     this.ensureTemplateKeySupport();
+    this.ensureTemplateMappingEnhancements();
   }
 
   hasColumn(tableName, columnName) {
@@ -74,6 +92,10 @@ class AppDatabase {
 
   ensureTemplateKeySupport() {
     return ensureTemplateKeySupport(this.db);
+  }
+
+  ensureTemplateMappingEnhancements() {
+    return ensureTemplateMappingEnhancements(this.db);
   }
 
   listTemplates() {
@@ -112,8 +134,8 @@ class AppDatabase {
     return templateRepository.getTemplateMappings(this.db, templateId);
   }
 
-  saveMappings(templateId, mappings, bigAccounts = []) {
-    return templateRepository.saveMappings(this.db, templateId, mappings, bigAccounts);
+  saveMappings(templateId, mappings, bigAccounts = [], fixedAssignments = []) {
+    return templateRepository.saveMappings(this.db, templateId, mappings, bigAccounts, fixedAssignments);
   }
 
   listTemplateBundleEntries() {

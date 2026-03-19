@@ -388,10 +388,33 @@ function rememberPendingBigAccountSelection(context = null) {
         mappings: Array.isArray(context.mappings) ? context.mappings.map((mapping) => ({ ...mapping })) : [],
         orderedTargetFields: Array.isArray(context.orderedTargetFields) ? context.orderedTargetFields.slice() : [],
         inputFilePaths: normalizeInputFilePaths(context.inputFilePaths || context.inputFilePath),
-        options: Array.isArray(context.options)
-          ? context.options.map((option) => ({
-              merchantId: normalizeCell(option.merchantId),
-              currency: normalizeCell(option.currency)
+        bigAccounts: Array.isArray(context.bigAccounts)
+          ? context.bigAccounts.map((item) => ({
+              merchantId: normalizeCell(item.merchantId),
+              currencies: Array.isArray(item.currencies)
+                ? item.currencies.map((value) => normalizeCell(value)).filter((value) => value !== '')
+                : [],
+              isMultiCurrency: Boolean(item.isMultiCurrency)
+            }))
+          : [],
+        fixedAssignments: Array.isArray(context.fixedAssignments)
+          ? context.fixedAssignments.map((item) => ({
+              merchantId: normalizeCell(item.merchantId),
+              currency: normalizeCell(item.currency),
+              rowIndex: Number(item.rowIndex || 0)
+            }))
+          : [],
+        fileEntries: Array.isArray(context.fileEntries)
+          ? context.fileEntries.map((entry) => ({
+              filePath: entry.filePath,
+              detailRows: cloneRowsWithMetadata(entry.detailRows)
+            }))
+          : [],
+        rows: Array.isArray(context.rows)
+          ? context.rows.map((row) => ({
+              index: Number(row.index || 0),
+              sourceRowNumber: Number(row.sourceRowNumber || 0),
+              fileName: normalizeCell(row.fileName)
             }))
           : []
       }
@@ -430,17 +453,105 @@ function buildManualBalanceRequiredResult(prompt, generatedFiles) {
   };
 }
 
-function buildBigAccountSelectionRequiredResult(options = []) {
+function buildBigAccountSelectionRequiredResult({ rows = [], bigAccounts = [], fixedAssignments = [] } = {}) {
   clearLastErrorReport();
   return {
     status: 'select-big-account',
     message: '请选择本次使用的大账号 / 币种',
-    options: options.map((option) => ({
-      merchantId: normalizeCell(option.merchantId),
-      currency: normalizeCell(option.currency),
-      label: `${normalizeCell(option.merchantId)} / ${normalizeCell(option.currency)}`
+    selectionMode: 'multi-row',
+    rows: rows.map((row, index) => ({
+      index: Number.isInteger(row.index) ? row.index : index,
+      label: `${index + 1}.`,
+      sourceRowNumber: Number(row.sourceRowNumber || 0),
+      fileName: normalizeCell(row.fileName)
+    })),
+    bigAccounts: bigAccounts.map((item) => ({
+      merchantId: normalizeCell(item.merchantId),
+      currencies: Array.isArray(item.currencies)
+        ? item.currencies.map((value) => normalizeCell(value)).filter((value) => value !== '')
+        : [],
+      isMultiCurrency: Boolean(item.isMultiCurrency)
+    })),
+    fixedAssignments: fixedAssignments.map((item) => ({
+      merchantId: normalizeCell(item.merchantId),
+      currency: normalizeCell(item.currency),
+      rowIndex: Number(item.rowIndex || 0)
     }))
   };
+}
+
+function buildPendingBigAccountFileEntries({ template, mappings, orderedTargetFields, inputFilePaths = [] }) {
+  const config = buildStatementGenerationConfig({
+    template,
+    mappings,
+    orderedTargetFields,
+    allowManagedMerchantWithoutSelection: true
+  });
+
+  return normalizeInputFilePaths(inputFilePaths, { dedupe: false }).map((inputFilePath) => ({
+    filePath: inputFilePath,
+    detailRows: buildMappedRowsForFile({
+      config,
+      inputFilePath
+    })
+  }));
+}
+
+function buildBigAccountSelectionRows(fileEntries = []) {
+  const rows = [];
+  let rowIndex = 0;
+
+  fileEntries.forEach((entry) => {
+    const rowMetas = Array.isArray(entry.detailRows?.rowMetas) ? entry.detailRows.rowMetas : [];
+    entry.detailRows.slice(1).forEach((_row, index) => {
+      rows.push({
+        index: rowIndex,
+        sourceRowNumber: rowMetas[index]?.sourceRowNumber || index + 2,
+        fileName: path.basename(entry.filePath)
+      });
+      rowIndex += 1;
+    });
+  });
+
+  return rows;
+}
+
+function applyBigAccountAssignmentsToFileEntries(fileEntries = [], assignments = []) {
+  const normalizedAssignments = assignments.map((item, index) => ({
+    merchantId: normalizeCell(item.merchantId),
+    currency: normalizeCell(item.currency),
+    rowIndex: Number.isInteger(item.rowIndex) ? item.rowIndex : index
+  }));
+  const assignmentByRowIndex = new Map(normalizedAssignments.map((item) => [item.rowIndex, item]));
+  let globalRowIndex = 0;
+
+  return fileEntries.map((entry) => {
+    const nextRows = cloneRowsWithMetadata(entry.detailRows);
+    const fieldIndexMap = buildFieldIndexMap(nextRows[0] || []);
+    const merchantIdIndex = fieldIndexMap.get('MerchantId');
+    const currencyIndex = fieldIndexMap.get('Currency');
+
+    nextRows.slice(1).forEach((row) => {
+      const assignment = assignmentByRowIndex.get(globalRowIndex);
+
+      if (assignment) {
+        if (merchantIdIndex !== undefined) {
+          row[merchantIdIndex] = assignment.merchantId;
+        }
+
+        if (currencyIndex !== undefined) {
+          row[currencyIndex] = assignment.currency;
+        }
+      }
+
+      globalRowIndex += 1;
+    });
+
+    return {
+      filePath: entry.filePath,
+      detailRows: nextRows
+    };
+  });
 }
 
 function createErrorReport(payload) {
@@ -590,11 +701,23 @@ function getAvailableCurrencyCodes() {
 
   try {
     return Array.from(
-      new Set(
-        loadCurrencyMappings(currencyMappingTablePath)
-          .map((mapping) => normalizeCell(mapping.englishCode))
-          .filter((code) => code !== '')
-      )
+      loadCurrencyMappings(currencyMappingTablePath)
+        .reduce((accumulator, mapping) => {
+          const code = normalizeCell(mapping.englishCode);
+
+          if (!code || accumulator.has(code)) {
+            return accumulator;
+          }
+
+          const name = normalizeCell(mapping.displayName || mapping.simpleChinese || mapping.traditionalChinese);
+          accumulator.set(code, {
+            code,
+            name,
+            label: name ? `${code} ${name}` : code
+          });
+          return accumulator;
+        }, new Map())
+        .values()
     );
   } catch (error) {
     console.error(error);
@@ -674,7 +797,8 @@ function readTemplateBundleFile(filePath) {
     sourceFileName: normalizeCell(item.sourceFileName) || `${normalizeCell(item.name) || 'template'}.xlsx`,
     headers: Array.isArray(item.headers) ? item.headers.map((value) => normalizeCell(value)).filter((value) => value !== '') : [],
     mappings: Array.isArray(item.mappings) ? item.mappings : [],
-    bigAccounts: Array.isArray(item.bigAccounts) ? item.bigAccounts : []
+    bigAccounts: Array.isArray(item.bigAccounts) ? item.bigAccounts : [],
+    fixedAssignments: Array.isArray(item.fixedAssignments) ? item.fixedAssignments : []
   }));
 }
 
@@ -956,6 +1080,32 @@ function buildImportWarningMessage({ warnings, balanceReady, balanceRequested })
     : exportParts.join('，');
 }
 
+function normalizeMappedFields(rawFields = [], fallbackValue = '') {
+  const normalizedFields = Array.from(
+    new Set(
+      (Array.isArray(rawFields) ? rawFields : [])
+        .map((value) => normalizeCell(value))
+        .filter((value) => value !== '')
+    )
+  );
+
+  if (normalizedFields.length) {
+    return normalizedFields;
+  }
+
+  const fallback = normalizeCell(fallbackValue);
+  return fallback ? [fallback] : [];
+}
+
+function getPrimaryMappedField(mapping) {
+  const mappedFields = normalizeMappedFields(mapping?.mappedFields, mapping?.mappedField);
+  return mappedFields[0] || '';
+}
+
+function getMappingFieldValues(mapping) {
+  return normalizeMappedFields(mapping?.mappedFields, mapping?.mappedField);
+}
+
 function decodeCustomInputMappingValue(rawValue) {
   const normalizedValue = normalizeCell(rawValue);
 
@@ -1040,10 +1190,17 @@ function resolveCurrentMappings({ template, mappings, enumValues }) {
     ? mappings
         .map((mapping) => ({
           templateField: mapping.mappedField,
-          mappedField: mapping.templateField
+          mappedField: mapping.templateField,
+          mappedFields: normalizeMappedFields([], mapping.templateField)
         }))
         .filter((mapping) => targetFieldSet.has(mapping.templateField))
-    : mappings.filter((mapping) => targetFieldSet.has(mapping.templateField));
+    : mappings
+        .filter((mapping) => targetFieldSet.has(mapping.templateField))
+        .map((mapping) => ({
+          ...mapping,
+          mappedField: normalizeCell(mapping.mappedField),
+          mappedFields: getMappingFieldValues(mapping)
+        }));
 
   return currentMappings;
 }
@@ -1055,13 +1212,15 @@ function normalizeMappingRows({ template, mappings, enumValues, bigAccounts = []
     mappings,
     enumValues
   });
-  const savedMap = new Map(currentMappings.map((mapping) => [mapping.templateField, normalizeCell(mapping.mappedField)]));
-  const merchantIdSavedValue = savedMap.get('MerchantId') || '';
+  const savedMap = new Map(currentMappings.map((mapping) => [mapping.templateField, mapping]));
+  const merchantIdSavedValue = getPrimaryMappedField(savedMap.get('MerchantId')) || '';
   const merchantIdCustomInput = decodeCustomInputMappingValue(merchantIdSavedValue);
   const merchantIdManagedByBigAccounts = merchantIdCustomInput.isCustomInput;
 
   return targetFields.map((fieldName) => {
-    const savedValue = savedMap.get(fieldName) || '';
+    const savedMapping = savedMap.get(fieldName) || null;
+    const savedValue = getPrimaryMappedField(savedMapping);
+    const savedFields = getMappingFieldValues(savedMapping);
     const customInputMapping = CUSTOM_INPUT_TARGET_FIELDS.has(fieldName)
       ? decodeCustomInputMappingValue(savedValue)
       : null;
@@ -1082,6 +1241,15 @@ function normalizeMappingRows({ template, mappings, enumValues, bigAccounts = []
                 : savedValue === BALANCE_DISABLED_OPTION
                   ? ''
                   : savedValue || '',
+      mappedFields:
+        fieldName === 'Balance' ||
+        fieldName === 'MerchantId' ||
+        fieldName === 'Currency' && merchantIdManagedByBigAccounts ||
+        (customInputMapping && customInputMapping.isCustomInput)
+          ? []
+          : savedFields.length > 1
+            ? savedFields
+            : [],
       customValue: fieldName === 'MerchantId'
         ? ''
         : customInputMapping
@@ -1103,10 +1271,12 @@ function normalizeExportMappingRows({ template, mappings, enumValues }) {
     mappings,
     enumValues
   });
-  const savedMap = new Map(currentMappings.map((mapping) => [mapping.templateField, normalizeCell(mapping.mappedField)]));
+  const savedMap = new Map(currentMappings.map((mapping) => [mapping.templateField, mapping]));
 
   return targetFields.map((fieldName) => {
-    const savedValue = savedMap.get(fieldName) || '';
+    const savedMapping = savedMap.get(fieldName) || null;
+    const savedValue = getPrimaryMappedField(savedMapping);
+    const savedFields = getMappingFieldValues(savedMapping);
 
     return {
       templateField: fieldName,
@@ -1114,7 +1284,11 @@ function normalizeExportMappingRows({ template, mappings, enumValues }) {
         ? savedValue || BALANCE_DISABLED_OPTION
         : savedValue === BALANCE_DISABLED_OPTION
           ? ''
-          : savedValue || ''
+          : savedValue || '',
+      mappedFields:
+        fieldName === 'Balance' || savedFields.length <= 1
+          ? []
+          : savedFields
     };
   });
 }
@@ -1157,7 +1331,14 @@ function getTemplateMappingConfig(templateId) {
     exportTargetFields: buildExportTargetFields(enumValues),
     mappings,
     exportMappings,
-    bigAccounts: compatibleBigAccounts
+    bigAccounts: compatibleBigAccounts,
+    fixedAssignments: Array.isArray(templatePayload.fixedAssignments)
+      ? templatePayload.fixedAssignments.map((item) => ({
+          merchantId: normalizeCell(item.merchantId),
+          currency: normalizeCell(item.currency),
+          rowIndex: Number(item.rowIndex || 0)
+        }))
+      : []
   };
 }
 
@@ -1609,60 +1790,99 @@ function buildNewAccountBillDates(openDate, today = new Date()) {
   return Array.from(dateMap.values()).sort((left, right) => left.getTime() - right.getTime());
 }
 
-function buildNewAccountBalanceRecords({
-  bankName,
-  location,
-  currency,
-  currencies = [],
-  bankAccount,
-  openingDate,
-  balanceTemplateFields
-}) {
-  const billDates = buildNewAccountBillDates(openingDate);
-  const currencyValues = Array.from(
+function normalizeNewAccountCurrencyValues({ currency, currencies = [], isMultiCurrency = false }) {
+  return Array.from(
     new Set(
-      (Array.isArray(currencies) && currencies.length ? currencies : [currency])
+      ((isMultiCurrency && Array.isArray(currencies) && currencies.length) ? currencies : [currency])
         .map((value) => normalizeCell(value))
         .filter((value) => value !== '')
     )
   );
+}
 
-  if (!currencyValues.length) {
-    throw new FileValidationError('FILE_READ', '至少需要提供一个币种');
-  }
+function normalizeNewAccountAccounts(payload = {}) {
+  const rawAccounts = Array.isArray(payload.accounts) && payload.accounts.length
+    ? payload.accounts
+    : [{
+        bankName: payload.bankName,
+        location: payload.location,
+        currency: payload.currency,
+        currencies: payload.currencies,
+        bankAccount: payload.bankAccount,
+        openingDate: payload.openingDate,
+        isMultiCurrency: payload.isMultiCurrency
+      }];
 
+  return rawAccounts.map((item) => ({
+    bankName: normalizeCell(item.bankName),
+    location: normalizeCell(item.location),
+    currency: normalizeCell(item.currency),
+    currencies: Array.isArray(item.currencies) ? item.currencies.map((value) => normalizeCell(value)) : [],
+    bankAccount: normalizeCell(item.bankAccount),
+    openingDateRaw: normalizeCell(item.openingDate),
+    openingDate: parseDateValue(item.openingDate),
+    isMultiCurrency: Boolean(item.isMultiCurrency)
+  }));
+}
+
+function buildNewAccountBalanceRecords({
+  accounts = [],
+  balanceTemplateFields
+}) {
   const records = [];
+  const allBillDates = new Set();
+  const allCurrencies = new Set();
 
-  billDates.forEach((billDate) => {
-    const billDateLabel = formatDateLabel(billDate);
+  accounts.forEach((account) => {
+    const billDates = buildNewAccountBillDates(account.openingDate);
+    const currencyValues = normalizeNewAccountCurrencyValues(account);
 
-    currencyValues.forEach((currencyValue) => {
-      records.push(buildBalanceTemplateRow(balanceTemplateFields, {
-        银行名称: bankName,
-        所在地: location,
-        币种: currencyValue,
-        银行账号: bankAccount,
-        账单日期: billDateLabel,
-        期初余额: '',
-        期初可用余额: '',
-        期末余额: 0,
-        期末可用余额: ''
-      }));
+    if (!currencyValues.length) {
+      throw new FileValidationError('FILE_READ', '至少需要提供一个币种');
+    }
+
+    billDates.forEach((billDate) => {
+      const billDateLabel = formatDateLabel(billDate);
+      allBillDates.add(billDateLabel);
+
+      currencyValues.forEach((currencyValue) => {
+        allCurrencies.add(currencyValue);
+        records.push(buildBalanceTemplateRow(balanceTemplateFields, {
+          银行名称: account.bankName,
+          所在地: account.location,
+          币种: currencyValue,
+          银行账号: account.bankAccount,
+          账单日期: billDateLabel,
+          期初余额: '',
+          期初可用余额: '',
+          期末余额: 0,
+          期末可用余额: ''
+        }));
+      });
     });
   });
 
   return {
     records,
-    billDates: billDates.map((billDate) => formatDateLabel(billDate)),
-    currencies: currencyValues
+    billDates: Array.from(allBillDates).sort(),
+    currencies: Array.from(allCurrencies)
   };
 }
 
-function fileDialogFilters() {
+function templateFileDialogFilters() {
   return [
     {
       name: 'Excel / CSV',
       extensions: ['xlsx', 'xls', 'csv']
+    }
+  ];
+}
+
+function statementFileDialogFilters() {
+  return [
+    {
+      name: 'Excel / CSV / PDF',
+      extensions: ['xlsx', 'xls', 'csv', 'pdf']
     }
   ];
 }
@@ -2044,7 +2264,7 @@ function registerAccountMappingHandlers() {
   });
 }
 
-function validateTemplateConfiguration({ template, mappings, enumValues, bigAccounts = [] }) {
+function validateTemplateConfiguration({ template, mappings, enumValues, bigAccounts = [], fixedAssignments = [] }) {
   const targetFields = buildManagedMappingFields(enumValues);
   const targetFieldSet = new Set(targetFields);
   const sourceFieldSet = new Set(template.headers.map((header) => normalizeCell(header)));
@@ -2052,7 +2272,7 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
 
   mappings.forEach((mapping) => {
     const targetField = normalizeCell(mapping.templateField);
-    const sourceField = normalizeCell(mapping.mappedField);
+    const sourceField = getPrimaryMappedField(mapping);
 
     if (!targetFieldSet.has(targetField)) {
       return;
@@ -2060,6 +2280,7 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
 
     mappingByTarget.set(targetField, {
       mappedField: sourceField,
+      mappedFields: getMappingFieldValues(mapping),
       customValue: normalizeCell(mapping.customValue)
     });
   });
@@ -2067,6 +2288,7 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
   const cleanedMappings = [];
   const merchantIdMapping = mappingByTarget.get('MerchantId') || {
     mappedField: '',
+    mappedFields: [],
     customValue: '',
     isMultiBigAccount: false
   };
@@ -2098,14 +2320,25 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
         isMultiCurrency: Boolean(item.isMultiCurrency)
       }))
     : [];
+  const cleanedFixedAssignments = merchantIdManagedByBigAccounts
+    ? fixedAssignments
+        .map((item, index) => ({
+          merchantId: normalizeCell(item.merchantId),
+          currency: normalizeCell(item.currency),
+          rowIndex: Number.isInteger(item.rowIndex) ? item.rowIndex : index
+        }))
+        .filter((item) => item.merchantId !== '')
+    : [];
 
   targetFields.forEach((targetField) => {
     const selectedMapping = mappingByTarget.get(targetField) || {
       mappedField: '',
+      mappedFields: [],
       customValue: '',
       isMultiBigAccount: false
     };
     const selectedSourceField = selectedMapping.mappedField;
+    const selectedSourceFields = selectedMapping.mappedFields;
     const normalizedSourceField = targetField === 'Balance'
       ? selectedSourceField || BALANCE_DISABLED_OPTION
       : selectedSourceField === BALANCE_DISABLED_OPTION
@@ -2115,7 +2348,8 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     if (targetField === 'Balance' && normalizedSourceField === BALANCE_DISABLED_OPTION) {
       cleanedMappings.push({
         templateField: targetField,
-        mappedField: BALANCE_DISABLED_OPTION
+        mappedField: BALANCE_DISABLED_OPTION,
+        mappedFields: []
       });
       return;
     }
@@ -2123,7 +2357,8 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     if (targetField === 'Balance' && normalizedSourceField === BALANCE_CALCULATED_OPTION) {
       cleanedMappings.push({
         templateField: targetField,
-        mappedField: BALANCE_CALCULATED_OPTION
+        mappedField: BALANCE_CALCULATED_OPTION,
+        mappedFields: []
       });
       return;
     }
@@ -2131,15 +2366,17 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     if (merchantIdManagedByBigAccounts && targetField === 'Currency') {
       cleanedMappings.push({
         templateField: targetField,
-        mappedField: ''
+        mappedField: '',
+        mappedFields: []
       });
       return;
     }
 
-    if (!normalizedSourceField) {
+    if (!normalizedSourceField && !selectedSourceFields.length) {
       cleanedMappings.push({
         templateField: targetField,
-        mappedField: ''
+        mappedField: '',
+        mappedFields: []
       });
       return;
     }
@@ -2147,7 +2384,8 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     if (targetField === 'MerchantId' && normalizedSourceField === MERCHANT_ID_SELF_INPUT_OPTION) {
       cleanedMappings.push({
         templateField: targetField,
-        mappedField: `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`
+        mappedField: `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`,
+        mappedFields: []
       });
       return;
     }
@@ -2155,7 +2393,8 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     if (targetField === 'Currency' && normalizedSourceField === MERCHANT_ID_SELF_INPUT_OPTION) {
       cleanedMappings.push({
         templateField: targetField,
-        mappedField: ''
+        mappedField: '',
+        mappedFields: []
       });
       return;
     }
@@ -2163,7 +2402,8 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     if (targetField === 'MerchantId' && normalizedSourceField.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
       cleanedMappings.push({
         templateField: targetField,
-        mappedField: normalizedSourceField
+        mappedField: normalizedSourceField,
+        mappedFields: []
       });
       return;
     }
@@ -2171,7 +2411,23 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     if (targetField === 'Currency' && normalizedSourceField.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
       cleanedMappings.push({
         templateField: targetField,
-        mappedField: merchantIdManagedByBigAccounts ? '' : normalizedSourceField
+        mappedField: merchantIdManagedByBigAccounts ? '' : normalizedSourceField,
+        mappedFields: []
+      });
+      return;
+    }
+
+    if (selectedSourceFields.length > 1) {
+      selectedSourceFields.forEach((fieldName) => {
+        if (!sourceFieldSet.has(fieldName)) {
+          throw new FileValidationError('FILE_READ', `映射字段不存在：${fieldName}`);
+        }
+      });
+
+      cleanedMappings.push({
+        templateField: targetField,
+        mappedField: selectedSourceFields[0],
+        mappedFields: selectedSourceFields
       });
       return;
     }
@@ -2182,7 +2438,8 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
 
     cleanedMappings.push({
       templateField: targetField,
-      mappedField: normalizedSourceField
+      mappedField: normalizedSourceField,
+      mappedFields: []
     });
   });
 
@@ -2216,7 +2473,8 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
 
   return {
     mappings: cleanedMappings,
-    bigAccounts: expandBigAccountConfigurations(cleanedBigAccounts)
+    bigAccounts: expandBigAccountConfigurations(cleanedBigAccounts),
+    fixedAssignments: cleanedFixedAssignments
   };
 }
 
@@ -2228,7 +2486,7 @@ function registerTemplateHandlers() {
   ipcMain.handle('template:import', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile'],
-      filters: fileDialogFilters()
+      filters: templateFileDialogFilters()
     });
 
     if (result.canceled || result.filePaths.length === 0) {
@@ -2320,7 +2578,8 @@ function registerTemplateHandlers() {
         advancedMappingFields: mappingConfig.advancedMappingFields,
         exportTargetFields: mappingConfig.exportTargetFields,
         mappings: mappingConfig.mappings,
-        bigAccounts: mappingConfig.bigAccounts
+        bigAccounts: mappingConfig.bigAccounts,
+        fixedAssignments: mappingConfig.fixedAssignments
       };
     } catch (error) {
       if (error instanceof FileValidationError) {
@@ -2371,10 +2630,16 @@ function registerTemplateHandlers() {
         template,
         mappings: payload.mappings,
         enumValues: loadEnumValues(enumConfig.filePath),
-        bigAccounts: payload.bigAccounts
+        bigAccounts: payload.bigAccounts,
+        fixedAssignments: payload.fixedAssignments
       });
 
-      database.saveMappings(payload.templateId, templateConfiguration.mappings, templateConfiguration.bigAccounts);
+      database.saveMappings(
+        payload.templateId,
+        templateConfiguration.mappings,
+        templateConfiguration.bigAccounts,
+        templateConfiguration.fixedAssignments
+      );
       syncTemplateLibraryFile();
       clearLastErrorReport();
       appendActivityLogEntry({
@@ -2580,7 +2845,8 @@ function registerTemplateHandlers() {
               enumValues
             }),
             enumValues,
-            bigAccounts: entry.bigAccounts
+            bigAccounts: entry.bigAccounts,
+            fixedAssignments: entry.fixedAssignments
           });
           const template = database.upsertTemplate({
             templateKey: entry.templateKey,
@@ -2589,7 +2855,12 @@ function registerTemplateHandlers() {
             headers: entry.headers
           });
 
-          database.saveMappings(template.id, validated.mappings, validated.bigAccounts);
+          database.saveMappings(
+            template.id,
+            validated.mappings,
+            validated.bigAccounts,
+            validated.fixedAssignments
+          );
 
           if (existingTemplate) {
             updatedCount += 1;
@@ -2647,9 +2918,20 @@ function registerTemplateHandlers() {
 
 function buildMappedFieldLookup(mappings) {
   return mappings.reduce((accumulator, mapping) => {
-    accumulator[mapping.templateField] = mapping.mappedField;
+    const mappedFields = getMappingFieldValues(mapping);
+    accumulator[mapping.templateField] = mappedFields.length > 1
+      ? mappedFields
+      : getPrimaryMappedField(mapping);
     return accumulator;
   }, {});
+}
+
+function normalizeLookupMappingValue(value) {
+  if (Array.isArray(value)) {
+    return normalizeCell(value[0]);
+  }
+
+  return normalizeCell(value);
 }
 
 function buildStatementGenerationConfig({
@@ -2678,14 +2960,16 @@ function buildStatementGenerationConfig({
   const templateNameParts = splitTemplateName(template.name);
   const selectedMerchantId = normalizeCell(selectedBigAccount?.merchantId);
   const selectedCurrency = normalizeCell(selectedBigAccount?.currency);
-  const isMultiBigAccountTemplate = normalizeCell(mappingByTargetField.MerchantId)
+  const merchantIdMappingValue = normalizeLookupMappingValue(mappingByTargetField.MerchantId);
+  const currencyMappingValue = normalizeLookupMappingValue(mappingByTargetField.Currency);
+  const isMultiBigAccountTemplate = merchantIdMappingValue
     === `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`;
 
   if (orderedTargetFields.includes('Channel')) {
     mappingByTargetField.Channel = `${FIXED_FIELD_VALUE_PREFIX}${templateNameParts.bankName}`;
   }
 
-  if (!mappingByTargetField.BillDate) {
+  if (!mappingByTargetField.BillDate || (Array.isArray(mappingByTargetField.BillDate) && !mappingByTargetField.BillDate.length)) {
     throw new FileValidationError('FILE_READ', '当前模板必须映射 BillDate 字段');
   }
 
@@ -2696,9 +2980,9 @@ function buildStatementGenerationConfig({
   let currencyMappings = [];
 
   if (
-    mappingByTargetField.Currency &&
+    (Array.isArray(mappingByTargetField.Currency) ? mappingByTargetField.Currency.length > 0 : Boolean(currencyMappingValue)) &&
     !selectedCurrency &&
-    !mappingByTargetField.Currency.startsWith(FIXED_FIELD_VALUE_PREFIX)
+    !currencyMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)
   ) {
     const currencyMappingTablePath = getCurrencyMappingTablePath();
 
@@ -3364,7 +3648,7 @@ function registerFileHandlers() {
 
       const result = await dialog.showOpenDialog(mainWindow, {
         properties: ['openFile', 'multiSelections'],
-        filters: fileDialogFilters()
+        filters: statementFileDialogFilters()
       });
 
       if (result.canceled || result.filePaths.length === 0) {
@@ -3372,27 +3656,6 @@ function registerFileHandlers() {
       }
 
       const inputFilePaths = normalizeInputFilePaths(result.filePaths, { dedupe: false });
-      const bigAccountOptions = expandBigAccountConfigurations(templateConfig.bigAccounts);
-
-      if (bigAccountOptions.length > 1) {
-        rememberPendingBigAccountSelection({
-          templateId,
-          template: templateConfig.template,
-          mappings: templateConfig.exportMappings,
-          orderedTargetFields: templateConfig.exportTargetFields,
-          inputFilePaths,
-          options: bigAccountOptions
-        });
-        return buildBigAccountSelectionRequiredResult(bigAccountOptions);
-      }
-
-      const selectedBigAccount = bigAccountOptions.length === 1
-        ? {
-            merchantId: bigAccountOptions[0].merchantId,
-            currency: bigAccountOptions[0].currency
-          }
-        : null;
-
       const session = getOrCreateStatementImportSession({
         statementImportSessions,
         templateId,
@@ -3407,6 +3670,42 @@ function registerFileHandlers() {
       if (selectionResult.status === 'cancelled' || selectionResult.filePaths.length === 0) {
         return { status: 'cancelled' };
       }
+
+      const bigAccountOptions = expandBigAccountConfigurations(templateConfig.bigAccounts);
+
+      if (bigAccountOptions.length > 1) {
+        const provisionalFileEntries = buildPendingBigAccountFileEntries({
+          template: templateConfig.template,
+          mappings: templateConfig.exportMappings,
+          orderedTargetFields: templateConfig.exportTargetFields,
+          inputFilePaths: selectionResult.filePaths
+        });
+        const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
+
+        rememberPendingBigAccountSelection({
+          templateId,
+          template: templateConfig.template,
+          mappings: templateConfig.exportMappings,
+          orderedTargetFields: templateConfig.exportTargetFields,
+          inputFilePaths: selectionResult.filePaths,
+          bigAccounts: templateConfig.bigAccounts,
+          fixedAssignments: templateConfig.fixedAssignments,
+          fileEntries: provisionalFileEntries,
+          rows: selectionRows
+        });
+        return buildBigAccountSelectionRequiredResult({
+          rows: selectionRows,
+          bigAccounts: templateConfig.bigAccounts,
+          fixedAssignments: templateConfig.fixedAssignments
+        });
+      }
+
+      const selectedBigAccount = bigAccountOptions.length === 1
+        ? {
+            merchantId: bigAccountOptions[0].merchantId,
+            currency: bigAccountOptions[0].currency
+          }
+        : null;
 
       const generatedFiles = prepareGeneratedFiles({
         template: templateConfig.template,
@@ -3501,13 +3800,16 @@ function registerFileHandlers() {
       });
     }
 
-    const selectedMerchantId = normalizeCell(payload.merchantId);
-    const selectedCurrency = normalizeCell(payload.currency);
-    const selectedOption = pendingContext.options.find((option) => {
-      return option.merchantId === selectedMerchantId && option.currency === selectedCurrency;
-    });
+    const groupedBigAccounts = Array.isArray(pendingContext.bigAccounts) ? pendingContext.bigAccounts : [];
+    const assignments = Array.isArray(payload.assignments)
+      ? payload.assignments.map((item, index) => ({
+          merchantId: normalizeCell(item.merchantId),
+          currency: normalizeCell(item.currency),
+          rowIndex: Number.isInteger(item.index) ? item.index : (Number.isInteger(item.rowIndex) ? item.rowIndex : index)
+        }))
+      : [];
 
-    if (!selectedOption) {
+    if (!assignments.length || assignments.length !== pendingContext.rows.length) {
       return createErrorResult({
         step: '选择大账号',
         message: '请选择有效的大账号 / 币种',
@@ -3516,53 +3818,93 @@ function registerFileHandlers() {
       });
     }
 
-    try {
-      const selectedBigAccount = {
-        merchantId: selectedOption.merchantId,
-        currency: selectedOption.currency
+    const normalizedAssignments = assignments.map((assignment) => {
+      const matchedAccount = groupedBigAccounts.find((item) => item.merchantId === assignment.merchantId);
+
+      if (!matchedAccount) {
+        throw new FileValidationError('FILE_READ', '请选择有效的大账号 / 币种');
+      }
+
+      const availableCurrencies = Array.isArray(matchedAccount.currencies) ? matchedAccount.currencies : [];
+      const normalizedCurrency = matchedAccount.isMultiCurrency
+        ? normalizeCell(assignment.currency)
+        : normalizeCell(availableCurrencies[0] || assignment.currency);
+
+      if (!normalizedCurrency || !availableCurrencies.includes(normalizedCurrency)) {
+        throw new FileValidationError('FILE_READ', `大账号 ${matchedAccount.merchantId} 的币种选择无效`);
+      }
+
+      return {
+        merchantId: matchedAccount.merchantId,
+        currency: normalizedCurrency,
+        rowIndex: assignment.rowIndex
       };
+    }).sort((left, right) => left.rowIndex - right.rowIndex);
+
+    try {
       const session = getOrCreateStatementImportSession({
         statementImportSessions,
         templateId: pendingContext.templateId,
         templateName: pendingContext.template.name
       });
-      const selectionResult = await resolveImportFileSelection({
-        templateName: pendingContext.template.name,
-        session,
-        filePaths: pendingContext.inputFilePaths
-      });
 
-      if (selectionResult.status === 'cancelled' || selectionResult.filePaths.length === 0) {
-        clearPendingBigAccountSelection();
-        return { status: 'cancelled' };
+      if (Boolean(payload.fixed)) {
+        const currentMappingPayload = database.getTemplateMappings(pendingContext.templateId);
+
+        if (currentMappingPayload) {
+          database.saveMappings(
+            pendingContext.templateId,
+            currentMappingPayload.mappings,
+            database.getTemplateBigAccounts(pendingContext.templateId),
+            normalizedAssignments
+          );
+          syncTemplateLibraryFile();
+        }
       }
 
-      const generatedFiles = prepareGeneratedFiles({
+      const resolvedFileEntries = applyBigAccountAssignmentsToFileEntries(
+        pendingContext.fileEntries,
+        normalizedAssignments
+      );
+      const generationConfig = buildStatementGenerationConfig({
         template: pendingContext.template,
         mappings: pendingContext.mappings,
         orderedTargetFields: pendingContext.orderedTargetFields,
-        inputFilePaths: selectionResult.filePaths,
-        selectedBigAccount
+        allowManagedMerchantWithoutSelection: true
       });
-      selectionResult.replacePaths.forEach((filePath) => {
+      const preparedBatch = statementGenerationHelpers.buildPreparedStatementBatchFromEntries({
+        config: generationConfig,
+        fileEntries: resolvedFileEntries
+      });
+      const generatedFiles = {
+        ...generateStatementFiles({
+          config: generationConfig,
+          preparedBatch,
+          scope: 'current'
+        }),
+        fileEntries: resolvedFileEntries.map((entry) => buildStatementFileEntry({
+          ...entry,
+          buildEntryId: buildStatementFileEntryId
+        })),
+        preparedBatch
+      };
+
+      pendingContext.inputFilePaths.forEach((filePath) => {
         removeStatementSessionEntriesByFilePath(session, filePath);
       });
       const batchId = appendStatementSessionImport({
         buildBatchId: buildStatementBatchId,
         lastGeneratedExports,
         session,
-        fileEntries: generatedFiles.fileEntries.map((entry) => buildStatementFileEntry({
-          ...entry,
-          buildEntryId: buildStatementFileEntryId
-        }))
+        fileEntries: generatedFiles.fileEntries
       });
       rememberLastFileImportContext({
         templateId: pendingContext.templateId,
         template: pendingContext.template,
         mappings: pendingContext.mappings,
         orderedTargetFields: pendingContext.orderedTargetFields,
-        inputFilePaths: selectionResult.filePaths,
-        selectedBigAccount,
+        inputFilePaths: pendingContext.inputFilePaths,
+        selectedBigAccount: null,
         preparedDetailRows: generatedFiles.preparedBatch.detailRows,
         scope: 'current',
         statementSessionKey: session.key,
@@ -3574,7 +3916,7 @@ function registerFileHandlers() {
         generatedFiles,
         templateId: pendingContext.templateId,
         templateName: pendingContext.template.name,
-        inputFilePaths: selectionResult.filePaths
+        inputFilePaths: pendingContext.inputFilePaths
       });
     } catch (error) {
       clearGeneratedExports();
@@ -3758,36 +4100,13 @@ function registerFileHandlers() {
 
 function registerNewAccountHandlers() {
   ipcMain.handle('new-account:generate', (_event, payload = {}) => {
-    const bankName = normalizeCell(payload.bankName);
-    const location = normalizeCell(payload.location);
-    const currency = normalizeCell(payload.currency);
-    const isMultiCurrency = Boolean(payload.isMultiCurrency);
-    const selectedCurrencies = Array.from(
-      new Set(
-        (Array.isArray(payload.currencies) ? payload.currencies : [])
-          .map((value) => normalizeCell(value))
-          .filter((value) => value !== '')
-      )
-    );
-    const bankAccount = normalizeCell(payload.bankAccount);
-    const openingDate = parseDateValue(payload.openingDate);
-    const missingFields = [
-      ['银行名称', bankName],
-      ['所在地', location],
-      ['银行账号', bankAccount],
-      ['开户日期', normalizeCell(payload.openingDate)]
-    ].filter(([, value]) => !value);
+    const accounts = normalizeNewAccountAccounts(payload);
 
-    if (!isMultiCurrency && !currency) {
-      missingFields.push(['币种', '']);
-    }
-
-    if (missingFields.length) {
+    if (!accounts.length) {
       return createErrorResult({
         step: '生成新开账户余额账单',
         message: '请完整填写所有必填项',
         errorCode: 'NEW_ACCOUNT_REQUIRED',
-        detailLines: [`缺少字段：${missingFields.map(([label]) => label).join('、')}`],
         templateName: NEW_ACCOUNT_EXPORT_NAME,
         context: {
           moduleName: NEW_ACCOUNT_EXPORT_NAME
@@ -3795,28 +4114,47 @@ function registerNewAccountHandlers() {
       });
     }
 
-    if (isMultiCurrency && selectedCurrencies.length === 0) {
+    const missingDetails = [];
+
+    accounts.forEach((account, index) => {
+      const missingFields = [
+        ['银行名称', account.bankName],
+        ['所在地', account.location],
+        ['银行账号', account.bankAccount],
+        ['开户日期', account.openingDateRaw]
+      ].filter(([, value]) => !value);
+
+      if (!account.isMultiCurrency && !account.currency) {
+        missingFields.push(['币种', '']);
+      }
+
+      if (missingFields.length) {
+        missingDetails.push(`${index + 1}. 缺少字段：${missingFields.map(([label]) => label).join('、')}`);
+        return;
+      }
+
+      const selectedCurrencies = normalizeNewAccountCurrencyValues(account);
+
+      if (account.isMultiCurrency && selectedCurrencies.length === 0) {
+        missingDetails.push(`${index + 1}. 多币种账户至少需要勾选一个币种`);
+        return;
+      }
+
+      if (!account.openingDate) {
+        missingDetails.push(`${index + 1}. 开户日期不是有效日期`);
+      }
+    });
+
+    if (missingDetails.length) {
       return createErrorResult({
         step: '生成新开账户余额账单',
-        message: '多币种账户至少需要勾选一个币种',
-        errorCode: 'NEW_ACCOUNT_MULTI_CURRENCY_REQUIRED',
+        message: '请完整填写所有必填项',
+        errorCode: 'NEW_ACCOUNT_REQUIRED',
+        detailLines: missingDetails,
         templateName: NEW_ACCOUNT_EXPORT_NAME,
         context: {
           moduleName: NEW_ACCOUNT_EXPORT_NAME
         }
-      });
-    }
-
-    if (!openingDate) {
-      return createErrorResult({
-        step: '生成新开账户余额账单',
-        message: '开户日期不是有效日期',
-        errorCode: 'NEW_ACCOUNT_OPEN_DATE_INVALID',
-        context: {
-          openingDate: payload.openingDate,
-          moduleName: NEW_ACCOUNT_EXPORT_NAME
-        },
-        templateName: NEW_ACCOUNT_EXPORT_NAME
       });
     }
 
@@ -3850,18 +4188,14 @@ function registerNewAccountHandlers() {
       }
 
       const generated = buildNewAccountBalanceRecords({
-        bankName,
-        location,
-        currency,
-        currencies: selectedCurrencies,
-        bankAccount,
-        openingDate,
+        accounts,
         balanceTemplateFields
       });
-      const currencyLabel = isMultiCurrency ? '多币种' : generated.currencies[0];
+      const primaryAccount = accounts[0];
+      const currencyLabel = generated.currencies.length > 1 ? '多币种' : (generated.currencies[0] || '');
       const output = buildOutputFilePath({
         kind: 'new-account',
-        outputFileName: `${bankName}-${location}-${bankAccount}-${currencyLabel}-${NEW_ACCOUNT_EXPORT_NAME}.xlsx`
+        outputFileName: `${primaryAccount.bankName}-${primaryAccount.location}-多账号-${currencyLabel}-${NEW_ACCOUNT_EXPORT_NAME}.xlsx`
       });
 
       writeBalanceWorkbook({
@@ -3887,7 +4221,8 @@ function registerNewAccountHandlers() {
         details: [
           `导出文件：${output.outputFileName}`,
           `币种：${currencyLabel}`,
-          `账单日期数量：${generated.billDates.length}`
+          `账单日期数量：${generated.billDates.length}`,
+          `账号行数：${accounts.length}`
         ]
       });
 
@@ -3910,12 +4245,14 @@ function registerNewAccountHandlers() {
           errorCode: error.code,
           originalError: error,
           context: {
-            bankName,
-            location,
-            currency,
-            currencies: selectedCurrencies,
-            bankAccount,
-            openingDate: formatDateLabel(openingDate),
+            accounts: accounts.map((account) => ({
+              bankName: account.bankName,
+              location: account.location,
+              currency: account.currency,
+              currencies: account.currencies,
+              bankAccount: account.bankAccount,
+              openingDate: account.openingDate ? formatDateLabel(account.openingDate) : account.openingDateRaw
+            })),
             moduleName: NEW_ACCOUNT_EXPORT_NAME
           },
           templateName: NEW_ACCOUNT_EXPORT_NAME
@@ -3932,6 +4269,14 @@ function registerNewAccountHandlers() {
         originalError: error,
         templateName: NEW_ACCOUNT_EXPORT_NAME,
         context: {
+          accounts: accounts.map((account) => ({
+            bankName: account.bankName,
+            location: account.location,
+            currency: account.currency,
+            currencies: account.currencies,
+            bankAccount: account.bankAccount,
+            openingDate: account.openingDate ? formatDateLabel(account.openingDate) : account.openingDateRaw
+          })),
           moduleName: NEW_ACCOUNT_EXPORT_NAME
         }
       });

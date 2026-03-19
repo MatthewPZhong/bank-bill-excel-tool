@@ -81,6 +81,7 @@ function createSmokeContext() {
     unmappedDataPath: path.join(root, 'input-unmapped.xlsx'),
     amountMappingDataPath: path.join(root, 'amount-mapping-input.xlsx'),
     signedAmountDataPath: path.join(root, 'input-signed-amount.xlsx'),
+    datePartsDataPath: path.join(root, 'input-date-parts.xlsx'),
     simultaneousAmountDataPath: path.join(root, 'input-simultaneous.xlsx'),
     skippedAmountDataPath: path.join(root, 'input-skipped-amounts.xlsx'),
     rawStatementPath: path.join(root, 'input-raw-statement.xlsx'),
@@ -117,6 +118,11 @@ function createSmokeContext() {
     ['账单日期', '发生额', '银行账号'],
     ['11/02/26 09:01:19', '+123.45', 'NET_001'],
     ['2026/1/2 09:01:19', '-54.3', 'NET_001']
+  ]);
+  makeWorkbook(context.datePartsDataPath, [
+    ['Year', 'Date', 'Currency', 'Credit', 'Debit'],
+    ['2026', '02-Feb', 'USD', '10.00', '0.00'],
+    ['03-Mar', '2026', 'USD', '0.00', '5.00']
   ]);
   makeWorkbook(context.simultaneousAmountDataPath, [
     ['原字段A', '原字段B', '原字段C', '原字段D', '原字段E', '原字段F', '原字段G', '原字段H'],

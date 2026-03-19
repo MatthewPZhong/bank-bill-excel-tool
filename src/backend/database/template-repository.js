@@ -2,7 +2,8 @@ const { randomUUID } = require('node:crypto');
 const {
   buildTemplateSummaryFromRow,
   groupBigAccountRows,
-  normalizeText
+  normalizeText,
+  parseJsonArray
 } = require('./utils');
 
 function listTemplates(db) {
@@ -118,6 +119,7 @@ function upsertTemplate(db, { templateKey = '', name, sourceFileName, headers })
         .run(normalizedTemplateKey, name, sourceFileName, JSON.stringify(headers), now, existing.id);
       db.prepare('DELETE FROM template_mappings WHERE template_id = ?').run(existing.id);
       db.prepare('DELETE FROM template_big_accounts WHERE template_id = ?').run(existing.id);
+      db.prepare('DELETE FROM template_fixed_assignments WHERE template_id = ?').run(existing.id);
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -173,6 +175,25 @@ function getTemplateBigAccounts(db, templateId) {
     }));
 }
 
+function getTemplateFixedAssignments(db, templateId) {
+  return db
+    .prepare(`
+      SELECT
+        merchant_id AS merchantId,
+        currency,
+        row_index AS rowIndex
+      FROM template_fixed_assignments
+      WHERE template_id = ?
+      ORDER BY row_index ASC, id ASC
+    `)
+    .all(templateId)
+    .map((row) => ({
+      merchantId: normalizeText(row.merchantId),
+      currency: normalizeText(row.currency),
+      rowIndex: Number(row.rowIndex || 0)
+    }));
+}
+
 function getTemplateMappings(db, templateId) {
   const template = getTemplate(db, templateId);
 
@@ -182,45 +203,73 @@ function getTemplateMappings(db, templateId) {
 
   const mappings = db
     .prepare(`
-      SELECT row_index AS rowIndex, template_field AS templateField, mapped_field AS mappedField
+      SELECT
+        row_index AS rowIndex,
+        template_field AS templateField,
+        mapped_field AS mappedField,
+        mapped_fields_json AS mappedFieldsJson
       FROM template_mappings
       WHERE template_id = ?
       ORDER BY row_index ASC
     `)
-    .all(templateId);
+    .all(templateId)
+    .map((row) => ({
+      rowIndex: Number(row.rowIndex || 0),
+      templateField: normalizeText(row.templateField),
+      mappedField: normalizeText(row.mappedField),
+      mappedFields: parseJsonArray(row.mappedFieldsJson)
+        .map((value) => normalizeText(value))
+        .filter((value) => value !== '')
+    }));
   const bigAccountRows = getTemplateBigAccounts(db, templateId);
+  const fixedAssignments = getTemplateFixedAssignments(db, templateId);
 
   return {
     template,
     mappings,
-    bigAccounts: groupBigAccountRows(bigAccountRows)
+    bigAccounts: groupBigAccountRows(bigAccountRows),
+    fixedAssignments
   };
 }
 
-function saveMappings(db, templateId, mappings, bigAccounts = []) {
+function saveMappings(db, templateId, mappings, bigAccounts = [], fixedAssignments = []) {
   const now = new Date().toISOString();
   db.exec('BEGIN');
 
   try {
     db.prepare('DELETE FROM template_mappings WHERE template_id = ?').run(templateId);
     db.prepare('DELETE FROM template_big_accounts WHERE template_id = ?').run(templateId);
+    db.prepare('DELETE FROM template_fixed_assignments WHERE template_id = ?').run(templateId);
 
     const insertMappingStatement = db.prepare(`
       INSERT INTO template_mappings (
-        template_id, template_field, mapped_field, row_index, created_at
-      ) VALUES (?, ?, ?, ?, ?)
+        template_id, template_field, mapped_field, mapped_fields_json, row_index, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
     `);
     const insertBigAccountStatement = db.prepare(`
       INSERT INTO template_big_accounts (
         template_id, merchant_id, currency, row_index, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?)
     `);
+    const insertFixedAssignmentStatement = db.prepare(`
+      INSERT INTO template_fixed_assignments (
+        template_id, merchant_id, currency, row_index, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `);
 
     mappings.forEach((mapping, index) => {
+      const mappedFields = Array.from(
+        new Set(
+          (Array.isArray(mapping.mappedFields) ? mapping.mappedFields : [])
+            .map((value) => normalizeText(value))
+            .filter((value) => value !== '')
+        )
+      );
       insertMappingStatement.run(
         templateId,
         mapping.templateField,
         mapping.mappedField,
+        JSON.stringify(mappedFields),
         index,
         now
       );
@@ -232,6 +281,23 @@ function saveMappings(db, templateId, mappings, bigAccounts = []) {
         item.merchantId,
         item.currency,
         index,
+        now,
+        now
+      );
+    });
+
+    fixedAssignments.forEach((item, index) => {
+      const merchantId = normalizeText(item.merchantId);
+
+      if (!merchantId) {
+        return;
+      }
+
+      insertFixedAssignmentStatement.run(
+        templateId,
+        merchantId,
+        normalizeText(item.currency),
+        Number.isInteger(item.rowIndex) ? item.rowIndex : index,
         now,
         now
       );
@@ -262,6 +328,7 @@ function listTemplateBundleEntries(db) {
         currencies: item.currencies.slice(),
         isMultiCurrency: Boolean(item.isMultiCurrency)
       })) : [],
+      fixedAssignments: payload ? payload.fixedAssignments.map((item) => ({ ...item })) : [],
       createdAt: template.createdAt,
       updatedAt: template.updatedAt
     };
@@ -272,6 +339,7 @@ module.exports = {
   deleteTemplate,
   getTemplate,
   getTemplateBigAccounts,
+  getTemplateFixedAssignments,
   getTemplateByKey,
   getTemplateByName,
   getTemplateMappings,

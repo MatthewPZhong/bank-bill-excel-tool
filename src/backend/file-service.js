@@ -65,19 +65,49 @@ function buildMappedRows({
   });
   const mappedRows = [orderedTargetFields.slice()];
 
-  function resolveRawValueByMapping(mappingValue, row) {
-    const normalizedMappingValue = normalizeCell(mappingValue);
+  function normalizeMappingTokens(mappingValue) {
+    if (Array.isArray(mappingValue)) {
+      return mappingValue.map((value) => normalizeCell(value)).filter((value) => value !== '');
+    }
 
-    if (!normalizedMappingValue) {
+    const normalizedValue = normalizeCell(mappingValue);
+    return normalizedValue ? [normalizedValue] : [];
+  }
+
+  function resolveMappedPartsByTokens(mappingTokens, row) {
+    return mappingTokens.map((token) => {
+      if (token.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
+        return token.slice(FIXED_FIELD_VALUE_PREFIX.length);
+      }
+
+      const sourceIndex = sourceIndexByField.get(token);
+      return sourceIndex === undefined ? '' : row[sourceIndex];
+    });
+  }
+
+  function resolveRawValueByMapping(mappingValue, row) {
+    const mappingTokens = normalizeMappingTokens(mappingValue);
+
+    if (!mappingTokens.length) {
       return '';
     }
 
-    if (normalizedMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
-      return normalizedMappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
+    return resolveMappedPartsByTokens(mappingTokens, row)
+      .filter((value) => normalizeCell(value) !== '')
+      .join('');
+  }
+
+  function resolveDateRawValueByMapping(mappingValue, row) {
+    const mappingTokens = normalizeMappingTokens(mappingValue);
+
+    if (!mappingTokens.length) {
+      return '';
     }
 
-    const sourceIndex = sourceIndexByField.get(normalizedMappingValue);
-    return sourceIndex === undefined ? '' : row[sourceIndex];
+    return resolveMappedPartsByTokens(mappingTokens, row)
+      .map((value) => normalizeCell(value))
+      .filter((value) => value !== '')
+      .join(' ');
   }
 
   rows.slice(1).forEach((row, rowIndex) => {
@@ -104,11 +134,11 @@ function buildMappedRows({
     });
 
     const mappedRow = orderedTargetFields.map((targetField) => {
-      const mappingValue = normalizeCell(mappingByField[targetField]);
-
-      const sourceField = mappingValue;
-      const sourceIndex = sourceIndexByField.get(sourceField);
-      const rawValue = sourceIndex === undefined ? '' : row[sourceIndex];
+      const mappingValue = mappingByField[targetField];
+      const mappingTokens = normalizeMappingTokens(mappingValue);
+      const primaryMappingValue = mappingTokens[0] || '';
+      const sourceField = primaryMappingValue;
+      const rawValue = resolveRawValueByMapping(mappingValue, row);
 
       if (targetField === 'Balance') {
         return sanitizeAmountValue(rawValue);
@@ -123,7 +153,7 @@ function buildMappedRows({
       }
 
       if (targetField === 'BillDate' || targetField === 'ValueDate') {
-        return normalizeDateExportValue(rawValue).value;
+        return normalizeDateExportValue(resolveDateRawValueByMapping(mappingValue, row)).value;
       }
 
       if (nameSourceField && mappingValue === nameSourceField) {
@@ -151,8 +181,8 @@ function buildMappedRows({
           return selectedCurrency;
         }
 
-        if (mappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
-          return mappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
+        if (primaryMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
+          return primaryMappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
         }
 
         const currencyResult = resolveCurrencyValue(rawValue, currencyMappings);
@@ -173,8 +203,9 @@ function buildMappedRows({
           return selectedMerchantId;
         }
 
-        if (mappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
-          return mappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
+        if (primaryMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
+          const fixedValue = primaryMappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
+          return fixedValue === '__MULTI_BIG_ACCOUNT__' ? '' : fixedValue;
         }
 
         const originalValue = normalizeCell(rawValue);
@@ -188,8 +219,8 @@ function buildMappedRows({
           : rawValue;
       }
 
-      if (mappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
-        return mappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
+      if (primaryMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
+        return primaryMappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
       }
 
       return rawValue ?? '';

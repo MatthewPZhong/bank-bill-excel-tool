@@ -73,43 +73,48 @@
 
           <section id="newAccountModulePanel" class="control-board new-account-panel" hidden>
             <div class="new-account-title">仅支持开户至今未发生交易的账户余额导出</div>
-            <div class="new-account-form-row">
-              <label class="new-account-field">
-                <span class="new-account-label">银行名称</span>
-                <input id="newAccountBankNameInput" class="new-account-input" type="text" spellcheck="false" />
-              </label>
-              <label class="new-account-field">
-                <span class="new-account-label">所在地</span>
-                <input id="newAccountLocationInput" class="new-account-input" type="text" spellcheck="false" />
-              </label>
-              <label class="new-account-field">
-                <span class="new-account-label">币种</span>
-                <div class="new-account-currency-row">
-                  <input id="newAccountCurrencyInput" class="new-account-input new-account-currency-input" type="text" spellcheck="false" />
-                  <div id="newAccountCurrencyDropdownWrap" class="new-account-currency-dropdown-wrap" hidden>
-                    <button
-                      id="newAccountCurrencyDropdownBtn"
-                      class="new-account-input new-account-currency-dropdown-btn"
-                      type="button"
-                      aria-haspopup="true"
-                      aria-expanded="false"
-                    ></button>
-                    <div id="newAccountCurrencyDropdownPanel" class="new-account-currency-dropdown-panel" hidden></div>
+            <div id="newAccountRows">
+              <div class="new-account-form-row" data-new-account-row="true">
+                <label class="new-account-field">
+                  <span class="new-account-label">银行名称</span>
+                  <input id="newAccountBankNameInput" class="new-account-input new-account-bank-name-input" type="text" spellcheck="false" />
+                </label>
+                <label class="new-account-field">
+                  <span class="new-account-label">所在地</span>
+                  <input id="newAccountLocationInput" class="new-account-input new-account-location-input" type="text" spellcheck="false" />
+                </label>
+                <label class="new-account-field">
+                  <span class="new-account-label">币种</span>
+                  <div class="new-account-currency-row">
+                    <input id="newAccountCurrencyInput" class="new-account-input new-account-currency-input" type="text" spellcheck="false" />
+                    <div id="newAccountCurrencyDropdownWrap" class="new-account-currency-dropdown-wrap" hidden>
+                      <button
+                        id="newAccountCurrencyDropdownBtn"
+                        class="new-account-input new-account-currency-dropdown-btn"
+                        type="button"
+                        aria-haspopup="true"
+                        aria-expanded="false"
+                      ></button>
+                      <div id="newAccountCurrencyDropdownPanel" class="new-account-currency-dropdown-panel" hidden></div>
+                    </div>
+                    <label class="new-account-checkbox-label">
+                      <input id="newAccountMultiCurrencyCheckbox" class="new-account-checkbox new-account-multi-currency-checkbox" type="checkbox" />
+                      <span class="new-account-checkbox-text"><span>多币种</span><span>账户</span></span>
+                    </label>
                   </div>
-                  <label class="new-account-checkbox-label">
-                    <input id="newAccountMultiCurrencyCheckbox" class="new-account-checkbox" type="checkbox" />
-                    <span class="new-account-checkbox-text"><span>多币种</span><span>账户</span></span>
-                  </label>
-                </div>
-              </label>
-              <label class="new-account-field">
-                <span class="new-account-label">银行账号</span>
-                <input id="newAccountBankAccountInput" class="new-account-input" type="text" spellcheck="false" />
-              </label>
-              <label class="new-account-field">
-                <span class="new-account-label">开户日期</span>
-                <input id="newAccountOpenDateInput" class="new-account-input" type="text" value="" />
-              </label>
+                </label>
+                <label class="new-account-field">
+                  <span class="new-account-label">银行账号</span>
+                  <div class="new-account-bank-account-row">
+                    <input id="newAccountBankAccountInput" class="new-account-input new-account-bank-account-input" type="text" spellcheck="false" />
+                    <button id="newAccountAddRowBtn" class="text-action new-account-add-btn" type="button">新增</button>
+                  </div>
+                </label>
+                <label class="new-account-field">
+                  <span class="new-account-label">开户日期</span>
+                  <input id="newAccountOpenDateInput" class="new-account-input new-account-open-date-input" type="text" value="" />
+                </label>
+              </div>
             </div>
             <div class="new-account-actions-row">
               <div id="newAccountStatusBox" class="status-box new-account-status-box">等待生成</div>

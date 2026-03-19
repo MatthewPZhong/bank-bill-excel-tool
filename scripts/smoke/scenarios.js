@@ -22,6 +22,9 @@ const {
   writeErrorReport
 } = require('../../src/backend/logger');
 const {
+  collectMatchedRows
+} = require('../../src/backend/file-service/readers');
+const {
   buildStartupFailureDialogMessage,
   reportStartupFailure
 } = require('../../src/backend/startup-failure');
@@ -156,6 +159,16 @@ function runAssetAndDateScenario(context) {
   assert.deepStrictEqual(normalizeDateExportValue('2026-03-17-14:30'), {
     value: '2026-03-17',
     date: new Date(2026, 2, 17),
+    displayFormat: 'yyyy-mm-dd'
+  });
+  assert.deepStrictEqual(normalizeDateExportValue('2026 02-Feb'), {
+    value: '2026-02-02',
+    date: new Date(2026, 1, 2),
+    displayFormat: 'yyyy-mm-dd'
+  });
+  assert.deepStrictEqual(normalizeDateExportValue('02-Feb 2026'), {
+    value: '2026-02-02',
+    date: new Date(2026, 1, 2),
     displayFormat: 'yyyy-mm-dd'
   });
   assert.deepStrictEqual(normalizeDateExportValue('11/02/26 02:08:07'), {
@@ -323,6 +336,19 @@ function runMappingScenario(context, state) {
   assert.strictEqual(signedAmountRows[2][3], '');
   assert.strictEqual(signedAmountRows[2][4], '54.3');
 
+  const splitDateRows = buildMappedRows({
+    inputFilePath: context.datePartsDataPath,
+    mappingByField: {
+      BillDate: ['Year', 'Date'],
+      Currency: 'Currency',
+      'Credit Amount': 'Credit',
+      'Debit Amount': 'Debit'
+    },
+    orderedTargetFields: ['BillDate', 'Currency', 'Credit Amount', 'Debit Amount']
+  });
+  assert.strictEqual(splitDateRows[1][0], '2026-02-02');
+  assert.strictEqual(splitDateRows[2][0], '2026-03-03');
+
   const rawStatementRows = buildMappedRows({
     inputFilePath: context.rawStatementPath,
     expectedSourceHeaders: state.headers,
@@ -362,6 +388,45 @@ function runMappingScenario(context, state) {
   assert.strictEqual(rawStatementWithSummaryRows[1][1], '2026-03-02');
   assert.strictEqual(rawStatementWithSummaryRows[1][3], 'BIG_001');
   assert.strictEqual(rawStatementWithSummaryRows[1][4], 'USD');
+
+  const pdfMatchedRows = collectMatchedRows({
+    meaningfulRows: [
+      {
+        rowNumber: 40,
+        cells: ['Year', 'Date', 'Event ID', 'Transaction type', 'Currency', 'Credit', 'Debit']
+      },
+      {
+        rowNumber: 41,
+        cells: ['2026', '02-Feb', 'TXN001', 'Deposit', 'USD', '100.00', '0.00']
+      },
+      {
+        rowNumber: 42,
+        cells: ['www.example.com | contact@example.com']
+      },
+      {
+        rowNumber: 43,
+        cells: ['2026', '03-Feb', 'TXN002', 'Deposit', 'USD', '200.00', '0.00']
+      },
+      {
+        rowNumber: 44,
+        cells: ['Year', 'Date', 'Event ID', 'Transaction type', 'Currency', 'Credit', 'Debit']
+      },
+      {
+        rowNumber: 45,
+        cells: ['Named Account']
+      },
+      {
+        rowNumber: 46,
+        cells: ['2026', '04-Feb', 'TXN003', 'Deposit', 'USD', '300.00', '0.00']
+      }
+    ],
+    matchedRowIndex: 0,
+    matchedColumnIndex: 0,
+    normalizedExpectedHeaders: ['Year', 'Date', 'Event ID', 'Transaction type', 'Currency', 'Credit', 'Debit'],
+    isPdfFile: true
+  });
+  assert.strictEqual(pdfMatchedRows.rows.length, 3);
+  assert.deepStrictEqual(pdfMatchedRows.rowNumbers, [40, 41, 43]);
 
   const simultaneousAmountRows = buildMappedRows({
     inputFilePath: context.simultaneousAmountDataPath,

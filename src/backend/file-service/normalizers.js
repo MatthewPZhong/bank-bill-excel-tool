@@ -1,6 +1,21 @@
 const XLSX = require('xlsx');
 const { FileValidationError, normalizeCell } = require('./common');
 
+const ENGLISH_MONTH_INDEX = new Map([
+  ['jan', 1],
+  ['feb', 2],
+  ['mar', 3],
+  ['apr', 4],
+  ['may', 5],
+  ['jun', 6],
+  ['jul', 7],
+  ['aug', 8],
+  ['sep', 9],
+  ['oct', 10],
+  ['nov', 11],
+  ['dec', 12]
+]);
+
 function parseNumericValue(value) {
   if (value === null || value === undefined || value === '') {
     return null;
@@ -168,7 +183,10 @@ function loadCurrencyMappings(filePath, { readRows }) {
 
     mappings.push({
       aliases,
-      englishCode
+      englishCode,
+      simpleChinese,
+      traditionalChinese,
+      displayName: simpleChinese || traditionalChinese || ''
     });
   });
 
@@ -317,6 +335,75 @@ function buildDateObject(year, month, day) {
   return date;
 }
 
+function formatIsoDateValue(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function resolveEnglishMonthIndex(value) {
+  const normalizedValue = normalizeCell(value)
+    .toLowerCase()
+    .replace(/\./g, '');
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  return ENGLISH_MONTH_INDEX.get(normalizedValue.slice(0, 3)) || null;
+}
+
+function parseEnglishMonthDateCandidate(value) {
+  const normalizedValue = normalizeCell(value)
+    .replace(/[，,]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!/[A-Za-z]{3,}/.test(normalizedValue)) {
+    return null;
+  }
+
+  const patterns = [
+    {
+      regex: /^(\d{4})[\s-]+(\d{1,2})-([A-Za-z]{3,})$/,
+      resolve: (parts) => ({ year: parts[1], day: parts[2], monthName: parts[3] })
+    },
+    {
+      regex: /^(\d{1,2})-([A-Za-z]{3,})[\s-]+(\d{4})$/,
+      resolve: (parts) => ({ year: parts[3], day: parts[1], monthName: parts[2] })
+    },
+    {
+      regex: /^(\d{4})[\s-]+([A-Za-z]{3,})-(\d{1,2})$/,
+      resolve: (parts) => ({ year: parts[1], day: parts[3], monthName: parts[2] })
+    },
+    {
+      regex: /^([A-Za-z]{3,})-(\d{1,2})[\s-]+(\d{4})$/,
+      resolve: (parts) => ({ year: parts[3], day: parts[2], monthName: parts[1] })
+    }
+  ];
+
+  for (const pattern of patterns) {
+    const matchedParts = normalizedValue.match(pattern.regex);
+
+    if (!matchedParts) {
+      continue;
+    }
+
+    const { year, day, monthName } = pattern.resolve(matchedParts);
+    const monthIndex = resolveEnglishMonthIndex(monthName);
+
+    if (!monthIndex) {
+      continue;
+    }
+
+    const date = buildDateObject(year, monthIndex, day);
+
+    if (date) {
+      return buildNormalizedDateResult(date, 'yyyy-mm-dd', formatIsoDateValue(date));
+    }
+  }
+
+  return null;
+}
+
 function stripDateTimeSuffix(rawValue) {
   const normalizedValue = normalizeCell(rawValue);
 
@@ -329,7 +416,8 @@ function stripDateTimeSuffix(rawValue) {
     /^(\d{4}-\d{1,2}-\d{1,2})-\d{1,2}:\d{1,2}$/,
     '$1'
   );
-  return withoutDashHourMinute.split(/\s+/)[0] || withoutDashHourMinute;
+  const withoutTrailingTime = withoutDashHourMinute.replace(/\s+\d{1,2}:\d{1,2}(:\d{1,2})?.*$/, '');
+  return withoutTrailingTime || withoutDashHourMinute;
 }
 
 function buildNormalizedDateResult(date, displayFormat = 'yyyy-mm-dd', value = '') {
@@ -365,9 +453,7 @@ function normalizeDateExportValue(value) {
     return buildNormalizedDateResult(
       date,
       'yyyy-mm-dd',
-      date
-        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-        : ''
+      date ? formatIsoDateValue(date) : ''
     );
   }
 
@@ -375,6 +461,12 @@ function normalizeDateExportValue(value) {
 
   if (!candidateValue) {
     return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
+  }
+
+  const englishMonthDateResult = parseEnglishMonthDateCandidate(candidateValue);
+
+  if (englishMonthDateResult) {
+    return englishMonthDateResult;
   }
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(candidateValue)) {
@@ -415,9 +507,7 @@ function normalizeDateExportValue(value) {
     return buildNormalizedDateResult(
       dayFirstDate,
       'yyyy-mm-dd',
-      dayFirstDate
-        ? `${dayFirstDate.getFullYear()}-${String(dayFirstDate.getMonth() + 1).padStart(2, '0')}-${String(dayFirstDate.getDate()).padStart(2, '0')}`
-        : ''
+      dayFirstDate ? formatIsoDateValue(dayFirstDate) : ''
     );
   }
 
@@ -434,9 +524,7 @@ function normalizeDateExportValue(value) {
     return buildNormalizedDateResult(
       date,
       'yyyy-mm-dd',
-      date
-        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-        : ''
+      date ? formatIsoDateValue(date) : ''
     );
   }
 
@@ -447,9 +535,7 @@ function normalizeDateExportValue(value) {
     return buildNormalizedDateResult(
       date,
       'yyyy-mm-dd',
-      date
-        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-        : ''
+      date ? formatIsoDateValue(date) : ''
     );
   }
 
@@ -461,9 +547,7 @@ function normalizeDateExportValue(value) {
     return buildNormalizedDateResult(
       date,
       'yyyy-mm-dd',
-      date
-        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-        : ''
+      date ? formatIsoDateValue(date) : ''
     );
   }
 
@@ -473,9 +557,7 @@ function normalizeDateExportValue(value) {
     return buildNormalizedDateResult(
       date,
       'yyyy-mm-dd',
-      date
-        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-        : ''
+      date ? formatIsoDateValue(date) : ''
     );
   }
 
@@ -490,7 +572,7 @@ function normalizeDateExportValue(value) {
     return buildNormalizedDateResult(
       date,
       'yyyy-mm-dd',
-      `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+      formatIsoDateValue(date)
     );
   }
 

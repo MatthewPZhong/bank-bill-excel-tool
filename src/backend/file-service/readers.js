@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const XLSX = require('xlsx');
 const {
   FileValidationError,
@@ -17,11 +18,38 @@ function ensureSupportedFile(filePath) {
   }
 }
 
+function readPdfRows(filePath) {
+  try {
+    const workerScriptPath = path.join(__dirname, 'pdf-worker.js');
+    const output = execFileSync(process.execPath, [workerScriptPath, filePath], {
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: '1'
+      },
+      maxBuffer: 32 * 1024 * 1024,
+      encoding: 'utf8'
+    });
+    const payload = JSON.parse(output);
+    return Array.isArray(payload.rows) ? payload.rows : [];
+  } catch (error) {
+    if (error instanceof FileValidationError) {
+      throw error;
+    }
+
+    throw new FileValidationError('FILE_READ', 'PDF 文件无法识别或不可读，请重新导入');
+  }
+}
+
 function readWorkbookRows(filePath, { blankrows = false } = {}) {
   ensureSupportedFile(filePath);
 
   if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
     throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
+  }
+
+  if (path.extname(filePath).toLowerCase() === '.pdf') {
+    const rows = readPdfRows(filePath);
+    return blankrows ? rows : rows.filter((row) => isRowMeaningful(row));
   }
 
   try {
@@ -59,6 +87,100 @@ function readRows(filePath) {
   }
 
   return rows;
+}
+
+function countNonEmptyCells(cells = []) {
+  return cells.reduce((count, cell) => count + (normalizeCell(cell) !== '' ? 1 : 0), 0);
+}
+
+function getFirstNonEmptyCell(cells = []) {
+  return cells.find((cell) => normalizeCell(cell) !== '') || '';
+}
+
+function isRepeatedMatchedHeader(cells, normalizedExpectedHeaders) {
+  return cells.every((cell, headerIndex) => normalizeCell(cell) === normalizedExpectedHeaders[headerIndex]);
+}
+
+function shouldStopPdfMatchedRows(cells) {
+  const meaningfulCount = countNonEmptyCells(cells);
+  const firstCell = normalizeCell(getFirstNonEmptyCell(cells)).toLowerCase();
+
+  if (meaningfulCount > 2 || !firstCell) {
+    return false;
+  }
+
+  return [
+    'named account',
+    'account summary',
+    'statement summary',
+    'please review',
+    'thank you',
+    'nb:'
+  ].some((keyword) => firstCell.includes(keyword));
+}
+
+function shouldSkipPdfMatchedRow(cells, expectedHeaderCount) {
+  const meaningfulCount = countNonEmptyCells(cells);
+
+  if (meaningfulCount === 0) {
+    return true;
+  }
+
+  return meaningfulCount < Math.max(4, Math.min(5, expectedHeaderCount));
+}
+
+function collectMatchedRows({
+  meaningfulRows,
+  matchedRowIndex,
+  matchedColumnIndex,
+  normalizedExpectedHeaders,
+  isPdfFile = false
+}) {
+  const expectedHeaderCount = normalizedExpectedHeaders.length;
+  const rows = [];
+  const rowNumbers = [];
+  const summaryLabels = ['总收入笔数', '总收入金额', '总支出笔数', '总支出金额'];
+
+  for (const [index, row] of meaningfulRows.slice(matchedRowIndex).entries()) {
+    const normalizedCells = row.cells.slice(matchedColumnIndex, matchedColumnIndex + expectedHeaderCount);
+
+    while (normalizedCells.length < expectedHeaderCount) {
+      normalizedCells.push('');
+    }
+
+    if (
+      index > 0 &&
+      summaryLabels.some((label) => normalizeCell(normalizedCells[0]).includes(label))
+    ) {
+      break;
+    }
+
+    if (index > 0 && isRepeatedMatchedHeader(normalizedCells, normalizedExpectedHeaders)) {
+      continue;
+    }
+
+    if (index > 0 && !isRowMeaningful(normalizedCells)) {
+      continue;
+    }
+
+    if (index > 0 && isPdfFile) {
+      if (shouldStopPdfMatchedRows(normalizedCells)) {
+        break;
+      }
+
+      if (shouldSkipPdfMatchedRow(normalizedCells, expectedHeaderCount)) {
+        continue;
+      }
+    }
+
+    rows.push(normalizedCells);
+    rowNumbers.push(row.rowNumber);
+  }
+
+  return {
+    rows,
+    rowNumbers
+  };
 }
 
 function readRowsWithMetadata(filePath, expectedHeaders = []) {
@@ -113,36 +235,13 @@ function readRowsWithMetadata(filePath, expectedHeaders = []) {
     );
   }
 
-  const rows = [];
-  const rowNumbers = [];
-  const summaryLabels = ['总收入笔数', '总收入金额', '总支出笔数', '总支出金额'];
-
-  for (const [index, row] of meaningfulRows.slice(matchedRowIndex).entries()) {
-    const normalizedCells = row.cells.slice(matchedColumnIndex, matchedColumnIndex + expectedHeaderCount);
-
-    while (normalizedCells.length < expectedHeaderCount) {
-      normalizedCells.push('');
-    }
-
-    if (
-      index > 0 &&
-      summaryLabels.some((label) => normalizeCell(normalizedCells[0]).includes(label))
-    ) {
-      break;
-    }
-
-    if (index > 0 && !isRowMeaningful(normalizedCells)) {
-      continue;
-    }
-
-    rows.push(normalizedCells);
-    rowNumbers.push(row.rowNumber);
-  }
-
-  return {
-    rows,
-    rowNumbers
-  };
+  return collectMatchedRows({
+    meaningfulRows,
+    matchedRowIndex,
+    matchedColumnIndex,
+    normalizedExpectedHeaders,
+    isPdfFile: path.extname(filePath).toLowerCase() === '.pdf'
+  });
 }
 
 function extractHeaders(filePath) {
@@ -209,6 +308,7 @@ function extractEnumValuesFromImportedFile(filePath) {
 }
 
 module.exports = {
+  collectMatchedRows,
   ensureSupportedFile,
   extractEnumValuesFromImportedFile,
   extractHeaders,

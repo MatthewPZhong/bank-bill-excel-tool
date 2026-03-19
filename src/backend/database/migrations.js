@@ -44,7 +44,37 @@ function ensureTemplateKeySupport(db) {
   }
 }
 
+function ensureTemplateMappingEnhancements(db) {
+  db.exec('BEGIN');
+
+  try {
+    if (!hasColumn(db, 'template_mappings', 'mapped_fields_json')) {
+      db.exec('ALTER TABLE template_mappings ADD COLUMN mapped_fields_json TEXT NOT NULL DEFAULT \'[]\';');
+    }
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS template_fixed_assignments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL,
+        merchant_id TEXT NOT NULL,
+        currency TEXT NOT NULL,
+        row_index INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE,
+        UNIQUE(template_id, row_index)
+      );
+    `);
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 module.exports = {
+  ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,
   hasColumn
 };

@@ -262,17 +262,189 @@
       return Array.from(new Set((currencies || []).filter((value) => value))).join('、');
     }
 
+    function normalizeCurrencyOptionEntry(option) {
+      if (typeof option === 'string') {
+        const code = option.trim();
+        return code
+          ? {
+              code,
+              name: '',
+              label: code
+            }
+          : null;
+      }
+
+      if (!option || typeof option !== 'object') {
+        return null;
+      }
+
+      const code = String(option.code || option.englishCode || '').trim();
+
+      if (!code) {
+        return null;
+      }
+
+      const name = String(option.name || option.displayName || option.chineseName || '').trim();
+      return {
+        code,
+        name,
+        label: String(option.label || '').trim() || (name ? `${code} ${name}` : code)
+      };
+    }
+
+    function getCurrencyOptionEntries() {
+      const optionMap = new Map();
+
+      (state.currencyOptions || []).forEach((option) => {
+        const normalized = normalizeCurrencyOptionEntry(option);
+
+        if (!normalized || optionMap.has(normalized.code)) {
+          return;
+        }
+
+        optionMap.set(normalized.code, normalized);
+      });
+
+      return Array.from(optionMap.values());
+    }
+
+    function getCurrencyOptionLabel(code) {
+      const normalizedCode = String(code || '').trim();
+      const matchedOption = getCurrencyOptionEntries().find((option) => option.code === normalizedCode);
+      return matchedOption?.label || normalizedCode;
+    }
+
+    function getCurrencySuggestion(value, allowedCodes = []) {
+      const query = String(value || '').trim().toUpperCase();
+
+      if (!query) {
+        return '';
+      }
+
+      const allowedCodeSet = allowedCodes.length
+        ? new Set(allowedCodes.map((code) => String(code || '').trim()).filter(Boolean))
+        : null;
+      const matchedOption = getCurrencyOptionEntries().find((option) => {
+        if (allowedCodeSet && !allowedCodeSet.has(option.code)) {
+          return false;
+        }
+
+        return option.code.toUpperCase().startsWith(query);
+      });
+
+      return matchedOption?.code || '';
+    }
+
+    function getSelectValues(selectElement) {
+      if (!selectElement) {
+        return [];
+      }
+
+      if (selectElement.multiple) {
+        return Array.from(selectElement.selectedOptions)
+          .map((option) => option.value)
+          .filter((value) => value !== '');
+      }
+
+      return selectElement.value ? [selectElement.value] : [];
+    }
+
     function collectMappingDraftFromTable(tableBody) {
       return Array.from(tableBody.querySelectorAll('tr[data-template-field]')).map((row) => {
         const select = row.querySelector('.mapping-select');
+        const mappedFields = getSelectValues(select);
 
         return {
           templateField: row.dataset.templateField,
-          mappedField: select ? select.value : '',
+          mappedField: mappedFields[0] || '',
+          mappedFields: mappedFields.length > 1 ? mappedFields : [],
           customValue: '',
           isMultiBigAccount: false
         };
       });
+    }
+
+    function createMappingOrderDialog({ mappings, onConfirm, onCancel }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manager-card mapping-order-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">多选字段顺序确认</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="mapping-order-intro">已检测到多选映射，请确认各字段的拼接顺序。</div>
+        <div class="mapping-order-groups"></div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="confirm">确认并保存</button>
+        </div>
+      `;
+
+      const groups = dialog.querySelector('.mapping-order-groups');
+      const drafts = mappings.map((mapping) => ({
+        ...mapping,
+        mappedFields: Array.isArray(mapping.mappedFields) ? mapping.mappedFields.slice() : []
+      }));
+
+      function renderGroups() {
+        groups.innerHTML = '';
+
+        drafts.forEach((mapping) => {
+          const block = document.createElement('section');
+          block.className = 'mapping-order-group';
+          const rows = mapping.mappedFields.map((fieldName, index) => `
+            <div class="mapping-order-row" data-index="${index}">
+              <span class="mapping-order-index">${index + 1}.</span>
+              <span class="mapping-order-name">${escapeHtml(fieldName)}</span>
+              <div class="mapping-order-actions">
+                <button class="text-action" type="button" data-action="up" ${index === 0 ? 'disabled' : ''}>上移</button>
+                <button class="text-action" type="button" data-action="down" ${index === mapping.mappedFields.length - 1 ? 'disabled' : ''}>下移</button>
+              </div>
+            </div>
+          `).join('');
+
+          block.innerHTML = `
+            <div class="mapping-order-group-title">${escapeHtml(mapping.templateField)}</div>
+            <div class="mapping-order-list">${rows}</div>
+            <div class="mapping-order-preview">预览结果：${escapeHtml(mapping.mappedFields.join(' + '))}</div>
+          `;
+
+          block.querySelectorAll('[data-action]').forEach((button) => {
+            button.addEventListener('click', () => {
+              const rowIndex = Number(button.closest('.mapping-order-row')?.dataset.index || -1);
+
+              if (rowIndex < 0) {
+                return;
+              }
+
+              const nextIndex = button.dataset.action === 'up' ? rowIndex - 1 : rowIndex + 1;
+
+              if (nextIndex < 0 || nextIndex >= mapping.mappedFields.length) {
+                return;
+              }
+
+              const nextFields = mapping.mappedFields.slice();
+              const [moved] = nextFields.splice(rowIndex, 1);
+              nextFields.splice(nextIndex, 0, moved);
+              mapping.mappedFields = nextFields;
+              renderGroups();
+            });
+          });
+
+          groups.appendChild(block);
+        });
+      }
+
+      dialog.querySelector('.icon-close').addEventListener('click', onCancel);
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', onCancel);
+      dialog.querySelector('[data-action="confirm"]').addEventListener('click', () => {
+        onConfirm(drafts);
+      });
+
+      renderGroups();
+      overlay.appendChild(dialog);
+      return overlay;
     }
 
     function createTemplateRenameDialog(template) {
@@ -326,47 +498,392 @@
       return overlay;
     }
 
-    function createBigAccountSelectionDialog(options) {
+    function createBigAccountSelectionDialog(payload) {
+      if (Array.isArray(payload)) {
+        const overlay = createOverlay();
+        const dialog = document.createElement('div');
+        dialog.className = 'modal-card manual-balance-card';
+        dialog.innerHTML = `
+          <div class="dialog-header">
+            <div class="dialog-title">请选择本次使用的大账号 / 币种</div>
+            <button class="icon-close" type="button">×</button>
+          </div>
+          <div class="big-account-selection-list"></div>
+          <div class="dialog-actions right">
+            <button class="primary-btn small" type="button" data-action="done">完成</button>
+          </div>
+        `;
+
+        const list = dialog.querySelector('.big-account-selection-list');
+        const radioName = `big-account-selection-${Date.now()}`;
+
+        payload.forEach((option, index) => {
+          const label = document.createElement('label');
+          label.className = 'big-account-selection-item';
+          label.innerHTML = `
+            <input class="new-account-checkbox" type="radio" name="${radioName}" value="${index}" />
+            <span>${escapeHtml(option.label)}</span>
+          `;
+          list.appendChild(label);
+        });
+
+        dialog.querySelector('.icon-close').addEventListener('click', closeModal);
+        dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+          const checked = list.querySelector(`input[name="${radioName}"]:checked`);
+
+          if (!checked) {
+            setStatus('请选择本次使用的大账号 / 币种', 'error');
+            return;
+          }
+
+          const selectedOption = payload[Number(checked.value)];
+          const result = await desktopApi.files.completeBigAccountSelection({
+            assignments: [
+              {
+                rowIndex: 0,
+                merchantId: selectedOption.merchantId,
+                currency: selectedOption.currency
+              }
+            ],
+            fixed: false
+          });
+
+          closeModal();
+          applyStatementResult(result);
+
+          if (result.status === 'error' && !result.manualBalancePromptReady) {
+            openModal(createAlertDialog(result.message));
+          }
+        });
+
+        overlay.appendChild(dialog);
+        return overlay;
+      }
+
+      const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+      const groupedBigAccounts = Array.from(
+        (Array.isArray(payload?.bigAccounts) ? payload.bigAccounts : []).reduce((accumulator, item) => {
+          const merchantId = String(item?.merchantId || '').trim();
+
+          if (!merchantId) {
+            return accumulator;
+          }
+
+          const existing = accumulator.get(merchantId) || {
+            merchantId,
+            currencies: [],
+            isMultiCurrency: false
+          };
+          const nextCurrencies = Array.from(
+            new Set([
+              ...existing.currencies,
+              ...(Array.isArray(item.currencies) ? item.currencies.map((value) => String(value || '').trim()).filter(Boolean) : [])
+            ])
+          );
+
+          accumulator.set(merchantId, {
+            merchantId,
+            currencies: nextCurrencies,
+            isMultiCurrency: Boolean(item.isMultiCurrency) || nextCurrencies.length > 1
+          });
+          return accumulator;
+        }, new Map()).values()
+      );
+      const fixedAssignmentsByRowIndex = new Map(
+        (Array.isArray(payload?.fixedAssignments) ? payload.fixedAssignments : [])
+          .map((item) => ({
+            rowIndex: Number(item?.rowIndex || 0),
+            merchantId: String(item?.merchantId || '').trim(),
+            currency: String(item?.currency || '').trim()
+          }))
+          .filter((item) => item.merchantId)
+          .map((item) => [item.rowIndex, item])
+      );
+      const currencyOptions = getCurrencyOptionEntries();
       const overlay = createOverlay();
       const dialog = document.createElement('div');
-      dialog.className = 'modal-card manual-balance-card';
+      let fixedEnabled = fixedAssignmentsByRowIndex.size > 0;
+      const currencyControls = [];
+      const rowControls = [];
+
+      function createCurrencyControl({ value = '', allowedCodes = [], disabled = false } = {}) {
+        const root = document.createElement('div');
+        root.className = 'enum-input-control big-account-selection-currency-control';
+        root.innerHTML = `
+          <div class="enum-input-shell">
+            <input class="new-account-input enum-ghost-input" type="text" tabindex="-1" disabled />
+            <input class="new-account-input enum-active-input big-account-selection-currency-input" type="text" spellcheck="false" />
+          </div>
+          <button class="new-account-input new-account-currency-dropdown-btn big-account-selection-dropdown-btn" type="button" aria-expanded="false"></button>
+          <div class="new-account-currency-dropdown-panel big-account-selection-dropdown-panel" hidden></div>
+        `;
+
+        const ghostInput = root.querySelector('.enum-ghost-input');
+        const input = root.querySelector('.big-account-selection-currency-input');
+        const button = root.querySelector('.big-account-selection-dropdown-btn');
+        const panel = root.querySelector('.big-account-selection-dropdown-panel');
+        let currentAllowedCodes = allowedCodes.slice();
+        let isDisabled = disabled;
+
+        function renderSuggestion() {
+          const suggestion = isDisabled ? '' : getCurrencySuggestion(input.value, currentAllowedCodes);
+          ghostInput.value = suggestion;
+          return suggestion;
+        }
+
+        function renderPanel() {
+          panel.replaceChildren();
+          const visibleOptions = currencyOptions.filter((option) => {
+            return !currentAllowedCodes.length || currentAllowedCodes.includes(option.code);
+          });
+
+          if (!visibleOptions.length) {
+            const emptyState = document.createElement('div');
+            emptyState.className = 'new-account-currency-option';
+            emptyState.innerHTML = '<span class="new-account-currency-option-text">无可选币种</span>';
+            panel.appendChild(emptyState);
+            return;
+          }
+
+          visibleOptions.forEach((option) => {
+            const optionButton = document.createElement('button');
+            optionButton.className = 'new-account-currency-option big-account-selection-option';
+            optionButton.type = 'button';
+            optionButton.textContent = option.label;
+            optionButton.addEventListener('click', () => {
+              input.value = option.code;
+              renderSuggestion();
+              closePanel();
+            });
+            panel.appendChild(optionButton);
+          });
+        }
+
+        function closePanel() {
+          panel.hidden = true;
+          button.classList.remove('is-open');
+          button.setAttribute('aria-expanded', 'false');
+        }
+
+        function openPanel() {
+          if (isDisabled) {
+            return;
+          }
+
+          currencyControls.forEach((control) => {
+            if (control !== api) {
+              control.close();
+            }
+          });
+          renderPanel();
+          panel.hidden = false;
+          button.classList.add('is-open');
+          button.setAttribute('aria-expanded', 'true');
+        }
+
+        function setAllowedCodes(nextAllowedCodes = []) {
+          currentAllowedCodes = nextAllowedCodes.slice();
+
+          if (input.value && currentAllowedCodes.length && !currentAllowedCodes.includes(input.value)) {
+            input.value = '';
+          }
+
+          renderSuggestion();
+        }
+
+        function setDisabled(nextDisabled) {
+          isDisabled = Boolean(nextDisabled);
+          input.disabled = isDisabled;
+          button.disabled = isDisabled;
+
+          if (isDisabled) {
+            closePanel();
+          }
+
+          renderSuggestion();
+        }
+
+        input.addEventListener('input', () => {
+          renderSuggestion();
+        });
+        input.addEventListener('keydown', (event) => {
+          if (event.key === 'ArrowRight') {
+            const suggestion = renderSuggestion();
+            const currentValue = String(input.value || '');
+
+            if (suggestion && suggestion !== currentValue && suggestion.toUpperCase().startsWith(currentValue.trim().toUpperCase())) {
+              input.value = suggestion;
+              renderSuggestion();
+              event.preventDefault();
+            }
+          }
+        });
+        button.addEventListener('click', () => {
+          if (panel.hidden) {
+            openPanel();
+            return;
+          }
+
+          closePanel();
+        });
+
+        input.value = value;
+        setAllowedCodes(currentAllowedCodes);
+        setDisabled(isDisabled);
+
+        const api = {
+          root,
+          input,
+          close: closePanel,
+          getValue: () => String(input.value || '').trim(),
+          setValue: (nextValue) => {
+            input.value = String(nextValue || '').trim();
+            renderSuggestion();
+          },
+          setAllowedCodes,
+          setDisabled
+        };
+
+        renderSuggestion();
+        return api;
+      }
+
+      dialog.className = 'modal-card big-account-selection-card';
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">请选择本次使用的大账号 / 币种</div>
-          <button class="icon-close" type="button">×</button>
+          <div class="big-account-selection-toolbar">
+            <button class="big-account-fixed-toggle${fixedEnabled ? ' is-active' : ''}" type="button" data-action="toggle-fixed" aria-pressed="${fixedEnabled ? 'true' : 'false'}">
+              <span class="big-account-fixed-toggle-dot"></span>
+              <span class="big-account-fixed-toggle-text">固定</span>
+            </button>
+            <button class="icon-close" type="button">×</button>
+          </div>
         </div>
-        <div class="big-account-selection-list"></div>
+        <div class="big-account-selection-intro">从上到下的大账号依次为：</div>
+        <div class="big-account-selection-rows"></div>
         <div class="dialog-actions right">
           <button class="primary-btn small" type="button" data-action="done">完成</button>
         </div>
       `;
 
-      const list = dialog.querySelector('.big-account-selection-list');
-      const radioName = `big-account-selection-${Date.now()}`;
+      const rowsContainer = dialog.querySelector('.big-account-selection-rows');
+      const fixedToggleBtn = dialog.querySelector('[data-action="toggle-fixed"]');
 
-      options.forEach((option, index) => {
-        const label = document.createElement('label');
-        label.className = 'big-account-selection-item';
-        label.innerHTML = `
-          <input class="new-account-checkbox" type="radio" name="${radioName}" value="${index}" />
-          <span>${escapeHtml(option.label)}</span>
+      function syncFixedToggle() {
+        fixedToggleBtn.classList.toggle('is-active', fixedEnabled);
+        fixedToggleBtn.setAttribute('aria-pressed', fixedEnabled ? 'true' : 'false');
+      }
+
+      rows.forEach((row, displayIndex) => {
+        const rowIndex = Number.isInteger(row.index) ? row.index : displayIndex;
+        const prefilledAssignment = fixedAssignmentsByRowIndex.get(rowIndex) || null;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'big-account-selection-row-card';
+        const accountSelect = document.createElement('select');
+        accountSelect.className = 'mapping-select big-account-selection-account-select';
+        accountSelect.innerHTML = [
+          '<option value=""></option>',
+          ...groupedBigAccounts.map((item) => `<option value="${escapeHtml(item.merchantId)}">${escapeHtml(item.merchantId)}</option>`)
+        ].join('');
+        const currencyControl = createCurrencyControl({
+          value: prefilledAssignment?.currency || '',
+          allowedCodes: [],
+          disabled: false
+        });
+
+        wrapper.innerHTML = `
+          <div class="big-account-selection-row-head">
+            <span class="big-account-selection-index">${escapeHtml(row.label || `${displayIndex + 1}.`)}</span>
+            <span class="big-account-selection-meta">${escapeHtml(row.fileName || '')}${row.sourceRowNumber ? ` 第${row.sourceRowNumber}行` : ''}</span>
+          </div>
+          <div class="big-account-selection-row-fields">
+            <div class="big-account-selection-field">
+              <span class="manual-balance-label">大账号</span>
+            </div>
+            <div class="big-account-selection-field">
+              <span class="manual-balance-label">币种</span>
+            </div>
+          </div>
         `;
-        list.appendChild(label);
+
+        const fields = wrapper.querySelector('.big-account-selection-row-fields');
+        const accountField = fields.children[0];
+        const currencyField = fields.children[1];
+        accountField.appendChild(accountSelect);
+        currencyField.appendChild(currencyControl.root);
+
+        function syncAccountSelection() {
+          const selectedAccount = groupedBigAccounts.find((item) => item.merchantId === accountSelect.value);
+          const allowedCodes = selectedAccount?.currencies?.slice() || [];
+          const isSingleCurrencyAccount = Boolean(selectedAccount) && !selectedAccount.isMultiCurrency && allowedCodes.length === 1;
+
+          currencyControl.setAllowedCodes(allowedCodes);
+
+          if (!selectedAccount) {
+            currencyControl.setValue('');
+            currencyControl.setDisabled(false);
+            return;
+          }
+
+          if (isSingleCurrencyAccount) {
+            currencyControl.setValue(allowedCodes[0]);
+            currencyControl.setDisabled(true);
+            return;
+          }
+
+          currencyControl.setDisabled(false);
+
+          if (prefilledAssignment?.merchantId === selectedAccount.merchantId && prefilledAssignment.currency) {
+            currencyControl.setValue(
+              !allowedCodes.length || allowedCodes.includes(prefilledAssignment.currency)
+                ? prefilledAssignment.currency
+                : ''
+            );
+            return;
+          }
+
+          if (allowedCodes.length === 1 && !currencyControl.getValue()) {
+            currencyControl.setValue(allowedCodes[0]);
+          }
+        }
+
+        accountSelect.addEventListener('change', syncAccountSelection);
+        accountSelect.value = prefilledAssignment?.merchantId || '';
+        syncAccountSelection();
+
+        rowControls.push({
+          rowIndex,
+          accountSelect,
+          currencyControl
+        });
+        currencyControls.push(currencyControl);
+        rowsContainer.appendChild(wrapper);
       });
+
+      fixedToggleBtn.addEventListener('click', () => {
+        fixedEnabled = !fixedEnabled;
+        syncFixedToggle();
+      });
+      syncFixedToggle();
 
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
       dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
-        const checked = list.querySelector(`input[name="${radioName}"]:checked`);
+        const assignments = rowControls.map((control) => ({
+          rowIndex: control.rowIndex,
+          merchantId: String(control.accountSelect.value || '').trim(),
+          currency: control.currencyControl.getValue()
+        }));
+        const invalidAssignment = assignments.find((item) => !item.merchantId || !item.currency);
 
-        if (!checked) {
-          setStatus('请选择本次使用的大账号 / 币种', 'error');
+        if (invalidAssignment) {
+          setStatus('请先为每一行选择大账号和币种', 'error');
           return;
         }
 
-        const selectedOption = options[Number(checked.value)];
         const result = await desktopApi.files.completeBigAccountSelection({
-          merchantId: selectedOption.merchantId,
-          currency: selectedOption.currency
+          assignments,
+          fixed: fixedEnabled
         });
 
         closeModal();
@@ -375,6 +892,14 @@
         if (result.status === 'error' && !result.manualBalancePromptReady) {
           openModal(createAlertDialog(result.message));
         }
+      });
+
+      overlay.addEventListener('mousedown', (event) => {
+        currencyControls.forEach((control) => {
+          if (!control.root.contains(event.target)) {
+            control.close();
+          }
+        });
       });
 
       overlay.appendChild(dialog);
@@ -413,9 +938,12 @@
       const floatingPanel = document.createElement('div');
       floatingPanel.className = 'new-account-currency-dropdown-panel big-account-currency-floating-panel';
       floatingPanel.hidden = true;
+      const currencyOptionEntries = getCurrencyOptionEntries();
       const currencySelectOptions = [
         '<option value=""></option>',
-        ...state.currencyOptions.map((currencyCode) => `<option value="${escapeHtml(currencyCode)}">${escapeHtml(currencyCode)}</option>`)
+        ...currencyOptionEntries.map((currencyOption) => (
+          `<option value="${escapeHtml(currencyOption.code)}">${escapeHtml(currencyOption.label)}</option>`
+        ))
       ].join('');
       let activeFloatingDropdown = null;
 
@@ -434,12 +962,12 @@
         const selectedCurrencies = Array.from(new Set((currencies || []).filter((value) => value)));
         button.textContent = formatBigAccountCurrencySummary(selectedCurrencies) || '\u00A0';
         button.title = getBigAccountCurrencyTitle(selectedCurrencies);
-        button.disabled = state.currencyOptions.length === 0;
+        button.disabled = currencyOptionEntries.length === 0;
       }
 
       function renderCurrencyDropdownOptions(selectedCurrencies, onChange) {
         floatingPanel.replaceChildren();
-        if (!state.currencyOptions.length) {
+        if (!currencyOptionEntries.length) {
           const emptyState = document.createElement('div');
           emptyState.className = 'new-account-currency-option';
           emptyState.innerHTML = '<span class="new-account-currency-option-text">未读取到币种选项</span>';
@@ -447,19 +975,19 @@
           return;
         }
 
-        state.currencyOptions.forEach((currencyCode) => {
+        currencyOptionEntries.forEach((currencyOption) => {
           const option = document.createElement('label');
           option.className = 'new-account-currency-option';
 
           const text = document.createElement('span');
           text.className = 'new-account-currency-option-text';
-          text.textContent = currencyCode;
+          text.textContent = currencyOption.label;
 
           const checkbox = document.createElement('input');
           checkbox.className = 'new-account-checkbox';
           checkbox.type = 'checkbox';
-          checkbox.value = currencyCode;
-          checkbox.checked = selectedCurrencies.includes(currencyCode);
+          checkbox.value = currencyOption.code;
+          checkbox.checked = selectedCurrencies.includes(currencyOption.code);
           checkbox.addEventListener('change', () => {
             onChange(
               Array.from(floatingPanel.querySelectorAll('input[type="checkbox"]:checked')).map((selectedCheckbox) => selectedCheckbox.value)
@@ -900,6 +1428,13 @@
         ? payload.advancedMappingFields
         : ADVANCED_MAPPING_FIELDS;
       const currentBigAccounts = cloneBigAccountItems(payload.bigAccounts || []);
+      const currentFixedAssignments = Array.isArray(payload.fixedAssignments)
+        ? payload.fixedAssignments.map((item) => ({
+            merchantId: String(item.merchantId || ''),
+            currency: String(item.currency || ''),
+            rowIndex: Number(item.rowIndex || 0)
+          }))
+        : [];
       dialog.className = 'modal-card mapping-card';
       dialog.innerHTML = `
         <div class="dialog-header">
@@ -943,9 +1478,12 @@
         row.dataset.templateField = fieldName;
         const isBalanceField = fieldName === 'Balance';
         const isMerchantIdField = fieldName === 'MerchantId';
+        const isAdvancedField = advancedMappingFields.includes(fieldName);
         const supportsSelfInputOption = isMerchantIdField;
+        const supportsMultiSelect = !isBalanceField && !supportsSelfInputOption && !isAdvancedField;
         const savedMapping = savedMap.get(fieldName) || {
           mappedField: isBalanceField ? BALANCE_DISABLED_OPTION : '',
+          mappedFields: [],
           customValue: '',
           isMultiBigAccount: false
         };
@@ -958,7 +1496,7 @@
           <td>${escapeHtml(fieldName)}</td>
           <td>
             <div class="mapping-field-editor">
-              <select class="mapping-select">${selectOptions}</select>
+              <select class="mapping-select${supportsMultiSelect ? ' mapping-multi-select' : ''}" ${supportsMultiSelect ? 'multiple size="6"' : ''}>${selectOptions}</select>
               ${isMerchantIdField ? `
                 <button class="secondary-btn small mapping-big-account-manage-btn" type="button" hidden>维护大账号</button>
               ` : ''}
@@ -968,10 +1506,20 @@
 
         const select = row.querySelector('.mapping-select');
         const manageBigAccountBtn = row.querySelector('.mapping-big-account-manage-btn');
-        select.value = savedMapping.mappedField || (isBalanceField ? BALANCE_DISABLED_OPTION : '');
+        const savedFields = Array.isArray(savedMapping.mappedFields) && savedMapping.mappedFields.length
+          ? savedMapping.mappedFields
+          : (savedMapping.mappedField ? [savedMapping.mappedField] : []);
+
+        if (supportsMultiSelect) {
+          Array.from(select.options).forEach((option) => {
+            option.selected = savedFields.includes(option.value);
+          });
+        } else {
+          select.value = savedMapping.mappedField || (isBalanceField ? BALANCE_DISABLED_OPTION : '');
+        }
 
         function syncEditorState() {
-          const isCustomInput = select.value === MERCHANT_ID_SELF_INPUT_OPTION;
+          const isCustomInput = getSelectValues(select)[0] === MERCHANT_ID_SELF_INPUT_OPTION;
 
           if (manageBigAccountBtn) {
             manageBigAccountBtn.hidden = !isCustomInput;
@@ -988,17 +1536,19 @@
                   ...payload,
                   mappings: draftMappings.map((mapping) => {
                     return mapping.templateField === 'MerchantId'
-                      ? { ...mapping, mappedField: MERCHANT_ID_SELF_INPUT_OPTION }
+                      ? { ...mapping, mappedField: MERCHANT_ID_SELF_INPUT_OPTION, mappedFields: [] }
                       : mapping;
                   }),
-                  bigAccounts: nextBigAccounts
+                  bigAccounts: nextBigAccounts,
+                  fixedAssignments: currentFixedAssignments
                 }));
               },
               onCancel: () => {
                 openModal(createMappingDialog({
                   ...payload,
                   mappings: draftMappings,
-                  bigAccounts: currentBigAccounts
+                  bigAccounts: currentBigAccounts,
+                  fixedAssignments: currentFixedAssignments
                 }));
               }
             }));
@@ -1015,7 +1565,7 @@
         const merchantRow = rowByField.get('MerchantId');
         const currencyRow = rowByField.get('Currency');
         const merchantSelect = merchantRow?.querySelector('.mapping-select');
-        const isManagedByBigAccount = merchantSelect?.value === MERCHANT_ID_SELF_INPUT_OPTION;
+        const isManagedByBigAccount = getSelectValues(merchantSelect)[0] === MERCHANT_ID_SELF_INPUT_OPTION;
 
         if (currencyRow) {
           currencyRow.hidden = Boolean(isManagedByBigAccount);
@@ -1031,33 +1581,80 @@
       });
 
       dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
-        const mappings = collectMappingDraftFromTable(tbody);
         const draftBigAccounts = cloneBigAccountItems(currentBigAccounts);
-        const result = await desktopApi.templates.saveMappings({
-          templateId: payload.template.id,
-          mappings,
-          bigAccounts: draftBigAccounts
-        });
+        const draftMappings = collectMappingDraftFromTable(tbody);
 
-        setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
-          errorReportReady: Boolean(result.errorReportReady)
-        });
+        const saveMappings = async (mappings) => {
+          const result = await desktopApi.templates.saveMappings({
+            templateId: payload.template.id,
+            mappings,
+            bigAccounts: draftBigAccounts,
+            fixedAssignments: currentFixedAssignments
+          });
 
-        if (result.status === 'success') {
-          await refreshTemplates();
-          openModal(createTemplateManagerDialog());
+          setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
+            errorReportReady: Boolean(result.errorReportReady)
+          });
+
+          if (result.status === 'success') {
+            await refreshTemplates();
+            openModal(createTemplateManagerDialog());
+            return;
+          }
+
+          openModal(createAlertDialog(result.message, {
+            onConfirm: () => {
+              openModal(createMappingDialog({
+                ...payload,
+                mappings,
+                bigAccounts: draftBigAccounts,
+                fixedAssignments: currentFixedAssignments
+              }));
+            }
+          }));
+        };
+
+        const multiSelectMappings = draftMappings.filter((mapping) => Array.isArray(mapping.mappedFields) && mapping.mappedFields.length > 1);
+
+        if (multiSelectMappings.length) {
+          openModal(createMappingOrderDialog({
+            mappings: multiSelectMappings,
+            onConfirm: (orderedMappings) => {
+              const orderedMap = new Map(orderedMappings.map((mapping) => [mapping.templateField, mapping.mappedFields.slice()]));
+              const nextMappings = draftMappings.map((mapping) => {
+                const orderedFields = orderedMap.get(mapping.templateField);
+
+                if (!orderedFields) {
+                  return mapping;
+                }
+
+                return {
+                  ...mapping,
+                  mappedField: orderedFields[0] || '',
+                  mappedFields: orderedFields
+                };
+              });
+              saveMappings(nextMappings).catch((error) => {
+                console.error(error);
+                setStatus('模板映射保存失败，请查看控制台', 'error');
+              });
+            },
+            onCancel: () => {
+              openModal(createMappingDialog({
+                ...payload,
+                mappings: draftMappings,
+                bigAccounts: draftBigAccounts,
+                fixedAssignments: currentFixedAssignments
+              }));
+            }
+          }));
           return;
         }
 
-        openModal(createAlertDialog(result.message, {
-          onConfirm: () => {
-            openModal(createMappingDialog({
-              ...payload,
-              mappings,
-              bigAccounts: draftBigAccounts
-            }));
-          }
-        }));
+        saveMappings(draftMappings).catch((error) => {
+          console.error(error);
+          setStatus('模板映射保存失败，请查看控制台', 'error');
+        });
       });
 
       overlay.appendChild(dialog);

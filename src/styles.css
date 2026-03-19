@@ -105,8 +105,8 @@ select {
   position: fixed;
   top: 0.5cm;
   left: 0.5cm;
-  width: 1.5cm;
-  height: 1.5cm;
+  width: 0.75cm;
+  height: 0.75cm;
   object-fit: cover;
   border-radius: 22px;
   box-shadow: 0 20px 42px rgba(53, 39, 20, 0.18);
@@ -394,6 +394,11 @@ select {
   gap: 8px;
 }
 
+#newAccountRows {
+  display: grid;
+  gap: 14px;
+}
+
 .new-account-label {
   font-size: 14px;
   color: var(--muted);
@@ -423,6 +428,41 @@ select {
   flex: 0 0 auto;
   width: 1.9cm;
   min-width: 118px;
+}
+
+.enum-input-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+}
+
+.enum-input-shell {
+  position: relative;
+  min-width: 0;
+  width: 100%;
+}
+
+.enum-ghost-input,
+.enum-active-input {
+  width: 100%;
+}
+
+.enum-ghost-input {
+  position: absolute;
+  inset: 0;
+  color: rgba(123, 106, 83, 0.48);
+  background: #fffdf8;
+  pointer-events: none;
+  opacity: 1;
+}
+
+.enum-active-input {
+  position: relative;
+  background: transparent;
+  z-index: 1;
 }
 
 .new-account-currency-dropdown-wrap {
@@ -512,6 +552,18 @@ select {
 
 .new-account-checkbox-text span:last-child {
   align-self: center;
+}
+
+.new-account-bank-account-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.new-account-add-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .new-account-actions-row {
@@ -924,6 +976,77 @@ select {
   gap: 12px;
 }
 
+.mapping-multi-select {
+  height: auto;
+  min-height: 128px;
+  padding: 10px 12px;
+}
+
+.mapping-order-card {
+  width: min(100%, 760px);
+}
+
+.mapping-order-intro {
+  margin-bottom: 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.mapping-order-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.mapping-order-group {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(104, 79, 39, 0.16);
+  background: rgba(255, 250, 241, 0.72);
+}
+
+.mapping-order-group-title {
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.mapping-order-list {
+  display: grid;
+  gap: 8px;
+}
+
+.mapping-order-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.mapping-order-index {
+  color: var(--muted);
+}
+
+.mapping-order-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mapping-order-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mapping-order-preview {
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .mapping-custom-input {
   flex: 1 1 220px;
   min-width: 220px;
@@ -1126,6 +1249,116 @@ select {
   border: 1px solid rgba(104, 79, 39, 0.12);
   border-radius: 12px;
   background: rgba(255, 250, 241, 0.7);
+}
+
+.big-account-selection-card {
+  width: min(100%, 920px);
+}
+
+.big-account-selection-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.big-account-selection-intro {
+  margin-bottom: 16px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.big-account-selection-rows {
+  display: grid;
+  gap: 14px;
+}
+
+.big-account-selection-row-card {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(104, 79, 39, 0.16);
+  background: rgba(255, 250, 241, 0.72);
+}
+
+.big-account-selection-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.big-account-selection-index {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.big-account-selection-meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.big-account-selection-row-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.big-account-selection-field {
+  display: grid;
+  gap: 8px;
+}
+
+.big-account-selection-account-select {
+  width: 100%;
+  min-width: 0;
+}
+
+.big-account-selection-currency-control {
+  min-width: 0;
+}
+
+.big-account-selection-dropdown-btn {
+  width: 52px;
+  min-width: 52px;
+  padding: 0;
+}
+
+.big-account-selection-dropdown-panel {
+  width: 100%;
+  min-width: 0;
+}
+
+.big-account-selection-option {
+  width: 100%;
+  justify-content: flex-start;
+  border: none;
+  background: transparent;
+}
+
+.big-account-fixed-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 0 14px 0 10px;
+  border: 1px solid rgba(104, 79, 39, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 250, 241, 0.86);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.big-account-fixed-toggle-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(104, 79, 39, 0.38);
+  background: transparent;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.big-account-fixed-toggle.is-active .big-account-fixed-toggle-dot {
+  background: var(--primary);
+  border-color: var(--primary);
 }
 
 .big-account-action-cell {

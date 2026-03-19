@@ -1,4 +1,4 @@
-const SUPPORTED_EXTENSIONS = new Set(['.xlsx', '.xls', '.csv']);
+const SUPPORTED_EXTENSIONS = new Set(['.xlsx', '.xls', '.csv', '.pdf']);
 const FIXED_FIELD_VALUE_PREFIX = '__FIXED__:';
 
 class FileValidationError extends Error {
