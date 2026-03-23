@@ -187,6 +187,17 @@ function buildMappedRows({
 
         const currencyResult = resolveCurrencyValue(rawValue, currencyMappings);
 
+        if (!currencyResult.value || currencyResult.value === '') {
+          const merchantIdValue = resolveRawValueByMapping(mappingByField['MerchantId'], row);
+          const merchantIdNormalized = normalizeCell(merchantIdValue);
+          if (merchantIdNormalized && Object.prototype.hasOwnProperty.call(accountMappingByBankId, merchantIdNormalized)) {
+            const accountMapping = accountMappingByBankId[merchantIdNormalized];
+            if (typeof accountMapping === 'object' && accountMapping.noCurrency && accountMapping.currency) {
+              return accountMapping.currency;
+            }
+          }
+        }
+
         if (currencyResult.issue) {
           issues.push({
             ...currencyResult.issue,
@@ -214,9 +225,12 @@ function buildMappedRows({
           return '';
         }
 
-        return Object.prototype.hasOwnProperty.call(accountMappingByBankId, originalValue)
-          ? String(accountMappingByBankId[originalValue])
-          : rawValue;
+        if (Object.prototype.hasOwnProperty.call(accountMappingByBankId, originalValue)) {
+          const accountMapping = accountMappingByBankId[originalValue];
+          return typeof accountMapping === 'object' ? accountMapping.clearingAccountId : String(accountMapping);
+        }
+
+        return rawValue;
       }
 
       if (primaryMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {

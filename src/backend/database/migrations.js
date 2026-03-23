@@ -73,7 +73,17 @@ function ensureTemplateMappingEnhancements(db) {
   }
 }
 
+function ensureAccountMappingCurrencySupport(db) {
+  if (!hasColumn(db, 'account_mappings', 'no_currency')) {
+    db.exec("ALTER TABLE account_mappings ADD COLUMN no_currency INTEGER NOT NULL DEFAULT 0;");
+  }
+  if (!hasColumn(db, 'account_mappings', 'currency')) {
+    db.exec("ALTER TABLE account_mappings ADD COLUMN currency TEXT NOT NULL DEFAULT '';");
+  }
+}
+
 module.exports = {
+  ensureAccountMappingCurrencySupport,
   ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,
   hasColumn

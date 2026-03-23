@@ -66,6 +66,8 @@ function listAccountMappings(db) {
         id,
         bank_account_id AS bankAccountId,
         clearing_account_id AS clearingAccountId,
+        no_currency AS noCurrency,
+        currency,
         row_index AS rowIndex
       FROM account_mappings
       ORDER BY row_index ASC, id ASC
@@ -82,14 +84,16 @@ function saveAccountMappings(db, mappings) {
 
     const insertStatement = db.prepare(`
       INSERT INTO account_mappings (
-        bank_account_id, clearing_account_id, row_index, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?)
+        bank_account_id, clearing_account_id, no_currency, currency, row_index, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     mappings.forEach((mapping, index) => {
       insertStatement.run(
         mapping.bankAccountId,
         mapping.clearingAccountId,
+        mapping.noCurrency ? 1 : 0,
+        mapping.currency || '',
         index,
         now,
         now

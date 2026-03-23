@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const {
+  ensureAccountMappingCurrencySupport,
   ensureTemplateKeySupport,
   ensureTemplateMappingEnhancements,
   hasColumn
@@ -76,6 +77,8 @@ class AppDatabase {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         bank_account_id TEXT NOT NULL UNIQUE,
         clearing_account_id TEXT NOT NULL,
+        no_currency INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT '',
         row_index INTEGER NOT NULL UNIQUE,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -84,6 +87,7 @@ class AppDatabase {
 
     this.ensureTemplateKeySupport();
     this.ensureTemplateMappingEnhancements();
+    this.ensureAccountMappingCurrencySupport();
   }
 
   hasColumn(tableName, columnName) {
@@ -96,6 +100,10 @@ class AppDatabase {
 
   ensureTemplateMappingEnhancements() {
     return ensureTemplateMappingEnhancements(this.db);
+  }
+
+  ensureAccountMappingCurrencySupport() {
+    return ensureAccountMappingCurrencySupport(this.db);
   }
 
   listTemplates() {
