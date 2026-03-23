@@ -1239,7 +1239,7 @@
           const isMultiCurrency = row.querySelector('.big-account-multi-checkbox').checked;
           const currencies = isMultiCurrency
             ? Array.from(new Set(row.querySelector('.big-account-currency-view').title.split('、').filter((value) => value)))
-            : [row.querySelector('.big-account-currency-select').value].filter((value) => value !== '');
+            : [row.querySelector('.big-account-currency-input').value.trim()].filter((value) => value !== '');
 
           return {
             merchantId,

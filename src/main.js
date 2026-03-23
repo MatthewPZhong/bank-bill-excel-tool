@@ -2511,6 +2511,10 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
     }
 
     if (normalizedSourceField === CONCAT_FIELDS_MAPPING_FIELD) {
+      if (!selectedSourceFields.length) {
+        throw new FileValidationError('FILE_READ', `${targetField} 使用"需要拼接字段"时必须至少选择 1 个源字段`);
+      }
+
       selectedSourceFields.forEach((fieldName) => {
         if (!sourceFieldSet.has(fieldName)) {
           throw new FileValidationError('FILE_READ', `拼接字段不存在：${fieldName}`);
