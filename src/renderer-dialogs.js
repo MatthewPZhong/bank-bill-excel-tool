@@ -370,94 +370,11 @@
         return {
           templateField: row.dataset.templateField,
           mappedField: mappedFields[0] || '',
-          mappedFields: mappedFields.length > 1 ? mappedFields : [],
+          mappedFields: [],
           customValue: '',
           isMultiBigAccount: false
         };
       });
-    }
-
-    function createMappingOrderDialog({ mappings, onConfirm, onCancel }) {
-      const overlay = createOverlay();
-      const dialog = document.createElement('div');
-      dialog.className = 'modal-card manager-card mapping-order-card';
-      dialog.innerHTML = `
-        <div class="dialog-header">
-          <div class="dialog-title">多选字段顺序确认</div>
-          <button class="icon-close" type="button">×</button>
-        </div>
-        <div class="mapping-order-intro">已检测到多选映射，请确认各字段的拼接顺序。</div>
-        <div class="mapping-order-groups"></div>
-        <div class="dialog-actions right">
-          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
-          <button class="primary-btn small" type="button" data-action="confirm">确认并保存</button>
-        </div>
-      `;
-
-      const groups = dialog.querySelector('.mapping-order-groups');
-      const drafts = mappings.map((mapping) => ({
-        ...mapping,
-        mappedFields: Array.isArray(mapping.mappedFields) ? mapping.mappedFields.slice() : []
-      }));
-
-      function renderGroups() {
-        groups.innerHTML = '';
-
-        drafts.forEach((mapping) => {
-          const block = document.createElement('section');
-          block.className = 'mapping-order-group';
-          const rows = mapping.mappedFields.map((fieldName, index) => `
-            <div class="mapping-order-row" data-index="${index}">
-              <span class="mapping-order-index">${index + 1}.</span>
-              <span class="mapping-order-name">${escapeHtml(fieldName)}</span>
-              <div class="mapping-order-actions">
-                <button class="text-action" type="button" data-action="up" ${index === 0 ? 'disabled' : ''}>上移</button>
-                <button class="text-action" type="button" data-action="down" ${index === mapping.mappedFields.length - 1 ? 'disabled' : ''}>下移</button>
-              </div>
-            </div>
-          `).join('');
-
-          block.innerHTML = `
-            <div class="mapping-order-group-title">${escapeHtml(mapping.templateField)}</div>
-            <div class="mapping-order-list">${rows}</div>
-            <div class="mapping-order-preview">预览结果：${escapeHtml(mapping.mappedFields.join(' + '))}</div>
-          `;
-
-          block.querySelectorAll('[data-action]').forEach((button) => {
-            button.addEventListener('click', () => {
-              const rowIndex = Number(button.closest('.mapping-order-row')?.dataset.index || -1);
-
-              if (rowIndex < 0) {
-                return;
-              }
-
-              const nextIndex = button.dataset.action === 'up' ? rowIndex - 1 : rowIndex + 1;
-
-              if (nextIndex < 0 || nextIndex >= mapping.mappedFields.length) {
-                return;
-              }
-
-              const nextFields = mapping.mappedFields.slice();
-              const [moved] = nextFields.splice(rowIndex, 1);
-              nextFields.splice(nextIndex, 0, moved);
-              mapping.mappedFields = nextFields;
-              renderGroups();
-            });
-          });
-
-          groups.appendChild(block);
-        });
-      }
-
-      dialog.querySelector('.icon-close').addEventListener('click', onCancel);
-      dialog.querySelector('[data-action="cancel"]').addEventListener('click', onCancel);
-      dialog.querySelector('[data-action="confirm"]').addEventListener('click', () => {
-        onConfirm(drafts);
-      });
-
-      renderGroups();
-      overlay.appendChild(dialog);
-      return overlay;
     }
 
     function createTemplateRenameDialog(template) {
@@ -1466,7 +1383,7 @@
           <td>${escapeHtml(fieldName)}</td>
           <td>
             <div class="mapping-field-editor">
-              <select class="mapping-select${supportsMultiSelect ? ' mapping-multi-select' : ''}" ${supportsMultiSelect ? 'multiple size="6"' : ''}>${selectOptions}</select>
+              <select class="mapping-select">${selectOptions}</select>
               ${isMerchantIdField ? `
                 <button class="secondary-btn small mapping-big-account-manage-btn" type="button" hidden>维护大账号</button>
               ` : ''}
@@ -1474,7 +1391,10 @@
                 <div class="concat-field-picker" hidden>
                   <button class="concat-picker-trigger secondary-btn small" type="button">选择字段</button>
                   <div class="concat-picker-panel" hidden></div>
-                  <span class="concat-preview" title=""></span>
+                  <div class="concat-preview-wrapper">
+                    <span class="concat-order-label">当前拼接顺序：</span>
+                    <span class="concat-preview" title=""></span>
+                  </div>
                 </div>
               ` : ''}
             </div>
@@ -1493,17 +1413,9 @@
           : (savedMapping.mappedField ? [savedMapping.mappedField] : []);
         const isSavedConcatMode = savedMapping.mappedField === CONCAT_FIELDS_MAPPING_FIELD;
 
-        if (supportsMultiSelect) {
-          if (isSavedConcatMode) {
-            Array.from(select.options).forEach((option) => {
-              option.selected = option.value === CONCAT_FIELDS_MAPPING_FIELD;
-            });
-            concatSelectedFields = Array.isArray(savedMapping.mappedFields) ? savedMapping.mappedFields.slice() : [];
-          } else {
-            Array.from(select.options).forEach((option) => {
-              option.selected = savedFields.includes(option.value);
-            });
-          }
+        if (isSavedConcatMode) {
+          select.value = CONCAT_FIELDS_MAPPING_FIELD;
+          concatSelectedFields = Array.isArray(savedMapping.mappedFields) ? savedMapping.mappedFields.slice() : [];
         } else {
           select.value = savedMapping.mappedField || (isBalanceField ? BALANCE_DISABLED_OPTION : '');
         }
@@ -1674,49 +1586,18 @@
           }));
         };
 
-        const multiSelectMappings = draftMappings.filter((mapping) => Array.isArray(mapping.mappedFields) && mapping.mappedFields.length > 1);
-
-        if (multiSelectMappings.length) {
-          openModal(createMappingOrderDialog({
-            mappings: multiSelectMappings,
-            onConfirm: (orderedMappings) => {
-              const orderedMap = new Map(orderedMappings.map((mapping) => [mapping.templateField, mapping.mappedFields.slice()]));
-              const nextMappings = draftMappings.map((mapping) => {
-                const orderedFields = orderedMap.get(mapping.templateField);
-
-                if (!orderedFields) {
-                  return mapping;
-                }
-
-                return {
-                  ...mapping,
-                  mappedField: mapping.mappedField === CONCAT_FIELDS_MAPPING_FIELD
-                    ? CONCAT_FIELDS_MAPPING_FIELD
-                    : orderedFields[0] || '',
-                  mappedFields: orderedFields
-                };
-              });
-              saveMappings(nextMappings).catch((error) => {
-                console.error(error);
-                setStatus('模板映射保存失败，请查看控制台', 'error');
-              });
-            },
-            onCancel: () => {
-              openModal(createMappingDialog({
-                ...payload,
-                mappings: draftMappings,
-                bigAccounts: draftBigAccounts,
-                fixedAssignments: currentFixedAssignments
-              }));
-            }
-          }));
-          return;
-        }
-
         saveMappings(draftMappings).catch((error) => {
           console.error(error);
           setStatus('模板映射保存失败，请查看控制台', 'error');
         });
+      });
+
+      dialog.addEventListener('mousedown', (event) => {
+        if (!event.target.closest('.concat-field-picker')) {
+          dialog.querySelectorAll('.concat-picker-panel:not([hidden])').forEach((panel) => {
+            panel.hidden = true;
+          });
+        }
       });
 
       overlay.appendChild(dialog);
