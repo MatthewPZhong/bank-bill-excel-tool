@@ -498,17 +498,68 @@ function buildPendingBigAccountFileEntries({ template, mappings, orderedTargetFi
   }));
 }
 
+function identifyAccountBlocks(headerRow, dataRows, rowMetas) {
+  if (!headerRow || !headerRow.length || !dataRows.length) {
+    return [{ startIndex: 0, endIndex: dataRows.length - 1, startRowNumber: rowMetas[0]?.sourceRowNumber || 2 }];
+  }
+
+  const normalizedHeader = headerRow.map((cell) => normalizeCell(cell));
+  const headerLength = normalizedHeader.filter((cell) => cell !== '').length;
+  const blocks = [];
+  let blockStart = 0;
+
+  for (let i = 0; i < dataRows.length; i++) {
+    const row = dataRows[i];
+    if (!Array.isArray(row)) continue;
+
+    const normalizedRow = row.map((cell) => normalizeCell(cell));
+    const matchCount = normalizedHeader.reduce((count, headerCell, colIndex) => {
+      if (headerCell === '' || colIndex >= normalizedRow.length) return count;
+      return normalizedRow[colIndex] === headerCell ? count + 1 : count;
+    }, 0);
+
+    const isHeaderRow = headerLength > 0 && matchCount / headerLength >= 0.5;
+
+    if (isHeaderRow && i > blockStart) {
+      blocks.push({
+        startIndex: blockStart,
+        endIndex: i - 1,
+        startRowNumber: rowMetas[blockStart]?.sourceRowNumber || blockStart + 2
+      });
+      blockStart = i + 1;
+    } else if (isHeaderRow && i === blockStart) {
+      blockStart = i + 1;
+    }
+  }
+
+  if (blockStart < dataRows.length) {
+    blocks.push({
+      startIndex: blockStart,
+      endIndex: dataRows.length - 1,
+      startRowNumber: rowMetas[blockStart]?.sourceRowNumber || blockStart + 2
+    });
+  }
+
+  return blocks.length ? blocks : [{ startIndex: 0, endIndex: dataRows.length - 1, startRowNumber: rowMetas[0]?.sourceRowNumber || 2 }];
+}
+
 function buildBigAccountSelectionRows(fileEntries = []) {
   const rows = [];
   let rowIndex = 0;
 
   fileEntries.forEach((entry) => {
+    const headerRow = entry.detailRows[0] || [];
+    const dataRows = entry.detailRows.slice(1);
     const rowMetas = Array.isArray(entry.detailRows?.rowMetas) ? entry.detailRows.rowMetas : [];
-    entry.detailRows.slice(1).forEach((_row, index) => {
+    const blocks = identifyAccountBlocks(headerRow, dataRows, rowMetas);
+
+    blocks.forEach((block) => {
       rows.push({
         index: rowIndex,
-        sourceRowNumber: rowMetas[index]?.sourceRowNumber || index + 2,
-        fileName: path.basename(entry.filePath)
+        sourceRowNumber: block.startRowNumber,
+        fileName: path.basename(entry.filePath),
+        blockStartIndex: block.startIndex,
+        blockEndIndex: block.endIndex
       });
       rowIndex += 1;
     });
@@ -524,28 +575,34 @@ function applyBigAccountAssignmentsToFileEntries(fileEntries = [], assignments =
     rowIndex: Number.isInteger(item.rowIndex) ? item.rowIndex : index
   }));
   const assignmentByRowIndex = new Map(normalizedAssignments.map((item) => [item.rowIndex, item]));
-  let globalRowIndex = 0;
+  let globalBlockIndex = 0;
 
   return fileEntries.map((entry) => {
     const nextRows = cloneRowsWithMetadata(entry.detailRows);
     const fieldIndexMap = buildFieldIndexMap(nextRows[0] || []);
     const merchantIdIndex = fieldIndexMap.get('MerchantId');
     const currencyIndex = fieldIndexMap.get('Currency');
+    const headerRow = nextRows[0] || [];
+    const dataRows = nextRows.slice(1);
+    const rowMetas = Array.isArray(entry.detailRows?.rowMetas) ? entry.detailRows.rowMetas : [];
+    const blocks = identifyAccountBlocks(headerRow, dataRows, rowMetas);
 
-    nextRows.slice(1).forEach((row) => {
-      const assignment = assignmentByRowIndex.get(globalRowIndex);
+    blocks.forEach((block) => {
+      const assignment = assignmentByRowIndex.get(globalBlockIndex);
 
       if (assignment) {
-        if (merchantIdIndex !== undefined) {
-          row[merchantIdIndex] = assignment.merchantId;
-        }
-
-        if (currencyIndex !== undefined) {
-          row[currencyIndex] = assignment.currency;
+        for (let i = block.startIndex; i <= block.endIndex && i < dataRows.length; i++) {
+          const row = dataRows[i];
+          if (merchantIdIndex !== undefined) {
+            row[merchantIdIndex] = assignment.merchantId;
+          }
+          if (currencyIndex !== undefined) {
+            row[currencyIndex] = assignment.currency;
+          }
         }
       }
 
-      globalRowIndex += 1;
+      globalBlockIndex += 1;
     });
 
     return {
@@ -1394,9 +1451,12 @@ function buildStatementOutputFilePath({
   const publicFileName = displayMerchantId
     ? `${templateName}-${displayMerchantId}-${outputTag}-${safeDateLabel}.xlsx`
     : `${templateName}-${outputTag}-${safeDateLabel}.xlsx`;
-  const internalFileName = internalSuffix
-    ? publicFileName.replace(/\.xlsx$/i, `__${internalSuffix}.xlsx`)
+  const internalBase = merchantId
+    ? `${templateName}-${merchantId}-${outputTag}-${safeDateLabel}.xlsx`
     : publicFileName;
+  const internalFileName = internalSuffix
+    ? internalBase.replace(/\.xlsx$/i, `__${internalSuffix}.xlsx`)
+    : internalBase;
   const outputMeta = buildOutputFilePath({
     kind,
     outputFileName: internalFileName
@@ -2241,7 +2301,7 @@ function validateAccountMappings(mappings) {
       bankAccountId,
       clearingAccountId,
       noCurrency,
-      currency
+      currency: noCurrency ? currency.toUpperCase() : currency
     });
   }
 
@@ -3766,10 +3826,13 @@ function registerFileHandlers() {
           orderedTargetFields: templateConfig.exportTargetFields,
           inputFilePaths: selectionResult.filePaths
         });
-        const totalDataRows = provisionalFileEntries.reduce(
-          (sum, entry) => sum + Math.max(0, entry.detailRows.length - 1), 0
-        );
-        const needsSelection = inputFileCount > 1 || totalDataRows > 1;
+        const totalBlocks = provisionalFileEntries.reduce((sum, entry) => {
+          const headerRow = entry.detailRows[0] || [];
+          const dataRows = entry.detailRows.slice(1);
+          const rowMetas = Array.isArray(entry.detailRows?.rowMetas) ? entry.detailRows.rowMetas : [];
+          return sum + identifyAccountBlocks(headerRow, dataRows, rowMetas).length;
+        }, 0);
+        const needsSelection = inputFileCount > 1 || totalBlocks > 1;
 
         if (needsSelection) {
           if (!templateConfig.bigAccounts.length) {

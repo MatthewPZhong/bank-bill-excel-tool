@@ -357,8 +357,7 @@
         const isConcatMode = mappedFields[0] === CONCAT_FIELDS_MAPPING_FIELD;
 
         if (isConcatMode) {
-          const concatPreview = row.querySelector('.concat-preview');
-          const concatFields = concatPreview?.title ? concatPreview.title.split(' ').filter(Boolean) : [];
+          const concatFields = row.dataset.concatFields ? JSON.parse(row.dataset.concatFields) : [];
           return {
             templateField: row.dataset.templateField,
             mappedField: CONCAT_FIELDS_MAPPING_FIELD,
@@ -1514,6 +1513,7 @@
           const previewText = concatSelectedFields.join(' ');
           concatPreview.textContent = previewText.length > 40 ? previewText.slice(0, 40) + '......' : previewText;
           concatPreview.title = concatSelectedFields.join(' ');
+          row.dataset.concatFields = JSON.stringify(concatSelectedFields);
         }
 
         function renderConcatPanel() {
@@ -1564,6 +1564,7 @@
         }
 
         if (isSavedConcatMode) {
+          row.dataset.concatFields = JSON.stringify(concatSelectedFields);
           updateConcatPreview();
         }
 
@@ -1673,7 +1674,7 @@
           }));
         };
 
-        const multiSelectMappings = draftMappings.filter((mapping) => Array.isArray(mapping.mappedFields) && mapping.mappedFields.length > 1 && mapping.mappedField !== CONCAT_FIELDS_MAPPING_FIELD);
+        const multiSelectMappings = draftMappings.filter((mapping) => Array.isArray(mapping.mappedFields) && mapping.mappedFields.length > 1);
 
         if (multiSelectMappings.length) {
           openModal(createMappingOrderDialog({
@@ -1689,7 +1690,9 @@
 
                 return {
                   ...mapping,
-                  mappedField: orderedFields[0] || '',
+                  mappedField: mapping.mappedField === CONCAT_FIELDS_MAPPING_FIELD
+                    ? CONCAT_FIELDS_MAPPING_FIELD
+                    : orderedFields[0] || '',
                   mappedFields: orderedFields
                 };
               });
