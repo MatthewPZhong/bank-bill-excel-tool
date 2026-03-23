@@ -499,8 +499,8 @@ function formatSelectedCurrencySummary(currencies) {
     return '\u00A0';
   }
 
-  if (currencies.length === 1) {
-    return getCurrencyOptionLabel(currencies[0]);
+  if (currencies.length <= 2) {
+    return currencies.map((code) => getCurrencyOptionLabel(code)).join('、');
   }
 
   return `已选${currencies.length}项`;
