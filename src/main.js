@@ -2413,6 +2413,8 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
         isMultiCurrency: Boolean(item.isMultiCurrency)
       }))
     : [];
+  const bigAccountLookup = new Map(cleanedBigAccounts.map((item) => [item.merchantId, item]));
+  const seenFixedRowIndices = new Set();
   const cleanedFixedAssignments = merchantIdManagedByBigAccounts
     ? fixedAssignments
         .map((item, index) => ({
@@ -2420,7 +2422,15 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
           currency: normalizeCell(item.currency),
           rowIndex: Number.isInteger(item.rowIndex) ? item.rowIndex : index
         }))
-        .filter((item) => item.merchantId !== '')
+        .filter((item) => {
+          if (!item.merchantId) return false;
+          if (seenFixedRowIndices.has(item.rowIndex)) return false;
+          const bigAccount = bigAccountLookup.get(item.merchantId);
+          if (!bigAccount) return false;
+          if (item.currency && bigAccount.currencies.length && !bigAccount.currencies.includes(item.currency)) return false;
+          seenFixedRowIndices.add(item.rowIndex);
+          return true;
+        })
     : [];
 
   targetFields.forEach((targetField) => {
