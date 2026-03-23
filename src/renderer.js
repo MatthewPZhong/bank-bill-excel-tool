@@ -499,8 +499,8 @@ function formatSelectedCurrencySummary(currencies) {
     return '\u00A0';
   }
 
-  if (currencies.length === 1) {
-    return getCurrencyOptionLabel(currencies[0]);
+  if (currencies.length <= 2) {
+    return currencies.map((code) => getCurrencyOptionLabel(code)).join('、');
   }
 
   return `已选${currencies.length}项`;
@@ -658,7 +658,14 @@ function renderNewAccountCurrencyOptions(rowOrRefs = null) {
       const checkbox = document.createElement('input');
       checkbox.className = 'new-account-checkbox';
       checkbox.type = 'checkbox';
+      checkbox.dataset.currencyCode = code;
       checkbox.checked = rowState.selectedCurrencies.includes(code);
+
+      const indexSpan = document.createElement('span');
+      indexSpan.className = 'concat-picker-index';
+      const selectedIdx = rowState.selectedCurrencies.indexOf(code);
+      indexSpan.textContent = selectedIdx >= 0 ? `${selectedIdx + 1}.` : '';
+
       checkbox.addEventListener('change', () => {
         if (checkbox.checked) {
           rowState.selectedCurrencies = Array.from(new Set([...rowState.selectedCurrencies, code]));
@@ -666,11 +673,16 @@ function renderNewAccountCurrencyOptions(rowOrRefs = null) {
           rowState.selectedCurrencies = rowState.selectedCurrencies.filter((value) => value !== code);
         }
 
+        refs.currencyDropdownPanel.querySelectorAll('.concat-picker-index').forEach((span) => {
+          const optionCode = span.parentElement?.querySelector('.new-account-checkbox')?.dataset?.currencyCode || '';
+          const idx = rowState.selectedCurrencies.indexOf(optionCode);
+          span.textContent = idx >= 0 ? `${idx + 1}.` : '';
+        });
         updateNewAccountCurrencyDropdownLabel(refs);
         handleNewAccountFormMutation();
       });
 
-      option.append(text, checkbox);
+      option.append(checkbox, indexSpan, text);
     } else {
       option.addEventListener('click', () => {
         refs.currencyInput.value = code;

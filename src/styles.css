@@ -848,13 +848,6 @@ select {
   width: min(100%, 1120px);
 }
 
-.mapping-card .data-table td:first-child,
-.mapping-card .data-table th:first-child {
-  width: 1%;
-  white-space: nowrap;
-  padding-right: 8px;
-}
-
 .concat-field-picker {
   display: inline-flex;
   align-items: center;
@@ -901,6 +894,19 @@ select {
   font-weight: 600;
 }
 
+.concat-preview-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.concat-order-label {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .concat-preview {
   max-width: 200px;
   overflow: hidden;
@@ -908,6 +914,12 @@ select {
   white-space: nowrap;
   color: var(--muted);
   font-size: 13px;
+}
+
+.new-account-label-with-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .account-mapping-clearing-cell {
@@ -1084,77 +1096,6 @@ select {
   gap: 12px;
 }
 
-.mapping-multi-select {
-  height: auto;
-  min-height: 128px;
-  padding: 10px 12px;
-}
-
-.mapping-order-card {
-  width: min(100%, 760px);
-}
-
-.mapping-order-intro {
-  margin-bottom: 14px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.mapping-order-groups {
-  display: grid;
-  gap: 14px;
-}
-
-.mapping-order-group {
-  padding: 16px;
-  border-radius: 18px;
-  border: 1px solid rgba(104, 79, 39, 0.16);
-  background: rgba(255, 250, 241, 0.72);
-}
-
-.mapping-order-group-title {
-  font-weight: 700;
-  margin-bottom: 12px;
-}
-
-.mapping-order-list {
-  display: grid;
-  gap: 8px;
-}
-
-.mapping-order-row {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.68);
-}
-
-.mapping-order-index {
-  color: var(--muted);
-}
-
-.mapping-order-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mapping-order-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.mapping-order-preview {
-  margin-top: 12px;
-  color: var(--muted);
-  font-size: 14px;
-}
-
 .mapping-custom-input {
   flex: 1 1 220px;
   min-width: 220px;
@@ -1317,17 +1258,13 @@ select {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   min-height: 44px;
-}
-
-.big-account-currency-select {
-  min-width: 150px;
 }
 
 .big-account-currency-dropdown-wrap {
   position: relative;
-  width: 168px;
+  width: 128px;
 }
 
 .big-account-currency-dropdown-btn {
