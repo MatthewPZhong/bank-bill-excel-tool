@@ -18,6 +18,7 @@ const ADVANCED_MAPPING_FIELDS = [
   AMOUNT_BASED_NAME_MAPPING_FIELD,
   AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
 ];
+const CONCAT_FIELDS_MAPPING_FIELD = '需要拼接字段';
 const MODULES = Object.freeze({
   statementGenerator: {
     id: 'statement-generator',
@@ -187,6 +188,7 @@ const {
   BALANCE_CALCULATED_OPTION,
   MERCHANT_ID_SELF_INPUT_OPTION,
   ADVANCED_MAPPING_FIELDS,
+  CONCAT_FIELDS_MAPPING_FIELD,
   refreshTemplates,
   setStatus,
   applyStatementResult,
@@ -697,7 +699,7 @@ function syncNewAccountCurrencyMode(rowOrRefs = null) {
   const refs = rowOrRefs.row ? rowOrRefs : getNewAccountRowElements(rowOrRefs);
   const isMultiCurrency = isNewAccountMultiCurrencyMode(refs);
   refs.currencyInput.hidden = isMultiCurrency;
-  refs.currencyDropdownWrap.hidden = false;
+  refs.currencyDropdownWrap.hidden = !isMultiCurrency;
   refs.currencyRow?.classList.toggle('is-multi', isMultiCurrency);
   refs.currencyRow?.classList.toggle('is-single', !isMultiCurrency);
 

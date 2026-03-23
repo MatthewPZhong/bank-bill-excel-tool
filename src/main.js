@@ -90,6 +90,7 @@ const BALANCE_DISABLED_OPTION = '无';
 const BALANCE_CALCULATED_OPTION = '通过发生额计算';
 const MERCHANT_ID_SELF_INPUT_OPTION = '自己输入';
 const MERCHANT_ID_MULTI_ACCOUNT_MARKER = '__MULTI_BIG_ACCOUNT__';
+const CONCAT_FIELDS_MAPPING_FIELD = '需要拼接字段';
 const CUSTOM_INPUT_TARGET_FIELDS = new Set(['MerchantId']);
 const SIGNED_AMOUNT_MAPPING_FIELD = '按正负号拆分的发生额';
 const AMOUNT_BASED_NAME_MAPPING_FIELD = '根据发生额做映射的户名';
@@ -1221,6 +1222,8 @@ function normalizeMappingRows({ template, mappings, enumValues, bigAccounts = []
     const savedMapping = savedMap.get(fieldName) || null;
     const savedValue = getPrimaryMappedField(savedMapping);
     const savedFields = getMappingFieldValues(savedMapping);
+    const rawMappedField = normalizeCell(savedMapping?.mappedField);
+    const isConcatMode = rawMappedField === CONCAT_FIELDS_MAPPING_FIELD;
     const customInputMapping = CUSTOM_INPUT_TARGET_FIELDS.has(fieldName)
       ? decodeCustomInputMappingValue(savedValue)
       : null;
@@ -1228,28 +1231,32 @@ function normalizeMappingRows({ template, mappings, enumValues, bigAccounts = []
 
     return {
       templateField: fieldName,
-      mappedField: fieldName === 'Balance'
-        ? savedValue || BALANCE_DISABLED_OPTION
-        : fieldName === 'MerchantId' && merchantIdManagedByBigAccounts
-          ? MERCHANT_ID_SELF_INPUT_OPTION
-          : fieldName === 'Currency' && merchantIdManagedByBigAccounts
-            ? ''
-            : fieldName === 'Currency' && savedValue.startsWith(FIXED_FIELD_VALUE_PREFIX)
+      mappedField: isConcatMode
+        ? CONCAT_FIELDS_MAPPING_FIELD
+        : fieldName === 'Balance'
+          ? savedValue || BALANCE_DISABLED_OPTION
+          : fieldName === 'MerchantId' && merchantIdManagedByBigAccounts
+            ? MERCHANT_ID_SELF_INPUT_OPTION
+            : fieldName === 'Currency' && merchantIdManagedByBigAccounts
               ? ''
-              : customInputMapping
-                ? customInputMapping.mappedField
-                : savedValue === BALANCE_DISABLED_OPTION
-                  ? ''
-                  : savedValue || '',
+              : fieldName === 'Currency' && savedValue.startsWith(FIXED_FIELD_VALUE_PREFIX)
+                ? ''
+                : customInputMapping
+                  ? customInputMapping.mappedField
+                  : savedValue === BALANCE_DISABLED_OPTION
+                    ? ''
+                    : savedValue || '',
       mappedFields:
         fieldName === 'Balance' ||
         fieldName === 'MerchantId' ||
         fieldName === 'Currency' && merchantIdManagedByBigAccounts ||
         (customInputMapping && customInputMapping.isCustomInput)
           ? []
-          : savedFields.length > 1
+          : isConcatMode
             ? savedFields
-            : [],
+            : savedFields.length > 1
+              ? savedFields
+              : [],
       customValue: fieldName === 'MerchantId'
         ? ''
         : customInputMapping
@@ -1277,18 +1284,24 @@ function normalizeExportMappingRows({ template, mappings, enumValues }) {
     const savedMapping = savedMap.get(fieldName) || null;
     const savedValue = getPrimaryMappedField(savedMapping);
     const savedFields = getMappingFieldValues(savedMapping);
+    const rawMappedField = normalizeCell(savedMapping?.mappedField);
+    const isConcatMode = rawMappedField === CONCAT_FIELDS_MAPPING_FIELD;
 
     return {
       templateField: fieldName,
-      mappedField: fieldName === 'Balance'
-        ? savedValue || BALANCE_DISABLED_OPTION
-        : savedValue === BALANCE_DISABLED_OPTION
-          ? ''
-          : savedValue || '',
+      mappedField: isConcatMode
+        ? CONCAT_FIELDS_MAPPING_FIELD
+        : fieldName === 'Balance'
+          ? savedValue || BALANCE_DISABLED_OPTION
+          : savedValue === BALANCE_DISABLED_OPTION
+            ? ''
+            : savedValue || '',
       mappedFields:
-        fieldName === 'Balance' || savedFields.length <= 1
-          ? []
-          : savedFields
+        isConcatMode
+          ? savedFields
+          : fieldName === 'Balance' || savedFields.length <= 1
+            ? []
+            : savedFields
     };
   });
 }
@@ -1377,8 +1390,9 @@ function buildStatementOutputFilePath({
   internalSuffix = ''
 }) {
   const safeDateLabel = dateRangeLabel || getToday();
-  const publicFileName = merchantId
-    ? `${templateName}-${merchantId}-${outputTag}-${safeDateLabel}.xlsx`
+  const displayMerchantId = merchantId && merchantId.length > 4 ? merchantId.slice(-4) : merchantId;
+  const publicFileName = displayMerchantId
+    ? `${templateName}-${displayMerchantId}-${outputTag}-${safeDateLabel}.xlsx`
     : `${templateName}-${outputTag}-${safeDateLabel}.xlsx`;
   const internalFileName = internalSuffix
     ? publicFileName.replace(/\.xlsx$/i, `__${internalSuffix}.xlsx`)
@@ -2205,10 +2219,29 @@ function validateAccountMappings(mappings) {
       };
     }
 
+    const noCurrency = Boolean(mapping.noCurrency);
+    const currency = String(mapping.currency || '').trim();
+
+    if (noCurrency && !currency) {
+      return {
+        status: 'error',
+        message: '请填写币种'
+      };
+    }
+
+    if (noCurrency && !/^[A-Z]{3,5}$/i.test(currency)) {
+      return {
+        status: 'error',
+        message: '币种代码无效'
+      };
+    }
+
     bankAccountSeen.add(bankAccountId);
     cleanedMappings.push({
       bankAccountId,
-      clearingAccountId
+      clearingAccountId,
+      noCurrency,
+      currency
     });
   }
 
@@ -2413,6 +2446,21 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
         templateField: targetField,
         mappedField: merchantIdManagedByBigAccounts ? '' : normalizedSourceField,
         mappedFields: []
+      });
+      return;
+    }
+
+    if (normalizedSourceField === CONCAT_FIELDS_MAPPING_FIELD) {
+      selectedSourceFields.forEach((fieldName) => {
+        if (!sourceFieldSet.has(fieldName)) {
+          throw new FileValidationError('FILE_READ', `拼接字段不存在：${fieldName}`);
+        }
+      });
+
+      cleanedMappings.push({
+        templateField: targetField,
+        mappedField: CONCAT_FIELDS_MAPPING_FIELD,
+        mappedFields: selectedSourceFields
       });
       return;
     }
@@ -2919,9 +2967,12 @@ function registerTemplateHandlers() {
 function buildMappedFieldLookup(mappings) {
   return mappings.reduce((accumulator, mapping) => {
     const mappedFields = getMappingFieldValues(mapping);
-    accumulator[mapping.templateField] = mappedFields.length > 1
-      ? mappedFields
-      : getPrimaryMappedField(mapping);
+    const isConcatMode = normalizeCell(mapping.mappedField) === CONCAT_FIELDS_MAPPING_FIELD;
+    accumulator[mapping.templateField] = isConcatMode
+      ? (Array.isArray(mapping.mappedFields) && mapping.mappedFields.length ? mapping.mappedFields : mappedFields)
+      : mappedFields.length > 1
+        ? mappedFields
+        : getPrimaryMappedField(mapping);
     return accumulator;
   }, {});
 }
@@ -3002,7 +3053,11 @@ function buildStatementGenerationConfig({
   );
 
   const accountMappingByBankId = database.listAccountMappings().reduce((accumulator, mapping) => {
-    accumulator[mapping.bankAccountId] = mapping.clearingAccountId;
+    accumulator[mapping.bankAccountId] = {
+      clearingAccountId: mapping.clearingAccountId,
+      noCurrency: Boolean(mapping.noCurrency),
+      currency: mapping.currency || ''
+    };
     return accumulator;
   }, {});
 
@@ -3672,6 +3727,9 @@ function registerFileHandlers() {
       }
 
       const bigAccountOptions = expandBigAccountConfigurations(templateConfig.bigAccounts);
+      const isMerchantIdSelfInput = templateConfig.exportMappings.some(
+        (mapping) => mapping.templateField === 'MerchantId' && mapping.mappedField === MERCHANT_ID_SELF_INPUT_OPTION
+      );
 
       if (bigAccountOptions.length > 1) {
         const provisionalFileEntries = buildPendingBigAccountFileEntries({
@@ -3698,6 +3756,48 @@ function registerFileHandlers() {
           bigAccounts: templateConfig.bigAccounts,
           fixedAssignments: templateConfig.fixedAssignments
         });
+      }
+
+      if (isMerchantIdSelfInput && bigAccountOptions.length <= 1) {
+        const inputFileCount = selectionResult.filePaths.length;
+        const provisionalFileEntries = buildPendingBigAccountFileEntries({
+          template: templateConfig.template,
+          mappings: templateConfig.exportMappings,
+          orderedTargetFields: templateConfig.exportTargetFields,
+          inputFilePaths: selectionResult.filePaths
+        });
+        const totalDataRows = provisionalFileEntries.reduce(
+          (sum, entry) => sum + Math.max(0, entry.detailRows.length - 1), 0
+        );
+        const needsSelection = inputFileCount > 1 || totalDataRows > 1;
+
+        if (needsSelection) {
+          if (!templateConfig.bigAccounts.length) {
+            return createErrorResult({
+              step: '导入网银明细文件',
+              message: '请先在映射管理中维护大账号列表',
+              errorCode: 'BIG_ACCOUNT_REQUIRED'
+            });
+          }
+
+          const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
+          rememberPendingBigAccountSelection({
+            templateId,
+            template: templateConfig.template,
+            mappings: templateConfig.exportMappings,
+            orderedTargetFields: templateConfig.exportTargetFields,
+            inputFilePaths: selectionResult.filePaths,
+            bigAccounts: templateConfig.bigAccounts,
+            fixedAssignments: templateConfig.fixedAssignments,
+            fileEntries: provisionalFileEntries,
+            rows: selectionRows
+          });
+          return buildBigAccountSelectionRequiredResult({
+            rows: selectionRows,
+            bigAccounts: templateConfig.bigAccounts,
+            fixedAssignments: templateConfig.fixedAssignments
+          });
+        }
       }
 
       const selectedBigAccount = bigAccountOptions.length === 1

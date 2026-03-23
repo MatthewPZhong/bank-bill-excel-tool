@@ -848,6 +848,88 @@ select {
   width: min(100%, 1120px);
 }
 
+.mapping-card .data-table td:first-child,
+.mapping-card .data-table th:first-child {
+  width: 1%;
+  white-space: nowrap;
+  padding-right: 8px;
+}
+
+.concat-field-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+
+.concat-picker-trigger {
+  min-width: 80px;
+  height: 34px;
+}
+
+.concat-picker-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  min-width: 240px;
+  max-height: 300px;
+  overflow-y: auto;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 250, 242, 0.98);
+  box-shadow: 0 14px 30px rgba(45, 31, 14, 0.15);
+  padding: 8px 0;
+}
+
+.concat-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.concat-picker-option:hover {
+  background: rgba(154, 90, 26, 0.06);
+}
+
+.concat-picker-index {
+  width: 2em;
+  text-align: right;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.concat-preview {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.account-mapping-clearing-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.no-currency-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.account-currency-input-shell {
+  width: 100px;
+}
+
 .alert-card {
   width: min(100%, 420px);
   padding: 34px 28px 28px;

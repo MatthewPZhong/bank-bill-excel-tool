@@ -8,6 +8,7 @@
       BALANCE_CALCULATED_OPTION,
       MERCHANT_ID_SELF_INPUT_OPTION,
       ADVANCED_MAPPING_FIELDS,
+      CONCAT_FIELDS_MAPPING_FIELD,
       refreshTemplates,
       setStatus,
       applyStatementResult,
@@ -353,6 +354,19 @@
       return Array.from(tableBody.querySelectorAll('tr[data-template-field]')).map((row) => {
         const select = row.querySelector('.mapping-select');
         const mappedFields = getSelectValues(select);
+        const isConcatMode = mappedFields[0] === CONCAT_FIELDS_MAPPING_FIELD;
+
+        if (isConcatMode) {
+          const concatPreview = row.querySelector('.concat-preview');
+          const concatFields = concatPreview?.title ? concatPreview.title.split(' ').filter(Boolean) : [];
+          return {
+            templateField: row.dataset.templateField,
+            mappedField: CONCAT_FIELDS_MAPPING_FIELD,
+            mappedFields: concatFields,
+            customValue: '',
+            isMultiBigAccount: false
+          };
+        }
 
         return {
           templateField: row.dataset.templateField,
@@ -614,14 +628,10 @@
             <input class="new-account-input enum-ghost-input" type="text" tabindex="-1" disabled />
             <input class="new-account-input enum-active-input big-account-selection-currency-input" type="text" spellcheck="false" />
           </div>
-          <button class="new-account-input new-account-currency-dropdown-btn big-account-selection-dropdown-btn" type="button" aria-expanded="false"></button>
-          <div class="new-account-currency-dropdown-panel big-account-selection-dropdown-panel" hidden></div>
         `;
 
         const ghostInput = root.querySelector('.enum-ghost-input');
         const input = root.querySelector('.big-account-selection-currency-input');
-        const button = root.querySelector('.big-account-selection-dropdown-btn');
-        const panel = root.querySelector('.big-account-selection-dropdown-panel');
         let currentAllowedCodes = allowedCodes.slice();
         let isDisabled = disabled;
 
@@ -629,56 +639,6 @@
           const suggestion = isDisabled ? '' : getCurrencySuggestion(input.value, currentAllowedCodes);
           ghostInput.value = suggestion;
           return suggestion;
-        }
-
-        function renderPanel() {
-          panel.replaceChildren();
-          const visibleOptions = currencyOptions.filter((option) => {
-            return !currentAllowedCodes.length || currentAllowedCodes.includes(option.code);
-          });
-
-          if (!visibleOptions.length) {
-            const emptyState = document.createElement('div');
-            emptyState.className = 'new-account-currency-option';
-            emptyState.innerHTML = '<span class="new-account-currency-option-text">无可选币种</span>';
-            panel.appendChild(emptyState);
-            return;
-          }
-
-          visibleOptions.forEach((option) => {
-            const optionButton = document.createElement('button');
-            optionButton.className = 'new-account-currency-option big-account-selection-option';
-            optionButton.type = 'button';
-            optionButton.textContent = option.label;
-            optionButton.addEventListener('click', () => {
-              input.value = option.code;
-              renderSuggestion();
-              closePanel();
-            });
-            panel.appendChild(optionButton);
-          });
-        }
-
-        function closePanel() {
-          panel.hidden = true;
-          button.classList.remove('is-open');
-          button.setAttribute('aria-expanded', 'false');
-        }
-
-        function openPanel() {
-          if (isDisabled) {
-            return;
-          }
-
-          currencyControls.forEach((control) => {
-            if (control !== api) {
-              control.close();
-            }
-          });
-          renderPanel();
-          panel.hidden = false;
-          button.classList.add('is-open');
-          button.setAttribute('aria-expanded', 'true');
         }
 
         function setAllowedCodes(nextAllowedCodes = []) {
@@ -694,12 +654,6 @@
         function setDisabled(nextDisabled) {
           isDisabled = Boolean(nextDisabled);
           input.disabled = isDisabled;
-          button.disabled = isDisabled;
-
-          if (isDisabled) {
-            closePanel();
-          }
-
           renderSuggestion();
         }
 
@@ -718,14 +672,6 @@
             }
           }
         });
-        button.addEventListener('click', () => {
-          if (panel.hidden) {
-            openPanel();
-            return;
-          }
-
-          closePanel();
-        });
 
         input.value = value;
         setAllowedCodes(currentAllowedCodes);
@@ -734,7 +680,7 @@
         const api = {
           root,
           input,
-          close: closePanel,
+          close: () => {},
           getValue: () => String(input.value || '').trim(),
           setValue: (nextValue) => {
             input.value = String(nextValue || '').trim();
@@ -1051,7 +997,10 @@
           </td>
           <td>
             <div class="big-account-currency-editor">
-              <select class="mapping-select big-account-currency-select">${currencySelectOptions}</select>
+              <div class="enum-input-shell big-account-currency-input-shell">
+                <input class="new-account-input enum-ghost-input big-account-currency-ghost" type="text" tabindex="-1" disabled />
+                <input class="new-account-input enum-active-input big-account-currency-input" type="text" spellcheck="false" />
+              </div>
               <div class="new-account-currency-dropdown-wrap big-account-currency-dropdown-wrap" hidden>
                 <button class="new-account-input new-account-currency-dropdown-btn big-account-currency-dropdown-btn" type="button" aria-expanded="false"></button>
               </div>
@@ -1072,7 +1021,9 @@
 
         const merchantInput = row.querySelector('.big-account-merchant-input');
         const merchantView = row.querySelector('.big-account-merchant-view');
-        const select = row.querySelector('.big-account-currency-select');
+        const currencyInput = row.querySelector('.big-account-currency-input');
+        const currencyGhost = row.querySelector('.big-account-currency-ghost');
+        const currencyInputShell = row.querySelector('.big-account-currency-input-shell');
         const dropdownWrap = row.querySelector('.big-account-currency-dropdown-wrap');
         const dropdownButton = row.querySelector('.big-account-currency-dropdown-btn');
         const multiCheckbox = row.querySelector('.big-account-multi-checkbox');
@@ -1081,9 +1032,16 @@
         const toggleCompleteBtn = row.querySelector('[data-action="toggle-complete"]');
         let selectedCurrencies = Array.isArray(item.currencies) ? item.currencies.slice() : [];
 
+        function renderCurrencyInputSuggestion() {
+          const suggestion = getCurrencySuggestion(currencyInput.value);
+          currencyGhost.value = suggestion;
+          return suggestion;
+        }
+
         multiCheckbox.checked = Boolean(item.isMultiCurrency);
         if (!multiCheckbox.checked) {
-          select.value = selectedCurrencies[0] || '';
+          currencyInput.value = selectedCurrencies[0] || '';
+          renderCurrencyInputSuggestion();
         }
 
         function getRowDraft() {
@@ -1092,7 +1050,7 @@
             isMultiCurrency: multiCheckbox.checked,
             currencies: multiCheckbox.checked
               ? Array.from(new Set(selectedCurrencies.filter((value) => value)))
-              : [select.value].filter((value) => value !== '')
+              : [currencyInput.value.trim()].filter((value) => value !== '')
           };
         }
 
@@ -1112,13 +1070,14 @@
 
         function syncCurrencyMode() {
           const isMultiCurrency = multiCheckbox.checked;
-          select.hidden = isMultiCurrency;
+          currencyInputShell.hidden = isMultiCurrency;
           dropdownWrap.hidden = !isMultiCurrency;
 
           if (!isMultiCurrency) {
             if (activeFloatingDropdown?.button === dropdownButton) {
               cleanupFloatingDropdown();
             }
+            renderCurrencyInputSuggestion();
             return;
           }
 
@@ -1140,13 +1099,24 @@
           });
         });
         multiCheckbox.addEventListener('change', syncCurrencyMode);
-        select.addEventListener('change', () => {
+        currencyInput.addEventListener('input', () => {
+          renderCurrencyInputSuggestion();
           if (row.dataset.mode === 'view') {
             return;
           }
-
-          currencyView.textContent = select.value;
-          currencyView.title = select.value;
+          currencyView.textContent = currencyInput.value.trim();
+          currencyView.title = currencyInput.value.trim();
+        });
+        currencyInput.addEventListener('keydown', (event) => {
+          if (event.key === 'ArrowRight') {
+            const suggestion = renderCurrencyInputSuggestion();
+            const currentValue = String(currencyInput.value || '');
+            if (suggestion && suggestion !== currentValue && suggestion.toUpperCase().startsWith(currentValue.trim().toUpperCase())) {
+              currencyInput.value = suggestion;
+              renderCurrencyInputSuggestion();
+              event.preventDefault();
+            }
+          }
         });
         merchantInput.addEventListener('input', () => {
           if (row.dataset.mode === 'view') {
@@ -1490,6 +1460,7 @@
         const selectOptions = [isBalanceField ? `<option value="${BALANCE_DISABLED_OPTION}">${BALANCE_DISABLED_OPTION}</option>` : '<option value=""></option>']
           .concat(isBalanceField ? [`<option value="${BALANCE_CALCULATED_OPTION}">${BALANCE_CALCULATED_OPTION}</option>`] : [])
           .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_SELF_INPUT_OPTION}">${MERCHANT_ID_SELF_INPUT_OPTION}</option>`] : [])
+          .concat(supportsMultiSelect ? [`<option value="${CONCAT_FIELDS_MAPPING_FIELD}">${CONCAT_FIELDS_MAPPING_FIELD}</option>`] : [])
           .concat(headerOptions)
           .join('');
         row.innerHTML = `
@@ -1500,29 +1471,117 @@
               ${isMerchantIdField ? `
                 <button class="secondary-btn small mapping-big-account-manage-btn" type="button" hidden>维护大账号</button>
               ` : ''}
+              ${supportsMultiSelect ? `
+                <div class="concat-field-picker" hidden>
+                  <button class="concat-picker-trigger secondary-btn small" type="button">选择字段</button>
+                  <div class="concat-picker-panel" hidden></div>
+                  <span class="concat-preview" title=""></span>
+                </div>
+              ` : ''}
             </div>
           </td>
         `;
 
         const select = row.querySelector('.mapping-select');
         const manageBigAccountBtn = row.querySelector('.mapping-big-account-manage-btn');
+        const concatFieldPicker = row.querySelector('.concat-field-picker');
+        const concatPickerTrigger = row.querySelector('.concat-picker-trigger');
+        const concatPickerPanel = row.querySelector('.concat-picker-panel');
+        const concatPreview = row.querySelector('.concat-preview');
+        let concatSelectedFields = [];
         const savedFields = Array.isArray(savedMapping.mappedFields) && savedMapping.mappedFields.length
           ? savedMapping.mappedFields
           : (savedMapping.mappedField ? [savedMapping.mappedField] : []);
+        const isSavedConcatMode = savedMapping.mappedField === CONCAT_FIELDS_MAPPING_FIELD;
 
         if (supportsMultiSelect) {
-          Array.from(select.options).forEach((option) => {
-            option.selected = savedFields.includes(option.value);
-          });
+          if (isSavedConcatMode) {
+            Array.from(select.options).forEach((option) => {
+              option.selected = option.value === CONCAT_FIELDS_MAPPING_FIELD;
+            });
+            concatSelectedFields = Array.isArray(savedMapping.mappedFields) ? savedMapping.mappedFields.slice() : [];
+          } else {
+            Array.from(select.options).forEach((option) => {
+              option.selected = savedFields.includes(option.value);
+            });
+          }
         } else {
           select.value = savedMapping.mappedField || (isBalanceField ? BALANCE_DISABLED_OPTION : '');
         }
 
+        function updateConcatPreview() {
+          if (!concatPreview) return;
+          const previewText = concatSelectedFields.join(' ');
+          concatPreview.textContent = previewText.length > 40 ? previewText.slice(0, 40) + '......' : previewText;
+          concatPreview.title = concatSelectedFields.join(' ');
+        }
+
+        function renderConcatPanel() {
+          if (!concatPickerPanel) return;
+          concatPickerPanel.replaceChildren();
+          const headers = payload.template.headers || [];
+          headers.forEach((header) => {
+            const option = document.createElement('div');
+            option.className = 'concat-picker-option';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = concatSelectedFields.includes(header);
+            const indexSpan = document.createElement('span');
+            indexSpan.className = 'concat-picker-index';
+            const selectedIdx = concatSelectedFields.indexOf(header);
+            indexSpan.textContent = selectedIdx >= 0 ? `${selectedIdx + 1}.` : '';
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = header;
+            option.append(checkbox, indexSpan, nameSpan);
+            option.addEventListener('click', (event) => {
+              if (event.target === checkbox) return;
+              checkbox.checked = !checkbox.checked;
+              checkbox.dispatchEvent(new Event('change'));
+            });
+            checkbox.addEventListener('change', () => {
+              if (checkbox.checked) {
+                if (!concatSelectedFields.includes(header)) {
+                  concatSelectedFields.push(header);
+                }
+              } else {
+                concatSelectedFields = concatSelectedFields.filter((f) => f !== header);
+              }
+              renderConcatPanel();
+              updateConcatPreview();
+            });
+            concatPickerPanel.appendChild(option);
+          });
+        }
+
+        if (concatPickerTrigger) {
+          concatPickerTrigger.addEventListener('click', () => {
+            const isOpen = !concatPickerPanel.hidden;
+            concatPickerPanel.hidden = isOpen;
+            if (!isOpen) {
+              renderConcatPanel();
+            }
+          });
+        }
+
+        if (isSavedConcatMode) {
+          updateConcatPreview();
+        }
+
         function syncEditorState() {
-          const isCustomInput = getSelectValues(select)[0] === MERCHANT_ID_SELF_INPUT_OPTION;
+          const selectedValue = getSelectValues(select)[0];
+          const isCustomInput = selectedValue === MERCHANT_ID_SELF_INPUT_OPTION;
+          const isConcatMode = selectedValue === CONCAT_FIELDS_MAPPING_FIELD;
 
           if (manageBigAccountBtn) {
             manageBigAccountBtn.hidden = !isCustomInput;
+          }
+          if (concatFieldPicker) {
+            concatFieldPicker.hidden = !isConcatMode;
+            if (!isConcatMode) {
+              concatSelectedFields = [];
+              updateConcatPreview();
+              if (concatPickerPanel) concatPickerPanel.hidden = true;
+            }
           }
         }
 
@@ -1614,7 +1673,7 @@
           }));
         };
 
-        const multiSelectMappings = draftMappings.filter((mapping) => Array.isArray(mapping.mappedFields) && mapping.mappedFields.length > 1);
+        const multiSelectMappings = draftMappings.filter((mapping) => Array.isArray(mapping.mappedFields) && mapping.mappedFields.length > 1 && mapping.mappedField !== CONCAT_FIELDS_MAPPING_FIELD);
 
         if (multiSelectMappings.length) {
           openModal(createMappingOrderDialog({
@@ -1674,7 +1733,7 @@
             <thead>
               <tr>
                 <th>网银大账户ID</th>
-                <th>清结算系统大账户ID</th>
+                <th>清结算系统大账号ID</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -1686,11 +1745,13 @@
       `;
 
       const tbody = dialog.querySelector('tbody');
+      const inputRows = [];
 
-      function createInputRow(bankAccountId = '', clearingAccountId = '') {
+      function createInputRow(bankAccountId = '', clearingAccountId = '', noCurrency = false, currency = '') {
         const row = document.createElement('tr');
         const bankCell = document.createElement('td');
         const clearingCell = document.createElement('td');
+        clearingCell.className = 'account-mapping-clearing-cell';
         const bankInput = document.createElement('input');
         const clearingInput = document.createElement('input');
 
@@ -1704,9 +1765,72 @@
         clearingInput.spellcheck = false;
         clearingInput.value = clearingAccountId;
 
+        const checkboxLabel = document.createElement('label');
+        checkboxLabel.className = 'no-currency-checkbox-label';
+        const checkbox = document.createElement('input');
+        checkbox.className = 'no-currency-checkbox';
+        checkbox.type = 'checkbox';
+        checkbox.checked = noCurrency;
+        const checkboxText = document.createElement('span');
+        checkboxText.textContent = '有账户号无币种';
+        checkboxLabel.append(checkbox, checkboxText);
+
+        const currencyShell = document.createElement('div');
+        currencyShell.className = 'enum-input-shell account-currency-input-shell';
+        currencyShell.hidden = !noCurrency;
+        const ghostInput = document.createElement('input');
+        ghostInput.className = 'new-account-input enum-ghost-input';
+        ghostInput.type = 'text';
+        ghostInput.tabIndex = -1;
+        ghostInput.disabled = true;
+        const currencyInput = document.createElement('input');
+        currencyInput.className = 'new-account-input enum-active-input account-currency-input';
+        currencyInput.type = 'text';
+        currencyInput.spellcheck = false;
+        currencyInput.value = currency;
+        currencyShell.append(ghostInput, currencyInput);
+
+        function renderSuggestion() {
+          const suggestion = getCurrencySuggestion(currencyInput.value);
+          ghostInput.value = suggestion;
+          return suggestion;
+        }
+
+        checkbox.addEventListener('change', () => {
+          currencyShell.hidden = !checkbox.checked;
+          if (!checkbox.checked) {
+            currencyInput.value = '';
+            ghostInput.value = '';
+          }
+        });
+
+        currencyInput.addEventListener('input', renderSuggestion);
+        currencyInput.addEventListener('keydown', (event) => {
+          if (event.key === 'ArrowRight') {
+            const suggestion = renderSuggestion();
+            const currentValue = String(currencyInput.value || '');
+            if (suggestion && suggestion !== currentValue && suggestion.toUpperCase().startsWith(currentValue.trim().toUpperCase())) {
+              currencyInput.value = suggestion;
+              renderSuggestion();
+              event.preventDefault();
+            }
+          }
+        });
+
+        renderSuggestion();
+
         bankCell.appendChild(bankInput);
-        clearingCell.appendChild(clearingInput);
+        clearingCell.append(clearingInput, checkboxLabel, currencyShell);
         row.append(bankCell, clearingCell);
+
+        const rowApi = {
+          row,
+          getBankAccountId: () => bankInput.value,
+          getClearingAccountId: () => clearingInput.value,
+          getNoCurrency: () => checkbox.checked,
+          getCurrency: () => currencyInput.value.trim()
+        };
+        inputRows.push(rowApi);
         return row;
       }
 
@@ -1726,31 +1850,23 @@
       }
 
       payload.mappings.forEach((mapping) => {
-        tbody.appendChild(createInputRow(mapping.bankAccountId, mapping.clearingAccountId));
+        tbody.appendChild(createInputRow(
+          mapping.bankAccountId,
+          mapping.clearingAccountId,
+          Boolean(mapping.noCurrency),
+          mapping.currency || ''
+        ));
       });
       tbody.appendChild(createAddRow());
 
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
       dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
-        const mappings = Array.from(dialog.querySelectorAll('.mapping-text-input'))
-          .reduce((accumulator, input, index) => {
-            const rowIndex = Math.floor(index / 2);
-
-            if (!accumulator[rowIndex]) {
-              accumulator[rowIndex] = {
-                bankAccountId: '',
-                clearingAccountId: ''
-              };
-            }
-
-            if (index % 2 === 0) {
-              accumulator[rowIndex].bankAccountId = input.value;
-            } else {
-              accumulator[rowIndex].clearingAccountId = input.value;
-            }
-
-            return accumulator;
-          }, []);
+        const mappings = inputRows.map((rowApi) => ({
+          bankAccountId: rowApi.getBankAccountId(),
+          clearingAccountId: rowApi.getClearingAccountId(),
+          noCurrency: rowApi.getNoCurrency(),
+          currency: rowApi.getCurrency()
+        }));
 
         const result = await desktopApi.accountMappings.save(mappings);
 
