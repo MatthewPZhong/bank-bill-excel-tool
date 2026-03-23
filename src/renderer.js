@@ -369,6 +369,7 @@ function getNewAccountRowElements(row) {
     row,
     bankNameInput: row.querySelector('.new-account-bank-name-input'),
     locationInput: row.querySelector('.new-account-location-input'),
+    currencyRow: row.querySelector('.new-account-currency-row'),
     currencyInput: row.querySelector('.new-account-currency-input'),
     currencyDropdownWrap: row.querySelector('.new-account-currency-dropdown-wrap'),
     currencyDropdownBtn: row.querySelector('.new-account-currency-dropdown-btn'),
@@ -520,6 +521,16 @@ function closeAllNewAccountCurrencyDropdowns(exceptRow = null) {
 function isNewAccountMultiCurrencyMode(rowOrRefs = elements) {
   const refs = rowOrRefs.row ? rowOrRefs : rowOrRefs.multiCurrencyCheckbox ? rowOrRefs : getNewAccountRowElements(getNewAccountRows()[0]);
   return Boolean(refs?.multiCurrencyCheckbox?.checked);
+}
+
+function syncNewAccountAddButtonVisibility() {
+  getNewAccountRows().forEach((row, index) => {
+    const refs = getNewAccountRowElements(row);
+
+    if (refs.addRowBtn) {
+      refs.addRowBtn.hidden = index !== 0;
+    }
+  });
 }
 
 function closeNewAccountCurrencyDropdown(rowOrRefs = elements) {
@@ -684,10 +695,13 @@ function syncNewAccountCurrencyMode(rowOrRefs = null) {
   }
 
   const refs = rowOrRefs.row ? rowOrRefs : getNewAccountRowElements(rowOrRefs);
-  refs.currencyInput.hidden = isNewAccountMultiCurrencyMode(refs);
+  const isMultiCurrency = isNewAccountMultiCurrencyMode(refs);
+  refs.currencyInput.hidden = isMultiCurrency;
   refs.currencyDropdownWrap.hidden = false;
+  refs.currencyRow?.classList.toggle('is-multi', isMultiCurrency);
+  refs.currencyRow?.classList.toggle('is-single', !isMultiCurrency);
 
-  if (!isNewAccountMultiCurrencyMode(refs)) {
+  if (!isMultiCurrency) {
     getNewAccountRowState(refs.row).selectedCurrencies = [];
     closeNewAccountCurrencyDropdown(refs);
     updateNewAccountCurrencySuggestion(refs);
@@ -779,6 +793,7 @@ function initializeNewAccountRow(row, defaults = {}) {
   refs.multiCurrencyCheckbox.checked = Boolean(defaults.isMultiCurrency);
   rowState.selectedCurrencies = Array.isArray(defaults.currencies) ? defaults.currencies.slice() : rowState.selectedCurrencies;
   syncNewAccountCurrencyMode(refs);
+  syncNewAccountAddButtonVisibility();
 }
 
 function addNewAccountRow(defaults = {}) {
@@ -799,6 +814,7 @@ function addNewAccountRow(defaults = {}) {
   });
   elements.newAccountRows.appendChild(clone);
   initializeNewAccountRow(clone, defaults);
+  syncNewAccountAddButtonVisibility();
   handleNewAccountFormMutation();
 }
 
@@ -820,6 +836,7 @@ function resetNewAccountRows() {
     isMultiCurrency: false,
     currencies: []
   });
+  syncNewAccountAddButtonVisibility();
 }
 
 function isNewAccountFormComplete() {

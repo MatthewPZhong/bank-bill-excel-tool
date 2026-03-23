@@ -430,6 +430,17 @@ select {
   min-width: 118px;
 }
 
+.new-account-currency-row.is-single .new-account-currency-input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.new-account-currency-row.is-single .new-account-currency-dropdown-wrap {
+  width: 44px;
+  min-width: 44px;
+}
+
 .enum-input-control {
   position: relative;
   display: flex;
@@ -476,6 +487,17 @@ select {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.new-account-currency-row.is-single .new-account-currency-dropdown-btn {
+  padding: 0;
+  color: transparent;
+}
+
+.new-account-currency-row.is-single .new-account-currency-dropdown-btn::after {
+  left: 50%;
+  right: auto;
+  transform: translate(-50%, -50%);
 }
 
 .new-account-currency-dropdown-btn::after {
@@ -529,7 +551,7 @@ select {
 
 .new-account-checkbox-label {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   color: var(--muted);
   font-size: 14px;
@@ -545,13 +567,15 @@ select {
 
 .new-account-checkbox-text {
   display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  line-height: 1.1;
+  flex-direction: row;
+  align-items: center;
+  gap: 0;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .new-account-checkbox-text span:last-child {
-  align-self: center;
+  align-self: auto;
 }
 
 .new-account-bank-account-row {
@@ -563,6 +587,8 @@ select {
 
 .new-account-add-btn {
   flex: 0 0 auto;
+  font-size: 12px;
+  line-height: 1;
   white-space: nowrap;
 }
 
