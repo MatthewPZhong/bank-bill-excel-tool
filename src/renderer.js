@@ -658,6 +658,7 @@ function renderNewAccountCurrencyOptions(rowOrRefs = null) {
       const checkbox = document.createElement('input');
       checkbox.className = 'new-account-checkbox';
       checkbox.type = 'checkbox';
+      checkbox.dataset.currencyCode = code;
       checkbox.checked = rowState.selectedCurrencies.includes(code);
 
       const indexSpan = document.createElement('span');
@@ -672,7 +673,11 @@ function renderNewAccountCurrencyOptions(rowOrRefs = null) {
           rowState.selectedCurrencies = rowState.selectedCurrencies.filter((value) => value !== code);
         }
 
-        renderNewAccountCurrencyOptions(refs);
+        refs.currencyDropdownPanel.querySelectorAll('.concat-picker-index').forEach((span) => {
+          const optionCode = span.parentElement?.querySelector('.new-account-checkbox')?.dataset?.currencyCode || '';
+          const idx = rowState.selectedCurrencies.indexOf(optionCode);
+          span.textContent = idx >= 0 ? `${idx + 1}.` : '';
+        });
         updateNewAccountCurrencyDropdownLabel(refs);
         handleNewAccountFormMutation();
       });
