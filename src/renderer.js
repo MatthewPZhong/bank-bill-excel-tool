@@ -819,6 +819,14 @@ function addNewAccountRow(defaults = {}) {
 
   const clone = sourceRow.cloneNode(true);
   clone.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
+  clone.querySelectorAll('.enum-input-shell').forEach((shell) => {
+    const realInput = shell.querySelector('.enum-active-input');
+    if (realInput) {
+      realInput.classList.remove('enum-active-input');
+      shell.parentNode.insertBefore(realInput, shell);
+    }
+    shell.remove();
+  });
   clone.querySelectorAll('input').forEach((input) => {
     if (input.type === 'checkbox') {
       input.checked = false;
