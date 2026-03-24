@@ -2366,13 +2366,14 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
   mappings.forEach((mapping) => {
     const targetField = normalizeCell(mapping.templateField);
     const sourceField = getPrimaryMappedField(mapping);
+    const rawMappedField = normalizeCell(mapping.mappedField);
 
     if (!targetFieldSet.has(targetField)) {
       return;
     }
 
     mappingByTarget.set(targetField, {
-      mappedField: sourceField,
+      mappedField: rawMappedField === CONCAT_FIELDS_MAPPING_FIELD ? CONCAT_FIELDS_MAPPING_FIELD : sourceField,
       mappedFields: getMappingFieldValues(mapping),
       customValue: normalizeCell(mapping.customValue)
     });
