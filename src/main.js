@@ -1632,6 +1632,55 @@ function storeGeneratedBalanceSeeds({ templateName, seedRecords = [] }) {
   });
 }
 
+function scanBalanceSeedStatus({ detailRows, templateName }) {
+  const fieldIndexMap = buildFieldIndexMap(detailRows[0] || []);
+  const merchantIdIndex = fieldIndexMap.get('MerchantId');
+  const currencyIndex = fieldIndexMap.get('Currency');
+  const billDateIndex = fieldIndexMap.get('BillDate');
+
+  if (merchantIdIndex === undefined || billDateIndex === undefined) {
+    return { total: 0, missing: 0 };
+  }
+
+  const bankNameParts = splitTemplateName(templateName);
+  const accountKeys = new Map();
+
+  detailRows.slice(1).forEach((row) => {
+    const merchantId = normalizeCell(row[merchantIdIndex]);
+    const currency = currencyIndex !== undefined ? normalizeCell(row[currencyIndex]) : '';
+    const billDate = normalizeCell(row[billDateIndex]);
+    if (!merchantId || !billDate) return;
+
+    const key = `${merchantId}@@${currency}`;
+    if (accountKeys.has(key)) return;
+
+    const parsedDate = parseDateValue(billDate);
+    if (!parsedDate) return;
+
+    const seedRecord = findPreviousBalanceSeed(ensureStorageRoot(), {
+      bankName: bankNameParts.bankName,
+      merchantId,
+      currency,
+      beforeBillDate: formatDateLabel(parsedDate)
+    });
+
+    accountKeys.set(key, { merchantId, currency, hasSeed: seedRecord !== null });
+  });
+
+  const total = accountKeys.size;
+  const missing = Array.from(accountKeys.values()).filter((a) => !a.hasSeed).length;
+  let missingIndex = 0;
+  const missingIndexByKey = new Map();
+  accountKeys.forEach((account, key) => {
+    if (!account.hasSeed) {
+      missingIndex++;
+      missingIndexByKey.set(key, missingIndex);
+    }
+  });
+
+  return { total, missing, missingIndexByKey };
+}
+
 function buildBalanceSeedPrompt({ templateName, bankName, merchantId, currency, targetBillDate }) {
   return {
     templateName,
@@ -3386,6 +3435,11 @@ function generateStatementFiles({
         throw new FileValidationError('FILE_READ', '余额账单模板为空或不可读，请重新确认');
       }
 
+      const balanceSeedStatus = scanBalanceSeedStatus({
+        detailRows: effectiveDetailRows,
+        templateName: config.template.name
+      });
+
       const balanceResult = deriveBalanceRecords({
         detailRows: effectiveDetailRows,
         templateName: config.template.name,
@@ -3431,15 +3485,23 @@ function generateStatementFiles({
     } catch (error) {
       if (error instanceof FileValidationError) {
         if (error.code === 'BALANCE_SEED_REQUIRED') {
+          const promptMerchantId = normalizeCell(error.context?.merchantId);
+          const promptCurrency = normalizeCell(error.context?.currency);
+          const promptKey = `${promptMerchantId}@@${promptCurrency}`;
+          const queueIndex = balanceSeedStatus.missingIndexByKey?.get(promptKey) || 1;
+          const queueTotal = balanceSeedStatus.missing || 1;
+
           warnings.push({
             type: 'balance-seed-required',
             message: error.message,
             prompt: {
               templateName: config.template.name,
               bankName: error.context?.bankName || splitTemplateName(config.template.name).bankName,
-              merchantId: normalizeCell(error.context?.merchantId),
-              currency: normalizeCell(error.context?.currency),
-              targetBillDate: normalizeCell(error.context?.targetBillDate)
+              merchantId: promptMerchantId,
+              currency: promptCurrency,
+              targetBillDate: normalizeCell(error.context?.targetBillDate),
+              queueIndex,
+              queueTotal
             }
           });
         } else {

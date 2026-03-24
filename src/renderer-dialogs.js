@@ -135,8 +135,10 @@
       const dialog = document.createElement('div');
       dialog.className = 'modal-card manual-balance-card';
       const promptQueueIndex = Number.isInteger(prompt?.queueIndex) && prompt.queueIndex > 0 ? prompt.queueIndex : 0;
-      const currentQueue = queueState || { index: promptQueueIndex || 1 };
+      const promptQueueTotal = Number.isInteger(prompt?.queueTotal) && prompt.queueTotal > 0 ? prompt.queueTotal : 0;
+      const currentQueue = queueState || { index: promptQueueIndex || 1, total: promptQueueTotal || 0 };
       const queueIndex = promptQueueIndex || currentQueue.index;
+      const queueTotal = promptQueueTotal || currentQueue.total;
       const merchantId = prompt?.merchantId || 'N/A';
       const currency = prompt?.currency || '(空)';
       const targetBillDate = prompt?.targetBillDate || 'N/A';
@@ -146,7 +148,7 @@
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="manual-balance-context">
-          <div class="manual-balance-progress">第 ${queueIndex} 个账号</div>
+          <div class="manual-balance-progress">第 ${queueIndex} 个账号${queueTotal ? `，共 ${queueTotal} 个` : ''}</div>
           <div class="manual-balance-context-grid">
             <div class="manual-balance-context-row">
               <span class="manual-balance-context-label">银行账号</span>
@@ -214,7 +216,7 @@
           openModal(createManualBalanceSeedDialog(
             result.manualBalancePrompt,
             {},
-            { index: queueIndex + 1 }
+            { index: queueIndex + 1, total: queueTotal }
           ));
           return;
         }
