@@ -1616,7 +1616,7 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th>网银大账户ID</th>
+                <th>网银大账号ID</th>
                 <th>清结算系统大账号ID</th>
               </tr>
             </thead>
@@ -1629,25 +1629,33 @@
       `;
 
       const tbody = dialog.querySelector('tbody');
-      const inputRows = [];
 
       function createInputRow(bankAccountId = '', clearingAccountId = '', noCurrency = false, currency = '') {
         const row = document.createElement('tr');
+        row.dataset.accountMappingRow = 'true';
         const bankCell = document.createElement('td');
         const clearingCell = document.createElement('td');
         clearingCell.className = 'account-mapping-clearing-cell';
         const bankInput = document.createElement('input');
         const clearingInput = document.createElement('input');
+        const deleteBtn = document.createElement('button');
 
-        bankInput.className = 'mapping-text-input';
+        bankInput.className = 'mapping-text-input account-mapping-id-input';
         bankInput.type = 'text';
         bankInput.spellcheck = false;
         bankInput.value = bankAccountId;
 
-        clearingInput.className = 'mapping-text-input';
+        clearingInput.className = 'mapping-text-input account-mapping-id-input';
         clearingInput.type = 'text';
         clearingInput.spellcheck = false;
         clearingInput.value = clearingAccountId;
+
+        deleteBtn.className = 'text-action danger account-mapping-delete-btn';
+        deleteBtn.type = 'button';
+        deleteBtn.textContent = '删除';
+        deleteBtn.addEventListener('click', () => {
+          row.remove();
+        });
 
         const checkboxLabel = document.createElement('label');
         checkboxLabel.className = 'no-currency-checkbox-label';
@@ -1704,17 +1712,14 @@
         renderSuggestion();
 
         bankCell.appendChild(bankInput);
-        clearingCell.append(clearingInput, checkboxLabel, currencyShell);
+        clearingCell.append(clearingInput, deleteBtn, checkboxLabel, currencyShell);
         row.append(bankCell, clearingCell);
-
-        const rowApi = {
-          row,
+        row.__rowApi = {
           getBankAccountId: () => bankInput.value,
           getClearingAccountId: () => clearingInput.value,
           getNoCurrency: () => checkbox.checked,
           getCurrency: () => currencyInput.value.trim()
         };
-        inputRows.push(rowApi);
         return row;
       }
 
@@ -1745,11 +1750,11 @@
 
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
       dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
-        const mappings = inputRows.map((rowApi) => ({
-          bankAccountId: rowApi.getBankAccountId(),
-          clearingAccountId: rowApi.getClearingAccountId(),
-          noCurrency: rowApi.getNoCurrency(),
-          currency: rowApi.getCurrency()
+        const mappings = Array.from(tbody.querySelectorAll('tr[data-account-mapping-row="true"]')).map((row) => ({
+          bankAccountId: row.__rowApi.getBankAccountId(),
+          clearingAccountId: row.__rowApi.getClearingAccountId(),
+          noCurrency: row.__rowApi.getNoCurrency(),
+          currency: row.__rowApi.getCurrency()
         }));
 
         const result = await desktopApi.accountMappings.save(mappings);

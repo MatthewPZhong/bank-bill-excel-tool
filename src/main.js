@@ -2068,6 +2068,38 @@ function registerAppHandlers() {
       previewModal: process.env.APP_PREVIEW_MODAL || ''
     };
   });
+  ipcMain.handle('app:save-user-guide', async () => {
+    try {
+      const result = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: '使用手册.md',
+        filters: [
+          {
+            name: 'Markdown 文件',
+            extensions: ['md']
+          }
+        ]
+      });
+
+      if (result.canceled || !result.filePath) {
+        return { status: 'cancelled' };
+      }
+
+      const userGuidePath = path.join(app.getAppPath(), 'docs', 'USER_GUIDE.md');
+      const content = fs.readFileSync(userGuidePath, 'utf8');
+      fs.writeFileSync(result.filePath, content, 'utf8');
+
+      return {
+        status: 'success',
+        message: '使用手册导出成功',
+        filePath: result.filePath
+      };
+    } catch (error) {
+      return {
+        status: 'error',
+        message: '使用手册导出失败，请查看控制台'
+      };
+    }
+  });
   ipcMain.on('app:report-startup-metrics', (_event, payload = {}) => {
     startupMetrics.renderer = sanitizeRendererStartupMetrics(payload);
 
@@ -2261,14 +2293,14 @@ function validateAccountMappings(mappings) {
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(bankAccountId)) {
       return {
         status: 'error',
-        message: '网银大账户ID仅支持1-64位字母、数字、下划线、中划线'
+        message: '网银大账号ID仅支持1-64位字母、数字、下划线、中划线'
       };
     }
 
     if (bankAccountSeen.has(bankAccountId)) {
       return {
         status: 'error',
-        message: '网银大账户ID不可重复，请重新确认'
+        message: '网银大账号ID不可重复，请重新确认'
       };
     }
 

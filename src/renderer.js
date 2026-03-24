@@ -157,6 +157,7 @@ const elements = {
   newAccountModulePanel: document.getElementById('newAccountModulePanel'),
   backgroundTool: document.getElementById('backgroundTool'),
   backgroundPaletteBtn: document.getElementById('backgroundPaletteBtn'),
+  saveUserGuideBtn: document.getElementById('saveUserGuideBtn'),
   backgroundPalettePanel: document.getElementById('backgroundPalettePanel'),
   backgroundSpectrumArea: document.getElementById('backgroundSpectrumArea'),
   backgroundSpectrumCanvas: document.getElementById('backgroundSpectrumCanvas'),
@@ -558,18 +559,18 @@ function updateNewAccountCurrencyDropdownLabel(rowOrRefs = elements) {
   const isMultiCurrency = isNewAccountMultiCurrencyMode(refs);
   const label = isMultiCurrency
     ? formatSelectedCurrencySummary(rowState.selectedCurrencies)
-    : '\u00A0';
+    : (refs.currencyInput.value ? getCurrencyOptionLabel(refs.currencyInput.value) : '请选择币种');
 
   refs.currencyDropdownBtn.textContent = label;
   refs.currencyDropdownBtn.title = isMultiCurrency
     ? rowState.selectedCurrencies.map((currency) => getCurrencyOptionLabel(currency)).join('、')
-    : '显示全部币种';
+    : (refs.currencyInput.value ? getCurrencyOptionLabel(refs.currencyInput.value) : '显示全部币种');
   refs.currencyDropdownBtn.disabled = getCurrencyOptionEntries().length === 0;
 }
 
 function updateNewAccountCurrencySuggestion(rowOrRefs = elements) {
   const refs = rowOrRefs.row ? rowOrRefs : rowOrRefs.currencyInput ? rowOrRefs : getNewAccountRowElements(getNewAccountRows()[0]);
-  if (!refs?.currencyInput) {
+  if (!refs?.currencyInput || refs.currencyInput.type === 'hidden') {
     return '';
   }
 
@@ -634,6 +635,9 @@ function renderNewAccountCurrencyOptions(rowOrRefs = null) {
   const currencyCodes = currencyOptions.map((option) => option.code);
   refs.currencyDropdownPanel.replaceChildren();
   rowState.selectedCurrencies = rowState.selectedCurrencies.filter((currency) => currencyCodes.includes(currency));
+  if (refs.currencyInput.value && !currencyCodes.includes(refs.currencyInput.value)) {
+    refs.currencyInput.value = '';
+  }
   const isMultiCurrency = isNewAccountMultiCurrencyMode(refs);
 
   if (!currencyOptions.length) {
@@ -684,9 +688,10 @@ function renderNewAccountCurrencyOptions(rowOrRefs = null) {
 
       option.append(checkbox, indexSpan, text);
     } else {
+      option.classList.toggle('is-selected', refs.currencyInput.value === code);
       option.addEventListener('click', () => {
         refs.currencyInput.value = code;
-        updateNewAccountCurrencySuggestion(refs);
+        updateNewAccountCurrencyDropdownLabel(refs);
         closeNewAccountCurrencyDropdown(refs);
         handleNewAccountFormMutation();
       });
@@ -697,7 +702,6 @@ function renderNewAccountCurrencyOptions(rowOrRefs = null) {
   });
 
   updateNewAccountCurrencyDropdownLabel(refs);
-  updateNewAccountCurrencySuggestion(refs);
 }
 
 function syncNewAccountCurrencyMode(rowOrRefs = null) {
@@ -710,16 +714,20 @@ function syncNewAccountCurrencyMode(rowOrRefs = null) {
 
   const refs = rowOrRefs.row ? rowOrRefs : getNewAccountRowElements(rowOrRefs);
   const isMultiCurrency = isNewAccountMultiCurrencyMode(refs);
-  refs.currencyInput.hidden = isMultiCurrency;
-  refs.currencyDropdownWrap.hidden = !isMultiCurrency;
+  const rowState = getNewAccountRowState(refs.row);
+  refs.currencyInput.hidden = true;
+  refs.currencyDropdownWrap.hidden = false;
   refs.currencyRow?.classList.toggle('is-multi', isMultiCurrency);
   refs.currencyRow?.classList.toggle('is-single', !isMultiCurrency);
 
   if (!isMultiCurrency) {
-    getNewAccountRowState(refs.row).selectedCurrencies = [];
+    if (rowState.selectedCurrencies.length > 0) {
+      refs.currencyInput.value = rowState.selectedCurrencies[0];
+    }
+    rowState.selectedCurrencies = [];
     closeNewAccountCurrencyDropdown(refs);
-    updateNewAccountCurrencySuggestion(refs);
-  } else {
+  } else if (refs.currencyInput.value) {
+    rowState.selectedCurrencies = [refs.currencyInput.value];
     refs.currencyInput.value = '';
   }
 
@@ -744,7 +752,6 @@ function setNewAccountOpenDateValue(value, rowOrRefs = null) {
 function initializeNewAccountRow(row, defaults = {}) {
   const refs = getNewAccountRowElements(row);
   const rowState = getNewAccountRowState(row);
-  ensureCurrencyGhostShell(refs.currencyInput);
 
   if (!rowState.initialized) {
     refs.currencyDropdownBtn.addEventListener('click', () => {
@@ -753,23 +760,6 @@ function initializeNewAccountRow(row, defaults = {}) {
     refs.multiCurrencyCheckbox.addEventListener('change', () => {
       syncNewAccountCurrencyMode(refs);
       handleNewAccountFormMutation();
-    });
-    refs.currencyInput.addEventListener('input', () => {
-      updateNewAccountCurrencySuggestion(refs);
-      handleNewAccountFormMutation();
-    });
-    refs.currencyInput.addEventListener('keydown', (event) => {
-      if (event.key === 'ArrowRight') {
-        const suggestion = updateNewAccountCurrencySuggestion(refs);
-        const currentValue = String(refs.currencyInput.value || '');
-
-        if (suggestion && suggestion.toUpperCase().startsWith(currentValue.trim().toUpperCase()) && suggestion !== currentValue) {
-          refs.currencyInput.value = suggestion;
-          updateNewAccountCurrencySuggestion(refs);
-          handleNewAccountFormMutation();
-          event.preventDefault();
-        }
-      }
     });
     [
       refs.bankNameInput,
@@ -2694,6 +2684,15 @@ async function initialize() {
     }
 
     openBackgroundPalette();
+  });
+  elements.saveUserGuideBtn.addEventListener('click', async () => {
+    const result = await window.desktopApi.app.saveUserGuide();
+
+    if (result.status === 'cancelled') {
+      return;
+    }
+
+    setStatus(result.message, result.status === 'success' ? 'success' : 'error');
   });
   elements.backgroundSpectrumArea.addEventListener('pointerdown', (event) => {
     event.preventDefault();

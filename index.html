@@ -86,8 +86,8 @@
                 <label class="new-account-field">
                   <span class="new-account-label">币种</span>
                   <div class="new-account-currency-row">
-                    <input id="newAccountCurrencyInput" class="new-account-input new-account-currency-input" type="text" spellcheck="false" />
-                    <div id="newAccountCurrencyDropdownWrap" class="new-account-currency-dropdown-wrap" hidden>
+                    <input id="newAccountCurrencyInput" class="new-account-input new-account-currency-input" type="hidden" spellcheck="false" />
+                    <div id="newAccountCurrencyDropdownWrap" class="new-account-currency-dropdown-wrap">
                       <button
                         id="newAccountCurrencyDropdownBtn"
                         class="new-account-input new-account-currency-dropdown-btn"
@@ -99,7 +99,7 @@
                     </div>
                     <label class="new-account-checkbox-label">
                       <input id="newAccountMultiCurrencyCheckbox" class="new-account-checkbox new-account-multi-currency-checkbox" type="checkbox" />
-                      <span class="new-account-checkbox-text"><span>多币种</span><span>账户</span></span>
+                      <span class="new-account-checkbox-text">多币种账户</span>
                     </label>
                   </div>
                 </label>
@@ -134,15 +134,18 @@
       </footer>
 
       <div id="backgroundTool" class="background-tool">
-        <button
-          id="backgroundPaletteBtn"
-          class="palette-trigger"
-          type="button"
-          aria-label="背景调色盘"
-          title="背景调色盘"
-        >
-          <span class="palette-trigger-emoji" aria-hidden="true">🎨</span>
-        </button>
+        <div class="background-tool-actions">
+          <button
+            id="backgroundPaletteBtn"
+            class="palette-trigger"
+            type="button"
+            aria-label="背景调色盘"
+            title="背景调色盘"
+          >
+            <span class="palette-trigger-emoji" aria-hidden="true">🎨</span>
+          </button>
+          <button id="saveUserGuideBtn" class="text-action background-guide-btn" type="button">使用手册</button>
+        </div>
 
         <section id="backgroundPalettePanel" class="palette-panel" hidden aria-label="背景设置">
           <div class="palette-panel-body">

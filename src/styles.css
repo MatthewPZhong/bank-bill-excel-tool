@@ -423,22 +423,13 @@ select {
   min-width: 0;
 }
 
-.new-account-currency-input,
 .new-account-currency-dropdown-wrap {
-  flex: 0 0 auto;
-  width: 1.9cm;
-  min-width: 118px;
-}
-
-.new-account-currency-row.is-single .new-account-currency-input {
   flex: 1 1 auto;
-  width: auto;
   min-width: 0;
 }
 
-.new-account-currency-row.is-single .new-account-currency-dropdown-wrap {
-  width: 44px;
-  min-width: 44px;
+.new-account-currency-input {
+  display: none;
 }
 
 .enum-input-control {
@@ -487,17 +478,6 @@ select {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.new-account-currency-row.is-single .new-account-currency-dropdown-btn {
-  padding: 0;
-  color: transparent;
-}
-
-.new-account-currency-row.is-single .new-account-currency-dropdown-btn::after {
-  left: 50%;
-  right: auto;
-  transform: translate(-50%, -50%);
 }
 
 .new-account-currency-dropdown-btn::after {
@@ -574,10 +554,6 @@ select {
   white-space: nowrap;
 }
 
-.new-account-checkbox-text span:last-child {
-  align-self: auto;
-}
-
 .new-account-bank-account-row {
   display: flex;
   align-items: center;
@@ -643,6 +619,18 @@ select {
   left: 0.45cm;
   bottom: 0.45cm;
   z-index: 3;
+}
+
+.background-tool-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.background-guide-btn {
+  font-size: 13px;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .palette-trigger {
@@ -926,7 +914,18 @@ select {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.account-mapping-id-input {
+  width: 180px;
+  max-width: 100%;
+}
+
+.account-mapping-delete-btn {
+  flex: 0 0 auto;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .no-currency-checkbox-label {
