@@ -130,12 +130,12 @@
       return overlay;
     }
 
-    function createManualBalanceSeedDialog(prompt, draft = {}) {
+    function createManualBalanceSeedDialog(prompt, draft = {}, queueState = null) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card manual-balance-card';
-      const queueIndex = Number.isInteger(prompt?.queueIndex) && prompt.queueIndex > 0 ? prompt.queueIndex : 1;
-      const queueTotal = Number.isInteger(prompt?.queueTotal) && prompt.queueTotal > 0 ? prompt.queueTotal : 1;
+      const currentQueue = queueState || { index: 1 };
+      const queueIndex = currentQueue.index;
       const merchantId = prompt?.merchantId || 'N/A';
       const currency = prompt?.currency || '(空)';
       const targetBillDate = prompt?.targetBillDate || 'N/A';
@@ -145,7 +145,7 @@
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="manual-balance-context">
-          <div class="manual-balance-progress">第 ${queueIndex} 个，共 ${queueTotal} 个</div>
+          <div class="manual-balance-progress">第 ${queueIndex} 个账号</div>
           <div class="manual-balance-context-grid">
             <div class="manual-balance-context-row">
               <span class="manual-balance-context-label">银行账号</span>
@@ -194,8 +194,28 @@
           dateInput.type = 'text';
         }
       });
+      const doneBtn = dialog.querySelector('[data-action="done"]');
+
+      function handleSaveResult(result) {
+        if (result.manualBalancePromptReady && result.manualBalancePrompt) {
+          openModal(createManualBalanceSeedDialog(
+            result.manualBalancePrompt,
+            {},
+            { index: queueIndex + 1 }
+          ));
+          return;
+        }
+
+        closeModal();
+        applyStatementResult(result);
+
+        if (result.status === 'error' && !result.manualBalancePromptReady) {
+          openModal(createAlertDialog(result.message));
+        }
+      }
+
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
-      dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+      doneBtn.addEventListener('click', async () => {
         const payload = {
           billDate: dateInput.value,
           endBalance: amountInput.value
@@ -213,20 +233,14 @@
                   ...payload,
                   overwrite: true
                 });
-                closeModal();
-                applyStatementResult(overwriteResult);
+                handleSaveResult(overwriteResult);
               }
             })
           );
           return;
         }
 
-        closeModal();
-        applyStatementResult(result);
-
-        if (result.status === 'error' && !result.manualBalancePromptReady) {
-          openModal(createAlertDialog(result.message));
-        }
+        handleSaveResult(result);
       });
 
       overlay.appendChild(dialog);

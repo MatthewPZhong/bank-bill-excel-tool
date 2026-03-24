@@ -498,49 +498,75 @@ function buildPendingBigAccountFileEntries({ template, mappings, orderedTargetFi
   }));
 }
 
-function identifyAccountBlocks(headerRow, dataRows, rowMetas) {
-  if (!headerRow || !headerRow.length || !dataRows.length) {
-    return [{ startIndex: 0, endIndex: dataRows.length - 1, startRowNumber: rowMetas[0]?.sourceRowNumber || 2 }];
+function identifyAccountBlocks(detailRows) {
+  const headerRow = detailRows[0] || [];
+  const dataRows = detailRows.slice(1);
+  const rowMetas = Array.isArray(detailRows.rowMetas) ? detailRows.rowMetas : [];
+  const headerBreaks = Array.isArray(detailRows.headerBreaks) ? detailRows.headerBreaks : [];
+
+  if (!headerBreaks.length) {
+    return [{
+      startIndex: 0,
+      endIndex: Math.max(0, dataRows.length - 1),
+      startRowNumber: rowMetas[0]?.sourceRowNumber || 2
+    }];
   }
 
-  const normalizedHeader = headerRow.map((cell) => normalizeCell(cell));
-  const headerLength = normalizedHeader.filter((cell) => cell !== '').length;
+  const creditIndex = headerRow.indexOf('Credit Amount');
+  const debitIndex = headerRow.indexOf('Debit Amount');
+
+  function isTransactionRow(row) {
+    if (!Array.isArray(row)) return false;
+    const credit = creditIndex >= 0 ? normalizeCell(row[creditIndex]) : '';
+    const debit = debitIndex >= 0 ? normalizeCell(row[debitIndex]) : '';
+    return credit !== '' || debit !== '';
+  }
+
+  function trimBlock(startIndex, endIndex) {
+    while (endIndex >= startIndex && !isTransactionRow(dataRows[endIndex])) {
+      endIndex--;
+    }
+    while (startIndex <= endIndex && !isTransactionRow(dataRows[startIndex])) {
+      startIndex++;
+    }
+    return { startIndex, endIndex };
+  }
+
   const blocks = [];
   let blockStart = 0;
 
-  for (let i = 0; i < dataRows.length; i++) {
-    const row = dataRows[i];
-    if (!Array.isArray(row)) continue;
+  headerBreaks.forEach((breakRowNumber) => {
+    const splitIndex = rowMetas.findIndex(
+      (meta, i) => i >= blockStart && meta.sourceRowNumber >= breakRowNumber
+    );
+    const effectiveSplit = splitIndex >= 0 ? splitIndex : dataRows.length;
 
-    const normalizedRow = row.map((cell) => normalizeCell(cell));
-    const matchCount = normalizedHeader.reduce((count, headerCell, colIndex) => {
-      if (headerCell === '' || colIndex >= normalizedRow.length) return count;
-      return normalizedRow[colIndex] === headerCell ? count + 1 : count;
-    }, 0);
-
-    const isHeaderRow = headerLength > 0 && matchCount / headerLength >= 0.5;
-
-    if (isHeaderRow && i > blockStart) {
+    const rawEnd = effectiveSplit > blockStart ? effectiveSplit - 1 : blockStart - 1;
+    const trimmed = trimBlock(blockStart, rawEnd);
+    if (trimmed.startIndex <= trimmed.endIndex) {
       blocks.push({
-        startIndex: blockStart,
-        endIndex: i - 1,
-        startRowNumber: rowMetas[blockStart]?.sourceRowNumber || blockStart + 2
+        startIndex: trimmed.startIndex,
+        endIndex: trimmed.endIndex,
+        startRowNumber: rowMetas[trimmed.startIndex]?.sourceRowNumber || trimmed.startIndex + 2
       });
-      blockStart = i + 1;
-    } else if (isHeaderRow && i === blockStart) {
-      blockStart = i + 1;
     }
-  }
+    blockStart = effectiveSplit;
+  });
 
-  if (blockStart < dataRows.length) {
+  const lastTrimmed = trimBlock(blockStart, dataRows.length - 1);
+  if (lastTrimmed.startIndex <= lastTrimmed.endIndex) {
     blocks.push({
-      startIndex: blockStart,
-      endIndex: dataRows.length - 1,
-      startRowNumber: rowMetas[blockStart]?.sourceRowNumber || blockStart + 2
+      startIndex: lastTrimmed.startIndex,
+      endIndex: lastTrimmed.endIndex,
+      startRowNumber: rowMetas[lastTrimmed.startIndex]?.sourceRowNumber || lastTrimmed.startIndex + 2
     });
   }
 
-  return blocks.length ? blocks : [{ startIndex: 0, endIndex: dataRows.length - 1, startRowNumber: rowMetas[0]?.sourceRowNumber || 2 }];
+  return blocks.length ? blocks : [{
+    startIndex: 0,
+    endIndex: Math.max(0, dataRows.length - 1),
+    startRowNumber: rowMetas[0]?.sourceRowNumber || 2
+  }];
 }
 
 function buildBigAccountSelectionRows(fileEntries = []) {
@@ -548,10 +574,7 @@ function buildBigAccountSelectionRows(fileEntries = []) {
   let rowIndex = 0;
 
   fileEntries.forEach((entry) => {
-    const headerRow = entry.detailRows[0] || [];
-    const dataRows = entry.detailRows.slice(1);
-    const rowMetas = Array.isArray(entry.detailRows?.rowMetas) ? entry.detailRows.rowMetas : [];
-    const blocks = identifyAccountBlocks(headerRow, dataRows, rowMetas);
+    const blocks = identifyAccountBlocks(entry.detailRows);
 
     blocks.forEach((block) => {
       rows.push({
@@ -582,16 +605,17 @@ function applyBigAccountAssignmentsToFileEntries(fileEntries = [], assignments =
     const fieldIndexMap = buildFieldIndexMap(nextRows[0] || []);
     const merchantIdIndex = fieldIndexMap.get('MerchantId');
     const currencyIndex = fieldIndexMap.get('Currency');
-    const headerRow = nextRows[0] || [];
     const dataRows = nextRows.slice(1);
-    const rowMetas = Array.isArray(entry.detailRows?.rowMetas) ? entry.detailRows.rowMetas : [];
-    const blocks = identifyAccountBlocks(headerRow, dataRows, rowMetas);
+    const blocks = identifyAccountBlocks(entry.detailRows);
+
+    const keepIndices = new Set();
 
     blocks.forEach((block) => {
       const assignment = assignmentByRowIndex.get(globalBlockIndex);
 
-      if (assignment) {
-        for (let i = block.startIndex; i <= block.endIndex && i < dataRows.length; i++) {
+      for (let i = block.startIndex; i <= block.endIndex && i < dataRows.length; i++) {
+        keepIndices.add(i);
+        if (assignment) {
           const row = dataRows[i];
           if (merchantIdIndex !== undefined) {
             row[merchantIdIndex] = assignment.merchantId;
@@ -605,9 +629,25 @@ function applyBigAccountAssignmentsToFileEntries(fileEntries = [], assignments =
       globalBlockIndex += 1;
     });
 
+    const filteredRows = [nextRows[0]];
+    const filteredRowMetas = [];
+    dataRows.forEach((row, i) => {
+      if (keepIndices.has(i)) {
+        filteredRows.push(row);
+        if (Array.isArray(nextRows.rowMetas) && nextRows.rowMetas[i]) {
+          filteredRowMetas.push(nextRows.rowMetas[i]);
+        }
+      }
+    });
+    filteredRows.rowMetas = filteredRowMetas;
+    if (Array.isArray(nextRows.issues)) filteredRows.issues = nextRows.issues;
+    if (Array.isArray(nextRows.headerBreaks)) filteredRows.headerBreaks = [];
+    if (Array.isArray(nextRows.skippedRows)) filteredRows.skippedRows = nextRows.skippedRows;
+    if (Array.isArray(nextRows.simultaneousRows)) filteredRows.simultaneousRows = nextRows.simultaneousRows;
+
     return {
       filePath: entry.filePath,
-      detailRows: nextRows
+      detailRows: filteredRows
     };
   });
 }
@@ -3874,10 +3914,7 @@ function registerFileHandlers() {
           inputFilePaths: selectionResult.filePaths
         });
         const totalBlocks = provisionalFileEntries.reduce((sum, entry) => {
-          const headerRow = entry.detailRows[0] || [];
-          const dataRows = entry.detailRows.slice(1);
-          const rowMetas = Array.isArray(entry.detailRows?.rowMetas) ? entry.detailRows.rowMetas : [];
-          return sum + identifyAccountBlocks(headerRow, dataRows, rowMetas).length;
+          return sum + identifyAccountBlocks(entry.detailRows).length;
         }, 0);
         const needsSelection = inputFileCount > 1 || totalBlocks > 1;
 
