@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('desktopApi', {
   app: {
     getInfo: () => ipcRenderer.invoke('app:get-info'),
+    saveUserGuide: () => ipcRenderer.invoke('app:save-user-guide'),
     reportStartupMetrics: (payload) => ipcRenderer.send('app:report-startup-metrics', payload)
   },
   errors: {
