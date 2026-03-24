@@ -197,6 +197,18 @@
       const doneBtn = dialog.querySelector('[data-action="done"]');
 
       function handleSaveResult(result) {
+        if (result.status === 'manual-balance-invalid') {
+          applyManualBalancePromptStatus(result);
+          openModal(createManualBalanceSeedDialog(
+            result.manualBalancePrompt,
+            { billDate: dateInput.value, endBalance: amountInput.value },
+            currentQueue
+          ));
+          return;
+        }
+
+        applyStatementResult(result);
+
         if (result.manualBalancePromptReady && result.manualBalancePrompt) {
           openModal(createManualBalanceSeedDialog(
             result.manualBalancePrompt,
@@ -207,7 +219,6 @@
         }
 
         closeModal();
-        applyStatementResult(result);
 
         if (result.status === 'error' && !result.manualBalancePromptReady) {
           openModal(createAlertDialog(result.message));
