@@ -134,8 +134,9 @@
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card manual-balance-card';
-      const currentQueue = queueState || { index: 1 };
-      const queueIndex = currentQueue.index;
+      const promptQueueIndex = Number.isInteger(prompt?.queueIndex) && prompt.queueIndex > 0 ? prompt.queueIndex : 0;
+      const currentQueue = queueState || { index: promptQueueIndex || 1 };
+      const queueIndex = promptQueueIndex || currentQueue.index;
       const merchantId = prompt?.merchantId || 'N/A';
       const currency = prompt?.currency || '(空)';
       const targetBillDate = prompt?.targetBillDate || 'N/A';
