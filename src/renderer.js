@@ -380,7 +380,7 @@ function getNewAccountRowElements(row) {
     multiCurrencyCheckbox: row.querySelector('.new-account-multi-currency-checkbox'),
     bankAccountInput: row.querySelector('.new-account-bank-account-input'),
     openDateInput: row.querySelector('.new-account-open-date-input'),
-    addRowBtn: row.querySelector('.new-account-add-btn')
+    rowActionBtn: row.querySelector('.new-account-row-action-btn')
   };
 }
 
@@ -388,6 +388,7 @@ function getNewAccountRowState(row) {
   if (!newAccountRowStateMap.has(row)) {
     newAccountRowStateMap.set(row, {
       selectedCurrencies: [],
+      currencySearchQuery: '',
       isDropdownOpen: false,
       initialized: false
     });
@@ -526,12 +527,17 @@ function isNewAccountMultiCurrencyMode(rowOrRefs = elements) {
   return Boolean(refs?.multiCurrencyCheckbox?.checked);
 }
 
-function syncNewAccountAddButtonVisibility() {
+function syncNewAccountRowActionButtons() {
   getNewAccountRows().forEach((row, index) => {
     const refs = getNewAccountRowElements(row);
 
-    if (refs.addRowBtn) {
-      refs.addRowBtn.hidden = index !== 0;
+    if (refs.rowActionBtn) {
+      const isFirstRow = index === 0;
+      refs.rowActionBtn.hidden = false;
+      refs.rowActionBtn.dataset.rowAction = isFirstRow ? 'add' : 'delete';
+      refs.rowActionBtn.textContent = isFirstRow ? '新增' : '删除';
+      refs.rowActionBtn.title = isFirstRow ? '新增账号行' : '删除当前账号行';
+      refs.rowActionBtn.setAttribute('aria-label', isFirstRow ? '新增账号行' : '删除当前账号行');
     }
   });
 }
@@ -542,10 +548,15 @@ function closeNewAccountCurrencyDropdown(rowOrRefs = elements) {
     return;
   }
 
-  getNewAccountRowState(refs.row).isDropdownOpen = false;
+  const rowState = getNewAccountRowState(refs.row);
+  rowState.isDropdownOpen = false;
+  rowState.currencySearchQuery = '';
   refs.currencyDropdownPanel.hidden = true;
   refs.currencyDropdownBtn.classList.remove('is-open');
   refs.currencyDropdownBtn.setAttribute('aria-expanded', 'false');
+  if (isNewAccountMultiCurrencyMode(refs)) {
+    renderNewAccountCurrencyOptions(refs);
+  }
   syncNewAccountDropdownFlag();
 }
 
@@ -559,7 +570,7 @@ function updateNewAccountCurrencyDropdownLabel(rowOrRefs = elements) {
   const isMultiCurrency = isNewAccountMultiCurrencyMode(refs);
   const label = isMultiCurrency
     ? formatSelectedCurrencySummary(rowState.selectedCurrencies)
-    : (refs.currencyInput.value ? getCurrencyOptionLabel(refs.currencyInput.value) : '请选择币种');
+    : (refs.currencyInput.value ? getCurrencyOptionLabel(refs.currencyInput.value) : '\u00A0');
 
   refs.currencyDropdownBtn.textContent = label;
   refs.currencyDropdownBtn.title = isMultiCurrency
@@ -582,17 +593,119 @@ function updateNewAccountCurrencySuggestion(rowOrRefs = elements) {
   return suggestion;
 }
 
+function matchesCurrencyOptionQuery(option, query) {
+  const normalizedQuery = String(query || '').trim().toUpperCase();
+
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  return [option.code, option.label, option.name]
+    .map((value) => String(value || '').trim().toUpperCase())
+    .some((value) => value.includes(normalizedQuery));
+}
+
+function renderNewAccountCurrencyOptionsList(refs, currencyOptions, host) {
+  const rowState = getNewAccountRowState(refs.row);
+  const isMultiCurrency = isNewAccountMultiCurrencyMode(refs);
+  const optionsHost = host || refs.currencyDropdownPanel;
+
+  if (!optionsHost) {
+    return;
+  }
+
+  optionsHost.replaceChildren();
+
+  const visibleOptions = isMultiCurrency
+    ? currencyOptions.filter((option) => matchesCurrencyOptionQuery(option, rowState.currencySearchQuery))
+    : currencyOptions;
+
+  if (!visibleOptions.length) {
+    const emptyState = document.createElement('div');
+    emptyState.className = 'new-account-currency-option';
+    emptyState.innerHTML = `<span class="new-account-currency-option-text">${
+      isMultiCurrency && String(rowState.currencySearchQuery || '').trim()
+        ? '未匹配到币种选项'
+        : '未读取到币种选项'
+    }</span>`;
+    optionsHost.appendChild(emptyState);
+    updateNewAccountCurrencyDropdownLabel(refs);
+    updateNewAccountCurrencySuggestion(refs);
+    return;
+  }
+
+  visibleOptions.forEach(({ code, label }) => {
+    const option = document.createElement('label');
+    option.className = 'new-account-currency-option';
+
+    const text = document.createElement('span');
+    text.className = 'new-account-currency-option-text';
+    text.textContent = label;
+
+    if (isMultiCurrency) {
+      const checkbox = document.createElement('input');
+      checkbox.className = 'new-account-checkbox';
+      checkbox.type = 'checkbox';
+      checkbox.dataset.currencyCode = code;
+      checkbox.checked = rowState.selectedCurrencies.includes(code);
+
+      const indexSpan = document.createElement('span');
+      indexSpan.className = 'concat-picker-index';
+      const selectedIdx = rowState.selectedCurrencies.indexOf(code);
+      indexSpan.textContent = selectedIdx >= 0 ? `${selectedIdx + 1}.` : '';
+
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) {
+          rowState.selectedCurrencies = Array.from(new Set([...rowState.selectedCurrencies, code]));
+        } else {
+          rowState.selectedCurrencies = rowState.selectedCurrencies.filter((value) => value !== code);
+        }
+
+        refs.currencyDropdownPanel.querySelectorAll('.concat-picker-index').forEach((span) => {
+          const optionCode = span.parentElement?.querySelector('.new-account-checkbox')?.dataset?.currencyCode || '';
+          const idx = rowState.selectedCurrencies.indexOf(optionCode);
+          span.textContent = idx >= 0 ? `${idx + 1}.` : '';
+        });
+        updateNewAccountCurrencyDropdownLabel(refs);
+        handleNewAccountFormMutation();
+      });
+
+      option.append(checkbox, indexSpan, text);
+    } else {
+      option.classList.toggle('is-selected', refs.currencyInput.value === code);
+      option.addEventListener('click', () => {
+        refs.currencyInput.value = code;
+        updateNewAccountCurrencyDropdownLabel(refs);
+        closeNewAccountCurrencyDropdown(refs);
+        handleNewAccountFormMutation();
+      });
+      option.append(text);
+    }
+
+    optionsHost.appendChild(option);
+  });
+
+  updateNewAccountCurrencyDropdownLabel(refs);
+  updateNewAccountCurrencySuggestion(refs);
+}
+
 function openNewAccountCurrencyDropdown(rowOrRefs = elements) {
   const refs = rowOrRefs.row ? rowOrRefs : rowOrRefs.currencyDropdownPanel ? rowOrRefs : getNewAccountRowElements(getNewAccountRows()[0]);
   if (!refs?.currencyDropdownPanel || getCurrencyOptionEntries().length === 0) {
     return;
   }
 
+  renderNewAccountCurrencyOptions(refs);
   closeAllNewAccountCurrencyDropdowns(refs.row);
   getNewAccountRowState(refs.row).isDropdownOpen = true;
   refs.currencyDropdownPanel.hidden = false;
   refs.currencyDropdownBtn.classList.add('is-open');
   refs.currencyDropdownBtn.setAttribute('aria-expanded', 'true');
+  if (isNewAccountMultiCurrencyMode(refs)) {
+    setTimeout(() => {
+      refs.currencyDropdownPanel.querySelector('.new-account-currency-search-input')?.focus({ preventScroll: true });
+    }, 0);
+  }
   syncNewAccountDropdownFlag();
 }
 
@@ -650,58 +763,37 @@ function renderNewAccountCurrencyOptions(rowOrRefs = null) {
     return;
   }
 
-  currencyOptions.forEach(({ code, label }) => {
-    const option = document.createElement('label');
-    option.className = 'new-account-currency-option';
+  if (isMultiCurrency) {
+    const searchRow = document.createElement('div');
+    searchRow.className = 'new-account-currency-search-row';
 
-    const text = document.createElement('span');
-    text.className = 'new-account-currency-option-text';
-    text.textContent = label;
+    const searchInput = document.createElement('input');
+    searchInput.className = 'new-account-input new-account-currency-search-input';
+    searchInput.type = 'text';
+    searchInput.placeholder = '搜索币种';
+    searchInput.spellcheck = false;
+    searchInput.value = rowState.currencySearchQuery;
+    searchInput.addEventListener('input', () => {
+      rowState.currencySearchQuery = searchInput.value;
+      renderNewAccountCurrencyOptionsList(refs, currencyOptions, optionsHost);
+    });
+    searchInput.addEventListener('pointerdown', (event) => {
+      event.stopPropagation();
+    });
 
-    if (isMultiCurrency) {
-      const checkbox = document.createElement('input');
-      checkbox.className = 'new-account-checkbox';
-      checkbox.type = 'checkbox';
-      checkbox.dataset.currencyCode = code;
-      checkbox.checked = rowState.selectedCurrencies.includes(code);
+    const optionsHost = document.createElement('div');
+    optionsHost.className = 'new-account-currency-options-list';
 
-      const indexSpan = document.createElement('span');
-      indexSpan.className = 'concat-picker-index';
-      const selectedIdx = rowState.selectedCurrencies.indexOf(code);
-      indexSpan.textContent = selectedIdx >= 0 ? `${selectedIdx + 1}.` : '';
+    searchRow.appendChild(searchInput);
+    refs.currencyDropdownPanel.append(searchRow, optionsHost);
+    renderNewAccountCurrencyOptionsList(refs, currencyOptions, optionsHost);
+    return;
+  }
 
-      checkbox.addEventListener('change', () => {
-        if (checkbox.checked) {
-          rowState.selectedCurrencies = Array.from(new Set([...rowState.selectedCurrencies, code]));
-        } else {
-          rowState.selectedCurrencies = rowState.selectedCurrencies.filter((value) => value !== code);
-        }
-
-        refs.currencyDropdownPanel.querySelectorAll('.concat-picker-index').forEach((span) => {
-          const optionCode = span.parentElement?.querySelector('.new-account-checkbox')?.dataset?.currencyCode || '';
-          const idx = rowState.selectedCurrencies.indexOf(optionCode);
-          span.textContent = idx >= 0 ? `${idx + 1}.` : '';
-        });
-        updateNewAccountCurrencyDropdownLabel(refs);
-        handleNewAccountFormMutation();
-      });
-
-      option.append(checkbox, indexSpan, text);
-    } else {
-      option.classList.toggle('is-selected', refs.currencyInput.value === code);
-      option.addEventListener('click', () => {
-        refs.currencyInput.value = code;
-        updateNewAccountCurrencyDropdownLabel(refs);
-        closeNewAccountCurrencyDropdown(refs);
-        handleNewAccountFormMutation();
-      });
-      option.append(text);
-    }
-
-    refs.currencyDropdownPanel.appendChild(option);
-  });
-
-  updateNewAccountCurrencyDropdownLabel(refs);
+  const optionsHost = document.createElement('div');
+  optionsHost.className = 'new-account-currency-options-list';
+  refs.currencyDropdownPanel.appendChild(optionsHost);
+  renderNewAccountCurrencyOptionsList(refs, currencyOptions, optionsHost);
 }
 
 function syncNewAccountCurrencyMode(rowOrRefs = null) {
@@ -725,10 +817,12 @@ function syncNewAccountCurrencyMode(rowOrRefs = null) {
       refs.currencyInput.value = rowState.selectedCurrencies[0];
     }
     rowState.selectedCurrencies = [];
+    rowState.currencySearchQuery = '';
     closeNewAccountCurrencyDropdown(refs);
   } else if (refs.currencyInput.value) {
     rowState.selectedCurrencies = [refs.currencyInput.value];
     refs.currencyInput.value = '';
+    rowState.currencySearchQuery = '';
   }
 
   renderNewAccountCurrencyOptions(refs);
@@ -783,7 +877,15 @@ function initializeNewAccountRow(row, defaults = {}) {
       syncNewAccountOpenDateInputType(refs);
       handleNewAccountFormMutation();
     });
-    refs.addRowBtn?.addEventListener('click', () => {
+    refs.rowActionBtn?.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (refs.rowActionBtn.dataset.rowAction === 'delete') {
+        removeNewAccountRow(refs.row);
+        return;
+      }
+
       addNewAccountRow();
     });
     rowState.initialized = true;
@@ -796,8 +898,9 @@ function initializeNewAccountRow(row, defaults = {}) {
   setNewAccountOpenDateValue(defaults.openingDate ?? refs.openDateInput.value ?? '', refs);
   refs.multiCurrencyCheckbox.checked = Boolean(defaults.isMultiCurrency);
   rowState.selectedCurrencies = Array.isArray(defaults.currencies) ? defaults.currencies.slice() : rowState.selectedCurrencies;
+  rowState.currencySearchQuery = '';
   syncNewAccountCurrencyMode(refs);
-  syncNewAccountAddButtonVisibility();
+  syncNewAccountRowActionButtons();
 }
 
 function addNewAccountRow(defaults = {}) {
@@ -818,7 +921,22 @@ function addNewAccountRow(defaults = {}) {
   });
   elements.newAccountRows.appendChild(clone);
   initializeNewAccountRow(clone, defaults);
-  syncNewAccountAddButtonVisibility();
+  syncNewAccountRowActionButtons();
+  handleNewAccountFormMutation();
+}
+
+function removeNewAccountRow(row) {
+  const rows = getNewAccountRows();
+
+  if (!row || rows.length <= 1) {
+    return;
+  }
+
+  const refs = getNewAccountRowElements(row);
+  closeNewAccountCurrencyDropdown(refs);
+  row.remove();
+  syncNewAccountRowActionButtons();
+  syncNewAccountDropdownFlag();
   handleNewAccountFormMutation();
 }
 
@@ -840,7 +958,7 @@ function resetNewAccountRows() {
     isMultiCurrency: false,
     currencies: []
   });
-  syncNewAccountAddButtonVisibility();
+  syncNewAccountRowActionButtons();
 }
 
 function isNewAccountFormComplete() {

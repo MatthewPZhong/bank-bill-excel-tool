@@ -383,7 +383,7 @@ select {
 
 .new-account-form-row {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.67fr) minmax(0, 1.33fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
   align-items: end;
 }
@@ -499,14 +499,37 @@ select {
   top: calc(100% + 6px);
   left: 0;
   min-width: 188px;
-  max-height: 216px;
-  overflow: auto;
+  max-height: 248px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   border-radius: 16px;
   border: 1px solid rgba(104, 79, 39, 0.18);
   background: rgba(255, 252, 246, 0.98);
   box-shadow: 0 16px 34px rgba(45, 31, 14, 0.18);
   padding: 6px;
   z-index: 4;
+}
+
+.new-account-currency-search-row {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(255, 252, 246, 0.98);
+}
+
+.new-account-currency-search-input {
+  height: 38px;
+  border-radius: 12px;
+  padding: 0 12px;
+}
+
+.new-account-currency-options-list {
+  display: grid;
+  gap: 2px;
+  overflow: auto;
+  min-height: 0;
 }
 
 .new-account-currency-option {
