@@ -1280,7 +1280,7 @@ function normalizeMappingRows({ template, mappings, enumValues, bigAccounts = []
     const savedValue = getPrimaryMappedField(savedMapping);
     const savedFields = getMappingFieldValues(savedMapping);
     const rawMappedField = normalizeCell(savedMapping?.mappedField);
-    const isConcatMode = rawMappedField === CONCAT_FIELDS_MAPPING_FIELD;
+    const isConcatMode = rawMappedField === CONCAT_FIELDS_MAPPING_FIELD || savedFields.length > 1;
     const customInputMapping = CUSTOM_INPUT_TARGET_FIELDS.has(fieldName)
       ? decodeCustomInputMappingValue(savedValue)
       : null;
@@ -1342,7 +1342,7 @@ function normalizeExportMappingRows({ template, mappings, enumValues }) {
     const savedValue = getPrimaryMappedField(savedMapping);
     const savedFields = getMappingFieldValues(savedMapping);
     const rawMappedField = normalizeCell(savedMapping?.mappedField);
-    const isConcatMode = rawMappedField === CONCAT_FIELDS_MAPPING_FIELD;
+    const isConcatMode = rawMappedField === CONCAT_FIELDS_MAPPING_FIELD || savedFields.length > 1;
 
     return {
       templateField: fieldName,
@@ -2398,13 +2398,14 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
   mappings.forEach((mapping) => {
     const targetField = normalizeCell(mapping.templateField);
     const sourceField = getPrimaryMappedField(mapping);
+    const rawMappedField = normalizeCell(mapping.mappedField);
 
     if (!targetFieldSet.has(targetField)) {
       return;
     }
 
     mappingByTarget.set(targetField, {
-      mappedField: sourceField,
+      mappedField: rawMappedField === CONCAT_FIELDS_MAPPING_FIELD ? CONCAT_FIELDS_MAPPING_FIELD : sourceField,
       mappedFields: getMappingFieldValues(mapping),
       customValue: normalizeCell(mapping.customValue)
     });
