@@ -1643,7 +1643,7 @@ function scanBalanceSeedStatus({ detailRows, templateName }) {
   }
 
   const bankNameParts = splitTemplateName(templateName);
-  const accountKeys = new Map();
+  const accountEarliestDates = new Map();
 
   detailRows.slice(1).forEach((row) => {
     const merchantId = normalizeCell(row[merchantIdIndex]);
@@ -1651,20 +1651,28 @@ function scanBalanceSeedStatus({ detailRows, templateName }) {
     const billDate = normalizeCell(row[billDateIndex]);
     if (!merchantId || !billDate) return;
 
-    const key = `${merchantId}@@${currency}`;
-    if (accountKeys.has(key)) return;
-
     const parsedDate = parseDateValue(billDate);
     if (!parsedDate) return;
 
+    const dateLabel = formatDateLabel(parsedDate);
+    const key = `${merchantId}@@${currency}`;
+    const existing = accountEarliestDates.get(key);
+
+    if (!existing || dateLabel < existing.dateLabel) {
+      accountEarliestDates.set(key, { merchantId, currency, dateLabel });
+    }
+  });
+
+  const accountKeys = new Map();
+  accountEarliestDates.forEach((account, key) => {
     const seedRecord = findPreviousBalanceSeed(ensureStorageRoot(), {
       bankName: bankNameParts.bankName,
-      merchantId,
-      currency,
-      beforeBillDate: formatDateLabel(parsedDate)
+      merchantId: account.merchantId,
+      currency: account.currency,
+      beforeBillDate: account.dateLabel
     });
 
-    accountKeys.set(key, { merchantId, currency, hasSeed: seedRecord !== null });
+    accountKeys.set(key, { merchantId: account.merchantId, currency: account.currency, hasSeed: seedRecord !== null });
   });
 
   const total = accountKeys.size;
