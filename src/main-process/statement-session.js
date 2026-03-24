@@ -21,6 +21,10 @@ function cloneRowsWithMetadata(rows = []) {
     clonedRows.simultaneousRows = rows.simultaneousRows.map((row) => ({ ...row }));
   }
 
+  if (Array.isArray(rows.headerBreaks)) {
+    clonedRows.headerBreaks = rows.headerBreaks.slice();
+  }
+
   if (Array.isArray(rows.sourceRows)) {
     clonedRows.sourceRows = cloneRowsWithMetadata(rows.sourceRows);
   }

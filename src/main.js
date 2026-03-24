@@ -498,49 +498,75 @@ function buildPendingBigAccountFileEntries({ template, mappings, orderedTargetFi
   }));
 }
 
-function identifyAccountBlocks(headerRow, dataRows, rowMetas) {
-  if (!headerRow || !headerRow.length || !dataRows.length) {
-    return [{ startIndex: 0, endIndex: dataRows.length - 1, startRowNumber: rowMetas[0]?.sourceRowNumber || 2 }];
+function identifyAccountBlocks(detailRows) {
+  const headerRow = detailRows[0] || [];
+  const dataRows = detailRows.slice(1);
+  const rowMetas = Array.isArray(detailRows.rowMetas) ? detailRows.rowMetas : [];
+  const headerBreaks = Array.isArray(detailRows.headerBreaks) ? detailRows.headerBreaks : [];
+
+  if (!headerBreaks.length) {
+    return [{
+      startIndex: 0,
+      endIndex: Math.max(0, dataRows.length - 1),
+      startRowNumber: rowMetas[0]?.sourceRowNumber || 2
+    }];
   }
 
-  const normalizedHeader = headerRow.map((cell) => normalizeCell(cell));
-  const headerLength = normalizedHeader.filter((cell) => cell !== '').length;
+  const creditIndex = headerRow.indexOf('Credit Amount');
+  const debitIndex = headerRow.indexOf('Debit Amount');
+
+  function isTransactionRow(row) {
+    if (!Array.isArray(row)) return false;
+    const credit = creditIndex >= 0 ? normalizeCell(row[creditIndex]) : '';
+    const debit = debitIndex >= 0 ? normalizeCell(row[debitIndex]) : '';
+    return credit !== '' || debit !== '';
+  }
+
+  function trimBlock(startIndex, endIndex) {
+    while (endIndex >= startIndex && !isTransactionRow(dataRows[endIndex])) {
+      endIndex--;
+    }
+    while (startIndex <= endIndex && !isTransactionRow(dataRows[startIndex])) {
+      startIndex++;
+    }
+    return { startIndex, endIndex };
+  }
+
   const blocks = [];
   let blockStart = 0;
 
-  for (let i = 0; i < dataRows.length; i++) {
-    const row = dataRows[i];
-    if (!Array.isArray(row)) continue;
+  headerBreaks.forEach((breakRowNumber) => {
+    const splitIndex = rowMetas.findIndex(
+      (meta, i) => i >= blockStart && meta.sourceRowNumber >= breakRowNumber
+    );
+    const effectiveSplit = splitIndex >= 0 ? splitIndex : dataRows.length;
 
-    const normalizedRow = row.map((cell) => normalizeCell(cell));
-    const matchCount = normalizedHeader.reduce((count, headerCell, colIndex) => {
-      if (headerCell === '' || colIndex >= normalizedRow.length) return count;
-      return normalizedRow[colIndex] === headerCell ? count + 1 : count;
-    }, 0);
-
-    const isHeaderRow = headerLength > 0 && matchCount / headerLength >= 0.5;
-
-    if (isHeaderRow && i > blockStart) {
+    const rawEnd = effectiveSplit > blockStart ? effectiveSplit - 1 : blockStart - 1;
+    const trimmed = trimBlock(blockStart, rawEnd);
+    if (trimmed.startIndex <= trimmed.endIndex) {
       blocks.push({
-        startIndex: blockStart,
-        endIndex: i - 1,
-        startRowNumber: rowMetas[blockStart]?.sourceRowNumber || blockStart + 2
+        startIndex: trimmed.startIndex,
+        endIndex: trimmed.endIndex,
+        startRowNumber: rowMetas[trimmed.startIndex]?.sourceRowNumber || trimmed.startIndex + 2
       });
-      blockStart = i + 1;
-    } else if (isHeaderRow && i === blockStart) {
-      blockStart = i + 1;
     }
-  }
+    blockStart = effectiveSplit;
+  });
 
-  if (blockStart < dataRows.length) {
+  const lastTrimmed = trimBlock(blockStart, dataRows.length - 1);
+  if (lastTrimmed.startIndex <= lastTrimmed.endIndex) {
     blocks.push({
-      startIndex: blockStart,
-      endIndex: dataRows.length - 1,
-      startRowNumber: rowMetas[blockStart]?.sourceRowNumber || blockStart + 2
+      startIndex: lastTrimmed.startIndex,
+      endIndex: lastTrimmed.endIndex,
+      startRowNumber: rowMetas[lastTrimmed.startIndex]?.sourceRowNumber || lastTrimmed.startIndex + 2
     });
   }
 
-  return blocks.length ? blocks : [{ startIndex: 0, endIndex: dataRows.length - 1, startRowNumber: rowMetas[0]?.sourceRowNumber || 2 }];
+  return blocks.length ? blocks : [{
+    startIndex: 0,
+    endIndex: Math.max(0, dataRows.length - 1),
+    startRowNumber: rowMetas[0]?.sourceRowNumber || 2
+  }];
 }
 
 function buildBigAccountSelectionRows(fileEntries = []) {
@@ -548,10 +574,7 @@ function buildBigAccountSelectionRows(fileEntries = []) {
   let rowIndex = 0;
 
   fileEntries.forEach((entry) => {
-    const headerRow = entry.detailRows[0] || [];
-    const dataRows = entry.detailRows.slice(1);
-    const rowMetas = Array.isArray(entry.detailRows?.rowMetas) ? entry.detailRows.rowMetas : [];
-    const blocks = identifyAccountBlocks(headerRow, dataRows, rowMetas);
+    const blocks = identifyAccountBlocks(entry.detailRows);
 
     blocks.forEach((block) => {
       rows.push({
@@ -582,16 +605,17 @@ function applyBigAccountAssignmentsToFileEntries(fileEntries = [], assignments =
     const fieldIndexMap = buildFieldIndexMap(nextRows[0] || []);
     const merchantIdIndex = fieldIndexMap.get('MerchantId');
     const currencyIndex = fieldIndexMap.get('Currency');
-    const headerRow = nextRows[0] || [];
     const dataRows = nextRows.slice(1);
-    const rowMetas = Array.isArray(entry.detailRows?.rowMetas) ? entry.detailRows.rowMetas : [];
-    const blocks = identifyAccountBlocks(headerRow, dataRows, rowMetas);
+    const blocks = identifyAccountBlocks(entry.detailRows);
+
+    const keepIndices = new Set();
 
     blocks.forEach((block) => {
       const assignment = assignmentByRowIndex.get(globalBlockIndex);
 
-      if (assignment) {
-        for (let i = block.startIndex; i <= block.endIndex && i < dataRows.length; i++) {
+      for (let i = block.startIndex; i <= block.endIndex && i < dataRows.length; i++) {
+        keepIndices.add(i);
+        if (assignment) {
           const row = dataRows[i];
           if (merchantIdIndex !== undefined) {
             row[merchantIdIndex] = assignment.merchantId;
@@ -605,9 +629,25 @@ function applyBigAccountAssignmentsToFileEntries(fileEntries = [], assignments =
       globalBlockIndex += 1;
     });
 
+    const filteredRows = [nextRows[0]];
+    const filteredRowMetas = [];
+    dataRows.forEach((row, i) => {
+      if (keepIndices.has(i)) {
+        filteredRows.push(row);
+        if (Array.isArray(nextRows.rowMetas) && nextRows.rowMetas[i]) {
+          filteredRowMetas.push(nextRows.rowMetas[i]);
+        }
+      }
+    });
+    filteredRows.rowMetas = filteredRowMetas;
+    if (Array.isArray(nextRows.issues)) filteredRows.issues = nextRows.issues;
+    if (Array.isArray(nextRows.headerBreaks)) filteredRows.headerBreaks = [];
+    if (Array.isArray(nextRows.skippedRows)) filteredRows.skippedRows = nextRows.skippedRows;
+    if (Array.isArray(nextRows.simultaneousRows)) filteredRows.simultaneousRows = nextRows.simultaneousRows;
+
     return {
       filePath: entry.filePath,
-      detailRows: nextRows
+      detailRows: filteredRows
     };
   });
 }
@@ -1590,6 +1630,63 @@ function storeGeneratedBalanceSeeds({ templateName, seedRecords = [] }) {
       overwrite: true
     });
   });
+}
+
+function scanBalanceSeedStatus({ detailRows, templateName }) {
+  const fieldIndexMap = buildFieldIndexMap(detailRows[0] || []);
+  const merchantIdIndex = fieldIndexMap.get('MerchantId');
+  const currencyIndex = fieldIndexMap.get('Currency');
+  const billDateIndex = fieldIndexMap.get('BillDate');
+
+  if (merchantIdIndex === undefined || billDateIndex === undefined) {
+    return { total: 0, missing: 0 };
+  }
+
+  const bankNameParts = splitTemplateName(templateName);
+  const accountEarliestDates = new Map();
+
+  detailRows.slice(1).forEach((row) => {
+    const merchantId = normalizeCell(row[merchantIdIndex]);
+    const currency = currencyIndex !== undefined ? normalizeCell(row[currencyIndex]) : '';
+    const billDate = normalizeCell(row[billDateIndex]);
+    if (!merchantId || !billDate) return;
+
+    const parsedDate = parseDateValue(billDate);
+    if (!parsedDate) return;
+
+    const dateLabel = formatDateLabel(parsedDate);
+    const key = `${merchantId}@@${currency}`;
+    const existing = accountEarliestDates.get(key);
+
+    if (!existing || dateLabel < existing.dateLabel) {
+      accountEarliestDates.set(key, { merchantId, currency, dateLabel });
+    }
+  });
+
+  const accountKeys = new Map();
+  accountEarliestDates.forEach((account, key) => {
+    const seedRecord = findPreviousBalanceSeed(ensureStorageRoot(), {
+      bankName: bankNameParts.bankName,
+      merchantId: account.merchantId,
+      currency: account.currency,
+      beforeBillDate: account.dateLabel
+    });
+
+    accountKeys.set(key, { merchantId: account.merchantId, currency: account.currency, hasSeed: seedRecord !== null });
+  });
+
+  const total = accountKeys.size;
+  const missing = Array.from(accountKeys.values()).filter((a) => !a.hasSeed).length;
+  let missingIndex = 0;
+  const missingIndexByKey = new Map();
+  accountKeys.forEach((account, key) => {
+    if (!account.hasSeed) {
+      missingIndex++;
+      missingIndexByKey.set(key, missingIndex);
+    }
+  });
+
+  return { total, missing, missingIndexByKey };
 }
 
 function buildBalanceSeedPrompt({ templateName, bankName, merchantId, currency, targetBillDate }) {
@@ -3346,6 +3443,11 @@ function generateStatementFiles({
         throw new FileValidationError('FILE_READ', '余额账单模板为空或不可读，请重新确认');
       }
 
+      const balanceSeedStatus = scanBalanceSeedStatus({
+        detailRows: effectiveDetailRows,
+        templateName: config.template.name
+      });
+
       const balanceResult = deriveBalanceRecords({
         detailRows: effectiveDetailRows,
         templateName: config.template.name,
@@ -3391,15 +3493,23 @@ function generateStatementFiles({
     } catch (error) {
       if (error instanceof FileValidationError) {
         if (error.code === 'BALANCE_SEED_REQUIRED') {
+          const promptMerchantId = normalizeCell(error.context?.merchantId);
+          const promptCurrency = normalizeCell(error.context?.currency);
+          const promptKey = `${promptMerchantId}@@${promptCurrency}`;
+          const queueIndex = balanceSeedStatus.missingIndexByKey?.get(promptKey) || 1;
+          const queueTotal = balanceSeedStatus.missing || 1;
+
           warnings.push({
             type: 'balance-seed-required',
             message: error.message,
             prompt: {
               templateName: config.template.name,
               bankName: error.context?.bankName || splitTemplateName(config.template.name).bankName,
-              merchantId: normalizeCell(error.context?.merchantId),
-              currency: normalizeCell(error.context?.currency),
-              targetBillDate: normalizeCell(error.context?.targetBillDate)
+              merchantId: promptMerchantId,
+              currency: promptCurrency,
+              targetBillDate: normalizeCell(error.context?.targetBillDate),
+              queueIndex,
+              queueTotal
             }
           });
         } else {
@@ -3874,10 +3984,7 @@ function registerFileHandlers() {
           inputFilePaths: selectionResult.filePaths
         });
         const totalBlocks = provisionalFileEntries.reduce((sum, entry) => {
-          const headerRow = entry.detailRows[0] || [];
-          const dataRows = entry.detailRows.slice(1);
-          const rowMetas = Array.isArray(entry.detailRows?.rowMetas) ? entry.detailRows.rowMetas : [];
-          return sum + identifyAccountBlocks(headerRow, dataRows, rowMetas).length;
+          return sum + identifyAccountBlocks(entry.detailRows).length;
         }, 0);
         const needsSelection = inputFileCount > 1 || totalBlocks > 1;
 

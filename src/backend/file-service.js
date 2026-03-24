@@ -45,7 +45,7 @@ function buildMappedRows({
   expectedSourceHeaders = [],
   selectedBigAccount = null
 }) {
-  const { rows, rowNumbers } = readRowsWithMetadata(inputFilePath, expectedSourceHeaders);
+  const { rows, rowNumbers, headerBreaks = [] } = readRowsWithMetadata(inputFilePath, expectedSourceHeaders);
   const sourceHeaders = rows[0] || [];
   const sourceIndexByField = new Map();
   const issues = [];
@@ -245,6 +245,7 @@ function buildMappedRows({
 
   mappedRows.issues = issues;
   mappedRows.rowMetas = rowMetas;
+  mappedRows.headerBreaks = headerBreaks;
   return mappedRows;
 }
 

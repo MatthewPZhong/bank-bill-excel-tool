@@ -139,6 +139,7 @@ function collectMatchedRows({
   const expectedHeaderCount = normalizedExpectedHeaders.length;
   const rows = [];
   const rowNumbers = [];
+  const headerBreaks = [];
   const summaryLabels = ['总收入笔数', '总收入金额', '总支出笔数', '总支出金额'];
 
   for (const [index, row] of meaningfulRows.slice(matchedRowIndex).entries()) {
@@ -156,6 +157,7 @@ function collectMatchedRows({
     }
 
     if (index > 0 && isRepeatedMatchedHeader(normalizedCells, normalizedExpectedHeaders)) {
+      headerBreaks.push(row.rowNumber);
       continue;
     }
 
@@ -179,7 +181,8 @@ function collectMatchedRows({
 
   return {
     rows,
-    rowNumbers
+    rowNumbers,
+    headerBreaks
   };
 }
 

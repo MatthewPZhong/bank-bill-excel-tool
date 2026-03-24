@@ -1337,6 +1337,8 @@ select {
 .big-account-selection-rows {
   display: grid;
   gap: 14px;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 .big-account-selection-row-card {
