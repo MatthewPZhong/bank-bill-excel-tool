@@ -675,6 +675,12 @@ function runLoggingScenario(context) {
   assert.strictEqual(exitCalls[0], 1);
   const startupFailureLogContent = fs.readFileSync(context.startupFailureLogPath, 'utf8');
   assert(startupFailureLogContent.includes('[ERROR] 应用启动失败 | 错误摘要：旧数据库迁移失败'));
+
+  const mainSource = fs.readFileSync(`${context.projectRoot}/src/main.js`, 'utf8');
+  assert(
+    /let balanceSeedStatus = \{\s*missing: 0,\s*missingIndexByKey: new Map\(\)\s*\};/.test(mainSource),
+    '余额补录链路应在 try 外预置 balanceSeedStatus，避免 BALANCE_SEED_REQUIRED 时触发 ReferenceError'
+  );
 }
 
 function runSmokeScenarios(context) {
