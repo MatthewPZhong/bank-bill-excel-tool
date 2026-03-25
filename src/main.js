@@ -3430,6 +3430,11 @@ function generateStatementFiles({
       throw new FileValidationError('FILE_READ', '当前模板启用 Balance 时必须映射 MerchantId 字段');
     }
 
+    let balanceSeedStatus = {
+      missing: 0,
+      missingIndexByKey: new Map()
+    };
+
     try {
       const balanceTemplatePath = getBalanceTemplatePath();
 
@@ -3443,7 +3448,7 @@ function generateStatementFiles({
         throw new FileValidationError('FILE_READ', '余额账单模板为空或不可读，请重新确认');
       }
 
-      const balanceSeedStatus = scanBalanceSeedStatus({
+      balanceSeedStatus = scanBalanceSeedStatus({
         detailRows: effectiveDetailRows,
         templateName: config.template.name
       });
