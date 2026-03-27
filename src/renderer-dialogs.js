@@ -1218,18 +1218,8 @@
           bigAccountSnapshot = [];
         }
         if (!bigAccountSnapshot.length) {
-          bigAccountSnapshot = Array.from(tbody.querySelectorAll('tr[data-big-account-row]'))
-            .filter((row) => row.dataset.mode === 'view')
-            .map((row) => {
-              const merchantId = row.querySelector('.big-account-merchant-view')?.textContent?.trim() || '';
-              const isMultiCurrency = row.querySelector('.big-account-multi-checkbox')?.checked || false;
-              const currencyText = row.querySelector('.big-account-currency-view')?.title || '';
-              const currencies = isMultiCurrency
-                ? currencyText.split('、').filter(Boolean)
-                : [currencyText].filter(Boolean);
-              return { merchantId, currencies, isMultiCurrency };
-            })
-            .filter((item) => item.merchantId);
+          setStatus('请先保存大账号配置后再使用余额管理', 'error');
+          return;
         }
         openModal(createBalanceAddonManagerDialog({
           templateName,
@@ -1833,7 +1823,15 @@
         if (record.merchantId) {
           merchantSelect.value = record.merchantId;
           syncCurrencyOptions();
-          if (record.currency) currencySelect.value = record.currency;
+          if (record.currency) {
+            if (!Array.from(currencySelect.options).some((opt) => opt.value === record.currency)) {
+              const extraCurrOpt = document.createElement('option');
+              extraCurrOpt.value = record.currency;
+              extraCurrOpt.textContent = record.currency;
+              currencySelect.appendChild(extraCurrOpt);
+            }
+            currencySelect.value = record.currency;
+          }
         }
         if (record.effectiveDate) {
           dateInput.value = record.effectiveDate;
