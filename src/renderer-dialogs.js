@@ -796,9 +796,10 @@
       return overlay;
     }
 
-    function createBigAccountManagerDialog({ bigAccounts, onDone, onCancel }) {
+    function createBigAccountManagerDialog({ bigAccounts, templateId, templateName, onDone, onCancel }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
+      let pendingOwnAccounts = null;
       dialog.className = 'modal-card manager-card big-account-card';
       dialog.innerHTML = `
         <div class="dialog-header">
@@ -818,7 +819,11 @@
           </table>
         </div>
         <div class="dialog-actions split big-account-footer-actions">
-          <button class="secondary-btn small" type="button" data-action="add">新增</button>
+          <div class="big-account-footer-left">
+            <button class="secondary-btn small" type="button" data-action="add">新增</button>
+            <button class="secondary-btn small" type="button" data-action="import-bank-info">导入银行账号信息</button>
+            <button class="secondary-btn small" type="button" data-action="balance-management">余额管理</button>
+          </div>
           <button class="primary-btn small" type="button" data-action="done">完成</button>
         </div>
       `;
@@ -1072,6 +1077,10 @@
         });
         toggleCompleteBtn.addEventListener('click', () => {
           if (row.dataset.mode === 'edit') {
+            if (!multiCheckbox.checked && currencyInput) {
+              currencyInput.value = currencyInput.value.trim().toUpperCase();
+              renderCurrencyInputSuggestion();
+            }
             const validationMessage = validateRowDraft();
 
             if (validationMessage) {
@@ -1171,6 +1180,73 @@
         cleanupFloatingDropdown();
         tbody.appendChild(createBigAccountRow({}, 'edit'));
       });
+      dialog.querySelector('[data-action="import-bank-info"]').addEventListener('click', async () => {
+        cleanupFloatingDropdown();
+        if (!templateId) {
+          setStatus('请先选择模板', 'error');
+          return;
+        }
+        const result = await window.desktopApi.bigAccount.importBankInfo(templateId);
+        if (result.status === 'cancelled') return;
+        if (result.status === 'error') {
+          setStatus(result.message, 'error');
+          return;
+        }
+        pendingOwnAccounts = result.ownAccounts || [];
+        tbody.innerHTML = '';
+        const clientAccounts = result.clientAccounts || [];
+        if (clientAccounts.length === 0) {
+          tbody.appendChild(createBigAccountRow({}, 'edit'));
+        } else {
+          clientAccounts.forEach((item) => {
+            tbody.appendChild(createBigAccountRow(item, 'view'));
+          });
+        }
+        setStatus(result.message, 'success');
+      });
+      dialog.querySelector('[data-action="balance-management"]').addEventListener('click', async () => {
+        cleanupFloatingDropdown();
+        if (!templateName) {
+          setStatus('请先选择模板', 'error');
+          return;
+        }
+        const bigAccountSnapshot = Array.from(tbody.querySelectorAll('tr[data-big-account-row]'))
+          .filter((row) => row.dataset.mode === 'view')
+          .map((row) => {
+            const merchantId = row.querySelector('.big-account-merchant-view')?.textContent?.trim() || '';
+            const isMultiCurrency = row.querySelector('.big-account-multi-checkbox')?.checked || false;
+            const currencyText = row.querySelector('.big-account-currency-view')?.title || '';
+            const currencies = isMultiCurrency
+              ? currencyText.split('、').filter(Boolean)
+              : [currencyText].filter(Boolean);
+            return { merchantId, currencies, isMultiCurrency };
+          })
+          .filter((item) => item.merchantId);
+        openModal(createBalanceAddonManagerDialog({
+          templateName,
+          bigAccounts: bigAccountSnapshot,
+          onClose: () => {
+            openModal(createBigAccountManagerDialog({
+              bigAccounts: cloneBigAccountItems(
+                Array.from(tbody.querySelectorAll('tr[data-big-account-row]'))
+                  .filter((r) => r.dataset.mode === 'view')
+                  .map((r) => {
+                    const mid = r.querySelector('.big-account-merchant-view')?.textContent?.trim() || '';
+                    const isMC = r.querySelector('.big-account-multi-checkbox')?.checked || false;
+                    const cText = r.querySelector('.big-account-currency-view')?.title || '';
+                    const cs = isMC ? cText.split('、').filter(Boolean) : [cText].filter(Boolean);
+                    return { merchantId: mid, currencies: cs, isMultiCurrency: isMC };
+                  })
+                  .filter((i) => i.merchantId)
+              ),
+              templateId,
+              templateName,
+              onDone,
+              onCancel
+            }));
+          }
+        }));
+      });
       dialog.querySelector('[data-action="done"]').addEventListener('click', () => {
         const rows = Array.from(tbody.querySelectorAll('tr[data-big-account-row]'));
 
@@ -1195,7 +1271,7 @@
 
         cleanupFloatingDropdown();
         document.removeEventListener('keydown', handleKeydown);
-        onDone(nextBigAccounts);
+        onDone(nextBigAccounts, { ownAccounts: pendingOwnAccounts });
       });
 
       overlay.appendChild(dialog);
@@ -1531,7 +1607,15 @@
             const draftMappings = collectMappingDraftFromTable(tbody);
             openModal(createBigAccountManagerDialog({
               bigAccounts: currentBigAccounts,
-              onDone: (nextBigAccounts) => {
+              templateId: payload.template.id,
+              templateName: payload.template.name,
+              onDone: async (nextBigAccounts, extra) => {
+                if (extra && extra.ownAccounts) {
+                  await window.desktopApi.bigAccount.saveOwnAccounts({
+                    templateId: payload.template.id,
+                    accounts: extra.ownAccounts
+                  });
+                }
                 openModal(createMappingDialog({
                   ...payload,
                   mappings: draftMappings.map((mapping) => {
@@ -1626,6 +1710,162 @@
             panel.hidden = true;
           });
         }
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    function createBalanceAddonManagerDialog({ templateName, bigAccounts, onClose }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manager-card balance-addon-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">余额管理</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>大账号</th>
+                <th>币种</th>
+                <th>日期</th>
+                <th>余额附加值</th>
+                <th>备注</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="dialog-actions split">
+          <button class="secondary-btn small" type="button" data-action="add-row">新增</button>
+          <button class="primary-btn small" type="button" data-action="done">完成</button>
+        </div>
+      `;
+
+      const tbody = dialog.querySelector('tbody');
+      const groupedBigAccounts = bigAccounts || [];
+
+      function createAddonRow(record = {}) {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>
+            <select class="mapping-select balance-addon-merchant-select">
+              <option value=""></option>
+              ${groupedBigAccounts.map((item) => `<option value="${escapeHtml(item.merchantId)}">${escapeHtml(item.merchantId)}</option>`).join('')}
+            </select>
+          </td>
+          <td>
+            <select class="mapping-select balance-addon-currency-select">
+              <option value=""></option>
+            </select>
+          </td>
+          <td><input class="mapping-text-input balance-addon-date-input" type="text" value="" /></td>
+          <td><input class="mapping-text-input balance-addon-value-input" type="text" spellcheck="false" value="" /></td>
+          <td>
+            <div class="balance-addon-remark-cell">
+              <input class="mapping-text-input balance-addon-remark-input" type="text" spellcheck="false" value="" />
+              <button class="text-action danger" type="button" data-action="delete-row">删除</button>
+            </div>
+          </td>
+        `;
+
+        const merchantSelect = row.querySelector('.balance-addon-merchant-select');
+        const currencySelect = row.querySelector('.balance-addon-currency-select');
+        const dateInput = row.querySelector('.balance-addon-date-input');
+        const valueInput = row.querySelector('.balance-addon-value-input');
+        const remarkInput = row.querySelector('.balance-addon-remark-input');
+
+        function syncCurrencyOptions() {
+          const selectedAccount = groupedBigAccounts.find((item) => item.merchantId === merchantSelect.value);
+          currencySelect.innerHTML = '<option value=""></option>';
+          if (selectedAccount) {
+            selectedAccount.currencies.forEach((currency) => {
+              const opt = document.createElement('option');
+              opt.value = currency;
+              opt.textContent = currency;
+              currencySelect.appendChild(opt);
+            });
+            if (!selectedAccount.isMultiCurrency && selectedAccount.currencies.length === 1) {
+              currencySelect.value = selectedAccount.currencies[0];
+              currencySelect.disabled = true;
+            } else {
+              currencySelect.disabled = false;
+            }
+          }
+        }
+
+        merchantSelect.addEventListener('change', syncCurrencyOptions);
+        dateInput.addEventListener('focus', () => {
+          if (dateInput.type !== 'date') dateInput.type = 'date';
+          dateInput.showPicker?.();
+        });
+        dateInput.addEventListener('blur', () => {
+          if (!dateInput.value) dateInput.type = 'text';
+        });
+        row.querySelector('[data-action="delete-row"]').addEventListener('click', () => {
+          row.remove();
+        });
+
+        if (record.merchantId) {
+          merchantSelect.value = record.merchantId;
+          syncCurrencyOptions();
+          if (record.currency) currencySelect.value = record.currency;
+        }
+        if (record.effectiveDate) {
+          dateInput.value = record.effectiveDate;
+          dateInput.type = 'date';
+        }
+        if (record.adjustmentValue !== undefined && record.adjustmentValue !== null) {
+          valueInput.value = String(record.adjustmentValue);
+        }
+        if (record.remark) remarkInput.value = record.remark;
+
+        return row;
+      }
+
+      dialog.querySelector('.icon-close').addEventListener('click', () => {
+        if (onClose) onClose();
+        else closeModal();
+      });
+      dialog.querySelector('[data-action="add-row"]').addEventListener('click', () => {
+        tbody.appendChild(createAddonRow());
+      });
+      dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+        const records = Array.from(tbody.querySelectorAll('tr')).map((row) => ({
+          merchantId: row.querySelector('.balance-addon-merchant-select')?.value?.trim() || '',
+          currency: row.querySelector('.balance-addon-currency-select')?.value?.trim() || '',
+          effectiveDate: row.querySelector('.balance-addon-date-input')?.value?.trim() || '',
+          adjustmentValue: row.querySelector('.balance-addon-value-input')?.value?.trim() || '',
+          remark: row.querySelector('.balance-addon-remark-input')?.value?.trim() || ''
+        })).filter((r) => r.merchantId || r.effectiveDate || r.adjustmentValue);
+
+        const result = await window.desktopApi.balanceAdjustment.save({
+          templateName,
+          records
+        });
+
+        if (result.status === 'success') {
+          setStatus(result.message, 'success');
+          if (onClose) onClose();
+          else closeModal();
+        } else {
+          setStatus(result.message, 'error');
+        }
+      });
+
+      // Load existing records
+      window.desktopApi.balanceAdjustment.list(templateName).then((result) => {
+        const adjustments = result.adjustments || [];
+        if (adjustments.length) {
+          adjustments.forEach((record) => tbody.appendChild(createAddonRow(record)));
+        } else {
+          tbody.appendChild(createAddonRow());
+        }
+      }).catch(() => {
+        tbody.appendChild(createAddonRow());
       });
 
       overlay.appendChild(dialog);

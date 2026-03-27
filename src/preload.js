@@ -36,6 +36,14 @@ contextBridge.exposeInMainWorld('desktopApi', {
     exportBundle: () => ipcRenderer.invoke('template:export-bundle'),
     importBundle: () => ipcRenderer.invoke('template:import-bundle')
   },
+  bigAccount: {
+    importBankInfo: (templateId) => ipcRenderer.invoke('big-account:import-bank-info', templateId),
+    saveOwnAccounts: (payload) => ipcRenderer.invoke('big-account:save-own-accounts', payload)
+  },
+  balanceAdjustment: {
+    list: (templateName) => ipcRenderer.invoke('balance-adjustment:list', templateName),
+    save: (payload) => ipcRenderer.invoke('balance-adjustment:save', payload)
+  },
   files: {
     importFile: (templateId) => ipcRenderer.invoke('file:import', templateId),
     completeBigAccountSelection: (payload) => ipcRenderer.invoke('file:complete-big-account-selection', payload),

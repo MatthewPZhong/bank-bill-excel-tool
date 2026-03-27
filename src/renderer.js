@@ -1609,13 +1609,14 @@ function updateTemplateSelect() {
   });
 
   const preserved = state.templates.find((template) => String(template.id) === previous);
-  const fallback = state.templates[0];
   state.selectedTemplateId = preserved
     ? String(preserved.id)
-    : fallback
-      ? String(fallback.id)
-      : '';
+    : '';
   elements.templateSelect.value = state.selectedTemplateId || '';
+
+  if (!state.selectedTemplateId) {
+    setExportAvailability({ detailEnabled: false, balanceEnabled: false });
+  }
 }
 
 async function refreshTemplates() {
@@ -2600,6 +2601,11 @@ async function handleOpenAccountMappings() {
 async function handleImportFile() {
   if (!state.hasEnum) {
     setStatus(getEnumStatusMessage(), 'error');
+    return;
+  }
+
+  if (!state.selectedTemplateId) {
+    setStatus('请先选择模板', 'error');
     return;
   }
 
