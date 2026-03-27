@@ -796,10 +796,10 @@
       return overlay;
     }
 
-    function createBigAccountManagerDialog({ bigAccounts, templateId, templateName, onDone, onCancel }) {
+    function createBigAccountManagerDialog({ bigAccounts, templateId, templateName, initialOwnAccounts, onDone, onCancel }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
-      let pendingOwnAccounts = null;
+      let pendingOwnAccounts = initialOwnAccounts || null;
       dialog.className = 'modal-card manager-card big-account-card';
       dialog.innerHTML = `
         <div class="dialog-header">
@@ -1241,6 +1241,7 @@
               ),
               templateId,
               templateName,
+              initialOwnAccounts: pendingOwnAccounts,
               onDone,
               onCancel
             }));
@@ -1611,10 +1612,14 @@
               templateName: payload.template.name,
               onDone: async (nextBigAccounts, extra) => {
                 if (extra && extra.ownAccounts) {
-                  await window.desktopApi.bigAccount.saveOwnAccounts({
+                  const ownResult = await window.desktopApi.bigAccount.saveOwnAccounts({
                     templateId: payload.template.id,
                     accounts: extra.ownAccounts
                   });
+                  if (ownResult.status === 'error') {
+                    setStatus(ownResult.message || '自有账号保存失败', 'error');
+                    return;
+                  }
                 }
                 openModal(createMappingDialog({
                   ...payload,

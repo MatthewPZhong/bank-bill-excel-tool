@@ -1867,6 +1867,7 @@ function deriveBalanceRecords({
   groupedEntries.forEach((group) => {
     const dateKeys = Array.from(group.dateMap.keys()).sort();
     let previousEndBalance = null;
+    let lastCumulativeAdjustment = 0;
 
     dateKeys.forEach((dateLabel) => {
       const entries = group.dateMap.get(dateLabel);
@@ -1909,14 +1910,16 @@ function deriveBalanceRecords({
         });
       }
 
-      const adjustment = resolveBalanceAdjustment(balanceAdjustments, {
+      const cumulativeAdjustment = resolveBalanceAdjustment(balanceAdjustments, {
         merchantId: group.merchantId,
         currency: group.currency,
         dateLabel
       });
-      if (adjustment && endBalance !== null) {
-        endBalance = Math.round((endBalance + adjustment) * 100) / 100;
+      const incrementalAdjustment = Math.round((cumulativeAdjustment - lastCumulativeAdjustment) * 100) / 100;
+      if (incrementalAdjustment && endBalance !== null) {
+        endBalance = Math.round((endBalance + incrementalAdjustment) * 100) / 100;
       }
+      lastCumulativeAdjustment = cumulativeAdjustment;
 
       previousEndBalance = endBalance;
       allBillDates.add(dateLabel);
@@ -4008,10 +4011,14 @@ function registerBigAccountHandlers() {
 
   ipcMain.handle('balance-adjustment:list', (_event, templateName) => {
     try {
-      const bankNameParts = splitTemplateName(templateName);
+      const normalizedName = normalizeCell(templateName);
+      const bankNameParts = splitTemplateName(normalizedName);
+      const allAdjustments = readBalanceAdjustments(ensureStorageRoot(), bankNameParts.bankName);
       return {
         status: 'success',
-        adjustments: readBalanceAdjustments(ensureStorageRoot(), bankNameParts.bankName)
+        adjustments: allAdjustments.filter(
+          (record) => normalizeCell(record.templateName) === normalizedName
+        )
       };
     } catch (_error) {
       return { status: 'success', adjustments: [] };
@@ -4031,11 +4038,16 @@ function registerBigAccountHandlers() {
 
       const bankNameParts = splitTemplateName(templateName);
       const records = Array.isArray(payload.records) ? payload.records : [];
+      const existingRecords = readBalanceAdjustments(ensureStorageRoot(), bankNameParts.bankName);
+      const otherTemplateRecords = existingRecords.filter(
+        (record) => normalizeCell(record.templateName) !== templateName
+      );
+      const mergedRecords = [
+        ...otherTemplateRecords,
+        ...records.map((record) => ({ ...record, templateName }))
+      ];
 
-      writeBalanceAdjustments(ensureStorageRoot(), bankNameParts.bankName, records.map((record) => ({
-        ...record,
-        templateName
-      })));
+      writeBalanceAdjustments(ensureStorageRoot(), bankNameParts.bankName, mergedRecords);
 
       appendActivityLogEntry({
         level: 'info',
