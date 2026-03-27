@@ -9,6 +9,13 @@ const {
   upsertBalanceSeedRecord,
   splitTemplateName
 } = require('./backend/balance-seed-store');
+const { parseBankAccountExcel } = require('./backend/bank-account-import');
+const { writeOwnAccounts } = require('./backend/own-account-store');
+const {
+  readBalanceAdjustments,
+  writeBalanceAdjustments,
+  resolveBalanceAdjustment
+} = require('./backend/balance-adjustment-store');
 const {
   calculateEndingBalanceFromAmounts,
   buildDetailExportRows,
@@ -1735,7 +1742,8 @@ function deriveBalanceRecords({
   templateName,
   balanceTemplateFields,
   mode = 'statement',
-  resolvePreviousEndBalance = null
+  resolvePreviousEndBalance = null,
+  balanceAdjustments = []
 }) {
   const fieldIndexMap = buildFieldIndexMap(detailRows[0] || []);
   const balanceIndex = fieldIndexMap.get('Balance');
@@ -1859,6 +1867,7 @@ function deriveBalanceRecords({
   groupedEntries.forEach((group) => {
     const dateKeys = Array.from(group.dateMap.keys()).sort();
     let previousEndBalance = null;
+    let lastCumulativeAdjustment = 0;
 
     dateKeys.forEach((dateLabel) => {
       const entries = group.dateMap.get(dateLabel);
@@ -1900,6 +1909,17 @@ function deriveBalanceRecords({
           dateLabel
         });
       }
+
+      const cumulativeAdjustment = resolveBalanceAdjustment(balanceAdjustments, {
+        merchantId: group.merchantId,
+        currency: group.currency,
+        dateLabel
+      });
+      const incrementalAdjustment = Math.round((cumulativeAdjustment - lastCumulativeAdjustment) * 100) / 100;
+      if (incrementalAdjustment && endBalance !== null) {
+        endBalance = Math.round((endBalance + incrementalAdjustment) * 100) / 100;
+      }
+      lastCumulativeAdjustment = cumulativeAdjustment;
 
       previousEndBalance = endBalance;
       allBillDates.add(dateLabel);
@@ -1945,20 +1965,23 @@ function buildNewAccountBillDates(openDate, today = new Date()) {
     throw new FileValidationError('FILE_READ', '开户日期不能晚于今日');
   }
 
-  const dateMap = new Map([[formatDateLabel(normalizedOpenDate), normalizedOpenDate]]);
-  let cursor = new Date(normalizedOpenDate.getFullYear(), normalizedOpenDate.getMonth(), 1);
+  const totalDays = Math.round(
+    (normalizedToday.getTime() - normalizedOpenDate.getTime()) / (24 * 60 * 60 * 1000)
+  ) + 1;
 
-  while (cursor.getTime() <= normalizedToday.getTime()) {
-    const monthEndDate = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
-
-    if (monthEndDate.getTime() >= normalizedOpenDate.getTime() && monthEndDate.getTime() <= normalizedToday.getTime()) {
-      dateMap.set(formatDateLabel(monthEndDate), normalizeDateOnly(monthEndDate));
-    }
-
-    cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+  if (totalDays > 3650) {
+    throw new FileValidationError('FILE_READ', '开户日期距今超过 10 年，不支持生成');
   }
 
-  return Array.from(dateMap.values()).sort((left, right) => left.getTime() - right.getTime());
+  const dates = [];
+  let cursor = new Date(normalizedOpenDate.getTime());
+
+  while (cursor.getTime() <= normalizedToday.getTime()) {
+    dates.push(normalizeDateOnly(new Date(cursor.getTime())));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return dates;
 }
 
 function normalizeNewAccountCurrencyValues({ currency, currencies = [], isMultiCurrency = false }) {
@@ -2794,6 +2817,7 @@ function registerTemplateHandlers() {
     const template = database.getTemplate(templateId);
     database.deleteTemplate(templateId);
     syncTemplateLibraryFile();
+    clearGeneratedExports();
     appendActivityLogEntry({
       level: 'info',
       message: '删除模板成功',
@@ -3453,11 +3477,15 @@ function generateStatementFiles({
         templateName: config.template.name
       });
 
+      const templateBankName = splitTemplateName(config.template.name).bankName;
+      const balanceAdjustments = readBalanceAdjustments(ensureStorageRoot(), templateBankName);
+
       const balanceResult = deriveBalanceRecords({
         detailRows: effectiveDetailRows,
         templateName: config.template.name,
         balanceTemplateFields,
         mode: preparedBatch.balanceMode,
+        balanceAdjustments,
         resolvePreviousEndBalance: ({ bankName, merchantId, currency, targetBillDate }) => {
           const seedRecord = findPreviousBalanceSeed(ensureStorageRoot(), {
             bankName,
@@ -3887,6 +3915,157 @@ async function exportStatementByScope(kind, scope = 'auto') {
     emptyMessage,
     kind === 'detail' ? '导出明细账单' : '导出余额账单'
   );
+}
+
+function registerBigAccountHandlers() {
+  ipcMain.handle('big-account:import-bank-info', async (_event, templateId) => {
+    const template = database.getTemplate(templateId);
+
+    if (!template) {
+      return createErrorResult({
+        step: '导入银行账号信息',
+        message: '未找到对应模板',
+        errorCode: 'TEMPLATE_NOT_FOUND',
+        context: { templateId }
+      });
+    }
+
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { status: 'cancelled' };
+    }
+
+    try {
+      const parsed = parseBankAccountExcel(result.filePaths[0]);
+
+      if (!parsed.clientAccounts.length && !parsed.ownAccounts.length) {
+        return createErrorResult({
+          step: '导入银行账号信息',
+          message: '未找到符合条件的银行账号信息',
+          errorCode: 'BANK_ACCOUNT_IMPORT_EMPTY'
+        });
+      }
+
+      const skippedNote = parsed.skippedCount > 0
+        ? `（${parsed.skippedCount} 行因银行账号或币种为空被跳过）`
+        : '';
+
+      appendActivityLogEntry({
+        level: 'info',
+        message: '导入银行账号信息成功',
+        details: [
+          `模板名：${template.name}`,
+          `客资账号：${parsed.clientAccounts.length} 个`,
+          `自有账号：${parsed.ownAccounts.length} 个`
+        ]
+      });
+
+      return {
+        status: 'success',
+        message: `已导入 ${parsed.clientAccounts.length} 个客资账号、${parsed.ownAccounts.length} 个自有账号${skippedNote}`,
+        clientAccounts: parsed.clientAccounts,
+        ownAccounts: parsed.ownAccounts
+      };
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return createErrorResult({
+          step: '导入银行账号信息',
+          message: error.message,
+          errorCode: error.code,
+          originalError: error
+        });
+      }
+      return createErrorResult({
+        step: '导入银行账号信息',
+        message: '导入失败，请导出报错文件查看详情',
+        errorCode: 'BANK_ACCOUNT_IMPORT_RUNTIME',
+        errorType: '系统错误',
+        originalError: error
+      });
+    }
+  });
+
+  ipcMain.handle('big-account:save-own-accounts', (_event, payload = {}) => {
+    try {
+      const template = database.getTemplate(payload.templateId);
+      if (!template) {
+        return { status: 'error', message: '未找到对应模板' };
+      }
+      const bankNameParts = splitTemplateName(template.name);
+      writeOwnAccounts(ensureStorageRoot(), bankNameParts.bankName, payload.accounts || []);
+      return { status: 'success' };
+    } catch (error) {
+      return createErrorResult({
+        step: '保存自有账号',
+        message: '自有账号保存失败',
+        errorCode: 'OWN_ACCOUNT_SAVE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error
+      });
+    }
+  });
+
+  ipcMain.handle('balance-adjustment:list', (_event, templateName) => {
+    try {
+      const normalizedName = normalizeCell(templateName);
+      const bankNameParts = splitTemplateName(normalizedName);
+      const allAdjustments = readBalanceAdjustments(ensureStorageRoot(), bankNameParts.bankName);
+      return {
+        status: 'success',
+        adjustments: allAdjustments.filter(
+          (record) => normalizeCell(record.templateName) === normalizedName
+        )
+      };
+    } catch (_error) {
+      return { status: 'success', adjustments: [] };
+    }
+  });
+
+  ipcMain.handle('balance-adjustment:save', (_event, payload = {}) => {
+    try {
+      const templateName = normalizeCell(payload.templateName);
+      if (!templateName) {
+        return createErrorResult({
+          step: '保存余额附加值',
+          message: '模板名称不能为空',
+          errorCode: 'BALANCE_ADJUSTMENT_TEMPLATE_MISSING'
+        });
+      }
+
+      const bankNameParts = splitTemplateName(templateName);
+      const records = Array.isArray(payload.records) ? payload.records : [];
+      const existingRecords = readBalanceAdjustments(ensureStorageRoot(), bankNameParts.bankName);
+      const otherTemplateRecords = existingRecords.filter(
+        (record) => normalizeCell(record.templateName) !== templateName
+      );
+      const mergedRecords = [
+        ...otherTemplateRecords,
+        ...records.map((record) => ({ ...record, templateName }))
+      ];
+
+      writeBalanceAdjustments(ensureStorageRoot(), bankNameParts.bankName, mergedRecords);
+
+      appendActivityLogEntry({
+        level: 'info',
+        message: '保存余额附加值成功',
+        details: [`模板名：${templateName}`, `记录数：${records.length}`]
+      });
+
+      return { status: 'success', message: '余额附加值保存成功' };
+    } catch (error) {
+      return createErrorResult({
+        step: '保存余额附加值',
+        message: '余额附加值保存失败',
+        errorCode: 'BALANCE_ADJUSTMENT_SAVE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error
+      });
+    }
+  });
 }
 
 function registerFileHandlers() {
@@ -4628,6 +4807,7 @@ app.whenReady()
     registerBackgroundHandlers();
     registerAccountMappingHandlers();
     registerTemplateHandlers();
+    registerBigAccountHandlers();
     registerFileHandlers();
     registerNewAccountHandlers();
     markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);
