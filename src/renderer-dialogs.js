@@ -1206,22 +1206,31 @@
       });
       dialog.querySelector('[data-action="balance-management"]').addEventListener('click', async () => {
         cleanupFloatingDropdown();
-        if (!templateName) {
+        if (!templateName || !templateId) {
           setStatus('请先选择模板', 'error');
           return;
         }
-        const bigAccountSnapshot = Array.from(tbody.querySelectorAll('tr[data-big-account-row]'))
-          .filter((row) => row.dataset.mode === 'view')
-          .map((row) => {
-            const merchantId = row.querySelector('.big-account-merchant-view')?.textContent?.trim() || '';
-            const isMultiCurrency = row.querySelector('.big-account-multi-checkbox')?.checked || false;
-            const currencyText = row.querySelector('.big-account-currency-view')?.title || '';
-            const currencies = isMultiCurrency
-              ? currencyText.split('、').filter(Boolean)
-              : [currencyText].filter(Boolean);
-            return { merchantId, currencies, isMultiCurrency };
-          })
-          .filter((item) => item.merchantId);
+        let bigAccountSnapshot;
+        try {
+          const mappingResult = await desktopApi.templates.getMappings(templateId);
+          bigAccountSnapshot = Array.isArray(mappingResult?.bigAccounts) ? mappingResult.bigAccounts : [];
+        } catch (_error) {
+          bigAccountSnapshot = [];
+        }
+        if (!bigAccountSnapshot.length) {
+          bigAccountSnapshot = Array.from(tbody.querySelectorAll('tr[data-big-account-row]'))
+            .filter((row) => row.dataset.mode === 'view')
+            .map((row) => {
+              const merchantId = row.querySelector('.big-account-merchant-view')?.textContent?.trim() || '';
+              const isMultiCurrency = row.querySelector('.big-account-multi-checkbox')?.checked || false;
+              const currencyText = row.querySelector('.big-account-currency-view')?.title || '';
+              const currencies = isMultiCurrency
+                ? currencyText.split('、').filter(Boolean)
+                : [currencyText].filter(Boolean);
+              return { merchantId, currencies, isMultiCurrency };
+            })
+            .filter((item) => item.merchantId);
+        }
         openModal(createBalanceAddonManagerDialog({
           templateName,
           bigAccounts: bigAccountSnapshot,
@@ -1783,6 +1792,13 @@
         const valueInput = row.querySelector('.balance-addon-value-input');
         const remarkInput = row.querySelector('.balance-addon-remark-input');
 
+        if (record.merchantId && !Array.from(merchantSelect.options).some((opt) => opt.value === record.merchantId)) {
+          const extraOpt = document.createElement('option');
+          extraOpt.value = record.merchantId;
+          extraOpt.textContent = record.merchantId;
+          merchantSelect.appendChild(extraOpt);
+        }
+
         function syncCurrencyOptions() {
           const selectedAccount = groupedBigAccounts.find((item) => item.merchantId === merchantSelect.value);
           currencySelect.innerHTML = '<option value=""></option>';
@@ -1846,6 +1862,26 @@
           adjustmentValue: row.querySelector('.balance-addon-value-input')?.value?.trim() || '',
           remark: row.querySelector('.balance-addon-remark-input')?.value?.trim() || ''
         })).filter((r) => r.merchantId || r.effectiveDate || r.adjustmentValue);
+
+        for (let i = 0; i < records.length; i++) {
+          const r = records[i];
+          if (!r.merchantId) {
+            setStatus(`第 ${i + 1} 行：请选择大账号`, 'error');
+            return;
+          }
+          if (!r.currency) {
+            setStatus(`第 ${i + 1} 行：请选择币种`, 'error');
+            return;
+          }
+          if (!r.effectiveDate) {
+            setStatus(`第 ${i + 1} 行：请填写日期`, 'error');
+            return;
+          }
+          if (!r.adjustmentValue || isNaN(Number(r.adjustmentValue))) {
+            setStatus(`第 ${i + 1} 行：余额附加值必须是有效数字`, 'error');
+            return;
+          }
+        }
 
         const result = await window.desktopApi.balanceAdjustment.save({
           templateName,
