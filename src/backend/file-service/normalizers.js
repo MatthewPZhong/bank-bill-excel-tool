@@ -416,7 +416,7 @@ function stripDateTimeSuffix(rawValue) {
     /^(\d{4}-\d{1,2}-\d{1,2})-\d{1,2}:\d{1,2}$/,
     '$1'
   );
-  const withoutTrailingTime = withoutDashHourMinute.replace(/\s+\d{1,2}:\d{1,2}(:\d{1,2})?.*$/, '');
+  const withoutTrailingTime = withoutDashHourMinute.replace(/\s+\d{1,2}[:.]\d{1,2}([:.]\d{1,2})?.*$/, '');
   return withoutTrailingTime || withoutDashHourMinute;
 }
 
