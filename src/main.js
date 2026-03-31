@@ -16,6 +16,8 @@ const {
   writeBalanceAdjustments,
   resolveBalanceAdjustment
 } = require('./backend/balance-adjustment-store');
+const { readBigAccountOrder, writeBigAccountOrder } = require('./backend/big-account-order-store');
+const { readBigAccountMode, writeBigAccountMode } = require('./backend/big-account-mode-store');
 const {
   calculateEndingBalanceFromAmounts,
   buildDetailExportRows,
@@ -424,7 +426,14 @@ function rememberPendingBigAccountSelection(context = null) {
               sourceRowNumber: Number(row.sourceRowNumber || 0),
               fileName: normalizeCell(row.fileName)
             }))
-          : []
+          : [],
+        rowsWithEmptyBlocks: Array.isArray(context.rowsWithEmptyBlocks)
+          ? context.rowsWithEmptyBlocks.map((row) => ({
+              index: Number(row.index || 0),
+              sourceRowNumber: Number(row.sourceRowNumber || 0),
+              fileName: normalizeCell(row.fileName)
+            }))
+          : undefined
       }
     : null;
 }
@@ -461,18 +470,21 @@ function buildManualBalanceRequiredResult(prompt, generatedFiles) {
   };
 }
 
-function buildBigAccountSelectionRequiredResult({ rows = [], bigAccounts = [], fixedAssignments = [] } = {}) {
+function buildBigAccountSelectionRequiredResult({ rows = [], rowsWithEmptyBlocks, bigAccounts = [], fixedAssignments = [], templateId } = {}) {
   clearLastErrorReport();
+  const mapRow = (row, index) => ({
+    index: Number.isInteger(row.index) ? row.index : index,
+    label: `${index + 1}.`,
+    sourceRowNumber: Number(row.sourceRowNumber || 0),
+    fileName: normalizeCell(row.fileName)
+  });
   return {
     status: 'select-big-account',
     message: '请选择本次使用的大账号 / 币种',
     selectionMode: 'multi-row',
-    rows: rows.map((row, index) => ({
-      index: Number.isInteger(row.index) ? row.index : index,
-      label: `${index + 1}.`,
-      sourceRowNumber: Number(row.sourceRowNumber || 0),
-      fileName: normalizeCell(row.fileName)
-    })),
+    templateId,
+    rows: rows.map(mapRow),
+    rowsWithEmptyBlocks: (rowsWithEmptyBlocks || rows).map(mapRow),
     bigAccounts: bigAccounts.map((item) => ({
       merchantId: normalizeCell(item.merchantId),
       currencies: Array.isArray(item.currencies)
@@ -480,6 +492,7 @@ function buildBigAccountSelectionRequiredResult({ rows = [], bigAccounts = [], f
         : [],
       isMultiCurrency: Boolean(item.isMultiCurrency)
     })),
+    expandedBigAccountOptions: expandBigAccountConfigurations(bigAccounts),
     fixedAssignments: fixedAssignments.map((item) => ({
       merchantId: normalizeCell(item.merchantId),
       currency: normalizeCell(item.currency),
@@ -505,7 +518,8 @@ function buildPendingBigAccountFileEntries({ template, mappings, orderedTargetFi
   }));
 }
 
-function identifyAccountBlocks(detailRows) {
+function identifyAccountBlocks(detailRows, options = {}) {
+  const { includeEmptyBlocks = false } = options;
   const headerRow = detailRows[0] || [];
   const dataRows = detailRows.slice(1);
   const rowMetas = Array.isArray(detailRows.rowMetas) ? detailRows.rowMetas : [];
@@ -541,6 +555,7 @@ function identifyAccountBlocks(detailRows) {
 
   const blocks = [];
   let blockStart = 0;
+  let prevBreakRowNumber = null;
 
   headerBreaks.forEach((breakRowNumber) => {
     const splitIndex = rowMetas.findIndex(
@@ -550,22 +565,36 @@ function identifyAccountBlocks(detailRows) {
 
     const rawEnd = effectiveSplit > blockStart ? effectiveSplit - 1 : blockStart - 1;
     const trimmed = trimBlock(blockStart, rawEnd);
-    if (trimmed.startIndex <= trimmed.endIndex) {
+    if (includeEmptyBlocks) {
       blocks.push({
         startIndex: trimmed.startIndex,
         endIndex: trimmed.endIndex,
-        startRowNumber: rowMetas[trimmed.startIndex]?.sourceRowNumber || trimmed.startIndex + 2
+        startRowNumber: rowMetas[trimmed.startIndex]?.sourceRowNumber || prevBreakRowNumber || blockStart + 2
+      });
+    } else if (trimmed.startIndex <= trimmed.endIndex) {
+      blocks.push({
+        startIndex: trimmed.startIndex,
+        endIndex: trimmed.endIndex,
+        startRowNumber: rowMetas[trimmed.startIndex]?.sourceRowNumber || prevBreakRowNumber || trimmed.startIndex + 2
       });
     }
     blockStart = effectiveSplit;
+    prevBreakRowNumber = breakRowNumber;
   });
 
+  const lastBreakRowNumber = headerBreaks[headerBreaks.length - 1];
   const lastTrimmed = trimBlock(blockStart, dataRows.length - 1);
-  if (lastTrimmed.startIndex <= lastTrimmed.endIndex) {
+  if (includeEmptyBlocks) {
     blocks.push({
       startIndex: lastTrimmed.startIndex,
       endIndex: lastTrimmed.endIndex,
-      startRowNumber: rowMetas[lastTrimmed.startIndex]?.sourceRowNumber || lastTrimmed.startIndex + 2
+      startRowNumber: rowMetas[lastTrimmed.startIndex]?.sourceRowNumber || lastBreakRowNumber || blockStart + 2
+    });
+  } else if (lastTrimmed.startIndex <= lastTrimmed.endIndex) {
+    blocks.push({
+      startIndex: lastTrimmed.startIndex,
+      endIndex: lastTrimmed.endIndex,
+      startRowNumber: rowMetas[lastTrimmed.startIndex]?.sourceRowNumber || lastBreakRowNumber || lastTrimmed.startIndex + 2
     });
   }
 
@@ -576,12 +605,13 @@ function identifyAccountBlocks(detailRows) {
   }];
 }
 
-function buildBigAccountSelectionRows(fileEntries = []) {
+function buildBigAccountSelectionRows(fileEntries = [], options = {}) {
+  const { includeEmptyBlocks = false } = options;
   const rows = [];
   let rowIndex = 0;
 
   fileEntries.forEach((entry) => {
-    const blocks = identifyAccountBlocks(entry.detailRows);
+    const blocks = identifyAccountBlocks(entry.detailRows, { includeEmptyBlocks });
 
     blocks.forEach((block) => {
       rows.push({
@@ -598,7 +628,8 @@ function buildBigAccountSelectionRows(fileEntries = []) {
   return rows;
 }
 
-function applyBigAccountAssignmentsToFileEntries(fileEntries = [], assignments = []) {
+function applyBigAccountAssignmentsToFileEntries(fileEntries = [], assignments = [], options = {}) {
+  const { includeEmptyBlocks = false } = options;
   const normalizedAssignments = assignments.map((item, index) => ({
     merchantId: normalizeCell(item.merchantId),
     currency: normalizeCell(item.currency),
@@ -613,7 +644,7 @@ function applyBigAccountAssignmentsToFileEntries(fileEntries = [], assignments =
     const merchantIdIndex = fieldIndexMap.get('MerchantId');
     const currencyIndex = fieldIndexMap.get('Currency');
     const dataRows = nextRows.slice(1);
-    const blocks = identifyAccountBlocks(entry.detailRows);
+    const blocks = identifyAccountBlocks(entry.detailRows, { includeEmptyBlocks });
 
     const keepIndices = new Set();
 
@@ -4068,6 +4099,42 @@ function registerBigAccountHandlers() {
   });
 }
 
+function registerBigAccountOrderHandlers() {
+  ipcMain.handle('big-account-mode:load', (_event, templateId) => {
+    try {
+      return { status: 'success', mode: readBigAccountMode(ensureStorageRoot(), templateId) };
+    } catch (_error) {
+      return { status: 'success', mode: 'unfixed' };
+    }
+  });
+
+  ipcMain.handle('big-account-mode:save', (_event, payload = {}) => {
+    try {
+      writeBigAccountMode(ensureStorageRoot(), payload.templateId, payload.mode);
+      return { status: 'success' };
+    } catch (_error) {
+      return { status: 'error', message: '解析模式保存失败' };
+    }
+  });
+
+  ipcMain.handle('big-account-order:load', (_event, templateId) => {
+    try {
+      return { status: 'success', order: readBigAccountOrder(ensureStorageRoot(), templateId) };
+    } catch (_error) {
+      return { status: 'success', order: null };
+    }
+  });
+
+  ipcMain.handle('big-account-order:save', (_event, payload = {}) => {
+    try {
+      writeBigAccountOrder(ensureStorageRoot(), payload.templateId, payload.assignments || []);
+      return { status: 'success' };
+    } catch (_error) {
+      return { status: 'error', message: '大账号选择顺序保存失败' };
+    }
+  });
+}
+
 function registerFileHandlers() {
   ipcMain.handle('file:import', async (_event, templateId) => {
     if (!getEnumConfig()) {
@@ -4140,6 +4207,7 @@ function registerFileHandlers() {
           inputFilePaths: selectionResult.filePaths
         });
         const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
+        const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
 
         rememberPendingBigAccountSelection({
           templateId,
@@ -4150,12 +4218,15 @@ function registerFileHandlers() {
           bigAccounts: templateConfig.bigAccounts,
           fixedAssignments: templateConfig.fixedAssignments,
           fileEntries: provisionalFileEntries,
-          rows: selectionRows
+          rows: selectionRows,
+          rowsWithEmptyBlocks: selectionRowsWithEmpty
         });
         return buildBigAccountSelectionRequiredResult({
           rows: selectionRows,
+          rowsWithEmptyBlocks: selectionRowsWithEmpty,
           bigAccounts: templateConfig.bigAccounts,
-          fixedAssignments: templateConfig.fixedAssignments
+          fixedAssignments: templateConfig.fixedAssignments,
+          templateId
         });
       }
 
@@ -4182,6 +4253,7 @@ function registerFileHandlers() {
           }
 
           const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
+          const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
           rememberPendingBigAccountSelection({
             templateId,
             template: templateConfig.template,
@@ -4191,12 +4263,15 @@ function registerFileHandlers() {
             bigAccounts: templateConfig.bigAccounts,
             fixedAssignments: templateConfig.fixedAssignments,
             fileEntries: provisionalFileEntries,
-            rows: selectionRows
+            rows: selectionRows,
+            rowsWithEmptyBlocks: selectionRowsWithEmpty
           });
           return buildBigAccountSelectionRequiredResult({
             rows: selectionRows,
+            rowsWithEmptyBlocks: selectionRowsWithEmpty,
             bigAccounts: templateConfig.bigAccounts,
-            fixedAssignments: templateConfig.fixedAssignments
+            fixedAssignments: templateConfig.fixedAssignments,
+            templateId
           });
         }
       }
@@ -4310,10 +4385,15 @@ function registerFileHandlers() {
         }))
       : [];
 
-    if (!assignments.length || assignments.length !== pendingContext.rows.length) {
+    const isFixedMode = payload.mode === 'fixed';
+    const expectedRows = isFixedMode
+      ? (pendingContext.rowsWithEmptyBlocks || pendingContext.rows)
+      : pendingContext.rows;
+
+    if (!assignments.length || assignments.length !== expectedRows.length) {
       return createErrorResult({
         step: '选择大账号',
-        message: '请选择有效的大账号 / 币种',
+        message: `请选择有效的大账号 / 币种（需要 ${expectedRows.length} 个，当前 ${assignments.length} 个）`,
         errorCode: 'BIG_ACCOUNT_SELECTION_INVALID',
         templateName: pendingContext.template.name
       });
@@ -4349,23 +4429,10 @@ function registerFileHandlers() {
         templateName: pendingContext.template.name
       });
 
-      if (Boolean(payload.fixed)) {
-        const currentMappingPayload = database.getTemplateMappings(pendingContext.templateId);
-
-        if (currentMappingPayload) {
-          database.saveMappings(
-            pendingContext.templateId,
-            currentMappingPayload.mappings,
-            database.getTemplateBigAccounts(pendingContext.templateId),
-            normalizedAssignments
-          );
-          syncTemplateLibraryFile();
-        }
-      }
-
       const resolvedFileEntries = applyBigAccountAssignmentsToFileEntries(
         pendingContext.fileEntries,
-        normalizedAssignments
+        normalizedAssignments,
+        { includeEmptyBlocks: isFixedMode }
       );
       const generationConfig = buildStatementGenerationConfig({
         template: pendingContext.template,
@@ -4693,10 +4760,30 @@ function registerNewAccountHandlers() {
         balanceTemplateFields
       });
       const primaryAccount = accounts[0];
-      const currencyLabel = generated.currencies.length > 1 ? '多币种' : (generated.currencies[0] || '');
+
+      let accountSegment;
+      let currencySegment;
+
+      if (accounts.length === 1) {
+        const bankAccount = String(primaryAccount.bankAccount || '').trim();
+        accountSegment = bankAccount.length > 4 ? bankAccount.slice(-4) : bankAccount;
+        currencySegment = generated.currencies.length > 1 ? '多币种' : (generated.currencies[0] || '');
+      } else {
+        accountSegment = '多账号';
+        currencySegment = '多币种';
+      }
+
+      const nameParts = [
+        primaryAccount.bankName,
+        primaryAccount.location,
+        accountSegment,
+        currencySegment,
+        NEW_ACCOUNT_EXPORT_NAME
+      ].filter((part) => part !== '');
+
       const output = buildOutputFilePath({
         kind: 'new-account',
-        outputFileName: `${primaryAccount.bankName}-${primaryAccount.location}-多账号-${currencyLabel}-${NEW_ACCOUNT_EXPORT_NAME}.xlsx`
+        outputFileName: `${nameParts.join('-')}.xlsx`
       });
 
       writeBalanceWorkbook({
@@ -4808,6 +4895,7 @@ app.whenReady()
     registerAccountMappingHandlers();
     registerTemplateHandlers();
     registerBigAccountHandlers();
+    registerBigAccountOrderHandlers();
     registerFileHandlers();
     registerNewAccountHandlers();
     markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);

@@ -38,7 +38,11 @@ contextBridge.exposeInMainWorld('desktopApi', {
   },
   bigAccount: {
     importBankInfo: (templateId) => ipcRenderer.invoke('big-account:import-bank-info', templateId),
-    saveOwnAccounts: (payload) => ipcRenderer.invoke('big-account:save-own-accounts', payload)
+    saveOwnAccounts: (payload) => ipcRenderer.invoke('big-account:save-own-accounts', payload),
+    loadMode: (templateId) => ipcRenderer.invoke('big-account-mode:load', templateId),
+    saveMode: (payload) => ipcRenderer.invoke('big-account-mode:save', payload),
+    loadOrder: (templateId) => ipcRenderer.invoke('big-account-order:load', templateId),
+    saveOrder: (payload) => ipcRenderer.invoke('big-account-order:save', payload)
   },
   balanceAdjustment: {
     list: (templateName) => ipcRenderer.invoke('balance-adjustment:list', templateName),
