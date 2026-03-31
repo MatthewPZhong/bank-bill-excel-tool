@@ -532,6 +532,7 @@
       let checkedOrder = [];
       let searchMatchIndex = -1;
       let searchMatches = [];
+      let lastSearchQuery = '';
 
       dialog.innerHTML = `
         <div class="dialog-header">
@@ -680,6 +681,12 @@
       function syncModeUI() {
         currentFileRows = currentMode === 'fixed' ? rowsWithEmptyBlocks : rows;
         rememberLabel.hidden = currentMode !== 'fixed';
+        if (currentMode !== 'fixed') {
+          rememberCheckbox.checked = false;
+          rememberCheckbox.disabled = true;
+        } else {
+          rememberCheckbox.disabled = false;
+        }
         checkedOrder = [];
         renderFileList();
         renderOrderList();
@@ -745,10 +752,16 @@
         if (!searchMatches.length) {
           searchInput.classList.add('is-flash-error');
           setTimeout(() => searchInput.classList.remove('is-flash-error'), 500);
+          lastSearchQuery = query;
           return;
         }
 
-        searchMatchIndex = (searchMatchIndex + 1) % searchMatches.length;
+        if (query !== lastSearchQuery) {
+          searchMatchIndex = 0;
+          lastSearchQuery = query;
+        } else {
+          searchMatchIndex = (searchMatchIndex + 1) % searchMatches.length;
+        }
         const target = searchMatches[searchMatchIndex];
         target.classList.add('is-search-highlight');
         target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
