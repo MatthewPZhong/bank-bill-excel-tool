@@ -1076,6 +1076,12 @@ select {
   cursor: pointer;
 }
 
+.big-account-remember-label.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .is-flash-error {
   border-color: #e74c3c !important;
   animation: flash-error 500ms ease-out;
