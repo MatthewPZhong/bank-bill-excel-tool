@@ -4489,7 +4489,6 @@ function registerFileHandlers() {
     } catch (error) {
       clearGeneratedExports();
       clearPendingManualBalancePrompt();
-      clearPendingBigAccountSelection();
 
       if (error instanceof FileValidationError) {
         return createErrorResult({

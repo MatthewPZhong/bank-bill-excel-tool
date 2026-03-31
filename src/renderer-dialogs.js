@@ -627,10 +627,29 @@
               }
               checkedOrder.push({ merchantId: option.merchantId, currency: option.currency, key });
             } else {
-              checkedOrder = checkedOrder.filter((item) => item.key !== key);
+              const lastIdx = checkedOrder.map((o) => o.key).lastIndexOf(key);
+              if (lastIdx >= 0) {
+                checkedOrder.splice(lastIdx, 1);
+              }
+              if (checkedOrder.some((o) => o.key === key)) {
+                checkbox.checked = true;
+              }
             }
             syncOrderIndices();
             syncCheckboxDisabled();
+          });
+
+          item.addEventListener('click', (e) => {
+            if (e.target === checkbox) return;
+            const key = `${option.merchantId}@@${option.currency}`;
+            if (checkbox.checked && checkedOrder.length < currentFileRows.length) {
+              checkedOrder.push({ merchantId: option.merchantId, currency: option.currency, key });
+              syncOrderIndices();
+              syncCheckboxDisabled();
+            } else if (!checkbox.checked) {
+              checkbox.checked = true;
+              checkbox.dispatchEvent(new Event('change'));
+            }
           });
 
           item.append(checkbox, indexSpan, textSpan);
@@ -643,9 +662,11 @@
       function syncOrderIndices() {
         orderListContainer.querySelectorAll('.big-account-order-item').forEach((item) => {
           const key = `${item.dataset.merchantId}@@${item.dataset.currency}`;
-          const orderIdx = checkedOrder.findIndex((o) => o.key === key);
+          const positions = checkedOrder
+            .map((o, i) => o.key === key ? i + 1 : null)
+            .filter((v) => v !== null);
           const indexSpan = item.querySelector('.big-account-order-index');
-          indexSpan.textContent = orderIdx >= 0 ? `${orderIdx + 1}.` : '';
+          indexSpan.textContent = positions.length ? positions.join(',') : '';
         });
       }
 
