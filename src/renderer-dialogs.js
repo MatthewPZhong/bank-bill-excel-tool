@@ -519,278 +519,282 @@
       }
 
       const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-      const groupedBigAccounts = Array.from(
-        (Array.isArray(payload?.bigAccounts) ? payload.bigAccounts : []).reduce((accumulator, item) => {
-          const merchantId = String(item?.merchantId || '').trim();
+      const rowsWithEmptyBlocks = Array.isArray(payload?.rowsWithEmptyBlocks) ? payload.rowsWithEmptyBlocks : rows;
+      const expandedOptions = Array.isArray(payload?.expandedBigAccountOptions) ? payload.expandedBigAccountOptions : [];
+      const templateId = payload?.templateId;
 
-          if (!merchantId) {
-            return accumulator;
-          }
-
-          const existing = accumulator.get(merchantId) || {
-            merchantId,
-            currencies: [],
-            isMultiCurrency: false
-          };
-          const nextCurrencies = Array.from(
-            new Set([
-              ...existing.currencies,
-              ...(Array.isArray(item.currencies) ? item.currencies.map((value) => String(value || '').trim()).filter(Boolean) : [])
-            ])
-          );
-
-          accumulator.set(merchantId, {
-            merchantId,
-            currencies: nextCurrencies,
-            isMultiCurrency: Boolean(item.isMultiCurrency) || nextCurrencies.length > 1
-          });
-          return accumulator;
-        }, new Map()).values()
-      );
-      const fixedAssignmentsByRowIndex = new Map(
-        (Array.isArray(payload?.fixedAssignments) ? payload.fixedAssignments : [])
-          .map((item) => ({
-            rowIndex: Number(item?.rowIndex || 0),
-            merchantId: String(item?.merchantId || '').trim(),
-            currency: String(item?.currency || '').trim()
-          }))
-          .filter((item) => item.merchantId)
-          .map((item) => [item.rowIndex, item])
-      );
-      const currencyOptions = getCurrencyOptionEntries();
       const overlay = createOverlay();
       const dialog = document.createElement('div');
-      let fixedEnabled = fixedAssignmentsByRowIndex.size > 0;
-      const currencyControls = [];
-      const rowControls = [];
+      dialog.className = 'modal-card big-account-selection-card big-account-selection-split';
 
-      function createCurrencyControl({ value = '', allowedCodes = [], disabled = false } = {}) {
-        const root = document.createElement('div');
-        root.className = 'enum-input-control big-account-selection-currency-control';
-        root.innerHTML = `
-          <div class="enum-input-shell">
-            <input class="new-account-input enum-ghost-input" type="text" tabindex="-1" disabled />
-            <input class="new-account-input enum-active-input big-account-selection-currency-input" type="text" spellcheck="false" />
-          </div>
-        `;
+      let currentMode = 'unfixed';
+      let currentFileRows = rows;
+      let checkedOrder = [];
+      let searchMatchIndex = -1;
+      let searchMatches = [];
+      let lastSearchQuery = '';
 
-        const ghostInput = root.querySelector('.enum-ghost-input');
-        const input = root.querySelector('.big-account-selection-currency-input');
-        let currentAllowedCodes = allowedCodes.slice();
-        let isDisabled = disabled;
-
-        function renderSuggestion() {
-          const suggestion = isDisabled ? '' : getCurrencySuggestion(input.value, currentAllowedCodes);
-          ghostInput.value = suggestion;
-          return suggestion;
-        }
-
-        function setAllowedCodes(nextAllowedCodes = []) {
-          currentAllowedCodes = nextAllowedCodes.slice();
-
-          if (input.value && currentAllowedCodes.length && !currentAllowedCodes.includes(input.value)) {
-            input.value = '';
-          }
-
-          renderSuggestion();
-        }
-
-        function setDisabled(nextDisabled) {
-          isDisabled = Boolean(nextDisabled);
-          input.disabled = isDisabled;
-          renderSuggestion();
-        }
-
-        input.addEventListener('input', () => {
-          renderSuggestion();
-        });
-        input.addEventListener('keydown', (event) => {
-          if (event.key === 'ArrowRight') {
-            const suggestion = renderSuggestion();
-            const currentValue = String(input.value || '');
-
-            if (suggestion && suggestion !== currentValue && suggestion.toUpperCase().startsWith(currentValue.trim().toUpperCase())) {
-              input.value = suggestion;
-              renderSuggestion();
-              event.preventDefault();
-            }
-          }
-        });
-
-        input.value = value;
-        setAllowedCodes(currentAllowedCodes);
-        setDisabled(isDisabled);
-
-        const api = {
-          root,
-          input,
-          close: () => {},
-          getValue: () => String(input.value || '').trim(),
-          setValue: (nextValue) => {
-            input.value = String(nextValue || '').trim();
-            renderSuggestion();
-          },
-          setAllowedCodes,
-          setDisabled
-        };
-
-        renderSuggestion();
-        return api;
-      }
-
-      dialog.className = 'modal-card big-account-selection-card';
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">请选择本次使用的大账号 / 币种</div>
           <div class="big-account-selection-toolbar">
-            <button class="big-account-fixed-toggle${fixedEnabled ? ' is-active' : ''}" type="button" data-action="toggle-fixed" aria-pressed="${fixedEnabled ? 'true' : 'false'}">
-              <span class="big-account-fixed-toggle-dot"></span>
-              <span class="big-account-fixed-toggle-text">固定</span>
-            </button>
+            <span class="big-account-mode-label">多账号账单导入解析模式</span>
+            <select class="mapping-select big-account-mode-select">
+              <option value="unfixed">账号顺序不固定</option>
+              <option value="fixed">账号顺序固定</option>
+            </select>
             <button class="icon-close" type="button">×</button>
           </div>
         </div>
-        <div class="big-account-selection-intro">从上到下的大账号依次为：</div>
-        <div class="big-account-selection-rows"></div>
-        <div class="dialog-actions right">
+        <div class="big-account-split-body">
+          <div class="big-account-split-left">
+            <div class="big-account-split-header">文件顺序：</div>
+            <div class="big-account-file-list"></div>
+          </div>
+          <div class="big-account-split-right">
+            <div class="big-account-split-header">大账号顺序：</div>
+            <div class="big-account-order-list"></div>
+          </div>
+        </div>
+        <div class="dialog-actions big-account-selection-footer">
+          <span class="big-account-search-label">定位大账号</span>
+          <input class="mapping-text-input big-account-search-input" type="text" spellcheck="false" />
+          <label class="big-account-remember-label is-disabled">
+            <input class="new-account-checkbox big-account-remember-checkbox" type="checkbox" />
+            <span>记住大账号选择顺序</span>
+          </label>
           <button class="primary-btn small" type="button" data-action="done">完成</button>
         </div>
       `;
 
-      const rowsContainer = dialog.querySelector('.big-account-selection-rows');
-      const fixedToggleBtn = dialog.querySelector('[data-action="toggle-fixed"]');
+      const modeSelect = dialog.querySelector('.big-account-mode-select');
+      const fileListContainer = dialog.querySelector('.big-account-file-list');
+      const orderListContainer = dialog.querySelector('.big-account-order-list');
+      const searchInput = dialog.querySelector('.big-account-search-input');
+      const rememberLabel = dialog.querySelector('.big-account-remember-label');
+      const rememberCheckbox = dialog.querySelector('.big-account-remember-checkbox');
+      const doneBtn = dialog.querySelector('[data-action="done"]');
 
-      function syncFixedToggle() {
-        fixedToggleBtn.classList.toggle('is-active', fixedEnabled);
-        fixedToggleBtn.setAttribute('aria-pressed', fixedEnabled ? 'true' : 'false');
+      function truncateFileName(fileName, maxLen) {
+        if (!fileName || fileName.length <= maxLen) return fileName || '';
+        const keepStart = 6;
+        const keepEnd = 10;
+        if (fileName.length <= keepStart + keepEnd + 3) return fileName;
+        return fileName.slice(0, keepStart) + '...' + fileName.slice(-keepEnd);
       }
 
-      rows.forEach((row, displayIndex) => {
-        const rowIndex = Number.isInteger(row.index) ? row.index : displayIndex;
-        const prefilledAssignment = fixedAssignmentsByRowIndex.get(rowIndex) || null;
-        const wrapper = document.createElement('div');
-        wrapper.className = 'big-account-selection-row-card';
-        const accountSelect = document.createElement('select');
-        accountSelect.className = 'mapping-select big-account-selection-account-select';
-        accountSelect.innerHTML = [
-          '<option value=""></option>',
-          ...groupedBigAccounts.map((item) => `<option value="${escapeHtml(item.merchantId)}">${escapeHtml(item.merchantId)}</option>`)
-        ].join('');
-        const currencyControl = createCurrencyControl({
-          value: prefilledAssignment?.currency || '',
-          allowedCodes: [],
-          disabled: false
+      function renderFileList() {
+        fileListContainer.innerHTML = '';
+        currentFileRows.forEach((row, index) => {
+          const item = document.createElement('div');
+          item.className = 'big-account-file-item';
+          const fullName = row.fileName || '';
+          const rowSuffix = row.sourceRowNumber ? ` 第${row.sourceRowNumber}行` : '';
+          const displayName = truncateFileName(fullName, 20) + rowSuffix;
+          const fullMeta = fullName + rowSuffix;
+          item.innerHTML = `<span class="big-account-file-index">${index + 1}.</span><span class="big-account-file-meta" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span>`;
+          fileListContainer.appendChild(item);
+        });
+      }
+
+      function renderOrderList() {
+        orderListContainer.innerHTML = '';
+        if (!expandedOptions.length) {
+          orderListContainer.innerHTML = '<div class="big-account-order-empty">暂无可选大账号，请先在映射管理中维护大账号</div>';
+          return;
+        }
+        expandedOptions.forEach((option, index) => {
+          const item = document.createElement('div');
+          item.className = 'big-account-order-item';
+          item.dataset.merchantId = option.merchantId;
+          item.dataset.currency = option.currency;
+          const label = `${option.merchantId} ${option.currency}`;
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.className = 'new-account-checkbox big-account-order-checkbox';
+          const indexSpan = document.createElement('span');
+          indexSpan.className = 'concat-picker-index big-account-order-index';
+          indexSpan.textContent = '';
+          const textSpan = document.createElement('span');
+          textSpan.className = 'big-account-order-text';
+          textSpan.title = label;
+          textSpan.textContent = label;
+
+          checkbox.addEventListener('change', () => {
+            const key = `${option.merchantId}@@${option.currency}`;
+            if (checkbox.checked) {
+              if (checkedOrder.length >= currentFileRows.length) {
+                checkbox.checked = false;
+                return;
+              }
+              checkedOrder.push({ merchantId: option.merchantId, currency: option.currency, key });
+            } else {
+              checkedOrder = checkedOrder.filter((item) => item.key !== key);
+            }
+            syncOrderIndices();
+            syncCheckboxDisabled();
+          });
+
+          item.append(checkbox, indexSpan, textSpan);
+          orderListContainer.appendChild(item);
+        });
+        syncOrderIndices();
+        syncCheckboxDisabled();
+      }
+
+      function syncOrderIndices() {
+        orderListContainer.querySelectorAll('.big-account-order-item').forEach((item) => {
+          const key = `${item.dataset.merchantId}@@${item.dataset.currency}`;
+          const orderIdx = checkedOrder.findIndex((o) => o.key === key);
+          const indexSpan = item.querySelector('.big-account-order-index');
+          indexSpan.textContent = orderIdx >= 0 ? `${orderIdx + 1}.` : '';
+        });
+      }
+
+      function syncCheckboxDisabled() {
+        const maxReached = checkedOrder.length >= currentFileRows.length;
+        orderListContainer.querySelectorAll('.big-account-order-checkbox').forEach((cb) => {
+          cb.disabled = maxReached && !cb.checked;
+        });
+      }
+
+      function syncModeUI() {
+        currentFileRows = currentMode === 'fixed' ? rowsWithEmptyBlocks : rows;
+        if (currentMode !== 'fixed') {
+          rememberCheckbox.checked = false;
+          rememberCheckbox.disabled = true;
+          rememberLabel.classList.add('is-disabled');
+        } else {
+          rememberCheckbox.disabled = false;
+          rememberLabel.classList.remove('is-disabled');
+        }
+        checkedOrder = [];
+        searchInput.value = '';
+        searchMatchIndex = -1;
+        searchMatches = [];
+        lastSearchQuery = '';
+        renderFileList();
+        renderOrderList();
+
+        if (currentMode === 'fixed' && savedOrder && Array.isArray(savedOrder.assignments) && savedOrder.assignments.length) {
+          rememberCheckbox.checked = true;
+          applyPrefilledOrder(savedOrder.assignments);
+        }
+      }
+
+      let savedOrder = null;
+
+      function applyPrefilledOrder(assignments) {
+        checkedOrder = [];
+        assignments.forEach((a) => {
+          const key = `${a.merchantId}@@${a.currency}`;
+          const exists = expandedOptions.some((o) => o.merchantId === a.merchantId && o.currency === a.currency);
+          if (exists && checkedOrder.length < currentFileRows.length) {
+            checkedOrder.push({ merchantId: a.merchantId, currency: a.currency, key });
+            const item = orderListContainer.querySelector(`[data-merchant-id="${a.merchantId}"][data-currency="${a.currency}"]`);
+            if (item) {
+              item.querySelector('.big-account-order-checkbox').checked = true;
+            }
+          }
+        });
+        syncOrderIndices();
+        syncCheckboxDisabled();
+      }
+
+      function setInteractive(enabled) {
+        const interactiveElements = [modeSelect, searchInput, doneBtn];
+        interactiveElements.forEach((el) => { el.disabled = !enabled; });
+        orderListContainer.style.pointerEvents = enabled ? '' : 'none';
+        orderListContainer.style.opacity = enabled ? '' : '0.5';
+      }
+
+      async function initializeState() {
+        setInteractive(false);
+        try {
+          const modeResult = await desktopApi.bigAccount.loadMode(templateId);
+          currentMode = modeResult.mode || 'unfixed';
+          modeSelect.value = currentMode;
+
+          const orderResult = await desktopApi.bigAccount.loadOrder(templateId);
+          savedOrder = orderResult.order;
+        } catch (_error) {}
+        syncModeUI();
+        setInteractive(true);
+      }
+
+      modeSelect.addEventListener('change', async () => {
+        currentMode = modeSelect.value;
+        await desktopApi.bigAccount.saveMode({ templateId, mode: currentMode });
+        syncModeUI();
+      });
+
+      searchInput.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        const query = searchInput.value.trim().toLowerCase();
+        if (!query) return;
+
+        orderListContainer.querySelectorAll('.big-account-order-item.is-search-highlight').forEach((el) => {
+          el.classList.remove('is-search-highlight');
         });
 
-        wrapper.innerHTML = `
-          <div class="big-account-selection-row-head">
-            <span class="big-account-selection-index">${escapeHtml(row.label || `${displayIndex + 1}.`)}</span>
-            <span class="big-account-selection-meta">${escapeHtml(row.fileName || '')}${row.sourceRowNumber ? ` 第${row.sourceRowNumber}行` : ''}</span>
-          </div>
-          <div class="big-account-selection-row-fields">
-            <div class="big-account-selection-field">
-              <span class="manual-balance-label">大账号</span>
-            </div>
-            <div class="big-account-selection-field">
-              <span class="manual-balance-label">币种</span>
-            </div>
-          </div>
-        `;
+        searchMatches = Array.from(orderListContainer.querySelectorAll('.big-account-order-item')).filter((item) => {
+          const text = (item.dataset.merchantId || '').toLowerCase();
+          return text.includes(query);
+        });
 
-        const fields = wrapper.querySelector('.big-account-selection-row-fields');
-        const accountField = fields.children[0];
-        const currencyField = fields.children[1];
-        accountField.appendChild(accountSelect);
-        currencyField.appendChild(currencyControl.root);
-
-        function syncAccountSelection() {
-          const selectedAccount = groupedBigAccounts.find((item) => item.merchantId === accountSelect.value);
-          const allowedCodes = selectedAccount?.currencies?.slice() || [];
-          const isSingleCurrencyAccount = Boolean(selectedAccount) && !selectedAccount.isMultiCurrency && allowedCodes.length === 1;
-
-          currencyControl.setAllowedCodes(allowedCodes);
-
-          if (!selectedAccount) {
-            currencyControl.setValue('');
-            currencyControl.setDisabled(false);
-            return;
-          }
-
-          if (isSingleCurrencyAccount) {
-            currencyControl.setValue(allowedCodes[0]);
-            currencyControl.setDisabled(true);
-            return;
-          }
-
-          currencyControl.setDisabled(false);
-
-          if (prefilledAssignment?.merchantId === selectedAccount.merchantId && prefilledAssignment.currency) {
-            currencyControl.setValue(
-              !allowedCodes.length || allowedCodes.includes(prefilledAssignment.currency)
-                ? prefilledAssignment.currency
-                : ''
-            );
-            return;
-          }
-
-          if (allowedCodes.length === 1 && !currencyControl.getValue()) {
-            currencyControl.setValue(allowedCodes[0]);
-          }
+        if (!searchMatches.length) {
+          searchInput.classList.add('is-flash-error');
+          setTimeout(() => searchInput.classList.remove('is-flash-error'), 500);
+          lastSearchQuery = query;
+          return;
         }
 
-        accountSelect.addEventListener('change', syncAccountSelection);
-        accountSelect.value = prefilledAssignment?.merchantId || '';
-        syncAccountSelection();
-
-        rowControls.push({
-          rowIndex,
-          accountSelect,
-          currencyControl
-        });
-        currencyControls.push(currencyControl);
-        rowsContainer.appendChild(wrapper);
+        if (query !== lastSearchQuery) {
+          searchMatchIndex = 0;
+          lastSearchQuery = query;
+        } else {
+          searchMatchIndex = (searchMatchIndex + 1) % searchMatches.length;
+        }
+        const target = searchMatches[searchMatchIndex];
+        target.classList.add('is-search-highlight');
+        target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       });
-
-      fixedToggleBtn.addEventListener('click', () => {
-        fixedEnabled = !fixedEnabled;
-        syncFixedToggle();
-      });
-      syncFixedToggle();
 
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
-      dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
-        const assignments = rowControls.map((control) => ({
-          rowIndex: control.rowIndex,
-          merchantId: String(control.accountSelect.value || '').trim(),
-          currency: control.currencyControl.getValue()
-        }));
-        const invalidAssignment = assignments.find((item) => !item.merchantId || !item.currency);
-
-        if (invalidAssignment) {
-          setStatus('请先为每一行选择大账号和币种', 'error');
+      doneBtn.addEventListener('click', async () => {
+        if (checkedOrder.length !== currentFileRows.length) {
+          setStatus(`请勾选 ${currentFileRows.length} 个大账号（当前已选 ${checkedOrder.length} 个）`, 'error');
           return;
+        }
+
+        const assignments = checkedOrder.map((item, index) => ({
+          rowIndex: index,
+          merchantId: item.merchantId,
+          currency: item.currency
+        }));
+
+        if (currentMode === 'fixed' && rememberCheckbox.checked) {
+          await desktopApi.bigAccount.saveOrder({ templateId, assignments });
+        } else if (currentMode === 'fixed' && !rememberCheckbox.checked) {
+          await desktopApi.bigAccount.saveOrder({ templateId, assignments: [] });
         }
 
         const result = await desktopApi.files.completeBigAccountSelection({
           assignments,
-          fixed: fixedEnabled
+          mode: currentMode
         });
+
+        if (result.status === 'error' && !result.manualBalancePromptReady) {
+          setStatus(result.message || '选择大账号失败，请重新设定', 'error');
+          return;
+        }
 
         closeModal();
         applyStatementResult(result);
-
-        if (result.status === 'error' && !result.manualBalancePromptReady) {
-          openModal(createAlertDialog(result.message));
-        }
       });
 
-      overlay.addEventListener('mousedown', (event) => {
-        currencyControls.forEach((control) => {
-          if (!control.root.contains(event.target)) {
-            control.close();
-          }
-        });
-      });
+      initializeState();
 
       overlay.appendChild(dialog);
       return overlay;
