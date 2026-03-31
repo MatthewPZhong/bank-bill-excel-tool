@@ -573,6 +573,7 @@
       const searchInput = dialog.querySelector('.big-account-search-input');
       const rememberLabel = dialog.querySelector('.big-account-remember-label');
       const rememberCheckbox = dialog.querySelector('.big-account-remember-checkbox');
+      const doneBtn = dialog.querySelector('[data-action="done"]');
 
       function truncateFileName(fileName, maxLen) {
         if (!fileName || fileName.length <= maxLen) return fileName || '';
@@ -668,6 +669,10 @@
           rememberLabel.classList.remove('is-disabled');
         }
         checkedOrder = [];
+        searchInput.value = '';
+        searchMatchIndex = -1;
+        searchMatches = [];
+        lastSearchQuery = '';
         renderFileList();
         renderOrderList();
 
@@ -696,7 +701,15 @@
         syncCheckboxDisabled();
       }
 
+      function setInteractive(enabled) {
+        const interactiveElements = [modeSelect, searchInput, doneBtn];
+        interactiveElements.forEach((el) => { el.disabled = !enabled; });
+        orderListContainer.style.pointerEvents = enabled ? '' : 'none';
+        orderListContainer.style.opacity = enabled ? '' : '0.5';
+      }
+
       async function initializeState() {
+        setInteractive(false);
         try {
           const modeResult = await desktopApi.bigAccount.loadMode(templateId);
           currentMode = modeResult.mode || 'unfixed';
@@ -706,6 +719,7 @@
           savedOrder = orderResult.order;
         } catch (_error) {}
         syncModeUI();
+        setInteractive(true);
       }
 
       modeSelect.addEventListener('change', async () => {
@@ -748,7 +762,7 @@
       });
 
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
-      dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+      doneBtn.addEventListener('click', async () => {
         if (checkedOrder.length !== currentFileRows.length) {
           setStatus(`请勾选 ${currentFileRows.length} 个大账号（当前已选 ${checkedOrder.length} 个）`, 'error');
           return;
