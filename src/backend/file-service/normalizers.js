@@ -531,24 +531,28 @@ function normalizeDateExportValue(value) {
   matchedParts = normalizedValue.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
 
   if (matchedParts) {
-    const date = buildDateObject(matchedParts[3], matchedParts[2], matchedParts[1]);
-    return buildNormalizedDateResult(
-      date,
-      'yyyy-mm-dd',
-      date ? formatIsoDateValue(date) : ''
-    );
+    const ddmmDate = buildDateObject(matchedParts[3], matchedParts[2], matchedParts[1]);
+    if (ddmmDate) {
+      return buildNormalizedDateResult(ddmmDate, 'yyyy-mm-dd', formatIsoDateValue(ddmmDate));
+    }
+    const mmddDate = buildDateObject(matchedParts[3], matchedParts[1], matchedParts[2]);
+    if (mmddDate) {
+      return buildNormalizedDateResult(mmddDate, 'yyyy-mm-dd', formatIsoDateValue(mmddDate));
+    }
   }
 
   matchedParts = normalizedValue.match(/^(\d{1,2})-(\d{1,2})-(\d{2})$/);
 
   if (matchedParts) {
     const fullYear = `20${matchedParts[3]}`;
-    const date = buildDateObject(fullYear, matchedParts[2], matchedParts[1]);
-    return buildNormalizedDateResult(
-      date,
-      'yyyy-mm-dd',
-      date ? formatIsoDateValue(date) : ''
-    );
+    const ddmmDate = buildDateObject(fullYear, matchedParts[2], matchedParts[1]);
+    if (ddmmDate) {
+      return buildNormalizedDateResult(ddmmDate, 'yyyy-mm-dd', formatIsoDateValue(ddmmDate));
+    }
+    const mmddDate = buildDateObject(fullYear, matchedParts[1], matchedParts[2]);
+    if (mmddDate) {
+      return buildNormalizedDateResult(mmddDate, 'yyyy-mm-dd', formatIsoDateValue(mmddDate));
+    }
   }
 
   if (/^\d{6}$/.test(normalizedValue)) {
