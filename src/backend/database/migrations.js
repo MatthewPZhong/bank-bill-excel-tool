@@ -82,8 +82,15 @@ function ensureAccountMappingCurrencySupport(db) {
   }
 }
 
+function ensureTemplateDateFormatSupport(db) {
+  if (!hasColumn(db, 'templates', 'date_format')) {
+    db.exec("ALTER TABLE templates ADD COLUMN date_format TEXT NOT NULL DEFAULT 'auto';");
+  }
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
+  ensureTemplateDateFormatSupport,
   ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,
   hasColumn

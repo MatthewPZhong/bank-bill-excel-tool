@@ -428,7 +428,7 @@ function buildNormalizedDateResult(date, displayFormat = 'yyyy-mm-dd', value = '
   };
 }
 
-function normalizeDateExportValue(value) {
+function normalizeDateExportValue(value, { dateParseOrder = 'auto' } = {}) {
   if (value === null || value === undefined || value === '') {
     return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
   }
@@ -531,24 +531,36 @@ function normalizeDateExportValue(value) {
   matchedParts = normalizedValue.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
 
   if (matchedParts) {
-    const date = buildDateObject(matchedParts[3], matchedParts[2], matchedParts[1]);
-    return buildNormalizedDateResult(
-      date,
-      'yyyy-mm-dd',
-      date ? formatIsoDateValue(date) : ''
-    );
+    const firstDate = dateParseOrder === 'MDY'
+      ? buildDateObject(matchedParts[3], matchedParts[1], matchedParts[2])
+      : buildDateObject(matchedParts[3], matchedParts[2], matchedParts[1]);
+    if (firstDate) {
+      return buildNormalizedDateResult(firstDate, 'yyyy-mm-dd', formatIsoDateValue(firstDate));
+    }
+    const secondDate = dateParseOrder === 'MDY'
+      ? buildDateObject(matchedParts[3], matchedParts[2], matchedParts[1])
+      : buildDateObject(matchedParts[3], matchedParts[1], matchedParts[2]);
+    if (secondDate) {
+      return buildNormalizedDateResult(secondDate, 'yyyy-mm-dd', formatIsoDateValue(secondDate));
+    }
   }
 
   matchedParts = normalizedValue.match(/^(\d{1,2})-(\d{1,2})-(\d{2})$/);
 
   if (matchedParts) {
     const fullYear = `20${matchedParts[3]}`;
-    const date = buildDateObject(fullYear, matchedParts[2], matchedParts[1]);
-    return buildNormalizedDateResult(
-      date,
-      'yyyy-mm-dd',
-      date ? formatIsoDateValue(date) : ''
-    );
+    const firstDate = dateParseOrder === 'MDY'
+      ? buildDateObject(fullYear, matchedParts[1], matchedParts[2])
+      : buildDateObject(fullYear, matchedParts[2], matchedParts[1]);
+    if (firstDate) {
+      return buildNormalizedDateResult(firstDate, 'yyyy-mm-dd', formatIsoDateValue(firstDate));
+    }
+    const secondDate = dateParseOrder === 'MDY'
+      ? buildDateObject(fullYear, matchedParts[2], matchedParts[1])
+      : buildDateObject(fullYear, matchedParts[1], matchedParts[2]);
+    if (secondDate) {
+      return buildNormalizedDateResult(secondDate, 'yyyy-mm-dd', formatIsoDateValue(secondDate));
+    }
   }
 
   if (/^\d{6}$/.test(normalizedValue)) {
@@ -559,6 +571,19 @@ function normalizeDateExportValue(value) {
       'yyyy-mm-dd',
       date ? formatIsoDateValue(date) : ''
     );
+  }
+
+  if (/^\d+$/.test(candidateValue)) {
+    const numericCandidate = Number(candidateValue);
+    if (Number.isFinite(numericCandidate) && numericCandidate > 365 && numericCandidate < 200000) {
+      const parsed = XLSX.SSF.parse_date_code(numericCandidate);
+      if (parsed) {
+        const date = buildDateObject(parsed.y, parsed.m, parsed.d);
+        if (date) {
+          return buildNormalizedDateResult(date, 'yyyy-mm-dd', formatIsoDateValue(date));
+        }
+      }
+    }
   }
 
   const isFallbackCandidate =
