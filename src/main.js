@@ -3177,7 +3177,8 @@ function registerTemplateHandlers() {
             template.id,
             validated.mappings,
             validated.bigAccounts,
-            validated.fixedAssignments
+            validated.fixedAssignments,
+            entry.dateFormat
           );
 
           if (existingTemplate) {
