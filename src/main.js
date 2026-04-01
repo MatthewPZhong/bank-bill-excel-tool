@@ -2000,13 +2000,15 @@ function normalizeDateOnly(date) {
 function buildNewAccountBillDates(openDate, today = new Date()) {
   const normalizedOpenDate = normalizeDateOnly(openDate);
   const normalizedToday = normalizeDateOnly(today);
+  const yesterday = new Date(normalizedToday.getTime());
+  yesterday.setDate(yesterday.getDate() - 1);
 
-  if (normalizedOpenDate.getTime() > normalizedToday.getTime()) {
-    throw new FileValidationError('FILE_READ', '开户日期不能晚于今日');
+  if (normalizedOpenDate.getTime() > yesterday.getTime()) {
+    throw new FileValidationError('FILE_READ', '开户日期不能晚于昨日');
   }
 
   const totalDays = Math.round(
-    (normalizedToday.getTime() - normalizedOpenDate.getTime()) / (24 * 60 * 60 * 1000)
+    (yesterday.getTime() - normalizedOpenDate.getTime()) / (24 * 60 * 60 * 1000)
   ) + 1;
 
   if (totalDays > 3650) {
@@ -2016,7 +2018,7 @@ function buildNewAccountBillDates(openDate, today = new Date()) {
   const dates = [];
   let cursor = new Date(normalizedOpenDate.getTime());
 
-  while (cursor.getTime() <= normalizedToday.getTime()) {
+  while (cursor.getTime() <= yesterday.getTime()) {
     dates.push(normalizeDateOnly(new Date(cursor.getTime())));
     cursor.setDate(cursor.getDate() + 1);
   }
