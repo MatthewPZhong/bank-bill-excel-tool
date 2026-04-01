@@ -4257,6 +4257,16 @@ function registerFileHandlers() {
         const totalBlocks = provisionalFileEntries.reduce((sum, entry) => {
           return sum + identifyAccountBlocks(entry.detailRows).length;
         }, 0);
+
+        if (totalBlocks === 0) {
+          return createErrorResult({
+            step: '导入网银明细文件',
+            message: '导入文件中没有账号存在交易数据',
+            errorCode: 'NO_TRANSACTION_DATA',
+            templateName: templateConfig.template.name
+          });
+        }
+
         const needsSelection = inputFileCount > 1 || totalBlocks > 1;
 
         if (needsSelection) {
