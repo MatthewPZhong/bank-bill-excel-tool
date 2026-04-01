@@ -463,15 +463,6 @@ function normalizeDateExportValue(value) {
     return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
   }
 
-  const numericCandidate = Number(candidateValue);
-  if (/^\d+$/.test(candidateValue) && Number.isFinite(numericCandidate) && numericCandidate > 365 && numericCandidate < 200000) {
-    const parsed = XLSX.SSF.parse_date_code(numericCandidate);
-    if (parsed) {
-      const date = buildDateObject(parsed.y, parsed.m, parsed.d);
-      return buildNormalizedDateResult(date, 'yyyy-mm-dd', date ? formatIsoDateValue(date) : '');
-    }
-  }
-
   const englishMonthDateResult = parseEnglishMonthDateCandidate(candidateValue);
 
   if (englishMonthDateResult) {
@@ -572,6 +563,19 @@ function normalizeDateExportValue(value) {
       'yyyy-mm-dd',
       date ? formatIsoDateValue(date) : ''
     );
+  }
+
+  if (/^\d+$/.test(candidateValue)) {
+    const numericCandidate = Number(candidateValue);
+    if (Number.isFinite(numericCandidate) && numericCandidate > 365 && numericCandidate < 200000) {
+      const parsed = XLSX.SSF.parse_date_code(numericCandidate);
+      if (parsed) {
+        const date = buildDateObject(parsed.y, parsed.m, parsed.d);
+        if (date) {
+          return buildNormalizedDateResult(date, 'yyyy-mm-dd', formatIsoDateValue(date));
+        }
+      }
+    }
   }
 
   const isFallbackCandidate =
