@@ -94,8 +94,7 @@ function buildTemplateSummaryFromRow(row) {
     mappingCount: Number(row.mappingCount || 0),
     bigAccountCount,
     bigAccountMode,
-    bigAccountSummary,
-    dateFormat: normalizeText(row.dateFormat) || 'auto'
+    bigAccountSummary
   };
 }
 

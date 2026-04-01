@@ -43,8 +43,7 @@ function buildMappedRows({
   currencyMappings = [],
   amountMappingRules = {},
   expectedSourceHeaders = [],
-  selectedBigAccount = null,
-  dateParseOrder = 'auto'
+  selectedBigAccount = null
 }) {
   const { rows, rowNumbers, headerBreaks = [] } = readRowsWithMetadata(inputFilePath, expectedSourceHeaders);
   const sourceHeaders = rows[0] || [];
@@ -154,7 +153,7 @@ function buildMappedRows({
       }
 
       if (targetField === 'BillDate' || targetField === 'ValueDate') {
-        return normalizeDateExportValue(resolveDateRawValueByMapping(mappingValue, row), { dateParseOrder }).value;
+        return normalizeDateExportValue(resolveDateRawValueByMapping(mappingValue, row)).value;
       }
 
       if (nameSourceField && mappingValue === nameSourceField) {

@@ -428,7 +428,7 @@ function buildNormalizedDateResult(date, displayFormat = 'yyyy-mm-dd', value = '
   };
 }
 
-function normalizeDateExportValue(value, { dateParseOrder = 'auto' } = {}) {
+function normalizeDateExportValue(value) {
   if (value === null || value === undefined || value === '') {
     return buildNormalizedDateResult(null, 'yyyy-mm-dd', '');
   }
@@ -531,17 +531,13 @@ function normalizeDateExportValue(value, { dateParseOrder = 'auto' } = {}) {
   matchedParts = normalizedValue.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
 
   if (matchedParts) {
-    const firstDate = dateParseOrder === 'MDY'
-      ? buildDateObject(matchedParts[3], matchedParts[1], matchedParts[2])
-      : buildDateObject(matchedParts[3], matchedParts[2], matchedParts[1]);
-    if (firstDate) {
-      return buildNormalizedDateResult(firstDate, 'yyyy-mm-dd', formatIsoDateValue(firstDate));
+    const ddmmDate = buildDateObject(matchedParts[3], matchedParts[2], matchedParts[1]);
+    if (ddmmDate) {
+      return buildNormalizedDateResult(ddmmDate, 'yyyy-mm-dd', formatIsoDateValue(ddmmDate));
     }
-    const secondDate = dateParseOrder === 'MDY'
-      ? buildDateObject(matchedParts[3], matchedParts[2], matchedParts[1])
-      : buildDateObject(matchedParts[3], matchedParts[1], matchedParts[2]);
-    if (secondDate) {
-      return buildNormalizedDateResult(secondDate, 'yyyy-mm-dd', formatIsoDateValue(secondDate));
+    const mmddDate = buildDateObject(matchedParts[3], matchedParts[1], matchedParts[2]);
+    if (mmddDate) {
+      return buildNormalizedDateResult(mmddDate, 'yyyy-mm-dd', formatIsoDateValue(mmddDate));
     }
   }
 
@@ -549,17 +545,13 @@ function normalizeDateExportValue(value, { dateParseOrder = 'auto' } = {}) {
 
   if (matchedParts) {
     const fullYear = `20${matchedParts[3]}`;
-    const firstDate = dateParseOrder === 'MDY'
-      ? buildDateObject(fullYear, matchedParts[1], matchedParts[2])
-      : buildDateObject(fullYear, matchedParts[2], matchedParts[1]);
-    if (firstDate) {
-      return buildNormalizedDateResult(firstDate, 'yyyy-mm-dd', formatIsoDateValue(firstDate));
+    const ddmmDate = buildDateObject(fullYear, matchedParts[2], matchedParts[1]);
+    if (ddmmDate) {
+      return buildNormalizedDateResult(ddmmDate, 'yyyy-mm-dd', formatIsoDateValue(ddmmDate));
     }
-    const secondDate = dateParseOrder === 'MDY'
-      ? buildDateObject(fullYear, matchedParts[2], matchedParts[1])
-      : buildDateObject(fullYear, matchedParts[1], matchedParts[2]);
-    if (secondDate) {
-      return buildNormalizedDateResult(secondDate, 'yyyy-mm-dd', formatIsoDateValue(secondDate));
+    const mmddDate = buildDateObject(fullYear, matchedParts[1], matchedParts[2]);
+    if (mmddDate) {
+      return buildNormalizedDateResult(mmddDate, 'yyyy-mm-dd', formatIsoDateValue(mmddDate));
     }
   }
 

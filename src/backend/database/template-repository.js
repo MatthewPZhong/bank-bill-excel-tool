@@ -16,7 +16,6 @@ function listTemplates(db) {
       t.headers_json AS headersJson,
       t.created_at AS createdAt,
       t.updated_at AS updatedAt,
-      t.date_format AS dateFormat,
       COUNT(DISTINCT m.id) AS mappingCount,
       COUNT(DISTINCT ba.merchant_id) AS bigAccountCount,
       merchant_mapping.mapped_field AS merchantIdMappedField,
@@ -45,7 +44,6 @@ function getTemplate(db, templateId) {
         t.headers_json AS headersJson,
         t.created_at AS createdAt,
         t.updated_at AS updatedAt,
-        t.date_format AS dateFormat,
         (
           SELECT COUNT(1)
           FROM template_mappings m
@@ -234,7 +232,7 @@ function getTemplateMappings(db, templateId) {
   };
 }
 
-function saveMappings(db, templateId, mappings, bigAccounts = [], fixedAssignments = [], dateFormat = 'auto') {
+function saveMappings(db, templateId, mappings, bigAccounts = [], fixedAssignments = []) {
   const now = new Date().toISOString();
   db.exec('BEGIN');
 
@@ -306,8 +304,8 @@ function saveMappings(db, templateId, mappings, bigAccounts = [], fixedAssignmen
     });
 
     db
-      .prepare('UPDATE templates SET updated_at = ?, date_format = ? WHERE id = ?')
-      .run(now, dateFormat || 'auto', templateId);
+      .prepare('UPDATE templates SET updated_at = ? WHERE id = ?')
+      .run(now, templateId);
 
     db.exec('COMMIT');
   } catch (error) {
@@ -331,7 +329,6 @@ function listTemplateBundleEntries(db) {
         isMultiCurrency: Boolean(item.isMultiCurrency)
       })) : [],
       fixedAssignments: payload ? payload.fixedAssignments.map((item) => ({ ...item })) : [],
-      dateFormat: template.dateFormat || 'auto',
       createdAt: template.createdAt,
       updatedAt: template.updatedAt
     };

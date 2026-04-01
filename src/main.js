@@ -942,8 +942,7 @@ function readTemplateBundleFile(filePath) {
     headers: Array.isArray(item.headers) ? item.headers.map((value) => normalizeCell(value)).filter((value) => value !== '') : [],
     mappings: Array.isArray(item.mappings) ? item.mappings : [],
     bigAccounts: Array.isArray(item.bigAccounts) ? item.bigAccounts : [],
-    fixedAssignments: Array.isArray(item.fixedAssignments) ? item.fixedAssignments : [],
-    dateFormat: normalizeCell(item.dateFormat) || 'auto'
+    fixedAssignments: Array.isArray(item.fixedAssignments) ? item.fixedAssignments : []
   }));
 }
 
@@ -2897,8 +2896,7 @@ function registerTemplateHandlers() {
         exportTargetFields: mappingConfig.exportTargetFields,
         mappings: mappingConfig.mappings,
         bigAccounts: mappingConfig.bigAccounts,
-        fixedAssignments: mappingConfig.fixedAssignments,
-        dateFormat: mappingConfig.template.dateFormat || 'auto'
+        fixedAssignments: mappingConfig.fixedAssignments
       };
     } catch (error) {
       if (error instanceof FileValidationError) {
@@ -2957,8 +2955,7 @@ function registerTemplateHandlers() {
         payload.templateId,
         templateConfiguration.mappings,
         templateConfiguration.bigAccounts,
-        templateConfiguration.fixedAssignments,
-        payload.dateFormat || 'auto'
+        templateConfiguration.fixedAssignments
       );
       syncTemplateLibraryFile();
       clearLastErrorReport();
@@ -3179,8 +3176,7 @@ function registerTemplateHandlers() {
             template.id,
             validated.mappings,
             validated.bigAccounts,
-            validated.fixedAssignments,
-            entry.dateFormat || 'auto'
+            validated.fixedAssignments
           );
 
           if (existingTemplate) {
@@ -3348,8 +3344,7 @@ function buildStatementGenerationConfig({
       signedAmountSourceField: mappingByTargetField[SIGNED_AMOUNT_MAPPING_FIELD],
       nameSourceField: mappingByTargetField[AMOUNT_BASED_NAME_MAPPING_FIELD],
       accountSourceField: mappingByTargetField[AMOUNT_BASED_ACCOUNT_MAPPING_FIELD]
-    },
-    dateParseOrder: template.dateFormat || 'auto'
+    }
   };
 }
 
@@ -3368,8 +3363,7 @@ function buildMappedRowsForFile({
     selectedBigAccount: {
       merchantId: config.selectedMerchantId,
       currency: config.selectedCurrency
-    },
-    dateParseOrder: config.dateParseOrder
+    }
   });
 }
 
