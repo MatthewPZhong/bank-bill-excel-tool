@@ -234,7 +234,7 @@ function getTemplateMappings(db, templateId) {
   };
 }
 
-function saveMappings(db, templateId, mappings, bigAccounts = [], fixedAssignments = [], dateFormat = 'auto') {
+function saveMappings(db, templateId, mappings, bigAccounts = [], fixedAssignments = [], dateFormat) {
   const now = new Date().toISOString();
   db.exec('BEGIN');
 
@@ -305,9 +305,11 @@ function saveMappings(db, templateId, mappings, bigAccounts = [], fixedAssignmen
       );
     });
 
-    db
-      .prepare('UPDATE templates SET updated_at = ?, date_format = ? WHERE id = ?')
-      .run(now, dateFormat || 'auto', templateId);
+    if (dateFormat) {
+      db.prepare('UPDATE templates SET updated_at = ?, date_format = ? WHERE id = ?').run(now, dateFormat, templateId);
+    } else {
+      db.prepare('UPDATE templates SET updated_at = ? WHERE id = ?').run(now, templateId);
+    }
 
     db.exec('COMMIT');
   } catch (error) {

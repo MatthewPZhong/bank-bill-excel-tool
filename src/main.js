@@ -598,11 +598,19 @@ function identifyAccountBlocks(detailRows, options = {}) {
     });
   }
 
-  return blocks.length ? blocks : [{
-    startIndex: 0,
-    endIndex: Math.max(0, dataRows.length - 1),
-    startRowNumber: rowMetas[0]?.sourceRowNumber || 2
-  }];
+  if (blocks.length) {
+    return blocks;
+  }
+
+  if (!headerBreaks.length) {
+    return [{
+      startIndex: 0,
+      endIndex: Math.max(0, dataRows.length - 1),
+      startRowNumber: rowMetas[0]?.sourceRowNumber || 2
+    }];
+  }
+
+  return [];
 }
 
 function buildBigAccountSelectionRows(fileEntries = [], options = {}) {
@@ -1992,13 +2000,15 @@ function normalizeDateOnly(date) {
 function buildNewAccountBillDates(openDate, today = new Date()) {
   const normalizedOpenDate = normalizeDateOnly(openDate);
   const normalizedToday = normalizeDateOnly(today);
+  const yesterday = new Date(normalizedToday.getTime());
+  yesterday.setDate(yesterday.getDate() - 1);
 
-  if (normalizedOpenDate.getTime() > normalizedToday.getTime()) {
-    throw new FileValidationError('FILE_READ', '开户日期不能晚于今日');
+  if (normalizedOpenDate.getTime() > yesterday.getTime()) {
+    throw new FileValidationError('FILE_READ', '开户日期不能晚于昨日');
   }
 
   const totalDays = Math.round(
-    (normalizedToday.getTime() - normalizedOpenDate.getTime()) / (24 * 60 * 60 * 1000)
+    (yesterday.getTime() - normalizedOpenDate.getTime()) / (24 * 60 * 60 * 1000)
   ) + 1;
 
   if (totalDays > 3650) {
@@ -2008,7 +2018,7 @@ function buildNewAccountBillDates(openDate, today = new Date()) {
   const dates = [];
   let cursor = new Date(normalizedOpenDate.getTime());
 
-  while (cursor.getTime() <= normalizedToday.getTime()) {
+  while (cursor.getTime() <= yesterday.getTime()) {
     dates.push(normalizeDateOnly(new Date(cursor.getTime())));
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -3170,7 +3180,7 @@ function registerTemplateHandlers() {
             validated.mappings,
             validated.bigAccounts,
             validated.fixedAssignments,
-            entry.dateFormat || 'auto'
+            entry.dateFormat
           );
 
           if (existingTemplate) {
@@ -4213,6 +4223,16 @@ function registerFileHandlers() {
           inputFilePaths: selectionResult.filePaths
         });
         const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
+
+        if (!selectionRows.length) {
+          return createErrorResult({
+            step: '导入网银明细文件',
+            message: '导入文件中没有账号存在交易数据',
+            errorCode: 'NO_TRANSACTION_DATA',
+            templateName: templateConfig.template.name
+          });
+        }
+
         const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
 
         rememberPendingBigAccountSelection({
@@ -4247,6 +4267,16 @@ function registerFileHandlers() {
         const totalBlocks = provisionalFileEntries.reduce((sum, entry) => {
           return sum + identifyAccountBlocks(entry.detailRows).length;
         }, 0);
+
+        if (totalBlocks === 0) {
+          return createErrorResult({
+            step: '导入网银明细文件',
+            message: '导入文件中没有账号存在交易数据',
+            errorCode: 'NO_TRANSACTION_DATA',
+            templateName: templateConfig.template.name
+          });
+        }
+
         const needsSelection = inputFileCount > 1 || totalBlocks > 1;
 
         if (needsSelection) {
@@ -4259,6 +4289,17 @@ function registerFileHandlers() {
           }
 
           const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
+
+          if (!selectionRows.length) {
+            return createErrorResult({
+              step: '导入网银明细文件',
+              message: '导入文件中没有账号存在交易数据',
+              errorCode: 'NO_TRANSACTION_DATA',
+              templateName: templateConfig.template.name
+            });
+          }
+
+
           const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
           rememberPendingBigAccountSelection({
             templateId,
@@ -4813,7 +4854,7 @@ function registerNewAccountHandlers() {
         message: '生成新开账户余额账单成功',
         details: [
           `导出文件：${output.outputFileName}`,
-          `币种：${currencyLabel}`,
+          `币种：${currencySegment}`,
           `账单日期数量：${generated.billDates.length}`,
           `账号行数：${accounts.length}`
         ]

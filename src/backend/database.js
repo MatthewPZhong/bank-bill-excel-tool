@@ -148,7 +148,7 @@ class AppDatabase {
     return templateRepository.getTemplateMappings(this.db, templateId);
   }
 
-  saveMappings(templateId, mappings, bigAccounts = [], fixedAssignments = [], dateFormat = 'auto') {
+  saveMappings(templateId, mappings, bigAccounts = [], fixedAssignments = [], dateFormat) {
     return templateRepository.saveMappings(this.db, templateId, mappings, bigAccounts, fixedAssignments, dateFormat);
   }
 
