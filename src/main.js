@@ -4223,7 +4223,6 @@ function registerFileHandlers() {
           inputFilePaths: selectionResult.filePaths
         });
         const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
-        const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
 
         if (!selectionRows.length) {
           return createErrorResult({
