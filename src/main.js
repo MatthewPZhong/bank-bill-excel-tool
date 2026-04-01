@@ -4213,6 +4213,16 @@ function registerFileHandlers() {
           inputFilePaths: selectionResult.filePaths
         });
         const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
+
+        if (!selectionRows.length) {
+          return createErrorResult({
+            step: '导入网银明细文件',
+            message: '导入文件中没有账号存在交易数据',
+            errorCode: 'NO_TRANSACTION_DATA',
+            templateName: templateConfig.template.name
+          });
+        }
+
         const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
 
         rememberPendingBigAccountSelection({
@@ -4259,6 +4269,16 @@ function registerFileHandlers() {
           }
 
           const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
+
+          if (!selectionRows.length) {
+            return createErrorResult({
+              step: '导入网银明细文件',
+              message: '导入文件中没有账号存在交易数据',
+              errorCode: 'NO_TRANSACTION_DATA',
+              templateName: templateConfig.template.name
+            });
+          }
+
           const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
           rememberPendingBigAccountSelection({
             templateId,

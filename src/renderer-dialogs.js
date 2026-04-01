@@ -786,7 +786,13 @@
         });
 
         if (result.status === 'error' && !result.manualBalancePromptReady) {
-          setStatus(result.message || '选择大账号失败，请重新设定', 'error');
+          if (result.errorCode === 'BIG_ACCOUNT_SELECTION_INVALID') {
+            setStatus(result.message || '选择大账号失败，请重新设定', 'error');
+            return;
+          }
+          closeModal();
+          applyStatementResult(result);
+          openModal(createAlertDialog(result.message));
           return;
         }
 
