@@ -691,7 +691,9 @@
           const exists = expandedOptions.some((o) => o.merchantId === a.merchantId && o.currency === a.currency);
           if (exists && checkedOrder.length < currentFileRows.length) {
             checkedOrder.push({ merchantId: a.merchantId, currency: a.currency, key });
-            const item = orderListContainer.querySelector(`[data-merchant-id="${a.merchantId}"][data-currency="${a.currency}"]`);
+            const item = Array.from(orderListContainer.querySelectorAll('.big-account-order-item')).find(
+              (el) => el.dataset.merchantId === a.merchantId && el.dataset.currency === a.currency
+            );
             if (item) {
               item.querySelector('.big-account-order-checkbox').checked = true;
             }

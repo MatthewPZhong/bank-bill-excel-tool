@@ -942,7 +942,8 @@ function readTemplateBundleFile(filePath) {
     headers: Array.isArray(item.headers) ? item.headers.map((value) => normalizeCell(value)).filter((value) => value !== '') : [],
     mappings: Array.isArray(item.mappings) ? item.mappings : [],
     bigAccounts: Array.isArray(item.bigAccounts) ? item.bigAccounts : [],
-    fixedAssignments: Array.isArray(item.fixedAssignments) ? item.fixedAssignments : []
+    fixedAssignments: Array.isArray(item.fixedAssignments) ? item.fixedAssignments : [],
+    dateFormat: normalizeCell(item.dateFormat) || 'auto'
   }));
 }
 
@@ -3344,7 +3345,8 @@ function buildStatementGenerationConfig({
       signedAmountSourceField: mappingByTargetField[SIGNED_AMOUNT_MAPPING_FIELD],
       nameSourceField: mappingByTargetField[AMOUNT_BASED_NAME_MAPPING_FIELD],
       accountSourceField: mappingByTargetField[AMOUNT_BASED_ACCOUNT_MAPPING_FIELD]
-    }
+    },
+    dateParseOrder: template.dateFormat || 'auto'
   };
 }
 
@@ -3363,7 +3365,8 @@ function buildMappedRowsForFile({
     selectedBigAccount: {
       merchantId: config.selectedMerchantId,
       currency: config.selectedCurrency
-    }
+    },
+    dateParseOrder: config.dateParseOrder
   });
 }
 

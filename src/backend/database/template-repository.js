@@ -16,6 +16,7 @@ function listTemplates(db) {
       t.headers_json AS headersJson,
       t.created_at AS createdAt,
       t.updated_at AS updatedAt,
+      t.date_format AS dateFormat,
       COUNT(DISTINCT m.id) AS mappingCount,
       COUNT(DISTINCT ba.merchant_id) AS bigAccountCount,
       merchant_mapping.mapped_field AS merchantIdMappedField,
@@ -44,6 +45,7 @@ function getTemplate(db, templateId) {
         t.headers_json AS headersJson,
         t.created_at AS createdAt,
         t.updated_at AS updatedAt,
+        t.date_format AS dateFormat,
         (
           SELECT COUNT(1)
           FROM template_mappings m
@@ -329,6 +331,7 @@ function listTemplateBundleEntries(db) {
         isMultiCurrency: Boolean(item.isMultiCurrency)
       })) : [],
       fixedAssignments: payload ? payload.fixedAssignments.map((item) => ({ ...item })) : [],
+      dateFormat: template.dateFormat || 'auto',
       createdAt: template.createdAt,
       updatedAt: template.updatedAt
     };
