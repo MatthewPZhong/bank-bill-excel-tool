@@ -1454,11 +1454,21 @@
             <tbody></tbody>
           </table>
         </div>
+        <div class="mapping-settings-row">
+          <span class="mapping-settings-label">日期格式</span>
+          <select class="mapping-select mapping-date-format-select">
+            <option value="auto">自动识别</option>
+            <option value="DMY">日-月-年 (DD/MM/YY)</option>
+            <option value="MDY">月-日-年 (MM/DD/YY)</option>
+          </select>
+        </div>
         <div class="dialog-actions right">
           <button class="primary-btn small" type="button" data-action="done">完成</button>
         </div>
       `;
 
+      const dateFormatSelect = dialog.querySelector('.mapping-date-format-select');
+      dateFormatSelect.value = payload.dateFormat || 'auto';
       const tbody = dialog.querySelector('tbody');
       const rowByField = new Map();
       const savedMap = new Map(payload.mappings.map((item) => [item.templateField, item]));
@@ -1689,7 +1699,8 @@
             templateId: payload.template.id,
             mappings,
             bigAccounts: draftBigAccounts,
-            fixedAssignments: currentFixedAssignments
+            fixedAssignments: currentFixedAssignments,
+            dateFormat: dateFormatSelect.value
           });
 
           setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
@@ -1708,7 +1719,8 @@
                 ...payload,
                 mappings,
                 bigAccounts: draftBigAccounts,
-                fixedAssignments: currentFixedAssignments
+                fixedAssignments: currentFixedAssignments,
+                dateFormat: dateFormatSelect.value
               }));
             }
           }));

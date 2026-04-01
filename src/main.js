@@ -2897,7 +2897,8 @@ function registerTemplateHandlers() {
         exportTargetFields: mappingConfig.exportTargetFields,
         mappings: mappingConfig.mappings,
         bigAccounts: mappingConfig.bigAccounts,
-        fixedAssignments: mappingConfig.fixedAssignments
+        fixedAssignments: mappingConfig.fixedAssignments,
+        dateFormat: mappingConfig.template.dateFormat || 'auto'
       };
     } catch (error) {
       if (error instanceof FileValidationError) {
@@ -2956,7 +2957,8 @@ function registerTemplateHandlers() {
         payload.templateId,
         templateConfiguration.mappings,
         templateConfiguration.bigAccounts,
-        templateConfiguration.fixedAssignments
+        templateConfiguration.fixedAssignments,
+        payload.dateFormat || 'auto'
       );
       syncTemplateLibraryFile();
       clearLastErrorReport();
@@ -4221,6 +4223,7 @@ function registerFileHandlers() {
           inputFilePaths: selectionResult.filePaths
         });
         const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
+        const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
 
         if (!selectionRows.length) {
           return createErrorResult({
@@ -4296,6 +4299,7 @@ function registerFileHandlers() {
               templateName: templateConfig.template.name
             });
           }
+
 
           const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
           rememberPendingBigAccountSelection({
