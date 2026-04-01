@@ -2886,7 +2886,8 @@ function registerTemplateHandlers() {
         exportTargetFields: mappingConfig.exportTargetFields,
         mappings: mappingConfig.mappings,
         bigAccounts: mappingConfig.bigAccounts,
-        fixedAssignments: mappingConfig.fixedAssignments
+        fixedAssignments: mappingConfig.fixedAssignments,
+        dateFormat: mappingConfig.template.dateFormat || 'auto'
       };
     } catch (error) {
       if (error instanceof FileValidationError) {
@@ -2945,7 +2946,8 @@ function registerTemplateHandlers() {
         payload.templateId,
         templateConfiguration.mappings,
         templateConfiguration.bigAccounts,
-        templateConfiguration.fixedAssignments
+        templateConfiguration.fixedAssignments,
+        payload.dateFormat || 'auto'
       );
       syncTemplateLibraryFile();
       clearLastErrorReport();
@@ -3334,7 +3336,8 @@ function buildStatementGenerationConfig({
       signedAmountSourceField: mappingByTargetField[SIGNED_AMOUNT_MAPPING_FIELD],
       nameSourceField: mappingByTargetField[AMOUNT_BASED_NAME_MAPPING_FIELD],
       accountSourceField: mappingByTargetField[AMOUNT_BASED_ACCOUNT_MAPPING_FIELD]
-    }
+    },
+    dateParseOrder: template.dateFormat || 'auto'
   };
 }
 
@@ -3353,7 +3356,8 @@ function buildMappedRowsForFile({
     selectedBigAccount: {
       merchantId: config.selectedMerchantId,
       currency: config.selectedCurrency
-    }
+    },
+    dateParseOrder: config.dateParseOrder
   });
 }
 

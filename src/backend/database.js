@@ -3,6 +3,7 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const {
   ensureAccountMappingCurrencySupport,
+  ensureTemplateDateFormatSupport,
   ensureTemplateKeySupport,
   ensureTemplateMappingEnhancements,
   hasColumn
@@ -88,6 +89,7 @@ class AppDatabase {
     this.ensureTemplateKeySupport();
     this.ensureTemplateMappingEnhancements();
     this.ensureAccountMappingCurrencySupport();
+    this.ensureTemplateDateFormatSupport();
   }
 
   hasColumn(tableName, columnName) {
@@ -104,6 +106,10 @@ class AppDatabase {
 
   ensureAccountMappingCurrencySupport() {
     return ensureAccountMappingCurrencySupport(this.db);
+  }
+
+  ensureTemplateDateFormatSupport() {
+    return ensureTemplateDateFormatSupport(this.db);
   }
 
   listTemplates() {
@@ -142,8 +148,8 @@ class AppDatabase {
     return templateRepository.getTemplateMappings(this.db, templateId);
   }
 
-  saveMappings(templateId, mappings, bigAccounts = [], fixedAssignments = []) {
-    return templateRepository.saveMappings(this.db, templateId, mappings, bigAccounts, fixedAssignments);
+  saveMappings(templateId, mappings, bigAccounts = [], fixedAssignments = [], dateFormat = 'auto') {
+    return templateRepository.saveMappings(this.db, templateId, mappings, bigAccounts, fixedAssignments, dateFormat);
   }
 
   listTemplateBundleEntries() {
