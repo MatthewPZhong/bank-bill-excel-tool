@@ -219,7 +219,7 @@ function buildMappedRows({
           return fixedValue === '__MULTI_BIG_ACCOUNT__' ? '' : fixedValue;
         }
 
-        const originalValue = normalizeCell(rawValue);
+        const originalValue = normalizeCell(rawValue).replace(/\s+/g, '');
 
         if (!originalValue) {
           return '';
@@ -230,7 +230,7 @@ function buildMappedRows({
           return typeof accountMapping === 'object' ? accountMapping.clearingAccountId : String(accountMapping);
         }
 
-        return rawValue;
+        return originalValue;
       }
 
       if (primaryMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
