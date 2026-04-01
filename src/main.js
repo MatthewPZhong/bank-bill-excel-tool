@@ -934,7 +934,8 @@ function readTemplateBundleFile(filePath) {
     headers: Array.isArray(item.headers) ? item.headers.map((value) => normalizeCell(value)).filter((value) => value !== '') : [],
     mappings: Array.isArray(item.mappings) ? item.mappings : [],
     bigAccounts: Array.isArray(item.bigAccounts) ? item.bigAccounts : [],
-    fixedAssignments: Array.isArray(item.fixedAssignments) ? item.fixedAssignments : []
+    fixedAssignments: Array.isArray(item.fixedAssignments) ? item.fixedAssignments : [],
+    dateFormat: normalizeCell(item.dateFormat) || 'auto'
   }));
 }
 
@@ -3168,7 +3169,8 @@ function registerTemplateHandlers() {
             template.id,
             validated.mappings,
             validated.bigAccounts,
-            validated.fixedAssignments
+            validated.fixedAssignments,
+            entry.dateFormat || 'auto'
           );
 
           if (existingTemplate) {

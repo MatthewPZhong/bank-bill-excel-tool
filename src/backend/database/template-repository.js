@@ -331,6 +331,7 @@ function listTemplateBundleEntries(db) {
         isMultiCurrency: Boolean(item.isMultiCurrency)
       })) : [],
       fixedAssignments: payload ? payload.fixedAssignments.map((item) => ({ ...item })) : [],
+      dateFormat: template.dateFormat || 'auto',
       createdAt: template.createdAt,
       updatedAt: template.updatedAt
     };
