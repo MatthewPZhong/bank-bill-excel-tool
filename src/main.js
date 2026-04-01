@@ -4851,7 +4851,7 @@ function registerNewAccountHandlers() {
         message: '生成新开账户余额账单成功',
         details: [
           `导出文件：${output.outputFileName}`,
-          `币种：${currencyLabel}`,
+          `币种：${currencySegment}`,
           `账单日期数量：${generated.billDates.length}`,
           `账号行数：${accounts.length}`
         ]
