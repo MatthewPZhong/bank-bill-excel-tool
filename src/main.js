@@ -598,11 +598,19 @@ function identifyAccountBlocks(detailRows, options = {}) {
     });
   }
 
-  return blocks.length ? blocks : [{
-    startIndex: 0,
-    endIndex: Math.max(0, dataRows.length - 1),
-    startRowNumber: rowMetas[0]?.sourceRowNumber || 2
-  }];
+  if (blocks.length) {
+    return blocks;
+  }
+
+  if (!headerBreaks.length) {
+    return [{
+      startIndex: 0,
+      endIndex: Math.max(0, dataRows.length - 1),
+      startRowNumber: rowMetas[0]?.sourceRowNumber || 2
+    }];
+  }
+
+  return [];
 }
 
 function buildBigAccountSelectionRows(fileEntries = [], options = {}) {
