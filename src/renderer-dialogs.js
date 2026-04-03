@@ -1482,7 +1482,8 @@
         const isMerchantIdField = fieldName === 'MerchantId';
         const isAdvancedField = advancedMappingFields.includes(fieldName);
         const supportsSelfInputOption = isMerchantIdField;
-        const supportsMultiSelect = !isBalanceField && !supportsSelfInputOption && !isAdvancedField;
+        const isCurrencyField = fieldName === 'Currency';
+        const supportsMultiSelect = !isBalanceField && !supportsSelfInputOption && !isAdvancedField && !isCurrencyField;
         const savedMapping = savedMap.get(fieldName) || {
           mappedField: isBalanceField ? BALANCE_DISABLED_OPTION : '',
           mappedFields: [],
