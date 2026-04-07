@@ -1777,19 +1777,11 @@
           }
         });
 
-        const directAmountActive = mutexTargetFields.some((targetField) => {
-          const targetRow = rowByField.get(targetField);
-          const targetSelect = targetRow?.querySelector('.mapping-select');
-          return targetSelect && getSelectValues(targetSelect)[0] !== '';
-        });
-
-        if (!amountSplitEnabled && directAmountActive && amountSplitRow) {
-          amountSplitRow.classList.add('mapping-row-mutex-disabled');
-          if (amountSplitSelect) {
-            amountSplitSelect.value = '';
-            amountSplitSelect.disabled = true;
-          }
-        } else if (amountSplitRow) {
+        // 「按字段区分发生额」字段始终可点击。当用户选「是」时，上面的 forward
+        // 互斥逻辑会自动清空 + disable 另外三行（Credit Amount / Debit Amount /
+        // 按正负号拆分的发生额）。不应根据"另外三行已配置"反向锁定本字段，
+        // 否则会让旧模板用户根本无法切换到新功能。
+        if (amountSplitRow) {
           amountSplitRow.classList.remove('mapping-row-mutex-disabled');
           if (amountSplitSelect) {
             amountSplitSelect.disabled = false;
