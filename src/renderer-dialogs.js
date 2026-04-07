@@ -1719,7 +1719,8 @@
                       : mapping;
                   }),
                   bigAccounts: nextBigAccounts,
-                  fixedAssignments: currentFixedAssignments
+                  fixedAssignments: currentFixedAssignments,
+                  amountSplitRules: currentAmountSplitRules
                 }));
               },
               onCancel: () => {
@@ -1727,7 +1728,8 @@
                   ...payload,
                   mappings: draftMappings,
                   bigAccounts: currentBigAccounts,
-                  fixedAssignments: currentFixedAssignments
+                  fixedAssignments: currentFixedAssignments,
+                  amountSplitRules: currentAmountSplitRules
                 }));
               }
             }));
@@ -1866,7 +1868,8 @@
                 ...payload,
                 mappings,
                 bigAccounts: draftBigAccounts,
-                fixedAssignments: currentFixedAssignments
+                fixedAssignments: currentFixedAssignments,
+                amountSplitRules: currentAmountSplitRules
               }));
             }
           }));
@@ -1992,6 +1995,9 @@
           }
           if (!rule.mappedField) {
             errors.push(`${rule.targetField}：请选择发生额字段`);
+          }
+          if (rule.conditionField && rule.mappedField && rule.conditionField === rule.mappedField) {
+            errors.push(`${rule.targetField}：条件字段与目标字段不能相同`);
           }
         });
         return errors;

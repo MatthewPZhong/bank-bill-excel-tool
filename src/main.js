@@ -3462,6 +3462,10 @@ function validateAmountSplitRulesPayload(rules, template) {
       throw new FileValidationError('FILE_READ', `映射字段不存在：${mappedField}`);
     }
 
+    if (conditionField === mappedField) {
+      throw new FileValidationError('FILE_READ', '条件字段与目标字段不能相同');
+    }
+
     return {
       targetField,
       conditionField,
