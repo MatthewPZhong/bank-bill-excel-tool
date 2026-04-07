@@ -40,6 +40,64 @@ function readPdfRows(filePath) {
   }
 }
 
+function parseCsvText(content, { blankrows = false } = {}) {
+  const rows = [];
+  let current = [];
+  let cell = '';
+  let inQuotes = false;
+  let i = 0;
+
+  while (i < content.length) {
+    const ch = content[i];
+
+    if (inQuotes) {
+      if (ch === '"' && content[i + 1] === '"') {
+        cell += '"';
+        i += 2;
+      } else if (ch === '"') {
+        inQuotes = false;
+        i++;
+      } else {
+        cell += ch;
+        i++;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+      i++;
+    } else if (ch === ',') {
+      current.push(cell);
+      cell = '';
+      i++;
+    } else if (ch === '\r' && content[i + 1] === '\n') {
+      current.push(cell);
+      cell = '';
+      rows.push(current);
+      current = [];
+      i += 2;
+    } else if (ch === '\n' || ch === '\r') {
+      current.push(cell);
+      cell = '';
+      rows.push(current);
+      current = [];
+      i++;
+    } else {
+      cell += ch;
+      i++;
+    }
+  }
+
+  if (cell || current.length) {
+    current.push(cell);
+    rows.push(current);
+  }
+
+  if (blankrows) {
+    return rows;
+  }
+
+  return rows.filter((row) => isRowMeaningful(row));
+}
+
 function readWorkbookRows(filePath, { blankrows = false } = {}) {
   ensureSupportedFile(filePath);
 
@@ -50,6 +108,21 @@ function readWorkbookRows(filePath, { blankrows = false } = {}) {
   if (path.extname(filePath).toLowerCase() === '.pdf') {
     const rows = readPdfRows(filePath);
     return blankrows ? rows : rows.filter((row) => isRowMeaningful(row));
+  }
+
+  if (path.extname(filePath).toLowerCase() === '.csv') {
+    try {
+      const raw = fs.readFileSync(filePath);
+      const content = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF
+        ? raw.subarray(3).toString('utf-8')
+        : raw.toString('utf-8');
+      return parseCsvText(content, { blankrows });
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        throw error;
+      }
+      throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
+    }
   }
 
   try {

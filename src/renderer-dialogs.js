@@ -382,7 +382,8 @@
       return Array.from(tableBody.querySelectorAll('tr[data-template-field]')).map((row) => {
         const select = row.querySelector('.mapping-select');
         const mappedFields = getSelectValues(select);
-        const isConcatMode = mappedFields[0] === CONCAT_FIELDS_MAPPING_FIELD;
+        const firstValue = mappedFields[0] || '';
+        const isConcatMode = firstValue === CONCAT_FIELDS_MAPPING_FIELD;
 
         if (isConcatMode) {
           const concatFields = row.dataset.concatFields ? JSON.parse(row.dataset.concatFields) : [];
@@ -395,9 +396,26 @@
           };
         }
 
+        // Preserve legacy concat config on fields that no longer support concat
+        // UI (e.g. Currency). If the user hasn't explicitly picked a new value
+        // (select is empty), restore the original concat mapping instead of
+        // silently wiping it.
+        if (!firstValue && row.dataset.legacyConcatMode === 'true') {
+          const legacyFields = row.dataset.legacyConcatFields
+            ? JSON.parse(row.dataset.legacyConcatFields)
+            : [];
+          return {
+            templateField: row.dataset.templateField,
+            mappedField: CONCAT_FIELDS_MAPPING_FIELD,
+            mappedFields: legacyFields,
+            customValue: '',
+            isMultiBigAccount: false
+          };
+        }
+
         return {
           templateField: row.dataset.templateField,
-          mappedField: mappedFields[0] || '',
+          mappedField: firstValue,
           mappedFields: [],
           customValue: '',
           isMultiBigAccount: false
@@ -1454,21 +1472,11 @@
             <tbody></tbody>
           </table>
         </div>
-        <div class="mapping-settings-row">
-          <span class="mapping-settings-label">日期格式</span>
-          <select class="mapping-select mapping-date-format-select">
-            <option value="auto">自动识别</option>
-            <option value="DMY">日-月-年 (DD/MM/YY)</option>
-            <option value="MDY">月-日-年 (MM/DD/YY)</option>
-          </select>
-        </div>
         <div class="dialog-actions right">
           <button class="primary-btn small" type="button" data-action="done">完成</button>
         </div>
       `;
 
-      const dateFormatSelect = dialog.querySelector('.mapping-date-format-select');
-      dateFormatSelect.value = payload.dateFormat || 'auto';
       const tbody = dialog.querySelector('tbody');
       const rowByField = new Map();
       const savedMap = new Map(payload.mappings.map((item) => [item.templateField, item]));
@@ -1492,7 +1500,8 @@
         const isMerchantIdField = fieldName === 'MerchantId';
         const isAdvancedField = advancedMappingFields.includes(fieldName);
         const supportsSelfInputOption = isMerchantIdField;
-        const supportsMultiSelect = !isBalanceField && !supportsSelfInputOption && !isAdvancedField;
+        const isCurrencyField = fieldName === 'Currency';
+        const supportsMultiSelect = !isBalanceField && !supportsSelfInputOption && !isAdvancedField && !isCurrencyField;
         const savedMapping = savedMap.get(fieldName) || {
           mappedField: isBalanceField ? BALANCE_DISABLED_OPTION : '',
           mappedFields: [],
@@ -1539,9 +1548,19 @@
           : (savedMapping.mappedField ? [savedMapping.mappedField] : []);
         const isSavedConcatMode = savedMapping.mappedField === CONCAT_FIELDS_MAPPING_FIELD;
 
-        if (isSavedConcatMode) {
+        if (isSavedConcatMode && supportsMultiSelect) {
           select.value = CONCAT_FIELDS_MAPPING_FIELD;
           concatSelectedFields = Array.isArray(savedMapping.mappedFields) ? savedMapping.mappedFields.slice() : [];
+        } else if (isSavedConcatMode && !supportsMultiSelect) {
+          // Legacy concat config on a field that no longer supports concat UI
+          // (e.g. Currency after 1.4.7 removed concat support). Preserve the
+          // original mappedFields in dataset so collectMappingDraftFromTable
+          // can restore them unless the user explicitly picks a new value.
+          row.dataset.legacyConcatMode = 'true';
+          row.dataset.legacyConcatFields = JSON.stringify(
+            Array.isArray(savedMapping.mappedFields) ? savedMapping.mappedFields : []
+          );
+          select.value = '';
         } else {
           select.value = savedMapping.mappedField || (isBalanceField ? BALANCE_DISABLED_OPTION : '');
         }
@@ -1665,7 +1684,13 @@
           });
         }
 
-        select.addEventListener('change', syncEditorState);
+        select.addEventListener('change', () => {
+          // User explicitly changed the mapping — drop any legacy concat
+          // preservation so the new selection (including an empty one) wins.
+          delete row.dataset.legacyConcatMode;
+          delete row.dataset.legacyConcatFields;
+          syncEditorState();
+        });
         syncEditorState();
         rowByField.set(fieldName, row);
         tbody.appendChild(row);
@@ -1699,8 +1724,7 @@
             templateId: payload.template.id,
             mappings,
             bigAccounts: draftBigAccounts,
-            fixedAssignments: currentFixedAssignments,
-            dateFormat: dateFormatSelect.value
+            fixedAssignments: currentFixedAssignments
           });
 
           setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
@@ -1719,8 +1743,7 @@
                 ...payload,
                 mappings,
                 bigAccounts: draftBigAccounts,
-                fixedAssignments: currentFixedAssignments,
-                dateFormat: dateFormatSelect.value
+                fixedAssignments: currentFixedAssignments
               }));
             }
           }));

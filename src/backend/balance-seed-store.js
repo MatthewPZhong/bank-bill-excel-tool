@@ -16,11 +16,11 @@ function sanitizeFileName(value) {
 }
 
 function splitTemplateName(templateName) {
-  const [bankName, ...locationParts] = String(templateName || '').split('-');
+  const parts = String(templateName || '').split('-');
 
   return {
-    bankName: bankName || '',
-    location: locationParts.join('-')
+    bankName: parts[0] || '',
+    location: parts[1] || ''
   };
 }
 
