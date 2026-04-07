@@ -9,11 +9,37 @@
       MERCHANT_ID_SELF_INPUT_OPTION,
       ADVANCED_MAPPING_FIELDS,
       CONCAT_FIELDS_MAPPING_FIELD,
+      AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
+      AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION,
       refreshTemplates,
       setStatus,
       applyStatementResult,
       applyManualBalancePromptStatus
     } = deps;
+
+    // 同步修改：main 侧的另一份实现位于 src/backend/file-service/normalizers.js 内
+    // REGEX_LITERAL_PATTERN / isRegexLiteral / compileRegexLiteral / matchAmountSplitConditionValue。
+    // 两份必须保持行为一致。按团队约定不引入 src/shared/ 公共模块。
+    const REGEX_LITERAL_PATTERN_RENDERER = /^\/(.+)\/([gimsu]*)$/;
+
+    function looksLikeRegexLiteral(input) {
+      if (typeof input !== 'string') {
+        return false;
+      }
+      return REGEX_LITERAL_PATTERN_RENDERER.test(input);
+    }
+
+    function parseRegexLiteral(input) {
+      const match = REGEX_LITERAL_PATTERN_RENDERER.exec(String(input || ''));
+      if (!match) {
+        return null;
+      }
+      try {
+        return new RegExp(match[1], match[2]);
+      } catch (_error) {
+        return null;
+      }
+    }
 
     function closeModal() {
       elements.modalRoot.innerHTML = '';
@@ -1455,6 +1481,15 @@
             rowIndex: Number(item.rowIndex || 0)
           }))
         : [];
+      let currentAmountSplitRules = Array.isArray(payload.amountSplitRules)
+        ? payload.amountSplitRules.map((rule) => ({
+            targetField: String(rule.targetField || ''),
+            conditionField: String(rule.conditionField || ''),
+            conditionValue: String(rule.conditionValue || ''),
+            mappedField: String(rule.mappedField || ''),
+            rowIndex: Number(rule.rowIndex || 0)
+          }))
+        : [];
       dialog.className = 'modal-card mapping-card';
       dialog.innerHTML = `
         <div class="dialog-header">
@@ -1499,6 +1534,7 @@
         const isBalanceField = fieldName === 'Balance';
         const isMerchantIdField = fieldName === 'MerchantId';
         const isAdvancedField = advancedMappingFields.includes(fieldName);
+        const isAmountSplitByFieldField = fieldName === AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD;
         const supportsSelfInputOption = isMerchantIdField;
         const isCurrencyField = fieldName === 'Currency';
         const supportsMultiSelect = !isBalanceField && !supportsSelfInputOption && !isAdvancedField && !isCurrencyField;
@@ -1508,12 +1544,17 @@
           customValue: '',
           isMultiBigAccount: false
         };
-        const selectOptions = [isBalanceField ? `<option value="${BALANCE_DISABLED_OPTION}">${BALANCE_DISABLED_OPTION}</option>` : '<option value=""></option>']
-          .concat(isBalanceField ? [`<option value="${BALANCE_CALCULATED_OPTION}">${BALANCE_CALCULATED_OPTION}</option>`] : [])
-          .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_SELF_INPUT_OPTION}">${MERCHANT_ID_SELF_INPUT_OPTION}</option>`] : [])
-          .concat(supportsMultiSelect ? [`<option value="${CONCAT_FIELDS_MAPPING_FIELD}">${CONCAT_FIELDS_MAPPING_FIELD}</option>`] : [])
-          .concat(headerOptions)
-          .join('');
+        let selectOptions;
+        if (isAmountSplitByFieldField) {
+          selectOptions = `<option value=""></option><option value="${AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION}">${AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION}</option>`;
+        } else {
+          selectOptions = [isBalanceField ? `<option value="${BALANCE_DISABLED_OPTION}">${BALANCE_DISABLED_OPTION}</option>` : '<option value=""></option>']
+            .concat(isBalanceField ? [`<option value="${BALANCE_CALCULATED_OPTION}">${BALANCE_CALCULATED_OPTION}</option>`] : [])
+            .concat(supportsSelfInputOption ? [`<option value="${MERCHANT_ID_SELF_INPUT_OPTION}">${MERCHANT_ID_SELF_INPUT_OPTION}</option>`] : [])
+            .concat(supportsMultiSelect ? [`<option value="${CONCAT_FIELDS_MAPPING_FIELD}">${CONCAT_FIELDS_MAPPING_FIELD}</option>`] : [])
+            .concat(headerOptions)
+            .join('');
+        }
         row.innerHTML = `
           <td>${escapeHtml(fieldName)}</td>
           <td>
@@ -1521,6 +1562,9 @@
               <select class="mapping-select">${selectOptions}</select>
               ${isMerchantIdField ? `
                 <button class="secondary-btn small mapping-big-account-manage-btn" type="button" hidden>维护大账号</button>
+              ` : ''}
+              ${isAmountSplitByFieldField ? `
+                <button class="secondary-btn small mapping-amount-split-manage-btn" type="button" hidden>维护发生额映射关系</button>
               ` : ''}
               ${supportsMultiSelect ? `
                 <div class="concat-field-picker" hidden>
@@ -1538,6 +1582,7 @@
 
         const select = row.querySelector('.mapping-select');
         const manageBigAccountBtn = row.querySelector('.mapping-big-account-manage-btn');
+        const manageAmountSplitBtn = row.querySelector('.mapping-amount-split-manage-btn');
         const concatFieldPicker = row.querySelector('.concat-field-picker');
         const concatPickerTrigger = row.querySelector('.concat-picker-trigger');
         const concatPickerPanel = row.querySelector('.concat-picker-panel');
@@ -1629,9 +1674,14 @@
           const selectedValue = getSelectValues(select)[0];
           const isCustomInput = selectedValue === MERCHANT_ID_SELF_INPUT_OPTION;
           const isConcatMode = selectedValue === CONCAT_FIELDS_MAPPING_FIELD;
+          const isAmountSplitEnabled = isAmountSplitByFieldField
+            && selectedValue === AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION;
 
           if (manageBigAccountBtn) {
             manageBigAccountBtn.hidden = !isCustomInput;
+          }
+          if (manageAmountSplitBtn) {
+            manageAmountSplitBtn.hidden = !isAmountSplitEnabled;
           }
           if (concatFieldPicker) {
             concatFieldPicker.hidden = !isConcatMode;
@@ -1684,17 +1734,98 @@
           });
         }
 
+        if (manageAmountSplitBtn) {
+          manageAmountSplitBtn.addEventListener('click', async () => {
+            await openAmountSplitRulesDialog();
+          });
+        }
+
         select.addEventListener('change', () => {
           // User explicitly changed the mapping — drop any legacy concat
           // preservation so the new selection (including an empty one) wins.
           delete row.dataset.legacyConcatMode;
           delete row.dataset.legacyConcatFields;
           syncEditorState();
+          applyAmountSplitMutualExclusion();
         });
         syncEditorState();
         rowByField.set(fieldName, row);
         tbody.appendChild(row);
       });
+
+      function applyAmountSplitMutualExclusion() {
+        const amountSplitRow = rowByField.get(AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD);
+        const amountSplitSelect = amountSplitRow?.querySelector('.mapping-select');
+        const amountSplitEnabled = amountSplitSelect
+          && getSelectValues(amountSplitSelect)[0] === AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION;
+
+        const mutexTargetFields = ['Credit Amount', 'Debit Amount', '按正负号拆分的发生额'];
+
+        mutexTargetFields.forEach((targetField) => {
+          const targetRow = rowByField.get(targetField);
+          if (!targetRow) return;
+          const targetSelect = targetRow.querySelector('.mapping-select');
+          if (!targetSelect) return;
+
+          if (amountSplitEnabled) {
+            targetRow.classList.add('mapping-row-mutex-disabled');
+            targetSelect.value = '';
+            targetSelect.disabled = true;
+          } else {
+            targetRow.classList.remove('mapping-row-mutex-disabled');
+            targetSelect.disabled = false;
+          }
+        });
+
+        const directAmountActive = mutexTargetFields.some((targetField) => {
+          const targetRow = rowByField.get(targetField);
+          const targetSelect = targetRow?.querySelector('.mapping-select');
+          return targetSelect && getSelectValues(targetSelect)[0] !== '';
+        });
+
+        if (!amountSplitEnabled && directAmountActive && amountSplitRow) {
+          amountSplitRow.classList.add('mapping-row-mutex-disabled');
+          if (amountSplitSelect) {
+            amountSplitSelect.value = '';
+            amountSplitSelect.disabled = true;
+          }
+        } else if (amountSplitRow) {
+          amountSplitRow.classList.remove('mapping-row-mutex-disabled');
+          if (amountSplitSelect) {
+            amountSplitSelect.disabled = false;
+          }
+        }
+      }
+
+      async function openAmountSplitRulesDialog() {
+        const draftBigAccounts = cloneBigAccountItems(currentBigAccounts);
+        const draftMappings = collectMappingDraftFromTable(tbody);
+        openModal(createAmountSplitRulesDialog({
+          template: payload.template,
+          initialRules: currentAmountSplitRules,
+          onDone: (nextRules) => {
+            currentAmountSplitRules = nextRules.map((rule) => ({ ...rule }));
+            openModal(createMappingDialog({
+              ...payload,
+              mappings: draftMappings,
+              bigAccounts: draftBigAccounts,
+              fixedAssignments: currentFixedAssignments,
+              amountSplitRules: currentAmountSplitRules
+            }));
+          },
+          onCancel: () => {
+            openModal(createMappingDialog({
+              ...payload,
+              mappings: draftMappings,
+              bigAccounts: draftBigAccounts,
+              fixedAssignments: currentFixedAssignments,
+              amountSplitRules: currentAmountSplitRules
+            }));
+          }
+        }));
+      }
+
+      applyAmountSplitMutualExclusion();
 
       function syncMerchantIdDependentRows() {
         const merchantRow = rowByField.get('MerchantId');
@@ -1760,6 +1891,193 @@
           dialog.querySelectorAll('.concat-picker-panel:not([hidden])').forEach((panel) => {
             panel.hidden = true;
           });
+        }
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    function createAmountSplitRulesDialog({ template, initialRules = [], onDone, onCancel }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card amount-split-rules-card';
+
+      const fallbackRules = [
+        { targetField: 'Credit Amount', conditionField: '', conditionValue: '', mappedField: '', rowIndex: 0 },
+        { targetField: 'Debit Amount', conditionField: '', conditionValue: '', mappedField: '', rowIndex: 1 }
+      ];
+      const seededRules = initialRules && initialRules.length
+        ? initialRules
+        : fallbackRules;
+      const creditRule = seededRules.find((rule) => rule.targetField === 'Credit Amount') || fallbackRules[0];
+      const debitRule = seededRules.find((rule) => rule.targetField === 'Debit Amount') || fallbackRules[1];
+
+      const headers = Array.isArray(template.headers) ? template.headers : [];
+      const headerOptions = ['<option value=""></option>']
+        .concat(headers.map((header) => `<option value="${escapeHtml(header)}">${escapeHtml(header || '(空白字段)')}</option>`))
+        .join('');
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">发生额映射关系管理</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="amount-split-rules-body">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>目标字段</th>
+                <th>判断字段</th>
+                <th>判断字段值</th>
+                <th>发生额字段</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="amount-split-rule-row" data-target-field="Credit Amount">
+                <td>Credit Amount</td>
+                <td><select class="mapping-select rule-condition-field">${headerOptions}</select></td>
+                <td><input class="mapping-text-input rule-condition-value" type="text" spellcheck="false" /></td>
+                <td><select class="mapping-select rule-mapped-field">${headerOptions}</select></td>
+              </tr>
+              <tr class="amount-split-rule-row" data-target-field="Debit Amount">
+                <td>Debit Amount</td>
+                <td><select class="mapping-select rule-condition-field">${headerOptions}</select></td>
+                <td><input class="mapping-text-input rule-condition-value" type="text" spellcheck="false" /></td>
+                <td><select class="mapping-select rule-mapped-field">${headerOptions}</select></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="amount-split-rules-hint">
+            提示：判断字段值支持正则表达式字面量（格式：<code>/模式/标志</code>，例如 <code>/^收入/i</code>），否则使用字符串完全匹配。
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="done">保存</button>
+        </div>
+      `;
+
+      const rowByTarget = new Map();
+      dialog.querySelectorAll('tr[data-target-field]').forEach((row) => {
+        rowByTarget.set(row.dataset.targetField, row);
+      });
+
+      function applyRuleToRow(targetField, rule) {
+        const row = rowByTarget.get(targetField);
+        if (!row) return;
+        row.querySelector('.rule-condition-field').value = rule.conditionField || '';
+        row.querySelector('.rule-condition-value').value = rule.conditionValue || '';
+        row.querySelector('.rule-mapped-field').value = rule.mappedField || '';
+      }
+
+      applyRuleToRow('Credit Amount', creditRule);
+      applyRuleToRow('Debit Amount', debitRule);
+
+      function collectRules() {
+        const collected = [];
+        ['Credit Amount', 'Debit Amount'].forEach((targetField, index) => {
+          const row = rowByTarget.get(targetField);
+          if (!row) return;
+          collected.push({
+            targetField,
+            conditionField: String(row.querySelector('.rule-condition-field').value || '').trim(),
+            conditionValue: String(row.querySelector('.rule-condition-value').value || '').trim(),
+            mappedField: String(row.querySelector('.rule-mapped-field').value || '').trim(),
+            rowIndex: index
+          });
+        });
+        return collected;
+      }
+
+      function validateCollectedRulesClientSide(rules) {
+        const errors = [];
+        rules.forEach((rule) => {
+          if (!rule.conditionField) {
+            errors.push(`${rule.targetField}：请选择判断字段`);
+          }
+          if (rule.conditionValue === '') {
+            errors.push(`${rule.targetField}：请填写判断字段值`);
+          } else if (looksLikeRegexLiteral(rule.conditionValue) && !parseRegexLiteral(rule.conditionValue)) {
+            errors.push(`${rule.targetField}：正则表达式语法错误 ${rule.conditionValue}`);
+          }
+          if (!rule.mappedField) {
+            errors.push(`${rule.targetField}：请选择发生额字段`);
+          }
+        });
+        return errors;
+      }
+
+      dialog.querySelector('.icon-close').addEventListener('click', () => {
+        if (typeof onCancel === 'function') {
+          onCancel();
+        } else {
+          closeModal();
+        }
+      });
+
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+        if (typeof onCancel === 'function') {
+          onCancel();
+        } else {
+          closeModal();
+        }
+      });
+
+      dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+        const rules = collectRules();
+        const errors = validateCollectedRulesClientSide(rules);
+        if (errors.length) {
+          openModal(createAlertDialog(errors.join('<br/>'), {
+            onConfirm: () => {
+              openModal(createAmountSplitRulesDialog({
+                template,
+                initialRules: rules,
+                onDone,
+                onCancel
+              }));
+            }
+          }));
+          return;
+        }
+
+        try {
+          const result = await desktopApi.templates.saveAmountSplitRules({
+            templateId: template.id,
+            rules
+          });
+
+          if (result.status === 'success') {
+            if (typeof onDone === 'function') {
+              onDone(rules);
+            } else {
+              closeModal();
+            }
+            return;
+          }
+
+          openModal(createAlertDialog(result.message || '保存失败', {
+            onConfirm: () => {
+              openModal(createAmountSplitRulesDialog({
+                template,
+                initialRules: rules,
+                onDone,
+                onCancel
+              }));
+            }
+          }));
+        } catch (error) {
+          console.error(error);
+          openModal(createAlertDialog('保存失败，请查看控制台', {
+            onConfirm: () => {
+              openModal(createAmountSplitRulesDialog({
+                template,
+                initialRules: rules,
+                onDone,
+                onCancel
+              }));
+            }
+          }));
         }
       });
 

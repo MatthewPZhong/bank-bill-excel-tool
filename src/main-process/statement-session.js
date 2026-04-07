@@ -25,6 +25,10 @@ function cloneRowsWithMetadata(rows = []) {
     clonedRows.headerBreaks = rows.headerBreaks.slice();
   }
 
+  if (rows.amountSplitMatchStats && typeof rows.amountSplitMatchStats === 'object') {
+    clonedRows.amountSplitMatchStats = { ...rows.amountSplitMatchStats };
+  }
+
   if (Array.isArray(rows.sourceRows)) {
     clonedRows.sourceRows = cloneRowsWithMetadata(rows.sourceRows);
   }

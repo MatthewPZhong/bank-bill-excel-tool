@@ -3,6 +3,7 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const {
   ensureAccountMappingCurrencySupport,
+  ensureAmountSplitRulesSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateKeySupport,
   ensureTemplateMappingEnhancements,
@@ -90,6 +91,7 @@ class AppDatabase {
     this.ensureTemplateMappingEnhancements();
     this.ensureAccountMappingCurrencySupport();
     this.ensureTemplateDateFormatSupport();
+    this.ensureAmountSplitRulesSupport();
   }
 
   hasColumn(tableName, columnName) {
@@ -110,6 +112,10 @@ class AppDatabase {
 
   ensureTemplateDateFormatSupport() {
     return ensureTemplateDateFormatSupport(this.db);
+  }
+
+  ensureAmountSplitRulesSupport() {
+    return ensureAmountSplitRulesSupport(this.db);
   }
 
   listTemplates() {
@@ -148,8 +154,24 @@ class AppDatabase {
     return templateRepository.getTemplateMappings(this.db, templateId);
   }
 
-  saveMappings(templateId, mappings, bigAccounts = [], fixedAssignments = [], dateFormat) {
-    return templateRepository.saveMappings(this.db, templateId, mappings, bigAccounts, fixedAssignments, dateFormat);
+  saveMappings(templateId, mappings, bigAccounts = [], fixedAssignments = [], dateFormat, amountSplitRules = null) {
+    return templateRepository.saveMappings(
+      this.db,
+      templateId,
+      mappings,
+      bigAccounts,
+      fixedAssignments,
+      dateFormat,
+      amountSplitRules
+    );
+  }
+
+  getAmountSplitRules(templateId) {
+    return templateRepository.getAmountSplitRules(this.db, templateId);
+  }
+
+  saveAmountSplitRules(templateId, rules) {
+    return templateRepository.saveAmountSplitRules(this.db, templateId, rules);
   }
 
   listTemplateBundleEntries() {

@@ -14,10 +14,13 @@ const {
 } = require('./file-service/readers');
 const {
   calculateEndingBalanceFromAmounts,
+  compileRegexLiteral,
   hasEffectiveAmount,
   inferDateCellFormat,
   inferEndingBalance,
+  isRegexLiteral,
   loadCurrencyMappings: loadCurrencyMappingsFromMappings,
+  matchAmountSplitConditionValue,
   normalizeDateExportValue,
   parseDateValue,
   parseNumericValue,
@@ -42,6 +45,7 @@ function buildMappedRows({
   accountMappingByBankId = {},
   currencyMappings = [],
   amountMappingRules = {},
+  amountSplitByField = null,
   expectedSourceHeaders = [],
   selectedBigAccount = null,
   dateParseOrder = 'auto'
@@ -56,6 +60,12 @@ function buildMappedRows({
   const signedAmountSourceField = normalizeCell(amountMappingRules.signedAmountSourceField);
   const selectedMerchantId = normalizeCell(selectedBigAccount?.merchantId);
   const selectedCurrency = normalizeCell(selectedBigAccount?.currency);
+  const amountSplitEnabled = Boolean(amountSplitByField && amountSplitByField.enabled);
+  const amountSplitRules = amountSplitEnabled && Array.isArray(amountSplitByField.rules)
+    ? amountSplitByField.rules
+    : [];
+  let matchedCreditCount = 0;
+  let matchedDebitCount = 0;
 
   sourceHeaders.forEach((header, index) => {
     const normalizedHeader = normalizeCell(header);
@@ -64,6 +74,22 @@ function buildMappedRows({
       sourceIndexByField.set(normalizedHeader, index);
     }
   });
+
+  if (amountSplitEnabled) {
+    amountSplitRules.forEach((rule) => {
+      const conditionField = normalizeCell(rule.conditionField);
+      const mappedField = normalizeCell(rule.mappedField);
+
+      if (conditionField && !sourceIndexByField.has(conditionField)) {
+        throw new FileValidationError('FILE_READ', `映射字段不存在：${conditionField}`);
+      }
+
+      if (mappedField && !sourceIndexByField.has(mappedField)) {
+        throw new FileValidationError('FILE_READ', `映射字段不存在：${mappedField}`);
+      }
+    });
+  }
+
   const mappedRows = [orderedTargetFields.slice()];
 
   function normalizeMappingTokens(mappingValue) {
@@ -117,18 +143,72 @@ function buildMappedRows({
     const signedAmountValue = signedAmountSourceField
       ? splitSignedAmountValue(resolveRawValueByMapping(signedAmountSourceField, row))
       : null;
-    const creditAmountValue = signedAmountValue
-      ? signedAmountValue.creditAmount
-      : sanitizeAmountValue(directCreditAmountRaw);
-    const debitAmountValue = signedAmountValue
-      ? signedAmountValue.debitAmount
-      : sanitizeAmountValue(directDebitAmountRaw);
-    const hasCreditAmount = signedAmountValue
-      ? signedAmountValue.hasCreditAmount
-      : hasEffectiveAmount(directCreditAmountRaw);
-    const hasDebitAmount = signedAmountValue
-      ? signedAmountValue.hasDebitAmount
-      : hasEffectiveAmount(directDebitAmountRaw);
+
+    let creditAmountValue;
+    let debitAmountValue;
+    let hasCreditAmount;
+    let hasDebitAmount;
+
+    if (amountSplitEnabled) {
+      let creditRawFromRule = '';
+      let debitRawFromRule = '';
+      let matchedCreditRule = false;
+      let matchedDebitRule = false;
+
+      amountSplitRules.forEach((rule) => {
+        const conditionField = normalizeCell(rule.conditionField);
+        const mappedField = normalizeCell(rule.mappedField);
+        const targetField = normalizeCell(rule.targetField);
+        const conditionValue = String(rule.conditionValue ?? '');
+        const conditionIndex = sourceIndexByField.get(conditionField);
+        const mappedIndex = sourceIndexByField.get(mappedField);
+
+        if (conditionIndex === undefined || mappedIndex === undefined) {
+          return;
+        }
+
+        const sourceCell = row[conditionIndex];
+
+        if (!matchAmountSplitConditionValue(sourceCell, conditionValue)) {
+          return;
+        }
+
+        const amountRaw = row[mappedIndex];
+
+        if (targetField === 'Credit Amount' && !matchedCreditRule) {
+          creditRawFromRule = amountRaw;
+          matchedCreditRule = true;
+        } else if (targetField === 'Debit Amount' && !matchedDebitRule) {
+          debitRawFromRule = amountRaw;
+          matchedDebitRule = true;
+        }
+      });
+
+      creditAmountValue = matchedCreditRule ? sanitizeAmountValue(creditRawFromRule) : '';
+      debitAmountValue = matchedDebitRule ? sanitizeAmountValue(debitRawFromRule) : '';
+      hasCreditAmount = matchedCreditRule && hasEffectiveAmount(creditRawFromRule);
+      hasDebitAmount = matchedDebitRule && hasEffectiveAmount(debitRawFromRule);
+
+      if (hasCreditAmount) {
+        matchedCreditCount += 1;
+      }
+      if (hasDebitAmount) {
+        matchedDebitCount += 1;
+      }
+    } else {
+      creditAmountValue = signedAmountValue
+        ? signedAmountValue.creditAmount
+        : sanitizeAmountValue(directCreditAmountRaw);
+      debitAmountValue = signedAmountValue
+        ? signedAmountValue.debitAmount
+        : sanitizeAmountValue(directDebitAmountRaw);
+      hasCreditAmount = signedAmountValue
+        ? signedAmountValue.hasCreditAmount
+        : hasEffectiveAmount(directCreditAmountRaw);
+      hasDebitAmount = signedAmountValue
+        ? signedAmountValue.hasDebitAmount
+        : hasEffectiveAmount(directDebitAmountRaw);
+    }
 
     rowMetas.push({
       sourceRowNumber: rowNumbers[rowIndex + 1] || rowIndex + 2
@@ -247,6 +327,16 @@ function buildMappedRows({
   mappedRows.issues = issues;
   mappedRows.rowMetas = rowMetas;
   mappedRows.headerBreaks = headerBreaks;
+
+  if (amountSplitEnabled) {
+    mappedRows.amountSplitMatchStats = {
+      enabled: true,
+      totalRows: rows.length > 0 ? rows.length - 1 : 0,
+      hitCredit: matchedCreditCount,
+      hitDebit: matchedDebitCount
+    };
+  }
+
   return mappedRows;
 }
 
@@ -396,9 +486,12 @@ module.exports = {
   calculateEndingBalanceFromAmounts,
   buildMappedRows,
   buildDetailExportRows,
+  compileRegexLiteral,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   inferEndingBalance,
+  isRegexLiteral,
+  matchAmountSplitConditionValue,
   SUPPORTED_EXTENSIONS,
   ensureSupportedFile,
   extractEnumValuesFromImportedFile,

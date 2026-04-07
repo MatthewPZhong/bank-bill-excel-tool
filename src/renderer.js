@@ -13,10 +13,13 @@ const MERCHANT_ID_SELF_INPUT_OPTION = '自己输入';
 const SIGNED_AMOUNT_MAPPING_FIELD = '按正负号拆分的发生额';
 const AMOUNT_BASED_NAME_MAPPING_FIELD = '根据发生额做映射的户名';
 const AMOUNT_BASED_ACCOUNT_MAPPING_FIELD = '根据发生额做映射的账户号';
+const AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD = '按字段区分发生额';
+const AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION = '是';
 const ADVANCED_MAPPING_FIELDS = [
   SIGNED_AMOUNT_MAPPING_FIELD,
   AMOUNT_BASED_NAME_MAPPING_FIELD,
-  AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
+  AMOUNT_BASED_ACCOUNT_MAPPING_FIELD,
+  AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD
 ];
 const CONCAT_FIELDS_MAPPING_FIELD = '需要拼接字段';
 const MODULES = Object.freeze({
@@ -190,6 +193,8 @@ const {
   MERCHANT_ID_SELF_INPUT_OPTION,
   ADVANCED_MAPPING_FIELDS,
   CONCAT_FIELDS_MAPPING_FIELD,
+  AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD,
+  AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION,
   refreshTemplates,
   setStatus,
   applyStatementResult,
@@ -342,6 +347,10 @@ function applyStatementResult(result) {
     manualBalancePromptReady: Boolean(result.manualBalancePromptReady),
     manualBalancePrompt: result.manualBalancePrompt || null
   });
+
+  if (Array.isArray(result.unmatchedAmountSplitFiles) && result.unmatchedAmountSplitFiles.length) {
+    window.alert(`以下文件全部未命中收支规则，请检查规则配置：\n${result.unmatchedAmountSplitFiles.join('\n')}`);
+  }
 
   if (
     result.status === 'success' ||

@@ -196,6 +196,62 @@ function getTemplateFixedAssignments(db, templateId) {
     }));
 }
 
+function getAmountSplitRules(db, templateId) {
+  return db
+    .prepare(`
+      SELECT
+        target_field AS targetField,
+        condition_field AS conditionField,
+        condition_value AS conditionValue,
+        mapped_field AS mappedField,
+        row_index AS rowIndex
+      FROM template_amount_split_rules
+      WHERE template_id = ?
+      ORDER BY row_index ASC
+    `)
+    .all(templateId)
+    .map((row) => ({
+      targetField: normalizeText(row.targetField),
+      conditionField: normalizeText(row.conditionField),
+      conditionValue: normalizeText(row.conditionValue),
+      mappedField: normalizeText(row.mappedField),
+      rowIndex: Number(row.rowIndex || 0)
+    }));
+}
+
+function saveAmountSplitRules(db, templateId, rules = []) {
+  const now = new Date().toISOString();
+  db.exec('BEGIN');
+
+  try {
+    db.prepare('DELETE FROM template_amount_split_rules WHERE template_id = ?').run(templateId);
+
+    const insertStatement = db.prepare(`
+      INSERT INTO template_amount_split_rules (
+        template_id, target_field, condition_field, condition_value, mapped_field, row_index, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    rules.forEach((rule, index) => {
+      insertStatement.run(
+        templateId,
+        normalizeText(rule.targetField),
+        normalizeText(rule.conditionField),
+        normalizeText(rule.conditionValue),
+        normalizeText(rule.mappedField),
+        Number.isInteger(rule.rowIndex) ? rule.rowIndex : index,
+        now,
+        now
+      );
+    });
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 function getTemplateMappings(db, templateId) {
   const template = getTemplate(db, templateId);
 
@@ -225,16 +281,26 @@ function getTemplateMappings(db, templateId) {
     }));
   const bigAccountRows = getTemplateBigAccounts(db, templateId);
   const fixedAssignments = getTemplateFixedAssignments(db, templateId);
+  const amountSplitRules = getAmountSplitRules(db, templateId);
 
   return {
     template,
     mappings,
     bigAccounts: groupBigAccountRows(bigAccountRows),
-    fixedAssignments
+    fixedAssignments,
+    amountSplitRules
   };
 }
 
-function saveMappings(db, templateId, mappings, bigAccounts = [], fixedAssignments = [], dateFormat) {
+function saveMappings(
+  db,
+  templateId,
+  mappings,
+  bigAccounts = [],
+  fixedAssignments = [],
+  dateFormat,
+  amountSplitRules = null
+) {
   const now = new Date().toISOString();
   db.exec('BEGIN');
 
@@ -305,6 +371,29 @@ function saveMappings(db, templateId, mappings, bigAccounts = [], fixedAssignmen
       );
     });
 
+    if (amountSplitRules !== null) {
+      db.prepare('DELETE FROM template_amount_split_rules WHERE template_id = ?').run(templateId);
+
+      const insertRuleStatement = db.prepare(`
+        INSERT INTO template_amount_split_rules (
+          template_id, target_field, condition_field, condition_value, mapped_field, row_index, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      amountSplitRules.forEach((rule, index) => {
+        insertRuleStatement.run(
+          templateId,
+          normalizeText(rule.targetField),
+          normalizeText(rule.conditionField),
+          normalizeText(rule.conditionValue),
+          normalizeText(rule.mappedField),
+          Number.isInteger(rule.rowIndex) ? rule.rowIndex : index,
+          now,
+          now
+        );
+      });
+    }
+
     if (dateFormat) {
       db.prepare('UPDATE templates SET updated_at = ?, date_format = ? WHERE id = ?').run(now, dateFormat, templateId);
     } else {
@@ -333,6 +422,9 @@ function listTemplateBundleEntries(db) {
         isMultiCurrency: Boolean(item.isMultiCurrency)
       })) : [],
       fixedAssignments: payload ? payload.fixedAssignments.map((item) => ({ ...item })) : [],
+      amountSplitRules: payload && Array.isArray(payload.amountSplitRules)
+        ? payload.amountSplitRules.map((rule) => ({ ...rule }))
+        : [],
       dateFormat: template.dateFormat || 'auto',
       createdAt: template.createdAt,
       updatedAt: template.updatedAt
@@ -342,6 +434,7 @@ function listTemplateBundleEntries(db) {
 
 module.exports = {
   deleteTemplate,
+  getAmountSplitRules,
   getTemplate,
   getTemplateBigAccounts,
   getTemplateFixedAssignments,
@@ -351,6 +444,7 @@ module.exports = {
   listTemplateBundleEntries,
   listTemplates,
   renameTemplate,
+  saveAmountSplitRules,
   saveMappings,
   upsertTemplate
 };

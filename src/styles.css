@@ -1713,3 +1713,50 @@ select {
     margin-bottom: 28px;
   }
 }
+
+.mapping-row-mutex-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.mapping-row-mutex-disabled .mapping-select {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.mapping-amount-split-manage-btn {
+  margin-left: 8px;
+}
+
+.amount-split-rules-card {
+  min-width: 720px;
+  max-width: 960px;
+}
+
+.amount-split-rules-body {
+  padding: 12px 16px;
+}
+
+.amount-split-rules-body .data-table {
+  width: 100%;
+}
+
+.amount-split-rule-row .mapping-select,
+.amount-split-rule-row .mapping-text-input {
+  width: 100%;
+}
+
+.amount-split-rules-hint {
+  margin-top: 10px;
+  color: #666;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.amount-split-rules-hint code {
+  background-color: #f2f2f2;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 12px;
+}
