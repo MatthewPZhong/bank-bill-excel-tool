@@ -628,14 +628,54 @@ function inferDateCellFormat(value) {
   return 'yyyy-mm-dd';
 }
 
+// 同步修改：renderer 侧另一份实现位于 src/renderer-dialogs.js 内 createRendererDialogs 的
+// looksLikeRegexLiteral / parseRegexLiteral / matchRegexLiteral。两份必须保持行为一致。
+// 按团队约定不引入 src/shared/ 公共模块。
+const REGEX_LITERAL_PATTERN = /^\/(.+)\/([gimsu]*)$/;
+
+function isRegexLiteral(input) {
+  if (typeof input !== 'string') {
+    return false;
+  }
+  return REGEX_LITERAL_PATTERN.test(input);
+}
+
+function compileRegexLiteral(input) {
+  const match = REGEX_LITERAL_PATTERN.exec(String(input || ''));
+  if (!match) {
+    throw new Error(`非法的正则表达式字面量：${input}`);
+  }
+  return new RegExp(match[1], match[2]);
+}
+
+function matchAmountSplitConditionValue(rawSourceCell, conditionValue) {
+  const trimmedSource = String(rawSourceCell ?? '').trim();
+  const trimmedTarget = String(conditionValue ?? '').trim();
+
+  if (isRegexLiteral(trimmedTarget)) {
+    let regex;
+    try {
+      regex = compileRegexLiteral(trimmedTarget);
+    } catch (_error) {
+      return false;
+    }
+    return regex.test(trimmedSource);
+  }
+
+  return trimmedSource === trimmedTarget;
+}
+
 module.exports = {
   buildNormalizedDateResult,
   calculateEndingBalanceFromAmounts,
+  compileRegexLiteral,
   extractCurrencyAliases,
   hasEffectiveAmount,
   inferDateCellFormat,
   inferEndingBalance,
+  isRegexLiteral,
   loadCurrencyMappings,
+  matchAmountSplitConditionValue,
   normalizeCurrencyAlias,
   normalizeDateExportValue,
   parseDateValue,

@@ -34,7 +34,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     saveMappings: (payload) => ipcRenderer.invoke('template:save-mappings', payload),
     rename: (payload) => ipcRenderer.invoke('template:rename', payload),
     exportBundle: () => ipcRenderer.invoke('template:export-bundle'),
-    importBundle: () => ipcRenderer.invoke('template:import-bundle')
+    importBundle: () => ipcRenderer.invoke('template:import-bundle'),
+    getAmountSplitRules: (templateId) => ipcRenderer.invoke('template:get-amount-split-rules', templateId),
+    saveAmountSplitRules: (payload) => ipcRenderer.invoke('template:save-amount-split-rules', payload)
   },
   bigAccount: {
     importBankInfo: (templateId) => ipcRenderer.invoke('big-account:import-bank-info', templateId),

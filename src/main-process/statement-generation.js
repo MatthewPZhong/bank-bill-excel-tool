@@ -1,3 +1,5 @@
+const path = require('node:path');
+
 function createStatementGenerationHelpers(deps) {
   const {
     appendActivityLogEntry,
@@ -32,7 +34,30 @@ function createStatementGenerationHelpers(deps) {
     appendLog
   } = deps;
 
+  function collectUnmatchedAmountSplitFiles(fileEntries) {
+    const unmatched = [];
+
+    fileEntries.forEach((entry) => {
+      const stats = entry?.detailRows?.amountSplitMatchStats;
+      if (!stats || !stats.enabled) {
+        return;
+      }
+      if (stats.totalRows > 0 && stats.hitCredit === 0 && stats.hitDebit === 0) {
+        const filePath = entry.filePath || '';
+        const displayName = filePath && filePath !== '__cached__'
+          ? path.basename(filePath)
+          : filePath;
+        if (displayName) {
+          unmatched.push(displayName);
+        }
+      }
+    });
+
+    return unmatched;
+  }
+
   function buildPreparedStatementBatchFromEntries({ config, fileEntries = [] }) {
+    const unmatchedFiles = collectUnmatchedAmountSplitFiles(fileEntries);
     const detailRows = mergeMappedDetailRows(fileEntries.map((entry) => entry.detailRows));
     const selectedMerchantId = config.selectedMerchantId || resolveSinglePreparedFieldValue(detailRows, 'MerchantId', {
       buildFieldIndexMap,
@@ -50,7 +75,8 @@ function createStatementGenerationHelpers(deps) {
       balanceMode: config.balanceMode,
       selectedMerchantId,
       selectedCurrency,
-      inputFilePaths: fileEntries.map((entry) => entry.filePath)
+      inputFilePaths: fileEntries.map((entry) => entry.filePath),
+      unmatchedAmountSplitFiles: unmatchedFiles
     };
   }
 
@@ -116,9 +142,16 @@ function createStatementGenerationHelpers(deps) {
   }) {
     const manualBalanceWarning = extractManualBalancePromptWarning(generatedFiles.warnings);
     const normalizedInputFilePaths = normalizeInputFilePaths(inputFilePaths || inputFilePath);
+    const unmatchedAmountSplitFiles = Array.isArray(generatedFiles.unmatchedAmountSplitFiles)
+      ? generatedFiles.unmatchedAmountSplitFiles.slice()
+      : [];
 
     if (manualBalanceWarning) {
-      return buildManualBalanceRequiredResult(manualBalanceWarning.prompt, generatedFiles);
+      const manualResult = buildManualBalanceRequiredResult(manualBalanceWarning.prompt, generatedFiles);
+      if (unmatchedAmountSplitFiles.length) {
+        manualResult.unmatchedAmountSplitFiles = unmatchedAmountSplitFiles;
+      }
+      return manualResult;
     }
 
     if (generatedFiles.warnings.length) {
@@ -130,7 +163,7 @@ function createStatementGenerationHelpers(deps) {
         balanceRequested: generatedFiles.balanceRequested
       });
 
-      return createWarningResult({
+      const warningResult = createWarningResult({
         step: '导入网银明细文件',
         message,
         detailReady,
@@ -144,6 +177,12 @@ function createStatementGenerationHelpers(deps) {
         errorCode: 'FILE_IMPORT_WARNING',
         templateName
       });
+
+      if (unmatchedAmountSplitFiles.length) {
+        warningResult.unmatchedAmountSplitFiles = unmatchedAmountSplitFiles;
+      }
+
+      return warningResult;
     }
 
     appendActivityLogEntry({
@@ -162,7 +201,8 @@ function createStatementGenerationHelpers(deps) {
       status: 'success',
       message: generatedFiles.message,
       detailReady: Boolean(generatedFiles.detail),
-      balanceReady: Boolean(generatedFiles.balance)
+      balanceReady: Boolean(generatedFiles.balance),
+      unmatchedAmountSplitFiles
     };
   }
 

@@ -22,10 +22,12 @@ const {
   calculateEndingBalanceFromAmounts,
   buildDetailExportRows,
   buildMappedRows,
+  compileRegexLiteral,
   FileValidationError,
   FIXED_FIELD_VALUE_PREFIX,
   extractHeaders,
   inferEndingBalance,
+  isRegexLiteral,
   loadCurrencyMappings,
   loadEnumValues,
   normalizeCell,
@@ -104,10 +106,14 @@ const CUSTOM_INPUT_TARGET_FIELDS = new Set(['MerchantId']);
 const SIGNED_AMOUNT_MAPPING_FIELD = '按正负号拆分的发生额';
 const AMOUNT_BASED_NAME_MAPPING_FIELD = '根据发生额做映射的户名';
 const AMOUNT_BASED_ACCOUNT_MAPPING_FIELD = '根据发生额做映射的账户号';
+const AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD = '按字段区分发生额';
+const AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION = '是';
+const SUPPORTED_BUNDLE_VERSION = 2;
 const ADVANCED_MAPPING_FIELDS = [
   SIGNED_AMOUNT_MAPPING_FIELD,
   AMOUNT_BASED_NAME_MAPPING_FIELD,
-  AMOUNT_BASED_ACCOUNT_MAPPING_FIELD
+  AMOUNT_BASED_ACCOUNT_MAPPING_FIELD,
+  AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD
 ];
 const NEW_ACCOUNT_EXPORT_NAME = 'NEW_BALANCE';
 const BACKGROUND_IMAGE_LIMITS = Object.freeze({
@@ -903,7 +909,7 @@ function expandBigAccountConfigurations(bigAccounts = []) {
 
 function buildTemplateLibraryPayload() {
   return {
-    bundleVersion: 1,
+    bundleVersion: SUPPORTED_BUNDLE_VERSION,
     exportedAt: new Date().toISOString(),
     templates: database.listTemplateBundleEntries()
   };
@@ -933,6 +939,15 @@ function readTemplateBundleFile(filePath) {
     throw new FileValidationError('FILE_READ', '模板文件格式错误，请重新确认');
   }
 
+  const bundleVersion = Number(parsed?.bundleVersion || 1);
+
+  if (bundleVersion > SUPPORTED_BUNDLE_VERSION) {
+    throw new FileValidationError(
+      'FILE_READ',
+      `模板文件版本（${bundleVersion}）高于当前应用支持的版本（${SUPPORTED_BUNDLE_VERSION}），请升级应用后再导入`
+    );
+  }
+
   const templates = Array.isArray(parsed?.templates) ? parsed.templates : [];
 
   return templates.map((item) => ({
@@ -943,6 +958,7 @@ function readTemplateBundleFile(filePath) {
     mappings: Array.isArray(item.mappings) ? item.mappings : [],
     bigAccounts: Array.isArray(item.bigAccounts) ? item.bigAccounts : [],
     fixedAssignments: Array.isArray(item.fixedAssignments) ? item.fixedAssignments : [],
+    amountSplitRules: Array.isArray(item.amountSplitRules) ? item.amountSplitRules : [],
     dateFormat: normalizeCell(item.dateFormat) || 'auto'
   }));
 }
@@ -1494,6 +1510,15 @@ function getTemplateMappingConfig(templateId) {
           merchantId: normalizeCell(item.merchantId),
           currency: normalizeCell(item.currency),
           rowIndex: Number(item.rowIndex || 0)
+        }))
+      : [],
+    amountSplitRules: Array.isArray(templatePayload.amountSplitRules)
+      ? templatePayload.amountSplitRules.map((rule) => ({
+          targetField: normalizeCell(rule.targetField),
+          conditionField: normalizeCell(rule.conditionField),
+          conditionValue: normalizeCell(rule.conditionValue),
+          mappedField: normalizeCell(rule.mappedField),
+          rowIndex: Number(rule.rowIndex || 0)
         }))
       : []
   };
@@ -2584,11 +2609,19 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
   const signedAmountSourceField = normalizeCell(mappingByTarget.get(SIGNED_AMOUNT_MAPPING_FIELD)?.mappedField);
   const creditAmountSourceField = normalizeCell(mappingByTarget.get('Credit Amount')?.mappedField);
   const debitAmountSourceField = normalizeCell(mappingByTarget.get('Debit Amount')?.mappedField);
+  const amountSplitByFieldOption = normalizeCell(mappingByTarget.get(AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD)?.mappedField);
   const usesSignedAmountMapping = signedAmountSourceField !== '';
   const usesDirectAmountMapping = creditAmountSourceField !== '' || debitAmountSourceField !== '';
+  const usesAmountSplitByField = amountSplitByFieldOption === AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION;
 
-  if (usesSignedAmountMapping && usesDirectAmountMapping) {
-    throw new FileValidationError('FILE_READ', '“按正负号拆分的发生额”与 Credit Amount / Debit Amount 不能同时设置');
+  const enabledAmountModes = [usesDirectAmountMapping, usesSignedAmountMapping, usesAmountSplitByField]
+    .filter(Boolean).length;
+
+  if (enabledAmountModes > 1) {
+    throw new FileValidationError(
+      'FILE_READ',
+      '“Credit Amount / Debit Amount”、“按正负号拆分的发生额”与“按字段区分发生额”三者只能启用其中一种'
+    );
   }
 
   if (usesSignedAmountMapping && !sourceFieldSet.has(signedAmountSourceField)) {
@@ -2665,6 +2698,17 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
       cleanedMappings.push({
         templateField: targetField,
         mappedField: '',
+        mappedFields: []
+      });
+      return;
+    }
+
+    if (targetField === AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD) {
+      cleanedMappings.push({
+        templateField: targetField,
+        mappedField: normalizedSourceField === AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION
+          ? AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION
+          : '',
         mappedFields: []
       });
       return;
@@ -2898,6 +2942,7 @@ function registerTemplateHandlers() {
         mappings: mappingConfig.mappings,
         bigAccounts: mappingConfig.bigAccounts,
         fixedAssignments: mappingConfig.fixedAssignments,
+        amountSplitRules: mappingConfig.amountSplitRules,
         dateFormat: mappingConfig.template.dateFormat || 'auto'
       };
     } catch (error) {
@@ -2952,6 +2997,28 @@ function registerTemplateHandlers() {
         bigAccounts: payload.bigAccounts,
         fixedAssignments: payload.fixedAssignments
       });
+
+      const usesAmountSplitByField = templateConfiguration.mappings.some(
+        (mapping) => normalizeCell(mapping.templateField) === AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD
+          && normalizeCell(mapping.mappedField) === AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION
+      );
+
+      if (usesAmountSplitByField) {
+        const existingRules = database.getAmountSplitRules(payload.templateId) || [];
+
+        if (existingRules.length < 2) {
+          return createErrorResult({
+            step: '保存模板映射',
+            message: '请先在"发生额映射关系管理"中配置完整的两行规则',
+            errorCode: 'AMOUNT_SPLIT_RULES_MISSING',
+            context: {
+              templateId: payload.templateId,
+              templateName: template.name
+            },
+            templateName: template.name
+          });
+        }
+      }
 
       database.saveMappings(
         payload.templateId,
@@ -3175,12 +3242,25 @@ function registerTemplateHandlers() {
             headers: entry.headers
           });
 
+          const normalizedAmountSplitRules = Array.isArray(entry.amountSplitRules)
+            ? entry.amountSplitRules
+                .map((rule, index) => ({
+                  targetField: normalizeCell(rule?.targetField),
+                  conditionField: normalizeCell(rule?.conditionField),
+                  conditionValue: normalizeCell(rule?.conditionValue),
+                  mappedField: normalizeCell(rule?.mappedField),
+                  rowIndex: Number.isInteger(rule?.rowIndex) ? rule.rowIndex : index
+                }))
+                .filter((rule) => rule.targetField && rule.conditionField && rule.mappedField)
+            : [];
+
           database.saveMappings(
             template.id,
             validated.mappings,
             validated.bigAccounts,
             validated.fixedAssignments,
-            entry.dateFormat
+            entry.dateFormat,
+            normalizedAmountSplitRules
           );
 
           if (existingTemplate) {
@@ -3235,6 +3315,171 @@ function registerTemplateHandlers() {
       });
     }
   });
+
+  ipcMain.handle('template:get-amount-split-rules', (_event, templateId) => {
+    try {
+      const template = database.getTemplate(templateId);
+
+      if (!template) {
+        return createErrorResult({
+          step: '打开发生额映射关系管理',
+          message: '未找到对应模板',
+          errorCode: 'TEMPLATE_NOT_FOUND',
+          context: { templateId }
+        });
+      }
+
+      const rules = database.getAmountSplitRules(templateId) || [];
+
+      return {
+        status: 'success',
+        template: buildTemplateSummary(template),
+        rules: rules.map((rule) => ({
+          targetField: normalizeCell(rule.targetField),
+          conditionField: normalizeCell(rule.conditionField),
+          conditionValue: normalizeCell(rule.conditionValue),
+          mappedField: normalizeCell(rule.mappedField),
+          rowIndex: Number(rule.rowIndex || 0)
+        }))
+      };
+    } catch (error) {
+      return createErrorResult({
+        step: '打开发生额映射关系管理',
+        message: '发生额映射关系管理打开失败，请导出报错文件查看详情',
+        errorCode: 'AMOUNT_SPLIT_RULES_OPEN_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId }
+      });
+    }
+  });
+
+  ipcMain.handle('template:save-amount-split-rules', (_event, payload = {}) => {
+    const templateId = Number(payload.templateId);
+    let template = null;
+
+    try {
+      template = database.getTemplate(templateId);
+
+      if (!template) {
+        return createErrorResult({
+          step: '保存发生额映射关系',
+          message: '未找到对应模板',
+          errorCode: 'TEMPLATE_NOT_FOUND',
+          context: { templateId }
+        });
+      }
+
+      const validatedRules = validateAmountSplitRulesPayload(payload.rules, template);
+
+      database.saveAmountSplitRules(templateId, validatedRules);
+      syncTemplateLibraryFile();
+      clearLastErrorReport();
+      appendActivityLogEntry({
+        level: 'info',
+        message: '保存发生额映射关系成功',
+        details: [`模板名：${template.name}`, `规则数：${validatedRules.length}`]
+      });
+
+      return {
+        status: 'success',
+        message: '发生额映射关系保存成功'
+      };
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return createErrorResult({
+          step: '保存发生额映射关系',
+          message: error.message,
+          errorCode: error.code,
+          originalError: error,
+          context: { templateId, templateName: template?.name || '' },
+          templateName: template?.name || ''
+        });
+      }
+
+      return createErrorResult({
+        step: '保存发生额映射关系',
+        message: '发生额映射关系保存失败，请导出报错文件查看详情',
+        errorCode: 'AMOUNT_SPLIT_RULES_SAVE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId, templateName: template?.name || '' },
+        templateName: template?.name || ''
+      });
+    }
+  });
+}
+
+function validateAmountSplitRulesPayload(rules, template) {
+  if (!Array.isArray(rules) || rules.length !== 2) {
+    throw new FileValidationError('FILE_READ', '请同时配置 Credit Amount 与 Debit Amount 两行规则');
+  }
+
+  const sourceFieldSet = new Set((template.headers || []).map((header) => normalizeCell(header)));
+  const expectedTargets = new Set(['Credit Amount', 'Debit Amount']);
+  const seenTargets = new Set();
+  const normalized = rules.map((rule, index) => {
+    const targetField = normalizeCell(rule?.targetField);
+    const conditionField = normalizeCell(rule?.conditionField);
+    const conditionValue = normalizeCell(rule?.conditionValue);
+    const mappedField = normalizeCell(rule?.mappedField);
+
+    if (!expectedTargets.has(targetField)) {
+      throw new FileValidationError('FILE_READ', '目标字段必须是 Credit Amount 或 Debit Amount');
+    }
+
+    if (seenTargets.has(targetField)) {
+      throw new FileValidationError('FILE_READ', `目标字段 ${targetField} 重复`);
+    }
+
+    seenTargets.add(targetField);
+
+    if (!conditionField) {
+      throw new FileValidationError('FILE_READ', '判断字段不能为空');
+    }
+
+    if (!sourceFieldSet.has(conditionField)) {
+      throw new FileValidationError('FILE_READ', `映射字段不存在：${conditionField}`);
+    }
+
+    if (conditionValue === '') {
+      throw new FileValidationError('FILE_READ', '判断字段值不能为空');
+    }
+
+    if (isRegexLiteral(conditionValue)) {
+      try {
+        compileRegexLiteral(conditionValue);
+      } catch (_error) {
+        throw new FileValidationError('FILE_READ', `正则表达式语法错误：${conditionValue}`);
+      }
+    }
+
+    if (!mappedField) {
+      throw new FileValidationError('FILE_READ', '发生额字段不能为空');
+    }
+
+    if (!sourceFieldSet.has(mappedField)) {
+      throw new FileValidationError('FILE_READ', `映射字段不存在：${mappedField}`);
+    }
+
+    if (conditionField === mappedField) {
+      throw new FileValidationError('FILE_READ', '条件字段与目标字段不能相同');
+    }
+
+    return {
+      targetField,
+      conditionField,
+      conditionValue,
+      mappedField,
+      rowIndex: Number.isInteger(rule?.rowIndex) ? rule.rowIndex : index
+    };
+  });
+
+  if (seenTargets.size !== 2) {
+    throw new FileValidationError('FILE_READ', '必须同时设置 Credit Amount 与 Debit Amount 两个目标字段');
+  }
+
+  return normalized;
 }
 
 function buildMappedFieldLookup(mappings) {
@@ -3334,6 +3579,8 @@ function buildStatementGenerationConfig({
     return accumulator;
   }, {});
 
+  const amountSplitByFieldConfig = buildAmountSplitByFieldConfig(template, selectedMappings);
+
   return {
     template,
     mappingByTargetField,
@@ -3349,7 +3596,34 @@ function buildStatementGenerationConfig({
       nameSourceField: mappingByTargetField[AMOUNT_BASED_NAME_MAPPING_FIELD],
       accountSourceField: mappingByTargetField[AMOUNT_BASED_ACCOUNT_MAPPING_FIELD]
     },
+    amountSplitByField: amountSplitByFieldConfig,
     dateParseOrder: template.dateFormat || 'auto'
+  };
+}
+
+function buildAmountSplitByFieldConfig(template, selectedMappings) {
+  const enabled = selectedMappings.some((mapping) => {
+    return normalizeCell(mapping.templateField) === AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD
+      && normalizeCell(mapping.mappedField) === AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION;
+  });
+
+  if (!enabled || !template || !template.id) {
+    return { enabled: false, rules: [] };
+  }
+
+  const rules = (database.getAmountSplitRules(template.id) || [])
+    .map((rule) => ({
+      targetField: normalizeCell(rule.targetField),
+      conditionField: normalizeCell(rule.conditionField),
+      conditionValue: normalizeCell(rule.conditionValue),
+      mappedField: normalizeCell(rule.mappedField),
+      rowIndex: Number(rule.rowIndex || 0)
+    }))
+    .filter((rule) => rule.targetField && rule.conditionField && rule.mappedField);
+
+  return {
+    enabled: true,
+    rules
   };
 }
 
@@ -3364,6 +3638,7 @@ function buildMappedRowsForFile({
     accountMappingByBankId: config.accountMappingByBankId,
     currencyMappings: config.currencyMappings,
     amountMappingRules: config.amountMappingRules,
+    amountSplitByField: config.amountSplitByField,
     expectedSourceHeaders: config.template.headers,
     selectedBigAccount: {
       merchantId: config.selectedMerchantId,
@@ -3467,7 +3742,10 @@ function generateStatementFiles({
     balance: null,
     message: includeDetail && includeBalance !== true ? '明细账单可导出' : '',
     warnings,
-    balanceRequested: Boolean(preparedBatch.balanceRequested)
+    balanceRequested: Boolean(preparedBatch.balanceRequested),
+    unmatchedAmountSplitFiles: Array.isArray(preparedBatch.unmatchedAmountSplitFiles)
+      ? preparedBatch.unmatchedAmountSplitFiles.slice()
+      : []
   };
 
   if (includeDetail) {

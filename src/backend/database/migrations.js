@@ -88,8 +88,41 @@ function ensureTemplateDateFormatSupport(db) {
   }
 }
 
+function ensureAmountSplitRulesSupport(db) {
+  db.exec('BEGIN');
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS template_amount_split_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL,
+        target_field TEXT NOT NULL,
+        condition_field TEXT NOT NULL,
+        condition_value TEXT NOT NULL,
+        mapped_field TEXT NOT NULL,
+        row_index INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE,
+        UNIQUE(template_id, row_index)
+      );
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS template_amount_split_rules_template_id_idx
+      ON template_amount_split_rules(template_id);
+    `);
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
+  ensureAmountSplitRulesSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,
