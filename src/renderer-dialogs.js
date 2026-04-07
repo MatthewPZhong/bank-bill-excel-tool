@@ -382,7 +382,8 @@
       return Array.from(tableBody.querySelectorAll('tr[data-template-field]')).map((row) => {
         const select = row.querySelector('.mapping-select');
         const mappedFields = getSelectValues(select);
-        const isConcatMode = mappedFields[0] === CONCAT_FIELDS_MAPPING_FIELD;
+        const firstValue = mappedFields[0] || '';
+        const isConcatMode = firstValue === CONCAT_FIELDS_MAPPING_FIELD;
 
         if (isConcatMode) {
           const concatFields = row.dataset.concatFields ? JSON.parse(row.dataset.concatFields) : [];
@@ -395,9 +396,26 @@
           };
         }
 
+        // Preserve legacy concat config on fields that no longer support concat
+        // UI (e.g. Currency). If the user hasn't explicitly picked a new value
+        // (select is empty), restore the original concat mapping instead of
+        // silently wiping it.
+        if (!firstValue && row.dataset.legacyConcatMode === 'true') {
+          const legacyFields = row.dataset.legacyConcatFields
+            ? JSON.parse(row.dataset.legacyConcatFields)
+            : [];
+          return {
+            templateField: row.dataset.templateField,
+            mappedField: CONCAT_FIELDS_MAPPING_FIELD,
+            mappedFields: legacyFields,
+            customValue: '',
+            isMultiBigAccount: false
+          };
+        }
+
         return {
           templateField: row.dataset.templateField,
-          mappedField: mappedFields[0] || '',
+          mappedField: firstValue,
           mappedFields: [],
           customValue: '',
           isMultiBigAccount: false
@@ -1530,9 +1548,19 @@
           : (savedMapping.mappedField ? [savedMapping.mappedField] : []);
         const isSavedConcatMode = savedMapping.mappedField === CONCAT_FIELDS_MAPPING_FIELD;
 
-        if (isSavedConcatMode) {
+        if (isSavedConcatMode && supportsMultiSelect) {
           select.value = CONCAT_FIELDS_MAPPING_FIELD;
           concatSelectedFields = Array.isArray(savedMapping.mappedFields) ? savedMapping.mappedFields.slice() : [];
+        } else if (isSavedConcatMode && !supportsMultiSelect) {
+          // Legacy concat config on a field that no longer supports concat UI
+          // (e.g. Currency after 1.4.7 removed concat support). Preserve the
+          // original mappedFields in dataset so collectMappingDraftFromTable
+          // can restore them unless the user explicitly picks a new value.
+          row.dataset.legacyConcatMode = 'true';
+          row.dataset.legacyConcatFields = JSON.stringify(
+            Array.isArray(savedMapping.mappedFields) ? savedMapping.mappedFields : []
+          );
+          select.value = '';
         } else {
           select.value = savedMapping.mappedField || (isBalanceField ? BALANCE_DISABLED_OPTION : '');
         }
@@ -1656,7 +1684,13 @@
           });
         }
 
-        select.addEventListener('change', syncEditorState);
+        select.addEventListener('change', () => {
+          // User explicitly changed the mapping — drop any legacy concat
+          // preservation so the new selection (including an empty one) wins.
+          delete row.dataset.legacyConcatMode;
+          delete row.dataset.legacyConcatFields;
+          syncEditorState();
+        });
         syncEditorState();
         rowByField.set(fieldName, row);
         tbody.appendChild(row);

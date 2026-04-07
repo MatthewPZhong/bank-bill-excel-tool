@@ -2958,7 +2958,7 @@ function registerTemplateHandlers() {
         templateConfiguration.mappings,
         templateConfiguration.bigAccounts,
         templateConfiguration.fixedAssignments,
-        payload.dateFormat || 'auto'
+        payload.dateFormat
       );
       syncTemplateLibraryFile();
       clearLastErrorReport();
