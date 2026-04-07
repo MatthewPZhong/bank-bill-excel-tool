@@ -1940,9 +1940,6 @@
               </tr>
             </tbody>
           </table>
-          <div class="amount-split-rules-hint">
-            提示：判断字段值支持正则表达式字面量（格式：<code>/模式/标志</code>，例如 <code>/^收入/i</code>），否则使用字符串完全匹配。
-          </div>
         </div>
         <div class="dialog-actions right">
           <button class="secondary-btn small" type="button" data-action="cancel">取消</button>

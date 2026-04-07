@@ -1745,18 +1745,3 @@ select {
 .amount-split-rule-row .mapping-text-input {
   width: 100%;
 }
-
-.amount-split-rules-hint {
-  margin-top: 10px;
-  color: #666;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.amount-split-rules-hint code {
-  background-color: #f2f2f2;
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-family: Menlo, Consolas, monospace;
-  font-size: 12px;
-}
