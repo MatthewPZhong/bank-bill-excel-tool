@@ -836,14 +836,14 @@ const SUPPORTED_BUNDLE_VERSION = 3;  // 原 v1.4.8 = 2
 | `ERROR_AMOUNT_MODE_CONFLICT` | `'AMOUNT_MODE_CONFLICT'` | 4 方互斥违反（保存阶段） | AC1-71 |
 | `ERROR_BILL_SPLIT_CONFIG_MISSING` | `'BILL_SPLIT_CONFIG_MISSING'` | 开关 = 是但弹框 2 无 `completed` 行（保存阶段） | ACI-11 |
 | `ERROR_BILL_MERGE_CURRENCY_MISMATCH` | `'BILL_MERGE_CURRENCY_MISMATCH'` | 合并组 Currency 不一致（导入阶段） | AC1-60 / ACI-6 |
-| `ERROR_BILL_MERGE_NET_ZERO` | `'BILL_MERGE_NET_ZERO'` | 合并组净值 = 0（导入阶段） | AC1-62 / ACI-7 |
+| `ERROR_BILL_MERGE_NET_ZERO` *(deprecated)* | `'BILL_MERGE_NET_ZERO'` | ~~合并组净值 = 0（导入阶段）~~ **2026-04-08 fix2 override：不再抛出**，合并组净值 = 0 时改为静默跳过整个组（见 §5.6.4）。错误码字符串保留在错误码表中以保持历史兼容，但实际代码路径永远不会触发。 | AC1-62 / ACI-7 |
 
 > **统一文案**（参考 PRD §4.5 / §4.7.5 / Q-G2 / Q-G3）：
 >
 > - `AMOUNT_MODE_CONFLICT` → `Credit Amount / Debit Amount 直接映射、按正负号拆分的发生额、按字段区分发生额、拆分/合并明细账单 四者只能启用其中一种`
 > - `BILL_SPLIT_CONFIG_MISSING` → `请先在"拆分/合并账单映射关系管理"中配置至少一行拆分账单配置`
 > - `BILL_MERGE_CURRENCY_MISMATCH` → `合并账单的 Currency 不一致，无法合并`
-> - `BILL_MERGE_NET_ZERO` → `合并账单后净值为 0，无法判定收支方向，请检查合并配置`
+> - ~~`BILL_MERGE_NET_ZERO` → `合并账单后净值为 0，无法判定收支方向，请检查合并配置`~~ **已废弃（2026-04-08 fix2）**，保留文案仅作历史参考
 
 ### 4.3 IPC 通道命名
 
@@ -1256,6 +1256,12 @@ return {
 
 `enabledFromMappings(field, expected, defaultValue = '')` 是一个内部 helper：从 `mappings` 数组找出 `templateField === field` 的行，返回其 `mappedField === expected` 的判定结果（带默认值）。
 
+> **2026-04-08 fix2（Fix #6，commit `d30ec96`）：`template:get-mappings` handler 返回 5 个 billSplit 字段**
+>
+> `getTemplateMappingConfig` 的返回结构正确包含了 `billSplitGroupFields` / `billSplitMappings` / `billSplitRows` / `billSplitAmountRules` / `billSplitMeta` 5 个字段，但 `template:get-mappings` IPC handler（`src/main.js:2988-3020`）在组装 response 对象时**漏了这 5 个字段**——直接 `return { status: 'success', template, targetFields, advancedMappingFields, ..., mappings, bigAccounts, fixedAssignments, amountSplitRules, dateFormat }`，前端 `createMappingDialog` 读到 undefined fallback 为空数组，导致冷启动后**首次**打开弹框 2 显示空状态。
+>
+> 修复：在 handler return 对象中显式追加这 5 个字段（从 `mappingConfig.*` 读取并透传）。第二次打开能正常显示的原因：弹框 2 onClose → getBillSplitConfig → reopen 时显式传这些字段。详见 commit message。
+
 #### 5.5.2 `buildStatementGenerationConfig` 扩展
 
 `buildStatementGenerationConfig` 当前在 `src/main.js:3506-3628` 处构造导入阶段使用的配置对象。v1.4.9 在返回对象中追加 `billSplitMergeConfig`：
@@ -1432,11 +1438,32 @@ function expandBillSplit(originalRow, headers, billSplitMergeConfig, templateMap
 
 #### 5.6.4 合并阶段（按 mergeGroups 合并 K 拆分行 → 1 输出行）
 
+> **2026-04-08 fix2 override**（对应代码 commit `6031f88 fix(v1.4.9): filter zero-amount rows silently`）：
+>
+> - **原决定**：合并组净值 = 0 时抛 `BILL_MERGE_NET_ZERO` 错误阻断整个导入流程。
+> - **新决定**：合并组净值 = 0 时**静默跳过整个合并组**（不 push 到 `finalRows`），导入流程继续处理其他行/组。`BILL_MERGE_NET_ZERO` 错误码保留在错误码表中但代码永远不会抛出。
+> - **同时新增**：`expandBillSplitForRow`（§5.6.3）在计算完每条拆分行的 credit/debit 后，若两者都为 0 / 空 / NaN，直接返回 `null` 并过滤掉，不输出该拆分行。
+> - **独立行双保险**：`applyBillSplitMerge` 对 standalone 行（未参与合并组的拆分输出行）也再过滤一次 credit+debit 全 0 的情况，作为双保险兜底。
+> - **保留不变**：Currency 不一致仍然抛 `BILL_MERGE_CURRENCY_MISMATCH` 阻断导入。
+> - 详见 PRD §4.4.2 / §4.7.5、AC1-62 / AC1-62a / ACI-7 / ACI-7a 的 override 说明。
+
 ```javascript
+// 2026-04-08 fix2 override 后的伪代码
 function applyBillSplitMerge(splitOutputRows, billSplitMergeConfig) {
   const { mergeGroups } = billSplitMergeConfig;
+
+  // 辅助：判断一行 credit 和 debit 是否都为 0 / 空 / NaN（fix2 新增）
+  function isAllZero(row) {
+    const c = parseNumericValue(row.creditAmount);
+    const d = parseNumericValue(row.debitAmount);
+    const czero = c === 0 || c === null || c === undefined || Number.isNaN(c);
+    const dzero = d === 0 || d === null || d === undefined || Number.isNaN(d);
+    return czero && dzero;
+  }
+
   if (mergeGroups.length === 0) {
-    return splitOutputRows;
+    // 未合并行双保险过滤 0 值（fix2 新增）
+    return splitOutputRows.filter((row) => !isAllZero(row));
   }
 
   const mergedSeqs = new Set();
@@ -1446,14 +1473,16 @@ function applyBillSplitMerge(splitOutputRows, billSplitMergeConfig) {
     }
   }
 
-  // 1. 未合并行原样输出
-  const finalRows = splitOutputRows.filter((row) => !mergedSeqs.has(row.seqNo));
+  // 1. 未合并行原样输出（fix2：加 0 值过滤）
+  const finalRows = splitOutputRows
+    .filter((row) => !mergedSeqs.has(row.seqNo))
+    .filter((row) => !isAllZero(row));
 
-  // 2. 每个合并组 → 1 行
+  // 2. 每个合并组 → 0 或 1 行
   for (const group of mergeGroups) {
     const groupRows = group.rows.map((r) => splitOutputRows.find((sr) => sr.seqNo === r.seqNo));
 
-    // Step 1: Currency 一致性校验 (AC1-60 / ACI-6)
+    // Step 1: Currency 一致性校验 (AC1-60 / ACI-6) — 保留
     const currencies = groupRows.map((r) => r.currency).filter(Boolean);
     const distinctCurrencies = new Set(currencies);
     if (distinctCurrencies.size > 1) {
@@ -1467,13 +1496,10 @@ function applyBillSplitMerge(splitOutputRows, billSplitMergeConfig) {
     const sumCredit = groupRows.reduce((acc, r) => acc + safeNumber(r.creditAmount), 0);
     const sumDebit = groupRows.reduce((acc, r) => acc + safeNumber(r.debitAmount), 0);
 
-    // Step 3: 净值与方向判定
+    // Step 3: 净值与方向判定（fix2 override：净值=0 静默跳过，不再 throw）
     const net = sumCredit - sumDebit;
     if (net === 0) {
-      throw createImportError(
-        'BILL_MERGE_NET_ZERO',
-        '合并账单后净值为 0，无法判定收支方向，请检查合并配置'
-      );
+      continue;  // 2026-04-08 fix2: 整个组不产生输出行，不报错
     }
 
     // Step 4: 非金额字段从代表行取
@@ -1491,6 +1517,27 @@ function applyBillSplitMerge(splitOutputRows, billSplitMergeConfig) {
   // 按代表行 seqNo 排序输出，保持稳定顺序
   return finalRows.sort((a, b) => (a.seqNo || 0) - (b.seqNo || 0));
 }
+```
+
+`expandBillSplitForRow`（§5.6.3）对应的 fix2 改动：
+
+```javascript
+// §5.6.3 pseudo — fix2 override: 0 值静默过滤
+return billSplitRows
+  .map((splitRow) => {
+    // ... 原 expand 逻辑（currency / credit / debit / amount source field 取值）...
+
+    // fix2 新增: credit 和 debit 都为 0 → 返回 null 丢弃
+    const creditNum = parseNumericValue(creditValue);
+    const debitNum = parseNumericValue(debitValue);
+    if ((creditNum === 0 || creditNum === null || creditNum === undefined || Number.isNaN(creditNum))
+        && (debitNum === 0 || debitNum === null || debitNum === undefined || Number.isNaN(debitNum))) {
+      return null;
+    }
+
+    return { seqNo, mergedGroupSeq, currency, creditAmount, debitAmount, rowArray, sourceRowNumber };
+  })
+  .filter((r) => r !== null);
 ```
 
 #### 5.6.5 全部行未命中告警的扩展
@@ -1928,7 +1975,17 @@ function applyBillSplitMergeMutualExclusion(enabled) {
 >
 > **Dev 在 task #4 实施阶段注意**：请勿给 v1.4.9 新增任何反向互斥逻辑，哪怕看起来"更安全"——这是 v1.4.8 的 lesson learned，PRD 没要求就不加。
 
-v1.4.8 既有的 `applyAmountSplitMutualExclusion`（`src/renderer-dialogs.js:1758`）继续存在且不动——它处理的是 `Credit Amount` / `Debit Amount` / `按正负号拆分的发生额` 三个字段之间的互斥，v1.4.9 新增的 `applyBillSplitMergeMutualExclusion` 覆盖的是"拆分合并 vs 前三方"的互斥，两者独立共存。
+v1.4.8 既有的 `applyAmountSplitMutualExclusion`（`src/renderer-dialogs.js:1758`）继续存在，**但在 v1.4.9 有一处协作性改动**——它处理的是 `Credit Amount` / `Debit Amount` / `按正负号拆分的发生额` 三个字段之间的互斥，v1.4.9 新增的 `applyBillSplitMergeMutualExclusion` 覆盖的是"拆分合并 vs 前三方"的互斥。
+
+> **2026-04-08 fix2（Fix #3，commit `8041619`）：`applyAmountSplitMutualExclusion` 需要 bill-split-merge 启用时 early-return**
+>
+> 原始实施（v1.4.9 第一版）存在一个调用顺序 bug：`applyBillSplitMergeMutualExclusion(true)` 在循环结束时调用 `applyAmountSplitMutualExclusion()`，后者无条件进入 `else` 分支把 `Credit Amount` / `Debit Amount` / `按正负号` 三个 select 的 `disabled` 置回 `false`，**覆盖**了 4 方互斥刚刚设置的 disabled 状态，导致用户反馈的「互斥禁用不生效」bug。
+>
+> 修复方式：
+> 1. `applyAmountSplitMutualExclusion` **顶部 early-return**：当 `isBillSplitMergeEnabledInTable()` 返回 true 时直接 noop，让 4 方互斥独占 5 行的 disabled 状态。
+> 2. `applyBillSplitMergeMutualExclusion(false)` 才重新调用 `applyAmountSplitMutualExclusion()`（关闭 4 方互斥后恢复 2 方互斥）。
+> 3. `applyBillSplitMergeMutualExclusion(true)` 同时**显式禁用行内所有按钮**（big-account 维护 / 发生额规则管理 / concat trigger），通过 `data-bill-split-merge-disabled='true'` 标记；解除时只恢复被本函数禁用的按钮。
+> 4. 新增辅助函数 `isBillSplitMergeEnabledInTable()` 读取当前 select 值。
 
 #### 7.1.5 主表格 `Currency` / 金额字段的显示规则
 
@@ -1966,11 +2023,12 @@ function createBillSplitMappingsDialog({
 +----------------------------------------------------------------+
 ```
 
-- 弹框尺寸：主 `createMappingDialog` 的 50%。Dev 在 task #4 实施阶段用 `.bill-split-mappings-dialog` CSS 类设 `width: 50%; max-width: 500px;`（或等效），`<dialog>` 元素直接套用。
+- 弹框尺寸：~~主 `createMappingDialog` 的 50%（`width: 50%; max-width: 500px;`）~~ **2026-04-08 fix2 override**：改为 `width: 80vw; min-width: 520px; max-width: none;`（commit `3eaaf14`），原设计"主弹框的一半"在用户实测后发现不足以容纳完整的字段映射表格，基于用户反馈扩大；`max-width: none` 必须显式写以覆盖 `.modal-card` 的 `width: min(100%, 940px)` 默认约束。CSS 类名实际采用 `.bill-split-mappings-card`。
 - 标题：`拆分/合并账单映射关系设置`（AC1-12）。
 - 右上角按钮：`导入当前映射关系`（AC1-13）。
-- 表格行枚举：`template.targetFields.filter((f) => f !== 'Currency' && f !== 'Credit Amount' && f !== 'Debit Amount' && !ADVANCED_MAPPING_FIELDS.includes(f))`（AC1-15，同时排除 v1.4.7/8 的高级字段）。
+- 表格行枚举：`template.targetFields.filter((f) => f !== 'Currency' && f !== 'Credit Amount' && f !== 'Debit Amount' && !ADVANCED_MAPPING_FIELDS.includes(f) && !BILL_SPLIT_GROUP_FIELDS.includes(f))`（AC1-15，同时排除 v1.4.7/8 的高级字段 + v1.4.9 bill-split group 字段）。
 - 「映射字段」列复用主弹框的单元格工厂（包括拼接字段 / 自己输入所有形式，AC1-16）。**关键**：这里不能 `cloneNode` DOM（参考 PRD NFR-6 + v1.4.7 ghost shell 教训）；要重新调用 factory 函数构造。
+- **`Balance` 字段选项**（**2026-04-08 fix2 澄清**）：弹框 1 的 Balance 行选项**与主表格 Balance 行一致**——`BALANCE_DISABLED_OPTION`（`'无'`）+ `BALANCE_CALCULATED_OPTION`（`'通过发生额计算'`）+ `template.headers`，默认值为 `BALANCE_DISABLED_OPTION`；Balance 行**不渲染 concat-field-picker DOM**（`supportsMultiSelect = !isCurrencyLike && !isBalanceField`）。后端 `validateBillSplitMappingsPayload` 对 Balance 字段加 `isBalanceSpecialValue` 旁路，允许 `BALANCE_DISABLED_OPTION` / `BALANCE_CALCULATED_OPTION` 跳过 header 存在性校验（commit `cb127c0`）。
 
 #### 7.2.3 「导入当前映射关系」按钮逻辑（AC1-17 / AC1-18）
 
@@ -2052,9 +2110,9 @@ function createBillSplitRowsDialog({
 
 ```
 +----------------------------------------------------------------+
-| 拆分/合并账单映射关系管理          [x]  [✓ 合并账单] [2,3▾] [完成]
+| 拆分/合并账单映射关系管理   [✓ 合并账单] [请选择▾] [完成]  [x]  |
 +----------------------------------------------------------------+
-| 需要拆分成几份账单 [ 3 ] [完成]                                |
+| 需要拆分成几份账单 [ 3 ] [拆]                                   |
 |                                                                |
 | +------+----------+-------------+------------+--------+-----+|
 | |账单序号| Currency | Credit Amt  | Debit Amt  | 发生额|操作 ||
@@ -2070,10 +2128,35 @@ function createBillSplitRowsDialog({
 |                                                                |
 | 按正负号拆分的发生额  [          ▾]                          |
 | 按字段区分发生额      [          ▾]  [发生额映射关系管理]      |
+|                                                                |
+|                                                       [完成]   |
 +----------------------------------------------------------------+
 ```
 
-#### 7.3.3 顶部：`需要拆分成几份账单` 数字框 + 完成按钮（AC1-23 / AC1-24 / AC1-25 / AC1-26 / AC1-37 / AC1-38 / AC1-39 / AC1-50）
+> **2026-04-08 fix2 override**（对应 commit `fc91550` / `04a2e21` / `57dbd38`）：
+>
+> 1. **合并下拉框改为 checkbox-panel picker**（Fix #1，`fc91550`）：
+>    - 原设计：`<select class="mapping-select bill-split-merge-dropdown" multiple hidden>`
+>    - 新设计：`<div class="bill-split-merge-picker">` 包裹 `bill-split-merge-picker-trigger`（按钮）和 `bill-split-merge-picker-panel`（浮层 checkbox 列表），复用 concat-picker 模式。
+>    - 原因：`<select multiple>` 被 `.mapping-select { height: 44px }` 挤压成单行无法多选。
+>    - trigger 文本动态显示 `请选择账单序号` / `已选: 1, 2` / `已选: N 项`（> 5 项切换到计数）。
+>    - dialog 上注册 `mousedown` 外部点击 → 关闭 panel（与 concat-picker 相同的惯例）。
+>    - 前端状态 `mergeSelectedSeqNos: number[]` 代替原 `selectedOptions` 读取。
+>
+> 2. **「需要拆分成几份账单」按钮文本 + 宽度**（Fix #8，`57dbd38`）：
+>    - 按钮文本从 `完成` 改为 `拆`。
+>    - 按钮宽度：通过 CSS `.bill-split-row-count-done-btn.secondary-btn.small { min-width: 0; width: 71px; padding: 0 8px; }` 覆盖 `.small { min-width: 108px }`，达到原宽度的 ≈66%。
+>    - 原因：用户反馈新增的底部「完成」按钮（Fix #7）和此处按钮的 `完成` 文案重复，基于用户要求改名避免混淆。
+>
+> 3. **弹框 2 右下角新增「完成」按钮**（Fix #7，`04a2e21`）：
+>    - 新增 `<div class="dialog-actions right bill-split-rows-footer">` 包裹 `<button class="primary-btn small bill-split-rows-done-btn">完成</button>`，位置在 `bill-split-rows-body` 之外、弹框底部。
+>    - 点击事件**语义等同 × 关闭**：调 `onClose` 回调 + 关闭 modal，**不做任何额外 save 动作**（所有改动仍是行级落库）。
+>    - 对应 PRD §4.3.5 override、Q-C12 override、AC1-27 override、AC1-27a 新增。
+>    - 原 PRD Q-C12 = B 明确"弹框 2 没有弹框级完成按钮"，本次 override 是用户实测后主动要求的交互回调（提供一个显式"我已完成"的关闭入口），不破坏行级落库语义。
+
+#### 7.3.3 顶部：`需要拆分成几份账单` 数字框 + `拆` 按钮（AC1-23 / AC1-24 / AC1-25 / AC1-26 / AC1-37 / AC1-38 / AC1-39 / AC1-50）
+
+> **2026-04-08 fix2 override**：按钮文本从 `完成` 改为 `拆`（commit `57dbd38`），避免与弹框 2 右下角新增的「完成」按钮（commit `04a2e21`）重复混淆。按钮宽度通过 CSS 覆盖为原 `.small` 宽度的 66%（108px → 71px）。
 
 ```javascript
 const nInput = document.createElement('input');
@@ -2092,7 +2175,7 @@ nInput.addEventListener('input', () => {
 });
 
 const nDoneButton = document.createElement('button');
-nDoneButton.textContent = '完成';
+nDoneButton.textContent = '拆';  // 2026-04-08 fix2: 原文本为 '完成'
 nDoneButton.addEventListener('click', async () => {
   const nextN = Number(nInput.value);
   if (!Number.isInteger(nextN) || nextN < 1 || nextN > 99) {
@@ -2395,15 +2478,29 @@ mergeDoneButton.addEventListener('click', async () => {
 });
 ```
 
-#### 7.3.8 弹框关闭（AC1-27 / AC1-28）
+#### 7.3.8 弹框关闭（AC1-27 / AC1-27a / AC1-28）
+
+> **2026-04-08 fix2 override**（commit `04a2e21`）：原设计弹框 2 只能通过右上角 × 按钮或 ESC 键关闭。本次新增右下角「完成」按钮（`.bill-split-rows-done-btn`）作为第三种关闭方式，**语义等同 ×**——不做任何额外 save 动作，调 `onClose` 回调关闭 modal。三种关闭路径等价：× / ESC / 右下角完成。对应 AC1-27 override + AC1-27a 新增。
 
 ```javascript
-// 右上角 x 按钮 + ESC 键
+// 右上角 × 按钮 / ESC 键 / 右下角「完成」按钮（2026-04-08 fix2 新增）
 function closeDialog() {
   // 不做额外落库动作（一切已行级落库）
   removeDialogDOM();
   onClose();
 }
+
+// 实际实现（renderer-dialogs.js）
+dialog.querySelector('.icon-close').addEventListener('click', () => {
+  if (typeof onClose === 'function') onClose();
+  else closeModal();
+});
+
+// 2026-04-08 fix2 新增：右下角「完成」按钮
+dialog.querySelector('.bill-split-rows-done-btn').addEventListener('click', () => {
+  if (typeof onClose === 'function') onClose();
+  else closeModal();
+});
 ```
 
 ### 7.4 `createAmountSplitRulesDialog` 扩展 —— `context` 参数
@@ -2469,12 +2566,42 @@ function createAmountSplitRulesDialog({
   margin: 16px 0;
 }
 
-/* 弹框 1 尺寸 */
-.bill-split-mappings-dialog {
-  width: 50%;
-  max-width: 500px;
+/* 弹框 1 尺寸 —— 2026-04-08 fix2 override */
+/* 原: .bill-split-mappings-dialog { width: 50%; max-width: 500px; } */
+/* 新（commit 3eaaf14）: */
+.bill-split-mappings-card {
+  width: 80vw;
+  min-width: 520px;
+  max-width: none;  /* 必须显式覆盖 .modal-card 的 width: min(100%, 940px) */
+}
+
+/* 弹框 2 合并下拉框改为 checkbox-panel picker —— 2026-04-08 fix2 override (commit fc91550) */
+.bill-split-merge-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.bill-split-merge-picker-trigger {
+  min-width: 180px;
+  height: 34px;
+}
+.bill-split-merge-picker-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 10;
+  /* ... panel 样式参考 concat-picker-panel ... */
+}
+
+/* 弹框 2「需要拆分成几份账单」按钮缩窄 —— 2026-04-08 fix2 (commit 57dbd38) */
+.bill-split-row-count-done-btn.secondary-btn.small {
+  min-width: 0;       /* 解除 .small 的 min-width: 108px 约束 */
+  width: 71px;        /* 108 × 66% ≈ 71 */
+  padding: 0 8px;
 }
 ```
+
+> **CSS 类名约定**：实际实施阶段采用 `.bill-split-mappings-card` / `.bill-split-rows-card` / `.bill-split-merged-row` / `.bill-split-merge-disabled` 等（非原 TechDoc 示例中的 `.bill-split-mappings-dialog` / `.bill-split-dialog`）。CSS 选择器与 HTML class 一致。
 
 ### 7.6 Preload 暴露（再次强调，详见 §4.4）
 
@@ -2558,7 +2685,9 @@ PRD §4.4.2 / Q-F4：「合并后的非金额字段取合并组代表行（最�
 
 v1.4.8 既有的 import 错误流：`buildMappedRowsForFile` throw → main process catch → 通过 IPC 返回 renderer → dialog 弹错误提示。
 
-v1.4.9 新增的错误码（`BILL_MERGE_CURRENCY_MISMATCH` / `BILL_MERGE_NET_ZERO`）走同一流程，**不需要**额外的 handler。错误文案在 §4.2 已统一定义，`createImportError(code, message)` 抛出后由现有错误渲染逻辑处理。
+v1.4.9 新增的错误码（`BILL_MERGE_CURRENCY_MISMATCH`）走同一流程，**不需要**额外的 handler。错误文案在 §4.2 已统一定义，`createImportError(code, message)` 抛出后由现有错误渲染逻辑处理。
+
+> **2026-04-08 fix2 override**：原本列为 v1.4.9 新增错误码的 `BILL_MERGE_NET_ZERO` 已**不再抛出**（合并组净值 = 0 时改为静默过滤，详见 §5.6.4 override 说明）。错误码字符串保留在错误码表以防外部引用，但实际代码路径永远不会触发。
 
 ### 8.4 多文件聚合告警（AC ACI-12）
 
@@ -2863,4 +2992,5 @@ PRD 添加这 2 条 AC 后，覆盖率变成 96/96 = 100%（仍然 100%，但分
 |------|---------|------|
 | 2026-04-08 | 初版 TechDoc 生成。覆盖 PRD-v1.4.9.md 定稿的 94 AC（AC1-1 ~ AC1-82 + ACI-1 ~ ACI-12），13 章结构对齐 `docs/iterations/v1.4.8/TechDoc-v1.4.8.md`；落定 3 张新表 schema 与幂等迁移 SQL；落定 8 个新 IPC 通道命名；落定 4 方互斥扩展方案；提交 8 个 Open Technical Questions（Q-OT1 ~ Q-OT8）公示 Dev 的实现选择。 | Dev |
 | 2026-04-08 | **team-lead 决策更新**：Q-OT2 选 B、Q-OT6 选 C / Dev 选 C1 surgical。具体改动：(1) 新增第 4 张表 `template_bill_split_meta`（1:1 with template，独立存「按正负号拆分的发生额」字段），与 `template_bill_split_amount_rules` 完全分离；新增 repo 函数 `getBillSplitMeta` / `saveBillSplitMeta`；删除常量 `BILL_SPLIT_SIGNED_AMOUNT_TARGET`；将原 IPC `template:save-bill-split-amount-rules` 拆分为 `template:save-bill-split-amount-rules`（仅承载规则数组）+ `template:save-bill-split-meta`（仅承载 signed 字段）；bundle JSON v3 顶层新增 `billSplitMeta` 字段；前端 state / onChange / IPC 调用全部对应拆分。(2) `deleteBillSplitRow` 新增"受影响合并组解散"逻辑（C1 surgical：自身所在组 + 任一其它组中存在 seq ≥ 删除行 seq 的成员），新增 `template:preview-delete-bill-split-row` IPC + 前端 deleteBtn 二次确认 UI；保证 PRD §Q-A3 不变量「`merged_group_seq` = 组内最小 seq_no」。提议 PM 在 task #3 之前为 PRD 加入 AC1-43-NEW / AC1-44-NEW 两条 AC（详见 §12.1 末尾说明）。 | Dev (执行 team-lead 决策) |
+| 2026-04-08 fix2 | **基于 v1.4.9 实施后用户实测反馈同步 TechDoc**，对应代码 commit 范围 `fc91550..57dbd38`（8 个 fix commit）。override 项：(1) **Fix #2（`6031f88`）** §4.2 错误码表、§5.6.4 `applyBillSplitMerge` 伪代码、§5.6.3 `expandBillSplitForRow` 伪代码、§8.3 导入错误流：`BILL_MERGE_NET_ZERO` 改为 deprecated，合并组净值 = 0 静默 `continue` 跳过整组，并新增"单行拆分输出 Credit/Debit 全 0 静默丢弃"的过滤逻辑（双保险：`expandBillSplitForRow` 的 `.filter(r => r !== null)` + `applyBillSplitMerge` 对 standalone 行的再次过滤）。`BILL_MERGE_CURRENCY_MISMATCH` 保留不变。(2) **Fix #7（`04a2e21`）** §7.3.2 ASCII 图 + §7.3.8 关闭逻辑：弹框 2 右下角新增 `.bill-split-rows-done-btn` 按钮，click 等同 × 关闭（不做额外 save），对应 PRD AC1-27 override + AC1-27a 新增。(3) **Fix #8（`57dbd38`）** §7.3.3 `nDoneButton.textContent = '拆'`（原 `完成`）；CSS 新增 `.bill-split-row-count-done-btn.secondary-btn.small { min-width: 0; width: 71px; }` 覆盖 `.small { min-width: 108px }`。(4) **Fix #4（`3eaaf14`）** §7.2 弹框尺寸 + §7.5 CSS：弹框 1 从 `width: 50%; max-width: 500px` 改为 `width: 80vw; min-width: 520px; max-width: none`；CSS 类名由 `.bill-split-mappings-dialog` 实际采用为 `.bill-split-mappings-card`。(5) **Fix #5（`cb127c0`）** §7.2.2：弹框 1 Balance 字段选项与主表格对齐（`无` / `通过发生额计算` / `headers`），后端 `validateBillSplitMappingsPayload` 加 `isBalanceSpecialValue` 旁路；Balance 行不渲染 concat-field-picker。(6) **Fix #1（`fc91550`）** §7.3.2：弹框 2 「合并账单」下拉框由 `<select multiple>` 改为 `.bill-split-merge-picker` (trigger + panel) checkbox-panel 模式，复用 concat-picker 惯例；§7.5 CSS 新增 `.bill-split-merge-picker-*` 样式。(7) **Fix #3（`8041619`）** §7.1.4：`applyAmountSplitMutualExclusion` 顶部 early-return 当 `isBillSplitMergeEnabledInTable()` 返回 true，避免覆盖 `applyBillSplitMergeMutualExclusion(true)` 设置的 disabled 状态；`applyBillSplitMergeMutualExclusion` 显式禁用行内所有按钮（`data-bill-split-merge-disabled='true'`）。(8) **Fix #6（`d30ec96`）** §5.5.1：`template:get-mappings` IPC handler 的 return 对象补齐 5 个 billSplit 字段（`billSplitGroupFields` / `billSplitMappings` / `billSplitRows` / `billSplitAmountRules` / `billSplitMeta`），修复冷启动首次打开弹框 2 显示空状态的 bug。 | dev-3（根据用户 fix2 反馈 + team-lead override 指令） |
 
