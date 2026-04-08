@@ -1757,16 +1757,21 @@ select {
   cursor: not-allowed;
 }
 
-/* 弹框 1: 拆分/合并账单映射关系设置 (主对话框尺寸的一半) */
+/* 弹框 1: 拆分/合并账单映射关系设置 (宽度 80vw，覆盖 .modal-card 的 940px 约束) */
 .bill-split-mappings-card {
+  width: 80vw;
   min-width: 520px;
-  max-width: 600px;
+  max-width: none;
 }
 
 .bill-split-mappings-wrapper {
-  max-height: 60vh;
+  max-height: 65vh;
   overflow-y: auto;
   padding: 0 16px;
+}
+
+.bill-split-mappings-wrapper .data-table {
+  width: 100%;
 }
 
 .bill-split-mappings-header-actions {
