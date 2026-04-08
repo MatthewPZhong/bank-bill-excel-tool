@@ -2679,7 +2679,7 @@
           <div class="bill-split-row-count-line">
             <label>需要拆分成几份账单</label>
             <input type="number" class="bill-split-row-count-input" min="1" max="99" />
-            <button class="secondary-btn small bill-split-row-count-done-btn" type="button">完成</button>
+            <button class="secondary-btn small bill-split-row-count-done-btn" type="button">拆</button>
           </div>
           <div class="table-wrapper bill-split-rows-table-wrapper">
             <table class="data-table bill-split-rows-table">

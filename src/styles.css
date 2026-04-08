@@ -1867,6 +1867,13 @@ select {
   padding: 4px 8px;
 }
 
+/* 按用户要求缩窄到 .small 默认宽度 (108px) 的 66% ≈ 71px */
+.bill-split-row-count-done-btn.secondary-btn.small {
+  min-width: 0;
+  width: 71px;
+  padding: 0 8px;
+}
+
 .bill-split-rows-table-wrapper {
   margin-bottom: 12px;
 }
