@@ -4456,6 +4456,10 @@ function generateStatementFiles({
     balanceRequested: Boolean(preparedBatch.balanceRequested),
     unmatchedAmountSplitFiles: Array.isArray(preparedBatch.unmatchedAmountSplitFiles)
       ? preparedBatch.unmatchedAmountSplitFiles.slice()
+      : [],
+    // v1.4.9 PR #16 review P1 Fix C: 平行于 unmatchedAmountSplitFiles 的 bill-split 版本
+    unmatchedBillSplitFiles: Array.isArray(preparedBatch.unmatchedBillSplitFiles)
+      ? preparedBatch.unmatchedBillSplitFiles.slice()
       : []
   };
 

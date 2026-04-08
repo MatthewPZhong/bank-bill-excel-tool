@@ -352,6 +352,11 @@ function applyStatementResult(result) {
     window.alert(`以下文件全部未命中收支规则，请检查规则配置：\n${result.unmatchedAmountSplitFiles.join('\n')}`);
   }
 
+  // v1.4.9 PR #16 review P1 Fix C: ACI-12 — 拆分/合并账单全部未命中聚合告警
+  if (Array.isArray(result.unmatchedBillSplitFiles) && result.unmatchedBillSplitFiles.length) {
+    window.alert(`以下文件全部未命中拆分/合并规则，请检查规则配置：\n${result.unmatchedBillSplitFiles.join('\n')}`);
+  }
+
   if (
     result.status === 'success' ||
     result.status === 'warning' ||
