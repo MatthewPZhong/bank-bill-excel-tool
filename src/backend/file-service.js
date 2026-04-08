@@ -235,48 +235,58 @@ function buildMappedRows({
     const hasAmountRules = billSplitAmountRules.length > 0;
     const useAmountSourceField = hasSignedAmount || hasAmountRules;
 
-    return billSplitRows.map((splitRow) => {
-      const expandedRow = baseMappedRow.slice();
-      const currencyValue = normalizeCell(readSourceCell(originalRow, splitRow.currencySourceField));
-      let creditValue = '';
-      let debitValue = '';
+    return billSplitRows
+      .map((splitRow) => {
+        const expandedRow = baseMappedRow.slice();
+        const currencyValue = normalizeCell(readSourceCell(originalRow, splitRow.currencySourceField));
+        let creditValue = '';
+        let debitValue = '';
 
-      if (useAmountSourceField) {
-        const amountRaw = readSourceCell(originalRow, splitRow.amountSourceField);
-        if (hasSignedAmount) {
-          const split = splitSignedAmountValue(readSourceCell(originalRow, billSplitSignedField));
-          creditValue = split.creditAmount;
-          debitValue = split.debitAmount;
+        if (useAmountSourceField) {
+          const amountRaw = readSourceCell(originalRow, splitRow.amountSourceField);
+          if (hasSignedAmount) {
+            const split = splitSignedAmountValue(readSourceCell(originalRow, billSplitSignedField));
+            creditValue = split.creditAmount;
+            debitValue = split.debitAmount;
+          } else {
+            const result = evaluateBillSplitAmountRulesForRow(originalRow, amountRaw);
+            creditValue = result.credit;
+            debitValue = result.debit;
+          }
         } else {
-          const result = evaluateBillSplitAmountRulesForRow(originalRow, amountRaw);
-          creditValue = result.credit;
-          debitValue = result.debit;
+          creditValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.creditSourceField));
+          debitValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.debitSourceField));
         }
-      } else {
-        creditValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.creditSourceField));
-        debitValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.debitSourceField));
-      }
 
-      if (currencyTargetIndex >= 0 && currencyValue) {
-        expandedRow[currencyTargetIndex] = currencyValue;
-      }
-      if (creditTargetIndex >= 0) {
-        expandedRow[creditTargetIndex] = creditValue;
-      }
-      if (debitTargetIndex >= 0) {
-        expandedRow[debitTargetIndex] = debitValue;
-      }
+        // 静默过滤：credit 和 debit 都为 0（或空）的拆分行直接丢弃，不输出也不报错
+        const creditNum = parseNumericValue(creditValue);
+        const debitNum = parseNumericValue(debitValue);
+        if ((creditNum === 0 || creditNum === null || creditNum === undefined || Number.isNaN(creditNum))
+            && (debitNum === 0 || debitNum === null || debitNum === undefined || Number.isNaN(debitNum))) {
+          return null;
+        }
 
-      return {
-        seqNo: splitRow.seqNo,
-        mergedGroupSeq: splitRow.mergedGroupSeq,
-        currency: currencyValue,
-        creditAmount: creditValue,
-        debitAmount: debitValue,
-        rowArray: expandedRow,
-        sourceRowNumber
-      };
-    });
+        if (currencyTargetIndex >= 0 && currencyValue) {
+          expandedRow[currencyTargetIndex] = currencyValue;
+        }
+        if (creditTargetIndex >= 0) {
+          expandedRow[creditTargetIndex] = creditValue;
+        }
+        if (debitTargetIndex >= 0) {
+          expandedRow[debitTargetIndex] = debitValue;
+        }
+
+        return {
+          seqNo: splitRow.seqNo,
+          mergedGroupSeq: splitRow.mergedGroupSeq,
+          currency: currencyValue,
+          creditAmount: creditValue,
+          debitAmount: debitValue,
+          rowArray: expandedRow,
+          sourceRowNumber
+        };
+      })
+      .filter((r) => r !== null);
   }
 
   function applyBillSplitMergeForRow(expandedRows) {
@@ -296,16 +306,34 @@ function buildMappedRows({
       grouped.get(key).push(row);
     });
 
-    const result = [...standalone];
+    // 双保险：独立行里再过滤一次 credit/debit 都为 0 的行（expandBillSplitForRow 已处理，
+    // 这里兜底以防其它上游路径没过滤）
+    const filteredStandalone = standalone.filter((row) => {
+      const creditNum = parseNumericValue(row.creditAmount);
+      const debitNum = parseNumericValue(row.debitAmount);
+      const creditIsZero = creditNum === 0 || creditNum === null || creditNum === undefined || Number.isNaN(creditNum);
+      const debitIsZero = debitNum === 0 || debitNum === null || debitNum === undefined || Number.isNaN(debitNum);
+      return !(creditIsZero && debitIsZero);
+    });
+
+    const result = [...filteredStandalone];
 
     grouped.forEach((groupRows) => {
       if (groupRows.length < 2) {
-        // Single-member "group" — treat as standalone
-        result.push(...groupRows);
+        // Single-member "group" — treat as standalone (双保险：过滤 0 值)
+        groupRows.forEach((row) => {
+          const creditNum = parseNumericValue(row.creditAmount);
+          const debitNum = parseNumericValue(row.debitAmount);
+          const creditIsZero = creditNum === 0 || creditNum === null || creditNum === undefined || Number.isNaN(creditNum);
+          const debitIsZero = debitNum === 0 || debitNum === null || debitNum === undefined || Number.isNaN(debitNum);
+          if (!(creditIsZero && debitIsZero)) {
+            result.push(row);
+          }
+        });
         return;
       }
 
-      // AC1-60 / ACI-6: Currency consistency check
+      // AC1-60 / ACI-6: Currency consistency check (保留)
       const distinctCurrencies = new Set(
         groupRows.map((r) => normalizeCell(r.currency)).filter((c) => c !== '')
       );
@@ -321,12 +349,9 @@ function buildMappedRows({
       const sumDebit = groupRows.reduce((acc, r) => acc + (parseNumericValue(r.debitAmount) || 0), 0);
       const net = sumCredit - sumDebit;
 
+      // 净值为 0 时静默跳过整个合并组，不输出也不报错
       if (net === 0) {
-        const err = new FileValidationError(
-          'BILL_MERGE_NET_ZERO',
-          '合并账单后净值为 0，无法判定收支方向，请检查合并配置'
-        );
-        throw err;
+        return;
       }
 
       // Representative row = the one whose seqNo equals mergedGroupSeq (i.e. min seqNo)
