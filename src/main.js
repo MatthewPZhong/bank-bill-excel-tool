@@ -4265,6 +4265,13 @@ function buildBillSplitMergeConfig(template, selectedMappings) {
       : []
   }));
 
+  // P1 Fix A (PR #16 review): 预先构造 billSplit 字段映射的 target→field lookup。
+  // 当 reuseModuleMapping === false 时，file-service 会用这个 lookup 替代主模板的
+  // mappingByField 重新计算每个拆分行的非金额字段，使弹框 1 配置真正生效。
+  const billSplitMappingByTargetField = buildMappedFieldLookup(
+    billSplitMappings.filter((m) => m.templateField)
+  );
+
   // P1 Fix B (PR #16 review): 导出阶段只传 row_status = completed 的拆分行。
   // draft 行保留在 DB 作为"草稿"供用户下次打开弹框继续编辑，但不参与导出。
   // 对应 PRD §4.3.5 Q-C12 / ACI-1（"至少 1 行 completed 才展开"）。
@@ -4297,6 +4304,7 @@ function buildBillSplitMergeConfig(template, selectedMappings) {
     enabled: true,
     reuseModuleMapping,
     billSplitMappings,
+    billSplitMappingByTargetField,  // P1 Fix A (PR #16 review)
     billSplitRows,
     billSplitAmountRules,
     signedAmountSourceField

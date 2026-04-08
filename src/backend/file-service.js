@@ -77,6 +77,15 @@ function buildMappedRows({
   const billSplitSignedField = billSplitEnabled
     ? normalizeCell(billSplitMerge.signedAmountSourceField)
     : '';
+  // P1 Fix A (PR #16 review): reuseModuleMapping === false 时非金额字段走弹框 1 的独立 lookup
+  const billSplitReuseModuleMapping = billSplitEnabled
+    ? billSplitMerge.reuseModuleMapping !== false
+    : true;
+  const billSplitMappingByField = billSplitEnabled
+      && billSplitMerge.billSplitMappingByTargetField
+      && typeof billSplitMerge.billSplitMappingByTargetField === 'object'
+    ? billSplitMerge.billSplitMappingByTargetField
+    : {};
   let matchedCreditCount = 0;
   let matchedDebitCount = 0;
   let matchedBillSplitCount = 0;
@@ -462,115 +471,148 @@ function buildMappedRows({
       rowMetas.push({ sourceRowNumber });
     }
 
-    const mappedRow = orderedTargetFields.map((targetField) => {
-      const mappingValue = mappingByField[targetField];
-      const mappingTokens = normalizeMappingTokens(mappingValue);
-      const primaryMappingValue = mappingTokens[0] || '';
-      const sourceField = primaryMappingValue;
-      const rawValue = resolveRawValueByMapping(mappingValue, row);
+    // P1 Fix A (PR #16 review): 提取单行映射计算为可复用 helper，以便 billSplit 的
+    // reuseModuleMapping === false 场景可以用弹框 1 的独立 mapping lookup 重算非金额字段。
+    // 行为对 reuseModuleMapping === true（默认）路径保持完全等价——helper 依赖的 closure
+    // 变量 (row, rowIndex, hasCreditAmount, hasDebitAmount, creditAmountValue, debitAmountValue,
+    // selectedCurrency, selectedMerchantId, nameSourceField, accountSourceField, currencyMappings,
+    // accountMappingByBankId, dateParseOrder, rowNumbers, issues) 都已在外层 forEach 作用域内。
+    function computeMappedRow(mappingByFieldParam) {
+      return orderedTargetFields.map((targetField) => {
+        const mappingValue = mappingByFieldParam[targetField];
+        const mappingTokens = normalizeMappingTokens(mappingValue);
+        const primaryMappingValue = mappingTokens[0] || '';
+        const sourceField = primaryMappingValue;
+        const rawValue = resolveRawValueByMapping(mappingValue, row);
 
-      if (targetField === 'Balance') {
-        return sanitizeAmountValue(rawValue);
-      }
-
-      if (targetField === 'Credit Amount') {
-        return creditAmountValue;
-      }
-
-      if (targetField === 'Debit Amount') {
-        return debitAmountValue;
-      }
-
-      if (targetField === 'BillDate' || targetField === 'ValueDate') {
-        return normalizeDateExportValue(resolveDateRawValueByMapping(mappingValue, row), { dateParseOrder }).value;
-      }
-
-      if (nameSourceField && mappingValue === nameSourceField) {
-        if (targetField === 'Drawee Name') {
-          return hasCreditAmount && !hasDebitAmount ? rawValue ?? '' : '';
+        if (targetField === 'Balance') {
+          return sanitizeAmountValue(rawValue);
         }
 
-        if (targetField === 'Payee Name') {
-          return hasDebitAmount && !hasCreditAmount ? rawValue ?? '' : '';
-        }
-      }
-
-      if (accountSourceField && mappingValue === accountSourceField) {
-        if (targetField === 'Drawee CardNo') {
-          return hasCreditAmount && !hasDebitAmount ? rawValue ?? '' : '';
+        if (targetField === 'Credit Amount') {
+          return creditAmountValue;
         }
 
-        if (targetField === 'Payee Cardno' || targetField === 'Payee CardNo') {
-          return hasDebitAmount && !hasCreditAmount ? rawValue ?? '' : '';
+        if (targetField === 'Debit Amount') {
+          return debitAmountValue;
         }
-      }
 
-      if (targetField === 'Currency') {
-        if (selectedCurrency) {
-          return selectedCurrency;
+        if (targetField === 'BillDate' || targetField === 'ValueDate') {
+          return normalizeDateExportValue(resolveDateRawValueByMapping(mappingValue, row), { dateParseOrder }).value;
+        }
+
+        if (nameSourceField && mappingValue === nameSourceField) {
+          if (targetField === 'Drawee Name') {
+            return hasCreditAmount && !hasDebitAmount ? rawValue ?? '' : '';
+          }
+
+          if (targetField === 'Payee Name') {
+            return hasDebitAmount && !hasCreditAmount ? rawValue ?? '' : '';
+          }
+        }
+
+        if (accountSourceField && mappingValue === accountSourceField) {
+          if (targetField === 'Drawee CardNo') {
+            return hasCreditAmount && !hasDebitAmount ? rawValue ?? '' : '';
+          }
+
+          if (targetField === 'Payee Cardno' || targetField === 'Payee CardNo') {
+            return hasDebitAmount && !hasCreditAmount ? rawValue ?? '' : '';
+          }
+        }
+
+        if (targetField === 'Currency') {
+          if (selectedCurrency) {
+            return selectedCurrency;
+          }
+
+          if (primaryMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
+            return primaryMappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
+          }
+
+          const currencyResult = resolveCurrencyValue(rawValue, currencyMappings);
+
+          if (!currencyResult.value || currencyResult.value === '') {
+            const merchantIdValue = resolveRawValueByMapping(mappingByFieldParam['MerchantId'], row);
+            const merchantIdNormalized = normalizeCell(merchantIdValue);
+            if (merchantIdNormalized && Object.prototype.hasOwnProperty.call(accountMappingByBankId, merchantIdNormalized)) {
+              const accountMapping = accountMappingByBankId[merchantIdNormalized];
+              if (typeof accountMapping === 'object' && accountMapping.noCurrency && accountMapping.currency) {
+                return accountMapping.currency;
+              }
+            }
+          }
+
+          if (currencyResult.issue) {
+            issues.push({
+              ...currencyResult.issue,
+              rowNumber: rowNumbers[rowIndex + 1] || rowIndex + 2,
+              sourceField
+            });
+          }
+
+          return currencyResult.value;
+        }
+
+        if (targetField === 'MerchantId') {
+          if (selectedMerchantId) {
+            return selectedMerchantId;
+          }
+
+          if (primaryMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
+            const fixedValue = primaryMappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
+            return fixedValue === '__MULTI_BIG_ACCOUNT__' ? '' : fixedValue;
+          }
+
+          const originalValue = normalizeCell(rawValue).replace(/\s+/g, '');
+
+          if (!originalValue) {
+            return '';
+          }
+
+          if (Object.prototype.hasOwnProperty.call(accountMappingByBankId, originalValue)) {
+            const accountMapping = accountMappingByBankId[originalValue];
+            return typeof accountMapping === 'object' ? accountMapping.clearingAccountId : String(accountMapping);
+          }
+
+          return originalValue;
         }
 
         if (primaryMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
           return primaryMappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
         }
 
-        const currencyResult = resolveCurrencyValue(rawValue, currencyMappings);
+        return rawValue ?? '';
+      });
+    }
 
-        if (!currencyResult.value || currencyResult.value === '') {
-          const merchantIdValue = resolveRawValueByMapping(mappingByField['MerchantId'], row);
-          const merchantIdNormalized = normalizeCell(merchantIdValue);
-          if (merchantIdNormalized && Object.prototype.hasOwnProperty.call(accountMappingByBankId, merchantIdNormalized)) {
-            const accountMapping = accountMappingByBankId[merchantIdNormalized];
-            if (typeof accountMapping === 'object' && accountMapping.noCurrency && accountMapping.currency) {
-              return accountMapping.currency;
-            }
-          }
-        }
-
-        if (currencyResult.issue) {
-          issues.push({
-            ...currencyResult.issue,
-            rowNumber: rowNumbers[rowIndex + 1] || rowIndex + 2,
-            sourceField
-          });
-        }
-
-        return currencyResult.value;
-      }
-
-      if (targetField === 'MerchantId') {
-        if (selectedMerchantId) {
-          return selectedMerchantId;
-        }
-
-        if (primaryMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
-          const fixedValue = primaryMappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
-          return fixedValue === '__MULTI_BIG_ACCOUNT__' ? '' : fixedValue;
-        }
-
-        const originalValue = normalizeCell(rawValue).replace(/\s+/g, '');
-
-        if (!originalValue) {
-          return '';
-        }
-
-        if (Object.prototype.hasOwnProperty.call(accountMappingByBankId, originalValue)) {
-          const accountMapping = accountMappingByBankId[originalValue];
-          return typeof accountMapping === 'object' ? accountMapping.clearingAccountId : String(accountMapping);
-        }
-
-        return originalValue;
-      }
-
-      if (primaryMappingValue.startsWith(FIXED_FIELD_VALUE_PREFIX)) {
-        return primaryMappingValue.slice(FIXED_FIELD_VALUE_PREFIX.length);
-      }
-
-      return rawValue ?? '';
-    });
+    const mappedRow = computeMappedRow(mappingByField);
 
     if (billSplitEnabled) {
-      const expanded = expandBillSplitForRow(row, mappedRow, sourceRowNumber);
+      // P1 Fix A (PR #16 review): 当 reuseModuleMapping === false 时用弹框 1 的独立 lookup
+      // 重算非金额字段；否则沿用主模板 mappedRow（原行为）。
+      // Drawee/Payee Name/CardNo 依赖 hasCreditAmount/hasDebitAmount，在 source-row 级别
+      // 主模板计算后对应的是主模板下的 Credit/Debit 是否有效；在 billSplit 非复用路径下
+      // 这两个标志相对每个拆分行才有意义，所以"base row"阶段先统一置空，由后续
+      // expandBillSplitForRow 按每个拆分行的 Credit/Debit 单独决定（当前实现不在拆分
+      // 阶段重新计算 Drawee/Payee，作为已知限制；详见 TechDoc §5.6.3 fix2 说明）。
+      let billSplitBaseRow = mappedRow;
+      if (!billSplitReuseModuleMapping) {
+        const savedHasCredit = hasCreditAmount;
+        const savedHasDebit = hasDebitAmount;
+        const savedCredit = creditAmountValue;
+        const savedDebit = debitAmountValue;
+        hasCreditAmount = false;
+        hasDebitAmount = false;
+        creditAmountValue = '';
+        debitAmountValue = '';
+        billSplitBaseRow = computeMappedRow(billSplitMappingByField);
+        hasCreditAmount = savedHasCredit;
+        hasDebitAmount = savedHasDebit;
+        creditAmountValue = savedCredit;
+        debitAmountValue = savedDebit;
+      }
+      const expanded = expandBillSplitForRow(row, billSplitBaseRow, sourceRowNumber);
       const merged = applyBillSplitMergeForRow(expanded);
       merged.forEach((entry) => {
         rowMetas.push({ sourceRowNumber: entry.sourceRowNumber });
