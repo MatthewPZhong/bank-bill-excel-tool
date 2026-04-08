@@ -120,9 +120,99 @@ function ensureAmountSplitRulesSupport(db) {
   }
 }
 
+function ensureBillSplitMergeSupport(db) {
+  db.exec('BEGIN');
+
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS template_bill_split_mappings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL,
+        template_field TEXT NOT NULL,
+        mapped_field TEXT,
+        mapped_fields_json TEXT,
+        row_index INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE,
+        UNIQUE (template_id, template_field)
+      );
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_template_bill_split_mappings_template_id
+        ON template_bill_split_mappings (template_id);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS template_bill_split_rows (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL,
+        seq_no INTEGER NOT NULL,
+        currency_source_field TEXT,
+        credit_source_field TEXT,
+        debit_source_field TEXT,
+        amount_source_field TEXT,
+        row_status TEXT NOT NULL DEFAULT 'draft' CHECK (row_status IN ('draft', 'completed')),
+        merged_group_seq INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE,
+        UNIQUE (template_id, seq_no)
+      );
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_template_bill_split_rows_template_id
+        ON template_bill_split_rows (template_id);
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_template_bill_split_rows_merged_group
+        ON template_bill_split_rows (template_id, merged_group_seq);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS template_bill_split_amount_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL,
+        target_field TEXT NOT NULL,
+        condition_field TEXT,
+        condition_value TEXT,
+        mapped_field TEXT,
+        row_index INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE
+      );
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_template_bill_split_amount_rules_template_id
+        ON template_bill_split_amount_rules (template_id);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS template_bill_split_meta (
+        template_id INTEGER PRIMARY KEY,
+        signed_amount_source_field TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE
+      );
+    `);
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
   ensureAmountSplitRulesSupport,
+  ensureBillSplitMergeSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,

@@ -288,7 +288,11 @@ function getTemplateMappings(db, templateId) {
     mappings,
     bigAccounts: groupBigAccountRows(bigAccountRows),
     fixedAssignments,
-    amountSplitRules
+    amountSplitRules,
+    billSplitMappings: getBillSplitMappings(db, templateId),
+    billSplitRows: getBillSplitRows(db, templateId),
+    billSplitAmountRules: getBillSplitAmountRules(db, templateId),
+    billSplitMeta: getBillSplitMeta(db, templateId)
   };
 }
 
@@ -407,6 +411,331 @@ function saveMappings(
   }
 }
 
+function getBillSplitMappings(db, templateId) {
+  return db
+    .prepare(`
+      SELECT
+        row_index AS rowIndex,
+        template_field AS templateField,
+        mapped_field AS mappedField,
+        mapped_fields_json AS mappedFieldsJson
+      FROM template_bill_split_mappings
+      WHERE template_id = ?
+      ORDER BY row_index ASC
+    `)
+    .all(templateId)
+    .map((row) => ({
+      rowIndex: Number(row.rowIndex || 0),
+      templateField: normalizeText(row.templateField),
+      mappedField: normalizeText(row.mappedField),
+      mappedFields: parseJsonArray(row.mappedFieldsJson)
+        .map((value) => normalizeText(value))
+        .filter((value) => value !== '')
+    }));
+}
+
+function saveBillSplitMappings(db, templateId, mappings = []) {
+  const now = new Date().toISOString();
+  db.exec('BEGIN');
+
+  try {
+    db.prepare('DELETE FROM template_bill_split_mappings WHERE template_id = ?').run(templateId);
+
+    const insertStatement = db.prepare(`
+      INSERT INTO template_bill_split_mappings (
+        template_id, template_field, mapped_field, mapped_fields_json, row_index, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    (Array.isArray(mappings) ? mappings : []).forEach((mapping, index) => {
+      const templateField = normalizeText(mapping.templateField);
+      const mappedField = normalizeText(mapping.mappedField);
+      const mappedFields = Array.from(
+        new Set(
+          (Array.isArray(mapping.mappedFields) ? mapping.mappedFields : [])
+            .map((value) => normalizeText(value))
+            .filter((value) => value !== '')
+        )
+      );
+      if (!templateField || (!mappedField && mappedFields.length === 0)) {
+        return;
+      }
+      insertStatement.run(
+        templateId,
+        templateField,
+        mappedField,
+        JSON.stringify(mappedFields),
+        Number.isInteger(mapping.rowIndex) ? mapping.rowIndex : index,
+        now,
+        now
+      );
+    });
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function getBillSplitRows(db, templateId) {
+  return db
+    .prepare(`
+      SELECT
+        seq_no AS seqNo,
+        currency_source_field AS currencySourceField,
+        credit_source_field AS creditSourceField,
+        debit_source_field AS debitSourceField,
+        amount_source_field AS amountSourceField,
+        row_status AS rowStatus,
+        merged_group_seq AS mergedGroupSeq
+      FROM template_bill_split_rows
+      WHERE template_id = ?
+      ORDER BY seq_no ASC
+    `)
+    .all(templateId)
+    .map((row) => ({
+      seqNo: Number(row.seqNo),
+      currencySourceField: normalizeText(row.currencySourceField),
+      creditSourceField: normalizeText(row.creditSourceField),
+      debitSourceField: normalizeText(row.debitSourceField),
+      amountSourceField: normalizeText(row.amountSourceField),
+      rowStatus: normalizeText(row.rowStatus) || 'draft',
+      mergedGroupSeq: row.mergedGroupSeq === null || row.mergedGroupSeq === undefined ? null : Number(row.mergedGroupSeq)
+    }));
+}
+
+function saveBillSplitRowCount(db, templateId, nextN) {
+  const now = new Date().toISOString();
+  db.exec('BEGIN');
+  try {
+    if (nextN === 0) {
+      db.prepare('DELETE FROM template_bill_split_rows WHERE template_id = ?').run(templateId);
+      db.exec('COMMIT');
+      return;
+    }
+
+    const existingRows = db
+      .prepare('SELECT seq_no, merged_group_seq FROM template_bill_split_rows WHERE template_id = ? ORDER BY seq_no ASC')
+      .all(templateId);
+    const currentM = existingRows.length;
+
+    if (nextN > currentM) {
+      const insertStmt = db.prepare(`
+        INSERT INTO template_bill_split_rows (
+          template_id, seq_no, currency_source_field, credit_source_field, debit_source_field,
+          amount_source_field, row_status, merged_group_seq, created_at, updated_at
+        ) VALUES (?, ?, '', '', '', '', 'draft', NULL, ?, ?)
+      `);
+      for (let seq = currentM + 1; seq <= nextN; seq += 1) {
+        insertStmt.run(templateId, seq, now, now);
+      }
+    } else if (nextN < currentM) {
+      const dissolvedGroups = db
+        .prepare('SELECT DISTINCT merged_group_seq FROM template_bill_split_rows WHERE template_id = ? AND seq_no > ? AND merged_group_seq IS NOT NULL')
+        .all(templateId, nextN)
+        .map((row) => Number(row.merged_group_seq));
+      if (dissolvedGroups.length > 0) {
+        const placeholders = dissolvedGroups.map(() => '?').join(',');
+        db.prepare(`UPDATE template_bill_split_rows SET merged_group_seq = NULL, updated_at = ? WHERE template_id = ? AND merged_group_seq IN (${placeholders})`)
+          .run(now, templateId, ...dissolvedGroups);
+      }
+      db.prepare('DELETE FROM template_bill_split_rows WHERE template_id = ? AND seq_no > ?').run(templateId, nextN);
+    }
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function saveBillSplitRow(db, templateId, row) {
+  const now = new Date().toISOString();
+  db.prepare(`
+    UPDATE template_bill_split_rows
+    SET currency_source_field = ?,
+        credit_source_field = ?,
+        debit_source_field = ?,
+        amount_source_field = ?,
+        row_status = ?,
+        updated_at = ?
+    WHERE template_id = ? AND seq_no = ?
+  `).run(
+    normalizeText(row.currencySourceField),
+    normalizeText(row.creditSourceField),
+    normalizeText(row.debitSourceField),
+    normalizeText(row.amountSourceField),
+    row.rowStatus === 'completed' ? 'completed' : 'draft',
+    now,
+    templateId,
+    Number(row.seqNo)
+  );
+}
+
+function deleteBillSplitRow(db, templateId, seqNo) {
+  // Q-OT6 = C / C1 surgical: 删除行 + 解除受影响的合并组以维护 PRD §Q-A3 不变量
+  // 受影响 = (1) 删除行自身所在的合并组 (2) 任一其它合并组中存在 seq >= seqNo 的成员
+  const now = new Date().toISOString();
+  const dissolvedGroups = [];
+  db.exec('BEGIN');
+  try {
+    const target = db
+      .prepare('SELECT merged_group_seq FROM template_bill_split_rows WHERE template_id = ? AND seq_no = ?')
+      .get(templateId, seqNo);
+    if (!target) {
+      db.exec('COMMIT');
+      return { dissolvedGroups };
+    }
+
+    if (target.merged_group_seq !== null && target.merged_group_seq !== undefined) {
+      dissolvedGroups.push(Number(target.merged_group_seq));
+    }
+    const otherAffected = db
+      .prepare(`
+        SELECT DISTINCT merged_group_seq
+        FROM template_bill_split_rows
+        WHERE template_id = ?
+          AND merged_group_seq IS NOT NULL
+          AND seq_no >= ?
+          AND seq_no != ?
+      `)
+      .all(templateId, seqNo, seqNo)
+      .map((row) => Number(row.merged_group_seq))
+      .filter((groupSeq) => !dissolvedGroups.includes(groupSeq));
+    dissolvedGroups.push(...otherAffected);
+
+    if (dissolvedGroups.length > 0) {
+      const placeholders = dissolvedGroups.map(() => '?').join(',');
+      db.prepare(`
+        UPDATE template_bill_split_rows
+        SET merged_group_seq = NULL, updated_at = ?
+        WHERE template_id = ? AND merged_group_seq IN (${placeholders})
+      `).run(now, templateId, ...dissolvedGroups);
+    }
+
+    db.prepare('DELETE FROM template_bill_split_rows WHERE template_id = ? AND seq_no = ?').run(templateId, seqNo);
+
+    db.prepare(`
+      UPDATE template_bill_split_rows
+      SET seq_no = seq_no - 1,
+          updated_at = ?
+      WHERE template_id = ? AND seq_no > ?
+    `).run(now, templateId, seqNo);
+
+    db.exec('COMMIT');
+    return { dissolvedGroups };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function saveBillSplitMergeGroup(db, templateId, seqNos = []) {
+  if (!Array.isArray(seqNos) || seqNos.length < 2) {
+    return;
+  }
+  const minSeq = Math.min(...seqNos.map(Number));
+  const now = new Date().toISOString();
+  const placeholders = seqNos.map(() => '?').join(',');
+  db.prepare(`
+    UPDATE template_bill_split_rows
+    SET merged_group_seq = ?,
+        updated_at = ?
+    WHERE template_id = ? AND seq_no IN (${placeholders})
+  `).run(minSeq, now, templateId, ...seqNos.map(Number));
+}
+
+function clearBillSplitMergeGroups(db, templateId) {
+  const now = new Date().toISOString();
+  db.prepare('UPDATE template_bill_split_rows SET merged_group_seq = NULL, updated_at = ? WHERE template_id = ? AND merged_group_seq IS NOT NULL')
+    .run(now, templateId);
+}
+
+function getBillSplitAmountRules(db, templateId) {
+  return db
+    .prepare(`
+      SELECT
+        target_field AS targetField,
+        condition_field AS conditionField,
+        condition_value AS conditionValue,
+        mapped_field AS mappedField,
+        row_index AS rowIndex
+      FROM template_bill_split_amount_rules
+      WHERE template_id = ?
+      ORDER BY row_index ASC
+    `)
+    .all(templateId)
+    .map((row) => ({
+      targetField: normalizeText(row.targetField),
+      conditionField: normalizeText(row.conditionField),
+      conditionValue: normalizeText(row.conditionValue),
+      mappedField: normalizeText(row.mappedField),
+      rowIndex: Number(row.rowIndex || 0)
+    }));
+}
+
+function saveBillSplitAmountRules(db, templateId, rules = []) {
+  const now = new Date().toISOString();
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM template_bill_split_amount_rules WHERE template_id = ?').run(templateId);
+    const insertStmt = db.prepare(`
+      INSERT INTO template_bill_split_amount_rules (
+        template_id, target_field, condition_field, condition_value, mapped_field, row_index, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    (Array.isArray(rules) ? rules : []).forEach((rule, index) => {
+      insertStmt.run(
+        templateId,
+        normalizeText(rule.targetField),
+        normalizeText(rule.conditionField),
+        normalizeText(rule.conditionValue),
+        normalizeText(rule.mappedField),
+        Number.isInteger(rule.rowIndex) ? rule.rowIndex : index,
+        now,
+        now
+      );
+    });
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function getBillSplitMeta(db, templateId) {
+  const row = db
+    .prepare(`
+      SELECT signed_amount_source_field AS signedAmountSourceField
+      FROM template_bill_split_meta
+      WHERE template_id = ?
+    `)
+    .get(templateId);
+  return {
+    signedAmountSourceField: row ? normalizeText(row.signedAmountSourceField) : ''
+  };
+}
+
+function saveBillSplitMeta(db, templateId, meta = {}) {
+  const now = new Date().toISOString();
+  const value = normalizeText(meta && meta.signedAmountSourceField);
+  const existing = db.prepare('SELECT 1 FROM template_bill_split_meta WHERE template_id = ?').get(templateId);
+  if (existing) {
+    db.prepare(`
+      UPDATE template_bill_split_meta
+      SET signed_amount_source_field = ?, updated_at = ?
+      WHERE template_id = ?
+    `).run(value, now, templateId);
+  } else {
+    db.prepare(`
+      INSERT INTO template_bill_split_meta (
+        template_id, signed_amount_source_field, created_at, updated_at
+      ) VALUES (?, ?, ?, ?)
+    `).run(templateId, value, now, now);
+  }
+}
+
 function listTemplateBundleEntries(db) {
   return listTemplates(db).map((template) => {
     const payload = getTemplateMappings(db, template.id);
@@ -425,6 +754,18 @@ function listTemplateBundleEntries(db) {
       amountSplitRules: payload && Array.isArray(payload.amountSplitRules)
         ? payload.amountSplitRules.map((rule) => ({ ...rule }))
         : [],
+      billSplitMappings: payload && Array.isArray(payload.billSplitMappings)
+        ? payload.billSplitMappings.map((m) => ({ ...m, mappedFields: Array.isArray(m.mappedFields) ? m.mappedFields.slice() : [] }))
+        : [],
+      billSplitRows: payload && Array.isArray(payload.billSplitRows)
+        ? payload.billSplitRows.map((r) => ({ ...r }))
+        : [],
+      billSplitAmountRules: payload && Array.isArray(payload.billSplitAmountRules)
+        ? payload.billSplitAmountRules.map((r) => ({ ...r }))
+        : [],
+      billSplitMeta: payload && payload.billSplitMeta
+        ? { signedAmountSourceField: payload.billSplitMeta.signedAmountSourceField || '' }
+        : { signedAmountSourceField: '' },
       dateFormat: template.dateFormat || 'auto',
       createdAt: template.createdAt,
       updatedAt: template.updatedAt
@@ -433,8 +774,14 @@ function listTemplateBundleEntries(db) {
 }
 
 module.exports = {
+  clearBillSplitMergeGroups,
+  deleteBillSplitRow,
   deleteTemplate,
   getAmountSplitRules,
+  getBillSplitAmountRules,
+  getBillSplitMappings,
+  getBillSplitMeta,
+  getBillSplitRows,
   getTemplate,
   getTemplateBigAccounts,
   getTemplateFixedAssignments,
@@ -445,6 +792,12 @@ module.exports = {
   listTemplates,
   renameTemplate,
   saveAmountSplitRules,
+  saveBillSplitAmountRules,
+  saveBillSplitMappings,
+  saveBillSplitMergeGroup,
+  saveBillSplitMeta,
+  saveBillSplitRow,
+  saveBillSplitRowCount,
   saveMappings,
   upsertTemplate
 };
