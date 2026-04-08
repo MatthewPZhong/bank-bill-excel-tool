@@ -3011,11 +3011,16 @@ function registerTemplateHandlers() {
         template: buildTemplateSummary(mappingConfig.template),
         targetFields: mappingConfig.targetFields,
         advancedMappingFields: mappingConfig.advancedMappingFields,
+        billSplitGroupFields: mappingConfig.billSplitGroupFields,
         exportTargetFields: mappingConfig.exportTargetFields,
         mappings: mappingConfig.mappings,
         bigAccounts: mappingConfig.bigAccounts,
         fixedAssignments: mappingConfig.fixedAssignments,
         amountSplitRules: mappingConfig.amountSplitRules,
+        billSplitMappings: mappingConfig.billSplitMappings,
+        billSplitRows: mappingConfig.billSplitRows,
+        billSplitAmountRules: mappingConfig.billSplitAmountRules,
+        billSplitMeta: mappingConfig.billSplitMeta,
         dateFormat: mappingConfig.template.dateFormat || 'auto'
       };
     } catch (error) {
