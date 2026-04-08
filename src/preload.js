@@ -36,7 +36,17 @@ contextBridge.exposeInMainWorld('desktopApi', {
     exportBundle: () => ipcRenderer.invoke('template:export-bundle'),
     importBundle: () => ipcRenderer.invoke('template:import-bundle'),
     getAmountSplitRules: (templateId) => ipcRenderer.invoke('template:get-amount-split-rules', templateId),
-    saveAmountSplitRules: (payload) => ipcRenderer.invoke('template:save-amount-split-rules', payload)
+    saveAmountSplitRules: (payload) => ipcRenderer.invoke('template:save-amount-split-rules', payload),
+    getBillSplitConfig: (templateId) => ipcRenderer.invoke('template:get-bill-split-config', templateId),
+    saveBillSplitMappings: (payload) => ipcRenderer.invoke('template:save-bill-split-mappings', payload),
+    saveBillSplitRowCount: (payload) => ipcRenderer.invoke('template:save-bill-split-row-count', payload),
+    saveBillSplitRow: (payload) => ipcRenderer.invoke('template:save-bill-split-row', payload),
+    previewDeleteBillSplitRow: (payload) => ipcRenderer.invoke('template:preview-delete-bill-split-row', payload),
+    deleteBillSplitRow: (payload) => ipcRenderer.invoke('template:delete-bill-split-row', payload),
+    saveBillSplitMergeGroup: (payload) => ipcRenderer.invoke('template:save-bill-split-merge-group', payload),
+    clearBillSplitMergeGroups: (payload) => ipcRenderer.invoke('template:clear-bill-split-merge-groups', payload),
+    saveBillSplitAmountRules: (payload) => ipcRenderer.invoke('template:save-bill-split-amount-rules', payload),
+    saveBillSplitMeta: (payload) => ipcRenderer.invoke('template:save-bill-split-meta', payload)
   },
   bigAccount: {
     importBankInfo: (templateId) => ipcRenderer.invoke('big-account:import-bank-info', templateId),
