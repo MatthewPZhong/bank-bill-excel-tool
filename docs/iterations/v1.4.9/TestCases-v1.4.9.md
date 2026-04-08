@@ -1268,14 +1268,17 @@
 
 #### TC-V149-096 多文件批量导入 — 部分文件全部未命中聚合告警
 
+**2026-04-09 PR #16 review P1 Fix C override**（commit `598801a`）：本 TC 之前仅是占位，代码链路实际从未接通——`billSplitMatchStats` 在 `file-service.js` 已产出，但 `statement-generation.js` 只有 `collectUnmatchedAmountSplitFiles`（v1.4.8 旧版），没有 `collectUnmatchedBillSplitFiles`；`main.js` / `statement-session.js` / `renderer.js` 都没透传 `unmatchedBillSplitFiles`。本次 fix 补齐 5 处触点，TC 预期结果**不变**（原文案和触发条件本来就是正确的），但本次 PR #16 review 后需要**重新验证**整条链路。
+
 | 项目 | 内容 |
 |------|------|
 | 关联AC | ACI-12 |
-| 类型 | 功能 |
-| 优先级 | P1 |
-| 前置条件 | 模板 T2 配置完整 bill split 规则；多文件批量导入 F1（部分命中）+ F6（全部未命中）+ F2（命中） |
-| 测试步骤 | 1. 批量导入 3 个文件 |
-| 预期结果 | 不阻断导入；导入完成后弹一条聚合告警：`以下文件全部未命中拆分/合并规则，请检查规则配置：\nF6.csv`；F1 和 F2 的命中输出正常生成 |
+| 类型 | 功能 / **PR #16 review 回归** |
+| 优先级 | P0（之前 P1，因 PR #16 user 反馈该链路未接通，升级为 P0 block-merge） |
+| 前置条件 | 模板 T2 配置完整 bill split 规则；多文件批量导入 F1（部分命中）+ F6（全部未命中）+ F2（命中）。**F6 构造方式**：源文件有 ≥ 1 行源数据，但弹框 2 配的 split rows 的 `creditSourceField` / `debitSourceField` / `amountSourceField` 指向的列，在 F6 中对应的值都为 0 / 空 / NaN，或者合并组的净值全为 0 → 所有 source row 的 `outputRows === 0`。 |
+| 测试步骤 | 1. 批量导入 3 个文件<br>2. 检查是否弹出聚合告警<br>3. 检查 F1 / F2 的输出是否正常<br>4. （PR #16 review 新增）通过 dev tools 验证 `result.unmatchedBillSplitFiles` 数组包含 `F6.csv` |
+| 预期结果 | 不阻断导入；导入完成后弹一条**独立**的聚合告警：`以下文件全部未命中拆分/合并规则，请检查规则配置：\nF6.csv`；F1 和 F2 的命中输出正常生成。告警由 `renderer.js` 的新 alert 分支触发（`result.unmatchedBillSplitFiles` 非空时），与 v1.4.8 的 `result.unmatchedAmountSplitFiles` 告警独立（4 方互斥保证同一次导入不会两个同时触发）。 |
+| 链路验证 | `billSplitMatchStats = { enabled: true, totalRows: N, outputRows: 0 }` (file-service.js) → `collectUnmatchedBillSplitFiles` 收集 → `buildPreparedStatementBatchFromEntries` 返回 `unmatchedBillSplitFiles` → `prepareGeneratedFiles` 透传到 `result.unmatchedBillSplitFiles` → `buildImportResultFromGeneratedFiles` 透传到最终 IPC return → `renderer.js` 弹 alert。每一步都必须通过（参见 commit `598801a` 改动的 5 个文件）。 |
 
 #### TC-V149-097 弹框 2 性能 - 大 N（N=99）
 
@@ -1515,3 +1518,4 @@ Tester 在编写本文档过程中**未发现** PRD 与 TechDoc 之间的矛盾�
 | 2026-04-08 | 初版生成，对齐 PRD-v1.4.9.md 全部 95 条 AC（AC1-1 ~ AC1-82 + AC1-82a 主 AC + ACI-1 ~ ACI-12 导入语义 AC），共 **97 个 TC**，覆盖 A-J 10 个模块；重点覆盖 Q-OT6=C 的 4 条删除路径（TC-V149-037 ~ TC-V149-040）和 Q-OT2=B 的独立表语义（TC-V149-050） | Tester |
 | 2026-04-08 fix2 | **基于 v1.4.9 实施后用户实测反馈同步 TestCases**，对应代码 commit 范围 `fc91550..57dbd38`（8 个 fix commit）、PRD 同步 commit `3aea829`、TechDoc 同步 commit `82b9c09`。**新增 4 条 TC**：(1) **TC-V149-030a**：弹框 2 右下角「完成」按钮存在 + 点击等同 × 关闭（Fix #7，AC1-27 override + AC1-27a 新增）。(2) **TC-V149-030b**：合并账单下拉框改为 checkbox-panel picker（Fix #1）。(3) **TC-V149-075a**：单行拆分输出 Credit/Debit 全 0 静默丢弃（Fix #2，AC1-62a / ACI-7a 新增）。(4) **TC-V149-081a**：冷启动首次打开弹框 2 数据回显（Fix #6 回归验证）。**修订 6 条既有 TC**：(1) TC-V149-010 弹框 1 尺寸从"主弹框的一半"改为"80vw"（Fix #4）。(2) TC-V149-013 弹框 1 Balance 字段选项澄清为与主表格一致（Fix #5）。(3) TC-V149-022 「需要拆分成几份账单」按钮文案从 `完成` 改为 `拆`，宽度 66%（Fix #8）。(4) TC-V149-024 ~ 026 测试步骤中按钮文本同步改为 `拆`。(5) TC-V149-075 合并组净值 = 0 预期从"报错阻断"改为"静默跳过整个组"（Fix #2）。(6) TC-V149-093 同步改为"静默跳过"。AC 覆盖度：95 → 98（新增 AC1-27a / AC1-62a / ACI-7a），TC 总数：97 → 101。各模块计数：C 10 → 12，H 9 → 10，I 9 → 10。 | dev-3（根据 team-lead 文档同步指令） |
 | 2026-04-09 PR #16 review | **基于 PR #16 review 阶段 user + Codex 提的 2 个 P1 block-merge fixes 同步 TestCases**，对应代码 commit `59dc93d` + `d7f07ed`、PRD/TechDoc 同文件内同步。**新增 2 条 TC**：(1) **TC-V149-098**（P1 Fix A 回归验证）：reuseModuleMapping = false 时弹框 1 独立 Description 映射真正生效——源文件同时含 `MAIN_MEMO` / `SPLIT_MEMO` 两列，主模板 `Description → MAIN_MEMO`，弹框 1 `Description → SPLIT_MEMO`，导出应使用 `SPLIT_MEMO`（而不是 `MAIN_MEMO`）；反向对照把"复用"切回"是"应回到 `MAIN_MEMO`。验证 ACI-9 原本仅"隐含"覆盖的实际导出路径。(2) **TC-V149-099**（P1 Fix B 回归验证）：弹框 2 配 N=3 但仅 1 行 completed 其余 draft，导入时输出**恰好 1 行**，draft 行不参与展开；边界补充全 draft 情况下保存模板会触发 ACI-11 校验 `BILL_SPLIT_CONFIG_MISSING` 阻断。验证 ACI-1 的反向语义（"只有 completed 行才展开"）。TC 总数：101 → 103；模块 J：8 → 10；不新增 AC（两条 TC 都是对已有 AC 的更严格回归验证）。 | dev-3（根据 team-lead PR #16 review fix 指令） |
+| 2026-04-09 PR #16 review (P1 Fix C) | **基于 PR #16 review 阶段 user 补提的第 3 个 P1 block-merge fix 同步 TestCases**，对应代码 commit `598801a`、TechDoc 同文件内同步。**修订 TC-V149-096**（ACI-12 多文件聚合告警）：原 TC 的预期结果（文案和触发条件）本来就是正确的，但代码链路从未接通（`billSplitMatchStats` 产出后被 5 个上层触点丢弃），该 TC 等于占位。本次 fix 补齐 5 处链路后，TC 加上"2026-04-09 PR #16 review P1 Fix C override"头注、优先级从 P1 升级为 P0（PR #16 user 反馈 block-merge）、前置条件补充 F6 的精确构造方式、测试步骤补充"dev tools 验证 `result.unmatchedBillSplitFiles` 数组包含 F6.csv"、新增"链路验证"行列出完整的 5 个触点：`billSplitMatchStats` (file-service.js) → `collectUnmatchedBillSplitFiles` → `buildPreparedStatementBatchFromEntries` → `prepareGeneratedFiles` → `buildImportResultFromGeneratedFiles` → `renderer.js alert`。不新增 TC，不新增 AC。 | dev-3（根据 team-lead PR #16 review fix 指令） |

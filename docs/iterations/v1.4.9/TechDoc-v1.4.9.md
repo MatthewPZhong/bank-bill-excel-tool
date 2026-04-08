@@ -2753,6 +2753,47 @@ v1.4.8 已经实现"多文件全部未命中"聚合告警：遍历所有文件�
 
 v1.4.9 扩展判定条件为 `hasCreditAmount === false && hasDebitAmount === false && hasBillSplitOutput === false`（见 §5.6.5）。告警文案改为 `以下文件全部未命中映射 / 拆分 / 合并规则，请检查规则配置：\n{filenames}`。
 
+> **2026-04-09 PR #16 review P1 Fix C 实施修正**（对应 commit `598801a fix(v1.4.9): wire bill-split unmatched aggregate warning (ACI-12)`）：
+>
+> 上面原始设计的"判定条件合并为一个"被**实施时拆分为两套独立链路**（与 v1.4.8 的 `unmatchedAmountSplitFiles` 保持平行），避免一个 alert 同时报两个功能的未命中导致文案歧义。
+>
+> **实际的端到端链路**：
+>
+> ```
+> file-service.js buildMappedRows
+>   ↓ 挂在 mappedRows 数组上：
+>   ├─ amountSplitMatchStats = { enabled, totalRows, hitCredit, hitDebit }  (v1.4.8 既有)
+>   └─ billSplitMatchStats   = { enabled, totalRows, outputRows }             (v1.4.9 新增，见 §5.6.5)
+>   ↓
+> main-process/statement-generation.js
+>   ├─ collectUnmatchedAmountSplitFiles(fileEntries)  (v1.4.8 既有)
+>   │    判定：stats.enabled && stats.totalRows > 0 && stats.hitCredit === 0 && stats.hitDebit === 0
+>   └─ collectUnmatchedBillSplitFiles(fileEntries)    (v1.4.9 PR #16 review P1 Fix C 新增)
+>        判定：stats.enabled && stats.totalRows > 0 && stats.outputRows === 0
+>   ↓
+> buildPreparedStatementBatchFromEntries 返回:
+>   { ..., unmatchedAmountSplitFiles, unmatchedBillSplitFiles }
+>   ↓
+> prepareGeneratedFiles (main.js) 透传到 result.unmatchedAmountSplitFiles / unmatchedBillSplitFiles
+>   ↓
+> buildImportResultFromGeneratedFiles:
+>   - manualResult / warningResult / 最终 success return 都透传两个字段
+>   ↓
+> statement-session.js cloneRowsWithMetadata 同时克隆 amountSplitMatchStats 和 billSplitMatchStats
+>   ↓
+> IPC return → renderer.js
+>   - 两个 if 分支独立 window.alert:
+>     * unmatchedAmountSplitFiles → "以下文件全部未命中收支规则，请检查规则配置：\n{...}"
+>     * unmatchedBillSplitFiles → "以下文件全部未命中拆分/合并规则，请检查规则配置：\n{...}"
+> ```
+>
+> **为什么两套独立而不是一个合并字段**：
+> 1. **文案更精确**：用户能直接知道是"收支规则"还是"拆分/合并规则"未命中，不用猜测。
+> 2. **4 方互斥保证**：同一次导入不会同时触发两个（因为 amountSplitByField 和 billSplitMerge 互斥）。两个独立的 if 分支在实际使用中只有一个会触发，保持独立纯粹是代码防御性。
+> 3. **平行模式**：v1.4.8 `unmatchedAmountSplitFiles` 已经是完整一套（collect + prepared + manual + warning + clone + render），新增 `unmatchedBillSplitFiles` 完全镜像既有模式，diff 最小，回归风险最低。
+>
+> **之前为什么没接通**：v1.4.9 初次实施阶段只做了 `file-service.js` 这一层（正确挂了 `billSplitMatchStats`），但上层 `statement-generation.js` / `main.js` / `statement-session.js` / `renderer.js` 5 个触点全都没动，导致 stats 产出后就被丢弃。PR #16 user review 发现"ACI-12 的 TC 应该弹告警但实际没弹"，回溯定位到这里。
+
 ---
 
 ## 九、回归风险 & 向后兼容
@@ -3052,4 +3093,5 @@ PRD 添加这 2 条 AC 后，覆盖率变成 96/96 = 100%（仍然 100%，但分
 | 2026-04-08 | **team-lead 决策更新**：Q-OT2 选 B、Q-OT6 选 C / Dev 选 C1 surgical。具体改动：(1) 新增第 4 张表 `template_bill_split_meta`（1:1 with template，独立存「按正负号拆分的发生额」字段），与 `template_bill_split_amount_rules` 完全分离；新增 repo 函数 `getBillSplitMeta` / `saveBillSplitMeta`；删除常量 `BILL_SPLIT_SIGNED_AMOUNT_TARGET`；将原 IPC `template:save-bill-split-amount-rules` 拆分为 `template:save-bill-split-amount-rules`（仅承载规则数组）+ `template:save-bill-split-meta`（仅承载 signed 字段）；bundle JSON v3 顶层新增 `billSplitMeta` 字段；前端 state / onChange / IPC 调用全部对应拆分。(2) `deleteBillSplitRow` 新增"受影响合并组解散"逻辑（C1 surgical：自身所在组 + 任一其它组中存在 seq ≥ 删除行 seq 的成员），新增 `template:preview-delete-bill-split-row` IPC + 前端 deleteBtn 二次确认 UI；保证 PRD §Q-A3 不变量「`merged_group_seq` = 组内最小 seq_no」。提议 PM 在 task #3 之前为 PRD 加入 AC1-43-NEW / AC1-44-NEW 两条 AC（详见 §12.1 末尾说明）。 | Dev (执行 team-lead 决策) |
 | 2026-04-08 fix2 | **基于 v1.4.9 实施后用户实测反馈同步 TechDoc**，对应代码 commit 范围 `fc91550..57dbd38`（8 个 fix commit）。override 项：(1) **Fix #2（`6031f88`）** §4.2 错误码表、§5.6.4 `applyBillSplitMerge` 伪代码、§5.6.3 `expandBillSplitForRow` 伪代码、§8.3 导入错误流：`BILL_MERGE_NET_ZERO` 改为 deprecated，合并组净值 = 0 静默 `continue` 跳过整组，并新增"单行拆分输出 Credit/Debit 全 0 静默丢弃"的过滤逻辑（双保险：`expandBillSplitForRow` 的 `.filter(r => r !== null)` + `applyBillSplitMerge` 对 standalone 行的再次过滤）。`BILL_MERGE_CURRENCY_MISMATCH` 保留不变。(2) **Fix #7（`04a2e21`）** §7.3.2 ASCII 图 + §7.3.8 关闭逻辑：弹框 2 右下角新增 `.bill-split-rows-done-btn` 按钮，click 等同 × 关闭（不做额外 save），对应 PRD AC1-27 override + AC1-27a 新增。(3) **Fix #8（`57dbd38`）** §7.3.3 `nDoneButton.textContent = '拆'`（原 `完成`）；CSS 新增 `.bill-split-row-count-done-btn.secondary-btn.small { min-width: 0; width: 71px; }` 覆盖 `.small { min-width: 108px }`。(4) **Fix #4（`3eaaf14`）** §7.2 弹框尺寸 + §7.5 CSS：弹框 1 从 `width: 50%; max-width: 500px` 改为 `width: 80vw; min-width: 520px; max-width: none`；CSS 类名由 `.bill-split-mappings-dialog` 实际采用为 `.bill-split-mappings-card`。(5) **Fix #5（`cb127c0`）** §7.2.2：弹框 1 Balance 字段选项与主表格对齐（`无` / `通过发生额计算` / `headers`），后端 `validateBillSplitMappingsPayload` 加 `isBalanceSpecialValue` 旁路；Balance 行不渲染 concat-field-picker。(6) **Fix #1（`fc91550`）** §7.3.2：弹框 2 「合并账单」下拉框由 `<select multiple>` 改为 `.bill-split-merge-picker` (trigger + panel) checkbox-panel 模式，复用 concat-picker 惯例；§7.5 CSS 新增 `.bill-split-merge-picker-*` 样式。(7) **Fix #3（`8041619`）** §7.1.4：`applyAmountSplitMutualExclusion` 顶部 early-return 当 `isBillSplitMergeEnabledInTable()` 返回 true，避免覆盖 `applyBillSplitMergeMutualExclusion(true)` 设置的 disabled 状态；`applyBillSplitMergeMutualExclusion` 显式禁用行内所有按钮（`data-bill-split-merge-disabled='true'`）。(8) **Fix #6（`d30ec96`）** §5.5.1：`template:get-mappings` IPC handler 的 return 对象补齐 5 个 billSplit 字段（`billSplitGroupFields` / `billSplitMappings` / `billSplitRows` / `billSplitAmountRules` / `billSplitMeta`），修复冷启动首次打开弹框 2 显示空状态的 bug。 | dev-3（根据用户 fix2 反馈 + team-lead override 指令） |
 | 2026-04-09 PR #16 review | **基于 PR #16 review 阶段 user + Codex 反馈的 2 个 P1 block-merge fixes**，对应代码 commit `59dc93d` + `d7f07ed`。(1) **P1 Fix B（`59dc93d fix(v1.4.9): filter bill-split rows to completed before export`）** §5.6.3 末尾新增 override 块：`main.js buildBillSplitMergeConfig` 在构造 `billSplitRows` 时先 `.filter((row) => row.rowStatus === 'completed')`，draft 行不参与导出；`file-service.js buildMappedRows` 解构 `billSplitRows` 时再加一层 filter 作为双保险。边界：全 draft 时静默无输出不报错。(2) **P1 Fix A（`d7f07ed fix(v1.4.9): apply dialog 1 mappings when reuseModuleMapping is false`）** §5.6.3 末尾新增 override 块 + §7.2.5 新增"导出时生效路径"小节：fix 前 `file-service.js` 只解构 `billSplitRows` / `billSplitAmountRules` / `signedAmountSourceField`，**从未解构** `billSplitMappings` / `reuseModuleMapping`，导致弹框 1 配的独立字段映射在导出时被完全忽略。修复方案按 team-lead 推荐的 Approach A refactor：`main.js buildBillSplitMergeConfig` 新增 `billSplitMappingByTargetField = buildMappedFieldLookup(billSplitMappings)` 放进 config；`file-service.js buildMappedRows` 把原本内联的 `.map((targetField) => {...})` 提取为内部 helper `computeMappedRow(mappingByFieldParam)`（行为对 reuseModuleMapping=true 路径完全等价，纯 refactor）；当 `billSplitEnabled && !reuseModuleMapping` 时临时置空 hasCreditAmount/hasDebitAmount/creditAmountValue/debitAmountValue 再调 `computeMappedRow(billSplitMappingByField)`，产出 `billSplitBaseRow` 传给 `expandBillSplitForRow`。**已知限制**：reuseModuleMapping=false 路径下 Drawee/Payee Name 的 Name-based 分配（依赖 hasCreditAmount/hasDebitAmount）在 base-row 阶段置空，拆分行输出为空串；当前实施不为每个拆分行单独评估 Drawee/Payee 的 Credit/Debit 方向（team-lead 推荐的简单方案）。Smoke test 验证：reuse=true / reuse=false 两条路径对 Description 字段的输出都正确；1 completed + 1 draft 路径 draft 行被正确过滤；回归 all-zero / net-zero / currency-mismatch 全部保留。 | dev-3（根据 team-lead PR #16 review fix 指令） |
+| 2026-04-09 PR #16 review (P1 Fix C) | **基于 PR #16 review 阶段 user 补提的第 3 个 P1 block-merge fix**，对应代码 commit `598801a fix(v1.4.9): wire bill-split unmatched aggregate warning (ACI-12)`。§8.4 "多文件聚合告警" 新增 override 块详细说明链路修正：原设计"与 amountSplit 合并为单一判定条件"被**实施时拆分为两套独立链路**——新增 `collectUnmatchedBillSplitFiles(fileEntries)` 函数（判定 `stats.enabled && stats.totalRows > 0 && stats.outputRows === 0`），`buildPreparedStatementBatchFromEntries` 返回 `unmatchedBillSplitFiles` 字段，`buildImportResultFromGeneratedFiles` 在 manualResult / warningResult / 最终 success return 都透传，`statement-session.js cloneRowsWithMetadata` 平行克隆 `billSplitMatchStats`，`main.js prepareGeneratedFiles` 返回 result 中追加字段，`renderer.js` 新增第二个独立 `window.alert` 分支（文案：`以下文件全部未命中拆分/合并规则，请检查规则配置：\n{filenames}`）。**为什么之前没接通**：v1.4.9 初次实施只做了 `file-service.js` 这一层（正确挂了 `billSplitMatchStats`），但上层 5 个触点全都没动；PR #16 user review 发现 ACI-12 的 TC-V149-096 没弹告警，回溯定位到这里。5 个触点全部修复：`statement-generation.js` (`collectUnmatchedBillSplitFiles` + `buildPreparedStatementBatchFromEntries` + `buildImportResultFromGeneratedFiles` 3 处) / `main.js` (`prepareGeneratedFiles`) / `statement-session.js` (`cloneRowsWithMetadata`) / `renderer.js` (alert 分支)。Smoke test 验证：file-service 层面 stats 正确产出 `{enabled: true, totalRows: 2, outputRows: 0}`；helper 层面 `collectUnmatchedBillSplitFiles` 正确过滤出唯一未命中文件；回归 `unmatchedAmountSplitFiles` 路径不受影响。 | dev-3（根据 team-lead PR #16 review fix 指令） |
 
