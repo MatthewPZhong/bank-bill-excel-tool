@@ -311,7 +311,7 @@ function buildMappedRows({
       );
       if (distinctCurrencies.size > 1) {
         throw new FileValidationError(
-          'FILE_READ',
+          'BILL_MERGE_CURRENCY_MISMATCH',
           '合并账单的 Currency 不一致，无法合并'
         );
       }
