@@ -4265,17 +4265,22 @@ function buildBillSplitMergeConfig(template, selectedMappings) {
       : []
   }));
 
-  const billSplitRows = (database.getBillSplitRows(template.id) || []).map((row) => ({
-    seqNo: Number(row.seqNo),
-    currencySourceField: normalizeCell(row.currencySourceField),
-    creditSourceField: normalizeCell(row.creditSourceField),
-    debitSourceField: normalizeCell(row.debitSourceField),
-    amountSourceField: normalizeCell(row.amountSourceField),
-    rowStatus: row.rowStatus === 'completed' ? 'completed' : 'draft',
-    mergedGroupSeq: row.mergedGroupSeq === null || row.mergedGroupSeq === undefined
-      ? null
-      : Number(row.mergedGroupSeq)
-  }));
+  // P1 Fix B (PR #16 review): 导出阶段只传 row_status = completed 的拆分行。
+  // draft 行保留在 DB 作为"草稿"供用户下次打开弹框继续编辑，但不参与导出。
+  // 对应 PRD §4.3.5 Q-C12 / ACI-1（"至少 1 行 completed 才展开"）。
+  const billSplitRows = (database.getBillSplitRows(template.id) || [])
+    .filter((row) => row.rowStatus === 'completed')
+    .map((row) => ({
+      seqNo: Number(row.seqNo),
+      currencySourceField: normalizeCell(row.currencySourceField),
+      creditSourceField: normalizeCell(row.creditSourceField),
+      debitSourceField: normalizeCell(row.debitSourceField),
+      amountSourceField: normalizeCell(row.amountSourceField),
+      rowStatus: 'completed',
+      mergedGroupSeq: row.mergedGroupSeq === null || row.mergedGroupSeq === undefined
+        ? null
+        : Number(row.mergedGroupSeq)
+    }));
 
   const billSplitAmountRules = (database.getBillSplitAmountRules(template.id) || []).map((rule) => ({
     targetField: normalizeCell(rule.targetField),

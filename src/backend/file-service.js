@@ -66,8 +66,10 @@ function buildMappedRows({
     ? amountSplitByField.rules
     : [];
   const billSplitEnabled = Boolean(billSplitMerge && billSplitMerge.enabled);
+  // P1 Fix B (PR #16 review): 双保险，只接受 rowStatus === 'completed' 的拆分行；
+  // main.js buildBillSplitMergeConfig 已 filter 过一次，这里再过滤防止未来某个路径绕过。
   const billSplitRows = billSplitEnabled && Array.isArray(billSplitMerge.billSplitRows)
-    ? billSplitMerge.billSplitRows
+    ? billSplitMerge.billSplitRows.filter((r) => r && r.rowStatus === 'completed')
     : [];
   const billSplitAmountRules = billSplitEnabled && Array.isArray(billSplitMerge.billSplitAmountRules)
     ? billSplitMerge.billSplitAmountRules
