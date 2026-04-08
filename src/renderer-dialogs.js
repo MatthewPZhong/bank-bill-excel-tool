@@ -1473,6 +1473,11 @@
       const advancedMappingFields = Array.isArray(payload.advancedMappingFields) && payload.advancedMappingFields.length
         ? payload.advancedMappingFields
         : ADVANCED_MAPPING_FIELDS;
+      const billSplitGroupFields = Array.isArray(payload.billSplitGroupFields) && payload.billSplitGroupFields.length
+        ? payload.billSplitGroupFields
+        : ['是否拆分/合并明细账单', '复用模块字段的映射关系'];
+      const BILL_SPLIT_MERGE_FIELD = '是否拆分/合并明细账单';
+      const REUSE_MODULE_FIELD = '复用模块字段的映射关系';
       const currentBigAccounts = cloneBigAccountItems(payload.bigAccounts || []);
       const currentFixedAssignments = Array.isArray(payload.fixedAssignments)
         ? payload.fixedAssignments.map((item) => ({
@@ -1490,6 +1495,23 @@
             rowIndex: Number(rule.rowIndex || 0)
           }))
         : [];
+      let currentBillSplitMappings = Array.isArray(payload.billSplitMappings)
+        ? payload.billSplitMappings.map((m) => ({
+            templateField: String(m.templateField || ''),
+            mappedField: String(m.mappedField || ''),
+            mappedFields: Array.isArray(m.mappedFields) ? m.mappedFields.slice() : [],
+            rowIndex: Number(m.rowIndex || 0)
+          }))
+        : [];
+      let currentBillSplitRows = Array.isArray(payload.billSplitRows)
+        ? payload.billSplitRows.map((r) => ({ ...r }))
+        : [];
+      let currentBillSplitAmountRules = Array.isArray(payload.billSplitAmountRules)
+        ? payload.billSplitAmountRules.map((rule) => ({ ...rule }))
+        : [];
+      let currentBillSplitMeta = payload.billSplitMeta && typeof payload.billSplitMeta === 'object'
+        ? { signedAmountSourceField: String(payload.billSplitMeta.signedAmountSourceField || '') }
+        : { signedAmountSourceField: '' };
       dialog.className = 'modal-card mapping-card';
       dialog.innerHTML = `
         <div class="dialog-header">
@@ -1527,6 +1549,18 @@
           sectionRow.className = 'mapping-section-row';
           sectionRow.innerHTML = '<td colspan="2"><strong>映射关系设置</strong></td>';
           tbody.appendChild(sectionRow);
+        }
+
+        if (fieldName === billSplitGroupFields[0]) {
+          const sectionRow = document.createElement('tr');
+          sectionRow.className = 'mapping-section-row';
+          sectionRow.innerHTML = '<td colspan="2"><strong>账单拆分合并管理</strong></td>';
+          tbody.appendChild(sectionRow);
+        }
+
+        if (billSplitGroupFields.includes(fieldName)) {
+          renderBillSplitGroupRow(fieldName);
+          return;
         }
 
         const row = document.createElement('tr');
@@ -1755,6 +1789,158 @@
         tbody.appendChild(row);
       });
 
+      function renderBillSplitGroupRow(fieldName) {
+        const row = document.createElement('tr');
+        row.dataset.templateField = fieldName;
+        row.dataset.billSplitGroupField = 'true';
+
+        // 默认值：BILL_SPLIT_MERGE_FIELD 默认 '否'（存为空字符串 ''），REUSE_MODULE_FIELD 默认 '是'
+        const savedMapping = savedMap.get(fieldName) || {
+          mappedField: fieldName === REUSE_MODULE_FIELD ? '是' : '',
+          mappedFields: []
+        };
+        let savedValue = String(savedMapping.mappedField || '');
+        if (fieldName === BILL_SPLIT_MERGE_FIELD) {
+          // 存为 '是' 或 ''，UI 显示为 '是' 或 '否'
+          savedValue = savedValue === '是' ? '是' : '';
+        } else if (fieldName === REUSE_MODULE_FIELD) {
+          savedValue = savedValue === '否' ? '否' : '是';
+        }
+
+        let buttonLabel = '';
+        if (fieldName === BILL_SPLIT_MERGE_FIELD && savedValue === '是') {
+          buttonLabel = '拆分/合并账单映射关系管理';
+        } else if (fieldName === REUSE_MODULE_FIELD && savedValue === '否') {
+          buttonLabel = '拆分/合并账单映射关系设置';
+        }
+
+        const selectOptions = fieldName === BILL_SPLIT_MERGE_FIELD
+          ? '<option value="">否</option><option value="是">是</option>'
+          : '<option value="是">是</option><option value="否">否</option>';
+
+        row.innerHTML = `
+          <td>${escapeHtml(fieldName)}</td>
+          <td>
+            <div class="mapping-field-editor">
+              <select class="mapping-select bill-split-group-select">${selectOptions}</select>
+              <button class="secondary-btn small bill-split-group-btn" type="button" ${buttonLabel ? '' : 'hidden'}>${buttonLabel || ''}</button>
+            </div>
+          </td>
+        `;
+
+        const select = row.querySelector('.mapping-select');
+        const button = row.querySelector('.bill-split-group-btn');
+        select.value = savedValue;
+
+        select.addEventListener('change', () => {
+          const newValue = select.value;
+          if (fieldName === BILL_SPLIT_MERGE_FIELD) {
+            if (newValue === '是') {
+              button.hidden = false;
+              button.textContent = '拆分/合并账单映射关系管理';
+              applyBillSplitMergeMutualExclusion(true);
+            } else {
+              button.hidden = true;
+              button.textContent = '';
+              applyBillSplitMergeMutualExclusion(false);
+            }
+          } else if (fieldName === REUSE_MODULE_FIELD) {
+            if (newValue === '否') {
+              button.hidden = false;
+              button.textContent = '拆分/合并账单映射关系设置';
+            } else {
+              button.hidden = true;
+              button.textContent = '';
+            }
+          }
+        });
+
+        button.addEventListener('click', () => {
+          if (fieldName === BILL_SPLIT_MERGE_FIELD) {
+            openBillSplitRowsDialogFromMain();
+          } else if (fieldName === REUSE_MODULE_FIELD) {
+            openBillSplitMappingsDialogFromMain();
+          }
+        });
+
+        rowByField.set(fieldName, row);
+        tbody.appendChild(row);
+      }
+
+      function openBillSplitRowsDialogFromMain() {
+        const draftBigAccounts = cloneBigAccountItems(currentBigAccounts);
+        const draftMappings = collectMappingDraftFromTable(tbody);
+        openModal(createBillSplitRowsDialog({
+          template: payload.template,
+          initialRows: currentBillSplitRows,
+          initialAmountRules: currentBillSplitAmountRules,
+          initialBillSplitMeta: currentBillSplitMeta,
+          onClose: async () => {
+            // Re-read the latest bill-split config from DB (行级落库保证一致)
+            try {
+              const latest = await desktopApi.templates.getBillSplitConfig(payload.template.id);
+              if (latest && latest.status === 'success') {
+                currentBillSplitRows = latest.billSplitRows || [];
+                currentBillSplitAmountRules = latest.billSplitAmountRules || [];
+                currentBillSplitMeta = latest.billSplitMeta || { signedAmountSourceField: '' };
+              }
+            } catch (_error) { /* ignore */ }
+            openModal(createMappingDialog({
+              ...payload,
+              mappings: draftMappings,
+              bigAccounts: draftBigAccounts,
+              fixedAssignments: currentFixedAssignments,
+              amountSplitRules: currentAmountSplitRules,
+              billSplitMappings: currentBillSplitMappings,
+              billSplitRows: currentBillSplitRows,
+              billSplitAmountRules: currentBillSplitAmountRules,
+              billSplitMeta: currentBillSplitMeta
+            }));
+          }
+        }));
+      }
+
+      function openBillSplitMappingsDialogFromMain() {
+        const draftBigAccounts = cloneBigAccountItems(currentBigAccounts);
+        const draftMappings = collectMappingDraftFromTable(tbody);
+        openModal(createBillSplitMappingsDialog({
+          template: payload.template,
+          initialMappings: currentBillSplitMappings,
+          mainTemplateMappings: draftMappings,
+          headers: payload.template.headers || [],
+          targetFields: (payload.targetFields || []).slice(),
+          advancedMappingFields: advancedMappingFields.slice(),
+          billSplitGroupFields: billSplitGroupFields.slice(),
+          onDone: (nextMappings) => {
+            currentBillSplitMappings = nextMappings.map((m) => ({ ...m }));
+            openModal(createMappingDialog({
+              ...payload,
+              mappings: draftMappings,
+              bigAccounts: draftBigAccounts,
+              fixedAssignments: currentFixedAssignments,
+              amountSplitRules: currentAmountSplitRules,
+              billSplitMappings: currentBillSplitMappings,
+              billSplitRows: currentBillSplitRows,
+              billSplitAmountRules: currentBillSplitAmountRules,
+              billSplitMeta: currentBillSplitMeta
+            }));
+          },
+          onCancel: () => {
+            openModal(createMappingDialog({
+              ...payload,
+              mappings: draftMappings,
+              bigAccounts: draftBigAccounts,
+              fixedAssignments: currentFixedAssignments,
+              amountSplitRules: currentAmountSplitRules,
+              billSplitMappings: currentBillSplitMappings,
+              billSplitRows: currentBillSplitRows,
+              billSplitAmountRules: currentBillSplitAmountRules,
+              billSplitMeta: currentBillSplitMeta
+            }));
+          }
+        }));
+      }
+
       function applyAmountSplitMutualExclusion() {
         const amountSplitRow = rowByField.get(AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD);
         const amountSplitSelect = amountSplitRow?.querySelector('.mapping-select');
@@ -1791,6 +1977,41 @@
         }
       }
 
+      // v1.4.9: 4 方互斥 UI 侧 — 开启「是否拆分/合并明细账单」时 disabled + 清空其它 5 行
+      // Currency / Credit Amount / Debit Amount / 按正负号拆分的发生额 / 按字段区分发生额
+      function applyBillSplitMergeMutualExclusion(enabled) {
+        const mutexFields = [
+          'Currency',
+          'Credit Amount',
+          'Debit Amount',
+          '按正负号拆分的发生额',
+          '按字段区分发生额'
+        ];
+        mutexFields.forEach((targetField) => {
+          const targetRow = rowByField.get(targetField);
+          if (!targetRow) return;
+          const targetSelect = targetRow.querySelector('.mapping-select');
+          if (!targetSelect) return;
+
+          if (enabled) {
+            targetSelect.value = '';
+            targetSelect.disabled = true;
+            targetRow.classList.add('mapping-row-mutex-disabled', 'bill-split-merge-disabled');
+            targetRow.setAttribute('title', '已开启拆分/合并明细账单，本字段不可用');
+          } else {
+            targetSelect.disabled = false;
+            targetRow.classList.remove('bill-split-merge-disabled');
+            targetRow.removeAttribute('title');
+            // 若 amount split 仍启用，保留 mutex-disabled class（由 applyAmountSplitMutualExclusion 管理）
+            if (!targetRow.classList.contains('bill-split-merge-disabled')) {
+              // re-evaluate amount split mutex
+            }
+          }
+        });
+        // 重新评估 amount split 互斥，保证 disabled 状态正确
+        applyAmountSplitMutualExclusion();
+      }
+
       async function openAmountSplitRulesDialog() {
         const draftBigAccounts = cloneBigAccountItems(currentBigAccounts);
         const draftMappings = collectMappingDraftFromTable(tbody);
@@ -1820,6 +2041,16 @@
       }
 
       applyAmountSplitMutualExclusion();
+
+      // 初始化：若模板当前已启用「是否拆分/合并明细账单 = 是」，立即应用 4 方互斥（disabled + 清空）
+      {
+        const billSplitMergeRow = rowByField.get(BILL_SPLIT_MERGE_FIELD);
+        const billSplitMergeSelect = billSplitMergeRow?.querySelector('.mapping-select');
+        const billSplitMergeEnabledInitial = billSplitMergeSelect && billSplitMergeSelect.value === '是';
+        if (billSplitMergeEnabledInitial) {
+          applyBillSplitMergeMutualExclusion(true);
+        }
+      }
 
       function syncMerchantIdDependentRows() {
         const merchantRow = rowByField.get('MerchantId');
@@ -1893,7 +2124,7 @@
       return overlay;
     }
 
-    function createAmountSplitRulesDialog({ template, initialRules = [], onDone, onCancel }) {
+    function createAmountSplitRulesDialog({ template, initialRules = [], context = 'main', onDone, onCancel }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card amount-split-rules-card';
@@ -2028,11 +2259,23 @@
               openModal(createAmountSplitRulesDialog({
                 template,
                 initialRules: rules,
+                context,
                 onDone,
                 onCancel
               }));
             }
           }));
+          return;
+        }
+
+        // bill-split 上下文：IPC 分流由 onDone 回调完成（见 createBillSplitRowsDialog），
+        // 本对话框不直接写入，避免落到主 template_amount_split_rules 表。
+        if (context === 'bill-split') {
+          if (typeof onDone === 'function') {
+            onDone(rules);
+          } else {
+            closeModal();
+          }
           return;
         }
 
@@ -2056,6 +2299,7 @@
               openModal(createAmountSplitRulesDialog({
                 template,
                 initialRules: rules,
+                context,
                 onDone,
                 onCancel
               }));
@@ -2068,6 +2312,7 @@
               openModal(createAmountSplitRulesDialog({
                 template,
                 initialRules: rules,
+                context,
                 onDone,
                 onCancel
               }));
@@ -2076,6 +2321,789 @@
         }
       });
 
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // ==================== v1.4.9 弹框 1: 拆分/合并账单映射关系设置 ====================
+    // TechDoc §7.2 / PRD §4.2
+    function createBillSplitMappingsDialog({
+      template,
+      initialMappings = [],
+      mainTemplateMappings = [],
+      headers = [],
+      targetFields = [],
+      advancedMappingFields = [],
+      billSplitGroupFields = [],
+      onDone,
+      onCancel
+    }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card bill-split-mappings-card';
+
+      // 模板字段列表 = targetFields 排除 Currency / Credit Amount / Debit Amount + 高级字段 + bill-split group 字段
+      const excludeFields = new Set([
+        'Currency',
+        'Credit Amount',
+        'Debit Amount',
+        ...advancedMappingFields,
+        ...billSplitGroupFields
+      ]);
+      const displayTargetFields = (targetFields || []).filter((f) => !excludeFields.has(f));
+
+      // 可变 state: 每个模板字段对应的 mappedField / mappedFields
+      let currentDialogMappings = displayTargetFields.map((f) => {
+        const existing = (initialMappings || []).find((m) => m.templateField === f);
+        return {
+          templateField: f,
+          mappedField: existing ? String(existing.mappedField || '') : '',
+          mappedFields: existing && Array.isArray(existing.mappedFields) ? existing.mappedFields.slice() : []
+        };
+      });
+
+      const headerOptions = (headers || []).map((header) => {
+        const escapedHeader = escapeHtml(header || '(空白字段)');
+        const value = escapeHtml(header);
+        return `<option value="${value}">${escapedHeader}</option>`;
+      });
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">拆分/合并账单映射关系设置</div>
+          <div class="bill-split-mappings-header-actions">
+            <button class="secondary-btn small" type="button" data-action="import-main">导入当前映射关系</button>
+            <button class="icon-close" type="button">×</button>
+          </div>
+        </div>
+        <div class="table-wrapper bill-split-mappings-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>模板字段</th>
+                <th>映射字段</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="done">完成</button>
+        </div>
+      `;
+
+      const tbody = dialog.querySelector('tbody');
+
+      function rerenderTable() {
+        tbody.replaceChildren();
+        currentDialogMappings.forEach((entry) => {
+          const row = document.createElement('tr');
+          row.dataset.templateField = entry.templateField;
+
+          const isCurrencyLike = entry.templateField === 'Currency';
+          const supportsMultiSelect = !isCurrencyLike;
+          const selectOptions = ['<option value=""></option>']
+            .concat(supportsMultiSelect ? [`<option value="${CONCAT_FIELDS_MAPPING_FIELD}">${CONCAT_FIELDS_MAPPING_FIELD}</option>`] : [])
+            .concat(headerOptions)
+            .join('');
+
+          row.innerHTML = `
+            <td>${escapeHtml(entry.templateField)}</td>
+            <td>
+              <div class="mapping-field-editor">
+                <select class="mapping-select bill-split-mapping-select">${selectOptions}</select>
+                <div class="concat-field-picker" hidden>
+                  <button class="concat-picker-trigger secondary-btn small" type="button">选择字段</button>
+                  <div class="concat-picker-panel" hidden></div>
+                  <div class="concat-preview-wrapper">
+                    <span class="concat-order-label">当前拼接顺序：</span>
+                    <span class="concat-preview" title=""></span>
+                  </div>
+                </div>
+              </div>
+            </td>
+          `;
+
+          const select = row.querySelector('.bill-split-mapping-select');
+          const concatPicker = row.querySelector('.concat-field-picker');
+          const concatTrigger = row.querySelector('.concat-picker-trigger');
+          const concatPanel = row.querySelector('.concat-picker-panel');
+          const concatPreview = row.querySelector('.concat-preview');
+          let concatSelectedFields = Array.isArray(entry.mappedFields) ? entry.mappedFields.slice() : [];
+          const isConcatInitial = entry.mappedField === CONCAT_FIELDS_MAPPING_FIELD && concatSelectedFields.length > 0;
+
+          select.value = isConcatInitial ? CONCAT_FIELDS_MAPPING_FIELD : (entry.mappedField || '');
+
+          function updateConcatPreviewText() {
+            if (!concatPreview) return;
+            const previewText = concatSelectedFields.join(' ');
+            concatPreview.textContent = previewText.length > 40 ? previewText.slice(0, 40) + '......' : previewText;
+            concatPreview.title = concatSelectedFields.join(' ');
+          }
+
+          function renderConcatOptions() {
+            if (!concatPanel) return;
+            concatPanel.replaceChildren();
+            (headers || []).forEach((header) => {
+              const option = document.createElement('div');
+              option.className = 'concat-picker-option';
+              const checkbox = document.createElement('input');
+              checkbox.type = 'checkbox';
+              checkbox.checked = concatSelectedFields.includes(header);
+              const indexSpan = document.createElement('span');
+              indexSpan.className = 'concat-picker-index';
+              const selectedIdx = concatSelectedFields.indexOf(header);
+              indexSpan.textContent = selectedIdx >= 0 ? `${selectedIdx + 1}.` : '';
+              const nameSpan = document.createElement('span');
+              nameSpan.textContent = header || '(空白字段)';
+              option.append(checkbox, indexSpan, nameSpan);
+              option.addEventListener('click', (event) => {
+                if (event.target === checkbox) return;
+                checkbox.checked = !checkbox.checked;
+                checkbox.dispatchEvent(new Event('change'));
+              });
+              checkbox.addEventListener('change', () => {
+                if (checkbox.checked) {
+                  if (!concatSelectedFields.includes(header)) concatSelectedFields.push(header);
+                } else {
+                  concatSelectedFields = concatSelectedFields.filter((h) => h !== header);
+                }
+                entry.mappedFields = concatSelectedFields.slice();
+                renderConcatOptions();
+                updateConcatPreviewText();
+              });
+              concatPanel.appendChild(option);
+            });
+          }
+
+          if (concatTrigger) {
+            concatTrigger.addEventListener('click', () => {
+              const isOpen = !concatPanel.hidden;
+              concatPanel.hidden = isOpen;
+              if (!isOpen) renderConcatOptions();
+            });
+          }
+
+          function syncEditorState() {
+            const isConcatMode = select.value === CONCAT_FIELDS_MAPPING_FIELD;
+            if (concatPicker) concatPicker.hidden = !isConcatMode;
+            if (!isConcatMode) {
+              concatSelectedFields = [];
+              entry.mappedFields = [];
+              updateConcatPreviewText();
+              if (concatPanel) concatPanel.hidden = true;
+            }
+          }
+
+          select.addEventListener('change', () => {
+            entry.mappedField = select.value;
+            syncEditorState();
+          });
+
+          if (isConcatInitial) {
+            updateConcatPreviewText();
+          }
+          syncEditorState();
+          tbody.appendChild(row);
+        });
+      }
+
+      function validateLocalMappings() {
+        // 校验：同字段不可重复（已通过结构保证），空字段会被后端丢弃，无需前端报错
+        return true;
+      }
+
+      function doImportFromMain() {
+        // 从主模板映射复制，排除 Currency/Credit/Debit/advanced/bill-split group
+        const imported = (mainTemplateMappings || [])
+          .filter((m) => !excludeFields.has(m.templateField))
+          .map((m) => ({
+            templateField: m.templateField,
+            mappedField: String(m.mappedField || ''),
+            mappedFields: Array.isArray(m.mappedFields) ? m.mappedFields.slice() : []
+          }));
+        const importMap = new Map(imported.map((m) => [m.templateField, m]));
+        currentDialogMappings = displayTargetFields.map((f) => {
+          const hit = importMap.get(f);
+          return hit
+            ? { templateField: f, mappedField: hit.mappedField, mappedFields: hit.mappedFields }
+            : { templateField: f, mappedField: '', mappedFields: [] };
+        });
+        rerenderTable();
+      }
+
+      dialog.querySelector('[data-action="import-main"]').addEventListener('click', () => {
+        // 检查弹框当前是否已有任意行非空
+        const hasExistingData = currentDialogMappings.some(
+          (m) => m.mappedField || (Array.isArray(m.mappedFields) && m.mappedFields.length > 0)
+        );
+        if (hasExistingData) {
+          openModal(createConfirmDialog({
+            message: '确认覆盖弹框中已有的配置？',
+            confirmText: '确认',
+            cancelText: '取消',
+            onConfirm: () => {
+              doImportFromMain();
+              openModal(overlay);
+            }
+          }));
+        } else {
+          doImportFromMain();
+        }
+      });
+
+      dialog.querySelector('.icon-close').addEventListener('click', () => {
+        if (typeof onCancel === 'function') onCancel();
+        else closeModal();
+      });
+
+      dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+        if (!validateLocalMappings()) return;
+        // 只发送非空的 mappings（后端 validate 会丢弃空行）
+        const toSave = currentDialogMappings.filter(
+          (m) => m.mappedField || (Array.isArray(m.mappedFields) && m.mappedFields.length > 0)
+        );
+        try {
+          const result = await desktopApi.templates.saveBillSplitMappings({
+            templateId: template.id,
+            mappings: toSave
+          });
+          if (result && result.status === 'success') {
+            if (typeof onDone === 'function') onDone(toSave);
+            else closeModal();
+          } else {
+            openModal(createAlertDialog(result?.message || '保存失败', {
+              onConfirm: () => { openModal(overlay); }
+            }));
+          }
+        } catch (error) {
+          console.error(error);
+          openModal(createAlertDialog('保存失败，请查看控制台', {
+            onConfirm: () => { openModal(overlay); }
+          }));
+        }
+      });
+
+      dialog.addEventListener('mousedown', (event) => {
+        if (!event.target.closest('.concat-field-picker')) {
+          dialog.querySelectorAll('.concat-picker-panel:not([hidden])').forEach((panel) => {
+            panel.hidden = true;
+          });
+        }
+      });
+
+      rerenderTable();
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // ==================== v1.4.9 弹框 2: 拆分/合并账单映射关系管理 ====================
+    // TechDoc §7.3 / PRD §4.3
+    function createBillSplitRowsDialog({
+      template,
+      initialRows = [],
+      initialAmountRules = [],
+      initialBillSplitMeta = { signedAmountSourceField: '' },
+      onClose
+    }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card bill-split-rows-card';
+
+      let currentRows = (initialRows || []).map((r) => ({ ...r }));
+      let currentAmountRules = (initialAmountRules || []).map((r) => ({ ...r }));
+      let currentBillSplitMeta = {
+        signedAmountSourceField: String((initialBillSplitMeta && initialBillSplitMeta.signedAmountSourceField) || '')
+      };
+
+      const headers = Array.isArray(template.headers) ? template.headers : [];
+      // 排除特殊枚举，仅剩 template.headers 本身（AC1-31）
+      const headerOptionsHtml = ['<option value=""></option>']
+        .concat(headers.map((h) => `<option value="${escapeHtml(h)}">${escapeHtml(h || '(空白字段)')}</option>`))
+        .join('');
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">拆分/合并账单映射关系管理</div>
+          <div class="bill-split-rows-header-actions">
+            <label class="bill-split-merge-checkbox-label">
+              <input type="checkbox" class="bill-split-merge-checkbox" />
+              <span>合并账单</span>
+            </label>
+            <select class="mapping-select bill-split-merge-dropdown" multiple hidden></select>
+            <button class="secondary-btn small bill-split-merge-done-btn" type="button" hidden>完成</button>
+            <button class="icon-close" type="button">×</button>
+          </div>
+        </div>
+        <div class="bill-split-rows-body">
+          <div class="bill-split-row-count-line">
+            <label>需要拆分成几份账单</label>
+            <input type="number" class="bill-split-row-count-input" min="1" max="99" />
+            <button class="secondary-btn small bill-split-row-count-done-btn" type="button">完成</button>
+          </div>
+          <div class="table-wrapper bill-split-rows-table-wrapper">
+            <table class="data-table bill-split-rows-table">
+              <thead>
+                <tr>
+                  <th>账单序号</th>
+                  <th>Currency</th>
+                  <th>Credit Amount</th>
+                  <th>Debit Amount</th>
+                  <th>发生额</th>
+                  <th>执行操作</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <hr class="bill-split-sub-section-divider" />
+          <div class="bill-split-sub-section">
+            <h3>拆分/合并账单——发生额映射关系管理</h3>
+            <div class="bill-split-sub-row">
+              <label>按正负号拆分的发生额</label>
+              <select class="mapping-select bill-split-signed-select">${headerOptionsHtml}</select>
+            </div>
+            <div class="bill-split-sub-row">
+              <label>按字段区分发生额</label>
+              <select class="mapping-select bill-split-by-field-select">
+                <option value=""></option>
+                <option value="是">是</option>
+              </select>
+              <button class="secondary-btn small bill-split-amount-rules-manage-btn" type="button" hidden>发生额映射关系管理</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const tableBody = dialog.querySelector('.bill-split-rows-table tbody');
+      const nInput = dialog.querySelector('.bill-split-row-count-input');
+      const nDoneBtn = dialog.querySelector('.bill-split-row-count-done-btn');
+      const mergeCheckbox = dialog.querySelector('.bill-split-merge-checkbox');
+      const mergeDropdown = dialog.querySelector('.bill-split-merge-dropdown');
+      const mergeDoneBtn = dialog.querySelector('.bill-split-merge-done-btn');
+      const signedSelect = dialog.querySelector('.bill-split-signed-select');
+      const byFieldSelect = dialog.querySelector('.bill-split-by-field-select');
+      const amountRulesManageBtn = dialog.querySelector('.bill-split-amount-rules-manage-btn');
+
+      // 初始化副区域 UI
+      signedSelect.value = currentBillSplitMeta.signedAmountSourceField || '';
+      byFieldSelect.value = currentAmountRules.length > 0 ? '是' : '';
+      amountRulesManageBtn.hidden = currentAmountRules.length === 0;
+
+      nInput.value = String(currentRows.length || 1);
+
+      function isAmountSourceColumnEnabled() {
+        return Boolean(currentBillSplitMeta.signedAmountSourceField) || currentAmountRules.length > 0;
+      }
+
+      function applyBillSplit2WayExclusion() {
+        const enabled = isAmountSourceColumnEnabled();
+        // 副区域状态
+        if (currentBillSplitMeta.signedAmountSourceField) {
+          byFieldSelect.disabled = true;
+        } else if (currentAmountRules.length > 0) {
+          signedSelect.disabled = true;
+        } else {
+          signedSelect.disabled = false;
+          byFieldSelect.disabled = false;
+        }
+        // Credit/Debit 列禁用 + 清空
+        if (enabled) {
+          currentRows.forEach((row) => {
+            row.creditSourceField = '';
+            row.debitSourceField = '';
+          });
+        }
+      }
+
+      function renderTableRow(row) {
+        const tr = document.createElement('tr');
+        const seqDisplay = (row.mergedGroupSeq !== null && row.mergedGroupSeq !== undefined)
+          ? String(row.mergedGroupSeq)
+          : String(row.seqNo);
+        const isMerged = row.mergedGroupSeq !== null && row.mergedGroupSeq !== undefined;
+        const isCompleted = row.rowStatus === 'completed';
+        const amountEnabled = isAmountSourceColumnEnabled();
+
+        if (isMerged) tr.classList.add('bill-split-merged-row');
+
+        tr.innerHTML = `
+          <td>${escapeHtml(seqDisplay)}</td>
+          <td><select class="mapping-select bill-split-currency-select">${headerOptionsHtml}</select></td>
+          <td><select class="mapping-select bill-split-credit-select">${headerOptionsHtml}</select></td>
+          <td><select class="mapping-select bill-split-debit-select">${headerOptionsHtml}</select></td>
+          <td><select class="mapping-select bill-split-amount-select">${headerOptionsHtml}</select></td>
+          <td class="bill-split-row-actions">
+            <button class="text-action bill-split-row-complete-btn" type="button">${isCompleted ? '编辑' : '完成'}</button>
+            <button class="text-action danger bill-split-row-delete-btn" type="button">删除</button>
+          </td>
+        `;
+
+        const currencySel = tr.querySelector('.bill-split-currency-select');
+        const creditSel = tr.querySelector('.bill-split-credit-select');
+        const debitSel = tr.querySelector('.bill-split-debit-select');
+        const amountSel = tr.querySelector('.bill-split-amount-select');
+        const completeBtn = tr.querySelector('.bill-split-row-complete-btn');
+        const deleteBtn = tr.querySelector('.bill-split-row-delete-btn');
+
+        currencySel.value = row.currencySourceField || '';
+        creditSel.value = row.creditSourceField || '';
+        debitSel.value = row.debitSourceField || '';
+        amountSel.value = row.amountSourceField || '';
+
+        // 禁用规则
+        if (isMerged || isCompleted) {
+          currencySel.disabled = true;
+          creditSel.disabled = true;
+          debitSel.disabled = true;
+          amountSel.disabled = true;
+        } else {
+          currencySel.disabled = false;
+          if (amountEnabled) {
+            creditSel.disabled = true;
+            debitSel.disabled = true;
+            amountSel.disabled = false;
+          } else {
+            creditSel.disabled = false;
+            debitSel.disabled = false;
+            amountSel.disabled = true;
+          }
+        }
+
+        completeBtn.disabled = isMerged;
+        deleteBtn.disabled = isMerged;
+
+        // 同行 Credit !== Debit 校验
+        function onCreditDebitChange(which, sel) {
+          const newValue = sel.value;
+          const otherValue = which === 'credit' ? row.debitSourceField : row.creditSourceField;
+          if (newValue && otherValue && newValue === otherValue) {
+            openModal(createAlertDialog('同一份拆分账单的 Credit Amount 和 Debit Amount 不能是同一列', {
+              onConfirm: () => { openModal(overlay); }
+            }));
+            sel.value = which === 'credit' ? (row.creditSourceField || '') : (row.debitSourceField || '');
+            return;
+          }
+          if (which === 'credit') row.creditSourceField = newValue;
+          else row.debitSourceField = newValue;
+        }
+
+        currencySel.addEventListener('change', () => { row.currencySourceField = currencySel.value; });
+        creditSel.addEventListener('change', () => { onCreditDebitChange('credit', creditSel); });
+        debitSel.addEventListener('change', () => { onCreditDebitChange('debit', debitSel); });
+        amountSel.addEventListener('change', () => { row.amountSourceField = amountSel.value; });
+
+        completeBtn.addEventListener('click', async () => {
+          const nextStatus = isCompleted ? 'draft' : 'completed';
+          try {
+            const result = await desktopApi.templates.saveBillSplitRow({
+              templateId: template.id,
+              row: { ...row, rowStatus: nextStatus }
+            });
+            if (result && result.status === 'success') {
+              row.rowStatus = nextStatus;
+              rerenderTable();
+            } else {
+              openModal(createAlertDialog(result?.message || '保存失败', {
+                onConfirm: () => { openModal(overlay); }
+              }));
+            }
+          } catch (error) {
+            console.error(error);
+          }
+        });
+
+        deleteBtn.addEventListener('click', async () => {
+          // 先 preview 受影响的合并组（Q-OT6=C）
+          let dissolvedGroups = [];
+          try {
+            const preview = await desktopApi.templates.previewDeleteBillSplitRow({
+              templateId: template.id,
+              seqNo: row.seqNo
+            });
+            if (preview && Array.isArray(preview.dissolvedGroups)) {
+              dissolvedGroups = preview.dissolvedGroups;
+            }
+          } catch (_error) { /* ignore */ }
+
+          async function performDelete() {
+            try {
+              const result = await desktopApi.templates.deleteBillSplitRow({
+                templateId: template.id,
+                seqNo: row.seqNo
+              });
+              if (result && result.status === 'success') {
+                currentRows = result.currentRows || [];
+                nInput.value = String(currentRows.length);
+                rerenderTable();
+              } else {
+                openModal(createAlertDialog(result?.message || '删除失败', {
+                  onConfirm: () => { openModal(overlay); }
+                }));
+              }
+            } catch (error) {
+              console.error(error);
+            }
+          }
+
+          if (dissolvedGroups.length > 0) {
+            const listText = dissolvedGroups.map((s) => `合并组 ${s}`).join('、');
+            openModal(createConfirmDialog({
+              message: `删除账单序号 ${row.seqNo} 将解散以下合并组：${listText}。确认继续？`,
+              confirmText: '确认',
+              cancelText: '取消',
+              onConfirm: async () => {
+                await performDelete();
+                openModal(overlay);
+              }
+            }));
+          } else {
+            await performDelete();
+          }
+        });
+
+        return tr;
+      }
+
+      function rerenderTable() {
+        applyBillSplit2WayExclusion();
+        tableBody.replaceChildren();
+        currentRows.forEach((r) => {
+          tableBody.appendChild(renderTableRow(r));
+        });
+      }
+
+      async function refreshFromServer() {
+        try {
+          const result = await desktopApi.templates.getBillSplitConfig(template.id);
+          if (result && result.status === 'success') {
+            currentRows = result.billSplitRows || [];
+            currentAmountRules = result.billSplitAmountRules || [];
+            currentBillSplitMeta = result.billSplitMeta || { signedAmountSourceField: '' };
+            signedSelect.value = currentBillSplitMeta.signedAmountSourceField || '';
+            byFieldSelect.value = currentAmountRules.length > 0 ? '是' : '';
+            amountRulesManageBtn.hidden = currentAmountRules.length === 0;
+            nInput.value = String(currentRows.length);
+            rerenderTable();
+          }
+        } catch (_error) { /* ignore */ }
+      }
+
+      // N 完成按钮
+      nDoneBtn.addEventListener('click', async () => {
+        const nextN = Number(nInput.value);
+        if (!Number.isInteger(nextN) || nextN < 1 || nextN > 99) {
+          openModal(createAlertDialog('拆分账单份数必须为 1 ~ 99 之间的整数', {
+            onConfirm: () => { openModal(overlay); }
+          }));
+          return;
+        }
+        const currentM = currentRows.length;
+
+        async function doPersist(finalN) {
+          try {
+            const result = await desktopApi.templates.saveBillSplitRowCount({
+              templateId: template.id,
+              nextN: finalN
+            });
+            if (result && result.status === 'success') {
+              currentRows = result.currentRows || [];
+              rerenderTable();
+            } else {
+              openModal(createAlertDialog(result?.message || '保存失败', {
+                onConfirm: () => { openModal(overlay); }
+              }));
+            }
+          } catch (error) {
+            console.error(error);
+          }
+        }
+
+        if (nextN < currentM) {
+          openModal(createConfirmDialog({
+            message: `确认删除最下方的 ${currentM - nextN} 行？已填数据会丢失`,
+            confirmText: '确认',
+            cancelText: '取消',
+            onConfirm: async () => {
+              await doPersist(nextN);
+              openModal(overlay);
+            }
+          }));
+        } else if (nextN > currentM) {
+          await doPersist(nextN);
+        }
+      });
+
+      // 合并账单勾选框
+      mergeCheckbox.addEventListener('change', async () => {
+        if (mergeCheckbox.checked) {
+          // 显示多选下拉框 + 完成按钮
+          mergeDropdown.hidden = false;
+          mergeDoneBtn.hidden = false;
+          // 填充候选值（completed 且未合并的行）
+          const candidates = currentRows.filter(
+            (r) => r.rowStatus === 'completed' && (r.mergedGroupSeq === null || r.mergedGroupSeq === undefined)
+          );
+          mergeDropdown.replaceChildren();
+          candidates.forEach((r) => {
+            const opt = document.createElement('option');
+            opt.value = String(r.seqNo);
+            opt.textContent = String(r.seqNo);
+            mergeDropdown.appendChild(opt);
+          });
+        } else {
+          mergeDropdown.hidden = true;
+          mergeDoneBtn.hidden = true;
+          // 清空所有合并组
+          try {
+            await desktopApi.templates.clearBillSplitMergeGroups({ templateId: template.id });
+            await refreshFromServer();
+          } catch (error) {
+            console.error(error);
+          }
+        }
+      });
+
+      mergeDoneBtn.addEventListener('click', async () => {
+        const selectedSeqNos = Array.from(mergeDropdown.selectedOptions).map((opt) => Number(opt.value));
+        if (selectedSeqNos.length < 2) {
+          openModal(createAlertDialog('合并账单至少需要选择 2 个账单序号', {
+            onConfirm: () => { openModal(overlay); }
+          }));
+          return;
+        }
+        try {
+          const result = await desktopApi.templates.saveBillSplitMergeGroup({
+            templateId: template.id,
+            seqNos: selectedSeqNos
+          });
+          if (result && result.status === 'success') {
+            await refreshFromServer();
+            // 刷新后重建候选列表
+            const candidates = currentRows.filter(
+              (r) => r.rowStatus === 'completed' && (r.mergedGroupSeq === null || r.mergedGroupSeq === undefined)
+            );
+            mergeDropdown.replaceChildren();
+            candidates.forEach((r) => {
+              const opt = document.createElement('option');
+              opt.value = String(r.seqNo);
+              opt.textContent = String(r.seqNo);
+              mergeDropdown.appendChild(opt);
+            });
+          } else {
+            openModal(createAlertDialog(result?.message || '合并失败', {
+              onConfirm: () => { openModal(overlay); }
+            }));
+          }
+        } catch (error) {
+          console.error(error);
+        }
+      });
+
+      // 副区域：按正负号拆分的发生额 onChange
+      signedSelect.addEventListener('change', async () => {
+        const newValue = signedSelect.value;
+        try {
+          // 互斥：若 amount rules 非空且 next 非空 → 先清空对侧
+          if (newValue && currentAmountRules.length > 0) {
+            await desktopApi.templates.saveBillSplitAmountRules({
+              templateId: template.id,
+              amountSplitRules: []
+            });
+            currentAmountRules = [];
+            byFieldSelect.value = '';
+            amountRulesManageBtn.hidden = true;
+          }
+          await desktopApi.templates.saveBillSplitMeta({
+            templateId: template.id,
+            signedAmountSourceField: newValue
+          });
+          currentBillSplitMeta.signedAmountSourceField = newValue;
+          rerenderTable();
+        } catch (error) {
+          console.error(error);
+        }
+      });
+
+      // 副区域：按字段区分发生额 onChange
+      byFieldSelect.addEventListener('change', async () => {
+        const newValue = byFieldSelect.value;
+        if (newValue === '是') {
+          // 打开子弹框配置规则
+          if (currentBillSplitMeta.signedAmountSourceField) {
+            // 互斥：先清空对侧
+            try {
+              await desktopApi.templates.saveBillSplitMeta({
+                templateId: template.id,
+                signedAmountSourceField: ''
+              });
+              currentBillSplitMeta.signedAmountSourceField = '';
+              signedSelect.value = '';
+            } catch (_error) { /* ignore */ }
+          }
+          openBillSplitAmountRulesSubDialog();
+        } else {
+          // 清空规则
+          try {
+            await desktopApi.templates.saveBillSplitAmountRules({
+              templateId: template.id,
+              amountSplitRules: []
+            });
+            currentAmountRules = [];
+            amountRulesManageBtn.hidden = true;
+            rerenderTable();
+          } catch (error) {
+            console.error(error);
+          }
+        }
+      });
+
+      amountRulesManageBtn.addEventListener('click', () => {
+        openBillSplitAmountRulesSubDialog();
+      });
+
+      function openBillSplitAmountRulesSubDialog() {
+        openModal(createAmountSplitRulesDialog({
+          template,
+          initialRules: currentAmountRules,
+          context: 'bill-split',
+          onDone: async (nextRules) => {
+            try {
+              const result = await desktopApi.templates.saveBillSplitAmountRules({
+                templateId: template.id,
+                amountSplitRules: nextRules
+              });
+              if (result && result.status === 'success') {
+                currentAmountRules = nextRules.map((r) => ({ ...r }));
+                byFieldSelect.value = '是';
+                amountRulesManageBtn.hidden = false;
+                rerenderTable();
+                openModal(overlay);
+              } else {
+                openModal(createAlertDialog(result?.message || '保存失败', {
+                  onConfirm: () => { openModal(overlay); }
+                }));
+              }
+            } catch (error) {
+              console.error(error);
+              openModal(createAlertDialog('保存失败，请查看控制台', {
+                onConfirm: () => { openModal(overlay); }
+              }));
+            }
+          },
+          onCancel: () => {
+            byFieldSelect.value = currentAmountRules.length > 0 ? '是' : '';
+            openModal(overlay);
+          }
+        }));
+      }
+
+      dialog.querySelector('.icon-close').addEventListener('click', () => {
+        if (typeof onClose === 'function') onClose();
+        else closeModal();
+      });
+
+      rerenderTable();
       overlay.appendChild(dialog);
       return overlay;
     }
