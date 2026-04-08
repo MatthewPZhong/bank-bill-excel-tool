@@ -1941,7 +1941,19 @@
         }));
       }
 
+      function isBillSplitMergeEnabledInTable() {
+        const row = rowByField.get(BILL_SPLIT_MERGE_FIELD);
+        const select = row?.querySelector('.mapping-select');
+        return select && select.value === '是';
+      }
+
       function applyAmountSplitMutualExclusion() {
+        // 若 bill-split-merge 已启用，4 方互斥由 applyBillSplitMergeMutualExclusion 全权管理，
+        // 此处跳过，避免覆盖其设置的 disabled 状态（Fix #3）
+        if (isBillSplitMergeEnabledInTable()) {
+          return;
+        }
+
         const amountSplitRow = rowByField.get(AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD);
         const amountSplitSelect = amountSplitRow?.querySelector('.mapping-select');
         const amountSplitEnabled = amountSplitSelect
@@ -1998,18 +2010,27 @@
             targetSelect.disabled = true;
             targetRow.classList.add('mapping-row-mutex-disabled', 'bill-split-merge-disabled');
             targetRow.setAttribute('title', '已开启拆分/合并明细账单，本字段不可用');
+            // 显式禁用该行的所有按钮（big-account 维护 / 发生额规则管理 / concat trigger 等）
+            targetRow.querySelectorAll('button').forEach((btn) => {
+              btn.disabled = true;
+              btn.dataset.billSplitMergeDisabled = 'true';
+            });
           } else {
             targetSelect.disabled = false;
-            targetRow.classList.remove('bill-split-merge-disabled');
+            targetRow.classList.remove('bill-split-merge-disabled', 'mapping-row-mutex-disabled');
             targetRow.removeAttribute('title');
-            // 若 amount split 仍启用，保留 mutex-disabled class（由 applyAmountSplitMutualExclusion 管理）
-            if (!targetRow.classList.contains('bill-split-merge-disabled')) {
-              // re-evaluate amount split mutex
-            }
+            // 恢复按钮状态（只恢复被 bill-split-merge 禁用的按钮）
+            targetRow.querySelectorAll('button[data-bill-split-merge-disabled="true"]').forEach((btn) => {
+              btn.disabled = false;
+              delete btn.dataset.billSplitMergeDisabled;
+            });
           }
         });
-        // 重新评估 amount split 互斥，保证 disabled 状态正确
-        applyAmountSplitMutualExclusion();
+        // 禁用时不重新调用 amount-split mutex（它会在 isBillSplitMergeEnabledInTable 返回 true 时 noop）；
+        // 解除时重新评估 amount-split mutex，保证 Credit/Debit/按正负号的禁用状态与「按字段区分发生额」一致
+        if (!enabled) {
+          applyAmountSplitMutualExclusion();
+        }
       }
 
       async function openAmountSplitRulesDialog() {
