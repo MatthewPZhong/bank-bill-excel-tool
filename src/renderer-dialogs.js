@@ -2713,6 +2713,9 @@
             </div>
           </div>
         </div>
+        <div class="dialog-actions right bill-split-rows-footer">
+          <button class="primary-btn small bill-split-rows-done-btn" type="button">完成</button>
+        </div>
       `;
 
       const tableBody = dialog.querySelector('.bill-split-rows-table tbody');
@@ -3198,6 +3201,12 @@
       }
 
       dialog.querySelector('.icon-close').addEventListener('click', () => {
+        if (typeof onClose === 'function') onClose();
+        else closeModal();
+      });
+
+      // 弹框 2 底部完成按钮：语义等同 × 关闭（一切已行级落库，无需额外 save 动作）
+      dialog.querySelector('.bill-split-rows-done-btn').addEventListener('click', () => {
         if (typeof onClose === 'function') onClose();
         else closeModal();
       });
