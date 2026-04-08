@@ -3952,6 +3952,10 @@ function validateBillSplitMappingsPayload(mappings, template) {
     if (!mappedField && mappedFields.length === 0) {
       return;
     }
+    // Balance 字段允许特殊值（BALANCE_DISABLED_OPTION / BALANCE_CALCULATED_OPTION），
+    // 与主表格保持一致
+    const isBalanceSpecialValue = templateField === 'Balance'
+      && (mappedField === BALANCE_DISABLED_OPTION || mappedField === BALANCE_CALCULATED_OPTION);
     // Header existence check (allow concat marker + custom prefix to pass)
     const checkSourceFieldExists = (field) => {
       if (!field) return;
@@ -3961,7 +3965,7 @@ function validateBillSplitMappingsPayload(mappings, template) {
         throw new FileValidationError('FILE_READ', `映射字段不存在：${field}`);
       }
     };
-    if (mappedField !== CONCAT_FIELDS_MAPPING_FIELD) {
+    if (mappedField !== CONCAT_FIELDS_MAPPING_FIELD && !isBalanceSpecialValue) {
       checkSourceFieldExists(mappedField);
     }
     mappedFields.forEach(checkSourceFieldExists);

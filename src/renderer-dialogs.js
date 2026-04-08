@@ -2374,11 +2374,13 @@
       const displayTargetFields = (targetFields || []).filter((f) => !excludeFields.has(f));
 
       // 可变 state: 每个模板字段对应的 mappedField / mappedFields
+      // Balance 字段默认值为 BALANCE_DISABLED_OPTION（与主表格一致）
       let currentDialogMappings = displayTargetFields.map((f) => {
         const existing = (initialMappings || []).find((m) => m.templateField === f);
+        const defaultMappedField = f === 'Balance' ? BALANCE_DISABLED_OPTION : '';
         return {
           templateField: f,
-          mappedField: existing ? String(existing.mappedField || '') : '',
+          mappedField: existing ? String(existing.mappedField || '') : defaultMappedField,
           mappedFields: existing && Array.isArray(existing.mappedFields) ? existing.mappedFields.slice() : []
         };
       });
@@ -2421,18 +2423,30 @@
           const row = document.createElement('tr');
           row.dataset.templateField = entry.templateField;
 
+          const isBalanceField = entry.templateField === 'Balance';
           const isCurrencyLike = entry.templateField === 'Currency';
-          const supportsMultiSelect = !isCurrencyLike;
-          const selectOptions = ['<option value=""></option>']
-            .concat(supportsMultiSelect ? [`<option value="${CONCAT_FIELDS_MAPPING_FIELD}">${CONCAT_FIELDS_MAPPING_FIELD}</option>`] : [])
-            .concat(headerOptions)
-            .join('');
+          const supportsMultiSelect = !isCurrencyLike && !isBalanceField;
+
+          let selectOptions;
+          if (isBalanceField) {
+            // Balance 字段选项与主表格一致：禁用 / 通过发生额计算 / headers
+            selectOptions = [
+              `<option value="${BALANCE_DISABLED_OPTION}">${BALANCE_DISABLED_OPTION}</option>`,
+              `<option value="${BALANCE_CALCULATED_OPTION}">${BALANCE_CALCULATED_OPTION}</option>`
+            ].concat(headerOptions).join('');
+          } else {
+            selectOptions = ['<option value=""></option>']
+              .concat(supportsMultiSelect ? [`<option value="${CONCAT_FIELDS_MAPPING_FIELD}">${CONCAT_FIELDS_MAPPING_FIELD}</option>`] : [])
+              .concat(headerOptions)
+              .join('');
+          }
 
           row.innerHTML = `
             <td>${escapeHtml(entry.templateField)}</td>
             <td>
               <div class="mapping-field-editor">
                 <select class="mapping-select bill-split-mapping-select">${selectOptions}</select>
+                ${supportsMultiSelect ? `
                 <div class="concat-field-picker" hidden>
                   <button class="concat-picker-trigger secondary-btn small" type="button">选择字段</button>
                   <div class="concat-picker-panel" hidden></div>
@@ -2441,6 +2455,7 @@
                     <span class="concat-preview" title=""></span>
                   </div>
                 </div>
+                ` : ''}
               </div>
             </td>
           `;
@@ -2546,9 +2561,10 @@
         const importMap = new Map(imported.map((m) => [m.templateField, m]));
         currentDialogMappings = displayTargetFields.map((f) => {
           const hit = importMap.get(f);
+          const defaultMappedField = f === 'Balance' ? BALANCE_DISABLED_OPTION : '';
           return hit
             ? { templateField: f, mappedField: hit.mappedField, mappedFields: hit.mappedFields }
-            : { templateField: f, mappedField: '', mappedFields: [] };
+            : { templateField: f, mappedField: defaultMappedField, mappedFields: [] };
         });
         rerenderTable();
       }
