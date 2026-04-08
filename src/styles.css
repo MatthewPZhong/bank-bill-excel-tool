@@ -1800,8 +1800,54 @@ select {
   font-size: 13px;
 }
 
-.bill-split-merge-dropdown {
-  min-width: 120px;
+.bill-split-merge-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.bill-split-merge-picker-trigger {
+  min-width: 180px;
+  height: 34px;
+}
+
+.bill-split-merge-picker-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 10;
+  min-width: 220px;
+  max-height: 300px;
+  overflow-y: auto;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 250, 242, 0.98);
+  box-shadow: 0 14px 30px rgba(45, 31, 14, 0.15);
+  padding: 8px 0;
+  margin-top: 4px;
+}
+
+.bill-split-merge-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.bill-split-merge-picker-option:hover {
+  background: rgba(154, 90, 26, 0.06);
+}
+
+.bill-split-merge-picker-option input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.bill-split-merge-picker-empty {
+  padding: 12px 14px;
+  color: var(--muted, #888);
+  font-size: 13px;
+  text-align: center;
 }
 
 .bill-split-row-count-line {

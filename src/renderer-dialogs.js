@@ -2630,7 +2630,10 @@
               <input type="checkbox" class="bill-split-merge-checkbox" />
               <span>合并账单</span>
             </label>
-            <select class="mapping-select bill-split-merge-dropdown" multiple hidden></select>
+            <div class="bill-split-merge-picker" hidden>
+              <button class="bill-split-merge-picker-trigger secondary-btn small" type="button">请选择账单序号</button>
+              <div class="bill-split-merge-picker-panel" hidden></div>
+            </div>
             <button class="secondary-btn small bill-split-merge-done-btn" type="button" hidden>完成</button>
             <button class="icon-close" type="button">×</button>
           </div>
@@ -2679,8 +2682,11 @@
       const nInput = dialog.querySelector('.bill-split-row-count-input');
       const nDoneBtn = dialog.querySelector('.bill-split-row-count-done-btn');
       const mergeCheckbox = dialog.querySelector('.bill-split-merge-checkbox');
-      const mergeDropdown = dialog.querySelector('.bill-split-merge-dropdown');
+      const mergePicker = dialog.querySelector('.bill-split-merge-picker');
+      const mergePickerTrigger = dialog.querySelector('.bill-split-merge-picker-trigger');
+      const mergePickerPanel = dialog.querySelector('.bill-split-merge-picker-panel');
       const mergeDoneBtn = dialog.querySelector('.bill-split-merge-done-btn');
+      let mergeSelectedSeqNos = [];
       const signedSelect = dialog.querySelector('.bill-split-signed-select');
       const byFieldSelect = dialog.querySelector('.bill-split-by-field-select');
       const amountRulesManageBtn = dialog.querySelector('.bill-split-amount-rules-manage-btn');
@@ -2934,26 +2940,87 @@
         }
       });
 
+      function getMergeCandidateSeqNos() {
+        return currentRows
+          .filter((r) => r.rowStatus === 'completed' && (r.mergedGroupSeq === null || r.mergedGroupSeq === undefined))
+          .map((r) => Number(r.seqNo));
+      }
+
+      function updateMergePickerTriggerLabel() {
+        if (!mergePickerTrigger) return;
+        if (mergeSelectedSeqNos.length === 0) {
+          mergePickerTrigger.textContent = '请选择账单序号';
+        } else if (mergeSelectedSeqNos.length <= 5) {
+          mergePickerTrigger.textContent = `已选: ${mergeSelectedSeqNos.join(', ')}`;
+        } else {
+          mergePickerTrigger.textContent = `已选: ${mergeSelectedSeqNos.length} 项`;
+        }
+      }
+
+      function renderMergePickerPanel() {
+        if (!mergePickerPanel) return;
+        mergePickerPanel.replaceChildren();
+        const candidates = getMergeCandidateSeqNos();
+        if (candidates.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'bill-split-merge-picker-empty';
+          empty.textContent = '暂无可合并的已完成账单';
+          mergePickerPanel.appendChild(empty);
+          return;
+        }
+        candidates.forEach((seqNo) => {
+          const option = document.createElement('div');
+          option.className = 'bill-split-merge-picker-option';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = mergeSelectedSeqNos.includes(seqNo);
+          const label = document.createElement('span');
+          label.textContent = String(seqNo);
+          option.append(checkbox, label);
+          option.addEventListener('click', (event) => {
+            if (event.target === checkbox) return;
+            checkbox.checked = !checkbox.checked;
+            checkbox.dispatchEvent(new Event('change'));
+          });
+          checkbox.addEventListener('change', () => {
+            if (checkbox.checked) {
+              if (!mergeSelectedSeqNos.includes(seqNo)) {
+                mergeSelectedSeqNos.push(seqNo);
+                mergeSelectedSeqNos.sort((a, b) => a - b);
+              }
+            } else {
+              mergeSelectedSeqNos = mergeSelectedSeqNos.filter((s) => s !== seqNo);
+            }
+            updateMergePickerTriggerLabel();
+          });
+          mergePickerPanel.appendChild(option);
+        });
+      }
+
+      if (mergePickerTrigger && mergePickerPanel) {
+        mergePickerTrigger.addEventListener('click', () => {
+          const isOpen = !mergePickerPanel.hidden;
+          mergePickerPanel.hidden = isOpen;
+          if (!isOpen) {
+            renderMergePickerPanel();
+          }
+        });
+      }
+
       // 合并账单勾选框
       mergeCheckbox.addEventListener('change', async () => {
         if (mergeCheckbox.checked) {
-          // 显示多选下拉框 + 完成按钮
-          mergeDropdown.hidden = false;
+          // 显示 picker + 完成按钮
+          mergeSelectedSeqNos = [];
+          mergePicker.hidden = false;
           mergeDoneBtn.hidden = false;
-          // 填充候选值（completed 且未合并的行）
-          const candidates = currentRows.filter(
-            (r) => r.rowStatus === 'completed' && (r.mergedGroupSeq === null || r.mergedGroupSeq === undefined)
-          );
-          mergeDropdown.replaceChildren();
-          candidates.forEach((r) => {
-            const opt = document.createElement('option');
-            opt.value = String(r.seqNo);
-            opt.textContent = String(r.seqNo);
-            mergeDropdown.appendChild(opt);
-          });
+          updateMergePickerTriggerLabel();
+          renderMergePickerPanel();
         } else {
-          mergeDropdown.hidden = true;
+          mergePicker.hidden = true;
           mergeDoneBtn.hidden = true;
+          if (mergePickerPanel) mergePickerPanel.hidden = true;
+          mergeSelectedSeqNos = [];
           // 清空所有合并组
           try {
             await desktopApi.templates.clearBillSplitMergeGroups({ templateId: template.id });
@@ -2965,7 +3032,7 @@
       });
 
       mergeDoneBtn.addEventListener('click', async () => {
-        const selectedSeqNos = Array.from(mergeDropdown.selectedOptions).map((opt) => Number(opt.value));
+        const selectedSeqNos = mergeSelectedSeqNos.slice();
         if (selectedSeqNos.length < 2) {
           openModal(createAlertDialog('合并账单至少需要选择 2 个账单序号', {
             onConfirm: () => { openModal(overlay); }
@@ -2980,16 +3047,11 @@
           if (result && result.status === 'success') {
             await refreshFromServer();
             // 刷新后重建候选列表
-            const candidates = currentRows.filter(
-              (r) => r.rowStatus === 'completed' && (r.mergedGroupSeq === null || r.mergedGroupSeq === undefined)
-            );
-            mergeDropdown.replaceChildren();
-            candidates.forEach((r) => {
-              const opt = document.createElement('option');
-              opt.value = String(r.seqNo);
-              opt.textContent = String(r.seqNo);
-              mergeDropdown.appendChild(opt);
-            });
+            mergeSelectedSeqNos = [];
+            updateMergePickerTriggerLabel();
+            if (mergePickerPanel) {
+              mergePickerPanel.hidden = true;
+            }
           } else {
             openModal(createAlertDialog(result?.message || '合并失败', {
               onConfirm: () => { openModal(overlay); }
@@ -3101,6 +3163,14 @@
       dialog.querySelector('.icon-close').addEventListener('click', () => {
         if (typeof onClose === 'function') onClose();
         else closeModal();
+      });
+
+      dialog.addEventListener('mousedown', (event) => {
+        if (!event.target.closest('.bill-split-merge-picker')) {
+          if (mergePickerPanel && !mergePickerPanel.hidden) {
+            mergePickerPanel.hidden = true;
+          }
+        }
       });
 
       rerenderTable();
