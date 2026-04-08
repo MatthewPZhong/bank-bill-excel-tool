@@ -25,8 +25,8 @@
 | G | 4 方互斥（UI 层 + 保存层） | 9 |
 | H | 合并输出业务逻辑（导入阶段求和 / 净值法 / Currency 一致性） | 10（fix2 +1 单行 0 值过滤） |
 | I | 数据持久化 + bundle 兼容（含 bundleVersion = 3） | 10（fix2 +1 冷启动回显） |
-| J | 回归 + 边界 + 错误处理 | 8 |
-| **合计** | | **101**（**2026-04-08 fix2 新增 4 条**） |
+| J | 回归 + 边界 + 错误处理 | 10（**PR #16 review +2**：TC-V149-098 Fix A / TC-V149-099 Fix B） |
+| **合计** | | **103**（**2026-04-08 fix2 +4** + **2026-04-09 PR #16 review +2**） |
 
 | 测试类型分布 | 数量 |
 |---|---|
@@ -1285,8 +1285,34 @@
 | 类型 | 性能 |
 | 优先级 | P2 |
 | 前置条件 | 模板 T1 |
-| 测试步骤 | 1. 打开弹框 2<br>2. 输入 N=99 并点「完成」<br>3. 观察渲染 |
+| 测试步骤 | 1. 打开弹框 2<br>2. 输入 N=99 并点「拆」（**2026-04-08 fix2 override**：按钮文案从 `完成` 改为 `拆`）<br>3. 观察渲染 |
 | 预期结果 | 99 行六列表格渲染完成；无明显卡顿（渲染时间 < 2 秒）；滚动流畅；不使用 `cloneNode` 创建 DOM（NFR-6） |
+
+#### TC-V149-098 reuseModuleMapping = false 时弹框 1 映射生效（**2026-04-09 PR #16 review P1 Fix A 新增**）
+
+**2026-04-09 PR #16 review P1 Fix A 新增**（commit `d7f07ed`）：弹框 1 配的 `billSplitMappings` 在导出时从未被 `file-service.js` 读取，用户配"复用 = 否"+独立 Description 映射，输出仍然吃主模板的 Description。修复：`main.js buildBillSplitMergeConfig` 新增 `billSplitMappingByTargetField`，`file-service.js` 提取 `computeMappedRow` helper，`reuseModuleMapping=false` 路径下用弹框 1 lookup 重算 base row。
+
+| 项目 | 内容 |
+|------|------|
+| 关联AC | ACI-9（reuseModuleMapping=false 正确生效） |
+| 类型 | 功能 / 回归 |
+| 优先级 | P0 |
+| 前置条件 | 模板 T1，源文件 `DATE,MAIN_MEMO,SPLIT_MEMO,AMT1_C,AMT1_D,AMT2_C,AMT2_D` 一行 `2026-04-09,main-memo-val,split-memo-val,100,0,50,0`；主模板 `Description → MAIN_MEMO`；「复用模块字段的映射关系」= 否；弹框 1 中 `Description → SPLIT_MEMO`；弹框 2 N=2（两行均 completed），第 1 行 `Credit=AMT1_C, Debit=AMT1_D`，第 2 行 `Credit=AMT2_C, Debit=AMT2_D` |
+| 测试步骤 | 1. 保存模板<br>2. 导入源文件<br>3. 检查输出 Excel 的 Description 列 |
+| 预期结果 | **输出 2 行**（第 1 拆分行 credit=100, 第 2 拆分行 credit=50）；**两行的 `Description` 列都等于 `split-memo-val`**（来自 `SPLIT_MEMO` 列），**不是** `main-memo-val`。若看到 `main-memo-val`，说明 Fix A 失效 / 回归。<br><br>**反向对照**：把「复用模块字段的映射关系」切回 `是`，重新导入，Description 应变成 `main-memo-val`（主模板映射路径保持不变）。 |
+
+#### TC-V149-099 导出时只包含 completed 拆分行（**2026-04-09 PR #16 review P1 Fix B 新增**）
+
+**2026-04-09 PR #16 review P1 Fix B 新增**（commit `59dc93d`）：`main.js buildBillSplitMergeConfig` 原本未过滤 `rowStatus`，draft 行也被透传到 `file-service.js` 并参与展开。修复：两层 filter 双保险（main.js + file-service.js）。
+
+| 项目 | 内容 |
+|------|------|
+| 关联AC | ACI-1（"至少 1 行 row_status = completed 才展开"的反向验证） |
+| 类型 | 功能 / 回归 |
+| 优先级 | P0 |
+| 前置条件 | 模板 T1，弹框 2 配置 N=3，三行中**仅第 1 行点"完成"标为 `completed`**，其余两行保留为 `draft`；主模板外层切「是否拆分/合并明细账单 = 是」保存（应通过 ACI-11 校验，因为至少有 1 行 completed） |
+| 测试步骤 | 1. 保存模板<br>2. 导入一行源数据<br>3. 检查输出行数 |
+| 预期结果 | **输出恰好 1 行**（只展开第 1 个 completed 行）；draft 的第 2 / 第 3 行**不参与导出**；导入不报错。<br><br>**边界补充**：把第 1 行也切回 `draft`（弹框 2 内点"编辑"），此时所有行都是 draft。保存模板时 ACI-11 校验（`BILL_SPLIT_CONFIG_MISSING`）会阻断保存，提示"请先在拆分/合并账单映射关系管理中配置至少一行拆分账单配置"。若绕过保存（例如直接改 DB）触发导入，输出行数为 0（静默无输出，不报错）。<br><br>**DB 验证**：导出后查 `template_bill_split_rows` 表，draft 行数据原样保留（未被导出流程破坏或清空）。 |
 
 ---
 
@@ -1305,8 +1331,8 @@
 | G. 4 方互斥 | TC-V149-063 ~ TC-V149-071 | 9 |
 | H. 合并输出业务逻辑 | TC-V149-072 ~ TC-V149-080 + TC-V149-075a | 10（fix2 +1） |
 | I. 持久化 + bundle 兼容 | TC-V149-081 ~ TC-V149-089 + TC-V149-081a | 10（fix2 +1） |
-| J. 回归 + 边界 + 错误处理 | TC-V149-090 ~ TC-V149-097 | 8 |
-| **合计** | | **101**（**2026-04-08 fix2 新增 4 条**） |
+| J. 回归 + 边界 + 错误处理 | TC-V149-090 ~ TC-V149-097 + TC-V149-098 + TC-V149-099 | 10（PR #16 review +2） |
+| **合计** | | **103**（fix2 +4 + PR #16 review +2） |
 
 ### 5.2 AC → TC 映射
 
@@ -1397,7 +1423,7 @@
 | AC1-81 | TC-V149-088 |
 | AC1-82 | TC-V149-089 |
 | AC1-82a | TC-V149-038, TC-V149-039 |
-| ACI-1 | TC-V149-072 |
+| ACI-1 | TC-V149-072, **TC-V149-099**（PR #16 review P1 Fix B：只 completed 行参与导出的反向验证） |
 | ACI-2 | TC-V149-072 |
 | ACI-3 | TC-V149-079 |
 | ACI-4 | TC-V149-080 |
@@ -1406,7 +1432,7 @@
 | ACI-7 | TC-V149-075, TC-V149-093（**2026-04-08 fix2 override**：均改为静默过滤验证） |
 | ACI-7a | TC-V149-075a（**2026-04-08 fix2 新增**） |
 | ACI-8 | （隐含于 TC-V149-072/077：默认「复用 = 是」路径） |
-| ACI-9 | （隐含于 TC-V149-081 的弹框 1 路径） |
+| ACI-9 | （隐含于 TC-V149-081 的弹框 1 路径），**TC-V149-098**（PR #16 review P1 Fix A：reuseModuleMapping=false 时弹框 1 映射真正生效的端到端验证） |
 | ACI-10 | TC-V149-095 |
 | ACI-11 | TC-V149-094 |
 | ACI-12 | TC-V149-096 |
@@ -1488,3 +1514,4 @@ Tester 在编写本文档过程中**未发现** PRD 与 TechDoc 之间的矛盾�
 |------|---------|------|
 | 2026-04-08 | 初版生成，对齐 PRD-v1.4.9.md 全部 95 条 AC（AC1-1 ~ AC1-82 + AC1-82a 主 AC + ACI-1 ~ ACI-12 导入语义 AC），共 **97 个 TC**，覆盖 A-J 10 个模块；重点覆盖 Q-OT6=C 的 4 条删除路径（TC-V149-037 ~ TC-V149-040）和 Q-OT2=B 的独立表语义（TC-V149-050） | Tester |
 | 2026-04-08 fix2 | **基于 v1.4.9 实施后用户实测反馈同步 TestCases**，对应代码 commit 范围 `fc91550..57dbd38`（8 个 fix commit）、PRD 同步 commit `3aea829`、TechDoc 同步 commit `82b9c09`。**新增 4 条 TC**：(1) **TC-V149-030a**：弹框 2 右下角「完成」按钮存在 + 点击等同 × 关闭（Fix #7，AC1-27 override + AC1-27a 新增）。(2) **TC-V149-030b**：合并账单下拉框改为 checkbox-panel picker（Fix #1）。(3) **TC-V149-075a**：单行拆分输出 Credit/Debit 全 0 静默丢弃（Fix #2，AC1-62a / ACI-7a 新增）。(4) **TC-V149-081a**：冷启动首次打开弹框 2 数据回显（Fix #6 回归验证）。**修订 6 条既有 TC**：(1) TC-V149-010 弹框 1 尺寸从"主弹框的一半"改为"80vw"（Fix #4）。(2) TC-V149-013 弹框 1 Balance 字段选项澄清为与主表格一致（Fix #5）。(3) TC-V149-022 「需要拆分成几份账单」按钮文案从 `完成` 改为 `拆`，宽度 66%（Fix #8）。(4) TC-V149-024 ~ 026 测试步骤中按钮文本同步改为 `拆`。(5) TC-V149-075 合并组净值 = 0 预期从"报错阻断"改为"静默跳过整个组"（Fix #2）。(6) TC-V149-093 同步改为"静默跳过"。AC 覆盖度：95 → 98（新增 AC1-27a / AC1-62a / ACI-7a），TC 总数：97 → 101。各模块计数：C 10 → 12，H 9 → 10，I 9 → 10。 | dev-3（根据 team-lead 文档同步指令） |
+| 2026-04-09 PR #16 review | **基于 PR #16 review 阶段 user + Codex 提的 2 个 P1 block-merge fixes 同步 TestCases**，对应代码 commit `59dc93d` + `d7f07ed`、PRD/TechDoc 同文件内同步。**新增 2 条 TC**：(1) **TC-V149-098**（P1 Fix A 回归验证）：reuseModuleMapping = false 时弹框 1 独立 Description 映射真正生效——源文件同时含 `MAIN_MEMO` / `SPLIT_MEMO` 两列，主模板 `Description → MAIN_MEMO`，弹框 1 `Description → SPLIT_MEMO`，导出应使用 `SPLIT_MEMO`（而不是 `MAIN_MEMO`）；反向对照把"复用"切回"是"应回到 `MAIN_MEMO`。验证 ACI-9 原本仅"隐含"覆盖的实际导出路径。(2) **TC-V149-099**（P1 Fix B 回归验证）：弹框 2 配 N=3 但仅 1 行 completed 其余 draft，导入时输出**恰好 1 行**，draft 行不参与展开；边界补充全 draft 情况下保存模板会触发 ACI-11 校验 `BILL_SPLIT_CONFIG_MISSING` 阻断。验证 ACI-1 的反向语义（"只有 completed 行才展开"）。TC 总数：101 → 103；模块 J：8 → 10；不新增 AC（两条 TC 都是对已有 AC 的更严格回归验证）。 | dev-3（根据 team-lead PR #16 review fix 指令） |
