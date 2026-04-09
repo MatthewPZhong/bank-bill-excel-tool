@@ -56,8 +56,36 @@ function createStatementGenerationHelpers(deps) {
     return unmatched;
   }
 
+  // v1.4.9 PR #16 review P1 Fix C: 平行于 collectUnmatchedAmountSplitFiles，
+  // 收集启用了拆分/合并但所有源行都未产出任何拆分输出行的文件名（PRD ACI-12 / TC-V149-096）。
+  // 触发条件: billSplitMatchStats.enabled === true 且 totalRows > 0 且 outputRows === 0。
+  // 典型场景: 用户配了 billSplit 但拆分行的 source field 都被 0 值过滤掉 / 或
+  // 每行 credit+debit 都为 0 / 或合并组净值都为 0，导致整个文件输出为空。
+  function collectUnmatchedBillSplitFiles(fileEntries) {
+    const unmatched = [];
+
+    fileEntries.forEach((entry) => {
+      const stats = entry?.detailRows?.billSplitMatchStats;
+      if (!stats || !stats.enabled) {
+        return;
+      }
+      if (stats.totalRows > 0 && stats.outputRows === 0) {
+        const filePath = entry.filePath || '';
+        const displayName = filePath && filePath !== '__cached__'
+          ? path.basename(filePath)
+          : filePath;
+        if (displayName) {
+          unmatched.push(displayName);
+        }
+      }
+    });
+
+    return unmatched;
+  }
+
   function buildPreparedStatementBatchFromEntries({ config, fileEntries = [] }) {
     const unmatchedFiles = collectUnmatchedAmountSplitFiles(fileEntries);
+    const unmatchedBillSplitFiles = collectUnmatchedBillSplitFiles(fileEntries);
     const detailRows = mergeMappedDetailRows(fileEntries.map((entry) => entry.detailRows));
     const selectedMerchantId = config.selectedMerchantId || resolveSinglePreparedFieldValue(detailRows, 'MerchantId', {
       buildFieldIndexMap,
@@ -76,7 +104,8 @@ function createStatementGenerationHelpers(deps) {
       selectedMerchantId,
       selectedCurrency,
       inputFilePaths: fileEntries.map((entry) => entry.filePath),
-      unmatchedAmountSplitFiles: unmatchedFiles
+      unmatchedAmountSplitFiles: unmatchedFiles,
+      unmatchedBillSplitFiles
     };
   }
 
@@ -145,11 +174,18 @@ function createStatementGenerationHelpers(deps) {
     const unmatchedAmountSplitFiles = Array.isArray(generatedFiles.unmatchedAmountSplitFiles)
       ? generatedFiles.unmatchedAmountSplitFiles.slice()
       : [];
+    // v1.4.9 PR #16 review P1 Fix C
+    const unmatchedBillSplitFiles = Array.isArray(generatedFiles.unmatchedBillSplitFiles)
+      ? generatedFiles.unmatchedBillSplitFiles.slice()
+      : [];
 
     if (manualBalanceWarning) {
       const manualResult = buildManualBalanceRequiredResult(manualBalanceWarning.prompt, generatedFiles);
       if (unmatchedAmountSplitFiles.length) {
         manualResult.unmatchedAmountSplitFiles = unmatchedAmountSplitFiles;
+      }
+      if (unmatchedBillSplitFiles.length) {
+        manualResult.unmatchedBillSplitFiles = unmatchedBillSplitFiles;
       }
       return manualResult;
     }
@@ -181,6 +217,9 @@ function createStatementGenerationHelpers(deps) {
       if (unmatchedAmountSplitFiles.length) {
         warningResult.unmatchedAmountSplitFiles = unmatchedAmountSplitFiles;
       }
+      if (unmatchedBillSplitFiles.length) {
+        warningResult.unmatchedBillSplitFiles = unmatchedBillSplitFiles;
+      }
 
       return warningResult;
     }
@@ -202,7 +241,8 @@ function createStatementGenerationHelpers(deps) {
       message: generatedFiles.message,
       detailReady: Boolean(generatedFiles.detail),
       balanceReady: Boolean(generatedFiles.balance),
-      unmatchedAmountSplitFiles
+      unmatchedAmountSplitFiles,
+      unmatchedBillSplitFiles
     };
   }
 

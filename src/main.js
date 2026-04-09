@@ -108,12 +108,20 @@ const AMOUNT_BASED_NAME_MAPPING_FIELD = '根据发生额做映射的户名';
 const AMOUNT_BASED_ACCOUNT_MAPPING_FIELD = '根据发生额做映射的账户号';
 const AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD = '按字段区分发生额';
 const AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION = '是';
-const SUPPORTED_BUNDLE_VERSION = 2;
+const BILL_SPLIT_MERGE_MAPPING_FIELD = '是否拆分/合并明细账单';
+const BILL_SPLIT_MERGE_ENABLED_OPTION = '是';
+const REUSE_MODULE_MAPPING_FIELD = '复用模块字段的映射关系';
+const REUSE_MODULE_DEFAULT_OPTION = '是';
+const SUPPORTED_BUNDLE_VERSION = 3;
 const ADVANCED_MAPPING_FIELDS = [
   SIGNED_AMOUNT_MAPPING_FIELD,
   AMOUNT_BASED_NAME_MAPPING_FIELD,
   AMOUNT_BASED_ACCOUNT_MAPPING_FIELD,
   AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD
+];
+const BILL_SPLIT_GROUP_FIELDS = [
+  BILL_SPLIT_MERGE_MAPPING_FIELD,
+  REUSE_MODULE_MAPPING_FIELD
 ];
 const NEW_ACCOUNT_EXPORT_NAME = 'NEW_BALANCE';
 const BACKGROUND_IMAGE_LIMITS = Object.freeze({
@@ -959,6 +967,12 @@ function readTemplateBundleFile(filePath) {
     bigAccounts: Array.isArray(item.bigAccounts) ? item.bigAccounts : [],
     fixedAssignments: Array.isArray(item.fixedAssignments) ? item.fixedAssignments : [],
     amountSplitRules: Array.isArray(item.amountSplitRules) ? item.amountSplitRules : [],
+    billSplitMappings: Array.isArray(item.billSplitMappings) ? item.billSplitMappings : [],
+    billSplitRows: Array.isArray(item.billSplitRows) ? item.billSplitRows : [],
+    billSplitAmountRules: Array.isArray(item.billSplitAmountRules) ? item.billSplitAmountRules : [],
+    billSplitMeta: item.billSplitMeta && typeof item.billSplitMeta === 'object'
+      ? { signedAmountSourceField: normalizeCell(item.billSplitMeta.signedAmountSourceField) }
+      : { signedAmountSourceField: '' },
     dateFormat: normalizeCell(item.dateFormat) || 'auto'
   }));
 }
@@ -1162,7 +1176,7 @@ function buildMappingTargetFields(enumValues) {
 }
 
 function buildManagedMappingFields(enumValues) {
-  return buildMappingTargetFields(enumValues).concat(ADVANCED_MAPPING_FIELDS);
+  return buildMappingTargetFields(enumValues).concat(ADVANCED_MAPPING_FIELDS).concat(BILL_SPLIT_GROUP_FIELDS);
 }
 
 function getBalanceTemplatePath() {
@@ -1501,6 +1515,7 @@ function getTemplateMappingConfig(templateId) {
     enumValues,
     targetFields: buildManagedMappingFields(enumValues),
     advancedMappingFields: ADVANCED_MAPPING_FIELDS.slice(),
+    billSplitGroupFields: BILL_SPLIT_GROUP_FIELDS.slice(),
     exportTargetFields: buildExportTargetFields(enumValues),
     mappings,
     exportMappings,
@@ -1520,7 +1535,38 @@ function getTemplateMappingConfig(templateId) {
           mappedField: normalizeCell(rule.mappedField),
           rowIndex: Number(rule.rowIndex || 0)
         }))
-      : []
+      : [],
+    billSplitMappings: Array.isArray(templatePayload.billSplitMappings)
+      ? templatePayload.billSplitMappings.map((m) => ({
+          templateField: normalizeCell(m.templateField),
+          mappedField: normalizeCell(m.mappedField),
+          mappedFields: Array.isArray(m.mappedFields) ? m.mappedFields.slice() : [],
+          rowIndex: Number(m.rowIndex || 0)
+        }))
+      : [],
+    billSplitRows: Array.isArray(templatePayload.billSplitRows)
+      ? templatePayload.billSplitRows.map((r) => ({
+          seqNo: Number(r.seqNo),
+          currencySourceField: normalizeCell(r.currencySourceField),
+          creditSourceField: normalizeCell(r.creditSourceField),
+          debitSourceField: normalizeCell(r.debitSourceField),
+          amountSourceField: normalizeCell(r.amountSourceField),
+          rowStatus: r.rowStatus === 'completed' ? 'completed' : 'draft',
+          mergedGroupSeq: r.mergedGroupSeq === null || r.mergedGroupSeq === undefined ? null : Number(r.mergedGroupSeq)
+        }))
+      : [],
+    billSplitAmountRules: Array.isArray(templatePayload.billSplitAmountRules)
+      ? templatePayload.billSplitAmountRules.map((rule) => ({
+          targetField: normalizeCell(rule.targetField),
+          conditionField: normalizeCell(rule.conditionField),
+          conditionValue: normalizeCell(rule.conditionValue),
+          mappedField: normalizeCell(rule.mappedField),
+          rowIndex: Number(rule.rowIndex || 0)
+        }))
+      : [],
+    billSplitMeta: templatePayload.billSplitMeta && typeof templatePayload.billSplitMeta === 'object'
+      ? { signedAmountSourceField: normalizeCell(templatePayload.billSplitMeta.signedAmountSourceField) }
+      : { signedAmountSourceField: '' }
   };
 }
 
@@ -2610,17 +2656,23 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
   const creditAmountSourceField = normalizeCell(mappingByTarget.get('Credit Amount')?.mappedField);
   const debitAmountSourceField = normalizeCell(mappingByTarget.get('Debit Amount')?.mappedField);
   const amountSplitByFieldOption = normalizeCell(mappingByTarget.get(AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD)?.mappedField);
+  const billSplitMergeOption = normalizeCell(mappingByTarget.get(BILL_SPLIT_MERGE_MAPPING_FIELD)?.mappedField);
   const usesSignedAmountMapping = signedAmountSourceField !== '';
   const usesDirectAmountMapping = creditAmountSourceField !== '' || debitAmountSourceField !== '';
   const usesAmountSplitByField = amountSplitByFieldOption === AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION;
+  const usesBillSplitMerge = billSplitMergeOption === BILL_SPLIT_MERGE_ENABLED_OPTION;
 
-  const enabledAmountModes = [usesDirectAmountMapping, usesSignedAmountMapping, usesAmountSplitByField]
-    .filter(Boolean).length;
+  const enabledAmountModes = [
+    usesDirectAmountMapping,
+    usesSignedAmountMapping,
+    usesAmountSplitByField,
+    usesBillSplitMerge
+  ].filter(Boolean).length;
 
   if (enabledAmountModes > 1) {
     throw new FileValidationError(
       'FILE_READ',
-      '“Credit Amount / Debit Amount”、“按正负号拆分的发生额”与“按字段区分发生额”三者只能启用其中一种'
+      'Credit Amount / Debit Amount 直接映射、按正负号拆分的发生额、按字段区分发生额、拆分/合并明细账单 四者只能启用其中一种'
     );
   }
 
@@ -2709,6 +2761,27 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
         mappedField: normalizedSourceField === AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION
           ? AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION
           : '',
+        mappedFields: []
+      });
+      return;
+    }
+
+    if (targetField === BILL_SPLIT_MERGE_MAPPING_FIELD) {
+      cleanedMappings.push({
+        templateField: targetField,
+        mappedField: normalizedSourceField === BILL_SPLIT_MERGE_ENABLED_OPTION
+          ? BILL_SPLIT_MERGE_ENABLED_OPTION
+          : '',
+        mappedFields: []
+      });
+      return;
+    }
+
+    if (targetField === REUSE_MODULE_MAPPING_FIELD) {
+      const value = normalizedSourceField === '否' ? '否' : REUSE_MODULE_DEFAULT_OPTION;
+      cleanedMappings.push({
+        templateField: targetField,
+        mappedField: value,
         mappedFields: []
       });
       return;
@@ -2938,11 +3011,16 @@ function registerTemplateHandlers() {
         template: buildTemplateSummary(mappingConfig.template),
         targetFields: mappingConfig.targetFields,
         advancedMappingFields: mappingConfig.advancedMappingFields,
+        billSplitGroupFields: mappingConfig.billSplitGroupFields,
         exportTargetFields: mappingConfig.exportTargetFields,
         mappings: mappingConfig.mappings,
         bigAccounts: mappingConfig.bigAccounts,
         fixedAssignments: mappingConfig.fixedAssignments,
         amountSplitRules: mappingConfig.amountSplitRules,
+        billSplitMappings: mappingConfig.billSplitMappings,
+        billSplitRows: mappingConfig.billSplitRows,
+        billSplitAmountRules: mappingConfig.billSplitAmountRules,
+        billSplitMeta: mappingConfig.billSplitMeta,
         dateFormat: mappingConfig.template.dateFormat || 'auto'
       };
     } catch (error) {
@@ -3011,6 +3089,30 @@ function registerTemplateHandlers() {
             step: '保存模板映射',
             message: '请先在"发生额映射关系管理"中配置完整的两行规则',
             errorCode: 'AMOUNT_SPLIT_RULES_MISSING',
+            context: {
+              templateId: payload.templateId,
+              templateName: template.name
+            },
+            templateName: template.name
+          });
+        }
+      }
+
+      // v1.4.9 ACI-11: 开关 = 是 但弹框 2 无 completed 行 → 报错
+      const usesBillSplitMerge = templateConfiguration.mappings.some(
+        (mapping) => normalizeCell(mapping.templateField) === BILL_SPLIT_MERGE_MAPPING_FIELD
+          && normalizeCell(mapping.mappedField) === BILL_SPLIT_MERGE_ENABLED_OPTION
+      );
+
+      if (usesBillSplitMerge) {
+        const existingBillSplitRows = database.getBillSplitRows(payload.templateId) || [];
+        const completedRows = existingBillSplitRows.filter((row) => row.rowStatus === 'completed');
+
+        if (completedRows.length === 0) {
+          return createErrorResult({
+            step: '保存模板映射',
+            message: '请先在"拆分/合并账单映射关系管理"中配置至少一行拆分账单配置',
+            errorCode: 'BILL_SPLIT_CONFIG_MISSING',
             context: {
               templateId: payload.templateId,
               templateName: template.name
@@ -3263,6 +3365,76 @@ function registerTemplateHandlers() {
             normalizedAmountSplitRules
           );
 
+          // v1.4.9: import bill-split/merge config (4 tables)
+          const normalizedBillSplitMappings = Array.isArray(entry.billSplitMappings)
+            ? entry.billSplitMappings
+                .map((mapping, index) => ({
+                  templateField: normalizeCell(mapping?.templateField),
+                  mappedField: normalizeCell(mapping?.mappedField),
+                  mappedFields: Array.isArray(mapping?.mappedFields)
+                    ? mapping.mappedFields.map((value) => normalizeCell(value)).filter((value) => value !== '')
+                    : [],
+                  rowIndex: Number.isInteger(mapping?.rowIndex) ? mapping.rowIndex : index
+                }))
+                .filter((mapping) => mapping.templateField && (mapping.mappedField || mapping.mappedFields.length > 0))
+            : [];
+          database.saveBillSplitMappings(template.id, normalizedBillSplitMappings);
+
+          const normalizedBillSplitRows = Array.isArray(entry.billSplitRows)
+            ? entry.billSplitRows
+                .map((row) => ({
+                  seqNo: Number(row?.seqNo),
+                  currencySourceField: normalizeCell(row?.currencySourceField),
+                  creditSourceField: normalizeCell(row?.creditSourceField),
+                  debitSourceField: normalizeCell(row?.debitSourceField),
+                  amountSourceField: normalizeCell(row?.amountSourceField),
+                  rowStatus: row?.rowStatus === 'completed' ? 'completed' : 'draft',
+                  mergedGroupSeq: row?.mergedGroupSeq === null || row?.mergedGroupSeq === undefined
+                    ? null
+                    : Number(row.mergedGroupSeq)
+                }))
+                .filter((row) => Number.isInteger(row.seqNo) && row.seqNo >= 1)
+                .sort((a, b) => a.seqNo - b.seqNo)
+            : [];
+          database.saveBillSplitRowCount(template.id, normalizedBillSplitRows.length);
+          normalizedBillSplitRows.forEach((row) => {
+            database.saveBillSplitRow(template.id, row);
+          });
+          // Restore merge groups
+          database.clearBillSplitMergeGroups(template.id);
+          const groupsByMin = new Map();
+          normalizedBillSplitRows.forEach((row) => {
+            if (row.mergedGroupSeq === null || row.mergedGroupSeq === undefined) {
+              return;
+            }
+            const key = Number(row.mergedGroupSeq);
+            if (!groupsByMin.has(key)) {
+              groupsByMin.set(key, []);
+            }
+            groupsByMin.get(key).push(row.seqNo);
+          });
+          groupsByMin.forEach((seqNos) => {
+            if (seqNos.length >= 2) {
+              database.saveBillSplitMergeGroup(template.id, seqNos);
+            }
+          });
+
+          const normalizedBillSplitAmountRules = Array.isArray(entry.billSplitAmountRules)
+            ? entry.billSplitAmountRules
+                .map((rule, index) => ({
+                  targetField: normalizeCell(rule?.targetField),
+                  conditionField: normalizeCell(rule?.conditionField),
+                  conditionValue: normalizeCell(rule?.conditionValue),
+                  mappedField: normalizeCell(rule?.mappedField),
+                  rowIndex: Number.isInteger(rule?.rowIndex) ? rule.rowIndex : index
+                }))
+            : [];
+          database.saveBillSplitAmountRules(template.id, normalizedBillSplitAmountRules);
+
+          database.saveBillSplitMeta(template.id, {
+            signedAmountSourceField: normalizeCell(entry.billSplitMeta?.signedAmountSourceField)
+          });
+
           if (existingTemplate) {
             updatedCount += 1;
           } else {
@@ -3407,6 +3579,471 @@ function registerTemplateHandlers() {
         templateName: template?.name || ''
       });
     }
+  });
+
+  // ===== v1.4.9 bill split / merge handlers =====
+
+  ipcMain.handle('template:get-bill-split-config', (_event, templateId) => {
+    templateId = Number(templateId);
+    try {
+      const template = database.getTemplate(templateId);
+      if (!template) {
+        return createErrorResult({
+          step: '读取拆分账单配置',
+          message: '未找到对应模板',
+          errorCode: 'TEMPLATE_NOT_FOUND',
+          context: { templateId }
+        });
+      }
+      const fullMapping = database.getTemplateMappings(templateId);
+      const billSplitMappings = database.getBillSplitMappings(templateId) || [];
+      const billSplitRows = database.getBillSplitRows(templateId) || [];
+      const billSplitAmountRules = database.getBillSplitAmountRules(templateId) || [];
+      const billSplitMeta = database.getBillSplitMeta(templateId) || { signedAmountSourceField: '' };
+      const enabled = ((fullMapping?.mappings || [])
+        .find((m) => normalizeCell(m.templateField) === BILL_SPLIT_MERGE_MAPPING_FIELD)?.mappedField || '')
+        === BILL_SPLIT_MERGE_ENABLED_OPTION;
+      const reuseModule = ((fullMapping?.mappings || [])
+        .find((m) => normalizeCell(m.templateField) === REUSE_MODULE_MAPPING_FIELD)?.mappedField || REUSE_MODULE_DEFAULT_OPTION)
+        === REUSE_MODULE_DEFAULT_OPTION;
+      return {
+        status: 'success',
+        enabled,
+        reuseModule,
+        billSplitMappings,
+        billSplitRows,
+        billSplitAmountRules,
+        billSplitMeta
+      };
+    } catch (error) {
+      return createErrorResult({
+        step: '读取拆分账单配置',
+        message: '读取拆分账单配置失败，请导出报错文件查看详情',
+        errorCode: 'BILL_SPLIT_CONFIG_READ_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId }
+      });
+    }
+  });
+
+  ipcMain.handle('template:save-bill-split-mappings', (_event, payload = {}) => {
+    const templateId = Number(payload?.templateId);
+    let template = null;
+    try {
+      template = database.getTemplate(templateId);
+      if (!template) {
+        return createErrorResult({
+          step: '保存拆分账单字段映射',
+          message: '未找到对应模板',
+          errorCode: 'TEMPLATE_NOT_FOUND',
+          context: { templateId }
+        });
+      }
+      const validated = validateBillSplitMappingsPayload(payload.mappings, template);
+      database.saveBillSplitMappings(templateId, validated);
+      syncTemplateLibraryFile();
+      return { status: 'success', message: '拆分账单字段映射保存成功' };
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return createErrorResult({
+          step: '保存拆分账单字段映射',
+          message: error.message,
+          errorCode: error.code,
+          originalError: error,
+          context: { templateId, templateName: template?.name || '' },
+          templateName: template?.name || ''
+        });
+      }
+      return createErrorResult({
+        step: '保存拆分账单字段映射',
+        message: '拆分账单字段映射保存失败，请导出报错文件查看详情',
+        errorCode: 'BILL_SPLIT_MAPPINGS_SAVE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId, templateName: template?.name || '' },
+        templateName: template?.name || ''
+      });
+    }
+  });
+
+  ipcMain.handle('template:save-bill-split-row-count', (_event, payload = {}) => {
+    const templateId = Number(payload?.templateId);
+    const nextN = Number(payload?.nextN);
+    try {
+      if (!Number.isInteger(nextN) || nextN < 1 || nextN > 99) {
+        throw new FileValidationError('FILE_READ', '拆分账单的份数必须为 1 ~ 99 之间的整数');
+      }
+      database.saveBillSplitRowCount(templateId, nextN);
+      const currentRows = database.getBillSplitRows(templateId) || [];
+      syncTemplateLibraryFile();
+      return { status: 'success', currentRows };
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return createErrorResult({
+          step: '设置拆分账单行数',
+          message: error.message,
+          errorCode: error.code,
+          originalError: error,
+          context: { templateId, nextN }
+        });
+      }
+      return createErrorResult({
+        step: '设置拆分账单行数',
+        message: '设置拆分账单行数失败，请导出报错文件查看详情',
+        errorCode: 'BILL_SPLIT_ROW_COUNT_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId, nextN }
+      });
+    }
+  });
+
+  ipcMain.handle('template:save-bill-split-row', (_event, payload = {}) => {
+    const templateId = Number(payload?.templateId);
+    try {
+      validateBillSplitRowPayload(payload?.row);
+      database.saveBillSplitRow(templateId, payload.row);
+      syncTemplateLibraryFile();
+      return { status: 'success' };
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return createErrorResult({
+          step: '保存拆分账单单行',
+          message: error.message,
+          errorCode: error.code,
+          originalError: error,
+          context: { templateId }
+        });
+      }
+      return createErrorResult({
+        step: '保存拆分账单单行',
+        message: '保存拆分账单单行失败，请导出报错文件查看详情',
+        errorCode: 'BILL_SPLIT_ROW_SAVE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId }
+      });
+    }
+  });
+
+  ipcMain.handle('template:preview-delete-bill-split-row', (_event, payload = {}) => {
+    const templateId = Number(payload?.templateId);
+    const seqNo = Number(payload?.seqNo);
+    try {
+      const allRows = database.getBillSplitRows(templateId) || [];
+      const target = allRows.find((r) => r.seqNo === seqNo);
+      if (!target) {
+        return { status: 'success', dissolvedGroups: [] };
+      }
+      const dissolved = new Set();
+      if (target.mergedGroupSeq !== null && target.mergedGroupSeq !== undefined) {
+        dissolved.add(Number(target.mergedGroupSeq));
+      }
+      for (const row of allRows) {
+        if (row.mergedGroupSeq !== null && row.mergedGroupSeq !== undefined && row.seqNo >= seqNo && row.seqNo !== seqNo) {
+          dissolved.add(Number(row.mergedGroupSeq));
+        }
+      }
+      return { status: 'success', dissolvedGroups: Array.from(dissolved).sort((a, b) => a - b) };
+    } catch (error) {
+      return createErrorResult({
+        step: '预演删除拆分账单行',
+        message: '预演删除失败，请导出报错文件查看详情',
+        errorCode: 'BILL_SPLIT_PREVIEW_DELETE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId, seqNo }
+      });
+    }
+  });
+
+  ipcMain.handle('template:delete-bill-split-row', (_event, payload = {}) => {
+    const templateId = Number(payload?.templateId);
+    const seqNo = Number(payload?.seqNo);
+    try {
+      const { dissolvedGroups } = database.deleteBillSplitRow(templateId, seqNo);
+      const currentRows = database.getBillSplitRows(templateId) || [];
+      syncTemplateLibraryFile();
+      return { status: 'success', currentRows, dissolvedGroups };
+    } catch (error) {
+      return createErrorResult({
+        step: '删除拆分账单行',
+        message: '删除拆分账单行失败，请导出报错文件查看详情',
+        errorCode: 'BILL_SPLIT_DELETE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId, seqNo }
+      });
+    }
+  });
+
+  ipcMain.handle('template:save-bill-split-merge-group', (_event, payload = {}) => {
+    const templateId = Number(payload?.templateId);
+    const seqNos = Array.isArray(payload?.seqNos) ? payload.seqNos.map(Number) : [];
+    try {
+      if (seqNos.length < 2) {
+        throw new FileValidationError('FILE_READ', '合并账单至少需要选择 2 个账单序号');
+      }
+      const allRows = database.getBillSplitRows(templateId) || [];
+      const candidateSet = new Set(
+        allRows
+          .filter((row) => row.rowStatus === 'completed' && (row.mergedGroupSeq === null || row.mergedGroupSeq === undefined))
+          .map((row) => row.seqNo)
+      );
+      for (const seqNo of seqNos) {
+        if (!candidateSet.has(seqNo)) {
+          throw new FileValidationError('FILE_READ', `账单序号 ${seqNo} 不可参与合并（未完成或已属于其它合并组）`);
+        }
+      }
+      database.saveBillSplitMergeGroup(templateId, seqNos);
+      syncTemplateLibraryFile();
+      return { status: 'success' };
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return createErrorResult({
+          step: '保存合并账单组',
+          message: error.message,
+          errorCode: error.code,
+          originalError: error,
+          context: { templateId, seqNos }
+        });
+      }
+      return createErrorResult({
+        step: '保存合并账单组',
+        message: '保存合并账单组失败，请导出报错文件查看详情',
+        errorCode: 'BILL_SPLIT_MERGE_GROUP_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId, seqNos }
+      });
+    }
+  });
+
+  ipcMain.handle('template:clear-bill-split-merge-groups', (_event, payload = {}) => {
+    const templateId = Number(payload?.templateId);
+    try {
+      database.clearBillSplitMergeGroups(templateId);
+      syncTemplateLibraryFile();
+      return { status: 'success' };
+    } catch (error) {
+      return createErrorResult({
+        step: '清空合并账单组',
+        message: '清空合并账单组失败，请导出报错文件查看详情',
+        errorCode: 'BILL_SPLIT_MERGE_CLEAR_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId }
+      });
+    }
+  });
+
+  ipcMain.handle('template:save-bill-split-amount-rules', (_event, payload = {}) => {
+    const templateId = Number(payload?.templateId);
+    let template = null;
+    try {
+      template = database.getTemplate(templateId);
+      if (!template) {
+        return createErrorResult({
+          step: '保存拆分账单发生额规则',
+          message: '未找到对应模板',
+          errorCode: 'TEMPLATE_NOT_FOUND',
+          context: { templateId }
+        });
+      }
+      const incomingRules = Array.isArray(payload?.amountSplitRules) ? payload.amountSplitRules : [];
+      const existingMeta = database.getBillSplitMeta(templateId) || { signedAmountSourceField: '' };
+      if (existingMeta.signedAmountSourceField && incomingRules.length > 0) {
+        throw new FileValidationError(
+          'FILE_READ',
+          '弹框 2 副区域的"按正负号拆分的发生额"和"按字段区分发生额"只能启用其中一种'
+        );
+      }
+      const validated = incomingRules.length === 0
+        ? []
+        : validateBillSplitAmountRulesPayload(incomingRules, template);
+      database.saveBillSplitAmountRules(templateId, validated);
+      syncTemplateLibraryFile();
+      return { status: 'success' };
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return createErrorResult({
+          step: '保存拆分账单发生额规则',
+          message: error.message,
+          errorCode: error.code,
+          originalError: error,
+          context: { templateId, templateName: template?.name || '' },
+          templateName: template?.name || ''
+        });
+      }
+      return createErrorResult({
+        step: '保存拆分账单发生额规则',
+        message: '保存拆分账单发生额规则失败，请导出报错文件查看详情',
+        errorCode: 'BILL_SPLIT_AMOUNT_RULES_SAVE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId, templateName: template?.name || '' },
+        templateName: template?.name || ''
+      });
+    }
+  });
+
+  ipcMain.handle('template:save-bill-split-meta', (_event, payload = {}) => {
+    const templateId = Number(payload?.templateId);
+    try {
+      const signedAmountSourceField = normalizeCell(payload?.signedAmountSourceField);
+      const existingRules = database.getBillSplitAmountRules(templateId) || [];
+      if (signedAmountSourceField && existingRules.length > 0) {
+        throw new FileValidationError(
+          'FILE_READ',
+          '弹框 2 副区域的"按正负号拆分的发生额"和"按字段区分发生额"只能启用其中一种'
+        );
+      }
+      database.saveBillSplitMeta(templateId, { signedAmountSourceField });
+      syncTemplateLibraryFile();
+      return { status: 'success' };
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        return createErrorResult({
+          step: '保存拆分账单按正负号拆分字段',
+          message: error.message,
+          errorCode: error.code,
+          originalError: error,
+          context: { templateId }
+        });
+      }
+      return createErrorResult({
+        step: '保存拆分账单按正负号拆分字段',
+        message: '保存拆分账单按正负号拆分字段失败，请导出报错文件查看详情',
+        errorCode: 'BILL_SPLIT_META_SAVE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { templateId }
+      });
+    }
+  });
+}
+
+function validateBillSplitMappingsPayload(mappings, template) {
+  if (!Array.isArray(mappings)) {
+    throw new FileValidationError('FILE_READ', '弹框 1 字段映射格式错误');
+  }
+  const sourceFieldSet = new Set((template.headers || []).map((header) => normalizeCell(header)));
+  const seenFields = new Set();
+  const normalized = [];
+  mappings.forEach((mapping, index) => {
+    const templateField = normalizeCell(mapping?.templateField);
+    if (!templateField) {
+      return;
+    }
+    if (templateField === 'Currency' || templateField === 'Credit Amount' || templateField === 'Debit Amount') {
+      throw new FileValidationError(
+        'FILE_READ',
+        '弹框 1 不允许映射 Currency / Credit Amount / Debit Amount，请在弹框 2 中配置'
+      );
+    }
+    if (seenFields.has(templateField)) {
+      throw new FileValidationError('FILE_READ', `弹框 1 中模板字段「${templateField}」重复`);
+    }
+    seenFields.add(templateField);
+    const mappedField = normalizeCell(mapping?.mappedField);
+    const mappedFields = Array.from(
+      new Set(
+        (Array.isArray(mapping?.mappedFields) ? mapping.mappedFields : [])
+          .map((value) => normalizeCell(value))
+          .filter((value) => value !== '')
+      )
+    );
+    if (!mappedField && mappedFields.length === 0) {
+      return;
+    }
+    // Balance 字段允许特殊值（BALANCE_DISABLED_OPTION / BALANCE_CALCULATED_OPTION），
+    // 与主表格保持一致
+    const isBalanceSpecialValue = templateField === 'Balance'
+      && (mappedField === BALANCE_DISABLED_OPTION || mappedField === BALANCE_CALCULATED_OPTION);
+    // Header existence check (allow concat marker + custom prefix to pass)
+    const checkSourceFieldExists = (field) => {
+      if (!field) return;
+      if (field === CONCAT_FIELDS_MAPPING_FIELD) return;
+      if (typeof field === 'string' && field.startsWith(FIXED_FIELD_VALUE_PREFIX)) return;
+      if (!sourceFieldSet.has(field)) {
+        throw new FileValidationError('FILE_READ', `映射字段不存在：${field}`);
+      }
+    };
+    if (mappedField !== CONCAT_FIELDS_MAPPING_FIELD && !isBalanceSpecialValue) {
+      checkSourceFieldExists(mappedField);
+    }
+    mappedFields.forEach(checkSourceFieldExists);
+    normalized.push({
+      templateField,
+      mappedField,
+      mappedFields,
+      rowIndex: Number.isInteger(mapping?.rowIndex) ? mapping.rowIndex : index
+    });
+  });
+  return normalized;
+}
+
+function validateBillSplitRowPayload(row) {
+  if (!row || !Number.isInteger(Number(row?.seqNo)) || Number(row.seqNo) < 1) {
+    throw new FileValidationError('FILE_READ', '拆分账单行数据格式错误');
+  }
+  const credit = normalizeCell(row?.creditSourceField);
+  const debit = normalizeCell(row?.debitSourceField);
+  if (credit && debit && credit === debit) {
+    throw new FileValidationError(
+      'FILE_READ',
+      '同一份拆分账单的 Credit Amount 和 Debit Amount 不能是同一列'
+    );
+  }
+  if (row.rowStatus !== undefined && row.rowStatus !== 'draft' && row.rowStatus !== 'completed') {
+    throw new FileValidationError('FILE_READ', '拆分账单行状态值非法');
+  }
+}
+
+function validateBillSplitAmountRulesPayload(rules, template) {
+  if (!Array.isArray(rules) || rules.length === 0) {
+    return [];
+  }
+  const sourceFieldSet = new Set((template.headers || []).map((header) => normalizeCell(header)));
+  const expectedTargets = new Set(['Credit Amount', 'Debit Amount']);
+  return rules.map((rule, index) => {
+    const targetField = normalizeCell(rule?.targetField);
+    const conditionField = normalizeCell(rule?.conditionField);
+    const conditionValue = normalizeCell(rule?.conditionValue);
+    const mappedField = normalizeCell(rule?.mappedField);
+    if (!expectedTargets.has(targetField)) {
+      throw new FileValidationError('FILE_READ', '目标字段必须是 Credit Amount 或 Debit Amount');
+    }
+    if (!conditionField) {
+      throw new FileValidationError('FILE_READ', '判断字段不能为空');
+    }
+    if (!sourceFieldSet.has(conditionField)) {
+      throw new FileValidationError('FILE_READ', `映射字段不存在：${conditionField}`);
+    }
+    if (conditionValue === '') {
+      throw new FileValidationError('FILE_READ', '判断字段值不能为空');
+    }
+    if (isRegexLiteral(conditionValue)) {
+      try {
+        compileRegexLiteral(conditionValue);
+      } catch (_error) {
+        throw new FileValidationError('FILE_READ', `正则表达式语法错误：${conditionValue}`);
+      }
+    }
+    if (!mappedField) {
+      throw new FileValidationError('FILE_READ', '发生额字段不能为空');
+    }
+    if (!sourceFieldSet.has(mappedField)) {
+      throw new FileValidationError('FILE_READ', `映射字段不存在：${mappedField}`);
+    }
+    return {
+      targetField,
+      conditionField,
+      conditionValue,
+      mappedField,
+      rowIndex: Number.isInteger(rule?.rowIndex) ? rule.rowIndex : index
+    };
   });
 }
 
@@ -3580,6 +4217,7 @@ function buildStatementGenerationConfig({
   }, {});
 
   const amountSplitByFieldConfig = buildAmountSplitByFieldConfig(template, selectedMappings);
+  const billSplitMergeConfig = buildBillSplitMergeConfig(template, selectedMappings);
 
   return {
     template,
@@ -3597,7 +4235,79 @@ function buildStatementGenerationConfig({
       accountSourceField: mappingByTargetField[AMOUNT_BASED_ACCOUNT_MAPPING_FIELD]
     },
     amountSplitByField: amountSplitByFieldConfig,
+    billSplitMerge: billSplitMergeConfig,
     dateParseOrder: template.dateFormat || 'auto'
+  };
+}
+
+function buildBillSplitMergeConfig(template, selectedMappings) {
+  const enabled = selectedMappings.some((mapping) => {
+    return normalizeCell(mapping.templateField) === BILL_SPLIT_MERGE_MAPPING_FIELD
+      && normalizeCell(mapping.mappedField) === BILL_SPLIT_MERGE_ENABLED_OPTION;
+  });
+
+  if (!enabled || !template || !template.id) {
+    return { enabled: false };
+  }
+
+  // Default reuseModuleMapping = true (PRD §Q-A4 / TechDoc §3.4.7)
+  const reuseModuleMapping = !selectedMappings.some((mapping) => {
+    return normalizeCell(mapping.templateField) === REUSE_MODULE_MAPPING_FIELD
+      && normalizeCell(mapping.mappedField) === '否';
+  });
+
+  const billSplitMappings = (database.getBillSplitMappings(template.id) || []).map((mapping) => ({
+    rowIndex: Number(mapping.rowIndex || 0),
+    templateField: normalizeCell(mapping.templateField),
+    mappedField: normalizeCell(mapping.mappedField),
+    mappedFields: Array.isArray(mapping.mappedFields)
+      ? mapping.mappedFields.map((value) => normalizeCell(value)).filter((value) => value !== '')
+      : []
+  }));
+
+  // P1 Fix A (PR #16 review): 预先构造 billSplit 字段映射的 target→field lookup。
+  // 当 reuseModuleMapping === false 时，file-service 会用这个 lookup 替代主模板的
+  // mappingByField 重新计算每个拆分行的非金额字段，使弹框 1 配置真正生效。
+  const billSplitMappingByTargetField = buildMappedFieldLookup(
+    billSplitMappings.filter((m) => m.templateField)
+  );
+
+  // P1 Fix B (PR #16 review): 导出阶段只传 row_status = completed 的拆分行。
+  // draft 行保留在 DB 作为"草稿"供用户下次打开弹框继续编辑，但不参与导出。
+  // 对应 PRD §4.3.5 Q-C12 / ACI-1（"至少 1 行 completed 才展开"）。
+  const billSplitRows = (database.getBillSplitRows(template.id) || [])
+    .filter((row) => row.rowStatus === 'completed')
+    .map((row) => ({
+      seqNo: Number(row.seqNo),
+      currencySourceField: normalizeCell(row.currencySourceField),
+      creditSourceField: normalizeCell(row.creditSourceField),
+      debitSourceField: normalizeCell(row.debitSourceField),
+      amountSourceField: normalizeCell(row.amountSourceField),
+      rowStatus: 'completed',
+      mergedGroupSeq: row.mergedGroupSeq === null || row.mergedGroupSeq === undefined
+        ? null
+        : Number(row.mergedGroupSeq)
+    }));
+
+  const billSplitAmountRules = (database.getBillSplitAmountRules(template.id) || []).map((rule) => ({
+    targetField: normalizeCell(rule.targetField),
+    conditionField: normalizeCell(rule.conditionField),
+    conditionValue: normalizeCell(rule.conditionValue),
+    mappedField: normalizeCell(rule.mappedField),
+    rowIndex: Number(rule.rowIndex || 0)
+  }));
+
+  const meta = database.getBillSplitMeta(template.id) || {};
+  const signedAmountSourceField = normalizeCell(meta.signedAmountSourceField);
+
+  return {
+    enabled: true,
+    reuseModuleMapping,
+    billSplitMappings,
+    billSplitMappingByTargetField,  // P1 Fix A (PR #16 review)
+    billSplitRows,
+    billSplitAmountRules,
+    signedAmountSourceField
   };
 }
 
@@ -3639,6 +4349,7 @@ function buildMappedRowsForFile({
     currencyMappings: config.currencyMappings,
     amountMappingRules: config.amountMappingRules,
     amountSplitByField: config.amountSplitByField,
+    billSplitMerge: config.billSplitMerge,
     expectedSourceHeaders: config.template.headers,
     selectedBigAccount: {
       merchantId: config.selectedMerchantId,
@@ -3745,6 +4456,10 @@ function generateStatementFiles({
     balanceRequested: Boolean(preparedBatch.balanceRequested),
     unmatchedAmountSplitFiles: Array.isArray(preparedBatch.unmatchedAmountSplitFiles)
       ? preparedBatch.unmatchedAmountSplitFiles.slice()
+      : [],
+    // v1.4.9 PR #16 review P1 Fix C: 平行于 unmatchedAmountSplitFiles 的 bill-split 版本
+    unmatchedBillSplitFiles: Array.isArray(preparedBatch.unmatchedBillSplitFiles)
+      ? preparedBatch.unmatchedBillSplitFiles.slice()
       : []
   };
 

@@ -1745,3 +1745,198 @@ select {
 .amount-split-rule-row .mapping-text-input {
   width: 100%;
 }
+
+/* ==================== v1.4.9 bill-split / merge dialogs ==================== */
+
+/* 入口分组：4 方互斥 disabled 行的灰显 + tooltip */
+.mapping-row-mutex-disabled.bill-split-merge-disabled {
+  opacity: 0.55;
+}
+
+.mapping-row-mutex-disabled.bill-split-merge-disabled .mapping-select {
+  cursor: not-allowed;
+}
+
+/* 弹框 1: 拆分/合并账单映射关系设置 (宽度 80vw，覆盖 .modal-card 的 940px 约束) */
+.bill-split-mappings-card {
+  width: 80vw;
+  min-width: 520px;
+  max-width: none;
+}
+
+.bill-split-mappings-wrapper {
+  max-height: 65vh;
+  overflow-y: auto;
+  padding: 0 16px;
+}
+
+.bill-split-mappings-wrapper .data-table {
+  width: 100%;
+}
+
+.bill-split-mappings-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 弹框 2: 拆分/合并账单映射关系管理 */
+.bill-split-rows-card {
+  min-width: 960px;
+  max-width: 1240px;
+}
+
+.bill-split-rows-body {
+  padding: 12px 16px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.bill-split-rows-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bill-split-merge-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.bill-split-merge-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.bill-split-merge-picker-trigger {
+  min-width: 180px;
+  height: 34px;
+}
+
+.bill-split-merge-picker-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 10;
+  min-width: 220px;
+  max-height: 300px;
+  overflow-y: auto;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 250, 242, 0.98);
+  box-shadow: 0 14px 30px rgba(45, 31, 14, 0.15);
+  padding: 8px 0;
+  margin-top: 4px;
+}
+
+.bill-split-merge-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.bill-split-merge-picker-option:hover {
+  background: rgba(154, 90, 26, 0.06);
+}
+
+.bill-split-merge-picker-option input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.bill-split-merge-picker-empty {
+  padding: 12px 14px;
+  color: var(--muted, #888);
+  font-size: 13px;
+  text-align: center;
+}
+
+.bill-split-row-count-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.bill-split-row-count-input {
+  width: 80px;
+  padding: 4px 8px;
+}
+
+/* 按用户要求缩窄到 .small 默认宽度 (108px) 的 66% ≈ 71px */
+.bill-split-row-count-done-btn.secondary-btn.small {
+  min-width: 0;
+  width: 71px;
+  padding: 0 8px;
+}
+
+.bill-split-rows-table-wrapper {
+  margin-bottom: 12px;
+}
+
+.bill-split-rows-table {
+  width: 100%;
+}
+
+.bill-split-rows-table th,
+.bill-split-rows-table td {
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+
+.bill-split-rows-table .mapping-select {
+  min-width: 120px;
+  width: 100%;
+}
+
+.bill-split-row-actions {
+  white-space: nowrap;
+}
+
+.bill-split-row-actions .text-action {
+  margin-right: 8px;
+}
+
+/* 合并组行灰显且不可点击 */
+.bill-split-merged-row {
+  opacity: 0.5;
+  background-color: #f3f4f6;
+}
+
+.bill-split-merged-row .mapping-select,
+.bill-split-merged-row .text-action {
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+/* 弹框 2 副区域分隔线 + 副标题 */
+.bill-split-sub-section-divider {
+  border: 0;
+  border-top: 1px solid #ccc;
+  margin: 16px 0;
+}
+
+.bill-split-sub-section h3 {
+  margin: 8px 0;
+  font-size: 14px;
+}
+
+.bill-split-sub-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.bill-split-sub-row label {
+  min-width: 160px;
+  font-size: 13px;
+}
+
+.bill-split-sub-row .mapping-select {
+  min-width: 200px;
+}

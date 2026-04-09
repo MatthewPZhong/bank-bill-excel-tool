@@ -29,6 +29,11 @@ function cloneRowsWithMetadata(rows = []) {
     clonedRows.amountSplitMatchStats = { ...rows.amountSplitMatchStats };
   }
 
+  // v1.4.9 PR #16 review P1 Fix C: 平行克隆 billSplitMatchStats
+  if (rows.billSplitMatchStats && typeof rows.billSplitMatchStats === 'object') {
+    clonedRows.billSplitMatchStats = { ...rows.billSplitMatchStats };
+  }
+
   if (Array.isArray(rows.sourceRows)) {
     clonedRows.sourceRows = cloneRowsWithMetadata(rows.sourceRows);
   }

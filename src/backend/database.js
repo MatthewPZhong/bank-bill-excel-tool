@@ -4,6 +4,7 @@ const { DatabaseSync } = require('node:sqlite');
 const {
   ensureAccountMappingCurrencySupport,
   ensureAmountSplitRulesSupport,
+  ensureBillSplitMergeSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateKeySupport,
   ensureTemplateMappingEnhancements,
@@ -92,6 +93,7 @@ class AppDatabase {
     this.ensureAccountMappingCurrencySupport();
     this.ensureTemplateDateFormatSupport();
     this.ensureAmountSplitRulesSupport();
+    this.ensureBillSplitMergeSupport();
   }
 
   hasColumn(tableName, columnName) {
@@ -116,6 +118,10 @@ class AppDatabase {
 
   ensureAmountSplitRulesSupport() {
     return ensureAmountSplitRulesSupport(this.db);
+  }
+
+  ensureBillSplitMergeSupport() {
+    return ensureBillSplitMergeSupport(this.db);
   }
 
   listTemplates() {
@@ -176,6 +182,54 @@ class AppDatabase {
 
   listTemplateBundleEntries() {
     return templateRepository.listTemplateBundleEntries(this.db);
+  }
+
+  getBillSplitMappings(templateId) {
+    return templateRepository.getBillSplitMappings(this.db, templateId);
+  }
+
+  saveBillSplitMappings(templateId, mappings) {
+    return templateRepository.saveBillSplitMappings(this.db, templateId, mappings);
+  }
+
+  getBillSplitRows(templateId) {
+    return templateRepository.getBillSplitRows(this.db, templateId);
+  }
+
+  saveBillSplitRowCount(templateId, nextN) {
+    return templateRepository.saveBillSplitRowCount(this.db, templateId, nextN);
+  }
+
+  saveBillSplitRow(templateId, row) {
+    return templateRepository.saveBillSplitRow(this.db, templateId, row);
+  }
+
+  deleteBillSplitRow(templateId, seqNo) {
+    return templateRepository.deleteBillSplitRow(this.db, templateId, seqNo);
+  }
+
+  saveBillSplitMergeGroup(templateId, seqNos) {
+    return templateRepository.saveBillSplitMergeGroup(this.db, templateId, seqNos);
+  }
+
+  clearBillSplitMergeGroups(templateId) {
+    return templateRepository.clearBillSplitMergeGroups(this.db, templateId);
+  }
+
+  getBillSplitAmountRules(templateId) {
+    return templateRepository.getBillSplitAmountRules(this.db, templateId);
+  }
+
+  saveBillSplitAmountRules(templateId, rules) {
+    return templateRepository.saveBillSplitAmountRules(this.db, templateId, rules);
+  }
+
+  getBillSplitMeta(templateId) {
+    return templateRepository.getBillSplitMeta(this.db, templateId);
+  }
+
+  saveBillSplitMeta(templateId, meta) {
+    return templateRepository.saveBillSplitMeta(this.db, templateId, meta);
   }
 
   getSetting(settingKey) {
