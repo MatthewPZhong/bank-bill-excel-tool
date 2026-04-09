@@ -86,6 +86,10 @@ function buildMappedRows({
       && typeof billSplitMerge.billSplitMappingByTargetField === 'object'
     ? billSplitMerge.billSplitMappingByTargetField
     : {};
+  // P2 Fix D (PR #16 review): expandBillSplitForRow 的 Name/CardNo per-row 分配需要
+  // 知道"当前应该用哪套 mapping 判定"——reuseModuleMapping=true 时用主模板 mappingByField，
+  // false 时用 billSplitMappingByField。每个 source row 在进入拆分前 (见外层 forEach) 更新。
+  let billSplitEffectiveMappingByField = null;
   let matchedCreditCount = 0;
   let matchedDebitCount = 0;
   let matchedBillSplitCount = 0;
@@ -242,6 +246,22 @@ function buildMappedRows({
     const creditTargetIndex = orderedTargetFields.indexOf('Credit Amount');
     const debitTargetIndex = orderedTargetFields.indexOf('Debit Amount');
 
+    // v1.4.9 PR #16 review P2 Fix D: 预先定位 Name / CardNo 四个 target field 的 index，
+    // 在每个拆分行输出前按该行自己的 credit/debit 方向单独分配 Name / CardNo。
+    // effectiveMappingByField 由外层 closure (billSplitEffectiveMappingByField) 提供，
+    // reuseModuleMapping = true 时指向主模板 mappingByField，false 时指向 billSplitMappingByField。
+    const draweeNameIndex = orderedTargetFields.indexOf('Drawee Name');
+    const payeeNameIndex = orderedTargetFields.indexOf('Payee Name');
+    const draweeCardNoIndex = orderedTargetFields.indexOf('Drawee CardNo');
+    const payeeCardNoIndex = orderedTargetFields.indexOf('Payee CardNo') >= 0
+      ? orderedTargetFields.indexOf('Payee CardNo')
+      : orderedTargetFields.indexOf('Payee Cardno');
+    const effectiveMapping = billSplitEffectiveMappingByField || mappingByField;
+    const draweeNameMappingValue = effectiveMapping['Drawee Name'];
+    const payeeNameMappingValue = effectiveMapping['Payee Name'];
+    const draweeCardNoMappingValue = effectiveMapping['Drawee CardNo'];
+    const payeeCardNoMappingValue = effectiveMapping['Payee CardNo'] || effectiveMapping['Payee Cardno'];
+
     const hasSignedAmount = Boolean(billSplitSignedField);
     const hasAmountRules = billSplitAmountRules.length > 0;
     const useAmountSourceField = hasSignedAmount || hasAmountRules;
@@ -285,6 +305,35 @@ function buildMappedRows({
         }
         if (debitTargetIndex >= 0) {
           expandedRow[debitTargetIndex] = debitValue;
+        }
+
+        // v1.4.9 PR #16 review P2 Fix D: 按当前拆分行的 credit/debit 方向单独分配
+        // Drawee Name / Payee Name / Drawee CardNo / Payee CardNo 四个字段。
+        // 判定 per-row 方向（基于本拆分行的 creditValue / debitValue，不依赖 source row 级别的
+        // hasCreditAmount/hasDebitAmount closure 变量）。
+        const hasCreditInRow = hasEffectiveAmount(creditValue);
+        const hasDebitInRow = hasEffectiveAmount(debitValue);
+
+        // Drawee Name: 只有 credit-only 拆分行填值，其它情况置空（与 v1.4.8 的 source-row 级语义对齐，
+        // 只是判定维度从 source row 变成拆分行）
+        if (draweeNameIndex >= 0 && nameSourceField && draweeNameMappingValue === nameSourceField) {
+          const rawName = readSourceCell(originalRow, nameSourceField);
+          expandedRow[draweeNameIndex] = hasCreditInRow && !hasDebitInRow ? (rawName != null ? rawName : '') : '';
+        }
+        // Payee Name: 只有 debit-only 拆分行填值
+        if (payeeNameIndex >= 0 && nameSourceField && payeeNameMappingValue === nameSourceField) {
+          const rawName = readSourceCell(originalRow, nameSourceField);
+          expandedRow[payeeNameIndex] = hasDebitInRow && !hasCreditInRow ? (rawName != null ? rawName : '') : '';
+        }
+        // Drawee CardNo: 只有 credit-only 拆分行填值
+        if (draweeCardNoIndex >= 0 && accountSourceField && draweeCardNoMappingValue === accountSourceField) {
+          const rawAcct = readSourceCell(originalRow, accountSourceField);
+          expandedRow[draweeCardNoIndex] = hasCreditInRow && !hasDebitInRow ? (rawAcct != null ? rawAcct : '') : '';
+        }
+        // Payee CardNo: 只有 debit-only 拆分行填值
+        if (payeeCardNoIndex >= 0 && accountSourceField && payeeCardNoMappingValue === accountSourceField) {
+          const rawAcct = readSourceCell(originalRow, accountSourceField);
+          expandedRow[payeeCardNoIndex] = hasDebitInRow && !hasCreditInRow ? (rawAcct != null ? rawAcct : '') : '';
         }
 
         return {
@@ -591,26 +640,20 @@ function buildMappedRows({
     if (billSplitEnabled) {
       // P1 Fix A (PR #16 review): 当 reuseModuleMapping === false 时用弹框 1 的独立 lookup
       // 重算非金额字段；否则沿用主模板 mappedRow（原行为）。
-      // Drawee/Payee Name/CardNo 依赖 hasCreditAmount/hasDebitAmount，在 source-row 级别
-      // 主模板计算后对应的是主模板下的 Credit/Debit 是否有效；在 billSplit 非复用路径下
-      // 这两个标志相对每个拆分行才有意义，所以"base row"阶段先统一置空，由后续
-      // expandBillSplitForRow 按每个拆分行的 Credit/Debit 单独决定（当前实现不在拆分
-      // 阶段重新计算 Drawee/Payee，作为已知限制；详见 TechDoc §5.6.3 fix2 说明）。
+      //
+      // P2 Fix D (PR #16 review): 移除原"临时清零 hasCreditAmount/hasDebitAmount 再 restore"的
+      // hack——该 hack 原本是为了避免 source-row 级别的方向标志污染 reuseModuleMapping=false 路径
+      // 的 base row Name/CardNo 值。现在改为在 expandBillSplitForRow 里按每个拆分行自己的
+      // credit/debit 方向独立分配 Name/CardNo（详见 expandBillSplitForRow 的 post-process 块），
+      // 所以 base row 阶段无需再关心 Name/CardNo 的方向，直接让 computeMappedRow 用原始的
+      // closure 变量计算即可。billSplitEffectiveMappingByField 则是透传给 expandBillSplitForRow
+      // 的 closure 变量，让它知道应该用哪套 mapping 来判断 Drawee Name 是否等于 nameSourceField。
       let billSplitBaseRow = mappedRow;
       if (!billSplitReuseModuleMapping) {
-        const savedHasCredit = hasCreditAmount;
-        const savedHasDebit = hasDebitAmount;
-        const savedCredit = creditAmountValue;
-        const savedDebit = debitAmountValue;
-        hasCreditAmount = false;
-        hasDebitAmount = false;
-        creditAmountValue = '';
-        debitAmountValue = '';
         billSplitBaseRow = computeMappedRow(billSplitMappingByField);
-        hasCreditAmount = savedHasCredit;
-        hasDebitAmount = savedHasDebit;
-        creditAmountValue = savedCredit;
-        debitAmountValue = savedDebit;
+        billSplitEffectiveMappingByField = billSplitMappingByField;
+      } else {
+        billSplitEffectiveMappingByField = mappingByField;
       }
       const expanded = expandBillSplitForRow(row, billSplitBaseRow, sourceRowNumber);
       const merged = applyBillSplitMergeForRow(expanded);
