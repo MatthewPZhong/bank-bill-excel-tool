@@ -9,6 +9,96 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 1.4.9
+
+### 新增
+
+- 映射关系管理新增「账单拆分合并管理」分组：`是否拆分/合并明细账单`（默认 `否`） + `复用模块字段的映射关系`（默认 `是`）两行开关。
+- 启用 `是否拆分/合并明细账单` 时，与 `Credit Amount` / `Debit Amount` 直接映射、`按正负号拆分的发生额`、`按字段区分发生额` 形成 **四方互斥**。
+- 新增「拆分/合并账单映射关系设置」弹框（宽度 `80vw`），用于在 `复用模块字段的映射关系 = 否` 时为非金额字段单独配置映射；右上角 `导入当前映射关系` 按钮可从主模板复制配置（自动排除 `Currency` / `Credit Amount` / `Debit Amount`）。
+- 新增「拆分/合并账单映射关系管理」弹框：包含 `合并账单` 勾选框、`需要拆分成几份账单` 数字输入 + `拆` 按钮、六列表格（`账单序号` / `Currency` / `Credit Amount` / `Debit Amount` / `发生额` / `执行操作`）和副区域「拆分/合并账单——发生额映射关系管理」。
+- 弹框二的合并账单 picker 为 checkbox-panel 多选样式；删除合并组内的拆分行时，会先弹出受影响合并组列表的二次确认（外科手术式解散）。
+- 弹框二支持行级落库：`需要拆分成几份账单` 输入数字 N 后点 `拆` 生成 N 行，每一行的 `完成` 按钮单独锁定该行；行变只读后按钮变成 `编辑`，再点可解锁继续修改。
+- 导入流程新增按弹框二配置展开 N 行输出的能力（`expandBillSplitForRow`），并按 `merged_group_seq` 分组求净值合并输出（`applyBillSplitMergeForRow`）。
+- 新增 4 张 DB 表：`template_bill_split_meta` / `template_bill_split_mappings` / `template_bill_split_rows` / `template_bill_split_amount_rules`，配套 10 个 IPC handlers。
+- 多文件导入时新增「以下文件全部未命中拆分/合并规则，请检查规则配置：…」聚合告警，与 1.4.8 的「按字段区分发生额」全部未命中告警平行独立。
+- `Drawee Name` / `Payee Name` / `Drawee CardNo` / `Payee CardNo` 在拆分场景下按每个拆分行自己的收支方向独立分配，`reuseModuleMapping` 为 `是` / `否` 两条路径行为一致。
+
+### 变更
+
+- 单行拆分行的 `Credit Amount` 与 `Debit Amount` 同时为 0、或合并组净值为 0 时改为 **静默过滤** 不输出，不再报错或弹提示；合并组 `Currency` 不一致时仍然报错 `BILL_MERGE_CURRENCY_MISMATCH` 阻断导入。
+- `bundleVersion` 升级到 `3`，导出 entry 新增 `billSplitMappings` / `billSplitRows` / `billSplitAmountRules` / `billSplitMeta` 四个字段；旧 `bundleVersion = 2` 的 bundle 按 4 张表的默认值兼容；`bundleVersion > 3` 仍然拒绝。
+- `template:get-mappings` IPC 返回值补齐 `billSplitGroupFields` / `billSplitMappings` / `billSplitRows` / `billSplitAmountRules` / `billSplitMeta` 5 个字段，修复冷启动后首次打开「拆分/合并账单映射关系管理」弹框只显示初始页面的 bug。
+
+### 移除
+
+- 无
+
+## 1.4.8
+
+### 新增
+
+- 映射关系管理新增 `按字段区分发生额` 配置项（归入 `ADVANCED_MAPPING_FIELDS`，放分组末尾），下拉选项为空白（默认）/ `是`；选 `是` 时右侧出现 `发生额映射关系管理` 按钮。
+- 启用 `按字段区分发生额` 时，与 `Credit Amount` / `Debit Amount` 直接映射、`按正负号拆分的发生额` 形成 **三方互斥**：选 `是` 自动清空并禁用另外三行；切回空白时按钮隐藏，弹框配置草稿独立保留，再切回 `是` 时回显。
+- 新增「发生额映射关系管理」弹框：固定 2 行规则——一行 `当 [字段] 的值为 [输入] 时，[字段] 映射为 Credit Amount`，一行映射为 `Debit Amount`；4 个下拉框选项来自 `template.headers`，排除 `自己输入` / `需要拼接字段` 特殊值；同行内 `条件字段 ≠ 目标字段`。
+- 条件值匹配规则：默认按字面值精确匹配（整串、大小写敏感、源值先 trim、不做数字归一化）；输入 `/pattern/flags` 形式按正则匹配，支持 `i` / `g` / `m` / `s` / `u` 等 JS RegExp flags；不支持多值，多值场景请用 `/^(C|CR|Credit)$/` 这类正则分组代替。
+- 新增 DB 表 `template_amount_split_rules` 和 IPC `template:get-amount-split-rules` / `template:save-amount-split-rules`。
+- 多文件导入时新增「以下文件全部未命中收支规则，请检查规则配置：…」聚合告警；按文件独立判定 + 跨文件聚合后弹一个合并告警框。
+- 新增 `bundleVersion` 顶层字段（v2），导出 entry 包含 `amountSplitRules`；导入时 `bundleVersion > 当前支持版本` 被拒绝（v1.4.8 自身不会触发，为后续版本预埋）。
+
+### 变更
+
+- `saveMappings` 签名扩展为 6 参，最后一个参数 `amountSplitRules`（`null` = 保留原值，`[]` = 清空）。
+- 无效正则保存时报错 `正则表达式语法错误`；同行内条件字段等于目标字段时报错。
+
+### 移除
+
+- 无
+
+## 1.4.7
+
+### 新增
+
+- 大账号选择对话框重写为左右分栏布局：左侧按文件顺序展示，右侧按勾选序位展示，并新增搜索定位与勾选序号回显。
+- 多账号账单导入新增 **账号顺序固定 / 不固定** 模式：固定模式下要求一次勾选全部大账号且按指定顺序导入，并支持「记住顺序」在下次导入时回显配置。
+- 日期解析支持 BNI 点号时间格式 `HH.MM.SS`、Excel 日期序列号被字符串化后的解析（如 PAB-CN 的 `46102`）；`DD-MM-YY` 不歧义场景下 fallback 到 `MM-DD-YY`（`month > 12` 时）；`YYMMDD` 优先于 Excel 序列号识别。
+- CSV 导入新增纯文本解析器 `parseCsvText`：所有值保持字符串、不过 `xlsx` 的类型推断，解决 20 位以上长数字（交易流水号）后几位被截断为 0 的问题；支持引号包裹 / 转义引号 / CRLF / LF / UTF-8 BOM。
+
+### 变更
+
+- 大账号对话框：`remember` 复选框在不固定模式下灰显而非隐藏；切换搜索关键字时重置选中索引；模式切换时清空搜索状态；初始化期间禁用交互；报错后保留对话框供用户重新设定。
+- 新开账户模块的导出文件命名规则适配单 / 多账号场景。
+- 新开账户余额账单的最晚日期改为「到昨天」。
+- 全部账号 0 笔交易时直接报错 `没有账号存在交易数据`，不再进入大账号选择；修复 `identifyAccountBlocks` 空块 fallback 假块的问题。
+- `MerchantId` 自动去除中间空格（如 `NRA 7101 2023 0223 63` → `NRA71012023022363`）。
+- `Currency` 字段从映射对话框的多选拼接里排除，下拉不再出现 `需要拼接字段` 选项。
+- `splitTemplateName` 修复多段 `-` 时的所在地取值：`BNI-ID-SG` 模板的 location 取第二段 `ID`，不再是 `ID-SG`。
+- 修复 `rowsWithEmptyBlocks` 未持久化导致固定模式校验失败、空块 `sourceRowNumber` 回退值错误、元数据行被误当成数据行导出的问题。
+- `xlsx` / `xls` 文件不受 CSV parser 改动影响，仍走 `XLSX` 库读取。
+
+### 移除
+
+- 移除映射对话框的日期格式下拉（`dateFormatSelect` 变量及 `saveMappings` 内 `dateFormat: dateFormatSelect.value` 一并删除）。
+
+## 1.4.6
+
+### 新增
+
+- 新增「导入银行账号信息」入口：从 Excel 解析客资账号写入大账号表，自有账号写入独立 JSON 存储。
+- 新增「余额管理」弹窗：按 `大账号 + 币种 + 日期 + 余额附加值 + 备注` 维护余额附加值；附加值会在余额导出时按 `MerchantId + Currency + BillDate` 累加注入到生成的余额账单。
+- 新增 IPC channels：`bigAccount` 系列 + `balanceAdjustment` 系列。
+
+### 变更
+
+- 维护大账号弹窗的币种输入框小写自动转大写；多币种浮动面板溢出修复（`overflow-y: auto`）。
+- 模板选择框启动时显示 `请选择模板` 占位符；未选模板时阻断导入操作；删除模板时清理相关缓存。
+- 新开账户余额账单改为开户日到今天 **逐日生成**（上限 3650 天），不再只输出开户日和月末日。
+- `维护大账号` / `账户映射` 等弹窗按钮新增文本溢出保护样式（`.primary-btn.small` 等）。
+
+### 移除
+
+- 无
+
 ## 1.4.5
 
 ### 新增

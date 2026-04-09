@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.4.9 - 2026-04-09
+
+- 映射关系管理新增「账单拆分合并管理」分组（`createMappingDialog` 内 `BILL_SPLIT_GROUP_FIELDS` 两行）：`是否拆分/合并明细账单`（默认 `否`） + `复用模块字段的映射关系`（默认 `是`）。
+- 启用 `是否拆分/合并明细账单` 时，与 `Credit Amount` / `Debit Amount` 直接映射、`按正负号拆分的发生额`、`按字段区分发生额` 形成 **四方互斥**；该开关启用后会自动清空并禁用 `Currency` / `Credit Amount` / `Debit Amount` / `按正负号拆分的发生额` / `按字段区分发生额` 五行。
+- 新增 `拆分/合并账单映射关系设置` 弹框（`createBillSplitMappingsDialog`，宽度 `80vw`）：用于在 `复用模块字段的映射关系 = 否` 时为非金额字段单独配置映射；右上角 `导入当前映射关系` 按钮可从主模板复制（自动排除 `Currency` / `Credit Amount` / `Debit Amount`），若弹框已有配置先弹二次确认。`Balance` 字段枚举值与主表格一致（`无` / `通过发生额计算` / headers，无拼接字段选项）。
+- 新增 `拆分/合并账单映射关系管理` 弹框（`createBillSplitRowsDialog`）：右上角 `合并账单` 勾选框 + checkbox-panel 多选 picker；标题下方 `需要拆分成几份账单` 数字输入 + `拆` 按钮（宽度 71px）生成 N 行；六列表格（`账单序号` / `Currency` / `Credit Amount` / `Debit Amount` / `发生额` / `执行操作`）支持行级 `完成 / 编辑 / 删除`；副区域 `拆分/合并账单——发生额映射关系管理` 内嵌 `按正负号拆分的发生额` 和 `按字段区分发生额` 二选一互斥；右下角 `完成` 按钮（语义等同 × 关闭）。
+- 删除合并组内的拆分行时，会先调用 `template:preview-delete-bill-split-row` 预览受影响的合并组，并弹出二次确认对话框（外科手术式解散：删除该行并解散所有受影响合并组）。
+- 新增 4 张 DB 表：`template_bill_split_meta`（按正负号拆分配置） / `template_bill_split_mappings`（弹框 1 字段映射） / `template_bill_split_rows`（六列表格行数据，含 `row_status` 和 `merged_group_seq`） / `template_bill_split_amount_rules`（弹框 2 副区域的按字段区分规则，独立于主模板的同名表）。
+- 新增 10 个 IPC：`template:get-bill-split-config` / `save-bill-split-mappings` / `save-bill-split-row-count` / `save-bill-split-row` / `preview-delete-bill-split-row` / `delete-bill-split-row` / `save-bill-split-merge-group` / `clear-bill-split-merge-groups` / `save-bill-split-amount-rules` / `save-bill-split-meta`。
+- 导入流程：`buildMappedRows` 新增 `billSplitMerge` 入参 + `expandBillSplitForRow`（按弹框 2 N 行配置展开） + `applyBillSplitMergeForRow`（按 `merged_group_seq` 分组求净值，按 `Σ(Credit) − Σ(Debit)` 方向填入 `Credit Amount` 或 `Debit Amount`）。
+- 单行拆分行 `Credit Amount` 和 `Debit Amount` 同时为 0、或合并组净值为 0 时 **静默过滤** 不输出，不报错；合并组 `Currency` 不一致时仍然报错 `BILL_MERGE_CURRENCY_MISMATCH` 阻断导入。
+- `复用模块字段的映射关系 = 否` 时，`expandBillSplitForRow` 通过 `billSplitMappingByTargetField` 用弹框 1 的映射重新计算非金额字段；`Drawee Name` / `Payee Name` / `Drawee CardNo` / `Payee CardNo` 在 post-process 阶段按每个拆分行自己的收支方向独立分配（`reuse=true` 路径同样按 per-split-row 方向分配）。
+- 多文件导入时新增 `以下文件全部未命中拆分/合并规则，请检查规则配置：…` 聚合告警，沿用 v1.4.8 的链路实现（`collectUnmatchedBillSplitFiles` + `unmatchedBillSplitFiles` 字段）。
+- `bundleVersion` 升级到 `3`，导出 entry 新增 `billSplitMappings` / `billSplitRows` / `billSplitAmountRules` / `billSplitMeta` 四个字段；旧 `bundleVersion = 2` 的 bundle 按 4 张表的默认值兼容；`bundleVersion > 3` 的 bundle 仍然拒绝。
+- `template:get-mappings` IPC 返回值补齐 `billSplitGroupFields` / `billSplitMappings` / `billSplitRows` / `billSplitAmountRules` / `billSplitMeta` 5 个字段，修复冷启动后首次打开 `拆分/合并账单映射关系管理` 弹框只显示初始页面的 bug。
+
+## 1.4.8 - 2026-04-07
+
+- 映射关系管理新增 `按字段区分发生额` 配置项（归入 `ADVANCED_MAPPING_FIELDS`，放分组末尾），下拉选项为空白（默认）/ `是`；选 `是` 时右侧出现 `发生额映射关系管理` 按钮。
+- 启用 `按字段区分发生额` 时，与 `Credit Amount` / `Debit Amount` 直接映射、`按正负号拆分的发生额` 形成 **三方互斥**：选 `是` 自动清空并禁用另外三行；切回空白时按钮隐藏，弹框配置草稿独立保留，再切回 `是` 时回显。
+- 新增 `发生额映射关系管理` 弹框：固定 2 行规则——第一行 `当 [字段] 的值为 [输入] 时，[字段] 映射为 Credit Amount`，第二行映射为 `Debit Amount`；4 个下拉框选项来自 `template.headers`，排除 `自己输入` / `需要拼接字段` 特殊值；同行内 `条件字段 ≠ 目标字段`，跨行可同字段；`完成` 按钮直接落库，校验失败保留弹框开放、不丢失已填字段。
+- 条件值匹配规则：默认按字面值精确匹配（整串、大小写敏感、源值先 trim、不做数字归一化，`1.0 ≠ 1`）；输入 `/pattern/flags` 形式按正则匹配，使用 `regex.test`，支持 `i` / `g` / `m` / `s` / `u` 等 JS RegExp flags；不支持多值，多值场景请用 `/^(C|CR|Credit)$/` 这类正则分组代替；无效正则保存时报错 `正则表达式语法错误`。
+- 新增 DB 表 `template_amount_split_rules`（迁移幂等），新增 IPC `template:get-amount-split-rules` / `template:save-amount-split-rules`；`saveMappings` 签名扩展为 6 参，最后一个参数 `amountSplitRules`（`null` = 保留原值，`[]` = 清空）。
+- `buildMappedRows` 新增按字段区分发生额的匹配分支，导入时按规则计算 `Credit Amount` / `Debit Amount`；命中失败的行 `Credit Amount` / `Debit Amount` 留空，不阻断导入。
+- 多文件导入时新增 `以下文件全部未命中收支规则，请检查规则配置：…` 聚合告警；按文件独立判定 + 跨文件聚合后弹一个合并告警框。
+- 新增 `bundleVersion` 顶层字段（v2），导出 entry 包含 `amountSplitRules`；导入时 `bundleVersion > SUPPORTED_BUNDLE_VERSION` 被拒绝（v1.4.8 自身不会触发，为后续版本预埋）。
+
+## 1.4.7 - 2026-04-07
+
+- 大账号选择对话框重写为左右分栏布局：左侧按文件顺序展示，右侧按勾选序位展示，并新增搜索定位与勾选序号回显。
+- 多账号账单导入新增 **账号顺序固定 / 不固定** 模式：固定模式下要求一次勾选全部大账号且按指定顺序导入，并支持「记住顺序」在下次导入时回显配置。
+- 新开账户模块的导出文件命名规则适配单 / 多账号场景。
+- 修复 `rowsWithEmptyBlocks` 未持久化导致固定模式校验失败、空块 `sourceRowNumber` 回退值错误、元数据行被误当成数据行导出的问题。
+- 大账号对话框：`remember` 复选框在不固定模式下灰显而非隐藏；切换搜索关键字时重置选中索引；模式切换时清空搜索状态；初始化期间禁用交互；报错后保留对话框供用户重新设定。
+- 日期解析增强：支持 BNI 点号时间格式 `HH.MM.SS`；支持 Excel 日期序列号被字符串化后的解析（如 PAB-CN 的 `46102`）；`DD-MM-YY` 不歧义场景下 fallback 到 `MM-DD-YY`（`month > 12` 时）；`YYMMDD` 优先于 Excel 序列号识别。
+- 全部账号 0 笔交易时直接报错 `没有账号存在交易数据`，不再进入大账号选择；修复 `identifyAccountBlocks` 空块 fallback 假块的问题。
+- 新开账户余额账单的最晚日期改为「到昨天」。
+- `MerchantId` 自动去除中间空格（如 `NRA 7101 2023 0223 63` → `NRA71012023022363`）。
+- CSV 导入改用纯文本解析器 `parseCsvText`：所有值保持字符串、不过 `xlsx` 的类型推断，解决 20 位以上长数字（交易流水号）后几位被截断为 0 的问题；支持引号包裹 / 转义引号 / CRLF / LF / UTF-8 BOM。`xlsx` / `xls` 文件不受影响，仍走 `XLSX` 库读取。
+- `Currency` 字段从映射对话框的多选拼接里排除（`isCurrencyField` 判断），下拉不再出现 `需要拼接字段` 选项。
+- `splitTemplateName` 修复多段 `-` 时的所在地取值：`BNI-ID-SG` 模板的 location 取第二段 `ID`，不再是 `ID-SG`。
+- 移除映射对话框的日期格式下拉（`dateFormatSelect` 变量及 `saveMappings` 内 `dateFormat: dateFormatSelect.value` 一并删除）。
+
+## 1.4.6 - 2026-03-27
+
+- 维护大账号弹窗的币种输入框小写自动转大写；多币种浮动面板溢出修复（`overflow-y: auto`）。
+- 模板选择框启动时显示 `请选择模板` 占位符；未选模板时阻断导入操作；删除模板时清理相关缓存。
+- 新增「导入银行账号信息」入口（`bank-account-import.js`）：从 Excel 解析客资账号写入大账号表，自有账号写入独立 JSON 存储（`own-account-store.js`）。
+- 新增「余额管理」弹窗：按 `大账号 + 币种 + 日期 + 余额附加值 + 备注` 维护余额附加值（`balance-adjustment-store.js`）；附加值会在余额导出时按 `MerchantId + Currency + BillDate` 累加注入到生成的余额账单。
+- 新开账户余额账单改为开户日到今天 **逐日生成**（上限 3650 天），不再只输出开户日和月末日。
+- `维护大账号` / `账户映射` 等弹窗按钮新增文本溢出保护样式（`.primary-btn.small` 等）。
+- 新增 IPC channels：`bigAccount` 系列 + `balanceAdjustment` 系列。
+
 ## 1.4.5 - 2026-03-24
 
 - “新开账户生成网银账单”模块中，`所在地` 输入框宽度缩窄为原来的三分之二，`币种` 列相应扩宽。
