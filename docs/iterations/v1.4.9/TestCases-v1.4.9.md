@@ -25,8 +25,8 @@
 | G | 4 方互斥（UI 层 + 保存层） | 9 |
 | H | 合并输出业务逻辑（导入阶段求和 / 净值法 / Currency 一致性） | 10（fix2 +1 单行 0 值过滤） |
 | I | 数据持久化 + bundle 兼容（含 bundleVersion = 3） | 10（fix2 +1 冷启动回显） |
-| J | 回归 + 边界 + 错误处理 | 10（**PR #16 review +2**：TC-V149-098 Fix A / TC-V149-099 Fix B） |
-| **合计** | | **103**（**2026-04-08 fix2 +4** + **2026-04-09 PR #16 review +2**） |
+| J | 回归 + 边界 + 错误处理 | 11（**PR #16 review +3**：TC-V149-098 Fix A / TC-V149-099 Fix B / TC-V149-100 Fix D） |
+| **合计** | | **104**（**2026-04-08 fix2 +4** + **2026-04-09 PR #16 review +3**） |
 
 | 测试类型分布 | 数量 |
 |---|---|
@@ -1317,6 +1317,20 @@
 | 测试步骤 | 1. 保存模板<br>2. 导入一行源数据<br>3. 检查输出行数 |
 | 预期结果 | **输出恰好 1 行**（只展开第 1 个 completed 行）；draft 的第 2 / 第 3 行**不参与导出**；导入不报错。<br><br>**边界补充**：把第 1 行也切回 `draft`（弹框 2 内点"编辑"），此时所有行都是 draft。保存模板时 ACI-11 校验（`BILL_SPLIT_CONFIG_MISSING`）会阻断保存，提示"请先在拆分/合并账单映射关系管理中配置至少一行拆分账单配置"。若绕过保存（例如直接改 DB）触发导入，输出行数为 0（静默无输出，不报错）。<br><br>**DB 验证**：导出后查 `template_bill_split_rows` 表，draft 行数据原样保留（未被导出流程破坏或清空）。 |
 
+#### TC-V149-100 Drawee/Payee Name/CardNo 按拆分行方向分配（**2026-04-09 PR #16 review P2 Fix D 新增**）
+
+**2026-04-09 PR #16 review P2 Fix D 新增**（commit `681ac69`）：P1 Fix A 初次实施采用"临时清零 hasCreditAmount/hasDebitAmount 再 restore"的 hack 避免 source-row 级方向污染 base row，副作用是 reuseModuleMapping=false 路径下 Drawee Name / Payee Name / Drawee CardNo / Payee CardNo 4 个字段系统性返回空串（`computeMappedRow` 的 Name 分支用 `hasCreditAmount && !hasDebitAmount` 判定，清零后两个条件都 false）。修复：移除 hack，改为在 `expandBillSplitForRow` 做 per-row post-process，按每条拆分行自己的 `hasEffectiveAmount(creditValue/debitValue)` 方向独立分配 4 个字段。同时顺手修了 reuseModuleMapping=true 路径下的隐藏 bug（之前 Name/CardNo 继承 source-row 方向而非拆分行方向）。
+
+| 项目 | 内容 |
+|------|------|
+| 关联AC | ACI-8 / ACI-9（reuseModuleMapping 两路的非金额字段 per-row 分配） |
+| 类型 | 功能 / 回归 |
+| 优先级 | P0（user 明确"未闭环功能缺口"） |
+| 前置条件 | 源文件 `DATE,AMT1_C,AMT1_D,AMT2_C,AMT2_D,NAME_SRC,ACCT_SRC` 一行 `2026-04-09,100,0,0,50,张三,ACCT001`。主模板映射：`Drawee Name → NAME_SRC`，`Payee Name → NAME_SRC`，`Drawee CardNo → ACCT_SRC`，`Payee CardNo → ACCT_SRC`，`amountMappingRules.nameSourceField = NAME_SRC`，`amountMappingRules.accountSourceField = ACCT_SRC`。弹框 2 配 N=2 两行 completed：第 1 行 `Credit=AMT1_C, Debit=AMT1_D`（源数据 credit=100 → credit-only），第 2 行 `Credit=AMT2_C, Debit=AMT2_D`（源数据 debit=50 → debit-only）。 |
+| 测试步骤 | **场景 1（`reuseModuleMapping = true`）**：保存模板 + 导入 + 检查输出行的 4 个 Name/CardNo 列。<br><br>**场景 2（`reuseModuleMapping = false`，弹框 1 也配 Drawee Name→NAME_SRC, Payee Name→NAME_SRC, Drawee CardNo→ACCT_SRC, Payee CardNo→ACCT_SRC）**：切换复用开关，配置弹框 1，保存 + 导入 + 检查。<br><br>**场景 3（`reuseModuleMapping = false`，弹框 1 只配 BillDate，未配 Drawee/Payee Name/CardNo）**：清空弹框 1 的 Name/CardNo 行，保存 + 导入 + 检查。 |
+| 预期结果 | **场景 1**：<br>- row 1 (credit-only): `Drawee Name=张三`, `Payee Name=''`, `Drawee CardNo=ACCT001`, `Payee CardNo=''`<br>- row 2 (debit-only): `Drawee Name=''`, `Payee Name=张三`, `Drawee CardNo=''`, `Payee CardNo=ACCT001`<br><br>**场景 2**：输出与场景 1 **完全一致**——reuse=false 不应导致 Name/CardNo 被错误清空。如果看到 row 1/row 2 的 4 个字段全空，说明 P2 Fix D 失效 / 回归（回到了"临时清零"的旧 hack 行为）。<br><br>**场景 3**：两个拆分行的 Drawee/Payee Name/CardNo **都为空串**。因为弹框 1 的 `billSplitMappingByTargetField` 里 4 个字段的 mappingValue 都不等于 `nameSourceField` / `accountSourceField`，per-row 覆写的条件分支不进入。这是正确行为——弹框 1 没配的字段就应该是空。 |
+| 链路验证 | `expandBillSplitForRow` 内部的 per-row post-process 块：`hasEffectiveAmount(creditValue)` / `hasEffectiveAmount(debitValue)` 产出 `hasCreditInRow` / `hasDebitInRow`；4 个 target field 各自的 `mappingValue` 从 `billSplitEffectiveMappingByField`（outer closure 变量，每个 source row 进入拆分前更新为 `mappingByField` 或 `billSplitMappingByField`）读取；若 `mappingValue === nameSourceField / accountSourceField` 且方向满足 → 覆写 expandedRow 对应 index，否则置空串。 |
+
 ---
 
 ## 五、AC 覆盖度汇总
@@ -1334,8 +1348,8 @@
 | G. 4 方互斥 | TC-V149-063 ~ TC-V149-071 | 9 |
 | H. 合并输出业务逻辑 | TC-V149-072 ~ TC-V149-080 + TC-V149-075a | 10（fix2 +1） |
 | I. 持久化 + bundle 兼容 | TC-V149-081 ~ TC-V149-089 + TC-V149-081a | 10（fix2 +1） |
-| J. 回归 + 边界 + 错误处理 | TC-V149-090 ~ TC-V149-097 + TC-V149-098 + TC-V149-099 | 10（PR #16 review +2） |
-| **合计** | | **103**（fix2 +4 + PR #16 review +2） |
+| J. 回归 + 边界 + 错误处理 | TC-V149-090 ~ TC-V149-097 + TC-V149-098 + TC-V149-099 + TC-V149-100 | 11（PR #16 review +3） |
+| **合计** | | **104**（fix2 +4 + PR #16 review +3） |
 
 ### 5.2 AC → TC 映射
 
@@ -1434,8 +1448,8 @@
 | ACI-6 | TC-V149-076 |
 | ACI-7 | TC-V149-075, TC-V149-093（**2026-04-08 fix2 override**：均改为静默过滤验证） |
 | ACI-7a | TC-V149-075a（**2026-04-08 fix2 新增**） |
-| ACI-8 | （隐含于 TC-V149-072/077：默认「复用 = 是」路径） |
-| ACI-9 | （隐含于 TC-V149-081 的弹框 1 路径），**TC-V149-098**（PR #16 review P1 Fix A：reuseModuleMapping=false 时弹框 1 映射真正生效的端到端验证） |
+| ACI-8 | （隐含于 TC-V149-072/077：默认「复用 = 是」路径），**TC-V149-100**（PR #16 review P2 Fix D：reuseModuleMapping 两路下 Drawee/Payee Name/CardNo per-split-row 方向分配） |
+| ACI-9 | （隐含于 TC-V149-081 的弹框 1 路径），**TC-V149-098**（PR #16 review P1 Fix A：reuseModuleMapping=false 时弹框 1 映射真正生效的端到端验证），**TC-V149-100**（PR #16 review P2 Fix D：reuseModuleMapping=false 路径下 Name/CardNo per-row 分配） |
 | ACI-10 | TC-V149-095 |
 | ACI-11 | TC-V149-094 |
 | ACI-12 | TC-V149-096 |
@@ -1519,3 +1533,4 @@ Tester 在编写本文档过程中**未发现** PRD 与 TechDoc 之间的矛盾�
 | 2026-04-08 fix2 | **基于 v1.4.9 实施后用户实测反馈同步 TestCases**，对应代码 commit 范围 `fc91550..57dbd38`（8 个 fix commit）、PRD 同步 commit `3aea829`、TechDoc 同步 commit `82b9c09`。**新增 4 条 TC**：(1) **TC-V149-030a**：弹框 2 右下角「完成」按钮存在 + 点击等同 × 关闭（Fix #7，AC1-27 override + AC1-27a 新增）。(2) **TC-V149-030b**：合并账单下拉框改为 checkbox-panel picker（Fix #1）。(3) **TC-V149-075a**：单行拆分输出 Credit/Debit 全 0 静默丢弃（Fix #2，AC1-62a / ACI-7a 新增）。(4) **TC-V149-081a**：冷启动首次打开弹框 2 数据回显（Fix #6 回归验证）。**修订 6 条既有 TC**：(1) TC-V149-010 弹框 1 尺寸从"主弹框的一半"改为"80vw"（Fix #4）。(2) TC-V149-013 弹框 1 Balance 字段选项澄清为与主表格一致（Fix #5）。(3) TC-V149-022 「需要拆分成几份账单」按钮文案从 `完成` 改为 `拆`，宽度 66%（Fix #8）。(4) TC-V149-024 ~ 026 测试步骤中按钮文本同步改为 `拆`。(5) TC-V149-075 合并组净值 = 0 预期从"报错阻断"改为"静默跳过整个组"（Fix #2）。(6) TC-V149-093 同步改为"静默跳过"。AC 覆盖度：95 → 98（新增 AC1-27a / AC1-62a / ACI-7a），TC 总数：97 → 101。各模块计数：C 10 → 12，H 9 → 10，I 9 → 10。 | dev-3（根据 team-lead 文档同步指令） |
 | 2026-04-09 PR #16 review | **基于 PR #16 review 阶段 user + Codex 提的 2 个 P1 block-merge fixes 同步 TestCases**，对应代码 commit `59dc93d` + `d7f07ed`、PRD/TechDoc 同文件内同步。**新增 2 条 TC**：(1) **TC-V149-098**（P1 Fix A 回归验证）：reuseModuleMapping = false 时弹框 1 独立 Description 映射真正生效——源文件同时含 `MAIN_MEMO` / `SPLIT_MEMO` 两列，主模板 `Description → MAIN_MEMO`，弹框 1 `Description → SPLIT_MEMO`，导出应使用 `SPLIT_MEMO`（而不是 `MAIN_MEMO`）；反向对照把"复用"切回"是"应回到 `MAIN_MEMO`。验证 ACI-9 原本仅"隐含"覆盖的实际导出路径。(2) **TC-V149-099**（P1 Fix B 回归验证）：弹框 2 配 N=3 但仅 1 行 completed 其余 draft，导入时输出**恰好 1 行**，draft 行不参与展开；边界补充全 draft 情况下保存模板会触发 ACI-11 校验 `BILL_SPLIT_CONFIG_MISSING` 阻断。验证 ACI-1 的反向语义（"只有 completed 行才展开"）。TC 总数：101 → 103；模块 J：8 → 10；不新增 AC（两条 TC 都是对已有 AC 的更严格回归验证）。 | dev-3（根据 team-lead PR #16 review fix 指令） |
 | 2026-04-09 PR #16 review (P1 Fix C) | **基于 PR #16 review 阶段 user 补提的第 3 个 P1 block-merge fix 同步 TestCases**，对应代码 commit `598801a`、TechDoc 同文件内同步。**修订 TC-V149-096**（ACI-12 多文件聚合告警）：原 TC 的预期结果（文案和触发条件）本来就是正确的，但代码链路从未接通（`billSplitMatchStats` 产出后被 5 个上层触点丢弃），该 TC 等于占位。本次 fix 补齐 5 处链路后，TC 加上"2026-04-09 PR #16 review P1 Fix C override"头注、优先级从 P1 升级为 P0（PR #16 user 反馈 block-merge）、前置条件补充 F6 的精确构造方式、测试步骤补充"dev tools 验证 `result.unmatchedBillSplitFiles` 数组包含 F6.csv"、新增"链路验证"行列出完整的 5 个触点：`billSplitMatchStats` (file-service.js) → `collectUnmatchedBillSplitFiles` → `buildPreparedStatementBatchFromEntries` → `prepareGeneratedFiles` → `buildImportResultFromGeneratedFiles` → `renderer.js alert`。不新增 TC，不新增 AC。 | dev-3（根据 team-lead PR #16 review fix 指令） |
+| 2026-04-09 PR #16 review (P2 Fix D) | **基于 PR #16 review 阶段 user 补提的 P2 fix（"未闭环功能缺口"，不 defer）同步 TestCases**，对应代码 commit `681ac69`、TechDoc 同文件内同步。**新增 1 条 TC — TC-V149-100**：Drawee/Payee Name/CardNo 按每个拆分行的 credit/debit 方向独立分配，覆盖 3 个 scenario：(1) reuseModuleMapping=true 基准（拆分行 1 credit-only / 拆分行 2 debit-only → row 1 Drawee=张三/Payee=''/DraweeCard=ACCT001/PayeeCard=''，row 2 对称 debit-only）；(2) reuseModuleMapping=false 且弹框 1 配 Name/CardNo → 输出与场景 1 完全一致；(3) reuseModuleMapping=false 且弹框 1 未配 Name/CardNo → 4 个字段都为空（因为 billSplitMappingByField 里 mappingValue 不等于 nameSourceField/accountSourceField）。映射到 ACI-8（reuse=true 路径）/ ACI-9（reuse=false 路径）的更严格验证。TC 总数：103 → 104；模块 J：10 → 11；不新增 AC（对已有 ACI-8/9 的精化验证）。同时 TechDoc §5.6.3 的 "Drawee/Payee Name 简化处理（已知限制）" 块被移除，因为 P2 Fix D 已闭环该限制。 | dev-3（根据 team-lead PR #16 review fix 指令） |

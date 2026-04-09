@@ -1455,19 +1455,48 @@ function expandBillSplit(originalRow, headers, billSplitMergeConfig, templateMap
 >      : {};
 >    ```
 > 3. **把原本内联的 `orderedTargetFields.map(targetField => { ... })` 提取成内部 helper `computeMappedRow(mappingByFieldParam)`**，行为对 `reuseModuleMapping = true` 完全等价（纯 refactor，没改任何字段计算逻辑），只是 `mappingByField` 参数化。helper 仍依赖 forEach 作用域内的 closure 变量（`row`, `rowIndex`, `hasCreditAmount`, `hasDebitAmount`, `creditAmountValue`, `debitAmountValue`, `selectedCurrency`, `selectedMerchantId`, `nameSourceField`, `accountSourceField`, `currencyMappings`, `accountMappingByBankId`, `dateParseOrder`, `rowNumbers`, `issues`）。
-> 4. **当 `billSplitEnabled && !billSplitReuseModuleMapping` 时**，临时把 `hasCreditAmount` / `hasDebitAmount` / `creditAmountValue` / `debitAmountValue` 置空再调用 `computeMappedRow(billSplitMappingByField)`，产出 `billSplitBaseRow` 传给 `expandBillSplitForRow`（代替原 `mainMappedRow`）；计算完后恢复原 credit/debit 值，不影响其它代码路径。
+> 4. **当 `billSplitEnabled && !billSplitReuseModuleMapping` 时**，直接调用 `computeMappedRow(billSplitMappingByField)` 产出 `billSplitBaseRow` 传给 `expandBillSplitForRow`（代替原 `mainMappedRow`）。Drawee/Payee Name/CardNo 的 per-row 分配在 `expandBillSplitForRow` 的 post-process 阶段完成（详见 P2 Fix D override 块）。
 >
-> **Drawee/Payee Name 的简化处理（已知限制）**：
-> - 主模板 path 下 Drawee/Payee Name 依赖 `hasCreditAmount` / `hasDebitAmount` 作为 source-row 级别标志（由 Credit/Debit 直接映射或 amountSplitRules 计算出）。
-> - billSplit 非复用 path 下这两个标志**在 source-row 级别**没有意义——每个拆分行才有自己的 Credit/Debit，应该在拆分阶段按拆分行独立评估。
-> - **当前实施采纳 team-lead 推荐的"简单方案"**：billSplit 非复用 base-row 计算阶段先把 Drawee/Payee Name 都置空（hasCreditAmount/hasDebitAmount 都 false）；`expandBillSplitForRow` 后续也不为每个拆分行重新算 Drawee/Payee Name。
-> - **已知限制**：`reuseModuleMapping = false` + `Drawee Name` / `Payee Name` 使用 Name-based 分配（即 `mappingValue === nameSourceField`）时，拆分输出行的 Drawee/Payee Name 都是空串。如果用户需要拆分行也按 Credit/Debit 方向分配 Drawee/Payee，当前实现不支持，作为 PR #16 review 的已知限制记录；真实业务场景下"复用模块字段的映射关系 = 否"的主要诉求是**独立字段 mapping**（例如拆分行的 BillDate/Description/备注取不同列），而 Drawee/Payee 的 Name-based 分配通常不和拆分同时使用。
+> **~~Drawee/Payee Name 的简化处理（已知限制）~~** — **2026-04-09 P2 Fix D 已闭环，移除此限制**，详见下方 P2 Fix D override 块。
 >
 > **验证（Smoke test）**：
 > - `reuseModuleMapping = true`：主/弹框 1 不同 Description 映射 → 输出 Description 来自主模板 ✓
 > - `reuseModuleMapping = false`：主/弹框 1 不同 Description 映射 → 输出 Description 来自弹框 1 ✓
 > - `reuseModuleMapping = false` + 1 completed + 1 draft → 输出 1 行，Description 来自弹框 1 ✓
 > - 回归：all-zero / net-zero / currency-mismatch 全部保留 ✓
+
+> **2026-04-09 PR #16 review P2 Fix D**（对应代码 commit `681ac69 fix(v1.4.9): assign Drawee/Payee Name/CardNo per split row direction`）：
+>
+> **问题**：P1 Fix A 初次实施时，为了避免 `computeMappedRow(billSplitMappingByField)` 继承 source-row 级别的 `hasCreditAmount`/`hasDebitAmount` 污染 base row 的 Name/CardNo 分支（line 504-522 `computeMappedRow` 内部用 `hasCreditAmount && !hasDebitAmount` 判定 Drawee/Payee），采用了"临时清零 + restore"的 hack。副作用：reuseModuleMapping = false 路径下 Drawee Name / Payee Name / Drawee CardNo / Payee CardNo 这 4 个字段**系统性返回空串**（因为清零后两个判定都是 false）。PR #16 user 明确这是未闭环功能缺口，要求按每个拆分行自己的 credit/debit 方向重新分配。
+>
+> **修复方案（Approach B — `expandBillSplitForRow` per-row post-process）**：
+>
+> 1. **移除 `buildMappedRows` 主循环里的清零+restore hack**。`reuseModuleMapping = false` 路径直接 `billSplitBaseRow = computeMappedRow(billSplitMappingByField)`；`hasCreditAmount` / `hasDebitAmount` / `creditAmountValue` / `debitAmountValue` 都保持主模板路径的值（source-row 级）。
+> 2. **新增 outer closure 变量 `billSplitEffectiveMappingByField`**，每个 source row 在进入拆分前更新：`reuseModuleMapping = true` → `mappingByField`（主模板），`reuseModuleMapping = false` → `billSplitMappingByField`（弹框 1）。
+> 3. **`expandBillSplitForRow` 新增 per-row post-process 块**，在每条拆分行的 `expandedRow` 产出 Credit/Debit 值之后：
+>    - 计算 per-row 方向：`hasCreditInRow = hasEffectiveAmount(creditValue)`，`hasDebitInRow = hasEffectiveAmount(debitValue)`。
+>    - 预先定位 `draweeNameIndex / payeeNameIndex / draweeCardNoIndex / payeeCardNoIndex` 4 个 index（注意处理 `'Payee CardNo'` / `'Payee Cardno'` 两种拼写）。
+>    - 从 `billSplitEffectiveMappingByField` 读 4 个字段各自的 `mappingValue`。
+>    - 覆写规则：
+>      * `Drawee Name`：若 `mappingValue === nameSourceField` 且 `hasCreditInRow && !hasDebitInRow` → `readSourceCell(originalRow, nameSourceField)`，否则置空串。
+>      * `Payee Name`：若 `mappingValue === nameSourceField` 且 `hasDebitInRow && !hasCreditInRow` → `readSourceCell(originalRow, nameSourceField)`，否则置空串。
+>      * `Drawee CardNo`：同理用 `accountSourceField`。
+>      * `Payee CardNo` / `Payee Cardno`：同理用 `accountSourceField`。
+>
+> **为什么两路都修**：`reuseModuleMapping = true` 路径之前也有隐藏 bug——主模板计算的 base row 继承 source-row 级别的方向，某些拆分行可能只有 debit（按 splitRow 配置取值），但 Drawee Name 仍然带着 source row 的 credit 方向值。P2 Fix D 的 post-process 对两条路径都生效，把 Drawee/Payee 的方向判定统一收敛到"每条拆分行独立"，符合 PRD 语义（拆分行是独立输出行）。
+>
+> **覆盖 reuseModuleMapping = false + 弹框 1 未配 Name/CardNo 的场景**：此时 `billSplitEffectiveMappingByField['Drawee Name']` 是 undefined，与 `nameSourceField` 不相等，覆写分支不进入，`expandedRow[draweeNameIndex]` 保持 `computeMappedRow(billSplitMappingByField)` 产出的值（Name 行的 `mappingValue` 在弹框 1 lookup 里也是 undefined，`computeMappedRow` 的 Name 分支同样不进入，最终走 fallback `rawValue ?? ''` 但 rawValue 也是空）。
+>
+> **验证（Smoke test，源文件一行：credit=100 debit=0 name=张三 acct=ACCT001，配 2 个拆分行：拆分 1 credit-only / 拆分 2 debit-only）**：
+>
+> - **Scenario 1（reuseModuleMapping = true）**：
+>   * row 1 (credit-only): `DraweeName=张三 / PayeeName='' / DraweeCard=ACCT001 / PayeeCard=''` ✓
+>   * row 2 (debit-only): `DraweeName='' / PayeeName=张三 / DraweeCard='' / PayeeCard=ACCT001` ✓
+> - **Scenario 2（reuseModuleMapping = false + 弹框 1 配 NAME_SRC/ACCT_SRC）**：
+>   * 与 Scenario 1 输出完全一致 ✓
+> - **Scenario 3（reuseModuleMapping = false + 弹框 1 未配 Name/CardNo）**：
+>   * 两个拆分行的 Drawee/Payee Name/CardNo 都为空串（因为 `billSplitMappingByField` 里这 4 个字段的 mappingValue 都不等于 nameSourceField/accountSourceField，覆写分支不进入）✓
+> - **回归**：Fix A (reuse=false 路径 Description 来自弹框 1) / Fix #2 all-zero 过滤 / Fix #2 Currency mismatch throw 全部保留 ✓
 
 > **2026-04-09 PR #16 review P1 Fix B**（对应代码 commit `59dc93d fix(v1.4.9): filter bill-split rows to completed before export`）：
 >
@@ -2137,16 +2166,17 @@ doneButton.addEventListener('click', async () => {
 });
 ```
 
-#### 7.2.5 导出时生效路径（**2026-04-09 PR #16 review P1 Fix A 补充**）
+#### 7.2.5 导出时生效路径（**2026-04-09 PR #16 review P1 Fix A 补充 + P2 Fix D 精化**）
 
 弹框 1 保存落库后，在**导出**阶段如何真正生效：
 
 1. **main.js `buildBillSplitMergeConfig`**（commit `d7f07ed`）读取 `database.getBillSplitMappings(template.id)` 后调用 `buildMappedFieldLookup(...)` 构造 `billSplitMappingByTargetField`（与主模板 `mappingByTargetField` 完全相同的格式，即 `{ [targetField]: sourceFieldOrArray }`），放进 `billSplitMergeConfig` 返回。
 2. **file-service.js `buildMappedRows`**（commit `d7f07ed`）从 `billSplitMerge` 解构 `reuseModuleMapping` + `billSplitMappingByTargetField` 两个字段。
-3. 当 `reuseModuleMapping === false` 时，对每条原始行：先用主模板的 `mappingByField` 算出一份 `mainMappedRow`（保留主模板路径的 credit/debit 计算结果），然后临时置空 `hasCreditAmount` / `hasDebitAmount` / `creditAmountValue` / `debitAmountValue`，调用 `computeMappedRow(billSplitMappingByField)` 产出 `billSplitBaseRow`，把 `billSplitBaseRow` 传给 `expandBillSplitForRow` 作为 base（而不是 `mainMappedRow`）。
+3. 当 `reuseModuleMapping === false` 时，对每条原始行：先用主模板的 `mappingByField` 算出一份 `mainMappedRow`（保留主模板路径的 credit/debit 计算结果），然后**直接调用 `computeMappedRow(billSplitMappingByField)`** 产出 `billSplitBaseRow`（**P2 Fix D `681ac69` 修订**：之前 P1 Fix A 为避免污染会临时清零 `hasCreditAmount` / `hasDebitAmount` 等，导致 Name/CardNo 系统性清空；现在不再清零，Name/CardNo 的 per-row 方向判定移到 `expandBillSplitForRow` post-process 阶段，详见 §5.6.3 末尾的 P2 Fix D override 块）。`billSplitBaseRow` 传给 `expandBillSplitForRow` 作为 base（而不是 `mainMappedRow`）。
 4. 当 `reuseModuleMapping === true`（默认）时，保持原行为——直接用 `mainMappedRow` 作为 base。
+5. **P2 Fix D 新增的 per-row Name/CardNo 覆写**：`expandBillSplitForRow` 为每个拆分行按 `hasEffectiveAmount(creditValue)` / `hasEffectiveAmount(debitValue)` 判定拆分行方向，覆写 Drawee Name / Payee Name / Drawee CardNo / Payee CardNo 4 个字段（credit-only → Drawee 填值 Payee 空；debit-only → Payee 填值 Drawee 空）。两条 reuse 路径都生效。`billSplitEffectiveMappingByField` 是 outer closure 变量，每个 source row 进入拆分前更新（`reuseModuleMapping = true` → `mappingByField`，`false` → `billSplitMappingByField`），让 `expandBillSplitForRow` 知道 4 个 Name/CardNo target field 的 mappingValue 来自哪套 lookup。
 
-这保证了 PRD §4.7.4「复用模块字段的映射关系 = 否」时非金额字段真正走弹框 1 独立配置。详见 §5.6.3 末尾的 PR #16 Fix A override 块。
+这保证了 PRD §4.7.4「复用模块字段的映射关系 = 否」时非金额字段真正走弹框 1 独立配置，且 Drawee/Payee Name/CardNo 按每个拆分行的收支方向独立分配（**已闭环**，不再有 P1 Fix A 时期的"统一置空"已知限制）。详见 §5.6.3 末尾的 P1 Fix A 和 P2 Fix D override 块。
 
 ### 7.3 弹框 2：`createBillSplitRowsDialog`（新增）
 
@@ -3094,4 +3124,5 @@ PRD 添加这 2 条 AC 后，覆盖率变成 96/96 = 100%（仍然 100%，但分
 | 2026-04-08 fix2 | **基于 v1.4.9 实施后用户实测反馈同步 TechDoc**，对应代码 commit 范围 `fc91550..57dbd38`（8 个 fix commit）。override 项：(1) **Fix #2（`6031f88`）** §4.2 错误码表、§5.6.4 `applyBillSplitMerge` 伪代码、§5.6.3 `expandBillSplitForRow` 伪代码、§8.3 导入错误流：`BILL_MERGE_NET_ZERO` 改为 deprecated，合并组净值 = 0 静默 `continue` 跳过整组，并新增"单行拆分输出 Credit/Debit 全 0 静默丢弃"的过滤逻辑（双保险：`expandBillSplitForRow` 的 `.filter(r => r !== null)` + `applyBillSplitMerge` 对 standalone 行的再次过滤）。`BILL_MERGE_CURRENCY_MISMATCH` 保留不变。(2) **Fix #7（`04a2e21`）** §7.3.2 ASCII 图 + §7.3.8 关闭逻辑：弹框 2 右下角新增 `.bill-split-rows-done-btn` 按钮，click 等同 × 关闭（不做额外 save），对应 PRD AC1-27 override + AC1-27a 新增。(3) **Fix #8（`57dbd38`）** §7.3.3 `nDoneButton.textContent = '拆'`（原 `完成`）；CSS 新增 `.bill-split-row-count-done-btn.secondary-btn.small { min-width: 0; width: 71px; }` 覆盖 `.small { min-width: 108px }`。(4) **Fix #4（`3eaaf14`）** §7.2 弹框尺寸 + §7.5 CSS：弹框 1 从 `width: 50%; max-width: 500px` 改为 `width: 80vw; min-width: 520px; max-width: none`；CSS 类名由 `.bill-split-mappings-dialog` 实际采用为 `.bill-split-mappings-card`。(5) **Fix #5（`cb127c0`）** §7.2.2：弹框 1 Balance 字段选项与主表格对齐（`无` / `通过发生额计算` / `headers`），后端 `validateBillSplitMappingsPayload` 加 `isBalanceSpecialValue` 旁路；Balance 行不渲染 concat-field-picker。(6) **Fix #1（`fc91550`）** §7.3.2：弹框 2 「合并账单」下拉框由 `<select multiple>` 改为 `.bill-split-merge-picker` (trigger + panel) checkbox-panel 模式，复用 concat-picker 惯例；§7.5 CSS 新增 `.bill-split-merge-picker-*` 样式。(7) **Fix #3（`8041619`）** §7.1.4：`applyAmountSplitMutualExclusion` 顶部 early-return 当 `isBillSplitMergeEnabledInTable()` 返回 true，避免覆盖 `applyBillSplitMergeMutualExclusion(true)` 设置的 disabled 状态；`applyBillSplitMergeMutualExclusion` 显式禁用行内所有按钮（`data-bill-split-merge-disabled='true'`）。(8) **Fix #6（`d30ec96`）** §5.5.1：`template:get-mappings` IPC handler 的 return 对象补齐 5 个 billSplit 字段（`billSplitGroupFields` / `billSplitMappings` / `billSplitRows` / `billSplitAmountRules` / `billSplitMeta`），修复冷启动首次打开弹框 2 显示空状态的 bug。 | dev-3（根据用户 fix2 反馈 + team-lead override 指令） |
 | 2026-04-09 PR #16 review | **基于 PR #16 review 阶段 user + Codex 反馈的 2 个 P1 block-merge fixes**，对应代码 commit `59dc93d` + `d7f07ed`。(1) **P1 Fix B（`59dc93d fix(v1.4.9): filter bill-split rows to completed before export`）** §5.6.3 末尾新增 override 块：`main.js buildBillSplitMergeConfig` 在构造 `billSplitRows` 时先 `.filter((row) => row.rowStatus === 'completed')`，draft 行不参与导出；`file-service.js buildMappedRows` 解构 `billSplitRows` 时再加一层 filter 作为双保险。边界：全 draft 时静默无输出不报错。(2) **P1 Fix A（`d7f07ed fix(v1.4.9): apply dialog 1 mappings when reuseModuleMapping is false`）** §5.6.3 末尾新增 override 块 + §7.2.5 新增"导出时生效路径"小节：fix 前 `file-service.js` 只解构 `billSplitRows` / `billSplitAmountRules` / `signedAmountSourceField`，**从未解构** `billSplitMappings` / `reuseModuleMapping`，导致弹框 1 配的独立字段映射在导出时被完全忽略。修复方案按 team-lead 推荐的 Approach A refactor：`main.js buildBillSplitMergeConfig` 新增 `billSplitMappingByTargetField = buildMappedFieldLookup(billSplitMappings)` 放进 config；`file-service.js buildMappedRows` 把原本内联的 `.map((targetField) => {...})` 提取为内部 helper `computeMappedRow(mappingByFieldParam)`（行为对 reuseModuleMapping=true 路径完全等价，纯 refactor）；当 `billSplitEnabled && !reuseModuleMapping` 时临时置空 hasCreditAmount/hasDebitAmount/creditAmountValue/debitAmountValue 再调 `computeMappedRow(billSplitMappingByField)`，产出 `billSplitBaseRow` 传给 `expandBillSplitForRow`。**已知限制**：reuseModuleMapping=false 路径下 Drawee/Payee Name 的 Name-based 分配（依赖 hasCreditAmount/hasDebitAmount）在 base-row 阶段置空，拆分行输出为空串；当前实施不为每个拆分行单独评估 Drawee/Payee 的 Credit/Debit 方向（team-lead 推荐的简单方案）。Smoke test 验证：reuse=true / reuse=false 两条路径对 Description 字段的输出都正确；1 completed + 1 draft 路径 draft 行被正确过滤；回归 all-zero / net-zero / currency-mismatch 全部保留。 | dev-3（根据 team-lead PR #16 review fix 指令） |
 | 2026-04-09 PR #16 review (P1 Fix C) | **基于 PR #16 review 阶段 user 补提的第 3 个 P1 block-merge fix**，对应代码 commit `598801a fix(v1.4.9): wire bill-split unmatched aggregate warning (ACI-12)`。§8.4 "多文件聚合告警" 新增 override 块详细说明链路修正：原设计"与 amountSplit 合并为单一判定条件"被**实施时拆分为两套独立链路**——新增 `collectUnmatchedBillSplitFiles(fileEntries)` 函数（判定 `stats.enabled && stats.totalRows > 0 && stats.outputRows === 0`），`buildPreparedStatementBatchFromEntries` 返回 `unmatchedBillSplitFiles` 字段，`buildImportResultFromGeneratedFiles` 在 manualResult / warningResult / 最终 success return 都透传，`statement-session.js cloneRowsWithMetadata` 平行克隆 `billSplitMatchStats`，`main.js prepareGeneratedFiles` 返回 result 中追加字段，`renderer.js` 新增第二个独立 `window.alert` 分支（文案：`以下文件全部未命中拆分/合并规则，请检查规则配置：\n{filenames}`）。**为什么之前没接通**：v1.4.9 初次实施只做了 `file-service.js` 这一层（正确挂了 `billSplitMatchStats`），但上层 5 个触点全都没动；PR #16 user review 发现 ACI-12 的 TC-V149-096 没弹告警，回溯定位到这里。5 个触点全部修复：`statement-generation.js` (`collectUnmatchedBillSplitFiles` + `buildPreparedStatementBatchFromEntries` + `buildImportResultFromGeneratedFiles` 3 处) / `main.js` (`prepareGeneratedFiles`) / `statement-session.js` (`cloneRowsWithMetadata`) / `renderer.js` (alert 分支)。Smoke test 验证：file-service 层面 stats 正确产出 `{enabled: true, totalRows: 2, outputRows: 0}`；helper 层面 `collectUnmatchedBillSplitFiles` 正确过滤出唯一未命中文件；回归 `unmatchedAmountSplitFiles` 路径不受影响。 | dev-3（根据 team-lead PR #16 review fix 指令） |
+| 2026-04-09 PR #16 review (P2 Fix D) | **基于 PR #16 review 阶段 user 补提的 P2 fix（user 明确说是"未闭环功能缺口"，不 defer）**，对应代码 commit `681ac69 fix(v1.4.9): assign Drawee/Payee Name/CardNo per split row direction`。§5.6.3 移除 P1 Fix A 遗留的"Drawee/Payee Name 简化处理（已知限制）"块，新增完整的 P2 Fix D override 块。根因：P1 Fix A 初次实施为了避免 source-row 级 hasCredit/hasDebit 污染 reuseModuleMapping=false 的 base row，采用"临时清零 + restore" hack，副作用是 Drawee Name / Payee Name / Drawee CardNo / Payee CardNo 4 个字段系统性返回空串（`computeMappedRow` 的 Name 分支用 `hasCreditAmount && !hasDebitAmount` 判定，清零后两个判定都 false）。修复方案（Approach B — `expandBillSplitForRow` per-row post-process）：(1) 移除 `buildMappedRows` 主循环的清零 + restore hack，直接让 `computeMappedRow(billSplitMappingByField)` 正常算；(2) 新增 outer closure 变量 `billSplitEffectiveMappingByField`（reuseModuleMapping=true → mappingByField，false → billSplitMappingByField），每个 source row 进入拆分前更新；(3) `expandBillSplitForRow` 内预先定位 4 个 target field 的 index（注意处理 `'Payee CardNo'` / `'Payee Cardno'` 两种拼写）+ 读 `billSplitEffectiveMappingByField` 里的 mappingValue；(4) 每个拆分行的 `expandedRow` 产出后，按 `hasEffectiveAmount(creditValue/debitValue)` 计算 per-row 方向，覆写 4 个字段（credit-only → Drawee 填值 Payee 空；debit-only → Payee 填值 Drawee 空）。**两路都修**：reuseModuleMapping=true 路径之前也有隐藏 bug（Name/CardNo 继承 source-row 方向而非拆分行方向），P2 Fix D 对两路统一按拆分行方向分配，符合 PRD 语义。Smoke test 验证 3 个场景全部通过：reuse=true / reuse=false(弹框 1 配 Name) / reuse=false(弹框 1 未配 Name)；回归 Fix A / Fix #2 all-zero / Fix #2 currency-mismatch 全部保留。 | dev-3（根据 team-lead PR #16 review fix 指令） |
 
