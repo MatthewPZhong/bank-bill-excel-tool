@@ -113,10 +113,17 @@ function readWorkbookRows(filePath, { blankrows = false } = {}) {
   if (path.extname(filePath).toLowerCase() === '.csv') {
     try {
       const raw = fs.readFileSync(filePath);
-      const content = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF
-        ? raw.subarray(3).toString('utf-8')
-        : raw.toString('utf-8');
-      return parseCsvText(content, { blankrows });
+      // 检测 magic bytes：XLS (OLE2) = D0CF11E0，XLSX (ZIP) = 504B0304
+      // 如果 .csv 文件实际是 Excel 二进制格式，跳过 CSV 解析，走 XLSX 库
+      const isOLE2 = raw.length >= 4 && raw[0] === 0xD0 && raw[1] === 0xCF && raw[2] === 0x11 && raw[3] === 0xE0;
+      const isZIP = raw.length >= 4 && raw[0] === 0x50 && raw[1] === 0x4B && raw[2] === 0x03 && raw[3] === 0x04;
+      if (!isOLE2 && !isZIP) {
+        const content = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF
+          ? raw.subarray(3).toString('utf-8')
+          : raw.toString('utf-8');
+        return parseCsvText(content, { blankrows });
+      }
+      // 否则 fall through 到下方 XLSX.readFile
     } catch (error) {
       if (error instanceof FileValidationError) {
         throw error;

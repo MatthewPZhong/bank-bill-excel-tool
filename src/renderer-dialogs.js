@@ -832,7 +832,9 @@
 
       checkSortBtn.addEventListener('click', async () => {
         if (checkedOrder.length === 0) {
-          openModal(createAlertDialog('未勾选任何大账号，请检查。'));
+          openModal(createAlertDialog('未勾选任何大账号，请检查。', {
+            onConfirm: () => { openModal(overlay); }
+          }));
           return;
         }
 
@@ -848,6 +850,7 @@
             if (result.resultCode !== 'RE1') {
               sortOrderListByCheckedOrder();
             }
+            openModal(overlay);
           }
         }));
       });
