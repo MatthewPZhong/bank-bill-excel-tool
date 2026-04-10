@@ -808,6 +808,17 @@ function determineCheckSortResult(fileAccountsList, userMerchantIds, leftPanelCo
   return { resultCode: 'R5', message: '账户个数和顺序都匹配不上，请检查。' };
 }
 
+function sortFileEntriesByAccountCount(fileEntries) {
+  return fileEntries
+    .map((entry, originalIndex) => ({
+      entry,
+      originalIndex,
+      blockCount: identifyAccountBlocks(entry.detailRows).length
+    }))
+    .sort((a, b) => a.blockCount - b.blockCount || a.originalIndex - b.originalIndex)
+    .map(({ entry }) => entry);
+}
+
 function buildBigAccountSelectionRows(fileEntries = [], options = {}) {
   const { includeEmptyBlocks = false } = options;
   const rows = [];
@@ -5396,7 +5407,8 @@ function registerFileHandlers() {
           orderedTargetFields: templateConfig.exportTargetFields,
           inputFilePaths: selectionResult.filePaths
         });
-        const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
+        const sortedFileEntries = sortFileEntriesByAccountCount(provisionalFileEntries);
+        const selectionRows = buildBigAccountSelectionRows(sortedFileEntries);
 
         if (!selectionRows.length) {
           return createErrorResult({
@@ -5407,7 +5419,7 @@ function registerFileHandlers() {
           });
         }
 
-        const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
+        const selectionRowsWithEmpty = buildBigAccountSelectionRows(sortedFileEntries, { includeEmptyBlocks: true });
 
         rememberPendingBigAccountSelection({
           templateId,
@@ -5417,7 +5429,7 @@ function registerFileHandlers() {
           inputFilePaths: selectionResult.filePaths,
           bigAccounts: templateConfig.bigAccounts,
           fixedAssignments: templateConfig.fixedAssignments,
-          fileEntries: provisionalFileEntries,
+          fileEntries: sortedFileEntries,
           rows: selectionRows,
           rowsWithEmptyBlocks: selectionRowsWithEmpty
         });
@@ -5462,7 +5474,8 @@ function registerFileHandlers() {
             });
           }
 
-          const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
+          const sortedFileEntries2 = sortFileEntriesByAccountCount(provisionalFileEntries);
+          const selectionRows = buildBigAccountSelectionRows(sortedFileEntries2);
 
           if (!selectionRows.length) {
             return createErrorResult({
@@ -5473,8 +5486,7 @@ function registerFileHandlers() {
             });
           }
 
-
-          const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
+          const selectionRowsWithEmpty = buildBigAccountSelectionRows(sortedFileEntries2, { includeEmptyBlocks: true });
           rememberPendingBigAccountSelection({
             templateId,
             template: templateConfig.template,
@@ -5483,7 +5495,7 @@ function registerFileHandlers() {
             inputFilePaths: selectionResult.filePaths,
             bigAccounts: templateConfig.bigAccounts,
             fixedAssignments: templateConfig.fixedAssignments,
-            fileEntries: provisionalFileEntries,
+            fileEntries: sortedFileEntries2,
             rows: selectionRows,
             rowsWithEmptyBlocks: selectionRowsWithEmpty
           });
