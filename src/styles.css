@@ -1078,6 +1078,58 @@ select {
   margin-top: 18px;
 }
 
+.extract-order-btn {
+  margin-right: auto;
+}
+
+.extract-order-card {
+  min-width: 700px;
+  max-width: 960px;
+}
+
+.extract-order-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.extract-order-text {
+  flex: 1;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extract-edit-btn {
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.extract-edit-btn:hover {
+  text-decoration: underline;
+}
+
+.extract-edit-container {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.extract-edit-input {
+  height: 34px;
+  font-size: 13px;
+  flex: 1;
+  min-width: 80px;
+}
+
 .big-account-search-label {
   font-size: 13px;
   color: var(--muted);

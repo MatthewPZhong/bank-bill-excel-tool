@@ -601,6 +601,7 @@
           </div>
         </div>
         <div class="dialog-actions big-account-selection-footer">
+          <button class="secondary-btn small extract-order-btn" type="button" data-action="extract-order">提取大账号顺序</button>
           <span class="big-account-search-label">定位大账号</span>
           <input class="mapping-text-input big-account-search-input" type="text" spellcheck="false" />
           <label class="big-account-remember-label is-disabled">
@@ -615,6 +616,7 @@
       const fileListContainer = dialog.querySelector('.big-account-file-list');
       const orderListContainer = dialog.querySelector('.big-account-order-list');
       const searchInput = dialog.querySelector('.big-account-search-input');
+      const extractOrderBtn = dialog.querySelector('[data-action="extract-order"]');
       const rememberLabel = dialog.querySelector('.big-account-remember-label');
       const rememberCheckbox = dialog.querySelector('.big-account-remember-checkbox');
       const doneBtn = dialog.querySelector('[data-action="done"]');
@@ -805,6 +807,153 @@
         const target = searchMatches[searchMatchIndex];
         target.classList.add('is-search-highlight');
         target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
+
+      extractOrderBtn.addEventListener('click', async () => {
+        const result = await desktopApi.files.extractBigAccountOrder();
+
+        if (result.status === 'error') {
+          const failedLines = (result.failedRows || [])
+            .map((r) => `第 ${r.index + 1} 行（${escapeHtml(r.fileName || '')}）提取不到大账号信息`)
+            .join('<br/>');
+          openModal(createAlertDialog(failedLines || '提取大账号信息失败', {
+            onConfirm: () => { openModal(overlay); }
+          }));
+          return;
+        }
+
+        const extractedAccounts = result.accounts || [];
+
+        function applyExtractedOrder() {
+          checkedOrder = [];
+          orderListContainer.querySelectorAll('.big-account-order-checkbox').forEach((cb) => { cb.checked = false; });
+
+          extractedAccounts.forEach((account) => {
+            const key = `${account.merchantId}@@${account.currency}`;
+            const item = Array.from(orderListContainer.querySelectorAll('.big-account-order-item')).find(
+              (el) => el.dataset.merchantId === account.merchantId && el.dataset.currency === account.currency
+            );
+            if (item && checkedOrder.length < currentFileRows.length) {
+              item.querySelector('.big-account-order-checkbox').checked = true;
+              checkedOrder.push({ merchantId: account.merchantId, currency: account.currency, key });
+            }
+          });
+          syncOrderIndices();
+          syncCheckboxDisabled();
+        }
+
+        function showExtractDialog() {
+          const extractOverlay = createOverlay();
+          const extractDialog = document.createElement('div');
+          extractDialog.className = 'modal-card big-account-selection-card extract-order-card';
+          extractDialog.innerHTML = `
+            <div class="dialog-header">
+              <div class="dialog-title">确认大账号顺序</div>
+            </div>
+            <div class="big-account-split-body">
+              <div class="big-account-split-left">
+                <div class="big-account-split-header">文件顺序：</div>
+                <div class="extract-file-list"></div>
+              </div>
+              <div class="big-account-split-right">
+                <div class="big-account-split-header">大账号信息：</div>
+                <div class="extract-order-list"></div>
+              </div>
+            </div>
+            <div class="dialog-actions right">
+              <button class="primary-btn small" type="button" data-action="extract-done">完成</button>
+            </div>
+          `;
+
+          const extractFileList = extractDialog.querySelector('.extract-file-list');
+          const extractOrderList = extractDialog.querySelector('.extract-order-list');
+
+          currentFileRows.forEach((row, index) => {
+            const item = document.createElement('div');
+            item.className = 'big-account-file-item';
+            const fullName = row.fileName || '';
+            item.innerHTML = `<span class="big-account-file-index">${index + 1}.</span><span class="big-account-file-meta" title="${escapeHtml(fullName)}">${escapeHtml(fullName)}</span>`;
+            extractFileList.appendChild(item);
+          });
+
+          extractedAccounts.forEach((account, index) => {
+            const item = document.createElement('div');
+            item.className = 'extract-order-item';
+            item.dataset.index = index;
+            item.dataset.merchantId = account.merchantId;
+            item.dataset.currency = account.currency;
+
+            const textSpan = document.createElement('span');
+            textSpan.className = 'extract-order-text';
+            textSpan.textContent = `${account.merchantId} ${account.currency}`;
+
+            const editBtn = document.createElement('button');
+            editBtn.className = 'extract-edit-btn';
+            editBtn.type = 'button';
+            editBtn.textContent = '编辑';
+
+            const editContainer = document.createElement('div');
+            editContainer.className = 'extract-edit-container';
+            editContainer.hidden = true;
+            editContainer.innerHTML = `
+              <input class="mapping-text-input extract-edit-input extract-edit-merchant" type="text" placeholder="账户号" value="${escapeHtml(account.merchantId)}" />
+              <input class="mapping-text-input extract-edit-input extract-edit-currency" type="text" placeholder="币种" value="${escapeHtml(account.currency)}" />
+              <button class="secondary-btn small extract-edit-done" type="button">完成</button>
+            `;
+
+            editBtn.addEventListener('click', () => {
+              textSpan.hidden = true;
+              editBtn.hidden = true;
+              editContainer.hidden = false;
+            });
+
+            editContainer.querySelector('.extract-edit-done').addEventListener('click', () => {
+              const newMerchantId = editContainer.querySelector('.extract-edit-merchant').value.trim();
+              const newCurrency = editContainer.querySelector('.extract-edit-currency').value.trim();
+              const matched = expandedOptions.find(
+                (o) => o.merchantId === newMerchantId && o.currency === newCurrency
+              );
+              if (!matched) {
+                openModal(createAlertDialog('大账号信息不存在，请重新输入。', {
+                  onConfirm: () => { openModal(extractOverlay); }
+                }));
+                return;
+              }
+              item.dataset.merchantId = newMerchantId;
+              item.dataset.currency = newCurrency;
+              extractedAccounts[index] = { merchantId: newMerchantId, currency: newCurrency, matchType: 'exact' };
+              textSpan.textContent = `${newMerchantId} ${newCurrency}`;
+              textSpan.hidden = false;
+              editBtn.hidden = false;
+              editContainer.hidden = true;
+            });
+
+            item.append(textSpan, editBtn, editContainer);
+            extractOrderList.appendChild(item);
+          });
+
+          extractDialog.querySelector('[data-action="extract-done"]').addEventListener('click', () => {
+            if (checkedOrder.length > 0) {
+              openModal(createConfirmDialog({
+                message: '当前已有已勾选的大账号，确认覆盖吗？',
+                confirmText: '确认覆盖',
+                cancelText: '取消',
+                onConfirm: () => {
+                  applyExtractedOrder();
+                  openModal(overlay);
+                }
+              }));
+            } else {
+              applyExtractedOrder();
+              openModal(overlay);
+            }
+          });
+
+          extractOverlay.appendChild(extractDialog);
+          openModal(extractOverlay);
+        }
+
+        showExtractDialog();
       });
 
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);

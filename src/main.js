@@ -5661,6 +5661,71 @@ function registerFileHandlers() {
   });
 
 
+  ipcMain.handle('file:extract-big-account-order', (_event) => {
+    const pendingContext = lastPendingBigAccountSelection;
+
+    if (!pendingContext) {
+      return { status: 'error', failedRows: [], message: '当前没有待处理的大账号选择任务，请重新导入文件' };
+    }
+
+    const allMerchantIds = (pendingContext.bigAccounts || []).map((ba) => normalizeCell(ba.merchantId)).filter((id) => id !== '');
+    const expectedSourceHeaders = pendingContext.template?.headers || [];
+    const expandedOptions = expandBigAccountConfigurations(pendingContext.bigAccounts || []);
+
+    try {
+      const accounts = [];
+      const failedRows = [];
+      let globalIndex = 0;
+
+      (pendingContext.fileEntries || []).forEach((entry) => {
+        const fileResult = identifyAccountsFromFile({
+          filePath: entry.filePath,
+          detailRows: entry.detailRows,
+          expectedSourceHeaders,
+          allMerchantIds
+        });
+
+        const fileName = path.basename(entry.filePath);
+        const headerRowNumbers = findHeaderRowNumbersInRawRows(readRows(entry.filePath), expectedSourceHeaders);
+        const blockCount = Math.max(headerRowNumbers.length, fileResult.accounts.length, 1);
+
+        for (let bi = 0; bi < blockCount; bi += 1) {
+          const identified = fileResult.accounts[bi];
+          if (!identified) {
+            failedRows.push({ index: globalIndex, fileName });
+            globalIndex += 1;
+            continue;
+          }
+
+          const matched = expandedOptions.find((o) => {
+            const result = matchMerchantIds(identified.merchantId, o.merchantId);
+            return result !== 'none';
+          });
+
+          if (matched) {
+            accounts.push({
+              merchantId: matched.merchantId,
+              currency: matched.currency,
+              matchType: identified.matchType,
+              fileName
+            });
+          } else {
+            failedRows.push({ index: globalIndex, fileName });
+          }
+          globalIndex += 1;
+        }
+      });
+
+      if (failedRows.length > 0) {
+        return { status: 'error', failedRows };
+      }
+
+      return { status: 'ok', accounts };
+    } catch (error) {
+      return { status: 'error', failedRows: [], message: '提取大账号信息时出错' };
+    }
+  });
+
   ipcMain.handle('file:save-balance-seed', (_event, payload = {}) => {
     const pendingPrompt = lastManualBalancePrompt;
     const importContext = lastFileImportContext;
