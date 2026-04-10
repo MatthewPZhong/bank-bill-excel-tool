@@ -669,37 +669,15 @@ function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
 
 function identifyAccountsFromFile({ filePath, detailRows, expectedSourceHeaders, allMerchantIds }) {
   const rawRows = readRows(filePath);
-  const headerBreaks = Array.isArray(detailRows.headerBreaks) ? detailRows.headerBreaks : [];
-  const rowMetas = Array.isArray(detailRows.rowMetas) ? detailRows.rowMetas : [];
-  const blocks = identifyAccountBlocks(detailRows);
   const headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
-  const isSingleAccount = blocks.length <= 1 && headerBreaks.length === 0;
+  const isSingleAccount = headerRowNumbers.length <= 1;
   const identified = [];
 
-  blocks.forEach((block, blockIndex) => {
-    let candidateStartRow;
-    let candidateEndRow;
-
-    if (blockIndex === 0) {
-      candidateStartRow = 1;
-      candidateEndRow = headerRowNumbers.length > 0 ? headerRowNumbers[0] - 1 : 1;
-    } else {
-      const prevBlock = blocks[blockIndex - 1];
-      const prevEndRowNumber = rowMetas[prevBlock.endIndex]?.sourceRowNumber || 0;
-      candidateStartRow = prevEndRowNumber + 1;
-      candidateEndRow = headerRowNumbers.length > blockIndex
-        ? headerRowNumbers[blockIndex] - 1
-        : prevEndRowNumber + 1;
-    }
-
-    if (candidateEndRow < candidateStartRow) {
-      candidateEndRow = candidateStartRow;
-    }
-
+  function searchCandidateRange(startIdx, endIdx) {
     let bestMatch = null;
     let bestMatchType = 'none';
 
-    for (let rowIdx = candidateStartRow - 1; rowIdx < Math.min(candidateEndRow, rawRows.length); rowIdx += 1) {
+    for (let rowIdx = startIdx; rowIdx <= endIdx && rowIdx < rawRows.length; rowIdx += 1) {
       const row = rawRows[rowIdx];
       if (!Array.isArray(row)) continue;
       for (const cell of row) {
@@ -722,10 +700,24 @@ function identifyAccountsFromFile({ filePath, detailRows, expectedSourceHeaders,
       if (bestMatchType === 'exact') break;
     }
 
-    if (bestMatch) {
-      identified.push({ merchantId: bestMatch, matchType: bestMatchType });
+    return bestMatch ? { merchantId: bestMatch, matchType: bestMatchType } : null;
+  }
+
+  headerRowNumbers.forEach((headerRowNum, idx) => {
+    const candidateStartIdx = idx === 0 ? 0 : headerRowNumbers[idx - 1];
+    const candidateEndIdx = headerRowNum - 2;
+    const match = searchCandidateRange(candidateStartIdx, candidateEndIdx);
+    if (match) {
+      identified.push(match);
     }
   });
+
+  if (headerRowNumbers.length === 0) {
+    const match = searchCandidateRange(0, rawRows.length - 1);
+    if (match) {
+      identified.push(match);
+    }
+  }
 
   return { accounts: identified, isSingleAccount };
 }
