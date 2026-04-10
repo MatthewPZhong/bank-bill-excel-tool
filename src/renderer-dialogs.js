@@ -580,7 +580,7 @@
 
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">请选择本次使用的大账号 / 币种</div>
+          <div class="dialog-title">网银账单解析大账号确认</div>
           <div class="big-account-selection-toolbar">
             <span class="big-account-mode-label">多账号账单导入解析模式</span>
             <select class="mapping-select big-account-mode-select">
@@ -605,7 +605,7 @@
           <input class="mapping-text-input big-account-search-input" type="text" spellcheck="false" />
           <label class="big-account-remember-label is-disabled">
             <input class="new-account-checkbox big-account-remember-checkbox" type="checkbox" />
-            <span>记住大账号选择顺序</span>
+            <span>记住顺序</span>
           </label>
           <button class="primary-btn small" type="button" data-action="done">完成</button>
         </div>
