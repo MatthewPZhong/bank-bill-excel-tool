@@ -1102,6 +1102,46 @@ select {
   gap: 12px;
 }
 
+.file-order-help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(104, 79, 39, 0.15);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: help;
+  position: relative;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
+.file-order-tooltip {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  width: 320px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(63, 49, 32, 0.95);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.file-order-help-icon:hover .file-order-tooltip,
+.file-order-help-icon:focus .file-order-tooltip {
+  display: block;
+}
+
 .balance-addon-card {
   width: min(100%, 1120px);
 }

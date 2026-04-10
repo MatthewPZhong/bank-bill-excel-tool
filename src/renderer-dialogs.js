@@ -592,7 +592,7 @@
         </div>
         <div class="big-account-split-body">
           <div class="big-account-split-left">
-            <div class="big-account-split-header">文件顺序：</div>
+            <div class="big-account-split-header">文件顺序：<span class="file-order-help-icon" tabindex="0">?<span class="file-order-tooltip">导入多个文件时，文件顺序是由多个文件的文件名里最左侧的数字的大小决定，由小到大排序的。如：四个文件&lt;文件2.xlsx&gt;、&lt;文件12.xlsx&gt;、&lt;文件1_4.xlsx&gt;、&lt;文件6.xlsx&gt;，多选导入后的文件顺序：&lt;文件1_4.xlsx&gt;、&lt;文件2.xlsx&gt;、&lt;文件6.xlsx&gt;、&lt;文件12.xlsx&gt;。</span></span></div>
             <div class="big-account-file-list"></div>
           </div>
           <div class="big-account-split-right">
