@@ -722,103 +722,6 @@ function identifyAccountsFromFile({ filePath, detailRows, expectedSourceHeaders,
   return { accounts: identified, isSingleAccount };
 }
 
-function determineCheckSortResult(fileAccountsList, userMerchantIds, leftPanelCount) {
-  const allFileAccounts = [];
-  let hasSingleAccountFile = false;
-
-  for (const fileResult of fileAccountsList) {
-    if (fileResult.isSingleAccount) {
-      hasSingleAccountFile = true;
-    }
-    allFileAccounts.push(...fileResult.accounts);
-  }
-
-  if (leftPanelCount <= 1 && hasSingleAccountFile && fileAccountsList.length === 1) {
-    if (allFileAccounts.length === 0) {
-      return { resultCode: 'RS2', message: '匹配不上，请检查。' };
-    }
-    const fileAccount = allFileAccounts[0];
-    for (const uid of userMerchantIds) {
-      const result = matchMerchantIds(fileAccount.merchantId, uid);
-      if (result !== 'none') {
-        return { resultCode: 'RS1', message: '排序检查无误，请自行再做检查。' };
-      }
-    }
-    return { resultCode: 'RS2', message: '匹配不上，请检查。' };
-  }
-
-  if (allFileAccounts.length === 0 || userMerchantIds.length === 0) {
-    return { resultCode: 'R5', message: '账户个数和顺序都匹配不上，请检查。' };
-  }
-
-  const filePositions = [];
-  let allExact = true;
-  let allFound = true;
-
-  for (const uid of userMerchantIds) {
-    let foundIdx = -1;
-    let foundType = 'none';
-    for (let fi = 0; fi < allFileAccounts.length; fi += 1) {
-      const result = matchMerchantIds(allFileAccounts[fi].merchantId, uid);
-      if (result === 'exact') {
-        foundIdx = fi;
-        foundType = 'exact';
-        break;
-      }
-      if (result === 'fuzzy' && foundIdx === -1) {
-        foundIdx = fi;
-        foundType = 'fuzzy';
-      }
-    }
-    if (foundIdx === -1) {
-      allFound = false;
-      allExact = false;
-    } else {
-      filePositions.push(foundIdx);
-      if (foundType === 'fuzzy') {
-        allExact = false;
-      }
-    }
-  }
-
-  let orderMatch = allFound;
-  if (orderMatch) {
-    for (let i = 1; i < filePositions.length; i += 1) {
-      if (filePositions[i] <= filePositions[i - 1]) {
-        orderMatch = false;
-        break;
-      }
-    }
-  }
-
-  const countMatch = leftPanelCount === userMerchantIds.length;
-
-  if (countMatch && orderMatch && allExact) {
-    return { resultCode: 'R1', message: '排序检查无误，请自行再做检查。' };
-  }
-  if (countMatch && orderMatch && !allExact) {
-    return { resultCode: 'R3', message: '账户顺序在模糊匹配下排序无误，请检查。' };
-  }
-  if (countMatch && !orderMatch) {
-    return { resultCode: 'R4', message: '账户顺序匹配不上，请检查。' };
-  }
-  if (!countMatch && orderMatch) {
-    return { resultCode: 'R2', message: '账户个数匹配不上，请检查。' };
-  }
-  return { resultCode: 'R5', message: '账户个数和顺序都匹配不上，请检查。' };
-}
-
-function sortFileEntriesByAccountCount(fileEntries) {
-  return fileEntries
-    .map((entry, originalIndex) => ({
-      entry,
-      originalIndex,
-      blockCount: identifyAccountBlocks(entry.detailRows).length
-    }))
-    .sort((a, b) => a.blockCount - b.blockCount || a.originalIndex - b.originalIndex)
-    .map(({ entry }) => entry);
-}
-
 function buildBigAccountSelectionRows(fileEntries = [], options = {}) {
   const { includeEmptyBlocks = false } = options;
   const rows = [];
@@ -5407,8 +5310,7 @@ function registerFileHandlers() {
           orderedTargetFields: templateConfig.exportTargetFields,
           inputFilePaths: selectionResult.filePaths
         });
-        const sortedFileEntries = sortFileEntriesByAccountCount(provisionalFileEntries);
-        const selectionRows = buildBigAccountSelectionRows(sortedFileEntries);
+        const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
 
         if (!selectionRows.length) {
           return createErrorResult({
@@ -5419,7 +5321,7 @@ function registerFileHandlers() {
           });
         }
 
-        const selectionRowsWithEmpty = buildBigAccountSelectionRows(sortedFileEntries, { includeEmptyBlocks: true });
+        const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
 
         rememberPendingBigAccountSelection({
           templateId,
@@ -5429,7 +5331,7 @@ function registerFileHandlers() {
           inputFilePaths: selectionResult.filePaths,
           bigAccounts: templateConfig.bigAccounts,
           fixedAssignments: templateConfig.fixedAssignments,
-          fileEntries: sortedFileEntries,
+          fileEntries: provisionalFileEntries,
           rows: selectionRows,
           rowsWithEmptyBlocks: selectionRowsWithEmpty
         });
@@ -5474,8 +5376,7 @@ function registerFileHandlers() {
             });
           }
 
-          const sortedFileEntries2 = sortFileEntriesByAccountCount(provisionalFileEntries);
-          const selectionRows = buildBigAccountSelectionRows(sortedFileEntries2);
+          const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
 
           if (!selectionRows.length) {
             return createErrorResult({
@@ -5486,7 +5387,7 @@ function registerFileHandlers() {
             });
           }
 
-          const selectionRowsWithEmpty = buildBigAccountSelectionRows(sortedFileEntries2, { includeEmptyBlocks: true });
+          const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
           rememberPendingBigAccountSelection({
             templateId,
             template: templateConfig.template,
@@ -5495,7 +5396,7 @@ function registerFileHandlers() {
             inputFilePaths: selectionResult.filePaths,
             bigAccounts: templateConfig.bigAccounts,
             fixedAssignments: templateConfig.fixedAssignments,
-            fileEntries: sortedFileEntries2,
+            fileEntries: provisionalFileEntries,
             rows: selectionRows,
             rowsWithEmptyBlocks: selectionRowsWithEmpty
           });
@@ -5759,40 +5660,6 @@ function registerFileHandlers() {
     }
   });
 
-  ipcMain.handle('file:check-sort', (_event, payload = {}) => {
-    const pendingContext = lastPendingBigAccountSelection;
-
-    if (!pendingContext) {
-      return { status: 'error', resultCode: 'RE1', message: '当前没有待处理的大账号选择任务，请重新导入文件' };
-    }
-
-    const assignments = Array.isArray(payload.assignments) ? payload.assignments : [];
-
-    if (!assignments.length) {
-      return { status: 'ok', resultCode: 'RE1', message: '未勾选任何大账号，请检查。' };
-    }
-
-    const allMerchantIds = (pendingContext.bigAccounts || []).map((ba) => normalizeCell(ba.merchantId)).filter((id) => id !== '');
-    const userMerchantIds = assignments.map((a) => normalizeCell(a.merchantId));
-    const expectedSourceHeaders = pendingContext.template?.headers || [];
-
-    try {
-      const fileAccountsList = (pendingContext.fileEntries || []).map((entry) => {
-        return identifyAccountsFromFile({
-          filePath: entry.filePath,
-          detailRows: entry.detailRows,
-          expectedSourceHeaders,
-          allMerchantIds
-        });
-      });
-
-      const leftPanelCount = Number.isInteger(payload.leftPanelCount) ? payload.leftPanelCount : 0;
-      const result = determineCheckSortResult(fileAccountsList, userMerchantIds, leftPanelCount);
-      return { status: 'ok', ...result };
-    } catch (error) {
-      return { status: 'error', resultCode: 'RS2', message: '检查排序时出错，请检查。' };
-    }
-  });
 
   ipcMain.handle('file:save-balance-seed', (_event, payload = {}) => {
     const pendingPrompt = lastManualBalancePrompt;

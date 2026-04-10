@@ -322,6 +322,7 @@ select {
 .template-select,
 .mapping-select {
   min-width: 260px;
+  max-width: 260px;
   height: 44px;
   border-radius: 14px;
   border: 1px solid var(--line-strong);
@@ -874,6 +875,27 @@ select {
   position: relative;
 }
 
+/* 拼接字段 picker 隐藏时保持占位，避免映射字段列位置平移 */
+.concat-field-picker[hidden] {
+  display: inline-flex !important;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* 映射关系管理：条件按钮隐藏时保持占位（维护大账号 / 发生额管理 / 拆分管理等） */
+.mapping-field-editor > button[hidden] {
+  display: inline-block !important;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* 账单拆分组行：管理按钮隐藏时保持占位 */
+.bill-split-group-btn[hidden] {
+  display: inline-block !important;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .concat-picker-trigger {
   min-width: 80px;
   height: 34px;
@@ -927,7 +949,6 @@ select {
 }
 
 .concat-preview {
-  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1057,10 +1078,6 @@ select {
   margin-top: 18px;
 }
 
-.check-sort-btn {
-  margin-right: auto;
-}
-
 .big-account-search-label {
   font-size: 13px;
   color: var(--muted);
@@ -1100,46 +1117,6 @@ select {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.file-order-help-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: rgba(104, 79, 39, 0.15);
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: help;
-  position: relative;
-  vertical-align: middle;
-  margin-left: 4px;
-}
-
-.file-order-tooltip {
-  display: none;
-  position: absolute;
-  left: 0;
-  top: calc(100% + 8px);
-  width: 320px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: rgba(63, 49, 32, 0.95);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 1.5;
-  white-space: normal;
-  z-index: 10;
-  pointer-events: none;
-}
-
-.file-order-help-icon:hover .file-order-tooltip,
-.file-order-help-icon:focus .file-order-tooltip {
-  display: block;
 }
 
 .balance-addon-card {
@@ -1924,12 +1901,14 @@ select {
 
 .bill-split-rows-table {
   width: 100%;
+  table-layout: fixed;
 }
 
 .bill-split-rows-table th,
 .bill-split-rows-table td {
   padding: 6px 8px;
   vertical-align: middle;
+  white-space: nowrap;
 }
 
 .bill-split-rows-table .mapping-select {
@@ -1939,6 +1918,33 @@ select {
 
 .bill-split-row-actions {
   white-space: nowrap;
+}
+
+.bill-split-row-view-text {
+  display: block;
+  min-height: 44px;
+  line-height: 44px;
+  font-size: 14px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bill-split-rows-table th:first-child {
+  padding-left: 1em;
+  text-align: left;
+}
+
+.bill-split-rows-table td:first-child {
+  padding-left: 2em;
+  text-align: left;
+}
+
+.bill-split-rows-table td:first-child {
+  min-height: 44px;
+  line-height: 44px;
+  font-size: 14px;
 }
 
 .bill-split-row-actions .text-action {
