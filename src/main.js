@@ -3628,11 +3628,15 @@ function registerTemplateHandlers() {
 
           if (entry.bigAccountOrderConfig && Array.isArray(entry.bigAccountOrderConfig.files)) {
             writeBigAccountOrder(ensureStorageRoot(), template.id, entry.bigAccountOrderConfig);
+          } else {
+            writeBigAccountOrder(ensureStorageRoot(), template.id, { assignments: [] });
           }
 
-          if (entry.bigAccountMode === 'fixed') {
-            writeBigAccountMode(ensureStorageRoot(), template.id, 'fixed');
-          }
+          writeBigAccountMode(
+            ensureStorageRoot(),
+            template.id,
+            entry.bigAccountMode === 'fixed' ? 'fixed' : 'unfixed'
+          );
 
           if (existingTemplate) {
             updatedCount += 1;
