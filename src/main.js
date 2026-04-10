@@ -1023,6 +1023,10 @@ function buildTemplateLibraryPayload() {
       if (orderConfig && Array.isArray(orderConfig.files) && orderConfig.files.length > 0) {
         entry.bigAccountOrderConfig = orderConfig;
       }
+      const mode = readBigAccountMode(ensureStorageRoot(), template.id);
+      if (mode === 'fixed') {
+        entry.bigAccountMode = mode;
+      }
     }
     return entry;
   });
@@ -3624,6 +3628,10 @@ function registerTemplateHandlers() {
 
           if (entry.bigAccountOrderConfig && Array.isArray(entry.bigAccountOrderConfig.files)) {
             writeBigAccountOrder(ensureStorageRoot(), template.id, entry.bigAccountOrderConfig);
+          }
+
+          if (entry.bigAccountMode === 'fixed') {
+            writeBigAccountMode(ensureStorageRoot(), template.id, 'fixed');
           }
 
           if (existingTemplate) {
