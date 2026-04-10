@@ -601,6 +601,7 @@
           </div>
         </div>
         <div class="dialog-actions big-account-selection-footer">
+          <button class="secondary-btn small check-sort-btn" type="button" data-action="check-sort">检查排序</button>
           <span class="big-account-search-label">定位大账号</span>
           <input class="mapping-text-input big-account-search-input" type="text" spellcheck="false" />
           <label class="big-account-remember-label is-disabled">
@@ -617,6 +618,7 @@
       const searchInput = dialog.querySelector('.big-account-search-input');
       const rememberLabel = dialog.querySelector('.big-account-remember-label');
       const rememberCheckbox = dialog.querySelector('.big-account-remember-checkbox');
+      const checkSortBtn = dialog.querySelector('[data-action="check-sort"]');
       const doneBtn = dialog.querySelector('[data-action="done"]');
 
       function truncateFileName(fileName, maxLen) {
@@ -805,6 +807,49 @@
         const target = searchMatches[searchMatchIndex];
         target.classList.add('is-search-highlight');
         target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
+
+      function sortOrderListByCheckedOrder() {
+        const allItems = Array.from(orderListContainer.querySelectorAll('.big-account-order-item'));
+        const checkedItems = [];
+        const uncheckedItems = [];
+
+        allItems.forEach((item) => {
+          const key = `${item.dataset.merchantId}@@${item.dataset.currency}`;
+          const orderIdx = checkedOrder.findIndex((o) => o.key === key);
+          if (orderIdx >= 0) {
+            checkedItems.push({ item, order: orderIdx });
+          } else {
+            uncheckedItems.push(item);
+          }
+        });
+
+        checkedItems.sort((a, b) => a.order - b.order);
+        orderListContainer.innerHTML = '';
+        checkedItems.forEach(({ item }) => orderListContainer.appendChild(item));
+        uncheckedItems.forEach((item) => orderListContainer.appendChild(item));
+      }
+
+      checkSortBtn.addEventListener('click', async () => {
+        if (checkedOrder.length === 0) {
+          openModal(createAlertDialog('未勾选任何大账号，请检查。'));
+          return;
+        }
+
+        const assignments = checkedOrder.map((item) => ({
+          merchantId: item.merchantId,
+          currency: item.currency
+        }));
+
+        const result = await desktopApi.files.checkSort({ assignments });
+
+        openModal(createAlertDialog(result.message, {
+          onConfirm: () => {
+            if (result.resultCode !== 'RE1') {
+              sortOrderListByCheckedOrder();
+            }
+          }
+        }));
       });
 
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);

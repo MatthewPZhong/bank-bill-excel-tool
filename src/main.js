@@ -33,6 +33,7 @@ const {
   normalizeCell,
   parseDateValue,
   parseNumericValue,
+  readRows,
   writeBalanceWorkbook,
   writeWorkbookRows
 } = require('./backend/file-service');
@@ -625,6 +626,168 @@ function identifyAccountBlocks(detailRows, options = {}) {
   }
 
   return [];
+}
+
+function stripSpecialCharsForMatch(value) {
+  return String(value || '').replace(/[\s\-_()（）[\]【】]/g, '');
+}
+
+function matchMerchantIds(cellValue, merchantId) {
+  const a = normalizeCell(cellValue);
+  const b = normalizeCell(merchantId);
+  if (!a || !b) return 'none';
+  if (a === b) return 'exact';
+  const sa = stripSpecialCharsForMatch(a);
+  const sb = stripSpecialCharsForMatch(b);
+  if (sa && sb && sa === sb) return 'fuzzy';
+  if (sa && sb && (sa.includes(sb) || sb.includes(sa))) return 'fuzzy';
+  return 'none';
+}
+
+function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
+  const normalizedExpected = (expectedSourceHeaders || [])
+    .map((h) => normalizeCell(h))
+    .filter((h) => h !== '');
+  if (!normalizedExpected.length) return [];
+
+  const results = [];
+  rawRows.forEach((row, index) => {
+    const cells = Array.isArray(row) ? row : [];
+    const maxStart = cells.length - normalizedExpected.length;
+    for (let start = 0; start <= maxStart; start += 1) {
+      const match = normalizedExpected.every(
+        (exp, ei) => normalizeCell(cells[start + ei]) === exp
+      );
+      if (match) {
+        results.push(index + 1);
+        break;
+      }
+    }
+  });
+  return results;
+}
+
+function identifyAccountsFromFile({ filePath, detailRows, expectedSourceHeaders, allMerchantIds }) {
+  const rawRows = readRows(filePath);
+  const headerBreaks = Array.isArray(detailRows.headerBreaks) ? detailRows.headerBreaks : [];
+  const rowMetas = Array.isArray(detailRows.rowMetas) ? detailRows.rowMetas : [];
+  const blocks = identifyAccountBlocks(detailRows);
+  const headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
+  const isSingleAccount = blocks.length <= 1 && headerBreaks.length === 0;
+  const identified = [];
+
+  blocks.forEach((block, blockIndex) => {
+    let candidateStartRow;
+    let candidateEndRow;
+
+    if (blockIndex === 0) {
+      candidateStartRow = 1;
+      candidateEndRow = headerRowNumbers.length > 0 ? headerRowNumbers[0] - 1 : 1;
+    } else {
+      const prevBlock = blocks[blockIndex - 1];
+      const prevEndRowNumber = rowMetas[prevBlock.endIndex]?.sourceRowNumber || 0;
+      candidateStartRow = prevEndRowNumber + 1;
+      candidateEndRow = headerRowNumbers.length > blockIndex
+        ? headerRowNumbers[blockIndex] - 1
+        : prevEndRowNumber + 1;
+    }
+
+    if (candidateEndRow < candidateStartRow) {
+      candidateEndRow = candidateStartRow;
+    }
+
+    let bestMatch = null;
+    let bestMatchType = 'none';
+
+    for (let rowIdx = candidateStartRow - 1; rowIdx < Math.min(candidateEndRow, rawRows.length); rowIdx += 1) {
+      const row = rawRows[rowIdx];
+      if (!Array.isArray(row)) continue;
+      for (const cell of row) {
+        const cellStr = normalizeCell(cell);
+        if (!cellStr) continue;
+        for (const mid of allMerchantIds) {
+          const result = matchMerchantIds(cellStr, mid);
+          if (result === 'exact') {
+            bestMatch = mid;
+            bestMatchType = 'exact';
+            break;
+          }
+          if (result === 'fuzzy' && bestMatchType !== 'exact') {
+            bestMatch = mid;
+            bestMatchType = 'fuzzy';
+          }
+        }
+        if (bestMatchType === 'exact') break;
+      }
+      if (bestMatchType === 'exact') break;
+    }
+
+    if (bestMatch) {
+      identified.push({ merchantId: bestMatch, matchType: bestMatchType });
+    }
+  });
+
+  return { accounts: identified, isSingleAccount };
+}
+
+function determineCheckSortResult(fileAccountsList, userMerchantIds) {
+  const allFileAccounts = [];
+  let hasSingleAccountFile = false;
+
+  for (const fileResult of fileAccountsList) {
+    if (fileResult.isSingleAccount) {
+      hasSingleAccountFile = true;
+    }
+    allFileAccounts.push(...fileResult.accounts);
+  }
+
+  if (hasSingleAccountFile && fileAccountsList.length === 1 && allFileAccounts.length <= 1) {
+    if (allFileAccounts.length === 0) {
+      return { resultCode: 'RS2', message: '匹配不上，请检查。' };
+    }
+    const fileAccount = allFileAccounts[0];
+    for (const uid of userMerchantIds) {
+      const result = matchMerchantIds(fileAccount.merchantId, uid);
+      if (result !== 'none') {
+        return { resultCode: 'RS1', message: '排序检查无误，请自行再做检查。' };
+      }
+    }
+    return { resultCode: 'RS2', message: '匹配不上，请检查。' };
+  }
+
+  const countMatch = allFileAccounts.length === userMerchantIds.length;
+  const compareLen = Math.min(allFileAccounts.length, userMerchantIds.length);
+
+  if (compareLen === 0) {
+    return { resultCode: 'R5', message: '账户个数和顺序都匹配不上，请检查。' };
+  }
+
+  let allExact = true;
+  let allMatch = true;
+
+  for (let i = 0; i < compareLen; i += 1) {
+    const matched = matchMerchantIds(allFileAccounts[i].merchantId, userMerchantIds[i]);
+    if (matched === 'none') {
+      allMatch = false;
+      allExact = false;
+    } else if (matched === 'fuzzy') {
+      allExact = false;
+    }
+  }
+
+  if (countMatch && allExact) {
+    return { resultCode: 'R1', message: '排序检查无误，请自行再做检查。' };
+  }
+  if (countMatch && allMatch && !allExact) {
+    return { resultCode: 'R3', message: '账户顺序在模糊匹配下排序无误，请检查。' };
+  }
+  if (countMatch && !allMatch) {
+    return { resultCode: 'R4', message: '账户顺序匹配不上，请检查。' };
+  }
+  if (!countMatch && allMatch) {
+    return { resultCode: 'R2', message: '账户个数匹配不上，请检查。' };
+  }
+  return { resultCode: 'R5', message: '账户个数和顺序都匹配不上，请检查。' };
 }
 
 function buildBigAccountSelectionRows(fileEntries = [], options = {}) {
@@ -5563,6 +5726,40 @@ function registerFileHandlers() {
         originalError: error,
         templateName: pendingContext.template.name
       });
+    }
+  });
+
+  ipcMain.handle('file:check-sort', (_event, payload = {}) => {
+    const pendingContext = lastPendingBigAccountSelection;
+
+    if (!pendingContext) {
+      return { status: 'error', resultCode: 'RE1', message: '当前没有待处理的大账号选择任务，请重新导入文件' };
+    }
+
+    const assignments = Array.isArray(payload.assignments) ? payload.assignments : [];
+
+    if (!assignments.length) {
+      return { status: 'ok', resultCode: 'RE1', message: '未勾选任何大账号，请检查。' };
+    }
+
+    const allMerchantIds = (pendingContext.bigAccounts || []).map((ba) => normalizeCell(ba.merchantId)).filter((id) => id !== '');
+    const userMerchantIds = assignments.map((a) => normalizeCell(a.merchantId));
+    const expectedSourceHeaders = pendingContext.template?.headers || [];
+
+    try {
+      const fileAccountsList = (pendingContext.fileEntries || []).map((entry) => {
+        return identifyAccountsFromFile({
+          filePath: entry.filePath,
+          detailRows: entry.detailRows,
+          expectedSourceHeaders,
+          allMerchantIds
+        });
+      });
+
+      const result = determineCheckSortResult(fileAccountsList, userMerchantIds);
+      return { status: 'ok', ...result };
+    } catch (error) {
+      return { status: 'error', resultCode: 'RS2', message: '检查排序时出错，请检查。' };
     }
   });
 

@@ -63,6 +63,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
   files: {
     importFile: (templateId) => ipcRenderer.invoke('file:import', templateId),
     completeBigAccountSelection: (payload) => ipcRenderer.invoke('file:complete-big-account-selection', payload),
+    checkSort: (payload) => ipcRenderer.invoke('file:check-sort', payload),
     saveBalanceSeed: (payload) => ipcRenderer.invoke('file:save-balance-seed', payload),
     exportDetail: (scope) => ipcRenderer.invoke('file:export-detail', scope),
     exportBalance: (scope) => ipcRenderer.invoke('file:export-balance', scope)

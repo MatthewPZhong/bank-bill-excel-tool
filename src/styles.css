@@ -1057,6 +1057,10 @@ select {
   margin-top: 18px;
 }
 
+.check-sort-btn {
+  margin-right: auto;
+}
+
 .big-account-search-label {
   font-size: 13px;
   color: var(--muted);
