@@ -42,6 +42,10 @@ function roundAmount(value) {
   return Number(Number(value).toFixed(2));
 }
 
+function roundAmountHighPrecision(value) {
+  return Number(Number(value).toFixed(12));
+}
+
 function inferEndingBalance({ previousEndBalance, entries, dateLabel }) {
   const uniqueBalances = Array.from(
     new Set(
@@ -85,7 +89,7 @@ function inferEndingBalance({ previousEndBalance, entries, dateLabel }) {
 function calculateEndingBalanceFromAmounts({ previousEndBalance, entries }) {
   const creditAmountSum = entries.reduce((sum, entry) => sum + entry.creditAmount, 0);
   const debitAmountSum = entries.reduce((sum, entry) => sum + entry.debitAmount, 0);
-  return roundAmount(previousEndBalance + creditAmountSum - debitAmountSum);
+  return roundAmountHighPrecision(previousEndBalance + creditAmountSum - debitAmountSum);
 }
 
 function sanitizeAmountValue(value) {
@@ -682,6 +686,7 @@ module.exports = {
   parseNumericValue,
   resolveCurrencyValue,
   roundAmount,
+  roundAmountHighPrecision,
   sanitizeAmountValue,
   sanitizeSignedAmountValue,
   splitSignedAmountValue,

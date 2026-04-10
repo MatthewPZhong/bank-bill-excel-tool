@@ -3,6 +3,29 @@ const path = require('node:path');
 const XLSX = require('xlsx');
 const { FileValidationError, normalizeCell } = require('./common');
 
+function countSignificantDigits(value) {
+  const absStr = String(Math.abs(value));
+  const cleaned = absStr.replace('.', '').replace(/^0+/, '');
+  return cleaned.length;
+}
+
+function hasMoreThanTwoDecimals(value) {
+  const str = String(value);
+  const dotIndex = str.indexOf('.');
+  if (dotIndex < 0) return false;
+  return str.length - dotIndex - 1 > 2;
+}
+
+function buildNumericCellValue(numericValue) {
+  if (countSignificantDigits(numericValue) > 15) {
+    return { t: 's', v: String(numericValue), z: '@' };
+  }
+  if (hasMoreThanTwoDecimals(numericValue)) {
+    return { t: 'n', v: numericValue };
+  }
+  return { t: 'n', v: numericValue, z: '0.00' };
+}
+
 function applyExportFieldFormats(worksheet, rows, {
   inferDateCellFormat,
   parseDateValue,
@@ -38,11 +61,7 @@ function applyExportFieldFormats(worksheet, rows, {
         }
 
         const cellAddress = XLSX.utils.encode_cell({ c: columnIndex, r: sheetRowIndex });
-        worksheet[cellAddress] = {
-          t: 'n',
-          v: numericValue,
-          z: '0.00'
-        };
+        worksheet[cellAddress] = buildNumericCellValue(numericValue);
       });
     });
 
@@ -116,11 +135,7 @@ function applyBalanceFieldFormats(worksheet, headerFields, rows, {
         }
 
         const cellAddress = XLSX.utils.encode_cell({ c: columnIndex, r: sheetRowIndex });
-        worksheet[cellAddress] = {
-          t: 'n',
-          v: numericValue,
-          z: '0.00'
-        };
+        worksheet[cellAddress] = buildNumericCellValue(numericValue);
       });
     });
 
