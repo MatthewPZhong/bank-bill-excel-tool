@@ -970,7 +970,7 @@
         }));
 
         if (currentMode === 'fixed' && rememberCheckbox.checked) {
-          await desktopApi.bigAccount.saveOrder({ templateId, assignments });
+          await desktopApi.bigAccount.saveOrder({ templateId, assignments, includeFileInfo: true });
         } else if (currentMode === 'fixed' && !rememberCheckbox.checked) {
           await desktopApi.bigAccount.saveOrder({ templateId, assignments: [] });
         }
@@ -3778,6 +3778,35 @@
       return overlay;
     }
 
+    function createRememberOrderMismatchDialog({ message, bigAccountResult }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card alert-card';
+      dialog.innerHTML = `
+        <div class="alert-message">${message}</div>
+        <div class="dialog-actions center">
+          <button class="secondary-btn small" type="button" data-action="change-config">变更配置</button>
+          <button class="primary-btn small" type="button" data-action="confirm">确认</button>
+        </div>
+      `;
+
+      dialog.querySelector('[data-action="change-config"]').addEventListener('click', () => {
+        closeModal();
+        const selectionPayload = {
+          ...bigAccountResult,
+          status: 'select-big-account'
+        };
+        openModal(createBigAccountSelectionDialog(selectionPayload));
+      });
+
+      dialog.querySelector('[data-action="confirm"]').addEventListener('click', () => {
+        closeModal();
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     return {
       closeModal,
       openModal,
@@ -3794,6 +3823,7 @@
       createTemplateRenameDialog,
       createBigAccountSelectionDialog,
       createBigAccountManagerDialog,
+      createRememberOrderMismatchDialog,
       renderTemplateTableRows,
       createTemplateManagerDialog,
       createMappingDialog,

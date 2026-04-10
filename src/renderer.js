@@ -181,6 +181,7 @@ const {
   createTemplateRenameDialog,
   createBigAccountSelectionDialog,
   createBigAccountManagerDialog,
+  createRememberOrderMismatchDialog,
   createTemplateManagerDialog,
   createMappingDialog,
   createAccountMappingDialog
@@ -288,7 +289,7 @@ function applyManualBalancePromptStatus(result) {
 
 function getEnumStatusMessage() {
   return state.hasEnum
-    ? `已加载内置枚举表：${state.enumFileName || 'COMMON枚举.xlsx'}`
+    ? '欢迎使用小助手'
     : '内置网银账单枚举表缺失，请检查安装包';
 }
 
@@ -2632,6 +2633,17 @@ async function handleImportFile() {
 
   if (result.status === 'select-big-account') {
     openModal(createBigAccountSelectionDialog(result));
+    return;
+  }
+
+  if (result.status === 'remember-order-mismatch') {
+    const failedLines = (result.failedFileNames || [])
+      .map((name) => `${name}的账户个数或账户号匹配不上（账户个数和账户号都匹配不上），请检查。`)
+      .join('<br/>');
+    openModal(createRememberOrderMismatchDialog({
+      message: failedLines,
+      bigAccountResult: result
+    }));
     return;
   }
 

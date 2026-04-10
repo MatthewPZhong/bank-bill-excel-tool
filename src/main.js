@@ -1011,10 +1011,21 @@ function expandBigAccountConfigurations(bigAccounts = []) {
 }
 
 function buildTemplateLibraryPayload() {
+  const templates = database.listTemplateBundleEntries().map((entry) => {
+    const template = database.getTemplateByKey(entry.templateKey) || database.getTemplateByName(entry.name);
+    if (template) {
+      const orderConfig = readBigAccountOrder(ensureStorageRoot(), template.id);
+      if (orderConfig && Array.isArray(orderConfig.files) && orderConfig.files.length > 0) {
+        entry.bigAccountOrderConfig = orderConfig;
+      }
+    }
+    return entry;
+  });
+
   return {
     bundleVersion: SUPPORTED_BUNDLE_VERSION,
     exportedAt: new Date().toISOString(),
-    templates: database.listTemplateBundleEntries()
+    templates
   };
 }
 
@@ -3530,6 +3541,10 @@ function registerTemplateHandlers() {
             signedAmountSourceField: normalizeCell(entry.billSplitMeta?.signedAmountSourceField)
           });
 
+          if (entry.bigAccountOrderConfig && Array.isArray(entry.bigAccountOrderConfig.files)) {
+            writeBigAccountOrder(ensureStorageRoot(), template.id, entry.bigAccountOrderConfig);
+          }
+
           if (existingTemplate) {
             updatedCount += 1;
           } else {
@@ -5231,7 +5246,34 @@ function registerBigAccountOrderHandlers() {
 
   ipcMain.handle('big-account-order:save', (_event, payload = {}) => {
     try {
-      writeBigAccountOrder(ensureStorageRoot(), payload.templateId, payload.assignments || []);
+      const data = { assignments: payload.assignments || [] };
+
+      if (payload.includeFileInfo && lastPendingBigAccountSelection) {
+        const pendingContext = lastPendingBigAccountSelection;
+        const fileEntries = pendingContext.fileEntries || [];
+        const allMerchantIds = (pendingContext.bigAccounts || []).map((ba) => normalizeCell(ba.merchantId)).filter((id) => id !== '');
+        const expectedSourceHeaders = pendingContext.template?.headers || [];
+        const expandedOptions = expandBigAccountConfigurations(pendingContext.bigAccounts || []);
+
+        data.fileCount = fileEntries.length;
+        data.files = fileEntries.map((entry, fileIndex) => {
+          const fileResult = identifyAccountsFromFile({
+            filePath: entry.filePath,
+            detailRows: entry.detailRows,
+            expectedSourceHeaders,
+            allMerchantIds
+          });
+          const accounts = fileResult.accounts.map((identified) => {
+            const matched = expandedOptions.find((o) => matchMerchantIds(identified.merchantId, o.merchantId) !== 'none');
+            return matched
+              ? { merchantId: matched.merchantId, currency: matched.currency }
+              : { merchantId: identified.merchantId, currency: '' };
+          });
+          return { fileIndex, accountCount: accounts.length, accounts };
+        });
+      }
+
+      writeBigAccountOrder(ensureStorageRoot(), payload.templateId, data);
       return { status: 'success' };
     } catch (_error) {
       return { status: 'error', message: '大账号选择顺序保存失败' };
@@ -5310,6 +5352,201 @@ function registerFileHandlers() {
           orderedTargetFields: templateConfig.exportTargetFields,
           inputFilePaths: selectionResult.filePaths
         });
+        const savedMode = readBigAccountMode(ensureStorageRoot(), templateId);
+        const savedOrderConfig = readBigAccountOrder(ensureStorageRoot(), templateId);
+
+        if (savedMode?.mode === 'fixed' && savedOrderConfig && Array.isArray(savedOrderConfig.files) && savedOrderConfig.files.length > 0) {
+          const importFileCount = selectionResult.filePaths.length;
+
+          if (importFileCount === savedOrderConfig.fileCount) {
+            const allMerchantIds = templateConfig.bigAccounts.map((ba) => normalizeCell(ba.merchantId)).filter((id) => id !== '');
+            const expectedSourceHeaders = templateConfig.template.headers || [];
+            const failedFileNames = [];
+
+            provisionalFileEntries.forEach((entry, fileIndex) => {
+              const savedFile = savedOrderConfig.files[fileIndex];
+              if (!savedFile) { failedFileNames.push(path.basename(entry.filePath)); return; }
+
+              const fileResult = identifyAccountsFromFile({
+                filePath: entry.filePath,
+                detailRows: entry.detailRows,
+                expectedSourceHeaders,
+                allMerchantIds
+              });
+
+              if (fileResult.accounts.length !== savedFile.accountCount) {
+                failedFileNames.push(path.basename(entry.filePath));
+                return;
+              }
+
+              const allAccountsMatch = savedFile.accounts.every((savedAccount) => {
+                return fileResult.accounts.some((identified) => matchMerchantIds(identified.merchantId, savedAccount.merchantId) !== 'none');
+              });
+
+              if (!allAccountsMatch) {
+                failedFileNames.push(path.basename(entry.filePath));
+              }
+            });
+
+            if (failedFileNames.length === 0 && Array.isArray(savedOrderConfig.assignments) && savedOrderConfig.assignments.length > 0) {
+              rememberPendingBigAccountSelection({
+                templateId,
+                template: templateConfig.template,
+                mappings: templateConfig.exportMappings,
+                orderedTargetFields: templateConfig.exportTargetFields,
+                inputFilePaths: selectionResult.filePaths,
+                bigAccounts: templateConfig.bigAccounts,
+                fixedAssignments: templateConfig.fixedAssignments,
+                fileEntries: provisionalFileEntries,
+                rows: buildBigAccountSelectionRows(provisionalFileEntries),
+                rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true })
+              });
+
+              const autoResult = await ipcMain.emit('__internal-complete-big-account-selection__') || null;
+              if (!autoResult) {
+                try {
+                  const directResult = await (async () => {
+                    const pendingContext = lastPendingBigAccountSelection;
+                    const isFixedMode = true;
+                    const expectedRows = pendingContext.rowsWithEmptyBlocks || pendingContext.rows;
+                    const normalizedAssignments = savedOrderConfig.assignments
+                      .map((assignment) => {
+                        const matchedAccount = templateConfig.bigAccounts.find((item) => item.merchantId === assignment.merchantId);
+                        if (!matchedAccount) return null;
+                        const availableCurrencies = Array.isArray(matchedAccount.currencies) ? matchedAccount.currencies : [];
+                        const normalizedCurrency = matchedAccount.isMultiCurrency
+                          ? normalizeCell(assignment.currency)
+                          : normalizeCell(availableCurrencies[0] || assignment.currency);
+                        if (!normalizedCurrency || !availableCurrencies.includes(normalizedCurrency)) return null;
+                        return { merchantId: matchedAccount.merchantId, currency: normalizedCurrency, rowIndex: assignment.rowIndex };
+                      })
+                      .filter((a) => a !== null)
+                      .sort((left, right) => left.rowIndex - right.rowIndex);
+
+                    if (normalizedAssignments.length !== expectedRows.length) {
+                      return null;
+                    }
+
+                    const resolvedFileEntries = applyBigAccountAssignmentsToFileEntries(
+                      pendingContext.fileEntries,
+                      normalizedAssignments,
+                      { includeEmptyBlocks: isFixedMode }
+                    );
+                    const generationConfig = buildStatementGenerationConfig({
+                      template: pendingContext.template,
+                      mappings: pendingContext.mappings,
+                      orderedTargetFields: pendingContext.orderedTargetFields,
+                      allowManagedMerchantWithoutSelection: true
+                    });
+                    const preparedBatch = statementGenerationHelpers.buildPreparedStatementBatchFromEntries({
+                      config: generationConfig,
+                      fileEntries: resolvedFileEntries
+                    });
+                    const generatedFiles = {
+                      ...generateStatementFiles({
+                        config: generationConfig,
+                        preparedBatch,
+                        scope: 'current'
+                      }),
+                      fileEntries: resolvedFileEntries.map((entry) => buildStatementFileEntry({
+                        ...entry,
+                        buildEntryId: buildStatementFileEntryId
+                      })),
+                      preparedBatch
+                    };
+
+                    pendingContext.inputFilePaths.forEach((fp) => {
+                      removeStatementSessionEntriesByFilePath(session, fp);
+                    });
+                    const batchId = appendStatementSessionImport({
+                      buildBatchId: buildStatementBatchId,
+                      lastGeneratedExports,
+                      session,
+                      fileEntries: generatedFiles.fileEntries
+                    });
+                    rememberLastFileImportContext({
+                      templateId: pendingContext.templateId,
+                      template: pendingContext.template,
+                      mappings: pendingContext.mappings,
+                      orderedTargetFields: pendingContext.orderedTargetFields,
+                      inputFilePaths: pendingContext.inputFilePaths,
+                      selectedBigAccount: null,
+                      preparedDetailRows: generatedFiles.preparedBatch.detailRows,
+                      scope: 'current',
+                      statementSessionKey: session.key,
+                      currentBatchId: batchId
+                    });
+                    clearPendingBigAccountSelection();
+                    updateStatementSessionCache(session, batchId, generatedFiles);
+                    return buildImportResultFromGeneratedFiles({
+                      generatedFiles,
+                      templateId: pendingContext.templateId,
+                      templateName: pendingContext.template.name,
+                      inputFilePaths: pendingContext.inputFilePaths
+                    });
+                  })();
+
+                  if (directResult) {
+                    return directResult;
+                  }
+                } catch (_autoMatchError) {
+                  // Fall through to manual selection
+                }
+              }
+            }
+
+            if (failedFileNames.length > 0) {
+              rememberPendingBigAccountSelection({
+                templateId,
+                template: templateConfig.template,
+                mappings: templateConfig.exportMappings,
+                orderedTargetFields: templateConfig.exportTargetFields,
+                inputFilePaths: selectionResult.filePaths,
+                bigAccounts: templateConfig.bigAccounts,
+                fixedAssignments: templateConfig.fixedAssignments,
+                fileEntries: provisionalFileEntries,
+                rows: buildBigAccountSelectionRows(provisionalFileEntries),
+                rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true })
+              });
+              return {
+                status: 'remember-order-mismatch',
+                message: failedFileNames
+                  .map((name) => `${name}的账户个数或账户号匹配不上（账户个数和账户号都匹配不上），请检查。`)
+                  .join('\n'),
+                failedFileNames,
+                selectionMode: 'multi-row',
+                templateId,
+                rows: buildBigAccountSelectionRows(provisionalFileEntries).map((row, index) => ({
+                  index: Number.isInteger(row.index) ? row.index : index,
+                  label: `${index + 1}.`,
+                  sourceRowNumber: Number(row.sourceRowNumber || 0),
+                  fileName: normalizeCell(row.fileName)
+                })),
+                rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true }).map((row, index) => ({
+                  index: Number.isInteger(row.index) ? row.index : index,
+                  label: `${index + 1}.`,
+                  sourceRowNumber: Number(row.sourceRowNumber || 0),
+                  fileName: normalizeCell(row.fileName)
+                })),
+                bigAccounts: templateConfig.bigAccounts.map((item) => ({
+                  merchantId: normalizeCell(item.merchantId),
+                  currencies: Array.isArray(item.currencies)
+                    ? item.currencies.map((value) => normalizeCell(value)).filter((value) => value !== '')
+                    : [],
+                  isMultiCurrency: Boolean(item.isMultiCurrency)
+                })),
+                expandedBigAccountOptions: expandBigAccountConfigurations(templateConfig.bigAccounts),
+                fixedAssignments: (templateConfig.fixedAssignments || []).map((item) => ({
+                  merchantId: normalizeCell(item.merchantId),
+                  currency: normalizeCell(item.currency),
+                  rowIndex: Number(item.rowIndex || 0)
+                })),
+                forceMode: 'fixed'
+              };
+            }
+          }
+        }
+
         const selectionRows = buildBigAccountSelectionRows(provisionalFileEntries);
 
         if (!selectionRows.length) {
