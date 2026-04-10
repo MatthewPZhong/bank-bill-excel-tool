@@ -722,7 +722,7 @@ function identifyAccountsFromFile({ filePath, detailRows, expectedSourceHeaders,
   return { accounts: identified, isSingleAccount };
 }
 
-function determineCheckSortResult(fileAccountsList, userMerchantIds) {
+function determineCheckSortResult(fileAccountsList, userMerchantIds, leftPanelCount) {
   const allFileAccounts = [];
   let hasSingleAccountFile = false;
 
@@ -733,7 +733,7 @@ function determineCheckSortResult(fileAccountsList, userMerchantIds) {
     allFileAccounts.push(...fileResult.accounts);
   }
 
-  if (hasSingleAccountFile && fileAccountsList.length === 1 && allFileAccounts.length <= 1) {
+  if (leftPanelCount <= 1 && hasSingleAccountFile && fileAccountsList.length === 1) {
     if (allFileAccounts.length === 0) {
       return { resultCode: 'RS2', message: '匹配不上，请检查。' };
     }
@@ -791,7 +791,7 @@ function determineCheckSortResult(fileAccountsList, userMerchantIds) {
     }
   }
 
-  const countMatch = allFileAccounts.length === userMerchantIds.length;
+  const countMatch = leftPanelCount === userMerchantIds.length;
 
   if (countMatch && orderMatch && allExact) {
     return { resultCode: 'R1', message: '排序检查无误，请自行再做检查。' };
@@ -5774,7 +5774,8 @@ function registerFileHandlers() {
         });
       });
 
-      const result = determineCheckSortResult(fileAccountsList, userMerchantIds);
+      const leftPanelCount = Number.isInteger(payload.leftPanelCount) ? payload.leftPanelCount : 0;
+      const result = determineCheckSortResult(fileAccountsList, userMerchantIds, leftPanelCount);
       return { status: 'ok', ...result };
     } catch (error) {
       return { status: 'error', resultCode: 'RS2', message: '检查排序时出错，请检查。' };

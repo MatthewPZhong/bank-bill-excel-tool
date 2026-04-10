@@ -841,7 +841,7 @@
           currency: item.currency
         }));
 
-        const result = await desktopApi.files.checkSort({ assignments });
+        const result = await desktopApi.files.checkSort({ assignments, leftPanelCount: currentFileRows.length });
 
         openModal(createAlertDialog(result.message, {
           onConfirm: () => {
