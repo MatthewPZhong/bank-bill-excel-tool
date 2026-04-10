@@ -747,36 +747,62 @@ function determineCheckSortResult(fileAccountsList, userMerchantIds) {
     return { resultCode: 'RS2', message: '匹配不上，请检查。' };
   }
 
-  const countMatch = allFileAccounts.length === userMerchantIds.length;
-  const compareLen = Math.min(allFileAccounts.length, userMerchantIds.length);
-
-  if (compareLen === 0) {
+  if (allFileAccounts.length === 0 || userMerchantIds.length === 0) {
     return { resultCode: 'R5', message: '账户个数和顺序都匹配不上，请检查。' };
   }
 
+  const filePositions = [];
   let allExact = true;
-  let allMatch = true;
+  let allFound = true;
 
-  for (let i = 0; i < compareLen; i += 1) {
-    const matched = matchMerchantIds(allFileAccounts[i].merchantId, userMerchantIds[i]);
-    if (matched === 'none') {
-      allMatch = false;
+  for (const uid of userMerchantIds) {
+    let foundIdx = -1;
+    let foundType = 'none';
+    for (let fi = 0; fi < allFileAccounts.length; fi += 1) {
+      const result = matchMerchantIds(allFileAccounts[fi].merchantId, uid);
+      if (result === 'exact') {
+        foundIdx = fi;
+        foundType = 'exact';
+        break;
+      }
+      if (result === 'fuzzy' && foundIdx === -1) {
+        foundIdx = fi;
+        foundType = 'fuzzy';
+      }
+    }
+    if (foundIdx === -1) {
+      allFound = false;
       allExact = false;
-    } else if (matched === 'fuzzy') {
-      allExact = false;
+    } else {
+      filePositions.push(foundIdx);
+      if (foundType === 'fuzzy') {
+        allExact = false;
+      }
     }
   }
 
-  if (countMatch && allExact) {
+  let orderMatch = allFound;
+  if (orderMatch) {
+    for (let i = 1; i < filePositions.length; i += 1) {
+      if (filePositions[i] <= filePositions[i - 1]) {
+        orderMatch = false;
+        break;
+      }
+    }
+  }
+
+  const countMatch = allFileAccounts.length === userMerchantIds.length;
+
+  if (countMatch && orderMatch && allExact) {
     return { resultCode: 'R1', message: '排序检查无误，请自行再做检查。' };
   }
-  if (countMatch && allMatch && !allExact) {
+  if (countMatch && orderMatch && !allExact) {
     return { resultCode: 'R3', message: '账户顺序在模糊匹配下排序无误，请检查。' };
   }
-  if (countMatch && !allMatch) {
+  if (countMatch && !orderMatch) {
     return { resultCode: 'R4', message: '账户顺序匹配不上，请检查。' };
   }
-  if (!countMatch && allMatch) {
+  if (!countMatch && orderMatch) {
     return { resultCode: 'R2', message: '账户个数匹配不上，请检查。' };
   }
   return { resultCode: 'R5', message: '账户个数和顺序都匹配不上，请检查。' };
