@@ -668,7 +668,7 @@ function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
 }
 
 function identifyAccountsFromFile({ filePath, detailRows, expectedSourceHeaders, allMerchantIds }) {
-  const rawRows = readRows(filePath);
+  const rawRows = readRows(filePath, { blankrows: true });
   const headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
   const isSingleAccount = headerRowNumbers.length <= 1;
   const identified = [];
@@ -677,7 +677,9 @@ function identifyAccountsFromFile({ filePath, detailRows, expectedSourceHeaders,
     let bestMatch = null;
     let bestMatchType = 'none';
 
-    for (let rowIdx = startIdx; rowIdx <= endIdx && rowIdx < rawRows.length; rowIdx += 1) {
+    // 从 header 往回搜（倒序），优先命中最靠近 header 的"查询账号"行，
+    // 避免被更远的交易数据行里的账户号字段污染
+    for (let rowIdx = Math.min(endIdx, rawRows.length - 1); rowIdx >= startIdx; rowIdx -= 1) {
       const row = rawRows[rowIdx];
       if (!Array.isArray(row)) continue;
       for (const cell of row) {
@@ -704,9 +706,12 @@ function identifyAccountsFromFile({ filePath, detailRows, expectedSourceHeaders,
   }
 
   headerRowNumbers.forEach((headerRowNum, idx) => {
-    const candidateStartIdx = idx === 0 ? 0 : headerRowNumbers[idx - 1];
+    // 只搜索 header 前面有限行（避免搜到上一个账户的交易数据行里的账户号）
+    // BOC-CN 格式：查询账号在 header 上方约 7 行，留 10 行余量
+    const prevBoundary = idx === 0 ? 0 : headerRowNumbers[idx - 1];
+    const narrowStart = Math.max(prevBoundary, headerRowNum - 10);
     const candidateEndIdx = headerRowNum - 2;
-    const match = searchCandidateRange(candidateStartIdx, candidateEndIdx);
+    const match = searchCandidateRange(narrowStart, candidateEndIdx);
     if (match) {
       identified.push(match);
     }
@@ -2410,11 +2415,11 @@ function registerAppHandlers() {
   ipcMain.handle('app:save-user-guide', async () => {
     try {
       const result = await dialog.showSaveDialog(mainWindow, {
-        defaultPath: '使用手册.md',
+        defaultPath: '使用手册.pdf',
         filters: [
           {
-            name: 'Markdown 文件',
-            extensions: ['md']
+            name: 'PDF 文件',
+            extensions: ['pdf']
           }
         ]
       });
@@ -2424,8 +2429,84 @@ function registerAppHandlers() {
       }
 
       const userGuidePath = path.join(app.getAppPath(), 'docs', 'USER_GUIDE.md');
-      const content = fs.readFileSync(userGuidePath, 'utf8');
-      fs.writeFileSync(result.filePath, content, 'utf8');
+      const markdown = fs.readFileSync(userGuidePath, 'utf8');
+
+      // Markdown → HTML（轻量转换，覆盖常用语法）
+      const htmlBody = markdown
+        // 代码块 ```...```
+        .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+        // 行内代码 `...`
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        // 标题
+        .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+        // 粗体
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        // 引用块
+        .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+        // 分割线
+        .replace(/^---$/gm, '<hr/>')
+        // 有序列表
+        .replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>')
+        // 无序列表
+        .replace(/^[-*]\s+(.+)$/gm, '<li>$1</li>')
+        // 表格（简易：| 分隔的行）
+        .replace(/^\|(.+)\|$/gm, (match, content) => {
+          const cells = content.split('|').map((c) => c.trim());
+          if (cells.every((c) => /^[-:]+$/.test(c))) return '';
+          const tag = cells.some((c) => c.startsWith('**')) ? 'th' : 'td';
+          return '<tr>' + cells.map((c) => `<${tag}>${c.replace(/\*\*/g, '')}</${tag}>`).join('') + '</tr>';
+        })
+        // 段落（连续非空行）
+        .replace(/\n{2,}/g, '</p><p>')
+        .replace(/\n/g, '<br/>');
+
+      const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; font-size: 13px; line-height: 1.7; color: #333; max-width: 700px; margin: 0 auto; padding: 20px 30px; }
+  h1 { font-size: 22px; border-bottom: 2px solid #e0d5c0; padding-bottom: 8px; }
+  h2 { font-size: 18px; margin-top: 28px; border-bottom: 1px solid #e0d5c0; padding-bottom: 6px; }
+  h3 { font-size: 15px; margin-top: 20px; }
+  h4 { font-size: 14px; margin-top: 16px; }
+  code { background: #f5f0e8; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+  pre { background: #f5f0e8; padding: 12px; border-radius: 6px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  blockquote { border-left: 3px solid #d4c9b0; margin: 10px 0; padding: 6px 14px; color: #666; }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+  th, td { border: 1px solid #d4c9b0; padding: 6px 10px; text-align: left; font-size: 12px; }
+  th { background: #f5f0e8; }
+  hr { border: none; border-top: 1px solid #e0d5c0; margin: 20px 0; }
+  li { margin: 3px 0; }
+  strong { color: #222; }
+</style>
+</head>
+<body><p>${htmlBody}</p></body>
+</html>`;
+
+      // 用隐藏的 BrowserWindow 渲染 HTML 并导出 PDF
+      const pdfWindow = new BrowserWindow({
+        show: false,
+        width: 800,
+        height: 600,
+        webPreferences: { contextIsolation: true }
+      });
+
+      await pdfWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+
+      const pdfBuffer = await pdfWindow.webContents.printToPDF({
+        printBackground: true,
+        preferCSSPageSize: false,
+        margins: { top: 0.6, bottom: 0.6, left: 0.5, right: 0.5 }
+      });
+
+      pdfWindow.destroy();
+
+      fs.writeFileSync(result.filePath, pdfBuffer);
 
       return {
         status: 'success',
@@ -5355,18 +5436,24 @@ function registerFileHandlers() {
         const savedMode = readBigAccountMode(ensureStorageRoot(), templateId);
         const savedOrderConfig = readBigAccountOrder(ensureStorageRoot(), templateId);
 
-        if (savedMode?.mode === 'fixed' && savedOrderConfig && Array.isArray(savedOrderConfig.files) && savedOrderConfig.files.length > 0) {
+
+        let forceUnfixedMode = false;
+        if (savedMode === 'fixed' && savedOrderConfig && Array.isArray(savedOrderConfig.files) && savedOrderConfig.files.length > 0) {
           const importFileCount = selectionResult.filePaths.length;
 
-          if (importFileCount === savedOrderConfig.fileCount) {
+          if (importFileCount !== savedOrderConfig.fileCount) {
+            // 文件个数不等于"记住顺序"里的文件个数 → 降级为"不固定"模式
+            forceUnfixedMode = true;
+          } else if (importFileCount === savedOrderConfig.fileCount) {
             const allMerchantIds = templateConfig.bigAccounts.map((ba) => normalizeCell(ba.merchantId)).filter((id) => id !== '');
             const expectedSourceHeaders = templateConfig.template.headers || [];
             const failedFileNames = [];
 
-            provisionalFileEntries.forEach((entry, fileIndex) => {
-              const savedFile = savedOrderConfig.files[fileIndex];
-              if (!savedFile) { failedFileNames.push(path.basename(entry.filePath)); return; }
+            // 每个导入文件用账户个数+账户号去全部保存文件里找匹配（不按位置对位）
+            const usedSavedIndices = new Set();
+            const fileMatchMap = new Map(); // importIndex → savedFileIndex
 
+            provisionalFileEntries.forEach((entry, fileIndex) => {
               const fileResult = identifyAccountsFromFile({
                 filePath: entry.filePath,
                 detailRows: entry.detailRows,
@@ -5374,21 +5461,60 @@ function registerFileHandlers() {
                 allMerchantIds
               });
 
-              if (fileResult.accounts.length !== savedFile.accountCount) {
-                failedFileNames.push(path.basename(entry.filePath));
-                return;
+              let matchedSavedIndex = -1;
+              for (let si = 0; si < savedOrderConfig.files.length; si += 1) {
+                if (usedSavedIndices.has(si)) continue;
+                const savedFile = savedOrderConfig.files[si];
+
+                if (fileResult.accounts.length !== savedFile.accountCount) continue;
+
+                const allAccountsMatch = savedFile.accounts.every((savedAccount) => {
+                  return fileResult.accounts.some((identified) => matchMerchantIds(identified.merchantId, savedAccount.merchantId) !== 'none');
+                });
+
+                if (allAccountsMatch) {
+                  matchedSavedIndex = si;
+                  break;
+                }
               }
 
-              const allAccountsMatch = savedFile.accounts.every((savedAccount) => {
-                return fileResult.accounts.some((identified) => matchMerchantIds(identified.merchantId, savedAccount.merchantId) !== 'none');
-              });
-
-              if (!allAccountsMatch) {
+              if (matchedSavedIndex >= 0) {
+                usedSavedIndices.add(matchedSavedIndex);
+                fileMatchMap.set(fileIndex, matchedSavedIndex);
+              } else {
                 failedFileNames.push(path.basename(entry.filePath));
               }
             });
 
             if (failedFileNames.length === 0 && Array.isArray(savedOrderConfig.assignments) && savedOrderConfig.assignments.length > 0) {
+              // 按 fileMatchMap 重排 assignments：按导入文件顺序重组保存的 assignments
+              const savedFiles = savedOrderConfig.files || [];
+              const savedAssignments = savedOrderConfig.assignments || [];
+
+              // 计算每个保存文件的 assignment 范围（基于 accountCount 累加）
+              const savedFileRanges = [];
+              let cumulativeIndex = 0;
+              savedFiles.forEach((sf) => {
+                const count = sf.accountCount || 0;
+                savedFileRanges.push({ start: cumulativeIndex, count });
+                cumulativeIndex += count;
+              });
+
+              // 按导入文件顺序重组
+              const reorderedAssignments = [];
+              let newRowIndex = 0;
+              for (let importIdx = 0; importIdx < provisionalFileEntries.length; importIdx += 1) {
+                const savedIdx = fileMatchMap.get(importIdx);
+                if (savedIdx === undefined) continue;
+                const range = savedFileRanges[savedIdx];
+                if (!range) continue;
+                const slice = savedAssignments.slice(range.start, range.start + range.count);
+                slice.forEach((a) => {
+                  reorderedAssignments.push({ ...a, rowIndex: newRowIndex });
+                  newRowIndex += 1;
+                });
+              }
+
               rememberPendingBigAccountSelection({
                 templateId,
                 template: templateConfig.template,
@@ -5409,7 +5535,7 @@ function registerFileHandlers() {
                     const pendingContext = lastPendingBigAccountSelection;
                     const isFixedMode = true;
                     const expectedRows = pendingContext.rowsWithEmptyBlocks || pendingContext.rows;
-                    const normalizedAssignments = savedOrderConfig.assignments
+                    const normalizedAssignments = reorderedAssignments
                       .map((assignment) => {
                         const matchedAccount = templateConfig.bigAccounts.find((item) => item.merchantId === assignment.merchantId);
                         if (!matchedAccount) return null;
@@ -5424,6 +5550,17 @@ function registerFileHandlers() {
                       .sort((left, right) => left.rowIndex - right.rowIndex);
 
                     if (normalizedAssignments.length !== expectedRows.length) {
+                      // Log first few filtered-out assignments
+                      savedOrderConfig.assignments.forEach((a, i) => {
+                        const matched = templateConfig.bigAccounts.find((item) => item.merchantId === a.merchantId);
+                        if (!matched) {
+                        } else {
+                          const avail = Array.isArray(matched.currencies) ? matched.currencies : [];
+                          const nc = matched.isMultiCurrency ? normalizeCell(a.currency) : normalizeCell(avail[0] || a.currency);
+                          if (!nc || !avail.includes(nc)) {
+                          }
+                        }
+                      });
                       return null;
                     }
 
@@ -5572,13 +5709,17 @@ function registerFileHandlers() {
           rows: selectionRows,
           rowsWithEmptyBlocks: selectionRowsWithEmpty
         });
-        return buildBigAccountSelectionRequiredResult({
+        const selectionRequired = buildBigAccountSelectionRequiredResult({
           rows: selectionRows,
           rowsWithEmptyBlocks: selectionRowsWithEmpty,
           bigAccounts: templateConfig.bigAccounts,
           fixedAssignments: templateConfig.fixedAssignments,
           templateId
         });
+        if (forceUnfixedMode) {
+          selectionRequired.forceMode = 'unfixed';
+        }
+        return selectionRequired;
       }
 
       if (isMerchantIdSelfInput && bigAccountOptions.length <= 1) {
@@ -5898,8 +6039,10 @@ function registerFileHandlers() {
   });
 
 
-  ipcMain.handle('file:extract-big-account-order', (_event) => {
+  ipcMain.handle('file:extract-big-account-order', (_event, payload = {}) => {
     const pendingContext = lastPendingBigAccountSelection;
+    const mode = payload?.mode || 'unfixed';
+    const frontendFileRows = Array.isArray(payload?.fileRows) ? payload.fileRows : [];
 
     if (!pendingContext) {
       return { status: 'error', failedRows: [], message: '当前没有待处理的大账号选择任务，请重新导入文件' };
@@ -5914,19 +6057,104 @@ function registerFileHandlers() {
       const failedRows = [];
       let globalIndex = 0;
 
-      (pendingContext.fileEntries || []).forEach((entry) => {
-        const fileResult = identifyAccountsFromFile({
-          filePath: entry.filePath,
-          detailRows: entry.detailRows,
-          expectedSourceHeaders,
-          allMerchantIds
+      if (mode !== 'fixed' && frontendFileRows.length > 0) {
+        // 不固定模式：按前端传来的 fileRows（左侧面板显示的行）逐行提取
+        // 每个 fileRow 有 sourceRowNumber + fileName，根据 sourceRowNumber 在原始文件里找对应的账户号
+        const fileEntriesByName = new Map();
+        (pendingContext.fileEntries || []).forEach((entry) => {
+          const name = path.basename(entry.filePath);
+          if (!fileEntriesByName.has(name)) fileEntriesByName.set(name, entry);
         });
 
-        const fileName = path.basename(entry.filePath);
-        const headerRowNumbers = findHeaderRowNumbersInRawRows(readRows(entry.filePath), expectedSourceHeaders);
-        const blockCount = Math.max(headerRowNumbers.length, fileResult.accounts.length, 1);
+        // 预缓存每个文件的原始行和 headerRowNumbers
+        const fileCache = new Map();
+        fileEntriesByName.forEach((entry, name) => {
+          const rawRows = readRows(entry.filePath, { blankrows: true });
+          const headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
+          fileCache.set(name, { rawRows, headerRowNumbers, entry });
+        });
 
-        for (let bi = 0; bi < blockCount; bi += 1) {
+        frontendFileRows.forEach((fr) => {
+          const cached = fileCache.get(fr.fileName);
+          if (!cached) {
+            failedRows.push({ index: globalIndex, fileName: fr.fileName || '' });
+            globalIndex += 1;
+            return;
+          }
+
+          const { rawRows, headerRowNumbers } = cached;
+          const sourceRow = Number(fr.sourceRowNumber || 0);
+
+
+          // 找到该行所属的 header（最后一个 <= sourceRow 的 headerRowNumber）
+          let headerIdx = -1;
+          for (let hi = headerRowNumbers.length - 1; hi >= 0; hi -= 1) {
+            if (headerRowNumbers[hi] <= sourceRow) {
+              headerIdx = hi;
+              break;
+            }
+          }
+
+
+          if (headerIdx < 0) {
+            failedRows.push({ index: globalIndex, fileName: fr.fileName || '' });
+            globalIndex += 1;
+            return;
+          }
+
+          // 在该 header 前面的行里搜索账户号（倒序搜索，避免数据行污染）
+          const candidateStart = headerIdx === 0 ? 0 : headerRowNumbers[headerIdx - 1];
+          const narrowStart = Math.max(candidateStart, headerRowNumbers[headerIdx] - 10);
+          const candidateEnd = headerRowNumbers[headerIdx] - 2;
+
+          let bestMatch = null;
+          for (let rowIdx = Math.min(candidateEnd, rawRows.length - 1); rowIdx >= narrowStart; rowIdx -= 1) {
+            const row = rawRows[rowIdx];
+            if (!Array.isArray(row)) continue;
+            for (const cell of row) {
+              const cellStr = normalizeCell(cell);
+              if (!cellStr) continue;
+              for (const mid of allMerchantIds) {
+                const result = matchMerchantIds(cellStr, mid);
+                if (result === 'exact') { bestMatch = { merchantId: mid, matchType: 'exact' }; break; }
+                if (result === 'fuzzy' && (!bestMatch || bestMatch.matchType !== 'exact')) {
+                  bestMatch = { merchantId: mid, matchType: 'fuzzy' };
+                }
+              }
+              if (bestMatch?.matchType === 'exact') break;
+            }
+            if (bestMatch?.matchType === 'exact') break;
+          }
+
+
+          if (bestMatch) {
+            const matched = expandedOptions.find((o) => matchMerchantIds(bestMatch.merchantId, o.merchantId) !== 'none');
+            if (matched) {
+              accounts.push({ merchantId: matched.merchantId, currency: matched.currency, matchType: bestMatch.matchType, fileName: fr.fileName });
+            } else {
+              failedRows.push({ index: globalIndex, fileName: fr.fileName || '' });
+            }
+          } else {
+            failedRows.push({ index: globalIndex, fileName: fr.fileName || '' });
+          }
+          globalIndex += 1;
+        });
+      } else {
+        // 固定模式（或没传 fileRows 的 fallback）：提取全量账户
+        (pendingContext.fileEntries || []).forEach((entry) => {
+          const fileResult = identifyAccountsFromFile({
+            filePath: entry.filePath,
+            detailRows: entry.detailRows,
+            expectedSourceHeaders,
+            allMerchantIds
+          });
+
+          const fileName = path.basename(entry.filePath);
+          const rawRows = readRows(entry.filePath, { blankrows: true });
+          const headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
+          const blockCount = Math.max(headerRowNumbers.length, fileResult.accounts.length, 1);
+
+          for (let bi = 0; bi < blockCount; bi += 1) {
           const identified = fileResult.accounts[bi];
           if (!identified) {
             failedRows.push({ index: globalIndex, fileName });
@@ -5950,8 +6178,9 @@ function registerFileHandlers() {
             failedRows.push({ index: globalIndex, fileName });
           }
           globalIndex += 1;
-        }
-      });
+          }
+        });
+      }
 
       if (failedRows.length > 0) {
         return { status: 'error', failedRows };

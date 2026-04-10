@@ -621,6 +621,21 @@
       const rememberCheckbox = dialog.querySelector('.big-account-remember-checkbox');
       const doneBtn = dialog.querySelector('[data-action="done"]');
 
+      // 左右面板同步滚动
+      let mainSyncingScroll = false;
+      fileListContainer.addEventListener('scroll', () => {
+        if (mainSyncingScroll) return;
+        mainSyncingScroll = true;
+        orderListContainer.scrollTop = fileListContainer.scrollTop;
+        mainSyncingScroll = false;
+      });
+      orderListContainer.addEventListener('scroll', () => {
+        if (mainSyncingScroll) return;
+        mainSyncingScroll = true;
+        fileListContainer.scrollTop = orderListContainer.scrollTop;
+        mainSyncingScroll = false;
+      });
+
       function truncateFileName(fileName, maxLen) {
         if (!fileName || fileName.length <= maxLen) return fileName || '';
         const keepStart = 6;
@@ -761,6 +776,12 @@
         try {
           const modeResult = await desktopApi.bigAccount.loadMode(templateId);
           currentMode = modeResult.mode || 'unfixed';
+
+          // forceMode 优先：文件个数不匹配时后端强制指定模式
+          if (payload?.forceMode === 'unfixed' || payload?.forceMode === 'fixed') {
+            currentMode = payload.forceMode;
+          }
+
           modeSelect.value = currentMode;
 
           const orderResult = await desktopApi.bigAccount.loadOrder(templateId);
@@ -810,7 +831,13 @@
       });
 
       extractOrderBtn.addEventListener('click', async () => {
-        const result = await desktopApi.files.extractBigAccountOrder();
+        const result = await desktopApi.files.extractBigAccountOrder({
+          mode: currentMode,
+          fileRows: currentFileRows.map((row) => ({
+            sourceRowNumber: row.sourceRowNumber,
+            fileName: row.fileName
+          }))
+        });
 
         if (result.status === 'error') {
           const failedLines = (result.failedRows || [])
@@ -840,6 +867,24 @@
           });
           syncOrderIndices();
           syncCheckboxDisabled();
+
+          // 右侧大账号顺序按数字序号从小到大排序（已勾选排前面，未勾选排后面）
+          const allItems = Array.from(orderListContainer.querySelectorAll('.big-account-order-item'));
+          const checkedItems = [];
+          const uncheckedItems = [];
+          allItems.forEach((item) => {
+            const key = `${item.dataset.merchantId}@@${item.dataset.currency}`;
+            const orderIdx = checkedOrder.findIndex((o) => o.key === key);
+            if (orderIdx >= 0) {
+              checkedItems.push({ item, order: orderIdx });
+            } else {
+              uncheckedItems.push(item);
+            }
+          });
+          checkedItems.sort((a, b) => a.order - b.order);
+          orderListContainer.innerHTML = '';
+          checkedItems.forEach(({ item }) => orderListContainer.appendChild(item));
+          uncheckedItems.forEach((item) => orderListContainer.appendChild(item));
         }
 
         function showExtractDialog() {
@@ -849,6 +894,7 @@
           extractDialog.innerHTML = `
             <div class="dialog-header">
               <div class="dialog-title">确认大账号顺序</div>
+              <button class="icon-close extract-close-btn" type="button">×</button>
             </div>
             <div class="big-account-split-body">
               <div class="big-account-split-left">
@@ -868,11 +914,29 @@
           const extractFileList = extractDialog.querySelector('.extract-file-list');
           const extractOrderList = extractDialog.querySelector('.extract-order-list');
 
+          // 左右面板同步滚动
+          let extractSyncingScroll = false;
+          extractFileList.addEventListener('scroll', () => {
+            if (extractSyncingScroll) return;
+            extractSyncingScroll = true;
+            extractOrderList.scrollTop = extractFileList.scrollTop;
+            extractSyncingScroll = false;
+          });
+          extractOrderList.addEventListener('scroll', () => {
+            if (extractSyncingScroll) return;
+            extractSyncingScroll = true;
+            extractFileList.scrollTop = extractOrderList.scrollTop;
+            extractSyncingScroll = false;
+          });
+
           currentFileRows.forEach((row, index) => {
             const item = document.createElement('div');
             item.className = 'big-account-file-item';
             const fullName = row.fileName || '';
-            item.innerHTML = `<span class="big-account-file-index">${index + 1}.</span><span class="big-account-file-meta" title="${escapeHtml(fullName)}">${escapeHtml(fullName)}</span>`;
+            const rowSuffix = row.sourceRowNumber ? ` 第${row.sourceRowNumber}行` : '';
+            const displayName = truncateFileName(fullName, 20) + rowSuffix;
+            const fullMeta = fullName + rowSuffix;
+            item.innerHTML = `<span class="big-account-file-index">${index + 1}.</span><span class="big-account-file-meta" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span>`;
             extractFileList.appendChild(item);
           });
 
@@ -882,6 +946,10 @@
             item.dataset.index = index;
             item.dataset.merchantId = account.merchantId;
             item.dataset.currency = account.currency;
+
+            const indexSpan = document.createElement('span');
+            indexSpan.className = 'extract-order-index';
+            indexSpan.textContent = `${index + 1}.`;
 
             const textSpan = document.createElement('span');
             textSpan.className = 'extract-order-text';
@@ -928,8 +996,12 @@
               editContainer.hidden = true;
             });
 
-            item.append(textSpan, editBtn, editContainer);
+            item.append(indexSpan, textSpan, editBtn, editContainer);
             extractOrderList.appendChild(item);
+          });
+
+          extractDialog.querySelector('.extract-close-btn').addEventListener('click', () => {
+            openModal(overlay);
           });
 
           extractDialog.querySelector('[data-action="extract-done"]').addEventListener('click', () => {

@@ -159,8 +159,8 @@ function readWorkbookRows(filePath, { blankrows = false } = {}) {
   }
 }
 
-function readRows(filePath) {
-  const rows = readWorkbookRows(filePath, { blankrows: false });
+function readRows(filePath, { blankrows = false } = {}) {
+  const rows = readWorkbookRows(filePath, { blankrows });
 
   if (!Array.isArray(rows) || rows.length === 0 || !rows.some(isRowMeaningful)) {
     throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
