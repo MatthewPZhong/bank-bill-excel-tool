@@ -3,6 +3,36 @@ const path = require('node:path');
 const XLSX = require('xlsx');
 const { FileValidationError, normalizeCell } = require('./common');
 
+function countSignificantDigitsFromString(str) {
+  const cleaned = str.replace(/[^0-9]/g, '').replace(/^0+/, '');
+  return cleaned.length;
+}
+
+function hasMoreThanTwoDecimalsFromString(str) {
+  const dotIndex = str.indexOf('.');
+  if (dotIndex < 0) return false;
+  return str.length - dotIndex - 1 > 2;
+}
+
+function buildNumericCellValue(rawStringValue, parseNumericValue) {
+  const str = String(rawStringValue || '');
+  const sigDigits = countSignificantDigitsFromString(str);
+
+  if (sigDigits > 15) {
+    return { t: 's', v: str, z: '@' };
+  }
+
+  const numericValue = parseNumericValue(str);
+  if (numericValue === null) {
+    return null;
+  }
+
+  if (hasMoreThanTwoDecimalsFromString(str)) {
+    return { t: 'n', v: numericValue };
+  }
+  return { t: 'n', v: numericValue, z: '0.00' };
+}
+
 function applyExportFieldFormats(worksheet, rows, {
   inferDateCellFormat,
   parseDateValue,
@@ -31,18 +61,18 @@ function applyExportFieldFormats(worksheet, rows, {
 
     numericFields.forEach((fieldName) => {
       (fieldIndexMap.get(fieldName) || []).forEach((columnIndex) => {
-        const numericValue = parseNumericValue(row[columnIndex]);
+        const rawValue = row[columnIndex];
+        if (rawValue === null || rawValue === undefined || rawValue === '') {
+          return;
+        }
 
-        if (numericValue === null) {
+        const cellValue = buildNumericCellValue(rawValue, parseNumericValue);
+        if (!cellValue) {
           return;
         }
 
         const cellAddress = XLSX.utils.encode_cell({ c: columnIndex, r: sheetRowIndex });
-        worksheet[cellAddress] = {
-          t: 'n',
-          v: numericValue,
-          z: '0.00'
-        };
+        worksheet[cellAddress] = cellValue;
       });
     });
 
@@ -109,18 +139,18 @@ function applyBalanceFieldFormats(worksheet, headerFields, rows, {
 
     numericFields.forEach((fieldName) => {
       (fieldIndexMap.get(fieldName) || []).forEach((columnIndex) => {
-        const numericValue = parseNumericValue(row[columnIndex]);
+        const rawValue = row[columnIndex];
+        if (rawValue === null || rawValue === undefined || rawValue === '') {
+          return;
+        }
 
-        if (numericValue === null) {
+        const cellValue = buildNumericCellValue(rawValue, parseNumericValue);
+        if (!cellValue) {
           return;
         }
 
         const cellAddress = XLSX.utils.encode_cell({ c: columnIndex, r: sheetRowIndex });
-        worksheet[cellAddress] = {
-          t: 'n',
-          v: numericValue,
-          z: '0.00'
-        };
+        worksheet[cellAddress] = cellValue;
       });
     });
 

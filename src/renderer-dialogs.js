@@ -580,7 +580,7 @@
 
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">请选择本次使用的大账号 / 币种</div>
+          <div class="dialog-title">网银账单解析大账号确认</div>
           <div class="big-account-selection-toolbar">
             <span class="big-account-mode-label">多账号账单导入解析模式</span>
             <select class="mapping-select big-account-mode-select">
@@ -601,11 +601,12 @@
           </div>
         </div>
         <div class="dialog-actions big-account-selection-footer">
+          <button class="secondary-btn small extract-order-btn" type="button" data-action="extract-order">提取大账号顺序</button>
           <span class="big-account-search-label">定位大账号</span>
           <input class="mapping-text-input big-account-search-input" type="text" spellcheck="false" />
           <label class="big-account-remember-label is-disabled">
             <input class="new-account-checkbox big-account-remember-checkbox" type="checkbox" />
-            <span>记住大账号选择顺序</span>
+            <span>记住顺序</span>
           </label>
           <button class="primary-btn small" type="button" data-action="done">完成</button>
         </div>
@@ -615,9 +616,25 @@
       const fileListContainer = dialog.querySelector('.big-account-file-list');
       const orderListContainer = dialog.querySelector('.big-account-order-list');
       const searchInput = dialog.querySelector('.big-account-search-input');
+      const extractOrderBtn = dialog.querySelector('[data-action="extract-order"]');
       const rememberLabel = dialog.querySelector('.big-account-remember-label');
       const rememberCheckbox = dialog.querySelector('.big-account-remember-checkbox');
       const doneBtn = dialog.querySelector('[data-action="done"]');
+
+      // 左右面板同步滚动
+      let mainSyncingScroll = false;
+      fileListContainer.addEventListener('scroll', () => {
+        if (mainSyncingScroll) return;
+        mainSyncingScroll = true;
+        orderListContainer.scrollTop = fileListContainer.scrollTop;
+        mainSyncingScroll = false;
+      });
+      orderListContainer.addEventListener('scroll', () => {
+        if (mainSyncingScroll) return;
+        mainSyncingScroll = true;
+        fileListContainer.scrollTop = orderListContainer.scrollTop;
+        mainSyncingScroll = false;
+      });
 
       function truncateFileName(fileName, maxLen) {
         if (!fileName || fileName.length <= maxLen) return fileName || '';
@@ -759,6 +776,12 @@
         try {
           const modeResult = await desktopApi.bigAccount.loadMode(templateId);
           currentMode = modeResult.mode || 'unfixed';
+
+          // forceMode 优先：文件个数不匹配时后端强制指定模式
+          if (payload?.forceMode === 'unfixed' || payload?.forceMode === 'fixed') {
+            currentMode = payload.forceMode;
+          }
+
           modeSelect.value = currentMode;
 
           const orderResult = await desktopApi.bigAccount.loadOrder(templateId);
@@ -807,6 +830,204 @@
         target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       });
 
+      extractOrderBtn.addEventListener('click', async () => {
+        const result = await desktopApi.files.extractBigAccountOrder({
+          mode: currentMode,
+          fileRows: currentFileRows.map((row) => ({
+            sourceRowNumber: row.sourceRowNumber,
+            fileName: row.fileName
+          }))
+        });
+
+        if (result.status === 'error') {
+          const failedLines = (result.failedRows || [])
+            .map((r) => `第 ${r.index + 1} 行（${escapeHtml(r.fileName || '')}）提取不到大账号信息`)
+            .join('<br/>');
+          openModal(createAlertDialog(failedLines || '提取大账号信息失败', {
+            onConfirm: () => { openModal(overlay); }
+          }));
+          return;
+        }
+
+        const extractedAccounts = result.accounts || [];
+
+        function applyExtractedOrder() {
+          checkedOrder = [];
+          orderListContainer.querySelectorAll('.big-account-order-checkbox').forEach((cb) => { cb.checked = false; });
+
+          extractedAccounts.forEach((account) => {
+            const key = `${account.merchantId}@@${account.currency}`;
+            const item = Array.from(orderListContainer.querySelectorAll('.big-account-order-item')).find(
+              (el) => el.dataset.merchantId === account.merchantId && el.dataset.currency === account.currency
+            );
+            if (item && checkedOrder.length < currentFileRows.length) {
+              item.querySelector('.big-account-order-checkbox').checked = true;
+              checkedOrder.push({ merchantId: account.merchantId, currency: account.currency, key });
+            }
+          });
+          syncOrderIndices();
+          syncCheckboxDisabled();
+
+          // 右侧大账号顺序按数字序号从小到大排序（已勾选排前面，未勾选排后面）
+          const allItems = Array.from(orderListContainer.querySelectorAll('.big-account-order-item'));
+          const checkedItems = [];
+          const uncheckedItems = [];
+          allItems.forEach((item) => {
+            const key = `${item.dataset.merchantId}@@${item.dataset.currency}`;
+            const orderIdx = checkedOrder.findIndex((o) => o.key === key);
+            if (orderIdx >= 0) {
+              checkedItems.push({ item, order: orderIdx });
+            } else {
+              uncheckedItems.push(item);
+            }
+          });
+          checkedItems.sort((a, b) => a.order - b.order);
+          orderListContainer.innerHTML = '';
+          checkedItems.forEach(({ item }) => orderListContainer.appendChild(item));
+          uncheckedItems.forEach((item) => orderListContainer.appendChild(item));
+        }
+
+        function showExtractDialog() {
+          const extractOverlay = createOverlay();
+          const extractDialog = document.createElement('div');
+          extractDialog.className = 'modal-card big-account-selection-card extract-order-card';
+          extractDialog.innerHTML = `
+            <div class="dialog-header">
+              <div class="dialog-title">确认大账号顺序</div>
+              <button class="icon-close extract-close-btn" type="button">×</button>
+            </div>
+            <div class="big-account-split-body">
+              <div class="big-account-split-left">
+                <div class="big-account-split-header">文件顺序：</div>
+                <div class="extract-file-list"></div>
+              </div>
+              <div class="big-account-split-right">
+                <div class="big-account-split-header">大账号信息：</div>
+                <div class="extract-order-list"></div>
+              </div>
+            </div>
+            <div class="dialog-actions right">
+              <button class="primary-btn small" type="button" data-action="extract-done">完成</button>
+            </div>
+          `;
+
+          const extractFileList = extractDialog.querySelector('.extract-file-list');
+          const extractOrderList = extractDialog.querySelector('.extract-order-list');
+
+          // 左右面板同步滚动
+          let extractSyncingScroll = false;
+          extractFileList.addEventListener('scroll', () => {
+            if (extractSyncingScroll) return;
+            extractSyncingScroll = true;
+            extractOrderList.scrollTop = extractFileList.scrollTop;
+            extractSyncingScroll = false;
+          });
+          extractOrderList.addEventListener('scroll', () => {
+            if (extractSyncingScroll) return;
+            extractSyncingScroll = true;
+            extractFileList.scrollTop = extractOrderList.scrollTop;
+            extractSyncingScroll = false;
+          });
+
+          currentFileRows.forEach((row, index) => {
+            const item = document.createElement('div');
+            item.className = 'big-account-file-item';
+            const fullName = row.fileName || '';
+            const rowSuffix = row.sourceRowNumber ? ` 第${row.sourceRowNumber}行` : '';
+            const displayName = truncateFileName(fullName, 20) + rowSuffix;
+            const fullMeta = fullName + rowSuffix;
+            item.innerHTML = `<span class="big-account-file-index">${index + 1}.</span><span class="big-account-file-meta" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span>`;
+            extractFileList.appendChild(item);
+          });
+
+          extractedAccounts.forEach((account, index) => {
+            const item = document.createElement('div');
+            item.className = 'extract-order-item';
+            item.dataset.index = index;
+            item.dataset.merchantId = account.merchantId;
+            item.dataset.currency = account.currency;
+
+            const indexSpan = document.createElement('span');
+            indexSpan.className = 'extract-order-index';
+            indexSpan.textContent = `${index + 1}.`;
+
+            const textSpan = document.createElement('span');
+            textSpan.className = 'extract-order-text';
+            textSpan.textContent = `${account.merchantId} ${account.currency}`;
+
+            const editBtn = document.createElement('button');
+            editBtn.className = 'extract-edit-btn';
+            editBtn.type = 'button';
+            editBtn.textContent = '编辑';
+
+            const editContainer = document.createElement('div');
+            editContainer.className = 'extract-edit-container';
+            editContainer.hidden = true;
+            editContainer.innerHTML = `
+              <input class="mapping-text-input extract-edit-input extract-edit-merchant" type="text" placeholder="账户号" value="${escapeHtml(account.merchantId)}" />
+              <input class="mapping-text-input extract-edit-input extract-edit-currency" type="text" placeholder="币种" value="${escapeHtml(account.currency)}" />
+              <button class="secondary-btn small extract-edit-done" type="button">完成</button>
+            `;
+
+            editBtn.addEventListener('click', () => {
+              textSpan.hidden = true;
+              editBtn.hidden = true;
+              editContainer.hidden = false;
+            });
+
+            editContainer.querySelector('.extract-edit-done').addEventListener('click', () => {
+              const newMerchantId = editContainer.querySelector('.extract-edit-merchant').value.trim();
+              const newCurrency = editContainer.querySelector('.extract-edit-currency').value.trim();
+              const matched = expandedOptions.find(
+                (o) => o.merchantId === newMerchantId && o.currency === newCurrency
+              );
+              if (!matched) {
+                openModal(createAlertDialog('大账号信息不存在，请重新输入。', {
+                  onConfirm: () => { openModal(extractOverlay); }
+                }));
+                return;
+              }
+              item.dataset.merchantId = newMerchantId;
+              item.dataset.currency = newCurrency;
+              extractedAccounts[index] = { merchantId: newMerchantId, currency: newCurrency, matchType: 'exact' };
+              textSpan.textContent = `${newMerchantId} ${newCurrency}`;
+              textSpan.hidden = false;
+              editBtn.hidden = false;
+              editContainer.hidden = true;
+            });
+
+            item.append(indexSpan, textSpan, editBtn, editContainer);
+            extractOrderList.appendChild(item);
+          });
+
+          extractDialog.querySelector('.extract-close-btn').addEventListener('click', () => {
+            openModal(overlay);
+          });
+
+          extractDialog.querySelector('[data-action="extract-done"]').addEventListener('click', () => {
+            if (checkedOrder.length > 0) {
+              openModal(createConfirmDialog({
+                message: '当前已有已勾选的大账号，确认覆盖吗？',
+                confirmText: '确认覆盖',
+                cancelText: '取消',
+                onConfirm: () => {
+                  applyExtractedOrder();
+                  openModal(overlay);
+                }
+              }));
+            } else {
+              applyExtractedOrder();
+              openModal(overlay);
+            }
+          });
+
+          extractOverlay.appendChild(extractDialog);
+          openModal(extractOverlay);
+        }
+
+        showExtractDialog();
+      });
+
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
       doneBtn.addEventListener('click', async () => {
         if (checkedOrder.length !== currentFileRows.length) {
@@ -821,7 +1042,7 @@
         }));
 
         if (currentMode === 'fixed' && rememberCheckbox.checked) {
-          await desktopApi.bigAccount.saveOrder({ templateId, assignments });
+          await desktopApi.bigAccount.saveOrder({ templateId, assignments, includeFileInfo: true });
         } else if (currentMode === 'fixed' && !rememberCheckbox.checked) {
           await desktopApi.bigAccount.saveOrder({ templateId, assignments: [] });
         }
@@ -1070,6 +1291,12 @@
             return '请选择币种';
           }
 
+          const knownCurrencyCodes = new Set(getCurrencyOptionEntries().map((entry) => entry.code));
+          const invalidCurrency = draft.currencies.find((code) => !knownCurrencyCodes.has(code));
+          if (invalidCurrency) {
+            return `币种「${invalidCurrency}」不是有效的币种代码`;
+          }
+
           return '';
         }
 
@@ -1140,7 +1367,9 @@
             const validationMessage = validateRowDraft();
 
             if (validationMessage) {
-              setStatus(validationMessage, 'error');
+              openModal(createAlertDialog(validationMessage, {
+                onConfirm: () => { openModal(overlay); }
+              }));
               return;
             }
 
@@ -1647,7 +1876,7 @@
         function updateConcatPreview() {
           if (!concatPreview) return;
           const previewText = concatSelectedFields.join(' ');
-          concatPreview.textContent = previewText.length > 40 ? previewText.slice(0, 40) + '......' : previewText;
+          concatPreview.textContent = previewText.length > 120 ? previewText.slice(0, 120) + '......' : previewText;
           concatPreview.title = concatSelectedFields.join(' ');
           row.dataset.concatFields = JSON.stringify(concatSelectedFields);
         }
@@ -1807,12 +2036,13 @@
           savedValue = savedValue === '否' ? '否' : '是';
         }
 
-        let buttonLabel = '';
-        if (fieldName === BILL_SPLIT_MERGE_FIELD && savedValue === '是') {
-          buttonLabel = '拆分/合并账单映射关系管理';
-        } else if (fieldName === REUSE_MODULE_FIELD && savedValue === '否') {
-          buttonLabel = '拆分/合并账单映射关系设置';
-        }
+        // 按钮文本始终填充（hidden 时靠 visibility:hidden 占位，避免列平移）
+        const buttonLabel = fieldName === BILL_SPLIT_MERGE_FIELD
+          ? '拆分/合并账单映射关系管理'
+          : '拆分/合并账单映射关系设置';
+        const buttonHidden = fieldName === BILL_SPLIT_MERGE_FIELD
+          ? savedValue !== '是'
+          : savedValue !== '否';
 
         const selectOptions = fieldName === BILL_SPLIT_MERGE_FIELD
           ? '<option value="">否</option><option value="是">是</option>'
@@ -1823,7 +2053,7 @@
           <td>
             <div class="mapping-field-editor">
               <select class="mapping-select bill-split-group-select">${selectOptions}</select>
-              <button class="secondary-btn small bill-split-group-btn" type="button" ${buttonLabel ? '' : 'hidden'}>${buttonLabel || ''}</button>
+              <button class="secondary-btn small bill-split-group-btn" type="button" ${buttonHidden ? 'hidden' : ''}>${buttonLabel}</button>
             </div>
           </td>
         `;
@@ -1837,21 +2067,13 @@
           if (fieldName === BILL_SPLIT_MERGE_FIELD) {
             if (newValue === '是') {
               button.hidden = false;
-              button.textContent = '拆分/合并账单映射关系管理';
               applyBillSplitMergeMutualExclusion(true);
             } else {
               button.hidden = true;
-              button.textContent = '';
               applyBillSplitMergeMutualExclusion(false);
             }
           } else if (fieldName === REUSE_MODULE_FIELD) {
-            if (newValue === '否') {
-              button.hidden = false;
-              button.textContent = '拆分/合并账单映射关系设置';
-            } else {
-              button.hidden = true;
-              button.textContent = '';
-            }
+            button.hidden = newValue !== '否';
           }
         });
 
@@ -1959,33 +2181,54 @@
         const amountSplitEnabled = amountSplitSelect
           && getSelectValues(amountSplitSelect)[0] === AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION;
 
-        const mutexTargetFields = ['Credit Amount', 'Debit Amount', '按正负号拆分的发生额'];
+        const signedAmountRow = rowByField.get('按正负号拆分的发生额');
+        const signedAmountSelect = signedAmountRow?.querySelector('.mapping-select');
+        const signedAmountEnabled = signedAmountSelect
+          && signedAmountSelect.value !== '';
 
-        mutexTargetFields.forEach((targetField) => {
-          const targetRow = rowByField.get(targetField);
-          if (!targetRow) return;
-          const targetSelect = targetRow.querySelector('.mapping-select');
-          if (!targetSelect) return;
+        const creditRow = rowByField.get('Credit Amount');
+        const creditSelect = creditRow?.querySelector('.mapping-select');
 
-          if (amountSplitEnabled) {
-            targetRow.classList.add('mapping-row-mutex-disabled');
-            targetSelect.value = '';
-            targetSelect.disabled = true;
+        const debitRow = rowByField.get('Debit Amount');
+        const debitSelect = debitRow?.querySelector('.mapping-select');
+
+        // 判定当前哪个模式被激活（3 选 1：按字段区分 / 按正负号 / 无）
+        // Credit/Debit 直接映射是默认状态，不算独立模式，不触发互斥锁
+        const activeMode = amountSplitEnabled ? 'amountSplit'
+          : signedAmountEnabled ? 'signed'
+          : 'none';
+
+        // 按字段区分发生额 = 是 → 禁用 Credit / Debit / 按正负号
+        // 按正负号拆分有值 → 禁用 Credit / Debit / 按字段区分
+        // 无 → 全部启用
+
+        function setRowDisabled(row, select, disabled) {
+          if (!row || !select) return;
+          if (disabled) {
+            row.classList.add('mapping-row-mutex-disabled');
+            select.disabled = true;
           } else {
-            targetRow.classList.remove('mapping-row-mutex-disabled');
-            targetSelect.disabled = false;
+            row.classList.remove('mapping-row-mutex-disabled');
+            select.disabled = false;
           }
-        });
+        }
 
-        // 「按字段区分发生额」字段始终可点击。当用户选「是」时，上面的 forward
-        // 互斥逻辑会自动清空 + disable 另外三行（Credit Amount / Debit Amount /
-        // 按正负号拆分的发生额）。不应根据"另外三行已配置"反向锁定本字段，
-        // 否则会让旧模板用户根本无法切换到新功能。
-        if (amountSplitRow) {
-          amountSplitRow.classList.remove('mapping-row-mutex-disabled');
-          if (amountSplitSelect) {
-            amountSplitSelect.disabled = false;
-          }
+        if (activeMode === 'amountSplit') {
+          setRowDisabled(creditRow, creditSelect, true);
+          setRowDisabled(debitRow, debitSelect, true);
+          setRowDisabled(signedAmountRow, signedAmountSelect, true);
+          setRowDisabled(amountSplitRow, amountSplitSelect, false);
+        } else if (activeMode === 'signed') {
+          setRowDisabled(creditRow, creditSelect, true);
+          setRowDisabled(debitRow, debitSelect, true);
+          setRowDisabled(signedAmountRow, signedAmountSelect, false);
+          setRowDisabled(amountSplitRow, amountSplitSelect, true);
+        } else {
+          // none — 全部启用
+          setRowDisabled(creditRow, creditSelect, false);
+          setRowDisabled(debitRow, debitSelect, false);
+          setRowDisabled(signedAmountRow, signedAmountSelect, false);
+          setRowDisabled(amountSplitRow, amountSplitSelect, false);
         }
       }
 
@@ -2473,7 +2716,7 @@
           function updateConcatPreviewText() {
             if (!concatPreview) return;
             const previewText = concatSelectedFields.join(' ');
-            concatPreview.textContent = previewText.length > 40 ? previewText.slice(0, 40) + '......' : previewText;
+            concatPreview.textContent = previewText.length > 120 ? previewText.slice(0, 120) + '......' : previewText;
             concatPreview.title = concatSelectedFields.join(' ');
           }
 
@@ -2775,10 +3018,22 @@
 
         tr.innerHTML = `
           <td>${escapeHtml(seqDisplay)}</td>
-          <td><select class="mapping-select bill-split-currency-select">${headerOptionsHtml}</select></td>
-          <td><select class="mapping-select bill-split-credit-select">${headerOptionsHtml}</select></td>
-          <td><select class="mapping-select bill-split-debit-select">${headerOptionsHtml}</select></td>
-          <td><select class="mapping-select bill-split-amount-select">${headerOptionsHtml}</select></td>
+          <td>
+            <select class="mapping-select bill-split-currency-select" ${isCompleted ? 'hidden' : ''}>${headerOptionsHtml}</select>
+            <span class="bill-split-row-view-text" ${isCompleted ? '' : 'hidden'}></span>
+          </td>
+          <td>
+            <select class="mapping-select bill-split-credit-select" ${isCompleted ? 'hidden' : ''}>${headerOptionsHtml}</select>
+            <span class="bill-split-row-view-text" ${isCompleted ? '' : 'hidden'}></span>
+          </td>
+          <td>
+            <select class="mapping-select bill-split-debit-select" ${isCompleted ? 'hidden' : ''}>${headerOptionsHtml}</select>
+            <span class="bill-split-row-view-text" ${isCompleted ? '' : 'hidden'}></span>
+          </td>
+          <td>
+            <select class="mapping-select bill-split-amount-select" ${isCompleted ? 'hidden' : ''}>${headerOptionsHtml}</select>
+            <span class="bill-split-row-view-text" ${isCompleted ? '' : 'hidden'}></span>
+          </td>
           <td class="bill-split-row-actions">
             <button class="text-action bill-split-row-complete-btn" type="button">${isCompleted ? '编辑' : '完成'}</button>
             <button class="text-action danger bill-split-row-delete-btn" type="button">删除</button>
@@ -2789,6 +3044,7 @@
         const creditSel = tr.querySelector('.bill-split-credit-select');
         const debitSel = tr.querySelector('.bill-split-debit-select');
         const amountSel = tr.querySelector('.bill-split-amount-select');
+        const viewTexts = tr.querySelectorAll('.bill-split-row-view-text');
         const completeBtn = tr.querySelector('.bill-split-row-complete-btn');
         const deleteBtn = tr.querySelector('.bill-split-row-delete-btn');
 
@@ -2797,13 +3053,21 @@
         debitSel.value = row.debitSourceField || '';
         amountSel.value = row.amountSourceField || '';
 
-        // 禁用规则
-        if (isMerged || isCompleted) {
+        // 完成态：显示纯文本
+        if (isCompleted) {
+          viewTexts[0].textContent = row.currencySourceField || '';
+          viewTexts[1].textContent = row.creditSourceField || '';
+          viewTexts[2].textContent = row.debitSourceField || '';
+          viewTexts[3].textContent = row.amountSourceField || '';
+        }
+
+        // 禁用规则（仅编辑态生效）
+        if (isMerged) {
           currencySel.disabled = true;
           creditSel.disabled = true;
           debitSel.disabled = true;
           amountSel.disabled = true;
-        } else {
+        } else if (!isCompleted) {
           currencySel.disabled = false;
           if (amountEnabled) {
             creditSel.disabled = true;
@@ -3586,6 +3850,35 @@
       return overlay;
     }
 
+    function createRememberOrderMismatchDialog({ message, bigAccountResult }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card alert-card';
+      dialog.innerHTML = `
+        <div class="alert-message">${message}</div>
+        <div class="dialog-actions center">
+          <button class="secondary-btn small" type="button" data-action="change-config">变更配置</button>
+          <button class="primary-btn small" type="button" data-action="confirm">确认</button>
+        </div>
+      `;
+
+      dialog.querySelector('[data-action="change-config"]').addEventListener('click', () => {
+        closeModal();
+        const selectionPayload = {
+          ...bigAccountResult,
+          status: 'select-big-account'
+        };
+        openModal(createBigAccountSelectionDialog(selectionPayload));
+      });
+
+      dialog.querySelector('[data-action="confirm"]').addEventListener('click', () => {
+        closeModal();
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     return {
       closeModal,
       openModal,
@@ -3602,6 +3895,7 @@
       createTemplateRenameDialog,
       createBigAccountSelectionDialog,
       createBigAccountManagerDialog,
+      createRememberOrderMismatchDialog,
       renderTemplateTableRows,
       createTemplateManagerDialog,
       createMappingDialog,

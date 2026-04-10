@@ -322,6 +322,7 @@ select {
 .template-select,
 .mapping-select {
   min-width: 260px;
+  max-width: 260px;
   height: 44px;
   border-radius: 14px;
   border: 1px solid var(--line-strong);
@@ -874,6 +875,27 @@ select {
   position: relative;
 }
 
+/* 拼接字段 picker 隐藏时保持占位，避免映射字段列位置平移 */
+.concat-field-picker[hidden] {
+  display: inline-flex !important;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* 映射关系管理：条件按钮隐藏时保持占位（维护大账号 / 发生额管理 / 拆分管理等） */
+.mapping-field-editor > button[hidden] {
+  display: inline-block !important;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* 账单拆分组行：管理按钮隐藏时保持占位 */
+.bill-split-group-btn[hidden] {
+  display: inline-block !important;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .concat-picker-trigger {
   min-width: 80px;
   height: 34px;
@@ -927,7 +949,6 @@ select {
 }
 
 .concat-preview {
-  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1055,6 +1076,58 @@ select {
   justify-content: flex-end;
   align-items: center;
   margin-top: 18px;
+}
+
+.extract-order-btn {
+  margin-right: auto;
+}
+
+.extract-order-card {
+  min-width: 700px;
+  max-width: 960px;
+}
+
+.extract-order-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.extract-order-text {
+  flex: 1;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.extract-edit-btn {
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.extract-edit-btn:hover {
+  text-decoration: underline;
+}
+
+.extract-edit-container {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.extract-edit-input {
+  height: 34px;
+  font-size: 13px;
+  flex: 1;
+  min-width: 80px;
 }
 
 .big-account-search-label {
@@ -1880,12 +1953,14 @@ select {
 
 .bill-split-rows-table {
   width: 100%;
+  table-layout: fixed;
 }
 
 .bill-split-rows-table th,
 .bill-split-rows-table td {
   padding: 6px 8px;
   vertical-align: middle;
+  white-space: nowrap;
 }
 
 .bill-split-rows-table .mapping-select {
@@ -1895,6 +1970,33 @@ select {
 
 .bill-split-row-actions {
   white-space: nowrap;
+}
+
+.bill-split-row-view-text {
+  display: block;
+  min-height: 44px;
+  line-height: 44px;
+  font-size: 14px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bill-split-rows-table th:first-child {
+  padding-left: 1em;
+  text-align: left;
+}
+
+.bill-split-rows-table td:first-child {
+  padding-left: 2em;
+  text-align: left;
+}
+
+.bill-split-rows-table td:first-child {
+  min-height: 44px;
+  line-height: 44px;
+  font-size: 14px;
 }
 
 .bill-split-row-actions .text-action {
