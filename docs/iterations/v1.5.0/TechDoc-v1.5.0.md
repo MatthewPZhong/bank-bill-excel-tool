@@ -501,7 +501,56 @@ checkSort: (payload) => ipcRenderer.invoke('file:check-sort', payload)
 
 ---
 
-## 七、实施计划（Commit 粒度）
+## 七、需求 4：多文件按账户个数升序排序 —— 详细设计
+
+### 7.1 需求概述
+
+导入多文件时，左侧"文件顺序"面板的文件按文件内账户个数**升序排列**（账户少的排前面）。账户个数相同时保持 OS 原始顺序（稳定排序）。两种模式（不固定 / 固定）都生效。
+
+### 7.2 排序算法
+
+新增 `sortFileEntriesByAccountCount(fileEntries)` 函数，位置在 `buildBigAccountSelectionRows` 附近。
+
+```javascript
+function sortFileEntriesByAccountCount(fileEntries) {
+  return fileEntries
+    .map((entry, originalIndex) => ({
+      entry,
+      originalIndex,
+      blockCount: identifyAccountBlocks(entry.detailRows).length
+    }))
+    .sort((a, b) => a.blockCount - b.blockCount || a.originalIndex - b.originalIndex)
+    .map(({ entry }) => entry);
+}
+```
+
+设计说明：
+- `identifyAccountBlocks(entry.detailRows)` 不传 `includeEmptyBlocks`，默认 `false`，计算有交易的账户块数。
+- `sort` 使用 `blockCount` 升序；相同时按 `originalIndex` 保持稳定排序。
+- 排序后的 `fileEntries` 传给 `buildBigAccountSelectionRows` 的两次调用（不固定 / 固定模式），确保两个面板数据一致。
+
+### 7.3 改动点
+
+在 `main.js` 的两处调用 `buildBigAccountSelectionRows` 之前，对 `provisionalFileEntries` 排序：
+
+```javascript
+const sortedFileEntries = sortFileEntriesByAccountCount(provisionalFileEntries);
+const selectionRows = buildBigAccountSelectionRows(sortedFileEntries);
+// ...
+const selectionRowsWithEmpty = buildBigAccountSelectionRows(sortedFileEntries, { includeEmptyBlocks: true });
+```
+
+同时 `rememberPendingBigAccountSelection` 的 `fileEntries` 也传排序后的版本，确保后续 `file:check-sort` / `file:complete-big-account-selection` 使用相同顺序。
+
+### 7.4 影响范围
+
+- `buildBigAccountSelectionRows` 本身不改动，只是传入排序后的 `fileEntries`。
+- `applyBigAccountAssignmentsToFileEntries` 使用 `pendingContext.fileEntries`（已排序），与左侧面板顺序一致。
+- 检查排序（`file:check-sort`）同样使用排序后的 `fileEntries`，顺序一致。
+
+---
+
+## 八、实施计划（Commit 粒度）
 
 | 序号 | Commit message | 涉及文件 |
 |------|---------------|---------|
@@ -510,9 +559,10 @@ checkSort: (payload) => ipcRenderer.invoke('file:check-sort', payload)
 | 3 | `feat(v1.5.0): check-sort button in big account selection` | `main.js`, `preload.js`, `renderer-dialogs.js`, `styles.css`, `file-service.js` |
 | 4 | `feat(v1.5.0): file order help tooltip` | `renderer-dialogs.js`, `styles.css` |
 | 5 | `chore(v1.5.0): bump package.json version to 1.5.0` | `package.json` |
+| 6 | `feat(v1.5.0): sort files by account count ascending in big account selection` | `main.js` |
 
 ---
 
-## 八、Open Technical Questions（无）
+## 九、Open Technical Questions（无）
 
-本版本的 3 项需求技术实现方案明确，无待定的技术问题。
+本版本的 4 项需求技术实现方案明确，无待定的技术问题。
