@@ -381,6 +381,14 @@ function parseEnglishMonthDateCandidate(value) {
     {
       regex: /^([A-Za-z]{3,})-(\d{1,2})[\s-]+(\d{4})$/,
       resolve: (parts) => ({ year: parts[3], day: parts[2], monthName: parts[1] })
+    },
+    {
+      regex: /^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})$/,
+      resolve: (parts) => ({ year: parts[3], day: parts[1], monthName: parts[2] })
+    },
+    {
+      regex: /^([A-Za-z]{3,})\s+(\d{1,2})\s+(\d{4})$/,
+      resolve: (parts) => ({ year: parts[3], day: parts[2], monthName: parts[1] })
     }
   ];
 
@@ -420,7 +428,9 @@ function stripDateTimeSuffix(rawValue) {
     /^(\d{4}-\d{1,2}-\d{1,2})-\d{1,2}:\d{1,2}$/,
     '$1'
   );
-  const withoutTrailingTime = withoutDashHourMinute.replace(/\s+\d{1,2}[:.]\d{1,2}([:.]\d{1,2})?.*$/, '');
+  const withoutTrailingTime = withoutDashHourMinute
+    .replace(/[,，]\s*\d{1,2}[:.]\d{1,2}([:.]\d{1,2})?\s*(AM|PM|am|pm)?.*$/i, '')
+    .replace(/\s+\d{1,2}[:.]\d{1,2}([:.]\d{1,2})?\s*(AM|PM|am|pm)?.*$/i, '');
   return withoutTrailingTime || withoutDashHourMinute;
 }
 

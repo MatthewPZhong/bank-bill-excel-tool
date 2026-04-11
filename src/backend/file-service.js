@@ -77,6 +77,12 @@ function buildMappedRows({
   const billSplitSignedField = billSplitEnabled
     ? normalizeCell(billSplitMerge.signedAmountSourceField)
     : '';
+  const billSplitSignedTargetSeqNos = billSplitEnabled && Array.isArray(billSplitMerge.signedAmountTargetSeqNos)
+    ? billSplitMerge.signedAmountTargetSeqNos
+    : [];
+  const billSplitByFieldTargetSeqNos = billSplitEnabled && Array.isArray(billSplitMerge.byFieldAmountTargetSeqNos)
+    ? billSplitMerge.byFieldAmountTargetSeqNos
+    : [];
   // P1 Fix A (PR #16 review): reuseModuleMapping === false 时非金额字段走弹框 1 的独立 lookup
   const billSplitReuseModuleMapping = billSplitEnabled
     ? billSplitMerge.reuseModuleMapping !== false
@@ -273,18 +279,22 @@ function buildMappedRows({
         let creditValue = '';
         let debitValue = '';
 
-        if (useAmountSourceField) {
-          const amountRaw = readSourceCell(originalRow, splitRow.amountSourceField);
-          if (hasSignedAmount) {
-            const split = splitSignedAmountValue(readSourceCell(originalRow, billSplitSignedField));
-            creditValue = split.creditAmount;
-            debitValue = split.debitAmount;
-          } else {
-            const result = evaluateBillSplitAmountRulesForRow(originalRow, amountRaw);
-            creditValue = result.credit;
-            debitValue = result.debit;
-          }
+        // 指定账单实现功能：检查当前拆分行是否被指定
+        const isTargetedBySigned = billSplitSignedTargetSeqNos.includes(splitRow.seqNo);
+        const isTargetedByField = billSplitByFieldTargetSeqNos.includes(splitRow.seqNo);
+
+        if (isTargetedBySigned && hasSignedAmount) {
+          // 该行被"按正负号拆分的发生额"指定，使用 signed amount 逻辑
+          const split = splitSignedAmountValue(readSourceCell(originalRow, billSplitSignedField));
+          creditValue = split.creditAmount;
+          debitValue = split.debitAmount;
+        } else if (isTargetedByField && hasAmountRules) {
+          // 该行被"按字段区分发生额"指定，使用 amount rules 逻辑
+          const result = evaluateBillSplitAmountRulesForRow(originalRow, '');
+          creditValue = result.credit;
+          debitValue = result.debit;
         } else {
+          // 未被指定的行，使用行级 Credit/Debit 直接映射
           creditValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.creditSourceField));
           debitValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.debitSourceField));
         }

@@ -29,7 +29,7 @@ const MODULES = Object.freeze({
   },
   newAccountGenerator: {
     id: 'new-account-generator',
-    name: '新开账户生成网银账单'
+    name: '新开账户余额账单生成'
   }
 });
 const RENDERER_STARTUP_MARKS = Object.freeze({

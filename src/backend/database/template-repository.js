@@ -707,32 +707,51 @@ function saveBillSplitAmountRules(db, templateId, rules = []) {
 function getBillSplitMeta(db, templateId) {
   const row = db
     .prepare(`
-      SELECT signed_amount_source_field AS signedAmountSourceField
+      SELECT
+        signed_amount_source_field AS signedAmountSourceField,
+        signed_amount_target_seq_nos AS signedAmountTargetSeqNos,
+        by_field_amount_target_seq_nos AS byFieldAmountTargetSeqNos
       FROM template_bill_split_meta
       WHERE template_id = ?
     `)
     .get(templateId);
   return {
-    signedAmountSourceField: row ? normalizeText(row.signedAmountSourceField) : ''
+    signedAmountSourceField: row ? normalizeText(row.signedAmountSourceField) : '',
+    signedAmountTargetSeqNos: row && row.signedAmountTargetSeqNos
+      ? row.signedAmountTargetSeqNos.split(',').filter(Boolean).map(Number)
+      : [],
+    byFieldAmountTargetSeqNos: row && row.byFieldAmountTargetSeqNos
+      ? row.byFieldAmountTargetSeqNos.split(',').filter(Boolean).map(Number)
+      : []
   };
 }
 
 function saveBillSplitMeta(db, templateId, meta = {}) {
   const now = new Date().toISOString();
   const value = normalizeText(meta && meta.signedAmountSourceField);
+  const signedTargetSeqNos = Array.isArray(meta.signedAmountTargetSeqNos)
+    ? meta.signedAmountTargetSeqNos.join(',')
+    : '';
+  const byFieldTargetSeqNos = Array.isArray(meta.byFieldAmountTargetSeqNos)
+    ? meta.byFieldAmountTargetSeqNos.join(',')
+    : '';
   const existing = db.prepare('SELECT 1 FROM template_bill_split_meta WHERE template_id = ?').get(templateId);
   if (existing) {
     db.prepare(`
       UPDATE template_bill_split_meta
-      SET signed_amount_source_field = ?, updated_at = ?
+      SET signed_amount_source_field = ?,
+          signed_amount_target_seq_nos = ?,
+          by_field_amount_target_seq_nos = ?,
+          updated_at = ?
       WHERE template_id = ?
-    `).run(value, now, templateId);
+    `).run(value, signedTargetSeqNos, byFieldTargetSeqNos, now, templateId);
   } else {
     db.prepare(`
       INSERT INTO template_bill_split_meta (
-        template_id, signed_amount_source_field, created_at, updated_at
-      ) VALUES (?, ?, ?, ?)
-    `).run(templateId, value, now, now);
+        template_id, signed_amount_source_field, signed_amount_target_seq_nos,
+        by_field_amount_target_seq_nos, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `).run(templateId, value, signedTargetSeqNos, byFieldTargetSeqNos, now, now);
   }
 }
 
