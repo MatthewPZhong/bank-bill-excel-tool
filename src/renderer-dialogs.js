@@ -766,7 +766,7 @@
         fileListContainer.parentElement.style.overflowY = '';
         orderListContainer.parentElement.style.overflowY = '';
         scrollContainer.classList.remove('ba-single-scroll-active');
-        renderOrderList();
+        renderOrderListAsCheckbox();
       }
 
       function renderOrderListAsText() {

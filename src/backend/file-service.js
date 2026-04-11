@@ -233,11 +233,13 @@ function buildMappedRows({
       if (!matchAmountSplitConditionValue(sourceCell, conditionValue)) {
         return;
       }
+      // 每条规则用自己的 mappedField 读取金额；无 mappedField 时回退到外部传入值
+      const ruleAmountRaw = rule.mappedField ? readSourceCell(row, rule.mappedField) : amountValueRaw;
       if (targetField === 'Credit Amount' && !matchedCredit) {
-        credit = sanitizeAmountValue(amountValueRaw);
+        credit = sanitizeAmountValue(ruleAmountRaw);
         matchedCredit = true;
       } else if (targetField === 'Debit Amount' && !matchedDebit) {
-        debit = sanitizeAmountValue(amountValueRaw);
+        debit = sanitizeAmountValue(ruleAmountRaw);
         matchedDebit = true;
       }
     });
