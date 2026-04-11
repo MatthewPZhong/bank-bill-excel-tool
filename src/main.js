@@ -758,6 +758,7 @@ function buildBigAccountSelectionRows(fileEntries = [], options = {}) {
         index: rowIndex,
         sourceRowNumber: block.startRowNumber,
         fileName: path.basename(entry.filePath),
+        filePath: entry.filePath,
         blockStartIndex: block.startIndex,
         blockEndIndex: block.endIndex
       });
@@ -6089,22 +6090,24 @@ function registerFileHandlers() {
       if (mode !== 'fixed' && frontendFileRows.length > 0) {
         // 不固定模式：按前端传来的 fileRows（左侧面板显示的行）逐行提取
         // 每个 fileRow 有 sourceRowNumber + fileName，根据 sourceRowNumber 在原始文件里找对应的账户号
-        const fileEntriesByName = new Map();
+        const fileEntriesByPath = new Map();
         (pendingContext.fileEntries || []).forEach((entry) => {
-          const name = path.basename(entry.filePath);
-          if (!fileEntriesByName.has(name)) fileEntriesByName.set(name, entry);
+          fileEntriesByPath.set(entry.filePath, entry);
         });
 
         // 预缓存每个文件的原始行和 headerRowNumbers
         const fileCache = new Map();
-        fileEntriesByName.forEach((entry, name) => {
-          const rawRows = readRows(entry.filePath, { blankrows: true });
+        fileEntriesByPath.forEach((entry, filePath) => {
+          const rawRows = readRows(filePath, { blankrows: true });
           const headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
-          fileCache.set(name, { rawRows, headerRowNumbers, entry });
+          fileCache.set(filePath, { rawRows, headerRowNumbers, entry });
         });
 
         frontendFileRows.forEach((fr) => {
-          const cached = fileCache.get(fr.fileName);
+          const cached = fileCache.get(fr.filePath || '') || fileCache.get(
+            // fallback: 按 basename 匹配（兼容旧数据）
+            [...fileCache.keys()].find((fp) => path.basename(fp) === fr.fileName) || ''
+          );
           if (!cached) {
             failedRows.push({ index: globalIndex, fileName: fr.fileName || '' });
             globalIndex += 1;

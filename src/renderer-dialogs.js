@@ -906,7 +906,8 @@
           mode: currentMode,
           fileRows: currentFileRows.map((row) => ({
             sourceRowNumber: row.sourceRowNumber,
-            fileName: row.fileName
+            fileName: row.fileName,
+            filePath: row.filePath || ''
           }))
         });
 
