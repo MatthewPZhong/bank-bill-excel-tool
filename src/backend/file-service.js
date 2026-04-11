@@ -279,22 +279,39 @@ function buildMappedRows({
         let creditValue = '';
         let debitValue = '';
 
-        // 指定账单实现功能：检查当前拆分行是否被指定
-        const isTargetedBySigned = billSplitSignedTargetSeqNos.includes(splitRow.seqNo);
-        const isTargetedByField = billSplitByFieldTargetSeqNos.includes(splitRow.seqNo);
+        // 指定账单实现功能：判断是否有指定、当前行是否被指定
+        const hasSignedTargets = billSplitSignedTargetSeqNos.length > 0;
+        const hasByFieldTargets = billSplitByFieldTargetSeqNos.length > 0;
+        const isTargetedBySigned = hasSignedTargets && billSplitSignedTargetSeqNos.includes(splitRow.seqNo);
+        const isTargetedByField = hasByFieldTargets && billSplitByFieldTargetSeqNos.includes(splitRow.seqNo);
 
         if (isTargetedBySigned && hasSignedAmount) {
-          // 该行被"按正负号拆分的发生额"指定，使用 signed amount 逻辑
+          // 该行被"按正负号拆分的发生额"指定
           const split = splitSignedAmountValue(readSourceCell(originalRow, billSplitSignedField));
           creditValue = split.creditAmount;
           debitValue = split.debitAmount;
         } else if (isTargetedByField && hasAmountRules) {
-          // 该行被"按字段区分发生额"指定，使用 amount rules 逻辑
-          const result = evaluateBillSplitAmountRulesForRow(originalRow, '');
+          // 该行被"按字段区分发生额"指定，从规则的 mappedField 读取金额
+          const firstRule = billSplitAmountRules.find((r) => r.mappedField);
+          const amountRaw = firstRule ? readSourceCell(originalRow, firstRule.mappedField) : '';
+          const result = evaluateBillSplitAmountRulesForRow(originalRow, amountRaw);
           creditValue = result.credit;
           debitValue = result.debit;
+        } else if (useAmountSourceField && !hasSignedTargets && !hasByFieldTargets) {
+          // 副区域有值但没有勾选"指定账单"→ 所有行使用副区域逻辑（旧行为）
+          if (hasSignedAmount) {
+            const split = splitSignedAmountValue(readSourceCell(originalRow, billSplitSignedField));
+            creditValue = split.creditAmount;
+            debitValue = split.debitAmount;
+          } else {
+            const firstRule = billSplitAmountRules.find((r) => r.mappedField);
+            const amountRaw = firstRule ? readSourceCell(originalRow, firstRule.mappedField) : '';
+            const result = evaluateBillSplitAmountRulesForRow(originalRow, amountRaw);
+            creditValue = result.credit;
+            debitValue = result.debit;
+          }
         } else {
-          // 未被指定的行，使用行级 Credit/Debit 直接映射
+          // 未被指定的行（有指定但该行不在列表），使用行级 Credit/Debit 直接映射
           creditValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.creditSourceField));
           debitValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.debitSourceField));
         }
