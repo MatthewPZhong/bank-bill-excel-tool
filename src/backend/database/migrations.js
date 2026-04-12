@@ -209,10 +209,20 @@ function ensureBillSplitMergeSupport(db) {
   }
 }
 
+function ensureBillSplitTargetSeqSupport(db) {
+  if (!hasColumn(db, 'template_bill_split_meta', 'signed_amount_target_seq_nos')) {
+    db.exec("ALTER TABLE template_bill_split_meta ADD COLUMN signed_amount_target_seq_nos TEXT NOT NULL DEFAULT '';");
+  }
+  if (!hasColumn(db, 'template_bill_split_meta', 'by_field_amount_target_seq_nos')) {
+    db.exec("ALTER TABLE template_bill_split_meta ADD COLUMN by_field_amount_target_seq_nos TEXT NOT NULL DEFAULT '';");
+  }
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
   ensureAmountSplitRulesSupport,
   ensureBillSplitMergeSupport,
+  ensureBillSplitTargetSeqSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,

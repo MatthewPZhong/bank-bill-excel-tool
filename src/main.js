@@ -164,6 +164,24 @@ function sanitizeFileName(value) {
     .trim();
 }
 
+function stripMarkdown(md) {
+  return md
+    .replace(/```\w*\n/g, '')
+    .replace(/```/g, '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^>\s+/gm, '')
+    .replace(/^---$/gm, '')
+    .replace(/^\|(.+)\|$/gm, (match, content) => {
+      const cells = content.split('|').map((c) => c.trim());
+      if (cells.every((c) => /^[-:]+$/.test(c))) return '';
+      return cells.join('\t');
+    })
+    .replace(/\n{3,}/g, '\n\n');
+}
+
 function markStartupMetric(stageName) {
   startupMetrics.marks.set(stageName, performance.now());
 }
@@ -439,14 +457,16 @@ function rememberPendingBigAccountSelection(context = null) {
           ? context.rows.map((row) => ({
               index: Number(row.index || 0),
               sourceRowNumber: Number(row.sourceRowNumber || 0),
-              fileName: normalizeCell(row.fileName)
+              fileName: normalizeCell(row.fileName),
+              filePath: row.filePath || ''
             }))
           : [],
         rowsWithEmptyBlocks: Array.isArray(context.rowsWithEmptyBlocks)
           ? context.rowsWithEmptyBlocks.map((row) => ({
               index: Number(row.index || 0),
               sourceRowNumber: Number(row.sourceRowNumber || 0),
-              fileName: normalizeCell(row.fileName)
+              fileName: normalizeCell(row.fileName),
+              filePath: row.filePath || ''
             }))
           : undefined
       }
@@ -491,7 +511,8 @@ function buildBigAccountSelectionRequiredResult({ rows = [], rowsWithEmptyBlocks
     index: Number.isInteger(row.index) ? row.index : index,
     label: `${index + 1}.`,
     sourceRowNumber: Number(row.sourceRowNumber || 0),
-    fileName: normalizeCell(row.fileName)
+    fileName: normalizeCell(row.fileName),
+    filePath: row.filePath || ''
   });
   return {
     status: 'select-big-account',
@@ -740,6 +761,7 @@ function buildBigAccountSelectionRows(fileEntries = [], options = {}) {
         index: rowIndex,
         sourceRowNumber: block.startRowNumber,
         fileName: path.basename(entry.filePath),
+        filePath: entry.filePath,
         blockStartIndex: block.startIndex,
         blockEndIndex: block.endIndex
       });
@@ -2419,12 +2441,11 @@ function registerAppHandlers() {
   ipcMain.handle('app:save-user-guide', async () => {
     try {
       const result = await dialog.showSaveDialog(mainWindow, {
-        defaultPath: '使用手册.pdf',
+        defaultPath: '使用手册',
         filters: [
-          {
-            name: 'PDF 文件',
-            extensions: ['pdf']
-          }
+          { name: '纯文本文件', extensions: ['txt'] },
+          { name: 'Markdown 文件', extensions: ['md'] },
+          { name: 'HTML 文件', extensions: ['html'] }
         ]
       });
 
@@ -2434,45 +2455,24 @@ function registerAppHandlers() {
 
       const userGuidePath = path.join(app.getAppPath(), 'docs', 'USER_GUIDE.md');
       const markdown = fs.readFileSync(userGuidePath, 'utf8');
+      const ext = path.extname(result.filePath).toLowerCase();
 
-      // Markdown → HTML（轻量转换，覆盖常用语法）
-      const htmlBody = markdown
-        // 代码块 ```...```
-        .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
-        // 行内代码 `...`
-        .replace(/`([^`]+)`/g, '<code>$1</code>')
-        // 标题
-        .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
-        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-        // 粗体
-        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-        // 引用块
-        .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
-        // 分割线
-        .replace(/^---$/gm, '<hr/>')
-        // 有序列表
-        .replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>')
-        // 无序列表
-        .replace(/^[-*]\s+(.+)$/gm, '<li>$1</li>')
-        // 表格（简易：| 分隔的行）
-        .replace(/^\|(.+)\|$/gm, (match, content) => {
-          const cells = content.split('|').map((c) => c.trim());
-          if (cells.every((c) => /^[-:]+$/.test(c))) return '';
-          const tag = cells.some((c) => c.startsWith('**')) ? 'th' : 'td';
-          return '<tr>' + cells.map((c) => `<${tag}>${c.replace(/\*\*/g, '')}</${tag}>`).join('') + '</tr>';
-        })
-        // 段落（连续非空行）
-        .replace(/\n{2,}/g, '</p><p>')
-        .replace(/\n/g, '<br/>');
+      if (ext === '.md') {
+        fs.writeFileSync(result.filePath, markdown, 'utf8');
+      } else if (ext === '.txt') {
+        const plainText = stripMarkdown(markdown);
+        fs.writeFileSync(result.filePath, plainText, 'utf8');
+      } else if (ext === '.html') {
+        const { marked } = require('marked');
+        marked.setOptions({ gfm: true, breaks: true });
+        const htmlBody = marked.parse(markdown);
 
-      const html = `<!DOCTYPE html>
+        const html = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8"/>
 <style>
-  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; font-size: 13px; line-height: 1.7; color: #333; max-width: 700px; margin: 0 auto; padding: 20px 30px; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 13px; line-height: 1.7; color: #333; max-width: 700px; margin: 0 auto; padding: 20px 30px; }
   h1 { font-size: 22px; border-bottom: 2px solid #e0d5c0; padding-bottom: 8px; }
   h2 { font-size: 18px; margin-top: 28px; border-bottom: 1px solid #e0d5c0; padding-bottom: 6px; }
   h3 { font-size: 15px; margin-top: 20px; }
@@ -2489,32 +2489,15 @@ function registerAppHandlers() {
   strong { color: #222; }
 </style>
 </head>
-<body><p>${htmlBody}</p></body>
+<body>${htmlBody}</body>
 </html>`;
 
-      // 用隐藏的 BrowserWindow 渲染 HTML 并导出 PDF
-      const pdfWindow = new BrowserWindow({
-        show: false,
-        width: 800,
-        height: 600,
-        webPreferences: { contextIsolation: true }
-      });
-
-      await pdfWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-
-      const pdfBuffer = await pdfWindow.webContents.printToPDF({
-        printBackground: true,
-        preferCSSPageSize: false,
-        margins: { top: 0.6, bottom: 0.6, left: 0.5, right: 0.5 }
-      });
-
-      pdfWindow.destroy();
-
-      fs.writeFileSync(result.filePath, pdfBuffer);
+        fs.writeFileSync(result.filePath, html, 'utf8');
+      }
 
       return {
         status: 'success',
-        message: '使用手册导出成功',
+        message: `使用手册导出成功：${result.filePath}`,
         filePath: result.filePath
       };
     } catch (error) {
@@ -3498,6 +3481,34 @@ function registerTemplateHandlers() {
       let updatedCount = 0;
       let skippedCount = 0;
 
+      // Scan for existing templates with same name before importing
+      const existingTemplateNames = [];
+      importedTemplates.forEach((entry) => {
+        if (!entry.name || !entry.headers.length) return;
+        const existingTemplate = entry.templateKey
+          ? database.getTemplateByKey(entry.templateKey)
+          : database.getTemplateByName(entry.name);
+        if (existingTemplate) {
+          existingTemplateNames.push(entry.name);
+        }
+      });
+
+      if (existingTemplateNames.length > 0) {
+        const confirmResult = await dialog.showMessageBox(mainWindow, {
+          type: 'warning',
+          title: '导入模板包',
+          message: '以下模板已存在，导入将覆盖现有配置：',
+          detail: existingTemplateNames.map((name) => `• ${name}`).join('\n') + '\n\n是否确认覆盖？',
+          buttons: ['取消', '确认覆盖'],
+          defaultId: 0,
+          cancelId: 0
+        });
+
+        if (confirmResult.response === 0) {
+          return { status: 'cancelled' };
+        }
+      }
+
       importedTemplates.forEach((entry) => {
         if (!entry.name || !entry.headers.length) {
           skippedCount += 1;
@@ -3623,7 +3634,9 @@ function registerTemplateHandlers() {
           database.saveBillSplitAmountRules(template.id, normalizedBillSplitAmountRules);
 
           database.saveBillSplitMeta(template.id, {
-            signedAmountSourceField: normalizeCell(entry.billSplitMeta?.signedAmountSourceField)
+            signedAmountSourceField: normalizeCell(entry.billSplitMeta?.signedAmountSourceField),
+            signedAmountTargetSeqNos: entry.billSplitMeta?.signedAmountTargetSeqNos || [],
+            byFieldAmountTargetSeqNos: entry.billSplitMeta?.byFieldAmountTargetSeqNos || []
           });
 
           if (entry.bigAccountOrderConfig && Array.isArray(entry.bigAccountOrderConfig.files)) {
@@ -4102,7 +4115,11 @@ function registerTemplateHandlers() {
           '弹框 2 副区域的"按正负号拆分的发生额"和"按字段区分发生额"只能启用其中一种'
         );
       }
-      database.saveBillSplitMeta(templateId, { signedAmountSourceField });
+      database.saveBillSplitMeta(templateId, {
+        signedAmountSourceField,
+        signedAmountTargetSeqNos: payload.signedAmountTargetSeqNos || [],
+        byFieldAmountTargetSeqNos: payload.byFieldAmountTargetSeqNos || []
+      });
       syncTemplateLibraryFile();
       return { status: 'success' };
     } catch (error) {
@@ -4502,6 +4519,8 @@ function buildBillSplitMergeConfig(template, selectedMappings) {
 
   const meta = database.getBillSplitMeta(template.id) || {};
   const signedAmountSourceField = normalizeCell(meta.signedAmountSourceField);
+  const signedAmountTargetSeqNos = Array.isArray(meta.signedAmountTargetSeqNos) ? meta.signedAmountTargetSeqNos : [];
+  const byFieldAmountTargetSeqNos = Array.isArray(meta.byFieldAmountTargetSeqNos) ? meta.byFieldAmountTargetSeqNos : [];
 
   return {
     enabled: true,
@@ -4510,7 +4529,9 @@ function buildBillSplitMergeConfig(template, selectedMappings) {
     billSplitMappingByTargetField,  // P1 Fix A (PR #16 review)
     billSplitRows,
     billSplitAmountRules,
-    signedAmountSourceField
+    signedAmountSourceField,
+    signedAmountTargetSeqNos,
+    byFieldAmountTargetSeqNos
   };
 }
 
@@ -5669,13 +5690,15 @@ function registerFileHandlers() {
                   index: Number.isInteger(row.index) ? row.index : index,
                   label: `${index + 1}.`,
                   sourceRowNumber: Number(row.sourceRowNumber || 0),
-                  fileName: normalizeCell(row.fileName)
+                  fileName: normalizeCell(row.fileName),
+              filePath: row.filePath || ''
                 })),
                 rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true }).map((row, index) => ({
                   index: Number.isInteger(row.index) ? row.index : index,
                   label: `${index + 1}.`,
                   sourceRowNumber: Number(row.sourceRowNumber || 0),
-                  fileName: normalizeCell(row.fileName)
+                  fileName: normalizeCell(row.fileName),
+              filePath: row.filePath || ''
                 })),
                 bigAccounts: templateConfig.bigAccounts.map((item) => ({
                   merchantId: normalizeCell(item.merchantId),
@@ -6072,22 +6095,24 @@ function registerFileHandlers() {
       if (mode !== 'fixed' && frontendFileRows.length > 0) {
         // 不固定模式：按前端传来的 fileRows（左侧面板显示的行）逐行提取
         // 每个 fileRow 有 sourceRowNumber + fileName，根据 sourceRowNumber 在原始文件里找对应的账户号
-        const fileEntriesByName = new Map();
+        const fileEntriesByPath = new Map();
         (pendingContext.fileEntries || []).forEach((entry) => {
-          const name = path.basename(entry.filePath);
-          if (!fileEntriesByName.has(name)) fileEntriesByName.set(name, entry);
+          fileEntriesByPath.set(entry.filePath, entry);
         });
 
         // 预缓存每个文件的原始行和 headerRowNumbers
         const fileCache = new Map();
-        fileEntriesByName.forEach((entry, name) => {
-          const rawRows = readRows(entry.filePath, { blankrows: true });
+        fileEntriesByPath.forEach((entry, filePath) => {
+          const rawRows = readRows(filePath, { blankrows: true });
           const headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
-          fileCache.set(name, { rawRows, headerRowNumbers, entry });
+          fileCache.set(filePath, { rawRows, headerRowNumbers, entry });
         });
 
         frontendFileRows.forEach((fr) => {
-          const cached = fileCache.get(fr.fileName);
+          const cached = fileCache.get(fr.filePath || '') || fileCache.get(
+            // fallback: 按 basename 匹配（兼容旧数据）
+            [...fileCache.keys()].find((fp) => path.basename(fp) === fr.fileName) || ''
+          );
           if (!cached) {
             failedRows.push({ index: globalIndex, fileName: fr.fileName || '' });
             globalIndex += 1;

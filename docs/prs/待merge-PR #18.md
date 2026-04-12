@@ -1,0 +1,49 @@
+# PR #18 — v1.5.0 fix2：模块名称 + 英文日期 + 模板覆盖确认 + 使用手册HTML + 单滚动条 + 指定账单功能
+
+## 改动文件
+
+- `index.html`（1 行）
+- `src/renderer.js`（1 行）
+- `src/backend/file-service/normalizers.js`（+12 行）
+- `src/main.js`（+145 / -115 行）
+- `src/renderer-dialogs.js`（+377 / -40 行）
+- `src/styles.css`（+123 / -5 行）
+- `src/backend/database.js`（+6 行）
+- `src/backend/database/migrations.js`（+10 行）
+- `src/backend/database/template-repository.js`（+33 行）
+- `src/backend/file-service.js`（+32 行）
+- `package.json`（+1 行，新增 marked 依赖）
+- `docs/iterations/v1.5.0/PRD-v1.5.0.md`（+22 行，实施记录）
+- `docs/iterations/v1.5.0/PRD-v1.5.0-fix2.md`（新增）
+- `docs/iterations/v1.5.0/TechDoc-v1.5.0-fix2.md`（新增）
+- `docs/prs/PR17-v1.5.0.md`（新增，归档）
+
+## 改动内容
+
+### 需求 1：模块名称变更
+"新开账户生成网银账单" → "新开账户余额账单生成"，涉及 index.html 按钮文本和 renderer.js 模块 name 字段。
+
+### 需求 2：英文日期格式解析
+normalizers.js 的 `stripDateTimeSuffix` 新增逗号+时间+AM/PM 正则；`parseEnglishMonthDateCandidate` 新增 DD Mon YYYY 和 Month DD YYYY 两个 pattern。支持 `09 Apr 2026, 06:26:26 PM` 和 `April 9, 2026` 等格式。
+
+### 需求 3：导入模板包同名覆盖确认
+main.js 的 `template:import-bundle` handler 在循环前扫描同名模板，使用 Electron 原生 `dialog.showMessageBox` 弹出确认框。
+
+### 需求 4：使用手册导出格式扩展
+支持 txt / md / html 三种格式导出。HTML 格式使用 marked 库渲染 Markdown，直接保存为 HTML 文件。
+
+### 需求 5a：提取大账号顺序弹框单滚动条
+DOM 重构：左右面板放入 `.extract-scroll-container`（overflow-y: auto），删除双滚动条同步代码。
+
+### 需求 5b：大账号选择对话框条件单滚动条 + 文本化
+DOM 重构：左右面板放入 `.ba-scroll-container`。勾选"记住顺序"时切为单滚动条 + 右面板文本化只读显示；取消勾选恢复双滚动条 + checkbox 列表。
+
+### 需求 6：按正负号下拉框宽度修复
+`.bill-split-sub-row .mapping-select` 从 `min-width: 200px` 改为 `min-width: 260px; max-width: 260px`。
+
+### 需求 7：指定账单实现功能
+- DB 迁移：`template_bill_split_meta` 表新增 `signed_amount_target_seq_nos` 和 `by_field_amount_target_seq_nos` 两列
+- 前端：按正负号/按字段区分有值时出现"指定账单实现功能"勾选框 + 多选账单序号下拉
+- 禁用逻辑：副区域有值 + 没勾选指定 → 全部 Credit/Debit 禁用；勾选指定 → 被指定行禁用，未指定行可选
+- 删除六列表中的"发生额"列（改为五列）
+- 后端 file-service.js：被指定行使用副区域逻辑，未指定行使用行级 Credit/Debit 直接映射

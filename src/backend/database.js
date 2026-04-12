@@ -5,6 +5,7 @@ const {
   ensureAccountMappingCurrencySupport,
   ensureAmountSplitRulesSupport,
   ensureBillSplitMergeSupport,
+  ensureBillSplitTargetSeqSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateKeySupport,
   ensureTemplateMappingEnhancements,
@@ -94,6 +95,7 @@ class AppDatabase {
     this.ensureTemplateDateFormatSupport();
     this.ensureAmountSplitRulesSupport();
     this.ensureBillSplitMergeSupport();
+    this.ensureBillSplitTargetSeqSupport();
   }
 
   hasColumn(tableName, columnName) {
@@ -122,6 +124,10 @@ class AppDatabase {
 
   ensureBillSplitMergeSupport() {
     return ensureBillSplitMergeSupport(this.db);
+  }
+
+  ensureBillSplitTargetSeqSupport() {
+    return ensureBillSplitTargetSeqSupport(this.db);
   }
 
   listTemplates() {

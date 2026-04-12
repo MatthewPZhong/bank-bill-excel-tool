@@ -77,6 +77,12 @@ function buildMappedRows({
   const billSplitSignedField = billSplitEnabled
     ? normalizeCell(billSplitMerge.signedAmountSourceField)
     : '';
+  const billSplitSignedTargetSeqNos = billSplitEnabled && Array.isArray(billSplitMerge.signedAmountTargetSeqNos)
+    ? billSplitMerge.signedAmountTargetSeqNos
+    : [];
+  const billSplitByFieldTargetSeqNos = billSplitEnabled && Array.isArray(billSplitMerge.byFieldAmountTargetSeqNos)
+    ? billSplitMerge.byFieldAmountTargetSeqNos
+    : [];
   // P1 Fix A (PR #16 review): reuseModuleMapping === false 时非金额字段走弹框 1 的独立 lookup
   const billSplitReuseModuleMapping = billSplitEnabled
     ? billSplitMerge.reuseModuleMapping !== false
@@ -227,11 +233,13 @@ function buildMappedRows({
       if (!matchAmountSplitConditionValue(sourceCell, conditionValue)) {
         return;
       }
+      // 每条规则用自己的 mappedField 读取金额；无 mappedField 时回退到外部传入值
+      const ruleAmountRaw = rule.mappedField ? readSourceCell(row, rule.mappedField) : amountValueRaw;
       if (targetField === 'Credit Amount' && !matchedCredit) {
-        credit = sanitizeAmountValue(amountValueRaw);
+        credit = sanitizeAmountValue(ruleAmountRaw);
         matchedCredit = true;
       } else if (targetField === 'Debit Amount' && !matchedDebit) {
-        debit = sanitizeAmountValue(amountValueRaw);
+        debit = sanitizeAmountValue(ruleAmountRaw);
         matchedDebit = true;
       }
     });
@@ -273,18 +281,39 @@ function buildMappedRows({
         let creditValue = '';
         let debitValue = '';
 
-        if (useAmountSourceField) {
-          const amountRaw = readSourceCell(originalRow, splitRow.amountSourceField);
+        // 指定账单实现功能：判断是否有指定、当前行是否被指定
+        const hasSignedTargets = billSplitSignedTargetSeqNos.length > 0;
+        const hasByFieldTargets = billSplitByFieldTargetSeqNos.length > 0;
+        const isTargetedBySigned = hasSignedTargets && billSplitSignedTargetSeqNos.includes(splitRow.seqNo);
+        const isTargetedByField = hasByFieldTargets && billSplitByFieldTargetSeqNos.includes(splitRow.seqNo);
+
+        if (isTargetedBySigned && hasSignedAmount) {
+          // 该行被"按正负号拆分的发生额"指定
+          const split = splitSignedAmountValue(readSourceCell(originalRow, billSplitSignedField));
+          creditValue = split.creditAmount;
+          debitValue = split.debitAmount;
+        } else if (isTargetedByField && hasAmountRules) {
+          // 该行被"按字段区分发生额"指定，从规则的 mappedField 读取金额
+          const firstRule = billSplitAmountRules.find((r) => r.mappedField);
+          const amountRaw = firstRule ? readSourceCell(originalRow, firstRule.mappedField) : '';
+          const result = evaluateBillSplitAmountRulesForRow(originalRow, amountRaw);
+          creditValue = result.credit;
+          debitValue = result.debit;
+        } else if (useAmountSourceField && !hasSignedTargets && !hasByFieldTargets) {
+          // 副区域有值但没有勾选"指定账单"→ 所有行使用副区域逻辑（旧行为）
           if (hasSignedAmount) {
             const split = splitSignedAmountValue(readSourceCell(originalRow, billSplitSignedField));
             creditValue = split.creditAmount;
             debitValue = split.debitAmount;
           } else {
+            const firstRule = billSplitAmountRules.find((r) => r.mappedField);
+            const amountRaw = firstRule ? readSourceCell(originalRow, firstRule.mappedField) : '';
             const result = evaluateBillSplitAmountRulesForRow(originalRow, amountRaw);
             creditValue = result.credit;
             debitValue = result.debit;
           }
         } else {
+          // 未被指定的行（有指定但该行不在列表），使用行级 Credit/Debit 直接映射
           creditValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.creditSourceField));
           debitValue = sanitizeAmountValue(readSourceCell(originalRow, splitRow.debitSourceField));
         }

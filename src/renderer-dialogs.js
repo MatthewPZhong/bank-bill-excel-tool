@@ -591,13 +591,15 @@
           </div>
         </div>
         <div class="big-account-split-body">
-          <div class="big-account-split-left">
-            <div class="big-account-split-header">文件顺序：</div>
-            <div class="big-account-file-list"></div>
-          </div>
-          <div class="big-account-split-right">
-            <div class="big-account-split-header">大账号顺序：</div>
-            <div class="big-account-order-list"></div>
+          <div class="ba-scroll-container">
+            <div class="big-account-split-left">
+              <div class="big-account-split-header">文件顺序：</div>
+              <div class="big-account-file-list"></div>
+            </div>
+            <div class="big-account-split-right">
+              <div class="big-account-split-header">大账号顺序：</div>
+              <div class="big-account-order-list"></div>
+            </div>
           </div>
         </div>
         <div class="dialog-actions big-account-selection-footer">
@@ -613,6 +615,7 @@
       `;
 
       const modeSelect = dialog.querySelector('.big-account-mode-select');
+      const scrollContainer = dialog.querySelector('.ba-scroll-container');
       const fileListContainer = dialog.querySelector('.big-account-file-list');
       const orderListContainer = dialog.querySelector('.big-account-order-list');
       const searchInput = dialog.querySelector('.big-account-search-input');
@@ -621,16 +624,18 @@
       const rememberCheckbox = dialog.querySelector('.big-account-remember-checkbox');
       const doneBtn = dialog.querySelector('[data-action="done"]');
 
-      // 左右面板同步滚动
+      let isRememberMode = false;
+
+      // 左右面板同步滚动（仅在非记住顺序模式下生效）
       let mainSyncingScroll = false;
       fileListContainer.addEventListener('scroll', () => {
-        if (mainSyncingScroll) return;
+        if (isRememberMode || mainSyncingScroll) return;
         mainSyncingScroll = true;
         orderListContainer.scrollTop = fileListContainer.scrollTop;
         mainSyncingScroll = false;
       });
       orderListContainer.addEventListener('scroll', () => {
-        if (mainSyncingScroll) return;
+        if (isRememberMode || mainSyncingScroll) return;
         mainSyncingScroll = true;
         fileListContainer.scrollTop = orderListContainer.scrollTop;
         mainSyncingScroll = false;
@@ -740,7 +745,65 @@
         if (currentMode === 'fixed' && savedOrder && Array.isArray(savedOrder.assignments) && savedOrder.assignments.length) {
           rememberCheckbox.checked = true;
           applyPrefilledOrder(savedOrder.assignments);
+          switchToRememberMode();
+        } else {
+          switchToNormalMode();
         }
+      }
+
+      function switchToRememberMode() {
+        isRememberMode = true;
+        scrollContainer.style.overflowY = 'auto';
+        fileListContainer.parentElement.style.overflowY = 'visible';
+        orderListContainer.parentElement.style.overflowY = 'visible';
+        scrollContainer.classList.add('ba-single-scroll-active');
+        renderOrderListAsText();
+      }
+
+      function switchToNormalMode() {
+        isRememberMode = false;
+        scrollContainer.style.overflowY = '';
+        fileListContainer.parentElement.style.overflowY = '';
+        orderListContainer.parentElement.style.overflowY = '';
+        scrollContainer.classList.remove('ba-single-scroll-active');
+        renderOrderListAsCheckbox();
+      }
+
+      function renderOrderListAsText() {
+        orderListContainer.innerHTML = '';
+        orderListContainer.classList.add('text-readonly');
+        if (!checkedOrder.length) {
+          orderListContainer.innerHTML = '<div class="big-account-order-empty">暂无已选大账号</div>';
+          return;
+        }
+        checkedOrder.forEach((item, index) => {
+          const div = document.createElement('div');
+          div.className = 'big-account-order-item big-account-order-text-item';
+          const indexSpan = document.createElement('span');
+          indexSpan.className = 'concat-picker-index big-account-order-index';
+          indexSpan.textContent = `${index + 1}.`;
+          const textSpan = document.createElement('span');
+          textSpan.className = 'big-account-order-text';
+          textSpan.textContent = `${item.merchantId} ${item.currency}`;
+          div.append(indexSpan, textSpan);
+          orderListContainer.appendChild(div);
+        });
+      }
+
+      function renderOrderListAsCheckbox() {
+        orderListContainer.classList.remove('text-readonly');
+        renderOrderList();
+        // Restore checked state
+        checkedOrder.forEach((co) => {
+          const item = Array.from(orderListContainer.querySelectorAll('.big-account-order-item')).find(
+            (el) => el.dataset.merchantId === co.merchantId && el.dataset.currency === co.currency
+          );
+          if (item) {
+            item.querySelector('.big-account-order-checkbox').checked = true;
+          }
+        });
+        syncOrderIndices();
+        syncCheckboxDisabled();
       }
 
       let savedOrder = null;
@@ -797,6 +860,14 @@
         syncModeUI();
       });
 
+      rememberCheckbox.addEventListener('change', () => {
+        if (rememberCheckbox.checked) {
+          switchToRememberMode();
+        } else {
+          switchToNormalMode();
+        }
+      });
+
       searchInput.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter') return;
         event.preventDefault();
@@ -835,7 +906,8 @@
           mode: currentMode,
           fileRows: currentFileRows.map((row) => ({
             sourceRowNumber: row.sourceRowNumber,
-            fileName: row.fileName
+            fileName: row.fileName,
+            filePath: row.filePath || ''
           }))
         });
 
@@ -896,14 +968,16 @@
               <div class="dialog-title">确认大账号顺序</div>
               <button class="icon-close extract-close-btn" type="button">×</button>
             </div>
-            <div class="big-account-split-body">
-              <div class="big-account-split-left">
-                <div class="big-account-split-header">文件顺序：</div>
-                <div class="extract-file-list"></div>
-              </div>
-              <div class="big-account-split-right">
-                <div class="big-account-split-header">大账号信息：</div>
-                <div class="extract-order-list"></div>
+            <div class="big-account-split-body extract-single-scroll">
+              <div class="extract-scroll-container">
+                <div class="big-account-split-left">
+                  <div class="big-account-split-header">文件顺序：</div>
+                  <div class="extract-file-list"></div>
+                </div>
+                <div class="big-account-split-right">
+                  <div class="big-account-split-header">大账号信息：</div>
+                  <div class="extract-order-list"></div>
+                </div>
               </div>
             </div>
             <div class="dialog-actions right">
@@ -914,20 +988,8 @@
           const extractFileList = extractDialog.querySelector('.extract-file-list');
           const extractOrderList = extractDialog.querySelector('.extract-order-list');
 
-          // 左右面板同步滚动
-          let extractSyncingScroll = false;
-          extractFileList.addEventListener('scroll', () => {
-            if (extractSyncingScroll) return;
-            extractSyncingScroll = true;
-            extractOrderList.scrollTop = extractFileList.scrollTop;
-            extractSyncingScroll = false;
-          });
-          extractOrderList.addEventListener('scroll', () => {
-            if (extractSyncingScroll) return;
-            extractSyncingScroll = true;
-            extractFileList.scrollTop = extractOrderList.scrollTop;
-            extractSyncingScroll = false;
-          });
+
+
 
           currentFileRows.forEach((row, index) => {
             const item = document.createElement('div');
@@ -2893,7 +2955,13 @@
       let currentRows = (initialRows || []).map((r) => ({ ...r }));
       let currentAmountRules = (initialAmountRules || []).map((r) => ({ ...r }));
       let currentBillSplitMeta = {
-        signedAmountSourceField: String((initialBillSplitMeta && initialBillSplitMeta.signedAmountSourceField) || '')
+        signedAmountSourceField: String((initialBillSplitMeta && initialBillSplitMeta.signedAmountSourceField) || ''),
+        signedAmountTargetSeqNos: Array.isArray(initialBillSplitMeta?.signedAmountTargetSeqNos)
+          ? initialBillSplitMeta.signedAmountTargetSeqNos.slice()
+          : [],
+        byFieldAmountTargetSeqNos: Array.isArray(initialBillSplitMeta?.byFieldAmountTargetSeqNos)
+          ? initialBillSplitMeta.byFieldAmountTargetSeqNos.slice()
+          : []
       };
 
       const headers = Array.isArray(template.headers) ? template.headers : [];
@@ -2932,7 +3000,6 @@
                   <th>Currency</th>
                   <th>Credit Amount</th>
                   <th>Debit Amount</th>
-                  <th>发生额</th>
                   <th>执行操作</th>
                 </tr>
               </thead>
@@ -2945,6 +3012,14 @@
             <div class="bill-split-sub-row">
               <label>按正负号拆分的发生额</label>
               <select class="mapping-select bill-split-signed-select">${headerOptionsHtml}</select>
+              <label class="bill-split-target-seq-label bill-split-signed-target-seq-label" hidden>
+                <input type="checkbox" class="bill-split-target-seq-checkbox bill-split-signed-target-seq-checkbox" />
+                <span>指定账单实现功能</span>
+              </label>
+              <div class="bill-split-target-seq-picker bill-split-signed-target-seq-picker" hidden>
+                <button class="bill-split-target-seq-trigger secondary-btn small" type="button">选择账单序号</button>
+                <div class="bill-split-target-seq-panel bill-split-signed-target-seq-panel" hidden></div>
+              </div>
             </div>
             <div class="bill-split-sub-row">
               <label>按字段区分发生额</label>
@@ -2953,6 +3028,14 @@
                 <option value="是">是</option>
               </select>
               <button class="secondary-btn small bill-split-amount-rules-manage-btn" type="button" hidden>发生额映射关系管理</button>
+              <label class="bill-split-target-seq-label bill-split-by-field-target-seq-label" hidden>
+                <input type="checkbox" class="bill-split-target-seq-checkbox bill-split-by-field-target-seq-checkbox" />
+                <span>指定账单实现功能</span>
+              </label>
+              <div class="bill-split-target-seq-picker bill-split-by-field-target-seq-picker" hidden>
+                <button class="bill-split-target-seq-trigger secondary-btn small" type="button">选择账单序号</button>
+                <div class="bill-split-target-seq-panel bill-split-by-field-target-seq-panel" hidden></div>
+              </div>
             </div>
           </div>
         </div>
@@ -2974,10 +3057,143 @@
       const byFieldSelect = dialog.querySelector('.bill-split-by-field-select');
       const amountRulesManageBtn = dialog.querySelector('.bill-split-amount-rules-manage-btn');
 
+      // 指定账单实现功能 UI elements
+      const signedTargetSeqLabel = dialog.querySelector('.bill-split-signed-target-seq-label');
+      const signedTargetSeqCheckbox = dialog.querySelector('.bill-split-signed-target-seq-checkbox');
+      const signedTargetSeqPicker = dialog.querySelector('.bill-split-signed-target-seq-picker');
+      const signedTargetSeqTrigger = signedTargetSeqPicker.querySelector('.bill-split-target-seq-trigger');
+      const signedTargetSeqPanel = dialog.querySelector('.bill-split-signed-target-seq-panel');
+
+      const byFieldTargetSeqLabel = dialog.querySelector('.bill-split-by-field-target-seq-label');
+      const byFieldTargetSeqCheckbox = dialog.querySelector('.bill-split-by-field-target-seq-checkbox');
+      const byFieldTargetSeqPicker = dialog.querySelector('.bill-split-by-field-target-seq-picker');
+      const byFieldTargetSeqTrigger = byFieldTargetSeqPicker.querySelector('.bill-split-target-seq-trigger');
+      const byFieldTargetSeqPanel = dialog.querySelector('.bill-split-by-field-target-seq-panel');
+
       // 初始化副区域 UI
       signedSelect.value = currentBillSplitMeta.signedAmountSourceField || '';
       byFieldSelect.value = currentAmountRules.length > 0 ? '是' : '';
       amountRulesManageBtn.hidden = currentAmountRules.length === 0;
+
+      // 指定账单实现功能：初始化
+      function initTargetSeqUI() {
+        const hasSignedValue = Boolean(signedSelect.value);
+        signedTargetSeqLabel.hidden = !hasSignedValue;
+        if (hasSignedValue && currentBillSplitMeta.signedAmountTargetSeqNos.length > 0) {
+          signedTargetSeqCheckbox.checked = true;
+          signedTargetSeqPicker.hidden = false;
+          updateTargetSeqTriggerLabel(signedTargetSeqTrigger, currentBillSplitMeta.signedAmountTargetSeqNos);
+        } else {
+          signedTargetSeqCheckbox.checked = false;
+          signedTargetSeqPicker.hidden = true;
+        }
+
+        const hasByFieldValue = byFieldSelect.value === '是';
+        byFieldTargetSeqLabel.hidden = !hasByFieldValue;
+        if (hasByFieldValue && currentBillSplitMeta.byFieldAmountTargetSeqNos.length > 0) {
+          byFieldTargetSeqCheckbox.checked = true;
+          byFieldTargetSeqPicker.hidden = false;
+          updateTargetSeqTriggerLabel(byFieldTargetSeqTrigger, currentBillSplitMeta.byFieldAmountTargetSeqNos);
+        } else {
+          byFieldTargetSeqCheckbox.checked = false;
+          byFieldTargetSeqPicker.hidden = true;
+        }
+      }
+
+      function updateTargetSeqTriggerLabel(trigger, seqNos) {
+        if (seqNos.length === 0) {
+          trigger.textContent = '选择账单序号';
+        } else if (seqNos.length <= 5) {
+          trigger.textContent = `已选: ${seqNos.join(', ')}`;
+        } else {
+          trigger.textContent = `已选: ${seqNos.length} 项`;
+        }
+      }
+
+      function getCurrentSeqNos() {
+        return currentRows.map((r) => r.seqNo);
+      }
+
+      function renderTargetSeqPanel(panel, selectedSeqNos) {
+        panel.innerHTML = '';
+        const currentSeqNos = getCurrentSeqNos();
+        currentSeqNos.forEach((seqNo) => {
+          const option = document.createElement('div');
+          option.className = 'bill-split-target-seq-option';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.value = String(seqNo);
+          checkbox.checked = selectedSeqNos.includes(seqNo);
+          const label = document.createElement('span');
+          label.textContent = `账单 ${seqNo}`;
+          option.append(checkbox, label);
+          option.addEventListener('click', (event) => {
+            if (event.target === checkbox) return;
+            checkbox.checked = !checkbox.checked;
+            checkbox.dispatchEvent(new Event('change'));
+          });
+          panel.appendChild(option);
+        });
+      }
+
+      function collectSelectedSeqNos(panel) {
+        return Array.from(panel.querySelectorAll('input[type="checkbox"]:checked'))
+          .map((cb) => Number(cb.value))
+          .sort((a, b) => a - b);
+      }
+
+      function updateTargetSeqNos(type, seqNos) {
+        if (type === 'signed') {
+          currentBillSplitMeta.signedAmountTargetSeqNos = seqNos;
+        } else {
+          currentBillSplitMeta.byFieldAmountTargetSeqNos = seqNos;
+        }
+        desktopApi.templates.saveBillSplitMeta({
+          templateId: template.id,
+          signedAmountSourceField: currentBillSplitMeta.signedAmountSourceField,
+          signedAmountTargetSeqNos: currentBillSplitMeta.signedAmountTargetSeqNos,
+          byFieldAmountTargetSeqNos: currentBillSplitMeta.byFieldAmountTargetSeqNos
+        });
+        rerenderTable();
+      }
+
+      // 按正负号：指定账单 checkbox
+      signedTargetSeqCheckbox.addEventListener('change', () => {
+        if (signedTargetSeqCheckbox.checked) {
+          signedTargetSeqPicker.hidden = false;
+          renderTargetSeqPanel(signedTargetSeqPanel, currentBillSplitMeta.signedAmountTargetSeqNos);
+        } else {
+          signedTargetSeqPicker.hidden = true;
+          signedTargetSeqPanel.hidden = true;
+          updateTargetSeqNos('signed', []);
+          updateTargetSeqTriggerLabel(signedTargetSeqTrigger, []);
+        }
+      });
+
+      signedTargetSeqTrigger.addEventListener('click', () => {
+        renderTargetSeqPanel(signedTargetSeqPanel, currentBillSplitMeta.signedAmountTargetSeqNos);
+        signedTargetSeqPanel.hidden = !signedTargetSeqPanel.hidden;
+      });
+
+      // 按字段区分：指定账单 checkbox
+      byFieldTargetSeqCheckbox.addEventListener('change', () => {
+        if (byFieldTargetSeqCheckbox.checked) {
+          byFieldTargetSeqPicker.hidden = false;
+          renderTargetSeqPanel(byFieldTargetSeqPanel, currentBillSplitMeta.byFieldAmountTargetSeqNos);
+        } else {
+          byFieldTargetSeqPicker.hidden = true;
+          byFieldTargetSeqPanel.hidden = true;
+          updateTargetSeqNos('byField', []);
+          updateTargetSeqTriggerLabel(byFieldTargetSeqTrigger, []);
+        }
+      });
+
+      byFieldTargetSeqTrigger.addEventListener('click', () => {
+        renderTargetSeqPanel(byFieldTargetSeqPanel, currentBillSplitMeta.byFieldAmountTargetSeqNos);
+        byFieldTargetSeqPanel.hidden = !byFieldTargetSeqPanel.hidden;
+      });
+
+      initTargetSeqUI();
 
       nInput.value = String(currentRows.length || 1);
 
@@ -2996,11 +3212,16 @@
           signedSelect.disabled = false;
           byFieldSelect.disabled = false;
         }
-        // Credit/Debit 列禁用 + 清空
+        // Credit/Debit 列清空（仅被指定的行，或没勾选指定功能时全部清空）
         if (enabled) {
+          const hasTargetSeq = signedTargetSeqCheckbox.checked || byFieldTargetSeqCheckbox.checked;
           currentRows.forEach((row) => {
-            row.creditSourceField = '';
-            row.debitSourceField = '';
+            const isTargeted = currentBillSplitMeta.signedAmountTargetSeqNos.includes(row.seqNo)
+              || currentBillSplitMeta.byFieldAmountTargetSeqNos.includes(row.seqNo);
+            if (!hasTargetSeq || isTargeted) {
+              row.creditSourceField = '';
+              row.debitSourceField = '';
+            }
           });
         }
       }
@@ -3030,10 +3251,6 @@
             <select class="mapping-select bill-split-debit-select" ${isCompleted ? 'hidden' : ''}>${headerOptionsHtml}</select>
             <span class="bill-split-row-view-text" ${isCompleted ? '' : 'hidden'}></span>
           </td>
-          <td>
-            <select class="mapping-select bill-split-amount-select" ${isCompleted ? 'hidden' : ''}>${headerOptionsHtml}</select>
-            <span class="bill-split-row-view-text" ${isCompleted ? '' : 'hidden'}></span>
-          </td>
           <td class="bill-split-row-actions">
             <button class="text-action bill-split-row-complete-btn" type="button">${isCompleted ? '编辑' : '完成'}</button>
             <button class="text-action danger bill-split-row-delete-btn" type="button">删除</button>
@@ -3043,7 +3260,6 @@
         const currencySel = tr.querySelector('.bill-split-currency-select');
         const creditSel = tr.querySelector('.bill-split-credit-select');
         const debitSel = tr.querySelector('.bill-split-debit-select');
-        const amountSel = tr.querySelector('.bill-split-amount-select');
         const viewTexts = tr.querySelectorAll('.bill-split-row-view-text');
         const completeBtn = tr.querySelector('.bill-split-row-complete-btn');
         const deleteBtn = tr.querySelector('.bill-split-row-delete-btn');
@@ -3051,32 +3267,39 @@
         currencySel.value = row.currencySourceField || '';
         creditSel.value = row.creditSourceField || '';
         debitSel.value = row.debitSourceField || '';
-        amountSel.value = row.amountSourceField || '';
 
         // 完成态：显示纯文本
         if (isCompleted) {
           viewTexts[0].textContent = row.currencySourceField || '';
           viewTexts[1].textContent = row.creditSourceField || '';
           viewTexts[2].textContent = row.debitSourceField || '';
-          viewTexts[3].textContent = row.amountSourceField || '';
         }
+
+        // 指定账单实现功能：检查是否启用 + 当前行是否被指定
+        const hasTargetSeqChecked = signedTargetSeqCheckbox.checked || byFieldTargetSeqCheckbox.checked;
+        const isTargetedBySigned = currentBillSplitMeta.signedAmountTargetSeqNos.includes(row.seqNo);
+        const isTargetedByField = currentBillSplitMeta.byFieldAmountTargetSeqNos.includes(row.seqNo);
+        const isTargetedByAny = isTargetedBySigned || isTargetedByField;
+
 
         // 禁用规则（仅编辑态生效）
         if (isMerged) {
           currencySel.disabled = true;
           creditSel.disabled = true;
           debitSel.disabled = true;
-          amountSel.disabled = true;
         } else if (!isCompleted) {
           currencySel.disabled = false;
-          if (amountEnabled) {
+          if (amountEnabled && hasTargetSeqChecked) {
+            // 副区域有值 + 勾选了指定账单：被指定行禁用，未指定行可选
+            creditSel.disabled = isTargetedByAny;
+            debitSel.disabled = isTargetedByAny;
+          } else if (amountEnabled) {
+            // 副区域有值 + 没勾选指定账单：所有行 Credit/Debit 禁用
             creditSel.disabled = true;
             debitSel.disabled = true;
-            amountSel.disabled = false;
           } else {
             creditSel.disabled = false;
             debitSel.disabled = false;
-            amountSel.disabled = true;
           }
         }
 
@@ -3101,7 +3324,6 @@
         currencySel.addEventListener('change', () => { row.currencySourceField = currencySel.value; });
         creditSel.addEventListener('change', () => { onCreditDebitChange('credit', creditSel); });
         debitSel.addEventListener('change', () => { onCreditDebitChange('debit', debitSel); });
-        amountSel.addEventListener('change', () => { row.amountSourceField = amountSel.value; });
 
         completeBtn.addEventListener('click', async () => {
           const nextStatus = isCompleted ? 'draft' : 'completed';
@@ -3189,10 +3411,19 @@
           if (result && result.status === 'success') {
             currentRows = result.billSplitRows || [];
             currentAmountRules = result.billSplitAmountRules || [];
-            currentBillSplitMeta = result.billSplitMeta || { signedAmountSourceField: '' };
+            currentBillSplitMeta = {
+              signedAmountSourceField: String((result.billSplitMeta && result.billSplitMeta.signedAmountSourceField) || ''),
+              signedAmountTargetSeqNos: Array.isArray(result.billSplitMeta?.signedAmountTargetSeqNos)
+                ? result.billSplitMeta.signedAmountTargetSeqNos.slice()
+                : [],
+              byFieldAmountTargetSeqNos: Array.isArray(result.billSplitMeta?.byFieldAmountTargetSeqNos)
+                ? result.billSplitMeta.byFieldAmountTargetSeqNos.slice()
+                : []
+            };
             signedSelect.value = currentBillSplitMeta.signedAmountSourceField || '';
             byFieldSelect.value = currentAmountRules.length > 0 ? '是' : '';
             amountRulesManageBtn.hidden = currentAmountRules.length === 0;
+            initTargetSeqUI();
             nInput.value = String(currentRows.length);
             rerenderTable();
           }
@@ -3369,6 +3600,14 @@
       // 副区域：按正负号拆分的发生额 onChange
       signedSelect.addEventListener('change', async () => {
         const newValue = signedSelect.value;
+        const hasValue = Boolean(newValue);
+        signedTargetSeqLabel.hidden = !hasValue;
+        if (!hasValue) {
+          signedTargetSeqCheckbox.checked = false;
+          signedTargetSeqPicker.hidden = true;
+          signedTargetSeqPanel.hidden = true;
+          currentBillSplitMeta.signedAmountTargetSeqNos = [];
+        }
         try {
           // 互斥：若 amount rules 非空且 next 非空 → 先清空对侧
           if (newValue && currentAmountRules.length > 0) {
@@ -3379,10 +3618,17 @@
             currentAmountRules = [];
             byFieldSelect.value = '';
             amountRulesManageBtn.hidden = true;
+            byFieldTargetSeqLabel.hidden = true;
+            byFieldTargetSeqCheckbox.checked = false;
+            byFieldTargetSeqPicker.hidden = true;
+            byFieldTargetSeqPanel.hidden = true;
+            currentBillSplitMeta.byFieldAmountTargetSeqNos = [];
           }
           await desktopApi.templates.saveBillSplitMeta({
             templateId: template.id,
-            signedAmountSourceField: newValue
+            signedAmountSourceField: newValue,
+            signedAmountTargetSeqNos: currentBillSplitMeta.signedAmountTargetSeqNos,
+            byFieldAmountTargetSeqNos: currentBillSplitMeta.byFieldAmountTargetSeqNos
           });
           currentBillSplitMeta.signedAmountSourceField = newValue;
           rerenderTable();
@@ -3394,6 +3640,14 @@
       // 副区域：按字段区分发生额 onChange
       byFieldSelect.addEventListener('change', async () => {
         const newValue = byFieldSelect.value;
+        const hasValue = newValue === '是';
+        byFieldTargetSeqLabel.hidden = !hasValue;
+        if (!hasValue) {
+          byFieldTargetSeqCheckbox.checked = false;
+          byFieldTargetSeqPicker.hidden = true;
+          byFieldTargetSeqPanel.hidden = true;
+          currentBillSplitMeta.byFieldAmountTargetSeqNos = [];
+        }
         if (newValue === '是') {
           // 打开子弹框配置规则
           if (currentBillSplitMeta.signedAmountSourceField) {
@@ -3401,10 +3655,17 @@
             try {
               await desktopApi.templates.saveBillSplitMeta({
                 templateId: template.id,
-                signedAmountSourceField: ''
+                signedAmountSourceField: '',
+                signedAmountTargetSeqNos: [],
+                byFieldAmountTargetSeqNos: currentBillSplitMeta.byFieldAmountTargetSeqNos
               });
               currentBillSplitMeta.signedAmountSourceField = '';
+              currentBillSplitMeta.signedAmountTargetSeqNos = [];
               signedSelect.value = '';
+              signedTargetSeqLabel.hidden = true;
+              signedTargetSeqCheckbox.checked = false;
+              signedTargetSeqPicker.hidden = true;
+              signedTargetSeqPanel.hidden = true;
             } catch (_error) { /* ignore */ }
           }
           openBillSplitAmountRulesSubDialog();
@@ -3417,6 +3678,7 @@
             });
             currentAmountRules = [];
             amountRulesManageBtn.hidden = true;
+            updateTargetSeqNos('byField', []);
             rerenderTable();
           } catch (error) {
             console.error(error);
@@ -3479,6 +3741,20 @@
         if (!event.target.closest('.bill-split-merge-picker')) {
           if (mergePickerPanel && !mergePickerPanel.hidden) {
             mergePickerPanel.hidden = true;
+          }
+        }
+        if (!event.target.closest('.bill-split-target-seq-picker')) {
+          if (!signedTargetSeqPanel.hidden) {
+            signedTargetSeqPanel.hidden = true;
+            const selected = collectSelectedSeqNos(signedTargetSeqPanel);
+            updateTargetSeqNos('signed', selected);
+            updateTargetSeqTriggerLabel(signedTargetSeqTrigger, selected);
+          }
+          if (!byFieldTargetSeqPanel.hidden) {
+            byFieldTargetSeqPanel.hidden = true;
+            const selected = collectSelectedSeqNos(byFieldTargetSeqPanel);
+            updateTargetSeqNos('byField', selected);
+            updateTargetSeqTriggerLabel(byFieldTargetSeqTrigger, selected);
           }
         }
       });
