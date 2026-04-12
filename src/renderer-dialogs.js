@@ -990,6 +990,7 @@
 
 
 
+
           currentFileRows.forEach((row, index) => {
             const item = document.createElement('div');
             item.className = 'big-account-file-item';
@@ -3279,6 +3280,7 @@
         const isTargetedBySigned = currentBillSplitMeta.signedAmountTargetSeqNos.includes(row.seqNo);
         const isTargetedByField = currentBillSplitMeta.byFieldAmountTargetSeqNos.includes(row.seqNo);
         const isTargetedByAny = isTargetedBySigned || isTargetedByField;
+
 
         // 禁用规则（仅编辑态生效）
         if (isMerged) {
