@@ -3,7 +3,7 @@
   "version": "1.5.0",
   "description": "网银账单小助手",
   "main": "src/main.js",
-  "author": "OpenAI Codex",
+  "author": "Pzhong",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
