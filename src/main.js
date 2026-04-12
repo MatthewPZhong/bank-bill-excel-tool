@@ -457,14 +457,16 @@ function rememberPendingBigAccountSelection(context = null) {
           ? context.rows.map((row) => ({
               index: Number(row.index || 0),
               sourceRowNumber: Number(row.sourceRowNumber || 0),
-              fileName: normalizeCell(row.fileName)
+              fileName: normalizeCell(row.fileName),
+              filePath: row.filePath || ''
             }))
           : [],
         rowsWithEmptyBlocks: Array.isArray(context.rowsWithEmptyBlocks)
           ? context.rowsWithEmptyBlocks.map((row) => ({
               index: Number(row.index || 0),
               sourceRowNumber: Number(row.sourceRowNumber || 0),
-              fileName: normalizeCell(row.fileName)
+              fileName: normalizeCell(row.fileName),
+              filePath: row.filePath || ''
             }))
           : undefined
       }
@@ -509,7 +511,8 @@ function buildBigAccountSelectionRequiredResult({ rows = [], rowsWithEmptyBlocks
     index: Number.isInteger(row.index) ? row.index : index,
     label: `${index + 1}.`,
     sourceRowNumber: Number(row.sourceRowNumber || 0),
-    fileName: normalizeCell(row.fileName)
+    fileName: normalizeCell(row.fileName),
+    filePath: row.filePath || ''
   });
   return {
     status: 'select-big-account',
@@ -5687,13 +5690,15 @@ function registerFileHandlers() {
                   index: Number.isInteger(row.index) ? row.index : index,
                   label: `${index + 1}.`,
                   sourceRowNumber: Number(row.sourceRowNumber || 0),
-                  fileName: normalizeCell(row.fileName)
+                  fileName: normalizeCell(row.fileName),
+              filePath: row.filePath || ''
                 })),
                 rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true }).map((row, index) => ({
                   index: Number.isInteger(row.index) ? row.index : index,
                   label: `${index + 1}.`,
                   sourceRowNumber: Number(row.sourceRowNumber || 0),
-                  fileName: normalizeCell(row.fileName)
+                  fileName: normalizeCell(row.fileName),
+              filePath: row.filePath || ''
                 })),
                 bigAccounts: templateConfig.bigAccounts.map((item) => ({
                   merchantId: normalizeCell(item.merchantId),
