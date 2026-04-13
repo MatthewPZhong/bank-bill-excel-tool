@@ -101,7 +101,7 @@ function runDatabaseScenario(context) {
     { templateField: 'MerchantId', mappedField: `${FIXED_FIELD_VALUE_PREFIX}62220000000000012345` },
     { templateField: 'Currency', mappedField: `${FIXED_FIELD_VALUE_PREFIX}USD` }
   ]);
-  db.saveAccountMappings([
+  db.saveAccountMappings(fixedTemplate.id, [
     {
       bankAccountId: 'NET_001',
       clearingAccountId: 'CLEAR_9001'

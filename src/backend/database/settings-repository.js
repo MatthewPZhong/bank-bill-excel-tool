@@ -59,7 +59,7 @@ function setBackgroundConfig(db, backgroundConfig) {
   setSetting(db, 'background_config', JSON.stringify(backgroundConfig));
 }
 
-function listAccountMappings(db) {
+function listAccountMappings(db, templateId) {
   return db
     .prepare(`
       SELECT
@@ -70,26 +70,28 @@ function listAccountMappings(db) {
         currency,
         row_index AS rowIndex
       FROM account_mappings
+      WHERE template_id = ?
       ORDER BY row_index ASC, id ASC
     `)
-    .all();
+    .all(templateId);
 }
 
-function saveAccountMappings(db, mappings) {
+function saveAccountMappings(db, templateId, mappings) {
   const now = new Date().toISOString();
   db.exec('BEGIN');
 
   try {
-    db.exec('DELETE FROM account_mappings');
+    db.prepare('DELETE FROM account_mappings WHERE template_id = ?').run(templateId);
 
     const insertStatement = db.prepare(`
       INSERT INTO account_mappings (
-        bank_account_id, clearing_account_id, no_currency, currency, row_index, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        template_id, bank_account_id, clearing_account_id, no_currency, currency, row_index, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     mappings.forEach((mapping, index) => {
       insertStatement.run(
+        templateId,
         mapping.bankAccountId,
         mapping.clearingAccountId,
         mapping.noCurrency ? 1 : 0,

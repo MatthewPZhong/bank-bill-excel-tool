@@ -17,6 +17,8 @@ function listTemplates(db) {
       t.created_at AS createdAt,
       t.updated_at AS updatedAt,
       t.date_format AS dateFormat,
+      t.is_parent AS isParent,
+      t.parent_template_id AS parentTemplateId,
       COUNT(DISTINCT m.id) AS mappingCount,
       COUNT(DISTINCT ba.merchant_id) AS bigAccountCount,
       merchant_mapping.mapped_field AS merchantIdMappedField,
@@ -46,6 +48,8 @@ function getTemplate(db, templateId) {
         t.created_at AS createdAt,
         t.updated_at AS updatedAt,
         t.date_format AS dateFormat,
+        t.is_parent AS isParent,
+        t.parent_template_id AS parentTemplateId,
         (
           SELECT COUNT(1)
           FROM template_mappings m
@@ -98,6 +102,69 @@ function getTemplateByName(db, name) {
     .get(name);
 
   return row ? getTemplate(db, row.id) : null;
+}
+
+function listChildTemplates(db, parentTemplateId) {
+  return db.prepare(`
+    SELECT
+      t.id,
+      t.template_key AS templateKey,
+      t.name,
+      t.source_file_name AS sourceFileName,
+      t.headers_json AS headersJson,
+      t.created_at AS createdAt,
+      t.updated_at AS updatedAt,
+      t.date_format AS dateFormat,
+      t.is_parent AS isParent,
+      t.parent_template_id AS parentTemplateId,
+      (SELECT COUNT(1) FROM template_mappings m WHERE m.template_id = t.id) AS mappingCount,
+      (SELECT COUNT(DISTINCT merchant_id) FROM template_big_accounts ba WHERE ba.template_id = t.id) AS bigAccountCount,
+      (SELECT mapped_field FROM template_mappings mm WHERE mm.template_id = t.id AND mm.template_field = 'MerchantId' LIMIT 1) AS merchantIdMappedField,
+      (SELECT MIN(merchant_id) FROM template_big_accounts ba WHERE ba.template_id = t.id) AS singleBigAccountMerchantId
+    FROM templates t
+    WHERE t.parent_template_id = ?
+    ORDER BY t.id ASC
+  `).all(parentTemplateId).map((row) => buildTemplateSummaryFromRow(row));
+}
+
+function setParentStatus(db, templateId, isParent) {
+  const now = new Date().toISOString();
+  db.exec('BEGIN');
+  try {
+    db.prepare('UPDATE templates SET is_parent = ?, updated_at = ? WHERE id = ?').run(isParent ? 1 : 0, now, templateId);
+    if (!isParent) {
+      // 取消主模板身份时，将子模板的 parent_template_id 置 NULL
+      db.prepare('UPDATE templates SET parent_template_id = NULL, updated_at = ? WHERE parent_template_id = ?').run(now, templateId);
+    }
+    // 设为主模板时，确保自身不是子模板
+    if (isParent) {
+      db.prepare('UPDATE templates SET parent_template_id = NULL, updated_at = ? WHERE id = ?').run(now, templateId);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function setChildParent(db, templateId, parentTemplateId) {
+  const now = new Date().toISOString();
+  db.exec('BEGIN');
+  try {
+    if (parentTemplateId) {
+      // 设为子模板：设置 parent_template_id，清除 is_parent
+      db.prepare('UPDATE templates SET parent_template_id = ?, is_parent = 0, updated_at = ? WHERE id = ?')
+        .run(parentTemplateId, now, templateId);
+    } else {
+      // 取消子模板身份
+      db.prepare('UPDATE templates SET parent_template_id = NULL, updated_at = ? WHERE id = ?')
+        .run(now, templateId);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
 
 function upsertTemplate(db, { templateKey = '', name, sourceFileName, headers }) {
@@ -758,11 +825,21 @@ function saveBillSplitMeta(db, templateId, meta = {}) {
 function listTemplateBundleEntries(db) {
   return listTemplates(db).map((template) => {
     const payload = getTemplateMappings(db, template.id);
+
+    // v1.5.1: 主/子模板关系
+    let parentTemplateKey = null;
+    if (template.parentTemplateId) {
+      const parentRow = db.prepare('SELECT template_key FROM templates WHERE id = ?').get(template.parentTemplateId);
+      parentTemplateKey = parentRow ? normalizeText(parentRow.template_key) : null;
+    }
+
     return {
       templateKey: template.templateKey,
       name: template.name,
       sourceFileName: template.sourceFileName,
       headers: template.headers,
+      isParent: Boolean(template.isParent),
+      parentTemplateKey,
       mappings: payload ? payload.mappings.map((mapping) => ({ ...mapping })) : [],
       bigAccounts: payload ? payload.bigAccounts.map((item) => ({
         merchantId: item.merchantId,
@@ -807,6 +884,7 @@ module.exports = {
   getTemplateByKey,
   getTemplateByName,
   getTemplateMappings,
+  listChildTemplates,
   listTemplateBundleEntries,
   listTemplates,
   renameTemplate,
@@ -818,5 +896,7 @@ module.exports = {
   saveBillSplitRow,
   saveBillSplitRowCount,
   saveMappings,
+  setChildParent,
+  setParentStatus,
   upsertTemplate
 };

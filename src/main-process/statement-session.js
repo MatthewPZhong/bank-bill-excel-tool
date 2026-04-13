@@ -119,11 +119,12 @@ function removeStatementSessionEntriesByFilePath(session, targetFilePath) {
   pruneStatementImportSession(session);
 }
 
-function buildStatementFileEntry({ buildEntryId, detailRows, filePath }) {
+function buildStatementFileEntry({ buildEntryId, detailRows, filePath, matchedTemplateId = null }) {
   return {
     id: buildEntryId(),
     filePath: path.resolve(filePath),
-    detailRows: cloneRowsWithMetadata(detailRows)
+    detailRows: cloneRowsWithMetadata(detailRows),
+    matchedTemplateId: matchedTemplateId || null
   };
 }
 
