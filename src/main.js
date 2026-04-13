@@ -625,11 +625,18 @@ function rebuildMatchedTemplateFileEntries({
       fallbackTemplateConfig,
       cache: templateConfigCache
     });
+    // 只有多大账号模板才传 selectedBigAccount，避免覆盖子模板自身的 fixed/custom MerchantId
+    const entryMerchantMapping = (entryTemplateConfig.exportMappings || []).find(
+      (m) => normalizeCell(m.templateField) === 'MerchantId'
+    );
+    const entryIsMultiBigAccount = normalizeCell(entryMerchantMapping?.mappedField)
+      === `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`;
+    const entrySelectedBigAccount = entryIsMultiBigAccount ? selectedBigAccount : null;
     const config = buildStatementGenerationConfig({
       template: entryTemplateConfig.template,
       mappings: entryTemplateConfig.exportMappings,
       orderedTargetFields: entryTemplateConfig.exportTargetFields,
-      selectedBigAccount,
+      selectedBigAccount: entrySelectedBigAccount,
       allowManagedMerchantWithoutSelection: true
     });
     const merchantLookupFlags = buildManagedMerchantLookupFlags(entryTemplateConfig.exportMappings);
@@ -3925,7 +3932,7 @@ function registerTemplateHandlers() {
         }
       });
 
-      // v1.5.1: 第二轮 — 还原主/子模板关系
+      // v1.5.1: 第二轮 — 还原主/子模板关系（覆盖导入时也清除旧的主/子状态）
       importedTemplates.forEach((entry) => {
         if (!entry.name || !entry.headers.length) return;
         const template = entry.templateKey
@@ -3933,37 +3940,36 @@ function registerTemplateHandlers() {
           : database.getTemplateByName(entry.name);
         if (!template) return;
 
-        if (entry.isParent) {
-          database.setParentStatus(template.id, true);
-        }
+        // 始终同步主/子状态：v3 bundle 无这些字段时 isParent=false, parentTemplateKey=null → 清除旧状态
+        database.setParentStatus(template.id, Boolean(entry.isParent));
 
         if (entry.parentTemplateKey) {
           const parentTemplate = database.getTemplateByKey(entry.parentTemplateKey);
           if (parentTemplate) {
             database.setChildParent(template.id, parentTemplate.id);
           }
+        } else {
+          database.setChildParent(template.id, null);
         }
       });
 
-      // v1.5.1: 第三轮 — 导入账户映射
+      // v1.5.1: 第三轮 — 导入账户映射（覆盖导入时也清除旧映射）
       importedTemplates.forEach((entry) => {
         if (!entry.name || !entry.headers.length) return;
-        if (!Array.isArray(entry.accountMappings) || entry.accountMappings.length === 0) return;
         const template = entry.templateKey
           ? database.getTemplateByKey(entry.templateKey)
           : database.getTemplateByName(entry.name);
         if (!template) return;
 
-        const mappings = entry.accountMappings.map((m) => ({
+        const mappings = (Array.isArray(entry.accountMappings) ? entry.accountMappings : []).map((m) => ({
           bankAccountId: normalizeCell(m.bankAccountId),
           clearingAccountId: normalizeCell(m.clearingAccountId),
           noCurrency: Boolean(m.noCurrency),
           currency: normalizeCell(m.currency)
         })).filter((m) => m.bankAccountId);
 
-        if (mappings.length > 0) {
-          database.saveAccountMappings(template.id, mappings);
-        }
+        // 始终写入：v3 bundle 无 accountMappings 时 mappings=[] → 清除旧映射
+        database.saveAccountMappings(template.id, mappings);
       });
 
       syncTemplateLibraryFile();
@@ -5268,12 +5274,20 @@ async function resolveImportFileSelection({
   const acceptedPaths = [];
   const replacePaths = [];
 
-  // 预计算已导入文件的信息
-  const sessionFileInfo = session.fileEntries.map((entry) => ({
-    filePath: entry.filePath,
-    baseName: path.basename(entry.filePath),
-    hash: computeFileHash(entry.filePath)
-  }));
+  // 预计算已导入文件的信息（跳过已删除/移动的文件）
+  const sessionFileInfo = session.fileEntries.map((entry) => {
+    let hash = '';
+    try {
+      hash = computeFileHash(entry.filePath);
+    } catch (_ignored) {
+      // 文件已删除/移动，跳过 hash 比对
+    }
+    return {
+      filePath: entry.filePath,
+      baseName: path.basename(entry.filePath),
+      hash
+    };
+  }).filter((info) => info.hash !== '');
 
   // 当前批次的文件信息
   const batchFileInfo = [];
@@ -5854,6 +5868,16 @@ function registerFileHandlers() {
         step: '导入网银明细文件',
         message: '请选择模板',
         errorCode: 'TEMPLATE_REQUIRED'
+      });
+    }
+
+    // v1.5.1: 迁移未完成时阻止导入，避免使用未分配的占位映射
+    const migrationPending = database.getSetting('account_mapping_migration_pending');
+    if (migrationPending === 'true') {
+      return createErrorResult({
+        step: '导入网银明细文件',
+        message: '账户映射数据迁移尚未完成，请先打开「账户映射」页面完成数据分配',
+        errorCode: 'ACCOUNT_MAPPING_MIGRATION_PENDING'
       });
     }
 
