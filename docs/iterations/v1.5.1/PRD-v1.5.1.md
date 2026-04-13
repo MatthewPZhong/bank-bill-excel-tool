@@ -586,3 +586,37 @@
 ## 十二、实施记录
 
 > 由 PR merged + 归档后自动追加，PM 不需要手动填写。
+
+### PR #19 — v1.5.1（2026-04-13）
+
+来源：`docs/prs/PR19-v1.5.1.md`
+
+**改动文件**（18 文件，+3323/-266）：
+
+| 文件 | 改动量 | 说明 |
+|------|--------|------|
+| `package.json` | version → 1.5.1 | 版本号 |
+| `src/backend/database/migrations.js` | +71 | `ensureParentTemplateSupport` + `ensureAccountMappingTemplateSupport` |
+| `src/backend/database/template-repository.js` | +80 | `listChildTemplates`、isParent/parentTemplateId、Bundle entries |
+| `src/backend/database/settings-repository.js` | +14 | `listAccountMappings`/`saveAccountMappings` 增 templateId |
+| `src/backend/database/utils.js` | +4 | 辅助工具 |
+| `src/backend/database.js` | +37 | 透传参数、注册迁移 |
+| `src/backend/file-service.js` | +1 | 辅助调整 |
+| `src/main-process/statement-session.js` | +5 | 辅助调整 |
+| `src/main.js` | +1060 | 主/子匹配、rebuildMatchedTemplateFileEntries、Bundle v4、三维度判重、迁移 IPC、桥接提醒 |
+| `src/preload.js` | +10 | accountMappings 增 templateId |
+| `src/renderer-dialogs.js` | +507 | 主/子勾选框、展开折叠、账户映射全面改造、迁移分配对话框 |
+| `src/renderer.js` | +56 | 下拉框过滤子模板、迁移检查 |
+| `src/styles.css` | +155 | 展开折叠、编辑完成、tooltip、action-cell 左对齐 |
+| `scripts/smoke/scenarios.js` | +2 | smoke test 适配 |
+| `docs/iterations/v1.5.1/PRD-v1.5.1.md` | 更新 | Reverse Sync |
+| `docs/iterations/v1.5.1/TechDoc-v1.5.1.md` | 更新 | Reverse Sync |
+| `docs/iterations/v1.5.1/TestReport-v1.5.1.md` | 新增 | 测试报告 |
+
+**改动摘要**：
+
+- 需求 1：主/子模板（DB 迁移 + 前端 UI + 自动匹配 + rebuildMatchedTemplateFileEntries 修复）
+- 需求 2：账户映射按模板隔离（重建表迁移 + 迁移分配对话框 + tooltip + 自动检测 + 桥接提醒）
+- 需求 3：模板管理标题
+- 需求 4：Bundle v4（导出含子模板+账户映射，导入三阶段还原，v3 兼容）
+- 需求 5：三维度判重 + 移除「保留两份」
