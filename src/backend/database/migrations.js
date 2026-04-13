@@ -267,17 +267,8 @@ function ensureAccountMappingTemplateSupport(db) {
           SET setting_value = 'true', updated_at = ?
         `).run(now, now);
       }
-    } else if (templates.length === 0 && oldRowCount > 0) {
-      // 无模板但有旧映射数据：保留到第一个模板创建后再迁移
-      // 将旧数据复原回 account_mappings（使用 template_id=0 占位），避免数据丢失
-      db.exec(`
-        INSERT INTO account_mappings
-          (template_id, bank_account_id, clearing_account_id, no_currency, currency, row_index, created_at, updated_at)
-        SELECT
-          0, bank_account_id, clearing_account_id, no_currency, currency, row_index, created_at, updated_at
-        FROM account_mappings_old
-      `);
     }
+    // 无模板但有旧映射时：旧数据无法关联到任何模板，随旧表一起丢弃
 
     db.exec('DROP TABLE account_mappings_old;');
 

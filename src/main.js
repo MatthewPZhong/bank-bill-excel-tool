@@ -2986,9 +2986,21 @@ function registerAccountMappingHandlers() {
       const allTemplates = database.listTemplates();
       const validTemplateIds = new Set(allTemplates.map((t) => t.id));
 
+      // 获取迁移源数据的行数，用于完整性校验
+      const migrationSourceRows = database.listAllAccountMappings
+        ? database.listAllAccountMappings()
+        : [];
+      const uniqueSourceKeys = new Set(
+        migrationSourceRows.map((m) => `${normalizeCell(m.bankAccountId)}@@${normalizeCell(m.clearingAccountId)}`)
+      );
+
+      const droppedRows = [];
       assignments.forEach((a, index) => {
         const tid = Number(a.templateId);
-        if (!validTemplateIds.has(tid)) return; // 跳过已删除的模板
+        if (!validTemplateIds.has(tid)) {
+          droppedRows.push({ bankAccountId: a.bankAccountId, reason: '模板已删除' });
+          return;
+        }
         if (!byTemplate.has(tid)) byTemplate.set(tid, []);
         byTemplate.get(tid).push({
           bankAccountId: normalizeCell(a.bankAccountId),
@@ -2998,6 +3010,15 @@ function registerAccountMappingHandlers() {
           rowIndex: index
         });
       });
+
+      // 如果有行因模板已删除被丢弃，拒绝提交而非静默丢失
+      if (droppedRows.length > 0) {
+        return createErrorResult({
+          step: '分配账户映射',
+          message: `${droppedRows.length} 条映射的目标模板已被删除，请关闭后重新打开账户映射页面`,
+          errorCode: 'MIGRATION_DISTRIBUTE_STALE_TEMPLATE'
+        });
+      }
 
       // 清空所有模板的 account_mappings，再按分配写入
       for (const template of allTemplates) {
@@ -6485,11 +6506,17 @@ function registerFileHandlers() {
           fallbackTemplateConfig: templateConfig,
           selectedBigAccount
         });
+        // batch 级 config 也需按实际模板类型决定是否传 selectedBigAccount
+        const generationMerchantMapping = (generationTemplateConfig.exportMappings || []).find(
+          (m) => normalizeCell(m.templateField) === 'MerchantId'
+        );
+        const generationIsMultiBigAccount = normalizeCell(generationMerchantMapping?.mappedField)
+          === `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`;
         const config = buildStatementGenerationConfig({
           template: generationTemplateConfig.template,
           mappings: generationTemplateConfig.exportMappings,
           orderedTargetFields: generationTemplateConfig.exportTargetFields,
-          selectedBigAccount,
+          selectedBigAccount: generationIsMultiBigAccount ? selectedBigAccount : null,
           allowManagedMerchantWithoutSelection: true
         });
         const preparedBatch = buildPreparedStatementBatchFromEntries({
