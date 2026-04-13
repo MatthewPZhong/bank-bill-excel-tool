@@ -1477,12 +1477,25 @@ select {
   align-items: center;
 }
 
+.manager-card .data-table {
+  table-layout: fixed;
+}
+.manager-card .data-table th:nth-child(1),
+.manager-card .data-table td:nth-child(1) {
+  width: 40%;
+}
+.manager-card .data-table th:nth-child(2),
+.manager-card .data-table td:nth-child(2) {
+  width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .manager-action-header {
-  width: 228px;
+  width: 30%;
 }
 
 .manager-action-cell {
-  width: 228px;
+  width: 30%;
 }
 
 .manager-action-header-label {
@@ -2162,4 +2175,142 @@ select {
 
 .bill-split-target-seq-option:hover {
   background: rgba(104, 79, 39, 0.06);
+}
+
+/* v1.5.1: 主/子模板 — 模板管理页面 */
+.template-child-row {
+  background: rgba(104, 79, 39, 0.03);
+}
+.template-toggle-btn {
+  display: inline;
+  user-select: none;
+  font-size: 11px;
+}
+.child-indent {
+  color: #999;
+  white-space: pre;
+}
+
+/* v1.5.1: 映射关系管理 — 主/子模板 checkbox */
+.dialog-header-checkboxes {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: 16px;
+  font-size: 13px;
+  min-width: 420px;
+}
+.dialog-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dialog-child-parent-select-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.dialog-child-parent-select-wrapper select {
+  font-size: 13px;
+  padding: 2px 4px;
+}
+
+/* v1.5.1: 账户映射 — 币种 tooltip */
+.account-card .data-table th:nth-child(3) {
+  position: relative;
+  z-index: 2;
+}
+.currency-tooltip-wrap {
+  position: relative;
+  display: inline-block;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+.currency-tooltip-icon {
+  display: inline-block;
+  cursor: help;
+  font-size: 14px;
+  color: #888;
+  line-height: 1;
+}
+.currency-tooltip-text {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  transform: translateX(-50%);
+  margin-bottom: 6px;
+  background: #333;
+  color: #fff;
+  font-size: 12px;
+  font-weight: normal;
+  padding: 8px 10px;
+  border-radius: 4px;
+  white-space: normal;
+  width: 260px;
+  line-height: 1.5;
+  z-index: 9999;
+  pointer-events: none;
+}
+.currency-tooltip-wrap:hover .currency-tooltip-text {
+  display: block;
+}
+
+/* v1.5.1: 账户映射迁移分配 */
+.migration-template-select {
+  font-size: 13px;
+  padding: 2px 4px;
+  min-width: 120px;
+}
+
+/* v1.5.1: 账户映射 — 固定列宽防止编辑/完成切换时平移 */
+.account-card .table-wrapper {
+  overflow: visible;
+}
+.account-card .data-table {
+  table-layout: fixed;
+}
+.account-card .data-table th:nth-child(1),
+.account-card .data-table td:nth-child(1) {
+  width: 35%;
+}
+.account-card .data-table th:nth-child(2),
+.account-card .data-table td:nth-child(2) {
+  width: 35%;
+}
+.account-card .data-table th:nth-child(3),
+.account-card .data-table td:nth-child(3) {
+  width: 15%;
+}
+.account-card .data-table th:nth-child(4),
+.account-card .data-table td:nth-child(4) {
+  width: 15%;
+}
+.account-mapping-text-cell {
+  min-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.account-card .data-table input.mapping-text-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.account-mapping-action-cell {
+  white-space: nowrap;
+  text-align: left;
+}
+.account-mapping-action-cell button:first-child {
+  margin-left: 0;
+}
+.account-mapping-action-cell button + button {
+  margin-left: 4px;
+}
+.account-mapping-template-select-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
 }

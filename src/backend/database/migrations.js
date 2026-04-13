@@ -218,11 +218,82 @@ function ensureBillSplitTargetSeqSupport(db) {
   }
 }
 
+function ensureAccountMappingTemplateSupport(db) {
+  if (hasColumn(db, 'account_mappings', 'template_id')) {
+    return;
+  }
+
+  db.exec('BEGIN');
+  try {
+    db.exec('ALTER TABLE account_mappings RENAME TO account_mappings_old;');
+
+    db.exec(`
+      CREATE TABLE account_mappings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL,
+        bank_account_id TEXT NOT NULL,
+        clearing_account_id TEXT NOT NULL,
+        no_currency INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT '',
+        row_index INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE,
+        UNIQUE(template_id, bank_account_id)
+      );
+    `);
+
+    const templates = db.prepare('SELECT id FROM templates').all();
+    const oldRowCount = db.prepare('SELECT COUNT(1) AS cnt FROM account_mappings_old').get().cnt;
+    if (templates.length > 0 && oldRowCount > 0) {
+      const insertStmt = db.prepare(`
+        INSERT INTO account_mappings
+          (template_id, bank_account_id, clearing_account_id, no_currency, currency, row_index, created_at, updated_at)
+        SELECT
+          ?, bank_account_id, clearing_account_id, no_currency, currency, row_index, created_at, updated_at
+        FROM account_mappings_old
+      `);
+      templates.forEach((t) => {
+        insertStmt.run(t.id);
+      });
+
+      // 复制给多个模板时标记需要用户手动分配
+      if (templates.length > 1) {
+        const now = new Date().toISOString();
+        db.prepare(`
+          INSERT INTO app_settings (setting_key, setting_value, updated_at)
+          VALUES ('account_mapping_migration_pending', 'true', ?)
+          ON CONFLICT(setting_key) DO UPDATE
+          SET setting_value = 'true', updated_at = ?
+        `).run(now, now);
+      }
+    }
+
+    db.exec('DROP TABLE account_mappings_old;');
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function ensureParentTemplateSupport(db) {
+  if (!hasColumn(db, 'templates', 'parent_template_id')) {
+    db.exec('ALTER TABLE templates ADD COLUMN parent_template_id INTEGER REFERENCES templates(id) ON DELETE SET NULL;');
+  }
+  if (!hasColumn(db, 'templates', 'is_parent')) {
+    db.exec('ALTER TABLE templates ADD COLUMN is_parent INTEGER NOT NULL DEFAULT 0;');
+  }
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
+  ensureAccountMappingTemplateSupport,
   ensureAmountSplitRulesSupport,
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
+  ensureParentTemplateSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,

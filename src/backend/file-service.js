@@ -885,6 +885,7 @@ module.exports = {
   parseDateValue,
   parseNumericValue,
   readRows,
+  readRowsWithMetadata,
   transformFileToWorkbook,
   writeBalanceWorkbook,
   writeWorkbookRows

@@ -184,7 +184,8 @@ const {
   createRememberOrderMismatchDialog,
   createTemplateManagerDialog,
   createMappingDialog,
-  createAccountMappingDialog
+  createAccountMappingDialog,
+  createAccountMappingMigrationDialog
 } = window.__rendererDialogs.createRendererDialogs({
   state,
   elements,
@@ -1616,12 +1617,14 @@ function updateTemplateSelect() {
   placeholder.textContent = state.templates.length ? '请选择模板' : '暂无模板';
   elements.templateSelect.appendChild(placeholder);
 
-  state.templates.forEach((template) => {
-    const option = document.createElement('option');
-    option.value = String(template.id);
-    option.textContent = template.name;
-    elements.templateSelect.appendChild(option);
-  });
+  state.templates
+    .filter((template) => !template.parentTemplateId)
+    .forEach((template) => {
+      const option = document.createElement('option');
+      option.value = String(template.id);
+      option.textContent = template.name;
+      elements.templateSelect.appendChild(option);
+    });
 
   const preserved = state.templates.find((template) => String(template.id) === previous);
   state.selectedTemplateId = preserved
@@ -2600,7 +2603,37 @@ async function handleImportTemplate() {
 }
 
 async function handleOpenAccountMappings() {
-  const result = await window.desktopApi.accountMappings.list();
+  const currentTemplateId = state.selectedTemplateId ? Number(state.selectedTemplateId) : null;
+  const templateId = currentTemplateId || (state.templates.length > 0 ? state.templates[0].id : null);
+
+  if (!templateId) {
+    setStatus('请先创建模板', 'error');
+    return;
+  }
+
+  // 检查是否有待分配的迁移数据
+  const migrationCheck = await window.desktopApi.accountMappings.checkMigrationPending();
+  if (migrationCheck.pending) {
+    openModal(createAlertDialog('检测到旧版本数据，请为每个模板配置正确的账户映射', {
+      onConfirm: async () => {
+        const migrationData = await window.desktopApi.accountMappings.getMigrationData();
+        if (migrationData.status !== 'success') {
+          setStatus(migrationData.message || '获取迁移数据失败', 'error');
+          return;
+        }
+        openModal(createAccountMappingMigrationDialog({
+          rows: migrationData.rows,
+          templates: state.templates,
+          onDone: () => {
+            handleOpenAccountMappings();
+          }
+        }));
+      }
+    }));
+    return;
+  }
+
+  const result = await window.desktopApi.accountMappings.list(templateId);
 
   if (result.status !== 'success') {
     setStatus(result.message, 'error', {
@@ -2610,7 +2643,12 @@ async function handleOpenAccountMappings() {
     return;
   }
 
-  openModal(createAccountMappingDialog(result));
+  openModal(createAccountMappingDialog({
+    ...result,
+    currentTemplateId: templateId,
+    templates: state.templates,
+    currencyOptions: state.currencyOptions || []
+  }));
 }
 
 async function handleImportFile() {

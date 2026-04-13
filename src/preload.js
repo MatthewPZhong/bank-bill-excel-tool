@@ -15,8 +15,11 @@ contextBridge.exposeInMainWorld('desktopApi', {
     reset: () => ipcRenderer.invoke('background:reset')
   },
   accountMappings: {
-    list: () => ipcRenderer.invoke('account-mapping:list'),
-    save: (mappings) => ipcRenderer.invoke('account-mapping:save', mappings)
+    list: (templateId) => ipcRenderer.invoke('account-mapping:list', templateId),
+    save: (templateId, mappings) => ipcRenderer.invoke('account-mapping:save', templateId, mappings),
+    checkMigrationPending: () => ipcRenderer.invoke('account-mapping:check-migration-pending'),
+    getMigrationData: () => ipcRenderer.invoke('account-mapping:get-migration-data'),
+    distributeMigration: (assignments) => ipcRenderer.invoke('account-mapping:distribute-migration', assignments)
   },
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
@@ -28,6 +31,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
   },
   templates: {
     list: () => ipcRenderer.invoke('template:list'),
+    listChildren: (parentTemplateId) => ipcRenderer.invoke('template:list-children', parentTemplateId),
+    setParentStatus: (templateId, isParent) => ipcRenderer.invoke('template:set-parent-status', templateId, isParent),
+    setChildParent: (templateId, parentTemplateId) => ipcRenderer.invoke('template:set-child-parent', templateId, parentTemplateId),
     importTemplate: () => ipcRenderer.invoke('template:import'),
     deleteTemplate: (templateId) => ipcRenderer.invoke('template:delete', templateId),
     getMappings: (templateId) => ipcRenderer.invoke('template:get-mappings', templateId),
