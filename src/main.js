@@ -91,6 +91,7 @@ let activityLogFilePath = '';
 let lastFileImportContext = null;
 let lastManualBalancePrompt = null;
 let lastPendingBigAccountSelection = null;
+let fileImportInProgress = false;
 let statementImportSessions = new Map();
 let nextStatementBatchId = 1;
 let nextStatementFileEntryId = 1;
@@ -2982,8 +2983,12 @@ function registerAccountMappingHandlers() {
     try {
       // 按 templateId 分组
       const byTemplate = new Map();
+      const allTemplates = database.listTemplates();
+      const validTemplateIds = new Set(allTemplates.map((t) => t.id));
+
       assignments.forEach((a, index) => {
         const tid = Number(a.templateId);
+        if (!validTemplateIds.has(tid)) return; // 跳过已删除的模板
         if (!byTemplate.has(tid)) byTemplate.set(tid, []);
         byTemplate.get(tid).push({
           bankAccountId: normalizeCell(a.bankAccountId),
@@ -2995,7 +3000,6 @@ function registerAccountMappingHandlers() {
       });
 
       // 清空所有模板的 account_mappings，再按分配写入
-      const allTemplates = database.listTemplates();
       for (const template of allTemplates) {
         const rows = byTemplate.get(template.id) || [];
         database.saveAccountMappings(template.id, rows);
@@ -3417,6 +3421,8 @@ function registerTemplateHandlers() {
     database.deleteTemplate(templateId);
     syncTemplateLibraryFile();
     clearGeneratedExports();
+    clearPendingManualBalancePrompt();
+    clearPendingBigAccountSelection();
     appendActivityLogEntry({
       level: 'info',
       message: '删除模板成功',
@@ -5253,9 +5259,23 @@ function matchFileToTemplate(filePath, candidateTemplates) {
     try {
       readRowsWithMetadata(filePath, headers);
       matches.push(template);
-    } catch (_error) {
-      // 表头不匹配，尝试下一个模板
+    } catch (error) {
+      // 区分文件读取错误和表头不匹配：文件本身不可读时向上抛出
+      if (error instanceof FileValidationError && error.message.includes('表头')) {
+        continue; // 表头不匹配，尝试下一个模板
+      }
+      if (error instanceof FileValidationError) {
+        throw error; // 文件为空/不可读，直接抛出
+      }
+      // 其他异常（如 PDF 解析失败）也抛出
+      throw error;
     }
+  }
+
+  // 过滤子集匹配：多个模板匹配时，只保留 headers 最多的（最精确匹配）
+  if (matches.length > 1) {
+    const maxHeaderCount = Math.max(...matches.map((t) => (t.headers || []).length));
+    return matches.filter((t) => (t.headers || []).length === maxHeaderCount);
   }
 
   return matches;
@@ -5855,6 +5875,14 @@ function registerBigAccountOrderHandlers() {
 
 function registerFileHandlers() {
   ipcMain.handle('file:import', async (_event, templateId) => {
+    if (fileImportInProgress) {
+      return createErrorResult({
+        step: '导入网银明细文件',
+        message: '上一次导入尚未完成，请稍候',
+        errorCode: 'IMPORT_IN_PROGRESS'
+      });
+    }
+
     if (!getEnumConfig()) {
       return createErrorResult({
         step: '导入网银明细文件',
@@ -5882,6 +5910,7 @@ function registerFileHandlers() {
     }
 
     let templateConfig = null;
+    fileImportInProgress = true;
 
     try {
       clearPendingManualBalancePrompt();
@@ -6564,7 +6593,14 @@ function registerFileHandlers() {
         originalError: error,
         templateName: templateConfig?.template?.name || ''
       });
+    } finally {
+      fileImportInProgress = false;
     }
+  });
+
+  ipcMain.handle('file:cancel-big-account-selection', () => {
+    clearPendingBigAccountSelection();
+    return { status: 'success' };
   });
 
   ipcMain.handle('file:complete-big-account-selection', async (_event, payload = {}) => {

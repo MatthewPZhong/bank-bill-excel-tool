@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
   },
   files: {
     importFile: (templateId) => ipcRenderer.invoke('file:import', templateId),
+    cancelBigAccountSelection: () => ipcRenderer.invoke('file:cancel-big-account-selection'),
     completeBigAccountSelection: (payload) => ipcRenderer.invoke('file:complete-big-account-selection', payload),
     extractBigAccountOrder: (payload) => ipcRenderer.invoke('file:extract-big-account-order', payload),
     saveBalanceSeed: (payload) => ipcRenderer.invoke('file:save-balance-seed', payload),

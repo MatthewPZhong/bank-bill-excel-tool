@@ -1098,7 +1098,10 @@
         }
       });
 
-      dialog.querySelector('.icon-close').addEventListener('click', closeModal);
+      dialog.querySelector('.icon-close').addEventListener('click', () => {
+        desktopApi.files.cancelBigAccountSelection();
+        closeModal();
+      });
       doneBtn.addEventListener('click', async () => {
         if (checkedOrder.length !== currentFileRows.length) {
           setStatus(`请勾选 ${currentFileRows.length} 个大账号（当前已选 ${checkedOrder.length} 个）`, 'error');
