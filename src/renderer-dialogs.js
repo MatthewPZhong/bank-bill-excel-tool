@@ -922,6 +922,7 @@
         }
 
         const extractedAccounts = result.accounts || [];
+        const ambiguousFiles = result.ambiguousCurrencyFiles || [];
 
         function applyExtractedOrder() {
           checkedOrder = [];
@@ -1087,10 +1088,20 @@
           openModal(extractOverlay);
         }
 
-        showExtractDialog();
+        if (ambiguousFiles.length > 0) {
+          const fileList = ambiguousFiles.map((f) => escapeHtml(f)).join('<br/>');
+          openModal(createAlertDialog(`以下文件的大账号币种可能不准确，请检查并编辑：<br/>${fileList}`, {
+            onConfirm: () => { showExtractDialog(); }
+          }));
+        } else {
+          showExtractDialog();
+        }
       });
 
-      dialog.querySelector('.icon-close').addEventListener('click', closeModal);
+      dialog.querySelector('.icon-close').addEventListener('click', () => {
+        desktopApi.files.cancelBigAccountSelection();
+        closeModal();
+      });
       doneBtn.addEventListener('click', async () => {
         if (checkedOrder.length !== currentFileRows.length) {
           setStatus(`请勾选 ${currentFileRows.length} 个大账号（当前已选 ${checkedOrder.length} 个）`, 'error');
@@ -1640,11 +1651,16 @@
         return;
       }
 
-      state.templates.forEach((template) => {
+      function createTemplateRow(template, options = {}) {
+        const { isChild = false } = options;
         const bigAccountSummary = template.bigAccountSummary || '未设置';
         const row = document.createElement('tr');
+        if (isChild) {
+          row.className = 'template-child-row';
+        }
+        const namePrefix = isChild ? '<span class="child-indent">\u00A0\u00A0└ </span>' : '';
         row.innerHTML = `
-          <td>${template.name}</td>
+          <td>${namePrefix}${escapeHtml(template.name)}</td>
           <td class="manager-big-account-cell">
             <span class="manager-big-account-summary" title="${escapeHtml(bigAccountSummary)}">${escapeHtml(bigAccountSummary)}</span>
           </td>
@@ -1659,15 +1675,11 @@
 
         row.querySelector('[data-action="manage"]').addEventListener('click', async () => {
           const result = await desktopApi.templates.getMappings(template.id);
-
           if (result.status !== 'success') {
-            setStatus(result.message, 'error', {
-              errorReportReady: Boolean(result.errorReportReady)
-            });
+            setStatus(result.message, 'error', { errorReportReady: Boolean(result.errorReportReady) });
             openModal(createAlertDialog(result.message));
             return;
           }
-
           openModal(createMappingDialog(result));
         });
         row.querySelector('[data-action="rename"]').addEventListener('click', () => {
@@ -1688,7 +1700,68 @@
           );
         });
 
-        tableBody.appendChild(row);
+        return row;
+      }
+
+      // 分类：主模板、子模板（按 parentTemplateId 分组）、普通模板
+      const parentTemplates = state.templates.filter((t) => t.isParent);
+      const childByParent = new Map();
+      const childTemplateIds = new Set();
+      state.templates.forEach((t) => {
+        if (t.parentTemplateId) {
+          childTemplateIds.add(t.id);
+          if (!childByParent.has(t.parentTemplateId)) {
+            childByParent.set(t.parentTemplateId, []);
+          }
+          childByParent.get(t.parentTemplateId).push(t);
+        }
+      });
+      const normalTemplates = state.templates.filter((t) => !t.isParent && !t.parentTemplateId);
+
+      // 先渲染主模板（带展开/折叠）
+      parentTemplates.forEach((parent) => {
+        const children = childByParent.get(parent.id) || [];
+        const parentRow = createTemplateRow(parent);
+
+        if (children.length > 0) {
+          const nameCell = parentRow.querySelector('td');
+          const toggleBtn = document.createElement('span');
+          toggleBtn.className = 'template-toggle-btn';
+          toggleBtn.textContent = '▶ ';
+          toggleBtn.style.cursor = 'pointer';
+          nameCell.insertBefore(toggleBtn, nameCell.firstChild);
+
+          const childRows = children.map((child) => createTemplateRow(child, { isChild: true }));
+
+          let expanded = false;
+          toggleBtn.addEventListener('click', () => {
+            expanded = !expanded;
+            toggleBtn.textContent = expanded ? '▼ ' : '▶ ';
+            childRows.forEach((cr) => {
+              cr.style.display = expanded ? '' : 'none';
+            });
+          });
+
+          tableBody.appendChild(parentRow);
+          childRows.forEach((cr) => {
+            cr.style.display = 'none';
+            tableBody.appendChild(cr);
+          });
+        } else {
+          const nameCell = parentRow.querySelector('td');
+          const toggleBtn = document.createElement('span');
+          toggleBtn.className = 'template-toggle-btn';
+          toggleBtn.textContent = '▶ ';
+          toggleBtn.style.cursor = 'pointer';
+          toggleBtn.style.opacity = '0.3';
+          nameCell.insertBefore(toggleBtn, nameCell.firstChild);
+          tableBody.appendChild(parentRow);
+        }
+      });
+
+      // 渲染普通模板
+      normalTemplates.forEach((template) => {
+        tableBody.appendChild(createTemplateRow(template));
       });
     }
 
@@ -1697,7 +1770,8 @@
       const dialog = document.createElement('div');
       dialog.className = 'modal-card manager-card';
       dialog.innerHTML = `
-        <div class="dialog-header compact">
+        <div class="dialog-header">
+          <div class="dialog-title">模板管理</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="table-wrapper">
@@ -1804,9 +1878,19 @@
         ? { signedAmountSourceField: String(payload.billSplitMeta.signedAmountSourceField || '') }
         : { signedAmountSourceField: '' };
       dialog.className = 'modal-card mapping-card';
+      const templateIsParent = Boolean(payload.template.isParent);
+      const templateParentId = payload.template.parentTemplateId || null;
+      let unparentConfirmed = false;
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">映射关系管理</div>
+          <div class="dialog-header-checkboxes">
+            <label class="dialog-checkbox-label"><input type="checkbox" data-role="is-parent" ${templateIsParent ? 'checked' : ''}>设为主模板</label>
+            <label class="dialog-checkbox-label"><input type="checkbox" data-role="is-child" ${templateParentId ? 'checked' : ''}>设为子模板</label>
+            <span class="dialog-child-parent-select-wrapper" ${templateParentId ? '' : 'style="display:none"'}>
+              主模板 <select data-role="parent-select"></select>
+            </span>
+          </div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="table-wrapper mapping-wrapper">
@@ -1824,6 +1908,64 @@
           <button class="primary-btn small" type="button" data-action="done">完成</button>
         </div>
       `;
+
+      const isParentCheckbox = dialog.querySelector('[data-role="is-parent"]');
+      const isChildCheckbox = dialog.querySelector('[data-role="is-child"]');
+      const parentSelectWrapper = dialog.querySelector('.dialog-child-parent-select-wrapper');
+      const parentSelect = dialog.querySelector('[data-role="parent-select"]');
+
+      // 填充主模板下拉框
+      const allTemplates = state.templates || [];
+      const parentTemplates = allTemplates.filter((t) => t.isParent && t.id !== payload.template.id);
+      parentTemplates.forEach((t) => {
+        const opt = document.createElement('option');
+        opt.value = String(t.id);
+        opt.textContent = t.name;
+        if (templateParentId && String(t.id) === String(templateParentId)) {
+          opt.selected = true;
+        }
+        parentSelect.appendChild(opt);
+      });
+
+      // 取消主模板身份时的确认（有子模板的主模板才需要）
+      async function confirmUnparentIfNeeded() {
+        if (!templateIsParent || unparentConfirmed) return true;
+        const children = await desktopApi.templates.listChildren(payload.template.id);
+        if (children && children.length > 0) {
+          const confirmed = confirm(`该模板下有 ${children.length} 个子模板，取消主模板身份后子模板将恢复为普通模板，是否继续？`);
+          if (!confirmed) return false;
+        }
+        unparentConfirmed = true;
+        return true;
+      }
+
+      // 互斥逻辑
+      isParentCheckbox.addEventListener('change', async () => {
+        if (isParentCheckbox.checked) {
+          isChildCheckbox.checked = false;
+          parentSelectWrapper.style.display = 'none';
+        } else {
+          const ok = await confirmUnparentIfNeeded();
+          if (!ok) {
+            isParentCheckbox.checked = true;
+            return;
+          }
+        }
+      });
+
+      isChildCheckbox.addEventListener('change', async () => {
+        if (isChildCheckbox.checked) {
+          const ok = await confirmUnparentIfNeeded();
+          if (!ok) {
+            isChildCheckbox.checked = false;
+            return;
+          }
+          isParentCheckbox.checked = false;
+          parentSelectWrapper.style.display = '';
+        } else {
+          parentSelectWrapper.style.display = 'none';
+        }
+      });
 
       const tbody = dialog.querySelector('tbody');
       const rowByField = new Map();
@@ -2414,6 +2556,37 @@
           });
 
           if (result.status === 'success') {
+            // 保存主/子模板状态
+            const wantParent = isParentCheckbox.checked;
+            const wantChild = isChildCheckbox.checked;
+            const wasParent = templateIsParent;
+            const wasChild = Boolean(templateParentId);
+
+            if (wantParent !== wasParent) {
+              if (!wantParent && wasParent && !unparentConfirmed) {
+                // 取消主模板 — 检查是否有子模板（checkbox 层已确认则跳过）
+                const children = await desktopApi.templates.listChildren(payload.template.id);
+                if (children && children.length > 0) {
+                  const confirmed = confirm(`该主模板下有 ${children.length} 个子模板，取消主模板身份后，子模板将恢复为普通模板。是否确认？`);
+                  if (!confirmed) {
+                    await refreshTemplates();
+                    openModal(createTemplateManagerDialog());
+                    return;
+                  }
+                }
+              }
+              await desktopApi.templates.setParentStatus(payload.template.id, wantParent);
+            }
+
+            if (wantChild) {
+              const selectedParentId = parentSelect.value ? Number(parentSelect.value) : null;
+              if (selectedParentId !== templateParentId) {
+                await desktopApi.templates.setChildParent(payload.template.id, selectedParentId);
+              }
+            } else if (wasChild && !wantChild) {
+              await desktopApi.templates.setChildParent(payload.template.id, null);
+            }
+
             await refreshTemplates();
             openModal(createTemplateManagerDialog());
             return;
@@ -3959,16 +4132,22 @@
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card manager-card account-card';
+      let activeTemplateId = payload.currentTemplateId || null;
       dialog.innerHTML = `
-        <div class="dialog-header compact">
+        <div class="dialog-header">
+          <div class="account-mapping-template-select-wrapper">
+            模板 <select data-role="template-select"></select>
+          </div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="table-wrapper">
           <table class="data-table">
             <thead>
               <tr>
-                <th>网银大账号ID</th>
-                <th>清结算系统大账号ID</th>
+                <th>网银账单账户号</th>
+                <th>清结算系统银行账号</th>
+                <th>币种 <span class="currency-tooltip-wrap"><span class="currency-tooltip-icon">&#9432;</span><span class="currency-tooltip-text">当账户映射中填写了币种时，导出账单时会自动使用此币种覆盖文件中缺失的币种信息。适用于网银文件中有账户号但无币种列的场景。</span></span></th>
+                <th>执行操作</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -3979,96 +4158,158 @@
         </div>
       `;
 
+      const templateSelect = dialog.querySelector('[data-role="template-select"]');
       const tbody = dialog.querySelector('tbody');
 
-      function createInputRow(bankAccountId = '', clearingAccountId = '', noCurrency = false, currency = '') {
+      // 填充模板下拉框
+      (payload.templates || []).forEach((t) => {
+        const opt = document.createElement('option');
+        opt.value = String(t.id);
+        opt.textContent = t.name;
+        if (String(t.id) === String(activeTemplateId)) {
+          opt.selected = true;
+        }
+        templateSelect.appendChild(opt);
+      });
+
+      function createReadOnlyRow(bankAccountId, clearingAccountId, noCurrency, currency) {
         const row = document.createElement('tr');
         row.dataset.accountMappingRow = 'true';
+        let isEditing = false;
+
         const bankCell = document.createElement('td');
         const clearingCell = document.createElement('td');
-        clearingCell.className = 'account-mapping-clearing-cell';
-        const bankInput = document.createElement('input');
-        const clearingInput = document.createElement('input');
-        const deleteBtn = document.createElement('button');
+        const currencyCell = document.createElement('td');
+        const actionCell = document.createElement('td');
+        actionCell.className = 'account-mapping-action-cell';
 
+        const bankSpan = document.createElement('span');
+        bankSpan.textContent = bankAccountId;
+        const clearingSpan = document.createElement('span');
+        clearingSpan.textContent = clearingAccountId;
+        const currencySpan = document.createElement('span');
+        currencySpan.textContent = currency;
+
+        const bankInput = document.createElement('input');
+        bankInput.className = 'mapping-text-input account-mapping-id-input';
+        bankInput.type = 'text';
+        bankInput.spellcheck = false;
+        bankInput.value = bankAccountId;
+        bankInput.style.display = 'none';
+
+        const clearingInput = document.createElement('input');
+        clearingInput.className = 'mapping-text-input account-mapping-id-input';
+        clearingInput.type = 'text';
+        clearingInput.spellcheck = false;
+        clearingInput.value = clearingAccountId;
+        clearingInput.style.display = 'none';
+
+        const currencyInput = document.createElement('input');
+        currencyInput.className = 'mapping-text-input';
+        currencyInput.type = 'text';
+        currencyInput.spellcheck = false;
+        currencyInput.value = currency;
+        currencyInput.style.display = 'none';
+
+        const editBtn = document.createElement('button');
+        editBtn.className = 'text-action';
+        editBtn.type = 'button';
+        editBtn.textContent = '编辑';
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'text-action danger';
+        deleteBtn.type = 'button';
+        deleteBtn.textContent = '删除';
+
+        function toggleEdit() {
+          isEditing = !isEditing;
+          bankSpan.style.display = isEditing ? 'none' : '';
+          clearingSpan.style.display = isEditing ? 'none' : '';
+          currencySpan.style.display = isEditing ? 'none' : '';
+          bankInput.style.display = isEditing ? '' : 'none';
+          clearingInput.style.display = isEditing ? '' : 'none';
+          currencyInput.style.display = isEditing ? '' : 'none';
+          editBtn.textContent = isEditing ? '完成' : '编辑';
+
+          if (!isEditing) {
+            bankSpan.textContent = bankInput.value;
+            clearingSpan.textContent = clearingInput.value;
+            currencySpan.textContent = currencyInput.value;
+          }
+        }
+
+        editBtn.addEventListener('click', toggleEdit);
+        deleteBtn.addEventListener('click', () => { row.remove(); });
+
+        bankCell.append(bankSpan, bankInput);
+        clearingCell.append(clearingSpan, clearingInput);
+        currencyCell.append(currencySpan, currencyInput);
+        actionCell.append(editBtn, deleteBtn);
+        row.append(bankCell, clearingCell, currencyCell, actionCell);
+
+        row.__rowApi = {
+          getBankAccountId: () => bankInput.value,
+          getClearingAccountId: () => clearingInput.value,
+          getNoCurrency: () => currencyInput.value.trim() !== '',
+          getCurrency: () => currencyInput.value.trim()
+        };
+        return row;
+      }
+
+      function createEditableRow(bankAccountId = '', clearingAccountId = '', noCurrency = false, currency = '') {
+        const row = document.createElement('tr');
+        row.dataset.accountMappingRow = 'true';
+
+        const bankCell = document.createElement('td');
+        const clearingCell = document.createElement('td');
+        const currencyCell = document.createElement('td');
+        const actionCell = document.createElement('td');
+        actionCell.className = 'account-mapping-action-cell';
+
+        const bankInput = document.createElement('input');
         bankInput.className = 'mapping-text-input account-mapping-id-input';
         bankInput.type = 'text';
         bankInput.spellcheck = false;
         bankInput.value = bankAccountId;
 
+        const clearingInput = document.createElement('input');
         clearingInput.className = 'mapping-text-input account-mapping-id-input';
         clearingInput.type = 'text';
         clearingInput.spellcheck = false;
         clearingInput.value = clearingAccountId;
 
-        deleteBtn.className = 'text-action danger account-mapping-delete-btn';
-        deleteBtn.type = 'button';
-        deleteBtn.textContent = '删除';
-        deleteBtn.addEventListener('click', () => {
-          row.remove();
-        });
-
-        const checkboxLabel = document.createElement('label');
-        checkboxLabel.className = 'no-currency-checkbox-label';
-        const checkbox = document.createElement('input');
-        checkbox.className = 'no-currency-checkbox';
-        checkbox.type = 'checkbox';
-        checkbox.checked = noCurrency;
-        const checkboxText = document.createElement('span');
-        checkboxText.textContent = '有账户号无币种';
-        checkboxLabel.append(checkbox, checkboxText);
-
-        const currencyShell = document.createElement('div');
-        currencyShell.className = 'enum-input-shell account-currency-input-shell';
-        currencyShell.hidden = !noCurrency;
-        const ghostInput = document.createElement('input');
-        ghostInput.className = 'new-account-input enum-ghost-input';
-        ghostInput.type = 'text';
-        ghostInput.tabIndex = -1;
-        ghostInput.disabled = true;
         const currencyInput = document.createElement('input');
-        currencyInput.className = 'new-account-input enum-active-input account-currency-input';
+        currencyInput.className = 'mapping-text-input';
         currencyInput.type = 'text';
         currencyInput.spellcheck = false;
         currencyInput.value = currency;
-        currencyShell.append(ghostInput, currencyInput);
 
-        function renderSuggestion() {
-          const suggestion = getCurrencySuggestion(currencyInput.value);
-          ghostInput.value = suggestion;
-          return suggestion;
-        }
+        const doneBtn = document.createElement('button');
+        doneBtn.className = 'text-action';
+        doneBtn.type = 'button';
+        doneBtn.textContent = '完成';
 
-        checkbox.addEventListener('change', () => {
-          currencyShell.hidden = !checkbox.checked;
-          if (!checkbox.checked) {
-            currencyInput.value = '';
-            ghostInput.value = '';
-          }
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'text-action danger';
+        deleteBtn.type = 'button';
+        deleteBtn.textContent = '删除';
+
+        doneBtn.addEventListener('click', () => {
+          const newRow = createReadOnlyRow(bankInput.value, clearingInput.value, currencyInput.value.trim() !== '', currencyInput.value.trim());
+          row.parentNode.replaceChild(newRow, row);
         });
-
-        currencyInput.addEventListener('input', renderSuggestion);
-        currencyInput.addEventListener('keydown', (event) => {
-          if (event.key === 'ArrowRight') {
-            const suggestion = renderSuggestion();
-            const currentValue = String(currencyInput.value || '');
-            if (suggestion && suggestion !== currentValue && suggestion.toUpperCase().startsWith(currentValue.trim().toUpperCase())) {
-              currencyInput.value = suggestion;
-              renderSuggestion();
-              event.preventDefault();
-            }
-          }
-        });
-
-        renderSuggestion();
+        deleteBtn.addEventListener('click', () => { row.remove(); });
 
         bankCell.appendChild(bankInput);
-        clearingCell.append(clearingInput, deleteBtn, checkboxLabel, currencyShell);
-        row.append(bankCell, clearingCell);
+        clearingCell.appendChild(clearingInput);
+        currencyCell.appendChild(currencyInput);
+        actionCell.append(doneBtn, deleteBtn);
+        row.append(bankCell, clearingCell, currencyCell, actionCell);
+
         row.__rowApi = {
           getBankAccountId: () => bankInput.value,
           getClearingAccountId: () => clearingInput.value,
-          getNoCurrency: () => checkbox.checked,
+          getNoCurrency: () => currencyInput.value.trim() !== '',
           getCurrency: () => currencyInput.value.trim()
         };
         return row;
@@ -4079,25 +4320,38 @@
         row.className = 'add-row';
         row.innerHTML = `
           <td><button class="text-action" type="button" data-action="add">新增</button></td>
-          <td></td>
+          <td></td><td></td><td></td>
         `;
 
         row.querySelector('[data-action="add"]').addEventListener('click', () => {
-          tbody.insertBefore(createInputRow('', ''), row);
+          tbody.insertBefore(createEditableRow('', ''), row);
         });
 
         return row;
       }
 
-      payload.mappings.forEach((mapping) => {
-        tbody.appendChild(createInputRow(
-          mapping.bankAccountId,
-          mapping.clearingAccountId,
-          Boolean(mapping.noCurrency),
-          mapping.currency || ''
-        ));
+      function loadMappings(mappings) {
+        tbody.innerHTML = '';
+        (mappings || []).forEach((mapping) => {
+          tbody.appendChild(createReadOnlyRow(
+            mapping.bankAccountId,
+            mapping.clearingAccountId,
+            Boolean(mapping.noCurrency),
+            mapping.currency || ''
+          ));
+        });
+        tbody.appendChild(createAddRow());
+      }
+
+      loadMappings(payload.mappings);
+
+      templateSelect.addEventListener('change', async () => {
+        activeTemplateId = Number(templateSelect.value);
+        const result = await desktopApi.accountMappings.list(activeTemplateId);
+        if (result.status === 'success') {
+          loadMappings(result.mappings);
+        }
       });
-      tbody.appendChild(createAddRow());
 
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
       dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
@@ -4108,7 +4362,7 @@
           currency: row.__rowApi.getCurrency()
         }));
 
-        const result = await desktopApi.accountMappings.save(mappings);
+        const result = await desktopApi.accountMappings.save(activeTemplateId, mappings);
 
         openModal(createAlertDialog(result.message));
         if (result.status === 'success') {
@@ -4155,6 +4409,97 @@
       return overlay;
     }
 
+    function createAccountMappingMigrationDialog({ rows = [], templates = [], onDone }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manager-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">账户映射分配</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>网银账单账户号</th>
+                <th>清结算系统银行账号</th>
+                <th>币种</th>
+                <th>分配到模板</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="done">完成</button>
+        </div>
+      `;
+
+      const tbody = dialog.querySelector('tbody');
+      const templateOptions = templates.map((t) => {
+        return `<option value="${t.id}">${escapeHtml(t.name)}</option>`;
+      }).join('');
+
+      rows.forEach((row, index) => {
+        const tr = document.createElement('tr');
+        tr.dataset.migrationRow = String(index);
+        tr.innerHTML = `
+          <td class="account-mapping-text-cell">${escapeHtml(row.bankAccountId)}</td>
+          <td class="account-mapping-text-cell">${escapeHtml(row.clearingAccountId)}</td>
+          <td>${escapeHtml(row.currency || '—')}</td>
+          <td><select class="migration-template-select"><option value="">请选择模板</option>${templateOptions}</select></td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      dialog.querySelector('.icon-close').addEventListener('click', closeModal);
+
+      dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+        const allRows = Array.from(tbody.querySelectorAll('tr[data-migration-row]'));
+        const assignments = [];
+        let hasEmpty = false;
+
+        allRows.forEach((tr, index) => {
+          const select = tr.querySelector('.migration-template-select');
+          const templateId = select.value;
+          if (!templateId) {
+            hasEmpty = true;
+            return;
+          }
+          assignments.push({
+            bankAccountId: rows[index].bankAccountId,
+            clearingAccountId: rows[index].clearingAccountId,
+            noCurrency: rows[index].noCurrency,
+            currency: rows[index].currency,
+            templateId: Number(templateId)
+          });
+        });
+
+        if (hasEmpty) {
+          openModal(createAlertDialog('请为所有行选择对应的模板', {
+            onConfirm: () => {
+              openModal(createAccountMappingMigrationDialog({ rows, templates, onDone }));
+            }
+          }));
+          return;
+        }
+
+        const result = await window.desktopApi.accountMappings.distributeMigration(assignments);
+        if (result.status === 'success') {
+          setStatus('账户映射分配完成', 'success');
+          closeModal();
+          if (onDone) onDone();
+        } else {
+          setStatus(result.message || '分配失败', 'error');
+          openModal(createAlertDialog(result.message || '分配失败'));
+        }
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     return {
       closeModal,
       openModal,
@@ -4175,7 +4520,8 @@
       renderTemplateTableRows,
       createTemplateManagerDialog,
       createMappingDialog,
-      createAccountMappingDialog
+      createAccountMappingDialog,
+      createAccountMappingMigrationDialog
     };
   }
 

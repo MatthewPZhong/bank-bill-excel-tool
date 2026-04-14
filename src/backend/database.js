@@ -3,9 +3,11 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const {
   ensureAccountMappingCurrencySupport,
+  ensureAccountMappingTemplateSupport,
   ensureAmountSplitRulesSupport,
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
+  ensureParentTemplateSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateKeySupport,
   ensureTemplateMappingEnhancements,
@@ -96,6 +98,8 @@ class AppDatabase {
     this.ensureAmountSplitRulesSupport();
     this.ensureBillSplitMergeSupport();
     this.ensureBillSplitTargetSeqSupport();
+    this.ensureParentTemplateSupport();
+    this.ensureAccountMappingTemplateSupport();
   }
 
   hasColumn(tableName, columnName) {
@@ -130,12 +134,32 @@ class AppDatabase {
     return ensureBillSplitTargetSeqSupport(this.db);
   }
 
+  ensureParentTemplateSupport() {
+    return ensureParentTemplateSupport(this.db);
+  }
+
+  ensureAccountMappingTemplateSupport() {
+    return ensureAccountMappingTemplateSupport(this.db);
+  }
+
   listTemplates() {
     return templateRepository.listTemplates(this.db);
   }
 
   getTemplate(templateId) {
     return templateRepository.getTemplate(this.db, templateId);
+  }
+
+  listChildTemplates(parentTemplateId) {
+    return templateRepository.listChildTemplates(this.db, parentTemplateId);
+  }
+
+  setParentStatus(templateId, isParent) {
+    return templateRepository.setParentStatus(this.db, templateId, isParent);
+  }
+
+  setChildParent(templateId, parentTemplateId) {
+    return templateRepository.setChildParent(this.db, templateId, parentTemplateId);
   }
 
   getTemplateByKey(templateKey) {
@@ -262,12 +286,17 @@ class AppDatabase {
     return settingsRepository.setBackgroundConfig(this.db, backgroundConfig);
   }
 
-  listAccountMappings() {
-    return settingsRepository.listAccountMappings(this.db);
+  listAccountMappings(templateId) {
+    return settingsRepository.listAccountMappings(this.db, templateId);
   }
 
-  saveAccountMappings(mappings) {
-    return settingsRepository.saveAccountMappings(this.db, mappings);
+  countAllAccountMappings() {
+    const row = this.db.prepare('SELECT COUNT(1) AS cnt FROM account_mappings').get();
+    return row ? Number(row.cnt) : 0;
+  }
+
+  saveAccountMappings(templateId, mappings) {
+    return settingsRepository.saveAccountMappings(this.db, templateId, mappings);
   }
 }
 

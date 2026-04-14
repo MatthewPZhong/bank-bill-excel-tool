@@ -95,7 +95,9 @@ function buildTemplateSummaryFromRow(row) {
     bigAccountCount,
     bigAccountMode,
     bigAccountSummary,
-    dateFormat: normalizeText(row.dateFormat) || 'auto'
+    dateFormat: normalizeText(row.dateFormat) || 'auto',
+    isParent: Boolean(row.isParent),
+    parentTemplateId: row.parentTemplateId || null
   };
 }
 
