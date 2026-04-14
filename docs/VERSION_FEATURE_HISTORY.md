@@ -9,6 +9,60 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 1.5.1
+
+### 新增
+
+- **主/子模板**：模板可声明为「主模板」或「子模板」。映射关系管理 dialog header 新增「设为主模板」「设为子模板」checkbox，互斥逻辑；选「设为子模板」时出现主模板下拉框。模板管理页面新增「模板管理」标题；主模板行带 ▶/▼ 展开折叠按钮，子模板缩进显示。
+- 主页面模板下拉框自动过滤子模板（只显示主模板）；文件导入时按 headers 精确匹配候选模板，在大账号选定后重建 rows。
+- **账户映射按模板隔离**：`account_mappings` 表重建，以 `(template_id, bank_account_id)` 为联合唯一键；同一银行账号在不同模板下可配置不同映射。首次打开账户映射会检测迁移 flag 并弹「迁移分配对话框」引导用户将旧数据分配到具体模板。
+- **账户映射 UI 调整**：表头文案「网银大账号ID」→「网银账单账户号」、「清结算系统大账号ID」→「清结算系统银行账号」；执行操作列编辑/完成切换交互，按钮左对齐；币种 ⓘ tooltip 展示说明文本；提取大账号顺序时如检测到桥接匹配 + 多币种会弹提醒框。
+- **Bundle v4**：模板包导出/导入支持主/子模板关系（`parentTemplateKey`）和账户映射（`accountMappings`）。`SUPPORTED_BUNDLE_VERSION = 4`。导入时三阶段还原（模板 → 父子关系 → 账户映射）。
+- **重复判定增强**：文件导入按「路径 > 文件名 > 内容（SHA-256 哈希）」三维度判重，提示框显示重复原因。
+
+### 变更
+
+- 移除账户映射弹框的 `noCurrency` checkbox，改为根据币种输入框值自动判断。
+- 重复判定对话框改为两按钮（覆盖旧记录 / 取消本次导入），移除「保留两份」选项。
+- 账户映射缺失不再阻断导入。
+- Bundle v3 向下兼容（缺失字段默认空值）；`bundleVersion > 4` 的 bundle 仍然拒绝。
+- `template:get-mappings` / `listAccountMappings` / `saveAccountMappings` / `listTemplates` / `listTemplateBundleEntries` 等 DB 层方法签名扩展 `templateId` / `isParent` / `parentTemplateId` 等参数。
+
+### 移除
+
+- 账户映射弹框的 `noCurrency` checkbox。
+
+## 1.5.0
+
+### 新增
+
+- **发生额精度提升到小数点后 12 位**：`Credit Amount` / `Debit Amount` / 发生额 / 余额均支持最多 12 位小数，原始值有几位就保留几位，不补零。Excel 导出默认数字格式；有效数字超过 15 位时自动切换为文本格式保持精度。
+- **「提取大账号顺序」功能**：网银账单解析大账号确认页左下角新增按钮，自动从文件识别账户号并在「确认大账号顺序」弹出页展示，支持双输入框编辑 + 精准匹配校验。「完成」按钮按条件覆盖右侧大账号顺序表。
+- **「记住顺序」持久化增强**：固定模式下勾选「记住顺序」会持久化「文件个数 + 各文件账户数与账户号 + 排序」。下次导入按文件个数和账户匹配自动回显；文件数不匹配时切回「账号顺序不固定」模式；账户信息匹配不上时弹提醒框供用户选择「变更配置」或「确认」。
+- **英文日期格式解析**：支持 `DD Mon YYYY`（`09 Apr 2026`）、`Month DD YYYY`（`April 9, 2026`）、以及「逗号 + 时间 + AM/PM」形式（`09 Apr 2026, 06:26:26 PM`）。
+- **导入模板包同名覆盖确认**：`template:import-bundle` 在循环前扫描同名模板，用 Electron 原生 `dialog.showMessageBox` 弹确认框，避免静默覆盖。
+- **使用手册导出格式扩展**：支持 `txt` / `md` / `html` 三种格式。HTML 使用 `marked` 库渲染 Markdown 后保存（新增 `marked` 依赖）。
+- **指定账单实现功能**：按正负号 / 按字段区分发生额有值时出现「指定账单实现功能」勾选框 + 多选账单序号下拉。副区域有值未勾选指定时全部 Credit/Debit 禁用；勾选指定时被指定行禁用、未指定行保留行级 Credit/Debit 直接映射。
+
+### 变更
+
+- **模块名称**：新开账户模块按钮文本由「新开账户生成网银账单」改为「新开账户余额账单生成」。
+- **大账号确认页重构**：页面标题和文案统一；主页面左右面板支持同步滚动。
+- **提取大账号顺序弹框**：DOM 重构为 `.extract-scroll-container`，改为单滚动条。
+- **大账号选择对话框条件单滚动条 + 文本化**：勾选「记住顺序」时切为单滚动条 + 右面板文本化只读显示；取消勾选恢复双滚动条 + checkbox 列表。
+- **映射字段列位置固定**：`.concat-field-picker` / `.mapping-field-editor > button[hidden]` / `.bill-split-group-btn[hidden]` 改用 `visibility: hidden + pointer-events: none` 保留占位空间，不再因 `display: none` 导致列平移。
+- **映射字段下拉框宽度固定**：`.mapping-select` 固定 `min-width: 260px; max-width: 260px`，长文本在下拉框内截断显示。
+- **按正负号下拉框宽度**：`.bill-split-sub-row .mapping-select` 由 `min-width: 200px` 改为 `min-width: 260px; max-width: 260px`。
+- **映射互斥补全**：发生额互斥由单向改为完整 3 选 1（按字段区分 / 按正负号 / 均无），修正空值误判为激活的 bug。
+- **拼接字段预览文本截断**：移除 `.concat-preview` 的 `max-width: 200px` 硬限，截断阈值由 40 字符提升到 120 字符。
+- **六列表格 UI 优化**：账单序号表头不换行；行级「完成」后 4 个 select 改为纯文本显示（表格 `table-layout: fixed` 防抖）；账单序号列抬头/数字缩进（`padding-left` 1em/2em）；维护大账号币种校验失败改为弹框提醒，不再只在状态栏显示。
+- **主页面初始状态框文本**：启动文本由「已加载内置枚举表：COMMON枚举.xlsx」改为「欢迎使用小助手」。
+- `roundAmount` 新增高精度版本，保留原实现兜底短精度路径。
+
+### 移除
+
+- 六列表格的「发生额」列（合并/拆分场景下不再需要）。
+
 ## 1.4.9
 
 ### 新增
