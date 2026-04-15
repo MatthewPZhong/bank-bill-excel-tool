@@ -388,3 +388,27 @@ filters: [
 | 日期 | 变更内容 |
 |------|---------|
 | 2026-04-11 | 初稿：8 项需求，23 条 AC，无 Open Questions |
+| 2026-04-12 | 需求 8（关闭按钮对齐）取消；需求 4 改为 HTML（不生成 PDF）；需求 7 删除发生额列 + 重构禁用逻辑；需求 5b 恢复文本化；AC 更新为 24 条 |
+
+---
+
+## 九、实施记录
+
+### PR #18 — v1.5.0 fix2
+
+**改动内容**：
+
+1. **需求 1（模块名称变更）**：index.html + renderer.js 文本替换
+2. **需求 2（英文日期解析）**：normalizers.js 新增 DD Mon YYYY / Month DD YYYY pattern + 逗号时间AM/PM 正则
+3. **需求 3（模板包覆盖确认）**：main.js template:import-bundle handler 增加 dialog.showMessageBox 确认
+4. **需求 4（使用手册导出）**：支持 txt/md/html，HTML 使用 marked 渲染
+5. **需求 5a（提取弹框单滚动条）**：DOM 重构为 extract-scroll-container，删除双滚动条同步代码
+6. **需求 5b（条件单滚动条 + 文本化）**：ba-scroll-container + switchToRememberMode/switchToNormalMode + renderOrderListAsText
+7. **需求 6（下拉框宽度）**：bill-split-sub-row .mapping-select 改为 min/max-width: 260px
+8. **需求 7（指定账单实现功能）**：DB 迁移新增两列 + 前端 checkbox/多选下拉 + 禁用逻辑重构 + 删除发生额列 + file-service 按指定/未指定分流
+
+**PR review 修复**：
+- P1: 空 target list 回退到全局副区域逻辑
+- P1: evaluateBillSplitAmountRulesForRow 每条规则用自己的 mappedField
+- P2: switchToNormalMode 用 renderOrderListAsCheckbox 恢复勾选状态
+- P2: 提取大账号缓存改用 filePath 替代 basename，所有 row builder 传播 filePath
