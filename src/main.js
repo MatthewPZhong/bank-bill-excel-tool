@@ -5294,8 +5294,8 @@ function mergeGeneratedXlsxFiles(filePaths, mergedOutputPath) {
 }
 
 // v1.5.2：虚拟 ID 下从 session 重新生成合并的余额文件（补录 seed 后调用）
-function regenerateVirtualTemplateBalanceFromSession(session) {
-  const allEntries = getStatementSessionEntries(session, 'all');
+function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
+  const allEntries = getStatementSessionEntries(session, scope);
   const groupMap = new Map();
   for (const entry of allEntries) {
     const tid = entry.matchedTemplateId || 0;
@@ -5359,6 +5359,14 @@ function regenerateVirtualTemplateBalanceFromSession(session) {
     mergedBalance = { filePath: balancePaths[0], fileName: path.basename(balancePaths[0]), templateName: '按文件名映射模板' };
   }
 
+  // 所有 group 模板都被删时，生成失败 warning 避免误报 success
+  if (!mergedBalance && !allWarnings.length) {
+    allWarnings.push({
+      type: 'balance-generate-failed',
+      message: '余额账单未生成：所有模板均已被删除或无法加载'
+    });
+  }
+
   return {
     needsSeed: false,
     generatedFiles: {
@@ -5366,7 +5374,7 @@ function regenerateVirtualTemplateBalanceFromSession(session) {
       balance: mergedBalance,
       message: mergedBalance ? '余额账单可导出' : '',
       warnings: allWarnings,
-      balanceRequested: balancePaths.length > 0 || allWarnings.some((w) => w.type === 'balance-seed-required')
+      balanceRequested: balancePaths.length > 0 || allWarnings.some((w) => w.type === 'balance-seed-required' || w.type === 'balance-generate-failed')
     }
   };
 }
@@ -8036,7 +8044,7 @@ function registerFileHandlers() {
         : null;
 
       if (isFilenameMappingMode(importContext.templateId) && session) {
-        const regenResult = regenerateVirtualTemplateBalanceFromSession(session);
+        const regenResult = regenerateVirtualTemplateBalanceFromSession(session, importContext.scope || 'current');
         if (regenResult.needsSeed) {
           // 还有其他 group 需要补录 → 返回下一个 prompt
           return buildManualBalanceRequiredResult(regenResult.prompt, {
