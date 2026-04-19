@@ -1239,8 +1239,10 @@
           rerenderAfterMultiDone();
         } else {
           // 编辑：重新进入编辑态；保留已有 multiGroups 供用户修改
+          // 清空 checkedOrder（重编辑可能改变覆盖范围，旧 1:1 选择不再有效）
           multiEditing = true;
           pendingGroup = null;
+          checkedOrder = [];
           renderFileList();
           syncOrderIndices();
           syncCheckboxDisabled();
