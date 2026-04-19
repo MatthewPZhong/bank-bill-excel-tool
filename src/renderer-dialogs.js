@@ -1203,10 +1203,14 @@
       multiModeCheckbox.addEventListener('change', () => {
         multiMode = multiModeCheckbox.checked;
         if (multiMode) {
-          // 进入多对一模式：默认编辑态；若原有 checkedOrder 有内容，保留但由用户自行编辑/取消
+          // 进入多对一模式：默认编辑态；清空 checkedOrder 避免旧 1:1 选择错配给未覆盖 block
           multiEditing = true;
           multiGroups = [];
           pendingGroup = null;
+          checkedOrder = [];
+          orderListContainer.querySelectorAll('.big-account-order-checkbox').forEach((cb) => {
+            cb.checked = false;
+          });
         } else {
           // 关闭多对一模式：清空 multiGroups + pendingGroup；回到旧 1:1 UI（数字序号 + checkedOrder）
           multiGroups = [];

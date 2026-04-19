@@ -5258,16 +5258,21 @@ function mergeGeneratedXlsxFiles(filePaths, mergedOutputPath) {
   const baseWs = baseWb.Sheets[baseSheetName];
   const baseRange = XLSX.utils.decode_range(baseWs['!ref'] || 'A1');
   let nextRow = baseRange.e.r + 1;
-  const colCount = baseRange.e.c + 1;
+  let maxCol = baseRange.e.c;
 
   for (let fi = 1; fi < filePaths.length; fi++) {
     if (!fs.existsSync(filePaths[fi])) continue;
     const wb = XLSX.readFile(filePaths[fi], { cellNF: true, cellStyles: true, raw: true });
     const ws = wb.Sheets[wb.SheetNames[0]];
     const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+    if (range.e.c > maxCol) maxCol = range.e.c;
+    // 合并 !cols 元数据（取较长的数组）
+    if (Array.isArray(ws['!cols']) && (!baseWs['!cols'] || ws['!cols'].length > baseWs['!cols'].length)) {
+      baseWs['!cols'] = ws['!cols'];
+    }
     // 跳过表头（r=0），从 r=1 开始复制数据行
     for (let r = 1; r <= range.e.r; r++) {
-      for (let c = 0; c <= Math.max(range.e.c, colCount - 1); c++) {
+      for (let c = 0; c <= maxCol; c++) {
         const srcAddr = XLSX.utils.encode_cell({ r, c });
         const dstAddr = XLSX.utils.encode_cell({ r: nextRow, c });
         const cell = ws[srcAddr];
@@ -5278,10 +5283,10 @@ function mergeGeneratedXlsxFiles(filePaths, mergedOutputPath) {
       nextRow++;
     }
   }
-  // 更新 sheet range
+  // 更新 sheet range（用全局最大列数）
   baseWs['!ref'] = XLSX.utils.encode_range({
     s: { r: 0, c: 0 },
-    e: { r: nextRow - 1, c: colCount - 1 }
+    e: { r: nextRow - 1, c: maxCol }
   });
   fs.mkdirSync(path.dirname(mergedOutputPath), { recursive: true });
   XLSX.writeFile(baseWb, mergedOutputPath);
@@ -5886,12 +5891,8 @@ async function exportStatementByScope(kind, scope = 'auto') {
           includeBalance: kind === 'balance'
         });
 
-        if (kind === 'balance') {
-          const manualBalanceWarning = extractManualBalancePromptWarning(groupGeneratedFiles.warnings);
-          if (manualBalanceWarning) {
-            return buildManualBalanceRequiredResult(manualBalanceWarning.prompt, groupGeneratedFiles);
-          }
-        }
+        // 不在循环内 return balance-seed-required；收集 warnings 后统一处理
+        // （补录后重新导出时 seed 已持久化，该组能正常生成余额）
 
         try {
           const dates = parseRequiredBillDates(groupPreparedBatch.detailRows);
@@ -5899,8 +5900,23 @@ async function exportStatementByScope(kind, scope = 'auto') {
         } catch (_ignored) {}
         perGroupPaths.push({
           detail: groupGeneratedFiles.detail ? groupGeneratedFiles.detail.filePath : null,
-          balance: groupGeneratedFiles.balance ? groupGeneratedFiles.balance.filePath : null
+          balance: groupGeneratedFiles.balance ? groupGeneratedFiles.balance.filePath : null,
+          warnings: groupGeneratedFiles.warnings || []
         });
+      }
+
+      // 循环结束后统一检查 balance-seed-required（补录后重新导出时 seed 已持久化）
+      if (kind === 'balance') {
+        const allGroupWarnings = perGroupPaths.flatMap((g) => g.warnings || []);
+        const manualBalanceWarning = extractManualBalancePromptWarning(allGroupWarnings);
+        if (manualBalanceWarning) {
+          return buildManualBalanceRequiredResult(manualBalanceWarning.prompt, {
+            warnings: allGroupWarnings,
+            balance: null,
+            detail: null,
+            balanceRequested: true
+          });
+        }
       }
 
       // 合并多组文件，命名：模板数量-COMMON/BALANCE-日期范围.xlsx
@@ -6341,7 +6357,8 @@ async function handleFilenameMappingImport() {
     const perFileMatch = []; // [{ filePath, matchedTemplate }]
     for (const filePath of inputFilePaths) {
       const basename = path.basename(filePath);
-      const candidates = allTemplates.filter((t) => matchesTemplateHeaders(filePath, t));
+      // 复用 matchFileToTemplate：多命中时自动保留 headers 最多的（子集消歧）
+      const candidates = matchFileToTemplate(filePath, allTemplates);
 
       if (candidates.length === 0) {
         return createErrorResult({
