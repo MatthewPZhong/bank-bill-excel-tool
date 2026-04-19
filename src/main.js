@@ -5309,7 +5309,13 @@ function regenerateVirtualTemplateBalanceFromSession(session) {
 
   for (const [tid, groupEntries] of groupMap) {
     const templateConfig = getTemplateMappingConfig(tid);
-    if (!templateConfig) continue;
+    if (!templateConfig) {
+      appendActivityLogEntry({
+        level: 'warn',
+        message: `余额重新生成时跳过模板组（templateId=${tid}）：模板已被删除，${groupEntries.length} 个文件的数据未包含`
+      });
+      continue;
+    }
 
     const groupGenConfig = buildStatementGenerationConfig({
       template: templateConfig.template,
@@ -7990,8 +7996,10 @@ function registerFileHandlers() {
         return buildManualBalanceInvalidResult('请输入有效的上一账单日余额');
       }
 
+      // 用 prompt 里的 templateName（来自实际缺 seed 的组），不用 importContext.template.name（可能是最后一组）
+      const seedTemplateName = pendingPrompt.templateName || importContext.template.name;
       const upsertResult = upsertBalanceSeedRecord(ensureStorageRoot(), {
-        templateName: importContext.template.name,
+        templateName: seedTemplateName,
         merchantId: pendingPrompt.merchantId,
         currency: pendingPrompt.currency,
         billDate: normalizedSeedDate,
@@ -8013,7 +8021,7 @@ function registerFileHandlers() {
         level: 'info',
         message: '补录上一账单日余额成功',
         details: [
-          `模板名：${importContext.template.name}`,
+          `模板名：${seedTemplateName}`,
           `银行账号：${pendingPrompt.merchantId}`,
           `币种：${pendingPrompt.currency || '(空)'}`,
           `账单日期：${normalizedSeedDate}`,

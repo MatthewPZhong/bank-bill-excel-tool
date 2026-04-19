@@ -805,7 +805,7 @@
               return;
             }
             if (checkbox.checked) {
-              if (checkedOrder.length >= currentFileRows.length) {
+              if (checkedOrder.length >= getUncoveredBlockCount()) {
                 checkbox.checked = false;
                 return;
               }
@@ -840,15 +840,27 @@
         });
       }
 
+      // M:1 完成后还需要 1:1 分配的 block 数量
+      function getUncoveredBlockCount() {
+        if (!multiMode || !multiGroups.length) return currentFileRows.length;
+        let covered = 0;
+        for (const g of multiGroups) {
+          covered += g.leftBlockRowIndices.length;
+        }
+        return Math.max(0, currentFileRows.length - covered);
+      }
+
       function syncCheckboxDisabled() {
-        // v1.5.2 需求 2：编辑态下不限制勾选上限（状态机允许一个大账号同时被多 block 共享，且"一个大账号最多进一组"已由 onRightAccountChecked 保证）
+        // v1.5.2 需求 2：编辑态下不限制勾选上限
         if (multiMode && multiEditing) {
           orderListContainer.querySelectorAll('.big-account-order-checkbox').forEach((cb) => {
             cb.disabled = false;
           });
           return;
         }
-        const maxReached = checkedOrder.length >= currentFileRows.length;
+        // 上限 = 未被 M:1 覆盖的 block 数量（非 multiMode 时 = currentFileRows.length）
+        const maxSlots = getUncoveredBlockCount();
+        const maxReached = checkedOrder.length >= maxSlots;
         orderListContainer.querySelectorAll('.big-account-order-item').forEach((item) => {
           const cb = item.querySelector('.big-account-order-checkbox');
           if (!cb) return;
