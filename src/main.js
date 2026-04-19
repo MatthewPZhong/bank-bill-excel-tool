@@ -5306,6 +5306,7 @@ function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
   const balancePaths = [];
   const billDates = [];
   const allWarnings = [];
+  let skippedCount = 0;
 
   for (const [tid, groupEntries] of groupMap) {
     const templateConfig = getTemplateMappingConfig(tid);
@@ -5314,6 +5315,7 @@ function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
         level: 'warn',
         message: `余额重新生成时跳过模板组（templateId=${tid}）：模板已被删除，${groupEntries.length} 个文件的数据未包含`
       });
+      skippedCount += 1;
       continue;
     }
 
@@ -5359,11 +5361,16 @@ function regenerateVirtualTemplateBalanceFromSession(session, scope = 'all') {
     mergedBalance = { filePath: balancePaths[0], fileName: path.basename(balancePaths[0]), templateName: '按文件名映射模板' };
   }
 
-  // 所有 group 模板都被删时，生成失败 warning 避免误报 success
+  // 模板被删时加 warning：全删 → 生成失败；部分删 → 数据不完整提示
   if (!mergedBalance && !allWarnings.length) {
     allWarnings.push({
       type: 'balance-generate-failed',
       message: '余额账单未生成：所有模板均已被删除或无法加载'
+    });
+  } else if (mergedBalance && skippedCount > 0) {
+    allWarnings.push({
+      type: 'balance-generate-failed',
+      message: `余额账单已生成但数据不完整：${skippedCount} 组模板已被删除，对应文件的余额未包含`
     });
   }
 
@@ -5939,8 +5946,9 @@ async function exportStatementByScope(kind, scope = 'auto') {
         groupMap.get(tid).push(entry);
       }
 
-      const perGroupPaths = []; // [{detail, balance}]
+      const perGroupPaths = []; // [{detail, balance, warnings}]
       const exportBillDates = [];
+      const skippedGroupNames = [];
       for (const [tid, groupEntries] of groupMap) {
         const templateConfig = getTemplateMappingConfig(tid);
         if (!templateConfig) {
@@ -5948,6 +5956,7 @@ async function exportStatementByScope(kind, scope = 'auto') {
             level: 'warn',
             message: `导出时跳过模板组（templateId=${tid}）：模板已被删除，${groupEntries.length} 个文件的数据未包含在导出中`
           });
+          skippedGroupNames.push(`模板ID=${tid}（${groupEntries.length}个文件）`);
           continue;
         }
 
@@ -6022,6 +6031,11 @@ async function exportStatementByScope(kind, scope = 'auto') {
         generatedFile = { filePath: mergedPath, fileName: mergedFileName, templateName: '按文件名映射模板' };
       } else if (targetPaths.length === 1) {
         generatedFile = { filePath: targetPaths[0], fileName: path.basename(targetPaths[0]), templateName: '按文件名映射模板' };
+      }
+
+      // 部分 group 模板被删时：文件生成了但数据不完整，通过文件名提示用户
+      if (generatedFile && skippedGroupNames.length > 0) {
+        generatedFile.templateName = `按文件名映射模板（${skippedGroupNames.length}组模板已删除，数据不完整）`;
       }
 
       if (!generatedFile) {
@@ -6520,14 +6534,20 @@ async function handleFilenameMappingImport() {
     // 每个命中的模板自身 bigAccounts；若模板是子模板，向上追加主模板的 bigAccounts（沿用 v1.5.1 聚合思路）。
     // 主模板如也被直接命中（即也在 perTemplateConfigCache 内），跳过重复追加。
     const aggregatedBigAccounts = [];
-    const seenMerchantIds = new Set();
     const addBigAccounts = (baList) => {
       if (!Array.isArray(baList)) return;
       for (const ba of baList) {
         const mid = normalizeCell(ba.merchantId);
-        if (mid && !seenMerchantIds.has(mid)) {
-          seenMerchantIds.add(mid);
-          aggregatedBigAccounts.push(ba);
+        if (!mid) continue;
+        const existing = aggregatedBigAccounts.find((a) => normalizeCell(a.merchantId) === mid);
+        if (existing) {
+          // 同 MerchantId 合并 currencies（避免丢弃不同模板的币种）
+          const newCurrencies = (Array.isArray(ba.currencies) ? ba.currencies : [])
+            .map((c) => normalizeCell(c)).filter((c) => c !== '');
+          const existingCurrencies = Array.isArray(existing.currencies) ? existing.currencies : [];
+          existing.currencies = Array.from(new Set([...existingCurrencies, ...newCurrencies]));
+        } else {
+          aggregatedBigAccounts.push({ ...ba });
         }
       }
     };
@@ -6913,14 +6933,19 @@ function registerFileHandlers() {
           }
 
           // 聚合所有匹配到的模板的大账号配置 + 检查是否有子模板启用了 Balance
-          const aggregatedBigAccounts = [...templateConfig.bigAccounts];
-          const seenMerchantIds = new Set(aggregatedBigAccounts.map((ba) => normalizeCell(ba.merchantId)));
+          const aggregatedBigAccounts = templateConfig.bigAccounts.map((ba) => ({ ...ba }));
           for (const [, childConfig] of childConfigCache) {
             for (const ba of (childConfig.bigAccounts || [])) {
               const mid = normalizeCell(ba.merchantId);
-              if (mid && !seenMerchantIds.has(mid)) {
-                seenMerchantIds.add(mid);
-                aggregatedBigAccounts.push(ba);
+              if (!mid) continue;
+              const existing = aggregatedBigAccounts.find((a) => normalizeCell(a.merchantId) === mid);
+              if (existing) {
+                const newCurrencies = (Array.isArray(ba.currencies) ? ba.currencies : [])
+                  .map((c) => normalizeCell(c)).filter((c) => c !== '');
+                const existingCurrencies = Array.isArray(existing.currencies) ? existing.currencies : [];
+                existing.currencies = Array.from(new Set([...existingCurrencies, ...newCurrencies]));
+              } else {
+                aggregatedBigAccounts.push({ ...ba });
               }
             }
           }
