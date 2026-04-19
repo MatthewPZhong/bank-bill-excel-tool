@@ -9,6 +9,30 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 1.5.2
+
+### 新增
+
+- **按表头自动识别模板**：主页面「模板」下拉顶部新增虚拟枚举值「按文件名映射模板」并设为**默认**选中。导入时系统遍历所有模板，用 `matchesTemplateHeaders(filePath, template)` 逐个试表头自动匹配——用户无需在映射管理中配置任何字段（原映射管理对话框中的「按文件名映射模板」输入框模块**已删除**）。0 命中报 `FILENAME_MAPPING_NO_MATCH`、≥2 命中报 `FILENAME_MAPPING_AMBIGUOUS`，均**整批截断本次导入**；唯一命中直接按该模板解析（不再有 HEADER_MISMATCH 报错）。`filenameFixedField` 数据层保留不动（DB 列、Repo/IPC/Bundle 透传均在，只是 UI 删除，未来可能重新启用）。
+- **表头唯一性校验**：导入模板文件时新表头与已有模板全量比较，完全相同则拒绝（`TEMPLATE_HEADERS_DUPLICATE`）；Bundle 导入时每个 entry 校验，重复则跳过并写 activity log 警告。确保按表头自动识别不会命中多个完全相同的模板。
+- **多模板合并导出**：多个文件匹配到不同模板时，每组按各自模板独立生成（银行名称 / 所在地各自正确），合并为汇总文件：`{模板数量}-COMMON-{日期范围}.xlsx` / `{模板数量}-BALANCE-{日期范围}.xlsx`。合并方式为直接复制单元格保留格式，session 只 append 一次。
+- **大账号确认页「单个账号匹多个文件」（M:1 映射）**：「提取大账号顺序」按钮右侧新增「单个账号匹多个文件」勾选框（**默认不勾选**）+ 编辑和完成**合并为 1 个 toggle 按钮**。勾选时不发生文本平移（visibility 占位），编辑态勾选 block 位置不变。完成后排序：uncovered 在前保持原序，covered 在后按组 a→z 排（组内按原文件顺序）。编辑还原：点编辑恢复原排序，保留已有映射供修改（不清空 multiGroups）。已映射 block 不参与「提取大账号顺序」，确认弹窗不显示已映射 block。左侧文件名左边新增字母列。勾选粒度 = **block**：同一文件的多个 block 可独立归属不同组或不归属任何组；支持"先左后右"与"先右后左"两种操作顺序。对话框主「完成」按 block 粒度把 `multiGroups` 展开为多条 `assignments`（key = `rowIndex`，同组多条 rowIndex 共享 MerchantId + Currency），与 1:1 部分合并后发送给后端。
+- **主 / 子模板名校验**：映射关系管理「完成」按钮前置执行"子名.includes(主名)"字符串校验；勾选「设为子模板」+ 选中主模板时若当前模板名不包含主模板名，弹出提醒框「子模板与主模板模板名匹配不上，请检查。」，**整个 save 流程被阻断**，用户确认后重新打开对话框。未勾「设为子模板」或未选主模板时不触发校验。
+
+### 变更
+
+- **模板数据结构**：`templates` 表新增 `filename_fixed_field TEXT NOT NULL DEFAULT ''` 列（数据层保留，UI 已删除输入框）；`listTemplates` / `getTemplate` / `listChildTemplates` / `listTemplateBundleEntries` 的 SELECT 追加 `t.filename_fixed_field AS filenameFixedField`；新增 `saveTemplateFilenameFixedField(db, templateId, value)` 仓储方法。
+- **Bundle v4 透明扩展**：`SUPPORTED_BUNDLE_VERSION` 保持 `4` **不升 v5**。`filenameFixedField` 作为 v4 schema 下的透明扩展字段由 bundle 自动携带；旧 v4 bundle 导入时回退为空串；`bundleVersion > 4` 仍然拒绝。Bundle 导入时新增表头唯一性校验，重复 entry 跳过 + 日志警告。
+- **大账号确认页 row 结构扩展**：`buildBigAccountSelectionRows` 每 row 追加 `fileIndex` 字段；前端新增状态机 `multiMode / multiEditing / multiGroups / pendingGroup`。
+- **大账号确认页 UI**："导出当前文件"更名为"导出**当前批次文件**"；"导出所有"更名为"导出**所有批次文件**"。
+- **固定模式与 M:1 互斥**：`rememberCheckbox` 与 `ba-multi-mode-checkbox` 双向 `disabled` 互斥；mode 切换时清空 `multiGroups / pendingGroup`。
+- 新增 IPC `template:save-filename-fixed-field`；`preload.js` `templates` 对象追加 `saveFilenameFixedField`。
+- **虚拟 ID 短路 helper**：`main.js` 与 `renderer.js` 各自定义 `isFilenameMappingMode(templateId)` helper，避免虚拟 ID 流入真实 DB 查询。
+
+### 移除
+
+- 映射关系管理对话框中的「按文件名映射模板」输入框模块（配置 filenameFixedField 的 UI 已删除，数据层保留）
+
 ## 1.5.1
 
 ### 新增

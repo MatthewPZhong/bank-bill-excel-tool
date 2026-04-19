@@ -288,6 +288,14 @@ function ensureParentTemplateSupport(db) {
   }
 }
 
+// v1.5.2 需求 3：按文件名映射模板 — 在 templates 表新增 filename_fixed_field 列
+// 幂等：若列已存在则跳过（老库再次启动不重复添加）。
+function ensureTemplateFilenameFixedFieldSupport(db) {
+  if (!hasColumn(db, 'templates', 'filename_fixed_field')) {
+    db.exec("ALTER TABLE templates ADD COLUMN filename_fixed_field TEXT NOT NULL DEFAULT '';");
+  }
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
@@ -296,6 +304,7 @@ module.exports = {
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
   ensureTemplateDateFormatSupport,
+  ensureTemplateFilenameFixedFieldSupport,
   ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,
   hasColumn

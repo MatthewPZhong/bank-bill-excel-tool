@@ -9,6 +9,7 @@ const {
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
   ensureTemplateDateFormatSupport,
+  ensureTemplateFilenameFixedFieldSupport,
   ensureTemplateKeySupport,
   ensureTemplateMappingEnhancements,
   hasColumn
@@ -99,6 +100,7 @@ class AppDatabase {
     this.ensureBillSplitMergeSupport();
     this.ensureBillSplitTargetSeqSupport();
     this.ensureParentTemplateSupport();
+    this.ensureTemplateFilenameFixedFieldSupport();
     this.ensureAccountMappingTemplateSupport();
   }
 
@@ -136,6 +138,10 @@ class AppDatabase {
 
   ensureParentTemplateSupport() {
     return ensureParentTemplateSupport(this.db);
+  }
+
+  ensureTemplateFilenameFixedFieldSupport() {
+    return ensureTemplateFilenameFixedFieldSupport(this.db);
   }
 
   ensureAccountMappingTemplateSupport() {
@@ -180,6 +186,11 @@ class AppDatabase {
 
   deleteTemplate(templateId) {
     return templateRepository.deleteTemplate(this.db, templateId);
+  }
+
+  // v1.5.2 需求 3：保存模板的文件名固定字段
+  saveTemplateFilenameFixedField(templateId, value) {
+    return templateRepository.saveTemplateFilenameFixedField(this.db, templateId, value);
   }
 
   getTemplateBigAccounts(templateId) {

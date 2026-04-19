@@ -389,11 +389,11 @@ function createStatementGenerationHelpers(deps) {
       options: [
         {
           scope: 'current',
-          label: `导出当前文件的${kind === 'detail' ? '明细' : '余额'}`
+          label: `导出当前批次文件的${kind === 'detail' ? '明细' : '余额'}`
         },
         {
           scope: 'all',
-          label: `导出所有${kind === 'detail' ? '明细' : '余额'}`
+          label: `导出所有批次文件的${kind === 'detail' ? '明细' : '余额'}`
         }
       ]
     };

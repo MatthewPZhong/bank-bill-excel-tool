@@ -1227,6 +1227,74 @@ select {
   pointer-events: none;
 }
 
+/* v1.5.2 需求 2：多对一工具条（单个账号匹多个文件） */
+.ba-multi-mode-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+  margin-left: 8px;
+  cursor: pointer;
+}
+
+.ba-multi-mode-label.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.ba-multi-toggle-btn {
+  padding: 4px 1em;
+  min-width: 0;
+  margin-left: 4px;
+}
+
+/* 未勾选时按钮占位但不可见，避免文本平移 */
+.ba-multi-toggle-btn.is-hidden {
+  visibility: hidden;
+}
+
+.ba-multi-edit-btn,
+.ba-multi-done-btn {
+  min-width: 64px;
+}
+
+/* 编辑态：左侧 block 行的勾选框 */
+.ba-left-block-checkbox {
+  margin-right: 6px;
+  cursor: pointer;
+}
+
+/* 编辑态下 big-account-file-item 保留数字序号位置，交给状态机决定渲染什么 */
+.big-account-file-item.ba-multi-editing .big-account-file-index {
+  display: none;
+}
+
+/* 左侧字母列（和右侧大账号序号对齐） */
+.ba-left-letter {
+  display: inline-block;
+  min-width: 20px;
+  text-align: right;
+  margin-right: 4px;
+}
+
+/* 编辑态下右侧大账号序号渲染为字母（a.b.c...），复用字号/行高 */
+.big-account-order-index.big-account-order-index--alpha {
+  font-style: italic;
+}
+
+/* 组闭合后左侧 block 行的"已配对"样式（显示 ✓ 与组字母） */
+.big-account-file-item.ba-multi-grouped {
+  color: var(--muted, #888);
+}
+
+.big-account-file-item .ba-multi-group-marker {
+  margin-right: 6px;
+  font-weight: 600;
+  color: var(--accent, #8a6d3b);
+}
+
 .is-flash-error {
   border-color: #e74c3c !important;
   animation: flash-error 500ms ease-out;
@@ -1603,6 +1671,7 @@ select {
 .mapping-big-account-manage-btn {
   min-width: 120px;
 }
+
 
 .big-account-card {
   width: min(100%, 980px);

@@ -1,6 +1,6 @@
 {
   "name": "bank-bill-excel-tool",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "网银账单小助手",
   "main": "src/main.js",
   "author": "Pzhong",
@@ -14,6 +14,8 @@
     "preview": "node scripts/render-preview.js",
     "preview:account": "node scripts/render-account-mapping-preview.js",
     "smoke": "node scripts/smoke-test.js",
+    "test:v1.5.2": "node scripts/test-v1.5.2-backend.js",
+    "test:v1.5.2:sm": "node scripts/test-v1.5.2-state-machine.js",
     "startup:measure": "node scripts/measure-startup.js"
   },
   "build": {

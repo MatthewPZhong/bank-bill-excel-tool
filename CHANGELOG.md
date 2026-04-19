@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.5.2 - 2026-04-16
+
+- **按表头自动识别模板**：主页面「模板」下拉顶部新增 `__FILENAME_MAPPING__` 虚拟枚举值「按文件名映射模板」并设为**默认选中**（`src/renderer.js:updateTemplateSelect`）。导入时系统遍历所有模板，用 `matchesTemplateHeaders(filePath, template)` 逐个试表头自动匹配——用户**无需**在映射关系管理中配置任何"文件名固定字段"（原映射管理对话框中的「按文件名映射模板」输入框模块已删除）。0 命中报 `FILENAME_MAPPING_NO_MATCH`、≥2 命中报 `FILENAME_MAPPING_AMBIGUOUS`，均**整批截断**（当次导入的所有文件全部不入库）；唯一命中直接按该模板解析（不再有 HEADER_MISMATCH 报错）。`filenameFixedField` 数据层保留不动（DB 列、Repo/IPC/Bundle 透传均在，只是 UI 删除，未来可能重新启用）。
+- **表头唯一性校验**：导入模板文件时新表头与已有模板全量比较，完全相同则拒绝（`TEMPLATE_HEADERS_DUPLICATE`）；Bundle 导入时每个 entry 校验，重复则跳过并写 activity log 警告。确保按表头自动识别不会命中多个完全相同的模板。
+- **多模板合并导出**：多个文件匹配到不同模板时，每组按各自模板独立生成（银行名称 / 所在地各自正确），最终合并为汇总文件：`{模板数量}-COMMON-{日期范围}.xlsx` / `{模板数量}-BALANCE-{日期范围}.xlsx`。合并方式为直接复制单元格保留格式，session 只 append 一次。
+- **大账号确认页「单个账号匹多个文件」（M:1 映射）**：「提取大账号顺序」按钮右侧新增勾选框「单个账号匹多个文件」（**默认不勾选**）+ 编辑和完成**合并为 1 个 toggle 按钮**。勾选时不发生文本平移（visibility 占位），编辑态勾选 block 位置不变。**完成后排序**：uncovered 在前保持原序，covered 在后按组 a→z 排（组内按原文件顺序）。**编辑还原**：点编辑恢复原排序，保留已有映射供修改（不清空 multiGroups）。已映射 block 不参与「提取大账号顺序」，确认弹窗不显示已映射 block。左侧文件名左边新增字母列。勾选粒度 = **block**：同一文件的多个 block 可归属不同组或不归属任何组；未参与 M:1 的 block 沿用旧 1:1 勾选流程。对话框主「完成」按 block 粒度展开 `multiGroups` 为多条 `assignments`（key = `rowIndex`），同组多条 rowIndex 共享 MerchantId+Currency，与 1:1 部分合并后发送给后端。
+- **主/子模板名校验**：映射关系管理「完成」按钮点击时前置执行"子名.includes(主名)"字符串校验；勾选「设为子模板」+ 选中主模板时若当前模板名不包含主模板名，弹提醒框阻断 `saveMappings` / `setParentStatus` / `setChildParent` 全部调用，用户确认后重开对话框。未勾「设为子模板」或未选主模板时不触发。
+- **UI 变更**："导出当前文件"更名为"导出**当前批次文件**"；"导出所有"更名为"导出**所有批次文件**"。
+
+### 变更
+
+- **模板数据结构**：`templates` 表追加 `filename_fixed_field` 列（数据层保留）；`listTemplates` / `getTemplate` / `listChildTemplates` / `listTemplateBundleEntries` 的 SELECT 均追加 `t.filename_fixed_field AS filenameFixedField`；`buildTemplateSummaryFromRow` / `buildTemplateSummary` 均透传该字段；新增 `saveTemplateFilenameFixedField(db, templateId, value)` 仓储方法。
+- **Bundle v4 透明扩展**：`SUPPORTED_BUNDLE_VERSION` 保持 `4` 不升 v5。`filenameFixedField` 作为 v4 schema 下的新增透明字段由 bundle 自动携带；`readTemplateBundleFile` 对无字段的旧 v4 bundle 回退为空串。**v1.5.1 用户导入 v1.5.2 导出的 bundle 不会报错，该字段被自然忽略**；`bundleVersion > 4` 仍然拒绝。
+- **大账号确认页 row 结构**：`buildBigAccountSelectionRows` 每 row 追加 `fileIndex` 字段（可视化辅助用，状态机 key 仍为 `rowIndex`）；前端状态机（`multiMode / multiEditing / multiGroups / pendingGroup` 四个 let 变量 + 一组 helper）按 block 粒度展开 assignments。
+- **固定模式与 M:1 互斥**：`rememberCheckbox` 与 `ba-multi-mode-checkbox` 双向 `disabled` 互斥；mode 切换（fixed ↔ unfixed）时清空 `multiGroups` / `pendingGroup`。
+- 新增 IPC：`template:save-filename-fixed-field`（payload `{templateId, value}`，返回 `{status:'success'}`，错误码 `TEMPLATE_ID_INVALID` / `TEMPLATE_FILENAME_FIXED_FIELD_SAVE_FAILED`）；`preload.js` `templates` 对象追加 `saveFilenameFixedField`。
+
 ## 1.5.1 - 2026-04-13
 
 - **主/子模板**：`templates` 表新增 `parent_template_id`（nullable FK, ON DELETE SET NULL）+ `is_parent`（INTEGER DEFAULT 0）两列。映射关系管理 dialog header 新增「设为主模板」「设为子模板」checkbox，互斥逻辑；选「设为子模板」时出现主模板下拉框。模板管理页面新增「模板管理」标题；主模板行有 ▶/▼ 展开折叠按钮，子模板缩进显示。
