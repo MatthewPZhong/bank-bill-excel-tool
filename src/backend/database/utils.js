@@ -97,7 +97,9 @@ function buildTemplateSummaryFromRow(row) {
     bigAccountSummary,
     dateFormat: normalizeText(row.dateFormat) || 'auto',
     isParent: Boolean(row.isParent),
-    parentTemplateId: row.parentTemplateId || null
+    parentTemplateId: row.parentTemplateId || null,
+    // v1.5.2 需求 3：按文件名映射模板的固定字段（默认空串）
+    filenameFixedField: normalizeText(row.filenameFixedField)
   };
 }
 

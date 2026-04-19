@@ -22,6 +22,12 @@ const ADVANCED_MAPPING_FIELDS = [
   AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD
 ];
 const CONCAT_FIELDS_MAPPING_FIELD = '需要拼接字段';
+// v1.5.2 需求 3：主页面「按文件名映射模板」的虚拟模板 ID（非 DB 记录）
+// helper 用于在接收 templateId 的调用点统一短路，避免将虚拟 ID 传入真实查询
+const FILENAME_MAPPING_TEMPLATE_ID = '__FILENAME_MAPPING__';
+function isFilenameMappingMode(templateId) {
+  return templateId === FILENAME_MAPPING_TEMPLATE_ID;
+}
 const MODULES = Object.freeze({
   statementGenerator: {
     id: 'statement-generator',
@@ -1451,8 +1457,8 @@ function legacyCreateExportScopeDialog(kind) {
   dialog.innerHTML = `
     <div class="alert-message">请选择要导出的范围</div>
     <div class="dialog-actions vertical">
-      <button class="secondary-btn small export-scope-btn" type="button" data-scope="current">导出当前文件的${fieldLabel}</button>
-      <button class="secondary-btn small export-scope-btn" type="button" data-scope="all">导出所有${fieldLabel}</button>
+      <button class="secondary-btn small export-scope-btn" type="button" data-scope="current">导出当前批次文件的${fieldLabel}</button>
+      <button class="secondary-btn small export-scope-btn" type="button" data-scope="all">导出所有批次文件的${fieldLabel}</button>
     </div>
   `;
 
@@ -1612,10 +1618,11 @@ function updateTemplateSelect() {
   const previous = state.selectedTemplateId;
   elements.templateSelect.innerHTML = '';
 
-  const placeholder = document.createElement('option');
-  placeholder.value = '';
-  placeholder.textContent = state.templates.length ? '请选择模板' : '暂无模板';
-  elements.templateSelect.appendChild(placeholder);
+  // v1.5.2 需求 3（G3-5）：「按文件名映射模板」置顶且作为默认值；不再保留旧 placeholder
+  const filenameMappingOption = document.createElement('option');
+  filenameMappingOption.value = FILENAME_MAPPING_TEMPLATE_ID;
+  filenameMappingOption.textContent = '按文件名映射模板';
+  elements.templateSelect.appendChild(filenameMappingOption);
 
   state.templates
     .filter((template) => !template.parentTemplateId)
@@ -1626,13 +1633,23 @@ function updateTemplateSelect() {
       elements.templateSelect.appendChild(option);
     });
 
-  const preserved = state.templates.find((template) => String(template.id) === previous);
-  state.selectedTemplateId = preserved
-    ? String(preserved.id)
-    : '';
-  elements.templateSelect.value = state.selectedTemplateId || '';
+  // v1.5.2 需求 3（G3-0/G3-5）：
+  //  - 虚拟 ID 下跳过按 ID 查表，直接保持选中「按文件名映射模板」
+  //  - 真实模板命中则保持；未命中时 fallback 为「按文件名映射模板」
+  const preserved = isFilenameMappingMode(previous)
+    ? null
+    : state.templates.find((template) => String(template.id) === previous);
+  if (isFilenameMappingMode(previous)) {
+    state.selectedTemplateId = FILENAME_MAPPING_TEMPLATE_ID;
+  } else if (preserved) {
+    state.selectedTemplateId = String(preserved.id);
+  } else {
+    state.selectedTemplateId = FILENAME_MAPPING_TEMPLATE_ID;
+  }
+  elements.templateSelect.value = state.selectedTemplateId;
 
-  if (!state.selectedTemplateId) {
+  // v1.5.2 需求 3（G3-5）：虚拟 ID 下强制禁用导出按钮（此时尚未导入文件）
+  if (isFilenameMappingMode(state.selectedTemplateId) || !state.selectedTemplateId) {
     setExportAvailability({ detailEnabled: false, balanceEnabled: false });
   }
 }
@@ -2603,7 +2620,9 @@ async function handleImportTemplate() {
 }
 
 async function handleOpenAccountMappings() {
-  const currentTemplateId = state.selectedTemplateId ? Number(state.selectedTemplateId) : null;
+  // v1.5.2 需求 3（G3-0）：虚拟 ID 不对应真实模板，这里当无选中处理，回落到第一个真实模板
+  const hasRealSelection = state.selectedTemplateId && !isFilenameMappingMode(state.selectedTemplateId);
+  const currentTemplateId = hasRealSelection ? Number(state.selectedTemplateId) : null;
   const templateId = currentTemplateId || (state.templates.length > 0 ? state.templates[0].id : null);
 
   if (!templateId) {
@@ -2662,7 +2681,10 @@ async function handleImportFile() {
     return;
   }
 
-  const templateId = Number(state.selectedTemplateId);
+  // v1.5.2 需求 3（G3-0）：虚拟 ID 原样透传给后端，由 file:import handler 做短路/分派
+  const templateId = isFilenameMappingMode(state.selectedTemplateId)
+    ? state.selectedTemplateId
+    : Number(state.selectedTemplateId);
   const result = await window.desktopApi.files.importFile(templateId);
 
   if (result.status === 'cancelled') {

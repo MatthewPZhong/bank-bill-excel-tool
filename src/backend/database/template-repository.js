@@ -19,6 +19,7 @@ function listTemplates(db) {
       t.date_format AS dateFormat,
       t.is_parent AS isParent,
       t.parent_template_id AS parentTemplateId,
+      t.filename_fixed_field AS filenameFixedField,
       COUNT(DISTINCT m.id) AS mappingCount,
       COUNT(DISTINCT ba.merchant_id) AS bigAccountCount,
       merchant_mapping.mapped_field AS merchantIdMappedField,
@@ -50,6 +51,7 @@ function getTemplate(db, templateId) {
         t.date_format AS dateFormat,
         t.is_parent AS isParent,
         t.parent_template_id AS parentTemplateId,
+        t.filename_fixed_field AS filenameFixedField,
         (
           SELECT COUNT(1)
           FROM template_mappings m
@@ -117,6 +119,7 @@ function listChildTemplates(db, parentTemplateId) {
       t.date_format AS dateFormat,
       t.is_parent AS isParent,
       t.parent_template_id AS parentTemplateId,
+      t.filename_fixed_field AS filenameFixedField,
       (SELECT COUNT(1) FROM template_mappings m WHERE m.template_id = t.id) AS mappingCount,
       (SELECT COUNT(DISTINCT merchant_id) FROM template_big_accounts ba WHERE ba.template_id = t.id) AS bigAccountCount,
       (SELECT mapped_field FROM template_mappings mm WHERE mm.template_id = t.id AND mm.template_field = 'MerchantId' LIMIT 1) AS merchantIdMappedField,
@@ -223,6 +226,15 @@ function renameTemplate(db, templateId, nextName) {
 
 function deleteTemplate(db, templateId) {
   db.prepare('DELETE FROM templates WHERE id = ?').run(templateId);
+}
+
+// v1.5.2 需求 3：保存模板的文件名固定字段
+// 输入：templateId（数字），value（字符串，允许空串）
+function saveTemplateFilenameFixedField(db, templateId, value) {
+  const now = new Date().toISOString();
+  db
+    .prepare('UPDATE templates SET filename_fixed_field = ?, updated_at = ? WHERE id = ?')
+    .run(String(value ?? ''), now, templateId);
 }
 
 function getTemplateBigAccounts(db, templateId) {
@@ -840,6 +852,8 @@ function listTemplateBundleEntries(db) {
       headers: template.headers,
       isParent: Boolean(template.isParent),
       parentTemplateKey,
+      // v1.5.2 需求 3：文件名固定字段随 bundle 透传
+      filenameFixedField: template.filenameFixedField || '',
       mappings: payload ? payload.mappings.map((mapping) => ({ ...mapping })) : [],
       bigAccounts: payload ? payload.bigAccounts.map((item) => ({
         merchantId: item.merchantId,
@@ -896,6 +910,7 @@ module.exports = {
   saveBillSplitRow,
   saveBillSplitRowCount,
   saveMappings,
+  saveTemplateFilenameFixedField,
   setChildParent,
   setParentStatus,
   upsertTemplate
