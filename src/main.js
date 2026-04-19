@@ -6033,11 +6033,6 @@ async function exportStatementByScope(kind, scope = 'auto') {
         generatedFile = { filePath: targetPaths[0], fileName: path.basename(targetPaths[0]), templateName: '按文件名映射模板' };
       }
 
-      // 部分 group 模板被删时：文件生成了但数据不完整，通过文件名提示用户
-      if (generatedFile && skippedGroupNames.length > 0) {
-        generatedFile.templateName = `按文件名映射模板（${skippedGroupNames.length}组模板已删除，数据不完整）`;
-      }
-
       if (!generatedFile) {
         return createErrorResult({
           step: kind === 'detail' ? '导出明细账单' : '导出余额账单',
@@ -6045,6 +6040,16 @@ async function exportStatementByScope(kind, scope = 'auto') {
           errorCode: 'EXPORT_EMPTY',
           templateName: session.templateName
         });
+      }
+
+      // 部分 group 模板被删时：先导出文件，再返回带 warning 的 result
+      if (skippedGroupNames.length > 0) {
+        const step = kind === 'detail' ? '导出明细账单' : '导出余额账单';
+        const exportResult = await exportGeneratedFile(generatedFile, emptyMessage, step);
+        if (exportResult.status === 'success') {
+          exportResult.message = `文件已导出，但数据不完整：${skippedGroupNames.join('、')} 的模板已被删除，对应文件未包含在导出中。`;
+        }
+        return exportResult;
       }
     } else {
       // 正常模板流程（非虚拟 ID）
@@ -6546,6 +6551,8 @@ async function handleFilenameMappingImport() {
             .map((c) => normalizeCell(c)).filter((c) => c !== '');
           const existingCurrencies = Array.isArray(existing.currencies) ? existing.currencies : [];
           existing.currencies = Array.from(new Set([...existingCurrencies, ...newCurrencies]));
+          // 合并后币种 > 1 则标记多币种，确保提交时不被 coerce 回第一个
+          existing.isMultiCurrency = existing.currencies.length > 1;
         } else {
           aggregatedBigAccounts.push({ ...ba });
         }
@@ -6944,6 +6951,7 @@ function registerFileHandlers() {
                   .map((c) => normalizeCell(c)).filter((c) => c !== '');
                 const existingCurrencies = Array.isArray(existing.currencies) ? existing.currencies : [];
                 existing.currencies = Array.from(new Set([...existingCurrencies, ...newCurrencies]));
+                existing.isMultiCurrency = existing.currencies.length > 1;
               } else {
                 aggregatedBigAccounts.push({ ...ba });
               }
