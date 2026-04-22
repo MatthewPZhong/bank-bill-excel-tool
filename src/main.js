@@ -5,6 +5,7 @@ const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage } = require('electron');
 const { AppDatabase } = require('./backend/database');
+const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
 const {
   BALANCE_SEED_GENERATION_METHODS,
   findPreviousBalanceSeed,
@@ -63,6 +64,11 @@ const {
 const {
   createStatementGenerationHelpers
 } = require('./main-process/statement-generation');
+const {
+  ALL_BANKS_TEMPLATE_SCOPE,
+  assembleMonthlyBalance,
+  toBalanceRows
+} = require('./main-process/monthly-balance');
 
 if (process.env.APP_USER_DATA_DIR) {
   app.setPath('userData', process.env.APP_USER_DATA_DIR);
@@ -85,7 +91,10 @@ let lastGeneratedExports = {
   allBalance: null,
   statementSessionKey: '',
   currentBatchId: '',
-  newAccount: null
+  newAccount: null,
+  // v1.5.3 R1 (T1.3)：月度余额装配产物（与 statement session 独立；clearGeneratedExports 不清它）
+  // 形态：{ filePath, fileName, templateScope, templateLabel, year, month, recordCount }
+  monthlyBalance: null
 };
 let lastErrorReport = null;
 let activityLogFilePath = '';
@@ -97,6 +106,9 @@ let statementImportSessions = new Map();
 let nextStatementBatchId = 1;
 let nextStatementFileEntryId = 1;
 let startupMetricsReported = false;
+// v1.5.3 R2：自有账号迁移失败消息（D15）。null = 无失败；字符串 = 启动时发生失败，
+// renderer 首次 app:get-info 时读取并用 error tone 显示状态栏告警
+let lastOwnAccountsMigrationError = null;
 
 const DEFAULT_BACKGROUND_COLOR = '#efe8da';
 const BUNDLED_ENUM_FILE_NAME = 'COMMON枚举.xlsx';
@@ -1149,11 +1161,15 @@ function expandBigAccountConfigurations(bigAccounts = []) {
           .filter((value) => value !== '')
       )
     );
+    // v1.5.3 R2：透传 accountNature 到展平行（写入 template_big_accounts 时入库）
+    const rawNature = typeof item.accountNature === 'string' ? item.accountNature.trim() : '';
+    const accountNature = rawNature === 'own' ? 'own' : 'client';
 
     currencies.forEach((currency) => {
       expandedRows.push({
         merchantId,
-        currency
+        currency,
+        accountNature
       });
     });
   });
@@ -1912,7 +1928,10 @@ function clearGeneratedExports() {
     allBalance: null,
     statementSessionKey: '',
     currentBatchId: '',
-    newAccount: lastGeneratedExports.newAccount
+    newAccount: lastGeneratedExports.newAccount,
+    // v1.5.3 R1：clearGeneratedExports 由"制作网银账单"流程的导入/批次切换触发；
+    // monthlyBalance session 与 statement session 独立，不在这里清
+    monthlyBalance: lastGeneratedExports.monthlyBalance
   };
 }
 
@@ -2602,7 +2621,9 @@ function registerAppHandlers() {
       accountMappingCount: database.countAllAccountMappings(),
       currencyOptions: getAvailableCurrencyCodes(),
       backgroundConfig: buildBackgroundPayload(),
-      previewModal: process.env.APP_PREVIEW_MODAL || ''
+      previewModal: process.env.APP_PREVIEW_MODAL || '',
+      // v1.5.3 R2（D15）：启动时自有账号迁移失败的错误文案；null 表示无失败
+      ownAccountsMigrationError: lastOwnAccountsMigrationError
     };
   });
   ipcMain.handle('app:save-user-guide', async () => {
@@ -3130,17 +3151,23 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
   }
 
   const cleanedBigAccounts = merchantIdManagedByBigAccounts
-    ? bigAccounts.map((item) => ({
-        merchantId: normalizeCell(item.merchantId),
-        currencies: Array.from(
-          new Set(
-            (Array.isArray(item.currencies) ? item.currencies : [])
-              .map((value) => normalizeCell(value))
-              .filter((value) => value !== '')
-          )
-        ),
-        isMultiCurrency: Boolean(item.isMultiCurrency)
-      }))
+    ? bigAccounts.map((item) => {
+        // v1.5.3 R2：透传 accountNature，缺省 → 'client'；非法值同样落 'client'
+        const rawNature = typeof item.accountNature === 'string' ? item.accountNature.trim() : '';
+        const accountNature = rawNature === 'own' ? 'own' : 'client';
+        return {
+          merchantId: normalizeCell(item.merchantId),
+          currencies: Array.from(
+            new Set(
+              (Array.isArray(item.currencies) ? item.currencies : [])
+                .map((value) => normalizeCell(value))
+                .filter((value) => value !== '')
+            )
+          ),
+          isMultiCurrency: Boolean(item.isMultiCurrency),
+          accountNature
+        };
+      })
     : [];
   const bigAccountLookup = new Map(cleanedBigAccounts.map((item) => [item.merchantId, item]));
   const seenFixedRowIndices = new Set();
@@ -5252,19 +5279,22 @@ function mergeGeneratedXlsxFiles(filePaths, mergedOutputPath) {
     fs.copyFileSync(filePaths[0], mergedOutputPath);
     return mergedOutputPath;
   }
+  // v1.5.3 R3：合并路径局部使用 xlsx-js-style，确保读回 + 写出都能保留单元格样式（cell.s）
+  // 全局 XLSX（require('xlsx')）的 writeFile 会丢 s 字段；此处 shadow 到 xlsx-js-style
+  const XLSXStyle = require('xlsx-js-style');
   // 以第一个文件为基础，追加其他文件的数据行
-  const baseWb = XLSX.readFile(filePaths[0], { cellNF: true, cellStyles: true, raw: true });
+  const baseWb = XLSXStyle.readFile(filePaths[0], { cellNF: true, cellStyles: true, raw: true });
   const baseSheetName = baseWb.SheetNames[0];
   const baseWs = baseWb.Sheets[baseSheetName];
-  const baseRange = XLSX.utils.decode_range(baseWs['!ref'] || 'A1');
+  const baseRange = XLSXStyle.utils.decode_range(baseWs['!ref'] || 'A1');
   let nextRow = baseRange.e.r + 1;
   let maxCol = baseRange.e.c;
 
   for (let fi = 1; fi < filePaths.length; fi++) {
     if (!fs.existsSync(filePaths[fi])) continue;
-    const wb = XLSX.readFile(filePaths[fi], { cellNF: true, cellStyles: true, raw: true });
+    const wb = XLSXStyle.readFile(filePaths[fi], { cellNF: true, cellStyles: true, raw: true });
     const ws = wb.Sheets[wb.SheetNames[0]];
-    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+    const range = XLSXStyle.utils.decode_range(ws['!ref'] || 'A1');
     if (range.e.c > maxCol) maxCol = range.e.c;
     // 合并 !cols 元数据（取较长的数组）
     if (Array.isArray(ws['!cols']) && (!baseWs['!cols'] || ws['!cols'].length > baseWs['!cols'].length)) {
@@ -5273,8 +5303,8 @@ function mergeGeneratedXlsxFiles(filePaths, mergedOutputPath) {
     // 跳过表头（r=0），从 r=1 开始复制数据行
     for (let r = 1; r <= range.e.r; r++) {
       for (let c = 0; c <= maxCol; c++) {
-        const srcAddr = XLSX.utils.encode_cell({ r, c });
-        const dstAddr = XLSX.utils.encode_cell({ r: nextRow, c });
+        const srcAddr = XLSXStyle.utils.encode_cell({ r, c });
+        const dstAddr = XLSXStyle.utils.encode_cell({ r: nextRow, c });
         const cell = ws[srcAddr];
         if (cell) {
           baseWs[dstAddr] = { ...cell };
@@ -5284,12 +5314,24 @@ function mergeGeneratedXlsxFiles(filePaths, mergedOutputPath) {
     }
   }
   // 更新 sheet range（用全局最大列数）
-  baseWs['!ref'] = XLSX.utils.encode_range({
+  baseWs['!ref'] = XLSXStyle.utils.encode_range({
     s: { r: 0, c: 0 },
     e: { r: nextRow - 1, c: maxCol }
   });
+  // v1.5.3 R3：合并后重新给表头注入 Courier New（读回 + 浅拷贝可能丢 s.font.name，兜底补注入）
+  for (let c = 0; c <= maxCol; c++) {
+    const addr = XLSXStyle.utils.encode_cell({ r: 0, c });
+    const cell = baseWs[addr];
+    if (!cell) continue;
+    const existingStyle = cell.s || {};
+    const existingFont = existingStyle.font || {};
+    cell.s = {
+      ...existingStyle,
+      font: { ...existingFont, name: 'Courier New' }
+    };
+  }
   fs.mkdirSync(path.dirname(mergedOutputPath), { recursive: true });
-  XLSX.writeFile(baseWb, mergedOutputPath);
+  XLSXStyle.writeFile(baseWb, mergedOutputPath);
   return mergedOutputPath;
 }
 
@@ -6218,6 +6260,26 @@ function registerBigAccountHandlers() {
         step: '保存自有账号',
         message: '自有账号保存失败',
         errorCode: 'OWN_ACCOUNT_SAVE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error
+      });
+    }
+  });
+
+  // v1.5.3 R2：拉含自有账号的完整大账号列表（专供"维护大账号"对话框初始化 / G1 月度余额弹窗）
+  // 与默认 getTemplateBigAccounts 区别：显式带 { includeOwn: true }
+  ipcMain.handle('big-account:get-with-own', (_event, templateId) => {
+    try {
+      if (!templateId) {
+        return { status: 'error', message: 'templateId 不能为空' };
+      }
+      const bigAccounts = database.getTemplateBigAccounts(templateId, { includeOwn: true });
+      return { status: 'success', bigAccounts };
+    } catch (error) {
+      return createErrorResult({
+        step: '获取大账号（含自有）',
+        message: '获取大账号失败',
+        errorCode: 'BIG_ACCOUNT_GET_WITH_OWN_RUNTIME',
         errorType: '系统错误',
         originalError: error
       });
@@ -8155,6 +8217,219 @@ function registerFileHandlers() {
   ipcMain.handle('file:export-balance', (_event, scope = 'auto') => {
     return exportStatementByScope('balance', scope);
   });
+
+  // v1.5.3 R1 (T1.3)：月度余额装配 IPC
+  // payload = { templateScope, templateName, year, month }
+  //   - templateScope：'all'（走全部普通模板） | 'single'（templateName 指定的具体模板）
+  //   - templateName：当 templateScope === 'single' 时必填；为 '全部银行渠道' 时等价于 'all'
+  // 返回：
+  //   { status: 'ready', summary: { count, missingCount, templateScope, year, month } }
+  //   { status: 'empty', message }
+  //   { status: 'error', errorCode, message }
+  // 注意：校验类错误（E1/E2/E3/E4）不走 createErrorResult 避免误触发错误报告；前端通过 createAlertDialog 弹窗
+  ipcMain.handle('monthly-balance:assemble', async (_event, payload = {}) => {
+    try {
+      const templateScopeRaw = payload && typeof payload.templateScope === 'string' ? payload.templateScope : '';
+      const templateNameRaw = payload && typeof payload.templateName === 'string' ? payload.templateName : '';
+      const yearRaw = payload ? Number(payload.year) : NaN;
+      const monthRaw = payload ? Number(payload.month) : NaN;
+
+      const hasTemplate =
+        templateScopeRaw === 'all' ||
+        templateScopeRaw === ALL_BANKS_TEMPLATE_SCOPE ||
+        (templateScopeRaw === 'single' && templateNameRaw.trim() !== '');
+      const hasTime = Number.isInteger(yearRaw) && Number.isInteger(monthRaw) && monthRaw >= 1 && monthRaw <= 12;
+
+      // E1 / E2 / E3：三类校验合并为一条 errorCode，前端根据 templateScopeRaw / year / month 自行区分弹窗文案
+      if (!hasTemplate && !hasTime) {
+        return {
+          status: 'error',
+          errorCode: 'MONTHLY_BALANCE_INVALID_INPUT',
+          message: '请选择模板和时间'
+        };
+      }
+      if (!hasTemplate) {
+        return {
+          status: 'error',
+          errorCode: 'MONTHLY_BALANCE_INVALID_INPUT',
+          message: '请选择模板'
+        };
+      }
+      if (!hasTime) {
+        return {
+          status: 'error',
+          errorCode: 'MONTHLY_BALANCE_INVALID_INPUT',
+          message: '请选择时间'
+        };
+      }
+
+      const storageRoot = ensureStorageRoot();
+      const useAll = templateScopeRaw === 'all' || templateScopeRaw === ALL_BANKS_TEMPLATE_SCOPE;
+      const assembleScope = useAll ? ALL_BANKS_TEMPLATE_SCOPE : templateNameRaw.trim();
+
+      const assembled = assembleMonthlyBalance({
+        templateScope: assembleScope,
+        year: yearRaw,
+        month: monthRaw,
+        db: database,
+        storageRoot
+      });
+
+      // E4：装配结果为空（模板/范围内无余额记录）
+      if (!assembled.records.length) {
+        lastGeneratedExports.monthlyBalance = null;
+        return {
+          status: 'empty',
+          message: `所选模板在 ${yearRaw}年${monthRaw}月的月末及更早均无余额记录，无法生成月度余额账单`
+        };
+      }
+
+      // 写入临时 xlsx（用户点"导出余额"时再通过 save dialog 另存为）
+      const balanceTemplatePath = getBalanceTemplatePath();
+      if (!fs.existsSync(balanceTemplatePath)) {
+        return createErrorResult({
+          step: '装配月度余额账单',
+          message: '未找到余额账单模板，请确认 assets/余额账单模版.xlsx 已存在',
+          errorCode: 'BALANCE_TEMPLATE_MISSING'
+        });
+      }
+      const balanceTemplateFields = extractHeaders(balanceTemplatePath);
+      if (!balanceTemplateFields.length) {
+        return createErrorResult({
+          step: '装配月度余额账单',
+          message: '余额账单模板为空或不可读',
+          errorCode: 'BALANCE_TEMPLATE_INVALID'
+        });
+      }
+
+      const records = toBalanceRows(assembled.records, balanceTemplateFields);
+      const templateLabel = useAll ? '全部银行渠道' : templateNameRaw.trim();
+      const publicFileName = sanitizeFileName(
+        `月度余额账单-${templateLabel}-${yearRaw}-${String(monthRaw).padStart(2, '0')}.xlsx`
+      );
+      // 复用 buildOutputFilePath('balance') 的目录约定：{storageRoot}/exports/{date}/balance/
+      const output = buildOutputFilePath({
+        kind: 'balance',
+        outputFileName: publicFileName
+      });
+
+      writeBalanceWorkbook({
+        templateFilePath: balanceTemplatePath,
+        records,
+        templateFields: balanceTemplateFields,
+        outputFilePath: output.outputFilePath
+      });
+
+      lastGeneratedExports.monthlyBalance = {
+        filePath: output.outputFilePath,
+        fileName: publicFileName,
+        templateScope: assembleScope,
+        templateLabel,
+        year: yearRaw,
+        month: monthRaw,
+        recordCount: assembled.records.length
+      };
+
+      appendActivityLogEntry({
+        level: 'info',
+        message: '月度余额账单装配成功',
+        details: [
+          `模板：${templateLabel}`,
+          `年月：${yearRaw}-${String(monthRaw).padStart(2, '0')}`,
+          `记录数：${assembled.records.length}`,
+          `缺失大账号数：${assembled.stats.missingAccounts.length}`,
+          `临时文件：${output.outputFilePath}`
+        ]
+      });
+
+      return {
+        status: 'ready',
+        summary: {
+          count: assembled.records.length,
+          missingCount: assembled.stats.missingAccounts.length,
+          templateLabel,
+          templateScope: assembleScope,
+          year: yearRaw,
+          month: monthRaw,
+          fileName: publicFileName
+        }
+      };
+    } catch (error) {
+      return createErrorResult({
+        step: '装配月度余额账单',
+        message: '装配月度余额账单失败，请导出报错文件查看详情',
+        errorCode: 'MONTHLY_BALANCE_ASSEMBLE_RUNTIME',
+        errorType: '系统错误',
+        originalError: error
+      });
+    }
+  });
+
+  // v1.5.3 R1 (T1.4)：月度余额另存为
+  // 前提：lastGeneratedExports.monthlyBalance 已由 assemble 成功填充
+  // 返回：
+  //   { status: 'success', filePath, message }
+  //   { status: 'cancelled' }
+  //   { status: 'error', errorCode, message }
+  ipcMain.handle('monthly-balance:export', async () => {
+    try {
+      const pending = lastGeneratedExports.monthlyBalance;
+      if (!pending || !pending.filePath) {
+        return {
+          status: 'error',
+          errorCode: 'MONTHLY_BALANCE_NO_PENDING',
+          message: '尚未生成月度余额账单，请先在弹窗中选择模板和时间'
+        };
+      }
+      if (!fs.existsSync(pending.filePath)) {
+        lastGeneratedExports.monthlyBalance = null;
+        return {
+          status: 'error',
+          errorCode: 'MONTHLY_BALANCE_FILE_MISSING',
+          message: '临时文件已丢失，请重新生成月度余额账单'
+        };
+      }
+
+      const saveResult = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: pending.fileName,
+        filters: [
+          {
+            name: 'Excel',
+            extensions: ['xlsx']
+          }
+        ]
+      });
+
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { status: 'cancelled' };
+      }
+
+      fs.copyFileSync(pending.filePath, saveResult.filePath);
+      appendActivityLogEntry({
+        level: 'info',
+        message: '月度余额账单导出成功',
+        details: [
+          `模板：${pending.templateLabel}`,
+          `年月：${pending.year}-${String(pending.month).padStart(2, '0')}`,
+          `导出路径：${saveResult.filePath}`
+        ]
+      });
+
+      return {
+        status: 'success',
+        filePath: saveResult.filePath,
+        message: '月度余额账单导出成功'
+      };
+    } catch (error) {
+      return createErrorResult({
+        step: '导出月度余额账单',
+        message: '月度余额账单另存为失败，请导出报错文件查看详情',
+        errorCode: 'MONTHLY_BALANCE_EXPORT_RUNTIME',
+        errorType: '系统错误',
+        originalError: error
+      });
+    }
+  });
 }
 
 function registerNewAccountHandlers() {
@@ -8376,6 +8651,34 @@ app.whenReady()
     database = new AppDatabase(dataPath);
     database.init();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
+
+    // v1.5.3 R2（D15）：一次性迁移 own-accounts/*.json → template_big_accounts
+    // 失败不阻塞启动：异常由迁移模块内部捕获，返回 status='failed' 时记录到
+    // lastOwnAccountsMigrationError，renderer 首次 app:get-info 读取后用 error tone 显示
+    try {
+      const storageRoot = ensureStorageRoot();
+      const migrationResult = runOwnAccountsMigration(storageRoot, database.db, {
+        appendActivityLogEntry
+      });
+      if (migrationResult && migrationResult.status === 'failed') {
+        lastOwnAccountsMigrationError = '自有账号迁移失败，请查看 own-accounts-migration-v1.5.3.log 后联系技术支持';
+      } else {
+        lastOwnAccountsMigrationError = null;
+      }
+    } catch (migrationErr) {
+      // 防御：即使迁移模块外层 catch 漏抛，这里再兜底一层
+      lastOwnAccountsMigrationError = '自有账号迁移失败，请查看 own-accounts-migration-v1.5.3.log 后联系技术支持';
+      try {
+        appendActivityLogEntry({
+          level: 'error',
+          message: '自有账号迁移（v1.5.3）抛出未捕获异常',
+          details: [String(migrationErr && migrationErr.stack ? migrationErr.stack : migrationErr)]
+        });
+      } catch (_logErr) {
+        // swallow
+      }
+    }
+
     syncTemplateLibraryFile();
     markStartupMetric(STARTUP_METRIC_MARKS.templateLibrarySynced);
 

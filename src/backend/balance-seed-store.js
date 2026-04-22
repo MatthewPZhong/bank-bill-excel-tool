@@ -33,6 +33,23 @@ function getBalanceSeedFilePath(storageRoot, bankName) {
   return path.join(getBalanceSeedsDir(storageRoot), `${safeBankName}.json`);
 }
 
+// v1.5.3 R1 (T1.1)：跨模板遍历 balance-seeds 目录，按 bankName 聚合
+// 返回值：balance-seeds 目录下所有 *.json 文件去扩展名后的 bankName 列表
+// 使用场景：月度余额导出模式下"全部银行渠道"需要枚举有 seeds 数据的所有 bankName
+function listBalanceSeedBankNames(storageRoot) {
+  const dir = getBalanceSeedsDir(storageRoot);
+
+  if (!fs.existsSync(dir)) {
+    return [];
+  }
+
+  return fs
+    .readdirSync(dir)
+    .filter((fileName) => fileName.toLowerCase().endsWith('.json'))
+    .map((fileName) => path.basename(fileName, path.extname(fileName)))
+    .filter((bankName) => bankName !== '');
+}
+
 function readBalanceSeedRecords(storageRoot, bankName) {
   const filePath = getBalanceSeedFilePath(storageRoot, bankName);
 
@@ -165,6 +182,7 @@ module.exports = {
   findPreviousBalanceSeed,
   getBalanceSeedFilePath,
   getBalanceSeedsDir,
+  listBalanceSeedBankNames,
   readBalanceSeedRecords,
   splitTemplateName,
   upsertBalanceSeedRecord,

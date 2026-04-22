@@ -156,6 +156,179 @@
       return overlay;
     }
 
+    // v1.5.3 R1 (T1.7)：导出月度余额账单模式下点"导出余额"弹出的模板 + 年月选择对话框（PRD §5.1.2）
+    // 完成按钮调 desktopApi.monthlyBalance.assemble → ready 关窗 + 主页面状态栏提示；
+    // empty/error 保留弹窗等用户修改（createAlertDialog 弹错后通过 onConfirm 重开本弹窗）
+    //
+    // 参数：
+    //   onAssembleReady(summary) —— 装配成功后由调用方（handleExportBalance 分流）接收 summary 更新 state
+    function createMonthlyBalanceExportDialog({ onAssembleReady } = {}) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card alert-card monthly-balance-export-card';
+
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      // PRD Q13：近 10 年 ~ 今年+1（2026 当下可选 2016~2027）
+      const yearOptions = [];
+      for (let y = currentYear - 9; y <= currentYear + 1; y += 1) {
+        yearOptions.push(y);
+      }
+
+      // PRD Q5 "普通模板"：排除子模板、主模板、虚拟 ID（虚拟 ID 本就不在 state.templates 里）
+      const regularTemplates = (state.templates || []).filter((template) => {
+        if (!template) return false;
+        if (template.isParent) return false;
+        if (template.parentTemplateId) return false;
+        return true;
+      });
+
+      const templateOptionsHtml = [
+        '<option value="__ALL_BANKS__" selected>全部银行渠道</option>',
+        ...regularTemplates.map((template) => {
+          const label = escapeHtml(String(template.name || ''));
+          return `<option value="${label}">${label}</option>`;
+        })
+      ].join('');
+
+      const yearOptionsHtml = yearOptions
+        .map((y) => `<option value="${y}">${y} 年</option>`)
+        .join('');
+      const monthOptionsHtml = Array.from({ length: 12 }, (_, i) => i + 1)
+        .map((m) => `<option value="${m}">${m} 月</option>`)
+        .join('');
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">请选择需要导出月度余额账单的银行渠道</div>
+          <button class="icon-close" type="button" data-action="close">×</button>
+        </div>
+        <div class="monthly-balance-form">
+          <label class="monthly-balance-row">
+            <span class="monthly-balance-label">模板</span>
+            <select class="monthly-balance-template-select mapping-text-input" data-role="template">
+              ${templateOptionsHtml}
+            </select>
+          </label>
+          <label class="monthly-balance-row">
+            <span class="monthly-balance-label">时间</span>
+            <div class="monthly-balance-time-picker">
+              <select class="monthly-balance-year-select mapping-text-input" data-role="year">
+                <option value="" selected>-- 选择年份 --</option>
+                ${yearOptionsHtml}
+              </select>
+              <select class="monthly-balance-month-select mapping-text-input" data-role="month">
+                <option value="" selected>-- 选择月份 --</option>
+                ${monthOptionsHtml}
+              </select>
+            </div>
+          </label>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="done">完成</button>
+        </div>
+      `;
+
+      const templateSel = dialog.querySelector('[data-role="template"]');
+      const yearSel = dialog.querySelector('[data-role="year"]');
+      const monthSel = dialog.querySelector('[data-role="month"]');
+
+      function currentDraft() {
+        return {
+          templateValue: templateSel.value || '',
+          year: yearSel.value ? Number(yearSel.value) : null,
+          month: monthSel.value ? Number(monthSel.value) : null
+        };
+      }
+
+      function reopenWith(draft) {
+        const next = createMonthlyBalanceExportDialog({ onAssembleReady });
+        const nextTemplateSel = next.querySelector('[data-role="template"]');
+        const nextYearSel = next.querySelector('[data-role="year"]');
+        const nextMonthSel = next.querySelector('[data-role="month"]');
+        if (nextTemplateSel) nextTemplateSel.value = draft.templateValue || '__ALL_BANKS__';
+        if (nextYearSel) nextYearSel.value = draft.year ? String(draft.year) : '';
+        if (nextMonthSel) nextMonthSel.value = draft.month ? String(draft.month) : '';
+        openModal(next);
+      }
+
+      dialog.querySelector('[data-action="close"]').addEventListener('click', () => {
+        closeModal();
+      });
+
+      dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+        const draft = currentDraft();
+        const hasTemplate = draft.templateValue !== '' && draft.templateValue !== null && draft.templateValue !== undefined;
+        const hasTime = Number.isInteger(draft.year) && Number.isInteger(draft.month);
+
+        // E1 / E2 / E3：本地校验，弹 createAlertDialog 后重开本弹窗保留已填值
+        if (!hasTemplate && !hasTime) {
+          closeModal();
+          openModal(createAlertDialog('请选择模板和时间', {
+            onConfirm: () => reopenWith(draft)
+          }));
+          return;
+        }
+        if (!hasTemplate) {
+          closeModal();
+          openModal(createAlertDialog('请选择模板', {
+            onConfirm: () => reopenWith(draft)
+          }));
+          return;
+        }
+        if (!hasTime) {
+          closeModal();
+          openModal(createAlertDialog('请选择时间', {
+            onConfirm: () => reopenWith(draft)
+          }));
+          return;
+        }
+
+        // 后端装配
+        const useAll = draft.templateValue === '__ALL_BANKS__';
+        const payload = {
+          templateScope: useAll ? 'all' : 'single',
+          templateName: useAll ? '' : draft.templateValue,
+          year: draft.year,
+          month: draft.month
+        };
+
+        let result;
+        try {
+          result = await desktopApi.monthlyBalance.assemble(payload);
+        } catch (error) {
+          closeModal();
+          openModal(createAlertDialog(`装配月度余额账单失败：${error?.message || error}`, {
+            onConfirm: () => reopenWith(draft)
+          }));
+          return;
+        }
+
+        if (result && result.status === 'ready') {
+          closeModal();
+          if (typeof onAssembleReady === 'function') {
+            onAssembleReady(result.summary);
+          }
+          return;
+        }
+        if (result && result.status === 'empty') {
+          closeModal();
+          openModal(createAlertDialog(result.message || '该模板 / 月份范围内无余额数据', {
+            onConfirm: () => reopenWith(draft)
+          }));
+          return;
+        }
+        // status === 'error' 或其它失败
+        closeModal();
+        openModal(createAlertDialog(result?.message || '装配月度余额账单失败', {
+          onConfirm: () => reopenWith(draft)
+        }));
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     function createManualBalanceSeedDialog(prompt, draft = {}, queueState = null) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
@@ -288,11 +461,16 @@
     }
 
     function cloneBigAccountItems(bigAccounts = []) {
-      return bigAccounts.map((item) => ({
-        merchantId: String(item.merchantId || ''),
-        currencies: Array.isArray(item.currencies) ? item.currencies.slice() : [],
-        isMultiCurrency: Boolean(item.isMultiCurrency)
-      }));
+      return bigAccounts.map((item) => {
+        // v1.5.3 R2：保留 accountNature（'client' / 'own'），缺省 'client'
+        const rawNature = typeof item.accountNature === 'string' ? item.accountNature.trim() : '';
+        return {
+          merchantId: String(item.merchantId || ''),
+          currencies: Array.isArray(item.currencies) ? item.currencies.slice() : [],
+          isMultiCurrency: Boolean(item.isMultiCurrency),
+          accountNature: rawNature === 'own' ? 'own' : 'client'
+        };
+      });
     }
 
     function formatBigAccountCurrencySummary(currencies) {
@@ -1768,6 +1946,10 @@
         const row = document.createElement('tr');
         row.dataset.bigAccountRow = 'true';
         row.dataset.mode = initialMode;
+        // v1.5.3 R2：记录账号性质（'client' / 'own'），缺省 'client'；完成按钮收集 nextBigAccounts 时读取
+        // view 模式下自有行在大账号前缀显示 [自有]；编辑态不显示（避免写进输入框值）
+        const rawNature = typeof item.accountNature === 'string' ? item.accountNature.trim() : '';
+        row.dataset.accountNature = rawNature === 'own' ? 'own' : 'client';
         row.innerHTML = `
           <td>
             <input class="mapping-text-input big-account-merchant-input" type="text" spellcheck="false" value="${escapeHtml(item.merchantId || '')}" />
@@ -1799,6 +1981,13 @@
 
         const merchantInput = row.querySelector('.big-account-merchant-input');
         const merchantView = row.querySelector('.big-account-merchant-view');
+        // v1.5.3 R2：自有行 view 态在大账号前加 [自有] 前缀，便于用户区分（不写进输入框值）
+        function setMerchantViewText(merchantId) {
+          const prefix = row.dataset.accountNature === 'own' ? '[自有] ' : '';
+          const textValue = String(merchantId || '');
+          merchantView.textContent = prefix + textValue;
+          merchantView.title = prefix + textValue;
+        }
         const currencyInput = row.querySelector('.big-account-currency-input');
         const currencyGhost = row.querySelector('.big-account-currency-ghost');
         const currencyInputShell = row.querySelector('.big-account-currency-input-shell');
@@ -1907,8 +2096,7 @@
             return;
           }
 
-          merchantView.textContent = merchantInput.value.trim();
-          merchantView.title = merchantInput.value.trim();
+          setMerchantViewText(merchantInput.value.trim());
         });
         toggleCompleteBtn.addEventListener('click', () => {
           if (row.dataset.mode === 'edit') {
@@ -1926,8 +2114,7 @@
             }
 
             const draft = getRowDraft();
-            merchantView.textContent = draft.merchantId;
-            merchantView.title = draft.merchantId;
+            setMerchantViewText(draft.merchantId);
             currencyView.textContent = formatBigAccountCurrencySummary(draft.currencies);
             currencyView.title = getBigAccountCurrencyTitle(draft.currencies);
             merchantInput.hidden = true;
@@ -1961,8 +2148,7 @@
 
         if (initialMode === 'view') {
           const initialDraft = getRowDraft();
-          merchantView.textContent = initialDraft.merchantId;
-          merchantView.title = initialDraft.merchantId;
+          setMerchantViewText(initialDraft.merchantId);
           currencyView.textContent = formatBigAccountCurrencySummary(initialDraft.currencies);
           currencyView.title = getBigAccountCurrencyTitle(initialDraft.currencies);
           merchantInput.hidden = true;
@@ -2029,13 +2215,20 @@
           setStatus(result.message, 'error');
           return;
         }
+        // v1.5.3 R2：客资 + 自有账号统一进 tbody（行带 accountNature 区分）；
+        // pendingOwnAccounts 仍保留，作为过渡兼容 big-account:save-own-accounts（Q6 决策）
         pendingOwnAccounts = result.ownAccounts || [];
         tbody.innerHTML = '';
         const clientAccounts = result.clientAccounts || [];
-        if (clientAccounts.length === 0) {
+        const ownAccounts = result.ownAccounts || [];
+        const mergedAccounts = [
+          ...clientAccounts.map((item) => ({ ...item, accountNature: 'client' })),
+          ...ownAccounts.map((item) => ({ ...item, accountNature: 'own' }))
+        ];
+        if (mergedAccounts.length === 0) {
           tbody.appendChild(createBigAccountRow({}, 'edit'));
         } else {
-          clientAccounts.forEach((item) => {
+          mergedAccounts.forEach((item) => {
             tbody.appendChild(createBigAccountRow(item, 'view'));
           });
         }
@@ -2067,11 +2260,13 @@
                 Array.from(tbody.querySelectorAll('tr[data-big-account-row]'))
                   .filter((r) => r.dataset.mode === 'view')
                   .map((r) => {
-                    const mid = r.querySelector('.big-account-merchant-view')?.textContent?.trim() || '';
+                    // v1.5.3 R2：大账号输入框的 .value 是裸 merchantId（不含 [自有] 前缀），读取它避免剥离问题
+                    const mid = r.querySelector('.big-account-merchant-input')?.value?.trim() || '';
                     const isMC = r.querySelector('.big-account-multi-checkbox')?.checked || false;
                     const cText = r.querySelector('.big-account-currency-view')?.title || '';
                     const cs = isMC ? cText.split('、').filter(Boolean) : [cText].filter(Boolean);
-                    return { merchantId: mid, currencies: cs, isMultiCurrency: isMC };
+                    const nature = r.dataset.accountNature === 'own' ? 'own' : 'client';
+                    return { merchantId: mid, currencies: cs, isMultiCurrency: isMC, accountNature: nature };
                   })
                   .filter((i) => i.merchantId)
               ),
@@ -2102,7 +2297,9 @@
           return {
             merchantId,
             currencies,
-            isMultiCurrency
+            isMultiCurrency,
+            // v1.5.3 R2：从 row.dataset 读取账号性质（import-bank-info / initialBigAccounts 回显时已设置）
+            accountNature: row.dataset.accountNature === 'own' ? 'own' : 'client'
           };
         }).filter((item) => item.merchantId !== '' && item.currencies.length > 0);
 
@@ -5003,6 +5200,7 @@
       createAlertDialog,
       createConfirmDialog,
       createExportScopeDialog,
+      createMonthlyBalanceExportDialog,
       createManualBalanceSeedDialog,
       escapeHtml,
       cloneBigAccountItems,

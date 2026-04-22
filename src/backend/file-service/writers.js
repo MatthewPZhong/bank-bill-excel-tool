@@ -1,7 +1,35 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const XLSX = require('xlsx');
+// v1.5.3 R3：切换到 xlsx-js-style 以支持写入单元格样式（cell.s.font 等）
+// 仅 writers.js 内部切换，其它文件仍用 xlsx（减少打包体积）
+const XLSX = require('xlsx-js-style');
 const { FileValidationError, normalizeCell } = require('./common');
+
+// v1.5.3 R3：给表头行（第 1 行）每个单元格注入 Courier New 字体
+// 决策 D14：字体名写死 'Courier New'，不加可选参数、不加回退链
+// 只改 font.name，保留单元格原有其它样式（字号、颜色、粗体等）
+function applyHeaderRowFont(worksheet, headerRowIndex = 0) {
+  if (!worksheet || !worksheet['!ref']) {
+    return;
+  }
+
+  const range = XLSX.utils.decode_range(worksheet['!ref']);
+  if (headerRowIndex < range.s.r || headerRowIndex > range.e.r) {
+    return;
+  }
+
+  for (let c = range.s.c; c <= range.e.c; c += 1) {
+    const addr = XLSX.utils.encode_cell({ r: headerRowIndex, c });
+    const cell = worksheet[addr];
+    if (!cell) continue;
+    const existingStyle = cell.s || {};
+    const existingFont = existingStyle.font || {};
+    cell.s = {
+      ...existingStyle,
+      font: { ...existingFont, name: 'Courier New' }
+    };
+  }
+}
 
 function countSignificantDigitsFromString(str) {
   const cleaned = str.replace(/[^0-9]/g, '').replace(/^0+/, '');
@@ -194,6 +222,7 @@ function writeWorkbookRows({ rows, outputFilePath, sheetName = 'COMMON' }, forma
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.aoa_to_sheet(rows);
   applyExportFieldFormats(worksheet, rows, formatters);
+  applyHeaderRowFont(worksheet, 0);
 
   XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
   fs.mkdirSync(path.dirname(outputFilePath), { recursive: true });
@@ -260,6 +289,7 @@ function writeBalanceWorkbook({
   XLSX.utils.sheet_add_aoa(worksheet, normalizedRecords, { origin: 'A2' });
   applyBalanceFieldFormats(worksheet, headerFields, normalizedRecords, formatters);
   worksheet['!ref'] = `A1:${XLSX.utils.encode_col(columnCount - 1)}${Math.max(normalizedRecords.length + 1, 2)}`;
+  applyHeaderRowFont(worksheet, 0);
 
   fs.mkdirSync(path.dirname(outputFilePath), { recursive: true });
   XLSX.writeFile(workbook, outputFilePath);

@@ -19,26 +19,33 @@ function parseJsonArray(rawValue) {
 }
 
 function groupBigAccountRows(rows) {
+  // v1.5.3 R2：按 (merchantId + accountNature) 分组，保证 client 与 own 不被误合并
+  // 返回结构含 accountNature（缺省 'client'，与老调用点向后兼容）
   const groupMap = new Map();
 
   rows.forEach((row) => {
     const merchantId = normalizeText(row.merchantId);
     const currency = normalizeText(row.currency);
+    const rawNature = normalizeText(row.accountNature);
+    const accountNature = rawNature === 'own' ? 'own' : 'client';
 
     if (!merchantId) {
       return;
     }
 
-    if (!groupMap.has(merchantId)) {
-      groupMap.set(merchantId, {
+    const key = `${merchantId}::${accountNature}`;
+
+    if (!groupMap.has(key)) {
+      groupMap.set(key, {
         merchantId,
         currencies: [],
-        isMultiCurrency: false
+        isMultiCurrency: false,
+        accountNature
       });
     }
 
     if (currency) {
-      groupMap.get(merchantId).currencies.push(currency);
+      groupMap.get(key).currencies.push(currency);
     }
   });
 
@@ -47,7 +54,8 @@ function groupBigAccountRows(rows) {
     return {
       merchantId: item.merchantId,
       currencies,
-      isMultiCurrency: currencies.length > 1
+      isMultiCurrency: currencies.length > 1,
+      accountNature: item.accountNature
     };
   });
 }
