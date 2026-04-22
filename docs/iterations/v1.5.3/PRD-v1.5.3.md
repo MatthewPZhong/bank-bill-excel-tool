@@ -553,4 +553,29 @@ v0 的 13 个待确认点已由用户逐条拍板，结果如下：
 
 ## 十二、实施记录
 
-> 由 PR merged + 归档后自动追加，PM 不需要手动填写。
+### PR #22 — feat(v1.5.3)（2026-04-22 归档）
+
+**对应分支**：`v1.5.x → main`
+**归档文件**：`docs/prs/PR22-v1.5.3.md`
+
+**改动清单**：
+
+- 代码（19 个 M + 3 个新增）
+  - 前端：`index.html` / `src/renderer.js` / `src/renderer-dialogs.js` / `src/styles.css`
+  - 后端：`src/main.js` / `src/preload.js` / `src/backend/database.js` / `src/backend/database/migrations.js` / `src/backend/database/template-repository.js` / `src/backend/database/utils.js` / `src/backend/balance-seed-store.js` / `src/backend/file-service.js` / `src/backend/file-service/writers.js`
+  - 新增：`src/main-process/monthly-balance.js` / `src/backend/database/own-accounts-migration.js`
+- 测试：`scripts/smoke/scenarios.js` 新增 T1.9 月度余额 7 场景；新增 `scripts/test-v1.5.3-regression.js`（20 自动回归 + 3 R4 精度用例）
+- 依赖：`package.json` 新增 `xlsx-js-style@^1.2.0`，版本号 `1.5.2 → 1.5.3`
+- 文档：`CHANGELOG.md` / `docs/VERSION_FEATURE_HISTORY.md` / `docs/USER_GUIDE.md` 三件套同步
+- 迭代：`docs/iterations/v1.5.3/{PRD,TechDoc}.md` / `changes/v1.5.3/{spec,tasks,log}.md`
+
+**自测结果**：
+- `npm run smoke` 全绿
+- `node scripts/test-v1.5.3-regression.js`：P0 18/18 + P1 5/6（P1-7 skipped：错误报告为 txt 非 xlsx）
+- 用户手动回归 29 条（21 P0 + 8 P1）全部通过
+
+**关键决策**（完整决策记录见 §十）：
+- D14 = B（Courier New 写死，新开账户模块副作用接受）
+- D15（迁移失败不阻塞启动，状态栏告警）
+- D16（orphan bankName 跳过 + `[WARN]` 日志）
+- D17 = A（R4 浮点精度在 1.5.3 内 hotfix；`roundAmount` 2 位小数，`roundAmountHighPrecision` 12 位对样本 2 不收敛）
