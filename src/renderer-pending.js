@@ -306,10 +306,11 @@ window.__rendererPending = (function () {
       title.textContent = '请选择 Pending 数据所属年月';
       dialog.appendChild(title);
 
-      const row = document.createElement('div');
-      row.className = 'pending-rule-row';
+      // 复用月度余额模块的"时间选取器"样式（monthly-balance-time-picker + mapping-text-input）
+      const picker = document.createElement('div');
+      picker.className = 'monthly-balance-time-picker pending-import-month-picker';
       const yearSelect = document.createElement('select');
-      yearSelect.className = 'pending-rule-select';
+      yearSelect.className = 'monthly-balance-year-select mapping-text-input';
       const now = new Date();
       const currentYear = now.getFullYear();
       for (let y = currentYear - 9; y <= currentYear + 1; y += 1) {
@@ -320,7 +321,7 @@ window.__rendererPending = (function () {
         yearSelect.appendChild(opt);
       }
       const monthSelect = document.createElement('select');
-      monthSelect.className = 'pending-rule-select';
+      monthSelect.className = 'monthly-balance-month-select mapping-text-input';
       const defaultMonth = now.getMonth() + 1;
       for (let m = 1; m <= 12; m += 1) {
         const opt = document.createElement('option');
@@ -329,9 +330,9 @@ window.__rendererPending = (function () {
         if (m === defaultMonth) opt.selected = true;
         monthSelect.appendChild(opt);
       }
-      row.appendChild(yearSelect);
-      row.appendChild(monthSelect);
-      dialog.appendChild(row);
+      picker.appendChild(yearSelect);
+      picker.appendChild(monthSelect);
+      dialog.appendChild(picker);
 
       const actions = document.createElement('div');
       actions.className = 'dialog-actions center';

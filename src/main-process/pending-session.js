@@ -80,11 +80,18 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
       }
 
       const jobMeta = { dbPath, yearMonth, files, archivePath };
+      // 关键：Electron 运行时 process.execPath 指向 Electron 二进制，直接 spawn 会把 worker.js
+      // 路径当成 Electron 自己的启动脚本参数，worker 里 argv[2] 拿到的是 worker.js 路径而不是
+      // JSON。必须设 ELECTRON_RUN_AS_NODE=1 让 Electron 以纯 Node 模式启动。
+      // Node 直跑时该变量不影响（测试脚本下 process.execPath 本就是 node）。
       const worker = spawn(process.execPath, [
         `--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`,
         WORKER_SCRIPT,
         JSON.stringify(jobMeta)
-      ], { stdio: ['ignore', 'pipe', 'pipe'] });
+      ], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+      });
 
       let stdoutBuf = '';
       let stderrBuf = '';

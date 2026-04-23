@@ -2475,6 +2475,9 @@ select {
   width: auto;
   max-width: 420px;
 }
+.pending-import-month-picker {
+  margin-bottom: 20px;
+}
 .pending-rule-columns {
   display: flex;
   gap: 32px;
