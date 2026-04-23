@@ -579,3 +579,32 @@ v0 的 13 个待确认点已由用户逐条拍板，结果如下：
 - D15（迁移失败不阻塞启动，状态栏告警）
 - D16（orphan bankName 跳过 + `[WARN]` 日志）
 - D17 = A（R4 浮点精度在 1.5.3 内 hotfix；`roundAmount` 2 位小数，`roundAmountHighPrecision` 12 位对样本 2 不收敛）
+
+### PR #23 — 协作基建 + preview 链路扩充（2026-04-23 归档）
+
+**对应分支**：`v1.5.x → main`
+**归档文件**：`docs/prs/PR23-v1.5.3.md`
+
+**改动清单**（56 文件 / +12627 / -9）：
+
+- 协作基建（变更 A）
+  - 新增：`rules/`（5 文件：project-context / coding-style / important-variables / domain-rules / security）
+  - 新增：`knowledge/index.md` / `.claude/agents/{dev,pm}.md` / `.claude/skills/check-vars/SKILL.md`
+  - 新增：`docs/templates/{PRD,TechDoc}-template.md` / `changes/templates/{spec,tasks,log,test-spec}.md`
+  - 新增：`docs/analysis/var-reference-stats.{md,json}` / `scripts/{scan-vars,check-vars}.js`
+  - 新增：`CLAUDE.md`（项目协作约定）
+  - 修改：`package.json`（`scan:vars` / `check:vars` scripts）/ `.gitignore`（忽略 `.claude/settings.local.json`）
+  - 补归档：`changes/v1.5.2/`
+- preview 链路扩充（变更 B）
+  - 修改：`src/renderer-previews.js`（+190：9 个 `apply*PreviewState`）/ `src/renderer.js`（+65：destructure + `info.previewModal` 路由 9 case）/ `src/renderer-dialogs.js`（+7：preview 启动路径）
+  - 修改：`scripts/render-*.js`（输出路径迁移到 `docs/previews/`）/ `package.json`（10 条 `preview:*` + `preview:all`）
+  - 产出：`docs/previews/` 20 张图（11 重命名 + 9 新增）+ `README.md`
+
+**自测结果**：
+- `npm run smoke` ✅
+- `npm run preview:all` ✅（串联 20 条 `preview:*`，20 张图全部生成）
+- `/check-vars` 跑通：Critical 2 (`ADVANCED_MAPPING_FIELDS` / `BALANCE_CALCULATED_OPTION`) + Runtime-state 3 (`MODULES` / `dialog` / `state`)，全部为 preview 链路 mock 消费，无实质语义变动
+
+**Self-review 修复轨迹**：
+- round 1（`7cbffc9`）— I-1：`check-vars.js` 默认模式 diff 三重采集，简化为单次 `git diff HEAD`
+- round 2（`f31b035`）— M-1/M-2/M-3：`templateRepository` 重复 review 要点去重；`dialog` 条目加 check-vars 命中说明；PR body "20 张图" 加 `preview:all` 串联 20 条交叉引用
