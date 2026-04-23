@@ -288,6 +288,22 @@ function ensureParentTemplateSupport(db) {
   }
 }
 
+// v1.5.2 需求 3：按文件名映射模板 — 在 templates 表新增 filename_fixed_field 列
+// 幂等：若列已存在则跳过（老库再次启动不重复添加）。
+function ensureTemplateFilenameFixedFieldSupport(db) {
+  if (!hasColumn(db, 'templates', 'filename_fixed_field')) {
+    db.exec("ALTER TABLE templates ADD COLUMN filename_fixed_field TEXT NOT NULL DEFAULT '';");
+  }
+}
+
+// v1.5.3 需求 R2：自有账号合并入大账号表 — 在 template_big_accounts 表新增 account_nature 列
+// 幂等：若列已存在则跳过；默认值 'client'（客资），迁移脚本写入 'own' 表示自有
+function ensureTemplateBigAccountNatureSupport(db) {
+  if (!hasColumn(db, 'template_big_accounts', 'account_nature')) {
+    db.exec("ALTER TABLE template_big_accounts ADD COLUMN account_nature TEXT NOT NULL DEFAULT 'client';");
+  }
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
@@ -295,7 +311,9 @@ module.exports = {
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
+  ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
+  ensureTemplateFilenameFixedFieldSupport,
   ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,
   hasColumn

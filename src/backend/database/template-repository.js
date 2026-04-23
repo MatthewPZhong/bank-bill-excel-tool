@@ -7,6 +7,8 @@ const {
 } = require('./utils');
 
 function listTemplates(db) {
+  // v1.5.3 R2 §3.1：bigAccountCount / singleBigAccountMerchantId 不含自有账号
+  // JOIN ON 条件加 ba.account_nature='client'（保留 LEFT JOIN 语义：无 client 的模板仍返回 count=0）
   const statement = db.prepare(`
     SELECT
       t.id,
@@ -19,13 +21,15 @@ function listTemplates(db) {
       t.date_format AS dateFormat,
       t.is_parent AS isParent,
       t.parent_template_id AS parentTemplateId,
+      t.filename_fixed_field AS filenameFixedField,
       COUNT(DISTINCT m.id) AS mappingCount,
       COUNT(DISTINCT ba.merchant_id) AS bigAccountCount,
       merchant_mapping.mapped_field AS merchantIdMappedField,
       MIN(ba.merchant_id) AS singleBigAccountMerchantId
     FROM templates t
     LEFT JOIN template_mappings m ON m.template_id = t.id
-    LEFT JOIN template_big_accounts ba ON ba.template_id = t.id
+    LEFT JOIN template_big_accounts ba
+      ON ba.template_id = t.id AND ba.account_nature = 'client'
     LEFT JOIN template_mappings merchant_mapping
       ON merchant_mapping.template_id = t.id
       AND merchant_mapping.template_field = 'MerchantId'
@@ -50,6 +54,7 @@ function getTemplate(db, templateId) {
         t.date_format AS dateFormat,
         t.is_parent AS isParent,
         t.parent_template_id AS parentTemplateId,
+        t.filename_fixed_field AS filenameFixedField,
         (
           SELECT COUNT(1)
           FROM template_mappings m
@@ -58,7 +63,7 @@ function getTemplate(db, templateId) {
         (
           SELECT COUNT(DISTINCT merchant_id)
           FROM template_big_accounts ba
-          WHERE ba.template_id = t.id
+          WHERE ba.template_id = t.id AND ba.account_nature = 'client'
         ) AS bigAccountCount,
         (
           SELECT mapped_field
@@ -70,7 +75,7 @@ function getTemplate(db, templateId) {
         (
           SELECT MIN(merchant_id)
           FROM template_big_accounts ba
-          WHERE ba.template_id = t.id
+          WHERE ba.template_id = t.id AND ba.account_nature = 'client'
         ) AS singleBigAccountMerchantId
       FROM templates t
       WHERE t.id = ?
@@ -104,6 +109,27 @@ function getTemplateByName(db, name) {
   return row ? getTemplate(db, row.id) : null;
 }
 
+// v1.5.3 R2 迁移专用：按 bankName 查所有 splitTemplateName(name).bankName 匹配的模板
+// 注：splitTemplateName 实现在 balance-seed-store.js —— 这里按 '-' 前缀匹配，避免循环依赖
+function getTemplatesByBankName(db, bankName) {
+  const target = normalizeText(bankName);
+  if (!target) return [];
+  return db
+    .prepare(`
+      SELECT id, name
+      FROM templates
+      WHERE name = ? OR name LIKE ?
+      ORDER BY id ASC
+    `)
+    .all(target, `${target}-%`)
+    .map((row) => ({ id: row.id, name: normalizeText(row.name) }))
+    .filter((t) => {
+      // 与 splitTemplateName 口径严格一致：name.split('-')[0] === bankName
+      const firstPart = t.name.split('-')[0] || '';
+      return firstPart === target;
+    });
+}
+
 function listChildTemplates(db, parentTemplateId) {
   return db.prepare(`
     SELECT
@@ -117,10 +143,11 @@ function listChildTemplates(db, parentTemplateId) {
       t.date_format AS dateFormat,
       t.is_parent AS isParent,
       t.parent_template_id AS parentTemplateId,
+      t.filename_fixed_field AS filenameFixedField,
       (SELECT COUNT(1) FROM template_mappings m WHERE m.template_id = t.id) AS mappingCount,
-      (SELECT COUNT(DISTINCT merchant_id) FROM template_big_accounts ba WHERE ba.template_id = t.id) AS bigAccountCount,
+      (SELECT COUNT(DISTINCT merchant_id) FROM template_big_accounts ba WHERE ba.template_id = t.id AND ba.account_nature = 'client') AS bigAccountCount,
       (SELECT mapped_field FROM template_mappings mm WHERE mm.template_id = t.id AND mm.template_field = 'MerchantId' LIMIT 1) AS merchantIdMappedField,
-      (SELECT MIN(merchant_id) FROM template_big_accounts ba WHERE ba.template_id = t.id) AS singleBigAccountMerchantId
+      (SELECT MIN(merchant_id) FROM template_big_accounts ba WHERE ba.template_id = t.id AND ba.account_nature = 'client') AS singleBigAccountMerchantId
     FROM templates t
     WHERE t.parent_template_id = ?
     ORDER BY t.id ASC
@@ -225,22 +252,36 @@ function deleteTemplate(db, templateId) {
   db.prepare('DELETE FROM templates WHERE id = ?').run(templateId);
 }
 
-function getTemplateBigAccounts(db, templateId) {
+// v1.5.2 需求 3：保存模板的文件名固定字段
+// 输入：templateId（数字），value（字符串，允许空串）
+function saveTemplateFilenameFixedField(db, templateId, value) {
+  const now = new Date().toISOString();
+  db
+    .prepare('UPDATE templates SET filename_fixed_field = ?, updated_at = ? WHERE id = ?')
+    .run(String(value ?? ''), now, templateId);
+}
+
+// v1.5.3 R2 §3.1：默认仅返回 account_nature='client'；
+// R1 月度余额导出场景显式传 { includeOwn: true } 才返回自有账号
+function getTemplateBigAccounts(db, templateId, { includeOwn = false } = {}) {
+  const natureClause = includeOwn ? '' : "AND account_nature = 'client'";
   return db
     .prepare(`
       SELECT
         merchant_id AS merchantId,
         currency,
-        row_index AS rowIndex
+        row_index AS rowIndex,
+        account_nature AS accountNature
       FROM template_big_accounts
-      WHERE template_id = ?
+      WHERE template_id = ? ${natureClause}
       ORDER BY row_index ASC, id ASC
     `)
     .all(templateId)
     .map((row) => ({
       merchantId: normalizeText(row.merchantId),
       currency: normalizeText(row.currency),
-      rowIndex: Number(row.rowIndex || 0)
+      rowIndex: Number(row.rowIndex || 0),
+      accountNature: normalizeText(row.accountNature) || 'client'
     }));
 }
 
@@ -363,6 +404,13 @@ function getTemplateMappings(db, templateId) {
   };
 }
 
+// v1.5.3 R2 round 3 修复 (Codex Finding 5)：
+// 用户在 mapping dialog 直接保存（不开维护大账号）时，前端 currentBigAccounts 来自 §3.1 过滤后的 client-only 列表，
+// 旧 saveMappings 直接 DELETE all + INSERT all → 数据库 own 被静默删除。
+// 修复：新增 `preserveOwn` 参数（默认 false 保持向后兼容旧行为；仅 mapping dialog 显式传 true 才生效）：
+//   - false（默认 = 旧行为）→ DELETE all + INSERT all（caller 已显式接管 own，传含 own 全集；如 bundle 导入 / mapping dialog onDone 含 own 路径）
+//   - true → DELETE 只删 client，INSERT 仅接收 client 行（own 不动；caller 是 mapping dialog 直接保存路径）
+// 调用方约定：bigAccountsLoadedWithOwn=false → preserveOwn=true；=true → preserveOwn=false
 function saveMappings(
   db,
   templateId,
@@ -370,14 +418,23 @@ function saveMappings(
   bigAccounts = [],
   fixedAssignments = [],
   dateFormat,
-  amountSplitRules = null
+  amountSplitRules = null,
+  { preserveOwn = false } = {}
 ) {
   const now = new Date().toISOString();
+  // v1.5.3 R2 round 6 second-pass self-review (C2)：在 try 块外声明
+  // 让 COMMIT 之后的 warn 能访问到；transaction rollback 抛出时永远不到 warn 那行
+  const skippedOwnRows = [];
   db.exec('BEGIN');
 
   try {
     db.prepare('DELETE FROM template_mappings WHERE template_id = ?').run(templateId);
-    db.prepare('DELETE FROM template_big_accounts WHERE template_id = ?').run(templateId);
+    if (preserveOwn) {
+      // 仅删 client；own 保留（caller 没接管 own）
+      db.prepare("DELETE FROM template_big_accounts WHERE template_id = ? AND account_nature = 'client'").run(templateId);
+    } else {
+      db.prepare('DELETE FROM template_big_accounts WHERE template_id = ?').run(templateId);
+    }
     db.prepare('DELETE FROM template_fixed_assignments WHERE template_id = ?').run(templateId);
 
     const insertMappingStatement = db.prepare(`
@@ -385,10 +442,11 @@ function saveMappings(
         template_id, template_field, mapped_field, mapped_fields_json, row_index, created_at
       ) VALUES (?, ?, ?, ?, ?, ?)
     `);
+    // v1.5.3 R2：account_nature 字段入库（前端缺省 → 'client'；'own' 仅迁移 / 导入 excel 带入）
     const insertBigAccountStatement = db.prepare(`
       INSERT INTO template_big_accounts (
-        template_id, merchant_id, currency, row_index, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
+        template_id, merchant_id, currency, row_index, account_nature, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     const insertFixedAssignmentStatement = db.prepare(`
       INSERT INTO template_fixed_assignments (
@@ -414,16 +472,29 @@ function saveMappings(
       );
     });
 
+    // v1.5.3 R2 round 6 self-review (I2 + C2)：跟踪 preserveOwn=true 时被防御性跳过的 own 行
+    // 用于在 COMMIT 之后打 warn，让 caller / 排障人员感知（不是静默 return）
+    // skippedOwnRows 在 try 块外声明 — rollback 时不会误打 warn (C2)
     bigAccounts.forEach((item, index) => {
+      // v1.5.3 R2：account_nature 仅接受 'client' / 'own'；缺省或非法 → 'client'
+      const rawNature = normalizeText(item.accountNature);
+      const accountNature = rawNature === 'own' ? 'own' : 'client';
+      // preserveOwn=true 时 caller 应只传 client 行；防御性跳过 own 行避免与已存的 own 冲突 (UNIQUE 约束)
+      if (preserveOwn && accountNature === 'own') {
+        skippedOwnRows.push(`${normalizeText(item.merchantId)}/${normalizeText(item.currency)}`);
+        return;
+      }
       insertBigAccountStatement.run(
         templateId,
         item.merchantId,
         item.currency,
         index,
+        accountNature,
         now,
         now
       );
     });
+    // 注：console.warn 在 COMMIT 之后才打（见函数末尾），避免 transaction rollback 时误导排障
 
     fixedAssignments.forEach((item, index) => {
       const merchantId = normalizeText(item.merchantId);
@@ -475,6 +546,15 @@ function saveMappings(
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;
+  }
+
+  // v1.5.3 R2 round 6 second-pass self-review (C2)：
+  // skippedOwnRows 的 warn 移到 COMMIT 之后；如果上面 transaction rollback 已抛出，这行不会执行 → warn 不会误打
+  if (skippedOwnRows.length > 0) {
+    // 不 throw，因为 caller 可能是 batch import / bundle 误传 own 行；warn 让排障可见但不阻塞写入
+    console.warn(
+      `[v1.5.3] saveMappings(preserveOwn=true) 防御性跳过 ${skippedOwnRows.length} 个 own 行（caller 应只传 client）：${skippedOwnRows.join(', ')}`
+    );
   }
 }
 
@@ -833,6 +913,12 @@ function listTemplateBundleEntries(db) {
       parentTemplateKey = parentRow ? normalizeText(parentRow.template_key) : null;
     }
 
+    // v1.5.3 R2：bundle 导出带 accountNature，且包含 own 账号（bundle 是全量备份/恢复场景，特例放行）
+    // 独立再查一次大账号（含 own），然后分组，避免依赖 payload.bigAccounts（后者来自 getTemplateMappings 默认过滤 own）
+    const allBigAccountsWithNature = groupBigAccountRows(
+      getTemplateBigAccounts(db, template.id, { includeOwn: true })
+    );
+
     return {
       templateKey: template.templateKey,
       name: template.name,
@@ -840,12 +926,16 @@ function listTemplateBundleEntries(db) {
       headers: template.headers,
       isParent: Boolean(template.isParent),
       parentTemplateKey,
+      // v1.5.2 需求 3：文件名固定字段随 bundle 透传
+      filenameFixedField: template.filenameFixedField || '',
       mappings: payload ? payload.mappings.map((mapping) => ({ ...mapping })) : [],
-      bigAccounts: payload ? payload.bigAccounts.map((item) => ({
+      bigAccounts: allBigAccountsWithNature.map((item) => ({
         merchantId: item.merchantId,
         currencies: item.currencies.slice(),
-        isMultiCurrency: Boolean(item.isMultiCurrency)
-      })) : [],
+        isMultiCurrency: Boolean(item.isMultiCurrency),
+        // v1.5.3 R2：bundleVersion 保持 v3，字段可选，旧版读取时被忽略
+        accountNature: item.accountNature || 'client'
+      })),
       fixedAssignments: payload ? payload.fixedAssignments.map((item) => ({ ...item })) : [],
       amountSplitRules: payload && Array.isArray(payload.amountSplitRules)
         ? payload.amountSplitRules.map((rule) => ({ ...rule }))
@@ -884,6 +974,7 @@ module.exports = {
   getTemplateByKey,
   getTemplateByName,
   getTemplateMappings,
+  getTemplatesByBankName,
   listChildTemplates,
   listTemplateBundleEntries,
   listTemplates,
@@ -896,6 +987,7 @@ module.exports = {
   saveBillSplitRow,
   saveBillSplitRowCount,
   saveMappings,
+  saveTemplateFilenameFixedField,
   setChildParent,
   setParentStatus,
   upsertTemplate

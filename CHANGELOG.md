@@ -1,5 +1,55 @@
 # Changelog
 
+## 1.5.3 - 2026-04-22
+
+- **主页面「模板」下拉改为「模式」**：`index.html:47` 的 `<label>` 文本由「模板」改为「模式」；下拉值域收窄为两条——`制作网银账单`（默认选中，内部隐式固定为 `__FILENAME_MAPPING__`）和 `导出月度余额账单`（R1 新增）。真实模板与虚拟 ID 不再出现在主页面下拉，仅在「导出月度余额账单」模式的弹窗内出现（`src/renderer.js:updateTemplateSelect`）。`__FILENAME_MAPPING__` / 具体模板选择 / v1.5.2 行为在「制作网银账单」模式下完全保留。
+- **新增「导出月度余额账单」模式**：在该模式下点击「导出余额」弹出 `createMonthlyBalanceExportDialog`（`src/renderer-dialogs.js`），含标题「请选择需要导出月度余额账单的银行渠道」+ 模板下拉（`全部银行渠道` 默认选中 + 普通模板列表）+ 年月选择器（年份范围 = 近 10 年 ~ 今年+1；月份必须主动选）+ 完成按钮。完成后后端走 `monthly-balance:assemble` 装配 records 并写入临时 xlsx，再由 `monthly-balance:export` 弹系统保存对话框另存；文件命名 `月度余额账单-{模板名 or "全部银行渠道"}-{YYYY-MM}.xlsx`，单文件单 sheet 合并全部模板/大账号/币种。
+- **月度余额装配规则（Q2 最新余额定义）**：对每个大账号 × 币种，优先取 `billDate === 月末最后一日` 的 seed；无则按 `billDate ≤ 月末最后一日` 取最大的一条（兜底）；全部 seeds `billDate > 月末` 或完全无 seed → **跳过该大账号**（不报错）。表头固定取自 `assets/余额账单模版.xlsx`，模板未提供的字段空字符串补位。详见 `src/main-process/monthly-balance.js:assembleMonthlyBalance + toBalanceRows`。
+- **按钮可用/禁用矩阵**：`导出月度余额账单` 模式下 `importFileBtn / exportDetailBtn / accountMappingBtn` 置灰禁用；`importTemplateBtn / manageTemplateBtn / exportBalanceBtn` 可用。`setExportAvailability` 在月度余额模式下短路返回，避免外部调用误覆盖按钮状态（`src/renderer.js:applyStatementModeSideEffects`）。
+- **自有账号合并入大账号表**：`template_big_accounts` 表新增列 `account_nature TEXT NOT NULL DEFAULT 'client'`（取值 `'client' | 'own'`；`src/backend/database/migrations.js:ensureTemplateBigAccountNatureSupport`）。`parseBankAccountExcel` 返回值保持不变，但「维护大账号」对话框 tbody 现同时渲染 `clientAccounts + ownAccounts`（UI 不加颜色/标识区分，仅在 tr 的 `dataset.accountNature` 携带）；view 态下 `own` 行在 merchantView 前加 `[自有] ` 前缀（不写进 input 值）。`saveMappings` 落库时透传每条 `accountNature` 字段，白名单校验 `'client' | 'own'`，非法/缺省默认 `'client'`。
+- **§3.1 自有账户隔离规则（跨需求一致性约束）**：自有账户**仅在 R1「导出月度余额账单」场景参与**，其它场景一律过滤。实现：`getTemplateBigAccounts(db, templateId, { includeOwn = false } = {})` 默认 `includeOwn=false`，R1 装配链路显式传 `{ includeOwn: true }`。`listTemplates / getTemplate / listChildTemplates` 的 `bigAccountCount` / `singleBigAccountMerchantId` 子查询统一加 `AND ba.account_nature = 'client'`——维护大账号对话框初始化另走独立 IPC `big-account:get-with-own`（`src/preload.js:bigAccount.getWithOwn`）拿含自有的完整列表供 UI 展示。`groupBigAccountRows`（`utils.js`）分组 key 扩展为 `merchantId::accountNature`，防止 client + own 同 merchantId 被错误合并。
+- **历史 own-accounts/*.json 启动迁移（D15/D16）**：新增 `src/backend/database/own-accounts-migration.js:runOwnAccountsMigration`，在 `app.whenReady` 启动序列里（`database.init()` 之后）执行一次性迁移。按 bankName 展开 `{merchantId, currencies}` 写入所有 `splitTemplateName(name).bankName === bankName` 匹配的模板，nature='own'，`INSERT OR IGNORE`；冲突保留已有记录并写 `[CONFLICT]` 日志。迁移幂等 flag = `app_settings.own_accounts_migration_v1_5_3_done='1'`。迁移日志独立写 `{storageRoot}/own-accounts-migration-v1.5.3.log`（ISO 时间戳 + `[INFO]/[OK]/[CONFLICT]/[WARN]/[ERROR]` 前缀）。原 `own-accounts/*.json` **保留不删除**，作为回退兼容；`big-account:save-own-accounts` IPC + `own-account-store.js` 同步并行保留（Q6 过渡期兼容）。
+- **D15 迁移失败不阻塞启动**：`runOwnAccountsMigration` 外层包 try/catch 返回 `{ status: 'done' | 'already-done' | 'failed', stats, error? }`；失败不抛异常、不阻塞应用加载。`lastOwnAccountsMigrationError` 缓存失败文案，`app:get-info` 返回给 renderer；`initialize` 末尾追加判断，若非空则 `setStatus(info.ownAccountsMigrationError, 'error')` 覆盖默认欢迎文案。损坏 json / 非 array 主动抛错（不沿用 `readOwnAccounts` 吞异常），确保能被外层 catch 捕获。
+- **D16 orphan bankName 跳过不告警**：json 对应 bankName 在数据库里找不到任何模板时，整份 json 跳过 + `[WARN] orphan bankName: {bankName}, skipped ({N} accounts)` 日志，`status` 仍为 `'done'`，**不触发** D15 状态栏告警。
+- **明细/余额/合并/月度余额/新开账户模块导出 xlsx 表头字体统一为 Courier New**（决策 D14 = B）：新增依赖 `xlsx-js-style@^1.2.0`（仅 `src/backend/file-service/writers.js` 切 `require('xlsx')` → `require('xlsx-js-style')`，其它文件保持 `xlsx`，减少打包体积增长）。writers 内部新增 `applyHeaderRowFont(worksheet, headerRowIndex = 0)`：遍历表头行每个 cell，`cell.s.font.name = 'Courier New'` 硬编码（**无 CJK 回退链**，Q10 决策），保留原有 `font.bold` / `font.sz` / `font.color` / `fill` / `border`。`writeWorkbookRows` + `writeBalanceWorkbook` 各补调一次；数据区字体不变；报错 xlsx / error-reports 不改。
+- **合并文件字体补调**（TechDoc §4.3.2 fallback）：`src/main.js:mergeGeneratedXlsxFiles` 内部局部 shadow `const XLSXStyle = require('xlsx-js-style')`（避免改全局 `xlsx` 影响其它非合并路径），`writeFile` 之前补一次内联表头 Courier New 注入。实测社区版 `xlsx` 读回 `cell.s` 会丢失 `font.name`，浅拷贝 `{ ...cell }` 即使保留字段也无用；须在 merge 出口重写字体，否则合并产物 styles.xml 会被 xlsx 社区版 writer 重建为 Calibri。
+- **账单拆分合并浮点精度 hotfix**（D17 = A，2026-04-22）：`src/backend/file-service.js:buildMappedRows` 合并分支把 `net = sumCredit - sumDebit` 结果套 `roundAmount(...)`（`Number(value.toFixed(2))`）。此前纯 JS 浮点 `+` / `-` 会导致 `2377.49 + 178.31 = 2555.7999999999997`、`65572.01 + 4917.90 = 70489.90999999999` 等噪声泄露到导出 xlsx 的 Debit Amount 列。2 位小数对资金是精确而非降精度。初稿方案 `roundAmountHighPrecision`（`toFixed(12)`）对样本 2 仍不收敛（IEEE 754 在 12 位精度处仍保留尾巴），改用 `roundAmount`（`toFixed(2)`）覆盖全部样本。`net === 0` 判定同步变精确（`(0.1+0.2-0.3)` 合并组静默跳过）。
+
+### 变更
+
+- **主页面 state 新增 `mode` / `monthlyBalanceReady` / `monthlyBalancePreview`**（`src/renderer.js`）；`selectedTemplateId` 默认值改为 `FILENAME_MAPPING_TEMPLATE_ID`（「制作网银账单」内部隐式默认）。`updateTemplateSelect` 重写为只同步下拉 value ↔ `state.mode`，并调 `applyStatementModeSideEffects()`；option 改为静态 HTML（不再遍历 `state.templates` 构造）。`templateSelect` change listener 改为切模式 + 重置月度余额 ready 标记 + 调 side effects。
+- **`handleExportBalance` 按 `state.mode` 三路分流**：月度余额模式未装配 → 弹 `createMonthlyBalanceExportDialog`；已装配 → 调 `window.desktopApi.monthlyBalance.export()` 弹系统保存对话框；制作网银账单模式 → 保留 v1.5.2 原 `files.exportBalance()` 链路。
+- **新增 IPC**：`monthly-balance:assemble`（payload `{ templateScope: 'all'|'single', templateName, year, month }` 或兼容 `'__ALL_BANKS__'`；返回 `{ status: 'ready' | 'empty' | 'error', ... }`；E1/E2/E3 校验分支 errorCode=`MONTHLY_BALANCE_INVALID_INPUT` 不走 `createErrorResult`，避免误触发错误报告）、`monthly-balance:export`（从 `lastGeneratedExports.monthlyBalance` 读，未装配/文件丢失/用户取消/成功四分支）、`big-account:get-with-own`（维护大账号对话框初始化专用，返回含自有的完整列表）。`preload.js` 新增 `window.desktopApi.monthlyBalance = { assemble, export }` 和 `window.desktopApi.bigAccount.getWithOwn`。
+- **`lastGeneratedExports` 新增 `monthlyBalance: null`**（`src/main.js`）；`clearGeneratedExports` 保留 `monthlyBalance`（R1 session 独立于 `statementImportSessions`）。切模式时清前端 `monthlyBalanceReady / preview`，后端 session 保留（用户重走装配链路时覆盖）。
+- **Bundle v3 透明扩展**：`SUPPORTED_BUNDLE_VERSION` 保持 `v3` 不升 v4。`listTemplateBundleEntries` 独立再查一次 `getTemplateBigAccounts(..., {includeOwn:true})` → `groupBigAccountRows`，bundle 导出项 `bigAccounts[].accountNature` 字段可选携带（v1.5.2 读时忽略向后兼容；新版读旧 bundle 时缺省 `'client'`）。
+- **`createBigAccountManagerDialog` tbody 初始化**：从原 `clientAccounts` 单类渲染改为 `[...client.map(nature=client), ...own.map(nature=own)]` 合并渲染；`pendingOwnAccounts` 仍保留供 `saveOwnAccounts` IPC 过渡兼容（并行写 json + DB）。`createBigAccountRow` tr 带 `dataset.accountNature`；新增内部 `setMerchantViewText(merchantId)` 处理 view 态下 own 行的 `[自有] ` 前缀；merchantInput 的 input 事件在 view 态下 value 始终保持裸 merchantId。`[data-action="done"]` 收集 `nextBigAccounts` 时读 `row.dataset.accountNature` → `accountNature` 字段；`balance-management` 往返重建 bigAccounts 时从裸 merchantId 取避免被前缀污染。
+- **`expandBigAccountConfigurations` / `validateTemplateConfiguration` / `buildCompatibleBigAccounts`** 保留 `accountNature` 字段（白名单校验 + 展平 `(merchantId, currency)` 时同样保留）。
+- **R4 import 重命名**：`src/backend/file-service.js` 顶部把 `roundAmountHighPrecision` 替换为 `roundAmount`（只取 2 位版本），合并分支注释改"2026-04-22 更正"版本说明为何改用 2 位小数（12 位无法收敛 `65572.01 + 4917.90` 场景）。
+- **新开账户模块导出表头字体也变为 Courier New**（D14 决策接受的副作用）：`new-account:generate` 链路共用 `writeBalanceWorkbook`，Courier New 自动生效；用户已知情并确认。
+
+### 废弃保留
+
+- `src/backend/own-account-store.js`：源文件保留（未改代码），作为 v1.5.2 回退兼容 fallback。
+- `src/main.js:big-account:save-own-accounts` IPC handler：前端不再单独依赖，但在 T2.9 决策下**并行写**（json + 数据库同时写），作为过渡期兼容层（Q6）。未来 major 版本可下线。
+- `src/preload.js:bigAccount.saveOwnAccounts`：同上。
+
+## 1.5.2 - 2026-04-16
+
+- **按表头自动识别模板**：主页面「模板」下拉顶部新增 `__FILENAME_MAPPING__` 虚拟枚举值「按文件名映射模板」并设为**默认选中**（`src/renderer.js:updateTemplateSelect`）。导入时系统遍历所有模板，用 `matchesTemplateHeaders(filePath, template)` 逐个试表头自动匹配——用户**无需**在映射关系管理中配置任何"文件名固定字段"（原映射管理对话框中的「按文件名映射模板」输入框模块已删除）。0 命中报 `FILENAME_MAPPING_NO_MATCH`、≥2 命中报 `FILENAME_MAPPING_AMBIGUOUS`，均**整批截断**（当次导入的所有文件全部不入库）；唯一命中直接按该模板解析（不再有 HEADER_MISMATCH 报错）。`filenameFixedField` 数据层保留不动（DB 列、Repo/IPC/Bundle 透传均在，只是 UI 删除，未来可能重新启用）。
+- **表头唯一性校验**：导入模板文件时新表头与已有模板全量比较，完全相同则拒绝（`TEMPLATE_HEADERS_DUPLICATE`）；Bundle 导入时每个 entry 校验，重复则跳过并写 activity log 警告。确保按表头自动识别不会命中多个完全相同的模板。
+- **多模板合并导出**：多个文件匹配到不同模板时，每组按各自模板独立生成（银行名称 / 所在地各自正确），最终合并为汇总文件：`{模板数量}-COMMON-{日期范围}.xlsx` / `{模板数量}-BALANCE-{日期范围}.xlsx`。合并方式为直接复制单元格保留格式，session 只 append 一次。
+- **大账号确认页「单个账号匹多个文件」（M:1 映射）**：「提取大账号顺序」按钮右侧新增勾选框「单个账号匹多个文件」（**默认不勾选**）+ 编辑和完成**合并为 1 个 toggle 按钮**。勾选时不发生文本平移（visibility 占位），编辑态勾选 block 位置不变。**完成后排序**：uncovered 在前保持原序，covered 在后按组 a→z 排（组内按原文件顺序）。**编辑还原**：点编辑恢复原排序，保留已有映射供修改（不清空 multiGroups）。已映射 block 不参与「提取大账号顺序」，确认弹窗不显示已映射 block。左侧文件名左边新增字母列。勾选粒度 = **block**：同一文件的多个 block 可归属不同组或不归属任何组；未参与 M:1 的 block 沿用旧 1:1 勾选流程。对话框主「完成」按 block 粒度展开 `multiGroups` 为多条 `assignments`（key = `rowIndex`），同组多条 rowIndex 共享 MerchantId+Currency，与 1:1 部分合并后发送给后端。
+- **主/子模板名校验**：映射关系管理「完成」按钮点击时前置执行"子名.includes(主名)"字符串校验；勾选「设为子模板」+ 选中主模板时若当前模板名不包含主模板名，弹提醒框阻断 `saveMappings` / `setParentStatus` / `setChildParent` 全部调用，用户确认后重开对话框。未勾「设为子模板」或未选主模板时不触发。
+- **UI 变更**："导出当前文件"更名为"导出**当前批次文件**"；"导出所有"更名为"导出**所有批次文件**"。
+
+### 变更
+
+- **模板数据结构**：`templates` 表追加 `filename_fixed_field` 列（数据层保留）；`listTemplates` / `getTemplate` / `listChildTemplates` / `listTemplateBundleEntries` 的 SELECT 均追加 `t.filename_fixed_field AS filenameFixedField`；`buildTemplateSummaryFromRow` / `buildTemplateSummary` 均透传该字段；新增 `saveTemplateFilenameFixedField(db, templateId, value)` 仓储方法。
+- **Bundle v4 透明扩展**：`SUPPORTED_BUNDLE_VERSION` 保持 `4` 不升 v5。`filenameFixedField` 作为 v4 schema 下的新增透明字段由 bundle 自动携带；`readTemplateBundleFile` 对无字段的旧 v4 bundle 回退为空串。**v1.5.1 用户导入 v1.5.2 导出的 bundle 不会报错，该字段被自然忽略**；`bundleVersion > 4` 仍然拒绝。
+- **大账号确认页 row 结构**：`buildBigAccountSelectionRows` 每 row 追加 `fileIndex` 字段（可视化辅助用，状态机 key 仍为 `rowIndex`）；前端状态机（`multiMode / multiEditing / multiGroups / pendingGroup` 四个 let 变量 + 一组 helper）按 block 粒度展开 assignments。
+- **固定模式与 M:1 互斥**：`rememberCheckbox` 与 `ba-multi-mode-checkbox` 双向 `disabled` 互斥；mode 切换（fixed ↔ unfixed）时清空 `multiGroups` / `pendingGroup`。
+- 新增 IPC：`template:save-filename-fixed-field`（payload `{templateId, value}`，返回 `{status:'success'}`，错误码 `TEMPLATE_ID_INVALID` / `TEMPLATE_FILENAME_FIXED_FIELD_SAVE_FAILED`）；`preload.js` `templates` 对象追加 `saveFilenameFixedField`。
+
 ## 1.5.1 - 2026-04-13
 
 - **主/子模板**：`templates` 表新增 `parent_template_id`（nullable FK, ON DELETE SET NULL）+ `is_parent`（INTEGER DEFAULT 0）两列。映射关系管理 dialog header 新增「设为主模板」「设为子模板」checkbox，互斥逻辑；选「设为子模板」时出现主模板下拉框。模板管理页面新增「模板管理」标题；主模板行有 ▶/▼ 展开折叠按钮，子模板缩进显示。

@@ -44,8 +44,11 @@
                 <button id="importFileBtn" class="primary-btn" type="button">导入文件</button>
               </div>
               <div class="cell center">
-                <label class="select-label" for="templateSelect">模板</label>
-                <select id="templateSelect" class="template-select"></select>
+                <label class="select-label" for="templateSelect">模式</label>
+                <select id="templateSelect" class="template-select">
+                  <option value="create-statement">制作网银账单</option>
+                  <option value="export-monthly-balance">导出月度余额账单</option>
+                </select>
               </div>
               <div class="cell right">
                 <div class="export-actions">

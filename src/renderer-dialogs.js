@@ -110,8 +110,8 @@
       dialog.innerHTML = `
         <div class="alert-message">请选择要导出的范围</div>
         <div class="dialog-actions vertical">
-          <button class="secondary-btn small export-scope-btn" type="button" data-scope="current">导出当前文件的${fieldLabel}</button>
-          <button class="secondary-btn small export-scope-btn" type="button" data-scope="all">导出所有${fieldLabel}</button>
+          <button class="secondary-btn small export-scope-btn" type="button" data-scope="current">导出当前批次文件的${fieldLabel}</button>
+          <button class="secondary-btn small export-scope-btn" type="button" data-scope="all">导出所有批次文件的${fieldLabel}</button>
         </div>
       `;
 
@@ -152,6 +152,179 @@
           setStatus(`导出${fieldLabel}账单失败，请查看控制台`, 'error');
         });
       });
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // v1.5.3 R1 (T1.7)：导出月度余额账单模式下点"导出余额"弹出的模板 + 年月选择对话框（PRD §5.1.2）
+    // 完成按钮调 desktopApi.monthlyBalance.assemble → ready 关窗 + 主页面状态栏提示；
+    // empty/error 保留弹窗等用户修改（createAlertDialog 弹错后通过 onConfirm 重开本弹窗）
+    //
+    // 参数：
+    //   onAssembleReady(summary) —— 装配成功后由调用方（handleExportBalance 分流）接收 summary 更新 state
+    function createMonthlyBalanceExportDialog({ onAssembleReady } = {}) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card alert-card monthly-balance-export-card';
+
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      // PRD Q13：近 10 年 ~ 今年+1（2026 当下可选 2016~2027）
+      const yearOptions = [];
+      for (let y = currentYear - 9; y <= currentYear + 1; y += 1) {
+        yearOptions.push(y);
+      }
+
+      // PRD Q5 "普通模板"：排除子模板、主模板、虚拟 ID（虚拟 ID 本就不在 state.templates 里）
+      const regularTemplates = (state.templates || []).filter((template) => {
+        if (!template) return false;
+        if (template.isParent) return false;
+        if (template.parentTemplateId) return false;
+        return true;
+      });
+
+      const templateOptionsHtml = [
+        '<option value="__ALL_BANKS__" selected>全部银行渠道</option>',
+        ...regularTemplates.map((template) => {
+          const label = escapeHtml(String(template.name || ''));
+          return `<option value="${label}">${label}</option>`;
+        })
+      ].join('');
+
+      const yearOptionsHtml = yearOptions
+        .map((y) => `<option value="${y}">${y} 年</option>`)
+        .join('');
+      const monthOptionsHtml = Array.from({ length: 12 }, (_, i) => i + 1)
+        .map((m) => `<option value="${m}">${m} 月</option>`)
+        .join('');
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">请选择需要导出月度余额账单的银行渠道</div>
+          <button class="icon-close" type="button" data-action="close">×</button>
+        </div>
+        <div class="monthly-balance-form">
+          <label class="monthly-balance-row">
+            <span class="monthly-balance-label">模板</span>
+            <select class="monthly-balance-template-select mapping-text-input" data-role="template">
+              ${templateOptionsHtml}
+            </select>
+          </label>
+          <label class="monthly-balance-row">
+            <span class="monthly-balance-label">时间</span>
+            <div class="monthly-balance-time-picker">
+              <select class="monthly-balance-year-select mapping-text-input" data-role="year">
+                <option value="" selected>-- 选择年份 --</option>
+                ${yearOptionsHtml}
+              </select>
+              <select class="monthly-balance-month-select mapping-text-input" data-role="month">
+                <option value="" selected>-- 选择月份 --</option>
+                ${monthOptionsHtml}
+              </select>
+            </div>
+          </label>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="done">完成</button>
+        </div>
+      `;
+
+      const templateSel = dialog.querySelector('[data-role="template"]');
+      const yearSel = dialog.querySelector('[data-role="year"]');
+      const monthSel = dialog.querySelector('[data-role="month"]');
+
+      function currentDraft() {
+        return {
+          templateValue: templateSel.value || '',
+          year: yearSel.value ? Number(yearSel.value) : null,
+          month: monthSel.value ? Number(monthSel.value) : null
+        };
+      }
+
+      function reopenWith(draft) {
+        const next = createMonthlyBalanceExportDialog({ onAssembleReady });
+        const nextTemplateSel = next.querySelector('[data-role="template"]');
+        const nextYearSel = next.querySelector('[data-role="year"]');
+        const nextMonthSel = next.querySelector('[data-role="month"]');
+        if (nextTemplateSel) nextTemplateSel.value = draft.templateValue || '__ALL_BANKS__';
+        if (nextYearSel) nextYearSel.value = draft.year ? String(draft.year) : '';
+        if (nextMonthSel) nextMonthSel.value = draft.month ? String(draft.month) : '';
+        openModal(next);
+      }
+
+      dialog.querySelector('[data-action="close"]').addEventListener('click', () => {
+        closeModal();
+      });
+
+      dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+        const draft = currentDraft();
+        const hasTemplate = draft.templateValue !== '' && draft.templateValue !== null && draft.templateValue !== undefined;
+        const hasTime = Number.isInteger(draft.year) && Number.isInteger(draft.month);
+
+        // E1 / E2 / E3：本地校验，弹 createAlertDialog 后重开本弹窗保留已填值
+        if (!hasTemplate && !hasTime) {
+          closeModal();
+          openModal(createAlertDialog('请选择模板和时间', {
+            onConfirm: () => reopenWith(draft)
+          }));
+          return;
+        }
+        if (!hasTemplate) {
+          closeModal();
+          openModal(createAlertDialog('请选择模板', {
+            onConfirm: () => reopenWith(draft)
+          }));
+          return;
+        }
+        if (!hasTime) {
+          closeModal();
+          openModal(createAlertDialog('请选择时间', {
+            onConfirm: () => reopenWith(draft)
+          }));
+          return;
+        }
+
+        // 后端装配
+        const useAll = draft.templateValue === '__ALL_BANKS__';
+        const payload = {
+          templateScope: useAll ? 'all' : 'single',
+          templateName: useAll ? '' : draft.templateValue,
+          year: draft.year,
+          month: draft.month
+        };
+
+        let result;
+        try {
+          result = await desktopApi.monthlyBalance.assemble(payload);
+        } catch (error) {
+          closeModal();
+          openModal(createAlertDialog(`装配月度余额账单失败：${error?.message || error}`, {
+            onConfirm: () => reopenWith(draft)
+          }));
+          return;
+        }
+
+        if (result && result.status === 'ready') {
+          closeModal();
+          if (typeof onAssembleReady === 'function') {
+            onAssembleReady(result.summary);
+          }
+          return;
+        }
+        if (result && result.status === 'empty') {
+          closeModal();
+          openModal(createAlertDialog(result.message || '该模板 / 月份范围内无余额数据', {
+            onConfirm: () => reopenWith(draft)
+          }));
+          return;
+        }
+        // status === 'error' 或其它失败
+        closeModal();
+        openModal(createAlertDialog(result?.message || '装配月度余额账单失败', {
+          onConfirm: () => reopenWith(draft)
+        }));
+      });
+
       overlay.appendChild(dialog);
       return overlay;
     }
@@ -288,11 +461,16 @@
     }
 
     function cloneBigAccountItems(bigAccounts = []) {
-      return bigAccounts.map((item) => ({
-        merchantId: String(item.merchantId || ''),
-        currencies: Array.isArray(item.currencies) ? item.currencies.slice() : [],
-        isMultiCurrency: Boolean(item.isMultiCurrency)
-      }));
+      return bigAccounts.map((item) => {
+        // v1.5.3 R2：保留 accountNature（'client' / 'own'），缺省 'client'
+        const rawNature = typeof item.accountNature === 'string' ? item.accountNature.trim() : '';
+        return {
+          merchantId: String(item.merchantId || ''),
+          currencies: Array.isArray(item.currencies) ? item.currencies.slice() : [],
+          isMultiCurrency: Boolean(item.isMultiCurrency),
+          accountNature: rawNature === 'own' ? 'own' : 'client'
+        };
+      });
     }
 
     function formatBigAccountCurrencySummary(currencies) {
@@ -604,6 +782,12 @@
         </div>
         <div class="dialog-actions big-account-selection-footer">
           <button class="secondary-btn small extract-order-btn" type="button" data-action="extract-order">提取大账号顺序</button>
+          <!-- v1.5.2 需求 2：多对一工具条（block 粒度，决策 ①B）-->
+          <label class="ba-multi-mode-label">
+            <input class="new-account-checkbox ba-multi-mode-checkbox" type="checkbox" />
+            <span>单个账号匹多个文件</span>
+          </label>
+          <button class="secondary-btn small ba-multi-toggle-btn is-hidden" type="button">编辑</button>
           <span class="big-account-search-label">定位大账号</span>
           <input class="mapping-text-input big-account-search-input" type="text" spellcheck="false" />
           <label class="big-account-remember-label is-disabled">
@@ -623,6 +807,17 @@
       const rememberLabel = dialog.querySelector('.big-account-remember-label');
       const rememberCheckbox = dialog.querySelector('.big-account-remember-checkbox');
       const doneBtn = dialog.querySelector('[data-action="done"]');
+      // v1.5.2 需求 2：多对一工具条 DOM 引用
+      const multiModeCheckbox = dialog.querySelector('.ba-multi-mode-checkbox');
+      const multiToggleBtn = dialog.querySelector('.ba-multi-toggle-btn');
+
+      // v1.5.2 需求 2（决策 ①B）：多对一状态机
+      //   - multiMode：是否启用"单个账号匹多个文件"；默认 false（不勾选）
+      //   - multiEditing：是否处于编辑态；默认 false
+      let multiMode = false;
+      let multiEditing = false;
+      let multiGroups = [];
+      let pendingGroup = null;
 
       let isRememberMode = false;
 
@@ -649,16 +844,110 @@
         return fileName.slice(0, keepStart) + '...' + fileName.slice(-keepEnd);
       }
 
+      // 获取某 rowIndex 对应的组字母；无组则返回空串
+      function getGroupLetter(rowIndex) {
+        const closedIdx = multiGroups.findIndex((g) => g.leftBlockRowIndices.includes(rowIndex));
+        if (closedIdx >= 0) return String.fromCharCode(97 + closedIdx);
+        if (pendingGroup && pendingGroup.leftBlockRowIndices.includes(rowIndex)) {
+          return String.fromCharCode(97 + multiGroups.length);
+        }
+        return '';
+      }
+
       function renderFileList() {
         fileListContainer.innerHTML = '';
-        currentFileRows.forEach((row, index) => {
+
+        // v1.5.2：构建显示行列表
+        let displayRows = currentFileRows.map((row, index) => ({
+          row,
+          originalIndex: index,
+          rowIndex: Number.isInteger(row.index) ? row.index : index,
+          covered: multiMode && isRowIndexCovered(Number.isInteger(row.index) ? row.index : index)
+        }));
+        // 编辑态：保持原始顺序，不移动 block
+        // 完成态：uncovered 在前（原序），covered 在后（按组 a→z 排，组内按原文件顺序）
+        if (multiMode && !multiEditing && multiGroups.length > 0) {
+          const uncovered = displayRows.filter((r) => !r.covered);
+          const covered = displayRows.filter((r) => r.covered);
+          covered.sort((a, b) => {
+            const gA = multiGroups.findIndex((g) => g.leftBlockRowIndices.includes(a.rowIndex));
+            const gB = multiGroups.findIndex((g) => g.leftBlockRowIndices.includes(b.rowIndex));
+            if (gA !== gB) return gA - gB; // 组间 a→z
+            return a.originalIndex - b.originalIndex; // 组内原文件顺序
+          });
+          displayRows = uncovered.concat(covered);
+        }
+
+        let uncoveredSeq = 0;
+        displayRows.forEach((entry) => {
+          const { row, rowIndex, covered } = entry;
           const item = document.createElement('div');
           item.className = 'big-account-file-item';
+          item.dataset.rowIndex = String(rowIndex);
+          if (Number.isInteger(row.fileIndex)) {
+            item.dataset.fileIndex = String(row.fileIndex);
+          }
           const fullName = row.fileName || '';
           const rowSuffix = row.sourceRowNumber ? ` 第${row.sourceRowNumber}行` : '';
           const displayName = truncateFileName(fullName, 20) + rowSuffix;
           const fullMeta = fullName + rowSuffix;
-          item.innerHTML = `<span class="big-account-file-index">${index + 1}.</span><span class="big-account-file-meta" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span>`;
+
+          if (multiMode && multiEditing) {
+            // 编辑态：勾选框 + 字母列 + 文件名
+            item.classList.add('ba-multi-editing');
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'ba-left-block-checkbox';
+            checkbox.dataset.rowIndex = String(rowIndex);
+            checkbox.checked = isRowIndexCovered(rowIndex);
+            checkbox.addEventListener('change', () => {
+              onLeftBlockChecked(rowIndex, checkbox.checked);
+            });
+            const letterSpan = document.createElement('span');
+            letterSpan.className = 'big-account-order-index ba-left-letter';
+            const letter = getGroupLetter(rowIndex);
+            letterSpan.textContent = letter ? `${letter}.` : '';
+            if (letter) letterSpan.classList.add('big-account-order-index--alpha');
+            const meta = document.createElement('span');
+            meta.className = 'big-account-file-meta';
+            meta.title = fullMeta;
+            meta.textContent = displayName;
+            item.append(checkbox, letterSpan, meta);
+          } else if (multiMode && !multiEditing && covered) {
+            // 闭合态已入组 block��显示 "✓ a. 文件名 → 大账号"
+            item.classList.add('ba-multi-grouped');
+            const groupInfo = findGroupByRowIndex(rowIndex);
+            const group = groupInfo ? multiGroups[groupInfo.groupIndex] : null;
+            const markerSpan = document.createElement('span');
+            markerSpan.className = 'ba-multi-group-marker';
+            markerSpan.textContent = '✓';
+            const letterSpan = document.createElement('span');
+            letterSpan.className = 'big-account-order-index ba-left-letter big-account-order-index--alpha';
+            letterSpan.textContent = group ? `${String.fromCharCode(97 + groupInfo.groupIndex)}.` : '';
+            const meta = document.createElement('span');
+            meta.className = 'big-account-file-meta';
+            meta.title = fullMeta;
+            meta.textContent = group ? `${displayName} → ${group.rightAccount.merchantId} ${group.rightAccount.currency}` : displayName;
+            item.append(markerSpan, letterSpan, meta);
+          } else if (multiMode) {
+            // multiMode 但未入组：字母列留空 + 数字序号
+            uncoveredSeq += 1;
+            const letterSpan = document.createElement('span');
+            letterSpan.className = 'big-account-order-index ba-left-letter';
+            letterSpan.textContent = '';
+            item.innerHTML = '';
+            const indexSpan = document.createElement('span');
+            indexSpan.className = 'big-account-file-index';
+            indexSpan.textContent = `${uncoveredSeq}.`;
+            const meta = document.createElement('span');
+            meta.className = 'big-account-file-meta';
+            meta.title = fullMeta;
+            meta.textContent = escapeHtml(displayName);
+            item.append(letterSpan, indexSpan, meta);
+          } else {
+            uncoveredSeq += 1;
+            item.innerHTML = `<span class="big-account-file-index">${uncoveredSeq}.</span><span class="big-account-file-meta" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span>`;
+          }
           fileListContainer.appendChild(item);
         });
       }
@@ -688,8 +977,13 @@
 
           checkbox.addEventListener('change', () => {
             const key = `${option.merchantId}@@${option.currency}`;
+            // v1.5.2 需求 2：编辑态下走多对一状态机，非编辑态走原 1:1 逻辑
+            if (multiMode && multiEditing) {
+              onRightAccountChecked({ merchantId: option.merchantId, currency: option.currency }, checkbox.checked);
+              return;
+            }
             if (checkbox.checked) {
-              if (checkedOrder.length >= currentFileRows.length) {
+              if (checkedOrder.length >= getUncoveredBlockCount()) {
                 checkbox.checked = false;
                 return;
               }
@@ -709,19 +1003,237 @@
       }
 
       function syncOrderIndices() {
+        // v1.5.2 需求 2：编辑态下右侧序号渲染为字母（a.b.c...），按组在 multiGroups 中的位置 + pendingGroup
+        if (multiMode && multiEditing) {
+          renderAlphaIndex();
+          return;
+        }
         orderListContainer.querySelectorAll('.big-account-order-item').forEach((item) => {
           const key = `${item.dataset.merchantId}@@${item.dataset.currency}`;
           const orderIdx = checkedOrder.findIndex((o) => o.key === key);
           const indexSpan = item.querySelector('.big-account-order-index');
+          if (!indexSpan) return;
+          indexSpan.classList.remove('big-account-order-index--alpha');
           indexSpan.textContent = orderIdx >= 0 ? `${orderIdx + 1}.` : '';
         });
       }
 
+      // M:1 完成后还需要 1:1 分配的 block 数量
+      function getUncoveredBlockCount() {
+        if (!multiMode || !multiGroups.length) return currentFileRows.length;
+        let covered = 0;
+        for (const g of multiGroups) {
+          covered += g.leftBlockRowIndices.length;
+        }
+        return Math.max(0, currentFileRows.length - covered);
+      }
+
       function syncCheckboxDisabled() {
-        const maxReached = checkedOrder.length >= currentFileRows.length;
-        orderListContainer.querySelectorAll('.big-account-order-checkbox').forEach((cb) => {
+        // v1.5.2 需求 2：编辑态下不限制勾选上限
+        if (multiMode && multiEditing) {
+          orderListContainer.querySelectorAll('.big-account-order-checkbox').forEach((cb) => {
+            cb.disabled = false;
+          });
+          return;
+        }
+        // 上限 = 未被 M:1 覆盖的 block 数量（非 multiMode 时 = currentFileRows.length）
+        const maxSlots = getUncoveredBlockCount();
+        const maxReached = checkedOrder.length >= maxSlots;
+        orderListContainer.querySelectorAll('.big-account-order-item').forEach((item) => {
+          const cb = item.querySelector('.big-account-order-checkbox');
+          if (!cb) return;
+          // v1.5.2：非编辑态下，已入组大账号保持 disabled（只能点"编辑"才能解绑）
+          if (multiMode && !multiEditing) {
+            const account = { merchantId: item.dataset.merchantId, currency: item.dataset.currency };
+            const isGrouped = multiGroups.some((g) => sameAccount(g.rightAccount, account));
+            if (isGrouped) {
+              cb.disabled = true;
+              return;
+            }
+          }
           cb.disabled = maxReached && !cb.checked;
         });
+      }
+
+      // ===== v1.5.2 需求 2：多对一状态机 helper =====
+      function sameAccount(a, b) {
+        return a && b && a.merchantId === b.merchantId && a.currency === b.currency;
+      }
+      function accountKey(acc) {
+        return `${acc.merchantId}@@${acc.currency}`;
+      }
+      // 判断某 rowIndex 是否已被 pendingGroup 或任何已闭合组覆盖（仅供 renderFileList 初始化勾选态使用）
+      function isRowIndexCovered(rowIndex) {
+        if (pendingGroup && pendingGroup.leftBlockRowIndices.includes(rowIndex)) return true;
+        return multiGroups.some((g) => g.leftBlockRowIndices.includes(rowIndex));
+      }
+      // 查找某大账号属于 pendingGroup 或哪个已闭合组；返回 {source:'pending'|'closed', index}
+      function findGroupByAccount(account) {
+        if (pendingGroup && pendingGroup.rightAccount && sameAccount(pendingGroup.rightAccount, account)) {
+          return { source: 'pending', index: -1 };
+        }
+        const idx = multiGroups.findIndex((g) => sameAccount(g.rightAccount, account));
+        if (idx >= 0) return { source: 'closed', index: idx };
+        return null;
+      }
+      // 查找某 rowIndex 属于 pendingGroup 或哪个已闭合组；返回 {source, groupIndex}
+      function findGroupByRowIndex(rowIndex) {
+        if (pendingGroup && pendingGroup.leftBlockRowIndices.includes(rowIndex)) {
+          return { source: 'pending', groupIndex: -1 };
+        }
+        const idx = multiGroups.findIndex((g) => g.leftBlockRowIndices.includes(rowIndex));
+        if (idx >= 0) return { source: 'closed', groupIndex: idx };
+        return null;
+      }
+      // 左侧 block 勾选/取消
+      function onLeftBlockChecked(rowIndex, checked) {
+        if (!multiMode || !multiEditing) return;
+        if (checked) {
+          // 已在任一组内 → 保持原状（不允许同一 block 属于多组）
+          if (findGroupByRowIndex(rowIndex)) return;
+          if (!pendingGroup) {
+            pendingGroup = { leftBlockRowIndices: [rowIndex], rightAccount: null, startedBy: 'left' };
+          } else {
+            // 若 pendingGroup 已有右侧大账号且也有左侧 → 追加本 block 到当前组
+            // （决策 §6.2.1：同组内 N 个 block 共享一个大账号，可随时追加）
+            if (!pendingGroup.leftBlockRowIndices.includes(rowIndex)) {
+              pendingGroup.leftBlockRowIndices.push(rowIndex);
+            }
+          }
+        } else {
+          // 取消：若在 pendingGroup 中 → 移除；若 pendingGroup 因此变空（无 left 无 right）→ 置 null
+          // 若在已闭合组中 → 从该组移除；若该组变空 → 整组移除
+          if (pendingGroup && pendingGroup.leftBlockRowIndices.includes(rowIndex)) {
+            pendingGroup.leftBlockRowIndices = pendingGroup.leftBlockRowIndices.filter((r) => r !== rowIndex);
+            if (pendingGroup.leftBlockRowIndices.length === 0 && !pendingGroup.rightAccount) {
+              pendingGroup = null;
+            }
+          } else {
+            for (let i = multiGroups.length - 1; i >= 0; i -= 1) {
+              const g = multiGroups[i];
+              if (g.leftBlockRowIndices.includes(rowIndex)) {
+                g.leftBlockRowIndices = g.leftBlockRowIndices.filter((r) => r !== rowIndex);
+                if (g.leftBlockRowIndices.length === 0) {
+                  multiGroups.splice(i, 1);
+                }
+                break;
+              }
+            }
+          }
+        }
+        // 渲染：刷新左侧（勾选态/字母位置）+ 右侧字母
+        renderFileList();
+        renderAlphaIndex();
+      }
+      // 右侧大账号勾选/取消
+      function onRightAccountChecked(account, checked) {
+        if (!multiMode || !multiEditing) return;
+        if (checked) {
+          // 同一大账号最多只能属于一组；若已在某组 → 忽略（checkbox 让 DOM 自动保持勾选态）
+          if (findGroupByAccount(account)) return;
+          if (!pendingGroup) {
+            pendingGroup = { leftBlockRowIndices: [], rightAccount: { ...account }, startedBy: 'right' };
+          } else if (!pendingGroup.rightAccount) {
+            pendingGroup.rightAccount = { ...account };
+          } else {
+            // pendingGroup 已绑右侧 → 触发闭合，开始新组
+            closeCurrentGroup();
+            pendingGroup = { leftBlockRowIndices: [], rightAccount: { ...account }, startedBy: 'right' };
+          }
+        } else {
+          // 取消：若在 pendingGroup → 清 rightAccount；若因此变空 → 置 null
+          // 若在已闭合组 → 整组移除
+          if (pendingGroup && pendingGroup.rightAccount && sameAccount(pendingGroup.rightAccount, account)) {
+            pendingGroup.rightAccount = null;
+            if (pendingGroup.leftBlockRowIndices.length === 0) {
+              pendingGroup = null;
+            }
+          } else {
+            const idx = multiGroups.findIndex((g) => sameAccount(g.rightAccount, account));
+            if (idx >= 0) {
+              multiGroups.splice(idx, 1);
+            }
+          }
+        }
+        // 渲染：左侧（勾选态/标记）+ 右侧字母
+        renderFileList();
+        renderAlphaIndex();
+      }
+      // 闭合当前 pendingGroup（若有效：同时存在至少 1 个 left 且 1 个 right）
+      function closeCurrentGroup() {
+        if (!pendingGroup) return;
+        if (pendingGroup.leftBlockRowIndices.length > 0 && pendingGroup.rightAccount) {
+          multiGroups.push({
+            leftBlockRowIndices: pendingGroup.leftBlockRowIndices.slice(),
+            rightAccount: { ...pendingGroup.rightAccount }
+          });
+        }
+        pendingGroup = null;
+      }
+      // 字母序号渲染：按 (multiGroups index) 作为字母基位；pendingGroup 追加在尾部
+      function renderAlphaIndex() {
+        orderListContainer.querySelectorAll('.big-account-order-item').forEach((item) => {
+          const account = { merchantId: item.dataset.merchantId, currency: item.dataset.currency };
+          const indexSpan = item.querySelector('.big-account-order-index');
+          if (!indexSpan) return;
+          let letter = '';
+          const closedIdx = multiGroups.findIndex((g) => sameAccount(g.rightAccount, account));
+          if (closedIdx >= 0) {
+            letter = String.fromCharCode(97 + closedIdx);
+          } else if (pendingGroup && pendingGroup.rightAccount && sameAccount(pendingGroup.rightAccount, account)) {
+            // pendingGroup 使用"下一个可用字母"：= multiGroups.length
+            letter = String.fromCharCode(97 + multiGroups.length);
+          }
+          if (letter) {
+            indexSpan.classList.add('big-account-order-index--alpha');
+            indexSpan.textContent = `${letter}.`;
+          } else {
+            indexSpan.classList.remove('big-account-order-index--alpha');
+            indexSpan.textContent = '';
+          }
+          // 同步 checkbox 勾选态（保证取消/闭合/编辑切换后视觉一致）
+          const cb = item.querySelector('.big-account-order-checkbox');
+          if (cb) {
+            const coveredByClosed = closedIdx >= 0;
+            const coveredByPending = pendingGroup && pendingGroup.rightAccount && sameAccount(pendingGroup.rightAccount, account);
+            cb.checked = Boolean(coveredByClosed || coveredByPending);
+          }
+        });
+      }
+      // 退出编辑态时恢复显示（左侧数字序号 + 右侧数字序号 + checkedOrder 由 closeCurrentGroup 后的 multiGroups 展开不负责回填，交给主 doneBtn 的展开逻辑）
+      // 本函数主要保证 UI 回到"非编辑态"：左侧恢复数字序号（含已入组 block 的"已配对"标记）+ 右侧已入组的 checkbox 保留勾选且 disabled（不允许取消，除非"编辑"重开）；未入组的 checkbox 开放 1:1 勾选
+      function rerenderAfterMultiDone() {
+        renderFileList();
+        orderListContainer.querySelectorAll('.big-account-order-item').forEach((item) => {
+          const indexSpan = item.querySelector('.big-account-order-index');
+          if (indexSpan) {
+            indexSpan.classList.remove('big-account-order-index--alpha');
+            indexSpan.textContent = '';
+          }
+          const cb = item.querySelector('.big-account-order-checkbox');
+          if (!cb) return;
+          const account = { merchantId: item.dataset.merchantId, currency: item.dataset.currency };
+          const isGrouped = multiGroups.some((g) => sameAccount(g.rightAccount, account));
+          if (isGrouped) {
+            cb.checked = true;
+            cb.disabled = true;
+          } else {
+            cb.checked = false;
+            cb.disabled = false;
+          }
+        });
+        // 同步 1:1 数字序号（checkedOrder 目前为空）+ disable 上限检查
+        syncOrderIndices();
+        syncCheckboxDisabled();
+      }
+      // toggle 按钮同步（编辑↔完成）；用 visibility 而非 hidden 避免文本平移
+      function syncMultiToolbar() {
+        if (!multiMode) {
+          multiToggleBtn.classList.add('is-hidden');
+          return;
+        }
+        multiToggleBtn.classList.remove('is-hidden');
+        multiToggleBtn.textContent = multiEditing ? '完成' : '编辑';
       }
 
       function syncModeUI() {
@@ -734,6 +1246,9 @@
           rememberCheckbox.disabled = false;
           rememberLabel.classList.remove('is-disabled');
         }
+        // v1.5.2 需求 2：mode 切换导致 currentFileRows / rowIndex 空间变化 → 清空多对一状态避免对不上
+        multiGroups = [];
+        pendingGroup = null;
         checkedOrder = [];
         searchInput.value = '';
         searchMatchIndex = -1;
@@ -851,6 +1366,9 @@
           savedOrder = orderResult.order;
         } catch (_error) {}
         syncModeUI();
+        // v1.5.2 需求 2：初始同步多对一工具条状态 + 互斥
+        syncMultiToolbar();
+        syncMultiModeMutualDisabled();
         setInteractive(true);
       }
 
@@ -858,6 +1376,7 @@
         currentMode = modeSelect.value;
         await desktopApi.bigAccount.saveMode({ templateId, mode: currentMode });
         syncModeUI();
+        syncMultiModeMutualDisabled();
       });
 
       rememberCheckbox.addEventListener('change', () => {
@@ -866,7 +1385,90 @@
         } else {
           switchToNormalMode();
         }
+        syncMultiModeMutualDisabled();
       });
+
+      // ===== v1.5.2 需求 2：多对一工具条事件 =====
+      // "单个账号匹多个文件" 勾选框：开/关切换
+      multiModeCheckbox.addEventListener('change', () => {
+        multiMode = multiModeCheckbox.checked;
+        if (multiMode) {
+          // 进入多对一模式：默认编辑态；清空 checkedOrder 避免旧 1:1 选择错配给未覆盖 block
+          multiEditing = true;
+          multiGroups = [];
+          pendingGroup = null;
+          checkedOrder = [];
+          orderListContainer.querySelectorAll('.big-account-order-checkbox').forEach((cb) => {
+            cb.checked = false;
+          });
+        } else {
+          // 关闭多对一模式：清空 multiGroups + pendingGroup；回到旧 1:1 UI（数字序号 + checkedOrder）
+          multiGroups = [];
+          pendingGroup = null;
+          multiEditing = false;
+          // 已勾选的大账号勾选态需回到 checkedOrder 语义，此处简单重置为空以避免跨模式脏数据
+          checkedOrder = [];
+          orderListContainer.querySelectorAll('.big-account-order-checkbox').forEach((cb) => {
+            cb.checked = false;
+          });
+        }
+        renderFileList();
+        syncOrderIndices();
+        syncCheckboxDisabled();
+        syncMultiToolbar();
+        syncMultiModeMutualDisabled();
+      });
+
+      // toggle 按钮：编辑↔完成 切换
+      multiToggleBtn.addEventListener('click', () => {
+        if (!multiMode) return;
+        if (multiEditing) {
+          // 完成：闭合 pendingGroup + 退出编辑态
+          closeCurrentGroup();
+          multiEditing = false;
+          rerenderAfterMultiDone();
+        } else {
+          // 编辑：重新进入编辑态；保留已有 multiGroups 供用户修改
+          // 清空 checkedOrder（重编辑可能改变覆盖范围，旧 1:1 选择不再有效）
+          multiEditing = true;
+          pendingGroup = null;
+          checkedOrder = [];
+          renderFileList();
+          syncOrderIndices();
+          syncCheckboxDisabled();
+        }
+        syncMultiToolbar();
+      });
+
+      // "单个账号匹多个文件" 与 "记住顺序" 互斥
+      function syncMultiModeMutualDisabled() {
+        // 记住顺序勾上 → 多对一模式勾选框 disabled 并取消；立即重渲染左侧避免遗留勾选框
+        if (rememberCheckbox.checked) {
+          multiModeCheckbox.disabled = true;
+          if (multiModeCheckbox.checked) {
+            multiModeCheckbox.checked = false;
+            multiMode = false;
+            multiEditing = false;
+            multiGroups = [];
+            pendingGroup = null;
+            renderFileList();
+          }
+          syncMultiToolbar();
+          return;
+        }
+        // 多对一模式勾上 → 记住顺序 disabled
+        if (multiModeCheckbox.checked) {
+          rememberCheckbox.disabled = true;
+          rememberLabel.classList.add('is-disabled');
+        } else {
+          // 仅在 fixed 模式才允许启用记住顺序；unfixed 下 syncModeUI 已强制 disable
+          if (currentMode === 'fixed') {
+            rememberCheckbox.disabled = false;
+            rememberLabel.classList.remove('is-disabled');
+          }
+        }
+        multiModeCheckbox.disabled = false;
+      }
 
       searchInput.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter') return;
@@ -902,9 +1504,16 @@
       });
 
       extractOrderBtn.addEventListener('click', async () => {
+        // v1.5.2：已被"单个账号匹多个文件"映射的 block 不参与提取
+        const extractableRows = multiMode
+          ? currentFileRows.filter((row, i) => {
+              const ri = Number.isInteger(row.index) ? row.index : i;
+              return !isRowIndexCovered(ri);
+            })
+          : currentFileRows;
         const result = await desktopApi.files.extractBigAccountOrder({
           mode: currentMode,
-          fileRows: currentFileRows.map((row) => ({
+          fileRows: extractableRows.map((row) => ({
             sourceRowNumber: row.sourceRowNumber,
             fileName: row.fileName,
             filePath: row.filePath || ''
@@ -992,7 +1601,8 @@
 
 
 
-          currentFileRows.forEach((row, index) => {
+          // v1.5.2：确认大账号顺序弹窗只显示未被"单个账号匹多个文件"映射的 block
+          extractableRows.forEach((row, index) => {
             const item = document.createElement('div');
             item.className = 'big-account-file-item';
             const fullName = row.fileName || '';
@@ -1103,25 +1713,72 @@
         closeModal();
       });
       doneBtn.addEventListener('click', async () => {
-        if (checkedOrder.length !== currentFileRows.length) {
-          setStatus(`请勾选 ${currentFileRows.length} 个大账号（当前已选 ${checkedOrder.length} 个）`, 'error');
+        // v1.5.2 需求 2（决策 ①B）：按 block 粒度展开 assignments
+        //   - multiMode 下：
+        //     1) 若处于编辑态（用户未点"完成"组闭合按钮），尝试闭合最后一组；这样单组用户直接点主完成也能生效
+        //     2) 展开 multiGroups：每个被勾选的 block 产生 1 条 assignment，key = rowIndex（row.index）
+        //     3) coveredRowIndices 记录已被 M:1 覆盖的 rowIndex
+        //     4) 未入组的 block 按 currentFileRows 顺序，用 checkedOrder 依次补齐 1:1（决策 D4）
+        //   - 非 multiMode 下：沿用 v1.5.1 1:1 逻辑
+        let finalAssignments;
+        if (multiMode) {
+          // 编辑态下主完成 → 尝试闭合当前组（P0-4 单组场景不强制用户先点组"完成"再点主"完成"）
+          if (multiEditing) {
+            closeCurrentGroup();
+            multiEditing = false;
+          }
+          finalAssignments = [];
+          const coveredRowIndices = new Set();
+          multiGroups.forEach((group) => {
+            group.leftBlockRowIndices.forEach((rowIndex) => {
+              finalAssignments.push({
+                rowIndex,
+                merchantId: group.rightAccount.merchantId,
+                currency: group.rightAccount.currency
+              });
+              coveredRowIndices.add(rowIndex);
+            });
+          });
+          // 未入组 block 按 checkedOrder 顺序补齐（checkedOrder 只在非编辑态累积）
+          // 按 currentFileRows 顺序，跳过已被 M:1 覆盖的 rowIndex
+          let orderCursor = 0;
+          for (const row of currentFileRows) {
+            const rowIdx = Number.isInteger(row.index) ? row.index : null;
+            if (rowIdx === null) continue;
+            if (coveredRowIndices.has(rowIdx)) continue;
+            const item = checkedOrder[orderCursor];
+            if (!item) break; // checkedOrder 不够 → 交给长度校验
+            finalAssignments.push({
+              rowIndex: rowIdx,
+              merchantId: item.merchantId,
+              currency: item.currency
+            });
+            orderCursor += 1;
+          }
+          // 按 rowIndex 升序排序（后端按 rowIndex 匹配 globalBlockIndex）
+          finalAssignments.sort((a, b) => a.rowIndex - b.rowIndex);
+        } else {
+          // 非多对一模式：保持 v1.5.1 1:1 行为（rowIndex = 数组下标）
+          finalAssignments = checkedOrder.map((item, index) => ({
+            rowIndex: index,
+            merchantId: item.merchantId,
+            currency: item.currency
+          }));
+        }
+
+        if (finalAssignments.length !== currentFileRows.length) {
+          setStatus(`请勾选 ${currentFileRows.length} 个大账号（当前已选 ${finalAssignments.length} 个）`, 'error');
           return;
         }
 
-        const assignments = checkedOrder.map((item, index) => ({
-          rowIndex: index,
-          merchantId: item.merchantId,
-          currency: item.currency
-        }));
-
         if (currentMode === 'fixed' && rememberCheckbox.checked) {
-          await desktopApi.bigAccount.saveOrder({ templateId, assignments, includeFileInfo: true });
+          await desktopApi.bigAccount.saveOrder({ templateId, assignments: finalAssignments, includeFileInfo: true });
         } else if (currentMode === 'fixed' && !rememberCheckbox.checked) {
           await desktopApi.bigAccount.saveOrder({ templateId, assignments: [] });
         }
 
         const result = await desktopApi.files.completeBigAccountSelection({
-          assignments,
+          assignments: finalAssignments,
           mode: currentMode
         });
 
@@ -1146,10 +1803,9 @@
       return overlay;
     }
 
-    function createBigAccountManagerDialog({ bigAccounts, templateId, templateName, initialOwnAccounts, onDone, onCancel }) {
+    function createBigAccountManagerDialog({ bigAccounts, templateId, templateName, onDone, onCancel }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
-      let pendingOwnAccounts = initialOwnAccounts || null;
       dialog.className = 'modal-card manager-card big-account-card';
       dialog.innerHTML = `
         <div class="dialog-header">
@@ -1289,6 +1945,10 @@
         const row = document.createElement('tr');
         row.dataset.bigAccountRow = 'true';
         row.dataset.mode = initialMode;
+        // v1.5.3 R2：记录账号性质（'client' / 'own'），缺省 'client'；完成按钮收集 nextBigAccounts 时读取
+        // view 模式下自有行在大账号前缀显示 [自有]；编辑态不显示（避免写进输入框值）
+        const rawNature = typeof item.accountNature === 'string' ? item.accountNature.trim() : '';
+        row.dataset.accountNature = rawNature === 'own' ? 'own' : 'client';
         row.innerHTML = `
           <td>
             <input class="mapping-text-input big-account-merchant-input" type="text" spellcheck="false" value="${escapeHtml(item.merchantId || '')}" />
@@ -1320,6 +1980,13 @@
 
         const merchantInput = row.querySelector('.big-account-merchant-input');
         const merchantView = row.querySelector('.big-account-merchant-view');
+        // v1.5.3 R2：自有行 view 态在大账号前加 [自有] 前缀，便于用户区分（不写进输入框值）
+        function setMerchantViewText(merchantId) {
+          const prefix = row.dataset.accountNature === 'own' ? '[自有] ' : '';
+          const textValue = String(merchantId || '');
+          merchantView.textContent = prefix + textValue;
+          merchantView.title = prefix + textValue;
+        }
         const currencyInput = row.querySelector('.big-account-currency-input');
         const currencyGhost = row.querySelector('.big-account-currency-ghost');
         const currencyInputShell = row.querySelector('.big-account-currency-input-shell');
@@ -1428,8 +2095,7 @@
             return;
           }
 
-          merchantView.textContent = merchantInput.value.trim();
-          merchantView.title = merchantInput.value.trim();
+          setMerchantViewText(merchantInput.value.trim());
         });
         toggleCompleteBtn.addEventListener('click', () => {
           if (row.dataset.mode === 'edit') {
@@ -1447,8 +2113,7 @@
             }
 
             const draft = getRowDraft();
-            merchantView.textContent = draft.merchantId;
-            merchantView.title = draft.merchantId;
+            setMerchantViewText(draft.merchantId);
             currencyView.textContent = formatBigAccountCurrencySummary(draft.currencies);
             currencyView.title = getBigAccountCurrencyTitle(draft.currencies);
             merchantInput.hidden = true;
@@ -1482,8 +2147,7 @@
 
         if (initialMode === 'view') {
           const initialDraft = getRowDraft();
-          merchantView.textContent = initialDraft.merchantId;
-          merchantView.title = initialDraft.merchantId;
+          setMerchantViewText(initialDraft.merchantId);
           currencyView.textContent = formatBigAccountCurrencySummary(initialDraft.currencies);
           currencyView.title = getBigAccountCurrencyTitle(initialDraft.currencies);
           merchantInput.hidden = true;
@@ -1550,17 +2214,69 @@
           setStatus(result.message, 'error');
           return;
         }
-        pendingOwnAccounts = result.ownAccounts || [];
+        // v1.5.3 R2：客资 + 自有账号统一进 tbody（行带 accountNature 区分），由 saveMappings 统一写回
         tbody.innerHTML = '';
         const clientAccounts = result.clientAccounts || [];
-        if (clientAccounts.length === 0) {
+        const ownAccounts = result.ownAccounts || [];
+        // v1.5.3 R2 round 5 (Codex Finding 8)：dedupe by (merchantId, currency)
+        // 脏 Excel 可能在 client + own 同时含同 merchantId+currency；直接 concat → saveMappings 撞 UNIQUE 约束 (template_id, merchant_id, currency) → 整个 save 报错
+        // 冲突规则：保留 client（与 PRD §3.1 一致：自有账户仅在 R1 月度余额放行；UI 默认按 client 行为对齐）；丢弃的 own 行打 warn 让用户感知
+        const mergedAccounts = [];
+        const seenByPair = new Set();
+        const droppedOwnPairs = [];
+        clientAccounts.forEach((item) => {
+          const merchantId = String(item.merchantId || '').trim();
+          const currencies = Array.isArray(item.currencies) ? item.currencies : [];
+          mergedAccounts.push({ ...item, accountNature: 'client' });
+          currencies.forEach((c) => {
+            const key = `${merchantId}::${String(c || '').trim()}`;
+            seenByPair.add(key);
+          });
+        });
+        ownAccounts.forEach((item) => {
+          const merchantId = String(item.merchantId || '').trim();
+          const currencies = Array.isArray(item.currencies) ? item.currencies : [];
+          // 整体冲突 = own 行的所有 currency 都已被 client 占用 → 丢弃
+          // 部分冲突 = 混合（部分 currency 被占用，部分未占用）→ 仅保留未占用的 currency；如剩 0 则丢弃
+          const remainingCurrencies = currencies.filter((c) => !seenByPair.has(`${merchantId}::${String(c || '').trim()}`));
+          if (remainingCurrencies.length === 0) {
+            droppedOwnPairs.push(`${merchantId}（${currencies.join('/')}）`);
+            return;
+          }
+          if (remainingCurrencies.length < currencies.length) {
+            const droppedCurrencies = currencies.filter((c) => seenByPair.has(`${merchantId}::${String(c || '').trim()}`));
+            droppedOwnPairs.push(`${merchantId}（${droppedCurrencies.join('/')}, 部分冲突）`);
+          }
+          mergedAccounts.push({
+            ...item,
+            currencies: remainingCurrencies,
+            isMultiCurrency: remainingCurrencies.length > 1,
+            accountNature: 'own'
+          });
+          remainingCurrencies.forEach((c) => seenByPair.add(`${merchantId}::${String(c || '').trim()}`));
+        });
+        // v1.5.3 R2 round 6 self-review (C1)：dedupe 丢弃的 own 升级为状态栏 warning（含具体丢失明细），
+        // 避免 console.warn 静默 — 让用户在保存前能感知并修正 Excel 源
+        if (droppedOwnPairs.length > 0) {
+          console.warn(`[v1.5.3] import-bank-info dedupe: 自有账号与客资重复，已保留客资，丢弃 own 项: ${droppedOwnPairs.join('; ')}`);
+        }
+        if (mergedAccounts.length === 0) {
           tbody.appendChild(createBigAccountRow({}, 'edit'));
         } else {
-          clientAccounts.forEach((item) => {
+          mergedAccounts.forEach((item) => {
             tbody.appendChild(createBigAccountRow(item, 'view'));
           });
         }
-        setStatus(result.message, 'success');
+        if (droppedOwnPairs.length > 0) {
+          // 状态栏告警：保留 import-bank-info 的 success message + 追加 dedupe 提示
+          // 用户在 DevTools / 状态栏都能感知（控制台不行就靠 toast）
+          setStatus(
+            `${result.message}；⚠ 检测到 ${droppedOwnPairs.length} 个自有账号与客资重复，已保留客资并丢弃 own：${droppedOwnPairs.join('；')}。请核对 Excel 源数据是否分类正确`,
+            'error'
+          );
+        } else {
+          setStatus(result.message, 'success');
+        }
       });
       dialog.querySelector('[data-action="balance-management"]').addEventListener('click', async () => {
         cleanupFloatingDropdown();
@@ -1588,17 +2304,18 @@
                 Array.from(tbody.querySelectorAll('tr[data-big-account-row]'))
                   .filter((r) => r.dataset.mode === 'view')
                   .map((r) => {
-                    const mid = r.querySelector('.big-account-merchant-view')?.textContent?.trim() || '';
+                    // v1.5.3 R2：大账号输入框的 .value 是裸 merchantId（不含 [自有] 前缀），读取它避免剥离问题
+                    const mid = r.querySelector('.big-account-merchant-input')?.value?.trim() || '';
                     const isMC = r.querySelector('.big-account-multi-checkbox')?.checked || false;
                     const cText = r.querySelector('.big-account-currency-view')?.title || '';
                     const cs = isMC ? cText.split('、').filter(Boolean) : [cText].filter(Boolean);
-                    return { merchantId: mid, currencies: cs, isMultiCurrency: isMC };
+                    const nature = r.dataset.accountNature === 'own' ? 'own' : 'client';
+                    return { merchantId: mid, currencies: cs, isMultiCurrency: isMC, accountNature: nature };
                   })
                   .filter((i) => i.merchantId)
               ),
               templateId,
               templateName,
-              initialOwnAccounts: pendingOwnAccounts,
               onDone,
               onCancel
             }));
@@ -1623,13 +2340,15 @@
           return {
             merchantId,
             currencies,
-            isMultiCurrency
+            isMultiCurrency,
+            // v1.5.3 R2：从 row.dataset 读取账号性质（import-bank-info / initialBigAccounts 回显时已设置）
+            accountNature: row.dataset.accountNature === 'own' ? 'own' : 'client'
           };
         }).filter((item) => item.merchantId !== '' && item.currencies.length > 0);
 
         cleanupFloatingDropdown();
         document.removeEventListener('keydown', handleKeydown);
-        onDone(nextBigAccounts, { ownAccounts: pendingOwnAccounts });
+        onDone(nextBigAccounts);
       });
 
       overlay.appendChild(dialog);
@@ -1843,7 +2562,13 @@
         : ['是否拆分/合并明细账单', '复用模块字段的映射关系'];
       const BILL_SPLIT_MERGE_FIELD = '是否拆分/合并明细账单';
       const REUSE_MODULE_FIELD = '复用模块字段的映射关系';
-      const currentBigAccounts = cloneBigAccountItems(payload.bigAccounts || []);
+      let currentBigAccounts = cloneBigAccountItems(payload.bigAccounts || []);
+      // v1.5.3 R2 round 2 修复 (Codex Finding 3)：
+      // 标记 currentBigAccounts 是否已含 own。第一次从模板管理 / get-mappings 进入时不含 own（§3.1 过滤），
+      // 维护大账号 click handler 才去 await getWithOwn 拉数据库版；第二次重开 mapping dialog 时
+      // payload.bigAccounts 已是上次维护大账号 onDone 的内存版（含 own + 用户编辑），透传 loadedWithOwn=true 跳过 getWithOwn，
+      // 避免静默覆盖用户的内存编辑（包括主动删除的 own 行）。
+      let bigAccountsLoadedWithOwn = Boolean(payload.bigAccountsLoadedWithOwn);
       const currentFixedAssignments = Array.isArray(payload.fixedAssignments)
         ? payload.fixedAssignments.map((item) => ({
             merchantId: String(item.merchantId || ''),
@@ -2161,23 +2886,35 @@
         }
 
         if (manageBigAccountBtn) {
-          manageBigAccountBtn.addEventListener('click', () => {
+          manageBigAccountBtn.addEventListener('click', async () => {
             const draftMappings = collectMappingDraftFromTable(tbody);
+            // v1.5.3 R2 fix：拉含自有账号的完整大账号列表作为弹窗初始数据
+            // 直接用 payload.bigAccounts（来自 template:get-mappings，§3.1 过滤自有）会在
+            // saveMappings DELETE+INSERT 写回时静默删除 own 账号；首次进入 dialog 时 loadedWithOwn=false，
+            // 此时去 await getWithOwn；后续重开（透传 loadedWithOwn=true）直接用 currentBigAccounts，
+            // 避免覆盖用户在内存里的编辑（Codex Round 2 Finding 3）
+            let bigAccountsForDialog = currentBigAccounts;
+            if (!bigAccountsLoadedWithOwn) {
+              try {
+                const withOwnResult = await window.desktopApi.bigAccount.getWithOwn(payload.template.id);
+                if (withOwnResult && withOwnResult.status === 'success' && Array.isArray(withOwnResult.bigAccounts)) {
+                  bigAccountsForDialog = withOwnResult.bigAccounts;
+                  currentBigAccounts = bigAccountsForDialog;
+                  bigAccountsLoadedWithOwn = true;
+                } else if (withOwnResult && withOwnResult.status === 'error') {
+                  setStatus(withOwnResult.message || '获取大账号（含自有）失败', 'error');
+                  return;
+                }
+              } catch (error) {
+                setStatus('获取大账号（含自有）失败，请重试', 'error');
+                return;
+              }
+            }
             openModal(createBigAccountManagerDialog({
-              bigAccounts: currentBigAccounts,
+              bigAccounts: bigAccountsForDialog,
               templateId: payload.template.id,
               templateName: payload.template.name,
-              onDone: async (nextBigAccounts, extra) => {
-                if (extra && extra.ownAccounts) {
-                  const ownResult = await window.desktopApi.bigAccount.saveOwnAccounts({
-                    templateId: payload.template.id,
-                    accounts: extra.ownAccounts
-                  });
-                  if (ownResult.status === 'error') {
-                    setStatus(ownResult.message || '自有账号保存失败', 'error');
-                    return;
-                  }
-                }
+              onDone: (nextBigAccounts) => {
                 openModal(createMappingDialog({
                   ...payload,
                   mappings: draftMappings.map((mapping) => {
@@ -2186,6 +2923,7 @@
                       : mapping;
                   }),
                   bigAccounts: nextBigAccounts,
+                  bigAccountsLoadedWithOwn: true,
                   fixedAssignments: currentFixedAssignments,
                   amountSplitRules: currentAmountSplitRules
                 }));
@@ -2194,7 +2932,8 @@
                 openModal(createMappingDialog({
                   ...payload,
                   mappings: draftMappings,
-                  bigAccounts: currentBigAccounts,
+                  bigAccounts: bigAccountsForDialog,
+                  bigAccountsLoadedWithOwn: true,
                   fixedAssignments: currentFixedAssignments,
                   amountSplitRules: currentAmountSplitRules
                 }));
@@ -2311,10 +3050,13 @@
                 currentBillSplitMeta = latest.billSplitMeta || { signedAmountSourceField: '' };
               }
             } catch (_error) { /* ignore */ }
+            // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
+            // 虽然 ...payload spread 会自动带过来，显式声明可防未来 spread 漏写 / payload 形状重构
             openModal(createMappingDialog({
               ...payload,
               mappings: draftMappings,
               bigAccounts: draftBigAccounts,
+              bigAccountsLoadedWithOwn,
               fixedAssignments: currentFixedAssignments,
               amountSplitRules: currentAmountSplitRules,
               billSplitMappings: currentBillSplitMappings,
@@ -2339,10 +3081,12 @@
           billSplitGroupFields: billSplitGroupFields.slice(),
           onDone: (nextMappings) => {
             currentBillSplitMappings = nextMappings.map((m) => ({ ...m }));
+            // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
             openModal(createMappingDialog({
               ...payload,
               mappings: draftMappings,
               bigAccounts: draftBigAccounts,
+              bigAccountsLoadedWithOwn,
               fixedAssignments: currentFixedAssignments,
               amountSplitRules: currentAmountSplitRules,
               billSplitMappings: currentBillSplitMappings,
@@ -2352,10 +3096,12 @@
             }));
           },
           onCancel: () => {
+            // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
             openModal(createMappingDialog({
               ...payload,
               mappings: draftMappings,
               bigAccounts: draftBigAccounts,
+              bigAccountsLoadedWithOwn,
               fixedAssignments: currentFixedAssignments,
               amountSplitRules: currentAmountSplitRules,
               billSplitMappings: currentBillSplitMappings,
@@ -2488,19 +3234,23 @@
           initialRules: currentAmountSplitRules,
           onDone: (nextRules) => {
             currentAmountSplitRules = nextRules.map((rule) => ({ ...rule }));
+            // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
             openModal(createMappingDialog({
               ...payload,
               mappings: draftMappings,
               bigAccounts: draftBigAccounts,
+              bigAccountsLoadedWithOwn,
               fixedAssignments: currentFixedAssignments,
               amountSplitRules: currentAmountSplitRules
             }));
           },
           onCancel: () => {
+            // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
             openModal(createMappingDialog({
               ...payload,
               mappings: draftMappings,
               bigAccounts: draftBigAccounts,
+              bigAccountsLoadedWithOwn,
               fixedAssignments: currentFixedAssignments,
               amountSplitRules: currentAmountSplitRules
             }));
@@ -2540,15 +3290,36 @@
       });
 
       dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+        // v1.5.2 需求 1：子/主模板名校验（必须在 saveMappings 之前）
+        // 规则 D1：子模板名需包含主模板名字符串（含相等）；未勾子模板或未选主模板均跳过校验
+        if (isChildCheckbox.checked && parentSelect.value) {
+          const parentId = parentSelect.value;
+          const parentTemplate = (state.templates || []).find((t) => String(t.id) === String(parentId));
+          const currentName = String(payload.template.name || '');
+          const parentName = String(parentTemplate?.name || '');
+          if (!parentName || !currentName.includes(parentName)) {
+            openModal(createAlertDialog('子模板与主模板模板名匹配不上，请检查。', {
+              onConfirm: () => {
+                openModal(createMappingDialog(payload));
+              }
+            }));
+            return;
+          }
+        }
+
         const draftBigAccounts = cloneBigAccountItems(currentBigAccounts);
         const draftMappings = collectMappingDraftFromTable(tbody);
 
         const saveMappings = async (mappings) => {
+          // v1.5.3 R2 round 3 (Codex Finding 5)：透传 preserveOwn
+          // bigAccountsLoadedWithOwn=false（用户没打开维护大账号）→ draftBigAccounts 是 client-only → preserveOwn=true 保留 own
+          // bigAccountsLoadedWithOwn=true（已 await getWithOwn 含 own 全集）→ preserveOwn=false 让 caller 全权（含主动删除 own）
           const result = await desktopApi.templates.saveMappings({
             templateId: payload.template.id,
             mappings,
             bigAccounts: draftBigAccounts,
-            fixedAssignments: currentFixedAssignments
+            fixedAssignments: currentFixedAssignments,
+            preserveOwn: !bigAccountsLoadedWithOwn
           });
 
           setStatus(result.message, result.status === 'success' ? 'success' : 'error', {
@@ -2594,10 +3365,12 @@
 
           openModal(createAlertDialog(result.message, {
             onConfirm: () => {
+              // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
               openModal(createMappingDialog({
                 ...payload,
                 mappings,
                 bigAccounts: draftBigAccounts,
+                bigAccountsLoadedWithOwn,
                 fixedAssignments: currentFixedAssignments,
                 amountSplitRules: currentAmountSplitRules
               }));
@@ -4507,6 +5280,7 @@
       createAlertDialog,
       createConfirmDialog,
       createExportScopeDialog,
+      createMonthlyBalanceExportDialog,
       createManualBalanceSeedDialog,
       escapeHtml,
       cloneBigAccountItems,

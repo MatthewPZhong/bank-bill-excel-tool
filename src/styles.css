@@ -1227,6 +1227,74 @@ select {
   pointer-events: none;
 }
 
+/* v1.5.2 需求 2：多对一工具条（单个账号匹多个文件） */
+.ba-multi-mode-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+  margin-left: 8px;
+  cursor: pointer;
+}
+
+.ba-multi-mode-label.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.ba-multi-toggle-btn {
+  padding: 4px 1em;
+  min-width: 0;
+  margin-left: 4px;
+}
+
+/* 未勾选时按钮占位但不可见，避免文本平移 */
+.ba-multi-toggle-btn.is-hidden {
+  visibility: hidden;
+}
+
+.ba-multi-edit-btn,
+.ba-multi-done-btn {
+  min-width: 64px;
+}
+
+/* 编辑态：左侧 block 行的勾选框 */
+.ba-left-block-checkbox {
+  margin-right: 6px;
+  cursor: pointer;
+}
+
+/* 编辑态下 big-account-file-item 保留数字序号位置，交给状态机决定渲染什么 */
+.big-account-file-item.ba-multi-editing .big-account-file-index {
+  display: none;
+}
+
+/* 左侧字母列（和右侧大账号序号对齐） */
+.ba-left-letter {
+  display: inline-block;
+  min-width: 20px;
+  text-align: right;
+  margin-right: 4px;
+}
+
+/* 编辑态下右侧大账号序号渲染为字母（a.b.c...），复用字号/行高 */
+.big-account-order-index.big-account-order-index--alpha {
+  font-style: italic;
+}
+
+/* 组闭合后左侧 block 行的"已配对"样式（显示 ✓ 与组字母） */
+.big-account-file-item.ba-multi-grouped {
+  color: var(--muted, #888);
+}
+
+.big-account-file-item .ba-multi-group-marker {
+  margin-right: 6px;
+  font-weight: 600;
+  color: var(--accent, #8a6d3b);
+}
+
 .is-flash-error {
   border-color: #e74c3c !important;
   animation: flash-error 500ms ease-out;
@@ -1579,6 +1647,48 @@ select {
   margin-top: 18px;
 }
 
+/* v1.5.3 R1 (T1.7)：月度余额账单导出弹窗 */
+.monthly-balance-export-card {
+  width: min(100%, 560px);
+  padding: 28px 28px 24px;
+}
+
+.monthly-balance-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin: 18px 0 6px;
+}
+
+.monthly-balance-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.monthly-balance-label {
+  flex: 0 0 56px;
+  font-size: 14px;
+  color: var(--text-secondary, #555);
+}
+
+.monthly-balance-template-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.monthly-balance-time-picker {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 8px;
+}
+
+.monthly-balance-year-select,
+.monthly-balance-month-select {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .export-scope-card {
   width: 320px;
 }
@@ -1603,6 +1713,7 @@ select {
 .mapping-big-account-manage-btn {
   min-width: 120px;
 }
+
 
 .big-account-card {
   width: min(100%, 980px);

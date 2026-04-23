@@ -22,6 +22,20 @@ const ADVANCED_MAPPING_FIELDS = [
   AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD
 ];
 const CONCAT_FIELDS_MAPPING_FIELD = '需要拼接字段';
+// v1.5.2 需求 3：主页面「按文件名映射模板」的虚拟模板 ID（非 DB 记录）
+// helper 用于在接收 templateId 的调用点统一短路，避免将虚拟 ID 传入真实查询
+const FILENAME_MAPPING_TEMPLATE_ID = '__FILENAME_MAPPING__';
+function isFilenameMappingMode(templateId) {
+  return templateId === FILENAME_MAPPING_TEMPLATE_ID;
+}
+
+// v1.5.3 R1 (T1.5)：主页面"模式"下拉值域（取代 v1.5.2 的"模板"下拉）
+const STATEMENT_MODES = Object.freeze({
+  createStatement: 'create-statement',       // 制作网银账单（保留 v1.5.2 完整流程；内部强制用 __FILENAME_MAPPING__）
+  exportMonthlyBalance: 'export-monthly-balance' // 导出月度余额账单（R1 新增；只启用 导入模板/模板管理/导出余额）
+});
+// R1 弹窗模板下拉的虚拟值（等价于后端 ALL_BANKS_TEMPLATE_SCOPE）
+const ALL_BANKS_TEMPLATE_SCOPE = '__ALL_BANKS__';
 const MODULES = Object.freeze({
   statementGenerator: {
     id: 'statement-generator',
@@ -52,7 +66,15 @@ rendererStartupProfiler.marks.set(RENDERER_STARTUP_MARKS.scriptStart, rendererSt
 
 const state = {
   templates: [],
-  selectedTemplateId: '',
+  // v1.5.3 R1 (T1.5)：创建网银账单模式下始终为 FILENAME_MAPPING_TEMPLATE_ID；
+  // 月度余额模式下 selectedTemplateId 不参与（由弹窗内部维护）
+  selectedTemplateId: FILENAME_MAPPING_TEMPLATE_ID,
+  // v1.5.3 R1：主页面模式（create-statement / export-monthly-balance）
+  mode: STATEMENT_MODES.createStatement,
+  // v1.5.3 R1：月度余额装配是否就绪（true → "导出余额"直接另存为；false → "导出余额"弹装配对话框）
+  monthlyBalanceReady: false,
+  // v1.5.3 R1：月度余额装配预览（summary 字段由 IPC 返回）
+  monthlyBalancePreview: null,
   canExportDetail: false,
   canExportBalance: false,
   canExportNewAccount: false,
@@ -177,6 +199,7 @@ const {
   createAlertDialog,
   createConfirmDialog,
   createExportScopeDialog,
+  createMonthlyBalanceExportDialog,
   createManualBalanceSeedDialog,
   createTemplateRenameDialog,
   createBigAccountSelectionDialog,
@@ -1002,6 +1025,10 @@ function updateNewAccountGenerateAvailability() {
 function setExportAvailability({ detailEnabled = state.canExportDetail, balanceEnabled = state.canExportBalance }) {
   state.canExportDetail = detailEnabled;
   state.canExportBalance = balanceEnabled;
+  // v1.5.3 R1 (T1.6)：月度余额模式下由 applyStatementModeSideEffects 统一控制按钮；此处不覆盖
+  if (state.mode === STATEMENT_MODES.exportMonthlyBalance) {
+    return;
+  }
   elements.exportDetailBtn.disabled = !detailEnabled;
   elements.exportBalanceBtn.disabled = !balanceEnabled;
 }
@@ -1451,8 +1478,8 @@ function legacyCreateExportScopeDialog(kind) {
   dialog.innerHTML = `
     <div class="alert-message">请选择要导出的范围</div>
     <div class="dialog-actions vertical">
-      <button class="secondary-btn small export-scope-btn" type="button" data-scope="current">导出当前文件的${fieldLabel}</button>
-      <button class="secondary-btn small export-scope-btn" type="button" data-scope="all">导出所有${fieldLabel}</button>
+      <button class="secondary-btn small export-scope-btn" type="button" data-scope="current">导出当前批次文件的${fieldLabel}</button>
+      <button class="secondary-btn small export-scope-btn" type="button" data-scope="all">导出所有批次文件的${fieldLabel}</button>
     </div>
   `;
 
@@ -1608,32 +1635,57 @@ function legacyEscapeHtml(value) {
     .replaceAll('"', '&quot;');
 }
 
+// v1.5.3 R1 (T1.5)：主页面下拉改为"模式"（create-statement / export-monthly-balance）；
+// "制作网银账单"模式内部 selectedTemplateId 固定为 __FILENAME_MAPPING__（用户不可见不可选，继承 v1.5.2 默认行为）；
+// 具体模板不再出现在主页面下拉里，只在 R1 月度余额弹窗里选择。
+// 函数名保留 updateTemplateSelect，只初始化/同步下拉选中值 + 按模式刷新按钮态；不再遍历 state.templates。
 function updateTemplateSelect() {
-  const previous = state.selectedTemplateId;
-  elements.templateSelect.innerHTML = '';
+  // HTML 已静态声明两个 option（见 index.html），这里只负责同步 selectedIndex 到 state.mode
+  if (elements.templateSelect.value !== state.mode) {
+    elements.templateSelect.value = state.mode;
+  }
 
-  const placeholder = document.createElement('option');
-  placeholder.value = '';
-  placeholder.textContent = state.templates.length ? '请选择模板' : '暂无模板';
-  elements.templateSelect.appendChild(placeholder);
+  // 制作网银账单模式下 selectedTemplateId 永远是虚拟 ID（继承 v1.5.2）
+  if (state.mode === STATEMENT_MODES.createStatement) {
+    state.selectedTemplateId = FILENAME_MAPPING_TEMPLATE_ID;
+  }
 
-  state.templates
-    .filter((template) => !template.parentTemplateId)
-    .forEach((template) => {
-      const option = document.createElement('option');
-      option.value = String(template.id);
-      option.textContent = template.name;
-      elements.templateSelect.appendChild(option);
-    });
+  applyStatementModeSideEffects();
+}
 
-  const preserved = state.templates.find((template) => String(template.id) === previous);
-  state.selectedTemplateId = preserved
-    ? String(preserved.id)
-    : '';
-  elements.templateSelect.value = state.selectedTemplateId || '';
+// v1.5.3 R1 (T1.6)：按模式设置按钮可用性矩阵（PRD §5.1.1）
+// create-statement      → 按原 v1.5.2 规则（ canExportDetail / canExportBalance 控制）
+// export-monthly-balance → 禁用 导入文件/导出明细/账户映射；导出余额始终可用（点击后走装配或另存为）
+//                          导入模板/模板管理两模式都可用
+function applyStatementModeSideEffects() {
+  const isMonthly = state.mode === STATEMENT_MODES.exportMonthlyBalance;
 
-  if (!state.selectedTemplateId) {
-    setExportAvailability({ detailEnabled: false, balanceEnabled: false });
+  // 两模式都可用的按钮：importTemplateBtn / manageTemplateBtn（无需改动 disabled）
+  // 月度余额模式禁用：导入文件 / 导出明细 / 账户映射
+  if (elements.importFileBtn) {
+    elements.importFileBtn.disabled = isMonthly;
+  }
+  if (elements.accountMappingBtn) {
+    elements.accountMappingBtn.disabled = isMonthly;
+  }
+
+  if (isMonthly) {
+    // 月度余额模式：导出明细一律禁用；导出余额始终可点（装配/另存为走弹窗链路）
+    if (elements.exportDetailBtn) {
+      elements.exportDetailBtn.disabled = true;
+    }
+    if (elements.exportBalanceBtn) {
+      elements.exportBalanceBtn.disabled = false;
+    }
+    // 注：不清 state.canExportDetail / canExportBalance（PRD §1.7 P1-1：切回 statement 模式要恢复原状态）
+  } else {
+    // 制作网银账单模式：按 state.canExport* 恢复
+    if (elements.exportDetailBtn) {
+      elements.exportDetailBtn.disabled = !state.canExportDetail;
+    }
+    if (elements.exportBalanceBtn) {
+      elements.exportBalanceBtn.disabled = !state.canExportBalance;
+    }
   }
 }
 
@@ -2603,7 +2655,9 @@ async function handleImportTemplate() {
 }
 
 async function handleOpenAccountMappings() {
-  const currentTemplateId = state.selectedTemplateId ? Number(state.selectedTemplateId) : null;
+  // v1.5.2 需求 3（G3-0）：虚拟 ID 不对应真实模板，这里当无选中处理，回落到第一个真实模板
+  const hasRealSelection = state.selectedTemplateId && !isFilenameMappingMode(state.selectedTemplateId);
+  const currentTemplateId = hasRealSelection ? Number(state.selectedTemplateId) : null;
   const templateId = currentTemplateId || (state.templates.length > 0 ? state.templates[0].id : null);
 
   if (!templateId) {
@@ -2662,7 +2716,10 @@ async function handleImportFile() {
     return;
   }
 
-  const templateId = Number(state.selectedTemplateId);
+  // v1.5.2 需求 3（G3-0）：虚拟 ID 原样透传给后端，由 file:import handler 做短路/分派
+  const templateId = isFilenameMappingMode(state.selectedTemplateId)
+    ? state.selectedTemplateId
+    : Number(state.selectedTemplateId);
   const result = await window.desktopApi.files.importFile(templateId);
 
   if (result.status === 'cancelled') {
@@ -2706,6 +2763,47 @@ async function handleExportDetail() {
 }
 
 async function handleExportBalance() {
+  // v1.5.3 R1 (T1.8)：按模式分流
+  if (state.mode === STATEMENT_MODES.exportMonthlyBalance) {
+    // 月度余额模式：
+    //   未装配 → 弹 createMonthlyBalanceExportDialog；装配 ready 回调里再 setStatus + state.monthlyBalanceReady=true
+    //   已装配 → 直接走 IPC export（弹系统保存对话框）
+    if (!state.monthlyBalanceReady) {
+      openModal(createMonthlyBalanceExportDialog({
+        onAssembleReady: (summary) => {
+          state.monthlyBalanceReady = true;
+          state.monthlyBalancePreview = summary;
+          setStatus(
+            `月度余额账单已生成（共 ${summary.count} 条记录），可点击"导出余额"另存为文件`,
+            'success',
+            { errorReportReady: false }
+          );
+        }
+      }));
+      return;
+    }
+    const result = await window.desktopApi.monthlyBalance.export();
+    if (result.status === 'cancelled') {
+      return;
+    }
+    if (result.status === 'success') {
+      setStatus(result.message || '月度余额账单导出成功', 'success', { errorReportReady: false });
+      return;
+    }
+    // v1.5.3 R1 round 3 (Codex Finding 6)：
+    // 后端 session 丢失（临时文件被清 / lastGeneratedExports.monthlyBalance 已 reset）→ reset 前端 ready 状态，
+    // 让用户下次点击重新弹 assemble 对话框，而不是反复打到失败 export 分支
+    if (result.errorCode === 'MONTHLY_BALANCE_NO_PENDING' || result.errorCode === 'MONTHLY_BALANCE_FILE_MISSING') {
+      state.monthlyBalanceReady = false;
+      state.monthlyBalancePreview = null;
+    }
+    setStatus(result.message || '月度余额账单导出失败', 'error', {
+      errorReportReady: Boolean(result.errorReportReady)
+    });
+    return;
+  }
+
+  // create-statement 模式：保留 v1.5.2 原逻辑
   const result = await window.desktopApi.files.exportBalance();
 
   if (result.status === 'cancelled') {
@@ -2811,6 +2909,13 @@ async function initialize() {
   setStatus(getEnumStatusMessage(), state.hasEnum ? 'info' : 'error', {
     errorReportReady: false
   });
+  // v1.5.3 R2（D15）：自有账号迁移失败告警，覆盖默认状态栏文案；
+  // 保留到用户手动关闭或下一次 setStatus 被其它动作覆盖
+  if (info.ownAccountsMigrationError) {
+    setStatus(info.ownAccountsMigrationError, 'error', {
+      errorReportReady: false
+    });
+  }
   setNewAccountStatus('请完整填写开户信息后点击生成', 'info', {
     errorReportReady: false,
     idleTitle: getNewAccountStatusTitle()
@@ -2845,11 +2950,29 @@ async function initialize() {
     });
   });
   elements.templateSelect.addEventListener('change', (event) => {
-    state.selectedTemplateId = event.target.value;
-    setExportAvailability({
-      detailEnabled: false,
-      balanceEnabled: false
-    });
+    // v1.5.3 R1 (T1.5)：主页面下拉现在是"模式"语义（而不是模板 ID）
+    const nextMode = event.target.value === STATEMENT_MODES.exportMonthlyBalance
+      ? STATEMENT_MODES.exportMonthlyBalance
+      : STATEMENT_MODES.createStatement;
+    if (state.mode === nextMode) return;
+    state.mode = nextMode;
+
+    // 切模式时重置月度余额装配 session（让下次切回月度余额重新弹弹窗）
+    // 注：不清 statementImportSessions / lastGeneratedExports（PRD P1-1：模式切换不丢 statement session）
+    state.monthlyBalanceReady = false;
+    state.monthlyBalancePreview = null;
+
+    if (nextMode === STATEMENT_MODES.createStatement) {
+      // 恢复到 v1.5.2 默认：selectedTemplateId 固定虚拟 ID
+      state.selectedTemplateId = FILENAME_MAPPING_TEMPLATE_ID;
+      applyStatementModeSideEffects();
+    } else {
+      // 切到月度余额：按钮矩阵重置；状态栏提示
+      applyStatementModeSideEffects();
+      setStatus('点击"导出余额"选择模板和年月', 'info', {
+        errorReportReady: false
+      });
+    }
   });
   elements.moduleSwitcherBtn.addEventListener('click', () => {
     if (state.isModuleMenuOpen) {

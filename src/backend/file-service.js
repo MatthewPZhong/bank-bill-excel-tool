@@ -25,6 +25,7 @@ const {
   parseDateValue,
   parseNumericValue,
   resolveCurrencyValue,
+  roundAmount,
   sanitizeAmountValue,
   splitSignedAmountValue,
   toExcelSerial
@@ -436,7 +437,11 @@ function buildMappedRows({
       // Sum
       const sumCredit = groupRows.reduce((acc, r) => acc + (parseNumericValue(r.creditAmount) || 0), 0);
       const sumDebit = groupRows.reduce((acc, r) => acc + (parseNumericValue(r.debitAmount) || 0), 0);
-      const net = sumCredit - sumDebit;
+      // v1.5.3 R4（2026-04-22 更正）：浮点求和尾部噪声（如 2377.49 + 178.31 = 2555.7999999999997、
+      // 65572.01 + 4917.90 = 70489.90999999999），toFixed(12) 在第二例无法收敛。
+      // 资金本就 2 位小数，统一 roundAmount（toFixed(2)）强制 2 位：
+      // 使 net===0 判定与 netString 输出均精确。
+      const net = roundAmount(sumCredit - sumDebit);
 
       // 净值为 0 时静默跳过整个合并组，不输出也不报错
       if (net === 0) {

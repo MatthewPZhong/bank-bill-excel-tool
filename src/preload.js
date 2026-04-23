@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
     getMappings: (templateId) => ipcRenderer.invoke('template:get-mappings', templateId),
     saveMappings: (payload) => ipcRenderer.invoke('template:save-mappings', payload),
     rename: (payload) => ipcRenderer.invoke('template:rename', payload),
+    saveFilenameFixedField: (payload) => ipcRenderer.invoke('template:save-filename-fixed-field', payload),
     exportBundle: () => ipcRenderer.invoke('template:export-bundle'),
     importBundle: () => ipcRenderer.invoke('template:import-bundle'),
     getAmountSplitRules: (templateId) => ipcRenderer.invoke('template:get-amount-split-rules', templateId),
@@ -57,6 +58,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
   bigAccount: {
     importBankInfo: (templateId) => ipcRenderer.invoke('big-account:import-bank-info', templateId),
     saveOwnAccounts: (payload) => ipcRenderer.invoke('big-account:save-own-accounts', payload),
+    // v1.5.3 R2：拉含自有账号的完整大账号列表（维护大账号对话框 / G1 月度余额弹窗）
+    getWithOwn: (templateId) => ipcRenderer.invoke('big-account:get-with-own', templateId),
     loadMode: (templateId) => ipcRenderer.invoke('big-account-mode:load', templateId),
     saveMode: (payload) => ipcRenderer.invoke('big-account-mode:save', payload),
     loadOrder: (templateId) => ipcRenderer.invoke('big-account-order:load', templateId),
@@ -74,6 +77,11 @@ contextBridge.exposeInMainWorld('desktopApi', {
     saveBalanceSeed: (payload) => ipcRenderer.invoke('file:save-balance-seed', payload),
     exportDetail: (scope) => ipcRenderer.invoke('file:export-detail', scope),
     exportBalance: (scope) => ipcRenderer.invoke('file:export-balance', scope)
+  },
+  // v1.5.3 R1 (T1.4)：月度余额账单导出（导出月度余额账单模式）
+  monthlyBalance: {
+    assemble: (payload) => ipcRenderer.invoke('monthly-balance:assemble', payload),
+    export: () => ipcRenderer.invoke('monthly-balance:export')
   },
   newAccount: {
     generate: (payload) => ipcRenderer.invoke('new-account:generate', payload),
