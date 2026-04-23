@@ -80,17 +80,22 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
       }
 
       const jobMeta = { dbPath, yearMonth, files, archivePath };
-      // 关键：Electron 运行时 process.execPath 指向 Electron 二进制，直接 spawn 会把 worker.js
+      // 关键一：Electron 运行时 process.execPath 指向 Electron 二进制，直接 spawn 会把 worker.js
       // 路径当成 Electron 自己的启动脚本参数，worker 里 argv[2] 拿到的是 worker.js 路径而不是
       // JSON。必须设 ELECTRON_RUN_AS_NODE=1 让 Electron 以纯 Node 模式启动。
-      // Node 直跑时该变量不影响（测试脚本下 process.execPath 本就是 node）。
+      // 关键二：Electron-Node 模式下 argv 里的 V8 flag（--max-old-space-size）不生效，heap 默认
+      // 只 ~1GB，121 万行 × 31 列 × ExcelJS wb 对象 → 48 秒 OOM。V8 flags 必须走 NODE_OPTIONS
+      // 环境变量；纯 Node 直跑（测试脚本）两种方式都 OK。
       const worker = spawn(process.execPath, [
-        `--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`,
         WORKER_SCRIPT,
         JSON.stringify(jobMeta)
       ], {
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: '1',
+          NODE_OPTIONS: `--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`
+        }
       });
 
       let stdoutBuf = '';
