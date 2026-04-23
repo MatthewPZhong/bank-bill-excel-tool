@@ -139,7 +139,7 @@ window.__rendererPending = (function () {
       overlay.appendChild(dialog);
 
       const title = document.createElement('div');
-      title.className = 'pending-rule-title';
+      title.className = 'pending-dialog-title';
       title.textContent = 'Pending 数据对账规则';
       dialog.appendChild(title);
 
@@ -302,7 +302,7 @@ window.__rendererPending = (function () {
       overlay.appendChild(dialog);
 
       const title = document.createElement('div');
-      title.className = 'alert-message';
+      title.className = 'pending-dialog-title';
       title.textContent = '请选择 Pending 数据所属年月';
       dialog.appendChild(title);
 

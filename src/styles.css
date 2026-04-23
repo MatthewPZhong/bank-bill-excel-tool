@@ -2464,12 +2464,16 @@ select {
   width: auto;
   max-width: 720px;
 }
-.pending-rule-title {
+.pending-dialog-title {
   text-align: left;
   font-size: 18px;
   font-weight: 700;
   color: var(--text);
   margin-bottom: 20px;
+}
+.pending-import-month-dialog {
+  width: auto;
+  max-width: 420px;
 }
 .pending-rule-columns {
   display: flex;
