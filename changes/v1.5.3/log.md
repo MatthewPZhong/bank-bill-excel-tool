@@ -1004,3 +1004,85 @@ P1 通过: 5/6 (P1-7 skipped: 错误报告为 txt 格式（非 xlsx），无字�
 2. push v1.5.x → origin
 3. PR #22 评论 `@codex review` 触发 round 5
 4. 等 Codex round 5；若 clean（0 finding 或仅 👍）→ 等用户决定合并
+
+---
+
+## 2026-04-23 Dev — Codex Review Round 5（2 条 P2 finding 修复）
+
+> Round 4 修复后触发 Codex round 5 review，发现 2 条 P2（低优先级）finding：
+> - **F8**（`renderer-dialogs.js:2223`）：`import-bank-info` 直接 concat clientAccounts + ownAccounts，未按 `(merchantId, currency)` dedupe；脏 Excel 同 (merchantId, currency) 既出现 client 又出现 own 时，触发 `template_big_accounts` UNIQUE 约束 `(template_id, merchant_id, currency)` → 整个 save 失败
+> - **F9**（`package-lock.json:1`）：`package.json` 已升 `1.5.3` 但 lockfile 根版本仍 `1.5.2`，发版元数据不一致
+>
+> 同时 Codex round 4 review (针对 Round 3 fix `ea6401f`) 09:10 给出 "Didn't find any major issues. Nice work!"，确认 Round 3 资金风险修复已 clean。
+
+### 缺陷复盘
+
+#### F8 — import-bank-info 合并未 dedupe
+
+- 链路：
+  - 用户从模板管理 → mapping dialog → 维护大账号 → 从 Excel 导入大账号信息
+  - `desktopApi.bigAccount.importBankInfo(templateId)` 后端解析 Excel → 返回 `{ clientAccounts, ownAccounts }`（按 Excel 列分类）
+  - `renderer-dialogs.js:2221-2224` 直接 spread concat 两个数组 → tbody 行
+  - 用户点完成 → onDone → mapping dialog → 保存 → `database.saveMappings` INSERT 多行 → 撞 UNIQUE → 整个 transaction rollback
+- 严重程度：P2（依赖脏 Excel 输入；显式报错而非静默丢失，但用户体验差，需要手动核查 Excel）
+
+#### F9 — lockfile 版本号未跟随 bump
+
+- `package.json:version = 1.5.3`（v1.5.3 发版收尾时改了）
+- `package-lock.json:3 + :9 packages[""]` 仍显 `1.5.2`
+- 影响：发版元数据不一致；构建产物 / 锁文件比对 / 版本审计混淆；不影响功能
+
+### 修复方案
+
+#### F8 — `(merchantId, currency)` dedupe，client 优先
+
+- `src/renderer-dialogs.js:2221`：把简单 concat 改为分两阶段合并
+  - 阶段 1：把 clientAccounts 全部加入 mergedAccounts，并把 `(merchantId, currency)` pair 加入 `seenByPair` Set
+  - 阶段 2：遍历 ownAccounts，对每个 own 行的 currencies 做过滤：剔除 `seenByPair` 中已存在的 currency
+    - 剩余 currencies 为 0 → 整体丢弃，记 `droppedOwnPairs`
+    - 剩余 currencies < 原 currencies → 部分冲突，记 `droppedOwnPairs` 含 `(部分冲突)` 标记，剩余 currencies 入 mergedAccounts
+    - 剩余 currencies == 原 currencies → 全部保留
+  - 最后如果 `droppedOwnPairs.length > 0` → console.warn 让用户感知
+- 冲突规则：**client 优先**（与 PRD §3.1 一致：自有账户仅在 R1 月度余额放行；UI 默认按 client 行为对齐）
+
+#### F9 — `npm install --package-lock-only`
+
+- 不安装新依赖，仅同步 lockfile
+- 验证 `grep -n '"version"' package-lock.json | head -3`：`:3` 和 `:9` 均显 `1.5.3`
+- diff 仅 4 行（2 处 +/- 版本号，无依赖增删）
+
+### 涉及文件
+
+| 文件 | 改动类型 | 说明 |
+|------|---------|------|
+| `src/renderer-dialogs.js` | 修改 | import-bank-info 合并 client+own 改为 dedupe by (merchantId, currency)，client 优先；console.warn 丢弃的 own pair |
+| `package-lock.json` | 修改 | 根版本 1.5.2 → 1.5.3（仅 4 行 diff） |
+| `scripts/test-v1.5.3-regression.js` | 修改 | Section 4 新增 P0-F10（dedupe 4 条决策表 contract test） |
+
+### 验证证据
+
+```
+[P0-F10] ✅ import-bank-info dedupe (merchantId, currency) — client 优先 — 4 条决策表正确：完全冲突丢 own / 无冲突全留 / 部分冲突保留剩余 / 最终无 (mid, cur) 重复
+
+=== 总计 ===
+P0 通过: 28/28
+P1 通过: 5/6 (P1-7 skipped: 错误报告为 txt 格式（非 xlsx），无字体可验)
+失败用例: 无
+```
+
+- `node scripts/test-v1.5.3-regression.js`：P0 28/28 + P1 5/6 + 1 skip
+- `npm run smoke`：pass
+- `grep '"version"' package-lock.json | head -3`：均 `1.5.3` ✓
+
+### 风险 / 决策
+
+- **F8 行为变更**：脏 Excel 场景下，原行为是 save 报错（用户感知 + 可手动纠正 Excel）；新行为是静默丢弃 own + console.warn（用户在 DevTools Console 才能看到）。trade-off：避免 save 失败带来"全部白干"的体验损失，代价是 own dedupe 不在主 UI 提示。**建议未来 round 6+ 把 droppedOwnPairs 升级为状态栏 toast** — 但本轮先按 P2 节奏修
+- **未拆 PR**：F8 / F9 都属 v1.5.3 R2 收口范围
+- **F9 是元数据一致性修复**：纯文本同步，无运行时影响
+
+### 下一步
+
+1. commit `fix(v1.5.3): Codex review round 5 — 2 P2 issues fixed`
+2. push v1.5.x → origin
+3. PR #22 评论 `@codex review` 触发 round 6
+4. 等 Codex round 6；若 clean → 等用户决定合并

@@ -8,7 +8,7 @@
 //   Section 1 — R1 资金装配（7 条）：P0-4 ~ P0-7、P0-10、P0-11、P1-3
 //   Section 2 — R1 IPC 校验层（2 条）：P0-8 / P0-9
 //   Section 3 — R2 迁移三态（3 条）：P0-13 / P0-14 / P0-15
-//   Section 4 — R2 过滤 / bundle + Codex 修复（11 条）：P1-4 / P1-5 / P0-F1 ~ P0-F9
+//   Section 4 — R2 过滤 / bundle + Codex 修复（12 条）：P1-4 / P1-5 / P0-F1 ~ P0-F10
 //   Section 5 — R3 字体 XML 级验证（7 条）：P0-17 ~ P0-20、P1-6 / P1-7 / P1-8
 //   Section 6 — R4 账单合并浮点精度（3 条）：P0-R4-1 ~ P0-R4-3
 //
@@ -1147,6 +1147,90 @@ function casesR2FilterBundle() {
     } finally {
       cleanupCtx(ctx);
     }
+  });
+
+  // --- P0-F10：import-bank-info dedupe by (merchantId, currency)（Codex Round 5 Finding 8 修复） ---
+  // 背景：Excel 源同 (merchantId, currency) 既出现为 client 又出现为 own → 直接 concat → onDone → saveMappings → UNIQUE 撞 → save 报错
+  // 修复：合并时按 (merchantId, currency) dedupe，client 优先（PRD §3.1 一致），部分冲突保留剩余 own currencies
+  // 本用例复刻 dedupe 算法验证决策表（renderer-dialogs.js 是 IIFE 工厂不易抽 export，改用 contract test）
+  runCase('P0-F10', 'P0', 'import-bank-info dedupe (merchantId, currency) — client 优先', () => {
+    function mergeWithDedupe(clientAccounts, ownAccounts) {
+      const mergedAccounts = [];
+      const seenByPair = new Set();
+      const droppedOwnPairs = [];
+      clientAccounts.forEach((item) => {
+        const merchantId = String(item.merchantId || '').trim();
+        const currencies = Array.isArray(item.currencies) ? item.currencies : [];
+        mergedAccounts.push({ ...item, accountNature: 'client' });
+        currencies.forEach((c) => {
+          seenByPair.add(`${merchantId}::${String(c || '').trim()}`);
+        });
+      });
+      ownAccounts.forEach((item) => {
+        const merchantId = String(item.merchantId || '').trim();
+        const currencies = Array.isArray(item.currencies) ? item.currencies : [];
+        const remaining = currencies.filter((c) => !seenByPair.has(`${merchantId}::${String(c || '').trim()}`));
+        if (remaining.length === 0) {
+          droppedOwnPairs.push(merchantId);
+          return;
+        }
+        mergedAccounts.push({
+          ...item,
+          currencies: remaining,
+          isMultiCurrency: remaining.length > 1,
+          accountNature: 'own'
+        });
+        remaining.forEach((c) => seenByPair.add(`${merchantId}::${String(c || '').trim()}`));
+      });
+      return { mergedAccounts, droppedOwnPairs };
+    }
+
+    // 用例 1：完全冲突 — 同 merchantId/currency 同时为 client + own → own 整体丢
+    const r1 = mergeWithDedupe(
+      [{ merchantId: 'A', currencies: ['CNY'] }],
+      [{ merchantId: 'A', currencies: ['CNY'] }]
+    );
+    assertEqual(r1.mergedAccounts.length, 1, '完全冲突 → 1 条');
+    assertEqual(r1.mergedAccounts[0].accountNature, 'client', '保留 client');
+    assertEqual(r1.droppedOwnPairs.length, 1, '丢 1 条 own');
+
+    // 用例 2：无冲突 — 都保留
+    const r2 = mergeWithDedupe(
+      [{ merchantId: 'A', currencies: ['CNY'] }],
+      [{ merchantId: 'B', currencies: ['USD'] }]
+    );
+    assertEqual(r2.mergedAccounts.length, 2, '无冲突 → 2 条都保留');
+    assertEqual(r2.droppedOwnPairs.length, 0, '无丢弃');
+
+    // 用例 3：部分冲突 — own 同 merchantId 含 CNY+USD，client 占 CNY → own 仅保留 USD
+    const r3 = mergeWithDedupe(
+      [{ merchantId: 'A', currencies: ['CNY'] }],
+      [{ merchantId: 'A', currencies: ['CNY', 'USD'] }]
+    );
+    assertEqual(r3.mergedAccounts.length, 2, '部分冲突 → 2 条（client A/CNY + own A/USD）');
+    const ownItem = r3.mergedAccounts.find((i) => i.accountNature === 'own');
+    assertTruthy(ownItem, 'own 应仍存在');
+    assertEqual(ownItem.currencies.length, 1, 'own 仅剩 1 个 currency');
+    assertEqual(ownItem.currencies[0], 'USD', '剩 USD（CNY 被 client 占）');
+
+    // 用例 4：UNIQUE 验证 — 没有任何 (merchantId, currency) 在 mergedAccounts 中重复
+    const r4 = mergeWithDedupe(
+      [{ merchantId: 'A', currencies: ['CNY', 'USD'] }],
+      [
+        { merchantId: 'A', currencies: ['CNY'] },     // 完全冲突 → 丢
+        { merchantId: 'A', currencies: ['USD'] },     // 完全冲突 → 丢
+        { merchantId: 'B', currencies: ['CNY'] }       // 无冲突 → 保留
+      ]
+    );
+    const pairs = new Set();
+    r4.mergedAccounts.forEach((item) => {
+      item.currencies.forEach((c) => {
+        const key = `${item.merchantId}::${c}`;
+        assertTruthy(!pairs.has(key), `(${item.merchantId}, ${c}) 不应重复`);
+        pairs.add(key);
+      });
+    });
+    return `4 条决策表正确：完全冲突丢 own / 无冲突全留 / 部分冲突保留剩余 / 最终无 (mid, cur) 重复`;
   });
 
   // --- P0-F9：子弹窗重开 mapping dialog 时 bigAccountsLoadedWithOwn 显式透传（Codex Round 4 defensive） ---

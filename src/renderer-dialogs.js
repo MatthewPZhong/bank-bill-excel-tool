@@ -2218,10 +2218,46 @@
         tbody.innerHTML = '';
         const clientAccounts = result.clientAccounts || [];
         const ownAccounts = result.ownAccounts || [];
-        const mergedAccounts = [
-          ...clientAccounts.map((item) => ({ ...item, accountNature: 'client' })),
-          ...ownAccounts.map((item) => ({ ...item, accountNature: 'own' }))
-        ];
+        // v1.5.3 R2 round 5 (Codex Finding 8)：dedupe by (merchantId, currency)
+        // 脏 Excel 可能在 client + own 同时含同 merchantId+currency；直接 concat → saveMappings 撞 UNIQUE 约束 (template_id, merchant_id, currency) → 整个 save 报错
+        // 冲突规则：保留 client（与 PRD §3.1 一致：自有账户仅在 R1 月度余额放行；UI 默认按 client 行为对齐）；丢弃的 own 行打 warn 让用户感知
+        const mergedAccounts = [];
+        const seenByPair = new Set();
+        const droppedOwnPairs = [];
+        clientAccounts.forEach((item) => {
+          const merchantId = String(item.merchantId || '').trim();
+          const currencies = Array.isArray(item.currencies) ? item.currencies : [];
+          mergedAccounts.push({ ...item, accountNature: 'client' });
+          currencies.forEach((c) => {
+            const key = `${merchantId}::${String(c || '').trim()}`;
+            seenByPair.add(key);
+          });
+        });
+        ownAccounts.forEach((item) => {
+          const merchantId = String(item.merchantId || '').trim();
+          const currencies = Array.isArray(item.currencies) ? item.currencies : [];
+          // 整体冲突 = own 行的所有 currency 都已被 client 占用 → 丢弃
+          // 部分冲突 = 混合（部分 currency 被占用，部分未占用）→ 仅保留未占用的 currency；如剩 0 则丢弃
+          const remainingCurrencies = currencies.filter((c) => !seenByPair.has(`${merchantId}::${String(c || '').trim()}`));
+          if (remainingCurrencies.length === 0) {
+            droppedOwnPairs.push(`${merchantId}（${currencies.join('/')}）`);
+            return;
+          }
+          if (remainingCurrencies.length < currencies.length) {
+            const droppedCurrencies = currencies.filter((c) => seenByPair.has(`${merchantId}::${String(c || '').trim()}`));
+            droppedOwnPairs.push(`${merchantId}（${droppedCurrencies.join('/')}, 部分冲突）`);
+          }
+          mergedAccounts.push({
+            ...item,
+            currencies: remainingCurrencies,
+            isMultiCurrency: remainingCurrencies.length > 1,
+            accountNature: 'own'
+          });
+          remainingCurrencies.forEach((c) => seenByPair.add(`${merchantId}::${String(c || '').trim()}`));
+        });
+        if (droppedOwnPairs.length > 0) {
+          console.warn(`[v1.5.3] import-bank-info dedupe: 自有账号与客资重复，已保留客资，丢弃 own 项: ${droppedOwnPairs.join('; ')}`);
+        }
         if (mergedAccounts.length === 0) {
           tbody.appendChild(createBigAccountRow({}, 'edit'));
         } else {
