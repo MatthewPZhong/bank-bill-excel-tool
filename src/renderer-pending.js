@@ -140,7 +140,7 @@ window.__rendererPending = (function () {
 
       const title = document.createElement('div');
       title.className = 'pending-rule-title';
-      title.textContent = 'Pending 数据筛选规则';
+      title.textContent = 'Pending 数据对账规则';
       dialog.appendChild(title);
 
       const columnsWrap = document.createElement('div');
@@ -250,8 +250,8 @@ window.__rendererPending = (function () {
         }
         handleRuleConfirm({ matchFields, compareFields });
       });
-      actions.appendChild(cancelBtn);
       actions.appendChild(saveBtn);
+      actions.appendChild(cancelBtn);
       dialog.appendChild(actions);
       return overlay;
     }
