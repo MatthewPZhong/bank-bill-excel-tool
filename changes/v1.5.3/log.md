@@ -1187,3 +1187,76 @@ P1 通过: 5/6 (P1-7 skipped: 错误报告为 txt 格式（非 xlsx），无字�
 2. push v1.5.x → origin
 3. PR #22 评论 `@codex review` 触发 round 7
 4. 等 Codex round 7；若 clean（0 finding 或仅 👍）→ 等用户决定合并
+
+---
+
+## 2026-04-23 Dev — Self-Review Round 6 二轮（C2 修复）
+
+> Round 6 修复完成后用户要求 Dev 再 self-review；这次发现自己 round 6 修的 I2 有时序缺陷（C2），以及 2 条 Minor。
+
+### 第二轮 Self-Review 摘要
+
+| 级别 | ID | 描述 | 处理 |
+|------|----|------|------|
+| Critical | C2 | I2 修的 `console.warn` 在 transaction commit **之前**触发；如果后续 INSERT 抛错 rollback，warn 已打 → 误导排障 | **本轮修** |
+| Minor | M5 | C1 setStatus 文案在 droppedOwnPairs 数量大时过长 | 留 v1.5.4 |
+| Minor | M6 | C1 文案未提示"保存后还会影响数据库其他 own"（I1 推迟带来的边角风险） | 留 v1.5.4，跟 I1 一起决策 |
+
+### 缺陷复盘 — C2
+
+- 位置：`template-repository.js:494-498`（round 6 I2 修复时引入）
+- 旧时序：
+  ```
+  BEGIN
+  DELETE/INSERT mappings
+  DELETE/INSERT big_accounts (loop with skippedOwnRows.push)
+  ★ console.warn(skippedOwnRows) ← 这里！commit 之前
+  INSERT fixedAssignments
+  INSERT amountSplitRules (optional)
+  UPDATE templates
+  COMMIT
+  ```
+- 失败场景：fixedAssignments INSERT 撞 UNIQUE 约束 (template_id, row_index) → catch → ROLLBACK
+  - **warn 已打**，但 transaction 实际没成功
+  - 排障人员看 console 以为 own 真被跳过、client 已落库，结果数据库实际没动
+- 严重程度：Critical（误导排障；如果 caller 又看 warn 决定后续行为，可能引发二次错误）
+
+### 修复方案 — C2
+
+- 把 `skippedOwnRows` 数组从 try 块内 hoist 到函数顶部（`:425` const 声明）
+- 把 `if (skippedOwnRows.length > 0) console.warn(...)` 从 try 块内 INSERT 循环结束后，移到 try-catch 块**之后**（即 COMMIT 真正成功之后）
+- rollback 触发时 throw 已抛出，永远不会到 warn 那行
+
+### 涉及文件
+
+| 文件 | 改动类型 | 说明 |
+|------|---------|------|
+| `src/backend/database/template-repository.js` | 修改 | C2 — skippedOwnRows hoist 到 try 块外；console.warn 移到 try-catch 块之后（COMMIT 之后） |
+| `scripts/test-v1.5.3-regression.js` | 修改 | 新增 P0-F13（模拟 fixedAssignments UNIQUE 撞 → rollback → 验证 warn 未打 + 数据库状态完整回滚） |
+
+### 验证证据
+
+```
+[P0-F13] ✅ saveMappings rollback 时 preserveOwn warn 不打（C2 修复） — rollback 触发时 preserveOwn warn 未打 + 数据库状态完整回滚
+
+=== 总计 ===
+P0 通过: 31/31
+P1 通过: 5/6 (P1-7 skipped: 错误报告为 txt 格式（非 xlsx），无字体可验)
+失败用例: 无
+```
+
+- `node scripts/test-v1.5.3-regression.js`：P0 31/31（含新增 P0-F13）+ P1 5/6 + 1 skip
+- `npm run smoke`：pass
+- 既有 P0-F12 仍 pass（commit 成功路径 warn 仍正常打）
+
+### 风险 / 决策
+
+- **C2 时序修复无业务影响**：warn 是 side effect，调整时机不改变 transaction 语义
+- **M5 / M6 推迟**：M5 文案截断属优化级；M6 跟 I1（import 覆盖 vs merge 语义）一起决策
+
+### 下一步
+
+1. commit `fix(v1.5.3): self-review round 6 second-pass — C2 warn timing`
+2. push v1.5.x → origin
+3. PR #22 评论 `@codex review` 触发 round 8（Codex review 序号）
+4. 等 Codex 反馈；若 clean → 等用户决定合并

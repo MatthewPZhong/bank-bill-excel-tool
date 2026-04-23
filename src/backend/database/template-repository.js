@@ -422,6 +422,9 @@ function saveMappings(
   { preserveOwn = false } = {}
 ) {
   const now = new Date().toISOString();
+  // v1.5.3 R2 round 6 second-pass self-review (C2)：在 try 块外声明
+  // 让 COMMIT 之后的 warn 能访问到；transaction rollback 抛出时永远不到 warn 那行
+  const skippedOwnRows = [];
   db.exec('BEGIN');
 
   try {
@@ -469,9 +472,9 @@ function saveMappings(
       );
     });
 
-    // v1.5.3 R2 round 6 self-review (I2)：跟踪 preserveOwn=true 时被防御性跳过的 own 行
-    // 用于在循环结束后打 warn，让 caller / 排障人员感知（不是静默 return）
-    const skippedOwnRows = [];
+    // v1.5.3 R2 round 6 self-review (I2 + C2)：跟踪 preserveOwn=true 时被防御性跳过的 own 行
+    // 用于在 COMMIT 之后打 warn，让 caller / 排障人员感知（不是静默 return）
+    // skippedOwnRows 在 try 块外声明 — rollback 时不会误打 warn (C2)
     bigAccounts.forEach((item, index) => {
       // v1.5.3 R2：account_nature 仅接受 'client' / 'own'；缺省或非法 → 'client'
       const rawNature = normalizeText(item.accountNature);
@@ -491,12 +494,7 @@ function saveMappings(
         now
       );
     });
-    if (skippedOwnRows.length > 0) {
-      // 不 throw，因为 caller 可能是 batch import / bundle 误传 own 行；warn 让排障可见但不阻塞写入
-      console.warn(
-        `[v1.5.3] saveMappings(preserveOwn=true) 防御性跳过 ${skippedOwnRows.length} 个 own 行（caller 应只传 client）：${skippedOwnRows.join(', ')}`
-      );
-    }
+    // 注：console.warn 在 COMMIT 之后才打（见函数末尾），避免 transaction rollback 时误导排障
 
     fixedAssignments.forEach((item, index) => {
       const merchantId = normalizeText(item.merchantId);
@@ -548,6 +546,15 @@ function saveMappings(
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;
+  }
+
+  // v1.5.3 R2 round 6 second-pass self-review (C2)：
+  // skippedOwnRows 的 warn 移到 COMMIT 之后；如果上面 transaction rollback 已抛出，这行不会执行 → warn 不会误打
+  if (skippedOwnRows.length > 0) {
+    // 不 throw，因为 caller 可能是 batch import / bundle 误传 own 行；warn 让排障可见但不阻塞写入
+    console.warn(
+      `[v1.5.3] saveMappings(preserveOwn=true) 防御性跳过 ${skippedOwnRows.length} 个 own 行（caller 应只传 client）：${skippedOwnRows.join(', ')}`
+    );
   }
 }
 

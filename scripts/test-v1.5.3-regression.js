@@ -8,7 +8,7 @@
 //   Section 1 — R1 资金装配（7 条）：P0-4 ~ P0-7、P0-10、P0-11、P1-3
 //   Section 2 — R1 IPC 校验层（2 条）：P0-8 / P0-9
 //   Section 3 — R2 迁移三态（3 条）：P0-13 / P0-14 / P0-15
-//   Section 4 — R2 过滤 / bundle + Codex 修复（14 条）：P1-4 / P1-5 / P0-F1 ~ P0-F12
+//   Section 4 — R2 过滤 / bundle + Codex 修复（15 条）：P1-4 / P1-5 / P0-F1 ~ P0-F13
 //   Section 5 — R3 字体 XML 级验证（7 条）：P0-17 ~ P0-20、P1-6 / P1-7 / P1-8
 //   Section 6 — R4 账单合并浮点精度（3 条）：P0-R4-1 ~ P0-R4-3
 //
@@ -1358,6 +1358,69 @@ function casesR2FilterBundle() {
       } finally {
         console.warn = originalWarn;
       }
+    } finally {
+      cleanupCtx(ctx);
+    }
+  });
+
+  // --- P0-F13：saveMappings rollback 时 warn 不打（Round 6 second-pass C2 修复） ---
+  // C2 把 console.warn 移到 COMMIT 之后；如果 transaction 失败 rollback，warn 不应被调用（避免误导排障）
+  // 模拟方法：触发 fixedAssignments INSERT 失败的场景。fixedAssignments UNIQUE 约束在 (template_id, row_index)，
+  // 显式传 2 个相同 rowIndex 的项 → INSERT 撞 UNIQUE 抛错 → rollback
+  runCase('P0-F13', 'P0', 'saveMappings rollback 时 preserveOwn warn 不打（C2 修复）', () => {
+    const ctx = createSingleTemplateCtx({ bigAccounts: [] });
+    try {
+      const originalWarn = console.warn;
+      const warnCalls = [];
+      console.warn = (...args) => warnCalls.push(args.join(' '));
+
+      try {
+        // 前置：写入一条 own 让后续 preserveOwn=true 路径能尝试跳过
+        ctx.db.saveMappings(
+          ctx.template.id,
+          [{ templateField: 'MerchantId', mappedField: '摘要' }],
+          [{ merchantId: 'OWN_PRE', currency: 'CNY', accountNature: 'own' }]
+        );
+
+        // 触发：preserveOwn=true + caller 误传 own（应跳过 → 收集到 skippedOwnRows）
+        // + fixedAssignments 含 2 个相同 rowIndex → INSERT 撞 UNIQUE → rollback
+        let threw = null;
+        try {
+          ctx.db.saveMappings(
+            ctx.template.id,
+            [{ templateField: 'MerchantId', mappedField: '摘要' }],
+            [
+              { merchantId: 'C_NEW', currency: 'CNY', accountNature: 'client' },
+              { merchantId: 'OWN_PRE', currency: 'CNY', accountNature: 'own' }  // 应被跳过
+            ],
+            [
+              { merchantId: 'F_A', currency: 'CNY', rowIndex: 0 },
+              { merchantId: 'F_B', currency: 'CNY', rowIndex: 0 }  // 相同 rowIndex → UNIQUE 撞
+            ],
+            undefined,
+            null,
+            { preserveOwn: true }
+          );
+        } catch (err) {
+          threw = err;
+        }
+        assertTruthy(threw, 'fixedAssignments 撞 UNIQUE → 应抛错');
+
+        // C2 关键断言：preserveOwn warn 不应在 rollback 时被调用
+        const matched = warnCalls.find((w) => w.includes('preserveOwn=true') && w.includes('防御性跳过'));
+        assertTruthy(!matched, 'rollback 时 preserveOwn warn 不应被调用（C2）');
+
+        // 验证数据库状态：preserveOwn=true 路径会先 DELETE client，但 transaction rollback 后应回滚
+        // OWN_PRE 应仍存在；C_NEW 不应入库
+        const rows = ctx.db.db.prepare(
+          "SELECT merchant_id, account_nature FROM template_big_accounts WHERE template_id=? ORDER BY merchant_id"
+        ).all(ctx.template.id);
+        assertEqual(rows.length, 1, 'rollback 后应仅剩 OWN_PRE');
+        assertEqual(rows[0].merchant_id, 'OWN_PRE', 'OWN_PRE 应仍存在');
+      } finally {
+        console.warn = originalWarn;
+      }
+      return 'rollback 触发时 preserveOwn warn 未打 + 数据库状态完整回滚';
     } finally {
       cleanupCtx(ctx);
     }
