@@ -2427,7 +2427,9 @@ select {
 }
 
 /* v2.0.0: Pending 主模块面板布局
- * 中列（导入文件 / 开始运行 / 状态框）垂直堆叠；规则管理、导出差异分列两侧，沿中列垂直中线对齐 */
+ * 左列：规则管理 / 导出差异 垂直堆；
+ * 右列：上行 [导入文件 | 开始运行] 两按钮 grid 并排，总宽=状态框宽；下行 状态框横跨两列。
+ * 两列相对整体"中线"左右分布，左列靠中线以左；右列靠中线以右。 */
 .pending-module-grid {
   display: flex;
   align-items: center;
@@ -2435,14 +2437,26 @@ select {
   gap: 40px;
   padding: 16px 0;
 }
-.pending-center-column {
+.pending-left-column {
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: 16px;
+  align-items: center;
 }
-.pending-side-btn {
-  align-self: center;
+.pending-right-column {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  width: 280px;
+}
+.pending-right-column > .pending-top-btn {
+  min-width: 0;
+  width: 100%;
+}
+.pending-right-column > .status-box {
+  grid-column: 1 / -1;
+  width: 100%;
+  min-width: 0;
 }
 
 /* v2.0.0: Pending 规则管理对话框 */

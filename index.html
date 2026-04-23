@@ -138,13 +138,15 @@
 
           <section id="pendingModulePanel" class="control-board module-panel pending-module-panel" hidden>
             <div class="pending-module-grid">
-              <button id="pendingRuleBtn" class="secondary-btn pending-side-btn" type="button">规则管理</button>
-              <div class="pending-center-column">
-                <button id="pendingImportBtn" class="primary-btn" type="button" disabled>导入文件</button>
-                <button id="pendingRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
+              <div class="pending-left-column">
+                <button id="pendingRuleBtn" class="secondary-btn" type="button">规则管理</button>
+                <button id="pendingExportBtn" class="secondary-btn" type="button" disabled>导出差异</button>
+              </div>
+              <div class="pending-right-column">
+                <button id="pendingImportBtn" class="primary-btn pending-top-btn" type="button" disabled>导入文件</button>
+                <button id="pendingRunBtn" class="primary-btn pending-top-btn" type="button" disabled>开始运行</button>
                 <div id="pendingStatusBox" class="status-box">初次使用请确认用来筛选的字段~</div>
               </div>
-              <button id="pendingExportBtn" class="secondary-btn pending-side-btn" type="button" disabled>导出差异</button>
             </div>
           </section>
         </section>
