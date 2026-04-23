@@ -12,6 +12,17 @@ const monthRepo = require('../backend/pending-db/month-repository');
 const WORKER_SCRIPT = path.resolve(__dirname, '../backend/pending-import/worker.js');
 const NODE_MAX_OLD_SPACE_MB = 8192;
 
+// Electron 下必须用 utilityProcess.fork（真正的 Node.js 子进程），否则：
+//   - spawn(process.execPath) 启动 Electron helper，--max-old-space-size 失效，heap 限制 ~1GB
+//   - 121 万行 × 31 列 ExcelJS 读取必 OOM（实测 @ 1047MB）
+// 纯 Node 运行（测试脚本下）require('electron') 会失败，fallback 到 spawn。
+let electronUtilityProcess = null;
+try {
+  electronUtilityProcess = require('electron').utilityProcess;
+} catch (_err) {
+  // 非 Electron 运行时；保持 spawn 兜底
+}
+
 function formatTimestamp(date = new Date()) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
@@ -80,29 +91,13 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
       }
 
       const jobMeta = { dbPath, yearMonth, files, archivePath };
-      // 关键一：Electron 运行时 process.execPath 指向 Electron 二进制，直接 spawn 会把 worker.js
-      // 路径当成 Electron 自己的启动脚本参数，worker 里 argv[2] 拿到的是 worker.js 路径而不是
-      // JSON。必须设 ELECTRON_RUN_AS_NODE=1 让 Electron 以纯 Node 模式启动。
-      // 关键二：Electron-Node 模式下 argv 里的 V8 flag（--max-old-space-size）不生效，heap 默认
-      // 只 ~1GB，121 万行 × 31 列 × ExcelJS wb 对象 → 48 秒 OOM。V8 flags 必须走 NODE_OPTIONS
-      // 环境变量；纯 Node 直跑（测试脚本）两种方式都 OK。
-      const worker = spawn(process.execPath, [
-        WORKER_SCRIPT,
-        JSON.stringify(jobMeta)
-      ], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: {
-          ...process.env,
-          ELECTRON_RUN_AS_NODE: '1',
-          NODE_OPTIONS: `--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`
-        }
-      });
 
       let stdoutBuf = '';
       let stderrBuf = '';
       const events = [];
 
-      worker.stdout.on('data', (chunk) => {
+      // 公共事件处理
+      function onStdoutChunk(chunk) {
         stdoutBuf += chunk.toString();
         let idx;
         while ((idx = stdoutBuf.indexOf('\n')) !== -1) {
@@ -116,20 +111,13 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
             try { onProgress(ev); } catch (_progErr) { /* swallow */ }
           }
         }
-      });
+      }
 
-      worker.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
-
-      worker.on('error', (err) => {
-        resolve({ status: 'error', errors: [{ severity: 'fatal', message: 'worker spawn 失败：' + err.message }] });
-      });
-
-      worker.on('close', (code) => {
+      function finalize(code) {
         if (stdoutBuf.trim()) {
           try { events.push(JSON.parse(stdoutBuf.trim())); } catch (_e) { events.push({ type: 'raw', line: stdoutBuf.trim() }); }
           stdoutBuf = '';
         }
-
         if (code === 0) {
           const complete = events.find((e) => e.type === 'complete');
           if (complete) {
@@ -146,14 +134,37 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
           resolve({ status: 'error', errors: [{ severity: 'fatal', message: 'worker 正常退出但缺 complete 事件' }] });
           return;
         }
-
         const errorEv = events.find((e) => e.type === 'error');
         const errors = errorEv
           ? errorEv.errors
           : [{ severity: 'fatal', message: `worker 异常退出（code=${code}）\nstderr=${stderrBuf.trim()}` }];
         lastImportErrors = { errors, yearMonth, files: files.slice() };
         resolve({ status: 'error', errors });
-      });
+      }
+
+      if (electronUtilityProcess) {
+        // Electron 路径：utilityProcess.fork → 真正 Node.js 子进程，execArgv 里 V8 flag 生效
+        const worker = electronUtilityProcess.fork(WORKER_SCRIPT, [JSON.stringify(jobMeta)], {
+          execArgv: [`--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`],
+          stdio: 'pipe'
+        });
+        worker.stdout.on('data', onStdoutChunk);
+        worker.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+        worker.on('exit', finalize);
+      } else {
+        // Node 直跑（测试脚本）：spawn 老路径
+        const worker = spawn(process.execPath, [
+          `--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`,
+          WORKER_SCRIPT,
+          JSON.stringify(jobMeta)
+        ], { stdio: ['ignore', 'pipe', 'pipe'] });
+        worker.stdout.on('data', onStdoutChunk);
+        worker.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+        worker.on('error', (err) => {
+          resolve({ status: 'error', errors: [{ severity: 'fatal', message: 'worker spawn 失败：' + err.message }] });
+        });
+        worker.on('close', finalize);
+      }
     });
   }
 
