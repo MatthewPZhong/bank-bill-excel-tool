@@ -2427,35 +2427,35 @@ select {
 }
 
 /* v2.0.0: Pending 主模块面板布局
- * 左列：规则管理（顶部与"导入文件"顶部平）/ 导出差异（底部与状态框底部平）垂直两端对齐；
- * 右列：上行 [导入文件 | 开始运行] 两按钮 grid 并排，总宽=状态框宽；下行 状态框横跨两列。
- * 两列相对整体"中线"左右分布，左列靠中线以左；右列靠中线以右。 */
+ * 2 列 × 2 行 grid：
+ *   - 行 1：规则管理 | [导入文件 | 开始运行]
+ *   - 行 2：导出差异 | 状态框
+ * 每行内左右两列 align-items: center，即左列按钮中点 = 右列元素中点。
+ * 右列宽 280px，导入/开始两按钮 grid 1fr 1fr 铺满右列（左右缘对齐状态框左右缘）。 */
 .pending-module-grid {
-  display: flex;
-  align-items: stretch; /* 左列与右列同高 → 左列内两按钮能 space-between 顶/底对齐 */
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: 96px;
+  row-gap: 16px;
+  align-items: center;
   justify-content: center;
-  gap: 96px;
   padding: 16px 0;
 }
-.pending-left-column {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between; /* 规则管理贴顶，导出差异贴底 */
-  align-items: center;
+.pending-left-btn {
+  justify-self: center;
 }
-.pending-right-column {
+.pending-top-btn-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
   width: 280px;
 }
-.pending-right-column > .pending-top-btn {
+.pending-top-btn-row > .pending-top-btn {
   min-width: 0;
   width: 100%;
 }
-.pending-right-column > .status-box {
-  grid-column: 1 / -1;
-  width: 100%;
+.pending-module-grid > .status-box {
+  width: 280px;
   min-width: 0;
 }
 
