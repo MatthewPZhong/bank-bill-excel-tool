@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "1.5.3",
-    "scannedAt": "2026-04-23T10:28:25.651Z",
+    "version": "2.0.0-beta.1",
+    "scannedAt": "2026-04-23T11:52:34.966Z",
     "root": "src",
     "totalFiles": 28,
     "totalTopLevelNames": 355,
@@ -503,14 +503,41 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 2
+            "count": 3
           },
           {
             "file": "src/renderer.js",
             "count": 5
           }
         ],
-        "totalHits": 13,
+        "totalHits": 14,
+        "fileSpan": 4
+      },
+      {
+        "name": "ADVANCED_MAPPING_FIELDS",
+        "defFiles": [
+          "src/main.js",
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer-previews.js",
+            "count": 4
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 11,
         "fileSpan": 4
       },
       {
@@ -563,33 +590,6 @@
           }
         ],
         "totalHits": 10,
-        "fileSpan": 4
-      },
-      {
-        "name": "ADVANCED_MAPPING_FIELDS",
-        "defFiles": [
-          "src/main.js",
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main.js",
-            "count": 1
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 2
-          },
-          {
-            "file": "src/renderer-previews.js",
-            "count": 2
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 9,
         "fileSpan": 4
       },
       {
@@ -1045,14 +1045,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 5
+            "count": 6
           },
           {
             "file": "src/renderer.js",
             "count": 122
           }
         ],
-        "totalHits": 137,
+        "totalHits": 138,
         "fileSpan": 3
       },
       {
@@ -1816,6 +1816,42 @@
         "fileSpan": 2
       },
       {
+        "name": "MODULES",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer-previews.js",
+            "count": 16
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 23,
+        "fileSpan": 2
+      },
+      {
+        "name": "setCurrentModule",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer-previews.js",
+            "count": 16
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 20,
+        "fileSpan": 2
+      },
+      {
         "name": "hasColumn",
         "defFiles": [
           "src/backend/database/migrations.js"
@@ -1831,24 +1867,6 @@
           }
         ],
         "totalHits": 17,
-        "fileSpan": 2
-      },
-      {
-        "name": "MODULES",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer-previews.js",
-            "count": 7
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 7
-          }
-        ],
-        "totalHits": 14,
         "fileSpan": 2
       },
       {
@@ -1956,24 +1974,6 @@
           {
             "file": "src/renderer.js",
             "count": 6
-          }
-        ],
-        "totalHits": 11,
-        "fileSpan": 2
-      },
-      {
-        "name": "setCurrentModule",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer-previews.js",
-            "count": 7
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 4
           }
         ],
         "totalHits": 11,
@@ -5969,14 +5969,41 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 2
+          "count": 3
         },
         {
           "file": "src/renderer.js",
           "count": 5
         }
       ],
-      "totalHits": 13,
+      "totalHits": 14,
+      "fileSpan": 4
+    },
+    {
+      "name": "ADVANCED_MAPPING_FIELDS",
+      "defFiles": [
+        "src/main.js",
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer-previews.js",
+          "count": 4
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 11,
       "fileSpan": 4
     },
     {
@@ -6029,33 +6056,6 @@
         }
       ],
       "totalHits": 10,
-      "fileSpan": 4
-    },
-    {
-      "name": "ADVANCED_MAPPING_FIELDS",
-      "defFiles": [
-        "src/main.js",
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main.js",
-          "count": 1
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 2
-        },
-        {
-          "file": "src/renderer-previews.js",
-          "count": 2
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 9,
       "fileSpan": 4
     },
     {
@@ -6511,14 +6511,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 5
+          "count": 6
         },
         {
           "file": "src/renderer.js",
           "count": 122
         }
       ],
-      "totalHits": 137,
+      "totalHits": 138,
       "fileSpan": 3
     },
     {
@@ -7280,6 +7280,42 @@
       "fileSpan": 2
     },
     {
+      "name": "MODULES",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/renderer-previews.js",
+          "count": 16
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 7
+        }
+      ],
+      "totalHits": 23,
+      "fileSpan": 2
+    },
+    {
+      "name": "setCurrentModule",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/renderer-previews.js",
+          "count": 16
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 20,
+      "fileSpan": 2
+    },
+    {
       "name": "hasColumn",
       "defFiles": [
         "src/backend/database/migrations.js"
@@ -7295,24 +7331,6 @@
         }
       ],
       "totalHits": 17,
-      "fileSpan": 2
-    },
-    {
-      "name": "MODULES",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/renderer-previews.js",
-          "count": 7
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 7
-        }
-      ],
-      "totalHits": 14,
       "fileSpan": 2
     },
     {
@@ -7420,24 +7438,6 @@
         {
           "file": "src/renderer.js",
           "count": 6
-        }
-      ],
-      "totalHits": 11,
-      "fileSpan": 2
-    },
-    {
-      "name": "setCurrentModule",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/renderer-previews.js",
-          "count": 7
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 4
         }
       ],
       "totalHits": 11,

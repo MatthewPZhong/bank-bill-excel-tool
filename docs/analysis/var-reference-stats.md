@@ -4,8 +4,8 @@
 
 | 字段 | 值 |
 |---|---|
-| 版本 | v1.5.3 |
-| 扫描时间 | 2026-4-23 18:28:25 |
+| 版本 | v2.0.0-beta.1 |
+| 扫描时间 | 2026-4-23 19:52:34 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 28 |
 | 顶层声明总数 | 355 |
@@ -32,10 +32,10 @@
 | `XLSX` | 4 | 27 | 4 | src/backend/file-service/normalizers.js |
 | `FIXED_FIELD_VALUE_PREFIX` | 4 | 21 | 2 | src/backend/database/utils.js |
 | `MERCHANT_ID_SELF_INPUT_OPTION` | 4 | 17 | 2 | src/main.js |
-| `BALANCE_CALCULATED_OPTION` | 4 | 13 | 2 | src/main.js |
+| `BALANCE_CALCULATED_OPTION` | 4 | 14 | 2 | src/main.js |
+| `ADVANCED_MAPPING_FIELDS` | 4 | 11 | 2 | src/main.js |
 | `parseDateValue` | 4 | 11 | 1 | src/backend/file-service/normalizers.js |
 | `app` | 4 | 10 | 1 | src/main.js |
-| `ADVANCED_MAPPING_FIELDS` | 4 | 9 | 2 | src/main.js |
 | `listTemplates` | 4 | 8 | 1 | src/backend/database/template-repository.js |
 | `saveBillSplitAmountRules` | 4 | 8 | 1 | src/backend/database/template-repository.js |
 | `saveBillSplitMeta` | 4 | 8 | 1 | src/backend/database/template-repository.js |
@@ -53,7 +53,7 @@
 | `setParentStatus` | 4 | 6 | 1 | src/backend/database/template-repository.js |
 | `splitTemplateName` | 4 | 6 | 2 | src/backend/database/own-accounts-migration.js |
 | `dialog` | 3 | 241 | 1 | src/main.js |
-| `state` | 3 | 137 | 1 | src/renderer.js |
+| `state` | 3 | 138 | 1 | src/renderer.js |
 | `elements` | 3 | 114 | 1 | src/renderer.js |
 | `setStatus` | 3 | 77 | 1 | src/renderer.js |
 | `normalizeText` | 3 | 70 | 2 | src/backend/database/migrations.js |
@@ -93,15 +93,15 @@
 | 名字 | 总次数 | 声明位置（首个） |
 |---|---:|---|
 | `templateRepository` | 33 | src/backend/database.js |
+| `MODULES` | 23 | src/renderer.js |
+| `setCurrentModule` | 20 | src/renderer.js |
 | `hasColumn` | 17 | src/backend/database/migrations.js |
-| `MODULES` | 14 | src/renderer.js |
 | `refreshTemplates` | 14 | src/renderer.js |
 | `sanitizeAmountValue` | 14 | src/backend/file-service/normalizers.js |
 | `settingsRepository` | 13 | src/backend/database.js |
 | `getCurrencyOptionEntries` | 12 | src/renderer.js |
 | `pad` | 12 | src/backend/logger.js |
 | `applyStatementResult` | 11 | src/renderer.js |
-| `setCurrentModule` | 11 | src/renderer.js |
 | `getTemplate` | 10 | src/backend/database/template-repository.js |
 | `setNewAccountStatus` | 10 | src/renderer.js |
 | `hasEffectiveAmount` | 9 | src/backend/file-service/normalizers.js |
@@ -353,10 +353,10 @@
 | `XLSX` | 4 | 27 | 4 | src/backend/file-service/writers.js(20), src/backend/file-service/normalizers.js(3), src/backend/file-service/readers.js(3) |
 | `FIXED_FIELD_VALUE_PREFIX` | 4 | 21 | 2 | src/backend/file-service.js(13), src/backend/database/utils.js(5), src/backend/file-service/common.js(2) |
 | `MERCHANT_ID_SELF_INPUT_OPTION` | 4 | 17 | 2 | src/renderer.js(8), src/renderer-dialogs.js(6), src/renderer-previews.js(2) |
-| `BALANCE_CALCULATED_OPTION` | 4 | 13 | 2 | src/renderer-dialogs.js(5), src/renderer.js(5), src/renderer-previews.js(2) |
+| `BALANCE_CALCULATED_OPTION` | 4 | 14 | 2 | src/renderer-dialogs.js(5), src/renderer.js(5), src/renderer-previews.js(3) |
+| `ADVANCED_MAPPING_FIELDS` | 4 | 11 | 2 | src/renderer-previews.js(4), src/renderer.js(4), src/renderer-dialogs.js(2) |
 | `parseDateValue` | 4 | 11 | 1 | src/backend/file-service.js(4), src/backend/file-service/writers.js(4), src/backend/file-service/normalizers.js(2) |
 | `app` | 4 | 10 | 1 | src/main.js(4), src/renderer.js(4), src/preload.js(1) |
-| `ADVANCED_MAPPING_FIELDS` | 4 | 9 | 2 | src/renderer.js(4), src/renderer-dialogs.js(2), src/renderer-previews.js(2) |
 | `listTemplates` | 4 | 8 | 1 | src/backend/database/template-repository.js(3), src/backend/database.js(2), src/main-process/monthly-balance.js(2) |
 | `saveBillSplitAmountRules` | 4 | 8 | 1 | src/renderer-dialogs.js(3), src/backend/database.js(2), src/backend/database/template-repository.js(2) |
 | `saveBillSplitMeta` | 4 | 8 | 1 | src/renderer-dialogs.js(3), src/backend/database.js(2), src/backend/database/template-repository.js(2) |
@@ -374,7 +374,7 @@
 | `setParentStatus` | 4 | 6 | 1 | src/backend/database.js(2), src/backend/database/template-repository.js(2), src/preload.js(1) |
 | `splitTemplateName` | 4 | 6 | 2 | src/backend/database/own-accounts-migration.js(2), src/main-process/monthly-balance.js(2), src/main-process/statement-generation.js(1) |
 | `dialog` | 3 | 241 | 1 | src/renderer-dialogs.js(169), src/renderer.js(71), src/main.js(1) |
-| `state` | 3 | 137 | 1 | src/renderer.js(122), src/renderer-dialogs.js(10), src/renderer-previews.js(5) |
+| `state` | 3 | 138 | 1 | src/renderer.js(122), src/renderer-dialogs.js(10), src/renderer-previews.js(6) |
 | `elements` | 3 | 114 | 1 | src/renderer.js(100), src/renderer-previews.js(10), src/renderer-dialogs.js(4) |
 | `setStatus` | 3 | 77 | 1 | src/renderer.js(44), src/renderer-dialogs.js(32), src/renderer-previews.js(1) |
 | `normalizeText` | 3 | 70 | 2 | src/backend/database/template-repository.js(57), src/backend/database/utils.js(10), src/backend/database/migrations.js(3) |
@@ -409,15 +409,15 @@
 | `mergeMappedDetailRows` | 3 | 5 | 1 | src/main-process/statement-generation.js(2), src/main-process/statement-session.js(2), src/main.js(1) |
 | `sanitizeBankName` | 3 | 4 | 3 | src/backend/database/own-accounts-migration.js(2), src/backend/balance-adjustment-store.js(1), src/backend/own-account-store.js(1) |
 | `templateRepository` | 2 | 33 | 2 | src/backend/database.js(30), src/backend/database/own-accounts-migration.js(3) |
+| `MODULES` | 2 | 23 | 1 | src/renderer-previews.js(16), src/renderer.js(7) |
+| `setCurrentModule` | 2 | 20 | 1 | src/renderer-previews.js(16), src/renderer.js(4) |
 | `hasColumn` | 2 | 17 | 1 | src/backend/database/migrations.js(14), src/backend/database.js(3) |
-| `MODULES` | 2 | 14 | 1 | src/renderer-previews.js(7), src/renderer.js(7) |
 | `refreshTemplates` | 2 | 14 | 1 | src/renderer.js(8), src/renderer-dialogs.js(6) |
 | `sanitizeAmountValue` | 2 | 14 | 1 | src/backend/file-service.js(11), src/backend/file-service/normalizers.js(3) |
 | `settingsRepository` | 2 | 13 | 2 | src/backend/database.js(9), src/backend/database/own-accounts-migration.js(4) |
 | `getCurrencyOptionEntries` | 2 | 12 | 1 | src/renderer.js(7), src/renderer-dialogs.js(5) |
 | `pad` | 2 | 12 | 2 | src/backend/logger.js(11), src/main.js(1) |
 | `applyStatementResult` | 2 | 11 | 1 | src/renderer.js(6), src/renderer-dialogs.js(5) |
-| `setCurrentModule` | 2 | 11 | 1 | src/renderer-previews.js(7), src/renderer.js(4) |
 | `getTemplate` | 2 | 10 | 1 | src/backend/database/template-repository.js(8), src/backend/database.js(2) |
 | `setNewAccountStatus` | 2 | 10 | 1 | src/renderer.js(8), src/renderer-previews.js(2) |
 | `hasEffectiveAmount` | 2 | 9 | 1 | src/backend/file-service.js(7), src/backend/file-service/normalizers.js(2) |
