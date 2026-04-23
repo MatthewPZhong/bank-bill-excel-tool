@@ -17,6 +17,27 @@ window.__rendererPending = (function () {
 
     let columnsCache = null;
 
+    function isAdjacentMonths(upper, lower) {
+      if (typeof upper !== 'string' || typeof lower !== 'string') return false;
+      if (!/^\d{4}-\d{2}$/.test(upper) || !/^\d{4}-\d{2}$/.test(lower)) return false;
+      const [uY, uM] = upper.split('-').map(Number);
+      const [lY, lM] = lower.split('-').map(Number);
+      let prevYear = lY;
+      let prevMonth = lM - 1;
+      if (prevMonth === 0) { prevMonth = 12; prevYear -= 1; }
+      return prevYear === uY && prevMonth === uM;
+    }
+
+    function formatDurationSec(ms) {
+      if (!Number.isFinite(ms) || ms < 0) return '—';
+      if (ms < 1000) return '< 1 秒';
+      const sec = Math.round(ms / 1000);
+      if (sec < 60) return `${sec} 秒`;
+      const min = Math.floor(sec / 60);
+      const restSec = sec % 60;
+      return restSec > 0 ? `${min} 分 ${restSec} 秒` : `${min} 分`;
+    }
+
     function computePendingStatusText() {
       const p = state.pending;
       if (p.importing) return p.importingText || '正在导入...';
@@ -49,7 +70,7 @@ window.__rendererPending = (function () {
       const hasMonths = state.pending.months && state.pending.months.length > 0;
       elements.pendingImportBtn.disabled = !hasRule || state.pending.importing || state.pending.running;
       elements.pendingRunBtn.disabled = !hasRule || !hasMonths || state.pending.running || state.pending.importing;
-      elements.pendingExportBtn.disabled = !state.pending.latestRunResult;
+      elements.pendingExportBtn.disabled = !state.pending.latestRunId;
     }
 
     async function loadRule() {
@@ -359,6 +380,147 @@ window.__rendererPending = (function () {
       }
     }
 
+    // ========== 开始运行（对账）==========
+
+    function buildReconcileDialog({ months, defaultUpper, defaultLower, onConfirm, onCancel }) {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card pending-reconcile-dialog';
+      overlay.appendChild(dialog);
+
+      const title = document.createElement('div');
+      title.className = 'alert-message';
+      title.textContent = '请选取需要比对 Pending 数据的月份';
+      dialog.appendChild(title);
+
+      function buildMonthSelect(labelText, preferValue) {
+        const row = document.createElement('div');
+        row.className = 'pending-rule-row';
+        const label = document.createElement('label');
+        label.className = 'pending-rule-label';
+        label.textContent = labelText;
+        row.appendChild(label);
+        const select = document.createElement('select');
+        select.className = 'pending-rule-select';
+        months.forEach((m) => {
+          const opt = document.createElement('option');
+          opt.value = m;
+          opt.textContent = m;
+          if (preferValue && m === preferValue) opt.selected = true;
+          select.appendChild(opt);
+        });
+        row.appendChild(select);
+        dialog.appendChild(row);
+        return select;
+      }
+
+      const upperSelect = buildMonthSelect('上上个月 Pending 文件', defaultUpper);
+      const lowerSelect = buildMonthSelect('上个月 Pending 文件', defaultLower);
+
+      const actions = document.createElement('div');
+      actions.className = 'dialog-actions center';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'secondary-btn small';
+      cancelBtn.type = 'button';
+      cancelBtn.textContent = '取消';
+      cancelBtn.addEventListener('click', () => { if (typeof onCancel === 'function') onCancel(); });
+      const confirmBtn = document.createElement('button');
+      confirmBtn.className = 'primary-btn small';
+      confirmBtn.type = 'button';
+      confirmBtn.textContent = '完成';
+      confirmBtn.addEventListener('click', () => {
+        const upper = upperSelect.value;
+        const lower = lowerSelect.value;
+        if (typeof onConfirm === 'function') onConfirm({ upper, lower });
+      });
+      actions.appendChild(cancelBtn);
+      actions.appendChild(confirmBtn);
+      dialog.appendChild(actions);
+      return overlay;
+    }
+
+    async function handlePendingRunClick() {
+      await loadMonths();
+      const months = state.pending.months.slice();
+      if (months.length < 2) {
+        openModal(createAlertDialog(`至少需要 2 个月的 Pending 数据才能对账（当前 ${months.length} 个月）。`));
+        return;
+      }
+
+      const openDialog = (defaultUpper, defaultLower) => {
+        openModal(buildReconcileDialog({
+          months,
+          defaultUpper,
+          defaultLower,
+          onConfirm: ({ upper, lower }) => {
+            // 第一步确认：开始运行？
+            openModal(createConfirmDialog({
+              message: `确认以 "${upper}" vs "${lower}" 进行对账？`,
+              confirmText: '确认',
+              cancelText: '取消',
+              onConfirm: () => {
+                // 第二步：校验相邻
+                closeModal();
+                if (!isAdjacentMonths(upper, lower)) {
+                  openModal(createAlertDialog(
+                    `选取的月份不是相邻月份（上上月=${upper}，上月=${lower}），请重新选择。`,
+                    { onConfirm: () => { openDialog(upper, lower); } }
+                  ));
+                  return;
+                }
+                runReconciliation(upper, lower).catch((err) => {
+                  console.error('[pending] runReconciliation error:', err);
+                });
+              }
+            }));
+          },
+          onCancel: () => closeModal()
+        }));
+      };
+
+      openDialog(months[1], months[0]);
+    }
+
+    async function runReconciliation(upperMonth, lowerMonth) {
+      state.pending.running = true;
+      state.pending.latestRunResult = null;
+      state.pending.runningText = `正在对账 ${lowerMonth} vs ${upperMonth}（预计估算中...）`;
+      refreshPendingUi();
+
+      let estimatedMs = null;
+      try {
+        estimatedMs = await desktopApi.pending.reconcile.benchmark({ upperMonth, lowerMonth });
+      } catch (err) {
+        console.warn('[pending] benchmark failed:', err);
+      }
+
+      if (Number.isFinite(estimatedMs) && estimatedMs > 0) {
+        state.pending.runningText = `正在对账 ${lowerMonth} vs ${upperMonth}，预计 ${formatDurationSec(estimatedMs)}...`;
+        refreshPendingUi();
+      }
+
+      try {
+        const result = await desktopApi.pending.reconcile.run({ upperMonth, lowerMonth });
+        state.pending.running = false;
+        const total = (result.statNew || 0) + (result.statMissing || 0) + (result.statChanged || 0);
+        if (total === 0) {
+          state.pending.latestRunResult = `对账完成：${lowerMonth} vs ${upperMonth} 无差异。`;
+        } else {
+          state.pending.latestRunResult =
+            `对账完成：${lowerMonth} vs ${upperMonth} 找出 ${total} 条差异` +
+            `（${result.statNew || 0} 新增 / ${result.statMissing || 0} 消失 / ${result.statChanged || 0} 变更）。` +
+            '点击"导出差异"另存。';
+        }
+        state.pending.latestRunId = result.runId || null;
+        refreshPendingUi();
+      } catch (err) {
+        state.pending.running = false;
+        state.pending.latestRunResult = `对账失败：${err && err.message ? err.message : String(err)}`;
+        refreshPendingUi();
+      }
+    }
+
     // ========== 初始化 + 事件绑定 ==========
 
     async function initialize() {
@@ -376,6 +538,11 @@ window.__rendererPending = (function () {
       if (elements.pendingImportBtn) {
         elements.pendingImportBtn.addEventListener('click', () => {
           handlePendingImportClick().catch((err) => console.error('[pending] import click error:', err));
+        });
+      }
+      if (elements.pendingRunBtn) {
+        elements.pendingRunBtn.addEventListener('click', () => {
+          handlePendingRunClick().catch((err) => console.error('[pending] run click error:', err));
         });
       }
       if (elements.pendingStatusBox) {

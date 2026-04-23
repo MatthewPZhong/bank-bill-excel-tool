@@ -96,8 +96,13 @@ const state = {
     rule: null,
     months: [],
     latestRunResult: null,
+    latestRunId: null,
     importing: false,
     running: false,
+    runningText: null,
+    errorReportAvailable: false,
+    errorMessage: null,
+    lastImportSummary: null,
     errorReportPath: null
   },
   isModuleMenuOpen: false,

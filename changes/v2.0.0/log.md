@@ -209,3 +209,27 @@
 - T5 benchmark 返回数字
 - T6 ensureMatchIndex 幂等
 - T7 非法 matchField 抛错
+
+---
+
+### T8 完成（开始运行 UI + 相邻月校验）
+
+**动作**：
+- `src/renderer-pending.js`:
+  - `isAdjacentMonths(upper, lower)` 纯函数（跨年 `2025-12` ↔ `2026-01` OK；字符串比较）
+  - `formatDurationSec` 预计时间中文格式化
+  - `buildReconcileDialog` 两单选下拉（月份，默认最近两月）
+  - `handlePendingRunClick` 完整流:
+    - `<2 月` 时 alert
+    - 选月份 → 二次 createConfirmDialog → 相邻校验
+    - 不相邻 → createAlertDialog 并重开 dialog 保留已选值
+    - 通过 → benchmark → 显示预计 → reconcile.run → 状态栏结果
+  - `runReconciliation` 设 state.pending.running / latestRunId / latestRunResult
+  - refreshPendingUi 里导出按钮判断从 `latestRunResult` 改为 `latestRunId`
+- `src/renderer.js` state.pending 扩 `latestRunId / runningText / errorReportAvailable
+  / errorMessage / lastImportSummary`（T6/T8 累计）
+
+**验证**：
+- node --check / smoke 通过
+- UI 层封装，T7 engine 已验证三类差异；无需额外自动化
+- 手动测试留给 T11 之后的 UI 端到端验证
