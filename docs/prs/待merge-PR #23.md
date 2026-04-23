@@ -99,7 +99,7 @@ $ npm run check:vars
 
 ### 业务测试
 - `npm run smoke` ✅
-- `npm run preview:all` ✅（20 张图全部生成）
+- `npm run preview:all` ✅（串联 20 条 `preview:*` 命令，对应 `docs/previews/` 下 20 张图全部生成）
 
 ## 风险
 
@@ -133,5 +133,5 @@ $ npm run check:vars
 
 **验证**
 - [x] `npm run smoke`
-- [x] `npm run preview:all`（20 张图全部生成）
+- [x] `npm run preview:all`（串联 20 条 `preview:*` 命令，对应 `docs/previews/` 下 20 张图全部生成）
 - [x] preview 进程独立启动，退出即销毁，不污染正常路径 state

@@ -107,14 +107,13 @@
 ### `templateRepository`
 - 定义：`src/backend/database.js`（门面）
 - 关联功能：所有模板 CRUD 的唯一入口；`main.js` 里 33 次调用
-- 变更 review 要点：增减方法要同步 preload IPC 暴露与 renderer 对应调用
 - 子方法（均在 `database/template-repository.js`）：
   - `saveMappings` / `getTemplate` / `deleteTemplate` / `listTemplates`
   - `saveBillSplitAmountRules` / `saveBillSplitMeta` / `saveBillSplitMappings`
   - `saveBillSplitMergeGroup` / `clearBillSplitMergeGroups` / `saveBillSplitRow`
   - `saveBillSplitRowCount` / `deleteBillSplitRow` / `setChildParent` / `setParentStatus`
   - `saveAmountSplitRules` / `getAmountSplitRules` / `getTemplateBigAccounts`
-- 变更 review 要点：增减方法时要同步 preload IPC 暴露与 renderer 对应调用
+- 变更 review 要点：增减方法要同步 preload IPC 暴露与 renderer 对应调用
 
 ### `settingsRepository`
 - 定义：`src/backend/database.js`
@@ -158,6 +157,7 @@
 - 次数：230+
 - 关联功能：所有原生对话框（文件选择 / 错误报告 / 覆盖确认）
 - 变更 review 要点：改 dialog 调用必须考虑用户取消分支
+- ⚠️ check-vars 命中说明：`dialog` 是通用名，renderer 层 dialog factory 里也常写 `const dialog = document.createElement(...)`。命中时需人工判断是 `src/main.js` 的 `require('electron').dialog`（真命中）还是渲染层局部变量（可忽略）
 
 ### `state`
 - 定义：`src/renderer.js` 顶层（单例）
