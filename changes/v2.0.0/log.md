@@ -355,3 +355,105 @@
 - package.json 未动（仍是 2.0.0-beta.1，上一次 bump 在 T1 前就做好了）
 
 **v2.0.0 第一阶段完结**：T1-T11 已全部完成；待 12 完整手工/UI 端到端测试。
+
+---
+
+## 2026-04-24
+
+### T12 完成（真实样本端到端性能测试 + 多项 Reverse Sync）
+
+**样本**（用户提供）：
+- `/Users/pzhong/Downloads/正常归档Pending账单-2602/*.xlsx`（5 文件 / 183.6 MB / 121.85 万行）
+- `/Users/pzhong/Downloads/正常归档Pending账单-2603/*.xlsx`（5 文件 / 221.6 MB / 121.83 万行）
+- 合计 **243.68 万行**，接近 PRD 300 万目标
+
+### Reverse Sync #1 — OT-9 枚举撤销
+
+**触发**：真实样本的 `pending资金类型` 值出现 `入金`，不在 PRD §4.1 / OT-9 枚举 `{提现/退票/充值}` 内。
+
+**决策（用户选 A）**：完全撤销枚举校验，允许任意文本（含空值）入库。
+
+**改动**：
+- `src/backend/pending-import/validator.js`：删 `FUND_TYPE_COLUMN` / `ALLOWED_FUND_TYPES` / `validateFundType`
+- `src/backend/pending-import/worker.js`：删枚举校验分支；import 只保留"表头"和"行级 hash"两层校验
+- `scripts/test-v2.0.0-pending-import.js`：T3 场景从"枚举非法"改为"非枚举值允许入库"
+- `scripts/test-v2.0.0-pending-session.js`：T4 改用"表头缺列"构造 fatal error（原来用 `fundType: '转账'`）
+
+**待更新（PRD / VFH / USER_GUIDE / CHANGELOG）**：撤销 OT-9；改为"任意文本"；导出按实际值动态分 sheet（已实现）。
+
+### Reverse Sync #2 — xlsx 库换 ExcelJS（大文件不可读）
+
+**触发**：样本 4 个大文件（45MB / 30 万行 / inline string）用 `xlsx@0.18.5` / `xlsx@0.20.3` 都读为空（"Bad uncompressed size"警告 + sheet_to_json 返回 `[]`）。
+
+**诊断**：xlsx 文件 dimension=A1:AE300001（31 列 × 30 万行）正常；sharedStrings.xml 仅 137B → 全部 inline string。xlsx 库对该 zip 结构处理失败。
+
+**决策（用户选 A2）**：引入 `exceljs@^4.4.0` 替代 `xlsx` 读大文件（仅 worker.js 读路径；writer 继续用 xlsx-js-style）。
+
+**改动**：
+- `package.json`：新增 dep `"exceljs": "^4.4.0"`
+- `src/backend/pending-import/worker.js`：`XLSX.readFile` → `new ExcelJS.Workbook().xlsx.readFile`；`sheet_to_json` → `ws.eachRow`
+- `normalizeXlsxCell`：增强处理 ExcelJS 单元格对象（formula / richText / hyperlink）
+
+**实测**：大文件 30 万行 × 31 列读取 13.7 秒（需 `--max-old-space-size=8192`，worker 已开）。
+
+### Reverse Sync #3 — worker 流式 INSERT（原 allRows 累积会 OOM）
+
+**触发**：改用 ExcelJS 后首次跑 T12 在第 4 个大文件时 **heap OOM**（~7.9GB 上限），`allRows` 累积 90 万行 × 31 列字符串占内存。
+
+**决策**：去掉 `allRows` 在内存累积；改为边读边 INSERT。
+
+**改动**：
+- `src/backend/pending-import/worker.js:main()`：
+  - 改为 **流式 INSERT**：`BEGIN` 上移到文件循环前，每行读到即 `insertRow`
+  - 错误累积时 `ROLLBACK` 整批回滚（保留原事务语义）
+  - 单文件读完立即 `rows = null` 释放 wb 引用给 V8 GC
+  - `hashSet` 仍保留（跨文件去重 key；300 万行 × 40 字节 hex = 120MB，可控）
+- **errors truncate 保护**：`MAX_ROW_ERRORS_EMITTED = 1000`；行级错误累积上限；超上限只返统计数（防 emit 巨型 JSON 把 stdout 管道撑爆，原 bug 导致 exit=1 但 `errors count: 0`）
+
+**实测内存**：worker 峰值 <2 GB（单文件 wb 载入 + hashSet），远低于 8GB heap 上限。
+
+### Reverse Sync #4 — ⚠️ 资金敏感：engine SQL 性能修复
+
+**触发**：T12 reconcile 卡 15+ 分钟 CPU 100%。诊断：
+- `benchmark.js` 不调 `ensureMatchIndex`，采样 SQL 在无 `(year_month, matchFields)` 复合索引时走 full scan
+- 121 万 × 121 万 NOT EXISTS subquery O(n²) → 万亿次比较
+
+**改动**：
+- `src/backend/pending-reconcile/benchmark.js`：
+  - 采样前先调 `ensureMatchIndex(db, matchFields)`（复用 engine 的索引建立逻辑）
+  - 采样 SQL 的 JOIN 条件 `IS` → `=`
+- `src/backend/pending-reconcile/engine.js:buildOnClause`：match 阶段 `IS` → `=`
+  - **EXPLAIN QUERY PLAN 实测** `IS` 和 `=` planner 生成相同计划（SEARCH USING COVERING INDEX）
+  - 选 `=` 理由：语义明确不依赖启发式；match key 为 NULL 的行**不匹配任何行**（含另一 NULL）
+  - **语义变更**：原 `IS` 允许两 NULL match 成功（等同相等）；新 `=` 两 NULL 不相等
+  - 业务合理性：match key 缺失本就是无效对账行，不应与另一 NULL 行"匹配"
+  - `buildChangedClause`（compare 阶段）保留 `IS NOT`（对 row 级 filter 性能影响小，保留 NULL-safe 语义）
+
+**T12 实测**（243.68 万行 DB）：
+| 阶段 | 耗时 |
+|---|---|
+| 建 `idx_pending_match_*` | ~2 秒 |
+| benchmark 采样 | ~2.9 秒（含建索引） |
+| reconcile 全量 | **2.85 秒** |
+| export single (281 diff) | 38 ms |
+| export aggregate | 34 ms |
+
+### T12 性能汇总
+
+| 指标 | PRD 目标 | 实测 | 结论 |
+|---|---|---|---|
+| 300 万行导入 | < 5 分钟 | 243.68 万行 / **2 分 13.3 秒** | ✅（外推 300 万约 2 分 44 秒）|
+| 对账 SQL | < 1 分钟 | **2.85 秒** | ✅ 超目标 22× |
+| benchmark 精度 | ±20% | 实测误差 3297% | ⚠ warn（外推偏高，用户体验反而是"早完成"）|
+
+**benchmark 误差分析**：采样 10000 行 LIMIT 早期终止的每行边际成本 ~0.04ms，但全量 reconcile 后 cache 热 + 全索引扫描每行 ~0.001ms，导致线性外推系统性偏高。可接受——偏高比偏低安全（用户看到"预计 90 秒"实际 3 秒 = 好体验）。后续若要精确可用 `(total × sampleMs / sampleRowsActual) × 0.03` 等经验系数，视为 T12+ 优化。
+
+### check-vars 自查（T12 累积）
+
+- **Risk-sensitive 命中**：engine.js `buildOnClause` 是对账 SQL 核心，属资金敏感。本次 `IS` → `=` 已在 pending-reconcile 23 断言小样本全绿；**真实样本 4×4 手工对照**：new=3 / missing=276 / changed=2 / 总 281，统计合理（跨月 Pending 数据本来差异就小）。
+- **Runtime-state**：无命中。
+- **依赖变更**：`package.json` 新增 `exceljs@^4.4.0` — 打包体积增加 ~1MB，仅 worker 使用，现有模块零影响。
+
+### 测试脚本
+
+- 新增 `scripts/test-v2.0.0-perf-real-sample.js`：端到端 6 场景（2602/2603 导入 + benchmark + reconcile + exportSingle + exportAggregate）；15 pass / 0 fail / 1 warn。

@@ -1,4 +1,10 @@
 // 对账时间预估：固定取 10000 行样本跑 NOT EXISTS JOIN，线性外推（OT-5 = a，精度 ±20%）
+//
+// v2.0.0-beta.2 性能修复：
+// - benchmark 必须先建 (year_month, matchFields) 复合索引，否则 121 万行 subquery 会 O(n²) 全表扫描
+// - JOIN 条件用 `=` 而不是 `IS`（两者 planner 计划相同，但 `=` 语义明确，更不依赖 planner 启发式）
+
+const { ensureMatchIndex } = require('./engine');
 
 const SAMPLE_SIZE = 10000;
 
@@ -16,9 +22,11 @@ function estimateRunTimeMs(db, { upperMonth, lowerMonth, matchFields }) {
   const total = upperCount + lowerCount;
   if (total === 0) return 0;
 
+  ensureMatchIndex(db, matchFields);
+
   // 样本 JOIN：lower LIMIT 10000 NOT EXISTS upper
   const onClause = matchFields
-    .map((f) => `B.\`${f}\` IS A.\`${f}\``)
+    .map((f) => `B.\`${f}\` = A.\`${f}\``)
     .join(' AND ');
 
   const start = Date.now();

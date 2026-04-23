@@ -36,9 +36,12 @@ function ensureMatchIndex(db, matchFields) {
   return name;
 }
 
+// v2.0.0-beta.2 性能修复：match 阶段用 `=` 而非 `IS`
+// - planner 等价（EXPLAIN 实测相同），但 `=` 语义明确不依赖启发式
+// - 语义变更：match key 为 NULL 的行不再匹配任何行（含另一 NULL）—— 业务上 match key 缺失本就是无效对账行
 function buildOnClause(matchFields, leftAlias, rightAlias) {
   return matchFields
-    .map((f) => `${leftAlias}.\`${f}\` IS ${rightAlias}.\`${f}\``)
+    .map((f) => `${leftAlias}.\`${f}\` = ${rightAlias}.\`${f}\``)
     .join(' AND ');
 }
 

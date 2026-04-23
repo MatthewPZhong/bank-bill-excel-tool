@@ -16,10 +16,10 @@
 - **顶部模块切换按钮改下拉（3 选 1）**：原二选切换器追加第 3 项 `月度 Pending 数据核对`。首次启动默认 `网银账单生成`，切模式不持久化（关闭重开仍回首项）。三个模块容器互不影响，切换时仅 hide/show。
 - **全新顶级模块「月度 Pending 数据核对」**：独立业务链路 `导入 → 入库 → 规则化对账 → 差异落库 → 导出 xlsx`，覆盖财务/运营每月比对 Pending 数据的核心痛点。布局两行：第一行 `规则管理 / 导入文件 / 开始运行`；第二行 `导出差异 + 状态框`。对现有两个模块零侵入。
 - **独立 SQLite 数据库 `tool-data-pending.sqlite`**：与主 DB 隔离；5 表幂等 schema（`rule` 单行全局 / `pending_months` / `pending_rows` 31 列中文原名 + row_hash / `diff_runs` / `diff_rows`）+ 5 索引。删除该文件即可完全清空 Pending 模块数据，主 DB 不受影响。
-- **Pending 模板 31 列固定表头**（打包内置 `assets/Pending.xlsx`）：启动时读一次缓存整个会话期间复用。关键列 `pending资金类型` 值必须 ∈ `{提现/退票/充值}` 枚举，任一行违反整批拒绝。
+- **Pending 模板 31 列固定表头**（打包内置 `assets/Pending.xlsx`）：启动时读一次缓存整个会话期间复用。关键列 `pending资金类型` 允许任意文本（含空值）；导出差异按**实际出现值**动态分 sheet。
 - **规则管理（单条全局）**：两组多选下拉——`对账字段`（JOIN key，至少选 1 项）+ `对账内容`（比对字段，可空）。全部选项来自 31 列表头。保存走"完成 → 二次确认 → upsert"覆盖当前规则；每次运算 JSON 快照随差异 record 存档做历史回溯。
 - **多文件合并导入**：一次可选 N 个 xlsx 归为同一月份。child process 解析（带 `--max-old-space-size=8192`），主进程 `webContents.send` 转发 progress 事件到状态栏实时显示"正在导入 {YYYY-MM}：{file}（已处理 N 行）"。
-- **严格校验链**：表头顺序 + 内容严格一致（任一不一致整批拒绝）→ 枚举校验 `pending资金类型` → 全月行级 hash 去重（SHA-1 + SOH 分隔符）。行级冲突整批 rollback，状态栏提示"导入失败，发现 N 条重复行，点击导出报错文件"；点击导出 xlsx 错误报告（schema = source_file / sheet_row / severity / message + 31 原列）。
+- **严格校验链**：表头顺序 + 内容严格一致（任一不一致整批拒绝）→ 全月行级 hash 去重（SHA-1 + SOH 分隔符）。行级冲突整批 rollback，状态栏提示"导入失败，发现 N 条重复行，点击导出报错文件"；点击导出 xlsx 错误报告（schema = source_file / sheet_row / severity / message + 31 原列）。
 - **覆盖前自动留底 xlsx**：同月重复导入 → 弹"{year}-{month} 已有 N 行"确认；确认覆盖前先把旧月全行写 `Documents/网银账单生成小助手/pending-archives/{YYYY-MM}/{YYYY-MM}-backup-{YYYYMMDDThhmmss}.xlsx`。写入阶段 `BEGIN → deleteMonth → 批量 INSERT → COMMIT`，失败 `ROLLBACK`。
 - **开始运行（对账引擎）**：选两月 → 二次确认 → 相邻校验（跨年 `2025-12 ↔ 2026-01` 算相邻；不相邻弹 alert 并保留已选）→ benchmark 外推预计时间（固定采样 10000 行，精度 ±20%）→ 三段 SQL 产出 `new / missing / changed`。全部 SQL 用 `IS / IS NOT` 处理 NULL 友好；`changed` 按值严格相等（字符串 `===`，OT-8 不做 hash），由规则设计者保证上游数据清洗一致。
 - **状态栏完成文案**：无差异 `对账完成：{下月} vs {上上月} 无差异。`；有差异 `对账完成：{下月} vs {上上月} 找出 N 条差异（X 新增 / Y 消失 / Z 变更），可点击"导出差异"另存。`。对账中 + 导入成功态挂 `data-tone="success"`；报错态挂 `data-tone="error"` + `.is-clickable`（视觉红框 + 鼠标手势反馈）。

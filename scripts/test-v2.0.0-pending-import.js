@@ -104,21 +104,19 @@ try {
     );
   }
 
-  // === T3: 资金类型枚举错 ===
-  console.log('[T3] pending资金类型 值不合法');
+  // === T3: pending资金类型 非枚举值正常入库 ===
+  // v2.0.0-beta.2 Reverse Sync：OT-9 三枚举撤销；任意文本允许入库
+  console.log('[T3] pending资金类型 非枚举值允许入库');
   {
-    const file = makeXlsx('bad-fund.xlsx', PENDING_COLUMNS, [
-      sampleRow({ orderNo: 'B001', fundType: '提现' }),
-      sampleRow({ orderNo: 'B002', fundType: '转账' }) // 非枚举
+    const file = makeXlsx('non-std-fund.xlsx', PENDING_COLUMNS, [
+      sampleRow({ orderNo: 'B001', fundType: '入金' }),   // 非原枚举
+      sampleRow({ orderNo: 'B002', fundType: '转账' }),   // 非原枚举
+      sampleRow({ orderNo: 'B003', fundType: '' })        // 空值也允许
     ]);
     const res = runWorker('2026-05', [file]);
-    check('exit 1', res.exit === 1);
-    const err = res.events.find((e) => e.type === 'error');
-    check(
-      'has row error about fund_type',
-      err && err.errors.some((x) => x.severity === 'row' && /资金类型/.test(x.message)),
-      err ? JSON.stringify(err.errors.slice(0, 1)) : 'no error event'
-    );
+    check('exit 0 (非枚举值允许入库)', res.exit === 0);
+    const complete = res.events.find((e) => e.type === 'complete');
+    check('complete rowCount = 3', complete && complete.rowCount === 3);
   }
 
   // === T4: 多文件合并（happy）===
@@ -164,13 +162,13 @@ try {
     check('2026-03 has 3 rows', monthRepo.countRowsInMonth(db, '2026-03') === 3);
     check('2026-06 has 4 rows', monthRepo.countRowsInMonth(db, '2026-06') === 4);
     check('2026-04 (bad header) not stored', monthRepo.countRowsInMonth(db, '2026-04') === 0);
-    check('2026-05 (bad fund) not stored', monthRepo.countRowsInMonth(db, '2026-05') === 0);
+    check('2026-05 (non-std fund) stored with 3 rows', monthRepo.countRowsInMonth(db, '2026-05') === 3);
     check('2026-07 (dup) not stored', monthRepo.countRowsInMonth(db, '2026-07') === 0);
 
-    const months = monthRepo.listMonths(db);
+    const months = monthRepo.listMonths(db).map((m) => typeof m === 'string' ? m : m.yearMonth);
     check(
-      'listMonths = [2026-06, 2026-03]（desc）',
-      JSON.stringify(months) === JSON.stringify(['2026-06', '2026-03']),
+      'listMonths = [2026-06, 2026-05, 2026-03]（desc）',
+      JSON.stringify(months) === JSON.stringify(['2026-06', '2026-05', '2026-03']),
       JSON.stringify(months)
     );
 

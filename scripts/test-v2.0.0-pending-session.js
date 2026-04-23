@@ -94,9 +94,11 @@ function check(name, cond, detail = '') {
     }
 
     console.log('[T4] errors cached → exportErrorReport');
+    // v2.0.0-beta.2 资金类型枚举撤销后，用表头不匹配（少一列）构造 fatal error
     {
-      const f = makeXlsx('f4.xlsx', PENDING_COLUMNS, [
-        sampleRow({ orderNo: 'X', fundType: '转账' })
+      const badHeaders = PENDING_COLUMNS.slice(0, PENDING_COLUMNS.length - 1);
+      const f = makeXlsx('f4-bad-header.xlsx', badHeaders, [
+        badHeaders.map((_, i) => i === 0 ? 'whatever' : '')
       ]);
       const r = await session.runImport({
         yearMonth: '2026-04', files: [f], overwriteConfirmed: false, dbPath: DB_PATH

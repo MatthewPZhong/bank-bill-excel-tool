@@ -39,6 +39,7 @@
     "test:v2.0.0:pending-session": "node scripts/test-v2.0.0-pending-session.js",
     "test:v2.0.0:pending-reconcile": "node scripts/test-v2.0.0-pending-reconcile.js",
     "test:v2.0.0:pending-export": "node scripts/test-v2.0.0-pending-export.js",
+    "test:v2.0.0:perf": "node scripts/test-v2.0.0-perf-real-sample.js",
     "startup:measure": "node scripts/measure-startup.js",
     "scan:vars": "node scripts/scan-vars.js",
     "check:vars": "node scripts/check-vars.js"
@@ -86,6 +87,7 @@
     "@napi-rs/canvas": "^0.1.97",
     "@tesseract.js-data/chi_sim": "^1.0.0",
     "@tesseract.js-data/eng": "^1.0.0",
+    "exceljs": "^4.4.0",
     "marked": "^18.0.0",
     "pdfjs-dist": "^5.5.207",
     "tesseract.js": "^7.0.0",

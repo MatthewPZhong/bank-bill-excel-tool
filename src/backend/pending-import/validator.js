@@ -1,11 +1,13 @@
-// Pending 导入校验：表头 / 资金类型枚举 / 行级 hash
+// Pending 导入校验：表头 / 行级 hash
 // 纯函数；可在 worker / 主进程共用
+//
+// v2.0.0-beta.2 Reverse Sync：撤销 `pending资金类型` 枚举校验
+// 原 OT-9 定义 {提现/退票/充值} 三枚举；真实样本出现"入金"等其他值 → 枚举不完整
+// 改为：`pending资金类型` 允许任意文本（含空值），导出按实际值动态分 sheet
 
 const crypto = require('node:crypto');
 const PENDING_COLUMNS = require('../pending-db/columns');
 
-const FUND_TYPE_COLUMN = 'pending资金类型';
-const ALLOWED_FUND_TYPES = Object.freeze(new Set(['提现', '退票', '充值']));
 // SOH 作为拼串分隔符；列值里几乎不会出现 \u0001，避免 "AB"+"CD" 和 "A"+"BCD" 算同 hash
 const HASH_SEPARATOR = '\u0001';
 
@@ -30,20 +32,12 @@ function validateHeaders(headerRow) {
   return { ok: true };
 }
 
-function validateFundType(value) {
-  const v = typeof value === 'string' ? value : String(value ?? '');
-  return ALLOWED_FUND_TYPES.has(v);
-}
-
 function computeRowHash(cells) {
   const parts = cells.map((v) => (v === undefined || v === null ? '' : String(v)));
   return crypto.createHash('sha1').update(parts.join(HASH_SEPARATOR)).digest('hex');
 }
 
 module.exports = {
-  FUND_TYPE_COLUMN,
-  ALLOWED_FUND_TYPES,
   validateHeaders,
-  validateFundType,
   computeRowHash
 };
