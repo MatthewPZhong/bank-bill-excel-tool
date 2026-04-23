@@ -44,6 +44,8 @@ const DB_PATH = path.join(TMP, 'tool-data-pending.sqlite');
 function listXlsx(dir) {
   return fs.readdirSync(dir)
     .filter((f) => f.toLowerCase().endsWith('.xlsx'))
+    // 过滤掉手工测试留下的报错导出文件（非 Pending 模板结构）
+    .filter((f) => !f.startsWith('pending-import-errors-'))
     .sort()
     .map((f) => path.join(dir, f));
 }

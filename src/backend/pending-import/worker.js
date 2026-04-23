@@ -13,12 +13,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const v8 = require('node:v8');
-const ExcelJS = require('exceljs');
 const { DatabaseSync } = require('node:sqlite');
 
 const { runMigrations } = require('../pending-db/migrations');
 const PENDING_COLUMNS = require('../pending-db/columns');
 const { validateHeaders, computeRowHash } = require('./validator');
+const { readXlsxStreamed } = require('./streaming-xlsx-reader');
 const monthRepo = require('../pending-db/month-repository');
 
 // 错误数量上限：防止百万级行级错误累积后 emit 巨型 JSON 把 stdout 管道撑爆
@@ -52,40 +52,8 @@ function loadJobMeta() {
   }
 }
 
-function normalizeXlsxCell(value) {
-  if (value === undefined || value === null) return '';
-  if (value instanceof Date) return value.toISOString();
-  // ExcelJS formula cell: { formula, result } — 取 result
-  if (typeof value === 'object' && value !== null) {
-    if ('result' in value && value.result !== undefined) return normalizeXlsxCell(value.result);
-    if ('text' in value && typeof value.text === 'string') return value.text;
-    if ('richText' in value && Array.isArray(value.richText)) {
-      return value.richText.map((r) => r.text || '').join('');
-    }
-    if ('hyperlink' in value && 'text' in value) return String(value.text || '');
-  }
-  return String(value);
-}
-
-// ExcelJS row.values 下标从 1 开始；第 0 位是 sparse 占位
-// 返回 2 维数组 [[header], [row1], ...]，和旧 XLSX 接口兼容，下游代码不改
-async function readXlsxHeadersAndRows(filePath) {
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(filePath);
-  const ws = wb.worksheets[0];
-  if (!ws) throw new Error('文件无 Sheet');
-
-  const result = [];
-  const colCount = PENDING_COLUMNS.length;
-  ws.eachRow({ includeEmpty: false }, (row) => {
-    const cells = new Array(colCount);
-    for (let c = 0; c < colCount; c++) {
-      cells[c] = row.getCell(c + 1).value; // ExcelJS 1-based
-    }
-    result.push(cells);
-  });
-  return result;
-}
+// 原 normalizeXlsxCell / readXlsxHeadersAndRows（ExcelJS 全载入）已被流式 reader 替代
+// 流式 reader 直接输出 string[31]，byte-level 与 ExcelJS 一致（已 test-v2.0.0-streaming-diff.js 验证）
 
 async function main() {
   const job = loadJobMeta();
@@ -125,58 +93,65 @@ async function main() {
         continue;
       }
 
-      let rows;
+      // 流式：每一行 sax callback 做校验 + INSERT；fatal 抛 __abort 中断 stream
+      let fileTotalRows = 0;
+      let fileDataRowsInserted = 0;
+      let headerChecked = false;
+      let fileHasFatal = false;
+
       try {
-        rows = await readXlsxHeadersAndRows(filePath);
+        await readXlsxStreamed(filePath, (cells, rowIdx) => {
+          fileTotalRows = rowIdx;
+          if (rowIdx === 1) {
+            const hdr = validateHeaders(cells);
+            if (!hdr.ok) {
+              errors.push({ severity: 'fatal', file: fileName, message: hdr.error });
+              fileHasFatal = true;
+              const abort = new Error(hdr.error);
+              abort.__abort = true;
+              throw abort;
+            }
+            headerChecked = true;
+            return;
+          }
+          // 数据行
+          const rowHash = computeRowHash(cells);
+          if (hashSet.has(rowHash)) {
+            rowErrorCount += 1;
+            if (errors.filter((e) => e.severity === 'row').length < MAX_ROW_ERRORS_EMITTED) {
+              errors.push({
+                severity: 'row',
+                file: fileName,
+                sheetRow: rowIdx,
+                message: `发现重复行（hash ${rowHash.slice(0, 8)}...）`,
+                cells: cells.slice()
+              });
+            }
+            return;
+          }
+          hashSet.add(rowHash);
+          insertRow(yearMonth, rowHash, cells);
+          fileDataRowsInserted += 1;
+          totalInserted += 1;
+        });
       } catch (err) {
-        errors.push({ severity: 'fatal', file: fileName, message: 'xlsx 解析失败：' + err.message });
+        if (!err.__abort) {
+          errors.push({ severity: 'fatal', file: fileName, message: 'xlsx 解析失败：' + err.message });
+          fileHasFatal = true;
+        }
+      }
+
+      if (fileHasFatal) {
         hasFatal = true;
         continue;
       }
-
-      if (rows.length < 2) {
+      if (!headerChecked || fileTotalRows < 2) {
         errors.push({ severity: 'fatal', file: fileName, message: '文件为空或只有表头行' });
         hasFatal = true;
-        rows = null;
         continue;
       }
 
-      const headerCheck = validateHeaders(rows[0]);
-      if (!headerCheck.ok) {
-        errors.push({ severity: 'fatal', file: fileName, message: headerCheck.error });
-        hasFatal = true;
-        rows = null;
-        continue;
-      }
-
-      for (let i = 1; i < rows.length; i++) {
-        const rawRow = rows[i];
-        const cells = new Array(PENDING_COLUMNS.length);
-        for (let c = 0; c < PENDING_COLUMNS.length; c++) {
-          cells[c] = normalizeXlsxCell(rawRow[c]);
-        }
-
-        const rowHash = computeRowHash(cells);
-        if (hashSet.has(rowHash)) {
-          rowErrorCount += 1;
-          if (errors.filter((e) => e.severity === 'row').length < MAX_ROW_ERRORS_EMITTED) {
-            errors.push({
-              severity: 'row',
-              file: fileName,
-              sheetRow: i + 1,
-              message: `发现重复行（hash ${rowHash.slice(0, 8)}...）`,
-              cells
-            });
-          }
-          continue;
-        }
-        hashSet.add(rowHash);
-        insertRow(yearMonth, rowHash, cells); // 流式 INSERT，释放单行引用给 V8 GC
-        totalInserted += 1;
-      }
-
-      rows = null; // 释放整文件 wb 引用，给 V8 GC 机会回收
-      emit({ type: 'progress', file: fileName, rowsProcessed: 0, totalInserted });
+      emit({ type: 'progress', file: fileName, rowsProcessed: fileDataRowsInserted, totalInserted });
     }
 
     if (hasFatal || errors.length > 0) {
