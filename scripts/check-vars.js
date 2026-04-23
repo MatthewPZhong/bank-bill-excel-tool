@@ -33,16 +33,12 @@ if (!fs.existsSync(MD_PATH)) {
 }
 
 // ---------- Step 1: 取 diff ----------
+// 默认：git diff HEAD -- src/ 已覆盖 unstaged + staged，无需二次追加
+// --since: git diff <ref>...HEAD -- src/（三点号 = 从 merge-base 到 HEAD）
 let diff;
 try {
   const target = opt.since ? `${opt.since}...HEAD` : 'HEAD';
   diff = execSync(`git diff ${target} -- src/`, { cwd: REPO_ROOT, encoding: 'utf8' });
-  if (!opt.since) {
-    // 默认追加未提交改动
-    const unstaged = execSync(`git diff -- src/`, { cwd: REPO_ROOT, encoding: 'utf8' });
-    const staged = execSync(`git diff --cached -- src/`, { cwd: REPO_ROOT, encoding: 'utf8' });
-    diff = diff + '\n' + unstaged + '\n' + staged;
-  }
 } catch (e) {
   console.error('[check-vars] git diff 失败：', e.message);
   process.exit(1);
