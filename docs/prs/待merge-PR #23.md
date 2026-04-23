@@ -1,0 +1,137 @@
+# 待提交 PR #23 — 协作基建 + preview 链路扩充
+
+## 背景
+
+v1.5.3 主体（PR #22）merged 之后累积了两批"非业务"改动，性质相近（都围绕协作流程 / 截图链路），合成一个 PR 推：
+
+**变更 A — 协作基建 / 规则清单**
+
+大版本累积后代码改动涉及面变广，agent 改代码时缺乏一张"红线清单"提醒哪些符号改动需要做关联功能 review。历史上踩过：
+
+- `__FIXED__:` 前缀改动会破坏历史模板 JSON 的序列化契约
+- 资金/余额/迁移红线改动没被及时高亮提醒
+- 跨 13 文件的 `normalizeCell` 签名改动引起链式影响
+
+同时缺 `rules/` / `knowledge/` 规则沉淀、缺 PRD/TechDoc/change 目录模板、缺 subagent 定义。
+
+**变更 B — preview 链路扩充**
+
+v1.5.3 round 6 self-review 时发现 modal preview 没覆盖所有 dialog，缺 9 个；顺便把 `docs/*-preview.png` 统一搬到 `docs/previews/` 下、扩充 `package.json` 的 `preview:*` 命令集。
+
+## 产物清单
+
+### 变更 A — 协作基建
+
+**新增**
+- `rules/` — 5 个规则文件：`project-context.md` / `coding-style.md` / `important-variables.md` / `domain-rules.md` / `security.md`
+  - 核心：`rules/important-variables.md` 人工清单，5 层（Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor），约 60 条；含升格/降级双门槛标准 + 维护分工（agent 起草 + 用户审批）
+- `knowledge/index.md` — 经验/专题入口
+- `.claude/agents/dev.md`、`pm.md` — Dev / PM subagent 定义
+- `.claude/skills/check-vars/SKILL.md` — `/check-vars` skill 定义
+- `scripts/scan-vars.js` — 扫 `src/` 所有 JS 顶层声明，生成自动统计报告
+- `scripts/check-vars.js` — 对 `git diff` 做命中扫描
+- `docs/analysis/var-reference-stats.{md,json}` — 首版基线（v1.5.3：28 JS / 355 顶层名 / A-share 66 / A-pair 90 / B 156）
+- `docs/templates/PRD-template.md`、`TechDoc-template.md` — PM / Dev 文档骨架
+- `changes/templates/spec.md` / `tasks.md` / `log.md` / `test-spec.md` — 变更目录 4 件套模板
+- `changes/v1.5.2/*` — v1.5.2 变更记录补归档
+- `docs/prs/待merge-PR #23.md` — 本 PR 草稿（合并后按 workflow 规则重命名为 `PR23-v1.5.3.md`）
+- `CLAUDE.md` — 项目协作约定 + 重要变量 check 章节
+
+**修改**
+- `package.json` — 新增 `scan:vars` / `check:vars` 两个 scripts
+- `.gitignore` — 忽略 `.claude/settings.local.json`（含本地工具权限配置，不入库）
+
+### 变更 B — preview 链路扩充
+
+**9 个新 modal preview**
+- `src/renderer-previews.js` +190 行：9 个 `apply*PreviewState()` 函数
+  - MonthlyBalanceExport / ManualBalanceSeed / BalanceAddonManager / ExportScope / AmountSplitRules / BillSplitRows / BillSplitMappings / RememberOrderMismatch / AccountMappingMigration
+- `src/renderer.js` +65 行：从 `createRendererDialogs` / `createRendererPreviews` 多 destructure 9 个 factory，`info.previewModal` 路由新增 9 个 case
+- `src/renderer-dialogs.js` +7 行：支持 preview 启动路径
+
+**preview 脚本扩充**
+- `scripts/render-preview.js` / `render-account-mapping-preview.js` / `render-modal-preview.js` / `render-template-manager-preview.js`：输出路径统一到 `docs/previews/`
+- `package.json`：新增 10 条 `preview:*` 命令 + `preview:all` 汇总
+
+**preview 图产出**
+- 重命名 `docs/*-preview.png → docs/previews/*.png`（11 张）
+- 新增 9 张 modal preview 图
+- `docs/previews/README.md` — 索引
+
+### Memory（非代码，用户本地，不进 git）
+- `~/.claude/projects/.../memory/workflow_important_vars_check.md`（新增条目）
+- `MEMORY.md` 索引追加一条
+
+## 流程闭环
+
+```
+每次 src/ 改动（软约束）
+    → agent 在结尾汇报里自查「⚠️ 关联功能 review」
+    → 命中 Critical/Important/Runtime-state/Risk-sensitive 任一 → 列变量 + review 要点
+
+提 PR / 版本 bump / 合并受保护分支（硬节点）
+    → 跑 /check-vars（= npm run check:vars）
+    → 输出命中报告 + 可粘贴到 PR body 的「⚠️ 关联功能 review」段落
+    → scan-vars 新发现的跨 ≥3 文件候选 → agent 起草入表 → 用户审批
+
+版本迭代
+    → npm run scan:vars 刷新 docs/analysis/var-reference-stats.{md,json}
+    → 对比自动报告 vs 清单，评估升格/降级
+```
+
+## 验证
+
+### 脚本端到端跑通
+
+```
+$ npm run scan:vars
+[scan-vars] v1.5.3 @ src/ — 28 files, 355 top-level names
+[scan-vars]   A-share 66 / A-pair 90 / A-local 146 / B 156
+
+$ npm run check:vars
+⚠️ Critical — 2：ADVANCED_MAPPING_FIELDS / BALANCE_CALCULATED_OPTION
+⚠️ Runtime-state — 3：MODULES / dialog / state
+（全部命中均为 preview 链路消费现有值/mock 赋值，详见下方 check-vars 段）
+```
+
+### 假阳性过滤
+初版抽取规则把清单散文里反引号写的 `bundleVersion` 误识为变量。脚本收紧为"仅认列表项开头连续反引号"后修复。
+
+### 业务测试
+- `npm run smoke` ✅
+- `npm run preview:all` ✅（20 张图全部生成）
+
+## 风险
+
+| 风险 | 应对 |
+|---|---|
+| 跨分支 `package.json` scripts 丢失：v1.5.x 落的 `scan:vars` / `check:vars` / `preview:*` 切 v2.0.0 / main 时被覆盖 | 合并到每个活跃分支后各 commit 一次（v1.5.x → main → v2.0.0 / v3.0.0） |
+| 表升格/降级机制未经历真实版本 | 下次版本 bump 时走一遍流程做回归 |
+| 清单可能漏收 v2.0.0 新引入符号 | v2.0.0 分支 merge 此 PR 后跑 scan:vars 评估 |
+| preview 链路对 `state.templates` mock 赋值 | preview 进程独立启动（`--preview-modal=xxx`），退出即销毁，不污染正常路径 |
+
+## Commits 拆分
+
+两个 commit，一个 PR：
+
+1. **`feat(v1.5.3): 补全 9 个 modal preview + preview 脚本扩充`** — 变更 B
+2. **`chore(v1.5.3): 协作基建（rules / knowledge / check-vars / 模板）`** — 变更 A
+
+## 后续
+
+- [ ] 合并到 `main` 后：`v2.0.0` / `v3.0.0` merge main，各分支跑 `npm run scan:vars` 生成自己的基线
+- [ ] 下次版本 bump 时：走一遍完整升格/降级流程作为机制回归
+- [ ] v2.0.0 上首次 `scan:vars` 可能发现漏收符号（历史观察：v2.0.0 58 A-share vs v1.5.3 的 66），到时再补清单
+
+## ⚠️ 关联功能 review（check-vars 自动生成）
+
+本次改动命中以下重要变量，均为 **preview 链路消费现有值 / mock 赋值**，未改变枚举成员或 state 读写语义：
+
+- **Critical**：`ADVANCED_MAPPING_FIELDS`、`BALANCE_CALCULATED_OPTION` — preview factory mock 数据消费，未增删枚举
+- **Runtime-state**：`MODULES`、`state` — preview 函数 `setCurrentModule` + `state.templates = [mock]` 仅在 `--preview-modal` 启动时触发（preview 是独立进程）
+- **误识**：`dialog` — check-vars 脚本把 `createXxxDialog` destructure 当成 `electron.dialog`
+
+**验证**
+- [x] `npm run smoke`
+- [x] `npm run preview:all`（20 张图全部生成）
+- [x] preview 进程独立启动，退出即销毁，不污染正常路径 state
