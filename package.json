@@ -38,6 +38,7 @@
     "test:v2.0.0:pending-import": "node scripts/test-v2.0.0-pending-import.js",
     "test:v2.0.0:pending-session": "node scripts/test-v2.0.0-pending-session.js",
     "test:v2.0.0:pending-reconcile": "node scripts/test-v2.0.0-pending-reconcile.js",
+    "test:v2.0.0:pending-export": "node scripts/test-v2.0.0-pending-export.js",
     "startup:measure": "node scripts/measure-startup.js",
     "scan:vars": "node scripts/scan-vars.js",
     "check:vars": "node scripts/check-vars.js"

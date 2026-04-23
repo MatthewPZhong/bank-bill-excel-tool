@@ -105,7 +105,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     diff: {
       listAllRuns: () => ipcRenderer.invoke('pending:diff:runs-list'),
       listRunsForMonthPair: (payload) => ipcRenderer.invoke('pending:diff:runs-for-month-pair', payload),
-      getLatestRunForMonthPair: (payload) => ipcRenderer.invoke('pending:diff:latest-run-for', payload)
+      getLatestRunForMonthPair: (payload) => ipcRenderer.invoke('pending:diff:latest-run-for', payload),
+      exportSingle: (payload) => ipcRenderer.invoke('pending:diff:export-single', payload),
+      exportAggregate: () => ipcRenderer.invoke('pending:diff:export-aggregate')
     }
   }
 });

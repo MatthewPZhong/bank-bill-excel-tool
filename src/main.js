@@ -12,6 +12,7 @@ const pendingMonthRepo = require('./backend/pending-db/month-repository');
 const pendingDiffRepo = require('./backend/pending-db/diff-repository');
 const pendingReconcileEngine = require('./backend/pending-reconcile/engine');
 const pendingReconcileBenchmark = require('./backend/pending-reconcile/benchmark');
+const pendingExportWriter = require('./backend/pending-export/writer');
 const { createPendingSession } = require('./main-process/pending-session');
 const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
 const { groupBigAccountRows } = require('./backend/database/utils');
@@ -8809,6 +8810,40 @@ function registerNewAccountHandlers() {
       return pendingDiffRepo.getLatestRunForMonthPair(pendingDb, payload.upperMonth, payload.lowerMonth);
     } catch (_e) {
       return null;
+    }
+  });
+
+  ipcMain.handle('pending:diff:export-single', async (_event, payload = {}) => {
+    if (!pendingDb) return { status: 'error', message: 'Pending DB 未初始化' };
+    const runId = Number(payload.runId);
+    if (!Number.isFinite(runId) || runId <= 0) {
+      return { status: 'error', message: 'runId 无效' };
+    }
+    const saveResult = await dialog.showSaveDialog({
+      title: '保存 Pending 差异文件',
+      defaultPath: payload.defaultFileName || `月度Pending差异-run${runId}.xlsx`,
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+    });
+    if (saveResult.canceled || !saveResult.filePath) return { status: 'cancelled' };
+    try {
+      return pendingExportWriter.exportSingleRun(pendingDb, runId, saveResult.filePath);
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  ipcMain.handle('pending:diff:export-aggregate', async () => {
+    if (!pendingDb) return { status: 'error', message: 'Pending DB 未初始化' };
+    const saveResult = await dialog.showSaveDialog({
+      title: '保存 Pending 差异汇总文件',
+      defaultPath: `月度Pending差异-汇总-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+    });
+    if (saveResult.canceled || !saveResult.filePath) return { status: 'cancelled' };
+    try {
+      return pendingExportWriter.exportAggregate(pendingDb, saveResult.filePath);
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
   });
 }

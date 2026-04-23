@@ -521,6 +521,190 @@ window.__rendererPending = (function () {
       }
     }
 
+    // ========== 导出差异 ==========
+
+    function formatRunOption(run) {
+      const createdAt = (run.createdAt || '').replace('T', ' ').slice(0, 19);
+      const rs = run.ruleSnapshot || {};
+      const mfs = Array.isArray(rs.matchFields) ? rs.matchFields.join(',') : '';
+      const cfs = Array.isArray(rs.compareFields) ? rs.compareFields.join(',') : '';
+      const total = (run.statNew || 0) + (run.statMissing || 0) + (run.statChanged || 0);
+      return `${createdAt}  差异 ${total} 条  规则 {${mfs} × ${cfs}}`;
+    }
+
+    function buildExportDialog({ allRuns, onConfirm, onCancel }) {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card pending-export-dialog';
+      overlay.appendChild(dialog);
+
+      const title = document.createElement('div');
+      title.className = 'alert-message';
+      title.textContent = '导出月份范围';
+      dialog.appendChild(title);
+
+      // 收集月份
+      const monthsSet = new Set(allRuns.map((r) => r.lowerMonth));
+      const months = Array.from(monthsSet).sort((a, b) => (a < b ? 1 : -1)); // desc
+
+      // Radio 组
+      const radioSingle = document.createElement('input');
+      radioSingle.type = 'radio';
+      radioSingle.name = 'pending-export-scope';
+      radioSingle.id = 'pending-export-radio-single';
+      radioSingle.value = 'single';
+      radioSingle.checked = true;
+      const radioSingleLabel = document.createElement('label');
+      radioSingleLabel.setAttribute('for', 'pending-export-radio-single');
+      radioSingleLabel.textContent = '导出指定月份';
+      const radioSingleRow = document.createElement('div');
+      radioSingleRow.className = 'pending-rule-row';
+      radioSingleRow.appendChild(radioSingle);
+      radioSingleRow.appendChild(radioSingleLabel);
+      dialog.appendChild(radioSingleRow);
+
+      // 指定月份：月份 + run 两个下拉
+      const singleMonthRow = document.createElement('div');
+      singleMonthRow.className = 'pending-rule-row';
+      const singleMonthLabel = document.createElement('label');
+      singleMonthLabel.className = 'pending-rule-label';
+      singleMonthLabel.textContent = '月份';
+      singleMonthRow.appendChild(singleMonthLabel);
+      const monthSelect = document.createElement('select');
+      monthSelect.className = 'pending-rule-select';
+      months.forEach((m, idx) => {
+        const opt = document.createElement('option');
+        opt.value = m;
+        opt.textContent = m;
+        if (idx === 0) opt.selected = true;
+        monthSelect.appendChild(opt);
+      });
+      singleMonthRow.appendChild(monthSelect);
+      dialog.appendChild(singleMonthRow);
+
+      const runRow = document.createElement('div');
+      runRow.className = 'pending-rule-row';
+      const runLabel = document.createElement('label');
+      runLabel.className = 'pending-rule-label';
+      runLabel.textContent = 'Run';
+      runRow.appendChild(runLabel);
+      const runSelect = document.createElement('select');
+      runSelect.className = 'pending-rule-select';
+      runRow.appendChild(runSelect);
+      dialog.appendChild(runRow);
+
+      function refreshRunOptions() {
+        const chosenMonth = monthSelect.value;
+        const filtered = allRuns.filter((r) => r.lowerMonth === chosenMonth);
+        runSelect.innerHTML = '';
+        filtered.forEach((r, idx) => {
+          const opt = document.createElement('option');
+          opt.value = String(r.id);
+          opt.textContent = formatRunOption(r);
+          if (idx === 0) opt.selected = true;
+          runSelect.appendChild(opt);
+        });
+      }
+      monthSelect.addEventListener('change', refreshRunOptions);
+      refreshRunOptions();
+
+      // Radio 汇总
+      const radioAggr = document.createElement('input');
+      radioAggr.type = 'radio';
+      radioAggr.name = 'pending-export-scope';
+      radioAggr.id = 'pending-export-radio-aggr';
+      radioAggr.value = 'aggregate';
+      const radioAggrLabel = document.createElement('label');
+      radioAggrLabel.setAttribute('for', 'pending-export-radio-aggr');
+      radioAggrLabel.textContent = '导出所有月份汇总（每月取最新 run）';
+      const radioAggrRow = document.createElement('div');
+      radioAggrRow.className = 'pending-rule-row';
+      radioAggrRow.appendChild(radioAggr);
+      radioAggrRow.appendChild(radioAggrLabel);
+      dialog.appendChild(radioAggrRow);
+
+      function updateMode() {
+        const single = radioSingle.checked;
+        monthSelect.disabled = !single;
+        runSelect.disabled = !single;
+      }
+      radioSingle.addEventListener('change', updateMode);
+      radioAggr.addEventListener('change', updateMode);
+      updateMode();
+
+      const actions = document.createElement('div');
+      actions.className = 'dialog-actions center';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'secondary-btn small';
+      cancelBtn.type = 'button';
+      cancelBtn.textContent = '取消';
+      cancelBtn.addEventListener('click', () => { if (typeof onCancel === 'function') onCancel(); });
+      const confirmBtn = document.createElement('button');
+      confirmBtn.className = 'primary-btn small';
+      confirmBtn.type = 'button';
+      confirmBtn.textContent = '导出';
+      confirmBtn.addEventListener('click', () => {
+        if (radioSingle.checked) {
+          const runId = Number(runSelect.value);
+          if (!runId) {
+            openModal(createAlertDialog('请选择一个 run'));
+            return;
+          }
+          const chosenMonth = monthSelect.value;
+          if (typeof onConfirm === 'function') onConfirm({ scope: 'single', runId, month: chosenMonth });
+        } else {
+          if (typeof onConfirm === 'function') onConfirm({ scope: 'aggregate' });
+        }
+      });
+      actions.appendChild(cancelBtn);
+      actions.appendChild(confirmBtn);
+      dialog.appendChild(actions);
+
+      return overlay;
+    }
+
+    async function handlePendingExportClick() {
+      let allRuns = [];
+      try {
+        allRuns = await desktopApi.pending.diff.listAllRuns();
+      } catch (err) {
+        openModal(createAlertDialog('读取运算记录失败：' + (err && err.message ? err.message : String(err))));
+        return;
+      }
+      if (!Array.isArray(allRuns) || allRuns.length === 0) {
+        openModal(createAlertDialog('暂无运算记录，请先点击"开始运行"生成差异。'));
+        return;
+      }
+
+      openModal(buildExportDialog({
+        allRuns,
+        onConfirm: async (choice) => {
+          closeModal();
+          try {
+            let result;
+            if (choice.scope === 'single') {
+              result = await desktopApi.pending.diff.exportSingle({
+                runId: choice.runId,
+                defaultFileName: `月度Pending差异-${choice.month}-run${choice.runId}.xlsx`
+              });
+            } else {
+              result = await desktopApi.pending.diff.exportAggregate();
+            }
+            if (!result || result.status === 'cancelled') return;
+            if (result.status === 'success') {
+              openModal(createAlertDialog(`导出成功：${result.path}（${result.rowCount || 0} 条差异）`));
+            } else {
+              openModal(createAlertDialog('导出失败：' + (result.message || '未知错误')));
+            }
+          } catch (err) {
+            openModal(createAlertDialog('导出异常：' + (err && err.message ? err.message : String(err))));
+          }
+        },
+        onCancel: () => closeModal()
+      }));
+    }
+
     // ========== 初始化 + 事件绑定 ==========
 
     async function initialize() {
@@ -543,6 +727,11 @@ window.__rendererPending = (function () {
       if (elements.pendingRunBtn) {
         elements.pendingRunBtn.addEventListener('click', () => {
           handlePendingRunClick().catch((err) => console.error('[pending] run click error:', err));
+        });
+      }
+      if (elements.pendingExportBtn) {
+        elements.pendingExportBtn.addEventListener('click', () => {
+          handlePendingExportClick().catch((err) => console.error('[pending] export click error:', err));
         });
       }
       if (elements.pendingStatusBox) {

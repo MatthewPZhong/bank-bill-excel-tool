@@ -233,3 +233,43 @@
 - node --check / smoke 通过
 - UI 层封装，T7 engine 已验证三类差异；无需额外自动化
 - 手动测试留给 T11 之后的 UI 端到端验证
+
+---
+
+### T9 完成（导出 writer + 对话框）
+
+**动作**：
+- 新增 `src/backend/pending-export/writer.js`:
+  - `exportSingleRun(db, runId, savePath)` — 按 runId 导出；Sheet1 汇总 +
+    Sheet2~N 按 `pending资金类型` 值分组（仅差异行实际出现的值建 sheet）；
+    列 = 31 原列 + `diff_type` + 每个 compareField 的 `_before`/`_after`
+  - `exportAggregate(db, savePath)` — 每 (upper, lower) 对取最新 run；
+    Sheet1 `按月维度区别汇总`（分段 + month label）+ Sheet2 `汇总`（扁平）；
+    compareFields 取所有 run 的并集
+  - `applyHeaderRowFont` 第 1 行表头字体写死 `Courier New`（OT-3 延续 v1.5.3 R3）
+  - `sanitizeSheetName` 防非法字符
+- `src/main.js` 2 个 IPC: `pending:diff:export-single` / `pending:diff:export-aggregate`
+  都走 `dialog.showSaveDialog`
+- `src/preload.js` `pending.diff.exportSingle / exportAggregate`
+- `src/renderer-pending.js`:
+  - `buildExportDialog`：radio 单月 vs 汇总；单月模式下月份+run 两级下拉
+    （月份 change 刷新 run list），run 下拉显示 `createdAt + 差异条数 + 规则摘要`
+  - `handlePendingExportClick`：listAllRuns → 无 run 时 alert → 弹 dialog →
+    调 exportSingle / exportAggregate → success 弹 alert 提示路径
+- 新增 `scripts/test-v2.0.0-pending-export.js`（2 场景 22 断言）
+- package.json 加 `test:v2.0.0:pending-export`
+
+**验证**：
+- 22/22 断言全过：
+  - single 3 行差异（new/missing/changed 各 1）→ 34 列 header + changed
+    _before=200 / _after=250 精确匹配 + 按 fund_type 动态分 sheet（充值/退票）
+  - aggregate 多 run（2026-08+2026-09 + 2026-09+2026-10 两对）→ 2 sheet
+    （按月维度区别汇总 + 汇总）
+- smoke 通过；node --check 全绿
+
+**T9 内部设计决策**：
+- 分 sheet 按**实际出现值**动态建（OT-9 = i），即使 PRD 固定了 3 种枚举
+  {提现/退票/充值}，如果差异行里只出现 2 种也只建 2 个 sheet
+- changed 行的 31 原列用**lower 版本**（新值），`_before` 是 upper / `_after`
+  是 lower；new 行 31 列用 lower，`_before`/`_after` 都空；missing 行 31
+  列用 upper，`_before`/`_after` 都空
