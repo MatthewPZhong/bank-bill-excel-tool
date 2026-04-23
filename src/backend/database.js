@@ -8,6 +8,7 @@ const {
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
+  ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,
   ensureTemplateKeySupport,
@@ -56,6 +57,7 @@ class AppDatabase {
         merchant_id TEXT NOT NULL,
         currency TEXT NOT NULL,
         row_index INTEGER NOT NULL,
+        account_nature TEXT NOT NULL DEFAULT 'client',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE,
@@ -102,6 +104,7 @@ class AppDatabase {
     this.ensureParentTemplateSupport();
     this.ensureTemplateFilenameFixedFieldSupport();
     this.ensureAccountMappingTemplateSupport();
+    this.ensureTemplateBigAccountNatureSupport();
   }
 
   hasColumn(tableName, columnName) {
@@ -146,6 +149,11 @@ class AppDatabase {
 
   ensureAccountMappingTemplateSupport() {
     return ensureAccountMappingTemplateSupport(this.db);
+  }
+
+  // v1.5.3 需求 R2：自有账号合并入大账号表 — 幂等 schema 迁移
+  ensureTemplateBigAccountNatureSupport() {
+    return ensureTemplateBigAccountNatureSupport(this.db);
   }
 
   listTemplates() {
@@ -193,15 +201,16 @@ class AppDatabase {
     return templateRepository.saveTemplateFilenameFixedField(this.db, templateId, value);
   }
 
-  getTemplateBigAccounts(templateId) {
-    return templateRepository.getTemplateBigAccounts(this.db, templateId);
+  getTemplateBigAccounts(templateId, options = {}) {
+    return templateRepository.getTemplateBigAccounts(this.db, templateId, options);
   }
 
   getTemplateMappings(templateId) {
     return templateRepository.getTemplateMappings(this.db, templateId);
   }
 
-  saveMappings(templateId, mappings, bigAccounts = [], fixedAssignments = [], dateFormat, amountSplitRules = null) {
+  // v1.5.3 R2 round 3：options.preserveOwn 透传到 repository（默认 true，调用方未显式接管 own 时保留 own）
+  saveMappings(templateId, mappings, bigAccounts = [], fixedAssignments = [], dateFormat, amountSplitRules = null, options = {}) {
     return templateRepository.saveMappings(
       this.db,
       templateId,
@@ -209,7 +218,8 @@ class AppDatabase {
       bigAccounts,
       fixedAssignments,
       dateFormat,
-      amountSplitRules
+      amountSplitRules,
+      options
     );
   }
 

@@ -31,9 +31,19 @@ const {
 const {
   BALANCE_SEED_GENERATION_METHODS,
   findPreviousBalanceSeed,
+  listBalanceSeedBankNames,
   readBalanceSeedRecords,
-  upsertBalanceSeedRecord
+  upsertBalanceSeedRecord,
+  writeBalanceSeedRecords
 } = require('../../src/backend/balance-seed-store');
+const {
+  ALL_BANKS_TEMPLATE_SCOPE,
+  assembleMonthlyBalance,
+  buildTargetLastDay,
+  lastDayOfMonth,
+  pickLatestSeedForAccount,
+  toBalanceRows
+} = require('../../src/main-process/monthly-balance');
 
 function runDatabaseScenario(context) {
   const db = new AppDatabase(context.dbPath);
@@ -683,6 +693,222 @@ function runLoggingScenario(context) {
   );
 }
 
+// v1.5.3 R1 (T1.9)：月度余额装配场景 — 7 个 P0 用例全链路覆盖
+// 用独立 tmpdir + 独立 DB，避免污染其它 smoke 场景的共享 DB
+function runMonthlyBalanceScenario() {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { AppDatabase } = require('../../src/backend/database');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mb-smoke-'));
+
+  try {
+    // utility sanity
+    assert.strictEqual(lastDayOfMonth(2024, 2), 29, 'leap year feb');
+    assert.strictEqual(lastDayOfMonth(2026, 2), 28, 'non-leap feb');
+    assert.strictEqual(lastDayOfMonth(2026, 3), 31);
+    assert.strictEqual(lastDayOfMonth(2026, 12), 31);
+    assert.strictEqual(lastDayOfMonth(2026, 13), null);
+    assert.strictEqual(buildTargetLastDay(2026, 3), '2026-03-31');
+    assert.strictEqual(buildTargetLastDay(2026, 10), '2026-10-31');
+
+    // listBalanceSeedBankNames helper sanity
+    assert.deepStrictEqual(listBalanceSeedBankNames(root), [], 'empty dir -> []');
+
+    // pickLatestSeedForAccount helper sanity
+    const seeds = [
+      { merchantId: 'A', currency: 'CNY', billDate: '2026-03-31', endBalance: 100 },
+      { merchantId: 'A', currency: 'CNY', billDate: '2026-02-28', endBalance: 50 },
+      { merchantId: 'A', currency: 'USD', billDate: '2026-04-30', endBalance: 999 }
+    ];
+    assert.strictEqual(pickLatestSeedForAccount(seeds, 'A', 'CNY', '2026-03-31').reason, 'exact');
+    assert.strictEqual(pickLatestSeedForAccount(seeds, 'A', 'CNY', '2026-04-30').reason, 'fallback');
+    assert.strictEqual(pickLatestSeedForAccount(seeds, 'A', 'USD', '2026-03-31').chosen, null);
+    assert.strictEqual(pickLatestSeedForAccount(seeds, 'B', 'CNY', '2026-03-31').chosen, null);
+
+    // 构建 DB + 模板
+    const db = new AppDatabase(path.join(root, 'app.sqlite'));
+    db.init();
+    const t1 = db.upsertTemplate({ name: '中行-北京', sourceFileName: 'a.xlsx', headers: ['h'] });
+    const t2 = db.upsertTemplate({ name: '建行-上海', sourceFileName: 'b.xlsx', headers: ['h'] });
+    const t3 = db.upsertTemplate({ name: '工行-深圳', sourceFileName: 'c.xlsx', headers: ['h'] });
+
+    // 构造主模板 + 子模板 — 验证 Q5 "普通模板" 不包含它们
+    const tParent = db.upsertTemplate({ name: '招商', sourceFileName: 'p.xlsx', headers: ['h'] });
+    db.setParentStatus(tParent.id, true);
+    const tChild = db.upsertTemplate({ name: '招商-北京', sourceFileName: 'ch.xlsx', headers: ['h'] });
+    db.setChildParent(tChild.id, tParent.id);
+
+    // 3 模板 × 2 大账号 × 2 币种 = 12 组合；另加 1 个自有账号（验证 Q6）
+    db.saveMappings(t1.id, [{ templateField: 'MerchantId', mappedField: 'h' }], [
+      { merchantId: 'BOC_CLIENT_1', currency: 'CNY', accountNature: 'client' },
+      { merchantId: 'BOC_CLIENT_1', currency: 'USD', accountNature: 'client' },
+      { merchantId: 'BOC_CLIENT_2', currency: 'CNY', accountNature: 'client' },
+      { merchantId: 'BOC_CLIENT_2', currency: 'USD', accountNature: 'client' },
+      { merchantId: 'BOC_OWN_1', currency: 'CNY', accountNature: 'own' }
+    ]);
+    db.saveMappings(t2.id, [{ templateField: 'MerchantId', mappedField: 'h' }], [
+      { merchantId: 'CCB_CLIENT_1', currency: 'CNY', accountNature: 'client' },
+      { merchantId: 'CCB_CLIENT_1', currency: 'USD', accountNature: 'client' },
+      { merchantId: 'CCB_CLIENT_2', currency: 'CNY', accountNature: 'client' },
+      { merchantId: 'CCB_CLIENT_2', currency: 'USD', accountNature: 'client' }
+    ]);
+    db.saveMappings(t3.id, [{ templateField: 'MerchantId', mappedField: 'h' }], [
+      { merchantId: 'ICBC_CLIENT_1', currency: 'CNY', accountNature: 'client' },
+      { merchantId: 'ICBC_CLIENT_1', currency: 'USD', accountNature: 'client' },
+      { merchantId: 'ICBC_CLIENT_2', currency: 'CNY', accountNature: 'client' },
+      { merchantId: 'ICBC_CLIENT_2', currency: 'USD', accountNature: 'client' }
+    ]);
+
+    // 构造 seeds：每账号每币种在 2026-03-31 都有精确记录；1 个 USD 账号仅有未来 seed；1 个账号完全无 seed
+    writeBalanceSeedRecords(root, '中行', [
+      { merchantId: 'BOC_CLIENT_1', currency: 'CNY', billDate: '2026-03-31', endBalance: 1000.01, templateName: '中行-北京', updatedAt: '' },
+      { merchantId: 'BOC_CLIENT_1', currency: 'USD', billDate: '2026-03-31', endBalance: 100.01, templateName: '中行-北京', updatedAt: '' },
+      { merchantId: 'BOC_CLIENT_2', currency: 'CNY', billDate: '2026-02-28', endBalance: 900.00, templateName: '中行-北京', updatedAt: '' }, // 兜底
+      { merchantId: 'BOC_CLIENT_2', currency: 'USD', billDate: '2026-04-30', endBalance: 500.00, templateName: '中行-北京', updatedAt: '' }, // 未来 → 排除
+      { merchantId: 'BOC_OWN_1', currency: 'CNY', billDate: '2026-03-15', endBalance: 77.77, templateName: '中行-北京', updatedAt: '' } // 自有兜底
+    ]);
+    writeBalanceSeedRecords(root, '建行', [
+      { merchantId: 'CCB_CLIENT_1', currency: 'CNY', billDate: '2026-03-31', endBalance: 2000.00, templateName: '建行-上海', updatedAt: '' },
+      { merchantId: 'CCB_CLIENT_1', currency: 'USD', billDate: '2026-03-31', endBalance: 200.00, templateName: '建行-上海', updatedAt: '' },
+      { merchantId: 'CCB_CLIENT_2', currency: 'CNY', billDate: '2026-03-31', endBalance: 2500.00, templateName: '建行-上海', updatedAt: '' },
+      { merchantId: 'CCB_CLIENT_2', currency: 'USD', billDate: '2026-03-31', endBalance: 250.00, templateName: '建行-上海', updatedAt: '' }
+    ]);
+    writeBalanceSeedRecords(root, '工行', [
+      { merchantId: 'ICBC_CLIENT_1', currency: 'CNY', billDate: '2026-03-31', endBalance: 3000.00, templateName: '工行-深圳', updatedAt: '' },
+      { merchantId: 'ICBC_CLIENT_1', currency: 'USD', billDate: '2026-03-31', endBalance: 300.00, templateName: '工行-深圳', updatedAt: '' },
+      { merchantId: 'ICBC_CLIENT_2', currency: 'CNY', billDate: '2026-03-31', endBalance: 3500.00, templateName: '工行-深圳', updatedAt: '' }
+      // ICBC_CLIENT_2/USD 完全无 seed → 跳过
+    ]);
+
+    // -----------------------------------------------------------------------
+    // 场景 1（P0-10 对应）：全部银行渠道 × 2026-03 → 中行 4 + 建行 4 + 工行 3 = 11 条；自有账号未计入 client 场景外应被包含
+    // 中行：BOC_CLIENT_1/CNY+USD（exact）= 2；BOC_CLIENT_2/CNY（兜底 2026-02-28）= 1；BOC_CLIENT_2/USD 未来排除 = 0；BOC_OWN_1/CNY（兜底）= 1 → 4
+    // 建行：4 条 exact
+    // 工行：3 条 exact（ICBC_CLIENT_2/USD 无 seed → 排除）
+    // 合计 11 条；templates 只有 3 个普通模板（主模板 + 子模板不参与）
+    const r1 = assembleMonthlyBalance({
+      templateScope: ALL_BANKS_TEMPLATE_SCOPE,
+      year: 2026, month: 3,
+      db, storageRoot: root
+    });
+    assert.strictEqual(r1.records.length, 11, `场景1 全部银行渠道 → 期望 11 条，实际 ${r1.records.length}`);
+    assert.strictEqual(r1.templates.length, 3, `场景1 普通模板 → 期望 3，实际 ${r1.templates.length}`);
+    assert(
+      !r1.templates.some((t) => t.name === '招商' || t.name === '招商-北京'),
+      '场景1 主模板/子模板 不应出现'
+    );
+    // Q6 自有账号出现在 R1 records
+    assert(
+      r1.records.some((r) => r.merchantId === 'BOC_OWN_1'),
+      '场景1 自有账号 BOC_OWN_1 应出现（§3.1 R1 唯一放行）'
+    );
+
+    // -----------------------------------------------------------------------
+    // 场景 2（P0-4 对应）：单模板 × 2026-03 某账号在月末恰好有记录 → exact
+    const r2 = assembleMonthlyBalance({
+      templateScope: '建行-上海',
+      year: 2026, month: 3,
+      db, storageRoot: root
+    });
+    assert.strictEqual(r2.records.length, 4, `场景2 建行-上海 2026-03 → 期望 4 条，实际 ${r2.records.length}`);
+    const ccbC1CNY = r2.records.find((r) => r.merchantId === 'CCB_CLIENT_1' && r.currency === 'CNY');
+    assert(ccbC1CNY, '场景2 CCB_CLIENT_1/CNY 应存在');
+    assert.strictEqual(ccbC1CNY.billDate, '2026-03-31', '场景2 exact → billDate 应为 2026-03-31');
+    assert.strictEqual(ccbC1CNY.endBalance, 2000.00, '场景2 endBalance 应为 2000.00');
+    assert.strictEqual(ccbC1CNY.pickReason, 'exact');
+
+    // -----------------------------------------------------------------------
+    // 场景 3（P0-5 对应）：单模板 × 2026-03 某账号仅有 2026-02-28 → 兜底
+    // 中行-北京 BOC_CLIENT_2/CNY 仅有 2026-02-28
+    const r3 = assembleMonthlyBalance({
+      templateScope: '中行-北京',
+      year: 2026, month: 3,
+      db, storageRoot: root
+    });
+    const bocC2CNY = r3.records.find((r) => r.merchantId === 'BOC_CLIENT_2' && r.currency === 'CNY');
+    assert(bocC2CNY, '场景3 BOC_CLIENT_2/CNY 应存在');
+    assert.strictEqual(bocC2CNY.billDate, '2026-02-28', '场景3 兜底 → billDate 应为 2026-02-28');
+    assert.strictEqual(bocC2CNY.endBalance, 900.00, '场景3 endBalance 应为 900.00');
+    assert.strictEqual(bocC2CNY.pickReason, 'fallback');
+
+    // -----------------------------------------------------------------------
+    // 场景 4（P0-6 对应）：某账号所有 seeds 都 > 月末 → 不出现
+    // 中行-北京 BOC_CLIENT_2/USD 只有 2026-04-30
+    const bocC2USD = r3.records.find((r) => r.merchantId === 'BOC_CLIENT_2' && r.currency === 'USD');
+    assert.strictEqual(bocC2USD, undefined, '场景4 BOC_CLIENT_2/USD 全部 billDate > 月末 → 不应出现在 records');
+    const missingC2USD = r3.stats.missingAccounts.find(
+      (m) => m.merchantId === 'BOC_CLIENT_2' && m.currency === 'USD'
+    );
+    assert(missingC2USD, '场景4 应记入 missingAccounts');
+    assert.strictEqual(missingC2USD.reason, 'no-candidates');
+
+    // -----------------------------------------------------------------------
+    // 场景 5：某账号完全无 seeds → 不出现
+    // 工行-深圳 ICBC_CLIENT_2/USD 完全无 seed
+    const r4 = assembleMonthlyBalance({
+      templateScope: '工行-深圳',
+      year: 2026, month: 3,
+      db, storageRoot: root
+    });
+    const icbcC2USD = r4.records.find((r) => r.merchantId === 'ICBC_CLIENT_2' && r.currency === 'USD');
+    assert.strictEqual(icbcC2USD, undefined, '场景5 ICBC_CLIENT_2/USD 无 seed → 不应出现');
+    assert.strictEqual(r4.records.length, 3, `场景5 工行-深圳 → 期望 3 条（排除无 seed 的 USD），实际 ${r4.records.length}`);
+
+    // -----------------------------------------------------------------------
+    // 场景 6（P0-7 对应）：空输入 — 所有大账号无 seed / 未来 seed
+    // 构造独立 tmpdir + DB 来隔离
+    const root2 = fs.mkdtempSync(path.join(os.tmpdir(), 'mb-smoke-empty-'));
+    try {
+      const db2 = new AppDatabase(path.join(root2, 'app.sqlite'));
+      db2.init();
+      const tX = db2.upsertTemplate({ name: '某行-某地', sourceFileName: 'x.xlsx', headers: ['h'] });
+      db2.saveMappings(tX.id, [{ templateField: 'MerchantId', mappedField: 'h' }], [
+        { merchantId: 'X_CLIENT_1', currency: 'CNY', accountNature: 'client' }
+      ]);
+      // 完全无 seeds 目录
+      const r5 = assembleMonthlyBalance({
+        templateScope: ALL_BANKS_TEMPLATE_SCOPE,
+        year: 2026, month: 3,
+        db: db2, storageRoot: root2
+      });
+      assert.strictEqual(r5.records.length, 0, '场景6 空输入 → records.length === 0');
+      assert.strictEqual(r5.stats.missingAccounts.length, 1, '场景6 missingAccounts 仍应记录 X_CLIENT_1');
+      db2.db.close();
+    } finally {
+      fs.rmSync(root2, { recursive: true, force: true });
+    }
+
+    // -----------------------------------------------------------------------
+    // 场景 7（P0-11 对应）：自有账号有 seeds → 出现在 R1 导出（Q6 唯一放行）
+    const r6 = assembleMonthlyBalance({
+      templateScope: '中行-北京',
+      year: 2026, month: 3,
+      db, storageRoot: root
+    });
+    const ownInResult = r6.records.find((r) => r.merchantId === 'BOC_OWN_1');
+    assert(ownInResult, '场景7 自有账号 BOC_OWN_1 应出现在 R1 records');
+    assert.strictEqual(ownInResult.billDate, '2026-03-15');
+    assert.strictEqual(ownInResult.endBalance, 77.77);
+
+    // toBalanceRows 字段对齐（模拟 balanceTemplateFields）
+    const rows = toBalanceRows(r6.records, ['银行名称', '所在地', '银行账号', '币种', '账单日期', '期末余额']);
+    assert.strictEqual(rows.length, r6.records.length);
+    assert.strictEqual(rows[0].length, 6);
+    // 随机抽查一行字段位置
+    const bocOwnRow = rows.find((row) => row[2] === 'BOC_OWN_1');
+    assert(bocOwnRow);
+    assert.strictEqual(bocOwnRow[0], '中行'); // 银行名称
+    assert.strictEqual(bocOwnRow[1], '北京'); // 所在地
+    assert.strictEqual(bocOwnRow[3], 'CNY'); // 币种
+    assert.strictEqual(bocOwnRow[5], 77.77); // 期末余额
+
+    db.db.close();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 function runSmokeScenarios(context) {
   const databaseState = runDatabaseScenario(context);
   const assetState = runAssetAndDateScenario(context);
@@ -692,6 +918,8 @@ function runSmokeScenarios(context) {
   });
   runWorkbookScenario(context, mappingState);
   runLoggingScenario(context);
+  // v1.5.3 R1 (T1.9)：月度余额装配场景
+  runMonthlyBalanceScenario();
 }
 
 module.exports = {

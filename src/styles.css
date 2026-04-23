@@ -1647,6 +1647,48 @@ select {
   margin-top: 18px;
 }
 
+/* v1.5.3 R1 (T1.7)：月度余额账单导出弹窗 */
+.monthly-balance-export-card {
+  width: min(100%, 560px);
+  padding: 28px 28px 24px;
+}
+
+.monthly-balance-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin: 18px 0 6px;
+}
+
+.monthly-balance-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.monthly-balance-label {
+  flex: 0 0 56px;
+  font-size: 14px;
+  color: var(--text-secondary, #555);
+}
+
+.monthly-balance-template-select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.monthly-balance-time-picker {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 8px;
+}
+
+.monthly-balance-year-select,
+.monthly-balance-month-select {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 .export-scope-card {
   width: 320px;
 }

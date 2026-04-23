@@ -9,6 +9,34 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 1.5.3
+
+### 新增
+
+- **主页面「模板」下拉改为「模式」**：label 文本由「模板」改为「模式」，下拉值域收窄为两条——`制作网银账单`（默认选中，内部隐式使用 v1.5.2 的 `__FILENAME_MAPPING__`）和 `导出月度余额账单`（R1 新增）。真实模板与虚拟 ID 不再出现在主页面下拉，仅在「导出月度余额账单」模式的弹窗内出现。`制作网银账单` 模式下所有 v1.5.2 行为保留不变。
+- **导出月度余额账单模式（R1）**：新增独立导出入口，点击「导出余额」弹出「请选择需要导出月度余额账单的银行渠道」对话框（模板下拉默认选中 `全部银行渠道`，另含全部普通模板；年份范围 = 近 10 年 ~ 今年+1；月份必须主动选）。完成后装配月度余额 records → 写入临时 xlsx → 再由系统保存对话框另存。文件命名 `月度余额账单-{模板名 or "全部银行渠道"}-{YYYY-MM}.xlsx`，单文件单 sheet 合并所有模板/大账号/币种；表头固定取自 `assets/余额账单模版.xlsx`，模板未提供的字段空字符串补位。
+- **Q2 最新余额定义**：优先取 `billDate === 月末最后一日` 的 seed；无则按 `billDate ≤ 月末最后一日` 取最大的一条（兜底）；全部 seeds `billDate > 月末` 或完全无 seed 则跳过该大账号（不报错）。多币种大账号按币种拆多行。
+- **按钮可用/禁用矩阵**：`导出月度余额账单` 模式下 `导入文件 / 导出明细 / 账户映射` 置灰禁用；`导入模板 / 模板管理 / 导出余额` 可用。E1/E2/E3 校验（模板空 / 时间空 / 两者都空）通过 `createAlertDialog` 弹框，确认后重开弹窗保留已填值；E4 所选范围无余额记录时弹「所选模板在 {年}年{月}月的月末及更早均无余额记录，无法生成月度余额账单」。
+- **自有账号合并入大账号表（R2）**：`template_big_accounts` 表新增列 `account_nature TEXT NOT NULL DEFAULT 'client'`（取值 `'client' | 'own'`）。导入银行账号信息 Excel 后，客资 + 自有都进入「维护大账号」对话框 tbody（UI 不加颜色/标识区分；view 态下 own 行 merchantView 前加 `[自有] ` 前缀，input 值保持裸 merchantId）。
+- **§3.1 自有账户隔离规则（跨需求一致性约束）**：自有账户**仅在 R1「导出月度余额账单」场景参与**，其它所有场景（大账号排序、大账号选择弹框、明细账单生成、大账号检测、字段固定分配、余额管理、账户映射等）一律过滤。实现：SQL 层软过滤（`getTemplateBigAccounts` 默认只返客资；R1 装配链路显式传 `{ includeOwn: true }`）+ 维护大账号对话框初始化改走独立 IPC `big-account:get-with-own` 拿含自有的完整列表。
+- **历史 own-accounts/*.json 启动迁移（D15/D16）**：启动时执行一次性幂等迁移，按 bankName 匹配模板展平 `{merchantId, currency}` 写入 `template_big_accounts`（nature='own'），冲突保留已有记录并写 `[CONFLICT]` 日志。迁移幂等 flag = `app_settings.own_accounts_migration_v1_5_3_done='1'`。迁移日志独立写 `{storageRoot}/own-accounts-migration-v1.5.3.log`。原 `own-accounts/*.json` 文件**保留不删除**，作为回退兼容。迁移失败不阻塞启动（D15），状态栏以 error tone 显示告警；orphan bankName 跳过不告警（D16）。
+- **导出 xlsx 表头字体统一为 Courier New（R3）**：明细（COMMON）、余额（BALANCE）、月度余额、多模板合并文件、新开账户模块导出的 xlsx **第 1 行表头**字体统一改为 Courier New（字号/颜色/粗体/合并单元格属性保持原样）。数据区字体不变；**无 CJK 回退链**（Q10 决策，CJK 渲染依赖系统字体替换，风险由用户承担）。新依赖 `xlsx-js-style@^1.2.0`，仅在 `writers.js` 局部 `require`（其它文件仍用 `xlsx`）以减少打包体积增长；合并场景需在 `mergeGeneratedXlsxFiles` 内部局部 shadow 为 `xlsx-js-style` 并补一次字体注入，否则合并产物 styles.xml 会被 xlsx 社区版 writer 重建为 Calibri。报错 xlsx / error-reports 字体不改。
+- **账单拆分合并浮点精度修复（R4/D17 hotfix）**：`buildMappedRows` 合并分支 `net = sumCredit - sumDebit` 结果套 `roundAmount(...)` 强制 2 位小数 round，吃掉 IEEE 754 浮点噪声。`2377.49 + 178.31 = 2555.80`、`65572.01 + 4917.90 = 70489.91`、`(0.1 + 0.2) - 0.3 = 0`（静默跳过合并组）等场景现在稳定输出精确值。初稿方案 `roundAmountHighPrecision`（12 位）对样本 2 不收敛，改用 `roundAmount`（2 位）覆盖全部样本。
+
+### 变更
+
+- **主页面 state 新增 `mode` / `monthlyBalanceReady` / `monthlyBalancePreview`**；`selectedTemplateId` 默认值改为 `FILENAME_MAPPING_TEMPLATE_ID`。`updateTemplateSelect` 重写为只同步下拉 value ↔ `state.mode`；option 改为静态 HTML（不再遍历 `state.templates` 构造）。
+- **`handleExportBalance` 按 `state.mode` 三路分流**：月度余额模式未装配 → 弹月度余额导出对话框；已装配 → 调系统保存对话框另存；制作网银账单模式 → 保留 v1.5.2 原链路。切模式时清前端 `monthlyBalanceReady / preview`，后端 `lastGeneratedExports.monthlyBalance` session 保留。
+- **新增 IPC**：`monthly-balance:assemble` / `monthly-balance:export` / `big-account:get-with-own`。`preload.js` 新增 `window.desktopApi.monthlyBalance = { assemble, export }` 和 `window.desktopApi.bigAccount.getWithOwn`。
+- **Bundle v3 透明扩展**：`SUPPORTED_BUNDLE_VERSION` 保持 `v3` 不升 v4。bundle 导出项 `bigAccounts[].accountNature` 字段可选携带（v1.5.2 读时忽略向后兼容；新版读旧 bundle 时缺省 `'client'`）。`groupBigAccountRows` 分组 key 扩展为 `merchantId::accountNature`，防止 client + own 同 merchantId 被错误合并。
+- **`saveMappings` 透传 `accountNature`**：白名单校验 `'client' | 'own'`，非法/缺省默认 `'client'`；`expandBigAccountConfigurations` / `validateTemplateConfiguration` / `buildCompatibleBigAccounts` 同样保留字段。
+- **SQL 过滤一致性（§3.1 落地）**：`listTemplates / getTemplate / listChildTemplates` 的 `bigAccountCount` 子查询加 `AND ba.account_nature = 'client'`；维护大账号对话框 `bigAccountCount` 不含自有，但 tbody 初始化另走 `big-account:get-with-own` 拿全量。
+- **新开账户模块导出表头字体变为 Courier New**（D14 决策接受的副作用）：`new-account:generate` 共用 `writeBalanceWorkbook`，字体注入自动生效。
+
+### 废弃保留
+
+- `src/backend/own-account-store.js` + `big-account:save-own-accounts` IPC + `preload.js:bigAccount.saveOwnAccounts`：前端不再单独依赖，但过渡期**并行写**（json + 数据库同时写）以兼容旧代码路径（Q6）。原 `own-accounts/*.json` 文件保留不删除，作为 v1.5.2 回退兼容 fallback。
+
 ## 1.5.2
 
 ### 新增
