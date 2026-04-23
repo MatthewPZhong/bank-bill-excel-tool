@@ -257,11 +257,15 @@ window.__rendererPending = (function () {
     }
 
     function handleRuleConfirm({ matchFields, compareFields }) {
-      const message = [
-        '请确认筛选的字段：',
-        `对账字段 (${matchFields.length}): ${matchFields.join('、') || '(无)'}`,
-        `对账内容 (${compareFields.length}): ${compareFields.join('、') || '(无)'}`
-      ].join('\n');
+      // createConfirmDialog 内部用 innerHTML 塞 message，支持 HTML 标签
+      // 31 列表头为受控预定义值（无 HTML 特殊字符），防御性对字段名做 HTML escape
+      const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+      const matchText = matchFields.length > 0 ? matchFields.map(esc).join('、') : '(无)';
+      const compareText = compareFields.length > 0 ? compareFields.map(esc).join('、') : '(无)';
+      const message =
+        '<strong>请确认筛选的字段：</strong><br><br>' +
+        `<div>对账字段 (${matchFields.length}): ${matchText}</div>` +
+        `<div>对账内容 (${compareFields.length}): ${compareText}</div>`;
       openModal(createConfirmDialog({
         message,
         confirmText: '确认',
