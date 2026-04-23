@@ -8,7 +8,7 @@
 //   Section 1 — R1 资金装配（7 条）：P0-4 ~ P0-7、P0-10、P0-11、P1-3
 //   Section 2 — R1 IPC 校验层（2 条）：P0-8 / P0-9
 //   Section 3 — R2 迁移三态（3 条）：P0-13 / P0-14 / P0-15
-//   Section 4 — R2 过滤 / bundle + Codex 修复（12 条）：P1-4 / P1-5 / P0-F1 ~ P0-F10
+//   Section 4 — R2 过滤 / bundle + Codex 修复（14 条）：P1-4 / P1-5 / P0-F1 ~ P0-F12
 //   Section 5 — R3 字体 XML 级验证（7 条）：P0-17 ~ P0-20、P1-6 / P1-7 / P1-8
 //   Section 6 — R4 账单合并浮点精度（3 条）：P0-R4-1 ~ P0-R4-3
 //
@@ -1231,6 +1231,136 @@ function casesR2FilterBundle() {
       });
     });
     return `4 条决策表正确：完全冲突丢 own / 无冲突全留 / 部分冲突保留剩余 / 最终无 (mid, cur) 重复`;
+  });
+
+  // --- P0-F11：F8 dedupe 时 droppedOwnPairs 计数与明细（Round 6 self-review C1 修复） ---
+  // C1 把 console.warn 升级为 setStatus warning；要求 droppedOwnPairs 列表必须含被丢的 own pair 标识，
+  // 且数量准确（驱动状态栏文案 "检测到 N 个自有账号与客资重复..."）
+  runCase('P0-F11', 'P0', 'dedupe droppedOwnPairs 计数与明细正确（C1 修复）', () => {
+    function mergeWithDedupe(clientAccounts, ownAccounts) {
+      const mergedAccounts = [];
+      const seenByPair = new Set();
+      const droppedOwnPairs = [];
+      clientAccounts.forEach((item) => {
+        const merchantId = String(item.merchantId || '').trim();
+        const currencies = Array.isArray(item.currencies) ? item.currencies : [];
+        mergedAccounts.push({ ...item, accountNature: 'client' });
+        currencies.forEach((c) => seenByPair.add(`${merchantId}::${String(c || '').trim()}`));
+      });
+      ownAccounts.forEach((item) => {
+        const merchantId = String(item.merchantId || '').trim();
+        const currencies = Array.isArray(item.currencies) ? item.currencies : [];
+        const remaining = currencies.filter((c) => !seenByPair.has(`${merchantId}::${String(c || '').trim()}`));
+        if (remaining.length === 0) {
+          droppedOwnPairs.push(`${merchantId}（${currencies.join('/')}）`);
+          return;
+        }
+        if (remaining.length < currencies.length) {
+          const dropped = currencies.filter((c) => seenByPair.has(`${merchantId}::${String(c || '').trim()}`));
+          droppedOwnPairs.push(`${merchantId}（${dropped.join('/')}, 部分冲突）`);
+        }
+        mergedAccounts.push({ ...item, currencies: remaining, isMultiCurrency: remaining.length > 1, accountNature: 'own' });
+        remaining.forEach((c) => seenByPair.add(`${merchantId}::${String(c || '').trim()}`));
+      });
+      return { mergedAccounts, droppedOwnPairs };
+    }
+
+    // case 1：完全冲突 → droppedOwnPairs 应有 1 条标识 own 全 currency 被丢
+    const r1 = mergeWithDedupe(
+      [{ merchantId: 'A', currencies: ['CNY'] }],
+      [{ merchantId: 'A', currencies: ['CNY'] }]
+    );
+    assertEqual(r1.droppedOwnPairs.length, 1, '完全冲突 → 1 条 dropped');
+    assertTruthy(r1.droppedOwnPairs[0].includes('A'), 'dropped 含 merchantId');
+    assertTruthy(r1.droppedOwnPairs[0].includes('CNY'), 'dropped 含 currency 明细');
+
+    // case 2：部分冲突 → droppedOwnPairs 应含 "部分冲突" 标记
+    const r2 = mergeWithDedupe(
+      [{ merchantId: 'B', currencies: ['CNY'] }],
+      [{ merchantId: 'B', currencies: ['CNY', 'USD'] }]
+    );
+    assertEqual(r2.droppedOwnPairs.length, 1, '部分冲突 → 1 条 dropped');
+    assertTruthy(r2.droppedOwnPairs[0].includes('部分冲突'), 'dropped 标记 "部分冲突"');
+    assertTruthy(r2.droppedOwnPairs[0].includes('CNY'), 'dropped 列出被丢的 currency CNY（USD 保留）');
+    assertTruthy(!r2.droppedOwnPairs[0].includes('USD'), 'dropped 不含保留的 currency USD');
+
+    // case 3：多个 own 都完全冲突 → droppedOwnPairs 应有 2 条
+    const r3 = mergeWithDedupe(
+      [
+        { merchantId: 'A', currencies: ['CNY'] },
+        { merchantId: 'B', currencies: ['USD'] }
+      ],
+      [
+        { merchantId: 'A', currencies: ['CNY'] },
+        { merchantId: 'B', currencies: ['USD'] },
+        { merchantId: 'C', currencies: ['EUR'] }   // 无冲突 → 保留
+      ]
+    );
+    assertEqual(r3.droppedOwnPairs.length, 2, '2 个完全冲突 → 2 条 dropped');
+    assertEqual(r3.mergedAccounts.length, 3, 'merged 应含 2 client + 1 own (C/EUR)');
+
+    // case 4：无冲突 → droppedOwnPairs 应为空
+    const r4 = mergeWithDedupe(
+      [{ merchantId: 'A', currencies: ['CNY'] }],
+      [{ merchantId: 'B', currencies: ['USD'] }]
+    );
+    assertEqual(r4.droppedOwnPairs.length, 0, '无冲突 → 0 条 dropped');
+
+    return 'droppedOwnPairs 4 条决策表：完全冲突 1/部分冲突 1（带标记）/多冲突 2/无冲突 0';
+  });
+
+  // --- P0-F12：saveMappings preserveOwn=true 跳 own 行 + warn（Round 6 self-review I2 修复） ---
+  // I2 修复让 caller 误传 own 行时打 warn（不静默）。本用例验证：
+  //   1. caller 误传 own 不撞 UNIQUE 约束（已通过 P0-F8）
+  //   2. console.warn 被调用且含跳过的 (merchantId, currency) 列表
+  runCase('P0-F12', 'P0', 'saveMappings preserveOwn=true caller 误传 own 触发 warn（I2 修复）', () => {
+    const ctx = createSingleTemplateCtx({ bigAccounts: [] });
+    try {
+      // 拦截 console.warn
+      const originalWarn = console.warn;
+      const warnCalls = [];
+      console.warn = (...args) => warnCalls.push(args.join(' '));
+
+      try {
+        ctx.db.saveMappings(
+          ctx.template.id,
+          [{ templateField: 'MerchantId', mappedField: '摘要' }],
+          [{ merchantId: 'OWN_PRE', currency: 'CNY', accountNature: 'own' }]
+        );
+        // caller 误传 own 行 + preserveOwn=true → I2 期望打 warn
+        ctx.db.saveMappings(
+          ctx.template.id,
+          [{ templateField: 'MerchantId', mappedField: '摘要' }],
+          [
+            { merchantId: 'C_NEW', currency: 'CNY', accountNature: 'client' },
+            { merchantId: 'OWN_PRE', currency: 'CNY', accountNature: 'own' },
+            { merchantId: 'OWN_OTHER', currency: 'USD', accountNature: 'own' }
+          ],
+          [],
+          undefined,
+          null,
+          { preserveOwn: true }
+        );
+
+        // 验证 warn 被调用，含跳过的 (mid/cur) 列表
+        const matched = warnCalls.find((w) => w.includes('preserveOwn=true') && w.includes('防御性跳过'));
+        assertTruthy(matched, '应有 warn 含 "preserveOwn=true...防御性跳过"');
+        assertTruthy(matched.includes('OWN_PRE/CNY'), 'warn 含 OWN_PRE/CNY 标识');
+        assertTruthy(matched.includes('OWN_OTHER/USD'), 'warn 含 OWN_OTHER/USD 标识');
+        assertTruthy(matched.includes('2 个 own'), 'warn 含数量 "2 个 own"');
+
+        // 验证数据库不撞 UNIQUE 约束（OWN_PRE 保留 + C_NEW 新增）
+        const rows = ctx.db.db.prepare(
+          "SELECT merchant_id, account_nature FROM template_big_accounts WHERE template_id=? ORDER BY merchant_id"
+        ).all(ctx.template.id);
+        assertEqual(rows.length, 2, '应 2 条（OWN_PRE 保留 + C_NEW 新增；OWN_OTHER 被跳过）');
+        return `warn 含 2 条 own 跳过明细; 数据库 2 条（client 1 + 已存 own 1）`;
+      } finally {
+        console.warn = originalWarn;
+      }
+    } finally {
+      cleanupCtx(ctx);
+    }
   });
 
   // --- P0-F9：子弹窗重开 mapping dialog 时 bigAccountsLoadedWithOwn 显式透传（Codex Round 4 defensive） ---

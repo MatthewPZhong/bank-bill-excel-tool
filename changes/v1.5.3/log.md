@@ -1086,3 +1086,104 @@ P1 通过: 5/6 (P1-7 skipped: 错误报告为 txt 格式（非 xlsx），无字�
 2. push v1.5.x → origin
 3. PR #22 评论 `@codex review` 触发 round 6
 4. 等 Codex round 6；若 clean → 等用户决定合并
+
+---
+
+## 2026-04-23 Dev — Self-Review Round 6（Critical 1 + Important 2 修复）
+
+> Round 5 修复后用户要求 Dev 自审；Dev 用 reviewer 视角对累计 round 1-5 改动做 self-review，按 Critical / Important / Minor 分级；用户确认"一起修"后落地 1 Critical + 2 Important（其中 I3 横向核对后无需改代码）。
+
+### Self-Review 摘要
+
+| 级别 | ID | 描述 |
+|------|----|------|
+| Critical | C1 | F8 dedupe 后 own 静默丢失（仅 console.warn）→ 升级为 setStatus 错误级 toast |
+| Important | I1 | F8 后 saveMappings 仍会删数据库已存的 own（非本轮 bug，是 import-bank-info 覆盖式语义）→ **本轮记 spec / 不改代码** |
+| Important | I2 | F5 preserveOwn=true 防御性跳 own 行无 caller 反馈 → 加 console.warn 含跳过明细 |
+| Important | I3 | F4 lookup 一致性未横向 grep → **核对后只有 :3173 一处，其他链路用 list / 不假定唯一，无需改** |
+| Minor | M1-M4 | 测试覆盖 / 性能 / spec 同步 / commit 长度 — 本轮仅顺手补回归 |
+
+### 缺陷复盘
+
+#### C1 — F8 dedupe 后 own 静默丢失
+
+- 链路：
+  - 用户从 Excel 导入大账号 → import-bank-info 解析 → clientAccounts + ownAccounts
+  - F8 round 5 修复：按 (merchantId, currency) dedupe，client 优先；丢弃的 own 仅 console.warn
+  - **问题**：console.warn 仅 DevTools 可见 → 生产用户在状态栏看到 success → 完成 → 实际有 own 行被丢
+  - 这是与 Codex round 1 同质问题（silent data loss）的新变种
+- 严重程度：**Critical**（用户感知缺失 + 可能资金风险）
+
+#### I2 — preserveOwn=true 跳 own 静默 return
+
+- 位置：`template-repository.js:477` 防御性 `return` 跳 own 行（避免撞 UNIQUE）
+- 问题：caller 不知道有数据没入库；如果未来有人误以为 preserveOwn=true 也能加 own 会困惑
+- 严重程度：Important（防御 + 排障可见性）
+
+#### I3 — 横向 lookup 一致性
+
+- 核对范围：`grep -rn "new Map.*merchantId"` 全代码库
+- 结果：唯一引用是 `main.js:3175` 的注释（解释旧 bug）
+- 其他链路（`pendingContext.bigAccounts.allMerchantIds` 等）用 list 而非 Map，不假定 merchantId 唯一
+- 结论：**无需改代码**，已记录核对依据
+
+### 修复方案
+
+#### C1 — droppedOwnPairs 升级为 setStatus 'error'
+
+- `src/renderer-dialogs.js:2258-2270`：
+  - 保留 console.warn 作为 DevTools 排障线（不删）
+  - 新增 setStatus 分支：`droppedOwnPairs.length > 0` → `setStatus("...; ⚠ 检测到 N 个自有账号与客资重复...请核对 Excel 源数据是否分类正确", 'error')`
+  - 选 'error' 而非 'warning' 是因为状态栏 'warning' 没有专用 tone（未实现），用 'error' 让用户必须主动注意
+
+#### I2 — saveMappings 跳 own 加 warn 含明细
+
+- `src/backend/database/template-repository.js:472-498`：
+  - 在循环内收集 `skippedOwnRows` 数组（含 `mid/cur` 标识）
+  - 循环结束后，如有跳过 → console.warn（含数量 + 明细）
+  - 不 throw（caller 可能是 batch import / bundle，不能阻塞写入）
+
+### 涉及文件
+
+| 文件 | 改动类型 | 说明 |
+|------|---------|------|
+| `src/renderer-dialogs.js` | 修改 | C1 — droppedOwnPairs > 0 时升级为 setStatus 'error'，含丢弃明细 |
+| `src/backend/database/template-repository.js` | 修改 | I2 — saveMappings 收集 skippedOwnRows 并 warn 含明细 |
+| `scripts/test-v1.5.3-regression.js` | 修改 | 新增 P0-F11（droppedOwnPairs 4 条决策表）+ P0-F12（saveMappings preserveOwn=true warn 拦截测试） |
+
+### 验证证据
+
+```
+[P0-F11] ✅ dedupe droppedOwnPairs 计数与明细正确（C1 修复）
+[P0-F12] ✅ saveMappings preserveOwn=true caller 误传 own 触发 warn（I2 修复） — warn 含 2 条 own 跳过明细; 数据库 2 条（client 1 + 已存 own 1）
+
+=== 总计 ===
+P0 通过: 30/30
+P1 通过: 5/6 (P1-7 skipped: 错误报告为 txt 格式（非 xlsx），无字体可验)
+失败用例: 无
+```
+
+- `node scripts/test-v1.5.3-regression.js`：P0 30/30（含新增 P0-F11/F12）+ P1 5/6 + 1 skip
+- `npm run smoke`：pass
+- 所有既有用例 + Round 1-5 P0-F1~F10 + Round 1-5 字体 / 浮点精度 / R1 / R2 全部通过
+
+### I1 推迟决策（spec 记录，非本轮修）
+
+**问题**：F8 dedupe 后 saveMappings 仍会删数据库其他 own。
+- 链路：维护大账号 → 从 Excel 导入 → tbody 替换为 mergedAccounts → onDone → mapping dialog 重开（loadedWithOwn=true）→ 保存 → preserveOwn=false → DELETE all + INSERT mergedAccounts → **数据库已存的、不在 Excel 范围的 own 被删**
+- 这是 import-bank-info **覆盖式**语义的既有行为（v1.5.3 之前 import-bank-info 只 ownAccounts，行为也是覆盖；新增 client+own merge 后覆盖语义未变）
+- **决策**：本轮不改，下版本（v1.5.4 或更晚）由 PM 决策语义 — 是否改成 "merge 模式"（保留数据库已存 own）
+
+### 风险 / 决策
+
+- **C1 行为变更**：原 `success` 状态文案 + console.warn → 新 `error` 状态文案（含明细）。trade-off 选了"用户必须主动注意"（PRD §3.1 自有账号是资金链路相关）
+- **I2 行为变更**：caller 误传 own 时新增 warn 输出（不影响数据写入）— 仅影响 DevTools console 输出，无业务影响
+- **I3 不改代码**：横向核对结论已记录在 log，未来如有新增 lookup 链路，参照 `:3173` 模式
+- **未拆 PR**：C1/I2 仍属 v1.5.3 R2 收口范围
+
+### 下一步
+
+1. commit `fix(v1.5.3): self-review round 6 — C1 silent loss + I2 defensive warn`
+2. push v1.5.x → origin
+3. PR #22 评论 `@codex review` 触发 round 7
+4. 等 Codex round 7；若 clean（0 finding 或仅 👍）→ 等用户决定合并

@@ -469,12 +469,16 @@ function saveMappings(
       );
     });
 
+    // v1.5.3 R2 round 6 self-review (I2)：跟踪 preserveOwn=true 时被防御性跳过的 own 行
+    // 用于在循环结束后打 warn，让 caller / 排障人员感知（不是静默 return）
+    const skippedOwnRows = [];
     bigAccounts.forEach((item, index) => {
       // v1.5.3 R2：account_nature 仅接受 'client' / 'own'；缺省或非法 → 'client'
       const rawNature = normalizeText(item.accountNature);
       const accountNature = rawNature === 'own' ? 'own' : 'client';
       // preserveOwn=true 时 caller 应只传 client 行；防御性跳过 own 行避免与已存的 own 冲突 (UNIQUE 约束)
       if (preserveOwn && accountNature === 'own') {
+        skippedOwnRows.push(`${normalizeText(item.merchantId)}/${normalizeText(item.currency)}`);
         return;
       }
       insertBigAccountStatement.run(
@@ -487,6 +491,12 @@ function saveMappings(
         now
       );
     });
+    if (skippedOwnRows.length > 0) {
+      // 不 throw，因为 caller 可能是 batch import / bundle 误传 own 行；warn 让排障可见但不阻塞写入
+      console.warn(
+        `[v1.5.3] saveMappings(preserveOwn=true) 防御性跳过 ${skippedOwnRows.length} 个 own 行（caller 应只传 client）：${skippedOwnRows.join(', ')}`
+      );
+    }
 
     fixedAssignments.forEach((item, index) => {
       const merchantId = normalizeText(item.merchantId);

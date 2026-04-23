@@ -2255,6 +2255,8 @@
           });
           remainingCurrencies.forEach((c) => seenByPair.add(`${merchantId}::${String(c || '').trim()}`));
         });
+        // v1.5.3 R2 round 6 self-review (C1)：dedupe 丢弃的 own 升级为状态栏 warning（含具体丢失明细），
+        // 避免 console.warn 静默 — 让用户在保存前能感知并修正 Excel 源
         if (droppedOwnPairs.length > 0) {
           console.warn(`[v1.5.3] import-bank-info dedupe: 自有账号与客资重复，已保留客资，丢弃 own 项: ${droppedOwnPairs.join('; ')}`);
         }
@@ -2265,7 +2267,16 @@
             tbody.appendChild(createBigAccountRow(item, 'view'));
           });
         }
-        setStatus(result.message, 'success');
+        if (droppedOwnPairs.length > 0) {
+          // 状态栏告警：保留 import-bank-info 的 success message + 追加 dedupe 提示
+          // 用户在 DevTools / 状态栏都能感知（控制台不行就靠 toast）
+          setStatus(
+            `${result.message}；⚠ 检测到 ${droppedOwnPairs.length} 个自有账号与客资重复，已保留客资并丢弃 own：${droppedOwnPairs.join('；')}。请核对 Excel 源数据是否分类正确`,
+            'error'
+          );
+        } else {
+          setStatus(result.message, 'success');
+        }
       });
       dialog.querySelector('[data-action="balance-management"]').addEventListener('click', async () => {
         cleanupFloatingDropdown();
