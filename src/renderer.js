@@ -98,6 +98,8 @@ const state = {
     latestRunResult: null,
     latestRunId: null,
     importing: false,
+    importingText: null,
+    currentYearMonth: null,
     running: false,
     runningText: null,
     errorReportAvailable: false,

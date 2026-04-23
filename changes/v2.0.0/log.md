@@ -273,3 +273,52 @@
 - changed 行的 31 原列用**lower 版本**（新值），`_before` 是 upper / `_after`
   是 lower；new 行 31 列用 lower，`_before`/`_after` 都空；missing 行 31
   列用 upper，`_before`/`_after` 都空
+
+---
+
+### T10 完成（状态框完整流 + 报错链路文案对齐 + 资金敏感 bug 修复）
+
+**动作**：
+- `src/renderer-pending.js`:
+  - `computePendingStatusText` 报错分支改 `{errorMessage}，点击导出报错文件。`（对齐 PRD §5.4.8）
+  - `refreshPendingUi` 把不存在的 class `pending-status-clickable` 改成
+    项目已约定的 `is-clickable`（styles.css:361）；新增 `data-tone` 联动
+    (error / success)，视觉反馈到状态栏边框色（复用 styles.css:369,374 约定）
+  - `startImport` 成功文案对齐 PRD: `{YYYY-MM} 数据已导入（N 行）。旧数据已留底。`
+  - `summarizeErrors` 分类细化（fatal 表头 → PRD 标准文案 /
+    row 重复行 → PRD 标准文案 / row 资金类型不合法 / 其他 row 回退）
+  - `runReconciliation` 对账完成文案对齐 PRD §5.5.6：
+    `...找出 N 条差异（X/Y/Z），可点击"导出差异"另存。`
+  - `onImportProgress` 文案修正（原误码 `${state.pending.importing ? '' : ''}`）
+    → `正在导入 {YYYY-MM}：{file}（已处理 N 行）`
+  - state.pending 加 `currentYearMonth` 字段供 progress 事件消费
+- `src/renderer.js` state.pending 初始化补 `importingText / currentYearMonth`
+- `src/backend/pending-db/diff-repository.js` **⚠️ 资金敏感修复**：
+  - listAllRuns / listRunsForMonthPair / getLatestRunForMonthPair 的
+    `ORDER BY created_at DESC` 加 `, id DESC` tie-breaker
+  - 原因：`new Date().toISOString()` 毫秒精度；同毫秒多 run 时
+    `ORDER BY created_at DESC` 不稳定 → 用户"导出最新 run"可能误取旧 run
+  - 影响面：历史 run 的排序一致性；修完**减小风险**（无破坏）
+  - 发现方式：pending-reconcile 测试 T4 偶发失败（之前 T7 commit 时可能刚好时间分布到不同毫秒没触发）
+
+**验证**：
+- `node --check` 所有改动文件绿
+- `npm run test:v2.0.0:pending-reconcile` **连跑 5 次全部 23/23**（flaky 消失）
+- `npm run test:v2.0.0:pending-import` 21/21
+- `npm run test:v2.0.0:pending-session` 19/19
+- `npm run test:v2.0.0:pending-export` 22/22
+- `npm run smoke` 通过
+
+**check-vars T10**：
+- Runtime-state: `state` / `elements` 命中，纯扩展无破坏
+- 非清单但**资金敏感**：`diff-repository.js` ORDER BY tie-breaker — 已在代码注释里写清
+- 无 Critical / Important-skeleton / Risk-sensitive 清单命中
+
+**偏离 PRD / 决策记录**：
+- PRD §5.4.8 "导入中文案"写的是 `正在导入 {YYYY-MM}，预计 {X} 秒...` 带预计时间
+  - 当前实现**不含预计时间**（改为显示已处理行数）
+  - 理由：xlsx 解析阶段无法预测 rowCount（需读完才知道），硬给数字会误导
+  - 如后续要加，可在 worker 首次 progress 上报 totalRows 后再做外推，视为可选增强
+- PRD §5.4.8 "行级冲突报错文案" `{N} 条重复行，[点击导出报错文件]` 方括号是 UI 交互提示
+  - 实现用"，点击导出报错文件。"（纯文本 + CSS `is-clickable` 鼠标手势反馈）
+  - 理由：状态栏不方便渲染真正的链接按钮；视觉反馈通过 `is-clickable` cursor + `data-tone=error` 边框色完成

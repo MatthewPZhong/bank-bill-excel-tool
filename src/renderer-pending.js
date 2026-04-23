@@ -43,7 +43,7 @@ window.__rendererPending = (function () {
       if (p.importing) return p.importingText || '正在导入...';
       if (p.running) return p.runningText || '正在对账...';
       if (p.errorReportAvailable) {
-        return `${p.errorMessage || '导入失败'}（点击导出报错文件）`;
+        return `${p.errorMessage || '导入失败'}，点击导出报错文件。`;
       }
       if (!p.rule || !p.rule.matchFields || p.rule.matchFields.length === 0) {
         return '初次使用请确认用来筛选的字段~';
@@ -64,7 +64,18 @@ window.__rendererPending = (function () {
 
     function refreshPendingUi() {
       setPendingStatus(computePendingStatusText());
-      elements.pendingStatusBox.classList.toggle('pending-status-clickable', !!state.pending.errorReportAvailable);
+      const box = elements.pendingStatusBox;
+      if (box) {
+        const p = state.pending;
+        box.classList.toggle('is-clickable', !!p.errorReportAvailable);
+        if (p.errorReportAvailable) {
+          box.dataset.tone = 'error';
+        } else if (!p.importing && !p.running && (p.lastImportSummary || p.latestRunResult)) {
+          box.dataset.tone = 'success';
+        } else {
+          delete box.dataset.tone;
+        }
+      }
 
       const hasRule = !!(state.pending.rule && state.pending.rule.matchFields && state.pending.rule.matchFields.length > 0);
       const hasMonths = state.pending.months && state.pending.months.length > 0;
@@ -303,6 +314,7 @@ window.__rendererPending = (function () {
 
     async function startImport(files, yearMonth, overwriteConfirmed) {
       state.pending.importing = true;
+      state.pending.currentYearMonth = yearMonth;
       state.pending.importingText = `正在导入 ${yearMonth}（${files.length} 个文件）...`;
       state.pending.errorReportAvailable = false;
       state.pending.errorMessage = null;
@@ -313,6 +325,7 @@ window.__rendererPending = (function () {
 
         if (result && result.status === 'need-confirm') {
           state.pending.importing = false;
+          state.pending.currentYearMonth = null;
           refreshPendingUi();
           openModal(createConfirmDialog({
             message: `${yearMonth} 已有 ${result.existingRowCount} 行 Pending 数据${result.existingImportedAt ? `（导入时间 ${result.existingImportedAt}）` : ''}。\n\n继续将留底旧数据到 pending-archives/ 并覆盖。`,
@@ -330,7 +343,10 @@ window.__rendererPending = (function () {
 
         if (result && result.status === 'success') {
           state.pending.importing = false;
-          state.pending.lastImportSummary = `${yearMonth} 导入成功（${result.rowCount} 行，来源 ${Array.isArray(result.sourceFiles) ? result.sourceFiles.length : 1} 个文件）${result.archivePath ? '。旧数据已留底' : ''}。`;
+          state.pending.currentYearMonth = null;
+          state.pending.lastImportSummary =
+            `${yearMonth} 数据已导入（${result.rowCount} 行）。` +
+            (result.archivePath ? '旧数据已留底。' : '');
           await loadMonths();
           refreshPendingUi();
           return;
@@ -340,11 +356,13 @@ window.__rendererPending = (function () {
         const errors = result && Array.isArray(result.errors) ? result.errors : [];
         const summary = summarizeErrors(errors);
         state.pending.importing = false;
+        state.pending.currentYearMonth = null;
         state.pending.errorReportAvailable = errors.length > 0;
         state.pending.errorMessage = summary;
         refreshPendingUi();
       } catch (err) {
         state.pending.importing = false;
+        state.pending.currentYearMonth = null;
         state.pending.errorReportAvailable = false;
         state.pending.errorMessage = null;
         refreshPendingUi();
@@ -355,12 +373,21 @@ window.__rendererPending = (function () {
     function summarizeErrors(errors) {
       if (!errors || errors.length === 0) return '导入失败';
       const fatal = errors.filter((e) => e.severity === 'fatal');
-      const row = errors.filter((e) => e.severity === 'row');
       if (fatal.length > 0) {
-        const first = fatal[0];
-        return `${first.message}${fatal.length > 1 ? `（还有 ${fatal.length - 1} 条同级错误）` : ''}`;
+        const headerErr = fatal.find((e) => /表头/.test(e.message || ''));
+        if (headerErr) return '表头字段不一致，请检查并重新导入';
+        return fatal[0].message || '导入失败';
       }
-      return `发现 ${row.length} 条行级错误`;
+      const row = errors.filter((e) => e.severity === 'row');
+      const dup = row.filter((e) => /重复行/.test(e.message || ''));
+      if (dup.length > 0 && dup.length === row.length) {
+        return `导入失败，发现 ${dup.length} 条重复行`;
+      }
+      const fundErr = row.filter((e) => /不合法/.test(e.message || ''));
+      if (fundErr.length === row.length && fundErr.length > 0) {
+        return `导入失败，发现 ${fundErr.length} 条 pending资金类型 值不合法`;
+      }
+      return `导入失败，发现 ${row.length} 条行级错误`;
     }
 
     async function handleStatusBoxClick() {
@@ -509,8 +536,8 @@ window.__rendererPending = (function () {
         } else {
           state.pending.latestRunResult =
             `对账完成：${lowerMonth} vs ${upperMonth} 找出 ${total} 条差异` +
-            `（${result.statNew || 0} 新增 / ${result.statMissing || 0} 消失 / ${result.statChanged || 0} 变更）。` +
-            '点击"导出差异"另存。';
+            `（${result.statNew || 0} 新增 / ${result.statMissing || 0} 消失 / ${result.statChanged || 0} 变更），` +
+            '可点击"导出差异"另存。';
         }
         state.pending.latestRunId = result.runId || null;
         refreshPendingUi();
@@ -740,11 +767,13 @@ window.__rendererPending = (function () {
       if (desktopApi && desktopApi.pending && typeof desktopApi.pending.onImportProgress === 'function') {
         desktopApi.pending.onImportProgress((ev) => {
           if (!ev || ev.type !== 'progress') return;
-          state.pending.importingText = `正在导入 ${state.pending.importing ? '' : ''}：${ev.file || ''}（${ev.rowsProcessed || 0} 行）`;
-          if (state.pending.importing) refreshPendingUi();
+          if (!state.pending.importing) return;
+          const ym = state.pending.currentYearMonth || '';
+          state.pending.importingText =
+            `正在导入 ${ym}：${ev.file || ''}（已处理 ${ev.rowsProcessed || 0} 行）`;
+          refreshPendingUi();
         });
       }
-      // T7 / T8 / T9 绑定对账 / 导出按钮
     }
 
     return {

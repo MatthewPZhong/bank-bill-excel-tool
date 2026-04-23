@@ -38,13 +38,15 @@ function getRunById(db, runId) {
   return mapRun(db.prepare('SELECT * FROM diff_runs WHERE id = ?').get(runId));
 }
 
+// created_at 是 ISO-8601 毫秒精度；同毫秒多 run 时用 id DESC 做 tie-breaker
+// （资金敏感：防止"最新 run"取错导致用户导出错数据）
 function listAllRuns(db) {
-  return db.prepare('SELECT * FROM diff_runs ORDER BY created_at DESC').all().map(mapRun);
+  return db.prepare('SELECT * FROM diff_runs ORDER BY created_at DESC, id DESC').all().map(mapRun);
 }
 
 function listRunsForMonthPair(db, upperMonth, lowerMonth) {
   return db
-    .prepare('SELECT * FROM diff_runs WHERE upper_month = ? AND lower_month = ? ORDER BY created_at DESC')
+    .prepare('SELECT * FROM diff_runs WHERE upper_month = ? AND lower_month = ? ORDER BY created_at DESC, id DESC')
     .all(upperMonth, lowerMonth)
     .map(mapRun);
 }
@@ -52,7 +54,7 @@ function listRunsForMonthPair(db, upperMonth, lowerMonth) {
 function getLatestRunForMonthPair(db, upperMonth, lowerMonth) {
   return mapRun(
     db
-      .prepare('SELECT * FROM diff_runs WHERE upper_month = ? AND lower_month = ? ORDER BY created_at DESC LIMIT 1')
+      .prepare('SELECT * FROM diff_runs WHERE upper_month = ? AND lower_month = ? ORDER BY created_at DESC, id DESC LIMIT 1')
       .get(upperMonth, lowerMonth)
   );
 }
