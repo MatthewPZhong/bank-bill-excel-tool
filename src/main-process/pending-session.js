@@ -143,9 +143,15 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
       }
 
       if (electronUtilityProcess) {
-        // Electron 路径：utilityProcess.fork → 真正 Node.js 子进程，execArgv 里 V8 flag 生效
+        // Electron 路径：utilityProcess.fork → 真正 Node.js 子进程
+        // 同时传 execArgv（经 Node 启动行参）和 NODE_OPTIONS（运行时 env）双保险
+        // 避免 Electron 某版本把其中一条路径过滤掉
         const worker = electronUtilityProcess.fork(WORKER_SCRIPT, [JSON.stringify(jobMeta)], {
           execArgv: [`--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`],
+          env: {
+            ...process.env,
+            NODE_OPTIONS: `--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`
+          },
           stdio: 'pipe'
         });
         worker.stdout.on('data', onStdoutChunk);

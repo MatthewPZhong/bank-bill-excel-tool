@@ -12,6 +12,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const v8 = require('node:v8');
 const ExcelJS = require('exceljs');
 const { DatabaseSync } = require('node:sqlite');
 
@@ -27,6 +28,15 @@ const MAX_ROW_ERRORS_EMITTED = 1000;
 function emit(event) {
   process.stdout.write(JSON.stringify(event) + '\n');
 }
+
+// 诊断：启动时把 heap 限制写到 stderr，便于排查 --max-old-space-size 是否生效
+const heapStats = v8.getHeapStatistics();
+process.stderr.write(
+  `[worker-boot] heap_size_limit=${(heapStats.heap_size_limit / 1024 / 1024).toFixed(0)} MB ` +
+  `exec=${process.execPath} ` +
+  `execArgv=${JSON.stringify(process.execArgv)} ` +
+  `NODE_OPTIONS=${process.env.NODE_OPTIONS || '(none)'}\n`
+);
 
 function loadJobMeta() {
   const raw = process.argv[2];
