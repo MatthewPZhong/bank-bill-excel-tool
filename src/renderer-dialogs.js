@@ -3253,11 +3253,15 @@
         const draftMappings = collectMappingDraftFromTable(tbody);
 
         const saveMappings = async (mappings) => {
+          // v1.5.3 R2 round 3 (Codex Finding 5)：透传 preserveOwn
+          // bigAccountsLoadedWithOwn=false（用户没打开维护大账号）→ draftBigAccounts 是 client-only → preserveOwn=true 保留 own
+          // bigAccountsLoadedWithOwn=true（已 await getWithOwn 含 own 全集）→ preserveOwn=false 让 caller 全权（含主动删除 own）
           const result = await desktopApi.templates.saveMappings({
             templateId: payload.template.id,
             mappings,
             bigAccounts: draftBigAccounts,
-            fixedAssignments: currentFixedAssignments
+            fixedAssignments: currentFixedAssignments,
+            preserveOwn: !bigAccountsLoadedWithOwn
           });
 
           setStatus(result.message, result.status === 'success' ? 'success' : 'error', {

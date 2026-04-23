@@ -3664,12 +3664,18 @@ function registerTemplateHandlers() {
         }
       }
 
+      // v1.5.3 R2 round 3 (Codex Finding 5)：透传 preserveOwn
+      // 默认 false（向后兼容旧行为：DELETE all + INSERT all，caller 接管 own 全集）
+      // 仅当前端显式传 preserveOwn=true（即维护大账号没被打开过 → bigAccountsLoadedWithOwn=false → currentBigAccounts 是 client-only）才走 DELETE-client-only 保留 own 路径
+      const preserveOwn = payload.preserveOwn === true;
       database.saveMappings(
         payload.templateId,
         templateConfiguration.mappings,
         templateConfiguration.bigAccounts,
         templateConfiguration.fixedAssignments,
-        payload.dateFormat
+        payload.dateFormat,
+        null,
+        { preserveOwn }
       );
       syncTemplateLibraryFile();
       clearLastErrorReport();
@@ -3966,13 +3972,16 @@ function registerTemplateHandlers() {
                 .filter((rule) => rule.targetField && rule.conditionField && rule.mappedField)
             : [];
 
+          // bundle 导入：bigAccounts 来自 bundle 全量（listTemplateBundleEntries 导出时已含 own，见 :884）
+          // preserveOwn=false → DELETE all + INSERT all，确保 bundle 是权威全集，旧 own 被覆盖
           database.saveMappings(
             template.id,
             validated.mappings,
             validated.bigAccounts,
             validated.fixedAssignments,
             entry.dateFormat,
-            normalizedAmountSplitRules
+            normalizedAmountSplitRules,
+            { preserveOwn: false }
           );
 
           // v1.5.2 需求 3：透传文件名固定字段（老 bundle 无此字段时落为空串）

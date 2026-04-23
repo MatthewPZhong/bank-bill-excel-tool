@@ -404,6 +404,13 @@ function getTemplateMappings(db, templateId) {
   };
 }
 
+// v1.5.3 R2 round 3 修复 (Codex Finding 5)：
+// 用户在 mapping dialog 直接保存（不开维护大账号）时，前端 currentBigAccounts 来自 §3.1 过滤后的 client-only 列表，
+// 旧 saveMappings 直接 DELETE all + INSERT all → 数据库 own 被静默删除。
+// 修复：新增 `preserveOwn` 参数（默认 false 保持向后兼容旧行为；仅 mapping dialog 显式传 true 才生效）：
+//   - false（默认 = 旧行为）→ DELETE all + INSERT all（caller 已显式接管 own，传含 own 全集；如 bundle 导入 / mapping dialog onDone 含 own 路径）
+//   - true → DELETE 只删 client，INSERT 仅接收 client 行（own 不动；caller 是 mapping dialog 直接保存路径）
+// 调用方约定：bigAccountsLoadedWithOwn=false → preserveOwn=true；=true → preserveOwn=false
 function saveMappings(
   db,
   templateId,
@@ -411,14 +418,20 @@ function saveMappings(
   bigAccounts = [],
   fixedAssignments = [],
   dateFormat,
-  amountSplitRules = null
+  amountSplitRules = null,
+  { preserveOwn = false } = {}
 ) {
   const now = new Date().toISOString();
   db.exec('BEGIN');
 
   try {
     db.prepare('DELETE FROM template_mappings WHERE template_id = ?').run(templateId);
-    db.prepare('DELETE FROM template_big_accounts WHERE template_id = ?').run(templateId);
+    if (preserveOwn) {
+      // 仅删 client；own 保留（caller 没接管 own）
+      db.prepare("DELETE FROM template_big_accounts WHERE template_id = ? AND account_nature = 'client'").run(templateId);
+    } else {
+      db.prepare('DELETE FROM template_big_accounts WHERE template_id = ?').run(templateId);
+    }
     db.prepare('DELETE FROM template_fixed_assignments WHERE template_id = ?').run(templateId);
 
     const insertMappingStatement = db.prepare(`
@@ -460,6 +473,10 @@ function saveMappings(
       // v1.5.3 R2：account_nature 仅接受 'client' / 'own'；缺省或非法 → 'client'
       const rawNature = normalizeText(item.accountNature);
       const accountNature = rawNature === 'own' ? 'own' : 'client';
+      // preserveOwn=true 时 caller 应只传 client 行；防御性跳过 own 行避免与已存的 own 冲突 (UNIQUE 约束)
+      if (preserveOwn && accountNature === 'own') {
+        return;
+      }
       insertBigAccountStatement.run(
         templateId,
         item.merchantId,

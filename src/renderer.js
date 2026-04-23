@@ -2790,6 +2790,13 @@ async function handleExportBalance() {
       setStatus(result.message || '月度余额账单导出成功', 'success', { errorReportReady: false });
       return;
     }
+    // v1.5.3 R1 round 3 (Codex Finding 6)：
+    // 后端 session 丢失（临时文件被清 / lastGeneratedExports.monthlyBalance 已 reset）→ reset 前端 ready 状态，
+    // 让用户下次点击重新弹 assemble 对话框，而不是反复打到失败 export 分支
+    if (result.errorCode === 'MONTHLY_BALANCE_NO_PENDING' || result.errorCode === 'MONTHLY_BALANCE_FILE_MISSING') {
+      state.monthlyBalanceReady = false;
+      state.monthlyBalancePreview = null;
+    }
     setStatus(result.message || '月度余额账单导出失败', 'error', {
       errorReportReady: Boolean(result.errorReportReady)
     });

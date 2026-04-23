@@ -209,7 +209,8 @@ class AppDatabase {
     return templateRepository.getTemplateMappings(this.db, templateId);
   }
 
-  saveMappings(templateId, mappings, bigAccounts = [], fixedAssignments = [], dateFormat, amountSplitRules = null) {
+  // v1.5.3 R2 round 3：options.preserveOwn 透传到 repository（默认 true，调用方未显式接管 own 时保留 own）
+  saveMappings(templateId, mappings, bigAccounts = [], fixedAssignments = [], dateFormat, amountSplitRules = null, options = {}) {
     return templateRepository.saveMappings(
       this.db,
       templateId,
@@ -217,7 +218,8 @@ class AppDatabase {
       bigAccounts,
       fixedAssignments,
       dateFormat,
-      amountSplitRules
+      amountSplitRules,
+      options
     );
   }
 

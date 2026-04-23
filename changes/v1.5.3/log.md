@@ -834,3 +834,99 @@ P1 通过: 5/6 (P1-7 skipped)
 2. push v1.5.x → origin
 3. PR #22 评论 `@codex review` 触发 round 3
 4. 等 Codex round 3 反馈；若 clean → 等用户决定合并节奏（按 `workflow_no_tester_no_auto_pr`）
+
+---
+
+## 2026-04-23 Dev — Codex Review Round 3（2 条 finding 修复 + 1 次自纠）
+
+> Round 2 修复后触发 Codex round 3 review，发现 2 条新 finding：
+> - **F5**（Round 1 修复盲点 — 资金风险）：`createMappingDialog` 用 `payload.bigAccounts`（不含 own）初始化 `currentBigAccounts`。**用户改非大账号 mapping 后不开维护大账号直接保存** → saveMappings DELETE all + INSERT client-only → **数据库 own 被静默删除**。Codex round 1 原话其实早提示过 "(or the save path must preserve omitted own rows)"
+> - **F6**（R1 体验 bug）：`monthly-balance:export` 返回 session-loss 错误码（`MONTHLY_BALANCE_NO_PENDING` / `FILE_MISSING`）时只更新状态文字，`state.monthlyBalanceReady` 不重置 → 用户卡死必须切换模式才能重新 assemble
+
+### 缺陷复盘
+
+#### F5 — saveMappings 直接保存路径丢 own
+
+- 链路：
+  - 用户从模板管理 click → `desktopApi.templates.getMappings` → payload.bigAccounts (§3.1 过滤 own)
+  - createMappingDialog 用 payload.bigAccounts 初始化 `currentBigAccounts` → 不含 own，`bigAccountsLoadedWithOwn=false`
+  - 用户改一个非大账号 mapping（如 Date 字段）→ 直接点保存
+  - `desktopApi.templates.saveMappings({ bigAccounts: cloneBigAccountItems(currentBigAccounts) })` → 传的是 client-only
+  - `database.saveMappings` 先 DELETE all big_accounts，再 INSERT client-only → **own 被静默删除**
+- 严重程度：Critical（资金 + 静默 + 用户无感知）
+
+#### F6 — monthly export session loss 后 ready 状态卡住
+
+- 链路：
+  - 用户 assemble 月度余额（`monthlyBalance.assemble`）→ 后端 `lastGeneratedExports.monthlyBalance` 暂存 → 前端 `state.monthlyBalanceReady=true`
+  - 用户切换模式 → 切回月度 → 后端 `lastGeneratedExports.monthlyBalance=null`（被另一次 assemble 覆盖 / 重启等）
+  - 用户点导出 → `monthlyBalance.export` 返回 `MONTHLY_BALANCE_NO_PENDING`
+  - 旧代码只 setStatus 错误，**state.monthlyBalanceReady 不变**
+  - 用户继续点 → 仍走 `if (state.monthlyBalanceReady) export()` 分支 → 仍失败
+  - 用户卡死，必须手动切换两次模式才能触发 assemble 弹窗
+
+### 修复方案
+
+#### F5 — `preserveOwn` 参数
+
+- `src/backend/database/template-repository.js saveMappings`：
+  - 函数签名加第 8 参数 `{ preserveOwn = false } = {}`，**默认 false 保持向后兼容旧行为**
+  - `preserveOwn=true` 时改为 `DELETE WHERE template_id=? AND account_nature='client'`（仅删 client）
+  - `preserveOwn=true` 时 INSERT 防御性跳过 `accountNature==='own'` 行（避免 caller 误传 own 撞 UNIQUE 约束）
+- `src/backend/database.js`：facade `saveMappings` 透传第 8 参数 options
+- `src/main.js template:save-mappings handler`：`const preserveOwn = payload.preserveOwn === true;`（仅显式 true 才生效，不传 / false 走旧行为）；同时在 `:3984` bundle 导入路径显式传 `{ preserveOwn: false }` 让代码意图明确（虽然默认值已是 false）
+- `src/renderer-dialogs.js saveMappings`：调用 IPC 时透传 `preserveOwn: !bigAccountsLoadedWithOwn`：
+  - `bigAccountsLoadedWithOwn=false`（用户没开维护大账号 → currentBigAccounts client-only）→ `preserveOwn=true` 保留 own
+  - `bigAccountsLoadedWithOwn=true`（用户开过维护大账号 → currentBigAccounts 含 own 全集）→ `preserveOwn=false` 让 caller 全权（含主动删除 own）
+
+#### F6 — monthly export 失败 reset ready 状态
+
+- `src/renderer.js handleExportBalance`（月度模式分支）：
+  - export 返回非 success / 非 cancelled 时检查 errorCode
+  - 若是 `MONTHLY_BALANCE_NO_PENDING` / `MONTHLY_BALANCE_FILE_MISSING` → reset `state.monthlyBalanceReady = false` + `state.monthlyBalancePreview = null`
+  - 用户下次点击 → 由于 `!state.monthlyBalanceReady` → 重新弹 assemble 对话框
+
+### 涉及文件
+
+| 文件 | 改动类型 | 说明 |
+|------|---------|------|
+| `src/backend/database/template-repository.js` | 修改 | `saveMappings` 加 `{ preserveOwn = false }` 参数；condition DELETE; INSERT 防御性跳 own |
+| `src/backend/database.js` | 修改 | facade `saveMappings` 透传 options |
+| `src/main.js` | 修改 | `template:save-mappings` handler 取 `payload.preserveOwn === true`；bundle 导入路径显式传 `{ preserveOwn: false }` |
+| `src/renderer-dialogs.js` | 修改 | mapping dialog `saveMappings` 调用透传 `preserveOwn: !bigAccountsLoadedWithOwn` |
+| `src/renderer.js` | 修改 | `handleExportBalance` 月度分支检测 session-loss errorCode → reset ready 状态 |
+| `scripts/test-v1.5.3-regression.js` | 修改 | Section 4 新增 P0-F6 / P0-F7 / P0-F8 共 3 条 |
+
+### 实施过程中的自纠（坦白）
+
+- **初稿设计错误**：第一次实现时把 `preserveOwn` 默认值设为 `true`（"safer default — 不传都保留 own"），结果跑 regression 时 P0-11 / P0-F1 / P1-4 / P1-5 / P0-F6 / P0-F8 一片红 —— 因为已有用例调用 `ctx.db.saveMappings(...)` 不传 options，预期是 DELETE all + INSERT all（旧行为），新默认让 own 被防御性跳过 → 第一次写入 own 行直接丢失
+- **修正**：把默认改回 `false`，main.js handler 改为 `payload.preserveOwn === true`（仅显式 true 才生效），renderer-dialogs.js 仍显式传 `preserveOwn: !bigAccountsLoadedWithOwn`。语义更明确：**默认旧行为 = caller 接管 own；新行为是 opt-in**
+- **教训**：默认值的方向选择关乎"backward-compat" vs "safer fix"。这种语义上反向的参数应当 opt-in（默认旧行为）而非 opt-out
+
+### 验证证据
+
+```
+=== 总计 ===
+P0 通过: 26/26
+P1 通过: 5/6 (P1-7 skipped: 错误报告为 txt 格式（非 xlsx），无字体可验)
+失败用例: 无
+```
+
+- `node scripts/test-v1.5.3-regression.js`：P0 26/26（含新增 P0-F6/F7/F8）+ P1 5/6 + 1 skip
+- `npm run smoke`：pass
+- 其他既有用例 + Round 1/Round 2 P0-F1~F5 全部不受影响
+- F6 属 UI 状态决策，自动化无法跑（需要 main 进程 / Electron），由 user 手动 P0-22 验证：assemble → 切模式回 → 点导出 → 报错 → 再点导出 → 应弹 assemble 对话框（无需手动切换模式）
+
+### 风险 / 决策
+
+- **资金风险**：F5 是关键资金 bug，修复后通过 P0-F6（preserveOwn=true 保留 own）+ P0-F7（preserveOwn=false 全权）+ P0-F8（防御性跳 own 行不撞 UNIQUE）三角验证
+- **API 兼容**：默认 `preserveOwn=false` 保持向后兼容；其他 caller（bundle 导入、未来第三方）不传字段则走旧行为
+- **F6 自动化盲区**：F6 用例 P0-F8 在 regression 没有，需要 user 手动验证 UI 流。已在测试交接说明
+- **未拆 PR**：F5/F6 都属于 v1.5.3 R2/R1 收口范围，不拆
+
+### 下一步
+
+1. commit `fix(v1.5.3): Codex review round 3 — 2 issues fixed`
+2. push v1.5.x → origin
+3. PR #22 评论 `@codex review` 触发 round 4
+4. 等 Codex round 4 反馈；若 clean（👍 reaction 或 0 finding）→ 等用户决定合并节奏

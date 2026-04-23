@@ -1024,6 +1024,131 @@ function casesR2FilterBundle() {
     return `merchantId M_X (client:CNY + own:USD) → 合并集 {CNY, USD}（修复）vs 旧 {USD}（bug）`;
   });
 
+  // --- P0-F6：preserveOwn=true 不删 own（Codex Round 3 Finding 5 修复） ---
+  // 背景：用户改非大账号 mapping 后直接保存（不开维护大账号），前端 currentBigAccounts 是 client-only。
+  //       旧 saveMappings 直接 DELETE all + INSERT all → own 被静默删除。
+  // 修复：saveMappings 加 preserveOwn 参数：true 时仅 DELETE client_only 行；caller 不传 own 时 own 不动。
+  runCase('P0-F6', 'P0', 'preserveOwn=true 不删 own（Finding 5 修复）', () => {
+    const ctx = createSingleTemplateCtx({ bigAccounts: [] });
+    try {
+      // 前置：写入 1 client + 1 own
+      ctx.db.saveMappings(
+        ctx.template.id,
+        [{ templateField: 'MerchantId', mappedField: '摘要' }],
+        [
+          { merchantId: 'C_X', currency: 'CNY', accountNature: 'client' },
+          { merchantId: 'OWN_X', currency: 'CNY', accountNature: 'own' }
+        ]
+      );
+
+      // 模拟"用户没开维护大账号直接保存"：传 client-only + preserveOwn=true
+      ctx.db.saveMappings(
+        ctx.template.id,
+        [{ templateField: 'MerchantId', mappedField: '日期' }],  // 改了 mappedField
+        [{ merchantId: 'C_X', currency: 'CNY', accountNature: 'client' }],
+        [],
+        undefined,
+        null,
+        { preserveOwn: true }
+      );
+
+      const rows = ctx.db.db.prepare(
+        "SELECT merchant_id, account_nature FROM template_big_accounts WHERE template_id=? ORDER BY merchant_id"
+      ).all(ctx.template.id);
+      assertEqual(rows.length, 2, 'preserveOwn=true 后应仍 2 条');
+      const own = rows.find((r) => r.merchant_id === 'OWN_X');
+      assertTruthy(own, 'OWN_X 应仍存在');
+      assertEqual(own.account_nature, 'own', 'OWN_X 仍是 own');
+
+      // 验证 mapping 也确实被更新（DELETE+INSERT mappings 仍生效）
+      const mappings = ctx.db.db.prepare(
+        "SELECT mapped_field FROM template_mappings WHERE template_id=? AND template_field='MerchantId'"
+      ).get(ctx.template.id);
+      assertEqual(mappings.mapped_field, '日期', 'mapping 应已更新为新值');
+      return 'preserveOwn=true 仅删 client + INSERT client；OWN_X 保留；mapping 同步更新';
+    } finally {
+      cleanupCtx(ctx);
+    }
+  });
+
+  // --- P0-F7：preserveOwn=false 全权（含主动删除 own）（Codex Round 3 Finding 5 — 互补） ---
+  runCase('P0-F7', 'P0', 'preserveOwn=false 全权（用户在维护大账号删 own）', () => {
+    const ctx = createSingleTemplateCtx({ bigAccounts: [] });
+    try {
+      // 前置：1 client + 2 own
+      ctx.db.saveMappings(
+        ctx.template.id,
+        [{ templateField: 'MerchantId', mappedField: '摘要' }],
+        [
+          { merchantId: 'C_Y', currency: 'CNY', accountNature: 'client' },
+          { merchantId: 'OWN_KEEP', currency: 'CNY', accountNature: 'own' },
+          { merchantId: 'OWN_DEL', currency: 'USD', accountNature: 'own' }
+        ]
+      );
+
+      // 模拟"用户开维护大账号 → 删除 OWN_DEL → 完成 → 保存"：
+      //   currentBigAccounts 含 OWN_KEEP（保留），不含 OWN_DEL（已删）
+      //   bigAccountsLoadedWithOwn=true → preserveOwn=false → DELETE all + INSERT incoming
+      ctx.db.saveMappings(
+        ctx.template.id,
+        [{ templateField: 'MerchantId', mappedField: '摘要' }],
+        [
+          { merchantId: 'C_Y', currency: 'CNY', accountNature: 'client' },
+          { merchantId: 'OWN_KEEP', currency: 'CNY', accountNature: 'own' }
+        ],
+        [],
+        undefined,
+        null,
+        { preserveOwn: false }
+      );
+
+      const rows = ctx.db.db.prepare(
+        "SELECT merchant_id, account_nature FROM template_big_accounts WHERE template_id=? ORDER BY merchant_id"
+      ).all(ctx.template.id);
+      assertEqual(rows.length, 2, 'preserveOwn=false 后应剩 2 条（OWN_DEL 已删）');
+      assertTruthy(!rows.some((r) => r.merchant_id === 'OWN_DEL'), 'OWN_DEL 应已被删除');
+      const ownKeep = rows.find((r) => r.merchant_id === 'OWN_KEEP');
+      assertTruthy(ownKeep && ownKeep.account_nature === 'own', 'OWN_KEEP 应保留为 own');
+      return 'preserveOwn=false 完整覆盖：保留 OWN_KEEP, 删除 OWN_DEL';
+    } finally {
+      cleanupCtx(ctx);
+    }
+  });
+
+  // --- P0-F8：preserveOwn=true 时 caller 误传 own 行被防御性跳过（Finding 5 互补防御） ---
+  runCase('P0-F8', 'P0', 'preserveOwn=true 时 caller 误传 own 不破坏 UNIQUE', () => {
+    const ctx = createSingleTemplateCtx({ bigAccounts: [] });
+    try {
+      ctx.db.saveMappings(
+        ctx.template.id,
+        [{ templateField: 'MerchantId', mappedField: '摘要' }],
+        [{ merchantId: 'OWN_PRE', currency: 'CNY', accountNature: 'own' }]
+      );
+      // caller 误传 own 行 + preserveOwn=true（如果不防御 → INSERT 'OWN_PRE'/'CNY'/'own' 跟已存 row 撞 UNIQUE）
+      ctx.db.saveMappings(
+        ctx.template.id,
+        [{ templateField: 'MerchantId', mappedField: '摘要' }],
+        [
+          { merchantId: 'C_NEW', currency: 'CNY', accountNature: 'client' },
+          { merchantId: 'OWN_PRE', currency: 'CNY', accountNature: 'own' }  // caller 错误地把 own 也传进来
+        ],
+        [],
+        undefined,
+        null,
+        { preserveOwn: true }
+      );
+      const rows = ctx.db.db.prepare(
+        "SELECT merchant_id, account_nature FROM template_big_accounts WHERE template_id=? ORDER BY merchant_id"
+      ).all(ctx.template.id);
+      assertEqual(rows.length, 2, '应有 2 条（OWN_PRE 保留 + C_NEW 新增）');
+      const ownPre = rows.find((r) => r.merchant_id === 'OWN_PRE');
+      assertTruthy(ownPre && ownPre.account_nature === 'own', 'OWN_PRE 不重复插入也不丢失');
+      return '防御性跳过 caller 误传的 own 行；OWN_PRE 仍 1 条不重复';
+    } finally {
+      cleanupCtx(ctx);
+    }
+  });
+
   // --- P0-F5：bigAccountsLoadedWithOwn 标记不覆盖 in-memory 编辑（Codex Round 2 Finding 3） ---
   // 背景：round 1 修复让 manage handler 总是 await getWithOwn 拿数据库版，覆盖了 currentBigAccounts；
   //       但 mapping dialog 内部再次打开 manage 时，currentBigAccounts 可能是上次维护大账号 onDone 的内存版
