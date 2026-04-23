@@ -8,7 +8,7 @@
 //   Section 1 — R1 资金装配（7 条）：P0-4 ~ P0-7、P0-10、P0-11、P1-3
 //   Section 2 — R1 IPC 校验层（2 条）：P0-8 / P0-9
 //   Section 3 — R2 迁移三态（3 条）：P0-13 / P0-14 / P0-15
-//   Section 4 — R2 过滤 / bundle + Finding 1 修复（4 条）：P1-4 / P1-5 / P0-F1 / P0-F2
+//   Section 4 — R2 过滤 / bundle + Codex 修复（7 条）：P1-4 / P1-5 / P0-F1 / P0-F2 / P0-F3 / P0-F4 / P0-F5
 //   Section 5 — R3 字体 XML 级验证（7 条）：P0-17 ~ P0-20、P1-6 / P1-7 / P1-8
 //   Section 6 — R4 账单合并浮点精度（3 条）：P0-R4-1 ~ P0-R4-3
 //
@@ -953,6 +953,96 @@ function casesR2FilterBundle() {
     } finally {
       cleanupCtx(ctx);
     }
+  });
+
+  // --- P0-F3：迁移 sanitize 双向匹配（Codex Round 2 Finding 2 修复） ---
+  // 背景：own-account-store.sanitizeBankName 把空格转 '-' 后写入文件名。
+  //       迁移用 path.basename 拿到的是 sanitized 形态，但 getTemplatesByBankName 直接 SQL 比 raw bankName。
+  //       含空格的银行名（"中国 银行"、"BNP Paribas"）→ orphan + 标记完成 → 资金数据永久丢失。
+  // 修复：迁移入口按 sanitize(splitTemplateName(t.name).bankName) 建索引，file basename 直接 lookup。
+  runCase('P0-F3', 'P0', '迁移 sanitize 双向匹配（含空格的 bankName）', () => {
+    const root = makeTempRoot('v153-mig-sanitize-');
+    const db = newAppDb(root);
+    try {
+      // 模板的 bankName 含空格："中国 银行-北京"
+      const t = db.upsertTemplate({ name: '中国 银行-北京', sourceFileName: 'a.xlsx', headers: ['h'] });
+
+      // file basename 是 sanitize 后的：'中国-银行.json'（空格变 '-'）
+      const ownDir = path.join(root, 'own-accounts');
+      fs.mkdirSync(ownDir, { recursive: true });
+      fs.writeFileSync(path.join(ownDir, '中国-银行.json'), JSON.stringify([
+        { merchantId: 'BOC_OWN_SP', currencies: ['CNY'] }
+      ], null, 2));
+
+      const result = runOwnAccountsMigration(root, db.db);
+      assertEqual(result.status, 'done', 'status');
+      assertEqual(result.stats.insertedRows, 1, '应成功 insert 1 条（不再 orphan）');
+      assertEqual(result.stats.orphans, 0, 'orphans=0（修复前会是 1）');
+
+      const own = db.db.prepare(
+        "SELECT merchant_id, currency, account_nature FROM template_big_accounts WHERE template_id = ? AND account_nature='own'"
+      ).all(t.id);
+      assertEqual(own.length, 1, 'own 记录应为 1 条');
+      assertEqual(own[0].merchant_id, 'BOC_OWN_SP', 'merchant_id 匹配');
+      return `'中国-银行.json' (sanitized) 命中模板 '中国 银行-北京' (raw) → insertedRows=1, orphans=0`;
+    } finally {
+      try { db.db.close(); } catch (_) {}
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // --- P0-F4：fixedAssignment lookup 按 merchantId 聚合 client+own（Codex Round 2 Finding 4） ---
+  // 背景：v1.5.3 之后大账号按 (merchantId+accountNature) 分组，同 merchantId 可能有 2 条。
+  //       旧 lookup `new Map(items.map(i=>[i.merchantId,i]))` 后写覆盖前写，
+  //       fixedAssignment 过滤会拒绝合法 currency（被覆盖的那一条的 currencies）→ 静默丢失。
+  // 修复：lookup 按 merchantId 聚合所有 currencies（client ∪ own）。
+  // 本用例直接验证 main.js validateTemplateConfiguration 的逻辑等价物，避免拉 Electron。
+  runCase('P0-F4', 'P0', 'fixedAssignment lookup 聚合 client+own currencies', () => {
+    // 模拟修复后的聚合 lookup 行为
+    const cleanedBigAccounts = [
+      { merchantId: 'M_X', currencies: ['CNY'], accountNature: 'client' },
+      { merchantId: 'M_X', currencies: ['USD'], accountNature: 'own' }  // 同 merchantId 不同 nature 不同 currency
+    ];
+    const bigAccountCurrencyLookup = new Map();
+    cleanedBigAccounts.forEach((item) => {
+      if (!bigAccountCurrencyLookup.has(item.merchantId)) {
+        bigAccountCurrencyLookup.set(item.merchantId, new Set());
+      }
+      const set = bigAccountCurrencyLookup.get(item.merchantId);
+      item.currencies.forEach((c) => set.add(c));
+    });
+
+    const validCurrencies = bigAccountCurrencyLookup.get('M_X');
+    assertTruthy(validCurrencies, 'M_X 应有 lookup');
+    assertEqual(validCurrencies.size, 2, '应聚合 2 个 currency (CNY + USD)');
+    assertTruthy(validCurrencies.has('CNY'), 'CNY 应在合法集');
+    assertTruthy(validCurrencies.has('USD'), 'USD 应在合法集（修复前会因 own 覆盖 client 而漏判）');
+
+    // 模拟旧 lookup 行为 — 后写 own 覆盖 client → CNY 被误判
+    const oldLookup = new Map(cleanedBigAccounts.map((item) => [item.merchantId, item]));
+    assertEqual(oldLookup.get('M_X').currencies[0], 'USD', '旧 lookup 后写 own 覆盖 → 只剩 USD（证明 bug 存在）');
+    return `merchantId M_X (client:CNY + own:USD) → 合并集 {CNY, USD}（修复）vs 旧 {USD}（bug）`;
+  });
+
+  // --- P0-F5：bigAccountsLoadedWithOwn 标记不覆盖 in-memory 编辑（Codex Round 2 Finding 3） ---
+  // 背景：round 1 修复让 manage handler 总是 await getWithOwn 拿数据库版，覆盖了 currentBigAccounts；
+  //       但 mapping dialog 内部再次打开 manage 时，currentBigAccounts 可能是上次维护大账号 onDone 的内存版
+  //       （含用户主动删除的 own 行），覆盖会丢失这些未保存编辑。
+  // 修复：透传 bigAccountsLoadedWithOwn 标记，true 时跳过 getWithOwn 直接用 currentBigAccounts。
+  // 本用例模拟两种 payload 形态下的 manage handler 决策路径。
+  runCase('P0-F5', 'P0', 'bigAccountsLoadedWithOwn 标记决定是否拉 getWithOwn', () => {
+    function decideShouldFetch(payload) {
+      const flag = Boolean(payload.bigAccountsLoadedWithOwn);
+      return !flag;
+    }
+
+    // 首次进入 mapping dialog（来自 template:get-mappings）→ 没字段 → 应拉
+    assertEqual(decideShouldFetch({}), true, '首次 payload 缺字段 → 应拉 getWithOwn');
+    assertEqual(decideShouldFetch({ bigAccountsLoadedWithOwn: false }), true, '显式 false → 应拉');
+    // 重开 mapping dialog（onDone / onCancel 透传 true）→ 不应拉，避免覆盖 in-memory
+    assertEqual(decideShouldFetch({ bigAccountsLoadedWithOwn: true }), false, '透传 true → 不应拉');
+    assertEqual(decideShouldFetch({ bigAccountsLoadedWithOwn: 'true' }), false, '非空字符串 → 视为 true → 不拉');
+    return '决策表正确：缺字段/false=拉, true=不拉（保护 in-memory 编辑）';
   });
 }
 

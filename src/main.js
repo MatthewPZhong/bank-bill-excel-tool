@@ -3170,7 +3170,19 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
         };
       })
     : [];
-  const bigAccountLookup = new Map(cleanedBigAccounts.map((item) => [item.merchantId, item]));
+  // v1.5.3 R2 round 2 修复 (Codex Finding 4)：
+  // groupBigAccountRows 按 (merchantId+accountNature) 分组，因此同 merchantId 可能有 2 条（client + own，币种不一定相同）。
+  // 旧 lookup `new Map(items.map(i=>[i.merchantId, i]))` 后写覆盖前写 → 固定字段赋值过滤可能误删合法行。
+  // 修复：按 merchantId 聚合所有 currencies（client ∪ own）作为合法币种集合。
+  // fixed-assignment 本身不区分 nature，能匹配任一 nature 的账户即视为合法。
+  const bigAccountCurrencyLookup = new Map();
+  cleanedBigAccounts.forEach((item) => {
+    if (!bigAccountCurrencyLookup.has(item.merchantId)) {
+      bigAccountCurrencyLookup.set(item.merchantId, new Set());
+    }
+    const set = bigAccountCurrencyLookup.get(item.merchantId);
+    item.currencies.forEach((currency) => set.add(currency));
+  });
   const seenFixedRowIndices = new Set();
   const cleanedFixedAssignments = merchantIdManagedByBigAccounts
     ? fixedAssignments
@@ -3182,9 +3194,9 @@ function validateTemplateConfiguration({ template, mappings, enumValues, bigAcco
         .filter((item) => {
           if (!item.merchantId) return false;
           if (seenFixedRowIndices.has(item.rowIndex)) return false;
-          const bigAccount = bigAccountLookup.get(item.merchantId);
-          if (!bigAccount) return false;
-          if (item.currency && bigAccount.currencies.length && !bigAccount.currencies.includes(item.currency)) return false;
+          const validCurrencies = bigAccountCurrencyLookup.get(item.merchantId);
+          if (!validCurrencies) return false;
+          if (item.currency && validCurrencies.size && !validCurrencies.has(item.currency)) return false;
           seenFixedRowIndices.add(item.rowIndex);
           return true;
         })

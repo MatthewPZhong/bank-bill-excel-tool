@@ -2515,7 +2515,13 @@
         : ['是否拆分/合并明细账单', '复用模块字段的映射关系'];
       const BILL_SPLIT_MERGE_FIELD = '是否拆分/合并明细账单';
       const REUSE_MODULE_FIELD = '复用模块字段的映射关系';
-      const currentBigAccounts = cloneBigAccountItems(payload.bigAccounts || []);
+      let currentBigAccounts = cloneBigAccountItems(payload.bigAccounts || []);
+      // v1.5.3 R2 round 2 修复 (Codex Finding 3)：
+      // 标记 currentBigAccounts 是否已含 own。第一次从模板管理 / get-mappings 进入时不含 own（§3.1 过滤），
+      // 维护大账号 click handler 才去 await getWithOwn 拉数据库版；第二次重开 mapping dialog 时
+      // payload.bigAccounts 已是上次维护大账号 onDone 的内存版（含 own + 用户编辑），透传 loadedWithOwn=true 跳过 getWithOwn，
+      // 避免静默覆盖用户的内存编辑（包括主动删除的 own 行）。
+      let bigAccountsLoadedWithOwn = Boolean(payload.bigAccountsLoadedWithOwn);
       const currentFixedAssignments = Array.isArray(payload.fixedAssignments)
         ? payload.fixedAssignments.map((item) => ({
             merchantId: String(item.merchantId || ''),
@@ -2837,19 +2843,25 @@
             const draftMappings = collectMappingDraftFromTable(tbody);
             // v1.5.3 R2 fix：拉含自有账号的完整大账号列表作为弹窗初始数据
             // 直接用 payload.bigAccounts（来自 template:get-mappings，§3.1 过滤自有）会在
-            // saveMappings DELETE+INSERT 写回时静默删除 own 账号
+            // saveMappings DELETE+INSERT 写回时静默删除 own 账号；首次进入 dialog 时 loadedWithOwn=false，
+            // 此时去 await getWithOwn；后续重开（透传 loadedWithOwn=true）直接用 currentBigAccounts，
+            // 避免覆盖用户在内存里的编辑（Codex Round 2 Finding 3）
             let bigAccountsForDialog = currentBigAccounts;
-            try {
-              const withOwnResult = await window.desktopApi.bigAccount.getWithOwn(payload.template.id);
-              if (withOwnResult && withOwnResult.status === 'success' && Array.isArray(withOwnResult.bigAccounts)) {
-                bigAccountsForDialog = withOwnResult.bigAccounts;
-              } else if (withOwnResult && withOwnResult.status === 'error') {
-                setStatus(withOwnResult.message || '获取大账号（含自有）失败', 'error');
+            if (!bigAccountsLoadedWithOwn) {
+              try {
+                const withOwnResult = await window.desktopApi.bigAccount.getWithOwn(payload.template.id);
+                if (withOwnResult && withOwnResult.status === 'success' && Array.isArray(withOwnResult.bigAccounts)) {
+                  bigAccountsForDialog = withOwnResult.bigAccounts;
+                  currentBigAccounts = bigAccountsForDialog;
+                  bigAccountsLoadedWithOwn = true;
+                } else if (withOwnResult && withOwnResult.status === 'error') {
+                  setStatus(withOwnResult.message || '获取大账号（含自有）失败', 'error');
+                  return;
+                }
+              } catch (error) {
+                setStatus('获取大账号（含自有）失败，请重试', 'error');
                 return;
               }
-            } catch (error) {
-              setStatus('获取大账号（含自有）失败，请重试', 'error');
-              return;
             }
             openModal(createBigAccountManagerDialog({
               bigAccounts: bigAccountsForDialog,
@@ -2864,6 +2876,7 @@
                       : mapping;
                   }),
                   bigAccounts: nextBigAccounts,
+                  bigAccountsLoadedWithOwn: true,
                   fixedAssignments: currentFixedAssignments,
                   amountSplitRules: currentAmountSplitRules
                 }));
@@ -2873,6 +2886,7 @@
                   ...payload,
                   mappings: draftMappings,
                   bigAccounts: bigAccountsForDialog,
+                  bigAccountsLoadedWithOwn: true,
                   fixedAssignments: currentFixedAssignments,
                   amountSplitRules: currentAmountSplitRules
                 }));

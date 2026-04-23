@@ -35,5 +35,6 @@ function writeOwnAccounts(storageRoot, bankName, accounts) {
 
 module.exports = {
   readOwnAccounts,
-  writeOwnAccounts
+  writeOwnAccounts,
+  sanitizeBankName
 };

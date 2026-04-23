@@ -714,3 +714,123 @@ R4 属于后端纯算子改动，Dev 自测已覆盖所有可自动验证面。�
 1. 用户跑 `node scripts/test-v1.5.3-regression.js` 验证 27 条用例（应 25 pass + 1 skip + P0-F1 / P0-F2 新增 2 pass = 27 用例 26 pass + 1 skip）
 2. 用户跑 `npm run smoke` 验证 smoke 全绿
 3. 用户确认 OK 后，team-lead commit + push 到 v1.5.x，PR #22 自动收到新 commit；用户在 PR 评论区留 `@codex review` 触发 round 2
+
+---
+
+## 2026-04-23 Dev — Codex Review Round 2（3 条 finding 修复）
+
+> Round 1 修复后 PR 触发 Codex round 2 review，新发现 3 条 finding：
+> - **F2**（Round 1 漏掉的资金风险）：`own-accounts-migration.js:81` 用 `path.basename` 拿到的是 sanitize 后形态，与原始模板 bankName 比对错位 → 含空格 / 特殊字符的 bankName 全部 orphan + 标记完成 → **资金数据永久丢失**
+> - **F3**（Round 1 修复引入的副作用）：`renderer-dialogs.js:2846` manage handler 总是 await `getWithOwn` 拿数据库版，会覆盖 mapping dialog 第二次打开时 `currentBigAccounts` 中的 in-memory 编辑（包含用户主动删除的 own 行）
+> - **F4**（R2 落地缺口）：`main.js:3173` `bigAccountLookup` 按 merchantId 单键，client+own 共享 merchantId 时后写覆盖前写 → fixed-assignment 过滤可能误删合法行
+
+### 缺陷复盘
+
+#### F2 — 迁移 sanitize lookup 错位
+
+- 链路：
+  - `own-account-store.js:11 getOwnAccountFilePath` 写文件时调 `sanitizeBankName(bankName)` → 空格 / `<>:"/\|?*` / 控制字符全部替换为 `-`
+  - 例：用户在 OS 中创建模板 "中国 银行-北京"，UI 触发 own-accounts 写入时 → `own-accounts/中国-银行.json`
+  - 迁移阶段 `own-accounts-migration.js:81` `path.basename(jsonFile, '.json')` → `'中国-银行'`
+  - `templateRepository.getTemplatesByBankName(db, '中国-银行')` → SQL 比对 `name = '中国-银行' OR name LIKE '中国-银行-%'`
+  - 模板真名 "中国 银行-北京"（split('-')[0] = "中国 银行" 含空格）→ 不匹配
+  - → orphan + log [WARN] + `MIGRATION_FLAG_KEY` 置 done → **永远不再尝试迁移 → 永久丢失**
+- 影响范围：所有 bankName 含空格 / 控制字符 / `<>:"/\|?*` 的模板（国际银行常见，如 "BNP Paribas"、"Standard Chartered"）；国内"中行""建行"短词不触发，但"中国 银行" / "中国 工商银行"等带空格变体会触发
+
+#### F3 — Round 1 修复覆盖 in-memory 编辑
+
+- 链路：
+  - Round 1 修复（commit `9add60e`）让 `manageBigAccountBtn` click handler 总是 `await window.desktopApi.bigAccount.getWithOwn(...)` → 用结果覆盖 `bigAccountsForDialog`
+  - 用户场景：
+    1. 模板管理 → 打开 mapping dialog（payload.bigAccounts 不含 own）
+    2. 点维护大账号 → getWithOwn 拿到 [client_a, client_b, own_x]
+    3. 用户在弹窗里**手动删除 own_x** → 点完成 → onDone(nextBigAccounts=[client_a, client_b])
+    4. 重开 mapping dialog（payload.bigAccounts = [client_a, client_b]）
+    5. 用户**再次**点维护大账号 → 本应用 currentBigAccounts（已删 own_x），但 round 1 修复又去 await getWithOwn → 数据库里 own_x 还没删（saveMappings 还没跑）→ 拉回 [client_a, client_b, own_x]
+    6. 用户在弹窗里再操作 → 完成 → 写回 → **own_x 又被插回**
+- 严重程度：用户主动删除的 own 被静默"复活"，等同于操作失效
+
+#### F4 — fixedAssignment lookup 按 merchantId 单键覆盖
+
+- 链路：
+  - `main.js:3154-3172 cleanedBigAccounts`（v1.5.3）保留 `accountNature`，且 `groupBigAccountRows` 按 `(merchantId+accountNature)` 分组 → 同 merchantId 可能出现 2 条
+  - 旧代码 `:3173` `new Map(items.map(i => [i.merchantId, i]))` → 后写覆盖前写
+  - 例：M_X 在 client 行 `currencies=['CNY']`，own 行 `currencies=['USD']`
+  - lookup `M_X` 拿到的是 own 那条 → fixedAssignment item `{merchantId:M_X, currency:'CNY'}` 过滤 `!validCurrencies.includes('CNY')` → 误判 → silently filtered out
+- 影响范围：用户在 fixedAssignment 配置中给 client 账号设了固定字段赋值，但 client+own 共享 merchantId 且 currencies 不重叠 → 该固定字段赋值被静默删除
+
+### 修复方案
+
+#### F2 — sanitize 双向匹配
+
+- `src/backend/own-account-store.js`：
+  - module.exports 新增 `sanitizeBankName`（原本是文件内 private 函数，为支持迁移侧反向匹配 export）
+- `src/backend/database/own-accounts-migration.js`：
+  - 顶部 import 新增 `sanitizeBankName`（来自 own-account-store）+ `splitTemplateName`（来自 balance-seed-store）
+  - 新增 helper `buildSanitizedBankNameIndex(db)`：遍历所有模板 → `splitTemplateName(t.name).bankName` → `sanitizeBankName(rawBankName)` → 建 `Map<sanitizedKey, [{id, name}]>`
+  - 迁移主循环改为：file basename 优先去 `templateBucketsBySanitizedBankName` 索引 lookup；查不到 → fallback 到旧 `getTemplatesByBankName`（短词无空格场景下两路径等价）
+  - 注释说明决策原因 + 可能影响 + 与原有逻辑兼容性
+
+#### F3 — `bigAccountsLoadedWithOwn` 标记
+
+- `src/renderer-dialogs.js:createMappingDialog`：
+  - `:2518` 把 `const currentBigAccounts` 改为 `let`（允许后续 reassign）
+  - `:2519-2524` 新增 `let bigAccountsLoadedWithOwn = Boolean(payload.bigAccountsLoadedWithOwn);` 标记
+  - `:2840-2860` `manageBigAccountBtn` click handler 仅在 `!bigAccountsLoadedWithOwn` 时去 await `getWithOwn`；成功后同步给 `currentBigAccounts` + 置标记 true
+  - `:2879/2889` onDone / onCancel 重开 createMappingDialog 时显式透传 `bigAccountsLoadedWithOwn: true`
+  - 注释说明：保护 in-memory 编辑（包括用户主动删除的 own 行）
+
+#### F4 — `bigAccountCurrencyLookup` 按 merchantId 聚合 currencies
+
+- `src/main.js:validateTemplateConfiguration`：
+  - `:3173-3192` 把旧 `bigAccountLookup = new Map(items.map(i => [i.merchantId, i]))` 改为 `bigAccountCurrencyLookup = new Map<merchantId, Set<currency>>`
+  - 遍历 `cleanedBigAccounts` 把 `item.currencies` 全部 union 到 set（合并 client + own 的 currencies）
+  - filter 改为 `validCurrencies.has(item.currency)`
+  - 注释说明：fixed-assignment 本身不区分 nature，能匹配任一 nature 的账户即视为合法
+
+### 涉及文件
+
+| 文件 | 改动类型 | 说明 |
+|------|---------|------|
+| `src/backend/own-account-store.js` | 修改 | export `sanitizeBankName`（原 private） |
+| `src/backend/database/own-accounts-migration.js` | 修改 | 顶部 import 新增 sanitizeBankName + splitTemplateName；新增 `buildSanitizedBankNameIndex`；迁移主循环改双向匹配（sanitize 索引 + fallback） |
+| `src/main.js` | 修改 | `validateTemplateConfiguration` `bigAccountLookup` 改为按 merchantId 聚合 currencies |
+| `src/renderer-dialogs.js` | 修改 | `createMappingDialog` 加 `bigAccountsLoadedWithOwn` 标记；`manageBigAccountBtn` click handler 条件 fetch；onDone/onCancel 透传标记 |
+| `scripts/test-v1.5.3-regression.js` | 修改 | Section 4 新增 P0-F3 / P0-F4 / P0-F5 共 3 条用例 |
+
+### 验证证据
+
+```
+--- Section 4 — R2 过滤 / bundle ---
+[P1-4] ✅ ...
+[P1-5] ✅ ...
+[P0-F1] ✅ 维护大账号 roundtrip 不丢 own（Finding 1 修复）
+[P0-F2] ✅ 旧链路（过滤后 bigAccounts → saveMappings）会丢 own（负向证明）
+[P0-F3] ✅ 迁移 sanitize 双向匹配（含空格的 bankName） — '中国-银行.json' (sanitized) 命中模板 '中国 银行-北京' (raw) → insertedRows=1, orphans=0
+[P0-F4] ✅ fixedAssignment lookup 聚合 client+own currencies — merchantId M_X (client:CNY + own:USD) → 合并集 {CNY, USD}（修复）vs 旧 {USD}（bug）
+[P0-F5] ✅ bigAccountsLoadedWithOwn 标记决定是否拉 getWithOwn — 决策表正确：缺字段/false=拉, true=不拉（保护 in-memory 编辑）
+
+=== 总计 ===
+P0 通过: 23/23
+P1 通过: 5/6 (P1-7 skipped)
+失败用例: 无
+```
+
+- `node scripts/test-v1.5.3-regression.js`：P0 23/23 + P1 5/6 + 1 skip
+- `npm run smoke`：pass
+- 其他既有用例（R1/R2/R3/R4 + Round 1 P0-F1/F2）均不受影响
+
+### 风险 / 决策
+
+- **资金风险**：F2 是关键资金 bug，修复后通过 P0-F3 用例锁定（含空格 bankName 不再 orphan）
+- **回归保护**：保留 `getTemplatesByBankName` 旧 SQL 路径作 fallback，不破坏既有"短词无空格 + 子模板 LIKE 'X-%'"的查询语义
+- **F3 设计 tradeoff**：`bigAccountsLoadedWithOwn` 是 dialog 实例级状态，依赖 createMappingDialog 调用方在重开时显式透传。grep 验证 mapping dialog 内部 onDone/onCancel/billsplit 等 spread `...payload` 的 callback 都能自动透传；外部入口（`createMappingDialog(result)`，来自 `template:get-mappings`）不传字段，Boolean(undefined)=false → 首次拉一次 ✓
+- **F4 兼容性**：旧 lookup 返回单条 item 含 `accountNature`，但 fixedAssignment 过滤只用 `currencies` 字段；新 lookup 改为 Set\<currency> 不带 nature。grep 验证 `bigAccountLookup` 在 `:3173` 之后无其它使用点 → 重命名 + 改类型不影响其它路径
+- **未拆 PR**：3 条 finding 都属于 v1.5.3 R2 收口范围，统一在 PR #22 修不拆分。下一回合 PR 草稿同步前可在 PRD §"实施记录"补一段 round 2 修复记录
+
+### 下一步
+
+1. commit `fix(v1.5.3): Codex review round 2 — 3 issues fixed`
+2. push v1.5.x → origin
+3. PR #22 评论 `@codex review` 触发 round 3
+4. 等 Codex round 3 反馈；若 clean → 等用户决定合并节奏（按 `workflow_no_tester_no_auto_pr`）

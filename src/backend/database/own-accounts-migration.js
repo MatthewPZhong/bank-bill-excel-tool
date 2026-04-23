@@ -8,6 +8,28 @@ const fs = require('node:fs');
 const path = require('node:path');
 const settingsRepository = require('./settings-repository');
 const templateRepository = require('./template-repository');
+const { sanitizeBankName } = require('../own-account-store');
+const { splitTemplateName } = require('../balance-seed-store');
+
+// v1.5.3 R2 round 2 修复 (Codex Finding 2)：
+// own-accounts/*.json 的文件名是经 own-account-store.sanitizeBankName 处理过的（空格 / 控制字符等替换为 '-'）。
+// 模板 bankName（split('-')[0]）是用户输入的原始值（保留空格 / 特殊字符）。
+// 直接用 file basename 调 getTemplatesByBankName 会在 bankName 含空格的场景永久 orphan + 标记完成 → 资金数据丢失。
+// 修复：迁移入口对所有模板预扫一遍，按 sanitize(splitBankName(t.name)) 建索引，再用 file basename 直接 lookup。
+function buildSanitizedBankNameIndex(db) {
+  const index = new Map();
+  const templates = templateRepository.listTemplates(db);
+  templates.forEach((t) => {
+    const rawBankName = splitTemplateName(t.name).bankName;
+    if (!rawBankName) return;
+    const sanitizedKey = sanitizeBankName(rawBankName);
+    if (!index.has(sanitizedKey)) {
+      index.set(sanitizedKey, []);
+    }
+    index.get(sanitizedKey).push({ id: t.id, name: t.name });
+  });
+  return index;
+}
 
 const MIGRATION_FLAG_KEY = 'own_accounts_migration_v1_5_3_done';
 const MIGRATION_LOG_FILENAME = 'own-accounts-migration-v1.5.3.log';
@@ -61,6 +83,9 @@ function runOwnAccountsMigration(storageRoot, db, { appendActivityLogEntry } = {
     const jsonFiles = fs.readdirSync(ownAccountsDir).filter((f) => f.endsWith('.json'));
     appendMigrationLog(storageRoot, `[INFO] migration started, ${jsonFiles.length} json file(s) found`);
 
+    // Finding 2 修复：模板 bankName 按 sanitize 后索引，让 file basename 能命中含空格 / 特殊字符的原始 bankName
+    const templateBucketsBySanitizedBankName = buildSanitizedBankNameIndex(db);
+
     const now = new Date().toISOString();
     const insertStmt = db.prepare(`
       INSERT INTO template_big_accounts
@@ -93,7 +118,12 @@ function runOwnAccountsMigration(storageRoot, db, { appendActivityLogEntry } = {
         throw new Error(`${jsonFile} content is not an array`);
       }
 
-      const matchingTemplates = templateRepository.getTemplatesByBankName(db, bankName);
+      // Finding 2 修复：file basename 已是 sanitize 后形态，直接用 sanitize 索引 lookup
+      // 同时保留旧 getTemplatesByBankName 作 fallback（短词无空格场景下两条路径等价）
+      let matchingTemplates = templateBucketsBySanitizedBankName.get(bankName) || [];
+      if (matchingTemplates.length === 0) {
+        matchingTemplates = templateRepository.getTemplatesByBankName(db, bankName);
+      }
 
       if (matchingTemplates.length === 0) {
         // D16：orphan bankName → 跳过 + 日志，不中断整体流程，不算失败
