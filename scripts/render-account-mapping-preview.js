@@ -6,7 +6,7 @@ const { spawn } = require('node:child_process');
 const electronBinary = require('electron');
 
 const projectRoot = path.resolve(__dirname, '..');
-const previewPath = path.join(projectRoot, 'docs', 'account-mapping-preview.png');
+const previewPath = path.join(projectRoot, 'docs', 'previews', 'account-mapping.png');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'bank-bill-account-preview-'));
 
 fs.mkdirSync(path.dirname(previewPath), { recursive: true });
