@@ -6,6 +6,7 @@ const { performance } = require('node:perf_hooks');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage } = require('electron');
 const { AppDatabase } = require('./backend/database');
 const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
+const { groupBigAccountRows } = require('./backend/database/utils');
 const {
   BALANCE_SEED_GENERATION_METHODS,
   findPreviousBalanceSeed,
@@ -6246,8 +6247,11 @@ function registerBigAccountHandlers() {
     }
   });
 
+  // v1.5.3 R2：deprecated。自有账号已合入 template_big_accounts 表，由 saveMappings 统一写回。
+  // 保留该 handler 仅作兼容（防止老调用链报错），任何新调用应改走 saveMappings。
   ipcMain.handle('big-account:save-own-accounts', (_event, payload = {}) => {
     try {
+      console.warn('[v1.5.3] big-account:save-own-accounts is deprecated; own accounts should be persisted via template:save-mappings');
       const template = database.getTemplate(payload.templateId);
       if (!template) {
         return { status: 'error', message: '未找到对应模板' };
@@ -6267,13 +6271,15 @@ function registerBigAccountHandlers() {
   });
 
   // v1.5.3 R2：拉含自有账号的完整大账号列表（专供"维护大账号"对话框初始化 / G1 月度余额弹窗）
-  // 与默认 getTemplateBigAccounts 区别：显式带 { includeOwn: true }
+  // 与默认 getTemplateBigAccounts 区别：显式带 { includeOwn: true }，并按 merchantId+accountNature 聚合
+  // 返回 grouped 结构 {merchantId, currencies, isMultiCurrency, accountNature}，与 getTemplateMappings.bigAccounts 对齐
   ipcMain.handle('big-account:get-with-own', (_event, templateId) => {
     try {
       if (!templateId) {
         return { status: 'error', message: 'templateId 不能为空' };
       }
-      const bigAccounts = database.getTemplateBigAccounts(templateId, { includeOwn: true });
+      const rows = database.getTemplateBigAccounts(templateId, { includeOwn: true });
+      const bigAccounts = groupBigAccountRows(rows);
       return { status: 'success', bigAccounts };
     } catch (error) {
       return createErrorResult({

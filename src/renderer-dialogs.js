@@ -1803,10 +1803,9 @@
       return overlay;
     }
 
-    function createBigAccountManagerDialog({ bigAccounts, templateId, templateName, initialOwnAccounts, onDone, onCancel }) {
+    function createBigAccountManagerDialog({ bigAccounts, templateId, templateName, onDone, onCancel }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
-      let pendingOwnAccounts = initialOwnAccounts || null;
       dialog.className = 'modal-card manager-card big-account-card';
       dialog.innerHTML = `
         <div class="dialog-header">
@@ -2215,9 +2214,7 @@
           setStatus(result.message, 'error');
           return;
         }
-        // v1.5.3 R2：客资 + 自有账号统一进 tbody（行带 accountNature 区分）；
-        // pendingOwnAccounts 仍保留，作为过渡兼容 big-account:save-own-accounts（Q6 决策）
-        pendingOwnAccounts = result.ownAccounts || [];
+        // v1.5.3 R2：客资 + 自有账号统一进 tbody（行带 accountNature 区分），由 saveMappings 统一写回
         tbody.innerHTML = '';
         const clientAccounts = result.clientAccounts || [];
         const ownAccounts = result.ownAccounts || [];
@@ -2272,7 +2269,6 @@
               ),
               templateId,
               templateName,
-              initialOwnAccounts: pendingOwnAccounts,
               onDone,
               onCancel
             }));
@@ -2305,7 +2301,7 @@
 
         cleanupFloatingDropdown();
         document.removeEventListener('keydown', handleKeydown);
-        onDone(nextBigAccounts, { ownAccounts: pendingOwnAccounts });
+        onDone(nextBigAccounts);
       });
 
       overlay.appendChild(dialog);
@@ -2837,23 +2833,29 @@
         }
 
         if (manageBigAccountBtn) {
-          manageBigAccountBtn.addEventListener('click', () => {
+          manageBigAccountBtn.addEventListener('click', async () => {
             const draftMappings = collectMappingDraftFromTable(tbody);
+            // v1.5.3 R2 fix：拉含自有账号的完整大账号列表作为弹窗初始数据
+            // 直接用 payload.bigAccounts（来自 template:get-mappings，§3.1 过滤自有）会在
+            // saveMappings DELETE+INSERT 写回时静默删除 own 账号
+            let bigAccountsForDialog = currentBigAccounts;
+            try {
+              const withOwnResult = await window.desktopApi.bigAccount.getWithOwn(payload.template.id);
+              if (withOwnResult && withOwnResult.status === 'success' && Array.isArray(withOwnResult.bigAccounts)) {
+                bigAccountsForDialog = withOwnResult.bigAccounts;
+              } else if (withOwnResult && withOwnResult.status === 'error') {
+                setStatus(withOwnResult.message || '获取大账号（含自有）失败', 'error');
+                return;
+              }
+            } catch (error) {
+              setStatus('获取大账号（含自有）失败，请重试', 'error');
+              return;
+            }
             openModal(createBigAccountManagerDialog({
-              bigAccounts: currentBigAccounts,
+              bigAccounts: bigAccountsForDialog,
               templateId: payload.template.id,
               templateName: payload.template.name,
-              onDone: async (nextBigAccounts, extra) => {
-                if (extra && extra.ownAccounts) {
-                  const ownResult = await window.desktopApi.bigAccount.saveOwnAccounts({
-                    templateId: payload.template.id,
-                    accounts: extra.ownAccounts
-                  });
-                  if (ownResult.status === 'error') {
-                    setStatus(ownResult.message || '自有账号保存失败', 'error');
-                    return;
-                  }
-                }
+              onDone: (nextBigAccounts) => {
                 openModal(createMappingDialog({
                   ...payload,
                   mappings: draftMappings.map((mapping) => {
@@ -2870,7 +2872,7 @@
                 openModal(createMappingDialog({
                   ...payload,
                   mappings: draftMappings,
-                  bigAccounts: currentBigAccounts,
+                  bigAccounts: bigAccountsForDialog,
                   fixedAssignments: currentFixedAssignments,
                   amountSplitRules: currentAmountSplitRules
                 }));

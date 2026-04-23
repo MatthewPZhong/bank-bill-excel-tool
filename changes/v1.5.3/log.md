@@ -618,3 +618,99 @@ R4 属于后端纯算子改动，Dev 自测已覆盖所有可自动验证面。�
   - `rg -n 'v1.5.3' docs/USER_GUIDE.md | head` → 顶部版本号 + 至少 5 处 `(v1.5.3 新增)` 标注
 - 风险：无（纯文档改动，未触 git / 代码 / 数据库）
 - 决策：按 `workflow_no_tester_no_auto_pr`，用户未说「提 PR」前 team-lead 不动 git；本次仅发版收尾，下一步等用户指示是否 commit / 提 PR
+
+---
+
+## 2026-04-23 Dev — Codex Review Round 1（Finding 1 修复）
+
+> 触发：PR #22 Codex 自动 review 提出 1 条 finding，用户复核后判定为 Critical（资金链路 + 数据删除 + 静默失败 + 直接让 R1 失效），要求修复后重新 review。
+
+### 缺陷复盘
+
+- 位置：`src/renderer-dialogs.js:2840` 维护大账号弹窗打开入口
+- 链路根因：
+  1. `manageBigAccountBtn` click handler 把 `currentBigAccounts` 传给 `createBigAccountManagerDialog`
+  2. `currentBigAccounts` ← `payload.bigAccounts`（来自 `template:get-mappings`）
+  3. `template:get-mappings` → `getTemplateMappingConfig` → `database.getTemplateMappings` → `template-repository.js:390` 调用 `getTemplateBigAccounts(db, templateId)` **没传 `{includeOwn: true}`**
+  4. §3.1 SQL 过滤掉 own → 弹窗 tbody 只显示 client
+  5. 用户点完成 → `saveMappings()` DELETE+INSERT 写回可见行 → **own 账号被静默删除**
+- 后果：R1 月度余额导出依赖 own 账号，用户只要打开过维护大账号并点完成，own 全部丢失；没有任何告警；无法回滚（除非重跑 own-accounts 迁移，但 `MIGRATION_FLAG_KEY` 已置 done）
+- T2.9 spec 残留：原任务列表第 124-125 行明确要求"`onDone 回调`：不再调 `saveOwnAccounts`，删除 `extra.ownAccounts` 分支"——但实际 `:2847-2856` 仍保留旧分支 + `pendingOwnAccounts` 双写链路；说明 T2.9 落地不完整，Finding 1 是其表象之一
+
+### 修复方案
+
+**1. 后端 — IPC 返回结构对齐（`src/main.js`）**
+
+- 顶部 import 新增 `groupBigAccountRows`（来自 `./backend/database/utils`）
+- `big-account:get-with-own` handler（原 `:6271-6287`）：
+  - 旧：`getTemplateBigAccounts(templateId, {includeOwn:true})` 直接返 row-level
+  - 新：再调 `groupBigAccountRows(rows)` 返 grouped `{merchantId, currencies, isMultiCurrency, accountNature}[]`，与 `getTemplateMappings.bigAccounts` 结构对齐
+- 注释补充：明确说明 grouped 形态 + 与默认 `getTemplateBigAccounts` 的语义差异
+
+**2. 前端 — 维护大账号入口改用 getWithOwn（`src/renderer-dialogs.js`）**
+
+- `manageBigAccountBtn` click handler（约 `:2839`）改 async：
+  - 进入弹窗前先 `await window.desktopApi.bigAccount.getWithOwn(payload.template.id)`
+  - 成功 → 用其 `bigAccounts`（grouped 含 own）作为弹窗初值
+  - 失败（`status==='error'` 或抛异常）→ 状态栏告警 + return（不打开弹窗，避免用户误操作丢 own）
+  - 注释明确说明为何不能直接用 `currentBigAccounts`（§3.1 过滤 + saveMappings 静默删 own）
+- onDone/onCancel 链路简化：
+  - 删除 onDone 第二参数 `extra.ownAccounts → saveOwnAccounts` 双写分支（T2.9 残留）
+  - onCancel 用同一份 `bigAccountsForDialog` 重建 mappingDialog，保持取消语义一致
+
+**3. 前端 — 清理 T2.9 残留（`src/renderer-dialogs.js`）**
+
+- `createBigAccountManagerDialog` 签名删除 `initialOwnAccounts` 形参
+- 函数体删除 `let pendingOwnAccounts = initialOwnAccounts || null` 状态变量
+- import-bank-info handler（`:2206`）删除 `pendingOwnAccounts = result.ownAccounts || []` 旁路赋值，注释更新为"由 saveMappings 统一写回"
+- balance-management onClose（`:2237`）递归打开弹窗时删除 `initialOwnAccounts: pendingOwnAccounts` 入参
+- "完成"按钮 click handler（`:2282`）改为 `onDone(nextBigAccounts)`，删除第二参数 `{ ownAccounts: pendingOwnAccounts }`
+- grep 验证：`pendingOwnAccounts` / `initialOwnAccounts` / `extra.ownAccounts` 在 renderer-dialogs.js 全部清零
+
+**4. 后端 — 旧 IPC 加 deprecated 警告（`src/main.js`）**
+
+- `big-account:save-own-accounts` handler（`:6250`）：
+  - 顶部加注释 "deprecated。自有账号已合入 template_big_accounts 表，由 saveMappings 统一写回"
+  - 函数体首行加 `console.warn('[v1.5.3] big-account:save-own-accounts is deprecated; ...')`
+  - **不删除 handler**：保留兼容（防止老调用链 / 第三方触发报错），与 T2.9 spec 一致；仅前端不再调用
+
+### 涉及文件
+
+| 文件 | 改动类型 | 说明 |
+|------|---------|------|
+| `src/main.js` | 修改 | 顶部 import 新增 `groupBigAccountRows`；`big-account:get-with-own` 返回 grouped；`big-account:save-own-accounts` 加 deprecated 注释 + warn |
+| `src/renderer-dialogs.js` | 修改 | 维护大账号入口改用 `getWithOwn`；清理 `pendingOwnAccounts` / `initialOwnAccounts` / `extra.ownAccounts` 全部链路 |
+| `scripts/test-v1.5.3-regression.js` | 修改 | Section 4 新增 P0-F1（修复后正向）+ P0-F2（旧链路负向证明）；顶部 import 新增 `groupBigAccountRows` |
+
+### 验证证据
+
+#### 1. 静态验证（已完成）
+
+- `grep -n "pendingOwnAccounts\|initialOwnAccounts\|extra\.ownAccounts" src/renderer-dialogs.js` → **零命中**（清理彻底）
+- 修复后调用链审计：
+  - 维护大账号弹窗打开 → `bigAccount.getWithOwn` IPC → `groupBigAccountRows(getTemplateBigAccounts(..., {includeOwn:true}))` → grouped 含 own
+  - 弹窗 onDone → `nextBigAccounts`（含 own，每行带 `accountNature='own'`）→ `createMappingDialog` payload.bigAccounts → 模板保存按钮 saveMappings IPC → `validateTemplateConfiguration` 保留 nature → `expandBigAccountConfigurations` 展平 row-level → `database.saveMappings` insertBigAccountStatement 写入 `account_nature='own'`
+  - 整条链路 `accountNature` 透传无丢失
+
+#### 2. 自动回归（待用户跑）
+
+- 新增 2 条用例（Section 4 末尾）：
+  - **P0-F1**：grouped(含 own) → saveMappings roundtrip 后 own 仍在表里（accountNature='own'）→ 验证修复后链路正确
+  - **P0-F2**：旧链路（`getTemplateMappings.bigAccounts` → saveMappings）→ own 被删 → contract test 锁定 §3.1 过滤行为，未来 §3.1 语义改动会触发该用例失败提醒重审 Finding 1
+- 其它已有 P0-F2 之外 19 条 P0 + 6 条 P1 不应受影响（仅扩展，未改动既有用例代码）
+
+> ⚠️ Dev 说明：本次回合 Dev 写完代码后未亲自跑 `node scripts/test-v1.5.3-regression.js` 验证（环境 sandbox 分类器多次不可用，bash 多次拒绝），代码改动属"小范围、明确链路、可静态推断正确"类型。**请用户在合并前手动跑一次 `node scripts/test-v1.5.3-regression.js` + `npm run smoke` 双绿后再触发 Codex 重新 review**。
+
+### 风险 / 决策
+
+- **资金风险**：原 bug 有资金风险（own 账号丢失 → R1 月度余额漏账）；本修复是反向收口，纯收益、零新增风险
+- **数据兼容**：保留 `big-account:save-own-accounts` IPC + `desktopApi.bigAccount.saveOwnAccounts` preload，确保任何"忘记升级的"老调用链不会报错（仅打 warn）
+- **Spec 完成度**：T2.9 task 状态在原 tasks.md 仍标 "todo" 但实际声明"已落地"。本次回合相当于补完 T2.9 第 4-5 项（删除 onDone 旁路 + saveOwnAccounts handler 加 deprecated 警告）。下一回合 PR 草稿同步前可在 PRD §"实施记录" 章节回写"Codex Round 1 修复 Finding 1，T2.9 落地补完"
+- **后续追踪**：若 Codex round 2 review 仍命中此区域问题，需要把"维护大账号 → mapping dialog → save"完整链路抽到一个独立 contract test，避免再被发现
+- **不改 spec.md / PRD**：spec 在迭代主体已稳定，本次仅修补 T2.9 落地缺口，相关锚点 (§3.1) 不需要修改
+
+### 下一步（待用户）
+
+1. 用户跑 `node scripts/test-v1.5.3-regression.js` 验证 27 条用例（应 25 pass + 1 skip + P0-F1 / P0-F2 新增 2 pass = 27 用例 26 pass + 1 skip）
+2. 用户跑 `npm run smoke` 验证 smoke 全绿
+3. 用户确认 OK 后，team-lead commit + push 到 v1.5.x，PR #22 自动收到新 commit；用户在 PR 评论区留 `@codex review` 触发 round 2

@@ -8,7 +8,7 @@
 //   Section 1 — R1 资金装配（7 条）：P0-4 ~ P0-7、P0-10、P0-11、P1-3
 //   Section 2 — R1 IPC 校验层（2 条）：P0-8 / P0-9
 //   Section 3 — R2 迁移三态（3 条）：P0-13 / P0-14 / P0-15
-//   Section 4 — R2 过滤 / bundle（2 条）：P1-4 / P1-5
+//   Section 4 — R2 过滤 / bundle + Finding 1 修复（4 条）：P1-4 / P1-5 / P0-F1 / P0-F2
 //   Section 5 — R3 字体 XML 级验证（7 条）：P0-17 ~ P0-20、P1-6 / P1-7 / P1-8
 //   Section 6 — R4 账单合并浮点精度（3 条）：P0-R4-1 ~ P0-R4-3
 //
@@ -20,6 +20,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { AppDatabase } = require('../src/backend/database');
+const { groupBigAccountRows } = require('../src/backend/database/utils');
 const {
   runOwnAccountsMigration,
   MIGRATION_FLAG_KEY,
@@ -838,6 +839,117 @@ function casesR2FilterBundle() {
       ).get(ctx.template.id);
       assertEqual(legacy.account_nature, 'client', '老 bundle 缺字段 → 默认 client');
       return `bundle 导出 3 项均带 nature, 老 bundle 缺字段 → 默认 client`;
+    } finally {
+      cleanupCtx(ctx);
+    }
+  });
+
+  // --- P0-F1：维护大账号 roundtrip 不丢 own（Codex Finding 1 修复验证） ---
+  // 背景：修复前，维护大账号弹窗从 template:get-mappings 拉 bigAccounts，默认过滤 own；
+  //       用户点完成后 saveMappings DELETE+INSERT 写回可见行，静默删除 own 账号。
+  // 修复：弹窗打开时改用 big-account:get-with-own（grouped，含 own）作为 bigAccounts 初值。
+  // 本用例模拟修复后的链路：grouped 含 own → saveMappings → 断言 own 保留。
+  runCase('P0-F1', 'P0', '维护大账号 roundtrip 不丢 own（Finding 1 修复）', () => {
+    const ctx = createSingleTemplateCtx({ bigAccounts: [] });
+    try {
+      // 前置：初始写入 2 client + 1 own
+      ctx.db.saveMappings(
+        ctx.template.id,
+        [{ templateField: 'MerchantId', mappedField: '摘要' }],
+        [
+          { merchantId: 'C_FOO', currency: 'CNY', accountNature: 'client' },
+          { merchantId: 'C_BAR', currency: 'USD', accountNature: 'client' },
+          { merchantId: 'OWN_Z', currency: 'CNY', accountNature: 'own' }
+        ]
+      );
+
+      // 模拟 big-account:get-with-own IPC：getTemplateBigAccounts(templateId, {includeOwn:true}) + groupBigAccountRows
+      const rowsWithOwn = ctx.db.getTemplateBigAccounts(ctx.template.id, { includeOwn: true });
+      assertEqual(rowsWithOwn.length, 3, 'getTemplateBigAccounts(includeOwn:true) 应返回 3 行');
+      const groupedWithOwn = groupBigAccountRows(rowsWithOwn);
+      assertEqual(groupedWithOwn.length, 3, 'grouped 列表应为 3 项');
+      const ownInGrouped = groupedWithOwn.find((item) => item.merchantId === 'OWN_Z');
+      assertTruthy(ownInGrouped, 'grouped 列表应含 OWN_Z');
+      assertEqual(ownInGrouped.accountNature, 'own', 'OWN_Z 的 accountNature 应为 own');
+
+      // 对照：旧链路 template:get-mappings 返回的 bigAccounts 默认过滤 own
+      const legacyPayload = ctx.db.getTemplateMappings(ctx.template.id);
+      const legacyBigAccounts = legacyPayload.bigAccounts;
+      assertEqual(legacyBigAccounts.length, 2, '旧链路 getTemplateMappings.bigAccounts 应只含 2 项 client（§3.1 过滤）');
+      assertTruthy(
+        !legacyBigAccounts.some((item) => item.merchantId === 'OWN_Z'),
+        '旧链路不应含 OWN_Z（证实修复前的 bug 场景）'
+      );
+
+      // 模拟维护大账号 onDone → saveMappings：把 grouped（含 own）展平后写回
+      // 等价于 main.js expandBigAccountConfigurations + database.saveMappings
+      const flattened = [];
+      groupedWithOwn.forEach((item) => {
+        item.currencies.forEach((currency) => {
+          flattened.push({
+            merchantId: item.merchantId,
+            currency,
+            accountNature: item.accountNature
+          });
+        });
+      });
+      ctx.db.saveMappings(
+        ctx.template.id,
+        [{ templateField: 'MerchantId', mappedField: '摘要' }],
+        flattened
+      );
+
+      // 断言：own 账号仍在
+      const afterRows = ctx.db.db.prepare(
+        'SELECT merchant_id, account_nature FROM template_big_accounts WHERE template_id=? ORDER BY merchant_id'
+      ).all(ctx.template.id);
+      assertEqual(afterRows.length, 3, 'saveMappings roundtrip 后应仍 3 条');
+      const afterOwn = afterRows.find((r) => r.merchant_id === 'OWN_Z');
+      assertTruthy(afterOwn, 'OWN_Z 应仍在表里（修复后不再静默删除）');
+      assertEqual(afterOwn.account_nature, 'own', 'OWN_Z 的 nature 应仍为 own');
+      return 'grouped(含 own) → saveMappings roundtrip 保留 3 条，OWN_Z 仍是 own';
+    } finally {
+      cleanupCtx(ctx);
+    }
+  });
+
+  // --- P0-F2：Finding 1 负向证明 —— 旧链路确实会丢 own（contract test） ---
+  // 目的：用"假装走旧链路"的方式构造出 bug 场景，确保 §3.1 过滤确实会造成 own 被删。
+  //      若该用例未来开始 fail，说明 §3.1 过滤语义被改动，需要同步重审 Finding 1 修复是否仍有效。
+  runCase('P0-F2', 'P0', '旧链路（过滤后 bigAccounts → saveMappings）会丢 own（负向证明）', () => {
+    const ctx = createSingleTemplateCtx({ bigAccounts: [] });
+    try {
+      ctx.db.saveMappings(
+        ctx.template.id,
+        [{ templateField: 'MerchantId', mappedField: '摘要' }],
+        [
+          { merchantId: 'C_A', currency: 'CNY', accountNature: 'client' },
+          { merchantId: 'OWN_B', currency: 'CNY', accountNature: 'own' }
+        ]
+      );
+      // 模拟旧链路：用 getTemplateMappings（默认过滤 own）的 bigAccounts 作为 roundtrip 输入
+      const legacyPayload = ctx.db.getTemplateMappings(ctx.template.id);
+      const flattened = [];
+      legacyPayload.bigAccounts.forEach((item) => {
+        item.currencies.forEach((currency) => {
+          flattened.push({
+            merchantId: item.merchantId,
+            currency,
+            accountNature: item.accountNature
+          });
+        });
+      });
+      ctx.db.saveMappings(
+        ctx.template.id,
+        [{ templateField: 'MerchantId', mappedField: '摘要' }],
+        flattened
+      );
+      const afterRows = ctx.db.db.prepare(
+        'SELECT merchant_id FROM template_big_accounts WHERE template_id=?'
+      ).all(ctx.template.id);
+      assertEqual(afterRows.length, 1, '旧链路 roundtrip 后 own 被删 → 剩 1 条');
+      assertEqual(afterRows[0].merchant_id, 'C_A', '剩下的应是 C_A');
+      return 'legacy roundtrip 删除 OWN_B（证明 §3.1 过滤 + saveMappings 组合确实会丢 own）';
     } finally {
       cleanupCtx(ctx);
     }
