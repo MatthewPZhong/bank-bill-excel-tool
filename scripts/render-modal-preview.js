@@ -14,7 +14,7 @@ if (!modalName || !outputName) {
 }
 
 const projectRoot = path.resolve(__dirname, '..');
-const previewPath = path.join(projectRoot, 'docs', outputName);
+const previewPath = path.join(projectRoot, 'docs', 'previews', outputName);
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), `bank-bill-${modalName}-preview-`));
 
 fs.mkdirSync(path.dirname(previewPath), { recursive: true });

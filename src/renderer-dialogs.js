@@ -5295,7 +5295,12 @@
       createTemplateManagerDialog,
       createMappingDialog,
       createAccountMappingDialog,
-      createAccountMappingMigrationDialog
+      createAccountMappingMigrationDialog,
+      // v1.5.3 round 6：补全 preview 所需 factory（业务代码不直接用，仅 preview 链路调）
+      createAmountSplitRulesDialog,
+      createBillSplitRowsDialog,
+      createBillSplitMappingsDialog,
+      createBalanceAddonManagerDialog
     };
   }
 

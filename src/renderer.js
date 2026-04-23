@@ -208,7 +208,12 @@ const {
   createTemplateManagerDialog,
   createMappingDialog,
   createAccountMappingDialog,
-  createAccountMappingMigrationDialog
+  createAccountMappingMigrationDialog,
+  // v1.5.3 round 6：补全 preview 所需 factory（仅 preview 链路使用）
+  createAmountSplitRulesDialog,
+  createBillSplitRowsDialog,
+  createBillSplitMappingsDialog,
+  createBalanceAddonManagerDialog
 } = window.__rendererDialogs.createRendererDialogs({
   state,
   elements,
@@ -233,7 +238,17 @@ const {
   applyTemplateRenamePreviewState,
   applyBigAccountManagerPreviewState,
   applyBigAccountManagerDropdownPreviewState,
-  applyBigAccountSelectionPreviewState
+  applyBigAccountSelectionPreviewState,
+  // v1.5.3 round 6：补全的 9 个 modal preview
+  applyMonthlyBalanceExportDialogPreviewState,
+  applyManualBalanceSeedDialogPreviewState,
+  applyBalanceAddonManagerPreviewState,
+  applyExportScopeDialogPreviewState,
+  applyAmountSplitRulesDialogPreviewState,
+  applyBillSplitRowsDialogPreviewState,
+  applyBillSplitMappingsDialogPreviewState,
+  applyRememberOrderMismatchDialogPreviewState,
+  applyAccountMappingMigrationDialogPreviewState
 } = window.__rendererPreviews.createRendererPreviews({
   state,
   elements,
@@ -259,6 +274,16 @@ const {
   createTemplateRenameDialog,
   createBigAccountManagerDialog,
   createBigAccountSelectionDialog,
+  // v1.5.3 round 6：补全 preview 所需 factory
+  createMonthlyBalanceExportDialog,
+  createManualBalanceSeedDialog,
+  createBalanceAddonManagerDialog,
+  createExportScopeDialog,
+  createAmountSplitRulesDialog,
+  createBillSplitRowsDialog,
+  createBillSplitMappingsDialog,
+  createRememberOrderMismatchDialog,
+  createAccountMappingMigrationDialog,
   closeModal,
   openBackgroundPalette
 });
@@ -3147,6 +3172,42 @@ async function initialize() {
     setTimeout(() => {
       applyNewAccountPreviewState();
       openBackgroundPalette();
+    }, 120);
+  } else if (info.previewModal === 'monthly-balance-export-dialog') {
+    setTimeout(() => {
+      applyMonthlyBalanceExportDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'manual-balance-seed-dialog') {
+    setTimeout(() => {
+      applyManualBalanceSeedDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'balance-addon-manager') {
+    setTimeout(() => {
+      applyBalanceAddonManagerPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'export-scope-dialog') {
+    setTimeout(() => {
+      applyExportScopeDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'amount-split-rules-dialog') {
+    setTimeout(() => {
+      applyAmountSplitRulesDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'bill-split-rows-dialog') {
+    setTimeout(() => {
+      applyBillSplitRowsDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'bill-split-mappings-dialog') {
+    setTimeout(() => {
+      applyBillSplitMappingsDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'remember-order-mismatch-dialog') {
+    setTimeout(() => {
+      applyRememberOrderMismatchDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'account-mapping-migration-dialog') {
+    setTimeout(() => {
+      applyAccountMappingMigrationDialogPreviewState();
     }, 120);
   }
 
