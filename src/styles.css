@@ -2426,6 +2426,25 @@ select {
   font-size: 14px;
 }
 
+/* v2.0.0: Pending 主模块面板布局
+ * 中列（导入文件 / 开始运行 / 状态框）垂直堆叠；规则管理、导出差异分列两侧，沿中列垂直中线对齐 */
+.pending-module-grid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+  padding: 16px 0;
+}
+.pending-center-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+.pending-side-btn {
+  align-self: center;
+}
+
 /* v2.0.0: Pending 规则管理对话框 */
 .pending-rule-dialog {
   width: auto;
