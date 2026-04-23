@@ -90,3 +90,38 @@
 **check-vars 自查（T1-T4 累积）**：
 - Important-skeleton: `ipcRenderer` — preload 新 pending 对象，main 同步注册 3 handler ✅
 - Runtime-state: `MODULES` / `elements` / `state` / `app` — 均为新增引用，未破坏现有语义 ✅
+
+---
+
+### T5 完成（import worker + 校验 + 批量 INSERT）
+
+**动作**：
+- 新增 `src/backend/pending-import/validator.js`
+  - `validateHeaders(row)` — 严格对比 PENDING_COLUMNS（顺序 + 内容）
+  - `validateFundType(value)` — ∈ {提现/退票/充值} 枚举
+  - `computeRowHash(cells)` — SHA-1 拼串（SOH `\u0001` 分隔符）
+- 新增 `src/backend/pending-import/worker.js`
+  - child process 入口：`node worker.js <jobMetaJson>`
+  - jobMeta = `{ dbPath, yearMonth, files, archivePath? }`
+  - 事件流到 stdout：`progress` / `error` / `complete`
+  - 退出码：0 成功 / 1 校验失败 / 2 系统错误
+  - DB 写入：`BEGIN` → `deleteMonth`（覆盖）→ prepared statement 逐行 INSERT → `upsertMonthMeta` → `COMMIT`；任一失败 `ROLLBACK`
+- 新增 `src/backend/pending-db/month-repository.js`
+  - countRowsInMonth / listMonths / getMonthMeta / upsertMonthMeta / deleteMonth
+  - `createRowInserter(db)` 返回 prepared statement 闭包（31 列 INSERT）
+- 新增 `scripts/test-v2.0.0-pending-import.js` + package.json `test:v2.0.0:pending-import` script
+  - 21 断言，7 场景：happy / 表头错 / fund_type 错 / 多文件合并 / 跨文件冲突 / DB 状态 / 覆盖模式
+
+**验证**：
+- `node --check` T5 所有新文件绿
+- `npm run test:v2.0.0:pending-import` → 21/21 全过
+- `npm run smoke` → 通过（v1.5.3 现有功能不回退）
+
+**check-vars 自查（T5 增量）**：
+- T5 只改动 src/backend/pending-* 下新文件；现有清单变量 0 命中
+- 新候选升格：`PENDING_COLUMNS`（跨 4 文件：migrations.js / columns.js / validator.js / worker.js）—— T6+ 继续扩散后跑 scan:vars 评估升格到 Critical
+
+**T5 关键决策**：
+- worker **内部再做 `deleteMonth`**：防御性，即使父进程忘了删（T6 实现 session 时会显式删），worker 仍能保证一个 year_month 对应一套数据
+- child process 启动先不加 `--max-old-space-size=8192`（T6 主进程 spawn 时加；单元测试走常规 heap 也够 happy path）
+- Errors 收集模式：校验阶段**收集所有错误**（不 early exit），让用户一次看到所有问题后批量修（不是打地鼠式逐条）
