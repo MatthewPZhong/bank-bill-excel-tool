@@ -2443,7 +2443,8 @@ select {
   gap: 32px;
   justify-content: center;
   align-items: flex-start;
-  margin-bottom: 24px;
+  /* 与"完成/取消"按钮行之间保留约一行（select 44px + gap 10px）= 54px 间距 */
+  margin-bottom: 54px;
 }
 .pending-rule-column {
   flex: 1 1 0;
