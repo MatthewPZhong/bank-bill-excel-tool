@@ -2434,7 +2434,7 @@ select {
   display: flex;
   align-items: stretch; /* 左列与右列同高 → 左列内两按钮能 space-between 顶/底对齐 */
   justify-content: center;
-  gap: 40px;
+  gap: 96px;
   padding: 16px 0;
 }
 .pending-left-column {
