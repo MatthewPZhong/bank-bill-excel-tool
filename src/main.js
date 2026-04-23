@@ -5,6 +5,9 @@ const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage } = require('electron');
 const { AppDatabase } = require('./backend/database');
+const { openPendingDb } = require('./backend/pending-db');
+const PENDING_COLUMNS = require('./backend/pending-db/columns');
+const pendingRuleRepo = require('./backend/pending-db/rule-repository');
 const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
 const { groupBigAccountRows } = require('./backend/database/utils');
 const {
@@ -85,6 +88,7 @@ if (process.platform === 'win32') {
 
 let mainWindow = null;
 let database = null;
+let pendingDb = null;
 let lastGeneratedExports = {
   detail: null,
   balance: null,
@@ -8667,6 +8671,33 @@ function registerNewAccountHandlers() {
   ipcMain.handle('new-account:export', () => {
     return exportGeneratedFile(lastGeneratedExports.newAccount, '暂无可导出的新开账户余额账单', '导出新开账户余额账单');
   });
+
+  ipcMain.handle('pending:columns', () => PENDING_COLUMNS.slice());
+
+  ipcMain.handle('pending:rule:get', () => {
+    if (!pendingDb) return null;
+    try {
+      return pendingRuleRepo.getRule(pendingDb);
+    } catch (err) {
+      try {
+        appendActivityLogEntry({
+          level: 'error',
+          message: 'pending:rule:get 失败',
+          details: [String(err && err.stack ? err.stack : err)]
+        });
+      } catch (_logErr) {
+        // swallow
+      }
+      return null;
+    }
+  });
+
+  ipcMain.handle('pending:rule:save', (_event, payload) => {
+    if (!pendingDb) {
+      throw new Error('Pending DB 未初始化，无法保存规则');
+    }
+    return pendingRuleRepo.upsertRule(pendingDb, payload || {});
+  });
 }
 
 app.whenReady()
@@ -8678,6 +8709,21 @@ app.whenReady()
     database = new AppDatabase(dataPath);
     database.init();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
+
+    try {
+      pendingDb = openPendingDb(app.getPath('userData'));
+    } catch (pendingDbErr) {
+      pendingDb = null;
+      try {
+        appendActivityLogEntry({
+          level: 'error',
+          message: 'Pending DB 初始化失败（v2.0.0）',
+          details: [String(pendingDbErr && pendingDbErr.stack ? pendingDbErr.stack : pendingDbErr)]
+        });
+      } catch (_logErr) {
+        // swallow
+      }
+    }
 
     // v1.5.3 R2（D15）：一次性迁移 own-accounts/*.json → template_big_accounts
     // 失败不阻塞启动：异常由迁移模块内部捕获，返回 status='failed' 时记录到

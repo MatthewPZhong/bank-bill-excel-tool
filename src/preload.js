@@ -86,5 +86,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
   newAccount: {
     generate: (payload) => ipcRenderer.invoke('new-account:generate', payload),
     exportFile: () => ipcRenderer.invoke('new-account:export')
+  },
+  pending: {
+    getColumns: () => ipcRenderer.invoke('pending:columns'),
+    getRule: () => ipcRenderer.invoke('pending:rule:get'),
+    saveRule: (payload) => ipcRenderer.invoke('pending:rule:save', payload)
   }
 });

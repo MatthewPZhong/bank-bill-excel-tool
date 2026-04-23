@@ -1,0 +1,37 @@
+// Pending.xlsx 模板 31 列表头常量
+// 与 assets/Pending.xlsx Sheet1 第 1 行严格对齐（顺序 + 内容）
+// 导入时 validator.js 用此常量校验表头；migrations.js 用此常量建 pending_rows 表的 31 列
+
+module.exports = Object.freeze([
+  'pending类型',
+  'pending资金类型',
+  '账单类型',
+  'billDate',
+  'valueDate',
+  '平账账期',
+  '业务BU',
+  '对手业务BU',
+  '财务BU',
+  '主体',
+  '对账类型',
+  'recon_id',
+  '金额',
+  '币种',
+  'order_no',
+  'acc_id',
+  'finish_time',
+  '穿透ID',
+  'channel',
+  'merchant_id',
+  'bank_ref',
+  '对账明细ID',
+  '对账单ID',
+  'PendingBizId',
+  '备注',
+  '计算金额',
+  '计算币种',
+  '是否拆分Pending',
+  '穿透节点ID',
+  '业务部门（流水）',
+  '主体（流水）',
+]);
