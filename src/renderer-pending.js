@@ -128,6 +128,8 @@ window.__rendererPending = (function () {
     }
 
     // ========== 规则管理对话框 ==========
+    // 布局：左上标题 | 两列并排（对账字段 / 对账内容）| 下方取消+完成
+    // 每列 N 行单选下拉；第 1 行 "新增"，第 2 行起 "删除"
 
     function buildRuleDialogNode({ columns, currentRule }) {
       const overlay = document.createElement('div');
@@ -137,35 +139,96 @@ window.__rendererPending = (function () {
       overlay.appendChild(dialog);
 
       const title = document.createElement('div');
-      title.className = 'alert-message';
+      title.className = 'pending-rule-title';
       title.textContent = 'Pending 数据筛选规则';
       dialog.appendChild(title);
 
-      function buildSection(labelText, selectedValues) {
-        const row = document.createElement('div');
-        row.className = 'pending-rule-row';
-        const label = document.createElement('label');
-        label.textContent = labelText;
-        label.className = 'pending-rule-label';
-        row.appendChild(label);
-        const select = document.createElement('select');
-        select.multiple = true;
-        select.size = Math.min(10, columns.length);
-        select.className = 'pending-rule-select';
-        columns.forEach((col) => {
-          const option = document.createElement('option');
-          option.value = col;
-          option.textContent = col;
-          if (selectedValues && selectedValues.includes(col)) option.selected = true;
-          select.appendChild(option);
-        });
-        row.appendChild(select);
-        dialog.appendChild(row);
-        return select;
+      const columnsWrap = document.createElement('div');
+      columnsWrap.className = 'pending-rule-columns';
+      dialog.appendChild(columnsWrap);
+
+      function buildColumn(labelText, initialValues) {
+        const column = document.createElement('div');
+        column.className = 'pending-rule-column';
+
+        const header = document.createElement('div');
+        header.className = 'pending-rule-column-header';
+        header.textContent = labelText;
+        column.appendChild(header);
+
+        const rowsBox = document.createElement('div');
+        rowsBox.className = 'pending-rule-rows';
+        column.appendChild(rowsBox);
+        columnsWrap.appendChild(column);
+
+        function createFieldRow(initialValue) {
+          const fieldRow = document.createElement('div');
+          fieldRow.className = 'pending-rule-field-row';
+
+          const select = document.createElement('select');
+          select.className = 'mapping-select pending-rule-field-select';
+          const placeholder = document.createElement('option');
+          placeholder.value = '';
+          placeholder.textContent = '（请选择）';
+          select.appendChild(placeholder);
+          columns.forEach((col) => {
+            const opt = document.createElement('option');
+            opt.value = col;
+            opt.textContent = col;
+            if (initialValue && initialValue === col) opt.selected = true;
+            select.appendChild(opt);
+          });
+          fieldRow.appendChild(select);
+
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'pending-rule-field-btn';
+          fieldRow.appendChild(btn);
+
+          function updateBtn() {
+            const isFirst = rowsBox.firstChild === fieldRow;
+            btn.textContent = isFirst ? '新增' : '删除';
+            btn.dataset.role = isFirst ? 'add' : 'remove';
+          }
+          btn.addEventListener('click', () => {
+            if (btn.dataset.role === 'add') {
+              const newRow = createFieldRow('');
+              rowsBox.appendChild(newRow);
+              refreshAllRowButtons();
+            } else {
+              rowsBox.removeChild(fieldRow);
+              refreshAllRowButtons();
+            }
+          });
+
+          // 初始化按钮状态（由外层 refreshAllRowButtons 调整）
+          fieldRow._updateBtn = updateBtn;
+          return fieldRow;
+        }
+
+        function refreshAllRowButtons() {
+          Array.from(rowsBox.children).forEach((r) => r._updateBtn && r._updateBtn());
+        }
+
+        // 初始行：有历史值则每个值一行；否则一行空
+        const seed = Array.isArray(initialValues) && initialValues.length > 0 ? initialValues : [''];
+        seed.forEach((v) => rowsBox.appendChild(createFieldRow(v)));
+        refreshAllRowButtons();
+
+        function collectValues() {
+          const out = [];
+          const seen = new Set();
+          Array.from(rowsBox.querySelectorAll('select')).forEach((s) => {
+            const v = s.value;
+            if (v && !seen.has(v)) { seen.add(v); out.push(v); }
+          });
+          return out;
+        }
+        return { collectValues };
       }
 
-      const matchSelect = buildSection('对账字段', currentRule ? currentRule.matchFields : []);
-      const compareSelect = buildSection('对账内容', currentRule ? currentRule.compareFields : []);
+      const matchCol = buildColumn('对账字段', currentRule ? currentRule.matchFields : []);
+      const compareCol = buildColumn('对账内容', currentRule ? currentRule.compareFields : []);
 
       const actions = document.createElement('div');
       actions.className = 'dialog-actions center';
@@ -179,8 +242,8 @@ window.__rendererPending = (function () {
       saveBtn.type = 'button';
       saveBtn.textContent = '完成';
       saveBtn.addEventListener('click', () => {
-        const matchFields = Array.from(matchSelect.selectedOptions).map((o) => o.value);
-        const compareFields = Array.from(compareSelect.selectedOptions).map((o) => o.value);
+        const matchFields = matchCol.collectValues();
+        const compareFields = compareCol.collectValues();
         if (matchFields.length === 0) {
           openModal(createAlertDialog('请至少选择一个"对账字段"（匹配 key）'));
           return;

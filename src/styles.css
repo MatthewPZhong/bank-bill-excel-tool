@@ -2425,3 +2425,72 @@ select {
   gap: 8px;
   font-size: 14px;
 }
+
+/* v2.0.0: Pending 规则管理对话框 */
+.pending-rule-dialog {
+  width: auto;
+  max-width: 720px;
+}
+.pending-rule-title {
+  text-align: left;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 20px;
+}
+.pending-rule-columns {
+  display: flex;
+  gap: 32px;
+  justify-content: center;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+.pending-rule-column {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 300px;
+}
+.pending-rule-column-header {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+.pending-rule-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  align-items: center;
+}
+.pending-rule-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pending-rule-field-select {
+  width: 200px;
+  min-width: 200px;
+  max-width: 200px;
+}
+.pending-rule-field-btn {
+  background: none;
+  border: none;
+  color: var(--accent, #9a5a1a);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: background 120ms ease;
+}
+.pending-rule-field-btn:hover {
+  background: rgba(154, 90, 26, 0.08);
+}
+.pending-rule-field-btn[data-role="remove"] {
+  color: var(--danger, #a53d30);
+}
+.pending-rule-field-btn[data-role="remove"]:hover {
+  background: rgba(165, 61, 48, 0.1);
+}
