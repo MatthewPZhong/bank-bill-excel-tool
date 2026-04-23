@@ -3003,10 +3003,13 @@
                 currentBillSplitMeta = latest.billSplitMeta || { signedAmountSourceField: '' };
               }
             } catch (_error) { /* ignore */ }
+            // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
+            // 虽然 ...payload spread 会自动带过来，显式声明可防未来 spread 漏写 / payload 形状重构
             openModal(createMappingDialog({
               ...payload,
               mappings: draftMappings,
               bigAccounts: draftBigAccounts,
+              bigAccountsLoadedWithOwn,
               fixedAssignments: currentFixedAssignments,
               amountSplitRules: currentAmountSplitRules,
               billSplitMappings: currentBillSplitMappings,
@@ -3031,10 +3034,12 @@
           billSplitGroupFields: billSplitGroupFields.slice(),
           onDone: (nextMappings) => {
             currentBillSplitMappings = nextMappings.map((m) => ({ ...m }));
+            // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
             openModal(createMappingDialog({
               ...payload,
               mappings: draftMappings,
               bigAccounts: draftBigAccounts,
+              bigAccountsLoadedWithOwn,
               fixedAssignments: currentFixedAssignments,
               amountSplitRules: currentAmountSplitRules,
               billSplitMappings: currentBillSplitMappings,
@@ -3044,10 +3049,12 @@
             }));
           },
           onCancel: () => {
+            // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
             openModal(createMappingDialog({
               ...payload,
               mappings: draftMappings,
               bigAccounts: draftBigAccounts,
+              bigAccountsLoadedWithOwn,
               fixedAssignments: currentFixedAssignments,
               amountSplitRules: currentAmountSplitRules,
               billSplitMappings: currentBillSplitMappings,
@@ -3180,19 +3187,23 @@
           initialRules: currentAmountSplitRules,
           onDone: (nextRules) => {
             currentAmountSplitRules = nextRules.map((rule) => ({ ...rule }));
+            // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
             openModal(createMappingDialog({
               ...payload,
               mappings: draftMappings,
               bigAccounts: draftBigAccounts,
+              bigAccountsLoadedWithOwn,
               fixedAssignments: currentFixedAssignments,
               amountSplitRules: currentAmountSplitRules
             }));
           },
           onCancel: () => {
+            // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
             openModal(createMappingDialog({
               ...payload,
               mappings: draftMappings,
               bigAccounts: draftBigAccounts,
+              bigAccountsLoadedWithOwn,
               fixedAssignments: currentFixedAssignments,
               amountSplitRules: currentAmountSplitRules
             }));
@@ -3307,10 +3318,12 @@
 
           openModal(createAlertDialog(result.message, {
             onConfirm: () => {
+              // v1.5.3 R2 round 4 (Codex defensive)：显式透传 bigAccountsLoadedWithOwn
               openModal(createMappingDialog({
                 ...payload,
                 mappings,
                 bigAccounts: draftBigAccounts,
+                bigAccountsLoadedWithOwn,
                 fixedAssignments: currentFixedAssignments,
                 amountSplitRules: currentAmountSplitRules
               }));

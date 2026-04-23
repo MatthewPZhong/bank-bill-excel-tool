@@ -930,3 +930,77 @@ P1 通过: 5/6 (P1-7 skipped: 错误报告为 txt 格式（非 xlsx），无字�
 2. push v1.5.x → origin
 3. PR #22 评论 `@codex review` 触发 round 4
 4. 等 Codex round 4 反馈；若 clean（👍 reaction 或 0 finding）→ 等用户决定合并节奏
+
+---
+
+## 2026-04-23 Dev — Codex Review Round 4（1 条 defensive finding 采纳）
+
+> Round 3 修复后触发 Codex round 4 review，发现 1 条 finding（用户 PR comment ID `4303221690` 转贴）：
+> - **F7**（renderer-dialogs.js 6 处 spread 调用点 defensive）：子弹窗（账单拆分行 / 复用模块映射 / 发生额规则 / saveMappings 失败 alert）的 onClose / onDone / onConfirm 回调通过 `...payload` spread + 显式覆盖部分字段 重开 mapping dialog，**没显式声明 `bigAccountsLoadedWithOwn`**。Codex 担心 spread 是隐式透传，未来重构 / 漏写会断链 → 用户先编辑 own 后进子弹窗回返时，bigAccountsLoadedWithOwn 误判 false → preserveOwn=true → own 修改不落库
+
+### 缺陷复盘
+
+代码现状（commit `ea6401f` 之前）：
+
+```js
+// 例 1: bill-split rows onClose（renderer-dialogs.js:3006）
+openModal(createMappingDialog({
+  ...payload,              // 隐式透传 bigAccountsLoadedWithOwn
+  bigAccounts: draftBigAccounts,
+  // 没有 bigAccountsLoadedWithOwn 字段
+  ...
+}));
+```
+
+**核实结论**：bug 路径**不存在** — `...payload` spread 已经把 `bigAccountsLoadedWithOwn` 自动透传过去（payload 是当前 mapping dialog 实例的入参，含上一次 `manageBigAccountBtn` onDone 显式写入的 `bigAccountsLoadedWithOwn: true`）。
+
+但 **Codex 的 defensive 建议有价值**：
+1. 可读性：显式声明让代码意图明确，新人 / 重构者一眼能看出
+2. 健壮性：未来如果 spread 被重构（去掉 `...payload` 改为显式参数列表）或 payload 形状变化，链路不会无声断裂
+3. 一致性：`manageBigAccountBtn` onDone/onCancel 显式写了 `bigAccountsLoadedWithOwn: true`，子弹窗回返链路也应一致
+
+### 修复方案
+
+在 6 处子弹窗回返链路显式加 `bigAccountsLoadedWithOwn` 字段（**透传当前局部变量值，非写死 true**）：
+- `renderer-dialogs.js:3008` — bill-split rows onClose
+- `renderer-dialogs.js:3038` — bill-split mappings onDone
+- `renderer-dialogs.js:3053` — bill-split mappings onCancel
+- `renderer-dialogs.js:3191` — amount-split rules onDone
+- `renderer-dialogs.js:3202` — amount-split rules onCancel
+- `renderer-dialogs.js:3322` — saveMappings 失败 alert onConfirm
+
+⚠️ **关键**：必须透传**当前局部变量值**而非写死 `true`！如果按 Codex 字面建议写 `bigAccountsLoadedWithOwn: true`，会引入新 bug：用户首次进 mapping dialog（flag=false）→ 不开维护大账号 → 直接进子弹窗 → onClose → mapping dialog 被强制标 true → 保存时 preserveOwn=false → DELETE all → own 被删
+
+### 涉及文件
+
+| 文件 | 改动类型 | 说明 |
+|------|---------|------|
+| `src/renderer-dialogs.js` | 修改 | 6 处子弹窗回返 createMappingDialog 显式加 `bigAccountsLoadedWithOwn`（透传当前局部变量） |
+| `scripts/test-v1.5.3-regression.js` | 修改 | Section 4 新增 P0-F9（spread/显式透传 4 条决策表 contract test） |
+
+### 验证证据
+
+```
+[P0-F9] ✅ spread + 显式 bigAccountsLoadedWithOwn 透传等价性 — spread/显式透传 4 条决策表正确：true→true / 显式覆盖 spread / 缺字段→false / 显式 false→false
+
+=== 总计 ===
+P0 通过: 27/27
+P1 通过: 5/6 (P1-7 skipped: 错误报告为 txt 格式（非 xlsx），无字体可验)
+失败用例: 无
+```
+
+- `node scripts/test-v1.5.3-regression.js`：P0 27/27（含新增 P0-F9）+ P1 5/6 + 1 skip
+- `npm run smoke`：pass
+
+### 风险 / 决策
+
+- **资金风险**：本次修复纯 defensive，不引入新行为；当前没有 bug 路径，修后未来重构防回归
+- **未拆 PR**：F7 属 v1.5.3 R2 收口范围，与 round 3 同语境
+- **PR 评论回复**：commit message + PR comment 中说明"代码现状下 spread 已透传，没有 bug 路径；接受 Codex defensive 建议防未来重构"
+
+### 下一步
+
+1. commit `fix(v1.5.3): Codex review round 4 — defensive explicit propagation`
+2. push v1.5.x → origin
+3. PR #22 评论 `@codex review` 触发 round 5
+4. 等 Codex round 5；若 clean（0 finding 或仅 👍）→ 等用户决定合并

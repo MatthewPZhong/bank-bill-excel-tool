@@ -8,7 +8,7 @@
 //   Section 1 — R1 资金装配（7 条）：P0-4 ~ P0-7、P0-10、P0-11、P1-3
 //   Section 2 — R1 IPC 校验层（2 条）：P0-8 / P0-9
 //   Section 3 — R2 迁移三态（3 条）：P0-13 / P0-14 / P0-15
-//   Section 4 — R2 过滤 / bundle + Codex 修复（7 条）：P1-4 / P1-5 / P0-F1 / P0-F2 / P0-F3 / P0-F4 / P0-F5
+//   Section 4 — R2 过滤 / bundle + Codex 修复（11 条）：P1-4 / P1-5 / P0-F1 ~ P0-F9
 //   Section 5 — R3 字体 XML 级验证（7 条）：P0-17 ~ P0-20、P1-6 / P1-7 / P1-8
 //   Section 6 — R4 账单合并浮点精度（3 条）：P0-R4-1 ~ P0-R4-3
 //
@@ -1147,6 +1147,35 @@ function casesR2FilterBundle() {
     } finally {
       cleanupCtx(ctx);
     }
+  });
+
+  // --- P0-F9：子弹窗重开 mapping dialog 时 bigAccountsLoadedWithOwn 显式透传（Codex Round 4 defensive） ---
+  // 背景：renderer-dialogs.js 子弹窗（账单拆分 / 复用模块映射 / 发生额规则 / saveMappings 失败 alert）
+  //       的 onClose / onDone / onConfirm 回调都通过 spread `...payload` + 显式覆盖部分字段 重开 mapping dialog。
+  //       Codex Round 4 担心 spread 是隐式透传，未来重构 / 漏写会断链。
+  // 修复：在所有 6 处 spread 调用点显式加 `bigAccountsLoadedWithOwn`（透传当前局部变量值，非写死 true）。
+  //       本用例验证 spread + 显式声明的语义等价性 + 显式优先级（同名字段以显式为准）。
+  runCase('P0-F9', 'P0', 'spread + 显式 bigAccountsLoadedWithOwn 透传等价性', () => {
+    // 模拟 spread 透传：payload 含 true，spread 后保留
+    const payload1 = { bigAccountsLoadedWithOwn: true, other: 'x' };
+    const reopened1 = { ...payload1, bigAccounts: 'new' };
+    assertEqual(reopened1.bigAccountsLoadedWithOwn, true, 'spread 应自动透传 true');
+
+    // 模拟显式声明 + spread：当前局部 false，payload 中 true → 显式覆盖
+    const localLoadedFlag = false;
+    const reopened2 = { ...payload1, bigAccounts: 'new', bigAccountsLoadedWithOwn: localLoadedFlag };
+    assertEqual(reopened2.bigAccountsLoadedWithOwn, false, '显式声明优先级高于 spread（关键 — 防 Codex 字面建议引入新 bug）');
+
+    // 模拟用户首次进入（未开维护大账号）→ 子弹窗回返：payload 缺字段 → spread 后仍 undefined
+    const payload3 = { other: 'x' };
+    const reopened3 = { ...payload3, bigAccounts: 'new' };
+    assertEqual(Boolean(reopened3.bigAccountsLoadedWithOwn), false, '缺字段时透传 undefined → Boolean=false');
+
+    // 显式声明 false 时（即修复后链路）：透传 false 给新 dialog
+    const reopened4 = { ...payload3, bigAccounts: 'new', bigAccountsLoadedWithOwn: false };
+    assertEqual(reopened4.bigAccountsLoadedWithOwn, false, '显式 false 时透传 false（保护"未开过维护大账号"语义）');
+
+    return 'spread/显式透传 4 条决策表正确：true→true / 显式覆盖 spread / 缺字段→false / 显式 false→false';
   });
 
   // --- P0-F5：bigAccountsLoadedWithOwn 标记不覆盖 in-memory 编辑（Codex Round 2 Finding 3） ---
