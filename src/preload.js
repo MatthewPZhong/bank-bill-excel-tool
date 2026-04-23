@@ -97,6 +97,15 @@ contextBridge.exposeInMainWorld('desktopApi', {
     exportErrorReport: () => ipcRenderer.invoke('pending:error:export-report'),
     onImportProgress: (listener) => {
       ipcRenderer.on('pending:import:progress', (_event, ev) => listener(ev));
+    },
+    reconcile: {
+      benchmark: (payload) => ipcRenderer.invoke('pending:reconcile:benchmark', payload),
+      run: (payload) => ipcRenderer.invoke('pending:reconcile:run', payload)
+    },
+    diff: {
+      listAllRuns: () => ipcRenderer.invoke('pending:diff:runs-list'),
+      listRunsForMonthPair: (payload) => ipcRenderer.invoke('pending:diff:runs-for-month-pair', payload),
+      getLatestRunForMonthPair: (payload) => ipcRenderer.invoke('pending:diff:latest-run-for', payload)
     }
   }
 });

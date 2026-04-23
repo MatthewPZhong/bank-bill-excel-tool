@@ -9,6 +9,9 @@ const { openPendingDb, PENDING_DB_FILENAME } = require('./backend/pending-db');
 const PENDING_COLUMNS = require('./backend/pending-db/columns');
 const pendingRuleRepo = require('./backend/pending-db/rule-repository');
 const pendingMonthRepo = require('./backend/pending-db/month-repository');
+const pendingDiffRepo = require('./backend/pending-db/diff-repository');
+const pendingReconcileEngine = require('./backend/pending-reconcile/engine');
+const pendingReconcileBenchmark = require('./backend/pending-reconcile/benchmark');
 const { createPendingSession } = require('./main-process/pending-session');
 const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
 const { groupBigAccountRows } = require('./backend/database/utils');
@@ -8757,6 +8760,55 @@ function registerNewAccountHandlers() {
       return pendingSession.exportErrorReport(result.filePath);
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  ipcMain.handle('pending:reconcile:benchmark', (_event, payload = {}) => {
+    if (!pendingDb) throw new Error('Pending DB 未初始化');
+    const rule = pendingRuleRepo.getRule(pendingDb);
+    if (!rule || !rule.matchFields || rule.matchFields.length === 0) {
+      throw new Error('规则未设置（matchFields 为空）');
+    }
+    return pendingReconcileBenchmark.estimateRunTimeMs(pendingDb, {
+      upperMonth: payload.upperMonth,
+      lowerMonth: payload.lowerMonth,
+      matchFields: rule.matchFields
+    });
+  });
+
+  ipcMain.handle('pending:reconcile:run', (_event, payload = {}) => {
+    if (!pendingDb) throw new Error('Pending DB 未初始化');
+    const rule = pendingRuleRepo.getRule(pendingDb);
+    if (!rule || !rule.matchFields || rule.matchFields.length === 0) {
+      throw new Error('规则未设置（matchFields 为空）');
+    }
+    return pendingReconcileEngine.runReconciliation(pendingDb, {
+      upperMonth: payload.upperMonth,
+      lowerMonth: payload.lowerMonth,
+      rule
+    });
+  });
+
+  ipcMain.handle('pending:diff:runs-list', () => {
+    if (!pendingDb) return [];
+    try { return pendingDiffRepo.listAllRuns(pendingDb); } catch (_e) { return []; }
+  });
+
+  ipcMain.handle('pending:diff:runs-for-month-pair', (_event, payload = {}) => {
+    if (!pendingDb) return [];
+    try {
+      return pendingDiffRepo.listRunsForMonthPair(pendingDb, payload.upperMonth, payload.lowerMonth);
+    } catch (_e) {
+      return [];
+    }
+  });
+
+  ipcMain.handle('pending:diff:latest-run-for', (_event, payload = {}) => {
+    if (!pendingDb) return null;
+    try {
+      return pendingDiffRepo.getLatestRunForMonthPair(pendingDb, payload.upperMonth, payload.lowerMonth);
+    } catch (_e) {
+      return null;
     }
   });
 }

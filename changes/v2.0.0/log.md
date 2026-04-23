@@ -169,3 +169,43 @@
 **T6 偏离 PRD / Dev 决策**：
 - 无偏离 PRD
 - `runImport` 用 Promise 化 + 事件回调双通道：最终结果走 Promise 返回（简化 renderer 侧 await）；进度走 `onProgress` 回调（主进程转发 `webContents.send`）—— 比纯事件流好理解
+
+---
+
+### T7 完成（对账 engine + benchmark — 资金敏感红线）
+
+**动作**：
+- 新增 `src/backend/pending-db/diff-repository.js`：createRun / updateRunStats /
+  getRunById / listAllRuns / listRunsForMonthPair / getLatestRunForMonthPair /
+  listDiffRows
+- 新增 `src/backend/pending-reconcile/engine.js`：
+  - `ensureMatchIndex(db, matchFields)` — 动态 `CREATE INDEX IF NOT EXISTS` 基于
+    SHA-1 哈希命名（避免长名）（OT-T3 lazy 建索引）
+  - `runReconciliation(db, { upperMonth, lowerMonth, rule })` 三段 SQL:
+    - new: lower 有 + upper 无（`NOT EXISTS`）
+    - missing: upper 有 + lower 无（`NOT EXISTS`）
+    - changed: INNER JOIN on matchFields + (compareFields 任一 `IS NOT`)
+  - 全部 SQL 用 `IS` / `IS NOT`（OT-T4 NULL 友好）
+  - `BEGIN / COMMIT` 包裹；任一失败 `ROLLBACK`
+- 新增 `src/backend/pending-reconcile/benchmark.js`：
+  - `estimateRunTimeMs` — LIMIT 10000 NOT EXISTS JOIN 取样，线性外推
+- `src/main.js` 5 IPC: pending:reconcile:{benchmark,run} + pending:diff:{runs-list,
+  runs-for-month-pair,latest-run-for}
+- `src/preload.js` pending.reconcile.{benchmark,run} + pending.diff.{listAllRuns,
+  listRunsForMonthPair,getLatestRunForMonthPair}
+- 新增 `scripts/test-v2.0.0-pending-reconcile.js`（7 场景 23 断言）
+- package.json 加 `test:v2.0.0:pending-reconcile` script
+
+**资金敏感测试覆盖**（T1 手工 4 × 4 样本）：
+- upper: A001/A002/A003/A004；lower: A001/A002/A005/A006
+- 规则 match=[order_no] compare=[金额,币种]
+- 预期: new=2(A005,A006) / missing=2(A003,A004) / changed=1(A002 金额 200→250)
+- 实测: 全部 9 个断言精确匹配（含行级 diff_rows 内容核对）
+
+**其他测试**：
+- T2 多 matchField 规则变严
+- T3 compareFields=[] → changed 恒 0
+- T4 多次 run 全保留 + getLatestRunForMonthPair 正确
+- T5 benchmark 返回数字
+- T6 ensureMatchIndex 幂等
+- T7 非法 matchField 抛错
