@@ -90,6 +90,13 @@ contextBridge.exposeInMainWorld('desktopApi', {
   pending: {
     getColumns: () => ipcRenderer.invoke('pending:columns'),
     getRule: () => ipcRenderer.invoke('pending:rule:get'),
-    saveRule: (payload) => ipcRenderer.invoke('pending:rule:save', payload)
+    saveRule: (payload) => ipcRenderer.invoke('pending:rule:save', payload),
+    listMonths: () => ipcRenderer.invoke('pending:months:list'),
+    pickFiles: () => ipcRenderer.invoke('pending:import:pick-files'),
+    startImport: (payload) => ipcRenderer.invoke('pending:import:start', payload),
+    exportErrorReport: () => ipcRenderer.invoke('pending:error:export-report'),
+    onImportProgress: (listener) => {
+      ipcRenderer.on('pending:import:progress', (_event, ev) => listener(ev));
+    }
   }
 });

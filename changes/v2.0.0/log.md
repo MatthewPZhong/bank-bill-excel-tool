@@ -125,3 +125,47 @@
 - worker **内部再做 `deleteMonth`**：防御性，即使父进程忘了删（T6 实现 session 时会显式删），worker 仍能保证一个 year_month 对应一套数据
 - child process 启动先不加 `--max-old-space-size=8192`（T6 主进程 spawn 时加；单元测试走常规 heap 也够 happy path）
 - Errors 收集模式：校验阶段**收集所有错误**（不 early exit），让用户一次看到所有问题后批量修（不是打地鼠式逐条）
+
+---
+
+### T6 完成（导入入口 UI + session + 覆盖留底 + 报错链路）
+
+**动作**：
+- 新增 `src/main-process/pending-session.js`
+  - `runImport({ yearMonth, files, overwriteConfirmed, dbPath, onProgress })` —
+    Promise 化 worker spawn；自动 `--max-old-space-size=8192`
+  - 返回状态：`success` / `need-confirm`（existing count + importedAt 用于覆盖确认框）/ `error`
+  - 覆盖链路：overwriteConfirmed=true 且已有月 → `archiveExistingMonth` 写 xlsx 到
+    `{documents}/网银账单生成小助手/pending-archives/{YYYY-MM}/{YYYY-MM}-backup-{YYYYMMDDThhmmss}.xlsx`
+  - 报错缓存：worker exit 非 0 时把 errors 存到 session 内存；状态栏 clickable
+  - `exportErrorReport(savePath)`：把 errors 写 xlsx，schema = source_file / sheet_row / severity / message + 31 原列
+- `src/main.js` 注册 4 个 pending IPC：
+  - `pending:months:list` → month-repository.listMonths
+  - `pending:import:pick-files` → dialog.showOpenDialog 支持 multiSelections
+  - `pending:import:start` → session.runImport（进度事件转发 webContents.send）
+  - `pending:error:export-report` → dialog.showSaveDialog + session.exportErrorReport
+- `src/preload.js` pending 对象新增 5 个 API：listMonths / pickFiles / startImport /
+  exportErrorReport / onImportProgress（事件订阅）
+- `src/renderer-pending.js` 扩展：
+  - `buildImportMonthDialog`：年月下拉（current-9 ~ current+1 / 1-12）
+  - `handlePendingImportClick`：pickFiles → 年月选择 → startImport
+  - `startImport(files, yearMonth, overwriteConfirmed)`：
+    - need-confirm 返回 → 弹 createConfirmDialog → overwriteConfirmed=true 再跑
+    - success → 更新 state.pending.lastImportSummary + loadMonths
+    - error → state.pending.errorReportAvailable=true，状态栏 clickable
+  - `handleStatusBoxClick`：调 exportErrorReport IPC
+  - `computePendingStatusText` 新增 importing / errorReportAvailable 分支
+  - 订阅 onImportProgress 事件，实时更新 importingText
+- 新增 `scripts/test-v2.0.0-pending-session.js`（5 场景 19 断言）
+- package.json 加 `test:v2.0.0:pending-session` script
+
+**验证**：
+- `test:v2.0.0:pending-import` 21/21 过（T5 回归）
+- `test:v2.0.0:pending-session` 19/19 过：
+  - fresh 导入 / re-import need-confirm / overwrite + archive 内容正确（留底 xlsx 含 header + 2 旧行）/ 报错缓存 + xlsx 导出 / 成功后 errors 清理
+- `npm run smoke` 通过
+- `node --check` 全绿
+
+**T6 偏离 PRD / Dev 决策**：
+- 无偏离 PRD
+- `runImport` 用 Promise 化 + 事件回调双通道：最终结果走 Promise 返回（简化 renderer 侧 await）；进度走 `onProgress` 回调（主进程转发 `webContents.send`）—— 比纯事件流好理解

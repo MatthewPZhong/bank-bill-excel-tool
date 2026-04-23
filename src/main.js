@@ -5,9 +5,11 @@ const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage } = require('electron');
 const { AppDatabase } = require('./backend/database');
-const { openPendingDb } = require('./backend/pending-db');
+const { openPendingDb, PENDING_DB_FILENAME } = require('./backend/pending-db');
 const PENDING_COLUMNS = require('./backend/pending-db/columns');
 const pendingRuleRepo = require('./backend/pending-db/rule-repository');
+const pendingMonthRepo = require('./backend/pending-db/month-repository');
+const { createPendingSession } = require('./main-process/pending-session');
 const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
 const { groupBigAccountRows } = require('./backend/database/utils');
 const {
@@ -89,6 +91,10 @@ if (process.platform === 'win32') {
 let mainWindow = null;
 let database = null;
 let pendingDb = null;
+const pendingSession = createPendingSession({
+  getPendingDb: () => pendingDb,
+  getStorageRoot: () => ensureStorageRoot()
+});
 let lastGeneratedExports = {
   detail: null,
   balance: null,
@@ -8697,6 +8703,61 @@ function registerNewAccountHandlers() {
       throw new Error('Pending DB 未初始化，无法保存规则');
     }
     return pendingRuleRepo.upsertRule(pendingDb, payload || {});
+  });
+
+  ipcMain.handle('pending:months:list', () => {
+    if (!pendingDb) return [];
+    try { return pendingMonthRepo.listMonths(pendingDb); } catch (_err) { return []; }
+  });
+
+  ipcMain.handle('pending:import:pick-files', async () => {
+    const result = await dialog.showOpenDialog({
+      title: '选择 Pending 数据文件',
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      properties: ['openFile', 'multiSelections']
+    });
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return { cancelled: true };
+    }
+    return { cancelled: false, files: result.filePaths };
+  });
+
+  ipcMain.handle('pending:import:start', async (event, payload) => {
+    const { files, yearMonth, overwriteConfirmed = false } = payload || {};
+    if (!Array.isArray(files) || files.length === 0) {
+      return { status: 'error', errors: [{ severity: 'fatal', message: '未选择文件' }] };
+    }
+    if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return { status: 'error', errors: [{ severity: 'fatal', message: 'yearMonth 格式错误（应为 YYYY-MM）' }] };
+    }
+    const webContents = event.sender;
+    const dbPath = path.join(app.getPath('userData'), PENDING_DB_FILENAME);
+    return pendingSession.runImport({
+      yearMonth,
+      files,
+      overwriteConfirmed,
+      dbPath,
+      onProgress: (ev) => {
+        try { webContents.send('pending:import:progress', ev); } catch (_e) { /* swallow */ }
+      }
+    });
+  });
+
+  ipcMain.handle('pending:error:export-report', async () => {
+    if (!pendingSession.hasPendingErrorReport()) {
+      return { status: 'error', message: '无错误报告' };
+    }
+    const result = await dialog.showSaveDialog({
+      title: '保存 Pending 导入报错文件',
+      defaultPath: `pending-import-errors-${Date.now()}.xlsx`,
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+    });
+    if (result.canceled || !result.filePath) return { status: 'cancelled' };
+    try {
+      return pendingSession.exportErrorReport(result.filePath);
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
   });
 }
 

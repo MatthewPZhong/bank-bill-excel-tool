@@ -36,6 +36,7 @@
     "test:v1.5.2": "node scripts/test-v1.5.2-backend.js",
     "test:v1.5.2:sm": "node scripts/test-v1.5.2-state-machine.js",
     "test:v2.0.0:pending-import": "node scripts/test-v2.0.0-pending-import.js",
+    "test:v2.0.0:pending-session": "node scripts/test-v2.0.0-pending-session.js",
     "startup:measure": "node scripts/measure-startup.js",
     "scan:vars": "node scripts/scan-vars.js",
     "check:vars": "node scripts/check-vars.js"
