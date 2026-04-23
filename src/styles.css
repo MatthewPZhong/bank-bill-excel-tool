@@ -2478,6 +2478,10 @@ select {
 .pending-import-month-picker {
   margin-bottom: 20px;
 }
+.pending-reconcile-month-select {
+  width: 100%;
+  min-width: 200px;
+}
 .pending-rule-columns {
   display: flex;
   gap: 32px;

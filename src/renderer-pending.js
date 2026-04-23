@@ -485,19 +485,24 @@ window.__rendererPending = (function () {
       overlay.appendChild(dialog);
 
       const title = document.createElement('div');
-      title.className = 'alert-message';
+      title.className = 'pending-dialog-title';
       title.textContent = '请选取需要比对 Pending 数据的月份';
       dialog.appendChild(title);
 
-      function buildMonthSelect(labelText, preferValue) {
-        const row = document.createElement('div');
-        row.className = 'pending-rule-row';
-        const label = document.createElement('label');
-        label.className = 'pending-rule-label';
-        label.textContent = labelText;
-        row.appendChild(label);
+      // 两列 side-by-side（沿中线对称），每列 label + 单选下拉（mapping-text-input 样式）
+      const columnsWrap = document.createElement('div');
+      columnsWrap.className = 'pending-rule-columns';
+      dialog.appendChild(columnsWrap);
+
+      function buildMonthColumn(labelText, preferValue) {
+        const column = document.createElement('div');
+        column.className = 'pending-rule-column';
+        const header = document.createElement('div');
+        header.className = 'pending-rule-column-header';
+        header.textContent = labelText;
+        column.appendChild(header);
         const select = document.createElement('select');
-        select.className = 'pending-rule-select';
+        select.className = 'mapping-text-input pending-reconcile-month-select';
         months.forEach((m) => {
           const opt = document.createElement('option');
           opt.value = m;
@@ -505,13 +510,13 @@ window.__rendererPending = (function () {
           if (preferValue && m === preferValue) opt.selected = true;
           select.appendChild(opt);
         });
-        row.appendChild(select);
-        dialog.appendChild(row);
+        column.appendChild(select);
+        columnsWrap.appendChild(column);
         return select;
       }
 
-      const upperSelect = buildMonthSelect('上上个月 Pending 文件', defaultUpper);
-      const lowerSelect = buildMonthSelect('上个月 Pending 文件', defaultLower);
+      const upperSelect = buildMonthColumn('上上个月 Pending 文件', defaultUpper);
+      const lowerSelect = buildMonthColumn('上个月 Pending 文件', defaultLower);
 
       const actions = document.createElement('div');
       actions.className = 'dialog-actions center';
@@ -529,8 +534,8 @@ window.__rendererPending = (function () {
         const lower = lowerSelect.value;
         if (typeof onConfirm === 'function') onConfirm({ upper, lower });
       });
-      actions.appendChild(cancelBtn);
       actions.appendChild(confirmBtn);
+      actions.appendChild(cancelBtn);
       dialog.appendChild(actions);
       return overlay;
     }
