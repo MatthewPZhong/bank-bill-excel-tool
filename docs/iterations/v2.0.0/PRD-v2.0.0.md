@@ -663,3 +663,35 @@ v0 的 10 个 OT 已由用户逐条拍板，结果如下：
 ## 十二、实施记录
 
 > 由 PR merged + 归档后自动追加，PM 不需要手动填写。
+
+### PR #24（2026-04-24 merged，`cb934d9b`） — Reverse Sync #6 + Codex 二次 review 修复
+
+**主线改动**（8 项）：
+
+1. 状态框 idle 文案改 "欢迎使用小助手"（`src/renderer-pending.js` §5.4.8）
+2. 导出差异按钮放宽：DB 有任意历史 run 即启用（`src/renderer-pending.js` initialize + §5.6.1）
+3. 规则弹窗对账字段加序号 `1./2./...` + header `?` tooltip（§5.3.1 + AC2-5/6）
+4. 对账内容 header 水平居中到下拉中心（`.pending-rule-column-aligned` 类）
+5. 删除 benchmark 整模块（`pending-reconcile/benchmark.js` / IPC / preload / UI 调用 / test T5 / T12-3，见 §5.5.3）
+6. 导出月份范围弹窗 UI 重排（`.pending-export-cols` 样式族，见 §5.6.2）
+7. 对账确认框月份值 `<strong>` 加粗
+8. **⚠️ 资金敏感** 导出差异格式增强：changed pair 展 before/after 双行；新增 `pair_id / change_side / changed_fields` 元数据列；compareFields 含金额/计算金额 → `_diff` 列；含 `pending资金类型` → 专门 sheet（§5.6.3 / §5.6.5 / AC5-6/7）
+
+**Codex 二次 review 修复**（2 P1 finding）：
+
+9. **Finding 1** `writer.js` aggregate 越权重算：`buildExportRowsForDiff` 签名拆 `runCompareFields`（值）+ `headerCompareFields`（列位），符合 PRD §5.6.4 "某 run 不含的列留空"
+10. **Finding 2** `month-repository.deleteMonth` 未级联：覆盖导入时手动 DELETE 涉及该月的 `diff_runs` + `diff_rows`，修复 orphan 指向已删除行的风险（FK CASCADE 因 PRAGMA off 未生效）
+
+**自我 review**：T5 金额数据改 500→888，让 Finding 1 回归真正可挂（原测试金额巧合相等，changed_fields 断言旧 bug 下也通过）。
+
+**测试**：pending-export 22 → **66 断言**（新增 T3 空资金类型 sheet / T4 资金类型双行 / T5 aggregate 独立性 / T6 级联清理）；pending-reconcile 22 / pending-session 19 / smoke 均绿。
+
+**文件改动**：13 个（首轮）+ 5 个（修复轮）+ 1 个（强化 T5）= 共 15 unique 文件涉及。
+
+**Commits**（合并后消失于 v2.0.0 线性历史）：
+- `2cbc4b9` 主线
+- `7b86dc9` Codex finding fix
+- `73cf68c` self-review T5 强化
+- `cb934d9` merge commit
+
+
