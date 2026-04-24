@@ -205,25 +205,22 @@ try {
   }
 
   // === T5: aggregate 下 run 规则独立 — Codex Finding 1 回归 ===
-  // 两个 run 规则不同：run A compareFields=[金额]，run B compareFields=[币种]
-  // 并集 = [金额, 币种]
-  // 期望：run A 的行 → 币种_before/after/changed_fields 里不出现"币种"；run B 反之
-  //       即不能因为并集就越权重新比对
+  // 构造关键：Z001 在 2027-01 和 2027-02 的**金额也不同**（500 → 888），币种也不同（USD → EUR）。
+  // run B compareFields=[币种] → 按规则只关心币种；金额虽实际差，但不属于本 run 比对范围。
+  // 旧越权行为（bug）：用并集 compareUnion 重算 → changed_fields 会混入"金额"、金额_diff 也会错填 388。
+  // 新行为（fix）：changed_fields 只含"币种"；金额_before/after/diff 全留空（PRD "某 run 不含的列留空"）。
   console.log('[T5] aggregate：run 规则独立 — 不跨 run 重算 compareFields（Codex Finding 1）');
   {
-    // 用两组新月份避免污染 T1/T2/T4 状态
     insertRows(db, '2026-05', [sampleRow({ orderNo: 'X001', amount: '100', currency: 'USD', fundType: '提现' })]);
     insertRows(db, '2026-06', [sampleRow({ orderNo: 'X001', amount: '100', currency: 'CNY', fundType: '提现' })]);
-    // run A：compareFields=[金额]，金额无变化 → changed=0
+    // run A：compareFields=[金额]，金额无变化 → changed=0（但进并集里让 headers 含 金额_before/after/金额_diff）
     engine.runReconciliation(db, {
       upperMonth: '2026-05', lowerMonth: '2026-06',
       rule: { matchFields: ['order_no'], compareFields: ['金额'] }
     });
-    insertRows(db, '2026-07', [sampleRow({ orderNo: 'Y001', amount: '200', currency: 'USD', fundType: '提现' })]);
-    // 删除 X001 以避免 Y001 的测试干扰（或用独立数据）
     insertRows(db, '2027-01', [sampleRow({ orderNo: 'Z001', amount: '500', currency: 'USD', fundType: '提现' })]);
-    insertRows(db, '2027-02', [sampleRow({ orderNo: 'Z001', amount: '500', currency: 'EUR', fundType: '提现' })]);
-    // run B：compareFields=[币种]，币种变 USD→EUR → changed=1
+    insertRows(db, '2027-02', [sampleRow({ orderNo: 'Z001', amount: '888', currency: 'EUR', fundType: '提现' })]);
+    // run B：compareFields=[币种]，币种 USD→EUR changed=1（金额虽差但不在本 run 规则里）
     engine.runReconciliation(db, {
       upperMonth: '2027-01', lowerMonth: '2027-02',
       rule: { matchFields: ['order_no'], compareFields: ['币种'] }
@@ -240,25 +237,32 @@ try {
     const changedFieldsIdx = header.indexOf('changed_fields');
     const jinE_beforeIdx = header.indexOf('金额_before');
     const jinE_afterIdx = header.indexOf('金额_after');
+    const jinE_diffIdx = header.indexOf('金额_diff');
     const biZhong_beforeIdx = header.indexOf('币种_before');
     const biZhong_afterIdx = header.indexOf('币种_after');
 
-    // 找 Z001 的 changed 行（run B, compareFields=[币种]）
+    check('并集 header 含 金额_before/after/金额_diff（run A 贡献）',
+      jinE_beforeIdx >= 0 && jinE_afterIdx >= 0 && jinE_diffIdx >= 0);
+    check('并集 header 含 币种_before/after（run B 贡献）',
+      biZhong_beforeIdx >= 0 && biZhong_afterIdx >= 0);
+
     const dataRows = flat.slice(1);
     const z001Changed = dataRows.filter((r2) => {
       if (r2[diffTypeIdx] !== 'changed') return false;
-      const idx = PENDING_COLUMNS.indexOf('order_no');
-      return r2[idx] === 'Z001';
+      return r2[PENDING_COLUMNS.indexOf('order_no')] === 'Z001';
     });
     check('Z001 changed 展 2 行', z001Changed.length === 2);
     if (z001Changed.length >= 1) {
       const z = z001Changed[0];
-      check('Z001 changed_fields = "币种"（不含金额，即使并集有金额列）',
+      // 金额在 upper(500) / lower(888) 不同；旧 bug 会让 changed_fields 含 "金额"；新 fix 只含 "币种"
+      check('Z001 changed_fields = "币种"（不含"金额"，即使两月金额实际不等）',
         z[changedFieldsIdx] === '币种', `got "${z[changedFieldsIdx]}"`);
-      // run B 不比对金额 → 金额_before/after 必须为空（即使 run A 用金额，两 run 独立）
-      check('Z001 金额_before 留空（run B 没配金额）', z[jinE_beforeIdx] === '', `got "${z[jinE_beforeIdx]}"`);
-      check('Z001 金额_after 留空（run B 没配金额）', z[jinE_afterIdx] === '', `got "${z[jinE_afterIdx]}"`);
-      // 币种 字段正常填
+      // 旧 bug 会填 金额_before=500 / after=888 / diff=388；新 fix 全留空
+      check('Z001 金额_before 留空（run B 未配金额）', z[jinE_beforeIdx] === '', `got "${z[jinE_beforeIdx]}"`);
+      check('Z001 金额_after 留空（run B 未配金额）', z[jinE_afterIdx] === '', `got "${z[jinE_afterIdx]}"`);
+      check('Z001 金额_diff 留空（run B 未配金额，防越权计算）',
+        z[jinE_diffIdx] === '', `got "${z[jinE_diffIdx]}"`);
+      // 本 run 真正配的字段：币种_before/after 正常填
       check('Z001 币种_before = USD', String(z[biZhong_beforeIdx]) === 'USD');
       check('Z001 币种_after = EUR', String(z[biZhong_afterIdx]) === 'EUR');
     }
