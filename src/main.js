@@ -11,7 +11,6 @@ const pendingRuleRepo = require('./backend/pending-db/rule-repository');
 const pendingMonthRepo = require('./backend/pending-db/month-repository');
 const pendingDiffRepo = require('./backend/pending-db/diff-repository');
 const pendingReconcileEngine = require('./backend/pending-reconcile/engine');
-const pendingReconcileBenchmark = require('./backend/pending-reconcile/benchmark');
 const pendingExportWriter = require('./backend/pending-export/writer');
 const { createPendingSession } = require('./main-process/pending-session');
 const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
@@ -8762,19 +8761,6 @@ function registerNewAccountHandlers() {
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
-  });
-
-  ipcMain.handle('pending:reconcile:benchmark', (_event, payload = {}) => {
-    if (!pendingDb) throw new Error('Pending DB 未初始化');
-    const rule = pendingRuleRepo.getRule(pendingDb);
-    if (!rule || !rule.matchFields || rule.matchFields.length === 0) {
-      throw new Error('规则未设置（matchFields 为空）');
-    }
-    return pendingReconcileBenchmark.estimateRunTimeMs(pendingDb, {
-      upperMonth: payload.upperMonth,
-      lowerMonth: payload.lowerMonth,
-      matchFields: rule.matchFields
-    });
   });
 
   ipcMain.handle('pending:reconcile:run', (_event, payload = {}) => {

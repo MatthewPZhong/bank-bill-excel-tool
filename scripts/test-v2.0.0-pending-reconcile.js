@@ -12,8 +12,6 @@ const { openPendingDb } = require('../src/backend/pending-db');
 const monthRepo = require('../src/backend/pending-db/month-repository');
 const diffRepo = require('../src/backend/pending-db/diff-repository');
 const engine = require('../src/backend/pending-reconcile/engine');
-const benchmark = require('../src/backend/pending-reconcile/benchmark');
-
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'pending-reconcile-test-'));
 
 function sampleRow({ orderNo, amount, currency, fundType = '提现' }) {
@@ -155,17 +153,6 @@ try {
 
     const latest = diffRepo.getLatestRunForMonthPair(db, '2026-09', '2026-10');
     check('latest run 是最新那次（T3 compareFields=[]）', latest && latest.statChanged === 0);
-  }
-
-  // === T5: benchmark 能返回数值 ===
-  console.log('[T5] benchmark 返回估算毫秒数');
-  {
-    const est = benchmark.estimateRunTimeMs(db, {
-      upperMonth: '2026-09',
-      lowerMonth: '2026-10',
-      matchFields: ['order_no']
-    });
-    check('est 是数字 >= 0', typeof est === 'number' && est >= 0, `got ${est}`);
   }
 
   // === T6: 索引 lazy 建 ===

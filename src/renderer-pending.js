@@ -28,16 +28,6 @@ window.__rendererPending = (function () {
       return prevYear === uY && prevMonth === uM;
     }
 
-    function formatDurationSec(ms) {
-      if (!Number.isFinite(ms) || ms < 0) return '—';
-      if (ms < 1000) return '< 1 秒';
-      const sec = Math.round(ms / 1000);
-      if (sec < 60) return `${sec} 秒`;
-      const min = Math.floor(sec / 60);
-      const restSec = sec % 60;
-      return restSec > 0 ? `${min} 分 ${restSec} 秒` : `${min} 分`;
-    }
-
     function computePendingStatusText() {
       const p = state.pending;
       if (p.importing) return p.importingText || '正在导入...';
@@ -53,7 +43,7 @@ window.__rendererPending = (function () {
       }
       if (p.latestRunResult) return p.latestRunResult;
       if (p.lastImportSummary) return p.lastImportSummary;
-      return `已导入 ${p.months.join(' / ')}。请点击"开始运行"选取对账月份。`;
+      return '欢迎使用小助手';
     }
 
     function setPendingStatus(text) {
@@ -147,13 +137,25 @@ window.__rendererPending = (function () {
       columnsWrap.className = 'pending-rule-columns';
       dialog.appendChild(columnsWrap);
 
-      function buildColumn(labelText, initialValues) {
+      function buildColumn(labelText, initialValues, opts) {
+        const showSerial = !!(opts && opts.showSerial);
+        const tooltip = opts && opts.tooltip ? String(opts.tooltip) : '';
+        const alignHeaderToSelect = !!(opts && opts.alignHeaderToSelect);
+
         const column = document.createElement('div');
         column.className = 'pending-rule-column';
+        if (alignHeaderToSelect) column.classList.add('pending-rule-column-aligned');
 
         const header = document.createElement('div');
         header.className = 'pending-rule-column-header';
         header.textContent = labelText;
+        if (tooltip) {
+          const tip = document.createElement('span');
+          tip.className = 'pending-rule-header-tip';
+          tip.textContent = '?';
+          tip.title = tooltip;
+          header.appendChild(tip);
+        }
         column.appendChild(header);
 
         const rowsBox = document.createElement('div');
@@ -164,6 +166,13 @@ window.__rendererPending = (function () {
         function createFieldRow(initialValue) {
           const fieldRow = document.createElement('div');
           fieldRow.className = 'pending-rule-field-row';
+
+          let serialEl = null;
+          if (showSerial) {
+            serialEl = document.createElement('span');
+            serialEl.className = 'pending-rule-field-serial';
+            fieldRow.appendChild(serialEl);
+          }
 
           const select = document.createElement('select');
           select.className = 'mapping-select pending-rule-field-select';
@@ -194,26 +203,29 @@ window.__rendererPending = (function () {
             if (btn.dataset.role === 'add') {
               const newRow = createFieldRow('');
               rowsBox.appendChild(newRow);
-              refreshAllRowButtons();
+              refreshAllRows();
             } else {
               rowsBox.removeChild(fieldRow);
-              refreshAllRowButtons();
+              refreshAllRows();
             }
           });
 
-          // 初始化按钮状态（由外层 refreshAllRowButtons 调整）
           fieldRow._updateBtn = updateBtn;
+          fieldRow._updateSerial = (idx) => { if (serialEl) serialEl.textContent = `${idx}.`; };
           return fieldRow;
         }
 
-        function refreshAllRowButtons() {
-          Array.from(rowsBox.children).forEach((r) => r._updateBtn && r._updateBtn());
+        function refreshAllRows() {
+          Array.from(rowsBox.children).forEach((r, i) => {
+            if (r._updateBtn) r._updateBtn();
+            if (r._updateSerial) r._updateSerial(i + 1);
+          });
         }
 
         // 初始行：有历史值则每个值一行；否则一行空
         const seed = Array.isArray(initialValues) && initialValues.length > 0 ? initialValues : [''];
         seed.forEach((v) => rowsBox.appendChild(createFieldRow(v)));
-        refreshAllRowButtons();
+        refreshAllRows();
 
         function collectValues() {
           const out = [];
@@ -227,8 +239,9 @@ window.__rendererPending = (function () {
         return { collectValues };
       }
 
-      const matchCol = buildColumn('对账字段', currentRule ? currentRule.matchFields : []);
-      const compareCol = buildColumn('对账内容', currentRule ? currentRule.compareFields : []);
+      const matchTooltip = '序号即匹配优先级：按序号逐轮 fallback，任一字段相等即视为同一笔。';
+      const matchCol = buildColumn('对账字段', currentRule ? currentRule.matchFields : [], { showSerial: true, tooltip: matchTooltip });
+      const compareCol = buildColumn('对账内容', currentRule ? currentRule.compareFields : [], { alignHeaderToSelect: true });
 
       const actions = document.createElement('div');
       actions.className = 'dialog-actions center';
@@ -556,7 +569,7 @@ window.__rendererPending = (function () {
           onConfirm: ({ upper, lower }) => {
             // 第一步确认：开始运行？
             openModal(createConfirmDialog({
-              message: `确认以 "${upper}" vs "${lower}" 进行对账？`,
+              message: `确认以 "<strong>${upper}</strong>" vs "<strong>${lower}</strong>" 进行对账？`,
               confirmText: '确认',
               cancelText: '取消',
               onConfirm: () => {
@@ -585,20 +598,8 @@ window.__rendererPending = (function () {
     async function runReconciliation(upperMonth, lowerMonth) {
       state.pending.running = true;
       state.pending.latestRunResult = null;
-      state.pending.runningText = `正在对账 ${lowerMonth} vs ${upperMonth}（预计估算中...）`;
+      state.pending.runningText = `正在对账 ${lowerMonth} vs ${upperMonth}...`;
       refreshPendingUi();
-
-      let estimatedMs = null;
-      try {
-        estimatedMs = await desktopApi.pending.reconcile.benchmark({ upperMonth, lowerMonth });
-      } catch (err) {
-        console.warn('[pending] benchmark failed:', err);
-      }
-
-      if (Number.isFinite(estimatedMs) && estimatedMs > 0) {
-        state.pending.runningText = `正在对账 ${lowerMonth} vs ${upperMonth}，预计 ${formatDurationSec(estimatedMs)}...`;
-        refreshPendingUi();
-      }
 
       try {
         const result = await desktopApi.pending.reconcile.run({ upperMonth, lowerMonth });
@@ -640,7 +641,7 @@ window.__rendererPending = (function () {
       overlay.appendChild(dialog);
 
       const title = document.createElement('div');
-      title.className = 'alert-message';
+      title.className = 'pending-dialog-title';
       title.textContent = '导出月份范围';
       dialog.appendChild(title);
 
@@ -664,15 +665,17 @@ window.__rendererPending = (function () {
       radioSingleRow.appendChild(radioSingleLabel);
       dialog.appendChild(radioSingleRow);
 
-      // 指定月份：月份 + run 两个下拉
-      const singleMonthRow = document.createElement('div');
-      singleMonthRow.className = 'pending-rule-row';
-      const singleMonthLabel = document.createElement('label');
-      singleMonthLabel.className = 'pending-rule-label';
-      singleMonthLabel.textContent = '月份';
-      singleMonthRow.appendChild(singleMonthLabel);
+      // 指定月份：月份 + Run 两个下拉，side-by-side 一行（沿用对账弹窗的列样式）
+      // pending-export-cols 覆盖两列宽度：月份窄（~120px）、Run 撑满剩余空间
+      const columnsWrap = document.createElement('div');
+      columnsWrap.className = 'pending-rule-columns pending-export-cols';
+      dialog.appendChild(columnsWrap);
+
+      const monthColumn = document.createElement('div');
+      monthColumn.className = 'pending-rule-column pending-export-month-column';
+      // "月份" 文本按需求移除；月份下拉直接作为该列唯一内容
       const monthSelect = document.createElement('select');
-      monthSelect.className = 'pending-rule-select';
+      monthSelect.className = 'mapping-text-input pending-reconcile-month-select';
       months.forEach((m, idx) => {
         const opt = document.createElement('option');
         opt.value = m;
@@ -680,19 +683,19 @@ window.__rendererPending = (function () {
         if (idx === 0) opt.selected = true;
         monthSelect.appendChild(opt);
       });
-      singleMonthRow.appendChild(monthSelect);
-      dialog.appendChild(singleMonthRow);
+      monthColumn.appendChild(monthSelect);
+      columnsWrap.appendChild(monthColumn);
 
-      const runRow = document.createElement('div');
-      runRow.className = 'pending-rule-row';
-      const runLabel = document.createElement('label');
-      runLabel.className = 'pending-rule-label';
-      runLabel.textContent = 'Run';
-      runRow.appendChild(runLabel);
+      const runColumn = document.createElement('div');
+      runColumn.className = 'pending-rule-column pending-export-run-column';
+      const runHeader = document.createElement('div');
+      runHeader.className = 'pending-rule-column-header';
+      runHeader.textContent = 'Run';
+      runColumn.appendChild(runHeader);
       const runSelect = document.createElement('select');
-      runSelect.className = 'pending-rule-select';
-      runRow.appendChild(runSelect);
-      dialog.appendChild(runRow);
+      runSelect.className = 'mapping-text-input pending-reconcile-month-select';
+      runColumn.appendChild(runSelect);
+      columnsWrap.appendChild(runColumn);
 
       function refreshRunOptions() {
         const chosenMonth = monthSelect.value;
@@ -757,8 +760,9 @@ window.__rendererPending = (function () {
           if (typeof onConfirm === 'function') onConfirm({ scope: 'aggregate' });
         }
       });
-      actions.appendChild(cancelBtn);
+      // 导出 在左、取消 在右（与其他弹窗相反的本次需求）
       actions.appendChild(confirmBtn);
+      actions.appendChild(cancelBtn);
       dialog.appendChild(actions);
 
       return overlay;
@@ -793,7 +797,7 @@ window.__rendererPending = (function () {
             }
             if (!result || result.status === 'cancelled') return;
             if (result.status === 'success') {
-              openModal(createAlertDialog(`导出成功：${result.path}（${result.rowCount || 0} 条差异）`));
+              openModal(createAlertDialog(`导出成功：${result.path}（共 ${result.rowCount || 0} 行，changed 每对展 2 行）`));
             } else {
               openModal(createAlertDialog('导出失败：' + (result.message || '未知错误')));
             }
@@ -810,6 +814,19 @@ window.__rendererPending = (function () {
     async function initialize() {
       await loadRule();
       await loadMonths();
+      // 从 DB 拿最新 run 恢复 latestRunId —— 让"导出差异"按钮在历史 run 存在时保持可用
+      // （latestRunId 之前只在本会话对账完成时赋值，重开模块或重启后会丢）
+      try {
+        if (desktopApi && desktopApi.pending && desktopApi.pending.diff
+            && typeof desktopApi.pending.diff.listAllRuns === 'function') {
+          const allRuns = await desktopApi.pending.diff.listAllRuns();
+          if (Array.isArray(allRuns) && allRuns.length > 0) {
+            state.pending.latestRunId = allRuns[0].id;
+          }
+        }
+      } catch (err) {
+        console.warn('[pending] listAllRuns at init failed:', err);
+      }
       refreshPendingUi();
     }
 

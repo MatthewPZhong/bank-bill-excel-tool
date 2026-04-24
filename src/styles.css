@@ -2497,11 +2497,66 @@ select {
   align-items: center;
   min-width: 300px;
 }
+/* 导出月份范围弹窗：月份 + Run 不等宽（月份窄、Run 宽），整体宽度 720px 让 Run 向右延伸
+ * 左缩进 22px 让月份下拉的左边对齐"导出指定月份"文本的左边（radio 视觉宽度 ~13 + UA margin ~4 + 文本前间隔 ~5）
+ * margin-top 2px + header margin-bottom 4px 让 radio 行与下拉框上下间距进一步收紧（~20px）
+ * gap 60px 让两个下拉框左右拉开
+ * align-items: flex-end 把两列按底部对齐 → 月份下拉与 Run 下拉同 y（平行）；Run 的 header "Run" 自然落在 Run 下拉的左上角
+ * 内层列 align-items: flex-start 让 Run header 左对齐到 Run 下拉的左边
+ * select min-width: 0 覆盖 .pending-reconcile-month-select 的 200px，防止月份下拉溢出 120px 列宽 */
+.pending-export-cols {
+  width: 720px;
+  margin-left: 22px;
+  margin-right: 0;
+  margin-top: 2px;
+  margin-bottom: 20px;
+  gap: 60px;
+  justify-content: flex-start;
+  align-items: flex-end;
+}
+.pending-export-cols .pending-rule-column {
+  align-items: flex-start;
+}
+.pending-export-cols .pending-rule-column-header {
+  margin-bottom: 4px;
+}
+.pending-export-cols .pending-export-month-column {
+  flex: 0 0 120px;
+  min-width: 0;
+}
+.pending-export-cols .pending-export-run-column {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.pending-export-cols .mapping-text-input {
+  min-width: 0;
+}
 .pending-rule-column-header {
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
   margin-bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pending-rule-header-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong, #c9b38a);
+  background: #fffdf8;
+  color: var(--accent, #9a5a1a);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: help;
+  user-select: none;
+}
+.pending-rule-header-tip:hover {
+  background: rgba(154, 90, 26, 0.12);
 }
 .pending-rule-rows {
   display: flex;
@@ -2519,6 +2574,27 @@ select {
   width: 200px;
   min-width: 200px;
   max-width: 200px;
+}
+/* Rule dialog 对账内容列：header 文本与 select 水平中心对齐
+ * 方式：列改左对齐；header 宽度等于 select（200px）+ inline-flex justify-content center → header text-center 与 select center 同位 */
+.pending-rule-column-aligned {
+  align-items: flex-start;
+}
+.pending-rule-column-aligned .pending-rule-column-header {
+  width: 200px;
+  justify-content: center;
+}
+.pending-rule-column-aligned .pending-rule-rows {
+  align-items: flex-start;
+}
+.pending-rule-field-serial {
+  display: inline-block;
+  width: 24px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  user-select: none;
 }
 .pending-rule-field-btn {
   background: none;

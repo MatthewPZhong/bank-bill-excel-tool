@@ -489,3 +489,56 @@
 
 **check-vars**：
 - **⚠️ 资金敏感 Risk-sensitive** 命中：engine.runReconciliation 核心算法改写。pending-reconcile 4×4 手工样本小测试 23 断言全绿，真实样本语义符合用户 A1 预期。
+
+### Reverse Sync #6 — UX 打磨 + 导出格式增强（2026-04-24）
+
+**触发**：用户手工测试反馈累积 8 项，涵盖 UX、状态文案、按钮可用性、性能预估失真、导出差异输出格式。
+
+#### 代码改动
+
+| # | 类别 | 改动 | 主要文件 |
+|---|------|------|---------|
+| 1 | UX 文案 | 状态框 idle 文案 `已导入 {X / Y}...` → `欢迎使用小助手` | `src/renderer-pending.js` |
+| 2 | UX 可用性 | 导出差异按钮放宽：打开模块时调 `listAllRuns()`，DB 有任意历史 run 即启用（原仅本会话） | `src/renderer-pending.js` initialize |
+| 3 | UI 规则弹窗 | 对账字段每行加序号 `1./2./...`（DOM 序即 matchFields 下标+1），header 右侧加 `?` tooltip 说明 fallback 优先级 | `src/renderer-pending.js` buildColumn + `src/styles.css` `.pending-rule-field-serial / .pending-rule-header-tip` |
+| 4 | UI 规则弹窗 | 对账内容 header 水平居中到其下拉中心（新增 `alignHeaderToSelect` opt + `.pending-rule-column-aligned` 类：列 align-items flex-start + header width=200px + inline-flex center） | 同上 + styles.css |
+| 5 | 清理 | **删除 benchmark**（`pending-reconcile/benchmark.js` 整文件 + IPC + preload + UI 调用 + formatDurationSec + 测试 T5 / T12-3）<br>原因：benchmark 用 NOT EXISTS 写法估算，engine 已切 JS 层 Map 配对，两条路径 per-row cost 差一个数量级，预估严重失真（用户看到 3 分 20 秒，实际几秒完成） | `src/backend/pending-reconcile/benchmark.js` 删 / `src/main.js` / `src/preload.js` / `src/renderer-pending.js` / test-v2.0.0-pending-reconcile.js / test-v2.0.0-perf-real-sample.js |
+| 6 | UI 导出弹窗 | 导出月份范围弹窗重排：标题左上加粗；月份 header 文字去除；Run header 浮在其下拉左上角（columns align-items flex-end 实现两下拉底对齐）；月份列缩至 120px、Run 列扩至 540px；gap 60px、margin-top 2px、margin-bottom 20px；按钮顺序 `[导出][取消]`（与其他弹窗相反） | `src/renderer-pending.js` buildExportDialog + `src/styles.css` `.pending-export-cols` |
+| 7 | UI 对账确认 | 对账确认框月份值包 `<strong>` 加粗（createConfirmDialog 走 innerHTML，已沙箱；值为 `YYYY-MM` 格式无注入风险） | `src/renderer-pending.js` |
+| 8 | **⚠️ 资金敏感** 导出 | **导出差异格式重大增强**：<br>• changed pair 展开为 before/after **双行**（同 `pair_id` 共享元数据；行序 upper→lower 即 before→after）<br>• 新增 `pair_id` / `change_side` / `changed_fields` 元数据列（placed after diff_type）<br>• compareFields 含 `金额` → 末尾加 `金额_diff` 列（= parseFloat(lower)-parseFloat(upper)，解析失败留空）<br>• compareFields 含 `计算金额` → 末尾加 `计算金额_diff` 列（同上）<br>• compareFields 含 `pending资金类型` → 追加 `pending资金类型差异` sheet（仅收资金类型变更的 pair；无变更时空表仅 header） | `src/backend/pending-export/writer.js` 全面重写 / `scripts/test-v2.0.0-pending-export.js` 22 → 50 断言 |
+
+#### 文档同步
+
+- `docs/iterations/v2.0.0/PRD-v2.0.0.md`：
+  - §5.3.1 弹窗结构示意图重绘，新增序号 + tooltip 说明；§5.3.3 交互条款加序号重排
+  - §5.4.8 状态栏文案表补充 "欢迎使用小助手" + "本会话有最新 ..." 条件
+  - §5.5.3 benchmark 改为移除说明（AC4-4 / OT-5 划掉标记）
+  - §5.6.1 导出按钮启用条件写清"有历史 run 即启用"
+  - §5.6.2 弹窗重绘
+  - §5.6.3 / §5.6.5 changed 双行 + 新列结构 + 资金类型差异 sheet
+  - §六 AC2-5 / AC2-6 / AC5-6 / AC5-7 新增
+  - §十一 变更记录追加 2026-04-24 Reverse Sync #6 一行
+
+#### 测试结果
+
+| 用例 | 断言 | 结果 |
+|---|---|---|
+| pending-export | 22 → **50** | ✅ |
+| pending-reconcile | 23 → 22（删 T5 benchmark） | ✅ |
+| pending-session | 19 | ✅ |
+| smoke | — | ✅ |
+
+手工测试（用户 Electron 端）：
+- 状态框初始文案正确（欢迎使用小助手）
+- 导出差异按钮开模块即可用（前提：DB 有历史 run）
+- 规则弹窗序号 + tooltip 显示正常
+- 导出月份范围 UI 平衡（月份 / Run 左右对齐、按钮顺序对）
+- 对账确认月份加粗
+- 导出 xlsx 打开核对（changed pair 双行、pair_id 共享、金额_diff 数值对、pending资金类型差异 sheet 行数对） — **用户确认"核对没问题"**
+
+#### check-vars
+
+- **⚠️ 资金敏感 Risk-sensitive**：`src/backend/pending-export/writer.js` 重写涉及资金导出核心。手工核对 + 50 断言小样本覆盖（T1 金额改值双行、T3 资金类型空 sheet、T4 资金类型差异双行）；列顺序 PENDING 31 列不变，追加列在 diff_type 之后，向前扩展
+- **Runtime-state**：`state.pending.latestRunId` 语义扩展（从"本会话 run id"→ "latestRunId 即可用 run 存在性标志"），消费处仅一处 `disabled = !latestRunId`，已验证
+- **Minor 知会**：benchmark 模块删除，打包体积无影响（原就在 src/backend 内）
+

@@ -51,7 +51,7 @@
 - 规则配置单条全局（对账字段 + 对账内容），全部选项从模板表头字段生成
 - 运算必须在相邻月份之间进行（`YYYY-MM` 字符串比较，跨年 `2025-12 ↔ 2026-01` 也算相邻）
 - 差异结果持久化，支持按月单独导出 + 按月汇总导出
-- 导入/运算**不阻塞 UI**（child process + benchmark 外推估时）
+- 导入/运算**不阻塞 UI**（child process / utilityProcess）
 
 ### 2.3 明确不做
 
@@ -159,18 +159,25 @@ order_no / acc_id / finish_time / 穿透ID / channel / merchant_id / bank_ref /
 
 #### 5.3.1 弹窗结构
 
-点"规则管理"按钮，弹出 modal：
+点"规则管理"按钮，弹出 modal（两列 side-by-side，"对账字段" 列每行下拉左侧有序号 `1. 2. 3. ...` + 右侧问号 tooltip）：
 
 ```
-┌─────────────────────────────────────────────────┐
-│ Pending 数据筛选规则                            │
-├─────────────────────────────────────────────────┤
-│ 对账字段  [多选下拉 ▾]                          │
-│ 对账内容  [多选下拉 ▾]                          │
-│                                                  │
-│                               [取消] [完成]     │
-└─────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│ Pending 数据对账规则                                           │
+├────────────────────────────────────────────────────────────────┤
+│   对账字段 (?)                      对账内容                   │
+│                                                                 │
+│   1. [下拉 ▾]  [新增]               [下拉 ▾]  [新增]           │
+│   2. [下拉 ▾]  [删除]               [下拉 ▾]  [删除]           │
+│   3. [下拉 ▾]  [删除]                                           │
+│                                                                 │
+│                                           [完成] [取消]        │
+└────────────────────────────────────────────────────────────────┘
 ```
+
+- **序号 = 匹配优先级**：与 `matchFields` 数组顺序一致，engine 按序号逐轮 fallback 配对（见 §5.5.4）
+- **问号 tooltip 文案**：「序号即匹配优先级：按序号逐轮 fallback，任一字段相等即视为同一笔。」
+- 对账内容列无序号、无 tooltip（对账内容字段间无优先级；语义是"任一字段不等即 changed"）
 
 #### 5.3.2 下拉选项
 
@@ -178,7 +185,7 @@ order_no / acc_id / finish_time / 穿透ID / channel / merchant_id / bank_ref /
 
 #### 5.3.3 交互
 
-- 对账字段多选 —— 至少选 1 项（否则无法做 JOIN，阻止保存）
+- 对账字段多选 —— 至少选 1 项（否则无法做 JOIN，阻止保存）；"新增/删除"按钮动态扩缩行数，序号随 DOM 行序实时重排
 - 对账内容多选 —— 可以空（空时 changed 类型差异恒为 0，只剩 new / missing）
 - **两个下拉可以选重叠列吗**：允许，但建议不选（业务上 key 不需要同时当 value 比对）；不做强制阻止
 
@@ -265,9 +272,11 @@ CREATE TABLE rule (
 |---|---|
 | 未设置规则 | `初次使用请确认用来筛选的字段~` |
 | 已设置规则 + 无任何月份数据 | `请导入 Pending 数据。` |
-| 已导入 ≥1 月 + 未运行 | `已导入 {月份列表}。请点击"开始运行"选取对账月份。` |
-| 导入中 | `正在导入 {YYYY-MM}，预计 {X} 秒...` |
-| 导入成功 | `{YYYY-MM} 数据已导入（{rowCount} 行）。` |
+| 已导入 ≥1 月 + 未运行 + 无本会话导入 / 运行结果 | `欢迎使用小助手` |
+| 本会话有最新对账结果 | `对账完成：{上月} vs {上上月} 找出 {N} 条差异（...）` |
+| 本会话有最新导入完成 | `{YYYY-MM} 数据已导入（{rowCount} 行）。...` |
+| 导入中 | `正在导入 {YYYY-MM}：{file}（已处理 N 行）` |
+| 对账中 | `正在对账 {上月} vs {上上月}...` |
 | 表头不一致报错 | `表头字段不一致，请检查并重新导入。` |
 | 行级冲突报错 | `导入失败，发现 {N} 条重复行，[点击导出报错文件]。` |
 
@@ -298,14 +307,19 @@ CREATE TABLE rule (
 - 校验相邻：上月的上一个月 == 上上月（按日历计算：`2025-12` 的上一个月 == `2025-11`；跨年 `2026-01` 上一月 == `2025-12`）
 - 不相邻 → 弹错框：`选取的月份不是相邻月份，请重新选择。`，点确认回到弹窗（保留已选值）
 
-#### 5.5.3 预计完成时间（OT-5 = a）
+#### 5.5.3 ~~预计完成时间~~（已移除 — 2026-04-24 Reverse Sync #6）
 
-月份校验通过后：
+**决策**：删除 benchmark 预估功能。
 
-- 固定取样 **10000 行** 做一次 JOIN benchmark（TechDoc 定具体 SQL；简单取两月前 5000 行 JOIN 一次即可）
-- 按实际耗时外推 `estimatedMs = (total_rows / 10000) × sample_ms`
-- 状态栏显示 `正在对账 {上月} vs {上上月}，预计 {N} 秒...`
-- **精度约定**：±20% 可接受（状态框仅提示用户预期，非 SLA）
+**原因**：
+- benchmark 代码写于 v1 SQL 语义（NOT EXISTS），engine 在 Reverse Sync #5 切到 JS 层 Map 配对后，两条路径的 per-row cost 差一个数量级
+- 实测偏差极大：用户看到"预计 3 分 20 秒"，实际几秒完成
+- 真实 engine 已经够快（243 万行 4.31 秒），无预估必要
+
+**实施**：
+- `src/backend/pending-reconcile/benchmark.js` 整文件删除
+- 撤回 IPC `pending:reconcile:benchmark` + preload `pending.reconcile.benchmark`
+- 状态栏文案简化为 `正在对账 {上月} vs {上上月}...`（无预估时间）
 
 #### 5.5.4 对账运算（A1 fallback 语义 — 2026-04-24 Reverse Sync）
 
@@ -349,31 +363,37 @@ CREATE TABLE rule (
 
 #### 5.6.1 按钮启用条件
 
-- `diff_runs` 表有记录 → 启用
+- `diff_runs` 表有**任意历史 run** → 启用（打开模块时即判定，不限于本会话运行过）
 - 空表 → 禁用（置灰）
+- 实现：模块 `initialize` 期间调 `listAllRuns()`，若返回非空则设置 `state.pending.latestRunId = allRuns[0].id`（已按 `created_at DESC, id DESC` 排序，`[0]` 即最新）
 
 #### 5.6.2 导出形态（OT-10 = 单月选 run，汇总取最新）
 
-点"导出差异" → 弹选择框：
+点"导出差异" → 弹选择框（标题左上加粗；月份下拉窄、Run 下拉宽、平行于同一基线）：
 
 ```
-┌──────────────────────────────────────────────┐
-│ 导出月份范围                                   │
-├──────────────────────────────────────────────┤
-│ ○ 导出指定月份                                │
-│     月份：  [下拉 ▾]  ← 已有 run 的月份 label  │
-│     Run：   [下拉 ▾]  ← 该月份 run 列表        │
-│              （显示 created_at + 规则摘要）    │
-│                                                │
-│ ○ 导出所有月份汇总（每月取最新 run）            │
-└──────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│ 导出月份范围                                              │
+├──────────────────────────────────────────────────────────┤
+│ ○ 导出指定月份                                            │
+│                                     Run                  │
+│     [月份 ▾]     [Run 下拉（displays created_at + 规则） ▾] │
+│                                                           │
+│ ○ 导出所有月份汇总（每月取最新 run）                       │
+│                                                           │
+│                                       [导出] [取消]      │
+└──────────────────────────────────────────────────────────┘
 ```
+
+- 月份下拉左边对齐"导出指定月份"文本左边（缩进 22px 跳过 radio 宽度）
+- "Run" 文本位于 Run 下拉的左上角（`align-items: flex-end` 让两下拉按底部对齐成平行 → "Run" header 自然浮在 Run 下拉之上）
+- 按钮顺序：左 `[导出]` / 右 `[取消]`（与其他弹窗相反）
 
 Run 下拉显示格式示例：
 
 ```
-2026-04-23 14:30:00  规则 {order_no × 金额,币种}
-2026-04-22 09:15:00  规则 {order_no × 金额}
+2026-04-23 14:30:00  差异 42 条  规则 {order_no × 金额,币种}
+2026-04-22 09:15:00  差异 35 条  规则 {order_no × 金额}
 ```
 
 单个月份只有 1 个 run 时，Run 下拉自动选中该唯一值，不需用户确认。
@@ -384,8 +404,9 @@ Run 下拉显示格式示例：
 
 - 取该 `run_id` 对应的差异明细
 - 文件结构：
-  - **Sheet1** 名 `汇总`：所有差异行，列 = 31 原列 + `diff_type` + 按 run 快照里的 `compare_fields` 动态展开的 `<field>_before` / `<field>_after` 列
-  - **Sheet2~N** 名为 `{pending资金类型 值}`：按 `pending资金类型` 列的实际出现值动态建 sheet（OT-9 枚举校验已在导入期完成，此时只会看到提现/退票/充值三种）
+  - **Sheet1** 名 `汇总`：所有差异行。列 = 31 原列 + `diff_type` + `pair_id` + `change_side` + `changed_fields` + 按 run 快照里的 `compare_fields` 动态展开的 `<field>_before` / `<field>_after` 列 + 末尾可选的 `金额_diff` / `计算金额_diff`
+  - **Sheet2~N** 名为 `{pending资金类型 值}`：按**行自身** `pending资金类型` 的实际值动态建 sheet；若 changed pair 两行资金类型不同，两行各自落到对应 sheet
+  - **[可选] Sheet** 名 `pending资金类型差异`：仅在 `compare_fields` 含 `pending资金类型` 时出现；收录 changed pair 中 `pending资金类型` 发生变更的那些对（before/after 双行）；无差异则空表（仅 header）
 - 文件名：`月度Pending差异-{上月}-run{YYYYMMDDThhmmss}.xlsx`（时间戳=该 run 的 created_at）
 
 #### 5.6.4 所有月份汇总导出
@@ -396,19 +417,23 @@ Run 下拉显示格式示例：
 - 列扩展策略：各月份最新 run 的规则快照可能不同（规则被改过），`compare_fields` 并集展开为列；某 run 不含的列留空
 - 文件名：`月度Pending差异-汇总-{最早月份}至{最新月份}.xlsx`
 
-#### 5.6.5 变更前后值列结构（changed 行）
+#### 5.6.5 变更前后值列结构（changed 行展成 2 行）
 
-对规则里 `compare_fields = ['金额', '币种', '是否拆分Pending']` 的例子：
+对规则里 `compare_fields = ['金额', '币种']` 的例子，一对 changed pair 展成 **before + after 两行**：
 
-| 原 31 列 | diff_type | 金额_before | 金额_after | 币种_before | 币种_after | 是否拆分Pending_before | 是否拆分Pending_after |
-|---|---|---|---|---|---|---|---|
-| ...（上月行内容） | `changed` | 100 | 150 | USD | USD | 是 | 否 |
-| ...（上月行内容） | `new` | — | — | — | — | — | — |
-| ...（上上月行内容） | `missing` | — | — | — | — | — | — |
+| 原 31 列 | diff_type | pair_id | change_side | changed_fields | 金额_before | 金额_after | 币种_before | 币种_after | 金额_diff |
+|---|---|---|---|---|---|---|---|---|---|
+| ...上上月快照 (upper_id=5)... | `changed` | `5_12` | `before` | 金额 | 100 | 150 | USD | USD | 50 |
+| ...上月快照 (lower_id=12)... | `changed` | `5_12` | `after` | 金额 | 100 | 150 | USD | USD | 50 |
+| ...上月行内容... | `new` | — | — | — | — | — | — | — | — |
+| ...上上月行内容... | `missing` | — | — | — | — | — | — | — | — |
 
-- `changed` 行：原 31 列用**上月版本**，`_before` 填上上月值，`_after` 填上月值
-- `new` 行：原 31 列用**上月版本**，所有 `_before` / `_after` 都空
-- `missing` 行：原 31 列用**上上月版本**，所有 `_before` / `_after` 都空
+- `changed`：**一对变两行**，同 pair_id 共享 `changed_fields` / `_before` / `_after` / `_diff`；`change_side=before` 行的 31 原列用上上月快照，`change_side=after` 用上月快照
+- `new`：1 行，原 31 列用**上月版本**；`pair_id` / `change_side` / `changed_fields` / `_before` / `_after` / `_diff` 全空
+- `missing`：1 行，原 31 列用**上上月版本**；同上全空
+- 行序：跨 pair 按 `upper_id` 升序（即 SQL `diff_rows.id` 升序）；一对内 `before → after`
+- `金额_diff` / `计算金额_diff`：仅当 `compare_fields` 含对应字段时出列；值 = `parseFloat(lower) - parseFloat(upper)`；解析失败留空
+- `changed_fields`：逗号分隔列出该 pair 里 upper ≠ lower 的 compareField 名（字符串比较，空值统一当 `''`）
 
 #### 5.6.6 导出文件保存位置
 
@@ -436,6 +461,8 @@ Run 下拉显示格式示例：
 | AC2-2 | 对账字段至少选 1 项；对账内容可空 |
 | AC2-3 | 点击下拉以外任意区域 → 弹确认框，显示当前勾选内容；确认 upsert DB，取消丢弃 |
 | AC2-4 | 同一会话多次修改：新规则覆盖旧规则（`rule.updated_at` 更新）|
+| AC2-5 | 对账字段每行下拉左侧有序号（1., 2., 3., ...），序号等于 `matchFields` 数组下标 + 1，反映 engine fallback 轮次优先级；新增/删除行时序号实时重排 |
+| AC2-6 | 对账字段 header 右侧有问号 tooltip，文案说明序号即匹配优先级；对账内容 header 无 tooltip 且文本横向中心对齐到其下拉中心 |
 
 ### 6.3 导入文件 AC
 
@@ -456,7 +483,7 @@ Run 下拉显示格式示例：
 | AC4-1 | 弹窗下拉显示 `pending_months` 表所有月份（`YYYY-MM desc`）|
 | AC4-2 | 点完成 → 二次确认 → 校验相邻（跨年算相邻）|
 | AC4-3 | 不相邻 → 错框 + 保留已选；相邻 → 继续 |
-| AC4-4 | 预计时间估算：取样 10000 行或两月 0.5% 做 benchmark，外推显示到状态栏 |
+| ~~AC4-4~~ | ~~预计时间估算~~（2026-04-24 移除，见 §5.5.3）|
 | AC4-5 | 对账运算产出三类差异（new / missing / changed），落 `diff_runs` + `diff_rows` 表 |
 | AC4-6 | 状态栏显示最终统计：`对账完成：{上月} vs {上上月} 找出 N 条差异（X 新增 / Y 消失 / Z 变更）` |
 
@@ -464,11 +491,13 @@ Run 下拉显示格式示例：
 
 | AC 编号 | 验收条件 |
 |---------|---------|
-| AC5-1 | `diff_runs` 空 → "导出差异" 按钮置灰 |
-| AC5-2 | 单月导出：Sheet1 = 汇总；Sheet2~N 按 `pending资金类型` 分组 |
+| AC5-1 | `diff_runs` 空 → "导出差异" 按钮置灰（有历史 run 时打开模块即可用）|
+| AC5-2 | 单月导出：Sheet1 = 汇总；Sheet2~N 按行自身 `pending资金类型` 分组 |
 | AC5-3 | 汇总导出：Sheet1 = 按月维度区别汇总（最老→最新，空行分隔）；Sheet2 = 总汇总 |
-| AC5-4 | 差异 xlsx 列 = 31 原列 + `diff_type` + 规则里 `compare_fields` 动态展开 `_before` / `_after`  |
-| AC5-5 | `changed` 行两侧值正确；`new` 行原列用上月版本；`missing` 行原列用上上月版本 |
+| AC5-4 | 差异 xlsx 列 = 31 原列 + `diff_type` + `pair_id` + `change_side` + `changed_fields` + 规则里 `compare_fields` 动态展开 `_before` / `_after` + 末尾可选 `金额_diff` / `计算金额_diff` |
+| AC5-5 | `changed` pair 展 2 行：before = 上上月快照、after = 上月快照，同 `pair_id`；`new` 行原列用上月版本；`missing` 行原列用上上月版本；new/missing 的新增元数据列全空 |
+| AC5-6 | `compare_fields` 含 `pending资金类型` → 导出 xlsx 多一张 `pending资金类型差异` sheet，仅收录资金类型变更的 pair；无变更时空表（仅 header） |
+| AC5-7 | `compare_fields` 含 `金额` / `计算金额` → 末尾出对应 `_diff` 列；changed 行值 = `parseFloat(lower) - parseFloat(upper)`，解析失败或 new/missing 留空 |
 
 ---
 
@@ -611,7 +640,7 @@ v0 的 10 个 OT 已由用户逐条拍板，结果如下：
 | OT-2 | 顶部下拉跨启动记忆 | **不记忆**，默认"网银账单生成" | §5.1.3 |
 | OT-3 | 导出差异 xlsx 字体 | **延续 v1.5.3 Courier New** 表头约定（TechDoc 在 writer 接入 xlsx-js-style 字体注入） | §九（新增）|
 | OT-4 | `pending_rows` 非 key 列索引 | **TechDoc 定**（PRD 层搁置，权衡磁盘 vs 查询） | TechDoc |
-| OT-5 | benchmark 采样行数 | **固定 10000 行**，精度 ±20% 可接受 | §5.5.3 |
+| ~~OT-5~~ | ~~benchmark 采样行数~~ | ~~固定 10000 行~~（2026-04-24 移除 benchmark，见 §5.5.3） | ~~§5.5.3~~ |
 | OT-6 | 报错文件格式 | **xlsx**（与现有 `error-reports/` 对齐） | §5.4.5 |
 | OT-7 | 运算中用户关应用 | **child process kill + DB rollback**；保证无脏数据 | §五 / §P1-7 |
 | OT-8 | `changed` 比对口径 | **按值严格相等**（字符串 `===`，非 hash） | §5.5.4 |
@@ -627,6 +656,7 @@ v0 的 10 个 OT 已由用户逐条拍板，结果如下：
 | 2026-04-23 | v0 初稿（10 个 OT 待定）|
 | 2026-04-23 | v1 定稿（OT-1~OT-10 已回写到 §4.1 / §5.1.3 / §5.4 / §5.5 / §5.6 / §九；§十 由"待澄清"改为"决策记录"）|
 | 2026-04-24 | **Reverse Sync v1→v1.1**：T12 真实样本测试发现 OT-9 枚举不完整（样本出现 `入金`）→ **撤销**枚举校验；同时发现 xlsx 库读不了大 inline-string 文件 → **换 ExcelJS**；worker 改**流式 INSERT** 防 OOM；engine/benchmark 加**复合索引**性能修复（对账 15 分钟 → 2.85 秒）。见 `changes/v2.0.0/log.md` 2026-04-24 段。|
+| 2026-04-24 | **Reverse Sync #6 — UX 打磨 + 导出格式增强**（用户手工测试反馈）：① 状态框初始文案"已导入..."→"欢迎使用小助手"；② 导出差异按钮由"本会话有 run"放宽为"DB 有任意历史 run"；③ 规则管理弹窗对账字段加序号 1./2./... + tooltip；④ 对账内容 header 水平居中到其下拉中心；⑤ 删除 benchmark（失真严重，见 §5.5.3）；⑥ 导出月份范围弹窗 UI 重新排布（详见 §5.6.2）；⑦ 对账确认框月份值加粗；⑧ **导出差异输出格式重大增强** changed pair 展开为 before/after 双行，新增 `pair_id / change_side / changed_fields` 元数据列 + 可选 `金额_diff / 计算金额_diff` + 可选 `pending资金类型差异` sheet（见 §5.6.3 / §5.6.5 / AC5-6 / AC5-7）。见 `changes/v2.0.0/log.md`。|
 
 ---
 

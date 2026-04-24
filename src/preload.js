@@ -99,7 +99,6 @@ contextBridge.exposeInMainWorld('desktopApi', {
       ipcRenderer.on('pending:import:progress', (_event, ev) => listener(ev));
     },
     reconcile: {
-      benchmark: (payload) => ipcRenderer.invoke('pending:reconcile:benchmark', payload),
       run: (payload) => ipcRenderer.invoke('pending:reconcile:run', payload)
     },
     diff: {

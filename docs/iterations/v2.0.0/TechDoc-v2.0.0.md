@@ -34,7 +34,7 @@
 | R-T4 | **changed 行对比按值严格相等（OT-8）** —— SQL 里如何实现不等 | 用 `(A.col_1 IS NOT B.col_1 OR A.col_2 IS NOT B.col_2 ...)`，`IS NOT` 处理 NULL 友好 |
 | R-T5 | **顶部 `<select>` vs 现有自定义展开动画** —— 现有的点击 → 展开 → 选择流程在 `src/renderer.js:1068-1090`；改为原生 select 后要删掉动画逻辑 | 删掉 `moduleSwitcherBtn` 相关的自定义展开 DOM 与 CSS；`<select>` 用原生下拉，变更 handler 直接触发 `setCurrentTopModule(value)` |
 | R-T6 | **xlsx-js-style 依赖复用** —— v1.5.3 已引入，但仅在 `writers.js` 局部 require | Pending export writer 单独新增 `src/backend/pending-export/writer.js`，同样局部 require `xlsx-js-style` |
-| R-T7 | **benchmark 的取样来源** —— PRD §5.5.3 说"取样 10000 行做 JOIN"；从 xlsx 现取费时 | Benchmark 在**数据已入库**后，SQL 直接 `LIMIT 10000` 取样跑 JOIN，避免读原文件 |
+| ~~R-T7~~ | ~~benchmark 的取样来源~~ | ~~SQL LIMIT 10000 采样~~（2026-04-24 Reverse Sync #6 移除 benchmark） |
 | R-T8 | **规则变更后旧 run 的导出兼容性** —— Q-20 + OT-10 要求保留所有 run 并能选历史 run 导出 | run 的 `rule_snapshot` 列存 JSON 快照；导出时 writer 根据快照的 `compare_fields` 动态展列，不依赖当前规则 |
 
 ### 1.3 与 PRD 的差异
@@ -60,7 +60,7 @@
 | `src/backend/pending-import/worker.js` | child process 解析 + 入库（主执行体）|
 | `src/backend/pending-import/validator.js` | 表头校验 + `pending资金类型` 枚举校验 + 行级冲突检测（hash）|
 | `src/backend/pending-reconcile/engine.js` | 对账 SQL 生成 + 执行 |
-| `src/backend/pending-reconcile/benchmark.js` | 采样 + 外推估时 |
+| ~~`src/backend/pending-reconcile/benchmark.js`~~ | ~~采样 + 外推估时~~（2026-04-24 删除）|
 | `src/backend/pending-export/writer.js` | 差异 xlsx 组装（单月 + 汇总两种形态）|
 | `src/main-process/pending-session.js` | 主进程 Pending 模块 session 状态 + IPC 处理 |
 | `src/renderer-pending.js` | renderer 侧 Pending 模块逻辑 |
@@ -276,73 +276,127 @@ process.argv: [node, worker.js, jobId, dbPath, yyyymm, filesJson, modeJson]
 
 ### 3.6 对账引擎
 
-#### Benchmark（`pending-reconcile/benchmark.js`）
+#### ~~Benchmark~~（2026-04-24 Reverse Sync #6 移除）
+
+benchmark 预估时间已整体删除，见 `changes/v2.0.0/log.md`。原因：预估算法用 `NOT EXISTS` 采样 + 线性外推，而 engine 在 Reverse Sync #5 已切 JS 层 Map 配对，两条路径 per-row cost 差一个数量级，预估严重失真（用户看到"3 分 20 秒"，实际几秒完成）。
+
+#### 对账 SQL + JS 层配对（`pending-reconcile/engine.js`）— A1 fallback 语义
+
+v2.0.0-beta.2 从原 AND 语义改为 **A1 fallback**（见 Reverse Sync #5）。同一笔定义：按 `matchFields` 顺序逐轮，任一字段相等即视为同一笔。
 
 ```js
-async function estimateRunTimeMs(upper, lower) {
-  const start = Date.now();
-  db.prepare(`
-    SELECT 1 FROM pending_rows A
-    INNER JOIN pending_rows B ON A.<match_field_1> = B.<match_field_1> ...
-    WHERE A.year_month = ? AND B.year_month = ?
-    LIMIT 10000
-  `).all(upper, lower);
-  const sampleMs = Date.now() - start;
-  const totalRows = getMonthRowCount(upper) + getMonthRowCount(lower);
-  return Math.round((totalRows / 10000) * sampleMs);
-}
-```
+function runReconciliation(db, { upperMonth, lowerMonth, rule }) {
+  const { matchFields, compareFields } = rule;
 
-#### 对账 SQL（`pending-reconcile/engine.js`）
-
-```js
-function runReconciliation(upper, lower, rule) {
-  const matchKeysJoinOn = rule.matchFields.map(f => `A.\`${f}\` IS B.\`${f}\``).join(' AND ');
-  const compareFieldsDiff = rule.compareFields.map(f => `(A.\`${f}\` IS NOT B.\`${f}\`)`).join(' OR ') || '0';
+  // 为每个 matchField 建覆盖索引 (year_month, col, id) — index-only scan
+  ensureMatchIndex(db, matchFields);
 
   db.exec('BEGIN');
-  // 1) insert diff_runs 拿 runId
-  const runId = db.prepare('INSERT INTO diff_runs(...) VALUES(...)').run(...).lastInsertRowid;
+  const runId = createRun(db, { upperMonth, lowerMonth, ruleSnapshot: { matchFields, compareFields } });
 
-  // 2) new
-  db.prepare(`
-    INSERT INTO diff_rows(run_id, type, lower_row_id)
+  // tmp_pairs 累积已配对（UNIQUE 约束防重复）
+  db.exec('CREATE TEMP TABLE IF NOT EXISTS tmp_pairs(upper_id INTEGER UNIQUE, lower_id INTEGER UNIQUE);');
+  db.exec('DELETE FROM tmp_pairs;');
+
+  // JS 层多轮 fallback 配对（原 SQL CTE+ROW_NUMBER+LEFT JOIN 在 121 万行 planner 低效）
+  const matchedUpperIds = new Set();
+  const matchedLowerIds = new Set();
+  const insertPair = db.prepare('INSERT INTO tmp_pairs(upper_id, lower_id) VALUES (?, ?)');
+
+  for (const field of matchFields) {
+    // SELECT 走 (year_month, col, id) 覆盖索引
+    const upperRows = db.prepare(`
+      SELECT id, \`${field}\` AS k FROM pending_rows
+      WHERE year_month = ? AND \`${field}\` IS NOT NULL AND \`${field}\` <> ''
+      ORDER BY id
+    `).all(upperMonth);
+    const lowerRows = /* 同上对 lowerMonth */;
+
+    // Map 按 key 分组（已 matched 的 id 跳过；ORDER BY id 保证 push 顺序升序）
+    const upperByKey = new Map(), lowerByKey = new Map();
+    for (const r of upperRows) if (!matchedUpperIds.has(r.id)) push(upperByKey, r.k, r.id);
+    for (const r of lowerRows) if (!matchedLowerIds.has(r.id)) push(lowerByKey, r.k, r.id);
+
+    // 同 key 1 对 1 配对：min(upper.length, lower.length) 对
+    for (const [k, uIds] of upperByKey) {
+      const lIds = lowerByKey.get(k) || [];
+      const n = Math.min(uIds.length, lIds.length);
+      for (let i = 0; i < n; i++) {
+        insertPair.run(uIds[i], lIds[i]);
+        matchedUpperIds.add(uIds[i]); matchedLowerIds.add(lIds[i]);
+      }
+    }
+  }
+
+  // 三段 SQL：changed / new / missing
+  db.prepare(`INSERT INTO diff_rows(run_id, type, upper_row_id, lower_row_id)
+    SELECT ?, 'changed', p.upper_id, p.lower_id FROM tmp_pairs p
+    INNER JOIN pending_rows A ON A.id = p.upper_id
+    INNER JOIN pending_rows B ON B.id = p.lower_id
+    WHERE ${compareFields.map(f => `(A.\`${f}\` IS NOT B.\`${f}\`)`).join(' OR ') || '0'}`).run(runId);
+
+  db.prepare(`INSERT INTO diff_rows(run_id, type, lower_row_id)
     SELECT ?, 'new', A.id FROM pending_rows A
-    WHERE A.year_month = ?
-      AND NOT EXISTS (
-        SELECT 1 FROM pending_rows B WHERE B.year_month = ? AND ${matchKeysJoinOn}
-      )
-  `).run(runId, lower, upper);
+    LEFT JOIN tmp_pairs t ON t.lower_id = A.id
+    WHERE A.year_month = ? AND t.lower_id IS NULL`).run(runId, lowerMonth);
 
-  // 3) missing (对偶)
-  // 4) changed
-  db.prepare(`
-    INSERT INTO diff_rows(run_id, type, upper_row_id, lower_row_id)
-    SELECT ?, 'changed', B.id, A.id FROM pending_rows A
-    INNER JOIN pending_rows B ON ${matchKeysJoinOn}
-    WHERE A.year_month = ? AND B.year_month = ?
-      AND (${compareFieldsDiff})
-  `).run(runId, lower, upper);
+  db.prepare(`INSERT INTO diff_rows(run_id, type, upper_row_id)
+    SELECT ?, 'missing', A.id FROM pending_rows A
+    LEFT JOIN tmp_pairs t ON t.upper_id = A.id
+    WHERE A.year_month = ? AND t.upper_id IS NULL`).run(runId, upperMonth);
 
-  // 5) 更新 stat
+  db.exec('DROP TABLE tmp_pairs;');
   db.exec('COMMIT');
 }
 ```
 
+**性能**（T12 真实样本 243 万行）：4.31 秒完成（3 轮 fallback）。
+
 ### 3.7 导出差异
 
-`pending-export/writer.js` 核心逻辑：
+`pending-export/writer.js` — **2026-04-24 Reverse Sync #6 格式增强**。
 
-1. 读 run → `rule_snapshot` 拿 `compareFields`
-2. 组装列：`[...PENDING_COLUMNS, 'diff_type', ...compareFields.flatMap(f => [`${f}_before`, `${f}_after`])]`
-3. 读 `diff_rows` + JOIN `pending_rows` 拿行内容
-4. 按 `type` 填 `_before` / `_after`：
-   - `new`: 原 31 列=lower_row 内容；`_before`/`_after`=空
-   - `missing`: 原 31 列=upper_row 内容；`_before`/`_after`=空
-   - `changed`: 原 31 列=lower_row 内容；`_before`=upper_row 的 compareField；`_after`=lower_row 的 compareField
-5. 汇总 Sheet1；按 `col_pending_fund_type` 分组生成子 sheets
-6. `xlsx-js-style` 写第 1 行 Courier New 字体
-7. 保存到用户选的路径
+#### 表头结构
+
+```
+[ PENDING 31 列 ]  diff_type  pair_id  change_side  changed_fields
+   [ <cf>_before / <cf>_after ... ]
+   [ 金额_diff? ]  [ 计算金额_diff? ]
+```
+
+- 前 3 大类固定；后 1 类为 `compareFields` 内每字段一对 `_before/_after`（与 v0 一致）
+- 末尾 2 可选列：仅当 `compareFields` 含对应字段时出现
+
+#### changed pair 展开 → 双行
+
+每对 changed 产生 **2 行**：
+- 第 1 行：`change_side='before'`，31 原列取 upper 快照
+- 第 2 行：`change_side='after'`，31 原列取 lower 快照
+- 两行共享 `pair_id = "{upper_id}_{lower_id}"`、`changed_fields`（逗号分隔 upper≠lower 的字段名）、所有 `_before/_after`、所有 `_diff`
+
+new / missing 仍 1 行；新增元数据列在 new/missing 上全空。
+
+#### `_diff` 列计算
+
+```js
+function computeAmountDiff(upperRow, lowerRow, field) {
+  const u = parseFloat(upperRow[field]);
+  const l = parseFloat(lowerRow[field]);
+  if (!Number.isFinite(u) || !Number.isFinite(l)) return '';  // 千分位 / 非数字 → 空
+  return l - u;  // after - before
+}
+```
+
+#### Sheet 结构
+
+| Sheet | 条件 | 内容 |
+|---|---|---|
+| `汇总` | 始终 | 所有行（changed 双行 + new + missing）|
+| `{pending 资金类型值}` | 始终（动态 1~N 张）| 按行自身 `pending资金类型` 分组；若 changed pair 两行资金类型不同，两行落不同 sheet |
+| `pending资金类型差异` | compareFields 含 `pending资金类型` | 仅收资金类型变更的 pair；无则空表（仅 header）|
+| `按月维度区别汇总` | 仅 aggregate export | 各月 run 数据串联 + 月份 label 空行分隔 |
+
+字体：每 sheet 第 1 行 Courier New（xlsx-js-style 注入），沿用 v1.5.3 OT-3 决策。
 
 ### 3.8 状态框文案流
 
@@ -410,9 +464,15 @@ T1 → T2 → T3 → T4 → T5 → T6 → T7 → T8 → T9 → T10 → T11 → T
 
 ## 六、实施日志
 
-> 记录实施过程中的关键决策、风险发现和可沉淀知识。
+> 记录实施过程中的关键决策、风险发现和可沉淀知识。详见 `changes/v2.0.0/log.md`。
 
-（空，等 dev 阶段填充）
+### 已执行 Reverse Sync 速览
+
+| # | 日期 | 主题 | 核心决策 |
+|---|------|------|---------|
+| Rev Sync v1→v1.1 | 2026-04-24 | OT-9 枚举撤回 + ExcelJS 替换 + worker 流式 INSERT + 复合索引 | 见 PRD §十一 |
+| Rev Sync #5 | 2026-04-24 | 对账语义 AND → A1 fallback + SQL → JS 层 Map 配对 | 见 log.md |
+| Rev Sync #6 | 2026-04-24 | UX 打磨 + 导出差异格式增强（changed 双行 + pair_id + _diff + 资金类型差异 sheet）+ benchmark 删除 | 见 log.md |
 
 ---
 

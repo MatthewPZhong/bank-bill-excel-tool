@@ -9,7 +9,6 @@
 // 场景：
 //   T12-1  2602 多文件合并导入（spawn worker child process，带 --max-old-space-size=8192）
 //   T12-2  2603 多文件合并导入
-//   T12-3  benchmark 预计时间（采样 10000 行线性外推）
 //   T12-4  对账 2026-02 vs 2026-03（match=order_no / compare=金额,币种,业务BU）
 //   T12-5  导出单月差异 xlsx
 //   T12-6  导出汇总差异 xlsx（单 run 模式，作为 sanity）
@@ -17,7 +16,6 @@
 // 性能目标（PRD §九）：
 //   单月导入 < 5 分钟
 //   对账 SQL < 1 分钟
-//   benchmark 精度 ±20%
 //
 // 运行：node scripts/test-v2.0.0-perf-real-sample.js
 
@@ -31,7 +29,6 @@ const monthRepo = require('../src/backend/pending-db/month-repository');
 const ruleRepo = require('../src/backend/pending-db/rule-repository');
 const diffRepo = require('../src/backend/pending-db/diff-repository');
 const engine = require('../src/backend/pending-reconcile/engine');
-const benchmark = require('../src/backend/pending-reconcile/benchmark');
 const writer = require('../src/backend/pending-export/writer');
 
 const SAMPLE_2602 = '/Users/pzhong/Downloads/正常归档Pending账单-2602';
@@ -207,20 +204,6 @@ async function main() {
   checkResult('2026-03 count 一致', m2603Count === import2603.rowCount, `${m2603Count} vs import=${import2603.rowCount}`);
   checkResult('listMonths 含两月', months.includes('2026-02') && months.includes('2026-03'), months.join(','));
 
-  // === T12-3: benchmark ===
-  console.log('');
-  console.log('[T12-3] benchmark 预计时间');
-  const t_bench0 = Date.now();
-  const estimatedMs = benchmark.estimateRunTimeMs(db, {
-    upperMonth: '2026-02',
-    lowerMonth: '2026-03',
-    matchFields,
-    compareFields
-  });
-  const benchDurMs = Date.now() - t_bench0;
-  console.log(`  采样耗时: ${formatMs(benchDurMs)}  外推预计: ${formatMs(estimatedMs)}`);
-  checkResult('benchmark 返回数字', Number.isFinite(estimatedMs) && estimatedMs > 0);
-
   // === T12-4: reconcile ===
   console.log('');
   console.log('[T12-4] 对账运算 2026-02 vs 2026-03');
@@ -233,19 +216,8 @@ async function main() {
   const reconDurMs = Date.now() - t_recon0;
   console.log(`  实际耗时: ${formatMs(reconDurMs)}`);
   console.log(`  差异统计: new=${reconcileResult.statNew.toLocaleString()} / missing=${reconcileResult.statMissing.toLocaleString()} / changed=${reconcileResult.statChanged.toLocaleString()}`);
-
-  // benchmark 精度验证（±20% 上限，≤50% 下限容错）
-  const errorRatio = Math.abs(reconDurMs - estimatedMs) / reconDurMs;
-  console.log(`  benchmark 误差: ${(errorRatio * 100).toFixed(1)}%`);
   checkResult('对账 < 1 分钟', reconDurMs < 60 * 1000, formatMs(reconDurMs));
   checkResult('差异统计字段存在', typeof reconcileResult.statNew === 'number' && typeof reconcileResult.statMissing === 'number' && typeof reconcileResult.statChanged === 'number');
-  if (errorRatio > 0.5) {
-    checkResult('benchmark 精度', 'warn', `误差 ${(errorRatio * 100).toFixed(1)}% 超 50%（PRD 期望 ±20%，可能样本分布不均或 IO 波动）`);
-  } else if (errorRatio > 0.2) {
-    checkResult('benchmark 精度', 'warn', `误差 ${(errorRatio * 100).toFixed(1)}% 超 20% 但可控`);
-  } else {
-    checkResult('benchmark 精度 ±20%', true, `误差 ${(errorRatio * 100).toFixed(1)}%`);
-  }
 
   // === T12-5: 单月导出 ===
   console.log('');
