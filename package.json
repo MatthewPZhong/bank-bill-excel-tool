@@ -1,6 +1,6 @@
 {
   "name": "bank-bill-excel-tool",
-  "version": "1.5.3",
+  "version": "2.0.0-beta.1",
   "description": "网银账单小助手",
   "main": "src/main.js",
   "author": "Pzhong",
@@ -35,6 +35,12 @@
     "smoke": "node scripts/smoke-test.js",
     "test:v1.5.2": "node scripts/test-v1.5.2-backend.js",
     "test:v1.5.2:sm": "node scripts/test-v1.5.2-state-machine.js",
+    "test:v2.0.0:pending-import": "node scripts/test-v2.0.0-pending-import.js",
+    "test:v2.0.0:pending-session": "node scripts/test-v2.0.0-pending-session.js",
+    "test:v2.0.0:pending-reconcile": "node scripts/test-v2.0.0-pending-reconcile.js",
+    "test:v2.0.0:pending-export": "node scripts/test-v2.0.0-pending-export.js",
+    "test:v2.0.0:perf": "node scripts/test-v2.0.0-perf-real-sample.js",
+    "test:v2.0.0:streaming-writer": "node scripts/test-v2.0.0-streaming-writer-diff.js",
     "startup:measure": "node scripts/measure-startup.js",
     "scan:vars": "node scripts/scan-vars.js",
     "check:vars": "node scripts/check-vars.js"
@@ -82,6 +88,7 @@
     "@napi-rs/canvas": "^0.1.97",
     "@tesseract.js-data/chi_sim": "^1.0.0",
     "@tesseract.js-data/eng": "^1.0.0",
+    "exceljs": "^4.4.0",
     "marked": "^18.0.0",
     "pdfjs-dist": "^5.5.207",
     "tesseract.js": "^7.0.0",

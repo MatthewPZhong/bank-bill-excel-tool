@@ -1,5 +1,43 @@
 # Changelog
 
+## 2.0.0-beta.1 - 2026-04-23
+
+- **顶部模块切换按钮改下拉（3 选 1）**：`index.html` 的 `moduleSwitcherMenu` 追加第 3 项 `月度 Pending 数据核对`；`src/renderer.js:MODULES` 扩 `pendingReconciliation`；`setCurrentModule` 从二选改三选（按 id 查字典取 name + 三 panel 联动）。首次启动默认 `网银账单生成`，切模式不持久化（关闭重开仍默认首项）。
+- **新增顶级模块「月度 Pending 数据核对」**：完整链路 `导入 → 入库 → 规则化对账 → 差异落库 → 导出 xlsx`，用户每月比对"上上月"与"上月"两份 Pending 数据自动找出 `new / missing / changed` 三类差异。布局两行：第一行 `规则管理 / 导入文件 / 开始运行`；第二行 `导出差异 + 状态框`。独立于现有"网银账单生成"和"新开账户余额账单生成"模块，零改现有业务逻辑。
+- **独立 SQLite 数据文件 `tool-data-pending.sqlite`**：避免污染主 DB。`src/backend/pending-db.js` 门面 + `pending-db/migrations.js` 幂等 5 表（`rule` 单行全局 / `pending_months` / `pending_rows` 含 31 列中文原名 + row_hash / `diff_runs` / `diff_rows`）+ 5 索引（`idx_pending_rows_hash UNIQUE(year_month, row_hash)` 等）。启动序列 `openPendingDb(userDataDir)` try-catch 不阻塞主流程。
+- **Pending 模板 31 列固定表头**（`assets/Pending.xlsx`）：`pending类型 / pending资金类型 / 账单类型 / billDate / valueDate / 平账账期 / 业务BU / 对手业务BU / 财务BU / 主体 / 对账类型 / recon_id / 金额 / 币种 / order_no / acc_id / finish_time / 穿透ID / channel / merchant_id / bank_ref / 对账明细ID / 对账单ID / PendingBizId / 备注 / 计算金额 / 计算币种 / 是否拆分Pending / 穿透节点ID / 业务部门（流水）/ 主体（流水）`。关键列 `pending资金类型` 允许任意文本（含空值；**OT-9 初稿的 {提现/退票/充值} 枚举校验在 2026-04-24 Reverse Sync 中撤销**，原因：真实样本出现 `入金` 等其他值，枚举不可穷举；导出差异按实际值动态分 sheet）。
+- **规则管理（单条全局）**：`规则管理` 按钮弹两 `<select multiple>` 下拉（对账字段 + 对账内容，选项来源 31 列表头）。对账字段至少选 1 项；对账内容可空（空时 changed 恒 0）。保存走"完成 → 二次确认 → upsert"，`rule` 表单行（`id = '__GLOBAL__'`）。历史差异 record 保存"规则 JSON 快照"（`diff_runs.rule_snapshot`）做回溯，不影响新运算。
+- **多文件合并导入（child process + ExcelJS 流式 INSERT + 留底 + 行级冲突检测）**：`src/backend/pending-import/worker.js` 是 xlsx 解析 child process 入口，`src/main-process/pending-session.js` 主进程 spawn 时带 `--max-old-space-size=8192`。**xlsx 解析库用 `exceljs@^4.4.0`**（原 `xlsx@0.18.5` 对 30 万行 + inline string 大文件读取为空，Reverse Sync 切换 ExcelJS）。多文件选完 → 弹年月选择 → worker 严格校验每个文件表头（顺序 + 内容，任一不一致整批拒绝）→ **流式 INSERT**（边读边写 DB，不在内存累积 allRows；跨文件 hash 去重 Set 占 ~120MB / 300 万行）→ 全月行级 hash 冲突整批 rollback 并缓存错误（错误上限 1000 条防 emit 巨型 JSON 撑爆 stdout 管道）；状态框支持"点击导出报错文件"（xlsx 格式，schema = source_file / sheet_row / severity / message + 31 原列）。worker 事件流 progress / error / complete，主进程 `webContents.send('pending:import:progress', ev)` 转发到渲染层状态栏实时显示"正在导入 {YYYY-MM}：{file}（累计入库 N 行）"。
+- **覆盖前自动留底 xlsx**：同月重复导入 → 弹"{year}-{month} 已有 N 行数据"确认框；确认覆盖前先把旧月全行导出为 `Documents/网银账单生成小助手/pending-archives/{YYYY-MM}/{YYYY-MM}-backup-{YYYYMMDDThhmmss}.xlsx`（`src/main-process/pending-session.js:archiveExistingMonth`），然后 worker 内 `BEGIN → deleteMonth → 批量 INSERT → upsertMonthMeta → COMMIT`，失败 `ROLLBACK`。
+- **对账引擎（资金敏感红线）**：`src/backend/pending-reconcile/engine.js:runReconciliation` 三段 SQL：
+  - `new`: lower 有 + upper 无（`NOT EXISTS`）
+  - `missing`: upper 有 + lower 无（`NOT EXISTS`，对偶）
+  - `changed`: INNER JOIN on matchFields + compareFields 任一 `IS NOT`
+  - match 阶段用 `=`（**v2.0.0-beta.2 Reverse Sync**：原设计用 `IS` 做 NULL-friendly；实测 EXPLAIN QUERY PLAN 下 `IS` 和 `=` planner 生成相同 SEARCH COVERING INDEX 计划，但 `=` 语义明确不依赖启发式。语义变更：match key 为 NULL 的行**不再匹配另一 NULL 行**—— 业务上 match key 缺失本就是无效对账行）。compare 阶段 `changed` 保留 `IS NOT`（row 级 filter 性能影响小，保留 NULL-safe 语义）；`ensureMatchIndex` lazy `CREATE INDEX IF NOT EXISTS`（名字用 matchFields 的 SHA-1 哈希，避免长名）。`changed` 按值严格相等（字符串 `===` 比较，OT-8 不做 hash；`金额="100.00"` vs `金额="100"` 视为不等，由规则设计者保证上游数据清洗一致）。
+- **benchmark 性能修复**：`src/backend/pending-reconcile/benchmark.js:estimateRunTimeMs` 采样 SQL 前先调 `ensureMatchIndex` 建 `(year_month, matchFields)` 复合索引（否则 121 万行 × 121 万行 NOT EXISTS subquery O(n²) 全表扫描，实测卡 15+ 分钟）。建索引 ~2 秒，之后 reconcile 采样 ~0.4 秒。真实样本 243.68 万行实测对账 **2.85 秒**（PRD 目标 < 1 分钟，超 22×）。
+- **相邻月校验（跨年也算相邻）**：开始运行弹窗选两月份 → 二次确认 → 相邻校验（`2025-12 ↔ 2026-01` 算相邻）；不相邻弹 alert 并重开弹窗保留已选值。
+- **benchmark 预计时间**：`src/backend/pending-reconcile/benchmark.js:estimateRunTimeMs` 固定取样 10000 行 NOT EXISTS JOIN，`(total/sampleRowsActual) × sampleMs` 线性外推（精度 ±20%）。状态栏显示"正在对账 {lower} vs {upper}，预计 {N} 秒..."。
+- **差异 xlsx 导出（单月选 run / 汇总取最新 run）**：`src/backend/pending-export/writer.js:exportSingleRun + exportAggregate`。
+  - 单月：`Sheet1 = 汇总`（31 原列 + `diff_type` + 按规则 compareFields 动态展开的 `{col}_before` / `{col}_after`，共 31 + 1 + 2n 列）+ `Sheet2~N` 按 `pending资金类型` 实际出现值动态分 sheet（OT-9 枚举约束保证只会有提现/退票/充值）；`changed` 行 31 原列用 lower / `_before` 填 upper 值 / `_after` 填 lower 值；`new` 行 31 列用 lower / `_before`、`_after` 为空；`missing` 行 31 列用 upper / `_before`、`_after` 为空。
+  - 汇总：每 `(upper, lower)` 对取最新 run；`Sheet1 = 按月维度区别汇总`（最老 → 最新，空行 + 月份 label 隔开）+ `Sheet2 = 汇总`（扁平）。compareFields 取所有 run 的**并集**展开为列，某 run 缺失的列留空。
+  - 表头第 1 行字体写死 `Courier New`（延续 v1.5.3 R3 `applyHeaderRowFont`，数据区字体不变，**无 CJK 回退链**）；sheet 名字走 `sanitizeSheetName` 防非法字符。
+- **资金敏感修复：diff_runs 排序 tie-breaker**：`src/backend/pending-db/diff-repository.js` 的 `listAllRuns / listRunsForMonthPair / getLatestRunForMonthPair` `ORDER BY created_at DESC` 末尾加 `, id DESC`。原因：`new Date().toISOString()` 毫秒精度；同毫秒多次 run 时单列 ORDER BY 不稳定，用户"导出最新 run"可能误取旧 run。AUTOINCREMENT id 单调，作为第二级稳定排序后 pending-reconcile 测试连跑 5 次 23/23 全绿（此前偶发失败）。
+- **新增 IPC + preload 暴露（15 个）**：`pending:columns` / `pending:rule:{get,save}` / `pending:months:list` / `pending:import:{pick-files,start,progress}` / `pending:error:export-report` / `pending:reconcile:{benchmark,run}` / `pending:diff:{runs-list,runs-for-month-pair,latest-run-for,export-single,export-aggregate}`。`src/preload.js` 挂 `window.desktopApi.pending = { getColumns, getRule, saveRule, listMonths, pickFiles, startImport, exportErrorReport, onImportProgress, reconcile: { benchmark, run }, diff: { listAllRuns, listRunsForMonthPair, getLatestRunForMonthPair, exportSingle, exportAggregate } }`。
+
+### 变更
+
+- **renderer state 扩展**：`state.pending = { rule, months, latestRunResult, latestRunId, importing, importingText, currentYearMonth, running, runningText, errorReportAvailable, errorMessage, lastImportSummary, errorReportPath }`。状态栏文案分支覆盖：未设置规则 / 已设置无数据 / 已导入未运行 / 导入中 / 导入成功 / 对账中 / 对账完成（有差异 / 无差异）/ 报错（表头 / 重复行 / 资金类型不合法 / 其他行级）。报错态下状态栏挂 `.is-clickable` + `data-tone="error"` → 鼠标手势反馈 + 边框色变红（复用 v1.5.3 `styles.css:361,374` 约定）；导入/对账成功挂 `data-tone="success"`。
+- **资源打包**：`assets/Pending.xlsx` 通过 `electron-builder.files: ["assets/**/*"]` 自动打进安装包，运行时读取其第 1 行作为 31 列常量缓存（`pending-db/columns.js` Object.freeze，启动时读一次整个会话期间不刷新）。
+- **版本号 bump**：`package.json.version` 从 `1.5.3` → `2.0.0-beta.1`。
+- **依赖新增**：`exceljs@^4.4.0`（仅 Pending 模块 worker 读 xlsx 用；现有两个模块继续用 `xlsx` + `xlsx-js-style`）。
+- **测试脚本新增 5 个**：`test-v2.0.0-pending-import.js`（21 断言 / 7 场景）/ `pending-session.js`（19 断言 / 5 场景）/ `pending-reconcile.js`（23 断言 / 7 场景，含 T1 手工 4×4 资金敏感样本）/ `pending-export.js`（22 断言 / 2 场景）/ **`pending-perf-real-sample.js`（15 断言 / 6 场景，真实样本 243.68 万行端到端）**。`package.json` 加对应 `test:v2.0.0:pending-*` script。
+
+### 风险与回滚
+
+- **资金敏感**：Pending 数据含金额 / 币种 / 资金类型。本次实现已用"覆盖前留底 xlsx"缓解误覆盖风险；"最新 run"排序加 tie-breaker 防止导出错数据。
+- **数据回滚**：删除 `{userData}/tool-data-pending.sqlite` 即可清空 Pending 模块全部数据（主 DB 不受影响）。
+- **代码隔离**：Pending 模块全部代码在 `src/backend/pending-db/` / `src/backend/pending-import/` / `src/backend/pending-reconcile/` / `src/backend/pending-export/` / `src/main-process/pending-session.js` / `src/renderer-pending.js` 新文件，主 DB 代码零改动。
+
 ## 1.5.3 - 2026-04-22
 
 - **主页面「模板」下拉改为「模式」**：`index.html:47` 的 `<label>` 文本由「模板」改为「模式」；下拉值域收窄为两条——`制作网银账单`（默认选中，内部隐式固定为 `__FILENAME_MAPPING__`）和 `导出月度余额账单`（R1 新增）。真实模板与虚拟 ID 不再出现在主页面下拉，仅在「导出月度余额账单」模式的弹窗内出现（`src/renderer.js:updateTemplateSelect`）。`__FILENAME_MAPPING__` / 具体模板选择 / v1.5.2 行为在「制作网银账单」模式下完全保留。

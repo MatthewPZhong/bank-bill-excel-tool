@@ -86,5 +86,27 @@ contextBridge.exposeInMainWorld('desktopApi', {
   newAccount: {
     generate: (payload) => ipcRenderer.invoke('new-account:generate', payload),
     exportFile: () => ipcRenderer.invoke('new-account:export')
+  },
+  pending: {
+    getColumns: () => ipcRenderer.invoke('pending:columns'),
+    getRule: () => ipcRenderer.invoke('pending:rule:get'),
+    saveRule: (payload) => ipcRenderer.invoke('pending:rule:save', payload),
+    listMonths: () => ipcRenderer.invoke('pending:months:list'),
+    pickFiles: () => ipcRenderer.invoke('pending:import:pick-files'),
+    startImport: (payload) => ipcRenderer.invoke('pending:import:start', payload),
+    exportErrorReport: () => ipcRenderer.invoke('pending:error:export-report'),
+    onImportProgress: (listener) => {
+      ipcRenderer.on('pending:import:progress', (_event, ev) => listener(ev));
+    },
+    reconcile: {
+      run: (payload) => ipcRenderer.invoke('pending:reconcile:run', payload)
+    },
+    diff: {
+      listAllRuns: () => ipcRenderer.invoke('pending:diff:runs-list'),
+      listRunsForMonthPair: (payload) => ipcRenderer.invoke('pending:diff:runs-for-month-pair', payload),
+      getLatestRunForMonthPair: (payload) => ipcRenderer.invoke('pending:diff:latest-run-for', payload),
+      exportSingle: (payload) => ipcRenderer.invoke('pending:diff:export-single', payload),
+      exportAggregate: () => ipcRenderer.invoke('pending:diff:export-aggregate')
+    }
   }
 });

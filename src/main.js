@@ -5,6 +5,14 @@ const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage } = require('electron');
 const { AppDatabase } = require('./backend/database');
+const { openPendingDb, PENDING_DB_FILENAME } = require('./backend/pending-db');
+const PENDING_COLUMNS = require('./backend/pending-db/columns');
+const pendingRuleRepo = require('./backend/pending-db/rule-repository');
+const pendingMonthRepo = require('./backend/pending-db/month-repository');
+const pendingDiffRepo = require('./backend/pending-db/diff-repository');
+const pendingReconcileEngine = require('./backend/pending-reconcile/engine');
+const pendingExportWriter = require('./backend/pending-export/writer');
+const { createPendingSession } = require('./main-process/pending-session');
 const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
 const { groupBigAccountRows } = require('./backend/database/utils');
 const {
@@ -85,6 +93,11 @@ if (process.platform === 'win32') {
 
 let mainWindow = null;
 let database = null;
+let pendingDb = null;
+const pendingSession = createPendingSession({
+  getPendingDb: () => pendingDb,
+  getStorageRoot: () => ensureStorageRoot()
+});
 let lastGeneratedExports = {
   detail: null,
   balance: null,
@@ -8667,6 +8680,158 @@ function registerNewAccountHandlers() {
   ipcMain.handle('new-account:export', () => {
     return exportGeneratedFile(lastGeneratedExports.newAccount, '暂无可导出的新开账户余额账单', '导出新开账户余额账单');
   });
+
+  ipcMain.handle('pending:columns', () => PENDING_COLUMNS.slice());
+
+  ipcMain.handle('pending:rule:get', () => {
+    if (!pendingDb) return null;
+    try {
+      return pendingRuleRepo.getRule(pendingDb);
+    } catch (err) {
+      try {
+        appendActivityLogEntry({
+          level: 'error',
+          message: 'pending:rule:get 失败',
+          details: [String(err && err.stack ? err.stack : err)]
+        });
+      } catch (_logErr) {
+        // swallow
+      }
+      return null;
+    }
+  });
+
+  ipcMain.handle('pending:rule:save', (_event, payload) => {
+    if (!pendingDb) {
+      throw new Error('Pending DB 未初始化，无法保存规则');
+    }
+    return pendingRuleRepo.upsertRule(pendingDb, payload || {});
+  });
+
+  ipcMain.handle('pending:months:list', () => {
+    if (!pendingDb) return [];
+    try { return pendingMonthRepo.listMonths(pendingDb); } catch (_err) { return []; }
+  });
+
+  ipcMain.handle('pending:import:pick-files', async () => {
+    const result = await dialog.showOpenDialog({
+      title: '选择 Pending 数据文件',
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      properties: ['openFile', 'multiSelections']
+    });
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return { cancelled: true };
+    }
+    return { cancelled: false, files: result.filePaths };
+  });
+
+  ipcMain.handle('pending:import:start', async (event, payload) => {
+    const { files, yearMonth, overwriteConfirmed = false } = payload || {};
+    if (!Array.isArray(files) || files.length === 0) {
+      return { status: 'error', errors: [{ severity: 'fatal', message: '未选择文件' }] };
+    }
+    if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return { status: 'error', errors: [{ severity: 'fatal', message: 'yearMonth 格式错误（应为 YYYY-MM）' }] };
+    }
+    const webContents = event.sender;
+    const dbPath = path.join(app.getPath('userData'), PENDING_DB_FILENAME);
+    return pendingSession.runImport({
+      yearMonth,
+      files,
+      overwriteConfirmed,
+      dbPath,
+      onProgress: (ev) => {
+        try { webContents.send('pending:import:progress', ev); } catch (_e) { /* swallow */ }
+      }
+    });
+  });
+
+  ipcMain.handle('pending:error:export-report', async () => {
+    if (!pendingSession.hasPendingErrorReport()) {
+      return { status: 'error', message: '无错误报告' };
+    }
+    const result = await dialog.showSaveDialog({
+      title: '保存 Pending 导入报错文件',
+      defaultPath: `pending-import-errors-${Date.now()}.xlsx`,
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+    });
+    if (result.canceled || !result.filePath) return { status: 'cancelled' };
+    try {
+      return pendingSession.exportErrorReport(result.filePath);
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  ipcMain.handle('pending:reconcile:run', (_event, payload = {}) => {
+    if (!pendingDb) throw new Error('Pending DB 未初始化');
+    const rule = pendingRuleRepo.getRule(pendingDb);
+    if (!rule || !rule.matchFields || rule.matchFields.length === 0) {
+      throw new Error('规则未设置（matchFields 为空）');
+    }
+    return pendingReconcileEngine.runReconciliation(pendingDb, {
+      upperMonth: payload.upperMonth,
+      lowerMonth: payload.lowerMonth,
+      rule
+    });
+  });
+
+  ipcMain.handle('pending:diff:runs-list', () => {
+    if (!pendingDb) return [];
+    try { return pendingDiffRepo.listAllRuns(pendingDb); } catch (_e) { return []; }
+  });
+
+  ipcMain.handle('pending:diff:runs-for-month-pair', (_event, payload = {}) => {
+    if (!pendingDb) return [];
+    try {
+      return pendingDiffRepo.listRunsForMonthPair(pendingDb, payload.upperMonth, payload.lowerMonth);
+    } catch (_e) {
+      return [];
+    }
+  });
+
+  ipcMain.handle('pending:diff:latest-run-for', (_event, payload = {}) => {
+    if (!pendingDb) return null;
+    try {
+      return pendingDiffRepo.getLatestRunForMonthPair(pendingDb, payload.upperMonth, payload.lowerMonth);
+    } catch (_e) {
+      return null;
+    }
+  });
+
+  ipcMain.handle('pending:diff:export-single', async (_event, payload = {}) => {
+    if (!pendingDb) return { status: 'error', message: 'Pending DB 未初始化' };
+    const runId = Number(payload.runId);
+    if (!Number.isFinite(runId) || runId <= 0) {
+      return { status: 'error', message: 'runId 无效' };
+    }
+    const saveResult = await dialog.showSaveDialog({
+      title: '保存 Pending 差异文件',
+      defaultPath: payload.defaultFileName || `月度Pending差异-run${runId}.xlsx`,
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+    });
+    if (saveResult.canceled || !saveResult.filePath) return { status: 'cancelled' };
+    try {
+      return pendingExportWriter.exportSingleRun(pendingDb, runId, saveResult.filePath);
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  ipcMain.handle('pending:diff:export-aggregate', async () => {
+    if (!pendingDb) return { status: 'error', message: 'Pending DB 未初始化' };
+    const saveResult = await dialog.showSaveDialog({
+      title: '保存 Pending 差异汇总文件',
+      defaultPath: `月度Pending差异-汇总-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+    });
+    if (saveResult.canceled || !saveResult.filePath) return { status: 'cancelled' };
+    try {
+      return pendingExportWriter.exportAggregate(pendingDb, saveResult.filePath);
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
 }
 
 app.whenReady()
@@ -8678,6 +8843,21 @@ app.whenReady()
     database = new AppDatabase(dataPath);
     database.init();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
+
+    try {
+      pendingDb = openPendingDb(app.getPath('userData'));
+    } catch (pendingDbErr) {
+      pendingDb = null;
+      try {
+        appendActivityLogEntry({
+          level: 'error',
+          message: 'Pending DB 初始化失败（v2.0.0）',
+          details: [String(pendingDbErr && pendingDbErr.stack ? pendingDbErr.stack : pendingDbErr)]
+        });
+      } catch (_logErr) {
+        // swallow
+      }
+    }
 
     // v1.5.3 R2（D15）：一次性迁移 own-accounts/*.json → template_big_accounts
     // 失败不阻塞启动：异常由迁移模块内部捕获，返回 status='failed' 时记录到

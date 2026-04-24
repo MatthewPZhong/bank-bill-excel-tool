@@ -35,6 +35,7 @@
             <div id="moduleSwitcherMenu" class="module-switcher-menu" hidden>
               <button class="module-option is-active" type="button" data-module="statement-generator">网银账单生成</button>
               <button class="module-option" type="button" data-module="new-account-generator">新开账户余额账单生成</button>
+              <button class="module-option" type="button" data-module="pending-reconciliation">月度 Pending 数据核对</button>
             </div>
           </div>
 
@@ -134,6 +135,18 @@
               </div>
             </div>
           </section>
+
+          <section id="pendingModulePanel" class="control-board module-panel pending-module-panel" hidden>
+            <div class="pending-module-grid">
+              <button id="pendingRuleBtn" class="secondary-btn pending-left-btn" type="button">规则管理</button>
+              <div class="pending-top-btn-row">
+                <button id="pendingImportBtn" class="primary-btn pending-top-btn" type="button" disabled>导入文件</button>
+                <button id="pendingRunBtn" class="primary-btn pending-top-btn" type="button" disabled>开始运行</button>
+              </div>
+              <button id="pendingExportBtn" class="secondary-btn pending-left-btn" type="button" disabled>导出差异</button>
+              <div id="pendingStatusBox" class="status-box">初次使用请确认用来筛选的字段~</div>
+            </div>
+          </section>
         </section>
       </main>
 
@@ -185,6 +198,7 @@
     <div id="modalRoot"></div>
     <script src="./src/renderer-dialogs.js"></script>
     <script src="./src/renderer-previews.js"></script>
+    <script src="./src/renderer-pending.js"></script>
     <script src="./src/renderer.js"></script>
   </body>
 </html>

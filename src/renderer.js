@@ -44,6 +44,10 @@ const MODULES = Object.freeze({
   newAccountGenerator: {
     id: 'new-account-generator',
     name: '新开账户余额账单生成'
+  },
+  pendingReconciliation: {
+    id: 'pending-reconciliation',
+    name: '月度 Pending 数据核对'
   }
 });
 const RENDERER_STARTUP_MARKS = Object.freeze({
@@ -88,6 +92,21 @@ const state = {
   backgroundDraft: { ...DEFAULT_BACKGROUND_SETTINGS },
   isBackgroundPaletteOpen: false,
   currentModule: MODULES.statementGenerator.id,
+  pending: {
+    rule: null,
+    months: [],
+    latestRunResult: null,
+    latestRunId: null,
+    importing: false,
+    importingText: null,
+    currentYearMonth: null,
+    running: false,
+    runningText: null,
+    errorReportAvailable: false,
+    errorMessage: null,
+    lastImportSummary: null,
+    errorReportPath: null
+  },
   isModuleMenuOpen: false,
   currencyOptions: [],
   manualBalancePromptReady: false,
@@ -180,6 +199,12 @@ const elements = {
   currentModuleName: document.getElementById('currentModuleName'),
   statementModulePanel: document.getElementById('statementModulePanel'),
   newAccountModulePanel: document.getElementById('newAccountModulePanel'),
+  pendingModulePanel: document.getElementById('pendingModulePanel'),
+  pendingRuleBtn: document.getElementById('pendingRuleBtn'),
+  pendingImportBtn: document.getElementById('pendingImportBtn'),
+  pendingRunBtn: document.getElementById('pendingRunBtn'),
+  pendingExportBtn: document.getElementById('pendingExportBtn'),
+  pendingStatusBox: document.getElementById('pendingStatusBox'),
   backgroundTool: document.getElementById('backgroundTool'),
   backgroundPaletteBtn: document.getElementById('backgroundPaletteBtn'),
   saveUserGuideBtn: document.getElementById('saveUserGuideBtn'),
@@ -286,6 +311,16 @@ const {
   createAccountMappingMigrationDialog,
   closeModal,
   openBackgroundPalette
+});
+
+const rendererPending = window.__rendererPending.createRendererPending({
+  state,
+  elements,
+  desktopApi: window.desktopApi,
+  openModal,
+  closeModal,
+  createAlertDialog,
+  createConfirmDialog
 });
 
 function updateStatusBox(box, message, tone = 'info', options = {}) {
@@ -1065,13 +1100,14 @@ function setNewAccountExportAvailability(enabled = state.canExportNewAccount) {
 
 function setCurrentModule(moduleId) {
   state.currentModule = moduleId;
-  const isStatementModule = moduleId === MODULES.statementGenerator.id;
+  const moduleDef = Object.values(MODULES).find((m) => m.id === moduleId) || MODULES.statementGenerator;
 
-  elements.currentModuleName.textContent = isStatementModule
-    ? MODULES.statementGenerator.name
-    : MODULES.newAccountGenerator.name;
-  elements.statementModulePanel.hidden = !isStatementModule;
-  elements.newAccountModulePanel.hidden = isStatementModule;
+  elements.currentModuleName.textContent = moduleDef.name;
+  elements.statementModulePanel.hidden = moduleId !== MODULES.statementGenerator.id;
+  elements.newAccountModulePanel.hidden = moduleId !== MODULES.newAccountGenerator.id;
+  if (elements.pendingModulePanel) {
+    elements.pendingModulePanel.hidden = moduleId !== MODULES.pendingReconciliation.id;
+  }
 
   Array.from(elements.moduleSwitcherMenu.querySelectorAll('.module-option')).forEach((button) => {
     button.classList.toggle('is-active', button.dataset.module === moduleId);
@@ -2931,6 +2967,8 @@ async function initialize() {
   updateNewAccountGenerateAvailability();
   setCurrentModule(MODULES.statementGenerator.id);
   closeModuleMenu();
+  await rendererPending.initialize();
+  rendererPending.bindEvents();
   setStatus(getEnumStatusMessage(), state.hasEnum ? 'info' : 'error', {
     errorReportReady: false
   });
