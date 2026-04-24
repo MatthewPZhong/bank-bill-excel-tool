@@ -307,30 +307,27 @@ CREATE TABLE rule (
 - 状态栏显示 `正在对账 {上月} vs {上上月}，预计 {N} 秒...`
 - **精度约定**：±20% 可接受（状态框仅提示用户预期，非 SLA）
 
-#### 5.5.4 对账运算（类型三合一）
+#### 5.5.4 对账运算（A1 fallback 语义 — 2026-04-24 Reverse Sync）
 
-用 SQL（SQLite）实现：
+**同一笔定义**：按对账字段顺序做 N 轮 fallback 配对。只要**任一**对账字段能在剩余未匹配行里配上，就视为同一笔。
 
-```sql
--- new: 上月有，上上月无
-SELECT A.* FROM rows A
-WHERE A.month = '{上月}'
-  AND NOT EXISTS (
-    SELECT 1 FROM rows B WHERE B.month = '{上上月}'
-      AND B.<match_field_1> = A.<match_field_1>
-      AND B.<match_field_2> = A.<match_field_2> ...
-  );
+**算法**：
+1. 初始 `matched_upper_ids = ∅`，`matched_lower_ids = ∅`
+2. 对每个 `match_field_i`（按 UI 顺序）：
+   - 从两月取未 matched 的行（排除 NULL/空值 key）
+   - 按 `match_field_i` 值分组，组内按 `pending_rows.id` 升序
+   - 同一分组内 upper 和 lower 行**按序号 1 对 1 配对**（`min(upper.length, lower.length)` 对）
+   - 配对成功的行加入 `matched_*_ids`
+3. 三类差异判定：
+   - **changed**：配对成功对 + `compare_fields` 任一列不等
+   - **new**：lower 月行不在 `matched_lower_ids` 里
+   - **missing**：upper 月行不在 `matched_upper_ids` 里
 
--- missing: 上上月有，上月无（对偶）
+**实现**：SQL 只做每轮 `(id, match_field)` 的覆盖索引扫描（ORDER BY id 免 sort），JS 层做 Map 分组 + 1 对 1 配对（`Set<id>` 跟踪已匹配）。配对完成后 SQL 做最后的 changed/new/missing 三段 INSERT。243.68 万行实测 ~4 秒。
 
--- changed: 两月都 match 上，但对比字段有差异
-SELECT A.*, B.* FROM rows A JOIN rows B ON ...
-WHERE <any compare_field A vs B 不相等>;
-```
+**changed 比对口径**（OT-8 延续）：`compare_fields` 逐列 `IS NOT` 比较，NULL-safe（两 NULL 视相等；NULL vs 非 NULL 视不等）。字符串层面严格相等，`金额="100.00"` vs `金额="100"` 视不等。
 
-每行差异结果写到 `diffs` 表（行级指针 + type + 规则快照）。
-
-**changed 比对口径（OT-8 = 按值）**：两月匹配 key 后，逐个对比 `compare_fields` 里的列**值**是否严格相等（字符串层面 === 比较，空值与空字符串视为相等）；不做 hash。这样 `金额="100.00"` 和 `金额="100"` 按值比对视为不等，交由规则设计者自行确保上游数据清洗一致。
+**match 比对口径**：单轮内 `=` 比较，NULL 不参与配对（无效 key 直接流到下一轮或最终 new/missing）。
 
 #### 5.5.5 结果落库
 

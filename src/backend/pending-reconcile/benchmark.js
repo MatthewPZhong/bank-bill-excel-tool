@@ -24,10 +24,10 @@ function estimateRunTimeMs(db, { upperMonth, lowerMonth, matchFields }) {
 
   ensureMatchIndex(db, matchFields);
 
-  // 样本 JOIN：lower LIMIT 10000 NOT EXISTS upper
-  const onClause = matchFields
-    .map((f) => `B.\`${f}\` = A.\`${f}\``)
-    .join(' AND ');
+  // 新 A1 语义多轮 fallback：样本 JOIN 只取第 1 个对账字段做 NOT EXISTS 取样，
+  // 再按 matchFields.length 线性粗放（近似每轮耗时相当）
+  const firstField = matchFields[0];
+  const onClause = `B.\`${firstField}\` = A.\`${firstField}\``;
 
   const start = Date.now();
   db.prepare(
@@ -40,12 +40,12 @@ function estimateRunTimeMs(db, { upperMonth, lowerMonth, matchFields }) {
 
   const sampleRowsActual = Math.min(lowerCount, SAMPLE_SIZE);
   if (sampleRowsActual === 0) {
-    // 小数据集不足 benchmark 样本：直接返回 sample 时间作为估算
-    return Math.max(sampleMs, 0);
+    return Math.max(sampleMs * matchFields.length, 0);
   }
 
-  // 线性外推：total_rows / sample_rows * sample_ms
-  return Math.max(Math.round((total / sampleRowsActual) * sampleMs), 0);
+  // 线性外推 × 轮数
+  const perRoundMs = (total / sampleRowsActual) * sampleMs;
+  return Math.max(Math.round(perRoundMs * matchFields.length), 0);
 }
 
 module.exports = {

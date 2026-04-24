@@ -44,8 +44,11 @@ const DB_PATH = path.join(TMP, 'tool-data-pending.sqlite');
 function listXlsx(dir) {
   return fs.readdirSync(dir)
     .filter((f) => f.toLowerCase().endsWith('.xlsx'))
-    // 过滤掉手工测试留下的报错导出文件（非 Pending 模板结构）
+    // 过滤掉手工测试留下的副产物：报错导出 / 差异导出 / Excel 打开的临时锁文件 / 备份文件
     .filter((f) => !f.startsWith('pending-import-errors-'))
+    .filter((f) => !f.startsWith('月度Pending差异'))
+    .filter((f) => !f.startsWith('.~') && !f.startsWith('~$'))
+    .filter((f) => !f.includes('-backup-'))
     .sort()
     .map((f) => path.join(dir, f));
 }

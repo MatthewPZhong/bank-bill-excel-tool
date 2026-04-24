@@ -457,3 +457,35 @@
 ### 测试脚本
 
 - 新增 `scripts/test-v2.0.0-perf-real-sample.js`：端到端 6 场景（2602/2603 导入 + benchmark + reconcile + exportSingle + exportAggregate）；15 pass / 0 fail / 1 warn。
+
+### 已知偏离 PRD §5.4.3（UX，2026-04-24 确认保留）
+
+- PRD 原意：选文件 → **先表头校验** → 通过后弹年月选择
+- 实际实现：选文件 → **先弹年月选择** → 确认后 worker 内才做表头校验
+- 影响：表头错的文件用户白点一次年月；数据正确性无影响
+- 决策（用户选 A）：保留现状。因为 ExcelJS 读大文件第 1 行也要 ~13 秒，先校验反而让用户等更久才看到年月对话框
+
+### Reverse Sync #5 — 对账语义 AND → A1 fallback（2026-04-24）
+
+**触发**：用户在手工测试期间提出"对账字段只要任一相等就视为同一笔"，与 PRD §5.5.4 / OT-8 原 AND 语义冲突。
+
+**决策**（用户选 A1 + id 升序 1 对 1 配对）：
+- 按对账字段**顺序**做 N 轮 fallback
+- 第 i 轮用第 i 个字段做单字段 key，同 key 内 upper/lower 按 `pending_rows.id` 升序 1 对 1 配对
+- 配对成功的行退出候选池，进入下一轮
+- N 轮跑完剩余：upper → missing / lower → new
+
+**代码改动**：
+- `src/backend/pending-reconcile/engine.js` 重写：
+  - `ensureMatchIndex` 改为"每字段一索引" `(year_month, col, id)` 覆盖索引（index-only scan）
+  - runReconciliation 多轮配对；初版纯 SQL CTE + ROW_NUMBER + LEFT JOIN（11 分钟未完 → kill）；**改用 JS 层配对**：SQL 只扫 `(id, key)`，JS Map 分组 + `Set<id>` 跟踪已匹配 + 1 对 1 配对，配对结果批量 INSERT 到 `tmp_pairs` 临时表；最后 SQL 做 changed/new/missing 三段 INSERT
+  - changed 判定仍走 compareFields 任一 `IS NOT`
+- `src/backend/pending-reconcile/benchmark.js`：单轮 sample × matchFields.length 粗略外推
+- `scripts/test-v2.0.0-pending-reconcile.js` T2 场景预期值更新（A1 语义下 2 轮 fallback 给出的 new/missing/changed 与 AND 不同）
+
+**T12 真实样本验证**（2436823 行）：
+- 对账耗时 **4.31 秒**（A1 3 轮 fallback 比原 AND 的 2.85 秒多 ~1.5 秒，仍远 < 1 分钟目标）
+- 差异 new=3 / missing=276 / changed=0（vs 原 AND 的 new=3 / missing=276 / changed=2；A1 下 order_no 已配齐所有可配对行，compareFields 差异比对结果不同属正常）
+
+**check-vars**：
+- **⚠️ 资金敏感 Risk-sensitive** 命中：engine.runReconciliation 核心算法改写。pending-reconcile 4×4 手工样本小测试 23 断言全绿，真实样本语义符合用户 A1 预期。

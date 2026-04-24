@@ -112,15 +112,21 @@ try {
     }
   }
 
-  // === T2: 多 matchField — 规则变严 ===
-  console.log('[T2] match=[order_no, 币种]: A002 CNY/CNY 仍匹配');
+  // === T2: A1 fallback — match=[order_no, 币种] 的 2 轮 ===
+  // 轮 1 (order_no): A001↔A001, A002↔A002（2 对）
+  // 轮 2 (币种): 剩余 upper[A003(HKD), A004(JPY)] / lower[A005(HKD), A006(EUR)]
+  //            只 HKD 有配对 A003↔A005（1 对）；A004/A006 无配对
+  // compareFields=[金额]:
+  //   A001(100)↔A001(100) 不变
+  //   A002(200)↔A002(250) 变
+  //   A003(300)↔A005(500) 变 → changed=2
+  console.log('[T2] A1 fallback match=[order_no, 币种]: new=1 / missing=1 / changed=2');
   {
     const rule = { matchFields: ['order_no', '币种'], compareFields: ['金额'] };
     const result = engine.runReconciliation(db, { upperMonth: '2026-09', lowerMonth: '2026-10', rule });
-    // 因为所有对比行的币种都一致，match 还是能匹配上 A001/A002；A003/A004/A005/A006 都独一份
-    check('statNew = 2 (A005, A006)', result.statNew === 2, `got ${result.statNew}`);
-    check('statMissing = 2 (A003, A004)', result.statMissing === 2);
-    check('statChanged = 1 (A002 金额)', result.statChanged === 1);
+    check('statNew = 1 (A006 未配)', result.statNew === 1, `got ${result.statNew}`);
+    check('statMissing = 1 (A004 未配)', result.statMissing === 1, `got ${result.statMissing}`);
+    check('statChanged = 2 (A002 + A003↔A005)', result.statChanged === 2, `got ${result.statChanged}`);
   }
 
   // === T3: compareFields 为空 — 只有 new / missing，没 changed ===

@@ -1,21 +1,23 @@
 // 对账 engine — 三类差异（new / missing / changed）
 // ⚠️ 资金敏感：任何 SQL 改动必须跑 test-v2.0.0-pending-reconcile.js（小样本手工对照）
 //
-// SQL 说明:
-// - JOIN 用 A.col IS B.col（非 =），处理 NULL 友好（TechDoc R-T4）
-// - changed 条件: compareFields 任一列 IS NOT 对应列
-// - matchFields 上 lazy 建 index（OT-T3）
+// v2.0.0-beta.2 Reverse Sync #5：对账语义改"单字段 fallback + id 升序 1 对 1 配对"
+//   - 原 AND 语义：N 个对账字段全等才算同一笔（太严，order_no 变了就配不上）
+//   - 新 A1 语义：按对账字段顺序逐轮匹配；第 n 轮用第 n 个字段做 key
+//     - 每轮：未匹配的 upper/lower 行，按单字段 key 分组 + id 升序 → 同组 1 对 1 配对
+//     - 配对成功的行移出候选池，进入下一轮用下一个字段
+//     - N 轮跑完剩余：upper → missing；lower → new
+//   - 同一对最多用到 1 个对账字段相等（符合"任一相等即同一笔"）
+//   - changed 判定仍基于 compareFields 任一不等（IS NOT，NULL-safe）
+//
+// 索引：为每个对账字段 (year_month, col) 建单列索引（不是复合索引）
 
 const crypto = require('node:crypto');
 const PENDING_COLUMNS = require('../pending-db/columns');
 const diffRepo = require('../pending-db/diff-repository');
 
-function makeMatchIndexName(matchFields) {
-  const hash = crypto
-    .createHash('sha1')
-    .update(matchFields.join('\u0001'))
-    .digest('hex')
-    .slice(0, 12);
+function makeFieldIndexName(field) {
+  const hash = crypto.createHash('sha1').update(field).digest('hex').slice(0, 12);
   return `idx_pending_match_${hash}`;
 }
 
@@ -27,22 +29,21 @@ function assertFieldsInPendingColumns(fields, label) {
   }
 }
 
+// 为每个对账字段建覆盖索引 (year_month, col, id)
+// - year_month 作前缀：WHERE 过滤
+// - col 第 2：ROW_NUMBER OVER PARTITION BY col
+// - id 第 3：ORDER BY id 走索引自然顺序，免 sort
+// 3 个字段就建 3 个索引；lazy IF NOT EXISTS
 function ensureMatchIndex(db, matchFields) {
-  if (!Array.isArray(matchFields) || matchFields.length === 0) return null;
+  if (!Array.isArray(matchFields) || matchFields.length === 0) return [];
   assertFieldsInPendingColumns(matchFields, 'match field');
-  const name = makeMatchIndexName(matchFields);
-  const colList = matchFields.map((f) => `\`${f}\``).join(', ');
-  db.exec(`CREATE INDEX IF NOT EXISTS ${name} ON pending_rows(year_month, ${colList});`);
-  return name;
-}
-
-// v2.0.0-beta.2 性能修复：match 阶段用 `=` 而非 `IS`
-// - planner 等价（EXPLAIN 实测相同），但 `=` 语义明确不依赖启发式
-// - 语义变更：match key 为 NULL 的行不再匹配任何行（含另一 NULL）—— 业务上 match key 缺失本就是无效对账行
-function buildOnClause(matchFields, leftAlias, rightAlias) {
-  return matchFields
-    .map((f) => `${leftAlias}.\`${f}\` = ${rightAlias}.\`${f}\``)
-    .join(' AND ');
+  const names = [];
+  for (const f of matchFields) {
+    const name = makeFieldIndexName(f);
+    db.exec(`CREATE INDEX IF NOT EXISTS ${name} ON pending_rows(year_month, \`${f}\`, id);`);
+    names.push(name);
+  }
+  return names;
 }
 
 function buildChangedClause(compareFields, leftAlias, rightAlias) {
@@ -76,44 +77,91 @@ function runReconciliation(db, { upperMonth, lowerMonth, rule }) {
   try {
     const runId = diffRepo.createRun(db, { upperMonth, lowerMonth, ruleSnapshot });
 
-    // 1) new: lower 有, upper 无
-    const notExistsUpper = buildOnClause(matchFields, 'B', 'A');
-    const newResult = db.prepare(
-      `INSERT INTO diff_rows (run_id, type, lower_row_id)
-       SELECT ?, 'new', A.id FROM pending_rows A
-       WHERE A.year_month = ?
-         AND NOT EXISTS (
-           SELECT 1 FROM pending_rows B
-           WHERE B.year_month = ? AND ${notExistsUpper}
-         )`
-    ).run(runId, lowerMonth, upperMonth);
+    // === 多轮配对：tmp_pairs(upper_id, lower_id) 累积已配对的 pair ===
+    // UNIQUE 约束防单行被多轮重复配对
+    db.exec(`
+      CREATE TEMP TABLE IF NOT EXISTS tmp_pairs (
+        upper_id INTEGER NOT NULL UNIQUE,
+        lower_id INTEGER NOT NULL UNIQUE
+      );
+    `);
+    db.exec('DELETE FROM tmp_pairs;');
 
-    // 2) missing: upper 有, lower 无
-    const notExistsLower = buildOnClause(matchFields, 'B', 'A');
-    const missingResult = db.prepare(
-      `INSERT INTO diff_rows (run_id, type, upper_row_id)
-       SELECT ?, 'missing', A.id FROM pending_rows A
-       WHERE A.year_month = ?
-         AND NOT EXISTS (
-           SELECT 1 FROM pending_rows B
-           WHERE B.year_month = ? AND ${notExistsLower}
-         )`
-    ).run(runId, upperMonth, lowerMonth);
+    // v2.0.0-beta.2 性能修复：原 SQL CTE + ROW_NUMBER + LEFT JOIN 在 121 万行规模 planner 出低效计划（11 分钟未完）
+    // 改用 JS 层配对：SQL 只扫 (id, key) 覆盖索引（index-only scan ~500ms），JS 层 Map 分组 + 已匹配 Set 过滤 + 1 对 1 配对
+    const matchedUpperIds = new Set();
+    const matchedLowerIds = new Set();
+    const insertPair = db.prepare('INSERT INTO tmp_pairs(upper_id, lower_id) VALUES (?, ?)');
 
-    // 3) changed: 两月匹配 key + compareFields 有差异
+    for (const field of matchFields) {
+      const fieldEsc = `\`${field}\``;
+      // SELECT 按 id 升序，走 (year_month, col, id) 覆盖索引，index-only scan
+      const selectSql = `SELECT id, ${fieldEsc} AS k FROM pending_rows
+        WHERE year_month = ? AND ${fieldEsc} IS NOT NULL AND ${fieldEsc} <> ''
+        ORDER BY id`;
+      const upperRows = db.prepare(selectSql).all(upperMonth);
+      const lowerRows = db.prepare(selectSql).all(lowerMonth);
+
+      // 分组：key → [id 升序]（SELECT 已 ORDER BY id，push 即保持升序）
+      const upperByKey = new Map();
+      for (const r of upperRows) {
+        if (matchedUpperIds.has(r.id)) continue;
+        let bucket = upperByKey.get(r.k);
+        if (!bucket) { bucket = []; upperByKey.set(r.k, bucket); }
+        bucket.push(r.id);
+      }
+      const lowerByKey = new Map();
+      for (const r of lowerRows) {
+        if (matchedLowerIds.has(r.id)) continue;
+        let bucket = lowerByKey.get(r.k);
+        if (!bucket) { bucket = []; lowerByKey.set(r.k, bucket); }
+        bucket.push(r.id);
+      }
+
+      // 1 对 1 配对：同 key 取前 min(upper.length, lower.length) 对
+      for (const [k, uIds] of upperByKey) {
+        const lIds = lowerByKey.get(k);
+        if (!lIds || lIds.length === 0) continue;
+        const n = Math.min(uIds.length, lIds.length);
+        for (let i = 0; i < n; i++) {
+          insertPair.run(uIds[i], lIds[i]);
+          matchedUpperIds.add(uIds[i]);
+          matchedLowerIds.add(lIds[i]);
+        }
+      }
+    }
+
+    // === changed: 配对成功且 compareFields 任一不等 ===
     let changedResult = { changes: 0 };
     const changedClause = buildChangedClause(compareFields, 'A', 'B');
     if (changedClause) {
-      const joinOn = buildOnClause(matchFields, 'A', 'B');
-      changedResult = db.prepare(
-        `INSERT INTO diff_rows (run_id, type, upper_row_id, lower_row_id)
-         SELECT ?, 'changed', A.id, B.id
-         FROM pending_rows A
-         INNER JOIN pending_rows B ON ${joinOn}
-         WHERE A.year_month = ? AND B.year_month = ?
-           AND (${changedClause})`
-      ).run(runId, upperMonth, lowerMonth);
+      changedResult = db.prepare(`
+        INSERT INTO diff_rows (run_id, type, upper_row_id, lower_row_id)
+        SELECT ?, 'changed', p.upper_id, p.lower_id
+        FROM tmp_pairs p
+        INNER JOIN pending_rows A ON A.id = p.upper_id
+        INNER JOIN pending_rows B ON B.id = p.lower_id
+        WHERE ${changedClause}
+      `).run(runId);
     }
+
+    // === new: lower 月未配对的行 ===
+    const newResult = db.prepare(`
+      INSERT INTO diff_rows (run_id, type, lower_row_id)
+      SELECT ?, 'new', A.id FROM pending_rows A
+      LEFT JOIN tmp_pairs t ON t.lower_id = A.id
+      WHERE A.year_month = ? AND t.lower_id IS NULL
+    `).run(runId, lowerMonth);
+
+    // === missing: upper 月未配对的行 ===
+    const missingResult = db.prepare(`
+      INSERT INTO diff_rows (run_id, type, upper_row_id)
+      SELECT ?, 'missing', A.id FROM pending_rows A
+      LEFT JOIN tmp_pairs t ON t.upper_id = A.id
+      WHERE A.year_month = ? AND t.upper_id IS NULL
+    `).run(runId, upperMonth);
+
+    db.exec('DROP TABLE tmp_pairs;');
 
     const stats = {
       statNew: Number(newResult.changes) || 0,
@@ -130,6 +178,7 @@ function runReconciliation(db, { upperMonth, lowerMonth, rule }) {
     };
   } catch (err) {
     try { db.exec('ROLLBACK'); } catch (_e) { /* swallow */ }
+    try { db.exec('DROP TABLE IF EXISTS tmp_pairs;'); } catch (_e) { /* swallow */ }
     throw err;
   }
 }
@@ -137,10 +186,9 @@ function runReconciliation(db, { upperMonth, lowerMonth, rule }) {
 module.exports = {
   runReconciliation,
   ensureMatchIndex,
-  // 暴露给测试的内部函数（避免 export 泄漏太广）
+  // 暴露给测试的内部函数
   __internal: {
-    buildOnClause,
     buildChangedClause,
-    makeMatchIndexName
+    makeFieldIndexName
   }
 };
