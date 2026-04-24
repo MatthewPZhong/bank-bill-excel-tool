@@ -40,6 +40,7 @@
     "test:v2.0.0:pending-reconcile": "node scripts/test-v2.0.0-pending-reconcile.js",
     "test:v2.0.0:pending-export": "node scripts/test-v2.0.0-pending-export.js",
     "test:v2.0.0:perf": "node scripts/test-v2.0.0-perf-real-sample.js",
+    "test:v2.0.0:streaming-writer": "node scripts/test-v2.0.0-streaming-writer-diff.js",
     "startup:measure": "node scripts/measure-startup.js",
     "scan:vars": "node scripts/scan-vars.js",
     "check:vars": "node scripts/check-vars.js"

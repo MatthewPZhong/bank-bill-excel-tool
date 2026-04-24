@@ -10,7 +10,10 @@ const PENDING_COLUMNS = require('../backend/pending-db/columns');
 const monthRepo = require('../backend/pending-db/month-repository');
 
 const WORKER_SCRIPT = path.resolve(__dirname, '../backend/pending-import/worker.js');
+const ARCHIVE_WORKER_SCRIPT = path.resolve(__dirname, './pending-archive-worker.js');
 const NODE_MAX_OLD_SPACE_MB = 8192;
+// 留底阈值：行数超过时走 utilityProcess + 流式 writer；否则主进程同步 XLSX 兜底（小样本测试）
+const ARCHIVE_WORKER_THRESHOLD = 50000;
 
 // Electron 下必须用 utilityProcess.fork（真正的 Node.js 子进程），否则：
 //   - spawn(process.execPath) 启动 Electron helper，--max-old-space-size 失效，heap 限制 ~1GB
@@ -37,12 +40,25 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
     return dir;
   }
 
-  function archiveExistingMonth(yearMonth) {
+  // 留底：把当月 pending_rows 导出为 xlsx
+  // 返回 Promise<archivePath | null>
+  //   - 行数 0 → null（无需留底）
+  //   - 行数 <= ARCHIVE_WORKER_THRESHOLD → 主进程同步 XLSX（小数据量，测试路径）
+  //   - 行数 > threshold → utilityProcess + 流式 writer（不卡主进程 UI）
+  async function archiveExistingMonth(yearMonth, dbPath) {
     const db = getPendingDb();
     if (!db) return null;
     const meta = monthRepo.getMonthMeta(db, yearMonth);
     if (!meta || meta.rowCount === 0) return null;
 
+    const archivePath = path.join(getArchiveDir(yearMonth), `${yearMonth}-backup-${formatTimestamp()}.xlsx`);
+
+    // 大数据量走 worker（Electron 环境才有 utilityProcess；无则 fallback 主进程同步）
+    if (meta.rowCount > ARCHIVE_WORKER_THRESHOLD && electronUtilityProcess && dbPath) {
+      return runArchiveInWorker({ dbPath, yearMonth, archivePath });
+    }
+
+    // 主进程同步兜底（测试 + 小数据量）
     const colList = PENDING_COLUMNS.map((c) => `\`${c}\``).join(', ');
     const rows = db.prepare(`SELECT ${colList} FROM pending_rows WHERE year_month = ?`).all(yearMonth);
 
@@ -50,46 +66,79 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
     for (const r of rows) {
       aoa.push(PENDING_COLUMNS.map((c) => (r[c] == null ? '' : r[c])));
     }
-
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-
-    const archivePath = path.join(getArchiveDir(yearMonth), `${yearMonth}-backup-${formatTimestamp()}.xlsx`);
     XLSX.writeFile(wb, archivePath);
     return archivePath;
   }
 
-  function runImport({ yearMonth, files, overwriteConfirmed, dbPath, onProgress }) {
-    return new Promise((resolve) => {
-      const db = getPendingDb();
-      if (!db) {
-        resolve({ status: 'error', errors: [{ severity: 'fatal', message: 'Pending DB 未初始化' }] });
-        return;
-      }
-
-      const existingCount = monthRepo.countRowsInMonth(db, yearMonth);
-      if (existingCount > 0 && !overwriteConfirmed) {
-        const meta = monthRepo.getMonthMeta(db, yearMonth);
-        resolve({
-          status: 'need-confirm',
-          yearMonth,
-          existingRowCount: existingCount,
-          existingImportedAt: meta ? meta.importedAt : null
-        });
-        return;
-      }
-
-      let archivePath = null;
-      if (existingCount > 0 && overwriteConfirmed) {
-        try {
-          archivePath = archiveExistingMonth(yearMonth);
-        } catch (err) {
-          resolve({ status: 'error', errors: [{ severity: 'fatal', message: '留底失败：' + err.message }] });
+  // 在 utilityProcess 里跑 archive-worker + 自研流式 xlsx writer；UI 不阻塞
+  function runArchiveInWorker({ dbPath, yearMonth, archivePath }) {
+    return new Promise((resolve, reject) => {
+      const jobMeta = { dbPath, yearMonth, archivePath };
+      const worker = electronUtilityProcess.fork(ARCHIVE_WORKER_SCRIPT, [JSON.stringify(jobMeta)], {
+        execArgv: [`--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`],
+        env: {
+          ...process.env,
+          NODE_OPTIONS: `--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`
+        },
+        stdio: 'pipe'
+      });
+      let stdoutBuf = '';
+      let stderrBuf = '';
+      const events = [];
+      worker.stdout.on('data', (chunk) => {
+        stdoutBuf += chunk.toString();
+        let idx;
+        while ((idx = stdoutBuf.indexOf('\n')) !== -1) {
+          const line = stdoutBuf.slice(0, idx).trim();
+          stdoutBuf = stdoutBuf.slice(idx + 1);
+          if (!line) continue;
+          try { events.push(JSON.parse(line)); } catch (_e) { events.push({ type: 'raw', line }); }
+        }
+      });
+      worker.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+      worker.on('exit', (code) => {
+        if (code === 0) {
+          const complete = events.find((e) => e.type === 'complete');
+          resolve(complete ? complete.archivePath : archivePath);
           return;
         }
-      }
+        const errEv = events.find((e) => e.type === 'error');
+        const msg = errEv ? errEv.message : `archive worker 异常退出 code=${code} stderr=${stderrBuf.trim().slice(0, 500)}`;
+        reject(new Error(msg));
+      });
+    });
+  }
 
+  async function runImport({ yearMonth, files, overwriteConfirmed, dbPath, onProgress }) {
+    const db = getPendingDb();
+    if (!db) {
+      return { status: 'error', errors: [{ severity: 'fatal', message: 'Pending DB 未初始化' }] };
+    }
+
+    const existingCount = monthRepo.countRowsInMonth(db, yearMonth);
+    if (existingCount > 0 && !overwriteConfirmed) {
+      const meta = monthRepo.getMonthMeta(db, yearMonth);
+      return {
+        status: 'need-confirm',
+        yearMonth,
+        existingRowCount: existingCount,
+        existingImportedAt: meta ? meta.importedAt : null
+      };
+    }
+
+    let archivePath = null;
+    if (existingCount > 0 && overwriteConfirmed) {
+      try {
+        archivePath = await archiveExistingMonth(yearMonth, dbPath);
+      } catch (err) {
+        return { status: 'error', errors: [{ severity: 'fatal', message: '留底失败：' + err.message }] };
+      }
+    }
+
+    return new Promise((resolve) => {
       const jobMeta = { dbPath, yearMonth, files, archivePath };
 
       let stdoutBuf = '';
