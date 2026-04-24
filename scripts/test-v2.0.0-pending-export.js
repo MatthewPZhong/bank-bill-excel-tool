@@ -204,6 +204,102 @@ try {
     check('after 行主行资金类型 = 退票', !!afterR && String(afterR[fundIdx]) === '退票');
   }
 
+  // === T5: aggregate 下 run 规则独立 — Codex Finding 1 回归 ===
+  // 两个 run 规则不同：run A compareFields=[金额]，run B compareFields=[币种]
+  // 并集 = [金额, 币种]
+  // 期望：run A 的行 → 币种_before/after/changed_fields 里不出现"币种"；run B 反之
+  //       即不能因为并集就越权重新比对
+  console.log('[T5] aggregate：run 规则独立 — 不跨 run 重算 compareFields（Codex Finding 1）');
+  {
+    // 用两组新月份避免污染 T1/T2/T4 状态
+    insertRows(db, '2026-05', [sampleRow({ orderNo: 'X001', amount: '100', currency: 'USD', fundType: '提现' })]);
+    insertRows(db, '2026-06', [sampleRow({ orderNo: 'X001', amount: '100', currency: 'CNY', fundType: '提现' })]);
+    // run A：compareFields=[金额]，金额无变化 → changed=0
+    engine.runReconciliation(db, {
+      upperMonth: '2026-05', lowerMonth: '2026-06',
+      rule: { matchFields: ['order_no'], compareFields: ['金额'] }
+    });
+    insertRows(db, '2026-07', [sampleRow({ orderNo: 'Y001', amount: '200', currency: 'USD', fundType: '提现' })]);
+    // 删除 X001 以避免 Y001 的测试干扰（或用独立数据）
+    insertRows(db, '2027-01', [sampleRow({ orderNo: 'Z001', amount: '500', currency: 'USD', fundType: '提现' })]);
+    insertRows(db, '2027-02', [sampleRow({ orderNo: 'Z001', amount: '500', currency: 'EUR', fundType: '提现' })]);
+    // run B：compareFields=[币种]，币种变 USD→EUR → changed=1
+    engine.runReconciliation(db, {
+      upperMonth: '2027-01', lowerMonth: '2027-02',
+      rule: { matchFields: ['order_no'], compareFields: ['币种'] }
+    });
+
+    const out = path.join(TMP, 'aggregate-run-independence.xlsx');
+    const r = writer.exportAggregate(db, out);
+    check('aggregate status=success', r.status === 'success');
+
+    const wb = XLSX.readFile(out);
+    const flat = XLSX.utils.sheet_to_json(wb.Sheets['汇总'], { header: 1, defval: '' });
+    const header = flat[0];
+    const diffTypeIdx = header.indexOf('diff_type');
+    const changedFieldsIdx = header.indexOf('changed_fields');
+    const jinE_beforeIdx = header.indexOf('金额_before');
+    const jinE_afterIdx = header.indexOf('金额_after');
+    const biZhong_beforeIdx = header.indexOf('币种_before');
+    const biZhong_afterIdx = header.indexOf('币种_after');
+
+    // 找 Z001 的 changed 行（run B, compareFields=[币种]）
+    const dataRows = flat.slice(1);
+    const z001Changed = dataRows.filter((r2) => {
+      if (r2[diffTypeIdx] !== 'changed') return false;
+      const idx = PENDING_COLUMNS.indexOf('order_no');
+      return r2[idx] === 'Z001';
+    });
+    check('Z001 changed 展 2 行', z001Changed.length === 2);
+    if (z001Changed.length >= 1) {
+      const z = z001Changed[0];
+      check('Z001 changed_fields = "币种"（不含金额，即使并集有金额列）',
+        z[changedFieldsIdx] === '币种', `got "${z[changedFieldsIdx]}"`);
+      // run B 不比对金额 → 金额_before/after 必须为空（即使 run A 用金额，两 run 独立）
+      check('Z001 金额_before 留空（run B 没配金额）', z[jinE_beforeIdx] === '', `got "${z[jinE_beforeIdx]}"`);
+      check('Z001 金额_after 留空（run B 没配金额）', z[jinE_afterIdx] === '', `got "${z[jinE_afterIdx]}"`);
+      // 币种 字段正常填
+      check('Z001 币种_before = USD', String(z[biZhong_beforeIdx]) === 'USD');
+      check('Z001 币种_after = EUR', String(z[biZhong_afterIdx]) === 'EUR');
+    }
+  }
+
+  // === T6: Codex Finding 2 — 覆盖导入清理 orphan diff_runs ===
+  // deleteMonth 不仅删 pending_rows，还要级联删涉及该月的 diff_runs/diff_rows
+  console.log('[T6] deleteMonth 级联清理 diff_runs/diff_rows（Codex Finding 2）');
+  {
+    const diffRepo = require('../src/backend/pending-db/diff-repository');
+    const monthRepoReq = require('../src/backend/pending-db/month-repository');
+    // 前置：DB 里 2026-05/2026-06/2027-01/2027-02 的 run 都还在
+    const runsBeforeDelete = diffRepo.listAllRuns(db);
+    const runsInvolving2026_06 = runsBeforeDelete.filter((rn) =>
+      rn.upperMonth === '2026-06' || rn.lowerMonth === '2026-06');
+    check('删前：有涉及 2026-06 的 run', runsInvolving2026_06.length >= 1);
+
+    // 删除 2026-06
+    monthRepoReq.deleteMonth(db, '2026-06');
+
+    // 验证：pending_rows + pending_months 都清了
+    const remainRows = db.prepare('SELECT COUNT(*) AS n FROM pending_rows WHERE year_month = ?').get('2026-06').n;
+    check('pending_rows 2026-06 已删', remainRows === 0);
+    const remainMeta = monthRepoReq.getMonthMeta(db, '2026-06');
+    check('pending_months 2026-06 已删', remainMeta === null);
+    // 验证：涉及 2026-06 的 run 也删掉了
+    const runsAfter = diffRepo.listAllRuns(db);
+    const runsInvolving2026_06_after = runsAfter.filter((rn) =>
+      rn.upperMonth === '2026-06' || rn.lowerMonth === '2026-06');
+    check('涉及 2026-06 的 run 级联删除', runsInvolving2026_06_after.length === 0);
+    // 验证：其他月份的 run 没被误删
+    const run27 = runsAfter.find((rn) => rn.lowerMonth === '2027-02');
+    check('2027-01/02 的 run 未被误删', !!run27);
+    // 验证：orphan diff_rows 也清了（run_id 找不到对应 run）
+    const orphanRows = db.prepare(`
+      SELECT COUNT(*) AS n FROM diff_rows
+      WHERE run_id NOT IN (SELECT id FROM diff_runs)
+    `).get().n;
+    check('无 orphan diff_rows', orphanRows === 0);
+  }
+
   db.close();
 } finally {
   fs.rmSync(TMP, { recursive: true, force: true });

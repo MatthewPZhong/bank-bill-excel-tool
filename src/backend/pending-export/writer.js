@@ -88,14 +88,18 @@ function computeAmountDiff(upperRow, lowerRow, field) {
   return ln - un;
 }
 
-// 构造一行导出：mainRow 提供 PENDING 31 列数据；pairId/changeSide/changedFieldsStr 元数据；_before/_after/_diff 值由 upper/lower 双快照计算
+// 构造一行导出：mainRow 提供 PENDING 31 列数据；pairId/changeSide/changedFieldsStr 元数据
+// headerCompareFields 决定 _before/_after 列的位置（用并集对齐 aggregate 表头）；
+// runCompareFields 决定值是否填入（该 run 规则不含的字段在 _before/_after/_diff 上留空，
+// 符合 PRD §5.6.4 "某 run 不含的列留空"）
 function buildSingleExportRow({
   mainRow,
   diffType,
   pairId,
   changeSide,
   changedFieldsStr,
-  compareFields,
+  runCompareFields,
+  headerCompareFields,
   upperRow,
   lowerRow
 }) {
@@ -108,8 +112,9 @@ function buildSingleExportRow({
   row.push(changeSide);
   row.push(changedFieldsStr);
 
-  for (const f of compareFields) {
-    if (upperRow && lowerRow) {
+  for (const f of headerCompareFields) {
+    // 非本 run 参与比对的字段：在 _before/_after 留空（PRD 约束）
+    if (upperRow && lowerRow && runCompareFields.includes(f)) {
       row.push(upperRow[f] == null ? '' : upperRow[f]);
       row.push(lowerRow[f] == null ? '' : lowerRow[f]);
     } else {
@@ -117,20 +122,29 @@ function buildSingleExportRow({
       row.push('');
     }
   }
-  if (compareFields.includes('金额')) {
-    row.push(diffType === 'changed' ? computeAmountDiff(upperRow, lowerRow, '金额') : '');
+  // _diff：列由 headerCompareFields 决定位置；值由 runCompareFields 决定是否计算
+  if (headerCompareFields.includes('金额')) {
+    row.push(
+      diffType === 'changed' && runCompareFields.includes('金额')
+        ? computeAmountDiff(upperRow, lowerRow, '金额')
+        : ''
+    );
   }
-  if (compareFields.includes('计算金额')) {
-    row.push(diffType === 'changed' ? computeAmountDiff(upperRow, lowerRow, '计算金额') : '');
+  if (headerCompareFields.includes('计算金额')) {
+    row.push(
+      diffType === 'changed' && runCompareFields.includes('计算金额')
+        ? computeAmountDiff(upperRow, lowerRow, '计算金额')
+        : ''
+    );
   }
   return row;
 }
 
-// 从 diffRow 展开 1 或 2 行：
-//   new → 1 行 lower 快照
-//   missing → 1 行 upper 快照
-//   changed → 2 行 before(upper) + after(lower)，共享 pair_id / changed_fields / _before/_after / _diff
-function buildExportRowsForDiff(db, diffRow, compareFields) {
+// 从 diffRow 展开 1 或 2 行
+// runCompareFields：本 run 的规则（决定 changed_fields + _before/_after/_diff 是否有值）
+// headerCompareFields：导出 xlsx 表头的并集（single 时与 run 同；aggregate 时 = 并集）
+function buildExportRowsForDiff(db, diffRow, runCompareFields, headerCompareFields) {
+  const hdr = headerCompareFields || runCompareFields;
   const upperRow = readPendingRow(db, diffRow.upperRowId);
   const lowerRow = readPendingRow(db, diffRow.lowerRowId);
 
@@ -141,7 +155,8 @@ function buildExportRowsForDiff(db, diffRow, compareFields) {
       pairId: '',
       changeSide: '',
       changedFieldsStr: '',
-      compareFields,
+      runCompareFields,
+      headerCompareFields: hdr,
       upperRow: null,
       lowerRow: null
     })];
@@ -153,14 +168,16 @@ function buildExportRowsForDiff(db, diffRow, compareFields) {
       pairId: '',
       changeSide: '',
       changedFieldsStr: '',
-      compareFields,
+      runCompareFields,
+      headerCompareFields: hdr,
       upperRow: null,
       lowerRow: null
     })];
   }
   // changed
   const pairId = `${diffRow.upperRowId}_${diffRow.lowerRowId}`;
-  const changedFields = computeChangedFields(upperRow, lowerRow, compareFields);
+  // changed_fields 基于本 run 规则计算（不会"越权"使用并集）
+  const changedFields = computeChangedFields(upperRow, lowerRow, runCompareFields);
   const changedFieldsStr = changedFields.join(', ');
   const beforeRow = buildSingleExportRow({
     mainRow: upperRow,
@@ -168,7 +185,8 @@ function buildExportRowsForDiff(db, diffRow, compareFields) {
     pairId,
     changeSide: 'before',
     changedFieldsStr,
-    compareFields,
+    runCompareFields,
+    headerCompareFields: hdr,
     upperRow,
     lowerRow
   });
@@ -178,7 +196,8 @@ function buildExportRowsForDiff(db, diffRow, compareFields) {
     pairId,
     changeSide: 'after',
     changedFieldsStr,
-    compareFields,
+    runCompareFields,
+    headerCompareFields: hdr,
     upperRow,
     lowerRow
   });
@@ -228,9 +247,10 @@ function exportSingleRun(db, runId, savePath) {
   const meta = getMetaColIndices(compareFields);
 
   // 每个 diffRow 展开 1/2 行；保持 listDiffRows 的 id 升序 → changed 对天然连续
+  // single run 模式：runCompareFields == headerCompareFields（两者同一）
   const allRows = [];
   for (const d of diffRows) {
-    const rows = buildExportRowsForDiff(db, d, compareFields);
+    const rows = buildExportRowsForDiff(db, d, compareFields, compareFields);
     for (const r of rows) allRows.push(r);
   }
 
@@ -318,9 +338,13 @@ function exportAggregate(db, savePath) {
     label[0] = `【${run.lowerMonth}（vs ${run.upperMonth}）最新 run - ${run.createdAt}】`;
     breakdownRows.push(label);
 
+    // aggregate 模式：runCompareFields = 本 run 规则；headerCompareFields = 并集（对齐表头）
+    // 非本 run 参与的列在该行 _before/_after/_diff 留空（PRD §5.6.4 "某 run 不含的列留空"）
+    const runCompareFields = (run.ruleSnapshot && Array.isArray(run.ruleSnapshot.compareFields))
+      ? run.ruleSnapshot.compareFields : [];
     const runRows = diffRepo.listDiffRows(db, run.id);
     for (const d of runRows) {
-      const rows = buildExportRowsForDiff(db, d, compareUnion);
+      const rows = buildExportRowsForDiff(db, d, runCompareFields, compareUnion);
       for (const r of rows) breakdownRows.push(r);
     }
     breakdownRows.push(monthSeparator.slice());
@@ -334,9 +358,11 @@ function exportAggregate(db, savePath) {
   // Sheet2: 汇总（扁平）
   const flatRows = [];
   for (const run of sortedLatest) {
+    const runCompareFields = (run.ruleSnapshot && Array.isArray(run.ruleSnapshot.compareFields))
+      ? run.ruleSnapshot.compareFields : [];
     const runRows = diffRepo.listDiffRows(db, run.id);
     for (const d of runRows) {
-      const rows = buildExportRowsForDiff(db, d, compareUnion);
+      const rows = buildExportRowsForDiff(db, d, runCompareFields, compareUnion);
       for (const r of rows) flatRows.push(r);
     }
   }

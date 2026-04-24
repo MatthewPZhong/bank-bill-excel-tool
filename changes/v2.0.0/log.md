@@ -542,3 +542,34 @@
 - **Runtime-state**：`state.pending.latestRunId` 语义扩展（从"本会话 run id"→ "latestRunId 即可用 run 存在性标志"），消费处仅一处 `disabled = !latestRunId`，已验证
 - **Minor 知会**：benchmark 模块删除，打包体积无影响（原就在 src/backend 内）
 
+
+### Reverse Sync #6 补丁 — PR #24 Codex review 反馈修复（2026-04-24）
+
+Codex 评审提出 2 个 P1 finding，已修：
+
+#### Finding 1 — aggregate 跨 run 并集越权重算
+
+**问题**：`exportAggregate` 对每个 run 的行生成也传 `compareUnion`，导致某 run 原本没参与比对的字段被越权重新比对，写进 `changed_fields` / `金额_diff` / `pending资金类型差异` sheet。违反 PRD §5.6.4 "某 run 不含的列留空"。
+
+**修复**：
+- `buildExportRowsForDiff` / `buildSingleExportRow` 签名拆分 `runCompareFields`（本 run 规则）+ `headerCompareFields`（并集，决定列位置）
+- 非本 run 参与的字段在 `_before`/`_after`/`_diff` 留空
+- `changed_fields` 基于 `runCompareFields` 计算，不会含并集的外来字段
+- `pending资金类型差异` sheet 过滤自动正确（走 `changed_fields` 过滤）
+
+#### Finding 2 — 覆盖导入未清理 orphan diff_runs / diff_rows
+
+**问题**：`month-repository.deleteMonth` 只删 `pending_rows` + `pending_months`，旧 `diff_runs` / `diff_rows` 的 `upper_row_id` / `lower_row_id` 悬空 → 导出时 `readPendingRow` 返回 null → 写空快照。叠加本 PR"按钮放宽"后风险更大（用户开模块即能点到报错数据）。
+
+**修复**：`deleteMonth` 扩展为级联删除涉及该月的 `diff_runs` 和其 `diff_rows`。migrations 里声明的 `ON DELETE CASCADE` 因 `PRAGMA foreign_keys = OFF` 不生效，故手动两步 DELETE。
+
+#### 测试补充
+
+- `scripts/test-v2.0.0-pending-export.js` 新增 T5（aggregate run 规则独立）+ T6（deleteMonth 级联）→ 50 → **63 断言**
+- 全绿：pending-export 63/63 / pending-reconcile 22/22 / pending-session 19/19 / smoke ✓
+
+#### check-vars
+
+- **⚠️ 资金敏感**：Finding 1 修复牵涉导出格式正确性（资金差异列不能越权）；Finding 2 修复守护导出数据完整性（orphan 行不能写入）。两项均在小样本单测覆盖
+- **破坏性影响**：`deleteMonth` 现在会删除涉及该月的历史 run。用户再次对该月导入后，过去的对账记录丢失（但新 run 用完整新数据重算）—— 与"覆盖前必留底"原则一致，留底 xlsx 已保全原始数据
+

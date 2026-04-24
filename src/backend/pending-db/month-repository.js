@@ -60,7 +60,16 @@ function upsertMonthMeta(db, { yearMonth, rowCount, sourceFiles, archivePath }) 
   );
 }
 
+// 覆盖导入时调用：清空该月的 pending_rows / pending_months
+// 另外清理**引用到该月**的 diff_runs / diff_rows —— 否则旧 run 的 upper_row_id / lower_row_id 悬空，
+// 导出差异时 readPendingRow 返回 null → 写出空快照，严重资金敏感
+// （FK ON DELETE CASCADE 在 migrations 声明了，但 DatabaseSync 默认 PRAGMA foreign_keys = OFF，
+//   这里手动两步删除更稳妥）
 function deleteMonth(db, yearMonth) {
+  db.prepare(`DELETE FROM diff_rows WHERE run_id IN (
+    SELECT id FROM diff_runs WHERE upper_month = ? OR lower_month = ?
+  )`).run(yearMonth, yearMonth);
+  db.prepare('DELETE FROM diff_runs WHERE upper_month = ? OR lower_month = ?').run(yearMonth, yearMonth);
   db.prepare('DELETE FROM pending_rows WHERE year_month = ?').run(yearMonth);
   db.prepare('DELETE FROM pending_months WHERE year_month = ?').run(yearMonth);
 }
