@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>导出范围选择 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card alert-card export-scope-card">
+      <div class="alert-body">
+        <div class="alert-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="28" height="28">
+            <defs><linearGradient id="ex" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="100%" stop-color="#34A853"/></linearGradient></defs>
+            <path d="M12 3v13M7 11l5 5 5-5M5 21h14" fill="none" stroke="url(#ex)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="alert-message">
+          请选择要导出的范围
+        </div>
+      </div>
+      <div class="dialog-actions vertical">
+        <button class="secondary-btn small export-scope-btn" type="button" data-scope="current">
+          <span class="export-scope-btn-main">导出当前批次文件的明细</span>
+          <span class="export-scope-btn-sub">只含本次导入的 3 个文件</span>
+        </button>
+        <button class="secondary-btn small export-scope-btn" type="button" data-scope="all">
+          <span class="export-scope-btn-main">导出所有批次文件的明细</span>
+          <span class="export-scope-btn-sub">含本模板下全部历史明细</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

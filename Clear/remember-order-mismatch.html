@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>记忆顺序不一致 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card alert-card remember-order-mismatch-card">
+      <div class="alert-body">
+        <div class="alert-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="28" height="28">
+            <defs><linearGradient id="rom" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#F6B93B"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs>
+            <circle cx="12" cy="12" r="10" fill="none" stroke="url(#rom)" stroke-width="2"/>
+            <path d="M12 7v6M12 16v1" stroke="url(#rom)" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="alert-message">
+          当前文件顺序与 <strong>已记忆的大账号顺序</strong> 不一致：<br/>
+          <span class="muted">检测到第 3 / 第 5 个文件与记忆顺序位置不符。</span><br/><br/>
+          点击 <strong>确认</strong> 将按文件真实顺序导入；点击 <strong>变更配置</strong> 重新打开大账号选择。
+        </div>
+      </div>
+      <div class="dialog-actions center">
+        <button class="secondary-btn small" type="button" data-action="change-config">变更配置</button>
+        <button class="primary-btn small" type="button" data-action="confirm">确认</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

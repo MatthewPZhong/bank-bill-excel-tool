@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>月度余额账单导出 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card alert-card monthly-balance-export-card">
+      <div class="dialog-header">
+        <div class="dialog-title"><span class="gemini-gradient">请选择需要导出月度余额账单的银行渠道</span></div>
+        <button class="icon-close" type="button" data-action="close">×</button>
+      </div>
+      <div class="monthly-balance-form">
+        <label class="monthly-balance-row">
+          <span class="monthly-balance-label">模板</span>
+          <select class="monthly-balance-template-select mapping-text-input" data-role="template">
+            <option value="__ALL_BANKS__" selected>全部银行渠道</option>
+            <option value="LusoBank-MO">LusoBank-MO</option>
+            <option value="BankABC-HK">BankABC-HK</option>
+            <option value="PingPong-US">PingPong-US</option>
+            <option value="HSBC-SG">HSBC-SG</option>
+          </select>
+        </label>
+        <label class="monthly-balance-row">
+          <span class="monthly-balance-label">时间</span>
+          <div class="monthly-balance-time-picker">
+            <select class="monthly-balance-year-select mapping-text-input" data-role="year">
+              <option value="">-- 选择年份 --</option>
+              <option value="2024" selected>2024 年</option>
+              <option value="2025">2025 年</option>
+              <option value="2026">2026 年</option>
+            </select>
+            <select class="monthly-balance-month-select mapping-text-input" data-role="month">
+              <option value="">-- 选择月份 --</option>
+              <option value="10">10 月</option>
+              <option value="11" selected>11 月</option>
+              <option value="12">12 月</option>
+            </select>
+          </div>
+        </label>
+      </div>
+      <div class="dialog-actions right">
+        <button class="primary-btn small" type="button" data-action="done">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

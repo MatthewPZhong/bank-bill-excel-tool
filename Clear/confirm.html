@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>确认弹窗 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card alert-card">
+      <div class="alert-body">
+        <div class="alert-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="28" height="28">
+            <defs><linearGradient id="ci" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#E95EA2"/><stop offset="100%" stop-color="#F6B93B"/></linearGradient></defs>
+            <path d="M12 3L2 20h20L12 3z" fill="none" stroke="url(#ci)" stroke-width="2" stroke-linejoin="round"/>
+            <path d="M12 10v4M12 17h.01" stroke="url(#ci)" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="alert-message">
+          确认要删除模板 <strong>LusoBank-MO</strong> 吗？<br/>
+          该操作会一并删除其所有 <strong>映射关系</strong> 与 <strong>账户映射</strong>，且不可恢复。
+        </div>
+      </div>
+      <div class="dialog-actions center">
+        <button class="danger-btn small" type="button" data-action="confirm">确认删除</button>
+        <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

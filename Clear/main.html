@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>网银账单小助手 · Gemini 主界面</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+</head>
+<body>
+<div id="appShell" class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button id="minimizeBtn" class="window-btn" type="button" aria-label="最小化">−</button>
+      <button id="maximizeBtn" class="window-btn" type="button" aria-label="最大化">□</button>
+      <button id="closeBtn" class="window-btn close-btn" type="button" aria-label="关闭">×</button>
+    </div>
+  </header>
+
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <main class="page-body">
+    <h1 class="page-title"><span class="gemini-gradient">网银账单小助手</span></h1>
+
+    <section class="workspace-shell">
+      <div class="module-switcher">
+        <button id="moduleSwitcherBtn" class="module-switcher-trigger" type="button" aria-haspopup="true" aria-expanded="false">
+          <span class="module-switcher-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="16" height="16"><defs><linearGradient id="gs" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="40%" stop-color="#9B72F2"/><stop offset="75%" stop-color="#E95EA2"/><stop offset="100%" stop-color="#F6B93B"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gs)"/></svg>
+          </span>
+          <span id="currentModuleName" class="module-switcher-name">网银账单生成</span>
+          <span class="module-switcher-caret" aria-hidden="true">▾</span>
+        </button>
+      </div>
+
+      <section id="statementModulePanel" class="control-board module-panel">
+        <div class="control-row">
+          <div class="cell left">
+            <button id="importFileBtn" class="primary-btn" type="button">导入文件</button>
+          </div>
+          <div class="cell center">
+            <label class="select-label" for="templateSelect">模式</label>
+            <div class="select-shell">
+              <select id="templateSelect" class="template-select">
+                <option value="create-statement">制作网银账单</option>
+                <option value="export-monthly-balance">导出月度余额账单</option>
+              </select>
+            </div>
+          </div>
+          <div class="cell right">
+            <div class="export-actions">
+              <button id="exportDetailBtn" class="secondary-btn" type="button">导出明细</button>
+              <button id="exportBalanceBtn" class="secondary-btn export-balance-btn" type="button">导出余额</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="control-row">
+          <div class="cell left">
+            <button id="importTemplateBtn" class="secondary-btn" type="button">导入模板</button>
+          </div>
+          <div class="cell center">
+            <label class="select-label" aria-hidden="true" style="visibility:hidden;">模式</label>
+            <div class="button-stack" style="flex:1; justify-content:space-between; gap:0;">
+              <button id="manageTemplateBtn" class="secondary-btn" type="button" style="flex:0 0 auto;">模板管理</button>
+              <button id="accountMappingBtn" class="secondary-btn" type="button" style="flex:0 0 auto;">账户映射</button>
+            </div>
+          </div>
+          <div class="cell right">
+            <div id="statusBox" class="status-box">
+              <span class="status-spark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gs2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gs2)"/></svg>
+              </span>
+              欢迎使用小助手
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="page-footer">
+    <div class="version-text"><span class="version-label">Version</span> <span id="appVersion">1.5.1</span></div>
+  </footer>
+
+  <div id="backgroundTool" class="background-tool">
+    <div class="background-tool-actions">
+      <button id="backgroundPaletteBtn" class="palette-trigger" type="button" aria-label="背景调色盘" title="背景调色盘">
+        <span class="palette-trigger-emoji" aria-hidden="true">🎨</span>
+      </button>
+      <button id="saveUserGuideBtn" class="text-action background-guide-btn" type="button">使用手册</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>大账号确认 · 多选模式 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v3" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card big-account-selection-card big-account-selection-split is-multi">
+      <div class="dialog-header">
+        <div class="dialog-title">网银账单解析大账号确认</div>
+        <div class="big-account-selection-toolbar">
+          <span class="big-account-mode-label">多账号账单导入解析模式</span>
+          <select class="mapping-select big-account-mode-select">
+            <option value="unfixed" selected>账号顺序不固定</option>
+            <option value="fixed">账号顺序固定</option>
+          </select>
+          <button class="icon-close" type="button">×</button>
+        </div>
+      </div>
+
+      <div class="big-account-split-body">
+        <div class="ba-scroll-container">
+          <div class="big-account-split-left">
+            <div class="big-account-split-header">文件顺序：</div>
+            <div class="big-account-file-list">
+              <div class="ba-file-row"><span class="ba-file-idx">1</span><span class="ba-file-name">HSBC-SG-2026-03.xlsx 第1行</span></div>
+              <div class="ba-file-row"><span class="ba-file-idx">2</span><span class="ba-file-name">HSBC-S…lock2.xlsx 第1行</span></div>
+              <div class="ba-file-row"><span class="ba-file-idx">3</span><span class="ba-file-name">BankAB…26-03.xlsx 第1行</span></div>
+              <div class="ba-file-row"><span class="ba-file-idx">4</span><span class="ba-file-name">PingPo…26-03.xlsx 第1行</span></div>
+              <div class="ba-file-row"><span class="ba-file-idx">5</span><span class="ba-file-name">LusoBa…extra.xlsx 第1行</span></div>
+            </div>
+          </div>
+
+          <div class="big-account-split-right">
+            <div class="big-account-split-header">大账号顺序：</div>
+            <div class="big-account-order-list">
+              <div class="ba-order-row">
+                <input class="new-account-checkbox" type="checkbox" />
+                <div class="ba-order-content"><div class="ba-order-title">6222000000000001 USD</div></div>
+              </div>
+              <div class="ba-order-row">
+                <input class="new-account-checkbox" type="checkbox" />
+                <div class="ba-order-content"><div class="ba-order-title">6222000000000001 HKD</div></div>
+              </div>
+              <div class="ba-order-row">
+                <input class="new-account-checkbox" type="checkbox" />
+                <div class="ba-order-content"><div class="ba-order-title">6222000000000001 SGD</div></div>
+              </div>
+              <div class="ba-order-row">
+                <input class="new-account-checkbox" type="checkbox" />
+                <div class="ba-order-content"><div class="ba-order-title">9558800000000008 SGD</div></div>
+              </div>
+              <div class="ba-order-row">
+                <input class="new-account-checkbox" type="checkbox" />
+                <div class="ba-order-content"><div class="ba-order-title">9558800000000008 USD</div></div>
+              </div>
+              <div class="ba-order-row">
+                <input class="new-account-checkbox" type="checkbox" />
+                <div class="ba-order-content"><div class="ba-order-title">4567000000000003 USD</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dialog-actions big-account-selection-footer">
+        <button class="secondary-btn small extract-order-btn" type="button">提取大账号顺序</button>
+        <label class="ba-multi-mode-label">
+          <input class="new-account-checkbox ba-multi-mode-checkbox" type="checkbox" />
+          <span>单个账号匹多个文件</span>
+        </label>
+        <span class="big-account-selection-footer-divider"></span>
+        <span class="big-account-search-label">定位大账号</span>
+        <input class="mapping-text-input big-account-search-input" type="text" spellcheck="false" />
+        <label class="big-account-remember-label">
+          <input class="new-account-checkbox big-account-remember-checkbox" type="checkbox" />
+          <span>记住顺序</span>
+        </label>
+        <button class="primary-btn small" type="button">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

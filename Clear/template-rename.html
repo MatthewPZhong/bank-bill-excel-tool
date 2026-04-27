@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>模板重命名 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card manual-balance-card template-rename-card">
+      <div class="dialog-header">
+        <div class="dialog-title"><span class="gemini-gradient">重命名模板</span></div>
+        <button class="icon-close" type="button">×</button>
+      </div>
+      <div class="manual-balance-form">
+        <label class="manual-balance-row">
+          <span class="manual-balance-label">当前模板名称</span>
+          <input class="mapping-text-input manual-balance-input" type="text" value="LusoBank-MO" disabled />
+        </label>
+        <label class="manual-balance-row">
+          <span class="manual-balance-label">新模板名称</span>
+          <input class="mapping-text-input manual-balance-input rename-template-input" type="text" spellcheck="false" value="LusoBank-MO-2024" />
+        </label>
+      </div>
+      <div class="dialog-actions right">
+        <button class="primary-btn small" type="button" data-action="done">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

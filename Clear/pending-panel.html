@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>月度 Pending 数据核对 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v3" />
+</head>
+<body>
+<div id="appShell" class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button id="minimizeBtn" class="window-btn" type="button" aria-label="最小化">−</button>
+      <button id="maximizeBtn" class="window-btn" type="button" aria-label="最大化">□</button>
+      <button id="closeBtn" class="window-btn close-btn" type="button" aria-label="关闭">×</button>
+    </div>
+  </header>
+
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <main class="page-body">
+    <h1 class="page-title"><span class="gemini-gradient">网银账单小助手</span></h1>
+
+    <section class="workspace-shell">
+      <div class="module-switcher">
+        <button id="moduleSwitcherBtn" class="module-switcher-trigger" type="button" aria-haspopup="true" aria-expanded="false">
+          <span class="module-switcher-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="16" height="16"><defs><linearGradient id="gs-p" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="40%" stop-color="#9B72F2"/><stop offset="75%" stop-color="#E95EA2"/><stop offset="100%" stop-color="#F6B93B"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gs-p)"/></svg>
+          </span>
+          <span id="currentModuleName" class="module-switcher-name">月度 Pending 数据核对</span>
+          <span class="module-switcher-caret" aria-hidden="true">▾</span>
+        </button>
+      </div>
+
+      <section id="pendingModulePanel" class="control-board module-panel pending-board">
+        <div class="control-row">
+          <div class="cell left">
+            <button id="pendingRuleBtn" class="secondary-btn" type="button">规则管理</button>
+          </div>
+          <div class="cell right">
+            <div class="pending-action-pair">
+              <button id="pendingImportBtn" class="primary-btn" type="button">导入文件</button>
+              <button id="pendingRunBtn" class="primary-btn" type="button">开始运行</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="control-row">
+          <div class="cell left">
+            <button id="pendingExportBtn" class="secondary-btn" type="button">导出差异</button>
+          </div>
+          <div class="cell right">
+            <div id="pendingStatusBox" class="pending-status" data-tone="success">
+              对账完成：2026-03 vs 2026-02 找出 10 条差异（5 新增 / 3 消失 / 2 变更），可点击"导出差异"另存。
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="page-footer">
+    <div class="version-text"><span class="version-label">Version</span> <span id="appVersion">2.0.0-beta.1</span></div>
+  </footer>
+
+  <div id="backgroundTool" class="background-tool">
+    <div class="background-tool-actions">
+      <button id="backgroundPaletteBtn" class="palette-trigger" type="button" aria-label="背景调色盘" title="背景调色盘">
+        <span class="palette-trigger-emoji" aria-hidden="true">🎨</span>
+      </button>
+      <button id="saveUserGuideBtn" class="text-action background-guide-btn" type="button">使用手册</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

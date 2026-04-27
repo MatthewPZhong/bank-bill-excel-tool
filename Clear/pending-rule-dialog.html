@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Pending 对账规则 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v3" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card pending-rule-card">
+      <div class="dialog-header">
+        <div class="dialog-title"><span class="gemini-gradient">Pending 数据对账规则</span></div>
+        <button class="icon-close" type="button" data-action="close">×</button>
+      </div>
+      <div class="pending-rule-body">
+        <div class="pending-rule-col-header">对账字段<span class="hint-icon">?</span></div>
+        <div class="pending-rule-col-header">对账内容<span class="hint-icon">?</span></div>
+
+        <div class="pending-rule-row">
+          <span class="pending-rule-index">1.</span>
+          <select class="pending-rule-select"><option>交易日期</option></select>
+          <button class="pending-rule-action add" type="button">新增</button>
+        </div>
+        <div class="pending-rule-row">
+          <span class="pending-rule-index">1.</span>
+          <select class="pending-rule-select"><option>摘要</option></select>
+          <button class="pending-rule-action add" type="button">新增</button>
+        </div>
+
+        <div class="pending-rule-row">
+          <span class="pending-rule-index">2.</span>
+          <select class="pending-rule-select"><option>主账户</option></select>
+          <button class="pending-rule-action remove" type="button">删除</button>
+        </div>
+        <div class="pending-rule-row">
+          <span class="pending-rule-index">2.</span>
+          <select class="pending-rule-select"><option>对方户名</option></select>
+          <button class="pending-rule-action remove" type="button">删除</button>
+        </div>
+
+        <div class="pending-rule-row">
+          <span class="pending-rule-index">3.</span>
+          <select class="pending-rule-select"><option>发生额</option></select>
+          <button class="pending-rule-action remove" type="button">删除</button>
+        </div>
+        <div></div>
+      </div>
+      <div class="dialog-actions center">
+        <button class="primary-btn small" type="button" data-action="done">完成</button>
+        <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
