@@ -1503,3 +1503,41 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   background: var(--bg-soft);
 }
 
+/* =================== v2.0.0-beta.2 阶段 5 增量：reconcile + export 对话框 Clear 适配 ===================
+ * src renderer 用 .pending-reconcile-dialog / .pending-export-dialog（设计师 .pending-reconcile-card /
+ * .pending-export-runs-card 是另一套），且 select 用 .mapping-text-input 基础 class（Clear 没有此 class
+ * 全局样式）。补全两套 alias + .mapping-text-input 基础 select 样式。
+ */
+.mapping-text-input {
+  width: 100%;
+  height: 40px;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 14px;
+  color: var(--text);
+  font-size: 14px;
+  box-sizing: border-box;
+}
+.mapping-text-input:focus {
+  outline: 2px solid var(--g-blue);
+  outline-offset: 1px;
+}
+select.mapping-text-input {
+  padding-right: 34px;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  cursor: pointer;
+}
+
+.modal-card.pending-reconcile-dialog {
+  width: min(100%, 680px);
+  padding: 24px 28px;
+}
+.modal-card.pending-export-dialog {
+  width: min(100%, 620px);
+  padding: 24px 28px;
+}
+
