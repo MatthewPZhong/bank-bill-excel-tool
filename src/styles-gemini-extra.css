@@ -1472,6 +1472,9 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 .pending-export-cols .pending-rule-column-header { margin-bottom: 4px; }
 .pending-export-cols .pending-export-month-column { flex: 0 0 120px; min-width: 0; }
 .pending-export-cols .pending-export-run-column { flex: 1 1 auto; min-width: 0; }
+/* 取消 min-width 以防 select 撑爆 column 容器（与 General styles.css:2531 一致）*/
+.pending-export-cols .mapping-text-input,
+.pending-export-cols .pending-reconcile-month-select { min-width: 0; }
 
 /* Pending 模块主面板 status-box（D6.1：HTML 用 status-box class 沿用阶段 2，
  * Clear 风格下让其呈现成设计稿 .pending-status 的卡片样式）*/
@@ -1537,7 +1540,8 @@ select.mapping-text-input {
   padding: 24px 28px;
 }
 .modal-card.pending-export-dialog {
-  width: min(100%, 620px);
+  /* width 760 容纳内部 .pending-export-cols 720 + padding 28 双侧 */
+  width: min(100%, 800px);
   padding: 24px 28px;
 }
 
