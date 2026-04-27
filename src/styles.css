@@ -2646,6 +2646,14 @@ select {
 .alert-body { display: contents; }
 .alert-icon { display: none; }
 
+/* 7. Pending 模块（D6.1）：HTML 重构对齐 Clear，给 General 加 control-row + pending-action-pair 布局 */
+.pending-board .control-row { grid-template-columns: 1fr 1.4fr; }
+.pending-board .cell.left { display: flex; justify-content: center; }
+.pending-board .cell.right { display: flex; justify-content: center; }
+.pending-board .cell.left .secondary-btn { min-width: 180px; }
+.pending-board .pending-action-pair { display: flex; gap: 12px; justify-content: center; }
+.pending-board .pending-action-pair .primary-btn { min-width: 140px; }
+
 /* === v2.0.0-beta.2 F1: 调色板"切换页面风格"下拉框样式（D11 自补）=== */
 
 /* 调色板 grid 多一行：[风格切换 / body / actions]，整体高度自适应 */

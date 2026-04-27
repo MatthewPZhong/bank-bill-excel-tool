@@ -153,19 +153,29 @@
             </div>
           </section>
 
-          <section id="pendingModulePanel" class="control-board module-panel pending-module-panel" hidden>
-            <div class="pending-module-grid">
-              <button id="pendingRuleBtn" class="secondary-btn pending-left-btn" type="button">规则管理</button>
-              <div class="pending-top-btn-row">
-                <button id="pendingImportBtn" class="primary-btn pending-top-btn" type="button" disabled>导入文件</button>
-                <button id="pendingRunBtn" class="primary-btn pending-top-btn" type="button" disabled>开始运行</button>
+          <section id="pendingModulePanel" class="control-board module-panel pending-board" hidden>
+            <div class="control-row">
+              <div class="cell left">
+                <button id="pendingRuleBtn" class="secondary-btn" type="button">规则管理</button>
               </div>
-              <button id="pendingExportBtn" class="secondary-btn pending-left-btn" type="button" disabled>导出差异</button>
-              <div id="pendingStatusBox" class="status-box">
-                <span class="status-spark" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusPending" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusPending)"/></svg>
-                </span>
-                <span class="status-box-text">初次使用请确认用来筛选的字段~</span>
+              <div class="cell right">
+                <div class="pending-action-pair">
+                  <button id="pendingImportBtn" class="primary-btn" type="button" disabled>导入文件</button>
+                  <button id="pendingRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
+                </div>
+              </div>
+            </div>
+            <div class="control-row">
+              <div class="cell left">
+                <button id="pendingExportBtn" class="secondary-btn" type="button" disabled>导出差异</button>
+              </div>
+              <div class="cell right">
+                <div id="pendingStatusBox" class="status-box">
+                  <span class="status-spark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusPending" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusPending)"/></svg>
+                  </span>
+                  <span class="status-box-text">初次使用请确认用来筛选的字段~</span>
+                </div>
               </div>
             </div>
           </section>
