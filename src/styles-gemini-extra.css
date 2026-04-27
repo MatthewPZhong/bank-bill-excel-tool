@@ -1368,12 +1368,25 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   font-family: "Roboto Mono", ui-monospace, monospace;
   letter-spacing: .04em;
 }
-/* Manager-card table 列宽固定，避免编辑态/view 态切换时列位移 */
+/* Manager-card / Account-card / Bill-split table 列宽固定，
+   避免编辑态/view 态切换时列位移（同步 General styles.css 的 fixed layout 策略） */
 .manager-card .data-table { table-layout: fixed; }
 .manager-card .data-table th:nth-child(1),
 .manager-card .data-table td:nth-child(1) { width: 40%; }
 .manager-card .data-table th:nth-child(2),
 .manager-card .data-table td:nth-child(2) { width: 30%; overflow: hidden; text-overflow: ellipsis; }
+
+.account-card .data-table { table-layout: fixed; }
+.account-card .data-table th:nth-child(1),
+.account-card .data-table td:nth-child(1) { width: 35%; }
+.account-card .data-table th:nth-child(2),
+.account-card .data-table td:nth-child(2) { width: 35%; }
+.account-card .data-table th:nth-child(3),
+.account-card .data-table td:nth-child(3) { width: 15%; }
+.account-card .data-table th:nth-child(4),
+.account-card .data-table td:nth-child(4) { width: 15%; }
+
+.bill-split-rows-table { table-layout: fixed; }
 
 .big-account-currency-editor {
   display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
