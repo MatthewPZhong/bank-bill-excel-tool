@@ -1902,12 +1902,6 @@ select {
   margin: 0 auto;
 }
 
-.big-account-currency-input-shell.is-inactive,
-.big-account-currency-dropdown-wrap.is-inactive {
-  opacity: .45;
-  pointer-events: none;
-}
-
 .big-account-view-text {
   display: block;
   min-height: 44px;
