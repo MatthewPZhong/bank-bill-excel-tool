@@ -5242,7 +5242,7 @@
           <td class="account-mapping-text-cell">${escapeHtml(row.bankAccountId)}</td>
           <td class="account-mapping-text-cell">${escapeHtml(row.clearingAccountId)}</td>
           <td>${escapeHtml(row.currency || '—')}</td>
-          <td><select class="migration-template-select"><option value="">请选择模板</option>${templateOptions}</select></td>
+          <td><select class="mapping-select migration-template-select"><option value="">请选择模板</option>${templateOptions}</select></td>
         `;
         tbody.appendChild(tr);
       });

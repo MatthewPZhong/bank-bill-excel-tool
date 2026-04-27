@@ -1368,8 +1368,30 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   font-family: "Roboto Mono", ui-monospace, monospace;
   letter-spacing: .04em;
 }
+.big-account-currency-editor {
+  display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
+  min-height: 44px;
+}
+.big-account-currency-input-shell {
+  position: relative; flex: 1 1 auto; min-width: 0;
+}
+.big-account-currency-ghost,
+.big-account-currency-input { width: 100%; }
+.big-account-currency-ghost {
+  position: absolute; inset: 0;
+  color: rgba(123, 106, 83, 0.48);
+  pointer-events: none;
+}
+.big-account-currency-input {
+  position: relative; background: transparent; z-index: 1;
+}
 .big-account-currency-dropdown-wrap { position: relative; width: 128px; }
 .big-account-currency-dropdown-btn { width: 100%; }
+.big-account-multi-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted);
+  white-space: nowrap;
+}
 .big-account-currency-floating-panel {
   z-index: 32;
   max-height: 320px;
