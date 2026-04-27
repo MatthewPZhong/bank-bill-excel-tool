@@ -1388,6 +1388,13 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 
 .bill-split-rows-table { table-layout: fixed; }
 
+/* Mapping-card 表格列比例对齐 General（模板字段窄 / 映射字段宽） */
+.mapping-card .data-table { table-layout: fixed; }
+.mapping-card .data-table th:nth-child(1),
+.mapping-card .data-table td:nth-child(1) { width: 30%; }
+.mapping-card .data-table th:nth-child(2),
+.mapping-card .data-table td:nth-child(2) { width: 70%; }
+
 .big-account-currency-editor {
   display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
   min-height: 44px;
