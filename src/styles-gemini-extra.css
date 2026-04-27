@@ -108,18 +108,31 @@
 .data-table tbody tr:hover td { background: var(--bg-soft); }
 .data-table tbody tr:last-child td { border-bottom: none; }
 
-/* Right-align action column */
-.manager-action-header { text-align: right; }
-.manager-action-header-label { display: inline-block; }
+/* Left-align action column (列头与第一按钮左缘对齐 td 内边距) */
+.manager-action-header { text-align: left; }
+.manager-action-header-label { display: block; width: auto; margin: 0; }
+.manager-row-actions,
+.big-account-row-actions {
+  width: auto;
+  margin: 0;
+  justify-content: flex-start;
+}
 .row-actions,
 .account-mapping-action-cell {
-  text-align: right;
+  text-align: left;
   white-space: nowrap;
 }
 .row-actions .text-action,
 .account-mapping-action-cell .text-action {
   padding: 6px 10px; font-size: 13px;
   margin-left: 4px;
+}
+.manager-row-actions .text-action:first-child,
+.big-account-row-actions .text-action:first-child,
+.row-actions .text-action:first-child,
+.account-mapping-action-cell .text-action:first-child {
+  margin-left: 0;
+  padding-left: 0;
 }
 .text-action.danger { color: var(--danger); }
 .text-action.danger:hover { background: #fce8e6; color: var(--danger); }
@@ -441,6 +454,7 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
 }
 .big-account-search-label {
   font-size: 12px; color: var(--muted);
+  margin-left: auto;
 }
 .big-account-search-input {
   width: 200px; height: 36px;
@@ -581,9 +595,10 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
   color: var(--text);
 }
 .bill-split-row-actions {
-  text-align: right; white-space: nowrap;
+  text-align: left; white-space: nowrap;
 }
 .bill-split-row-actions .text-action { margin-left: 4px; font-size: 12px; }
+.bill-split-row-actions .text-action:first-child { margin-left: 0; padding-left: 0; }
 
 .bill-split-sub-section-divider {
   border: none;
@@ -604,7 +619,7 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
 .bill-split-sub-row {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
-.bill-split-sub-label {
+.bill-split-sub-row label {
   font-size: 13px; color: var(--muted);
   min-width: 180px;
 }
@@ -1544,6 +1559,13 @@ select.mapping-text-input {
   background-repeat: no-repeat;
   background-position: right 12px center;
   cursor: pointer;
+}
+
+/* re-assert：line 445 的 .big-account-search-input 宽度被上面 .mapping-text-input 兜底覆盖，
+   这里再声明一次让 200px 生效（input 同时挂两个 class，后定义胜） */
+.big-account-search-input {
+  width: 200px;
+  height: 36px;
 }
 
 .modal-card.pending-reconcile-dialog {

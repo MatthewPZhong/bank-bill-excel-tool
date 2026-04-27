@@ -1585,22 +1585,20 @@
         function showExtractDialog() {
           const extractOverlay = createOverlay();
           const extractDialog = document.createElement('div');
-          extractDialog.className = 'modal-card big-account-selection-card extract-order-card';
+          extractDialog.className = 'modal-card extract-order-card';
           extractDialog.innerHTML = `
             <div class="dialog-header">
               <div class="dialog-title">确认大账号顺序</div>
-              <button class="icon-close extract-close-btn" type="button">×</button>
+              <button class="icon-close extract-close-btn" type="button" style="margin-left:auto;">×</button>
             </div>
-            <div class="big-account-split-body extract-single-scroll">
-              <div class="extract-scroll-container">
-                <div class="big-account-split-left">
-                  <div class="big-account-split-header">文件顺序：</div>
-                  <div class="extract-file-list"></div>
-                </div>
-                <div class="big-account-split-right">
-                  <div class="big-account-split-header">大账号信息：</div>
-                  <div class="extract-order-list"></div>
-                </div>
+            <div class="extract-order-body">
+              <div>
+                <div class="extract-order-col-header">文件顺序：</div>
+                <div class="extract-order-list extract-file-list"></div>
+              </div>
+              <div>
+                <div class="extract-order-col-header">大账号信息：</div>
+                <div class="extract-order-list extract-account-list"></div>
               </div>
             </div>
             <div class="dialog-actions right">
@@ -1609,7 +1607,7 @@
           `;
 
           const extractFileList = extractDialog.querySelector('.extract-file-list');
-          const extractOrderList = extractDialog.querySelector('.extract-order-list');
+          const extractOrderList = extractDialog.querySelector('.extract-account-list');
 
 
 
@@ -1617,32 +1615,32 @@
           // v1.5.2：确认大账号顺序弹窗只显示未被"单个账号匹多个文件"映射的 block
           extractableRows.forEach((row, index) => {
             const item = document.createElement('div');
-            item.className = 'big-account-file-item ba-file-row';
+            item.className = 'extract-order-row';
             const fullName = row.fileName || '';
             const rowSuffix = row.sourceRowNumber ? ` 第${row.sourceRowNumber}行` : '';
             const displayName = truncateFileName(fullName, 20) + rowSuffix;
             const fullMeta = fullName + rowSuffix;
-            item.innerHTML = `<span class="big-account-file-index">${index + 1}.</span><span class="big-account-file-meta" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span>`;
+            item.innerHTML = `<span class="eo-idx">${index + 1}.</span><span class="eo-name" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span><span></span>`;
             extractFileList.appendChild(item);
           });
 
           extractedAccounts.forEach((account, index) => {
             const item = document.createElement('div');
-            item.className = 'extract-order-item extract-order-row';
+            item.className = 'extract-order-row';
             item.dataset.index = index;
             item.dataset.merchantId = account.merchantId;
             item.dataset.currency = account.currency;
 
             const indexSpan = document.createElement('span');
-            indexSpan.className = 'extract-order-index eo-idx';
+            indexSpan.className = 'eo-idx';
             indexSpan.textContent = `${index + 1}.`;
 
             const textSpan = document.createElement('span');
-            textSpan.className = 'extract-order-text eo-name';
+            textSpan.className = 'eo-name';
             textSpan.textContent = `${account.merchantId} ${account.currency}`;
 
             const editBtn = document.createElement('button');
-            editBtn.className = 'extract-edit-btn';
+            editBtn.className = 'text-action eo-edit';
             editBtn.type = 'button';
             editBtn.textContent = '编辑';
 

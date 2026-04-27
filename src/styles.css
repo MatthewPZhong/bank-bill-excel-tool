@@ -1091,23 +1091,57 @@ select {
   max-width: 960px;
 }
 
-.extract-single-scroll {
-  overflow: hidden;
-  display: block;
-}
-
-.extract-scroll-container {
+.extract-order-body {
+  padding: 18px 24px 8px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0;
-  overflow-y: auto;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 24px;
   max-height: 50vh;
+  overflow-y: auto;
 }
 
-.extract-single-scroll .big-account-split-left,
-.extract-single-scroll .big-account-split-right {
-  overflow-y: visible;
-  max-height: none;
+.extract-order-col-header {
+  font-size: 12px;
+  color: rgba(56, 30, 17, 0.6);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+
+.extract-order-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.extract-order-row {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 6px;
+  font-size: 14px;
+  border-bottom: 1px solid rgba(104, 79, 39, 0.16);
+}
+
+.extract-order-row:last-child {
+  border-bottom: none;
+}
+
+.extract-order-row .eo-idx {
+  color: rgba(56, 30, 17, 0.6);
+  text-align: right;
+  font-family: "Roboto Mono", ui-monospace, monospace;
+}
+
+.extract-order-row .eo-name {
+  color: #381E11;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.extract-order-row .eo-edit {
+  font-size: 13px;
 }
 
 .big-account-selection-split .big-account-split-body {
@@ -1162,35 +1196,6 @@ select {
   padding: 6px 14px;
 }
 
-
-.extract-order-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--line);
-}
-
-.extract-order-text {
-  flex: 1;
-  font-size: 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.extract-edit-btn {
-  border: none;
-  background: transparent;
-  color: var(--primary);
-  cursor: pointer;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.extract-edit-btn:hover {
-  text-decoration: underline;
-}
 
 .extract-edit-container {
   display: flex;

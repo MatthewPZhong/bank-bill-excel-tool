@@ -652,22 +652,20 @@
       const overlay = document.createElement('div');
       overlay.className = 'modal-overlay';
       const dialog = document.createElement('div');
-      dialog.className = 'modal-card big-account-selection-card extract-order-card';
+      dialog.className = 'modal-card extract-order-card';
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">确认大账号顺序</div>
-          <button class="icon-close extract-close-btn" type="button">×</button>
+          <button class="icon-close extract-close-btn" type="button" style="margin-left:auto;">×</button>
         </div>
-        <div class="big-account-split-body extract-single-scroll">
-          <div class="extract-scroll-container">
-            <div class="big-account-split-left">
-              <div class="big-account-split-header">文件顺序：</div>
-              <div class="extract-file-list"></div>
-            </div>
-            <div class="big-account-split-right">
-              <div class="big-account-split-header">大账号信息：</div>
-              <div class="extract-order-list"></div>
-            </div>
+        <div class="extract-order-body">
+          <div>
+            <div class="extract-order-col-header">文件顺序：</div>
+            <div class="extract-order-list extract-file-list"></div>
+          </div>
+          <div>
+            <div class="extract-order-col-header">大账号信息：</div>
+            <div class="extract-order-list extract-account-list"></div>
           </div>
         </div>
         <div class="dialog-actions right">
@@ -677,7 +675,7 @@
       overlay.appendChild(dialog);
 
       const extractFileList = dialog.querySelector('.extract-file-list');
-      const extractOrderList = dialog.querySelector('.extract-order-list');
+      const extractOrderList = dialog.querySelector('.extract-account-list');
       const fileRows = [
         'HSBC-SG-2026-03.xlsx',
         'HSBC-SG-2026-03-block2.xlsx',
@@ -692,23 +690,24 @@
       ];
       fileRows.forEach((fileName, index) => {
         const item = document.createElement('div');
-        item.className = 'big-account-file-item';
+        item.className = 'extract-order-row';
         item.innerHTML =
-          `<span class="big-account-file-index">${index + 1}.</span>` +
-          `<span class="big-account-file-meta" title="${fileName}">${fileName}</span>`;
+          `<span class="eo-idx">${index + 1}.</span>` +
+          `<span class="eo-name" title="${fileName}">${fileName}</span>` +
+          `<span></span>`;
         extractFileList.appendChild(item);
       });
       extracted.forEach((account, index) => {
         const item = document.createElement('div');
-        item.className = 'extract-order-item';
+        item.className = 'extract-order-row';
         const indexSpan = document.createElement('span');
-        indexSpan.className = 'extract-order-index';
+        indexSpan.className = 'eo-idx';
         indexSpan.textContent = `${index + 1}.`;
         const textSpan = document.createElement('span');
-        textSpan.className = 'extract-order-text';
+        textSpan.className = 'eo-name';
         textSpan.textContent = `${account.merchantId} ${account.currency}`;
         const editBtn = document.createElement('button');
-        editBtn.className = 'extract-edit-btn';
+        editBtn.className = 'text-action eo-edit';
         editBtn.type = 'button';
         editBtn.textContent = '编辑';
         item.appendChild(indexSpan);
