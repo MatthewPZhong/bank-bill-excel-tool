@@ -7,7 +7,8 @@ const { FileValidationError, normalizeCell } = require('./common');
 
 // v1.5.3 R3：给表头行（第 1 行）每个单元格注入 Courier New 字体
 // 决策 D14：字体名写死 'Courier New'，不加可选参数、不加回退链
-// 只改 font.name，保留单元格原有其它样式（字号、颜色、粗体等）
+// v2.0.0：字号固定为 10pt（之前未显式设置，继承 xlsx-js-style 默认 Calibri 11pt）
+// 只改 font.name 和 font.sz，保留单元格原有其它样式（颜色、粗体等）
 function applyHeaderRowFont(worksheet, headerRowIndex = 0) {
   if (!worksheet || !worksheet['!ref']) {
     return;
@@ -26,7 +27,7 @@ function applyHeaderRowFont(worksheet, headerRowIndex = 0) {
     const existingFont = existingStyle.font || {};
     cell.s = {
       ...existingStyle,
-      font: { ...existingFont, name: 'Courier New' }
+      font: { ...existingFont, name: 'Courier New', sz: 10 }
     };
   }
 }
