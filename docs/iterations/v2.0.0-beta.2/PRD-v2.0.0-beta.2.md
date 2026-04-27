@@ -879,3 +879,76 @@ window.desktopApi.settings.setUiStyle(style)
 ## 十六、实施记录
 
 > 由 PR merged + 归档后自动追加，PM 不需要手动填写。
+
+### 阶段 1（commit `13ac3a7`）— 数据底座 + 版本号 bump（D12）
+
+- `src/backend/database/settings-repository.js`：新增 `getUiStyle / setUiStyle / ensureUiStyleDefault`（idempotent，`current` 为空才写默认 `'Clear'`）+ `UI_STYLE_KEY = 'ui_style'` + `UI_STYLE_DEFAULT = 'Clear'`
+- `src/backend/database.js`：facade 暴露同名方法
+- `src/main.js`：注册 IPC `settings:get-ui-style` / `settings:set-ui-style`；`app:get-info` 返回体加 `uiStyle`；`database.init()` 之后调用 `database.ensureUiStyleDefault()`
+- `src/preload.js`：`contextBridge` 加 `settings.{getUiStyle, setUiStyle}` namespace
+- `package.json.version`：`2.0.0-beta.1` → `2.0.0-beta.2`
+
+### 阶段 2（commit `4d01140`）— HTML 结构对齐 Clear
+
+- `index.html` 整体重写：DOM 对照 `Clear/main.html` + `Clear/pending.html` 重组三个 module-panel + module-switcher 下拉；保留猫猫 GIF（D8）；新增 `<select id="paletteStyleSelect">` + `<button id="paletteStyleConfirmBtn">` 切换器入口
+
+### 阶段 3（commit `03d4d4e` + `dc6811a`）— 双风格 CSS 切换机制（D15 简化 + D16 联动）
+
+- `index.html`：三 link 切换 `<link id="cssGeneral" disabled>` + `<link id="cssClear">` + `<link id="cssClearExtra">`
+- `src/styles.css` 末尾 5 类条件渲染节点退化（D15）
+- `src/renderer.js`：`applyUiStyle(style)` 三 link `disabled` 切换；`initialize()` 启动用 `info.uiStyle`
+- `src/main.js`：`CLEAR_BACKGROUND_COLOR = '#ffffff'` + `ensureBackgroundColorMatchesStyle()`（D16 启动联动，仅魔法值场景）
+
+### 阶段 4（commit `7d142e9`）— UI 切换器 + 提醒框（F1 + F2）
+
+- `src/renderer.js`：`handlePaletteStyleConfirm` 弹 `createConfirmDialog`（D9 二次确认）+ 取消回滚（D10）+ 写 SQLite + applyUiStyle + 联动背景色
+- `openBackgroundPalette` 强制 `paletteStyleSelect.value = 'Clear'`（D5 每次打开重置）
+- `updateStatusBox` / `setStatus` / `setNewAccountStatus` / `setPendingStatus`：写 `.status-box-text` 子节点（避免清掉 `.status-spark` SVG）
+- `src/renderer-pending.js`：`setPendingStatus` 同步改
+
+### 阶段 5（多 commit 增量）— dialog factory 双套适配
+
+由用户增量"怪怪的"反馈驱动循环修复，按对话框分批：
+
+- `97bdb86` alert/confirm 加 Clear SVG 图标 + D13 资产清洗（grep `font-weight:500` `data-cc-id` 应为 0）
+- `60fe541` 多币种下拉框 Clear 风格补全
+- `1f0710c` Pending 系列对话框 Clear 适配
+- `609cef8` Pending 主面板 HTML 重构对齐 Clear（D6.1 补做）
+- `ebd593e` reconcile + export 对话框 Clear 适配
+- `5319cd8` 大账号选择 + 顺序提取对话框 Clear 适配（首版 alias）
+- `2b9f1b1` 导出月份范围两下拉框重叠
+- `7aad2ca` 拆分/合并账单 picker Clear 适配
+- `cef0af3` mapping-select + 主模板 select Clear 适配
+- `1f721f4` / `cd0ed37` 导出月份范围按钮位置（最终对齐设计稿左下角）
+- `e5c994d` / `21363c1` 主面板按钮分布（revert + redo）
+- `24239ae` 模板管理/账户映射按钮左右对齐上方下拉框
+- `4e3ef6b` 新开账户行操作按钮 新增 → 蓝 / 删除 → 红
+- `62156e5` Clear 调色板选取颜色框尺寸对齐 General
+- `4d76bf7` renderer 输出双 class — 大账号选择 + 顺序提取
+- `72a1c2a` 删 Clear 长名 alias 让设计师短名样式生效（CSS cascade 修复）
+- `01dc51d` extract-order DOM 1:1 设计稿 + 多处对齐微调
+- `04636a9` General 主面板模板管理/账户映射按钮分开（cell.center stretch + button-stack flex-wrap nowrap）
+- `cceccfb` / `6d87a88` / `c9d152e` 账户映射按钮右缘对齐 select 右缘三轮迭代（最终 max-width:260 + flex:1 等分 + gap:12）
+- `ef6b637` export-scope / remember-order-mismatch / big-account-selection 裸露修复（加 `.alert-body` 包裹 + SVG icon + Clear list-item css）
+- `baa9d41` account-mapping-migration select 加 `.mapping-select` 标准化 + 维护大账号币种行单行布局
+- `5ecec14` 维护大账号币种行 hidden 互斥（撤销 69e5d7d 的"3 元素并排"方案）
+- `0f953f9` 维护大账号币种行三连修（table-layout fixed + ghost transparent border + input/dropdown 等宽）
+- `8f165ff` / `ffd6a52` / `7f63273` / `4835854` 输入框 70px / dropdown 160px
+- `5e61419` 4 个执行操作列 dialog 列宽固定（Clear 同步 General 的 table-layout fixed + nth-child width%）
+- `db9c12a` / `750e939` / `bf3b624` / `b2c8a53` 映射关系管理列比例 30/70 + mapping-field-editor flex row + flex-wrap + concat-field-picker flex-basis 100%
+- `517320b` Clear 风格右下角 Version 字体改 Courier New
+- 死代码删除：`legacyCreateBigAccountManagerDialog` + `legacyCreateTemplateManagerDialog`（共 -444 行）；其余 17 个 legacy 函数因运行时间接依赖未删
+
+### 阶段 6（commit `54892bd` + `a3935ba` + `1eef1ec`）— preview 双风格适配
+
+- 4 个 render 脚本（`render-modal-preview.js` / `render-preview.js` / `render-account-mapping-preview.js` / `render-template-manager-preview.js`）支持 `APP_PREVIEW_STYLE` env：默认 Clear → `docs/previews/<name>.png`；`general` → `docs/previews/_general/<name>.png`
+- `src/main.js`：preview 模式启动时若 env 存在则 `setUiStyle` 强制覆盖（在 ensureUiStyleDefault 之后）
+- `npm run preview:all` 默认 Clear 跑 35 张；`APP_PREVIEW_STYLE=general npm run preview:all` 跑 General 35 张
+- 双风格 35×2 截图全量产出后再次重渲一次（`1eef1ec`），确保所有截图反映阶段 5 收尾后的最终视觉
+- smoke 双风格各跑一次（`npm run smoke` / `APP_PREVIEW_STYLE=general npm run smoke`）均 pass
+
+### 验收
+
+- 23 条 AC（PRD §九）：F1 + F2 / F3 + F4 / F5 + F6 + F7 / Preview / 兼容 / 鲁棒；用户验证手动测试通过（包括 P0-1 ~ P0-10 + P1-1 ~ P1-5）
+- check-vars：Critical / Important-skeleton 命中 0 处；Runtime-state 命中 2 处（`state.uiStyle` 字段新增 + `elements.paletteStyleSelect/Btn` 新增）；Risk-sensitive 命中 1 处（`ensureUiStyleDefault` schema migration，幂等 + init 后调用 ✓）
+- 三件套文档同步更新（CHANGELOG.md / docs/VERSION_FEATURE_HISTORY.md / docs/USER_GUIDE.md §二「页面风格」）

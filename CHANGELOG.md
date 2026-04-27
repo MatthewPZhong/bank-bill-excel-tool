@@ -1,6 +1,8 @@
 # Changelog
 
-## 2.0.0-beta.2 - 2026-04-27（in-progress：分阶段追加，本版未发布）
+## 2.0.0-beta.2 - 2026-04-28
+
+新增 **页面风格切换**（`Clear` / `General` 二选一），默认 Clear。设计稿来自 `Clear/` 38 份 HTML（Claude Design）。整个迭代分 6 阶段实施：数据底座 → HTML 重构 → CSS 双套切换 → UI 切换器 → dialog factory 适配 → preview 双风格。
 
 ### 阶段 1：数据底座 + 版本号 bump
 
@@ -10,7 +12,53 @@
 - **preload 暴露 `desktopApi.settings.{getUiStyle, setUiStyle}`**：`src/preload.js` `contextBridge.exposeInMainWorld` 加 `settings` namespace。
 - **版本号 bump**：`package.json.version` `2.0.0-beta.1` → `2.0.0-beta.2`（按 PRD-v2.0.0-beta.2 §三 D12：spec 锁定后第一次 commit 时 bump）。
 
-> 阶段 2~6 内容随后续 commit 追加（HTML 重构 / CSS 双套 / UI 切换器 / dialog 适配 / preview 适配）。
+### 阶段 2：HTML 结构对齐 Clear
+
+- **`index.html` 基线整体重写**：DOM 结构对照 Clear/main.html、pending.html 重组（保留主面板 / Pending 面板 / 新开账户面板 三个 module-panel + module-switcher 下拉）；同时保留猫猫 GIF（D8 决策）。
+- **新增"切换页面风格"调色板下拉 + 应用按钮**：`<select id="paletteStyleSelect">` + `<button id="paletteStyleConfirmBtn">应用</button>`，从调色板面板顶部入口（`palette-panel-style-row`）触发风格切换。
+
+### 阶段 3：双风格 CSS 切换机制（D15 简化方案）
+
+- **三 link 切换**：`<link id="cssGeneral">` + `<link id="cssClear">` + `<link id="cssClearExtra">`，`cssGeneral.disabled / cssClear.disabled / cssClearExtra.disabled` 三状态布尔切换实现完全 cascade 隔离（D15：放弃 PRD 原方案的"全 selector 加 `body[data-style]` 前缀"双保险，工作量减少 ~80% 安全等价）。
+- **退化规则**：`src/styles.css` 末尾追加 5 类条件渲染节点的 General 退化（`.gemini-gradient` 重置 / `.status-spark display:none` / `.module-switcher-icon::before content:"🔁"` / `.select-shell display:contents` / `.alert-body display:contents` + `.alert-icon display:none`）。
+- **`applyUiStyle(style)`**：`src/renderer.js` 新增；启动时 `info.uiStyle` 决定初始；用户切换时 `desktopApi.settings.setUiStyle` 持久化 → applyUiStyle 立即切（不 reload）。
+- **D16 风格-背景色联动**（reverse sync）：`CLEAR_BACKGROUND_COLOR = '#ffffff'` vs `DEFAULT_BACKGROUND_COLOR = '#efe8da'`；`ensureBackgroundColorMatchesStyle()` 启动时仅当 colorHex 是"另一风格默认色"（魔法值）时重置，不覆盖用户自定义颜色。阶段 4 用户主动切风格时同样应用。
+
+### 阶段 4：UI 切换器 + 提醒框
+
+- **调色板"切换页面风格"下拉 + "应用"按钮**：`handlePaletteStyleConfirm` 弹 `createConfirmDialog`（D9 二次确认）；取消回滚下拉值（D10）；确认后写 SQLite + applyUiStyle + 联动背景色。
+- **状态保持**：`updateStatusBox` / `setStatus` / `setNewAccountStatus` / `setPendingStatus` 全部改为写 `.status-box-text` 子节点（避免 `.textContent` 整体覆盖清掉 `.status-spark` SVG 装饰）。
+- **每次打开调色板时下拉重置为 Clear**（D5）：`openBackgroundPalette` 强制 `paletteStyleSelect.value = 'Clear'`；改下拉但不点确认 → 关闭面板不写 DB。
+
+### 阶段 5：dialog factory 双套适配（增量收尾）
+
+由用户增量"怪怪的"反馈驱动的循环修复，多 commit 累计。涉及：
+
+- **alert/confirm 类**：`createAlertDialog` / `createConfirmDialog` / `createExportScopeDialog` / `createRememberOrderMismatchDialog` 加 `.alert-body` 包裹 + Clear SVG 圆圈/三角警告图标；General 风格通过 `alert-body { display:contents }` + `alert-icon { display:none }` 退化。
+- **多币种下拉 / Currency picker** Clear 适配。
+- **拆分/合并账单 picker**：勾选合并账单后右侧"请选择账单序号"下拉框 Clear 样式补全；按字段区分发生额单选下拉框对齐上方下拉框左缘。
+- **大账号选择 + 顺序提取对话框**：renderer 输出 dual-class（src 长名 + 设计师短名），删除 styles-gemini-extra.css 内冲突的长名 alias（cascade 后定义胜，避免覆盖设计师原版）；确认大账号顺序弹窗 DOM 重写为扁平 `.extract-order-body / .extract-order-row / .eo-idx / .eo-name / .text-action.eo-edit`，1:1 对齐 `Clear/extract-order.html`。
+- **维护大账号币种行**：Clear css 补 `.big-account-currency-editor` flex row + ghost transparent border + 表格 `table-layout: fixed` 列 40/30/30%（消除编辑/view 切换列位移）；输入框宽 70px，多币种 dropdown 160px。
+- **Pending 模块面板 + 系列对话框**（reconcile / export / rule confirm / import month）Clear 风格补全。
+- **执行操作列 4 个 dialog 列宽固定**：`.manager-card / .account-card / .bill-split-rows-table` 全部加 `table-layout: fixed`；按钮组容器（`.manager-row-actions` / `.big-account-row-actions` / `.row-actions` / `.account-mapping-action-cell` / `.bill-split-row-actions`）改左对齐 + 第一个按钮 `padding-left: 0`，让"修改"按钮左缘对齐"执行操作"列头文字左缘。
+- **映射关系管理 Clear 布局对齐 General**：表格 `table-layout: fixed` 30/70 列宽；`.mapping-field-editor` 改 flex row + flex-wrap，`.mapping-select` flex:1 让按钮回 select 右侧同行，`.concat-field-picker` flex-basis:100% 强制换行到独立行。
+- **主面板模板管理 / 账户映射按钮分布**：button-stack 加 `flex-wrap:nowrap` + max-width:260（与 select 等宽），两按钮 `flex:1 / min-width:0` 等分；`padding-right:14px` hack 让账户映射按钮右缘对齐 select caret 右缘。
+- **新开账户行操作按钮**：新增 = 蓝色 / 删除 = 红色。
+- **Clear 调色板尺寸**：选取颜色框对齐 General 大小。
+- **Clear 风格右下角 Version 字体**：改 Courier New 等宽。
+- **小细节**：`.bill-split-sub-row label` selector 修正（原 `.bill-split-sub-label` 与 renderer 输出不匹配，导致两行下拉框未对齐）；定位大账号搜索框宽度 200px 重新声明（被 `.mapping-text-input` 兜底 width:100% 覆盖修复）+ `margin-left: auto` 让搜索框组推到 footer 右下角。
+- **死代码删除**：`legacyCreateBigAccountManagerDialog` + `legacyCreateTemplateManagerDialog`（共 -444 行）；其余 17 个 legacy 函数因运行时间接依赖未删（grep 匹配虽为 0 但实测点击失效，已回滚）。
+
+### 阶段 6：preview 双风格适配
+
+- **`render-modal-preview.js` / `render-preview.js` / `render-account-mapping-preview.js` / `render-template-manager-preview.js` 4 个脚本支持 `APP_PREVIEW_STYLE` env**：默认（或 `clear`）→ `docs/previews/<name>.png`；`general` → `docs/previews/_general/<name>.png`。
+- **`src/main.js` preview 模式注入 ui_style**：`database.ensureUiStyleDefault()` 之后若 env `APP_PREVIEW_STYLE` 存在则 `setUiStyle` 强制覆盖。
+- **双风格 35×2 截图全量产出**：`npm run preview:all` 默认跑 Clear，`APP_PREVIEW_STYLE=general npm run preview:all` 跑 General。
+
+### 实施记录文件
+
+- `docs/iterations/v2.0.0-beta.2/PRD-v2.0.0-beta.2.md` 877 行（v1 定稿，OT-1 ~ OT-7 全部 closed + 16 决策 D1 ~ D16 + 23 验收 AC + 6 阶段实施计划）
+- `docs/iterations/v2.0.0-beta.2/TechDoc-v2.0.0-beta.2.md` 578 行（§4.3 D15 简化方案重写）
 
 ## 2.0.0-beta.1 - 2026-04-23
 
