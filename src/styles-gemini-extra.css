@@ -516,6 +516,9 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
 }
 .mapping-field-editor > .mapping-select { flex: 1 1 0; min-width: 0; }
 .mapping-field-editor > .concat-field-picker { flex-basis: 100%; }
+
+/* Clear 风格右下角 Version 用 Courier New */
+.version-text { font-family: "Courier New", ui-monospace, monospace; }
 .concat-field-picker {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px;
