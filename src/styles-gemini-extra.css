@@ -1380,7 +1380,7 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   min-height: 44px;
 }
 .big-account-currency-input-shell {
-  position: relative; width: 200px; flex: 0 0 200px; min-width: 0;
+  position: relative; width: 70px; flex: 0 0 70px; min-width: 0;
 }
 .big-account-currency-ghost,
 .big-account-currency-input { width: 100%; }
