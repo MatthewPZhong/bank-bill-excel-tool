@@ -1407,7 +1407,7 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 .big-account-currency-input {
   position: relative; background: transparent; z-index: 1;
 }
-.big-account-currency-dropdown-wrap { position: relative; width: 50px; flex: 0 0 50px; }
+.big-account-currency-dropdown-wrap { position: relative; width: 140px; flex: 0 0 140px; }
 .big-account-currency-dropdown-btn { width: 100%; }
 .big-account-multi-label {
   display: inline-flex; align-items: center; gap: 6px;
