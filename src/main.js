@@ -8879,6 +8879,13 @@ app.whenReady()
     // v2.0.0-beta.2 F4：ui_style 升级迁移（D4）—— 若不存在则写 'Clear'
     database.ensureUiStyleDefault();
 
+    // v2.0.0-beta.2 阶段 6：preview 模式通过 env APP_PREVIEW_STYLE=clear|general 强制风格
+    if (process.env.APP_PREVIEW_STYLE) {
+      const v = String(process.env.APP_PREVIEW_STYLE).trim().toLowerCase();
+      if (v === 'clear') database.setUiStyle('Clear');
+      else if (v === 'general') database.setUiStyle('General');
+    }
+
     // v2.0.0-beta.2 D16：风格-背景色联动（仅魔法值场景）
     ensureBackgroundColorMatchesStyle();
 
