@@ -511,7 +511,7 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
   font-weight: 500;
 }
 .mapping-field-editor {
-  display: flex; flex-direction: column; gap: 8px;
+  display: flex; align-items: center; gap: 12px;
 }
 .concat-field-picker {
   display: flex; align-items: center; gap: 10px;
