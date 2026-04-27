@@ -36,7 +36,17 @@
       createRememberOrderMismatchDialog,
       createAccountMappingMigrationDialog,
       closeModal,
-      openBackgroundPalette
+      openBackgroundPalette,
+      // v2.0.0 Pending 模块 preview 所需
+      rendererPending,
+      createConfirmDialog,
+      // 补充的 preview 所需
+      openModuleMenu,
+      createAccountMappingDialog,
+      escapeHtml,
+      desktopApi,
+      applyStatementResult,
+      closeAllNewAccountCurrencyDropdowns
     } = deps;
 
     function applyNewAccountPreviewState() {
@@ -421,6 +431,318 @@
       }));
     }
 
+    // ========== v2.0.0 Pending 模块 preview（6 张） ==========
+
+    const PENDING_PREVIEW_COLUMNS = [
+      '流水号', '交易日期', '交易时间', '主账户', '子账户', '币种',
+      '发生额', '借贷标志', '对方户名', '对方账号', '对方银行',
+      '摘要', '凭证号', '交易渠道'
+    ];
+    const PENDING_PREVIEW_RULE = {
+      matchFields: ['交易日期', '主账户', '发生额'],
+      compareFields: ['摘要', '对方户名']
+    };
+    const PENDING_PREVIEW_MONTHS = ['2026-03', '2026-02', '2026-01'];
+    const PENDING_PREVIEW_RUNS = [
+      {
+        id: 2, lowerMonth: '2026-03', upperMonth: '2026-02',
+        createdAt: '2026-04-18T14:32:00',
+        statNew: 5, statMissing: 3, statChanged: 2,
+        ruleSnapshot: PENDING_PREVIEW_RULE
+      },
+      {
+        id: 1, lowerMonth: '2026-02', upperMonth: '2026-01',
+        createdAt: '2026-03-15T09:10:00',
+        statNew: 8, statMissing: 1, statChanged: 4,
+        ruleSnapshot: PENDING_PREVIEW_RULE
+      }
+    ];
+
+    // 10. Pending 主面板（对账完成态）
+    function applyPendingPanelPreviewState() {
+      setCurrentModule(MODULES.pendingReconciliation.id);
+      state.pending.rule = PENDING_PREVIEW_RULE;
+      state.pending.months = PENDING_PREVIEW_MONTHS.slice();
+      state.pending.latestRunId = 2;
+      state.pending.latestRunResult =
+        '对账完成：2026-03 vs 2026-02 找出 10 条差异（5 新增 / 3 消失 / 2 变更），可点击"导出差异"另存。';
+      rendererPending.refreshPendingUi();
+    }
+
+    // 11. 规则管理对话框
+    function applyPendingRuleDialogPreviewState() {
+      setCurrentModule(MODULES.pendingReconciliation.id);
+      openModal(rendererPending.buildRuleDialogNode({
+        columns: PENDING_PREVIEW_COLUMNS,
+        currentRule: PENDING_PREVIEW_RULE
+      }));
+    }
+
+    // 12. 规则确认对话框
+    function applyPendingRuleConfirmPreviewState() {
+      setCurrentModule(MODULES.pendingReconciliation.id);
+      const matchFields = PENDING_PREVIEW_RULE.matchFields;
+      const compareFields = PENDING_PREVIEW_RULE.compareFields;
+      const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+      const message =
+        '<strong>请确认筛选的字段：</strong><br><br>' +
+        `<div>对账字段 (${matchFields.length}): ${matchFields.map(esc).join('、')}</div>` +
+        `<div>对账内容 (${compareFields.length}): ${compareFields.map(esc).join('、')}</div>`;
+      openModal(createConfirmDialog({
+        message,
+        confirmText: '确认',
+        cancelText: '取消',
+        onConfirm: () => {}
+      }));
+    }
+
+    // 13. 导入月份选择
+    function applyPendingImportMonthPreviewState() {
+      setCurrentModule(MODULES.pendingReconciliation.id);
+      openModal(rendererPending.buildImportMonthDialog({
+        onConfirm: () => {},
+        onCancel: () => {}
+      }));
+    }
+
+    // 14. 对账月份选择（开始运行）
+    function applyPendingReconcilePreviewState() {
+      setCurrentModule(MODULES.pendingReconciliation.id);
+      openModal(rendererPending.buildReconcileDialog({
+        months: PENDING_PREVIEW_MONTHS,
+        defaultUpper: '2026-02',
+        defaultLower: '2026-03',
+        onConfirm: () => {},
+        onCancel: () => {}
+      }));
+    }
+
+    // 15. 导出差异 run 选择
+    function applyPendingExportRunsPreviewState() {
+      setCurrentModule(MODULES.pendingReconciliation.id);
+      openModal(rendererPending.buildExportDialog({
+        allRuns: PENDING_PREVIEW_RUNS,
+        onConfirm: () => {},
+        onCancel: () => {}
+      }));
+    }
+
+    // ========== 2026-04-24 补：9 张历史遗漏 preview ==========
+
+    // 16. Pending 主面板 · 初始态（未设规则 / 未导入）
+    function applyPendingPanelInitialPreviewState() {
+      setCurrentModule(MODULES.pendingReconciliation.id);
+      state.pending.rule = null;
+      state.pending.months = [];
+      state.pending.latestRunResult = null;
+      state.pending.latestRunId = null;
+      rendererPending.refreshPendingUi();
+    }
+
+    // 17. Pending 主面板 · 导入中
+    function applyPendingPanelImportingPreviewState() {
+      setCurrentModule(MODULES.pendingReconciliation.id);
+      state.pending.rule = PENDING_PREVIEW_RULE;
+      state.pending.months = ['2026-01', '2026-02'];
+      state.pending.importing = true;
+      state.pending.currentYearMonth = '2026-03';
+      state.pending.importingText = '正在导入 2026-03：pending-account-2026-03.xlsx（已处理 123456 行）';
+      rendererPending.refreshPendingUi();
+    }
+
+    // 18. Pending 主面板 · 报错态（点击导出报错文件）
+    function applyPendingPanelErrorPreviewState() {
+      setCurrentModule(MODULES.pendingReconciliation.id);
+      state.pending.rule = PENDING_PREVIEW_RULE;
+      state.pending.errorReportAvailable = true;
+      state.pending.errorMessage = '表头字段不一致，请检查并重新导入';
+      rendererPending.refreshPendingUi();
+    }
+
+    // 19. 顶部模块切换菜单展开态
+    function applyModuleSwitcherOpenPreviewState() {
+      setCurrentModule(MODULES.statementGenerator.id);
+      openModuleMenu();
+    }
+
+    // 20. 新开账户 · 多行模式
+    function applyNewAccountMultiPreviewState() {
+      applyNewAccountPreviewState();
+      setTimeout(() => {
+        if (!elements.newAccountAddRowBtn) return;
+        elements.newAccountAddRowBtn.click();
+        setTimeout(() => {
+          elements.newAccountAddRowBtn.click();
+          setTimeout(() => {
+            // 填第 2 行数据以便视觉区分
+            const rows = elements.newAccountRows
+              ? Array.from(elements.newAccountRows.querySelectorAll('[data-new-account-row="true"]'))
+              : [];
+            const row2 = rows[1];
+            const row3 = rows[2];
+            if (row2) {
+              const bankInput = row2.querySelector('.new-account-bank-name-input');
+              const locInput = row2.querySelector('.new-account-location-input');
+              const currencyInput = row2.querySelector('.new-account-currency-input');
+              const accountInput = row2.querySelector('.new-account-bank-account-input');
+              if (bankInput) bankInput.value = '汇丰银行';
+              if (locInput) locInput.value = '新加坡';
+              if (currencyInput) currencyInput.value = 'SGD';
+              if (accountInput) accountInput.value = '9558800000000008';
+            }
+            if (row3) {
+              const bankInput = row3.querySelector('.new-account-bank-name-input');
+              const locInput = row3.querySelector('.new-account-location-input');
+              const currencyInput = row3.querySelector('.new-account-currency-input');
+              const accountInput = row3.querySelector('.new-account-bank-account-input');
+              if (bankInput) bankInput.value = 'PingPong';
+              if (locInput) locInput.value = '美国';
+              if (currencyInput) currencyInput.value = 'USD';
+              if (accountInput) accountInput.value = '4567000000000003';
+            }
+          }, 40);
+        }, 40);
+      }, 40);
+    }
+
+    // 21. 新开账户 · 币种下拉展开态
+    function applyNewAccountCurrencyDropdownPreviewState() {
+      applyNewAccountPreviewState();
+      setTimeout(() => {
+        const dropdownBtn = elements.newAccountCurrencyDropdownBtn;
+        if (dropdownBtn) dropdownBtn.click();
+      }, 80);
+    }
+
+    // 22. 多文件大账号选择对话框（split 双栏模式）
+    function applyBigAccountSelectionMultiPreviewState() {
+      setCurrentModule(MODULES.statementGenerator.id);
+      state.currencyOptions = ['USD', 'HKD', 'CNY', 'EUR', 'JPY', 'SGD'];
+      const rows = [
+        { index: 0, fileIndex: 0, fileName: 'HSBC-SG-2026-03.xlsx', sourceRowNumber: 1 },
+        { index: 1, fileIndex: 1, fileName: 'HSBC-SG-2026-03-block2.xlsx', sourceRowNumber: 1 },
+        { index: 2, fileIndex: 2, fileName: 'BankABC-HK-2026-03.xlsx', sourceRowNumber: 1 },
+        { index: 3, fileIndex: 3, fileName: 'PingPong-US-2026-03.xlsx', sourceRowNumber: 1 },
+        { index: 4, fileIndex: 4, fileName: 'LusoBank-MO-2026-03-verylongfilename-extra.xlsx', sourceRowNumber: 1 }
+      ];
+      openModal(createBigAccountSelectionDialog({
+        rows,
+        rowsWithEmptyBlocks: rows,
+        expandedBigAccountOptions: [
+          { merchantId: '6222000000000001', currency: 'USD' },
+          { merchantId: '6222000000000001', currency: 'HKD' },
+          { merchantId: '6222000000000001', currency: 'SGD' },
+          { merchantId: '9558800000000008', currency: 'SGD' },
+          { merchantId: '9558800000000008', currency: 'USD' },
+          { merchantId: '4567000000000003', currency: 'USD' }
+        ],
+        templateId: 'preview-template-4',
+        templateName: 'HSBC-SG',
+        canRemember: true,
+        onDone: () => {},
+        onCancel: closeModal
+      }));
+    }
+
+    // 23. "确认大账号顺序" 对话框（extract-order-card）
+    //     直接手搓 DOM（showExtractDialog 是 createBigAccountSelectionDialog 内部闭包，
+    //     无法从外部调用；视觉 class 名保持与实际实现一致即可）
+    function applyExtractOrderPreviewState() {
+      setCurrentModule(MODULES.statementGenerator.id);
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card big-account-selection-card extract-order-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">确认大账号顺序</div>
+          <button class="icon-close extract-close-btn" type="button">×</button>
+        </div>
+        <div class="big-account-split-body extract-single-scroll">
+          <div class="extract-scroll-container">
+            <div class="big-account-split-left">
+              <div class="big-account-split-header">文件顺序：</div>
+              <div class="extract-file-list"></div>
+            </div>
+            <div class="big-account-split-right">
+              <div class="big-account-split-header">大账号信息：</div>
+              <div class="extract-order-list"></div>
+            </div>
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="extract-done">完成</button>
+        </div>
+      `;
+      overlay.appendChild(dialog);
+
+      const extractFileList = dialog.querySelector('.extract-file-list');
+      const extractOrderList = dialog.querySelector('.extract-order-list');
+      const fileRows = [
+        'HSBC-SG-2026-03.xlsx',
+        'HSBC-SG-2026-03-block2.xlsx',
+        'BankABC-HK-2026-03.xlsx',
+        'PingPong-US-2026-03.xlsx'
+      ];
+      const extracted = [
+        { merchantId: '6222000000000001', currency: 'USD' },
+        { merchantId: '6222000000000001', currency: 'HKD' },
+        { merchantId: '9558800000000008', currency: 'SGD' },
+        { merchantId: '4567000000000003', currency: 'USD' }
+      ];
+      fileRows.forEach((fileName, index) => {
+        const item = document.createElement('div');
+        item.className = 'big-account-file-item';
+        item.innerHTML =
+          `<span class="big-account-file-index">${index + 1}.</span>` +
+          `<span class="big-account-file-meta" title="${fileName}">${fileName}</span>`;
+        extractFileList.appendChild(item);
+      });
+      extracted.forEach((account, index) => {
+        const item = document.createElement('div');
+        item.className = 'extract-order-item';
+        const indexSpan = document.createElement('span');
+        indexSpan.className = 'extract-order-index';
+        indexSpan.textContent = `${index + 1}.`;
+        const textSpan = document.createElement('span');
+        textSpan.className = 'extract-order-text';
+        textSpan.textContent = `${account.merchantId} ${account.currency}`;
+        const editBtn = document.createElement('button');
+        editBtn.className = 'extract-edit-btn';
+        editBtn.type = 'button';
+        editBtn.textContent = '编辑';
+        item.appendChild(indexSpan);
+        item.appendChild(textSpan);
+        item.appendChild(editBtn);
+        extractOrderList.appendChild(item);
+      });
+      openModal(overlay);
+    }
+
+    // 24. 账户映射对话框 · 编辑行态
+    function applyAccountMappingEditingPreviewState() {
+      setCurrentModule(MODULES.statementGenerator.id);
+      state.currencyOptions = ['USD', 'HKD', 'CNY', 'EUR'];
+      state.templates = [
+        { id: 'preview-template-4', name: 'HSBC-SG', isParent: false, parentTemplateId: null, bigAccountSummary: '3个' }
+      ];
+      openModal(createAccountMappingDialog({
+        templates: state.templates,
+        selectedTemplateId: 'preview-template-4',
+        mappings: [
+          { bankAccountId: '6222000000000001', clearingAccountId: 'CLEAR_001', currency: 'USD', noCurrency: false },
+          { bankAccountId: '9558800000000008', clearingAccountId: 'CLEAR_002', currency: 'HKD', noCurrency: false },
+          { bankAccountId: '4567000000000003', clearingAccountId: 'CLEAR_003', currency: '', noCurrency: true }
+        ],
+        onDone: () => {},
+        onCancel: closeModal
+      }));
+      setTimeout(() => {
+        const editBtn = elements.modalRoot.querySelector('.account-mapping-action-cell .text-action');
+        if (editBtn) editBtn.click();
+      }, 120);
+    }
+
     return {
       applyNewAccountPreviewState,
       applyTemplateManagerPreviewState,
@@ -439,7 +761,24 @@
       applyBillSplitRowsDialogPreviewState,
       applyBillSplitMappingsDialogPreviewState,
       applyRememberOrderMismatchDialogPreviewState,
-      applyAccountMappingMigrationDialogPreviewState
+      applyAccountMappingMigrationDialogPreviewState,
+      // v2.0.0 Pending 模块 preview（6 张）
+      applyPendingPanelPreviewState,
+      applyPendingRuleDialogPreviewState,
+      applyPendingRuleConfirmPreviewState,
+      applyPendingImportMonthPreviewState,
+      applyPendingReconcilePreviewState,
+      applyPendingExportRunsPreviewState,
+      // 2026-04-24 补：9 张历史遗漏 preview
+      applyPendingPanelInitialPreviewState,
+      applyPendingPanelImportingPreviewState,
+      applyPendingPanelErrorPreviewState,
+      applyModuleSwitcherOpenPreviewState,
+      applyNewAccountMultiPreviewState,
+      applyNewAccountCurrencyDropdownPreviewState,
+      applyBigAccountSelectionMultiPreviewState,
+      applyExtractOrderPreviewState,
+      applyAccountMappingEditingPreviewState
     };
   }
 

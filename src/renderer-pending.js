@@ -871,7 +871,12 @@ window.__rendererPending = (function () {
       refreshPendingUi,
       setPendingStatus,
       computePendingStatusText,
-      bindEvents
+      bindEvents,
+      // v2.0.0 preview 钩子：暴露 4 个对话框 builder 给 renderer-previews.js
+      buildRuleDialogNode,
+      buildImportMonthDialog,
+      buildReconcileDialog,
+      buildExportDialog
     };
   }
 

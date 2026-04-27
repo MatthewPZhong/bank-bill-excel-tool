@@ -256,6 +256,16 @@ const {
   applyManualBalancePromptStatus
 });
 
+const rendererPending = window.__rendererPending.createRendererPending({
+  state,
+  elements,
+  desktopApi: window.desktopApi,
+  openModal,
+  closeModal,
+  createAlertDialog,
+  createConfirmDialog
+});
+
 const {
   applyNewAccountPreviewState,
   applyTemplateManagerPreviewState,
@@ -273,7 +283,24 @@ const {
   applyBillSplitRowsDialogPreviewState,
   applyBillSplitMappingsDialogPreviewState,
   applyRememberOrderMismatchDialogPreviewState,
-  applyAccountMappingMigrationDialogPreviewState
+  applyAccountMappingMigrationDialogPreviewState,
+  // v2.0.0 Pending 模块 preview（6 张）
+  applyPendingPanelPreviewState,
+  applyPendingRuleDialogPreviewState,
+  applyPendingRuleConfirmPreviewState,
+  applyPendingImportMonthPreviewState,
+  applyPendingReconcilePreviewState,
+  applyPendingExportRunsPreviewState,
+  // 2026-04-24 补：9 张历史遗漏 preview
+  applyPendingPanelInitialPreviewState,
+  applyPendingPanelImportingPreviewState,
+  applyPendingPanelErrorPreviewState,
+  applyModuleSwitcherOpenPreviewState,
+  applyNewAccountMultiPreviewState,
+  applyNewAccountCurrencyDropdownPreviewState,
+  applyBigAccountSelectionMultiPreviewState,
+  applyExtractOrderPreviewState,
+  applyAccountMappingEditingPreviewState
 } = window.__rendererPreviews.createRendererPreviews({
   state,
   elements,
@@ -310,17 +337,16 @@ const {
   createRememberOrderMismatchDialog,
   createAccountMappingMigrationDialog,
   closeModal,
-  openBackgroundPalette
-});
-
-const rendererPending = window.__rendererPending.createRendererPending({
-  state,
-  elements,
+  openBackgroundPalette,
+  // v2.0.0 Pending 模块 preview 所需
+  rendererPending,
+  createConfirmDialog,
+  // 后续 preview 扩展所需
+  openModuleMenu,
+  createAccountMappingDialog,
   desktopApi: window.desktopApi,
-  openModal,
-  closeModal,
-  createAlertDialog,
-  createConfirmDialog
+  applyStatementResult,
+  closeAllNewAccountCurrencyDropdowns
 });
 
 function updateStatusBox(box, message, tone = 'info', options = {}) {
@@ -3246,6 +3272,66 @@ async function initialize() {
   } else if (info.previewModal === 'account-mapping-migration-dialog') {
     setTimeout(() => {
       applyAccountMappingMigrationDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'pending-panel') {
+    setTimeout(() => {
+      applyPendingPanelPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'pending-rule-dialog') {
+    setTimeout(() => {
+      applyPendingRuleDialogPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'pending-rule-confirm') {
+    setTimeout(() => {
+      applyPendingRuleConfirmPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'pending-import-month') {
+    setTimeout(() => {
+      applyPendingImportMonthPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'pending-reconcile') {
+    setTimeout(() => {
+      applyPendingReconcilePreviewState();
+    }, 120);
+  } else if (info.previewModal === 'pending-export-runs') {
+    setTimeout(() => {
+      applyPendingExportRunsPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'pending-panel-initial') {
+    setTimeout(() => {
+      applyPendingPanelInitialPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'pending-panel-importing') {
+    setTimeout(() => {
+      applyPendingPanelImportingPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'pending-panel-error') {
+    setTimeout(() => {
+      applyPendingPanelErrorPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'module-switcher-open') {
+    setTimeout(() => {
+      applyModuleSwitcherOpenPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'new-account-multi') {
+    setTimeout(() => {
+      applyNewAccountMultiPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'new-account-currency-dropdown') {
+    setTimeout(() => {
+      applyNewAccountCurrencyDropdownPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'big-account-selection-multi') {
+    setTimeout(() => {
+      applyBigAccountSelectionMultiPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'extract-order') {
+    setTimeout(() => {
+      applyExtractOrderPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'account-mapping-editing') {
+    setTimeout(() => {
+      applyAccountMappingEditingPreviewState();
     }, 120);
   }
 
