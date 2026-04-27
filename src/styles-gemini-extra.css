@@ -774,6 +774,22 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 }
 .balance-addon-remark-cell .mapping-text-input { flex: 1; }
 
+/* Big-account-selection (array payload, manual-balance-card 复用) */
+.manual-balance-card .big-account-selection-list {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 18px 28px 8px;
+}
+.manual-balance-card .big-account-selection-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+.manual-balance-card .big-account-selection-item:hover { background: var(--bg-soft); }
+.manual-balance-card .dialog-actions.right { padding: 8px 28px 22px; }
+
 /* Alert card */
 .alert-card .alert-body {
   display: flex; gap: 16px;

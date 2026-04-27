@@ -121,7 +121,12 @@
       const fieldLabel = kind === 'detail' ? '明细' : '余额';
       dialog.className = 'modal-card alert-card export-scope-card';
       dialog.innerHTML = `
-        <div class="alert-message">请选择要导出的范围</div>
+        <div class="alert-body">
+          <div class="alert-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28"><defs><linearGradient id="exportScopeIconG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="100%" stop-color="#9B72F2"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="none" stroke="url(#exportScopeIconG)" stroke-width="2"/><path d="M12 7v6M12 16v1" stroke="url(#exportScopeIconG)" stroke-width="2" stroke-linecap="round"/></svg>
+          </div>
+          <div class="alert-message">请选择要导出的范围</div>
+        </div>
         <div class="dialog-actions vertical">
           <button class="secondary-btn small export-scope-btn" type="button" data-scope="current">导出当前批次文件的${fieldLabel}</button>
           <button class="secondary-btn small export-scope-btn" type="button" data-scope="all">导出所有批次文件的${fieldLabel}</button>
@@ -5169,7 +5174,12 @@
       const dialog = document.createElement('div');
       dialog.className = 'modal-card alert-card';
       dialog.innerHTML = `
-        <div class="alert-message">${message}</div>
+        <div class="alert-body">
+          <div class="alert-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28"><defs><linearGradient id="rememberMismatchIconG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#E95EA2"/><stop offset="100%" stop-color="#F6B93B"/></linearGradient></defs><path d="M12 3L2 20h20L12 3z" fill="none" stroke="url(#rememberMismatchIconG)" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4M12 17h.01" stroke="url(#rememberMismatchIconG)" stroke-width="2" stroke-linecap="round"/></svg>
+          </div>
+          <div class="alert-message">${message}</div>
+        </div>
         <div class="dialog-actions center">
           <button class="secondary-btn small" type="button" data-action="change-config">变更配置</button>
           <button class="primary-btn small" type="button" data-action="confirm">确认</button>
