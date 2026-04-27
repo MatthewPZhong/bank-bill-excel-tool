@@ -1674,3 +1674,85 @@ select.mapping-text-input {
   border-radius: 8px;
 }
 
+/* =================== v2.0.0-beta.2 阶段 5 增量：拆分/合并账单 picker Clear 适配 ===================
+ * Clear styles-gemini-extra.css 缺 .bill-split-merge-picker- + .bill-split-target-seq-picker- 系列
+ * 样式（line 526-619 仅有外壳 + label，没 picker 容器/面板/选项）。
+ * 补 src 实际使用的 class（参考 General styles.css:2077-2125 + 2253-2289 token）。
+ */
+.bill-split-merge-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.bill-split-merge-picker-trigger {
+  min-width: 180px;
+  height: 34px;
+}
+.bill-split-merge-picker-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 10;
+  min-width: 220px;
+  max-height: 300px;
+  overflow-y: auto;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.12);
+  padding: 8px 0;
+  margin-top: 4px;
+}
+.bill-split-merge-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+.bill-split-merge-picker-option:hover { background: var(--bg-soft); }
+.bill-split-merge-picker-option input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+.bill-split-merge-picker-empty {
+  padding: 12px 14px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.bill-split-target-seq-picker {
+  display: inline-block;
+  position: relative;
+  margin-left: 8px;
+}
+.bill-split-target-seq-trigger { white-space: nowrap; }
+.bill-split-target-seq-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.10);
+  padding: 6px 0;
+  min-width: 140px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.bill-split-target-seq-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+.bill-split-target-seq-option:hover { background: var(--bg-soft); }
+.bill-split-target-seq-option input[type="checkbox"] { accent-color: var(--primary); }
+
