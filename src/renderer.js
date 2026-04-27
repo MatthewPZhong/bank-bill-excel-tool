@@ -356,7 +356,9 @@ function updateStatusBox(box, message, tone = 'info', options = {}) {
     idleTitle = ''
   } = options;
 
-  box.textContent = message;
+  // v2.0.0-beta.2：只更新 .status-box-text 子节点的文案，保留同级 .status-spark SVG 不被清空
+  const textEl = box.querySelector('.status-box-text');
+  if (textEl) textEl.textContent = message;
   box.dataset.tone = tone;
   box.dataset.errorReportReady = errorReportReady ? 'true' : 'false';
   box.dataset.manualBalancePromptReady = manualBalancePromptReady ? 'true' : 'false';

@@ -47,9 +47,10 @@ window.__rendererPending = (function () {
     }
 
     function setPendingStatus(text) {
-      if (elements.pendingStatusBox) {
-        elements.pendingStatusBox.textContent = text;
-      }
+      if (!elements.pendingStatusBox) return;
+      // v2.0.0-beta.2：只更新 .status-box-text 子节点，保留 .status-spark SVG
+      const textEl = elements.pendingStatusBox.querySelector('.status-box-text');
+      if (textEl) textEl.textContent = text;
     }
 
     function refreshPendingUi() {
