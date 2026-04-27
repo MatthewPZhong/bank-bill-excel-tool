@@ -1334,3 +1334,142 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   overflow-y: auto;
 }
 
+/* =================== v2.0.0-beta.2 阶段 5 增量：Pending 规则对话框 Clear 适配 ===================
+ * src renderer 用 .pending-rule-dialog/.pending-rule-columns/.pending-rule-column/
+ * .pending-rule-rows/.pending-rule-field-{row,select,serial,btn} 等 class（D14
+ * 命名错位 — 设计师 .pending-rule-card/.pending-rule-body 是另一套）。
+ * 此处给 src 实际渲染的 class 加 Clear 风格规则（参考 line 868-913 的设计 token）。
+ */
+.pending-rule-dialog {
+  width: min(100%, 720px);
+  padding: 24px 28px;
+}
+.pending-dialog-title {
+  text-align: left;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 20px;
+}
+.pending-rule-columns {
+  display: flex;
+  gap: 32px;
+  justify-content: center;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+.pending-rule-column {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 280px;
+}
+.pending-rule-column-header {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+  margin-bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pending-rule-header-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--chip-bg, #eef2f6);
+  color: var(--muted);
+  font-size: 11px;
+  cursor: help;
+  user-select: none;
+  border: none;
+}
+.pending-rule-header-tip:hover { background: var(--bg-soft); }
+.pending-rule-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  align-items: center;
+}
+.pending-rule-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pending-rule-field-select {
+  width: 200px;
+  min-width: 200px;
+  max-width: 200px;
+  height: 40px;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 34px 0 14px;
+  font-size: 14px;
+  color: var(--text);
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+.pending-rule-field-serial {
+  display: inline-block;
+  width: 24px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  user-select: none;
+}
+.pending-rule-field-btn {
+  background: none;
+  border: none;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.pending-rule-field-btn:hover { text-decoration: underline; }
+.pending-rule-field-btn[data-role="remove"] { color: var(--danger); }
+/* 对账内容列：header 居中对齐到 select 中心（沿用 General 视觉约定）*/
+.pending-rule-column-aligned { align-items: flex-start; }
+.pending-rule-column-aligned .pending-rule-column-header {
+  width: 200px;
+  justify-content: center;
+}
+.pending-rule-column-aligned .pending-rule-rows { align-items: flex-start; }
+
+/* Pending 导入月份 + 对账月份选择对话框（与规则同套设计语言）*/
+.pending-import-month-dialog { width: min(100%, 420px); padding: 24px 28px; }
+.pending-import-month-picker { margin-bottom: 20px; }
+.pending-reconcile-month-select {
+  width: 100%;
+  min-width: 200px;
+  height: 40px;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 14px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+/* Pending 导出月份范围对话框 */
+.pending-export-cols {
+  width: 720px;
+  margin: 2px 0 20px 22px;
+  gap: 60px;
+  justify-content: flex-start;
+  align-items: flex-end;
+}
+.pending-export-cols .pending-rule-column { align-items: flex-start; }
+.pending-export-cols .pending-rule-column-header { margin-bottom: 4px; }
+.pending-export-cols .pending-export-month-column { flex: 0 0 120px; min-width: 0; }
+.pending-export-cols .pending-export-run-column { flex: 1 1 auto; min-width: 0; }
+
