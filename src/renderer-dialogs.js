@@ -1976,7 +1976,7 @@
                 <input class="new-account-input enum-ghost-input big-account-currency-ghost" type="text" tabindex="-1" disabled />
                 <input class="new-account-input enum-active-input big-account-currency-input" type="text" spellcheck="false" />
               </div>
-              <div class="new-account-currency-dropdown-wrap big-account-currency-dropdown-wrap" hidden>
+              <div class="new-account-currency-dropdown-wrap big-account-currency-dropdown-wrap">
                 <button class="new-account-input new-account-currency-dropdown-btn big-account-currency-dropdown-btn" type="button" aria-expanded="false"></button>
               </div>
               <label class="new-account-checkbox-label big-account-multi-label">
@@ -2058,8 +2058,10 @@
 
         function syncCurrencyMode() {
           const isMultiCurrency = multiCheckbox.checked;
-          currencyInputShell.hidden = isMultiCurrency;
-          dropdownWrap.hidden = !isMultiCurrency;
+          // v2.0.0-beta.2 阶段 5 收尾：input shell + dropdown wrap 始终并排可见，
+          // 通过 .is-inactive 视觉禁用非当前态（pointer-events:none + opacity）
+          currencyInputShell.classList.toggle('is-inactive', isMultiCurrency);
+          dropdownWrap.classList.toggle('is-inactive', !isMultiCurrency);
 
           if (!isMultiCurrency) {
             if (activeFloatingDropdown?.button === dropdownButton) {
@@ -2073,7 +2075,8 @@
         }
 
         dropdownButton.addEventListener('click', () => {
-          if (dropdownWrap.hidden) {
+          // v2.0.0-beta.2 阶段 5 收尾：dropdown 始终可见，但单币种态下不能点开
+          if (!multiCheckbox.checked) {
             return;
           }
 
