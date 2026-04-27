@@ -1117,6 +1117,9 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 /* =================== New-account · multi-row form =================== */
 .new-account-form-row + .new-account-form-row { margin-top: 14px; }
 .new-account-row-action-btn.danger { color: var(--danger, #c5221f); }
+/* v2.0.0-beta.2：行操作按钮颜色（renderer 通过 data-row-action 切换 add/delete 文案）*/
+.new-account-row-action-btn[data-row-action="add"] { color: var(--primary, #1a73e8); }
+.new-account-row-action-btn[data-row-action="delete"] { color: var(--danger, #c5221f); }
 .new-account-status-box.is-warning {
   background: #fff;
   border-color: var(--line);

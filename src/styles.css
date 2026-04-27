@@ -600,6 +600,10 @@ select {
   white-space: nowrap;
 }
 
+/* v2.0.0-beta.2：行操作按钮颜色（renderer 通过 data-row-action 切换 add/delete 文案）*/
+.new-account-row-action-btn[data-row-action="add"] { color: var(--primary, #1a73e8); }
+.new-account-row-action-btn[data-row-action="delete"] { color: var(--danger, #c5221f); }
+
 .new-account-actions-row {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
