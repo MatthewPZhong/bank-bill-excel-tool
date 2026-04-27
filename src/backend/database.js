@@ -307,6 +307,18 @@ class AppDatabase {
     return settingsRepository.setBackgroundConfig(this.db, backgroundConfig);
   }
 
+  getUiStyle() {
+    return settingsRepository.getUiStyle(this.db);
+  }
+
+  setUiStyle(style) {
+    return settingsRepository.setUiStyle(this.db, style);
+  }
+
+  ensureUiStyleDefault() {
+    return settingsRepository.ensureUiStyleDefault(this.db);
+  }
+
   listAccountMappings(templateId) {
     return settingsRepository.listAccountMappings(this.db, templateId);
   }

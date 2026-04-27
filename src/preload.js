@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
     save: (payload) => ipcRenderer.invoke('background:save', payload),
     reset: () => ipcRenderer.invoke('background:reset')
   },
+  settings: {
+    getUiStyle: () => ipcRenderer.invoke('settings:get-ui-style'),
+    setUiStyle: (style) => ipcRenderer.invoke('settings:set-ui-style', style)
+  },
   accountMappings: {
     list: (templateId) => ipcRenderer.invoke('account-mapping:list', templateId),
     save: (templateId, mappings) => ipcRenderer.invoke('account-mapping:save', templateId, mappings),

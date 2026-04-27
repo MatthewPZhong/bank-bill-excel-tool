@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.0-beta.2 - 2026-04-27（in-progress：分阶段追加，本版未发布）
+
+### 阶段 1：数据底座 + 版本号 bump
+
+- **新增 SQLite `app_settings.ui_style` 字段**：键值对存储 UI 风格（`'Clear'` | `'General'`），默认 `'Clear'`。`src/backend/database/settings-repository.js` 新增 `getUiStyle / setUiStyle / ensureUiStyleDefault`；`src/backend/database.js` facade 暴露同名方法。
+- **升级迁移 `ensureUiStyleDefault`**：`src/main.js` 在 `database.init()` 后调用，若 `ui_style` 不存在则写 `'Clear'`（D4：升级用户首次启动强制切 Clear）。
+- **新增 IPC `settings:get-ui-style` / `settings:set-ui-style`**：`src/main.js:registerAppHandlers` 注册；`app:get-info` 返回体加 `uiStyle` 字段（renderer 启动时一次拿，避免二次 IPC roundtrip）。
+- **preload 暴露 `desktopApi.settings.{getUiStyle, setUiStyle}`**：`src/preload.js` `contextBridge.exposeInMainWorld` 加 `settings` namespace。
+- **版本号 bump**：`package.json.version` `2.0.0-beta.1` → `2.0.0-beta.2`（按 PRD-v2.0.0-beta.2 §三 D12：spec 锁定后第一次 commit 时 bump）。
+
+> 阶段 2~6 内容随后续 commit 追加（HTML 重构 / CSS 双套 / UI 切换器 / dialog 适配 / preview 适配）。
+
 ## 2.0.0-beta.1 - 2026-04-23
 
 - **顶部模块切换按钮改下拉（3 选 1）**：`index.html` 的 `moduleSwitcherMenu` 追加第 3 项 `月度 Pending 数据核对`；`src/renderer.js:MODULES` 扩 `pendingReconciliation`；`setCurrentModule` 从二选改三选（按 id 查字典取 name + 三 panel 联动）。首次启动默认 `网银账单生成`，切模式不持久化（关闭重开仍默认首项）。

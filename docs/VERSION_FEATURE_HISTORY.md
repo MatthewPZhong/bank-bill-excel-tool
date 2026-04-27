@@ -9,6 +9,23 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.0.0-beta.2（in-progress）
+
+### 新增
+
+- **SQLite `app_settings.ui_style` 字段（数据底座）**：存储 UI 风格（`'Clear'` | `'General'`），默认 `'Clear'`；首次启动若不存在则自动写入（D4 升级迁移）。
+- **风格切换 IPC + preload API**：`settings:get-ui-style` / `settings:set-ui-style`；renderer 通过 `desktopApi.settings.{getUiStyle, setUiStyle}` 调用；`app:get-info` 返回体扩 `uiStyle` 字段。
+
+### 变更
+
+- **版本号 bump**：`2.0.0-beta.1` → `2.0.0-beta.2`。
+
+### 进行中（阶段 2~6）
+
+- HTML 结构对齐 Clear / 双风格 CSS 切换 / 调色板"切换风格"下拉框 + 提醒框 / dialog factory 双套适配 / preview 双风格脚本
+
+---
+
 ## 2.0.0-beta.1
 
 ### 新增

@@ -2636,9 +2636,22 @@ function registerAppHandlers() {
       currencyOptions: getAvailableCurrencyCodes(),
       backgroundConfig: buildBackgroundPayload(),
       previewModal: process.env.APP_PREVIEW_MODAL || '',
+      // v2.0.0-beta.2 F1：UI 风格（'Clear' | 'General'）；renderer 启动时立即应用
+      uiStyle: database.getUiStyle() || 'Clear',
       // v1.5.3 R2（D15）：启动时自有账号迁移失败的错误文案；null 表示无失败
       ownAccountsMigrationError: lastOwnAccountsMigrationError
     };
+  });
+  ipcMain.handle('settings:get-ui-style', () => {
+    return database.getUiStyle() || 'Clear';
+  });
+  ipcMain.handle('settings:set-ui-style', (_event, style) => {
+    try {
+      database.setUiStyle(style);
+      return { status: 'ok', uiStyle: style };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
   });
   ipcMain.handle('app:save-user-guide', async () => {
     try {
@@ -8843,6 +8856,9 @@ app.whenReady()
     database = new AppDatabase(dataPath);
     database.init();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
+
+    // v2.0.0-beta.2 F4：ui_style 升级迁移（D4）—— 若不存在则写 'Clear'
+    database.ensureUiStyleDefault();
 
     try {
       pendingDb = openPendingDb(app.getPath('userData'));
