@@ -1756,3 +1756,56 @@ select.mapping-text-input {
 .bill-split-target-seq-option:hover { background: var(--bg-soft); }
 .bill-split-target-seq-option input[type="checkbox"] { accent-color: var(--primary); }
 
+/* =================== v2.0.0-beta.2 阶段 5 增量：mapping-select + 主模板 select Clear 适配 ===================
+ * Clear styles-gemini-extra.css 全局缺 .mapping-select 样式（仅几个特定 context 局部 override），
+ * 同时映射关系管理 dialog 里勾选"设为子模板"出现的"主模板"下拉框 select 没 class，
+ * 靠 .dialog-child-parent-select-wrapper select 选中（General styles.css:2321-2329 简单
+ * font-size/padding，无边框）。Clear 都没适配 → 这些 select 裸露。
+ */
+.mapping-select {
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 30px 0 12px;
+  font-size: 13px;
+  color: var(--text);
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  cursor: pointer;
+}
+.mapping-select:focus {
+  outline: 2px solid var(--g-blue);
+  outline-offset: 1px;
+}
+
+.dialog-child-parent-select-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text);
+}
+.dialog-child-parent-select-wrapper select {
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 28px 0 10px;
+  font-size: 13px;
+  color: var(--text);
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  cursor: pointer;
+  min-width: 160px;
+}
+.dialog-child-parent-select-wrapper select:focus {
+  outline: 2px solid var(--g-blue);
+  outline-offset: 1px;
+}
+
