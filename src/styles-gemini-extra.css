@@ -1541,3 +1541,132 @@ select.mapping-text-input {
   padding: 24px 28px;
 }
 
+/* =================== v2.0.0-beta.2 阶段 5 增量：大账号选择 + 顺序提取对话框 Clear 适配 ===================
+ * D14 命名错位：设计师在 styles-gemini-extra.css 用 .ba-file-row / .ba-order-row /
+ * .extract-order-row（短名），但 src renderer 输出 .big-account-file-item /
+ * .big-account-order-item / .extract-order-item（长名）。补 alias 样式（参考已有 Clear token）。
+ */
+
+/* 文件列表项（左侧"文件顺序"）*/
+.big-account-file-list { display: flex; flex-direction: column; gap: 6px; }
+.big-account-file-item {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: transparent;
+  cursor: default;
+  font-size: 13px;
+}
+.big-account-file-item:hover { background: var(--bg-soft); }
+.big-account-file-index {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--chip-bg);
+  color: var(--muted);
+  font-size: 11px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+}
+.big-account-file-meta {
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 大账号列表项（右侧"大账号顺序"）*/
+.big-account-order-list { display: flex; flex-direction: column; gap: 6px; }
+.big-account-order-item {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.big-account-order-item:hover { background: var(--bg-soft); }
+.big-account-order-item.is-selected,
+.big-account-order-item.is-checked {
+  background: var(--chip-active-bg, #e8f0fe);
+  border-color: var(--primary, #1a73e8);
+}
+.big-account-order-index {
+  font-size: 13px; font-weight: 600;
+  color: var(--primary, #1a73e8);
+  min-width: 20px;
+}
+.big-account-order-index--alpha { color: var(--muted); }
+.big-account-order-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.big-account-order-text-item {
+  font-size: 13px; font-weight: 500;
+  color: var(--text);
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.big-account-order-empty {
+  font-size: 12px; color: var(--muted);
+  padding: 16px; text-align: center;
+}
+
+/* 大账号编辑 input + 工具条 */
+.big-account-merchant-input,
+.big-account-currency-input {
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--text);
+  font-family: "Roboto Mono", ui-monospace, monospace;
+}
+.big-account-merchant-view,
+.big-account-currency-view {
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--text);
+}
+.ba-multi-mode-checkbox { accent-color: var(--primary, #1a73e8); width: 14px; height: 14px; }
+.ba-multi-toggle-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #fff;
+  cursor: pointer;
+}
+.ba-multi-toggle-btn.is-hidden { display: none; }
+
+/* extract-order 顺序提取对话框 列表项 */
+.extract-order-list { display: flex; flex-direction: column; gap: 4px; }
+.extract-order-item {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.extract-order-item:last-child { border-bottom: none; }
+.extract-order-index {
+  font-size: 13px; font-weight: 600;
+  color: var(--primary, #1a73e8);
+  text-align: center;
+}
+.extract-order-text {
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--text);
+}
+.extract-order-btn {
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 8px;
+}
+
