@@ -1368,24 +1368,33 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   font-family: "Roboto Mono", ui-monospace, monospace;
   letter-spacing: .04em;
 }
+/* Manager-card table 列宽固定，避免编辑态/view 态切换时列位移 */
+.manager-card .data-table { table-layout: fixed; }
+.manager-card .data-table th:nth-child(1),
+.manager-card .data-table td:nth-child(1) { width: 40%; }
+.manager-card .data-table th:nth-child(2),
+.manager-card .data-table td:nth-child(2) { width: 30%; overflow: hidden; text-overflow: ellipsis; }
+
 .big-account-currency-editor {
   display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
   min-height: 44px;
 }
 .big-account-currency-input-shell {
-  position: relative; flex: 1 1 auto; min-width: 0;
+  position: relative; width: 200px; flex: 0 0 200px; min-width: 0;
 }
 .big-account-currency-ghost,
 .big-account-currency-input { width: 100%; }
 .big-account-currency-ghost {
   position: absolute; inset: 0;
   color: rgba(123, 106, 83, 0.48);
+  background: transparent;
+  border-color: transparent;
   pointer-events: none;
 }
 .big-account-currency-input {
   position: relative; background: transparent; z-index: 1;
 }
-.big-account-currency-dropdown-wrap { position: relative; width: 128px; }
+.big-account-currency-dropdown-wrap { position: relative; width: 200px; flex: 0 0 200px; }
 .big-account-currency-dropdown-btn { width: 100%; }
 .big-account-multi-label {
   display: inline-flex; align-items: center; gap: 6px;
