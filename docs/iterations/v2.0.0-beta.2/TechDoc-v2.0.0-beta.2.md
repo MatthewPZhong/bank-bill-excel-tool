@@ -279,52 +279,63 @@ function applyUiStyle(style) {
 }
 ```
 
-### 4.3 selector 隔离规则（防 General/Clear 状态泄漏）
+### 4.3 selector 隔离规则（D15 简化后）
 
-**所有写在 `src/styles.css`（General）的 selector 必须加 `body[data-style="general"]` 前缀**：
+**reverse sync 2026-04-27（D15 PRD §三）**：原方案要求两份 CSS 全量加 `body[data-style="..."]` 前缀作"双保险"。Dev 阶段 3 实施前发现：
+
+- `<link>.disabled = true` → CSS 引擎**完全跳过**该 stylesheet（不参与 cascade，不参与 selector 匹配）
+- 两份 CSS 永远只启用一份，**不会重叠**
+- 加前缀是冗余双保险，工作量大（4078 行 / 600+ selector）
+
+**最终方案（B 简化）**：
+
+#### 4.3.1 `src/styles.css`（General）
+
+直接用现有内容**不动**，**末尾追加 5-10 条 General 退化规则**（针对单 HTML 里 Clear 特有的条件渲染节点）：
 
 ```css
-/* src/styles.css（General）写法 */
-body[data-style="general"] .module-switcher-trigger {
-  background: var(--general-bg);
-  /* ... */
-}
+/* === v2.0.0-beta.2 D15: General 风格退化规则（针对 Clear 特有节点）=== */
 
-body[data-style="general"] .corner-gif {
-  width: 64px; height: 64px;
-}
-
-/* 5 类局部条件渲染节点：General 风格的退化形态 */
-body[data-style="general"] .gemini-gradient {
-  -webkit-background-clip: initial;
-  -webkit-text-fill-color: var(--text);
+/* 1. 渐变文字 reset */
+.gemini-gradient {
   background: none;
+  -webkit-background-clip: initial;
+  -webkit-text-fill-color: inherit;
+  color: inherit;
 }
-body[data-style="general"] .module-switcher-icon svg { display: none; }
-body[data-style="general"] .module-switcher-icon::before { content: "🔁"; }
-body[data-style="general"] .module-switcher-caret { display: none; }
-body[data-style="general"] .status-spark { display: none; }
+
+/* 2. status-spark SVG 隐藏（General 状态栏不要那个钻石）*/
+.status-spark { display: none; }
+
+/* 3. module-switcher caret ▾ 隐藏（General 风格没有 caret 设计）*/
+.module-switcher-caret { display: none; }
+
+/* 4. module-switcher icon SVG 隐藏 + 用 emoji ::before 替代 */
+.module-switcher-icon svg { display: none; }
+.module-switcher-icon::before { content: "🔁"; font-size: 18px; }
+
+/* 5. select-shell 透明化（让现有 .cell.center > select 规则继续生效）*/
+.select-shell { display: contents; }
 ```
 
-**Clear 风格的 selector 也加 `body[data-style="clear"]` 前缀**（防止 General 状态下偶发匹配）：
+#### 4.3.2 `src/styles-gemini.css` + `src/styles-gemini-extra.css`（Clear）
 
-```css
-/* src/styles-gemini.css（Clear）写法 —— 在拷贝 Clear/styles-gemini.css 后加前缀 */
-body[data-style="clear"] .module-switcher-trigger { /* ... */ }
-body[data-style="clear"] .gemini-gradient {
-  background: linear-gradient(...);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-body[data-style="clear"] .corner-gif {
-  width: 40px; height: 40px;
-  border-radius: 12px;
-  background: var(--chip-bg);
-  /* ... */
-}
-```
+直接拷自 `Clear/styles-gemini.css` + `Clear/styles-gemini-extra.css`，**不改动**（不加前缀）。
 
-> **建议**：拷贝 `Clear/styles-gemini.css` 到 `src/styles-gemini.css` 时用 sed/script 批量加前缀，避免人肉处理 1132 行。
+#### 4.3.3 切换机制
+
+renderer.js `applyUiStyle(style)`：
+
+| style | cssGeneral.disabled | cssClear.disabled | cssClearExtra.disabled | body.dataset.style |
+|---|---|---|---|---|
+| `'Clear'` | true | false | false | `'clear'` |
+| `'General'` | false | true | true | `'general'` |
+
+切换瞬间 < 5ms，CSS 已 preload 解析在内存。
+
+#### 4.3.4 双保险还需要吗？
+
+不需要。link.disabled 由 renderer 自己代码控制（不会被外部修改），且 CSS 引擎对 disabled stylesheet 的隔离是规范行为（W3C HTML5 § Stylesheets `disabled` IDL attribute），不存在边缘 case。如果未来发现 bug，加前缀仍可叠加（不冲突）。
 
 ---
 

@@ -88,6 +88,7 @@
 | **D12** | 版本号 bump 时机：**spec 锁定后第一次 commit 时 bump**——即 PM v1 PRD 落地后 Dev 第一次 src 改动 commit 时把 `package.json.version` `2.0.0-beta.1` → `2.0.0-beta.2`，同时按 `workflow_docs_update` 更新三件套（CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE）+ 跑 `npm run scan:vars` + `/check-vars` | 用户回复（OT-4）：方案 B | §九 实施计划 / 阶段 1 |
 | **D13** | Clear 资产清洗：集成 HTML 时**剥离 inline style="font-weight:500" + data-cc-id="cc-X"** 等设计辅助标记，只保留语义 class（class 名以 Clear 现有为基线）| 用户回复（OT-6）：清洗 inline style + data-cc-id | §F6 / §6.6 / TechDoc §五 |
 | **D14** | Clear/ 资产命名错误（如 `Clear/index.html` 实际是 Pending 导出差异弹窗）按**内容对应**（不按文件名）——PM/Dev 集成时画一张 mapping 表（Clear/<file> ↔ 现有 dialog/page），存档于本 PRD §6.6 / TechDoc §五。命名问题不阻塞 Dev，后续跟 designer 沟通 | 用户回复（OT-7）：按内容对应 | §6.6 mapping 表 |
+| **D15**（reverse sync）| **CSS 隔离机制简化**：原方案要求 `styles.css` (2617 行 / 417 selector) + `styles-gemini.css/extra.css` (1461 行) **全量加** `body[data-style="..."]` 前缀作"双保险"。Dev 阶段 3 实施前发现：`<link>.disabled` 已经实现 CSS 引擎层级的完全隔离（disabled stylesheet 不参与 cascade，与启用 stylesheet 无任何重叠），加前缀冗余。降级为：(1) 两份 CSS 都不加前缀（直接拷自 Clear/）；(2) `styles.css` 末尾追加 5-10 条 General 退化规则（仅针对条件渲染节点 `.gemini-gradient` `.status-spark` `.module-switcher-caret` `.module-switcher-icon svg` `.select-shell`）；(3) 风格切换通过 `cssGeneral.disabled / cssClear.disabled / cssClearExtra.disabled` 三状态布尔切换。工作量减少 ~80%，安全等价 | 用户回复（reverse sync 2026-04-27）：B 简化方案 | §12.3 任务 / TechDoc §4.3 重写 |
 
 ---
 
@@ -756,16 +757,18 @@ window.desktopApi.settings.setUiStyle(style)
 
 **任务**：F5 的 CSS 部分 + F7 CSS 双套
 
+> **D15 简化**：原任务 3 / 4 "全量加 body[data-style] 前缀"已废弃，降级为"styles.css 末尾追加退化规则"。详见 §三 D15。
+
 | 序号 | 任务 | 涉及文件 | 验证方式 |
 |------|------|---------|---------|
-| 1 | 拷贝 Clear/styles-gemini.css → src/styles-gemini.css | 新文件 | 文件存在 |
-| 2 | 拷贝 Clear/styles-gemini-extra.css → src/styles-gemini-extra.css | 新文件 | 文件存在 |
-| 3 | 重写 src/styles.css，所有 selector 加 `body[data-style="general"]` 前缀 | `src/styles.css` | preview:main-page (general) vs beta.1 截图 diff |
-| 4 | 在 src/styles-gemini.css 的关键 selector 加 `body[data-style="clear"]` 前缀（防 General 状态泄漏）| `src/styles-gemini.css` | preview:main-page (clear) vs Clear/main.html 视觉对比 |
+| 1 | 拷贝 Clear/styles-gemini.css → src/styles-gemini.css（**不**加前缀，直接用）| 新文件 | 文件存在 |
+| 2 | 拷贝 Clear/styles-gemini-extra.css → src/styles-gemini-extra.css（同上）| 新文件 | 文件存在 |
+| 3 | **styles.css 末尾追加 5-10 条 General 退化规则**（D15 取代原"全量加前缀"）：`.gemini-gradient` 渐变 reset / `.status-spark { display:none }` / `.module-switcher-caret { display:none }` / `.module-switcher-icon svg { display:none }` + `::before content:"🔁"` / `.select-shell { display:contents }` | `src/styles.css` | preview:main-page (general) 与 beta.1 视觉无明显差异 |
+| 4 | ~~styles-gemini.css 加前缀~~ —— **D15 废弃**，不需要 | — | — |
 | 5 | index.html `<head>` 双 link 挂载（cssGeneral 默认 disabled，cssClear / cssClearExtra 默认启用）| `index.html:11` | DOM 检查 |
-| 6 | renderer.js initialize 拿到 info.uiStyle 后调用 applyUiStyle()：切 dataset + 切 link.disabled | `src/renderer.js:2967-3010` | 手动测试 |
+| 6 | renderer.js initialize 拿到 info.uiStyle 后调用 applyUiStyle()：切 dataset + 切 3 link.disabled | `src/renderer.js`（新增 applyUiStyle）| 手动测试 |
 
-**Commit 粒度**：1~2 commits（CSS 拷贝 + selector 重写可分两步）
+**Commit 粒度**：1 commit（D15 简化后单步可完成）
 
 ### 12.4 阶段 4：UI 切换器 + 提醒框（F1 + F2）
 

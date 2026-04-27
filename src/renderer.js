@@ -69,6 +69,8 @@ const rendererStartupProfiler = {
 rendererStartupProfiler.marks.set(RENDERER_STARTUP_MARKS.scriptStart, rendererStartupProfiler.startedAt);
 
 const state = {
+  // v2.0.0-beta.2 F1：UI 风格（'Clear' | 'General'），从 SQLite app_settings.ui_style 加载
+  uiStyle: 'Clear',
   templates: [],
   // v1.5.3 R1 (T1.5)：创建网银账单模式下始终为 FILENAME_MAPPING_TEMPLATE_ID；
   // 月度余额模式下 selectedTemplateId 不参与（由弹窗内部维护）
@@ -2966,11 +2968,38 @@ async function handleNewAccountExport() {
   });
 }
 
+// v2.0.0-beta.2 F1：UI 风格切换核心（D6 / D6.1 / D15）
+// 通过 link.disabled 切换 General / Clear 两套 CSS（CSS 引擎层级隔离，零延迟）
+// 同时同步 body.dataset.style 供条件 selector / JS 状态读取
+function applyUiStyle(style) {
+  const safe = (style === 'General') ? 'General' : 'Clear';
+  state.uiStyle = safe;
+
+  const cssGeneral = document.getElementById('cssGeneral');
+  const cssClear = document.getElementById('cssClear');
+  const cssClearExtra = document.getElementById('cssClearExtra');
+  if (!cssGeneral || !cssClear || !cssClearExtra) return;
+
+  // 先启用目标 link → 再禁用旧的，避免 1 帧裸 DOM
+  if (safe === 'General') {
+    cssGeneral.disabled = false;
+    cssClear.disabled = true;
+    cssClearExtra.disabled = true;
+    document.body.dataset.style = 'general';
+  } else {
+    cssClear.disabled = false;
+    cssClearExtra.disabled = false;
+    cssGeneral.disabled = true;
+    document.body.dataset.style = 'clear';
+  }
+}
+
 async function initialize() {
   markRendererStartup(RENDERER_STARTUP_MARKS.initializeStart);
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoStart);
   const info = await window.desktopApi.app.getInfo();
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoDone);
+  applyUiStyle(info.uiStyle);
   drawBackgroundSpectrum();
   resetBackgroundPickerSelection();
   elements.appVersion.textContent = info.version;

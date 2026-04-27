@@ -2615,3 +2615,29 @@ select {
 .pending-rule-field-btn[data-role="remove"]:hover {
   background: rgba(165, 61, 48, 0.1);
 }
+
+/* === v2.0.0-beta.2 D15: General 风格退化规则 ===
+ * HTML 基线对齐 Clear（D6.1），General 风格通过本节规则 hide / reset
+ * Clear 特有的条件渲染节点。详见 PRD §三 D15 + TechDoc §4.3.1
+ */
+
+/* 1. 渐变文字 reset（Clear 用 webkit-background-clip:text 实现渐变标题）*/
+.gemini-gradient {
+  background: none;
+  -webkit-background-clip: initial;
+  -webkit-text-fill-color: inherit;
+  color: inherit;
+}
+
+/* 2. 状态栏闪光 SVG 隐藏（General 状态栏纯文本）*/
+.status-spark { display: none; }
+
+/* 3. 模块切换 caret ▾ 隐藏（General 风格无 caret 设计）*/
+.module-switcher-caret { display: none; }
+
+/* 4. 模块切换 icon：SVG 隐藏 + emoji 通过 ::before 还原 */
+.module-switcher-icon svg { display: none; }
+.module-switcher-icon::before { content: "🔁"; font-size: 18px; line-height: 1; }
+
+/* 5. select-shell 外包 div 透明化（让 .cell.center > select 父子规则继续生效）*/
+.select-shell { display: contents; }
