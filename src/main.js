@@ -1283,9 +1283,20 @@ function readTemplateBundleFile(filePath) {
   }));
 }
 
+// v2.0.0-beta.2 D16 fix（Codex PR #26 Finding 1）：默认/重置背景按当前 ui_style 取
+// Clear → #ffffff / General → #efe8da；避免新装用户 ui_style=Clear 但回退到旧版米色
+function getStyleDefaultBackgroundColor() {
+  try {
+    const uiStyle = database?.getUiStyle?.() || 'Clear';
+    return uiStyle === 'Clear' ? CLEAR_BACKGROUND_COLOR : DEFAULT_BACKGROUND_COLOR;
+  } catch (_err) {
+    return CLEAR_BACKGROUND_COLOR;
+  }
+}
+
 function normalizeBackgroundColor(colorHex) {
   const normalized = String(colorHex || '').trim().toLowerCase();
-  return /^#[0-9a-f]{6}$/.test(normalized) ? normalized : DEFAULT_BACKGROUND_COLOR;
+  return /^#[0-9a-f]{6}$/.test(normalized) ? normalized : getStyleDefaultBackgroundColor();
 }
 
 // v2.0.0-beta.2 D16：风格-背景色联动（仅"魔法值"场景，不覆盖用户自定义颜色）
@@ -2885,7 +2896,7 @@ function registerBackgroundHandlers() {
   ipcMain.handle('background:reset', () => {
     try {
       const backgroundConfig = saveBackgroundConfig({
-        colorHex: DEFAULT_BACKGROUND_COLOR,
+        colorHex: getStyleDefaultBackgroundColor(),
         keepExistingImage: false
       });
       clearLastErrorReport();
