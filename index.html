@@ -191,6 +191,16 @@
         </div>
 
         <section id="backgroundPalettePanel" class="palette-panel" hidden aria-label="背景设置">
+          <div class="palette-panel-style-row">
+            <label class="palette-style-label" for="paletteStyleSelect">切换页面风格</label>
+            <div class="palette-style-control">
+              <select id="paletteStyleSelect" class="palette-style-select">
+                <option value="Clear" selected>Clear</option>
+                <option value="General">General</option>
+              </select>
+              <button id="paletteStyleConfirmBtn" class="palette-action solid" type="button">应用</button>
+            </div>
+          </div>
           <div class="palette-panel-body">
             <div id="backgroundSpectrumArea" class="palette-spectrum-shell" aria-label="全色谱选色板">
               <canvas

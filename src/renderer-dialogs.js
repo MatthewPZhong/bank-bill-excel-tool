@@ -83,7 +83,7 @@
       return overlay;
     }
 
-    function createConfirmDialog({ message, confirmText, cancelText, onConfirm }) {
+    function createConfirmDialog({ message, confirmText, cancelText, onConfirm, onCancel }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card alert-card';
@@ -97,7 +97,10 @@
       dialog.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
         await onConfirm();
       });
-      dialog.querySelector('[data-action="cancel"]').addEventListener('click', closeModal);
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+        if (onCancel) onCancel();
+        closeModal();
+      });
       overlay.appendChild(dialog);
       return overlay;
     }

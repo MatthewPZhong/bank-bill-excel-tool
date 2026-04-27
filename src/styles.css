@@ -2641,3 +2641,49 @@ select {
 
 /* 5. select-shell 外包 div 透明化（让 .cell.center > select 父子规则继续生效）*/
 .select-shell { display: contents; }
+
+/* === v2.0.0-beta.2 F1: 调色板"切换页面风格"下拉框样式（D11 自补）=== */
+
+/* 调色板 grid 多一行：[风格切换 / body / actions]，整体高度自适应 */
+.palette-panel {
+  grid-template-rows: auto 1fr auto;
+  height: auto;
+  min-height: 6.8cm;
+}
+
+.palette-panel-style-row {
+  display: flex;
+  align-items: center;
+  gap: 0.16cm;
+  padding: 0 0.06cm;
+}
+
+.palette-style-label {
+  font-size: 12px;
+  color: var(--text, #2d2014);
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.palette-style-control {
+  display: flex;
+  align-items: center;
+  gap: 0.12cm;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.palette-style-select {
+  padding: 0.06cm 0.18cm;
+  border-radius: 0.16cm;
+  border: 1px solid rgba(104, 79, 39, 0.24);
+  background: #fff;
+  font-size: 12px;
+  color: var(--text, #2d2014);
+  cursor: pointer;
+}
+
+.palette-style-select:focus {
+  outline: 2px solid rgba(104, 79, 39, 0.32);
+  outline-offset: 1px;
+}

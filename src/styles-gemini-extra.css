@@ -1130,3 +1130,113 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 .account-mapping-editing-row .mapping-select { height: 36px; }
 .account-mapping-editing-row .text-action.is-active { color: var(--primary); font-weight: 600; }
 
+/* =================== v2.0.0-beta.2 阶段 4 临时 fallback：调色板（D11） ===================
+ * Clear 风格下调色板的完整视觉适配在阶段 5 完成。本节给最低限度可用样式，
+ * 让"切换页面风格"下拉框 + 颜色选择 + 重置/导入/完成 按钮在 Clear 风格下也能用。
+ */
+.palette-panel {
+  position: absolute;
+  left: 0;
+  bottom: calc(0.8cm + 0.16cm);
+  width: 6.8cm;
+  min-height: 6.8cm;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: 0 22px 46px rgba(0, 0, 0, 0.12);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 8px;
+  z-index: 10;
+}
+.palette-panel-style-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.palette-style-label {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  font-weight: 500;
+}
+.palette-style-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  justify-content: flex-end;
+}
+.palette-style-select {
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.palette-style-select:focus {
+  outline: 2px solid var(--g-blue);
+  outline-offset: 1px;
+}
+.palette-panel-body {
+  display: grid;
+  grid-template-columns: 1fr 32px;
+  gap: 8px;
+  min-height: 0;
+}
+.palette-spectrum-shell {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #fff;
+  cursor: crosshair;
+  min-width: 0;
+  min-height: 0;
+}
+.palette-spectrum-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.palette-selected-color-box {
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.palette-selected-color-swatch {
+  width: 100%;
+  height: 100%;
+}
+.palette-panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.palette-panel-actions-right {
+  display: flex;
+  gap: 8px;
+}
+.palette-action {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.palette-action:hover { background: #e6eaf0; }
+.palette-action.solid {
+  background: var(--g-blue);
+  color: #fff;
+  border-color: var(--g-blue);
+}
+.palette-action.solid:hover { filter: brightness(1.05); }
+.palette-action.danger-text { color: var(--danger); border-color: rgba(217, 48, 37, 0.3); }
+.palette-action.danger-text:hover { background: #fce8e6; }
+
