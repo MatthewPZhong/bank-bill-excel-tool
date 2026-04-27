@@ -1544,10 +1544,15 @@ select.mapping-text-input {
   width: min(100%, 800px);
   padding: 24px 28px;
 }
-/* 导出 + 取消按钮向下平移 + 移到右下角（覆盖 .dialog-actions.center 默认居中）*/
+/* 按钮位置对齐 Clear/pending-export-runs.html 设计稿：左下角 + 导出在左 / 取消在右
+ * （覆盖 .dialog-actions.center 默认居中 + 默认 padding/border/background）*/
 .modal-card.pending-export-dialog .dialog-actions.center {
-  justify-content: flex-end;
+  justify-content: flex-start;
   margin-top: 28px;
+  padding: 6px 28px 20px;
+  border-top: none;
+  background: transparent;
+  gap: 12px;
 }
 
 /* =================== v2.0.0-beta.2 阶段 5 增量：大账号选择 + 顺序提取对话框 Clear 适配 ===================
