@@ -1240,3 +1240,97 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 .palette-action.danger-text { color: var(--danger); border-color: rgba(217, 48, 37, 0.3); }
 .palette-action.danger-text:hover { background: #fce8e6; }
 
+/* =================== v2.0.0-beta.2 阶段 5 增量：currency dropdown Clear 适配 ===================
+ * src/renderer.js 输出的 class 名（new-account-currency-dropdown-*）和设计师
+ * 用的（currency-dropdown-menu，line 632）不一致——设计师没给 src class 出 Clear
+ * 样式。这里给 src 实际渲染的 class 加 Clear 风格规则。
+ * 覆盖：新开账户多币种下拉 + 大账号管理多币种下拉（共用同一套 class）。
+ */
+.new-account-currency-dropdown-wrap { position: relative; }
+.new-account-currency-dropdown-btn {
+  position: relative;
+  padding: 0 24px 0 10px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.new-account-currency-dropdown-btn::after {
+  content: '▾';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+.new-account-currency-dropdown-btn.is-open::after { content: '▴'; }
+.new-account-currency-dropdown-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 188px;
+  max-height: 248px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.14);
+  padding: 6px;
+  z-index: 30;
+}
+.new-account-currency-search-row {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
+}
+.new-account-currency-search-input {
+  height: 36px;
+  border-radius: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 13px;
+  color: var(--text);
+  width: 100%;
+  box-sizing: border-box;
+}
+.new-account-currency-search-input:focus {
+  outline: 2px solid var(--g-blue);
+  outline-offset: 1px;
+}
+.new-account-currency-options-list {
+  display: grid;
+  gap: 2px;
+  overflow: auto;
+  min-height: 0;
+}
+.new-account-currency-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.new-account-currency-option:hover { background: var(--bg-soft); }
+.new-account-currency-option-text {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.25;
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  letter-spacing: .04em;
+}
+.big-account-currency-dropdown-wrap { position: relative; width: 128px; }
+.big-account-currency-dropdown-btn { width: 100%; }
+.big-account-currency-floating-panel {
+  z-index: 32;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
