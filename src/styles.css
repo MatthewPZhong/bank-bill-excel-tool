@@ -219,8 +219,8 @@ select {
 }
 
 .cell.center {
-  justify-self: center;
-  display: inline-flex;
+  justify-self: stretch;
+  display: flex;
   align-items: center;
   gap: 12px;
 }
