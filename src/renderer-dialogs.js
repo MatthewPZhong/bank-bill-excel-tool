@@ -895,7 +895,7 @@
         displayRows.forEach((entry) => {
           const { row, rowIndex, covered } = entry;
           const item = document.createElement('div');
-          item.className = 'big-account-file-item';
+          item.className = 'big-account-file-item ba-file-row';
           item.dataset.rowIndex = String(rowIndex);
           if (Number.isInteger(row.fileIndex)) {
             item.dataset.fileIndex = String(row.fileIndex);
@@ -922,7 +922,7 @@
             letterSpan.textContent = letter ? `${letter}.` : '';
             if (letter) letterSpan.classList.add('big-account-order-index--alpha');
             const meta = document.createElement('span');
-            meta.className = 'big-account-file-meta';
+            meta.className = 'big-account-file-meta ba-file-name';
             meta.title = fullMeta;
             meta.textContent = displayName;
             item.append(checkbox, letterSpan, meta);
@@ -938,7 +938,7 @@
             letterSpan.className = 'big-account-order-index ba-left-letter big-account-order-index--alpha';
             letterSpan.textContent = group ? `${String.fromCharCode(97 + groupInfo.groupIndex)}.` : '';
             const meta = document.createElement('span');
-            meta.className = 'big-account-file-meta';
+            meta.className = 'big-account-file-meta ba-file-name';
             meta.title = fullMeta;
             meta.textContent = group ? `${displayName} → ${group.rightAccount.merchantId} ${group.rightAccount.currency}` : displayName;
             item.append(markerSpan, letterSpan, meta);
@@ -950,16 +950,16 @@
             letterSpan.textContent = '';
             item.innerHTML = '';
             const indexSpan = document.createElement('span');
-            indexSpan.className = 'big-account-file-index';
+            indexSpan.className = 'big-account-file-index ba-file-idx';
             indexSpan.textContent = `${uncoveredSeq}.`;
             const meta = document.createElement('span');
-            meta.className = 'big-account-file-meta';
+            meta.className = 'big-account-file-meta ba-file-name';
             meta.title = fullMeta;
             meta.textContent = escapeHtml(displayName);
             item.append(letterSpan, indexSpan, meta);
           } else {
             uncoveredSeq += 1;
-            item.innerHTML = `<span class="big-account-file-index">${uncoveredSeq}.</span><span class="big-account-file-meta" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span>`;
+            item.innerHTML = `<span class="big-account-file-index ba-file-idx">${uncoveredSeq}.</span><span class="big-account-file-meta ba-file-name" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span>`;
           }
           fileListContainer.appendChild(item);
         });
@@ -973,7 +973,7 @@
         }
         expandedOptions.forEach((option, index) => {
           const item = document.createElement('div');
-          item.className = 'big-account-order-item';
+          item.className = 'big-account-order-item ba-order-row';
           item.dataset.merchantId = option.merchantId;
           item.dataset.currency = option.currency;
           const label = `${option.merchantId} ${option.currency}`;
@@ -981,10 +981,10 @@
           checkbox.type = 'checkbox';
           checkbox.className = 'new-account-checkbox big-account-order-checkbox';
           const indexSpan = document.createElement('span');
-          indexSpan.className = 'concat-picker-index big-account-order-index';
+          indexSpan.className = 'concat-picker-index big-account-order-index ba-order-badge';
           indexSpan.textContent = '';
           const textSpan = document.createElement('span');
-          textSpan.className = 'big-account-order-text';
+          textSpan.className = 'big-account-order-text ba-order-content';
           textSpan.title = label;
           textSpan.textContent = label;
 
@@ -1306,12 +1306,12 @@
         }
         checkedOrder.forEach((item, index) => {
           const div = document.createElement('div');
-          div.className = 'big-account-order-item big-account-order-text-item';
+          div.className = 'big-account-order-item big-account-order-text-item ba-order-row';
           const indexSpan = document.createElement('span');
-          indexSpan.className = 'concat-picker-index big-account-order-index';
+          indexSpan.className = 'concat-picker-index big-account-order-index ba-order-badge';
           indexSpan.textContent = `${index + 1}.`;
           const textSpan = document.createElement('span');
-          textSpan.className = 'big-account-order-text';
+          textSpan.className = 'big-account-order-text ba-order-content';
           textSpan.textContent = `${item.merchantId} ${item.currency}`;
           div.append(indexSpan, textSpan);
           orderListContainer.appendChild(div);
@@ -1617,7 +1617,7 @@
           // v1.5.2：确认大账号顺序弹窗只显示未被"单个账号匹多个文件"映射的 block
           extractableRows.forEach((row, index) => {
             const item = document.createElement('div');
-            item.className = 'big-account-file-item';
+            item.className = 'big-account-file-item ba-file-row';
             const fullName = row.fileName || '';
             const rowSuffix = row.sourceRowNumber ? ` 第${row.sourceRowNumber}行` : '';
             const displayName = truncateFileName(fullName, 20) + rowSuffix;
@@ -1628,17 +1628,17 @@
 
           extractedAccounts.forEach((account, index) => {
             const item = document.createElement('div');
-            item.className = 'extract-order-item';
+            item.className = 'extract-order-item extract-order-row';
             item.dataset.index = index;
             item.dataset.merchantId = account.merchantId;
             item.dataset.currency = account.currency;
 
             const indexSpan = document.createElement('span');
-            indexSpan.className = 'extract-order-index';
+            indexSpan.className = 'extract-order-index eo-idx';
             indexSpan.textContent = `${index + 1}.`;
 
             const textSpan = document.createElement('span');
-            textSpan.className = 'extract-order-text';
+            textSpan.className = 'extract-order-text eo-name';
             textSpan.textContent = `${account.merchantId} ${account.currency}`;
 
             const editBtn = document.createElement('button');
