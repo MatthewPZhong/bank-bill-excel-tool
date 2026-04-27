@@ -1544,6 +1544,11 @@ select.mapping-text-input {
   width: min(100%, 800px);
   padding: 24px 28px;
 }
+/* 导出 + 取消按钮向下平移 + 移到右下角（覆盖 .dialog-actions.center 默认居中）*/
+.modal-card.pending-export-dialog .dialog-actions.center {
+  justify-content: flex-end;
+  margin-top: 28px;
+}
 
 /* =================== v2.0.0-beta.2 阶段 5 增量：大账号选择 + 顺序提取对话框 Clear 适配 ===================
  * D14 命名错位：设计师在 styles-gemini-extra.css 用 .ba-file-row / .ba-order-row /
