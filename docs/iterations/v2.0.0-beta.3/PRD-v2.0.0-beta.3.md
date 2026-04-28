@@ -750,3 +750,13 @@ state.processingResult = {  // 运行后产生
 ## 十六、实施记录
 
 （实施期间，每个阶段 PR merge 后追加一节）
+
+### 阶段 1 — 数据底座（PR #29，commit `f00b60e` + Codex P2/P3 修复 `5eb2061`，merge `2c5fba5`）
+
+- **schema 变更**：新增 `scenarios` 表（9 列 + 4 个 CHECK 约束 + UNIQUE name）；不影响现有 11 张表
+- **迁移**：`migrations.js → ensureScenariosSupport(db)` 幂等
+- **seed**：3 内置场景（PRD §7.6 完整 JSON）：调拨ReconId自提取（C1, p3, on）/ outbound Fail打标（C2, p2, on）/ 调拨ReconId From网关（C3, p1, off）
+- **repository**：`scenarios-repository.js` — list / get / create / update / delete / toggleEnabled + 校验（category / priority / enabled / name 唯一）
+- **IPC**：6 个 `scenarios:*` handler；preload 暴露 `desktopApi.scenarios`
+- **决策修正**：Codex F1 (P2) 指出"COUNT(*)===0 才 seed" 违反 D14 删除终态语义（用户删完所有场景后重启会复活）→ 改用 `app_settings.scenarios_seeded` marker 机制：marker 已存在永不再 seed；老库迁移路径（无 marker 但表有数据）仅写 marker 不重复 seed
+- **测试**：单测 14/14 + F1 边界单测 5/5（A1 全新库 seed / B1 删完后重启不复活 / C1 部分删不补齐 / D1 老库迁移 / E1 marker+空表）；`npm run smoke` 通过；`npm run check:vars` 命中 `ipcRenderer` 已自查
