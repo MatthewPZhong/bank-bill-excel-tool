@@ -821,6 +821,7 @@ function runMonthlyBalanceScenario() {
     // -----------------------------------------------------------------------
     // 场景 3（P0-5 对应）：单模板 × 2026-03 某账号仅有 2026-02-28 → 兜底
     // 中行-北京 BOC_CLIENT_2/CNY 仅有 2026-02-28
+    // v2.0.0 反转：billDate 统一为月末日（targetLastDay）；endBalance 仍是 chosen.endBalance；pickReason 仍区分 exact/fallback
     const r3 = assembleMonthlyBalance({
       templateScope: '中行-北京',
       year: 2026, month: 3,
@@ -828,8 +829,8 @@ function runMonthlyBalanceScenario() {
     });
     const bocC2CNY = r3.records.find((r) => r.merchantId === 'BOC_CLIENT_2' && r.currency === 'CNY');
     assert(bocC2CNY, '场景3 BOC_CLIENT_2/CNY 应存在');
-    assert.strictEqual(bocC2CNY.billDate, '2026-02-28', '场景3 兜底 → billDate 应为 2026-02-28');
-    assert.strictEqual(bocC2CNY.endBalance, 900.00, '场景3 endBalance 应为 900.00');
+    assert.strictEqual(bocC2CNY.billDate, '2026-03-31', '场景3 兜底 → billDate 仍为月末日 2026-03-31（v2.0.0 反转：不再用 seed 实际日期 2026-02-28）');
+    assert.strictEqual(bocC2CNY.endBalance, 900.00, '场景3 endBalance 应为 900.00（仍是 2026-02-28 那条 seed 的余额）');
     assert.strictEqual(bocC2CNY.pickReason, 'fallback');
 
     // -----------------------------------------------------------------------
@@ -888,7 +889,8 @@ function runMonthlyBalanceScenario() {
     });
     const ownInResult = r6.records.find((r) => r.merchantId === 'BOC_OWN_1');
     assert(ownInResult, '场景7 自有账号 BOC_OWN_1 应出现在 R1 records');
-    assert.strictEqual(ownInResult.billDate, '2026-03-15');
+    // v2.0.0 反转：billDate 统一为月末日 2026-03-31（不再用 seed 实际日期 2026-03-15）；endBalance 仍是 77.77
+    assert.strictEqual(ownInResult.billDate, '2026-03-31');
     assert.strictEqual(ownInResult.endBalance, 77.77);
 
     // toBalanceRows 字段对齐（模拟 balanceTemplateFields）
