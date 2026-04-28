@@ -952,3 +952,18 @@ window.desktopApi.settings.setUiStyle(style)
 - 23 条 AC（PRD §九）：F1 + F2 / F3 + F4 / F5 + F6 + F7 / Preview / 兼容 / 鲁棒；用户验证手动测试通过（包括 P0-1 ~ P0-10 + P1-1 ~ P1-5）
 - check-vars：Critical / Important-skeleton 命中 0 处；Runtime-state 命中 2 处（`state.uiStyle` 字段新增 + `elements.paletteStyleSelect/Btn` 新增）；Risk-sensitive 命中 1 处（`ensureUiStyleDefault` schema migration，幂等 + init 后调用 ✓）
 - 三件套文档同步更新（CHANGELOG.md / docs/VERSION_FEATURE_HISTORY.md / docs/USER_GUIDE.md §二「页面风格」）
+
+### 附加：PR #27 — 启动恢复上次使用模块（commit `c800faf` + Codex P3 修复 `3a1e3c9`，merge `ebd5f26`）
+
+不在 PRD 原 6 阶段范围内的小功能增量，归在本节备查：
+
+- 复用 `uiStyle` 持久化模板：`app_settings.current_module` key/value + IPC `settings:set-current-module` + renderer 启动 apply
+- 5 个 src 文件 +60/-3：`settings-repository.js` / `database.js` / `main.js` / `preload.js` / `renderer.js`
+- 关键决策：
+  - D1 — 不开新表 / 不改 schema / 不加用户开关；1:1 复用 uiStyle 套路
+  - D2 — 切换时 fire-and-forget 写库，写库失败仅 `console.warn`
+  - D3 — 启动恢复三道兜底：DB null/非法 → main 端 `|| 'statement-generator'` → renderer 二次校验合法值 → 默认
+  - D4 — `setCurrentModule` 加 `{ persist=true }` 第二参数；启动恢复处显式 `{ persist: false }` 避免回写自身
+- check-vars：Important-skeleton 命中 2（`settingsRepository` / `ipcRenderer`）；Runtime-state 命中 2（`state` / `MODULES` / `setCurrentModule`），全部已自查通过；无升格候选
+- 测试：`npm run smoke` / `preview` / `preview:account` 全 pass；后端单元验证（in-memory SQLite）；用户手动验证「切模块 → 重启 → 自动恢复」通过
+- Codex review：2 个 P3（草稿 URL 占位 + tasks.md 全标 todo）已修复
