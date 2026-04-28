@@ -425,7 +425,7 @@ for 行 in 银行对账单:
 ```
 function runScenarios(bankRows, gwRows | null, scenarios):
     enabledScenarios = scenarios.filter(s => s.enabled)
-    sortedScenarios = enabledScenarios.sort((a, b) => 
+    sortedScenarios = enabledScenarios.sort((a, b) =>
         b.priority - a.priority || a.id - b.id  // 优先级 desc + 序号 asc
     )
 
@@ -670,22 +670,24 @@ state.processingResult = {  // 运行后产生
 
 ## 十二、实施计划
 
-按"一阶段一 PR"节奏：
+按方案 B 切分（用户确认 2026-04-28）：阶段保留 8 个内部里程碑，但 PR 合并为 4 个。
 
-| 阶段 | PR | 内容 | 工作量 |
-|---|---|---|---|
-| **阶段 1** | PR #29 | 数据底座：`scenarios` 表 schema + migrations + seed 3 内置 + scenariosRepository CRUD + IPC | 1-2 天 |
-| **阶段 2** | PR #30 | 模块入口：MODULES 加新成员 + 模块面板 fork + 模块持久化 setting 追加合法值 | 0.5 天 |
-| **阶段 3** | PR #31 | 场景管理弹窗 + 类别选择弹窗（不含 3 类配置弹窗） | 1 天 |
-| **阶段 4** | PR #32 | C1 配置弹窗 + C1 算法引擎 + 单元测试 | 2 天 |
-| **阶段 5** | PR #33 | C2 配置弹窗 + C2 算法引擎 + 单元测试 | 2 天 |
-| **阶段 6** | PR #34 | C3 配置弹窗 + 资金对账文件二次导入 + C3 算法引擎 + 单元测试 | 2 天 |
-| **阶段 7** | PR #35 | 调度引擎（first-match-wins 全局调度）+ 标黄输出 + 仅导修改行 + 导出文件 IPC | 2 天 |
-| **阶段 8** | PR #36 | 端到端 + smoke 集成测试 + 用户样例文件回归 + 文档同步（CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE）+ 版本号 bump 到 `2.0.0-beta.3` | 1-2 天 |
+| 阶段 | PR | 内容 | 工作量 | 状态 |
+|---|---|---|---|---|
+| **阶段 1** | PR #29 | 数据底座：`scenarios` 表 schema + migrations + seed 3 内置 + scenariosRepository CRUD + 6 IPC + preload | 1-2 天 | ✅ 已开 PR |
+| **阶段 2+3** | PR #30 | 模块入口：MODULES 加新成员 + 模块面板 fork + 模块持久化合法值追加 + 场景管理弹窗 + 类别选择弹窗（不含 3 类配置弹窗） | 1.5 天 | ⏳ 待启动 |
+| **阶段 4+5+6** | PR #31 | C1 / C2 / C3 配置弹窗（同质 UI 框架）+ 3 类算法引擎 + 资金对账文件二次导入 + 单元测试 | 6 天 | ⏳ 待启动 |
+| **阶段 7+8** | PR #32 | 调度引擎（first-match-wins）+ 标黄输出 + 仅导修改行 + 导出文件 IPC + E2E 集成测试 + 用户样例文件回归 + 文档三件套（CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE）+ 版本号 bump 到 `2.0.0-beta.3` | 3-4 天 | ⏳ 待启动 |
 
-**总工作量**：约 11-15 天（按 8 个 PR）。
+**总工作量**：约 11-15 天（4 个 PR）。
 
-每阶段 PR 都跑 check-vars + smoke + preview。
+每个 PR 都跑 check-vars + smoke + preview；最后一个 PR 还要跑 v1.5.3 回归脚本。
+
+### 方案 B 合并理由
+
+- **2+3 合并**：模块面板 fork + 场景管理 UI 同质，分 PR 反而割裂；体量小（~1.5 天）
+- **4+5+6 合并**：3 类配置弹窗的 UI 框架（场景名 / 优先级 / 多行配置 / "确认场景详情"预览）一致；分 PR 反而要维护 3 套相似但不同步的弹窗框架
+- **7+8 合并**：阶段 7 的输出格式直接决定 E2E 验证，分 PR 后阶段 8 90% 工作要回头看阶段 7 的输出
 
 ---
 
@@ -748,4 +750,3 @@ state.processingResult = {  // 运行后产生
 ## 十六、实施记录
 
 （实施期间，每个阶段 PR merge 后追加一节）
-

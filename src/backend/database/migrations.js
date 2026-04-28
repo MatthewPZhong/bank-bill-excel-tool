@@ -381,6 +381,11 @@ const BUILTIN_SCENARIOS = [
   }
 ];
 
+// seed 标记 key（落在 app_settings 表）
+// 一旦 seed 过 → marker=true → 此后永不重复 seed，即使用户把所有内置场景删光
+// 这是 D14 "内置场景可删除" 的语义保障：删除是终态，重启不会复活
+const SCENARIOS_SEEDED_MARKER = 'scenarios_seeded';
+
 function ensureScenariosSupport(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS scenarios (
@@ -397,32 +402,57 @@ function ensureScenariosSupport(db) {
     );
   `);
 
+  // 1. marker 已存在 → 已 seed 过，无论当前表是否为空都不再 seed（D14 删除终态保护）
+  const markerRow = db
+    .prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?')
+    .get(SCENARIOS_SEEDED_MARKER);
+  if (markerRow && String(markerRow.setting_value) === 'true') {
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const writeMarker = () => {
+    db.prepare(`
+      INSERT INTO app_settings (setting_key, setting_value, updated_at)
+      VALUES (?, 'true', ?)
+      ON CONFLICT(setting_key) DO UPDATE
+      SET setting_value = excluded.setting_value,
+          updated_at = excluded.updated_at
+    `).run(SCENARIOS_SEEDED_MARKER, now);
+  };
+
+  // 2. marker 不存在但表已有数据 → 老库迁移路径（无 marker 时已被早期版本 seed 过）
+  //    仅写 marker 防止后续误判，不重复 seed
   const countRow = db.prepare('SELECT COUNT(*) AS cnt FROM scenarios').get();
-  if (countRow && Number(countRow.cnt) === 0) {
-    const now = new Date().toISOString();
-    const insert = db.prepare(`
-      INSERT INTO scenarios (category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    db.exec('BEGIN');
-    try {
-      BUILTIN_SCENARIOS.forEach((scenario) => {
-        insert.run(
-          scenario.category,
-          scenario.name,
-          scenario.priority,
-          scenario.enabled,
-          JSON.stringify(scenario.config),
-          scenario.is_builtin,
-          now,
-          now
-        );
-      });
-      db.exec('COMMIT');
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
-    }
+  if (countRow && Number(countRow.cnt) > 0) {
+    writeMarker();
+    return;
+  }
+
+  // 3. marker 不存在且表为空 → 全新库，seed 3 内置场景 + 写 marker
+  const insert = db.prepare(`
+    INSERT INTO scenarios (category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  db.exec('BEGIN');
+  try {
+    BUILTIN_SCENARIOS.forEach((scenario) => {
+      insert.run(
+        scenario.category,
+        scenario.name,
+        scenario.priority,
+        scenario.enabled,
+        JSON.stringify(scenario.config),
+        scenario.is_builtin,
+        now,
+        now
+      );
+    });
+    writeMarker();
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
   }
 }
 
