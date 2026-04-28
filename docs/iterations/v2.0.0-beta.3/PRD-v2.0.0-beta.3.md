@@ -761,3 +761,20 @@ state.processingResult = {  // 运行后产生
 - **IPC**：6 个 `scenarios:*` handler；preload 暴露 `desktopApi.scenarios`
 - **决策修正**：Codex F1 (P2) 指出"COUNT(*)===0 才 seed" 违反 D14 删除终态语义（用户删完所有场景后重启会复活）→ 改用 `app_settings.scenarios_seeded` marker 机制：marker 已存在永不再 seed；老库迁移路径（无 marker 但表有数据）仅写 marker 不重复 seed
 - **测试**：单测 14/14 + F1 边界单测 5/5（A1 全新库 seed / B1 删完后重启不复活 / C1 部分删不补齐 / D1 老库迁移 / E1 marker+空表）；`npm run smoke` 通过；`npm run check:vars` 命中 `ipcRenderer` 已自查
+
+### 阶段 2+3 — 模块入口 + 场景管理弹窗（PR #30，commit `c597bcf` + Codex P3 修复 `81adf88`，merge `9e131a2`）
+
+- **模块入口（阶段 2）**：
+  - `index.html` 加第 4 个 module-option `bank-statement-process` + 新 panel `bankStatementModulePanel` fork `pendingModulePanel`（4 按钮 + statusBox）
+  - `renderer.js` `MODULES.bankStatementProcess` + 5 个新 elements + `setCurrentModule` 切换分支 + 4 按钮 binding（"导入文件"/"开始运行"/"导出文件" 占位 alert）
+  - `settings-repository.js` `CURRENT_MODULE_VALID` 追加 `'bank-statement-process'`（PR #27 持久化链路对齐）
+- **场景管理弹窗（阶段 3）**：
+  - `renderer-dialogs.js` 新增 `createScenariosManagerDialog`（6 列：序号/类别/名称/优先级/操作/启动）+ `createScenarioCategorySelectDialog`（类别选择，3 枚举单选）
+  - 编辑模式两段式锁（D5）：默认"编辑/查看场景/删除" → 点编辑解锁 → "完成/修改场景/删除"
+  - toggle 启用即时写库（D13），失败回滚 + 刷新
+  - 删除走 createConfirmDialog；内置场景与用户场景同等（D14）
+  - 占位 alert：查看/修改场景 + 类别选择"继续" 提示"将在 v2.0.0-beta.3 阶段 4-6 启用"
+- **CSS**：双风格（`styles.css` + `styles-gemini-extra.css`）各加 +96 行 — 6 列布局（fixed table-layout）+ `.is-editing` 状态高亮 + 类别选择弹窗
+- **Preview**：3 张新 preview state（`bank-statement-panel` / `scenarios-manager` / `scenario-category-select`）+ 主入口分发
+- **测试**：`npm run smoke` 通过；`npm run preview` + 3 张新 modal preview 渲染正常；`npm run check:vars` 命中 3 个 Runtime-state（`MODULES`/`dialog`/`elements`）已自查
+- **Codex 修正**：F1 (P3) tasks.md todo→done；F2 (P3) PRD §6.5 + §8.1 同步 marker 机制描述（与 PR #29 实现对齐）
