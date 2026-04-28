@@ -8,6 +8,7 @@ const {
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
+  ensureScenariosSupport,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,
@@ -15,6 +16,7 @@ const {
   ensureTemplateMappingEnhancements,
   hasColumn
 } = require('./database/migrations');
+const scenariosRepository = require('./database/scenarios-repository');
 const settingsRepository = require('./database/settings-repository');
 const templateRepository = require('./database/template-repository');
 
@@ -105,6 +107,7 @@ class AppDatabase {
     this.ensureTemplateFilenameFixedFieldSupport();
     this.ensureAccountMappingTemplateSupport();
     this.ensureTemplateBigAccountNatureSupport();
+    this.ensureScenariosSupport();
   }
 
   hasColumn(tableName, columnName) {
@@ -338,6 +341,35 @@ class AppDatabase {
 
   saveAccountMappings(templateId, mappings) {
     return settingsRepository.saveAccountMappings(this.db, templateId, mappings);
+  }
+
+  // v2.0.0-beta.3：场景 CRUD（银行对账单处理模块）
+  ensureScenariosSupport() {
+    return ensureScenariosSupport(this.db);
+  }
+
+  listScenarios() {
+    return scenariosRepository.listScenarios(this.db);
+  }
+
+  getScenario(id) {
+    return scenariosRepository.getScenario(this.db, id);
+  }
+
+  createScenario(payload) {
+    return scenariosRepository.createScenario(this.db, payload);
+  }
+
+  updateScenario(id, fields) {
+    return scenariosRepository.updateScenario(this.db, id, fields);
+  }
+
+  deleteScenario(id) {
+    return scenariosRepository.deleteScenario(this.db, id);
+  }
+
+  toggleScenarioEnabled(id, enabled) {
+    return scenariosRepository.toggleScenarioEnabled(this.db, id, enabled);
   }
 }
 

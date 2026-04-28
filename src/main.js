@@ -2693,6 +2693,57 @@ function registerAppHandlers() {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
   });
+  // v2.0.0-beta.3：银行对账单处理模块 — 场景 CRUD IPC
+  ipcMain.handle('scenarios:list', () => {
+    try {
+      return { status: 'ok', scenarios: database.listScenarios() };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  ipcMain.handle('scenarios:get', (_event, id) => {
+    try {
+      const scenario = database.getScenario(id);
+      if (!scenario) {
+        return { status: 'failed', message: `场景 id=${id} 不存在` };
+      }
+      return { status: 'ok', scenario };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  ipcMain.handle('scenarios:create', (_event, payload) => {
+    try {
+      const result = database.createScenario(payload);
+      return { status: 'ok', id: result.id };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  ipcMain.handle('scenarios:update', (_event, id, fields) => {
+    try {
+      database.updateScenario(id, fields);
+      return { status: 'ok', id };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  ipcMain.handle('scenarios:delete', (_event, id) => {
+    try {
+      const result = database.deleteScenario(id);
+      return { status: 'ok', id, deleted: result.deleted };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  ipcMain.handle('scenarios:toggle-enabled', (_event, id, enabled) => {
+    try {
+      const result = database.toggleScenarioEnabled(id, enabled);
+      return { status: 'ok', id, enabled: result.enabled };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
   ipcMain.handle('app:save-user-guide', async () => {
     try {
       const result = await dialog.showSaveDialog(mainWindow, {

@@ -967,3 +967,18 @@ window.desktopApi.settings.setUiStyle(style)
 - check-vars：Important-skeleton 命中 2（`settingsRepository` / `ipcRenderer`）；Runtime-state 命中 2（`state` / `MODULES` / `setCurrentModule`），全部已自查通过；无升格候选
 - 测试：`npm run smoke` / `preview` / `preview:account` 全 pass；后端单元验证（in-memory SQLite）；用户手动验证「切模块 → 重启 → 自动恢复」通过
 - Codex review：2 个 P3（草稿 URL 占位 + tasks.md 全标 todo）已修复
+
+### 附加：PR #28 — 主页面标题黑色 + 月度余额日期统一月末（commit `5063c3b` + Codex P2/P3 修复 `a555f9f`，merge `52f65f4`）
+
+v2.0.0-beta.3 大迭代（T2 银行对账单处理新模块）启动前的两个独立小改动，按 PR 切分方案 A 抽出来打小 PR：
+
+- **T1**：`index.html` 主标题在 Clear 风格下从 4 色渐变改为纯黑色（`styles-gemini.css` 单点改 `.gemini-gradient`）
+- **T3**：`assembleMonthlyBalance` 输出的 `records.billDate` 统一为目标月末日（`targetLastDay`），不再用 seed 实际记录日
+
+⚠️ **资金红线反转**：T3 反转 v1.5.3 R1 (T1.4) PRD §5.1.3 Q2 决策——
+- 旧：billDate 用 seed 实际记录日
+- 新：billDate 统一月末日；endBalance 仍取 seed 实际余额值；pickReason 仍区分 'exact' / 'fallback' 用于 stats
+
+测试：smoke 场景 3 (P0-5) + 场景 7 (P0-11) 同步反转期望值；v1.5.3 回归脚本 P0-5 同步反转（Codex F1 P2）；P0 31/31 通过
+
+变更目录：`changes/v2.0.0-pre-beta3-quickwin/`（spec.md / tasks.md / log.md）

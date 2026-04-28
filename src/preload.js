@@ -19,6 +19,15 @@ contextBridge.exposeInMainWorld('desktopApi', {
     setUiStyle: (style) => ipcRenderer.invoke('settings:set-ui-style', style),
     setCurrentModule: (moduleId) => ipcRenderer.invoke('settings:set-current-module', moduleId)
   },
+  // v2.0.0-beta.3：银行对账单处理模块 — 场景 CRUD
+  scenarios: {
+    list: () => ipcRenderer.invoke('scenarios:list'),
+    get: (id) => ipcRenderer.invoke('scenarios:get', id),
+    create: (payload) => ipcRenderer.invoke('scenarios:create', payload),
+    update: (id, fields) => ipcRenderer.invoke('scenarios:update', id, fields),
+    deleteOne: (id) => ipcRenderer.invoke('scenarios:delete', id),
+    toggleEnabled: (id, enabled) => ipcRenderer.invoke('scenarios:toggle-enabled', id, enabled)
+  },
   accountMappings: {
     list: (templateId) => ipcRenderer.invoke('account-mapping:list', templateId),
     save: (templateId, mappings) => ipcRenderer.invoke('account-mapping:save', templateId, mappings),
