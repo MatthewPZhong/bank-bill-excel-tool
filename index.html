@@ -41,6 +41,7 @@
               <button class="module-option is-active" type="button" data-module="statement-generator">网银账单生成</button>
               <button class="module-option" type="button" data-module="new-account-generator">新开账户余额账单生成</button>
               <button class="module-option" type="button" data-module="pending-reconciliation">月度 Pending 数据核对</button>
+              <button class="module-option" type="button" data-module="bank-statement-process">银行对账单处理</button>
             </div>
           </div>
 
@@ -176,6 +177,33 @@
                     <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusPending" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusPending)"/></svg>
                   </span>
                   <span class="status-box-text">初次使用请确认用来筛选的字段~</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section id="bankStatementModulePanel" class="control-board module-panel bank-statement-board" hidden>
+            <div class="control-row">
+              <div class="cell left">
+                <button id="bankStatementScenarioBtn" class="secondary-btn" type="button">场景管理</button>
+              </div>
+              <div class="cell right">
+                <div class="pending-action-pair">
+                  <button id="bankStatementImportBtn" class="primary-btn" type="button">导入文件</button>
+                  <button id="bankStatementRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
+                </div>
+              </div>
+            </div>
+            <div class="control-row">
+              <div class="cell left">
+                <button id="bankStatementExportBtn" class="secondary-btn" type="button" disabled>导出文件</button>
+              </div>
+              <div class="cell right">
+                <div id="bankStatementStatusBox" class="status-box">
+                  <span class="status-spark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusBankStatement" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusBankStatement)"/></svg>
+                  </span>
+                  <span class="status-box-text">请先点击导入文件，选择银行对账单</span>
                 </div>
               </div>
             </div>

@@ -91,7 +91,8 @@ const CURRENT_MODULE_KEY = 'current_module';
 const CURRENT_MODULE_VALID = [
   'statement-generator',
   'new-account-generator',
-  'pending-reconciliation'
+  'pending-reconciliation',
+  'bank-statement-process'
 ];
 const CURRENT_MODULE_DEFAULT = 'statement-generator';
 

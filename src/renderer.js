@@ -48,6 +48,10 @@ const MODULES = Object.freeze({
   pendingReconciliation: {
     id: 'pending-reconciliation',
     name: '月度 Pending 数据核对'
+  },
+  bankStatementProcess: {
+    id: 'bank-statement-process',
+    name: '银行对账单处理'
   }
 });
 const RENDERER_STARTUP_MARKS = Object.freeze({
@@ -207,6 +211,12 @@ const elements = {
   pendingRunBtn: document.getElementById('pendingRunBtn'),
   pendingExportBtn: document.getElementById('pendingExportBtn'),
   pendingStatusBox: document.getElementById('pendingStatusBox'),
+  bankStatementModulePanel: document.getElementById('bankStatementModulePanel'),
+  bankStatementScenarioBtn: document.getElementById('bankStatementScenarioBtn'),
+  bankStatementImportBtn: document.getElementById('bankStatementImportBtn'),
+  bankStatementRunBtn: document.getElementById('bankStatementRunBtn'),
+  bankStatementExportBtn: document.getElementById('bankStatementExportBtn'),
+  bankStatementStatusBox: document.getElementById('bankStatementStatusBox'),
   backgroundTool: document.getElementById('backgroundTool'),
   backgroundPaletteBtn: document.getElementById('backgroundPaletteBtn'),
   saveUserGuideBtn: document.getElementById('saveUserGuideBtn'),
@@ -242,7 +252,10 @@ const {
   createAmountSplitRulesDialog,
   createBillSplitRowsDialog,
   createBillSplitMappingsDialog,
-  createBalanceAddonManagerDialog
+  createBalanceAddonManagerDialog,
+  // v2.0.0-beta.3：银行对账单处理模块场景管理
+  createScenariosManagerDialog,
+  createScenarioCategorySelectDialog
 } = window.__rendererDialogs.createRendererDialogs({
   state,
   elements,
@@ -304,7 +317,11 @@ const {
   applyNewAccountCurrencyDropdownPreviewState,
   applyBigAccountSelectionMultiPreviewState,
   applyExtractOrderPreviewState,
-  applyAccountMappingEditingPreviewState
+  applyAccountMappingEditingPreviewState,
+  // v2.0.0-beta.3：银行对账单处理模块 preview（3 张）
+  applyBankStatementPanelPreviewState,
+  applyScenariosManagerPreviewState,
+  applyScenarioCategorySelectPreviewState
 } = window.__rendererPreviews.createRendererPreviews({
   state,
   elements,
@@ -1140,6 +1157,9 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
   elements.newAccountModulePanel.hidden = moduleId !== MODULES.newAccountGenerator.id;
   if (elements.pendingModulePanel) {
     elements.pendingModulePanel.hidden = moduleId !== MODULES.pendingReconciliation.id;
+  }
+  if (elements.bankStatementModulePanel) {
+    elements.bankStatementModulePanel.hidden = moduleId !== MODULES.bankStatementProcess.id;
   }
 
   Array.from(elements.moduleSwitcherMenu.querySelectorAll('.module-option')).forEach((button) => {
@@ -3125,6 +3145,19 @@ async function initialize() {
   elements.exportBalanceBtn.addEventListener('click', handleExportBalance);
   elements.newAccountGenerateBtn.addEventListener('click', handleNewAccountGenerate);
   elements.newAccountExportBtn.addEventListener('click', handleNewAccountExport);
+  // v2.0.0-beta.3：银行对账单处理模块按钮 binding
+  elements.bankStatementScenarioBtn.addEventListener('click', () => {
+    openModal(createScenariosManagerDialog());
+  });
+  elements.bankStatementImportBtn.addEventListener('click', () => {
+    openModal(createAlertDialog('「导入文件」功能将在 v2.0.0-beta.3 阶段 7 启用'));
+  });
+  elements.bankStatementRunBtn.addEventListener('click', () => {
+    openModal(createAlertDialog('「开始运行」功能将在 v2.0.0-beta.3 阶段 7 启用'));
+  });
+  elements.bankStatementExportBtn.addEventListener('click', () => {
+    openModal(createAlertDialog('「导出文件」功能将在 v2.0.0-beta.3 阶段 7 启用'));
+  });
   elements.statusBox.addEventListener('click', () => {
     if (state.manualBalancePromptReady && state.manualBalancePrompt) {
       openModal(createManualBalanceSeedDialog(state.manualBalancePrompt));
@@ -3439,6 +3472,18 @@ async function initialize() {
   } else if (info.previewModal === 'account-mapping-editing') {
     setTimeout(() => {
       applyAccountMappingEditingPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'bank-statement-panel') {
+    setTimeout(() => {
+      applyBankStatementPanelPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenarios-manager') {
+    setTimeout(() => {
+      applyScenariosManagerPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenario-category-select') {
+    setTimeout(() => {
+      applyScenarioCategorySelectPreviewState();
     }, 120);
   }
 

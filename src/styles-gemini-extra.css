@@ -1860,3 +1860,99 @@ select.mapping-text-input {
   outline: 2px solid var(--g-blue);
   outline-offset: 1px;
 }
+
+/* === v2.0.0-beta.3：银行对账单处理模块 — 场景管理（Clear 风格） === */
+
+.scenarios-manager-card {
+  width: min(96vw, 1140px);
+}
+
+.scenarios-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.scenarios-table .scenarios-col-id {
+  width: 7%;
+  text-align: center;
+}
+
+.scenarios-table .scenarios-col-category {
+  width: 22%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenarios-table .scenarios-col-name {
+  width: 20%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scenarios-table .scenarios-col-priority {
+  width: 8%;
+  text-align: center;
+}
+
+.scenarios-table .scenarios-col-actions {
+  width: 30%;
+  white-space: nowrap;
+}
+
+.scenarios-table tbody .scenarios-col-actions .text-action {
+  display: inline-block;
+  margin-right: 14px;
+}
+
+.scenarios-table tbody .scenarios-col-actions .text-action:last-child {
+  margin-right: 0;
+}
+
+.scenarios-table .scenarios-col-enabled {
+  width: 13%;
+  text-align: center;
+}
+
+.scenarios-table tbody tr.is-editing {
+  background: rgba(66, 133, 244, 0.06);
+}
+
+.scenarios-table tbody tr.is-editing td {
+  border-bottom-color: rgba(66, 133, 244, 0.32);
+}
+
+.scenarios-manager-footer {
+  padding-top: 12px;
+}
+
+/* 类别选择弹窗 */
+.scenario-category-select-card {
+  width: min(94vw, 480px);
+}
+
+.scenario-category-body {
+  padding: 24px 24px 12px;
+}
+
+.scenario-category-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.scenario-category-label {
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.scenario-category-select {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid rgba(104, 79, 39, 0.24);
+  border-radius: 6px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 14px;
+}

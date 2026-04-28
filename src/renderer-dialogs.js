@@ -5294,6 +5294,211 @@
       return overlay;
     }
 
+    // v2.0.0-beta.3：银行对账单处理模块 — 场景管理弹窗
+    // 6 列表格：序号 / 功能类别 / 场景名称 / 优先级 / 执行操作 / 是否启动
+    // 编辑模式两段式锁（D5）：编辑→完成 切换；查看场景→修改场景 切换
+    // 内置场景与用户场景同等地位（D14）：可删除可编辑
+    const SCENARIO_CATEGORY_LABELS = {
+      'extract-recon-id': '提取ReconId',
+      'offset-bill-mark': '冲销账单打标',
+      'gateway-recon-join': '根据资金对账不平结果提取ReconId'
+    };
+
+    function getCategoryLabel(category) {
+      return SCENARIO_CATEGORY_LABELS[category] || category;
+    }
+
+    async function loadScenariosOrAlert() {
+      const result = await desktopApi.scenarios.list();
+      if (result && result.status === 'ok') {
+        return Array.isArray(result.scenarios) ? result.scenarios : [];
+      }
+      openModal(createAlertDialog(`加载场景列表失败：${result?.message || '未知错误'}`));
+      return null;
+    }
+
+    function createScenariosManagerDialog() {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manager-card scenarios-manager-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">场景管理</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table scenarios-table">
+            <thead>
+              <tr>
+                <th class="scenarios-col-id">序号</th>
+                <th class="scenarios-col-category">功能类别</th>
+                <th class="scenarios-col-name">场景名称</th>
+                <th class="scenarios-col-priority">优先级</th>
+                <th class="scenarios-col-actions">执行操作</th>
+                <th class="scenarios-col-enabled">是否启动</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="dialog-actions left scenarios-manager-footer">
+          <button class="primary-btn small" type="button" data-action="add-scenario">新增场景</button>
+        </div>
+      `;
+
+      const tbody = dialog.querySelector('tbody');
+
+      function renderRow(scenario) {
+        const tr = document.createElement('tr');
+        tr.dataset.id = String(scenario.id);
+        tr.dataset.category = scenario.category;
+        tr.innerHTML = `
+          <td class="scenarios-col-id">${escapeHtml(String(scenario.id))}</td>
+          <td class="scenarios-col-category">${escapeHtml(getCategoryLabel(scenario.category))}</td>
+          <td class="scenarios-col-name">${escapeHtml(scenario.name)}</td>
+          <td class="scenarios-col-priority">${escapeHtml(String(scenario.priority))}</td>
+          <td class="scenarios-col-actions">
+            <button class="text-action" type="button" data-row-action="toggle-edit">编辑</button>
+            <button class="text-action" type="button" data-row-action="view-or-modify">查看场景</button>
+            <button class="text-action danger-text" type="button" data-row-action="delete">删除</button>
+          </td>
+          <td class="scenarios-col-enabled">
+            <input type="checkbox" data-row-action="toggle-enabled" ${scenario.enabled ? 'checked' : ''} />
+          </td>
+        `;
+        return tr;
+      }
+
+      async function refreshTable() {
+        const scenarios = await loadScenariosOrAlert();
+        if (scenarios === null) return;
+        tbody.innerHTML = '';
+        scenarios.forEach((scenario) => {
+          tbody.appendChild(renderRow(scenario));
+        });
+      }
+
+      // 委托：单一 click handler 处理 tbody 内所有 row-action
+      tbody.addEventListener('click', async (event) => {
+        const button = event.target.closest('[data-row-action]');
+        if (!button) return;
+        const tr = button.closest('tr');
+        if (!tr) return;
+        const id = Number(tr.dataset.id);
+        const action = button.dataset.rowAction;
+
+        if (action === 'toggle-edit') {
+          const isEditing = tr.classList.toggle('is-editing');
+          button.textContent = isEditing ? '完成' : '编辑';
+          const viewModifyBtn = tr.querySelector('[data-row-action="view-or-modify"]');
+          if (viewModifyBtn) {
+            viewModifyBtn.textContent = isEditing ? '修改场景' : '查看场景';
+          }
+          return;
+        }
+
+        if (action === 'view-or-modify') {
+          const isEditing = tr.classList.contains('is-editing');
+          openModal(createAlertDialog(
+            isEditing
+              ? '「修改场景」深度配置弹窗将在 v2.0.0-beta.3 阶段 4-6 启用'
+              : '「查看场景」详情弹窗将在 v2.0.0-beta.3 阶段 4-6 启用'
+          ));
+          return;
+        }
+
+        if (action === 'delete') {
+          const name = tr.querySelector('.scenarios-col-name')?.textContent || '';
+          openModal(createConfirmDialog({
+            message: `确认删除场景「${name}」？此操作不可撤销。`,
+            confirmText: '删除',
+            cancelText: '取消',
+            onConfirm: async () => {
+              const result = await desktopApi.scenarios.deleteOne(id);
+              if (result && result.status === 'ok') {
+                openModal(createScenariosManagerDialog());
+              } else {
+                openModal(createAlertDialog(`删除失败：${result?.message || '未知错误'}`));
+              }
+            }
+          }));
+          return;
+        }
+      });
+
+      // 是否启动 checkbox 用 change 事件单独绑（与 click 区分）
+      tbody.addEventListener('change', async (event) => {
+        const checkbox = event.target.closest('input[data-row-action="toggle-enabled"]');
+        if (!checkbox) return;
+        const tr = checkbox.closest('tr');
+        if (!tr) return;
+        const id = Number(tr.dataset.id);
+        const enabled = checkbox.checked;
+        const result = await desktopApi.scenarios.toggleEnabled(id, enabled);
+        if (!result || result.status !== 'ok') {
+          // 失败回滚 + 重渲（容错）
+          console.warn('toggle scenario enabled failed:', result);
+          checkbox.checked = !enabled;
+          await refreshTable();
+          openModal(createAlertDialog(`切换启用状态失败：${result?.message || '未知错误'}`));
+        }
+      });
+
+      dialog.querySelector('.icon-close').addEventListener('click', closeModal);
+      dialog.querySelector('[data-action="add-scenario"]').addEventListener('click', () => {
+        openModal(createScenarioCategorySelectDialog());
+      });
+
+      refreshTable();
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // v2.0.0-beta.3：新增场景流程第 1 步 — 类别选择弹窗
+    // 选择 3 个枚举之一，点"继续"占位 alert（具体配置弹窗在阶段 4-6 启用）
+    function createScenarioCategorySelectDialog() {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card scenario-category-select-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">新增场景</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body scenario-category-body">
+          <label class="scenario-category-row">
+            <span class="scenario-category-label">请选择功能类别</span>
+            <select class="scenario-category-select">
+              <option value="extract-recon-id">提取ReconId</option>
+              <option value="offset-bill-mark">冲销账单打标</option>
+              <option value="gateway-recon-join">根据资金对账不平结果提取ReconId</option>
+            </select>
+          </label>
+        </div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="continue">继续</button>
+        </div>
+      `;
+
+      dialog.querySelector('.icon-close').addEventListener('click', () => {
+        openModal(createScenariosManagerDialog());
+      });
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+        openModal(createScenariosManagerDialog());
+      });
+      dialog.querySelector('[data-action="continue"]').addEventListener('click', () => {
+        const select = dialog.querySelector('.scenario-category-select');
+        const category = select?.value || '';
+        const label = getCategoryLabel(category);
+        openModal(createAlertDialog(`「新增${label}类场景」深度配置弹窗将在 v2.0.0-beta.3 阶段 4-6 启用`));
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     return {
       closeModal,
       openModal,
@@ -5321,7 +5526,10 @@
       createAmountSplitRulesDialog,
       createBillSplitRowsDialog,
       createBillSplitMappingsDialog,
-      createBalanceAddonManagerDialog
+      createBalanceAddonManagerDialog,
+      // v2.0.0-beta.3：银行对账单处理模块场景管理
+      createScenariosManagerDialog,
+      createScenarioCategorySelectDialog
     };
   }
 
