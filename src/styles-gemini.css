@@ -120,15 +120,7 @@ button, select { font: inherit; }
   line-height: 1.1;
 }
 .gemini-gradient {
-  background: linear-gradient(92deg,
-    var(--g-blue) 0%,
-    var(--g-purple) 38%,
-    var(--g-pink) 72%,
-    var(--g-yellow) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
+  color: #000;
 }
 
 /* Workspace + module switcher (chip pill) */

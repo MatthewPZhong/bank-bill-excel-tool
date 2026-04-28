@@ -312,10 +312,12 @@ function casesR1() {
         storageRoot: ctx.root
       });
       assertEqual(result.records.length, 1, 'records.length');
-      assertEqual(result.records[0].billDate, '2026-02-28', 'billDate');
+      // v2.0.0 反转：billDate 统一用月末日（targetLastDay='2026-03-31'），不再用 seed 实际日期 2026-02-28；
+      // endBalance 仍是 chosen.endBalance；pickReason 仍区分 'exact' / 'fallback'
+      assertEqual(result.records[0].billDate, '2026-03-31', 'billDate');
       assertEqual(result.records[0].endBalance, 900, 'endBalance');
       assertEqual(result.records[0].pickReason, 'fallback', 'pickReason');
-      return `records.length=1, billDate=2026-02-28, endBalance=900, pickReason=fallback`;
+      return `records.length=1, billDate=2026-03-31, endBalance=900, pickReason=fallback`;
     } finally {
       cleanupCtx(ctx);
     }

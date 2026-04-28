@@ -1,4 +1,5 @@
 // v1.5.3 R1 (T1.2)：月度余额账单导出装配模块（资金红线集中点）
+// v2.0.0-pre-beta3-quickwin：billDate 输出统一为月末日（反转 v1.5.3 Q2 资金红线决策）
 //
 // 职责：
 //   - assembleMonthlyBalance：按 templateScope × {year, month} 从 balance-seeds 装配 records
@@ -9,6 +10,8 @@
 //          - 若存在 billDate === 月末最后一日 → 优先用该日
 //          - 若全部 seeds 的 billDate > 月末 → 跳过该大账号（"未来余额排除"）
 //          - 无任何 seeds → 跳过该大账号
+//          - **v2.0.0 反转**：输出 records.billDate 统一用 targetLastDay（月末日），不再用 seed 实际记录日；
+//            endBalance 仍取 chosen.endBalance（最近交易日的余额值）
 //   - Q6：R1 是全流程里唯一放行 account_nature='own' 的场景，所以必须显式传 { includeOwn: true }
 //   - Q4：所有模板 / 大账号 / 币种的余额条目合并到单个 sheet
 //
@@ -188,13 +191,14 @@ function assembleMonthlyBalance({ templateScope, year, month, db, storageRoot })
         continue;
       }
 
-      // Q2 资金红线：billDate 用 seed 实际记录的那一天（可能是 2026-02-28），不是月末
+      // v2.0.0：billDate 统一用月末日（targetLastDay）；endBalance 仍是 chosen.endBalance
+      // —— 反转 v1.5.3 R1 Q2 "用 seed 实际记录日" 决策；用户业务要求月度账单日期落在月末
       records.push({
         bankName,
         location,
         merchantId,
         currency,
-        billDate: chosen.billDate,
+        billDate: targetLastDay,
         endBalance: chosen.endBalance,
         templateName,
         pickReason: reason
