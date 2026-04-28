@@ -304,6 +304,128 @@ function ensureTemplateBigAccountNatureSupport(db) {
   }
 }
 
+// v2.0.0-beta.3：银行对账单处理模块 — 场景表 + 内置 3 场景 seed
+// 幂等：CREATE TABLE IF NOT EXISTS + seed-if-empty
+const BUILTIN_SCENARIOS = [
+  {
+    category: 'extract-recon-id',
+    name: '调拨ReconId自提取',
+    priority: 3,
+    enabled: 1,
+    is_builtin: 1,
+    config: {
+      conditions: [
+        { field: 'Extra Information', op: '包含', value: 'AFT' },
+        { field: 'Extra Information', op: '包含', value: 'BFT' },
+        { field: 'Extra Information', op: '包含', value: 'CFT' },
+        { field: 'Extra Information', op: '包含', value: 'DFT' },
+        { field: 'CustomerRef',       op: '包含', value: 'AFT' },
+        { field: 'CustomerRef',       op: '包含', value: 'BFT' },
+        { field: 'CustomerRef',       op: '包含', value: 'CFT' },
+        { field: 'CustomerRef',       op: '包含', value: 'DFT' },
+        { field: 'Payment Detail',    op: '包含', value: 'AFT' },
+        { field: 'Payment Detail',    op: '包含', value: 'BFT' },
+        { field: 'Payment Detail',    op: '包含', value: 'CFT' },
+        { field: 'Payment Detail',    op: '包含', value: 'DFT' }
+      ],
+      extractByFeature: {
+        enabled: true,
+        searchFields: ['CustomerRef', 'Extra Information', 'Payment Detail'],
+        featureCode: 'FT',
+        digitCount: 12,
+        totalLength: 15
+      },
+      extractByOtherField: null
+    }
+  },
+  {
+    category: 'offset-bill-mark',
+    name: 'outbound Fail打标',
+    priority: 2,
+    enabled: 1,
+    is_builtin: 1,
+    config: {
+      billTypes: [
+        { seq: 1, field: 'FundType', op: '等于', value: 'outbound Fail' },
+        { seq: 2, field: 'FundType', op: '等于', value: 'outbound' }
+      ],
+      reconFields: [
+        { seq: 1, leftType: 1, leftField: 'CustomerRef',   rightType: 2, rightField: 'CustomerRef' },
+        { seq: 2, leftType: 1, leftField: 'Credit Amount', rightType: 2, rightField: 'Debit Amount' }
+      ],
+      markValue: {
+        type: 2,
+        field: 'FundType',
+        value: 'outbound Fail'
+      }
+    }
+  },
+  {
+    category: 'gateway-recon-join',
+    name: '调拨ReconId From网关',
+    priority: 1,
+    enabled: 0,
+    is_builtin: 1,
+    config: {
+      reconFields: [
+        { seq: 1, gwField: 'currency',   bankField: 'Currency' },
+        { seq: 2, gwField: 'Amount',     bankField: '发生额绝对值' },
+        { seq: 3, gwField: 'MerchantId', bankField: 'MerchantId' },
+        { seq: 4, gwField: 'Bank',       bankField: 'Channel' }
+      ],
+      assign: {
+        gwField: 'reconciliationId',
+        bankField: 'ReconciliationId'
+      }
+    }
+  }
+];
+
+function ensureScenariosSupport(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS scenarios (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL CHECK (category IN ('extract-recon-id', 'offset-bill-mark', 'gateway-recon-join')),
+      name TEXT NOT NULL,
+      priority INTEGER NOT NULL CHECK (priority BETWEEN 0 AND 3),
+      enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+      config_json TEXT NOT NULL,
+      is_builtin INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0, 1)),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (name)
+    );
+  `);
+
+  const countRow = db.prepare('SELECT COUNT(*) AS cnt FROM scenarios').get();
+  if (countRow && Number(countRow.cnt) === 0) {
+    const now = new Date().toISOString();
+    const insert = db.prepare(`
+      INSERT INTO scenarios (category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    db.exec('BEGIN');
+    try {
+      BUILTIN_SCENARIOS.forEach((scenario) => {
+        insert.run(
+          scenario.category,
+          scenario.name,
+          scenario.priority,
+          scenario.enabled,
+          JSON.stringify(scenario.config),
+          scenario.is_builtin,
+          now,
+          now
+        );
+      });
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
@@ -311,6 +433,7 @@ module.exports = {
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
+  ensureScenariosSupport,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,
