@@ -256,7 +256,8 @@
 
 ### 6.5 内置场景 (F5)
 
-启动时若 `scenarios` 表为空，自动 seed 3 条内置场景（详见 §七.6）。
+首次初始化（`app_settings.scenarios_seeded` marker 不存在）且 `scenarios` 表为空时，自动 seed 3 条内置场景（详见 §七.6）+ 写 marker；后续启动 marker 已存在 → 永不重新 seed，即使用户删光所有场景表为空也不复活（D14 删除终态保障，PR #29 Codex F1 P2 修复）。
+
 用户后续 CRUD 与普通场景同等。
 
 ---
@@ -586,7 +587,7 @@ CREATE TABLE IF NOT EXISTS scenarios (
 );
 ```
 
-迁移：在 `database/migrations.js` 加 `ensureScenariosSupport(db)`，幂等创建表 + seed 3 条内置场景（仅当表为空时）。
+迁移：在 `database/migrations.js` 加 `ensureScenariosSupport(db)`，幂等创建表 + seed 3 条内置场景**当且仅当 `app_settings.scenarios_seeded` marker 不存在且表为空时**。seed 完成后写 marker；marker 一旦写入永不重复 seed（保障 D14 删除终态）。老库迁移路径（无 marker 但表已有数据）→ 仅写 marker，不重复 seed。
 
 ### 8.2 in-memory session（main 进程）
 
