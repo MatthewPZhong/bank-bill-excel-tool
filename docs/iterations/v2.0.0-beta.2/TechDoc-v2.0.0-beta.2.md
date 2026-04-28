@@ -20,43 +20,43 @@ PRD D6 + D6.1 锁定颗粒度 A：**单 HTML 树（基线对齐 Clear）+ 双 CS
 
 ```
               启动                                     运行
-                                                       
+
 [main]              [renderer]                                 [user 操作]
-app.whenReady           
-  └─ database.init                                              
-  └─ ensureUiStyleDefault                                       
-       (F4 升级迁移)                                             
-  └─ createWindow                                               
-       └─ index.html                                            
-            ├─ <head>                                          
-            │   ├─ <link id="cssGeneral" disabled>             
-            │   ├─ <link id="cssClear">                        
-            │   └─ <link id="cssClearExtra">                   
-            └─ <body data-style="clear">                       
-                                                                
-                          renderer.js initialize               
-                            └─ desktopApi.app.getInfo()        
+app.whenReady
+  └─ database.init
+  └─ ensureUiStyleDefault
+       (F4 升级迁移)
+  └─ createWindow
+       └─ index.html
+            ├─ <head>
+            │   ├─ <link id="cssGeneral" disabled>
+            │   ├─ <link id="cssClear">
+            │   └─ <link id="cssClearExtra">
+            └─ <body data-style="clear">
+
+                          renderer.js initialize
+                            └─ desktopApi.app.getInfo()
                                   ←—— uiStyle: 'Clear' | 'General'
-                            └─ applyUiStyle(uiStyle)           
-                                  ├─ body.dataset.style ←——    
-                                  └─ link.disabled 切换 ←——     
-                                                                
-                                         (用户使用应用 ...)     
-                                                                
+                            └─ applyUiStyle(uiStyle)
+                                  ├─ body.dataset.style ←——
+                                  └─ link.disabled 切换 ←——
+
+                                         (用户使用应用 ...)
+
                                                               [user 点 🎨 → 调色板]
                                                               [user 改下拉值]
                                                               [user 点"确认切换"按钮]
                                               ←—— ipc setUiStyle('General')
-                          ipc handler                          
-                            └─ settingsRepository              
-                                 .setUiStyle(db, 'General')    
-                                  ──→ DB 写入                   
-                          renderer 收到 success                
-                            └─ applyUiStyle('General')         
+                          ipc handler
+                            └─ settingsRepository
+                                 .setUiStyle(db, 'General')
+                                  ──→ DB 写入
+                          renderer 收到 success
+                            └─ applyUiStyle('General')
                                   ├─ body.dataset.style ←—— 'general'
-                                  └─ link.disabled 切换 ←——    
-                          (条件渲染 5 类节点的 CSS selector     
-                           自动重新匹配，无需 JS 操作 DOM)       
+                                  └─ link.disabled 切换 ←——
+                          (条件渲染 5 类节点的 CSS selector
+                           自动重新匹配，无需 JS 操作 DOM)
 ```
 
 ### 1.2 关键改动总结

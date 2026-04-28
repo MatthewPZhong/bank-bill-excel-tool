@@ -1129,4 +1129,3 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 .account-mapping-editing-row .mapping-text-input,
 .account-mapping-editing-row .mapping-select { height: 36px; }
 .account-mapping-editing-row .text-action.is-active { color: var(--primary); font-weight: 600; }
-
