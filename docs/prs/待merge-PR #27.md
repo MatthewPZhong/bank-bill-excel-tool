@@ -1,6 +1,6 @@
 # PR #27（待 merge）
 
-- **URL**：（待 `gh pr create` 后补）
+- **URL**：https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/27
 - **分支**：`v2.0.0` → `main`
 - **版本**：`2.0.0-beta.2`（本次不 bump）
 - **状态**：待 merge
