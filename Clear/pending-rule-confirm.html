@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Pending 规则确认 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v3" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card alert-card pending-rule-confirm-card">
+      <div class="dialog-header">
+        <div class="dialog-title">请确认筛选的字段：</div>
+      </div>
+      <div class="pending-rule-confirm-body">
+        <div>对账字段 (3)：交易日期、主账户、发生额</div>
+        <div>对账内容 (2)：摘要、对方户名</div>
+      </div>
+      <div class="dialog-actions center">
+        <button class="danger-btn small" type="button" data-action="confirm">确认</button>
+        <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

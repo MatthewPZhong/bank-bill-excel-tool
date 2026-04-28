@@ -59,6 +59,34 @@ function setBackgroundConfig(db, backgroundConfig) {
   setSetting(db, 'background_config', JSON.stringify(backgroundConfig));
 }
 
+const UI_STYLE_KEY = 'ui_style';
+const UI_STYLE_VALID = ['Clear', 'General'];
+const UI_STYLE_DEFAULT = 'Clear';
+
+function getUiStyle(db) {
+  const value = getSetting(db, UI_STYLE_KEY);
+  if (value && UI_STYLE_VALID.includes(value)) {
+    return value;
+  }
+  return null;
+}
+
+function setUiStyle(db, style) {
+  if (!UI_STYLE_VALID.includes(style)) {
+    throw new Error(`Invalid ui_style: ${style}, must be one of ${UI_STYLE_VALID.join(' | ')}`);
+  }
+  setSetting(db, UI_STYLE_KEY, style);
+}
+
+function ensureUiStyleDefault(db) {
+  const current = getUiStyle(db);
+  if (!current) {
+    setSetting(db, UI_STYLE_KEY, UI_STYLE_DEFAULT);
+    return UI_STYLE_DEFAULT;
+  }
+  return current;
+}
+
 function listAccountMappings(db, templateId) {
   return db
     .prepare(`
@@ -110,12 +138,15 @@ function saveAccountMappings(db, templateId, mappings) {
 }
 
 module.exports = {
+  ensureUiStyleDefault,
   getBackgroundConfig,
   getEnumConfig,
   getSetting,
+  getUiStyle,
   listAccountMappings,
   saveAccountMappings,
   setBackgroundConfig,
   setEnumConfig,
-  setSetting
+  setSetting,
+  setUiStyle
 };

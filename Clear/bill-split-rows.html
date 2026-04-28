@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>拆分/合并账单映射关系管理 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card bill-split-rows-card">
+      <div class="dialog-header">
+        <div class="dialog-title"><span class="gemini-gradient">拆分/合并账单映射关系管理</span></div>
+        <div class="bill-split-rows-header-actions">
+          <label class="bill-split-merge-checkbox-label">
+            <input type="checkbox" class="bill-split-merge-checkbox" />
+            <span>合并账单</span>
+          </label>
+          <button class="icon-close" type="button">×</button>
+        </div>
+      </div>
+
+      <div class="bill-split-rows-body">
+        <!-- 拆分行数控制 -->
+        <div class="bill-split-row-count-line">
+          <label>需要拆分成几份账单</label>
+          <input type="number" class="bill-split-row-count-input" min="1" max="99" value="3" />
+          <button class="secondary-btn small bill-split-row-count-done-btn" type="button">拆</button>
+          <span class="bill-split-row-count-note">可点击右侧 <strong>完成</strong> 锁定每行；完成后点 <strong>编辑</strong> 可恢复。</span>
+        </div>
+
+        <!-- 拆分表格 -->
+        <div class="table-wrapper bill-split-rows-table-wrapper">
+          <table class="data-table bill-split-rows-table">
+            <thead>
+              <tr>
+                <th>账单序号</th>
+                <th>Currency</th>
+                <th>Credit Amount</th>
+                <th>Debit Amount</th>
+                <th style="text-align:left;">执行操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="bill-split-seq-badge">1</span></td>
+                <td><span class="bill-split-row-view-text">币种</span></td>
+                <td><span class="bill-split-row-view-text">贷方金额</span></td>
+                <td><span class="bill-split-row-view-text">借方金额</span></td>
+                <td class="bill-split-row-actions" style="text-align:left;">
+                  <button class="text-action bill-split-row-complete-btn" type="button">编辑</button>
+                  <button class="text-action danger bill-split-row-delete-btn" type="button">删除</button>
+                </td>
+              </tr>
+              <tr>
+                <td><span class="bill-split-seq-badge">2</span></td>
+                <td>
+                  <select class="mapping-select bill-split-currency-select">
+                    <option value=""></option>
+                    <option selected>币种</option>
+                    <option>本位币</option>
+                  </select>
+                </td>
+                <td>
+                  <select class="mapping-select bill-split-credit-select" disabled>
+                    <option value="" selected></option>
+                  </select>
+                </td>
+                <td>
+                  <select class="mapping-select bill-split-debit-select" disabled>
+                    <option value="" selected></option>
+                  </select>
+                </td>
+                <td class="bill-split-row-actions" style="text-align:left;">
+                  <button class="text-action bill-split-row-complete-btn" type="button">完成</button>
+                  <button class="text-action danger bill-split-row-delete-btn" type="button">删除</button>
+                </td>
+              </tr>
+              <tr>
+                <td><span class="bill-split-seq-badge">3</span></td>
+                <td>
+                  <select class="mapping-select bill-split-currency-select">
+                    <option value="" selected></option>
+                    <option>币种</option>
+                    <option>本位币</option>
+                  </select>
+                </td>
+                <td>
+                  <select class="mapping-select bill-split-credit-select" disabled>
+                    <option value="" selected></option>
+                  </select>
+                </td>
+                <td>
+                  <select class="mapping-select bill-split-debit-select" disabled>
+                    <option value="" selected></option>
+                  </select>
+                </td>
+                <td class="bill-split-row-actions" style="text-align:left;">
+                  <button class="text-action bill-split-row-complete-btn" type="button">完成</button>
+                  <button class="text-action danger bill-split-row-delete-btn" type="button">删除</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <hr class="bill-split-sub-section-divider" />
+
+        <!-- 发生额映射关系管理 副区域 -->
+        <div class="bill-split-sub-section">
+          <h3 class="bill-split-sub-title">拆分/合并账单 — 发生额映射关系管理</h3>
+
+          <div class="bill-split-sub-row">
+            <label class="bill-split-sub-label">按正负号拆分的发生额</label>
+            <select class="mapping-select bill-split-signed-select">
+              <option value=""></option>
+              <option selected>交易金额</option>
+              <option>本位币金额</option>
+            </select>
+            <label class="bill-split-target-seq-label">
+              <input type="checkbox" class="bill-split-target-seq-checkbox" checked />
+              <span>指定账单实现功能</span>
+            </label>
+            <div class="bill-split-target-seq-picker">
+              <button class="bill-split-target-seq-trigger secondary-btn small" type="button">已选: 1, 2</button>
+            </div>
+          </div>
+
+          <div class="bill-split-sub-row">
+            <label class="bill-split-sub-label">按字段区分发生额</label>
+            <select class="mapping-select bill-split-by-field-select" disabled>
+              <option value="" selected></option>
+              <option>是</option>
+            </select>
+            <button class="secondary-btn small bill-split-amount-rules-manage-btn" type="button" hidden>发生额映射关系管理</button>
+            <span class="bill-split-sub-hint muted">（"按正负号"已启用时互斥）</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="dialog-actions right bill-split-rows-footer">
+        <button class="primary-btn small bill-split-rows-done-btn" type="button">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

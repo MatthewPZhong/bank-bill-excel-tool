@@ -69,6 +69,8 @@ const rendererStartupProfiler = {
 rendererStartupProfiler.marks.set(RENDERER_STARTUP_MARKS.scriptStart, rendererStartupProfiler.startedAt);
 
 const state = {
+  // v2.0.0-beta.2 F1：UI 风格（'Clear' | 'General'），从 SQLite app_settings.ui_style 加载
+  uiStyle: 'Clear',
   templates: [],
   // v1.5.3 R1 (T1.5)：创建网银账单模式下始终为 FILENAME_MAPPING_TEMPLATE_ID；
   // 月度余额模式下 selectedTemplateId 不参与（由弹窗内部维护）
@@ -215,7 +217,9 @@ const elements = {
   backgroundSelectedColorSwatch: document.getElementById('backgroundSelectedColorSwatch'),
   backgroundImportBtn: document.getElementById('backgroundImportBtn'),
   backgroundDoneBtn: document.getElementById('backgroundDoneBtn'),
-  backgroundResetBtn: document.getElementById('backgroundResetBtn')
+  backgroundResetBtn: document.getElementById('backgroundResetBtn'),
+  paletteStyleSelect: document.getElementById('paletteStyleSelect'),
+  paletteStyleConfirmBtn: document.getElementById('paletteStyleConfirmBtn')
 };
 
 const {
@@ -356,7 +360,9 @@ function updateStatusBox(box, message, tone = 'info', options = {}) {
     idleTitle = ''
   } = options;
 
-  box.textContent = message;
+  // v2.0.0-beta.2：只更新 .status-box-text 子节点的文案，保留同级 .status-spark SVG 不被清空
+  const textEl = box.querySelector('.status-box-text');
+  if (textEl) textEl.textContent = message;
   box.dataset.tone = tone;
   box.dataset.errorReportReady = errorReportReady ? 'true' : 'false';
   box.dataset.manualBalancePromptReady = manualBalancePromptReady ? 'true' : 'false';
@@ -1406,6 +1412,10 @@ function openBackgroundPalette() {
   elements.backgroundPaletteBtn.classList.add('is-active');
   resetBackgroundPickerSelection();
   applyBackgroundSettings(state.backgroundDraft);
+  // v2.0.0-beta.2 D5：每次打开调色板时下拉永远显示 'Clear'（不反映当前实际风格）
+  if (elements.paletteStyleSelect) {
+    elements.paletteStyleSelect.value = 'Clear';
+  }
 }
 
 function closeBackgroundPalette({ revert = true } = {}) {
@@ -2964,11 +2974,94 @@ async function handleNewAccountExport() {
   });
 }
 
+// v2.0.0-beta.2 F1：UI 风格切换核心（D6 / D6.1 / D15）
+// 通过 link.disabled 切换 General / Clear 两套 CSS（CSS 引擎层级隔离，零延迟）
+// 同时同步 body.dataset.style 供条件 selector / JS 状态读取
+function applyUiStyle(style) {
+  const safe = (style === 'General') ? 'General' : 'Clear';
+  state.uiStyle = safe;
+
+  const cssGeneral = document.getElementById('cssGeneral');
+  const cssClear = document.getElementById('cssClear');
+  const cssClearExtra = document.getElementById('cssClearExtra');
+  if (!cssGeneral || !cssClear || !cssClearExtra) return;
+
+  // 先启用目标 link → 再禁用旧的，避免 1 帧裸 DOM
+  if (safe === 'General') {
+    cssGeneral.disabled = false;
+    cssClear.disabled = true;
+    cssClearExtra.disabled = true;
+    document.body.dataset.style = 'general';
+  } else {
+    cssClear.disabled = false;
+    cssClearExtra.disabled = false;
+    cssGeneral.disabled = true;
+    document.body.dataset.style = 'clear';
+  }
+}
+
+// v2.0.0-beta.2 D16：用户主动切风格时同步背景色（仅"魔法值"场景，不覆盖用户自定义）
+async function maybeSyncBackgroundColorOnStyleChange(targetStyle) {
+  const currentColor = String(state.backgroundSettings?.colorHex || '').toLowerCase();
+  const desiredColor = targetStyle === 'Clear' ? '#ffffff' : '#efe8da';
+  const otherDefault = targetStyle === 'Clear' ? '#efe8da' : '#ffffff';
+
+  if (currentColor !== otherDefault || currentColor === desiredColor) return;
+
+  const result = await window.desktopApi.background.save({
+    colorHex: desiredColor,
+    keepExistingImage: true
+  });
+  if (result && result.status === 'success') {
+    state.backgroundSettings = cloneBackgroundSettings(result.backgroundConfig);
+    state.backgroundDraft = cloneBackgroundSettings(result.backgroundConfig);
+    applyBackgroundSettings(state.backgroundSettings);
+  }
+}
+
+// v2.0.0-beta.2 F1+F2（D9/D10）：调色板"应用"按钮触发风格切换流程
+function handlePaletteStyleConfirm() {
+  const select = elements.paletteStyleSelect;
+  if (!select) return;
+  const targetStyle = select.value === 'General' ? 'General' : 'Clear';
+
+  // 当前已经是该风格，无需切换；直接收起调色板
+  if (targetStyle === state.uiStyle) {
+    closeBackgroundPalette({ revert: true });
+    return;
+  }
+
+  openModal(
+    createConfirmDialog({
+      message: `确认切换页面风格为「${targetStyle}」？切换后立即生效。`,
+      confirmText: '确认切换',
+      cancelText: '取消',
+      onConfirm: async () => {
+        const result = await window.desktopApi.settings.setUiStyle(targetStyle);
+        if (!result || result.status !== 'ok') {
+          closeModal();
+          openModal(createAlertDialog((result && result.message) || '切换失败'));
+          return;
+        }
+        applyUiStyle(targetStyle);
+        await maybeSyncBackgroundColorOnStyleChange(targetStyle);
+        closeModal();
+        closeBackgroundPalette({ revert: true });
+      },
+      onCancel: () => {
+        // D10：取消 → 下拉值回到 'Clear'（D5 的固定显示值）
+        select.value = 'Clear';
+      }
+    })
+  );
+}
+
 async function initialize() {
   markRendererStartup(RENDERER_STARTUP_MARKS.initializeStart);
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoStart);
   const info = await window.desktopApi.app.getInfo();
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoDone);
+  applyUiStyle(info.uiStyle);
   drawBackgroundSpectrum();
   resetBackgroundPickerSelection();
   elements.appVersion.textContent = info.version;
@@ -3130,6 +3223,9 @@ async function initialize() {
     });
   });
   elements.backgroundResetBtn.addEventListener('click', handleBackgroundReset);
+  if (elements.paletteStyleConfirmBtn) {
+    elements.paletteStyleConfirmBtn.addEventListener('click', handlePaletteStyleConfirm);
+  }
 
   elements.minimizeBtn.addEventListener('click', () => window.desktopApi.window.minimize());
   elements.maximizeBtn.addEventListener('click', async () => {

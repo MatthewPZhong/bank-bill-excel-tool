@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>维护大账号 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card manager-card big-account-card">
+      <div class="dialog-header">
+        <div class="dialog-title"><span class="gemini-gradient">维护大账号</span></div>
+        <button class="icon-close" type="button">×</button>
+      </div>
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>大账号</th>
+              <th>币种</th>
+              <th class="manager-action-header" style="text-align:left;"><span class="manager-action-header-label">执行操作</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>NET001</td>
+              <td><button class="new-account-input new-account-currency-dropdown-btn" type="button">USD</button></td>
+              <td class="row-actions" style="text-align:left;">
+                <button class="text-action" style="padding-left:0;">编辑</button>
+                <button class="text-action danger">删除</button>
+              </td>
+            </tr>
+            <tr>
+              <td>NET002</td>
+              <td><button class="new-account-input new-account-currency-dropdown-btn" type="button">USD / HKD</button></td>
+              <td class="row-actions" style="text-align:left;">
+                <button class="text-action" style="padding-left:0;">编辑</button>
+                <button class="text-action danger">删除</button>
+              </td>
+            </tr>
+            <tr>
+              <td>NET003</td>
+              <td><button class="new-account-input new-account-currency-dropdown-btn" type="button">CNY</button></td>
+              <td class="row-actions" style="text-align:left;">
+                <button class="text-action" style="padding-left:0;">编辑</button>
+                <button class="text-action danger">删除</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="dialog-actions split big-account-footer-actions">
+        <div class="big-account-footer-left">
+          <button class="secondary-btn small" type="button" data-action="add">新增</button>
+          <button class="secondary-btn small" type="button" data-action="import-bank-info">导入银行账号信息</button>
+          <button class="secondary-btn small" type="button" data-action="balance-management">余额管理</button>
+        </div>
+        <button class="primary-btn small" type="button" data-action="done">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

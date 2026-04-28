@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>账户映射分配 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card manager-card account-mapping-migration-card">
+      <div class="dialog-header">
+        <div class="dialog-title"><span class="gemini-gradient">账户映射分配</span></div>
+        <button class="icon-close" type="button">×</button>
+      </div>
+      <div class="migration-intro">
+        <span class="migration-intro-icon" aria-hidden="true">ⓘ</span>
+        检测到 <strong>4 条</strong>旧版账户映射未归属任何模板，请为每一行选择对应的模板以完成迁移。
+      </div>
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>网银账单账户号</th>
+              <th>清结算系统银行账号</th>
+              <th>币种</th>
+              <th>分配到模板</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr data-migration-row="0">
+              <td class="account-mapping-text-cell">ACC-001-MO</td>
+              <td class="account-mapping-text-cell">6222 0000 0000 0012345</td>
+              <td>USD</td>
+              <td>
+                <select class="migration-template-select mapping-select">
+                  <option value="">请选择模板</option>
+                  <option selected>LusoBank-MO</option>
+                  <option>BankABC-HK</option>
+                  <option>PingPong-US</option>
+                  <option>HSBC-SG</option>
+                </select>
+              </td>
+            </tr>
+            <tr data-migration-row="1">
+              <td class="account-mapping-text-cell">ACC-002-MO</td>
+              <td class="account-mapping-text-cell">6222 0000 0000 0012346</td>
+              <td>MOP</td>
+              <td>
+                <select class="migration-template-select mapping-select">
+                  <option value="">请选择模板</option>
+                  <option selected>LusoBank-MO</option>
+                  <option>BankABC-HK</option>
+                  <option>PingPong-US</option>
+                  <option>HSBC-SG</option>
+                </select>
+              </td>
+            </tr>
+            <tr data-migration-row="2">
+              <td class="account-mapping-text-cell">HK-8810-USD</td>
+              <td class="account-mapping-text-cell">808-123-456789</td>
+              <td>HKD</td>
+              <td>
+                <select class="migration-template-select mapping-select">
+                  <option value="">请选择模板</option>
+                  <option>LusoBank-MO</option>
+                  <option selected>BankABC-HK</option>
+                  <option>PingPong-US</option>
+                  <option>HSBC-SG</option>
+                </select>
+              </td>
+            </tr>
+            <tr data-migration-row="3" class="migration-empty-row">
+              <td class="account-mapping-text-cell">PP-US-0091</td>
+              <td class="account-mapping-text-cell">—</td>
+              <td><span class="muted">—</span></td>
+              <td>
+                <select class="migration-template-select mapping-select">
+                  <option value="" selected>请选择模板</option>
+                  <option>LusoBank-MO</option>
+                  <option>BankABC-HK</option>
+                  <option>PingPong-US</option>
+                  <option>HSBC-SG</option>
+                </select>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="dialog-actions right">
+        <button class="primary-btn small" type="button" data-action="done">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

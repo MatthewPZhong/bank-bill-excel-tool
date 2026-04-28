@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>映射关系管理 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card mapping-card">
+      <div class="dialog-header">
+        <div class="dialog-title"><span class="gemini-gradient">映射关系管理</span></div>
+        <div class="dialog-header-checkboxes">
+          <label class="dialog-checkbox-label"><input type="checkbox" data-role="is-parent">设为主模板</label>
+          <label class="dialog-checkbox-label"><input type="checkbox" data-role="is-child">设为子模板</label>
+        </div>
+        <button class="icon-close" type="button">×</button>
+      </div>
+      <div class="table-wrapper mapping-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>模板字段</th>
+              <th>映射字段</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="mapping-section-row"><td colspan="2"><strong>映射关系设置</strong></td></tr>
+            <tr><td>BillDate</td><td><select class="mapping-select"><option>交易日期</option></select></td></tr>
+            <tr><td>ValueDate</td><td><select class="mapping-select"><option>起息日期</option></select></td></tr>
+            <tr><td>Credit Amount</td><td><select class="mapping-select"><option></option></select></td></tr>
+            <tr><td>Debit Amount</td><td><select class="mapping-select"><option></option></select></td></tr>
+            <tr><td>Balance</td><td><select class="mapping-select"><option>通过发生额计算</option></select></td></tr>
+            <tr><td>MerchantId</td><td><select class="mapping-select"><option>自己输入</option></select></td></tr>
+            <tr><td>Currency</td><td><select class="mapping-select"><option>币种</option></select></td></tr>
+            <tr><td>Payee Name</td><td><select class="mapping-select"><option></option></select></td></tr>
+            <tr><td>Drawee Name</td><td><select class="mapping-select"><option></option></select></td></tr>
+            <tr class="mapping-section-row"><td colspan="2"><strong>账单拆分合并管理</strong></td></tr>
+            <tr><td>拆分字段</td><td><select class="mapping-select"><option></option></select></td></tr>
+            <tr><td>拆分规则</td><td><select class="mapping-select"><option>按金额正负</option></select></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="dialog-actions right">
+        <button class="primary-btn small" type="button" data-action="done">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -125,6 +125,8 @@ let startupMetricsReported = false;
 let lastOwnAccountsMigrationError = null;
 
 const DEFAULT_BACKGROUND_COLOR = '#efe8da';
+// v2.0.0-beta.2 D16：Clear 风格的默认背景色（白）
+const CLEAR_BACKGROUND_COLOR = '#ffffff';
 const BUNDLED_ENUM_FILE_NAME = 'COMMON枚举.xlsx';
 const CURRENCY_MAPPING_FILE_NAME = '币种映射表.xlsx';
 const MISSING_ENUM_MESSAGE = '内置网银账单枚举表缺失，请检查安装包';
@@ -1281,9 +1283,37 @@ function readTemplateBundleFile(filePath) {
   }));
 }
 
+// v2.0.0-beta.2 D16 fix（Codex PR #26 Finding 1）：默认/重置背景按当前 ui_style 取
+// Clear → #ffffff / General → #efe8da；避免新装用户 ui_style=Clear 但回退到旧版米色
+function getStyleDefaultBackgroundColor() {
+  try {
+    const uiStyle = database?.getUiStyle?.() || 'Clear';
+    return uiStyle === 'Clear' ? CLEAR_BACKGROUND_COLOR : DEFAULT_BACKGROUND_COLOR;
+  } catch (_err) {
+    return CLEAR_BACKGROUND_COLOR;
+  }
+}
+
 function normalizeBackgroundColor(colorHex) {
   const normalized = String(colorHex || '').trim().toLowerCase();
-  return /^#[0-9a-f]{6}$/.test(normalized) ? normalized : DEFAULT_BACKGROUND_COLOR;
+  return /^#[0-9a-f]{6}$/.test(normalized) ? normalized : getStyleDefaultBackgroundColor();
+}
+
+// v2.0.0-beta.2 D16：风格-背景色联动（仅"魔法值"场景，不覆盖用户自定义颜色）
+// Clear 风格 → #ffffff；General 风格 → #efe8da
+// 仅当 colorHex 等于"另一风格的默认色"时才重置；用户已自定义的颜色不动
+function ensureBackgroundColorMatchesStyle() {
+  const uiStyle = database.getUiStyle() || 'Clear';
+  const currentBgConfig = database.getBackgroundConfig();
+  if (!currentBgConfig) return;
+
+  const currentColor = String(currentBgConfig.colorHex || '').toLowerCase();
+  const desiredColor = uiStyle === 'Clear' ? CLEAR_BACKGROUND_COLOR : DEFAULT_BACKGROUND_COLOR;
+  const otherDefault = uiStyle === 'Clear' ? DEFAULT_BACKGROUND_COLOR : CLEAR_BACKGROUND_COLOR;
+
+  if (currentColor === otherDefault && currentColor !== desiredColor) {
+    database.setBackgroundConfig({ ...currentBgConfig, colorHex: desiredColor });
+  }
 }
 
 function getStoredBackgroundConfig() {
@@ -2636,9 +2666,22 @@ function registerAppHandlers() {
       currencyOptions: getAvailableCurrencyCodes(),
       backgroundConfig: buildBackgroundPayload(),
       previewModal: process.env.APP_PREVIEW_MODAL || '',
+      // v2.0.0-beta.2 F1：UI 风格（'Clear' | 'General'）；renderer 启动时立即应用
+      uiStyle: database.getUiStyle() || 'Clear',
       // v1.5.3 R2（D15）：启动时自有账号迁移失败的错误文案；null 表示无失败
       ownAccountsMigrationError: lastOwnAccountsMigrationError
     };
+  });
+  ipcMain.handle('settings:get-ui-style', () => {
+    return database.getUiStyle() || 'Clear';
+  });
+  ipcMain.handle('settings:set-ui-style', (_event, style) => {
+    try {
+      database.setUiStyle(style);
+      return { status: 'ok', uiStyle: style };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
   });
   ipcMain.handle('app:save-user-guide', async () => {
     try {
@@ -2853,7 +2896,7 @@ function registerBackgroundHandlers() {
   ipcMain.handle('background:reset', () => {
     try {
       const backgroundConfig = saveBackgroundConfig({
-        colorHex: DEFAULT_BACKGROUND_COLOR,
+        colorHex: getStyleDefaultBackgroundColor(),
         keepExistingImage: false
       });
       clearLastErrorReport();
@@ -8843,6 +8886,19 @@ app.whenReady()
     database = new AppDatabase(dataPath);
     database.init();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
+
+    // v2.0.0-beta.2 F4：ui_style 升级迁移（D4）—— 若不存在则写 'Clear'
+    database.ensureUiStyleDefault();
+
+    // v2.0.0-beta.2 阶段 6：preview 模式通过 env APP_PREVIEW_STYLE=clear|general 强制风格
+    if (process.env.APP_PREVIEW_STYLE) {
+      const v = String(process.env.APP_PREVIEW_STYLE).trim().toLowerCase();
+      if (v === 'clear') database.setUiStyle('Clear');
+      else if (v === 'general') database.setUiStyle('General');
+    }
+
+    // v2.0.0-beta.2 D16：风格-背景色联动（仅魔法值场景）
+    ensureBackgroundColorMatchesStyle();
 
     try {
       pendingDb = openPendingDb(app.getPath('userData'));

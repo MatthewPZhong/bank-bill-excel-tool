@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>余额管理 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card manager-card balance-addon-card">
+      <div class="dialog-header">
+        <div class="dialog-title"><span class="gemini-gradient">余额管理</span></div>
+        <button class="icon-close" type="button">×</button>
+      </div>
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>大账号</th>
+              <th>币种</th>
+              <th>日期</th>
+              <th>余额附加值</th>
+              <th>备注</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><select class="mapping-select"><option>NET001</option></select></td>
+              <td><select class="mapping-select"><option>USD</option></select></td>
+              <td><input class="mapping-text-input" type="text" value="2026-01-31" /></td>
+              <td><input class="mapping-text-input" type="text" value="12,500.00" /></td>
+              <td>
+                <div class="balance-addon-remark-cell">
+                  <input class="mapping-text-input" type="text" value="期初调整" />
+                  <button class="text-action danger" type="button">删除</button>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><select class="mapping-select"><option>NET002</option></select></td>
+              <td><select class="mapping-select"><option>HKD</option></select></td>
+              <td><input class="mapping-text-input" type="text" value="2026-02-28" /></td>
+              <td><input class="mapping-text-input" type="text" value="-800.00" /></td>
+              <td>
+                <div class="balance-addon-remark-cell">
+                  <input class="mapping-text-input" type="text" value="手续费扣除" />
+                  <button class="text-action danger" type="button">删除</button>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><select class="mapping-select"><option>NET003</option></select></td>
+              <td><select class="mapping-select"><option>CNY</option></select></td>
+              <td><input class="mapping-text-input" type="text" value="" /></td>
+              <td><input class="mapping-text-input" type="text" value="" /></td>
+              <td>
+                <div class="balance-addon-remark-cell">
+                  <input class="mapping-text-input" type="text" value="" />
+                  <button class="text-action danger" type="button">删除</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="dialog-actions split">
+        <button class="secondary-btn small" type="button" data-action="add-row">新增</button>
+        <button class="primary-btn small" type="button" data-action="done">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

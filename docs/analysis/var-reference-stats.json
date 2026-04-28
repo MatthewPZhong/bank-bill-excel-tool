@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "2.0.0-beta.1",
-    "scannedAt": "2026-04-23T11:52:34.966Z",
+    "version": "2.0.0-beta.2",
+    "scannedAt": "2026-04-27T09:26:11.618Z",
     "root": "src",
-    "totalFiles": 28,
-    "totalTopLevelNames": 355,
+    "totalFiles": 43,
+    "totalTopLevelNames": 455,
     "buckets": {
-      "shared": 66,
-      "paired": 90,
-      "local": 146,
-      "crossFile": 156
+      "shared": 80,
+      "paired": 116,
+      "local": 194,
+      "crossFile": 196
     }
   },
   "A": {
@@ -28,6 +28,9 @@
           "src/backend/file-service/writers.js",
           "src/backend/logger.js",
           "src/backend/own-account-store.js",
+          "src/backend/pending-db.js",
+          "src/backend/pending-import/worker.js",
+          "src/main-process/pending-session.js",
           "src/main-process/statement-generation.js",
           "src/main-process/statement-session.js",
           "src/main.js"
@@ -78,6 +81,22 @@
             "count": 1
           },
           {
+            "file": "src/backend/pending-db.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 6
+          },
+          {
             "file": "src/main-process/statement-generation.js",
             "count": 3
           },
@@ -88,10 +107,103 @@
           {
             "file": "src/main.js",
             "count": 1
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 2
           }
         ],
-        "totalHits": 42,
-        "fileSpan": 14
+        "totalHits": 57,
+        "fileSpan": 19
+      },
+      {
+        "name": "fs",
+        "defFiles": [
+          "src/backend/balance-adjustment-store.js",
+          "src/backend/balance-seed-store.js",
+          "src/backend/big-account-mode-store.js",
+          "src/backend/big-account-order-store.js",
+          "src/backend/database.js",
+          "src/backend/database/own-accounts-migration.js",
+          "src/backend/file-service/pdf-worker.js",
+          "src/backend/file-service/readers.js",
+          "src/backend/file-service/writers.js",
+          "src/backend/logger.js",
+          "src/backend/own-account-store.js",
+          "src/backend/pending-import/streaming-xlsx-reader.js",
+          "src/backend/pending-import/streaming-xlsx-writer.js",
+          "src/backend/pending-import/worker.js",
+          "src/main-process/pending-session.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/balance-adjustment-store.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/balance-seed-store.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/big-account-mode-store.js",
+            "count": 5
+          },
+          {
+            "file": "src/backend/big-account-order-store.js",
+            "count": 5
+          },
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/own-accounts-migration.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/file-service/pdf-worker.js",
+            "count": 8
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/file-service/writers.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/logger.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/own-account-store.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 45,
+        "fileSpan": 16
       },
       {
         "name": "normalizeCell",
@@ -163,75 +275,6 @@
         "fileSpan": 13
       },
       {
-        "name": "fs",
-        "defFiles": [
-          "src/backend/balance-adjustment-store.js",
-          "src/backend/balance-seed-store.js",
-          "src/backend/big-account-mode-store.js",
-          "src/backend/big-account-order-store.js",
-          "src/backend/database.js",
-          "src/backend/database/own-accounts-migration.js",
-          "src/backend/file-service/pdf-worker.js",
-          "src/backend/file-service/readers.js",
-          "src/backend/file-service/writers.js",
-          "src/backend/logger.js",
-          "src/backend/own-account-store.js",
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/balance-adjustment-store.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/balance-seed-store.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/big-account-mode-store.js",
-            "count": 5
-          },
-          {
-            "file": "src/backend/big-account-order-store.js",
-            "count": 5
-          },
-          {
-            "file": "src/backend/database.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database/own-accounts-migration.js",
-            "count": 6
-          },
-          {
-            "file": "src/backend/file-service/pdf-worker.js",
-            "count": 8
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 4
-          },
-          {
-            "file": "src/backend/file-service/writers.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/logger.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/own-account-store.js",
-            "count": 1
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 38,
-        "fileSpan": 12
-      },
-      {
         "name": "FileValidationError",
         "defFiles": [
           "src/backend/balance-seed-store.js",
@@ -280,6 +323,129 @@
         ],
         "totalHits": 42,
         "fileSpan": 9
+      },
+      {
+        "name": "PENDING_COLUMNS",
+        "defFiles": [
+          "src/backend/pending-db/migrations.js",
+          "src/backend/pending-db/month-repository.js",
+          "src/backend/pending-export/writer.js",
+          "src/backend/pending-import/validator.js",
+          "src/backend/pending-import/worker.js",
+          "src/backend/pending-reconcile/engine.js",
+          "src/main-process/pending-archive-worker.js",
+          "src/main-process/pending-session.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/migrations.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-db/month-repository.js",
+            "count": 5
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/pending-import/validator.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pending-archive-worker.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 6
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 33,
+        "fileSpan": 9
+      },
+      {
+        "name": "XLSX",
+        "defFiles": [
+          "src/backend/file-service/normalizers.js",
+          "src/backend/file-service/readers.js",
+          "src/backend/file-service/writers.js",
+          "src/backend/pending-export/writer.js",
+          "src/main-process/pending-session.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service/normalizers.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/file-service/writers.js",
+            "count": 20
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 9
+          },
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 9
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 45,
+        "fileSpan": 6
+      },
+      {
+        "name": "dialog",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 169
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 26
+          },
+          {
+            "file": "src/renderer-previews.js",
+            "count": 6
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 71
+          }
+        ],
+        "totalHits": 273,
+        "fileSpan": 5
       },
       {
         "name": "parseNumericValue",
@@ -404,32 +570,55 @@
         "fileSpan": 5
       },
       {
-        "name": "XLSX",
+        "name": "state",
         "defFiles": [
-          "src/backend/file-service/normalizers.js",
-          "src/backend/file-service/readers.js",
-          "src/backend/file-service/writers.js",
-          "src/main.js"
+          "src/renderer.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/file-service/normalizers.js",
-            "count": 3
+            "file": "src/renderer-dialogs.js",
+            "count": 10
           },
           {
-            "file": "src/backend/file-service/readers.js",
-            "count": 3
+            "file": "src/renderer-pending.js",
+            "count": 54
           },
           {
-            "file": "src/backend/file-service/writers.js",
-            "count": 20
+            "file": "src/renderer-previews.js",
+            "count": 26
           },
           {
-            "file": "src/main.js",
-            "count": 1
+            "file": "src/renderer.js",
+            "count": 123
           }
         ],
-        "totalHits": 27,
+        "totalHits": 213,
+        "fileSpan": 4
+      },
+      {
+        "name": "elements",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 4
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 17
+          },
+          {
+            "file": "src/renderer-previews.js",
+            "count": 17
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 103
+          }
+        ],
+        "totalHits": 141,
         "fileSpan": 4
       },
       {
@@ -593,6 +782,35 @@
         "fileSpan": 4
       },
       {
+        "name": "DatabaseSync",
+        "defFiles": [
+          "src/backend/database.js",
+          "src/backend/pending-db.js",
+          "src/backend/pending-import/worker.js",
+          "src/main-process/pending-archive-worker.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-db.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pending-archive-worker.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 4
+      },
+      {
         "name": "listTemplates",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -695,6 +913,32 @@
           }
         ],
         "totalHits": 8,
+        "fileSpan": 4
+      },
+      {
+        "name": "listAllRuns",
+        "defFiles": [
+          "src/backend/pending-db/diff-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/diff-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 1
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 7,
         "fileSpan": 4
       },
       {
@@ -1012,72 +1256,6 @@
         "fileSpan": 4
       },
       {
-        "name": "dialog",
-        "defFiles": [
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main.js",
-            "count": 1
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 169
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 71
-          }
-        ],
-        "totalHits": 241,
-        "fileSpan": 3
-      },
-      {
-        "name": "state",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 10
-          },
-          {
-            "file": "src/renderer-previews.js",
-            "count": 6
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 122
-          }
-        ],
-        "totalHits": 138,
-        "fileSpan": 3
-      },
-      {
-        "name": "elements",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 4
-          },
-          {
-            "file": "src/renderer-previews.js",
-            "count": 10
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 100
-          }
-        ],
-        "totalHits": 114,
-        "fileSpan": 3
-      },
-      {
         "name": "setStatus",
         "defFiles": [
           "src/renderer.js"
@@ -1145,6 +1323,29 @@
         "fileSpan": 3
       },
       {
+        "name": "pad",
+        "defFiles": [
+          "src/backend/logger.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/logger.js",
+            "count": 11
+          },
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 6
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 18,
+        "fileSpan": 3
+      },
+      {
         "name": "CONCAT_FIELDS_MAPPING_FIELD",
         "defFiles": [
           "src/main.js",
@@ -1191,6 +1392,50 @@
         "fileSpan": 3
       },
       {
+        "name": "applyStatementResult",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 5
+          },
+          {
+            "file": "src/renderer-previews.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 3
+      },
+      {
+        "name": "setSetting",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/own-accounts-migration.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 3
+      },
+      {
         "name": "inferDateCellFormat",
         "defFiles": [
           "src/backend/file-service/normalizers.js"
@@ -1207,6 +1452,29 @@
           {
             "file": "src/backend/file-service/writers.js",
             "count": 4
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 3
+      },
+      {
+        "name": "parseJsonArray",
+        "defFiles": [
+          "src/backend/database/utils.js",
+          "src/backend/pending-db/rule-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/template-repository.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/database/utils.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/pending-db/rule-repository.js",
+            "count": 3
           }
         ],
         "totalHits": 9,
@@ -1349,6 +1617,28 @@
         "fileSpan": 3
       },
       {
+        "name": "getSetting",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/own-accounts-migration.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 3
+      },
+      {
         "name": "getTemplateBigAccounts",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -1365,28 +1655,6 @@
           {
             "file": "src/main-process/monthly-balance.js",
             "count": 2
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 3
-      },
-      {
-        "name": "setSetting",
-        "defFiles": [
-          "src/backend/database/settings-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database/own-accounts-migration.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database/settings-repository.js",
-            "count": 4
           }
         ],
         "totalHits": 8,
@@ -1413,28 +1681,6 @@
           }
         ],
         "totalHits": 8,
-        "fileSpan": 3
-      },
-      {
-        "name": "getSetting",
-        "defFiles": [
-          "src/backend/database/settings-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database/own-accounts-migration.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/database/settings-repository.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 7,
         "fileSpan": 3
       },
       {
@@ -1493,6 +1739,28 @@
           },
           {
             "file": "src/backend/database/template-repository.js",
+            "count": 3
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
+        "name": "getUiStyle",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
             "count": 3
           },
           {
@@ -1594,6 +1862,30 @@
         "fileSpan": 3
       },
       {
+        "name": "main",
+        "defFiles": [
+          "src/backend/file-service/pdf-worker.js",
+          "src/backend/pending-import/worker.js",
+          "src/main-process/pending-archive-worker.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service/pdf-worker.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pending-archive-worker.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
         "name": "readRowsWithMetadata",
         "defFiles": [
           "src/backend/file-service/readers.js"
@@ -1632,6 +1924,30 @@
           {
             "file": "src/main.js",
             "count": 1
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
+        "name": "runMigrations",
+        "defFiles": [
+          "src/backend/pending-db.js",
+          "src/backend/pending-db/migrations.js",
+          "src/backend/pending-import/worker.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-db/migrations.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 2
           }
         ],
         "totalHits": 6,
@@ -1705,6 +2021,28 @@
         "fileSpan": 3
       },
       {
+        "name": "getRule",
+        "defFiles": [
+          "src/backend/pending-db/rule-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/rule-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
         "name": "getStatementSessionEntries",
         "defFiles": [
           "src/main-process/statement-session.js"
@@ -1749,6 +2087,28 @@
         "fileSpan": 3
       },
       {
+        "name": "listMonths",
+        "defFiles": [
+          "src/backend/pending-db/month-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/month-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
         "name": "mergeMappedDetailRows",
         "defFiles": [
           "src/main-process/statement-session.js"
@@ -1768,6 +2128,50 @@
           }
         ],
         "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
+        "name": "setUiStyle",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
+        "name": "exportAggregate",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 4,
         "fileSpan": 3
       },
       {
@@ -1793,9 +2197,67 @@
         ],
         "totalHits": 4,
         "fileSpan": 3
+      },
+      {
+        "name": "createHash",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/validator.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 1
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 3
       }
     ],
     "paired": [
+      {
+        "name": "MODULES",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer-previews.js",
+            "count": 29
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 9
+          }
+        ],
+        "totalHits": 38,
+        "fileSpan": 2
+      },
+      {
+        "name": "setCurrentModule",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer-previews.js",
+            "count": 29
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 33,
+        "fileSpan": 2
+      },
       {
         "name": "templateRepository",
         "defFiles": [
@@ -1816,36 +2278,19 @@
         "fileSpan": 2
       },
       {
-        "name": "MODULES",
+        "name": "emit",
         "defFiles": [
-          "src/renderer.js"
+          "src/backend/pending-import/worker.js",
+          "src/main-process/pending-archive-worker.js"
         ],
         "refFiles": [
           {
-            "file": "src/renderer-previews.js",
-            "count": 16
+            "file": "src/backend/pending-import/worker.js",
+            "count": 10
           },
           {
-            "file": "src/renderer.js",
-            "count": 7
-          }
-        ],
-        "totalHits": 23,
-        "fileSpan": 2
-      },
-      {
-        "name": "setCurrentModule",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer-previews.js",
-            "count": 16
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 4
+            "file": "src/main-process/pending-archive-worker.js",
+            "count": 10
           }
         ],
         "totalHits": 20,
@@ -1867,6 +2312,25 @@
           }
         ],
         "totalHits": 17,
+        "fileSpan": 2
+      },
+      {
+        "name": "settingsRepository",
+        "defFiles": [
+          "src/backend/database.js",
+          "src/backend/database/own-accounts-migration.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 12
+          },
+          {
+            "file": "src/backend/database/own-accounts-migration.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 16,
         "fileSpan": 2
       },
       {
@@ -1906,18 +2370,17 @@
         "fileSpan": 2
       },
       {
-        "name": "settingsRepository",
+        "name": "rendererPending",
         "defFiles": [
-          "src/backend/database.js",
-          "src/backend/database/own-accounts-migration.js"
+          "src/renderer.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/database.js",
+            "file": "src/renderer-previews.js",
             "count": 9
           },
           {
-            "file": "src/backend/database/own-accounts-migration.js",
+            "file": "src/renderer.js",
             "count": 4
           }
         ],
@@ -1940,43 +2403,6 @@
           }
         ],
         "totalHits": 12,
-        "fileSpan": 2
-      },
-      {
-        "name": "pad",
-        "defFiles": [
-          "src/backend/logger.js",
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/logger.js",
-            "count": 11
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 12,
-        "fileSpan": 2
-      },
-      {
-        "name": "applyStatementResult",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 5
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 11,
         "fileSpan": 2
       },
       {
@@ -2013,6 +2439,25 @@
           }
         ],
         "totalHits": 10,
+        "fileSpan": 2
+      },
+      {
+        "name": "diffRepo",
+        "defFiles": [
+          "src/backend/pending-export/writer.js",
+          "src/backend/pending-reconcile/engine.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 9,
         "fileSpan": 2
       },
       {
@@ -2064,6 +2509,25 @@
           {
             "file": "src/renderer.js",
             "count": 6
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 2
+      },
+      {
+        "name": "monthRepo",
+        "defFiles": [
+          "src/backend/pending-import/worker.js",
+          "src/main-process/pending-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 4
           }
         ],
         "totalHits": 8,
@@ -2173,6 +2637,24 @@
           {
             "file": "src/backend/database/utils.js",
             "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "closeAllNewAccountCurrencyDropdowns",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer-previews.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 5
           }
         ],
         "totalHits": 6,
@@ -2449,24 +2931,6 @@
         "fileSpan": 2
       },
       {
-        "name": "parseJsonArray",
-        "defFiles": [
-          "src/backend/database/utils.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/template-repository.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/database/utils.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 2
-      },
-      {
         "name": "setExportAvailability",
         "defFiles": [
           "src/renderer.js"
@@ -2518,6 +2982,25 @@
           }
         ],
         "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "applyHeaderRowFont",
+        "defFiles": [
+          "src/backend/file-service/writers.js",
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service/writers.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 5,
         "fileSpan": 2
       },
       {
@@ -2629,6 +3112,60 @@
         "fileSpan": 2
       },
       {
+        "name": "initialize",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer-pending.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "listDiffRows",
+        "defFiles": [
+          "src/backend/pending-db/diff-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/diff-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "openModuleMenu",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer-previews.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "performance",
         "defFiles": [
           "src/main.js"
@@ -2701,6 +3238,81 @@
         "fileSpan": 2
       },
       {
+        "name": "computeRowHash",
+        "defFiles": [
+          "src/backend/pending-import/validator.js",
+          "src/backend/pending-import/worker.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "createPendingSession",
+        "defFiles": [
+          "src/main-process/pending-session.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "crypto",
+        "defFiles": [
+          "src/backend/pending-import/validator.js",
+          "src/backend/pending-reconcile/engine.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "ensureUiStyleDefault",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "extractEnumValuesFromImportedFile",
         "defFiles": [
           "src/backend/file-service/readers.js"
@@ -2766,6 +3378,24 @@
           },
           {
             "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "getMonthMeta",
+        "defFiles": [
+          "src/backend/pending-db/month-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/month-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pending-session.js",
             "count": 2
           }
         ],
@@ -2919,6 +3549,25 @@
         "fileSpan": 2
       },
       {
+        "name": "PENDING_DB_FILENAME",
+        "defFiles": [
+          "src/backend/pending-db.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "randomUUID",
         "defFiles": [
           "src/backend/database/migrations.js",
@@ -2967,6 +3616,24 @@
           },
           {
             "file": "src/backend/file-service/normalizers.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "runReconciliation",
+        "defFiles": [
+          "src/backend/pending-reconcile/engine.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer-pending.js",
             "count": 2
           }
         ],
@@ -3082,6 +3749,44 @@
         "fileSpan": 2
       },
       {
+        "name": "validateHeaders",
+        "defFiles": [
+          "src/backend/pending-import/validator.js",
+          "src/backend/pending-import/worker.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "writeStreamedXlsx",
+        "defFiles": [
+          "src/backend/pending-import/streaming-xlsx-writer.js",
+          "src/main-process/pending-archive-worker.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pending-archive-worker.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "AppDatabase",
         "defFiles": [
           "src/backend/database.js",
@@ -3173,6 +3878,60 @@
         "fileSpan": 2
       },
       {
+        "name": "countRowsInMonth",
+        "defFiles": [
+          "src/backend/pending-db/month-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/month-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "createRowInserter",
+        "defFiles": [
+          "src/backend/pending-db/month-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/month-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "createRun",
+        "defFiles": [
+          "src/backend/pending-db/diff-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/diff-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "createStatementGenerationHelpers",
         "defFiles": [
           "src/main-process/statement-generation.js"
@@ -3184,6 +3943,42 @@
           },
           {
             "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "deleteMonth",
+        "defFiles": [
+          "src/backend/pending-db/month-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/month-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "getLatestRunForMonthPair",
+        "defFiles": [
+          "src/backend/pending-db/diff-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/diff-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
             "count": 1
           }
         ],
@@ -3209,6 +4004,24 @@
         "fileSpan": 2
       },
       {
+        "name": "getRunById",
+        "defFiles": [
+          "src/backend/pending-db/diff-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/diff-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "getTemplatesByBankName",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -3221,6 +4034,62 @@
           {
             "file": "src/backend/database/template-repository.js",
             "count": 2
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "JSZip",
+        "defFiles": [
+          "src/backend/pending-import/streaming-xlsx-reader.js",
+          "src/backend/pending-import/streaming-xlsx-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "listRunsForMonthPair",
+        "defFiles": [
+          "src/backend/pending-db/diff-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/diff-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "openPendingDb",
+        "defFiles": [
+          "src/backend/pending-db.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
           }
         ],
         "totalHits": 3,
@@ -3357,6 +4226,42 @@
         "fileSpan": 2
       },
       {
+        "name": "updateRunStats",
+        "defFiles": [
+          "src/backend/pending-db/diff-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/diff-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "upsertMonthMeta",
+        "defFiles": [
+          "src/backend/pending-db/month-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/month-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "writeBigAccountMode",
         "defFiles": [
           "src/backend/big-account-mode-store.js",
@@ -3441,10 +4346,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 61
+            "count": 77
           }
         ],
-        "totalHits": 61,
+        "totalHits": 77,
         "fileSpan": 1
       },
       {
@@ -3700,6 +4605,48 @@
         "fileSpan": 1
       },
       {
+        "name": "appendSheetWithHeaderFont",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
+        "name": "FUND_TYPE_COLUMN",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildSingleExportRow",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
         "name": "closeBackgroundPalette",
         "defFiles": [
           "src/renderer.js"
@@ -3742,6 +4689,20 @@
         "fileSpan": 1
       },
       {
+        "name": "electronUtilityProcess",
+        "defFiles": [
+          "src/main-process/pending-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
         "name": "mixColor",
         "defFiles": [
           "src/renderer.js"
@@ -3749,6 +4710,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
+        "name": "NODE_MAX_OLD_SPACE_MB",
+        "defFiles": [
+          "src/main-process/pending-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pending-session.js",
             "count": 6
           }
         ],
@@ -3767,6 +4742,34 @@
           }
         ],
         "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
+        "name": "XML_HEAD",
+        "defFiles": [
+          "src/backend/pending-import/streaming-xlsx-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildExportRowsForDiff",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
         "fileSpan": 1
       },
       {
@@ -3805,6 +4808,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "mapRun",
+        "defFiles": [
+          "src/backend/pending-db/diff-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/diff-repository.js",
             "count": 5
           }
         ],
@@ -3882,13 +4899,55 @@
         "fileSpan": 1
       },
       {
-        "name": "closeAllNewAccountCurrencyDropdowns",
+        "name": "assertFieldsInPendingColumns",
         "defFiles": [
-          "src/renderer.js"
+          "src/backend/pending-reconcile/engine.js"
         ],
         "refFiles": [
           {
-            "file": "src/renderer.js",
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildHeaders",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildRowXml",
+        "defFiles": [
+          "src/backend/pending-import/streaming-xlsx-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "computeAmountDiff",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
             "count": 4
           }
         ],
@@ -4022,6 +5081,20 @@
         "fileSpan": 1
       },
       {
+        "name": "RULE_GLOBAL_ID",
+        "defFiles": [
+          "src/backend/pending-db/rule-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/rule-repository.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "syncNewAccountDropdownFlag",
         "defFiles": [
           "src/renderer.js"
@@ -4029,6 +5102,34 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "UI_STYLE_KEY",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "UI_STYLE_VALID",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
             "count": 4
           }
         ],
@@ -4078,20 +5179,6 @@
         "fileSpan": 1
       },
       {
-        "name": "applyHeaderRowFont",
-        "defFiles": [
-          "src/backend/file-service/writers.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service/writers.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "BACKGROUND_FILE_HINT",
         "defFiles": [
           "src/renderer.js"
@@ -4099,6 +5186,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildChangedClause",
+        "defFiles": [
+          "src/backend/pending-reconcile/engine.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
             "count": 3
           }
         ],
@@ -4176,6 +5277,34 @@
         "fileSpan": 1
       },
       {
+        "name": "columnLetter",
+        "defFiles": [
+          "src/backend/pending-import/streaming-xlsx-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "computeChangedFields",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "countNonEmptyCells",
         "defFiles": [
           "src/backend/file-service/readers.js"
@@ -4204,6 +5333,20 @@
         "fileSpan": 1
       },
       {
+        "name": "ensureMatchIndex",
+        "defFiles": [
+          "src/backend/pending-reconcile/engine.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "getEnumStatusMessage",
         "defFiles": [
           "src/renderer.js"
@@ -4211,6 +5354,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "getMetaColIndices",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
             "count": 3
           }
         ],
@@ -4372,6 +5529,20 @@
         "fileSpan": 1
       },
       {
+        "name": "makeFieldIndexName",
+        "defFiles": [
+          "src/backend/pending-reconcile/engine.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "MIGRATION_LOG_FILENAME",
         "defFiles": [
           "src/backend/database/own-accounts-migration.js"
@@ -4442,6 +5613,20 @@
         "fileSpan": 1
       },
       {
+        "name": "readPendingRow",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "readWorkbookRows",
         "defFiles": [
           "src/backend/file-service/readers.js"
@@ -4484,6 +5669,20 @@
         "fileSpan": 1
       },
       {
+        "name": "sanitizeSheetName",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "sanitizeSignedAmountValue",
         "defFiles": [
           "src/backend/file-service/normalizers.js"
@@ -4491,6 +5690,34 @@
         "refFiles": [
           {
             "file": "src/backend/file-service/normalizers.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "SHEET_FUND_TYPE_DIFF_NAME",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "SHEET_SUMMARY_NAME",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
             "count": 3
           }
         ],
@@ -4540,6 +5767,20 @@
         "fileSpan": 1
       },
       {
+        "name": "UI_STYLE_DEFAULT",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "updateSelectedColorSwatch",
         "defFiles": [
           "src/renderer.js"
@@ -4568,6 +5809,34 @@
         "fileSpan": 1
       },
       {
+        "name": "WORKER_SCRIPT",
+        "defFiles": [
+          "src/main-process/pending-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "xmlEscape",
+        "defFiles": [
+          "src/backend/pending-import/streaming-xlsx-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "addNewAccountRow",
         "defFiles": [
           "src/renderer.js"
@@ -4575,6 +5844,48 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "AMOUNT_DIFF_COLUMN",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "ARCHIVE_WORKER_SCRIPT",
+        "defFiles": [
+          "src/main-process/pending-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "ARCHIVE_WORKER_THRESHOLD",
+        "defFiles": [
+          "src/main-process/pending-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pending-session.js",
             "count": 2
           }
         ],
@@ -4652,6 +5963,48 @@
         "fileSpan": 1
       },
       {
+        "name": "CALC_AMOUNT_DIFF_COLUMN",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "CHANGE_SIDE_COLUMN",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "CHANGED_FIELDS_COLUMN",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "chineseData",
         "defFiles": [
           "src/backend/file-service/pdf-worker.js"
@@ -4659,6 +6012,20 @@
         "refFiles": [
           {
             "file": "src/backend/file-service/pdf-worker.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "CONTENT_TYPES_XML",
+        "defFiles": [
+          "src/backend/pending-import/streaming-xlsx-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
             "count": 2
           }
         ],
@@ -4736,13 +6103,13 @@
         "fileSpan": 1
       },
       {
-        "name": "DatabaseSync",
+        "name": "DIFF_TYPE_COLUMN",
         "defFiles": [
-          "src/backend/database.js"
+          "src/backend/pending-export/writer.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/database.js",
+            "file": "src/backend/pending-export/writer.js",
             "count": 2
           }
         ],
@@ -4820,6 +6187,20 @@
         "fileSpan": 1
       },
       {
+        "name": "exportSingleRun",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "extractPdfRows",
         "defFiles": [
           "src/backend/file-service/pdf-worker.js"
@@ -4855,6 +6236,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "formatTimestamp",
+        "defFiles": [
+          "src/main-process/pending-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pending-session.js",
             "count": 2
           }
         ],
@@ -5044,6 +6439,20 @@
         "fileSpan": 1
       },
       {
+        "name": "HASH_SEPARATOR",
+        "defFiles": [
+          "src/backend/pending-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/validator.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "hasMoreThanTwoDecimalsFromString",
         "defFiles": [
           "src/backend/file-service/writers.js"
@@ -5058,13 +6467,13 @@
         "fileSpan": 1
       },
       {
-        "name": "hslToRgb",
+        "name": "heapStats",
         "defFiles": [
-          "src/renderer.js"
+          "src/backend/pending-import/worker.js"
         ],
         "refFiles": [
           {
-            "file": "src/renderer.js",
+            "file": "src/backend/pending-import/worker.js",
             "count": 2
           }
         ],
@@ -5072,7 +6481,7 @@
         "fileSpan": 1
       },
       {
-        "name": "initialize",
+        "name": "hslToRgb",
         "defFiles": [
           "src/renderer.js"
         ],
@@ -5114,13 +6523,13 @@
         "fileSpan": 1
       },
       {
-        "name": "main",
+        "name": "loadJobMeta",
         "defFiles": [
-          "src/backend/file-service/pdf-worker.js"
+          "src/backend/pending-import/worker.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/file-service/pdf-worker.js",
+            "file": "src/backend/pending-import/worker.js",
             "count": 2
           }
         ],
@@ -5142,13 +6551,13 @@
         "fileSpan": 1
       },
       {
-        "name": "openModuleMenu",
+        "name": "MAX_ROW_ERRORS_EMITTED",
         "defFiles": [
-          "src/renderer.js"
+          "src/backend/pending-import/worker.js"
         ],
         "refFiles": [
           {
-            "file": "src/renderer.js",
+            "file": "src/backend/pending-import/worker.js",
             "count": 2
           }
         ],
@@ -5184,6 +6593,20 @@
         "fileSpan": 1
       },
       {
+        "name": "PAIR_ID_COLUMN",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "parseCsvText",
         "defFiles": [
           "src/backend/file-service/readers.js"
@@ -5205,6 +6628,48 @@
         "refFiles": [
           {
             "file": "src/backend/file-service/normalizers.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "parseSnapshot",
+        "defFiles": [
+          "src/backend/pending-db/diff-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/diff-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "pendingDb",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "Readable",
+        "defFiles": [
+          "src/backend/pending-import/streaming-xlsx-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
             "count": 2
           }
         ],
@@ -5261,6 +6726,20 @@
         "refFiles": [
           {
             "file": "src/backend/file-service/readers.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "readXlsxStreamed",
+        "defFiles": [
+          "src/backend/pending-import/worker.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/worker.js",
             "count": 2
           }
         ],
@@ -5366,6 +6845,20 @@
         "fileSpan": 1
       },
       {
+        "name": "ROOT_RELS_XML",
+        "defFiles": [
+          "src/backend/pending-import/streaming-xlsx-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "setBackgroundSpectrumSelection",
         "defFiles": [
           "src/renderer.js"
@@ -5373,6 +6866,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "SHEET_MONTHLY_BREAKDOWN_NAME",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
             "count": 2
           }
         ],
@@ -5401,6 +6908,20 @@
         "refFiles": [
           {
             "file": "src/backend/file-service/readers.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "spawn",
+        "defFiles": [
+          "src/main-process/pending-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pending-session.js",
             "count": 2
           }
         ],
@@ -5476,6 +6997,62 @@
         ],
         "totalHits": 2,
         "fileSpan": 1
+      },
+      {
+        "name": "upsertRule",
+        "defFiles": [
+          "src/backend/pending-db/rule-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/rule-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "v8",
+        "defFiles": [
+          "src/backend/pending-import/worker.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "WORKBOOK_RELS_XML",
+        "defFiles": [
+          "src/backend/pending-import/streaming-xlsx-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "WORKBOOK_XML",
+        "defFiles": [
+          "src/backend/pending-import/streaming-xlsx-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
       }
     ]
   },
@@ -5494,6 +7071,9 @@
         "src/backend/file-service/writers.js",
         "src/backend/logger.js",
         "src/backend/own-account-store.js",
+        "src/backend/pending-db.js",
+        "src/backend/pending-import/worker.js",
+        "src/main-process/pending-session.js",
         "src/main-process/statement-generation.js",
         "src/main-process/statement-session.js",
         "src/main.js"
@@ -5544,6 +7124,22 @@
           "count": 1
         },
         {
+          "file": "src/backend/pending-db.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/pending-session.js",
+          "count": 6
+        },
+        {
           "file": "src/main-process/statement-generation.js",
           "count": 3
         },
@@ -5554,10 +7150,103 @@
         {
           "file": "src/main.js",
           "count": 1
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 2
         }
       ],
-      "totalHits": 42,
-      "fileSpan": 14
+      "totalHits": 57,
+      "fileSpan": 19
+    },
+    {
+      "name": "fs",
+      "defFiles": [
+        "src/backend/balance-adjustment-store.js",
+        "src/backend/balance-seed-store.js",
+        "src/backend/big-account-mode-store.js",
+        "src/backend/big-account-order-store.js",
+        "src/backend/database.js",
+        "src/backend/database/own-accounts-migration.js",
+        "src/backend/file-service/pdf-worker.js",
+        "src/backend/file-service/readers.js",
+        "src/backend/file-service/writers.js",
+        "src/backend/logger.js",
+        "src/backend/own-account-store.js",
+        "src/backend/pending-import/streaming-xlsx-reader.js",
+        "src/backend/pending-import/streaming-xlsx-writer.js",
+        "src/backend/pending-import/worker.js",
+        "src/main-process/pending-session.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/balance-adjustment-store.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/balance-seed-store.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/big-account-mode-store.js",
+          "count": 5
+        },
+        {
+          "file": "src/backend/big-account-order-store.js",
+          "count": 5
+        },
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/own-accounts-migration.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/file-service/pdf-worker.js",
+          "count": 8
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/file-service/writers.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/logger.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/own-account-store.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pending-session.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 45,
+      "fileSpan": 16
     },
     {
       "name": "normalizeCell",
@@ -5629,75 +7318,6 @@
       "fileSpan": 13
     },
     {
-      "name": "fs",
-      "defFiles": [
-        "src/backend/balance-adjustment-store.js",
-        "src/backend/balance-seed-store.js",
-        "src/backend/big-account-mode-store.js",
-        "src/backend/big-account-order-store.js",
-        "src/backend/database.js",
-        "src/backend/database/own-accounts-migration.js",
-        "src/backend/file-service/pdf-worker.js",
-        "src/backend/file-service/readers.js",
-        "src/backend/file-service/writers.js",
-        "src/backend/logger.js",
-        "src/backend/own-account-store.js",
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/balance-adjustment-store.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/balance-seed-store.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/big-account-mode-store.js",
-          "count": 5
-        },
-        {
-          "file": "src/backend/big-account-order-store.js",
-          "count": 5
-        },
-        {
-          "file": "src/backend/database.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database/own-accounts-migration.js",
-          "count": 6
-        },
-        {
-          "file": "src/backend/file-service/pdf-worker.js",
-          "count": 8
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 4
-        },
-        {
-          "file": "src/backend/file-service/writers.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/logger.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/own-account-store.js",
-          "count": 1
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 38,
-      "fileSpan": 12
-    },
-    {
       "name": "FileValidationError",
       "defFiles": [
         "src/backend/balance-seed-store.js",
@@ -5746,6 +7366,129 @@
       ],
       "totalHits": 42,
       "fileSpan": 9
+    },
+    {
+      "name": "PENDING_COLUMNS",
+      "defFiles": [
+        "src/backend/pending-db/migrations.js",
+        "src/backend/pending-db/month-repository.js",
+        "src/backend/pending-export/writer.js",
+        "src/backend/pending-import/validator.js",
+        "src/backend/pending-import/worker.js",
+        "src/backend/pending-reconcile/engine.js",
+        "src/main-process/pending-archive-worker.js",
+        "src/main-process/pending-session.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/migrations.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-db/month-repository.js",
+          "count": 5
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/pending-import/validator.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-reconcile/engine.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pending-archive-worker.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/pending-session.js",
+          "count": 6
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 33,
+      "fileSpan": 9
+    },
+    {
+      "name": "XLSX",
+      "defFiles": [
+        "src/backend/file-service/normalizers.js",
+        "src/backend/file-service/readers.js",
+        "src/backend/file-service/writers.js",
+        "src/backend/pending-export/writer.js",
+        "src/main-process/pending-session.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service/normalizers.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/file-service/writers.js",
+          "count": 20
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 9
+        },
+        {
+          "file": "src/main-process/pending-session.js",
+          "count": 9
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 45,
+      "fileSpan": 6
+    },
+    {
+      "name": "dialog",
+      "defFiles": [
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 169
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 26
+        },
+        {
+          "file": "src/renderer-previews.js",
+          "count": 6
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 71
+        }
+      ],
+      "totalHits": 273,
+      "fileSpan": 5
     },
     {
       "name": "parseNumericValue",
@@ -5870,32 +7613,55 @@
       "fileSpan": 5
     },
     {
-      "name": "XLSX",
+      "name": "state",
       "defFiles": [
-        "src/backend/file-service/normalizers.js",
-        "src/backend/file-service/readers.js",
-        "src/backend/file-service/writers.js",
-        "src/main.js"
+        "src/renderer.js"
       ],
       "refFiles": [
         {
-          "file": "src/backend/file-service/normalizers.js",
-          "count": 3
+          "file": "src/renderer-dialogs.js",
+          "count": 10
         },
         {
-          "file": "src/backend/file-service/readers.js",
-          "count": 3
+          "file": "src/renderer-pending.js",
+          "count": 54
         },
         {
-          "file": "src/backend/file-service/writers.js",
-          "count": 20
+          "file": "src/renderer-previews.js",
+          "count": 26
         },
         {
-          "file": "src/main.js",
-          "count": 1
+          "file": "src/renderer.js",
+          "count": 123
         }
       ],
-      "totalHits": 27,
+      "totalHits": 213,
+      "fileSpan": 4
+    },
+    {
+      "name": "elements",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 4
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 17
+        },
+        {
+          "file": "src/renderer-previews.js",
+          "count": 17
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 103
+        }
+      ],
+      "totalHits": 141,
       "fileSpan": 4
     },
     {
@@ -6059,6 +7825,35 @@
       "fileSpan": 4
     },
     {
+      "name": "DatabaseSync",
+      "defFiles": [
+        "src/backend/database.js",
+        "src/backend/pending-db.js",
+        "src/backend/pending-import/worker.js",
+        "src/main-process/pending-archive-worker.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-db.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pending-archive-worker.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 4
+    },
+    {
       "name": "listTemplates",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -6161,6 +7956,32 @@
         }
       ],
       "totalHits": 8,
+      "fileSpan": 4
+    },
+    {
+      "name": "listAllRuns",
+      "defFiles": [
+        "src/backend/pending-db/diff-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/diff-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 1
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 7,
       "fileSpan": 4
     },
     {
@@ -6478,72 +8299,6 @@
       "fileSpan": 4
     },
     {
-      "name": "dialog",
-      "defFiles": [
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main.js",
-          "count": 1
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 169
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 71
-        }
-      ],
-      "totalHits": 241,
-      "fileSpan": 3
-    },
-    {
-      "name": "state",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 10
-        },
-        {
-          "file": "src/renderer-previews.js",
-          "count": 6
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 122
-        }
-      ],
-      "totalHits": 138,
-      "fileSpan": 3
-    },
-    {
-      "name": "elements",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 4
-        },
-        {
-          "file": "src/renderer-previews.js",
-          "count": 10
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 100
-        }
-      ],
-      "totalHits": 114,
-      "fileSpan": 3
-    },
-    {
       "name": "setStatus",
       "defFiles": [
         "src/renderer.js"
@@ -6611,6 +8366,29 @@
       "fileSpan": 3
     },
     {
+      "name": "pad",
+      "defFiles": [
+        "src/backend/logger.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/logger.js",
+          "count": 11
+        },
+        {
+          "file": "src/main-process/pending-session.js",
+          "count": 6
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 18,
+      "fileSpan": 3
+    },
+    {
       "name": "CONCAT_FIELDS_MAPPING_FIELD",
       "defFiles": [
         "src/main.js",
@@ -6657,6 +8435,50 @@
       "fileSpan": 3
     },
     {
+      "name": "applyStatementResult",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 5
+        },
+        {
+          "file": "src/renderer-previews.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 7
+        }
+      ],
+      "totalHits": 13,
+      "fileSpan": 3
+    },
+    {
+      "name": "setSetting",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/own-accounts-migration.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 6
+        }
+      ],
+      "totalHits": 10,
+      "fileSpan": 3
+    },
+    {
       "name": "inferDateCellFormat",
       "defFiles": [
         "src/backend/file-service/normalizers.js"
@@ -6673,6 +8495,29 @@
         {
           "file": "src/backend/file-service/writers.js",
           "count": 4
+        }
+      ],
+      "totalHits": 9,
+      "fileSpan": 3
+    },
+    {
+      "name": "parseJsonArray",
+      "defFiles": [
+        "src/backend/database/utils.js",
+        "src/backend/pending-db/rule-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/template-repository.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/database/utils.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/pending-db/rule-repository.js",
+          "count": 3
         }
       ],
       "totalHits": 9,
@@ -6815,6 +8660,28 @@
       "fileSpan": 3
     },
     {
+      "name": "getSetting",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/own-accounts-migration.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 3
+    },
+    {
       "name": "getTemplateBigAccounts",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -6831,28 +8698,6 @@
         {
           "file": "src/main-process/monthly-balance.js",
           "count": 2
-        }
-      ],
-      "totalHits": 8,
-      "fileSpan": 3
-    },
-    {
-      "name": "setSetting",
-      "defFiles": [
-        "src/backend/database/settings-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database/own-accounts-migration.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database/settings-repository.js",
-          "count": 4
         }
       ],
       "totalHits": 8,
@@ -6879,28 +8724,6 @@
         }
       ],
       "totalHits": 8,
-      "fileSpan": 3
-    },
-    {
-      "name": "getSetting",
-      "defFiles": [
-        "src/backend/database/settings-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database/own-accounts-migration.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/database/settings-repository.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 7,
       "fileSpan": 3
     },
     {
@@ -6959,6 +8782,28 @@
         },
         {
           "file": "src/backend/database/template-repository.js",
+          "count": 3
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
+      "name": "getUiStyle",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
           "count": 3
         },
         {
@@ -7060,6 +8905,30 @@
       "fileSpan": 3
     },
     {
+      "name": "main",
+      "defFiles": [
+        "src/backend/file-service/pdf-worker.js",
+        "src/backend/pending-import/worker.js",
+        "src/main-process/pending-archive-worker.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service/pdf-worker.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pending-archive-worker.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
       "name": "readRowsWithMetadata",
       "defFiles": [
         "src/backend/file-service/readers.js"
@@ -7098,6 +8967,30 @@
         {
           "file": "src/main.js",
           "count": 1
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
+      "name": "runMigrations",
+      "defFiles": [
+        "src/backend/pending-db.js",
+        "src/backend/pending-db/migrations.js",
+        "src/backend/pending-import/worker.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-db/migrations.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 2
         }
       ],
       "totalHits": 6,
@@ -7171,6 +9064,28 @@
       "fileSpan": 3
     },
     {
+      "name": "getRule",
+      "defFiles": [
+        "src/backend/pending-db/rule-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/rule-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
       "name": "getStatementSessionEntries",
       "defFiles": [
         "src/main-process/statement-session.js"
@@ -7215,6 +9130,28 @@
       "fileSpan": 3
     },
     {
+      "name": "listMonths",
+      "defFiles": [
+        "src/backend/pending-db/month-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/month-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
       "name": "mergeMappedDetailRows",
       "defFiles": [
         "src/main-process/statement-session.js"
@@ -7234,6 +9171,50 @@
         }
       ],
       "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
+      "name": "setUiStyle",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
+      "name": "exportAggregate",
+      "defFiles": [
+        "src/backend/pending-export/writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 4,
       "fileSpan": 3
     },
     {
@@ -7261,6 +9242,64 @@
       "fileSpan": 3
     },
     {
+      "name": "createHash",
+      "defFiles": [
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-import/validator.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-reconcile/engine.js",
+          "count": 1
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 3
+    },
+    {
+      "name": "MODULES",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/renderer-previews.js",
+          "count": 29
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 9
+        }
+      ],
+      "totalHits": 38,
+      "fileSpan": 2
+    },
+    {
+      "name": "setCurrentModule",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/renderer-previews.js",
+          "count": 29
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 33,
+      "fileSpan": 2
+    },
+    {
       "name": "templateRepository",
       "defFiles": [
         "src/backend/database.js",
@@ -7280,36 +9319,19 @@
       "fileSpan": 2
     },
     {
-      "name": "MODULES",
+      "name": "emit",
       "defFiles": [
-        "src/renderer.js"
+        "src/backend/pending-import/worker.js",
+        "src/main-process/pending-archive-worker.js"
       ],
       "refFiles": [
         {
-          "file": "src/renderer-previews.js",
-          "count": 16
+          "file": "src/backend/pending-import/worker.js",
+          "count": 10
         },
         {
-          "file": "src/renderer.js",
-          "count": 7
-        }
-      ],
-      "totalHits": 23,
-      "fileSpan": 2
-    },
-    {
-      "name": "setCurrentModule",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/renderer-previews.js",
-          "count": 16
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 4
+          "file": "src/main-process/pending-archive-worker.js",
+          "count": 10
         }
       ],
       "totalHits": 20,
@@ -7331,6 +9353,25 @@
         }
       ],
       "totalHits": 17,
+      "fileSpan": 2
+    },
+    {
+      "name": "settingsRepository",
+      "defFiles": [
+        "src/backend/database.js",
+        "src/backend/database/own-accounts-migration.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 12
+        },
+        {
+          "file": "src/backend/database/own-accounts-migration.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 16,
       "fileSpan": 2
     },
     {
@@ -7370,18 +9411,17 @@
       "fileSpan": 2
     },
     {
-      "name": "settingsRepository",
+      "name": "rendererPending",
       "defFiles": [
-        "src/backend/database.js",
-        "src/backend/database/own-accounts-migration.js"
+        "src/renderer.js"
       ],
       "refFiles": [
         {
-          "file": "src/backend/database.js",
+          "file": "src/renderer-previews.js",
           "count": 9
         },
         {
-          "file": "src/backend/database/own-accounts-migration.js",
+          "file": "src/renderer.js",
           "count": 4
         }
       ],
@@ -7404,43 +9444,6 @@
         }
       ],
       "totalHits": 12,
-      "fileSpan": 2
-    },
-    {
-      "name": "pad",
-      "defFiles": [
-        "src/backend/logger.js",
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/logger.js",
-          "count": 11
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 12,
-      "fileSpan": 2
-    },
-    {
-      "name": "applyStatementResult",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 5
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 6
-        }
-      ],
-      "totalHits": 11,
       "fileSpan": 2
     },
     {
@@ -7477,6 +9480,25 @@
         }
       ],
       "totalHits": 10,
+      "fileSpan": 2
+    },
+    {
+      "name": "diffRepo",
+      "defFiles": [
+        "src/backend/pending-export/writer.js",
+        "src/backend/pending-reconcile/engine.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/pending-reconcile/engine.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 9,
       "fileSpan": 2
     },
     {
@@ -7528,6 +9550,25 @@
         {
           "file": "src/renderer.js",
           "count": 6
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 2
+    },
+    {
+      "name": "monthRepo",
+      "defFiles": [
+        "src/backend/pending-import/worker.js",
+        "src/main-process/pending-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/pending-session.js",
+          "count": 4
         }
       ],
       "totalHits": 8,
@@ -7637,6 +9678,24 @@
         {
           "file": "src/backend/database/utils.js",
           "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "closeAllNewAccountCurrencyDropdowns",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/renderer-previews.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 5
         }
       ],
       "totalHits": 6,
@@ -7913,24 +9972,6 @@
       "fileSpan": 2
     },
     {
-      "name": "parseJsonArray",
-      "defFiles": [
-        "src/backend/database/utils.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database/template-repository.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/database/utils.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 2
-    },
-    {
       "name": "setExportAvailability",
       "defFiles": [
         "src/renderer.js"
@@ -7982,6 +10023,25 @@
         }
       ],
       "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "applyHeaderRowFont",
+      "defFiles": [
+        "src/backend/file-service/writers.js",
+        "src/backend/pending-export/writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service/writers.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 5,
       "fileSpan": 2
     },
     {
@@ -8093,6 +10153,60 @@
       "fileSpan": 2
     },
     {
+      "name": "initialize",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/renderer-pending.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "listDiffRows",
+      "defFiles": [
+        "src/backend/pending-db/diff-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/diff-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "openModuleMenu",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/renderer-previews.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "performance",
       "defFiles": [
         "src/main.js"
@@ -8165,6 +10279,81 @@
       "fileSpan": 2
     },
     {
+      "name": "computeRowHash",
+      "defFiles": [
+        "src/backend/pending-import/validator.js",
+        "src/backend/pending-import/worker.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "createPendingSession",
+      "defFiles": [
+        "src/main-process/pending-session.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/pending-session.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "crypto",
+      "defFiles": [
+        "src/backend/pending-import/validator.js",
+        "src/backend/pending-reconcile/engine.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-reconcile/engine.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "ensureUiStyleDefault",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "extractEnumValuesFromImportedFile",
       "defFiles": [
         "src/backend/file-service/readers.js"
@@ -8230,6 +10419,24 @@
         },
         {
           "file": "src/backend/database/settings-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "getMonthMeta",
+      "defFiles": [
+        "src/backend/pending-db/month-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/month-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pending-session.js",
           "count": 2
         }
       ],
@@ -8383,6 +10590,25 @@
       "fileSpan": 2
     },
     {
+      "name": "PENDING_DB_FILENAME",
+      "defFiles": [
+        "src/backend/pending-db.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "randomUUID",
       "defFiles": [
         "src/backend/database/migrations.js",
@@ -8431,6 +10657,24 @@
         },
         {
           "file": "src/backend/file-service/normalizers.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "runReconciliation",
+      "defFiles": [
+        "src/backend/pending-reconcile/engine.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-reconcile/engine.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer-pending.js",
           "count": 2
         }
       ],
@@ -8546,6 +10790,44 @@
       "fileSpan": 2
     },
     {
+      "name": "validateHeaders",
+      "defFiles": [
+        "src/backend/pending-import/validator.js",
+        "src/backend/pending-import/worker.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "writeStreamedXlsx",
+      "defFiles": [
+        "src/backend/pending-import/streaming-xlsx-writer.js",
+        "src/main-process/pending-archive-worker.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pending-archive-worker.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "AppDatabase",
       "defFiles": [
         "src/backend/database.js",
@@ -8637,6 +10919,60 @@
       "fileSpan": 2
     },
     {
+      "name": "countRowsInMonth",
+      "defFiles": [
+        "src/backend/pending-db/month-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/month-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pending-session.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "createRowInserter",
+      "defFiles": [
+        "src/backend/pending-db/month-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/month-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "createRun",
+      "defFiles": [
+        "src/backend/pending-db/diff-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/diff-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-reconcile/engine.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "createStatementGenerationHelpers",
       "defFiles": [
         "src/main-process/statement-generation.js"
@@ -8648,6 +10984,42 @@
         },
         {
           "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "deleteMonth",
+      "defFiles": [
+        "src/backend/pending-db/month-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/month-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "getLatestRunForMonthPair",
+      "defFiles": [
+        "src/backend/pending-db/diff-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/diff-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
           "count": 1
         }
       ],
@@ -8673,6 +11045,24 @@
       "fileSpan": 2
     },
     {
+      "name": "getRunById",
+      "defFiles": [
+        "src/backend/pending-db/diff-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/diff-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "getTemplatesByBankName",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -8685,6 +11075,62 @@
         {
           "file": "src/backend/database/template-repository.js",
           "count": 2
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "JSZip",
+      "defFiles": [
+        "src/backend/pending-import/streaming-xlsx-reader.js",
+        "src/backend/pending-import/streaming-xlsx-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "listRunsForMonthPair",
+      "defFiles": [
+        "src/backend/pending-db/diff-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/diff-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "openPendingDb",
+      "defFiles": [
+        "src/backend/pending-db.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
         }
       ],
       "totalHits": 3,
@@ -8814,6 +11260,42 @@
         },
         {
           "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "updateRunStats",
+      "defFiles": [
+        "src/backend/pending-db/diff-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/diff-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-reconcile/engine.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "upsertMonthMeta",
+      "defFiles": [
+        "src/backend/pending-db/month-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/month-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
           "count": 1
         }
       ],

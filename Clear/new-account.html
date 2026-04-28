@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>新开账户余额账单生成 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div id="appShell" class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn" type="button" aria-label="最小化">−</button>
+      <button class="window-btn" type="button" aria-label="最大化">□</button>
+      <button class="window-btn close-btn" type="button" aria-label="关闭">×</button>
+    </div>
+  </header>
+
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <main class="page-body">
+    <h1 class="page-title"><span class="gemini-gradient">网银账单小助手</span></h1>
+
+    <section class="workspace-shell">
+      <div class="module-switcher">
+        <button class="module-switcher-trigger" type="button" aria-haspopup="true" aria-expanded="false">
+          <span class="module-switcher-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="16" height="16"><defs><linearGradient id="gs" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="40%" stop-color="#9B72F2"/><stop offset="75%" stop-color="#E95EA2"/><stop offset="100%" stop-color="#F6B93B"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gs)"/></svg>
+          </span>
+          <span class="module-switcher-name">新开账户生成网银账单</span>
+          <span class="module-switcher-caret" aria-hidden="true">▾</span>
+        </button>
+      </div>
+
+      <section id="newAccountModulePanel" class="control-board new-account-panel">
+        <div class="new-account-title">仅支持开户至今未发生交易的账户余额导出</div>
+        <div id="newAccountRows">
+          <div class="new-account-form-row" data-new-account-row="true">
+            <label class="new-account-field">
+              <span class="new-account-label">银行名称</span>
+              <input class="new-account-input new-account-bank-name-input" type="text" value="中国银行" spellcheck="false" />
+            </label>
+            <label class="new-account-field">
+              <span class="new-account-label">所在地</span>
+              <input class="new-account-input new-account-location-input" type="text" value="香港" spellcheck="false" />
+            </label>
+            <label class="new-account-field">
+              <span class="new-account-label">币种</span>
+              <div class="new-account-currency-row">
+                <div class="new-account-currency-dropdown-wrap">
+                  <button class="new-account-input new-account-currency-dropdown-btn" type="button" aria-haspopup="true" aria-expanded="false">USD</button>
+                </div>
+                <label class="new-account-checkbox-label">
+                  <input class="new-account-checkbox new-account-multi-currency-checkbox" type="checkbox" />
+                  <span class="new-account-checkbox-text">多币种账户</span>
+                </label>
+              </div>
+            </label>
+            <label class="new-account-field">
+              <span class="new-account-label new-account-label-with-action">
+                银行账号
+                <button class="text-action new-account-row-action-btn new-account-add-btn" type="button" data-row-action="add">新增</button>
+              </span>
+              <div class="new-account-bank-account-row">
+                <input class="new-account-input new-account-bank-account-input" type="text" value="6222 0000 0000 0001" spellcheck="false" />
+              </div>
+            </label>
+            <label class="new-account-field">
+              <span class="new-account-label">开户日期</span>
+              <input class="new-account-input new-account-open-date-input" type="text" value="2026-01-01" />
+            </label>
+          </div>
+        </div>
+
+        <div class="new-account-actions-row">
+          <div class="status-box new-account-status-box">
+            <span class="status-spark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gs2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gs2)"/></svg>
+            </span>
+            等待生成
+          </div>
+          <div class="new-account-actions">
+            <button class="primary-btn" type="button">生成</button>
+            <button class="secondary-btn" type="button" disabled>导出</button>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="page-footer">
+    <div class="version-text"><span class="version-label">Version</span> 1.5.1</div>
+  </footer>
+
+  <div class="background-tool">
+    <div class="background-tool-actions">
+      <button class="palette-trigger" type="button" aria-label="背景调色盘" title="背景调色盘"><span aria-hidden="true">🎨</span></button>
+      <button class="text-action" type="button">使用手册</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

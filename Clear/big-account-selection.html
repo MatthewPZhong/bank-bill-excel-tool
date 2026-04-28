@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>大账号确认（左右分栏）· Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card big-account-selection-card big-account-selection-split">
+      <div class="dialog-header">
+        <div class="dialog-title"><span class="gemini-gradient">网银账单解析大账号确认</span></div>
+        <div class="big-account-selection-toolbar">
+          <span class="big-account-mode-label">多账号账单导入解析模式</span>
+          <select class="mapping-select big-account-mode-select">
+            <option value="unfixed">账号顺序不固定</option>
+            <option value="fixed">账号顺序固定</option>
+          </select>
+          <button class="icon-close" type="button">×</button>
+        </div>
+      </div>
+
+      <div class="big-account-split-body">
+        <div class="ba-scroll-container">
+          <!-- Left: 文件顺序 -->
+          <div class="big-account-split-left">
+            <div class="big-account-split-header">文件顺序：</div>
+            <div class="big-account-file-list">
+              <div class="ba-file-row">
+                <span class="ba-file-idx">1</span>
+                <span class="ba-file-name" title="202411_LusoBank_MO_USD.xlsx">202411_LusoBank_MO_USD.xlsx</span>
+              </div>
+              <div class="ba-file-row">
+                <span class="ba-file-idx">2</span>
+                <span class="ba-file-name">202411_LusoBank_MO_HKD.xlsx</span>
+              </div>
+              <div class="ba-file-row">
+                <span class="ba-file-idx">3</span>
+                <span class="ba-file-name">202411_LusoBank_MO_MOP.xlsx</span>
+              </div>
+              <div class="ba-file-row">
+                <span class="ba-file-idx">4</span>
+                <span class="ba-file-name">202411_LusoBank_MO_EUR.xlsx</span>
+              </div>
+              <div class="ba-file-row">
+                <span class="ba-file-idx">5</span>
+                <span class="ba-file-name">202411_LusoBank_MO_CNY.xlsx</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: 大账号顺序 -->
+          <div class="big-account-split-right">
+            <div class="big-account-split-header">大账号顺序：</div>
+            <div class="big-account-order-list">
+              <div class="ba-order-row is-selected">
+                <input class="new-account-checkbox" type="radio" name="ba" checked />
+                <span class="ba-order-badge">①</span>
+                <div class="ba-order-content">
+                  <div class="ba-order-title">6222 0000 0000 0012345 · USD</div>
+                  <div class="ba-order-sub">澳门商业银行 · 大账号 A</div>
+                </div>
+              </div>
+              <div class="ba-order-row">
+                <input class="new-account-checkbox" type="radio" name="ba" />
+                <span class="ba-order-badge">②</span>
+                <div class="ba-order-content">
+                  <div class="ba-order-title">6222 0000 0000 0012346 · HKD</div>
+                  <div class="ba-order-sub">澳门商业银行 · 大账号 B</div>
+                </div>
+              </div>
+              <div class="ba-order-row">
+                <input class="new-account-checkbox" type="radio" name="ba" />
+                <span class="ba-order-badge">③</span>
+                <div class="ba-order-content">
+                  <div class="ba-order-title">6222 0000 0000 0012347 · MOP</div>
+                  <div class="ba-order-sub">澳门商业银行 · 大账号 C</div>
+                </div>
+              </div>
+              <div class="ba-order-row">
+                <input class="new-account-checkbox" type="radio" name="ba" />
+                <span class="ba-order-badge">④</span>
+                <div class="ba-order-content">
+                  <div class="ba-order-title">6222 0000 0000 0012348 · EUR</div>
+                  <div class="ba-order-sub">澳门商业银行 · 大账号 D</div>
+                </div>
+              </div>
+              <div class="ba-order-row">
+                <input class="new-account-checkbox" type="radio" name="ba" />
+                <span class="ba-order-badge">⑤</span>
+                <div class="ba-order-content">
+                  <div class="ba-order-title">6222 0000 0000 0012349 · CNY</div>
+                  <div class="ba-order-sub">澳门商业银行 · 大账号 E</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="dialog-actions big-account-selection-footer">
+        <button class="secondary-btn small extract-order-btn" type="button">提取大账号顺序</button>
+        <label class="ba-multi-mode-label">
+          <input class="new-account-checkbox ba-multi-mode-checkbox" type="checkbox" />
+          <span>单个账号匹多个文件</span>
+        </label>
+        <span class="big-account-selection-footer-divider"></span>
+        <span class="big-account-search-label">定位大账号</span>
+        <input class="mapping-text-input big-account-search-input" type="text" spellcheck="false" placeholder="输入账号后缀 / 币种 …" value="USD" />
+        <label class="big-account-remember-label">
+          <input class="new-account-checkbox big-account-remember-checkbox" type="checkbox" />
+          <span>记住顺序</span>
+        </label>
+        <button class="primary-btn small" type="button">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

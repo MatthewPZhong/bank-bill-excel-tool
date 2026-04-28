@@ -695,3 +695,31 @@ v0 的 10 个 OT 已由用户逐条拍板，结果如下：
 - `cb934d9` merge commit
 
 
+### PR #25（2026-04-27 merged，`5308b24`） — 表头字号 10pt + Pending preview 链路扩充
+
+**主线改动**（2 项）：
+
+1. **fix(writers)**：导出 detail/balance Excel 表头字号显式固定为 **10pt**（之前未显式设置，xlsx-js-style 默认 Calibri 11pt），`src/backend/file-service/writers.js` `applyHeaderRowFont` 在 `font.name='Courier New'` 基础上追加 `sz: 10`；仅影响第 1 行表头，数据行不变，COMMON 模板（只读资源）不受影响
+2. **feat(previews)**：Pending 模块 preview 链路扩充 — 新增 **15** 个 `applyXxxPreviewState`（Pending 主流程 6 张：pending-panel / pending-rule-dialog / pending-rule-confirm / pending-import-month / pending-reconcile / pending-export-runs；Pending 状态 3 张：pending-panel-initial / pending-panel-importing / pending-panel-error；历史遗漏 6 张：module-switcher-open / new-account-multi / new-account-currency-dropdown / big-account-selection-multi / extract-order / account-mapping-editing）。配套：`renderer-pending` 导出 4 个对话框 builder（`buildRuleDialogNode` / `buildImportMonthDialog` / `buildReconcileDialog` / `buildExportDialog`）+ `renderer.js` 调整依赖注入顺序（rendererPending 提前初始化）+ `initialize()` 加 15 个 previewModal 路由 + `package.json` 加 15 个 `preview:*` script + 扩展 `preview:all`；21 张已存在 preview 因依赖注入差异重新渲染产生视觉回归
+
+**测试**：`npm run smoke` ✅ pass + inline node 验证 `cell.s.font = { name: 'Courier New', sz: 10 }` + preview 全量 36 张落盘（15 新增 + 21 回归）
+
+**未覆盖**：实际 Windows 环境打开 detail Excel 肉眼校验 10pt 观感；preview 是否覆盖所有 Pending 极端态（导入失败、对账冲突等）
+
+**文件改动**：41 unique 文件 / +488 / -23（不含截图二进制）
+- `src/backend/file-service/writers.js` +2 / -1
+- `src/renderer.js` +90 / -14
+- `src/renderer-pending.js` +5 / -1
+- `src/renderer-previews.js` +343 / -2
+- `package.json` +16 / -1
+- `docs/previews/README.md` 同步
+- `docs/previews/{15}.png` 新增 + `docs/previews/{21}.png` 回归
+
+**关联功能 review**：对照 `rules/important-variables.md` 未命中 Critical / Important-skeleton / Runtime-state / Risk-sensitive 任一层
+
+**Commits**（合并后消失于 v2.0.0 线性历史）：
+- `50661b4` fix(writers): 导出表头字号固定为 10pt
+- `4b4c3d8` feat(previews): Pending 模块 + 历史遗漏 preview 链路扩充
+- `5308b24` merge commit
+
+

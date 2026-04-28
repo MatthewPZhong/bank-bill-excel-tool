@@ -1,0 +1,1862 @@
+/* Gemini reskin — extras for modals & dialogs.
+   Targets the real class names from src/renderer-dialogs.js:
+   .modal-overlay, .modal-card, .dialog-header, .dialog-title, .icon-close,
+   .table-wrapper, .data-table, .dialog-actions, .manager-card, .mapping-card,
+   .account-card, .alert-card, .big-account-card, .balance-addon-card */
+
+/* Modal overlay + card — sized to match real styles.css */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(32,33,36,.32);
+  backdrop-filter: blur(8px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 28px;
+  z-index: 50;
+}
+.modal-card {
+  background: #fff;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  box-shadow: 0 22px 60px rgba(0,0,0,.18);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  width: min(100%, 940px);
+  max-height: calc(100vh - 56px);
+}
+.manager-card { min-height: 360px; }
+.mapping-card { width: min(100%, 1120px); }
+.account-card { width: min(100%, 920px); }
+.big-account-card { width: min(100%, 980px); }
+.balance-addon-card { width: min(100%, 1120px); }
+.alert-card { width: min(100%, 420px); }
+
+/* Dialog header */
+.dialog-header {
+  display: flex; align-items: center;
+  padding: 22px 28px 16px;
+  border-bottom: 1px solid var(--line-soft);
+  gap: 16px;
+}
+.dialog-title {
+  font-family: "Google Sans", sans-serif;
+  font-size: 22px; font-weight: 500; letter-spacing: -0.01em;
+  flex: 0 0 auto;
+}
+.dialog-header-checkboxes {
+  display: flex; align-items: center; gap: 16px;
+  margin-left: 16px;
+  font-size: 13px; color: var(--muted);
+}
+.dialog-checkbox-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  cursor: pointer;
+}
+.dialog-checkbox-label input { accent-color: var(--primary); }
+.account-mapping-template-select-wrapper {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 14px; color: var(--muted);
+}
+.account-mapping-template-select-wrapper select {
+  height: 36px; padding: 0 14px;
+  border-radius: var(--pill);
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 14px; color: var(--text);
+  appearance: none;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+.icon-close {
+  margin-left: auto;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  border: none; background: var(--chip-bg);
+  color: var(--muted); font-size: 18px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.icon-close:hover { background: #e6eaf0; color: var(--text); }
+
+/* Table */
+.table-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+}
+.mapping-wrapper { padding-bottom: 16px; }
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.data-table thead th {
+  text-align: left;
+  font-size: 12px; font-weight: 600;
+  letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted);
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  background: transparent;
+}
+.data-table tbody td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: middle;
+}
+.data-table tbody tr:hover td { background: var(--bg-soft); }
+.data-table tbody tr:last-child td { border-bottom: none; }
+
+/* Left-align action column (列头与第一按钮左缘对齐 td 内边距) */
+.manager-action-header { text-align: left; }
+.manager-action-header-label { display: block; width: auto; margin: 0; }
+.manager-row-actions,
+.big-account-row-actions {
+  width: auto;
+  margin: 0;
+  justify-content: flex-start;
+}
+.row-actions,
+.account-mapping-action-cell {
+  text-align: left;
+  white-space: nowrap;
+}
+.row-actions .text-action,
+.account-mapping-action-cell .text-action {
+  padding: 6px 10px; font-size: 13px;
+  margin-left: 4px;
+}
+.manager-row-actions .text-action:first-child,
+.big-account-row-actions .text-action:first-child,
+.row-actions .text-action:first-child,
+.account-mapping-action-cell .text-action:first-child {
+  margin-left: 0;
+  padding-left: 0;
+}
+.text-action.danger { color: var(--danger); }
+.text-action.danger:hover { background: #fce8e6; color: var(--danger); }
+
+td .muted { color: var(--muted); }
+
+/* Mapping-specific */
+.mapping-section-row td {
+  background: var(--bg-soft) !important;
+  padding: 10px 16px !important;
+  border-bottom: 1px solid var(--line-soft) !important;
+}
+.mapping-section-row strong {
+  font-size: 12px; font-weight: 600;
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--primary);
+}
+.mapping-wrapper .data-table tbody td {
+  padding: 10px 16px;
+}
+.mapping-wrapper .mapping-select {
+  height: 40px;
+  background-color: #fff;
+}
+
+/* Dialog actions footer */
+.dialog-actions {
+  display: flex; align-items: center;
+  padding: 16px 28px 22px;
+  border-top: 1px solid var(--line-soft);
+  background: var(--bg-soft);
+  gap: 10px;
+}
+.dialog-actions.right { justify-content: flex-end; }
+.dialog-actions.center { justify-content: center; }
+.dialog-actions.split { justify-content: space-between; }
+.dialog-actions.vertical {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 8px 28px 22px;
+}
+.big-account-footer-left { display: flex; gap: 8px; }
+
+/* =================== Card size presets for new dialogs =================== */
+.export-scope-card { width: min(100%, 480px); }
+.monthly-balance-export-card { width: min(100%, 520px); }
+.manual-balance-card { width: min(100%, 560px); }
+.template-rename-card { width: min(100%, 520px); }
+.remember-order-mismatch-card { width: min(100%, 460px); }
+.account-mapping-migration-card { width: min(100%, 900px); }
+.amount-split-rules-card { width: min(100%, 880px); }
+.bill-split-mappings-card { width: 80vw; max-width: 1280px; }
+.bill-split-rows-card { width: min(100%, 1180px); }
+.big-account-selection-card { width: min(100%, 1080px); min-height: 540px; }
+.big-account-selection-split { min-height: 600px; }
+
+/* =================== Export-scope vertical buttons =================== */
+.export-scope-card .dialog-actions.vertical .export-scope-btn {
+  height: auto;
+  padding: 14px 18px;
+  border-radius: 14px;
+  display: flex; flex-direction: column; align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+  width: 100%;
+  background: #fff;
+  border: 1px solid var(--line);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.export-scope-card .export-scope-btn:hover {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(11,87,208,.12);
+}
+.export-scope-btn-main {
+  font-size: 14px; font-weight: 500; color: var(--text);
+}
+.export-scope-btn-sub {
+  font-size: 12px; color: var(--muted);
+}
+
+/* =================== Monthly-balance-export form =================== */
+.monthly-balance-form {
+  padding: 24px 28px 8px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.monthly-balance-row {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  align-items: center;
+  gap: 16px;
+}
+.monthly-balance-label {
+  font-size: 13px; color: var(--muted); font-weight: 500;
+}
+.monthly-balance-time-picker {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+.monthly-balance-time-picker select,
+.monthly-balance-template-select {
+  height: 44px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 14px;
+  font-size: 14px; color: var(--text);
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+/* =================== Manual-balance-seed dialog =================== */
+.manual-balance-card .dialog-header { padding-bottom: 14px; }
+.manual-balance-context {
+  padding: 16px 28px 18px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--line-soft);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.manual-balance-progress {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.manual-balance-progress-chip {
+  font-size: 12px; color: var(--muted);
+}
+.manual-balance-progress-chip strong {
+  color: var(--primary); font-weight: 600;
+}
+.manual-balance-progress-bar {
+  height: 4px; border-radius: 999px;
+  background: #e3e8ef;
+  overflow: hidden;
+}
+.manual-balance-progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--g-blue), var(--g-purple), var(--g-pink));
+  border-radius: 999px;
+}
+.manual-balance-context-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px;
+}
+.manual-balance-context-row {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.manual-balance-context-row:first-child {
+  grid-column: 1 / -1;
+}
+.manual-balance-context-label {
+  font-size: 11px; color: var(--muted);
+  letter-spacing: .04em; text-transform: uppercase;
+}
+.manual-balance-context-value {
+  font-size: 14px; color: var(--text);
+  font-family: "Roboto Mono", ui-monospace, monospace;
+}
+.manual-balance-context-account {
+  letter-spacing: .02em;
+}
+.manual-balance-context-tag {
+  display: inline-flex; align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--chip-active-bg);
+  color: var(--primary);
+  font-size: 12px; font-weight: 600;
+  width: max-content;
+}
+.manual-balance-form {
+  padding: 20px 28px 12px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.manual-balance-row {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  align-items: center;
+  gap: 16px;
+}
+.manual-balance-label {
+  font-size: 13px; color: var(--muted); font-weight: 500;
+}
+.manual-balance-input { height: 44px; }
+.manual-balance-input:disabled {
+  background: var(--bg-soft);
+  color: var(--dim);
+}
+
+/* =================== Account-mapping-migration =================== */
+.migration-intro {
+  padding: 14px 28px;
+  background: #fff8e1;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text);
+  font-size: 13px;
+  display: flex; align-items: center; gap: 10px;
+}
+.migration-intro-icon {
+  color: #f6b93b;
+  font-size: 16px;
+}
+.migration-template-select { height: 40px; }
+tr.migration-empty-row td { background: #fff5f5; }
+tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
+
+/* =================== Big-account-selection split =================== */
+.big-account-selection-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  margin-left: auto;
+}
+.big-account-mode-label {
+  font-size: 12px; color: var(--muted);
+}
+.big-account-mode-select {
+  height: 36px;
+  width: 180px;
+  padding: 0 36px 0 14px;
+  border-radius: var(--pill);
+  font-size: 13px;
+}
+.big-account-split-body {
+  flex: 1; padding: 8px 12px 0;
+  overflow: hidden;
+}
+.ba-scroll-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  height: 100%;
+  min-height: 360px;
+  max-height: 52vh;
+}
+.big-account-split-left,
+.big-account-split-right {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: #fff;
+}
+.big-account-split-header {
+  padding: 12px 16px;
+  font-size: 12px; font-weight: 600;
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted);
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+.big-account-file-list,
+.big-account-order-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.ba-file-row {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: transparent;
+  cursor: default;
+  font-size: 13px;
+}
+.ba-file-row:hover { background: var(--bg-soft); }
+.ba-file-idx {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--chip-bg);
+  color: var(--muted);
+  font-size: 11px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center;
+}
+.ba-file-name {
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ba-order-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.ba-order-row:hover { background: var(--bg-soft); }
+.ba-order-row.is-selected {
+  background: var(--chip-active-bg);
+  border-color: var(--primary-soft);
+}
+.ba-order-badge {
+  font-size: 13px; font-weight: 600;
+  color: var(--primary);
+  min-width: 20px;
+}
+.ba-order-content { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ba-order-title {
+  font-size: 13px; font-weight: 500;
+  color: var(--text);
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ba-order-sub {
+  font-size: 11px; color: var(--muted);
+}
+.big-account-selection-footer {
+  flex-wrap: wrap; gap: 12px;
+}
+.big-account-selection-footer-divider {
+  height: 20px; width: 1px;
+  background: var(--line-soft);
+  margin: 0 4px;
+}
+.big-account-search-label {
+  font-size: 12px; color: var(--muted);
+  margin-left: auto;
+}
+.big-account-search-input {
+  width: 200px; height: 36px;
+}
+.ba-multi-mode-label,
+.big-account-remember-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted);
+  white-space: nowrap;
+}
+
+/* =================== Amount-split-rules =================== */
+.amount-split-rules-body {
+  padding: 18px 28px 16px;
+}
+.amount-split-rules-hint {
+  margin: 0 0 14px;
+  font-size: 13px; color: var(--muted);
+  line-height: 1.55;
+}
+.amount-split-rules-table thead th {
+  white-space: nowrap;
+}
+.amount-split-rules-table .mapping-select,
+.amount-split-rules-table .mapping-text-input {
+  height: 40px;
+}
+.amount-split-target-pill {
+  display: inline-flex; align-items: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px; font-weight: 600;
+  font-family: "Roboto Mono", ui-monospace, monospace;
+}
+.amount-split-target-pill--credit {
+  background: #e6f4ea;
+  color: #137333;
+}
+.amount-split-target-pill--debit {
+  background: #fce8e6;
+  color: var(--danger);
+}
+
+/* =================== Bill-split-mappings (弹框 1) =================== */
+.bill-split-mappings-header-actions {
+  display: flex; align-items: center; gap: 10px;
+  margin-left: auto;
+}
+.bill-split-mappings-wrapper { padding: 4px 16px; }
+.bill-split-field-name {
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+.mapping-field-editor {
+  display: flex; align-items: center; gap: 12px;
+  flex-wrap: wrap;
+}
+.mapping-field-editor > .mapping-select { flex: 1 1 0; min-width: 0; }
+.mapping-field-editor > .concat-field-picker { flex-basis: 100%; }
+
+/* Clear 风格右下角 Version 用 Courier New */
+.version-text { font-family: "Courier New", ui-monospace, monospace; }
+.concat-field-picker {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-soft);
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+}
+.concat-picker-trigger { flex: 0 0 auto; }
+.concat-preview-wrapper {
+  display: flex; flex-direction: column; gap: 2px;
+  min-width: 0; flex: 1;
+}
+.concat-order-label {
+  font-size: 11px; color: var(--muted);
+  letter-spacing: .04em; text-transform: uppercase;
+}
+.concat-preview {
+  font-size: 13px;
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* =================== Bill-split-rows (弹框 2) =================== */
+.bill-split-rows-header-actions {
+  display: flex; align-items: center; gap: 12px;
+  margin-left: auto;
+}
+.bill-split-merge-checkbox-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--muted);
+  white-space: nowrap;
+}
+.bill-split-merge-checkbox-label input { accent-color: var(--primary); }
+
+.bill-split-rows-body {
+  padding: 18px 28px 12px;
+  display: flex; flex-direction: column; gap: 16px;
+  overflow-y: auto;
+}
+.bill-split-row-count-line {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  font-size: 13px; color: var(--text);
+}
+.bill-split-row-count-line label { color: var(--muted); }
+.bill-split-row-count-input {
+  width: 80px; height: 36px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  padding: 0 12px;
+  font-size: 14px;
+  text-align: center;
+}
+.bill-split-row-count-note {
+  margin-left: auto;
+  font-size: 12px; color: var(--muted);
+}
+.bill-split-rows-table-wrapper {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.bill-split-rows-table thead th { padding: 10px 14px; }
+.bill-split-rows-table tbody td {
+  padding: 10px 14px;
+}
+.bill-split-rows-table .mapping-select { height: 38px; }
+.bill-split-seq-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 28px; height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--chip-active-bg);
+  color: var(--primary);
+  font-size: 12px; font-weight: 600;
+}
+.bill-split-row-view-text {
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--text);
+}
+.bill-split-row-actions {
+  text-align: left; white-space: nowrap;
+}
+.bill-split-row-actions .text-action { margin-left: 4px; font-size: 12px; }
+.bill-split-row-actions .text-action:first-child { margin-left: 0; padding-left: 0; }
+
+.bill-split-sub-section-divider {
+  border: none;
+  height: 1px;
+  background: var(--line-soft);
+  margin: 4px 0;
+}
+.bill-split-sub-section {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 8px 0 4px;
+}
+.bill-split-sub-title {
+  margin: 0;
+  font-family: "Google Sans", sans-serif;
+  font-size: 14px; font-weight: 500;
+  color: var(--text);
+}
+.bill-split-sub-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.bill-split-sub-row label {
+  font-size: 13px; color: var(--muted);
+  min-width: 180px;
+}
+.bill-split-sub-row .mapping-select {
+  width: 220px; height: 40px;
+}
+.bill-split-target-seq-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted);
+}
+.bill-split-target-seq-label input { accent-color: var(--primary); }
+.bill-split-sub-hint { font-size: 12px; }
+
+.bill-split-rows-footer { padding: 14px 28px 18px; }
+
+/* =================== Big-account · currency dropdown (open state) =================== */
+.currency-cell { position: relative; overflow: visible; }
+.new-account-currency-row.inline { display: flex; align-items: center; gap: 12px; flex-wrap: nowrap; }
+.new-account-currency-row.inline .new-account-currency-dropdown-wrap { flex: 0 0 180px; }
+.new-account-currency-dropdown-btn.is-open {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(11,87,208,.14);
+}
+.new-account-currency-dropdown-btn.is-open::after { content: "▴"; }
+.currency-dropdown-menu {
+  position: absolute;
+  left: 0; top: calc(100% + 6px);
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 14px 40px rgba(0,0,0,.14);
+  padding: 6px;
+  z-index: 30;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.currency-dropdown-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 13px; color: var(--text);
+  cursor: pointer;
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  letter-spacing: .04em;
+}
+.currency-dropdown-row:hover { background: var(--bg-soft); }
+.currency-dropdown-row.is-checked { color: var(--primary); font-weight: 600; }
+.currency-dropdown-check { accent-color: var(--primary); width: 14px; height: 14px; }
+tr.is-editing td { background: linear-gradient(0deg, rgba(11,87,208,.02), rgba(11,87,208,.02)); }
+tr.is-editing .mapping-text-input { height: 40px; }
+
+/* =================== Palette float =================== */
+.muted-preview {
+  min-height: 140px;
+  background: linear-gradient(180deg, rgba(255,255,255,.6), rgba(255,255,255,.3));
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+}
+.muted-preview.tall { min-height: 220px; }
+.palette-float {
+  position: fixed;
+  left: 24px; bottom: 24px;
+  width: 210px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: 0 20px 50px rgba(0,0,0,.18);
+  padding: 10px;
+  display: flex; flex-direction: column; gap: 10px;
+  z-index: 60;
+}
+.palette-body {
+  position: relative;
+  height: 170px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+}
+.palette-spectrum {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(to right,
+      hsl(0,100%,50%), hsl(30,100%,50%), hsl(60,100%,50%),
+      hsl(120,100%,50%), hsl(180,100%,50%), hsl(240,100%,50%),
+      hsl(280,100%,50%), hsl(320,100%,50%), hsl(360,100%,50%));
+}
+.palette-sat {
+  position: absolute; inset: 0;
+  background: linear-gradient(to right, #fff, transparent);
+}
+.palette-light {
+  position: absolute; inset: 0;
+  background: linear-gradient(to bottom, transparent, #000);
+}
+.palette-cursor {
+  position: absolute;
+  width: 14px; height: 14px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.6), 0 2px 6px rgba(0,0,0,.3);
+  transform: translate(-50%, -50%);
+}
+.palette-swatch-preview {
+  position: absolute;
+  right: 10px; top: 10px;
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px var(--line), 0 2px 6px rgba(0,0,0,.18);
+  background: #ffffff;
+}
+.palette-swatch-preview.is-alt { background: #b48af0; }
+.palette-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 6px;
+}
+.palette-footer-right { display: flex; gap: 6px; }
+.palette-footer .tiny {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+
+/* Account mapping — add row */
+tr.add-row td {
+  padding: 10px 16px;
+  background: transparent;
+}
+tr.add-row .text-action {
+  color: var(--primary); font-weight: 500;
+  padding: 10px 14px;
+  border-radius: var(--pill);
+  background: var(--chip-active-bg);
+}
+tr.add-row .text-action:hover { background: #c2d7fa; }
+
+/* Currency tooltip icon */
+.currency-tooltip-wrap {
+  display: inline-flex; align-items: center;
+  margin-left: 6px;
+}
+.currency-tooltip-icon {
+  color: var(--muted); font-size: 12px;
+  cursor: help;
+}
+.currency-tooltip-text { display: none; }
+
+/* Balance addon remark cell */
+.balance-addon-remark-cell {
+  display: flex; gap: 8px; align-items: center;
+}
+.balance-addon-remark-cell .mapping-text-input { flex: 1; }
+
+/* Big-account-selection (array payload, manual-balance-card 复用) */
+.manual-balance-card .big-account-selection-list {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 18px 28px 8px;
+}
+.manual-balance-card .big-account-selection-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+.manual-balance-card .big-account-selection-item:hover { background: var(--bg-soft); }
+.manual-balance-card .dialog-actions.right { padding: 8px 28px 22px; }
+
+/* Alert card */
+.alert-card .alert-body {
+  display: flex; gap: 16px;
+  padding: 28px 28px 8px;
+}
+.alert-icon {
+  flex: 0 0 auto;
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: var(--bg-soft);
+  display: flex; align-items: center; justify-content: center;
+}
+.alert-message {
+  flex: 1;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--text);
+  padding-top: 4px;
+}
+.alert-message strong { color: var(--primary); font-weight: 600; }
+
+/* New-account form (structure from real index.html) */
+.new-account-panel .new-account-title {
+  font-size: 13px; color: var(--muted); font-weight: 500;
+  text-align: left;
+  margin-bottom: 4px;
+}
+#newAccountRows { display: flex; flex-direction: column; gap: 12px; }
+.new-account-form-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+  align-items: end;
+  margin-top: 8px;
+}
+.new-account-field {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.new-account-label {
+  font-size: 12px; color: var(--muted); font-weight: 500;
+  padding-left: 2px;
+}
+.new-account-label-with-action {
+  display: flex; justify-content: space-between; align-items: center;
+}
+.new-account-input {
+  width: 100%; height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 14px;
+  font-size: 14px; color: var(--text);
+}
+.new-account-input:focus {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(11,87,208,.15);
+}
+.new-account-currency-row {
+  display: flex; align-items: center; gap: 10px;
+}
+.new-account-currency-dropdown-wrap { flex: 1; position: relative; }
+.new-account-currency-dropdown-btn {
+  text-align: left; cursor: pointer; position: relative;
+}
+.new-account-currency-dropdown-btn::after {
+  content: "▾"; position: absolute; right: 14px; top: 50%;
+  transform: translateY(-50%); color: var(--muted); font-size: 11px;
+}
+.new-account-checkbox-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted); white-space: nowrap;
+}
+.new-account-checkbox { accent-color: var(--primary); }
+.new-account-bank-account-row { display: flex; }
+.new-account-actions-row {
+  display: flex; align-items: center; gap: 16px;
+  margin-top: 24px;
+}
+.new-account-status-box { flex: 1; }
+.new-account-actions { display: flex; gap: 10px; }
+
+/* =================== Pending (v2.0.0) =================== */
+
+/* Main panel — reuses .control-board/.control-row, but rebalances the 2x2 grid
+   so 规则管理/导出差异 占左列, 导入文件+开始运行 / 状态框 占右列 */
+.pending-board .control-row { grid-template-columns: 1fr 1.4fr; }
+.pending-board .cell.left { display: flex; justify-content: center; }
+.pending-board .cell.right { display: flex; justify-content: center; }
+.pending-board .cell.left .secondary-btn { min-width: 180px; }
+.pending-board .pending-action-pair { display: flex; gap: 12px; justify-content: center; }
+.pending-board .pending-action-pair .primary-btn { min-width: 140px; }
+.pending-board .pending-status {
+  width: 100%;
+  max-width: 360px;
+  min-height: 110px;
+  padding: 16px 20px;
+  border-radius: 18px;
+  border: 1px solid rgba(30,142,62,.28);
+  background: #e6f4ea;
+  color: var(--success);
+  font-size: 13px; line-height: 1.6;
+  text-align: left;
+  display: flex; align-items: center;
+}
+
+/* Pending rule dialog — 两列规则 */
+.pending-rule-card { width: min(100%, 640px); }
+.pending-rule-card .dialog-header { padding-bottom: 14px; }
+.pending-rule-body {
+  padding: 18px 28px 10px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 24px 32px;
+}
+.pending-rule-col-header {
+  grid-column: span 1;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 13px; color: var(--muted); font-weight: 500;
+  margin-bottom: -8px;
+}
+.pending-rule-col-header .hint-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--chip-bg); color: var(--muted);
+  font-size: 11px;
+}
+.pending-rule-row {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  align-items: center; gap: 10px;
+}
+.pending-rule-index {
+  font-size: 13px; color: var(--muted); text-align: right;
+}
+.pending-rule-select {
+  height: 40px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 34px 0 14px;
+  font-size: 14px; color: var(--text);
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+.pending-rule-action {
+  font-size: 13px;
+  background: none; border: none; cursor: pointer;
+  padding: 6px 6px;
+}
+.pending-rule-action.add { color: var(--danger); }
+.pending-rule-action.remove { color: var(--danger); }
+.pending-rule-action:hover { text-decoration: underline; }
+
+/* Pending rule confirm — tight alert */
+.pending-rule-confirm-card { width: min(100%, 440px); }
+.pending-rule-confirm-card .dialog-header {
+  padding: 24px 28px 8px;
+  border-bottom: none;
+  justify-content: center;
+}
+.pending-rule-confirm-card .dialog-title {
+  font-size: 16px; font-weight: 600;
+  letter-spacing: 0;
+}
+.pending-rule-confirm-body {
+  padding: 8px 28px 18px;
+  display: flex; flex-direction: column; gap: 6px;
+  text-align: center;
+  font-size: 14px; color: var(--text);
+  line-height: 1.6;
+}
+.pending-rule-confirm-card .dialog-actions {
+  justify-content: center;
+  border-top: none;
+  background: transparent;
+  padding-top: 4px;
+  padding-bottom: 22px;
+}
+.pending-rule-confirm-card .danger-btn.small {
+  background: #a1382f;
+}
+.pending-rule-confirm-card .danger-btn.small:hover { background: #8d2e27; }
+
+/* Pending import month — tiny year/month picker */
+.pending-import-month-card { width: min(100%, 380px); }
+.pending-import-month-card .dialog-header {
+  padding: 20px 24px 8px;
+  border-bottom: none;
+}
+.pending-import-month-card .dialog-title {
+  font-size: 15px; font-weight: 600; letter-spacing: 0;
+}
+.pending-import-month-form {
+  padding: 4px 24px 12px;
+  display: flex; gap: 10px;
+}
+.pending-import-month-form .pending-rule-select { flex: 1; }
+.pending-import-month-card .dialog-actions {
+  justify-content: flex-start;
+  border-top: none;
+  background: transparent;
+  padding: 6px 24px 20px;
+  gap: 10px;
+}
+
+/* Pending reconcile — two-month selector */
+.pending-reconcile-card { width: min(100%, 680px); }
+.pending-reconcile-card .dialog-header {
+  padding: 22px 28px 6px;
+  border-bottom: none;
+}
+.pending-reconcile-card .dialog-title {
+  font-size: 15px; font-weight: 600; letter-spacing: 0;
+}
+.pending-reconcile-form {
+  padding: 12px 28px 8px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px;
+}
+.pending-reconcile-label {
+  font-size: 13px; color: var(--muted);
+  text-align: center;
+}
+.pending-reconcile-select {
+  height: 44px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 34px 0 14px;
+  font-size: 14px; color: var(--text);
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+.pending-reconcile-card .dialog-actions {
+  justify-content: center;
+  border-top: none;
+  background: transparent;
+  padding-top: 8px;
+}
+
+/* Pending export runs — radio + run select */
+.pending-export-runs-card { width: min(100%, 620px); }
+.pending-export-runs-card .dialog-header {
+  padding: 20px 28px 8px;
+  border-bottom: none;
+}
+.pending-export-runs-card .dialog-title {
+  font-size: 15px; font-weight: 600; letter-spacing: 0;
+}
+.pending-export-runs-body {
+  padding: 8px 28px 12px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.pending-export-runs-option {
+  display: grid;
+  grid-template-columns: 22px auto 1fr;
+  align-items: center;
+  gap: 10px;
+}
+.pending-export-runs-option input[type="radio"] {
+  accent-color: var(--primary);
+  width: 16px; height: 16px;
+}
+.pending-export-runs-option .pending-rule-select { min-width: 160px; }
+.pending-export-runs-option .run-select {
+  height: 40px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 34px 0 14px;
+  font-size: 13px; color: var(--text);
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  text-overflow: ellipsis; white-space: nowrap; overflow: hidden;
+}
+.pending-export-runs-option .run-label {
+  font-size: 12px; color: var(--muted);
+  font-weight: 500;
+}
+.pending-export-runs-card .dialog-actions {
+  justify-content: flex-start;
+  border-top: none;
+  background: transparent;
+  padding: 6px 28px 20px;
+  gap: 12px;
+}
+
+/* =================== Pending status tones =================== */
+.pending-board .pending-status[data-tone="neutral"] {
+  background: #fff;
+  border-color: var(--line);
+  color: var(--text);
+  text-align: center;
+  justify-content: center;
+}
+.pending-board .pending-status[data-tone="error"] {
+  background: #fdecec;
+  border-color: rgba(217,48,37,.32);
+  color: var(--danger, #c5221f);
+}
+
+/* Disabled buttons in pending-board need to feel "muted brown" like the screenshots */
+.pending-board .primary-btn[disabled],
+.pending-board .secondary-btn[disabled] {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+/* =================== Big-account selection · multi-mode =================== */
+.big-account-selection-card.is-multi .ba-order-row .new-account-checkbox { accent-color: var(--primary); }
+.big-account-selection-card.is-multi .ba-order-badge { display: none; }
+
+/* =================== Extract-order confirm card =================== */
+.extract-order-card { width: min(100%, 760px); }
+.extract-order-body {
+  padding: 18px 28px 8px;
+  display: grid; grid-template-columns: 1fr 1.15fr; gap: 28px;
+}
+.extract-order-col-header {
+  font-size: 12px; color: var(--muted); font-weight: 500;
+  letter-spacing: .04em; margin-bottom: 8px;
+}
+.extract-order-list {
+  display: flex; flex-direction: column;
+}
+.extract-order-row {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 6px;
+  font-size: 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.extract-order-row:last-child { border-bottom: none; }
+.extract-order-row .eo-idx {
+  color: var(--muted); text-align: right;
+  font-family: "Roboto Mono", ui-monospace, monospace;
+}
+.extract-order-row .eo-name {
+  color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.extract-order-row .eo-edit { font-size: 13px; }
+
+/* =================== Module switcher · open menu =================== */
+.module-switcher.is-open .module-switcher-trigger {
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(0,0,0,.08);
+}
+.module-switcher.is-open .module-switcher-caret { transform: rotate(180deg); }
+
+/* =================== New-account · multi-row form =================== */
+.new-account-form-row + .new-account-form-row { margin-top: 14px; }
+.new-account-row-action-btn.danger { color: var(--danger, #c5221f); }
+/* v2.0.0-beta.2：行操作按钮颜色（renderer 通过 data-row-action 切换 add/delete 文案）*/
+.new-account-row-action-btn[data-row-action="add"] { color: var(--primary, #1a73e8); }
+.new-account-row-action-btn[data-row-action="delete"] { color: var(--danger, #c5221f); }
+.new-account-status-box.is-warning {
+  background: #fff;
+  border-color: var(--line);
+  color: var(--muted);
+  text-align: center;
+  justify-content: center;
+}
+
+/* =================== Account-mapping · editing row =================== */
+.account-mapping-editing-row .mapping-text-input,
+.account-mapping-editing-row .mapping-select { height: 36px; }
+.account-mapping-editing-row .text-action.is-active { color: var(--primary); font-weight: 600; }
+
+/* =================== v2.0.0-beta.2 阶段 4 临时 fallback：调色板（D11） ===================
+ * Clear 风格下调色板的完整视觉适配在阶段 5 完成。本节给最低限度可用样式，
+ * 让"切换页面风格"下拉框 + 颜色选择 + 重置/导入/完成 按钮在 Clear 风格下也能用。
+ */
+.palette-panel {
+  position: absolute;
+  left: 0;
+  bottom: calc(0.8cm + 0.16cm);
+  width: 6.8cm;
+  min-height: 6.8cm;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: 0 22px 46px rgba(0, 0, 0, 0.12);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 8px;
+  z-index: 10;
+}
+.palette-panel-style-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.palette-style-label {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  font-weight: 500;
+}
+.palette-style-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  justify-content: flex-end;
+}
+.palette-style-select {
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.palette-style-select:focus {
+  outline: 2px solid var(--g-blue);
+  outline-offset: 1px;
+}
+.palette-panel-body {
+  display: grid;
+  /* 第二列 22px ≈ General 0.56cm，与 .palette-selected-color-swatch 对齐 */
+  grid-template-columns: 1fr 22px;
+  gap: 8px;
+  min-height: 0;
+}
+.palette-spectrum-shell {
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #fff;
+  cursor: crosshair;
+  min-width: 0;
+  min-height: 0;
+}
+.palette-spectrum-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.palette-selected-color-box {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  border: none;
+  border-radius: 0;
+  overflow: visible;
+}
+.palette-selected-color-swatch {
+  /* 22px ≈ General 0.56cm，6px ≈ General 0.16cm */
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+}
+.palette-panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.palette-panel-actions-right {
+  display: flex;
+  gap: 8px;
+}
+.palette-action {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.palette-action:hover { background: #e6eaf0; }
+.palette-action.solid {
+  background: var(--g-blue);
+  color: #fff;
+  border-color: var(--g-blue);
+}
+.palette-action.solid:hover { filter: brightness(1.05); }
+.palette-action.danger-text { color: var(--danger); border-color: rgba(217, 48, 37, 0.3); }
+.palette-action.danger-text:hover { background: #fce8e6; }
+
+/* =================== v2.0.0-beta.2 阶段 5 增量：currency dropdown Clear 适配 ===================
+ * src/renderer.js 输出的 class 名（new-account-currency-dropdown-*）和设计师
+ * 用的（currency-dropdown-menu，line 632）不一致——设计师没给 src class 出 Clear
+ * 样式。这里给 src 实际渲染的 class 加 Clear 风格规则。
+ * 覆盖：新开账户多币种下拉 + 大账号管理多币种下拉（共用同一套 class）。
+ */
+.new-account-currency-dropdown-wrap { position: relative; }
+.new-account-currency-dropdown-btn {
+  position: relative;
+  padding: 0 24px 0 10px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.new-account-currency-dropdown-btn::after {
+  content: '▾';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+.new-account-currency-dropdown-btn.is-open::after { content: '▴'; }
+.new-account-currency-dropdown-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 188px;
+  max-height: 248px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.14);
+  padding: 6px;
+  z-index: 30;
+}
+.new-account-currency-search-row {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
+}
+.new-account-currency-search-input {
+  height: 36px;
+  border-radius: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 13px;
+  color: var(--text);
+  width: 100%;
+  box-sizing: border-box;
+}
+.new-account-currency-search-input:focus {
+  outline: 2px solid var(--g-blue);
+  outline-offset: 1px;
+}
+.new-account-currency-options-list {
+  display: grid;
+  gap: 2px;
+  overflow: auto;
+  min-height: 0;
+}
+.new-account-currency-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.new-account-currency-option:hover { background: var(--bg-soft); }
+.new-account-currency-option-text {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.25;
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  letter-spacing: .04em;
+}
+/* Manager-card / Account-card / Bill-split table 列宽固定，
+   避免编辑态/view 态切换时列位移（同步 General styles.css 的 fixed layout 策略） */
+.manager-card .data-table { table-layout: fixed; }
+.manager-card .data-table th:nth-child(1),
+.manager-card .data-table td:nth-child(1) { width: 40%; }
+.manager-card .data-table th:nth-child(2),
+.manager-card .data-table td:nth-child(2) { width: 30%; overflow: hidden; text-overflow: ellipsis; }
+
+.account-card .data-table { table-layout: fixed; }
+.account-card .data-table th:nth-child(1),
+.account-card .data-table td:nth-child(1) { width: 35%; }
+.account-card .data-table th:nth-child(2),
+.account-card .data-table td:nth-child(2) { width: 35%; }
+.account-card .data-table th:nth-child(3),
+.account-card .data-table td:nth-child(3) { width: 15%; }
+.account-card .data-table th:nth-child(4),
+.account-card .data-table td:nth-child(4) { width: 15%; }
+
+.bill-split-rows-table { table-layout: fixed; }
+
+/* Mapping-card 表格列比例对齐 General（模板字段窄 / 映射字段宽） */
+.mapping-card .data-table { table-layout: fixed; }
+.mapping-card .data-table th:nth-child(1),
+.mapping-card .data-table td:nth-child(1) { width: 30%; }
+.mapping-card .data-table th:nth-child(2),
+.mapping-card .data-table td:nth-child(2) { width: 70%; }
+
+.big-account-currency-editor {
+  display: flex; align-items: center; gap: 10px; flex-wrap: nowrap;
+  min-height: 44px;
+}
+.big-account-currency-input-shell {
+  position: relative; width: 70px; flex: 0 0 70px; min-width: 0;
+}
+.big-account-currency-ghost,
+.big-account-currency-input { width: 100%; }
+.big-account-currency-ghost {
+  position: absolute; inset: 0;
+  color: rgba(123, 106, 83, 0.48);
+  background: transparent;
+  border-color: transparent;
+  pointer-events: none;
+}
+.big-account-currency-input {
+  position: relative; background: transparent; z-index: 1;
+}
+.big-account-currency-dropdown-wrap { position: relative; width: 160px; flex: 0 0 160px; }
+.big-account-currency-dropdown-btn { width: 100%; }
+.big-account-multi-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted);
+  white-space: nowrap;
+}
+.big-account-currency-floating-panel {
+  z-index: 32;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* =================== v2.0.0-beta.2 阶段 5 增量：Pending 规则对话框 Clear 适配 ===================
+ * src renderer 用 .pending-rule-dialog/.pending-rule-columns/.pending-rule-column/
+ * .pending-rule-rows/.pending-rule-field-{row,select,serial,btn} 等 class（D14
+ * 命名错位 — 设计师 .pending-rule-card/.pending-rule-body 是另一套）。
+ * 此处给 src 实际渲染的 class 加 Clear 风格规则（参考 line 868-913 的设计 token）。
+ */
+.pending-rule-dialog {
+  width: min(100%, 720px);
+  padding: 24px 28px;
+}
+.pending-dialog-title {
+  text-align: left;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 20px;
+}
+.pending-rule-columns {
+  display: flex;
+  gap: 32px;
+  justify-content: center;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+.pending-rule-column {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 280px;
+}
+.pending-rule-column-header {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+  margin-bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pending-rule-header-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--chip-bg, #eef2f6);
+  color: var(--muted);
+  font-size: 11px;
+  cursor: help;
+  user-select: none;
+  border: none;
+}
+.pending-rule-header-tip:hover { background: var(--bg-soft); }
+.pending-rule-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  align-items: center;
+}
+.pending-rule-field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pending-rule-field-select {
+  width: 200px;
+  min-width: 200px;
+  max-width: 200px;
+  height: 40px;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 34px 0 14px;
+  font-size: 14px;
+  color: var(--text);
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+.pending-rule-field-serial {
+  display: inline-block;
+  width: 24px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  user-select: none;
+}
+.pending-rule-field-btn {
+  background: none;
+  border: none;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.pending-rule-field-btn:hover { text-decoration: underline; }
+.pending-rule-field-btn[data-role="remove"] { color: var(--danger); }
+/* 对账内容列：header 居中对齐到 select 中心（沿用 General 视觉约定）*/
+.pending-rule-column-aligned { align-items: flex-start; }
+.pending-rule-column-aligned .pending-rule-column-header {
+  width: 200px;
+  justify-content: center;
+}
+.pending-rule-column-aligned .pending-rule-rows { align-items: flex-start; }
+
+/* Pending 导入月份 + 对账月份选择对话框（与规则同套设计语言）*/
+.pending-import-month-dialog { width: min(100%, 420px); padding: 24px 28px; }
+.pending-import-month-picker { margin-bottom: 20px; }
+.pending-reconcile-month-select {
+  width: 100%;
+  min-width: 200px;
+  height: 40px;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 14px;
+  font-size: 14px;
+  color: var(--text);
+}
+
+/* Pending 导出月份范围对话框 */
+.pending-export-cols {
+  width: 720px;
+  margin: 2px 0 20px 22px;
+  gap: 60px;
+  justify-content: flex-start;
+  align-items: flex-end;
+}
+.pending-export-cols .pending-rule-column { align-items: flex-start; }
+.pending-export-cols .pending-rule-column-header { margin-bottom: 4px; }
+.pending-export-cols .pending-export-month-column { flex: 0 0 120px; min-width: 0; }
+.pending-export-cols .pending-export-run-column { flex: 1 1 auto; min-width: 0; }
+/* 取消 min-width 以防 select 撑爆 column 容器（与 General styles.css:2531 一致）*/
+.pending-export-cols .mapping-text-input,
+.pending-export-cols .pending-reconcile-month-select { min-width: 0; }
+
+/* Pending 模块主面板 status-box（D6.1：HTML 用 status-box class 沿用阶段 2，
+ * Clear 风格下让其呈现成设计稿 .pending-status 的卡片样式）*/
+.pending-board .status-box {
+  width: 100%;
+  max-width: 360px;
+  min-height: 110px;
+  padding: 16px 20px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: left;
+  color: var(--text);
+}
+.pending-board .status-box[data-tone="success"] {
+  border-color: rgba(30,142,62,.28);
+  background: #e6f4ea;
+  color: var(--success);
+}
+.pending-board .status-box[data-tone="error"] {
+  border-color: rgba(217,48,37,.28);
+  background: #fce8e6;
+  color: var(--danger);
+}
+.pending-board .status-box[data-tone="neutral"] {
+  border-color: var(--line);
+  background: var(--bg-soft);
+}
+
+/* =================== v2.0.0-beta.2 阶段 5 增量：reconcile + export 对话框 Clear 适配 ===================
+ * src renderer 用 .pending-reconcile-dialog / .pending-export-dialog（设计师 .pending-reconcile-card /
+ * .pending-export-runs-card 是另一套），且 select 用 .mapping-text-input 基础 class（Clear 没有此 class
+ * 全局样式）。补全两套 alias + .mapping-text-input 基础 select 样式。
+ */
+.mapping-text-input {
+  width: 100%;
+  height: 40px;
+  border-radius: var(--radius-sm, 8px);
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 14px;
+  color: var(--text);
+  font-size: 14px;
+  box-sizing: border-box;
+}
+.mapping-text-input:focus {
+  outline: 2px solid var(--g-blue);
+  outline-offset: 1px;
+}
+select.mapping-text-input {
+  padding-right: 34px;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  cursor: pointer;
+}
+
+/* re-assert：line 445 的 .big-account-search-input 宽度被上面 .mapping-text-input 兜底覆盖，
+   这里再声明一次让 200px 生效（input 同时挂两个 class，后定义胜） */
+.big-account-search-input {
+  width: 200px;
+  height: 36px;
+}
+
+.modal-card.pending-reconcile-dialog {
+  width: min(100%, 680px);
+  padding: 24px 28px;
+}
+.modal-card.pending-export-dialog {
+  /* width 760 容纳内部 .pending-export-cols 720 + padding 28 双侧 */
+  width: min(100%, 800px);
+  padding: 24px 28px;
+}
+/* 按钮位置对齐 Clear/pending-export-runs.html 设计稿：左下角 + 导出在左 / 取消在右
+ * （覆盖 .dialog-actions.center 默认居中 + 默认 padding/border/background）*/
+.modal-card.pending-export-dialog .dialog-actions.center {
+  justify-content: flex-start;
+  margin-top: 28px;
+  padding: 6px 28px 20px;
+  border-top: none;
+  background: transparent;
+  gap: 12px;
+}
+
+/* =================== v2.0.0-beta.2 阶段 5 增量：大账号选择 + 顺序提取对话框 Clear 适配 ===================
+ * D14 命名错位：设计师在 styles-gemini-extra.css 用 .ba-file-row / .ba-order-row /
+ * .extract-order-row（短名），但 src renderer 输出 .big-account-file-item /
+ * .big-account-order-item / .extract-order-item（长名）。补 alias 样式（参考已有 Clear token）。
+ */
+
+/* 容器 + 仅 Clear 设计师未出的辅助 class（核心 .ba-file-row / .ba-order-row /
+ * .extract-order-row / .eo-idx / .eo-name 由设计师原版 line 378-433 + 1083-1108 提供）*/
+.big-account-file-list { display: flex; flex-direction: column; gap: 6px; }
+.big-account-order-list { display: flex; flex-direction: column; gap: 6px; }
+
+/* 大账号行高亮（设计师 .ba-order-row.is-selected 已有，扩展 src 也用的 .is-checked）*/
+.ba-order-row.is-checked,
+.big-account-order-item.is-checked {
+  background: var(--chip-active-bg, #e8f0fe);
+  border-color: var(--primary, #1a73e8);
+}
+
+.big-account-order-index--alpha { color: var(--muted); }
+.big-account-order-text-item {
+  font-size: 13px; font-weight: 500;
+  color: var(--text);
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.big-account-order-empty {
+  font-size: 12px; color: var(--muted);
+  padding: 16px; text-align: center;
+}
+
+.big-account-merchant-input,
+.big-account-currency-input {
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--text);
+  font-family: "Roboto Mono", ui-monospace, monospace;
+}
+.big-account-merchant-view,
+.big-account-currency-view {
+  font-family: "Roboto Mono", ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--text);
+}
+.ba-multi-mode-checkbox { accent-color: var(--primary, #1a73e8); width: 14px; height: 14px; }
+.ba-multi-toggle-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #fff;
+  cursor: pointer;
+}
+.ba-multi-toggle-btn.is-hidden { display: none; }
+
+.extract-order-list { display: flex; flex-direction: column; gap: 4px; }
+.extract-order-btn {
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: 8px;
+}
+
+/* =================== v2.0.0-beta.2 阶段 5 增量：拆分/合并账单 picker Clear 适配 ===================
+ * Clear styles-gemini-extra.css 缺 .bill-split-merge-picker- + .bill-split-target-seq-picker- 系列
+ * 样式（line 526-619 仅有外壳 + label，没 picker 容器/面板/选项）。
+ * 补 src 实际使用的 class（参考 General styles.css:2077-2125 + 2253-2289 token）。
+ */
+.bill-split-merge-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.bill-split-merge-picker-trigger {
+  min-width: 180px;
+  height: 34px;
+}
+.bill-split-merge-picker-panel {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 10;
+  min-width: 220px;
+  max-height: 300px;
+  overflow-y: auto;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.12);
+  padding: 8px 0;
+  margin-top: 4px;
+}
+.bill-split-merge-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+.bill-split-merge-picker-option:hover { background: var(--bg-soft); }
+.bill-split-merge-picker-option input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+.bill-split-merge-picker-empty {
+  padding: 12px 14px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.bill-split-target-seq-picker {
+  display: inline-block;
+  position: relative;
+  margin-left: 8px;
+}
+.bill-split-target-seq-trigger { white-space: nowrap; }
+.bill-split-target-seq-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.10);
+  padding: 6px 0;
+  min-width: 140px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.bill-split-target-seq-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+.bill-split-target-seq-option:hover { background: var(--bg-soft); }
+.bill-split-target-seq-option input[type="checkbox"] { accent-color: var(--primary); }
+
+/* =================== v2.0.0-beta.2 阶段 5 增量：mapping-select + 主模板 select Clear 适配 ===================
+ * Clear styles-gemini-extra.css 全局缺 .mapping-select 样式（仅几个特定 context 局部 override），
+ * 同时映射关系管理 dialog 里勾选"设为子模板"出现的"主模板"下拉框 select 没 class，
+ * 靠 .dialog-child-parent-select-wrapper select 选中（General styles.css:2321-2329 简单
+ * font-size/padding，无边框）。Clear 都没适配 → 这些 select 裸露。
+ */
+.mapping-select {
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 30px 0 12px;
+  font-size: 13px;
+  color: var(--text);
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  cursor: pointer;
+}
+.mapping-select:focus {
+  outline: 2px solid var(--g-blue);
+  outline-offset: 1px;
+}
+
+.dialog-child-parent-select-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text);
+}
+.dialog-child-parent-select-wrapper select {
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 28px 0 10px;
+  font-size: 13px;
+  color: var(--text);
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  cursor: pointer;
+  min-width: 160px;
+}
+.dialog-child-parent-select-wrapper select:focus {
+  outline: 2px solid var(--g-blue);
+  outline-offset: 1px;
+}

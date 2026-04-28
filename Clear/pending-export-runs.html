@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Pending 导出差异 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v3" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card pending-export-runs-card">
+      <div class="dialog-header">
+        <div class="dialog-title">导出月份范围</div>
+      </div>
+      <div class="pending-export-runs-body">
+        <label class="pending-export-runs-option">
+          <input type="radio" name="export-scope" checked />
+          <span>
+            <span class="run-label">导出指定月份</span>
+            <select class="pending-rule-select" style="margin-top:6px;display:block;width:140px">
+              <option selected>2026-03</option>
+              <option>2026-02</option>
+              <option>2026-01</option>
+            </select>
+          </span>
+          <span>
+            <span class="run-label">Run</span>
+            <select class="run-select" style="margin-top:6px;display:block;width:100%">
+              <option selected>2026-04-18 14:32:00  差异 10 条  规则 {交易日期,主账户,发生额 × 摘…</option>
+              <option>2026-04-17 09:10:00  差异 12 条  规则 {交易日期,主账户}</option>
+            </select>
+          </span>
+        </label>
+        <label class="pending-export-runs-option">
+          <input type="radio" name="export-scope" />
+          <span class="run-label" style="grid-column:2 / span 2;font-size:13px;color:var(--text);font-weight:400">导出所有月份汇总（每月取最新 run）</span>
+        </label>
+      </div>
+      <div class="dialog-actions">
+        <button class="primary-btn small" type="button" data-action="export">导出</button>
+        <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

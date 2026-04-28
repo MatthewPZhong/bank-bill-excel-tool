@@ -1,0 +1,57 @@
+<!DOCTYPE html><html lang="zh-CN"><head>
+
+
+<meta charset="UTF-8">
+<title>Pending 导出差异 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css">
+<link rel="stylesheet" href="styles-gemini-extra.css?v3">
+</head>
+<body data-cc-id="cc-1" style="cursor: crosshair;">
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay" data-cc-id="cc-4" style="font-weight: 500;">
+    <div class="modal-card pending-export-runs-card" style="font-weight: 500;">
+      <div class="dialog-header" style="font-weight: 500;">
+        <div class="dialog-title" style="font-weight: 500;">导出月份范围</div>
+      </div>
+      <div class="pending-export-runs-body" style="font-weight: 500;">
+        <label class="pending-export-runs-option" style="font-weight: 500;">
+          <input type="radio" name="export-scope" checked="">
+          <span style="font-weight: 500;">
+            <span class="run-label" style="font-weight: 500;">导出指定月份</span>
+            <select class="pending-rule-select" style="margin-top: 6px; display: block; width: 140px; font-weight: 500;">
+              <option selected="" style="font-weight: 500;">2026-03</option>
+              <option style="font-weight: 500;">2026-02</option>
+              <option style="font-weight: 500;">2026-01</option>
+            </select>
+          </span>
+          <span style="font-weight: 500;">
+            <span class="run-label" style="font-weight: 500;">Run</span>
+            <select class="run-select" style="margin-top: 6px; display: block; width: 100%; font-weight: 500;">
+              <option selected="" style="font-weight: 500;">2026-04-18 14:32:00  差异 10 条  规则 {交易日期,主账户,发生额 × 摘…</option>
+              <option style="font-weight: 500;">2026-04-17 09:10:00  差异 12 条  规则 {交易日期,主账户}</option>
+            </select>
+          </span>
+        </label>
+        <label class="pending-export-runs-option" style="font-weight: 500;">
+          <input type="radio" name="export-scope">
+          <span class="run-label" style="grid-column: 2 / span 2; font-size: 13px; color: var(--text); font-weight: 500;">导出所有月份汇总（每月取最新 run）</span>
+        </label>
+      </div>
+      <div class="dialog-actions" data-cc-id="cc-2" style="font-weight: 500;">
+        <button class="primary-btn small" type="button" data-action="export" style="font-weight: 500;">导出</button>
+        <button class="secondary-btn small" type="button" data-action="cancel" data-cc-id="cc-3" style="line-height: 2; padding: 1px 16px 0px; border-width: 1px; height: 36px; font-weight: 500;">取消</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+</body></html>

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>拆分/合并账单映射关系设置 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card bill-split-mappings-card">
+      <div class="dialog-header">
+        <div class="dialog-title"><span class="gemini-gradient">拆分/合并账单映射关系设置</span></div>
+        <div class="bill-split-mappings-header-actions">
+          <button class="secondary-btn small" type="button" data-action="import-main">导入当前映射关系</button>
+          <button class="icon-close" type="button">×</button>
+        </div>
+      </div>
+
+      <div class="table-wrapper bill-split-mappings-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>模板字段</th>
+              <th>映射字段</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="bill-split-field-name">Transaction Date</span></td>
+              <td>
+                <div class="mapping-field-editor">
+                  <select class="mapping-select bill-split-mapping-select">
+                    <option value=""></option>
+                    <option selected>交易日期</option>
+                    <option>记账日期</option>
+                    <option>入账日</option>
+                  </select>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="bill-split-field-name">Value Date</span></td>
+              <td>
+                <div class="mapping-field-editor">
+                  <select class="mapping-select bill-split-mapping-select">
+                    <option value=""></option>
+                    <option selected>起息日</option>
+                    <option>交易日期</option>
+                  </select>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="bill-split-field-name">Description</span></td>
+              <td>
+                <div class="mapping-field-editor">
+                  <select class="mapping-select bill-split-mapping-select">
+                    <option value=""></option>
+                    <option selected>__CONCAT__</option>
+                    <option>摘要</option>
+                    <option>对方户名</option>
+                    <option>交易附言</option>
+                  </select>
+                  <div class="concat-field-picker">
+                    <button class="concat-picker-trigger secondary-btn small" type="button">选择字段</button>
+                    <div class="concat-preview-wrapper">
+                      <span class="concat-order-label">当前拼接顺序：</span>
+                      <span class="concat-preview" title="摘要 对方户名 交易附言">摘要 对方户名 交易附言</span>
+                    </div>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="bill-split-field-name">Reference No</span></td>
+              <td>
+                <div class="mapping-field-editor">
+                  <select class="mapping-select bill-split-mapping-select">
+                    <option value=""></option>
+                    <option selected>交易流水号</option>
+                  </select>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="bill-split-field-name">Balance</span></td>
+              <td>
+                <div class="mapping-field-editor">
+                  <select class="mapping-select bill-split-mapping-select">
+                    <option>禁用</option>
+                    <option selected>通过发生额计算</option>
+                    <option>账户余额</option>
+                  </select>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td><span class="bill-split-field-name">Counter Party</span></td>
+              <td>
+                <div class="mapping-field-editor">
+                  <select class="mapping-select bill-split-mapping-select">
+                    <option value="" selected></option>
+                    <option>对方户名</option>
+                    <option>对方账号</option>
+                  </select>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="dialog-actions right">
+        <button class="primary-btn small" type="button" data-action="done">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

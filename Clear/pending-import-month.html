@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>Pending 导入月份 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v3" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card alert-card pending-import-month-card">
+      <div class="dialog-header">
+        <div class="dialog-title">请选择 Pending 数据所属年月</div>
+      </div>
+      <div class="pending-import-month-form">
+        <select class="pending-rule-select" data-role="year">
+          <option selected>2026 年</option>
+          <option>2025 年</option>
+          <option>2024 年</option>
+        </select>
+        <select class="pending-rule-select" data-role="month">
+          <option selected>4 月</option>
+          <option>3 月</option>
+          <option>2 月</option>
+        </select>
+      </div>
+      <div class="dialog-actions">
+        <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        <button class="primary-btn small" type="button" data-action="confirm">确认</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

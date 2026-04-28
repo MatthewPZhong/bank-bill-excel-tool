@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>发生额映射关系管理 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card amount-split-rules-card">
+      <div class="dialog-header">
+        <div class="dialog-title"><span class="gemini-gradient">发生额映射关系管理</span></div>
+        <button class="icon-close" type="button">×</button>
+      </div>
+      <div class="amount-split-rules-body">
+        <p class="amount-split-rules-hint">
+          根据 <strong>判断字段 = 判断字段值</strong> 将 <strong>发生额字段</strong> 分派到 Credit Amount / Debit Amount。
+        </p>
+        <table class="data-table amount-split-rules-table">
+          <thead>
+            <tr>
+              <th>目标字段</th>
+              <th>判断字段</th>
+              <th>判断字段值</th>
+              <th>发生额字段</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="amount-split-rule-row" data-target-field="Credit Amount">
+              <td><span class="amount-split-target-pill amount-split-target-pill--credit">Credit Amount</span></td>
+              <td>
+                <select class="mapping-select rule-condition-field">
+                  <option value=""></option>
+                  <option>借贷标志</option>
+                  <option selected>收付标志</option>
+                  <option>交易类型</option>
+                </select>
+              </td>
+              <td><input class="mapping-text-input rule-condition-value" type="text" value="收" spellcheck="false" /></td>
+              <td>
+                <select class="mapping-select rule-mapped-field">
+                  <option value=""></option>
+                  <option selected>交易金额</option>
+                  <option>本位币金额</option>
+                </select>
+              </td>
+            </tr>
+            <tr class="amount-split-rule-row" data-target-field="Debit Amount">
+              <td><span class="amount-split-target-pill amount-split-target-pill--debit">Debit Amount</span></td>
+              <td>
+                <select class="mapping-select rule-condition-field">
+                  <option value=""></option>
+                  <option>借贷标志</option>
+                  <option selected>收付标志</option>
+                  <option>交易类型</option>
+                </select>
+              </td>
+              <td><input class="mapping-text-input rule-condition-value" type="text" value="付" spellcheck="false" /></td>
+              <td>
+                <select class="mapping-select rule-mapped-field">
+                  <option value=""></option>
+                  <option selected>交易金额</option>
+                  <option>本位币金额</option>
+                </select>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="dialog-actions right">
+        <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        <button class="primary-btn small" type="button" data-action="done">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

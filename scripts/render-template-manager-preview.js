@@ -6,7 +6,11 @@ const { spawn } = require('node:child_process');
 const electronBinary = require('electron');
 
 const projectRoot = path.resolve(__dirname, '..');
-const previewPath = path.join(projectRoot, 'docs', 'previews', 'template-manager.png');
+const previewStyle = String(process.env.APP_PREVIEW_STYLE || '').trim().toLowerCase();
+const previewDir = previewStyle === 'general'
+  ? path.join(projectRoot, 'docs', 'previews', '_general')
+  : path.join(projectRoot, 'docs', 'previews');
+const previewPath = path.join(previewDir, 'template-manager.png');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'bank-bill-template-manager-preview-'));
 
 fs.mkdirSync(path.dirname(previewPath), { recursive: true });

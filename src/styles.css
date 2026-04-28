@@ -219,8 +219,8 @@ select {
 }
 
 .cell.center {
-  justify-self: center;
-  display: inline-flex;
+  justify-self: stretch;
+  display: flex;
   align-items: center;
   gap: 12px;
 }
@@ -599,6 +599,10 @@ select {
   line-height: 1;
   white-space: nowrap;
 }
+
+/* v2.0.0-beta.2：行操作按钮颜色（renderer 通过 data-row-action 切换 add/delete 文案）*/
+.new-account-row-action-btn[data-row-action="add"] { color: var(--primary, #1a73e8); }
+.new-account-row-action-btn[data-row-action="delete"] { color: var(--danger, #c5221f); }
 
 .new-account-actions-row {
   display: grid;
@@ -1087,23 +1091,57 @@ select {
   max-width: 960px;
 }
 
-.extract-single-scroll {
-  overflow: hidden;
-  display: block;
-}
-
-.extract-scroll-container {
+.extract-order-body {
+  padding: 18px 24px 8px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0;
-  overflow-y: auto;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 24px;
   max-height: 50vh;
+  overflow-y: auto;
 }
 
-.extract-single-scroll .big-account-split-left,
-.extract-single-scroll .big-account-split-right {
-  overflow-y: visible;
-  max-height: none;
+.extract-order-col-header {
+  font-size: 12px;
+  color: rgba(56, 30, 17, 0.6);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+
+.extract-order-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.extract-order-row {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 6px;
+  font-size: 14px;
+  border-bottom: 1px solid rgba(104, 79, 39, 0.16);
+}
+
+.extract-order-row:last-child {
+  border-bottom: none;
+}
+
+.extract-order-row .eo-idx {
+  color: rgba(56, 30, 17, 0.6);
+  text-align: right;
+  font-family: "Roboto Mono", ui-monospace, monospace;
+}
+
+.extract-order-row .eo-name {
+  color: #381E11;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.extract-order-row .eo-edit {
+  font-size: 13px;
 }
 
 .big-account-selection-split .big-account-split-body {
@@ -1158,35 +1196,6 @@ select {
   padding: 6px 14px;
 }
 
-
-.extract-order-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--line);
-}
-
-.extract-order-text {
-  flex: 1;
-  font-size: 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.extract-edit-btn {
-  border: none;
-  background: transparent;
-  color: var(--primary);
-  cursor: pointer;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.extract-edit-btn:hover {
-  text-decoration: underline;
-}
 
 .extract-edit-container {
   display: flex;
@@ -2614,4 +2623,88 @@ select {
 }
 .pending-rule-field-btn[data-role="remove"]:hover {
   background: rgba(165, 61, 48, 0.1);
+}
+
+/* === v2.0.0-beta.2 D15: General 风格退化规则 ===
+ * HTML 基线对齐 Clear（D6.1），General 风格通过本节规则 hide / reset
+ * Clear 特有的条件渲染节点。详见 PRD §三 D15 + TechDoc §4.3.1
+ */
+
+/* 1. 渐变文字 reset（Clear 用 webkit-background-clip:text 实现渐变标题）*/
+.gemini-gradient {
+  background: none;
+  -webkit-background-clip: initial;
+  -webkit-text-fill-color: inherit;
+  color: inherit;
+}
+
+/* 2. 状态栏闪光 SVG 隐藏（General 状态栏纯文本）*/
+.status-spark { display: none; }
+
+/* 3. 模块切换 caret ▾ 隐藏（General 风格无 caret 设计）*/
+.module-switcher-caret { display: none; }
+
+/* 4. 模块切换 icon：SVG 隐藏 + emoji 通过 ::before 还原 */
+.module-switcher-icon svg { display: none; }
+.module-switcher-icon::before { content: "🔁"; font-size: 18px; line-height: 1; }
+
+/* 5. select-shell 外包 div 透明化（让 .cell.center > select 父子规则继续生效）*/
+.select-shell { display: contents; }
+
+/* 6. alert/confirm 弹窗的 alert-body 包装层透明化 + alert-icon 隐藏（General 不要 SVG 装饰）*/
+.alert-body { display: contents; }
+.alert-icon { display: none; }
+
+/* 7. Pending 模块（D6.1）：HTML 重构对齐 Clear，给 General 加 control-row + pending-action-pair 布局 */
+.pending-board .control-row { grid-template-columns: 1fr 1.4fr; }
+.pending-board .cell.left { display: flex; justify-content: center; }
+.pending-board .cell.right { display: flex; justify-content: center; }
+.pending-board .cell.left .secondary-btn { min-width: 180px; }
+.pending-board .pending-action-pair { display: flex; gap: 12px; justify-content: center; }
+.pending-board .pending-action-pair .primary-btn { min-width: 140px; }
+
+/* === v2.0.0-beta.2 F1: 调色板"切换页面风格"下拉框样式（D11 自补）=== */
+
+/* 调色板 grid 多一行：[风格切换 / body / actions]，整体高度自适应 */
+.palette-panel {
+  grid-template-rows: auto 1fr auto;
+  height: auto;
+  min-height: 6.8cm;
+}
+
+.palette-panel-style-row {
+  display: flex;
+  align-items: center;
+  gap: 0.16cm;
+  padding: 0 0.06cm;
+}
+
+.palette-style-label {
+  font-size: 12px;
+  color: var(--text, #2d2014);
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.palette-style-control {
+  display: flex;
+  align-items: center;
+  gap: 0.12cm;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.palette-style-select {
+  padding: 0.06cm 0.18cm;
+  border-radius: 0.16cm;
+  border: 1px solid rgba(104, 79, 39, 0.24);
+  background: #fff;
+  font-size: 12px;
+  color: var(--text, #2d2014);
+  cursor: pointer;
+}
+
+.palette-style-select:focus {
+  outline: 2px solid rgba(104, 79, 39, 0.32);
+  outline-offset: 1px;
 }

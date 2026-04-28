@@ -70,7 +70,12 @@
       const dialog = document.createElement('div');
       dialog.className = 'modal-card alert-card';
       dialog.innerHTML = `
-        <div class="alert-message">${message}</div>
+        <div class="alert-body">
+          <div class="alert-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28"><defs><linearGradient id="alertIconG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="100%" stop-color="#9B72F2"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="none" stroke="url(#alertIconG)" stroke-width="2"/><path d="M12 7v6M12 16v1" stroke="url(#alertIconG)" stroke-width="2" stroke-linecap="round"/></svg>
+          </div>
+          <div class="alert-message">${message}</div>
+        </div>
         <div class="dialog-actions center">
           <button class="primary-btn small" type="button">确认</button>
         </div>
@@ -83,12 +88,17 @@
       return overlay;
     }
 
-    function createConfirmDialog({ message, confirmText, cancelText, onConfirm }) {
+    function createConfirmDialog({ message, confirmText, cancelText, onConfirm, onCancel }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card alert-card';
       dialog.innerHTML = `
-        <div class="alert-message">${message}</div>
+        <div class="alert-body">
+          <div class="alert-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28"><defs><linearGradient id="confirmIconG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#E95EA2"/><stop offset="100%" stop-color="#F6B93B"/></linearGradient></defs><path d="M12 3L2 20h20L12 3z" fill="none" stroke="url(#confirmIconG)" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4M12 17h.01" stroke="url(#confirmIconG)" stroke-width="2" stroke-linecap="round"/></svg>
+          </div>
+          <div class="alert-message">${message}</div>
+        </div>
         <div class="dialog-actions center">
           <button class="danger-btn small" type="button" data-action="confirm">${confirmText}</button>
           <button class="secondary-btn small" type="button" data-action="cancel">${cancelText}</button>
@@ -97,7 +107,10 @@
       dialog.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
         await onConfirm();
       });
-      dialog.querySelector('[data-action="cancel"]').addEventListener('click', closeModal);
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+        if (onCancel) onCancel();
+        closeModal();
+      });
       overlay.appendChild(dialog);
       return overlay;
     }
@@ -108,7 +121,12 @@
       const fieldLabel = kind === 'detail' ? '明细' : '余额';
       dialog.className = 'modal-card alert-card export-scope-card';
       dialog.innerHTML = `
-        <div class="alert-message">请选择要导出的范围</div>
+        <div class="alert-body">
+          <div class="alert-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28"><defs><linearGradient id="exportScopeIconG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="100%" stop-color="#9B72F2"/></linearGradient></defs><circle cx="12" cy="12" r="10" fill="none" stroke="url(#exportScopeIconG)" stroke-width="2"/><path d="M12 7v6M12 16v1" stroke="url(#exportScopeIconG)" stroke-width="2" stroke-linecap="round"/></svg>
+          </div>
+          <div class="alert-message">请选择要导出的范围</div>
+        </div>
         <div class="dialog-actions vertical">
           <button class="secondary-btn small export-scope-btn" type="button" data-scope="current">导出当前批次文件的${fieldLabel}</button>
           <button class="secondary-btn small export-scope-btn" type="button" data-scope="all">导出所有批次文件的${fieldLabel}</button>
@@ -882,7 +900,7 @@
         displayRows.forEach((entry) => {
           const { row, rowIndex, covered } = entry;
           const item = document.createElement('div');
-          item.className = 'big-account-file-item';
+          item.className = 'big-account-file-item ba-file-row';
           item.dataset.rowIndex = String(rowIndex);
           if (Number.isInteger(row.fileIndex)) {
             item.dataset.fileIndex = String(row.fileIndex);
@@ -909,7 +927,7 @@
             letterSpan.textContent = letter ? `${letter}.` : '';
             if (letter) letterSpan.classList.add('big-account-order-index--alpha');
             const meta = document.createElement('span');
-            meta.className = 'big-account-file-meta';
+            meta.className = 'big-account-file-meta ba-file-name';
             meta.title = fullMeta;
             meta.textContent = displayName;
             item.append(checkbox, letterSpan, meta);
@@ -925,7 +943,7 @@
             letterSpan.className = 'big-account-order-index ba-left-letter big-account-order-index--alpha';
             letterSpan.textContent = group ? `${String.fromCharCode(97 + groupInfo.groupIndex)}.` : '';
             const meta = document.createElement('span');
-            meta.className = 'big-account-file-meta';
+            meta.className = 'big-account-file-meta ba-file-name';
             meta.title = fullMeta;
             meta.textContent = group ? `${displayName} → ${group.rightAccount.merchantId} ${group.rightAccount.currency}` : displayName;
             item.append(markerSpan, letterSpan, meta);
@@ -937,16 +955,16 @@
             letterSpan.textContent = '';
             item.innerHTML = '';
             const indexSpan = document.createElement('span');
-            indexSpan.className = 'big-account-file-index';
+            indexSpan.className = 'big-account-file-index ba-file-idx';
             indexSpan.textContent = `${uncoveredSeq}.`;
             const meta = document.createElement('span');
-            meta.className = 'big-account-file-meta';
+            meta.className = 'big-account-file-meta ba-file-name';
             meta.title = fullMeta;
             meta.textContent = escapeHtml(displayName);
             item.append(letterSpan, indexSpan, meta);
           } else {
             uncoveredSeq += 1;
-            item.innerHTML = `<span class="big-account-file-index">${uncoveredSeq}.</span><span class="big-account-file-meta" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span>`;
+            item.innerHTML = `<span class="big-account-file-index ba-file-idx">${uncoveredSeq}.</span><span class="big-account-file-meta ba-file-name" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span>`;
           }
           fileListContainer.appendChild(item);
         });
@@ -960,7 +978,7 @@
         }
         expandedOptions.forEach((option, index) => {
           const item = document.createElement('div');
-          item.className = 'big-account-order-item';
+          item.className = 'big-account-order-item ba-order-row';
           item.dataset.merchantId = option.merchantId;
           item.dataset.currency = option.currency;
           const label = `${option.merchantId} ${option.currency}`;
@@ -968,10 +986,10 @@
           checkbox.type = 'checkbox';
           checkbox.className = 'new-account-checkbox big-account-order-checkbox';
           const indexSpan = document.createElement('span');
-          indexSpan.className = 'concat-picker-index big-account-order-index';
+          indexSpan.className = 'concat-picker-index big-account-order-index ba-order-badge';
           indexSpan.textContent = '';
           const textSpan = document.createElement('span');
-          textSpan.className = 'big-account-order-text';
+          textSpan.className = 'big-account-order-text ba-order-content';
           textSpan.title = label;
           textSpan.textContent = label;
 
@@ -1293,12 +1311,12 @@
         }
         checkedOrder.forEach((item, index) => {
           const div = document.createElement('div');
-          div.className = 'big-account-order-item big-account-order-text-item';
+          div.className = 'big-account-order-item big-account-order-text-item ba-order-row';
           const indexSpan = document.createElement('span');
-          indexSpan.className = 'concat-picker-index big-account-order-index';
+          indexSpan.className = 'concat-picker-index big-account-order-index ba-order-badge';
           indexSpan.textContent = `${index + 1}.`;
           const textSpan = document.createElement('span');
-          textSpan.className = 'big-account-order-text';
+          textSpan.className = 'big-account-order-text ba-order-content';
           textSpan.textContent = `${item.merchantId} ${item.currency}`;
           div.append(indexSpan, textSpan);
           orderListContainer.appendChild(div);
@@ -1572,22 +1590,20 @@
         function showExtractDialog() {
           const extractOverlay = createOverlay();
           const extractDialog = document.createElement('div');
-          extractDialog.className = 'modal-card big-account-selection-card extract-order-card';
+          extractDialog.className = 'modal-card extract-order-card';
           extractDialog.innerHTML = `
             <div class="dialog-header">
               <div class="dialog-title">确认大账号顺序</div>
-              <button class="icon-close extract-close-btn" type="button">×</button>
+              <button class="icon-close extract-close-btn" type="button" style="margin-left:auto;">×</button>
             </div>
-            <div class="big-account-split-body extract-single-scroll">
-              <div class="extract-scroll-container">
-                <div class="big-account-split-left">
-                  <div class="big-account-split-header">文件顺序：</div>
-                  <div class="extract-file-list"></div>
-                </div>
-                <div class="big-account-split-right">
-                  <div class="big-account-split-header">大账号信息：</div>
-                  <div class="extract-order-list"></div>
-                </div>
+            <div class="extract-order-body">
+              <div>
+                <div class="extract-order-col-header">文件顺序：</div>
+                <div class="extract-order-list extract-file-list"></div>
+              </div>
+              <div>
+                <div class="extract-order-col-header">大账号信息：</div>
+                <div class="extract-order-list extract-account-list"></div>
               </div>
             </div>
             <div class="dialog-actions right">
@@ -1596,7 +1612,7 @@
           `;
 
           const extractFileList = extractDialog.querySelector('.extract-file-list');
-          const extractOrderList = extractDialog.querySelector('.extract-order-list');
+          const extractOrderList = extractDialog.querySelector('.extract-account-list');
 
 
 
@@ -1604,32 +1620,32 @@
           // v1.5.2：确认大账号顺序弹窗只显示未被"单个账号匹多个文件"映射的 block
           extractableRows.forEach((row, index) => {
             const item = document.createElement('div');
-            item.className = 'big-account-file-item';
+            item.className = 'extract-order-row';
             const fullName = row.fileName || '';
             const rowSuffix = row.sourceRowNumber ? ` 第${row.sourceRowNumber}行` : '';
             const displayName = truncateFileName(fullName, 20) + rowSuffix;
             const fullMeta = fullName + rowSuffix;
-            item.innerHTML = `<span class="big-account-file-index">${index + 1}.</span><span class="big-account-file-meta" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span>`;
+            item.innerHTML = `<span class="eo-idx">${index + 1}.</span><span class="eo-name" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span><span></span>`;
             extractFileList.appendChild(item);
           });
 
           extractedAccounts.forEach((account, index) => {
             const item = document.createElement('div');
-            item.className = 'extract-order-item';
+            item.className = 'extract-order-row';
             item.dataset.index = index;
             item.dataset.merchantId = account.merchantId;
             item.dataset.currency = account.currency;
 
             const indexSpan = document.createElement('span');
-            indexSpan.className = 'extract-order-index';
+            indexSpan.className = 'eo-idx';
             indexSpan.textContent = `${index + 1}.`;
 
             const textSpan = document.createElement('span');
-            textSpan.className = 'extract-order-text';
+            textSpan.className = 'eo-name';
             textSpan.textContent = `${account.merchantId} ${account.currency}`;
 
             const editBtn = document.createElement('button');
-            editBtn.className = 'extract-edit-btn';
+            editBtn.className = 'text-action eo-edit';
             editBtn.type = 'button';
             editBtn.textContent = '编辑';
 
@@ -5158,7 +5174,12 @@
       const dialog = document.createElement('div');
       dialog.className = 'modal-card alert-card';
       dialog.innerHTML = `
-        <div class="alert-message">${message}</div>
+        <div class="alert-body">
+          <div class="alert-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28"><defs><linearGradient id="rememberMismatchIconG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#E95EA2"/><stop offset="100%" stop-color="#F6B93B"/></linearGradient></defs><path d="M12 3L2 20h20L12 3z" fill="none" stroke="url(#rememberMismatchIconG)" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4M12 17h.01" stroke="url(#rememberMismatchIconG)" stroke-width="2" stroke-linecap="round"/></svg>
+          </div>
+          <div class="alert-message">${message}</div>
+        </div>
         <div class="dialog-actions center">
           <button class="secondary-btn small" type="button" data-action="change-config">变更配置</button>
           <button class="primary-btn small" type="button" data-action="confirm">确认</button>
@@ -5221,7 +5242,7 @@
           <td class="account-mapping-text-cell">${escapeHtml(row.bankAccountId)}</td>
           <td class="account-mapping-text-cell">${escapeHtml(row.clearingAccountId)}</td>
           <td>${escapeHtml(row.currency || '—')}</td>
-          <td><select class="migration-template-select"><option value="">请选择模板</option>${templateOptions}</select></td>
+          <td><select class="mapping-select migration-template-select"><option value="">请选择模板</option>${templateOptions}</select></td>
         `;
         tbody.appendChild(tr);
       });

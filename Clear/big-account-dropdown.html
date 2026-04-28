@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>维护大账号 · 币种下拉 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v3" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card manager-card big-account-card">
+      <div class="dialog-header">
+        <div class="dialog-title"><span class="gemini-gradient">维护大账号</span></div>
+        <button class="icon-close" type="button">×</button>
+      </div>
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>大账号</th>
+              <th>币种</th>
+              <th class="manager-action-header" style="text-align:left;"><span class="manager-action-header-label">执行操作</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>6222000000000001</td>
+              <td><button class="new-account-input new-account-currency-dropdown-btn" type="button">USD</button></td>
+              <td class="row-actions" style="text-align:left;">
+                <button class="text-action" style="padding-left:0;">修改</button>
+                <button class="text-action danger">删除</button>
+              </td>
+            </tr>
+            <tr class="is-editing">
+              <td><input class="mapping-text-input" value="6222000000000001" /></td>
+              <td class="currency-cell">
+                <div class="new-account-currency-row inline">
+                  <div class="new-account-currency-dropdown-wrap">
+                    <button class="new-account-input new-account-currency-dropdown-btn is-open" type="button" aria-expanded="true">4个币种</button>
+                    <div class="currency-dropdown-menu" role="listbox">
+                      <label class="currency-dropdown-row">
+                        <span class="currency-dropdown-code">USD</span>
+                        <input type="checkbox" class="currency-dropdown-check" />
+                      </label>
+                      <label class="currency-dropdown-row is-checked">
+                        <span class="currency-dropdown-code">HKD</span>
+                        <input type="checkbox" class="currency-dropdown-check" checked />
+                      </label>
+                      <label class="currency-dropdown-row is-checked">
+                        <span class="currency-dropdown-code">CNY</span>
+                        <input type="checkbox" class="currency-dropdown-check" checked />
+                      </label>
+                      <label class="currency-dropdown-row is-checked">
+                        <span class="currency-dropdown-code">EUR</span>
+                        <input type="checkbox" class="currency-dropdown-check" checked />
+                      </label>
+                      <label class="currency-dropdown-row is-checked">
+                        <span class="currency-dropdown-code">JPY</span>
+                        <input type="checkbox" class="currency-dropdown-check" checked />
+                      </label>
+                    </div>
+                  </div>
+                  <label class="new-account-checkbox-label">
+                    <input class="new-account-checkbox" type="checkbox" checked />
+                    <span class="new-account-checkbox-text">多币种</span>
+                  </label>
+                </div>
+              </td>
+              <td class="row-actions" style="text-align:left;">
+                <button class="text-action" style="padding-left:0;">完成</button>
+                <button class="text-action danger">删除</button>
+              </td>
+            </tr>
+            <tr>
+              <td>9558800000000008</td>
+              <td><button class="new-account-input new-account-currency-dropdown-btn" type="button">USD / HKD</button></td>
+              <td class="row-actions" style="text-align:left;">
+                <button class="text-action" style="padding-left:0;">修改</button>
+                <button class="text-action danger">删除</button>
+              </td>
+            </tr>
+            <tr class="is-editing">
+              <td><input class="mapping-text-input" value="8888999900001111" /></td>
+              <td>
+                <div class="new-account-currency-row inline">
+                  <button class="new-account-input new-account-currency-dropdown-btn" type="button">CNY</button>
+                  <label class="new-account-checkbox-label">
+                    <input class="new-account-checkbox" type="checkbox" />
+                    <span class="new-account-checkbox-text">多币种</span>
+                  </label>
+                </div>
+              </td>
+              <td class="row-actions" style="text-align:left;">
+                <button class="text-action" style="padding-left:0;">完成</button>
+                <button class="text-action danger">删除</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="dialog-actions split big-account-footer-actions">
+        <div class="big-account-footer-left">
+          <button class="secondary-btn small" type="button" data-action="add">新增</button>
+          <button class="secondary-btn small" type="button" data-action="import-bank-info">导入银行账号信息</button>
+          <button class="secondary-btn small" type="button" data-action="balance-management">余额管理</button>
+        </div>
+        <button class="primary-btn small" type="button" data-action="done">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

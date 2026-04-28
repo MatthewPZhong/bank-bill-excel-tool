@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>账户映射 · 行内编辑 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v3" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card manager-card account-card">
+      <div class="dialog-header">
+        <div class="account-mapping-template-select-wrapper">
+          模板
+          <select data-role="template-select">
+            <option>HSBC-SG</option>
+            <option>BankABC-HK</option>
+            <option>PingPong-US</option>
+          </select>
+        </div>
+        <button class="icon-close" type="button">×</button>
+      </div>
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>网银账单账户号</th>
+              <th>清结算系统银行账号</th>
+              <th>币种 <span class="currency-tooltip-wrap"><span class="currency-tooltip-icon">&#9432;</span></span></th>
+              <th style="text-align:left;">执行操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="account-mapping-editing-row" data-account-mapping-row="true">
+              <td><input class="mapping-text-input" type="text" value="6222000000000001" /></td>
+              <td><input class="mapping-text-input" type="text" value="CLEAR_001" /></td>
+              <td><input class="mapping-text-input" type="text" value="USD" /></td>
+              <td class="account-mapping-action-cell" style="text-align:left;">
+                <button class="text-action is-active" style="padding-left:0;">完成</button>
+                <button class="text-action danger">删除</button>
+              </td>
+            </tr>
+            <tr data-account-mapping-row="true">
+              <td><span>9558800000000008</span></td>
+              <td><span>CLEAR_002</span></td>
+              <td><span>HKD</span></td>
+              <td class="account-mapping-action-cell" style="text-align:left;">
+                <button class="text-action" style="padding-left:0;">编辑</button>
+                <button class="text-action danger">删除</button>
+              </td>
+            </tr>
+            <tr data-account-mapping-row="true">
+              <td><span>4567000000000003</span></td>
+              <td><span>CLEAR_003</span></td>
+              <td><span>HKD</span></td>
+              <td class="account-mapping-action-cell" style="text-align:left;">
+                <button class="text-action" style="padding-left:0;">编辑</button>
+                <button class="text-action danger">删除</button>
+              </td>
+            </tr>
+            <tr class="add-row">
+              <td colspan="4">
+                <button class="text-action" type="button">新增</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="dialog-actions right">
+        <button class="primary-btn small" type="button" data-action="done">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

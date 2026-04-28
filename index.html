@@ -8,9 +8,11 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>网银账单小助手</title>
-    <link rel="stylesheet" href="./src/styles.css" />
+    <link id="cssGeneral" rel="stylesheet" href="./src/styles.css" disabled />
+    <link id="cssClear" rel="stylesheet" href="./src/styles-gemini.css" />
+    <link id="cssClearExtra" rel="stylesheet" href="./src/styles-gemini-extra.css" />
   </head>
-  <body>
+  <body data-style="clear">
     <div id="appShell" class="app-shell">
       <header class="window-bar">
         <div class="drag-region"></div>
@@ -24,13 +26,16 @@
       <img class="corner-gif" src="./assets/cat-meme.gif" alt="gif" />
 
       <main class="page-body">
-        <h1 class="page-title">网银账单小助手</h1>
+        <h1 class="page-title"><span class="gemini-gradient">网银账单小助手</span></h1>
 
         <section class="workspace-shell">
           <div class="module-switcher">
             <button id="moduleSwitcherBtn" class="module-switcher-trigger" type="button" aria-haspopup="true" aria-expanded="false">
-              <span class="module-switcher-icon" aria-hidden="true">🔁</span>
+              <span class="module-switcher-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="16" height="16"><defs><linearGradient id="gs" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="40%" stop-color="#9B72F2"/><stop offset="75%" stop-color="#E95EA2"/><stop offset="100%" stop-color="#F6B93B"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gs)"/></svg>
+              </span>
               <span id="currentModuleName" class="module-switcher-name">网银账单生成</span>
+              <span class="module-switcher-caret" aria-hidden="true">▾</span>
             </button>
             <div id="moduleSwitcherMenu" class="module-switcher-menu" hidden>
               <button class="module-option is-active" type="button" data-module="statement-generator">网银账单生成</button>
@@ -46,10 +51,12 @@
               </div>
               <div class="cell center">
                 <label class="select-label" for="templateSelect">模式</label>
-                <select id="templateSelect" class="template-select">
-                  <option value="create-statement">制作网银账单</option>
-                  <option value="export-monthly-balance">导出月度余额账单</option>
-                </select>
+                <div class="select-shell">
+                  <select id="templateSelect" class="template-select">
+                    <option value="create-statement">制作网银账单</option>
+                    <option value="export-monthly-balance">导出月度余额账单</option>
+                  </select>
+                </div>
               </div>
               <div class="cell right">
                 <div class="export-actions">
@@ -64,13 +71,19 @@
                 <button id="importTemplateBtn" class="secondary-btn" type="button">导入模板</button>
               </div>
               <div class="cell center">
-                <div class="button-stack">
-                  <button id="manageTemplateBtn" class="secondary-btn" type="button">模板管理</button>
-                  <button id="accountMappingBtn" class="secondary-btn" type="button">账户映射</button>
+                <label class="select-label" aria-hidden="true" style="visibility:hidden;">模式</label>
+                <div class="button-stack" style="flex:1; max-width:260px; gap:12px; flex-wrap:nowrap;">
+                  <button id="manageTemplateBtn" class="secondary-btn" type="button" style="flex:1; min-width:0;">模板管理</button>
+                  <button id="accountMappingBtn" class="secondary-btn" type="button" style="flex:1; min-width:0;">账户映射</button>
                 </div>
               </div>
               <div class="cell right">
-                <div id="statusBox" class="status-box">欢迎使用小助手</div>
+                <div id="statusBox" class="status-box">
+                  <span class="status-spark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatus" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatus)"/></svg>
+                  </span>
+                  <span class="status-box-text">欢迎使用小助手</span>
+                </div>
               </div>
             </div>
           </section>
@@ -128,7 +141,12 @@
               </div>
             </div>
             <div class="new-account-actions-row">
-              <div id="newAccountStatusBox" class="status-box new-account-status-box">等待生成</div>
+              <div id="newAccountStatusBox" class="status-box new-account-status-box">
+                <span class="status-spark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusNew" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusNew)"/></svg>
+                </span>
+                <span class="status-box-text">等待生成</span>
+              </div>
               <div class="new-account-actions">
                 <button id="newAccountGenerateBtn" class="primary-btn" type="button" disabled>生成</button>
                 <button id="newAccountExportBtn" class="secondary-btn" type="button" disabled>导出</button>
@@ -136,15 +154,30 @@
             </div>
           </section>
 
-          <section id="pendingModulePanel" class="control-board module-panel pending-module-panel" hidden>
-            <div class="pending-module-grid">
-              <button id="pendingRuleBtn" class="secondary-btn pending-left-btn" type="button">规则管理</button>
-              <div class="pending-top-btn-row">
-                <button id="pendingImportBtn" class="primary-btn pending-top-btn" type="button" disabled>导入文件</button>
-                <button id="pendingRunBtn" class="primary-btn pending-top-btn" type="button" disabled>开始运行</button>
+          <section id="pendingModulePanel" class="control-board module-panel pending-board" hidden>
+            <div class="control-row">
+              <div class="cell left">
+                <button id="pendingRuleBtn" class="secondary-btn" type="button">规则管理</button>
               </div>
-              <button id="pendingExportBtn" class="secondary-btn pending-left-btn" type="button" disabled>导出差异</button>
-              <div id="pendingStatusBox" class="status-box">初次使用请确认用来筛选的字段~</div>
+              <div class="cell right">
+                <div class="pending-action-pair">
+                  <button id="pendingImportBtn" class="primary-btn" type="button" disabled>导入文件</button>
+                  <button id="pendingRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
+                </div>
+              </div>
+            </div>
+            <div class="control-row">
+              <div class="cell left">
+                <button id="pendingExportBtn" class="secondary-btn" type="button" disabled>导出差异</button>
+              </div>
+              <div class="cell right">
+                <div id="pendingStatusBox" class="status-box">
+                  <span class="status-spark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusPending" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusPending)"/></svg>
+                  </span>
+                  <span class="status-box-text">初次使用请确认用来筛选的字段~</span>
+                </div>
+              </div>
             </div>
           </section>
         </section>
@@ -169,6 +202,16 @@
         </div>
 
         <section id="backgroundPalettePanel" class="palette-panel" hidden aria-label="背景设置">
+          <div class="palette-panel-style-row">
+            <label class="palette-style-label" for="paletteStyleSelect">切换页面风格</label>
+            <div class="palette-style-control">
+              <select id="paletteStyleSelect" class="palette-style-select">
+                <option value="Clear" selected>Clear</option>
+                <option value="General">General</option>
+              </select>
+              <button id="paletteStyleConfirmBtn" class="palette-action solid" type="button">应用</button>
+            </div>
+          </div>
           <div class="palette-panel-body">
             <div id="backgroundSpectrumArea" class="palette-spectrum-shell" aria-label="全色谱选色板">
               <canvas

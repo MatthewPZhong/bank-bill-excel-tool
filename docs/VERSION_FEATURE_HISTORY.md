@@ -9,6 +9,31 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.0.0-beta.2
+
+### 新增
+
+- **页面风格切换（Clear / General 二选一）**：调色板顶部新增「切换页面风格」下拉 + 「应用」按钮，二次确认后即时切换（不 reload）。Clear = v2.0.0 全新主线（来自 Claude Design 38 份 HTML 设计稿）；General = v2.0.0-beta.1 之前的旧风格（向下兼容）。猫猫 GIF 跨风格保留（D8）。
+- **SQLite `app_settings.ui_style` 字段（数据底座）**：存储 UI 风格（`'Clear'` | `'General'`），默认 `'Clear'`；首次启动若不存在则自动写入（D4 升级迁移）。
+- **风格切换 IPC + preload API**：`settings:get-ui-style` / `settings:set-ui-style`；renderer 通过 `desktopApi.settings.{getUiStyle, setUiStyle}` 调用；`app:get-info` 返回体扩 `uiStyle` 字段。
+- **风格-背景色联动（D16）**：Clear 默认背景 `#ffffff`，General 默认 `#efe8da`；切风格时仅当当前色是"另一风格默认色"（魔法值）时自动同步，不覆盖用户自定义颜色。
+- **preview 脚本支持双风格**：`APP_PREVIEW_STYLE=clear|general npm run preview:all` 输出到 `docs/previews/<name>.png` 或 `docs/previews/_general/<name>.png` 两套截图（35×2 张）。
+
+### 变更
+
+- **版本号 bump**：`2.0.0-beta.1` → `2.0.0-beta.2`。
+- **HTML 结构对齐 Clear**：`index.html` 基线整体重写（DOM 对照 `Clear/main.html` + `Clear/pending.html` 重组）；同时保留所有现有控件 ID 与 JS handler 不变。
+- **dialog factory 双套适配**：alert / confirm / export-scope / remember-order-mismatch / 大账号管理 / 模板管理 / 拆分合并账单 / 账户映射 / 大账号选择 / 顺序提取 / Pending 系列对话框 / 调色板等全套 dialog 在 Clear 风格下视觉重写；General 风格通过条件渲染节点退化（5 类：`.gemini-gradient` / `.status-spark` / `.module-switcher-icon` SVG / `.select-shell` / `.alert-body+icon`）保持原视觉。
+- **状态框 SVG-spark 装饰保留**：`updateStatusBox` / `setStatus` / `setNewAccountStatus` / `setPendingStatus` 改为写 `.status-box-text` 子节点（避免 textContent 整体覆盖清掉 spark）。
+- **执行操作列 4 个 dialog**：Clear 风格表格列宽固定（`table-layout: fixed`）消除编辑/view 切换时的列位移；按钮组左对齐 + 第一个按钮 `padding-left: 0`，"修改"按钮左缘对齐"执行操作"列头。
+- **Clear 风格右下角 Version 字体**：等宽（Courier New）。
+
+### 移除
+
+- 死代码 `legacyCreateBigAccountManagerDialog` + `legacyCreateTemplateManagerDialog`（共 -444 行）。其余 17 个 legacy 函数因运行时间接依赖暂保留。
+
+---
+
 ## 2.0.0-beta.1
 
 ### 新增

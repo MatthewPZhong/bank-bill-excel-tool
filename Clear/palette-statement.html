@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>背景调色板 · 制作网银账单 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v3" />
+</head>
+<body>
+<div id="appShell" class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn" type="button">−</button>
+      <button class="window-btn" type="button">□</button>
+      <button class="window-btn close-btn" type="button">×</button>
+    </div>
+  </header>
+
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <main class="page-body">
+    <h1 class="page-title"><span class="gemini-gradient">网银账单小助手</span></h1>
+
+    <section class="workspace-shell">
+      <div class="module-switcher">
+        <button class="module-switcher-trigger" type="button">
+          <span class="module-switcher-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="16" height="16"><defs><linearGradient id="gs" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="40%" stop-color="#9B72F2"/><stop offset="75%" stop-color="#E95EA2"/><stop offset="100%" stop-color="#F6B93B"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gs)"/></svg>
+          </span>
+          <span class="module-switcher-name">网银账单生成</span>
+          <span class="module-switcher-caret" aria-hidden="true">▾</span>
+        </button>
+      </div>
+
+      <section class="control-board module-panel">
+        <div class="control-row">
+          <div class="cell left"><button class="primary-btn" type="button">导入文件</button></div>
+          <div class="cell center">
+            <label class="select-label">模式</label>
+            <div class="select-shell">
+              <select class="template-select"><option>制作网银账单</option></select>
+            </div>
+          </div>
+          <div class="cell right">
+            <div class="export-actions">
+              <button class="secondary-btn" type="button">导出明细</button>
+              <button class="secondary-btn export-balance-btn" type="button">导出余额</button>
+            </div>
+          </div>
+        </div>
+        <div class="control-row">
+          <div class="cell left"><button class="secondary-btn" type="button">导入模板</button></div>
+          <div class="cell center">
+            <div class="button-stack">
+              <button class="secondary-btn" type="button">模板管理</button>
+              <button class="secondary-btn" type="button">账户映射</button>
+            </div>
+          </div>
+          <div class="cell right">
+            <div class="status-box">
+              <span class="status-spark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gs2" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gs2)"/></svg>
+              </span>
+              欢迎使用小助手
+            </div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="page-footer">
+    <div class="version-text"><span class="version-label">Version</span> 1.5.1</div>
+  </footer>
+
+  <!-- 调色板浮窗 -->
+  <div class="palette-float" role="dialog" aria-label="背景调色板">
+    <div class="palette-body">
+      <div class="palette-spectrum" aria-hidden="true">
+        <div class="palette-sat"></div>
+        <div class="palette-light"></div>
+        <div class="palette-cursor" style="left:82%; top:24%;"></div>
+      </div>
+      <button class="palette-swatch-preview" type="button" aria-label="当前颜色"></button>
+    </div>
+    <div class="palette-footer">
+      <button class="secondary-btn pill tiny" type="button">重置</button>
+      <div class="palette-footer-right">
+        <button class="secondary-btn pill tiny" type="button">导入背景文件</button>
+        <button class="primary-btn pill tiny" type="button">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

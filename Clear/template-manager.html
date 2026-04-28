@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>模板管理 · Gemini</title>
+<link rel="stylesheet" href="styles-gemini.css" />
+<link rel="stylesheet" href="styles-gemini-extra.css?v2" />
+</head>
+<body>
+<div class="app-shell">
+  <header class="window-bar">
+    <div class="drag-region"></div>
+    <div class="window-actions no-drag">
+      <button class="window-btn">−</button><button class="window-btn">□</button><button class="window-btn close-btn">×</button>
+    </div>
+  </header>
+  <div class="corner-gif-slot" aria-hidden="true">🐱</div>
+
+  <div class="modal-overlay">
+    <div class="modal-card manager-card">
+      <div class="dialog-header">
+        <div class="dialog-title"><span class="gemini-gradient">模板管理</span></div>
+        <button class="icon-close" type="button">×</button>
+      </div>
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>模板名称</th>
+              <th>大账号</th>
+              <th class="manager-action-header" style="text-align:left;"><span class="manager-action-header-label">执行操作</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>LusoBank-MO</td>
+              <td><span class="muted">来自账单</span></td>
+              <td class="row-actions" style="text-align:left;">
+                <button class="text-action" style="padding-left:0;">修改</button>
+                <button class="text-action">重命名</button>
+                <button class="text-action danger">删除</button>
+              </td>
+            </tr>
+            <tr>
+              <td>BankABC-HK</td>
+              <td><span class="muted">未设置</span></td>
+              <td class="row-actions" style="text-align:left;">
+                <button class="text-action" style="padding-left:0;">修改</button>
+                <button class="text-action">重命名</button>
+                <button class="text-action danger">删除</button>
+              </td>
+            </tr>
+            <tr>
+              <td>PingPong-US</td>
+              <td>6222 0000 0000 0012345</td>
+              <td class="row-actions" style="text-align:left;">
+                <button class="text-action" style="padding-left:0;">修改</button>
+                <button class="text-action">重命名</button>
+                <button class="text-action danger">删除</button>
+              </td>
+            </tr>
+            <tr>
+              <td>HSBC-SG</td>
+              <td><span class="muted">3 个</span></td>
+              <td class="row-actions" style="text-align:left;">
+                <button class="text-action" style="padding-left:0;">修改</button>
+                <button class="text-action">重命名</button>
+                <button class="text-action danger">删除</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="dialog-actions right template-manager-bundle-actions">
+        <button class="secondary-btn small" type="button" data-action="import-bundle">导入模板文件</button>
+        <button class="secondary-btn small" type="button" data-action="export-bundle">导出模板文件</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
