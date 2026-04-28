@@ -1130,7 +1130,8 @@ function setNewAccountExportAvailability(enabled = state.canExportNewAccount) {
   elements.newAccountExportBtn.disabled = !enabled;
 }
 
-function setCurrentModule(moduleId) {
+function setCurrentModule(moduleId, { persist = true } = {}) {
+  const previousModuleId = state.currentModule;
   state.currentModule = moduleId;
   const moduleDef = Object.values(MODULES).find((m) => m.id === moduleId) || MODULES.statementGenerator;
 
@@ -1144,6 +1145,12 @@ function setCurrentModule(moduleId) {
   Array.from(elements.moduleSwitcherMenu.querySelectorAll('.module-option')).forEach((button) => {
     button.classList.toggle('is-active', button.dataset.module === moduleId);
   });
+
+  if (persist && previousModuleId !== moduleId) {
+    window.desktopApi?.settings?.setCurrentModule?.(moduleId).catch((error) => {
+      console.warn('persist currentModule failed:', error);
+    });
+  }
 }
 
 function openModuleMenu() {
@@ -3084,7 +3091,11 @@ async function initialize() {
   });
   setNewAccountExportAvailability(false);
   updateNewAccountGenerateAvailability();
-  setCurrentModule(MODULES.statementGenerator.id);
+  const validModuleIds = Object.values(MODULES).map((m) => m.id);
+  const restoredModuleId = validModuleIds.includes(info.currentModule)
+    ? info.currentModule
+    : MODULES.statementGenerator.id;
+  setCurrentModule(restoredModuleId, { persist: false });
   closeModuleMenu();
   await rendererPending.initialize();
   rendererPending.bindEvents();

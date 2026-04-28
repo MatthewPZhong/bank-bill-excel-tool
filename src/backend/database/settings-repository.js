@@ -87,6 +87,31 @@ function ensureUiStyleDefault(db) {
   return current;
 }
 
+const CURRENT_MODULE_KEY = 'current_module';
+const CURRENT_MODULE_VALID = [
+  'statement-generator',
+  'new-account-generator',
+  'pending-reconciliation'
+];
+const CURRENT_MODULE_DEFAULT = 'statement-generator';
+
+function getCurrentModule(db) {
+  const value = getSetting(db, CURRENT_MODULE_KEY);
+  if (value && CURRENT_MODULE_VALID.includes(value)) {
+    return value;
+  }
+  return null;
+}
+
+function setCurrentModule(db, moduleId) {
+  if (!CURRENT_MODULE_VALID.includes(moduleId)) {
+    throw new Error(
+      `Invalid current_module: ${moduleId}, must be one of ${CURRENT_MODULE_VALID.join(' | ')}`
+    );
+  }
+  setSetting(db, CURRENT_MODULE_KEY, moduleId);
+}
+
 function listAccountMappings(db, templateId) {
   return db
     .prepare(`
@@ -140,12 +165,14 @@ function saveAccountMappings(db, templateId, mappings) {
 module.exports = {
   ensureUiStyleDefault,
   getBackgroundConfig,
+  getCurrentModule,
   getEnumConfig,
   getSetting,
   getUiStyle,
   listAccountMappings,
   saveAccountMappings,
   setBackgroundConfig,
+  setCurrentModule,
   setEnumConfig,
   setSetting,
   setUiStyle

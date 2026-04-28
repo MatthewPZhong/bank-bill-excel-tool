@@ -16,7 +16,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
   },
   settings: {
     getUiStyle: () => ipcRenderer.invoke('settings:get-ui-style'),
-    setUiStyle: (style) => ipcRenderer.invoke('settings:set-ui-style', style)
+    setUiStyle: (style) => ipcRenderer.invoke('settings:set-ui-style', style),
+    setCurrentModule: (moduleId) => ipcRenderer.invoke('settings:set-current-module', moduleId)
   },
   accountMappings: {
     list: (templateId) => ipcRenderer.invoke('account-mapping:list', templateId),

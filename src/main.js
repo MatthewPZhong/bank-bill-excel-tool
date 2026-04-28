@@ -2668,6 +2668,8 @@ function registerAppHandlers() {
       previewModal: process.env.APP_PREVIEW_MODAL || '',
       // v2.0.0-beta.2 F1：UI 风格（'Clear' | 'General'）；renderer 启动时立即应用
       uiStyle: database.getUiStyle() || 'Clear',
+      // 上次使用模块；renderer 启动时恢复
+      currentModule: database.getCurrentModule() || 'statement-generator',
       // v1.5.3 R2（D15）：启动时自有账号迁移失败的错误文案；null 表示无失败
       ownAccountsMigrationError: lastOwnAccountsMigrationError
     };
@@ -2679,6 +2681,14 @@ function registerAppHandlers() {
     try {
       database.setUiStyle(style);
       return { status: 'ok', uiStyle: style };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  ipcMain.handle('settings:set-current-module', (_event, moduleId) => {
+    try {
+      database.setCurrentModule(moduleId);
+      return { status: 'ok', currentModule: moduleId };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
