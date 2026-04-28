@@ -319,6 +319,14 @@ class AppDatabase {
     return settingsRepository.ensureUiStyleDefault(this.db);
   }
 
+  getCurrentModule() {
+    return settingsRepository.getCurrentModule(this.db);
+  }
+
+  setCurrentModule(moduleId) {
+    return settingsRepository.setCurrentModule(this.db, moduleId);
+  }
+
   listAccountMappings(templateId) {
     return settingsRepository.listAccountMappings(this.db, templateId);
   }
