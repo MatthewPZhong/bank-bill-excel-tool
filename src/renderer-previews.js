@@ -742,6 +742,37 @@
       }, 120);
     }
 
+    // v2.0.0-beta.3：银行对账单处理模块主面板
+    function applyBankStatementPanelPreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+    }
+
+    // v2.0.0-beta.3：场景管理弹窗（含 3 内置场景）
+    function applyScenariosManagerPreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      setTimeout(() => {
+        if (elements.bankStatementScenarioBtn) {
+          elements.bankStatementScenarioBtn.click();
+        }
+      }, 120);
+    }
+
+    // v2.0.0-beta.3：类别选择弹窗
+    function applyScenarioCategorySelectPreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      setTimeout(() => {
+        if (elements.bankStatementScenarioBtn) {
+          elements.bankStatementScenarioBtn.click();
+          setTimeout(() => {
+            const addBtn = elements.modalRoot
+              ? elements.modalRoot.querySelector('[data-action="add-scenario"]')
+              : null;
+            if (addBtn) addBtn.click();
+          }, 240);
+        }
+      }, 120);
+    }
+
     return {
       applyNewAccountPreviewState,
       applyTemplateManagerPreviewState,
@@ -777,7 +808,11 @@
       applyNewAccountCurrencyDropdownPreviewState,
       applyBigAccountSelectionMultiPreviewState,
       applyExtractOrderPreviewState,
-      applyAccountMappingEditingPreviewState
+      applyAccountMappingEditingPreviewState,
+      // v2.0.0-beta.3：银行对账单处理模块 preview（3 张）
+      applyBankStatementPanelPreviewState,
+      applyScenariosManagerPreviewState,
+      applyScenarioCategorySelectPreviewState
     };
   }
 
