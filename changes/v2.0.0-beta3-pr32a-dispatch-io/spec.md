@@ -254,6 +254,23 @@ desktopApi.bankStatement = {
 - 沿用现有 `xxx-yyy:zzz` 格式（如 `templates:list` / `mappings:save`）
 - bank-statement:import / gateway-recon:import / bank-statement:run / bank-statement:export
 
+### D6 dispatcher in-place 修改语义 + main.js 调用方契约（Codex Round 1 F1 P1 修订）
+
+- **算法引擎 in-place 修改**：c1/c2/c3 引擎都会 `bankRow[col] = newValue`（写回原对象）
+- **dispatcher 不 clone**：`runAllScenarios(bankRows, gwRows, ...)` 直接用传入的 bankRows
+- **main.js IPC 调用方必须每次 run 前 deep clone session 数据**：
+  - 不 clone → 连续两次"开始运行" → 第二次 oldValue 已是目标值 → first-match-wins 失效 → 低优先级场景可能覆盖高优先级写入
+  - 用 `structuredClone(bankStatementSession.rows)` + `structuredClone(gatewayReconSession.gwRows)`
+- session 保留 immutable 原始数据（含 _rowId）
+- smoke D6/D7 验证：D6 反向证明 in-place 漂移；D7 clone 后跑两次结果幂等
+
+### D7 重新导入银行对账单时同步清空 gatewayReconSession（Codex Round 1 F2 P1 修订）
+
+- 用户处理完 A 文件 → 导入 B 银行对账单 → 直接运行
+- 旧逻辑只清 `processingResult`，会用 A 批次的旧 gwRows 错改 B 文件 ReconciliationId
+- 修复：`bank-statement:import` IPC 同步 `gatewayReconSession = null`
+- 用户重新导入 B 文件后，必须显式重新导入资金对账（renderer 侧由 PR #32b 接 statusBox 提示）
+
 ## 7. 数据 / 状态 / 安全影响
 
 ### ⚠️ 资金红线（高亮提醒）

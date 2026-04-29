@@ -167,6 +167,65 @@ async function runScenarioDispatcherSmokeTests() {
     assert.strictEqual(result.stats.scenarioHitCount, 0, 'D5 scenarioHitCount');
   }
 
+  // ===== Dispatcher D6（Codex F1 P1 回归）：dispatcher in-place 修改特性 =====
+  // 算法引擎会 row[col] = newValue，所以连续两次跑同一份 rows，第二次结果会漂移。
+  // main.js IPC 必须每次 run 前 deep clone session 数据，否则 first-match-wins 失效。
+  {
+    const baseRow = {
+      _rowId: 'r1',
+      CustomerRef: 'AFT123456789012',
+      'Extra Information': '',
+      Currency: 'CNY',
+      'Credit Amount': 100,
+      'Debit Amount': 0,
+      MerchantId: 'M001',
+      Channel: 'BankA',
+      ReconciliationId: ''
+    };
+    const sharedRows = [baseRow];
+    const gwRows = [{ Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_C3' }];
+    // 第一次跑：C1 优先级 3 应锁该行，写 ReconciliationId='AFT123456789012'
+    const r1 = runAllScenarios(sharedRows, gwRows, [makeC1Scenario(), makeC3Scenario()]);
+    assert.strictEqual(r1.modifiedRows[0]._hitScenarioId, 1, 'D6 第一次应 C1 命中');
+    assert.strictEqual(sharedRows[0].ReconciliationId, 'AFT123456789012', 'D6 第一次 C1 写入');
+    // 第二次跑同一份 sharedRows（已被改）：C1 oldValue 已等于目标值
+    // → C1 不再视为修改 → 该行不进 lockedRowIds → C3 可能覆盖
+    // 这是 dispatcher 的 in-place 修改特性，必须由调用方 clone 防御
+    const r2 = runAllScenarios(sharedRows, gwRows, [makeC1Scenario(), makeC3Scenario()]);
+    // 第二次结果 vs 第一次会不一致（具体表现取决于算法判定 oldValue == newValue 时是否仍 lock）
+    // 关键断言：dispatcher 不保证幂等；调用方负责 clone
+    const r1IsC1 = r1.modifiedRows.length > 0 && r1.modifiedRows[0]._hitScenarioId === 1;
+    const r2IsC3 = r2.modifiedRows.length > 0 && r2.modifiedRows[0]._hitScenarioId === 3;
+    const driftDetected = r1IsC1 && (r2IsC3 || r2.modifiedRows.length === 0);
+    assert(driftDetected, 'D6 连续 in-place 跑应漂移（第二次不再是 C1 命中）');
+  }
+
+  // ===== Dispatcher D7（Codex F1 P1 回归）：调用方 clone 后跑 → 结果幂等 =====
+  {
+    const baseRow = {
+      _rowId: 'r1',
+      CustomerRef: 'AFT123456789012',
+      'Extra Information': '',
+      Currency: 'CNY',
+      'Credit Amount': 100,
+      'Debit Amount': 0,
+      MerchantId: 'M001',
+      Channel: 'BankA',
+      ReconciliationId: ''
+    };
+    const originalRows = [baseRow];
+    const gwRows = [{ Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_C3' }];
+    // 每次 clone 后跑 → 应得到一致结果
+    const work1 = structuredClone(originalRows);
+    const r1 = runAllScenarios(work1, gwRows, [makeC1Scenario(), makeC3Scenario()]);
+    const work2 = structuredClone(originalRows);
+    const r2 = runAllScenarios(work2, gwRows, [makeC1Scenario(), makeC3Scenario()]);
+    assert.strictEqual(r1.modifiedRows[0]._hitScenarioId, r2.modifiedRows[0]._hitScenarioId, 'D7 clone 后两次结果应一致');
+    assert.strictEqual(r1.modifiedRows[0]._hitScenarioId, 1, 'D7 应稳定 C1 命中');
+    // 原始数据未被改
+    assert.strictEqual(originalRows[0].ReconciliationId, '', 'D7 originalRows 保持纯净');
+  }
+
   // ===== Helper unit: sortScenariosByPriority =====
   {
     const list = [
@@ -187,7 +246,7 @@ async function runScenarioDispatcherSmokeTests() {
     assert.strictEqual(filterScenariosByGwAvailability(list, [{}]).length, 3, 'gwRows 非空 → 全保留');
   }
 
-  console.log('  scenario-dispatcher: 7/7 PASS');
+  console.log('  scenario-dispatcher: 9/9 PASS');
 }
 
 // ===== exceljs-writer round-trip =====

@@ -2777,8 +2777,10 @@ function registerAppHandlers() {
         headers: result.headers,
         importedAt: Date.now()
       };
-      // 重新导入 → 清空运行结果
+      // 重新导入银行对账单 → 同步清空运行结果 + 资金对账文件
+      // （Codex F2 P1 修复：避免把上一批 gwRows 误用到新文件）
       processingResult = null;
+      gatewayReconSession = null;
       return {
         status: 'ok',
         fileName: result.fileName,
@@ -2842,8 +2844,12 @@ function registerAppHandlers() {
       const allScenarios = database.listScenarios();
       const enabled = allScenarios.filter((s) => s.enabled === 1 || s.enabled === true);
       const detailedEnabled = enabled.map((s) => database.getScenario(s.id)).filter(Boolean);
-      const gwRows = gatewayReconSession ? gatewayReconSession.gwRows : null;
-      const result = runAllScenarios(bankStatementSession.rows, gwRows, detailedEnabled);
+      // 每次 run 都基于原始导入数据 deep clone 一份工作副本
+      // （Codex F1 P1 修复：算法层会原地修改字段，不 clone 会让连续运行的 oldValue 漂移
+      //  → first-match-wins 失效，低优先级场景可能覆盖高优先级写入的字段）
+      const workingBankRows = structuredClone(bankStatementSession.rows);
+      const workingGwRows = gatewayReconSession ? structuredClone(gatewayReconSession.gwRows) : null;
+      const result = runAllScenarios(workingBankRows, workingGwRows, detailedEnabled);
       processingResult = {
         modifiedRows: result.modifiedRows,
         modifications: result.modifications,
