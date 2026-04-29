@@ -899,3 +899,41 @@ state.processingResult = {  // 运行后产生
   - Runtime-state · `state`：新增 5 字段（`bankStatementSession` / `gatewayReconSession` / `processingResult` / `bankStatementExport` / `scenarioDraft`），全新增不破坏既有
 - **改动文件清单（PR #33 总计）**：4 dialog + 接入 5 文件（renderer-dialogs.js +1500 / renderer.js +400 / renderer-previews.js +200 / preload.js +20 / index.html +30）+ 算法/IO/迁移 7 文件 + CSS 双风格 +500 + smoke 6 文件 + 文档 4 + 配置 2 + spec 三件套
 - **2.0.0-beta.3 系列收官**：自此 PRD-v2.0.0-beta.3 全部 4 PR（#29 → #30 → #31 → #32a → #33）merged；用户能完整使用银行对账单处理模块的导入 → 配置场景 → 运行 → 标黄输出闭环
+
+### 阶段 9 — v2.0.0 GA 收官（PR #34，commit `9389a7d` 起 + 4 轮 Codex / user 复审 + self-review，merge `9cebc99`）
+
+> 本阶段已超出 PRD-v2.0.0-beta.3 范畴，是 v2.0.0 GA 发版前的最后收尾，对应独立 spec `changes/v2.0.0-beta.4-stats-error-report/`，记录在此完成 v2.0.0 系列的实施记录闭环。
+
+- **范围**（spec 4 主项 + 用户增量 #3 #4）：
+  1. F1 隐藏 `.usage-stats.txt`：用户文档存储根（`~/Documents/网银账单生成小助手/`）下记录软件使用统计（appOpenCount / 各模块各功能使用次数 / 模块小计 / 总操作次数）
+  2. F2 error-report 加「可能原因」列：3 模块（生成网银账单 / 月度 Pending / 银行对账单处理）统一加列，文案口语化
+  3. 增量 #3：所有导出 xlsx 表头字号统一 10pt
+  4. 增量 #4：使用手册另存为简化为 HTML（默认）/ TXT 两选
+  5. **bump `2.0.0-beta.3` → `2.0.0` GA 正式版**（一次发版，去 beta）
+- **新增 src 模块**：
+  - `src/backend/usage-stats.js`：FUNCTION_REGISTRY（5 模块 17 功能） + INI-lite parser/serializer + load/save/incrementFunction/recordSessionStart/recordSessionEnd + 原子写入（tmp → rename）+ 失败 throw（让上层 retry）
+  - `src/backend/file-service/error-causes.js`：CAUSE_MAP（22+ code，frozen） + errorCodeToCause(code) fallback `未知错误`
+- **集成 main.js**：
+  - app.whenReady 调 recordSessionStart + 启动 setInterval(5min) flushIfDirty
+  - app.before-quit 调 recordSessionEnd + flush
+  - 25 个用户感知 IPC handler 通过 `trackedIpcHandle(channel, moduleKey, fnKey, handler)` 包装：仅 `result.status` 是 `'ok'` 或 `'success'` 时才 tickUsageStats（避免失败/取消污染统计）
+  - flushUsageStats 失败时保留 dirty 让下次 tick 重试
+- **3 模块 writer 加可能原因列**：
+  - `logger.js#writeErrorReport`（主模块 .txt）：加 `可能原因：${cause}` 行
+  - `exceljs-writer.js#writeErrorReport`（银行对账单 .xlsx）：4 列 → 5 列；headerRow.font 加 size: 10
+  - `pending-session.js#exportErrorReport`（月度 Pending .xlsx）：从 `xlsx`（CE 不支持 styles）切到 `xlsx-js-style` + 加列 + applyHeaderRowFont sz: 10
+  - `pending-export/writer.js`：applyHeaderRowFont 加 sz: 10
+  - 主模块 `writers.js` 已在 v2.0.0 设过 sz: 10（免改）
+- **使用手册另存为简化**：`main.js#app:save-user-guide` filter 仅 `.html` + `.txt`；默认 HTML（filter 第一项 + `defaultPath '使用手册.html'`）；移除 `.md` 写出分支
+- **测试**：smoke 158/158 PASS（既有 76 + scenarios-repository 5 + scenario-end-to-end 23 + bank-statement-io 13 + error-causes 39 + usage-stats 41 + scenario-engines 23 + scenario-dispatcher 11 + exceljs-writer 3）
+- **Codex / user 复审（4 轮 + self-review，6 finding）**：
+  - Round 1（commit `9afed62`，1 P2）：F1 P2 资金红线/数据完整性 — `flushUsageStats` 写盘失败仍清 dirty 静默丢数据；修复：saveStats 失败抛错，flushUsageStats 仅成功后清 dirty + 失败 retry next tick；smoke 加 U12 用例验证 throw
+  - Round 2（commit `d57324b`，2 P2）：F1 P2 tickUsageStats 应仅成功才计数（spec D6 一致性）— 入口 hook 把失败/取消也计了；修复：新增 `trackedIpcHandle` wrapper，24 处替换；F2 P2 USER_GUIDE FAQ 仍写可导出 md — 同步去 md
+  - Round 3（commit `2797e59`，1 P2）：F1 P2 wrapper 仅认 `'ok'` 漏掉 `'success'` — 多个 handler 实际返回 `success`（template/account-mapping/file:export-detail/new-account:export 等），修复：扩展 `SUCCESS_STATUSES = new Set(['ok', 'success'])` 双方言
+  - Round 4（commit `ec1a808`，1 P2）：F1 P2 Pending 两 handler 直接返回业务对象（无 status 字段）— `pending:rule:save` / `pending:reconcile:run` 漏计数；修复：包一层 `{ status: 'success', ...result }`
+  - Self-review（commit `9952255`，1 P2）：`monthly-balance:export` 漏接 trackedIpcHandle — 用户从月度装配对话框点导出绕过统计；修复：与 `file:export-balance` 共享"导出余额"功能 key
+- **资金红线 / 数据完整性 全清**：写盘失败 retry + 仅成功才计数 + 双方言识别 + 业务对象包 status + 漏接 handler 兜底
+- **关联功能 review（check-vars 软流程）**：未触发 Risk-sensitive（无 schema 变化）；Critical / Important-skeleton / Runtime-state / Minor 未命中
+- **不做（spec §7）**：usage-stats GUI 展示 / 跨设备同步 / Windows attrib +H 真隐藏 / streaming-xlsx-writer 流式 archive 表头字号（121 万行 OOXML XML 写出复杂，单独 PR）/ FUNCTION_REGISTRY 与 IPC handler 元数据合并的工程化（漂移风险，单独 PR）
+- **改动文件清单（PR #34 总计）**：新增 src 2（usage-stats.js / error-causes.js）+ 改动 src 5（main.js / logger.js / exceljs-writer.js / pending-session.js / pending-export/writer.js）+ smoke 新增 2（error-causes.js / usage-stats.js）+ 文档三件套 + spec 三件套 + PR 草稿
+- **v2.0.0 GA 收官**：自此 PRD-v2.0.0-beta.1 / beta.2 / beta.3 / beta.4 全部产物 merged 进 main；版本号 `2.0.0`（去 beta），标志 v2.0.0 系列正式发布
