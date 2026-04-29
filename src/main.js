@@ -2871,15 +2871,11 @@ function registerAppHandlers() {
       if (!processingResult) {
         return { status: 'failed', message: '请先点击"开始运行"处理对账单' };
       }
-      if (processingResult.modifiedRows.length === 0) {
-        return { status: 'empty', message: '无修改记录，未生成文件' };
-      }
       const exportRootDir = path.join(ensureStorageRoot(), 'bank-statement-process');
-      const main = await writeBankStatementMainOutput({
-        modifiedRows: processingResult.modifiedRows,
-        headers: bankStatementSession.headers,
-        exportRootDir
-      });
+      // error-report 与主输出独立（PRD §189：error-report xlsx 格式独立于主输出）
+      // 即使 modifiedRows.length === 0，warnings 仍应落盘——避免唯一可追溯的异常信息被吞掉
+      // （Codex Round 2 F1 P1 修复：C1 多字段值不一致 / C2 一对多多对一 时
+      //  modifiedRows 可能为空但 warnings 非空）
       let errorReport = null;
       if (processingResult.errorReport.length > 0) {
         errorReport = await writeErrorReportOutput({
@@ -2887,6 +2883,20 @@ function registerAppHandlers() {
           exportRootDir
         });
       }
+      if (processingResult.modifiedRows.length === 0) {
+        // PRD §717 P0-11：不生成主输出，但 error-report 仍可能已生成
+        return {
+          status: 'empty',
+          message: '无修改记录，未生成主输出文件',
+          errorReportPath: errorReport ? errorReport.filePath : null,
+          errorReportName: errorReport ? errorReport.fileName : null
+        };
+      }
+      const main = await writeBankStatementMainOutput({
+        modifiedRows: processingResult.modifiedRows,
+        headers: bankStatementSession.headers,
+        exportRootDir
+      });
       return {
         status: 'ok',
         mainFilePath: main.filePath,

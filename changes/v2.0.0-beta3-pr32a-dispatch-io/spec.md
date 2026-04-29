@@ -264,6 +264,15 @@ desktopApi.bankStatement = {
 - session 保留 immutable 原始数据（含 _rowId）
 - smoke D6/D7 验证：D6 反向证明 in-place 漂移；D7 clone 后跑两次结果幂等
 
+### D8 error-report 与主输出独立落盘（Codex Round 2 F1 P1 修订）
+
+- PRD §189 明确：error-report 是 xlsx 格式，**独立**于主输出
+- 旧逻辑：`bank-statement:export` 在 `modifiedRows.length === 0` 时直接 return empty → error-report 静默丢失
+- 实际场景：C1 多字段值不一致 / C2 一对多 / C2 多对一 → warnings 非空但 modifiedRows = []
+- 修复：先调 `writeErrorReportOutput`（如有 warnings），再判断 modifiedRows 是否空
+- empty 分支返回 `errorReportPath` 给 renderer，让 PR #32b 提示用户"无修改但有 N 条警告"
+- smoke D8 回归：构造 C1 多字段不一致 → modifiedRows=[] + errorReport.length > 0
+
 ### D7 重新导入银行对账单时同步清空 gatewayReconSession（Codex Round 1 F2 P1 修订）
 
 - 用户处理完 A 文件 → 导入 B 银行对账单 → 直接运行

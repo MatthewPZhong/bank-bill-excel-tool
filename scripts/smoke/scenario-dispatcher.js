@@ -226,6 +226,43 @@ async function runScenarioDispatcherSmokeTests() {
     assert.strictEqual(originalRows[0].ReconciliationId, '', 'D7 originalRows 保持纯净');
   }
 
+  // ===== Dispatcher D8（Codex Round 2 F1 P1 回归）：warnings-only 场景 =====
+  // C1 多字段值不一致 → 不修改 + 产 warning。dispatcher.errorReport 应非空，
+  // modifiedRows 应为空。main.js export 必须基于此把 error-report 落盘
+  // （即使 modifiedRows.length === 0）。
+  {
+    const c1 = makeC1Scenario({
+      config: {
+        conditions: [{ field: 'CustomerRef', op: '包含', value: 'FT' }],
+        extractByFeature: {
+          enabled: true,
+          searchFields: ['CustomerRef', 'Extra Information'],
+          featureCode: 'FT',
+          digitCount: 12,
+          totalLength: 15
+        },
+        extractByOtherField: null
+      }
+    });
+    // 同行两个字段含不同的 ReconId → 一致性校验失败
+    const bankRows = [
+      {
+        _rowId: 'rIncon',
+        CustomerRef: 'AFT111111111111',
+        'Extra Information': 'BFT222222222222',
+        ReconciliationId: ''
+      }
+    ];
+    const result = runAllScenarios(bankRows, null, [c1]);
+    assert.strictEqual(result.modifiedRows.length, 0, 'D8 不一致 → modifiedRows 应空');
+    assert(result.errorReport.length > 0, 'D8 不一致 → errorReport 应非空');
+    assert(
+      result.errorReport.some((w) => w.code === 'inconsistent-recon-id-values'),
+      'D8 应有 inconsistent-recon-id-values warning'
+    );
+    assert(result.errorReport[0].scenarioId, 'D8 errorReport 注入 scenarioId');
+  }
+
   // ===== Helper unit: sortScenariosByPriority =====
   {
     const list = [
@@ -246,7 +283,7 @@ async function runScenarioDispatcherSmokeTests() {
     assert.strictEqual(filterScenariosByGwAvailability(list, [{}]).length, 3, 'gwRows 非空 → 全保留');
   }
 
-  console.log('  scenario-dispatcher: 9/9 PASS');
+  console.log('  scenario-dispatcher: 10/10 PASS');
 }
 
 // ===== exceljs-writer round-trip =====
