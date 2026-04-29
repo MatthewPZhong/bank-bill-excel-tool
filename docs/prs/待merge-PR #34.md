@@ -13,11 +13,13 @@ integrated: false
 
 ## Summary
 
-v2.0.0 GA 正式版收尾迭代。两件事 + 一次性 bump 到正式版：
+v2.0.0 GA 正式版收尾迭代。四件事 + 一次性 bump 到正式版：
 
 1. **隐藏 `.usage-stats.txt`**：用户文档存储根（`~/Documents/网银账单生成小助手/`）下记录软件打开次数 + 每个模块每个功能的使用次数 + 模块小计 + 总操作次数。dot prefix 隐藏，关闭时 flush + 每 5 分钟自动 flush。
 2. **错误报告加「可能原因」列**：3 个模块（生成网银账单 / 月度 Pending / 银行对账单处理）的 error-report 统一加「可能原因」字段，口语化文案（如 `多个字段抓到的对账ID不一致，无法判断该用哪个`）。统一映射表 `src/backend/file-service/error-causes.js` 覆盖 22+ 已知 code。
-3. **bump 2.0.0**：去 beta 后缀，标志 v2.0.0 系列 GA 发版。
+3. **所有导出表头字号统一 10pt**：4 处 writer 同步；`pending-session.js` 从 `xlsx`（CE 不支持 styles 写出）切到 `xlsx-js-style`。
+4. **使用手册另存为简化**：仅 `.html` + `.txt`，默认 HTML（去 `.md`）。
+5. **bump 2.0.0**：去 beta 后缀，标志 v2.0.0 系列 GA 发版。
 
 ## 用户决策（spec §6）
 
