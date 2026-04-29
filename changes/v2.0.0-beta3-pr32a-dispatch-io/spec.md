@@ -12,7 +12,7 @@
 - 上游决策（用户 2026-04-29）：
   - **Q1=C**：xlsx 标黄改用 `exceljs`（全功能，避免 SheetJS Free 版 cell.s 不支持的兼容性风险）
   - **Q2=B**：PR #32 切两 PR
-    - **PR #32a（本 PR）**：调度引擎 + IO 层 + 4 IPC handler + smoke
+    - **PR #32a（本 PR）**：调度引擎 + IO 层 + 5 IPC handler + smoke
     - **PR #32b（下一个）**：4 dialog factory + 接入 PR #30 占位 + statusBox + preview + E2E + 文档 + bump
   - **Q3=A**：dialog 全做完后一次 Codex review（与 Q2 切分配套）
 - 切分理由：单 PR 5-7 天 / ~2500 行风险高；后端可独立 ship 给前端稳定接口
@@ -232,7 +232,7 @@ desktopApi.bankStatement = {
   - `src/main-process/bank-statement-io.js`（新，~400 行）
   - `src/main-process/exceljs-writer.js`（新，~150 行）
 - **后端修改**：
-  - `src/main.js` — 4 个 IPC handler + 3 个 session state（约 +250 行）
+  - `src/main.js` — 5 个 IPC handler + 3 个 session state（约 +250 行）
   - `src/preload.js` — `desktopApi.bankStatement` 暴露（约 +10 行）
 - **依赖**：`package.json` 新增 `exceljs`
 - **测试**：
@@ -357,8 +357,8 @@ desktopApi.bankStatement = {
 3. `src/main-process/exceljs-writer.js`（150 行）+ smoke I1（写 + 读回验证标黄）
 4. `src/main-process/scenario-dispatcher.js`（200 行）+ smoke F6.1 11 用例（含 Codex 4 轮修复后的 D6-D9 回归）
 5. `src/main-process/bank-statement-io.js`（400 行）+ smoke F6.2 11 用例
-6. `src/main.js` 4 IPC handler + session state（250 行）
-7. `src/preload.js` 暴露 4 channel
+6. `src/main.js` 5 IPC handler + session state（250 行）
+7. `src/preload.js` 暴露 5 channel（含 sessionStatus）
 8. `npm run smoke` 全量 PASS
 9. `npm run scan:vars` + check-vars 评估升格
 10. PR body + 提 PR
