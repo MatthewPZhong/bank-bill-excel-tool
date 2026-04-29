@@ -847,3 +847,55 @@ state.processingResult = {  // 运行后产生
   - Important-skeleton `ipcRenderer`（5 channel preload + main.js 同步注册）
   - Runtime-state `dialog`（import handler 处理用户取消分支）
 - **不含本 PR 范围（→ PR #32b）**：4 dialog factory / 接入 PR #30 占位 / 4 按钮 binding / statusBox / preview / E2E 用户样例文件 / 文档三件套 / 版本 bump beta.3
+
+### 阶段 8 — UI 闭环 + 发版（PR #33，原 PR #32b，commit `648e263` + Codex 3 轮修复 `fedea04`/`165075a`/`0e7ba90`，merge `90ba410`）
+
+- **范围**：v2.0.0-beta.3 系列收尾 PR — 4 dialog factory 串通 PR #29/#30/#31/#32a 后端 + 8 项 GUI 实测 UX 调整 + E2E smoke + 用户样例 dry-run 工具 + 文档三件套 + 版本 bump
+- **4 dialog factory**（`src/renderer-dialogs.js` +1500）：
+  - `createScenarioConfigDialogC1`（5 行：场景名/优先级/特征提取/其他字段提取/打标值；行 4/5 互斥；7 操作下拉 + 多字段筛选浮层）
+  - `createScenarioConfigDialogC2`（5 行 + 行 3 序号自动 + 行 4/5 类型联动；笛卡尔配对配置）
+  - `createScenarioConfigDialogC3`（4 行：场景名/优先级/对账字段多行/赋值字段；4 字段 AND join + 大写 Currency）
+  - `createScenarioConfirmDetailDialog`（C1/C2/C3 三种文本预览；create/edit/view 三模式共用）
+  - `state.scenarioDraft` 跨弹窗共享单一来源；"返回"保留 / "完成"成功落库 / "取消" / 关闭 / 模块切换都清空
+- **PR #30 占位 3 处接入**：
+  - `view-or-modify` action → `desktopApi.scenarios.get(id)` + 进入对应 category dialog（mode='edit'/'view'）
+  - 类别选择"继续" → 进入 category dialog（mode='create'）
+  - "管理"按钮替代 PR #30 编辑/查看场景三按钮
+- **bankStatementModulePanel 4 按钮 binding（src/renderer.js +400）**：
+  - 导入文件 → `desktopApi.bankStatement.import` + 导入后弹 dialog#1（C3 启用未导 gw 时）
+  - 开始运行 → `desktopApi.bankStatement.run` + 运行点弹 dialog#2 三选一（round 1 P2 修复）
+  - 导出文件 → `desktopApi.bankStatement.export` 走 saveDialog 另存为
+  - 状态框 5 状态文案：初始 / 已导入（双文件分行）/ 已处理（含命中场景序号 + skipped C3）/ 已导出（含 error-report）+ tone
+  - `state.bankStatementExport` renderer-side 缓存（"已导出"状态优先级最高）
+- **8 项 GUI 实测 UX 调整（reverse-sync）**：
+  1. 场景类别命名统一：`提取ReconId-From Self / 账单打标 / 提取ReconId-From 网关`
+  2. 内置 3 场景重命名（`ensureBuiltinScenarioNamesUpdate` 一次性迁移，幂等 UPDATE）
+  3. 场景管理表布局（6 列宽 5%/22%/30.94%/10%/19.06%/13%）
+  4. 资金对账文件提示时机（运行点 → 导入后立即 `maybePromptGatewayReconImport`）
+  5. 状态框文案：资金对账 → 不平账结果表；命中场景以序号显示「（场景 1、3）」；分行展示
+  6. 去掉运行 / 导出成功 alert（内容进状态框）
+  7. 导出文件支持另存为（`dialog.showSaveDialog`）
+  8. 导出命名规则统一：`银行对账单-YYYYMMDDHHmm-处理结果.xlsx`（不含场景名，分钟级）
+- **资金红线决策 — 删除 overwrite warning**（用户 UX 决策）：
+  - C1 `overwrite-existing-recon-id` + C3 `overwrite-existing-value` warning 删除
+  - 原值非空被覆盖时不再产生 error-report 记录
+  - 防御依赖：dispatcher first-match-wins + modifications 列表 + 主输出黄底
+- **E2E smoke**（`scripts/smoke/scenario-end-to-end.js` 23 用例）：mock bankRows + gwRows + 3 场景 → dispatcher → exceljs writer 全链路 + 标黄 round-trip 验证
+  - E1 三类场景同时命中（C1/C2/C3 不同行 + ReconciliationId/FundType 写入 + 黄底）
+  - E2 first-match-wins（C1 优先级 3 > C3 优先级 1，不重复入 modifiedRows）
+  - E3 gwRows=null 启用 C3 → skippedC3Count=1
+  - E4 error-report 路径独立
+- **用户样例 dry-run 工具**（`scripts/dryrun-user-sample.js`）：in-process 跑 dispatcher → exceljs writer 全链路；真实样例 `Copy of 汇总测试.xlsx` 3625 行 → 58 行命中（23 C2 FundType + 12 C3 ReconciliationId modifications）+ 主输出 FundType 列 23 黄底验证 PASS；P0 矩阵 7 自动 ✅ + 2 smoke 单测覆盖 + 2 GUI 实测 ✅
+- **文档三件套**：`CHANGELOG.md` + `docs/VERSION_FEATURE_HISTORY.md` + `docs/USER_GUIDE.md` 全部加 v2.0.0-beta.3 段（USER_GUIDE 加 1.4「银行对账单处理」章节 + 顶部版本号 + 模块总览第 4 项）
+- **版本 bump**：`package.json` + `package-lock.json` 同步 `2.0.0-beta.2` → `2.0.0-beta.3`
+- **测试**：`npm run smoke` 78/78 PASS（scenario-engines 23 + scenarios-repository 5 + scenario-dispatcher 11 + exceljs-writer 3 + bank-statement-io 13 + scenario-end-to-end 23）
+- **Codex 修正（3 轮 10 finding）**：
+  - Round 1（commit `fedea04`，5 finding 4 P2 + 1 P3）：F1 P2 C3"稍后再说"无补救入口 → A 方案：保留 dialog#1 + 运行点新增 dialog#2 三选一（导入文件/跳过 C3/取消，扩展 createConfirmDialog 支持 middleText）/ F2 P2 package-lock 同步 beta.3 / F3 P2 USER_GUIDE 顶部版本 + 模块总览 / F4 P2 内置场景删除语义统一为可编辑可禁用可删除（不恢复出厂）/ F5 P3 preview:all 串入 6 新 script
+  - Round 2（commit `165075a`，3 finding 1 P1 + 2 P3）：F1 **P1 资金红线** scenarios:create/update/delete/toggle-enabled 4 IPC handler 强制清空 processingResult + renderer 联动 refreshBankStatementStatus / F2 P3 CHANGELOG.md:15 残留删除 / F3 P3 tasks.md 全部勾选
+  - Round 3（commit `0e7ba90`，2 finding 1 P1 + 1 P3）：F1 **P1 资金红线 defense in depth** run 时记录 scenariosSnapshot（id\|name\|priority\|enabled\|config 序列化）+ export 时重读 enabled scenarios 比对 snapshot 不一致拒绝 / F2 P3 preview:all 加 scenario-category-select
+- **资金红线 2 个 P1 全清（双层防御）**：IPC 入口主动清（round 2，体验防线）+ export 端被动校验 snapshot（round 3，最后防线）
+- **关联功能 review（check-vars 软流程）**：1 Risk-sensitive + 1 Runtime-state（知会）
+  - Risk-sensitive · 数据库迁移：新增 `ensureBuiltinScenarioNamesUpdate`（幂等 UPDATE，不破坏 ALTER）
+  - Runtime-state · `state`：新增 5 字段（`bankStatementSession` / `gatewayReconSession` / `processingResult` / `bankStatementExport` / `scenarioDraft`），全新增不破坏既有
+- **改动文件清单（PR #33 总计）**：4 dialog + 接入 5 文件（renderer-dialogs.js +1500 / renderer.js +400 / renderer-previews.js +200 / preload.js +20 / index.html +30）+ 算法/IO/迁移 7 文件 + CSS 双风格 +500 + smoke 6 文件 + 文档 4 + 配置 2 + spec 三件套
+- **2.0.0-beta.3 系列收官**：自此 PRD-v2.0.0-beta.3 全部 4 PR（#29 → #30 → #31 → #32a → #33）merged；用户能完整使用银行对账单处理模块的导入 → 配置场景 → 运行 → 标黄输出闭环
