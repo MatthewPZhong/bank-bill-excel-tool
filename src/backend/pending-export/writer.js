@@ -34,9 +34,10 @@ function applyHeaderRowFont(worksheet, headerRowIndex = 0) {
     if (!cell) continue;
     const existingStyle = cell.s || {};
     const existingFont = existingStyle.font || {};
+    // v2.0.0 GA：所有导出表头统一字号 10
     cell.s = {
       ...existingStyle,
-      font: { ...existingFont, name: 'Courier New' }
+      font: { ...existingFont, name: 'Courier New', sz: 10 }
     };
   }
 }

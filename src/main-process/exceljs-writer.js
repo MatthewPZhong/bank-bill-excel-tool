@@ -1,16 +1,18 @@
 // v2.0.0-beta.3 PR #32a：exceljs 标黄输出 + error-report 写出
+// v2.0.0-beta.4：error-report 加「可能原因」列（5 列），文案来自 file-service/error-causes.js
 //
 // 仅本模块（bank-statement-process）使用 exceljs；
 // 其他 3 模块（statementGenerator / newAccountGenerator / pendingReconciliation）继续 SheetJS。
 //
 // 核心能力：
 //   - writeBankStatementOutput：仅修改行 + 单元格黄底 + 表头
-//   - writeErrorReport：4 列（时间戳 / 场景名 / 行号 / 原因）
+//   - writeErrorReport：5 列（时间戳 / 场景名 / 行号 / 原因 / 可能原因）
 //
 // 标黄约定：
 //   cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } }
 
 const ExcelJS = require('exceljs');
+const { errorCodeToCause } = require('../backend/file-service/error-causes');
 
 const YELLOW_FILL = {
   type: 'pattern',
@@ -42,9 +44,9 @@ async function writeBankStatementOutput(rows, headers, savePath) {
   const sheetData = buildSheetData(rows, headers);
   sheetData.forEach((rowValues) => sheet.addRow(rowValues));
 
-  // 表头加粗
+  // 表头加粗 + 字号 10（v2.0.0 GA：所有导出表头统一 size 10）
   const headerRow = sheet.getRow(1);
-  headerRow.font = { bold: true };
+  headerRow.font = { bold: true, size: 10 };
 
   // 标黄：rows 中每行的 _modifiedColumns 对应的单元格
   rows.forEach((row, rowIdx) => {
@@ -68,9 +70,10 @@ async function writeErrorReport(warnings, savePath) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('error-report');
 
-  const headers = ['时间戳', '场景名', '行号', '原因'];
+  const headers = ['时间戳', '场景名', '行号', '原因', '可能原因'];
   sheet.addRow(headers);
-  sheet.getRow(1).font = { bold: true };
+  // 表头加粗 + 字号 10（v2.0.0 GA：所有导出表头统一 size 10）
+  sheet.getRow(1).font = { bold: true, size: 10 };
 
   const timestamp = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
   warnings.forEach((w) => {
@@ -78,7 +81,8 @@ async function writeErrorReport(warnings, savePath) {
       timestamp,
       w.scenarioName ?? `场景 #${w.scenarioId}`,
       w.rowId ?? '',
-      w.message ?? w.code ?? ''
+      w.message ?? w.code ?? '',
+      errorCodeToCause(w.code)
     ]);
   });
 

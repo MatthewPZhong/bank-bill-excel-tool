@@ -2690,7 +2690,7 @@ function registerAppHandlers() {
   ipcMain.handle('settings:get-ui-style', () => {
     return database.getUiStyle() || 'Clear';
   });
-  ipcMain.handle('settings:set-ui-style', (_event, style) => {
+  trackedIpcHandle('settings:set-ui-style', '切换页面风格', '切换', (_event, style) => {
     try {
       database.setUiStyle(style);
       return { status: 'ok', uiStyle: style };
@@ -2725,7 +2725,7 @@ function registerAppHandlers() {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
   });
-  ipcMain.handle('scenarios:create', (_event, payload) => {
+  trackedIpcHandle('scenarios:create', '银行对账单处理', '场景管理', (_event, payload) => {
     try {
       const result = database.createScenario(payload);
       // PR #33 Codex round 2 P1（资金红线）：场景配置变更后旧的 processingResult 已陈旧
@@ -2736,7 +2736,7 @@ function registerAppHandlers() {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
   });
-  ipcMain.handle('scenarios:update', (_event, id, fields) => {
+  trackedIpcHandle('scenarios:update', '银行对账单处理', '场景管理', (_event, id, fields) => {
     try {
       database.updateScenario(id, fields);
       processingResult = null;  // round 2 P1
@@ -2745,7 +2745,7 @@ function registerAppHandlers() {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
   });
-  ipcMain.handle('scenarios:delete', (_event, id) => {
+  trackedIpcHandle('scenarios:delete', '银行对账单处理', '场景管理', (_event, id) => {
     try {
       const result = database.deleteScenario(id);
       processingResult = null;  // round 2 P1
@@ -2754,7 +2754,7 @@ function registerAppHandlers() {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
   });
-  ipcMain.handle('scenarios:toggle-enabled', (_event, id, enabled) => {
+  trackedIpcHandle('scenarios:toggle-enabled', '银行对账单处理', '场景管理', (_event, id, enabled) => {
     try {
       const result = database.toggleScenarioEnabled(id, enabled);
       processingResult = null;  // round 2 P1
@@ -2765,7 +2765,7 @@ function registerAppHandlers() {
   });
 
   // v2.0.0-beta.3 PR #32a：银行对账单处理模块 IO + 调度 IPC
-  ipcMain.handle('bank-statement:import', async () => {
+  trackedIpcHandle('bank-statement:import', '银行对账单处理', '导入文件', async () => {
     try {
       const choice = await dialog.showOpenDialog(mainWindow, {
         title: '选择银行对账单文件',
@@ -2806,7 +2806,7 @@ function registerAppHandlers() {
     }
   });
 
-  ipcMain.handle('gateway-recon:import', async () => {
+  trackedIpcHandle('gateway-recon:import', '银行对账单处理', '导入文件', async () => {
     try {
       const choice = await dialog.showOpenDialog(mainWindow, {
         title: '选择资金对账不平结果表',
@@ -2854,7 +2854,7 @@ function registerAppHandlers() {
       .join('\n');
   }
 
-  ipcMain.handle('bank-statement:run', () => {
+  trackedIpcHandle('bank-statement:run', '银行对账单处理', '开始运行', () => {
     try {
       if (!bankStatementSession) {
         return { status: 'failed', message: '请先导入银行对账单' };
@@ -2885,7 +2885,7 @@ function registerAppHandlers() {
     }
   });
 
-  ipcMain.handle('bank-statement:export', async () => {
+  trackedIpcHandle('bank-statement:export', '银行对账单处理', '导出文件', async () => {
     try {
       if (!processingResult) {
         return { status: 'failed', message: '请先点击"开始运行"处理对账单' };
@@ -2971,12 +2971,12 @@ function registerAppHandlers() {
 
   ipcMain.handle('app:save-user-guide', async () => {
     try {
+      // v2.0.0 GA：默认 HTML（filters 第一项被 saveDialog 当默认；同时 defaultPath 带 .html 后缀加固）
       const result = await dialog.showSaveDialog(mainWindow, {
-        defaultPath: '使用手册',
+        defaultPath: '使用手册.html',
         filters: [
-          { name: '纯文本文件', extensions: ['txt'] },
-          { name: 'Markdown 文件', extensions: ['md'] },
-          { name: 'HTML 文件', extensions: ['html'] }
+          { name: 'HTML 文件', extensions: ['html'] },
+          { name: '纯文本文件', extensions: ['txt'] }
         ]
       });
 
@@ -2988,9 +2988,7 @@ function registerAppHandlers() {
       const markdown = fs.readFileSync(userGuidePath, 'utf8');
       const ext = path.extname(result.filePath).toLowerCase();
 
-      if (ext === '.md') {
-        fs.writeFileSync(result.filePath, markdown, 'utf8');
-      } else if (ext === '.txt') {
+      if (ext === '.txt') {
         const plainText = stripMarkdown(markdown);
         fs.writeFileSync(result.filePath, plainText, 'utf8');
       } else if (ext === '.html') {
@@ -3289,7 +3287,7 @@ function registerAccountMappingHandlers() {
     };
   });
 
-  ipcMain.handle('account-mapping:save', (_event, templateId, mappings) => {
+  trackedIpcHandle('account-mapping:save', '生成网银账单', '账户映射', (_event, templateId, mappings) => {
     try {
       const validationResult = validateAccountMappings(mappings);
 
@@ -3786,7 +3784,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:import', async () => {
+  trackedIpcHandle('template:import', '生成网银账单', '导入模板', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile'],
       filters: templateFileDialogFilters()
@@ -3854,7 +3852,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:delete', (_event, templateId) => {
+  trackedIpcHandle('template:delete', '生成网银账单', '模板管理', (_event, templateId) => {
     const template = database.getTemplate(templateId);
     database.deleteTemplate(templateId);
     syncTemplateLibraryFile();
@@ -3928,7 +3926,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:save-mappings', (_event, payload) => {
+  trackedIpcHandle('template:save-mappings', '生成网银账单', '模板管理', (_event, payload) => {
     let template = null;
 
     try {
@@ -4060,7 +4058,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:rename', (_event, payload = {}) => {
+  trackedIpcHandle('template:rename', '生成网银账单', '模板管理', (_event, payload = {}) => {
     const templateId = Number(payload.templateId);
     const nextName = normalizeCell(payload.name);
     const template = database.getTemplate(templateId);
@@ -4149,7 +4147,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:export-bundle', async () => {
+  trackedIpcHandle('template:export-bundle', '生成网银账单', '模板管理', async () => {
     try {
       const saveResult = await dialog.showSaveDialog(mainWindow, {
         defaultPath: 'template-library.json',
@@ -4188,7 +4186,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:import-bundle', async () => {
+  trackedIpcHandle('template:import-bundle', '生成网银账单', '模板管理', async () => {
     const enumConfig = getEnumConfig();
 
     if (!enumConfig) {
@@ -7212,7 +7210,7 @@ async function handleFilenameMappingImport() {
 }
 
 function registerFileHandlers() {
-  ipcMain.handle('file:import', async (_event, templateId) => {
+  trackedIpcHandle('file:import', '生成网银账单', '导入文件', async (_event, templateId) => {
     // v1.5.2 需求 3（G3-7）：虚拟 ID 走独立分支
     // 见 handleFilenameMappingImport（文件名+表头双校验 + 整批截断 + 复用大账号选择流程）
     if (isFilenameMappingMode(templateId)) {
@@ -8579,11 +8577,11 @@ function registerFileHandlers() {
     }
   });
 
-  ipcMain.handle('file:export-detail', (_event, scope = 'auto') => {
+  trackedIpcHandle('file:export-detail', '生成网银账单', '导出明细', (_event, scope = 'auto') => {
     return exportStatementByScope('detail', scope);
   });
 
-  ipcMain.handle('file:export-balance', (_event, scope = 'auto') => {
+  trackedIpcHandle('file:export-balance', '生成网银账单', '导出余额', (_event, scope = 'auto') => {
     return exportStatementByScope('balance', scope);
   });
 
@@ -8740,7 +8738,8 @@ function registerFileHandlers() {
   //   { status: 'success', filePath, message }
   //   { status: 'cancelled' }
   //   { status: 'error', errorCode, message }
-  ipcMain.handle('monthly-balance:export', async () => {
+  // PR #34 self-review：与 file:export-balance 共享"导出余额"功能 key（用户视角都是月度/单批的导出余额操作）
+  trackedIpcHandle('monthly-balance:export', '生成网银账单', '导出余额', async () => {
     try {
       const pending = lastGeneratedExports.monthlyBalance;
       if (!pending || !pending.filePath) {
@@ -8802,7 +8801,7 @@ function registerFileHandlers() {
 }
 
 function registerNewAccountHandlers() {
-  ipcMain.handle('new-account:generate', (_event, payload = {}) => {
+  trackedIpcHandle('new-account:generate', '新开账户', '生成余额账单', (_event, payload = {}) => {
     const accounts = normalizeNewAccountAccounts(payload);
 
     if (!accounts.length) {
@@ -9006,7 +9005,7 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('new-account:export', () => {
+  trackedIpcHandle('new-account:export', '新开账户', '导出余额', () => {
     return exportGeneratedFile(lastGeneratedExports.newAccount, '暂无可导出的新开账户余额账单', '导出新开账户余额账单');
   });
 
@@ -9030,11 +9029,13 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('pending:rule:save', (_event, payload) => {
+  trackedIpcHandle('pending:rule:save', '月度 Pending', '规则管理', (_event, payload) => {
     if (!pendingDb) {
       throw new Error('Pending DB 未初始化，无法保存规则');
     }
-    return pendingRuleRepo.upsertRule(pendingDb, payload || {});
+    // PR #34 round 4 P2：包一层 status 让 trackedIpcHandle 能识别成功
+    const data = pendingRuleRepo.upsertRule(pendingDb, payload || {});
+    return { status: 'success', ...data };
   });
 
   ipcMain.handle('pending:months:list', () => {
@@ -9054,7 +9055,7 @@ function registerNewAccountHandlers() {
     return { cancelled: false, files: result.filePaths };
   });
 
-  ipcMain.handle('pending:import:start', async (event, payload) => {
+  trackedIpcHandle('pending:import:start', '月度 Pending', '导入文件', async (event, payload) => {
     const { files, yearMonth, overwriteConfirmed = false } = payload || {};
     if (!Array.isArray(files) || files.length === 0) {
       return { status: 'error', errors: [{ severity: 'fatal', message: '未选择文件' }] };
@@ -9092,17 +9093,19 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('pending:reconcile:run', (_event, payload = {}) => {
+  trackedIpcHandle('pending:reconcile:run', '月度 Pending', '开始运行', (_event, payload = {}) => {
     if (!pendingDb) throw new Error('Pending DB 未初始化');
     const rule = pendingRuleRepo.getRule(pendingDb);
     if (!rule || !rule.matchFields || rule.matchFields.length === 0) {
       throw new Error('规则未设置（matchFields 为空）');
     }
-    return pendingReconcileEngine.runReconciliation(pendingDb, {
+    // PR #34 round 4 P2：包一层 status 让 trackedIpcHandle 能识别成功
+    const result = pendingReconcileEngine.runReconciliation(pendingDb, {
       upperMonth: payload.upperMonth,
       lowerMonth: payload.lowerMonth,
       rule
     });
+    return { status: 'success', ...result };
   });
 
   ipcMain.handle('pending:diff:runs-list', () => {
@@ -9128,7 +9131,7 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('pending:diff:export-single', async (_event, payload = {}) => {
+  trackedIpcHandle('pending:diff:export-single', '月度 Pending', '导出差异', async (_event, payload = {}) => {
     if (!pendingDb) return { status: 'error', message: 'Pending DB 未初始化' };
     const runId = Number(payload.runId);
     if (!Number.isFinite(runId) || runId <= 0) {
@@ -9147,7 +9150,7 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('pending:diff:export-aggregate', async () => {
+  trackedIpcHandle('pending:diff:export-aggregate', '月度 Pending', '导出差异', async () => {
     if (!pendingDb) return { status: 'error', message: 'Pending DB 未初始化' };
     const saveResult = await dialog.showSaveDialog({
       title: '保存 Pending 差异汇总文件',
@@ -9163,10 +9166,66 @@ function registerNewAccountHandlers() {
   });
 }
 
+// v2.0.0-beta.4：usage-stats 模块（隐藏 .usage-stats.txt）
+const usageStatsModule = require('./backend/usage-stats');
+let usageStats = null;
+let usageStatsAutoFlushTimer = null;
+const USAGE_STATS_FLUSH_INTERVAL_MS = 5 * 60 * 1000;
+let usageStatsDirty = false;
+
+function tickUsageStats(moduleKey, functionKey) {
+  if (!usageStats) return;
+  usageStatsModule.incrementFunction(usageStats, moduleKey, functionKey);
+  usageStatsDirty = true;
+}
+
+// PR #34 Codex round 2 P2：仅成功才计数（spec D6）
+//   使用方式：trackedIpcHandle('xxx:yyy', '模块', '功能', handler)
+//   handler 返回成功状态（'ok' 或 'success'）时才 tick；其他状态不计
+//
+// PR #34 Codex round 3 P2：原仅认 'ok'，但 template:import / delete / save-mappings /
+//   account-mapping:save / file:export-detail / new-account:export 等 handler 实际返回
+//   `status: 'success'`，导致统计偏低 → 同时接受两种方言（不接受 ready / empty 中间态）
+const SUCCESS_STATUSES = new Set(['ok', 'success']);
+
+function trackedIpcHandle(channel, moduleKey, functionKey, handler) {
+  ipcMain.handle(channel, async (event, ...args) => {
+    const result = await handler(event, ...args);
+    if (result && SUCCESS_STATUSES.has(result.status)) {
+      tickUsageStats(moduleKey, functionKey);
+    }
+    return result;
+  });
+}
+
+function flushUsageStats() {
+  if (!usageStats || !usageStatsDirty) return;
+  try {
+    usageStatsModule.saveStats(ensureStorageRoot(), usageStats);
+    usageStatsDirty = false;
+  } catch (err) {
+    // PR #34 Codex round 1 P2：写盘失败保留 dirty 让下次 tick 重试
+    // （原实现无论成败都清 dirty，磁盘满 / 权限错时 session 计数静默丢失）
+    console.warn('[usage-stats] flush failed (will retry next tick):', err && err.message);
+  }
+}
+
 app.whenReady()
   .then(() => {
     markStartupMetric(STARTUP_METRIC_MARKS.appReady);
     initializeActivityLog();
+
+    // v2.0.0-beta.4：加载 usage-stats + 记录 sessionStart + 启动定时 flush
+    try {
+      usageStats = usageStatsModule.loadStats(ensureStorageRoot());
+      usageStatsModule.recordSessionStart(usageStats);
+      usageStatsDirty = true;
+      flushUsageStats();
+      usageStatsAutoFlushTimer = setInterval(flushUsageStats, USAGE_STATS_FLUSH_INTERVAL_MS);
+    } catch (err) {
+      console.warn('[usage-stats] init failed:', err && err.message);
+      usageStats = usageStatsModule.defaultStats();
+    }
 
     const dataPath = path.join(app.getPath('userData'), 'tool-data.sqlite');
     database = new AppDatabase(dataPath);
@@ -9247,6 +9306,23 @@ app.whenReady()
   .catch((error) => {
     handleStartupFailure(error);
   });
+
+// v2.0.0-beta.4：退出前 flush usage-stats（before-quit 在窗口全关后触发）
+app.on('before-quit', () => {
+  try {
+    if (usageStats) {
+      usageStatsModule.recordSessionEnd(usageStats);
+      usageStatsDirty = true;
+      flushUsageStats();
+    }
+    if (usageStatsAutoFlushTimer) {
+      clearInterval(usageStatsAutoFlushTimer);
+      usageStatsAutoFlushTimer = null;
+    }
+  } catch (err) {
+    console.warn('[usage-stats] before-quit flush failed:', err && err.message);
+  }
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
