@@ -264,6 +264,14 @@ desktopApi.bankStatement = {
 - session 保留 immutable 原始数据（含 _rowId）
 - smoke D6/D7 验证：D6 反向证明 in-place 漂移；D7 clone 后跑两次结果幂等
 
+### D9 gwRows=[] 时 C3 仍跑（让 PR #31 算法层产 warning）（Codex Round 3 F1 P2 修订）
+
+- 旧逻辑：`filterScenariosByGwAvailability` 把 `gwRows=[]` 也视为不可用 → 过滤掉 C3
+- 问题：用户导入了结构正确但无数据行的「网关账单」文件 → C3 不跑 → PR #31 已实现的 `no-gateway-rows` warning 不触发 → error-report 里没有任何提示
+- 修复：仅 `null/undefined` 时过滤 C3；空数组 `[]` 不过滤，让 C3 跑出 PR #31 算法层的 warning
+- smoke D9 回归：gwRows=[] + C3 → modifiedRows=[] + errorReport 含 'no-gateway-rows'
+- 与 D4 协同：D4 验证 gwRows=null 时 C3 仍被过滤（不重复跑空 warning）
+
 ### D8 error-report 与主输出独立落盘（Codex Round 2 F1 P1 修订）
 
 - PRD §189 明确：error-report 是 xlsx 格式，**独立**于主输出

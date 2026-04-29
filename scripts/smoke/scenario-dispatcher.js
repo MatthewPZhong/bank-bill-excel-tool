@@ -276,14 +276,34 @@ async function runScenarioDispatcherSmokeTests() {
   }
 
   // ===== Helper unit: filterScenariosByGwAvailability =====
+  // Codex Round 3 F1 P2：仅 null/undefined 过滤，[] 不过滤（让 C3 产 no-gateway-rows warning）
   {
     const list = [{ category: 'extract-recon-id' }, { category: 'gateway-recon-join' }, { category: 'offset-bill-mark' }];
-    assert.strictEqual(filterScenariosByGwAvailability(list, []).length, 2, 'gwRows 空 → 过滤 C3');
     assert.strictEqual(filterScenariosByGwAvailability(list, null).length, 2, 'gwRows null → 过滤 C3');
+    assert.strictEqual(filterScenariosByGwAvailability(list, undefined).length, 2, 'gwRows undefined → 过滤 C3');
+    assert.strictEqual(filterScenariosByGwAvailability(list, []).length, 3, 'gwRows = [] → 不过滤（让 C3 产 warning）');
     assert.strictEqual(filterScenariosByGwAvailability(list, [{}]).length, 3, 'gwRows 非空 → 全保留');
   }
 
-  console.log('  scenario-dispatcher: 10/10 PASS');
+  // ===== Dispatcher D9（Codex Round 3 F1 P2 回归）：gwRows=[] 时 C3 仍跑 + 产 warning =====
+  // 用户导入了结构正确但无数据行的网关账单 → C3 应跑出 no-gateway-rows warning
+  // dispatcher 不能把 [] 当成 null 而过滤掉 C3，否则 warning 静默丢失
+  {
+    const bankRows = [
+      { _rowId: 'b9', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
+    ];
+    const result = runAllScenarios(bankRows, [], [makeC3Scenario()]);
+    assert.strictEqual(result.modifiedRows.length, 0, 'D9 modifiedRows 应空');
+    assert(
+      result.errorReport.some((w) => w.code === 'no-gateway-rows'),
+      'D9 应有 no-gateway-rows warning'
+    );
+    // D4 仍要求：gwRows = null 时 C3 类被过滤
+    const r2 = runAllScenarios(bankRows, null, [makeC3Scenario()]);
+    assert.strictEqual(r2.stats.skippedC3Count, 1, 'D9 vs D4: gwRows=null 仍按之前过滤');
+  }
+
+  console.log('  scenario-dispatcher: 11/11 PASS');
 }
 
 // ===== exceljs-writer round-trip =====

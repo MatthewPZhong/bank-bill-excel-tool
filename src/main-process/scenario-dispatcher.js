@@ -20,8 +20,13 @@ function sortScenariosByPriority(scenarios) {
 }
 
 function filterScenariosByGwAvailability(scenarios, gwRows) {
-  if (Array.isArray(gwRows) && gwRows.length > 0) return scenarios;
-  return scenarios.filter((s) => s.category !== 'gateway-recon-join');
+  // 只在用户未导入资金对账文件时（gwRows === null/undefined）过滤掉 C3 类。
+  // 已导入但为空数组（gwRows = []）→ 不过滤，让 C3 正常跑并产 'no-gateway-rows' warning
+  // （Codex Round 3 F1 P2 修复：避免空文件场景下 PR #31 已实现的 warning 被吞掉）
+  if (gwRows === null || gwRows === undefined) {
+    return scenarios.filter((s) => s.category !== 'gateway-recon-join');
+  }
+  return scenarios;
 }
 
 // runAllScenarios(bankRows, gwRows | null, scenarios)
