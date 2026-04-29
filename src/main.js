@@ -13,6 +13,13 @@ const pendingDiffRepo = require('./backend/pending-db/diff-repository');
 const pendingReconcileEngine = require('./backend/pending-reconcile/engine');
 const pendingExportWriter = require('./backend/pending-export/writer');
 const { createPendingSession } = require('./main-process/pending-session');
+const { runAllScenarios } = require('./main-process/scenario-dispatcher');
+const {
+  readBankStatement,
+  readGatewayRecon,
+  writeBankStatementMainOutput,
+  writeErrorReportOutput
+} = require('./main-process/bank-statement-io');
 const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
 const { groupBigAccountRows } = require('./backend/database/utils');
 const {
@@ -119,6 +126,11 @@ let fileImportInProgress = false;
 let statementImportSessions = new Map();
 let nextStatementBatchId = 1;
 let nextStatementFileEntryId = 1;
+// v2.0.0-beta.3 PR #32a：银行对账单处理模块的进程级 session
+// 进程重启不持久化（与 lastFileImportContext 一致）
+let bankStatementSession = null;     // { filePath, fileName, rows, headers, importedAt }
+let gatewayReconSession = null;      // { filePath, fileName, gwRows, importedAt }
+let processingResult = null;         // { modifiedRows, modifications, errorReport, stats, ranAt }
 let startupMetricsReported = false;
 // v1.5.3 R2：自有账号迁移失败消息（D15）。null = 无失败；字符串 = 启动时发生失败，
 // renderer 首次 app:get-info 时读取并用 error tone 显示状态栏告警
@@ -2744,6 +2756,173 @@ function registerAppHandlers() {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
   });
+
+  // v2.0.0-beta.3 PR #32a：银行对账单处理模块 IO + 调度 IPC
+  ipcMain.handle('bank-statement:import', async () => {
+    try {
+      const choice = await dialog.showOpenDialog(mainWindow, {
+        title: '选择银行对账单文件',
+        properties: ['openFile'],
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      const filePath = choice.filePaths[0];
+      const result = readBankStatement(filePath);
+      bankStatementSession = {
+        filePath: result.filePath,
+        fileName: result.fileName,
+        rows: result.rows,
+        headers: result.headers,
+        importedAt: Date.now()
+      };
+      // 重新导入银行对账单 → 同步清空运行结果 + 资金对账文件
+      // （Codex F2 P1 修复：避免把上一批 gwRows 误用到新文件）
+      processingResult = null;
+      gatewayReconSession = null;
+      return {
+        status: 'ok',
+        fileName: result.fileName,
+        rowCount: result.rowCount
+      };
+    } catch (error) {
+      if (error && error.name === 'FileValidationError') {
+        return {
+          status: 'invalid',
+          code: error.code,
+          message: error.message,
+          detailLines: error.detailLines || []
+        };
+      }
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+
+  ipcMain.handle('gateway-recon:import', async () => {
+    try {
+      const choice = await dialog.showOpenDialog(mainWindow, {
+        title: '选择资金对账不平结果表',
+        properties: ['openFile'],
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      const filePath = choice.filePaths[0];
+      const result = readGatewayRecon(filePath);
+      gatewayReconSession = {
+        filePath: result.filePath,
+        fileName: result.fileName,
+        gwRows: result.gwRows,
+        importedAt: Date.now()
+      };
+      processingResult = null;
+      return {
+        status: 'ok',
+        fileName: result.fileName,
+        rowCount: result.rowCount
+      };
+    } catch (error) {
+      if (error && error.name === 'FileValidationError') {
+        return {
+          status: 'invalid',
+          code: error.code,
+          message: error.message,
+          detailLines: error.detailLines || []
+        };
+      }
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+
+  ipcMain.handle('bank-statement:run', () => {
+    try {
+      if (!bankStatementSession) {
+        return { status: 'failed', message: '请先导入银行对账单' };
+      }
+      const allScenarios = database.listScenarios();
+      const enabled = allScenarios.filter((s) => s.enabled === 1 || s.enabled === true);
+      const detailedEnabled = enabled.map((s) => database.getScenario(s.id)).filter(Boolean);
+      // 每次 run 都基于原始导入数据 deep clone 一份工作副本
+      // （Codex F1 P1 修复：算法层会原地修改字段，不 clone 会让连续运行的 oldValue 漂移
+      //  → first-match-wins 失效，低优先级场景可能覆盖高优先级写入的字段）
+      const workingBankRows = structuredClone(bankStatementSession.rows);
+      const workingGwRows = gatewayReconSession ? structuredClone(gatewayReconSession.gwRows) : null;
+      const result = runAllScenarios(workingBankRows, workingGwRows, detailedEnabled);
+      processingResult = {
+        modifiedRows: result.modifiedRows,
+        modifications: result.modifications,
+        errorReport: result.errorReport,
+        stats: result.stats,
+        ranAt: Date.now()
+      };
+      return {
+        status: 'ok',
+        stats: result.stats
+      };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+
+  ipcMain.handle('bank-statement:export', async () => {
+    try {
+      if (!processingResult) {
+        return { status: 'failed', message: '请先点击"开始运行"处理对账单' };
+      }
+      const exportRootDir = path.join(ensureStorageRoot(), 'bank-statement-process');
+      // error-report 与主输出独立（PRD §189：error-report xlsx 格式独立于主输出）
+      // 即使 modifiedRows.length === 0，warnings 仍应落盘——避免唯一可追溯的异常信息被吞掉
+      // （Codex Round 2 F1 P1 修复：C1 多字段值不一致 / C2 一对多多对一 时
+      //  modifiedRows 可能为空但 warnings 非空）
+      let errorReport = null;
+      if (processingResult.errorReport.length > 0) {
+        errorReport = await writeErrorReportOutput({
+          warnings: processingResult.errorReport,
+          exportRootDir
+        });
+      }
+      if (processingResult.modifiedRows.length === 0) {
+        // PRD §717 P0-11：不生成主输出，但 error-report 仍可能已生成
+        return {
+          status: 'empty',
+          message: '无修改记录，未生成主输出文件',
+          errorReportPath: errorReport ? errorReport.filePath : null,
+          errorReportName: errorReport ? errorReport.fileName : null
+        };
+      }
+      const main = await writeBankStatementMainOutput({
+        modifiedRows: processingResult.modifiedRows,
+        headers: bankStatementSession.headers,
+        exportRootDir
+      });
+      return {
+        status: 'ok',
+        mainFilePath: main.filePath,
+        mainFileName: main.fileName,
+        errorReportPath: errorReport ? errorReport.filePath : null,
+        errorReportName: errorReport ? errorReport.fileName : null
+      };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+
+  ipcMain.handle('bank-statement:session-status', () => {
+    return {
+      status: 'ok',
+      hasBankStatement: bankStatementSession !== null,
+      bankStatementFileName: bankStatementSession ? bankStatementSession.fileName : null,
+      bankStatementRowCount: bankStatementSession ? bankStatementSession.rows.length : 0,
+      hasGatewayRecon: gatewayReconSession !== null,
+      gatewayReconFileName: gatewayReconSession ? gatewayReconSession.fileName : null,
+      gatewayReconRowCount: gatewayReconSession ? gatewayReconSession.gwRows.length : 0,
+      hasProcessingResult: processingResult !== null,
+      processingStats: processingResult ? processingResult.stats : null
+    };
+  });
+
   ipcMain.handle('app:save-user-guide', async () => {
     try {
       const result = await dialog.showSaveDialog(mainWindow, {

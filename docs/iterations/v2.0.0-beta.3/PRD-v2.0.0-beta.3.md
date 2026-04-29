@@ -784,3 +784,29 @@ state.processingResult = {  // 运行后产生
 - **Preview**：3 张新 preview state（`bank-statement-panel` / `scenarios-manager` / `scenario-category-select`）+ 主入口分发
 - **测试**：`npm run smoke` 通过；`npm run preview` + 3 张新 modal preview 渲染正常；`npm run check:vars` 命中 3 个 Runtime-state（`MODULES`/`dialog`/`elements`）已自查
 - **Codex 修正**：F1 (P3) tasks.md todo→done；F2 (P3) PRD §6.5 + §8.1 同步 marker 机制描述（与 PR #29 实现对齐）
+
+### 阶段 4+5+6 — 算法引擎纯函数（PR #31，commit `cb3a211` + Codex 3 轮修复 `52f142b`/`fa31911`/`5d13fd4`，merge `b977815a`）
+
+- **范围切分**：实施途中由"4+5+6 配置弹窗 + 算法"（约 3000 行）切分为 PR #31（算法引擎）+ PR #32（UI/调度/IO/文档/bump），原因：单 PR 4 个相互关联 dialog factory + 算法风险高，算法层有完整单测可独立 ship
+- **算法引擎独立 module**：`src/main-process/scenario-engines/` 5 文件
+  - `engine-utils.js`：`ensureRowId`（写回 _rowId）/ `makeModificationCollector`（lock + record 分离）/ `makeWarningCollector` / `valuesEqual` / `parseNumber` 等共享工具
+  - `c1-extract-recon-id.js`：`runC1Scenario` / `buildFeatureRegex` + 多字段值一致性校验
+  - `c2-offset-bill-mark.js`：`runC2Scenario` 笛卡尔配对 + 一对多/多对一报错 + 双侧锁
+  - `c3-gateway-recon-join.js`：`runC3Scenario` 4 字段 AND join + 多行取首 + 发生额绝对值
+  - `index.js`：`runScenario(scenario, bankRows, gwRows?)` 按 category 分发
+- **算法稳定签名**：`{scenario, bankRows, gwRows?} → { lockedRowIds: Set, modifications: [], warnings: [] }`
+  - `lockedRowIds`：first-match-wins 锁定 + 仅导修改行依据；C2 配对成功时双方都锁，即使 leftRow 未改字段
+  - `modifications`：标黄依据
+  - `warnings`：error-report 依据
+- **字段常量**：`src/constants/bank-statement-fields.js`（44 列 + `'发生额绝对值'` 虚拟字段）+ `src/constants/gateway-recon-fields.js`（31 列）；runtime 不从导入文件提取（PRD D7 列结构固定）
+- **migrations seed 修复**：`BUILTIN_SCENARIOS[2].config.reconFields[0].gwField` `'currency'` → `'Currency'`（与网关 sheet 实际表头大小写对齐，Codex F3 P1）；非 schema 变更，由 PR #29 marker 保护幂等性
+- **测试**：23 单测落 `scripts/smoke/scenario-engines.js` 接入 `npm run smoke`
+  - C1（9 个）：regex 构建（2）/ 单字段命中 / 多字段一致 / 多字段不一致 / 单字段双值 / condition 不满足 / 原值非空覆盖 / extractByOtherField
+  - C2（5 个）：一对一双锁 / 一对多 warn / 多对一 warn / 类型不匹配 / 无 _rowId 自动写回（F1 回归）
+  - C3（9 个）：4 字段 AND / 不匹配保留 / 多行取首 / 原值覆盖 / 大写 Currency 命中（F3 回归）/ 入口分发 / gwRows 空 / reconFields 空 / assign 缺失（Round 2 F1 回归）
+- **Codex 修正（3 轮 7 finding）**：
+  - Round 1（commit `52f142b`）：F1 (P1) ensureRowId 写回 row / F2 (P1) C2 leftRow 也进 lockedRowIds / F3 (P1) seed currency → Currency / F4 (P2) 18 单测落 smoke
+  - Round 2（commit `fa31911`）：F1 (P1) C3 三个 invalid early-return 漏改 listLockedRowIds + smoke 补 invalid 分支 / F2 (P2) spec.md/log.md API 文档同步 lockedRowIds
+  - Round 3（commit `5d13fd4`）：F1 (P3) spec.md F2-F6 / §5 / §9 标注"已移到 PR #32"
+- **不含本 PR 范围（移到 PR #32）**：4 个 dialog factory（C1/C2/C3 配置 + 确认详情）/ 接入 PR #30 占位 / first-match-wins 调度 / 文件 IO / 标黄输出 / E2E / 文档三件套 / 版本号 bump beta.3
+- **关联功能 review**：手工补判（脚本不跨 branch 比较）—— migrations.js 仅 seed 字符串非 schema 变更，PR #29 marker 保护幂等；7 新文件不在重要变量表（升格评估留给 PR #32）
