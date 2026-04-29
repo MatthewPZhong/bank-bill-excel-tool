@@ -14,7 +14,8 @@ const {
   readGatewayRecon,
   writeBankStatementMainOutput,
   writeErrorReportOutput,
-  buildMainOutputFileName
+  buildMainOutputFileName,
+  sanitizeFileName
 } = require('../../src/main-process/bank-statement-io');
 
 const { BANK_STATEMENT_FIELDS } = require('../../src/constants/bank-statement-fields');
@@ -197,10 +198,36 @@ async function runBankStatementIoSmokeTests() {
     assert(buildMainOutputFileName([], '20260429000000').includes('空命中'), 'F1 空命中文件名');
   }
 
+  // ===== S1（self-review #2）：sanitizeFileName Windows / macOS 跨平台兜底 =====
+  {
+    // 控制字符替换为 _
+    assert.strictEqual(sanitizeFileName('调拨\u0001ReconId\u0007'), '调拨_ReconId_', 'S1.1 控制字符');
+    // Windows 禁用字符
+    assert.strictEqual(sanitizeFileName('a/b\\c:d*e?f"g<h>i|j'), 'a_b_c_d_e_f_g_h_i_j', 'S1.2 Windows 禁用字符');
+    // 尾点 + 尾空格（Windows 自动 trim 导致冲突）
+    assert.strictEqual(sanitizeFileName('调拨ReconId. '), '调拨ReconId', 'S1.3 尾点空格');
+    assert.strictEqual(sanitizeFileName('调拨...'), '调拨', 'S1.4 多尾点');
+    // 设备保留名 → 加 _ 前缀
+    assert.strictEqual(sanitizeFileName('CON'), '_CON', 'S1.5 CON');
+    assert.strictEqual(sanitizeFileName('con'), '_con', 'S1.6 小写也命中');
+    assert.strictEqual(sanitizeFileName('CON.txt'), '_CON.txt', 'S1.7 CON.txt（含扩展名）');
+    assert.strictEqual(sanitizeFileName('LPT1'), '_LPT1', 'S1.8 LPT1');
+    // 普通名不加前缀
+    assert.strictEqual(sanitizeFileName('CONS'), 'CONS', 'S1.9 CONS 非保留名');
+    // 空 / 全控制字符 → '_'
+    assert.strictEqual(sanitizeFileName(''), '_', 'S1.10 空');
+    assert.strictEqual(sanitizeFileName('   '), '_', 'S1.11 全空格');
+    // 长度限制
+    const longName = '调'.repeat(150);
+    assert.strictEqual(sanitizeFileName(longName).length, 100, 'S1.12 长度截断到 100');
+    // 正常名不变
+    assert.strictEqual(sanitizeFileName('调拨ReconId自提取'), '调拨ReconId自提取', 'S1.13 正常名不变');
+  }
+
   // 清理
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
-  console.log('  bank-statement-io: 11/11 PASS');
+  console.log('  bank-statement-io: 12/12 PASS');
 }
 
 module.exports = {

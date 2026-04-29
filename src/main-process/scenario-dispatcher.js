@@ -96,13 +96,9 @@ function runAllScenarios(bankRows, gwRows, scenarios) {
     }
 
     if (Array.isArray(warnings)) {
-      warnings.forEach((w) => {
-        allWarnings.push({
-          ...w,
-          scenarioId: scenario.id,
-          scenarioName: scenario.name
-        });
-      });
+      // PR #31 algo 层 makeWarningCollector(scenario.id, scenario.name) 已在内部
+      // push 时注入 scenarioId/scenarioName；dispatcher 不再重复 inject（self-review #1 修订）
+      warnings.forEach((w) => allWarnings.push({ ...w }));
     }
   }
 

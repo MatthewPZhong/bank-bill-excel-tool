@@ -140,8 +140,33 @@ function buildDateDir() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function sanitizeFileName(name) {
-  return String(name || '').replace(/[\\/:*?"<>|]/g, '_').trim();
+// Windows 设备保留名（不区分大小写）— 不能直接作为文件名（含扩展名也不行）
+const WINDOWS_RESERVED_NAMES = new Set([
+  'CON', 'PRN', 'AUX', 'NUL',
+  'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+  'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
+]);
+
+// Windows / macOS 跨平台文件名兜底
+// （self-review #2 修订：用户场景名可能含控制字符 / 尾点空格 / 设备保留名 / 超长）
+function sanitizeFileName(name, maxLen = 100) {
+  let s = String(name || '');
+  // 控制字符 (0x00-0x1F + DEL 0x7F) → '_'
+  s = s.replace(/[\x00-\x1F\x7F]/g, '_');
+  // Windows / macOS 禁用字符
+  s = s.replace(/[\\/:*?"<>|]/g, '_');
+  // 去除尾点和尾空格（Windows 会自动 trim 导致命名 "ABC. " 与 "ABC" 冲突）
+  s = s.replace(/[. ]+$/, '');
+  s = s.trim();
+  if (s === '') return '_';
+  // 设备保留名兜底（不区分大小写，比对去除扩展名后的 base）
+  const upperBase = s.toUpperCase().replace(/\.[^.]*$/, '');
+  if (WINDOWS_RESERVED_NAMES.has(upperBase)) {
+    s = `_${s}`;
+  }
+  // 长度限制（含 timestamp+扩展名 后总长仍在 Windows MAX_PATH 内）
+  if (s.length > maxLen) s = s.slice(0, maxLen);
+  return s;
 }
 
 // 主输出文件名：YYYYMMDDhhmmss-<场景名>.xlsx 或 YYYYMMDDhhmmss-多场景.xlsx
