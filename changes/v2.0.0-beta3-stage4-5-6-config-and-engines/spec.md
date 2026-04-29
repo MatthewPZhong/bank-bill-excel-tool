@@ -73,6 +73,8 @@ C2 / C3 同型签名。
 
 ### F2 — C1 配置弹窗 (`createScenarioConfigDialogC1`)
 
+> ⚠️ **已移到 PR #32**：以下内容是切分前的原计划，PR #31 已收口为算法引擎，F2-F6 全部归 PR #32。保留作为 PR #32 实施参考。
+
 完全按 PRD §7.1：
 - 5 行：场景名称 / 优先级 / 条件（多行）/ 根据特征提取 / 根据其他字段提取
 - 行 4 / 行 5 互斥（点 row4 checkbox 自动取消 row5，反之亦然）
@@ -141,16 +143,24 @@ C2 / C3 同型签名。
 
 ## 5. 影响范围
 
+### PR #31（本 PR，已收口）
+
 - 后端：
   - 新目录 `src/main-process/scenario-engines/`（5 个新文件）
   - 新文件 `src/constants/bank-statement-fields.js`（44 列）
   - 新文件 `src/constants/gateway-recon-fields.js`（31 列）
+- 测试：`scripts/smoke/scenario-engines.js`（接入 npm run smoke）
+- 不动：renderer-dialogs.js、renderer.js、main.js、preload.js、styles*.css
+
+### PR #32（已移出，参考用）
+
+> ⚠️ 以下是切分前的原计划，归 PR #32
+
 - 前端：
   - `src/renderer-dialogs.js` 加 4 个新 dialog factory（C1/C2/C3 配置 + 确认详情）
   - 修改 PR #30 的 `createScenariosManagerDialog` + `createScenarioCategorySelectDialog`：移除占位 alert，接入新 dialog
   - 新增 `state.scenarioDraft`（编辑/新建过程中的临时配置）
-  - CSS：新增 dialog 表单布局
-- 不动：main.js IPC（已就绪）、preload.js（已就绪）、index.html、settings-repository.js
+  - CSS：新增 dialog 表单布局（styles.css + styles-gemini-extra.css 双份）
 - 兼容性：与 PR #29 / #30 完全兼容；scenarios 表 schema 不变
 - 资金红线：算法实现期间高亮（第 7 段）
 
@@ -199,11 +209,21 @@ C2 / C3 同型签名。
 
 ## 9. 实施顺序
 
-1. 落 spec 三件套
-2. 写常量文件（`bank-statement-fields.js` / `gateway-recon-fields.js`）
-3. 写算法引擎（5 个文件）+ 单元测试（in-memory mock）
-4. 写 4 个 dialog factory（C1/C2/C3 配置 + 确认详情）
-5. 改 PR #30 的 createScenariosManagerDialog / createScenarioCategorySelectDialog 接入新 dialog
-6. CSS（dialog 表单样式）
-7. preview state 补充（C1/C2/C3 配置 + 确认详情各 1 张）
-8. smoke + preview + check-vars + 提 PR
+### PR #31（本 PR，已完成）
+
+1. 落 spec 三件套 ✅
+2. 写常量文件（`bank-statement-fields.js` / `gateway-recon-fields.js`）✅
+3. 写算法引擎（5 个文件）+ smoke 用例（`scripts/smoke/scenario-engines.js`，23/23 PASS）✅
+4. smoke + check-vars + 提 PR ✅
+
+### PR #32（已移出）
+
+> 以下步骤归 PR #32
+
+5. 写 4 个 dialog factory（C1/C2/C3 配置 + 确认详情）
+6. 改 PR #30 的 createScenariosManagerDialog / createScenarioCategorySelectDialog 接入新 dialog
+7. CSS（dialog 表单样式，styles.css + styles-gemini-extra.css 双份）
+8. preview state 补充（C1/C2/C3 配置 + 确认详情各 1 张）
+9. first-match-wins 调度 + 文件 IO + 标黄输出
+10. E2E + 文档三件套 + 版本 bump
+11. smoke + preview + check-vars + 提 PR
