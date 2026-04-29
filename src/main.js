@@ -9032,7 +9032,9 @@ function registerNewAccountHandlers() {
     if (!pendingDb) {
       throw new Error('Pending DB 未初始化，无法保存规则');
     }
-    return pendingRuleRepo.upsertRule(pendingDb, payload || {});
+    // PR #34 round 4 P2：包一层 status 让 trackedIpcHandle 能识别成功
+    const data = pendingRuleRepo.upsertRule(pendingDb, payload || {});
+    return { status: 'success', ...data };
   });
 
   ipcMain.handle('pending:months:list', () => {
@@ -9096,11 +9098,13 @@ function registerNewAccountHandlers() {
     if (!rule || !rule.matchFields || rule.matchFields.length === 0) {
       throw new Error('规则未设置（matchFields 为空）');
     }
-    return pendingReconcileEngine.runReconciliation(pendingDb, {
+    // PR #34 round 4 P2：包一层 status 让 trackedIpcHandle 能识别成功
+    const result = pendingReconcileEngine.runReconciliation(pendingDb, {
       upperMonth: payload.upperMonth,
       lowerMonth: payload.lowerMonth,
       rule
     });
+    return { status: 'success', ...result };
   });
 
   ipcMain.handle('pending:diff:runs-list', () => {
