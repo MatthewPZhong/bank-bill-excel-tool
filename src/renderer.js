@@ -284,7 +284,8 @@ const {
   refreshTemplates,
   setStatus,
   applyStatementResult,
-  applyManualBalancePromptStatus
+  applyManualBalancePromptStatus,
+  refreshBankStatementStatus
 });
 
 const rendererPending = window.__rendererPending.createRendererPending({

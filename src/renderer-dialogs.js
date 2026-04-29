@@ -15,7 +15,8 @@
       refreshTemplates,
       setStatus,
       applyStatementResult,
-      applyManualBalancePromptStatus
+      applyManualBalancePromptStatus,
+      refreshBankStatementStatus
     } = deps;
 
     // v2.0.0-beta.3 PR #32b：银行对账单处理模块字段常量（preload 暴露 → window.appConstants → deps）
@@ -5475,6 +5476,8 @@
             onConfirm: async () => {
               const result = await desktopApi.scenarios.deleteOne(id);
               if (result && result.status === 'ok') {
+                // round 2 P1：main 端已清 processingResult，此处同步 renderer state
+                if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
                 openModal(createScenariosManagerDialog());
               } else {
                 openModal(createAlertDialog(`删除失败：${result?.message || '未知错误'}`));
@@ -5500,6 +5503,9 @@
           checkbox.checked = !enabled;
           await refreshTable();
           openModal(createAlertDialog(`切换启用状态失败：${result?.message || '未知错误'}`));
+        } else {
+          // round 2 P1：toggle 成功 → main 端已清 processingResult，此处同步 renderer state
+          if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
         }
       });
 
@@ -6488,6 +6494,8 @@
             return;
           }
           // 成功 → 清空 draft + 刷新场景管理弹窗
+          // round 2 P1：场景已变更，main 端已清 processingResult，此处同步 renderer state
+          if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
           clearScenarioDraft();
           openModal(createScenariosManagerDialog());
         } catch (error) {

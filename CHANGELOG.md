@@ -12,7 +12,7 @@
 - **C2 场景（账单打标）**：双类型行配对（一一对应同 CustomerRef + Credit==Debit）；一对多 / 多对一 → error-report；正常配对 → 双方都进 lockedRowIds，rightType 行字段被打标。
 - **C3 场景（提取ReconId-From 网关）**：与「资金对账不平结果表」按 4 字段 AND 匹配（含发生额绝对值虚拟字段）；多匹配取首条 + warn；未导入 gw 文件时整类被过滤 + skippedC3Count 提示。
 - **3 个内置场景（默认存在，可编辑、可禁用、可删除；不提供"恢复出厂"）**：`从银行对账单的信息里提取对账ID`（C1，启用）/ `outbound改标为outbound Fail`（C2，启用）/ `与网关对账单根据金额币种一对一匹配对账ID`（C3，禁用）。
-- **6 列场景管理表（CRUD + toggle）**：`序号 / 功能类别 / 场景名称 / 优先级 / 执行操作 / 是否启动`。toggle 实时写库；删除内置场景被拦截；序号取最小未用 ID（gap-filling）。
+- **6 列场景管理表（CRUD + toggle）**：`序号 / 功能类别 / 场景名称 / 优先级 / 执行操作 / 是否启动`。toggle 实时写库；序号取最小未用 ID（gap-filling）；内置场景可编辑、可禁用、可删除（不提供"恢复出厂"）。
 - **4 个场景配置弹窗**：`createScenarioConfigDialogC1 / C2 / C3 / createScenarioConfirmDetailDialog`（创建/编辑/查看三模式共用）；状态由 renderer-side `state.scenarioDraft` 跨弹窗共享。
 - **xlsx 标黄输出**：仅命中场景的行入主输出，被修改的单元格用 exceljs 黄底（FFFFFF00 ARGB）；非修改行不导出。文件命名 `银行对账单-YYYYMMDDHHmm-处理结果.xlsx`（统一格式，不含场景名）；用户通过原生 saveDialog 选保存路径（另存为）。
 - **error-report 独立产物**：warnings 单独 xlsx 落 `Documents/网银账单生成小助手/bank-statement-process/{date}/{ts}-error-report.xlsx`，与主输出独立（即使 modifiedRows 为空也会写）。

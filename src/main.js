@@ -2728,6 +2728,9 @@ function registerAppHandlers() {
   ipcMain.handle('scenarios:create', (_event, payload) => {
     try {
       const result = database.createScenario(payload);
+      // PR #33 Codex round 2 P1（资金红线）：场景配置变更后旧的 processingResult 已陈旧
+      // → 强制失效，避免用户改场景后导出 stale 旧规则的输出
+      processingResult = null;
       return { status: 'ok', id: result.id };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -2736,6 +2739,7 @@ function registerAppHandlers() {
   ipcMain.handle('scenarios:update', (_event, id, fields) => {
     try {
       database.updateScenario(id, fields);
+      processingResult = null;  // round 2 P1
       return { status: 'ok', id };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -2744,6 +2748,7 @@ function registerAppHandlers() {
   ipcMain.handle('scenarios:delete', (_event, id) => {
     try {
       const result = database.deleteScenario(id);
+      processingResult = null;  // round 2 P1
       return { status: 'ok', id, deleted: result.deleted };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -2752,6 +2757,7 @@ function registerAppHandlers() {
   ipcMain.handle('scenarios:toggle-enabled', (_event, id, enabled) => {
     try {
       const result = database.toggleScenarioEnabled(id, enabled);
+      processingResult = null;  // round 2 P1
       return { status: 'ok', id, enabled: result.enabled };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
