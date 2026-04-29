@@ -368,7 +368,9 @@ const BUILTIN_SCENARIOS = [
     is_builtin: 1,
     config: {
       reconFields: [
-        { seq: 1, gwField: 'currency',   bankField: 'Currency' },
+        // 网关账单 sheet 实际表头大小写：'Currency'（大写 C）；
+        // PR #29 早期 seed 误用小写 'currency' → C3 默认场景全行匹配不到（Codex PR #31 F3 P1 修复）
+        { seq: 1, gwField: 'Currency',   bankField: 'Currency' },
         { seq: 2, gwField: 'Amount',     bankField: '发生额绝对值' },
         { seq: 3, gwField: 'MerchantId', bankField: 'MerchantId' },
         { seq: 4, gwField: 'Bank',       bankField: 'Channel' }

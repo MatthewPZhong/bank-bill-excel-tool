@@ -549,7 +549,7 @@ function exportModifiedRows(modifiedRows, originalHeaders):
   "enabled": false,
   "config": {
     "reconFields": [
-      { "seq": 1, "gwField": "currency",   "bankField": "Currency" },
+      { "seq": 1, "gwField": "Currency",   "bankField": "Currency" },
       { "seq": 2, "gwField": "Amount",     "bankField": "发生额绝对值" },
       { "seq": 3, "gwField": "MerchantId", "bankField": "MerchantId" },
       { "seq": 4, "gwField": "Bank",       "bankField": "Channel" }
@@ -675,20 +675,26 @@ state.processingResult = {  // 运行后产生
 
 | 阶段 | PR | 内容 | 工作量 | 状态 |
 |---|---|---|---|---|
-| **阶段 1** | PR #29 | 数据底座：`scenarios` 表 schema + migrations + seed 3 内置 + scenariosRepository CRUD + 6 IPC + preload | 1-2 天 | ✅ 已开 PR |
-| **阶段 2+3** | PR #30 | 模块入口：MODULES 加新成员 + 模块面板 fork + 模块持久化合法值追加 + 场景管理弹窗 + 类别选择弹窗（不含 3 类配置弹窗） | 1.5 天 | ⏳ 待启动 |
-| **阶段 4+5+6** | PR #31 | C1 / C2 / C3 配置弹窗（同质 UI 框架）+ 3 类算法引擎 + 资金对账文件二次导入 + 单元测试 | 6 天 | ⏳ 待启动 |
-| **阶段 7+8** | PR #32 | 调度引擎（first-match-wins）+ 标黄输出 + 仅导修改行 + 导出文件 IPC + E2E 集成测试 + 用户样例文件回归 + 文档三件套（CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE）+ 版本号 bump 到 `2.0.0-beta.3` | 3-4 天 | ⏳ 待启动 |
+| **阶段 1** | PR #29 | 数据底座：`scenarios` 表 schema + migrations + seed 3 内置 + scenariosRepository CRUD + 6 IPC + preload | 1-2 天 | ✅ 已 merge |
+| **阶段 2+3** | PR #30 | 模块入口：MODULES 加新成员 + 模块面板 fork + 模块持久化合法值追加 + 场景管理弹窗 + 类别选择弹窗（不含 3 类配置弹窗） | 1.5 天 | ✅ 已 merge |
+| **阶段 4+5+6（算法部分）** | PR #31 | 算法引擎：C1 / C2 / C3 纯函数 + 字段常量（44 + 31 列）+ 18 个边界单测；不接 UI / IO（方案 B 微调：原"配置弹窗 + 算法"中算法部分单独 ship） | 1.5-2 天 | 🚀 当前 |
+| **阶段 4+5+6（UI 部分）+ 7 + 8** | PR #32 | 3 类配置弹窗 + 确认场景详情 + 接入 PR #30 占位 + 调度引擎（first-match-wins）+ 文件 IO（导入银行对账单 / 资金对账）+ 标黄输出 + 仅导修改行 + 导出文件 IPC + E2E 集成测试 + 用户样例文件回归 + 文档三件套 + 版本号 bump 到 `2.0.0-beta.3` | 5-7 天 | ⏳ 待启动 |
 
-**总工作量**：约 11-15 天（4 个 PR）。
+**总工作量**：约 11-15 天（仍 4 个 PR，方案 B 微调：把"算法引擎"和"UI + 调度 + IO + 文档"切开，因为算法纯函数有 18 单测保障，UI/调度/IO 是顺序拼装，逻辑边界更清晰且降低单 PR 体量风险）。
 
 每个 PR 都跑 check-vars + smoke + preview；最后一个 PR 还要跑 v1.5.3 回归脚本。
 
-### 方案 B 合并理由
+### 方案 B 合并理由（2026-04-28 微调）
 
 - **2+3 合并**：模块面板 fork + 场景管理 UI 同质，分 PR 反而割裂；体量小（~1.5 天）
-- **4+5+6 合并**：3 类配置弹窗的 UI 框架（场景名 / 优先级 / 多行配置 / "确认场景详情"预览）一致；分 PR 反而要维护 3 套相似但不同步的弹窗框架
-- **7+8 合并**：阶段 7 的输出格式直接决定 E2E 验证，分 PR 后阶段 8 90% 工作要回头看阶段 7 的输出
+- **4+5+6 算法 / UI 切分**（原计划"4+5+6 合并"中途调整）：
+  - 算法引擎纯函数有 18 个边界单测（C1 8 + C2 4 + C3 5 + 入口 1）保障，独立成 PR #31
+  - 3 类配置弹窗 + 接入 PR #30 占位归入 PR #32（与调度 + IO + 文档一起 ship 出"用户能用的完整功能"）
+  - 实施期间发现单 PR "算法 + 4 dialog factory" 体量到 3000+ 行风险高（一次会话内写 4 个相互关联 dialog 易出错）
+- **PR #32（4+5+6 UI + 7 + 8）合并**：
+  - UI 配置弹窗 + 调度引擎 + 文件 IO 是"用户工作流闭环"必备
+  - 文档三件套 + 版本 bump 是发版动作，必须等闭环就位
+  - 这一 PR 体量会大（5-7 天），但顺序拼装（UI → 调度 → IO → 标黄 → 测试）依赖明确
 
 ---
 
@@ -761,3 +767,20 @@ state.processingResult = {  // 运行后产生
 - **IPC**：6 个 `scenarios:*` handler；preload 暴露 `desktopApi.scenarios`
 - **决策修正**：Codex F1 (P2) 指出"COUNT(*)===0 才 seed" 违反 D14 删除终态语义（用户删完所有场景后重启会复活）→ 改用 `app_settings.scenarios_seeded` marker 机制：marker 已存在永不再 seed；老库迁移路径（无 marker 但表有数据）仅写 marker 不重复 seed
 - **测试**：单测 14/14 + F1 边界单测 5/5（A1 全新库 seed / B1 删完后重启不复活 / C1 部分删不补齐 / D1 老库迁移 / E1 marker+空表）；`npm run smoke` 通过；`npm run check:vars` 命中 `ipcRenderer` 已自查
+
+### 阶段 2+3 — 模块入口 + 场景管理弹窗（PR #30，commit `c597bcf` + Codex P3 修复 `81adf88`，merge `9e131a2`）
+
+- **模块入口（阶段 2）**：
+  - `index.html` 加第 4 个 module-option `bank-statement-process` + 新 panel `bankStatementModulePanel` fork `pendingModulePanel`（4 按钮 + statusBox）
+  - `renderer.js` `MODULES.bankStatementProcess` + 5 个新 elements + `setCurrentModule` 切换分支 + 4 按钮 binding（"导入文件"/"开始运行"/"导出文件" 占位 alert）
+  - `settings-repository.js` `CURRENT_MODULE_VALID` 追加 `'bank-statement-process'`（PR #27 持久化链路对齐）
+- **场景管理弹窗（阶段 3）**：
+  - `renderer-dialogs.js` 新增 `createScenariosManagerDialog`（6 列：序号/类别/名称/优先级/操作/启动）+ `createScenarioCategorySelectDialog`（类别选择，3 枚举单选）
+  - 编辑模式两段式锁（D5）：默认"编辑/查看场景/删除" → 点编辑解锁 → "完成/修改场景/删除"
+  - toggle 启用即时写库（D13），失败回滚 + 刷新
+  - 删除走 createConfirmDialog；内置场景与用户场景同等（D14）
+  - 占位 alert：查看/修改场景 + 类别选择"继续" 提示"将在 v2.0.0-beta.3 阶段 4-6 启用"
+- **CSS**：双风格（`styles.css` + `styles-gemini-extra.css`）各加 +96 行 — 6 列布局（fixed table-layout）+ `.is-editing` 状态高亮 + 类别选择弹窗
+- **Preview**：3 张新 preview state（`bank-statement-panel` / `scenarios-manager` / `scenario-category-select`）+ 主入口分发
+- **测试**：`npm run smoke` 通过；`npm run preview` + 3 张新 modal preview 渲染正常；`npm run check:vars` 命中 3 个 Runtime-state（`MODULES`/`dialog`/`elements`）已自查
+- **Codex 修正**：F1 (P3) tasks.md todo→done；F2 (P3) PRD §6.5 + §8.1 同步 marker 机制描述（与 PR #29 实现对齐）
