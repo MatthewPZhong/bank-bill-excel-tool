@@ -18,8 +18,8 @@
 - **C1 场景（提取ReconId-From Self）**：根据特征/其他字段提取 `ReconciliationId`；多字段值不一致 → error-report，不写入。
 - **C2 场景（账单打标）**：双类型行配对（一一对应 CustomerRef + Credit==Debit）；一对多 / 多对一 → error-report；rightType 行字段被打标。
 - **C3 场景（提取ReconId-From 网关）**：与「资金对账不平结果表」按 4 字段 AND 匹配（含发生额绝对值虚拟字段）；多匹配取首条 + warn；未导入 gw 文件时整类被过滤 + `skippedC3Count` 提示。
-- **3 个内置场景**：默认存在，可禁用、不可删除（C1/C2 默认启用，C3 默认禁用）。
-- **场景管理表（6 列 CRUD + toggle）**：`序号 / 功能类别 / 场景名称 / 优先级 / 执行操作 / 是否启动`；toggle 实时写库；序号取最小未用 ID（gap-filling）；删除内置被拦截。
+- **3 个内置场景**：默认存在，可编辑、可禁用、可删除；不提供"恢复出厂"（C1/C2 默认启用，C3 默认禁用）。
+- **场景管理表（6 列 CRUD + toggle）**：`序号 / 功能类别 / 场景名称 / 优先级 / 执行操作 / 是否启动`；toggle 实时写库；序号取最小未用 ID（gap-filling）。
 - **4 个场景配置弹窗**：`createScenarioConfigDialogC1 / C2 / C3 / createScenarioConfirmDetailDialog`（创建/编辑/查看三模式共用）；通过 renderer-side `state.scenarioDraft` 跨弹窗共享状态。
 - **xlsx 标黄输出（exceljs）**：命中场景的行入主输出，被修改单元格黄底（FFFFFF00 ARGB）；非修改行不导出；error-report 独立 xlsx 产物。
 - **导出文件支持另存为**：原生 saveDialog 选保存路径；文件命名 `银行对账单-YYYYMMDDHHmm-处理结果.xlsx`（统一格式）。

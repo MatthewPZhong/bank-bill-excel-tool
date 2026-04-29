@@ -138,10 +138,14 @@
       return overlay;
     }
 
-    function createConfirmDialog({ message, confirmText, cancelText, onConfirm, onCancel }) {
+    function createConfirmDialog({ message, confirmText, cancelText, onConfirm, onCancel, middleText, onMiddle }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card alert-card';
+      // PR #33 Codex Finding 1：可选 middleText/onMiddle 支持三按钮（C3 运行点二次提示三选一）
+      const middleBtnHtml = middleText
+        ? `<button class="secondary-btn small" type="button" data-action="middle">${middleText}</button>`
+        : '';
       dialog.innerHTML = `
         <div class="alert-body">
           <div class="alert-icon" aria-hidden="true">
@@ -151,12 +155,18 @@
         </div>
         <div class="dialog-actions center">
           <button class="danger-btn small" type="button" data-action="confirm">${confirmText}</button>
+          ${middleBtnHtml}
           <button class="secondary-btn small" type="button" data-action="cancel">${cancelText}</button>
         </div>
       `;
       dialog.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
         await onConfirm();
       });
+      if (middleText) {
+        dialog.querySelector('[data-action="middle"]').addEventListener('click', async () => {
+          if (onMiddle) await onMiddle();
+        });
+      }
       dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => {
         if (onCancel) onCancel();
         closeModal();

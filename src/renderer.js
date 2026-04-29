@@ -3226,13 +3226,46 @@ async function handleBankStatementRun() {
     openModal(createAlertDialog('请先导入银行对账单'));
     return;
   }
-  // 资金对账文件提示已挪到 import 后立即弹（maybePromptGatewayReconImport），
-  // 此处直接运行；若 C3 启用但未导入 gw，dispatcher 会跳过该类场景并在 stats.skippedC3Count 提醒
+  // PR #33 Codex Finding 1：保留 import 后 dialog#1（maybePromptGatewayReconImport）+
+  // 运行点新增 dialog#2 三选一（防止 dialog#1 选"稍后再说"后 C3 被静默跳过）
   try {
+    const needGwReminder = await shouldPromptGatewayReconAtRun();
+    if (needGwReminder) {
+      openModal(createConfirmDialog({
+        message: '已启用「资金对账不平」类场景但未导入「资金对账不平结果表」。<br>继续运行将跳过该类场景。',
+        confirmText: '导入文件',
+        middleText: '跳过 C3 直接运行',
+        cancelText: '取消',
+        onConfirm: async () => {
+          closeModal();
+          const ok = await handleBankStatementImportGatewayRecon();
+          if (ok) await runBankStatementInternal();
+        },
+        onMiddle: async () => {
+          closeModal();
+          await runBankStatementInternal();
+        }
+        // onCancel 默认仅 closeModal，不运行
+      }));
+      return;
+    }
     await runBankStatementInternal();
   } catch (error) {
     console.error(error);
     openModal(createAlertDialog(`运行失败：${error.message || error}`));
+  }
+}
+
+async function shouldPromptGatewayReconAtRun() {
+  // C3 启用 + 未导入 gw 文件 → 运行点弹 dialog#2 三选一
+  if (state.gatewayReconSession) return false;
+  try {
+    const list = await window.desktopApi.scenarios.list();
+    const scenarios = (list && list.status === 'ok' && Array.isArray(list.scenarios)) ? list.scenarios : [];
+    return scenarios.some((s) => s.category === 'gateway-recon-join' && (s.enabled === 1 || s.enabled === true));
+  } catch (error) {
+    console.warn('shouldPromptGatewayReconAtRun failed:', error);
+    return false;
   }
 }
 
