@@ -103,6 +103,16 @@ function getScenario(db, id) {
   return row ? rowToDetail(row) : null;
 }
 
+// 计算最小未使用的 scenario id：从 1 起找第一个 missing
+// （PRD 用户偏好 2026-04-29：删除某条后新增应填补 gap，不用 AUTOINCREMENT 单调递增）
+function calculateNextScenarioId(db) {
+  const rows = db.prepare('SELECT id FROM scenarios ORDER BY id ASC').all();
+  const used = new Set(rows.map((r) => Number(r.id)));
+  let next = 1;
+  while (used.has(next)) next++;
+  return next;
+}
+
 function createScenario(db, payload) {
   const category = payload.category;
   validateCategory(category);
@@ -112,15 +122,15 @@ function createScenario(db, payload) {
   const configJson = serializeConfig(payload.config);
   const isBuiltin = payload.isBuiltin ? 1 : 0;
   const now = new Date().toISOString();
+  const nextId = calculateNextScenarioId(db);
 
   try {
-    const result = db
-      .prepare(`
-        INSERT INTO scenarios (category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    db.prepare(`
+        INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
-      .run(category, name, priority, enabled, configJson, isBuiltin, now, now);
-    return { id: Number(result.lastInsertRowid) };
+      .run(nextId, category, name, priority, enabled, configJson, isBuiltin, now, now);
+    return { id: nextId };
   } catch (error) {
     if (String(error.message || '').includes('UNIQUE constraint failed: scenarios.name')) {
       throw new Error(`场景名 "${name}" 已存在，请换一个名字`);
@@ -201,6 +211,7 @@ function toggleScenarioEnabled(db, id, enabled) {
 
 module.exports = {
   VALID_CATEGORIES,
+  calculateNextScenarioId,
   createScenario,
   deleteScenario,
   getScenario,

@@ -119,12 +119,12 @@ function runScenarioEngineSmokeTests() {
     assert.strictEqual(result.lockedRowIds.size, 0, 'C1-7 不应命中');
   }
 
-  // C1-8：原值非空 + 不同 → warn + 覆盖
+  // C1-8：原值非空 + 不同 → 直接覆盖（不再产生 warn，UX 决策 2026-04-29 PR #32b）
   {
     const rows = [{ _rowId: 'r6', CustomerRef: 'AFT123456789012', 'Extra Information': '', ReconciliationId: 'OLD' }];
     const result = runC1Scenario(makeC1Scenario(), rows);
     assert.strictEqual(rows[0].ReconciliationId, 'AFT123456789012', 'C1-8 应覆盖');
-    assert(result.warnings.some(w => w.code === 'overwrite-existing-recon-id'), 'C1-8 应有覆盖 warn');
+    assert(!result.warnings.some(w => w.code === 'overwrite-existing-recon-id'), 'C1-8 不应再产生 overwrite warn');
   }
 
   // C1-9：extractByOtherField 模式
@@ -233,13 +233,13 @@ function runScenarioEngineSmokeTests() {
     assert(result.warnings.some(w => w.code === 'multi-gateway-match'), 'C3-3 应有 multi-gateway-match warn');
   }
 
-  // C3-4：原值非空 + 不同 → warn + 覆盖
+  // C3-4：原值非空 + 不同 → 直接覆盖（不再产生 warn，UX 决策 2026-04-29 PR #32b）
   {
     const bankRows = [{ _rowId: 'b4', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: 'OLD' }];
     const gwRows = [{ Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'NEW' }];
     const result = runC3Scenario(makeC3Scenario(), bankRows, gwRows);
     assert.strictEqual(bankRows[0].ReconciliationId, 'NEW', 'C3-4 应覆盖');
-    assert(result.warnings.some(w => w.code === 'overwrite-existing-value'), 'C3-4 应有覆盖 warn');
+    assert(!result.warnings.some(w => w.code === 'overwrite-existing-value'), 'C3-4 不应再产生 overwrite warn');
   }
 
   // C3-5（Codex F3 P1 修复回归）：内置 seed 大写 Currency 字段名能命中

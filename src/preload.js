@@ -1,5 +1,40 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// v2.0.0-beta.3 PR #32b：暴露银行对账单处理模块的字段常量到 renderer
+// 注：Electron sandbox 限制 preload require 自定义模块，不能 require '../constants/*'。
+// 此处 inline 常量副本，必须与 src/constants/bank-statement-fields.js / gateway-recon-fields.js 同步：
+//   - 任意修改 BANK_STATEMENT_FIELDS / GATEWAY_RECON_FIELDS / BANK_STATEMENT_VIRTUAL_AMOUNT_ABS，
+//     必须同时改这里和 src/constants/。
+const BANK_STATEMENT_FIELDS = Object.freeze([
+  '账户主体', '账户BU', 'BizId', 'BillDate', 'ValueDate', 'Channel', '地区', 'MerchantId',
+  'Currency', 'Credit Amount', 'Debit Amount', 'ReconciliationId', 'ChannelOrderNo',
+  'CustomerRef', 'Account Reference', 'Transaction Description', 'Extra Information',
+  'Payment Detail', 'Payee Name', 'Payee CardNo', 'Drawee Name', 'Drawee CardNo',
+  'By Order Of/Beneficiary', 'Extra Fee', 'tradeChannel', 'FundType', 'Remark-description',
+  'Datasource', 'Remark-BU', '回填方式', '关联大账号', '自动分类规则', '分类人',
+  '清算网络', '最近修改时间', 'Recon Amount', 'OriginBillId', 'fxChannel', 'fxReconId',
+  'buyCurrency', 'buyAmount', 'sellCurrency', 'sellAmount', '拆分信息'
+]);
+const BANK_STATEMENT_VIRTUAL_AMOUNT_ABS = '发生额绝对值';
+const BANK_STATEMENT_FIELDS_FOR_C3 = Object.freeze([
+  ...BANK_STATEMENT_FIELDS,
+  BANK_STATEMENT_VIRTUAL_AMOUNT_ABS
+]);
+const GATEWAY_RECON_FIELDS = Object.freeze([
+  'BillDate', 'Bank', 'MerchantId', 'OrderId', 'DataSource', 'OppBu', 'OriginBillSource',
+  'BillType', 'Type(0:1对1,1:1对多,2:多对1,3:多对1（轧差合并)', 'Reference', 'Currency',
+  'Amount', 'OriginBillBizId', 'ReconBillBizId', 'reconciliationId', 'tradeType',
+  'clientId', 'name', 'cardNo', '真实渠道', '清算网络', '对账批次号', 'createTime',
+  'finishTime', 'LOriginalId', 'remark1', 'remark2', 'bookdate', 'valuedate', 'fileId', 'AccountRef'
+]);
+
+contextBridge.exposeInMainWorld('appConstants', {
+  bankStatementFields: BANK_STATEMENT_FIELDS,
+  bankStatementFieldsForC3: BANK_STATEMENT_FIELDS_FOR_C3,
+  bankStatementVirtualAmountAbs: BANK_STATEMENT_VIRTUAL_AMOUNT_ABS,
+  gatewayReconFields: GATEWAY_RECON_FIELDS
+});
+
 contextBridge.exposeInMainWorld('desktopApi', {
   app: {
     getInfo: () => ipcRenderer.invoke('app:get-info'),

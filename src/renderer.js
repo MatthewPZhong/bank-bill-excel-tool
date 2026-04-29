@@ -125,7 +125,15 @@ const state = {
     x: 0,
     y: 0,
     colorHex: DEFAULT_SPECTRUM_PICK_COLOR
-  }
+  },
+  // v2.0.0-beta.3 PR #32b：银行对账单处理模块 — renderer 侧 UI 缓存
+  // 数据真在 main 进程；模块切换/启动时调 desktopApi.bankStatement.sessionStatus 同步
+  bankStatementSession: null,    // { fileName, rowCount, importedAt } | null
+  gatewayReconSession: null,     // { fileName, rowCount, importedAt } | null
+  processingResult: null,        // { hitRowCount, scenarioHitCount, warningCount, ranAt } | null
+  bankStatementExport: null,     // { mainFileName, errorReportName } | null（仅 renderer-side 缓存）
+  // 4 弹窗共享的临时配置（"返回" 保留，"完成/取消/关闭" 清空）
+  scenarioDraft: null            // { mode, category, scenarioId, name, priority, config } | null
 };
 const newAccountRowStateMap = new WeakMap();
 
@@ -255,11 +263,17 @@ const {
   createBalanceAddonManagerDialog,
   // v2.0.0-beta.3：银行对账单处理模块场景管理
   createScenariosManagerDialog,
-  createScenarioCategorySelectDialog
+  createScenarioCategorySelectDialog,
+  // v2.0.0-beta.3 PR #32b：4 dialog factory（C1/C2/C3 配置 + 确认场景详情）
+  createScenarioConfigDialogC1,
+  createScenarioConfigDialogC2,
+  createScenarioConfigDialogC3,
+  createScenarioConfirmDetailDialog
 } = window.__rendererDialogs.createRendererDialogs({
   state,
   elements,
   desktopApi: window.desktopApi,
+  appConstants: window.appConstants,
   BALANCE_DISABLED_OPTION,
   BALANCE_CALCULATED_OPTION,
   MERCHANT_ID_SELF_INPUT_OPTION,
@@ -321,7 +335,12 @@ const {
   // v2.0.0-beta.3：银行对账单处理模块 preview（3 张）
   applyBankStatementPanelPreviewState,
   applyScenariosManagerPreviewState,
-  applyScenarioCategorySelectPreviewState
+  applyScenarioCategorySelectPreviewState,
+  // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 preview（4 张）
+  applyScenarioConfigC1PreviewState,
+  applyScenarioConfigC2PreviewState,
+  applyScenarioConfigC3PreviewState,
+  applyScenarioConfirmDetailPreviewState
 } = window.__rendererPreviews.createRendererPreviews({
   state,
   elements,
@@ -367,7 +386,12 @@ const {
   createAccountMappingDialog,
   desktopApi: window.desktopApi,
   applyStatementResult,
-  closeAllNewAccountCurrencyDropdowns
+  closeAllNewAccountCurrencyDropdowns,
+  // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 preview 所需
+  createScenarioConfigDialogC1,
+  createScenarioConfigDialogC2,
+  createScenarioConfigDialogC3,
+  createScenarioConfirmDetailDialog
 });
 
 function updateStatusBox(box, message, tone = 'info', options = {}) {
@@ -1169,6 +1193,13 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
   if (persist && previousModuleId !== moduleId) {
     window.desktopApi?.settings?.setCurrentModule?.(moduleId).catch((error) => {
       console.warn('persist currentModule failed:', error);
+    });
+  }
+
+  // v2.0.0-beta.3 PR #32b：切到银行对账单处理模块时同步 session 状态
+  if (moduleId === MODULES.bankStatementProcess.id && typeof refreshBankStatementStatus === 'function') {
+    refreshBankStatementStatus().catch((error) => {
+      console.warn('refreshBankStatementStatus failed:', error);
     });
   }
 }
@@ -3046,6 +3077,219 @@ async function maybeSyncBackgroundColorOnStyleChange(targetStyle) {
   }
 }
 
+// v2.0.0-beta.3 PR #32b：银行对账单处理模块 — 状态同步 + 4 按钮 handler
+async function refreshBankStatementStatus() {
+  try {
+    const status = await window.desktopApi.bankStatement.sessionStatus();
+    if (!status || status.status !== 'ok') {
+      state.bankStatementSession = null;
+      state.gatewayReconSession = null;
+      state.processingResult = null;
+    } else {
+      state.bankStatementSession = status.hasBankStatement
+        ? { fileName: status.bankStatementFileName, rowCount: status.bankStatementRowCount }
+        : null;
+      state.gatewayReconSession = status.hasGatewayRecon
+        ? { fileName: status.gatewayReconFileName, rowCount: status.gatewayReconRowCount }
+        : null;
+      state.processingResult = status.hasProcessingResult
+        ? {
+          hitRowCount: status.processingStats?.hitRowCount ?? 0,
+          scenarioHitCount: status.processingStats?.scenarioHitCount ?? 0,
+          hitScenarioIds: Array.isArray(status.processingStats?.hitScenarioIds)
+            ? status.processingStats.hitScenarioIds.slice()
+            : [],
+          warningCount: status.processingStats?.warningCount ?? 0,
+          skippedC3Count: status.processingStats?.skippedC3Count ?? 0
+        }
+        : null;
+    }
+  } catch (error) {
+    console.error('refreshBankStatementStatus failed:', error);
+  }
+  updateBankStatementUi();
+}
+
+function updateBankStatementUi() {
+  if (!elements.bankStatementStatusBox) return;
+  const bs = state.bankStatementSession;
+  const gw = state.gatewayReconSession;
+  const pr = state.processingResult;
+  const ex = state.bankStatementExport;
+
+  // 文案：5 状态优先级（初始 / 已导入 / 已处理 / 已导出）+ tone
+  // 多行用 \n 分隔（CSS .status-box-text { white-space: pre-line } 渲染换行）
+  let text;
+  let tone = 'info';
+  if (!bs) {
+    text = '欢迎使用小助手';
+    tone = 'neutral';
+  } else if (ex) {
+    text = `已导出：\n${ex.mainFileName}`;
+    if (ex.errorReportName) text += `\nerror-report：${ex.errorReportName}`;
+    tone = 'success';
+  } else if (pr) {
+    const ids = Array.isArray(pr.hitScenarioIds) ? pr.hitScenarioIds : [];
+    const idsText = ids.length > 0 ? `（场景 ${ids.join('、')}）` : '';
+    text = `已处理：${pr.hitRowCount} 行命中${idsText}，${pr.warningCount} 警告`;
+    if (pr.skippedC3Count > 0) {
+      text += ` · 跳过 ${pr.skippedC3Count} 个对账不平场景`;
+    }
+    tone = pr.warningCount > 0 ? 'error' : 'success';
+  } else {
+    text = `已导入：\n${bs.fileName}（${bs.rowCount} 行）`;
+    if (gw) text += `\n不平账结果表：${gw.fileName}（${gw.rowCount} 行）`;
+    tone = 'info';
+  }
+  // 仅替换文本节点，保留 .status-spark SVG（与 setStatus 模式一致）
+  const textEl = elements.bankStatementStatusBox.querySelector('.status-box-text');
+  if (textEl) textEl.textContent = text;
+  elements.bankStatementStatusBox.dataset.tone = tone;
+
+  // 按钮 disabled 控制
+  if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = false;
+  if (elements.bankStatementRunBtn) elements.bankStatementRunBtn.disabled = !bs;
+  if (elements.bankStatementExportBtn) elements.bankStatementExportBtn.disabled = !pr;
+}
+
+async function handleBankStatementImport() {
+  try {
+    const result = await window.desktopApi.bankStatement.import();
+    if (!result) return;
+    if (result.status === 'cancelled') return;
+    if (result.status === 'invalid') {
+      const detail = (result.detailLines || []).map((l) => `• ${l}`).join('<br>');
+      openModal(createAlertDialog(`${result.message || '文件校验失败'}<br>${detail}`));
+      return;
+    }
+    if (result.status !== 'ok') {
+      openModal(createAlertDialog(`导入失败：${result.message || '未知错误'}`));
+      return;
+    }
+    state.bankStatementExport = null;  // 重新导入 → 清掉「已导出」缓存
+    await refreshBankStatementStatus();
+    // v2.0.0-beta.3 PR #32b：导入银行对账单成功后，若启用了 C3 类场景且未导入资金对账文件 → 立即弹提示
+    await maybePromptGatewayReconImport();
+  } catch (error) {
+    console.error(error);
+    openModal(createAlertDialog(`导入失败：${error.message || error}`));
+  }
+}
+
+async function maybePromptGatewayReconImport() {
+  try {
+    const list = await window.desktopApi.scenarios.list();
+    const scenarios = (list && list.status === 'ok' && Array.isArray(list.scenarios)) ? list.scenarios : [];
+    const hasC3Enabled = scenarios.some((s) => s.category === 'gateway-recon-join' && (s.enabled === 1 || s.enabled === true));
+    if (!hasC3Enabled) return;
+    if (state.gatewayReconSession) return;
+    openModal(createConfirmDialog({
+      message: '已启用「资金对账不平」类场景，需要导入「资金对账不平结果表」。<br>是否现在导入？（也可稍后再导入；不导入则该类场景将被跳过）',
+      confirmText: '导入文件',
+      cancelText: '稍后再说',
+      onConfirm: async () => {
+        closeModal();
+        await handleBankStatementImportGatewayRecon();
+      }
+    }));
+  } catch (error) {
+    console.warn('maybePromptGatewayReconImport failed:', error);
+  }
+}
+
+async function handleBankStatementImportGatewayRecon() {
+  try {
+    const result = await window.desktopApi.bankStatement.importGatewayRecon();
+    if (!result) return false;
+    if (result.status === 'cancelled') return false;
+    if (result.status === 'invalid') {
+      const detail = (result.detailLines || []).map((l) => `• ${l}`).join('<br>');
+      openModal(createAlertDialog(`${result.message || '文件校验失败'}<br>${detail}`));
+      return false;
+    }
+    if (result.status !== 'ok') {
+      openModal(createAlertDialog(`导入失败：${result.message || '未知错误'}`));
+      return false;
+    }
+    state.bankStatementExport = null;  // 重新导入 gw → 清掉「已导出」缓存
+    await refreshBankStatementStatus();
+    return true;
+  } catch (error) {
+    console.error(error);
+    openModal(createAlertDialog(`导入资金对账文件失败：${error.message || error}`));
+    return false;
+  }
+}
+
+async function handleBankStatementRun() {
+  if (!state.bankStatementSession) {
+    openModal(createAlertDialog('请先导入银行对账单'));
+    return;
+  }
+  // 资金对账文件提示已挪到 import 后立即弹（maybePromptGatewayReconImport），
+  // 此处直接运行；若 C3 启用但未导入 gw，dispatcher 会跳过该类场景并在 stats.skippedC3Count 提醒
+  try {
+    await runBankStatementInternal();
+  } catch (error) {
+    console.error(error);
+    openModal(createAlertDialog(`运行失败：${error.message || error}`));
+  }
+}
+
+async function runBankStatementInternal() {
+  try {
+    const result = await window.desktopApi.bankStatement.run();
+    if (!result || result.status !== 'ok') {
+      openModal(createAlertDialog(`运行失败：${result?.message || '未知错误'}`));
+      return;
+    }
+    state.bankStatementExport = null;  // 重新运行 → 清掉「已导出」缓存
+    // 运行成功不再弹 alert，处理结果（命中场景 ids / 警告数 / skippedC3）由 updateBankStatementUi
+    // 通过 refreshBankStatementStatus 拉到的 stats 一并展示在状态框
+    await refreshBankStatementStatus();
+  } catch (error) {
+    console.error(error);
+    openModal(createAlertDialog(`运行失败：${error.message || error}`));
+  }
+}
+
+async function handleBankStatementExport() {
+  if (!state.processingResult) {
+    openModal(createAlertDialog('请先点击"开始运行"处理对账单'));
+    return;
+  }
+  try {
+    const result = await window.desktopApi.bankStatement.export();
+    if (!result) return;
+    if (result.status === 'cancelled') return;
+    if (result.status === 'failed') {
+      openModal(createAlertDialog(`导出失败：${result.message || '未知错误'}`));
+      return;
+    }
+    if (result.status === 'empty') {
+      // 无主输出 → 把 empty 提示与 error-report 名一并写入状态框（不弹 alert）
+      state.bankStatementExport = {
+        mainFileName: result.message || '无修改记录，未生成主输出文件',
+        errorReportName: result.errorReportName || null
+      };
+      updateBankStatementUi();
+      return;
+    }
+    if (result.status === 'ok') {
+      state.bankStatementExport = {
+        mainFileName: result.mainFileName || result.mainFilePath,
+        errorReportName: result.errorReportName || null
+      };
+      updateBankStatementUi();
+      return;
+    }
+    openModal(createAlertDialog(`未知导出状态：${JSON.stringify(result)}`));
+  } catch (error) {
+    console.error(error);
+    openModal(createAlertDialog(`导出失败：${error.message || error}`));
+  }
+}
+
 // v2.0.0-beta.2 F1+F2（D9/D10）：调色板"应用"按钮触发风格切换流程
 function handlePaletteStyleConfirm() {
   const select = elements.paletteStyleSelect;
@@ -3149,15 +3393,9 @@ async function initialize() {
   elements.bankStatementScenarioBtn.addEventListener('click', () => {
     openModal(createScenariosManagerDialog());
   });
-  elements.bankStatementImportBtn.addEventListener('click', () => {
-    openModal(createAlertDialog('「导入文件」功能将在 v2.0.0-beta.3 阶段 7 启用'));
-  });
-  elements.bankStatementRunBtn.addEventListener('click', () => {
-    openModal(createAlertDialog('「开始运行」功能将在 v2.0.0-beta.3 阶段 7 启用'));
-  });
-  elements.bankStatementExportBtn.addEventListener('click', () => {
-    openModal(createAlertDialog('「导出文件」功能将在 v2.0.0-beta.3 阶段 7 启用'));
-  });
+  elements.bankStatementImportBtn.addEventListener('click', handleBankStatementImport);
+  elements.bankStatementRunBtn.addEventListener('click', handleBankStatementRun);
+  elements.bankStatementExportBtn.addEventListener('click', handleBankStatementExport);
   elements.statusBox.addEventListener('click', () => {
     if (state.manualBalancePromptReady && state.manualBalancePrompt) {
       openModal(createManualBalanceSeedDialog(state.manualBalancePrompt));
@@ -3484,6 +3722,22 @@ async function initialize() {
   } else if (info.previewModal === 'scenario-category-select') {
     setTimeout(() => {
       applyScenarioCategorySelectPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenario-config-c1') {
+    setTimeout(() => {
+      applyScenarioConfigC1PreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenario-config-c2') {
+    setTimeout(() => {
+      applyScenarioConfigC2PreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenario-config-c3') {
+    setTimeout(() => {
+      applyScenarioConfigC3PreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenario-confirm-detail') {
+    setTimeout(() => {
+      applyScenarioConfirmDetailPreviewState();
     }, 120);
   }
 

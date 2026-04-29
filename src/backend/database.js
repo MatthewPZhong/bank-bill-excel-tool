@@ -9,6 +9,8 @@ const {
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
   ensureScenariosSupport,
+  ensureC3GwFieldCurrencyCaseFix,
+  ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,
@@ -108,6 +110,8 @@ class AppDatabase {
     this.ensureAccountMappingTemplateSupport();
     this.ensureTemplateBigAccountNatureSupport();
     this.ensureScenariosSupport();
+    this.ensureC3GwFieldCurrencyCaseFix();
+    this.ensureBuiltinScenarioNamesUpdate();
   }
 
   hasColumn(tableName, columnName) {
@@ -346,6 +350,14 @@ class AppDatabase {
   // v2.0.0-beta.3：场景 CRUD（银行对账单处理模块）
   ensureScenariosSupport() {
     return ensureScenariosSupport(this.db);
+  }
+
+  ensureC3GwFieldCurrencyCaseFix() {
+    return ensureC3GwFieldCurrencyCaseFix(this.db);
+  }
+
+  ensureBuiltinScenarioNamesUpdate() {
+    return ensureBuiltinScenarioNamesUpdate(this.db);
   }
 
   listScenarios() {

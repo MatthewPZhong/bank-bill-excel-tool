@@ -6,3 +6,7 @@ coverage
 exports
 tmp
 .claude/settings.local.json
+
+# v2.0.0-beta.3 PR #32b：用户样例文件（dry-run 用，不入 git）
+银行对账单.xlsx
+资金对账导出不平.xlsx

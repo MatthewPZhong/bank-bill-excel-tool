@@ -1,6 +1,10 @@
 // v2.0.0-beta.3：银行对账单 44 列固定字段（PRD §6 D7：列结构固定，不从导入文件提取）
 // 顺序与样例文件 银行对账单.xlsx 「渠道对账单」sheet 表头一致
 // 任何场景配置中"字段下拉"的枚举值都来自本表
+//
+// ⚠️ 同步提醒：Electron sandbox 限制 preload require 自定义模块，
+//   src/preload.js 顶部 inline 了一份副本（BANK_STATEMENT_FIELDS / BANK_STATEMENT_FIELDS_FOR_C3 /
+//   BANK_STATEMENT_VIRTUAL_AMOUNT_ABS）。本文件改动必须同步更新 preload.js。
 
 const BANK_STATEMENT_FIELDS = Object.freeze([
   '账户主体',

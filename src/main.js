@@ -18,7 +18,8 @@ const {
   readBankStatement,
   readGatewayRecon,
   writeBankStatementMainOutput,
-  writeErrorReportOutput
+  writeErrorReportOutput,
+  buildMainOutputFileName
 } = require('./main-process/bank-statement-io');
 const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
 const { groupBigAccountRows } = require('./backend/database/utils');
@@ -2872,6 +2873,23 @@ function registerAppHandlers() {
         return { status: 'failed', message: '请先点击"开始运行"处理对账单' };
       }
       const exportRootDir = path.join(ensureStorageRoot(), 'bank-statement-process');
+
+      // 主输出走 saveDialog（用户另存为）；先弹保存框，让用户选位置
+      // 若 modifiedRows 为空 → 跳过 saveDialog，仅落 error-report
+      let mainFilePath = null;
+      if (processingResult.modifiedRows.length > 0) {
+        const defaultFileName = buildMainOutputFileName();
+        const saveResult = await dialog.showSaveDialog(mainWindow, {
+          title: '保存处理结果',
+          defaultPath: path.join(app.getPath('documents'), defaultFileName),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (saveResult.canceled || !saveResult.filePath) {
+          return { status: 'cancelled' };
+        }
+        mainFilePath = saveResult.filePath;
+      }
+
       // error-report 与主输出独立（PRD §189：error-report xlsx 格式独立于主输出）
       // 即使 modifiedRows.length === 0，warnings 仍应落盘——避免唯一可追溯的异常信息被吞掉
       // （Codex Round 2 F1 P1 修复：C1 多字段值不一致 / C2 一对多多对一 时
@@ -2895,7 +2913,7 @@ function registerAppHandlers() {
       const main = await writeBankStatementMainOutput({
         modifiedRows: processingResult.modifiedRows,
         headers: bankStatementSession.headers,
-        exportRootDir
+        mainFilePath
       });
       return {
         status: 'ok',

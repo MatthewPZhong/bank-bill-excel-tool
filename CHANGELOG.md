@@ -1,5 +1,41 @@
 # Changelog
 
+## 2.0.0-beta.3 - 2026-04-29
+
+新增**银行对账单处理模块**：导入银行对账单 xlsx → 配置场景规则 → 自动 first-match-wins 调度 → 标黄输出修改单元格。整个模块横跨 4 个 PR（#29 数据底座 / #30 模块入口 + 场景管理 / #31 算法引擎 / #32a 调度+IO+IPC / #32b 配置弹窗 + 闭环 + 发版）。
+
+### 新增
+
+- **「银行对账单处理」顶级模块**：`index.html` 增加第 4 个 module-panel + module-switcher 下拉项；4 按钮（场景管理 / 导入文件 / 开始运行 / 导出文件）+ statusBox 5 状态文案（初始/已导入/已处理/已导出 4 主态 + skip/error tone）。
+- **3 类场景调度器（C1/C2/C3）**：first-match-wins 全局行锁；按 `priority desc, id asc` 排序；同一行被高优先级场景锁后，低优先级跳过；返回 `{ modifiedRows, modifications, errorReport, stats: { totalRows, hitRowCount, scenarioHitCount, hitScenarioIds, warningCount, skippedC3Count } }`。
+- **C1 场景（提取ReconId-From Self）**：根据特征/其他字段提取 ReconciliationId（条件 + 特征码 + 数字位数 + 总长度 / 复制其他字段值）；多字段值不一致 → error-report，不写入。
+- **C2 场景（账单打标）**：双类型行配对（一一对应同 CustomerRef + Credit==Debit）；一对多 / 多对一 → error-report；正常配对 → 双方都进 lockedRowIds，rightType 行字段被打标。
+- **C3 场景（提取ReconId-From 网关）**：与「资金对账不平结果表」按 4 字段 AND 匹配（含发生额绝对值虚拟字段）；多匹配取首条 + warn；未导入 gw 文件时整类被过滤 + skippedC3Count 提示。
+- **3 个内置场景（默认存在，可禁用 / 不可删除）**：`从银行对账单的信息里提取对账ID`（C1，启用）/ `outbound改标为outbound Fail`（C2，启用）/ `与网关对账单根据金额币种一对一匹配对账ID`（C3，禁用）。
+- **6 列场景管理表（CRUD + toggle）**：`序号 / 功能类别 / 场景名称 / 优先级 / 执行操作 / 是否启动`。toggle 实时写库；删除内置场景被拦截；序号取最小未用 ID（gap-filling）。
+- **4 个场景配置弹窗**：`createScenarioConfigDialogC1 / C2 / C3 / createScenarioConfirmDetailDialog`（创建/编辑/查看三模式共用）；状态由 renderer-side `state.scenarioDraft` 跨弹窗共享。
+- **xlsx 标黄输出**：仅命中场景的行入主输出，被修改的单元格用 exceljs 黄底（FFFFFF00 ARGB）；非修改行不导出。文件命名 `银行对账单-YYYYMMDDHHmm-处理结果.xlsx`（统一格式，不含场景名）；用户通过原生 saveDialog 选保存路径（另存为）。
+- **error-report 独立产物**：warnings 单独 xlsx 落 `Documents/网银账单生成小助手/bank-statement-process/{date}/{ts}-error-report.xlsx`，与主输出独立（即使 modifiedRows 为空也会写）。
+- **44 列银行对账单 + 31 列资金对账文件 schema**：列名固定，导入时严格校验顺序与列名；任一不一致 → invalid 状态返回 detailLines 提示用户。
+- **5 个 IPC channel**：`bank-statement:import` / `gateway-recon:import` / `bank-statement:run` / `bank-statement:export` / `bank-statement:session-status`，全部走 main 进程内存 session（不持久化）。
+- **scenarios 表 + 6 IPC channel**：`scenarios:list / get / create / update / delete / toggle-enabled`；`scenarios-repository.js` 提供 CRUD + `calculateNextScenarioId`；migrations 含 builtin seed + 名称同步迁移 `ensureBuiltinScenarioNamesUpdate`（处理 v2.0.0-beta.3 内部场景重命名）。
+- **资金对账文件提示时机**：导入银行对账单成功后，若启用了 C3 类场景且未导入 gw 文件 → 立即弹 confirmDialog 询问"导入文件 / 稍后再说"。
+
+### 变更
+
+- **版本号 bump**：`2.0.0-beta.2` → `2.0.0-beta.3`。
+- **状态框文案**（renderer.js `updateBankStatementUi`）：5 状态优先级（已导出 > 已处理 > 已导入双文件 > 已导入单文件 > 初始）；已导入/已导出标签后内容换行展示（CSS `#bankStatementStatusBox .status-box-text { white-space: pre-line }`）；命中场景以序号显示在 `（场景 1、3）`；skipped C3 提示并入状态框（` · 跳过 N 个对账不平场景`）。
+- **运行 / 导出成功 不再弹 alert**：内容直接写入状态框；failed / cancelled 仍走 alert。
+
+### 移除
+
+- **覆盖原 ID warning 删除**：C1 `overwrite-existing-recon-id` + C3 `overwrite-existing-value` 不再产生 error-report 记录（用户 UX 决策：原值非空被覆盖时直接覆盖，无 warning 痕迹）。⚠️ 资金红线提醒：dispatcher first-match-wins 若导致非预期覆盖，将无追溯痕迹，需依赖 modifications 列表本身追踪。
+
+### 测试
+
+- **smoke 78/78 PASS**：scenario-engines 23 + scenarios-repository 5 + scenario-dispatcher 11 + exceljs-writer 3 + bank-statement-io 13 + scenario-end-to-end 23（PR #32b 新增 E2E）。
+- **E2E smoke**：mock bankRows + gwRows + 3 场景 → dispatcher → exceljs writer → 读回 xlsx 验证 ReconciliationId / FundType 写入 + 黄底；first-match-wins / skippedC3Count / error-report 路径独立全覆盖。
+
 ## 2.0.0-beta.2 - 2026-04-28
 
 新增 **页面风格切换**（`Clear` / `General` 二选一），默认 Clear。设计稿来自 `Clear/` 38 份 HTML（Claude Design）。整个迭代分 6 阶段实施：数据底座 → HTML 重构 → CSS 双套切换 → UI 切换器 → dialog factory 适配 → preview 双风格。

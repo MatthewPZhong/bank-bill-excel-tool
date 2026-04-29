@@ -2656,12 +2656,23 @@ select {
 .alert-icon { display: none; }
 
 /* 7. Pending 模块（D6.1）：HTML 重构对齐 Clear，给 General 加 control-row + pending-action-pair 布局 */
-.pending-board .control-row { grid-template-columns: 1fr 1.4fr; }
-.pending-board .cell.left { display: flex; justify-content: center; }
-.pending-board .cell.right { display: flex; justify-content: center; }
-.pending-board .cell.left .secondary-btn { min-width: 180px; }
-.pending-board .pending-action-pair { display: flex; gap: 12px; justify-content: center; }
-.pending-board .pending-action-pair .primary-btn { min-width: 140px; }
+.pending-board .control-row,
+.bank-statement-board .control-row { grid-template-columns: 1fr 1.4fr; }
+.pending-board .cell.left,
+.bank-statement-board .cell.left { display: flex; justify-content: center; }
+.pending-board .cell.right,
+.bank-statement-board .cell.right { display: flex; justify-content: center; }
+.pending-board .cell.left .secondary-btn,
+.bank-statement-board .cell.left .secondary-btn { min-width: 180px; }
+.pending-board .pending-action-pair,
+.bank-statement-board .pending-action-pair { display: flex; gap: 12px; justify-content: center; }
+.pending-board .pending-action-pair .primary-btn,
+.bank-statement-board .pending-action-pair .primary-btn { min-width: 140px; }
+
+/* PR #32b 多行状态框：导入两文件 / 已导出含 error-report 时换行展示 */
+#bankStatementStatusBox .status-box-text {
+  white-space: pre-line;
+}
 
 /* === v2.0.0-beta.2 F1: 调色板"切换页面风格"下拉框样式（D11 自补）=== */
 
@@ -2720,9 +2731,31 @@ select {
   width: 100%;
 }
 
+/* v2.0.0-beta.3 PR #32b：方案 A — 保留"序号"列（用户精调 round 4）
+ * col-id: width 1.5% + padding-left 7px → "序号" 字符右移 7px (半个"序"字符)
+ *   注：col-id width 17px 不够装"序号" 28px → "序号"标题溢出到右侧（visible，与 col-category 表头不重叠）
+ *       数据行 1-9 单字符显示完整；10+ 双字符可能稍溢出但不与 col-category 重叠
+ * col-category: padding-left 0 + col-id width 缩到 1.5% → 内容左移 ~28px (≈ 2 字符 "功能")
+ * col-name: padding-left 0 同步左移；width 拓宽吃下 col-id 减少的空间
+ * priority / actions 起点右移 ~60px（col-name 拓宽实现）
+ * 总宽 100% */
+.scenarios-manager-card .table-wrapper {
+  margin-left: -1px;
+  margin-right: -1px;
+}
+
 .scenarios-table .scenarios-col-id {
-  width: 7%;
-  text-align: center;
+  width: 5%;
+  text-align: left;
+  padding-left: 0;
+  padding-right: 0;
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.scenarios-table .scenarios-col-id-inner {
+  display: inline-block;
+  margin-left: 21px;
 }
 
 .scenarios-table .scenarios-col-category {
@@ -2730,23 +2763,37 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
+  padding-left: 0;
+  padding-right: 4px;
 }
 
 .scenarios-table .scenarios-col-name {
-  width: 20%;
+  width: 30.94% !important;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
+  padding-left: 0;
 }
 
 .scenarios-table .scenarios-col-priority {
-  width: 8%;
+  width: 10%;
   text-align: center;
+  white-space: nowrap;
 }
 
 .scenarios-table .scenarios-col-actions {
-  width: 30%;
+  width: 19.06%;
   white-space: nowrap;
+  text-align: left;
+  padding-left: 8px;
+}
+
+/* "管理"按钮无内边距，左侧严格对齐表头"执行操作"的最左字符位置 */
+.scenarios-table tbody .scenarios-col-actions .text-action:first-child {
+  margin-left: 0;
+  padding-left: 0;
 }
 
 .scenarios-table tbody .scenarios-col-actions .text-action {
@@ -2803,4 +2850,288 @@ select {
   background: #fff;
   font-family: inherit;
   font-size: 14px;
+}
+
+/* === v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 === */
+
+.scenario-config-card {
+  width: min(96vw, 880px);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.scenario-config-card .scenario-config-body {
+  padding: 16px 24px 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.scenario-config-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(104, 79, 39, 0.08);
+}
+
+.scenario-config-row:last-child {
+  border-bottom: none;
+}
+
+.scenario-config-row.scenario-config-row-multi {
+  align-items: flex-start;
+}
+
+.scenario-config-row.scenario-config-row-mutex {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.scenario-config-label {
+  flex-shrink: 0;
+  width: 120px;
+  font-weight: 500;
+  color: #4a3a1a;
+  padding-top: 6px;
+}
+
+.scenario-config-tooltip {
+  display: inline-block;
+  margin-left: 4px;
+  color: #8b7355;
+  cursor: help;
+  font-style: normal;
+  font-size: 0.9em;
+}
+
+.scenario-config-input {
+  padding: 6px 10px;
+  border: 1px solid rgba(104, 79, 39, 0.24);
+  border-radius: 5px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  flex: 1;
+  min-width: 0;
+}
+
+.scenario-config-input:disabled {
+  background: rgba(0, 0, 0, 0.04);
+  color: #888;
+  cursor: not-allowed;
+}
+
+.scenario-config-input-narrow {
+  flex: 0 0 100px;
+  width: 100px;
+}
+
+.scenario-config-multi-select {
+  min-height: 84px;
+}
+
+.scenario-config-multi-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scenario-config-multi-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scenario-config-multi-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 4px;
+}
+
+.scenario-config-multi-seq {
+  flex: 0 0 36px;
+  text-align: center;
+  font-weight: 600;
+  color: #8b7355;
+  font-size: 13px;
+}
+
+.scenario-config-vs-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.scenario-config-vs-arrow {
+  color: #8b7355;
+  font-weight: 500;
+  font-size: 13px;
+  flex-shrink: 0;
+  padding: 0 4px;
+}
+
+.icon-close-small {
+  background: transparent;
+  border: none;
+  color: #8b7355;
+  font-size: 18px;
+  font-weight: 600;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.icon-close-small:hover {
+  background: rgba(217, 70, 70, 0.12);
+  color: #d94646;
+}
+
+.scenario-config-mutex-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.scenario-config-mutex-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.scenario-config-mutex-content {
+  padding-left: 26px;
+}
+
+.scenario-config-feature-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+  align-items: center;
+}
+
+.scenario-config-feature-grid label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.scenario-config-feature-grid label > select,
+.scenario-config-feature-grid label > input,
+.scenario-config-feature-grid label > button {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 筛选字段下拉 button 视觉对齐第一列下方的 input（高度 / padding / border / 字号 一致）*/
+.scenario-config-feature-grid label > button.scenario-config-feature-search-btn {
+  height: 32px;
+  padding: 6px 24px 6px 10px;
+  border-radius: 5px;
+  border: 1px solid rgba(104, 79, 39, 0.24);
+  background: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: relative;
+  cursor: pointer;
+}
+
+.scenario-config-feature-grid label > button.scenario-config-feature-search-btn::after {
+  content: '▾';
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: rgba(104, 79, 39, 0.6);
+  pointer-events: none;
+}
+
+.scenario-config-feature-grid label > button.scenario-config-feature-search-btn:disabled {
+  background: rgba(0, 0, 0, 0.04);
+  color: #888;
+  cursor: not-allowed;
+}
+
+/* 筛选字段：多行单选下拉（与页面其他下拉视觉一致） */
+.scenario-config-feature-search-label {
+  align-items: flex-start !important;
+}
+
+.scenario-config-feature-search-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.scenario-config-feature-search-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scenario-config-feature-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scenario-config-feature-search-row > select {
+  flex: 1;
+  min-width: 0;
+}
+
+.scenario-confirm-detail-card {
+  width: min(92vw, 640px);
+}
+
+.scenario-confirm-detail-body {
+  padding: 16px 24px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.scenario-confirm-detail-section {
+  padding: 6px 0;
+  font-size: 13px;
+  line-height: 1.6;
+  border-bottom: 1px dashed rgba(104, 79, 39, 0.12);
+}
+
+.scenario-confirm-detail-section:last-child {
+  border-bottom: none;
+}
+
+.scenario-confirm-detail-label {
+  font-weight: 600;
+  color: #4a3a1a;
+  margin-right: 6px;
+}
+
+.scenario-confirm-detail-section ul {
+  margin: 4px 0 4px 12px;
+  padding-left: 16px;
+}
+
+.scenario-confirm-detail-section ul li {
+  list-style: disc;
+  padding: 2px 0;
 }

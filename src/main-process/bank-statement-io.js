@@ -134,6 +134,19 @@ function buildTimestamp() {
   ].join('');
 }
 
+// 主输出文件名时间戳：精度到分钟（YYYYMMDDHHmm，12 位）
+function buildTimestampMinute() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return [
+    d.getFullYear(),
+    pad(d.getMonth() + 1),
+    pad(d.getDate()),
+    pad(d.getHours()),
+    pad(d.getMinutes())
+  ].join('');
+}
+
 function buildDateDir() {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, '0');
@@ -169,20 +182,9 @@ function sanitizeFileName(name, maxLen = 100) {
   return s;
 }
 
-// 主输出文件名：YYYYMMDDhhmmss-<场景名>.xlsx 或 YYYYMMDDhhmmss-多场景.xlsx
-function buildMainOutputFileName(modifiedRows, timestamp = buildTimestamp()) {
-  const hitNames = new Set();
-  modifiedRows.forEach((r) => {
-    if (r._hitScenarioName) hitNames.add(r._hitScenarioName);
-  });
-  if (hitNames.size === 0) {
-    return `${timestamp}-空命中.xlsx`;
-  }
-  if (hitNames.size === 1) {
-    const onlyName = sanitizeFileName(Array.from(hitNames)[0]);
-    return `${timestamp}-${onlyName}.xlsx`;
-  }
-  return `${timestamp}-多场景.xlsx`;
+// 主输出文件名：银行对账单-YYYYMMDDHHmm-处理结果.xlsx（统一格式，不含场景名）
+function buildMainOutputFileName(timestamp = buildTimestampMinute()) {
+  return `银行对账单-${timestamp}-处理结果.xlsx`;
 }
 
 function ensureDateDir(exportRootDir) {
@@ -194,16 +196,20 @@ function ensureDateDir(exportRootDir) {
 }
 
 // ===== writeBankStatementMainOutput =====
-async function writeBankStatementMainOutput({ modifiedRows, headers, exportRootDir, timestamp }) {
+// 用户已通过 saveDialog 选定 mainFilePath（绝对路径） → 直接写
+async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePath }) {
   if (!Array.isArray(modifiedRows)) {
     throw new Error('writeBankStatementMainOutput: modifiedRows 必须是数组');
   }
-  const ts = timestamp ?? buildTimestamp();
-  const dir = ensureDateDir(exportRootDir);
-  const fileName = buildMainOutputFileName(modifiedRows, ts);
-  const savePath = path.join(dir, fileName);
-  const result = await writeBankStatementOutput(modifiedRows, headers, savePath);
-  return { ...result, fileName };
+  if (!mainFilePath) {
+    throw new Error('writeBankStatementMainOutput: 需提供 mainFilePath（用户保存路径）');
+  }
+  const dir = path.dirname(mainFilePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  const result = await writeBankStatementOutput(modifiedRows, headers, mainFilePath);
+  return { ...result, fileName: path.basename(mainFilePath) };
 }
 
 // ===== writeErrorReportOutput =====
@@ -226,6 +232,7 @@ module.exports = {
   writeErrorReportOutput,
   buildMainOutputFileName,
   buildTimestamp,
+  buildTimestampMinute,
   buildDateDir,
   sanitizeFileName
 };
