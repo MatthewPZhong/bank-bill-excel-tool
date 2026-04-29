@@ -4,6 +4,7 @@
 
 | 关键词 | 文档 | 说明 |
 |--------|------|------|
+| backlog / 待办 / 后续 PR 候选 | `knowledge/backlog.md` | 已识别但暂不实施的非阻塞改进项（按 P0-P3 分级，版本 bump 前 review）|
 | 示例：登录风控 | `knowledge/login-risk.md` | 登录风控历史方案与坑点 |
 | 示例：支付重试 | `knowledge/payment-retry.md` | 重试幂等与补偿约束 |
 
