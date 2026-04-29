@@ -8738,7 +8738,8 @@ function registerFileHandlers() {
   //   { status: 'success', filePath, message }
   //   { status: 'cancelled' }
   //   { status: 'error', errorCode, message }
-  ipcMain.handle('monthly-balance:export', async () => {
+  // PR #34 self-review：与 file:export-balance 共享"导出余额"功能 key（用户视角都是月度/单批的导出余额操作）
+  trackedIpcHandle('monthly-balance:export', '生成网银账单', '导出余额', async () => {
     try {
       const pending = lastGeneratedExports.monthlyBalance;
       if (!pending || !pending.filePath) {
