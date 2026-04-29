@@ -9176,11 +9176,17 @@ function tickUsageStats(moduleKey, functionKey) {
 
 // PR #34 Codex round 2 P2：仅成功才计数（spec D6）
 //   使用方式：trackedIpcHandle('xxx:yyy', '模块', '功能', handler)
-//   handler 返回 { status: 'ok', ... } 时才 tick；其他状态（failed / cancelled / error / 抛错）不计
+//   handler 返回成功状态（'ok' 或 'success'）时才 tick；其他状态不计
+//
+// PR #34 Codex round 3 P2：原仅认 'ok'，但 template:import / delete / save-mappings /
+//   account-mapping:save / file:export-detail / new-account:export 等 handler 实际返回
+//   `status: 'success'`，导致统计偏低 → 同时接受两种方言（不接受 ready / empty 中间态）
+const SUCCESS_STATUSES = new Set(['ok', 'success']);
+
 function trackedIpcHandle(channel, moduleKey, functionKey, handler) {
   ipcMain.handle(channel, async (event, ...args) => {
     const result = await handler(event, ...args);
-    if (result && result.status === 'ok') {
+    if (result && SUCCESS_STATUSES.has(result.status)) {
       tickUsageStats(moduleKey, functionKey);
     }
     return result;
