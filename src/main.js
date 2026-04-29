@@ -2843,6 +2843,17 @@ function registerAppHandlers() {
     }
   });
 
+  // PR #33 Codex round 3 P1 资金红线（defense in depth）：
+  // 即使 round 2 已在 scenarios:* 4 IPC 入口处清空 processingResult，
+  // 仍在 run 时记录 snapshot、export 时再比对一次——让 export handler 自身可见显式校验。
+  // snapshot key = id + name + priority + enabled + JSON.stringify(config)
+  function buildScenariosSnapshot(detailedEnabled) {
+    return detailedEnabled
+      .map((s) => `${s.id}|${s.name}|${s.priority}|${s.enabled ? 1 : 0}|${JSON.stringify(s.config || {})}`)
+      .sort()
+      .join('\n');
+  }
+
   ipcMain.handle('bank-statement:run', () => {
     try {
       if (!bankStatementSession) {
@@ -2862,6 +2873,7 @@ function registerAppHandlers() {
         modifications: result.modifications,
         errorReport: result.errorReport,
         stats: result.stats,
+        scenariosSnapshot: buildScenariosSnapshot(detailedEnabled),
         ranAt: Date.now()
       };
       return {
@@ -2877,6 +2889,16 @@ function registerAppHandlers() {
     try {
       if (!processingResult) {
         return { status: 'failed', message: '请先点击"开始运行"处理对账单' };
+      }
+      // round 3 P1 资金红线（defense in depth）：即使 scenarios:* 4 IPC 入口都清了缓存，
+      // 这里再校验一次 snapshot；任何场景 CRUD/toggle 在 run 之后发生 → snapshot 不一致 → 拒绝
+      const allScenarios = database.listScenarios();
+      const enabled = allScenarios.filter((s) => s.enabled === 1 || s.enabled === true);
+      const detailedEnabled = enabled.map((s) => database.getScenario(s.id)).filter(Boolean);
+      const currentSnapshot = buildScenariosSnapshot(detailedEnabled);
+      if (processingResult.scenariosSnapshot !== currentSnapshot) {
+        processingResult = null;
+        return { status: 'failed', message: '场景已变更，请重新点击"开始运行"再导出' };
       }
       const exportRootDir = path.join(ensureStorageRoot(), 'bank-statement-process');
 
