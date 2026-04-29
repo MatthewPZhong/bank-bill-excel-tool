@@ -1,16 +1,18 @@
 // v2.0.0-beta.3 PR #32a：exceljs 标黄输出 + error-report 写出
+// v2.0.0-beta.4：error-report 加「可能原因」列（5 列），文案来自 file-service/error-causes.js
 //
 // 仅本模块（bank-statement-process）使用 exceljs；
 // 其他 3 模块（statementGenerator / newAccountGenerator / pendingReconciliation）继续 SheetJS。
 //
 // 核心能力：
 //   - writeBankStatementOutput：仅修改行 + 单元格黄底 + 表头
-//   - writeErrorReport：4 列（时间戳 / 场景名 / 行号 / 原因）
+//   - writeErrorReport：5 列（时间戳 / 场景名 / 行号 / 原因 / 可能原因）
 //
 // 标黄约定：
 //   cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } }
 
 const ExcelJS = require('exceljs');
+const { errorCodeToCause } = require('../backend/file-service/error-causes');
 
 const YELLOW_FILL = {
   type: 'pattern',
@@ -68,7 +70,7 @@ async function writeErrorReport(warnings, savePath) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('error-report');
 
-  const headers = ['时间戳', '场景名', '行号', '原因'];
+  const headers = ['时间戳', '场景名', '行号', '原因', '可能原因'];
   sheet.addRow(headers);
   sheet.getRow(1).font = { bold: true };
 
@@ -78,7 +80,8 @@ async function writeErrorReport(warnings, savePath) {
       timestamp,
       w.scenarioName ?? `场景 #${w.scenarioId}`,
       w.rowId ?? '',
-      w.message ?? w.code ?? ''
+      w.message ?? w.code ?? '',
+      errorCodeToCause(w.code)
     ]);
   });
 

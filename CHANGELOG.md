@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.0.0 - 2026-04-30
+
+v2.0.0 GA 正式版（去 beta）。本版本为 v2.0.0-beta 系列收官，包含 beta.1 ~ beta.4 全部产物 + 本次 beta.4 两项收尾功能。
+
+### 新增（v2.0.0-beta.4）
+
+- **错误报告加「可能原因」列**：3 个模块（生成网银账单 / 月度 Pending / 银行对账单处理）的 error-report 文件统一加「可能原因」字段，文案口语化（如 `多个字段抓到的对账ID不一致，无法判断该用哪个` / `一对多匹配，可能有重复数据`）。统一映射表 `src/backend/file-service/error-causes.js` 覆盖 22+ 已知 code，未知 code fallback `未知错误`。
+
+### 变更（v2.0.0-beta.4）
+
+- **版本号**：`2.0.0-beta.3` → `2.0.0`（GA 正式版，去 beta）。
+- **smoke 增量**：scripts/smoke 新增 `error-causes`（39 用例）+ `usage-stats`（40 用例），合计 157 PASS。
+
+### v2.0.0 GA 系列总览（beta.1 → beta.4 全部产物）
+
+- **beta.1**：模块切换器（3 选 1）+ 月度 Pending 数据核对模块（独立 SQLite + 31 列固定表头 + 多文件合并导入 + 行级 hash 去重 + benchmark 外推预计时间）
+- **beta.2**：页面风格切换（Clear / General）+ 双套 CSS + dialog factory 双风格适配
+- **beta.3**：银行对账单处理模块（C1/C2/C3 三类场景 + first-match-wins 调度 + xlsx 标黄输出 + 4 dialog factory + 用户样例 dry-run + UX 8 项调整）
+- **beta.4**：本次
+
 ## 2.0.0-beta.3 - 2026-04-29
 
 新增**银行对账单处理模块**：导入银行对账单 xlsx → 配置场景规则 → 自动 first-match-wins 调度 → 标黄输出修改单元格。整个模块横跨 4 个 PR（#29 数据底座 / #30 模块入口 + 场景管理 / #31 算法引擎 / #32a 调度+IO+IPC / #32b 配置弹窗 + 闭环 + 发版）。

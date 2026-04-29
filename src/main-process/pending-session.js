@@ -8,6 +8,8 @@ const XLSX = require('xlsx');
 
 const PENDING_COLUMNS = require('../backend/pending-db/columns');
 const monthRepo = require('../backend/pending-db/month-repository');
+// v2.0.0-beta.4：error-report 加「可能原因」列
+const { errorCodeToCause } = require('../backend/file-service/error-causes');
 
 const WORKER_SCRIPT = path.resolve(__dirname, '../backend/pending-import/worker.js');
 const ARCHIVE_WORKER_SCRIPT = path.resolve(__dirname, './pending-archive-worker.js');
@@ -225,7 +227,8 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
 
   function exportErrorReport(savePath) {
     if (!lastImportErrors) return { status: 'error', message: '无错误报告' };
-    const headers = ['source_file', 'sheet_row', 'severity', 'message', ...PENDING_COLUMNS];
+    // v2.0.0-beta.4：第 5 列「可能原因」（基于 err.code 或 severity 兜底）
+    const headers = ['source_file', 'sheet_row', 'severity', 'message', '可能原因', ...PENDING_COLUMNS];
     const rows = [headers];
     for (const err of lastImportErrors.errors) {
       const cells = Array.isArray(err.cells) ? err.cells : PENDING_COLUMNS.map(() => '');
@@ -234,6 +237,7 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
         err.sheetRow != null ? err.sheetRow : '',
         err.severity || '',
         err.message || '',
+        errorCodeToCause(err.code || err.severity),
         ...cells
       ]);
     }

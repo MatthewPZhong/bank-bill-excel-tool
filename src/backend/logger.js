@@ -1,5 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
+// v2.0.0-beta.4：error-report 加「可能原因」行（口语化）
+const { errorCodeToCause } = require('./file-service/error-causes');
 
 function pad(value) {
   return String(value).padStart(2, '0');
@@ -67,7 +69,8 @@ function writeErrorReport(reportRoot, payload = {}) {
     `错误步骤：${payload.step || '未说明'}`,
     `错误类型：${payload.errorType || '业务校验错误'}`,
     `错误摘要：${payload.message || '未提供错误摘要'}`,
-    `错误代码：${payload.errorCode || 'N/A'}`
+    `错误代码：${payload.errorCode || 'N/A'}`,
+    `可能原因：${errorCodeToCause(payload.errorCode)}`
   ];
 
   if (detailLines.length) {
