@@ -260,7 +260,45 @@ function runScenarioEngineSmokeTests() {
     assert.strictEqual(bankRows[0].ReconciliationId, 'DISPATCH', 'C3-6 runScenario 入口分发应工作');
   }
 
-  console.log('  scenario-engines: 20/20 PASS');
+  // C3-7（Codex Round 2 F1 P1 回归）：gwRows 为空 → 不抛错 + warn no-gateway-rows
+  {
+    const bankRows = [{ _rowId: 'b7', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }];
+    const result = runC3Scenario(makeC3Scenario(), bankRows, []);
+    assert(result.warnings.some(w => w.code === 'no-gateway-rows'), 'C3-7 应 warn no-gateway-rows');
+    assert.strictEqual(result.lockedRowIds.size, 0, 'C3-7 不应锁任何行');
+    assert.strictEqual(result.modifications.length, 0, 'C3-7 不应有 modifications');
+  }
+
+  // C3-8（Codex Round 2 F1 P1 回归）：reconFields 为空 → 不抛错 + warn invalid-config
+  {
+    const bankRows = [{ _rowId: 'b8', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }];
+    const gwRows = [{ Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'X' }];
+    const emptyReconScenario = {
+      id: 8, name: 'empty-recon', category: 'gateway-recon-join',
+      config: { reconFields: [], assign: { gwField: 'reconciliationId', bankField: 'ReconciliationId' } }
+    };
+    const result = runC3Scenario(emptyReconScenario, bankRows, gwRows);
+    assert(result.warnings.some(w => w.code === 'invalid-config'), 'C3-8 应 warn invalid-config');
+    assert.strictEqual(result.lockedRowIds.size, 0, 'C3-8 不应锁任何行');
+  }
+
+  // C3-9（Codex Round 2 F1 P1 回归）：assign 缺失 → 不抛错 + warn invalid-config
+  {
+    const bankRows = [{ _rowId: 'b9', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }];
+    const gwRows = [{ Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'X' }];
+    const noAssignScenario = {
+      id: 9, name: 'no-assign', category: 'gateway-recon-join',
+      config: {
+        reconFields: [{ seq: 1, gwField: 'Currency', bankField: 'Currency' }],
+        assign: {}
+      }
+    };
+    const result = runC3Scenario(noAssignScenario, bankRows, gwRows);
+    assert(result.warnings.some(w => w.code === 'invalid-config'), 'C3-9 应 warn invalid-config');
+    assert.strictEqual(result.lockedRowIds.size, 0, 'C3-9 不应锁任何行');
+  }
+
+  console.log('  scenario-engines: 23/23 PASS');
 }
 
 module.exports = {

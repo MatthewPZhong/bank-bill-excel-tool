@@ -32,5 +32,5 @@
   - 18 个单测覆盖：C1 多字段值一致 / 不一致 / 单字段多值 / 原值覆盖 / extractByOtherField / regex 构建 / 条件判定；C2 一对一 / 一对多 / 多对一 / 类型不匹配；C3 4 字段 AND / 多行取首 / 没匹配保留 / 原值覆盖 / 入口分发
 
 ## 可沉淀知识
-- [x] 算法引擎纯函数模式：输入 `{scenario, bankRows, gwRows?}` → 输出 `{modifiedRowIds, modifications, warnings}` 是 PR #32 调度的稳定接口；first-match-wins 锁定靠 `modifiedRowIds`，标黄靠 `modifications`，error-report 靠 `warnings`
+- [x] 算法引擎纯函数模式：输入 `{scenario, bankRows, gwRows?}` → 输出 `{lockedRowIds, modifications, warnings}` 是 PR #32 调度的稳定接口；first-match-wins 锁定 + 仅导修改行靠 `lockedRowIds`（C2 配对成功时双方都锁，即使 leftRow 未改字段），标黄靠 `modifications`，error-report 靠 `warnings`
 - [x] PR 切分阈值：单 PR 超过 ~2500 行新代码 + 多个相互关联 UI 组件时，应中途评估是否再切分；纯函数 + 单测的算法层最适合独立 ship

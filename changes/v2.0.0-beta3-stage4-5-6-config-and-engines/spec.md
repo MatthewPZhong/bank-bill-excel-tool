@@ -63,7 +63,7 @@
 每个 engine 函数签名：
 ```js
 runC1Scenario(scenario, bankRows) → {
-  modifiedRowIds: Set<rowId>,    // 实际改了字段的行（first-match-wins 锁定依据）
+  lockedRowIds: Set<rowId>,      // 参与场景命中的行（first-match-wins 锁定 + 仅导修改行依据）；C2 配对成功时双方都锁，即使 leftRow 未改字段
   modifications: [{ rowId, column, oldValue, newValue }],  // 修改记录（标黄依据）
   warnings: [{ scenarioId, scenarioName, rowId, code, message }]  // error-report 依据
 }
@@ -157,12 +157,12 @@ C2 / C3 同型签名。
 ## 6. 技术决策
 
 - **算法引擎独立 module**：不放在 main.js（避免那个 7500 行文件继续膨胀），不放在 dialog（dialog 是 renderer 进程，算法属 main 进程业务逻辑）
-- **算法纯函数**：输入 `{scenario, bankRows, gwRows?}`，输出 `{modifiedRowIds, modifications, warnings}` —— 易测试 + 易复用
+- **算法纯函数**：输入 `{scenario, bankRows, gwRows?}`，输出 `{lockedRowIds, modifications, warnings}` —— 易测试 + 易复用（实际签名见 §4 F1）
 - **字段枚举常量化**：44 列 + 31 列写在 `src/constants/`，runtime 不从导入文件提取（PRD D7 列结构固定）
 - **"修改场景" 与 "查看场景" 复用同一 dialog**：传 `mode: 'view' | 'edit'` 控制 readonly
 - **行 4/行 5 互斥**：用 click handler 同步两个 checkbox 状态（不用 disabled，防止勾错）
 - **dialog 内的"返回"按钮**：保留所有输入到 `state.scenarioDraft`，重新打开配置弹窗时预填
-- **不直接接入 first-match-wins 调度**：算法函数返回的 modifiedRowIds / modifications / warnings 暂时无消费方（PR #32 才接入），但接口已稳定
+- **不直接接入 first-match-wins 调度**：算法函数返回的 lockedRowIds / modifications / warnings 暂时无消费方（PR #32 才接入），但接口已稳定
 
 ## 7. 数据 / 状态 / 安全影响
 

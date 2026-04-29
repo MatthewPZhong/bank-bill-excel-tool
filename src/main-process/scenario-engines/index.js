@@ -6,7 +6,7 @@ const { runC2Scenario } = require('./c2-offset-bill-mark');
 const { runC3Scenario } = require('./c3-gateway-recon-join');
 
 // 统一入口：runScenario(scenario, bankRows, gwRows?)
-// 返回 { modifiedRowIds: Set, modifications: Array, warnings: Array }
+// 返回 { lockedRowIds: Set, modifications: Array, warnings: Array }
 function runScenario(scenario, bankRows, gwRows = null) {
   if (!scenario || !scenario.category) {
     throw new Error('runScenario: scenario 无效，缺少 category');

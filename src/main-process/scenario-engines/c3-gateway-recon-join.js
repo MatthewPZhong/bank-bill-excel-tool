@@ -59,7 +59,7 @@ function runC3Scenario(scenario, bankRows, gwRows) {
       message: '资金对账不平结果（网关账单）数据为空，C3 场景无法运行'
     });
     return {
-      modifiedRowIds: modCollector.listModifiedRowIds(),
+      lockedRowIds: modCollector.listLockedRowIds(),
       modifications: modCollector.listModifications(),
       warnings: warningCollector.list()
     };
@@ -71,7 +71,7 @@ function runC3Scenario(scenario, bankRows, gwRows) {
       message: '对账字段至少需要 1 行'
     });
     return {
-      modifiedRowIds: modCollector.listModifiedRowIds(),
+      lockedRowIds: modCollector.listLockedRowIds(),
       modifications: modCollector.listModifications(),
       warnings: warningCollector.list()
     };
@@ -83,7 +83,7 @@ function runC3Scenario(scenario, bankRows, gwRows) {
       message: '对账成立后赋值必须指定网关账单字段 + 银行对账单字段'
     });
     return {
-      modifiedRowIds: modCollector.listModifiedRowIds(),
+      lockedRowIds: modCollector.listLockedRowIds(),
       modifications: modCollector.listModifications(),
       warnings: warningCollector.list()
     };
