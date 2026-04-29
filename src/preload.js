@@ -28,6 +28,14 @@ contextBridge.exposeInMainWorld('desktopApi', {
     deleteOne: (id) => ipcRenderer.invoke('scenarios:delete', id),
     toggleEnabled: (id, enabled) => ipcRenderer.invoke('scenarios:toggle-enabled', id, enabled)
   },
+  // v2.0.0-beta.3 PR #32a：银行对账单处理模块 — IO + 调度
+  bankStatement: {
+    import: () => ipcRenderer.invoke('bank-statement:import'),
+    importGatewayRecon: () => ipcRenderer.invoke('gateway-recon:import'),
+    run: () => ipcRenderer.invoke('bank-statement:run'),
+    export: () => ipcRenderer.invoke('bank-statement:export'),
+    sessionStatus: () => ipcRenderer.invoke('bank-statement:session-status')
+  },
   accountMappings: {
     list: (templateId) => ipcRenderer.invoke('account-mapping:list', templateId),
     save: (templateId, mappings) => ipcRenderer.invoke('account-mapping:save', templateId, mappings),
