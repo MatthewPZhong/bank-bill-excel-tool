@@ -6,14 +6,18 @@ const {
   runExceljsWriterSmokeTests
 } = require('./smoke/scenario-dispatcher');
 const { runBankStatementIoSmokeTests } = require('./smoke/bank-statement-io');
+const { runScenariosRepositorySmokeTests } = require('./smoke/scenarios-repository');
+const { runScenarioEndToEndSmokeTests } = require('./smoke/scenario-end-to-end');
 
 async function run() {
   const context = createSmokeContext();
   runSmokeScenarios(context);
   runScenarioEngineSmokeTests();
+  runScenariosRepositorySmokeTests();
   await runScenarioDispatcherSmokeTests();
   await runExceljsWriterSmokeTests();
   await runBankStatementIoSmokeTests();
+  await runScenarioEndToEndSmokeTests();
   console.log('smoke test passed');
 }
 

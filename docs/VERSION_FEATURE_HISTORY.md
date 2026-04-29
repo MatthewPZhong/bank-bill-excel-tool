@@ -9,6 +9,38 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.0.0-beta.3
+
+### 新增
+
+- **「银行对账单处理」顶级模块**：第 4 个 module-panel + 切换器项；4 按钮（场景管理 / 导入文件 / 开始运行 / 导出文件）+ statusBox 5 状态文案动态展示；模块入口与 v1.x 主面板、Pending 模块完全独立。
+- **3 类场景调度器（C1/C2/C3 + first-match-wins）**：`runAllScenarios(bankRows, gwRows, scenarios)` 全局行锁；按 `priority desc, id asc` 排序；返回 stats `{ totalRows, hitRowCount, scenarioHitCount, hitScenarioIds, warningCount, skippedC3Count }`。
+- **C1 场景（提取ReconId-From Self）**：根据特征/其他字段提取 `ReconciliationId`；多字段值不一致 → error-report，不写入。
+- **C2 场景（账单打标）**：双类型行配对（一一对应 CustomerRef + Credit==Debit）；一对多 / 多对一 → error-report；rightType 行字段被打标。
+- **C3 场景（提取ReconId-From 网关）**：与「资金对账不平结果表」按 4 字段 AND 匹配（含发生额绝对值虚拟字段）；多匹配取首条 + warn；未导入 gw 文件时整类被过滤 + `skippedC3Count` 提示。
+- **3 个内置场景**：默认存在，可编辑、可禁用、可删除；不提供"恢复出厂"（C1/C2 默认启用，C3 默认禁用）。
+- **场景管理表（6 列 CRUD + toggle）**：`序号 / 功能类别 / 场景名称 / 优先级 / 执行操作 / 是否启动`；toggle 实时写库；序号取最小未用 ID（gap-filling）。
+- **4 个场景配置弹窗**：`createScenarioConfigDialogC1 / C2 / C3 / createScenarioConfirmDetailDialog`（创建/编辑/查看三模式共用）；通过 renderer-side `state.scenarioDraft` 跨弹窗共享状态。
+- **xlsx 标黄输出（exceljs）**：命中场景的行入主输出，被修改单元格黄底（FFFFFF00 ARGB）；非修改行不导出；error-report 独立 xlsx 产物。
+- **导出文件支持另存为**：原生 saveDialog 选保存路径；文件命名 `银行对账单-YYYYMMDDHHmm-处理结果.xlsx`（统一格式）。
+- **5 个 IPC channel**：`bank-statement:import / gateway-recon:import / bank-statement:run / bank-statement:export / bank-statement:session-status`；session 仅 main 进程内存。
+- **`scenarios` 表 + 6 IPC channel**：CRUD + toggle-enabled；migrations 包含 builtin seed + 名称同步迁移 `ensureBuiltinScenarioNamesUpdate`。
+- **资金对账文件提示时机**：导入银行对账单成功后，若启用了 C3 类场景且未导入 gw 文件 → 立即弹 confirmDialog（"导入文件 / 稍后再说"）。
+- **状态框换行展示（white-space: pre-line）**：导入双文件 / 已导出含 error-report 时分行；命中场景以序号显示在 `（场景 1、3）`。
+
+### 变更
+
+- **版本号 bump**：`2.0.0-beta.2` → `2.0.0-beta.3`。
+- **运行 / 导出成功 alert 移除**：内容直接写入状态框；failed / cancelled 仍走 alert。
+- **状态框 5 状态优先级**：已导出 > 已处理 > 已导入双文件 > 已导入单文件 > 初始。
+- **导出默认目录改用户另存为**：原 `Documents/网银账单生成小助手/bank-statement-process/{date}/` 自动落盘 → 改 saveDialog 让用户选；error-report 仍走默认目录。
+
+### 移除
+
+- **覆盖原 ID warning**：C1 `overwrite-existing-recon-id` + C3 `overwrite-existing-value` 不再产生 error-report 记录。⚠️ 资金红线提醒：原值非空被覆盖时无 warning 痕迹，需依赖 modifications 列表追踪。
+
+---
+
 ## 2.0.0-beta.2
 
 ### 新增

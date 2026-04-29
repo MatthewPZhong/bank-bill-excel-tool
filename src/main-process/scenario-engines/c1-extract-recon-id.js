@@ -108,13 +108,6 @@ function runC1Scenario(scenario, bankRows) {
     if (reconIdValue === null) return;
 
     const oldValue = normalizeCellValue(row[RECONCILIATION_ID_COLUMN]);
-    if (oldValue !== '' && oldValue !== reconIdValue) {
-      warningCollector.push({
-        rowId,
-        code: 'overwrite-existing-recon-id',
-        message: `ReconciliationId 原值 "${oldValue}" 将被覆盖为 "${reconIdValue}"`
-      });
-    }
     if (oldValue === reconIdValue) {
       // 值未变，不算修改（first-match-wins 不锁定）
       return;

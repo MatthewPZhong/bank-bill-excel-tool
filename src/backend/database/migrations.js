@@ -309,7 +309,7 @@ function ensureTemplateBigAccountNatureSupport(db) {
 const BUILTIN_SCENARIOS = [
   {
     category: 'extract-recon-id',
-    name: '调拨ReconId自提取',
+    name: '从银行对账单的信息里提取对账ID',
     priority: 3,
     enabled: 1,
     is_builtin: 1,
@@ -340,7 +340,7 @@ const BUILTIN_SCENARIOS = [
   },
   {
     category: 'offset-bill-mark',
-    name: 'outbound Fail打标',
+    name: 'outbound改标为outbound Fail',
     priority: 2,
     enabled: 1,
     is_builtin: 1,
@@ -362,7 +362,7 @@ const BUILTIN_SCENARIOS = [
   },
   {
     category: 'gateway-recon-join',
-    name: '调拨ReconId From网关',
+    name: '与网关对账单根据金额币种一对一匹配对账ID',
     priority: 1,
     enabled: 0,
     is_builtin: 1,
@@ -458,6 +458,60 @@ function ensureScenariosSupport(db) {
   }
 }
 
+// v2.0.0-beta.3 PR #32b：一次性更新内置场景 name（旧 → 新，用户友好命名）
+// 仅在 name 仍是旧值（用户未自行重命名）时更新；UNIQUE 冲突时跳过保留旧名
+function ensureBuiltinScenarioNamesUpdate(db) {
+  const renames = [
+    { oldName: '调拨ReconId自提取',     newName: '从银行对账单的信息里提取对账ID',       category: 'extract-recon-id' },
+    { oldName: 'outbound Fail打标',     newName: 'outbound改标为outbound Fail',          category: 'offset-bill-mark' },
+    { oldName: '调拨ReconId From网关',  newName: '与网关对账单根据金额币种一对一匹配对账ID', category: 'gateway-recon-join' }
+  ];
+  const upd = db.prepare(`UPDATE scenarios SET name = ?, updated_at = ? WHERE name = ? AND category = ? AND is_builtin = 1`);
+  const now = new Date().toISOString();
+  renames.forEach(({ oldName, newName, category }) => {
+    try {
+      upd.run(newName, now, oldName, category);
+    } catch (_err) {
+      // UNIQUE 冲突（已存在新 name）→ 跳过保留旧名
+    }
+  });
+}
+
+// v2.0.0-beta.3 PR #32b：一次性修复历史 PR #29 seed 的小写 'currency' 错误
+// 背景：PR #29 初始 seed 时把 C3 内置场景的 reconFields[0].gwField 写成小写 'currency'，
+//       PR #31 修了 seed JSON 但 marker 机制保护老库不重 seed → 用户老 DB 里仍是小写。
+//       结果：v2.0.0-beta.3 dialog 渲染时网关字段下拉的 selected 不匹配（GATEWAY_RECON_FIELDS 是 'Currency' 大写），
+//       UI 显示空选项。
+// 修复：扫描所有 'gateway-recon-join' 场景，发现 reconFields[].gwField === 'currency' → 改为 'Currency'
+// 幂等：执行一次后 'currency' 就被替换为 'Currency'，再次运行不命中 → no-op
+function ensureC3GwFieldCurrencyCaseFix(db) {
+  const rows = db.prepare(
+    `SELECT id, config_json FROM scenarios WHERE category = 'gateway-recon-join'`
+  ).all();
+  if (rows.length === 0) return;
+  const update = db.prepare(`UPDATE scenarios SET config_json = ?, updated_at = ? WHERE id = ?`);
+  const now = new Date().toISOString();
+  rows.forEach((row) => {
+    let config;
+    try {
+      config = JSON.parse(row.config_json);
+    } catch (_e) {
+      return; // 解析失败跳过
+    }
+    if (!config || !Array.isArray(config.reconFields)) return;
+    let changed = false;
+    config.reconFields.forEach((rf) => {
+      if (rf && rf.gwField === 'currency') {
+        rf.gwField = 'Currency';
+        changed = true;
+      }
+    });
+    if (changed) {
+      update.run(JSON.stringify(config), now, row.id);
+    }
+  });
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
@@ -466,6 +520,8 @@ module.exports = {
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
   ensureScenariosSupport,
+  ensureC3GwFieldCurrencyCaseFix,
+  ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,

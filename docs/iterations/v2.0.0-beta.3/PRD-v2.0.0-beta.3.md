@@ -810,3 +810,40 @@ state.processingResult = {  // 运行后产生
   - Round 3（commit `5d13fd4`）：F1 (P3) spec.md F2-F6 / §5 / §9 标注"已移到 PR #32"
 - **不含本 PR 范围（移到 PR #32）**：4 个 dialog factory（C1/C2/C3 配置 + 确认详情）/ 接入 PR #30 占位 / first-match-wins 调度 / 文件 IO / 标黄输出 / E2E / 文档三件套 / 版本号 bump beta.3
 - **关联功能 review**：手工补判（脚本不跨 branch 比较）—— migrations.js 仅 seed 字符串非 schema 变更，PR #29 marker 保护幂等；7 新文件不在重要变量表（升格评估留给 PR #32）
+
+### 阶段 7 — first-match-wins 调度 + IO + IPC（PR #32a，commit `e9aea4b` + Codex 6 轮 + self-review，merge `e21be0d`）
+
+- **范围切分（用户决策 2026-04-29）**：
+  - 原 PR #32 切两 PR：**PR #32a（本 PR）= 后端**（调度 + IO + IPC）；**PR #32b（下一个）= 前端**（dialog + 接入 + 文档 + bump）
+  - **xlsx 标黄库选型 = exceljs**（Q1=C，避免 SheetJS Free 版 cell.s 兼容性风险）
+  - PR #32b dialog 全做完后一次 Codex review（Q3=A）
+- **新增依赖**：`exceljs ^4.4.0`（仅本模块用；其他 3 模块继续 SheetJS）
+- **新增模块**：
+  - `src/main-process/exceljs-writer.js`：`writeBankStatementOutput`（标黄）/ `writeErrorReport`（4 列）/ `YELLOW_FILL=FFFFFF00`
+  - `src/main-process/scenario-dispatcher.js`：`runAllScenarios(bankRows, gwRows, scenarios)` first-match-wins 调度（priority desc, id asc）
+  - `src/main-process/bank-statement-io.js`：`readBankStatement` 44 列校验 + _rowId 注入 / `readGatewayRecon`「网关账单」sheet + 31 列校验 / `writeBankStatementMainOutput` 文件名规则（单一/多场景/空命中）/ `writeErrorReportOutput` / `sanitizeFileName` 跨平台兜底
+- **IPC + state（main.js + preload.js）**：5 channel + 3 session state
+  - `bank-statement:import` / `gateway-recon:import` / `bank-statement:run` / `bank-statement:export` / `bank-statement:session-status`
+  - main.js session：`bankStatementSession` / `gatewayReconSession` / `processingResult`（进程级，不持久化）
+- **算法稳定签名**：dispatcher → `{ modifiedRows: Array, modifications, errorReport, stats }`，PR #32b 直接消费
+  - `lockedRowIds` PR #31 算法层负责（C2 双锁）
+  - `modifications` dispatcher 层注入 `scenarioId/scenarioName`
+  - `warnings` PR #31 makeWarningCollector 已注入 → dispatcher 不重复 inject（self-review 修订）
+- **测试**：49 单测落 `scripts/smoke/{scenario-dispatcher,bank-statement-io}.js` + 接入 `scripts/smoke-test.js` async runner
+  - dispatcher 11 用例：D1-D5 基础 + D6/D7 in-place clone 回归 + D8 warnings-only + D9 gwRows=[] warning + 2 helper unit
+  - exceljs-writer 3 用例：标黄 round-trip / error-report 4 列 / 空数据
+  - bank-statement-io 12 用例：R1-R6 reader 异常路径 + W1-W4 writer + F1 文件名 + S1 sanitizeFileName 13 unit（控制字符/禁用字符/尾点空格/设备保留名/长度）
+- **Codex 修正（6 轮 11 finding）**：
+  - Round 1 (`1cd9503`)：F1 (P1) dispatcher in-place 修改 → bank-statement:run structuredClone（D6/D7）/ F2 (P1) 重新导入清空 gatewayReconSession
+  - Round 2 (`e058527`)：F1 (P1) export 提前 return 把 error-report 丢掉 → 先写 error-report 再判 empty（D8）
+  - Round 3 (`5e3ee56`)：F1 (P2) dispatcher 把 gwRows=[] 当未导入 → 仅 null/undefined 过滤（D9）
+  - Round 4 (`a1f3b76`)：F1+F2 (P3) PR32-v2.0.0.md / tasks.md smoke 计数 + IPC 数量同步
+  - Round 5 (`7e0bbf6`)：F1+F2 (P3) Test plan / spec.md §3 IPC + smoke 计数同步
+  - Round 6 (`56b51b7`)：F1+F2 (P3) PR32-v2.0.0.md 改动文件表 + spec.md §1/§5/§9 IPC 残留同步
+- **Self-review**（commit `63aa332`）：F1 (P3) dispatcher warnings 不再重复 inject scenarioId/scenarioName（PR #31 算法层已注入）；F2 (P3) sanitizeFileName 加 Windows 兜底（控制字符 / 尾点空格 / 设备保留名 / 长度限制）
+- **资金红线 4 个 P1 全清**：in-place clone / 重新导入清 gw / error-report 独立 / gwRows=[] warning
+- **关联功能 review（check-vars）**：3 处命中已自查
+  - Critical `FileValidationError`（仅消费现有 schema，未改字段）
+  - Important-skeleton `ipcRenderer`（5 channel preload + main.js 同步注册）
+  - Runtime-state `dialog`（import handler 处理用户取消分支）
+- **不含本 PR 范围（→ PR #32b）**：4 dialog factory / 接入 PR #30 占位 / 4 按钮 binding / statusBox / preview / E2E 用户样例文件 / 文档三件套 / 版本 bump beta.3

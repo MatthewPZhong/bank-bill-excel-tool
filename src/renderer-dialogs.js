@@ -4,6 +4,7 @@
       state,
       elements,
       desktopApi,
+      appConstants,
       BALANCE_DISABLED_OPTION,
       BALANCE_CALCULATED_OPTION,
       MERCHANT_ID_SELF_INPUT_OPTION,
@@ -14,8 +15,58 @@
       refreshTemplates,
       setStatus,
       applyStatementResult,
-      applyManualBalancePromptStatus
+      applyManualBalancePromptStatus,
+      refreshBankStatementStatus
     } = deps;
+
+    // v2.0.0-beta.3 PR #32b：银行对账单处理模块字段常量（preload 暴露 → window.appConstants → deps）
+    const BANK_STATEMENT_FIELDS = (appConstants && appConstants.bankStatementFields) || [];
+    const BANK_STATEMENT_FIELDS_FOR_C3 = (appConstants && appConstants.bankStatementFieldsForC3) || BANK_STATEMENT_FIELDS;
+    const GATEWAY_RECON_FIELDS = (appConstants && appConstants.gatewayReconFields) || [];
+
+    // 条件操作枚举（C1 行 3 + C2 行 3 共用）
+    const SCENARIO_CONDITION_OPS = ['等于', '不等于', '包含', '不包含', '空值', '非空值', '开头为'];
+
+    // 操作 op 是否需要值输入框（'空值' / '非空值' 不需要）
+    function opNeedsValue(op) {
+      return op !== '空值' && op !== '非空值';
+    }
+
+    // 给 select 渲染 options（用文件已有的 escapeHtml）
+    function renderScenarioOptions(values, selected = '') {
+      const sel = String(selected ?? '');
+      return values
+        .map((v) => {
+          const s = String(v);
+          const safe = escapeHtml(s);
+          return `<option value="${safe}"${s === sel ? ' selected' : ''}>${safe}</option>`;
+        })
+        .join('');
+    }
+
+    function clearScenarioDraft() {
+      state.scenarioDraft = null;
+    }
+
+    // 把 mode 转换为弹窗右下按钮配置
+    // create / edit → "取消 / 确认"；view → "返回"
+    function getScenarioDialogActions(mode) {
+      if (mode === 'view') {
+        return [{ kind: 'secondary', action: 'back', text: '返回' }];
+      }
+      return [
+        { kind: 'secondary', action: 'cancel', text: '取消' },
+        { kind: 'primary', action: 'confirm', text: '确认' }
+      ];
+    }
+
+    // 4 个 dialog 配置弹窗 + 确认详情弹窗共用：根据 category 进入对应配置弹窗
+    function openScenarioConfigByCategory(category) {
+      if (category === 'extract-recon-id') return openModal(createScenarioConfigDialogC1());
+      if (category === 'offset-bill-mark') return openModal(createScenarioConfigDialogC2());
+      if (category === 'gateway-recon-join') return openModal(createScenarioConfigDialogC3());
+      throw new Error(`unknown scenario category: ${category}`);
+    }
 
     // 同步修改：main 侧的另一份实现位于 src/backend/file-service/normalizers.js 内
     // REGEX_LITERAL_PATTERN / isRegexLiteral / compileRegexLiteral / matchAmountSplitConditionValue。
@@ -88,10 +139,14 @@
       return overlay;
     }
 
-    function createConfirmDialog({ message, confirmText, cancelText, onConfirm, onCancel }) {
+    function createConfirmDialog({ message, confirmText, cancelText, onConfirm, onCancel, middleText, onMiddle }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card alert-card';
+      // PR #33 Codex Finding 1：可选 middleText/onMiddle 支持三按钮（C3 运行点二次提示三选一）
+      const middleBtnHtml = middleText
+        ? `<button class="secondary-btn small" type="button" data-action="middle">${middleText}</button>`
+        : '';
       dialog.innerHTML = `
         <div class="alert-body">
           <div class="alert-icon" aria-hidden="true">
@@ -101,12 +156,18 @@
         </div>
         <div class="dialog-actions center">
           <button class="danger-btn small" type="button" data-action="confirm">${confirmText}</button>
+          ${middleBtnHtml}
           <button class="secondary-btn small" type="button" data-action="cancel">${cancelText}</button>
         </div>
       `;
       dialog.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
         await onConfirm();
       });
+      if (middleText) {
+        dialog.querySelector('[data-action="middle"]').addEventListener('click', async () => {
+          if (onMiddle) await onMiddle();
+        });
+      }
       dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => {
         if (onCancel) onCancel();
         closeModal();
@@ -5299,9 +5360,9 @@
     // 编辑模式两段式锁（D5）：编辑→完成 切换；查看场景→修改场景 切换
     // 内置场景与用户场景同等地位（D14）：可删除可编辑
     const SCENARIO_CATEGORY_LABELS = {
-      'extract-recon-id': '提取ReconId',
-      'offset-bill-mark': '冲销账单打标',
-      'gateway-recon-join': '根据资金对账不平结果提取ReconId'
+      'extract-recon-id': '提取ReconId-From Self',
+      'offset-bill-mark': '账单打标',
+      'gateway-recon-join': '提取ReconId-From 网关'
     };
 
     function getCategoryLabel(category) {
@@ -5330,12 +5391,12 @@
           <table class="data-table scenarios-table">
             <thead>
               <tr>
-                <th class="scenarios-col-id">序号</th>
-                <th class="scenarios-col-category">功能类别</th>
-                <th class="scenarios-col-name">场景名称</th>
-                <th class="scenarios-col-priority">优先级</th>
-                <th class="scenarios-col-actions">执行操作</th>
-                <th class="scenarios-col-enabled">是否启动</th>
+                <th class="scenarios-col-id" style="width: 5%; padding-left: 0; padding-right: 0; text-align: left; white-space: nowrap;"><span style="display: inline-block; margin-left: 21px;">序号</span></th>
+                <th class="scenarios-col-category" style="width: 22%; padding-left: 0; padding-right: 4px; text-align: left;">功能类别</th>
+                <th class="scenarios-col-name" style="width: 30.94%; padding-left: 0; text-align: left;">场景名称</th>
+                <th class="scenarios-col-priority" style="width: 10%; text-align: center;">优先级</th>
+                <th class="scenarios-col-actions" style="width: 19.06%; padding-left: 8px; text-align: left;">执行操作</th>
+                <th class="scenarios-col-enabled" style="width: 13%;">是否启动</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -5353,13 +5414,12 @@
         tr.dataset.id = String(scenario.id);
         tr.dataset.category = scenario.category;
         tr.innerHTML = `
-          <td class="scenarios-col-id">${escapeHtml(String(scenario.id))}</td>
+          <td class="scenarios-col-id" style="padding-left: 0; padding-right: 0; text-align: left; white-space: nowrap;"><span style="display: inline-block; margin-left: 21px;">${escapeHtml(String(scenario.id))}</span></td>
           <td class="scenarios-col-category">${escapeHtml(getCategoryLabel(scenario.category))}</td>
           <td class="scenarios-col-name">${escapeHtml(scenario.name)}</td>
           <td class="scenarios-col-priority">${escapeHtml(String(scenario.priority))}</td>
           <td class="scenarios-col-actions">
-            <button class="text-action" type="button" data-row-action="toggle-edit">编辑</button>
-            <button class="text-action" type="button" data-row-action="view-or-modify">查看场景</button>
+            <button class="text-action" type="button" data-row-action="manage">管理</button>
             <button class="text-action danger-text" type="button" data-row-action="delete">删除</button>
           </td>
           <td class="scenarios-col-enabled">
@@ -5387,23 +5447,23 @@
         const id = Number(tr.dataset.id);
         const action = button.dataset.rowAction;
 
-        if (action === 'toggle-edit') {
-          const isEditing = tr.classList.toggle('is-editing');
-          button.textContent = isEditing ? '完成' : '编辑';
-          const viewModifyBtn = tr.querySelector('[data-row-action="view-or-modify"]');
-          if (viewModifyBtn) {
-            viewModifyBtn.textContent = isEditing ? '修改场景' : '查看场景';
+        if (action === 'manage') {
+          // 直接进入 edit 模式（取消两段式锁，简化为单按钮"管理"）
+          const result = await desktopApi.scenarios.get(id);
+          if (!result || result.status !== 'ok' || !result.scenario) {
+            openModal(createAlertDialog(`加载场景失败：${result?.message || '未知错误'}`));
+            return;
           }
-          return;
-        }
-
-        if (action === 'view-or-modify') {
-          const isEditing = tr.classList.contains('is-editing');
-          openModal(createAlertDialog(
-            isEditing
-              ? '「修改场景」深度配置弹窗将在 v2.0.0-beta.3 阶段 4-6 启用'
-              : '「查看场景」详情弹窗将在 v2.0.0-beta.3 阶段 4-6 启用'
-          ));
+          const sc = result.scenario;
+          state.scenarioDraft = {
+            mode: 'edit',
+            category: sc.category,
+            scenarioId: sc.id,
+            name: sc.name,
+            priority: sc.priority,
+            config: sc.config
+          };
+          openScenarioConfigByCategory(sc.category);
           return;
         }
 
@@ -5416,6 +5476,8 @@
             onConfirm: async () => {
               const result = await desktopApi.scenarios.deleteOne(id);
               if (result && result.status === 'ok') {
+                // round 2 P1：main 端已清 processingResult，此处同步 renderer state
+                if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
                 openModal(createScenariosManagerDialog());
               } else {
                 openModal(createAlertDialog(`删除失败：${result?.message || '未知错误'}`));
@@ -5441,6 +5503,9 @@
           checkbox.checked = !enabled;
           await refreshTable();
           openModal(createAlertDialog(`切换启用状态失败：${result?.message || '未知错误'}`));
+        } else {
+          // round 2 P1：toggle 成功 → main 端已清 processingResult，此处同步 renderer state
+          if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
         }
       });
 
@@ -5470,9 +5535,9 @@
           <label class="scenario-category-row">
             <span class="scenario-category-label">请选择功能类别</span>
             <select class="scenario-category-select">
-              <option value="extract-recon-id">提取ReconId</option>
-              <option value="offset-bill-mark">冲销账单打标</option>
-              <option value="gateway-recon-join">根据资金对账不平结果提取ReconId</option>
+              <option value="extract-recon-id">提取ReconId-From Self</option>
+              <option value="offset-bill-mark">账单打标</option>
+              <option value="gateway-recon-join">提取ReconId-From 网关</option>
             </select>
           </label>
         </div>
@@ -5491,8 +5556,953 @@
       dialog.querySelector('[data-action="continue"]').addEventListener('click', () => {
         const select = dialog.querySelector('.scenario-category-select');
         const category = select?.value || '';
-        const label = getCategoryLabel(category);
-        openModal(createAlertDialog(`「新增${label}类场景」深度配置弹窗将在 v2.0.0-beta.3 阶段 4-6 启用`));
+        if (!category) return;
+        // 初始化 create 模式的 draft（mode='create'，无预填）
+        state.scenarioDraft = {
+          mode: 'create',
+          category,
+          scenarioId: null,
+          name: '',
+          priority: 0,
+          config: createDefaultScenarioConfig(category)
+        };
+        openScenarioConfigByCategory(category);
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // v2.0.0-beta.3 PR #32b：默认 config 模板（create 模式无预填时用）
+    function createDefaultScenarioConfig(category) {
+      if (category === 'extract-recon-id') {
+        return {
+          conditions: [{ field: '', op: '等于', value: '' }],
+          extractByFeature: null,
+          extractByOtherField: null
+        };
+      }
+      if (category === 'offset-bill-mark') {
+        return {
+          billTypes: [
+            { seq: 1, field: '', op: '等于', value: '' },
+            { seq: 2, field: '', op: '等于', value: '' }
+          ],
+          reconFields: [{ seq: 1, leftType: 1, leftField: '', rightType: 2, rightField: '' }],
+          markValue: { type: 2, field: '', value: '' }
+        };
+      }
+      if (category === 'gateway-recon-join') {
+        return {
+          reconFields: [{ seq: 1, gwField: '', bankField: '' }],
+          assign: { gwField: '', bankField: '' }
+        };
+      }
+      return {};
+    }
+
+    // v2.0.0-beta.3 PR #32b：dialog 共用工具
+    function buildScenarioActionsHtml(mode) {
+      return getScenarioDialogActions(mode)
+        .map((a) => `<button class="${a.kind}-btn small" type="button" data-action="${a.action}">${a.text}</button>`)
+        .join('');
+    }
+
+    function getCategoryDialogTitle(category, mode) {
+      const label = getCategoryLabel(category);
+      const modeLabel = mode === 'view' ? '查看场景' : (mode === 'edit' ? '修改场景' : '新增场景');
+      return `${modeLabel} — ${label}`;
+    }
+
+    // 把 draft.name / .priority 同步到 input
+    function bindScenarioBasicFields(dialog, draft) {
+      const nameInput = dialog.querySelector('input[data-field="name"]');
+      const priorityInput = dialog.querySelector('input[data-field="priority"]');
+      if (nameInput) {
+        nameInput.addEventListener('input', () => {
+          draft.name = nameInput.value;
+        });
+      }
+      if (priorityInput) {
+        priorityInput.addEventListener('input', () => {
+          const v = Number(priorityInput.value);
+          draft.priority = Number.isFinite(v) ? v : 0;
+        });
+      }
+    }
+
+    // 校验 + 错误提示（弹 alert）
+    function validateScenarioDraft(draft) {
+      const errors = [];
+      if (!draft.name || draft.name.trim() === '') errors.push('场景名称不能为空');
+      const p = Number(draft.priority);
+      if (!Number.isInteger(p) || p < 0 || p > 3) errors.push('优先级必须是 0-3 之间的整数');
+      if (draft.category === 'extract-recon-id') {
+        const c = draft.config || {};
+        if (!Array.isArray(c.conditions) || c.conditions.length === 0) errors.push('条件至少需要 1 行');
+        else if (c.conditions.some((cd) => !cd.field || (opNeedsValue(cd.op) && (cd.value === '' || cd.value === undefined)))) {
+          errors.push('条件每行的字段不能为空；非「空值/非空值」操作的值不能为空');
+        }
+        const f = c.extractByFeature;
+        const o = c.extractByOtherField;
+        // 行 4/5 至少勾一个（否则场景没有任何提取规则，运行时无产出）
+        const featureChosen = !!(f && f.enabled);
+        const otherChosen = !!o;
+        if (!featureChosen && !otherChosen) {
+          errors.push('「根据特征提取 ReconId」和「根据其他字段提取 ReconId」必须至少勾选一个');
+        }
+        if (featureChosen) {
+          const validSearchFields = Array.isArray(f.searchFields) ? f.searchFields.filter((x) => x && String(x).trim()) : [];
+          // 同步清理 draft：去掉空字段（用户加了空行又不选）
+          f.searchFields = validSearchFields;
+          if (validSearchFields.length === 0) errors.push('"根据特征提取"的筛选字段至少选 1 个');
+          if (!/^[A-Z]+$/.test(String(f.featureCode || ''))) errors.push('英文特征必须是大写英文字母（A-Z）');
+          if (!Number.isInteger(Number(f.digitCount)) || Number(f.digitCount) < 1) errors.push('数字位数必须 ≥ 1');
+          if (!Number.isInteger(Number(f.totalLength)) || Number(f.totalLength) < Number(f.digitCount) + String(f.featureCode || '').length) {
+            errors.push('总位数必须 ≥ 数字位数 + 英文特征长度');
+          }
+        }
+        if (otherChosen && (!o.field || o.field === '')) errors.push('"根据其他字段提取"的字段不能为空');
+      } else if (draft.category === 'offset-bill-mark') {
+        const c = draft.config || {};
+        if (!Array.isArray(c.billTypes) || c.billTypes.length < 2) errors.push('账单类型至少需要 2 行');
+        else if (c.billTypes.some((b) => !b.field || (opNeedsValue(b.op) && (b.value === '' || b.value === undefined)))) {
+          errors.push('账单类型每行的字段不能为空；非「空值/非空值」操作的值不能为空');
+        }
+        if (!Array.isArray(c.reconFields) || c.reconFields.length === 0) errors.push('对账字段至少需要 1 行');
+        else if (c.reconFields.some((r) => !r.leftField || !r.rightField)) errors.push('对账字段每行两端的字段都不能为空');
+        const mv = c.markValue || {};
+        const billTypeSeqs = (c.billTypes || []).map((b) => b.seq);
+        if (!billTypeSeqs.includes(Number(mv.type))) errors.push('打标值的"账单类型"必须存在于上方账单类型列表中');
+        if (!mv.field) errors.push('打标值的字段不能为空');
+        if (mv.value === '' || mv.value === undefined) errors.push('打标值的写入值不能为空');
+      } else if (draft.category === 'gateway-recon-join') {
+        const c = draft.config || {};
+        if (!Array.isArray(c.reconFields) || c.reconFields.length === 0) errors.push('对账字段至少需要 1 行');
+        else if (c.reconFields.some((r) => !r.gwField || !r.bankField)) errors.push('对账字段每行两端都不能为空');
+        const a = c.assign || {};
+        if (!a.gwField || !a.bankField) errors.push('对账成立后赋值的两端都不能为空');
+      }
+      return errors;
+    }
+
+    // ===== F1 — C3 配置弹窗（最简，4 行）=====
+    function createScenarioConfigDialogC3() {
+      const draft = state.scenarioDraft;
+      if (!draft || draft.category !== 'gateway-recon-join') {
+        return createAlertDialog('内部错误：state.scenarioDraft 缺失或类别不匹配');
+      }
+      const mode = draft.mode || 'create';
+      const isReadonly = mode === 'view';
+      // config 防御：若 draft.config 缺失则补默认
+      if (!draft.config) draft.config = createDefaultScenarioConfig('gateway-recon-join');
+      const config = draft.config;
+      if (!Array.isArray(config.reconFields) || config.reconFields.length === 0) {
+        config.reconFields = [{ seq: 1, gwField: '', bankField: '' }];
+      }
+      if (!config.assign) config.assign = { gwField: '', bankField: '' };
+
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card scenario-config-card scenario-config-c3';
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">${escapeHtml(getCategoryDialogTitle(draft.category, mode))}</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body scenario-config-body">
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">场景名称</span>
+            <input class="scenario-config-input" type="text" data-field="name" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(draft.name || '')}" placeholder="非空 + 全局唯一">
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">优先级 <span class="scenario-config-tooltip" title="3 = 最高，0 = 最低">ⓘ</span></span>
+            <input class="scenario-config-input scenario-config-input-narrow" type="number" min="0" max="3" data-field="priority" ${isReadonly ? 'disabled' : ''} value="${draft.priority ?? 0}">
+          </div>
+          <div class="scenario-config-row scenario-config-row-multi">
+            <span class="scenario-config-label">对账字段</span>
+            <div class="scenario-config-multi-wrap">
+              <div class="scenario-config-multi-rows" data-multi="reconFields"></div>
+              ${isReadonly ? '' : '<button class="text-action small" type="button" data-action="add-recon-field">+ 新增对账字段</button>'}
+            </div>
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">对账成立后赋值</span>
+            <div class="scenario-config-vs-row">
+              <select class="scenario-config-input" data-field="assign-gw" ${isReadonly ? 'disabled' : ''}>
+                <option value="">请选择网关账单字段</option>
+                ${renderScenarioOptions(GATEWAY_RECON_FIELDS, config.assign.gwField)}
+              </select>
+              <span class="scenario-config-vs-arrow">赋值给</span>
+              <select class="scenario-config-input" data-field="assign-bank" ${isReadonly ? 'disabled' : ''}>
+                <option value="">请选择银行对账单字段</option>
+                ${renderScenarioOptions(BANK_STATEMENT_FIELDS_FOR_C3, config.assign.bankField)}
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          ${buildScenarioActionsHtml(mode)}
+        </div>
+      `;
+
+      const reconRowsContainer = dialog.querySelector('[data-multi="reconFields"]');
+
+      function renderReconFields() {
+        reconRowsContainer.innerHTML = config.reconFields.map((rf, idx) => `
+          <div class="scenario-config-multi-row" data-row-index="${idx}">
+            <span class="scenario-config-multi-seq">${idx + 1}</span>
+            <select class="scenario-config-input" data-multi-field="gwField" ${isReadonly ? 'disabled' : ''}>
+              <option value="">请选择网关账单字段</option>
+              ${renderScenarioOptions(GATEWAY_RECON_FIELDS, rf.gwField)}
+            </select>
+            <span class="scenario-config-vs-arrow">vs</span>
+            <select class="scenario-config-input" data-multi-field="bankField" ${isReadonly ? 'disabled' : ''}>
+              <option value="">请选择银行对账单字段</option>
+              ${renderScenarioOptions(BANK_STATEMENT_FIELDS_FOR_C3, rf.bankField)}
+            </select>
+            ${isReadonly || config.reconFields.length === 1 ? '' : '<button class="icon-close-small" type="button" data-multi-action="remove" title="删除">×</button>'}
+          </div>
+        `).join('');
+      }
+      renderReconFields();
+
+      bindScenarioBasicFields(dialog, draft);
+
+      // 行 4 赋值字段同步
+      dialog.querySelector('select[data-field="assign-gw"]')?.addEventListener('change', (e) => {
+        config.assign.gwField = e.target.value;
+      });
+      dialog.querySelector('select[data-field="assign-bank"]')?.addEventListener('change', (e) => {
+        config.assign.bankField = e.target.value;
+      });
+
+      // 行 3 多行编辑（新增 / 删除 / 字段同步）
+      reconRowsContainer.addEventListener('change', (event) => {
+        const select = event.target.closest('select[data-multi-field]');
+        if (!select) return;
+        const row = select.closest('.scenario-config-multi-row');
+        const idx = Number(row?.dataset.rowIndex);
+        const f = select.dataset.multiField;
+        if (Number.isFinite(idx) && config.reconFields[idx]) {
+          config.reconFields[idx][f] = select.value;
+        }
+      });
+      reconRowsContainer.addEventListener('click', (event) => {
+        const btn = event.target.closest('button[data-multi-action="remove"]');
+        if (!btn || isReadonly) return;
+        const row = btn.closest('.scenario-config-multi-row');
+        const idx = Number(row?.dataset.rowIndex);
+        if (Number.isFinite(idx) && config.reconFields.length > 1) {
+          config.reconFields.splice(idx, 1);
+          // 重排 seq
+          config.reconFields.forEach((r, i) => { r.seq = i + 1; });
+          renderReconFields();
+        }
+      });
+      const addBtn = dialog.querySelector('[data-action="add-recon-field"]');
+      addBtn?.addEventListener('click', () => {
+        if (isReadonly) return;
+        config.reconFields.push({ seq: config.reconFields.length + 1, gwField: '', bankField: '' });
+        renderReconFields();
+      });
+
+      // 关闭 / 取消 / 确认 / 返回
+      function closeAndClearDraft() {
+        clearScenarioDraft();
+        openModal(createScenariosManagerDialog());
+      }
+      dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
+      dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', closeAndClearDraft);
+      dialog.querySelector('[data-action="back"]')?.addEventListener('click', closeAndClearDraft);
+      dialog.querySelector('[data-action="confirm"]')?.addEventListener('click', () => {
+        const errors = validateScenarioDraft(draft);
+        if (errors.length > 0) {
+          // 校验失败 → alert 关闭后回到当前配置弹窗（state.scenarioDraft 仍在，input 已保留）
+          openModal(createAlertDialog(errors.map((e) => `• ${e}`).join('<br>'), {
+            onConfirm: () => openScenarioConfigByCategory(draft.category)
+          }));
+          return;
+        }
+        openModal(createScenarioConfirmDetailDialog());
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // ===== F2 — C1 配置弹窗（5 行 + 行 4/5 互斥）=====
+    function createScenarioConfigDialogC1() {
+      const draft = state.scenarioDraft;
+      if (!draft || draft.category !== 'extract-recon-id') {
+        return createAlertDialog('内部错误：state.scenarioDraft 缺失或类别不匹配');
+      }
+      const mode = draft.mode || 'create';
+      const isReadonly = mode === 'view';
+      if (!draft.config) draft.config = createDefaultScenarioConfig('extract-recon-id');
+      const config = draft.config;
+      if (!Array.isArray(config.conditions) || config.conditions.length === 0) {
+        config.conditions = [{ field: '', op: '等于', value: '' }];
+      }
+      // 互斥状态：行 4 vs 行 5 最多勾一个
+      const featureChecked = !!(config.extractByFeature && config.extractByFeature.enabled);
+      const otherChecked = !!(config.extractByOtherField);
+      if (featureChecked && otherChecked) {
+        // 修正：默认保留行 4
+        config.extractByOtherField = null;
+      }
+
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card scenario-config-card scenario-config-c1';
+
+      const featureCfg = config.extractByFeature || { enabled: false, searchFields: [], featureCode: '', digitCount: '', totalLength: '' };
+      const otherCfg = config.extractByOtherField || { field: '' };
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">${escapeHtml(getCategoryDialogTitle(draft.category, mode))}</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body scenario-config-body">
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">场景名称</span>
+            <input class="scenario-config-input" type="text" data-field="name" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(draft.name || '')}" placeholder="非空 + 全局唯一">
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">优先级 <span class="scenario-config-tooltip" title="3 = 最高，0 = 最低">ⓘ</span></span>
+            <input class="scenario-config-input scenario-config-input-narrow" type="number" min="0" max="3" data-field="priority" ${isReadonly ? 'disabled' : ''} value="${draft.priority ?? 0}">
+          </div>
+          <div class="scenario-config-row scenario-config-row-multi">
+            <span class="scenario-config-label">条件 <span class="scenario-config-tooltip" title="满足任一条件即可进入提取">ⓘ</span></span>
+            <div class="scenario-config-multi-wrap">
+              <div class="scenario-config-multi-rows" data-multi="conditions"></div>
+              ${isReadonly ? '' : '<button class="text-action small" type="button" data-action="add-condition">+ 新增条件</button>'}
+            </div>
+          </div>
+          <div class="scenario-config-row scenario-config-row-mutex">
+            <label class="scenario-config-mutex-label">
+              <input type="checkbox" data-field="extract-feature-enabled" ${featureChecked ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+              <span>根据特征提取 ReconId</span>
+            </label>
+            <div class="scenario-config-mutex-content" data-mutex="feature">
+              <div class="scenario-config-feature-grid">
+                <label>筛选字段：
+                  <button class="new-account-input new-account-currency-dropdown-btn big-account-currency-dropdown-btn scenario-config-feature-search-btn"
+                          type="button"
+                          ${isReadonly || !featureChecked ? 'disabled' : ''}
+                          data-field="feature-search-fields-btn"
+                          aria-expanded="false"></button>
+                </label>
+                <label>英文特征：<input class="scenario-config-input scenario-config-input-narrow" type="text" data-field="feature-code" ${isReadonly || !featureChecked ? 'disabled' : ''} value="${escapeHtml(featureCfg.featureCode || '')}" placeholder="如 FT"></label>
+                <label>数字位数：<input class="scenario-config-input scenario-config-input-narrow" type="number" min="1" data-field="feature-digit-count" ${isReadonly || !featureChecked ? 'disabled' : ''} value="${featureCfg.digitCount ?? ''}"></label>
+                <label>总位数：<input class="scenario-config-input scenario-config-input-narrow" type="number" min="1" data-field="feature-total-length" ${isReadonly || !featureChecked ? 'disabled' : ''} value="${featureCfg.totalLength ?? ''}"></label>
+              </div>
+            </div>
+          </div>
+          <div class="scenario-config-row scenario-config-row-mutex">
+            <label class="scenario-config-mutex-label">
+              <input type="checkbox" data-field="extract-other-enabled" ${otherChecked ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+              <span>根据其他字段提取 ReconId</span>
+            </label>
+            <div class="scenario-config-mutex-content" data-mutex="other">
+              <label>字段：<select class="scenario-config-input" data-field="other-field" ${isReadonly || !otherChecked ? 'disabled' : ''}>
+                <option value="">请选择字段</option>
+                ${renderScenarioOptions(BANK_STATEMENT_FIELDS, otherCfg.field)}
+              </select></label>
+            </div>
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          ${buildScenarioActionsHtml(mode)}
+        </div>
+      `;
+
+      const condContainer = dialog.querySelector('[data-multi="conditions"]');
+
+      function renderConditions() {
+        condContainer.innerHTML = config.conditions.map((cd, idx) => {
+          const valueHidden = !opNeedsValue(cd.op);
+          return `
+            <div class="scenario-config-multi-row" data-row-index="${idx}">
+              <select class="scenario-config-input" data-multi-field="field" ${isReadonly ? 'disabled' : ''}>
+                <option value="">请选择字段</option>
+                ${renderScenarioOptions(BANK_STATEMENT_FIELDS, cd.field)}
+              </select>
+              <select class="scenario-config-input scenario-config-input-narrow" data-multi-field="op" ${isReadonly ? 'disabled' : ''}>
+                ${renderScenarioOptions(SCENARIO_CONDITION_OPS, cd.op || '等于')}
+              </select>
+              <input class="scenario-config-input" type="text" data-multi-field="value" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(cd.value || '')}" placeholder="值" ${valueHidden ? 'style="visibility:hidden"' : ''}>
+              ${isReadonly || config.conditions.length === 1 ? '' : '<button class="icon-close-small" type="button" data-multi-action="remove" title="删除">×</button>'}
+            </div>
+          `;
+        }).join('');
+      }
+      renderConditions();
+
+      bindScenarioBasicFields(dialog, draft);
+
+      // 行 3 多行编辑
+      condContainer.addEventListener('change', (event) => {
+        const ctl = event.target.closest('[data-multi-field]');
+        if (!ctl) return;
+        const row = ctl.closest('.scenario-config-multi-row');
+        const idx = Number(row?.dataset.rowIndex);
+        const f = ctl.dataset.multiField;
+        if (Number.isFinite(idx) && config.conditions[idx]) {
+          config.conditions[idx][f] = ctl.value;
+          if (f === 'op') renderConditions();  // 切换"空值/非空值"时重渲（隐藏值输入）
+        }
+      });
+      condContainer.addEventListener('input', (event) => {
+        const input = event.target.closest('input[data-multi-field="value"]');
+        if (!input) return;
+        const row = input.closest('.scenario-config-multi-row');
+        const idx = Number(row?.dataset.rowIndex);
+        if (Number.isFinite(idx) && config.conditions[idx]) {
+          config.conditions[idx].value = input.value;
+        }
+      });
+      condContainer.addEventListener('click', (event) => {
+        const btn = event.target.closest('button[data-multi-action="remove"]');
+        if (!btn || isReadonly) return;
+        const row = btn.closest('.scenario-config-multi-row');
+        const idx = Number(row?.dataset.rowIndex);
+        if (Number.isFinite(idx) && config.conditions.length > 1) {
+          config.conditions.splice(idx, 1);
+          renderConditions();
+        }
+      });
+      dialog.querySelector('[data-action="add-condition"]')?.addEventListener('click', () => {
+        if (isReadonly) return;
+        config.conditions.push({ field: '', op: '等于', value: '' });
+        renderConditions();
+      });
+
+      // 行 4/5 互斥 + 启用切换
+      const featureCheckbox = dialog.querySelector('input[data-field="extract-feature-enabled"]');
+      const otherCheckbox = dialog.querySelector('input[data-field="extract-other-enabled"]');
+      function setFeatureEnabled(enabled) {
+        if (enabled) {
+          if (!config.extractByFeature) config.extractByFeature = { enabled: true, searchFields: [], featureCode: '', digitCount: '', totalLength: '' };
+          else config.extractByFeature.enabled = true;
+          config.extractByOtherField = null;
+        } else if (config.extractByFeature) {
+          config.extractByFeature.enabled = false;
+        }
+        // 重绘整个 dialog 的"特征提取" + "其他字段" 区块（重设 disabled 状态）
+        rerender();
+      }
+      function setOtherEnabled(enabled) {
+        if (enabled) {
+          config.extractByOtherField = config.extractByOtherField || { field: '' };
+          if (config.extractByFeature) config.extractByFeature.enabled = false;
+        } else {
+          config.extractByOtherField = null;
+        }
+        rerender();
+      }
+      featureCheckbox?.addEventListener('change', () => setFeatureEnabled(featureCheckbox.checked));
+      otherCheckbox?.addEventListener('change', () => setOtherEnabled(otherCheckbox.checked));
+
+      function rerender() {
+        // 简单做法：重新打开 dialog（draft 已经更新到 state）
+        openModal(createScenarioConfigDialogC1());
+      }
+
+      // 行 4 筛选字段（与"维护大账号"页面币种多选下拉同款 floating panel）
+      const searchBtn = dialog.querySelector('button[data-field="feature-search-fields-btn"]');
+      const searchPanel = document.createElement('div');
+      searchPanel.className = 'new-account-currency-dropdown-panel scenario-config-feature-search-panel';
+      searchPanel.hidden = true;
+      overlay.appendChild(searchPanel);
+      let searchPanelOpen = false;
+
+      function getSearchFieldsList() {
+        const f = config.extractByFeature;
+        return Array.isArray(f?.searchFields) ? f.searchFields.filter(Boolean) : [];
+      }
+
+      function updateSearchBtnLabel() {
+        if (!searchBtn) return;
+        const list = getSearchFieldsList();
+        if (list.length === 0) {
+          searchBtn.textContent = '请选择筛选字段';
+        } else if (list.length === 1) {
+          searchBtn.textContent = list[0];
+        } else if (list.length <= 3) {
+          searchBtn.textContent = list.join(', ');
+        } else {
+          searchBtn.textContent = `${list.length} 个字段已选`;
+        }
+        searchBtn.title = list.join(', ') || '请选择筛选字段';
+      }
+
+      function renderSearchPanelOptions() {
+        searchPanel.replaceChildren();
+        const selected = getSearchFieldsList();
+        BANK_STATEMENT_FIELDS.forEach((field) => {
+          const option = document.createElement('label');
+          option.className = 'new-account-currency-option';
+          const text = document.createElement('span');
+          text.className = 'new-account-currency-option-text';
+          text.textContent = field;
+          const cb = document.createElement('input');
+          cb.className = 'new-account-checkbox';
+          cb.type = 'checkbox';
+          cb.value = field;
+          cb.checked = selected.includes(field);
+          cb.addEventListener('change', () => {
+            const all = Array.from(searchPanel.querySelectorAll('input[type="checkbox"]:checked')).map((b) => b.value);
+            if (config.extractByFeature) config.extractByFeature.searchFields = all;
+            updateSearchBtnLabel();
+          });
+          option.append(text, cb);
+          searchPanel.appendChild(option);
+        });
+      }
+
+      function positionSearchPanel() {
+        if (!searchBtn) return;
+        const rect = searchBtn.getBoundingClientRect();
+        const margin = 12;
+        searchPanel.style.position = 'fixed';
+        searchPanel.style.minWidth = `${Math.max(rect.width, 220)}px`;
+        searchPanel.style.maxHeight = '320px';
+        searchPanel.style.overflowY = 'auto';
+        searchPanel.style.visibility = 'hidden';
+        searchPanel.hidden = false;
+        const panelHeight = searchPanel.offsetHeight || 320;
+        const panelWidth = searchPanel.offsetWidth || 220;
+        const left = Math.max(margin, Math.min(rect.left, window.innerWidth - panelWidth - margin));
+        const top = (rect.bottom + 6 + panelHeight > window.innerHeight - margin)
+          ? Math.max(margin, rect.top - panelHeight - 6)
+          : rect.bottom + 6;
+        searchPanel.style.left = `${left}px`;
+        searchPanel.style.top = `${top}px`;
+        searchPanel.style.visibility = 'visible';
+      }
+
+      function closeSearchPanel() {
+        searchPanel.hidden = true;
+        searchPanelOpen = false;
+        searchBtn?.setAttribute('aria-expanded', 'false');
+      }
+
+      searchBtn?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (searchBtn.disabled) return;
+        if (searchPanelOpen) {
+          closeSearchPanel();
+          return;
+        }
+        renderSearchPanelOptions();
+        positionSearchPanel();
+        searchPanelOpen = true;
+        searchBtn.setAttribute('aria-expanded', 'true');
+      });
+
+      // panel 外点击 → 关闭；dialog 关闭后自动 self-detach
+      document.addEventListener('click', function searchPanelOutsideClick(event) {
+        if (!searchPanel.isConnected) {
+          document.removeEventListener('click', searchPanelOutsideClick);
+          return;
+        }
+        if (!searchPanelOpen) return;
+        if (!searchPanel.contains(event.target) && event.target !== searchBtn) {
+          closeSearchPanel();
+        }
+      });
+
+      updateSearchBtnLabel();
+      dialog.querySelector('input[data-field="feature-code"]')?.addEventListener('input', (e) => {
+        if (config.extractByFeature) config.extractByFeature.featureCode = String(e.target.value || '').toUpperCase();
+        // 不立即 rerender 避免输入光标跳；用户失焦时如果是非法值会在校验阶段提示
+      });
+      dialog.querySelector('input[data-field="feature-digit-count"]')?.addEventListener('input', (e) => {
+        if (config.extractByFeature) {
+          const v = Number(e.target.value);
+          config.extractByFeature.digitCount = Number.isFinite(v) ? v : '';
+        }
+      });
+      dialog.querySelector('input[data-field="feature-total-length"]')?.addEventListener('input', (e) => {
+        if (config.extractByFeature) {
+          const v = Number(e.target.value);
+          config.extractByFeature.totalLength = Number.isFinite(v) ? v : '';
+        }
+      });
+      // 行 5
+      dialog.querySelector('select[data-field="other-field"]')?.addEventListener('change', (e) => {
+        if (config.extractByOtherField) config.extractByOtherField.field = e.target.value;
+      });
+
+      // 关闭 / 取消 / 确认 / 返回
+      function closeAndClearDraft() {
+        clearScenarioDraft();
+        openModal(createScenariosManagerDialog());
+      }
+      dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
+      dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', closeAndClearDraft);
+      dialog.querySelector('[data-action="back"]')?.addEventListener('click', closeAndClearDraft);
+      dialog.querySelector('[data-action="confirm"]')?.addEventListener('click', () => {
+        const errors = validateScenarioDraft(draft);
+        if (errors.length > 0) {
+          // 校验失败 → alert 关闭后回到当前配置弹窗（state.scenarioDraft 仍在，input 已保留）
+          openModal(createAlertDialog(errors.map((e) => `• ${e}`).join('<br>'), {
+            onConfirm: () => openScenarioConfigByCategory(draft.category)
+          }));
+          return;
+        }
+        openModal(createScenarioConfirmDetailDialog());
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // ===== F3 — C2 配置弹窗（5 行 + 序号自动 + 联动）=====
+    function createScenarioConfigDialogC2() {
+      const draft = state.scenarioDraft;
+      if (!draft || draft.category !== 'offset-bill-mark') {
+        return createAlertDialog('内部错误：state.scenarioDraft 缺失或类别不匹配');
+      }
+      const mode = draft.mode || 'create';
+      const isReadonly = mode === 'view';
+      if (!draft.config) draft.config = createDefaultScenarioConfig('offset-bill-mark');
+      const config = draft.config;
+      if (!Array.isArray(config.billTypes) || config.billTypes.length < 2) {
+        config.billTypes = [
+          { seq: 1, field: '', op: '等于', value: '' },
+          { seq: 2, field: '', op: '等于', value: '' }
+        ];
+      }
+      if (!Array.isArray(config.reconFields) || config.reconFields.length === 0) {
+        config.reconFields = [{ seq: 1, leftType: 1, leftField: '', rightType: 2, rightField: '' }];
+      }
+      if (!config.markValue) config.markValue = { type: 2, field: '', value: '' };
+
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card scenario-config-card scenario-config-c2';
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">${escapeHtml(getCategoryDialogTitle(draft.category, mode))}</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body scenario-config-body">
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">场景名称</span>
+            <input class="scenario-config-input" type="text" data-field="name" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(draft.name || '')}" placeholder="非空 + 全局唯一">
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">优先级 <span class="scenario-config-tooltip" title="3 = 最高，0 = 最低">ⓘ</span></span>
+            <input class="scenario-config-input scenario-config-input-narrow" type="number" min="0" max="3" data-field="priority" ${isReadonly ? 'disabled' : ''} value="${draft.priority ?? 0}">
+          </div>
+          <div class="scenario-config-row scenario-config-row-multi">
+            <span class="scenario-config-label">账单类型 <span class="scenario-config-tooltip" title="每行 = 一种独立账单类型">ⓘ</span></span>
+            <div class="scenario-config-multi-wrap">
+              <div class="scenario-config-multi-rows" data-multi="billTypes"></div>
+              ${isReadonly ? '' : '<button class="text-action small" type="button" data-action="add-bill-type">+ 新增账单类型</button>'}
+            </div>
+          </div>
+          <div class="scenario-config-row scenario-config-row-multi">
+            <span class="scenario-config-label">对账字段</span>
+            <div class="scenario-config-multi-wrap">
+              <div class="scenario-config-multi-rows" data-multi="reconFields"></div>
+              ${isReadonly ? '' : '<button class="text-action small" type="button" data-action="add-recon-field">+ 新增对账字段</button>'}
+            </div>
+          </div>
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">打标值</span>
+            <div class="scenario-config-vs-row" data-mark-value-row></div>
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          ${buildScenarioActionsHtml(mode)}
+        </div>
+      `;
+
+      const billTypeContainer = dialog.querySelector('[data-multi="billTypes"]');
+      const reconContainer = dialog.querySelector('[data-multi="reconFields"]');
+      const markRow = dialog.querySelector('[data-mark-value-row]');
+
+      function renderBillTypes() {
+        billTypeContainer.innerHTML = config.billTypes.map((bt, idx) => `
+          <div class="scenario-config-multi-row" data-row-index="${idx}">
+            <span class="scenario-config-multi-seq">#${bt.seq}</span>
+            <select class="scenario-config-input" data-multi-field="field" ${isReadonly ? 'disabled' : ''}>
+              <option value="">请选择字段</option>
+              ${renderScenarioOptions(BANK_STATEMENT_FIELDS, bt.field)}
+            </select>
+            <select class="scenario-config-input scenario-config-input-narrow" data-multi-field="op" ${isReadonly ? 'disabled' : ''}>
+              ${renderScenarioOptions(SCENARIO_CONDITION_OPS, bt.op || '等于')}
+            </select>
+            <input class="scenario-config-input" type="text" data-multi-field="value" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(bt.value || '')}" placeholder="值" ${!opNeedsValue(bt.op) ? 'style="visibility:hidden"' : ''}>
+            ${isReadonly || config.billTypes.length <= 2 ? '' : '<button class="icon-close-small" type="button" data-multi-action="remove" title="删除">×</button>'}
+          </div>
+        `).join('');
+      }
+      function renderReconFields() {
+        const billTypeSeqs = config.billTypes.map((b) => b.seq);
+        reconContainer.innerHTML = config.reconFields.map((rf, idx) => `
+          <div class="scenario-config-multi-row" data-row-index="${idx}">
+            <span class="scenario-config-multi-seq">#${idx + 1}</span>
+            <select class="scenario-config-input scenario-config-input-narrow" data-multi-field="leftType" ${isReadonly ? 'disabled' : ''}>
+              ${renderScenarioOptions(billTypeSeqs.map(String), String(rf.leftType))}
+            </select>
+            <select class="scenario-config-input" data-multi-field="leftField" ${isReadonly ? 'disabled' : ''}>
+              <option value="">请选择字段</option>
+              ${renderScenarioOptions(BANK_STATEMENT_FIELDS, rf.leftField)}
+            </select>
+            <span class="scenario-config-vs-arrow">vs</span>
+            <select class="scenario-config-input scenario-config-input-narrow" data-multi-field="rightType" ${isReadonly ? 'disabled' : ''}>
+              ${renderScenarioOptions(billTypeSeqs.map(String), String(rf.rightType))}
+            </select>
+            <select class="scenario-config-input" data-multi-field="rightField" ${isReadonly ? 'disabled' : ''}>
+              <option value="">请选择字段</option>
+              ${renderScenarioOptions(BANK_STATEMENT_FIELDS, rf.rightField)}
+            </select>
+            ${isReadonly || config.reconFields.length === 1 ? '' : '<button class="icon-close-small" type="button" data-multi-action="remove" title="删除">×</button>'}
+          </div>
+        `).join('');
+      }
+      function renderMarkValue() {
+        const billTypeSeqs = config.billTypes.map((b) => b.seq);
+        markRow.innerHTML = `
+          <select class="scenario-config-input scenario-config-input-narrow" data-mark-field="type" ${isReadonly ? 'disabled' : ''}>
+            ${renderScenarioOptions(billTypeSeqs.map(String), String(config.markValue.type))}
+          </select>
+          <span class="scenario-config-vs-arrow">的</span>
+          <select class="scenario-config-input" data-mark-field="field" ${isReadonly ? 'disabled' : ''}>
+            <option value="">请选择字段</option>
+            ${renderScenarioOptions(BANK_STATEMENT_FIELDS, config.markValue.field)}
+          </select>
+          <span class="scenario-config-vs-arrow">写入值</span>
+          <input class="scenario-config-input" type="text" data-mark-field="value" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(config.markValue.value || '')}" placeholder="值">
+        `;
+      }
+      function rerender() {
+        renderBillTypes();
+        renderReconFields();
+        renderMarkValue();
+      }
+      rerender();
+
+      bindScenarioBasicFields(dialog, draft);
+
+      // 行 3 账单类型多行编辑
+      billTypeContainer.addEventListener('change', (event) => {
+        const ctl = event.target.closest('[data-multi-field]');
+        if (!ctl) return;
+        const row = ctl.closest('.scenario-config-multi-row');
+        const idx = Number(row?.dataset.rowIndex);
+        const f = ctl.dataset.multiField;
+        if (Number.isFinite(idx) && config.billTypes[idx]) {
+          config.billTypes[idx][f] = ctl.value;
+          if (f === 'op') renderBillTypes();
+        }
+      });
+      billTypeContainer.addEventListener('input', (event) => {
+        const input = event.target.closest('input[data-multi-field="value"]');
+        if (!input) return;
+        const row = input.closest('.scenario-config-multi-row');
+        const idx = Number(row?.dataset.rowIndex);
+        if (Number.isFinite(idx) && config.billTypes[idx]) {
+          config.billTypes[idx].value = input.value;
+        }
+      });
+      billTypeContainer.addEventListener('click', (event) => {
+        const btn = event.target.closest('button[data-multi-action="remove"]');
+        if (!btn || isReadonly) return;
+        const row = btn.closest('.scenario-config-multi-row');
+        const idx = Number(row?.dataset.rowIndex);
+        if (Number.isFinite(idx) && config.billTypes.length > 2) {
+          config.billTypes.splice(idx, 1);
+          // 重排 seq（关键：行 4/5 引用要更新）
+          config.billTypes.forEach((b, i) => { b.seq = i + 1; });
+          // 校正行 4 / 行 5 引用，超出范围的回退到 1
+          const validSeqs = config.billTypes.map((b) => b.seq);
+          config.reconFields.forEach((r) => {
+            if (!validSeqs.includes(Number(r.leftType))) r.leftType = validSeqs[0] || 1;
+            if (!validSeqs.includes(Number(r.rightType))) r.rightType = validSeqs[1] || validSeqs[0] || 1;
+          });
+          if (!validSeqs.includes(Number(config.markValue.type))) config.markValue.type = validSeqs[validSeqs.length - 1] || 1;
+          rerender();
+        }
+      });
+      dialog.querySelector('[data-action="add-bill-type"]')?.addEventListener('click', () => {
+        if (isReadonly) return;
+        config.billTypes.push({ seq: config.billTypes.length + 1, field: '', op: '等于', value: '' });
+        rerender();
+      });
+
+      // 行 4 对账字段多行编辑
+      reconContainer.addEventListener('change', (event) => {
+        const ctl = event.target.closest('[data-multi-field]');
+        if (!ctl) return;
+        const row = ctl.closest('.scenario-config-multi-row');
+        const idx = Number(row?.dataset.rowIndex);
+        const f = ctl.dataset.multiField;
+        if (Number.isFinite(idx) && config.reconFields[idx]) {
+          if (f === 'leftType' || f === 'rightType') config.reconFields[idx][f] = Number(ctl.value);
+          else config.reconFields[idx][f] = ctl.value;
+        }
+      });
+      reconContainer.addEventListener('click', (event) => {
+        const btn = event.target.closest('button[data-multi-action="remove"]');
+        if (!btn || isReadonly) return;
+        const row = btn.closest('.scenario-config-multi-row');
+        const idx = Number(row?.dataset.rowIndex);
+        if (Number.isFinite(idx) && config.reconFields.length > 1) {
+          config.reconFields.splice(idx, 1);
+          renderReconFields();
+        }
+      });
+      dialog.querySelector('[data-action="add-recon-field"]')?.addEventListener('click', () => {
+        if (isReadonly) return;
+        const seqs = config.billTypes.map((b) => b.seq);
+        config.reconFields.push({ seq: config.reconFields.length + 1, leftType: seqs[0] || 1, leftField: '', rightType: seqs[1] || seqs[0] || 1, rightField: '' });
+        renderReconFields();
+      });
+
+      // 行 5 打标值
+      markRow.addEventListener('change', (event) => {
+        const ctl = event.target.closest('[data-mark-field]');
+        if (!ctl) return;
+        const f = ctl.dataset.markField;
+        if (f === 'type') config.markValue.type = Number(ctl.value);
+        else config.markValue[f] = ctl.value;
+      });
+      markRow.addEventListener('input', (event) => {
+        const input = event.target.closest('input[data-mark-field="value"]');
+        if (!input) return;
+        config.markValue.value = input.value;
+      });
+
+      // 关闭 / 取消 / 确认 / 返回
+      function closeAndClearDraft() {
+        clearScenarioDraft();
+        openModal(createScenariosManagerDialog());
+      }
+      dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
+      dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', closeAndClearDraft);
+      dialog.querySelector('[data-action="back"]')?.addEventListener('click', closeAndClearDraft);
+      dialog.querySelector('[data-action="confirm"]')?.addEventListener('click', () => {
+        const errors = validateScenarioDraft(draft);
+        if (errors.length > 0) {
+          // 校验失败 → alert 关闭后回到当前配置弹窗（state.scenarioDraft 仍在，input 已保留）
+          openModal(createAlertDialog(errors.map((e) => `• ${e}`).join('<br>'), {
+            onConfirm: () => openScenarioConfigByCategory(draft.category)
+          }));
+          return;
+        }
+        openModal(createScenarioConfirmDetailDialog());
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // ===== F4 — 确认场景详情弹窗（共用，文本预览 + 完成/返回）=====
+    function buildScenarioConfirmDetailHtml(draft) {
+      const c = draft.config || {};
+      let html = `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">类别：</span>${escapeHtml(getCategoryLabel(draft.category))}</div>`;
+      html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">名称：</span>${escapeHtml(draft.name)}</div>`;
+      html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">优先级：</span>${draft.priority}</div>`;
+      if (draft.category === 'extract-recon-id') {
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">条件（OR）：</span><ul>${(c.conditions || []).map((cd) => `<li>${escapeHtml(cd.field)} ${escapeHtml(cd.op)}${opNeedsValue(cd.op) ? ' ' + escapeHtml(String(cd.value || '')) : ''}</li>`).join('')}</ul></div>`;
+        if (c.extractByFeature && c.extractByFeature.enabled) {
+          const f = c.extractByFeature;
+          html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">根据特征提取：</span>筛选字段 [${(f.searchFields || []).map(escapeHtml).join(', ')}]，特征 ${escapeHtml(f.featureCode)}，数字位 ${f.digitCount}，总位 ${f.totalLength}</div>`;
+        }
+        if (c.extractByOtherField) {
+          html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">根据其他字段提取：</span>${escapeHtml(c.extractByOtherField.field)}</div>`;
+        }
+      } else if (draft.category === 'offset-bill-mark') {
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">账单类型：</span><ul>${(c.billTypes || []).map((bt) => `<li>#${bt.seq}：${escapeHtml(bt.field)} ${escapeHtml(bt.op)}${opNeedsValue(bt.op) ? ' ' + escapeHtml(String(bt.value || '')) : ''}</li>`).join('')}</ul></div>`;
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段：</span><ul>${(c.reconFields || []).map((r) => `<li>类型#${r.leftType} ${escapeHtml(r.leftField)} = 类型#${r.rightType} ${escapeHtml(r.rightField)}</li>`).join('')}</ul></div>`;
+        const mv = c.markValue || {};
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">打标：</span>类型#${mv.type} 的 ${escapeHtml(mv.field || '')} 写入 "${escapeHtml(String(mv.value || ''))}"</div>`;
+      } else if (draft.category === 'gateway-recon-join') {
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段（AND）：</span><ul>${(c.reconFields || []).map((r) => `<li>网关 ${escapeHtml(r.gwField)} = 银行 ${escapeHtml(r.bankField)}</li>`).join('')}</ul></div>`;
+        const a = c.assign || {};
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">赋值：</span>网关 ${escapeHtml(a.gwField || '')} → 银行 ${escapeHtml(a.bankField || '')}</div>`;
+      }
+      return html;
+    }
+
+    function createScenarioConfirmDetailDialog() {
+      const draft = state.scenarioDraft;
+      if (!draft) {
+        return createAlertDialog('内部错误：state.scenarioDraft 缺失');
+      }
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card scenario-confirm-detail-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">确认场景详情</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body scenario-confirm-detail-body">
+          ${buildScenarioConfirmDetailHtml(draft)}
+        </div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="back">返回</button>
+          <button class="primary-btn small" type="button" data-action="finish">完成</button>
+        </div>
+      `;
+
+      function backToConfig() {
+        // 保留 draft，重新打开对应配置弹窗
+        openScenarioConfigByCategory(draft.category);
+      }
+      function closeAndClearDraft() {
+        clearScenarioDraft();
+        openModal(createScenariosManagerDialog());
+      }
+      dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
+      dialog.querySelector('[data-action="back"]').addEventListener('click', backToConfig);
+      dialog.querySelector('[data-action="finish"]').addEventListener('click', async () => {
+        try {
+          let result;
+          if (draft.mode === 'create') {
+            result = await desktopApi.scenarios.create({
+              category: draft.category,
+              name: String(draft.name || '').trim(),
+              priority: Number(draft.priority),
+              enabled: true,
+              config: draft.config
+            });
+          } else if (draft.mode === 'edit') {
+            result = await desktopApi.scenarios.update(draft.scenarioId, {
+              name: String(draft.name || '').trim(),
+              priority: Number(draft.priority),
+              config: draft.config
+            });
+          } else {
+            // view 模式不应到达这里（按钮只显示"返回"）
+            closeAndClearDraft();
+            return;
+          }
+          if (!result || result.status !== 'ok') {
+            openModal(createAlertDialog(`保存失败：${result?.message || '未知错误'}`, {
+              onConfirm: backToConfig
+            }));
+            return;
+          }
+          // 成功 → 清空 draft + 刷新场景管理弹窗
+          // round 2 P1：场景已变更，main 端已清 processingResult，此处同步 renderer state
+          if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
+          clearScenarioDraft();
+          openModal(createScenariosManagerDialog());
+        } catch (error) {
+          openModal(createAlertDialog(`保存失败：${error.message || error}`, {
+            onConfirm: backToConfig
+          }));
+        }
       });
 
       overlay.appendChild(dialog);
@@ -5529,7 +6539,12 @@
       createBalanceAddonManagerDialog,
       // v2.0.0-beta.3：银行对账单处理模块场景管理
       createScenariosManagerDialog,
-      createScenarioCategorySelectDialog
+      createScenarioCategorySelectDialog,
+      // v2.0.0-beta.3 PR #32b：4 dialog factory（C1/C2/C3 配置 + 确认场景详情）
+      createScenarioConfigDialogC1,
+      createScenarioConfigDialogC2,
+      createScenarioConfigDialogC3,
+      createScenarioConfirmDetailDialog
     };
   }
 

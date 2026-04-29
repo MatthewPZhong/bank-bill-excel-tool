@@ -1,6 +1,10 @@
 // v2.0.0-beta.3：资金对账导出不平.xlsx 「网关账单」sheet 31 列固定字段
 // 顺序与样例文件表头一致
 // C3 场景的"网关账单字段下拉"枚举值来自本表
+//
+// ⚠️ 同步提醒：Electron sandbox 限制 preload require 自定义模块，
+//   src/preload.js 顶部 inline 了一份副本（GATEWAY_RECON_FIELDS）。
+//   本文件改动必须同步更新 preload.js。
 
 const GATEWAY_RECON_FIELDS = Object.freeze([
   'BillDate',

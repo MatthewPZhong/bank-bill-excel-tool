@@ -40,7 +40,8 @@ function filterScenariosByGwAvailability(scenarios, gwRows) {
 //                                          // 每行加 _modifiedColumns: Set + _hitScenarioId + _hitScenarioName
 //     modifications: Array<{ rowId, column, oldValue, newValue, scenarioId, scenarioName }>,
 //     errorReport: Array<{ scenarioId, scenarioName, rowId, code, message }>,
-//     stats: { totalRows, hitRowCount, scenarioHitCount, warningCount, skippedC3Count }
+//     stats: { totalRows, hitRowCount, scenarioHitCount, hitScenarioIds, warningCount, skippedC3Count }
+//     hitScenarioIds: 命中场景的 id 列表（按命中顺序，由 priority desc + id asc 决定）
 //   }
 function runAllScenarios(bankRows, gwRows, scenarios) {
   if (!Array.isArray(bankRows)) {
@@ -61,6 +62,7 @@ function runAllScenarios(bankRows, gwRows, scenarios) {
   const rowMeta = new Map(); // _rowId → { scenarioId, scenarioName, modifiedColumns: Set }
 
   let scenarioHitCount = 0;
+  const hitScenarioIds = [];
 
   for (const scenario of filtered) {
     const unlocked = bankRows.filter((r) => !rowLockSet.has(r._rowId));
@@ -71,6 +73,7 @@ function runAllScenarios(bankRows, gwRows, scenarios) {
 
     if (lockedRowIds && lockedRowIds.size > 0) {
       scenarioHitCount += 1;
+      hitScenarioIds.push(scenario.id);
       lockedRowIds.forEach((rowId) => {
         rowLockSet.add(rowId);
         if (!rowMeta.has(rowId)) {
@@ -126,6 +129,7 @@ function runAllScenarios(bankRows, gwRows, scenarios) {
       totalRows: bankRows.length,
       hitRowCount: modifiedRows.length,
       scenarioHitCount,
+      hitScenarioIds,
       warningCount: allWarnings.length,
       skippedC3Count
     }

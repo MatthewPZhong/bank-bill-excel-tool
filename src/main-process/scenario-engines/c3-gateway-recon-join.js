@@ -109,14 +109,6 @@ function runC3Scenario(scenario, bankRows, gwRows) {
     const oldValue = normalizeCellValue(bankRow[assign.bankField]);
     if (oldValue === newValue) return; // 值未变，不算修改
 
-    if (oldValue !== '') {
-      warningCollector.push({
-        rowId,
-        code: 'overwrite-existing-value',
-        message: `${assign.bankField} 原值 "${oldValue}" 将被覆盖为 "${newValue}"`
-      });
-    }
-
     bankRow[assign.bankField] = newValue;
     modCollector.record(rowId, assign.bankField, oldValue, newValue);
   });

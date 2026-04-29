@@ -120,9 +120,10 @@ async function runBankStatementIoSmokeTests() {
     );
   }
 
-  // ===== W1: writeBankStatementMainOutput 单一场景 =====
+  // ===== W1: writeBankStatementMainOutput 单一场景（用户另存为路径） =====
   {
-    const exportRootDir = path.join(tmpDir, 'export-root');
+    const exportRootDir = path.join(tmpDir, 'export-root', '2026-04-29');
+    fs.mkdirSync(exportRootDir, { recursive: true });
     const modifiedRows = [
       {
         _rowId: 'row_0',
@@ -133,14 +134,14 @@ async function runBankStatementIoSmokeTests() {
       }
     ];
     modifiedRows[0].ReconciliationId = 'AFT123456789012';
+    const mainFilePath = path.join(exportRootDir, '银行对账单-202604290000-处理结果.xlsx');
     const result = await writeBankStatementMainOutput({
       modifiedRows,
       headers: BANK_STATEMENT_FIELDS,
-      exportRootDir,
-      timestamp: '20260429000000'
+      mainFilePath
     });
     assert(fs.existsSync(result.filePath), 'W1 文件应存在');
-    assert(result.fileName.includes('调拨ReconId自提取'), 'W1 单一场景文件名应含场景名');
+    assert.strictEqual(result.fileName, '银行对账单-202604290000-处理结果.xlsx', 'W1 文件名应为新统一格式');
     // 读回校验标黄
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(result.filePath);
@@ -154,21 +155,22 @@ async function runBankStatementIoSmokeTests() {
     );
   }
 
-  // ===== W2: writeBankStatementMainOutput 多场景 =====
+  // ===== W2: writeBankStatementMainOutput 多场景命中 → 仍统一命名 =====
   {
-    const exportRootDir = path.join(tmpDir, 'export-root');
+    const exportRootDir = path.join(tmpDir, 'export-root-2', '2026-04-29');
+    fs.mkdirSync(exportRootDir, { recursive: true });
     const baseRow = Object.fromEntries(BANK_STATEMENT_FIELDS.map((h) => [h, '']));
     const modifiedRows = [
       { ...baseRow, _rowId: 'r1', _hitScenarioName: 'C1 提取', _modifiedColumns: new Set() },
       { ...baseRow, _rowId: 'r2', _hitScenarioName: 'C2 打标', _modifiedColumns: new Set() }
     ];
+    const mainFilePath = path.join(exportRootDir, '银行对账单-202604290001-处理结果.xlsx');
     const result = await writeBankStatementMainOutput({
       modifiedRows,
       headers: BANK_STATEMENT_FIELDS,
-      exportRootDir,
-      timestamp: '20260429000001'
+      mainFilePath
     });
-    assert(result.fileName.includes('多场景'), 'W2 多场景文件名应含"多场景"');
+    assert.strictEqual(result.fileName, '银行对账单-202604290001-处理结果.xlsx', 'W2 多场景仍用统一格式');
   }
 
   // ===== W3: writeErrorReportOutput 4 列 =====
@@ -193,9 +195,36 @@ async function runBankStatementIoSmokeTests() {
     assert.strictEqual(result, null, 'W4 空 warnings 应返回 null');
   }
 
-  // ===== F1: buildMainOutputFileName 空命中 =====
+  // ===== F1: buildMainOutputFileName 统一命名（PR #32b UX 决策） =====
   {
-    assert(buildMainOutputFileName([], '20260429000000').includes('空命中'), 'F1 空命中文件名');
+    // 新规则：银行对账单-{YYYYMMDDHHmm}-处理结果.xlsx，不含场景名
+    assert.strictEqual(
+      buildMainOutputFileName('202604290000'),
+      '银行对账单-202604290000-处理结果.xlsx',
+      'F1 命名规则：银行对账单-{ts}-处理结果.xlsx'
+    );
+    // 默认 timestamp = buildTimestampMinute（12 位 YYYYMMDDHHmm）
+    const defaultName = buildMainOutputFileName();
+    assert(/^银行对账单-\d{12}-处理结果\.xlsx$/.test(defaultName), 'F1.2 默认 timestamp 12 位');
+  }
+
+  // ===== P1（sandbox sync）：preload.js inline 常量必须与 src/constants/* 一致 =====
+  // Electron sandbox 限制 preload require 自定义模块，preload 内联常量副本
+  // 必须与 src/constants/bank-statement-fields.js / gateway-recon-fields.js 同步
+  {
+    const preloadSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'preload.js'), 'utf8');
+    // 提取 BANK_STATEMENT_FIELDS（44 列）
+    const bankMatch = preloadSrc.match(/const BANK_STATEMENT_FIELDS = Object\.freeze\(\[([\s\S]*?)\]\);/);
+    assert(bankMatch, 'P1.1 preload.js 缺 BANK_STATEMENT_FIELDS inline 副本');
+    const preloadBankCols = bankMatch[1].match(/'([^']+)'/g).map((s) => s.slice(1, -1));
+    assert.deepStrictEqual(preloadBankCols, BANK_STATEMENT_FIELDS, 'P1.2 BANK_STATEMENT_FIELDS preload 与 src/constants 不同步');
+    // 提取 GATEWAY_RECON_FIELDS（31 列）
+    const gwMatch = preloadSrc.match(/const GATEWAY_RECON_FIELDS = Object\.freeze\(\[([\s\S]*?)\]\);/);
+    assert(gwMatch, 'P1.3 preload.js 缺 GATEWAY_RECON_FIELDS inline 副本');
+    const preloadGwCols = gwMatch[1].match(/'([^']+)'/g).map((s) => s.slice(1, -1));
+    assert.deepStrictEqual(preloadGwCols, GATEWAY_RECON_FIELDS, 'P1.4 GATEWAY_RECON_FIELDS preload 与 src/constants 不同步');
+    // 虚拟字段
+    assert(preloadSrc.includes("const BANK_STATEMENT_VIRTUAL_AMOUNT_ABS = '发生额绝对值'"), 'P1.5 BANK_STATEMENT_VIRTUAL_AMOUNT_ABS preload 不同步');
   }
 
   // ===== S1（self-review #2）：sanitizeFileName Windows / macOS 跨平台兜底 =====
@@ -227,7 +256,7 @@ async function runBankStatementIoSmokeTests() {
   // 清理
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
-  console.log('  bank-statement-io: 12/12 PASS');
+  console.log('  bank-statement-io: 13/13 PASS');
 }
 
 module.exports = {

@@ -46,7 +46,12 @@
       escapeHtml,
       desktopApi,
       applyStatementResult,
-      closeAllNewAccountCurrencyDropdowns
+      closeAllNewAccountCurrencyDropdowns,
+      // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情
+      createScenarioConfigDialogC1,
+      createScenarioConfigDialogC2,
+      createScenarioConfigDialogC3,
+      createScenarioConfirmDetailDialog
     } = deps;
 
     function applyNewAccountPreviewState() {
@@ -773,6 +778,112 @@
       }, 120);
     }
 
+    // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 preview
+    function applyScenarioConfigC1PreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      state.scenarioDraft = {
+        mode: 'create',
+        category: 'extract-recon-id',
+        scenarioId: null,
+        name: '从银行对账单的信息里提取对账ID',
+        priority: 3,
+        config: {
+          conditions: [
+            { field: 'CustomerRef', op: '包含', value: 'AFT' },
+            { field: 'Extra Information', op: '包含', value: 'AFT' }
+          ],
+          extractByFeature: {
+            enabled: true,
+            searchFields: ['CustomerRef', 'Extra Information'],
+            featureCode: 'FT',
+            digitCount: 12,
+            totalLength: 15
+          },
+          extractByOtherField: null
+        }
+      };
+      setTimeout(() => {
+        openModal(createScenarioConfigDialogC1());
+      }, 120);
+    }
+
+    function applyScenarioConfigC2PreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      state.scenarioDraft = {
+        mode: 'create',
+        category: 'offset-bill-mark',
+        scenarioId: null,
+        name: 'outbound改标为outbound Fail',
+        priority: 2,
+        config: {
+          billTypes: [
+            { seq: 1, field: 'FundType', op: '等于', value: 'outbound Fail' },
+            { seq: 2, field: 'FundType', op: '等于', value: 'outbound' }
+          ],
+          reconFields: [
+            { seq: 1, leftType: 1, leftField: 'CustomerRef', rightType: 2, rightField: 'CustomerRef' },
+            { seq: 2, leftType: 1, leftField: 'Credit Amount', rightType: 2, rightField: 'Debit Amount' }
+          ],
+          markValue: { type: 2, field: 'FundType', value: 'outbound Fail' }
+        }
+      };
+      setTimeout(() => {
+        openModal(createScenarioConfigDialogC2());
+      }, 120);
+    }
+
+    function applyScenarioConfigC3PreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      state.scenarioDraft = {
+        mode: 'create',
+        category: 'gateway-recon-join',
+        scenarioId: null,
+        name: '与网关对账单根据金额币种一对一匹配对账ID',
+        priority: 1,
+        config: {
+          reconFields: [
+            { seq: 1, gwField: 'Currency', bankField: 'Currency' },
+            { seq: 2, gwField: 'Amount', bankField: '发生额绝对值' },
+            { seq: 3, gwField: 'MerchantId', bankField: 'MerchantId' },
+            { seq: 4, gwField: 'Bank', bankField: 'Channel' }
+          ],
+          assign: { gwField: 'reconciliationId', bankField: 'ReconciliationId' }
+        }
+      };
+      setTimeout(() => {
+        openModal(createScenarioConfigDialogC3());
+      }, 120);
+    }
+
+    function applyScenarioConfirmDetailPreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      // 预填 C1 配置然后进入确认详情
+      state.scenarioDraft = {
+        mode: 'create',
+        category: 'extract-recon-id',
+        scenarioId: null,
+        name: '从银行对账单的信息里提取对账ID',
+        priority: 3,
+        config: {
+          conditions: [
+            { field: 'CustomerRef', op: '包含', value: 'AFT' },
+            { field: 'Extra Information', op: '包含', value: 'BFT' }
+          ],
+          extractByFeature: {
+            enabled: true,
+            searchFields: ['CustomerRef', 'Extra Information', 'Payment Detail'],
+            featureCode: 'FT',
+            digitCount: 12,
+            totalLength: 15
+          },
+          extractByOtherField: null
+        }
+      };
+      setTimeout(() => {
+        openModal(createScenarioConfirmDetailDialog());
+      }, 120);
+    }
+
     return {
       applyNewAccountPreviewState,
       applyTemplateManagerPreviewState,
@@ -812,7 +923,12 @@
       // v2.0.0-beta.3：银行对账单处理模块 preview（3 张）
       applyBankStatementPanelPreviewState,
       applyScenariosManagerPreviewState,
-      applyScenarioCategorySelectPreviewState
+      applyScenarioCategorySelectPreviewState,
+      // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 preview（4 张）
+      applyScenarioConfigC1PreviewState,
+      applyScenarioConfigC2PreviewState,
+      applyScenarioConfigC3PreviewState,
+      applyScenarioConfirmDetailPreviewState
     };
   }
 

@@ -4,16 +4,16 @@
 
 | 字段 | 值 |
 |---|---|
-| 版本 | v2.0.0-beta.2 |
-| 扫描时间 | 2026-4-29 14:20:54 |
+| 版本 | v2.0.0-beta.3 |
+| 扫描时间 | 2026-4-29 22:59:37 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 54 |
-| 顶层声明总数 | 527 |
-| ≥2 次引用 | 454 |
-| 跨 ≥3 文件 (A-share) | 90 |
-| 跨 2 文件 (A-pair) | 135 |
-| 单文件 (A-local) | 229 |
-| 跨文件合计 (B) | 225 |
+| 顶层声明总数 | 540 |
+| ≥2 次引用 | 468 |
+| 跨 ≥3 文件 (A-share) | 94 |
+| 跨 2 文件 (A-pair) | 137 |
+| 单文件 (A-local) | 237 |
+| 跨文件合计 (B) | 231 |
 
 ---
 
@@ -27,22 +27,24 @@
 | `FileValidationError` | 10 | 49 | 6 | src/backend/balance-seed-store.js |
 | `PENDING_COLUMNS` | 9 | 33 | 9 | src/backend/pending-db/migrations.js |
 | `XLSX` | 7 | 49 | 7 | src/backend/file-service/normalizers.js |
-| `dialog` | 5 | 288 | 1 | src/main.js |
-| `setCurrentModule` | 5 | 42 | 2 | src/backend/database/settings-repository.js |
+| `dialog` | 5 | 343 | 1 | src/main.js |
+| `setCurrentModule` | 5 | 46 | 2 | src/backend/database/settings-repository.js |
 | `parseNumericValue` | 5 | 26 | 2 | src/backend/balance-seed-store.js |
 | `readRows` | 5 | 12 | 2 | src/backend/bank-account-import.js |
 | `saveMappings` | 5 | 9 | 1 | src/backend/database/template-repository.js |
 | `deleteTemplate` | 5 | 7 | 1 | src/backend/database/template-repository.js |
-| `state` | 4 | 220 | 1 | src/renderer.js |
-| `elements` | 4 | 158 | 1 | src/renderer.js |
-| `pad` | 4 | 27 | 2 | src/backend/logger.js |
+| `state` | 4 | 249 | 1 | src/renderer.js |
+| `elements` | 4 | 167 | 1 | src/renderer.js |
+| `pad` | 4 | 32 | 2 | src/backend/logger.js |
 | `FIXED_FIELD_VALUE_PREFIX` | 4 | 21 | 2 | src/backend/database/utils.js |
+| `BANK_STATEMENT_FIELDS` | 4 | 17 | 3 | src/constants/bank-statement-fields.js |
 | `MERCHANT_ID_SELF_INPUT_OPTION` | 4 | 17 | 2 | src/main.js |
 | `normalizeCellValue` | 4 | 16 | 1 | src/main-process/scenario-engines/engine-utils.js |
 | `BALANCE_CALCULATED_OPTION` | 4 | 14 | 2 | src/main.js |
 | `ADVANCED_MAPPING_FIELDS` | 4 | 11 | 2 | src/main.js |
 | `parseDateValue` | 4 | 11 | 1 | src/backend/file-service/normalizers.js |
 | `app` | 4 | 10 | 1 | src/main.js |
+| `GATEWAY_RECON_FIELDS` | 4 | 9 | 3 | src/constants/gateway-recon-fields.js |
 | `DatabaseSync` | 4 | 8 | 4 | src/backend/database.js |
 | `ensureRowId` | 4 | 8 | 1 | src/main-process/scenario-engines/engine-utils.js |
 | `listTemplates` | 4 | 8 | 1 | src/backend/database/template-repository.js |
@@ -80,9 +82,11 @@
 | `AMOUNT_BASED_NAME_MAPPING_FIELD` | 3 | 8 | 2 | src/main.js |
 | `AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION` | 3 | 8 | 2 | src/main.js |
 | `AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD` | 3 | 8 | 2 | src/main.js |
+| `BANK_STATEMENT_VIRTUAL_AMOUNT_ABS` | 3 | 8 | 3 | src/constants/bank-statement-fields.js |
 | `cloneRowsWithMetadata` | 3 | 8 | 1 | src/main-process/statement-session.js |
 | `getTemplateBigAccounts` | 3 | 8 | 1 | src/backend/database/template-repository.js |
 | `SIGNED_AMOUNT_MAPPING_FIELD` | 3 | 8 | 2 | src/main.js |
+| `BANK_STATEMENT_FIELDS_FOR_C3` | 3 | 7 | 2 | src/constants/bank-statement-fields.js |
 | `normalizeInputFilePaths` | 3 | 7 | 1 | src/main-process/statement-session.js |
 | `compileRegexLiteral` | 3 | 6 | 1 | src/backend/file-service/normalizers.js |
 | `evaluateCondition` | 3 | 6 | 1 | src/main-process/scenario-engines/engine-utils.js |
@@ -116,7 +120,7 @@
 
 | 名字 | 总次数 | 声明位置（首个） |
 |---|---:|---|
-| `MODULES` | 43 | src/renderer.js |
+| `MODULES` | 48 | src/renderer.js |
 | `templateRepository` | 33 | src/backend/database.js |
 | `emit` | 20 | src/backend/pending-import/worker.js |
 | `settingsRepository` | 18 | src/backend/database.js |
@@ -139,6 +143,7 @@
 | `parseNumber` | 7 | src/main-process/scenario-engines/engine-utils.js |
 | `roundAmount` | 7 | src/backend/file-service/normalizers.js |
 | `syncNewAccountCurrencyMode` | 7 | src/renderer.js |
+| `bankStatementSession` | 6 | src/main.js |
 | `buildTemplateSummaryFromRow` | 6 | src/backend/database/utils.js |
 | `closeAllNewAccountCurrencyDropdowns` | 6 | src/renderer.js |
 | `ensureAccountMappingCurrencySupport` | 6 | src/backend/database/migrations.js |
@@ -146,6 +151,8 @@
 | `ensureAmountSplitRulesSupport` | 6 | src/backend/database/migrations.js |
 | `ensureBillSplitMergeSupport` | 6 | src/backend/database/migrations.js |
 | `ensureBillSplitTargetSeqSupport` | 6 | src/backend/database/migrations.js |
+| `ensureBuiltinScenarioNamesUpdate` | 6 | src/backend/database/migrations.js |
+| `ensureC3GwFieldCurrencyCaseFix` | 6 | src/backend/database/migrations.js |
 | `ensureParentTemplateSupport` | 6 | src/backend/database/migrations.js |
 | `ensureScenariosSupport` | 6 | src/backend/database/migrations.js |
 | `ensureTemplateBigAccountNatureSupport` | 6 | src/backend/database/migrations.js |
@@ -153,16 +160,16 @@
 | `ensureTemplateFilenameFixedFieldSupport` | 6 | src/backend/database/migrations.js |
 | `ensureTemplateKeySupport` | 6 | src/backend/database/migrations.js |
 | `ensureTemplateMappingEnhancements` | 6 | src/backend/database/migrations.js |
+| `gatewayReconSession` | 6 | src/main.js |
 | `getCurrencyOptionLabel` | 6 | src/renderer.js |
 | `matchAmountSplitConditionValue` | 6 | src/backend/file-service/normalizers.js |
 | `normalizeDateExportValue` | 6 | src/backend/file-service/normalizers.js |
 | `openBackgroundPalette` | 6 | src/renderer.js |
+| `processingResult` | 6 | src/main.js |
 | `setExportAvailability` | 6 | src/renderer.js |
 | `splitSignedAmountValue` | 6 | src/backend/file-service/normalizers.js |
 | `updateNewAccountGenerateAvailability` | 6 | src/renderer.js |
 | `applyHeaderRowFont` | 5 | src/backend/file-service/writers.js |
-| `BANK_STATEMENT_FIELDS` | 5 | src/constants/bank-statement-fields.js |
-| `BANK_STATEMENT_VIRTUAL_AMOUNT_ABS` | 5 | src/constants/bank-statement-fields.js |
 | `ensureSupportedFile` | 5 | src/backend/file-service/readers.js |
 | `getBillSplitAmountRules` | 5 | src/backend/database/template-repository.js |
 | `getBillSplitMappings` | 5 | src/backend/database/template-repository.js |
@@ -187,7 +194,6 @@
 | `deleteScenario` | 4 | src/backend/database/scenarios-repository.js |
 | `ensureUiStyleDefault` | 4 | src/backend/database/settings-repository.js |
 | `extractEnumValuesFromImportedFile` | 4 | src/backend/file-service/readers.js |
-| `GATEWAY_RECON_FIELDS` | 4 | src/constants/gateway-recon-fields.js |
 | `getBackgroundConfig` | 4 | src/backend/database/settings-repository.js |
 | `getCurrencySuggestion` | 4 | src/renderer.js |
 | `getCurrentModule` | 4 | src/backend/database/settings-repository.js |
@@ -295,6 +301,7 @@
 |---|---:|
 | `VALID_CATEGORIES` | 4 |
 | `validateEnabled` | 4 |
+| `calculateNextScenarioId` | 3 |
 | `rowToListItem` | 3 |
 | `serializeConfig` | 3 |
 | `validateName` | 3 |
@@ -488,6 +495,7 @@
 | 名字 | 总次数 |
 |---|---:|
 | `ipcRenderer` | 89 |
+| `contextBridge` | 3 |
 
 ### `src/renderer.js`
 
@@ -511,6 +519,7 @@
 | `closeModuleMenu` | 6 |
 | `closeNewAccountCurrencyDropdown` | 6 |
 | `mixColor` | 6 |
+| `refreshBankStatementStatus` | 6 |
 | `updateNewAccountCurrencyDropdownLabel` | 6 |
 | `DEFAULT_BACKGROUND_SETTINGS` | 5 |
 | `DEFAULT_SPECTRUM_PICK_COLOR` | 5 |
@@ -525,6 +534,7 @@
 | `renderNewAccountCurrencyOptionsList` | 4 |
 | `resetBackgroundPickerSelection` | 4 |
 | `syncNewAccountDropdownFlag` | 4 |
+| `updateBankStatementUi` | 4 |
 | `updateNewAccountCurrencySuggestion` | 4 |
 | `applyUiStyle` | 3 |
 | `BACKGROUND_FILE_HINT` | 3 |
@@ -547,22 +557,24 @@
 | `FileValidationError` | 10 | 49 | 6 | src/backend/file-service/readers.js(17), src/backend/file-service/normalizers.js(7), src/main-process/bank-statement-io.js(7) |
 | `PENDING_COLUMNS` | 9 | 33 | 9 | src/backend/pending-export/writer.js(6), src/backend/pending-import/validator.js(6), src/main-process/pending-session.js(6) |
 | `XLSX` | 7 | 49 | 7 | src/backend/file-service/writers.js(20), src/backend/pending-export/writer.js(9), src/main-process/pending-session.js(9) |
-| `dialog` | 5 | 288 | 1 | src/renderer-dialogs.js(184), src/renderer.js(71), src/renderer-pending.js(26) |
-| `setCurrentModule` | 5 | 42 | 2 | src/renderer-previews.js(32), src/renderer.js(5), src/backend/database.js(2) |
+| `dialog` | 5 | 343 | 1 | src/renderer-dialogs.js(239), src/renderer.js(71), src/renderer-pending.js(26) |
+| `setCurrentModule` | 5 | 46 | 2 | src/renderer-previews.js(36), src/renderer.js(5), src/backend/database.js(2) |
 | `parseNumericValue` | 5 | 26 | 2 | src/backend/file-service.js(14), src/backend/file-service/writers.js(6), src/backend/file-service/normalizers.js(4) |
 | `readRows` | 5 | 12 | 2 | src/backend/file-service/readers.js(4), src/backend/file-service.js(3), src/backend/bank-account-import.js(2) |
 | `saveMappings` | 5 | 9 | 1 | src/renderer-dialogs.js(3), src/backend/database.js(2), src/backend/database/template-repository.js(2) |
 | `deleteTemplate` | 5 | 7 | 1 | src/backend/database.js(2), src/backend/database/template-repository.js(2), src/preload.js(1) |
-| `state` | 4 | 220 | 1 | src/renderer.js(130), src/renderer-pending.js(54), src/renderer-previews.js(26) |
-| `elements` | 4 | 158 | 1 | src/renderer.js(114), src/renderer-previews.js(23), src/renderer-pending.js(17) |
-| `pad` | 4 | 27 | 2 | src/backend/logger.js(11), src/main-process/bank-statement-io.js(9), src/main-process/pending-session.js(6) |
+| `state` | 4 | 249 | 1 | src/renderer.js(148), src/renderer-pending.js(54), src/renderer-previews.js(30) |
+| `elements` | 4 | 167 | 1 | src/renderer.js(123), src/renderer-previews.js(23), src/renderer-pending.js(17) |
+| `pad` | 4 | 32 | 2 | src/main-process/bank-statement-io.js(14), src/backend/logger.js(11), src/main-process/pending-session.js(6) |
 | `FIXED_FIELD_VALUE_PREFIX` | 4 | 21 | 2 | src/backend/file-service.js(13), src/backend/database/utils.js(5), src/backend/file-service/common.js(2) |
+| `BANK_STATEMENT_FIELDS` | 4 | 17 | 3 | src/renderer-dialogs.js(9), src/constants/bank-statement-fields.js(3), src/preload.js(3) |
 | `MERCHANT_ID_SELF_INPUT_OPTION` | 4 | 17 | 2 | src/renderer.js(8), src/renderer-dialogs.js(6), src/renderer-previews.js(2) |
 | `normalizeCellValue` | 4 | 16 | 1 | src/main-process/scenario-engines/engine-utils.js(6), src/main-process/scenario-engines/c1-extract-recon-id.js(4), src/main-process/scenario-engines/c2-offset-bill-mark.js(3) |
 | `BALANCE_CALCULATED_OPTION` | 4 | 14 | 2 | src/renderer-dialogs.js(5), src/renderer.js(5), src/renderer-previews.js(3) |
 | `ADVANCED_MAPPING_FIELDS` | 4 | 11 | 2 | src/renderer-previews.js(4), src/renderer.js(4), src/renderer-dialogs.js(2) |
 | `parseDateValue` | 4 | 11 | 1 | src/backend/file-service.js(4), src/backend/file-service/writers.js(4), src/backend/file-service/normalizers.js(2) |
 | `app` | 4 | 10 | 1 | src/main.js(4), src/renderer.js(4), src/preload.js(1) |
+| `GATEWAY_RECON_FIELDS` | 4 | 9 | 3 | src/renderer-dialogs.js(3), src/constants/gateway-recon-fields.js(2), src/main-process/bank-statement-io.js(2) |
 | `DatabaseSync` | 4 | 8 | 4 | src/backend/database.js(2), src/backend/pending-db.js(2), src/backend/pending-import/worker.js(2) |
 | `ensureRowId` | 4 | 8 | 1 | src/main-process/scenario-engines/c1-extract-recon-id.js(2), src/main-process/scenario-engines/c2-offset-bill-mark.js(2), src/main-process/scenario-engines/c3-gateway-recon-join.js(2) |
 | `listTemplates` | 4 | 8 | 1 | src/backend/database/template-repository.js(3), src/backend/database.js(2), src/main-process/monthly-balance.js(2) |
@@ -600,9 +612,11 @@
 | `AMOUNT_BASED_NAME_MAPPING_FIELD` | 3 | 8 | 2 | src/renderer-previews.js(3), src/renderer.js(3), src/main.js(2) |
 | `AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION` | 3 | 8 | 2 | src/renderer-dialogs.js(5), src/renderer.js(2), src/main.js(1) |
 | `AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD` | 3 | 8 | 2 | src/renderer-dialogs.js(3), src/renderer.js(3), src/main.js(2) |
+| `BANK_STATEMENT_VIRTUAL_AMOUNT_ABS` | 3 | 8 | 3 | src/constants/bank-statement-fields.js(3), src/preload.js(3), src/main-process/scenario-engines/c3-gateway-recon-join.js(2) |
 | `cloneRowsWithMetadata` | 3 | 8 | 1 | src/main-process/statement-session.js(5), src/main-process/statement-generation.js(2), src/main.js(1) |
 | `getTemplateBigAccounts` | 3 | 8 | 1 | src/backend/database/template-repository.js(4), src/backend/database.js(2), src/main-process/monthly-balance.js(2) |
 | `SIGNED_AMOUNT_MAPPING_FIELD` | 3 | 8 | 2 | src/renderer-previews.js(3), src/renderer.js(3), src/main.js(2) |
+| `BANK_STATEMENT_FIELDS_FOR_C3` | 3 | 7 | 2 | src/renderer-dialogs.js(3), src/constants/bank-statement-fields.js(2), src/preload.js(2) |
 | `normalizeInputFilePaths` | 3 | 7 | 1 | src/main-process/statement-generation.js(4), src/main-process/statement-session.js(2), src/main.js(1) |
 | `compileRegexLiteral` | 3 | 6 | 1 | src/backend/file-service/normalizers.js(3), src/backend/file-service.js(2), src/main.js(1) |
 | `evaluateCondition` | 3 | 6 | 1 | src/main-process/scenario-engines/c1-extract-recon-id.js(2), src/main-process/scenario-engines/c2-offset-bill-mark.js(2), src/main-process/scenario-engines/engine-utils.js(2) |
@@ -631,7 +645,7 @@
 | `writeErrorReport` | 3 | 4 | 1 | src/main-process/exceljs-writer.js(2), src/main-process/bank-statement-io.js(1), src/main.js(1) |
 | `createHash` | 3 | 3 | 1 | src/backend/pending-import/validator.js(1), src/backend/pending-reconcile/engine.js(1), src/main.js(1) |
 | `sanitizeFileName` | 3 | 3 | 3 | src/backend/balance-seed-store.js(1), src/main-process/bank-statement-io.js(1), src/main.js(1) |
-| `MODULES` | 2 | 43 | 1 | src/renderer-previews.js(32), src/renderer.js(11) |
+| `MODULES` | 2 | 48 | 1 | src/renderer-previews.js(36), src/renderer.js(12) |
 | `templateRepository` | 2 | 33 | 2 | src/backend/database.js(30), src/backend/database/own-accounts-migration.js(3) |
 | `emit` | 2 | 20 | 2 | src/backend/pending-import/worker.js(10), src/main-process/pending-archive-worker.js(10) |
 | `settingsRepository` | 2 | 18 | 2 | src/backend/database.js(14), src/backend/database/own-accounts-migration.js(4) |
@@ -654,6 +668,7 @@
 | `parseNumber` | 2 | 7 | 1 | src/main-process/scenario-engines/engine-utils.js(4), src/main-process/scenario-engines/c3-gateway-recon-join.js(3) |
 | `roundAmount` | 2 | 7 | 1 | src/backend/file-service/normalizers.js(5), src/backend/file-service.js(2) |
 | `syncNewAccountCurrencyMode` | 2 | 7 | 1 | src/renderer.js(5), src/renderer-previews.js(2) |
+| `bankStatementSession` | 2 | 6 | 1 | src/renderer.js(5), src/main.js(1) |
 | `buildTemplateSummaryFromRow` | 2 | 6 | 1 | src/backend/database/template-repository.js(4), src/backend/database/utils.js(2) |
 | `closeAllNewAccountCurrencyDropdowns` | 2 | 6 | 1 | src/renderer.js(5), src/renderer-previews.js(1) |
 | `ensureAccountMappingCurrencySupport` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
@@ -661,6 +676,8 @@
 | `ensureAmountSplitRulesSupport` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `ensureBillSplitMergeSupport` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `ensureBillSplitTargetSeqSupport` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
+| `ensureBuiltinScenarioNamesUpdate` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
+| `ensureC3GwFieldCurrencyCaseFix` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `ensureParentTemplateSupport` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `ensureScenariosSupport` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `ensureTemplateBigAccountNatureSupport` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
@@ -668,16 +685,16 @@
 | `ensureTemplateFilenameFixedFieldSupport` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `ensureTemplateKeySupport` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `ensureTemplateMappingEnhancements` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
+| `gatewayReconSession` | 2 | 6 | 1 | src/renderer.js(5), src/main.js(1) |
 | `getCurrencyOptionLabel` | 2 | 6 | 1 | src/renderer.js(5), src/renderer-dialogs.js(1) |
 | `matchAmountSplitConditionValue` | 2 | 6 | 1 | src/backend/file-service.js(4), src/backend/file-service/normalizers.js(2) |
 | `normalizeDateExportValue` | 2 | 6 | 1 | src/backend/file-service.js(3), src/backend/file-service/normalizers.js(3) |
 | `openBackgroundPalette` | 2 | 6 | 1 | src/renderer.js(5), src/renderer-previews.js(1) |
+| `processingResult` | 2 | 6 | 1 | src/renderer.js(5), src/main.js(1) |
 | `setExportAvailability` | 2 | 6 | 1 | src/renderer.js(5), src/renderer-previews.js(1) |
 | `splitSignedAmountValue` | 2 | 6 | 1 | src/backend/file-service.js(4), src/backend/file-service/normalizers.js(2) |
 | `updateNewAccountGenerateAvailability` | 2 | 6 | 1 | src/renderer.js(4), src/renderer-previews.js(2) |
 | `applyHeaderRowFont` | 2 | 5 | 2 | src/backend/file-service/writers.js(3), src/backend/pending-export/writer.js(2) |
-| `BANK_STATEMENT_FIELDS` | 2 | 5 | 2 | src/constants/bank-statement-fields.js(3), src/main-process/bank-statement-io.js(2) |
-| `BANK_STATEMENT_VIRTUAL_AMOUNT_ABS` | 2 | 5 | 2 | src/constants/bank-statement-fields.js(3), src/main-process/scenario-engines/c3-gateway-recon-join.js(2) |
 | `ensureSupportedFile` | 2 | 5 | 1 | src/backend/file-service/readers.js(3), src/backend/file-service.js(2) |
 | `getBillSplitAmountRules` | 2 | 5 | 1 | src/backend/database/template-repository.js(3), src/backend/database.js(2) |
 | `getBillSplitMappings` | 2 | 5 | 1 | src/backend/database/template-repository.js(3), src/backend/database.js(2) |
@@ -702,7 +719,6 @@
 | `deleteScenario` | 2 | 4 | 1 | src/backend/database.js(2), src/backend/database/scenarios-repository.js(2) |
 | `ensureUiStyleDefault` | 2 | 4 | 1 | src/backend/database.js(2), src/backend/database/settings-repository.js(2) |
 | `extractEnumValuesFromImportedFile` | 2 | 4 | 1 | src/backend/file-service.js(2), src/backend/file-service/readers.js(2) |
-| `GATEWAY_RECON_FIELDS` | 2 | 4 | 2 | src/constants/gateway-recon-fields.js(2), src/main-process/bank-statement-io.js(2) |
 | `getBackgroundConfig` | 2 | 4 | 1 | src/backend/database.js(2), src/backend/database/settings-repository.js(2) |
 | `getCurrencySuggestion` | 2 | 4 | 1 | src/renderer-dialogs.js(2), src/renderer.js(2) |
 | `getCurrentModule` | 2 | 4 | 1 | src/backend/database.js(2), src/backend/database/settings-repository.js(2) |
