@@ -25,3 +25,15 @@
 - [ ] usage-stats INI-lite parser 手写实现的边界（空行 / 中文 section / 等号在值里 / Windows CRLF）
 - [ ] error-causes 映射的覆盖率（漏映射默认 fallback 是否够好）
 - [ ] 项目长期规则候选：USER_GUIDE 写什么不写什么（spec D8 沉淀到 rules/coding-style.md）
+
+## 2026-04-30 增量需求（实施中追加）
+
+3. **所有导出文件表头字号统一 10pt**
+   - 影响 4 个 writer：exceljs-writer.js（2 处 headerRow.font）+ pending-export/writer.js（applyHeaderRowFont 加 sz）+ pending-session.js（切 xlsx-js-style + 新增 applyHeaderRowFont）
+   - writers.js（主模块）已在 v2.0.0 设过 sz: 10，免改
+   - streaming-xlsx-writer.js（121 万行流式留底）暂保留无字号（流式 OOXML 写出复杂，本 PR 不动）
+   - **决策**：pending-session.js 从 `xlsx`（CE，不支持 styles 写出）切到 `xlsx-js-style`（fork 支持），与其他 writer 包一致
+4. **使用手册另存为格式简化**
+   - main.js#app:save-user-guide：filter 去 `.md`，仅保留 `.html` + `.txt`
+   - 默认格式：HTML（filter 第一项 + defaultPath `使用手册.html`）
+   - 移除 `if (ext === '.md')` 分支（dead code）

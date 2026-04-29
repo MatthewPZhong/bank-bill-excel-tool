@@ -2980,12 +2980,12 @@ function registerAppHandlers() {
 
   ipcMain.handle('app:save-user-guide', async () => {
     try {
+      // v2.0.0 GA：默认 HTML（filters 第一项被 saveDialog 当默认；同时 defaultPath 带 .html 后缀加固）
       const result = await dialog.showSaveDialog(mainWindow, {
-        defaultPath: '使用手册',
+        defaultPath: '使用手册.html',
         filters: [
-          { name: '纯文本文件', extensions: ['txt'] },
-          { name: 'Markdown 文件', extensions: ['md'] },
-          { name: 'HTML 文件', extensions: ['html'] }
+          { name: 'HTML 文件', extensions: ['html'] },
+          { name: '纯文本文件', extensions: ['txt'] }
         ]
       });
 
@@ -2997,9 +2997,7 @@ function registerAppHandlers() {
       const markdown = fs.readFileSync(userGuidePath, 'utf8');
       const ext = path.extname(result.filePath).toLowerCase();
 
-      if (ext === '.md') {
-        fs.writeFileSync(result.filePath, markdown, 'utf8');
-      } else if (ext === '.txt') {
+      if (ext === '.txt') {
         const plainText = stripMarkdown(markdown);
         fs.writeFileSync(result.filePath, plainText, 'utf8');
       } else if (ext === '.html') {

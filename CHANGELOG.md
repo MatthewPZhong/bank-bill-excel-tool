@@ -7,10 +7,13 @@ v2.0.0 GA 正式版（去 beta）。本版本为 v2.0.0-beta 系列收官，包�
 ### 新增（v2.0.0-beta.4）
 
 - **错误报告加「可能原因」列**：3 个模块（生成网银账单 / 月度 Pending / 银行对账单处理）的 error-report 文件统一加「可能原因」字段，文案口语化（如 `多个字段抓到的对账ID不一致，无法判断该用哪个` / `一对多匹配，可能有重复数据`）。统一映射表 `src/backend/file-service/error-causes.js` 覆盖 22+ 已知 code，未知 code fallback `未知错误`。
+- **隐藏 `.usage-stats.txt`**：`~/Documents/网银账单生成小助手/.usage-stats.txt`（dot prefix 隐藏）记录软件打开次数 + 各模块各功能使用次数 + 模块小计 + 总操作次数。`关闭时 flush + 每 5 分钟自动 flush` 混合写盘，原子写入（tmp → rename）。
 
 ### 变更（v2.0.0-beta.4）
 
 - **版本号**：`2.0.0-beta.3` → `2.0.0`（GA 正式版，去 beta）。
+- **所有导出表头字号统一 10pt**：4 处 writer（exceljs-writer.js / pending-export/writer.js / pending-session.js / writers.js 已既有）；pending-session.js 从 `xlsx`（CE）切到 `xlsx-js-style` 以支持 styles 写出。
+- **使用手册另存为简化**：仅保留 `.html` + `.txt` 两种格式，默认 HTML（filter 第一项 + `defaultPath '使用手册.html'`）；去除 `.md` 选项（用户决策——使用手册不应让用户拿到原 markdown）。
 - **smoke 增量**：scripts/smoke 新增 `error-causes`（39 用例）+ `usage-stats`（40 用例），合计 157 PASS。
 
 ### v2.0.0 GA 系列总览（beta.1 → beta.4 全部产物）

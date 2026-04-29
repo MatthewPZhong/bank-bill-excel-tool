@@ -44,9 +44,9 @@ async function writeBankStatementOutput(rows, headers, savePath) {
   const sheetData = buildSheetData(rows, headers);
   sheetData.forEach((rowValues) => sheet.addRow(rowValues));
 
-  // 表头加粗
+  // 表头加粗 + 字号 10（v2.0.0 GA：所有导出表头统一 size 10）
   const headerRow = sheet.getRow(1);
-  headerRow.font = { bold: true };
+  headerRow.font = { bold: true, size: 10 };
 
   // 标黄：rows 中每行的 _modifiedColumns 对应的单元格
   rows.forEach((row, rowIdx) => {
@@ -72,7 +72,8 @@ async function writeErrorReport(warnings, savePath) {
 
   const headers = ['时间戳', '场景名', '行号', '原因', '可能原因'];
   sheet.addRow(headers);
-  sheet.getRow(1).font = { bold: true };
+  // 表头加粗 + 字号 10（v2.0.0 GA：所有导出表头统一 size 10）
+  sheet.getRow(1).font = { bold: true, size: 10 };
 
   const timestamp = new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
   warnings.forEach((w) => {

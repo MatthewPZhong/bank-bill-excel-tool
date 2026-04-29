@@ -4,12 +4,31 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const XLSX = require('xlsx');
+// v2.0.0 GA：切到 xlsx-js-style 以支持表头字号样式（与其他 writer 一致）
+const XLSX = require('xlsx-js-style');
 
 const PENDING_COLUMNS = require('../backend/pending-db/columns');
 const monthRepo = require('../backend/pending-db/month-repository');
 // v2.0.0-beta.4：error-report 加「可能原因」列
 const { errorCodeToCause } = require('../backend/file-service/error-causes');
+
+// v2.0.0 GA：表头字号统一 10pt（与其他 writer 一致）
+function applyHeaderRowFont(worksheet, headerRowIndex = 0) {
+  if (!worksheet || !worksheet['!ref']) return;
+  const range = XLSX.utils.decode_range(worksheet['!ref']);
+  if (headerRowIndex < range.s.r || headerRowIndex > range.e.r) return;
+  for (let c = range.s.c; c <= range.e.c; c += 1) {
+    const addr = XLSX.utils.encode_cell({ r: headerRowIndex, c });
+    const cell = worksheet[addr];
+    if (!cell) continue;
+    const existingStyle = cell.s || {};
+    const existingFont = existingStyle.font || {};
+    cell.s = {
+      ...existingStyle,
+      font: { ...existingFont, sz: 10 }
+    };
+  }
+}
 
 const WORKER_SCRIPT = path.resolve(__dirname, '../backend/pending-import/worker.js');
 const ARCHIVE_WORKER_SCRIPT = path.resolve(__dirname, './pending-archive-worker.js');
@@ -69,6 +88,7 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
       aoa.push(PENDING_COLUMNS.map((c) => (r[c] == null ? '' : r[c])));
     }
     const ws = XLSX.utils.aoa_to_sheet(aoa);
+    applyHeaderRowFont(ws);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
     XLSX.writeFile(wb, archivePath);
@@ -242,6 +262,7 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
       ]);
     }
     const ws = XLSX.utils.aoa_to_sheet(rows);
+    applyHeaderRowFont(ws);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '错误报告');
     XLSX.writeFile(wb, savePath);
