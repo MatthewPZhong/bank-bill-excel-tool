@@ -39,10 +39,10 @@
 3. **银行对账单 IO**：导入（44 列校验）+ 标黄输出（exceljs，仅修改行）
 4. **资金对账文件 IO**：导入「网关账单」sheet（31 列校验）
 5. **error-report xlsx 输出**：4 列（时间戳 / 场景名 / 行号 / 原因）
-6. **4 个新 IPC handler**：bank-statement:import / gateway-recon:import / bank-statement:run / bank-statement:export
+6. **5 个新 IPC handler**：bank-statement:import / gateway-recon:import / bank-statement:run / bank-statement:export / bank-statement:session-status（PR #32b renderer 同步用）
 7. **session state**（main 进程）：bankStatementSession / gatewayReconSession / processingResult
-8. **preload 暴露**：`desktopApi.bankStatement.{import, importGatewayRecon, run, export}`
-9. **smoke 测试**：dispatcher 5 用例 + IO 读写 round-trip 用例
+8. **preload 暴露**：`desktopApi.bankStatement.{import, importGatewayRecon, run, export, sessionStatus}`
+9. **smoke 测试**：dispatcher 11 用例（D1-D9 + 2 helper unit）+ exceljs-writer 3 + IO 11 用例（R1-R6 + W1-W4 + F1）；总 smoke 48/48 PASS
 
 ### 不做（移到 PR #32b）
 
@@ -160,10 +160,15 @@
 #### F4.4 `bank-statement:export`
 
 - 检查 `state.processingResult`（未运行 → error）
-- 若 modifiedRows.length === 0 → `{ status: 'empty' }`（renderer 显示"无修改记录"）
-- 调 F3.3 writeBankStatementMainOutput → 拿 mainFilePath
-- 若 errorReport.length > 0：调 F3.4 writeErrorReport → 拿 errorReportPath
-- 返回 `{ status: 'ok', mainFilePath, errorReportPath }`
+- **先调 F3.4 writeErrorReportOutput**（如 warnings 非空，独立于主输出落盘 — Codex Round 2 F1 修订）
+- 若 modifiedRows.length === 0 → `{ status: 'empty', errorReportPath }`（renderer 显示"无修改记录"+ error-report 路径）
+- 否则调 F3.3 writeBankStatementMainOutput → 拿 mainFilePath
+- 返回 `{ status: 'ok', mainFilePath, mainFileName, errorReportPath, errorReportName }`
+
+#### F4.5 `bank-statement:session-status`（新增）
+
+- 返回 `{ hasBankStatement, bankStatementFileName, bankStatementRowCount, hasGatewayRecon, gatewayReconFileName, gatewayReconRowCount, hasProcessingResult, processingStats }`
+- PR #32b renderer 启动时 / 模块切换时 / 取消弹窗后用此同步 statusBox 状态
 
 ### F5 — preload 暴露
 
@@ -174,7 +179,8 @@ desktopApi.bankStatement = {
   import: () => ipcRenderer.invoke('bank-statement:import'),
   importGatewayRecon: () => ipcRenderer.invoke('gateway-recon:import'),
   run: () => ipcRenderer.invoke('bank-statement:run'),
-  export: () => ipcRenderer.invoke('bank-statement:export')
+  export: () => ipcRenderer.invoke('bank-statement:export'),
+  sessionStatus: () => ipcRenderer.invoke('bank-statement:session-status')
 }
 ```
 
@@ -182,23 +188,42 @@ desktopApi.bankStatement = {
 
 #### F6.1 `scripts/smoke/scenario-dispatcher.js`（新）
 
-5 用例：
+11 用例（含 Codex 3 轮修复回归）：
 - D1: 单 C1 命中 → modifiedRows.length 正确
 - D2: 单 C2 命中 → 双锁（leftRow + rightRow 都进 modifiedRows）
 - D3: first-match-wins：C1 优先级 3 + C3 优先级 1 同行 → C1 命中后 C3 不再处理该行
 - D4: gwRows = null → C3 类场景被过滤掉（不参与调度）
 - D5: 全部场景 disabled → modifiedRows.length === 0
+- D6（Codex Round 1 F1 P1 回归）：dispatcher in-place 修改特性反向证明（连续两次 in-place 跑结果漂移）
+- D7（Codex Round 1 F1 P1 回归）：clone 后两次跑结果幂等
+- D8（Codex Round 2 F1 P1 回归）：C1 多字段不一致 → modifiedRows=[] + errorReport 非空
+- D9（Codex Round 3 F1 P2 回归）：gwRows=[] + C3 → modifiedRows=[] + errorReport 含 'no-gateway-rows'
+- 2 个 helper unit 测试：`sortScenariosByPriority` + `filterScenariosByGwAvailability`
 
 #### F6.2 `scripts/smoke/bank-statement-io.js`（新）
 
-3 用例：
-- I1: 写主输出 + 读回验证标黄（exceljs.read 校验 cell.fill）
-- I2: 写 error-report + 读回验证 4 列
-- I3: 校验异常（44 列缺列 / 31 列缺 sheet → 抛 FileValidationError）
+11 用例：
+- R1: readBankStatement 正常路径（44 列 + _rowId 注入）
+- R2: 缺 sheet `渠道对账单` → FileValidationError(missing-sheet)
+- R3: 列数不符 → FileValidationError(invalid-column-count)
+- R4: 列名错位 → FileValidationError(invalid-column-name)
+- R5: readGatewayRecon 正常（多 sheet 中定位「网关账单」）
+- R6: 缺 sheet「网关账单」→ FileValidationError(missing-sheet)
+- W1: writeBankStatementMainOutput 单一场景文件名 + 标黄 round-trip
+- W2: writeBankStatementMainOutput 多场景文件名
+- W3: writeErrorReportOutput 4 列 round-trip
+- W4: writeErrorReportOutput 空 warnings → 返回 null
+- F1: buildMainOutputFileName 空命中场景
 
-#### F6.3 接入
+#### F6.3 exceljs-writer round-trip（在 scenario-dispatcher.js 内）
 
-`scripts/smoke-test.js` 加 `runScenarioDispatcherSmokeTests()` + `runBankStatementIoSmokeTests()`。
+3 用例（I1/I2/I3）：标黄写读 / error-report 4 列 / 空数据写出。
+
+#### F6.4 接入
+
+`scripts/smoke-test.js` 改 async runner，加 `runScenarioDispatcherSmokeTests()` + `runExceljsWriterSmokeTests()` + `runBankStatementIoSmokeTests()`。
+
+总 smoke：**48/48 PASS**（scenario-engines 23 + dispatcher 11 + exceljs-writer 3 + bank-statement-io 11）
 
 ## 5. 影响范围
 
@@ -299,7 +324,7 @@ desktopApi.bankStatement = {
 - first-match-wins 锁机制错位 → 全行错过 / 重复改
 
 **强制要求**：
-- F6.1 dispatcher smoke 5 用例必须 PASS
+- F6.1 dispatcher smoke 11 用例必须 PASS（含 Codex D6/D7/D8/D9 回归）
 - PR body 高亮"⚠️ 资金红线"段落
 - 用户样例文件 dry-run 移到 PR #32b（前端接入后才能完整跑用户工作流）
 
@@ -330,8 +355,8 @@ desktopApi.bankStatement = {
 1. ✅ 落 spec 三件套（本文件）
 2. `npm install exceljs` + 验证版本
 3. `src/main-process/exceljs-writer.js`（150 行）+ smoke I1（写 + 读回验证标黄）
-4. `src/main-process/scenario-dispatcher.js`（200 行）+ smoke F6.1 5 用例
-5. `src/main-process/bank-statement-io.js`（400 行）+ smoke F6.2 3 用例
+4. `src/main-process/scenario-dispatcher.js`（200 行）+ smoke F6.1 11 用例（含 Codex 4 轮修复后的 D6-D9 回归）
+5. `src/main-process/bank-statement-io.js`（400 行）+ smoke F6.2 11 用例
 6. `src/main.js` 4 IPC handler + session state（250 行）
 7. `src/preload.js` 暴露 4 channel
 8. `npm run smoke` 全量 PASS
