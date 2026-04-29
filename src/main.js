@@ -9206,7 +9206,9 @@ function flushUsageStats() {
     usageStatsModule.saveStats(ensureStorageRoot(), usageStats);
     usageStatsDirty = false;
   } catch (err) {
-    console.warn('[usage-stats] flush failed:', err && err.message);
+    // PR #34 Codex round 1 P2：写盘失败保留 dirty 让下次 tick 重试
+    // （原实现无论成败都清 dirty，磁盘满 / 权限错时 session 计数静默丢失）
+    console.warn('[usage-stats] flush failed (will retry next tick):', err && err.message);
   }
 }
 

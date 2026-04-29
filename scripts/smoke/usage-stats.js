@@ -162,6 +162,24 @@ function runUsageStatsSmokeTests() {
       check('U11', Object.isFrozen(FUNCTION_REGISTRY), 'FUNCTION_REGISTRY 必须 frozen');
     }
 
+    // U12（PR #34 Codex round 1 P2）：saveStats 写盘失败时 throw（让调用方保留 dirty 重试）
+    {
+      const s = defaultStats();
+      incrementFunction(s, '银行对账单处理', '导出文件');
+      // 构造一个无法写入的路径（指向一个已存在的文件，让 mkdirSync 失败）
+      // 用 macOS / Linux 通用的"父路径是文件"场景
+      const blocker = path.join(tmpDir, 'blocker.txt');
+      fs.writeFileSync(blocker, 'x', 'utf8');
+      const invalidRoot = path.join(blocker, 'subdir'); // 父路径是文件 → mkdirSync 失败
+      let threw = false;
+      try {
+        saveStats(invalidRoot, s);
+      } catch (_err) {
+        threw = true;
+      }
+      check('U12', threw, '写盘失败必须 throw（避免上层 swallow 后丢失 dirty）');
+    }
+
     console.log(`  usage-stats: ${count}/${count} PASS`);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

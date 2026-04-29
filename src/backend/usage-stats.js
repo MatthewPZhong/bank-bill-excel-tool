@@ -151,6 +151,8 @@ function loadStats(storageRoot) {
 }
 
 // 原子写入：tmp → rename
+// PR #34 Codex round 1 P2：失败时 throw（让调用方保留 dirty 状态，下次 tick 重试）
+//   原实现 swallow 错误后仍清 dirty，导致磁盘满/权限错时 session 计数静默丢失
 function saveStats(storageRoot, stats) {
   if (!fs.existsSync(storageRoot)) {
     fs.mkdirSync(storageRoot, { recursive: true });
@@ -162,9 +164,9 @@ function saveStats(storageRoot, stats) {
     fs.writeFileSync(tmpPath, text, 'utf8');
     fs.renameSync(tmpPath, filePath);
   } catch (err) {
-    // 写盘失败不影响主流程；尽力清理 tmp
-    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) { /* ignore */ }
-    console.warn('[usage-stats] save failed:', err.message);
+    // 尽力清理 tmp 后向上抛——调用方决定是否 retry
+    try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) { /* ignore cleanup */ }
+    throw err;
   }
 }
 
