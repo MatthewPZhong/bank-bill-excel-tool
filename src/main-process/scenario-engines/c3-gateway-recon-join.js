@@ -122,7 +122,7 @@ function runC3Scenario(scenario, bankRows, gwRows) {
   });
 
   return {
-    modifiedRowIds: modCollector.listModifiedRowIds(),
+    lockedRowIds: modCollector.listLockedRowIds(),
     modifications: modCollector.listModifications(),
     warnings: warningCollector.list()
   };

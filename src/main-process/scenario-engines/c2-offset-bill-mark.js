@@ -64,7 +64,7 @@ function runC2Scenario(scenario, bankRows) {
       message: '账单类型至少需要 2 行（PRD §7.2）'
     });
     return {
-      modifiedRowIds: modCollector.listModifiedRowIds(),
+      lockedRowIds: modCollector.listLockedRowIds(),
       modifications: modCollector.listModifications(),
       warnings: warningCollector.list()
     };
@@ -76,7 +76,7 @@ function runC2Scenario(scenario, bankRows) {
       message: '对账字段至少需要 1 行'
     });
     return {
-      modifiedRowIds: modCollector.listModifiedRowIds(),
+      lockedRowIds: modCollector.listLockedRowIds(),
       modifications: modCollector.listModifications(),
       warnings: warningCollector.list()
     };
@@ -88,7 +88,7 @@ function runC2Scenario(scenario, bankRows) {
       message: '对账成立的打标值必须指定账单类型 + 字段'
     });
     return {
-      modifiedRowIds: modCollector.listModifiedRowIds(),
+      lockedRowIds: modCollector.listLockedRowIds(),
       modifications: modCollector.listModifications(),
       warnings: warningCollector.list()
     };
@@ -142,8 +142,15 @@ function runC2Scenario(scenario, bankRows) {
   });
 
   // 写打标值（跳过被 blocked 的 rightRow）
+  // PRD §7.2：配对成功后 r1 + matched[0] 都被场景命中（→ first-match-wins 锁定），
+  // 不论实际改字段的是哪一侧（Codex PR #31 F2 P1 修复）
   successfulPairs.forEach(({ leftRow, rightRow }) => {
     if (blockedRightRowIds.has(rightRow._rowId)) return;
+
+    // 锁定双方（参与配对即命中，下一场景不可再处理）
+    modCollector.lock(leftRow._rowId);
+    modCollector.lock(rightRow._rowId);
+
     if (markValue.type !== rightType) {
       // 用户 markValue 类型不是 rightType（可能是 leftType）—— 那就改 leftRow
       if (markValue.type === leftType) {
@@ -167,7 +174,7 @@ function runC2Scenario(scenario, bankRows) {
   bankRows.forEach((r) => { delete r._c2Types; });
 
   return {
-    modifiedRowIds: modCollector.listModifiedRowIds(),
+    lockedRowIds: modCollector.listLockedRowIds(),
     modifications: modCollector.listModifications(),
     warnings: warningCollector.list()
   };

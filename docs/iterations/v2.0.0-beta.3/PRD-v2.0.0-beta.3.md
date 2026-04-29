@@ -549,7 +549,7 @@ function exportModifiedRows(modifiedRows, originalHeaders):
   "enabled": false,
   "config": {
     "reconFields": [
-      { "seq": 1, "gwField": "currency",   "bankField": "Currency" },
+      { "seq": 1, "gwField": "Currency",   "bankField": "Currency" },
       { "seq": 2, "gwField": "Amount",     "bankField": "发生额绝对值" },
       { "seq": 3, "gwField": "MerchantId", "bankField": "MerchantId" },
       { "seq": 4, "gwField": "Bank",       "bankField": "Channel" }

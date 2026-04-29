@@ -125,7 +125,7 @@ function runC1Scenario(scenario, bankRows) {
   });
 
   return {
-    modifiedRowIds: modCollector.listModifiedRowIds(),
+    lockedRowIds: modCollector.listLockedRowIds(),
     modifications: modCollector.listModifications(),
     warnings: warningCollector.list()
   };

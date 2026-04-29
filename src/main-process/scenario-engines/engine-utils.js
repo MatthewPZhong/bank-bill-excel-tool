@@ -52,10 +52,13 @@ function evaluateCondition(row, condition) {
 }
 
 // 给行打 _rowId（如果还没有），用于 first-match-wins 锁定
-// 只在引擎内部使用；调用方传进来的行可能没有 _rowId
+// 关键：必须写回 row._rowId，否则 C2 后续 leftRow._rowId / rightRow._rowId 取值会得到 undefined
+// （Codex PR #31 F1 P1 修复）
 function ensureRowId(row, fallbackIndex) {
   if (row._rowId !== undefined && row._rowId !== null) return row._rowId;
-  return `row_${fallbackIndex}`;
+  const generated = `row_${fallbackIndex}`;
+  row._rowId = generated;
+  return generated;
 }
 
 // 简化的 warning 收集器
@@ -75,21 +78,27 @@ function makeWarningCollector(scenarioId, scenarioName) {
   };
 }
 
-// 简化的修改记录收集器
-// 每次 `record(rowId, column, oldValue, newValue)` push 一条
+// 修改记录收集器
+// - record(rowId, column, oldValue, newValue) — 实际改了字段的行（用于标黄）
+// - lock(rowId) — 参与场景命中但未必改字段的行（用于 first-match-wins）
+//   每次 record 自动调 lock；C2 配对成功时 leftRow 也要单独 lock
+// （Codex PR #31 F2 P1 修复：C2 leftRow 之前没有进入锁集合）
 function makeModificationCollector() {
   const modifications = [];
-  const modifiedRowIds = new Set();
+  const lockedRowIds = new Set();
   return {
     record(rowId, column, oldValue, newValue) {
       modifications.push({ rowId, column, oldValue, newValue });
-      modifiedRowIds.add(rowId);
+      lockedRowIds.add(rowId);
+    },
+    lock(rowId) {
+      lockedRowIds.add(rowId);
     },
     listModifications() {
       return modifications;
     },
-    listModifiedRowIds() {
-      return modifiedRowIds;
+    listLockedRowIds() {
+      return lockedRowIds;
     }
   };
 }
