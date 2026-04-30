@@ -132,12 +132,12 @@
 <!-- 2026-04-30 决策回写：Q2=A（R5/R6 未命中→ SubBizType 留空 + warning，不中断；Q1=A 体现于 R1-R4 Reference 取值描述）-->
 ### D6 — 7 + 5 条赋值规则（核心业务）
 
-> ⚠️ Q1=A 决策回写（2026-04-30）：R1-R6 / RB1-RB4 中"对账成立的 X 边单据 reconId"统一**直读对方 row 的 reconId 字段**（即"业务部门账单"/"对手部门账单" sheet 已由对账系统填好的 reconId 列）。**不再回查"对账结果" sheet**。  
+> ⚠️ Q1=A 决策回写（2026-04-30）：R1-R6 / RB1-RB4 中"对账成立的 X 边单据 reconId"统一**直读对方 row 的 reconId 字段**（即"业务部门账单"/"对手部门账单" sheet 已由对账系统填好的 reconId 列）。**不再回查"对账结果" sheet**。
 > ⚠️ Q2=A 决策回写（2026-04-30）：R5/R6 自动查"对账结果" sheet 时若**未命中**（即用 BizType + 主/对手部门单号未匹配到任何行）→ **SubBizType 留空 + 写入 warnings 报告**（warning 含 scenarioName/scenarioId/sourceSide/sourceRowOrderId/code='subBizType-not-found'/message），**不中断本次运行**，该行仍进 fixedRows（仅 SubBizType 列为空字符串）。
 
 #### 主从单边修复（"主边单据"或"从边单据"）— 7 条规则
 
-> 对账成功后给"被修复方"的单据 `Type` / `Reference` 赋值，再补 SubBizType；最终该行 A~O 列复制到「订单修复」sheet 模板。  
+> 对账成功后给"被修复方"的单据 `Type` / `Reference` 赋值，再补 SubBizType；最终该行 A~O 列复制到「订单修复」sheet 模板。
 > ⚠️ 「订单修复」sheet **没有 BizType 列**，只有 SubBizType 列；用户需求原文里的"BizType 列"在写入「订单修复」时统一指 SubBizType 列。
 
 | 规则号 | 修复方 | 匹配模式 | Type | Reference | 备注 |
@@ -531,7 +531,7 @@ function inferRules(sampleFile):
        - 对每个色组，找"主边/从边内固定取值"的字段（该字段在该组内所有行都同值，且全局所有组中只在本组取该值）
        - 这些字段-值对作为该组的"账单类型 conditions"
     6. 输出 inferred config（账单类型 + 对账字段）→ 回填到 C4 配置 dialog
-    
+
     边界处理：
     - 候选 < 1 → 抛"识读失败：未找到稳定的对账字段"
     - 候选 ≥ 5 → 取 top 4，提示用户"识读出 5+ 候选，已取 top 4，请人工裁剪"
@@ -679,8 +679,8 @@ state.reconIdFixResult = {  // 运行后产生
 | 14 | ReconBillBizId | 对账账单业务 ID，复制 |
 | 15 | **SubBizType** | **修复字段**（R5/R6 自动查 / R7 手填覆盖） |
 
-> ⚠️ 9/10/15 = 修复方有写入；其余复制源行的同名列。  
-> ⚠️ 源行有 BizType（业务类型）但 output 不含 BizType 列；只有用作 R5/R6 查 reconResult 的入参。  
+> ⚠️ 9/10/15 = 修复方有写入；其余复制源行的同名列。
+> ⚠️ 源行有 BizType（业务类型）但 output 不含 BizType 列；只有用作 R5/R6 查 reconResult 的入参。
 > ⚠️ R5/R6 自动查未命中 → SubBizType 列写空字符串 `''`，该行仍写入 fixedRows（不中断）；warnings 增一条 `code='subBizType-not-found'`。R7 手填路径不受影响（直接覆盖）。
 
 ---

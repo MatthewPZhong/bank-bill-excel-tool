@@ -161,7 +161,7 @@ function ensureScenariosCategoryReconIdFix(db) {
 }
 ```
 
-> ⚠️ 资金红线：必须包在事务里；包含 v2.0.0-beta.3 builtin scenarios 的老库必须无损迁移。  
+> ⚠️ 资金红线：必须包在事务里；包含 v2.0.0-beta.3 builtin scenarios 的老库必须无损迁移。
 > ⚠️ 调用顺序：在 `ensureScenariosSupport(db)` 之后；marker 写入逻辑不变。
 
 ### 2.4 `scenarios-repository.js` 同步
@@ -190,7 +190,7 @@ const VALID_CATEGORIES = [
 | `scenarios:delete` | `src/main.js:2748` | `desktopApi.scenarios.delete` |
 | `scenarios:toggle-enabled` | `src/main.js:2757` | `desktopApi.scenarios.toggleEnabled` |
 
-> 这 6 个 channel 已支持 C4：`scenarios.create({category: 'recon-id-fix', ...})` 在 `VALID_CATEGORIES` 扩展后即可用。  
+> 这 6 个 channel 已支持 C4：`scenarios.create({category: 'recon-id-fix', ...})` 在 `VALID_CATEGORIES` 扩展后即可用。
 > 复用 v2.0.0-beta.3 PR #33 round 2/3 的 `processingResult = null` 清缓存逻辑——本模块也要在 IPC 入口清 `state.reconIdFixResult`，详见 §六。
 
 ### 3.2 新增（PR-B + PR-C）
@@ -413,19 +413,19 @@ function runC4Scenario(scenario, sheets) {
   const cfg = scenario.config || {};
   const warningCollector = makeWarningCollector(scenario.id, scenario.name);
   const fixedRows = [];
-  
+
   // 1. 给主从边账单按 billTypes 分类
   const mainTyped = classifyRows(sheets.businessBills, cfg.billTypes, 'main');
   const oppTyped  = classifyRows(sheets.opponentBills, cfg.billTypes, 'opp');
-  
+
   // 2. 按 reconFields 序号分组（同序号一组 AND；不同序号一组 OR）
   const groups = groupReconFields(cfg.reconFields);
-  
+
   // 3. 对每组：分别尝试 1v1 / 1v多 / 多v1
   for (const grp of groups) {
     const leftRows  = mainTyped.filter(r => r._types.has(grp.leftTypeSeq));
     const rightRows = oppTyped .filter(r => r._types.has(grp.rightTypeSeq));
-    
+
     if (cfg.matchRules.oneToOne) {
       tryOneToOne(leftRows, rightRows, grp.recoFields, scenario, sheets.reconResult, fixedRows, warningCollector);
     }
@@ -436,7 +436,7 @@ function runC4Scenario(scenario, sheets) {
       tryManyToOne(leftRows, rightRows, grp.recoFields, scenario, sheets.reconResult, fixedRows, warningCollector);
     }
   }
-  
+
   return {
     fixedRows,
     warnings: warningCollector.list(),
@@ -462,7 +462,7 @@ function runC4Scenario(scenario, sheets) {
 
 #### 5.2.2 防止 1v1 路径同时被 1v多 / 多v1 重复处理
 
-实现"已配对 row 集合"：每次成功配对的 row push 到 `pairedRowIds`；后续路径过滤掉 paired。  
+实现"已配对 row 集合"：每次成功配对的 row push 到 `pairedRowIds`；后续路径过滤掉 paired。
 顺序：1v1 → 1v多 → 多v1（用户先试单笔，找不到才走多笔）
 
 <!-- 2026-04-30 决策回写：Q1=A（直读 row.reconId，无 fallback） -->
@@ -477,7 +477,7 @@ function lookupReconId(opCounterRow) {
 }
 ```
 
-> ⚠️ 决策依据（2026-04-30）：用户已确认"业务部门账单"/"对手部门账单"两 sheet 的 reconId 列由对账系统填好，直读即可，无需回查"对账结果" sheet。**单一路径**，**无 dry-run fallback**，**不引入** `reconResult` 反查分支。  
+> ⚠️ 决策依据（2026-04-30）：用户已确认"业务部门账单"/"对手部门账单"两 sheet 的 reconId 列由对账系统填好，直读即可，无需回查"对账结果" sheet。**单一路径**，**无 dry-run fallback**，**不引入** `reconResult` 反查分支。
 > ⚠️ 资金红线提示：若 `opCounterRow.reconId` 为空（导入数据本身缺列值），返回空串并由调用方写入 warnings；不要静默走兜底反查，避免污染 Reference。
 
 <!-- 2026-04-30 决策回写：Q3=C（颜色冲突取"有数据 cell"的最高频色）-->
@@ -488,29 +488,29 @@ async function inferReconIdFixRules(filePath) {
   const ExcelJS = require('exceljs');
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(filePath);
-  
+
   const businessSheet = wb.getWorksheet(BUSINESS_BILL_SHEET_NAME);
   const opponentSheet = wb.getWorksheet(OPPONENT_BILL_SHEET_NAME);
   if (!businessSheet || !opponentSheet) {
     throw new Error('识读规律失败：文件缺少业务部门账单或对手部门账单 sheet');
   }
-  
+
   // 1. 解析每行的"颜色组"
   const businessByColor = groupRowsByCellColor(businessSheet, BUSINESS_BILL_FIELDS);
   const opponentByColor = groupRowsByCellColor(opponentSheet, OPPONENT_BILL_FIELDS);
-  
+
   // 2. 合并色组（同色的主从边归为一例）
   const exampleGroups = mergeColorGroups(businessByColor, opponentByColor);
   if (exampleGroups.length === 0) {
     throw new Error('识读规律失败：没找到任何例子（无色或同色）');
   }
-  
+
   // 3. 候选对账字段挖掘
   const reconFieldCandidates = mineReconFields(exampleGroups);
-  
+
   // 4. 候选账单类型挖掘
   const billTypeCandidates = mineBillTypes(exampleGroups);
-  
+
   return {
     billTypes: billTypeCandidates.slice(0, 4), // top 4
     reconFields: reconFieldCandidates.slice(0, 4)
@@ -753,7 +753,7 @@ function buildReconIdFixSnapshot(scenario) {
 
 trackedIpcHandle('recon-id-fix:export', '单据对账ReconID修复', '导出文件', async () => {
   if (!reconIdFixResult) return { status: 'failed', message: '请先点击"开始运行"' };
-  
+
   const currentScenario = database.getScenario(reconIdFixResult.scenarioId);
   if (!currentScenario) {
     reconIdFixResult = null;
@@ -778,7 +778,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('desktopApi', {
   // ...（v2.0.0 已有的）
-  
+
   reconIdFix: {
     import: () => ipcRenderer.invoke('recon-id-fix:import'),
     run: (scenarioId) => ipcRenderer.invoke('recon-id-fix:run', scenarioId),

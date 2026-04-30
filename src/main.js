@@ -2873,18 +2873,23 @@ function registerAppHandlers() {
       const allScenarios = database.listScenarios();
       const enabled = allScenarios.filter((s) => s.enabled === 1 || s.enabled === true);
       const detailedEnabled = enabled.map((s) => database.getScenario(s.id)).filter(Boolean);
+      // v2.1.0-beta.1 PR-A round 2 P1（资金红线）：C4 (`recon-id-fix`) 走独立模块
+      // `recon-id-fix:run`，不应进入银行对账单 dispatcher（C4 没有对应的 case，
+      // dispatcher 内 `runScenario` default 分支会 throw "未知 category"）。
+      // 此处 + snapshot 都过滤掉 → 银行对账与单据对账两条流水线相互独立。
+      const dispatchScenarios = detailedEnabled.filter((s) => s.category !== 'recon-id-fix');
       // 每次 run 都基于原始导入数据 deep clone 一份工作副本
       // （Codex F1 P1 修复：算法层会原地修改字段，不 clone 会让连续运行的 oldValue 漂移
       //  → first-match-wins 失效，低优先级场景可能覆盖高优先级写入的字段）
       const workingBankRows = structuredClone(bankStatementSession.rows);
       const workingGwRows = gatewayReconSession ? structuredClone(gatewayReconSession.gwRows) : null;
-      const result = runAllScenarios(workingBankRows, workingGwRows, detailedEnabled);
+      const result = runAllScenarios(workingBankRows, workingGwRows, dispatchScenarios);
       processingResult = {
         modifiedRows: result.modifiedRows,
         modifications: result.modifications,
         errorReport: result.errorReport,
         stats: result.stats,
-        scenariosSnapshot: buildScenariosSnapshot(detailedEnabled),
+        scenariosSnapshot: buildScenariosSnapshot(dispatchScenarios),
         ranAt: Date.now()
       };
       return {
@@ -2906,7 +2911,10 @@ function registerAppHandlers() {
       const allScenarios = database.listScenarios();
       const enabled = allScenarios.filter((s) => s.enabled === 1 || s.enabled === true);
       const detailedEnabled = enabled.map((s) => database.getScenario(s.id)).filter(Boolean);
-      const currentSnapshot = buildScenariosSnapshot(detailedEnabled);
+      // v2.1.0-beta.1 PR-A round 2 P1：与 bank-statement:run 一致，C4 不参与本模块的 snapshot
+      // 否则用户改 C4 场景会让此处 snapshot 变化 → 误报"场景已变更" → 拒绝导出
+      const dispatchScenarios = detailedEnabled.filter((s) => s.category !== 'recon-id-fix');
+      const currentSnapshot = buildScenariosSnapshot(dispatchScenarios);
       if (processingResult.scenariosSnapshot !== currentSnapshot) {
         processingResult = null;
         return { status: 'failed', message: '场景已变更，请重新点击"开始运行"再导出' };

@@ -1238,14 +1238,11 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
     });
   }
   // v2.1.0-beta.1 PR-A：切到单据对账 ReconID 修复模块时同步 session 状态 + reload 场景下拉
+  // round 2 P2-1：reloadReconIdFixScenarios 内部已统一调 refreshReconIdFixStatus，无需重复触发
+  // scenariosChanged: false → 模块切换路径不清 reconIdFixExport（用户跨模块切回应保留导出文案）
   if (moduleId === MODULES.reconIdFix.id) {
-    if (typeof refreshReconIdFixStatus === 'function') {
-      refreshReconIdFixStatus().catch((error) => {
-        console.warn('refreshReconIdFixStatus failed:', error);
-      });
-    }
     if (typeof reloadReconIdFixScenarios === 'function') {
-      reloadReconIdFixScenarios().catch((error) => {
+      reloadReconIdFixScenarios({ scenariosChanged: false }).catch((error) => {
         console.warn('reloadReconIdFixScenarios failed:', error);
       });
     }
@@ -3398,7 +3395,16 @@ async function refreshReconIdFixStatus() {
 }
 
 // 主面板"场景"下拉刷新（task A9）
-async function reloadReconIdFixScenarios() {
+// v2.1.0-beta.1 PR-A round 2 P2-1：场景管理 dialog 的 4 个成功路径（save / delete / toggle / close）
+// 都汇集到本函数。除了刷新场景列表，还要把"运行结果 + 导出后状态"resync 一次：
+//   - main 端的 scenarios:create/update/delete/toggle 已经清 `reconIdFixResult`（spec §六），
+//     调 refreshReconIdFixStatus() 把 renderer 的 state 拉齐
+//   - state.reconIdFixExport 是 renderer-only（main 不存），CRUD 之后主动清空避免显示
+//     过期"已导出"文案。模块切换路径不清（用户跨模块切回应保留导出文案）。
+//
+// `options.scenariosChanged` 默认 true：场景管理 dialog 4 个成功路径都视为"可能有 CRUD 变更"，
+// 走完整清理。模块切换调用方传 false → 仅 reload 列表 + sync session-status，不清 export。
+async function reloadReconIdFixScenarios(options = { scenariosChanged: true }) {
   try {
     const result = await window.desktopApi.scenarios.list();
     if (!result || result.status !== 'ok' || !Array.isArray(result.scenarios)) {
@@ -3416,8 +3422,24 @@ async function reloadReconIdFixScenarios() {
     state.reconIdFixScenarios = [];
     state.reconIdFixSelectedScenarioId = null;
   }
+  // 仅当调用方明确说"场景变更"时才清 renderer-only 的 reconIdFixExport
+  // （reconIdFixResult 不在此处清——交给 refreshReconIdFixStatus 从 main 拉，避免与 main 不一致）
+  if (options && options.scenariosChanged) {
+    state.reconIdFixExport = null;
+  }
   renderReconIdFixScenarioSelect();
-  updateReconIdFixUi();
+  // 拉一次 main 端 session-status：若 main 已清 reconIdFixResult（任何 scenarios:* CRUD
+  // 触发后必然清空），renderer 的 state.reconIdFixResult 跟着置 null
+  if (typeof refreshReconIdFixStatus === 'function') {
+    try {
+      await refreshReconIdFixStatus();
+    } catch (error) {
+      console.warn('reloadReconIdFixScenarios → refreshReconIdFixStatus failed:', error);
+      updateReconIdFixUi();
+    }
+  } else {
+    updateReconIdFixUi();
+  }
 }
 
 function renderReconIdFixScenarioSelect() {

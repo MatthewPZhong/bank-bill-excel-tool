@@ -5738,10 +5738,11 @@
         if (mr.oneToMany && mr.manyToOne) {
           errors.push('"1 v 多"与"多 v 1"互斥，不能同时勾选');
         }
-        if (!Array.isArray(c.billTypes) || c.billTypes.length === 0) {
+        const billTypesArr = Array.isArray(c.billTypes) ? c.billTypes : [];
+        if (billTypesArr.length === 0) {
           errors.push('账单类型至少需要 1 行');
         } else {
-          c.billTypes.forEach((bt, idx) => {
+          billTypesArr.forEach((bt, idx) => {
             if (!bt.side || (bt.side !== 'main' && bt.side !== 'opp')) {
               errors.push(`账单类型 #${bt.seq || idx + 1} 的"主/从"必填`);
             }
@@ -5753,10 +5754,41 @@
             }
           });
         }
+        // v2.1.0-beta.1 PR-A round 2 P2-2（数据完整性）：必须主从两侧都有账单类型
+        // 否则保存出来的 C4 配置在 PR-B 引擎里会跑出空 leftRows / rightRows，相当于无效场景
+        const hasMainBillType = billTypesArr.some((bt) => bt.side === 'main');
+        const hasOppBillType = billTypesArr.some((bt) => bt.side === 'opp');
+        if (billTypesArr.length > 0) {
+          if (!hasMainBillType) errors.push('账单类型必须至少包含 1 条"主边"账单类型');
+          if (!hasOppBillType) errors.push('账单类型必须至少包含 1 条"从边"账单类型');
+        }
+
         if (!Array.isArray(c.reconFields) || c.reconFields.length === 0) {
           errors.push('对账字段至少需要 1 行');
         } else if (c.reconFields.some((r) => !r.leftField || !r.rightField)) {
           errors.push('对账字段每行两端的字段都不能为空');
+        }
+        // v2.1.0-beta.1 PR-A round 2 P2-2（数据完整性）：对账字段两端必须分别指向主/从边
+        // leftTypeSeq → side === 'main'；rightTypeSeq → side === 'opp'
+        // 否则保存的配置语义错误，PR-B 引擎按主/从边过滤行时会丢分组
+        if (Array.isArray(c.reconFields) && c.reconFields.length > 0 && billTypesArr.length > 0) {
+          const sideBySeq = new Map(billTypesArr.map((bt) => [Number(bt.seq), bt.side]));
+          c.reconFields.forEach((rf, idx) => {
+            const rowLabel = `对账字段 #${idx + 1}`;
+            const leftSeq = Number(rf.leftTypeSeq);
+            const rightSeq = Number(rf.rightTypeSeq);
+            // 序号落在 billTypes 之外（用户删了对应序号 → 校验失败而不是静默错位）
+            if (!sideBySeq.has(leftSeq)) {
+              errors.push(`${rowLabel} 左侧的账单类型序号 #${rf.leftTypeSeq} 不在账单类型列表中`);
+            } else if (sideBySeq.get(leftSeq) !== 'main') {
+              errors.push(`${rowLabel} 左侧必须指向"主边"账单类型`);
+            }
+            if (!sideBySeq.has(rightSeq)) {
+              errors.push(`${rowLabel} 右侧的账单类型序号 #${rf.rightTypeSeq} 不在账单类型列表中`);
+            } else if (sideBySeq.get(rightSeq) !== 'opp') {
+              errors.push(`${rowLabel} 右侧必须指向"从边"账单类型`);
+            }
+          });
         }
         const out = c.output || {};
         if (!out.mode || (out.mode !== 'main' && out.mode !== 'opp' && out.mode !== 'both')) {
