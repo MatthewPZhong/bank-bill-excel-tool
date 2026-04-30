@@ -29,6 +29,14 @@ function filterScenariosByGwAvailability(scenarios, gwRows) {
   return scenarios;
 }
 
+// v2.1.0-beta.1 PR-A round 2 P1（资金红线 + 阻断）：
+// C4 (`recon-id-fix`) 走 `recon-id-fix:run` 独立流水线，dispatcher 入参不应含 C4。
+// 入口处再防一手：即使上游 IPC handler 漏了 filter，dispatcher 也拒绝喂给 runScenario
+// （runScenario 的 default 分支会 throw "未知 category"，会让 bank-statement:run 整体失败）。
+function filterOutReconIdFix(scenarios) {
+  return scenarios.filter((s) => s && s.category !== 'recon-id-fix');
+}
+
 // runAllScenarios(bankRows, gwRows | null, scenarios)
 //   bankRows: Array<{ _rowId, ...44 columns }>
 //   gwRows: Array<{ ...31 columns }> | null
@@ -52,7 +60,10 @@ function runAllScenarios(bankRows, gwRows, scenarios) {
   }
 
   const enabled = scenarios.filter((s) => s && s.enabled);
-  const sorted = sortScenariosByPriority(enabled);
+  // v2.1.0-beta.1 PR-A round 2 P1：先剔 C4（不属于本 dispatcher）
+  const c4Stripped = filterOutReconIdFix(enabled);
+  const skippedC4Count = enabled.length - c4Stripped.length;
+  const sorted = sortScenariosByPriority(c4Stripped);
   const filtered = filterScenariosByGwAvailability(sorted, gwRows);
   const skippedC3Count = sorted.length - filtered.length;
 
@@ -131,7 +142,8 @@ function runAllScenarios(bankRows, gwRows, scenarios) {
       scenarioHitCount,
       hitScenarioIds,
       warningCount: allWarnings.length,
-      skippedC3Count
+      skippedC3Count,
+      skippedC4Count
     }
   };
 }
@@ -139,5 +151,6 @@ function runAllScenarios(bankRows, gwRows, scenarios) {
 module.exports = {
   runAllScenarios,
   sortScenariosByPriority,
-  filterScenariosByGwAvailability
+  filterScenariosByGwAvailability,
+  filterOutReconIdFix
 };

@@ -52,6 +52,11 @@ const MODULES = Object.freeze({
   bankStatementProcess: {
     id: 'bank-statement-process',
     name: '银行对账单处理'
+  },
+  // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（C4）
+  reconIdFix: {
+    id: 'recon-id-fix',
+    name: '单据对账 ReconID 修复'
   }
 });
 const RENDERER_STARTUP_MARKS = Object.freeze({
@@ -133,7 +138,14 @@ const state = {
   processingResult: null,        // { hitRowCount, scenarioHitCount, warningCount, ranAt } | null
   bankStatementExport: null,     // { mainFileName, errorReportName } | null（仅 renderer-side 缓存）
   // 4 弹窗共享的临时配置（"返回" 保留，"完成/取消/关闭" 清空）
-  scenarioDraft: null            // { mode, category, scenarioId, name, priority, config } | null
+  scenarioDraft: null,           // { mode, category, scenarioId, name, priority, config } | null
+  // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 — renderer 侧 UI 缓存（spec §七）
+  // 数据真在 main 进程；模块切换时调 desktopApi.reconIdFix.sessionStatus 同步
+  reconIdFixSession: null,            // { fileName, sheetCounts: { recon, business, opp } } | null
+  reconIdFixResult: null,             // { fixedRowCount, warningCount } | null
+  reconIdFixExport: null,             // { mainFileName } | null（仅 renderer-side 缓存）
+  reconIdFixSelectedScenarioId: null, // 主面板"场景"下拉当前选中（Q4 决策）
+  reconIdFixScenarios: []             // 主面板下拉 source（每次场景管理 dialog 关闭后 reload）
 };
 const newAccountRowStateMap = new WeakMap();
 
@@ -225,6 +237,14 @@ const elements = {
   bankStatementRunBtn: document.getElementById('bankStatementRunBtn'),
   bankStatementExportBtn: document.getElementById('bankStatementExportBtn'),
   bankStatementStatusBox: document.getElementById('bankStatementStatusBox'),
+  // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（spec §一.1 + §七 — 6 项 DOM 缓存）
+  reconIdFixModulePanel: document.getElementById('reconIdFixModulePanel'),
+  reconIdFixManageScenariosBtn: document.getElementById('reconIdFixManageScenariosBtn'),
+  reconIdFixImportBtn: document.getElementById('reconIdFixImportBtn'),
+  reconIdFixScenarioSelect: document.getElementById('reconIdFixScenarioSelect'),
+  reconIdFixRunBtn: document.getElementById('reconIdFixRunBtn'),
+  reconIdFixExportBtn: document.getElementById('reconIdFixExportBtn'),
+  reconIdFixStatusBox: document.getElementById('reconIdFixStatusBox'),
   backgroundTool: document.getElementById('backgroundTool'),
   backgroundPaletteBtn: document.getElementById('backgroundPaletteBtn'),
   saveUserGuideBtn: document.getElementById('saveUserGuideBtn'),
@@ -268,7 +288,9 @@ const {
   createScenarioConfigDialogC1,
   createScenarioConfigDialogC2,
   createScenarioConfigDialogC3,
-  createScenarioConfirmDetailDialog
+  createScenarioConfirmDetailDialog,
+  // v2.1.0-beta.1 PR-A（task A7）：C4 类配置弹窗
+  createScenarioConfigDialogC4
 } = window.__rendererDialogs.createRendererDialogs({
   state,
   elements,
@@ -285,7 +307,9 @@ const {
   setStatus,
   applyStatementResult,
   applyManualBalancePromptStatus,
-  refreshBankStatementStatus
+  refreshBankStatementStatus,
+  // v2.1.0-beta.1 PR-A（task A9）：场景管理 dialog 任意 CRUD 完成后 reload 主面板"场景"下拉
+  reloadReconIdFixScenarios
 });
 
 const rendererPending = window.__rendererPending.createRendererPending({
@@ -341,7 +365,11 @@ const {
   applyScenarioConfigC1PreviewState,
   applyScenarioConfigC2PreviewState,
   applyScenarioConfigC3PreviewState,
-  applyScenarioConfirmDetailPreviewState
+  applyScenarioConfirmDetailPreviewState,
+  // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 preview（3 张）
+  applyReconIdFixPanelPreviewState,
+  applyScenarioConfigC4PreviewState,
+  applyScenarioConfigC4BothPreviewState
 } = window.__rendererPreviews.createRendererPreviews({
   state,
   elements,
@@ -392,7 +420,9 @@ const {
   createScenarioConfigDialogC1,
   createScenarioConfigDialogC2,
   createScenarioConfigDialogC3,
-  createScenarioConfirmDetailDialog
+  createScenarioConfirmDetailDialog,
+  // v2.1.0-beta.1 PR-A（task A7）：C4 配置弹窗 preview 所需
+  createScenarioConfigDialogC4
 });
 
 function updateStatusBox(box, message, tone = 'info', options = {}) {
@@ -1186,6 +1216,10 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
   if (elements.bankStatementModulePanel) {
     elements.bankStatementModulePanel.hidden = moduleId !== MODULES.bankStatementProcess.id;
   }
+  // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块面板隐藏控制
+  if (elements.reconIdFixModulePanel) {
+    elements.reconIdFixModulePanel.hidden = moduleId !== MODULES.reconIdFix.id;
+  }
 
   Array.from(elements.moduleSwitcherMenu.querySelectorAll('.module-option')).forEach((button) => {
     button.classList.toggle('is-active', button.dataset.module === moduleId);
@@ -1202,6 +1236,16 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
     refreshBankStatementStatus().catch((error) => {
       console.warn('refreshBankStatementStatus failed:', error);
     });
+  }
+  // v2.1.0-beta.1 PR-A：切到单据对账 ReconID 修复模块时同步 session 状态 + reload 场景下拉
+  // round 2 P2-1：reloadReconIdFixScenarios 内部已统一调 refreshReconIdFixStatus，无需重复触发
+  // scenariosChanged: false → 模块切换路径不清 reconIdFixExport（用户跨模块切回应保留导出文案）
+  if (moduleId === MODULES.reconIdFix.id) {
+    if (typeof reloadReconIdFixScenarios === 'function') {
+      reloadReconIdFixScenarios({ scenariosChanged: false }).catch((error) => {
+        console.warn('reloadReconIdFixScenarios failed:', error);
+      });
+    }
   }
 }
 
@@ -3324,6 +3368,174 @@ async function handleBankStatementExport() {
   }
 }
 
+// ===== v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（spec §六 / §七 / Q4 决策） =====
+// PR-A 仅做骨架：sessionStatus 同步 + 主面板下拉 reload + 4 按钮 binding（导入/运行/导出 PR-B 落地）
+
+async function refreshReconIdFixStatus() {
+  try {
+    const status = await window.desktopApi.reconIdFix.sessionStatus();
+    if (!status || status.status !== 'ok') {
+      state.reconIdFixSession = null;
+      state.reconIdFixResult = null;
+    } else {
+      state.reconIdFixSession = status.hasFile
+        ? { fileName: status.fileName, sheetCounts: status.sheetCounts || null }
+        : null;
+      state.reconIdFixResult = status.hasResult
+        ? {
+          fixedRowCount: status.resultStats ? Number(status.resultStats.fixedRowCount || 0) : 0,
+          warningCount: status.resultStats ? Number(status.resultStats.warningCount || 0) : 0
+        }
+        : null;
+    }
+  } catch (error) {
+    console.error('refreshReconIdFixStatus failed:', error);
+  }
+  updateReconIdFixUi();
+}
+
+// 主面板"场景"下拉刷新（task A9）
+// v2.1.0-beta.1 PR-A round 2 P2-1：场景管理 dialog 的 4 个成功路径（save / delete / toggle / close）
+// 都汇集到本函数。除了刷新场景列表，还要把"运行结果 + 导出后状态"resync 一次：
+//   - main 端的 scenarios:create/update/delete/toggle 已经清 `reconIdFixResult`（spec §六），
+//     调 refreshReconIdFixStatus() 把 renderer 的 state 拉齐
+//   - state.reconIdFixExport 是 renderer-only（main 不存），CRUD 之后主动清空避免显示
+//     过期"已导出"文案。模块切换路径不清（用户跨模块切回应保留导出文案）。
+//
+// `options.scenariosChanged` 默认 true：场景管理 dialog 4 个成功路径都视为"可能有 CRUD 变更"，
+// 走完整清理。模块切换调用方传 false → 仅 reload 列表 + sync session-status，不清 export。
+async function reloadReconIdFixScenarios(options = { scenariosChanged: true }) {
+  try {
+    const result = await window.desktopApi.scenarios.list();
+    if (!result || result.status !== 'ok' || !Array.isArray(result.scenarios)) {
+      state.reconIdFixScenarios = [];
+    } else {
+      state.reconIdFixScenarios = result.scenarios.filter((s) => s.category === 'recon-id-fix');
+    }
+    // 当前已选 id 已不存在 → 置 null
+    if (state.reconIdFixSelectedScenarioId !== null
+        && !state.reconIdFixScenarios.some((s) => s.id === state.reconIdFixSelectedScenarioId)) {
+      state.reconIdFixSelectedScenarioId = null;
+    }
+  } catch (error) {
+    console.error('reloadReconIdFixScenarios failed:', error);
+    state.reconIdFixScenarios = [];
+    state.reconIdFixSelectedScenarioId = null;
+  }
+  // 仅当调用方明确说"场景变更"时才清 renderer-only 的 reconIdFixExport
+  // （reconIdFixResult 不在此处清——交给 refreshReconIdFixStatus 从 main 拉，避免与 main 不一致）
+  if (options && options.scenariosChanged) {
+    state.reconIdFixExport = null;
+  }
+  renderReconIdFixScenarioSelect();
+  // 拉一次 main 端 session-status：若 main 已清 reconIdFixResult（任何 scenarios:* CRUD
+  // 触发后必然清空），renderer 的 state.reconIdFixResult 跟着置 null
+  if (typeof refreshReconIdFixStatus === 'function') {
+    try {
+      await refreshReconIdFixStatus();
+    } catch (error) {
+      console.warn('reloadReconIdFixScenarios → refreshReconIdFixStatus failed:', error);
+      updateReconIdFixUi();
+    }
+  } else {
+    updateReconIdFixUi();
+  }
+}
+
+function renderReconIdFixScenarioSelect() {
+  const select = elements.reconIdFixScenarioSelect;
+  if (!select) return;
+  const scenarios = Array.isArray(state.reconIdFixScenarios) ? state.reconIdFixScenarios : [];
+  if (scenarios.length === 0) {
+    select.innerHTML = '<option value="">请先在场景管理中创建场景</option>';
+    select.disabled = true;
+    select.value = '';
+    return;
+  }
+  const opts = ['<option value="">请选择场景</option>']
+    .concat(scenarios.map((s) => {
+      const idStr = String(s.id);
+      const name = String(s.name || '');
+      // 简单 escape：避免 < / > / & / "
+      const escapedName = name
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+      return `<option value="${idStr}">${escapedName}</option>`;
+    }))
+    .join('');
+  select.innerHTML = opts;
+  select.disabled = false;
+  // 同步 select.value 与 state（防御 reload 后 currentSelected 仍存在的情况）
+  const desired = state.reconIdFixSelectedScenarioId !== null
+    ? String(state.reconIdFixSelectedScenarioId)
+    : '';
+  select.value = desired;
+}
+
+function updateReconIdFixUi() {
+  if (!elements.reconIdFixStatusBox) return;
+  const session = state.reconIdFixSession;
+  const result = state.reconIdFixResult;
+  const exp = state.reconIdFixExport;
+  const selectedId = state.reconIdFixSelectedScenarioId;
+  const selectedScenario = selectedId !== null
+    ? (state.reconIdFixScenarios || []).find((s) => s.id === selectedId)
+    : null;
+  const scenarioName = selectedScenario ? selectedScenario.name : '';
+
+  let text;
+  let tone = 'info';
+  if (exp) {
+    text = `已导出 ${exp.mainFileName}`;
+    tone = 'success';
+  } else if (result) {
+    text = `场景"${scenarioName}"运行完成；命中 ${result.fixedRowCount} 行修复，${result.warningCount} 行警告`;
+    tone = result.warningCount > 0 ? 'error' : 'success';
+  } else if (session) {
+    const counts = session.sheetCounts || {};
+    text = `已导入 ${session.fileName}（${counts.business || 0} 行业务账单 / ${counts.opp || 0} 行对手账单）；请点击"开始运行"`;
+    tone = 'info';
+  } else if (selectedScenario) {
+    text = `已选场景"${scenarioName}"，请点击"导入文件"`;
+    tone = 'neutral';
+  } else {
+    text = '请先点击"场景管理"配置场景，再选择场景并导入文件';
+    tone = 'neutral';
+  }
+  const textEl = elements.reconIdFixStatusBox.querySelector('.status-box-text');
+  if (textEl) textEl.textContent = text;
+  elements.reconIdFixStatusBox.dataset.tone = tone;
+
+  // 按钮可用性（spec §七 + Q4 决策）
+  if (elements.reconIdFixImportBtn) elements.reconIdFixImportBtn.disabled = false;
+  if (elements.reconIdFixRunBtn) {
+    elements.reconIdFixRunBtn.disabled = !(session && selectedId !== null);
+  }
+  if (elements.reconIdFixExportBtn) {
+    elements.reconIdFixExportBtn.disabled = !result;
+  }
+}
+
+// PR-A 占位：4 个按钮 handler（PR-B 落地真实 IPC 调用）
+async function handleReconIdFixImport() {
+  // PR-B 接通：调 desktopApi.reconIdFix.import → 落 reconIdFixSession
+  openModal(createAlertDialog('导入文件功能将在 PR-B 落地。'));
+}
+async function handleReconIdFixRun() {
+  if (state.reconIdFixSelectedScenarioId === null) {
+    openModal(createAlertDialog('请先选择场景'));
+    return;
+  }
+  // PR-B 接通：调 desktopApi.reconIdFix.run({ scenarioId: state.reconIdFixSelectedScenarioId })
+  openModal(createAlertDialog('开始运行功能将在 PR-B 落地。'));
+}
+async function handleReconIdFixExport() {
+  // PR-B 接通：调 desktopApi.reconIdFix.export
+  openModal(createAlertDialog('导出文件功能将在 PR-B 落地。'));
+}
+
 // v2.0.0-beta.2 F1+F2（D9/D10）：调色板"应用"按钮触发风格切换流程
 function handlePaletteStyleConfirm() {
   const select = elements.paletteStyleSelect;
@@ -3430,6 +3642,29 @@ async function initialize() {
   elements.bankStatementImportBtn.addEventListener('click', handleBankStatementImport);
   elements.bankStatementRunBtn.addEventListener('click', handleBankStatementRun);
   elements.bankStatementExportBtn.addEventListener('click', handleBankStatementExport);
+  // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块按钮 binding（spec §一.1 + Q4 决策）
+  if (elements.reconIdFixManageScenariosBtn) {
+    elements.reconIdFixManageScenariosBtn.addEventListener('click', () => {
+      openModal(createScenariosManagerDialog());
+    });
+  }
+  if (elements.reconIdFixImportBtn) {
+    elements.reconIdFixImportBtn.addEventListener('click', handleReconIdFixImport);
+  }
+  if (elements.reconIdFixRunBtn) {
+    elements.reconIdFixRunBtn.addEventListener('click', handleReconIdFixRun);
+  }
+  if (elements.reconIdFixExportBtn) {
+    elements.reconIdFixExportBtn.addEventListener('click', handleReconIdFixExport);
+  }
+  if (elements.reconIdFixScenarioSelect) {
+    elements.reconIdFixScenarioSelect.addEventListener('change', (event) => {
+      const raw = event.target.value;
+      const id = raw ? Number.parseInt(raw, 10) : NaN;
+      state.reconIdFixSelectedScenarioId = Number.isFinite(id) ? id : null;
+      updateReconIdFixUi();
+    });
+  }
   elements.statusBox.addEventListener('click', () => {
     if (state.manualBalancePromptReady && state.manualBalancePrompt) {
       openModal(createManualBalanceSeedDialog(state.manualBalancePrompt));
@@ -3772,6 +4007,18 @@ async function initialize() {
   } else if (info.previewModal === 'scenario-confirm-detail') {
     setTimeout(() => {
       applyScenarioConfirmDetailPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'recon-id-fix-panel') {
+    setTimeout(() => {
+      applyReconIdFixPanelPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenario-config-c4') {
+    setTimeout(() => {
+      applyScenarioConfigC4PreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenario-config-c4-both') {
+    setTimeout(() => {
+      applyScenarioConfigC4BothPreviewState();
     }, 120);
   }
 

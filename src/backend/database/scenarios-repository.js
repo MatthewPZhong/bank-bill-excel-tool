@@ -11,7 +11,9 @@
 const VALID_CATEGORIES = [
   'extract-recon-id',
   'offset-bill-mark',
-  'gateway-recon-join'
+  'gateway-recon-join',
+  // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复（C4）
+  'recon-id-fix'
 ];
 
 function validateCategory(category) {
@@ -147,6 +149,13 @@ function updateScenario(db, id, fields) {
   }
 
   // category 和 is_builtin 不可改
+  // PR #35 round 3 self-review P3-B：把 silent ignore 升级为显式 throw，约束可读
+  if (fields && Object.prototype.hasOwnProperty.call(fields, 'category')) {
+    throw new Error('updateScenario: category 不可修改（如需改类别请先 delete 再 create）');
+  }
+  if (fields && Object.prototype.hasOwnProperty.call(fields, 'is_builtin')) {
+    throw new Error('updateScenario: is_builtin 不可修改');
+  }
   const sets = [];
   const params = [];
 

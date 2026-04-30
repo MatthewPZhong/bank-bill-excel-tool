@@ -8,7 +8,8 @@ const fs = require('fs');
 const {
   runAllScenarios,
   sortScenariosByPriority,
-  filterScenariosByGwAvailability
+  filterScenariosByGwAvailability,
+  filterOutReconIdFix
 } = require('../../src/main-process/scenario-dispatcher');
 
 const {
@@ -79,6 +80,33 @@ function makeC3Scenario(overrides = {}) {
         { seq: 4, gwField: 'Bank', bankField: 'Channel' }
       ],
       assign: { gwField: 'reconciliationId', bankField: 'ReconciliationId' }
+    },
+    ...overrides
+  };
+}
+
+// v2.1.0-beta.1 PR-A round 2 P1：C4 场景（dispatcher 应过滤掉，不喂给 runScenario）
+function makeC4Scenario(overrides = {}) {
+  return {
+    id: 4,
+    name: 'C4 单据对账ReconID修复',
+    category: 'recon-id-fix',
+    priority: 0,
+    enabled: true,
+    config: {
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      billTypes: [
+        { seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: 'X' }] },
+        { seq: 2, side: 'opp', conditions: [{ field: 'BillType', op: '等于', value: 'Y' }] }
+      ],
+      reconFields: [
+        { seq: 1, leftTypeSeq: 1, leftField: 'OrderId', rightTypeSeq: 2, rightField: 'OrderId' }
+      ],
+      output: {
+        mode: 'main',
+        commonId: null,
+        subBizType: { mode: 'auto', mainValue: null, oppValue: null }
+      }
     },
     ...overrides
   };
@@ -307,7 +335,61 @@ async function runScenarioDispatcherSmokeTests() {
     assert.strictEqual(r2.stats.skippedC3Count, 1, 'D9 vs D4: gwRows=null 仍按之前过滤');
   }
 
-  console.log('  scenario-dispatcher: 11/11 PASS');
+  // ===== Helper unit: filterOutReconIdFix =====
+  // v2.1.0-beta.1 PR-A round 2 P1：C4 (`recon-id-fix`) 走独立流水线，dispatcher 应过滤
+  {
+    const list = [
+      { category: 'extract-recon-id' },
+      { category: 'recon-id-fix' },
+      { category: 'offset-bill-mark' },
+      { category: 'recon-id-fix' }
+    ];
+    const filtered = filterOutReconIdFix(list);
+    assert.strictEqual(filtered.length, 2, 'filterOutReconIdFix 应剔除 2 个 C4');
+    assert(filtered.every((s) => s.category !== 'recon-id-fix'), '不应保留 C4');
+    assert(filtered.some((s) => s.category === 'extract-recon-id'), '应保留 C1');
+    assert(filtered.some((s) => s.category === 'offset-bill-mark'), '应保留 C2');
+    // 防御：null/undefined 元素也应被过滤掉
+    assert.strictEqual(filterOutReconIdFix([null, undefined, { category: 'extract-recon-id' }]).length, 1);
+  }
+
+  // ===== Dispatcher D10（v2.1.0-beta.1 PR-A round 2 P1）：=====
+  // 一个 enabled C1 + 一个 enabled C4 → dispatcher 只跑 C1，C4 被剔，
+  // runScenario 不会因 C4 default 分支 throw。
+  {
+    const bankRows = [
+      { _rowId: 'rD10', CustomerRef: 'AFT123456789012', 'Extra Information': '', ReconciliationId: '' }
+    ];
+    const result = runAllScenarios(bankRows, null, [makeC1Scenario(), makeC4Scenario()]);
+    assert.strictEqual(result.modifiedRows.length, 1, 'D10 应仅 C1 命中 1 行');
+    assert.strictEqual(result.modifiedRows[0]._hitScenarioId, 1, 'D10 应是 C1 (id=1)');
+    assert.deepStrictEqual(result.stats.hitScenarioIds, [1], 'D10 hitScenarioIds 仅含 C1');
+    assert.strictEqual(result.stats.skippedC4Count, 1, 'D10 stats.skippedC4Count 应等于 C4 数量');
+  }
+
+  // ===== Dispatcher D11（v2.1.0-beta.1 PR-A round 2 P1）：=====
+  // 仅 enabled C4 → dispatcher 不该 throw，应静默 skip 并返回空结果
+  {
+    const bankRows = [
+      { _rowId: 'rD11', CustomerRef: 'X', ReconciliationId: '' }
+    ];
+    const result = runAllScenarios(bankRows, null, [makeC4Scenario()]);
+    assert.strictEqual(result.modifiedRows.length, 0, 'D11 modifiedRows 应空');
+    assert.strictEqual(result.stats.scenarioHitCount, 0, 'D11 scenarioHitCount=0');
+    assert.strictEqual(result.stats.skippedC4Count, 1, 'D11 skippedC4Count=1');
+    assert.deepStrictEqual(result.stats.hitScenarioIds, [], 'D11 hitScenarioIds 空');
+  }
+
+  // ===== Dispatcher D12（v2.1.0-beta.1 PR-A round 2 P1）：=====
+  // disabled C4 不计入 skippedC4Count（与 disabled 其他类一致：先 enabled 过滤，再 C4 过滤）
+  {
+    const bankRows = [{ _rowId: 'rD12', CustomerRef: 'X', ReconciliationId: '' }];
+    const c4Disabled = makeC4Scenario({ enabled: false });
+    const result = runAllScenarios(bankRows, null, [c4Disabled]);
+    assert.strictEqual(result.stats.skippedC4Count, 0, 'D12 disabled C4 不计入 skippedC4Count');
+  }
+
+  console.log('  scenario-dispatcher: 15/15 PASS');
 }
 
 // ===== exceljs-writer round-trip =====

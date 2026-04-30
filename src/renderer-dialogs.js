@@ -16,13 +16,18 @@
       setStatus,
       applyStatementResult,
       applyManualBalancePromptStatus,
-      refreshBankStatementStatus
+      refreshBankStatementStatus,
+      // v2.1.0-beta.1 PR-A（task A9）：场景管理 dialog 任意 CRUD 操作完成后 reload 主面板"场景"下拉
+      reloadReconIdFixScenarios
     } = deps;
 
     // v2.0.0-beta.3 PR #32b：银行对账单处理模块字段常量（preload 暴露 → window.appConstants → deps）
     const BANK_STATEMENT_FIELDS = (appConstants && appConstants.bankStatementFields) || [];
     const BANK_STATEMENT_FIELDS_FOR_C3 = (appConstants && appConstants.bankStatementFieldsForC3) || BANK_STATEMENT_FIELDS;
     const GATEWAY_RECON_FIELDS = (appConstants && appConstants.gatewayReconFields) || [];
+    // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块字段常量（spec §四）
+    const BUSINESS_BILL_FIELDS = (appConstants && appConstants.businessBillFields) || [];
+    const OPPONENT_BILL_FIELDS = (appConstants && appConstants.opponentBillFields) || [];
 
     // 条件操作枚举（C1 行 3 + C2 行 3 共用）
     const SCENARIO_CONDITION_OPS = ['等于', '不等于', '包含', '不包含', '空值', '非空值', '开头为'];
@@ -65,6 +70,8 @@
       if (category === 'extract-recon-id') return openModal(createScenarioConfigDialogC1());
       if (category === 'offset-bill-mark') return openModal(createScenarioConfigDialogC2());
       if (category === 'gateway-recon-join') return openModal(createScenarioConfigDialogC3());
+      // v2.1.0-beta.1 PR-A（task A6 / A7）：C4 类配置弹窗
+      if (category === 'recon-id-fix') return openModal(createScenarioConfigDialogC4());
       throw new Error(`unknown scenario category: ${category}`);
     }
 
@@ -5362,7 +5369,9 @@
     const SCENARIO_CATEGORY_LABELS = {
       'extract-recon-id': '提取ReconId-From Self',
       'offset-bill-mark': '账单打标',
-      'gateway-recon-join': '提取ReconId-From 网关'
+      'gateway-recon-join': '提取ReconId-From 网关',
+      // v2.1.0-beta.1 PR-A（task A6）：单据对账修复
+      'recon-id-fix': '单据对账修复'
     };
 
     function getCategoryLabel(category) {
@@ -5478,6 +5487,10 @@
               if (result && result.status === 'ok') {
                 // round 2 P1：main 端已清 processingResult，此处同步 renderer state
                 if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
+                // v2.1.0-beta.1 PR-A（task A9）：刷新主面板"场景"下拉
+                if (typeof reloadReconIdFixScenarios === 'function') {
+                  await reloadReconIdFixScenarios();
+                }
                 openModal(createScenariosManagerDialog());
               } else {
                 openModal(createAlertDialog(`删除失败：${result?.message || '未知错误'}`));
@@ -5506,10 +5519,24 @@
         } else {
           // round 2 P1：toggle 成功 → main 端已清 processingResult，此处同步 renderer state
           if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
+          // v2.1.0-beta.1 PR-A（task A9）：toggle 后场景列表 enabled 字段变了，刷新主面板下拉
+          if (typeof reloadReconIdFixScenarios === 'function') {
+            await reloadReconIdFixScenarios();
+          }
         }
       });
 
-      dialog.querySelector('.icon-close').addEventListener('click', closeModal);
+      // v2.1.0-beta.1 PR-A（task A9）：场景管理 dialog 关闭时（× / 点空白处通用 closeModal 通道也覆盖）
+      // 统一让主面板下拉即时同步——不论用户做了什么操作。
+      function closeAndReloadReconList() {
+        closeModal();
+        if (typeof reloadReconIdFixScenarios === 'function') {
+          reloadReconIdFixScenarios().catch((err) => {
+            console.warn('reloadReconIdFixScenarios on dialog close failed:', err);
+          });
+        }
+      }
+      dialog.querySelector('.icon-close').addEventListener('click', closeAndReloadReconList);
       dialog.querySelector('[data-action="add-scenario"]').addEventListener('click', () => {
         openModal(createScenarioCategorySelectDialog());
       });
@@ -5526,6 +5553,7 @@
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card scenario-category-select-card';
+      // v2.1.0-beta.1 PR-A（task A5）：三选一扩四选一，新增"单据对账 ReconID 修复"
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">新增场景</div>
@@ -5538,6 +5566,7 @@
               <option value="extract-recon-id">提取ReconId-From Self</option>
               <option value="offset-bill-mark">账单打标</option>
               <option value="gateway-recon-join">提取ReconId-From 网关</option>
+              <option value="recon-id-fix">单据对账 ReconID 修复</option>
             </select>
           </label>
         </div>
@@ -5596,6 +5625,23 @@
         return {
           reconFields: [{ seq: 1, gwField: '', bankField: '' }],
           assign: { gwField: '', bankField: '' }
+        };
+      }
+      // v2.1.0-beta.1 PR-A（task A7）：C4 类默认 config（spec §8.2）
+      if (category === 'recon-id-fix') {
+        return {
+          matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+          billTypes: [
+            { seq: 1, side: 'main', conditions: [{ field: '', op: '等于', value: '' }] }
+          ],
+          reconFields: [
+            { seq: 1, leftTypeSeq: 1, leftField: '', rightTypeSeq: 1, rightField: '' }
+          ],
+          output: {
+            mode: 'main', // 'main' | 'opp' | 'both'
+            commonId: { source: 'main', suffix: '' },
+            subBizType: { mode: 'auto', mainValue: '', oppValue: '' } // 'auto' | 'manualMain' | 'manualOpp' | 'manualBoth'
+          }
         };
       }
       return {};
@@ -5682,6 +5728,89 @@
         else if (c.reconFields.some((r) => !r.gwField || !r.bankField)) errors.push('对账字段每行两端都不能为空');
         const a = c.assign || {};
         if (!a.gwField || !a.bankField) errors.push('对账成立后赋值的两端都不能为空');
+      } else if (draft.category === 'recon-id-fix') {
+        // v2.1.0-beta.1 PR-A（task A7）：C4 校验
+        const c = draft.config || {};
+        const mr = c.matchRules || {};
+        if (!mr.oneToOne && !mr.oneToMany && !mr.manyToOne) {
+          errors.push('单据匹配规则至少勾 1 项');
+        }
+        if (mr.oneToMany && mr.manyToOne) {
+          errors.push('"1 v 多"与"多 v 1"互斥，不能同时勾选');
+        }
+        const billTypesArr = Array.isArray(c.billTypes) ? c.billTypes : [];
+        if (billTypesArr.length === 0) {
+          errors.push('账单类型至少需要 1 行');
+        } else {
+          billTypesArr.forEach((bt, idx) => {
+            if (!bt.side || (bt.side !== 'main' && bt.side !== 'opp')) {
+              errors.push(`账单类型 #${bt.seq || idx + 1} 的"主/从"必填`);
+            }
+            const conds = Array.isArray(bt.conditions) ? bt.conditions : [];
+            if (conds.length === 0) {
+              errors.push(`账单类型 #${bt.seq || idx + 1} 至少需要 1 个条件`);
+            } else if (conds.some((cd) => !cd.field || (opNeedsValue(cd.op) && (cd.value === '' || cd.value === undefined)))) {
+              errors.push(`账单类型 #${bt.seq || idx + 1} 每行的字段不能为空；非"空值/非空值"操作的值不能为空`);
+            }
+          });
+        }
+        // v2.1.0-beta.1 PR-A round 2 P2-2（数据完整性）：必须主从两侧都有账单类型
+        // 否则保存出来的 C4 配置在 PR-B 引擎里会跑出空 leftRows / rightRows，相当于无效场景
+        const hasMainBillType = billTypesArr.some((bt) => bt.side === 'main');
+        const hasOppBillType = billTypesArr.some((bt) => bt.side === 'opp');
+        if (billTypesArr.length > 0) {
+          if (!hasMainBillType) errors.push('账单类型必须至少包含 1 条"主边"账单类型');
+          if (!hasOppBillType) errors.push('账单类型必须至少包含 1 条"从边"账单类型');
+        }
+
+        if (!Array.isArray(c.reconFields) || c.reconFields.length === 0) {
+          errors.push('对账字段至少需要 1 行');
+        } else if (c.reconFields.some((r) => !r.leftField || !r.rightField)) {
+          errors.push('对账字段每行两端的字段都不能为空');
+        }
+        // v2.1.0-beta.1 PR-A round 2 P2-2（数据完整性）：对账字段两端必须分别指向主/从边
+        // leftTypeSeq → side === 'main'；rightTypeSeq → side === 'opp'
+        // 否则保存的配置语义错误，PR-B 引擎按主/从边过滤行时会丢分组
+        if (Array.isArray(c.reconFields) && c.reconFields.length > 0 && billTypesArr.length > 0) {
+          const sideBySeq = new Map(billTypesArr.map((bt) => [Number(bt.seq), bt.side]));
+          c.reconFields.forEach((rf, idx) => {
+            const rowLabel = `对账字段 #${idx + 1}`;
+            const leftSeq = Number(rf.leftTypeSeq);
+            const rightSeq = Number(rf.rightTypeSeq);
+            // 序号落在 billTypes 之外（用户删了对应序号 → 校验失败而不是静默错位）
+            if (!sideBySeq.has(leftSeq)) {
+              errors.push(`${rowLabel} 左侧的账单类型序号 #${rf.leftTypeSeq} 不在账单类型列表中`);
+            } else if (sideBySeq.get(leftSeq) !== 'main') {
+              errors.push(`${rowLabel} 左侧必须指向"主边"账单类型`);
+            }
+            if (!sideBySeq.has(rightSeq)) {
+              errors.push(`${rowLabel} 右侧的账单类型序号 #${rf.rightTypeSeq} 不在账单类型列表中`);
+            } else if (sideBySeq.get(rightSeq) !== 'opp') {
+              errors.push(`${rowLabel} 右侧必须指向"从边"账单类型`);
+            }
+          });
+        }
+        const out = c.output || {};
+        if (!out.mode || (out.mode !== 'main' && out.mode !== 'opp' && out.mode !== 'both')) {
+          errors.push('修复结果输出方向必填（主边 / 从边 / 主从都修复）');
+        }
+        if (out.mode === 'both') {
+          const ci = out.commonId || {};
+          if (!ci.source || (ci.source !== 'main' && ci.source !== 'opp')) {
+            errors.push('"主从都修复"必须选择共同 ID 取自主/从边');
+          }
+        }
+        const sub = out.subBizType || {};
+        const validSubModes = ['auto', 'manualMain', 'manualOpp', 'manualBoth'];
+        if (!validSubModes.includes(sub.mode)) {
+          errors.push('SubBizType 取值方式必填');
+        }
+        if (sub.mode === 'manualMain' && !sub.mainValue) errors.push('"主边单据 SubBizType 值"不能为空');
+        if (sub.mode === 'manualOpp' && !sub.oppValue) errors.push('"从边单据 SubBizType 值"不能为空');
+        if (sub.mode === 'manualBoth') {
+          if (!sub.mainValue) errors.push('"主边单据 SubBizType 值"不能为空');
+          if (!sub.oppValue) errors.push('"从边单据 SubBizType 值"不能为空');
+        }
       }
       return errors;
     }
@@ -6405,6 +6534,472 @@
       return overlay;
     }
 
+    // ===== v2.1.0-beta.1 PR-A — F5 C4 配置弹窗（5 行 + 识读按钮 disabled 占位）=====
+    // 主从双下拉枚举：BUSINESS_BILL_FIELDS（主边）/ OPPONENT_BILL_FIELDS（从边）
+    // 行结构详见 spec §八.1；互斥逻辑详见 PRD §三 D2 / D5
+    function getReconIdFixFieldsForSide(side) {
+      return side === 'opp' ? OPPONENT_BILL_FIELDS : BUSINESS_BILL_FIELDS;
+    }
+
+    function createScenarioConfigDialogC4() {
+      const draft = state.scenarioDraft;
+      if (!draft || draft.category !== 'recon-id-fix') {
+        return createAlertDialog('内部错误：state.scenarioDraft 缺失或类别不匹配');
+      }
+      const mode = draft.mode || 'create';
+      const isReadonly = mode === 'view';
+      if (!draft.config) draft.config = createDefaultScenarioConfig('recon-id-fix');
+      const config = draft.config;
+      // 防御：每行字段补默认
+      if (!config.matchRules) config.matchRules = { oneToOne: true, oneToMany: false, manyToOne: false };
+      if (!Array.isArray(config.billTypes) || config.billTypes.length === 0) {
+        config.billTypes = [{ seq: 1, side: 'main', conditions: [{ field: '', op: '等于', value: '' }] }];
+      }
+      // 兼容修正：保证 conditions 字段存在
+      config.billTypes.forEach((bt, idx) => {
+        if (!bt.seq) bt.seq = idx + 1;
+        if (!bt.side) bt.side = 'main';
+        if (!Array.isArray(bt.conditions) || bt.conditions.length === 0) {
+          bt.conditions = [{ field: '', op: '等于', value: '' }];
+        }
+      });
+      if (!Array.isArray(config.reconFields) || config.reconFields.length === 0) {
+        config.reconFields = [{ seq: 1, leftTypeSeq: 1, leftField: '', rightTypeSeq: 1, rightField: '' }];
+      }
+      if (!config.output) {
+        config.output = {
+          mode: 'main',
+          commonId: { source: 'main', suffix: '' },
+          subBizType: { mode: 'auto', mainValue: '', oppValue: '' }
+        };
+      }
+      if (!config.output.commonId) config.output.commonId = { source: 'main', suffix: '' };
+      if (!config.output.subBizType) config.output.subBizType = { mode: 'auto', mainValue: '', oppValue: '' };
+
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card scenario-config-card scenario-config-c4';
+
+      const inferTooltip = '导入单据不平结果表，表里的"业务部门账单"sheet 和"对手部门账单"sheet 需放入对平结果。多个例子时，需将同一例子的所有单元格颜色置为同色。通过识读对平结果，分析对平规则，分析结果填入账单类型和对账字段里。';
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">${escapeHtml(getCategoryDialogTitle(draft.category, mode))}</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body scenario-config-body">
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">场景名称</span>
+            <input class="scenario-config-input" type="text" data-field="name" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(draft.name || '')}" placeholder="非空 + 全局唯一">
+          </div>
+          <div class="scenario-config-row scenario-config-row-mutex">
+            <span class="scenario-config-label">单据匹配规则</span>
+            <div class="scenario-config-c4-checkboxes">
+              <label class="scenario-config-c4-checkbox-item">
+                <input type="checkbox" data-c4-match="oneToOne" ${config.matchRules.oneToOne ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+                <span>主边单据 1 v 1 从边单据</span>
+              </label>
+              <label class="scenario-config-c4-checkbox-item">
+                <input type="checkbox" data-c4-match="oneToMany" ${config.matchRules.oneToMany ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+                <span>主边单据 1 v 多 从边单据</span>
+              </label>
+              <label class="scenario-config-c4-checkbox-item">
+                <input type="checkbox" data-c4-match="manyToOne" ${config.matchRules.manyToOne ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+                <span>主边单据 多 v 1 从边单据</span>
+              </label>
+            </div>
+          </div>
+          <div class="scenario-config-row scenario-config-row-multi">
+            <span class="scenario-config-label">账单类型</span>
+            <div class="scenario-config-multi-wrap">
+              <div class="scenario-config-multi-rows" data-c4-bill-types></div>
+              ${isReadonly ? '' : '<button class="text-action small" type="button" data-c4-action="add-bill-type">+ 新增账单类型</button>'}
+            </div>
+          </div>
+          <div class="scenario-config-row scenario-config-row-multi">
+            <span class="scenario-config-label">对账字段</span>
+            <div class="scenario-config-multi-wrap">
+              <div class="scenario-config-multi-rows" data-c4-recon-fields></div>
+              ${isReadonly ? '' : '<button class="text-action small" type="button" data-c4-action="add-recon-field">+ 新增对账字段</button>'}
+            </div>
+          </div>
+          <div class="scenario-config-row scenario-config-row-mutex">
+            <span class="scenario-config-label">修复结果输出</span>
+            <div class="scenario-config-c4-output" data-c4-output></div>
+          </div>
+        </div>
+        <div class="dialog-actions left-right">
+          <div class="dialog-actions-left">
+            <button class="secondary-btn small" type="button" data-c4-action="infer-rules" disabled title="${escapeHtml(inferTooltip)}">识读场景规律</button>
+          </div>
+          <div class="dialog-actions-right">
+            ${buildScenarioActionsHtml(mode)}
+          </div>
+        </div>
+      `;
+
+      const billTypesEl = dialog.querySelector('[data-c4-bill-types]');
+      const reconFieldsEl = dialog.querySelector('[data-c4-recon-fields]');
+      const outputEl = dialog.querySelector('[data-c4-output]');
+
+      function renderBillTypes() {
+        billTypesEl.innerHTML = config.billTypes.map((bt, idx) => {
+          const fields = getReconIdFixFieldsForSide(bt.side);
+          const conditionsHtml = (bt.conditions || []).map((cd, cIdx) => `
+            <div class="scenario-config-c4-condition-row" data-c4-cond-row="${cIdx}">
+              <select class="scenario-config-input" data-c4-cond-field="field" ${isReadonly ? 'disabled' : ''}>
+                <option value="">请选择字段</option>
+                ${renderScenarioOptions(fields, cd.field)}
+              </select>
+              <select class="scenario-config-input scenario-config-input-narrow" data-c4-cond-field="op" ${isReadonly ? 'disabled' : ''}>
+                ${renderScenarioOptions(SCENARIO_CONDITION_OPS, cd.op || '等于')}
+              </select>
+              <input class="scenario-config-input" type="text" data-c4-cond-field="value" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(cd.value || '')}" placeholder="值" ${!opNeedsValue(cd.op) ? 'style="visibility:hidden"' : ''}>
+              ${isReadonly || (bt.conditions || []).length <= 1 ? '' : '<button class="icon-close-small" type="button" data-c4-cond-action="remove" title="删除">×</button>'}
+              ${isReadonly ? '' : `<button class="text-action small" type="button" data-c4-cond-action="add-cond" title="同序号 AND">新增</button>`}
+            </div>
+          `).join('');
+          return `
+            <div class="scenario-config-c4-bill-type" data-c4-bt-row="${idx}">
+              <div class="scenario-config-c4-bt-header">
+                <span class="scenario-config-multi-seq">#${bt.seq}</span>
+                <select class="scenario-config-input scenario-config-input-narrow" data-c4-bt-field="side" ${isReadonly ? 'disabled' : ''}>
+                  <option value="main"${bt.side === 'main' ? ' selected' : ''}>主边</option>
+                  <option value="opp"${bt.side === 'opp' ? ' selected' : ''}>从边</option>
+                </select>
+                ${isReadonly || config.billTypes.length <= 1 ? '' : '<button class="icon-close-small" type="button" data-c4-bt-action="remove" title="删除该序号">×</button>'}
+              </div>
+              <div class="scenario-config-c4-conditions">
+                ${conditionsHtml}
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      function renderReconFields() {
+        const seqs = config.billTypes.map((b) => b.seq);
+        const sideBySeq = new Map(config.billTypes.map((b) => [b.seq, b.side]));
+        reconFieldsEl.innerHTML = config.reconFields.map((rf, idx) => {
+          const leftSide = sideBySeq.get(Number(rf.leftTypeSeq)) || 'main';
+          const rightSide = sideBySeq.get(Number(rf.rightTypeSeq)) || 'opp';
+          const leftFields = getReconIdFixFieldsForSide(leftSide);
+          const rightFields = getReconIdFixFieldsForSide(rightSide);
+          return `
+            <div class="scenario-config-multi-row scenario-config-c4-recon-row" data-c4-rf-row="${idx}">
+              <span class="scenario-config-multi-seq">#${idx + 1}</span>
+              <select class="scenario-config-input scenario-config-input-narrow" data-c4-rf-field="leftTypeSeq" ${isReadonly ? 'disabled' : ''}>
+                ${renderScenarioOptions(seqs.map(String), String(rf.leftTypeSeq))}
+              </select>
+              <select class="scenario-config-input" data-c4-rf-field="leftField" ${isReadonly ? 'disabled' : ''}>
+                <option value="">请选择字段</option>
+                ${renderScenarioOptions(leftFields, rf.leftField)}
+              </select>
+              <span class="scenario-config-vs-arrow">vs</span>
+              <select class="scenario-config-input scenario-config-input-narrow" data-c4-rf-field="rightTypeSeq" ${isReadonly ? 'disabled' : ''}>
+                ${renderScenarioOptions(seqs.map(String), String(rf.rightTypeSeq))}
+              </select>
+              <select class="scenario-config-input" data-c4-rf-field="rightField" ${isReadonly ? 'disabled' : ''}>
+                <option value="">请选择字段</option>
+                ${renderScenarioOptions(rightFields, rf.rightField)}
+              </select>
+              ${isReadonly || config.reconFields.length === 1 ? '' : '<button class="icon-close-small" type="button" data-c4-rf-action="remove" title="删除">×</button>'}
+            </div>
+          `;
+        }).join('');
+      }
+
+      function renderOutput() {
+        const out = config.output;
+        const sub = out.subBizType;
+        const isBoth = out.mode === 'both';
+        outputEl.innerHTML = `
+          <div class="scenario-config-c4-output-modes">
+            <label class="scenario-config-c4-checkbox-item">
+              <input type="radio" name="c4-output-mode" value="main" ${out.mode === 'main' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+              <span>主边单据</span>
+            </label>
+            <label class="scenario-config-c4-checkbox-item">
+              <input type="radio" name="c4-output-mode" value="opp" ${out.mode === 'opp' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+              <span>从边单据</span>
+            </label>
+            <label class="scenario-config-c4-checkbox-item">
+              <input type="radio" name="c4-output-mode" value="both" ${out.mode === 'both' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+              <span>主从边都修复</span>
+            </label>
+          </div>
+          ${isBoth ? `
+            <div class="scenario-config-c4-common-id">
+              <span>取</span>
+              <select class="scenario-config-input scenario-config-input-narrow" data-c4-common-id="source" ${isReadonly ? 'disabled' : ''}>
+                <option value="main"${out.commonId.source === 'main' ? ' selected' : ''}>主边单据 ID</option>
+                <option value="opp"${out.commonId.source === 'opp' ? ' selected' : ''}>从边单据 ID</option>
+              </select>
+              <span>加上</span>
+              <input class="scenario-config-input scenario-config-input-narrow" type="text" data-c4-common-id="suffix" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(out.commonId.suffix || '')}" placeholder="后缀">
+              <span>作为主从边共同的修复 ID</span>
+            </div>
+          ` : ''}
+          <div class="scenario-config-c4-sub-biz">
+            <div class="scenario-config-c4-sub-biz-title">SubBizType 取值（三选一）</div>
+            <label class="scenario-config-c4-checkbox-item">
+              <input type="radio" name="c4-sub-mode" value="auto" ${sub.mode === 'auto' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+              <span>订单修复表的 SubBizType 值取对应单据在对账结果表里单据子类型</span>
+            </label>
+            <label class="scenario-config-c4-checkbox-item">
+              <input type="radio" name="c4-sub-mode" value="manualMain" ${sub.mode === 'manualMain' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+              <span>主边单据 SubBizType 值</span>
+              <input class="scenario-config-input scenario-config-input-narrow" type="text" data-c4-sub-field="mainValue" ${isReadonly || (sub.mode !== 'manualMain' && sub.mode !== 'manualBoth') ? 'disabled' : ''} value="${escapeHtml(sub.mainValue || '')}" placeholder="主边手填值">
+            </label>
+            <label class="scenario-config-c4-checkbox-item">
+              <input type="radio" name="c4-sub-mode" value="manualOpp" ${sub.mode === 'manualOpp' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+              <span>从边单据 SubBizType 值</span>
+              <input class="scenario-config-input scenario-config-input-narrow" type="text" data-c4-sub-field="oppValue" ${isReadonly || (sub.mode !== 'manualOpp' && sub.mode !== 'manualBoth') ? 'disabled' : ''} value="${escapeHtml(sub.oppValue || '')}" placeholder="从边手填值">
+            </label>
+            <label class="scenario-config-c4-checkbox-item">
+              <input type="radio" name="c4-sub-mode" value="manualBoth" ${sub.mode === 'manualBoth' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+              <span>主从边各自手填</span>
+            </label>
+          </div>
+        `;
+      }
+
+      function rerenderAll() {
+        renderBillTypes();
+        renderReconFields();
+        renderOutput();
+      }
+      rerenderAll();
+
+      bindScenarioBasicFields(dialog, draft);
+
+      // 行 2：单据匹配规则 — 1v多 / 多v1 互斥；1v1 自由
+      dialog.querySelectorAll('input[data-c4-match]').forEach((cb) => {
+        cb.addEventListener('change', () => {
+          if (isReadonly) return;
+          const key = cb.dataset.c4Match;
+          config.matchRules[key] = cb.checked;
+          // 互斥：1v多 与 多v1 不能同时
+          if (key === 'oneToMany' && cb.checked) {
+            config.matchRules.manyToOne = false;
+          } else if (key === 'manyToOne' && cb.checked) {
+            config.matchRules.oneToMany = false;
+          }
+          dialog.querySelectorAll('input[data-c4-match]').forEach((other) => {
+            other.checked = !!config.matchRules[other.dataset.c4Match];
+          });
+        });
+      });
+
+      // 行 3：账单类型动态行
+      billTypesEl.addEventListener('change', (event) => {
+        if (isReadonly) return;
+        const sideSel = event.target.closest('select[data-c4-bt-field="side"]');
+        if (sideSel) {
+          const row = sideSel.closest('[data-c4-bt-row]');
+          const idx = Number(row.dataset.c4BtRow);
+          if (Number.isFinite(idx) && config.billTypes[idx]) {
+            config.billTypes[idx].side = sideSel.value === 'opp' ? 'opp' : 'main';
+            // 切 side → 字段下拉枚举改变 → 清空 conditions[].field
+            (config.billTypes[idx].conditions || []).forEach((cd) => { cd.field = ''; });
+            renderBillTypes();
+            renderReconFields(); // 联动行 4 字段下拉
+          }
+          return;
+        }
+        const condCtl = event.target.closest('[data-c4-cond-field]');
+        if (condCtl) {
+          const btRow = condCtl.closest('[data-c4-bt-row]');
+          const condRow = condCtl.closest('[data-c4-cond-row]');
+          if (!btRow || !condRow) return;
+          const btIdx = Number(btRow.dataset.c4BtRow);
+          const condIdx = Number(condRow.dataset.c4CondRow);
+          const f = condCtl.dataset.c4CondField;
+          if (Number.isFinite(btIdx) && config.billTypes[btIdx]
+              && Number.isFinite(condIdx) && config.billTypes[btIdx].conditions[condIdx]) {
+            config.billTypes[btIdx].conditions[condIdx][f] = condCtl.value;
+            if (f === 'op') renderBillTypes();
+          }
+        }
+      });
+      billTypesEl.addEventListener('input', (event) => {
+        if (isReadonly) return;
+        const input = event.target.closest('input[data-c4-cond-field="value"]');
+        if (!input) return;
+        const btRow = input.closest('[data-c4-bt-row]');
+        const condRow = input.closest('[data-c4-cond-row]');
+        if (!btRow || !condRow) return;
+        const btIdx = Number(btRow.dataset.c4BtRow);
+        const condIdx = Number(condRow.dataset.c4CondRow);
+        if (Number.isFinite(btIdx) && config.billTypes[btIdx]
+            && Number.isFinite(condIdx) && config.billTypes[btIdx].conditions[condIdx]) {
+          config.billTypes[btIdx].conditions[condIdx].value = input.value;
+        }
+      });
+      billTypesEl.addEventListener('click', (event) => {
+        if (isReadonly) return;
+        const removeBtBtn = event.target.closest('button[data-c4-bt-action="remove"]');
+        if (removeBtBtn) {
+          const row = removeBtBtn.closest('[data-c4-bt-row]');
+          const idx = Number(row.dataset.c4BtRow);
+          if (Number.isFinite(idx) && config.billTypes.length > 1) {
+            config.billTypes.splice(idx, 1);
+            // 重排 seq + 校正行 4 引用
+            config.billTypes.forEach((b, i) => { b.seq = i + 1; });
+            const validSeqs = config.billTypes.map((b) => b.seq);
+            config.reconFields.forEach((r) => {
+              if (!validSeqs.includes(Number(r.leftTypeSeq))) r.leftTypeSeq = validSeqs[0] || 1;
+              if (!validSeqs.includes(Number(r.rightTypeSeq))) r.rightTypeSeq = validSeqs[0] || 1;
+            });
+            rerenderAll();
+          }
+          return;
+        }
+        const removeCondBtn = event.target.closest('button[data-c4-cond-action="remove"]');
+        if (removeCondBtn) {
+          const btRow = removeCondBtn.closest('[data-c4-bt-row]');
+          const condRow = removeCondBtn.closest('[data-c4-cond-row]');
+          if (!btRow || !condRow) return;
+          const btIdx = Number(btRow.dataset.c4BtRow);
+          const condIdx = Number(condRow.dataset.c4CondRow);
+          if (Number.isFinite(btIdx) && config.billTypes[btIdx]
+              && Number.isFinite(condIdx) && config.billTypes[btIdx].conditions.length > 1) {
+            config.billTypes[btIdx].conditions.splice(condIdx, 1);
+            renderBillTypes();
+          }
+          return;
+        }
+        const addCondBtn = event.target.closest('button[data-c4-cond-action="add-cond"]');
+        if (addCondBtn) {
+          const btRow = addCondBtn.closest('[data-c4-bt-row]');
+          if (!btRow) return;
+          const btIdx = Number(btRow.dataset.c4BtRow);
+          if (Number.isFinite(btIdx) && config.billTypes[btIdx]) {
+            config.billTypes[btIdx].conditions.push({ field: '', op: '等于', value: '' });
+            renderBillTypes();
+          }
+        }
+      });
+      dialog.querySelector('[data-c4-action="add-bill-type"]')?.addEventListener('click', () => {
+        if (isReadonly) return;
+        const nextSeq = config.billTypes.length + 1;
+        // 默认新加的下一组从边
+        const newSide = config.billTypes.length === 0 ? 'main' : (config.billTypes.length === 1 ? 'opp' : 'main');
+        config.billTypes.push({ seq: nextSeq, side: newSide, conditions: [{ field: '', op: '等于', value: '' }] });
+        renderBillTypes();
+        renderReconFields();
+      });
+
+      // 行 4：对账字段动态行
+      reconFieldsEl.addEventListener('change', (event) => {
+        if (isReadonly) return;
+        const ctl = event.target.closest('[data-c4-rf-field]');
+        if (!ctl) return;
+        const row = ctl.closest('[data-c4-rf-row]');
+        const idx = Number(row?.dataset.c4RfRow);
+        const f = ctl.dataset.c4RfField;
+        if (Number.isFinite(idx) && config.reconFields[idx]) {
+          if (f === 'leftTypeSeq' || f === 'rightTypeSeq') {
+            config.reconFields[idx][f] = Number(ctl.value);
+            // 切类型 → 字段下拉枚举改变 → 清空 leftField / rightField
+            if (f === 'leftTypeSeq') config.reconFields[idx].leftField = '';
+            else config.reconFields[idx].rightField = '';
+            renderReconFields();
+          } else {
+            config.reconFields[idx][f] = ctl.value;
+          }
+        }
+      });
+      reconFieldsEl.addEventListener('click', (event) => {
+        if (isReadonly) return;
+        const btn = event.target.closest('button[data-c4-rf-action="remove"]');
+        if (!btn) return;
+        const row = btn.closest('[data-c4-rf-row]');
+        const idx = Number(row?.dataset.c4RfRow);
+        if (Number.isFinite(idx) && config.reconFields.length > 1) {
+          config.reconFields.splice(idx, 1);
+          renderReconFields();
+        }
+      });
+      dialog.querySelector('[data-c4-action="add-recon-field"]')?.addEventListener('click', () => {
+        if (isReadonly) return;
+        const seqs = config.billTypes.map((b) => b.seq);
+        config.reconFields.push({
+          seq: config.reconFields.length + 1,
+          leftTypeSeq: seqs[0] || 1,
+          leftField: '',
+          rightTypeSeq: seqs[1] || seqs[0] || 1,
+          rightField: ''
+        });
+        renderReconFields();
+      });
+
+      // 行 5：修复结果输出
+      outputEl.addEventListener('change', (event) => {
+        if (isReadonly) return;
+        // mode 切换
+        const modeRadio = event.target.closest('input[name="c4-output-mode"]');
+        if (modeRadio && modeRadio.checked) {
+          config.output.mode = modeRadio.value;
+          renderOutput();
+          return;
+        }
+        // sub mode 切换
+        const subRadio = event.target.closest('input[name="c4-sub-mode"]');
+        if (subRadio && subRadio.checked) {
+          config.output.subBizType.mode = subRadio.value;
+          renderOutput();
+          return;
+        }
+        // commonId.source
+        const ciSource = event.target.closest('[data-c4-common-id="source"]');
+        if (ciSource) {
+          config.output.commonId.source = ciSource.value === 'opp' ? 'opp' : 'main';
+        }
+      });
+      outputEl.addEventListener('input', (event) => {
+        if (isReadonly) return;
+        const ciSuffix = event.target.closest('input[data-c4-common-id="suffix"]');
+        if (ciSuffix) {
+          config.output.commonId.suffix = ciSuffix.value;
+          return;
+        }
+        const subInput = event.target.closest('input[data-c4-sub-field]');
+        if (subInput) {
+          const f = subInput.dataset.c4SubField;
+          config.output.subBizType[f] = subInput.value;
+        }
+      });
+
+      // 识读规律按钮（PR-A 占位 disabled，PR-C 实装）
+      dialog.querySelector('[data-c4-action="infer-rules"]')?.addEventListener('click', () => {
+        // PR-A 仅占位提示
+        openModal(createAlertDialog('"识读场景规律"功能将在 PR-C 落地。'));
+      });
+
+      // 关闭 / 取消 / 确认 / 返回
+      function closeAndClearDraft() {
+        clearScenarioDraft();
+        openModal(createScenariosManagerDialog());
+      }
+      dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
+      dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', closeAndClearDraft);
+      dialog.querySelector('[data-action="back"]')?.addEventListener('click', closeAndClearDraft);
+      dialog.querySelector('[data-action="confirm"]')?.addEventListener('click', () => {
+        const errors = validateScenarioDraft(draft);
+        if (errors.length > 0) {
+          openModal(createAlertDialog(errors.map((e) => `• ${e}`).join('<br>'), {
+            onConfirm: () => openScenarioConfigByCategory(draft.category)
+          }));
+          return;
+        }
+        openModal(createScenarioConfirmDetailDialog());
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     // ===== F4 — 确认场景详情弹窗（共用，文本预览 + 完成/返回）=====
     function buildScenarioConfirmDetailHtml(draft) {
       const c = draft.config || {};
@@ -6429,6 +7024,35 @@
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段（AND）：</span><ul>${(c.reconFields || []).map((r) => `<li>网关 ${escapeHtml(r.gwField)} = 银行 ${escapeHtml(r.bankField)}</li>`).join('')}</ul></div>`;
         const a = c.assign || {};
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">赋值：</span>网关 ${escapeHtml(a.gwField || '')} → 银行 ${escapeHtml(a.bankField || '')}</div>`;
+      } else if (draft.category === 'recon-id-fix') {
+        // v2.1.0-beta.1 PR-A（task A8）：C4 文本预览（PRD §七.2 模板）
+        const mr = c.matchRules || {};
+        const mrParts = [];
+        if (mr.oneToOne) mrParts.push('1 v 1');
+        if (mr.oneToMany) mrParts.push('1 v 多');
+        if (mr.manyToOne) mrParts.push('多 v 1');
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">匹配规则：</span>${escapeHtml(mrParts.join(' / ') || '（未选）')}</div>`;
+        const sideLabel = (s) => s === 'opp' ? '从边' : '主边';
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">账单类型：</span><ul>${(c.billTypes || []).map((bt) => {
+          const condsHtml = (bt.conditions || []).map((cd) => `${escapeHtml(cd.field)} ${escapeHtml(cd.op)}${opNeedsValue(cd.op) ? ' ' + escapeHtml(String(cd.value || '')) : ''}`).join(' AND ');
+          return `<li>类型#${bt.seq} (${sideLabel(bt.side)})：${condsHtml}</li>`;
+        }).join('')}</ul></div>`;
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段：</span><ul>${(c.reconFields || []).map((r) => `<li>类型#${r.leftTypeSeq} ${escapeHtml(r.leftField)} vs 类型#${r.rightTypeSeq} ${escapeHtml(r.rightField)}</li>`).join('')}</ul></div>`;
+        const out = c.output || {};
+        const modeLabel = out.mode === 'main' ? '主边' : (out.mode === 'opp' ? '从边' : '主从都修复');
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">修复方向：</span>${escapeHtml(modeLabel)}</div>`;
+        if (out.mode === 'both') {
+          const ci = out.commonId || {};
+          html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">共同 ID：</span>取${escapeHtml(sideLabel(ci.source))}OrderId + "${escapeHtml(ci.suffix || '')}"</div>`;
+        }
+        const sub = out.subBizType || {};
+        let subText;
+        if (sub.mode === 'auto') subText = '自动查（对账结果 sheet 单据子类型）';
+        else if (sub.mode === 'manualMain') subText = `主边手填 = "${sub.mainValue || ''}"`;
+        else if (sub.mode === 'manualOpp') subText = `从边手填 = "${sub.oppValue || ''}"`;
+        else if (sub.mode === 'manualBoth') subText = `主边手填 = "${sub.mainValue || ''}"，从边手填 = "${sub.oppValue || ''}"`;
+        else subText = '（未选）';
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">SubBizType：</span>${escapeHtml(subText)}</div>`;
       }
       return html;
     }
@@ -6496,6 +7120,10 @@
           // 成功 → 清空 draft + 刷新场景管理弹窗
           // round 2 P1：场景已变更，main 端已清 processingResult，此处同步 renderer state
           if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
+          // v2.1.0-beta.1 PR-A（task A9）：scenarios:create / update 完成后刷新主面板"场景"下拉
+          if (typeof reloadReconIdFixScenarios === 'function') {
+            await reloadReconIdFixScenarios();
+          }
           clearScenarioDraft();
           openModal(createScenariosManagerDialog());
         } catch (error) {
@@ -6544,7 +7172,9 @@
       createScenarioConfigDialogC1,
       createScenarioConfigDialogC2,
       createScenarioConfigDialogC3,
-      createScenarioConfirmDetailDialog
+      createScenarioConfirmDetailDialog,
+      // v2.1.0-beta.1 PR-A（task A7）：C4 类配置弹窗
+      createScenarioConfigDialogC4
     };
   }
 

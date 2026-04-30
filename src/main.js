@@ -132,6 +132,12 @@ let nextStatementFileEntryId = 1;
 let bankStatementSession = null;     // { filePath, fileName, rows, headers, importedAt }
 let gatewayReconSession = null;      // { filePath, fileName, gwRows, importedAt }
 let processingResult = null;         // { modifiedRows, modifications, errorReport, stats, ranAt }
+// v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块的进程级 session（PR-B 才实装数据 IO，PR-A 仅占位）
+// reconIdFixSession = { filePath, fileName, sheets: { reconResult, businessBills, opponentBills, fixTemplate }, importedAt } | null
+// reconIdFixResult  = { scenarioId, scenarioName, fixedRows, warnings, scenariosSnapshot, ranAt } | null
+// 资金红线（spec §十）：场景任一变更 → 入口主动清 reconIdFixResult；export 端再被动校验 snapshot
+let reconIdFixSession = null;
+let reconIdFixResult = null;
 let startupMetricsReported = false;
 // v1.5.3 R2：自有账号迁移失败消息（D15）。null = 无失败；字符串 = 启动时发生失败，
 // renderer 首次 app:get-info 时读取并用 error tone 显示状态栏告警
@@ -2725,12 +2731,31 @@ function registerAppHandlers() {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
   });
+  // PR #35 Codex round 3 P2（资金红线分流）：4 个 scenarios:* 入口
+  // 不再无条件清两个全局缓存，而是按变更场景的 category 分流：
+  // - C1/C2/C3（'extract-recon-id' / 'offset-bill-mark' / 'gateway-recon-join'）→ 只清 processingResult
+  // - C4（'recon-id-fix'）→ 只清 reconIdFixResult
+  // 否则会出现：用户跑完银行对账（processingResult 已就绪）后改 C4 场景 → 误清 processingResult
+  // → 前端 refreshBankStatementStatus() 把已就绪的导出状态翻成"未运行"。反向同理。
+  // round 3 self-review P3-A：显式枚举已知 category，未知值（含 undefined）双清并 warn，
+  // 避免未来加新 category 时忘了同步本函数会偷偷清 processingResult。
+  const BANK_STATEMENT_CATEGORIES = new Set(['extract-recon-id', 'offset-bill-mark', 'gateway-recon-join']);
+  function clearResultCacheForCategory(category) {
+    if (category === 'recon-id-fix') {
+      reconIdFixResult = null;
+    } else if (BANK_STATEMENT_CATEGORIES.has(category)) {
+      processingResult = null;
+    } else {
+      console.warn(`[scenarios:*] 未知 category=${category}，保险起见双清 processingResult + reconIdFixResult`);
+      processingResult = null;
+      reconIdFixResult = null;
+    }
+  }
   trackedIpcHandle('scenarios:create', '银行对账单处理', '场景管理', (_event, payload) => {
     try {
       const result = database.createScenario(payload);
-      // PR #33 Codex round 2 P1（资金红线）：场景配置变更后旧的 processingResult 已陈旧
-      // → 强制失效，避免用户改场景后导出 stale 旧规则的输出
-      processingResult = null;
+      // round 3 P2：按 category 分流（payload.category 已通过 createScenario 内的 validateCategory）
+      clearResultCacheForCategory(payload && payload.category);
       return { status: 'ok', id: result.id };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -2738,8 +2763,11 @@ function registerAppHandlers() {
   });
   trackedIpcHandle('scenarios:update', '银行对账单处理', '场景管理', (_event, id, fields) => {
     try {
+      // round 3 P2：先查老 row 的 category（spec §三 IPC：update 不允许改 category，可信任 DB 现值）
+      // 查不到 → updateScenario 自身也会抛 "场景 id=X 不存在"，此处保持 try 链一致
+      const existing = database.getScenario(id);
       database.updateScenario(id, fields);
-      processingResult = null;  // round 2 P1
+      clearResultCacheForCategory(existing && existing.category);
       return { status: 'ok', id };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -2747,8 +2775,13 @@ function registerAppHandlers() {
   });
   trackedIpcHandle('scenarios:delete', '银行对账单处理', '场景管理', (_event, id) => {
     try {
+      // round 3 P2：DELETE 后 row 不存在 → 必须先 SELECT category 再删
+      const existing = database.getScenario(id);
       const result = database.deleteScenario(id);
-      processingResult = null;  // round 2 P1
+      // 仅当 row 真存在过才需要清缓存（不存在时 result.deleted=false，无副作用）
+      if (existing) {
+        clearResultCacheForCategory(existing.category);
+      }
       return { status: 'ok', id, deleted: result.deleted };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -2756,8 +2789,10 @@ function registerAppHandlers() {
   });
   trackedIpcHandle('scenarios:toggle-enabled', '银行对账单处理', '场景管理', (_event, id, enabled) => {
     try {
+      // round 3 P2：toggle 不改 category，先 SELECT 取 category
+      const existing = database.getScenario(id);
       const result = database.toggleScenarioEnabled(id, enabled);
-      processingResult = null;  // round 2 P1
+      clearResultCacheForCategory(existing && existing.category);
       return { status: 'ok', id, enabled: result.enabled };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -2862,18 +2897,23 @@ function registerAppHandlers() {
       const allScenarios = database.listScenarios();
       const enabled = allScenarios.filter((s) => s.enabled === 1 || s.enabled === true);
       const detailedEnabled = enabled.map((s) => database.getScenario(s.id)).filter(Boolean);
+      // v2.1.0-beta.1 PR-A round 2 P1（资金红线）：C4 (`recon-id-fix`) 走独立模块
+      // `recon-id-fix:run`，不应进入银行对账单 dispatcher（C4 没有对应的 case，
+      // dispatcher 内 `runScenario` default 分支会 throw "未知 category"）。
+      // 此处 + snapshot 都过滤掉 → 银行对账与单据对账两条流水线相互独立。
+      const dispatchScenarios = detailedEnabled.filter((s) => s.category !== 'recon-id-fix');
       // 每次 run 都基于原始导入数据 deep clone 一份工作副本
       // （Codex F1 P1 修复：算法层会原地修改字段，不 clone 会让连续运行的 oldValue 漂移
       //  → first-match-wins 失效，低优先级场景可能覆盖高优先级写入的字段）
       const workingBankRows = structuredClone(bankStatementSession.rows);
       const workingGwRows = gatewayReconSession ? structuredClone(gatewayReconSession.gwRows) : null;
-      const result = runAllScenarios(workingBankRows, workingGwRows, detailedEnabled);
+      const result = runAllScenarios(workingBankRows, workingGwRows, dispatchScenarios);
       processingResult = {
         modifiedRows: result.modifiedRows,
         modifications: result.modifications,
         errorReport: result.errorReport,
         stats: result.stats,
-        scenariosSnapshot: buildScenariosSnapshot(detailedEnabled),
+        scenariosSnapshot: buildScenariosSnapshot(dispatchScenarios),
         ranAt: Date.now()
       };
       return {
@@ -2895,7 +2935,10 @@ function registerAppHandlers() {
       const allScenarios = database.listScenarios();
       const enabled = allScenarios.filter((s) => s.enabled === 1 || s.enabled === true);
       const detailedEnabled = enabled.map((s) => database.getScenario(s.id)).filter(Boolean);
-      const currentSnapshot = buildScenariosSnapshot(detailedEnabled);
+      // v2.1.0-beta.1 PR-A round 2 P1：与 bank-statement:run 一致，C4 不参与本模块的 snapshot
+      // 否则用户改 C4 场景会让此处 snapshot 变化 → 误报"场景已变更" → 拒绝导出
+      const dispatchScenarios = detailedEnabled.filter((s) => s.category !== 'recon-id-fix');
+      const currentSnapshot = buildScenariosSnapshot(dispatchScenarios);
       if (processingResult.scenariosSnapshot !== currentSnapshot) {
         processingResult = null;
         return { status: 'failed', message: '场景已变更，请重新点击"开始运行"再导出' };
@@ -2966,6 +3009,39 @@ function registerAppHandlers() {
       gatewayReconRowCount: gatewayReconSession ? gatewayReconSession.gwRows.length : 0,
       hasProcessingResult: processingResult !== null,
       processingStats: processingResult ? processingResult.stats : null
+    };
+  });
+
+  // ===== v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 IPC =====
+  // PR-A 仅做骨架：4 个数据 IPC（import/run/export/session-status）当前返回 not-implemented，
+  // 真正的算法/IO 实装在 PR-B；此处占位的目的是让 preload 暴露的 desktopApi.reconIdFix.* 不再 undefined，
+  // renderer 启动时调用 sessionStatus() 不报错。
+  ipcMain.handle('recon-id-fix:import', async () => {
+    return { status: 'fail', code: 'not-implemented', message: 'PR-B 落地（recon-id-fix:import）' };
+  });
+  ipcMain.handle('recon-id-fix:run', async () => {
+    return { status: 'fail', code: 'not-implemented', message: 'PR-B 落地（recon-id-fix:run）' };
+  });
+  ipcMain.handle('recon-id-fix:export', async () => {
+    return { status: 'fail', code: 'not-implemented', message: 'PR-B 落地（recon-id-fix:export）' };
+  });
+  ipcMain.handle('recon-id-fix:session-status', () => {
+    return {
+      status: 'ok',
+      hasFile: reconIdFixSession !== null,
+      fileName: reconIdFixSession ? reconIdFixSession.fileName : null,
+      sheetCounts: reconIdFixSession && reconIdFixSession.sheets
+        ? {
+            recon: Array.isArray(reconIdFixSession.sheets.reconResult) ? reconIdFixSession.sheets.reconResult.length : 0,
+            business: Array.isArray(reconIdFixSession.sheets.businessBills) ? reconIdFixSession.sheets.businessBills.length : 0,
+            opp: Array.isArray(reconIdFixSession.sheets.opponentBills) ? reconIdFixSession.sheets.opponentBills.length : 0
+          }
+        : null,
+      hasResult: reconIdFixResult !== null,
+      resultStats: reconIdFixResult ? {
+        fixedRowCount: Array.isArray(reconIdFixResult.fixedRows) ? reconIdFixResult.fixedRows.length : 0,
+        warningCount: Array.isArray(reconIdFixResult.warnings) ? reconIdFixResult.warnings.length : 0
+      } : null
     };
   });
 

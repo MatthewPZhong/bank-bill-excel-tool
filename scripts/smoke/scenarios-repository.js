@@ -7,15 +7,17 @@ const { DatabaseSync } = require('node:sqlite');
 const {
   calculateNextScenarioId,
   createScenario,
-  deleteScenario
+  deleteScenario,
+  updateScenario
 } = require('../../src/backend/database/scenarios-repository');
 
 function setupInMemoryDb() {
   const db = new DatabaseSync(':memory:');
+  // v2.1.0-beta.1 PR-A：CHECK 约束扩到 4 值（含 'recon-id-fix'），与 ensureScenariosCategoryReconIdFix 后保持一致
   db.exec(`
     CREATE TABLE IF NOT EXISTS scenarios (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      category TEXT NOT NULL CHECK (category IN ('extract-recon-id', 'offset-bill-mark', 'gateway-recon-join')),
+      category TEXT NOT NULL CHECK (category IN ('extract-recon-id', 'offset-bill-mark', 'gateway-recon-join', 'recon-id-fix')),
       name TEXT NOT NULL,
       priority INTEGER NOT NULL CHECK (priority BETWEEN 0 AND 3),
       enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
@@ -108,7 +110,41 @@ function runScenariosRepositorySmokeTests() {
     assert.strictEqual(newOne.id, 1, 'R5 重新填回 id=1');
   }
 
-  console.log('  scenarios-repository: 5/5 PASS');
+  // ===== R6: v2.1.0-beta.1 PR-A — 新增 'recon-id-fix' 类（C4）createScenario 通过 =====
+  {
+    const db = setupInMemoryDb();
+    const r = createScenario(db, {
+      category: 'recon-id-fix',
+      name: 'C4-recon-id-fix-test',
+      priority: 0,
+      enabled: true,
+      config: {
+        matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+        billTypes: [{ seq: 1, side: 'main', conditions: [] }],
+        reconFields: [],
+        output: { mode: 'main', subBizType: { mode: 'auto', mainValue: null, oppValue: null } }
+      }
+    });
+    assert.strictEqual(r.id, 1, 'R6 C4 类创建成功 id=1');
+  }
+
+  // ===== R7: PR #35 round 3 self-review P3-B — updateScenario 显式拒绝 fields.category / is_builtin =====
+  {
+    const db = setupInMemoryDb();
+    const a = createScenario(db, makePayload('A', 'extract-recon-id'));
+    assert.throws(
+      () => updateScenario(db, a.id, { category: 'recon-id-fix' }),
+      /category 不可修改/,
+      'R7 updateScenario 应拒绝 fields.category'
+    );
+    assert.throws(
+      () => updateScenario(db, a.id, { is_builtin: 1 }),
+      /is_builtin 不可修改/,
+      'R7 updateScenario 应拒绝 fields.is_builtin'
+    );
+  }
+
+  console.log('  scenarios-repository: 7/7 PASS');
 }
 
 module.exports = {

@@ -42,6 +42,7 @@
               <button class="module-option" type="button" data-module="new-account-generator">新开账户余额账单生成</button>
               <button class="module-option" type="button" data-module="pending-reconciliation">月度 Pending 数据核对</button>
               <button class="module-option" type="button" data-module="bank-statement-process">银行对账单处理</button>
+              <button class="module-option" type="button" data-module="recon-id-fix">单据对账 ReconID 修复</button>
             </div>
           </div>
 
@@ -204,6 +205,38 @@
                     <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusBankStatement" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusBankStatement)"/></svg>
                   </span>
                   <span class="status-box-text">欢迎使用小助手</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块面板（fork bankStatementModulePanel；行 1 含主面板"场景"下拉，Q4 决策） -->
+          <section id="reconIdFixModulePanel" class="control-board module-panel bank-statement-board recon-id-fix-board" hidden>
+            <div class="control-row">
+              <div class="cell left">
+                <button id="reconIdFixManageScenariosBtn" class="secondary-btn" type="button">场景管理</button>
+              </div>
+              <div class="cell right">
+                <div class="pending-action-pair recon-id-fix-action-row">
+                  <button id="reconIdFixImportBtn" class="primary-btn" type="button">导入文件</button>
+                  <label class="recon-id-fix-scenario-label" for="reconIdFixScenarioSelect">场景</label>
+                  <select id="reconIdFixScenarioSelect" class="recon-id-fix-scenario-select" disabled>
+                    <option value="">请选择场景</option>
+                  </select>
+                  <button id="reconIdFixRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
+                </div>
+              </div>
+            </div>
+            <div class="control-row">
+              <div class="cell left">
+                <button id="reconIdFixExportBtn" class="secondary-btn" type="button" disabled>导出文件</button>
+              </div>
+              <div class="cell right">
+                <div id="reconIdFixStatusBox" class="status-box">
+                  <span class="status-spark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusReconIdFix" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusReconIdFix)"/></svg>
+                  </span>
+                  <span class="status-box-text">请先点击"场景管理"配置场景，再选择场景并导入文件</span>
                 </div>
               </div>
             </div>
