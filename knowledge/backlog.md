@@ -11,6 +11,14 @@
 
 ## 未实施
 
+### B4（P3）`recon-id-fix-scenario-ipc` smoke simulator 与真实 main.js 漂移
+
+- **来源**：PR #35 self-review（commit `7327b43`）
+- **影响**：`scripts/smoke/recon-id-fix-scenario-ipc.js` 用 simulator 跑 IPC handler 行为，不是真 `ipcMain.handle` 路径。修分流逻辑时如果忘了同步 simulator 会让测试假绿。
+- **现状**：simulator 是手工拷贝的 main.js handler 逻辑（含 round 3 的 `clearResultCacheForCategory` 分流）；和真实代码两份维护
+- **推荐**：补 simulator-vs-real 一致性断言；或 PR-D 加 electron e2e（spawn electron + IPC roundtrip）做兜底验证
+- **触发实施**：v2.1.0-beta.1 PR-D（收尾 + 文档三件套）一并加 e2e；或第二次出现"smoke 绿但真实跑挂"时优先
+
 ### B1（P3）`streaming-xlsx-writer.js` 流式 archive 表头字号
 
 - **来源**：PR #34 self-review（commit `9952255`）
