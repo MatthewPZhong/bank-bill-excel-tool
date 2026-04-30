@@ -92,7 +92,9 @@ const CURRENT_MODULE_VALID = [
   'statement-generator',
   'new-account-generator',
   'pending-reconciliation',
-  'bank-statement-process'
+  'bank-statement-process',
+  // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块
+  'recon-id-fix'
 ];
 const CURRENT_MODULE_DEFAULT = 'statement-generator';
 

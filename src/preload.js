@@ -28,11 +28,30 @@ const GATEWAY_RECON_FIELDS = Object.freeze([
   'finishTime', 'LOriginalId', 'remark1', 'remark2', 'bookdate', 'valuedate', 'fileId', 'AccountRef'
 ]);
 
+// v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块字段常量（spec §四）
+// 注：与 src/constants/recon-id-fix-fields.js 同步——任意修改两端都要改
+//      （PR-B 才会创建 src/constants/recon-id-fix-fields.js，PR-A 仅 inline 在此处）
+const BUSINESS_BILL_FIELDS = Object.freeze([
+  'BillDate', 'Bank', 'MerchantId', 'OrderId', 'DataSource', 'OppBu', 'OriginBillSource',
+  'BillType', 'Type', 'Reference', 'Currency', 'Amount', 'OriginBillBizId', 'ReconBillBizId',
+  'BizType', 'reconId', 'clientId', 'AccountId', 'createTime', 'finishTime', 'subRcptType',
+  '订单创建来源', '交易订单号'
+]);
+const OPPONENT_BILL_FIELDS = Object.freeze([
+  'BillDate', 'Bank', 'MerchantId', 'OrderId', 'DataSource', 'OppBu', 'OriginBillSource',
+  'BillType', 'Type', 'Reference', 'Currency', 'Amount', 'OriginBillBizId', 'ReconBillBizId',
+  'BizType', 'reconId', 'clientId', 'AccountId', 'createTime', 'finishTime', 'subRcptType',
+  '交易订单号'
+]);
+
 contextBridge.exposeInMainWorld('appConstants', {
   bankStatementFields: BANK_STATEMENT_FIELDS,
   bankStatementFieldsForC3: BANK_STATEMENT_FIELDS_FOR_C3,
   bankStatementVirtualAmountAbs: BANK_STATEMENT_VIRTUAL_AMOUNT_ABS,
-  gatewayReconFields: GATEWAY_RECON_FIELDS
+  gatewayReconFields: GATEWAY_RECON_FIELDS,
+  // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块的两 sheet 表头
+  businessBillFields: BUSINESS_BILL_FIELDS,
+  opponentBillFields: OPPONENT_BILL_FIELDS
 });
 
 contextBridge.exposeInMainWorld('desktopApi', {
@@ -70,6 +89,14 @@ contextBridge.exposeInMainWorld('desktopApi', {
     run: () => ipcRenderer.invoke('bank-statement:run'),
     export: () => ipcRenderer.invoke('bank-statement:export'),
     sessionStatus: () => ipcRenderer.invoke('bank-statement:session-status')
+  },
+  // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（PR-B 实装算法/IO；本 PR 占位）
+  // payload 形态见 docs/iterations/v2.1.0-beta.1/spec.md §三
+  reconIdFix: {
+    import: () => ipcRenderer.invoke('recon-id-fix:import'),
+    run: (payload) => ipcRenderer.invoke('recon-id-fix:run', payload),
+    export: () => ipcRenderer.invoke('recon-id-fix:export'),
+    sessionStatus: () => ipcRenderer.invoke('recon-id-fix:session-status')
   },
   accountMappings: {
     list: (templateId) => ipcRenderer.invoke('account-mapping:list', templateId),

@@ -477,6 +477,58 @@ function ensureBuiltinScenarioNamesUpdate(db) {
   });
 }
 
+// v2.1.0-beta.1 PR-A：扩展 scenarios.category CHECK 约束，新增 'recon-id-fix' 枚举值
+// 背景：v2.0.0-beta.3 PR #29 / #32b 的 CHECK 仅含 3 值；本迭代新增 C4「单据对账 ReconID 修复」类需要扩到 4 值。
+// SQLite 不支持 ALTER TABLE 改 CHECK → 必须重建表。
+// 资金红线：必须包在事务里；包含 v2.0.0-beta.3 builtin scenarios 的老库必须无损迁移；id / 列结构 / UNIQUE / 默认值都须保留。
+// 幂等：解析 sqlite_master.sql 字符串，已含 'recon-id-fix' → no-op；多次启动仅触发一次重建。
+// 注：必须在 ensureScenariosSupport（含 seed marker 写入）之后调用，避免迁移过程触发不必要的 marker 写入。
+function ensureScenariosCategoryReconIdFix(db) {
+  const tableSqlRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'"
+  ).get();
+  if (!tableSqlRow || !tableSqlRow.sql) return;
+  if (tableSqlRow.sql.includes("'recon-id-fix'")) return; // 已扩，no-op
+
+  db.exec('BEGIN');
+  try {
+    db.exec('ALTER TABLE scenarios RENAME TO scenarios_old;');
+
+    db.exec(`
+      CREATE TABLE scenarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL CHECK (category IN (
+          'extract-recon-id',
+          'offset-bill-mark',
+          'gateway-recon-join',
+          'recon-id-fix'
+        )),
+        name TEXT NOT NULL,
+        priority INTEGER NOT NULL CHECK (priority BETWEEN 0 AND 3),
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        config_json TEXT NOT NULL,
+        is_builtin INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (name)
+      );
+    `);
+
+    db.exec(`
+      INSERT INTO scenarios
+        (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      SELECT id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at
+      FROM scenarios_old;
+    `);
+
+    db.exec('DROP TABLE scenarios_old;');
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 // v2.0.0-beta.3 PR #32b：一次性修复历史 PR #29 seed 的小写 'currency' 错误
 // 背景：PR #29 初始 seed 时把 C3 内置场景的 reconFields[0].gwField 写成小写 'currency'，
 //       PR #31 修了 seed JSON 但 marker 机制保护老库不重 seed → 用户老 DB 里仍是小写。
@@ -520,6 +572,7 @@ module.exports = {
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
   ensureScenariosSupport,
+  ensureScenariosCategoryReconIdFix,
   ensureC3GwFieldCurrencyCaseFix,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,

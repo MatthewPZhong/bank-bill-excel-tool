@@ -9,6 +9,7 @@ const {
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
   ensureScenariosSupport,
+  ensureScenariosCategoryReconIdFix,
   ensureC3GwFieldCurrencyCaseFix,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
@@ -110,6 +111,9 @@ class AppDatabase {
     this.ensureAccountMappingTemplateSupport();
     this.ensureTemplateBigAccountNatureSupport();
     this.ensureScenariosSupport();
+    // v2.1.0-beta.1 PR-A：扩 CHECK 约束到 4 值（含 'recon-id-fix'）
+    // 必须在 ensureScenariosSupport 之后；幂等检查 sqlite_master.sql 含 'recon-id-fix' → no-op
+    this.ensureScenariosCategoryReconIdFix();
     this.ensureC3GwFieldCurrencyCaseFix();
     this.ensureBuiltinScenarioNamesUpdate();
   }
@@ -350,6 +354,10 @@ class AppDatabase {
   // v2.0.0-beta.3：场景 CRUD（银行对账单处理模块）
   ensureScenariosSupport() {
     return ensureScenariosSupport(this.db);
+  }
+
+  ensureScenariosCategoryReconIdFix() {
+    return ensureScenariosCategoryReconIdFix(this.db);
   }
 
   ensureC3GwFieldCurrencyCaseFix() {

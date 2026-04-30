@@ -10,12 +10,18 @@ const { runScenariosRepositorySmokeTests } = require('./smoke/scenarios-reposito
 const { runScenarioEndToEndSmokeTests } = require('./smoke/scenario-end-to-end');
 const { runErrorCausesSmokeTests } = require('./smoke/error-causes');
 const { runUsageStatsSmokeTests } = require('./smoke/usage-stats');
+// v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 — CHECK 约束迁移
+const { runMigrationsReconIdFixSmokeTests } = require('./smoke/migrations-recon-id-fix');
+// v2.1.0-beta.1 PR-A：scenarios:* IPC 的 C4 增删改查
+const { runReconIdFixScenarioIpcSmokeTests } = require('./smoke/recon-id-fix-scenario-ipc');
 
 async function run() {
   const context = createSmokeContext();
   runSmokeScenarios(context);
   runScenarioEngineSmokeTests();
   runScenariosRepositorySmokeTests();
+  runMigrationsReconIdFixSmokeTests();
+  runReconIdFixScenarioIpcSmokeTests();
   await runScenarioDispatcherSmokeTests();
   await runExceljsWriterSmokeTests();
   await runBankStatementIoSmokeTests();

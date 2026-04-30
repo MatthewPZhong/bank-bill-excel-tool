@@ -132,6 +132,12 @@ let nextStatementFileEntryId = 1;
 let bankStatementSession = null;     // { filePath, fileName, rows, headers, importedAt }
 let gatewayReconSession = null;      // { filePath, fileName, gwRows, importedAt }
 let processingResult = null;         // { modifiedRows, modifications, errorReport, stats, ranAt }
+// v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块的进程级 session（PR-B 才实装数据 IO，PR-A 仅占位）
+// reconIdFixSession = { filePath, fileName, sheets: { reconResult, businessBills, opponentBills, fixTemplate }, importedAt } | null
+// reconIdFixResult  = { scenarioId, scenarioName, fixedRows, warnings, scenariosSnapshot, ranAt } | null
+// 资金红线（spec §十）：场景任一变更 → 入口主动清 reconIdFixResult；export 端再被动校验 snapshot
+let reconIdFixSession = null;
+let reconIdFixResult = null;
 let startupMetricsReported = false;
 // v1.5.3 R2：自有账号迁移失败消息（D15）。null = 无失败；字符串 = 启动时发生失败，
 // renderer 首次 app:get-info 时读取并用 error tone 显示状态栏告警
@@ -2731,6 +2737,8 @@ function registerAppHandlers() {
       // PR #33 Codex round 2 P1（资金红线）：场景配置变更后旧的 processingResult 已陈旧
       // → 强制失效，避免用户改场景后导出 stale 旧规则的输出
       processingResult = null;
+      // v2.1.0-beta.1 PR-A（资金红线 spec §10.1 第一层）：同步清单据对账 ReconID 修复模块的 result
+      reconIdFixResult = null;
       return { status: 'ok', id: result.id };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -2740,6 +2748,7 @@ function registerAppHandlers() {
     try {
       database.updateScenario(id, fields);
       processingResult = null;  // round 2 P1
+      reconIdFixResult = null;  // v2.1.0-beta.1 PR-A 资金红线
       return { status: 'ok', id };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -2749,6 +2758,7 @@ function registerAppHandlers() {
     try {
       const result = database.deleteScenario(id);
       processingResult = null;  // round 2 P1
+      reconIdFixResult = null;  // v2.1.0-beta.1 PR-A 资金红线
       return { status: 'ok', id, deleted: result.deleted };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -2758,6 +2768,7 @@ function registerAppHandlers() {
     try {
       const result = database.toggleScenarioEnabled(id, enabled);
       processingResult = null;  // round 2 P1
+      reconIdFixResult = null;  // v2.1.0-beta.1 PR-A 资金红线
       return { status: 'ok', id, enabled: result.enabled };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -2966,6 +2977,39 @@ function registerAppHandlers() {
       gatewayReconRowCount: gatewayReconSession ? gatewayReconSession.gwRows.length : 0,
       hasProcessingResult: processingResult !== null,
       processingStats: processingResult ? processingResult.stats : null
+    };
+  });
+
+  // ===== v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 IPC =====
+  // PR-A 仅做骨架：4 个数据 IPC（import/run/export/session-status）当前返回 not-implemented，
+  // 真正的算法/IO 实装在 PR-B；此处占位的目的是让 preload 暴露的 desktopApi.reconIdFix.* 不再 undefined，
+  // renderer 启动时调用 sessionStatus() 不报错。
+  ipcMain.handle('recon-id-fix:import', async () => {
+    return { status: 'fail', code: 'not-implemented', message: 'PR-B 落地（recon-id-fix:import）' };
+  });
+  ipcMain.handle('recon-id-fix:run', async () => {
+    return { status: 'fail', code: 'not-implemented', message: 'PR-B 落地（recon-id-fix:run）' };
+  });
+  ipcMain.handle('recon-id-fix:export', async () => {
+    return { status: 'fail', code: 'not-implemented', message: 'PR-B 落地（recon-id-fix:export）' };
+  });
+  ipcMain.handle('recon-id-fix:session-status', () => {
+    return {
+      status: 'ok',
+      hasFile: reconIdFixSession !== null,
+      fileName: reconIdFixSession ? reconIdFixSession.fileName : null,
+      sheetCounts: reconIdFixSession && reconIdFixSession.sheets
+        ? {
+            recon: Array.isArray(reconIdFixSession.sheets.reconResult) ? reconIdFixSession.sheets.reconResult.length : 0,
+            business: Array.isArray(reconIdFixSession.sheets.businessBills) ? reconIdFixSession.sheets.businessBills.length : 0,
+            opp: Array.isArray(reconIdFixSession.sheets.opponentBills) ? reconIdFixSession.sheets.opponentBills.length : 0
+          }
+        : null,
+      hasResult: reconIdFixResult !== null,
+      resultStats: reconIdFixResult ? {
+        fixedRowCount: Array.isArray(reconIdFixResult.fixedRows) ? reconIdFixResult.fixedRows.length : 0,
+        warningCount: Array.isArray(reconIdFixResult.warnings) ? reconIdFixResult.warnings.length : 0
+      } : null
     };
   });
 

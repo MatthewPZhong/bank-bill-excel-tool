@@ -893,6 +893,41 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 .bank-statement-board .pending-action-pair { display: flex; gap: 12px; justify-content: center; }
 .pending-board .pending-action-pair .primary-btn,
 .bank-statement-board .pending-action-pair .primary-btn { min-width: 140px; }
+
+/* v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块主面板（Q4 主面板"场景"下拉布局） */
+.recon-id-fix-board .recon-id-fix-action-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+}
+.recon-id-fix-board .recon-id-fix-scenario-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #3c4043;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.recon-id-fix-board .recon-id-fix-scenario-select {
+  height: 36px;
+  min-width: 160px;
+  max-width: 220px;
+  padding: 0 12px;
+  border: 1px solid rgba(60, 64, 67, 0.2);
+  border-radius: 10px;
+  background-color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  color: #3c4043;
+  cursor: pointer;
+}
+.recon-id-fix-board .recon-id-fix-scenario-select:disabled {
+  background-color: rgba(60, 64, 67, 0.06);
+  color: rgba(60, 64, 67, 0.5);
+  cursor: not-allowed;
+}
+.recon-id-fix-board .recon-id-fix-action-row .primary-btn { min-width: 120px; }
 .pending-board .pending-status {
   width: 100%;
   max-width: 360px;
@@ -2298,4 +2333,119 @@ select.mapping-text-input {
 .scenario-confirm-detail-section ul li {
   list-style: disc;
   padding: 2px 0;
+}
+
+/* === v2.1.0-beta.1 PR-A：C4 配置弹窗（单据对账 ReconID 修复）=== */
+
+.scenario-config-c4 .scenario-config-c4-checkboxes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.scenario-config-c4-checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #3c4043;
+  flex-wrap: wrap;
+}
+
+.scenario-config-c4-checkbox-item input[type="checkbox"],
+.scenario-config-c4-checkbox-item input[type="radio"] {
+  flex-shrink: 0;
+}
+
+.scenario-config-c4-bill-type {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(60, 64, 67, 0.1);
+  border-radius: 6px;
+  background: rgba(60, 64, 67, 0.03);
+}
+
+.scenario-config-c4-bt-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scenario-config-c4-conditions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-left: 10px;
+}
+
+.scenario-config-c4-condition-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scenario-config-c4-recon-row {
+  flex-wrap: wrap;
+}
+
+.scenario-config-c4-output {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.scenario-config-c4-output-modes {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.scenario-config-c4-common-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px;
+  border: 1px dashed rgba(60, 64, 67, 0.2);
+  border-radius: 6px;
+  background: rgba(60, 64, 67, 0.02);
+}
+
+.scenario-config-c4-sub-biz {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(60, 64, 67, 0.08);
+  border-radius: 6px;
+}
+
+.scenario-config-c4-sub-biz-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: #3c4043;
+  margin-bottom: 2px;
+}
+
+/* C4 dialog actions：左右分布的双按钮区（左 - 识读规律；右 - 取消/确认） */
+.dialog-actions.left-right {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  border-top: 1px solid rgba(60, 64, 67, 0.08);
+}
+
+.dialog-actions.left-right .dialog-actions-left {
+  display: flex;
+  gap: 8px;
+}
+
+.dialog-actions.left-right .dialog-actions-right {
+  display: flex;
+  gap: 8px;
 }

@@ -51,7 +51,9 @@
       createScenarioConfigDialogC1,
       createScenarioConfigDialogC2,
       createScenarioConfigDialogC3,
-      createScenarioConfirmDetailDialog
+      createScenarioConfirmDetailDialog,
+      // v2.1.0-beta.1 PR-A（task A7）：C4 类配置弹窗
+      createScenarioConfigDialogC4
     } = deps;
 
     function applyNewAccountPreviewState() {
@@ -884,6 +886,74 @@
       }, 120);
     }
 
+    // ===== v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 preview =====
+    // task A3：主面板 preview（默认空场景态）
+    function applyReconIdFixPanelPreviewState() {
+      setCurrentModule(MODULES.reconIdFix.id);
+    }
+
+    // task A7：C4 配置弹窗 preview — create 模式（默认 1 主 1 从两类）
+    function applyScenarioConfigC4PreviewState() {
+      setCurrentModule(MODULES.reconIdFix.id);
+      state.scenarioDraft = {
+        mode: 'create',
+        category: 'recon-id-fix',
+        scenarioId: null,
+        name: '示例：业务订单 vs rcpt_inbound（主从一对一）',
+        priority: 0,
+        config: {
+          matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+          billTypes: [
+            { seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: '业务订单' }] },
+            { seq: 2, side: 'opp', conditions: [{ field: 'OriginBillSource', op: '等于', value: 'rcpt_inbound' }] }
+          ],
+          reconFields: [
+            { seq: 1, leftTypeSeq: 1, leftField: 'Currency', rightTypeSeq: 2, rightField: 'Currency' },
+            { seq: 2, leftTypeSeq: 1, leftField: 'Amount', rightTypeSeq: 2, rightField: 'Amount' }
+          ],
+          output: {
+            mode: 'main',
+            commonId: { source: 'main', suffix: '' },
+            subBizType: { mode: 'auto', mainValue: '', oppValue: '' }
+          }
+        }
+      };
+      setTimeout(() => {
+        openModal(createScenarioConfigDialogC4());
+      }, 120);
+    }
+
+    // task A7：C4 配置弹窗 preview — 主从都修复 + commonId 拼接
+    function applyScenarioConfigC4BothPreviewState() {
+      setCurrentModule(MODULES.reconIdFix.id);
+      state.scenarioDraft = {
+        mode: 'create',
+        category: 'recon-id-fix',
+        scenarioId: null,
+        name: '示例：主从都修复 + 共同 ID 后缀-FIX',
+        priority: 0,
+        config: {
+          matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+          billTypes: [
+            { seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: '业务订单' }] },
+            { seq: 2, side: 'opp', conditions: [{ field: 'OriginBillSource', op: '等于', value: 'rcpt_inbound' }] }
+          ],
+          reconFields: [
+            { seq: 1, leftTypeSeq: 1, leftField: 'Currency', rightTypeSeq: 2, rightField: 'Currency' },
+            { seq: 2, leftTypeSeq: 1, leftField: 'Amount', rightTypeSeq: 2, rightField: 'Amount' }
+          ],
+          output: {
+            mode: 'both',
+            commonId: { source: 'main', suffix: '-FIX' },
+            subBizType: { mode: 'auto', mainValue: '', oppValue: '' }
+          }
+        }
+      };
+      setTimeout(() => {
+        openModal(createScenarioConfigDialogC4());
+      }, 120);
+    }
+
     return {
       applyNewAccountPreviewState,
       applyTemplateManagerPreviewState,
@@ -928,7 +998,11 @@
       applyScenarioConfigC1PreviewState,
       applyScenarioConfigC2PreviewState,
       applyScenarioConfigC3PreviewState,
-      applyScenarioConfirmDetailPreviewState
+      applyScenarioConfirmDetailPreviewState,
+      // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 preview（3 张）
+      applyReconIdFixPanelPreviewState,
+      applyScenarioConfigC4PreviewState,
+      applyScenarioConfigC4BothPreviewState
     };
   }
 
