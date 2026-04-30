@@ -714,7 +714,7 @@ state.reconIdFixResult = {  // 运行后产生
 | **错误 Reference 关联导致单据修复失败** | 资金红线（最高） | 单测 + 集成测试覆盖 7+5 全规则；用户用样例文件回归；R5/R6 SubBizType 查不到时**必须**走 warning + 不进 fixedRows，绝不自动 fallback |
 | **多v1 / 1v多 时 Reference 写错单据** | 资金红线 | applyAssignment_NvN 必须严格区分"被聚合方" vs "聚合源"；单测覆盖正反向 |
 | **共同修复 ID 拼接错位**（取主边但应取从边的 OrderId） | 资金红线 | computeCommonId 单测；C4 配置弹窗 commonId.source 默认值要明示 |
-| **场景配置变更后旧 result 被导出** | 资金红线 | 复用 v2.0.0-beta.3 PR #33 round 2/3 的 snapshot 双层防御：scenarios:* IPC 入口主动清 + export 端被动校验 snapshot |
+| **场景配置变更后旧 result 被导出** | 资金红线 | 复用 v2.0.0-beta.3 PR #33 round 2/3 的 snapshot 双层防御：scenarios:* IPC 入口主动清（**PR #35 round 3 P2 修订**：按 category 分流——C1/C2/C3 只清 `processingResult`，C4 只清 `reconIdFixResult`，避免跨模块互抹）+ export 端被动校验 snapshot |
 
 ### 10.2 ⚠️ 算法稳定性（识读规律）
 

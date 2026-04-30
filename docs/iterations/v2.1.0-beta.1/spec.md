@@ -568,15 +568,26 @@ let reconIdFixResult = null;
 
 清空时机（**资金红线**，参考 v2.0.0-beta.3 PR #33 round 2 的双层防御）：
 
-| 触发 | `reconIdFixResult = null` | `reconIdFixSession = null` |
-|---|---|---|
-| `recon-id-fix:import` | ✓ | — |
-| `recon-id-fix:run` | 写入新值 | — |
-| `scenarios:create` (任意 category) | ✓（影响范围与 v2.0.0-beta.3 一致；也清 `processingResult`） | — |
-| `scenarios:update` | ✓ | — |
-| `scenarios:delete` | ✓ | — |
-| `scenarios:toggle-enabled` | ✓ | — |
-| `recon-id-fix:export` 中 snapshot 不一致 | ✓ + 拒绝导出 | — |
+> **PR #35 round 3 P2 修订**：scenarios:* 4 入口按变更场景的 `category` 分流清缓存——避免跨模块互抹。
+>
+> - C1 / C2 / C3（category in {`extract-recon-id`, `offset-bill-mark`, `gateway-recon-join`}）→ **只清 `processingResult`**
+> - C4（category = `recon-id-fix`）→ **只清 `reconIdFixResult`**
+>
+> 实装：`src/main.js` `clearResultCacheForCategory(category)` 工具函数 + 4 入口先 SELECT 老 row 取 category 再分流（详见 §三 IPC handler）。
+
+| 触发 | `reconIdFixResult = null` | `processingResult = null` | `reconIdFixSession = null` |
+|---|---|---|---|
+| `recon-id-fix:import` | ✓ | — | — |
+| `recon-id-fix:run` | 写入新值 | — | — |
+| `scenarios:create` (C4) | ✓ | — | — |
+| `scenarios:create` (C1/C2/C3) | — | ✓ | — |
+| `scenarios:update` (C4) | ✓ | — | — |
+| `scenarios:update` (C1/C2/C3) | — | ✓ | — |
+| `scenarios:delete` (C4) | ✓ | — | — |
+| `scenarios:delete` (C1/C2/C3) | — | ✓ | — |
+| `scenarios:toggle-enabled` (C4) | ✓ | — | — |
+| `scenarios:toggle-enabled` (C1/C2/C3) | — | ✓ | — |
+| `recon-id-fix:export` 中 snapshot 不一致 | ✓ + 拒绝导出 | — | — |
 
 ---
 
@@ -729,13 +740,29 @@ statusBox 文案（详见 PRD §三 D11，Q4 新增"已配场景未导入"档）
 
 ### 10.1 第一层：scenarios:* IPC 入口主动清
 
-`scenarios:create` / `scenarios:update` / `scenarios:delete` / `scenarios:toggle-enabled` 4 个 handler 在 v2.0.0-beta.3 已有 `processingResult = null`；本迭代追加：
+`scenarios:create` / `scenarios:update` / `scenarios:delete` / `scenarios:toggle-enabled` 4 个 handler 按变更场景的 `category` 分流清缓存（**PR #35 round 3 P2 修订**：原方案"两个都清"会让 C4 变更误抹银行对账模块的 `processingResult`，反向亦然）。
 
 ```javascript
-// src/main.js — 4 个 handler 都加
-processingResult = null;
-reconIdFixResult = null;  // ← 新增
+// src/main.js — 4 个 handler 共享工具函数
+function clearResultCacheForCategory(category) {
+  if (category === 'recon-id-fix') {
+    reconIdFixResult = null;     // C4 变更只清 C4 模块结果
+  } else {
+    processingResult = null;     // C1/C2/C3 变更只清银行对账模块结果
+  }
+}
+
+// create：从 payload.category 取（已通过 createScenario 内 validateCategory）
+clearResultCacheForCategory(payload && payload.category);
+
+// update / delete / toggle：先 SELECT 老 row 取 category（spec §三 update 不允许改 category；
+// delete 路径必须先查再删，否则 row 已不存在）
+const existing = database.getScenario(id);
+// ... 执行 update/delete/toggle ...
+clearResultCacheForCategory(existing && existing.category);
 ```
+
+> ⚠️ delete 必须**先 SELECT 后 DELETE**，否则 `database.getScenario(id)` 在 DELETE 之后会返回 null，分流退化成默认走 `processingResult = null`，等同于"删 C4 误清银行对账结果"——回到原始 finding。
 
 ### 10.2 第二层：export 端被动校验 snapshot
 

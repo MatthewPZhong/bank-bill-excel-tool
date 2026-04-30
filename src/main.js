@@ -2731,14 +2731,25 @@ function registerAppHandlers() {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
   });
+  // PR #35 Codex round 3 P2（资金红线分流）：4 个 scenarios:* 入口
+  // 不再无条件清两个全局缓存，而是按变更场景的 category 分流：
+  // - C1/C2/C3（'extract-recon-id' / 'offset-bill-mark' / 'gateway-recon-join'）→ 只清 processingResult
+  // - C4（'recon-id-fix'）→ 只清 reconIdFixResult
+  // 否则会出现：用户跑完银行对账（processingResult 已就绪）后改 C4 场景 → 误清 processingResult
+  // → 前端 refreshBankStatementStatus() 把已就绪的导出状态翻成"未运行"。反向同理。
+  function clearResultCacheForCategory(category) {
+    if (category === 'recon-id-fix') {
+      reconIdFixResult = null;
+    } else {
+      // C1/C2/C3 — 走银行对账单 dispatcher
+      processingResult = null;
+    }
+  }
   trackedIpcHandle('scenarios:create', '银行对账单处理', '场景管理', (_event, payload) => {
     try {
       const result = database.createScenario(payload);
-      // PR #33 Codex round 2 P1（资金红线）：场景配置变更后旧的 processingResult 已陈旧
-      // → 强制失效，避免用户改场景后导出 stale 旧规则的输出
-      processingResult = null;
-      // v2.1.0-beta.1 PR-A（资金红线 spec §10.1 第一层）：同步清单据对账 ReconID 修复模块的 result
-      reconIdFixResult = null;
+      // round 3 P2：按 category 分流（payload.category 已通过 createScenario 内的 validateCategory）
+      clearResultCacheForCategory(payload && payload.category);
       return { status: 'ok', id: result.id };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -2746,9 +2757,11 @@ function registerAppHandlers() {
   });
   trackedIpcHandle('scenarios:update', '银行对账单处理', '场景管理', (_event, id, fields) => {
     try {
+      // round 3 P2：先查老 row 的 category（spec §三 IPC：update 不允许改 category，可信任 DB 现值）
+      // 查不到 → updateScenario 自身也会抛 "场景 id=X 不存在"，此处保持 try 链一致
+      const existing = database.getScenario(id);
       database.updateScenario(id, fields);
-      processingResult = null;  // round 2 P1
-      reconIdFixResult = null;  // v2.1.0-beta.1 PR-A 资金红线
+      clearResultCacheForCategory(existing && existing.category);
       return { status: 'ok', id };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -2756,9 +2769,13 @@ function registerAppHandlers() {
   });
   trackedIpcHandle('scenarios:delete', '银行对账单处理', '场景管理', (_event, id) => {
     try {
+      // round 3 P2：DELETE 后 row 不存在 → 必须先 SELECT category 再删
+      const existing = database.getScenario(id);
       const result = database.deleteScenario(id);
-      processingResult = null;  // round 2 P1
-      reconIdFixResult = null;  // v2.1.0-beta.1 PR-A 资金红线
+      // 仅当 row 真存在过才需要清缓存（不存在时 result.deleted=false，无副作用）
+      if (existing) {
+        clearResultCacheForCategory(existing.category);
+      }
       return { status: 'ok', id, deleted: result.deleted };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -2766,9 +2783,10 @@ function registerAppHandlers() {
   });
   trackedIpcHandle('scenarios:toggle-enabled', '银行对账单处理', '场景管理', (_event, id, enabled) => {
     try {
+      // round 3 P2：toggle 不改 category，先 SELECT 取 category
+      const existing = database.getScenario(id);
       const result = database.toggleScenarioEnabled(id, enabled);
-      processingResult = null;  // round 2 P1
-      reconIdFixResult = null;  // v2.1.0-beta.1 PR-A 资金红线
+      clearResultCacheForCategory(existing && existing.category);
       return { status: 'ok', id, enabled: result.enabled };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
