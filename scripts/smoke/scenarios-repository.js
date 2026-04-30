@@ -7,7 +7,8 @@ const { DatabaseSync } = require('node:sqlite');
 const {
   calculateNextScenarioId,
   createScenario,
-  deleteScenario
+  deleteScenario,
+  updateScenario
 } = require('../../src/backend/database/scenarios-repository');
 
 function setupInMemoryDb() {
@@ -127,7 +128,23 @@ function runScenariosRepositorySmokeTests() {
     assert.strictEqual(r.id, 1, 'R6 C4 类创建成功 id=1');
   }
 
-  console.log('  scenarios-repository: 6/6 PASS');
+  // ===== R7: PR #35 round 3 self-review P3-B — updateScenario 显式拒绝 fields.category / is_builtin =====
+  {
+    const db = setupInMemoryDb();
+    const a = createScenario(db, makePayload('A', 'extract-recon-id'));
+    assert.throws(
+      () => updateScenario(db, a.id, { category: 'recon-id-fix' }),
+      /category 不可修改/,
+      'R7 updateScenario 应拒绝 fields.category'
+    );
+    assert.throws(
+      () => updateScenario(db, a.id, { is_builtin: 1 }),
+      /is_builtin 不可修改/,
+      'R7 updateScenario 应拒绝 fields.is_builtin'
+    );
+  }
+
+  console.log('  scenarios-repository: 7/7 PASS');
 }
 
 module.exports = {

@@ -2737,12 +2737,18 @@ function registerAppHandlers() {
   // - C4（'recon-id-fix'）→ 只清 reconIdFixResult
   // 否则会出现：用户跑完银行对账（processingResult 已就绪）后改 C4 场景 → 误清 processingResult
   // → 前端 refreshBankStatementStatus() 把已就绪的导出状态翻成"未运行"。反向同理。
+  // round 3 self-review P3-A：显式枚举已知 category，未知值（含 undefined）双清并 warn，
+  // 避免未来加新 category 时忘了同步本函数会偷偷清 processingResult。
+  const BANK_STATEMENT_CATEGORIES = new Set(['extract-recon-id', 'offset-bill-mark', 'gateway-recon-join']);
   function clearResultCacheForCategory(category) {
     if (category === 'recon-id-fix') {
       reconIdFixResult = null;
-    } else {
-      // C1/C2/C3 — 走银行对账单 dispatcher
+    } else if (BANK_STATEMENT_CATEGORIES.has(category)) {
       processingResult = null;
+    } else {
+      console.warn(`[scenarios:*] 未知 category=${category}，保险起见双清 processingResult + reconIdFixResult`);
+      processingResult = null;
+      reconIdFixResult = null;
     }
   }
   trackedIpcHandle('scenarios:create', '银行对账单处理', '场景管理', (_event, payload) => {
