@@ -837,15 +837,29 @@ state.reconIdFixResult = {  // 运行后产生
 
 > 由 PR merged + 归档后追加，PM 不需要手动填写。
 
-### PR-A 骨架（待启动）
+### PR-A 骨架（已合并）
 
-- 草稿：—
-- 初版：—
-- 最终：—
-- merge commit：—
-- 改动文件：—
-- 关键决策修订：—
-- 测试证据：—
+- 草稿：`docs/prs/PR35-v2.1.0-beta.1.md`（integrated=true）
+- 初版：commit `63d5450`（PR-A 9 task 主体）+ `1d09e2e`（spec 三件套 + samples fixture）
+- review 修订：`affd373`（round 1 — P1 资金红线 + 2 P2 + 1 P3）→ `01adc75`（round 2 — P2 分流 + P3 计数）→ `7327b43`（self-review — P3-A 显式枚举 + P3-B updateScenario 显式 throw）→ `b7608aa`（backlog B4）
+- merge commit：`6e5ebaf`（PR #35 → main，2026-04-30）
+- 改动文件（共 35 个）：
+  - **DB**：`src/backend/database/{migrations,scenarios-repository,settings-repository}.js` + `src/backend/database.js`（CHECK 约束 3→4 值，`ensureScenariosCategoryReconIdFix` 幂等迁移；updateScenario 显式 throw on category/is_builtin）
+  - **前端 DOM**：`index.html` + `src/styles-gemini-extra.css`（第 5 模块入口 + 主面板 fork）
+  - **渲染层**：`src/renderer.js`（MODULES +1 / state +5 / elements +6 / reloadReconIdFixScenarios + scenariosChanged 参数）+ `src/renderer-dialogs.js`（createScenarioConfigDialogC4 + 类别选择四选一 + validateScenarioDraft 4 条 C4 校验）+ `src/renderer-previews.js`
+  - **IPC + 主进程**：`src/main.js`（4 个 recon-id-fix:* handler 占位 + scenarios:* 按 category 分流清缓存 + clearResultCacheForCategory 显式枚举）+ `src/preload.js`（desktopApi.reconIdFix.* + 4 sheet 字段常量）+ `src/main-process/scenario-dispatcher.js`（filterOutReconIdFix + skippedC4Count）
+  - **smoke**：`scripts/smoke/{migrations-recon-id-fix,recon-id-fix-scenario-ipc,scenario-dispatcher,scenarios-repository}.js`（新增 18 用例：6 migrations + 11 IPC + 1 P3-B + dispatcher 4 用例 D10/D11/D12/filterOutReconIdFix 单测）
+  - **fixture**：`samples/单据对账导出不平.xlsx` / `单据对账导出不平-对平例子.xlsx` 入库
+  - **preview**：`docs/previews/{recon-id-fix-panel,scenario-config-c4,scenario-config-c4-both}.png` 新增 + 6 张 M
+  - **build**：`package.json`（3 个新 preview script）
+  - **docs**：本 PRD + spec + tasks + log + PR35 草稿 + `knowledge/backlog.md` 新增 B4
+- 关键决策修订：
+  - **资金红线分流**（round 3 P2）：原 round 2 在 dispatcher 入口和 export snapshot 过滤 C4，但 4 个 scenarios:* IPC 仍无条件双清两个全局缓存，导致用户跑完银行对账后改 C4 场景会误清 processingResult。修法：按 category 分流（'recon-id-fix' 清 reconIdFixResult；C1/C2/C3 清 processingResult；未知 category 双清 + warn 兜底）。降级保险（snapshot 校验）保留不动
+  - **C4 数据完整性**（round 1 P2）：保存前校验 billTypes 至少有 main + opp 各 1 条，reconFields 左指 main 右指 opp（避免 PR-B 引擎按 businessBills/opponentBills 跑时直接匹配不到从边）
+  - **场景管理 UI 同步**（round 1 P2）：reloadReconIdFixScenarios 加 scenariosChanged 参数，CRUD 路径清 state.reconIdFixExport + 调 refreshReconIdFixStatus 同步 main 端 session-status
+  - **银行对账 run/export 排除 C4**（round 1 P1）：bank-statement:run/export 在 detailedEnabled 之后过滤 category !== 'recon-id-fix'；dispatcher 入口加 filterOutReconIdFix defense in depth
+- 测试证据：smoke 181/181 PASS（10 套）；含 5 模块切换 / C4 dialog 5 行 / 类别四选一 / 资金红线跨模块互抹反向（T8/T9/T10/T11）/ 老库 3 builtin 无损迁移 / CHECK 约束拦截非法
+- 已知 follow-up：`knowledge/backlog.md` B4（recon-id-fix-scenario-ipc smoke simulator 与真实 main.js 漂移；PR-D e2e 时一并处理）
 
 ### PR-B 对账引擎（待启动）
 
