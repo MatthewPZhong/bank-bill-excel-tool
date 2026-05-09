@@ -43,6 +43,7 @@ function setupDb() {
 }
 
 function makeC4Payload(name = 'C4-test') {
+  // PR-B Q1=B：reconGroups[]
   return {
     category: 'recon-id-fix',
     name,
@@ -53,8 +54,8 @@ function makeC4Payload(name = 'C4-test') {
       billTypes: [
         { seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: 'X' }] }
       ],
-      reconFields: [
-        { seq: 1, leftTypeSeq: 1, leftField: 'OrderId', rightTypeSeq: 1, rightField: 'OrderId' }
+      reconGroups: [
+        { leftTypeSeq: 1, rightTypeSeq: 1, fieldPairs: [{ leftField: 'OrderId', rightField: 'OrderId' }] }
       ],
       output: {
         mode: 'main',

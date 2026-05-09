@@ -14,6 +14,11 @@ const { runUsageStatsSmokeTests } = require('./smoke/usage-stats');
 const { runMigrationsReconIdFixSmokeTests } = require('./smoke/migrations-recon-id-fix');
 // v2.1.0-beta.1 PR-A：scenarios:* IPC 的 C4 增删改查
 const { runReconIdFixScenarioIpcSmokeTests } = require('./smoke/recon-id-fix-scenario-ipc');
+// v2.1.0-beta.1 PR-B：4 sheet IO + 7+5 规则 + IPC handler 仿真 + 端到端
+const { runReconIdFixIoSmokeTests } = require('./smoke/recon-id-fix-io');
+const { runReconIdFixEngineSmokeTests } = require('./smoke/recon-id-fix-engine');
+const { runReconIdFixIpcHandlersSmokeTests } = require('./smoke/recon-id-fix-ipc-handlers');
+const { runReconIdFixEndToEndSmokeTests } = require('./smoke/recon-id-fix-end-to-end');
 
 async function run() {
   const context = createSmokeContext();
@@ -22,6 +27,11 @@ async function run() {
   runScenariosRepositorySmokeTests();
   runMigrationsReconIdFixSmokeTests();
   runReconIdFixScenarioIpcSmokeTests();
+  // PR-B：单据对账 ReconID 修复模块新增 smoke
+  runReconIdFixEngineSmokeTests();
+  await runReconIdFixIoSmokeTests();
+  await runReconIdFixIpcHandlersSmokeTests();
+  await runReconIdFixEndToEndSmokeTests();
   await runScenarioDispatcherSmokeTests();
   await runExceljsWriterSmokeTests();
   await runBankStatementIoSmokeTests();

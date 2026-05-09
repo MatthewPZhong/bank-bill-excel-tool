@@ -5,6 +5,7 @@ coverage
 .DS_Store
 exports
 tmp
+.tmp-smoke-*
 .claude/settings.local.json
 
 # v2.0.0-beta.3 PR #32b：用户样例文件（dry-run 用，不入 git）

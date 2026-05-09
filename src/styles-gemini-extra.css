@@ -2391,6 +2391,61 @@ select.mapping-text-input {
   flex-wrap: wrap;
 }
 
+/* PR-B Round 3（Decision 4）：reconGroups 块 + fieldPair 锁定视觉 */
+.scenario-config-c4-recon-group {
+  border: 1px solid rgba(60, 64, 67, 0.15);
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+
+.scenario-config-c4-recon-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #555;
+}
+
+.scenario-config-c4-recon-fieldpairs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scenario-config-c4-recon-fieldpair {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.scenario-config-c4-recon-fieldpair-locked {
+  background: rgba(60, 64, 67, 0.04);
+  padding: 4px 6px;
+  border-left: 3px solid rgba(60, 64, 67, 0.25);
+}
+
+.scenario-config-c4-recon-fieldpair-locked select {
+  background: rgba(60, 64, 67, 0.06);
+  cursor: not-allowed;
+}
+
+.scenario-config-c4-recon-or-sep {
+  font-weight: 600;
+  color: #999;
+  text-align: center;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.scenario-config-vs-arrow {
+  color: #888;
+  font-weight: 600;
+}
+
 .scenario-config-c4-output {
   display: flex;
   flex-direction: column;

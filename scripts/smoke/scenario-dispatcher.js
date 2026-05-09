@@ -86,6 +86,7 @@ function makeC3Scenario(overrides = {}) {
 }
 
 // v2.1.0-beta.1 PR-A round 2 P1：C4 场景（dispatcher 应过滤掉，不喂给 runScenario）
+// PR-B Q1=B：reconGroups[]
 function makeC4Scenario(overrides = {}) {
   return {
     id: 4,
@@ -99,8 +100,8 @@ function makeC4Scenario(overrides = {}) {
         { seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: 'X' }] },
         { seq: 2, side: 'opp', conditions: [{ field: 'BillType', op: '等于', value: 'Y' }] }
       ],
-      reconFields: [
-        { seq: 1, leftTypeSeq: 1, leftField: 'OrderId', rightTypeSeq: 2, rightField: 'OrderId' }
+      reconGroups: [
+        { leftTypeSeq: 1, rightTypeSeq: 2, fieldPairs: [{ leftField: 'OrderId', rightField: 'OrderId' }] }
       ],
       output: {
         mode: 'main',

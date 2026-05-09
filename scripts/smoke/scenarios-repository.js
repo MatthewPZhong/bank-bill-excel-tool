@@ -111,6 +111,7 @@ function runScenariosRepositorySmokeTests() {
   }
 
   // ===== R6: v2.1.0-beta.1 PR-A — 新增 'recon-id-fix' 类（C4）createScenario 通过 =====
+  // PR-B Q1=B：reconGroups[]
   {
     const db = setupInMemoryDb();
     const r = createScenario(db, {
@@ -121,7 +122,7 @@ function runScenariosRepositorySmokeTests() {
       config: {
         matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
         billTypes: [{ seq: 1, side: 'main', conditions: [] }],
-        reconFields: [],
+        reconGroups: [],
         output: { mode: 'main', subBizType: { mode: 'auto', mainValue: null, oppValue: null } }
       }
     });

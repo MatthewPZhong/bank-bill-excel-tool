@@ -21,6 +21,17 @@ const {
   writeErrorReportOutput,
   buildMainOutputFileName
 } = require('./main-process/bank-statement-io');
+// v2.1.0-beta.1 PR-B：单据对账 ReconID 修复模块 IO + 引擎
+//   Round 3 增加 writeUnmatchedReport / buildUnmatchedReportFileName / buildTimestampMinute（双文件 export）
+const {
+  readReconIdFixFile,
+  writeReconIdFixOutput,
+  writeUnmatchedReport,
+  buildMainOutputFileName: buildReconIdFixMainOutputFileName,
+  buildUnmatchedReportFileName: buildReconIdFixUnmatchedReportFileName,
+  buildTimestampMinute: buildReconIdFixTimestampMinute
+} = require('./main-process/recon-id-fix-io');
+const { runReconIdFix } = require('./main-process/recon-id-fix-engine');
 const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
 const { groupBigAccountRows } = require('./backend/database/utils');
 const {
@@ -3012,19 +3023,196 @@ function registerAppHandlers() {
     };
   });
 
-  // ===== v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 IPC =====
-  // PR-A 仅做骨架：4 个数据 IPC（import/run/export/session-status）当前返回 not-implemented，
-  // 真正的算法/IO 实装在 PR-B；此处占位的目的是让 preload 暴露的 desktopApi.reconIdFix.* 不再 undefined，
-  // renderer 启动时调用 sessionStatus() 不报错。
-  ipcMain.handle('recon-id-fix:import', async () => {
-    return { status: 'fail', code: 'not-implemented', message: 'PR-B 落地（recon-id-fix:import）' };
+  // ===== v2.1.0-beta.1 PR-B：单据对账 ReconID 修复模块 IPC（PR-A 占位 → PR-B 实装）=====
+  // 资金红线（spec §十）：
+  //   1) 入口主动清：scenarios:* 4 IPC 已按 category 分流清 reconIdFixResult（main.js:2743 clearResultCacheForCategory）
+  //   2) export 端被动校验：本节 recon-id-fix:export 重读 scenario + 比对 snapshot；不一致拒绝
+  //   3) 重新 import：清 reconIdFixResult（避免旧结果误导出新文件）
+  //   4) 重新 run：覆盖写 reconIdFixResult + 同步刷新 scenariosSnapshot
+
+  // snapshot 形态（与 bank-statement:run / export 一致）
+  function buildReconIdFixSnapshot(scenario) {
+    if (!scenario) return '';
+    return [
+      scenario.id,
+      scenario.name,
+      scenario.priority,
+      scenario.enabled ? 1 : 0,
+      JSON.stringify(scenario.config || {})
+    ].join('|');
+  }
+
+  trackedIpcHandle('recon-id-fix:import', '单据对账ReconID修复', '导入文件', async () => {
+    try {
+      const choice = await dialog.showOpenDialog(mainWindow, {
+        title: '选择单据对账文件',
+        properties: ['openFile'],
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      const filePath = choice.filePaths[0];
+      const result = readReconIdFixFile(filePath);
+      reconIdFixSession = {
+        filePath: result.filePath,
+        fileName: result.fileName,
+        sheets: result.sheets,
+        importedAt: result.importedAt
+      };
+      // 资金红线：重新导入清空 result（避免旧结果误导出）
+      reconIdFixResult = null;
+      return {
+        status: 'ok',
+        fileName: result.fileName,
+        sheetCounts: {
+          recon: result.sheets.reconResult.length,
+          business: result.sheets.businessBills.length,
+          opp: result.sheets.opponentBills.length
+        }
+      };
+    } catch (error) {
+      // FileValidationError → invalid 分支带 detailLines（spec §三 import 形态）
+      if (error && error.name === 'FileValidationError') {
+        return {
+          status: 'invalid',
+          code: error.code,
+          message: error.message,
+          detailLines: Array.isArray(error.detailLines) ? error.detailLines : []
+        };
+      }
+      return {
+        status: 'failed',
+        message: String(error && error.message ? error.message : error)
+      };
+    }
   });
-  ipcMain.handle('recon-id-fix:run', async () => {
-    return { status: 'fail', code: 'not-implemented', message: 'PR-B 落地（recon-id-fix:run）' };
+
+  trackedIpcHandle('recon-id-fix:run', '单据对账ReconID修复', '开始运行', (_event, payload) => {
+    try {
+      if (!reconIdFixSession) {
+        return { status: 'failed', message: '请先点击"导入文件"' };
+      }
+      const scenarioId = payload && (payload.scenarioId !== undefined ? payload.scenarioId : null);
+      if (scenarioId === null || scenarioId === undefined) {
+        return { status: 'failed', message: '请先在主面板"场景"下拉选择一个场景' };
+      }
+      const scenario = database.getScenario(scenarioId);
+      if (!scenario) {
+        return { status: 'failed', message: `场景 id=${scenarioId} 不存在` };
+      }
+      if (scenario.category !== 'recon-id-fix') {
+        return { status: 'failed', message: `场景 "${scenario.name}" 不是单据对账类，无法运行` };
+      }
+      // 深拷贝 sheets（避免 in-place 修改污染 session；与 bank-statement:run 一致）
+      const clonedSheets = {
+        reconResult: structuredClone(reconIdFixSession.sheets.reconResult),
+        businessBills: structuredClone(reconIdFixSession.sheets.businessBills),
+        opponentBills: structuredClone(reconIdFixSession.sheets.opponentBills),
+        fixTemplate: reconIdFixSession.sheets.fixTemplate
+      };
+      const result = runReconIdFix(scenario, clonedSheets);
+      reconIdFixResult = {
+        scenarioId: scenario.id,
+        scenarioName: scenario.name,
+        fixedRows: result.fixedRows,
+        warnings: result.warnings,
+        unmatchedRows: result.unmatchedRows || [],   // Round 3：落 unmatched
+        scenariosSnapshot: buildReconIdFixSnapshot(scenario),
+        ranAt: Date.now()
+      };
+      return {
+        status: 'ok',
+        stats: result.stats
+      };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
   });
-  ipcMain.handle('recon-id-fix:export', async () => {
-    return { status: 'fail', code: 'not-implemented', message: 'PR-B 落地（recon-id-fix:export）' };
+
+  trackedIpcHandle('recon-id-fix:export', '单据对账ReconID修复', '导出文件', async () => {
+    try {
+      if (!reconIdFixResult) {
+        return { status: 'failed', message: '请先点击"开始运行"' };
+      }
+      // ===== 资金红线 defense in depth（spec §十.2）=====
+      const currentScenario = database.getScenario(reconIdFixResult.scenarioId);
+      if (!currentScenario) {
+        reconIdFixResult = null;
+        return {
+          status: 'failed',
+          code: 'stale-snapshot',
+          message: '场景已删除，请重新选择场景再运行'
+        };
+      }
+      const currentSnapshot = buildReconIdFixSnapshot(currentScenario);
+      if (currentSnapshot !== reconIdFixResult.scenariosSnapshot) {
+        reconIdFixResult = null;
+        return {
+          status: 'failed',
+          code: 'stale-snapshot',
+          message: '场景已变更，请重新点击"开始运行"再导出'
+        };
+      }
+      // Round 3 决策（Decision 3）：双文件输出
+      const fixedRows = Array.isArray(reconIdFixResult.fixedRows) ? reconIdFixResult.fixedRows : [];
+      const unmatchedRows = Array.isArray(reconIdFixResult.unmatchedRows) ? reconIdFixResult.unmatchedRows : [];
+      // 主+unmatched 都空 → empty
+      if (fixedRows.length === 0 && unmatchedRows.length === 0) {
+        return {
+          status: 'empty',
+          message: '本次运行无修复记录且无未匹配记录，未生成文件'
+        };
+      }
+      // 同步生成 timestamp，主+unmatched 共用
+      const timestamp = buildReconIdFixTimestampMinute();
+      const defaultMainFileName = buildReconIdFixMainOutputFileName(reconIdFixResult.scenarioName, timestamp);
+      const saveResult = await dialog.showSaveDialog(mainWindow, {
+        title: '保存单据对账修复结果',
+        defaultPath: path.join(app.getPath('documents'), defaultMainFileName),
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { status: 'cancelled' };
+      }
+      const ret = {
+        status: 'ok',
+        mainFilePath: null,
+        mainFileName: null,
+        unmatchedFilePath: null,
+        unmatchedFileName: null,
+        rowCount: 0,
+        unmatchedCount: 0
+      };
+      // 写主修复文件（仅在主 fixedRows 非空时）
+      if (fixedRows.length > 0) {
+        const writeResult = await writeReconIdFixOutput({
+          fixedRows,
+          savePath: saveResult.filePath
+        });
+        ret.mainFilePath = writeResult.filePath;
+        ret.mainFileName = writeResult.fileName;
+        ret.rowCount = writeResult.rowCount;
+      }
+      // 写 unmatched 文件（仅在 unmatchedRows 非空时）
+      if (unmatchedRows.length > 0) {
+        const mainSaveDir = path.dirname(saveResult.filePath);
+        const unmatchedFileName = buildReconIdFixUnmatchedReportFileName(reconIdFixResult.scenarioName, timestamp);
+        const unmatchedSavePath = path.join(mainSaveDir, unmatchedFileName);
+        const writeUnmResult = await writeUnmatchedReport({
+          unmatchedRows,
+          savePath: unmatchedSavePath
+        });
+        ret.unmatchedFilePath = writeUnmResult.filePath;
+        ret.unmatchedFileName = writeUnmResult.fileName;
+        ret.unmatchedCount = writeUnmResult.rowCount;
+      }
+      return ret;
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
   });
+
   ipcMain.handle('recon-id-fix:session-status', () => {
     return {
       status: 'ok',
@@ -3040,7 +3228,9 @@ function registerAppHandlers() {
       hasResult: reconIdFixResult !== null,
       resultStats: reconIdFixResult ? {
         fixedRowCount: Array.isArray(reconIdFixResult.fixedRows) ? reconIdFixResult.fixedRows.length : 0,
-        warningCount: Array.isArray(reconIdFixResult.warnings) ? reconIdFixResult.warnings.length : 0
+        warningCount: Array.isArray(reconIdFixResult.warnings) ? reconIdFixResult.warnings.length : 0,
+        // Round 3：暴露 unmatchedRowCount
+        unmatchedRowCount: Array.isArray(reconIdFixResult.unmatchedRows) ? reconIdFixResult.unmatchedRows.length : 0
       } : null
     };
   });
