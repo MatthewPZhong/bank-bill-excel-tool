@@ -269,6 +269,84 @@
 
 ---
 
+## 2026-04-30 PR #36 round 3 P2 修复（删除"absolute optimal 早停"剪枝；user 提）
+
+- **背景**：user (MatthewPZhong) 在 round 2 修复后再发现 P2 finding：
+
+  > `isBestAbsoluteOptimal()` 把 `spread=0 + distToMain=0 + size=2` 当作绝对最优并让 DFS 提前返回，但 tie-break 还有最后一层 `firstIdxNum`。如果先遇到的是 `opp_10+opp_11` 这种 size=2 同日解，后面还有同样 spread/dist/size 但 firstIdx 更小的 `opp_2+opp_3`，当前实现会提前停在前者。
+  >
+  > 我用当前 head 复现：candidates `[opp_10:1, opp_2:50, opp_3:50, opp_11:99]`、target=100、同日时返回 `opp_10/opp_11`，但按完整 tie-break 应返回 `opp_2/opp_3`。建议不要在未证明 firstIdxNum 已不可更优时提前停止，或把最优下界条件也纳入 firstIdxNum。
+
+  本地 head=f16166b 复现确认：`findBestAmountSubset(candidates, 100, '2026-04-15')` 返回 `[opp_10, opp_11]`（错），期望 `[opp_2, opp_3]`（对）。
+
+- **根因**：round 2 引入的 `isBestAbsoluteOptimal()` 早停条件不充分。tie-break 实际有 4 阶（spread → distToMain → size → firstIdxNum），早停条件只覆盖前 3 阶（spread=0 / distToMain=0 / size=2）。bug 路径：
+
+  1. DFS 按 cents 升序遍历：cents=1 (opp_10) < 50 (opp_2) < 50 (opp_3) < 99 (opp_11)
+  2. 第一个找到的 sum=100 解：`opp_10(1) + opp_11(99)`，best={size=2, spread=0, dist=0, firstIdxNum=10}
+  3. 触发 `isBestAbsoluteOptimal()` break → 不再尝试 `opp_2(50) + opp_3(50)`（firstIdxNum=2 更优）
+
+- **决策**（方案 A — 强烈推荐项，不选 B/C）：完全删除 `isBestAbsoluteOptimal()` 早停剪枝
+  - 理由 1：B（修剪枝条件含 firstIdxNum）复杂、依赖 candidates 排序约定、易再次出错
+  - 理由 2：C（保留剪枝但延迟到完整遍历后）实现复杂、依赖 DFS 顺序约定
+  - 理由 3：方案 A 最简单可证明正确；其他剪枝（升序前缀 / 后缀总和 / top-k 后缀 / maxSize=8 / hardCeiling=5M）已足够防爆炸
+  - 性能影响：实测 n=20 大池子 1.02ms / 次（删一个 if 比 round 2 的 1.18ms 略快；远优于 round 2 之前的 2.58ms）
+
+- **改动清单**（4 文件）：
+  - `src/main-process/scenario-engines/c4-recon-id-fix.js`：
+    - 删除 `isBestAbsoluteOptimal()` 函数（10 行）
+    - 删除 DFS for 循环里 `if (isBestAbsoluteOptimal()) return;` 早停判定（line 379）
+    - 文件头部 round 4 注释加 round 3 P2 修复段落
+    - `findBestAmountSubset` 注释从 "启发式提前终止" 改为 round 3 修复说明
+  - `scripts/smoke/recon-id-fix-engine.js`：
+    - 新增 2 smoke 用例：
+      - `runPR36Round3P2EarlyStopFirstIdx` — user 原文复现 `[opp_10:1, opp_2:50, opp_3:50, opp_11:99]` target=100 修后选 `[opp_2, opp_3]`
+      - `runPR36Round3P2PerformanceN20NoEarlyStop` — 性能基线：删早停后 n=20 < 100ms（实测 1ms 量级）
+    - tests 注册新增 2 用例（41 → 43）
+  - `docs/iterations/v2.1.0-beta.1/spec.md`：
+    - §五.2.4.1 `findBestAmountSubset` 注释里删除"启发式提前终止"行，加 round 3 修复说明
+    - §五.2.4.1 伪代码删除 `isBestAbsoluteOptimal()` 函数 + DFS 内调用
+    - 性能边界提示更新为"round 3 修后 n=20 实测 1.02ms / 次"
+  - `docs/iterations/v2.1.0-beta.1/log.md`：本节
+
+- **测试证据**：
+  - `npm run smoke` **268/268 PASS**（baseline 266 + 新增 2 P2 round 3 用例；recon-id-fix-engine 41 → 43）
+  - **user 复现用例验证**（pre/post fix 行为对照）：
+    ```
+    candidates [opp_10:1, opp_2:50, opp_3:50, opp_11:99]，target=100，所有 BillDate=2026-04-15
+    --- 修前（带 isBestAbsoluteOptimal 早停）---
+      DFS 升序 cents: opp_10(1) → opp_11(99)，先找到 [opp_10, opp_11]
+      best={size=2, spread=0, dist=0, firstIdxNum=10} → 触发早停 break
+      最终: [opp_10, opp_11] (firstIdxNum=10，错)
+    --- 修后（删早停）---
+      DFS 全遍历: 找到 [opp_10, opp_11] / [opp_2, opp_3]
+      tryUpdateBest: firstIdxNum=2 < 10 → 更新 best
+      最终: [opp_2, opp_3] (firstIdxNum=2，对)
+    ```
+  - **回归 baseline**（修前修后行为一致，不退步）：
+    - smoke 全部既有用例：266/266 PASS（含基金 io 用例 / FX 中台入金 + FTA202604280200028 用户用例 / Round 4 大池子 fixture / round 1+2 P2 单测）
+    - 用户用例 **FTA202604280200028 ↔ 202604271439325696974017228**：smoke `runRound5Step2IdxTieBreak`（Step 2 idx tie-break 路径）继续 PASS — 该用例走 Step 2 不走 subset-sum，本修不影响其行为
+  - **性能对比**（n=20 大池子 50 次平均）：
+    ```
+    round 3 修后（删早停）   1.02ms / 次
+    round 2 修后（带早停剪枝） 1.18ms / 次
+    round 2 之前（旧二段式） 2.58ms / 次
+    ```
+    说明：早停只在"先命中绝对最优 + 后面还有大量待搜索分支"时省时间；在 P2-6 fixture 中其他剪枝已让 DFS 不会真正去探到漫长分支，删早停后实际略快。
+  - **n=30 stress 验证**：21ms（无退化风险）
+
+- **风险显式提醒**：
+  - **资金红线（subset-sum 全局最优）**：本次修复让池子算法**真正**返回全局最优；round 2 早停剪枝在"先命中前 3 阶并列解"时会漏掉 firstIdxNum 更优的解。修后行为：tie-break 4 阶完整生效。
+  - **回归不变**：所有既有 smoke 用例（含 FTA / 基金 io / FX 中台入金 / Round 4 大池子 / Round 5 Step 2 / round 1+2 P2 单测）行为不变。删早停只影响"DFS 在前 3 阶并列时是否继续探索 firstIdxNum"的语义边界；fixture 中 firstIdxNum 一致的解会以稳定顺序被选中（最小者）。
+  - **性能（防退化）**：实测 n=20 删早停后 1.02ms / 次 远优于 round 2 之前 2.58ms / 次；hardCeiling=5M visit 上限作极端数据兜底（不变）
+
+- **follow-up（已知，非 blocker）**：
+  - 已合并 round 2 → round 3 是续修；user 复现脚本可作为永久回归用例（已 smoke 化为 P2-7 / P2-8）
+  - hardCeiling=5M 默认值不变（n=20/30 实测均 < 50ms）
+
+- **下一步**：通知 team-lead "代码已完成自测"等待用户测试 → user 确认 → 由 team-lead 提 round 3 commit / push
+
+---
+
 ## 2026-05-09 PR-B Round 5 微调（Step 2 多候选 tie-break）+ 1 决策回写
 
 - **背景**：用户测试 Round 4 时发现一个用例没命中

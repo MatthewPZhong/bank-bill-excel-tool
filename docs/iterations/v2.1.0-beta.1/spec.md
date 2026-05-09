@@ -922,14 +922,23 @@ function enumerateAmountSubsets(candidates, targetCents, maxSize = 8, maxSolutio
 //   - top-k 后缀剪枝：剩余可选元素中最大的 (maxSize - depth) 个的和 < remaining 也剪
 //     （升序排序后 = `suffixSum[max(startIdx, n - (maxSize-depth))]`）
 //   - maxSize=8（与旧实现一致；业务约束：一笔大单很少拆超过 8 笔小单）
-//   - 启发式提前终止：当 best 已是 spread=0 + distToMain=0 + size=2 时 break
-//     （这是绝对最优的下确界；后续不可能更优）
 //   - hardCeiling 硬上限：DFS visit 次数 > hardCeiling 时 abort（默认 5000000；仅极端数据兜底）
 //
-// 实测性能（n=20 大池子，复刻 `runRound4LargePoolPerformance`）：
-//   - 修后 findBestAmountSubset：1.14ms / 次（100 次平均）
-//   - 修前 enumerateAmountSubsets+tieBreakSubsets：2.58ms / 次
-//   - 后缀总和 + top-k 剪枝实际比"截断到 64 解"更快收敛到正确答案
+// PR #36 round 3 P2 修复（2026-04-30，user 复现 + 续 round 2）：
+//   round 2 曾引入"absolute optimal 早停"（best 满足 spread=0 + distToMain=0 + size=2 直接 break）。
+//   user 指出：tie-break 实际有 4 阶（spread → distToMain → size → firstIdxNum），早停只覆盖前 3 阶；
+//   firstIdxNum 仍可能在剩余分支中更优。例：candidates [opp_10:1, opp_2:50, opp_3:50, opp_11:99]、
+//   target=100，DFS 升序遍历先找到 {opp_10, opp_11}（cents=1+99 size=2 spread=0 dist=0）触发早停，
+//   漏掉 firstIdxNum 更小的全局最优 {opp_2, opp_3}。
+//   修法：删除 `isBestAbsoluteOptimal()` 早停剪枝；其他剪枝（升序前缀 / 后缀总和 / top-k 后缀 / maxSize=8 /
+//   hardCeiling）已足够防爆炸。
+//
+// 实测性能（n=20 大池子，复刻 `runRound4LargePoolPerformance`，50 次平均）：
+//   - round 3 修后（删早停）findBestAmountSubset：1.02ms / 次
+//   - round 2 修后（带早停剪枝）findBestAmountSubset：1.18ms / 次
+//   - round 2 之前 enumerateAmountSubsets+tieBreakSubsets：2.58ms / 次
+//   说明：早停只在"先命中绝对最优解 + 后面还有大量待搜索分支"时省时间，但在 P2-6 fixture 中
+//        maxSize=8 + topKSum 剪枝已让 DFS 在 firstIdxNum 完成排序前就退出大部分分支，删早停略优。
 //
 // 返回 Array<row>（最优子集，按 row._origIdx 升序）；无解返回 null
 function findBestAmountSubset(candidates, targetCents, mainBillDate, options = {}) {
@@ -998,13 +1007,11 @@ function findBestAmountSubset(candidates, targetCents, mainBillDate, options = {
     }
   }
 
-  // 启发式：当 best 是绝对最优（spread=0 + distToMain=0 + size=2），后续不会更优 → break
-  function isBestAbsoluteOptimal() {
-    return best !== null
-      && best.spread === 0
-      && (mainMs === null || best.distToMain === 0)
-      && best.size === 2;
-  }
+  // PR #36 round 3 P2 修复（2026-04-30，user 复现）：移除"absolute optimal 早停"剪枝
+  //   round 2 曾在此处加入 `isBestAbsoluteOptimal()` early break：当 best 是 spread=0 + distToMain=0 + size=2
+  //   时直接 break。bug：tie-break 实际 4 阶（spread → distToMain → size → firstIdxNum），早停只覆盖前 3 阶；
+  //   firstIdxNum 在剩余分支中仍可能改进，会漏选全局最优。
+  //   修法：完全删除该剪枝；其他剪枝已足够防爆炸；性能仍 < 5ms 量级（P2-6/P2-7 测试覆盖）。
 
   function dfs(startIdx, remaining, depth) {
     if (aborted) return;
@@ -1025,7 +1032,6 @@ function findBestAmountSubset(candidates, targetCents, mainBillDate, options = {
       path.push(c);
       dfs(i + 1, remaining - c.cents, depth + 1);
       path.pop();
-      if (isBestAbsoluteOptimal()) return;
     }
   }
   dfs(0, targetCents, 0);
@@ -1078,11 +1084,13 @@ function parseRowIdxNum(rowIdx) {
 }
 ```
 
-> ⚠️ 性能边界（**PR #36 round 2 P2 修复后更新**）：
+> ⚠️ 性能边界（**PR #36 round 3 P2 修复后更新**）：
 > - 旧实现（`enumerateAmountSubsets` + `tieBreakSubsets` 二段式）：升序剪枝 + maxSize=8 + maxSolutions=64 三道防线
->   缺陷：maxSolutions 截断后排序选最优 → 全局最优排在 N>64 位时漏选（user 复现 bug）
-> - 新实现（`findBestAmountSubset` DFS 全遍历）：升序剪枝 + 后缀总和剪枝 + top-k 后缀剪枝 + maxSize=8 + 启发式提前终止 + hardCeiling=5M 硬上限
->   保证：找到全局最优；性能实测 n=20 大池子 1.14ms / 次（比旧实现 2.58ms 还快）
+>   缺陷：maxSolutions 截断后排序选最优 → 全局最优排在 N>64 位时漏选（user 复现 bug，round 2 修）
+> - round 2 实现（`findBestAmountSubset` DFS 全遍历 + absolute optimal 早停）：升序剪枝 + 后缀总和 + top-k 后缀 + maxSize=8 + 早停剪枝 + hardCeiling=5M
+>   缺陷：早停剪枝只覆盖 tie-break 前 3 阶（spread / distToMain / size），漏 firstIdxNum；user 复现 [opp_10:1, opp_2:50, opp_3:50, opp_11:99] target=100 错选 {opp_10, opp_11}（round 3 修）
+> - round 3 实现（删早停）：升序剪枝 + 后缀总和 + top-k 后缀 + maxSize=8 + hardCeiling=5M（**当前**）
+>   保证：找到全局最优；性能实测 n=20 大池子 1.02ms / 次（删一个 if 比 round 2 略快；远优于旧实现 2.58ms）
 > ⚠️ 浮点精度：必须先 `toCents` 化成整数分再比较，否则 `0.1 + 0.2 = 0.30000000000000004 ≠ 0.3` 经典坑会让 200 个用例对账失败。
 > ⚠️ subset 必须 size ≥ 2：1 主 vs 1 从单元素子集已在 Step 1 / Step 2 处理过；池子里 size=1 视为"无解"防止与 1v1 重复抢配。
 

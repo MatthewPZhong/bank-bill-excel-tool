@@ -1583,6 +1583,67 @@ function runPR36Round2P2PerformanceN20() {
     `P2-6 性能：findBestAmountSubset n=20 < 1s（实测 ${elapsedMs}ms；后缀和+top-k 剪枝有效）`);
 }
 
+// ===== PR #36 round 3 P2 修复（移除"absolute optimal 早停"剪枝）=====
+//
+// user 提出：round 2 加的 `isBestAbsoluteOptimal()` 早停判定 spread=0 + distToMain=0 + size=2 时
+// 直接 break，但 tie-break 实际有 4 阶（spread → distToMain → size → firstIdxNum），早停只覆盖前 3 阶。
+// 修法：删除该剪枝，让 DFS 在其他剪枝下完整遍历到 firstIdxNum 真正不可改进的位置。
+// 用例 P2-7：user 原文复现（candidates 4 个，cents=1/50/50/99，target=100，期望选 {opp_2, opp_3}）
+
+function runPR36Round3P2EarlyStopFirstIdx() {
+  // user 原文复现：
+  //   candidates [opp_10:1, opp_2:50, opp_3:50, opp_11:99]，target=100，所有 BillDate 同 04-15
+  //   tie-break 4 阶：
+  //     spread=0    → 全等
+  //     distToMain  → 与 mainBillDate=04-15 同日，均为 0 → 全等
+  //     size        → 两个解都 size=2 → 全等
+  //     firstIdxNum → {opp_10, opp_11} firstIdx=10；{opp_2, opp_3} firstIdx=2 → opp_2/3 最优
+  //
+  //   修前（round 2 早停）：DFS 升序 cents 遍历先找到 {opp_10:1, opp_11:99}（cents=1+99=100），
+  //                        立即触发 `isBestAbsoluteOptimal()` break → 不再尝试 {opp_2:50, opp_3:50}
+  //                        → 错选 {opp_10, opp_11}
+  //   修后：删除早停 → DFS 全遍历 → tryUpdateBest 阶段 firstIdxNum=2 < 10 → 更新 best 为 {opp_2, opp_3}
+  function makeCand(rowIdx, cents) {
+    return { row: { _rowIdx: rowIdx, BillDate: '2026-04-15', OrderId: rowIdx }, cents };
+  }
+  const candidates = [
+    makeCand('opp_10', 1),
+    makeCand('opp_2', 50),
+    makeCand('opp_3', 50),
+    makeCand('opp_11', 99)
+  ];
+  const chosen = findBestAmountSubset(candidates, 100, '2026-04-15');
+  assert.ok(chosen !== null, '应找到 sum=100 的最优子集');
+  assert.strictEqual(chosen.length, 2, 'size=2');
+  const orderIds = chosen.map((r) => r.OrderId).sort();
+  assert.deepStrictEqual(orderIds, ['opp_2', 'opp_3'],
+    'P2-7 修复：DFS 全遍历命中 firstIdxNum 最小子集 {opp_2, opp_3}（修前因早停 break 错选 {opp_10, opp_11}）');
+}
+
+// P2-8：性能基线 — 删早停后 n=20 仍 < 100ms（防止全遍历退化）
+function runPR36Round3P2PerformanceN20NoEarlyStop() {
+  // 复刻 P2-6 fixture：19 个 11 + 1 个 789 + 1 个 211，target=1000
+  // 删早停后预期：仍 < 100ms（极端宽松上限；典型 < 5ms）
+  function makeCand(rowIdx, cents) {
+    return { row: { _rowIdx: rowIdx, BillDate: '2026-04-09', OrderId: rowIdx }, cents };
+  }
+  const candidates = [];
+  for (let i = 0; i < 20; i++) {
+    const cents = i === 18 ? 78900 : (i === 19 ? 21100 : 1100);
+    candidates.push(makeCand(`opp_${i}`, cents));
+  }
+  const startMs = Date.now();
+  const chosen = findBestAmountSubset(candidates, 100000, '2026-04-09');
+  const elapsedMs = Date.now() - startMs;
+  assert.ok(chosen !== null, '应找到 {S18, S19}={789, 211}=1000');
+  assert.strictEqual(chosen.length, 2, 'size=2');
+  const orderIds = new Set(chosen.map((r) => r.OrderId));
+  assert.ok(orderIds.has('opp_18') && orderIds.has('opp_19'),
+    'P2-8 性能：删早停后仍能找到 {opp_18, opp_19}');
+  assert.ok(elapsedMs < 100,
+    `P2-8 性能基线：删早停后 n=20 < 100ms（实测 ${elapsedMs}ms）`);
+}
+
 // ===== category guard =====
 function runCategoryGuard() {
   assert.throws(
@@ -1643,6 +1704,9 @@ function runReconIdFixEngineSmokeTests() {
     runPR36Round2P2GlobalBestBeyond64,
     runPR36Round2P2EndToEndPool,
     runPR36Round2P2PerformanceN20,
+    // PR #36 round 3 P2 修复（移除"absolute optimal 早停"剪枝；tie-break 4 阶必须遍历到 firstIdxNum）
+    runPR36Round3P2EarlyStopFirstIdx,
+    runPR36Round3P2PerformanceN20NoEarlyStop,
     runCategoryGuard
   ];
   tests.forEach((t) => t());

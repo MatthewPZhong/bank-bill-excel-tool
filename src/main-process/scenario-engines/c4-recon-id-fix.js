@@ -33,10 +33,18 @@
 //
 //   修复方案 A：池子算法改用 `findBestAmountSubset` — DFS 不收集 solutions 数组，每找到一个 sum=target 解
 //   立即与"当前 best"做 tieBreak 比较（spread → distToMain → size → firstIdxNum），更新 best；不预截断。
-//   性能：升序剪枝 + 后缀总和剪枝 + maxSize=8 + 启发式提前终止（best 已 spread=0+distToMain=0+size=2 → break）
-//   + hardCeiling 硬上限（DFS visit 次数防御，默认 100000）。
+//   性能：升序剪枝 + 后缀总和剪枝 + maxSize=8 + hardCeiling 硬上限（DFS visit 次数防御，默认 5e6）。
 //
 //   `enumerateAmountSubsets` / `tieBreakSubsets` 保留（向后兼容 + 单测覆盖），但池子算法不再调用。
+//
+// === PR #36 round 3 P2 修复（2026-04-30）：移除"absolute optimal 早停"剪枝 ===
+//
+//   round 2 引入 `isBestAbsoluteOptimal()` 早停：best 满足 spread=0 + distToMain=0 + size=2 时
+//   直接 break。bug（user 提）：tie-break 实际 4 阶（spread → distToMain → size → firstIdxNum），
+//   早停只覆盖前 3 阶；firstIdxNum 仍可能在剩余分支中更优。
+//   例：candidates [opp_10:1, opp_2:50, opp_3:50, opp_11:99] / target=100，DFS 升序遍历先找到
+//   {opp_10, opp_11} 触发早停，漏掉 firstIdxNum 更小的全局最优 {opp_2, opp_3}。
+//   修法：删除该剪枝；其他剪枝足够防爆炸（n=20 实测耗时仍 < 5ms 量级，见 P2-6/P2-7 用例）。
 //
 // === Round 3 Type 规则（Decision 1，Round 4 沿用）===
 //
@@ -341,14 +349,17 @@ function findBestAmountSubset(candidates, targetCents, mainBillDate, options = {
     }
   }
 
-  // 启发式提前终止：当前 best 已是绝对最优（spread=0 同日 + distToMain=0 / 与主单同日 + size=2 最小），
-  // 后续不会有更优解。
-  function isBestAbsoluteOptimal() {
-    return best !== null
-      && best.spread === 0
-      && (mainMs === null || best.distToMain === 0)
-      && best.size === 2;
-  }
+  // PR #36 round 3 P2 修复（2026-04-30）：移除"absolute optimal 早停"剪枝
+  //
+  // 修前（round 2 引入）：当 best 满足 `spread=0 + distToMain=0 + size=2` 时直接 break 当前 for 循环
+  //   bug：tie-break 实际有 4 阶（spread → distToMain → size → firstIdxNum），早停只覆盖前 3 阶，
+  //        firstIdxNum 仍可能改进。例：candidates [opp_10:1, opp_2:50, opp_3:50, opp_11:99] / target=100
+  //        升序 cents 排序后 DFS 先找到 {opp_10, opp_11}（size=2 spread=0 dist=0）触发早停，
+  //        漏掉 firstIdxNum 更小的全局最优 {opp_2, opp_3}。
+  //
+  // 修法：完全删除剪枝。其他剪枝（升序前缀剪枝 / 后缀总和 / top-k 后缀 / maxSize=8 / hardCeiling=5M）
+  //      已足够防爆炸；n=20 大池子修后耗时仍 < 5ms 量级（见 P2-6/P2-7 性能测试）。
+  //      资金红线层面：必须保证全局最优，性能稍降可接受。
 
   function dfs(startIdx, remaining, depth) {
     if (aborted) return;
@@ -375,8 +386,6 @@ function findBestAmountSubset(candidates, targetCents, mainBillDate, options = {
       path.push(c);
       dfs(i + 1, remaining - c.cents, depth + 1);
       path.pop();
-      // 启发式提前终止：每次回溯后检查 best 是否已绝对最优
-      if (isBestAbsoluteOptimal()) return;
     }
   }
   dfs(0, targetCents, 0);
