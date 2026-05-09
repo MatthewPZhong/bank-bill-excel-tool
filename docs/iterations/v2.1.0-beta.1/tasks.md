@@ -196,30 +196,42 @@
   - smoke 测试 round-trip：写入 → 重新读取 → 数据一致
 - 关联 spec：§五.1、§三
 
-### task B4：`scenario-engines/c4-recon-id-fix.js` 主入口 + 7 条规则（主从单边）
+### task B4：`scenario-engines/c4-recon-id-fix.js` 主入口 + 7 条规则 + **Round 4 subset-sum 池子重写**
 
-- 涉及文件：`src/main-process/scenario-engines/c4-recon-id-fix.js`（新增）
-- 实施要点：
-  - `runC4Scenario(scenario, sheets) → { fixedRows, warnings, stats }`
-  - 复用 `engine-utils.js`：`evaluateCondition` / `makeWarningCollector` / `valuesEqual` / `normalizeCellValue`
-  - 实现 R1-R7 七条规则（详见 PRD §七.3.2）
-  - `tryOneToOne` / `tryOneToMany`（R2 多v1）/ `tryManyToOne`（R4 1v多 反向找）
-  - `lookupReconId`：先读对方 row.reconId；空则走 reconResult sheet 反查（§五.2.3）
-  - `resolveSubBizType`：mode='auto' 时按 R5/R6 算法查 reconResult；'manual*' 时直接取手填值
+- 涉及文件：`src/main-process/scenario-engines/c4-recon-id-fix.js`
+- 实施要点（**Round 4 重写**）：
+  - `runC4Scenario(scenario, sheets) → { fixedRows, warnings, unmatchedRows, stats }`
+  - 复用 `engine-utils.js`：`evaluateCondition` / `makeWarningCollector` / `normalizeCellValue`
+  - 实现 R1-R7 七条规则（PRD §七.3.2）
+  - 5 阶段：
+    - `tryOneToOne(leftRows, rightRows, fieldPairs, billDateMode, ...)` — Step 1（strict）/ Step 2（±1day）共用
+    - **Round 4**：`tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode, ...)` — Step 3.1（strict）/ Step 3.2（±1day），改 subset-sum 语义
+    - **Round 4**：`tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode, ...)` — Step 3'.1 / Step 3'.2，对称 subset-sum
+  - **Round 4 新增工具函数**：
+    - `toCents(amount)` — 浮点 ×100 整数化避精度坑
+    - `rowsMatchOtherFieldPairs(left, right, otherFieldPairs)` — 池子候选过滤"除 Amount 外其他对账字段 AND 全等"
+    - `enumerateAmountSubsets(candidates, targetCents, maxSize=8, maxSolutions=64)` — DFS + 升序剪枝枚举所有解
+    - `tieBreakSubsets(subsets, mainBillDate)` — 多解时按 spread → distToMain → size → firstIdx 字典序排序取首
+  - 沿用 Round 3：`findAmountLockedPair(fieldPairs)` / `billDateMatches(L, R, mode)` / `parseBillDateMs(s)`
+  - `collectUnmatchedRows(mainTyped, oppTyped, pairedLeft, pairedRight, lastStepByLeft, lastStepByRight, matchRules, scenarioName)` 收集未配主从 + deriveReason
+  - `lookupReconId`：直读 opCounterRow.reconId
+  - `resolveSubBizType`：mode='auto' 查 reconResult；'manual*' 取手填
 - 验收证据：
-  - `scripts/smoke/recon-id-fix-engine.js` 增 7 用例（R1/R2/R3/R4/R5/R6/R7 各 1）
-- 关联 spec：§五.2
+  - `scripts/smoke/recon-id-fix-engine.js` Round 4 重写：原 22 用例 + 7 个 Round 4 新增（subset-sum helpers + 用户用例 + 找不到子集 + 浮点精度 + 大候选集性能 + tieBreak 多解 + 多v1 对称）= 29 用例
+- 关联 spec：§五.2 / §五.4 / §五.2.4 / §五.2.4.1
 
-### task B5：`scenario-engines/c4-recon-id-fix.js` 5 条规则（主从都修复）
+### task B5：`scenario-engines/c4-recon-id-fix.js` 5 条规则（主从都修复）— **Round 3 RB4 Type=0 / Round 4 subset-sum 命中后赋值**
 
 - 涉及文件：同 task B4
 - 实施要点：
-  - 实现 RB1-RB5 五条规则（详见 PRD §七.3.3）
-  - `computeCommonId(commonIdCfg, leftRow, rightRow)` = source.OrderId + suffix
+  - 实现 RB1-RB5 五条规则（PRD §七.3.3）
+  - **Round 3 修订**：`apply1vNAssignment` 在 mode='both' 分支中 right Type 由 `2` 改为 `0`（Decision 1）
+  - **Round 4 沿用**：`apply1vNAssignment` / `applyNv1Assignment` 接收 subset-sum tieBreak 后的 chosen 子集（不再是全 candidates），逐行赋值
+  - `computeCommonId(commonIdCfg, leftRow, rightRow)` = src.reconId + suffix（PR-B Q2=a 已落）
   - mode='both' 时同时往 fixedRows 推 leftRow 和 rightRow 两条
 - 验收证据：
-  - smoke 增 5 用例（RB1/RB2/RB3/RB4/RB5）
-- 关联 spec：§五.2
+  - smoke 含 RB1/RB2/RB3/RB4 Type=0/RB5 用例（Round 4：RB2 / RB4 改为 subset-sum 命中场景）
+- 关联 spec：§五.2.6
 
 ### task B6：`recon-id-fix-engine.js` 顶层入口
 
@@ -253,17 +265,19 @@
 - 验收证据：smoke + GUI 实测
 - 关联 spec：§三、§六
 
-### task B9：`main.js` IPC `recon-id-fix:export` + defense in depth
+### task B9：`main.js` IPC `recon-id-fix:export` + defense in depth — **Round 3 双文件输出**
 
 - 涉及文件：`src/main.js`
-- 实施要点：
+- 实施要点（**Round 3 修订**）：
   - 校验 `reconIdFixResult` 存在
-  - **资金红线 defense in depth**：重读 scenario + 比对 snapshot；不一致拒绝（spec §十.2）
-  - 空 fixedRows → 返回 `status='empty'`，不弹 saveDialog
-  - `dialog.showSaveDialog` → 默认文件名 `单据对账修复-YYYYMMDDHHmm-{name}.xlsx`
-  - 调 `writeReconIdFixOutput` → 返回 mainFilePath
-- 验收证据：smoke 含 4 用例（正常 / 空命中 / snapshot 不一致 / 用户取消 saveDialog）
-- 关联 spec：§三、§十
+  - **资金红线 defense in depth**：重读 scenario + 比对 snapshot；不一致拒绝
+  - **空命中 + 空 unmatched** → 返回 `status='empty'`，不弹 saveDialog
+  - 至少一方非空 → 弹 saveDialog（用户选主文件保存路径）；timestamp 在 export 入口生成，主+unmatched 共用
+  - 主文件非空 → 调 `writeReconIdFixOutput`
+  - unmatched 非空 → 在主文件保存目录用 `buildUnmatchedReportFileName` 生成路径，调 `writeUnmatchedReport`
+  - 返回 `{ status, mainFilePath?, mainFileName?, unmatchedFilePath?, unmatchedFileName?, rowCount, unmatchedCount }`
+- 验收证据：smoke 含 4 用例（正常主+unmatched / 仅主 / 仅 unmatched / 都空 → empty / snapshot 不一致 / 用户取消）
+- 关联 spec：§三、§五.4、§十
 
 ### task B10：`main.js` 4 IPC 入口同步清缓存（资金红线）
 
@@ -284,34 +298,82 @@
 - 关联 spec：§三、§十一
 
 <!-- 2026-04-30 决策回写：Q4=部分采纳（B12 接通主面板下拉传 scenarioId） -->
-### task B12：`renderer.js` 4 按钮接通
+### task B12：`renderer.js` 4 按钮接通 — **Round 3 statusBox 加 unmatched 档**
 
 - 涉及文件：`src/renderer.js`
 - 实施要点：
   - 「导入文件」→ `desktopApi.reconIdFix.import` + 错误提示 + statusBox 文案
-  - 「开始运行」→ 取**主面板"场景"下拉**当前选中值 = `state.reconIdFixSelectedScenarioId`（task A9 已铺）→ `desktopApi.reconIdFix.run({ scenarioId: state.reconIdFixSelectedScenarioId })`（payload 形态来自 spec §三 / Q4 决策）+ statusBox
-  - 「导出文件」→ `desktopApi.reconIdFix.export` + saveDialog cancel/empty/ok 三态文案
-  - statusBox 5 状态文案（PRD §三 D11，Q4 已包含"已配场景未导入"档）
-  - 「开始运行」点击时若 `state.reconIdFixSelectedScenarioId === null`（理论上按钮已 disabled，防御兜底）→ 弹 alert"请先选择场景"
+  - 「开始运行」→ 取主面板"场景"下拉值 = `state.reconIdFixSelectedScenarioId` → `desktopApi.reconIdFix.run({ scenarioId })` + statusBox
+  - 「导出文件」→ `desktopApi.reconIdFix.export` + saveDialog cancel/empty/ok 三态文案；**Round 3 status='ok' 时 statusBox 显示主+unmatched 双文件名**
+  - statusBox 文案：
+    - 已运行：`场景"X"运行完成；命中 N 行修复，M 行警告，K 行未匹配`（Round 3 加"K 行未匹配"档）
+    - 已导出（仅主）：`已导出 mainFile`
+    - 已导出（仅 unmatched）：`已导出未匹配 report unmatchedFile`
+    - 已导出（双文件）：`已导出 mainFile / unmatchedFile`
 - 验收证据：GUI 全链路 smoke
 - 关联 spec：§七
 
-### task B13：端到端 smoke `scripts/smoke/recon-id-fix-end-to-end.js`
+### task B13：端到端 smoke — **Round 3 重写**
 
-- 涉及文件：新增
-- 实施要点：
-  - 4 用例：mode=main 全链路 / mode=opp 全链路 / mode=both 全链路 / SubBizType 自动查命中
-  - mock 4 sheet 数据 → dispatcher → writer → readBack 断言
-- 验收证据：smoke 4 用例全过 + 接入 `scripts/smoke-test.js` runner
+- 涉及文件：`scripts/smoke/recon-id-fix-end-to-end.js`
+- 实施要点（**Round 3 重写**）：
+  - 用例：5 阶段端到端 mode=main / opp / both（含 unmatched 输出）+ "基金"真实 fixture 全量回归
+  - 真实 fixture 跑通后断言 `fixedRowCount + unmatchedRowCount = mainTyped.length + oppTyped.length`（每行最多被分配到主/未配两边之一，但 fixedRows 中 1v多 / 多v1 会展开多行）
+- 验收证据：smoke 全过 + runner 注册
 - 关联 spec：§九.2
+
+### task B14：unmatched 报告 writer + smoke — **Round 3 新增**
+
+- 涉及文件：
+  - `src/main-process/recon-id-fix-io.js` — 新增 `writeUnmatchedReport` + `buildUnmatchedReportFileName`
+  - `scripts/smoke/recon-id-fix-io.js` — 增 round-trip 用例 + 命名用例
+- 实施要点：
+  - `writeUnmatchedReport({ unmatchedRows, savePath })` — sheet 名"未匹配单据" / 6 列表头 / 字号 10pt
+  - `buildUnmatchedReportFileName(scenarioName, timestamp)` — `单据对账修复-未匹配-{timestamp}-{sanitize(name)}.xlsx`
+- 验收证据：
+  - smoke 用例：写 → 重新读 → 6 列匹配 / 行数相等 / 表头字号 10pt
+  - smoke 用例：unmatchedRows=[]时仍写空 sheet（仅表头）
+- 关联 spec：§五.4
+
+### task B15：C4 dialog Amount 字段对锁定 — **Round 3 新增（Decision 4）**
+
+- 涉及文件：
+  - `src/renderer-dialogs.js` — `createScenarioConfigDialogC4` 行 4 渲染 + 数据初始化
+  - `src/backend/database/migrations.js` — 新增 `migrateC4ReconGroupsAmountLockedFieldPair(db)`
+  - `src/backend/database.js` — 调用新 migration
+  - `scripts/smoke/migrations-recon-id-fix.js` — 加 H 系列用例
+- 实施要点：
+  - `createDefaultScenarioConfig('recon-id-fix')` 改 reconGroups 默认值：
+    `[{ leftTypeSeq:1, rightTypeSeq:1, fieldPairs: [{ leftField:'Amount', rightField:'Amount', locked: true }] }]`
+  - dialog 渲染 reconGroups 时：`fp.locked === true` → leftField/rightField select 加 disabled + 隐藏 ❌ 删除按钮（无 `data-c4-rg-fp-action="remove"` 按钮渲染）
+  - "+ 新增字段对"按钮 push 新 fieldPair 不带 locked 标记
+  - "+ 新增 OR 分组"按钮 push 新 group 时**默认带 Amount 锁定 fieldPair 作为第一行**：
+    `{ leftTypeSeq, rightTypeSeq, fieldPairs: [{ leftField:'Amount', rightField:'Amount', locked: true }] }`
+  - migration `migrateC4ReconGroupsAmountLockedFieldPair`：
+    1. 老 reconGroups 中 fieldPair 恰好 leftField=='Amount' && rightField=='Amount' 但无 locked → 加 `locked: true`
+    2. 老 reconGroups 中无 Amount/Amount fieldPair → 在 fieldPairs 数组**头部插入** `{leftField:'Amount', rightField:'Amount', locked: true}`
+    3. 已含 locked Amount/Amount → no-op（幂等）
+- 验收证据：
+  - smoke 用例 H1 / H2 / H3：3 种 migration 路径
+  - GUI 实测：dialog 默认渲染 Amount 锁定行 + 锁定 select 不可改 + 删除按钮不可见 + + 新增字段对仍可工作 + + 新增 OR 分组带 Amount 锁定行
+- 关联 spec：§一 1.2 / §八.1 / 数据模型 §八.2
+
+### task B16：renderer.js statusBox 加 unmatched 档 — **Round 3 新增**
+
+- 涉及文件：`src/renderer.js`
+- 实施要点：
+  - statusBox 文案在"已运行"档加 `K 行未匹配`
+  - "已导出"档区分仅主 / 仅 unmatched / 双文件 三态
+- 验收证据：GUI 实测
+- 关联 spec：§七
 
 ### PR-B 验收清单
 
-- [ ] task B1-B13 全部 done
-- [ ] `npm run smoke` 全绿（新增 ~16 用例：engine 12 + io 7 + e2e 4 - 重叠）
+- [ ] task B1-B16 全部 done（**Round 3 加 B14/B15/B16**）
+- [ ] `npm run smoke` 全绿（baseline 232 + Round 3 新增用例）
 - [ ] PRD §十二 P0-1 ~ P0-10 全部手工验证通过（10 个资金红线场景）
 - [ ] `npm run check:vars` 输出"⚠️ 关联功能 review"段：命中 `FileValidationError`（Critical）+ `state` / `dialog` / `ipcRenderer`（Runtime-state / Important-skeleton）+ migrations 新函数（Risk-sensitive）
-- [ ] GUI 实测：用户样例文件 `samples/单据对账导出不平.xlsx` 真实跑一次（mode=both + 自动 SubBizType）
+- [ ] **真实 fixture「基金」场景**回归：`/Users/pzhong/Desktop/小助手-Debug/2.0.0/订单枚举表/单据对账导出不平.xlsx` 跑通后输出 fixedRows / unmatchedRows 与期望一致
 - [ ] PRD §十六 PR-B 实施记录补全
 
 ---
