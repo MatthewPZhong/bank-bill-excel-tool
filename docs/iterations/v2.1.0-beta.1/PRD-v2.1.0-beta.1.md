@@ -83,7 +83,17 @@
   - 「主边单据 1 v 多 从边单据」
   - 「主边单据 多 v 1 从边单据」
 - **互斥关系**（用户 5 轮澄清最后修订）：仅"1 v 多"与"多 v 1"互斥；"1 v 1"可与任一另一项**共勾**
-- **算法语义**：每行先尝试 1v1 匹配；找不到时按勾选回退到 1v多 / 多v1（详见 §七算法）
+- **算法语义**（**PR-B Round 4 subset-sum 重构，2026-05-09**）：5 阶段算法
+  - **Step 1**：同 BillDate + 全部对账字段（含 Amount 等）AND 全等的 1v1 严格匹配；命中即锁定
+  - **Step 2**：BillDate ± 1 day 容错（主单 D vs 从单 D-1/D/D+1 任一相等即可）+ 其他对账字段 AND 全等不变；命中即锁定
+  - **Step 3.1**：进 1v多 池子（剩余主+从）— 同 BillDate + 除 Amount 外其他对账字段 AND 全等过滤候选；候选 Amount 走 **subset-sum**(候选.Amount) === 主.Amount，找子集 size ≥ 2
+  - **Step 3.2**：进 1v多 池子 — BillDate ± 1 day + 除 Amount 外其他对账字段 AND 全等 + subset-sum
+  - **Step 3'.1 / Step 3'.2**：勾了 多v1 时，对剩余池子做 同 BillDate / ±1day + 除 Amount 外其他对账字段 AND 全等 + subset-sum(候选主.Amount) === 从.Amount 多主 vs 1 从匹配
+  - **多解 tie-break**：subset-sum 多解时按 `spread 最小 → distToMain 最近 → size 最小 → firstIdx 字典序` 决出唯一最优解（详 §七.3.6）
+  - 详见 §七.3.1 算法主流程
+- **未匹配单据**：算法跑完仍未配对的主从单据写入 `单据对账修复-未匹配-YYYYMMDDHHmm-{scenarioName}.xlsx` 告警 report（详见 §七.3.5 unmatched writer）
+- **不再存在**早期 PR-B Round 1+2 的"先 1v1 → 1v多 → 多v1"轮询（已被 Round 3 重构替换）
+- **Round 3 → Round 4 修订（用户测试反馈）**：Round 3 池子算法是"逐行 Amount 全等"过滤，**严重漏配**——主 270k 即使从有 [200k, 70k] 也不会命中。Round 4 改为 subset-sum 后，多笔小金额拼出大金额的会计对账常见做法被正确支持。
 
 ### D3 — 账单类型动态行（C4 配置弹窗第 3 行）
 
@@ -96,14 +106,35 @@
 - 同序号下方按钮「新增」：在该序号下加一行（同序号多条 = AND 关系）
 - 行底下按钮「新增账单类型」：序号 +1，开始新一组类型
 
-### D4 — 对账字段动态行（C4 配置弹窗第 4 行）
+### D4 — 对账字段（C4 配置弹窗第 4 行；**PR-B Q1=B 决策修订，2026-04-30；Round 3 Amount 锁定，2026-05-09**）
 
-- 行结构：`[序号] [账单类型号下拉1] [字段下拉2（主边）] [vs] [账单类型号下拉3] [字段下拉4（从边）]` + 行级 ❌
-- 下拉 1 / 下拉 3：枚举值 = §D3 行 3 已配的"账单类型"序号（1 / 2 / ...）
-- 下拉 2（主边字段）：枚举 = 「业务部门账单」sheet 表头（23 列）
-- 下拉 4（从边字段）：枚举 = 「对手部门账单」sheet 表头（22 列）
-- 行底下按钮「新增」：加一行，序号 +1
-- 同序号内多行 = AND；不同序号 = OR（与 v2.0.0-beta.3 C2 一致）
+> **2026-04-30 修订**：去 seq 概念，改为"分组（reconGroups）"模型。
+>   - 一个 group = 一对 (leftTypeSeq, rightTypeSeq) 头 + 多行 fieldPairs（默认 AND）
+>   - 多个 group 之间 = OR
+>   - 默认呈现 1 个 group（主→从）+ 1 行 fieldPair；用户继续点"+ 新增字段对" 加 AND 行
+>   - 如果用户要 OR 关系，单独点"+ 新增 OR 分组"按钮另开一个 group block
+
+> **2026-05-09 PR-B Round 3 修订（Decision 4 — Amount 字段对锁定）**：
+>   - **新增分组（reconGroup）默认带 Amount 字段对作为第一行**（leftField='Amount', rightField='Amount'）
+>   - Amount 字段对**完全不可编辑 + 不可删除**：
+>     - 行级 ❌ 删除按钮 disabled / 隐藏
+>     - leftField / rightField select 都 disabled，固定显示 'Amount'
+>   - 用户可继续在该 group 加其他字段对（如 Currency / BizType）
+>   - 多个 reconGroup 各自带自己的"锁定 Amount"行
+>   - **业务依据**：算法 Step 3.x 池子内 1v多 / 多v1 是基于 Amount 单一字段对匹配，必须保证用户场景里有 Amount 字段对作为算法基础
+
+- 分组 block 头：`分组 # | 左：[账单类型号下拉] vs 右：[账单类型号下拉] [✗ 删除分组]`
+- 字段对行：
+  - **第 1 行（锁定）**：`[Amount(disabled)] = [Amount(disabled)] [+ 新增字段对]`（无删除按钮）
+  - 其余行：`[左字段下拉] = [右字段下拉] [✗ 删除字段对] [+ 新增字段对]`
+- 行底下按钮「+ 新增 OR 分组」：在 group 列表底部加新 group block（新分组也自动带 Amount 锁定行）
+- 下拉 1 / 下拉 2：枚举值 = §D3 行 3 已配的"账单类型"序号（1 / 2 / ...），**左侧必须指向 main、右侧必须指向 opp**
+- 字段下拉枚举：左侧 = 「业务部门账单」sheet 表头（23 列）；右侧 = 「对手部门账单」sheet 表头（22 列）
+
+> 数据模型：`reconGroups[] = [{ leftTypeSeq, rightTypeSeq, fieldPairs: [{leftField, rightField, locked?}, ...] }, ...]`（详见 §八 8.2）
+> **不再保留 seq 字段**：早期 PR-A 设计的 seq 概念（同 seq AND，不同 seq OR）会让用户在配 (Currency, Amount, BizType) 三条时误打多 seq 形成 OR；新模型默认 AND，更符合直觉。
+> DB 迁移：老 reconFields[] 数据由 `migrateC4ReconGroupsStructure` 启动时按 seq 聚合到 reconGroups[]，幂等。
+> Amount 锁定标记：fieldPair 上加 `locked: true` 表示锁；migration 兼容老数据时自动给"恰好是 Amount/Amount 的 fieldPair"补 locked 标记，否则给每个 group 头部插一条新的 Amount 锁定 fieldPair。
 
 ### D5 — 修复结果输出（C4 配置弹窗第 5 行）
 
@@ -112,11 +143,15 @@
 - 上侧两个勾选框（互斥）：「主边单据」「从边单据」
 - 下侧勾选框「主从边都修复」（勾上后禁用上面两个）
 
-#### D5.2 主从边都修复 — 共同 ID 拼接
+#### D5.2 主从边都修复 — 共同 ID 拼接（**PR-B Q2=a 决策修订，2026-04-30**）
+
+> **2026-04-30 修订**：共同修复 ID 的"基础部分"从 `源端单据.OrderId` 改为 `源端单据.reconId`。
+>   - 业务上 reconId 才是"同对账组"的稳定标识；OrderId 跨主从边没法表达"同对账组"
+>   - 用户回报：跑 fixture 文件时按原 spec OrderId 拼出来的 commonId 与对账系统期望不符
 
 - 勾「主从边都修复」后右侧显示：
-  - 文本「取」 + 单选下拉（「主边单据 ID」/「从边单据 ID」）+ 文本「加上」 + 输入框 + 文本「作为主从边共同的修复 ID」
-- 共同修复 ID = `源端单据.OrderId + 输入框文本`（字符串拼接）
+  - 文本「取」 + 单选下拉（「主边单据 reconId」/「从边单据 reconId」）+ 文本「加上」 + 输入框 + 文本「作为主从边共同的修复 ID」
+- 共同修复 ID = `源端单据.reconId + 输入框文本`（字符串拼接）
 - 共同 ID 写入主、从两边的 Reference 列
 
 #### D5.3 SubBizType 取值规则（三选一互斥）
@@ -154,14 +189,21 @@
 
 #### 主从边都修复 — 5 条规则
 
-> 共同修复 ID = D5.2 拼接结果（`源端单据.OrderId + 输入框文本`）；写入主、从两端的 Reference 列。
+> 共同修复 ID = D5.2 拼接结果（**PR-B Q2=a 决策修订**：`源端单据.reconId + 输入框文本`）；写入主、从两端的 Reference 列。
+
+> **PR-B Round 3 决策修订（2026-05-09，Decision 1）**：mode='both' 时 1v多 / 多v1 的 Type 规则修订：
+> - **1v多（RB4）修订**：主从都 Type=`0`（原 RB4：主 `0` / 从 `2` → 改为：**主 `0` / 从 `0`**）
+> - 多v1（RB2）保持原规则（主 `2` / 从 `0`）
+> - 1v1（RB1）保持原规则（双 Type=`0`）
+> 业务依据：用户重新审视后，1v多 场景下从边多张单据每张都是"独立小单据"，应独立标记 Type=0；只有 多v1 场景下主边多张单据是"被聚合到一张从单"才写 Type=2。
+> 注意：**mode='main' / mode='opp' 单边修复的 R1-R7 规则不变**（仅 mode='both' 受影响）。
 
 | 规则号 | 匹配模式 | 主边 | 从边 | 备注 |
 |---|---|---|---|---|
-| RB1 | 1v1 | Type=`0` / Reference=共同 ID | Type=`0` / Reference=共同 ID | 双向写 |
-| RB2 | 多v1 | Type=`2` / Reference=共同 ID | Type=`0` / Reference=共同 ID | 多边写 2，单边写 0 |
-| RB3 | 1v1 | Type=`0` / Reference=共同 ID | Type=`0` / Reference=共同 ID | 同 RB1（用户原文区分主、从触发；执行结果对称，保留语义） |
-| RB4 | 1v多 | Type=`0` / Reference=共同 ID | Type=`2` / Reference=共同 ID | 反向多边 |
+| RB1 | 1v1 | Type=`0` / Reference=共同 ID（主.reconId + suffix） | Type=`0` / Reference=共同 ID | 双向写 |
+| RB2 | 多v1（Round 4：subset-sum 主子集） | Type=`2` / Reference=共同 ID（主代表行.reconId + suffix） | Type=`0` / Reference=共同 ID | 多主聚合到 1 从，主写 2 / 从写 0；多解 tieBreak 后命中的主子集都写 Type=2 |
+| RB3 | 1v1 | Type=`0` / Reference=共同 ID（commonId.source 决定取主或从 reconId） | Type=`0` / Reference=共同 ID | 同 RB1（用户原文区分主、从触发；执行结果对称，保留语义） |
+| RB4 | 1v多（Round 4：subset-sum 从子集） | Type=`0` / Reference=共同 ID（主.reconId + suffix） | **Type=`0`（Round 3 修订）** / Reference=共同 ID | 1 主对 N 从：主从都 Type=0；subset-sum 多解 tieBreak 后命中的从子集都写 Type=0（修订前为主 0/从 2） |
 | RB5 | + SubBizType 取值 | 同 R5/R6/R7 | 同 R5/R6/R7 | 复用主从单边的 SubBizType 路径 |
 
 > 实施时 RB1/RB3 合并实现，差异仅在"哪边触发对账成立的扫描方向"。
@@ -194,11 +236,15 @@
 
 ### D9 — 输出文件
 
-- 文件名：`单据对账修复-YYYYMMDDHHmm-{场景名}.xlsx`（参考 v2.0.0-beta.3 `银行对账单-YYYYMMDDHHmm-处理结果.xlsx` 命名规则；含场景名因为本模块每次只跑 1 个场景，无 first-match-wins）
-- 输出 sheet 名：「订单修复」（与样例 sheet 名一致）
+- 主文件名：`单据对账修复-YYYYMMDDHHmm-{场景名}.xlsx`（参考 v2.0.0-beta.3 `银行对账单-YYYYMMDDHHmm-处理结果.xlsx` 命名规则；含场景名因为本模块每次只跑 1 个场景，无 first-match-wins）
+- unmatched 文件名（**Round 5 P3-A/P3-B 修订**，2026-05-09）：
+  - fixedRows 空 + unmatched 非空：用户选什么名就写什么名（saveDialog 默认 `单据对账修复-未匹配-YYYYMMDDHHmm-{场景名}.xlsx`）
+  - fixedRows 非空 + unmatched 非空：联动主名 `{用户主文件 stem}-未匹配.xlsx`，同目录
+  - 详见 §七.3.5
+- 输出 sheet 名：「订单修复」（主）/「未匹配单据」（unmatched）
 - 输出列：A~O 共 15 列 = 「订单修复」sheet 表头（v2.0.0-beta.3 已确认列表，复用即可）
 - 路径：`~/Documents/网银账单生成小助手/recon-id-fix/{date}/`（用户另存为可改）
-- saveDialog 模式（用户另存为）；空命中场景 → 弹"无修改记录"提示，不生成文件
+- saveDialog 模式（用户另存为）；fixedRows + unmatched 都空 → status='empty' 不弹 saveDialog
 
 <!-- 2026-04-30 决策回写：Q4=部分采纳（单场景模式确认 + 主页面新增场景下拉）-->
 ### D10 — 跑场景的并发模型 + 主页面场景选择下拉（Q4=部分采纳，2026-04-30）
@@ -387,49 +433,77 @@
 - `fixedRows`：每条 = 完成 7+5 规则赋值后的"准备写入「订单修复」"的对象（A~O 列已填）
 - `warnings`：配对失败、对账结果 sheet 查 SubBizType 失败、SubBizType 已有值被覆盖等
 
-#### 7.3.1 算法主流程（伪代码）
+#### 7.3.1 算法主流程（**PR-B Round 4 subset-sum 重构，2026-05-09**）
+
+> Round 4 修订（用户测试反馈）：Round 3 池子算法是"逐行 Amount 全等"过滤，严重漏配。
+> Round 4 把 Step 3.x / 3'.x 改为 **subset-sum**——多笔小金额拼出大金额的会计对账常见做法。
+> 5 阶段步骤不变（Step 1 / 2 / 3.1 / 3.2 / 3'.1 / 3'.2），仅 Step 3.x / 3'.x 内部改 subset-sum 语义。
 
 ```
 function runC4Scenario(scenario, sheets):
     cfg = scenario.config
-    matchRules = cfg.matchRules   // {oneToOne, oneToMany, manyToOne}
-    billTypes = cfg.billTypes     // [ {seq, side, conditions: [{field, op, value}]} ]
-    reconFields = cfg.reconFields // [ {seq, leftTypeSeq, leftField, rightTypeSeq, rightField} ]
-    output = cfg.output           // {mode: 'main'|'opp'|'both', commonId?, subBizType: {...}}
+    matchRules = cfg.matchRules     // {oneToOne, oneToMany, manyToOne}
+    billTypes = cfg.billTypes
+    reconGroups = cfg.reconGroups   // 含锁定 Amount 字段对的分组列表
+    output = cfg.output
 
-    // 1. 按 billTypes 给主从边分类
+    // 1. billTypes 分类（不变）
     classifyBySide('main', sheets.businessBills, billTypes)
-    classifyBySide('opp',  sheets.opponentBills,  billTypes)
+    classifyBySide('opp',  sheets.opponentBills, billTypes)
 
     fixedRows = []
     warnings = []
+    pairedLeft = Set()       // 已配主行 _rowIdx 集合（跨 group 共享）
+    pairedRight = Set()
+    unmatchedReasons = Map() // _rowIdx → { side, reason }（见 §七.3.5）
 
-    // 2. 遍历每个主边账单类型与每个从边账单类型对（按 reconFields 序号关联）
-    for typePair in distinctPairs(reconFields):
-        leftRows  = sheets.businessBills.filter(r => r._types.has(typePair.leftTypeSeq))
-        rightRows = sheets.opponentBills.filter(r => r._types.has(typePair.rightTypeSeq))
-        leftReconFields  = reconFields.filter(rf => rf.leftTypeSeq === typePair.leftTypeSeq)
-        rightReconFields = leftReconFields  // 同序号一组 AND；不同序号已分到不同 typePair
+    for grp in reconGroups:
+        leftRows  = mainTyped.filter(r => r._types.has(grp.leftTypeSeq))
+        rightRows = oppTyped.filter (r => r._types.has(grp.rightTypeSeq))
 
-        // 3. 三阶尝试：先 1v1 → 失败按勾选回退到 1v多 / 多v1
-        for leftRow in leftRows:
-            matched = rightRows.filter(r => andEquals(leftRow, r, leftReconFields))
-            if matchRules.oneToOne and matched.length === 1:
-                applyAssignment_1v1(leftRow, matched[0], scenario, output, sheets.reconResult, fixedRows, warnings)
-                continue
-            if matchRules.oneToMany and matched.length > 1:
-                applyAssignment_1vN(leftRow, matched, scenario, output, sheets.reconResult, fixedRows, warnings)
-                continue
-            // 多v1：反向找
-            if matchRules.manyToOne:
-                for r in rightRows:
-                    leftCandidates = leftRows.filter(l => andEquals(l, r, leftReconFields))
-                    if leftCandidates.length > 1:
-                        applyAssignment_Nv1(leftCandidates, r, scenario, output, sheets.reconResult, fixedRows, warnings)
-            // 都不命中：warnings.push(...)，row 不进 fixedRows
+        // ------- Step 1：同 BillDate + 全部对账字段 AND 全等的 1v1 严格匹配 -------
+        if matchRules.oneToOne:
+            tryOneToOneStrict(leftRows, rightRows, grp.fieldPairs, billDateMode='strict', ...)
 
-    return { fixedRows, warnings }
+        // ------- Step 2：BillDate ± 1 day 容错 + 全部对账字段 AND 全等的 1v1 -------
+        if matchRules.oneToOne:
+            tryOneToOneStrict(leftRows, rightRows, grp.fieldPairs, billDateMode='±1day', ...)
+
+        // ------- Step 3 池子分流（按勾选；Round 4 subset-sum）-------
+        if matchRules.oneToMany:
+            // Step 3.1：剩余主+从池子，同 BillDate + 除 Amount 外其他对账字段 AND 全等过滤
+            //          + subset-sum(候选从.Amount) === 主.Amount 找子集（size ≥ 2）；多解走 tieBreak
+            tryOneToManyPool(leftRows, rightRows, grp.fieldPairs, billDateMode='strict', ...)
+            // Step 3.2：剩余主+从池子，BillDate ±1day + 其他对账字段 AND 全等 + subset-sum
+            tryOneToManyPool(leftRows, rightRows, grp.fieldPairs, billDateMode='±1day', ...)
+
+        if matchRules.manyToOne:
+            // Step 3'.1：池子同 BillDate + 其他对账字段 AND 全等 + subset-sum(候选主.Amount) === 从.Amount
+            tryManyToOnePool(leftRows, rightRows, grp.fieldPairs, billDateMode='strict', ...)
+            // Step 3'.2：池子 BillDate ±1day + 其他对账字段 AND 全等 + subset-sum
+            tryManyToOnePool(leftRows, rightRows, grp.fieldPairs, billDateMode='±1day', ...)
+
+    // ------- 跑完所有 group 后，未配的主从行写 unmatchedReasons -------
+    for r in mainTyped:
+        if r._rowIdx not in pairedLeft:
+            unmatchedReasons.set(r._rowIdx, { side: 'main', orderId: r.OrderId, billDate: r.BillDate, amount: r.Amount, reason: deriveReasonFor(r, matchRules) })
+    for r in oppTyped:
+        if r._rowIdx not in pairedRight:
+            unmatchedReasons.set(...)
+
+    return { fixedRows, warnings, unmatchedRows: serialize(unmatchedReasons), stats: ... }
 ```
+
+**关键不变量**（Round 4）：
+1. `pairedLeft` / `pairedRight` 跨 group 共享 — 同行最多被 1 次配对，避免双重命中
+2. 配对内每行 BillDate 仍按 ±1day 范围决定
+3. 池子内（Step 3.x / Step 3'.x）：**除 Amount 外其他对账字段（Currency / BizType / OrderId 等）AND 全等过滤候选**；**Amount 走 subset-sum**
+4. subset 必须 size ≥ 2（1v1 已在 Step 1/2 处理过）
+5. 多解 tieBreak 保证唯一性 — 资金红线必须可重复
+6. 浮点 Amount 必须 ×100 整数化避精度坑
+7. unmatched.xlsx 在算法跑完后导出，由 export IPC 一并返回 mainFilePath + unmatchedFilePath（详见 §九 IPC + §七.3.5）
+
+详细 Step 实现见 §七.3.6（Round 4 重构）。
 
 #### 7.3.2 7 条规则映射函数（主从单边修复）
 
@@ -487,7 +561,7 @@ function computeCommonId(leftRow, rightRow, commonIdCfg):
 
 RB2 (多v1)：多个 leftRow → Type=2；rightRow → Type=0；都用同一 commonId（基于 cfg.commonId.source 取的那一边的代表行）。
 
-RB4 (1v多)：1 个 leftRow → Type=0；多个 rightRow → Type=2；commonId 同上。
+RB4 (1v多)：1 个 leftRow → Type=0；多个 rightRow → **Type=0（PR-B Round 3 修订，2026-05-09，Decision 1）**；commonId 同上。
 
 #### 7.3.4 buildOutputRow
 
@@ -505,6 +579,189 @@ function buildOutputRow(srcRow, overrides):
 ```
 
 > ⚠️ 「业务部门账单」/「对手部门账单」sheet 都有 `BizType` 列（第 15 列）；「订单修复」sheet 没有 BizType 列，只有 SubBizType（第 15 列）。复制时要注意别把 BizType 误写到 SubBizType；srcRow 的 BizType 不进入 output。R5/R6 用 BizType 是用作"反查 reconResult"的输入，不出现在 output。
+
+#### 7.3.5 未匹配 Report 文件（**PR-B Round 3 新增，2026-05-09，Decision 3** — **Round 5 P3-A/P3-B 修订 2026-05-09**）
+
+跑完 Step 1 / Step 2 / Step 3.x（含勾选项 manyToOne 的 Step 3'.x）后，仍未配对的主从行须写入告警 report：
+
+- **文件名规则**（Round 5 P3-A/P3-B 修订）：
+  | 主 fixedRows | unmatched | saveDialog 默认名 | unmatched 实际文件名 |
+  |---|---|---|---|
+  | > 0 | 0 | `单据对账修复-{ts}-{scenarioName}.xlsx` | — |
+  | > 0 | > 0 | `单据对账修复-{ts}-{scenarioName}.xlsx` | `{用户改过的主名 stem}-未匹配.xlsx`（同目录） |
+  | 0 | > 0 | `单据对账修复-未匹配-{ts}-{scenarioName}.xlsx` | 用户选什么名就写什么名 |
+- **修复说明**：
+  - 原行为下"fixedRows 空 + unmatched 非空"时 saveDialog 默认是主名但写出来是另一个固定名 → UX 困惑（P3-A）
+  - 原行为下 unmatched 总是 `单据对账修复-未匹配-...` 固定名，不联动用户改的主名 → 用户改主名为 `4月对账.xlsx` 时 unmatched 仍是 `单据对账修复-未匹配-...`，配对感弱（P3-B）
+- **路径**：与主文件同目录（用户在 saveDialog 选定的目录）
+- **sheet 名**：`未匹配单据`
+- **6 列表头**：
+  | 列序 | 列名 | 含义 |
+  |---|---|---|
+  | 1 | 场景名 | scenario.name |
+  | 2 | 单据来源 | `主` 或 `从`（不写英文） |
+  | 3 | OrderId | 主从单据的 OrderId |
+  | 4 | BillDate | 主从单据的 BillDate |
+  | 5 | Amount | 主从单据的 Amount |
+  | 6 | 未配原因 | 枚举字符串（见下） |
+- **未配原因枚举**：
+  - `'1v1 严格 BillDate 未匹配'` — 进入 Step 1 但未配；用户未勾 oneToMany / manyToOne 时本行为未配（同 Step 1 失败）
+  - `'1v1 BillDate ±1day 未匹配'` — 进入 Step 2 但未配；未勾 oneToMany / manyToOne 时本行为未配（同 Step 2 失败）
+  - `'池子内 BillDate 未匹配'` — 进入 Step 3.1 / Step 3'.1 但池子内同日 + Amount 没找到候选
+  - `'池子内 BillDate ±1day 未匹配'` — 进入 Step 3.2 / Step 3'.2 但池子内 ±1day + Amount 没找到候选
+  - `'未勾 1v多/多v1，跳过'` — 用户场景仅勾 oneToOne 时，Step 1+2 失败的行直接走此原因（不进 Step 3.x）
+- **导出语义**（Round 5 P3-A/P3-B 修订）：
+  - 与主修复文件**一并导出**，由 `recon-id-fix:export` IPC 一次返回 `mainFilePath + unmatchedFilePath`
+  - 主文件空命中（fixedRows.length=0）但 unmatchedRows 非空 → 弹 saveDialog（默认 unmatched 名）；**用户选定路径直接作为 unmatched 文件路径**（mainFilePath null）
+  - 主文件 + unmatched 都空 → 直接 status='empty'，不弹 saveDialog，不生成任何文件
+  - 主文件非空 + unmatched 空 → 仅写主文件（与原行为一致）
+  - 主文件 + unmatched 都非空 → 弹 saveDialog（默认主名），用户选定路径作主文件，**unmatched 文件名联动主文件 basename**（`{用户改过的主名 stem}-未匹配.xlsx`，同目录）
+  - 表头字号 10pt（applyHeaderRowFont 与其他 writer 一致）
+
+#### 7.3.6 Step 1 / Step 2 / Step 3 实现细节（**PR-B Round 4 subset-sum 重构 + Round 5 Step 2 多候选 tie-break**）
+
+> Round 5 微调（2026-05-09）：Step 2 ±1day 容错的 1v1 配对，多候选时不再"恰好 1 个候选"才命中，而是按 tie-break 挑 1 个最优做 1v1（含双向一致性校验）。
+> Step 1 严格相等行为不变。详见 spec §五.2.3。
+
+```
+function tryOneToOne(leftRows, rightRows, fieldPairs, billDateMode, ...):
+    for leftRow in leftRows:
+        if pairedLeft.has(leftRow._rowIdx): continue
+        // 候选从行：BillDate 按 mode 比较 + 全部 fieldPairs（含 Amount 锁定）AND 全等
+        candidates = rightRows.filter(r => !pairedRight.has(r._rowIdx)
+          && billDateMatches(leftRow.BillDate, r.BillDate, billDateMode)
+          && allFieldPairsEqual(leftRow, r, fieldPairs))
+
+        if billDateMode === 'strict':
+            // Step 1：保持原行为，必须恰好 1 个候选
+            if candidates.length !== 1: continue
+            rightRow = candidates[0]
+            // 反向校验：右行回看左侧空闲行的匹配数 = 1，确认 1v1
+            reverse = leftRows.filter(l => !pairedLeft.has(l._rowIdx)
+              && billDateMatches(l.BillDate, rightRow.BillDate, billDateMode)
+              && allFieldPairsEqual(l, rightRow, fieldPairs))
+            if reverse.length !== 1: continue
+            pairedLeft.add(leftRow._rowIdx); pairedRight.add(rightRow._rowIdx)
+            apply1v1Assignment(leftRow, rightRow, ...)
+        else:  // billDateMode === '±1day'，Round 5 微调
+            if candidates.length === 0: continue
+            // tie-break 挑 1 个最优：dist → idx 字典序
+            bestRight = pickBestByTieBreak(leftRow, candidates)
+            // 双向一致性校验：bestRight 反查 leftRows，按同 tie-break 选回的主单必须 == 当前 leftRow
+            reverseCandidates = leftRows.filter(l => !pairedLeft.has(l._rowIdx)
+              && billDateMatches(l.BillDate, bestRight.BillDate, billDateMode)
+              && allFieldPairsEqual(l, bestRight, fieldPairs))
+            if reverseCandidates.length === 0: continue
+            bestLeftFromReverse = pickBestByTieBreak(bestRight, reverseCandidates)
+            if bestLeftFromReverse._rowIdx !== leftRow._rowIdx: continue  // 让位避免抢配冲突
+            pairedLeft.add(leftRow._rowIdx); pairedRight.add(bestRight._rowIdx)
+            apply1v1Assignment(leftRow, bestRight, ...)
+
+// Round 5：tie-break 多候选挑 1 个最优
+//   排序顺序：|参考.BillDate - 候选.BillDate| 最小 → 候选 _rowIdx 字典序最小
+function pickBestByTieBreak(referenceRow, candidates):
+    if candidates.length === 0: return null
+    if candidates.length === 1: return candidates[0]
+    score each candidate:
+        - dist = |refMs - candMs|（refMs/candMs 解析失败 → Infinity）
+        - idx = candidate._rowIdx 字符串
+    sort ascending by (dist, idx)
+    return candidates[0]
+
+function tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode, ...):
+    // Round 4 subset-sum 语义（替换 Round 3 单字段 Amount 全等）：
+    //   候选过滤：BillDate（按 mode）+ 除 Amount 外其他对账字段 AND 全等
+    //   subset-sum：候选 Amount 整数化（×100），DFS + 升序剪枝；subset 必须 size ≥ 2
+    //   多解 tieBreak：spread → distToMain → size → firstIdx 字典序
+    amountFieldPair = findAmountLockedPair(grp.fieldPairs)
+    if !amountFieldPair: return  // 防御：dialog 强制 Amount 锁定
+    otherFieldPairs = grp.fieldPairs.filter(fp => not (fp.leftField === 'Amount' && fp.rightField === 'Amount'))
+    for leftRow in leftRows:
+        if pairedLeft.has(leftRow._rowIdx): continue
+        // 候选过滤：除 Amount 外其他对账字段全等
+        candidates = rightRows.filter(r => !pairedRight.has(r._rowIdx)
+          && billDateMatches(leftRow.BillDate, r.BillDate, billDateMode)
+          && rowsMatchOtherFieldPairs(leftRow, r, otherFieldPairs))
+        if candidates.length < 2: continue                            // 候选不足 2 → 不可能 1v多
+        targetCents = toCents(leftRow.Amount)
+        if targetCents === null: continue                             // Amount 解析失败
+        candidatesWithCents = candidates.map(r => { row: r, cents: toCents(r.Amount) }).filter(c => c.cents !== null)
+        subsets = enumerateAmountSubsets(candidatesWithCents, targetCents, maxSize=8)
+        if subsets.length === 0: continue                             // 无解 → 进 unmatched
+        chosen = subsets.length === 1 ? subsets[0] : tieBreakSubsets(subsets, leftRow.BillDate)
+        if chosen.length < 2: continue                                // 兜底：subset 必须 size ≥ 2
+        pairedLeft.add(leftRow._rowIdx); chosen.forEach(r => pairedRight.add(r._rowIdx))
+        apply1vNAssignment(leftRow, chosen, ...)
+
+function tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode, ...):  // 对称
+    // 同 tryOneToManyPool，但 subset-sum 是从主单候选拼出从.Amount
+
+function billDateMatches(leftDate, rightDate, mode):
+    if mode === 'strict': return normalize(leftDate) === normalize(rightDate)
+    // ±1day 容错：主单 D vs 从单 D-1 / D / D+1 任一相等即匹配
+    leftStr = normalize(leftDate)
+    rightStr = normalize(rightDate)
+    if leftStr === rightStr: return true
+    leftDateObj = parseDate(leftStr); if (!leftDateObj) return false
+    rightDateObj = parseDate(rightStr); if (!rightDateObj) return false
+    diffMs = Math.abs(leftDateObj - rightDateObj)
+    return diffMs === 86400 * 1000   // 1 day
+
+// Round 4：金额转整数分（避浮点 0.1+0.2!=0.3 精度坑）
+function toCents(amount):
+    if amount === null/undefined/'': return null
+    n = Number(String(amount).trim()); if not Number.isFinite(n): return null
+    return Math.round(n * 100)
+
+// Round 4：subset-sum 枚举（DFS + 升序剪枝）
+function enumerateAmountSubsets(candidates, targetCents, maxSize=8, maxSolutions=64):
+    if len(candidates) < 2 or targetCents <= 0: return []
+    sort candidates ascending by cents
+    solutions = []; path = []
+    function dfs(startIdx, remaining, depth):
+        if len(solutions) >= maxSolutions: return
+        if remaining === 0 && depth >= 2: solutions.push(path.slice()); return  // size >= 2
+        if depth >= maxSize: return
+        for i from startIdx to len(candidates)-1:
+            if candidates[i].cents > remaining: break       // 升序剪枝
+            path.push(candidates[i])
+            dfs(i+1, remaining - candidates[i].cents, depth+1)
+            path.pop()
+    dfs(0, targetCents, 0)
+    return solutions
+
+// Round 4：tieBreak 多解唯一性
+function tieBreakSubsets(subsets, mainBillDate):
+    if subsets.length === 1: return subsets[0]
+    score each subset:
+      - spread = max(subset.BillDate ms) - min(subset.BillDate ms)
+      - distToMain = min(|mainBillDate ms - r.BillDate ms| for r in subset)
+      - size = subset.length
+      - firstIdx = subset.map(r => r._rowIdx).sort()[0]
+    sort subsets ascending by (spread, distToMain, size, firstIdx)
+    return subsets[0]
+```
+
+**Round 4 算法不变量**：
+1. 池子内每行 BillDate 仍按 ±1day 范围（与 Step 1+2 一致）
+2. **其他对账字段（Currency / BizType / OrderId）走 AND 全等过滤候选；只有 Amount 走 subset-sum**
+3. subset 必须 size ≥ 2（1 vs 1 已在 Step 1/2 处理过；池子里跳过单元素子集）
+4. 多解 tieBreak 保证唯一性，避免每次跑出不同结果（资金红线）
+5. 浮点精度 ×100 整数化是必须的：`0.1 + 0.2 = 0.30000000000000004 ≠ 0.3` 经典坑会让对账失败
+
+**未配原因 deriveReasonFor(row, matchRules)**：
+```
+function deriveReasonFor(row, matchRules):
+    // row 未在任一 step 配上时调用
+    // 取该行最后一次"进入候选池但未配"的 step
+    if row 在 Step 3.2 / Step 3'.2 仍未配 (因为 Step 3.x 都试过) → '池子内 BillDate ±1day 未匹配'
+    elif row 在 Step 3.1 / Step 3'.1 试过未配 → '池子内 BillDate 未匹配'
+    elif !matchRules.oneToMany && !matchRules.manyToOne → '未勾 1v多/多v1，跳过'
+    elif row 在 Step 2 试过未配 → '1v1 BillDate ±1day 未匹配'
+    else → '1v1 严格 BillDate 未匹配'
+```
+
+实现可用 `unmatchedReasonByRow`（`Map<_rowIdx, 'last-step-tried'>`）跟踪每行最后到达的 step，避免重复推断。
 
 <!-- 2026-04-30 决策回写：Q3=C（颜色冲突取"有数据 cell"的最高频色）-->
 ### 7.4 识读规律算法（PR-C）
@@ -569,7 +826,11 @@ function inferRules(sampleFile):
 - 迁移期间不破坏 UNIQUE(name) 约束
 - `scenarios-repository.js: VALID_CATEGORIES` 同步追加 `'recon-id-fix'`
 
-### 8.2 C4 场景 config_json 结构
+### 8.2 C4 场景 config_json 结构（**PR-B Q1=B 决策修订，2026-04-30**）
+
+> **2026-04-30 修订**：`reconFields[]`（含 seq）→ `reconGroups[]`（每组自带 leftTypeSeq/rightTypeSeq + fieldPairs[]，组内 AND，组间 OR）。
+>   早期 PR-A seq 概念会让用户配 3 个字段对时误打多 seq 形成 OR；新模型默认 AND。
+> DB 迁移：老 reconFields[] 数据由 `migrateC4ReconGroupsStructure(db)` 启动时按 seq 聚合到 reconGroups[]（详见 §spec §二 2.5）。
 
 ```json
 {
@@ -594,20 +855,14 @@ function inferRules(sampleFile):
       ]
     }
   ],
-  "reconFields": [
+  "reconGroups": [
     {
-      "seq": 1,
       "leftTypeSeq": 1,
-      "leftField": "Currency",
       "rightTypeSeq": 2,
-      "rightField": "Currency"
-    },
-    {
-      "seq": 2,
-      "leftTypeSeq": 1,
-      "leftField": "Amount",
-      "rightTypeSeq": 2,
-      "rightField": "Amount"
+      "fieldPairs": [
+        { "leftField": "Amount", "rightField": "Amount", "locked": true },
+        { "leftField": "Currency", "rightField": "Currency" }
+      ]
     }
   ],
   "output": {
@@ -629,8 +884,11 @@ function inferRules(sampleFile):
 - `matchRules`：3 个 boolean，至少 1 个 true
 - `billTypes[i].side`：`'main'` / `'opp'`
 - `billTypes[i].conditions[j].op`：复用 v2.0.0-beta.3 7 个 op 枚举
+- `reconGroups[i].leftTypeSeq` / `rightTypeSeq`：必须分别指向 main / opp 的 billType seq
+- `reconGroups[i].fieldPairs`：组内 AND（≥ 1 行），多组之间 OR
+- `reconGroups[i].fieldPairs[j].locked`：可选 boolean；`true` 表示该 fieldPair 不可编辑/不可删除（仅 Amount/Amount 锁定行用）；migration 兼容老数据时自动给 Amount/Amount 行补 `locked: true`，否则在 group 头部插一条新的 Amount 锁定行（PR-B Round 3，2026-05-09）
 - `output.mode`：`'main'` / `'opp'` / `'both'`
-- `output.commonId`（仅 mode='both' 用）：`source ∈ {'main', 'opp'}`，`suffix` 字符串
+- `output.commonId`（仅 mode='both' 用）：`source ∈ {'main', 'opp'}`，`suffix` 字符串；**基础部分取 src.reconId**（PR-B Q2=a 决策）
 - `output.subBizType.mode`：`'auto'`（R5/R6 自动查）/ `'manualMain'` / `'manualOpp'` / `'manualBoth'`（兼容用户同时填两个手填框）
 
 ### 8.3 in-memory session（main 进程）
@@ -682,6 +940,7 @@ state.reconIdFixResult = {  // 运行后产生
 > ⚠️ 9/10/15 = 修复方有写入；其余复制源行的同名列。
 > ⚠️ 源行有 BizType（业务类型）但 output 不含 BizType 列；只有用作 R5/R6 查 reconResult 的入参。
 > ⚠️ R5/R6 自动查未命中 → SubBizType 列写空字符串 `''`，该行仍写入 fixedRows（不中断）；warnings 增一条 `code='subBizType-not-found'`。R7 手填路径不受影响（直接覆盖）。
+> ⚠️ **PR-B Q2=a 决策（2026-04-30）**：mode=both 时 Reference 列 = `源端单据.reconId + suffix`（不再是 OrderId）。源端是主或从由 commonId.source 决定。
 
 ---
 
@@ -698,10 +957,16 @@ state.reconIdFixResult = {  // 运行后产生
 | `scenarios:delete` | renderer→main | `{id}` | `{status}` |
 | `scenarios:toggle-enabled` | renderer→main | `{id, enabled}` | `{status}` |
 | **`recon-id-fix:import`** | renderer→main | — | `{status, fileName, sheetCounts: {recon, business, opp}}` |
-| **`recon-id-fix:run`** | renderer→main | `{scenarioId}` | `{status, stats: {fixedRowCount, warningCount}}` |
-| **`recon-id-fix:export`** | renderer→main | `{savePath?}` | `{status, mainFilePath, errorReportPath?}` |
+| **`recon-id-fix:run`** | renderer→main | `{scenarioId}` | `{status, stats: {fixedRowCount, warningCount, unmatchedRowCount, mainRowsTouched, oppRowsTouched}}` |
+| **`recon-id-fix:export`** | renderer→main | `{savePath?}` | `{status, mainFilePath?, mainFileName?, unmatchedFilePath?, unmatchedFileName?, rowCount, unmatchedCount}` |
 | **`recon-id-fix:session-status`** | renderer→main | — | `{hasFile, hasResult, ...}` |
 | **`recon-id-fix:infer-rules`** | renderer→main | `{sampleFilePath}` | `{status, billTypes: [...], reconFields: [...]}` |
+
+> **PR-B Round 3 修订（2026-05-09，Decision 3）**：
+> - `recon-id-fix:run` 返回 `stats.unmatchedRowCount` —— 用于 statusBox 文案"运行完成；命中 N 行修复 / M 行未匹配"
+> - `recon-id-fix:export` 返回 `mainFilePath` + `unmatchedFilePath`（双文件）；前端可选择只看主文件 / 看告警文件
+> - 主文件空命中（fixedRows.length=0）但 unmatched 非空 → 仍写 unmatched 文件；mainFilePath 为 null
+> - 主+unmatched 都空 → status='empty'，不弹 saveDialog
 
 ---
 
@@ -715,6 +980,14 @@ state.reconIdFixResult = {  // 运行后产生
 | **多v1 / 1v多 时 Reference 写错单据** | 资金红线 | applyAssignment_NvN 必须严格区分"被聚合方" vs "聚合源"；单测覆盖正反向 |
 | **共同修复 ID 拼接错位**（取主边但应取从边的 OrderId） | 资金红线 | computeCommonId 单测；C4 配置弹窗 commonId.source 默认值要明示 |
 | **场景配置变更后旧 result 被导出** | 资金红线 | 复用 v2.0.0-beta.3 PR #33 round 2/3 的 snapshot 双层防御：scenarios:* IPC 入口主动清（**PR #35 round 3 P2 修订**：按 category 分流——C1/C2/C3 只清 `processingResult`，C4 只清 `reconIdFixResult`，避免跨模块互抹）+ export 端被动校验 snapshot |
+
+### 10.1.1 ⚠️ BillDate ±1day 容错可能误配（PR-B Round 3 新增，2026-05-09）
+
+| 风险 | 等级 | 缓解 |
+|---|---|---|
+| **±1day 容错可能误配相邻日的相似单据** | 资金红线（高） | 1）Step 1 严格 BillDate 优先，已配的不进 Step 2；2）Step 2 仍要求其他对账字段 AND 全等（非仅 Amount）；3）unmatched.xlsx 全量 dump 让用户校验；4）反向校验 `reverse.length === 1` 防止 N v 多 误配为 1v1 |
+| **池子内 Amount 单一字段对误配重复 Amount 单据** | 资金红线（高） | 1）池子内仍有 BillDate 同日 / ±1day 范围限制；2）pairedLeft/pairedRight 跨 group 共享，避免双重命中；3）unmatched 写明原因 — 用户可手动补 Currency/BizType 字段对升级到 Step 1 范围 |
+| **跨组 OR 时 Step 顺序导致优先 group 抢先吃配对** | 中 | reconGroups 顺序就是用户在 dialog 看到的顺序；用户可调整；smoke 验证 |
 
 ### 10.2 ⚠️ 算法稳定性（识读规律）
 
@@ -765,8 +1038,14 @@ state.reconIdFixResult = {  // 运行后产生
 | P0-1 | 主边 1v1 修复 | 导样例文件 + 配 C4 场景（mode=main, oneToOne）+ 运行 + 导出 | 主边命中行 Type=0 / Reference=对应从边 reconId / SubBizType 按 R5 自动查命中 |
 | P0-2 | 主边 多v1 | mode=main, manyToOne | 多个主边 Reference = 同一从边 reconId / 都是 Type=2 |
 | P0-3 | 从边 1v多 | mode=opp, oneToMany | 多个从边 Reference = 同一主边 reconId / 都是 Type=0 |
-| P0-4 | 主从都修复 1v1 | mode=both, oneToOne, commonId.source=main, suffix='-FIX' | 主从两行 Reference 都 = 主边 OrderId+'-FIX'，Type 都=0 |
-| P0-5 | 主从都修复 多v1 | mode=both, manyToOne, commonId.source=main | 多主边 Type=2 / 1 从边 Type=0 / Reference 全 = 主边代表行 OrderId+suffix |
+| P0-4 | 主从都修复 1v1 | mode=both, oneToOne, commonId.source=main, suffix='-FIX' | 主从两行 Reference 都 = **主边 reconId+'-FIX'**（Q2=a），Type 都=0 |
+| P0-5 | 主从都修复 多v1 | mode=both, manyToOne, commonId.source=main | 多主边 Type=2 / 1 从边 Type=0 / Reference 全 = **主边代表行 reconId+suffix**（Q2=a） |
+| P0-5b | 主从都修复 1v多 | mode=both, oneToMany, commonId.source=main | **主从都 Type=0**（Round 3 修订；原从 Type=2）/ Reference 全 = 主边 reconId+suffix |
+| P0-5c | 算法 5 阶段 BillDate ±1day | mode=main, oneToOne+oneToMany；M1 04-09 100 + S1 04-08 100（仅 1 个 ±1day 候选）+ M2 04-10 300 + S2 04-10 100 / S3 04-10 200 | 主 M1 与 S1 配对成功（Step 2 1v1 ±1day），剩余主从 M2 + [S2, S3] subset-sum=300 成功（Step 3.1） |
+| P0-5d | 真实 fixture「基金」（Round 4 subset-sum 重新校准） | 用 `/Users/pzhong/Desktop/小助手-Debug/2.0.0/订单枚举表/单据对账导出不平.xlsx` 跑"基金"场景 | Round 4 期望：fixedRowCount = 80 / mainRowsTouched = 30 / oppRowsTouched = 50 / unmatchedRowCount = 0（subset-sum 命中所有 PP 主从）—— 与 Round 3 baseline (28/14/14/52) 不同，因 Round 4 subset-sum 修复了 Round 3 漏配 |
+| P0-5e | unmatched.xlsx 双文件输出 | 跑场景生成主+unmatched | 主目录下生成 `单据对账修复-未匹配-...xlsx`（6 列 + sheet 名"未匹配单据"）|
+| P0-5f | subset-sum 命中（Round 4 用户用例） | mode=opp, oneToMany；主 04-15 USD 270k vs 从 [F1 04-13 70k, F2 04-14 200k, F3 04-14 70k, F4 04-15 70k] | 期望命中 {F2, F3} sum=270k（spread=0d 优于 spread=1d）；F1 04-13 超 ±1day 进 unmatched；F4 因 tieBreak 落选 |
+| P0-5g | subset-sum 多解 tieBreak | 1 主 100 vs 从 [50, 50, 30, 20]（{50,50}=100 / {50,30,20}=100 两解） | 期望选 {50,50}（spread 并列时 size 较小者优先；这里 spread=distToMain 都为 0 ⇒ size 决出胜负） |
 | P0-6 | SubBizType 自动查命中 | output.subBizType.mode=auto | 主边 SubBizType=对账结果."业务部门单据子类型"；从边 SubBizType=对账结果."对手部门单据子类型" |
 | P0-7 | SubBizType 自动查未命中 | output.subBizType.mode=auto，但对账结果 sheet 无对应行 | warnings 含一条；该行进 fixedRows 但 SubBizType='' |
 | P0-8 | SubBizType 手填覆盖 | output.subBizType.mode=manualBoth, mainValue='X', oppValue='Y' | 主边 SubBizType='X'；从边 SubBizType='Y'；不查对账结果 |
@@ -861,15 +1140,54 @@ state.reconIdFixResult = {  // 运行后产生
 - 测试证据：smoke 181/181 PASS（10 套）；含 5 模块切换 / C4 dialog 5 行 / 类别四选一 / 资金红线跨模块互抹反向（T8/T9/T10/T11）/ 老库 3 builtin 无损迁移 / CHECK 约束拦截非法
 - 已知 follow-up：`knowledge/backlog.md` B4（recon-id-fix-scenario-ipc smoke simulator 与真实 main.js 漂移；PR-D e2e 时一并处理）
 
-### PR-B 对账引擎（待启动）
+### PR-B 对账引擎（用户测试中 — Round 4 subset-sum 重构进行）
 
-- 草稿：—
-- 初版：—
-- 最终：—
+- 草稿：—（PR 未提）
+- 初版：工作目录改动 13 task 主体（PR-B Round 1）
+- Round 2：Q1=B（reconGroups）/ Q2=a（commonId 用 reconId）回写 + smoke 232/232
+- **Round 3 决策修订（2026-05-09 — 用户复盘原始需求 5 决策回写）**：
+  - **Decision 1**：mode='both' RB4（1v多）从 主 0/从 2 改为 **主 0/从 0**；mode='main'/'opp' R1-R7 不变
+  - **Decision 2**：算法重构 — "1v1 严格 → 1v1 ±1day → 池子 1v多 同日 → 池子 1v多 ±1day → 池子 多v1 同日 → 池子 多v1 ±1day"5 阶段
+  - **Decision 3**：新增 unmatched.xlsx 告警 report — 6 列 + 文件名 `单据对账修复-未匹配-...xlsx` + recon-id-fix:export 一并返回 mainFilePath + unmatchedFilePath
+  - **Decision 4**：C4 dialog Amount 字段对锁定 — 新增分组默认带 `Amount/Amount` 锁定行，行级 ❌ 删除按钮和字段 select 都 disabled
+  - **Decision 5**：BillDate 字段名（主从 sheet 都叫 `BillDate`）+ 池子语义两阶段（同 BillDate 先、±1day 后）+ Step 2 仍要求其他对账字段 AND 全等
+- **Round 4 决策修订（2026-05-09 — 用户测试发现 Round 3 池子算法语义错位 → 4 决策回写）**：
+  - **Decision 1**：1v多 池子改 subset-sum + 其他对账字段 AND 全等过滤候选
+    - Round 3 错误："逐行 Amount 全等"（候选必须每个都 == 主 Amount），漏配
+    - Round 4 正解：候选 = 池子里满足"BillDate（按 mode）+ 除 Amount 外其他对账字段 AND 全等"的从单；subset-sum(候选.Amount) === 主.Amount 找子集（size ≥ 2）
+  - **Decision 2**：subset-sum 多解 tie-break — `spread → distToMain → size → firstIdx 字典序` 4 阶
+  - **Decision 3**：多v1 池子对称 — subset-sum(候选主.Amount) === 从.Amount + 同 tieBreak
+  - **Decision 4**：Step 3.2（±1day）找不到子集 → 直接进 unmatched，不再退一步
+- **Round 5 决策修订（2026-05-09 — 用户测试 Round 4 时发现 Step 2 多候选直接跳过漏配 → 1 决策回写）**：
+  - **Q1=a**：Step 2 ±1day 多候选时按 tie-break 挑 1 个 1v1 命中（不退到 Step 3 池子）
+    - 用户用例：主 04-28 USD 300000 入账 + 从单池里有 04-27（target）和 04-29 两个候选，Round 4 实现要求"恰好 1 个候选"→ 直接跳过 → 退到 Step 3 池子（subset 必 size ≥ 2，单元素 300k 不命中）→ 全 unmatched
+    - Round 5 解：Step 2（billDateMode='±1day'）多候选时按 tie-break 选 1 个最优（dist → _rowIdx 字典序）+ 双向一致性校验（bestRight 反查 leftRows 必须选回当前 leftRow，否则让位避免主从抢配冲突）
+    - **Step 1（billDateMode='strict'）保持现状**：候选数必须恰好 1 + reverse 也恰好 1（资金红线最严）
+    - 不动 Q2 池子 subset-sum size ≥ 2 / Round 4 全部其他逻辑
+- **PR #36 round 1 P2 修复（2026-04-30 — Codex review）**：≥ 10 候选 tie-break `_rowIdx` 字典序 → 数字部分比较
+  - 详见 `log.md` 2026-04-30 节
+- **PR #36 round 2 P2 修复（2026-04-30 — user 复现）**：subset-sum 全局最优；DFS 全遍历维护 best
+  - **背景**：user 复现：10 个 04-01 候选 + 3 个 04-15 候选 + target=300，旧 `enumerateAmountSubsets`+`tieBreakSubsets` 二段式在 maxSolutions=64 截断后排序，全局最优排在第 N>64 位时被漏选
+  - **修法**：池子算法迁移到新工具函数 `findBestAmountSubset`（DFS 全遍历维护全局 best；不再截断）
+  - **性能**：升序剪枝 + 后缀总和剪枝 + top-k 后缀剪枝 + 启发式提前终止 + hardCeiling=5M 硬上限；n=20 大池子 1.14ms / 次（实测比修前 2.58ms 更快）
+  - **兼容**：`enumerateAmountSubsets` / `tieBreakSubsets` 函数保留（向后兼容 + 单测覆盖），但**池子算法不再调用**
+  - 详见 `log.md` 2026-04-30 round 2 节
+- 最终：—（待用户合并 PR #36 round 2）
 - merge commit：—
-- 改动文件：—
-- 关键决策修订：—
-- 测试证据：—
+- 改动文件：（待 commit 后填）
+- 关键决策修订：Round 3 5 决策 + Round 4 4 决策 + 工作目录所有 PR-B 改动
+- 测试证据：
+  - Round 4：smoke 254/254 PASS（Round 3 baseline 247 + Round 4 新增 7 用例：subset-sum helpers + 用户用例 + 多解 tieBreak + 浮点精度 + 大候选集性能 + 多v1 对称 + 找不到子集）；用户用例验证：主 04-15 USD 270k + 从 [F1 04-13 70k, F2 04-14 200k, F3 04-14 70k, F4 04-15 70k] → 命中 {F2, F3}（与用户预期一致，spread=0d 优于其他解）
+  - Round 5：smoke 260/260 PASS（Round 4 baseline 254 + Round 5 新增 6 用例：pickBestByTieBreak helpers + Step 2 dist tie-break + Step 2 idx tie-break + 反向不一致让位 + Step 1 严格不变 + Step 2 单候选不变）；用户用例验证（FX 中台入金 fixture）：主 FTA202604280200028（04-28, USD 300k, 入账）+ 从池里 04-27 target + 04-29 decoy → 命中 04-27 target，Reference=`PP_20260428020000_USD_HK0000720752_001`；FX fixture 全量：fixedRowCount=96 / mainTouched=36 / oppTouched=60 / unmatched=18；基金 fixture 回归：fixedRowCount=80 / mainTouched=30 / oppTouched=50 / unmatched=0（与 Round 4 baseline 一致，无退步）
+  - PR #36 round 1 P2 修复：smoke 262/262 PASS（260 + 2 新增）；详见 log.md
+  - **PR #36 round 2 P2 修复**：smoke **266/266 PASS**（262 + 4 新增）；user 复现用例验证 — 修前选 3 个 04-01 子集（次优），修后选 3 个 04-15 子集（spread=0+distToMain=0 全局最优）；fixture 回归（修前修后数字一致）：FX fixture × FX 入账 fixedRowCount=113 / mainTouched=44 / oppTouched=69 / unmatched=25 / warnings=0；性能：n=20 大池子 1.14ms（旧实现 2.58ms）；用户用例 FTA202604280200028 ↔ 202604271439325696974017228 双双命中并共享 commonId
+- **PR #36 self-review round 5 修复（2026-05-09 — 3 个 P3 finding）**：
+  - **P3-A（saveDialog UX 一致性）**：原行为下"fixedRows 空 + unmatched 非空"时 saveDialog 默认是主名，但实际写出来是固定 unmatched 名（`单据对账修复-未匹配-...`），导致用户选 A.xlsx 但桌面是另一个名字 → UX 困惑。修法：fixedRows 空 + unmatched 非空时 saveDialog 默认名直接用 unmatched 名，用户选定路径就用作 unmatched 文件路径（"用户选什么 = 实际写什么"）
+  - **P3-B（unmatched 文件名联动主名）**：原行为下 unmatched 总是 `单据对账修复-未匹配-{ts}-{name}.xlsx` 固定名，不联动用户改过的主名。修法：fixedRows + unmatched 都非空时，unmatched 文件名 = `{用户改过的主名 stem}-未匹配.xlsx`，同目录（`myreport.xlsx` → `myreport-未匹配.xlsx`）
+  - **P3-C（buildReconIdFixSnapshot 用 stableJsonStringify）**：原 `JSON.stringify(scenario.config || {})` 按 object 属性插入顺序输出，同语义 config 在 SQLite round-trip / repository 重写后 key 顺序变化会让 snapshot 字符串不同 → run 时落的 scenariosSnapshot 与 export 时重算的不一致 → 误判 stale-snapshot 拒导出。修法：加 stableJsonStringify（递归按 key 排序）helper，buildReconIdFixSnapshot 改用它（资金红线下游降级保险保留）
+  - 改动文件：`src/main.js`（buildReconIdFixSnapshot + stableJsonStringify + recon-id-fix:export handler 默认名分支 + unmatched 文件名联动）+ `src/main-process/recon-id-fix-io.js`（buildUnmatchedReportFileName 加可选第 3 参 mainFileBaseName）+ `scripts/smoke/recon-id-fix-ipc-handlers.js`（更新 simulator + T16/T17 改造 + 新增 T18/T19/T20）+ `scripts/smoke/recon-id-fix-io.js`（新增 R13）
+  - smoke：**272/272 PASS**（266 baseline + 6 新增/改造：T18 P3-A 默认名 + T19 P3-B 联动 + T20 P3-C 同语义同 snapshot + R13 联动签名 + T16/T17 行为 P3-A/P3-B 校准）
+  - 回归不变：用户用例 FTA202604280200028 ↔ 202604271439325696974017228 命中 ✓ / 基金 fixture 80/30/50/0 ✓ / FX 中台入金 fixture 96/36/60/18 ✓ / 资金红线 stale-snapshot smoke T12/T13 通过 ✓ / subset-sum tie-break 4 阶完整 ✓
 
 ### PR-C 识读规律（待启动）
 

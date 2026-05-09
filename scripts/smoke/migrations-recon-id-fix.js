@@ -9,10 +9,13 @@ const assert = require('node:assert/strict');
 const { DatabaseSync } = require('node:sqlite');
 
 const {
-  ensureScenariosCategoryReconIdFix
+  ensureScenariosCategoryReconIdFix,
+  migrateC4ReconGroupsStructure,
+  migrateC4ReconGroupsAmountLockedFieldPair
 } = require('../../src/backend/database/migrations');
 const {
   createScenario,
+  getScenario,
   listScenarios,
   VALID_CATEGORIES
 } = require('../../src/backend/database/scenarios-repository');
@@ -226,7 +229,269 @@ function runMigrationsReconIdFixSmokeTests() {
     );
   }
 
-  console.log('  migrations-recon-id-fix: 6/6 PASS');
+  // ===== G1：v2.1.0-beta.1 PR-B（Q1=B）— migrateC4ReconGroupsStructure 把
+  //   老 C4 reconFields[] 结构迁移到 reconGroups[]（按 seq 聚合）
+  {
+    const db = setupNewSchemaDb();
+    // 写一个 v2.1.0-beta.1 PR-A 老格式的 C4 场景：reconFields[] 含 3 条（同 seq AND，不同 seq OR）
+    const oldConfig = {
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      billTypes: [
+        { seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: 'biz' }] },
+        { seq: 2, side: 'opp', conditions: [{ field: 'BillType', op: '等于', value: 'biz' }] }
+      ],
+      reconFields: [
+        { seq: 1, leftTypeSeq: 1, leftField: 'Currency', rightTypeSeq: 2, rightField: 'Currency' },
+        { seq: 1, leftTypeSeq: 1, leftField: 'Amount', rightTypeSeq: 2, rightField: 'Amount' },
+        { seq: 2, leftTypeSeq: 1, leftField: 'BizType', rightTypeSeq: 2, rightField: 'BizType' }
+      ],
+      output: { mode: 'main', commonId: null, subBizType: { mode: 'auto' } }
+    };
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(1, 'recon-id-fix', 'G1-old-cfg', 0, 1, JSON.stringify(oldConfig), 0, now, now);
+
+    // 跑迁移
+    migrateC4ReconGroupsStructure(db);
+
+    // 验证：reconFields 已删除，reconGroups[] 出现 + 按 seq 正确聚合
+    const after = getScenario(db, 1);
+    assert.ok(after, 'G1 行仍存在');
+    assert.ok(!('reconFields' in after.config), 'G1 reconFields 字段已删除');
+    assert.ok(Array.isArray(after.config.reconGroups), 'G1 reconGroups 是数组');
+    assert.strictEqual(after.config.reconGroups.length, 2, 'G1 2 组（按 seq 1 / 2 分组）');
+    // 第一组：同 seq=1 两条 → fieldPairs 2 条
+    const grp1 = after.config.reconGroups[0];
+    assert.strictEqual(grp1.leftTypeSeq, 1, 'G1 第 1 组 leftTypeSeq=1');
+    assert.strictEqual(grp1.rightTypeSeq, 2, 'G1 第 1 组 rightTypeSeq=2');
+    assert.strictEqual(grp1.fieldPairs.length, 2, 'G1 第 1 组 fieldPairs 2 条（AND）');
+    assert.strictEqual(grp1.fieldPairs[0].leftField, 'Currency', 'G1 第 1 组第 1 对左字段');
+    assert.strictEqual(grp1.fieldPairs[1].leftField, 'Amount', 'G1 第 1 组第 2 对左字段');
+    // 第二组：seq=2 一条
+    const grp2 = after.config.reconGroups[1];
+    assert.strictEqual(grp2.fieldPairs.length, 1, 'G1 第 2 组 fieldPairs 1 条');
+    assert.strictEqual(grp2.fieldPairs[0].leftField, 'BizType', 'G1 第 2 组左字段');
+    // 其他 config 字段不动
+    assert.strictEqual(after.config.matchRules.oneToOne, true, 'G1 matchRules 不被破坏');
+    assert.strictEqual(after.config.billTypes.length, 2, 'G1 billTypes 不被破坏');
+  }
+
+  // ===== G2：幂等三连（已是 reconGroups 的库）— migrateC4ReconGroupsStructure 跑 3 次行为不变
+  {
+    const db = setupNewSchemaDb();
+    const newConfig = {
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      billTypes: [
+        { seq: 1, side: 'main', conditions: [{ field: 'X', op: '等于', value: '1' }] },
+        { seq: 2, side: 'opp', conditions: [{ field: 'Y', op: '等于', value: '2' }] }
+      ],
+      reconGroups: [
+        { leftTypeSeq: 1, rightTypeSeq: 2, fieldPairs: [{ leftField: 'A', rightField: 'B' }, { leftField: 'C', rightField: 'D' }] }
+      ],
+      output: { mode: 'main', commonId: null, subBizType: { mode: 'auto' } }
+    };
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(1, 'recon-id-fix', 'G2-new-cfg', 0, 1, JSON.stringify(newConfig), 0, now, now);
+
+    const before = getScenario(db, 1);
+    migrateC4ReconGroupsStructure(db);
+    migrateC4ReconGroupsStructure(db);
+    migrateC4ReconGroupsStructure(db);
+    const after = getScenario(db, 1);
+    // 三连后结构与 before 一致（深比较）
+    assert.deepStrictEqual(after.config.reconGroups, before.config.reconGroups, 'G2 reconGroups 幂等不变');
+    assert.ok(!('reconFields' in after.config), 'G2 仍无 reconFields 字段');
+  }
+
+  // ===== G3：迁移仅扫 category='recon-id-fix'，不影响 C1/C2/C3 老库 =====
+  {
+    const db = setupNewSchemaDb();
+    // C2 场景（offset-bill-mark）含 reconFields[]——是 C2 自己的结构（不应该被改）
+    const c2Config = {
+      billTypes: [{ seq: 1, field: 'X', op: '等于', value: 'Y' }],
+      reconFields: [{ seq: 1, leftType: 1, leftField: 'A', rightType: 2, rightField: 'B' }],
+      markValue: { type: 1, field: 'X', value: 'M' }
+    };
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(2, 'offset-bill-mark', 'G3-c2', 0, 1, JSON.stringify(c2Config), 0, now, now);
+
+    migrateC4ReconGroupsStructure(db);
+
+    const after = getScenario(db, 2);
+    // C2 场景 reconFields 应保留（迁移仅扫 C4）
+    assert.ok(Array.isArray(after.config.reconFields), 'G3 C2 reconFields 保留（迁移不动 C2）');
+    assert.ok(!Array.isArray(after.config.reconGroups), 'G3 C2 不应出现 reconGroups');
+  }
+
+  // ===== G4：迁移容错 — 解析失败的 config_json 跳过，不抛错 =====
+  {
+    const db = setupNewSchemaDb();
+    const now = new Date().toISOString();
+    // 直接插入非法 JSON（绕过 createScenario 校验）
+    db.prepare(`
+      INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(1, 'recon-id-fix', 'G4-bad-json', 0, 1, 'not-a-json', 0, now, now);
+    // 不应抛
+    migrateC4ReconGroupsStructure(db);
+    // 行仍在
+    const row = db.prepare('SELECT id FROM scenarios WHERE id=1').get();
+    assert.ok(row, 'G4 解析失败行仍存在');
+  }
+
+  // ===== G5：兼顾"已含 reconGroups 但残留 reconFields"边界 — 应清掉 reconFields 残留
+  {
+    const db = setupNewSchemaDb();
+    const mixed = {
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      billTypes: [{ seq: 1, side: 'main', conditions: [] }],
+      reconGroups: [
+        { leftTypeSeq: 1, rightTypeSeq: 2, fieldPairs: [{ leftField: 'X', rightField: 'Y' }] }
+      ],
+      reconFields: [ // 残留——理论上不应出现，但若用户手编 JSON 入侵需清理
+        { seq: 1, leftTypeSeq: 1, leftField: 'OLD', rightTypeSeq: 2, rightField: 'OLD' }
+      ],
+      output: { mode: 'main', subBizType: { mode: 'auto' } }
+    };
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(1, 'recon-id-fix', 'G5-mixed', 0, 1, JSON.stringify(mixed), 0, now, now);
+
+    migrateC4ReconGroupsStructure(db);
+    const after = getScenario(db, 1);
+    assert.ok(!('reconFields' in after.config), 'G5 残留 reconFields 已清除');
+    assert.strictEqual(after.config.reconGroups.length, 1, 'G5 reconGroups 不动');
+    assert.strictEqual(after.config.reconGroups[0].fieldPairs[0].leftField, 'X', 'G5 reconGroups 内容不动');
+  }
+
+  // ===== H1（Round 3）：老 reconGroups 中已有 Amount/Amount 但缺 locked 标记 → 自动补 locked=true
+  {
+    const db = setupNewSchemaDb();
+    const cfg = {
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      billTypes: [{ seq: 1, side: 'main', conditions: [] }],
+      reconGroups: [
+        {
+          leftTypeSeq: 1, rightTypeSeq: 2,
+          fieldPairs: [
+            { leftField: 'Amount', rightField: 'Amount' }, // 没有 locked 标记
+            { leftField: 'Currency', rightField: 'Currency' }
+          ]
+        }
+      ],
+      output: { mode: 'main', subBizType: { mode: 'auto' } }
+    };
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(1, 'recon-id-fix', 'H1-no-locked', 0, 1, JSON.stringify(cfg), 0, now, now);
+    migrateC4ReconGroupsAmountLockedFieldPair(db);
+    const after = getScenario(db, 1);
+    const fps = after.config.reconGroups[0].fieldPairs;
+    const amountFp = fps.find((fp) => fp.leftField === 'Amount');
+    assert.strictEqual(amountFp.locked, true, 'H1 Amount/Amount fieldPair 自动补 locked=true');
+    // Currency 不变
+    const currFp = fps.find((fp) => fp.leftField === 'Currency');
+    assert.ok(!currFp.locked, 'H1 Currency 不被加 locked');
+    assert.strictEqual(fps.length, 2, 'H1 fieldPair 数不变');
+  }
+
+  // ===== H2（Round 3）：老 reconGroups 中无 Amount/Amount → 头部插入锁定 Amount 行
+  {
+    const db = setupNewSchemaDb();
+    const cfg = {
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      billTypes: [{ seq: 1, side: 'main', conditions: [] }],
+      reconGroups: [
+        {
+          leftTypeSeq: 1, rightTypeSeq: 2,
+          fieldPairs: [
+            { leftField: 'OrderId', rightField: 'OrderId' },
+            { leftField: 'Currency', rightField: 'Currency' }
+          ]
+        }
+      ],
+      output: { mode: 'main', subBizType: { mode: 'auto' } }
+    };
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(1, 'recon-id-fix', 'H2-no-amount', 0, 1, JSON.stringify(cfg), 0, now, now);
+    migrateC4ReconGroupsAmountLockedFieldPair(db);
+    const after = getScenario(db, 1);
+    const fps = after.config.reconGroups[0].fieldPairs;
+    assert.strictEqual(fps.length, 3, 'H2 fieldPair 数 +1');
+    // 头部插入
+    assert.strictEqual(fps[0].leftField, 'Amount', 'H2 头部插入 Amount/Amount');
+    assert.strictEqual(fps[0].rightField, 'Amount', 'H2 头部插入');
+    assert.strictEqual(fps[0].locked, true, 'H2 头部插入带 locked=true');
+    // 原 fieldPairs 顺序保持
+    assert.strictEqual(fps[1].leftField, 'OrderId', 'H2 OrderId 仍在');
+    assert.strictEqual(fps[2].leftField, 'Currency', 'H2 Currency 仍在');
+  }
+
+  // ===== H3（Round 3）：已含 locked Amount/Amount → no-op（幂等三连）
+  {
+    const db = setupNewSchemaDb();
+    const cfg = {
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      billTypes: [{ seq: 1, side: 'main', conditions: [] }],
+      reconGroups: [
+        {
+          leftTypeSeq: 1, rightTypeSeq: 2,
+          fieldPairs: [
+            { leftField: 'Amount', rightField: 'Amount', locked: true },
+            { leftField: 'OrderId', rightField: 'OrderId' }
+          ]
+        }
+      ],
+      output: { mode: 'main', subBizType: { mode: 'auto' } }
+    };
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(1, 'recon-id-fix', 'H3-already-locked', 0, 1, JSON.stringify(cfg), 0, now, now);
+    const before = getScenario(db, 1);
+    // 跑 3 次
+    migrateC4ReconGroupsAmountLockedFieldPair(db);
+    migrateC4ReconGroupsAmountLockedFieldPair(db);
+    migrateC4ReconGroupsAmountLockedFieldPair(db);
+    const after = getScenario(db, 1);
+    assert.deepStrictEqual(after.config.reconGroups, before.config.reconGroups, 'H3 已 locked 时 3 次幂等不变');
+  }
+
+  // ===== H4（Round 3）：仅扫 category='recon-id-fix'，C1/C2/C3 不动
+  {
+    const db = setupNewSchemaDb();
+    const c2cfg = {
+      billTypes: [{ seq: 1, field: 'OrderId', op: '等于', value: 'X' }],
+      reconFields: [{ seq: 1, leftType: 1, leftField: 'Amount', rightType: 2, rightField: 'Amount' }],
+      markValue: { type: 1, field: 'Type', value: 1 }
+    };
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(1, 'offset-bill-mark', 'H4-c2', 0, 1, JSON.stringify(c2cfg), 0, now, now);
+    migrateC4ReconGroupsAmountLockedFieldPair(db);
+    const after = getScenario(db, 1);
+    assert.deepStrictEqual(after.config, c2cfg, 'H4 C2 reconFields 不被动');
+  }
+
+  console.log('  migrations-recon-id-fix: 15/15 PASS');
 }
 
 module.exports = {

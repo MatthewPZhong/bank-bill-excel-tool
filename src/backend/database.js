@@ -10,6 +10,8 @@ const {
   ensureParentTemplateSupport,
   ensureScenariosSupport,
   ensureScenariosCategoryReconIdFix,
+  migrateC4ReconGroupsStructure,
+  migrateC4ReconGroupsAmountLockedFieldPair,
   ensureC3GwFieldCurrencyCaseFix,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
@@ -114,6 +116,13 @@ class AppDatabase {
     // v2.1.0-beta.1 PR-A：扩 CHECK 约束到 4 值（含 'recon-id-fix'）
     // 必须在 ensureScenariosSupport 之后；幂等检查 sqlite_master.sql 含 'recon-id-fix' → no-op
     this.ensureScenariosCategoryReconIdFix();
+    // v2.1.0-beta.1 PR-B（Q1=B 决策回写，2026-04-30）：把 C4 类 config_json 老 reconFields[]
+    // 结构迁移成 reconGroups[]（详见 migrations.js: migrateC4ReconGroupsStructure）。
+    // 必须在 ensureScenariosCategoryReconIdFix 之后（依赖 CHECK 已扩到 4 值）。
+    this.migrateC4ReconGroupsStructure();
+    // v2.1.0-beta.1 PR-B Round 3（Decision 4 回写，2026-05-09）：给 C4 reconGroups 强制带 Amount 锁定字段对
+    // 必须在 migrateC4ReconGroupsStructure 之后（依赖 reconGroups 结构已就位）。
+    this.migrateC4ReconGroupsAmountLockedFieldPair();
     this.ensureC3GwFieldCurrencyCaseFix();
     this.ensureBuiltinScenarioNamesUpdate();
   }
@@ -358,6 +367,15 @@ class AppDatabase {
 
   ensureScenariosCategoryReconIdFix() {
     return ensureScenariosCategoryReconIdFix(this.db);
+  }
+
+  // v2.1.0-beta.1 PR-B（Q1=B 决策，2026-04-30）：C4 reconFields[] → reconGroups[] 迁移
+  migrateC4ReconGroupsAmountLockedFieldPair() {
+    return migrateC4ReconGroupsAmountLockedFieldPair(this.db);
+  }
+
+  migrateC4ReconGroupsStructure() {
+    return migrateC4ReconGroupsStructure(this.db);
   }
 
   ensureC3GwFieldCurrencyCaseFix() {

@@ -529,6 +529,133 @@ function ensureScenariosCategoryReconIdFix(db) {
   }
 }
 
+// v2.1.0-beta.1 PR-B（Q1=B 决策回写，2026-04-30）：把 C4 类场景的 config_json
+// 从 reconFields[]（含 seq/leftTypeSeq/rightTypeSeq/leftField/rightField，
+// 同 seq AND / 不同 seq OR）迁移到 reconGroups[]（每个 group 自带
+// leftTypeSeq/rightTypeSeq + fieldPairs[{leftField, rightField}]，
+// 一个 group 内部 AND，多个 group 之间 OR）。
+//
+// 老结构 → 新结构的语义映射（按 seq 聚合）：
+//   reconFields[seq=1, leftField=A, rightField=B]  → reconGroups[0].fieldPairs[0] = {A, B}
+//   reconFields[seq=1, leftField=C, rightField=D]  → reconGroups[0].fieldPairs[1] = {C, D}
+//   reconFields[seq=2, leftField=E, rightField=F]  → reconGroups[1].fieldPairs[0] = {E, F}
+//   每个 group 的 leftTypeSeq/rightTypeSeq 沿用同 seq 第一条 reconField 的取值
+//
+// 幂等：
+//   - 已含 reconGroups → no-op（不再读 reconFields）
+//   - 仅含 reconFields[] → 转换 + 写回（删除 reconFields，新增 reconGroups）
+//   - 两个都没有（空场景或非 C4）→ no-op
+//   - 解析 config_json 失败 → 跳过该行
+function migrateC4ReconGroupsStructure(db) {
+  const rows = db.prepare(
+    `SELECT id, config_json FROM scenarios WHERE category = 'recon-id-fix'`
+  ).all();
+  if (rows.length === 0) return;
+  const update = db.prepare(`UPDATE scenarios SET config_json = ?, updated_at = ? WHERE id = ?`);
+  const now = new Date().toISOString();
+  rows.forEach((row) => {
+    let config;
+    try {
+      config = JSON.parse(row.config_json);
+    } catch (_e) {
+      return; // 解析失败跳过
+    }
+    if (!config || typeof config !== 'object') return;
+    // 幂等：已含 reconGroups → no-op（即便同时含历史 reconFields 也以 reconGroups 为准）
+    if (Array.isArray(config.reconGroups) && config.reconGroups.length > 0) {
+      // 边界：若同时含残留 reconFields → 删掉历史字段（避免下次再触发本迁移做无意义工作）
+      if (Object.prototype.hasOwnProperty.call(config, 'reconFields')) {
+        delete config.reconFields;
+        update.run(JSON.stringify(config), now, row.id);
+      }
+      return;
+    }
+    if (!Array.isArray(config.reconFields) || config.reconFields.length === 0) {
+      // 没有 reconFields[] 也没有 reconGroups → no-op（用户保存过空场景；后续 dialog 再补默认）
+      return;
+    }
+    // 按 seq 聚合（保持与老 groupReconFields 同语义）
+    const grouped = new Map();
+    for (const rf of config.reconFields) {
+      if (!rf || typeof rf !== 'object') continue;
+      const seq = rf.seq;
+      if (!grouped.has(seq)) {
+        grouped.set(seq, {
+          leftTypeSeq: rf.leftTypeSeq,
+          rightTypeSeq: rf.rightTypeSeq,
+          fieldPairs: []
+        });
+      }
+      grouped.get(seq).fieldPairs.push({
+        leftField: rf.leftField,
+        rightField: rf.rightField
+      });
+    }
+    config.reconGroups = Array.from(grouped.values());
+    delete config.reconFields;
+    update.run(JSON.stringify(config), now, row.id);
+  });
+}
+
+// v2.1.0-beta.1 PR-B Round 3（Decision 4，2026-05-09）：给 C4 场景的 reconGroups 强制带 Amount 锁定 fieldPair
+// 处理 3 类老数据：
+//   1. fieldPairs 中已有 leftField=='Amount' && rightField=='Amount' 但缺 locked 标记 → 补 locked: true
+//   2. fieldPairs 中没有 Amount/Amount 行 → 在 fieldPairs 头部插入 { leftField: 'Amount', rightField: 'Amount', locked: true }
+//   3. 已含 locked Amount/Amount → no-op（幂等）
+// 仅扫 category='recon-id-fix'，不动 C2/C3 reconFields[] 结构
+function migrateC4ReconGroupsAmountLockedFieldPair(db) {
+  const rows = db.prepare(
+    `SELECT id, config_json FROM scenarios WHERE category = 'recon-id-fix'`
+  ).all();
+  if (rows.length === 0) return;
+  const update = db.prepare(`UPDATE scenarios SET config_json = ?, updated_at = ? WHERE id = ?`);
+  const now = new Date().toISOString();
+  rows.forEach((row) => {
+    let config;
+    try {
+      config = JSON.parse(row.config_json);
+    } catch (_e) {
+      return;
+    }
+    if (!config || typeof config !== 'object') return;
+    if (!Array.isArray(config.reconGroups) || config.reconGroups.length === 0) return;
+    let changed = false;
+    config.reconGroups.forEach((grp) => {
+      if (!grp || typeof grp !== 'object') return;
+      if (!Array.isArray(grp.fieldPairs)) {
+        grp.fieldPairs = [{ leftField: 'Amount', rightField: 'Amount', locked: true }];
+        changed = true;
+        return;
+      }
+      let hasAmountLocked = false;
+      let hasAmountUnlocked = false;
+      grp.fieldPairs.forEach((fp) => {
+        if (fp && fp.leftField === 'Amount' && fp.rightField === 'Amount') {
+          if (fp.locked === true) {
+            hasAmountLocked = true;
+          } else {
+            // 老数据：补 locked
+            fp.locked = true;
+            hasAmountLocked = true;
+            hasAmountUnlocked = true;
+            changed = true;
+          }
+        }
+      });
+      if (!hasAmountLocked) {
+        // 头部插一条
+        grp.fieldPairs.unshift({ leftField: 'Amount', rightField: 'Amount', locked: true });
+        changed = true;
+      }
+      // hasAmountUnlocked 仅用于跟踪 — 已在循环里 changed
+      void hasAmountUnlocked;
+    });
+    if (changed) {
+      update.run(JSON.stringify(config), now, row.id);
+    }
+  });
+}
+
 // v2.0.0-beta.3 PR #32b：一次性修复历史 PR #29 seed 的小写 'currency' 错误
 // 背景：PR #29 初始 seed 时把 C3 内置场景的 reconFields[0].gwField 写成小写 'currency'，
 //       PR #31 修了 seed JSON 但 marker 机制保护老库不重 seed → 用户老 DB 里仍是小写。
@@ -573,6 +700,8 @@ module.exports = {
   ensureParentTemplateSupport,
   ensureScenariosSupport,
   ensureScenariosCategoryReconIdFix,
+  migrateC4ReconGroupsStructure,
+  migrateC4ReconGroupsAmountLockedFieldPair,
   ensureC3GwFieldCurrencyCaseFix,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,

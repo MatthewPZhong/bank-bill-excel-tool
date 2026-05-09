@@ -1,0 +1,140 @@
+---
+pr: 36
+title: "[v2.1.0-beta.1 PR-B] feat: C4 单据对账 ReconID 修复对账引擎（5 阶段算法 + subset-sum + unmatched 报告）"
+branch: v2.1.0
+target: main
+status: draft
+integrated: false
+---
+
+# PR #36 — [v2.1.0-beta.1 PR-B] C4 单据对账 ReconID 修复对账引擎
+
+## 范围
+
+v2.1.0-beta.1 迭代第 2 个 PR（共 4 个）。在 PR-A 骨架基础上实施 C4 对账引擎全链路：
+
+- 4 sheet 读 + 严格列校验（FileValidationError）
+- C4 对账引擎：5 阶段算法 + 7+5 赋值规则 + subset-sum + tie-break + 双向一致性
+- 主修复文件 + unmatched 告警 report 双文件输出
+- 资金红线 stale-snapshot 防御（export 端重读 scenario + snapshot 比对）
+- UI Amount 字段对锁定 + reconGroups 数据模型
+
+**不含**识读规律（PR-C）/ 文档三件套（PR-D）。
+
+## 实施过程（5 轮重构 + 用户测试反馈驱动）
+
+| Round | 触发 | 修订 |
+|---|---|---|
+| **Round 1** | 13 task 主体实施 | B1-B13 全部完成（io / engine / IPC / renderer / smoke）|
+| **Round 2** | 用户测试发现 commonId 用 OrderId 错误 + reconFields[].seq 误成 OR | Q1 reconGroups（每 group AND，多 group OR）+ Q2 commonId 用 reconId（含 db migration `migrateC4ReconGroupsStructure`）|
+| **Round 3** | 用户重审原始需求 — Type 错 + 算法不考虑 BillDate + 缺告警 report | 5 阶段算法 + Type 修订（mode=both+1v多 全 Type=0）+ unmatched.xlsx 双文件 + Amount 锁定行 |
+| **Round 4** | 用户测试发现 1v多 池子 Amount "逐行全等"语义错 | subset-sum 求和（其他对账字段 AND 全等 + 解 size≥2）+ tie-break（日期跨度最小 → 离主单最近 → size 最少 → firstIdx）|
+| **Round 5** | 用户测试发现 Step 2 多候选时跳过 1v1（用例 FTA202604280200028 ↔ 202604271439325696974017228）| Step 2 ±1day 多候选 tie-break（dist 最近 → idx 最小）+ 双向一致性校验 |
+
+## 改动清单（28 文件）
+
+### 新增（8）
+
+| 文件 | 说明 |
+|---|---|
+| `src/constants/recon-id-fix-fields.js` | 4 sheet 表头常量（业务部门账单 23 列 / 对手部门账单 22 列 / 对账结果 18 列 / 订单修复 15 列）|
+| `src/main-process/recon-id-fix-io.js` | `readReconIdFixFile`（4 sheet + 严格列校验）/ `writeReconIdFixOutput`（xlsx-js-style + 表头字号 10）/ `writeUnmatchedReport`（6 列告警 report）+ `buildMainOutputFileName` / `buildUnmatchedReportFileName` / `sanitizeFileName` |
+| `src/main-process/recon-id-fix-engine.js` | 顶层入口 `runReconIdFix`（校验 category=='recon-id-fix' + 委托 c4 引擎）|
+| `src/main-process/scenario-engines/c4-recon-id-fix.js` | C4 对账引擎主体：`classifyRows` / `groupReconGroups` / `tryOneToOne`（含 Step 2 tie-break）/ `tryOneToManyPool` / `tryManyToOnePool`（subset-sum）+ `apply1v1Assignment` / `apply1vNAssignment` / `applyNv1Assignment`（7+5 规则）+ `lookupReconId` / `resolveSubBizType` / `computeCommonId` / `enumerateAmountSubsets` / `tieBreakSubsets` / `pickBestByTieBreak` / `billDateMatches` / `parseBillDateMs` / `toCents` / `collectUnmatchedRows` |
+| `scripts/smoke/recon-id-fix-engine.js` | 35 用例（5 轮算法重构全覆盖）|
+| `scripts/smoke/recon-id-fix-io.js` | 12 用例（4 sheet 读 + writer round-trip + 文件名规则 + unmatched writer）|
+| `scripts/smoke/recon-id-fix-ipc-handlers.js` | 17 用例（IPC import/run/export 含 stale-snapshot 防御 T12/T13 + 双文件输出 T16/T17）|
+| `scripts/smoke/recon-id-fix-end-to-end.js` | 6 用例（fixture 端到端：mode=main / mode=opp / mode=both / SubBizType auto / unmatched roundtrip）|
+
+### 修改（20）
+
+| 类别 | 文件 | 说明 |
+|---|---|---|
+| **IPC 主进程** | `src/main.js` | 4 个 `recon-id-fix:*` handler 实装（import/run/export/sessionStatus），run 落 scenariosSnapshot，export 含 stale-snapshot 防御 + 双文件输出（main + unmatched 同 timestamp 同 scenarioName）|
+| **渲染层** | `src/renderer.js` | 3 个 handler 接通真实 IPC + statusBox 5 档（含 unmatched 计数 / unmatchedFileName）+ `state.reconIdFix*` 同步 |
+| | `src/renderer-dialogs.js` | createScenarioConfigDialogC4 重构（Round 2 reconGroups → Round 3 Amount 锁定行：默认带 + 不可改不可删）+ validateScenarioDraft C4 4 条校验（每 group leftType=main / rightType=opp + Amount 锁定行存在）|
+| | `src/styles-gemini-extra.css` | + `.recon-fieldpair-locked` 视觉（灰显 disabled 风格）|
+| **DB migration** | `src/backend/database/migrations.js` | 新增 `migrateC4ReconGroupsStructure`（老 reconFields[].seq 按 seq 聚成 reconGroups[]，幂等）+ `migrateC4ReconGroupsAmountLockedFieldPair`（Amount 字段对加 locked 标记，幂等）|
+| | `src/backend/database.js` | 注册 2 个新 migration 调用 |
+| **统计** | `src/backend/usage-stats.js` | `FUNCTION_REGISTRY` 加 `'单据对账ReconID修复': ['导入文件', '开始运行', '导出文件']` |
+| **smoke 入口** | `scripts/smoke-test.js` | 接入 4 个新 smoke |
+| **smoke 既有** | `scripts/smoke/migrations-recon-id-fix.js` | 6→15 用例（reconGroups 迁移 + Amount 锁定迁移 + 三连幂等）|
+| | `scripts/smoke/recon-id-fix-scenario-ipc.js` | 7→11 用例（资金红线分流清缓存 T8-T11 + reconGroups 兼容）|
+| | `scripts/smoke/scenarios-repository.js` | 7→8 用例（reconGroups 创建兼容）|
+| | `scripts/smoke/scenario-dispatcher.js` | filterOutReconIdFix 在 PR-A round 1 已落 |
+| **preview** | `docs/previews/recon-id-fix-panel.png` 等 3 张 | 视觉刷新 |
+| **build** | `.gitignore` | + `.tmp-smoke-*` |
+| **docs** | `docs/iterations/v2.1.0-beta.1/{PRD,spec,tasks,log}.md` | 5 轮修订全程记录 |
+
+合计：**28 文件改动**，**+5800 / -300** 行。
+
+## 验收证据
+
+- **smoke 260/260 PASS**（baseline 181 + PR-B 共 79 新增用例）
+- **真实 fixture「FX中台入金-初始.xlsx」**：fixedRowCount=96 / mainTouched=36 / oppTouched=60 / unmatched=18 / warnings=0
+- **真实 fixture「单据对账导出不平.xlsx」基金场景**：fixedRowCount=80 / mainTouched=30 / oppTouched=50 / unmatched=0
+- **用户用例（Round 5）**：主 FTA202604280200028 ↔ 从 202604271439325696974017228 → 命中（Reference=PP_20260428020000_USD_HK0000720752_001 / Type=0）
+
+## 算法核心（5 阶段 + 池子）
+
+```
+[1] 1v1 阶段（不进池子）
+    Step 1: 同 BillDate 严格 + 对账字段 AND 全等 → 严格 1v1
+    Step 2: BillDate ±1day 容错 + 对账字段 AND 全等 → 多候选 tie-break + 双向一致性
+    ↓ 没匹上的进池子
+
+[2] 1v多 / 多v1 池子（按 matchRules 决定）
+    Step 3.1: 同 BillDate 严格 + Amount 走 subset-sum + 其他对账字段 AND 全等 → size≥2 子集
+    Step 3.2: BillDate ±1day 容错 + Amount 走 subset-sum + 其他字段 AND 全等
+    多解 tie-break: 解内日期跨度最小 → 离主单最近 → size 最少 → firstIdx
+    ↓ 仍没匹上的
+
+[3] unmatched.xlsx
+    剩余主+从全部写入告警 report（6 列：场景名/单据来源/OrderId/BillDate/Amount/未配原因）
+```
+
+## 关联 spec 文档
+
+- `docs/iterations/v2.1.0-beta.1/PRD-v2.1.0-beta.1.md`（§三 / §六 / §七算法 / §十六 实施记录）
+- `docs/iterations/v2.1.0-beta.1/spec.md`（§五 算法 / §九 IPC / §十二 Open Q）
+- `docs/iterations/v2.1.0-beta.1/tasks.md`（B1-B13 全部完成 + Round 4-5 重构标记）
+- `docs/iterations/v2.1.0-beta.1/log.md`（5 轮 round 完整时间线）
+
+## ⚠️ 关联功能 review（check-vars 自动生成）
+
+本次改动触及以下重要变量，已逐项自查：
+
+### Critical 命中
+
+- **`FileValidationError`** — `recon-id-fix-io.js` 抛三种 code（`missing-sheet` / `invalid-column-count` / `invalid-column-name`），均带 `detailLines`；error-causes.js 已映射；smoke 12 用例覆盖 ✅
+
+### Runtime-state 命中
+
+- **`app`** — main.js `recon-id-fix:export` 用 `app.getPath('documents')` 取 saveDialog 默认路径（与现有模式一致）✅
+- **`dialog`** — main.js `dialog.showOpenDialog` / `dialog.showSaveDialog` 各调用一次，已含 cancelled 分支 ✅
+- **`state`** — renderer.js `state.reconIdFix*` 子字段（Session / Result / Export / Scenarios / SelectedScenarioId）已 PR-A 建立；本 PR 增 `unmatchedRowCount` / `unmatchedFileName` 字段；statusBox 5 档文案对应 ✅
+
+**资金红线（spec §十）**：
+- 第一层 — scenarios:* 4 IPC 按 category 分流清缓存（PR-A round 3 已落，本 PR 不破坏）
+- 第二层 — `recon-id-fix:export` defense in depth（重读 scenario + 比对 `scenariosSnapshot`，不一致 `stale-snapshot` 拒绝 + 清 result）；smoke T12/T13 验证 ✅
+
+## ⚠️ 风险显式提醒（CLAUDE.md 规则 7）
+
+- **资金红线**：5 轮算法重构涉及 Type / Reference / SubBizType 赋值规则，每轮 smoke 全跑通 + 真实 fixture 端到端验证；stale-snapshot 防御保留
+- **DB migration**：`migrateC4ReconGroupsStructure` + `migrateC4ReconGroupsAmountLockedFieldPair` 都是幂等 + 仅扫 category='recon-id-fix' + 解析容错；smoke 三连幂等覆盖
+- **subset-sum 性能**：候选数 > 100 + 整数公差极小时可能漏解（maxSolutions=64 / maxSize=8 兜底）；smoke `runRound4LargePoolPerformance` 验证 n=20 < 1s
+- **浮点精度**：subset-sum 用 `toCents` 转整数比较，避免 0.1+0.2 != 0.3 坑；smoke `runRound4FloatPrecision` 验证
+
+## 必跑（用户手测已通过）
+
+- [x] `npm run smoke` — 260/260
+- [x] FX 中台入金 fixture 跑出 96 行命中（含用户用例 FTA202604280200028）
+- [x] 基金 fixture 跑出 80 行命中 / 0 unmatched
+- [x] commonId 用 reconId 拼接（Reference 格式 `PP_xxx_001` 或 `PR_xxx_001`）
+- [x] mode=both + 1v多 全 Type=0；mode=both + 多v1 主 Type=2 / 从 Type=0
+- [x] unmatched.xlsx 双文件输出（同目录 + 同 timestamp + 同 scenarioName）
+- [x] C4 dialog Amount 字段对默认带 + 不可改不可删
+
+## 下一步
+
+PR #36 合并后启动 PR-C（识读规律：导入对平例子文件 + 同色分组 + 纯规则推断 + 自动填账单类型/对账字段）。

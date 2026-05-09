@@ -3384,7 +3384,8 @@ async function refreshReconIdFixStatus() {
       state.reconIdFixResult = status.hasResult
         ? {
           fixedRowCount: status.resultStats ? Number(status.resultStats.fixedRowCount || 0) : 0,
-          warningCount: status.resultStats ? Number(status.resultStats.warningCount || 0) : 0
+          warningCount: status.resultStats ? Number(status.resultStats.warningCount || 0) : 0,
+          unmatchedRowCount: status.resultStats ? Number(status.resultStats.unmatchedRowCount || 0) : 0
         }
         : null;
     }
@@ -3488,10 +3489,17 @@ function updateReconIdFixUi() {
   let text;
   let tone = 'info';
   if (exp) {
-    text = `已导出 ${exp.mainFileName}`;
+    // Round 3：双文件导出时同时显示主+unmatched 文件名
+    const parts = [];
+    if (exp.mainFileName) parts.push(`主文件 ${exp.mainFileName}`);
+    if (exp.unmatchedFileName) parts.push(`未匹配 ${exp.unmatchedFileName}`);
+    text = parts.length > 0 ? `已导出 — ${parts.join(' / ')}` : '已导出';
     tone = 'success';
   } else if (result) {
-    text = `场景"${scenarioName}"运行完成；命中 ${result.fixedRowCount} 行修复，${result.warningCount} 行警告`;
+    // Round 3：加 K 行未匹配档
+    const unm = Number(result.unmatchedRowCount || 0);
+    const baseText = `场景"${scenarioName}"运行完成；命中 ${result.fixedRowCount} 行修复，${result.warningCount} 行警告`;
+    text = unm > 0 ? `${baseText}，${unm} 行未匹配` : baseText;
     tone = result.warningCount > 0 ? 'error' : 'success';
   } else if (session) {
     const counts = session.sheetCounts || {};
@@ -3518,22 +3526,92 @@ function updateReconIdFixUi() {
   }
 }
 
-// PR-A 占位：4 个按钮 handler（PR-B 落地真实 IPC 调用）
+// v2.1.0-beta.1 PR-B：4 个按钮 handler 接通真实 IPC（spec §七 + §三）
 async function handleReconIdFixImport() {
-  // PR-B 接通：调 desktopApi.reconIdFix.import → 落 reconIdFixSession
-  openModal(createAlertDialog('导入文件功能将在 PR-B 落地。'));
+  try {
+    const result = await window.desktopApi.reconIdFix.import();
+    if (!result || result.status === 'cancelled') {
+      // 用户取消 — 状态保持
+      return;
+    }
+    if (result.status === 'invalid') {
+      const detail = Array.isArray(result.detailLines) && result.detailLines.length > 0
+        ? `\n\n${result.detailLines.slice(0, 5).join('\n')}`
+        : '';
+      openModal(createAlertDialog(`导入失败：${result.message || '文件校验未通过'}${detail}`));
+      return;
+    }
+    if (result.status !== 'ok') {
+      openModal(createAlertDialog(`导入失败：${result.message || '未知错误'}`));
+      return;
+    }
+    // 导入成功：刷新 main 端 session-status 同步 state
+    state.reconIdFixExport = null; // 资金红线：导入新文件后清旧导出文案
+    await refreshReconIdFixStatus();
+  } catch (error) {
+    openModal(createAlertDialog(`导入失败：${error && error.message ? error.message : error}`));
+  }
 }
+
 async function handleReconIdFixRun() {
+  // 防御兜底：理论上按钮已 disabled，此处再校验
   if (state.reconIdFixSelectedScenarioId === null) {
     openModal(createAlertDialog('请先选择场景'));
     return;
   }
-  // PR-B 接通：调 desktopApi.reconIdFix.run({ scenarioId: state.reconIdFixSelectedScenarioId })
-  openModal(createAlertDialog('开始运行功能将在 PR-B 落地。'));
+  if (!state.reconIdFixSession) {
+    openModal(createAlertDialog('请先点击"导入文件"'));
+    return;
+  }
+  try {
+    const result = await window.desktopApi.reconIdFix.run({
+      scenarioId: state.reconIdFixSelectedScenarioId
+    });
+    if (!result || result.status !== 'ok') {
+      openModal(createAlertDialog(`运行失败：${(result && result.message) || '未知错误'}`));
+      return;
+    }
+    // 运行成功：清除"已导出"文案 + 刷新 session-status 同步 result
+    state.reconIdFixExport = null;
+    await refreshReconIdFixStatus();
+  } catch (error) {
+    openModal(createAlertDialog(`运行失败：${error && error.message ? error.message : error}`));
+  }
 }
+
 async function handleReconIdFixExport() {
-  // PR-B 接通：调 desktopApi.reconIdFix.export
-  openModal(createAlertDialog('导出文件功能将在 PR-B 落地。'));
+  try {
+    const result = await window.desktopApi.reconIdFix.export();
+    if (!result) {
+      openModal(createAlertDialog('导出失败：未知错误'));
+      return;
+    }
+    if (result.status === 'cancelled') {
+      return;
+    }
+    if (result.status === 'empty') {
+      openModal(createAlertDialog(result.message || '本次运行无修复记录，未生成文件'));
+      return;
+    }
+    if (result.status !== 'ok') {
+      // failed（含 stale-snapshot）→ refreshReconIdFixStatus 拉新状态
+      // （main 已在 stale-snapshot 路径清 reconIdFixResult）
+      openModal(createAlertDialog(`导出失败：${result.message || '未知错误'}`));
+      await refreshReconIdFixStatus();
+      return;
+    }
+    // 成功：缓存导出文件名（renderer-only，main 不存）+ 刷新 UI
+    // Round 3：含 unmatched 双文件名
+    state.reconIdFixExport = {
+      mainFileName: result.mainFileName || '',
+      mainFilePath: result.mainFilePath || '',
+      unmatchedFileName: result.unmatchedFileName || '',
+      unmatchedFilePath: result.unmatchedFilePath || ''
+    };
+    updateReconIdFixUi();
+  } catch (error) {
+    openModal(createAlertDialog(`导出失败：${error && error.message ? error.message : error}`));
+  }
 }
 
 // v2.0.0-beta.2 F1+F2（D9/D10）：调色板"应用"按钮触发风格切换流程

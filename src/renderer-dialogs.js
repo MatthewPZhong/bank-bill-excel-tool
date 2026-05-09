@@ -5628,14 +5628,23 @@
         };
       }
       // v2.1.0-beta.1 PR-A（task A7）：C4 类默认 config（spec §8.2）
+      // v2.1.0-beta.1 PR-B（Q1=B 决策，2026-04-30）：reconFields[] → reconGroups[]
+      //   每个 group 自带 leftTypeSeq/rightTypeSeq + fieldPairs[]（一组内 AND；多组 OR）
+      // v2.1.0-beta.1 PR-B Round 3（Decision 4，2026-05-09）：默认 group 带 Amount 锁定字段对
       if (category === 'recon-id-fix') {
         return {
           matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
           billTypes: [
             { seq: 1, side: 'main', conditions: [{ field: '', op: '等于', value: '' }] }
           ],
-          reconFields: [
-            { seq: 1, leftTypeSeq: 1, leftField: '', rightTypeSeq: 1, rightField: '' }
+          reconGroups: [
+            {
+              leftTypeSeq: 1,
+              rightTypeSeq: 1,
+              fieldPairs: [
+                { leftField: 'Amount', rightField: 'Amount', locked: true }
+              ]
+            }
           ],
           output: {
             mode: 'main', // 'main' | 'opp' | 'both'
@@ -5763,30 +5772,45 @@
           if (!hasOppBillType) errors.push('账单类型必须至少包含 1 条"从边"账单类型');
         }
 
-        if (!Array.isArray(c.reconFields) || c.reconFields.length === 0) {
-          errors.push('对账字段至少需要 1 行');
-        } else if (c.reconFields.some((r) => !r.leftField || !r.rightField)) {
-          errors.push('对账字段每行两端的字段都不能为空');
+        // v2.1.0-beta.1 PR-B（Q1=B 决策，2026-04-30）：对账字段以 reconGroups[] 形式存储
+        //   reconGroups[i] = { leftTypeSeq, rightTypeSeq, fieldPairs: [{leftField, rightField}, ...] }
+        //   - 一个 group 内部 AND（fieldPair 数 ≥ 1）
+        //   - 多个 group 之间 OR（group 数 ≥ 1）
+        if (!Array.isArray(c.reconGroups) || c.reconGroups.length === 0) {
+          errors.push('对账字段至少需要 1 个分组');
+        } else {
+          c.reconGroups.forEach((grp, gIdx) => {
+            const grpLabel = `对账字段分组 #${gIdx + 1}`;
+            if (!grp || typeof grp !== 'object') {
+              errors.push(`${grpLabel} 结构错误`);
+              return;
+            }
+            if (!Array.isArray(grp.fieldPairs) || grp.fieldPairs.length === 0) {
+              errors.push(`${grpLabel} 至少需要 1 行字段对`);
+            } else if (grp.fieldPairs.some((fp) => !fp || !fp.leftField || !fp.rightField)) {
+              errors.push(`${grpLabel} 每行字段对的两端字段都不能为空`);
+            }
+          });
         }
-        // v2.1.0-beta.1 PR-A round 2 P2-2（数据完整性）：对账字段两端必须分别指向主/从边
-        // leftTypeSeq → side === 'main'；rightTypeSeq → side === 'opp'
-        // 否则保存的配置语义错误，PR-B 引擎按主/从边过滤行时会丢分组
-        if (Array.isArray(c.reconFields) && c.reconFields.length > 0 && billTypesArr.length > 0) {
+        // v2.1.0-beta.1 PR-A round 2 P2-2（数据完整性，PR-B Q1=B 适配后保留语义）：
+        //   每个 reconGroup 的 leftTypeSeq → side === 'main'；rightTypeSeq → side === 'opp'
+        //   否则保存的配置语义错误，PR-B 引擎按主/从边过滤行时会丢分组
+        if (Array.isArray(c.reconGroups) && c.reconGroups.length > 0 && billTypesArr.length > 0) {
           const sideBySeq = new Map(billTypesArr.map((bt) => [Number(bt.seq), bt.side]));
-          c.reconFields.forEach((rf, idx) => {
-            const rowLabel = `对账字段 #${idx + 1}`;
-            const leftSeq = Number(rf.leftTypeSeq);
-            const rightSeq = Number(rf.rightTypeSeq);
-            // 序号落在 billTypes 之外（用户删了对应序号 → 校验失败而不是静默错位）
+          c.reconGroups.forEach((grp, gIdx) => {
+            if (!grp || typeof grp !== 'object') return;
+            const grpLabel = `对账字段分组 #${gIdx + 1}`;
+            const leftSeq = Number(grp.leftTypeSeq);
+            const rightSeq = Number(grp.rightTypeSeq);
             if (!sideBySeq.has(leftSeq)) {
-              errors.push(`${rowLabel} 左侧的账单类型序号 #${rf.leftTypeSeq} 不在账单类型列表中`);
+              errors.push(`${grpLabel} 左侧的账单类型序号 #${grp.leftTypeSeq} 不在账单类型列表中`);
             } else if (sideBySeq.get(leftSeq) !== 'main') {
-              errors.push(`${rowLabel} 左侧必须指向"主边"账单类型`);
+              errors.push(`${grpLabel} 左侧必须指向"主边"账单类型`);
             }
             if (!sideBySeq.has(rightSeq)) {
-              errors.push(`${rowLabel} 右侧的账单类型序号 #${rf.rightTypeSeq} 不在账单类型列表中`);
+              errors.push(`${grpLabel} 右侧的账单类型序号 #${grp.rightTypeSeq} 不在账单类型列表中`);
             } else if (sideBySeq.get(rightSeq) !== 'opp') {
-              errors.push(`${rowLabel} 右侧必须指向"从边"账单类型`);
+              errors.push(`${grpLabel} 右侧必须指向"从边"账单类型`);
             }
           });
         }
@@ -6563,9 +6587,63 @@
           bt.conditions = [{ field: '', op: '等于', value: '' }];
         }
       });
-      if (!Array.isArray(config.reconFields) || config.reconFields.length === 0) {
-        config.reconFields = [{ seq: 1, leftTypeSeq: 1, leftField: '', rightTypeSeq: 1, rightField: '' }];
+      // v2.1.0-beta.1 PR-B（Q1=B 决策，2026-04-30）：reconGroups[] 取代 reconFields[]
+      // v2.1.0-beta.1 PR-B Round 3（Decision 4，2026-05-09）：每个 group 强制带 Amount 锁定 fieldPair
+      // 兼容老 draft（用户在迁移前保存的草稿） — in-memory 转换
+      if (!Array.isArray(config.reconGroups) || config.reconGroups.length === 0) {
+        if (Array.isArray(config.reconFields) && config.reconFields.length > 0) {
+          // 一次性把老 reconFields[] 按 seq 聚合到 reconGroups[]，并删除 reconFields
+          const grouped = new Map();
+          for (const rf of config.reconFields) {
+            if (!rf || typeof rf !== 'object') continue;
+            const seq = rf.seq;
+            if (!grouped.has(seq)) {
+              grouped.set(seq, {
+                leftTypeSeq: rf.leftTypeSeq,
+                rightTypeSeq: rf.rightTypeSeq,
+                fieldPairs: []
+              });
+            }
+            grouped.get(seq).fieldPairs.push({
+              leftField: rf.leftField,
+              rightField: rf.rightField,
+              // Round 3：恰好 Amount/Amount 的老 fieldPair 自动补 locked
+              locked: rf.leftField === 'Amount' && rf.rightField === 'Amount'
+            });
+          }
+          config.reconGroups = Array.from(grouped.values());
+          delete config.reconFields;
+        } else {
+          config.reconGroups = [{
+            leftTypeSeq: 1,
+            rightTypeSeq: 1,
+            fieldPairs: [{ leftField: 'Amount', rightField: 'Amount', locked: true }]
+          }];
+        }
+      } else if (Object.prototype.hasOwnProperty.call(config, 'reconFields')) {
+        // 用户已是新结构，仅清理残留
+        delete config.reconFields;
       }
+      // 保证每个 group 自身结构完整 + Round 3：强制带一条 Amount 锁定行
+      config.reconGroups.forEach((grp) => {
+        if (!Array.isArray(grp.fieldPairs) || grp.fieldPairs.length === 0) {
+          grp.fieldPairs = [{ leftField: 'Amount', rightField: 'Amount', locked: true }];
+          return;
+        }
+        // 检查是否已有 Amount/Amount fieldPair
+        let hasAmount = false;
+        grp.fieldPairs.forEach((fp) => {
+          if (fp && fp.leftField === 'Amount' && fp.rightField === 'Amount') {
+            // 老数据没 locked 标记 → 自动补
+            if (fp.locked !== true) fp.locked = true;
+            hasAmount = true;
+          }
+        });
+        if (!hasAmount) {
+          // 头部插入锁定 Amount 行
+          grp.fieldPairs.unshift({ leftField: 'Amount', rightField: 'Amount', locked: true });
+        }
+      });
       if (!config.output) {
         config.output = {
           mode: 'main',
@@ -6619,8 +6697,8 @@
           <div class="scenario-config-row scenario-config-row-multi">
             <span class="scenario-config-label">对账字段</span>
             <div class="scenario-config-multi-wrap">
-              <div class="scenario-config-multi-rows" data-c4-recon-fields></div>
-              ${isReadonly ? '' : '<button class="text-action small" type="button" data-c4-action="add-recon-field">+ 新增对账字段</button>'}
+              <div class="scenario-config-multi-rows" data-c4-recon-groups></div>
+              ${isReadonly ? '' : '<button class="text-action small" type="button" data-c4-action="add-recon-group">+ 新增 OR 分组</button>'}
             </div>
           </div>
           <div class="scenario-config-row scenario-config-row-mutex">
@@ -6639,7 +6717,7 @@
       `;
 
       const billTypesEl = dialog.querySelector('[data-c4-bill-types]');
-      const reconFieldsEl = dialog.querySelector('[data-c4-recon-fields]');
+      const reconGroupsEl = dialog.querySelector('[data-c4-recon-groups]');
       const outputEl = dialog.querySelector('[data-c4-output]');
 
       function renderBillTypes() {
@@ -6677,33 +6755,76 @@
         }).join('');
       }
 
-      function renderReconFields() {
+      // v2.1.0-beta.1 PR-B（Q1=B 决策，2026-04-30）：行 4 渲染 reconGroups[]
+      //   每个 group 一个 block：[左类型↓ vs 右类型↓] 头 + 多行字段对（同 group 内 AND）+ "+ 新增字段对" + "❌ 删除分组"
+      //   多个 group 之间显示 "OR" 分隔（提示用户：不同 group 之间是 OR）
+      //   行底"+ 新增 OR 分组"按钮（在 dialog HTML 直接渲染，事件下方绑定）
+      function renderReconGroups() {
         const seqs = config.billTypes.map((b) => b.seq);
         const sideBySeq = new Map(config.billTypes.map((b) => [b.seq, b.side]));
-        reconFieldsEl.innerHTML = config.reconFields.map((rf, idx) => {
-          const leftSide = sideBySeq.get(Number(rf.leftTypeSeq)) || 'main';
-          const rightSide = sideBySeq.get(Number(rf.rightTypeSeq)) || 'opp';
+        reconGroupsEl.innerHTML = config.reconGroups.map((grp, gIdx) => {
+          const leftSide = sideBySeq.get(Number(grp.leftTypeSeq)) || 'main';
+          const rightSide = sideBySeq.get(Number(grp.rightTypeSeq)) || 'opp';
           const leftFields = getReconIdFixFieldsForSide(leftSide);
           const rightFields = getReconIdFixFieldsForSide(rightSide);
+          const fieldPairsHtml = (grp.fieldPairs || []).map((fp, fpIdx) => {
+            // Round 3（Decision 4）：locked fieldPair 不可改 / 不可删
+            const locked = fp && fp.locked === true;
+            const fpDisabled = isReadonly || locked;
+            // 锁定行：select 固定显示 'Amount'，添加 locked 视觉提示
+            const renderLeftSelect = locked
+              ? `<select class="scenario-config-input" data-c4-rg-fp-field="leftField" disabled title="Amount 字段对锁定（用于池子 1v多 / 多v1 算法）">
+                   <option value="Amount" selected>Amount</option>
+                 </select>`
+              : `<select class="scenario-config-input" data-c4-rg-fp-field="leftField" ${fpDisabled ? 'disabled' : ''}>
+                   <option value="">请选择左字段</option>
+                   ${renderScenarioOptions(leftFields, fp.leftField)}
+                 </select>`;
+            const renderRightSelect = locked
+              ? `<select class="scenario-config-input" data-c4-rg-fp-field="rightField" disabled title="Amount 字段对锁定（用于池子 1v多 / 多v1 算法）">
+                   <option value="Amount" selected>Amount</option>
+                 </select>`
+              : `<select class="scenario-config-input" data-c4-rg-fp-field="rightField" ${fpDisabled ? 'disabled' : ''}>
+                   <option value="">请选择右字段</option>
+                   ${renderScenarioOptions(rightFields, fp.rightField)}
+                 </select>`;
+            // 删除按钮：locked 行永不显示
+            const removeBtnHtml = (isReadonly || locked || (grp.fieldPairs || []).length <= 1)
+              ? ''
+              : '<button class="icon-close-small" type="button" data-c4-rg-fp-action="remove" title="删除字段对">×</button>';
+            // "+ 新增字段对"按钮在 readonly 时不显示；locked 行仍显示（让用户始终有入口加非锁定行）
+            const addBtnHtml = isReadonly
+              ? ''
+              : '<button class="text-action small" type="button" data-c4-rg-fp-action="add" title="同分组内 AND">+ 新增字段对</button>';
+            return `
+              <div class="scenario-config-c4-recon-fieldpair${locked ? ' scenario-config-c4-recon-fieldpair-locked' : ''}" data-c4-rg-fp-row="${fpIdx}">
+                ${renderLeftSelect}
+                <span class="scenario-config-vs-arrow">=</span>
+                ${renderRightSelect}
+                ${removeBtnHtml}
+                ${addBtnHtml}
+              </div>
+            `;
+          }).join('');
+          const orSeparatorHtml = gIdx > 0 ? '<div class="scenario-config-c4-recon-or-sep">OR</div>' : '';
           return `
-            <div class="scenario-config-multi-row scenario-config-c4-recon-row" data-c4-rf-row="${idx}">
-              <span class="scenario-config-multi-seq">#${idx + 1}</span>
-              <select class="scenario-config-input scenario-config-input-narrow" data-c4-rf-field="leftTypeSeq" ${isReadonly ? 'disabled' : ''}>
-                ${renderScenarioOptions(seqs.map(String), String(rf.leftTypeSeq))}
-              </select>
-              <select class="scenario-config-input" data-c4-rf-field="leftField" ${isReadonly ? 'disabled' : ''}>
-                <option value="">请选择字段</option>
-                ${renderScenarioOptions(leftFields, rf.leftField)}
-              </select>
-              <span class="scenario-config-vs-arrow">vs</span>
-              <select class="scenario-config-input scenario-config-input-narrow" data-c4-rf-field="rightTypeSeq" ${isReadonly ? 'disabled' : ''}>
-                ${renderScenarioOptions(seqs.map(String), String(rf.rightTypeSeq))}
-              </select>
-              <select class="scenario-config-input" data-c4-rf-field="rightField" ${isReadonly ? 'disabled' : ''}>
-                <option value="">请选择字段</option>
-                ${renderScenarioOptions(rightFields, rf.rightField)}
-              </select>
-              ${isReadonly || config.reconFields.length === 1 ? '' : '<button class="icon-close-small" type="button" data-c4-rf-action="remove" title="删除">×</button>'}
+            ${orSeparatorHtml}
+            <div class="scenario-config-c4-recon-group" data-c4-rg-row="${gIdx}">
+              <div class="scenario-config-c4-recon-group-header">
+                <span class="scenario-config-multi-seq">分组 ${gIdx + 1}</span>
+                <span>左：</span>
+                <select class="scenario-config-input scenario-config-input-narrow" data-c4-rg-field="leftTypeSeq" ${isReadonly ? 'disabled' : ''}>
+                  ${renderScenarioOptions(seqs.map(String), String(grp.leftTypeSeq))}
+                </select>
+                <span>vs 右：</span>
+                <select class="scenario-config-input scenario-config-input-narrow" data-c4-rg-field="rightTypeSeq" ${isReadonly ? 'disabled' : ''}>
+                  ${renderScenarioOptions(seqs.map(String), String(grp.rightTypeSeq))}
+                </select>
+                ${isReadonly || config.reconGroups.length === 1 ? '' : '<button class="icon-close-small" type="button" data-c4-rg-action="remove" title="删除分组">×</button>'}
+              </div>
+              <div class="scenario-config-c4-recon-fieldpairs">
+                ${fieldPairsHtml}
+              </div>
             </div>
           `;
         }).join('');
@@ -6732,8 +6853,8 @@
             <div class="scenario-config-c4-common-id">
               <span>取</span>
               <select class="scenario-config-input scenario-config-input-narrow" data-c4-common-id="source" ${isReadonly ? 'disabled' : ''}>
-                <option value="main"${out.commonId.source === 'main' ? ' selected' : ''}>主边单据 ID</option>
-                <option value="opp"${out.commonId.source === 'opp' ? ' selected' : ''}>从边单据 ID</option>
+                <option value="main"${out.commonId.source === 'main' ? ' selected' : ''}>主边单据 reconId</option>
+                <option value="opp"${out.commonId.source === 'opp' ? ' selected' : ''}>从边单据 reconId</option>
               </select>
               <span>加上</span>
               <input class="scenario-config-input scenario-config-input-narrow" type="text" data-c4-common-id="suffix" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(out.commonId.suffix || '')}" placeholder="后缀">
@@ -6766,7 +6887,7 @@
 
       function rerenderAll() {
         renderBillTypes();
-        renderReconFields();
+        renderReconGroups();
         renderOutput();
       }
       rerenderAll();
@@ -6803,7 +6924,7 @@
             // 切 side → 字段下拉枚举改变 → 清空 conditions[].field
             (config.billTypes[idx].conditions || []).forEach((cd) => { cd.field = ''; });
             renderBillTypes();
-            renderReconFields(); // 联动行 4 字段下拉
+            renderReconGroups(); // 联动行 4 字段下拉
           }
           return;
         }
@@ -6844,12 +6965,12 @@
           const idx = Number(row.dataset.c4BtRow);
           if (Number.isFinite(idx) && config.billTypes.length > 1) {
             config.billTypes.splice(idx, 1);
-            // 重排 seq + 校正行 4 引用
+            // 重排 seq + 校正行 4 引用（reconGroups 每组的 leftTypeSeq/rightTypeSeq）
             config.billTypes.forEach((b, i) => { b.seq = i + 1; });
             const validSeqs = config.billTypes.map((b) => b.seq);
-            config.reconFields.forEach((r) => {
-              if (!validSeqs.includes(Number(r.leftTypeSeq))) r.leftTypeSeq = validSeqs[0] || 1;
-              if (!validSeqs.includes(Number(r.rightTypeSeq))) r.rightTypeSeq = validSeqs[0] || 1;
+            (config.reconGroups || []).forEach((grp) => {
+              if (!validSeqs.includes(Number(grp.leftTypeSeq))) grp.leftTypeSeq = validSeqs[0] || 1;
+              if (!validSeqs.includes(Number(grp.rightTypeSeq))) grp.rightTypeSeq = validSeqs[0] || 1;
             });
             rerenderAll();
           }
@@ -6887,51 +7008,103 @@
         const newSide = config.billTypes.length === 0 ? 'main' : (config.billTypes.length === 1 ? 'opp' : 'main');
         config.billTypes.push({ seq: nextSeq, side: newSide, conditions: [{ field: '', op: '等于', value: '' }] });
         renderBillTypes();
-        renderReconFields();
+        renderReconGroups();
       });
 
-      // 行 4：对账字段动态行
-      reconFieldsEl.addEventListener('change', (event) => {
+      // 行 4：对账字段（reconGroups[] — 每个 group 内 AND；多个 group OR）
+      // change 事件：处理"分组头的 leftTypeSeq/rightTypeSeq"和"字段对的 leftField/rightField"
+      reconGroupsEl.addEventListener('change', (event) => {
         if (isReadonly) return;
-        const ctl = event.target.closest('[data-c4-rf-field]');
-        if (!ctl) return;
-        const row = ctl.closest('[data-c4-rf-row]');
-        const idx = Number(row?.dataset.c4RfRow);
-        const f = ctl.dataset.c4RfField;
-        if (Number.isFinite(idx) && config.reconFields[idx]) {
-          if (f === 'leftTypeSeq' || f === 'rightTypeSeq') {
-            config.reconFields[idx][f] = Number(ctl.value);
-            // 切类型 → 字段下拉枚举改变 → 清空 leftField / rightField
-            if (f === 'leftTypeSeq') config.reconFields[idx].leftField = '';
-            else config.reconFields[idx].rightField = '';
-            renderReconFields();
-          } else {
-            config.reconFields[idx][f] = ctl.value;
+        // 分组头的左/右类型下拉
+        const headerCtl = event.target.closest('[data-c4-rg-field]');
+        if (headerCtl) {
+          const grpRow = headerCtl.closest('[data-c4-rg-row]');
+          const gIdx = Number(grpRow?.dataset.c4RgRow);
+          const f = headerCtl.dataset.c4RgField;
+          if (Number.isFinite(gIdx) && config.reconGroups[gIdx]) {
+            config.reconGroups[gIdx][f] = Number(headerCtl.value);
+            // 切类型 → 字段下拉枚举改变 → 该分组内所有字段对的对应 left/rightField 清空
+            // Round 3：locked Amount 行不清空（保持 'Amount' 不变）
+            const sideKey = f === 'leftTypeSeq' ? 'leftField' : 'rightField';
+            (config.reconGroups[gIdx].fieldPairs || []).forEach((fp) => {
+              if (fp && fp.locked === true) return;
+              fp[sideKey] = '';
+            });
+            renderReconGroups();
+          }
+          return;
+        }
+        // 字段对的 leftField / rightField 下拉（Round 3：locked 行拒绝改）
+        const fpCtl = event.target.closest('[data-c4-rg-fp-field]');
+        if (fpCtl) {
+          const grpRow = fpCtl.closest('[data-c4-rg-row]');
+          const fpRow = fpCtl.closest('[data-c4-rg-fp-row]');
+          if (!grpRow || !fpRow) return;
+          const gIdx = Number(grpRow.dataset.c4RgRow);
+          const fpIdx = Number(fpRow.dataset.c4RgFpRow);
+          const f = fpCtl.dataset.c4RgFpField;
+          if (Number.isFinite(gIdx) && config.reconGroups[gIdx]
+              && Number.isFinite(fpIdx) && config.reconGroups[gIdx].fieldPairs[fpIdx]) {
+            const fp = config.reconGroups[gIdx].fieldPairs[fpIdx];
+            if (fp && fp.locked === true) return;     // 锁定行不允许改
+            fp[f] = fpCtl.value;
           }
         }
       });
-      reconFieldsEl.addEventListener('click', (event) => {
+      // click 事件：分组级 ❌（删除整个 group）/ 字段对级 ❌（删除单条 fieldPair）/ "+ 新增字段对"按钮
+      reconGroupsEl.addEventListener('click', (event) => {
         if (isReadonly) return;
-        const btn = event.target.closest('button[data-c4-rf-action="remove"]');
-        if (!btn) return;
-        const row = btn.closest('[data-c4-rf-row]');
-        const idx = Number(row?.dataset.c4RfRow);
-        if (Number.isFinite(idx) && config.reconFields.length > 1) {
-          config.reconFields.splice(idx, 1);
-          renderReconFields();
+        // 删除整个分组
+        const removeGrpBtn = event.target.closest('button[data-c4-rg-action="remove"]');
+        if (removeGrpBtn) {
+          const grpRow = removeGrpBtn.closest('[data-c4-rg-row]');
+          const gIdx = Number(grpRow?.dataset.c4RgRow);
+          if (Number.isFinite(gIdx) && config.reconGroups.length > 1) {
+            config.reconGroups.splice(gIdx, 1);
+            renderReconGroups();
+          }
+          return;
+        }
+        // 删除某个字段对（Round 3：locked fieldPair 不可删，防御兜底）
+        const removeFpBtn = event.target.closest('button[data-c4-rg-fp-action="remove"]');
+        if (removeFpBtn) {
+          const grpRow = removeFpBtn.closest('[data-c4-rg-row]');
+          const fpRow = removeFpBtn.closest('[data-c4-rg-fp-row]');
+          if (!grpRow || !fpRow) return;
+          const gIdx = Number(grpRow.dataset.c4RgRow);
+          const fpIdx = Number(fpRow.dataset.c4RgFpRow);
+          if (Number.isFinite(gIdx) && config.reconGroups[gIdx]
+              && Number.isFinite(fpIdx) && config.reconGroups[gIdx].fieldPairs[fpIdx]) {
+            const fp = config.reconGroups[gIdx].fieldPairs[fpIdx];
+            if (fp && fp.locked === true) return;     // 锁定行拒绝删除
+            if (config.reconGroups[gIdx].fieldPairs.length > 1) {
+              config.reconGroups[gIdx].fieldPairs.splice(fpIdx, 1);
+              renderReconGroups();
+            }
+          }
+          return;
+        }
+        // 同分组内 "+ 新增字段对"（AND）
+        const addFpBtn = event.target.closest('button[data-c4-rg-fp-action="add"]');
+        if (addFpBtn) {
+          const grpRow = addFpBtn.closest('[data-c4-rg-row]');
+          const gIdx = Number(grpRow?.dataset.c4RgRow);
+          if (Number.isFinite(gIdx) && config.reconGroups[gIdx]) {
+            config.reconGroups[gIdx].fieldPairs.push({ leftField: '', rightField: '' });
+            renderReconGroups();
+          }
         }
       });
-      dialog.querySelector('[data-c4-action="add-recon-field"]')?.addEventListener('click', () => {
+      // "+ 新增 OR 分组"（Round 3：新分组默认带 Amount 锁定 fieldPair）
+      dialog.querySelector('[data-c4-action="add-recon-group"]')?.addEventListener('click', () => {
         if (isReadonly) return;
         const seqs = config.billTypes.map((b) => b.seq);
-        config.reconFields.push({
-          seq: config.reconFields.length + 1,
+        config.reconGroups.push({
           leftTypeSeq: seqs[0] || 1,
-          leftField: '',
           rightTypeSeq: seqs[1] || seqs[0] || 1,
-          rightField: ''
+          fieldPairs: [{ leftField: 'Amount', rightField: 'Amount', locked: true }]
         });
-        renderReconFields();
+        renderReconGroups();
       });
 
       // 行 5：修复结果输出
@@ -7037,13 +7210,29 @@
           const condsHtml = (bt.conditions || []).map((cd) => `${escapeHtml(cd.field)} ${escapeHtml(cd.op)}${opNeedsValue(cd.op) ? ' ' + escapeHtml(String(cd.value || '')) : ''}`).join(' AND ');
           return `<li>类型#${bt.seq} (${sideLabel(bt.side)})：${condsHtml}</li>`;
         }).join('')}</ul></div>`;
-        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段：</span><ul>${(c.reconFields || []).map((r) => `<li>类型#${r.leftTypeSeq} ${escapeHtml(r.leftField)} vs 类型#${r.rightTypeSeq} ${escapeHtml(r.rightField)}</li>`).join('')}</ul></div>`;
+        // v2.1.0-beta.1 PR-B（Q1=B 决策，2026-04-30）：reconGroups[] 渲染
+        //   每个 group 一个 li，组内字段对 AND 用"&"分隔；多个 group 用"OR"分隔
+        const reconGroupsForPreview = Array.isArray(c.reconGroups)
+          ? c.reconGroups
+          : (Array.isArray(c.reconFields) // 兼容老 draft（理论上 in-memory 已转，仍保留兜底）
+              ? Array.from(c.reconFields.reduce((m, rf) => {
+                  if (!m.has(rf.seq)) m.set(rf.seq, { leftTypeSeq: rf.leftTypeSeq, rightTypeSeq: rf.rightTypeSeq, fieldPairs: [] });
+                  m.get(rf.seq).fieldPairs.push({ leftField: rf.leftField, rightField: rf.rightField });
+                  return m;
+                }, new Map()).values())
+              : []);
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段：</span><ul>${reconGroupsForPreview.map((grp, gIdx) => {
+          const fpStr = (grp.fieldPairs || []).map((fp) => `${escapeHtml(fp.leftField || '')}=${escapeHtml(fp.rightField || '')}`).join(' AND ');
+          const orPrefix = gIdx > 0 ? '<span class="scenario-confirm-detail-or">OR</span> ' : '';
+          return `<li>${orPrefix}类型#${grp.leftTypeSeq} vs 类型#${grp.rightTypeSeq}：${fpStr}</li>`;
+        }).join('')}</ul></div>`;
         const out = c.output || {};
         const modeLabel = out.mode === 'main' ? '主边' : (out.mode === 'opp' ? '从边' : '主从都修复');
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">修复方向：</span>${escapeHtml(modeLabel)}</div>`;
         if (out.mode === 'both') {
+          // v2.1.0-beta.1 PR-B（Q2=a 决策，2026-04-30）：commonId 取 reconId 不是 OrderId
           const ci = out.commonId || {};
-          html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">共同 ID：</span>取${escapeHtml(sideLabel(ci.source))}OrderId + "${escapeHtml(ci.suffix || '')}"</div>`;
+          html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">共同 ID：</span>取${escapeHtml(sideLabel(ci.source))}reconId + "${escapeHtml(ci.suffix || '')}"</div>`;
         }
         const sub = out.subBizType || {};
         let subText;
