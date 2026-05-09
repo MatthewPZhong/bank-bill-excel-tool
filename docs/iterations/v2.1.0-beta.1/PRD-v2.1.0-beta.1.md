@@ -1140,7 +1140,7 @@ state.reconIdFixResult = {  // 运行后产生
 - 测试证据：smoke 181/181 PASS（10 套）；含 5 模块切换 / C4 dialog 5 行 / 类别四选一 / 资金红线跨模块互抹反向（T8/T9/T10/T11）/ 老库 3 builtin 无损迁移 / CHECK 约束拦截非法
 - 已知 follow-up：`knowledge/backlog.md` B4（recon-id-fix-scenario-ipc smoke simulator 与真实 main.js 漂移；PR-D e2e 时一并处理）
 
-### PR-B 对账引擎（用户测试中 — Round 4 subset-sum 重构进行）
+### PR-B 对账引擎（已合并）
 
 - 草稿：—（PR 未提）
 - 初版：工作目录改动 13 task 主体（PR-B Round 1）
@@ -1172,9 +1172,15 @@ state.reconIdFixResult = {  // 运行后产生
   - **性能**：升序剪枝 + 后缀总和剪枝 + top-k 后缀剪枝 + 启发式提前终止 + hardCeiling=5M 硬上限；n=20 大池子 1.14ms / 次（实测比修前 2.58ms 更快）
   - **兼容**：`enumerateAmountSubsets` / `tieBreakSubsets` 函数保留（向后兼容 + 单测覆盖），但**池子算法不再调用**
   - 详见 `log.md` 2026-04-30 round 2 节
-- 最终：—（待用户合并 PR #36 round 2）
-- merge commit：—
-- 改动文件：（待 commit 后填）
+- 最终：commit `b09fda7`（self-review round 后 + backlog B5）→ PR #36 合并到 main
+- merge commit：`844d1d5`（PR #36 → main，2026-05-09T08:36Z）
+- 改动文件（共 28 个）：
+  - **8 新增**：`src/constants/recon-id-fix-fields.js` / `src/main-process/recon-id-fix-{io,engine}.js` / `src/main-process/scenario-engines/c4-recon-id-fix.js`（5 阶段算法 + subset-sum + tie-break 4 阶 + 双向一致性）+ 4 个 smoke（recon-id-fix-{engine,io,ipc-handlers,end-to-end}）
+  - **5 modified（核心）**：`src/main.js`（4 IPC handler 实装 + stale-snapshot 防御 + stableJsonStringify + 双文件输出 saveDialog 默认名分支）/ `src/renderer.js`（接通真实 IPC + statusBox 5 档）/ `src/renderer-dialogs.js`（C4 dialog Amount 锁定 + reconGroups 校验）/ `src/styles-gemini-extra.css`（locked 视觉）/ `src/preload.js`（PR-A 已暴露）
+  - **5 modified（DB/统计/build）**：`src/backend/database/migrations.js`（reconGroups 迁移 + Amount 锁定迁移）/ `src/backend/database.js`（注册 migration）/ `src/backend/usage-stats.js`（FUNCTION_REGISTRY 加 C4 模块）/ `scripts/smoke-test.js`（接入 4 新 smoke）/ `.gitignore`（+ .tmp-smoke-*）
+  - **3 既有 smoke 扩**：`scenarios-repository`（7→8）/ `migrations-recon-id-fix`（6→15）/ `recon-id-fix-scenario-ipc`（7→11）
+  - **3 preview 刷新**：`recon-id-fix-panel.png` / `scenario-config-c4-{both,}.png`
+  - **docs**：本 PRD + spec + tasks + log + PR36 草稿 + `knowledge/backlog.md` 新增 B5
 - 关键决策修订：Round 3 5 决策 + Round 4 4 决策 + 工作目录所有 PR-B 改动
 - 测试证据：
   - Round 4：smoke 254/254 PASS（Round 3 baseline 247 + Round 4 新增 7 用例：subset-sum helpers + 用户用例 + 多解 tieBreak + 浮点精度 + 大候选集性能 + 多v1 对称 + 找不到子集）；用户用例验证：主 04-15 USD 270k + 从 [F1 04-13 70k, F2 04-14 200k, F3 04-14 70k, F4 04-15 70k] → 命中 {F2, F3}（与用户预期一致，spread=0d 优于其他解）
