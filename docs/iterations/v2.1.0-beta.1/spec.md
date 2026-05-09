@@ -326,14 +326,18 @@ desktopApi.reconIdFix.export(): Promise<{
 }>
 ```
 
-实现要点（**Round 3 修订**）：
+实现要点（**Round 3 + Round 5 P3-A/P3-B 修订，2026-05-09**）：
 - 校验 `reconIdFixResult` 存在
-- defense in depth：重读 `database.getScenario(...)` + 比对 snapshot；不一致 → 清缓存 + 返回 failed
-- **空命中 + 空 unmatched** → 返回 status='empty'
-- 至少一方非空 → 弹 saveDialog（用户选主文件保存位置）；timestamp 在 export 入口内一次生成，主+unmatched 共用
-- 主文件非空 → 调 `writeReconIdFixOutput({ fixedRows, savePath })`
-- unmatched 非空 → 在主文件保存目录用 `buildUnmatchedReportFileName(...)` 生成路径调 `writeUnmatchedReport({ unmatchedRows, savePath })`
-- 返回值含主+unmatched 两路径
+- defense in depth：重读 `database.getScenario(...)` + 比对 snapshot（**Round 5 P3-C**：snapshot 用 `stableJsonStringify` 保证 round-trip 稳定，不被 JSON.stringify key 顺序漂移误判）；不一致 → 清缓存 + 返回 failed
+- **空命中 + 空 unmatched** → 返回 status='empty'，不弹 saveDialog
+- 否则进 saveDialog 分支；timestamp 在 export 入口内一次生成
+- saveDialog 默认名（**Round 5 P3-A**）：
+  - fixedRows 空 + unmatched 非空 → 默认 unmatched 名 `单据对账修复-未匹配-{ts}-{name}.xlsx`
+  - 否则 → 默认主名 `单据对账修复-{ts}-{name}.xlsx`
+- 用户选定路径写文件（**Round 5 P3-A**）：
+  - fixedRows 空 → 用户选定路径直接作 unmatched 文件路径（mainFilePath null）
+  - fixedRows 非空 → 用户选定路径作主文件 → 写主；若 unmatched 也非空，**unmatched 文件名联动主名**（**Round 5 P3-B**：`{用户主文件 basename 去 .xlsx}-未匹配.xlsx`，同目录）
+- 返回值含主 + unmatched 两路径（按上述分支可能任一为 null）
 
 #### `recon-id-fix:session-status`
 
@@ -1209,22 +1213,33 @@ async function writeUnmatchedReport({ unmatchedRows, savePath }) {
 }
 
 // 文件名规则
-function buildUnmatchedReportFileName(scenarioName, timestamp = buildTimestampMinute()) {
+//
+// PR #36 self-review round 5（P3-B，2026-05-09）：第 3 参 mainFileBaseName 联动主名
+//   传入用户在 saveDialog 改过的主文件 basename 时，用 `{stem}-未匹配.xlsx`
+//   （stem = mainFileBaseName 去掉末尾 .xlsx 不区分大小写 + sanitize）。
+//   旧 2 参签名保持兼容。
+function buildUnmatchedReportFileName(scenarioName, timestamp = buildTimestampMinute(), mainFileBaseName = null) {
+  if (mainFileBaseName) {
+    let stem = String(mainFileBaseName).replace(/\.xlsx$/i, '');
+    return `${sanitizeFileName(stem)}-未匹配.xlsx`;
+  }
   const safeName = sanitizeFileName(scenarioName);
   return `单据对账修复-未匹配-${timestamp}-${safeName}.xlsx`;
 }
 ```
 
-**导出策略**（在 `main.js: recon-id-fix:export` handler 内）：
+**导出策略**（在 `main.js: recon-id-fix:export` handler 内，**Round 5 P3-A/P3-B 修订 2026-05-09**）：
 
-| 主 fixedRows.length | unmatchedRows.length | 行为 |
-|---|---|---|
-| > 0 | 0 | 仅弹一次 saveDialog 写主文件（与原行为一致；mainFilePath 返回；unmatchedFilePath null） |
-| > 0 | > 0 | 弹一次 saveDialog（用户选主文件保存路径），主文件写完后**自动**用相同 timestamp + scenarioName 在同一目录写 unmatched 文件；都返回 |
-| 0 | > 0 | 弹一次 saveDialog（用户选主文件位置当容器目录），不写主文件，仅写 unmatched 文件 |
-| 0 | 0 | 不弹 saveDialog，直接返回 status='empty' |
+| 主 fixedRows.length | unmatchedRows.length | saveDialog 默认名 | 用户选定路径写到哪 | unmatched 文件名（P3-B） |
+|---|---|---|---|---|
+| > 0 | 0 | 主名 `单据对账修复-{ts}-{name}.xlsx` | 主文件 | — |
+| > 0 | > 0 | 主名 `单据对账修复-{ts}-{name}.xlsx` | 主文件 | `{用户主文件 stem}-未匹配.xlsx`（同目录） |
+| 0 | > 0 | **unmatched 名** `单据对账修复-未匹配-{ts}-{name}.xlsx` | **unmatched 文件**（用户选什么名就写什么名） | — |
+| 0 | 0 | — | — | 不弹 saveDialog，直接返回 status='empty' |
 
-> 路径策略：unmatchedFilePath = 主 saveDialog 选定目录 + `buildUnmatchedReportFileName(...)`；与主文件 timestamp 完全一致（在同一次 export 内同步生成 timestamp）。
+> Round 5 P3-A 修订（2026-05-09）：原行为下 fixedRows 空 + unmatched 非空时，saveDialog 默认名是主名但实际不写主文件（用 sanitize 后的固定 unmatched 名写到主目录），导致用户选了 A.xlsx 但桌面上是另一个名字。修法：
+> - **P3-A**：fixedRows 空 + unmatched 非空时，saveDialog 默认名直接用 unmatched 名；用户选定路径就用作 unmatched 文件路径（"用户选什么 = 实际写什么"语义对得上）。
+> - **P3-B**：主+unmatched 都非空时，unmatched 文件名联动用户改过的主文件 basename（`myreport.xlsx` → `myreport-未匹配.xlsx`），同目录。
 
 <!-- 2026-04-30 决策回写：Q3=C（颜色冲突取"有数据 cell"的最高频色）-->
 ### 5.3 `recon-id-fix-infer.js`（PR-C）
@@ -1514,15 +1529,33 @@ clearResultCacheForCategory(existing && existing.category);
 
 ### 10.2 第二层：export 端被动校验 snapshot
 
+> **Round 5 P3-C 修订（2026-05-09）**：snapshot 串里 `config` 序列化必须用 `stableJsonStringify`（递归按 key 排序），而不是 `JSON.stringify`。原因：
+> - `JSON.stringify` 按 object 属性插入顺序输出
+> - 同一 config 在 SQLite round-trip / repository 重写后 key 顺序可能变化
+> - 漂移会让 snapshot 字符串不同 → run 时落的 `scenariosSnapshot` 与 export 时重算的不一致 → 误判为"场景已变更"拒导出
+> - `stableJsonStringify` 保证同语义 config 在任何 round-trip 后产出同一字符串；smoke T20 验证
+
 ```javascript
 // src/main.js — recon-id-fix:export handler
+
+// PR #36 self-review round 5（P3-C，2026-05-09）：递归按 key 排序的稳定 stringify
+function stableJsonStringify(obj) {
+  if (obj === null || obj === undefined) return JSON.stringify(obj);
+  if (typeof obj !== 'object') return JSON.stringify(obj);
+  if (Array.isArray(obj)) {
+    return '[' + obj.map(stableJsonStringify).join(',') + ']';
+  }
+  const keys = Object.keys(obj).sort();
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableJsonStringify(obj[k])).join(',') + '}';
+}
+
 function buildReconIdFixSnapshot(scenario) {
   return [
     scenario.id,
     scenario.name,
     scenario.priority,
     scenario.enabled ? 1 : 0,
-    JSON.stringify(scenario.config || {})
+    stableJsonStringify(scenario.config || {})  // ⬅︎ Round 5 P3-C：从 JSON.stringify 改
   ].join('|');
 }
 

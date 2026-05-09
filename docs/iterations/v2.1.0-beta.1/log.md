@@ -347,6 +347,62 @@
 
 ---
 
+## 2026-05-09 PR #36 self-review round 5 修复（3 个 P3 finding；用户提示）
+
+- **背景**：team-lead 在 PR #36 round 4（注释同步）push 后做 self-review，发现 3 个 P3 finding——都偏 UX/防御性，不影响资金正确性，但需在 PR-B merge 前一并扫干净。
+
+- **3 个 P3 finding**：
+  1. **P3-A — fixedRows 空 + unmatched 非空时 saveDialog UX 困惑**：
+     - 当前行为：用户点导出弹 saveDialog，默认主名 `单据对账修复-{ts}-{name}.xlsx`；如果 fixedRows 空 → 不写主文件（用户选的路径上没文件）；如果 unmatched 非空 → 在同目录写**另一个固定名** `单据对账修复-未匹配-{ts}-{name}.xlsx`
+     - 用户视角："我选了 A.xlsx，怎么桌面上是另一个名字？"
+     - 修法：弹 saveDialog 前先判断；fixedRows 空 + unmatched 非空时 saveDialog 默认名直接用 unmatched 名；用户选定路径直接作为 unmatched 文件路径（"用户选什么 = 实际写什么"语义对得上）
+  2. **P3-B — unmatched 文件名联动用户改的主文件名**：
+     - 当前行为：unmatched 总是 `buildReconIdFixUnmatchedReportFileName(scenarioName, timestamp)` 拼出固定名 `单据对账修复-未匹配-YYYYMMDDHHmm-{scenarioName}.xlsx`
+     - 用户场景：在 saveDialog 把主名改成 `4月对账.xlsx` → unmatched 仍是 `单据对账修复-未匹配-...` → 配对感弱
+     - 修法：fixedRows + unmatched 都非空时，unmatched 文件名 = `{用户主文件 stem}-未匹配.xlsx`（同目录），`myreport.xlsx` → `myreport-未匹配.xlsx`
+  3. **P3-C — buildReconIdFixSnapshot 用 stableJsonStringify**：
+     - 问题：`JSON.stringify(scenario.config || {})` 按 object 属性插入顺序输出，同语义 config 在 SQLite round-trip / repository 重写后 key 顺序可能变化 → snapshot 字符串不同 → run 时落的 `scenariosSnapshot` 与 export 时重算的不一致 → 误判 stale-snapshot 拒导出
+     - 修法：加 `stableJsonStringify(obj)` helper（递归按 key 排序），buildReconIdFixSnapshot 改用它；保证同语义 config 在任何 round-trip 后产出同一字符串
+
+- **改动清单（4 文件）**：
+  - `src/main.js`：
+    - 新增 `stableJsonStringify` helper（位于 `buildReconIdFixSnapshot` 之上）
+    - `buildReconIdFixSnapshot` 改用 `stableJsonStringify(scenario.config || {})`
+    - `recon-id-fix:export` handler：
+      - saveDialog 默认名分支：fixedRows 空 + unmatched 非空 → `buildReconIdFixUnmatchedReportFileName(...)` 否则主名（P3-A）
+      - 写文件分支：fixedRows 空 → 用户选定路径直接作为 unmatched 文件路径；fixedRows 非空 → 写主 + 若 unmatched 非空联动主名 `{stem}-未匹配.xlsx`（P3-B）
+  - `src/main-process/recon-id-fix-io.js`：
+    - `buildUnmatchedReportFileName(scenarioName, timestamp, mainFileBaseName=null)` 加可选第 3 参；传入时用 `{sanitize(stem)}-未匹配.xlsx`，stem = mainFileBaseName 去 .xlsx（不区分大小写）；旧 2 参签名向后兼容
+  - `scripts/smoke/recon-id-fix-ipc-handlers.js`：
+    - 新增 `stableJsonStringify` helper（与 main.js 同源），buildReconIdFixSnapshot 同步改造
+    - simulateExport：3 参 saveDialogResult + 4 参 saveDialogDefaultProbe（让 T18 用例校验 saveDialog 默认名）；分支按 P3-A/P3-B 行为重写
+    - 改造 T16（unmatched 文件名联动主名 `t16-out-未匹配.xlsx`）+ T17（用户选定路径就是 unmatched 文件）
+    - 新增 T18（P3-A：默认名 = unmatched 名）+ T19（P3-B：联动改主名 `myreport.xlsx` → `myreport-未匹配.xlsx`）+ T20（P3-C：同语义不同 key 顺序 → 同 snapshot；真实改动 → 不同；数组顺序敏感）
+    - tests 总数 17 → 20
+  - `scripts/smoke/recon-id-fix-io.js`：
+    - 新增 R13（5 子用例）：buildUnmatchedReportFileName 第 3 参联动模式 — 主名带/不带 .xlsx / 大小写 / sanitize 危险字符 / 旧 2 参兼容 / 第 3 参 null 等价于不传
+    - tests 总数 12 → 13
+
+- **测试证据**：
+  - `npm run smoke` **272/272 PASS**（baseline 268 + 6 新增/改造：T18 + T19 + T20 + R13 + T16/T17 行为校准）
+  - 全部 P3 finding 验证：
+    - P3-A：T18 captures saveDialog 默认名以 `单据对账修复-未匹配-` 开头（含 scenarioName）；用户选定路径 `t18-user-pick.xlsx` 实际写到该路径，mainFilePath null
+    - P3-B：T19 用户改主名 `myreport.xlsx` → unmatchedFileName 实际为 `myreport-未匹配.xlsx`，与主文件同目录
+    - P3-C：T20 同语义但 key 顺序不同的两份 config（matchRules / billTypes / reconGroups / output 顶层倒序 + 嵌套倒序）→ snapshot 串完全相等；真实改 mode='main' → 'both' → 不等；billTypes 数组顺序变化 → 不等（数组语义敏感不被排序）
+  - 资金红线 stale-snapshot 防御回归：T12（场景 config 真实改动 → stale 拒导出）/ T13（场景已删 → stale 拒导出）继续 PASS
+  - 主算法回归不变（不退步）：
+    - smoke 全部既有用例 PASS（含 FTA202604280200028 ↔ 202604271439325696974017228 用户用例 / 基金 fixture / FX 中台入金 fixture）
+    - subset-sum tie-break 4 阶（spread → distToMain → size → firstIdxNum）完整（PR #36 round 1-3 修复保留）
+
+- **风险显式提醒**：
+  - **资金红线（snapshot 防御）**：P3-C 改造涉及核心防御机制——stale-snapshot 拒导出是防"用户改场景后导出还是旧规则"的关键。修后行为：snapshot 串不再被 key 顺序漂移误判（保护用户不被假阳性 stale 拒导出），但**真实场景 config 改动仍正常触发 stale**——T20 反例校验 + T12/T13 旧用例继续验证。
+  - **资金红线（不破坏 PR-A + PR-B round 1-4 已修复逻辑）**：subset-sum 全局最优 + tie-break 4 阶 + Step 2 多候选 + scenarios 分流清缓存 + Type 规则 + commonId reconId 取值 — 全部保留语义；smoke 272/272 反向证明
+  - **UX 改进（P3-A/P3-B）**：纯 UX 改进，不改变文件内容；用户在原行为下虽困惑但拿到的告警 report 数据正确
+
+- **下一步**：通知 team-lead "代码已完成自测"等待用户测试 → user 确认 → 由 team-lead 提 round 5 commit
+
+---
+
 ## 2026-05-09 PR-B Round 5 微调（Step 2 多候选 tie-break）+ 1 决策回写
 
 - **背景**：用户测试 Round 4 时发现一个用例没命中

@@ -239,7 +239,29 @@ async function runReconIdFixIoSmokeTests() {
     assert.match(name2, /^单据对账修复-未匹配-202605091427-test_recon_fix\.xlsx$/, 'R12 危险字符 sanitize');
   }
 
-  console.log('  recon-id-fix-io smoke: 12 / 12 PASS');
+  // ===== R13（Round 5 P3-B）：buildUnmatchedReportFileName 联动主文件 basename =====
+  {
+    // 用户改主名为 4月对账.xlsx → unmatched = 4月对账-未匹配.xlsx
+    const n1 = buildUnmatchedReportFileName('基金', '202605091427', '4月对账.xlsx');
+    assert.strictEqual(n1, '4月对账-未匹配.xlsx', 'R13 联动主名（带 .xlsx）');
+    // 大小写不敏感的扩展名
+    const n2 = buildUnmatchedReportFileName('基金', '202605091427', 'MyReport.XLSX');
+    assert.strictEqual(n2, 'MyReport-未匹配.xlsx', 'R13 联动主名（.XLSX 大写）');
+    // 主名不带扩展名
+    const n3 = buildUnmatchedReportFileName('基金', '202605091427', 'plain-name');
+    assert.strictEqual(n3, 'plain-name-未匹配.xlsx', 'R13 联动主名（无扩展名）');
+    // 主名含 sanitize 应当处理的字符
+    const n4 = buildUnmatchedReportFileName('基金', '202605091427', 'bad/name:1.xlsx');
+    assert.strictEqual(n4, 'bad_name_1-未匹配.xlsx', 'R13 联动主名 sanitize 危险字符');
+    // 旧 2 参签名不变（向后兼容）
+    const nOld = buildUnmatchedReportFileName('基金', '202605091427');
+    assert.match(nOld, /^单据对账修复-未匹配-202605091427-基金\.xlsx$/, 'R13 旧 2 参签名兼容');
+    // 第 3 参 null 等价于不传
+    const nNull = buildUnmatchedReportFileName('基金', '202605091427', null);
+    assert.strictEqual(nNull, nOld, 'R13 第 3 参 null = 不传');
+  }
+
+  console.log('  recon-id-fix-io smoke: 13 / 13 PASS');
 }
 
 module.exports = { runReconIdFixIoSmokeTests };

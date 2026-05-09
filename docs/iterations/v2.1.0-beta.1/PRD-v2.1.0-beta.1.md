@@ -236,11 +236,15 @@
 
 ### D9 — 输出文件
 
-- 文件名：`单据对账修复-YYYYMMDDHHmm-{场景名}.xlsx`（参考 v2.0.0-beta.3 `银行对账单-YYYYMMDDHHmm-处理结果.xlsx` 命名规则；含场景名因为本模块每次只跑 1 个场景，无 first-match-wins）
-- 输出 sheet 名：「订单修复」（与样例 sheet 名一致）
+- 主文件名：`单据对账修复-YYYYMMDDHHmm-{场景名}.xlsx`（参考 v2.0.0-beta.3 `银行对账单-YYYYMMDDHHmm-处理结果.xlsx` 命名规则；含场景名因为本模块每次只跑 1 个场景，无 first-match-wins）
+- unmatched 文件名（**Round 5 P3-A/P3-B 修订**，2026-05-09）：
+  - fixedRows 空 + unmatched 非空：用户选什么名就写什么名（saveDialog 默认 `单据对账修复-未匹配-YYYYMMDDHHmm-{场景名}.xlsx`）
+  - fixedRows 非空 + unmatched 非空：联动主名 `{用户主文件 stem}-未匹配.xlsx`，同目录
+  - 详见 §七.3.5
+- 输出 sheet 名：「订单修复」（主）/「未匹配单据」（unmatched）
 - 输出列：A~O 共 15 列 = 「订单修复」sheet 表头（v2.0.0-beta.3 已确认列表，复用即可）
 - 路径：`~/Documents/网银账单生成小助手/recon-id-fix/{date}/`（用户另存为可改）
-- saveDialog 模式（用户另存为）；空命中场景 → 弹"无修改记录"提示，不生成文件
+- saveDialog 模式（用户另存为）；fixedRows + unmatched 都空 → status='empty' 不弹 saveDialog
 
 <!-- 2026-04-30 决策回写：Q4=部分采纳（单场景模式确认 + 主页面新增场景下拉）-->
 ### D10 — 跑场景的并发模型 + 主页面场景选择下拉（Q4=部分采纳，2026-04-30）
@@ -576,12 +580,20 @@ function buildOutputRow(srcRow, overrides):
 
 > ⚠️ 「业务部门账单」/「对手部门账单」sheet 都有 `BizType` 列（第 15 列）；「订单修复」sheet 没有 BizType 列，只有 SubBizType（第 15 列）。复制时要注意别把 BizType 误写到 SubBizType；srcRow 的 BizType 不进入 output。R5/R6 用 BizType 是用作"反查 reconResult"的输入，不出现在 output。
 
-#### 7.3.5 未匹配 Report 文件（**PR-B Round 3 新增，2026-05-09，Decision 3**）
+#### 7.3.5 未匹配 Report 文件（**PR-B Round 3 新增，2026-05-09，Decision 3** — **Round 5 P3-A/P3-B 修订 2026-05-09**）
 
 跑完 Step 1 / Step 2 / Step 3.x（含勾选项 manyToOne 的 Step 3'.x）后，仍未配对的主从行须写入告警 report：
 
-- **文件名**：`单据对账修复-未匹配-YYYYMMDDHHmm-{scenarioName}.xlsx`（与主修复文件同 timestamp 同 scenarioName）
-- **路径**：`Documents/网银账单生成小助手/recon-id-fix/{date}/`（与主文件同目录）
+- **文件名规则**（Round 5 P3-A/P3-B 修订）：
+  | 主 fixedRows | unmatched | saveDialog 默认名 | unmatched 实际文件名 |
+  |---|---|---|---|
+  | > 0 | 0 | `单据对账修复-{ts}-{scenarioName}.xlsx` | — |
+  | > 0 | > 0 | `单据对账修复-{ts}-{scenarioName}.xlsx` | `{用户改过的主名 stem}-未匹配.xlsx`（同目录） |
+  | 0 | > 0 | `单据对账修复-未匹配-{ts}-{scenarioName}.xlsx` | 用户选什么名就写什么名 |
+- **修复说明**：
+  - 原行为下"fixedRows 空 + unmatched 非空"时 saveDialog 默认是主名但写出来是另一个固定名 → UX 困惑（P3-A）
+  - 原行为下 unmatched 总是 `单据对账修复-未匹配-...` 固定名，不联动用户改的主名 → 用户改主名为 `4月对账.xlsx` 时 unmatched 仍是 `单据对账修复-未匹配-...`，配对感弱（P3-B）
+- **路径**：与主文件同目录（用户在 saveDialog 选定的目录）
 - **sheet 名**：`未匹配单据`
 - **6 列表头**：
   | 列序 | 列名 | 含义 |
@@ -598,11 +610,12 @@ function buildOutputRow(srcRow, overrides):
   - `'池子内 BillDate 未匹配'` — 进入 Step 3.1 / Step 3'.1 但池子内同日 + Amount 没找到候选
   - `'池子内 BillDate ±1day 未匹配'` — 进入 Step 3.2 / Step 3'.2 但池子内 ±1day + Amount 没找到候选
   - `'未勾 1v多/多v1，跳过'` — 用户场景仅勾 oneToOne 时，Step 1+2 失败的行直接走此原因（不进 Step 3.x）
-- **导出语义**：
+- **导出语义**（Round 5 P3-A/P3-B 修订）：
   - 与主修复文件**一并导出**，由 `recon-id-fix:export` IPC 一次返回 `mainFilePath + unmatchedFilePath`
-  - 主文件空命中（fixedRows.length=0）但 unmatchedRows 非空 → 仍弹 saveDialog 写**只写 unmatched**（不弹"无修复记录"提示）
-  - 主文件 + unmatched 都空 → 弹"无修复记录"提示，不生成任何文件
+  - 主文件空命中（fixedRows.length=0）但 unmatchedRows 非空 → 弹 saveDialog（默认 unmatched 名）；**用户选定路径直接作为 unmatched 文件路径**（mainFilePath null）
+  - 主文件 + unmatched 都空 → 直接 status='empty'，不弹 saveDialog，不生成任何文件
   - 主文件非空 + unmatched 空 → 仅写主文件（与原行为一致）
+  - 主文件 + unmatched 都非空 → 弹 saveDialog（默认主名），用户选定路径作主文件，**unmatched 文件名联动主文件 basename**（`{用户改过的主名 stem}-未匹配.xlsx`，同目录）
   - 表头字号 10pt（applyHeaderRowFont 与其他 writer 一致）
 
 #### 7.3.6 Step 1 / Step 2 / Step 3 实现细节（**PR-B Round 4 subset-sum 重构 + Round 5 Step 2 多候选 tie-break**）
@@ -1168,6 +1181,13 @@ state.reconIdFixResult = {  // 运行后产生
   - Round 5：smoke 260/260 PASS（Round 4 baseline 254 + Round 5 新增 6 用例：pickBestByTieBreak helpers + Step 2 dist tie-break + Step 2 idx tie-break + 反向不一致让位 + Step 1 严格不变 + Step 2 单候选不变）；用户用例验证（FX 中台入金 fixture）：主 FTA202604280200028（04-28, USD 300k, 入账）+ 从池里 04-27 target + 04-29 decoy → 命中 04-27 target，Reference=`PP_20260428020000_USD_HK0000720752_001`；FX fixture 全量：fixedRowCount=96 / mainTouched=36 / oppTouched=60 / unmatched=18；基金 fixture 回归：fixedRowCount=80 / mainTouched=30 / oppTouched=50 / unmatched=0（与 Round 4 baseline 一致，无退步）
   - PR #36 round 1 P2 修复：smoke 262/262 PASS（260 + 2 新增）；详见 log.md
   - **PR #36 round 2 P2 修复**：smoke **266/266 PASS**（262 + 4 新增）；user 复现用例验证 — 修前选 3 个 04-01 子集（次优），修后选 3 个 04-15 子集（spread=0+distToMain=0 全局最优）；fixture 回归（修前修后数字一致）：FX fixture × FX 入账 fixedRowCount=113 / mainTouched=44 / oppTouched=69 / unmatched=25 / warnings=0；性能：n=20 大池子 1.14ms（旧实现 2.58ms）；用户用例 FTA202604280200028 ↔ 202604271439325696974017228 双双命中并共享 commonId
+- **PR #36 self-review round 5 修复（2026-05-09 — 3 个 P3 finding）**：
+  - **P3-A（saveDialog UX 一致性）**：原行为下"fixedRows 空 + unmatched 非空"时 saveDialog 默认是主名，但实际写出来是固定 unmatched 名（`单据对账修复-未匹配-...`），导致用户选 A.xlsx 但桌面是另一个名字 → UX 困惑。修法：fixedRows 空 + unmatched 非空时 saveDialog 默认名直接用 unmatched 名，用户选定路径就用作 unmatched 文件路径（"用户选什么 = 实际写什么"）
+  - **P3-B（unmatched 文件名联动主名）**：原行为下 unmatched 总是 `单据对账修复-未匹配-{ts}-{name}.xlsx` 固定名，不联动用户改过的主名。修法：fixedRows + unmatched 都非空时，unmatched 文件名 = `{用户改过的主名 stem}-未匹配.xlsx`，同目录（`myreport.xlsx` → `myreport-未匹配.xlsx`）
+  - **P3-C（buildReconIdFixSnapshot 用 stableJsonStringify）**：原 `JSON.stringify(scenario.config || {})` 按 object 属性插入顺序输出，同语义 config 在 SQLite round-trip / repository 重写后 key 顺序变化会让 snapshot 字符串不同 → run 时落的 scenariosSnapshot 与 export 时重算的不一致 → 误判 stale-snapshot 拒导出。修法：加 stableJsonStringify（递归按 key 排序）helper，buildReconIdFixSnapshot 改用它（资金红线下游降级保险保留）
+  - 改动文件：`src/main.js`（buildReconIdFixSnapshot + stableJsonStringify + recon-id-fix:export handler 默认名分支 + unmatched 文件名联动）+ `src/main-process/recon-id-fix-io.js`（buildUnmatchedReportFileName 加可选第 3 参 mainFileBaseName）+ `scripts/smoke/recon-id-fix-ipc-handlers.js`（更新 simulator + T16/T17 改造 + 新增 T18/T19/T20）+ `scripts/smoke/recon-id-fix-io.js`（新增 R13）
+  - smoke：**272/272 PASS**（266 baseline + 6 新增/改造：T18 P3-A 默认名 + T19 P3-B 联动 + T20 P3-C 同语义同 snapshot + R13 联动签名 + T16/T17 行为 P3-A/P3-B 校准）
+  - 回归不变：用户用例 FTA202604280200028 ↔ 202604271439325696974017228 命中 ✓ / 基金 fixture 80/30/50/0 ✓ / FX 中台入金 fixture 96/36/60/18 ✓ / 资金红线 stale-snapshot smoke T12/T13 通过 ✓ / subset-sum tie-break 4 阶完整 ✓
 
 ### PR-C 识读规律（待启动）
 

@@ -160,9 +160,21 @@ function buildMainOutputFileName(scenarioName, timestamp = buildTimestampMinute(
 }
 
 // PR-B Round 3（Decision 3，2026-05-09）：未匹配 report 文件名
-//   `单据对账修复-未匹配-YYYYMMDDHHmm-{sanitize(name)}.xlsx`
-//   与主修复文件同 timestamp 同 scenarioName，便于定位
-function buildUnmatchedReportFileName(scenarioName, timestamp = buildTimestampMinute()) {
+//   默认（无 mainFileBaseName）：`单据对账修复-未匹配-YYYYMMDDHHmm-{sanitize(name)}.xlsx`
+//
+// PR #36 self-review round 5（P3-B，2026-05-09）：联动用户主文件名
+//   传入 mainFileBaseName（用户在 saveDialog 里改过的主文件 basename，含或不含 .xlsx 扩展）
+//   时输出 `{stem}-未匹配.xlsx`，stem = mainFileBaseName 去掉末尾 .xlsx（不区分大小写）；
+//   mainFileBaseName 仍走 sanitizeFileName 防御危险字符。
+//   旧签名 buildUnmatchedReportFileName(name, timestamp) 保持兼容（smoke 老用例不动）。
+function buildUnmatchedReportFileName(scenarioName, timestamp = buildTimestampMinute(), mainFileBaseName = null) {
+  if (mainFileBaseName) {
+    let stem = String(mainFileBaseName);
+    // 去掉末尾 .xlsx（不区分大小写）
+    stem = stem.replace(/\.xlsx$/i, '');
+    const safeStem = sanitizeFileName(stem);
+    return `${safeStem}-未匹配.xlsx`;
+  }
   const safeName = sanitizeFileName(scenarioName);
   return `单据对账修复-未匹配-${timestamp}-${safeName}.xlsx`;
 }

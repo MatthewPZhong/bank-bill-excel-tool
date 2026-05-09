@@ -46,6 +46,21 @@ const {
 const { FileValidationError } = require('../../src/backend/file-service/common');
 
 // ===== 全等 main.js 中的 buildReconIdFixSnapshot =====
+//
+// PR #36 self-review round 5（P3-C，2026-05-09）：
+//   stableJsonStringify 与 main.js 同名 helper 同源（递归按 key 排序）；保证 smoke
+//   simulator 跟 main.js 真实 IPC 行为一致——同语义但 key 顺序不同的 config 应产生
+//   相同 snapshot 字符串。
+function stableJsonStringify(obj) {
+  if (obj === null || obj === undefined) return JSON.stringify(obj);
+  if (typeof obj !== 'object') return JSON.stringify(obj);
+  if (Array.isArray(obj)) {
+    return '[' + obj.map(stableJsonStringify).join(',') + ']';
+  }
+  const keys = Object.keys(obj).sort();
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + stableJsonStringify(obj[k])).join(',') + '}';
+}
+
 function buildReconIdFixSnapshot(scenario) {
   if (!scenario) return '';
   return [
@@ -53,7 +68,7 @@ function buildReconIdFixSnapshot(scenario) {
     scenario.name,
     scenario.priority,
     scenario.enabled ? 1 : 0,
-    JSON.stringify(scenario.config || {})
+    stableJsonStringify(scenario.config || {})
   ].join('|');
 }
 
@@ -127,9 +142,15 @@ function simulateRun(state, db, scenarioId) {
   }
 }
 
-// simulateExport：第 4 参数 saveDialogResult 模拟用户行为：null=取消；string=路径
+// simulateExport：第 3 参数 saveDialogResult 模拟用户行为：null=取消；string=路径
+// 第 4 参数 saveDialogDefaultProbe（可选）：传入函数 fn 时回传 saveDialog 准备用的
+//   defaultPath（让用例校验"默认名"逻辑命中），见 P3-A 测试。
 // Round 3：双文件输出（主+unmatched）
-async function simulateExport(state, db, saveDialogResult) {
+// PR #36 self-review round 5（P3-A / P3-B，2026-05-09）：
+//   - fixedRows 空 + unmatched 非空 → defaultPath 用 unmatched 名，用户选定路径就是 unmatched 文件
+//   - fixedRows 非空 + unmatched 非空 → defaultPath 用主名，主+unmatched 同目录，
+//     unmatched 文件名联动主文件 basename
+async function simulateExport(state, db, saveDialogResult, saveDialogDefaultProbe = null) {
   if (!state.reconIdFixResult) {
     return { status: 'failed', message: '请先点击"开始运行"' };
   }
@@ -148,6 +169,14 @@ async function simulateExport(state, db, saveDialogResult) {
   if (fixedRows.length === 0 && unmatchedRows.length === 0) {
     return { status: 'empty', message: '本次运行无修复记录且无未匹配记录，未生成文件' };
   }
+  // 模拟 saveDialog 默认名（P3-A）
+  const timestamp = buildTimestampMinute();
+  const defaultFileName = (fixedRows.length === 0 && unmatchedRows.length > 0)
+    ? buildUnmatchedReportFileName(state.reconIdFixResult.scenarioName, timestamp)
+    : `单据对账修复-${timestamp}-${state.reconIdFixResult.scenarioName}.xlsx`;
+  if (typeof saveDialogDefaultProbe === 'function') {
+    saveDialogDefaultProbe(defaultFileName);
+  }
   if (saveDialogResult === null) {
     return { status: 'cancelled' };
   }
@@ -158,21 +187,32 @@ async function simulateExport(state, db, saveDialogResult) {
       unmatchedFilePath: null, unmatchedFileName: null,
       rowCount: 0, unmatchedCount: 0
     };
-    const timestamp = buildTimestampMinute();
-    if (fixedRows.length > 0) {
+    if (fixedRows.length === 0) {
+      // 仅 unmatched 分支：用户选定路径就是 unmatched 文件
+      const wUnm = await writeUnmatchedReport({ unmatchedRows, savePath: saveDialogResult });
+      ret.unmatchedFilePath = wUnm.filePath;
+      ret.unmatchedFileName = wUnm.fileName;
+      ret.unmatchedCount = wUnm.rowCount;
+    } else {
+      // 主非空：写主文件
       const w = await writeReconIdFixOutput({ fixedRows, savePath: saveDialogResult });
       ret.mainFilePath = w.filePath;
       ret.mainFileName = w.fileName;
       ret.rowCount = w.rowCount;
-    }
-    if (unmatchedRows.length > 0) {
-      const dir = path.dirname(saveDialogResult);
-      const unmName = buildUnmatchedReportFileName(state.reconIdFixResult.scenarioName, timestamp);
-      const unmPath = path.join(dir, unmName);
-      const wUnm = await writeUnmatchedReport({ unmatchedRows, savePath: unmPath });
-      ret.unmatchedFilePath = wUnm.filePath;
-      ret.unmatchedFileName = wUnm.fileName;
-      ret.unmatchedCount = wUnm.rowCount;
+      if (unmatchedRows.length > 0) {
+        const dir = path.dirname(saveDialogResult);
+        const mainBase = path.basename(saveDialogResult);
+        const unmName = buildUnmatchedReportFileName(
+          state.reconIdFixResult.scenarioName,
+          timestamp,
+          mainBase
+        );
+        const unmPath = path.join(dir, unmName);
+        const wUnm = await writeUnmatchedReport({ unmatchedRows, savePath: unmPath });
+        ret.unmatchedFilePath = wUnm.filePath;
+        ret.unmatchedFileName = wUnm.fileName;
+        ret.unmatchedCount = wUnm.rowCount;
+      }
     }
     return ret;
   } catch (error) {
@@ -599,7 +639,7 @@ async function runReconIdFixIpcHandlersSmokeTests() {
     assert.strictEqual(res.status, 'failed', 'T15 未 run → failed');
   }
 
-  // ===== T16（Round 3）：export 主+unmatched 双文件输出 =====
+  // ===== T16（Round 3 + Round 5 P3-B）：export 主+unmatched 双文件输出，unmatched 文件名联动主名 =====
   {
     const db = setupDb();
     const sc = createScenario(db, makeC4Payload('T16-sc'));
@@ -626,10 +666,12 @@ async function runReconIdFixIpcHandlersSmokeTests() {
     assert.strictEqual(res.status, 'ok', 'T16 export ok');
     assert.ok(fs.existsSync(res.mainFilePath), 'T16 主文件存在');
     assert.ok(fs.existsSync(res.unmatchedFilePath), 'T16 unmatched 文件存在');
-    assert.ok(res.unmatchedFileName.startsWith('单据对账修复-未匹配-'), 'T16 unmatched 文件名前缀');
+    // P3-B：unmatched 文件名 = 主文件 stem + '-未匹配.xlsx'
+    assert.strictEqual(res.unmatchedFileName, 't16-out-未匹配.xlsx', 'T16 unmatched 文件名联动主名');
+    assert.strictEqual(path.dirname(res.unmatchedFilePath), tmpDir, 'T16 unmatched 同目录');
   }
 
-  // ===== T17（Round 3）：仅 unmatched（主全 unmatch）→ 仅写 unmatched 文件 =====
+  // ===== T17（Round 3 + Round 5 P3-A）：仅 unmatched 时用户选定路径就是 unmatched 文件 =====
   {
     const db = setupDb();
     const sc = createScenario(db, makeC4Payload('T17-sc'));
@@ -645,15 +687,135 @@ async function runReconIdFixIpcHandlersSmokeTests() {
     simulateRun(state, db, sc.id);
     assert.strictEqual(state.reconIdFixResult.fixedRows.length, 0, 'T17 fixedRows=0');
     assert.strictEqual(state.reconIdFixResult.unmatchedRows.length, 1, 'T17 1 unmatched');
+    // 用户选定 t17-out.xlsx → 现在用户选什么名 unmatched 就写到那个路径（P3-A 修复 UX 困惑）
     const outPath = path.join(tmpDir, 't17-out.xlsx');
     const res = await simulateExport(state, db, outPath);
     assert.strictEqual(res.status, 'ok', 'T17 export ok');
     assert.strictEqual(res.mainFilePath, null, 'T17 主文件 null');
-    assert.ok(fs.existsSync(res.unmatchedFilePath), 'T17 unmatched 文件存在');
-    assert.ok(!fs.existsSync(outPath), 'T17 主文件未写');
+    assert.strictEqual(res.unmatchedFilePath, outPath, 'T17 unmatched 写到用户选定路径');
+    assert.ok(fs.existsSync(outPath), 'T17 用户选定路径有文件');
+    assert.strictEqual(res.unmatchedFileName, 't17-out.xlsx', 'T17 unmatched fileName 与用户选名一致');
   }
 
-  console.log('  recon-id-fix-ipc-handlers smoke: 17 / 17 PASS');
+  // ===== T18（Round 5 P3-A）：fixedRows 空 + unmatched 非空 → saveDialog 默认名是 unmatched 名 =====
+  {
+    const db = setupDb();
+    const sc = createScenario(db, makeC4Payload('T18-sc'));
+    const filePath = path.join(tmpDir, 't18.xlsx');
+    writeFourSheetXlsx({
+      reconRows: [],
+      businessRows: [makeBusinessAoa({ OrderId: 'O-T18-LONE', BillType: 'biz', Amount: 555 })],
+      opponentRows: [],
+      savePath: filePath
+    });
+    const state = { reconIdFixSession: null, reconIdFixResult: null };
+    simulateImport(state, filePath);
+    simulateRun(state, db, sc.id);
+    assert.strictEqual(state.reconIdFixResult.fixedRows.length, 0, 'T18 fixedRows=0');
+    assert.ok(state.reconIdFixResult.unmatchedRows.length >= 1, 'T18 unmatched 非空');
+    let captured = null;
+    const userPath = path.join(tmpDir, 't18-user-pick.xlsx');
+    const res = await simulateExport(state, db, userPath, (defaultName) => { captured = defaultName; });
+    assert.strictEqual(res.status, 'ok', 'T18 export ok');
+    // P3-A：默认名应是 unmatched 名（前缀 `单据对账修复-未匹配-`），不是主名
+    assert.ok(captured, 'T18 captured 默认名');
+    assert.ok(captured.startsWith('单据对账修复-未匹配-'), `T18 默认名是 unmatched 名 (got: ${captured})`);
+    assert.ok(captured.includes('T18-sc'), 'T18 默认名含 scenarioName');
+    // 用户选 't18-user-pick.xlsx' → 文件实际写到该路径
+    assert.strictEqual(res.unmatchedFilePath, userPath, 'T18 unmatched 写到用户选定路径');
+    assert.ok(fs.existsSync(userPath), 'T18 用户路径有文件');
+    assert.strictEqual(res.mainFilePath, null, 'T18 mainFilePath null');
+  }
+
+  // ===== T19（Round 5 P3-B）：fixedRows 非空 + 改主名 → unmatched 联动 =====
+  {
+    const db = setupDb();
+    const sc = createScenario(db, makeC4Payload('T19-sc'));
+    const filePath = path.join(tmpDir, 't19.xlsx');
+    writeFourSheetXlsx({
+      reconRows: [],
+      businessRows: [
+        makeBusinessAoa({ OrderId: 'O-T19-OK', BillType: 'biz', Amount: 100 }),
+        makeBusinessAoa({ OrderId: 'O-T19-LONELY', BillType: 'biz', Amount: 999 })
+      ],
+      opponentRows: [
+        makeOpponentAoa({ OrderId: 'O-T19-OK', BillType: 'biz', Amount: 100, reconId: 'RID-T19-OPP' })
+      ],
+      savePath: filePath
+    });
+    const state = { reconIdFixSession: null, reconIdFixResult: null };
+    simulateImport(state, filePath);
+    simulateRun(state, db, sc.id);
+    // 用户在 saveDialog 改主名为 myreport.xlsx
+    const userMainPath = path.join(tmpDir, 'myreport.xlsx');
+    const res = await simulateExport(state, db, userMainPath);
+    assert.strictEqual(res.status, 'ok', 'T19 export ok');
+    assert.strictEqual(res.mainFilePath, userMainPath, 'T19 主文件路径 = myreport.xlsx');
+    assert.strictEqual(res.mainFileName, 'myreport.xlsx', 'T19 主文件名');
+    // P3-B：unmatched 文件名应是 myreport-未匹配.xlsx
+    assert.strictEqual(res.unmatchedFileName, 'myreport-未匹配.xlsx', 'T19 unmatched 联动主名');
+    assert.strictEqual(path.dirname(res.unmatchedFilePath), tmpDir, 'T19 unmatched 同目录');
+    assert.ok(fs.existsSync(res.unmatchedFilePath), 'T19 unmatched 文件存在');
+    assert.ok(fs.existsSync(res.mainFilePath), 'T19 主文件存在');
+  }
+
+  // ===== T20（Round 5 P3-C）：buildReconIdFixSnapshot 同语义 config 不同 key 顺序 → 同 snapshot =====
+  {
+    // 关键：模拟 SQLite round-trip 后 config 的 key 顺序变化
+    // 同语义 config（matchRules / billTypes / reconGroups / output 完全等价）但 key 顺序不同
+    const sc1 = {
+      id: 100, name: 'T20-sc', priority: 0, enabled: 1,
+      config: {
+        matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+        billTypes: [
+          { seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: 'biz' }] }
+        ],
+        reconGroups: [
+          { leftTypeSeq: 1, rightTypeSeq: 2,
+            fieldPairs: [{ leftField: 'Amount', rightField: 'Amount', locked: true }] }
+        ],
+        output: { mode: 'main', commonId: null, subBizType: { mode: 'manualMain', mainValue: 'X' } }
+      }
+    };
+    // 同语义但顶层 key 顺序倒过来 + 嵌套 key 顺序倒过来
+    const sc2 = {
+      id: 100, name: 'T20-sc', priority: 0, enabled: 1,
+      config: {
+        // 故意调换顶层 key 顺序
+        output: { subBizType: { mainValue: 'X', mode: 'manualMain' }, commonId: null, mode: 'main' },
+        reconGroups: [
+          { fieldPairs: [{ rightField: 'Amount', locked: true, leftField: 'Amount' }],
+            rightTypeSeq: 2, leftTypeSeq: 1 }
+        ],
+        billTypes: [
+          { conditions: [{ value: 'biz', op: '等于', field: 'BillType' }], side: 'main', seq: 1 }
+        ],
+        matchRules: { manyToOne: false, oneToMany: false, oneToOne: true }
+      }
+    };
+    const snap1 = buildReconIdFixSnapshot(sc1);
+    const snap2 = buildReconIdFixSnapshot(sc2);
+    assert.strictEqual(snap1, snap2, 'T20 同语义不同 key 顺序 → 同 snapshot（资金红线 P3-C）');
+    // 反例：实际改了 config（mode main → both）→ 不同 snapshot
+    const sc3 = JSON.parse(JSON.stringify(sc1));
+    sc3.config.output.mode = 'both';
+    const snap3 = buildReconIdFixSnapshot(sc3);
+    assert.notStrictEqual(snap1, snap3, 'T20 真实改动 → 不同 snapshot');
+    // 数组顺序敏感（不应该排序数组）
+    const sc4 = JSON.parse(JSON.stringify(sc1));
+    sc4.config.billTypes = [
+      { seq: 2, side: 'opp', conditions: [{ field: 'BillType', op: '等于', value: 'biz' }] },
+      { seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: 'biz' }] }
+    ];
+    const sc5 = JSON.parse(JSON.stringify(sc1));
+    sc5.config.billTypes = [
+      { seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: 'biz' }] },
+      { seq: 2, side: 'opp', conditions: [{ field: 'BillType', op: '等于', value: 'biz' }] }
+    ];
+    assert.notStrictEqual(buildReconIdFixSnapshot(sc4), buildReconIdFixSnapshot(sc5), 'T20 数组顺序敏感（语义不同）');
+  }
+
+  console.log('  recon-id-fix-ipc-handlers smoke: 20 / 20 PASS');
 }
 
 module.exports = { runReconIdFixIpcHandlersSmokeTests };
