@@ -138,6 +138,19 @@ function parseBillDateMs(s) {
   return Number.isFinite(t) ? t : null;
 }
 
+// PR #36 round 1 P2 修复（2026-04-30）：解析 _rowIdx 字符串末尾数字部分
+//   _rowIdx 格式：'main_<idx>' 或 'opp_<idx>'（由 classifyRows 生成，idx = 原数组下标）
+//   原 tie-break 用 _rowIdx 字符串字典序，候选 ≥ 10 时 'opp_10' < 'opp_2' 排错；
+//   解析数字部分比较即可恢复"原数组首个 row index"的文档约定。
+//   非法格式（无 _<digits> 后缀）→ 返回 MAX_SAFE_INTEGER 让其排在最后。
+function parseRowIdxNum(rowIdx) {
+  if (rowIdx === null || rowIdx === undefined) return Number.MAX_SAFE_INTEGER;
+  const m = String(rowIdx).match(/_(\d+)$/);
+  if (!m) return Number.MAX_SAFE_INTEGER;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+}
+
 // 检查 leftRow 与 rightRow 在某组对账字段下是否全等（fieldPairs 全部参与 AND 全等）
 // 用于 Step 1 / Step 2（含 Amount 锁定字段对在内全 AND）
 function rowsMatchFieldPairs(leftRow, rightRow, fieldPairs) {
@@ -225,7 +238,10 @@ function enumerateAmountSubsets(candidates, targetCents, maxSize = 8, maxSolutio
 //   1) 解内日期跨度最小（max(子集 BillDate) - min(子集 BillDate)）
 //   2) 离主单 BillDate 最近（min(|主.BillDate - 子集.BillDate|)）
 //   3) 子集元素数最少
-//   4) 子集元素在原数组顺序的首个 BillDate 最早（兜底）
+//   4) 子集元素 _rowIdx 数字部分最小者（兜底；解析后比较，不用字典序，避免 'opp_10' < 'opp_2'）
+//
+// PR #36 round 1 P2 修复（2026-04-30）：原实现 `s.map(r => r._rowIdx).sort()[0]` 是字符串字典序，
+// 当候选 ≥ 10 时 'opp_10' < 'opp_2' 排错；改成解析 `_rowIdx` 数字部分比较，恢复"原数组首个 row index"的文档约定。
 function tieBreakSubsets(subsets, mainBillDate) {
   if (!Array.isArray(subsets) || subsets.length === 0) return null;
   if (subsets.length === 1) return subsets[0];
@@ -238,17 +254,16 @@ function tieBreakSubsets(subsets, mainBillDate) {
       distToMain = Math.min(...dates.map((d) => Math.abs(mainMs - d)));
     }
     const size = s.length;
-    // firstIdx 用 _rowIdx 字符串（'main_3' / 'opp_5'）字典序作 fallback；同侧排序与原行顺序一致
-    const firstIdx = s.map((r) => r._rowIdx).sort()[0] || '';
-    return { subset: s, spread, distToMain, size, firstIdx };
+    // firstIdxNum：解析子集每行 _rowIdx 数字部分取最小值（数字比较，不再字典序）
+    // 同 subset 内同侧（main 或 opp 一致），_rowIdx 形如 'main_3' / 'opp_5' / 'opp_10'
+    const firstIdxNum = Math.min(...s.map((r) => parseRowIdxNum(r._rowIdx)));
+    return { subset: s, spread, distToMain, size, firstIdxNum };
   });
   scored.sort((a, b) => {
     if (a.spread !== b.spread) return a.spread - b.spread;
     if (a.distToMain !== b.distToMain) return a.distToMain - b.distToMain;
     if (a.size !== b.size) return a.size - b.size;
-    if (a.firstIdx < b.firstIdx) return -1;
-    if (a.firstIdx > b.firstIdx) return 1;
-    return 0;
+    return a.firstIdxNum - b.firstIdxNum;
   });
   return scored[0].subset;
 }
@@ -344,7 +359,10 @@ function buildOutputRow(srcRow, overrides) {
 //   Step 1（billDateMode='strict'）保持现状：必须恰好 1 个候选 + reverse 恰好 1 才命中
 
 // Round 5：tie-break 多候选挑 1 个最优
-//   排序顺序：BillDate 距离最近 → _rowIdx 字典序最小
+//   排序顺序：BillDate 距离最近 → _rowIdx 数字部分最小（原数组首个 row index）
+//
+// PR #36 round 1 P2 修复（2026-04-30）：原实现用 `_rowIdx` 字符串字典序，
+// 当候选 ≥ 10 时 'opp_10' < 'opp_2' 排错；改成解析数字部分比较，恢复"原数组首个 row index"语义。
 function pickBestByTieBreak(referenceRow, candidates) {
   if (!Array.isArray(candidates) || candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0];
@@ -357,13 +375,11 @@ function pickBestByTieBreak(referenceRow, candidates) {
     } else {
       dist = Math.abs(refMs - rMs);
     }
-    return { row: r, dist, idx: r._rowIdx || '' };
+    return { row: r, dist, idxNum: parseRowIdxNum(r._rowIdx) };
   });
   scored.sort((a, b) => {
     if (a.dist !== b.dist) return a.dist - b.dist;
-    if (a.idx < b.idx) return -1;
-    if (a.idx > b.idx) return 1;
-    return 0;
+    return a.idxNum - b.idxNum;
   });
   return scored[0].row;
 }
@@ -830,6 +846,7 @@ module.exports = {
   findAmountLockedPair,
   billDateMatches,
   parseBillDateMs,
+  parseRowIdxNum,
   rowsMatchFieldPairs,
   rowsMatchOtherFieldPairs,
   toCents,

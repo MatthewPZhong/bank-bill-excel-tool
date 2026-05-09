@@ -669,7 +669,9 @@ function computeCommonId(commonIdCfg, leftRow, rightRow) {
 
 `pickBestByTieBreak(referenceRow, candidates)` 排序顺序：
 1. **|referenceRow.BillDate - candidate.BillDate| 最小**（距离最近）
-2. **并列时按 candidate `_rowIdx` 字符串字典序最小**（原数组顺序首个；`_rowIdx` 形如 `'opp_0'` / `'main_3'`）
+2. **并列时按 candidate `_rowIdx` 数字部分（解析后比较）最小**（原数组顺序首个 row index；`_rowIdx` 形如 `'opp_0'` / `'main_3'`）
+
+> ⚠️ PR #36 round 1 P2 修复（2026-04-30）：原文档与实现都用"`_rowIdx` 字符串字典序"作 fallback，但当候选 ≥ 10 时 `'opp_10'` < `'opp_2'`（字典序按字符比较，`'1'<'2'`）排错；改成解析 `_rowIdx` 数字部分比较即可恢复"原数组首个 row index"的真实语义。详见 §五.2.4.1 `parseRowIdxNum`。
 
 伪代码：
 
@@ -684,9 +686,9 @@ function pickBestByTieBreak(referenceRow, candidates) {
       dist: refMs === null || parseBillDateMs(r.BillDate) === null
         ? Infinity
         : Math.abs(refMs - parseBillDateMs(r.BillDate)),
-      idx: r._rowIdx || ''
+      idxNum: parseRowIdxNum(r._rowIdx)
     }))
-    .sort((a, b) => a.dist - b.dist || (a.idx < b.idx ? -1 : a.idx > b.idx ? 1 : 0))[0].row;
+    .sort((a, b) => a.dist - b.dist || a.idxNum - b.idxNum)[0].row;
 }
 
 function tryOneToOne(leftRows, rightRows, fieldPairs, billDateMode, ..., stepLabel) {
@@ -906,7 +908,10 @@ function enumerateAmountSubsets(candidates, targetCents, maxSize = 8, maxSolutio
   );
 }
 
-// tieBreak：多解时按 spread → distToMain → size → firstIdx 字典序排序，取首
+// tieBreak：多解时按 spread → distToMain → size → firstIdxNum 数字部分排序，取首
+//
+// PR #36 round 1 P2 修复（2026-04-30）：原实现 `s.map(r=>r._rowIdx).sort()[0]` 是字符串字典序，
+// 当候选 ≥ 10 时 'opp_10' < 'opp_2'（因 '1'<'2'）排错；改成解析 _rowIdx 数字部分比较即可。
 function tieBreakSubsets(subsets, mainBillDate) {
   if (!Array.isArray(subsets) || subsets.length === 0) return null;
   if (subsets.length === 1) return subsets[0];
@@ -918,18 +923,27 @@ function tieBreakSubsets(subsets, mainBillDate) {
     if (mainMs !== null && dates.length > 0) {
       distToMain = Math.min(...dates.map((d) => Math.abs(mainMs - d)));
     }
-    const firstIdx = s.map((r) => r._rowIdx).sort()[0] || '';
-    return { subset: s, spread, distToMain, size: s.length, firstIdx };
+    const firstIdxNum = Math.min(...s.map((r) => parseRowIdxNum(r._rowIdx)));
+    return { subset: s, spread, distToMain, size: s.length, firstIdxNum };
   });
   scored.sort((a, b) => {
     if (a.spread !== b.spread) return a.spread - b.spread;
     if (a.distToMain !== b.distToMain) return a.distToMain - b.distToMain;
     if (a.size !== b.size) return a.size - b.size;
-    if (a.firstIdx < b.firstIdx) return -1;
-    if (a.firstIdx > b.firstIdx) return 1;
-    return 0;
+    return a.firstIdxNum - b.firstIdxNum;
   });
   return scored[0].subset;
+}
+
+// PR #36 round 1 P2 修复新增：解析 _rowIdx 字符串末尾数字部分
+//   _rowIdx 形如 'main_<idx>' / 'opp_<idx>'（由 classifyRows 生成）
+//   非法格式（无 _<digits> 后缀）→ 返回 MAX_SAFE_INTEGER 让其排在最后
+function parseRowIdxNum(rowIdx) {
+  if (rowIdx === null || rowIdx === undefined) return Number.MAX_SAFE_INTEGER;
+  const m = String(rowIdx).match(/_(\d+)$/);
+  if (!m) return Number.MAX_SAFE_INTEGER;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
 }
 ```
 

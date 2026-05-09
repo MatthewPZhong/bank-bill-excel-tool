@@ -16,6 +16,7 @@ const {
   enumerateAmountSubsets,
   tieBreakSubsets,
   pickBestByTieBreak,
+  parseRowIdxNum,
   lookupReconId,
   resolveSubBizType,
   computeCommonId,
@@ -773,11 +774,12 @@ function runRound4SubsetSumHelpers() {
   chosen = tieBreakSubsets([subsetX, subsetY], '2026-04-15');
   assert.strictEqual(chosen, subsetX, 'tieBreak step 3：size 较小者优先（X 2 元素 < Y 3 元素）');
 
-  // 测试 4：所有 3 都并列时 → firstIdx 字典序兜底
-  const subsetP = [makeTbCand('F2', '2026-04-15'), makeTbCand('F3', '2026-04-15')];
-  const subsetQ = [makeTbCand('F1', '2026-04-15'), makeTbCand('F4', '2026-04-15')];
+  // 测试 4：所有 3 都并列时 → firstIdxNum 数字部分兜底（PR #36 round 1 P2 修复）
+  // 用真实生产格式 `<side>_<idx>` 测；含 'opp_2' 的子集应优先于含 'opp_3' 的
+  const subsetP = [makeTbCand('opp_2', '2026-04-15'), makeTbCand('opp_3', '2026-04-15')];
+  const subsetQ = [makeTbCand('opp_1', '2026-04-15'), makeTbCand('opp_4', '2026-04-15')];
   chosen = tieBreakSubsets([subsetP, subsetQ], '2026-04-15');
-  assert.strictEqual(chosen, subsetQ, 'tieBreak step 4：firstIdx 兜底（Q 含 F1 字典序最早）');
+  assert.strictEqual(chosen, subsetQ, 'tieBreak step 4：firstIdxNum 数字部分兜底（Q 含 opp_1 数字最小）');
 
   // 单解直接返回
   chosen = tieBreakSubsets([subsetA], '2026-04-15');
@@ -1226,6 +1228,149 @@ function runRound5Step2SingleCandidateUnchanged() {
   assert.strictEqual(result.fixedRows[0].Reference, 'R-S', 'Step 2 单候选 Reference 正确');
 }
 
+// ===== PR #36 round 1 P2 修复：≥ 10 候选时 _rowIdx 必须按数字部分比较，不按字典序 =====
+//
+// 修前：tie-break 用 _rowIdx 字符串字典序，'opp_10' < 'opp_2'（'1' < '2'）→ 排错
+// 修后：解析 _rowIdx 数字部分比较 → 'opp_2' 数字 2 < 'opp_10' 数字 10 → 选 opp_2
+//
+// P2-1：pickBestByTieBreak ≥ 10 候选时按数字部分挑最小（Step 2 多候选 tie-break）
+function runPR36P2PickBestByTieBreakNumeric() {
+  // 构造 12 个从单（opp_0 ~ opp_11），全部 04-28 同日 + AND 全等 + 同 dist=0
+  // 主 04-28，期望 Step 2 tie-break 选 opp_0（数字最小）
+  // 之前 bug 行为：字典序 opp_0 / opp_1 / opp_10 / opp_11 / opp_2 / ... → opp_0 仍是首个（数字 0 == 字典序最小）
+  // 关键测试：让 opp_0 ~ opp_1 在 Step 1 严格命中失败但仍是 Step 2 候选 → 候选含 opp_2 ~ opp_10
+  // 简化：用 pickBestByTieBreak 直接单测（无需经过 Step 1/2 流程）
+  // 候选数组顺序故意打乱，把 opp_10 放第 0 位 + opp_2 放最后位 → 验证排序而非顺序
+  const ref = { BillDate: '2026-04-28' };
+  const candidates = [
+    { _rowIdx: 'opp_10', BillDate: '2026-04-27' },  // dist=1day
+    { _rowIdx: 'opp_3',  BillDate: '2026-04-27' },  // dist=1day
+    { _rowIdx: 'opp_5',  BillDate: '2026-04-27' },  // dist=1day
+    { _rowIdx: 'opp_11', BillDate: '2026-04-27' },  // dist=1day
+    { _rowIdx: 'opp_7',  BillDate: '2026-04-27' },  // dist=1day
+    { _rowIdx: 'opp_4',  BillDate: '2026-04-27' },  // dist=1day
+    { _rowIdx: 'opp_8',  BillDate: '2026-04-27' },  // dist=1day
+    { _rowIdx: 'opp_6',  BillDate: '2026-04-27' },  // dist=1day
+    { _rowIdx: 'opp_9',  BillDate: '2026-04-27' },  // dist=1day
+    { _rowIdx: 'opp_2',  BillDate: '2026-04-27' }   // dist=1day  ← 数字最小
+  ];
+  const picked = pickBestByTieBreak(ref, candidates);
+  assert.strictEqual(picked._rowIdx, 'opp_2',
+    'P2-1 修复：≥10 候选时按 _rowIdx 数字最小（opp_2 < opp_10）；修前字典序 opp_10 排在 opp_2 之前');
+
+  // 字典序对照：'opp_10' < 'opp_2'（因 '1' < '2'）→ 字典序首个会是 opp_10
+  // 但数字比较：2 < 10 → 数字首个是 opp_2
+  // 这两个 picked 不同就证明修复生效
+  const stringOrderFirst = candidates
+    .slice()
+    .sort((a, b) => (a._rowIdx < b._rowIdx ? -1 : a._rowIdx > b._rowIdx ? 1 : 0))[0];
+  assert.strictEqual(stringOrderFirst._rowIdx, 'opp_10',
+    '对照：字典序 opp_10 排第一（修前会被 pickBestByTieBreak 错选）');
+
+  // 端到端流程验证：Step 2 多候选（候选从 opp_2 起共 10 个），验证字典序 vs 数字序差异
+  // 主单 04-28；S0/S1 BizType=Y → 被 BizType AND 过滤掉，不进候选
+  //                 S2~S11 BizType=X 都 04-27 dist=1day 全等 → Step 2 候选 = 10 个
+  // 修前：字典序 'opp_10' < 'opp_2' → 错选 opp_10 (S10)
+  // 修后：数字最小 → 命中 opp_2 (S2)
+  // 这个用例的关键是 opp_2 vs opp_10 在字典序下 opp_10 排前；只有数字比较才能选 opp_2
+  const business = [
+    makeBusinessRow({ OrderId: 'M', BillDate: '2026-04-28', Amount: 100, BizType: 'X', reconId: 'R-M' })
+  ];
+  const opponent = [];
+  // S0 / S1 BizType=Y → 被 BizType AND 过滤不进候选
+  opponent.push(makeOpponentRow({ OrderId: 'S0', BillDate: '2026-04-27', Amount: 100, BizType: 'Y', reconId: 'R-S0' }));
+  opponent.push(makeOpponentRow({ OrderId: 'S1', BillDate: '2026-04-27', Amount: 100, BizType: 'Y', reconId: 'R-S1' }));
+  // S2 ~ S11 BizType=X 都 04-27（dist=1day, AND 全等）→ Step 2 候选 = 10 个
+  for (let i = 2; i < 12; i++) {
+    opponent.push(makeOpponentRow({
+      OrderId: `S${i}`,
+      BillDate: '2026-04-27',
+      Amount: 100,
+      BizType: 'X',
+      reconId: `R-S${i}`
+    }));
+  }
+  // Step 1 严格 04-28 vs 04-27 不等 → 0 候选；Step 2 ±1day → 10 个候选 → tie-break
+  const cfg = makeCfg({
+    matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+    output: { mode: 'main', subBizType: { mode: 'manualMain', mainValue: 'X' } },
+    extraFieldPairs: [{ leftField: 'BizType', rightField: 'BizType' }]
+  });
+  const scenario = makeScenario('recon-id-fix', 'pr36-p2-pickbest-numeric', cfg);
+  const result = runReconIdFix(scenario, { reconResult: [], businessBills: business, opponentBills: opponent });
+  assert.strictEqual(result.fixedRows.length, 1, 'Step 2 ≥10 候选 tie-break 命中 1 行');
+  // S2 = opp_2（数字最小，dist=1day 全部并列）；修前会因字典序 'opp_10' < 'opp_2' 错选 opp_10
+  assert.strictEqual(result.fixedRows[0].Reference, 'R-S2',
+    'P2-1 端到端：Step 2 候选 10 个 dist 全等 → 选 _rowIdx 数字最小 opp_2 → R-S2（修前字典序会错选 R-S10）');
+}
+
+// P2-2：tieBreakSubsets ≥ 10 候选 + spread/distToMain/size 全等 → firstIdxNum 数字最小
+function runPR36P2TieBreakSubsetsNumeric() {
+  // 构造场景：主单 1000；从单池 12 个，每个 100。subset-sum 找 10 个 100 拼出 1000？
+  // 但 maxSize=8，10 元素子集会被截断。先构造另一个：主 200，候选 [opp_0..opp_11] 各 100 → 任意 2 个=200
+  // C(12,2)=66 解，截断到 maxSolutions=64。
+  // 每个解 size=2、spread=0（全 04-09 同日）、distToMain=0（同日）→ 全等 → firstIdxNum 兜底
+  // 期望：选 {opp_0, opp_1}（含 idx_num=0 数字最小；修前字典序也是 opp_0 第一，因 'opp_0' 字典序最小）
+  // 改造：让 opp_0/opp_1 不进候选，让 opp_2 ~ opp_11 进候选 → 修前选 'opp_10' 字典序，修后选 'opp_2' 数字
+  //
+  // 实施：主 BizType=X，从 opp_0/opp_1 BizType=Y（被 BizType AND 过滤丢掉）；opp_2..opp_11 BizType=X
+  // 候选 10 个 amount=100 → subset-sum 200 → C(10,2)=45 解（在 maxSolutions=64 内）
+  // 每个解 size=2/spread=0/distToMain=0/firstIdxNum 不同
+  // 修前字典序：每个解的 firstIdx string = sort()[0]，含 opp_2 的解 firstIdx='opp_2'，含 opp_10 的解 firstIdx='opp_10'
+  //   字典序 'opp_10' < 'opp_2' → 含 opp_10 + opp_11 的解是字典序最小（firstIdx='opp_10'）
+  // 修后数字：含 opp_2 的解 firstIdxNum=2，含 opp_10 的解 firstIdxNum=10 → 含 opp_2 的解最小
+
+  const business = [
+    makeBusinessRow({ OrderId: 'M', BillDate: '2026-04-09', Amount: 200, BizType: 'X', reconId: 'R-M' })
+  ];
+  const opponent = [];
+  // opp_0 / opp_1 BizType=Y → 不进候选
+  opponent.push(makeOpponentRow({ OrderId: 'S0', BillDate: '2026-04-09', Amount: 100, BizType: 'Y', reconId: 'R-S0' }));
+  opponent.push(makeOpponentRow({ OrderId: 'S1', BillDate: '2026-04-09', Amount: 100, BizType: 'Y', reconId: 'R-S1' }));
+  // opp_2 ~ opp_11 BizType=X → 进候选（10 个）
+  for (let i = 2; i < 12; i++) {
+    opponent.push(makeOpponentRow({
+      OrderId: `S${i}`,
+      BillDate: '2026-04-09',
+      Amount: 100,
+      BizType: 'X',
+      reconId: `R-S${i}`
+    }));
+  }
+  const cfg = makeCfg({
+    matchRules: { oneToOne: true, oneToMany: true, manyToOne: false },
+    output: { mode: 'opp', subBizType: { mode: 'manualOpp', oppValue: 'X' } },
+    extraFieldPairs: [{ leftField: 'BizType', rightField: 'BizType' }]
+  });
+  const scenario = makeScenario('recon-id-fix', 'pr36-p2-tiebreak-subset-numeric', cfg);
+  const result = runReconIdFix(scenario, { reconResult: [], businessBills: business, opponentBills: opponent });
+  // 期望：subset-sum {opp_2, opp_3} 命中 → 2 行从（mode=opp）
+  assert.strictEqual(result.fixedRows.length, 2,
+    'tieBreakSubsets ≥10 候选 spread/distToMain/size 全等 → 选 firstIdxNum 数字最小子集 → 2 行');
+  const orderIds = new Set(result.fixedRows.map((r) => r.OrderId));
+  assert.ok(orderIds.has('S2') && orderIds.has('S3'),
+    'P2-2 修复：选含 opp_2(=S2) + opp_3(=S3) 的子集（数字最小 2,3）；修前字典序会选含 opp_10/opp_11');
+  assert.ok(!orderIds.has('S10') && !orderIds.has('S11'),
+    '修后 S10/S11 不在命中（修前因字典序 opp_10 < opp_2 会被错选）');
+
+  // 直接单测 tieBreakSubsets：构造同 spread/distToMain/size 但 firstIdxNum 不同的子集
+  function makeTb(rowIdx) { return { _rowIdx: rowIdx, BillDate: '2026-04-09' }; }
+  const subsetA = [makeTb('opp_10'), makeTb('opp_11')];  // firstIdxNum=10
+  const subsetB = [makeTb('opp_2'), makeTb('opp_5')];    // firstIdxNum=2
+  const subsetC = [makeTb('opp_3'), makeTb('opp_4')];    // firstIdxNum=3
+  const chosen = tieBreakSubsets([subsetA, subsetB, subsetC], '2026-04-09');
+  assert.strictEqual(chosen, subsetB,
+    'tieBreakSubsets 直接单测：firstIdxNum=2 (B) < 3 (C) < 10 (A)；修前字典序会选 A（含 opp_10）');
+
+  // parseRowIdxNum 单测
+  assert.strictEqual(parseRowIdxNum('opp_0'), 0, 'parseRowIdxNum opp_0 → 0');
+  assert.strictEqual(parseRowIdxNum('opp_2'), 2, 'parseRowIdxNum opp_2 → 2');
+  assert.strictEqual(parseRowIdxNum('opp_10'), 10, 'parseRowIdxNum opp_10 → 10');
+  assert.strictEqual(parseRowIdxNum('main_5'), 5, 'parseRowIdxNum main_5 → 5');
+  assert.strictEqual(parseRowIdxNum('no-suffix'), Number.MAX_SAFE_INTEGER, 'parseRowIdxNum 非法格式 → MAX_SAFE_INTEGER（排最后）');
+  assert.strictEqual(parseRowIdxNum(null), Number.MAX_SAFE_INTEGER, 'parseRowIdxNum null → MAX_SAFE_INTEGER');
+}
+
 // ===== category guard =====
 function runCategoryGuard() {
   assert.throws(
@@ -1278,6 +1423,9 @@ function runReconIdFixEngineSmokeTests() {
     runRound5Step2ReverseConflict,
     runRound5Step1Unchanged,
     runRound5Step2SingleCandidateUnchanged,
+    // PR #36 round 1 P2 修复（≥10 候选时 _rowIdx 数字部分比较，不再字典序）
+    runPR36P2PickBestByTieBreakNumeric,
+    runPR36P2TieBreakSubsetsNumeric,
     runCategoryGuard
   ];
   tests.forEach((t) => t());

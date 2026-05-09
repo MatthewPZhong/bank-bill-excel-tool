@@ -131,6 +131,51 @@
 
 ---
 
+## 2026-04-30 PR #36 round 1 P2 修复（_rowIdx tie-break 字典序 → 数字部分比较）
+
+- **背景**：Codex bot review PR #36 round 1 给了 2 个 P2 finding（同一根因），都在 `src/main-process/scenario-engines/c4-recon-id-fix.js`：
+  - **P2-1**（`pickBestByTieBreak` 第 360 行附近）：When Step 2 has at least 10 same-distance candidates, this string key makes `_rowIdx` sort lexicographically, so `opp_10` is chosen before `opp_2` even though the documented fallback is the smallest original row index.
+  - **P2-2**（`tieBreakSubsets` 第 242 行附近）：For 1vN/Nv1 subset tie-breaks, using the raw `_rowIdx` string means otherwise-equal subsets choose rows like `opp_10` before `opp_2`. In pools with 10+ candidates and equal spread/distance/size, the fallback no longer reflects original input order.
+
+- **根因**：`_rowIdx` 由 `classifyRows` 生成为 `'<side>_<idx>'` 字符串（idx 是原数组下标）；两处 tie-break 用 `r._rowIdx` 字符串字典序作兜底排序键。当原数组 ≥ 10 行时 `'opp_10'` < `'opp_2'`（字典序按字符比较，`'1' < '2'`），违反 spec 文档"原数组首个 row index"约定。
+
+- **决策**（方案 A — 最小侵入）：新增 `parseRowIdxNum(rowIdx)` 工具函数解析 `_rowIdx` 数字部分（正则 `/_(\d+)$/` 末尾连续数字），两处 tie-break sort key 改用数字比较。`_rowIdx` 字符串本身保留（pairedLeft / pairedRight Set 等其他用法不变）。
+
+- **改动清单**（4 文件）：
+  - `src/main-process/scenario-engines/c4-recon-id-fix.js`：
+    - 新增 `parseRowIdxNum(rowIdx)` 工具函数（位于 `parseBillDateMs` 之后，含 PR #36 round 1 P2 注释）
+    - `pickBestByTieBreak` 排序 key 从 `idx: r._rowIdx || ''` 改为 `idxNum: parseRowIdxNum(r._rowIdx)`，比较逻辑 `a.idxNum - b.idxNum`
+    - `tieBreakSubsets` 中 firstIdx 字符串排序 → `firstIdxNum = Math.min(...s.map(r => parseRowIdxNum(r._rowIdx)))`，比较逻辑改为数字比较
+    - module.exports 暴露 `parseRowIdxNum`（smoke 单测用）
+  - `scripts/smoke/recon-id-fix-engine.js`：
+    - 修 `runRound4SubsetSumHelpers` 测试 4：`'F1'/'F2'/'F3'/'F4'` 改成生产格式 `'opp_1'/'opp_2'/'opp_3'/'opp_4'`，期望保持 subsetQ（含 opp_1 数字最小）
+    - 新增 `runPR36P2PickBestByTieBreakNumeric`（P2-1 修复用例）：直接单测 `pickBestByTieBreak` 12 候选 + 端到端 Step 2 ≥10 候选验证选 `opp_2`（数字最小）
+    - 新增 `runPR36P2TieBreakSubsetsNumeric`（P2-2 修复用例）：端到端 1v多 subset-sum 12 候选过滤后 10 候选 + 直接单测 `tieBreakSubsets` 同 spread/dist/size 数字部分兜底 + `parseRowIdxNum` 单测
+    - tests 注册新增 2 用例（35 → 37）
+  - `docs/iterations/v2.1.0-beta.1/spec.md`：
+    - §五.2.3 `pickBestByTieBreak` 文档把"`_rowIdx` 字符串字典序最小"改为"`_rowIdx` 数字部分（解析后比较）最小"，伪代码 sort key 改 `idxNum`，附 P2 修复说明
+    - §五.2.4.1 `tieBreakSubsets` 实现把字符串排序改为 `firstIdxNum = Math.min(...)` 数字比较，新增 `parseRowIdxNum` 工具函数文档块
+  - `docs/iterations/v2.1.0-beta.1/log.md`：本节
+
+- **测试证据**：
+  - `npm run smoke` **262/262 PASS**（baseline 260 + 新增 2 P2 修复用例；recon-id-fix-engine smoke 35 → 37）
+  - 真实 fixture 回归（无退步）：
+    - 基金 fixture（`/Users/pzhong/Desktop/小助手-Debug/2.0.0/订单枚举表/单据对账导出不平.xlsx`）：fixedRowCount=80 / mainTouched=30 / oppTouched=50 / unmatched=0 / warnings=0（与 round 4/5 baseline 完全一致）
+    - FX 中台入金 fixture（`/Users/pzhong/Desktop/小助手-Debug/2.1.0/FX中台入金-初始.xlsx`）：fixedRowCount=96 / mainTouched=36 / oppTouched=60 / unmatched=18 / warnings=0（与 round 5 baseline 完全一致）；用户用例 FTA202604280200028 ↔ 202604271439325696974017228 双双命中并共享 commonId
+  - 修复前后行为差对照（手算）：
+    - 候选数组 `['opp_10','opp_3','opp_5','opp_11','opp_7','opp_4','opp_8','opp_6','opp_9','opp_2']`
+    - 字典序排序首个 = `'opp_10'`（修前 bug 行为）
+    - 数字序排序首个 = `'opp_2'`（修后正确行为）
+
+- **风险显式提醒**：
+  - 资金红线（tie-break 唯一性 + 与原数组顺序一致）：修后行为更严格符合 spec 文档"原数组首个 row index"约定，对 ≥ 10 行的真实业务场景才有可观测差异；< 10 行场景行为不变（字典序与数字序在 0~9 范围内一致）
+  - 资金红线（不破坏 round 1-5 已验证逻辑）：用户用例 FTA + 真实 fixture 全部回归 PASS；P2 修复仅影响"≥ 10 候选 + 同 dist/spread/distToMain/size 全等"路径，不改 Step 1 严格 / Step 2 单候选 / 池子 subset-sum / 双向一致性等其他路径
+  - 兼容性：`_rowIdx` 字符串本身不变（pairedLeft / pairedRight Set / lastStepBy* Map 等用法保留），仅 sort key 改成数字解析
+
+- **下一步**：等用户合并 PR #36
+
+---
+
 ## 2026-05-09 PR-B Round 5 微调（Step 2 多候选 tie-break）+ 1 决策回写
 
 - **背景**：用户测试 Round 4 时发现一个用例没命中
