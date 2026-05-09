@@ -271,8 +271,12 @@ function enumerateAmountSubsets(candidates, targetCents, maxSize = 8, maxSolutio
 //   - 升序排序 + cents > remaining 剪枝（与旧实现一致）
 //   - 后缀总和不足剪枝（remaining > 后缀和 → break；新增）
 //   - maxSize=8（与旧实现一致；业务约束）
-//   - 启发式提前终止：当 best 已是 spread=0 + distToMain=0 + size=2 时，break（后续不可能更优）
-//   - 硬上限 hardCeiling（默认 100000；DFS visit 次数防御；仅极端数据兜底）
+//   - 硬上限 hardCeiling（默认 5000000；DFS visit 次数防御；仅极端数据兜底）
+//
+// PR #36 round 3 P2 修复（2026-05-09）：删除"启发式提前终止"剪枝
+//   原剪枝条件 spread=0 + distToMain=0 + size=2 只覆盖 tieBreak 前 3 阶，
+//   firstIdxNum 第 4 阶仍可能改进（user 复现：[opp_10:1, opp_2:50, opp_3:50, opp_11:99] target=100
+//   早停后选 [opp_10, opp_11]，删早停后选 [opp_2, opp_3]）。
 //
 // 返回 Array<row>（最优子集，按 row._origIdx 升序）；无解返回 null
 //

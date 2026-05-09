@@ -1385,7 +1385,8 @@ function runPR36P2TieBreakSubsetsNumeric() {
 //
 // 修后：池子 `findBestAmountSubset(...)`
 //   DFS 遍历所有可能解 → 每找到 1 个 sum=target 解立即与 best 比对 → 不预截断
-//   性能：升序剪枝 + 后缀和剪枝 + 启发式提前终止（best 已 spread=0+distToMain=0+size=2 → break）+ hardCeiling 防御
+//   性能：升序剪枝 + 后缀和剪枝 + maxSize=8 + hardCeiling=5000000 visit 防御
+//   round 3 已删除"启发式提前终止"（spread=0+distToMain=0+size=2 break）剪枝（漏 firstIdxNum 第 4 阶最优）
 
 // P2-3：user 复现 — 10 个 04-01 候选 + 3 个 04-15 候选 + target=300 → 修后选 3 个 04-15（spread=0+distToMain=0），不选 04-01 子集
 function runPR36Round2P2UserRepro() {
