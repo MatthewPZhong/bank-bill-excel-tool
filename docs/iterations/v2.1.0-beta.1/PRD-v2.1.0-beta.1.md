@@ -1015,16 +1015,16 @@ state.reconIdFixResult = {  // 运行后产生
 
 ## 十一、PR 拆分
 
-按用户已对齐的 4 个 PR 切分。每个 PR 都跑 `check-vars` + `smoke` + `preview`。
+> **2026-05-09 调整**：PR-C 识读规律功能已取消（用户决策）。4 PR → **3 PR（A / B / D）**，§三 D7 / §七.4 / §十.2 等识读相关章节作历史记录保留但标 **DEPRECATED**。
 
 | PR | 内容 | 工作量估 | 状态 |
 |---|---|---|---|
-| **PR-A 骨架** | 模块入口 + 模块面板 + 场景管理 CRUD（C4 配置弹窗 + 类别选择四选一）+ SQLite migration（CHECK 扩） + 持久化 + 4 IPC（recon-id-fix:import 占位）| 2-3 天 | 待启动 |
-| **PR-B 对账引擎** | 4 sheet IO + C4 引擎（3 阶配对 + 7+5 规则）+ writer（15 列输出）+ "开始运行"/"导出文件"接通 + warnings → status 文案 | 4-5 天 | 待启动 |
-| **PR-C 识读规律** | 「识读场景规律」按钮 + ExcelJS cell.fill 解析 + fields-equal mining + 自动填表 | 1.5-2 天 | 待启动 |
+| **PR-A 骨架** | 模块入口 + 模块面板 + 场景管理 CRUD（C4 配置弹窗 + 类别选择四选一）+ SQLite migration（CHECK 扩） + 持久化 + 4 IPC（recon-id-fix:import 占位）| 2-3 天 | ✅ 已合并（PR #35） |
+| **PR-B 对账引擎** | 4 sheet IO + C4 引擎（5 阶段算法 + subset-sum + 7+5 规则）+ writer（15 列输出）+ unmatched.xlsx 双文件输出 + "开始运行"/"导出文件"接通 | 4-5 天 | ✅ 已合并（PR #36） |
+| ~~**PR-C 识读规律**~~ | ~~识读场景规律按钮 + ExcelJS cell.fill 解析 + fields-equal mining + 自动填表~~ | ~~1.5-2 天~~ | ❌ **已取消** |
 | **PR-D 收尾** | USER_GUIDE / VERSION_FEATURE_HISTORY / CHANGELOG 三件套 + 整体 smoke + 版本号 bump（`2.0.0` → `2.1.0-beta.1`） | 1 天 | 待启动 |
 
-总工作量约 8.5-11 天。
+总工作量约 7-9 天（去掉 PR-C 的 1.5-2 天）。
 
 ---
 
@@ -1195,15 +1195,20 @@ state.reconIdFixResult = {  // 运行后产生
   - smoke：**272/272 PASS**（266 baseline + 6 新增/改造：T18 P3-A 默认名 + T19 P3-B 联动 + T20 P3-C 同语义同 snapshot + R13 联动签名 + T16/T17 行为 P3-A/P3-B 校准）
   - 回归不变：用户用例 FTA202604280200028 ↔ 202604271439325696974017228 命中 ✓ / 基金 fixture 80/30/50/0 ✓ / FX 中台入金 fixture 96/36/60/18 ✓ / 资金红线 stale-snapshot smoke T12/T13 通过 ✓ / subset-sum tie-break 4 阶完整 ✓
 
-### PR-C 识读规律（待启动）
+### ~~PR-C 识读规律~~（**已取消** — 2026-05-09）
 
-- 草稿：—
-- 初版：—
-- 最终：—
-- merge commit：—
-- 改动文件：—
-- 关键决策修订：—
-- 测试证据：—
+**取消原因**：用户决策不再实施识读规律功能。dev 在 PR-C round 1 完成自测后（278/278 PASS）用户测试发现 alert 关闭后误回主页面 bug；修复后用户改变需求，决定整体取消该功能。
+
+**回退动作**：
+- 工作树 PR-C 改动全部回退（4 modified 恢复 + 2 untracked 删除）
+- C4 dialog（src/renderer-dialogs.js）删除「识读场景规律」按钮 + tooltip 常量（PR-A 占位也一并清理）
+- §三 D7 / §六 F3 识读按钮段 / §七.1 识读按钮段 / §七.4 识读规律算法 / §十.2 识读误判风险 等章节标 **DEPRECATED**（历史决策痕迹保留）
+- §十一 PR 拆分表：4 PR → 3 PR（A / B / D），PR-C 行划线
+- tasks.md PR-C task C1-C5 标 **CANCELLED**
+
+**保留事项**：
+- `samples/单据对账导出不平-对平例子.xlsx` fixture 暂留（不影响 PR-A/B 测试；PR-D 决定是否清理）
+- v2.0.0-beta.3 PR #32a 引入的 `exceljs` 依赖保留（`recon-id-fix-io.js writeUnmatchedReport` / banker 模块仍依赖）
 
 ### PR-D 收尾（待启动）
 

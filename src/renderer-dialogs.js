@@ -6658,8 +6658,6 @@
       const dialog = document.createElement('div');
       dialog.className = 'modal-card scenario-config-card scenario-config-c4';
 
-      const inferTooltip = '导入单据不平结果表，表里的"业务部门账单"sheet 和"对手部门账单"sheet 需放入对平结果。多个例子时，需将同一例子的所有单元格颜色置为同色。通过识读对平结果，分析对平规则，分析结果填入账单类型和对账字段里。';
-
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">${escapeHtml(getCategoryDialogTitle(draft.category, mode))}</div>
@@ -6706,13 +6704,8 @@
             <div class="scenario-config-c4-output" data-c4-output></div>
           </div>
         </div>
-        <div class="dialog-actions left-right">
-          <div class="dialog-actions-left">
-            <button class="secondary-btn small" type="button" data-c4-action="infer-rules" disabled title="${escapeHtml(inferTooltip)}">识读场景规律</button>
-          </div>
-          <div class="dialog-actions-right">
-            ${buildScenarioActionsHtml(mode)}
-          </div>
+        <div class="dialog-actions">
+          ${buildScenarioActionsHtml(mode)}
         </div>
       `;
 

@@ -607,3 +607,25 @@
 - "纯规则推断" + "不落库 + 用户必须确认"= 双保险
 - 颜色分组（同色同例）依赖用户文件本身已有的视觉标记，工程上易实现（ExcelJS cell.fill）
 - fields-equal mining 的全等率阈值默认 0.8，可调（PR-C 实施时如果 fixture 命中率不到 0.8 再下调）
+
+---
+
+## 2026-05-09 PR-C 识读规律功能取消
+
+**触发**：dev round 1 完成自测（278/278 PASS）→ 用户测试发现 alert 关闭后跳主页面（已修）→ 用户决定整体取消该功能。
+
+**回退动作**：
+- 工作目录 PR-C 改动全部回退（4 modified 恢复 + 2 untracked 删除）
+- C4 dialog 删除「识读场景规律」按钮 + tooltip 常量（PR-A 占位代码也清理）
+- PRD §十一 4 PR → 3 PR（A/B/D），PR-C 划线
+- PRD §十六 PR-C 段标"已取消"+ 取消原因
+- tasks.md PR-C 章节标 CANCELLED
+
+**保留事项**：
+- `samples/单据对账导出不平-对平例子.xlsx` fixture 暂留（PR-D 决定是否清理）
+- exceljs 依赖保留（unmatched.xlsx writer + banker 模块仍依赖）
+
+**经验教训**：
+- 教训：未来类似"自动化辅助"功能要在 PRD 阶段先做 demo，不要等代码落地才发现用户不需要
+
+**smoke 现状**：272/272 PASS（baseline 保持，PR-C 6 用例已删，回到 PR-B 合并后状态）
