@@ -176,6 +176,99 @@
 
 ---
 
+## 2026-04-30 PR #36 round 2 P2 修复（subset-sum 全局最优；DFS 全遍历维护 best）
+
+- **背景**：user (MatthewPZhong) 在 PR #36 上提了新的 P2 finding（round 1 P2 修复之后再发现的）：
+
+  > 这轮修复只把 `_rowIdx` 改成了数字比较，但 `enumerateAmountSubsets()` 仍然在 DFS 中达到 `maxSolutions` 后立即停止。后续 `tieBreakSubsets()` 只能在前 64 个枚举解里选最优，真正日期跨度更小/离主单更近的解如果排在第 65 个之后仍会被漏掉。
+
+  user 提供了可复现用例：10 个 `2026-04-01` 候选 + 3 个 `2026-04-15` 候选、`target=300` 时，前 64 个解里 0 个全 04-15 子集（解空间 C(13,3)=286，前 64 解都是 04-01 子集主导），最终选了 04-01 子集（spread=0+distToMain=14day 次优），而非 3 个 04-15（spread=0+distToMain=0 全局最优）。
+
+- **根因**：`enumerateAmountSubsets(...) → tieBreakSubsets(...)` 二段式语义错位：
+  1. `enumerateAmountSubsets` DFS 遇到 `maxSolutions=64` 解后立即停（"先截断"）
+  2. `tieBreakSubsets` 在前 64 解里排序选最优（"再排序"）
+
+  这是"先截断再排序"——只有当全局最优能被前 64 解覆盖时才正确。`maxSolutions=64` 是 round 4 设计为防组合爆炸（O(2^n)）的上限，但对"全局最优排在第 N>64 位"的合理业务场景没法保证正确。
+
+- **决策**（方案 A — 强烈推荐项，不选 B / C）：DFS 全遍历维护全局 best
+  1. 新增工具函数 `findBestAmountSubset(candidates, targetCents, mainBillDate, options)`：
+     - DFS 找到 `sum=target` 的解时，立即与"当前 best"做完整 tieBreak 比较（spread → distToMain → size → firstIdxNum）
+     - 不收集 solutions 数组、不预截断；遍历所有可能解
+     - 返回 `Array<row>`（最优子集，按 `_origIdx` 升序）；无解返回 `null`
+  2. **池子算法**（`tryOneToManyPool` / `tryManyToOnePool`）改用 `findBestAmountSubset`，不再调用 `enumerateAmountSubsets` + `tieBreakSubsets` 二段式
+  3. **保留** `enumerateAmountSubsets` / `tieBreakSubsets` 函数及其 exports（向后兼容 + 单测覆盖），但**注释明确标注"池子算法不再调用，仅供单测/向后兼容"**
+  4. 性能保障（防止全遍历退化）：
+     - 升序剪枝（`c.cents > remaining` break，与旧实现一致）
+     - 后缀总和剪枝（`suffixSum[startIdx] < remaining` 时 return）
+     - **top-k 后缀剪枝（新增）**：剩余可选元素中最大的 `(maxSize - depth)` 个的和 < remaining 也剪
+     - `maxSize=8`（业务上限，与旧实现一致）
+     - 启发式提前终止：当 best 已是 `spread=0 + distToMain=0 + size=2` 时 break（绝对最优下确界）
+     - `hardCeiling=5M`（DFS visit 次数硬上限；仅极端数据兜底）
+
+- **改动清单**（4 文件）：
+  - `src/main-process/scenario-engines/c4-recon-id-fix.js`：
+    - 新增 `findBestAmountSubset(candidates, targetCents, mainBillDate, options)` 函数（位于 `enumerateAmountSubsets` 之后、`tieBreakSubsets` 之前）
+    - `tryOneToManyPool` 改用 `findBestAmountSubset` 替换 `enumerateAmountSubsets`+`tieBreakSubsets` 二段式（删 `subsets.length === 1 ? ... : tieBreakSubsets(...)` 分支）
+    - `tryManyToOnePool` 同上
+    - `enumerateAmountSubsets` / `tieBreakSubsets` 加注释（"池子算法不再调用；保留供单测/向后兼容"）
+    - 文件头部 round 4 注释加 round 2 P2 修复段落
+    - `module.exports` 加 `findBestAmountSubset`
+  - `scripts/smoke/recon-id-fix-engine.js`：
+    - import 加 `findBestAmountSubset`
+    - **删除** `runRound4SubsetSumHelpers` 中"截断到 64"硬断言（line 742），改为"解数 ≤ maxSolutions"弱断言（覆盖函数本身行为，不再暗示池子语义合理）
+    - 新增 4 个 smoke 用例：
+      - `runPR36Round2P2UserRepro` — user 复现用例 10 个 04-01 + 3 个 04-15 + target=300 直接单测 `findBestAmountSubset` 返回全 04-15 子集；同时验证旧二段式仍 reproducible bug（防回归）
+      - `runPR36Round2P2GlobalBestBeyond64` — 全局最优 `{opp_12, opp_13}` 排在第 N=91 位（C(14,2)=91 截断到 64 解里 0 个最优）→ 修后能找到
+      - `runPR36Round2P2EndToEndPool` — 通过 `runReconIdFix` 走 `tryOneToManyPool` 验证端到端集成（mode=opp + oneToMany + 13 个 100 候选 + target=200 → 命中 firstIdxNum 最小子集 {S0, S1}）
+      - `runPR36Round2P2PerformanceN20` — 复刻 `runRound4LargePoolPerformance` 的 n=20 场景，断言 `findBestAmountSubset` 找到 `{opp_18, opp_19}={789,211}=1000` 且 < 1s
+    - tests 注册新增 4 个用例（37 → 41）
+  - `docs/iterations/v2.1.0-beta.1/spec.md`：
+    - §五.2.4 标题加 "PR #36 round 2 P2 修复 2026-04-30"
+    - §五.2.4 加 "原 enumerate→tieBreak 二段式问题 + findBestAmountSubset 替代" 段落
+    - §五.2.4 中 `tryOneToManyPool` / `tryManyToOnePool` 伪代码改用 `findBestAmountSubset`（删 `subsets.length === 1 ? ... : tieBreakSubsets(...)` 分支）
+    - §五.2.4.1 `enumerateAmountSubsets` 注释加 "池子算法不再调用" 警告
+    - §五.2.4.1 新增 `findBestAmountSubset` 完整伪代码 + 性能保障详解
+    - §五.2.4.1 `tieBreakSubsets` 注释加 "池子算法不再调用" 警告
+    - 性能边界提示更新为 "新实现 findBestAmountSubset 全遍历 + top-k 剪枝；n=20 实测 1.14ms / 次"
+  - `docs/iterations/v2.1.0-beta.1/log.md`：本节
+
+- **测试证据**：
+  - `npm run smoke` **266/266 PASS**（baseline 262 + 新增 4 P2 round 2 用例；recon-id-fix-engine 37 → 41）
+  - **user 复现用例验证**（pre/post fix 行为对照）：
+    ```
+    10 个 04-01 100 + 3 个 04-15 100 + target=300（mainBillDate=04-15）
+    --- 修前（enumerateAmountSubsets+tieBreakSubsets）---
+      总解数: 64（C(13,3)=286 截断）
+      64 解中：全 04-15 子集 0 个 / 全 04-01 子集 36 个 / 混合 28 个
+      tieBreak 选了 [opp_0, opp_1, opp_2]（3 个 04-01，distToMain=14day 次优）
+    --- 修后（findBestAmountSubset DFS 全遍历）---
+      选中: [opp_10, opp_11, opp_12]（3 个 04-15，spread=0+distToMain=0 全局最优）
+    ```
+  - **fixture 回归**（修前修后数字一致，不退步）：
+    - `单据对账导出不平.xlsx × FX 入账 scenario`（同测试配置 baseline）：fixedRowCount=46 / mainTouched=18 / oppTouched=28 / unmatched=0 / warnings=0（修前修后完全一致）
+    - `FX中台入金-初始.xlsx × FX 入账 scenario`：fixedRowCount=113 / mainTouched=44 / oppTouched=69 / unmatched=25 / warnings=0（修前修后完全一致）
+    - 用户用例 **FTA202604280200028 ↔ 202604271439325696974017228** 双双命中：`Reference=PP_20260428020000_USD_HK0000720752-FIX`，主从共享 commonId
+  - **性能对比**（n=20 大池子 100 次平均）：
+    ```
+    findBestAmountSubset       1.14ms / 次
+    enumerateAmountSubsets+tieBreakSubsets   2.58ms / 次
+    ```
+    新实现的 top-k 后缀剪枝实际比"截断到 64 解"更快收敛到正确答案
+
+- **风险显式提醒**：
+  - **资金红线（subset-sum 唯一性 + 全局最优）**：本次修复**改变了池子算法的输出语义** — 原"前 64 解中最优" → 新"全局最优"。对"全局最优在前 64 解中"的常见场景行为不变（fixture 回归数据一致）；对"全局最优在 N>64 位"的边缘场景行为修正（user 复现用例）。
+  - **资金红线（保留旧函数）**：`enumerateAmountSubsets` / `tieBreakSubsets` 仍 export，仅为向后兼容 + 单测覆盖；现有 smoke 既有用例 + round 1 P2 单测仍跑通；池子算法不再调用，**新代码不应再使用这两函数做池子配对**
+  - **性能（防退化）**：n=20 大池子修后 1.14ms（比修前 2.58ms 更快）；hardCeiling=5M visit 上限作极端数据兜底（n>30 + cents 极小时可能触发）
+  - **兼容性**：`enumerateAmountSubsets` / `tieBreakSubsets` 函数签名/行为完全保留；smoke 删的"截断到 64 硬断言"改为"解数 ≤ 64 弱断言"，不破坏函数行为单测
+
+- **follow-up（已知，非 blocker）**：
+  - hardCeiling 默认 5000000 是经验值（n=20 真实场景 < 1k visits）；若用户上极端数据（n>50 + cents 极小 + 多 BillDate）触发 abort，应在 unmatched.xlsx 加警示行
+  - `findBestAmountSubset` 当前不返回"是否 abort"标志；future 可改返回 `{ subset, aborted }` 结构便于 unmatched 推断
+
+- **下一步**：等用户合并 PR #36 round 2
+
+---
+
 ## 2026-05-09 PR-B Round 5 微调（Step 2 多候选 tie-break）+ 1 决策回写
 
 - **背景**：用户测试 Round 4 时发现一个用例没命中

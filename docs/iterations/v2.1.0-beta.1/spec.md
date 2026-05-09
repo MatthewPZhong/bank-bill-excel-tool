@@ -731,13 +731,18 @@ function tryOneToOne(leftRows, rightRows, fieldPairs, billDateMode, ..., stepLab
 > 3. 双向一致性校验避免主从抢配冲突 — 当多个主单都把同一从单当 bestRight 时，只有"反向 pickBest 选回当前主单"的那一个主单才命中
 > 4. 让位的主单本轮不命中，但下一轮（其他主单可能因 reverse 不一致也让位）仍可能找到其他从单
 
-#### 5.2.4 池子算法实现细节（**Round 4 subset-sum 重写，2026-05-09**）
+#### 5.2.4 池子算法实现细节（**Round 4 subset-sum 重写，2026-05-09 / PR #36 round 2 P2 修复 2026-04-30**）
+
+> **PR #36 round 2 P2 修复**：原 `enumerateAmountSubsets(...) → tieBreakSubsets(...)` 二段式在 maxSolutions=64 截断后排序选最优，
+> 当全局最优排在第 N>64 位时被漏选（user 复现：10 个 04-01 + 3 个 04-15 + target=300）。
+> 改用 `findBestAmountSubset`：DFS 全遍历维护全局 best（每找到 1 个 sum=target 解立即与 best tieBreak 比较）。
+> `enumerateAmountSubsets` / `tieBreakSubsets` 保留供单测/向后兼容，但**池子算法不再调用**。
 
 ```javascript
 // Step 3.x 池子 1v多：subset-sum(候选从.Amount) === 主.Amount
 //   候选过滤：BillDate（按 mode）+ 除 Amount 外其他对账字段 AND 全等
-//   subset-sum：候选 Amount 整数化（×100 转分），DFS + 升序剪枝；subset 必须 size ≥ 2
-//   多解 tieBreak：spread → distToMain → size → firstIdx 字典序兜底
+//   subset-sum：候选 Amount 整数化（×100 转分），DFS 全遍历维护 best；subset 必须 size ≥ 2
+//   多解 tieBreak：spread → distToMain → size → firstIdx（数字部分）— DFS 内即时更新 best 而非二段式
 function tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode,
   scenario, cfg, reconResult, fixedRows, warningCollector,
   pairedLeft, pairedRight, lastStepByLeft, lastStepByRight, stepLabel) {
@@ -770,14 +775,8 @@ function tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode,
     const candidatesWithCents = candidates
       .map((r) => ({ row: r, cents: toCents(r.Amount) }))
       .filter((c) => c.cents !== null);
-    const subsets = enumerateAmountSubsets(candidatesWithCents, targetCents);
-    if (subsets.length === 0) {
-      candidates.forEach((r) => lastStepByRight.set(r._rowIdx, stepLabel));
-      continue;
-    }
-    const chosen = subsets.length === 1
-      ? subsets[0]
-      : tieBreakSubsets(subsets, leftRow.BillDate);
+    // PR #36 round 2 P2 修复（2026-04-30）：DFS 全遍历维护全局 best（取代旧 enumerate→tieBreak 二段式）
+    const chosen = findBestAmountSubset(candidatesWithCents, targetCents, leftRow.BillDate);
     if (!chosen || chosen.length < 2) {
       candidates.forEach((r) => lastStepByRight.set(r._rowIdx, stepLabel));
       continue;
@@ -817,14 +816,8 @@ function tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode,
     const candidatesWithCents = candidates
       .map((l) => ({ row: l, cents: toCents(l.Amount) }))
       .filter((c) => c.cents !== null);
-    const subsets = enumerateAmountSubsets(candidatesWithCents, targetCents);
-    if (subsets.length === 0) {
-      candidates.forEach((l) => lastStepByLeft.set(l._rowIdx, stepLabel));
-      continue;
-    }
-    const chosen = subsets.length === 1
-      ? subsets[0]
-      : tieBreakSubsets(subsets, rightRow.BillDate);
+    // PR #36 round 2 P2 修复（2026-04-30）：DFS 全遍历维护全局 best（取代旧 enumerate→tieBreak 二段式）
+    const chosen = findBestAmountSubset(candidatesWithCents, targetCents, rightRow.BillDate);
     if (!chosen || chosen.length < 2) {
       candidates.forEach((l) => lastStepByLeft.set(l._rowIdx, stepLabel));
       continue;
@@ -877,6 +870,11 @@ function rowsMatchOtherFieldPairs(leftRow, rightRow, otherFieldPairs) {
 //   - DFS + 升序剪枝（sum > target 则后续更大值无须试）
 //   - solutions 上限 maxSolutions（防极端数据组合爆炸）
 //   - 返回 Array<Array<row>>，每个解 = 命中 row 数组（已按 _origIdx 升序保证稳定）
+//
+// PR #36 round 2 P2 修复（2026-04-30）：本函数仍维持"枚举到 maxSolutions 即停"语义，
+// 池子算法已迁移到 `findBestAmountSubset`（DFS 全遍历维护全局 best），保留本函数用于直接单测/向后兼容。
+// 注意：本函数 + `tieBreakSubsets` 二段式在 maxSolutions=64 截断后排序时，
+// 当全局最优解排在第 N>64 位时会被漏选；不应再被池子算法直接使用。
 function enumerateAmountSubsets(candidates, targetCents, maxSize = 8, maxSolutions = 64) {
   if (!Array.isArray(candidates) || candidates.length < 2) return [];
   if (!Number.isFinite(targetCents) || targetCents <= 0) return [];
@@ -908,10 +906,143 @@ function enumerateAmountSubsets(candidates, targetCents, maxSize = 8, maxSolutio
   );
 }
 
+// PR #36 round 2 P2 修复（2026-04-30，user 复现 + Codex review）：
+//   subset-sum DFS 全遍历 + 维护全局 best（替换旧 enumerate→tieBreak 二段式）
+//
+// 旧问题：`enumerateAmountSubsets(...) → tieBreakSubsets(...)` 在 `maxSolutions=64` 处截断、再排序，
+// 当全局最优解排在第 N>64 位时被漏选。User 复现：10 个 04-01 + 3 个 04-15 + target=300，
+// 64 个解里 0 个全 04-15（最优 spread=0+distToMain=0），旧算法返回 04-01 子集（次优）。
+//
+// 新算法（findBestAmountSubset）：DFS 找到 sum=target 的解时，立即与"当前 best"做 tieBreak 比较
+//   （spread → distToMain → size → firstIdxNum），更新 best；不收集 solutions 数组、不预截断。
+//
+// 性能保障（防止全遍历退化）：
+//   - 升序剪枝：`c.cents > remaining` 时 break（与旧实现一致）
+//   - 后缀总和剪枝：`suffixSum[startIdx] < remaining` 时 return（剩余总和不足凑成）
+//   - top-k 后缀剪枝：剩余可选元素中最大的 (maxSize - depth) 个的和 < remaining 也剪
+//     （升序排序后 = `suffixSum[max(startIdx, n - (maxSize-depth))]`）
+//   - maxSize=8（与旧实现一致；业务约束：一笔大单很少拆超过 8 笔小单）
+//   - 启发式提前终止：当 best 已是 spread=0 + distToMain=0 + size=2 时 break
+//     （这是绝对最优的下确界；后续不可能更优）
+//   - hardCeiling 硬上限：DFS visit 次数 > hardCeiling 时 abort（默认 5000000；仅极端数据兜底）
+//
+// 实测性能（n=20 大池子，复刻 `runRound4LargePoolPerformance`）：
+//   - 修后 findBestAmountSubset：1.14ms / 次（100 次平均）
+//   - 修前 enumerateAmountSubsets+tieBreakSubsets：2.58ms / 次
+//   - 后缀总和 + top-k 剪枝实际比"截断到 64 解"更快收敛到正确答案
+//
+// 返回 Array<row>（最优子集，按 row._origIdx 升序）；无解返回 null
+function findBestAmountSubset(candidates, targetCents, mainBillDate, options = {}) {
+  if (!Array.isArray(candidates) || candidates.length < 2) return null;
+  if (!Number.isFinite(targetCents) || targetCents <= 0) return null;
+  const maxSize = Number.isFinite(options.maxSize) ? options.maxSize : 8;
+  const hardCeiling = Number.isFinite(options.hardCeiling) ? options.hardCeiling : 5000000;
+  const mainMs = parseBillDateMs(normalizeCellValue(mainBillDate));
+  const indexed = candidates.map((c, originalIdx) => ({ ...c, _origIdx: originalIdx }));
+  indexed.sort((a, b) => a.cents - b.cents);
+  // 缓存每行 BillDate ms / _rowIdx 数字部分（避免 DFS 内重复解析）
+  for (const c of indexed) {
+    c._dateMs = parseBillDateMs(normalizeCellValue(c.row && c.row.BillDate));
+    c._idxNum = parseRowIdxNum(c.row && c.row._rowIdx);
+  }
+  // suffixSum[i] = indexed[i..end].cents 之和
+  const suffixSum = new Array(indexed.length + 1).fill(0);
+  for (let i = indexed.length - 1; i >= 0; i--) {
+    suffixSum[i] = suffixSum[i + 1] + indexed[i].cents;
+  }
+  const path = [];
+  let best = null;       // { rows, spread, distToMain, size, firstIdxNum }
+  let visits = 0;
+  let aborted = false;
+
+  function tryUpdateBest() {
+    let minD = null, maxD = null, hasInvalidDate = false;
+    let firstIdxNum = Number.MAX_SAFE_INTEGER;
+    for (const c of path) {
+      if (c._dateMs === null) hasInvalidDate = true;
+      else {
+        if (minD === null || c._dateMs < minD) minD = c._dateMs;
+        if (maxD === null || c._dateMs > maxD) maxD = c._dateMs;
+      }
+      if (c._idxNum < firstIdxNum) firstIdxNum = c._idxNum;
+    }
+    const spread = (hasInvalidDate || minD === null || maxD === null) ? Infinity : (maxD - minD);
+    let distToMain = Infinity;
+    if (mainMs !== null) {
+      for (const c of path) {
+        if (c._dateMs !== null) {
+          const d = Math.abs(mainMs - c._dateMs);
+          if (d < distToMain) distToMain = d;
+        }
+      }
+    }
+    const size = path.length;
+    if (best === null) {
+      best = { rows: path.slice(), spread, distToMain, size, firstIdxNum };
+      return;
+    }
+    if (spread !== best.spread) {
+      if (spread < best.spread) best = { rows: path.slice(), spread, distToMain, size, firstIdxNum };
+      return;
+    }
+    if (distToMain !== best.distToMain) {
+      if (distToMain < best.distToMain) best = { rows: path.slice(), spread, distToMain, size, firstIdxNum };
+      return;
+    }
+    if (size !== best.size) {
+      if (size < best.size) best = { rows: path.slice(), spread, distToMain, size, firstIdxNum };
+      return;
+    }
+    if (firstIdxNum < best.firstIdxNum) {
+      best = { rows: path.slice(), spread, distToMain, size, firstIdxNum };
+    }
+  }
+
+  // 启发式：当 best 是绝对最优（spread=0 + distToMain=0 + size=2），后续不会更优 → break
+  function isBestAbsoluteOptimal() {
+    return best !== null
+      && best.spread === 0
+      && (mainMs === null || best.distToMain === 0)
+      && best.size === 2;
+  }
+
+  function dfs(startIdx, remaining, depth) {
+    if (aborted) return;
+    if (++visits > hardCeiling) { aborted = true; return; }
+    if (remaining === 0 && depth >= 2) { tryUpdateBest(); return; }
+    if (depth >= maxSize) return;
+    if (startIdx >= indexed.length) return;
+    if (suffixSum[startIdx] < remaining) return;
+    const slotsLeft = maxSize - depth;
+    if (slotsLeft > 0 && slotsLeft < indexed.length - startIdx) {
+      const topKSum = suffixSum[indexed.length - slotsLeft];
+      if (topKSum < remaining) return;
+    }
+    for (let i = startIdx; i < indexed.length; i++) {
+      if (aborted) return;
+      const c = indexed[i];
+      if (c.cents > remaining) break;
+      path.push(c);
+      dfs(i + 1, remaining - c.cents, depth + 1);
+      path.pop();
+      if (isBestAbsoluteOptimal()) return;
+    }
+  }
+  dfs(0, targetCents, 0);
+  if (best === null) return null;
+  return best.rows
+    .slice()
+    .sort((a, b) => a._origIdx - b._origIdx)
+    .map((c) => c.row);
+}
+
 // tieBreak：多解时按 spread → distToMain → size → firstIdxNum 数字部分排序，取首
 //
 // PR #36 round 1 P2 修复（2026-04-30）：原实现 `s.map(r=>r._rowIdx).sort()[0]` 是字符串字典序，
 // 当候选 ≥ 10 时 'opp_10' < 'opp_2'（因 '1'<'2'）排错；改成解析 _rowIdx 数字部分比较即可。
+//
+// PR #36 round 2 P2 修复（2026-04-30）：本函数已不被池子算法直接调用（迁移到 `findBestAmountSubset`）。
+// 仍保留供直接单测 + 向后兼容（极少数 1 解 / 解数 ≤ maxSolutions 的场景与新实现等价）。
 function tieBreakSubsets(subsets, mainBillDate) {
   if (!Array.isArray(subsets) || subsets.length === 0) return null;
   if (subsets.length === 1) return subsets[0];
@@ -947,7 +1078,11 @@ function parseRowIdxNum(rowIdx) {
 }
 ```
 
-> ⚠️ 性能边界：subset-sum DFS 在最坏情况下是 O(2^n) 但通过升序剪枝 + maxSize=8 + maxSolutions=64 三道防线，业务场景候选 ≤ 数百时可控。
+> ⚠️ 性能边界（**PR #36 round 2 P2 修复后更新**）：
+> - 旧实现（`enumerateAmountSubsets` + `tieBreakSubsets` 二段式）：升序剪枝 + maxSize=8 + maxSolutions=64 三道防线
+>   缺陷：maxSolutions 截断后排序选最优 → 全局最优排在 N>64 位时漏选（user 复现 bug）
+> - 新实现（`findBestAmountSubset` DFS 全遍历）：升序剪枝 + 后缀总和剪枝 + top-k 后缀剪枝 + maxSize=8 + 启发式提前终止 + hardCeiling=5M 硬上限
+>   保证：找到全局最优；性能实测 n=20 大池子 1.14ms / 次（比旧实现 2.58ms 还快）
 > ⚠️ 浮点精度：必须先 `toCents` 化成整数分再比较，否则 `0.1 + 0.2 = 0.30000000000000004 ≠ 0.3` 经典坑会让 200 个用例对账失败。
 > ⚠️ subset 必须 size ≥ 2：1 主 vs 1 从单元素子集已在 Step 1 / Step 2 处理过；池子里 size=1 视为"无解"防止与 1v1 重复抢配。
 

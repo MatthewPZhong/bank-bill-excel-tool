@@ -14,6 +14,7 @@ const {
   rowsMatchOtherFieldPairs,
   toCents,
   enumerateAmountSubsets,
+  findBestAmountSubset,
   tieBreakSubsets,
   pickBestByTieBreak,
   parseRowIdxNum,
@@ -734,12 +735,17 @@ function runRound4SubsetSumHelpers() {
   // {F2(200k) + 任意一个 70k} = 270k → 3 个解
   assert.strictEqual(result.length, 3, '用户用例：3 解 {F2+F1} / {F2+F3} / {F2+F4}');
 
-  // 多解上限保护
+  // PR #36 round 2 P2 修复（2026-04-30）：移除"截断到 64 解"断言
+  //   - 原断言：`enumerateAmountSubsets` 在 maxSolutions=64 处截断
+  //   - 删除原因：池子算法已迁移到 `findBestAmountSubset`（DFS 全遍历维护全局 best），不再依赖此截断
+  //   - `enumerateAmountSubsets` 保留为向后兼容（对外 API + 直接单测），其 maxSolutions 截断仍合法（函数行为单测），
+  //     但不再用作"语义合理"断言；改测"解数 ≤ maxSolutions"弱断言以覆盖函数本身行为
   const manyCands = [];
   for (let i = 0; i < 10; i++) manyCands.push(makeCand(`x${i}`, 100));
-  // 从 10 个 100 里挑 3 个 sum=300 → C(10,3)=120 个解（超 maxSolutions=64）
+  // 从 10 个 100 里挑 3 个 sum=300 → C(10,3)=120 个解；maxSolutions=64 截断后实际解数 ≤ 64
   result = enumerateAmountSubsets(manyCands, 300, 8, 64);
-  assert.ok(result.length === 64, 'maxSolutions 上限保护（120 截断到 64）');
+  assert.ok(result.length <= 64,
+    'enumerateAmountSubsets：maxSolutions 截断行为单测（解数 ≤ 64；不再断言"等于 64"以避免暗示池子语义）');
 
   // size 上限：[1, 1, 1, 1, 1, 1, 1, 1, 1] → target 9 → 解 {全 9 个} size=9 超 maxSize=8 → 0 解
   result = enumerateAmountSubsets(
@@ -1371,6 +1377,212 @@ function runPR36P2TieBreakSubsetsNumeric() {
   assert.strictEqual(parseRowIdxNum(null), Number.MAX_SAFE_INTEGER, 'parseRowIdxNum null → MAX_SAFE_INTEGER');
 }
 
+// ===== PR #36 round 2 P2 修复（subset-sum 全局最优；DFS 全遍历维护 best）=====
+//
+// 修前：池子 `enumerateAmountSubsets(...) → tieBreakSubsets(...)` 二段式
+//   DFS 收集到 maxSolutions=64 解后停 → 再排序选最优
+//   bug：全局最优解排在第 N>64 位时被漏选（user 复现）
+//
+// 修后：池子 `findBestAmountSubset(...)`
+//   DFS 遍历所有可能解 → 每找到 1 个 sum=target 解立即与 best 比对 → 不预截断
+//   性能：升序剪枝 + 后缀和剪枝 + 启发式提前终止（best 已 spread=0+distToMain=0+size=2 → break）+ hardCeiling 防御
+
+// P2-3：user 复现 — 10 个 04-01 候选 + 3 个 04-15 候选 + target=300 → 修后选 3 个 04-15（spread=0+distToMain=0），不选 04-01 子集
+function runPR36Round2P2UserRepro() {
+  // 用户原文：「10 个 2026-04-01 候选 + 3 个 2026-04-15 候选、target=300 时，前 64 个解不包含 3 个 2026-04-15 的最优同日子集，最终选了 2026-04-01 的旧子集」
+  //
+  // 修前行为：解空间 C(13,3)=286，maxSolutions=64 截断；64 个解里全 04-15 = 0 个、全 04-01 = 36 个、混合 = 28 个
+  //   → tieBreakSubsets 选 spread 最小（0）+ distToMain 最小 → 64 个解里没有 04-15 的，只能选 04-01 的（distToMain=14day 次优）
+  //
+  // 修后行为：findBestAmountSubset DFS 全遍历 → 找到 {opp_10, opp_11, opp_12} 都 04-15 spread=0 distToMain=0 size=2... wait 是 size=3
+  //   → distToMain=0 因 mainBillDate=04-15 与子集 04-15 同日；spread=0；size=3
+  //   → 04-01 子集 spread=0 distToMain=14day → 04-15 子集 distToMain=0 < 14day → 选 04-15 ✓
+  //
+  // 端到端：通过 runReconIdFix 走 tryOneToManyPool（mode=opp + oneToMany=true）
+
+  // 工具：构造 candidates（cents 单位用 100 元 = 10000 cents）
+  function makeCand(rowIdx, cents, billDate) {
+    return { row: { _rowIdx: rowIdx, BillDate: billDate, OrderId: rowIdx }, cents };
+  }
+  const candidates = [];
+  for (let i = 0; i < 10; i++) candidates.push(makeCand(`opp_${i}`, 10000, '2026-04-01'));
+  for (let i = 10; i < 13; i++) candidates.push(makeCand(`opp_${i}`, 10000, '2026-04-15'));
+
+  // findBestAmountSubset 直接单测（绕过过滤步骤）：mainBillDate=04-15
+  const chosen = findBestAmountSubset(candidates, 30000, '2026-04-15');
+  assert.ok(chosen !== null, '应找到 sum=300 的最优子集');
+  assert.strictEqual(chosen.length, 3, '子集 size=3（3 个 100 凑 300）');
+  const allFifteen = chosen.every((r) => r.BillDate === '2026-04-15');
+  assert.ok(allFifteen,
+    'P2-3 修复：选 3 个 2026-04-15（spread=0+distToMain=0 全局最优）；修前因 maxSolutions=64 截断会选 3 个 04-01 子集（distToMain=14day 次优）');
+  // 子集 OrderId 必须是 opp_10/11/12（数字最小的同日子集）
+  const orderIds = chosen.map((r) => r.OrderId).sort();
+  assert.deepStrictEqual(orderIds, ['opp_10', 'opp_11', 'opp_12'], '修后命中 opp_10/opp_11/opp_12');
+
+  // 修前对照：用旧二段式 enumerateAmountSubsets + tieBreakSubsets 验证 bug 仍存在
+  // （证明 fix 前后行为差异，避免回归 + 证明保留旧函数仍合法）
+  const oldSubsets = enumerateAmountSubsets(candidates, 30000);
+  assert.ok(oldSubsets.length === 64, 'enumerateAmountSubsets 仍维持 maxSolutions=64 截断（向后兼容）');
+  const oldChosen = tieBreakSubsets(oldSubsets, '2026-04-15');
+  // 修前 bug：64 个解里没有全 04-15 的（C(10,3)=120 全 04-01 子集排在前 64 个解中）
+  // tieBreakSubsets 选 spread=0 → 04-01 子集 spread=0+distToMain=14day；04-15 解未进 64 → 选 04-01 子集
+  const oldAllOne = oldChosen.every((r) => r.BillDate === '2026-04-01');
+  assert.ok(oldAllOne,
+    '修前 bug 复现：旧二段式 enumerate→tieBreak 选了 3 个 04-01 子集（次优，因前 64 解里 0 个全 04-15）');
+
+  // 端到端集成：通过 runReconIdFix 走 tryOneToManyPool 验证修复生效
+  // 主 04-15 USD 300；从 = 10 个 04-01 100 + 3 个 04-15 100 → ±1day 候选 = 仅 3 个 04-15（04-01 距 04-15 14day 超出 ±1day 范围）
+  // → 候选只有 3 个 04-15 → 不会触发 maxSolutions bug；这个用例必须改成"strict"模式（同 BillDate）
+  // 改：让 04-01/04-15 都进候选 — 用 BillDate=2026-04-09 与 2026-04-10（dist=1day）
+  // 但要让"前 64 解全是次优"，需要 04-09 候选数量 >> 04-10 候选数量。
+  // 端到端：跳过；纯函数测试已覆盖 bug 修复；下面 runPR36Round2P2EndToEnd 用 ±1day 内更窄的日期模拟
+}
+
+// P2-4：全局最优在第 N>64 解（DFS 维护 best 必须能返回，不被 maxSolutions 截断遗漏）
+function runPR36Round2P2GlobalBestBeyond64() {
+  // 构造场景：12 个 100 候选 + 1 个 [50, 50] 同金额对（spread=0），target=200
+  //   解 1：从 12 个 100 里挑 2 个，C(12,2)=66 解，前 64 解都是 100+100 组合
+  //   解 2：50+50+100=200 size=3（3 元素，不优）
+  //   再加 5+5+90+100=200 size=4？... 复杂
+  //
+  // 简化：12 个 04-09 100 + 2 个 04-15 100；mainBillDate=04-15；target=200
+  //   解空间：C(14,2) = 91 全部 100+100 组合
+  //   前 64 解：都是 04-09+04-09 spread=0 distToMain=6day 次优
+  //   全局最优：{opp_12, opp_13}（04-15+04-15 spread=0 distToMain=0）排在 N=91 位置（升序枚举末尾）
+  //   修前 enumerate→tieBreak：64 解都是 04-09 → 选 04-09 子集
+  //   修后 findBestAmountSubset：DFS 找到 {opp_12, opp_13} 立即比 04-09 子集更优 → 选 04-15 子集
+  function makeCand(rowIdx, cents, billDate) {
+    return { row: { _rowIdx: rowIdx, BillDate: billDate, OrderId: rowIdx }, cents };
+  }
+  const candidates = [];
+  for (let i = 0; i < 12; i++) candidates.push(makeCand(`opp_${i}`, 10000, '2026-04-09'));
+  candidates.push(makeCand('opp_12', 10000, '2026-04-15'));
+  candidates.push(makeCand('opp_13', 10000, '2026-04-15'));
+
+  // 修前对照：旧二段式
+  const oldSubsets = enumerateAmountSubsets(candidates, 20000);
+  assert.ok(oldSubsets.length === 64, '旧 enumerateAmountSubsets 截断到 64 解（C(14,2)=91）');
+  const oldChosen = tieBreakSubsets(oldSubsets, '2026-04-15');
+  // 64 解中是否含 {opp_12, opp_13}？取决于 DFS 顺序；按 cents 升序排序所有 100 等值，_origIdx 升序
+  // DFS 升序 + i 自小到大 → 前 64 解大多是 opp_0/1 + 任意一个；末尾才到 opp_12/13
+  const oldAllNine = oldChosen.every((r) => r.BillDate === '2026-04-09');
+  assert.ok(oldAllNine,
+    '修前 bug：64 解里 0 个全 04-15 子集（{opp_12, opp_13} 排在第 N=91 位被截断）→ 选 04-09 子集（distToMain=6day 次优）');
+
+  // 修后：findBestAmountSubset 全遍历能找到全局最优
+  const chosen = findBestAmountSubset(candidates, 20000, '2026-04-15');
+  assert.ok(chosen !== null, '修后应找到全局最优子集');
+  const allFifteen = chosen.every((r) => r.BillDate === '2026-04-15');
+  assert.ok(allFifteen,
+    'P2-4 修复：DFS 全遍历找到 {opp_12, opp_13}（spread=0+distToMain=0 全局最优；排在第 N=91 位）；修前因 maxSolutions=64 截断会漏');
+  const orderIds = chosen.map((r) => r.OrderId).sort();
+  assert.deepStrictEqual(orderIds, ['opp_12', 'opp_13'], '修后命中 opp_12/opp_13');
+}
+
+// P2-5：端到端 — 通过 runReconIdFix 走 tryOneToManyPool（mode=opp + oneToMany）
+// 验证修复对池子算法生效（user 真实场景路径）
+function runPR36Round2P2EndToEndPool() {
+  // 主 BillDate=2026-04-09 USD 300；从单：
+  //   - 10 个 2026-04-09 USD 100（同主 BillDate strict）
+  //   - 3 个 2026-04-09 USD 100（也同主 BillDate）— 与上面合并：13 个同日同 cents
+  // 这样所有 13 个候选都进 Step 3.1 strict（同 BillDate） → C(13,3)=286 解，maxSolutions=64 截断
+  //
+  // 但全部同日 → spread=0 + distToMain=0 全等；只有 firstIdxNum 区分 → 修前修后都选 firstIdxNum 最小 = {opp_0, opp_1, opp_2}
+  // 这测不到 BillDate 差异（无法验证 P2 修复对 distToMain 的影响）
+  //
+  // 改：让 13 个候选 BillDate 不同：
+  //   - 10 个 2026-04-08（dist=1day with 主 04-09）
+  //   - 3 个 2026-04-09（dist=0）
+  // BillDate ±1day 容错路径（Step 3.2）覆盖所有 13 个；spread 最小（0）只能在"3 个全 04-09"或"10 个全 04-08"中达成
+  //   → 修前：64 解里 0 个全 04-09 子集 → 选 04-08 子集（spread=0, distToMain=1day）
+  //   → 修后：DFS 找到 {opp_10, opp_11, opp_12} = 3 个 04-09，distToMain=0 < 1day → 选 04-09 子集
+  //
+  // 但 Step 3.1 strict 同 BillDate=04-09 候选只有 3 个（opp_10/11/12）→ subset-sum {3个} 唯一解
+  //   → Step 3.1 直接命中 {opp_10/11/12} 不进 Step 3.2
+  // 这测不到 ±1day 路径
+  //
+  // 改：让 04-09 候选只有 2 个 + 04-08 候选 11 个，target=300 元（=3 个 100）
+  //   Step 3.1 strict 同日 04-09：候选 = 2 个，subset-sum 200 ≠ 300 → 跳
+  //   Step 3.2 ±1day：候选 = 13 个；subset-sum=300 size>=2 → C(11,3)=165 + C(11,2)*2 + C(2,3)=0 + ...
+  //                   太多解；64 解都是 04-08 子集（DFS 升序 _origIdx 优先 opp_0..opp_10 → 04-08）
+  //                   但全局最优需 distToMain 最小 → 含 04-09 越多越好
+  //                   {opp_11, opp_12, X} where X 是 04-08 (1 个 04-08 + 2 个 04-09)：spread=1day, size=3
+  //                   {opp_11, opp_12} = 200 ≠ 300 不命中
+  //   关键：只有 3 个 100 凑出 300，必含至少 1 个 04-08（因 04-09 候选只 2 个）→ spread 不可能 = 0
+  //
+  // 简化最终用例：mainBillDate=04-15 USD target=200；候选：12 个 04-09 100 + 2 个 04-15 100（与主同日）
+  //   ±1day 范围：04-14 / 04-15 / 04-16；04-09 不在 ±1day 范围 → 不进候选
+  //   → Step 3.2 候选只有 2 个 04-15 → 唯一解 {opp_12, opp_13}=200 → 命中
+  //   仍测不到 64 解截断
+  //
+  // 真实场景：用户的 bug 数据应该是 strict 同 BillDate 模式 — 同日 04-15 候选很多但 spread/distToMain 全等
+  // 端到端用 strict 模式 + 13 个同日候选 + target 让 maxSolutions 触发，验证 fix 在端到端路径下生效
+  //
+  // 决策：跳过端到端 distToMain 测试（路径限制），改用 firstIdxNum 兜底验证 fix 对所有候选都遍历完
+  //
+  // 端到端用例：主 04-09 100 vs 13 个 04-09 100 候选；target 在 mode=opp+oneToMany；C(13,2)=78 > maxSolutions=64
+  //   修前后命中应不变（全同 BillDate spread/distToMain 全等 → firstIdxNum=0 都能选 {opp_0, opp_1}）
+  //   但 size=2 + maxSize=8 + target=200 时 78 解 (size=2) + 解 (size=3+) 大量
+  //   关键测：修后能找到 {opp_0, opp_1}（firstIdxNum=0 最小）
+
+  const business = [
+    makeBusinessRow({ OrderId: 'M', BillDate: '2026-04-09', Amount: 200, BizType: 'X', reconId: 'RID-M' })
+  ];
+  const opponent = [];
+  for (let i = 0; i < 13; i++) {
+    opponent.push(makeOpponentRow({
+      OrderId: `S${i}`,
+      BillDate: '2026-04-09',
+      Amount: 100,
+      BizType: 'X',
+      reconId: `RID-S${i}`
+    }));
+  }
+  const cfg = makeCfg({
+    matchRules: { oneToOne: true, oneToMany: true, manyToOne: false },
+    output: { mode: 'opp', subBizType: { mode: 'manualOpp', oppValue: 'X' } },
+    extraFieldPairs: [{ leftField: 'BizType', rightField: 'BizType' }]
+  });
+  const scenario = makeScenario('recon-id-fix', 'pr36-round2-p2-e2e-pool', cfg);
+  const result = runReconIdFix(scenario, { reconResult: [], businessBills: business, opponentBills: opponent });
+  // mode=opp + oneToMany 命中：所选子集 N 个从单都 Type=0 + Reference=主 reconId
+  assert.strictEqual(result.fixedRows.length, 2,
+    '端到端：tryOneToManyPool subset-sum 全局最优 size=2 子集命中（{opp_0, opp_1} firstIdxNum 最小）');
+  const orderIds = new Set(result.fixedRows.map((r) => r.OrderId));
+  assert.ok(orderIds.has('S0') && orderIds.has('S1'),
+    'P2-5 修复：端到端命中 firstIdxNum 最小子集 {S0, S1}（修前因 maxSolutions=64 截断后 tieBreak firstIdx 仍能选到这两个，因为它们排在前 64 解；本用例验证 fix 不破坏既有正确路径）');
+  result.fixedRows.forEach((r) => {
+    assert.strictEqual(r.Type, 0, 'mode=opp 1v多 Type=0');
+    assert.strictEqual(r.Reference, 'RID-M', 'Reference = 主 reconId');
+  });
+}
+
+// P2-6：性能 — n=20 候选下 findBestAmountSubset 仍 < 1s（防止全遍历退化）
+function runPR36Round2P2PerformanceN20() {
+  // 复刻 runRound4LargePoolPerformance 的场景：19 个 11 + 1 个 789 + 1 个 211，target=1000
+  //   修前用 enumerateAmountSubsets：升序剪枝 + maxSolutions=64 → 快
+  //   修后用 findBestAmountSubset：升序剪枝 + 后缀和剪枝 + maxSize=8 → 大量"前 6/7 个 11" path 被新剪枝(top-k 后缀)剪掉
+  //   预期：< 1s（与修前性能持平或更优）
+  function makeCand(rowIdx, cents, billDate) {
+    return { row: { _rowIdx: rowIdx, BillDate: billDate, OrderId: rowIdx }, cents };
+  }
+  const candidates = [];
+  for (let i = 0; i < 20; i++) {
+    const cents = i === 18 ? 78900 : (i === 19 ? 21100 : 1100);  // 19 个 11 + 1 个 789（i=18）+ 1 个 211（i=19）
+    candidates.push(makeCand(`opp_${i}`, cents, '2026-04-09'));
+  }
+  const startMs = Date.now();
+  const chosen = findBestAmountSubset(candidates, 100000, '2026-04-09');
+  const elapsedMs = Date.now() - startMs;
+  assert.ok(chosen !== null, '应找到 {S18, S19}={789, 211}=1000');
+  assert.strictEqual(chosen.length, 2, 'size=2 子集');
+  const orderIds = new Set(chosen.map((r) => r.OrderId));
+  assert.ok(orderIds.has('opp_18') && orderIds.has('opp_19'),
+    'P2-6 性能：n=20 复刻 fixture 仍能找到 {opp_18, opp_19}={789, 211}=1000');
+  assert.ok(elapsedMs < 1000,
+    `P2-6 性能：findBestAmountSubset n=20 < 1s（实测 ${elapsedMs}ms；后缀和+top-k 剪枝有效）`);
+}
+
 // ===== category guard =====
 function runCategoryGuard() {
   assert.throws(
@@ -1426,6 +1638,11 @@ function runReconIdFixEngineSmokeTests() {
     // PR #36 round 1 P2 修复（≥10 候选时 _rowIdx 数字部分比较，不再字典序）
     runPR36P2PickBestByTieBreakNumeric,
     runPR36P2TieBreakSubsetsNumeric,
+    // PR #36 round 2 P2 修复（subset-sum DFS 全遍历维护 best；不再 maxSolutions 截断后排序）
+    runPR36Round2P2UserRepro,
+    runPR36Round2P2GlobalBestBeyond64,
+    runPR36Round2P2EndToEndPool,
+    runPR36Round2P2PerformanceN20,
     runCategoryGuard
   ];
   tests.forEach((t) => t());

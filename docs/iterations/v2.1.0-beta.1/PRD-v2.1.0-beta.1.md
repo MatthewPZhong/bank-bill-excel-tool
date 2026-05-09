@@ -1151,13 +1151,23 @@ state.reconIdFixResult = {  // 运行后产生
     - Round 5 解：Step 2（billDateMode='±1day'）多候选时按 tie-break 选 1 个最优（dist → _rowIdx 字典序）+ 双向一致性校验（bestRight 反查 leftRows 必须选回当前 leftRow，否则让位避免主从抢配冲突）
     - **Step 1（billDateMode='strict'）保持现状**：候选数必须恰好 1 + reverse 也恰好 1（资金红线最严）
     - 不动 Q2 池子 subset-sum size ≥ 2 / Round 4 全部其他逻辑
-- 最终：—（待用户测试 Round 5）
+- **PR #36 round 1 P2 修复（2026-04-30 — Codex review）**：≥ 10 候选 tie-break `_rowIdx` 字典序 → 数字部分比较
+  - 详见 `log.md` 2026-04-30 节
+- **PR #36 round 2 P2 修复（2026-04-30 — user 复现）**：subset-sum 全局最优；DFS 全遍历维护 best
+  - **背景**：user 复现：10 个 04-01 候选 + 3 个 04-15 候选 + target=300，旧 `enumerateAmountSubsets`+`tieBreakSubsets` 二段式在 maxSolutions=64 截断后排序，全局最优排在第 N>64 位时被漏选
+  - **修法**：池子算法迁移到新工具函数 `findBestAmountSubset`（DFS 全遍历维护全局 best；不再截断）
+  - **性能**：升序剪枝 + 后缀总和剪枝 + top-k 后缀剪枝 + 启发式提前终止 + hardCeiling=5M 硬上限；n=20 大池子 1.14ms / 次（实测比修前 2.58ms 更快）
+  - **兼容**：`enumerateAmountSubsets` / `tieBreakSubsets` 函数保留（向后兼容 + 单测覆盖），但**池子算法不再调用**
+  - 详见 `log.md` 2026-04-30 round 2 节
+- 最终：—（待用户合并 PR #36 round 2）
 - merge commit：—
 - 改动文件：（待 commit 后填）
 - 关键决策修订：Round 3 5 决策 + Round 4 4 决策 + 工作目录所有 PR-B 改动
 - 测试证据：
   - Round 4：smoke 254/254 PASS（Round 3 baseline 247 + Round 4 新增 7 用例：subset-sum helpers + 用户用例 + 多解 tieBreak + 浮点精度 + 大候选集性能 + 多v1 对称 + 找不到子集）；用户用例验证：主 04-15 USD 270k + 从 [F1 04-13 70k, F2 04-14 200k, F3 04-14 70k, F4 04-15 70k] → 命中 {F2, F3}（与用户预期一致，spread=0d 优于其他解）
   - Round 5：smoke 260/260 PASS（Round 4 baseline 254 + Round 5 新增 6 用例：pickBestByTieBreak helpers + Step 2 dist tie-break + Step 2 idx tie-break + 反向不一致让位 + Step 1 严格不变 + Step 2 单候选不变）；用户用例验证（FX 中台入金 fixture）：主 FTA202604280200028（04-28, USD 300k, 入账）+ 从池里 04-27 target + 04-29 decoy → 命中 04-27 target，Reference=`PP_20260428020000_USD_HK0000720752_001`；FX fixture 全量：fixedRowCount=96 / mainTouched=36 / oppTouched=60 / unmatched=18；基金 fixture 回归：fixedRowCount=80 / mainTouched=30 / oppTouched=50 / unmatched=0（与 Round 4 baseline 一致，无退步）
+  - PR #36 round 1 P2 修复：smoke 262/262 PASS（260 + 2 新增）；详见 log.md
+  - **PR #36 round 2 P2 修复**：smoke **266/266 PASS**（262 + 4 新增）；user 复现用例验证 — 修前选 3 个 04-01 子集（次优），修后选 3 个 04-15 子集（spread=0+distToMain=0 全局最优）；fixture 回归（修前修后数字一致）：FX fixture × FX 入账 fixedRowCount=113 / mainTouched=44 / oppTouched=69 / unmatched=25 / warnings=0；性能：n=20 大池子 1.14ms（旧实现 2.58ms）；用户用例 FTA202604280200028 ↔ 202604271439325696974017228 双双命中并共享 commonId
 
 ### PR-C 识读规律（待启动）
 
