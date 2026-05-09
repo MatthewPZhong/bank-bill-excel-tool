@@ -11,6 +11,14 @@
 
 ## 未实施
 
+### B5（P3）`buildScenariosSnapshot`（银行对账单模块）JSON.stringify key 顺序依赖
+
+- **来源**：PR #36 self-review（commit `42e0588`），dev 顺手发现
+- **影响**：`src/main.js:2898` `buildScenariosSnapshot`（银行对账单 / C1/C2/C3 资金红线 defense in depth）仍用 `JSON.stringify(s.config || {})`，与 PR #36 P3-C 已修的 C4 同名风险完全镜像 — 同语义 config 在 DB round-trip 前后 key 顺序不同 → 误报 stale-snapshot 拒导出
+- **现状**：实际可能性低（Node V8 JSON.parse + stringify round-trip 通常稳定），但 spec 不保证；C4 已用 `stableJsonStringify` 规范化，C1/C2/C3 未对齐
+- **推荐**：单独 PR 把 `stableJsonStringify` 提到共享工具（如 `src/main-process/snapshot-utils.js`），让 C1/C2/C3/C4 复用同一规范化逻辑
+- **触发实施**：发现银行对账模块出现"明明没改场景但导出被拒（stale-snapshot）"的实际事故；或下次 v2.0.x patch 时一并修
+
 ### B4（P3）`recon-id-fix-scenario-ipc` smoke simulator 与真实 main.js 漂移
 
 - **来源**：PR #35 self-review（commit `7327b43`）
