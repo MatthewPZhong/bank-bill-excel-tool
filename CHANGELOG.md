@@ -1,5 +1,41 @@
 # Changelog
 
+## 2.1.0-beta.1 - 2026-04-30
+
+新增 **第 5 个顶级模块「单据对账 ReconID 修复」**（C4 类场景）。基于 4 sheet xlsx（业务部门账单 / 对手部门账单 / 对账结果 / 订单修复模板）跑用户配置的对账场景，按 5 阶段算法（1v1 严格 → 1v1 ±1day → 池子 1v多 同日 → 池子 1v多 ±1day → 池子 多v1 同日 → 池子 多v1 ±1day）跑 7+5 条赋值规则后导出「订单修复」与「未匹配单据」双文件。整个迭代分 3 PR 实施（PR-A 骨架 / PR-B 对账引擎 / PR-D 收尾）。
+
+### 新增
+
+- **「单据对账 ReconID 修复」顶级模块**：`index.html` 增加第 5 个 module-panel + module-switcher 下拉项；4 按钮（场景管理 / 导入文件 / 开始运行 / 导出文件）+ 主面板「场景」单选下拉（控制行 1，「导入文件」与「开始运行」之间）+ statusBox 6 状态文案（初始/已选场景/已导入/已运行/已导出/empty 双文件 + warnings + unmatched 档）。
+- **C4 类场景配置弹窗 `createScenarioConfigDialogC4`（5 行布局）**：行 1 场景名 / 行 2 单据匹配规则（3 勾选框，1v多 与 多v1 互斥）/ 行 3 账单类型（动态行：序号 + 主/从联动字段下拉 + 7 op 下拉 + ❌ + 「+ 新增」）/ 行 4 对账字段（动态行：分组 block + Amount 字段对锁定 + 组内 AND + 组间 OR + 「+ 新增字段对」/「+ 新增 OR 分组」）/ 行 5 修复结果输出（互斥勾选「主边/从边/主从都修复」+ 主从都修复展开共同 ID 区 `主.reconId + suffix` + SubBizType 三选一互斥：自动查 / 主边手填 / 从边手填）。
+- **5 阶段算法（subset-sum 池子）**：`runC4Scenario(scenario, sheets) → { fixedRows, warnings, unmatchedRows, stats }`。Step 1 同 BillDate + 全部对账字段 AND 全等 1v1 严格；Step 2 BillDate ±1day 容错 1v1（多候选 4 阶 tie-break 选 1 + 双向一致性校验）；Step 3.1/3.2 池子 1v多（subset-sum + 其他对账字段 AND 全等 + size ≥ 2，subset-sum 多解 spread → distToMain → size → firstIdx 4 阶 tie-break，DFS 全遍历找全局最优 + 升序剪枝 + top-k 后缀剪枝 + 启发式提前终止 + hardCeiling=5M）；Step 3'.1/3'.2 池子 多v1 对称。BillDate 字段名主从 sheet 都叫 `BillDate`；浮点 Amount ×100 整数化避精度坑。
+- **7+5 赋值规则**：mode='main'/'opp' 单边修复 R1-R7（R1 主边 1v1 / R2 主边 多v1 Type=2 / R3 从边 1v1 / R4 从边 1v多 / R5 主边 SubBizType 自动查 reconResult / R6 从边 SubBizType 自动查 / R7 主/从边 SubBizType 手填覆盖）；mode='both' 主从都修复 RB1-RB5（RB1 1v1 双 Type=0 + 共同 ID / RB2 多v1 主 Type=2 从 Type=0 / RB3 1v1 同 RB1 / **RB4 1v多 双 Type=0**（Round 3 修订，原主 0/从 2 → 双 0）/ RB5 SubBizType 复用主从单边路径）。
+- **未匹配单据告警 report（Round 3 新增）**：算法跑完后未配主从行单独写 unmatched.xlsx（sheet 名「未匹配单据」+ 6 列：场景名 / 单据来源 / OrderId / BillDate / Amount / 未配原因），随主文件一并导出由 `recon-id-fix:export` IPC 一次返回 `mainFilePath + unmatchedFilePath`。文件名 P3-A/P3-B 修订（Round 5）：fixedRows 空 + unmatched 非空 → saveDialog 默认 unmatched 名（`单据对账修复-未匹配-{ts}-{name}.xlsx`），用户选什么就写什么；fixedRows + unmatched 都非空 → saveDialog 默认主名，unmatched 联动 `{用户主文件 stem}-未匹配.xlsx` 同目录。
+- **4 个 IPC channel + preload 暴露**：`recon-id-fix:import` / `recon-id-fix:run` / `recon-id-fix:export` / `recon-id-fix:session-status`；preload 暴露 `desktopApi.reconIdFix.{import, run, export, sessionStatus}`。
+- **资金红线 defense in depth（双层防御）**：第一层 — 4 个 `scenarios:*` IPC 入口主动按 category 分流清缓存（'recon-id-fix' 清 reconIdFixResult；C1/C2/C3 清 processingResult；未知 category 双清 + warn 兜底）；第二层 — `recon-id-fix:export` 入口被动校验 `scenariosSnapshot`（`stableJsonStringify` 递归按 key 排序避免 SQLite round-trip 误判 stale）+ run 时实写 snapshot；不一致 → 拒导出 + alert 让用户重新跑场景。`bank-statement:run` / `bank-statement:export` / dispatcher 入口 `filterOutReconIdFix` defense in depth 排除 C4。
+- **C4 dialog Amount 字段对锁定（Round 3 新增）**：reconGroups 默认带 `Amount/Amount` 锁定 fieldPair 作为第一行，select disabled + 隐藏 ❌ 删除按钮；新增 OR 分组也默认带 Amount 锁定行；migration `migrateC4ReconGroupsAmountLockedFieldPair` 老库无损升级（3 路径：已含 locked → no-op / 含 Amount/Amount 但无 locked → 加 locked / 无 Amount/Amount → 头部插入锁定行）。
+- **scenarios 表 CHECK 约束扩 4 值 + reconGroups 数据迁移**：CHECK `category IN ('extract-recon-id', 'offset-bill-mark', 'gateway-recon-join', 'recon-id-fix')`（migration `ensureScenariosCategoryReconIdFix` 走 RENAME-CREATE-INSERT-DROP-COMMIT 重建表，幂等）+ migration `migrateC4ReconGroupsStructure`（PR-B Q1=B 决策回写：reconFields[] → reconGroups[]，按 leftTypeSeq+rightTypeSeq 聚合 fieldPairs，仅扫 category='recon-id-fix'，幂等三连 smoke 验证）。
+- **类别选择对话框扩四选一**：`createScenarioCategorySelectDialog` 三选一扩四选一，新增「单据对账 ReconID 修复」选项 + 类别图标 + 副标题。`createScenariosManagerDialog` 「功能类别」列文案映射追加 `'recon-id-fix' → '单据对账修复'`；编辑/查看时类别 → dialog 路由（`renderer-dialogs.js:65-67`）追加 `'recon-id-fix' → createScenarioConfigDialogC4`。
+- **fixture 入库**：`samples/单据对账导出不平.xlsx` / `samples/单据对账导出不平-对平例子.xlsx`，便于真实 fixture 回归（基金 80/30/50/0 / FX 中台入金 96/36/60/18 / FX 入账 113/44/69/25）。
+- **3 个新 preview**：`recon-id-fix-panel` / `scenario-config-c4` / `scenario-config-c4-both`（`scripts/render-modal-preview.js` 注册）。
+
+### 变更
+
+- **版本号**：`2.0.0` → `2.1.0-beta.1`。
+- **`scenarios.category` CHECK 约束**：3 值 → 4 值（新增 `'recon-id-fix'`）；老库无损迁移由 `ensureScenariosCategoryReconIdFix` 处理。
+- **`scenarios-repository.js: VALID_CATEGORIES`**：3 → 4；`updateScenario` 显式拒绝改 `category` / `is_builtin`（self-review round 3 P3-B）。
+- **renderer state 扩展**：`state.reconIdFix{Session,Result,Export,SelectedScenarioId,Scenarios}` 5 字段；`MODULES.reconIdFix = 'recon-id-fix'`；`elements` 缓存 6 个新 DOM；`setCurrentModule(moduleId)` 加分支调 `reloadReconIdFixScenarios()`。
+- **`scenario-dispatcher.js`**：dispatcher 入口加 `filterOutReconIdFix` 过滤（C4 不走 first-match-wins 调度）+ 返回 stats 加 `skippedC4Count`（资金红线 defense in depth）。
+- **使用统计**：`src/backend/usage-stats.js: FUNCTION_REGISTRY` 加 C4 模块（5 项 IPC + 4 按钮埋点）。
+- **smoke 增量**：scripts/smoke 新增 `migrations-recon-id-fix`（15 用例）/ `recon-id-fix-engine`（43 用例）/ `recon-id-fix-io`（13 用例）/ `recon-id-fix-ipc-handlers`（20 用例）/ `recon-id-fix-end-to-end`（6 用例）/ `recon-id-fix-scenario-ipc`（11 用例）合计 **272 PASS**（v2.0.0 GA baseline 78 + Pending/scenarios 既有 + v2.1.0 新增 ~115）。
+
+### v2.1.0-beta.1 PR 汇总
+
+- **PR-A 骨架（PR #35，merged 2026-04-30，commit `6e5ebaf`）**：模块入口可达 + 场景 CRUD + DB schema 扩展（CHECK 4 值 / VALID_CATEGORIES / current_module 持久化）+ C4 dialog 5 行布局（含 Amount 锁定 + 4 数据完整性校验）+ 类别选择四选一 + 资金红线分流（4 个 scenarios:* IPC 按 category 清缓存 + dispatcher filterOutReconIdFix）+ 18 用例 smoke。9 task / 35 改动文件。
+- **PR-B 对账引擎（PR #36，merged 2026-05-09，commit `844d1d5`）**：4 sheet IO + 5 阶段算法 + subset-sum 池子（DFS 全遍历 + 4 阶 tie-break + 双向一致性 + 浮点精度修复）+ 7+5 规则 + 4 个 recon-id-fix:* IPC + unmatched 双文件输出 + scenariosSnapshot stableJsonStringify defense in depth + reconGroups Q1=B / commonId Q2=a 决策回写 + Amount 锁定 Round 3 + Round 4 subset-sum 重写 + Round 5 Step 2 多候选 tie-break + 用户用例 FTA202604280200028 ↔ 202604271439325696974017228 命中验证。16 task / 28 改动文件 / 7 轮 review（Round 1-5 + Codex round 1-4 + self-review round 5）。
+- **PR-D 收尾（本 PR）**：版本号 bump + 文档三件套 + 整体 smoke / preview / check-vars / scan-vars 回归。5 task。
+- ~~**PR-C 识读规律**（已取消，2026-05-09）~~：dev round 1 完成（278/278 PASS）+ 用户测试发现 alert 关闭后误回主页面 bug；修复后用户改变需求决定整体取消。工作树 PR-C 改动全部回退；§三 D7 / §六 F3 识读按钮段 / §七.1 识读按钮段 / §七.4 识读规律算法 / §十.2 识读误判风险等章节标 DEPRECATED 保留历史决策痕迹。
+
 ## 2.0.0 - 2026-04-30
 
 v2.0.0 GA 正式版（去 beta）。本版本为 v2.0.0-beta 系列收官，包含 beta.1 ~ beta.4 全部产物 + 本次 beta.4 两项收尾功能。

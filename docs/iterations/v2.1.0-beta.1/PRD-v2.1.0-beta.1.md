@@ -1210,13 +1210,39 @@ state.reconIdFixResult = {  // 运行后产生
 - `samples/单据对账导出不平-对平例子.xlsx` fixture 暂留（不影响 PR-A/B 测试；PR-D 决定是否清理）
 - v2.0.0-beta.3 PR #32a 引入的 `exceljs` 依赖保留（`recon-id-fix-io.js writeUnmatchedReport` / banker 模块仍依赖）
 
-### PR-D 收尾（待启动）
+### PR-D 收尾（用户手测通过 → PR #37 已提，待 merge）
 
-- 草稿：—
-- 初版：—
+- 草稿：`docs/prs/待merge-PR #37.md`（integrated=false；PR merge 后 rename `docs/prs/PR37-v2.1.0-beta.1.md`）
+- 初版：dev round 1（5 task D1-D5 全完成）
 - 最终：—
 - merge commit：—
-- 改动文件：—
-- 三件套更新：CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE
+- 改动文件（共 6 个）：
+  - **版本号**：`package.json`（`"version": "2.0.0"` → `"2.1.0-beta.1"`）+ `package-lock.json`（root 与 `packages.""` 同步）+ `CLAUDE.md`（Branch Structure 表新增 `v2.1.0` 行 + main 版本号 1.5.0 → 2.0.0 + PR 方向加 v2.1.0）
+  - **三件套**：`CHANGELOG.md`（顶部插入 v2.1.0-beta.1 段，5 模块全景 + 3 PR 汇总，PR-C 标取消）+ `docs/VERSION_FEATURE_HISTORY.md`（同结构）+ `docs/USER_GUIDE.md`（顶部版本号 → v2.1.0-beta.1 + 模块总览第 5 项 + 1.5 章节 6 小节 + 5 个截图占位）
+- 三件套更新：CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 全部更新
 - 版本 bump：`2.0.0` → `2.1.0-beta.1`
-- 测试证据：—
+- 测试证据：
+  - `npm run smoke` **272/272 PASS**（baseline 不退步；v2.0.0 GA 78 + Pending/scenarios + v2.1.0 PR-A/B 增量）
+  - `npm run preview` + `npm run preview:all` 全部 PASS（45 个 preview，含 5 个新 preview：recon-id-fix-panel / scenario-config-c4 / scenario-config-c4-both / module-switcher-open / 主页）
+  - `npm run scan:vars` 输出 v2.1.0-beta.1 报告（60 JS 文件 / 601 顶层声明 / A-share 101 / A-pair 153）
+  - `npm run check:vars` skipped（PR-D 无 src/ 改动）
+- 升格候选（未在 `rules/important-variables.md` 但跨 ≥ 3 文件，**仅候选，待 team-lead 决策**）：
+  - **Critical（业务契约锚点）候选**：
+    - `BUSINESS_BILL_FIELDS` / `OPPONENT_BILL_FIELDS` / `ORDER_REPAIR_FIELDS`（`src/constants/recon-id-fix-fields.js`）— 4 sheet 字段常量；与 preload inline 副本严格同步；同类已收录的有 `BANK_STATEMENT_FIELDS` / `GATEWAY_RECON_FIELDS`，建议升格
+    - `RECON_RESULT_FIELDS`（A-pair 跨 2 文件，暂不升格但结构/语义同上）
+  - **Risk-sensitive（数据库迁移）候选**：
+    - `ensureScenariosCategoryReconIdFix` / `migrateC4ReconGroupsStructure` / `migrateC4ReconGroupsAmountLockedFieldPair`（`src/backend/database/migrations.js`）— 同 `ensureScenariosSupport` 等已收录条目结构；A-pair 跨 2 文件（migrations + database.js），建议补入 §4 数据库迁移段
+  - **Runtime-state 候选（A-pair，非 A-share，仅记录）**：
+    - `reconIdFixSession` / `reconIdFixResult`（`src/main.js`，4 references main.js + renderer.js 之间联动；同 `lastGeneratedExports` / `statementImportSessions` 结构）— 跨 2 文件不是 A-share，但符合"运行时全局 session"定义，建议结合"是否再多 1 个引用文件"判断升格时机
+
+- **2026-05-11 用户手测通过 + 真实 fixture 回归脚本入仓**：
+  - 新增 `scripts/test-v2.1.0-fund-fixture.js`（团队工具脚本，非 src/）：3 case 自动化 P0-5d
+    - Case A — 基金 PP-only legacy（Round 4 算法核心 baseline，PRD §12 P0-5d 原值）：fixedRowCount=80 / mainTouched=30 / oppTouched=50 / unmatched=0 / warnings=0 PASS
+    - Case B — 基金 PP+PR 当前用户 SQLite scenario id=5（实际配置回归，PR 主 6 + PR 从 6 全命中 → +12 行）：92/36/56/0/0 PASS
+    - Case C — FX 中台入金 PP-only suffix=`_001`（Round 5 baseline 推断，log.md 467 行 Reference=`PP_..._001` 反推）：96/36/60/18/0 PASS
+  - **PRD §12 P0-5d baseline 漂移说明**：PRD 写 80/30/50 是 round 4 时 scenario 仅 PP 一组；用户 2026-05-09T06:37 update scenario 加了 PR 组后实际跑 92/36/56；两套都跑通 + unmatched=0 + warnings=0 算法层健康。fixture 脚本同时覆盖两套（算法核心 + 当前实际配置）保留可追溯性
+  - 用户手测 P1 系列 + P0-9 stale-snapshot 提示文案全部 PASS
+- 测试证据补充（2026-05-11 提 PR 前最终回归）：
+  - `npm run smoke` **272/272 PASS**（与 dev round 1 一致）
+  - `node scripts/test-v2.1.0-fund-fixture.js` **3/3 PASS**（基金 PP-only + 基金 PP+PR + FX 入账）
+  - `npm run check:vars` SKIPPED（PR-D 本次提交无 src/ 改动，符合脚本预期）

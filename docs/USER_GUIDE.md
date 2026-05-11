@@ -1,6 +1,6 @@
 # 清结算小助手使用手册
 
-版本：`v2.0.0`
+版本：`v2.1.0-beta.1`
 
 ---
 
@@ -10,6 +10,7 @@
 2. 新开银行账户生成余额账单
 3. 月度 Pending 数据核对（`v2.0.0` 新增）
 4. 银行对账单处理（`v2.0.0-beta.3` 新增）
+5. 单据对账 ReconID 修复（`v2.1.0-beta.1` 新增）
 
 ---
 
@@ -580,6 +581,237 @@
 - 场景命中后会修改 `ReconciliationId` / `FundType` 等字段并标黄写入主输出。
 - v2.0.0-beta.3 起，**原值非空被覆盖时不再产生 error-report 记录**——若 dispatcher 因配置或优先级导致非预期覆盖，需依赖主输出的标黄列与 modifications 自行追踪。
 - 建议首次跑场景前用一份测试样本 dry-run 验证规则。
+
+---
+
+## 1.5 单据对账 ReconID 修复（v2.1.0-beta.1 新增）
+
+将一份 4 sheet xlsx（业务部门账单 / 对手部门账单 / 对账结果 / 订单修复模板）按用户配置的 C4 类场景跑 5 阶段对账算法 + 7+5 条赋值规则，把对账成功后的主从单据修复结果写入「订单修复」sheet 输出，未匹配单据另写「未匹配单据」告警 report。本模块使用与「银行对账单处理」相同的 `scenarios` 表，但 C4 类场景**单场景独占运行**——一次只跑 1 个场景，由主面板「场景」单选下拉决定。
+
+> *注意：本模块与「银行对账单处理」共享 `scenarios` 表但分类隔离（`category='recon-id-fix'`），跨模块的场景增删改不会相互污染。*
+
+### 1.5.1 模块用途
+
+适用于这样的对账场景：业务部门和对手部门各有一套账单（同源资金的两种视角），系统已经提供「对账结果」sheet 标注了哪些单据互相对得平。本模块帮你**自动完成"对账成功后的修复动作"**：
+
+- 修复方的 `Type` 字段写 `0` 或 `2`（按 1v1 / 1v多 / 多v1 三种匹配模式）；
+- 修复方的 `Reference` 字段写对账成立的对方单据 `reconId`（或主从都修复时的"共同 ID"）；
+- 可选：修复方的 `SubBizType` 字段从「对账结果」sheet 自动查得，或用户手填覆盖。
+
+> 区别于「银行对账单处理」（多场景 first-match-wins 调度 + 标黄输出），本模块每次只跑 1 个场景，无标黄需求，输出单 sheet「订单修复」xlsx + 可选 unmatched.xlsx。
+
+### 1.5.2 场景管理
+
+#### 场景管理对话框
+
+`场景管理` 按钮弹出场景管理对话框（与第 4 模块「银行对账单处理」共用）。表格 6 列：`序号 / 功能类别 / 场景名称 / 优先级 / 执行操作 / 是否启动`。本模块**不预置 builtin 场景**，初次使用需手动新增。
+
+> ⚠️ 区别于第 4 模块：第 4 模块预置 3 个 builtin（C1/C2/C3），第 5 模块**不预置**任何 C4 场景，需用户手动创建。
+
+`新增场景` 按钮 → 弹「类别选择对话框」（四选一）→ 选「单据对账 ReconID 修复」→ 进入 C4 配置弹窗。
+
+<!-- 截图占位：scenarios-manager（场景管理对话框 + C4 行） -->
+
+<!-- 截图占位：scenario-category-select（类别选择对话框，四选一） -->
+
+#### C4 配置弹窗 5 行布局
+
+C4 类场景配置弹窗（`createScenarioConfigDialogC4`）共 5 行：
+
+| 行号 | 名称 | 控件 | 说明 |
+|---|---|---|---|
+| 1 | **场景名称** | 输入框 | 非空 + 全局唯一（`scenarios.name` UNIQUE） |
+| 2 | **单据匹配规则** | 3 勾选框 | `主边单据 1v1 从边单据`（与 1v多 / 多v1 可共勾）/ `主边单据 1v多 从边单据`（与 多v1 互斥）/ `主边单据 多v1 从边单据`（与 1v多 互斥）；至少勾 1 项 |
+| 3 | **账单类型** | 动态行 | 每行 = 序号（自增）+ 主/从联动字段下拉 + 7 op 下拉（=, !=, in, not-in, contains, starts-with, ends-with）+ ❌ 删除 + 行内「+ 新增」；主从各 1 条以上 |
+| 4 | **对账字段** | 动态分组 block | 默认 1 个 group + 1 行锁定 `Amount/Amount` 字段对（locked）；「+ 新增字段对」加 AND 行；「+ 新增 OR 分组」另开 group block；锁定行的 select disabled + ❌ 删除按钮隐藏 |
+| 5 | **修复结果输出** | 互斥勾选 + SubBizType 三选一 | 「主边修复 / 从边修复 / 主从都修复」三选一（互斥）；勾「主从都修复」展开"共同 ID"区（`源端单据 reconId + 输入框文本`）；SubBizType 三选一互斥：自动查 reconResult / 主边手填 / 从边手填 |
+
+<!-- 截图占位：scenario-config-c4（C4 配置弹窗 5 行布局，主边修复模式） -->
+
+<!-- 截图占位：scenario-config-c4-both（C4 配置弹窗 5 行布局，主从都修复模式 + 共同 ID 区展开） -->
+
+#### Amount 字段对锁定（行 4）
+
+`v2.1.0-beta.1` 起，C4 dialog 行 4 的对账字段每个分组**默认带一行锁定的 `Amount/Amount` 字段对**：
+
+- 锁定行的左/右字段 select **disabled**，无法改字段；
+- 锁定行的 ❌ 删除按钮**隐藏**，无法删除（保证每个分组至少有 Amount 等值约束）；
+- 「+ 新增字段对」推入新 fieldPair 不带 locked 标记（用户可自由配置 / 删除）；
+- 「+ 新增 OR 分组」推入新 group 时也默认带一行 Amount 锁定 fieldPair 作为第一行。
+
+> 业务依据：subset-sum 算法依赖 Amount 等值约束（多笔小金额拼成大金额或反向），强制锁定避免用户配错漏写。
+
+#### 主面板「场景」下拉
+
+新建好场景后回到主面板，「场景」单选下拉（控制行 1，「导入文件」与「开始运行」之间）会自动同步：
+
+- 列出所有 `category='recon-id-fix'` 的场景（不论 enabled）；
+- 默认占位 `请选择场景`；空场景态下拉 disabled + placeholder 改为 `请先在场景管理中创建场景`；
+- 改场景列表（场景管理 dialog 关闭后）→ 渲染层主动 reload 下拉，**实时同步**；
+- 与「开始运行」按钮联动：下拉未选或未导入文件 → 按钮 disabled。
+
+<!-- 截图占位：recon-id-fix-panel（主面板控制行 + 场景下拉） -->
+
+### 1.5.3 对账匹配规则（行 2 三勾选框语义）
+
+#### 1v1（一一对应）
+
+主边一条单据 ↔ 从边一条单据，金额 + 其他对账字段全等。是最常见的对账成立形态。
+
+```
+主边：[A1]  ←→  从边：[B1]
+```
+
+- 修复方 Type=0；
+- 修复方 Reference = 对方 reconId。
+
+#### 1v多（一对多）
+
+主边一条单据 ↔ 从边 N 条单据，N 条从单 Amount 相加 = 主单 Amount，且其他对账字段（Currency / BizType / OrderId 等除 Amount 外）AND 全等。
+
+```
+主边：[A1]  ←→  从边：[B1, B2, B3]   （B1+B2+B3 金额 = A1 金额）
+```
+
+- 主边 Type=0（mode='main' 或 'both' 不变）；
+- 从边 Type=0（mode='opp' 或 'both' Round 3 修订；mode='main' 不写从）；
+- 从边 N 条 Reference 都填同一个主单 reconId。
+
+#### 多v1（多对一）
+
+主边 N 条单据 ↔ 从边一条单据，N 条主单 Amount 相加 = 从单 Amount。
+
+```
+主边：[A1, A2, A3]  ←→  从边：[B1]   （A1+A2+A3 金额 = B1 金额）
+```
+
+- 主边 N 条 Type=2（聚合到一个从单）；
+- 主边 N 条 Reference 都填同一个从单 reconId；
+- 从边 Type=0（mode='opp' 或 'both' 不变；mode='main' 不写从）。
+
+> 三种规则可单选或共勾（除 1v多 与 多v1 互斥），算法跑 5 阶段时按勾选项依次走 Step 1/2 → Step 3.x → Step 3'.x。
+
+### 1.5.4 7+5 赋值规则（行 5 修复方向 + SubBizType）
+
+#### 单边修复（mode='main' 或 mode='opp'）— 7 条规则
+
+只对修复方一边写 Type / Reference / SubBizType，对方不动。
+
+| 规则号 | 修复方 | 匹配模式 | Type | Reference | SubBizType |
+|---|---|---|---|---|---|
+| R1 | 主边 | 1v1 | `0` | 对方 reconId | 按 R5/R7 |
+| R2 | 主边 | 多v1 | `2` | 对方 reconId | 按 R5/R7 |
+| R3 | 从边 | 1v1 | `0` | 对方 reconId | 按 R6/R7 |
+| R4 | 从边 | 1v多 | `0` | 对方 reconId | 按 R6/R7 |
+| R5 | 主边 | + SubBizType 自动查 | — | — | 用主边 BizType + OrderId 在「对账结果」sheet 反查「业务部门单据子类型」 |
+| R6 | 从边 | + SubBizType 自动查 | — | — | 用从边 BizType + OrderId 在「对账结果」sheet 反查「对手部门单据子类型」 |
+| R7 | 主/从 | + SubBizType 手填 | — | — | 直接用用户输入的字符串覆盖 |
+
+> R5/R6 与 R7 在 dialog 上**三选一互斥**（自动查 / 主边手填 / 从边手填），保证不冲突。R5/R6 自动查未命中（即用 BizType + OrderId 未匹配到「对账结果」sheet 任何行）→ SubBizType 留空 + 写入 warnings 报告（含 `code='subBizType-not-found'`），**不中断本次运行**，该行仍进 fixedRows（仅 SubBizType 列为空字符串）。
+
+#### 双边修复（mode='both'）— 5 条规则
+
+主从都写 Type / Reference / SubBizType；Reference 用"共同 ID"（`源端单据.reconId + 输入框文本`）。
+
+| 规则号 | 匹配模式 | 主边 Type | 从边 Type | Reference 共同 ID 来源 |
+|---|---|---|---|---|
+| RB1 | 1v1 | `0` | `0` | `主.reconId + suffix`（commonId.source 决定取主或从） |
+| RB2 | 多v1 | `2` | `0` | 主代表行 reconId + suffix |
+| RB3 | 1v1（同 RB1） | `0` | `0` | 同 RB1（commonId.source 决定方向） |
+| RB4 | 1v多 | `0` | **`0`** （Round 3 修订） | 主.reconId + suffix |
+| RB5 | + SubBizType | — | — | 复用 R5/R6/R7 路径 |
+
+> **RB4 Round 3 修订（v2.1.0-beta.1，2026-05-09）**：原方案 RB4 主 Type=0 / 从 Type=2 改为**主从都 Type=0**；业务依据：1v多 场景下从边多张单据每张都是"独立小单据"，应独立标记 Type=0；只有 多v1（RB2）下主边多张单据是"被聚合到一张从单"才写 Type=2。`mode='main'/'opp'` 单边的 R1-R7 规则不受 Round 3 影响（仅 mode='both' 受影响）。
+
+> **PR-B Q2=a 决策（v2.1.0-beta.1，2026-04-30）**：共同 ID 基础部分从 `src.OrderId` 改为 `src.reconId`（dialog 下拉文案"主边/从边单据 ID"也改为"主边/从边单据 reconId"）。
+
+### 1.5.5 输出文件格式
+
+#### 主输出「订单修复」（15 列）
+
+主输出 xlsx 单 sheet「订单修复」，**仅命中 fixedRows** 入主输出。文件命名 `单据对账修复-YYYYMMDDHHmm-{场景名}.xlsx`，由原生 saveDialog 让用户选保存路径（另存为）。
+
+15 列表头：
+
+| 列序 | 列名 | 含义 |
+|---|---|---|
+| 1 | BillDate | 账单日期（来自 srcRow） |
+| 2 | Bank | 银行（来自 srcRow） |
+| 3 | MerchantId | 商户号（来自 srcRow） |
+| 4 | OrderId | 单据 ID（来自 srcRow） |
+| 5 | DataSource | 数据来源（来自 srcRow） |
+| 6 | OppBu | 对手 BU（来自 srcRow） |
+| 7 | OriginBillSource | 原始账单源（来自 srcRow） |
+| 8 | BillType | 账单类型（来自 srcRow） |
+| 9 | Type | **R/RB 规则覆写**（0 / 2） |
+| 10 | Reference | **R/RB 规则覆写**（对方 reconId 或共同 ID） |
+| 11 | Currency | 币种（来自 srcRow） |
+| 12 | Amount | 金额（来自 srcRow） |
+| 13 | OriginBillBizId | 原账单业务 ID（来自 srcRow） |
+| 14 | ReconBillBizId | 对账业务 ID（来自 srcRow） |
+| 15 | SubBizType | **R5/R6/R7 规则覆写**（自动查 / 手填 / 空） |
+
+> ⚠️ 「业务部门账单」/「对手部门账单」sheet 都有 `BizType` 列（第 15 列）；「订单修复」sheet **没有 BizType 列，只有 SubBizType**。R5/R6 用 BizType 是用作"反查 reconResult"的输入，不出现在 output。
+
+#### unmatched 告警 report（6 列）
+
+跑完 5 阶段后，仍未配对的主从行**单独写「未匹配单据」xlsx**（与主文件一并由 `recon-id-fix:export` IPC 一次返回 `mainFilePath + unmatchedFilePath`）。sheet 名「未匹配单据」，6 列表头：
+
+| 列序 | 列名 | 含义 |
+|---|---|---|
+| 1 | 场景名 | scenario.name |
+| 2 | 单据来源 | `主` 或 `从`（不写英文） |
+| 3 | OrderId | 主从单据的 OrderId |
+| 4 | BillDate | 主从单据的 BillDate |
+| 5 | Amount | 主从单据的 Amount |
+| 6 | 未配原因 | 见下方枚举 |
+
+「未配原因」枚举：
+
+- `1v1 严格 BillDate 未匹配` — 进入 Step 1 但未配；
+- `1v1 BillDate ±1day 未匹配` — 进入 Step 2 但未配；
+- `池子内 BillDate 未匹配` — 进入 Step 3.1 / Step 3'.1 但池子内同日 + Amount 没找到候选；
+- `池子内 BillDate ±1day 未匹配` — 进入 Step 3.2 / Step 3'.2 但池子内 ±1day + Amount 没找到候选；
+- `未勾 1v多/多v1，跳过` — 用户场景仅勾 oneToOne 时，Step 1+2 失败的行直接走此原因。
+
+#### 文件名规则（Round 5 P3-A/P3-B 修订）
+
+| 主 fixedRows | unmatchedRows | saveDialog 默认名 | 用户选定路径写到哪 | unmatched 文件名 |
+|---|---|---|---|---|
+| > 0 | 0 | 主名 `单据对账修复-{ts}-{name}.xlsx` | 主文件 | — |
+| > 0 | > 0 | 主名 `单据对账修复-{ts}-{name}.xlsx` | 主文件 | `{用户主文件 stem}-未匹配.xlsx`（同目录） |
+| 0 | > 0 | unmatched 名 `单据对账修复-未匹配-{ts}-{name}.xlsx` | unmatched 文件（用户选什么名就写什么名） | — |
+| 0 | 0 | — | 不弹 saveDialog | 直接返回 status='empty' |
+
+> **P3-A**：fixedRows 空 + unmatched 非空时，saveDialog 默认名直接用 unmatched 名（"用户选什么 = 实际写什么"）。
+>
+> **P3-B**：主 + unmatched 都非空时，unmatched 文件名联动用户改过的主文件 basename（`myreport.xlsx` → `myreport-未匹配.xlsx`）。
+
+#### statusBox 文案
+
+| 状态 | 文案 |
+|---|---|
+| 初始 | `请先点击"场景管理"配置场景，再选择场景并导入文件` |
+| 已选场景未导入 | `已选场景"{scenarioName}"，请点击"导入文件"` |
+| 已导入未运行 | `已导入 {fileName}（{N} 行业务账单 / {M} 行对手账单）；请点击"开始运行"` |
+| 已运行 | `场景"{scenarioName}"运行完成；命中 N 行修复，M 行警告，K 行未匹配` |
+| 已导出（仅主） | `已导出 mainFile` |
+| 已导出（仅 unmatched） | `已导出未匹配 report unmatchedFile` |
+| 已导出（双文件） | `已导出 mainFile / unmatchedFile` |
+
+### 1.5.6 常见错误（FileValidationError）
+
+`recon-id-fix:import` IPC 在导入失败时会抛 `FileValidationError`（`src/backend/file-service/common.js`），分 3 种 code：
+
+| 错误代码 | 触发场景 | 处理建议 |
+|---|---|---|
+| `missing-sheet` | 文件缺少 4 sheet 之一（业务部门账单 / 对手部门账单 / 对账结果 / 订单修复） | 检查源文件 sheet 名是否完全一致（不要重命名 / 不要有前后空格） |
+| `invalid-column-count` | 任一 sheet 列数不符（业务 23 / 对手 22 / 对账结果 18 / 订单修复 15） | 比对 `src/constants/recon-id-fix-fields.js` 字段常量；模板列数固定，多列 / 少列均拒收 |
+| `invalid-column-name` | 任一 sheet 列名顺序或拼写不符 | 严格按字段常量定义的顺序与字符（含中英文 / 大小写）填表头；任一列错位 / 错字均拒收 |
+
+> 报错时弹出对话框显示 detailLines（具体到哪个 sheet 的第几列出问题），用户可以照提示修复源文件后重新导入。
+
+> ⚠️ **资金红线提醒**：场景命中后会修改 `Type` / `Reference` / `SubBizType` 字段并写入主输出。建议首次跑场景前用一份测试样本 dry-run 验证规则；场景配置变更后**已运行的结果会被自动作废**（资金红线 defense in depth：`scenariosSnapshot` 校验不一致 → 拒导出 + alert 让用户重新跑场景）。
 
 ---
 

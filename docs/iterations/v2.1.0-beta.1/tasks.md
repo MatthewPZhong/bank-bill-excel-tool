@@ -531,15 +531,17 @@
 
 ### PR-D 验收清单
 
-- [ ] task D1-D5 全部 done
-- [ ] `npm run smoke` 全绿（v2.0.0 GA 78 + v2.1.0 新 ~25）
-- [ ] `npm run check:vars` 输出"⚠️ 关联功能 review"段，无新增高风险命中未处理
-- [ ] `npm run preview` + `npm run preview:all` 全部正常
-- [ ] `npm run scan:vars` 重生成报告
-- [ ] CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 三件套全部更新
-- [ ] `package.json.version` = `2.1.0-beta.1`
-- [ ] PRD §十六 PR-D 实施记录补全
-- [ ] 提 PR：`v2.1.0 → main`（按 `workflow_no_tester_no_auto_pr` 用户手动测试循环结束后再提）
+- [x] task D1-D5 全部 done
+- [x] `npm run smoke` 全绿（272/272 PASS — 2 次复测一致）
+- [x] `npm run check:vars` SKIPPED（PR-D 无 src/ 改动，符合脚本预期）
+- [x] `npm run preview` + `npm run preview:all` 全部正常（45 个 preview）
+- [x] `npm run scan:vars` 重生成报告（`docs/analysis/var-reference-stats.{md,json}`）
+- [x] CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 三件套全部更新
+- [x] `package.json.version` = `2.1.0-beta.1`
+- [x] PRD §十六 PR-D 实施记录补全（含 2026-05-11 用户手测通过 + fixture 脚本入仓 + baseline 漂移说明）
+- [x] 新增 `scripts/test-v2.1.0-fund-fixture.js` 自动化 P0-5d（3 case PASS：基金 PP-only / 基金 PP+PR / FX 入账）
+- [x] 用户手测 P1-1 ~ P1-9 + P0-9 stale-snapshot 文案全过
+- [x] 提 PR：`v2.1.0 → main`（PR #37，2026-05-11）
 
 ---
 
