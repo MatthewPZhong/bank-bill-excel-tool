@@ -25,9 +25,12 @@
     const BANK_STATEMENT_FIELDS = (appConstants && appConstants.bankStatementFields) || [];
     const BANK_STATEMENT_FIELDS_FOR_C3 = (appConstants && appConstants.bankStatementFieldsForC3) || BANK_STATEMENT_FIELDS;
     const GATEWAY_RECON_FIELDS = (appConstants && appConstants.gatewayReconFields) || [];
-    // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块字段常量（spec §四）
+    // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块字段常量（spec §四，business 子模式）
     const BUSINESS_BILL_FIELDS = (appConstants && appConstants.businessBillFields) || [];
     const OPPONENT_BILL_FIELDS = (appConstants && appConstants.opponentBillFields) || [];
+    // v2.1.0-beta.3 T7：网关对账单 ReconID 修复模块字段常量（gateway 子模式）
+    const GATEWAY_BILL_FIELDS = (appConstants && appConstants.gatewayBillFields) || [];
+    const CHANNEL_BILL_FIELDS = (appConstants && appConstants.channelBillFields) || [];
 
     // 条件操作枚举（C1 行 3 + C2 行 3 共用）
     const SCENARIO_CONDITION_OPS = ['等于', '不等于', '包含', '不包含', '空值', '非空值', '开头为'];
@@ -66,13 +69,30 @@
       ];
     }
 
+    // v2.1.0-beta.3 T6：对账单ReconID修复模块下挂 business（单据）+ gateway（网关）两个子模式 helper
+    //   两个 category 共用 C4 dialog 骨架（matchRules/billTypes/reconGroups/output schema 相同）；
+    //   仅文案/枚举/SubBizType 显隐/输出列等"表层"按 mode 切换（详见 T7）。
+    const RECON_ID_FIX_CATEGORIES = ['recon-id-fix', 'gateway-recon-id-fix'];
+    function isReconIdFixCategory(category) {
+      return RECON_ID_FIX_CATEGORIES.includes(category);
+    }
+    function reconIdFixModeFromCategory(category) {
+      // 'recon-id-fix' → 'business'（v2.1.0-beta.1 已有单据子模式）
+      // 'gateway-recon-id-fix' → 'gateway'（v2.1.0-beta.3 新增网关子模式）
+      return category === 'gateway-recon-id-fix' ? 'gateway' : 'business';
+    }
+
     // 4 个 dialog 配置弹窗 + 确认详情弹窗共用：根据 category 进入对应配置弹窗
     function openScenarioConfigByCategory(category) {
       if (category === 'extract-recon-id') return openModal(createScenarioConfigDialogC1());
       if (category === 'offset-bill-mark') return openModal(createScenarioConfigDialogC2());
       if (category === 'gateway-recon-join') return openModal(createScenarioConfigDialogC3());
-      // v2.1.0-beta.1 PR-A（task A6 / A7）：C4 类配置弹窗
-      if (category === 'recon-id-fix') return openModal(createScenarioConfigDialogC4());
+      // v2.1.0-beta.1 PR-A（task A6 / A7）：C4 类配置弹窗（单据子模式）
+      // v2.1.0-beta.3 T6/T7：两个 ReconID 子模式（business/gateway）共用 createScenarioConfigDialogC4；
+      //   dialog 内部从 state.scenarioDraft.category 推导 subMode（business/gateway），不依赖参数
+      if (isReconIdFixCategory(category)) {
+        return openModal(createScenarioConfigDialogC4());
+      }
       throw new Error(`unknown scenario category: ${category}`);
     }
 
@@ -5372,7 +5392,9 @@
       'offset-bill-mark': '账单打标',
       'gateway-recon-join': '提取ReconId-From 网关',
       // v2.1.0-beta.1 PR-A（task A6）：单据对账修复
-      'recon-id-fix': '单据对账修复'
+      'recon-id-fix': '单据对账修复',
+      // v2.1.0-beta.3 T7：网关对账修复（C4 gateway 子模式）
+      'gateway-recon-id-fix': '网关对账修复'
     };
 
     function getCategoryLabel(category) {
@@ -5543,8 +5565,9 @@
           openModal(createAlertDialog(`切换启用状态失败：${result?.message || '未知错误'}`));
         } else {
           // v2.1.0-beta.2 PR #38 round 2 P2-2：按 category 分流，避免跨模块互抹状态
+          // v2.1.0-beta.3 T6：两个 ReconID 子模式（business/gateway）共用 reloadReconIdFixScenarios
           const toggledCategory = tr.dataset.category;
-          if (toggledCategory === 'recon-id-fix') {
+          if (isReconIdFixCategory(toggledCategory)) {
             if (typeof reloadReconIdFixScenarios === 'function') await reloadReconIdFixScenarios();
           } else {
             if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
@@ -5558,7 +5581,10 @@
       //   （真正的 create/update/delete/toggle 路径在上方已分别调用 reloadReconIdFixScenarios() 默认参数清状态）
       function closeAndReloadReconList() {
         closeModal();
-        const shouldReloadReconId = filter ? filter.includes('recon-id-fix') : true;
+        // v2.1.0-beta.3 T6：两个 ReconID 子模式（business/gateway）的白名单都触发 reload
+        const shouldReloadReconId = filter
+          ? filter.some((c) => isReconIdFixCategory(c))
+          : true;
         if (shouldReloadReconId && typeof reloadReconIdFixScenarios === 'function') {
           reloadReconIdFixScenarios({ scenariosChanged: false }).catch((err) => {
             console.warn('reloadReconIdFixScenarios on dialog close failed:', err);
@@ -5602,12 +5628,16 @@
 
     // v2.0.0-beta.3：新增场景流程第 1 步 — 类别选择弹窗
     // v2.1.0-beta.2 PR-A：按 allowedCategories 白名单过滤可见类别
+    // v2.1.0-beta.3 T6：新增 'gateway-recon-id-fix' 类别（label "网关对账单 ReconID 修复"）
+    //   实际不会暴露给用户：ReconID 模块入口的白名单总是单类别（business 或 gateway），
+    //   单类别 → 跳过此弹窗直接进 C4 dialog（参考 L5573 的 add-scenario click handler）
     function createScenarioCategorySelectDialog(allowedCategories = null) {
       const ALL_CATEGORY_OPTIONS = [
         { value: 'extract-recon-id', label: '提取ReconId-From Self' },
         { value: 'offset-bill-mark', label: '账单打标' },
         { value: 'gateway-recon-join', label: '提取ReconId-From 网关' },
-        { value: 'recon-id-fix', label: '单据对账 ReconID 修复' }
+        { value: 'recon-id-fix', label: '单据对账 ReconID 修复' },
+        { value: 'gateway-recon-id-fix', label: '网关对账单 ReconID 修复' }
       ];
       const visibleOptions = Array.isArray(allowedCategories) && allowedCategories.length > 0
         ? ALL_CATEGORY_OPTIONS.filter((c) => allowedCategories.includes(c.value))
@@ -5692,7 +5722,9 @@
       // v2.1.0-beta.1 PR-B（Q1=B 决策，2026-04-30）：reconFields[] → reconGroups[]
       //   每个 group 自带 leftTypeSeq/rightTypeSeq + fieldPairs[]（一组内 AND；多组 OR）
       // v2.1.0-beta.1 PR-B Round 3（Decision 4，2026-05-09）：默认 group 带 Amount 锁定字段对
-      if (category === 'recon-id-fix') {
+      // v2.1.0-beta.3 T6：两个 ReconID 子模式共用默认 config schema（matchRules/billTypes/reconGroups/output）
+      //   gateway 模式与 business 模式默认 config 结构相同；差异在 dialog 渲染（mode-switch，T7）
+      if (isReconIdFixCategory(category)) {
         return {
           matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
           billTypes: [
@@ -5727,7 +5759,8 @@
     function getCategoryDialogTitle(category, mode) {
       const modeLabel = mode === 'view' ? '查看场景' : (mode === 'edit' ? '修改场景' : '新增场景');
       // v2.1.0-beta.2 PR-B（task B5）：仅 C4（recon-id-fix）类别省略 ` — 类别名` 后缀（用户决定 C1/C2/C3 保留）
-      if (category === 'recon-id-fix') {
+      // v2.1.0-beta.3 T6：两个 ReconID 子模式都省略后缀（dialog 标题统一"新增/修改场景"）
+      if (isReconIdFixCategory(category)) {
         return modeLabel;
       }
       const label = getCategoryLabel(category);
@@ -5802,8 +5835,9 @@
         else if (c.reconFields.some((r) => !r.gwField || !r.bankField)) errors.push('对账字段每行两端都不能为空');
         const a = c.assign || {};
         if (!a.gwField || !a.bankField) errors.push('对账成立后赋值的两端都不能为空');
-      } else if (draft.category === 'recon-id-fix') {
+      } else if (isReconIdFixCategory(draft.category)) {
         // v2.1.0-beta.1 PR-A（task A7）：C4 校验
+        // v2.1.0-beta.3 T6：两个 ReconID 子模式共用校验（schema 相同）；SubBizType 校验跳过逻辑由 T7 按 mode 实施
         const c = draft.config || {};
         const mr = c.matchRules || {};
         if (!mr.oneToOne && !mr.oneToMany && !mr.manyToOne) {
@@ -5880,25 +5914,39 @@
           });
         }
         const out = c.output || {};
+        // v2.1.0-beta.3 T7：errors 文案按 subMode 切换；SubBizType 校验在 gateway 模式整段跳过
+        const subMode = reconIdFixModeFromCategory(draft.category);
+        const isGwSubMode = subMode === 'gateway';
         if (!out.mode || (out.mode !== 'main' && out.mode !== 'opp' && out.mode !== 'both')) {
-          errors.push('修复结果输出方向必填（主边 / 从边 / 主从都修复）');
+          errors.push(isGwSubMode
+            ? '订单修复ID取值必填（网关账单 / 渠道账单 / 自取值）'
+            : '修复结果输出方向必填（主边 / 从边 / 主从都修复）');
+        }
+        // gateway 模式：勾选 1v多/多v1 时禁止 output.mode='main'
+        if (isGwSubMode && out.mode === 'main' && (c.matchRules.oneToMany || c.matchRules.manyToOne)) {
+          errors.push('网关 1v多 / 多v1 模式下不能选择"网关账单"作为订单修复ID取值');
         }
         if (out.mode === 'both') {
           const ci = out.commonId || {};
           if (!ci.source || (ci.source !== 'main' && ci.source !== 'opp')) {
-            errors.push('"主从都修复"必须选择共同 ID 取自主/从边');
+            errors.push(isGwSubMode
+              ? '"自取值"必须选择 ID 取自 网关账单ReconID / 渠道账单ReconID'
+              : '"主从都修复"必须选择共同 ID 取自主/从边');
           }
         }
-        const sub = out.subBizType || {};
-        const validSubModes = ['auto', 'manualMain', 'manualOpp', 'manualBoth'];
-        if (!validSubModes.includes(sub.mode)) {
-          errors.push('SubBizType 取值方式必填');
-        }
-        if (sub.mode === 'manualMain' && !sub.mainValue) errors.push('"主边单据 SubBizType 值"不能为空');
-        if (sub.mode === 'manualOpp' && !sub.oppValue) errors.push('"从边单据 SubBizType 值"不能为空');
-        if (sub.mode === 'manualBoth') {
-          if (!sub.mainValue) errors.push('"主边单据 SubBizType 值"不能为空');
-          if (!sub.oppValue) errors.push('"从边单据 SubBizType 值"不能为空');
+        // gateway 模式：SubBizType 整段跳过（dialog 内已不渲染该区块）
+        if (!isGwSubMode) {
+          const sub = out.subBizType || {};
+          const validSubModes = ['auto', 'manualMain', 'manualOpp', 'manualBoth'];
+          if (!validSubModes.includes(sub.mode)) {
+            errors.push('SubBizType 取值方式必填');
+          }
+          if (sub.mode === 'manualMain' && !sub.mainValue) errors.push('"主边单据 SubBizType 值"不能为空');
+          if (sub.mode === 'manualOpp' && !sub.oppValue) errors.push('"从边单据 SubBizType 值"不能为空');
+          if (sub.mode === 'manualBoth') {
+            if (!sub.mainValue) errors.push('"主边单据 SubBizType 值"不能为空');
+            if (!sub.oppValue) errors.push('"从边单据 SubBizType 值"不能为空');
+          }
         }
       }
       return errors;
@@ -6626,18 +6674,29 @@
     // ===== v2.1.0-beta.1 PR-A — F5 C4 配置弹窗（5 行 + 识读按钮 disabled 占位）=====
     // 主从双下拉枚举：BUSINESS_BILL_FIELDS（主边）/ OPPONENT_BILL_FIELDS（从边）
     // 行结构详见 spec §八.1；互斥逻辑详见 PRD §三 D2 / D5
-    function getReconIdFixFieldsForSide(side) {
+    // v2.1.0-beta.3 T7：按 subMode 切换枚举源
+    //   business → BUSINESS_BILL_FIELDS / OPPONENT_BILL_FIELDS（单据对账，业务/对手部门账单）
+    //   gateway  → GATEWAY_BILL_FIELDS  / CHANNEL_BILL_FIELDS（网关对账，网关/渠道账单）
+    function getReconIdFixFieldsForSide(side, subMode) {
+      if (subMode === 'gateway') {
+        return side === 'opp' ? CHANNEL_BILL_FIELDS : GATEWAY_BILL_FIELDS;
+      }
       return side === 'opp' ? OPPONENT_BILL_FIELDS : BUSINESS_BILL_FIELDS;
     }
 
     function createScenarioConfigDialogC4() {
       const draft = state.scenarioDraft;
-      if (!draft || draft.category !== 'recon-id-fix') {
+      // v2.1.0-beta.3 T7：扩 category 校验到两个 ReconID 子模式
+      if (!draft || !isReconIdFixCategory(draft.category)) {
         return createAlertDialog('内部错误：state.scenarioDraft 缺失或类别不匹配');
       }
       const mode = draft.mode || 'create';
       const isReadonly = mode === 'view';
-      if (!draft.config) draft.config = createDefaultScenarioConfig('recon-id-fix');
+      // v2.1.0-beta.3 T7：从 draft.category 推导账单类别子模式（business / gateway）
+      //   注意：与上一行的 mode（create/edit/view）正交，subMode 仅影响文案/枚举/SubBizType 显隐/输出列
+      const subMode = reconIdFixModeFromCategory(draft.category);
+      const isGatewayMode = subMode === 'gateway';
+      if (!draft.config) draft.config = createDefaultScenarioConfig(draft.category);
       const config = draft.config;
       // 防御：每行字段补默认
       if (!config.matchRules) config.matchRules = { oneToOne: true, oneToMany: false, manyToOne: false };
@@ -6738,15 +6797,15 @@
             <div class="scenario-config-c4-checkboxes">
               <label class="scenario-config-c4-checkbox-item">
                 <input type="checkbox" data-c4-match="oneToOne" ${config.matchRules.oneToOne ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-                <span>主边单据 1 v 1 从边单据</span>
+                <span>${isGatewayMode ? '网关 1 v 1 渠道' : '主边单据 1 v 1 从边单据'}</span>
               </label>
               <label class="scenario-config-c4-checkbox-item">
                 <input type="checkbox" data-c4-match="oneToMany" ${config.matchRules.oneToMany ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-                <span>主边单据 1 v 多 从边单据</span>
+                <span>${isGatewayMode ? '网关 1 v 多 渠道' : '主边单据 1 v 多 从边单据'}</span>
               </label>
               <label class="scenario-config-c4-checkbox-item">
                 <input type="checkbox" data-c4-match="manyToOne" ${config.matchRules.manyToOne ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-                <span>主边单据 多 v 1 从边单据</span>
+                <span>${isGatewayMode ? '网关 多 v 1 渠道' : '主边单据 多 v 1 从边单据'}</span>
               </label>
             </div>
           </div>
@@ -6765,7 +6824,7 @@
             </div>
           </div>
           <div class="scenario-config-row scenario-config-row-mutex">
-            <span class="scenario-config-label">修复结果输出</span>
+            <span class="scenario-config-label">${isGatewayMode ? '订单修复ID取值' : '修复结果输出'}</span>
             <div class="scenario-config-c4-output" data-c4-output></div>
           </div>
         </div>
@@ -6780,7 +6839,7 @@
 
       function renderBillTypes() {
         billTypesEl.innerHTML = config.billTypes.map((bt, idx) => {
-          const fields = getReconIdFixFieldsForSide(bt.side);
+          const fields = getReconIdFixFieldsForSide(bt.side, subMode);
           const conditionsHtml = (bt.conditions || []).map((cd, cIdx) => `
             <div class="scenario-config-c4-condition-row" data-c4-cond-row="${cIdx}">
               <select class="scenario-config-input" data-c4-cond-field="field" ${isReadonly ? 'disabled' : ''}>
@@ -6823,8 +6882,8 @@
         reconGroupsEl.innerHTML = config.reconGroups.map((grp, gIdx) => {
           const leftSide = sideBySeq.get(Number(grp.leftTypeSeq)) || 'main';
           const rightSide = sideBySeq.get(Number(grp.rightTypeSeq)) || 'opp';
-          const leftFields = getReconIdFixFieldsForSide(leftSide);
-          const rightFields = getReconIdFixFieldsForSide(rightSide);
+          const leftFields = getReconIdFixFieldsForSide(leftSide, subMode);
+          const rightFields = getReconIdFixFieldsForSide(rightSide, subMode);
           // v2.1.0-beta.2 PR-A Round 2（task R2-12）：fieldpair 加 col 1 spacer，让 [leftField][=][rightField] 与
           // group-header 的 [leftTypeSeq][vs右：][rightTypeSeq] 在 grid 上下对齐
           const fieldPairsHtml = (grp.fieldPairs || []).map((fp, fpIdx) => {
@@ -6897,33 +6956,49 @@
         const out = config.output;
         const sub = out.subBizType;
         const isBoth = out.mode === 'both';
+        // v2.1.0-beta.3 T7：gateway 子模式文案映射
+        //   主边单据 → 网关账单 / 从边单据 → 渠道账单 / 主从边都修复 → 自取值
+        //   "主边单据 reconId" → "网关账单ReconID" / "从边单据 reconId" → "渠道账单ReconID"
+        //   去掉"主从边共同的"字样；SubBizType 取值栏整段不渲染
+        const labelMain = isGatewayMode ? '网关账单' : '主边单据';
+        const labelOpp = isGatewayMode ? '渠道账单' : '从边单据';
+        const labelBoth = isGatewayMode ? '自取值' : '主从边都修复';
+        const labelCommonIdMain = isGatewayMode ? '网关账单ReconID' : '主边单据 reconId';
+        const labelCommonIdOpp = isGatewayMode ? '渠道账单ReconID' : '从边单据 reconId';
+        const labelCommonIdSuffix = isGatewayMode ? '作为修复 ID' : '作为主从边共同的修复 ID';
+        // gateway：勾选 1v多 或 多v1 时"网关账单"radio 禁用（参考 PRD §3.4 / spec §2.4.2）
+        const lockMainOption = isGatewayMode && (config.matchRules.oneToMany || config.matchRules.manyToOne);
+        const mainDisabled = isReadonly || lockMainOption;
         outputEl.innerHTML = `
           <div class="scenario-config-c4-output-modes">
-            <label class="scenario-config-c4-checkbox-item">
-              <input type="radio" name="c4-output-mode" value="main" ${out.mode === 'main' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-              <span>主边单据</span>
+            <label class="scenario-config-c4-checkbox-item${lockMainOption ? ' is-disabled' : ''}">
+              <input type="radio" name="c4-output-mode" value="main" ${out.mode === 'main' ? 'checked' : ''} ${mainDisabled ? 'disabled' : ''}>
+              <span>${labelMain}</span>
             </label>
             <label class="scenario-config-c4-checkbox-item">
               <input type="radio" name="c4-output-mode" value="opp" ${out.mode === 'opp' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-              <span>从边单据</span>
+              <span>${labelOpp}</span>
             </label>
             <label class="scenario-config-c4-checkbox-item">
               <input type="radio" name="c4-output-mode" value="both" ${out.mode === 'both' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-              <span>主从边都修复</span>
+              <span>${labelBoth}</span>
             </label>
           </div>
           ${isBoth ? `
             <div class="scenario-config-c4-common-id">
               <span>取</span>
               <select class="scenario-config-input" data-c4-common-id="source" ${isReadonly ? 'disabled' : ''}>
-                <option value="main"${out.commonId.source === 'main' ? ' selected' : ''}>主边单据 reconId</option>
-                <option value="opp"${out.commonId.source === 'opp' ? ' selected' : ''}>从边单据 reconId</option>
+                <option value="main"${out.commonId.source === 'main' ? ' selected' : ''}>${labelCommonIdMain}</option>
+                <option value="opp"${out.commonId.source === 'opp' ? ' selected' : ''}>${labelCommonIdOpp}</option>
               </select>
-              <span>加上</span>
-              <input class="scenario-config-input scenario-config-input-narrow" type="text" data-c4-common-id="suffix" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(out.commonId.suffix || '')}" placeholder="后缀">
-              <span>作为主从边共同的修复 ID</span>
+              ${isGatewayMode ? '' : `
+                <span>加上</span>
+                <input class="scenario-config-input scenario-config-input-narrow" type="text" data-c4-common-id="suffix" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(out.commonId.suffix || '')}" placeholder="后缀">
+              `}
+              <span>${labelCommonIdSuffix}</span>
             </div>
           ` : ''}
+          ${isGatewayMode ? '' : `
           <div class="scenario-config-c4-sub-biz">
             <div class="scenario-config-c4-sub-biz-title">SubBizType 取值</div>
             <label class="scenario-config-c4-checkbox-item">
@@ -6945,6 +7020,7 @@
               <span>主从边各自手填</span>
             </label>
           </div>
+          `}
         `;
       }
 
@@ -6958,6 +7034,8 @@
       bindScenarioBasicFields(dialog, draft);
 
       // 行 2：单据匹配规则 — 1v多 / 多v1 互斥；1v1 自由
+      // v2.1.0-beta.3 T7：gateway 子模式下勾选 1v多/多v1 时"网关账单"选项被禁用 →
+      //   若当前 output.mode === 'main' 自动 fallback 到 'opp'（避免"勾着的禁用项"UX 灾难）+ 重渲染 output
       dialog.querySelectorAll('input[data-c4-match]').forEach((cb) => {
         cb.addEventListener('change', () => {
           if (isReadonly) return;
@@ -6972,6 +7050,13 @@
           dialog.querySelectorAll('input[data-c4-match]').forEach((other) => {
             other.checked = !!config.matchRules[other.dataset.c4Match];
           });
+          // gateway 子模式：勾选 1v多/多v1 锁定"网关账单"选项；若当前选中是 main 自动切到 'opp'
+          if (isGatewayMode && (config.matchRules.oneToMany || config.matchRules.manyToOne)
+              && config.output.mode === 'main') {
+            config.output.mode = 'opp';
+          }
+          // 重渲染 output（更新 lockMainOption 视觉态 + radio 选中态）
+          renderOutput();
         });
       });
 
@@ -7260,15 +7345,21 @@
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段（AND）：</span><ul>${(c.reconFields || []).map((r) => `<li>网关 ${escapeHtml(r.gwField)} = 银行 ${escapeHtml(r.bankField)}</li>`).join('')}</ul></div>`;
         const a = c.assign || {};
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">赋值：</span>网关 ${escapeHtml(a.gwField || '')} → 银行 ${escapeHtml(a.bankField || '')}</div>`;
-      } else if (draft.category === 'recon-id-fix') {
+      } else if (isReconIdFixCategory(draft.category)) {
         // v2.1.0-beta.1 PR-A（task A8）：C4 文本预览（PRD §七.2 模板）
+        // v2.1.0-beta.3 T6：两个 ReconID 子模式共用预览模板（文案差异由 T7 按 mode 处理）
         const mr = c.matchRules || {};
         const mrParts = [];
         if (mr.oneToOne) mrParts.push('1 v 1');
         if (mr.oneToMany) mrParts.push('1 v 多');
         if (mr.manyToOne) mrParts.push('多 v 1');
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">匹配规则：</span>${escapeHtml(mrParts.join(' / ') || '（未选）')}</div>`;
-        const sideLabel = (s) => s === 'opp' ? '从边' : '主边';
+        // v2.1.0-beta.3 T7：预览文案按 subMode 切换（主边/从边 ↔ 网关/渠道；SubBizType 在 gateway 模式不预览）
+        const previewSubMode = reconIdFixModeFromCategory(draft.category);
+        const isGwSubMode = previewSubMode === 'gateway';
+        const sideLabel = (s) => isGwSubMode
+          ? (s === 'opp' ? '渠道' : '网关')
+          : (s === 'opp' ? '从边' : '主边');
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">账单类型：</span><ul>${(c.billTypes || []).map((bt) => {
           const condsHtml = (bt.conditions || []).map((cd) => `${escapeHtml(cd.field)} ${escapeHtml(cd.op)}${opNeedsValue(cd.op) ? ' ' + escapeHtml(String(cd.value || '')) : ''}`).join(' AND ');
           return `<li>类型#${bt.seq} (${sideLabel(bt.side)})：${condsHtml}</li>`;
@@ -7290,21 +7381,34 @@
           return `<li>${orPrefix}类型#${grp.leftTypeSeq} vs 类型#${grp.rightTypeSeq}：${fpStr}</li>`;
         }).join('')}</ul></div>`;
         const out = c.output || {};
-        const modeLabel = out.mode === 'main' ? '主边' : (out.mode === 'opp' ? '从边' : '主从都修复');
-        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">修复方向：</span>${escapeHtml(modeLabel)}</div>`;
+        // v2.1.0-beta.3 T7：修复方向预览文案按 subMode 切换
+        const modeLabel = isGwSubMode
+          ? (out.mode === 'main' ? '网关账单' : (out.mode === 'opp' ? '渠道账单' : '自取值'))
+          : (out.mode === 'main' ? '主边' : (out.mode === 'opp' ? '从边' : '主从都修复'));
+        const labelTitle = isGwSubMode ? '订单修复ID取值' : '修复方向';
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">${labelTitle}：</span>${escapeHtml(modeLabel)}</div>`;
         if (out.mode === 'both') {
           // v2.1.0-beta.1 PR-B（Q2=a 决策，2026-04-30）：commonId 取 reconId 不是 OrderId
+          // v2.1.0-beta.3 T7：gateway 子模式预览不带 suffix（dialog 中已隐藏）
           const ci = out.commonId || {};
-          html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">共同 ID：</span>取${escapeHtml(sideLabel(ci.source))}reconId + "${escapeHtml(ci.suffix || '')}"</div>`;
+          if (isGwSubMode) {
+            const reconIdLabel = ci.source === 'opp' ? '渠道账单ReconID' : '网关账单ReconID';
+            html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">自取值：</span>${escapeHtml(reconIdLabel)}</div>`;
+          } else {
+            html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">共同 ID：</span>取${escapeHtml(sideLabel(ci.source))}reconId + "${escapeHtml(ci.suffix || '')}"</div>`;
+          }
         }
-        const sub = out.subBizType || {};
-        let subText;
-        if (sub.mode === 'auto') subText = '自动查（对账结果 sheet 单据子类型）';
-        else if (sub.mode === 'manualMain') subText = `主边手填 = "${sub.mainValue || ''}"`;
-        else if (sub.mode === 'manualOpp') subText = `从边手填 = "${sub.oppValue || ''}"`;
-        else if (sub.mode === 'manualBoth') subText = `主边手填 = "${sub.mainValue || ''}"，从边手填 = "${sub.oppValue || ''}"`;
-        else subText = '（未选）';
-        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">SubBizType：</span>${escapeHtml(subText)}</div>`;
+        // SubBizType 仅 business 子模式预览
+        if (!isGwSubMode) {
+          const sub = out.subBizType || {};
+          let subText;
+          if (sub.mode === 'auto') subText = '自动查（对账结果 sheet 单据子类型）';
+          else if (sub.mode === 'manualMain') subText = `主边手填 = "${sub.mainValue || ''}"`;
+          else if (sub.mode === 'manualOpp') subText = `从边手填 = "${sub.oppValue || ''}"`;
+          else if (sub.mode === 'manualBoth') subText = `主边手填 = "${sub.mainValue || ''}"，从边手填 = "${sub.oppValue || ''}"`;
+          else subText = '（未选）';
+          html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">SubBizType：</span>${escapeHtml(subText)}</div>`;
+        }
       }
       return html;
     }
@@ -7371,7 +7475,8 @@
           }
           // 成功 → 清空 draft + 刷新场景管理弹窗
           // v2.1.0-beta.2 PR #38 round 2 P2-2：按 draft.category 分流，避免跨模块互抹状态
-          if (draft.category === 'recon-id-fix') {
+          // v2.1.0-beta.3 T6：两个 ReconID 子模式（business/gateway）保存后都触发 reloadReconIdFixScenarios
+          if (isReconIdFixCategory(draft.category)) {
             if (typeof reloadReconIdFixScenarios === 'function') await reloadReconIdFixScenarios();
           } else {
             if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
