@@ -272,6 +272,48 @@ Round 2 改动**不另开 PR-C**，与 PR-A/PR-B 合并到同一个 PR（一次�
 
 ## 七、实施记录
 
-> 各 PR merge 归档后回写改动清单到此处。
+### PR #38 — merged 2026-05-11
 
-（待 PR-A / PR-B 完成后填写）
+- **merge_commit**: `95802fa569de99c5133010eaeefc80b92db65b3b`
+- **URL**: https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/38
+- **范围**：PR-A + PR-B + Round 2 (13 项) + Round 3 v2 (8 项) 合并为单一 PR 提交（用户决策方案 B）
+
+#### 改动文件（24 文件 / +2008 / -97）
+
+| 文件 | 改动 |
+|---|---|
+| `src/renderer-dialogs.js` | createScenariosManagerDialog 签名 + reopenScenariosManager helper + 11 处 reopen 透传 + createScenarioCategorySelectDialog 白名单 + scenarios-manager 完成按钮 + 序号 1-based + compact 模式隐藏列 + Amount 锁定行 box-shadow + C4 dialog grid 对齐 + 文案精简 + getScenarioDialogActions 顺序互换 + getCategoryDialogTitle C4 省后缀 + ReconID statusBox 默认文本 + 4 处 reload 路径按 category 分流（Round 2 P2-2）+ closeAndReloadReconList 加 scenariosChanged:false（Round 3 P2-1） |
+| `src/renderer.js` | 两入口传白名单 + updateReconIdFixUi 默认文本 "欢迎使用小助手" |
+| `src/styles-gemini.css` | `.no-drag, .window-actions, .window-btn { -webkit-app-region: no-drag }` 修复窗口按钮 hit-test |
+| `src/styles-gemini-extra.css` | ReconID 主面板布局 + scenarios-manager footer + 删除按钮居中 + scenario-config-label 中线对齐 + multi-seq flex auto + commonId 155px + C4 checkboxes 单行 + 4 dialog actions 右对齐 + OR sep 8px + Amount locked box-shadow + 账单类型 + 对账字段 grid 对齐 + scenario name input 180 + 场景下拉 3/4 + transform translateX |
+| `index.html` | ReconID panel 行 1 重排 + ReconID statusBox 初始文本 |
+| `package.json` | version 2.1.0-beta.1 → 2.1.0-beta.2 |
+| `package-lock.json` | version sync (Round 1 P2) |
+| `CHANGELOG.md` / `docs/VERSION_FEATURE_HISTORY.md` / `docs/USER_GUIDE.md` | 三件套 |
+| `docs/iterations/v2.1.0-beta.1/PRD-v2.1.0-beta.1.md` | Round 2 P3-4/P3-5：OrderId → reconId、启发式 → DFS 全遍历 |
+| `docs/iterations/v2.1.0-beta.2/` | PRD + spec + tasks + log（4 文档落齐 + Round 2 / Round 3 v2 章节 + Review round 1/2/3 + self-review 轨迹） |
+| `docs/prs/PR38-v2.1.0-beta.2.md` | PR 草稿 + Review round 1 后 doc smoke 计数修复 |
+| `docs/analysis/var-reference-stats.{md,json}` | scan-vars 重跑 |
+| `docs/previews/*.png` | 9 个 PNG 重跑 |
+
+#### Commits (8)
+
+| Commit | 描述 |
+|---|---|
+| `77dc683` | 主提交：39 项改动一次性合并 |
+| `64162b7` / `5b5f6f4` | 草稿 rename + frontmatter |
+| `122274e` | Review round 1 — 1 Codex P2（lockfile sync） |
+| `668963c` | Review round 2 — 1 P2 + 3 P3（C1/C2/C3 不再清 ReconID 导出态 + PRD OrderId/启发式旧口径修订 + PR doc smoke 计数） |
+| `b2f5c5e` | Review round 3 — 1 P2（关闭场景管理弹窗传 scenariosChanged:false） |
+| `9b45dd4` | Self-review — 3 P3 一致性 |
+| `95802fa` | merge commit (PR #38 → main) |
+
+#### ⚠️ 关联功能 review
+
+- **Runtime-state**: `state`（新增 `state.activeScenarioListFilter` 字段，用于场景管理 dialog reopen 链路保留白名单）
+  - 不影响"模板列表 / 当前模块 / 导出可用性"三组联动；仅供 `reopenScenariosManager` helper 读取
+
+#### 验证
+
+- `npm run smoke`：14 套件全 PASS
+- 用户手动测试 4 轮（Round 1 + Round 2 + Round 3 v2 + Review round 1/2/3）全部通过
