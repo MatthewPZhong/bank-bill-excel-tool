@@ -211,8 +211,8 @@
           </section>
 
           <!-- v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块面板（fork bankStatementModulePanel）
-               v2.1.0-beta.2 PR-B（task B1）：行 1 左 cell = [场景下拉 + 场景管理]，行 1 右 cell = [导入文件 + 开始运行]，对齐银行对账单模块
-               v2.1.0-beta.3 T3：行 1 左 cell 改为 [账单类别下拉]（business/gateway 子模式切换）；行 2 左 cell 改为 [场景下拉 + 场景管理 + 导出文件]（账单类别为空时隐藏） -->
+               v2.1.0-beta.2 PR-B（task B1）：行 1 左 cell = [场景下拉 + 场景管理]，行 1 右 cell = [导入文件 + 开始运行]
+               v2.1.0-beta.3 T3：行 1 左 cell"场景下拉"位置 → 账单类别下拉；"场景及其下拉框"下移至与"导出文件"按钮平行（行 2 左 cell）；场景管理按钮 保持在 行 1 左 cell（与账单类别同组，沿用 beta.2 视觉对齐）；其他前端结构同 beta.2 版本 -->
           <section id="reconIdFixModulePanel" class="control-board module-panel bank-statement-board recon-id-fix-board" hidden>
             <div class="control-row">
               <div class="cell left">
@@ -223,6 +223,7 @@
                     <option value="gateway">网关对账单</option>
                     <option value="business">单据对账单</option>
                   </select>
+                  <button id="reconIdFixManageScenariosBtn" class="secondary-btn" type="button" disabled>场景管理</button>
                 </div>
               </div>
               <div class="cell right">
@@ -234,13 +235,12 @@
             </div>
             <div class="control-row">
               <div class="cell left">
-                <!-- v2.1.0-beta.3 T11 修订：账单类别为空时也始终显示行 2（按 beta.2 结构）；按钮 disabled 由 updateReconIdFixPanelVisibility 控制 -->
+                <!-- 行 2 左 cell：[场景 label + 场景下拉 + 导出文件]（场景与导出文件平行）；按钮 disabled 由 updateReconIdFixPanelVisibility 控制 -->
                 <div id="reconIdFixScenarioRow" class="recon-id-fix-scenario-row">
                   <label class="recon-id-fix-scenario-label" for="reconIdFixScenarioSelect">场景</label>
                   <select id="reconIdFixScenarioSelect" class="recon-id-fix-scenario-select" disabled>
                     <option value="">请选择场景</option>
                   </select>
-                  <button id="reconIdFixManageScenariosBtn" class="secondary-btn" type="button" disabled>场景管理</button>
                   <button id="reconIdFixExportBtn" class="secondary-btn" type="button" disabled>导出文件</button>
                 </div>
               </div>
