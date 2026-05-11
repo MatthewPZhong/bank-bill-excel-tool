@@ -1,7 +1,7 @@
 {
   "meta": {
     "version": "2.1.0-beta.1",
-    "scannedAt": "2026-05-09T09:35:34.837Z",
+    "scannedAt": "2026-05-11T07:57:01.682Z",
     "root": "src",
     "totalFiles": 60,
     "totalTopLevelNames": 601,
@@ -557,7 +557,7 @@
           },
           {
             "file": "src/renderer-dialogs.js",
-            "count": 257
+            "count": 258
           },
           {
             "file": "src/renderer-pending.js",
@@ -572,7 +572,7 @@
             "count": 71
           }
         ],
-        "totalHits": 361,
+        "totalHits": 362,
         "fileSpan": 5
       },
       {
@@ -827,7 +827,7 @@
         "refFiles": [
           {
             "file": "src/renderer-dialogs.js",
-            "count": 18
+            "count": 21
           },
           {
             "file": "src/renderer-pending.js",
@@ -842,7 +842,7 @@
             "count": 130
           }
         ],
-        "totalHits": 234,
+        "totalHits": 237,
         "fileSpan": 4
       },
       {
@@ -9789,7 +9789,7 @@
         },
         {
           "file": "src/renderer-dialogs.js",
-          "count": 257
+          "count": 258
         },
         {
           "file": "src/renderer-pending.js",
@@ -9804,7 +9804,7 @@
           "count": 71
         }
       ],
-      "totalHits": 361,
+      "totalHits": 362,
       "fileSpan": 5
     },
     {
@@ -10059,7 +10059,7 @@
       "refFiles": [
         {
           "file": "src/renderer-dialogs.js",
-          "count": 18
+          "count": 21
         },
         {
           "file": "src/renderer-pending.js",
@@ -10074,7 +10074,7 @@
           "count": 130
         }
       ],
-      "totalHits": 234,
+      "totalHits": 237,
       "fileSpan": 4
     },
     {

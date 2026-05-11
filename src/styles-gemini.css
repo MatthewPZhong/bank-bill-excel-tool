@@ -78,6 +78,15 @@ button, select { font: inherit; }
 }
 .drag-region { position: absolute; inset: 0; -webkit-app-region: drag; }
 .window-actions { display: flex; align-items: center; gap: 2px; position: relative; z-index: 1; }
+/* v2.1.0-beta.2 PR-A：让窗口右上角控制按钮脱离 drag 区——
+   .drag-region (-webkit-app-region: drag) 是 hit-test 层面的窗口拖拽区，会吞掉子元素的 click，
+   即使 .window-actions 设了 z-index 也不能覆盖；必须显式声明 no-drag 才能让按钮恢复响应。
+   同时给 .window-actions / .window-btn 兜底（class="no-drag" + 容器 + 单个按钮三重）。 */
+.no-drag,
+.window-actions,
+.window-btn {
+  -webkit-app-region: no-drag;
+}
 .window-btn {
   width: 36px; height: 30px;
   border: none; background: transparent;

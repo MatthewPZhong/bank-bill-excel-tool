@@ -3509,7 +3509,7 @@ function updateReconIdFixUi() {
     text = `已选场景"${scenarioName}"，请点击"导入文件"`;
     tone = 'neutral';
   } else {
-    text = '请先点击"场景管理"配置场景，再选择场景并导入文件';
+    text = '欢迎使用小助手';
     tone = 'neutral';
   }
   const textEl = elements.reconIdFixStatusBox.querySelector('.status-box-text');
@@ -3714,16 +3714,22 @@ async function initialize() {
   elements.newAccountGenerateBtn.addEventListener('click', handleNewAccountGenerate);
   elements.newAccountExportBtn.addEventListener('click', handleNewAccountExport);
   // v2.0.0-beta.3：银行对账单处理模块按钮 binding
+  // v2.1.0-beta.2 PR-A：场景管理传白名单 ['extract-recon-id','offset-bill-mark','gateway-recon-join']（C1/C2/C3）
   elements.bankStatementScenarioBtn.addEventListener('click', () => {
-    openModal(createScenariosManagerDialog());
+    openModal(createScenariosManagerDialog([
+      'extract-recon-id',
+      'offset-bill-mark',
+      'gateway-recon-join'
+    ]));
   });
   elements.bankStatementImportBtn.addEventListener('click', handleBankStatementImport);
   elements.bankStatementRunBtn.addEventListener('click', handleBankStatementRun);
   elements.bankStatementExportBtn.addEventListener('click', handleBankStatementExport);
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块按钮 binding（spec §一.1 + Q4 决策）
   if (elements.reconIdFixManageScenariosBtn) {
+    // v2.1.0-beta.2 PR-A：传白名单 ['recon-id-fix']（C4，单类别 → "新增场景"将跳过类别选择窗）
     elements.reconIdFixManageScenariosBtn.addEventListener('click', () => {
-      openModal(createScenariosManagerDialog());
+      openModal(createScenariosManagerDialog(['recon-id-fix']));
     });
   }
   if (elements.reconIdFixImportBtn) {

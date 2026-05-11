@@ -902,6 +902,14 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   justify-content: center;
   flex-wrap: nowrap;
 }
+/* v2.1.0-beta.2 PR-B（task B1）：行 1 左 cell 内 [场景下拉 + 场景管理] 横向排列，对齐银行对账单模块 */
+.recon-id-fix-board .recon-id-fix-scenario-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+}
 .recon-id-fix-board .recon-id-fix-scenario-label {
   font-size: 13px;
   font-weight: 500;
@@ -911,8 +919,9 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 }
 .recon-id-fix-board .recon-id-fix-scenario-select {
   height: 36px;
-  min-width: 160px;
-  max-width: 220px;
+  /* v2.1.0-beta.2 PR-A Round 3 v2（task R3-5）：场景下拉宽度收窄至当前 3/4（160→120, 220→165） */
+  min-width: 120px;
+  max-width: 165px;
   padding: 0 12px;
   border: 1px solid rgba(60, 64, 67, 0.2);
   border-radius: 10px;
@@ -928,6 +937,41 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   cursor: not-allowed;
 }
 .recon-id-fix-board .recon-id-fix-action-row .primary-btn { min-width: 120px; }
+
+/* v2.1.0-beta.2 PR-A Round 3 v2（task R3-3）：状态框宽度 = pending-action-pair 宽度（2 * 140 + gap 12 = 292px）
+   cell.right 居中保持不变 → statusBox 居中后左右边界自然 = 导入文件左 / 开始运行右
+   global * { box-sizing: border-box }，width 含 padding + border */
+.recon-id-fix-board #reconIdFixStatusBox {
+  width: 292px;
+  max-width: 292px;
+}
+
+/* v2.1.0-beta.2 PR-A Round 3 v2（task R3-4）：
+   - 场景管理 + 导出文件按钮统一 min-width 140px（与导入文件一致）
+   - cell.left 内容靠右对齐：row 1 [scenario-row] 整体右靠 cell.left 右 + row 2 [导出文件] 也右靠
+     → 按钮右边界都贴 cell.left 右边界 → 上下右对齐；按钮 min-width 140 一致 → 左边界也对齐 */
+.recon-id-fix-board #reconIdFixManageScenariosBtn,
+.recon-id-fix-board #reconIdFixExportBtn {
+  min-width: 140px;
+}
+.recon-id-fix-board .cell.left {
+  justify-content: flex-end;
+}
+
+/* v2.1.0-beta.2 PR-A Round 3 v2（task R3-6）：整体向右平移 + 调整场景管理↔导入文件距离
+   保留 grid 默认 1fr:1.4fr 让 [场景 label + 场景下拉] 完全保持 R3-5 末态位置
+   用 transform: translateX 单独给 4 个元素右移：
+   - [场景管理]/[导出文件] 右移 100px
+   - [pending-action-pair]/[statusBox] 右移 74px（用户复测后从 47 增至 74，让距离 ≈ 80px = 原 53px 的 1.5 倍）
+   - 最终 [场景管理 右]↔[导入文件 左] 距离 = 106 - 100 + 74 = 80px */
+.recon-id-fix-board #reconIdFixManageScenariosBtn,
+.recon-id-fix-board #reconIdFixExportBtn {
+  transform: translateX(100px);
+}
+.recon-id-fix-board .pending-action-pair,
+.recon-id-fix-board #reconIdFixStatusBox {
+  transform: translateX(74px);
+}
 .pending-board .pending-status {
   width: 100%;
   max-width: 360px;
@@ -2093,6 +2137,12 @@ select.mapping-text-input {
   width: 120px;
   font-weight: 500;
   color: #3c4043;
+  /* v2.1.0-beta.2 PR-A Round 2（task R2-3）：移除 padding-top，让 label 在单行 row 中线对齐 input；
+     多行 row 的 label 顶端对齐由下方 .scenario-config-row-multi .scenario-config-label 单独加回 */
+}
+
+/* v2.1.0-beta.2 PR-A Round 2（task R2-3）：多行 row（账单类型 / 对账字段）的 label 重新加 padding-top 以顶端对齐内容 */
+.scenario-config-row-multi .scenario-config-label {
   padding-top: 6px;
 }
 
@@ -2127,6 +2177,13 @@ select.mapping-text-input {
   width: 100px;
 }
 
+/* v2.1.0-beta.2 PR-A Round 3 v2（task R3-2）：场景名称 input 宽度收窄至 ~1/4 dialog body 宽（180px）；4 个 dialog 共用 */
+.scenario-config-row > input[data-field="name"] {
+  flex: 0 0 180px;
+  width: 180px;
+  max-width: 180px;
+}
+
 .scenario-config-multi-select {
   min-height: 84px;
 }
@@ -2154,7 +2211,9 @@ select.mapping-text-input {
 }
 
 .scenario-config-multi-seq {
-  flex: 0 0 36px;
+  /* v2.1.0-beta.2 PR-A Round 2（task R2-4）：按内容宽度 + 不换行；原 flex:0 0 36px 强制 36px 宽，"分组 2" 等多字数文本被截断换行 */
+  flex: 0 0 auto;
+  white-space: nowrap;
   text-align: center;
   font-weight: 600;
   color: #5f6368;
@@ -2175,6 +2234,8 @@ select.mapping-text-input {
   font-size: 13px;
   flex-shrink: 0;
   padding: 0 4px;
+  /* v2.1.0-beta.2 PR-A Round 3 v2（task R3-1）：让 "=" 在 fieldpair grid col 3（60px）内水平居中 */
+  text-align: center;
 }
 
 .icon-close-small {
@@ -2189,6 +2250,12 @@ select.mapping-text-input {
   cursor: pointer;
   flex-shrink: 0;
   transition: background 0.15s;
+  /* v2.1.0-beta.2 PR-A Round 2（task R2-1）：让 × 字符在按钮内水平+垂直居中（原默认 inline 流偏移） */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
 }
 
 .icon-close-small:hover {
@@ -2337,11 +2404,14 @@ select.mapping-text-input {
 
 /* === v2.1.0-beta.1 PR-A：C4 配置弹窗（单据对账 ReconID 修复）=== */
 
+/* v2.1.0-beta.2 PR-B（task B2）：单据匹配规则 1v1 / 1v多 / 多v1 三勾选框单行排列（不换行） */
 .scenario-config-c4 .scenario-config-c4-checkboxes {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 16px;
   margin-top: 6px;
+  align-items: center;
 }
 
 .scenario-config-c4-checkbox-item {
@@ -2350,7 +2420,8 @@ select.mapping-text-input {
   gap: 8px;
   font-size: 13px;
   color: #3c4043;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 .scenario-config-c4-checkbox-item input[type="checkbox"],
@@ -2368,24 +2439,39 @@ select.mapping-text-input {
   background: rgba(60, 64, 67, 0.03);
 }
 
+/* v2.1.0-beta.2 PR-A Round 2（task R2-12）：账单类型 bt-header + condition-row 用同一 6 列 grid
+   让 #N 占 col 1、side/field 占 col 2（同列同宽）、op 占 col 3、value 占 col 4、× 占 col 5、新增 占 col 6
+   所有下拉框（side / field / op / value 实际是 input，但视觉等同）的左右边界垂直对齐 */
 .scenario-config-c4-bt-header {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 100px minmax(0, 1fr) 22px 60px;
   gap: 8px;
+  align-items: center;
 }
+
+.scenario-config-c4-bt-header > .scenario-config-multi-seq { grid-column: 1; }
+.scenario-config-c4-bt-header > [data-c4-bt-field="side"] { grid-column: 2; }
+.scenario-config-c4-bt-header > [data-c4-bt-action="remove"] { grid-column: 5; }
 
 .scenario-config-c4-conditions {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding-left: 10px;
+  /* v2.1.0-beta.2 PR-A Round 2：去掉 padding-left（grid col 1 已占 36px 顶替了原 #N 的空间） */
 }
 
 .scenario-config-c4-condition-row {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 100px minmax(0, 1fr) 22px 60px;
   gap: 8px;
+  align-items: center;
 }
+
+.scenario-config-c4-condition-row > [data-c4-cond-field="field"] { grid-column: 2; }
+.scenario-config-c4-condition-row > [data-c4-cond-field="op"] { grid-column: 3; }
+.scenario-config-c4-condition-row > [data-c4-cond-field="value"] { grid-column: 4; }
+.scenario-config-c4-condition-row > [data-c4-cond-action="remove"] { grid-column: 5; }
+.scenario-config-c4-condition-row > [data-c4-cond-action="add-cond"] { grid-column: 6; }
 
 .scenario-config-c4-recon-row {
   flex-wrap: wrap;
@@ -2399,11 +2485,18 @@ select.mapping-text-input {
   margin-bottom: 8px;
 }
 
+/* v2.1.0-beta.2 PR-A Round 2（task R2-12）：对账字段 group-header + fieldpair 用同一 6 列 grid
+   col 1 = 90px (group-header "分组 N 左：" 文本 / fieldpair 空 spacer)
+   col 2 = 1fr  (leftTypeSeq / leftField — 上下对齐)
+   col 3 = 60px (group-header "vs 右：" / fieldpair "=")
+   col 4 = 1fr  (rightTypeSeq / rightField — 上下对齐)
+   col 5 = 22px (×)
+   col 6 = 60px (group-header 空 / fieldpair "新增") */
 .scenario-config-c4-recon-group-header {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr) 60px minmax(0, 1fr) 22px 60px;
   gap: 8px;
-  flex-wrap: wrap;
+  align-items: center;
   margin-bottom: 8px;
   font-size: 13px;
   color: #555;
@@ -2416,16 +2509,34 @@ select.mapping-text-input {
 }
 
 .scenario-config-c4-recon-fieldpair {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr) 60px minmax(0, 1fr) 22px 60px;
   gap: 8px;
-  flex-wrap: wrap;
+  align-items: center;
 }
 
+/* v2.1.0-beta.2 PR-A Round 2（task R2-12）：分隔符 / 标签文字防换行（vs 右： / 新增 等小列） */
+.scenario-config-c4-recon-group-header,
+.scenario-config-c4-recon-fieldpair,
+.scenario-config-c4-bt-header,
+.scenario-config-c4-condition-row {
+  /* white-space 默认在 grid 子元素生效；显式设置避免小列内文字竖排 */
+}
+
+.scenario-config-c4-bt-header > .scenario-config-multi-seq,
+.scenario-config-c4-recon-group-header > .scenario-config-multi-seq,
+.scenario-config-c4-recon-group-header > span,
+.scenario-config-c4-recon-fieldpair > .scenario-config-vs-arrow,
+.scenario-config-c4-condition-row > [data-c4-cond-action="add-cond"],
+.scenario-config-c4-recon-fieldpair > [data-c4-rg-fp-action="add"] {
+  white-space: nowrap;
+}
+
+/* v2.1.0-beta.2 PR-A Round 2（task R2-13）：locked 行视觉提示改用 box-shadow inset，避免 padding/border 影响 grid 列对齐
+   原 padding:4px 6px + border-left:3px 占用布局空间，让锁定行 select 起始位置比普通 fieldpair 偏右 ~9px，破坏 R2-12 grid 对齐 */
 .scenario-config-c4-recon-fieldpair-locked {
   background: rgba(60, 64, 67, 0.04);
-  padding: 4px 6px;
-  border-left: 3px solid rgba(60, 64, 67, 0.25);
+  box-shadow: inset 3px 0 0 rgba(60, 64, 67, 0.25);
 }
 
 .scenario-config-c4-recon-fieldpair-locked select {
@@ -2433,12 +2544,27 @@ select.mapping-text-input {
   cursor: not-allowed;
 }
 
+/* v2.1.0-beta.2 PR-B（task B4）：分组之间的 "OR" 文字去除，仅保留 8px 视觉间距（与 .scenario-config-row 的 padding-top 一致） */
 .scenario-config-c4-recon-or-sep {
-  font-weight: 600;
-  color: #999;
-  text-align: center;
-  padding: 4px 0;
-  font-size: 12px;
+  height: 8px;
+}
+
+/* v2.1.0-beta.2 PR-B（task B6）：4 个场景配置 dialog 的 actions 改右下角对齐（C1/C2/C3/C4 共用 .scenario-config-card class） */
+.scenario-config-card .dialog-actions {
+  justify-content: flex-end;
+}
+
+/* v2.1.0-beta.2 PR-A Round 2（task R2-5）：commonId 取值下拉宽度收窄至 130px（仅放下"主边单据 reconId" + 箭头）
+   .scenario-config-input 默认 `flex: 1` 会让 select 填满父容器剩余空间，覆盖单纯的 width 设置；
+   必须用 `flex: 0 0 130px` 覆盖 flex-grow/shrink/basis 三者，让 select 固定 130px。 */
+.scenario-config-c4-output select[data-c4-common-id="source"] {
+  flex: 0 0 155px;
+  width: 155px;
+}
+
+/* v2.1.0-beta.2 PR-A Round 2（task R2-6）：场景管理 dialog footer = 左 [新增场景] / 右 [完成]，space-between 布局 */
+.scenarios-manager-footer {
+  justify-content: space-between;
 }
 
 .scenario-config-vs-arrow {
