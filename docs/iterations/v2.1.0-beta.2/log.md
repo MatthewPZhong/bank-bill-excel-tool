@@ -142,7 +142,7 @@ R2-1 / R2-2 / R2-3 / R2-4 / R2-6 / R2-7 / R2-8 用户实测**通过**。
 
 第 1 轮 Round 3 整批回滚后，用户重新提出 5 项（按顺序逐项做），新增 2 项（R3-6 距离调整、R3-7 状态框初始文本）。
 
-### Round 3 v2 实施完成（7 项，2026-05-11）
+### Round 3 v2 实施完成（8 项，2026-05-11）
 
 | # | 改动 | 实施 |
 |---|---|---|
@@ -164,21 +164,49 @@ R2-1 / R2-2 / R2-3 / R2-4 / R2-6 / R2-7 / R2-8 用户实测**通过**。
 
 ---
 
-## 待补 — 后续节点
+## 2026-05-11 — PR #38 提交 + Review round 1/2/3 修复
 
-> 实际推进时按时间倒序追加事件。建议节点：
+### 提 PR (2026-05-11)
+- 主提交 `77dc683`：39 项改动一次性合并（PR-A + PR-B + Round 2 + Round 3 v2）
+- 草稿 rename + frontmatter (`64162b7` / `5b5f6f4`)
+- PR #38: https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/38
 
-- [x] 用户 review 文档 + 拍板（2026-05-11 完成）
-- [x] PR-A Dev 启动 / 完成（2026-05-11）
-- [x] PR-B Dev 启动 / 完成（2026-05-11）
+### Review Round 1 — 1 P2 (`122274e`)
+- **P2 lockfile 同步**：`npm install --package-lock-only` 把 `package-lock.json` 顶层版本 + root package 从 2.1.0-beta.1 同步到 2.1.0-beta.2（仅 2 行）
+
+### Review Round 2 — 1 P2 + 3 P3 (`668963c`)
+- **P2-2 C1/C2/C3 变更清 ReconID 导出态**：4 处 reload 路径按 category 分流：
+  - `renderer-dialogs.js:5511-5517` delete 用 `tr.dataset.category` 分流
+  - `renderer-dialogs.js:5544-5549` toggle 用 `tr.dataset.category` 分流
+  - `renderer-dialogs.js:5555-5561` closeAndReloadReconList 用 `filter` 分流
+  - `renderer-dialogs.js:7367-7373` save (finish) 用 `draft.category` 分流
+- **P3-3 PR doc smoke 计数表述**：13/13 → "完整 smoke PASS — 14 个套件全绿"
+- **P3-4 v2.1.0-beta.1 PRD OrderId 旧口径**：L321 + L987 → "源端单据.reconId + 输入框文本"
+- **P3-5 v2.1.0-beta.1 PRD 启发式提前终止旧描述**：L1182 → "DFS 全遍历维护全局 best（不提前终止）"
+
+### Review Round 3 — 1 P2 (`b2f5c5e`)
+- **P2-1 关闭场景管理弹窗清 ReconID 导出态**：`closeAndReloadReconList` 调 `reloadReconIdFixScenarios({ scenariosChanged: false })`（close 不是 CRUD，不应清 `state.reconIdFixExport`；CRUD 路径已分流）
+
+### Self-Review Round （`<待 commit>`）
+- **P3-1 / P3-2 / P3-3 一致性**：log.md 待补节点状态过期 + Round 3 v2 数量不一致 + 缺 PR/Review 轨迹 → 本次 commit 同步
+
+---
+
+## 待补 — 后续节点（实时维护）
+
+- [x] 用户 review 文档 + 拍板（2026-05-11）
+- [x] PR-A Dev / 完成（2026-05-11）
+- [x] PR-B Dev / 完成（2026-05-11）
 - [x] preview + smoke 验证通过（2026-05-11）
 - [x] 用户测试 Round 1 通过（2026-05-11）
-- [x] Round 2 Dev 启动 / 完成（2026-05-11）
-- [ ] Round 2 用户测试通过
-- [ ] PR-A preview + smoke 通过
-- [ ] PR-A 用户测试循环 / merge
-- [ ] PR-B Dev 启动 / 完成
-- [ ] PR-B preview + smoke 通过
-- [ ] PR-B 用户测试循环 / merge
-- [ ] 版本号 bump + 三件套 + `/check-vars`
-- [ ] 迭代收尾归档
+- [x] Round 2 Dev / 完成（2026-05-11）
+- [x] Round 2 用户测试通过（2026-05-11）
+- [x] Round 3 v2 Dev / 完成（2026-05-11）
+- [x] Round 3 v2 用户测试通过（2026-05-11）
+- [x] 版本号 bump 2.1.0-beta.1 → 2.1.0-beta.2（2026-05-11）
+- [x] 文档三件套更新（CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE）
+- [x] `/check-vars` 已跑（命中 `state` Runtime-state，仅新增字段）
+- [x] PR #38 提交（2026-05-11）
+- [x] Review round 1/2/3 修复 + self-review
+- [ ] PR #38 merge
+- [ ] 迭代收尾归档（PR38 frontmatter integrated:true + merge_commit + PRD §七 实施记录）
