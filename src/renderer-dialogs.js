@@ -5554,11 +5554,13 @@
 
       // v2.1.0-beta.1 PR-A（task A9）：场景管理 dialog 关闭时（× / 点空白处通用 closeModal 通道也覆盖）
       // v2.1.0-beta.2 PR #38 round 2 P2-2：仅 ReconID 入口（filter 含 'recon-id-fix'）才刷新 ReconID 主面板下拉
+      // v2.1.0-beta.2 PR #38 round 3 P2-1：close 不是 CRUD，传 scenariosChanged: false 避免清 state.reconIdFixExport
+      //   （真正的 create/update/delete/toggle 路径在上方已分别调用 reloadReconIdFixScenarios() 默认参数清状态）
       function closeAndReloadReconList() {
         closeModal();
         const shouldReloadReconId = filter ? filter.includes('recon-id-fix') : true;
         if (shouldReloadReconId && typeof reloadReconIdFixScenarios === 'function') {
-          reloadReconIdFixScenarios().catch((err) => {
+          reloadReconIdFixScenarios({ scenariosChanged: false }).catch((err) => {
             console.warn('reloadReconIdFixScenarios on dialog close failed:', err);
           });
         }
