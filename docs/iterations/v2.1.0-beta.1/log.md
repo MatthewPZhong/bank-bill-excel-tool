@@ -94,7 +94,7 @@
   - `npm run smoke` **272/272 PASS**（baseline 不退步）
   - `npm run preview` + `npm run preview:all` 全部 PASS（45 个 preview）
   - `npm run scan:vars` 输出 v2.1.0-beta.1 报告（60 JS 文件 / 601 顶层声明 / A-share 101 / A-pair 153 / B-cross 254）
-  - `npm run check:vars` skipped（PR-D 无 src/ 改动）
+  - `npm run check:vars` SKIPPED（PR-D commit 自身无 src/ 改动；前置 `69cbf45` PR-C 取消 commit 的 11 行 UI 清理不命中重要变量）
 - **升格候选**（未在 `rules/important-variables.md` 但跨 ≥ 3 文件）：
   - Critical 候选：`BUSINESS_BILL_FIELDS` / `OPPONENT_BILL_FIELDS` / `ORDER_REPAIR_FIELDS`（4 sheet 字段常量，与 preload inline 副本严格同步；同类已收录 `BANK_STATEMENT_FIELDS` / `GATEWAY_RECON_FIELDS`）
   - Risk-sensitive 候选：`ensureScenariosCategoryReconIdFix` / `migrateC4ReconGroupsStructure` / `migrateC4ReconGroupsAmountLockedFieldPair`（DB 迁移函数，同 `ensureScenariosSupport` 等已收录条目结构）
@@ -679,13 +679,13 @@
 
 - **风险显式提醒**（提 PR 前最后一道）：
   - 资金红线（版本号 bump + 三件套 → main）：本 PR 是 release 链路对外契约，merge 到 main 后所有用户启动看到 `v2.1.0-beta.1`；CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 中 4 → 5 模块描述必须与 PR-A/B 实际行为对齐
-  - 资金红线（无 src/ 改动，但 fixture 脚本读取真实 IO 链路）：fixture 脚本调用 `readReconIdFixFile` + `runReconIdFix` 真实代码，3 case 全过反向证明 IO + 引擎在用户测试环境下行为稳定
+  - 资金红线（PR-D commit 自身无 src 改动，但 fixture 脚本读取真实 IO 链路）：fixture 脚本调用 `readReconIdFixFile` + `runReconIdFix` 真实代码，3 case 全过反向证明 IO + 引擎在用户测试环境下行为稳定；前置 `69cbf45` PR-C 取消 commit 的 11 行 UI 清理（删占位）不命中重要变量
   - 资金红线（合并后 v2.1.0 → main 同步）：merge 后按 memory `workflow_multi_version` cherry-pick 不适用（v2.1.0 是迭代分支，main ← v2.1.0 是正向合并）；v3.0.0 分支需后续 merge main 同步
 
 - **测试证据**：
   - `npm run smoke` 272/272 PASS（2 次复测一致）
   - `node scripts/test-v2.1.0-fund-fixture.js` 3/3 PASS（基金 PP-only + 基金 PP+PR + FX 入账）
-  - `npm run check:vars` SKIPPED（无 src/ 改动）
+  - `npm run check:vars` SKIPPED（PR-D commit 自身无 src/ 改动；前置 `69cbf45` PR-C 取消 commit 的 11 行 UI 清理不命中重要变量）
   - 用户手测 P1-1 ~ P1-9 + P0-9 全 PASS
 
 - **下一步**：等用户合并 PR #37 → main → 按 memory `workflow_archive_pr_draft` 归档 `docs/prs/PR37-v2.1.0-beta.1.md`（integrated=true + merge commit hash）→ 按 memory `workflow_pr_integrate_prd` 把改动清单追加到 PRD §16 PR-D

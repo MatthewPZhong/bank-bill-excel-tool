@@ -1235,7 +1235,7 @@ state.reconIdFixResult = {  // 运行后产生
   - `npm run smoke` **272/272 PASS**（baseline 不退步；v2.0.0 GA 78 + Pending/scenarios + v2.1.0 PR-A/B 增量）
   - `npm run preview` + `npm run preview:all` 全部 PASS（45 个 preview，含 5 个新 preview：recon-id-fix-panel / scenario-config-c4 / scenario-config-c4-both / module-switcher-open / 主页）
   - `npm run scan:vars` 输出 v2.1.0-beta.1 报告（60 JS 文件 / 601 顶层声明 / A-share 101 / A-pair 153）
-  - `npm run check:vars` skipped（PR-D 无 src/ 改动）
+  - `npm run check:vars` SKIPPED（PR-D commit 自身无 src/ 改动；前置 `69cbf45` PR-C 取消 commit 的 11 行 UI 清理不命中重要变量）
 - 升格候选（未在 `rules/important-variables.md` 但跨 ≥ 3 文件，**仅候选，待 team-lead 决策**）：
   - **Critical（业务契约锚点）候选**：
     - `BUSINESS_BILL_FIELDS` / `OPPONENT_BILL_FIELDS` / `ORDER_REPAIR_FIELDS`（`src/constants/recon-id-fix-fields.js`）— 4 sheet 字段常量；与 preload inline 副本严格同步；同类已收录的有 `BANK_STATEMENT_FIELDS` / `GATEWAY_RECON_FIELDS`，建议升格
@@ -1255,4 +1255,4 @@ state.reconIdFixResult = {  // 运行后产生
 - 测试证据补充（2026-05-11 提 PR 前最终回归）：
   - `npm run smoke` **272/272 PASS**（与 dev round 1 一致）
   - `node scripts/test-v2.1.0-fund-fixture.js` **3/3 PASS**（基金 PP-only + 基金 PP+PR + FX 入账）
-  - `npm run check:vars` SKIPPED（PR-D 本次提交无 src/ 改动，符合脚本预期）
+  - `npm run check:vars` SKIPPED（PR-D commit 自身无 src/ 改动；前置 `69cbf45` PR-C 取消 commit 的 11 行 UI 清理不命中重要变量）
