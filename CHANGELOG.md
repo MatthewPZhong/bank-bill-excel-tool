@@ -1,5 +1,48 @@
 # Changelog
 
+## 2.1.0-beta.3 - 2026-05-11
+
+v2.1.0-beta.2 之后追加迭代：单据对账 ReconID 修复模块扩展为 **对账单ReconID修复** 通用模块，下挂 **单据对账单**（已有）+ **网关对账单**（新增）两个子模式，共用 C4 dialog + 引擎骨架；主面板新增"账单类别"一级筛选下拉 + 持久化。13 个 task 共 5 个 commit 完成。
+
+### 新增
+
+- **对账单ReconID修复 — 网关对账单子模式（C4 gateway）**：新增 `scenario.category = 'gateway-recon-id-fix'`，与已有 `recon-id-fix`（单据子模式）并列；scenarios.category CHECK 约束从 4 值扩至 5 值（新增 `ensureScenariosCategoryGatewayReconIdFix` 幂等迁移函数，沿用 v2.1.0-beta.1 PR-A 模板）。
+- **网关子模式字段常量**：`src/constants/gateway-bill-recon-fields.js` 新增 4 个常量（GATEWAY_BILL_FIELDS 31 列 / CHANNEL_BILL_FIELDS 16 列 / ORDER_REPAIR_FIELDS_GATEWAY 14 列 / RECON_RESULT_FIELDS_GATEWAY 19 列）+ 4 个 sheet 名常量；preload.js inline 副本同步 + appConstants 暴露 3 字段。
+- **主面板"账单类别"下拉**（行 1 左 cell，位置 = 原"场景"位置）：枚举 `空（请选择账单类别）/ 网关对账单 / 单据对账单`；持久化到 `app_settings.recon_id_fix_bill_category`（新增 IPC handler `settings:set-recon-id-fix-bill-category`）；切换时级联清空（selectedScenarioId / Export / Session / Result）+ 重新过滤场景下拉 + 更新行 2 hidden 状态。
+- **主面板行 2**（账单类别空时隐藏）：[场景下拉 + 场景管理 + 导出文件] 同行；"场景"位置从行 1 下移至与"导出文件"按钮平行。
+- **C4 dialog 双模式化**：函数内部从 `state.scenarioDraft.category` 推导 `subMode`（business / gateway），mode-switch 控制匹配规则勾选框文案 / 字段下拉枚举源 / 标签文案 / 输出选项 / commonId-source / "网关账单"radio 禁用规则 / SubBizType 整段不渲染 / locked fieldPair 默认值 / errors 文案 / 预览 9 处差异。
+- **网关子模式引擎写值**（`c4-recon-id-fix.js`）：
+  - 1v1：双 Type=0 + Reference 按 `output.mode` 取（main=网关.reconciliationId / opp=渠道.reconciliationId / both=按 commonId.source 取）；
+  - **1v多 拆账**：输入 1 笔网关丢弃 + 输出 n 笔（基于 mainRow 数据 + 覆盖 Type=1 / Amount=对应渠道.receiveAmount / Reference 按选项），每笔渠道 ↔ 拆出网关一一对应；
+  - **多v1**：输出 n 笔（基于对应 mainRow 数据 + 覆盖 Type=2 / Amount 保持原值 / Reference 按选项）；
+  - 全局约束：每笔渠道账单全局只能被一次匹配组消费（沿用引擎骨架 pairedRight 集合）；
+  - 输出列：gateway 用 ORDER_REPAIR_FIELDS_GATEWAY（14 列无 SubBizType）；business 沿用 ORDER_REPAIR_FIELDS（15 列含 SubBizType）。
+- **IO 双模式化**：`getSheetConfigBySubMode` helper 按 subMode 选 4 sheet 名 + 4 字段集；reader / writer / 文件名 helper 全部加 subMode 参数；文件名前缀按 mode 切换（业务 `单据对账修复-...` / 网关 `网关对账修复-...`）；main.js 3 个 IPC handler（import/run/export）按 subMode 路由 + session.subMode vs scenario.category 一致性校验。
+- **网关引擎 fixture 化单测**（`scripts/smoke/recon-id-fix-engine-gateway.js`）：6 用例 + constants sanity（7/7 PASS），覆盖 1v1×3 选项 / 1v多 拆账 / 多v1 保 Amount / 全局约束；注册到 `npm run smoke` dispatcher。
+- **网关子模式 preview**（4 张）：`recon-id-fix-panel-business` / `recon-id-fix-panel-gateway` / `scenario-config-c4-gateway` / `scenario-config-c4-gateway-1vN`（gateway 1v多 网关账单选项禁用态）。
+
+### 变更
+
+- **版本号**：2.1.0-beta.2 → 2.1.0-beta.3。
+- **主面板模块下拉项文本**：`单据对账 ReconID 修复` → `对账单ReconID修复`（module.id 保留 `recon-id-fix` 不变，避免数十处引用 + DB CHECK 约束牵动）。
+- **算法层适配 gateway 字段名**：`findAmountLockedPair` 用 `locked === true` 优先识别（fallback 字段名）；`tryOneToManyPool` / `tryManyToOnePool` 用 `amountPair.leftField/rightField` 取 cents（不再硬编码 `r.Amount`）；引擎入口对 gateway 渠道行做 `createTime → BillDate` 字段映射（避免改动算法骨架 BillDate 硬编码）。
+- **renderer-dialogs.js helper 抽取**：`RECON_ID_FIX_CATEGORIES` / `isReconIdFixCategory(category)` / `reconIdFixModeFromCategory(category)`；9 处 `category === 'recon-id-fix'` 单一判断统一替换为 helper。
+- **smoke `migrations-recon-id-fix.js` E1 断言**：VALID_CATEGORIES 数量 4 → 5。
+
+### 修复
+
+- 无（本迭代为功能扩展，不修复 v2.1.0-beta.2 已知问题）。
+
+### 未改动（明确）
+
+- C1/C2/C3 dialog 业务逻辑与业务引擎；C3 网关对账 join 与本次"网关对账ReconID修复"是 **完全不同的模块**，仅 GATEWAY_RECON_FIELDS 31 列字段常量列名相同（但分属两个模块，未来不互相引用）。
+- 单据子模式（business）现有 C4 引擎默认路径：`runC4Scenario(scenario, sheets)` 不传 subMode 时仍按 v2.1.0-beta.2 行为跑；现有 `recon-id-fix` 场景输出 byte-for-byte 一致。
+- BrowserWindow 配置 / module.id（`recon-id-fix`，未改名）/ scenarios 表 schema 列结构与 UNIQUE 约束（仅扩 CHECK 枚举值 + 一个幂等迁移函数）。
+
+### smoke
+
+`npm run smoke` 14 个子套全绿（recon-id-fix-engine 23/23 / recon-id-fix-engine-gateway 7/7 / io 13/13 / end-to-end 6/6 / migrations 15/15 / scenarios-repository 7/7 / ipc-handlers 20/20 / scenario-engines 23/23 / dispatcher 15/15 / exceljs-writer 3/3 / bank-statement-io 13/13 / scenario-end-to-end 23/23 / error-causes 39/39 / usage-stats 41/41）。
+
 ## 2.1.0-beta.2 - 2026-05-11
 
 v2.1.0-beta.1 用户实测后的 UI 精修 + 场景管理跨模块隔离 + 窗口控制按钮 hit-test 修复迭代。共 39 项改动通过 4 轮用户测试迭代（PR-A 业务隔离+窗口 bug / PR-B 6 项 UI 调整 / Round 2 13 项 UI 优化 / Round 3 v2 8 项 UI 优化）后稳定，单 PR 合并提交。

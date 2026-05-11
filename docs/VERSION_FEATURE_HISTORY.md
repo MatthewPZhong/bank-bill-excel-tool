@@ -9,6 +9,44 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.0-beta.3（2026-05-11）
+
+v2.1.0-beta.2 之后追加迭代：将"单据对账 ReconID 修复"模块扩展为 **对账单ReconID修复** 通用模块，下挂"单据对账单"（已有）+ "网关对账单"（新增）两个子模式，共用 C4 dialog + 引擎骨架 + IO 层；主面板新增"账单类别"一级筛选下拉。13 个 task / 5 个 commit / 单 PR 合并。
+
+### 新增
+
+- **对账单ReconID修复 — 网关对账单子模式**：新增 `scenario.category = 'gateway-recon-id-fix'`（与已有 `recon-id-fix` 并列）；scenarios.category CHECK 约束扩 5 值（幂等迁移函数 `ensureScenariosCategoryGatewayReconIdFix`）。
+- **网关子模式 4 sheet 字段常量**：网关账单 31 列 / 渠道账单 16 列 / 订单修复 14 列（无 SubBizType）/ 对账结果 19 列；preload inline 副本同步。
+- **主面板"账单类别"下拉**：枚举 `网关对账单 / 单据对账单`（初始空）；位置 = 原"场景"位置；持久化到 `app_settings.recon_id_fix_bill_category`；切换时级联清空 + 重新过滤场景下拉。
+- **主面板行 2 wrapper**：[场景下拉 + 场景管理 + 导出文件] 同行，账单类别空时隐藏；"场景"从行 1 下移至与"导出文件"同行。
+- **C4 dialog 双模式化**：函数内部从 draft.category 推导 subMode，9 处 mode-switch（匹配规则勾选框文案 / 字段下拉枚举源 / 标签文案 / 输出选项文本 / commonId-source 下拉枚举 / "网关账单"radio 在 1v多/多v1 时禁用 / SubBizType 取值栏整段不渲染 / locked fieldPair 默认值按 mode 选字段名 / errors + 预览文案）。
+- **网关子模式引擎写值规则**：
+  - 1v1：双 Type=0 + Reference 按 dialog "订单修复ID取值"选项决定（main=网关.reconciliationId / opp=渠道.reconciliationId / both=按 commonId.source）；
+  - **1v多 拆账**：输入 1 笔网关丢弃 + 输出 n 笔（基于 mainRow 数据，Type=1 / Amount=对应渠道.receiveAmount / Reference 按选项）；
+  - **多v1**：输出 n 笔（基于对应 mainRow，Type=2 / Amount 保持原值 / Reference 按选项）；
+  - 全局约束：每笔渠道账单全局只能被一次消费；
+  - 输出列：gateway 14 列（无 SubBizType），business 仍 15 列。
+- **IO 双模式化**：reader/writer 按 subMode 选 sheet 名 + 字段常量；文件名前缀切换（业务 `单据对账修复-...` / 网关 `网关对账修复-...`）；session.subMode vs scenario.category 一致性校验。
+- **网关引擎 fixture 化单测**：6 用例（1v1×3 选项 / 1v多 拆账 / 多v1 保 Amount / 全局约束）+ constants sanity；7/7 PASS；注册到 npm run smoke。
+- **网关子模式 preview**：4 张新截图（主面板 business/gateway + dialog 默认/1v多 禁用）。
+
+### 变更
+
+- **版本号**：2.1.0-beta.2 → 2.1.0-beta.3。
+- **主面板模块下拉项文本**：`单据对账 ReconID 修复` → `对账单ReconID修复`；module.id 保留 `recon-id-fix` 不变。
+- **算法层适配 gateway 字段名**：`findAmountLockedPair` 优先按 `locked === true` 识别 + 字段名 fallback；池子算法用 `amountPair.leftField/rightField` 取 cents（不再硬编码 'Amount'）；引擎入口对 gateway 渠道行做 createTime→BillDate 字段映射。
+- **renderer-dialogs.js helper 抽取**：`isReconIdFixCategory(category)` / `reconIdFixModeFromCategory(category)`；9 处单一 category 判断统一替换。
+
+### 修复
+
+- 无（本迭代为功能扩展）。
+
+### 未改动
+
+- C1/C2/C3 dialog 业务逻辑；C3 网关对账 join 模块与本次"网关对账ReconID修复"完全不同的模块（仅字段列名相同）。
+- 单据子模式（business）现有 C4 引擎默认路径：输出 byte-for-byte 与 v2.1.0-beta.2 一致。
+- BrowserWindow 配置 / module.id `recon-id-fix` / scenarios 表列结构与 UNIQUE 约束（仅扩 CHECK 枚举值）。
+
 ## 2.1.0-beta.2（2026-05-11）
 
 v2.1.0-beta.1 用户实测后的 UI 精修 + 场景管理跨模块隔离 + 窗口控制按钮 hit-test 修复迭代。39 项改动 / 4 轮用户测试迭代（PR-A 业务隔离 / PR-B 6 项 UI / Round 2 13 项 / Round 3 v2 8 项），单 PR 合并提交。
