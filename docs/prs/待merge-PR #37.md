@@ -20,7 +20,7 @@ v2.1.0-beta.1 迭代第 3 个（也是最后一个）PR，主体是文档 + 配�
 - **新增真实 fixture 回归脚本**：`scripts/test-v2.1.0-fund-fixture.js`（3 case 自动化 P0-5d）
 - **PR-C 识读规律取消** 历史痕迹（PRD §三 D7 / §七.4 / §十.2 标 DEPRECATED；tasks.md C1-C5 标 CANCELLED；§十一 4 PR → 3 PR）
 
-## 改动清单（PR 整体 diff vs main：57 文件，含 1 处 src UI 清理；本次 PR-D commit `e20eaf2` 本身 58 文件无 src）
+## 改动清单（PR 整体 diff vs main：**59 文件**，含 1 处 src UI 清理；本次 PR-D commit `e20eaf2` 本身 58 文件无 src，review round 1 commit `e956292` 改 3 文件，PRD round 2 修订 + 本草稿本次又增量）
 
 ### 核心 6 个
 
