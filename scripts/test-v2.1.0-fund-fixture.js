@@ -229,8 +229,11 @@ function main() {
 
   console.log('');
   if (totalRan === 0) {
-    console.error('✗ 没有 fixture 可跑');
-    process.exit(2);
+    // PR #37 Codex P2 修复：fixture 全部缺失时按设计 skip（exit 0），不算 FAIL
+    // 注释里承诺"fixture 缺失自动跳过且不算 FAIL"，CI / 异机执行应一致
+    console.warn('!! 所有 fixture 路径都不存在，跳过本次回归（exit 0，符合脚本约定）');
+    console.warn('!! 如需在其他机器执行，请把 fixture 拷到约定路径，或后续支持 CLI 参数 / env var');
+    return;
   }
   if (allPass) {
     console.log(`✓ P0-5d 真实 fixture 回归全部 PASS（共 ${totalRan} case）`);

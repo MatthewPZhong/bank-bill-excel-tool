@@ -11,7 +11,7 @@ integrated: false
 
 ## 范围
 
-v2.1.0-beta.1 迭代第 3 个（也是最后一个）PR，纯文档 + 配置 + 测试基建，**无 src/ 业务代码改动**。
+v2.1.0-beta.1 迭代第 3 个（也是最后一个）PR，主体是文档 + 配置 + 测试基建。**含 1 处 src UI 清理**（`src/renderer-dialogs.js` 11 行，来自前置 commit `69cbf45` PR-C 取消时的遗留：删 inferTooltip 常量 + 「识读场景规律」按钮 + dialog-actions left-right → 单区简化），不涉及业务引擎 / 重要变量。
 
 - **版本号 bump**：`2.0.0` → `2.1.0-beta.1`
 - **文档三件套**：CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 新增 v2.1.0-beta.1 + 第 5 模块章节
@@ -20,7 +20,7 @@ v2.1.0-beta.1 迭代第 3 个（也是最后一个）PR，纯文档 + 配置 + �
 - **新增真实 fixture 回归脚本**：`scripts/test-v2.1.0-fund-fixture.js`（3 case 自动化 P0-5d）
 - **PR-C 识读规律取消** 历史痕迹（PRD §三 D7 / §七.4 / §十.2 标 DEPRECATED；tasks.md C1-C5 标 CANCELLED；§十一 4 PR → 3 PR）
 
-## 改动清单（共 56 个，无 src/）
+## 改动清单（PR 整体 diff vs main：57 文件，含 1 处 src UI 清理；本次 PR-D commit `e20eaf2` 本身 58 文件无 src）
 
 ### 核心 6 个
 
@@ -54,6 +54,10 @@ v2.1.0-beta.1 迭代第 3 个（也是最后一个）PR，纯文档 + 配置 + �
 
 - `docs/prs/待merge-PR #37.md` — 本文件
 
+### 前置 commit `69cbf45` 携带的 src UI 清理 1 个（PR-C 取消遗留，不在本次 PR-D commit 内但合入 PR 整体 diff）
+
+- `src/renderer-dialogs.js` — `createScenarioConfigDialogC4` 删 `inferTooltip` 常量 + 「识读场景规律」按钮 + dialog-actions left-right 简化为单区（共 -11 行）；不涉及业务引擎 / 重要变量
+
 ## 关键决策
 
 ### 1. PRD §12 P0-5d baseline 漂移保留为「双 baseline」
@@ -83,13 +87,13 @@ v2.1.0-beta.1 迭代第 3 个（也是最后一个）PR，纯文档 + 配置 + �
 | └ Case A 基金 PP-only legacy | 80/30/50/0/0 PASS |
 | └ Case B 基金 PP+PR 当前 scenario | 92/36/56/0/0 PASS |
 | └ Case C FX 入账 PP-only suffix=_001 | 96/36/60/18/0 PASS |
-| `npm run check:vars` | SKIPPED（无 src/ 改动，符合脚本预期） |
+| `npm run check:vars` | SKIPPED（本次 PR-D commit 无 src/ 改动；前置 `69cbf45` 的 UI 清理是 PR-C 取消遗留，不命中重要变量任一层） |
 | 用户手测 P1-1 ~ P1-9（CRUD / dropdown / 老库迁移 / 重启 / 文件错误 / 互斥 / 保存校验） | 全 PASS |
 | 用户手测 P0-9 stale-snapshot 文案 | 2 case 全 PASS（改场景 + 删场景） |
 
 ## ⚠️ 关联功能 review
 
-`npm run check:vars` SKIPPED — PR-D 本次无 src/ 改动（仅文档、配置、preview、scan-vars 报告、新增 scripts/ 测试脚本），不触发"重要变量变动"硬节点。
+`npm run check:vars` SKIPPED — PR-D 本次 commit `e20eaf2` 无 src/ 改动（仅文档、配置、preview、scan-vars 报告、新增 scripts/ 测试脚本）；前置 commit `69cbf45`（PR-C 取消，2026-05-09）的 `src/renderer-dialogs.js` 11 行属 UI 清理（删占位 + 简化 dialog-actions 结构），不命中 Critical / Important-skeleton / Runtime-state / Risk-sensitive 任一层。
 
 升格候选记录（在 PRD §16 PR-D 段，**仅候选，待 team-lead 决策**）：
 
@@ -100,7 +104,7 @@ v2.1.0-beta.1 迭代第 3 个（也是最后一个）PR，纯文档 + 配置 + �
 ## 风险显式提醒
 
 - **资金红线（release 链路）**：本 PR 是版本号 bump → main 的 release 链路对外契约。merge 后所有用户启动看到 `v2.1.0-beta.1`；CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 中 4 → 5 模块描述必须与 PR-A/B 实际行为对齐（已三件套统一更新）
-- **资金红线（不破坏 PR-A/B 已合并）**：本 PR 无 src/ 改动，理论上不会破坏 PR #35（PR-A 骨架）+ PR #36（PR-B 引擎）已 merge 的逻辑；smoke 272/272 PASS + fund/FX fixture 3/3 PASS 反向证明
+- **资金红线（不破坏 PR-A/B 已合并）**：本次 PR-D commit `e20eaf2` 无 src/ 改动；前置 `69cbf45` UI 清理仅删 PR-C 占位代码（按钮 disabled 状态 + tooltip 常量），不改业务引擎 / 数据模型；smoke 272/272 PASS + fund/FX fixture 3/3 PASS 反向证明
 - **资金红线（fixture 脚本不覆盖外部依赖）**：fixture 脚本是团队工具脚本（scripts/ 目录），无法在 CI 上跑（路径在 `/Users/pzhong/Desktop/小助手-Debug/...`），靠用户本机执行；提 PR 前已跑 2 次确认 3/3 PASS
 - **兼容性（v3.0.0 分支）**：merge 后按 memory `workflow_multi_version`，v3.0.0 分支需后续 merge main 同步 v2.1.0 → v3.0.0
 
