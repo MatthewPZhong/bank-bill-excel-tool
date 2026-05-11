@@ -1220,9 +1220,13 @@ state.reconIdFixResult = {  // 运行后产生
 - `samples/单据对账导出不平-对平例子.xlsx` fixture 暂留（不影响 PR-A/B 测试；PR-D 决定是否清理）
 - v2.0.0-beta.3 PR #32a 引入的 `exceljs` 依赖保留（`recon-id-fix-io.js writeUnmatchedReport` / banker 模块仍依赖）
 
-### PR-D 收尾（用户手测通过 → PR #37 已提，待 merge）
+### PR-D 收尾（已合并）
 
-- 草稿：`docs/prs/待merge-PR #37.md`（integrated=false；PR merge 后 rename `docs/prs/PR37-v2.1.0-beta.1.md`）
+- 草稿：`docs/prs/PR37-v2.1.0-beta.1.md`（integrated=true）
+- 初版：commit `e20eaf2`（PR-D 主提交：版本 bump + 三件套 + preview + fixture 脚本，58 文件）
+- review 修订：`e956292`（round 1 — Codex P2 + 2 user P3）→ `b2ffa3c`（round 2 — 2 user P3）→ `188b845`（self-review round 3 — 4 P3 一致性同步）
+- merge commit：`ac58b00`（PR #37 → main，2026-05-11T01:58:22Z）
+- PR 整体 diff vs main：59 文件（含前置 `69cbf45` PR-C 取消的 11 行 src UI 清理）
 - 初版：dev round 1（5 task D1-D5 全完成）
 - 最终：—
 - merge commit：—
