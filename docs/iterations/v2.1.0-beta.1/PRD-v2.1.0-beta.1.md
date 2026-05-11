@@ -50,7 +50,7 @@
 | ✅ 对账匹配引擎（1v1 / 1v多 / 多v1） + 7+5 赋值规则 | ❌ 实时增量处理（一次性批处理即可） |
 | ✅ 单文件导入（4 sheet 标准结构） | ❌ 在原 xlsx 上修改（必须另存为，输出新文件） |
 | ✅ 输出文件 = 「订单修复」sheet 15 列 + 命中行 | ❌ 标黄修改格（输出新 sheet，无标黄需求） |
-| ✅ 「识读场景规律」按钮：纯规则推断主从边对应关系 | ❌ 大模型接入（明确仅纯规则） |
+| ~~✅ 「识读场景规律」按钮：纯规则推断主从边对应关系~~ **❌ 已取消（2026-05-09 PR-C 取消）** | ❌ 大模型接入（明确仅纯规则） |
 | ✅ 资金红线测试覆盖（Reference 错误关联会导致单据修复失败） | ❌ 多语言 / 国际化 |
 
 ### 2.4 明确不做
@@ -208,7 +208,9 @@
 
 > 实施时 RB1/RB3 合并实现，差异仅在"哪边触发对账成立的扫描方向"。
 
-### D7 — 「识读场景规律」按钮
+### D7 — 「识读场景规律」按钮 ~~（PR-C）~~ **DEPRECATED**
+
+> **⚠️ DEPRECATED（2026-05-09 PR-C 取消）**：本段为历史决策记录，仅供追溯，不作当前实现 / 验收依据。详见 §十一 PR-C 行 + §十六 PR-C 段。
 
 - 入口：C4 配置弹窗左下角按钮，**含 tooltip**：
   > 「导入单据不平结果表，表里的"业务部门账单"sheet 和"对手部门账单"sheet 需放入对平结果。多个例子时，需将同一例子的所有单元格颜色置为同色。通过识读对平结果，分析对平规则，分析结果填入账单类型和对账字段里。」
@@ -356,7 +358,7 @@
 
 #### F3.4 C4 配置弹窗（**新**，详见 §七.1）
 
-5 行 + 1 个识读按钮 + 完成按钮。
+5 行 + 完成按钮（~~+ 1 个识读按钮~~ — PR-C 取消，2026-05-09）。
 
 #### F3.5 确认场景详情弹窗
 
@@ -378,7 +380,7 @@
 
 ## 七、详细设计
 
-### 7.1 C4 配置弹窗 — 5 行 + 识读按钮
+### 7.1 C4 配置弹窗 — 5 行 + 完成按钮（~~+ 识读按钮~~ PR-C 取消 2026-05-09）
 
 #### 行 1：场景名称
 
@@ -404,7 +406,9 @@
 
 #### 行 5：修复结果输出（详见 §三 D5）
 
-#### 识读按钮
+#### ~~识读按钮~~ **DEPRECATED**
+
+> **⚠️ DEPRECATED（2026-05-09 PR-C 取消）**：本段为历史决策记录，仅供追溯，不作当前实现 / 验收依据。详见 §十一 PR-C 行 + §十六 PR-C 段。`createScenarioConfigDialogC4` 已删该按钮（commit `69cbf45`）。
 
 - 左下角按钮「识读场景规律」+ tooltip（详见 §三 D7）
 - 点击 → 文件选择器（默认 fixture 路径） → 弹"识读中"→ 识读完成后回填行 3 + 行 4
@@ -764,7 +768,9 @@ function deriveReasonFor(row, matchRules):
 实现可用 `unmatchedReasonByRow`（`Map<_rowIdx, 'last-step-tried'>`）跟踪每行最后到达的 step，避免重复推断。
 
 <!-- 2026-04-30 决策回写：Q3=C（颜色冲突取"有数据 cell"的最高频色）-->
-### 7.4 识读规律算法（PR-C）
+### 7.4 ~~识读规律算法（PR-C）~~ **DEPRECATED**
+
+> **⚠️ DEPRECATED（2026-05-09 PR-C 取消）**：本段为历史决策记录，仅供追溯，不作当前实现 / 验收依据。详见 §十一 PR-C 行 + §十六 PR-C 段。
 
 ```
 function inferRules(sampleFile):
@@ -989,7 +995,9 @@ state.reconIdFixResult = {  // 运行后产生
 | **池子内 Amount 单一字段对误配重复 Amount 单据** | 资金红线（高） | 1）池子内仍有 BillDate 同日 / ±1day 范围限制；2）pairedLeft/pairedRight 跨 group 共享，避免双重命中；3）unmatched 写明原因 — 用户可手动补 Currency/BizType 字段对升级到 Step 1 范围 |
 | **跨组 OR 时 Step 顺序导致优先 group 抢先吃配对** | 中 | reconGroups 顺序就是用户在 dialog 看到的顺序；用户可调整；smoke 验证 |
 
-### 10.2 ⚠️ 算法稳定性（识读规律）
+### 10.2 ~~⚠️ 算法稳定性（识读规律）~~ **DEPRECATED**
+
+> **⚠️ DEPRECATED（2026-05-09 PR-C 取消）**：本段为历史决策记录，仅供追溯，不作当前实现 / 验收依据。详见 §十一 PR-C 行 + §十六 PR-C 段。
 
 | 风险 | 等级 | 缓解 |
 |---|---|---|
@@ -1015,16 +1023,16 @@ state.reconIdFixResult = {  // 运行后产生
 
 ## 十一、PR 拆分
 
-按用户已对齐的 4 个 PR 切分。每个 PR 都跑 `check-vars` + `smoke` + `preview`。
+> **2026-05-09 调整**：PR-C 识读规律功能已取消（用户决策）。4 PR → **3 PR（A / B / D）**，§三 D7 / §七.4 / §十.2 等识读相关章节作历史记录保留但标 **DEPRECATED**。
 
 | PR | 内容 | 工作量估 | 状态 |
 |---|---|---|---|
-| **PR-A 骨架** | 模块入口 + 模块面板 + 场景管理 CRUD（C4 配置弹窗 + 类别选择四选一）+ SQLite migration（CHECK 扩） + 持久化 + 4 IPC（recon-id-fix:import 占位）| 2-3 天 | 待启动 |
-| **PR-B 对账引擎** | 4 sheet IO + C4 引擎（3 阶配对 + 7+5 规则）+ writer（15 列输出）+ "开始运行"/"导出文件"接通 + warnings → status 文案 | 4-5 天 | 待启动 |
-| **PR-C 识读规律** | 「识读场景规律」按钮 + ExcelJS cell.fill 解析 + fields-equal mining + 自动填表 | 1.5-2 天 | 待启动 |
+| **PR-A 骨架** | 模块入口 + 模块面板 + 场景管理 CRUD（C4 配置弹窗 + 类别选择四选一）+ SQLite migration（CHECK 扩） + 持久化 + 4 IPC（recon-id-fix:import 占位）| 2-3 天 | ✅ 已合并（PR #35） |
+| **PR-B 对账引擎** | 4 sheet IO + C4 引擎（5 阶段算法 + subset-sum + 7+5 规则）+ writer（15 列输出）+ unmatched.xlsx 双文件输出 + "开始运行"/"导出文件"接通 | 4-5 天 | ✅ 已合并（PR #36） |
+| ~~**PR-C 识读规律**~~ | ~~识读场景规律按钮 + ExcelJS cell.fill 解析 + fields-equal mining + 自动填表~~ | ~~1.5-2 天~~ | ❌ **已取消** |
 | **PR-D 收尾** | USER_GUIDE / VERSION_FEATURE_HISTORY / CHANGELOG 三件套 + 整体 smoke + 版本号 bump（`2.0.0` → `2.1.0-beta.1`） | 1 天 | 待启动 |
 
-总工作量约 8.5-11 天。
+总工作量约 7-9 天（去掉 PR-C 的 1.5-2 天）。
 
 ---
 
@@ -1066,13 +1074,15 @@ state.reconIdFixResult = {  // 运行后产生
 | P1-8 | 1v多 + 多v1 互斥 UI 校验 |
 | P1-9 | 至少勾 1 个匹配规则才能保存 |
 
-### 12.3 P2 识读规律场景（PR-C）
+### 12.3 ~~P2 识读规律场景（PR-C）~~ **DEPRECATED**
+
+> **⚠️ DEPRECATED（2026-05-09 PR-C 取消）**：以下测试用例不作 PR-D 验收依据。详见 §十一 PR-C 行 + §十六 PR-C 段。
 
 | ID | 场景 |
 |---|---|
-| P2-1 | 识读 fixture（`单据对账导出不平-对平例子.xlsx`）→ 推断对应账单类型 + 对账字段 |
-| P2-2 | 识读结果回填 dialog 行 3 + 行 4 |
-| P2-3 | 识读失败（候选 < 1）→ 提示 |
+| ~~P2-1~~ | ~~识读 fixture（`单据对账导出不平-对平例子.xlsx`）→ 推断对应账单类型 + 对账字段~~ |
+| ~~P2-2~~ | ~~识读结果回填 dialog 行 3 + 行 4~~ |
+| ~~P2-3~~ | ~~识读失败（候选 < 1）→ 提示~~ |
 
 ### 12.4 不测项与原因
 
@@ -1195,23 +1205,54 @@ state.reconIdFixResult = {  // 运行后产生
   - smoke：**272/272 PASS**（266 baseline + 6 新增/改造：T18 P3-A 默认名 + T19 P3-B 联动 + T20 P3-C 同语义同 snapshot + R13 联动签名 + T16/T17 行为 P3-A/P3-B 校准）
   - 回归不变：用户用例 FTA202604280200028 ↔ 202604271439325696974017228 命中 ✓ / 基金 fixture 80/30/50/0 ✓ / FX 中台入金 fixture 96/36/60/18 ✓ / 资金红线 stale-snapshot smoke T12/T13 通过 ✓ / subset-sum tie-break 4 阶完整 ✓
 
-### PR-C 识读规律（待启动）
+### ~~PR-C 识读规律~~（**已取消** — 2026-05-09）
 
-- 草稿：—
-- 初版：—
+**取消原因**：用户决策不再实施识读规律功能。dev 在 PR-C round 1 完成自测后（278/278 PASS）用户测试发现 alert 关闭后误回主页面 bug；修复后用户改变需求，决定整体取消该功能。
+
+**回退动作**：
+- 工作树 PR-C 改动全部回退（4 modified 恢复 + 2 untracked 删除）
+- C4 dialog（src/renderer-dialogs.js）删除「识读场景规律」按钮 + tooltip 常量（PR-A 占位也一并清理）
+- §三 D7 / §六 F3 识读按钮段 / §七.1 识读按钮段 / §七.4 识读规律算法 / §十.2 识读误判风险 等章节标 **DEPRECATED**（历史决策痕迹保留）
+- §十一 PR 拆分表：4 PR → 3 PR（A / B / D），PR-C 行划线
+- tasks.md PR-C task C1-C5 标 **CANCELLED**
+
+**保留事项**：
+- `samples/单据对账导出不平-对平例子.xlsx` fixture 暂留（不影响 PR-A/B 测试；PR-D 决定是否清理）
+- v2.0.0-beta.3 PR #32a 引入的 `exceljs` 依赖保留（`recon-id-fix-io.js writeUnmatchedReport` / banker 模块仍依赖）
+
+### PR-D 收尾（用户手测通过 → PR #37 已提，待 merge）
+
+- 草稿：`docs/prs/待merge-PR #37.md`（integrated=false；PR merge 后 rename `docs/prs/PR37-v2.1.0-beta.1.md`）
+- 初版：dev round 1（5 task D1-D5 全完成）
 - 最终：—
 - merge commit：—
-- 改动文件：—
-- 关键决策修订：—
-- 测试证据：—
-
-### PR-D 收尾（待启动）
-
-- 草稿：—
-- 初版：—
-- 最终：—
-- merge commit：—
-- 改动文件：—
-- 三件套更新：CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE
+- 改动文件（共 6 个）：
+  - **版本号**：`package.json`（`"version": "2.0.0"` → `"2.1.0-beta.1"`）+ `package-lock.json`（root 与 `packages.""` 同步）+ `CLAUDE.md`（Branch Structure 表新增 `v2.1.0` 行 + main 版本号 1.5.0 → 2.0.0 + PR 方向加 v2.1.0）
+  - **三件套**：`CHANGELOG.md`（顶部插入 v2.1.0-beta.1 段，5 模块全景 + 3 PR 汇总，PR-C 标取消）+ `docs/VERSION_FEATURE_HISTORY.md`（同结构）+ `docs/USER_GUIDE.md`（顶部版本号 → v2.1.0-beta.1 + 模块总览第 5 项 + 1.5 章节 6 小节 + 5 个截图占位）
+- 三件套更新：CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 全部更新
 - 版本 bump：`2.0.0` → `2.1.0-beta.1`
-- 测试证据：—
+- 测试证据：
+  - `npm run smoke` **272/272 PASS**（baseline 不退步；v2.0.0 GA 78 + Pending/scenarios + v2.1.0 PR-A/B 增量）
+  - `npm run preview` + `npm run preview:all` 全部 PASS（45 个 preview，含 5 个新 preview：recon-id-fix-panel / scenario-config-c4 / scenario-config-c4-both / module-switcher-open / 主页）
+  - `npm run scan:vars` 输出 v2.1.0-beta.1 报告（60 JS 文件 / 601 顶层声明 / A-share 101 / A-pair 153）
+  - `npm run check:vars` SKIPPED（PR-D commit 自身无 src/ 改动；前置 `69cbf45` PR-C 取消 commit 的 11 行 UI 清理不命中重要变量）
+- 升格候选（未在 `rules/important-variables.md` 但跨 ≥ 3 文件，**仅候选，待 team-lead 决策**）：
+  - **Critical（业务契约锚点）候选**：
+    - `BUSINESS_BILL_FIELDS` / `OPPONENT_BILL_FIELDS` / `ORDER_REPAIR_FIELDS`（`src/constants/recon-id-fix-fields.js`）— 4 sheet 字段常量；与 preload inline 副本严格同步；同类已收录的有 `BANK_STATEMENT_FIELDS` / `GATEWAY_RECON_FIELDS`，建议升格
+    - `RECON_RESULT_FIELDS`（A-pair 跨 2 文件，暂不升格但结构/语义同上）
+  - **Risk-sensitive（数据库迁移）候选**：
+    - `ensureScenariosCategoryReconIdFix` / `migrateC4ReconGroupsStructure` / `migrateC4ReconGroupsAmountLockedFieldPair`（`src/backend/database/migrations.js`）— 同 `ensureScenariosSupport` 等已收录条目结构；A-pair 跨 2 文件（migrations + database.js），建议补入 §4 数据库迁移段
+  - **Runtime-state 候选（A-pair，非 A-share，仅记录）**：
+    - `reconIdFixSession` / `reconIdFixResult`（`src/main.js`，4 references main.js + renderer.js 之间联动；同 `lastGeneratedExports` / `statementImportSessions` 结构）— 跨 2 文件不是 A-share，但符合"运行时全局 session"定义，建议结合"是否再多 1 个引用文件"判断升格时机
+
+- **2026-05-11 用户手测通过 + 真实 fixture 回归脚本入仓**：
+  - 新增 `scripts/test-v2.1.0-fund-fixture.js`（团队工具脚本，非 src/）：3 case 自动化 P0-5d
+    - Case A — 基金 PP-only legacy（Round 4 算法核心 baseline，PRD §12 P0-5d 原值）：fixedRowCount=80 / mainTouched=30 / oppTouched=50 / unmatched=0 / warnings=0 PASS
+    - Case B — 基金 PP+PR 当前用户 SQLite scenario id=5（实际配置回归，PR 主 6 + PR 从 6 全命中 → +12 行）：92/36/56/0/0 PASS
+    - Case C — FX 中台入金 PP-only suffix=`_001`（Round 5 baseline 推断，log.md 467 行 Reference=`PP_..._001` 反推）：96/36/60/18/0 PASS
+  - **PRD §12 P0-5d baseline 漂移说明**：PRD 写 80/30/50 是 round 4 时 scenario 仅 PP 一组；用户 2026-05-09T06:37 update scenario 加了 PR 组后实际跑 92/36/56；两套都跑通 + unmatched=0 + warnings=0 算法层健康。fixture 脚本同时覆盖两套（算法核心 + 当前实际配置）保留可追溯性
+  - 用户手测 P1 系列 + P0-9 stale-snapshot 提示文案全部 PASS
+- 测试证据补充（2026-05-11 提 PR 前最终回归）：
+  - `npm run smoke` **272/272 PASS**（与 dev round 1 一致）
+  - `node scripts/test-v2.1.0-fund-fixture.js` **3/3 PASS**（基金 PP-only + 基金 PP+PR + FX 入账）
+  - `npm run check:vars` SKIPPED（PR-D commit 自身无 src/ 改动；前置 `69cbf45` PR-C 取消 commit 的 11 行 UI 清理不命中重要变量）

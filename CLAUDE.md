@@ -83,12 +83,13 @@ Main Process (src/main.js) — ipcMain.handle() handlers + orchestration
 
 | Branch | Purpose | Version |
 |--------|---------|---------|
-| `main` | 线上正式版，始终可发布 | 1.5.0 |
+| `main` | 线上正式版，始终可发布 | 2.0.0 |
 | `v1.5.x` | 1.5.x 维护分支（线上 bug 修复） | 1.5.x |
-| `v2.0.0` | 2.0.0 开发分支 | 2.0.0-beta.1 |
+| `v2.0.0` | 2.0.0 开发分支（已合并 main） | 2.0.0 |
+| `v2.1.0` | 2.1.0 开发分支（单据对账 ReconID 修复模块） | 2.1.0-beta.1 |
 | `v3.0.0` | 3.0.0 开发分支 | 3.0.0-beta.1 |
 
-PR 方向：v1.5.x fix → `v1.5.x → main`；v2.0.0/v3.0.0 发布 → 对应分支 → `main`。
+PR 方向：v1.5.x fix → `v1.5.x → main`；v2.0.0/v2.1.0/v3.0.0 发布 → 对应分支 → `main`。
 
 ## Docs to Keep Updated on Version Iterations
 

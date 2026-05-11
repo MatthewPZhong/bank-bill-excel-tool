@@ -82,7 +82,30 @@
 
 ---
 
-## 待补：PR-D 启动 + 发版
+## 2026-04-30 PR-D dev round 1 完成（5 task D1-D5）
+
+- **动作**：dev 角色实施 PR-D 5 task（D1 版本号 bump / D2 CHANGELOG / D3 VERSION_FEATURE_HISTORY / D4 USER_GUIDE / D5 整体回归）
+- **改动文件**（6 个）：
+  - 版本号：`package.json`（"2.0.0" → "2.1.0-beta.1"）+ `package-lock.json`（root + `packages.""` 同步）
+  - 项目配置：`CLAUDE.md`（Branch Structure 表新增 v2.1.0 行 + main 版本号 1.5.0 → 2.0.0 同步）
+  - 三件套：`CHANGELOG.md`（顶部插入 v2.1.0-beta.1 段，5 模块全景 + 3 PR 汇总，PR-C 标取消）+ `docs/VERSION_FEATURE_HISTORY.md`（同结构）+ `docs/USER_GUIDE.md`（顶部版本号 + 模块总览第 5 项 + 1.5 章节 6 小节 + 5 个截图占位）
+- **PR-C 取消反映**：USER_GUIDE 1.5 章节**不写识读规律小节**（原 1.5.5 留作"输出文件格式"）；CHANGELOG / VERSION_FEATURE_HISTORY 里 PR 汇总改为 3 PR（A/B/D），PR-C 标 `~~取消~~`
+- **测试证据**：
+  - `npm run smoke` **272/272 PASS**（baseline 不退步）
+  - `npm run preview` + `npm run preview:all` 全部 PASS（45 个 preview）
+  - `npm run scan:vars` 输出 v2.1.0-beta.1 报告（60 JS 文件 / 601 顶层声明 / A-share 101 / A-pair 153 / B-cross 254）
+  - `npm run check:vars` SKIPPED（PR-D commit 自身无 src/ 改动；前置 `69cbf45` PR-C 取消 commit 的 11 行 UI 清理不命中重要变量）
+- **升格候选**（未在 `rules/important-variables.md` 但跨 ≥ 3 文件）：
+  - Critical 候选：`BUSINESS_BILL_FIELDS` / `OPPONENT_BILL_FIELDS` / `ORDER_REPAIR_FIELDS`（4 sheet 字段常量，与 preload inline 副本严格同步；同类已收录 `BANK_STATEMENT_FIELDS` / `GATEWAY_RECON_FIELDS`）
+  - Risk-sensitive 候选：`ensureScenariosCategoryReconIdFix` / `migrateC4ReconGroupsStructure` / `migrateC4ReconGroupsAmountLockedFieldPair`（DB 迁移函数，同 `ensureScenariosSupport` 等已收录条目结构）
+  - 详细列表 + 跨文件分布见 `docs/analysis/var-reference-stats.md`
+- **风险**：无新代码改动；纯文档 + 版本号 bump
+- **决策**：dev round 1 完成等待用户手动测试；用户确认后由 team-lead 提 PR
+- **下一步**：通知 team-lead "代码已完成自测，等用户测试"
+
+---
+
+## 待补：PR-D 用户测试 + PR 提交 + 发版
 
 - 动作：—
 - 证据：—
@@ -607,3 +630,62 @@
 - "纯规则推断" + "不落库 + 用户必须确认"= 双保险
 - 颜色分组（同色同例）依赖用户文件本身已有的视觉标记，工程上易实现（ExcelJS cell.fill）
 - fields-equal mining 的全等率阈值默认 0.8，可调（PR-C 实施时如果 fixture 命中率不到 0.8 再下调）
+
+---
+
+## 2026-05-09 PR-C 识读规律功能取消
+
+**触发**：dev round 1 完成自测（278/278 PASS）→ 用户测试发现 alert 关闭后跳主页面（已修）→ 用户决定整体取消该功能。
+
+**回退动作**：
+- 工作目录 PR-C 改动全部回退（4 modified 恢复 + 2 untracked 删除）
+- C4 dialog 删除「识读场景规律」按钮 + tooltip 常量（PR-A 占位代码也清理）
+- PRD §十一 4 PR → 3 PR（A/B/D），PR-C 划线
+- PRD §十六 PR-C 段标"已取消"+ 取消原因
+- tasks.md PR-C 章节标 CANCELLED
+
+**保留事项**：
+- `samples/单据对账导出不平-对平例子.xlsx` fixture 暂留（PR-D 决定是否清理）
+- exceljs 依赖保留（unmatched.xlsx writer + banker 模块仍依赖）
+
+**经验教训**：
+- 教训：未来类似"自动化辅助"功能要在 PRD 阶段先做 demo，不要等代码落地才发现用户不需要
+
+**smoke 现状**：272/272 PASS（baseline 保持，PR-C 6 用例已删，回到 PR-B 合并后状态）
+
+---
+
+## 2026-05-11 PR-D 用户手测通过 + 真实 fixture 回归脚本入仓 + PR #37 提交
+
+- **触发**：用户对话「看下现在这个项目上个版本迭代做完了吗」→「列测试单」→「哪些是你可以自己写测试用例自己测的？」→「需要」→「顺便也跑 FX 中台入金 fixture」→ P1 系列 + P0-9 stale-snapshot 提示文案手测全过 →「全部测试通过，提 PR」
+
+- **新增**：`scripts/test-v2.1.0-fund-fixture.js`（3 case 自动化 P0-5d）
+  - **Case A — 基金 PP-only legacy**（PRD §12 P0-5d 原始 baseline 复现，"subset-sum 命中所有 PP 主从"）：80/30/50/0/0 PASS
+  - **Case B — 基金 PP+PR 当前用户 SQLite scenario id=5**（实际配置回归）：92/36/56/0/0 PASS
+  - **Case C — FX 中台入金 PP-only suffix=`_001`**（log.md 467 行反推 Round 5 baseline）：96/36/60/18/0 PASS
+  - 设计要点：fixture 缺失时跳过该 case 但不算 FAIL（避免外部 fixture 路径变动卡死脚本）；scenario config 硬编码在脚本里（不依赖用户 SQLite，CI 可跑）
+
+- **PRD §12 P0-5d baseline 漂移发现**：
+  - PRD 写 80/30/50/0 是 round 4 时 scenario 仅 PP 一组（PRD 1045 行明确"命中所有 PP 主从"）
+  - 用户 SQLite `scenarios.id=5` `updated_at=2026-05-09T06:37` 后已加 PR 组（4 billTypes + 2 reconGroups）→ 实际跑 92/36/56/0/0
+  - fixture mtime `2026-04-19` 早于 PRD baseline 写定日，fixture 未动；漂移仅来自用户 GUI 改 scenario
+  - 决策：fixture 脚本同时跑两套（算法核心 + 当前配置），保留可追溯性；PRD §16 PR-D 段补漂移说明，§12 P0-5d 表格保留原值不动（作为 round 4 算法回归 baseline）
+
+- **手测覆盖**：
+  - 用户跑 P1-1 ~ P1-9（CRUD / 类别 dropdown / 老库迁移 / 重启 / 文件错误 / UI 互斥 / 保存校验）全过
+  - 用户跑 P0-9 stale-snapshot 文案 2 case 全过：
+    - 改 scenario.config → 弹窗 `导出失败：场景已变更，请重新点击"开始运行"再导出`（`src/main.js:2955+:3172`）
+    - 删 scenario → 弹窗 `导出失败：场景已删除，请重新选择场景再运行`（`src/main.js:3164`）
+
+- **风险显式提醒**（提 PR 前最后一道）：
+  - 资金红线（版本号 bump + 三件套 → main）：本 PR 是 release 链路对外契约，merge 到 main 后所有用户启动看到 `v2.1.0-beta.1`；CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 中 4 → 5 模块描述必须与 PR-A/B 实际行为对齐
+  - 资金红线（PR-D commit 自身无 src 改动，但 fixture 脚本读取真实 IO 链路）：fixture 脚本调用 `readReconIdFixFile` + `runReconIdFix` 真实代码，3 case 全过反向证明 IO + 引擎在用户测试环境下行为稳定；前置 `69cbf45` PR-C 取消 commit 的 11 行 UI 清理（删占位）不命中重要变量
+  - 资金红线（合并后 v2.1.0 → main 同步）：merge 后按 memory `workflow_multi_version` cherry-pick 不适用（v2.1.0 是迭代分支，main ← v2.1.0 是正向合并）；v3.0.0 分支需后续 merge main 同步
+
+- **测试证据**：
+  - `npm run smoke` 272/272 PASS（2 次复测一致）
+  - `node scripts/test-v2.1.0-fund-fixture.js` 3/3 PASS（基金 PP-only + 基金 PP+PR + FX 入账）
+  - `npm run check:vars` SKIPPED（PR-D commit 自身无 src/ 改动；前置 `69cbf45` PR-C 取消 commit 的 11 行 UI 清理不命中重要变量）
+  - 用户手测 P1-1 ~ P1-9 + P0-9 全 PASS
+
+- **下一步**：等用户合并 PR #37 → main → 按 memory `workflow_archive_pr_draft` 归档 `docs/prs/PR37-v2.1.0-beta.1.md`（integrated=true + merge commit hash）→ 按 memory `workflow_pr_integrate_prd` 把改动清单追加到 PRD §16 PR-D

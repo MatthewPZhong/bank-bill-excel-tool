@@ -378,10 +378,11 @@
 
 ---
 
-## PR-C 识读规律
+## ~~PR-C 识读规律~~（**已取消** — 2026-05-09）
 
-> **目标**：「识读场景规律」按钮可用 → 自动填表。
-> **预计工作量**：1.5-2 天 / 5 个 task
+> **取消原因**：用户决策不再实施识读规律功能（dev round 1 完成 + 用户测试 1 个 UX bug 修复后改主意）
+> **C1-C5 task 全部标 CANCELLED**；详见 PRD §十六 PR-C 取消段落
+> **原计划**：「识读场景规律」按钮可用 → 自动填表（1.5-2 天 / 5 个 task）
 
 <!-- 2026-04-30 决策回写：Q3=C（颜色冲突取"有数据 cell"最高频色）-->
 ### task C1：`recon-id-fix-infer.js` 颜色分组
@@ -508,9 +509,9 @@
     - 1.5.2 配置场景（5 行 + 截图占位）
     - 1.5.3 对账匹配规则（1v1 / 1v多 / 多v1 三种语义图解）
     - 1.5.4 7+5 赋值规则（表格化）
-    - 1.5.5 识读场景规律（fixture + tooltip 引用）
-    - 1.5.6 输出文件格式（15 列说明）
-    - 1.5.7 常见错误（FileValidationError 5 种）
+    - ~~1.5.5 识读场景规律（fixture + tooltip 引用）~~ **DEPRECATED — PR-C 取消（2026-05-09），USER_GUIDE 跳过该节**
+    - 1.5.5 输出文件格式（15 列说明）  ← 实际实施：原 1.5.6 上移
+    - 1.5.6 常见错误（FileValidationError 5 种）  ← 实际实施：原 1.5.7 上移
 - 验收证据：手工 review；截图占位等 PR-D 实施期间补
 - 关联 spec：§一.4
 
@@ -530,15 +531,17 @@
 
 ### PR-D 验收清单
 
-- [ ] task D1-D5 全部 done
-- [ ] `npm run smoke` 全绿（v2.0.0 GA 78 + v2.1.0 新 ~25）
-- [ ] `npm run check:vars` 输出"⚠️ 关联功能 review"段，无新增高风险命中未处理
-- [ ] `npm run preview` + `npm run preview:all` 全部正常
-- [ ] `npm run scan:vars` 重生成报告
-- [ ] CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 三件套全部更新
-- [ ] `package.json.version` = `2.1.0-beta.1`
-- [ ] PRD §十六 PR-D 实施记录补全
-- [ ] 提 PR：`v2.1.0 → main`（按 `workflow_no_tester_no_auto_pr` 用户手动测试循环结束后再提）
+- [x] task D1-D5 全部 done
+- [x] `npm run smoke` 全绿（272/272 PASS — 2 次复测一致）
+- [x] `npm run check:vars` SKIPPED（PR-D 无 src/ 改动，符合脚本预期）
+- [x] `npm run preview` + `npm run preview:all` 全部正常（45 个 preview）
+- [x] `npm run scan:vars` 重生成报告（`docs/analysis/var-reference-stats.{md,json}`）
+- [x] CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 三件套全部更新
+- [x] `package.json.version` = `2.1.0-beta.1`
+- [x] PRD §十六 PR-D 实施记录补全（含 2026-05-11 用户手测通过 + fixture 脚本入仓 + baseline 漂移说明）
+- [x] 新增 `scripts/test-v2.1.0-fund-fixture.js` 自动化 P0-5d（3 case PASS：基金 PP-only / 基金 PP+PR / FX 入账）
+- [x] 用户手测 P1-1 ~ P1-9 + P0-9 stale-snapshot 文案全过
+- [x] 提 PR：`v2.1.0 → main`（PR #37，2026-05-11）
 
 ---
 

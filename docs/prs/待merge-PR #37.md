@@ -1,0 +1,136 @@
+---
+pr: 37
+title: "[v2.1.0-beta.1 PR-D] docs+chore: 版本号 bump 2.1.0-beta.1 + 三件套 + preview + 真实 fixture 回归脚本"
+branch: v2.1.0
+target: main
+status: open
+integrated: false
+url: https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/37
+---
+
+# PR #37 — [v2.1.0-beta.1 PR-D] docs+chore 收尾
+
+## 范围
+
+v2.1.0-beta.1 迭代第 3 个（也是最后一个）PR，主体是文档 + 配置 + 测试基建。**含 1 处 src UI 清理**（`src/renderer-dialogs.js` 11 行，来自前置 commit `69cbf45` PR-C 取消时的遗留：删 inferTooltip 常量 + 「识读场景规律」按钮 + dialog-actions left-right → 单区简化），不涉及业务引擎 / 重要变量。
+
+- **版本号 bump**：`2.0.0` → `2.1.0-beta.1`
+- **文档三件套**：CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 新增 v2.1.0-beta.1 + 第 5 模块章节
+- **Preview 全量重跑**：45 个 PNG（含 5 个新模块 preview）
+- **scan-vars 报告刷新**：`docs/analysis/var-reference-stats.{md,json}`
+- **新增真实 fixture 回归脚本**：`scripts/test-v2.1.0-fund-fixture.js`（3 case 自动化 P0-5d）
+- **PR-C 识读规律取消** 历史痕迹（PRD §三 D7 / §七.4 / §十.2 标 DEPRECATED；tasks.md C1-C5 标 CANCELLED；§十一 4 PR → 3 PR）
+
+## 改动清单（PR 整体 diff vs main：**59 文件**，含 1 处 src UI 清理）
+
+**Commit 增量来源**：
+
+| Commit | 日期 | 范围 | 文件数 |
+|---|---|---|---|
+| `69cbf45` | 2026-05-09 | PR-C 识读规律取消 — `src/renderer-dialogs.js` UI 清理 + PRD/log/tasks 状态同步 | 4 |
+| `e20eaf2` | 2026-05-11 | PR-D 主提交 — 版本号 bump + 三件套 + preview + fixture 脚本 + PRD/log/tasks 状态回写 + 草稿 | 58 |
+| `e956292` | 2026-05-11 | Review round 1 — Codex P2 + user P3 × 2 | 3 |
+| `b2ffa3c` | 2026-05-11 | Review round 2 — user P3 × 2（PRD 7 处 DEPRECATED + 草稿数字） | 2 |
+| `<self-review>` | 2026-05-11 | Self-review round 3 — 4 个 P3（tasks 1.5.x / PRD-log "无 src" 口径 / 草稿 commit hash 增量 / 草稿 frontmatter URL） | 6 |
+
+### 核心 6 个
+
+| 类别 | 文件 | 说明 |
+|---|---|---|
+| 版本号 | `package.json` | `"version": "2.0.0"` → `"2.1.0-beta.1"` |
+| 版本号 | `package-lock.json` | root + `packages.""` 同步 |
+| 文档 | `CLAUDE.md` | Branch Structure 表新增 v2.1.0 行 + PR 方向加 v2.1.0 |
+| 三件套 | `CHANGELOG.md` | 顶部插入 v2.1.0-beta.1 段（新增 5 模块全景 + 3 PR 汇总，PR-C 标取消） |
+| 三件套 | `docs/VERSION_FEATURE_HISTORY.md` | 同结构 |
+| 三件套 | `docs/USER_GUIDE.md` | 顶部版本号 + 模块总览第 5 项 + 1.5 章节 6 小节 + 5 截图占位 |
+
+### 新增 1 个（测试基建）
+
+| 文件 | 说明 |
+|---|---|
+| `scripts/test-v2.1.0-fund-fixture.js` | 3 case 自动化 P0-5d（基金 PP-only / 基金 PP+PR / FX 入账），fixture 缺失自动跳过 |
+
+### 自动生成产物 47 个
+
+- `docs/previews/*.png` × 45（preview:all 重跑结果）
+- `docs/analysis/var-reference-stats.{md,json}` × 2（scan:vars 重跑结果）
+
+### iteration 文档 3 个
+
+- `docs/iterations/v2.1.0-beta.1/PRD-v2.1.0-beta.1.md` — §十六 PR-D 段补 dev round 1 + 用户测试通过 + baseline 漂移说明
+- `docs/iterations/v2.1.0-beta.1/log.md` — 加 2026-05-11 PR-D 用户测试通过段
+- `docs/iterations/v2.1.0-beta.1/tasks.md` — PR-D 验收清单全部勾选
+
+### 草稿本身 1 个
+
+- `docs/prs/待merge-PR #37.md` — 本文件
+
+### 前置 commit `69cbf45` 携带的 src UI 清理 1 个（PR-C 取消遗留，不在本次 PR-D commit 内但合入 PR 整体 diff）
+
+- `src/renderer-dialogs.js` — `createScenarioConfigDialogC4` 删 `inferTooltip` 常量 + 「识读场景规律」按钮 + dialog-actions left-right 简化为单区（共 -11 行）；不涉及业务引擎 / 重要变量
+
+## 关键决策
+
+### 1. PRD §12 P0-5d baseline 漂移保留为「双 baseline」
+
+- PRD §12 P0-5d 原 baseline 80/30/50/0/0 是 round 4 时 scenario 仅配 PP 一组的结果（PRD 1045 行明确"命中所有 PP 主从"）
+- 用户 SQLite `scenarios.id=5` `updated_at=2026-05-09T06:37` 加了 PR 组（4 billTypes + 2 reconGroups）→ 当前实际跑 92/36/56/0/0
+- fixture `单据对账导出不平.xlsx` mtime=2026-04-19 早于 PRD baseline 写定日，未动；漂移仅来自用户 GUI 改 scenario
+- **决策**：fixture 脚本同时跑两套；PRD §12 P0-5d 表格保留原值不动（作为 round 4 算法核心 baseline）；PRD §16 PR-D 段补漂移说明
+
+### 2. FX 中台入金 fixture 脚本入仓（log.md round 5 baseline 自动化）
+
+- log.md 467 行 Reference=`PP_20260428020000_USD_HK0000720752_001` 反推 suffix='_001'
+- 推断的 scenario（PP-only / Currency+Amount+BizType / mode=both）跑 FX fixture 第一次就命中 96/36/60/18/0 baseline
+- 同时验证：subset-sum 在 n=47/91 大池子上行为稳定 + Round 5 Step 2 多候选 tie-break + 用户用例 FTA202604280200028 ↔ 202604271439325696974017228 在 96 命中之内
+
+### 3. fund-fixture 脚本不挂进 npm run smoke
+
+- 原因：fixture 路径是用户本机 `/Users/pzhong/Desktop/小助手-Debug/...`，CI 跑不到
+- 替代：脚本设计为 fixture 缺失自动跳过且不算 FAIL（避免环境耦合）；用户手动跑作为提 PR 前最终回归
+
+## 测试证据
+
+| 验证 | 结果 |
+|---|---|
+| `npm run smoke` | **272/272 PASS**（2 次复测一致） |
+| `node scripts/test-v2.1.0-fund-fixture.js` | **3/3 PASS** |
+| └ Case A 基金 PP-only legacy | 80/30/50/0/0 PASS |
+| └ Case B 基金 PP+PR 当前 scenario | 92/36/56/0/0 PASS |
+| └ Case C FX 入账 PP-only suffix=_001 | 96/36/60/18/0 PASS |
+| `npm run check:vars` | SKIPPED（本次 PR-D commit 无 src/ 改动；前置 `69cbf45` 的 UI 清理是 PR-C 取消遗留，不命中重要变量任一层） |
+| 用户手测 P1-1 ~ P1-9（CRUD / dropdown / 老库迁移 / 重启 / 文件错误 / 互斥 / 保存校验） | 全 PASS |
+| 用户手测 P0-9 stale-snapshot 文案 | 2 case 全 PASS（改场景 + 删场景） |
+
+## ⚠️ 关联功能 review
+
+`npm run check:vars` SKIPPED — PR-D 本次 commit `e20eaf2` 无 src/ 改动（仅文档、配置、preview、scan-vars 报告、新增 scripts/ 测试脚本）；前置 commit `69cbf45`（PR-C 取消，2026-05-09）的 `src/renderer-dialogs.js` 11 行属 UI 清理（删占位 + 简化 dialog-actions 结构），不命中 Critical / Important-skeleton / Runtime-state / Risk-sensitive 任一层。
+
+升格候选记录（在 PRD §16 PR-D 段，**仅候选，待 team-lead 决策**）：
+
+- **Critical 候选**：`BUSINESS_BILL_FIELDS` / `OPPONENT_BILL_FIELDS` / `ORDER_REPAIR_FIELDS`（4 sheet 字段常量）— 与 preload inline 副本严格同步；同类已收录 `BANK_STATEMENT_FIELDS` / `GATEWAY_RECON_FIELDS`，建议升格入 `rules/important-variables.md`
+- **Risk-sensitive 候选**：`ensureScenariosCategoryReconIdFix` / `migrateC4ReconGroupsStructure` / `migrateC4ReconGroupsAmountLockedFieldPair`（数据库迁移）— 建议补入 §4 数据库迁移段
+- **Runtime-state 候选（A-pair）**：`reconIdFixSession` / `reconIdFixResult`（main.js + renderer.js 跨 2 文件，运行时全局 session 同 `lastGeneratedExports` 结构）
+
+## 风险显式提醒
+
+- **资金红线（release 链路）**：本 PR 是版本号 bump → main 的 release 链路对外契约。merge 后所有用户启动看到 `v2.1.0-beta.1`；CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 中 4 → 5 模块描述必须与 PR-A/B 实际行为对齐（已三件套统一更新）
+- **资金红线（不破坏 PR-A/B 已合并）**：本次 PR-D commit `e20eaf2` 无 src/ 改动；前置 `69cbf45` UI 清理仅删 PR-C 占位代码（按钮 disabled 状态 + tooltip 常量），不改业务引擎 / 数据模型；smoke 272/272 PASS + fund/FX fixture 3/3 PASS 反向证明
+- **资金红线（fixture 脚本不覆盖外部依赖）**：fixture 脚本是团队工具脚本（scripts/ 目录），无法在 CI 上跑（路径在 `/Users/pzhong/Desktop/小助手-Debug/...`），靠用户本机执行；提 PR 前已跑 2 次确认 3/3 PASS
+- **兼容性（v3.0.0 分支）**：merge 后按 memory `workflow_multi_version`，v3.0.0 分支需后续 merge main 同步 v2.1.0 → v3.0.0
+
+## 关联文档
+
+- 迭代 PRD：`docs/iterations/v2.1.0-beta.1/PRD-v2.1.0-beta.1.md` §十六 PR-D 段
+- 迭代 log：`docs/iterations/v2.1.0-beta.1/log.md` 2026-05-11 段
+- 迭代 tasks：`docs/iterations/v2.1.0-beta.1/tasks.md` PR-D 验收清单（全勾）
+- PR-A 草稿：`docs/prs/PR35-v2.1.0-beta.1.md`（integrated=true）
+- PR-B 草稿：`docs/prs/PR36-v2.1.0-beta.1.md`（integrated=true）
+- 测试脚本：`scripts/test-v2.1.0-fund-fixture.js`
+
+## 合并后 follow-up
+
+1. merge 后归档草稿：rename `docs/prs/待merge-PR #37.md` → `docs/prs/PR37-v2.1.0-beta.1.md`，frontmatter 改 `integrated: true` + 写 merge commit hash
+2. PRD §十六 PR-D 段追加 merge commit 信息
+3. v3.0.0 分支 merge main 同步（memory `workflow_multi_version`）
+4. 同步 iterations 到 Obsidian Vault（memory `workflow_sync_iterations_to_obsidian`，用户触发）
