@@ -318,7 +318,7 @@
 | **主边 / 从边** | 业务部门账单 = 主边；对手部门账单 = 从边（基于业务语义命名） |
 | **账单类型（Bill Type）** | C4 配置中"主/从 + 字段+操作+值"组合标记的虚拟分组；同序号多行 = AND |
 | **对账字段（Recon Field）** | C4 配置中"主边某账单类型 vs 从边某账单类型 + 字段对"；同序号多行 = AND，不同序号 = OR |
-| **共同修复 ID** | 主从边都修复时 = "源端单据 OrderId + 输入框文本"的拼接 |
+| **共同修复 ID** | 主从边都修复时 = "源端单据.reconId + 输入框文本"的拼接（PR-B Q2=a 决策修订：原方案 src.OrderId + suffix 改为 src.reconId + suffix） |
 | **reconId** | 「对账结果」sheet 的 `reconId` 列；R1-R6 时 Reference 取此值 |
 | **识读规律** | 纯规则算法从对平例子 xlsx 推断出"账单类型"和"对账字段"配置 |
 | **A~O 列** | 「订单修复」sheet 的 15 列固定列名（详见 §八） |
@@ -984,7 +984,7 @@ state.reconIdFixResult = {  // 运行后产生
 |---|---|---|
 | **错误 Reference 关联导致单据修复失败** | 资金红线（最高） | 单测 + 集成测试覆盖 7+5 全规则；用户用样例文件回归；R5/R6 SubBizType 查不到时**必须**走 warning + 不进 fixedRows，绝不自动 fallback |
 | **多v1 / 1v多 时 Reference 写错单据** | 资金红线 | applyAssignment_NvN 必须严格区分"被聚合方" vs "聚合源"；单测覆盖正反向 |
-| **共同修复 ID 拼接错位**（取主边但应取从边的 OrderId） | 资金红线 | computeCommonId 单测；C4 配置弹窗 commonId.source 默认值要明示 |
+| **共同修复 ID 拼接错位**（取主边但应取从边的 reconId） | 资金红线 | computeCommonId 单测；C4 配置弹窗 commonId.source 默认值要明示 |
 | **场景配置变更后旧 result 被导出** | 资金红线 | 复用 v2.0.0-beta.3 PR #33 round 2/3 的 snapshot 双层防御：scenarios:* IPC 入口主动清（**PR #35 round 3 P2 修订**：按 category 分流——C1/C2/C3 只清 `processingResult`，C4 只清 `reconIdFixResult`，避免跨模块互抹）+ export 端被动校验 snapshot |
 
 ### 10.1.1 ⚠️ BillDate ±1day 容错可能误配（PR-B Round 3 新增，2026-05-09）
@@ -1179,7 +1179,7 @@ state.reconIdFixResult = {  // 运行后产生
 - **PR #36 round 2 P2 修复（2026-04-30 — user 复现）**：subset-sum 全局最优；DFS 全遍历维护 best
   - **背景**：user 复现：10 个 04-01 候选 + 3 个 04-15 候选 + target=300，旧 `enumerateAmountSubsets`+`tieBreakSubsets` 二段式在 maxSolutions=64 截断后排序，全局最优排在第 N>64 位时被漏选
   - **修法**：池子算法迁移到新工具函数 `findBestAmountSubset`（DFS 全遍历维护全局 best；不再截断）
-  - **性能**：升序剪枝 + 后缀总和剪枝 + top-k 后缀剪枝 + 启发式提前终止 + hardCeiling=5M 硬上限；n=20 大池子 1.14ms / 次（实测比修前 2.58ms 更快）
+  - **性能**：升序剪枝 + 后缀总和剪枝 + top-k 后缀剪枝 + hardCeiling=5M 硬上限；DFS 全遍历维护全局 best（不提前终止）；n=20 大池子 1.14ms / 次（实测比修前 2.58ms 更快）
   - **兼容**：`enumerateAmountSubsets` / `tieBreakSubsets` 函数保留（向后兼容 + 单测覆盖），但**池子算法不再调用**
   - 详见 `log.md` 2026-04-30 round 2 节
 - 最终：commit `b09fda7`（self-review round 后 + backlog B5）→ PR #36 合并到 main

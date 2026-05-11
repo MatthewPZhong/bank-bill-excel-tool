@@ -5509,11 +5509,12 @@
             onConfirm: async () => {
               const result = await desktopApi.scenarios.deleteOne(id);
               if (result && result.status === 'ok') {
-                // round 2 P1：main 端已清 processingResult，此处同步 renderer state
-                if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
-                // v2.1.0-beta.1 PR-A（task A9）：刷新主面板"场景"下拉
-                if (typeof reloadReconIdFixScenarios === 'function') {
-                  await reloadReconIdFixScenarios();
+                // v2.1.0-beta.2 PR #38 round 2 P2-2：按 category 分流，避免操作 C1/C2/C3 清掉 ReconID 导出态，反之亦然
+                const deletedCategory = tr.dataset.category;
+                if (deletedCategory === 'recon-id-fix') {
+                  if (typeof reloadReconIdFixScenarios === 'function') await reloadReconIdFixScenarios();
+                } else {
+                  if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
                 }
                 openModal(reopenScenariosManager());
               } else {
@@ -5541,20 +5542,22 @@
           await refreshTable();
           openModal(createAlertDialog(`切换启用状态失败：${result?.message || '未知错误'}`));
         } else {
-          // round 2 P1：toggle 成功 → main 端已清 processingResult，此处同步 renderer state
-          if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
-          // v2.1.0-beta.1 PR-A（task A9）：toggle 后场景列表 enabled 字段变了，刷新主面板下拉
-          if (typeof reloadReconIdFixScenarios === 'function') {
-            await reloadReconIdFixScenarios();
+          // v2.1.0-beta.2 PR #38 round 2 P2-2：按 category 分流，避免跨模块互抹状态
+          const toggledCategory = tr.dataset.category;
+          if (toggledCategory === 'recon-id-fix') {
+            if (typeof reloadReconIdFixScenarios === 'function') await reloadReconIdFixScenarios();
+          } else {
+            if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
           }
         }
       });
 
       // v2.1.0-beta.1 PR-A（task A9）：场景管理 dialog 关闭时（× / 点空白处通用 closeModal 通道也覆盖）
-      // 统一让主面板下拉即时同步——不论用户做了什么操作。
+      // v2.1.0-beta.2 PR #38 round 2 P2-2：仅 ReconID 入口（filter 含 'recon-id-fix'）才刷新 ReconID 主面板下拉
       function closeAndReloadReconList() {
         closeModal();
-        if (typeof reloadReconIdFixScenarios === 'function') {
+        const shouldReloadReconId = filter ? filter.includes('recon-id-fix') : true;
+        if (shouldReloadReconId && typeof reloadReconIdFixScenarios === 'function') {
           reloadReconIdFixScenarios().catch((err) => {
             console.warn('reloadReconIdFixScenarios on dialog close failed:', err);
           });
@@ -7365,11 +7368,11 @@
             return;
           }
           // 成功 → 清空 draft + 刷新场景管理弹窗
-          // round 2 P1：场景已变更，main 端已清 processingResult，此处同步 renderer state
-          if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
-          // v2.1.0-beta.1 PR-A（task A9）：scenarios:create / update 完成后刷新主面板"场景"下拉
-          if (typeof reloadReconIdFixScenarios === 'function') {
-            await reloadReconIdFixScenarios();
+          // v2.1.0-beta.2 PR #38 round 2 P2-2：按 draft.category 分流，避免跨模块互抹状态
+          if (draft.category === 'recon-id-fix') {
+            if (typeof reloadReconIdFixScenarios === 'function') await reloadReconIdFixScenarios();
+          } else {
+            if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
           }
           clearScenarioDraft();
           openModal(reopenScenariosManager());
