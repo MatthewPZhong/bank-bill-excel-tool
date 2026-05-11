@@ -206,10 +206,12 @@ function runMigrationsReconIdFixSmokeTests() {
     assert.strictEqual(before, after, 'D1 新 schema 直接 no-op，schema 不变');
   }
 
-  // ===== E1：scenarios-repository.VALID_CATEGORIES 已含 'recon-id-fix' =====
+  // ===== E1：scenarios-repository.VALID_CATEGORIES 已含 'recon-id-fix' / 'gateway-recon-id-fix' =====
+  // v2.1.0-beta.3 T2/T10：扩到 5 项（新增 'gateway-recon-id-fix' 网关子模式）
   {
     assert.ok(VALID_CATEGORIES.includes('recon-id-fix'), 'E1 VALID_CATEGORIES 已含 recon-id-fix');
-    assert.strictEqual(VALID_CATEGORIES.length, 4, 'E1 VALID_CATEGORIES 4 项');
+    assert.ok(VALID_CATEGORIES.includes('gateway-recon-id-fix'), 'E1 VALID_CATEGORIES 已含 gateway-recon-id-fix');
+    assert.strictEqual(VALID_CATEGORIES.length, 5, 'E1 VALID_CATEGORIES 5 项');
   }
 
   // ===== F1：CHECK 约束在 INSERT 非法值时拒绝 =====

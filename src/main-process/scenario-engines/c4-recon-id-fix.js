@@ -63,6 +63,8 @@ const {
   normalizeCellValue
 } = require('./engine-utils');
 const { ORDER_REPAIR_FIELDS } = require('../../constants/recon-id-fix-fields');
+// v2.1.0-beta.3 T8：网关子模式输出列模板（14 列，无 SubBizType）
+const { ORDER_REPAIR_FIELDS_GATEWAY } = require('../../constants/gateway-bill-recon-fields');
 
 // ===== 工具函数 =====
 
@@ -126,8 +128,17 @@ function groupReconFields(cfg) {
 }
 
 // Round 3：找 group 里的"locked Amount/Amount" fieldPair
+// v2.1.0-beta.3 T8/T10：兼容 gateway 子模式
+//   business: 左 'Amount' / 右 'Amount'（与 v2.1.0-beta.1 一致）
+//   gateway : 左 'Amount'（网关账单） / 右 'receiveAmount'（渠道账单 — fixture 实际字段名）
+//   双重识别：locked === true 优先（保证 dialog 设置的 lock 标识有效），其次按字段名兼容补识
 function findAmountLockedPair(fieldPairs) {
   if (!Array.isArray(fieldPairs)) return null;
+  // 优先按 locked 标识识别
+  for (const fp of fieldPairs) {
+    if (fp && fp.locked === true) return fp;
+  }
+  // fallback：按字段名（兼容 v2.1.0-beta.1 老 draft 没有 locked 字段）
   for (const fp of fieldPairs) {
     if (!fp) continue;
     if (fp.leftField === 'Amount' && fp.rightField === 'Amount') return fp;
@@ -502,10 +513,14 @@ function computeCommonId(commonIdCfg, leftRow, rightRow) {
   return baseReconId + suffix;
 }
 
-// 从 srcRow 抽 15 列，覆盖 overrides
-function buildOutputRow(srcRow, overrides) {
+// 从 srcRow 抽列，覆盖 overrides
+// v2.1.0-beta.3 T8：列模板按 subMode 切换
+//   - business（默认）：ORDER_REPAIR_FIELDS（15 列含 SubBizType）
+//   - gateway          ：ORDER_REPAIR_FIELDS_GATEWAY（14 列不含 SubBizType）
+function buildOutputRow(srcRow, overrides, subMode) {
+  const fields = subMode === 'gateway' ? ORDER_REPAIR_FIELDS_GATEWAY : ORDER_REPAIR_FIELDS;
   const out = {};
-  for (const col of ORDER_REPAIR_FIELDS) {
+  for (const col of fields) {
     if (Object.prototype.hasOwnProperty.call(overrides || {}, col)) {
       out[col] = overrides[col];
     } else {
@@ -518,6 +533,30 @@ function buildOutputRow(srcRow, overrides) {
     enumerable: false
   });
   return out;
+}
+
+// v2.1.0-beta.3 T8：gateway 子模式 Reference 取值（spec §2.5.3）
+// 取自 dialog "订单修复ID取值" 选项 + commonId.source（cfg.output 复用 schema）：
+//   output.mode === 'main' → mainRow.reconciliationId（网关账单 ReconID）
+//   output.mode === 'opp'  → oppRow.reconciliationId（渠道账单 ReconID）
+//   output.mode === 'both' → commonId.source 决定（'main'=网关 / 'opp'=渠道）
+// 注意：gateway 子模式 fixture 字段名是 reconciliationId（小写 c）；business 子模式是 reconId
+function computeReferenceGateway(mainRow, oppRow, cfg) {
+  const out = cfg.output || {};
+  const tgt = out.mode || 'main';
+  if (tgt === 'main') {
+    const v = mainRow && mainRow.reconciliationId;
+    return v === null || v === undefined ? '' : String(v);
+  }
+  if (tgt === 'opp') {
+    const v = oppRow && oppRow.reconciliationId;
+    return v === null || v === undefined ? '' : String(v);
+  }
+  // tgt === 'both'（自取值）
+  const src = (out.commonId && out.commonId.source) || 'main';
+  const row = src === 'opp' ? oppRow : mainRow;
+  const v = row && row.reconciliationId;
+  return v === null || v === undefined ? '' : String(v);
 }
 
 // ===== Round 3 算法主路径 =====
@@ -621,8 +660,11 @@ function tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode,
   // 拆出 amountPair（必有，dialog 强制锁定 + migration 保证）+ 其他 fieldPairs
   const amountPair = findAmountLockedPair(fieldPairs);
   if (!amountPair) return;
+  // v2.1.0-beta.3 T8/T10：取 amountPair 的实际字段名（business=Amount/Amount，gateway=Amount/receiveAmount）
+  const leftAmountField = amountPair.leftField || 'Amount';
+  const rightAmountField = amountPair.rightField || 'Amount';
   const otherFieldPairs = (fieldPairs || []).filter(
-    (fp) => fp && !(fp.leftField === 'Amount' && fp.rightField === 'Amount')
+    (fp) => fp && fp !== amountPair && !(fp.locked === true)
   );
   for (const leftRow of leftRows) {
     if (pairedLeft.has(leftRow._rowIdx)) continue;
@@ -637,14 +679,14 @@ function tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode,
       candidates.forEach((r) => lastStepByRight.set(r._rowIdx, stepLabel));
       continue;
     }
-    // subset-sum 找子集
-    const targetCents = toCents(leftRow.Amount);
+    // subset-sum 找子集 — 用 amountPair 字段名（非硬编码 'Amount'）
+    const targetCents = toCents(leftRow[leftAmountField]);
     if (targetCents === null) {
       candidates.forEach((r) => lastStepByRight.set(r._rowIdx, stepLabel));
       continue;
     }
     const candidatesWithCents = candidates
-      .map((r) => ({ row: r, cents: toCents(r.Amount) }))
+      .map((r) => ({ row: r, cents: toCents(r[rightAmountField]) }))
       .filter((c) => c.cents !== null);
     // PR #36 round 2 P2 修复：DFS 全遍历维护全局 best（取代旧 enumerate→tieBreak 二段式）
     const chosen = findBestAmountSubset(candidatesWithCents, targetCents, leftRow.BillDate);
@@ -665,8 +707,11 @@ function tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode,
   pairedLeft, pairedRight, lastStepByLeft, lastStepByRight, stepLabel) {
   const amountPair = findAmountLockedPair(fieldPairs);
   if (!amountPair) return;
+  // v2.1.0-beta.3 T8/T10：取 amountPair 的实际字段名（同 tryOneToManyPool）
+  const leftAmountField = amountPair.leftField || 'Amount';
+  const rightAmountField = amountPair.rightField || 'Amount';
   const otherFieldPairs = (fieldPairs || []).filter(
-    (fp) => fp && !(fp.leftField === 'Amount' && fp.rightField === 'Amount')
+    (fp) => fp && fp !== amountPair && !(fp.locked === true)
   );
   for (const rightRow of rightRows) {
     if (pairedRight.has(rightRow._rowIdx)) continue;
@@ -680,13 +725,13 @@ function tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode,
       candidates.forEach((l) => lastStepByLeft.set(l._rowIdx, stepLabel));
       continue;
     }
-    const targetCents = toCents(rightRow.Amount);
+    const targetCents = toCents(rightRow[rightAmountField]);
     if (targetCents === null) {
       candidates.forEach((l) => lastStepByLeft.set(l._rowIdx, stepLabel));
       continue;
     }
     const candidatesWithCents = candidates
-      .map((l) => ({ row: l, cents: toCents(l.Amount) }))
+      .map((l) => ({ row: l, cents: toCents(l[leftAmountField]) }))
       .filter((c) => c.cents !== null);
     // PR #36 round 2 P2 修复：DFS 全遍历维护全局 best（取代旧 enumerate→tieBreak 二段式）
     const chosen = findBestAmountSubset(candidatesWithCents, targetCents, rightRow.BillDate);
@@ -704,6 +749,18 @@ function tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode,
 
 function apply1v1Assignment(leftRow, rightRow, scenario, cfg, reconResult, fixedRows, warningCollector) {
   const mode = (cfg.output || {}).mode;
+  // v2.1.0-beta.3 T8：gateway 子模式 1v1 写值 — 始终基于 mainRow（网关账单），输出 1 行 Type=0；
+  //   Reference 按"订单修复ID取值"决定（main=网关 / opp=渠道 / both=自取值）；
+  //   不消费 reconResult / SubBizType（gateway 输出列已无 SubBizType）
+  if (cfg._subMode === 'gateway') {
+    const reference = computeReferenceGateway(leftRow, rightRow, cfg);
+    fixedRows.push(buildOutputRow(leftRow, {
+      Type: 0,
+      Reference: reference,
+      _sourceSide: 'main'
+    }, 'gateway'));
+    return;
+  }
   const subCfg = (cfg.output || {}).subBizType || { mode: 'auto' };
   if (mode === 'main') {
     const reference = lookupReconId(rightRow);
@@ -749,6 +806,25 @@ function apply1v1Assignment(leftRow, rightRow, scenario, cfg, reconResult, fixed
 //   mode='both'：RB4 — left Type=0 / **right Type=0**（Round 3 修订；原 right Type=2）
 function apply1vNAssignment(leftRow, matches, scenario, cfg, reconResult, fixedRows, warningCollector) {
   const mode = (cfg.output || {}).mode;
+  // v2.1.0-beta.3 T8：gateway 子模式 1v多 写值 — 1 笔网关 → n 笔渠道；输入 leftRow 丢弃 + 输出 n 笔
+  //   每笔基于 leftRow 数据（网关字段）+ 覆盖 Type=1 / Amount=对应渠道.receiveAmount / Reference 按选项
+  //   一一对应：matches[i] ↔ 第 i 笔输出（顺序按 subset-sum 算法返回 fixture 行序）
+  //   全局约束（每笔渠道全局只用一次）由引擎骨架的 pairedRight 保证，此函数仅消费已配对集合
+  if (cfg._subMode === 'gateway') {
+    for (let i = 0; i < matches.length; i++) {
+      const channelRow = matches[i];
+      const reference = computeReferenceGateway(leftRow, channelRow, cfg);
+      fixedRows.push(buildOutputRow(leftRow, {
+        Type: 1,
+        Reference: reference,
+        Amount: channelRow.receiveAmount === null || channelRow.receiveAmount === undefined
+          ? '' : channelRow.receiveAmount,
+        _sourceSide: 'main'
+      }, 'gateway'));
+    }
+    // 注：原 leftRow 不入 fixedRows（拆出的 n 笔已覆盖该网关账单的修复语义，原行丢弃）
+    return;
+  }
   const subCfg = (cfg.output || {}).subBizType || { mode: 'auto' };
   if (mode === 'main') {
     const reference = lookupReconId(matches[0]);
@@ -798,6 +874,19 @@ function apply1vNAssignment(leftRow, matches, scenario, cfg, reconResult, fixedR
 //   mode='both'：RB2 — left Type=2 / right Type=0；commonId 共享
 function applyNv1Assignment(matches, rightRow, scenario, cfg, reconResult, fixedRows, warningCollector) {
   const mode = (cfg.output || {}).mode;
+  // v2.1.0-beta.3 T8：gateway 子模式 多v1 写值 — n 笔网关 → 1 笔渠道；输出 n 笔
+  //   每笔基于对应 matches[i]（网关 mainRow）数据 + 覆盖 Type=2 / Reference 按选项 / Amount 保持原值
+  if (cfg._subMode === 'gateway') {
+    for (const mainRow of matches) {
+      const reference = computeReferenceGateway(mainRow, rightRow, cfg);
+      fixedRows.push(buildOutputRow(mainRow, {
+        Type: 2,
+        Reference: reference,
+        _sourceSide: 'main'
+      }, 'gateway'));
+    }
+    return;
+  }
   const subCfg = (cfg.output || {}).subBizType || { mode: 'auto' };
   if (mode === 'main') {
     const reference = lookupReconId(rightRow);
@@ -909,15 +998,35 @@ function collectUnmatchedRows(mainTyped, oppTyped, pairedLeft, pairedRight,
 
 // ===== 主入口 =====
 
-function runC4Scenario(scenario, sheets) {
+function runC4Scenario(scenario, sheets, subMode) {
   if (!scenario) {
     throw new Error('runC4Scenario: scenario 不能为空');
   }
-  const cfg = scenario.config || {};
+  // v2.1.0-beta.3 T8：subMode 来源优先级
+  //   1. 函数参数 subMode（recon-id-fix-engine 顶层入口按 scenario.category 推导后传入）
+  //   2. fallback 推导：scenario.category === 'gateway-recon-id-fix' → 'gateway'，否则 'business'
+  //   subMode 通过 cfg._subMode 沿调用链传递到 apply* / buildOutputRow，不改函数签名
+  const effectiveSubMode = subMode === 'gateway' ? 'gateway'
+    : subMode === 'business' ? 'business'
+    : (scenario.category === 'gateway-recon-id-fix' ? 'gateway' : 'business');
+  // 浅克隆 scenario.config 加 _subMode 字段，避免污染原 scenario 对象
+  const cfg = Object.assign({}, scenario.config || {}, { _subMode: effectiveSubMode });
   const matchRules = cfg.matchRules || {};
   const reconResult = (sheets && sheets.reconResult) || [];
   const businessBills = (sheets && sheets.businessBills) || [];
-  const opponentBills = (sheets && sheets.opponentBills) || [];
+  let opponentBills = (sheets && sheets.opponentBills) || [];
+  // v2.1.0-beta.3 T8：gateway 子模式字段映射
+  //   算法骨架（billDateMatches / pickBestByTieBreak 等）硬编码 row.BillDate。
+  //   渠道账单 sheet 字段是 createTime（不是 BillDate），引擎入口做字段映射 createTime → BillDate，
+  //   避免改动算法骨架。映射后 oppRow 同时拥有 createTime（原值）和 BillDate（=createTime）。
+  if (effectiveSubMode === 'gateway') {
+    opponentBills = opponentBills.map((row) => {
+      if (row && (row.BillDate === '' || row.BillDate === undefined || row.BillDate === null)) {
+        return Object.assign({}, row, { BillDate: row.createTime || '' });
+      }
+      return row;
+    });
+  }
 
   const warningCollector = makeWarningCollector(scenario.id, scenario.name);
   const fixedRows = [];

@@ -3071,10 +3071,13 @@ function registerAppHandlers() {
     ].join('|');
   }
 
-  trackedIpcHandle('recon-id-fix:import', '单据对账ReconID修复', '导入文件', async () => {
+  trackedIpcHandle('recon-id-fix:import', '对账单ReconID修复', '导入文件', async (_event, payload) => {
     try {
+      // v2.1.0-beta.3 T9：renderer 传 subMode（'business' | 'gateway'，从 state.reconIdFixBillCategory 推导）
+      const subMode = (payload && payload.subMode === 'gateway') ? 'gateway' : 'business';
+      const dialogTitle = subMode === 'gateway' ? '选择网关对账文件' : '选择单据对账文件';
       const choice = await dialog.showOpenDialog(mainWindow, {
-        title: '选择单据对账文件',
+        title: dialogTitle,
         properties: ['openFile'],
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
@@ -3082,12 +3085,14 @@ function registerAppHandlers() {
         return { status: 'cancelled' };
       }
       const filePath = choice.filePaths[0];
-      const result = readReconIdFixFile(filePath);
+      const result = readReconIdFixFile(filePath, subMode);
       reconIdFixSession = {
         filePath: result.filePath,
         fileName: result.fileName,
         sheets: result.sheets,
-        importedAt: result.importedAt
+        importedAt: result.importedAt,
+        // v2.1.0-beta.3 T9：记录 import 时的 subMode，run/export 校验时核对
+        subMode
       };
       // 资金红线：重新导入清空 result（避免旧结果误导出）
       reconIdFixResult = null;
@@ -3130,8 +3135,17 @@ function registerAppHandlers() {
       if (!scenario) {
         return { status: 'failed', message: `场景 id=${scenarioId} 不存在` };
       }
-      if (scenario.category !== 'recon-id-fix') {
-        return { status: 'failed', message: `场景 "${scenario.name}" 不是单据对账类，无法运行` };
+      // v2.1.0-beta.3 T9：扩 category 校验到两个 ReconID 子模式 + 验证 session 的 subMode 与 scenario.category 一致
+      if (scenario.category !== 'recon-id-fix' && scenario.category !== 'gateway-recon-id-fix') {
+        return { status: 'failed', message: `场景 "${scenario.name}" 不是对账单ReconID修复类，无法运行` };
+      }
+      const expectedSubMode = scenario.category === 'gateway-recon-id-fix' ? 'gateway' : 'business';
+      const sessionSubMode = reconIdFixSession.subMode || 'business';
+      if (expectedSubMode !== sessionSubMode) {
+        return {
+          status: 'failed',
+          message: `场景账单类别（${expectedSubMode === 'gateway' ? '网关对账单' : '单据对账单'}）与已导入文件类别（${sessionSubMode === 'gateway' ? '网关对账单' : '单据对账单'}）不一致，请重新导入文件`
+        };
       }
       // 深拷贝 sheets（避免 in-place 修改污染 session；与 bank-statement:run 一致）
       const clonedSheets = {
@@ -3199,11 +3213,14 @@ function registerAppHandlers() {
       //   fixedRows 空 + unmatched 非空时，saveDialog 默认名直接用 unmatched 名，
       //   让"用户选的路径"语义对得上"实际写出的文件"——避免用户选 A.xlsx 但桌面上是
       //   另一个固定命名的困惑。
+      // v2.1.0-beta.3 T9：按 scenario.category 推导 subMode，影响文件名前缀 + writer 输出列模板
+      const exportSubMode = currentScenario.category === 'gateway-recon-id-fix' ? 'gateway' : 'business';
       const defaultFileName = (fixedRows.length === 0 && unmatchedRows.length > 0)
-        ? buildReconIdFixUnmatchedReportFileName(reconIdFixResult.scenarioName, timestamp)
-        : buildReconIdFixMainOutputFileName(reconIdFixResult.scenarioName, timestamp);
+        ? buildReconIdFixUnmatchedReportFileName(reconIdFixResult.scenarioName, timestamp, null, exportSubMode)
+        : buildReconIdFixMainOutputFileName(reconIdFixResult.scenarioName, timestamp, exportSubMode);
+      const dialogSaveTitle = exportSubMode === 'gateway' ? '保存网关对账修复结果' : '保存单据对账修复结果';
       const saveResult = await dialog.showSaveDialog(mainWindow, {
-        title: '保存单据对账修复结果',
+        title: dialogSaveTitle,
         defaultPath: path.join(app.getPath('documents'), defaultFileName),
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
@@ -3232,10 +3249,11 @@ function registerAppHandlers() {
         ret.unmatchedFileName = writeUnmResult.fileName;
         ret.unmatchedCount = writeUnmResult.rowCount;
       } else {
-        // 主非空：写主文件
+        // 主非空：写主文件（v2.1.0-beta.3 T9 — 传 subMode 选输出列模板 + sheet 名）
         const writeResult = await writeReconIdFixOutput({
           fixedRows,
-          savePath: saveResult.filePath
+          savePath: saveResult.filePath,
+          subMode: exportSubMode
         });
         ret.mainFilePath = writeResult.filePath;
         ret.mainFileName = writeResult.fileName;
@@ -3249,7 +3267,8 @@ function registerAppHandlers() {
           const unmatchedFileName = buildReconIdFixUnmatchedReportFileName(
             reconIdFixResult.scenarioName,
             timestamp,
-            mainBaseName
+            mainBaseName,
+            exportSubMode
           );
           const unmatchedSavePath = path.join(mainSaveDir, unmatchedFileName);
           const writeUnmResult = await writeUnmatchedReport({

@@ -119,7 +119,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（PR-B 实装算法/IO；本 PR 占位）
   // payload 形态见 docs/iterations/v2.1.0-beta.1/spec.md §三
   reconIdFix: {
-    import: () => ipcRenderer.invoke('recon-id-fix:import'),
+    // v2.1.0-beta.3 T9：import 加 payload 传 subMode（'business' | 'gateway'）
+    import: (payload) => ipcRenderer.invoke('recon-id-fix:import', payload),
     run: (payload) => ipcRenderer.invoke('recon-id-fix:run', payload),
     export: () => ipcRenderer.invoke('recon-id-fix:export'),
     sessionStatus: () => ipcRenderer.invoke('recon-id-fix:session-status')

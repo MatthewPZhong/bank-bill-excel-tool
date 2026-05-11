@@ -3621,7 +3621,9 @@ async function handleReconIdFixBillCategoryChange(event) {
 // v2.1.0-beta.1 PR-B：4 个按钮 handler 接通真实 IPC（spec §七 + §三）
 async function handleReconIdFixImport() {
   try {
-    const result = await window.desktopApi.reconIdFix.import();
+    // v2.1.0-beta.3 T9：按主面板"账单类别"推导 subMode（'business' | 'gateway'）传给 main 端 reader
+    const subMode = state.reconIdFixBillCategory === 'gateway' ? 'gateway' : 'business';
+    const result = await window.desktopApi.reconIdFix.import({ subMode });
     if (!result || result.status === 'cancelled') {
       // 用户取消 — 状态保持
       return;
