@@ -64,7 +64,7 @@ v2.1.0-beta.1/beta.2 落地"单据对账 ReconID 修复"模块（C4）后，用�
 - 不动 C1/C2/C3 dialog 与对应业务流（C3 网关对账 join 与本次"网关对账ReconID修复"是 **完全不同的模块**，仅字段常量共享）
 - 不动单据模式现有 C4 引擎默认路径（mode='business' 即原行为）
 - 不调整模块切换下拉的 module.id（保留 `recon-id-fix`）
-- 主面板"账单类别"下拉初始为空时，"场景"下拉不显示
+- 主面板"账单类别"下拉初始为空时，**所有按钮仍显示**（保持 beta.2 完整布局），仅按钮 disabled；行 2 wrapper 不再 hidden（2026-05-11 reverse sync — 用户反馈"账单类别为空值的情况也要将其他按钮全部显示出来 + 其他前端结构同 beta.2 版本"）
 
 > ⚠️ 2026-05-11 Reverse Sync：原 §2.4 第 1 条"不写迁移"与代码现状冲突 — `scenarios.category` 有 SQLite CHECK 约束（migrations.js:500），新增枚举值必须重建表 + 幂等迁移。本次沿用 v2.1.0-beta.1 PR-A 已验证模板（`ensureScenariosCategoryReconIdFix`），新增 `ensureScenariosCategoryGatewayReconIdFix` 函数，结构、风险等同已有迁移。
 

@@ -3565,13 +3565,10 @@ function updateReconIdFixUi() {
 //   2. handleReconIdFixBillCategoryChange 切换账单类别时
 //   3. setCurrentModule 切到 reconIdFix 模块时（同步 UI 选中态）
 function updateReconIdFixPanelVisibility() {
+  // v2.1.0-beta.3 T11 修订（按用户反馈）：账单类别为空时也保持所有按钮显示（按 beta.2 结构），仅 disabled，
+  //   不再隐藏行 2 wrapper；行 2 始终 visible。
   const cat = state.reconIdFixBillCategory;
   const hasCategory = cat === 'business' || cat === 'gateway';
-
-  // 行 2 wrapper（场景下拉 + 场景管理 + 导出文件）整行 hidden 控制
-  if (elements.reconIdFixScenarioRow) {
-    elements.reconIdFixScenarioRow.hidden = !hasCategory;
-  }
 
   // 账单类别为空时强制禁用所有按钮（覆盖 updateReconIdFixUi 的默认 enable 逻辑）
   if (!hasCategory) {

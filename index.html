@@ -234,7 +234,8 @@
             </div>
             <div class="control-row">
               <div class="cell left">
-                <div id="reconIdFixScenarioRow" class="recon-id-fix-scenario-row" hidden>
+                <!-- v2.1.0-beta.3 T11 修订：账单类别为空时也始终显示行 2（按 beta.2 结构）；按钮 disabled 由 updateReconIdFixPanelVisibility 控制 -->
+                <div id="reconIdFixScenarioRow" class="recon-id-fix-scenario-row">
                   <label class="recon-id-fix-scenario-label" for="reconIdFixScenarioSelect">场景</label>
                   <select id="reconIdFixScenarioSelect" class="recon-id-fix-scenario-select" disabled>
                     <option value="">请选择场景</option>

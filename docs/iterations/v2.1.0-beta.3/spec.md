@@ -141,12 +141,11 @@ reconIdFix: {
 </section>
 ```
 
-**关键约束**：
+**关键约束**（2026-05-11 reverse sync 修订，按用户反馈"账单类别为空也要显示其他按钮 + 其他前端结构同 beta.2"）：
 - 账单类别下拉初始 = ""（空 option，placeholder）
-- 行 3（场景行 + 场景管理 + 导出文件）整行 `hidden`，账单类别选定后才显示
-- 导入文件 / 开始运行按钮 **始终显示**（用户期望"导入文件"在行 2，账单类别空时也能见到——若需求 §3.2 R2 联动表是"导入也禁用/隐藏"，则改为 disabled；待 Dev 阶段二次确认）
-
-> ⚠️ Dev 阶段二次确认点：账单类别为空时，"导入文件"/"开始运行" 是 **enable 但点了无意义**，还是 **disabled**？倾向 disabled（防误操作），但需求只明确"场景下拉不显示"。
+- **行 2 wrapper 始终显示**（不再按账单类别 hidden）；所有元素（场景下拉 / 场景管理 / 导出文件 / 导入文件 / 开始运行）始终在视觉上可见
+- 账单类别为空时：所有功能按钮 disabled（导入文件 / 开始运行 / 导出文件 / 场景管理 / 场景下拉），由 `updateReconIdFixPanelVisibility` 统一控制
+- 账单类别选定后：按 beta.2 默认态恢复（导入文件 enable / 场景管理 enable / 其他按钮按 session/result 状态决定）
 
 #### 2.2.2 CSS（src/styles-gemini-extra.css 或同等位置）
 
@@ -611,7 +610,7 @@ elements.reconIdFixBillCategorySelect.addEventListener('change', async (e) => {
   state.reconIdFixSelectedScenarioId = null;
   state.reconIdFixExport = null;
   await refreshReconIdFixScenarios();
-  updateReconIdFixPanelVisibility(); // 控制行 3 hidden 显隐
+  updateReconIdFixPanelVisibility(); // 控制按钮 disabled 状态（2026-05-11 reverse sync：行 2 不再 hidden，仅按钮 disabled）
 });
 ```
 
@@ -637,7 +636,7 @@ elements.reconIdFixBillCategorySelect.addEventListener('change', async (e) => {
 3. state.reconIdFixExport ← null（清 renderer-only 导出文案）
 4. 后端 import session: scenarios.clearImportSession()（如已 import）
 5. refreshReconIdFixScenarios()（按新 category 重新 filter）
-6. updateReconIdFixPanelVisibility()（行 3 hidden 状态切换）
+6. updateReconIdFixPanelVisibility()（按钮 disabled 状态切换；2026-05-11 reverse sync：行 2 始终 visible，不再按账单类别 hidden）
 7. 持久化 settings
 ```
 
