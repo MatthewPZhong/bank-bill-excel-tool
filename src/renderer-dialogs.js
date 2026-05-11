@@ -59,9 +59,10 @@
       if (mode === 'view') {
         return [{ kind: 'secondary', action: 'back', text: '返回' }];
       }
+      // v2.1.0-beta.2 PR-B（task B6）：[确认 取消] 顺序（互换），4 个 scenario config dialog 都受影响
       return [
-        { kind: 'secondary', action: 'cancel', text: '取消' },
-        { kind: 'primary', action: 'confirm', text: '确认' }
+        { kind: 'primary', action: 'confirm', text: '确认' },
+        { kind: 'secondary', action: 'cancel', text: '取消' }
       ];
     }
 
@@ -5387,7 +5388,23 @@
       return null;
     }
 
-    function createScenariosManagerDialog() {
+    function createScenariosManagerDialog(allowedCategories = null) {
+      // v2.1.0-beta.2 PR-A：白名单过滤（null = 不过滤，向后兼容）
+      // 同时落 state.activeScenarioListFilter，让所有 reopen 链路（reopenScenariosManager helper）
+      // 都能回到正确的过滤视图（C1-C4 dialog 取消 / 保存成功 / 删除成功 / 类别选择取消都会 reopen）
+      const filter = Array.isArray(allowedCategories) && allowedCategories.length > 0
+        ? allowedCategories
+        : null;
+      state.activeScenarioListFilter = filter;
+      // v2.1.0-beta.2 PR-A Round 2（task R2-8）：单类别入口（filter.length === 1）隐藏 优先级 + 是否启动 两列
+      // 单类别没有"跨场景调度"语义，优先级和是否启动失去意义；同时让其余列宽度按比例放大填满。
+      const isCompactView = Array.isArray(filter) && filter.length === 1;
+      const priorityTh = isCompactView ? '' : '<th class="scenarios-col-priority" style="width: 10%; text-align: center;">优先级</th>';
+      const enabledTh = isCompactView ? '' : '<th class="scenarios-col-enabled" style="width: 13%;">是否启动</th>';
+      const idWidth = isCompactView ? '6%' : '5%';
+      const categoryWidth = isCompactView ? '28%' : '22%';
+      const nameWidth = isCompactView ? '40%' : '30.94%';
+      const actionsWidth = isCompactView ? '26%' : '19.06%';
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card manager-card scenarios-manager-card';
@@ -5400,40 +5417,44 @@
           <table class="data-table scenarios-table">
             <thead>
               <tr>
-                <th class="scenarios-col-id" style="width: 5%; padding-left: 0; padding-right: 0; text-align: left; white-space: nowrap;"><span style="display: inline-block; margin-left: 21px;">序号</span></th>
-                <th class="scenarios-col-category" style="width: 22%; padding-left: 0; padding-right: 4px; text-align: left;">功能类别</th>
-                <th class="scenarios-col-name" style="width: 30.94%; padding-left: 0; text-align: left;">场景名称</th>
-                <th class="scenarios-col-priority" style="width: 10%; text-align: center;">优先级</th>
-                <th class="scenarios-col-actions" style="width: 19.06%; padding-left: 8px; text-align: left;">执行操作</th>
-                <th class="scenarios-col-enabled" style="width: 13%;">是否启动</th>
+                <th class="scenarios-col-id" style="width: ${idWidth}; padding-left: 0; padding-right: 0; text-align: left; white-space: nowrap;"><span style="display: inline-block; margin-left: 21px;">序号</span></th>
+                <th class="scenarios-col-category" style="width: ${categoryWidth}; padding-left: 0; padding-right: 4px; text-align: left;">功能类别</th>
+                <th class="scenarios-col-name" style="width: ${nameWidth}; padding-left: 0; text-align: left;">场景名称</th>
+                ${priorityTh}
+                <th class="scenarios-col-actions" style="width: ${actionsWidth}; padding-left: 8px; text-align: left;">执行操作</th>
+                ${enabledTh}
               </tr>
             </thead>
             <tbody></tbody>
           </table>
         </div>
-        <div class="dialog-actions left scenarios-manager-footer">
+        <div class="dialog-actions scenarios-manager-footer">
           <button class="primary-btn small" type="button" data-action="add-scenario">新增场景</button>
+          <button class="primary-btn small" type="button" data-action="finish">完成</button>
         </div>
       `;
 
       const tbody = dialog.querySelector('tbody');
 
-      function renderRow(scenario) {
+      function renderRow(scenario, displayIndex) {
         const tr = document.createElement('tr');
         tr.dataset.id = String(scenario.id);
         tr.dataset.category = scenario.category;
+        // v2.1.0-beta.2 PR-A Round 2：
+        // - task R2-7：序号 = 列表内 1-based 顺序号（不再用真实 scenarios.id；dataset.id 仍是真实 id 用于 IPC）
+        // - task R2-8：compact 模式（单类别入口）隐藏 优先级 + 是否启动 td
+        const priorityTd = isCompactView ? '' : `<td class="scenarios-col-priority">${escapeHtml(String(scenario.priority))}</td>`;
+        const enabledTd = isCompactView ? '' : `<td class="scenarios-col-enabled"><input type="checkbox" data-row-action="toggle-enabled" ${scenario.enabled ? 'checked' : ''} /></td>`;
         tr.innerHTML = `
-          <td class="scenarios-col-id" style="padding-left: 0; padding-right: 0; text-align: left; white-space: nowrap;"><span style="display: inline-block; margin-left: 21px;">${escapeHtml(String(scenario.id))}</span></td>
+          <td class="scenarios-col-id" style="padding-left: 0; padding-right: 0; text-align: left; white-space: nowrap;"><span style="display: inline-block; margin-left: 21px;">${escapeHtml(String(displayIndex))}</span></td>
           <td class="scenarios-col-category">${escapeHtml(getCategoryLabel(scenario.category))}</td>
           <td class="scenarios-col-name">${escapeHtml(scenario.name)}</td>
-          <td class="scenarios-col-priority">${escapeHtml(String(scenario.priority))}</td>
+          ${priorityTd}
           <td class="scenarios-col-actions">
             <button class="text-action" type="button" data-row-action="manage">管理</button>
             <button class="text-action danger-text" type="button" data-row-action="delete">删除</button>
           </td>
-          <td class="scenarios-col-enabled">
-            <input type="checkbox" data-row-action="toggle-enabled" ${scenario.enabled ? 'checked' : ''} />
-          </td>
+          ${enabledTd}
         `;
         return tr;
       }
@@ -5441,9 +5462,12 @@
       async function refreshTable() {
         const scenarios = await loadScenariosOrAlert();
         if (scenarios === null) return;
+        // v2.1.0-beta.2 PR-A：按白名单过滤
+        const visible = filter ? scenarios.filter((s) => filter.includes(s.category)) : scenarios;
         tbody.innerHTML = '';
-        scenarios.forEach((scenario) => {
-          tbody.appendChild(renderRow(scenario));
+        // v2.1.0-beta.2 PR-A Round 2（task R2-7）：传 displayIndex（1-based 列表内顺序）给 renderRow
+        visible.forEach((scenario, idx) => {
+          tbody.appendChild(renderRow(scenario, idx + 1));
         });
       }
 
@@ -5485,13 +5509,14 @@
             onConfirm: async () => {
               const result = await desktopApi.scenarios.deleteOne(id);
               if (result && result.status === 'ok') {
-                // round 2 P1：main 端已清 processingResult，此处同步 renderer state
-                if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
-                // v2.1.0-beta.1 PR-A（task A9）：刷新主面板"场景"下拉
-                if (typeof reloadReconIdFixScenarios === 'function') {
-                  await reloadReconIdFixScenarios();
+                // v2.1.0-beta.2 PR #38 round 2 P2-2：按 category 分流，避免操作 C1/C2/C3 清掉 ReconID 导出态，反之亦然
+                const deletedCategory = tr.dataset.category;
+                if (deletedCategory === 'recon-id-fix') {
+                  if (typeof reloadReconIdFixScenarios === 'function') await reloadReconIdFixScenarios();
+                } else {
+                  if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
                 }
-                openModal(createScenariosManagerDialog());
+                openModal(reopenScenariosManager());
               } else {
                 openModal(createAlertDialog(`删除失败：${result?.message || '未知错误'}`));
               }
@@ -5517,28 +5542,49 @@
           await refreshTable();
           openModal(createAlertDialog(`切换启用状态失败：${result?.message || '未知错误'}`));
         } else {
-          // round 2 P1：toggle 成功 → main 端已清 processingResult，此处同步 renderer state
-          if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
-          // v2.1.0-beta.1 PR-A（task A9）：toggle 后场景列表 enabled 字段变了，刷新主面板下拉
-          if (typeof reloadReconIdFixScenarios === 'function') {
-            await reloadReconIdFixScenarios();
+          // v2.1.0-beta.2 PR #38 round 2 P2-2：按 category 分流，避免跨模块互抹状态
+          const toggledCategory = tr.dataset.category;
+          if (toggledCategory === 'recon-id-fix') {
+            if (typeof reloadReconIdFixScenarios === 'function') await reloadReconIdFixScenarios();
+          } else {
+            if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
           }
         }
       });
 
       // v2.1.0-beta.1 PR-A（task A9）：场景管理 dialog 关闭时（× / 点空白处通用 closeModal 通道也覆盖）
-      // 统一让主面板下拉即时同步——不论用户做了什么操作。
+      // v2.1.0-beta.2 PR #38 round 2 P2-2：仅 ReconID 入口（filter 含 'recon-id-fix'）才刷新 ReconID 主面板下拉
+      // v2.1.0-beta.2 PR #38 round 3 P2-1：close 不是 CRUD，传 scenariosChanged: false 避免清 state.reconIdFixExport
+      //   （真正的 create/update/delete/toggle 路径在上方已分别调用 reloadReconIdFixScenarios() 默认参数清状态）
       function closeAndReloadReconList() {
         closeModal();
-        if (typeof reloadReconIdFixScenarios === 'function') {
-          reloadReconIdFixScenarios().catch((err) => {
+        const shouldReloadReconId = filter ? filter.includes('recon-id-fix') : true;
+        if (shouldReloadReconId && typeof reloadReconIdFixScenarios === 'function') {
+          reloadReconIdFixScenarios({ scenariosChanged: false }).catch((err) => {
             console.warn('reloadReconIdFixScenarios on dialog close failed:', err);
           });
         }
       }
       dialog.querySelector('.icon-close').addEventListener('click', closeAndReloadReconList);
+      // v2.1.0-beta.2 PR-A Round 2（task R2-6）：右下"完成"按钮 = 关闭 dialog 并刷新主面板下拉（同 closeAndReloadReconList）
+      dialog.querySelector('[data-action="finish"]').addEventListener('click', closeAndReloadReconList);
       dialog.querySelector('[data-action="add-scenario"]').addEventListener('click', () => {
-        openModal(createScenarioCategorySelectDialog());
+        // v2.1.0-beta.2 PR-A：单类别白名单（如 ReconID 入口）跳过类别选择窗，直接进入对应配置 dialog
+        if (filter && filter.length === 1) {
+          const onlyCategory = filter[0];
+          state.scenarioDraft = {
+            mode: 'create',
+            category: onlyCategory,
+            scenarioId: null,
+            name: '',
+            priority: 0,
+            config: createDefaultScenarioConfig(onlyCategory)
+          };
+          closeModal();
+          openScenarioConfigByCategory(onlyCategory);
+          return;
+        }
+        openModal(createScenarioCategorySelectDialog(filter));
       });
 
       refreshTable();
@@ -5547,13 +5593,31 @@
       return overlay;
     }
 
+    // v2.1.0-beta.2 PR-A：reopen 场景管理 dialog 的统一入口（透传当前白名单）
+    // 用于 C1-C4 dialog 取消 / 删除场景 / 类别选择取消 / 确认弹窗成功 等 11 处 reopen 链路。
+    // 不传 allowedCategories 调用 createScenariosManagerDialog 会回到全表，破坏隔离。
+    function reopenScenariosManager() {
+      return createScenariosManagerDialog(state.activeScenarioListFilter);
+    }
+
     // v2.0.0-beta.3：新增场景流程第 1 步 — 类别选择弹窗
-    // 选择 3 个枚举之一，点"继续"占位 alert（具体配置弹窗在阶段 4-6 启用）
-    function createScenarioCategorySelectDialog() {
+    // v2.1.0-beta.2 PR-A：按 allowedCategories 白名单过滤可见类别
+    function createScenarioCategorySelectDialog(allowedCategories = null) {
+      const ALL_CATEGORY_OPTIONS = [
+        { value: 'extract-recon-id', label: '提取ReconId-From Self' },
+        { value: 'offset-bill-mark', label: '账单打标' },
+        { value: 'gateway-recon-join', label: '提取ReconId-From 网关' },
+        { value: 'recon-id-fix', label: '单据对账 ReconID 修复' }
+      ];
+      const visibleOptions = Array.isArray(allowedCategories) && allowedCategories.length > 0
+        ? ALL_CATEGORY_OPTIONS.filter((c) => allowedCategories.includes(c.value))
+        : ALL_CATEGORY_OPTIONS;
+      const optionsHtml = visibleOptions
+        .map((c) => `<option value="${c.value}">${escapeHtml(c.label)}</option>`)
+        .join('');
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card scenario-category-select-card';
-      // v2.1.0-beta.1 PR-A（task A5）：三选一扩四选一，新增"单据对账 ReconID 修复"
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">新增场景</div>
@@ -5563,10 +5627,7 @@
           <label class="scenario-category-row">
             <span class="scenario-category-label">请选择功能类别</span>
             <select class="scenario-category-select">
-              <option value="extract-recon-id">提取ReconId-From Self</option>
-              <option value="offset-bill-mark">账单打标</option>
-              <option value="gateway-recon-join">提取ReconId-From 网关</option>
-              <option value="recon-id-fix">单据对账 ReconID 修复</option>
+              ${optionsHtml}
             </select>
           </label>
         </div>
@@ -5577,10 +5638,10 @@
       `;
 
       dialog.querySelector('.icon-close').addEventListener('click', () => {
-        openModal(createScenariosManagerDialog());
+        openModal(reopenScenariosManager());
       });
       dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => {
-        openModal(createScenariosManagerDialog());
+        openModal(reopenScenariosManager());
       });
       dialog.querySelector('[data-action="continue"]').addEventListener('click', () => {
         const select = dialog.querySelector('.scenario-category-select');
@@ -5664,8 +5725,12 @@
     }
 
     function getCategoryDialogTitle(category, mode) {
-      const label = getCategoryLabel(category);
       const modeLabel = mode === 'view' ? '查看场景' : (mode === 'edit' ? '修改场景' : '新增场景');
+      // v2.1.0-beta.2 PR-B（task B5）：仅 C4（recon-id-fix）类别省略 ` — 类别名` 后缀（用户决定 C1/C2/C3 保留）
+      if (category === 'recon-id-fix') {
+        return modeLabel;
+      }
+      const label = getCategoryLabel(category);
       return `${modeLabel} — ${label}`;
     }
 
@@ -5964,7 +6029,7 @@
       // 关闭 / 取消 / 确认 / 返回
       function closeAndClearDraft() {
         clearScenarioDraft();
-        openModal(createScenariosManagerDialog());
+        openModal(reopenScenariosManager());
       }
       dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
       dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', closeAndClearDraft);
@@ -6293,7 +6358,7 @@
       // 关闭 / 取消 / 确认 / 返回
       function closeAndClearDraft() {
         clearScenarioDraft();
-        openModal(createScenariosManagerDialog());
+        openModal(reopenScenariosManager());
       }
       dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
       dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', closeAndClearDraft);
@@ -6537,7 +6602,7 @@
       // 关闭 / 取消 / 确认 / 返回
       function closeAndClearDraft() {
         clearScenarioDraft();
-        openModal(createScenariosManagerDialog());
+        openModal(reopenScenariosManager());
       }
       dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
       dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', closeAndClearDraft);
@@ -6669,7 +6734,7 @@
             <input class="scenario-config-input" type="text" data-field="name" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(draft.name || '')}" placeholder="非空 + 全局唯一">
           </div>
           <div class="scenario-config-row scenario-config-row-mutex">
-            <span class="scenario-config-label">单据匹配规则</span>
+            <span class="scenario-config-label">匹配规则</span>
             <div class="scenario-config-c4-checkboxes">
               <label class="scenario-config-c4-checkbox-item">
                 <input type="checkbox" data-c4-match="oneToOne" ${config.matchRules.oneToOne ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
@@ -6696,7 +6761,7 @@
             <span class="scenario-config-label">对账字段</span>
             <div class="scenario-config-multi-wrap">
               <div class="scenario-config-multi-rows" data-c4-recon-groups></div>
-              ${isReadonly ? '' : '<button class="text-action small" type="button" data-c4-action="add-recon-group">+ 新增 OR 分组</button>'}
+              ${isReadonly ? '' : '<button class="text-action small" type="button" data-c4-action="add-recon-group">+ 新增对账分组</button>'}
             </div>
           </div>
           <div class="scenario-config-row scenario-config-row-mutex">
@@ -6727,7 +6792,7 @@
               </select>
               <input class="scenario-config-input" type="text" data-c4-cond-field="value" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(cd.value || '')}" placeholder="值" ${!opNeedsValue(cd.op) ? 'style="visibility:hidden"' : ''}>
               ${isReadonly || (bt.conditions || []).length <= 1 ? '' : '<button class="icon-close-small" type="button" data-c4-cond-action="remove" title="删除">×</button>'}
-              ${isReadonly ? '' : `<button class="text-action small" type="button" data-c4-cond-action="add-cond" title="同序号 AND">新增</button>`}
+              ${isReadonly || cIdx !== 0 ? '' : `<button class="text-action small" type="button" data-c4-cond-action="add-cond" title="同序号 AND">新增</button>`}
             </div>
           `).join('');
           return `
@@ -6760,6 +6825,8 @@
           const rightSide = sideBySeq.get(Number(grp.rightTypeSeq)) || 'opp';
           const leftFields = getReconIdFixFieldsForSide(leftSide);
           const rightFields = getReconIdFixFieldsForSide(rightSide);
+          // v2.1.0-beta.2 PR-A Round 2（task R2-12）：fieldpair 加 col 1 spacer，让 [leftField][=][rightField] 与
+          // group-header 的 [leftTypeSeq][vs右：][rightTypeSeq] 在 grid 上下对齐
           const fieldPairsHtml = (grp.fieldPairs || []).map((fp, fpIdx) => {
             // Round 3（Decision 4）：locked fieldPair 不可改 / 不可删
             const locked = fp && fp.locked === true;
@@ -6785,12 +6852,14 @@
             const removeBtnHtml = (isReadonly || locked || (grp.fieldPairs || []).length <= 1)
               ? ''
               : '<button class="icon-close-small" type="button" data-c4-rg-fp-action="remove" title="删除字段对">×</button>';
-            // "+ 新增字段对"按钮在 readonly 时不显示；locked 行仍显示（让用户始终有入口加非锁定行）
-            const addBtnHtml = isReadonly
+            // v2.1.0-beta.2 PR-A Round 2（task R2-11）："新增"按钮仅每个分组的第一行（fpIdx === 0）保留，其余隐藏
+            // 锁定的 Amount 行通常 fpIdx === 0，仍保留"新增"入口；若用户调整顺序使 Amount 不在首位也按 fpIdx === 0 控制
+            const addBtnHtml = isReadonly || fpIdx !== 0
               ? ''
-              : '<button class="text-action small" type="button" data-c4-rg-fp-action="add" title="同分组内 AND">+ 新增字段对</button>';
+              : '<button class="text-action small" type="button" data-c4-rg-fp-action="add" title="同分组内 AND">新增</button>';
             return `
               <div class="scenario-config-c4-recon-fieldpair${locked ? ' scenario-config-c4-recon-fieldpair-locked' : ''}" data-c4-rg-fp-row="${fpIdx}">
+                <span class="scenario-config-c4-recon-fieldpair-spacer" aria-hidden="true"></span>
                 ${renderLeftSelect}
                 <span class="scenario-config-vs-arrow">=</span>
                 ${renderRightSelect}
@@ -6799,13 +6868,14 @@
               </div>
             `;
           }).join('');
-          const orSeparatorHtml = gIdx > 0 ? '<div class="scenario-config-c4-recon-or-sep">OR</div>' : '';
+          // v2.1.0-beta.2 PR-B（task B4）：分组之间不渲染 "OR" 文字，仅保留 8px 视觉间距（CSS height:8px）
+          const orSeparatorHtml = gIdx > 0 ? '<div class="scenario-config-c4-recon-or-sep" aria-hidden="true"></div>' : '';
           return `
             ${orSeparatorHtml}
             <div class="scenario-config-c4-recon-group" data-c4-rg-row="${gIdx}">
               <div class="scenario-config-c4-recon-group-header">
-                <span class="scenario-config-multi-seq">分组 ${gIdx + 1}</span>
-                <span>左：</span>
+                <!-- v2.1.0-beta.2 PR-A Round 2（task R2-12）：合并"分组 N"+"左："为单 span 占 col 1，让 [leftTypeSeq] 与下方 [leftField] 在 grid col 2 上下对齐 -->
+                <span class="scenario-config-multi-seq">分组 ${gIdx + 1} 左：</span>
                 <select class="scenario-config-input scenario-config-input-narrow" data-c4-rg-field="leftTypeSeq" ${isReadonly ? 'disabled' : ''}>
                   ${renderScenarioOptions(seqs.map(String), String(grp.leftTypeSeq))}
                 </select>
@@ -6845,7 +6915,7 @@
           ${isBoth ? `
             <div class="scenario-config-c4-common-id">
               <span>取</span>
-              <select class="scenario-config-input scenario-config-input-narrow" data-c4-common-id="source" ${isReadonly ? 'disabled' : ''}>
+              <select class="scenario-config-input" data-c4-common-id="source" ${isReadonly ? 'disabled' : ''}>
                 <option value="main"${out.commonId.source === 'main' ? ' selected' : ''}>主边单据 reconId</option>
                 <option value="opp"${out.commonId.source === 'opp' ? ' selected' : ''}>从边单据 reconId</option>
               </select>
@@ -6855,7 +6925,7 @@
             </div>
           ` : ''}
           <div class="scenario-config-c4-sub-biz">
-            <div class="scenario-config-c4-sub-biz-title">SubBizType 取值（三选一）</div>
+            <div class="scenario-config-c4-sub-biz-title">SubBizType 取值</div>
             <label class="scenario-config-c4-checkbox-item">
               <input type="radio" name="c4-sub-mode" value="auto" ${sub.mode === 'auto' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
               <span>订单修复表的 SubBizType 值取对应单据在对账结果表里单据子类型</span>
@@ -7146,7 +7216,7 @@
       // 关闭 / 取消 / 确认 / 返回
       function closeAndClearDraft() {
         clearScenarioDraft();
-        openModal(createScenariosManagerDialog());
+        openModal(reopenScenariosManager());
       }
       dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
       dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', closeAndClearDraft);
@@ -7267,7 +7337,7 @@
       }
       function closeAndClearDraft() {
         clearScenarioDraft();
-        openModal(createScenariosManagerDialog());
+        openModal(reopenScenariosManager());
       }
       dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
       dialog.querySelector('[data-action="back"]').addEventListener('click', backToConfig);
@@ -7300,14 +7370,14 @@
             return;
           }
           // 成功 → 清空 draft + 刷新场景管理弹窗
-          // round 2 P1：场景已变更，main 端已清 processingResult，此处同步 renderer state
-          if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
-          // v2.1.0-beta.1 PR-A（task A9）：scenarios:create / update 完成后刷新主面板"场景"下拉
-          if (typeof reloadReconIdFixScenarios === 'function') {
-            await reloadReconIdFixScenarios();
+          // v2.1.0-beta.2 PR #38 round 2 P2-2：按 draft.category 分流，避免跨模块互抹状态
+          if (draft.category === 'recon-id-fix') {
+            if (typeof reloadReconIdFixScenarios === 'function') await reloadReconIdFixScenarios();
+          } else {
+            if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
           }
           clearScenarioDraft();
-          openModal(createScenariosManagerDialog());
+          openModal(reopenScenariosManager());
         } catch (error) {
           openModal(createAlertDialog(`保存失败：${error.message || error}`, {
             onConfirm: backToConfig

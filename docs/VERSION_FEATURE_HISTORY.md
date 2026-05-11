@@ -9,7 +9,40 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
-## 2.1.0-beta.1（2026-04-30）
+## 2.1.0-beta.2（2026-05-11）
+
+v2.1.0-beta.1 用户实测后的 UI 精修 + 场景管理跨模块隔离 + 窗口控制按钮 hit-test 修复迭代。39 项改动 / 4 轮用户测试迭代（PR-A 业务隔离 / PR-B 6 项 UI / Round 2 13 项 / Round 3 v2 8 项），单 PR 合并提交。
+
+### 新增
+
+- **场景管理跨模块隔离**：dialog factory 接收白名单参数 + helper 让 11 处 reopen 链路透传白名单 + 全局状态 `state.activeScenarioListFilter`。
+- **类别选择窗按入口过滤**：单类别入口（如 ReconID）跳过类别选择窗，直接进对应配置 dialog。
+- **场景管理 dialog 右下"完成"按钮**：关闭 + 刷新主面板下拉。
+- **场景管理 dialog 序号 1-based 顺序**：序号 = 列表内顺序，dataset.id 保留真实 id 用于 IPC。
+- **单类别入口 compact 模式**：filter.length === 1 时隐藏 优先级 + 是否启动 列。
+
+### 变更
+
+- ReconID 主面板布局重排（行 1 左 [场景下拉 + 场景管理] / 右 [导入文件 + 开始运行]；导出文件按钮平移至场景管理下方；transform translateX 整体右移 + 缩距）。
+- 状态框宽度固定 292px，左对齐导入文件 + 右对齐开始运行；初始文本统一 "欢迎使用小助手"。
+- 场景下拉宽度收窄至 3/4。
+- 4 个 scenario config dialog actions 顺序改 `[确认 取消]` 右下对齐。
+- C4 dialog 大量 UI 精修：标题省略类别后缀、label 简化、勾选框单行、按钮文案、grid 对齐、Amount 锁定行视觉对齐、"="居中、场景名称 input 宽度、各类间距与防换行调整。
+
+### 修复
+
+- 全局窗口最小化 / 最大化 / 关闭按钮无响应（hit-test 被拖拽区域罩住，CSS 单 rule 修复）。
+- 场景管理跨模块未隔离（v2.1.0-beta.1 遗留 bug）。
+
+### 未改动
+
+- ReconID 业务引擎 / 5 阶段算法 / 7+5 赋值规则。
+- C1/C2/C3 dialog 业务逻辑。
+- scenarios 表 schema / IPC 通道 / BrowserWindow 配置。
+
+---
+
+## 2.1.0-beta.1（2026-05-11）
 
 新增**第 5 个顶级模块「单据对账 ReconID 修复」**（C4 类场景）。基于 4 sheet xlsx 跑用户配置的对账场景，按 5 阶段算法 + 7+5 条赋值规则修复主从单据，输出「订单修复」与「未匹配单据」双文件。整个迭代分 3 PR 实施。
 

@@ -1,6 +1,64 @@
 # Changelog
 
-## 2.1.0-beta.1 - 2026-04-30
+## 2.1.0-beta.2 - 2026-05-11
+
+v2.1.0-beta.1 用户实测后的 UI 精修 + 场景管理跨模块隔离 + 窗口控制按钮 hit-test 修复迭代。共 39 项改动通过 4 轮用户测试迭代（PR-A 业务隔离+窗口 bug / PR-B 6 项 UI 调整 / Round 2 13 项 UI 优化 / Round 3 v2 8 项 UI 优化）后稳定，单 PR 合并提交。
+
+### 新增
+
+- **场景管理跨模块隔离**：`createScenariosManagerDialog(allowedCategories)` 接收白名单参数；helper `reopenScenariosManager()` 让 11 处 reopen 链路（C1-C4 dialog 取消/保存/删除/类别选择取消）透传白名单；`state.activeScenarioListFilter` 全局状态保存当前白名单。
+- **类别选择窗按入口过滤**：`createScenarioCategorySelectDialog(allowedCategories)` 按白名单展示类别；单类别入口（如 ReconID）直接跳过类别选择窗，进入对应配置 dialog。
+- **场景管理 dialog 完成按钮**：右下新增"完成"按钮（关闭 + 刷新主面板下拉，同 closeAndReloadReconList）。
+- **场景管理 dialog 序号重编号**：序号显示列表内 1-based 顺序（不再使用真实 scenarios.id）；`dataset.id` 保留真实 id 用于 IPC（管理/删除/切换启用）。
+- **单类别入口 compact 模式**：filter.length === 1 时场景管理 dialog 隐藏 优先级 + 是否启动 列，其他列宽按比例放大。
+
+### 变更
+
+- **版本号**：2.1.0-beta.1 → 2.1.0-beta.2。
+- **ReconID 模块主面板布局重排**：行 1 左 cell = [场景下拉 + 场景管理]、右 cell = [导入文件 + 开始运行]（对齐银行对账单模块）。导出文件按钮平移至场景管理下方（cell.left flex-end + min-width 140px 统一按钮尺寸）。整体右移 + 缩距用 transform translateX（[场景管理]/[导出文件] 100px、[pending-action-pair]/[statusBox] 74px → 距离 ≈ 80px）。状态框宽度固定 292px (= pending-action-pair 宽度)，与 [导入文件] 左对齐 + [开始运行] 右对齐；初始文本统一为 "欢迎使用小助手"。
+- **场景下拉宽度**：min-width 160→120, max-width 220→165（缩小至 3/4）。
+- **4 个 scenario config dialog actions**：顺序 [取消 确认] → [确认 取消]，右下对齐（`.scenario-config-card .dialog-actions { justify-content: flex-end }`）。
+- **C4 dialog UI 精修**：
+  - 标题省略 ` — 单据对账修复` 后缀（仅 C4，C1/C2/C3 保留）
+  - 行 2 label "单据匹配规则" → "匹配规则"；三勾选框（1v1 / 1v多 / 多v1）单行排列（`flex-direction: row; flex-wrap: nowrap`）
+  - 行 4 "+ 新增 OR 分组" → "+ 新增对账分组"；分组间 "OR" 文字去除，留 8px 视觉间距
+  - 行 4 "+ 新增字段对" → "新增"；账单类型 + 对账字段"新增"按钮仅每组第一行渲染
+  - 行 5 SubBizType "（三选一）" 后缀去除
+  - 行 5 commonId 下拉宽度 155px（覆盖默认 max-content；`flex: 0 0 155px; width: 155px`）
+  - 账单类型 + 对账字段 grid 对齐：所有 select 上下对齐（账单类型 6 列 `36px / 1fr / 100px / 1fr / 22px / 60px`；对账字段 6 列 `90px / 1fr / 60px / 1fr / 22px / 60px`）；HTML 合并"分组 N + 左："为单 span + fieldpair 加 col 1 spacer
+  - Amount 锁定行视觉提示改 `box-shadow inset` 替代 `padding: 4px 6px + border-left`，与其他 fieldpair 左右边界完全对齐
+  - "=" 在 fieldpair grid col 3 内水平居中（`text-align: center`）
+  - 场景名称 input 宽度 180px（4 个 dialog 共用）
+  - 场景名称 label 中线对齐 input（移除 `.scenario-config-label { padding-top: 6px }` 全局设置，仅 `.scenario-config-row-multi .scenario-config-label` 保留）
+  - 分组序号 "分组 N" 与"左："等同行显示（`flex: 0 0 auto; white-space: nowrap`，原 `flex: 0 0 36px` 强制截断）
+  - 删除按钮 × 水平+垂直居中（`inline-flex + align-items: center + justify-content: center + line-height: 1 + padding: 0`）
+
+### 修复
+
+- **全局窗口最小化 / 最大化 / 关闭按钮无响应**：根因 `.window-actions` 未声明 `-webkit-app-region: no-drag`，HTML class 写了 `no-drag` 但 CSS 无对应 rule，`.drag-region`（`-webkit-app-region: drag; position: absolute; inset: 0;`）在 hit-test 层面罩住整个 window-bar，z-index 不能覆盖；按钮点击事件被吞。修复：`styles-gemini.css` 加 `.no-drag, .window-actions, .window-btn { -webkit-app-region: no-drag; }` 三重兜底。
+- **场景管理跨模块未隔离（v2.1.0-beta.1 遗留）**：两个入口看到同一锅 4 类场景；类别选择窗 4 选 1 全展示；reopen 链路丢失白名单。修复见"新增"段。
+
+### 未改动（明确）
+
+- ReconID 业务引擎 / IO / 输出格式 / 5 阶段算法 / 7+5 赋值规则（c4-recon-id-fix.js 0 行改动）
+- C1/C2/C3 配置 dialog 业务逻辑（仅 actions 顺序受统一改动影响）
+- scenarios 表 schema / VALID_CATEGORIES / 4 个 IPC 通道
+- BrowserWindow 配置（继续 frame:false 无边框 + 自定义 titlebar）
+- 模块切换下拉项 / setCurrentModule 状态机
+
+### smoke
+
+`npm run smoke`：13 模块全 PASS（与 v2.1.0-beta.1 同 baseline，未新增 smoke 用例——纯 UI 改动 + 业务隔离逻辑无算法变化）。
+
+### 关联功能 review（check-vars）
+
+- **Runtime-state**: `state`（新增 `state.activeScenarioListFilter` 字段，用于场景管理 reopen 链路保留白名单）
+  - review: 不影响"模板列表 / 当前模块 / 导出可用性"三组联动；仅供 `reopenScenariosManager` helper 读取
+- 未命中 Critical / Important-skeleton / Risk-sensitive
+
+---
+
+## 2.1.0-beta.1 - 2026-05-11
 
 新增 **第 5 个顶级模块「单据对账 ReconID 修复」**（C4 类场景）。基于 4 sheet xlsx（业务部门账单 / 对手部门账单 / 对账结果 / 订单修复模板）跑用户配置的对账场景，按 5 阶段算法（1v1 严格 → 1v1 ±1day → 池子 1v多 同日 → 池子 1v多 ±1day → 池子 多v1 同日 → 池子 多v1 ±1day）跑 7+5 条赋值规则后导出「订单修复」与「未匹配单据」双文件。整个迭代分 3 PR 实施（PR-A 骨架 / PR-B 对账引擎 / PR-D 收尾）。
 

@@ -5,7 +5,7 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v2.1.0-beta.1 |
-| 扫描时间 | 2026-5-9 17:35:34 |
+| 扫描时间 | 2026-5-11 15:57:01 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 60 |
 | 顶层声明总数 | 601 |
@@ -28,7 +28,7 @@
 | `FileValidationError` | 11 | 55 | 7 | src/backend/balance-seed-store.js |
 | `PENDING_COLUMNS` | 9 | 33 | 9 | src/backend/pending-db/migrations.js |
 | `XLSX` | 8 | 54 | 8 | src/backend/file-service/normalizers.js |
-| `dialog` | 5 | 361 | 1 | src/main.js |
+| `dialog` | 5 | 362 | 1 | src/main.js |
 | `setCurrentModule` | 5 | 47 | 2 | src/backend/database/settings-repository.js |
 | `pad` | 5 | 37 | 2 | src/backend/logger.js |
 | `normalizeCellValue` | 5 | 35 | 1 | src/main-process/scenario-engines/engine-utils.js |
@@ -37,7 +37,7 @@
 | `makeWarningCollector` | 5 | 10 | 1 | src/main-process/scenario-engines/engine-utils.js |
 | `saveMappings` | 5 | 9 | 1 | src/backend/database/template-repository.js |
 | `deleteTemplate` | 5 | 7 | 1 | src/backend/database/template-repository.js |
-| `state` | 4 | 234 | 1 | src/renderer.js |
+| `state` | 4 | 237 | 1 | src/renderer.js |
 | `elements` | 4 | 128 | 1 | src/renderer.js |
 | `FIXED_FIELD_VALUE_PREFIX` | 4 | 21 | 2 | src/backend/database/utils.js |
 | `BANK_STATEMENT_FIELDS` | 4 | 17 | 3 | src/constants/bank-statement-fields.js |
@@ -624,7 +624,7 @@
 | `FileValidationError` | 11 | 55 | 7 | src/backend/file-service/readers.js(17), src/backend/file-service/normalizers.js(7), src/main-process/bank-statement-io.js(7) |
 | `PENDING_COLUMNS` | 9 | 33 | 9 | src/backend/pending-export/writer.js(6), src/backend/pending-import/validator.js(6), src/main-process/pending-session.js(6) |
 | `XLSX` | 8 | 54 | 8 | src/backend/file-service/writers.js(20), src/main-process/pending-session.js(11), src/backend/pending-export/writer.js(9) |
-| `dialog` | 5 | 361 | 1 | src/renderer-dialogs.js(257), src/renderer.js(71), src/renderer-pending.js(26) |
+| `dialog` | 5 | 362 | 1 | src/renderer-dialogs.js(258), src/renderer.js(71), src/renderer-pending.js(26) |
 | `setCurrentModule` | 5 | 47 | 2 | src/renderer-previews.js(39), src/renderer.js(3), src/backend/database.js(2) |
 | `pad` | 5 | 37 | 2 | src/main-process/bank-statement-io.js(14), src/backend/logger.js(11), src/main-process/pending-session.js(6) |
 | `normalizeCellValue` | 5 | 35 | 1 | src/main-process/scenario-engines/c4-recon-id-fix.js(19), src/main-process/scenario-engines/engine-utils.js(6), src/main-process/scenario-engines/c1-extract-recon-id.js(4) |
@@ -633,7 +633,7 @@
 | `makeWarningCollector` | 5 | 10 | 1 | src/main-process/scenario-engines/c1-extract-recon-id.js(2), src/main-process/scenario-engines/c2-offset-bill-mark.js(2), src/main-process/scenario-engines/c3-gateway-recon-join.js(2) |
 | `saveMappings` | 5 | 9 | 1 | src/renderer-dialogs.js(3), src/backend/database.js(2), src/backend/database/template-repository.js(2) |
 | `deleteTemplate` | 5 | 7 | 1 | src/backend/database.js(2), src/backend/database/template-repository.js(2), src/preload.js(1) |
-| `state` | 4 | 234 | 1 | src/renderer.js(130), src/renderer-pending.js(54), src/renderer-previews.js(32) |
+| `state` | 4 | 237 | 1 | src/renderer.js(130), src/renderer-pending.js(54), src/renderer-previews.js(32) |
 | `elements` | 4 | 128 | 1 | src/renderer.js(84), src/renderer-previews.js(23), src/renderer-pending.js(17) |
 | `FIXED_FIELD_VALUE_PREFIX` | 4 | 21 | 2 | src/backend/file-service.js(13), src/backend/database/utils.js(5), src/backend/file-service/common.js(2) |
 | `BANK_STATEMENT_FIELDS` | 4 | 17 | 3 | src/renderer-dialogs.js(9), src/constants/bank-statement-fields.js(3), src/preload.js(3) |
