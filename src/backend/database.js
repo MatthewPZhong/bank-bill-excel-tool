@@ -351,6 +351,15 @@ class AppDatabase {
     return settingsRepository.setCurrentModule(this.db, moduleId);
   }
 
+  // v2.1.0-beta.3 T4：对账单ReconID修复模块「账单类别」持久化
+  getReconIdFixBillCategory() {
+    return settingsRepository.getReconIdFixBillCategory(this.db);
+  }
+
+  setReconIdFixBillCategory(category) {
+    return settingsRepository.setReconIdFixBillCategory(this.db, category);
+  }
+
   listAccountMappings(templateId) {
     return settingsRepository.listAccountMappings(this.db, templateId);
   }

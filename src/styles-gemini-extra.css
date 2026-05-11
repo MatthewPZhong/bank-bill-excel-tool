@@ -902,7 +902,8 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   justify-content: center;
   flex-wrap: nowrap;
 }
-/* v2.1.0-beta.2 PR-B（task B1）：行 1 左 cell 内 [场景下拉 + 场景管理] 横向排列，对齐银行对账单模块 */
+/* v2.1.0-beta.2 PR-B（task B1）：行 1 左 cell 内 [场景下拉 + 场景管理] 横向排列，对齐银行对账单模块
+   v2.1.0-beta.3 T3：场景行下移至行 2，多了 #reconIdFixExportBtn 子元素，flex 自动自适应 */
 .recon-id-fix-board .recon-id-fix-scenario-row {
   display: flex;
   gap: 10px;
@@ -932,6 +933,41 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   cursor: pointer;
 }
 .recon-id-fix-board .recon-id-fix-scenario-select:disabled {
+  background-color: rgba(60, 64, 67, 0.06);
+  color: rgba(60, 64, 67, 0.5);
+  cursor: not-allowed;
+}
+
+/* v2.1.0-beta.3 T3：新增"账单类别"下拉行（行 1 左 cell，位置 = 原"场景"位置）
+   样式风格与 .recon-id-fix-scenario-* 对齐，保持视觉一致 */
+.recon-id-fix-board .recon-id-fix-bill-category-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+}
+.recon-id-fix-board .recon-id-fix-bill-category-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #3c4043;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.recon-id-fix-board .recon-id-fix-bill-category-select {
+  height: 36px;
+  min-width: 120px;
+  max-width: 165px;
+  padding: 0 12px;
+  border: 1px solid rgba(60, 64, 67, 0.2);
+  border-radius: 10px;
+  background-color: #fff;
+  font-family: inherit;
+  font-size: 13px;
+  color: #3c4043;
+  cursor: pointer;
+}
+.recon-id-fix-board .recon-id-fix-bill-category-select:disabled {
   background-color: rgba(60, 64, 67, 0.06);
   color: rgba(60, 64, 67, 0.5);
   cursor: not-allowed;

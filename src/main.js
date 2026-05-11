@@ -2700,6 +2700,8 @@ function registerAppHandlers() {
       uiStyle: database.getUiStyle() || 'Clear',
       // 上次使用模块；renderer 启动时恢复
       currentModule: database.getCurrentModule() || 'statement-generator',
+      // v2.1.0-beta.3 T4：对账单ReconID修复模块「账单类别」持久化（business | gateway | null）
+      reconIdFixBillCategory: database.getReconIdFixBillCategory(),
       // v1.5.3 R2（D15）：启动时自有账号迁移失败的错误文案；null 表示无失败
       ownAccountsMigrationError: lastOwnAccountsMigrationError
     };
@@ -2719,6 +2721,15 @@ function registerAppHandlers() {
     try {
       database.setCurrentModule(moduleId);
       return { status: 'ok', currentModule: moduleId };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  // v2.1.0-beta.3 T4：对账单ReconID修复模块「账单类别」持久化（business | gateway | null）
+  ipcMain.handle('settings:set-recon-id-fix-bill-category', (_event, category) => {
+    try {
+      database.setReconIdFixBillCategory(category);
+      return { status: 'ok', reconIdFixBillCategory: category || null };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }

@@ -42,7 +42,7 @@
               <button class="module-option" type="button" data-module="new-account-generator">新开账户余额账单生成</button>
               <button class="module-option" type="button" data-module="pending-reconciliation">月度 Pending 数据核对</button>
               <button class="module-option" type="button" data-module="bank-statement-process">银行对账单处理</button>
-              <button class="module-option" type="button" data-module="recon-id-fix">单据对账 ReconID 修复</button>
+              <button class="module-option" type="button" data-module="recon-id-fix">对账单ReconID修复</button>
             </div>
           </div>
 
@@ -211,28 +211,37 @@
           </section>
 
           <!-- v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块面板（fork bankStatementModulePanel）
-               v2.1.0-beta.2 PR-B（task B1）：行 1 左 cell = [场景下拉 + 场景管理]，行 1 右 cell = [导入文件 + 开始运行]，对齐银行对账单模块 -->
+               v2.1.0-beta.2 PR-B（task B1）：行 1 左 cell = [场景下拉 + 场景管理]，行 1 右 cell = [导入文件 + 开始运行]，对齐银行对账单模块
+               v2.1.0-beta.3 T3：行 1 左 cell 改为 [账单类别下拉]（business/gateway 子模式切换）；行 2 左 cell 改为 [场景下拉 + 场景管理 + 导出文件]（账单类别为空时隐藏） -->
           <section id="reconIdFixModulePanel" class="control-board module-panel bank-statement-board recon-id-fix-board" hidden>
             <div class="control-row">
               <div class="cell left">
-                <div class="recon-id-fix-scenario-row">
-                  <label class="recon-id-fix-scenario-label" for="reconIdFixScenarioSelect">场景</label>
-                  <select id="reconIdFixScenarioSelect" class="recon-id-fix-scenario-select" disabled>
-                    <option value="">请选择场景</option>
+                <div class="recon-id-fix-bill-category-row">
+                  <label class="recon-id-fix-bill-category-label" for="reconIdFixBillCategorySelect">账单类别</label>
+                  <select id="reconIdFixBillCategorySelect" class="recon-id-fix-bill-category-select">
+                    <option value="">请选择账单类别</option>
+                    <option value="gateway">网关对账单</option>
+                    <option value="business">单据对账单</option>
                   </select>
-                  <button id="reconIdFixManageScenariosBtn" class="secondary-btn" type="button">场景管理</button>
                 </div>
               </div>
               <div class="cell right">
                 <div class="pending-action-pair">
-                  <button id="reconIdFixImportBtn" class="primary-btn" type="button">导入文件</button>
+                  <button id="reconIdFixImportBtn" class="primary-btn" type="button" disabled>导入文件</button>
                   <button id="reconIdFixRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
                 </div>
               </div>
             </div>
             <div class="control-row">
               <div class="cell left">
-                <button id="reconIdFixExportBtn" class="secondary-btn" type="button" disabled>导出文件</button>
+                <div id="reconIdFixScenarioRow" class="recon-id-fix-scenario-row" hidden>
+                  <label class="recon-id-fix-scenario-label" for="reconIdFixScenarioSelect">场景</label>
+                  <select id="reconIdFixScenarioSelect" class="recon-id-fix-scenario-select" disabled>
+                    <option value="">请选择场景</option>
+                  </select>
+                  <button id="reconIdFixManageScenariosBtn" class="secondary-btn" type="button" disabled>场景管理</button>
+                  <button id="reconIdFixExportBtn" class="secondary-btn" type="button" disabled>导出文件</button>
+                </div>
               </div>
               <div class="cell right">
                 <div id="reconIdFixStatusBox" class="status-box">
