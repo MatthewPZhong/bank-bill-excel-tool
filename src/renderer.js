@@ -381,7 +381,12 @@ const {
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 preview（3 张）
   applyReconIdFixPanelPreviewState,
   applyScenarioConfigC4PreviewState,
-  applyScenarioConfigC4BothPreviewState
+  applyScenarioConfigC4BothPreviewState,
+  // v2.1.0-beta.3 T11：网关子模式 preview（4 张）
+  applyReconIdFixPanelBusinessPreviewState,
+  applyReconIdFixPanelGatewayPreviewState,
+  applyScenarioConfigC4GatewayPreviewState,
+  applyScenarioConfigC4Gateway1vNPreviewState
 } = window.__rendererPreviews.createRendererPreviews({
   state,
   elements,
@@ -4213,6 +4218,22 @@ async function initialize() {
   } else if (info.previewModal === 'scenario-config-c4-both') {
     setTimeout(() => {
       applyScenarioConfigC4BothPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'recon-id-fix-panel-business') {
+    setTimeout(() => {
+      applyReconIdFixPanelBusinessPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'recon-id-fix-panel-gateway') {
+    setTimeout(() => {
+      applyReconIdFixPanelGatewayPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenario-config-c4-gateway') {
+    setTimeout(() => {
+      applyScenarioConfigC4GatewayPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenario-config-c4-gateway-1vN') {
+    setTimeout(() => {
+      applyScenarioConfigC4Gateway1vNPreviewState();
     }, 120);
   }
 

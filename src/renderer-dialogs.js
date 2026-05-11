@@ -6738,10 +6738,12 @@
           config.reconGroups = Array.from(grouped.values());
           delete config.reconFields;
         } else {
+          // v2.1.0-beta.3 T11：gateway 子模式默认 amount-locked 是 Amount/receiveAmount（网关账单 vs 渠道账单字段名）
+          const defaultRight = isGatewayMode ? 'receiveAmount' : 'Amount';
           config.reconGroups = [{
             leftTypeSeq: 1,
             rightTypeSeq: 1,
-            fieldPairs: [{ leftField: 'Amount', rightField: 'Amount', locked: true }]
+            fieldPairs: [{ leftField: 'Amount', rightField: defaultRight, locked: true }]
           }];
         }
       } else if (Object.prototype.hasOwnProperty.call(config, 'reconFields')) {
@@ -6749,23 +6751,29 @@
         delete config.reconFields;
       }
       // 保证每个 group 自身结构完整 + Round 3：强制带一条 Amount 锁定行
+      // v2.1.0-beta.3 T11：gateway 子模式 amount-locked 是 Amount/receiveAmount（渠道账单字段名）
+      const lockedRightField = isGatewayMode ? 'receiveAmount' : 'Amount';
       config.reconGroups.forEach((grp) => {
         if (!Array.isArray(grp.fieldPairs) || grp.fieldPairs.length === 0) {
-          grp.fieldPairs = [{ leftField: 'Amount', rightField: 'Amount', locked: true }];
+          grp.fieldPairs = [{ leftField: 'Amount', rightField: lockedRightField, locked: true }];
           return;
         }
-        // 检查是否已有 Amount/Amount fieldPair
-        let hasAmount = false;
+        // 检查是否已有 amount-locked fieldPair（按 subMode 决定 rightField 名）
+        let hasAmountLocked = false;
         grp.fieldPairs.forEach((fp) => {
-          if (fp && fp.leftField === 'Amount' && fp.rightField === 'Amount') {
-            // 老数据没 locked 标记 → 自动补
+          if (!fp) return;
+          // gateway: Amount/receiveAmount 或者已 locked
+          // business: Amount/Amount 或者已 locked
+          const isMatchingLockedPair = fp.locked === true
+            || (fp.leftField === 'Amount' && fp.rightField === lockedRightField);
+          if (isMatchingLockedPair) {
             if (fp.locked !== true) fp.locked = true;
-            hasAmount = true;
+            hasAmountLocked = true;
           }
         });
-        if (!hasAmount) {
-          // 头部插入锁定 Amount 行
-          grp.fieldPairs.unshift({ leftField: 'Amount', rightField: 'Amount', locked: true });
+        if (!hasAmountLocked) {
+          // 头部插入锁定 Amount/<rightField> 行
+          grp.fieldPairs.unshift({ leftField: 'Amount', rightField: lockedRightField, locked: true });
         }
       });
       if (!config.output) {
@@ -6890,10 +6898,13 @@
             // Round 3（Decision 4）：locked fieldPair 不可改 / 不可删
             const locked = fp && fp.locked === true;
             const fpDisabled = isReadonly || locked;
-            // 锁定行：select 固定显示 'Amount'，添加 locked 视觉提示
+            // 锁定行：select 显示实际字段名（business 默认 Amount/Amount，gateway 默认 Amount/receiveAmount）
+            // v2.1.0-beta.3 T11：按 subMode 取 locked 行的实际字段名（fp.leftField/rightField 由前面 ensure 逻辑写好）
+            const lockedLeftLabel = fp && fp.leftField ? fp.leftField : 'Amount';
+            const lockedRightLabel = fp && fp.rightField ? fp.rightField : 'Amount';
             const renderLeftSelect = locked
               ? `<select class="scenario-config-input" data-c4-rg-fp-field="leftField" disabled title="Amount 字段对锁定（用于池子 1v多 / 多v1 算法）">
-                   <option value="Amount" selected>Amount</option>
+                   <option value="${escapeHtml(lockedLeftLabel)}" selected>${escapeHtml(lockedLeftLabel)}</option>
                  </select>`
               : `<select class="scenario-config-input" data-c4-rg-fp-field="leftField" ${fpDisabled ? 'disabled' : ''}>
                    <option value="">请选择左字段</option>
@@ -6901,7 +6912,7 @@
                  </select>`;
             const renderRightSelect = locked
               ? `<select class="scenario-config-input" data-c4-rg-fp-field="rightField" disabled title="Amount 字段对锁定（用于池子 1v多 / 多v1 算法）">
-                   <option value="Amount" selected>Amount</option>
+                   <option value="${escapeHtml(lockedRightLabel)}" selected>${escapeHtml(lockedRightLabel)}</option>
                  </select>`
               : `<select class="scenario-config-input" data-c4-rg-fp-field="rightField" ${fpDisabled ? 'disabled' : ''}>
                    <option value="">请选择右字段</option>
