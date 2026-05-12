@@ -710,6 +710,49 @@ function migrateC4ReconGroupsAmountLockedFieldPair(db) {
   });
 }
 
+// v2.1.0-beta.3 PR #39 self-review P1-1：一次性修复 v2.1.0-beta.3 早期测试期创建的 gateway 场景
+// fieldPairs locked 行 rightField='Amount'（应为 'receiveAmount'）的数据。
+// 背景：fix-5（commit f291013）发布给用户测试时，createDefaultScenarioConfig 仍写死 Amount/Amount；
+//       fix-round-2（commit 3f826e6）才修正默认值。期间用户创建的 gateway 场景 config_json 含 Amount/Amount locked
+//       → 引擎拿渠道行不存在的 Amount 字段匹配 → 1v1/1v多/多v1 全部 0 命中
+// 修复：扫描 scenarios category='gateway-recon-id-fix'，把 reconGroups[i].fieldPairs[j] 内
+//       `locked === true && leftField === 'Amount' && rightField === 'Amount'` 强制改为 rightField='receiveAmount'
+// 幂等：执行一次后 rightField 已是 'receiveAmount'，再跑命中 0 条 → no-op
+// 调用顺序：必须在 ensureScenariosCategoryGatewayReconIdFix 之后（依赖 category 枚举已扩 5 值）
+function migrateGatewayReconIdFixFieldPairs(db) {
+  const rows = db.prepare(
+    `SELECT id, config_json FROM scenarios WHERE category = 'gateway-recon-id-fix'`
+  ).all();
+  if (rows.length === 0) return;
+  const update = db.prepare(`UPDATE scenarios SET config_json = ?, updated_at = ? WHERE id = ?`);
+  const now = new Date().toISOString();
+  rows.forEach((row) => {
+    let config;
+    try {
+      config = JSON.parse(row.config_json);
+    } catch (_e) {
+      return;
+    }
+    if (!config || typeof config !== 'object') return;
+    if (!Array.isArray(config.reconGroups) || config.reconGroups.length === 0) return;
+    let changed = false;
+    config.reconGroups.forEach((grp) => {
+      if (!grp || typeof grp !== 'object' || !Array.isArray(grp.fieldPairs)) return;
+      grp.fieldPairs.forEach((fp) => {
+        if (!fp) return;
+        // gateway 子模式 locked Amount 行 rightField 必须是 receiveAmount
+        if (fp.locked === true && fp.leftField === 'Amount' && fp.rightField === 'Amount') {
+          fp.rightField = 'receiveAmount';
+          changed = true;
+        }
+      });
+    });
+    if (changed) {
+      update.run(JSON.stringify(config), now, row.id);
+    }
+  });
+}
+
 // v2.0.0-beta.3 PR #32b：一次性修复历史 PR #29 seed 的小写 'currency' 错误
 // 背景：PR #29 初始 seed 时把 C3 内置场景的 reconFields[0].gwField 写成小写 'currency'，
 //       PR #31 修了 seed JSON 但 marker 机制保护老库不重 seed → 用户老 DB 里仍是小写。
@@ -755,6 +798,7 @@ module.exports = {
   ensureScenariosSupport,
   ensureScenariosCategoryReconIdFix,
   ensureScenariosCategoryGatewayReconIdFix,
+  migrateGatewayReconIdFixFieldPairs,
   migrateC4ReconGroupsStructure,
   migrateC4ReconGroupsAmountLockedFieldPair,
   ensureC3GwFieldCurrencyCaseFix,

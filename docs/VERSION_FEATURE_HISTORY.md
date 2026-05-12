@@ -41,9 +41,13 @@ v2.1.0-beta.2 之后追加迭代：将"单据对账 ReconID 修复"模块扩展�
 - **主面板布局精修**（9 个 fix commit）：账单类别为空时保持 beta.2 完整布局 + 行 2 始终显示；场景管理保持行 1；下拉固定 165px；CSS grid 3 列严格对齐 + statusBox/pending-pair 等宽 292px；label/select 样式同模式（.select-label / .template-select 48px pill）；账单类别空时场景下拉真空白；5 元素整体微调左移；错误框去 "• " 前缀。
 - **smoke 新增 2 用例**：mode='both' + suffix 拼接 / source='' 空值 + 仅 suffix（self-review P0 回归保护）。
 
-### 修复
+### 修复（PR #39 review round 1-3 + self-review 收尾）
 
-- 无（本迭代为功能扩展）。
+- **dispatcher C4 集合过滤**（P1）：`filterOutReconIdFix` 用 C4_CATEGORIES 集合（含 `gateway-recon-id-fix`），防 gateway 子模式场景误入银行对账 dispatcher。
+- **状态隔离修复**（P2）：`clearResultCacheForCategory` + 删除场景刷新分支用 ReconID 子模式集合识别，防误清/误刷新银行对账模块。
+- **新增 IPC `recon-id-fix:clear-session`**（P2）：切换账单类别清 main 端 session/result，防旧 session 回流。
+- **UI 默认 config gateway 引擎匹配修复**（P1）：`createDefaultScenarioConfig` + "+ 新增对账分组" + 归一化 ensure 三处按 subMode 决定 `rightField`；新增 migration `migrateGatewayReconIdFixFieldPairs` 修复 DB 旧场景。
+- **smoke 回归保护**：gateway smoke 6 用例 → 10 用例（含 mode='both' suffix / source='' 空值 / UI 默认 config 进引擎匹配）；dispatcher smoke 扩展 gateway 剔除。
 
 ### 未改动
 

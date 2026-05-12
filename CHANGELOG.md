@@ -46,7 +46,20 @@ v2.1.0-beta.2 之后追加迭代：单据对账 ReconID 修复模块扩展为 **
 
 ### 修复
 
-- 无（本迭代为功能扩展，不修复 v2.1.0-beta.2 已知问题）。
+PR #39 review round 1-3 + self-review 收尾（共 5 项）：
+
+- **dispatcher C4 集合过滤**（PR #39 Finding 1，P1）：scenario-dispatcher `filterOutReconIdFix` 用 `C4_CATEGORIES` 集合（含 `gateway-recon-id-fix`）；main.js `bank-statement:run` + `:export` snapshot 2 处 inline filter 同步；防止用户启用 gateway 子模式场景 + 跑银行对账单处理时抛"未知 category"。
+- **状态隔离修复**（PR #39 Finding 2，P2）：`clearResultCacheForCategory` 用 `RECON_ID_FIX_CATEGORIES` Set（含两个子模式）；renderer-dialogs 删除场景分支用 `isReconIdFixCategory()` helper；防止改 gateway 场景误清银行对账结果 / 删除 gateway 场景误刷新银行对账模块。
+- **切换账单类别清 main 端 session**（PR #39 Codex#1，P2）：新增 IPC `recon-id-fix:clear-session`（清 `reconIdFixSession + reconIdFixResult`），renderer 切换账单类别先调 clearSession 再 reloadReconIdFixScenarios；防止 `refreshReconIdFixStatus` 从 main 端拉回旧 session 污染新类别 UI。
+- **UI 默认 config gateway 引擎匹配修复**（PR #39 review round 2，P1）：
+  - `createDefaultScenarioConfig` 按 category 决定 `defaultLockedRight`（gateway=`receiveAmount` / business=`Amount`）；
+  - "+ 新增对账分组" 按 isGatewayMode 决定 `rightField`；
+  - dialog 归一化 ensure 逻辑强制修正 locked 行的 leftField/rightField（防跨子模式残留 + 老 draft Amount/Amount → 引擎 0 命中）；
+  - 新增 migration `migrateGatewayReconIdFixFieldPairs`：扫描 DB scenarios category='gateway-recon-id-fix'，把 `reconGroups[i].fieldPairs[j]` 内 `locked === true && leftField='Amount' && rightField='Amount'` 强制改为 `rightField='receiveAmount'`（修复 v2.1.0-beta.3 测试期用户已创建场景）；幂等。
+- **smoke 回归保护**：
+  - `recon-id-fix-engine-gateway.js` 加 Case 7（mode='both' + suffix 拼接）/ Case 8（source='' 空值 + 仅 suffix）/ Case 8.5（UI 默认 config 进引擎应匹配）→ 9/9 → 10/10 PASS；
+  - `scenario-dispatcher.js` Helper unit 扩展（gateway-recon-id-fix 也被剔除）；
+  - 错误框文本去 "• " 前缀。
 
 ### 未改动（明确）
 

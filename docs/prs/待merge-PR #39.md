@@ -163,6 +163,11 @@ integrated: false
 - [x] commonId source 新增空值选项 + 空值时 suffix 必填 UI 校验（错误框点确认返回 dialog）
 - [x] **gateway mode='both' + suffix 拼接** Reference 输出验证（self-review P0-1 修复 + smoke Case 7 回归保护）
 - [x] **gateway mode='both' + source='' 空值 + suffix → 仅 suffix** 输出验证（self-review P0-2 修复 + smoke Case 8 回归保护）
+- [x] **gateway 场景不再误入银行对账 dispatcher**（PR #39 Finding 1）：启用 gateway 场景 + 跑「银行对账单处理」不抛"未知 category"
+- [x] **删除 gateway 场景刷新 ReconID 模块状态而非银行对账**（PR #39 Finding 2）
+- [x] **切换账单类别 main 端 session/result 同步清空**（PR #39 Codex #1）：切换后 panel 不显示旧文件/结果，Run/Export 按钮不误启用
+- [x] **UI 默认 config gateway 引擎匹配成功**（PR #39 review round 2）：`createDefaultScenarioConfig` 返回 Amount/receiveAmount + 新增分组同样默认 + 归一化强制修正（含 smoke Case 8.5 回归保护）
+- [x] **DB 内旧 gateway 场景自动迁移**（self-review P1-1）：`migrateGatewayReconIdFixFieldPairs` 启动时扫描修复 v2.1.0-beta.3 早期测试期创建的 Amount/Amount locked → receiveAmount
 
 ### 5.3 UI 视觉对齐（用户多次反馈精修）
 
