@@ -1,0 +1,175 @@
+---
+pr_number: 40
+title: "[v2.1.0-beta.3] v2.1.0 → main 版本同步（含 PR #39：对账单ReconID修复模块扩展 — 网关子模式 + 主面板账单类别筛选）"
+base: main
+head: v2.1.0
+created: 2026-05-12
+integrated: false
+---
+
+# PR #40 — [v2.1.0-beta.3] v2.1.0 → main 版本同步
+
+| 字段 | 值 |
+|---|---|
+| 起源版本 | `main` 当前 `2.1.0-beta.2`（PR #38 已合并） |
+| 目标版本 | `main` 升至 `2.1.0-beta.3` |
+| 分支 | `v2.1.0 → main` |
+| 起草日期 | 2026-05-12 |
+| commits | 29（PR #38 归档 1 + PR #39 完整 27 + Merge #39 + 归档 1） |
+| 改动量 | 41 files / +4354 / -449 |
+| 关联 PR | PR #38 (merged 2026-05-11) / **PR #39 (merged 2026-05-12，已合 v2.1.0，未合 main)** |
+| 关联草稿 | `docs/prs/PR39-v2.1.0-beta.3.md`（PR #39 详细 review 草稿，6 轮 review 全部记录） |
+
+---
+
+## 一、本 PR 的性质
+
+**版本同步 PR / fast-forward 合并 PR**。本 PR **不引入任何新功能**，仅把 v2.1.0 分支累积的、已在 PR #39 经过完整 6 轮 review 的代码合到 main，让 main 升至 `2.1.0-beta.3`，作为 v2.1.1 patch 迭代的起点。
+
+> 为什么需要本 PR：
+>
+> - PR #38（v2.1.0-beta.2 → main）已合并；PR #39（v2.1.0-beta.3 → v2.1.0）已合并到 v2.1.0 分支
+> - 但 v2.1.0 → main 未做合并 → main 滞后于 v2.1.0 分支整整一个 PR #39
+> - 2026-05-12 准备启动 v2.1.1 迭代（PDF 移除 + C4 dialog 优化 + BillDate ±N 配置 + tooltip 等），需要 main 作为切起点 → 本 PR 同步
+
+---
+
+## 二、改动总览
+
+### 2.1 PR #38 归档 commit（1）
+
+| Commit | 描述 |
+|---|---|
+| 0fd3a91 | [v2.1.0-beta.2] docs(PR #38): 归档完成 integrated=true + merge commit 95802fa + PRD §七 实施记录 |
+
+### 2.2 PR #39 主 task commit（6，按 spec §一 task 分组）
+
+| Commit | Task | 描述 |
+|---|---|---|
+| 47c87ce | T1+T2 | 网关子模式数据层（gateway 字段常量 + scenarios CHECK 扩至 5 值）+ PM 三件套（PRD/spec/tasks 起草） |
+| d7736fc | T3-T5 | 主面板「账单类别」下拉 + 状态级联 + 持久化（business/gateway/null 三态 + 场景下拉按类别动态过滤） |
+| bbc3bdc | T6-T7 | C4 dialog 双模式化 — business/gateway subMode 切换文案/枚举/校验/预览 + SubBizType 在 gateway 模式不渲染 |
+| 77bb83a | T8-T10 | C4 引擎 + IO 双模式化 + gateway 6 用例 smoke（review 期间扩至 10/10）— 算法适配 receiveAmount/createTime + business 零回归 |
+| 4346027 | T11 | preview 重跑 + 4 张 gateway 状态截图 + dialog locked fieldPair 按 subMode 选默认值 |
+| c94e8df | T12 | version bump 2.1.0-beta.2 → 2.1.0-beta.3 + 文档三件套（CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE） |
+
+### 2.3 PR #39 用户反馈 fix commit（9，UI 布局精修 + 文案/校验）
+
+| Commit | 反馈点 |
+|---|---|
+| 1220e39 | fix #1：账单类别为空时保持 beta.2 完整布局 — 行 2 始终显示，按钮仅 disabled 不 hidden |
+| dcccaf1 | fix #2：修正主面板布局对齐 — 场景管理按钮保持在行 1 左 cell |
+| 289d781 | fix #3：账单类别+场景下拉固定宽度 165px — 修复三态 placeholder 长短引起的布局 shift |
+| a0fd8bf | fix #4：grid 3 列严格对齐 |
+| f291013 | fix #5：label + 下拉样式同模式风格 + 账单类别为空时场景下拉真空白 |
+| 3995105 | fix #6：整体往左平移 30px |
+| 6f7ddd5 | fix #7：回滚整体 30px 平移，改为非对称平移 |
+| e0b7411 | fix #8：SCENARIO_CATEGORY_LABELS 文本调整 + commonId 加空值选项 + gateway suffix 输入框 + 校验 |
+| 8239110 | fix #9：C4 dialog 错误框去掉 "• " 前缀 |
+
+### 2.4 PR #39 self-review + 6 轮 PR review 修复 commit（10，含资金红线修复）
+
+| Commit | 阶段 | 关键修复 |
+|---|---|---|
+| 03c9908 | PR 草稿 | docs(pr-39): 起 PR 草稿到 docs/prs/ |
+| 4492b11 | self-review | P0/P1/P3 — computeReferenceGateway mode='both' 拼 suffix（资金红线关键修复）/ 模块名统一 / 文档补全 |
+| **33a6713** | **PR review R1（P1）** | **gateway 场景误入银行对账 dispatcher 修复 — 即今天用户报错"runScenario: 未知 category 'gateway-recon-id-fix'"的修复** |
+| 3f826e6 | PR review R2 | gateway 默认锁定字段 Amount/Amount → Amount/receiveAmount（修复匹配失败） |
+| f437549 | PR review R3 | gateway smoke 独立运行 footer 文案 8 → 10 CASES |
+| a91b7a2 | self-review R2 | DB migration migrateGatewayReconIdFixFieldPairs（修旧 gateway 场景 fieldPair）+ smoke 补全 |
+| 055a168 | PR review R4 | migration smoke H5/H6 用例 + 文档 smoke 数字同步 |
+| b351b2e | PR review R5 | PRD §6.2 + tasks T10 同步 gateway smoke 10/10 |
+| f895c02 | self-review R3 | migration H6.3 防御性 + CHANGELOG 文字统一 |
+| 728f209 | PR review R6 | 代码注释同步 — 6 用例 → 基线 6 + review 扩 3 + constants = 10/10 |
+| a894166 | self-review R4 | PR draft §2.3 commit 表补 round 6 |
+
+### 2.5 PR #39 Merge + 归档（3）
+
+| Commit | 描述 |
+|---|---|
+| 2514084 | Merge pull request #39 from MatthewPZhong/v2.1.0-beta.3 |
+| a8b4278 | [v2.1.0-beta.3] docs(PR #39): 归档完成 integrated=true + merge commit 2514084 + PRD §七 实施记录 |
+
+---
+
+## 三、内容指引
+
+本 PR 仅做版本合并；功能/算法/UI/migration 等所有变更**详见 PR #39 的完整 review 草稿**：
+
+📄 `docs/prs/PR39-v2.1.0-beta.3.md` ← 已合并的 PR #39 草稿（含 6 轮 review 全记录 + Codex 反馈处理）
+
+PR #39 概览：
+- **C4 网关子模式**（`category='gateway-recon-id-fix'`）扩展整个 v2.1.0-beta.1 起步的"单据对账 ReconID 修复"模块
+- **主面板新增「账单类别」一级筛选**（business / gateway / null 三态 + 持久化）
+- **C4 dialog + 引擎 + IO 双模式化**（business/gateway 共用骨架 + 差异参数化）
+- **DB migration**：scenarios.category CHECK 4 → 5 值 + 旧 gateway 场景 fieldPair 自动修复
+
+---
+
+## 四、测试
+
+- ✅ **smoke 全 14 子套 PASS**（2026-05-12 在 HEAD `a8b4278` 验证 — scenario-engines 23/23 / scenario-dispatcher 15/15 / recon-id-fix-engine-gateway 10/10 / migrations-recon-id-fix 19/19 / 等）
+- ✅ **用户手动验证 R1 修复**：2026-05-12 用户在 v2.1.0 HEAD 启动 + 启用 gateway 场景 + 跑银行对账单处理 → **不再抛"未知 category"**（重启 Electron 后通过）
+- ✅ **PR #39 期间 6 轮 review 全部 finding 已 close**（详见 PR #39 草稿 §测试结论）
+- ✅ **preview**：4 张 gateway 状态截图 + recon-id-fix-panel 系列已重跑
+
+---
+
+## 五、风险与人工复核要点
+
+⚠️ **重申资金红线**（CLAUDE.md 永久规则 #7）：
+
+- 本 PR 含 **C4 引擎匹配算法**（资金对账）、**DB migration**（CHECK 约束变更 + 旧场景 fieldPair 修复）、**资金红线 defense in depth**（C4_CATEGORIES filter）相关改动
+- 所有改动**已在 PR #39 走完 6 轮 review + 4 轮 self-review** + 用户多次反馈 → 风险已收敛
+- 本 PR **仅版本合并**，**不引入新代码** → 无需重复 finding review
+
+合并前请确认：
+
+- [ ] main 当前版本 `2.1.0-beta.2` → 合后变 `2.1.0-beta.3`（package.json 已 bump，无需手动）
+- [ ] CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 三件套已在 PR #39 c94e8df 同步
+- [ ] 合 main 后可立即从 main 切 v2.1.1 patch 分支
+
+---
+
+## 六、合并后下一步
+
+合 main 后立即启动 **v2.1.1 patch 迭代**：
+
+1. PDF 导入功能整体移除（破坏性变更 / 依赖瘦身）
+2. C4 dialog 文案优化（"匹配规则"→"匹配模式" / "主边单据/从边单据"→"主边/从边"）
+3. **BillDate ±N 可配置**（取代硬编码 ±1day，⚠️ 影响 C4 匹配算法）
+4. "修复结果输出" + "订单修复ID取值" tooltip
+5. "跳过 C3 直接运行" → "直接运行"
+
+详见 `changes/v2.1.1/`（PR #40 合并后起草）。
+
+---
+
+## 七、check-vars 输出
+
+> 基准：`git diff main...v2.1.0`（9 文件 / 485 diff 行）
+> 时间：2026-05-12
+
+### ⚠️ 关联功能 review（check-vars 自动生成）
+
+本次改动触及以下重要变量：
+
+- **Important-skeleton**: `settingsRepository`
+  - review 要点：renderer 侧缓存与 main 侧持久化的 key 必须对齐
+  - 现状：PR #39 期间已对齐（renderer `state.reconIdFixBillCategory` + main setting key `recon_id_fix_bill_category`），smoke + 用户手动测试已覆盖 ✅
+
+**未命中**：Critical / Runtime-state / Risk-sensitive / Minor。
+
+### 必跑
+
+- [x] `npm run smoke`（已在 v2.1.0 HEAD `a8b4278` 验证全 14 子套 PASS）
+- [ ] 合 main 后跑一次 `npm run scan:vars` 刷新 `docs/analysis/var-reference-stats.md`
+
+### 升格候选（不阻断合并）
+
+PR #39 引入的 2 个 migration 函数：
+
+- `ensureScenariosCategoryGatewayReconIdFix`（`src/backend/database/migrations.js`）
+- `migrateGatewayReconIdFixFieldPairs`（`src/backend/database/migrations.js`）
+
+跨度 = 2 文件，未达 A-share ≥ 3 门槛；继续观察，下次 scan-vars 时再评估是否升格入 Risk-sensitive § 数据库迁移段。
