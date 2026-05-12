@@ -400,5 +400,5 @@ module.exports = { runReconIdFixEngineGatewaySmokeTests };
 if (require.main === module) {
   console.log('====== gateway recon-id-fix smoke (T10) ======');
   runReconIdFixEngineGatewaySmokeTests();
-  console.log('====== ALL 8 CASES PASS ======');
+  console.log('====== ALL 10 CASES PASS ======');
 }
