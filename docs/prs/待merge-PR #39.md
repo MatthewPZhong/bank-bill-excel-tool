@@ -58,7 +58,7 @@ integrated: false
 | e0b7411 | fix #8：SCENARIO_CATEGORY_LABELS 文本调整（单据对账修复→单据对账单修复 / 网关对账修复→网关对账单修复）+ commonId 加空值选项 + gateway suffix 输入框 + 校验 |
 | 8239110 | fix #9：C4 dialog 错误框去掉 "• " 前缀 |
 
-### 2.3 self-review + PR review 修复 commit（7 个）
+### 2.3 self-review + PR review 修复 commit（10 个）
 
 | Commit | 阶段 | 描述 |
 |---|---|---|
@@ -69,7 +69,9 @@ integrated: false
 | a91b7a2 | self-review round 2 P1/P3 | P1-1 新增 migration migrateGatewayReconIdFixFieldPairs（修 DB 旧 gateway 场景）+ P1-2 CHANGELOG 补 round-1/2/3 + P3-1 smoke T21（clear-session）+ P3-2 PR draft §5.2 |
 | 055a168 | PR #39 review round 4 | Finding 1（P2）migration smoke H5/H6 用例 + Finding 2（P3）文档 smoke 数字同步 |
 | b351b2e | PR #39 review round 5 | P3 PRD §6.2 + tasks T10 同步 gateway smoke 10/10 |
-| （本 commit） | self-review round 3 P2/P3 | P2-1 H6.3 防御性 unlocked Amount/Amount 不动（migrations smoke 19/19）+ P3-1 CHANGELOG L21 文字统一 + P3-2 PR draft 本表补 7 个修复 commit |
+| f895c02 | self-review round 3 P2/P3 | P2-1 H6.3 防御性 unlocked Amount/Amount 不动（migrations smoke 19/19）+ P3-1 CHANGELOG L21 文字统一 + P3-2 PR draft §2.3 commit 表 |
+| 728f209 | PR #39 review round 6 | P3 代码注释同步 — scripts/smoke-test.js 注册注释 + recon-id-fix-engine-gateway.js 顶部注释 "6 用例" → "基线 6 + review 扩展 3 + constants = 10/10" |
+| （本 commit） | self-review round 4 P3 | P3-1 PR draft §2.3 commit 表补 round 6（728f209）+ 自己 |
 
 ---
 
