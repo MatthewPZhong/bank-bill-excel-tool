@@ -3606,7 +3606,16 @@ async function handleReconIdFixBillCategoryChange(event) {
   state.reconIdFixSession = null;
   state.reconIdFixResult = null;
 
-  // 2. 持久化
+  // 2. 清 main 端 session/result + 持久化账单类别
+  // v2.1.0-beta.3 PR #39 Codex#1（P2）：必须先清 main 端 session，否则下面 reloadReconIdFixScenarios →
+  // refreshReconIdFixStatus → main 端 session-status 会拉回旧 session/result 进 renderer state，导致
+  // 切换后 panel 仍显示旧文件/结果，Run/Export 按钮误启用（用 session.subMode vs scenario.category
+  // 校验只能在用户实际触发 run 时优雅失败，UI 错觉问题仍在）
+  try {
+    await window.desktopApi.reconIdFix.clearSession();
+  } catch (error) {
+    console.warn('clear main reconIdFix session failed:', error);
+  }
   try {
     await window.desktopApi.settings.setReconIdFixBillCategory(newCat);
   } catch (error) {

@@ -123,7 +123,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     import: (payload) => ipcRenderer.invoke('recon-id-fix:import', payload),
     run: (payload) => ipcRenderer.invoke('recon-id-fix:run', payload),
     export: () => ipcRenderer.invoke('recon-id-fix:export'),
-    sessionStatus: () => ipcRenderer.invoke('recon-id-fix:session-status')
+    sessionStatus: () => ipcRenderer.invoke('recon-id-fix:session-status'),
+    // v2.1.0-beta.3 PR #39 Codex#1（P2）：清空 main 端 session + result（切换账单类别时调用，避免旧 session 回流）
+    clearSession: () => ipcRenderer.invoke('recon-id-fix:clear-session')
   },
   accountMappings: {
     list: (templateId) => ipcRenderer.invoke('account-mapping:list', templateId),

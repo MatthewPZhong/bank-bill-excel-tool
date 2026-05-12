@@ -338,20 +338,25 @@ async function runScenarioDispatcherSmokeTests() {
 
   // ===== Helper unit: filterOutReconIdFix =====
   // v2.1.0-beta.1 PR-A round 2 P1：C4 (`recon-id-fix`) 走独立流水线，dispatcher 应过滤
+  // v2.1.0-beta.3 PR #39 Finding 1（P1）：扩展到所有 C4 category（含 'gateway-recon-id-fix'）
   {
     const list = [
       { category: 'extract-recon-id' },
       { category: 'recon-id-fix' },
       { category: 'offset-bill-mark' },
-      { category: 'recon-id-fix' }
+      { category: 'recon-id-fix' },
+      { category: 'gateway-recon-id-fix' }
     ];
     const filtered = filterOutReconIdFix(list);
-    assert.strictEqual(filtered.length, 2, 'filterOutReconIdFix 应剔除 2 个 C4');
-    assert(filtered.every((s) => s.category !== 'recon-id-fix'), '不应保留 C4');
+    assert.strictEqual(filtered.length, 2, 'filterOutReconIdFix 应剔除 3 个 C4（2 个 recon-id-fix + 1 个 gateway-recon-id-fix）');
+    assert(filtered.every((s) => s.category !== 'recon-id-fix' && s.category !== 'gateway-recon-id-fix'), '不应保留任何 C4');
     assert(filtered.some((s) => s.category === 'extract-recon-id'), '应保留 C1');
     assert(filtered.some((s) => s.category === 'offset-bill-mark'), '应保留 C2');
     // 防御：null/undefined 元素也应被过滤掉
     assert.strictEqual(filterOutReconIdFix([null, undefined, { category: 'extract-recon-id' }]).length, 1);
+    // gateway-recon-id-fix 单独 case
+    assert.strictEqual(filterOutReconIdFix([{ category: 'gateway-recon-id-fix' }]).length, 0,
+      'gateway-recon-id-fix 也应被剔除');
   }
 
   // ===== Dispatcher D10（v2.1.0-beta.1 PR-A round 2 P1）：=====

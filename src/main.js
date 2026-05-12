@@ -13,7 +13,7 @@ const pendingDiffRepo = require('./backend/pending-db/diff-repository');
 const pendingReconcileEngine = require('./backend/pending-reconcile/engine');
 const pendingExportWriter = require('./backend/pending-export/writer');
 const { createPendingSession } = require('./main-process/pending-session');
-const { runAllScenarios } = require('./main-process/scenario-dispatcher');
+const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-dispatcher');
 const {
   readBankStatement,
   readGatewayRecon,
@@ -2762,8 +2762,11 @@ function registerAppHandlers() {
   // round 3 self-review P3-A：显式枚举已知 category，未知值（含 undefined）双清并 warn，
   // 避免未来加新 category 时忘了同步本函数会偷偷清 processingResult。
   const BANK_STATEMENT_CATEGORIES = new Set(['extract-recon-id', 'offset-bill-mark', 'gateway-recon-join']);
+  // v2.1.0-beta.3 PR #39 Finding 2（P2）：把 ReconID 修复 category 集合化（含 business + gateway 两个子模式）
+  // 之前 'gateway-recon-id-fix' 落 unknown 分支 → 双清 processingResult + reconIdFixResult → 用户改 gateway 场景误清银行对账结果
+  const RECON_ID_FIX_CATEGORIES = new Set(['recon-id-fix', 'gateway-recon-id-fix']);
   function clearResultCacheForCategory(category) {
-    if (category === 'recon-id-fix') {
+    if (RECON_ID_FIX_CATEGORIES.has(category)) {
       reconIdFixResult = null;
     } else if (BANK_STATEMENT_CATEGORIES.has(category)) {
       processingResult = null;
@@ -2923,7 +2926,8 @@ function registerAppHandlers() {
       // `recon-id-fix:run`，不应进入银行对账单 dispatcher（C4 没有对应的 case，
       // dispatcher 内 `runScenario` default 分支会 throw "未知 category"）。
       // 此处 + snapshot 都过滤掉 → 银行对账与单据对账两条流水线相互独立。
-      const dispatchScenarios = detailedEnabled.filter((s) => s.category !== 'recon-id-fix');
+      // v2.1.0-beta.3 PR #39 Finding 1（P1）：扩展到所有 C4 category（含 'gateway-recon-id-fix'）
+      const dispatchScenarios = detailedEnabled.filter((s) => !C4_CATEGORIES.includes(s.category));
       // 每次 run 都基于原始导入数据 deep clone 一份工作副本
       // （Codex F1 P1 修复：算法层会原地修改字段，不 clone 会让连续运行的 oldValue 漂移
       //  → first-match-wins 失效，低优先级场景可能覆盖高优先级写入的字段）
@@ -2959,7 +2963,8 @@ function registerAppHandlers() {
       const detailedEnabled = enabled.map((s) => database.getScenario(s.id)).filter(Boolean);
       // v2.1.0-beta.1 PR-A round 2 P1：与 bank-statement:run 一致，C4 不参与本模块的 snapshot
       // 否则用户改 C4 场景会让此处 snapshot 变化 → 误报"场景已变更" → 拒绝导出
-      const dispatchScenarios = detailedEnabled.filter((s) => s.category !== 'recon-id-fix');
+      // v2.1.0-beta.3 PR #39 Finding 1（P1）：扩展到所有 C4 category
+      const dispatchScenarios = detailedEnabled.filter((s) => !C4_CATEGORIES.includes(s.category));
       const currentSnapshot = buildScenariosSnapshot(dispatchScenarios);
       if (processingResult.scenariosSnapshot !== currentSnapshot) {
         processingResult = null;
@@ -3286,6 +3291,13 @@ function registerAppHandlers() {
     }
   });
 
+  // v2.1.0-beta.3 PR #39 Codex#1（P2）：清空 main 端 session + result
+  // 用户切换"账单类别"时调用，避免 reloadReconIdFixScenarios 内的 refreshReconIdFixStatus 从 main 拉回旧 session
+  ipcMain.handle('recon-id-fix:clear-session', () => {
+    reconIdFixSession = null;
+    reconIdFixResult = null;
+    return { status: 'ok' };
+  });
   ipcMain.handle('recon-id-fix:session-status', () => {
     return {
       status: 'ok',

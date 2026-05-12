@@ -33,8 +33,11 @@ function filterScenariosByGwAvailability(scenarios, gwRows) {
 // C4 (`recon-id-fix`) 走 `recon-id-fix:run` 独立流水线，dispatcher 入参不应含 C4。
 // 入口处再防一手：即使上游 IPC handler 漏了 filter，dispatcher 也拒绝喂给 runScenario
 // （runScenario 的 default 分支会 throw "未知 category"，会让 bank-statement:run 整体失败）。
+// v2.1.0-beta.3 PR #39 Finding 1（P1）：扩展到所有 C4 category（含 'gateway-recon-id-fix'）
+// 否则用户启用 gateway 子模式场景 + 跑银行对账单处理 → scenario 进入 C1/C2/C3 dispatcher → runScenario 抛"未知 category"
+const C4_CATEGORIES = ['recon-id-fix', 'gateway-recon-id-fix'];
 function filterOutReconIdFix(scenarios) {
-  return scenarios.filter((s) => s && s.category !== 'recon-id-fix');
+  return scenarios.filter((s) => s && !C4_CATEGORIES.includes(s.category));
 }
 
 // runAllScenarios(bankRows, gwRows | null, scenarios)
@@ -152,5 +155,6 @@ module.exports = {
   runAllScenarios,
   sortScenariosByPriority,
   filterScenariosByGwAvailability,
-  filterOutReconIdFix
+  filterOutReconIdFix,
+  C4_CATEGORIES
 };

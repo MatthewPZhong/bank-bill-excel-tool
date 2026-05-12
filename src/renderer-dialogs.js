@@ -5534,8 +5534,10 @@
               const result = await desktopApi.scenarios.deleteOne(id);
               if (result && result.status === 'ok') {
                 // v2.1.0-beta.2 PR #38 round 2 P2-2：按 category 分流，避免操作 C1/C2/C3 清掉 ReconID 导出态，反之亦然
+                // v2.1.0-beta.3 PR #39 Finding 2（P2）：用 isReconIdFixCategory 识别两个 C4 子模式（含 gateway-recon-id-fix）
+                //   之前只识别 'recon-id-fix' → 删除 gateway 场景误走 refreshBankStatementStatus
                 const deletedCategory = tr.dataset.category;
-                if (deletedCategory === 'recon-id-fix') {
+                if (isReconIdFixCategory(deletedCategory)) {
                   if (typeof reloadReconIdFixScenarios === 'function') await reloadReconIdFixScenarios();
                 } else {
                   if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
