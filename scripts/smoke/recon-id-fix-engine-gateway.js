@@ -1,5 +1,7 @@
 // v2.1.0-beta.3 T10：网关对账 ReconID 修复引擎 fixture 化 smoke 测试（gateway 子模式）
-// spec §4.2 / PRD §6.2 — 6 用例覆盖 1v1 / 1v多 / 多v1 + 全局约束
+// spec §4.2 / PRD §6.2 — 基线 6 用例（1v1×3 选项 / 1v多 拆账 / 多v1 保 Amount / 全局约束）+
+//   PR #39 review 扩展 3 用例（Case 7: mode='both' + suffix 拼接 / Case 8: source='' 空值仅 suffix /
+//   Case 8.5: UI 默认 config 进引擎匹配） + constants sanity = 10/10 PASS
 //
 // 关键差异（与 business 子模式 smoke 对照）：
 //   - scenario.category = 'gateway-recon-id-fix'（不是 'recon-id-fix'）

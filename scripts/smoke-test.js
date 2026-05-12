@@ -19,7 +19,7 @@ const { runReconIdFixIoSmokeTests } = require('./smoke/recon-id-fix-io');
 const { runReconIdFixEngineSmokeTests } = require('./smoke/recon-id-fix-engine');
 const { runReconIdFixIpcHandlersSmokeTests } = require('./smoke/recon-id-fix-ipc-handlers');
 const { runReconIdFixEndToEndSmokeTests } = require('./smoke/recon-id-fix-end-to-end');
-// v2.1.0-beta.3 T10：网关对账子模式引擎 smoke（6 用例）
+// v2.1.0-beta.3 T10：网关对账子模式引擎 smoke（基线 6 用例 + PR #39 review 扩展 3 用例 + constants sanity = 10/10）
 const { runReconIdFixEngineGatewaySmokeTests } = require('./smoke/recon-id-fix-engine-gateway');
 
 async function run() {
@@ -31,7 +31,7 @@ async function run() {
   runReconIdFixScenarioIpcSmokeTests();
   // PR-B：单据对账 ReconID 修复模块新增 smoke
   runReconIdFixEngineSmokeTests();
-  // v2.1.0-beta.3 T10：网关对账子模式引擎 smoke（6 用例）
+  // v2.1.0-beta.3 T10：网关对账子模式引擎 smoke（基线 6 用例 + PR #39 review 扩展 3 用例 + constants sanity = 10/10）
   runReconIdFixEngineGatewaySmokeTests();
   await runReconIdFixIoSmokeTests();
   await runReconIdFixIpcHandlersSmokeTests();
