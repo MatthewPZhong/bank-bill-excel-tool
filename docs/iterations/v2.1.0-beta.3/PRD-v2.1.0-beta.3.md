@@ -305,7 +305,7 @@ function createScenarioReconIdFixDialog(scenario = null, mode = 'business') { /*
     4. `网关 1v多`（sum=300，3 笔渠道 100/100/100）：输入 1 笔丢弃 + 输出 3 笔；每笔 Type=1；Amount=对应渠道.receiveAmount；Reference 按选项；三笔渠道分别消费一次
     5. `网关 多v1`（3 笔网关 100/100/100，sum=300 ↔ 1 笔渠道 300）：输出 3 笔保持原 Amount；Type=2；Reference 按选项
     6. 全局约束验证：同一笔渠道账单不能被两组匹配复用（构造冲突 fixture 验证报错或正确路由）
-  - 验收：`node scripts/smoke/recon-id-fix-engine-gateway.js` 退出码 0，console 输出 6/6 PASS
+  - 验收：`node scripts/smoke/recon-id-fix-engine-gateway.js` 退出码 0，console 输出 **10/10 PASS**（基线 6 用例 + PR #39 review 扩展 3 用例 = mode='both' suffix 拼接 / source='' 空值 / UI 默认 config 进引擎匹配 + constants sanity = 10）
 - **回归验证**：`node scripts/smoke/recon-id-fix-engine.js`（business 模式现有单测）全绿，确认无回归
 - `npm run preview:account` 等 4 个 preview 全量重跑无差异（除新增 panel）
 - 新增 ReconID 主面板（含账单类别下拉）preview 截图

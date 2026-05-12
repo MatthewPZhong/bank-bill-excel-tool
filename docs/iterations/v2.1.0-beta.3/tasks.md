@@ -196,12 +196,12 @@
 
 ---
 
-## T10：gateway 引擎单测（fixture 化，6 用例）
+## T10：gateway 引擎单测（fixture 化，**基线 6 用例 + PR #39 review 扩至 9 用例 → 10/10 PASS**）
 
 - **涉及文件**：新增 `scripts/smoke/recon-id-fix-engine-gateway.js`
 - **实施要点**：
   - 参考 `scripts/smoke/recon-id-fix-engine.js` 结构
-  - 输入 fixture：构造内嵌 fixture（或读 `资金对账导出不平.xlsx`），覆盖 6 用例（PRD §6.2）：
+  - 输入 fixture：构造内嵌 fixture（或读 `资金对账导出不平.xlsx`），基线覆盖 6 用例（PRD §6.2）：
     1. 1v1 × Reference 取网关账单
     2. 1v1 × Reference 取渠道账单
     3. 1v1 × Reference 取自取值-网关ReconID
@@ -209,11 +209,15 @@
     5. 多v1（验 Type=2 / Amount 保持 / Reference 按选项）
     6. 全局约束（同一渠道账单不能被两组复用 — 构造冲突场景验证错误/正确路由）
   - 每个用例：构造 scenario + sheets → 跑 `runReconIdFix` → 断言 fixedRows / unmatched / warnings
+  - PR #39 review 期间新增 3 用例（self-review P0-1 / P0-2 + review-round-2 P1 回归保护）：
+    7. mode='both' + commonId.source='main' + suffix='-FIX' → Reference 应拼接为 `GW-RECON-007-FIX`
+    8. mode='both' + commonId.source='' (空值) + suffix='-ONLY-SUFFIX' → Reference 仅 suffix
+    8.5. UI 默认 config（Amount/receiveAmount locked） → 引擎能正确匹配 1 行
 - **验收证据**：
   - `node scripts/smoke/recon-id-fix-engine-gateway.js` 退出码 0
-  - console 输出 6/6 PASS
+  - console 输出 **10/10 PASS**（基线 6 用例 + review 扩展 3 用例 + constants sanity）
 - **关联 spec**：§4.2
-- **预计工作量**：0.6 天
+- **预计工作量**：0.6 天（基线）+ 0.2 天（PR #39 review 扩展）
 - **风险**：中（用例构造易漏边界）
 
 ---
