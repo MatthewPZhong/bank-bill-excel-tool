@@ -58,6 +58,19 @@ integrated: false
 | e0b7411 | fix #8：SCENARIO_CATEGORY_LABELS 文本调整（单据对账修复→单据对账单修复 / 网关对账修复→网关对账单修复）+ commonId 加空值选项 + gateway suffix 输入框 + 校验 |
 | 8239110 | fix #9：C4 dialog 错误框去掉 "• " 前缀 |
 
+### 2.3 self-review + PR review 修复 commit（7 个）
+
+| Commit | 阶段 | 描述 |
+|---|---|---|
+| 4492b11 | self-review P0/P1/P3 | computeReferenceGateway mode='both' 拼 suffix（P0-1）+ source='' 时 base 为空（P0-2）+ smoke Case 7/8（P0-3）+ trackedIpcHandle 模块名统一（P1-2）+ CHANGELOG/USER_GUIDE 补全（P1-1/P1-3）+ PR draft 测试结论 + 注释补全 |
+| 33a6713 | PR #39 review round 1 | Finding 1（P1）dispatcher C4_CATEGORIES 集合（防 gateway 误入银行对账 dispatcher）+ Finding 2（P2）clearResultCacheForCategory + 删除场景 helper + Codex #1（P2）新增 IPC recon-id-fix:clear-session |
+| 3f826e6 | PR #39 review round 2 | Finding 1（P1）gateway 默认锁定字段 Amount/Amount → Amount/receiveAmount（createDefaultScenarioConfig + 新增分组 + 归一化）+ smoke Case 8.5 |
+| f437549 | PR #39 review round 3 | Finding 1（P3）gateway smoke 独立运行 footer 文案 8 → 10 CASES |
+| a91b7a2 | self-review round 2 P1/P3 | P1-1 新增 migration migrateGatewayReconIdFixFieldPairs（修 DB 旧 gateway 场景）+ P1-2 CHANGELOG 补 round-1/2/3 + P3-1 smoke T21（clear-session）+ P3-2 PR draft §5.2 |
+| 055a168 | PR #39 review round 4 | Finding 1（P2）migration smoke H5/H6 用例 + Finding 2（P3）文档 smoke 数字同步 |
+| b351b2e | PR #39 review round 5 | P3 PRD §6.2 + tasks T10 同步 gateway smoke 10/10 |
+| （本 commit） | self-review round 3 P2/P3 | P2-1 H6.3 防御性 unlocked Amount/Amount 不动（migrations smoke 19/19）+ P3-1 CHANGELOG L21 文字统一 + P3-2 PR draft 本表补 7 个修复 commit |
+
 ---
 
 ## 三、关键改动
@@ -144,7 +157,7 @@ integrated: false
 - ✅ `npm run smoke` 14 子套全绿
   - recon-id-fix-engine 23/23（business 零回归）
   - recon-id-fix-engine-gateway **10/10**（review 期间扩至 9 用例 + constants sanity）
-  - io 13/13 / end-to-end 6/6 / **migrations 18/18**（review 期间新增 H5/H6 — migrateGatewayReconIdFixFieldPairs 主路径/幂等/非 gateway 不动）/ scenarios-repository 7/7
+  - io 13/13 / end-to-end 6/6 / **migrations 19/19**（review 期间新增 H5/H6 — migrateGatewayReconIdFixFieldPairs 主路径/幂等/非 gateway 不动/防御性 unlocked 不动）/ scenarios-repository 7/7
   - **ipc-handlers 21/21**（review 期间新增 T21 — clear-session 验证）/ scenario-engines 23/23 / dispatcher 15/15
   - exceljs-writer 3/3 / bank-statement-io 13/13 / scenario-end-to-end 23/23
   - error-causes 39/39 / usage-stats 41/41
@@ -184,7 +197,7 @@ integrated: false
 
 ## 六、风险点
 
-- **资金红线（DB 迁移）**：`ensureScenariosCategoryGatewayReconIdFix` 沿用 PR-A 模板，幂等 + 事务保护；`migrateGatewayReconIdFixFieldPairs` 修复测试期旧数据，幂等；已在 smoke `migrations-recon-id-fix.js` **18/18** 验证（含 H5/H6 主路径+幂等+非 gateway 不动）
+- **资金红线（DB 迁移）**：`ensureScenariosCategoryGatewayReconIdFix` 沿用 PR-A 模板，幂等 + 事务保护；`migrateGatewayReconIdFixFieldPairs` 修复测试期旧数据，幂等；已在 smoke `migrations-recon-id-fix.js` **19/19** 验证（含 H5/H6 主路径+幂等+非 gateway 不动+防御性 unlocked 不动）
 - **business 模式回归**：所有引擎/IO 改动都通过 mode 参数化分支，default 行为保持 beta.2 一致；smoke 23/23 验证
 - **回滚兼容**：用户在 beta.3 创建 `gateway-recon-id-fix` 场景后回滚 beta.2 → 启动失败（CHECK 不含新枚举值），与 v2.1.0-beta.1 → beta.0 回滚行为一致
 - **场景管理 dialog 行为**：账单类别为空时按钮 disabled，UI 可见（按 beta.2 完整布局，不 hidden）

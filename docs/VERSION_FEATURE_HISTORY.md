@@ -47,7 +47,7 @@ v2.1.0-beta.2 之后追加迭代：将"单据对账 ReconID 修复"模块扩展�
 - **状态隔离修复**（P2）：`clearResultCacheForCategory` + 删除场景刷新分支用 ReconID 子模式集合识别，防误清/误刷新银行对账模块。
 - **新增 IPC `recon-id-fix:clear-session`**（P2）：切换账单类别清 main 端 session/result，防旧 session 回流。
 - **UI 默认 config gateway 引擎匹配修复**（P1）：`createDefaultScenarioConfig` + "+ 新增对账分组" + 归一化 ensure 三处按 subMode 决定 `rightField`；新增 migration `migrateGatewayReconIdFixFieldPairs` 修复 DB 旧场景。
-- **smoke 回归保护**：gateway smoke 6 用例 → 10 用例（含 mode='both' suffix / source='' 空值 / UI 默认 config 进引擎匹配）；ipc-handlers 20 → 21（clear-session T21）；migrations 15 → 18（H5/H6 migrateGatewayReconIdFixFieldPairs 用例）；dispatcher smoke 扩展 gateway 剔除。
+- **smoke 回归保护**：gateway smoke 6 用例 → 10 用例（含 mode='both' suffix / source='' 空值 / UI 默认 config 进引擎匹配）；ipc-handlers 20 → 21（clear-session T21）；migrations 15 → 19（H5/H6 migrateGatewayReconIdFixFieldPairs 用例 — 主路径 / 幂等 / 非 gateway 不动 / 防御性 unlocked 不动）；dispatcher smoke 扩展 gateway 剔除。
 
 ### 未改动
 
