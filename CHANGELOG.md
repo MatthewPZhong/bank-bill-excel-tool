@@ -25,9 +25,24 @@ v2.1.0-beta.2 之后追加迭代：单据对账 ReconID 修复模块扩展为 **
 
 - **版本号**：2.1.0-beta.2 → 2.1.0-beta.3。
 - **主面板模块下拉项文本**：`单据对账 ReconID 修复` → `对账单ReconID修复`（module.id 保留 `recon-id-fix` 不变，避免数十处引用 + DB CHECK 约束牵动）。
+- **场景管理列表"功能类别"文案**：`单据对账修复` → `单据对账单修复`；`网关对账修复` → `网关对账单修复`。
 - **算法层适配 gateway 字段名**：`findAmountLockedPair` 用 `locked === true` 优先识别（fallback 字段名）；`tryOneToManyPool` / `tryManyToOnePool` 用 `amountPair.leftField/rightField` 取 cents（不再硬编码 `r.Amount`）；引擎入口对 gateway 渠道行做 `createTime → BillDate` 字段映射（避免改动算法骨架 BillDate 硬编码）。
+- **C4 dialog commonId 区域增强**：
+  - 取值来源下拉新增**空值 option**（人眼看为空白行），用户主动选取后右侧"加上"输入框必须填写内容（dialog 确认按钮校验，无值弹错误框点确认返回 dialog 保留编辑）；
+  - gateway 子模式 dialog 也渲染 "加上 + 输入框"（功能同 business 主从都修复，Reference = `source.reconciliationId + suffix`）；
+  - source='' 空值 + suffix → Reference 仅取 suffix（base 为空）。
 - **renderer-dialogs.js helper 抽取**：`RECON_ID_FIX_CATEGORIES` / `isReconIdFixCategory(category)` / `reconIdFixModeFromCategory(category)`；9 处 `category === 'recon-id-fix'` 单一判断统一替换为 helper。
+- **主面板布局精修（共 9 个 fix commit）**：
+  - 账单类别为空时保持 beta.2 完整布局（行 2 始终显示，按钮仅 disabled 不 hidden）；
+  - 场景管理按钮保持在行 1 左 cell（仅"场景及其下拉框"下移与导出文件平行）；
+  - 账单类别 + 场景下拉固定宽度 165px（避免 placeholder 长短引起 row shift）；
+  - CSS grid 3 列严格对齐（label 60 / 下拉 165 / 按钮 140）+ pending-pair width=292px 与 statusBox 等宽；
+  - label 字体样式同模式 `.select-label`（13px / var(--muted) / weight 500）+ 下拉样式同 `.template-select`（48px / pill / 14px / chevron）；
+  - 账单类别为空时场景下拉显示真空白（无 placeholder 文字）；
+  - 场景管理/导出文件往左 20px，导入/运行/状态框往左 15px；
+  - C4 dialog 错误框去掉 "• " 前缀。
 - **smoke `migrations-recon-id-fix.js` E1 断言**：VALID_CATEGORIES 数量 4 → 5。
+- **smoke `recon-id-fix-engine-gateway.js` 新增 2 用例**（self-review P0 回归保护）：mode='both' + source=main + suffix 拼接 / mode='both' + source='' 空值 + 仅 suffix。
 
 ### 修复
 

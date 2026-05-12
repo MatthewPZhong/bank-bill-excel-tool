@@ -296,6 +296,62 @@ function runCase6_GlobalConstraint() {
   console.log(`PASS  Case 6：全局约束 — 3 笔渠道全局唯一消费（输出 ${result.fixedRows.length} 行）`);
 }
 
+// ===== 用例 7：mode='both' + commonId.source='main' + suffix 拼接（P0-1 回归保护）=====
+function runCase7_Both_MainWithSuffix() {
+  const main = [
+    makeGatewayRow({
+      BillDate: '2026-04-09', Amount: 700, BillType: 'gw',
+      reconciliationId: 'GW-RECON-007'
+    })
+  ];
+  const opp = [
+    makeChannelRow({
+      createTime: '2026-04-09', receiveAmount: 700, channelName: 'ch',
+      reconciliationId: 'CH-RECON-007'
+    })
+  ];
+  const cfg = makeCfg({
+    matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+    // 自取值 + source=main + suffix → Reference 应 = 'GW-RECON-007' + '-FIX'
+    output: { mode: 'both', commonId: { source: 'main', suffix: '-FIX' } }
+  });
+  const result = runReconIdFix(makeScenario('Case7-Both-MainWithSuffix', cfg), {
+    reconResult: [], businessBills: main, opponentBills: opp
+  });
+  assert.strictEqual(result.fixedRows.length, 1, 'Case7 应输出 1 行');
+  assert.strictEqual(result.fixedRows[0].Reference, 'GW-RECON-007-FIX',
+    'Case7 mode=both + source=main + suffix=-FIX → Reference 应拼接为 GW-RECON-007-FIX');
+  console.log('PASS  Case 7：mode=both + source=main + suffix 拼接');
+}
+
+// ===== 用例 8：mode='both' + commonId.source='' (空值) + suffix 仅 suffix（P0-2 回归保护）=====
+function runCase8_Both_EmptySourceWithSuffix() {
+  const main = [
+    makeGatewayRow({
+      BillDate: '2026-04-09', Amount: 800, BillType: 'gw',
+      reconciliationId: 'GW-RECON-008'
+    })
+  ];
+  const opp = [
+    makeChannelRow({
+      createTime: '2026-04-09', receiveAmount: 800, channelName: 'ch',
+      reconciliationId: 'CH-RECON-008'
+    })
+  ];
+  const cfg = makeCfg({
+    matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+    // 自取值 + source='' (空值) + suffix → Reference 应 = '' + '-ONLY-SUFFIX' = '-ONLY-SUFFIX'
+    output: { mode: 'both', commonId: { source: '', suffix: '-ONLY-SUFFIX' } }
+  });
+  const result = runReconIdFix(makeScenario('Case8-Both-EmptySrc', cfg), {
+    reconResult: [], businessBills: main, opponentBills: opp
+  });
+  assert.strictEqual(result.fixedRows.length, 1, 'Case8 应输出 1 行');
+  assert.strictEqual(result.fixedRows[0].Reference, '-ONLY-SUFFIX',
+    'Case8 mode=both + source="" + suffix="-ONLY-SUFFIX" → Reference 应仅含 suffix（base 为空）');
+  console.log('PASS  Case 8：mode=both + source=空值 + suffix → 仅 suffix');
+}
+
 // ===== 主入口 =====
 function runReconIdFixEngineGatewaySmokeTests() {
   runConstantsSmoke();
@@ -305,7 +361,9 @@ function runReconIdFixEngineGatewaySmokeTests() {
   runCase4_1vN_Split();
   runCase5_Nv1_KeepAmount();
   runCase6_GlobalConstraint();
-  console.log('  recon-id-fix-engine-gateway smoke: 7 / 7 PASS');
+  runCase7_Both_MainWithSuffix();
+  runCase8_Both_EmptySourceWithSuffix();
+  console.log('  recon-id-fix-engine-gateway smoke: 9 / 9 PASS');
 }
 
 module.exports = { runReconIdFixEngineGatewaySmokeTests };
@@ -314,5 +372,5 @@ module.exports = { runReconIdFixEngineGatewaySmokeTests };
 if (require.main === module) {
   console.log('====== gateway recon-id-fix smoke (T10) ======');
   runReconIdFixEngineGatewaySmokeTests();
-  console.log('====== ALL 6 CASES PASS ======');
+  console.log('====== ALL 8 CASES PASS ======');
 }

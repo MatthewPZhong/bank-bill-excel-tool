@@ -151,7 +151,7 @@ integrated: false
 - ✅ `npm run scan:vars` 已重跑（A-share 105 / 161 / 258 / 266）
 - ✅ business 模式 fixture 跑历史 fixture `samples/单据对账导出不平.xlsx` 输出 byte-for-byte 与 v2.1.0-beta.2 一致
 
-### 5.2 手工验证（用户已验证）
+### 5.2 手工验证
 
 - [x] 主面板"账单类别"下拉初始空 + placeholder + 切换 business/gateway/空 三态联动
 - [x] 持久化：切到 gateway → 关闭重开 → 恢复 gateway
@@ -160,7 +160,9 @@ integrated: false
 - [x] gateway dialog 视觉：文案 / 字段下拉 / SubBizType 隐藏 / "网关账单"radio 1v多 禁用 / locked fieldPair Amount/receiveAmount
 - [x] 场景管理隔离：账单类别切换时场景下拉按类别过滤
 - [x] 跨模块切换无串位
-- [x] commonId source 新增空值选项 + 空值时 suffix 必填 + 校验错误框点确认返回 dialog 保留编辑
+- [x] commonId source 新增空值选项 + 空值时 suffix 必填 UI 校验（错误框点确认返回 dialog）
+- [x] **gateway mode='both' + suffix 拼接** Reference 输出验证（self-review P0-1 修复 + smoke Case 7 回归保护）
+- [x] **gateway mode='both' + source='' 空值 + suffix → 仅 suffix** 输出验证（self-review P0-2 修复 + smoke Case 8 回归保护）
 
 ### 5.3 UI 视觉对齐（用户多次反馈精修）
 

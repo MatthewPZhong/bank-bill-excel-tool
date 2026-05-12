@@ -619,6 +619,18 @@
 
 ⚠️ **全局约束**：每笔渠道账单全局只能被一次匹配组消费（防重复抵账）；单组内 1v多 的 n 笔渠道 ↔ 拆出的 n 笔网关一一对应（顺序按 subset-sum 算法返回的 fixture 行序）。
 
+#### "订单修复ID取值"（dialog 行 5）— 子模式差异
+
+| 选项 | business（单据对账单） | gateway（网关对账单） |
+|---|---|---|
+| radio 1 | 主边单据修复 → Reference = 对方 (rightRow) 的 `reconId` | 网关账单 → Reference = 网关行 (mainRow) 的 `reconciliationId` |
+| radio 2 | 从边单据修复 → Reference = 对方 (leftRow) 的 `reconId` | 渠道账单 → Reference = 渠道行 (oppRow) 的 `reconciliationId` |
+| radio 3 | 主从都修复 → Reference = 共同 ID（见下方"取值来源"） | 自取值 → Reference = 取值来源 + suffix（见下方） |
+| 取值来源（radio 3 展开） | 下拉：[空白 / 主边单据 reconId / 从边单据 reconId] + "加上"输入框 | 下拉：[空白 / 网关账单ReconID / 渠道账单ReconID] + "加上"输入框 |
+| 取值规则 | source ≠ 空 → `srcRow.reconId + suffix`；source = 空 → 仅 suffix（必填） | source ≠ 空 → `srcRow.reconciliationId + suffix`；source = 空 → 仅 suffix（必填） |
+
+**校验**：选择"主从都修复"/"自取值" 且 取值来源选**空白行** 时，"加上"输入框 **必须填写内容**；否则点 dialog 确认按钮弹错误框，点确认返回 dialog 让用户继续编辑（已填字段保留）。
+
 ### 1.5.1 模块用途
 
 适用于这样的对账场景：业务部门和对手部门各有一套账单（同源资金的两种视角），系统已经提供「对账结果」sheet 标注了哪些单据互相对得平。本模块帮你**自动完成"对账成功后的修复动作"**：

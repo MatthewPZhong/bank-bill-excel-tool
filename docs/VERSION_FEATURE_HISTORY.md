@@ -34,8 +34,12 @@ v2.1.0-beta.2 之后追加迭代：将"单据对账 ReconID 修复"模块扩展�
 
 - **版本号**：2.1.0-beta.2 → 2.1.0-beta.3。
 - **主面板模块下拉项文本**：`单据对账 ReconID 修复` → `对账单ReconID修复`；module.id 保留 `recon-id-fix` 不变。
+- **场景管理列表"功能类别"**：单据对账修复 → 单据对账单修复；网关对账修复 → 网关对账单修复。
 - **算法层适配 gateway 字段名**：`findAmountLockedPair` 优先按 `locked === true` 识别 + 字段名 fallback；池子算法用 `amountPair.leftField/rightField` 取 cents（不再硬编码 'Amount'）；引擎入口对 gateway 渠道行做 createTime→BillDate 字段映射。
+- **C4 dialog commonId 区域增强**：取值来源下拉新增空值 option（空值时 suffix 必填，校验失败弹错误框返回 dialog 保留编辑）；gateway 子模式同样渲染"加上 + 输入框"，Reference = source.reconciliationId + suffix（source='' 时仅 suffix）。
 - **renderer-dialogs.js helper 抽取**：`isReconIdFixCategory(category)` / `reconIdFixModeFromCategory(category)`；9 处单一 category 判断统一替换。
+- **主面板布局精修**（9 个 fix commit）：账单类别为空时保持 beta.2 完整布局 + 行 2 始终显示；场景管理保持行 1；下拉固定 165px；CSS grid 3 列严格对齐 + statusBox/pending-pair 等宽 292px；label/select 样式同模式（.select-label / .template-select 48px pill）；账单类别空时场景下拉真空白；5 元素整体微调左移；错误框去 "• " 前缀。
+- **smoke 新增 2 用例**：mode='both' + suffix 拼接 / source='' 空值 + 仅 suffix（self-review P0 回归保护）。
 
 ### 修复
 

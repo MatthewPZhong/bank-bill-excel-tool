@@ -536,27 +536,36 @@ function buildOutputRow(srcRow, overrides, subMode) {
 }
 
 // v2.1.0-beta.3 T8：gateway 子模式 Reference 取值（spec §2.5.3）
-// 取自 dialog "订单修复ID取值" 选项 + commonId.source（cfg.output 复用 schema）：
-//   output.mode === 'main' → mainRow.reconciliationId（网关账单 ReconID）
-//   output.mode === 'opp'  → oppRow.reconciliationId（渠道账单 ReconID）
-//   output.mode === 'both' → commonId.source 决定（'main'=网关 / 'opp'=渠道）
+// 取自 dialog "订单修复ID取值" 选项 + commonId.source + commonId.suffix（cfg.output 复用 schema）：
+//   output.mode === 'main' → mainRow.reconciliationId（网关账单 ReconID，不拼 suffix）
+//   output.mode === 'opp'  → oppRow.reconciliationId（渠道账单 ReconID，不拼 suffix）
+//   output.mode === 'both' → 自取值，commonId.source 决定 + 拼 suffix（功能同 business 的 computeCommonId）
+//     - source === 'main' → mainRow.reconciliationId + suffix
+//     - source === 'opp'  → oppRow.reconciliationId + suffix
+//     - source === ''     → 仅 suffix（用户主动选空白行；dialog 校验保证 suffix 非空）
 // 注意：gateway 子模式 fixture 字段名是 reconciliationId（小写 c）；business 子模式是 reconId
+// v2.1.0-beta.3 self-review P0-1/P0-2 修复：mode='both' 时拼接 suffix；source='' 时 base 为空（仅 suffix）
 function computeReferenceGateway(mainRow, oppRow, cfg) {
   const out = cfg.output || {};
   const tgt = out.mode || 'main';
+  const safeStr = (v) => (v === null || v === undefined) ? '' : String(v);
   if (tgt === 'main') {
-    const v = mainRow && mainRow.reconciliationId;
-    return v === null || v === undefined ? '' : String(v);
+    return safeStr(mainRow && mainRow.reconciliationId);
   }
   if (tgt === 'opp') {
-    const v = oppRow && oppRow.reconciliationId;
-    return v === null || v === undefined ? '' : String(v);
+    return safeStr(oppRow && oppRow.reconciliationId);
   }
-  // tgt === 'both'（自取值）
-  const src = (out.commonId && out.commonId.source) || 'main';
-  const row = src === 'opp' ? oppRow : mainRow;
-  const v = row && row.reconciliationId;
-  return v === null || v === undefined ? '' : String(v);
+  // tgt === 'both'（自取值）— 取 commonId.source 对应行的 reconciliationId + suffix
+  const ci = out.commonId || {};
+  let baseReconId = '';
+  if (ci.source === 'main') {
+    baseReconId = safeStr(mainRow && mainRow.reconciliationId);
+  } else if (ci.source === 'opp') {
+    baseReconId = safeStr(oppRow && oppRow.reconciliationId);
+  }
+  // ci.source === '' 或其他无效值 → baseReconId 保持 ''（仅用 suffix，dialog 校验保证 suffix 非空）
+  const suffix = (ci.suffix === null || ci.suffix === undefined) ? '' : String(ci.suffix);
+  return baseReconId + suffix;
 }
 
 // ===== Round 3 算法主路径 =====

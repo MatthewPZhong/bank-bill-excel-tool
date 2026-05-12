@@ -3122,7 +3122,7 @@ function registerAppHandlers() {
     }
   });
 
-  trackedIpcHandle('recon-id-fix:run', '单据对账ReconID修复', '开始运行', (_event, payload) => {
+  trackedIpcHandle('recon-id-fix:run', '对账单ReconID修复', '开始运行', (_event, payload) => {
     try {
       if (!reconIdFixSession) {
         return { status: 'failed', message: '请先点击"导入文件"' };
@@ -3173,7 +3173,7 @@ function registerAppHandlers() {
     }
   });
 
-  trackedIpcHandle('recon-id-fix:export', '单据对账ReconID修复', '导出文件', async () => {
+  trackedIpcHandle('recon-id-fix:export', '对账单ReconID修复', '导出文件', async () => {
     try {
       if (!reconIdFixResult) {
         return { status: 'failed', message: '请先点击"开始运行"' };
