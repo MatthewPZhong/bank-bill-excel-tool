@@ -920,8 +920,11 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 }
 .recon-id-fix-board .recon-id-fix-scenario-select {
   height: 36px;
-  /* v2.1.0-beta.2 PR-A Round 3 v2（task R3-5）：场景下拉宽度收窄至当前 3/4（160→120, 220→165） */
-  min-width: 120px;
+  /* v2.1.0-beta.2 PR-A Round 3 v2（task R3-5）：场景下拉宽度收窄至当前 3/4（160→120, 220→165）
+     v2.1.0-beta.3 修订：固定宽度 165px（min=max），避免 placeholder 长短不同（"请选择场景" vs "请先在场景管理中创建"）
+     导致下拉宽度弹性变化 → 三态间整体布局 shift */
+  width: 165px;
+  min-width: 165px;
   max-width: 165px;
   padding: 0 12px;
   border: 1px solid rgba(60, 64, 67, 0.2);
@@ -956,7 +959,9 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 }
 .recon-id-fix-board .recon-id-fix-bill-category-select {
   height: 36px;
-  min-width: 120px;
+  /* v2.1.0-beta.3 修订：固定宽度 165px（与场景下拉一致），避免不同 option 文字长度引起弹性变化 */
+  width: 165px;
+  min-width: 165px;
   max-width: 165px;
   padding: 0 12px;
   border: 1px solid rgba(60, 64, 67, 0.2);
