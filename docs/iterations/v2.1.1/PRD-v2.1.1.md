@@ -280,6 +280,80 @@ dialog 主提示文案（`message: '已启用「资金对账不平」类场景�
 
 ---
 
-## 七、实施记录（占位）
+## 七、实施记录（PR #41 合并后归档）
 
-> Dev 实施过程中本节会被反向同步更新（按 [[feedback_no_skip_spec]]）。Dev 完成后归档到 PR 中。
+| 字段 | 值 |
+|---|---|
+| PR 编号 | #41 |
+| 合并日期 | 2026-05-12T09:23:59Z |
+| Merge commit | `4e398f3` |
+| 累计 commit | 17（PM 1 + 实现 8 + PR 草稿 1 + 用户反馈 fix 2 + 草稿改名 1 + PR review round-1/2/3 fix 3 + self-review-final fix 1） |
+| smoke 终态 | 全 14 子套 PASS（business 45/45 / gateway 13/13） |
+
+### 7.1 主 task 实现 commit（8 个）
+
+- `0cf0e4a` PM — PRD + spec + tasks 起草（docs/iterations/v2.1.1/）
+- `424b4fb` T1 — PDF 整体移除（破坏性）：删 4 deps + 17 传递依赖 + pdf-worker.js + readers PDF helper + `SUPPORTED_EXTENSIONS` 删 `.pdf` + scenarios.js 删 pdfMatchedRows 用例
+- `fc13c1f` T2-1 — C4 dialog "匹配规则" → "匹配模式" + 3 勾选框 "主边/从边"（business 子模式；gateway 不动）
+- `f1bab6d` T4 — `跳过 C3 直接运行` → `直接运行`（renderer.js:3299）
+- `1572aa0` T3 — "修复结果输出" / "订单修复ID取值" tooltip（双 label .scenario-config-tooltip）
+- `afa8c73` T2-2 引擎 — `billDateMatches(L, R, mode, days=1)` 参数化 + 5 处调用传 `cfg._billDateDays` + `runC4Scenario` 解析 `cfg.billDateRange` + smoke business 44 / gateway 13
+- `0c8e875` T2-2 UI — C4 dialog 勾选框 + 数字输入 (1-999) + tooltip + validateScenarioDraft 校验 + createDefaultScenarioConfig 默认
+- `1b3c5b8` T2-2 layout — BillDate 区独立一行（CSS scenario-config-row-mutex flex-direction:column）+ 4 张 C4 preview 重跑
+- `234d22c` T5+T6 — 文档三件套（CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE）+ version bump 2.1.0-beta.3 → 2.1.1
+
+### 7.2 用户反馈 self-review fix commit（2 个，测试后用户提的）
+
+- `3576de7` T3 tooltip 修复 — label `width:auto; white-space:nowrap;` 让"订单修复ID取值 ⓘ"不换行；tooltip 文案改写：业务"主边/从边/主从都修复"，网关"取自网关 ReconID / 渠道 ReconID / 自取值（拼接'加上'输入框文本）"，去掉用户不懂的"suffix"和错误的"两侧都修复"
+- `f3eaa12` General 风格补齐 — `styles.css` 加 8 处 `.recon-id-fix-*` CSS（PR #39 只给 Clear 写了样式，General 完全没有）；grid 60/220/140 三列严格对齐 + label 同 `.select-label` + select 同 `.template-select`；3 张 General preview
+
+### 7.3 PR 草稿 + 改名 commit（2 个）
+
+- `78a3640` 起 PR #41 草稿到 `docs/prs/待merge-PR #41.md`
+- `bd54449` 草稿改名 `待merge-PR #41.md` → `PR41-v2.1.1.md` + 补 2 个 self-review fix commit 描述（之前 rename commit 没带内容）
+
+### 7.4 PR review 修复 commit（3 个，MatthewPZhong review 3 轮）
+
+- `192c685` PR review round 1（P2 资金红线 + 2 P3）：
+  - Finding 1（P2）— `runC4Scenario` 入口加 `Number.isInteger + [1,999]` 防御性校验，异常值 fallback 1 + push `INVALID_BILL_DATE_RANGE_DAYS` warning；smoke 新增 `runBillDateRangeDefensiveFallback`（7 异常值 + 1 正常值），business 44 → 45 PASS
+  - Finding 2（P3）— `CLAUDE.md` 删 Excel/CSV/PDF + PDF.js/Tesseract.js OCR + pdf-worker 行
+  - Finding 3（P3）— gateway smoke 文件头说明扩展至 13 用例
+- `2228240` PR review round 2（P2 USER_GUIDE 版本 + 2 P3 旧计数）：
+  - Finding 1（P2）— `docs/USER_GUIDE.md:3` 顶部版本 `v2.1.0-beta.3` → `v2.1.1`
+  - Finding 2（P3）— PR41 草稿 + CHANGELOG + VFH 同步 commits 12→15 / business 44→45
+  - Finding 3（P3）— gateway smoke 独立运行结尾 `ALL 10 CASES PASS` → `ALL 13 CASES PASS`
+- `0501b22` PR review round 3（P3）：
+  - Finding 1（P3）— CHANGELOG/VFH 顶部"8 commit / 6 task"旧口径明确分类：保留"6 主 task / 8 实现 commit"+ 累计 commit 分项
+
+### 7.5 self-review-final commit（1 个）
+
+- `e0da9e6` self-review-final（Important，off-by-one）：CHANGELOG/VFH "累计 15 commit" 数学错（实际 16/17 含本 fix），改为 "累计 17" + 分项加 "self-review-final fix 1"，数学验证 1+8+1+2+1+3+1=17 ✓
+
+### 7.6 关键算法改动（资金红线复核）
+
+**BillDate ±N 可配置**（c4-recon-id-fix.js）：
+- `billDateMatches(L, R, mode, days = 1)` 签名加 days，`mode='±1day'` 阶段判定改 `Math.abs <= days * 86400000`（含 days=0 时 ≤ 0 仅日期相等 fallback；UI 限 1-999）
+- 不勾选 → enabled=false → days=1（与历史 ±1day 等价，零回归）
+- 勾选 + N → enabled=true → days=N（Step 2/3.2/3'.2 容错窗口替换为 ±N 天）
+- Step 1 strict 严格匹配阶段**永远保留**（不受影响）
+- 引擎入口防御性校验：异常 days（非整数 / <1 / >999 / NaN / Infinity / 字符串）→ fallback 1 + warning
+
+### 7.7 Critical 变量改动
+
+`SUPPORTED_EXTENSIONS`（`rules/important-variables.md` Critical 层）：
+- 从 `['.xlsx', '.xls', '.csv', '.pdf']` → `['.xlsx', '.xls', '.csv']`
+- 同步项：reader 实现（删 PDF 分支）/ main.js dialog filter / USER_GUIDE 文案
+
+### 7.8 关联文档
+
+- 三件套：CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 已同步 v2.1.1
+- CLAUDE.md：移除 PDF 描述（顶部 + L107 worker 说明）
+- PR 归档：`docs/prs/PR41-v2.1.1.md`（`integrated: true`）
+- preview：4 张 Clear C4 dialog + 3 张 General ReconID 主面板
+
+### 7.9 smoke 终态
+
+`npm run smoke` 14 子套全绿：
+- `recon-id-fix-engine`: 45/45 PASS（含 BillDate ±N 端到端 + defensive fallback）
+- `recon-id-fix-engine-gateway`: 13/13 PASS（含 BillDate ±N 3 用例）
+- 其他 12 子套保持 PASS
