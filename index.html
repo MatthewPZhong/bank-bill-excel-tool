@@ -239,7 +239,8 @@
                 <div id="reconIdFixScenarioRow" class="recon-id-fix-scenario-row">
                   <label class="recon-id-fix-scenario-label" for="reconIdFixScenarioSelect">场景</label>
                   <select id="reconIdFixScenarioSelect" class="recon-id-fix-scenario-select" disabled>
-                    <option value="">请选择场景</option>
+                    <!-- v2.1.0-beta.3 修订（用户反馈）：初始空白 option，待 state 加载后由 renderReconIdFixScenarioSelect 重写 -->
+                    <option value=""></option>
                   </select>
                   <button id="reconIdFixExportBtn" class="secondary-btn" type="button" disabled>导出文件</button>
                 </div>

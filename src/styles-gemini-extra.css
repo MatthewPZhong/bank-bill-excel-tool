@@ -912,30 +912,32 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   column-gap: 10px;
   align-items: center;
 }
+/* v2.1.0-beta.3 修订（用户反馈）：label 字体样式同模式 .select-label；select 样式同模式 .template-select
+   保留 width 165px 固定（grid 列 2 严格对齐），仅 height/padding/border/chevron 等"皮"同模式风格 */
 .recon-id-fix-board .recon-id-fix-scenario-label {
   font-size: 13px;
+  color: var(--muted);
   font-weight: 500;
-  color: #3c4043;
   text-align: right;
   white-space: nowrap;
 }
 .recon-id-fix-board .recon-id-fix-scenario-select {
-  height: 36px;
-  /* v2.1.0-beta.2 PR-A Round 3 v2（task R3-5）：场景下拉宽度收窄至当前 3/4（160→120, 220→165）
-     v2.1.0-beta.3 修订：固定宽度 165px（min=max），避免 placeholder 长短不同（"请选择场景" vs "请先在场景管理中创建"）
-     导致下拉宽度弹性变化 → 三态间整体布局 shift */
   width: 165px;
-  min-width: 165px;
-  max-width: 165px;
-  padding: 0 12px;
-  border: 1px solid rgba(60, 64, 67, 0.2);
-  border-radius: 10px;
-  background-color: #fff;
+  height: 48px;
+  border-radius: var(--pill);
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 20px;
+  color: var(--text);
+  font-size: 14px;
   font-family: inherit;
-  font-size: 13px;
-  color: #3c4043;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
   cursor: pointer;
 }
+.recon-id-fix-board .recon-id-fix-scenario-select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(11,87,208,.15); }
 .recon-id-fix-board .recon-id-fix-scenario-select:disabled {
   background-color: rgba(60, 64, 67, 0.06);
   color: rgba(60, 64, 67, 0.5);
@@ -951,28 +953,31 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   column-gap: 10px;
   align-items: center;
 }
+/* v2.1.0-beta.3 修订（用户反馈）：账单类别 label + 下拉样式 同模式 .select-label + .template-select（与场景行风格一致） */
 .recon-id-fix-board .recon-id-fix-bill-category-label {
   font-size: 13px;
+  color: var(--muted);
   font-weight: 500;
-  color: #3c4043;
   text-align: right;
   white-space: nowrap;
 }
 .recon-id-fix-board .recon-id-fix-bill-category-select {
-  height: 36px;
-  /* v2.1.0-beta.3 修订：固定宽度 165px（与场景下拉一致），避免不同 option 文字长度引起弹性变化 */
   width: 165px;
-  min-width: 165px;
-  max-width: 165px;
-  padding: 0 12px;
-  border: 1px solid rgba(60, 64, 67, 0.2);
-  border-radius: 10px;
-  background-color: #fff;
+  height: 48px;
+  border-radius: var(--pill);
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 0 20px;
+  color: var(--text);
+  font-size: 14px;
   font-family: inherit;
-  font-size: 13px;
-  color: #3c4043;
+  appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235f6368' stroke-width='2'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
   cursor: pointer;
 }
+.recon-id-fix-board .recon-id-fix-bill-category-select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(11,87,208,.15); }
 .recon-id-fix-board .recon-id-fix-bill-category-select:disabled {
   background-color: rgba(60, 64, 67, 0.06);
   color: rgba(60, 64, 67, 0.5);

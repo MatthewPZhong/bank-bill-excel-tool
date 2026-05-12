@@ -3476,6 +3476,14 @@ async function reloadReconIdFixScenarios(options = { scenariosChanged: true }) {
 function renderReconIdFixScenarioSelect() {
   const select = elements.reconIdFixScenarioSelect;
   if (!select) return;
+  // v2.1.0-beta.3 修订（用户反馈）：账单类别为空时场景下拉显示真空白（不显示 "请先在场景管理中创建" placeholder）
+  const hasCategory = state.reconIdFixBillCategory === 'business' || state.reconIdFixBillCategory === 'gateway';
+  if (!hasCategory) {
+    select.innerHTML = '<option value=""></option>';
+    select.disabled = true;
+    select.value = '';
+    return;
+  }
   const scenarios = Array.isArray(state.reconIdFixScenarios) ? state.reconIdFixScenarios : [];
   if (scenarios.length === 0) {
     select.innerHTML = '<option value="">请先在场景管理中创建场景</option>';
