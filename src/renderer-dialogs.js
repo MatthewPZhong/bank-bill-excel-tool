@@ -5728,7 +5728,10 @@
       // v2.1.0-beta.1 PR-B Round 3（Decision 4，2026-05-09）：默认 group 带 Amount 锁定字段对
       // v2.1.0-beta.3 T6：两个 ReconID 子模式共用默认 config schema（matchRules/billTypes/reconGroups/output）
       //   gateway 模式与 business 模式默认 config 结构相同；差异在 dialog 渲染（mode-switch，T7）
+      // v2.1.0-beta.3 PR #39 review-round-2 Finding 1（P1）：gateway 子模式默认锁定字段 rightField 必须为 'receiveAmount'
+      //   （之前 'Amount' 让用户新建 gateway 场景引擎匹配不到渠道账单 — 1v1/1v多/多v1 都 fixedRows=0）
       if (isReconIdFixCategory(category)) {
+        const defaultLockedRight = category === 'gateway-recon-id-fix' ? 'receiveAmount' : 'Amount';
         return {
           matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
           billTypes: [
@@ -5739,7 +5742,7 @@
               leftTypeSeq: 1,
               rightTypeSeq: 1,
               fieldPairs: [
-                { leftField: 'Amount', rightField: 'Amount', locked: true }
+                { leftField: 'Amount', rightField: defaultLockedRight, locked: true }
               ]
             }
           ],
@@ -6763,6 +6766,8 @@
       }
       // 保证每个 group 自身结构完整 + Round 3：强制带一条 Amount 锁定行
       // v2.1.0-beta.3 T11：gateway 子模式 amount-locked 是 Amount/receiveAmount（渠道账单字段名）
+      // v2.1.0-beta.3 PR #39 review-round-2 Finding 1（P1）：归一化必须主动修正 locked 行的 rightField，
+      //   防止"老 draft Amount/Amount + locked=true 进 gateway dialog 后引擎匹配不到渠道"
       const lockedRightField = isGatewayMode ? 'receiveAmount' : 'Amount';
       config.reconGroups.forEach((grp) => {
         if (!Array.isArray(grp.fieldPairs) || grp.fieldPairs.length === 0) {
@@ -6773,12 +6778,16 @@
         let hasAmountLocked = false;
         grp.fieldPairs.forEach((fp) => {
           if (!fp) return;
-          // gateway: Amount/receiveAmount 或者已 locked
-          // business: Amount/Amount 或者已 locked
-          const isMatchingLockedPair = fp.locked === true
-            || (fp.leftField === 'Amount' && fp.rightField === lockedRightField);
-          if (isMatchingLockedPair) {
-            if (fp.locked !== true) fp.locked = true;
+          // 已有 locked 行：强制修正 leftField/rightField 为当前 subMode 正确字段（修复跨子模式残留）
+          if (fp.locked === true) {
+            if (fp.leftField !== 'Amount') fp.leftField = 'Amount';
+            if (fp.rightField !== lockedRightField) fp.rightField = lockedRightField;
+            hasAmountLocked = true;
+            return;
+          }
+          // 老 draft 未标 locked 但字段对匹配 → 自动补 locked
+          if (fp.leftField === 'Amount' && fp.rightField === lockedRightField) {
+            fp.locked = true;
             hasAmountLocked = true;
           }
         });
@@ -7267,13 +7276,15 @@
         }
       });
       // "+ 新增 OR 分组"（Round 3：新分组默认带 Amount 锁定 fieldPair）
+      // v2.1.0-beta.3 PR #39 review-round-2 Finding 1（P1）：gateway 子模式 rightField 必须为 'receiveAmount'
       dialog.querySelector('[data-c4-action="add-recon-group"]')?.addEventListener('click', () => {
         if (isReadonly) return;
         const seqs = config.billTypes.map((b) => b.seq);
+        const newGroupLockedRight = isGatewayMode ? 'receiveAmount' : 'Amount';
         config.reconGroups.push({
           leftTypeSeq: seqs[0] || 1,
           rightTypeSeq: seqs[1] || seqs[0] || 1,
-          fieldPairs: [{ leftField: 'Amount', rightField: 'Amount', locked: true }]
+          fieldPairs: [{ leftField: 'Amount', rightField: newGroupLockedRight, locked: true }]
         });
         renderReconGroups();
       });

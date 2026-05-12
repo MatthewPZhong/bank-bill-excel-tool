@@ -324,6 +324,33 @@ function runCase7_Both_MainWithSuffix() {
   console.log('PASS  Case 7：mode=both + source=main + suffix 拼接');
 }
 
+// ===== 用例 8.5：UI 默认 config 进引擎应匹配成功（PR #39 review-round-2 Finding 1 P1 回归保护）=====
+// 模拟 createDefaultScenarioConfig('gateway-recon-id-fix') 返回的 config + 用户填好 billTypes 后，
+// 引擎应能用 Amount/receiveAmount locked pair 正常匹配（之前是 Amount/Amount → 0 命中）
+function runCase8_5_DefaultUiConfig() {
+  const main = [makeGatewayRow({ Amount: 555, BillType: 'gw', reconciliationId: 'GW-RECON-855' })];
+  const opp = [makeChannelRow({ receiveAmount: 555, channelName: 'ch', reconciliationId: 'CH-RECON-855' })];
+  // 模拟从 createDefaultScenarioConfig('gateway-recon-id-fix') 出来的 config（fixedLockedRight='receiveAmount'）
+  const cfg = {
+    matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+    billTypes: [
+      { seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: 'gw' }] },
+      { seq: 2, side: 'opp', conditions: [{ field: 'channelName', op: '等于', value: 'ch' }] }
+    ],
+    reconGroups: [
+      { leftTypeSeq: 1, rightTypeSeq: 2,
+        fieldPairs: [{ leftField: 'Amount', rightField: 'receiveAmount', locked: true }] }
+    ],
+    output: { mode: 'main', commonId: { source: 'main', suffix: '' } }
+  };
+  const result = runReconIdFix(makeScenario('Case8.5-DefaultUI', cfg), {
+    reconResult: [], businessBills: main, opponentBills: opp
+  });
+  assert.strictEqual(result.fixedRows.length, 1,
+    'Case8.5 UI 默认 config (Amount/receiveAmount locked) 应正确匹配 → 1 行；如果是 Amount/Amount 则 0 行（PR #39 bug）');
+  console.log('PASS  Case 8.5：UI 默认 config (Amount/receiveAmount locked) 引擎匹配成功');
+}
+
 // ===== 用例 8：mode='both' + commonId.source='' (空值) + suffix 仅 suffix（P0-2 回归保护）=====
 function runCase8_Both_EmptySourceWithSuffix() {
   const main = [
@@ -363,7 +390,8 @@ function runReconIdFixEngineGatewaySmokeTests() {
   runCase6_GlobalConstraint();
   runCase7_Both_MainWithSuffix();
   runCase8_Both_EmptySourceWithSuffix();
-  console.log('  recon-id-fix-engine-gateway smoke: 9 / 9 PASS');
+  runCase8_5_DefaultUiConfig();
+  console.log('  recon-id-fix-engine-gateway smoke: 10 / 10 PASS');
 }
 
 module.exports = { runReconIdFixEngineGatewaySmokeTests };
