@@ -477,6 +477,60 @@ function ensureBuiltinScenarioNamesUpdate(db) {
   });
 }
 
+// v2.1.0-beta.3：扩展 scenarios.category CHECK 约束，新增 'gateway-recon-id-fix' 枚举值
+// 背景：v2.1.0-beta.1 PR-A 已扩到 4 值（recon-id-fix 加入）；本迭代新增 C4 gateway 子模式 → 扩到 5 值
+// 模板完全沿用 ensureScenariosCategoryReconIdFix，PR #37/#38 已实战验证
+// SQLite 不支持 ALTER TABLE 改 CHECK → 必须重建表
+// 资金红线：必须包在事务里；老库（含本版本前任意旧场景）必须无损迁移；id / 列结构 / UNIQUE / 默认值都须保留
+// 幂等：解析 sqlite_master.sql，已含 'gateway-recon-id-fix' → no-op；多次启动只触发一次重建
+// 调用顺序：必须在 ensureScenariosCategoryReconIdFix 之后（依赖 CHECK 已扩到 4 值）
+function ensureScenariosCategoryGatewayReconIdFix(db) {
+  const tableSqlRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'"
+  ).get();
+  if (!tableSqlRow || !tableSqlRow.sql) return;
+  if (tableSqlRow.sql.includes("'gateway-recon-id-fix'")) return; // 已扩，no-op
+
+  db.exec('BEGIN');
+  try {
+    db.exec('ALTER TABLE scenarios RENAME TO scenarios_old;');
+
+    db.exec(`
+      CREATE TABLE scenarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL CHECK (category IN (
+          'extract-recon-id',
+          'offset-bill-mark',
+          'gateway-recon-join',
+          'recon-id-fix',
+          'gateway-recon-id-fix'
+        )),
+        name TEXT NOT NULL,
+        priority INTEGER NOT NULL CHECK (priority BETWEEN 0 AND 3),
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        config_json TEXT NOT NULL,
+        is_builtin INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (name)
+      );
+    `);
+
+    db.exec(`
+      INSERT INTO scenarios
+        (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      SELECT id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at
+      FROM scenarios_old;
+    `);
+
+    db.exec('DROP TABLE scenarios_old;');
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 // v2.1.0-beta.1 PR-A：扩展 scenarios.category CHECK 约束，新增 'recon-id-fix' 枚举值
 // 背景：v2.0.0-beta.3 PR #29 / #32b 的 CHECK 仅含 3 值；本迭代新增 C4「单据对账 ReconID 修复」类需要扩到 4 值。
 // SQLite 不支持 ALTER TABLE 改 CHECK → 必须重建表。
@@ -656,6 +710,49 @@ function migrateC4ReconGroupsAmountLockedFieldPair(db) {
   });
 }
 
+// v2.1.0-beta.3 PR #39 self-review P1-1：一次性修复 v2.1.0-beta.3 早期测试期创建的 gateway 场景
+// fieldPairs locked 行 rightField='Amount'（应为 'receiveAmount'）的数据。
+// 背景：fix-5（commit f291013）发布给用户测试时，createDefaultScenarioConfig 仍写死 Amount/Amount；
+//       fix-round-2（commit 3f826e6）才修正默认值。期间用户创建的 gateway 场景 config_json 含 Amount/Amount locked
+//       → 引擎拿渠道行不存在的 Amount 字段匹配 → 1v1/1v多/多v1 全部 0 命中
+// 修复：扫描 scenarios category='gateway-recon-id-fix'，把 reconGroups[i].fieldPairs[j] 内
+//       `locked === true && leftField === 'Amount' && rightField === 'Amount'` 强制改为 rightField='receiveAmount'
+// 幂等：执行一次后 rightField 已是 'receiveAmount'，再跑命中 0 条 → no-op
+// 调用顺序：必须在 ensureScenariosCategoryGatewayReconIdFix 之后（依赖 category 枚举已扩 5 值）
+function migrateGatewayReconIdFixFieldPairs(db) {
+  const rows = db.prepare(
+    `SELECT id, config_json FROM scenarios WHERE category = 'gateway-recon-id-fix'`
+  ).all();
+  if (rows.length === 0) return;
+  const update = db.prepare(`UPDATE scenarios SET config_json = ?, updated_at = ? WHERE id = ?`);
+  const now = new Date().toISOString();
+  rows.forEach((row) => {
+    let config;
+    try {
+      config = JSON.parse(row.config_json);
+    } catch (_e) {
+      return;
+    }
+    if (!config || typeof config !== 'object') return;
+    if (!Array.isArray(config.reconGroups) || config.reconGroups.length === 0) return;
+    let changed = false;
+    config.reconGroups.forEach((grp) => {
+      if (!grp || typeof grp !== 'object' || !Array.isArray(grp.fieldPairs)) return;
+      grp.fieldPairs.forEach((fp) => {
+        if (!fp) return;
+        // gateway 子模式 locked Amount 行 rightField 必须是 receiveAmount
+        if (fp.locked === true && fp.leftField === 'Amount' && fp.rightField === 'Amount') {
+          fp.rightField = 'receiveAmount';
+          changed = true;
+        }
+      });
+    });
+    if (changed) {
+      update.run(JSON.stringify(config), now, row.id);
+    }
+  });
+}
+
 // v2.0.0-beta.3 PR #32b：一次性修复历史 PR #29 seed 的小写 'currency' 错误
 // 背景：PR #29 初始 seed 时把 C3 内置场景的 reconFields[0].gwField 写成小写 'currency'，
 //       PR #31 修了 seed JSON 但 marker 机制保护老库不重 seed → 用户老 DB 里仍是小写。
@@ -700,6 +797,8 @@ module.exports = {
   ensureParentTemplateSupport,
   ensureScenariosSupport,
   ensureScenariosCategoryReconIdFix,
+  ensureScenariosCategoryGatewayReconIdFix,
+  migrateGatewayReconIdFixFieldPairs,
   migrateC4ReconGroupsStructure,
   migrateC4ReconGroupsAmountLockedFieldPair,
   ensureC3GwFieldCurrencyCaseFix,

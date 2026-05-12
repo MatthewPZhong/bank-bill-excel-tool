@@ -53,10 +53,14 @@ const MODULES = Object.freeze({
     id: 'bank-statement-process',
     name: '银行对账单处理'
   },
-  // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（C4）
+  // v2.1.0-beta.1 PR-A：对账单ReconID修复模块（C4 / business + gateway 两个子模式）
+  // v2.1.0-beta.3 T4：模块下挂 business（单据对账单）+ gateway（网关对账单）两个子模式，按主面板「账单类别」下拉切换
+  //   ⚠️ module.id 保留 'recon-id-fix'（数十处引用 + DB schema CHECK 约束）；
+  //      单据子模式 scenario.category 仍是 'recon-id-fix'（字面与 module.id 相同，作用域不同）；
+  //      网关子模式 scenario.category = 'gateway-recon-id-fix'。
   reconIdFix: {
     id: 'recon-id-fix',
-    name: '单据对账 ReconID 修复'
+    name: '对账单ReconID修复'
   }
 });
 const RENDERER_STARTUP_MARKS = Object.freeze({
@@ -145,7 +149,12 @@ const state = {
   reconIdFixResult: null,             // { fixedRowCount, warningCount } | null
   reconIdFixExport: null,             // { mainFileName } | null（仅 renderer-side 缓存）
   reconIdFixSelectedScenarioId: null, // 主面板"场景"下拉当前选中（Q4 决策）
-  reconIdFixScenarios: []             // 主面板下拉 source（每次场景管理 dialog 关闭后 reload）
+  reconIdFixScenarios: [],            // 主面板下拉 source（每次场景管理 dialog 关闭后 reload）
+  // v2.1.0-beta.3 T4：主面板"账单类别"下拉持久化值（'business' | 'gateway' | null）
+  // 'business' = 单据对账单子模式（已有 C4，scenario.category='recon-id-fix'）
+  // 'gateway'  = 网关对账单子模式（新增，scenario.category='gateway-recon-id-fix'）
+  // 切换时级联清空：selectedScenarioId / Export / import session
+  reconIdFixBillCategory: null
 };
 const newAccountRowStateMap = new WeakMap();
 
@@ -238,7 +247,10 @@ const elements = {
   bankStatementExportBtn: document.getElementById('bankStatementExportBtn'),
   bankStatementStatusBox: document.getElementById('bankStatementStatusBox'),
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（spec §一.1 + §七 — 6 项 DOM 缓存）
+  // v2.1.0-beta.3 T4：新增主面板"账单类别"下拉 + 行 2 整行 wrapper（可隐藏）
   reconIdFixModulePanel: document.getElementById('reconIdFixModulePanel'),
+  reconIdFixBillCategorySelect: document.getElementById('reconIdFixBillCategorySelect'),
+  reconIdFixScenarioRow: document.getElementById('reconIdFixScenarioRow'),
   reconIdFixManageScenariosBtn: document.getElementById('reconIdFixManageScenariosBtn'),
   reconIdFixImportBtn: document.getElementById('reconIdFixImportBtn'),
   reconIdFixScenarioSelect: document.getElementById('reconIdFixScenarioSelect'),
@@ -369,7 +381,12 @@ const {
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 preview（3 张）
   applyReconIdFixPanelPreviewState,
   applyScenarioConfigC4PreviewState,
-  applyScenarioConfigC4BothPreviewState
+  applyScenarioConfigC4BothPreviewState,
+  // v2.1.0-beta.3 T11：网关子模式 preview（4 张）
+  applyReconIdFixPanelBusinessPreviewState,
+  applyReconIdFixPanelGatewayPreviewState,
+  applyScenarioConfigC4GatewayPreviewState,
+  applyScenarioConfigC4Gateway1vNPreviewState
 } = window.__rendererPreviews.createRendererPreviews({
   state,
   elements,
@@ -3406,22 +3423,35 @@ async function refreshReconIdFixStatus() {
 // `options.scenariosChanged` 默认 true：场景管理 dialog 4 个成功路径都视为"可能有 CRUD 变更"，
 // 走完整清理。模块切换调用方传 false → 仅 reload 列表 + sync session-status，不清 export。
 async function reloadReconIdFixScenarios(options = { scenariosChanged: true }) {
-  try {
-    const result = await window.desktopApi.scenarios.list();
-    if (!result || result.status !== 'ok' || !Array.isArray(result.scenarios)) {
-      state.reconIdFixScenarios = [];
-    } else {
-      state.reconIdFixScenarios = result.scenarios.filter((s) => s.category === 'recon-id-fix');
-    }
-    // 当前已选 id 已不存在 → 置 null
-    if (state.reconIdFixSelectedScenarioId !== null
-        && !state.reconIdFixScenarios.some((s) => s.id === state.reconIdFixSelectedScenarioId)) {
-      state.reconIdFixSelectedScenarioId = null;
-    }
-  } catch (error) {
-    console.error('reloadReconIdFixScenarios failed:', error);
+  // v2.1.0-beta.3 T5：按 state.reconIdFixBillCategory 推导 targetCategory；账单类别为空时直接清空场景列表
+  //   - 'business' → category='recon-id-fix'（单据子模式，v2.1.0-beta.1 已有）
+  //   - 'gateway'  → category='gateway-recon-id-fix'（网关子模式，v2.1.0-beta.3 新增）
+  //   - null       → 不拉场景（账单类别未选时主面板"场景"行已隐藏）
+  const cat = state.reconIdFixBillCategory;
+  const targetCategory = cat === 'gateway' ? 'gateway-recon-id-fix'
+    : (cat === 'business' ? 'recon-id-fix' : null);
+
+  if (!targetCategory) {
     state.reconIdFixScenarios = [];
     state.reconIdFixSelectedScenarioId = null;
+  } else {
+    try {
+      const result = await window.desktopApi.scenarios.list();
+      if (!result || result.status !== 'ok' || !Array.isArray(result.scenarios)) {
+        state.reconIdFixScenarios = [];
+      } else {
+        state.reconIdFixScenarios = result.scenarios.filter((s) => s.category === targetCategory);
+      }
+      // 当前已选 id 已不存在 → 置 null
+      if (state.reconIdFixSelectedScenarioId !== null
+          && !state.reconIdFixScenarios.some((s) => s.id === state.reconIdFixSelectedScenarioId)) {
+        state.reconIdFixSelectedScenarioId = null;
+      }
+    } catch (error) {
+      console.error('reloadReconIdFixScenarios failed:', error);
+      state.reconIdFixScenarios = [];
+      state.reconIdFixSelectedScenarioId = null;
+    }
   }
   // 仅当调用方明确说"场景变更"时才清 renderer-only 的 reconIdFixExport
   // （reconIdFixResult 不在此处清——交给 refreshReconIdFixStatus 从 main 拉，避免与 main 不一致）
@@ -3446,6 +3476,14 @@ async function reloadReconIdFixScenarios(options = { scenariosChanged: true }) {
 function renderReconIdFixScenarioSelect() {
   const select = elements.reconIdFixScenarioSelect;
   if (!select) return;
+  // v2.1.0-beta.3 修订（用户反馈）：账单类别为空时场景下拉显示真空白（不显示 "请先在场景管理中创建" placeholder）
+  const hasCategory = state.reconIdFixBillCategory === 'business' || state.reconIdFixBillCategory === 'gateway';
+  if (!hasCategory) {
+    select.innerHTML = '<option value=""></option>';
+    select.disabled = true;
+    select.value = '';
+    return;
+  }
   const scenarios = Array.isArray(state.reconIdFixScenarios) ? state.reconIdFixScenarios : [];
   if (scenarios.length === 0) {
     select.innerHTML = '<option value="">请先在场景管理中创建场景</option>';
@@ -3524,12 +3562,87 @@ function updateReconIdFixUi() {
   if (elements.reconIdFixExportBtn) {
     elements.reconIdFixExportBtn.disabled = !result;
   }
+  // v2.1.0-beta.3 T4：账单类别为空时强制 disable 所有动作按钮 + 隐藏场景行
+  // updateReconIdFixPanelVisibility 是最后一道 override（覆盖上面默认逻辑）
+  updateReconIdFixPanelVisibility();
+}
+
+// v2.1.0-beta.3 T4：根据 state.reconIdFixBillCategory 控制行 2 wrapper 可见性 + 按钮可用性
+// 调用时机：
+//   1. updateReconIdFixUi 末尾（作为按钮可用性最终 override）
+//   2. handleReconIdFixBillCategoryChange 切换账单类别时
+//   3. setCurrentModule 切到 reconIdFix 模块时（同步 UI 选中态）
+function updateReconIdFixPanelVisibility() {
+  // v2.1.0-beta.3 T11 修订（按用户反馈）：账单类别为空时也保持所有按钮显示（按 beta.2 结构），仅 disabled，
+  //   不再隐藏行 2 wrapper；行 2 始终 visible。
+  const cat = state.reconIdFixBillCategory;
+  const hasCategory = cat === 'business' || cat === 'gateway';
+
+  // 账单类别为空时强制禁用所有按钮（覆盖 updateReconIdFixUi 的默认 enable 逻辑）
+  if (!hasCategory) {
+    if (elements.reconIdFixImportBtn) elements.reconIdFixImportBtn.disabled = true;
+    if (elements.reconIdFixRunBtn) elements.reconIdFixRunBtn.disabled = true;
+    if (elements.reconIdFixExportBtn) elements.reconIdFixExportBtn.disabled = true;
+    if (elements.reconIdFixManageScenariosBtn) elements.reconIdFixManageScenariosBtn.disabled = true;
+  } else {
+    // 类别选定 → 场景管理按钮 enable；其他按钮（导入/运行/导出）由 updateReconIdFixUi 已设的状态决定
+    if (elements.reconIdFixManageScenariosBtn) elements.reconIdFixManageScenariosBtn.disabled = false;
+  }
+}
+
+// v2.1.0-beta.3 T4：账单类别切换 handler（持久化 + 级联清空 + UI 刷新）
+// 级联清空规则参考 spec §3.1：切换时清 selectedScenarioId / Export / Session / Result
+// 不动 import session 的 main 端状态（main 没有 clear 接口；下次导入自然覆盖）
+async function handleReconIdFixBillCategoryChange(event) {
+  const raw = event && event.target ? event.target.value : '';
+  const newCat = (raw === 'business' || raw === 'gateway') ? raw : null;
+  const prevCat = state.reconIdFixBillCategory;
+  if (newCat === prevCat) return; // no-op
+
+  // 1. 更新 state（先 state 后清空，避免清空逻辑读到旧 state）
+  state.reconIdFixBillCategory = newCat;
+  state.reconIdFixSelectedScenarioId = null;
+  state.reconIdFixExport = null;
+  state.reconIdFixSession = null;
+  state.reconIdFixResult = null;
+
+  // 2. 清 main 端 session/result + 持久化账单类别
+  // v2.1.0-beta.3 PR #39 Codex#1（P2）：必须先清 main 端 session，否则下面 reloadReconIdFixScenarios →
+  // refreshReconIdFixStatus → main 端 session-status 会拉回旧 session/result 进 renderer state，导致
+  // 切换后 panel 仍显示旧文件/结果，Run/Export 按钮误启用（用 session.subMode vs scenario.category
+  // 校验只能在用户实际触发 run 时优雅失败，UI 错觉问题仍在）
+  try {
+    await window.desktopApi.reconIdFix.clearSession();
+  } catch (error) {
+    console.warn('clear main reconIdFix session failed:', error);
+  }
+  try {
+    await window.desktopApi.settings.setReconIdFixBillCategory(newCat);
+  } catch (error) {
+    console.warn('persist reconIdFixBillCategory failed:', error);
+  }
+
+  // 3. 重新加载场景列表（按新类别过滤；reloadReconIdFixScenarios 已按 state.reconIdFixBillCategory 推导 targetCategory — T5）
+  if (newCat && typeof reloadReconIdFixScenarios === 'function') {
+    try {
+      await reloadReconIdFixScenarios({ scenariosChanged: true });
+    } catch (error) {
+      console.warn('reloadReconIdFixScenarios on category change failed:', error);
+    }
+  } else {
+    // 类别清空 → 直接清场景下拉 + 触发 UI 重绘
+    state.reconIdFixScenarios = [];
+    if (typeof renderReconIdFixScenarioSelect === 'function') renderReconIdFixScenarioSelect();
+    if (typeof updateReconIdFixUi === 'function') updateReconIdFixUi();
+  }
 }
 
 // v2.1.0-beta.1 PR-B：4 个按钮 handler 接通真实 IPC（spec §七 + §三）
 async function handleReconIdFixImport() {
   try {
-    const result = await window.desktopApi.reconIdFix.import();
+    // v2.1.0-beta.3 T9：按主面板"账单类别"推导 subMode（'business' | 'gateway'）传给 main 端 reader
+    const subMode = state.reconIdFixBillCategory === 'gateway' ? 'gateway' : 'business';
+    const result = await window.desktopApi.reconIdFix.import({ subMode });
     if (!result || result.status === 'cancelled') {
       // 用户取消 — 状态保持
       return;
@@ -3665,6 +3778,10 @@ async function initialize() {
   state.accountMappingCount = info.accountMappingCount || 0;
   state.hasErrorReport = Boolean(info.hasErrorReport);
   state.currencyOptions = Array.isArray(info.currencyOptions) ? info.currencyOptions.slice() : [];
+  // v2.1.0-beta.3 T4：从持久化恢复对账单ReconID修复模块「账单类别」
+  state.reconIdFixBillCategory = (info.reconIdFixBillCategory === 'business' || info.reconIdFixBillCategory === 'gateway')
+    ? info.reconIdFixBillCategory
+    : null;
   state.backgroundSettings = cloneBackgroundSettings(info.backgroundConfig);
   state.backgroundDraft = cloneBackgroundSettings(info.backgroundConfig);
   applyBackgroundSettings(state.backgroundSettings);
@@ -3726,10 +3843,22 @@ async function initialize() {
   elements.bankStatementRunBtn.addEventListener('click', handleBankStatementRun);
   elements.bankStatementExportBtn.addEventListener('click', handleBankStatementExport);
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块按钮 binding（spec §一.1 + Q4 决策）
+  // v2.1.0-beta.3 T5：场景管理白名单按当前账单类别动态决定
   if (elements.reconIdFixManageScenariosBtn) {
-    // v2.1.0-beta.2 PR-A：传白名单 ['recon-id-fix']（C4，单类别 → "新增场景"将跳过类别选择窗）
     elements.reconIdFixManageScenariosBtn.addEventListener('click', () => {
-      openModal(createScenariosManagerDialog(['recon-id-fix']));
+      const cat = state.reconIdFixBillCategory;
+      if (!cat) return; // 账单类别为空时按钮 disabled，理论上不会触发
+      const targetCategory = cat === 'gateway' ? 'gateway-recon-id-fix' : 'recon-id-fix';
+      openModal(createScenariosManagerDialog([targetCategory]));
+    });
+  }
+  // v2.1.0-beta.3 T4：账单类别下拉 change handler + 同步 UI 选中态
+  if (elements.reconIdFixBillCategorySelect) {
+    elements.reconIdFixBillCategorySelect.value = state.reconIdFixBillCategory || '';
+    elements.reconIdFixBillCategorySelect.addEventListener('change', (event) => {
+      handleReconIdFixBillCategoryChange(event).catch((error) => {
+        console.warn('handleReconIdFixBillCategoryChange failed:', error);
+      });
     });
   }
   if (elements.reconIdFixImportBtn) {
@@ -4103,6 +4232,22 @@ async function initialize() {
   } else if (info.previewModal === 'scenario-config-c4-both') {
     setTimeout(() => {
       applyScenarioConfigC4BothPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'recon-id-fix-panel-business') {
+    setTimeout(() => {
+      applyReconIdFixPanelBusinessPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'recon-id-fix-panel-gateway') {
+    setTimeout(() => {
+      applyReconIdFixPanelGatewayPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenario-config-c4-gateway') {
+    setTimeout(() => {
+      applyScenarioConfigC4GatewayPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenario-config-c4-gateway-1vN') {
+    setTimeout(() => {
+      applyScenarioConfigC4Gateway1vNPreviewState();
     }, 120);
   }
 

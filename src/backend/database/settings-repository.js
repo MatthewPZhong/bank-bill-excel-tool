@@ -115,6 +115,31 @@ function setCurrentModule(db, moduleId) {
   setSetting(db, CURRENT_MODULE_KEY, moduleId);
 }
 
+// v2.1.0-beta.3 T4：对账单ReconID修复模块「账单类别」持久化（business / gateway / null）
+const RECON_ID_FIX_BILL_CATEGORY_KEY = 'recon_id_fix_bill_category';
+const RECON_ID_FIX_BILL_CATEGORY_VALID = ['business', 'gateway'];
+
+function getReconIdFixBillCategory(db) {
+  const value = getSetting(db, RECON_ID_FIX_BILL_CATEGORY_KEY);
+  if (value && RECON_ID_FIX_BILL_CATEGORY_VALID.includes(value)) {
+    return value;
+  }
+  return null;
+}
+
+function setReconIdFixBillCategory(db, category) {
+  if (category === null || category === '' || category === undefined) {
+    setSetting(db, RECON_ID_FIX_BILL_CATEGORY_KEY, '');
+    return;
+  }
+  if (!RECON_ID_FIX_BILL_CATEGORY_VALID.includes(category)) {
+    throw new Error(
+      `Invalid recon_id_fix_bill_category: ${category}, must be one of ${RECON_ID_FIX_BILL_CATEGORY_VALID.join(' | ')} | null`
+    );
+  }
+  setSetting(db, RECON_ID_FIX_BILL_CATEGORY_KEY, category);
+}
+
 function listAccountMappings(db, templateId) {
   return db
     .prepare(`
@@ -170,6 +195,7 @@ module.exports = {
   getBackgroundConfig,
   getCurrentModule,
   getEnumConfig,
+  getReconIdFixBillCategory,
   getSetting,
   getUiStyle,
   listAccountMappings,
@@ -177,6 +203,7 @@ module.exports = {
   setBackgroundConfig,
   setCurrentModule,
   setEnumConfig,
+  setReconIdFixBillCategory,
   setSetting,
   setUiStyle
 };

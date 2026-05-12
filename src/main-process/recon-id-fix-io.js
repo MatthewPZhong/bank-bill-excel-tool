@@ -24,6 +24,44 @@ const {
   OPPONENT_BILL_SHEET_NAME,
   ORDER_REPAIR_SHEET_NAME
 } = require('../constants/recon-id-fix-fields');
+// v2.1.0-beta.3 T9：网关对账子模式 sheet 名 + 字段常量
+const {
+  GATEWAY_BILL_FIELDS,
+  CHANNEL_BILL_FIELDS,
+  ORDER_REPAIR_FIELDS_GATEWAY,
+  RECON_RESULT_FIELDS_GATEWAY,
+  GATEWAY_BILL_SHEET_NAME,
+  CHANNEL_BILL_SHEET_NAME,
+  ORDER_REPAIR_SHEET_NAME_GATEWAY,
+  RECON_RESULT_SHEET_NAME_GATEWAY
+} = require('../constants/gateway-bill-recon-fields');
+
+// v2.1.0-beta.3 T9：按 subMode 选择 sheet 名 + 字段常量集合
+function getSheetConfigBySubMode(subMode) {
+  if (subMode === 'gateway') {
+    return {
+      reconResultSheetName: RECON_RESULT_SHEET_NAME_GATEWAY,
+      mainBillSheetName: GATEWAY_BILL_SHEET_NAME,
+      oppBillSheetName: CHANNEL_BILL_SHEET_NAME,
+      orderRepairSheetName: ORDER_REPAIR_SHEET_NAME_GATEWAY,
+      reconResultFields: RECON_RESULT_FIELDS_GATEWAY,
+      mainBillFields: GATEWAY_BILL_FIELDS,
+      oppBillFields: CHANNEL_BILL_FIELDS,
+      orderRepairFields: ORDER_REPAIR_FIELDS_GATEWAY
+    };
+  }
+  // business（默认，保持现状）
+  return {
+    reconResultSheetName: RECON_RESULT_SHEET_NAME,
+    mainBillSheetName: BUSINESS_BILL_SHEET_NAME,
+    oppBillSheetName: OPPONENT_BILL_SHEET_NAME,
+    orderRepairSheetName: ORDER_REPAIR_SHEET_NAME,
+    reconResultFields: RECON_RESULT_FIELDS,
+    mainBillFields: BUSINESS_BILL_FIELDS,
+    oppBillFields: OPPONENT_BILL_FIELDS,
+    orderRepairFields: ORDER_REPAIR_FIELDS
+  };
+}
 
 // ===== 共用：把 sheet 转换成对象数组 + 严格列校验 =====
 // 模式与 bank-statement-io.js sheetToObjects 一致；为保留 sheetName 在 detailLines 里区分
@@ -88,22 +126,25 @@ function readSheetOrThrow(wb, sheetName) {
 
 // ===== readReconIdFixFile =====
 // 返回 { filePath, fileName, sheets: { reconResult, businessBills, opponentBills, fixTemplate }, importedAt }
-function readReconIdFixFile(filePath) {
+// v2.1.0-beta.3 T9：加 subMode 参数（'business' | 'gateway'），按 mode 选 sheet 名 + 字段常量
+//   sheets 输出 key 名（businessBills / opponentBills）保留不变，gateway 模式下分别承载网关账单/渠道账单数据
+function readReconIdFixFile(filePath, subMode = 'business') {
   if (!filePath || !fs.existsSync(filePath)) {
     throw new FileValidationError('file-not-found', `文件不存在：${filePath}`);
   }
   const wb = XLSX.readFile(filePath);
+  const cfg = getSheetConfigBySubMode(subMode);
   // spec §五.1 4 sheet 缺一即 missing-sheet
-  const reconSheet = readSheetOrThrow(wb, RECON_RESULT_SHEET_NAME);
-  const businessSheet = readSheetOrThrow(wb, BUSINESS_BILL_SHEET_NAME);
-  const opponentSheet = readSheetOrThrow(wb, OPPONENT_BILL_SHEET_NAME);
-  const fixSheet = readSheetOrThrow(wb, ORDER_REPAIR_SHEET_NAME);
+  const reconSheet = readSheetOrThrow(wb, cfg.reconResultSheetName);
+  const businessSheet = readSheetOrThrow(wb, cfg.mainBillSheetName);
+  const opponentSheet = readSheetOrThrow(wb, cfg.oppBillSheetName);
+  const fixSheet = readSheetOrThrow(wb, cfg.orderRepairSheetName);
 
-  const reconResultObj = sheetToObjects(reconSheet, RECON_RESULT_FIELDS, RECON_RESULT_SHEET_NAME);
-  const businessObj = sheetToObjects(businessSheet, BUSINESS_BILL_FIELDS, BUSINESS_BILL_SHEET_NAME);
-  const opponentObj = sheetToObjects(opponentSheet, OPPONENT_BILL_FIELDS, OPPONENT_BILL_SHEET_NAME);
+  const reconResultObj = sheetToObjects(reconSheet, cfg.reconResultFields, cfg.reconResultSheetName);
+  const businessObj = sheetToObjects(businessSheet, cfg.mainBillFields, cfg.mainBillSheetName);
+  const opponentObj = sheetToObjects(opponentSheet, cfg.oppBillFields, cfg.oppBillSheetName);
   // 「订单修复」sheet 仅校验表头（PRD §六.4.1 + spec §五.1）
-  const fixObj = sheetToObjects(fixSheet, ORDER_REPAIR_FIELDS, ORDER_REPAIR_SHEET_NAME);
+  const fixObj = sheetToObjects(fixSheet, cfg.orderRepairFields, cfg.orderRepairSheetName);
 
   return {
     filePath,
@@ -154,9 +195,13 @@ function sanitizeFileName(name, maxLen = 100) {
   return s;
 }
 
-function buildMainOutputFileName(scenarioName, timestamp = buildTimestampMinute()) {
+// v2.1.0-beta.3 T9：文件名前缀按 subMode 切换
+//   business → "单据对账修复-..."（保持现状）
+//   gateway  → "网关对账修复-..."
+function buildMainOutputFileName(scenarioName, timestamp = buildTimestampMinute(), subMode = 'business') {
   const safeName = sanitizeFileName(scenarioName);
-  return `单据对账修复-${timestamp}-${safeName}.xlsx`;
+  const prefix = subMode === 'gateway' ? '网关对账修复' : '单据对账修复';
+  return `${prefix}-${timestamp}-${safeName}.xlsx`;
 }
 
 // PR-B Round 3（Decision 3，2026-05-09）：未匹配 report 文件名
@@ -167,7 +212,8 @@ function buildMainOutputFileName(scenarioName, timestamp = buildTimestampMinute(
 //   时输出 `{stem}-未匹配.xlsx`，stem = mainFileBaseName 去掉末尾 .xlsx（不区分大小写）；
 //   mainFileBaseName 仍走 sanitizeFileName 防御危险字符。
 //   旧签名 buildUnmatchedReportFileName(name, timestamp) 保持兼容（smoke 老用例不动）。
-function buildUnmatchedReportFileName(scenarioName, timestamp = buildTimestampMinute(), mainFileBaseName = null) {
+// v2.1.0-beta.3 T9：默认 fallback 文件名前缀按 subMode 切换（mainFileBaseName 联动路径不变）
+function buildUnmatchedReportFileName(scenarioName, timestamp = buildTimestampMinute(), mainFileBaseName = null, subMode = 'business') {
   if (mainFileBaseName) {
     let stem = String(mainFileBaseName);
     // 去掉末尾 .xlsx（不区分大小写）
@@ -176,13 +222,14 @@ function buildUnmatchedReportFileName(scenarioName, timestamp = buildTimestampMi
     return `${safeStem}-未匹配.xlsx`;
   }
   const safeName = sanitizeFileName(scenarioName);
-  return `单据对账修复-未匹配-${timestamp}-${safeName}.xlsx`;
+  const prefix = subMode === 'gateway' ? '网关对账修复' : '单据对账修复';
+  return `${prefix}-未匹配-${timestamp}-${safeName}.xlsx`;
 }
 
 // ===== writeReconIdFixOutput =====
-// 单 sheet「订单修复」+ 表头 = ORDER_REPAIR_FIELDS（15 列）+ 表头字号 10pt
-// fixedRows 每行 = { BillDate, Bank, MerchantId, ..., SubBizType }
-async function writeReconIdFixOutput({ fixedRows, savePath }) {
+// 单 sheet「订单修复」+ 表头 = ORDER_REPAIR_FIELDS（business 15 列含 SubBizType / gateway 14 列不含）+ 表头字号 10pt
+// v2.1.0-beta.3 T9：加 subMode 参数，按 mode 选输出列模板 + sheet 名
+async function writeReconIdFixOutput({ fixedRows, savePath, subMode = 'business' }) {
   if (!Array.isArray(fixedRows)) {
     throw new Error('writeReconIdFixOutput: fixedRows 必须是数组');
   }
@@ -194,10 +241,11 @@ async function writeReconIdFixOutput({ fixedRows, savePath }) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
+  const cfg = getSheetConfigBySubMode(subMode);
   // 构造 aoa：第 0 行是表头，后面是数据行
-  const aoa = [ORDER_REPAIR_FIELDS.slice()];
+  const aoa = [cfg.orderRepairFields.slice()];
   for (const row of fixedRows) {
-    aoa.push(ORDER_REPAIR_FIELDS.map((col) => {
+    aoa.push(cfg.orderRepairFields.map((col) => {
       const v = row[col];
       if (v === null || v === undefined) return '';
       return v;
@@ -207,7 +255,7 @@ async function writeReconIdFixOutput({ fixedRows, savePath }) {
   applyHeaderRowFont(ws);
 
   const wb = XLSXStyle.utils.book_new();
-  XLSXStyle.utils.book_append_sheet(wb, ws, ORDER_REPAIR_SHEET_NAME);
+  XLSXStyle.utils.book_append_sheet(wb, ws, cfg.orderRepairSheetName);
   XLSXStyle.writeFile(wb, savePath);
 
   return {

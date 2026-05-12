@@ -1,5 +1,76 @@
 # Changelog
 
+## 2.1.0-beta.3 - 2026-05-11
+
+v2.1.0-beta.2 之后追加迭代：单据对账 ReconID 修复模块扩展为 **对账单ReconID修复** 通用模块，下挂 **单据对账单**（已有）+ **网关对账单**（新增）两个子模式，共用 C4 dialog + 引擎骨架；主面板新增"账单类别"一级筛选下拉 + 持久化。13 个 task 共 5 个 commit 完成。
+
+### 新增
+
+- **对账单ReconID修复 — 网关对账单子模式（C4 gateway）**：新增 `scenario.category = 'gateway-recon-id-fix'`，与已有 `recon-id-fix`（单据子模式）并列；scenarios.category CHECK 约束从 4 值扩至 5 值（新增 `ensureScenariosCategoryGatewayReconIdFix` 幂等迁移函数，沿用 v2.1.0-beta.1 PR-A 模板）。
+- **网关子模式字段常量**：`src/constants/gateway-bill-recon-fields.js` 新增 4 个常量（GATEWAY_BILL_FIELDS 31 列 / CHANNEL_BILL_FIELDS 16 列 / ORDER_REPAIR_FIELDS_GATEWAY 14 列 / RECON_RESULT_FIELDS_GATEWAY 19 列）+ 4 个 sheet 名常量；preload.js inline 副本同步 + appConstants 暴露 3 字段。
+- **主面板"账单类别"下拉**（行 1 左 cell，位置 = 原"场景"位置）：枚举 `空（请选择账单类别）/ 网关对账单 / 单据对账单`；持久化到 `app_settings.recon_id_fix_bill_category`（新增 IPC handler `settings:set-recon-id-fix-bill-category`）；切换时级联清空（selectedScenarioId / Export / Session / Result）+ 重新过滤场景下拉 + 更新行 2 hidden 状态。
+- **主面板行 2**（账单类别空时隐藏）：[场景下拉 + 场景管理 + 导出文件] 同行；"场景"位置从行 1 下移至与"导出文件"按钮平行。
+- **C4 dialog 双模式化**：函数内部从 `state.scenarioDraft.category` 推导 `subMode`（business / gateway），mode-switch 控制匹配规则勾选框文案 / 字段下拉枚举源 / 标签文案 / 输出选项 / commonId-source / "网关账单"radio 禁用规则 / SubBizType 整段不渲染 / locked fieldPair 默认值 / errors 文案 / 预览 9 处差异。
+- **网关子模式引擎写值**（`c4-recon-id-fix.js`）：
+  - 1v1：双 Type=0 + Reference 按 `output.mode` 取（main=网关.reconciliationId / opp=渠道.reconciliationId / both=按 commonId.source 取）；
+  - **1v多 拆账**：输入 1 笔网关丢弃 + 输出 n 笔（基于 mainRow 数据 + 覆盖 Type=1 / Amount=对应渠道.receiveAmount / Reference 按选项），每笔渠道 ↔ 拆出网关一一对应；
+  - **多v1**：输出 n 笔（基于对应 mainRow 数据 + 覆盖 Type=2 / Amount 保持原值 / Reference 按选项）；
+  - 全局约束：每笔渠道账单全局只能被一次匹配组消费（沿用引擎骨架 pairedRight 集合）；
+  - 输出列：gateway 用 ORDER_REPAIR_FIELDS_GATEWAY（14 列无 SubBizType）；business 沿用 ORDER_REPAIR_FIELDS（15 列含 SubBizType）。
+- **IO 双模式化**：`getSheetConfigBySubMode` helper 按 subMode 选 4 sheet 名 + 4 字段集；reader / writer / 文件名 helper 全部加 subMode 参数；文件名前缀按 mode 切换（业务 `单据对账修复-...` / 网关 `网关对账修复-...`）；main.js 3 个 IPC handler（import/run/export）按 subMode 路由 + session.subMode vs scenario.category 一致性校验。
+- **网关引擎 fixture 化单测**（`scripts/smoke/recon-id-fix-engine-gateway.js`）：基线 6 用例 + PR #39 review 期间扩至 9 用例 + constants sanity = 10/10 PASS，覆盖 1v1×3 选项 / 1v多 拆账 / 多v1 保 Amount / 全局约束 / mode='both' + suffix 拼接 / source='' 空值 + 仅 suffix / UI 默认 config 进引擎匹配；注册到 `npm run smoke` dispatcher。
+- **网关子模式 preview**（4 张）：`recon-id-fix-panel-business` / `recon-id-fix-panel-gateway` / `scenario-config-c4-gateway` / `scenario-config-c4-gateway-1vN`（gateway 1v多 网关账单选项禁用态）。
+
+### 变更
+
+- **版本号**：2.1.0-beta.2 → 2.1.0-beta.3。
+- **主面板模块下拉项文本**：`单据对账 ReconID 修复` → `对账单ReconID修复`（module.id 保留 `recon-id-fix` 不变，避免数十处引用 + DB CHECK 约束牵动）。
+- **场景管理列表"功能类别"文案**：`单据对账修复` → `单据对账单修复`；`网关对账修复` → `网关对账单修复`。
+- **算法层适配 gateway 字段名**：`findAmountLockedPair` 用 `locked === true` 优先识别（fallback 字段名）；`tryOneToManyPool` / `tryManyToOnePool` 用 `amountPair.leftField/rightField` 取 cents（不再硬编码 `r.Amount`）；引擎入口对 gateway 渠道行做 `createTime → BillDate` 字段映射（避免改动算法骨架 BillDate 硬编码）。
+- **C4 dialog commonId 区域增强**：
+  - 取值来源下拉新增**空值 option**（人眼看为空白行），用户主动选取后右侧"加上"输入框必须填写内容（dialog 确认按钮校验，无值弹错误框点确认返回 dialog 保留编辑）；
+  - gateway 子模式 dialog 也渲染 "加上 + 输入框"（功能同 business 主从都修复，Reference = `source.reconciliationId + suffix`）；
+  - source='' 空值 + suffix → Reference 仅取 suffix（base 为空）。
+- **renderer-dialogs.js helper 抽取**：`RECON_ID_FIX_CATEGORIES` / `isReconIdFixCategory(category)` / `reconIdFixModeFromCategory(category)`；9 处 `category === 'recon-id-fix'` 单一判断统一替换为 helper。
+- **主面板布局精修（共 9 个 fix commit）**：
+  - 账单类别为空时保持 beta.2 完整布局（行 2 始终显示，按钮仅 disabled 不 hidden）；
+  - 场景管理按钮保持在行 1 左 cell（仅"场景及其下拉框"下移与导出文件平行）；
+  - 账单类别 + 场景下拉固定宽度 165px（避免 placeholder 长短引起 row shift）；
+  - CSS grid 3 列严格对齐（label 60 / 下拉 165 / 按钮 140）+ pending-pair width=292px 与 statusBox 等宽；
+  - label 字体样式同模式 `.select-label`（13px / var(--muted) / weight 500）+ 下拉样式同 `.template-select`（48px / pill / 14px / chevron）；
+  - 账单类别为空时场景下拉显示真空白（无 placeholder 文字）；
+  - 场景管理/导出文件往左 20px，导入/运行/状态框往左 15px；
+  - C4 dialog 错误框去掉 "• " 前缀。
+- **smoke `migrations-recon-id-fix.js` E1 断言**：VALID_CATEGORIES 数量 4 → 5。
+- **smoke `recon-id-fix-engine-gateway.js` 新增 2 用例**（self-review P0 回归保护）：mode='both' + source=main + suffix 拼接 / mode='both' + source='' 空值 + 仅 suffix。
+
+### 修复
+
+PR #39 review round 1-3 + self-review 收尾（共 5 项）：
+
+- **dispatcher C4 集合过滤**（PR #39 Finding 1，P1）：scenario-dispatcher `filterOutReconIdFix` 用 `C4_CATEGORIES` 集合（含 `gateway-recon-id-fix`）；main.js `bank-statement:run` + `:export` snapshot 2 处 inline filter 同步；防止用户启用 gateway 子模式场景 + 跑银行对账单处理时抛"未知 category"。
+- **状态隔离修复**（PR #39 Finding 2，P2）：`clearResultCacheForCategory` 用 `RECON_ID_FIX_CATEGORIES` Set（含两个子模式）；renderer-dialogs 删除场景分支用 `isReconIdFixCategory()` helper；防止改 gateway 场景误清银行对账结果 / 删除 gateway 场景误刷新银行对账模块。
+- **切换账单类别清 main 端 session**（PR #39 Codex#1，P2）：新增 IPC `recon-id-fix:clear-session`（清 `reconIdFixSession + reconIdFixResult`），renderer 切换账单类别先调 clearSession 再 reloadReconIdFixScenarios；防止 `refreshReconIdFixStatus` 从 main 端拉回旧 session 污染新类别 UI。
+- **UI 默认 config gateway 引擎匹配修复**（PR #39 review round 2，P1）：
+  - `createDefaultScenarioConfig` 按 category 决定 `defaultLockedRight`（gateway=`receiveAmount` / business=`Amount`）；
+  - "+ 新增对账分组" 按 isGatewayMode 决定 `rightField`；
+  - dialog 归一化 ensure 逻辑强制修正 locked 行的 leftField/rightField（防跨子模式残留 + 老 draft Amount/Amount → 引擎 0 命中）；
+  - 新增 migration `migrateGatewayReconIdFixFieldPairs`：扫描 DB scenarios category='gateway-recon-id-fix'，把 `reconGroups[i].fieldPairs[j]` 内 `locked === true && leftField='Amount' && rightField='Amount'` 强制改为 `rightField='receiveAmount'`（修复 v2.1.0-beta.3 测试期用户已创建场景）；幂等。
+- **smoke 回归保护**：
+  - `recon-id-fix-engine-gateway.js` 加 Case 7（mode='both' + suffix 拼接）/ Case 8（source='' 空值 + 仅 suffix）/ Case 8.5（UI 默认 config 进引擎应匹配）→ 9/9 → 10/10 PASS；
+  - `scenario-dispatcher.js` Helper unit 扩展（gateway-recon-id-fix 也被剔除）；
+  - 错误框文本去 "• " 前缀。
+
+### 未改动（明确）
+
+- C1/C2/C3 dialog 业务逻辑与业务引擎；C3 网关对账 join 与本次"网关对账ReconID修复"是 **完全不同的模块**，仅 GATEWAY_RECON_FIELDS 31 列字段常量列名相同（但分属两个模块，未来不互相引用）。
+- 单据子模式（business）现有 C4 引擎默认路径：`runC4Scenario(scenario, sheets)` 不传 subMode 时仍按 v2.1.0-beta.2 行为跑；现有 `recon-id-fix` 场景输出 byte-for-byte 一致。
+- BrowserWindow 配置 / module.id（`recon-id-fix`，未改名）/ scenarios 表 schema 列结构与 UNIQUE 约束（仅扩 CHECK 枚举值 + 一个幂等迁移函数）。
+
+### smoke
+
+`npm run smoke` 14 个子套全绿（recon-id-fix-engine 23/23 / **recon-id-fix-engine-gateway 10/10**（PR #39 review 期间增至 10 用例）/ io 13/13 / end-to-end 6/6 / **migrations 19/19**（PR #39 self-review 新增 H5/H6 用例 — 含 migrateGatewayReconIdFixFieldPairs 主路径/幂等/非 gateway 不动/防御性 unlocked 不动）/ scenarios-repository 7/7 / **ipc-handlers 21/21**（PR #39 review 期间增加 clear-session T21）/ scenario-engines 23/23 / dispatcher 15/15 / exceljs-writer 3/3 / bank-statement-io 13/13 / scenario-end-to-end 23/23 / error-causes 39/39 / usage-stats 41/41）。
+
 ## 2.1.0-beta.2 - 2026-05-11
 
 v2.1.0-beta.1 用户实测后的 UI 精修 + 场景管理跨模块隔离 + 窗口控制按钮 hit-test 修复迭代。共 39 项改动通过 4 轮用户测试迭代（PR-A 业务隔离+窗口 bug / PR-B 6 项 UI 调整 / Round 2 13 项 UI 优化 / Round 3 v2 8 项 UI 优化）后稳定，单 PR 合并提交。

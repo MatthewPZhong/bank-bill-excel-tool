@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "2.1.0-beta.1",
-    "scannedAt": "2026-05-11T07:57:01.682Z",
+    "version": "2.1.0-beta.3",
+    "scannedAt": "2026-05-11T11:32:15.077Z",
     "root": "src",
-    "totalFiles": 60,
-    "totalTopLevelNames": 601,
+    "totalFiles": 61,
+    "totalTopLevelNames": 616,
     "buckets": {
-      "shared": 101,
-      "paired": 153,
-      "local": 255,
-      "crossFile": 254
+      "shared": 105,
+      "paired": 161,
+      "local": 258,
+      "crossFile": 266
     }
   },
   "A": {
@@ -596,14 +596,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 39
+            "count": 43
           },
           {
             "file": "src/renderer.js",
             "count": 3
           }
         ],
-        "totalHits": 47,
+        "totalHits": 51,
         "fileSpan": 5
       },
       {
@@ -835,14 +835,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 32
+            "count": 38
           },
           {
             "file": "src/renderer.js",
-            "count": 130
+            "count": 133
           }
         ],
-        "totalHits": 237,
+        "totalHits": 246,
         "fileSpan": 4
       },
       {
@@ -861,14 +861,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 23
+            "count": 27
           },
           {
             "file": "src/renderer.js",
             "count": 84
           }
         ],
-        "totalHits": 128,
+        "totalHits": 132,
         "fileSpan": 4
       },
       {
@@ -1143,6 +1143,33 @@
         "fileSpan": 4
       },
       {
+        "name": "CHANNEL_BILL_FIELDS",
+        "defFiles": [
+          "src/constants/gateway-bill-recon-fields.js",
+          "src/preload.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/gateway-bill-recon-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 4
+      },
+      {
         "name": "DatabaseSync",
         "defFiles": [
           "src/backend/database.js",
@@ -1224,6 +1251,33 @@
         "fileSpan": 4
       },
       {
+        "name": "GATEWAY_BILL_FIELDS",
+        "defFiles": [
+          "src/constants/gateway-bill-recon-fields.js",
+          "src/preload.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/gateway-bill-recon-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 4
+      },
+      {
         "name": "listTemplates",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -1296,6 +1350,34 @@
           },
           {
             "file": "src/renderer-dialogs.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 4
+      },
+      {
+        "name": "ORDER_REPAIR_FIELDS_GATEWAY",
+        "defFiles": [
+          "src/constants/gateway-bill-recon-fields.js",
+          "src/main-process/scenario-engines/c4-recon-id-fix.js",
+          "src/preload.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/gateway-bill-recon-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
             "count": 2
           }
         ],
@@ -1930,10 +2012,10 @@
           },
           {
             "file": "src/backend/database/settings-repository.js",
-            "count": 7
+            "count": 9
           }
         ],
-        "totalHits": 11,
+        "totalHits": 13,
         "fileSpan": 3
       },
       {
@@ -1952,10 +2034,10 @@
           },
           {
             "file": "src/backend/database/settings-repository.js",
-            "count": 6
+            "count": 7
           }
         ],
-        "totalHits": 9,
+        "totalHits": 10,
         "fileSpan": 3
       },
       {
@@ -2724,6 +2806,28 @@
         "fileSpan": 3
       },
       {
+        "name": "setReconIdFixBillCategory",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
         "name": "setUiStyle",
         "defFiles": [
           "src/backend/database/settings-repository.js"
@@ -2890,14 +2994,14 @@
         "refFiles": [
           {
             "file": "src/renderer-previews.js",
-            "count": 39
+            "count": 43
           },
           {
             "file": "src/renderer.js",
             "count": 12
           }
         ],
-        "totalHits": 51,
+        "totalHits": 55,
         "fileSpan": 2
       },
       {
@@ -2947,14 +3051,14 @@
         "refFiles": [
           {
             "file": "src/backend/database.js",
-            "count": 14
+            "count": 16
           },
           {
             "file": "src/backend/database/own-accounts-migration.js",
             "count": 4
           }
         ],
-        "totalHits": 18,
+        "totalHits": 20,
         "fileSpan": 2
       },
       {
@@ -3377,6 +3481,25 @@
         "fileSpan": 2
       },
       {
+        "name": "VALID_CATEGORIES",
+        "defFiles": [
+          "src/backend/database/scenarios-repository.js",
+          "src/main-process/recon-id-fix-engine.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/scenarios-repository.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/recon-id-fix-engine.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 2
+      },
+      {
         "name": "bankStatementSession",
         "defFiles": [
           "src/main.js"
@@ -3540,6 +3663,24 @@
       },
       {
         "name": "ensureParentTemplateSupport",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "ensureScenariosCategoryGatewayReconIdFix",
         "defFiles": [
           "src/backend/database/migrations.js"
         ],
@@ -3828,24 +3969,6 @@
         "fileSpan": 2
       },
       {
-        "name": "BUSINESS_BILL_SHEET_NAME",
-        "defFiles": [
-          "src/constants/recon-id-fix-fields.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/constants/recon-id-fix-fields.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/recon-id-fix-io.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
         "name": "ensureSupportedFile",
         "defFiles": [
           "src/backend/file-service/readers.js"
@@ -3990,42 +4113,6 @@
         "fileSpan": 2
       },
       {
-        "name": "OPPONENT_BILL_SHEET_NAME",
-        "defFiles": [
-          "src/constants/recon-id-fix-fields.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/constants/recon-id-fix-fields.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/recon-id-fix-io.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
-        "name": "ORDER_REPAIR_SHEET_NAME",
-        "defFiles": [
-          "src/constants/recon-id-fix-fields.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/constants/recon-id-fix-fields.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/recon-id-fix-io.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
         "name": "performance",
         "defFiles": [
           "src/main.js"
@@ -4037,24 +4124,6 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
-        "name": "RECON_RESULT_SHEET_NAME",
-        "defFiles": [
-          "src/constants/recon-id-fix-fields.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/constants/recon-id-fix-fields.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/recon-id-fix-io.js",
             "count": 3
           }
         ],
@@ -4209,6 +4278,42 @@
         "fileSpan": 2
       },
       {
+        "name": "BUSINESS_BILL_SHEET_NAME",
+        "defFiles": [
+          "src/constants/recon-id-fix-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/recon-id-fix-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "CHANNEL_BILL_SHEET_NAME",
+        "defFiles": [
+          "src/constants/gateway-bill-recon-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/gateway-bill-recon-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "closeAllNewAccountCurrencyDropdowns",
         "defFiles": [
           "src/renderer.js"
@@ -4356,6 +4461,24 @@
         "fileSpan": 2
       },
       {
+        "name": "GATEWAY_BILL_SHEET_NAME",
+        "defFiles": [
+          "src/constants/gateway-bill-recon-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/gateway-bill-recon-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "getBackgroundConfig",
         "defFiles": [
           "src/backend/database/settings-repository.js"
@@ -4439,6 +4562,24 @@
           },
           {
             "file": "src/main-process/pending-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "getReconIdFixBillCategory",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
             "count": 2
           }
         ],
@@ -4628,6 +4769,60 @@
         "fileSpan": 2
       },
       {
+        "name": "OPPONENT_BILL_SHEET_NAME",
+        "defFiles": [
+          "src/constants/recon-id-fix-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/recon-id-fix-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "ORDER_REPAIR_SHEET_NAME",
+        "defFiles": [
+          "src/constants/recon-id-fix-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/recon-id-fix-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "ORDER_REPAIR_SHEET_NAME_GATEWAY",
+        "defFiles": [
+          "src/constants/gateway-bill-recon-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/gateway-bill-recon-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "PENDING_DB_FILENAME",
         "defFiles": [
           "src/backend/pending-db.js",
@@ -4673,6 +4868,60 @@
         "refFiles": [
           {
             "file": "src/constants/recon-id-fix-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "RECON_RESULT_FIELDS_GATEWAY",
+        "defFiles": [
+          "src/constants/gateway-bill-recon-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/gateway-bill-recon-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "RECON_RESULT_SHEET_NAME",
+        "defFiles": [
+          "src/constants/recon-id-fix-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/recon-id-fix-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "RECON_RESULT_SHEET_NAME_GATEWAY",
+        "defFiles": [
+          "src/constants/gateway-bill-recon-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/gateway-bill-recon-fields.js",
             "count": 2
           },
           {
@@ -5681,10 +5930,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 93
+            "count": 94
           }
         ],
-        "totalHits": 93,
+        "totalHits": 94,
         "fileSpan": 1
       },
       {
@@ -5751,10 +6000,10 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
-            "count": 14
+            "count": 17
           }
         ],
-        "totalHits": 14,
+        "totalHits": 17,
         "fileSpan": 1
       },
       {
@@ -6472,6 +6721,20 @@
         "fileSpan": 1
       },
       {
+        "name": "computeReferenceGateway",
+        "defFiles": [
+          "src/main-process/scenario-engines/c4-recon-id-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "CURRENT_MODULE_VALID",
         "defFiles": [
           "src/backend/database/settings-repository.js"
@@ -6591,6 +6854,34 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "RECON_ID_FIX_BILL_CATEGORY_KEY",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "RECON_ID_FIX_BILL_CATEGORY_VALID",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
             "count": 4
           }
         ],
@@ -6773,20 +7064,6 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "VALID_CATEGORIES",
-        "defFiles": [
-          "src/backend/database/scenarios-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/scenarios-repository.js",
             "count": 4
           }
         ],
@@ -8432,6 +8709,20 @@
         "fileSpan": 1
       },
       {
+        "name": "getSheetConfigBySubMode",
+        "defFiles": [
+          "src/main-process/recon-id-fix-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "getStatusBoxTitle",
         "defFiles": [
           "src/renderer.js"
@@ -9828,14 +10119,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 39
+          "count": 43
         },
         {
           "file": "src/renderer.js",
           "count": 3
         }
       ],
-      "totalHits": 47,
+      "totalHits": 51,
       "fileSpan": 5
     },
     {
@@ -10067,14 +10358,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 32
+          "count": 38
         },
         {
           "file": "src/renderer.js",
-          "count": 130
+          "count": 133
         }
       ],
-      "totalHits": 237,
+      "totalHits": 246,
       "fileSpan": 4
     },
     {
@@ -10093,14 +10384,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 23
+          "count": 27
         },
         {
           "file": "src/renderer.js",
           "count": 84
         }
       ],
-      "totalHits": 128,
+      "totalHits": 132,
       "fileSpan": 4
     },
     {
@@ -10375,6 +10666,33 @@
       "fileSpan": 4
     },
     {
+      "name": "CHANNEL_BILL_FIELDS",
+      "defFiles": [
+        "src/constants/gateway-bill-recon-fields.js",
+        "src/preload.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/gateway-bill-recon-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 4
+    },
+    {
       "name": "DatabaseSync",
       "defFiles": [
         "src/backend/database.js",
@@ -10456,6 +10774,33 @@
       "fileSpan": 4
     },
     {
+      "name": "GATEWAY_BILL_FIELDS",
+      "defFiles": [
+        "src/constants/gateway-bill-recon-fields.js",
+        "src/preload.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/gateway-bill-recon-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 4
+    },
+    {
       "name": "listTemplates",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -10528,6 +10873,34 @@
         },
         {
           "file": "src/renderer-dialogs.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 4
+    },
+    {
+      "name": "ORDER_REPAIR_FIELDS_GATEWAY",
+      "defFiles": [
+        "src/constants/gateway-bill-recon-fields.js",
+        "src/main-process/scenario-engines/c4-recon-id-fix.js",
+        "src/preload.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/gateway-bill-recon-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
           "count": 2
         }
       ],
@@ -11162,10 +11535,10 @@
         },
         {
           "file": "src/backend/database/settings-repository.js",
-          "count": 7
+          "count": 9
         }
       ],
-      "totalHits": 11,
+      "totalHits": 13,
       "fileSpan": 3
     },
     {
@@ -11184,10 +11557,10 @@
         },
         {
           "file": "src/backend/database/settings-repository.js",
-          "count": 6
+          "count": 7
         }
       ],
-      "totalHits": 9,
+      "totalHits": 10,
       "fileSpan": 3
     },
     {
@@ -11956,6 +12329,28 @@
       "fileSpan": 3
     },
     {
+      "name": "setReconIdFixBillCategory",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
       "name": "setUiStyle",
       "defFiles": [
         "src/backend/database/settings-repository.js"
@@ -12120,14 +12515,14 @@
       "refFiles": [
         {
           "file": "src/renderer-previews.js",
-          "count": 39
+          "count": 43
         },
         {
           "file": "src/renderer.js",
           "count": 12
         }
       ],
-      "totalHits": 51,
+      "totalHits": 55,
       "fileSpan": 2
     },
     {
@@ -12177,14 +12572,14 @@
       "refFiles": [
         {
           "file": "src/backend/database.js",
-          "count": 14
+          "count": 16
         },
         {
           "file": "src/backend/database/own-accounts-migration.js",
           "count": 4
         }
       ],
-      "totalHits": 18,
+      "totalHits": 20,
       "fileSpan": 2
     },
     {
@@ -12607,6 +13002,25 @@
       "fileSpan": 2
     },
     {
+      "name": "VALID_CATEGORIES",
+      "defFiles": [
+        "src/backend/database/scenarios-repository.js",
+        "src/main-process/recon-id-fix-engine.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/scenarios-repository.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/recon-id-fix-engine.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 2
+    },
+    {
       "name": "bankStatementSession",
       "defFiles": [
         "src/main.js"
@@ -12770,6 +13184,24 @@
     },
     {
       "name": "ensureParentTemplateSupport",
+      "defFiles": [
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "ensureScenariosCategoryGatewayReconIdFix",
       "defFiles": [
         "src/backend/database/migrations.js"
       ],
@@ -13058,24 +13490,6 @@
       "fileSpan": 2
     },
     {
-      "name": "BUSINESS_BILL_SHEET_NAME",
-      "defFiles": [
-        "src/constants/recon-id-fix-fields.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/constants/recon-id-fix-fields.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/recon-id-fix-io.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
       "name": "ensureSupportedFile",
       "defFiles": [
         "src/backend/file-service/readers.js"
@@ -13220,42 +13634,6 @@
       "fileSpan": 2
     },
     {
-      "name": "OPPONENT_BILL_SHEET_NAME",
-      "defFiles": [
-        "src/constants/recon-id-fix-fields.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/constants/recon-id-fix-fields.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/recon-id-fix-io.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
-      "name": "ORDER_REPAIR_SHEET_NAME",
-      "defFiles": [
-        "src/constants/recon-id-fix-fields.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/constants/recon-id-fix-fields.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/recon-id-fix-io.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
       "name": "performance",
       "defFiles": [
         "src/main.js"
@@ -13267,24 +13645,6 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
-      "name": "RECON_RESULT_SHEET_NAME",
-      "defFiles": [
-        "src/constants/recon-id-fix-fields.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/constants/recon-id-fix-fields.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/recon-id-fix-io.js",
           "count": 3
         }
       ],
@@ -13439,6 +13799,42 @@
       "fileSpan": 2
     },
     {
+      "name": "BUSINESS_BILL_SHEET_NAME",
+      "defFiles": [
+        "src/constants/recon-id-fix-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/recon-id-fix-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "CHANNEL_BILL_SHEET_NAME",
+      "defFiles": [
+        "src/constants/gateway-bill-recon-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/gateway-bill-recon-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "closeAllNewAccountCurrencyDropdowns",
       "defFiles": [
         "src/renderer.js"
@@ -13586,6 +13982,24 @@
       "fileSpan": 2
     },
     {
+      "name": "GATEWAY_BILL_SHEET_NAME",
+      "defFiles": [
+        "src/constants/gateway-bill-recon-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/gateway-bill-recon-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "getBackgroundConfig",
       "defFiles": [
         "src/backend/database/settings-repository.js"
@@ -13669,6 +14083,24 @@
         },
         {
           "file": "src/main-process/pending-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "getReconIdFixBillCategory",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
           "count": 2
         }
       ],
@@ -13858,6 +14290,60 @@
       "fileSpan": 2
     },
     {
+      "name": "OPPONENT_BILL_SHEET_NAME",
+      "defFiles": [
+        "src/constants/recon-id-fix-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/recon-id-fix-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "ORDER_REPAIR_SHEET_NAME",
+      "defFiles": [
+        "src/constants/recon-id-fix-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/recon-id-fix-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "ORDER_REPAIR_SHEET_NAME_GATEWAY",
+      "defFiles": [
+        "src/constants/gateway-bill-recon-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/gateway-bill-recon-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "PENDING_DB_FILENAME",
       "defFiles": [
         "src/backend/pending-db.js",
@@ -13903,6 +14389,60 @@
       "refFiles": [
         {
           "file": "src/constants/recon-id-fix-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "RECON_RESULT_FIELDS_GATEWAY",
+      "defFiles": [
+        "src/constants/gateway-bill-recon-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/gateway-bill-recon-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "RECON_RESULT_SHEET_NAME",
+      "defFiles": [
+        "src/constants/recon-id-fix-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/recon-id-fix-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "RECON_RESULT_SHEET_NAME_GATEWAY",
+      "defFiles": [
+        "src/constants/gateway-bill-recon-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/gateway-bill-recon-fields.js",
           "count": 2
         },
         {

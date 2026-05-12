@@ -9,6 +9,52 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.0-beta.3（2026-05-11）
+
+v2.1.0-beta.2 之后追加迭代：将"单据对账 ReconID 修复"模块扩展为 **对账单ReconID修复** 通用模块，下挂"单据对账单"（已有）+ "网关对账单"（新增）两个子模式，共用 C4 dialog + 引擎骨架 + IO 层；主面板新增"账单类别"一级筛选下拉。13 个 task / 5 个 commit / 单 PR 合并。
+
+### 新增
+
+- **对账单ReconID修复 — 网关对账单子模式**：新增 `scenario.category = 'gateway-recon-id-fix'`（与已有 `recon-id-fix` 并列）；scenarios.category CHECK 约束扩 5 值（幂等迁移函数 `ensureScenariosCategoryGatewayReconIdFix`）。
+- **网关子模式 4 sheet 字段常量**：网关账单 31 列 / 渠道账单 16 列 / 订单修复 14 列（无 SubBizType）/ 对账结果 19 列；preload inline 副本同步。
+- **主面板"账单类别"下拉**：枚举 `网关对账单 / 单据对账单`（初始空）；位置 = 原"场景"位置；持久化到 `app_settings.recon_id_fix_bill_category`；切换时级联清空 + 重新过滤场景下拉。
+- **主面板行 2 wrapper**：[场景下拉 + 场景管理 + 导出文件] 同行，账单类别空时隐藏；"场景"从行 1 下移至与"导出文件"同行。
+- **C4 dialog 双模式化**：函数内部从 draft.category 推导 subMode，9 处 mode-switch（匹配规则勾选框文案 / 字段下拉枚举源 / 标签文案 / 输出选项文本 / commonId-source 下拉枚举 / "网关账单"radio 在 1v多/多v1 时禁用 / SubBizType 取值栏整段不渲染 / locked fieldPair 默认值按 mode 选字段名 / errors + 预览文案）。
+- **网关子模式引擎写值规则**：
+  - 1v1：双 Type=0 + Reference 按 dialog "订单修复ID取值"选项决定（main=网关.reconciliationId / opp=渠道.reconciliationId / both=按 commonId.source）；
+  - **1v多 拆账**：输入 1 笔网关丢弃 + 输出 n 笔（基于 mainRow 数据，Type=1 / Amount=对应渠道.receiveAmount / Reference 按选项）；
+  - **多v1**：输出 n 笔（基于对应 mainRow，Type=2 / Amount 保持原值 / Reference 按选项）；
+  - 全局约束：每笔渠道账单全局只能被一次消费；
+  - 输出列：gateway 14 列（无 SubBizType），business 仍 15 列。
+- **IO 双模式化**：reader/writer 按 subMode 选 sheet 名 + 字段常量；文件名前缀切换（业务 `单据对账修复-...` / 网关 `网关对账修复-...`）；session.subMode vs scenario.category 一致性校验。
+- **网关引擎 fixture 化单测**：基线 6 用例（1v1×3 / 1v多 拆账 / 多v1 / 全局约束）+ constants sanity；PR #39 review 期间扩至 9 用例（mode='both' suffix 拼接 / source='' 空值 / UI 默认 config）→ 10/10 PASS；注册到 npm run smoke。
+- **网关子模式 preview**：4 张新截图（主面板 business/gateway + dialog 默认/1v多 禁用）。
+
+### 变更
+
+- **版本号**：2.1.0-beta.2 → 2.1.0-beta.3。
+- **主面板模块下拉项文本**：`单据对账 ReconID 修复` → `对账单ReconID修复`；module.id 保留 `recon-id-fix` 不变。
+- **场景管理列表"功能类别"**：单据对账修复 → 单据对账单修复；网关对账修复 → 网关对账单修复。
+- **算法层适配 gateway 字段名**：`findAmountLockedPair` 优先按 `locked === true` 识别 + 字段名 fallback；池子算法用 `amountPair.leftField/rightField` 取 cents（不再硬编码 'Amount'）；引擎入口对 gateway 渠道行做 createTime→BillDate 字段映射。
+- **C4 dialog commonId 区域增强**：取值来源下拉新增空值 option（空值时 suffix 必填，校验失败弹错误框返回 dialog 保留编辑）；gateway 子模式同样渲染"加上 + 输入框"，Reference = source.reconciliationId + suffix（source='' 时仅 suffix）。
+- **renderer-dialogs.js helper 抽取**：`isReconIdFixCategory(category)` / `reconIdFixModeFromCategory(category)`；9 处单一 category 判断统一替换。
+- **主面板布局精修**（9 个 fix commit）：账单类别为空时保持 beta.2 完整布局 + 行 2 始终显示；场景管理保持行 1；下拉固定 165px；CSS grid 3 列严格对齐 + statusBox/pending-pair 等宽 292px；label/select 样式同模式（.select-label / .template-select 48px pill）；账单类别空时场景下拉真空白；5 元素整体微调左移；错误框去 "• " 前缀。
+- **smoke 新增 2 用例**：mode='both' + suffix 拼接 / source='' 空值 + 仅 suffix（self-review P0 回归保护）。
+
+### 修复（PR #39 review round 1-3 + self-review 收尾）
+
+- **dispatcher C4 集合过滤**（P1）：`filterOutReconIdFix` 用 C4_CATEGORIES 集合（含 `gateway-recon-id-fix`），防 gateway 子模式场景误入银行对账 dispatcher。
+- **状态隔离修复**（P2）：`clearResultCacheForCategory` + 删除场景刷新分支用 ReconID 子模式集合识别，防误清/误刷新银行对账模块。
+- **新增 IPC `recon-id-fix:clear-session`**（P2）：切换账单类别清 main 端 session/result，防旧 session 回流。
+- **UI 默认 config gateway 引擎匹配修复**（P1）：`createDefaultScenarioConfig` + "+ 新增对账分组" + 归一化 ensure 三处按 subMode 决定 `rightField`；新增 migration `migrateGatewayReconIdFixFieldPairs` 修复 DB 旧场景。
+- **smoke 回归保护**：gateway smoke 6 用例 → 10 用例（含 mode='both' suffix / source='' 空值 / UI 默认 config 进引擎匹配）；ipc-handlers 20 → 21（clear-session T21）；migrations 15 → 19（H5/H6 migrateGatewayReconIdFixFieldPairs 用例 — 主路径 / 幂等 / 非 gateway 不动 / 防御性 unlocked 不动）；dispatcher smoke 扩展 gateway 剔除。
+
+### 未改动
+
+- C1/C2/C3 dialog 业务逻辑；C3 网关对账 join 模块与本次"网关对账ReconID修复"完全不同的模块（仅字段列名相同）。
+- 单据子模式（business）现有 C4 引擎默认路径：输出 byte-for-byte 与 v2.1.0-beta.2 一致。
+- BrowserWindow 配置 / module.id `recon-id-fix` / scenarios 表列结构与 UNIQUE 约束（仅扩 CHECK 枚举值）。
+
 ## 2.1.0-beta.2（2026-05-11）
 
 v2.1.0-beta.1 用户实测后的 UI 精修 + 场景管理跨模块隔离 + 窗口控制按钮 hit-test 修复迭代。39 项改动 / 4 轮用户测试迭代（PR-A 业务隔离 / PR-B 6 项 UI / Round 2 13 项 / Round 3 v2 8 项），单 PR 合并提交。

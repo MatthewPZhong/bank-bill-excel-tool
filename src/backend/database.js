@@ -10,6 +10,8 @@ const {
   ensureParentTemplateSupport,
   ensureScenariosSupport,
   ensureScenariosCategoryReconIdFix,
+  ensureScenariosCategoryGatewayReconIdFix,
+  migrateGatewayReconIdFixFieldPairs,
   migrateC4ReconGroupsStructure,
   migrateC4ReconGroupsAmountLockedFieldPair,
   ensureC3GwFieldCurrencyCaseFix,
@@ -116,6 +118,13 @@ class AppDatabase {
     // v2.1.0-beta.1 PR-A：扩 CHECK 约束到 4 值（含 'recon-id-fix'）
     // 必须在 ensureScenariosSupport 之后；幂等检查 sqlite_master.sql 含 'recon-id-fix' → no-op
     this.ensureScenariosCategoryReconIdFix();
+    // v2.1.0-beta.3：扩 CHECK 约束到 5 值（含 'gateway-recon-id-fix'）
+    // 必须在 ensureScenariosCategoryReconIdFix 之后；幂等检查 sqlite_master.sql 含 'gateway-recon-id-fix' → no-op
+    this.ensureScenariosCategoryGatewayReconIdFix();
+    // v2.1.0-beta.3 PR #39 self-review P1-1：修复 v2.1.0-beta.3 早期测试期创建的 gateway 场景
+    // fieldPairs locked 行 rightField='Amount' → 'receiveAmount'（dialog 已修但 DB 旧数据需迁移）
+    // 必须在 ensureScenariosCategoryGatewayReconIdFix 之后；幂等：rightField 已是 receiveAmount → no-op
+    this.migrateGatewayReconIdFixFieldPairs();
     // v2.1.0-beta.1 PR-B（Q1=B 决策回写，2026-04-30）：把 C4 类 config_json 老 reconFields[]
     // 结构迁移成 reconGroups[]（详见 migrations.js: migrateC4ReconGroupsStructure）。
     // 必须在 ensureScenariosCategoryReconIdFix 之后（依赖 CHECK 已扩到 4 值）。
@@ -347,6 +356,15 @@ class AppDatabase {
     return settingsRepository.setCurrentModule(this.db, moduleId);
   }
 
+  // v2.1.0-beta.3 T4：对账单ReconID修复模块「账单类别」持久化
+  getReconIdFixBillCategory() {
+    return settingsRepository.getReconIdFixBillCategory(this.db);
+  }
+
+  setReconIdFixBillCategory(category) {
+    return settingsRepository.setReconIdFixBillCategory(this.db, category);
+  }
+
   listAccountMappings(templateId) {
     return settingsRepository.listAccountMappings(this.db, templateId);
   }
@@ -367,6 +385,14 @@ class AppDatabase {
 
   ensureScenariosCategoryReconIdFix() {
     return ensureScenariosCategoryReconIdFix(this.db);
+  }
+
+  ensureScenariosCategoryGatewayReconIdFix() {
+    return ensureScenariosCategoryGatewayReconIdFix(this.db);
+  }
+
+  migrateGatewayReconIdFixFieldPairs() {
+    return migrateGatewayReconIdFixFieldPairs(this.db);
   }
 
   // v2.1.0-beta.1 PR-B（Q1=B 决策，2026-04-30）：C4 reconFields[] → reconGroups[] 迁移

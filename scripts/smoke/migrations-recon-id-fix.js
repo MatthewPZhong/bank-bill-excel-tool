@@ -10,8 +10,10 @@ const { DatabaseSync } = require('node:sqlite');
 
 const {
   ensureScenariosCategoryReconIdFix,
+  ensureScenariosCategoryGatewayReconIdFix,
   migrateC4ReconGroupsStructure,
-  migrateC4ReconGroupsAmountLockedFieldPair
+  migrateC4ReconGroupsAmountLockedFieldPair,
+  migrateGatewayReconIdFixFieldPairs
 } = require('../../src/backend/database/migrations');
 const {
   createScenario,
@@ -206,10 +208,12 @@ function runMigrationsReconIdFixSmokeTests() {
     assert.strictEqual(before, after, 'D1 新 schema 直接 no-op，schema 不变');
   }
 
-  // ===== E1：scenarios-repository.VALID_CATEGORIES 已含 'recon-id-fix' =====
+  // ===== E1：scenarios-repository.VALID_CATEGORIES 已含 'recon-id-fix' / 'gateway-recon-id-fix' =====
+  // v2.1.0-beta.3 T2/T10：扩到 5 项（新增 'gateway-recon-id-fix' 网关子模式）
   {
     assert.ok(VALID_CATEGORIES.includes('recon-id-fix'), 'E1 VALID_CATEGORIES 已含 recon-id-fix');
-    assert.strictEqual(VALID_CATEGORIES.length, 4, 'E1 VALID_CATEGORIES 4 项');
+    assert.ok(VALID_CATEGORIES.includes('gateway-recon-id-fix'), 'E1 VALID_CATEGORIES 已含 gateway-recon-id-fix');
+    assert.strictEqual(VALID_CATEGORIES.length, 5, 'E1 VALID_CATEGORIES 5 项');
   }
 
   // ===== F1：CHECK 约束在 INSERT 非法值时拒绝 =====
@@ -491,7 +495,120 @@ function runMigrationsReconIdFixSmokeTests() {
     assert.deepStrictEqual(after.config, c2cfg, 'H4 C2 reconFields 不被动');
   }
 
-  console.log('  migrations-recon-id-fix: 15/15 PASS');
+  // ===== H5（v2.1.0-beta.3 PR #39 self-review P1-1）：migrateGatewayReconIdFixFieldPairs 主路径 =====
+  // 旧 gateway 场景（v2.1.0-beta.3 fix-5 测试期创建，fieldPairs locked Amount/Amount）→ 迁移后 rightField='receiveAmount'
+  {
+    const db = setupNewSchemaDb();
+    // 先扩 CHECK 到 5 值（含 'gateway-recon-id-fix'）
+    ensureScenariosCategoryGatewayReconIdFix(db);
+    const oldGw = {
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      billTypes: [{ seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: 'gw' }] }],
+      reconGroups: [{
+        leftTypeSeq: 1, rightTypeSeq: 2,
+        fieldPairs: [
+          { leftField: 'Amount', rightField: 'Amount', locked: true },
+          { leftField: 'OrderId', rightField: 'channelOrderNo' }
+        ]
+      }]
+    };
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(1, 'gateway-recon-id-fix', 'H5-old-gw', 0, 1, JSON.stringify(oldGw), 0, now, now);
+    migrateGatewayReconIdFixFieldPairs(db);
+    const after = getScenario(db, 1);
+    const locked = after.config.reconGroups[0].fieldPairs.find((fp) => fp.locked === true);
+    assert.strictEqual(locked.leftField, 'Amount', 'H5 locked.leftField 仍 Amount');
+    assert.strictEqual(locked.rightField, 'receiveAmount', 'H5 locked.rightField 已迁移到 receiveAmount');
+    // 非 locked 行不动
+    const unlocked = after.config.reconGroups[0].fieldPairs.find((fp) => fp.locked !== true);
+    assert.strictEqual(unlocked.rightField, 'channelOrderNo', 'H5 非 locked 行 rightField 不动');
+  }
+
+  // ===== H6.1：幂等（已是 receiveAmount 不动 + 3 次连跑无错）=====
+  {
+    const db = setupNewSchemaDb();
+    ensureScenariosCategoryGatewayReconIdFix(db);
+    const newGw = {
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      billTypes: [{ seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: 'gw' }] }],
+      reconGroups: [{
+        leftTypeSeq: 1, rightTypeSeq: 2,
+        fieldPairs: [{ leftField: 'Amount', rightField: 'receiveAmount', locked: true }]
+      }]
+    };
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(1, 'gateway-recon-id-fix', 'H6.1-new-gw', 0, 1, JSON.stringify(newGw), 0, now, now);
+    const before = getScenario(db, 1);
+    migrateGatewayReconIdFixFieldPairs(db);
+    migrateGatewayReconIdFixFieldPairs(db);
+    migrateGatewayReconIdFixFieldPairs(db);
+    const after = getScenario(db, 1);
+    assert.deepStrictEqual(after.config.reconGroups, before.config.reconGroups, 'H6.1 已 receiveAmount 时 3 次幂等不变');
+  }
+
+  // ===== H6.2：非 gateway 场景不动（仅扫 category='gateway-recon-id-fix'）=====
+  {
+    const db = setupNewSchemaDb();
+    ensureScenariosCategoryGatewayReconIdFix(db);
+    // business 场景：fieldPairs locked Amount/Amount（应保持，不应被网关 migration 误改）
+    const businessCfg = {
+      matchRules: { oneToOne: true },
+      billTypes: [{ seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: 'biz' }] }],
+      reconGroups: [{
+        leftTypeSeq: 1, rightTypeSeq: 2,
+        fieldPairs: [{ leftField: 'Amount', rightField: 'Amount', locked: true }]
+      }]
+    };
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(1, 'recon-id-fix', 'H6.2-business', 0, 1, JSON.stringify(businessCfg), 0, now, now);
+    migrateGatewayReconIdFixFieldPairs(db);
+    const after = getScenario(db, 1);
+    const locked = after.config.reconGroups[0].fieldPairs[0];
+    assert.strictEqual(locked.leftField, 'Amount', 'H6.2 business leftField 不被动');
+    assert.strictEqual(locked.rightField, 'Amount', 'H6.2 business rightField 保持 Amount（不应被误改）');
+  }
+
+  // ===== H6.3（PR #39 self-review round 3 P2-1）：gateway 场景内 unlocked Amount/Amount 不被误迁移
+  // 防御性边界：migration 必须严格按 locked === true 判定，不能仅匹配 leftField/rightField
+  {
+    const db = setupNewSchemaDb();
+    ensureScenariosCategoryGatewayReconIdFix(db);
+    // gateway 场景：fieldPairs 含 1 unlocked Amount/Amount 用户自定义行（locked=false）+ 1 locked Amount/Amount（应改）
+    const mixedGwCfg = {
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      billTypes: [{ seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: 'gw' }] }],
+      reconGroups: [{
+        leftTypeSeq: 1, rightTypeSeq: 2,
+        fieldPairs: [
+          { leftField: 'Amount', rightField: 'Amount', locked: true },   // 应迁移 → receiveAmount
+          { leftField: 'Amount', rightField: 'Amount', locked: false }   // 不应改（防御性）
+        ]
+      }]
+    };
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(1, 'gateway-recon-id-fix', 'H6.3-mixed', 0, 1, JSON.stringify(mixedGwCfg), 0, now, now);
+    migrateGatewayReconIdFixFieldPairs(db);
+    const after = getScenario(db, 1);
+    const fps = after.config.reconGroups[0].fieldPairs;
+    const lockedFp = fps.find((fp) => fp.locked === true);
+    const unlockedFp = fps.find((fp) => fp.locked === false);
+    assert.strictEqual(lockedFp.rightField, 'receiveAmount', 'H6.3 locked Amount/Amount → receiveAmount（应迁移）');
+    assert.strictEqual(unlockedFp.rightField, 'Amount', 'H6.3 unlocked Amount/Amount 不动（防御性 — migration 仅按 locked=true 判定）');
+  }
+
+  console.log('  migrations-recon-id-fix: 19/19 PASS');
 }
 
 module.exports = {
