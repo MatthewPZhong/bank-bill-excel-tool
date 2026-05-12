@@ -144,6 +144,11 @@ function runHelpersSmoke() {
   assert.strictEqual(billDateMatches('2026-04-09', '2026-04-10', '±1day'), true, '±1day D+1');
   assert.strictEqual(billDateMatches('2026-04-09', '2026-04-11', '±1day'), false, '±1day 隔 2 日不命中');
   assert.strictEqual(billDateMatches('', '2026-04-09', '±1day'), false, '空日期不命中');
+  // v2.1.1 T2-2：days 参数化（取代硬编码 1 天）
+  assert.strictEqual(billDateMatches('2026-04-09', '2026-04-11', '±1day', 1), false, 'days=1 隔 2 日不命中（与默认一致）');
+  assert.strictEqual(billDateMatches('2026-04-09', '2026-04-11', '±1day', 3), true, 'days=3 隔 2 日命中');
+  assert.strictEqual(billDateMatches('2026-04-09', '2026-04-15', '±1day', 5), false, 'days=5 隔 6 日不命中');
+  assert.strictEqual(billDateMatches('2026-04-09', '2026-04-14', '±1day', 5), true, 'days=5 隔 5 日命中');
 
   // parseBillDateMs
   assert.ok(parseBillDateMs('2026-04-09') !== null, 'parseBillDateMs 解析 ISO');
@@ -193,6 +198,53 @@ function runStep2Tolerant() {
   const result = runReconIdFix(scenario, { reconResult: [], businessBills: business, opponentBills: opponent });
   assert.strictEqual(result.fixedRows.length, 1, 'Step 2 ±1day 命中 1 行');
   assert.strictEqual(result.fixedRows[0].Reference, 'RID-OPP-1', 'Step 2 取对方 reconId');
+}
+
+// ===== v2.1.1 T2-2：BillDate ±N 端到端 =====
+//   主 D 04-09 vs 从 D+3 04-12 → 默认 ±1day 不命中；勾选 N=5 命中；勾选 N=1 不命中
+function runBillDateRangeWithNDays() {
+  const business = [
+    makeBusinessRow({ OrderId: 'O-1', BillDate: '2026-04-09', Amount: 100, reconId: '' })
+  ];
+  const opponent = [
+    makeOpponentRow({ OrderId: 'O-1', BillDate: '2026-04-12', Amount: 100, reconId: 'RID-OPP-1' })
+  ];
+
+  // Case BD-1: 不勾选（默认 ±1day，缺省 days=1）→ 跨 3 天 → 不命中
+  {
+    const cfg = makeCfg({
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      output: { mode: 'main', subBizType: { mode: 'manualMain', mainValue: 'SBT' } }
+    });
+    const scenario = makeScenario('recon-id-fix', 'BD-1-default', cfg);
+    const result = runReconIdFix(scenario, { reconResult: [], businessBills: business, opponentBills: opponent });
+    assert.strictEqual(result.fixedRows.length, 0, 'BD-1 不勾选 + 跨 3 天 → 不命中（与现状一致）');
+  }
+
+  // Case BD-2: 勾选 days=5 → 跨 3 天 ≤ 5 → 命中
+  {
+    const cfg = makeCfg({
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      output: { mode: 'main', subBizType: { mode: 'manualMain', mainValue: 'SBT' } }
+    });
+    cfg.billDateRange = { enabled: true, days: 5 };
+    const scenario = makeScenario('recon-id-fix', 'BD-2-N5', cfg);
+    const result = runReconIdFix(scenario, { reconResult: [], businessBills: business, opponentBills: opponent });
+    assert.strictEqual(result.fixedRows.length, 1, 'BD-2 days=5 + 跨 3 天 → 命中 1');
+    assert.strictEqual(result.fixedRows[0].Reference, 'RID-OPP-1', 'BD-2 取对方 reconId');
+  }
+
+  // Case BD-3: 勾选 days=1 → 跨 3 天 > 1 → 不命中
+  {
+    const cfg = makeCfg({
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      output: { mode: 'main', subBizType: { mode: 'manualMain', mainValue: 'SBT' } }
+    });
+    cfg.billDateRange = { enabled: true, days: 1 };
+    const scenario = makeScenario('recon-id-fix', 'BD-3-N1', cfg);
+    const result = runReconIdFix(scenario, { reconResult: [], businessBills: business, opponentBills: opponent });
+    assert.strictEqual(result.fixedRows.length, 0, 'BD-3 days=1 + 跨 3 天 → 不命中');
+  }
 }
 
 // ===== Step 3.1：池子同 BillDate + subset-sum 1v多 =====（Round 4 重写）
@@ -1665,6 +1717,7 @@ function runReconIdFixEngineSmokeTests() {
     runHelpersSmoke,
     runStep1Strict,
     runStep2Tolerant,
+    runBillDateRangeWithNDays,
     runStep31PoolOneToMany,
     runStep32PoolOneToManyTolerant,
     runStep3p1PoolManyToOne,

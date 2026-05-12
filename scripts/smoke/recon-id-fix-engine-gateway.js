@@ -381,6 +381,69 @@ function runCase8_Both_EmptySourceWithSuffix() {
   console.log('PASS  Case 8：mode=both + source=空值 + suffix → 仅 suffix');
 }
 
+// ===== v2.1.1 T2-2：BillDate ±N（取代硬编码 ±1day）=====
+// 网关账单 BillDate vs 渠道账单 createTime（gateway 引擎自动映射）
+//   gateway 子模式：opponentBills[*].BillDate 由 createTime 派生（c4 引擎 line 1031-1038）
+function runCase9_BillDateRange_Default() {
+  // BD-1：不勾选（默认 ±1day）+ 跨 3 天 → 不命中
+  const main = [
+    makeGatewayRow({ BillDate: '2026-04-09', Amount: 100, BillType: 'gw', reconciliationId: 'GW-BD-1' })
+  ];
+  const opp = [
+    makeChannelRow({ createTime: '2026-04-12', receiveAmount: 100, channelName: 'ch', reconciliationId: 'CH-BD-1' })
+  ];
+  const cfg = makeCfg({
+    matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+    output: { mode: 'main', commonId: { source: 'main', suffix: '' } }
+  });
+  const result = runReconIdFix(makeScenario('Case9-BD-default', cfg), {
+    reconResult: [], businessBills: main, opponentBills: opp
+  });
+  assert.strictEqual(result.fixedRows.length, 0, 'Case9 BD-1 不勾选 + 跨 3 天 → 不命中');
+  console.log('PASS  Case 9：BillDate ±N 不勾选 默认 ±1day + 跨 3 天 不命中');
+}
+
+function runCase10_BillDateRange_N5() {
+  // BD-2：勾选 days=5 + 跨 3 天 → 命中
+  const main = [
+    makeGatewayRow({ BillDate: '2026-04-09', Amount: 100, BillType: 'gw', reconciliationId: 'GW-BD-2' })
+  ];
+  const opp = [
+    makeChannelRow({ createTime: '2026-04-12', receiveAmount: 100, channelName: 'ch', reconciliationId: 'CH-BD-2' })
+  ];
+  const cfg = makeCfg({
+    matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+    output: { mode: 'main', commonId: { source: 'main', suffix: '' } }
+  });
+  cfg.billDateRange = { enabled: true, days: 5 };
+  const result = runReconIdFix(makeScenario('Case10-BD-N5', cfg), {
+    reconResult: [], businessBills: main, opponentBills: opp
+  });
+  assert.strictEqual(result.fixedRows.length, 1, 'Case10 BD-2 days=5 + 跨 3 天 → 命中');
+  assert.strictEqual(result.fixedRows[0].Reference, 'GW-BD-2', 'Case10 取主边 reconciliationId');
+  console.log('PASS  Case 10：BillDate ±N 勾选 days=5 + 跨 3 天 命中');
+}
+
+function runCase11_BillDateRange_N1() {
+  // BD-3：勾选 days=1 + 跨 3 天 → 不命中
+  const main = [
+    makeGatewayRow({ BillDate: '2026-04-09', Amount: 100, BillType: 'gw', reconciliationId: 'GW-BD-3' })
+  ];
+  const opp = [
+    makeChannelRow({ createTime: '2026-04-12', receiveAmount: 100, channelName: 'ch', reconciliationId: 'CH-BD-3' })
+  ];
+  const cfg = makeCfg({
+    matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+    output: { mode: 'main', commonId: { source: 'main', suffix: '' } }
+  });
+  cfg.billDateRange = { enabled: true, days: 1 };
+  const result = runReconIdFix(makeScenario('Case11-BD-N1', cfg), {
+    reconResult: [], businessBills: main, opponentBills: opp
+  });
+  assert.strictEqual(result.fixedRows.length, 0, 'Case11 BD-3 days=1 + 跨 3 天 → 不命中');
+  console.log('PASS  Case 11：BillDate ±N 勾选 days=1 + 跨 3 天 不命中');
+}
+
 // ===== 主入口 =====
 function runReconIdFixEngineGatewaySmokeTests() {
   runConstantsSmoke();
@@ -393,7 +456,11 @@ function runReconIdFixEngineGatewaySmokeTests() {
   runCase7_Both_MainWithSuffix();
   runCase8_Both_EmptySourceWithSuffix();
   runCase8_5_DefaultUiConfig();
-  console.log('  recon-id-fix-engine-gateway smoke: 10 / 10 PASS');
+  // v2.1.1 T2-2：BillDate ±N（基线 10 + 新增 3 = 13）
+  runCase9_BillDateRange_Default();
+  runCase10_BillDateRange_N5();
+  runCase11_BillDateRange_N1();
+  console.log('  recon-id-fix-engine-gateway smoke: 13 / 13 PASS');
 }
 
 module.exports = { runReconIdFixEngineGatewaySmokeTests };
