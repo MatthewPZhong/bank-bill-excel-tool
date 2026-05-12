@@ -892,6 +892,30 @@
       setCurrentModule(MODULES.reconIdFix.id);
     }
 
+    // v2.1.0-beta.3 T11：主面板 preview — 账单类别选定 gateway（行 2 wrapper 显示）
+    function applyReconIdFixPanelGatewayPreviewState() {
+      setCurrentModule(MODULES.reconIdFix.id);
+      state.reconIdFixBillCategory = 'gateway';
+      if (elements.reconIdFixBillCategorySelect) {
+        elements.reconIdFixBillCategorySelect.value = 'gateway';
+      }
+      if (typeof updateReconIdFixPanelVisibility === 'function') {
+        updateReconIdFixPanelVisibility();
+      }
+    }
+
+    // v2.1.0-beta.3 T11：主面板 preview — 账单类别选定 business（行 2 wrapper 显示）
+    function applyReconIdFixPanelBusinessPreviewState() {
+      setCurrentModule(MODULES.reconIdFix.id);
+      state.reconIdFixBillCategory = 'business';
+      if (elements.reconIdFixBillCategorySelect) {
+        elements.reconIdFixBillCategorySelect.value = 'business';
+      }
+      if (typeof updateReconIdFixPanelVisibility === 'function') {
+        updateReconIdFixPanelVisibility();
+      }
+    }
+
     // task A7：C4 配置弹窗 preview — create 模式（默认 1 主 1 从两类）
     function applyScenarioConfigC4PreviewState() {
       setCurrentModule(MODULES.reconIdFix.id);
@@ -913,6 +937,81 @@
           ],
           output: {
             mode: 'main',
+            commonId: { source: 'main', suffix: '' },
+            subBizType: { mode: 'auto', mainValue: '', oppValue: '' }
+          }
+        }
+      };
+      setTimeout(() => {
+        openModal(createScenarioConfigDialogC4());
+      }, 120);
+    }
+
+    // v2.1.0-beta.3 T11：C4 dialog preview — gateway 子模式 默认态
+    function applyScenarioConfigC4GatewayPreviewState() {
+      setCurrentModule(MODULES.reconIdFix.id);
+      state.reconIdFixBillCategory = 'gateway';
+      state.scenarioDraft = {
+        mode: 'create',
+        category: 'gateway-recon-id-fix',
+        scenarioId: null,
+        name: '示例：网关 vs 渠道（1v1）',
+        priority: 0,
+        config: {
+          matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+          billTypes: [
+            { seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: '网关订单' }] },
+            { seq: 2, side: 'opp', conditions: [{ field: 'channelName', op: '等于', value: 'CH001' }] }
+          ],
+          reconGroups: [
+            {
+              leftTypeSeq: 1,
+              rightTypeSeq: 2,
+              fieldPairs: [
+                { leftField: 'Amount', rightField: 'receiveAmount', locked: true }
+              ]
+            }
+          ],
+          output: {
+            mode: 'main',
+            commonId: { source: 'main', suffix: '' },
+            subBizType: { mode: 'auto', mainValue: '', oppValue: '' }
+          }
+        }
+      };
+      setTimeout(() => {
+        openModal(createScenarioConfigDialogC4());
+      }, 120);
+    }
+
+    // v2.1.0-beta.3 T11：C4 dialog preview — gateway 子模式 勾选 1v多 → "网关账单" radio 禁用
+    function applyScenarioConfigC4Gateway1vNPreviewState() {
+      setCurrentModule(MODULES.reconIdFix.id);
+      state.reconIdFixBillCategory = 'gateway';
+      state.scenarioDraft = {
+        mode: 'create',
+        category: 'gateway-recon-id-fix',
+        scenarioId: null,
+        name: '示例：网关 1 v 多 渠道（"网关账单"选项禁用）',
+        priority: 0,
+        config: {
+          matchRules: { oneToOne: false, oneToMany: true, manyToOne: false },
+          billTypes: [
+            { seq: 1, side: 'main', conditions: [{ field: 'BillType', op: '等于', value: '网关订单' }] },
+            { seq: 2, side: 'opp', conditions: [{ field: 'channelName', op: '等于', value: 'CH001' }] }
+          ],
+          reconGroups: [
+            {
+              leftTypeSeq: 1,
+              rightTypeSeq: 2,
+              fieldPairs: [
+                { leftField: 'Amount', rightField: 'receiveAmount', locked: true }
+              ]
+            }
+          ],
+          output: {
+            // 1v多 时 main 被禁用，默认切到 opp
+            mode: 'opp',
             commonId: { source: 'main', suffix: '' },
             subBizType: { mode: 'auto', mainValue: '', oppValue: '' }
           }
@@ -1002,7 +1101,12 @@
       // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 preview（3 张）
       applyReconIdFixPanelPreviewState,
       applyScenarioConfigC4PreviewState,
-      applyScenarioConfigC4BothPreviewState
+      applyScenarioConfigC4BothPreviewState,
+      // v2.1.0-beta.3 T11：网关子模式 preview（5 张 — 主面板 business/gateway + dialog gateway 默认/1v多 禁用）
+      applyReconIdFixPanelBusinessPreviewState,
+      applyReconIdFixPanelGatewayPreviewState,
+      applyScenarioConfigC4GatewayPreviewState,
+      applyScenarioConfigC4Gateway1vNPreviewState
     };
   }
 

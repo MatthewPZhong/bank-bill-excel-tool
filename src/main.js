@@ -13,7 +13,7 @@ const pendingDiffRepo = require('./backend/pending-db/diff-repository');
 const pendingReconcileEngine = require('./backend/pending-reconcile/engine');
 const pendingExportWriter = require('./backend/pending-export/writer');
 const { createPendingSession } = require('./main-process/pending-session');
-const { runAllScenarios } = require('./main-process/scenario-dispatcher');
+const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-dispatcher');
 const {
   readBankStatement,
   readGatewayRecon,
@@ -2700,6 +2700,8 @@ function registerAppHandlers() {
       uiStyle: database.getUiStyle() || 'Clear',
       // 上次使用模块；renderer 启动时恢复
       currentModule: database.getCurrentModule() || 'statement-generator',
+      // v2.1.0-beta.3 T4：对账单ReconID修复模块「账单类别」持久化（business | gateway | null）
+      reconIdFixBillCategory: database.getReconIdFixBillCategory(),
       // v1.5.3 R2（D15）：启动时自有账号迁移失败的错误文案；null 表示无失败
       ownAccountsMigrationError: lastOwnAccountsMigrationError
     };
@@ -2719,6 +2721,15 @@ function registerAppHandlers() {
     try {
       database.setCurrentModule(moduleId);
       return { status: 'ok', currentModule: moduleId };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  // v2.1.0-beta.3 T4：对账单ReconID修复模块「账单类别」持久化（business | gateway | null）
+  ipcMain.handle('settings:set-recon-id-fix-bill-category', (_event, category) => {
+    try {
+      database.setReconIdFixBillCategory(category);
+      return { status: 'ok', reconIdFixBillCategory: category || null };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
@@ -2751,8 +2762,11 @@ function registerAppHandlers() {
   // round 3 self-review P3-A：显式枚举已知 category，未知值（含 undefined）双清并 warn，
   // 避免未来加新 category 时忘了同步本函数会偷偷清 processingResult。
   const BANK_STATEMENT_CATEGORIES = new Set(['extract-recon-id', 'offset-bill-mark', 'gateway-recon-join']);
+  // v2.1.0-beta.3 PR #39 Finding 2（P2）：把 ReconID 修复 category 集合化（含 business + gateway 两个子模式）
+  // 之前 'gateway-recon-id-fix' 落 unknown 分支 → 双清 processingResult + reconIdFixResult → 用户改 gateway 场景误清银行对账结果
+  const RECON_ID_FIX_CATEGORIES = new Set(['recon-id-fix', 'gateway-recon-id-fix']);
   function clearResultCacheForCategory(category) {
-    if (category === 'recon-id-fix') {
+    if (RECON_ID_FIX_CATEGORIES.has(category)) {
       reconIdFixResult = null;
     } else if (BANK_STATEMENT_CATEGORIES.has(category)) {
       processingResult = null;
@@ -2912,7 +2926,8 @@ function registerAppHandlers() {
       // `recon-id-fix:run`，不应进入银行对账单 dispatcher（C4 没有对应的 case，
       // dispatcher 内 `runScenario` default 分支会 throw "未知 category"）。
       // 此处 + snapshot 都过滤掉 → 银行对账与单据对账两条流水线相互独立。
-      const dispatchScenarios = detailedEnabled.filter((s) => s.category !== 'recon-id-fix');
+      // v2.1.0-beta.3 PR #39 Finding 1（P1）：扩展到所有 C4 category（含 'gateway-recon-id-fix'）
+      const dispatchScenarios = detailedEnabled.filter((s) => !C4_CATEGORIES.includes(s.category));
       // 每次 run 都基于原始导入数据 deep clone 一份工作副本
       // （Codex F1 P1 修复：算法层会原地修改字段，不 clone 会让连续运行的 oldValue 漂移
       //  → first-match-wins 失效，低优先级场景可能覆盖高优先级写入的字段）
@@ -2948,7 +2963,8 @@ function registerAppHandlers() {
       const detailedEnabled = enabled.map((s) => database.getScenario(s.id)).filter(Boolean);
       // v2.1.0-beta.1 PR-A round 2 P1：与 bank-statement:run 一致，C4 不参与本模块的 snapshot
       // 否则用户改 C4 场景会让此处 snapshot 变化 → 误报"场景已变更" → 拒绝导出
-      const dispatchScenarios = detailedEnabled.filter((s) => s.category !== 'recon-id-fix');
+      // v2.1.0-beta.3 PR #39 Finding 1（P1）：扩展到所有 C4 category
+      const dispatchScenarios = detailedEnabled.filter((s) => !C4_CATEGORIES.includes(s.category));
       const currentSnapshot = buildScenariosSnapshot(dispatchScenarios);
       if (processingResult.scenariosSnapshot !== currentSnapshot) {
         processingResult = null;
@@ -3060,10 +3076,13 @@ function registerAppHandlers() {
     ].join('|');
   }
 
-  trackedIpcHandle('recon-id-fix:import', '单据对账ReconID修复', '导入文件', async () => {
+  trackedIpcHandle('recon-id-fix:import', '对账单ReconID修复', '导入文件', async (_event, payload) => {
     try {
+      // v2.1.0-beta.3 T9：renderer 传 subMode（'business' | 'gateway'，从 state.reconIdFixBillCategory 推导）
+      const subMode = (payload && payload.subMode === 'gateway') ? 'gateway' : 'business';
+      const dialogTitle = subMode === 'gateway' ? '选择网关对账文件' : '选择单据对账文件';
       const choice = await dialog.showOpenDialog(mainWindow, {
-        title: '选择单据对账文件',
+        title: dialogTitle,
         properties: ['openFile'],
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
@@ -3071,12 +3090,14 @@ function registerAppHandlers() {
         return { status: 'cancelled' };
       }
       const filePath = choice.filePaths[0];
-      const result = readReconIdFixFile(filePath);
+      const result = readReconIdFixFile(filePath, subMode);
       reconIdFixSession = {
         filePath: result.filePath,
         fileName: result.fileName,
         sheets: result.sheets,
-        importedAt: result.importedAt
+        importedAt: result.importedAt,
+        // v2.1.0-beta.3 T9：记录 import 时的 subMode，run/export 校验时核对
+        subMode
       };
       // 资金红线：重新导入清空 result（避免旧结果误导出）
       reconIdFixResult = null;
@@ -3106,7 +3127,7 @@ function registerAppHandlers() {
     }
   });
 
-  trackedIpcHandle('recon-id-fix:run', '单据对账ReconID修复', '开始运行', (_event, payload) => {
+  trackedIpcHandle('recon-id-fix:run', '对账单ReconID修复', '开始运行', (_event, payload) => {
     try {
       if (!reconIdFixSession) {
         return { status: 'failed', message: '请先点击"导入文件"' };
@@ -3119,8 +3140,17 @@ function registerAppHandlers() {
       if (!scenario) {
         return { status: 'failed', message: `场景 id=${scenarioId} 不存在` };
       }
-      if (scenario.category !== 'recon-id-fix') {
-        return { status: 'failed', message: `场景 "${scenario.name}" 不是单据对账类，无法运行` };
+      // v2.1.0-beta.3 T9：扩 category 校验到两个 ReconID 子模式 + 验证 session 的 subMode 与 scenario.category 一致
+      if (scenario.category !== 'recon-id-fix' && scenario.category !== 'gateway-recon-id-fix') {
+        return { status: 'failed', message: `场景 "${scenario.name}" 不是对账单ReconID修复类，无法运行` };
+      }
+      const expectedSubMode = scenario.category === 'gateway-recon-id-fix' ? 'gateway' : 'business';
+      const sessionSubMode = reconIdFixSession.subMode || 'business';
+      if (expectedSubMode !== sessionSubMode) {
+        return {
+          status: 'failed',
+          message: `场景账单类别（${expectedSubMode === 'gateway' ? '网关对账单' : '单据对账单'}）与已导入文件类别（${sessionSubMode === 'gateway' ? '网关对账单' : '单据对账单'}）不一致，请重新导入文件`
+        };
       }
       // 深拷贝 sheets（避免 in-place 修改污染 session；与 bank-statement:run 一致）
       const clonedSheets = {
@@ -3148,7 +3178,7 @@ function registerAppHandlers() {
     }
   });
 
-  trackedIpcHandle('recon-id-fix:export', '单据对账ReconID修复', '导出文件', async () => {
+  trackedIpcHandle('recon-id-fix:export', '对账单ReconID修复', '导出文件', async () => {
     try {
       if (!reconIdFixResult) {
         return { status: 'failed', message: '请先点击"开始运行"' };
@@ -3188,11 +3218,14 @@ function registerAppHandlers() {
       //   fixedRows 空 + unmatched 非空时，saveDialog 默认名直接用 unmatched 名，
       //   让"用户选的路径"语义对得上"实际写出的文件"——避免用户选 A.xlsx 但桌面上是
       //   另一个固定命名的困惑。
+      // v2.1.0-beta.3 T9：按 scenario.category 推导 subMode，影响文件名前缀 + writer 输出列模板
+      const exportSubMode = currentScenario.category === 'gateway-recon-id-fix' ? 'gateway' : 'business';
       const defaultFileName = (fixedRows.length === 0 && unmatchedRows.length > 0)
-        ? buildReconIdFixUnmatchedReportFileName(reconIdFixResult.scenarioName, timestamp)
-        : buildReconIdFixMainOutputFileName(reconIdFixResult.scenarioName, timestamp);
+        ? buildReconIdFixUnmatchedReportFileName(reconIdFixResult.scenarioName, timestamp, null, exportSubMode)
+        : buildReconIdFixMainOutputFileName(reconIdFixResult.scenarioName, timestamp, exportSubMode);
+      const dialogSaveTitle = exportSubMode === 'gateway' ? '保存网关对账修复结果' : '保存单据对账修复结果';
       const saveResult = await dialog.showSaveDialog(mainWindow, {
-        title: '保存单据对账修复结果',
+        title: dialogSaveTitle,
         defaultPath: path.join(app.getPath('documents'), defaultFileName),
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
@@ -3221,10 +3254,11 @@ function registerAppHandlers() {
         ret.unmatchedFileName = writeUnmResult.fileName;
         ret.unmatchedCount = writeUnmResult.rowCount;
       } else {
-        // 主非空：写主文件
+        // 主非空：写主文件（v2.1.0-beta.3 T9 — 传 subMode 选输出列模板 + sheet 名）
         const writeResult = await writeReconIdFixOutput({
           fixedRows,
-          savePath: saveResult.filePath
+          savePath: saveResult.filePath,
+          subMode: exportSubMode
         });
         ret.mainFilePath = writeResult.filePath;
         ret.mainFileName = writeResult.fileName;
@@ -3238,7 +3272,8 @@ function registerAppHandlers() {
           const unmatchedFileName = buildReconIdFixUnmatchedReportFileName(
             reconIdFixResult.scenarioName,
             timestamp,
-            mainBaseName
+            mainBaseName,
+            exportSubMode
           );
           const unmatchedSavePath = path.join(mainSaveDir, unmatchedFileName);
           const writeUnmResult = await writeUnmatchedReport({
@@ -3256,6 +3291,13 @@ function registerAppHandlers() {
     }
   });
 
+  // v2.1.0-beta.3 PR #39 Codex#1（P2）：清空 main 端 session + result
+  // 用户切换"账单类别"时调用，避免 reloadReconIdFixScenarios 内的 refreshReconIdFixStatus 从 main 拉回旧 session
+  ipcMain.handle('recon-id-fix:clear-session', () => {
+    reconIdFixSession = null;
+    reconIdFixResult = null;
+    return { status: 'ok' };
+  });
   ipcMain.handle('recon-id-fix:session-status', () => {
     return {
       status: 'ok',

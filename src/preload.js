@@ -44,6 +44,26 @@ const OPPONENT_BILL_FIELDS = Object.freeze([
   '交易订单号'
 ]);
 
+// v2.1.0-beta.3：网关对账单 ReconID 修复（gateway 子模式）字段常量
+// 与 src/constants/gateway-bill-recon-fields.js 同步——任意修改两端都要改
+// ⚠️ GATEWAY_BILL_FIELDS 与上方 GATEWAY_RECON_FIELDS 列名相同但分属两个模块（C3 / C4-gateway），不要相互引用
+const GATEWAY_BILL_FIELDS = Object.freeze([
+  'BillDate', 'Bank', 'MerchantId', 'OrderId', 'DataSource', 'OppBu', 'OriginBillSource',
+  'BillType', 'Type(0:1对1,1:1对多,2:多对1,3:多对1（轧差合并)', 'Reference', 'Currency', 'Amount',
+  'OriginBillBizId', 'ReconBillBizId', 'reconciliationId', 'tradeType', 'clientId', 'name',
+  'cardNo', '真实渠道', '清算网络', '对账批次号', 'createTime', 'finishTime',
+  'LOriginalId', 'remark1', 'remark2', 'bookdate', 'valuedate', 'fileId', 'AccountRef'
+]);
+const CHANNEL_BILL_FIELDS = Object.freeze([
+  'channelName', 'merchantId', 'reconciliationId', 'channelOrderNo', 'name', 'cardNo',
+  'currency', 'requestAmount', 'receiveAmount', 'extraFee', '清算网络', 'createTime',
+  'finishTime', 'additionInfo', 'remark', 'COriginalId'
+]);
+const ORDER_REPAIR_FIELDS_GATEWAY = Object.freeze([
+  'BillDate', 'Bank', 'MerchantId', 'OrderId', 'DataSource', 'OppBu', 'OriginBillSource',
+  'BillType', 'Type', 'Reference', 'Currency', 'Amount', 'OriginBillBizId', 'ReconBillBizId'
+]);
+
 contextBridge.exposeInMainWorld('appConstants', {
   bankStatementFields: BANK_STATEMENT_FIELDS,
   bankStatementFieldsForC3: BANK_STATEMENT_FIELDS_FOR_C3,
@@ -51,7 +71,11 @@ contextBridge.exposeInMainWorld('appConstants', {
   gatewayReconFields: GATEWAY_RECON_FIELDS,
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块的两 sheet 表头
   businessBillFields: BUSINESS_BILL_FIELDS,
-  opponentBillFields: OPPONENT_BILL_FIELDS
+  opponentBillFields: OPPONENT_BILL_FIELDS,
+  // v2.1.0-beta.3：网关对账单 ReconID 修复模块的 3 个字段常量
+  gatewayBillFields: GATEWAY_BILL_FIELDS,
+  channelBillFields: CHANNEL_BILL_FIELDS,
+  orderRepairFieldsGateway: ORDER_REPAIR_FIELDS_GATEWAY
 });
 
 contextBridge.exposeInMainWorld('desktopApi', {
@@ -71,7 +95,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
   settings: {
     getUiStyle: () => ipcRenderer.invoke('settings:get-ui-style'),
     setUiStyle: (style) => ipcRenderer.invoke('settings:set-ui-style', style),
-    setCurrentModule: (moduleId) => ipcRenderer.invoke('settings:set-current-module', moduleId)
+    setCurrentModule: (moduleId) => ipcRenderer.invoke('settings:set-current-module', moduleId),
+    // v2.1.0-beta.3 T4：对账单ReconID修复模块「账单类别」持久化（business | gateway | null）
+    setReconIdFixBillCategory: (category) => ipcRenderer.invoke('settings:set-recon-id-fix-bill-category', category)
   },
   // v2.0.0-beta.3：银行对账单处理模块 — 场景 CRUD
   scenarios: {
@@ -93,10 +119,13 @@ contextBridge.exposeInMainWorld('desktopApi', {
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（PR-B 实装算法/IO；本 PR 占位）
   // payload 形态见 docs/iterations/v2.1.0-beta.1/spec.md §三
   reconIdFix: {
-    import: () => ipcRenderer.invoke('recon-id-fix:import'),
+    // v2.1.0-beta.3 T9：import 加 payload 传 subMode（'business' | 'gateway'）
+    import: (payload) => ipcRenderer.invoke('recon-id-fix:import', payload),
     run: (payload) => ipcRenderer.invoke('recon-id-fix:run', payload),
     export: () => ipcRenderer.invoke('recon-id-fix:export'),
-    sessionStatus: () => ipcRenderer.invoke('recon-id-fix:session-status')
+    sessionStatus: () => ipcRenderer.invoke('recon-id-fix:session-status'),
+    // v2.1.0-beta.3 PR #39 Codex#1（P2）：清空 main 端 session + result（切换账单类别时调用，避免旧 session 回流）
+    clearSession: () => ipcRenderer.invoke('recon-id-fix:clear-session')
   },
   accountMappings: {
     list: (templateId) => ipcRenderer.invoke('account-mapping:list', templateId),

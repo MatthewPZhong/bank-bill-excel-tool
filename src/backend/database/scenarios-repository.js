@@ -12,8 +12,10 @@ const VALID_CATEGORIES = [
   'extract-recon-id',
   'offset-bill-mark',
   'gateway-recon-join',
-  // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复（C4）
-  'recon-id-fix'
+  // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复（C4，business 子模式）
+  'recon-id-fix',
+  // v2.1.0-beta.3：网关对账单 ReconID 修复（C4，gateway 子模式）
+  'gateway-recon-id-fix'
 ];
 
 function validateCategory(category) {

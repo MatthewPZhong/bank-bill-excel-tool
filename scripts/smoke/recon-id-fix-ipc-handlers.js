@@ -220,6 +220,13 @@ async function simulateExport(state, db, saveDialogResult, saveDialogDefaultProb
   }
 }
 
+// v2.1.0-beta.3 PR #39 Codex#1（P2）：清 main 端 session + result（切换账单类别时调用）
+function simulateClearSession(state) {
+  state.reconIdFixSession = null;
+  state.reconIdFixResult = null;
+  return { status: 'ok' };
+}
+
 function simulateSessionStatus(state) {
   return {
     status: 'ok',
@@ -815,7 +822,35 @@ async function runReconIdFixIpcHandlersSmokeTests() {
     assert.notStrictEqual(buildReconIdFixSnapshot(sc4), buildReconIdFixSnapshot(sc5), 'T20 数组顺序敏感（语义不同）');
   }
 
-  console.log('  recon-id-fix-ipc-handlers smoke: 20 / 20 PASS');
+  // ===== T21（v2.1.0-beta.3 PR #39 Codex#1 P2）：recon-id-fix:clear-session 清 main 端 session+result =====
+  // 用户切换"账单类别"时调用，防 refreshReconIdFixStatus 从 main 端拉回旧 session/result 进 renderer state
+  {
+    const db = setupDb();
+    const sc = createScenario(db, makeC4Payload('T21-clear-session'));
+    const filePath = path.join(tmpDir, 't21.xlsx');
+    writeFourSheetXlsx({
+      reconRows: [],
+      businessRows: [makeBusinessAoa({ OrderId: 'O-T21a', BillType: 'biz', Amount: 100 })],
+      opponentRows: [makeOpponentAoa({ OrderId: 'O-T21a', BillType: 'biz', reconId: 'RID-T21' })],
+      savePath: filePath
+    });
+    const state = { reconIdFixSession: null, reconIdFixResult: null };
+    // 导入 + 运行，让 session + result 都非空
+    simulateImport(state, filePath);
+    simulateRun(state, db, sc.id);
+    assert.notStrictEqual(state.reconIdFixSession, null, 'T21a 运行后 session 非空');
+    assert.notStrictEqual(state.reconIdFixResult, null, 'T21a 运行后 result 非空');
+    // 触发 clear-session
+    const ret = simulateClearSession(state);
+    assert.strictEqual(ret.status, 'ok', 'T21b clearSession 返回 ok');
+    assert.strictEqual(state.reconIdFixSession, null, 'T21b session 已清');
+    assert.strictEqual(state.reconIdFixResult, null, 'T21b result 已清');
+    // 幂等：再调一次仍 ok
+    const ret2 = simulateClearSession(state);
+    assert.strictEqual(ret2.status, 'ok', 'T21c 幂等：再调仍 ok');
+  }
+
+  console.log('  recon-id-fix-ipc-handlers smoke: 21 / 21 PASS');
 }
 
 module.exports = { runReconIdFixIpcHandlersSmokeTests };
