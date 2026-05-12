@@ -22,7 +22,7 @@
 | 文件 | 用途 |
 |---|---|
 | `src/constants/gateway-bill-recon-fields.js` | gateway 模式 4 sheet 字段常量（网关账单 31 / 渠道账单 16 / 订单修复 14 / 对账结果 19）+ sheet 名常量 |
-| `scripts/smoke/recon-id-fix-engine-gateway.js` | gateway 模式引擎 fixture 化单测（6 用例） |
+| `scripts/smoke/recon-id-fix-engine-gateway.js` | gateway 模式引擎 fixture 化单测（基线 6 用例；PR #39 review 扩至 9 用例 + constants = 10/10） |
 | `docs/iterations/v2.1.0-beta.3/PRD-v2.1.0-beta.3.md` | ✅ 已存在（本次起草） |
 | `docs/iterations/v2.1.0-beta.3/spec.md` | ✅ 本文档 |
 | `docs/iterations/v2.1.0-beta.3/tasks.md` | 任务清单（同目录） |

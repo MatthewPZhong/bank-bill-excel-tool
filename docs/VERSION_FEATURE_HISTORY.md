@@ -27,7 +27,7 @@ v2.1.0-beta.2 之后追加迭代：将"单据对账 ReconID 修复"模块扩展�
   - 全局约束：每笔渠道账单全局只能被一次消费；
   - 输出列：gateway 14 列（无 SubBizType），business 仍 15 列。
 - **IO 双模式化**：reader/writer 按 subMode 选 sheet 名 + 字段常量；文件名前缀切换（业务 `单据对账修复-...` / 网关 `网关对账修复-...`）；session.subMode vs scenario.category 一致性校验。
-- **网关引擎 fixture 化单测**：6 用例（1v1×3 选项 / 1v多 拆账 / 多v1 保 Amount / 全局约束）+ constants sanity；7/7 PASS；注册到 npm run smoke。
+- **网关引擎 fixture 化单测**：基线 6 用例（1v1×3 / 1v多 拆账 / 多v1 / 全局约束）+ constants sanity；PR #39 review 期间扩至 9 用例（mode='both' suffix 拼接 / source='' 空值 / UI 默认 config）→ 10/10 PASS；注册到 npm run smoke。
 - **网关子模式 preview**：4 张新截图（主面板 business/gateway + dialog 默认/1v多 禁用）。
 
 ### 变更
@@ -47,7 +47,7 @@ v2.1.0-beta.2 之后追加迭代：将"单据对账 ReconID 修复"模块扩展�
 - **状态隔离修复**（P2）：`clearResultCacheForCategory` + 删除场景刷新分支用 ReconID 子模式集合识别，防误清/误刷新银行对账模块。
 - **新增 IPC `recon-id-fix:clear-session`**（P2）：切换账单类别清 main 端 session/result，防旧 session 回流。
 - **UI 默认 config gateway 引擎匹配修复**（P1）：`createDefaultScenarioConfig` + "+ 新增对账分组" + 归一化 ensure 三处按 subMode 决定 `rightField`；新增 migration `migrateGatewayReconIdFixFieldPairs` 修复 DB 旧场景。
-- **smoke 回归保护**：gateway smoke 6 用例 → 10 用例（含 mode='both' suffix / source='' 空值 / UI 默认 config 进引擎匹配）；dispatcher smoke 扩展 gateway 剔除。
+- **smoke 回归保护**：gateway smoke 6 用例 → 10 用例（含 mode='both' suffix / source='' 空值 / UI 默认 config 进引擎匹配）；ipc-handlers 20 → 21（clear-session T21）；migrations 15 → 18（H5/H6 migrateGatewayReconIdFixFieldPairs 用例）；dispatcher smoke 扩展 gateway 剔除。
 
 ### 未改动
 

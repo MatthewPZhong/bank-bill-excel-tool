@@ -40,7 +40,7 @@ integrated: false
 | 47c87ce | T1+T2 | 网关子模式数据层（gateway 字段常量 + scenarios CHECK 扩至 5 值）+ PM 三件套（PRD/spec/tasks 起草） |
 | d7736fc | T3-T5 | 主面板「账单类别」下拉 + 状态级联 + 持久化（business/gateway/null 三态 + 场景下拉按类别动态过滤） |
 | bbc3bdc | T6-T7 | C4 dialog 双模式化 — business/gateway subMode 切换文案/枚举/校验/预览 + SubBizType 在 gateway 模式不渲染 |
-| 77bb83a | T8-T10 | C4 引擎 + IO 双模式化 + gateway 6 用例 smoke — 算法适配 receiveAmount/createTime + business 零回归 |
+| 77bb83a | T8-T10 | C4 引擎 + IO 双模式化 + gateway 6 用例 smoke（review 期间扩至 9 用例 + constants = 10/10）— 算法适配 receiveAmount/createTime + business 零回归 |
 | 4346027 | T11 | preview 重跑 + 4 张 gateway 状态截图 + dialog locked fieldPair 按 subMode 选默认值 |
 | c94e8df | T12 | version bump 2.1.0-beta.2 → 2.1.0-beta.3 + 文档三件套（CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE） |
 
@@ -102,7 +102,7 @@ integrated: false
 
 ### 3.5 单测（T10）
 
-- 新增 `scripts/smoke/recon-id-fix-engine-gateway.js`（6 用例 + constants sanity = 7/7 PASS）
+- 新增 `scripts/smoke/recon-id-fix-engine-gateway.js`（基线 6 用例 + constants sanity = 7/7；review 期间扩至 9 用例 + constants = 10/10 PASS）
 - 覆盖：1v1×3 选项 / 1v多 拆账 / 多v1 保 Amount / 全局约束（同一渠道全局唯一消费）
 - 注册到 `npm run smoke` dispatcher
 - `migrations-recon-id-fix.js` E1 断言 VALID_CATEGORIES 4 → 5
@@ -143,9 +143,9 @@ integrated: false
 
 - ✅ `npm run smoke` 14 子套全绿
   - recon-id-fix-engine 23/23（business 零回归）
-  - recon-id-fix-engine-gateway 7/7（新增 6 用例 + constants sanity）
-  - io 13/13 / end-to-end 6/6 / migrations 15/15 / scenarios-repository 7/7
-  - ipc-handlers 20/20 / scenario-engines 23/23 / dispatcher 15/15
+  - recon-id-fix-engine-gateway **10/10**（review 期间扩至 9 用例 + constants sanity）
+  - io 13/13 / end-to-end 6/6 / **migrations 18/18**（review 期间新增 H5/H6 — migrateGatewayReconIdFixFieldPairs 主路径/幂等/非 gateway 不动）/ scenarios-repository 7/7
+  - **ipc-handlers 21/21**（review 期间新增 T21 — clear-session 验证）/ scenario-engines 23/23 / dispatcher 15/15
   - exceljs-writer 3/3 / bank-statement-io 13/13 / scenario-end-to-end 23/23
   - error-causes 39/39 / usage-stats 41/41
 - ✅ `npm run scan:vars` 已重跑（A-share 105 / 161 / 258 / 266）
@@ -184,7 +184,7 @@ integrated: false
 
 ## 六、风险点
 
-- **资金红线（DB 迁移）**：`ensureScenariosCategoryGatewayReconIdFix` 沿用 PR-A 模板，幂等 + 事务保护；已在 smoke `migrations-recon-id-fix.js` 15/15 验证
+- **资金红线（DB 迁移）**：`ensureScenariosCategoryGatewayReconIdFix` 沿用 PR-A 模板，幂等 + 事务保护；`migrateGatewayReconIdFixFieldPairs` 修复测试期旧数据，幂等；已在 smoke `migrations-recon-id-fix.js` **18/18** 验证（含 H5/H6 主路径+幂等+非 gateway 不动）
 - **business 模式回归**：所有引擎/IO 改动都通过 mode 参数化分支，default 行为保持 beta.2 一致；smoke 23/23 验证
 - **回滚兼容**：用户在 beta.3 创建 `gateway-recon-id-fix` 场景后回滚 beta.2 → 启动失败（CHECK 不含新枚举值），与 v2.1.0-beta.1 → beta.0 回滚行为一致
 - **场景管理 dialog 行为**：账单类别为空时按钮 disabled，UI 可见（按 beta.2 完整布局，不 hidden）

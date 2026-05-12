@@ -18,7 +18,7 @@ v2.1.0-beta.2 之后追加迭代：单据对账 ReconID 修复模块扩展为 **
   - 全局约束：每笔渠道账单全局只能被一次匹配组消费（沿用引擎骨架 pairedRight 集合）；
   - 输出列：gateway 用 ORDER_REPAIR_FIELDS_GATEWAY（14 列无 SubBizType）；business 沿用 ORDER_REPAIR_FIELDS（15 列含 SubBizType）。
 - **IO 双模式化**：`getSheetConfigBySubMode` helper 按 subMode 选 4 sheet 名 + 4 字段集；reader / writer / 文件名 helper 全部加 subMode 参数；文件名前缀按 mode 切换（业务 `单据对账修复-...` / 网关 `网关对账修复-...`）；main.js 3 个 IPC handler（import/run/export）按 subMode 路由 + session.subMode vs scenario.category 一致性校验。
-- **网关引擎 fixture 化单测**（`scripts/smoke/recon-id-fix-engine-gateway.js`）：6 用例 + constants sanity（7/7 PASS），覆盖 1v1×3 选项 / 1v多 拆账 / 多v1 保 Amount / 全局约束；注册到 `npm run smoke` dispatcher。
+- **网关引擎 fixture 化单测**（`scripts/smoke/recon-id-fix-engine-gateway.js`）：constants sanity + 8 用例（PR #39 review 期间扩至 9 用例 = 10/10 PASS），覆盖 1v1×3 选项 / 1v多 拆账 / 多v1 保 Amount / 全局约束 / mode='both' + suffix 拼接 / source='' 空值 + 仅 suffix / UI 默认 config 进引擎匹配；注册到 `npm run smoke` dispatcher。
 - **网关子模式 preview**（4 张）：`recon-id-fix-panel-business` / `recon-id-fix-panel-gateway` / `scenario-config-c4-gateway` / `scenario-config-c4-gateway-1vN`（gateway 1v多 网关账单选项禁用态）。
 
 ### 变更
@@ -69,7 +69,7 @@ PR #39 review round 1-3 + self-review 收尾（共 5 项）：
 
 ### smoke
 
-`npm run smoke` 14 个子套全绿（recon-id-fix-engine 23/23 / recon-id-fix-engine-gateway 7/7 / io 13/13 / end-to-end 6/6 / migrations 15/15 / scenarios-repository 7/7 / ipc-handlers 20/20 / scenario-engines 23/23 / dispatcher 15/15 / exceljs-writer 3/3 / bank-statement-io 13/13 / scenario-end-to-end 23/23 / error-causes 39/39 / usage-stats 41/41）。
+`npm run smoke` 14 个子套全绿（recon-id-fix-engine 23/23 / **recon-id-fix-engine-gateway 10/10**（PR #39 review 期间增至 10 用例）/ io 13/13 / end-to-end 6/6 / **migrations 18/18**（PR #39 self-review 新增 H5/H6 用例 — 含 migrateGatewayReconIdFixFieldPairs 主路径/幂等/非 gateway 不动）/ scenarios-repository 7/7 / **ipc-handlers 21/21**（PR #39 review 期间增加 clear-session T21）/ scenario-engines 23/23 / dispatcher 15/15 / exceljs-writer 3/3 / bank-statement-io 13/13 / scenario-end-to-end 23/23 / error-causes 39/39 / usage-stats 41/41）。
 
 ## 2.1.0-beta.2 - 2026-05-11
 
