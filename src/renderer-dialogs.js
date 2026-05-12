@@ -6848,16 +6848,20 @@
                 <span>${isGatewayMode ? '网关 多 v 1 渠道' : '主边 多 v 1 从边'}</span>
               </label>
             </div>
-            <span class="scenario-config-label" style="margin-left:24px;">
+          </div>
+          <div class="scenario-config-row scenario-config-row-mutex">
+            <span class="scenario-config-label" style="white-space:nowrap;">
               BillDate 日期范围
               <span class="scenario-config-tooltip" title="默认 BillDate 容错范围 ±1 天（先严格匹配，再 ±1 天容错）。勾选后可调整容错窗口为 ±N 天（N=1-999），用于跨日扎单场景。严格匹配阶段不受影响。">ⓘ</span>
             </span>
-            <label class="scenario-config-c4-checkbox-item">
-              <input type="checkbox" data-c4-bill-date-range-enabled ${config.billDateRange.enabled ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-              <span>BillDate ±</span>
-              <input type="number" data-c4-bill-date-range-days min="1" max="999" value="${Number(config.billDateRange.days) > 0 ? Number(config.billDateRange.days) : 3}" ${(!config.billDateRange.enabled || isReadonly) ? 'disabled' : ''} style="width: 3em; margin: 0 4px;">
-              <span>Days</span>
-            </label>
+            <div class="scenario-config-c4-checkboxes">
+              <label class="scenario-config-c4-checkbox-item" style="white-space:nowrap;">
+                <input type="checkbox" data-c4-bill-date-range-enabled ${config.billDateRange.enabled ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+                <span>BillDate ±</span>
+                <input type="number" data-c4-bill-date-range-days min="1" max="999" value="${Number(config.billDateRange.days) > 0 ? Number(config.billDateRange.days) : 3}" ${(!config.billDateRange.enabled || isReadonly) ? 'disabled' : ''} style="width: 3em; margin: 0 4px;">
+                <span>Days</span>
+              </label>
+            </div>
           </div>
           <div class="scenario-config-row scenario-config-row-multi">
             <span class="scenario-config-label">账单类型</span>
