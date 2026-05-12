@@ -6821,19 +6821,19 @@
             <input class="scenario-config-input" type="text" data-field="name" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(draft.name || '')}" placeholder="非空 + 全局唯一">
           </div>
           <div class="scenario-config-row scenario-config-row-mutex">
-            <span class="scenario-config-label">匹配规则</span>
+            <span class="scenario-config-label">匹配模式</span>
             <div class="scenario-config-c4-checkboxes">
               <label class="scenario-config-c4-checkbox-item">
                 <input type="checkbox" data-c4-match="oneToOne" ${config.matchRules.oneToOne ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-                <span>${isGatewayMode ? '网关 1 v 1 渠道' : '主边单据 1 v 1 从边单据'}</span>
+                <span>${isGatewayMode ? '网关 1 v 1 渠道' : '主边 1 v 1 从边'}</span>
               </label>
               <label class="scenario-config-c4-checkbox-item">
                 <input type="checkbox" data-c4-match="oneToMany" ${config.matchRules.oneToMany ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-                <span>${isGatewayMode ? '网关 1 v 多 渠道' : '主边单据 1 v 多 从边单据'}</span>
+                <span>${isGatewayMode ? '网关 1 v 多 渠道' : '主边 1 v 多 从边'}</span>
               </label>
               <label class="scenario-config-c4-checkbox-item">
                 <input type="checkbox" data-c4-match="manyToOne" ${config.matchRules.manyToOne ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-                <span>${isGatewayMode ? '网关 多 v 1 渠道' : '主边单据 多 v 1 从边单据'}</span>
+                <span>${isGatewayMode ? '网关 多 v 1 渠道' : '主边 多 v 1 从边'}</span>
               </label>
             </div>
           </div>
