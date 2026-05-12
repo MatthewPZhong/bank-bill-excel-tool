@@ -319,7 +319,49 @@ function createScenarioReconIdFixDialog(scenario = null, mode = 'business') { /*
 
 ## 七、实施记录
 
-> 留空，PR 合并后由 team-lead 补充（参考 v2.1.0-beta.2 PRD §七）
+### PR #39 — 2026-05-12 合并到 `v2.1.0`（merge commit `2514084`）
+
+**13 task / 6 主 commit + 9 用户反馈 fix commit + 10 PR review 修复 commit = 共 25 commit**
+
+#### 7.1 主 task commit（T1-T12）
+
+- `47c87ce` T1+T2：网关子模式数据层（`gateway-bill-recon-fields.js` + preload inline + scenarios CHECK 4→5 + 幂等迁移）+ PM 三件套
+- `d7736fc` T3-T5：主面板"账单类别"下拉 + 状态级联 + 持久化（`recon_id_fix_bill_category`）
+- `bbc3bdc` T6-T7：C4 dialog 双模式化（business/gateway subMode 切换文案/枚举/校验/预览/SubBizType 隐藏）
+- `77bb83a` T8-T10：C4 引擎 + IO 双模式化 + gateway 6 用例 smoke（算法适配 `receiveAmount`/`createTime` + business 零回归）
+- `4346027` T11：preview 重跑 + 4 张 gateway 状态截图 + dialog locked fieldPair 按 subMode 选默认值
+- `c94e8df` T12：version bump 2.1.0-beta.2 → 2.1.0-beta.3 + 文档三件套
+
+#### 7.2 用户反馈 fix commit（fix #1-#9，主面板 UI 精修）
+
+`1220e39` 行 2 始终显示 / `dcccaf1` 场景管理保留行 1 / `289d781` 下拉固定 165px / `a0fd8bf` grid 严格对齐 / `f291013` label/select 同模式 + 场景空白 / `3995105` 整体左移 30px / `6f7ddd5` 回滚改非对称 -20/-15px / `e0b7411` 文案 + commonId 空值 + suffix + 校验 / `8239110` 错误框去 "• "
+
+#### 7.3 PR review 修复 commit（10 个，self-review + Codex/MatthewPZhong review）
+
+- `4492b11` self-review P0/P1/P3（computeReferenceGateway suffix / 模块名统一 / 注释补全）
+- `33a6713` PR review round 1（Finding 1 P1 dispatcher C4 集合 + Finding 2 P2 状态隔离 + Codex#1 P2 clear-session IPC）
+- `3f826e6` PR review round 2（Finding 1 P1 gateway 默认 Amount/Amount → Amount/receiveAmount + smoke Case 8.5）
+- `f437549` PR review round 3（P3 smoke footer 8 → 10）
+- `a91b7a2` self-review round 2（P1-1 新增 migration `migrateGatewayReconIdFixFieldPairs` 修 DB 旧 gateway 场景）
+- `055a168` PR review round 4（P2 migration smoke H5/H6 + P3 文档数字同步）
+- `b351b2e` PR review round 5（P3 PRD §6.2 + tasks T10 同步 10/10）
+- `f895c02` self-review round 3（P2-1 H6.3 防御性 + P3 文字统一 + PR draft §2.3 commit 表）
+- `728f209` PR review round 6（P3 代码注释 6 用例 → 10/10）
+- `a894166` self-review round 4（P3 PR draft §2.3 补 round 6）
+
+#### 7.4 smoke 最终
+
+`npm run smoke` 14 子套全绿（gateway 10/10 / migrations 19/19 / ipc-handlers 21/21 / engine 23/23 / io 13/13 等）
+
+#### 7.5 资金红线 / 数据迁移
+
+- scenarios.category CHECK 4→5 值（`ensureScenariosCategoryGatewayReconIdFix` 幂等迁移）
+- DB 旧 gateway 场景修复（`migrateGatewayReconIdFixFieldPairs`：fieldPairs locked `Amount/Amount` → `Amount/receiveAmount`）
+
+#### 7.6 关联文档
+
+- 三件套：CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE 已同步
+- PR 归档：`docs/prs/PR39-v2.1.0-beta.3.md`（`integrated: true`）
 
 ---
 
