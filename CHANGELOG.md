@@ -1,5 +1,54 @@
 # Changelog
 
+## 2.1.1 - 2026-05-12
+
+v2.1.0-beta.3 之后追加 patch 迭代：**PDF 整体移除**（破坏性变更）+ C4 dialog 文案优化 + **BillDate ±N 可配置** + tooltip + 按钮文案优化。6 个主 task 共 8 个 commit 完成。
+
+### ⚠️ 破坏性变更（BREAKING）
+
+- **移除 PDF 导入功能**：完全卸下 PDF 解析（pdfjs-dist + tesseract.js + OCR 训练数据 + `src/backend/file-service/pdf-worker.js` 子进程 + readers.js PDF 分支 + main.js dialog filter PDF 项 + `SUPPORTED_EXTENSIONS` 删 `.pdf`）。安装包体积预计减小 ~25 MB。**v2.1.0 及之前用户若仍在用 PDF 导入会被破坏**，需切到 Excel/CSV。
+
+### 新增
+
+- **C4 引擎 BillDate ±N 可配置**（取代硬编码 ±1day）：`scenario.config.billDateRange = { enabled: boolean, days: number }`：
+  - 不勾选（缺省）：保持 Step 2/3.2/3'.2 ±1day 容错（与现状一致，零回归）
+  - 勾选 + days=N（1-999 正整数）：Step 2/3.2/3'.2 容错窗口替换为 ±N 天
+  - Step 1 strict 严格匹配阶段**永远保留**（不受 BillDate ±N 配置影响）
+  - 用于跨日扎单场景对账容错
+  - dialog UI：C4 dialog 在"匹配模式"下方独立一行新增 "BillDate 日期范围 ⓘ" + "BillDate ± [days] Days"，含 tooltip 说明 + 1-999 输入校验
+- **dialog tooltip 双处**（"修复结果输出" + "订单修复ID取值"）：解释输出方向 + commonId 取值语义
+
+### 变更
+
+- **版本号**：2.1.0-beta.3 → 2.1.1（patch 版本）
+- **C4 dialog 文案精简**（business 子模式）：
+  - "匹配规则" → "匹配模式"
+  - "主边单据 1 v 1 从边单据" → "主边 1 v 1 从边"（3 个勾选框）
+  - gateway 子模式 "网关 X v Y 渠道" 保持不变
+- **银行对账单处理"开始运行"三选一 dialog 按钮文案**：`跳过 C3 直接运行` → `直接运行`（不再向最终用户暴露内部代号 C3）
+- **USER_GUIDE.md**：删除 PDF 类型说明（line 21）
+- **smoke 扩展**：
+  - `recon-id-fix-engine`：billDateMatches 加 4 个 days 参数化单测 + 端到端 `runBillDateRangeWithNDays` 3 sub-case（44/44 PASS）
+  - `recon-id-fix-engine-gateway`：基线 10 + Case 9/10/11 BillDate ±N（13/13 PASS）
+- **preview 重跑**：4 张 C4 dialog 截图（含新增 BillDate 区）
+
+### 修复
+
+- 无（本迭代均为新功能 / 改进，无 bug 修复）
+
+### 内部
+
+- **依赖卸下**：`pdfjs-dist@^5.5.207` / `tesseract.js@^7.0.0` / `@tesseract.js-data/chi_sim@^1.0.0` / `@tesseract.js-data/eng@^1.0.0`（4 个 dep + 17 个传递依赖）
+- **c4-recon-id-fix.js**：`billDateMatches(L, R, mode, days = 1)` 参数化；5 处调用点都传 `cfg._billDateDays`；`runC4Scenario` 入口解析 `cfg.billDateRange.{enabled, days}`
+- **scripts/smoke/scenarios.js**：删 `pdfMatchedRows` 用例（PDF 路径已移除）
+- **renderer-dialogs.js**：`createDefaultScenarioConfig` C4 类新增 `billDateRange: { enabled: false, days: 3 }` 默认；老 config 缺字段时路由层防御性兜底
+
+### Critical 变量改动
+
+- ⚠️ `SUPPORTED_EXTENSIONS`（`rules/important-variables.md` Critical 层）：从 `['.xlsx', '.xls', '.csv', '.pdf']` 改为 `['.xlsx', '.xls', '.csv']`。已同步：reader 实现 + UI dialog filter + USER_GUIDE 文案。
+
+---
+
 ## 2.1.0-beta.3 - 2026-05-11
 
 v2.1.0-beta.2 之后追加迭代：单据对账 ReconID 修复模块扩展为 **对账单ReconID修复** 通用模块，下挂 **单据对账单**（已有）+ **网关对账单**（新增）两个子模式，共用 C4 dialog + 引擎骨架；主面板新增"账单类别"一级筛选下拉 + 持久化。13 个 task 共 5 个 commit 完成。

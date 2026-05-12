@@ -9,6 +9,40 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.1（2026-05-12）
+
+v2.1.0-beta.3 之后追加 patch 迭代：**PDF 整体移除**（破坏性变更）+ C4 dialog 文案优化 + **BillDate ±N 可配置** + tooltip + 按钮文案。6 个 task / 8 个 commit / 单 PR 合并。
+
+### ⚠️ 破坏性变更
+
+- **PDF 导入功能整体移除**：完全卸下 `pdfjs-dist` + `tesseract.js`（含 OCR 训练数据）+ `pdf-worker.js` 子进程 + readers.js PDF 分支 + main.js dialog filter + `SUPPORTED_EXTENSIONS` 删 `.pdf`。安装包减小 ~25 MB。v2.1.0 及之前用户若用 PDF 导入会被破坏。
+
+### 新增
+
+- **C4 引擎 BillDate ±N 可配置**：取代硬编码 ±1day；`scenario.config.billDateRange = { enabled, days }`；不勾选保持现状（零回归）；勾选 + N 替换 Step 2/3.2/3'.2 容错窗口；用于跨日扎单对账场景。
+- **C4 dialog "BillDate 日期范围" 区**：勾选框 + 输入框（1-999）+ tooltip ⓘ；独立一行渲染在"匹配模式" 下方。
+- **C4 dialog "修复结果输出" / "订单修复ID取值" tooltip**：解释输出方向 + commonId 取值语义。
+
+### 变更
+
+- **C4 dialog 文案精简**（business 子模式）：
+  - "匹配规则" → "匹配模式"
+  - 3 个勾选框文案 "主边单据 X v Y 从边单据" → "主边 X v Y 从边"
+  - gateway 子模式（"网关 X v Y 渠道"）保持不变
+- **银行对账单处理 C3 提醒 dialog 按钮文案**：`跳过 C3 直接运行` → `直接运行`（不暴露内部代号）
+- **smoke 扩展**：billDateMatches 加 4 个 days 单测；engine + engine-gateway 各加 BillDate ±N 端到端用例（business 44/44，gateway 13/13）
+- **preview 重跑**：4 张 C4 dialog 截图
+
+### 移除
+
+- `pdfjs-dist` / `tesseract.js` / `@tesseract.js-data/chi_sim` / `@tesseract.js-data/eng`（4 dep + 17 传递依赖）
+- `src/backend/file-service/pdf-worker.js`（整文件）
+- `readers.js`：`readPdfRows` / `shouldStopPdfMatchedRows` / `shouldSkipPdfMatchedRow` / `isPdfFile` 参数
+- `scripts/smoke/scenarios.js`：`pdfMatchedRows` 用例
+- USER_GUIDE.md：line 21 PDF 类型说明
+
+---
+
 ## 2.1.0-beta.3（2026-05-11）
 
 v2.1.0-beta.2 之后追加迭代：将"单据对账 ReconID 修复"模块扩展为 **对账单ReconID修复** 通用模块，下挂"单据对账单"（已有）+ "网关对账单"（新增）两个子模式，共用 C4 dialog + 引擎骨架 + IO 层；主面板新增"账单类别"一级筛选下拉。13 个 task / 5 个 commit / 单 PR 合并。
