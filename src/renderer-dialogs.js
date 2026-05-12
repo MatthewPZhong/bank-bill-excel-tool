@@ -5750,7 +5750,9 @@
             mode: 'main', // 'main' | 'opp' | 'both'
             commonId: { source: 'main', suffix: '' },
             subBizType: { mode: 'auto', mainValue: '', oppValue: '' } // 'auto' | 'manualMain' | 'manualOpp' | 'manualBoth'
-          }
+          },
+          // v2.1.1 T2-2：BillDate ±N 默认 enabled=false（引擎走 ±1day 缺省，零回归）；days=3（勾选后首次展示值）
+          billDateRange: { enabled: false, days: 3 }
         };
       }
       return {};
@@ -5852,6 +5854,14 @@
         }
         if (mr.oneToMany && mr.manyToOne) {
           errors.push('"1 v 多"与"多 v 1"互斥，不能同时勾选');
+        }
+        // v2.1.1 T2-2：BillDate ±N 校验（仅勾选时校验 days；不勾选 → 用默认 ±1day，无需校验）
+        const bdr = c.billDateRange || null;
+        if (bdr && bdr.enabled) {
+          const d = Number(bdr.days);
+          if (!Number.isInteger(d) || d < 1 || d > 999) {
+            errors.push('BillDate 日期范围必须是 1-999 的正整数');
+          }
         }
         const billTypesArr = Array.isArray(c.billTypes) ? c.billTypes : [];
         if (billTypesArr.length === 0) {
@@ -6714,6 +6724,8 @@
       const config = draft.config;
       // 防御：每行字段补默认
       if (!config.matchRules) config.matchRules = { oneToOne: true, oneToMany: false, manyToOne: false };
+      // v2.1.1 T2-2：BillDate ±N 默认初始化（不勾选 → 引擎走 ±1day 缺省，零回归）
+      if (!config.billDateRange) config.billDateRange = { enabled: false, days: 3 };
       if (!Array.isArray(config.billTypes) || config.billTypes.length === 0) {
         config.billTypes = [{ seq: 1, side: 'main', conditions: [{ field: '', op: '等于', value: '' }] }];
       }
@@ -6821,19 +6833,33 @@
             <input class="scenario-config-input" type="text" data-field="name" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(draft.name || '')}" placeholder="非空 + 全局唯一">
           </div>
           <div class="scenario-config-row scenario-config-row-mutex">
-            <span class="scenario-config-label">匹配规则</span>
+            <span class="scenario-config-label">匹配模式</span>
             <div class="scenario-config-c4-checkboxes">
               <label class="scenario-config-c4-checkbox-item">
                 <input type="checkbox" data-c4-match="oneToOne" ${config.matchRules.oneToOne ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-                <span>${isGatewayMode ? '网关 1 v 1 渠道' : '主边单据 1 v 1 从边单据'}</span>
+                <span>${isGatewayMode ? '网关 1 v 1 渠道' : '主边 1 v 1 从边'}</span>
               </label>
               <label class="scenario-config-c4-checkbox-item">
                 <input type="checkbox" data-c4-match="oneToMany" ${config.matchRules.oneToMany ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-                <span>${isGatewayMode ? '网关 1 v 多 渠道' : '主边单据 1 v 多 从边单据'}</span>
+                <span>${isGatewayMode ? '网关 1 v 多 渠道' : '主边 1 v 多 从边'}</span>
               </label>
               <label class="scenario-config-c4-checkbox-item">
                 <input type="checkbox" data-c4-match="manyToOne" ${config.matchRules.manyToOne ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-                <span>${isGatewayMode ? '网关 多 v 1 渠道' : '主边单据 多 v 1 从边单据'}</span>
+                <span>${isGatewayMode ? '网关 多 v 1 渠道' : '主边 多 v 1 从边'}</span>
+              </label>
+            </div>
+          </div>
+          <div class="scenario-config-row scenario-config-row-mutex">
+            <span class="scenario-config-label" style="white-space:nowrap;">
+              BillDate 日期范围
+              <span class="scenario-config-tooltip" title="默认 BillDate 容错范围 ±1 天（先严格匹配，再 ±1 天容错）。勾选后可调整容错窗口为 ±N 天（N=1-999），用于跨日扎单场景。严格匹配阶段不受影响。">ⓘ</span>
+            </span>
+            <div class="scenario-config-c4-checkboxes">
+              <label class="scenario-config-c4-checkbox-item" style="white-space:nowrap;">
+                <input type="checkbox" data-c4-bill-date-range-enabled ${config.billDateRange.enabled ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+                <span>BillDate ±</span>
+                <input type="number" data-c4-bill-date-range-days min="1" max="999" value="${Number(config.billDateRange.days) > 0 ? Number(config.billDateRange.days) : 3}" ${(!config.billDateRange.enabled || isReadonly) ? 'disabled' : ''} style="width: 3em; margin: 0 4px;">
+                <span>Days</span>
               </label>
             </div>
           </div>
@@ -6852,7 +6878,7 @@
             </div>
           </div>
           <div class="scenario-config-row scenario-config-row-mutex">
-            <span class="scenario-config-label">${isGatewayMode ? '订单修复ID取值' : '修复结果输出'}</span>
+            <span class="scenario-config-label" style="width:auto; white-space:nowrap;">${isGatewayMode ? '订单修复ID取值' : '修复结果输出'} <span class="scenario-config-tooltip" title="${isGatewayMode ? '指定订单修复 ID 取值：取自网关 ReconID / 取自渠道 ReconID / 自取值（自定义来源 + 拼接&quot;加上&quot;输入框文本）。' : '指定修复结果写到哪一侧：主边修复 / 从边修复 / 主从都修复。选&quot;主从都修复&quot;会展开取值来源选项，决定共同 ReconID 从哪一侧取。'}">ⓘ</span></span>
             <div class="scenario-config-c4-output" data-c4-output></div>
           </div>
         </div>
@@ -7091,6 +7117,23 @@
           renderOutput();
         });
       });
+
+      // v2.1.1 T2-2：BillDate ±N 区事件 — 勾选框控制启用 + 输入框联动
+      const billDateEnabledEl = dialog.querySelector('input[data-c4-bill-date-range-enabled]');
+      const billDateDaysEl = dialog.querySelector('input[data-c4-bill-date-range-days]');
+      if (billDateEnabledEl && billDateDaysEl) {
+        billDateEnabledEl.addEventListener('change', () => {
+          if (isReadonly) return;
+          config.billDateRange.enabled = billDateEnabledEl.checked;
+          billDateDaysEl.disabled = !billDateEnabledEl.checked;
+        });
+        billDateDaysEl.addEventListener('input', () => {
+          if (isReadonly) return;
+          const v = Number(billDateDaysEl.value);
+          // 仅记入 config（校验留给保存时 validateScenarioDraft；range 是 1-999 正整数）
+          config.billDateRange.days = Number.isFinite(v) ? v : config.billDateRange.days;
+        });
+      }
 
       // 行 3：账单类型动态行
       billTypesEl.addEventListener('change', (event) => {

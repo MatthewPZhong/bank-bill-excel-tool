@@ -2581,8 +2581,8 @@ function templateFileDialogFilters() {
 function statementFileDialogFilters() {
   return [
     {
-      name: 'Excel / CSV / PDF',
-      extensions: ['xlsx', 'xls', 'csv', 'pdf']
+      name: 'Excel / CSV',
+      extensions: ['xlsx', 'xls', 'csv']
     }
   ];
 }

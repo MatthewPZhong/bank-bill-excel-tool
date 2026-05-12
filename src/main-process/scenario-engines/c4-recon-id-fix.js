@@ -148,8 +148,11 @@ function findAmountLockedPair(fieldPairs) {
 
 // Round 3：BillDate 比较
 //   mode='strict' — 字符串 normalize 后严格相等
-//   mode='±1day' — 在严格的基础上允许差 1 天（D-1 / D / D+1 任一相等）
-function billDateMatches(leftRaw, rightRaw, mode) {
+//   mode='±1day' — 启用容错；差 ≤ days 天命中（含 D-N … D+N）
+// v2.1.1 T2-2：days 参数化（取代硬编码 1 day）；默认 1 兼容老调用方
+//   语义：mode='strict' → 仅字符串相等；mode='±1day' → 字符串相等或差 ≤ days 天
+//   mode 标识保留 '±1day' 字面（语义层是"启用容错"），具体窗口由 days 决定
+function billDateMatches(leftRaw, rightRaw, mode, days = 1) {
   const L = normalizeCellValue(leftRaw);
   const R = normalizeCellValue(rightRaw);
   if (L === '' || R === '') return false;
@@ -158,7 +161,7 @@ function billDateMatches(leftRaw, rightRaw, mode) {
   const lDate = parseBillDateMs(L);
   const rDate = parseBillDateMs(R);
   if (lDate === null || rDate === null) return false;
-  return Math.abs(lDate - rDate) === 86400 * 1000;
+  return Math.abs(lDate - rDate) <= days * 86400 * 1000;
 }
 
 // 解析 BillDate 字符串为 UTC ms
@@ -612,9 +615,10 @@ function tryOneToOne(leftRows, rightRows, fieldPairs, billDateMode,
     if (pairedLeft.has(leftRow._rowIdx)) continue;
     lastStepByLeft.set(leftRow._rowIdx, stepLabel);
     // 候选：BillDate 按 mode 比较 + 全部 fieldPairs AND 全等
+    // v2.1.1 T2-2：days 参数化（cfg._billDateDays，由 runC4Scenario 入口注入；默认 1 与历史 ±1day 一致）
     const candidates = rightRows.filter((r) =>
       !pairedRight.has(r._rowIdx)
-        && billDateMatches(leftRow.BillDate, r.BillDate, billDateMode)
+        && billDateMatches(leftRow.BillDate, r.BillDate, billDateMode, cfg._billDateDays)
         && rowsMatchFieldPairs(leftRow, r, fieldPairs)
     );
     if (billDateMode === 'strict') {
@@ -627,7 +631,7 @@ function tryOneToOne(leftRows, rightRows, fieldPairs, billDateMode,
       // 反向校验：右行回看左侧空闲行的匹配数 == 1，确保 1v1
       const reverse = leftRows.filter((l) =>
         !pairedLeft.has(l._rowIdx)
-          && billDateMatches(l.BillDate, rightRow.BillDate, billDateMode)
+          && billDateMatches(l.BillDate, rightRow.BillDate, billDateMode, cfg._billDateDays)
           && rowsMatchFieldPairs(l, rightRow, fieldPairs)
       );
       if (reverse.length !== 1) {
@@ -647,7 +651,7 @@ function tryOneToOne(leftRows, rightRows, fieldPairs, billDateMode,
       // 双向一致性：bestRight 反查 leftRows，按同 tie-break 选最优主单；不是当前 leftRow 则让位
       const reverseCandidates = leftRows.filter((l) =>
         !pairedLeft.has(l._rowIdx)
-          && billDateMatches(l.BillDate, bestRight.BillDate, billDateMode)
+          && billDateMatches(l.BillDate, bestRight.BillDate, billDateMode, cfg._billDateDays)
           && rowsMatchFieldPairs(l, bestRight, fieldPairs)
       );
       if (reverseCandidates.length === 0) continue;
@@ -679,9 +683,10 @@ function tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode,
     if (pairedLeft.has(leftRow._rowIdx)) continue;
     lastStepByLeft.set(leftRow._rowIdx, stepLabel);
     // 候选过滤：BillDate + 其他对账字段 AND 全等（Amount 不参与 AND 过滤）
+    // v2.1.1 T2-2：days 参数化
     const candidates = rightRows.filter((r) =>
       !pairedRight.has(r._rowIdx)
-        && billDateMatches(leftRow.BillDate, r.BillDate, billDateMode)
+        && billDateMatches(leftRow.BillDate, r.BillDate, billDateMode, cfg._billDateDays)
         && rowsMatchOtherFieldPairs(leftRow, r, otherFieldPairs)
     );
     if (candidates.length < 2) {
@@ -727,7 +732,7 @@ function tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode,
     lastStepByRight.set(rightRow._rowIdx, stepLabel);
     const candidates = leftRows.filter((l) =>
       !pairedLeft.has(l._rowIdx)
-        && billDateMatches(l.BillDate, rightRow.BillDate, billDateMode)
+        && billDateMatches(l.BillDate, rightRow.BillDate, billDateMode, cfg._billDateDays)
         && rowsMatchOtherFieldPairs(l, rightRow, otherFieldPairs)
     );
     if (candidates.length < 2) {
@@ -1018,8 +1023,30 @@ function runC4Scenario(scenario, sheets, subMode) {
   const effectiveSubMode = subMode === 'gateway' ? 'gateway'
     : subMode === 'business' ? 'business'
     : (scenario.category === 'gateway-recon-id-fix' ? 'gateway' : 'business');
-  // 浅克隆 scenario.config 加 _subMode 字段，避免污染原 scenario 对象
-  const cfg = Object.assign({}, scenario.config || {}, { _subMode: effectiveSubMode });
+  // v2.1.1 T2-2：BillDate ±N 容错配置解析
+  //   不勾选 → _billDateDays = 1（与历史 ±1day 行为一致，零回归）
+  //   勾选 + days=N → _billDateDays = N（Step 2/3.2/3'.2 容错窗口替换为 ±N 天）
+  //   注入 cfg._billDateDays（不写盘 scenario.config，仅本次运行用）
+  // PR #41 review Finding 1（P2 资金红线）：UI 层 validateScenarioDraft 已 1-999 整数校验，
+  //   但 DB 旧配置 / 导入配置 / 异常配置可能带非法值（10000 / Infinity / 小数 / NaN）→
+  //   引擎入口必须再做一道防御性校验，异常值 fallback 1（与不勾选等价）+ warning，
+  //   避免资金类匹配窗口被异常配置静默扩大。
+  const billDateRange = (scenario.config && scenario.config.billDateRange) || null;
+  let billDateAbnormalRaw = null; // 非 null 表示原始 days 异常，待 warningCollector 创建后 push
+  const billDateDays = (() => {
+    if (!billDateRange || !billDateRange.enabled) return 1;
+    const n = Number(billDateRange.days);
+    if (!Number.isInteger(n) || n < 1 || n > 999) {
+      billDateAbnormalRaw = billDateRange.days;
+      return 1;
+    }
+    return n;
+  })();
+  // 浅克隆 scenario.config 加 _subMode / _billDateDays 字段，避免污染原 scenario 对象
+  const cfg = Object.assign({}, scenario.config || {}, {
+    _subMode: effectiveSubMode,
+    _billDateDays: billDateDays
+  });
   const matchRules = cfg.matchRules || {};
   const reconResult = (sheets && sheets.reconResult) || [];
   const businessBills = (sheets && sheets.businessBills) || [];
@@ -1039,6 +1066,14 @@ function runC4Scenario(scenario, sheets, subMode) {
 
   const warningCollector = makeWarningCollector(scenario.id, scenario.name);
   const fixedRows = [];
+
+  // v2.1.1 T2-2 / PR #41 review Finding 1：BillDate days 异常值 warning
+  if (billDateAbnormalRaw !== null) {
+    warningCollector.push({
+      code: 'INVALID_BILL_DATE_RANGE_DAYS',
+      message: `BillDate 日期范围天数配置异常（原值 ${JSON.stringify(billDateAbnormalRaw)}），引擎已回退到 ±1day。请到场景配置中修正为 1-999 整数。`
+    });
+  }
 
   // 1. 给主从边账单分类
   const mainTyped = classifyRows(businessBills, cfg.billTypes, 'main');
