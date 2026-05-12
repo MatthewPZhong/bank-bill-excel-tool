@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-网银账单生成小助手 — Electron desktop app for Chinese bank statement processing. Imports Excel/CSV/PDF bank statements, maps columns via configurable templates, and exports standardized detail & balance Excel files.
+网银账单生成小助手 — Electron desktop app for Chinese bank statement processing. Imports Excel/CSV bank statements, maps columns via configurable templates, and exports standardized detail & balance Excel files.
 
-Tech stack: Electron 36 + vanilla JS (no frontend framework) + SQLite (`node:sqlite` DatabaseSync) + SheetJS (XLSX) + PDF.js + Tesseract.js OCR.
+Tech stack: Electron 36 + vanilla JS (no frontend framework) + SQLite (`node:sqlite` DatabaseSync) + SheetJS (XLSX).
+
+> v2.1.1 起移除 PDF 导入支持（破坏性变更），同时卸下 pdfjs-dist + tesseract.js OCR 依赖与 `src/backend/file-service/pdf-worker.js` 子进程。
 
 ## Commands
 
@@ -104,7 +106,6 @@ Per README convention, these three files must be updated together on each releas
 - Custom error class: `FileValidationError` (code, message, detail lines, context) in `file-service/common.js`
 - Prepared field values use `__FIXED__:` prefix (e.g., `__FIXED__:MerchantId=NET001`)
 - Database migrations are idempotent and run on every startup (`database/migrations.js`)
-- PDF parsing runs in a child process (`file-service/pdf-worker.js`)
 - Dialogs are created dynamically in JS — no separate HTML templates
 - Commit message 不加 `Co-Authored-By` AI 署名
 - PR body 不加 `Generated with Claude Code` 等 AI 标记

@@ -247,6 +247,51 @@ function runBillDateRangeWithNDays() {
   }
 }
 
+// v2.1.1 PR #41 review Finding 1（P2）：runC4Scenario 防御性 days 校验
+//   UI 层 1-999 整数校验之外，引擎入口对异常 days（>999 / <1 / 非整数 / NaN）应 fallback 1 + warning
+function runBillDateRangeDefensiveFallback() {
+  const business = [
+    makeBusinessRow({ OrderId: 'O-1', BillDate: '2026-04-09', Amount: 100, reconId: '' })
+  ];
+  const opponent = [
+    makeOpponentRow({ OrderId: 'O-1', BillDate: '2026-04-12', Amount: 100, reconId: 'RID-OPP-1' })
+  ];
+
+  function runWithDays(days) {
+    const cfg = makeCfg({
+      matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+      output: { mode: 'main', subBizType: { mode: 'manualMain', mainValue: 'SBT' } }
+    });
+    cfg.billDateRange = { enabled: true, days };
+    const scenario = makeScenario('recon-id-fix', `BD-defensive-${days}`, cfg);
+    return runReconIdFix(scenario, { reconResult: [], businessBills: business, opponentBills: opponent });
+  }
+
+  // 异常 days 应 fallback 1（与不勾选等价），跨 3 天不命中 + 产 warning
+  const cases = [
+    { label: 'days=10000（超 999 上限）', value: 10000 },
+    { label: 'days=0', value: 0 },
+    { label: 'days=-1', value: -1 },
+    { label: 'days=3.5（非整数）', value: 3.5 },
+    { label: 'days=Infinity', value: Infinity },
+    { label: 'days=NaN', value: NaN },
+    { label: 'days="abc"（字符串）', value: 'abc' }
+  ];
+
+  cases.forEach((c) => {
+    const r = runWithDays(c.value);
+    assert.strictEqual(r.fixedRows.length, 0, `${c.label} → fallback 1 → 跨 3 天不命中`);
+    const hasWarn = (r.warnings || []).some((w) => w.code === 'INVALID_BILL_DATE_RANGE_DAYS');
+    assert.ok(hasWarn, `${c.label} → 应产 INVALID_BILL_DATE_RANGE_DAYS warning`);
+  });
+
+  // 正常 days=5（boundary）应不产 warning
+  const okResult = runWithDays(5);
+  assert.strictEqual(okResult.fixedRows.length, 1, 'days=5 正常 → 命中');
+  const hasNoWarn = !(okResult.warnings || []).some((w) => w.code === 'INVALID_BILL_DATE_RANGE_DAYS');
+  assert.ok(hasNoWarn, 'days=5 正常 → 不应产 INVALID_BILL_DATE_RANGE_DAYS warning');
+}
+
 // ===== Step 3.1：池子同 BillDate + subset-sum 1v多 =====（Round 4 重写）
 function runStep31PoolOneToMany() {
   // 1 主 amount=300 vs 2 从 [amount=100, amount=200] → subset-sum {100,200} = 300 ✓
@@ -1718,6 +1763,7 @@ function runReconIdFixEngineSmokeTests() {
     runStep1Strict,
     runStep2Tolerant,
     runBillDateRangeWithNDays,
+    runBillDateRangeDefensiveFallback,
     runStep31PoolOneToMany,
     runStep32PoolOneToManyTolerant,
     runStep3p1PoolManyToOne,

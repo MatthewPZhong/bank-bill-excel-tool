@@ -1027,10 +1027,21 @@ function runC4Scenario(scenario, sheets, subMode) {
   //   不勾选 → _billDateDays = 1（与历史 ±1day 行为一致，零回归）
   //   勾选 + days=N → _billDateDays = N（Step 2/3.2/3'.2 容错窗口替换为 ±N 天）
   //   注入 cfg._billDateDays（不写盘 scenario.config，仅本次运行用）
+  // PR #41 review Finding 1（P2 资金红线）：UI 层 validateScenarioDraft 已 1-999 整数校验，
+  //   但 DB 旧配置 / 导入配置 / 异常配置可能带非法值（10000 / Infinity / 小数 / NaN）→
+  //   引擎入口必须再做一道防御性校验，异常值 fallback 1（与不勾选等价）+ warning，
+  //   避免资金类匹配窗口被异常配置静默扩大。
   const billDateRange = (scenario.config && scenario.config.billDateRange) || null;
-  const billDateDays = (billDateRange && billDateRange.enabled)
-    ? (Number(billDateRange.days) > 0 ? Number(billDateRange.days) : 1)
-    : 1;
+  let billDateAbnormalRaw = null; // 非 null 表示原始 days 异常，待 warningCollector 创建后 push
+  const billDateDays = (() => {
+    if (!billDateRange || !billDateRange.enabled) return 1;
+    const n = Number(billDateRange.days);
+    if (!Number.isInteger(n) || n < 1 || n > 999) {
+      billDateAbnormalRaw = billDateRange.days;
+      return 1;
+    }
+    return n;
+  })();
   // 浅克隆 scenario.config 加 _subMode / _billDateDays 字段，避免污染原 scenario 对象
   const cfg = Object.assign({}, scenario.config || {}, {
     _subMode: effectiveSubMode,
@@ -1055,6 +1066,14 @@ function runC4Scenario(scenario, sheets, subMode) {
 
   const warningCollector = makeWarningCollector(scenario.id, scenario.name);
   const fixedRows = [];
+
+  // v2.1.1 T2-2 / PR #41 review Finding 1：BillDate days 异常值 warning
+  if (billDateAbnormalRaw !== null) {
+    warningCollector.push({
+      code: 'INVALID_BILL_DATE_RANGE_DAYS',
+      message: `BillDate 日期范围天数配置异常（原值 ${JSON.stringify(billDateAbnormalRaw)}），引擎已回退到 ±1day。请到场景配置中修正为 1-999 整数。`
+    });
+  }
 
   // 1. 给主从边账单分类
   const mainTyped = classifyRows(businessBills, cfg.billTypes, 'main');
