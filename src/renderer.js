@@ -3296,7 +3296,7 @@ async function handleBankStatementRun() {
       openModal(createConfirmDialog({
         message: '已启用「资金对账不平」类场景但未导入「资金对账不平结果表」。<br>继续运行将跳过该类场景。',
         confirmText: '导入文件',
-        middleText: '跳过 C3 直接运行',
+        middleText: '直接运行',
         cancelText: '取消',
         onConfirm: async () => {
           closeModal();
