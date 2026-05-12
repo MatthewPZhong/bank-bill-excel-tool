@@ -6878,7 +6878,7 @@
             </div>
           </div>
           <div class="scenario-config-row scenario-config-row-mutex">
-            <span class="scenario-config-label">${isGatewayMode ? '订单修复ID取值' : '修复结果输出'} <span class="scenario-config-tooltip" title="${isGatewayMode ? '指定网关账单与渠道账单两侧的修复 ID 取自哪一侧的 reconciliationId（可选追加 suffix）。&quot;两侧都修复&quot; 时会同时写入两侧。' : '指定 ReconID 修复结果写到哪一侧的单据：仅写主边 / 仅写从边 / 主从都写。Type 字段会自动标记（1=主边, 2=从边, 3=双向）。'}">ⓘ</span></span>
+            <span class="scenario-config-label" style="width:auto; white-space:nowrap;">${isGatewayMode ? '订单修复ID取值' : '修复结果输出'} <span class="scenario-config-tooltip" title="${isGatewayMode ? '指定订单修复 ID 取值：取自网关 ReconID / 取自渠道 ReconID / 自取值（自定义来源 + 拼接&quot;加上&quot;输入框文本）。' : '指定修复结果写到哪一侧：主边修复 / 从边修复 / 主从都修复。选&quot;主从都修复&quot;会展开取值来源选项，决定共同 ReconID 从哪一侧取。'}">ⓘ</span></span>
             <div class="scenario-config-c4-output" data-c4-output></div>
           </div>
         </div>

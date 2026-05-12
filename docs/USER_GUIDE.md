@@ -666,7 +666,7 @@ C4 类场景配置弹窗（`createScenarioConfigDialogC4`）共 5 行：
 | 2.5 | **BillDate 日期范围**（v2.1.1 新增） | 勾选框 + 数字输入 | 取代硬编码 ±1day 容错。不勾选 → 保持 ±1day（与现状一致）；勾选 + N（1-999 正整数）→ Step 2/3.2/3'.2 容错窗口替换为 ±N 天，用于跨日扎单对账。Step 1 strict 严格匹配永远第一道，不受影响。tooltip ⓘ 解释默认行为 |
 | 3 | **账单类型** | 动态行 | 每行 = 序号（自增）+ 主/从联动字段下拉 + 7 op 下拉（=, !=, in, not-in, contains, starts-with, ends-with）+ ❌ 删除 + 行内「+ 新增」；主从各 1 条以上 |
 | 4 | **对账字段** | 动态分组 block | 默认 1 个 group + 1 行锁定 `Amount/Amount` 字段对（locked）；「+ 新增字段对」加 AND 行；「+ 新增 OR 分组」另开 group block；锁定行的 select disabled + ❌ 删除按钮隐藏 |
-| 5 | **修复结果输出** | 互斥勾选 + SubBizType 三选一 + tooltip ⓘ（v2.1.1 新增） | 「主边修复 / 从边修复 / 主从都修复」三选一（互斥）；勾「主从都修复」展开"共同 ID"区（`源端单据 reconId + 输入框文本`）；SubBizType 三选一互斥：自动查 reconResult / 主边手填 / 从边手填。**tooltip 文案**（v2.1.1）：解释 ReconID 写到哪一侧 + Type 字段自动标记（1=主边, 2=从边, 3=双向）。gateway 子模式同行 label 为 `订单修复ID取值`，tooltip 文案改为 reconciliationId + suffix 取值说明 |
+| 5 | **修复结果输出** | 互斥勾选 + SubBizType 三选一 + tooltip ⓘ（v2.1.1 新增） | 「主边修复 / 从边修复 / 主从都修复」三选一（互斥）；勾「主从都修复」展开"共同 ID"区（`源端单据 reconId + 输入框文本`）；SubBizType 三选一互斥：自动查 reconResult / 主边手填 / 从边手填。**tooltip 文案**（v2.1.1）：业务子模式提示 "主边修复 / 从边修复 / 主从都修复" + 取值来源说明；gateway 子模式同行 label 为 `订单修复ID取值`，tooltip 文案提示 "取自网关 ReconID / 取自渠道 ReconID / 自取值（自定义来源 + 拼接'加上'输入框文本）" |
 
 <!-- 截图占位：scenario-config-c4（C4 配置弹窗 5 行布局，主边修复模式） -->
 
