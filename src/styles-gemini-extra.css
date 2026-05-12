@@ -1015,14 +1015,17 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
    用 transform: translateX 单独给 4 个元素右移：
    - [场景管理]/[导出文件] 右移 100px
    - [pending-action-pair]/[statusBox] 右移 74px（用户复测后从 47 增至 74，让距离 ≈ 80px = 原 53px 的 1.5 倍）
-   - 最终 [场景管理 右]↔[导入文件 左] 距离 = 106 - 100 + 74 = 80px */
+   - 最终 [场景管理 右]↔[导入文件 左] 距离 = 106 - 100 + 74 = 80px
+   v2.1.0-beta.3 修订（用户反馈）：场景管理/导出文件/导入文件/开始运行/状态框 整体往左 30px
+   - [场景管理]/[导出文件] 100 - 30 = 70px
+   - [pending-action-pair]/[statusBox] 74 - 30 = 44px */
 .recon-id-fix-board #reconIdFixManageScenariosBtn,
 .recon-id-fix-board #reconIdFixExportBtn {
-  transform: translateX(100px);
+  transform: translateX(70px);
 }
 .recon-id-fix-board .pending-action-pair,
 .recon-id-fix-board #reconIdFixStatusBox {
-  transform: translateX(74px);
+  transform: translateX(44px);
 }
 .pending-board .pending-status {
   width: 100%;
