@@ -2669,6 +2669,53 @@ select {
 .pending-board .pending-action-pair .primary-btn,
 .bank-statement-board .pending-action-pair .primary-btn { min-width: 140px; }
 
+/* v2.1.1：General 风格对账单ReconID修复 主面板（同步 Clear grid 3 列布局；label/select 视觉同网银账单生成模块的 .select-label / .template-select）
+   Clear 风格相同设计见 styles-gemini-extra.css:898-986
+   设计思路：60px label / 220px select / 140px button 三列严格对齐；行 1 [账单类别+下拉+场景管理] 与行 2 [场景+下拉+导出文件] 垂直对齐 */
+.recon-id-fix-board .recon-id-fix-bill-category-row,
+.recon-id-fix-board .recon-id-fix-scenario-row {
+  display: grid;
+  grid-template-columns: 60px 220px 140px;
+  column-gap: 10px;
+  align-items: center;
+}
+/* label 同模式 .select-label（16px / var(--muted)）；右对齐 + nowrap 防字符换行 */
+.recon-id-fix-board .recon-id-fix-bill-category-label,
+.recon-id-fix-board .recon-id-fix-scenario-label {
+  font-size: 16px;
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+}
+/* select 同模式 .template-select（44px 高 / 14px 圆角 / #fffdf8 背景 / var(--line-strong) 边 / 14px padding）；
+   仅 width 改成 grid 列 2 = 220px（mode 下拉框 260px 在窄左 cell 里溢出） */
+.recon-id-fix-board .recon-id-fix-bill-category-select,
+.recon-id-fix-board .recon-id-fix-scenario-select {
+  width: 220px;
+  height: 44px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: #fffdf8;
+  padding: 0 14px;
+  color: var(--text);
+}
+.recon-id-fix-board .recon-id-fix-bill-category-select:disabled,
+.recon-id-fix-board .recon-id-fix-scenario-select:disabled {
+  background-color: rgba(60, 64, 67, 0.06);
+  color: rgba(60, 64, 67, 0.5);
+  cursor: not-allowed;
+}
+/* 行 1/2 内的 secondary-btn (场景管理 / 导出文件) 宽度 = grid 第 3 列 140px
+   override .bank-statement-board .cell.left .secondary-btn 默认 180px（特异度相同，CSS 后写者胜） */
+.recon-id-fix-board .recon-id-fix-bill-category-row .secondary-btn,
+.recon-id-fix-board .recon-id-fix-scenario-row .secondary-btn {
+  min-width: 140px;
+}
+/* statusBox 宽度 = pending-action-pair 宽度 (2 * 140 + gap 12 = 292px)，与 Clear 风格一致 */
+.recon-id-fix-board #reconIdFixStatusBox {
+  width: 292px;
+}
+
 /* PR #32b 多行状态框：导入两文件 / 已导出含 error-report 时换行展示 */
 #bankStatementStatusBox .status-box-text {
   white-space: pre-line;
