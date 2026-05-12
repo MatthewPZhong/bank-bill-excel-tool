@@ -7332,7 +7332,8 @@
       dialog.querySelector('[data-action="confirm"]')?.addEventListener('click', () => {
         const errors = validateScenarioDraft(draft);
         if (errors.length > 0) {
-          openModal(createAlertDialog(errors.map((e) => `• ${e}`).join('<br>'), {
+          // v2.1.0-beta.3 修订（用户反馈）：错误文本去掉 "• " 前缀
+          openModal(createAlertDialog(errors.join('<br>'), {
             onConfirm: () => openScenarioConfigByCategory(draft.category)
           }));
           return;
