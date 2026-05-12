@@ -2,7 +2,7 @@
 
 ## 2.1.1 - 2026-05-12
 
-v2.1.0-beta.3 之后追加 patch 迭代：**PDF 整体移除**（破坏性变更）+ C4 dialog 文案优化 + **BillDate ±N 可配置** + tooltip + 按钮文案优化。6 个主 task 共 8 个 commit 完成。
+v2.1.0-beta.3 之后追加 patch 迭代：**PDF 整体移除**（破坏性变更）+ C4 dialog 文案优化 + **BillDate ±N 可配置** + tooltip + 按钮文案优化。6 个主 task / 8 个实现 commit 完成（PR #41 累计 15 commit，含 PM 1 + 实现 8 + PR 草稿 1 + 用户反馈 self-review fix 2 + 草稿改名 1 + PR review round-1/2 fix 2 + round-3 文档同步 1）。
 
 ### ⚠️ 破坏性变更（BREAKING）
 
