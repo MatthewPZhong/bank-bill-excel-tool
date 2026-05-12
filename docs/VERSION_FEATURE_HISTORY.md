@@ -30,7 +30,7 @@ v2.1.0-beta.3 之后追加 patch 迭代：**PDF 整体移除**（破坏性变更
   - 3 个勾选框文案 "主边单据 X v Y 从边单据" → "主边 X v Y 从边"
   - gateway 子模式（"网关 X v Y 渠道"）保持不变
 - **银行对账单处理 C3 提醒 dialog 按钮文案**：`跳过 C3 直接运行` → `直接运行`（不暴露内部代号）
-- **smoke 扩展**：billDateMatches 加 4 个 days 单测；engine + engine-gateway 各加 BillDate ±N 端到端用例（business 44/44，gateway 13/13）
+- **smoke 扩展**：billDateMatches 加 4 个 days 单测；engine + engine-gateway 各加 BillDate ±N 端到端用例 + PR #41 review fix defensive fallback 用例（business **45/45**，gateway **13/13**）
 - **preview 重跑**：4 张 C4 dialog 截图
 
 ### 移除

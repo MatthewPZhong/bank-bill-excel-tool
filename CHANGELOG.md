@@ -28,7 +28,7 @@ v2.1.0-beta.3 之后追加 patch 迭代：**PDF 整体移除**（破坏性变更
 - **银行对账单处理"开始运行"三选一 dialog 按钮文案**：`跳过 C3 直接运行` → `直接运行`（不再向最终用户暴露内部代号 C3）
 - **USER_GUIDE.md**：删除 PDF 类型说明（line 21）
 - **smoke 扩展**：
-  - `recon-id-fix-engine`：billDateMatches 加 4 个 days 参数化单测 + 端到端 `runBillDateRangeWithNDays` 3 sub-case（44/44 PASS）
+  - `recon-id-fix-engine`：billDateMatches 加 4 个 days 参数化单测 + 端到端 `runBillDateRangeWithNDays` 3 sub-case + PR #41 review fix `runBillDateRangeDefensiveFallback`（7 异常值 + 1 正常值）（45/45 PASS）
   - `recon-id-fix-engine-gateway`：基线 10 + Case 9/10/11 BillDate ±N（13/13 PASS）
 - **preview 重跑**：4 张 C4 dialog 截图（含新增 BillDate 区）
 
