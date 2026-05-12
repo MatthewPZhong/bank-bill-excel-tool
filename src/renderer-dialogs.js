@@ -5392,9 +5392,11 @@
       'offset-bill-mark': '账单打标',
       'gateway-recon-join': '提取ReconId-From 网关',
       // v2.1.0-beta.1 PR-A（task A6）：单据对账修复
-      'recon-id-fix': '单据对账修复',
+      // v2.1.0-beta.3 修订（用户反馈）：'单据对账修复' → '单据对账单修复'
+      'recon-id-fix': '单据对账单修复',
       // v2.1.0-beta.3 T7：网关对账修复（C4 gateway 子模式）
-      'gateway-recon-id-fix': '网关对账修复'
+      // v2.1.0-beta.3 修订（用户反馈）：'网关对账修复' → '网关对账单修复'
+      'gateway-recon-id-fix': '网关对账单修复'
     };
 
     function getCategoryLabel(category) {
@@ -5928,10 +5930,17 @@
         }
         if (out.mode === 'both') {
           const ci = out.commonId || {};
-          if (!ci.source || (ci.source !== 'main' && ci.source !== 'opp')) {
+          // v2.1.0-beta.3 修订（用户反馈）：取值来源新增空值选项 ''（用户主动选）；
+          //   选择空值时 suffix "加上"输入框必须非空
+          if (ci.source !== 'main' && ci.source !== 'opp' && ci.source !== '') {
             errors.push(isGwSubMode
-              ? '"自取值"必须选择 ID 取自 网关账单ReconID / 渠道账单ReconID'
-              : '"主从都修复"必须选择共同 ID 取自主/从边');
+              ? '"自取值"取值来源选项无效'
+              : '"主从都修复"取值来源选项无效');
+          }
+          if (ci.source === '' && (!ci.suffix || String(ci.suffix).trim() === '')) {
+            errors.push(isGwSubMode
+              ? '"自取值"取值来源选择空值时，右侧"加上"输入框必须填写内容'
+              : '"主从都修复"取值来源选择空值时，右侧"加上"输入框必须填写内容');
           }
         }
         // gateway 模式：SubBizType 整段跳过（dialog 内已不渲染该区块）
@@ -6999,13 +7008,14 @@
             <div class="scenario-config-c4-common-id">
               <span>取</span>
               <select class="scenario-config-input" data-c4-common-id="source" ${isReadonly ? 'disabled' : ''}>
+                <!-- v2.1.0-beta.3 修订（用户反馈）：新增空值 option（人眼看为空白行），选取后右侧"加上"输入框必须有值（校验时强制） -->
+                <option value=""${(!out.commonId.source) ? ' selected' : ''}></option>
                 <option value="main"${out.commonId.source === 'main' ? ' selected' : ''}>${labelCommonIdMain}</option>
                 <option value="opp"${out.commonId.source === 'opp' ? ' selected' : ''}>${labelCommonIdOpp}</option>
               </select>
-              ${isGatewayMode ? '' : `
-                <span>加上</span>
-                <input class="scenario-config-input scenario-config-input-narrow" type="text" data-c4-common-id="suffix" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(out.commonId.suffix || '')}" placeholder="后缀">
-              `}
+              <!-- v2.1.0-beta.3 修订（用户反馈）：gateway 模式也加 suffix 输入框（功能同 business 的"加上"输入框） -->
+              <span>加上</span>
+              <input class="scenario-config-input scenario-config-input-narrow" type="text" data-c4-common-id="suffix" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(out.commonId.suffix || '')}" placeholder="后缀">
               <span>${labelCommonIdSuffix}</span>
             </div>
           ` : ''}
@@ -7284,9 +7294,11 @@
           return;
         }
         // commonId.source
+        // v2.1.0-beta.3 修订（用户反馈）：支持空值 ''（用户主动选"空白行"），school 输入框校验在 validateScenarioDraft 内
         const ciSource = event.target.closest('[data-c4-common-id="source"]');
         if (ciSource) {
-          config.output.commonId.source = ciSource.value === 'opp' ? 'opp' : 'main';
+          const v = ciSource.value;
+          config.output.commonId.source = (v === 'main' || v === 'opp' || v === '') ? v : 'main';
         }
       });
       outputEl.addEventListener('input', (event) => {
