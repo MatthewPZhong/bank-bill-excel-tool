@@ -115,12 +115,8 @@
   },
   "dependencies": {
     "@napi-rs/canvas": "^0.1.97",
-    "@tesseract.js-data/chi_sim": "^1.0.0",
-    "@tesseract.js-data/eng": "^1.0.0",
     "exceljs": "^4.4.0",
     "marked": "^18.0.0",
-    "pdfjs-dist": "^5.5.207",
-    "tesseract.js": "^7.0.0",
     "xlsx": "^0.18.5",
     "xlsx-js-style": "^1.2.0"
   },

@@ -399,45 +399,6 @@ function runMappingScenario(context, state) {
   assert.strictEqual(rawStatementWithSummaryRows[1][3], 'BIG_001');
   assert.strictEqual(rawStatementWithSummaryRows[1][4], 'USD');
 
-  const pdfMatchedRows = collectMatchedRows({
-    meaningfulRows: [
-      {
-        rowNumber: 40,
-        cells: ['Year', 'Date', 'Event ID', 'Transaction type', 'Currency', 'Credit', 'Debit']
-      },
-      {
-        rowNumber: 41,
-        cells: ['2026', '02-Feb', 'TXN001', 'Deposit', 'USD', '100.00', '0.00']
-      },
-      {
-        rowNumber: 42,
-        cells: ['www.example.com | contact@example.com']
-      },
-      {
-        rowNumber: 43,
-        cells: ['2026', '03-Feb', 'TXN002', 'Deposit', 'USD', '200.00', '0.00']
-      },
-      {
-        rowNumber: 44,
-        cells: ['Year', 'Date', 'Event ID', 'Transaction type', 'Currency', 'Credit', 'Debit']
-      },
-      {
-        rowNumber: 45,
-        cells: ['Named Account']
-      },
-      {
-        rowNumber: 46,
-        cells: ['2026', '04-Feb', 'TXN003', 'Deposit', 'USD', '300.00', '0.00']
-      }
-    ],
-    matchedRowIndex: 0,
-    matchedColumnIndex: 0,
-    normalizedExpectedHeaders: ['Year', 'Date', 'Event ID', 'Transaction type', 'Currency', 'Credit', 'Debit'],
-    isPdfFile: true
-  });
-  assert.strictEqual(pdfMatchedRows.rows.length, 3);
-  assert.deepStrictEqual(pdfMatchedRows.rowNumbers, [40, 41, 43]);
-
   const simultaneousAmountRows = buildMappedRows({
     inputFilePath: context.simultaneousAmountDataPath,
     mappingByField: {
