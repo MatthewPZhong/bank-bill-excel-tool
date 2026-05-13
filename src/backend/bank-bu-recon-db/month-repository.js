@@ -3,8 +3,8 @@
 // 操作：
 //   - listMonths：列已导入月份 + 各侧行数 + latestRunAt
 //   - getMonthMeta：单月统计
-//   - clearMonth：重新导入前清空指定月份两侧数据（事务）
-//   - insertPendingRows / insertBankRows：批量插入（事务 + prepared stmt）
+//   - importMonthAtomic：覆盖导入原子事务（清 pending+bank+runs 旧数据 + 双侧 insert 同事务）
+//   - PR #43 self-review round 3 S1：删 clearMonth/insertPendingRows/insertBankRows 死代码 export
 //   - getPendingRows / getBankRows：对账算法读取（含 row_index）
 
 const {

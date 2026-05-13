@@ -358,11 +358,59 @@ PRD §三 草稿表格误标 `line 7420 / 7421 / 7425` 为 C4 dialog 范围，sp
 - 下拉框**宽度** = `labelWidth + 32px`（v0.7b 用户视觉偏好，右边缘超出「份」字 32px）→ 纯 CSS 不可行（`.pending-reconcile-month-select` 自带 `min-width:200px` + select native intrinsic width 会撑大父 inline-block，循环依赖）→ **改用 JS 测量**：dialog attach 后 `setTimeout 0` 测 `radioSingleLabel.getBoundingClientRect().width`，强制 `monthSelect.style.width = (labelWidth + 32) + 'px'`；`document.fonts.ready` 兜底字体异步加载
 - 涉及：`src/renderer-dialogs.js#createBankBuReconExportDialog`
 
+### 修正 11：Codex round 1 review（commit `ee7e954`）
+
+Codex 第 1 轮自动 review 提出 4 finding：
+
+- **P1（资金红线）覆盖导入旧 runs 不清** → `clearMonth()` 加 `DELETE FROM bank_bu_recon_runs`；`importMonth()` 同步清 `lastRunCache`（防"旧 runId + 新数据"混搭）
+- **P2 package-lock 版本未同步** → `npm install --package-lock-only` 同步到 2.1.2
+- **P2 资金红线 smoke 未接入** → 新建 `scripts/smoke/bank-bu-recon.js`（A-E + F-H + I 覆盖导入回归 + 5 normalize 单测 = 36 assert）+ 接到 `scripts/smoke-test.js`
+- **P3 trailing whitespace** → sed 清扫 PRD/spec 4 处
+
+涉及：`src/backend/bank-bu-recon-db/month-repository.js` / `src/main-process/bank-bu-recon-session.js` / `package-lock.json` / `scripts/smoke/bank-bu-recon.js`（新增）/ `scripts/smoke-test.js` / `docs/iterations/v2.1.2/{PRD,spec}.md`
+
+### 修正 12：self-review round 2（commit `494eb83`）— v0.4 残留全清
+
+第 1 轮 self-review fix（C1-M2）只改了 PR body Summary + smoke 表 + checklist + 1 个注释；第 2 轮 self-review 发现还有 11 处 v0.4 残留分布在 spec/tasks/CHANGELOG/USER_GUIDE/VFH/session.js 头部。
+
+- **N1**（Critical）`bank-bu-recon-session.js` 头部 line 2-4「严格 1:1 + 任何重复中断」→ v0.8「1:1/1:N/N:1 成功 + N:M 异常 sheet 不中断」（round 1 M1 只改了 normalize 注释，漏了上面匹配规则注释）
+- **N2** spec.md 5 处残留（runs schema 注释 / IPC 表 bankBuRecon:run 返回值 / smoke 用例 C/D/E + F/G/H 大小写边界 / 重要变量升格表 / 风险红线段 / preview 入口表）
+- **N3** tasks.md 3 处（T2.6 commit message 模板 / T2.10 验收"故意构造 1:N 数据" / 风险表 / 算法关键点）
+- **N4** PR body 修正 6 段「汇总跳过 failed_anomaly 月份」加 dormant safety net 说明
+- **N5** CHANGELOG / VFH / USER_GUIDE 顶部 summary + 章节描述 5 处
+
+最终验证：grep "failed_anomaly|严格 1:1|异常中断" 在所有文档/代码中 v0.4 残留 = 0
+
+### 修正 13：Codex round 2 review（commit `47344e0`）
+
+- **F1（P2）usage-stats FUNCTION_REGISTRY 缺注册** → `trackedIpcHandle('月度银行对账单BU回填校验',...)` 调用计数被 `incrementFunction()` 静默忽略；registry 加 3 个函数注册 + smoke `U11.bbr` 4 assert（registry + 实际 increment）
+- **F2（P2）docs v0.4/v0.5 残留** → USER_GUIDE §1.6.2 step 5/6（"运行中断 + 错误报告 + 2-sheet"→"v0.8 后 success + 弹另存为 + 3-sheet"）/ CHANGELOG 8→10 IPC / VFH 同步
+- **F3（P2 inline）importMonth 三步独立事务** → 新增 `importMonthAtomic()` 包 4 步（clear pending+bank+runs + 双侧 insert）同事务（防 disk-full 等场景下"清空 + 仅一侧已写"不一致）
+
+### 修正 14：Codex round 3 review（commit `94e658a`）
+
+- **F4（P2）docs 残留** → USER_GUIDE §1.6.3.1「2 sheet→3 sheet」/ VFH BU 比较改 v0.9 / CHANGELOG smoke 4 用例→36 assert
+- **F5（P2 inline）reader.js 行号空行 bug**（真 bug） → `XLSX.utils.sheet_to_json` 用 `blankrows: false` 移除空行，导致 array index 不再对应 Excel 真实行号 → N:M 异常 sheet / 错误报告里的行号会指向错误源行；修复：`blankrows: true` + smoke Case J 5 assert（构造表头/空/R1/空/R2 xlsx → R1._rowIndex=3, R2._rowIndex=5）
+
+说明：USER_GUIDE.md:935「对账单号匹配仍仅 trim 不大小写归一化（rec1 vs REC1 视为不匹配）」是描述 `normalizeKey` 的**正确行为**（v0.9 拍板：仅 BU 大小写归一，对账单号匹配保持区分大小写）— Codex 此条似误判，**该行保留不改**。
+
+### 修正 15：self-review round 3（commit `7a71dc2`）
+
+- **S1** 删 `month-repository.js` 3 个死代码 export（`clearMonth` / `insertPendingRows` / `insertBankRows` + `buildBatchInserter` 工厂）— 8 files changed, 净 -44 行；importMonth 改用 importMonthAtomic 后这些 export 在 src/ scripts/ **0 引用**
+- **S3** 8 处文案/注释残留同步 v0.8/v0.9：PRD §一「2-sheet→3-sheet」/ tasks T2.7 / spec §八 BU 比较 / main.js IPC 段顶注释（8→10 handler、严格 1:1→v0.8 1:1/1:N/N:1）/ migrations.js + run-repository.js 头部 status 字段加说明 / writer.js 头部「2-sheet→3-sheet」
+
+最终残留扫描 = 0：`grep "BU 不大小写 | failed_anomaly | 严格 1:1 | 2-sheet"` 在 v2.1.2 范围 0 命中（除合理的 v0.4/v0.8 历史对比 + dormant safety net + normalizeKey 描述外）。
+
+### 修正 16：self-review round 4
+
+- **R1** `month-repository.js` 头部注释 line 6-7 仍描述 round 3 已删的 `clearMonth` / `insertPendingRows` / `insertBankRows` → 改为描述 `importMonthAtomic` + 加 round 3 删除说明
+- **R3/R5** PR 草稿（本文件）补齐修正 11-16 章节，对齐归档要求（按 memory `workflow_archive_pr_draft`：merge 后改名 `PR43-v2.1.2.md` + 加 `integrated:true` frontmatter）
+
 ## 关联文档
 
-- `docs/iterations/v2.1.2/PRD-v2.1.2.md` v0.4
-- `docs/iterations/v2.1.2/spec.md` v0.1
-- `docs/iterations/v2.1.2/tasks.md` v0.1
+- `docs/iterations/v2.1.2/PRD-v2.1.2.md` v0.6（OPEN ISSUE #5 v0.9 + #10 v0.8 重新拍板）
+- `docs/iterations/v2.1.2/spec.md` v0.9（OPEN ISSUE #5 重新拍板：BU 比较加大小写归一化；normalize 拆为 normalizeKey/normalizeBu）
+- `docs/iterations/v2.1.2/tasks.md` v0.1（4 路对账算法 + smoke 36 assert）
 - `CHANGELOG.md` v2.1.2 章节
 - `docs/VERSION_FEATURE_HISTORY.md` v2.1.2 章节
 - `docs/USER_GUIDE.md` §1.6 章节
