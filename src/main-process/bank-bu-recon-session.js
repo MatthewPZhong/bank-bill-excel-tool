@@ -1,8 +1,10 @@
 // v2.1.2 T2 — 月度银行对账单BU回填校验：session 层 + 对账算法
-// 资金红线（PRD §六.2 OPEN ISSUE #10 拍板）：
-//   - 严格 1:1 匹配（Pending.主对账单号 ↔ 银行对账单.ReconciliationId）
-//   - 任何 1:N / N:1 / N:M 异常 → 运行立即中断 + 异常报告 + 弹窗
-// BU 比较语义（PRD §六 OPEN ISSUE #5 拍板，v0.9 修订）：
+// 资金红线（PRD §六.2 OPEN ISSUE #10 v0.5 → v0.8 重新拍板）：
+//   - 1:1 / 1:N / N:1 视为对账成功 → 走 BU 比较（精准标差异子对）
+//   - N:M（双侧 ≥2）视为数据异常 → 跳过 BU 比较，加入 nmAnomalies → 写入差异表 Sheet 3「异常」
+//   - 不再中断运行；不再生成 .txt 报告 / 中断弹窗（v0.4 设计已废弃）
+//   - run.status 永远是 'success'；bank_bu_recon_runs.anomaly_count = N:M 异常组数
+// BU 比较语义（PRD §六 OPEN ISSUE #5 v0.9 拍板）：
 //   - normalizeBu(v): null/undefined/'' → ''；其余 String(v).trim().toLowerCase()
 //   - 容忍 BU 字段大小写差异（如 Flowmore vs FlowMore，财务侧实际命名不规范不再误报）
 //   - 对账单号匹配仍用 normalizeKey（仅 trim 不大小写归一）

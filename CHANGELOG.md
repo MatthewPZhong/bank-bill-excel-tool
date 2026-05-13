@@ -2,7 +2,7 @@
 
 ## 2.1.2 - 2026-05-13
 
-v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更**（账单类型→对账字段、对账字段→对账内容）+ **新增模块「月度银行对账单BU回填校验」**。OPEN ISSUE #10 资金红线拍板：严格 1:1 匹配，任何 1:N / N:1 / N:M 异常 → 运行立即中断 + 错误报告 + 弹窗提示。
+v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更**（账单类型→对账字段、对账字段→对账内容）+ **新增模块「月度银行对账单BU回填校验」**。OPEN ISSUE #10 资金红线（v0.5 → v0.8 重新拍板）：1:1 / 1:N / N:1 视为对账成功（精准标 BU 差异子对）；N:M（双侧 ≥2）视为数据异常 → 跳过 + 写入差异表 Sheet 3「异常」（**不中断运行**）。OPEN ISSUE #5 BU 比较（v0.9）：trim + toLowerCase + 空值归一（容忍 `Flowmore` vs `FlowMore` 大小写差异）。
 
 ### ⚠️ 资金红线（必须人工 review）
 
@@ -14,7 +14,7 @@ v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更**（账单类型→�
 
 ### 新增
 
-- **新模块「月度银行对账单BU回填校验」**：T-1 月 Pending 数据管理 + 银行对账单导入 → 严格 1:1 对账 → 2-sheet 差异 Excel 导出（BU 差异行整行黄底）
+- **新模块「月度银行对账单BU回填校验」**：T-1 月 Pending 数据管理 + 银行对账单导入 → 1:1 / 1:N / N:1 视为对账成功（v0.8）→ 3-sheet 差异 Excel 导出（Pending / 银行对账单 / 异常；BU 差异行整行黄底）
   - 主菜单新增入口（与"对账单ReconID修复"同级）
   - 主面板 3 个按钮：「导入文件」+「开始运行」+「导出差异」
   - 「导入文件」点击 → 弹月份选择对话框（年/月两下拉）→ 弹 Pending 文件提示 → 弹文件选择 → 弹银行对账单文件提示 → 弹文件选择
@@ -53,7 +53,7 @@ v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更**（账单类型→�
 
 - ⚠️ T2 新增的对账核心符号（待 `npm run scan:vars` 升格评估，优先 Risk-sensitive）：
   - `runReconciliation()` (bank-bu-recon-session.js) — 资金红线对账算法入口
-  - `bank_bu_recon_runs.status` 字段 — `success` / `failed_anomaly` 状态机
+  - `bank_bu_recon_runs.status` 字段 — v0.4 设计 `success` / `failed_anomaly`；v0.8 后实际只用 `success`（schema 字段保留兼容）
   - `PENDING_MATCH_KEY_DB_COLUMN='recon_id'` / `BANK_MATCH_KEY_DB_COLUMN='reconciliation_id'` — 匹配 key 锚点
   - `PENDING_DIFF_FIELD_DB_COLUMN='finance_bu'` / `BANK_DIFF_FIELD_DB_COLUMN='remark_bu'` — 差异字段锚点
   - `normalize(v)` (bank-bu-recon-session.js) — BU 比较归一化函数

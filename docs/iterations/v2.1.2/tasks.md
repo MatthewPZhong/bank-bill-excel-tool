@@ -144,20 +144,22 @@
 ### T2.6：session + 对账算法（**资金红线**）
 
 - **文件（新建）**：`src/main-process/bank-bu-recon-session.js`
-- **核心函数**：
-  - `runReconciliation(yearMonth)` — spec §3.6 算法（伪码 → JS 实现）
-  - `writeAnomalyReport(yearMonth, anomalies)` — spec §3.8 异常报告 .txt
-  - `normalize(v)` — trim + 空值归一（spec §3.6）
+- **核心函数**（v0.8/v0.9 修订）：
+  - `runReconciliation(yearMonth)` — spec §3.6 算法（4 路分类：1:1/1:N/N:1/N:M）
+  - `normalizeKey(v)` / `normalizeBu(v)` — v0.9 拆函数（Key 仅 trim / Bu trim+toLowerCase）
+  - ~~`writeAnomalyReport`~~ — v0.8 已删除（不再生成 .txt 报告）
 - **算法关键点**（**逐字对照 spec §3.6 不打折扣**）：
-  - 必须扫完全部异常再中断（不是发现 1 个就停）
-  - Pending side / Bank side 各自检查重复
-  - 1:1 通过后再做 BU 比较
-- **完成证据**：
-  - smoke 用例 A：全相等 → bu_diff_count=0
-  - smoke 用例 B：部分差异 → bu_diff_count=2
-  - smoke 用例 C：1:N → status=failed_anomaly + anomaly 内含具体行号
-  - smoke 用例 D：N:1 → status=failed_anomaly
-- **commit message**：`[v2.1.2] feat(t2.6): bank-bu-recon session + 严格 1:1 对账算法（资金红线）`
+  - 1:1 / 1:N / N:1 视为对账成功 → 走 BU 比较（精准标差异子对，不要标多）
+  - N:M（双侧 ≥2）视为数据异常 → 跳过 BU 比较 + 加入 nmAnomalies → 写入差异表 Sheet 3「异常」
+  - 永远 status='success'（不中断、不弹窗、不生成 .txt）
+- **完成证据**（v0.8/v0.9 重新设计）：
+  - smoke A：1:1 全等 → buDiff=0 / nm=0
+  - smoke B：1:1 部分差异 → buDiff=2 / nm=0
+  - smoke C：1:N 部分差异 → P 不标，仅标差异 B 行 / nm=0
+  - smoke D：N:1 部分差异 → B 不标，仅标差异 P 行 / nm=0
+  - smoke E：N:M → status='success'，nm=1，异常 sheet 含行号
+  - smoke F/G/H：BU 大小写归一边界 + 对账单号大小写仍区分
+- **commit message**：`[v2.1.2] feat(t2.6): bank-bu-recon session + 4 路对账算法（v0.8: 1:1/1:N/N:1 成功 + N:M 异常 sheet）`
 - **预估**：L（最复杂的一块，必须人工 review）
 - **依赖**：T2.2 + T2.4 + T2.5
 - **⚠️ 风险**：资金红线，PR review 必须人工跑真实数据样本验证
@@ -209,7 +211,7 @@
 - **内容**：spec §3.9.2 状态机 + button enabled/disabled 联动 + 月份 select 渲染 + 调用 8 个 IPC + 状态栏 spark + tone
 - **完成证据**：
   - 手动测试：导入 → 运行 → 导出 全流程通
-  - 故意构造 1:N 数据：异常中断流程通
+  - 故意构造 N:M 数据：状态栏显示「N:M 异常 N 组」，运行不中断（v0.8 修订）
 - **commit message**：`[v2.1.2] feat(t2.10): renderer.js — bank-bu-recon 模块状态机`
 - **预估**：L
 - **依赖**：T2.8 + T2.9 + T2.12
@@ -333,7 +335,7 @@
 
 | 风险 | 应对 |
 |---|---|
-| **资金红线**：T2.6 严格 1:1 对账算法 | spec §3.6 伪码逐字对齐；smoke C/D 必须通过；PR review 人工跑真实数据样本 |
+| **资金红线**：T2.6 4 路对账算法（v0.8 修订） | spec §3.6 伪码逐字对齐；smoke A-E + F-H 必须通过；PR review 人工跑真实数据样本 |
 | **资金红线**：BU 比较 trim 语义（OPEN ISSUE #5） | normalize() 单元自检 + 用真实数据 BU 字段抽样验证 |
 | **资金红线**：异常报告完整性 | T2.6 必须 dump 全部异常（不止前 20）到 .txt 报告 |
 | Pending 模块同名风险 | T2 全部命名前缀 `bankBuRecon` / `bank_bu_recon` / `bank-bu-recon`，spec §八 已对齐 |

@@ -260,15 +260,15 @@ CREATE TABLE IF NOT EXISTS bank_bu_recon_runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   year_month TEXT NOT NULL,
   run_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  status TEXT NOT NULL,                 -- 'success' / 'failed_anomaly'
+  status TEXT NOT NULL,                 -- v0.4 设计 'success'/'failed_anomaly'；v0.8 后实际只用 'success'（schema 字段保留兼容）
   pending_total INTEGER NOT NULL,
   bank_total INTEGER NOT NULL,
-  matched_count INTEGER NOT NULL,       -- 1:1 对账成功数
+  matched_count INTEGER NOT NULL,       -- 双侧合计行数（1:1+1:N+N:1 全部 matched 行）
   bu_diff_count INTEGER NOT NULL,
   pending_unmatched INTEGER NOT NULL,
   bank_unmatched INTEGER NOT NULL,
-  anomaly_count INTEGER NOT NULL DEFAULT 0,
-  anomaly_report_path TEXT,             -- 异常报告文件路径（status=failed_anomaly 才有）
+  anomaly_count INTEGER NOT NULL DEFAULT 0,   -- v0.8 重新定义：N:M 异常组数
+  anomaly_report_path TEXT,             -- v0.4 字段保留兼容；v0.8 后不再生成 .txt 报告，永远为 NULL
   export_path TEXT                      -- 差异表导出路径
 );
 
@@ -285,7 +285,7 @@ CREATE INDEX IF NOT EXISTS idx_bbr_runs_month ON bank_bu_recon_runs(year_month, 
 | `bankBuRecon:import:pick-pending-file` | `{yearMonth}` | `{status, filePath}` | 单选 Pending 数据管理文件，触发前前端会先弹 `createBankBuReconFileImportPromptDialog` 提示用户用途 |
 | `bankBuRecon:import:pick-bank-file` | `{yearMonth}` | `{status, filePath}` | 单选银行对账单文件，触发前同上 |
 | `bankBuRecon:import:run` | `{yearMonth, pendingPath, bankPath}` | `{pendingCount, bankCount, errors}` | 后台导入解析 + 表头校验 + 入 SQLite |
-| `bankBuRecon:run` | `{yearMonth}` | `{runId, status, stats}` 或 `{status:'failed_anomaly', anomalies, reportPath}` | 后台执行对账（**严格 1:1**） |
+| `bankBuRecon:run` | `{yearMonth}` | `{runId, status:'success', stats}`（stats 含 nmAnomalyCount）| 后台执行对账（v0.8：1:1/1:N/N:1 成功，N:M 跳过 + 写差异表 Sheet 3 异常，永远 status=success） |
 | ~~`bankBuRecon:export`~~ | — | — | **v0.5 删除** — 拆为下两条 |
 | `bankBuRecon:export:single` | `{runId, savePath}` | `{status, filePath}` | 单月差异表导出到用户指定路径（另存为对话框结果） |
 | `bankBuRecon:export:aggregate` | `{savePath}` | `{status, filePath, skippedMonths}` | 跨月汇总导出（每月最新 success run，单 xlsx 2 sheet 加「对账月份」列）；skippedMonths 用于前端 alert 提示 |
@@ -650,15 +650,26 @@ function validatePendingGuanliHeaders(actualHeaders) {
 - 构造 5 行匹配，其中 2 行 BU 不等
 - 期望：bu_diff_count=2，差异表 Pending sheet 5 行中 2 行黄底，银行 sheet 同步
 
-### 4.3 用例 C（**资金红线**）：1:N 异常中断
+### 4.3 用例 C（**资金红线** v0.8 重写）：1:N 部分 BU 差异
 
-- 构造 Pending 1 行 + 银行对账单同对账单号 3 行
-- 期望：status='failed_anomaly'，anomaly_count=1，生成异常报告 .txt，差异表**不生成**
+- 构造 Pending 1 行 + 银行对账单同对账单号 3 行（其中 B[1] BU 与 P 不等）
+- 期望：status='success'，matched=4（双侧合计），buDiff=1（仅 B[1] 标黄，P 不标），nm=0
 
-### 4.4 用例 D（**资金红线**）：N:1 异常中断
+### 4.4 用例 D（**资金红线** v0.8 重写）：N:1 部分 BU 差异
 
-- 构造 Pending 2 行同对账单号 + 银行对账单 1 行
-- 期望：status='failed_anomaly'，anomaly_count=1
+- 构造 Pending 3 行（P[1] BU 与 B 不等）+ 银行对账单 1 行
+- 期望：status='success'，matched=4，buDiff=1（仅 P[1] 标黄，B 不标），nm=0
+
+### 4.5 用例 E（**资金红线** v0.8 新增）：N:M 异常 sheet
+
+- 构造 Pending 2 行 + 银行对账单 2 行同对账单号
+- 期望：status='success'（**不中断**），matched=0，nm=1，差异表 Sheet 3「异常」含 1 行（对账单号 + 双侧匹配数 + 双侧行号）
+
+### 4.6-4.8 用例 F/G/H（v0.9 新增）：BU 大小写归一边界
+
+- F: BU 仅大小写不同 (`Flowmore` vs `FlowMore`) → buDiff=0
+- G: BU 真差异 (`Flowmore` vs `OtherBU`) → buDiff=2
+- H: 对账单号大小写不同 (`rec1` vs `REC1`) → matched=0，双侧 unmatched 各 1（对账单号未归一）
 
 ---
 
@@ -671,7 +682,7 @@ function validatePendingGuanliHeaders(actualHeaders) {
 | 初始（无月份） | `assets/preview-bank-bu-recon-initial.png` |
 | 导入中 | `assets/preview-bank-bu-recon-importing.png` |
 | 差异结果 | `assets/preview-bank-bu-recon-result.png` |
-| 异常中断 | `assets/preview-bank-bu-recon-anomaly.png` |
+| ~~异常中断~~ | v0.8 删除（N:M 不再中断 + 不再弹窗） |
 
 `package.json` 新增 script：`"preview:bank-bu-recon": "node scripts/preview-bank-bu-recon.js"`
 
@@ -694,9 +705,10 @@ T2 新增的以下符号，spec 阶段评估是否升级进 `rules/important-var
 
 | 符号 | 层级建议 | 理由 |
 |---|---|---|
-| `runReconciliation` (函数) | Risk-sensitive | 资金红线对账核心 |
-| `normalize` (BU 比较 helper) | Important-skeleton | 影响差异判定语义 |
-| `bank_bu_recon_runs.status` (字段) | Risk-sensitive | success / failed_anomaly 状态机 |
+| `runReconciliation` (函数) | Risk-sensitive | 资金红线对账核心（v0.8 4 路分类 + N:M 异常 sheet） |
+| `normalizeKey` / `normalizeBu` (helper) | Important-skeleton / Risk-sensitive | 拆函数 v0.9 — Key 仅 trim / Bu trim+toLowerCase；影响差异判定 |
+| `bank_bu_recon_runs.status` (字段) | Risk-sensitive | v0.4 设计 'success'/'failed_anomaly'；v0.8 后实际只用 'success'（schema 兼容保留） |
+| `bank_bu_recon_runs.anomaly_count` (字段) | Risk-sensitive | v0.8 重新定义为 N:M 异常组数 |
 | `YELLOW_FILL` (常量) | Minor | 已在 exceljs-writer.js 存在，复用 |
 | `PENDING_GUANLI_HEADERS` (常量) | Important-skeleton | 模板表头校验 anchor |
 | `BANK_HEADERS` (常量) | Important-skeleton | 模板表头校验 anchor |
@@ -708,7 +720,7 @@ T2 新增的以下符号，spec 阶段评估是否升级进 `rules/important-var
 ## 八、风险与红线提醒
 
 ⚠️ **资金红线**：
-- T2 对账逻辑（§3.6）— 严格 1:1 匹配，任何异常立即中断
+- T2 对账逻辑（§3.6）— v0.8: 1:1/1:N/N:1 视为对账成功，N:M 跳过 + 写差异表 Sheet 3 异常（不中断）
 - BU 比较语义（§3.6 normalize）— trim + 空值归一，不大小写归一
 - 异常报告文件落盘 — 必须包含足够上下文（行号 + 对账单号），便于用户回溯源 Excel
 

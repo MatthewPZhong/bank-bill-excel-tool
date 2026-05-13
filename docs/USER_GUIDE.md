@@ -904,12 +904,12 @@ C4 类场景配置弹窗（`createScenarioConfigDialogC4`）共 5 行：
   - BU 差异行仍按月度规则整行黄色高亮
   - 异常 sheet 跨月汇总所有 N:M 异常
 - 默认文件名：`月度银行对账单BU回填校验_汇总_YYYYMMDDTHHMMSS.xlsx`（用户可改）
-- ⚠️ 如某月最新 run 是 `failed_anomaly`（数据异常未对账），**该月会被跳过**，导出完成后弹 alert 列出跳过的月份；建议先修复异常数据 + 重跑成功后再做汇总
+- ⚠️ v0.5 设计：如某月最新 run 是 `failed_anomaly` 状态会被跳过；v0.8 后所有 run 永远 `success`（N:M 异常不再中断），此跳过逻辑保留作 dormant safety net，实际不会触发
 
 #### 1.6.3.3 不导出的内容
 
 - 未匹上对侧的行（Pending 未匹上银行 + 银行未匹上 Pending）— 仅在状态栏统计计数，不导出到差异表（按 PRD OPEN ISSUE #6 拍板「仅对账成功侧」）
-- failed_anomaly 月份（汇总场景下被跳过）
+- v0.4 设计的 `failed_anomaly` 月份汇总场景下被跳过（v0.8 后 status 永远 success，实际不会发生）
 
 ### 1.6.4 ⚠️ 资金红线 — 1:1/1:N/N:1 正常 + N:M 异常 sheet
 

@@ -30,7 +30,7 @@ integrated: false
    - **3 个前端对话框**（Clear 风）：月份选择（年/月两下拉对齐 Pending 模块）/ 文件导入提示 / 异常列表
    - 「开始运行」/「导出差异」分别弹月份选择 / 导出选项 dialog；导出支持指定月份 / 全月份汇总 + 用户另存为路径
    - 差异表 **3-sheet** xlsx：Pending（20 列）+ 银行对账单（44 列）+ **异常（5 列）**；BU 差异行整行黄底（`FFFFFF00`）
-   - 汇总导出多 1 列「对账月份」区分跨月数据；最新 run 是异常的月份不参与汇总
+   - 汇总导出多 1 列「对账月份」区分跨月数据；汇总也含 Sheet 3 异常（合并跨月 N:M 异常组）
    - `.gitignore` 修复：`assets/{银行对账单,Pending数据管理}.xlsx` 模板入库 + `.~*.xlsx` 全局忽略
 
 ⚠️ **关键术语修正**：v0.4 草稿期曾设计为"严格 1:1，任何重复中断运行"，但用户在 v0.5 → v0.8 修订过程中重新拍板了 OPEN ISSUE #10（详见 §修正 8）+ #5（详见 §修正 9）。**Reviewer 应以 §资金红线 + §修正 8/9 为准**，不要参考 v0.4 文档残留。
@@ -238,7 +238,7 @@ PRD §三 草稿表格误标 `line 7420 / 7421 / 7425` 为 C4 dialog 范围，sp
 - 选完点「导出」→ 弹另存为对话框（OPEN ISSUE Q4=A，新 IPC `bankBuRecon:export:pick-save-path`）→ 用户指定路径
 - 后端拆 IPC：`bankBuRecon:export` → `:export:single` + `:export:aggregate`
 - **汇总输出**（OPEN ISSUE Q3=A）：单 xlsx + 2 sheet（Pending / 银行对账单），每行表头额外插「对账月份」列；按月升序、月内按原行号；BU 差异行仍整行黄底
-- **汇总跳过 failed_anomaly 月份**（OPEN ISSUE Q7=A）：导出完成后弹 alert 列出跳过月份
+- **汇总跳过非 success 月份**（OPEN ISSUE Q7=A）：导出完成后弹 alert 列出跳过月份；v0.8 后 status 永远是 'success'，skippedMonths 实际为空 → alert 不触发；逻辑保留作 dormant safety net（防 schema 演进）
 
 **按钮 enable 条件重设**：
 - 「导入文件」永远 enabled
