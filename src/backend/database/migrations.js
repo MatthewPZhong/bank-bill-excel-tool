@@ -902,7 +902,7 @@ function ensureBankBuReconTablesSupport(db) {
     `);
 
     // 表 3：对账运行历史（spec §3.4.3）
-    // status: 'success' / 'failed_anomaly'
+    // status: v0.4 设计 'success'/'failed_anomaly'；v0.8 后实际只用 'success'（schema 字段保留兼容）
     db.exec(`
       CREATE TABLE IF NOT EXISTS bank_bu_recon_runs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

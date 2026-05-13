@@ -72,24 +72,10 @@ function getMonthMeta(db, yearMonth) {
   };
 }
 
-// 资金红线（PR #43 Codex review P1 修复）：覆盖导入同月份时同步清旧 runs，
-// 否则旧 runId 会与新导入数据混搭：用户重新导入后不重跑也能"导出旧 runId + 新数据"
-// 的不一致结果，run_at 与实际算法运行时间错位，破坏审计完整性。
-function clearMonth(db, yearMonth) {
-  db.exec('BEGIN');
-  try {
-    db.prepare(`DELETE FROM ${PENDING_TABLE} WHERE year_month = ?`).run(yearMonth);
-    db.prepare(`DELETE FROM ${BANK_TABLE} WHERE year_month = ?`).run(yearMonth);
-    db.prepare(`DELETE FROM ${RUNS_TABLE} WHERE year_month = ?`).run(yearMonth);
-    db.exec('COMMIT');
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-}
-
 // v2.1.2 PR #43 Codex F3 修复：拆出"无 BEGIN/COMMIT"的内部 inserter，让上层
 // importMonthAtomic() 包一个事务 — 保证 clear+pending+bank 三步原子（任一失败全回滚）
+// PR #43 self-review round 3 S1：删除外层 buildBatchInserter / insertPendingRows / insertBankRows /
+// clearMonth — 这些 export 在 importMonth 改用 importMonthAtomic 后已无人调（src/ scripts/ 0 引用）
 function buildBatchInserterInTxn(insertSql, dbColumns) {
   return function insertRowsInTxn(db, yearMonth, rows) {
     if (!Array.isArray(rows) || rows.length === 0) return 0;
@@ -109,33 +95,6 @@ function buildBatchInserterInTxn(insertSql, dbColumns) {
 
 const insertPendingRowsInTxn = buildBatchInserterInTxn(PENDING_INSERT_SQL, PENDING_GUANLI_DB_COLUMNS);
 const insertBankRowsInTxn = buildBatchInserterInTxn(BANK_INSERT_SQL, BANK_DB_COLUMNS);
-
-function buildBatchInserter(insertSql, dbColumns) {
-  return function insertRows(db, yearMonth, rows) {
-    if (!Array.isArray(rows) || rows.length === 0) return 0;
-    const stmt = db.prepare(insertSql);
-    db.exec('BEGIN');
-    try {
-      let count = 0;
-      for (const row of rows) {
-        const params = [yearMonth, row._rowIndex ?? 0];
-        for (const col of dbColumns) {
-          params.push(row[col] ?? '');
-        }
-        stmt.run(...params);
-        count += 1;
-      }
-      db.exec('COMMIT');
-      return count;
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
-    }
-  };
-}
-
-const insertPendingRows = buildBatchInserter(PENDING_INSERT_SQL, PENDING_GUANLI_DB_COLUMNS);
-const insertBankRows = buildBatchInserter(BANK_INSERT_SQL, BANK_DB_COLUMNS);
 
 function getPendingRows(db, yearMonth) {
   return db.prepare(`SELECT * FROM ${PENDING_TABLE} WHERE year_month = ? ORDER BY row_index ASC`).all(yearMonth);
@@ -167,9 +126,6 @@ function importMonthAtomic(db, yearMonth, pendingRows, bankRows) {
 module.exports = {
   listMonths,
   getMonthMeta,
-  clearMonth,
-  insertPendingRows,
-  insertBankRows,
   importMonthAtomic,
   getPendingRows,
   getBankRows,

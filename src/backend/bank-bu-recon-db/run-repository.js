@@ -1,6 +1,6 @@
 // v2.1.2 T2 — 月度银行对账单BU回填校验：对账运行历史 CRUD
 // 主 DB (tool-data.sqlite) bank_bu_recon_runs
-// status: 'success' / 'failed_anomaly'
+// status: v0.4 设计 'success'/'failed_anomaly'；v0.8 后实际只用 'success'（schema 字段保留兼容）
 
 const RUNS_TABLE = 'bank_bu_recon_runs';
 

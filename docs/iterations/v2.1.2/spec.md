@@ -721,7 +721,7 @@ T2 新增的以下符号，spec 阶段评估是否升级进 `rules/important-var
 
 ⚠️ **资金红线**：
 - T2 对账逻辑（§3.6）— v0.8: 1:1/1:N/N:1 视为对账成功，N:M 跳过 + 写差异表 Sheet 3 异常（不中断）
-- BU 比较语义（§3.6 normalize）— trim + 空值归一，不大小写归一
+- BU 比较语义（§3.6 normalizeBu，v0.9）— trim + toLowerCase + 空值归一（容忍 BU 大小写差异）
 - 异常报告文件落盘 — 必须包含足够上下文（行号 + 对账单号），便于用户回溯源 Excel
 
 ⚠️ **不破坏 Pending 模块**：

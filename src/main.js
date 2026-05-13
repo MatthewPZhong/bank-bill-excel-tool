@@ -9530,7 +9530,7 @@ function registerNewAccountHandlers() {
 
   // ============================================================
   // v2.1.2 T2：月度银行对账单BU回填校验 — bankBuRecon:* IPC handler
-  // PRD §三 / spec §3.5：8 个 handler；资金红线模块（OPEN ISSUE #10 严格 1:1）
+  // PRD §三 / spec §3.5：10 个 handler；资金红线模块（OPEN ISSUE #10 v0.8 修订：1:1/1:N/N:1 视为对账成功，N:M 异常 sheet）
   // ============================================================
 
   ipcMain.handle('bankBuRecon:months:list', () => {

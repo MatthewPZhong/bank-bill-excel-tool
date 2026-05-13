@@ -1,6 +1,6 @@
 // v2.1.2 T2 — 月度银行对账单BU回填校验：差异表 writer
 // 用 exceljs（项目已含 dep；spec §3.7 决策，复用 src/main-process/exceljs-writer.js 黄底范式）
-// 2-sheet 输出：Pending（20 列）+ 银行对账单（44 列）
+// 3-sheet 输出：Pending（20 列）+ 银行对账单（44 列）+ 异常（5 列，v0.8 新增 N:M 异常组）
 // BU 差异行整行黄底（FFFFFF00）
 // 文件名：月度银行对账单BU回填校验_{YYYYMM}_{HHMMSS}.xlsx
 

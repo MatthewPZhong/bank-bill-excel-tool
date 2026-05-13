@@ -168,12 +168,12 @@
 
 - **文件（新建）**：`src/main-process/bank-bu-recon-writer.js`
 - **导出**：
-  - `writeDiffWorkbook({...})` — spec §3.7 exceljs 2-sheet 黄底差异表
+  - `writeDiffWorkbook({...})` — spec §3.7 exceljs 3-sheet（Pending / 银行对账单 / 异常 v0.8 新增）黄底差异表
   - `YELLOW_FILL` 常量复用 `src/main-process/exceljs-writer.js` 风格
 - **完成证据**：
   - smoke 用例 B 生成的 xlsx 用 Excel 打开 → 2 sheet 各 5 行 + 黄底 2 行
   - 表头加粗 size 10
-- **commit message**：`[v2.1.2] feat(t2.7): bank-bu-recon-writer — exceljs 2-sheet 差异表`
+- **commit message**：`[v2.1.2] feat(t2.7): bank-bu-recon-writer — exceljs 3-sheet 差异表（v0.8 新增异常 sheet）`
 - **预估**：M
 - **依赖**：T2.6
 
