@@ -72,11 +72,15 @@ function getMonthMeta(db, yearMonth) {
   };
 }
 
+// 资金红线（PR #43 Codex review P1 修复）：覆盖导入同月份时同步清旧 runs，
+// 否则旧 runId 会与新导入数据混搭：用户重新导入后不重跑也能"导出旧 runId + 新数据"
+// 的不一致结果，run_at 与实际算法运行时间错位，破坏审计完整性。
 function clearMonth(db, yearMonth) {
   db.exec('BEGIN');
   try {
     db.prepare(`DELETE FROM ${PENDING_TABLE} WHERE year_month = ?`).run(yearMonth);
     db.prepare(`DELETE FROM ${BANK_TABLE} WHERE year_month = ?`).run(yearMonth);
+    db.prepare(`DELETE FROM ${RUNS_TABLE} WHERE year_month = ?`).run(yearMonth);
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');

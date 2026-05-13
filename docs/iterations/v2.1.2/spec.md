@@ -523,7 +523,7 @@ session.js 中 `writeAnomalyReport` 函数 + main.js IPC `bankBuRecon:run` 返�
 
 **「开始运行」流程**（v0.5 + v0.8：删 failed_anomaly 分支）：
 ```
-[空闲] 
+[空闲]
   ↓ 「开始运行」点击
 [拉 ready-months → 弹 createBankBuReconReconcileDialog（单列月份下拉）]
   ↓ 选月份+完成（无二次确认）

@@ -262,7 +262,7 @@ v2.1.2 包含 2 块独立改动：
 对每个对账单号 key（pendingByKey ∪ bankByKey 并集）:
   P_list = pendingByKey.get(key) || []
   B_list = bankByKey.get(key) || []
-  
+
   case (len(P_list), len(B_list)):
     (0, _) / (_, 0): 单侧未匹上对面 → 不进入差异表（"对账失败"侧）
     (1, 1): 1:1 → 走 BU 比较（与 v0.4 一致）
@@ -279,13 +279,13 @@ v2.1.2 包含 2 块独立改动：
     1:1 (P1 vs B1):
       if normalizeBu(P1.财务BU) !== normalizeBu(B1.Remark-BU):
         标 P1 整行黄 + B1 整行黄
-    
+
     1:N (P1 vs B1, B2, ..., BN):
       P1 整行**默认不标**
       对每个 Bi:
         if normalizeBu(P1.财务BU) !== normalizeBu(Bi.Remark-BU):
           标 Bi 整行黄  # 仅标不等的银行行
-    
+
     N:1 (P1, P2, ..., PN vs B1):
       B1 整行**默认不标**
       对每个 Pi:

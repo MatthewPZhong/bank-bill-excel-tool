@@ -21,6 +21,8 @@ const { runReconIdFixIpcHandlersSmokeTests } = require('./smoke/recon-id-fix-ipc
 const { runReconIdFixEndToEndSmokeTests } = require('./smoke/recon-id-fix-end-to-end');
 // v2.1.0-beta.3 T10：网关对账子模式引擎 smoke（基线 6 用例 + PR #39 review 扩展 3 用例 + constants sanity = 10/10）
 const { runReconIdFixEngineGatewaySmokeTests } = require('./smoke/recon-id-fix-engine-gateway');
+// v2.1.2 T2：月度银行对账单BU回填校验（A-E + F-H + I 覆盖导入回归 + 5 normalize 单测）
+const { runBankBuReconSmokeTests } = require('./smoke/bank-bu-recon');
 
 async function run() {
   const context = createSmokeContext();
@@ -42,6 +44,8 @@ async function run() {
   await runScenarioEndToEndSmokeTests();
   runErrorCausesSmokeTests();
   runUsageStatsSmokeTests();
+  // v2.1.2 T2：月度银行对账单BU回填校验
+  await runBankBuReconSmokeTests();
   console.log('smoke test passed');
 }
 
