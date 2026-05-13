@@ -88,6 +88,28 @@ function clearMonth(db, yearMonth) {
   }
 }
 
+// v2.1.2 PR #43 Codex F3 修复：拆出"无 BEGIN/COMMIT"的内部 inserter，让上层
+// importMonthAtomic() 包一个事务 — 保证 clear+pending+bank 三步原子（任一失败全回滚）
+function buildBatchInserterInTxn(insertSql, dbColumns) {
+  return function insertRowsInTxn(db, yearMonth, rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return 0;
+    const stmt = db.prepare(insertSql);
+    let count = 0;
+    for (const row of rows) {
+      const params = [yearMonth, row._rowIndex ?? 0];
+      for (const col of dbColumns) {
+        params.push(row[col] ?? '');
+      }
+      stmt.run(...params);
+      count += 1;
+    }
+    return count;
+  };
+}
+
+const insertPendingRowsInTxn = buildBatchInserterInTxn(PENDING_INSERT_SQL, PENDING_GUANLI_DB_COLUMNS);
+const insertBankRowsInTxn = buildBatchInserterInTxn(BANK_INSERT_SQL, BANK_DB_COLUMNS);
+
 function buildBatchInserter(insertSql, dbColumns) {
   return function insertRows(db, yearMonth, rows) {
     if (!Array.isArray(rows) || rows.length === 0) return 0;
@@ -123,12 +145,32 @@ function getBankRows(db, yearMonth) {
   return db.prepare(`SELECT * FROM ${BANK_TABLE} WHERE year_month = ? ORDER BY row_index ASC`).all(yearMonth);
 }
 
+// v2.1.2 PR #43 Codex F3 修复：覆盖导入原子事务
+// clearMonth(pending+bank+runs 删除) + insertPendingRows + insertBankRows 包成单个事务，
+// 任一失败全部回滚（防止"清空 + 仅一侧导入成功"的不一致状态）
+function importMonthAtomic(db, yearMonth, pendingRows, bankRows) {
+  db.exec('BEGIN');
+  try {
+    db.prepare(`DELETE FROM ${PENDING_TABLE} WHERE year_month = ?`).run(yearMonth);
+    db.prepare(`DELETE FROM ${BANK_TABLE} WHERE year_month = ?`).run(yearMonth);
+    db.prepare(`DELETE FROM ${RUNS_TABLE} WHERE year_month = ?`).run(yearMonth);
+    const pCount = insertPendingRowsInTxn(db, yearMonth, pendingRows);
+    const bCount = insertBankRowsInTxn(db, yearMonth, bankRows);
+    db.exec('COMMIT');
+    return { pendingCount: pCount, bankCount: bCount };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 module.exports = {
   listMonths,
   getMonthMeta,
   clearMonth,
   insertPendingRows,
   insertBankRows,
+  importMonthAtomic,
   getPendingRows,
   getBankRows,
   PENDING_TABLE,

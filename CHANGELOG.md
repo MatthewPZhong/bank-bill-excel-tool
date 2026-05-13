@@ -24,10 +24,10 @@ v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更**（账单类型→�
   - 状态框初始文案「欢迎使用小助手」与其他模块对齐
   - 导出差异 dialog：月份下拉框与上方 radio 拉开间距 + 左右边缘对齐「导出指定月份」label 文字范围
   - SQLite 主 DB 新增 3 张表：`bank_bu_recon_pending_imports` / `bank_bu_recon_bank_imports` / `bank_bu_recon_runs`
-  - 8 个 IPC handler（`bankBuRecon:*`）
+  - 10 个 IPC handler（`bankBuRecon:*`）
   - **v0.8 已删除** 旧的「异常弹窗 + .txt 报告 + 运行中断」机制（OPEN ISSUE #10 重新拍板）；N:M 异常组改为写入差异表第 3 sheet「异常」（含对账单号 / 双侧匹配数量 / 双侧行号），运行不中断
   - 导出文件：`Documents/网银账单生成小助手/exports/{date}/月度银行对账单BU回填校验_{YYYYMM}_{HHMMSS}.xlsx`
-  - 异常报告：`Documents/网银账单生成小助手/error-reports/{date}/月度银行对账单BU回填校验_异常_{YYYYMM}_{HHMMSS}.txt`
+  - **v0.8 已删除**异常报告（旧设计 `error-reports/...txt` + 中断弹窗）；N:M 异常组改为写入差异表 Sheet 3「异常」（运行不中断）
 
 ### 变更
 

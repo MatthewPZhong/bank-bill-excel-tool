@@ -155,15 +155,12 @@ function createBankBuReconSession({ getDb, getStorageRoot }) {
 
   function importMonth(yearMonth, pendingRows, bankRows) {
     const db = getDb();
-    // PR #43 Codex P1：clearMonth 已含 DELETE FROM bank_bu_recon_runs（资金红线，旧 run 全清）
-    monthRepository.clearMonth(db, yearMonth);
-    // 同步清 lastRunCache，防止 cache 残留指向已删 runId
+    // v2.1.2 PR #43 Codex F3 修复：原子事务（clear + 双侧 insert 任一失败全回滚）
+    // PR #43 Codex P1：清旧 runs 已并入 importMonthAtomic（防"旧 runId + 新数据"混搭）
     if (lastRunCache && lastRunCache.yearMonth === yearMonth) {
       lastRunCache = null;
     }
-    const pCount = monthRepository.insertPendingRows(db, yearMonth, pendingRows);
-    const bCount = monthRepository.insertBankRows(db, yearMonth, bankRows);
-    return { pendingCount: pCount, bankCount: bCount };
+    return monthRepository.importMonthAtomic(db, yearMonth, pendingRows, bankRows);
   }
 
   function listMonths() {

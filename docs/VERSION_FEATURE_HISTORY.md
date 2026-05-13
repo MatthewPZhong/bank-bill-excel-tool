@@ -24,9 +24,9 @@ v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更** + **新增模块�
   - 资金红线对账（v0.8）：Pending.主对账单号 ↔ 银行对账单.ReconciliationId — 1:1 / 1:N / N:1 视为成功；N:M 视为异常（写 Sheet 3，不中断）
   - BU 比较语义：`String(v).trim()`（空值 → ''），不大小写归一化
   - 差异表 sheet：Pending（20 列）+ 银行对账单（44 列）；BU 差异行整行 `FFFFFF00` 黄底
-  - 异常报告：纯文本到 `Documents/网银账单生成小助手/error-reports/{date}/`，含全部异常对账单号 + 行号
+  - **v0.8 已删除**纯文本异常报告（旧 `error-reports/.txt` 设计）；N:M 异常改写入差异表第 3 sheet「异常」（不中断运行）
   - SQLite 主 DB 新增 3 张表（pending_imports / bank_imports / runs）；与 Pending 模块独立 DB 完全隔离
-- **8 个 IPC handler**（`bankBuRecon:*`）+ preload API 暴露
+- **10 个 IPC handler**（`bankBuRecon:*`）+ preload API 暴露
 
 ### 变更
 
@@ -35,7 +35,7 @@ v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更** + **新增模块�
   - 「账单类型」→「对账字段」（dialog label / 按钮 / 错误消息 / 确认弹窗）
   - 「对账字段」→「对账内容」（同上）
   - 不动：内部变量名 / data 属性 / C1/C2/C3 dialog 同名文案
-- **smoke 扩展**：4 用例（A 全相等 / B 部分差异 / C 1:N 异常 / D N:1 异常）
+- **smoke 扩展**：A-E + F-H + I 覆盖导入回归 + 5 normalize 单测 = 36 assert（v0.8 修订；v0.9 BU 大小写归一；PR #43 Codex P1/F3 资金红线 regression）
 - **preview 入口**：新增 4 张截图脚本
 
 ## 2.1.1（2026-05-12）
