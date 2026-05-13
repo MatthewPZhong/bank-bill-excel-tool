@@ -45,7 +45,7 @@ v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更**（账单类型→�
 
 - **新增文件 10 个**：3 个 PRD/spec/tasks（docs/iterations/v2.1.2/）+ 2 个 db repo + 2 个 import + 2 个 main-process + 1 个 columns
 - **migrations.js**：新增 `ensureBankBuReconTablesSupport()`（3 张表 + 5 索引 + 事务包装 + 幂等）
-- **smoke 扩展**：4 用例（A 全相等无差异 / B 部分 BU 差异 / C 1:N 异常 / D N:1 异常）— 全 PASS
+- **smoke 扩展**：`scripts/smoke/bank-bu-recon.js` 共 36 assert（A 1:1 全等 / B 1:1 部分差异 / C 1:N 部分差异 / D N:1 部分差异 / E N:M 异常 / F BU 大小写归一 / G BU 真差异 / H 对账单号大小写不归一 / I 覆盖导入清旧 run 回归 + 5 normalize 单测）— 全 PASS
 - **preview 入口**：4 张截图脚本（initial / importing / result / anomaly）+ `preview:all` 同步追加
 - **OPEN ISSUE #3**：直接复用项目现有 `exceljs` (^4.4.0) — 0 新增 dep
 

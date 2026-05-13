@@ -22,7 +22,7 @@ v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更** + **新增模块�
   - 「导出差异」→ 选指定月份 / 所有月份汇总 → 另存为对话框 → 写入用户指定路径
   - **资金红线**：1:1/1:N/N:1 视为正常匹配（精准标差异子对：仅标 BU 不等的子对）；N:M（双侧 ≥2）跳过 BU 比较 + 写入第 3 个「异常」sheet（不中断运行）
   - 资金红线对账（v0.8）：Pending.主对账单号 ↔ 银行对账单.ReconciliationId — 1:1 / 1:N / N:1 视为成功；N:M 视为异常（写 Sheet 3，不中断）
-  - BU 比较语义：`String(v).trim()`（空值 → ''），不大小写归一化
+  - BU 比较语义（v0.9）：`normalizeBu = String(v).trim().toLowerCase()`（空值 → ''），加大小写归一化（容忍 `Flowmore` vs `FlowMore`）；对账单号匹配 `normalizeKey = String(v).trim()` 仍区分大小写
   - 差异表 sheet：Pending（20 列）+ 银行对账单（44 列）；BU 差异行整行 `FFFFFF00` 黄底
   - **v0.8 已删除**纯文本异常报告（旧 `error-reports/.txt` 设计）；N:M 异常改写入差异表第 3 sheet「异常」（不中断运行）
   - SQLite 主 DB 新增 3 张表（pending_imports / bank_imports / runs）；与 Pending 模块独立 DB 完全隔离

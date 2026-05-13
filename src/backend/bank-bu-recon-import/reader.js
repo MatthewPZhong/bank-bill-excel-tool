@@ -21,12 +21,14 @@ const {
   validateBankHeaders
 } = require('./validator');
 
-// 从 worksheet 读出 2D 数组形式的所有行（含表头，去掉末尾空行）
+// 从 worksheet 读出 2D 数组形式的所有行（含表头）
+// PR #43 Codex round 3 F5 修复：blankrows: true 保留空行 — 否则 sheet_to_json 会移除中间空行，
+// 导致 array index 不再对应 Excel 真实行号，N:M 异常 sheet / 错误报告里的行号会指向错误源行
 function readSheetAsRows(worksheet) {
   return XLSX.utils.sheet_to_json(worksheet, {
     header: 1,           // 返回数组形式
     defval: '',          // 空 cell 填 ''
-    blankrows: false,    // 跳过全空行
+    blankrows: true,     // 保留空行（让 i+1 严格对应 Excel 1-based 行号）
     raw: false           // 所有 cell 转字符串（避免 Excel serial 日期 / 数字精度问题）
   });
 }

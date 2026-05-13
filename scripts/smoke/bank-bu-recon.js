@@ -150,6 +150,31 @@ async function runBankBuReconSmokeTests() {
   check('H Pending unmatched=1', r.stats.pendingUnmatched === 1);
   check('H 银行 unmatched=1', r.stats.bankUnmatched === 1);
 
+  // === Case J: reader 行号空行回归（PR #43 Codex F5）===
+  // 用 reader 直接读一份含空行的 xlsx，验证 _rowIndex 严格对应 Excel 行号
+  {
+    const XLSX = require('xlsx');
+    const { readPendingGuanliFile } = require('../../src/backend/bank-bu-recon-import/reader');
+    const { PENDING_GUANLI_HEADERS } = require('../../src/backend/bank-bu-recon-db/columns');
+    const tmpXlsx = path.join(tmpRoot, 'reader-blankrow-test.xlsx');
+    // 构造：第 1 行表头 / 第 2 行空 / 第 3 行 R1 / 第 4 行空 / 第 5 行 R2
+    const empty = PENDING_GUANLI_HEADERS.map(() => '');
+    const r1 = PENDING_GUANLI_HEADERS.map((h) => h === 'PendingBizId' ? 'PBI-R1' : h === '主对账单号' ? 'KEY-R1' : h === '财务BU' ? 'BU1' : '');
+    const r2 = PENDING_GUANLI_HEADERS.map((h) => h === 'PendingBizId' ? 'PBI-R2' : h === '主对账单号' ? 'KEY-R2' : h === '财务BU' ? 'BU2' : '');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([PENDING_GUANLI_HEADERS, empty, r1, empty, r2]);
+    XLSX.utils.book_append_sheet(wb, ws, 'sheet');
+    XLSX.writeFile(wb, tmpXlsx);
+    const result = readPendingGuanliFile(tmpXlsx);
+    check('J 空行回归 totalRows=2 (空行被 isRowMeaningful 跳过)', result.totalRows === 2);
+    check('J R1 _rowIndex=3 (Excel 第 3 行)', result.rows[0]._rowIndex === 3,
+      '空行被忽略前导致 array index 错位 — PR #43 Codex F5 真 bug');
+    check('J R2 _rowIndex=5 (Excel 第 5 行)', result.rows[1]._rowIndex === 5,
+      'F5 修复后中间空行不影响后续行号');
+    check('J R1 pending_biz_id=PBI-R1', result.rows[0].pending_biz_id === 'PBI-R1');
+    check('J R2 pending_biz_id=PBI-R2', result.rows[1].pending_biz_id === 'PBI-R2');
+  }
+
   // === Case I: 覆盖导入清旧 run（PR #43 Codex P1 资金红线 regression）===
   // 先验证 2026-01 还在 listSuccessMonths
   let successMonths = session.listSuccessMonths();
