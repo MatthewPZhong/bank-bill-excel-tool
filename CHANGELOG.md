@@ -1,5 +1,65 @@
 # Changelog
 
+## 2.1.2 - 2026-05-13
+
+v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更**（账单类型→对账字段、对账字段→对账内容）+ **新增模块「月度银行对账单BU回填校验」**。OPEN ISSUE #10 资金红线（v0.5 → v0.8 重新拍板）：1:1 / 1:N / N:1 视为对账成功（精准标 BU 差异子对）；N:M（双侧 ≥2）视为数据异常 → 跳过 + 写入差异表 Sheet 3「异常」（**不中断运行**）。OPEN ISSUE #5 BU 比较（v0.9）：trim + toLowerCase + 空值归一（容忍 `Flowmore` vs `FlowMore` 大小写差异）。
+
+### ⚠️ 资金红线（必须人工 review）
+
+- **新增对账模块 — 1:1 / 1:N / N:1 视为对账成功，N:M 跳过 + 写异常 sheet**（v0.5/v0.8 重新拍板）：
+  - 1:1 / 1:N / N:1 匹配 → 走 BU 比较，**精准标差异子对**（仅标 BU 不等的那一侧行；另一侧不标）
+  - **N:M（双侧 ≥2）**视为数据异常 → 跳过该组 BU 比较 + 写入差异表 Sheet 3「异常」（**不中断运行**）
+  - 详见 `docs/iterations/v2.1.2/PRD-v2.1.2.md` §六.2
+- **BU 比较语义**（v0.9 OPEN ISSUE #5 重新拍板）：`normalizeBu(v) = String(v).trim().toLowerCase()`（空值归一为 `""`），容忍大小写差异（如 `Flowmore` vs `FlowMore` 视为相同）；对账单号匹配仍仅 trim 不大小写归一（保持原行为）。
+
+### 新增
+
+- **新模块「月度银行对账单BU回填校验」**：T-1 月 Pending 数据管理 + 银行对账单导入 → 1:1 / 1:N / N:1 视为对账成功（v0.8）→ 3-sheet 差异 Excel 导出（Pending / 银行对账单 / 异常；BU 差异行整行黄底）
+  - 主菜单新增入口（与"对账单ReconID修复"同级）
+  - 主面板 3 个按钮：「导入文件」+「开始运行」+「导出差异」
+  - 「导入文件」点击 → 弹月份选择对话框（年/月两下拉）→ 弹 Pending 文件提示 → 弹文件选择 → 弹银行对账单文件提示 → 弹文件选择
+  - 「开始运行」点击 → 弹「选取需要对账的月份」对话框（仅列两侧都已导入的月份） → 选月份 + 完成 → 触发对账（**永远 success**，不再中断）
+  - 「导出差异」点击 → 弹「导出差异」对话框（指定月份 / 所有月份汇总 二选一） → 选完弹另存为对话框 → 写入用户指定路径
+  - 单月差异表：3 sheet（Pending / 银行对账单 / 异常）；汇总导出：3 sheet 都加「对账月份」列
+  - 状态框初始文案「欢迎使用小助手」与其他模块对齐
+  - 导出差异 dialog：月份下拉框与上方 radio 拉开间距 + 左右边缘对齐「导出指定月份」label 文字范围
+  - SQLite 主 DB 新增 3 张表：`bank_bu_recon_pending_imports` / `bank_bu_recon_bank_imports` / `bank_bu_recon_runs`
+  - 10 个 IPC handler（`bankBuRecon:*`）
+  - **v0.8 已删除** 旧的「异常弹窗 + .txt 报告 + 运行中断」机制（OPEN ISSUE #10 重新拍板）；N:M 异常组改为写入差异表第 3 sheet「异常」（含对账单号 / 双侧匹配数量 / 双侧行号），运行不中断
+  - 导出文件：`Documents/网银账单生成小助手/exports/{date}/月度银行对账单BU回填校验_{YYYYMM}_{HHMMSS}.xlsx`
+  - **v0.8 已删除**异常报告（旧设计 `error-reports/...txt` + 中断弹窗）；N:M 异常组改为写入差异表 Sheet 3「异常」（运行不中断）
+
+### 变更
+
+- **版本号**：2.1.1 → 2.1.2（patch 版本）
+- **C4 dialog 文案变更**（仅 ReconID 修复 / `isReconIdFixCategory` 分支）：
+  - 「账单类型」→「对账字段」
+  - 「对账字段」→「对账内容」
+  - 「+ 新增账单类型」→「+ 新增对账字段」
+  - 「+ 新增对账分组」→「+ 新增对账内容分组」
+  - 错误消息 13 处 + dialog UI label/按钮 4 处 + 确认弹窗 label 2 处
+  - **不动**：内部变量名 `billTypes` / `reconFields` / `reconGroups`、HTML data 属性、C1/C2/C3 dialog 同名文案
+  - ⚠️ **Reverse Sync 修正**：PRD 草稿 §三 误标 line 7420/7421/7425 为 C4 范围，spec 阶段查代码确认实际是 C2/C3 分支文案，未改
+
+### 内部
+
+- **新增文件 10 个**：3 个 PRD/spec/tasks（docs/iterations/v2.1.2/）+ 2 个 db repo + 2 个 import + 2 个 main-process + 1 个 columns
+- **migrations.js**：新增 `ensureBankBuReconTablesSupport()`（3 张表 + 5 索引 + 事务包装 + 幂等）
+- **smoke 扩展**：`scripts/smoke/bank-bu-recon.js` 共 36 assert（A 1:1 全等 / B 1:1 部分差异 / C 1:N 部分差异 / D N:1 部分差异 / E N:M 异常 / F BU 大小写归一 / G BU 真差异 / H 对账单号大小写不归一 / I 覆盖导入清旧 run 回归 + 5 normalize 单测）— 全 PASS
+- **preview 入口**：4 张截图脚本（initial / importing / result / anomaly）+ `preview:all` 同步追加
+- **OPEN ISSUE #3**：直接复用项目现有 `exceljs` (^4.4.0) — 0 新增 dep
+
+### Critical 变量改动
+
+- ⚠️ T2 新增的对账核心符号（待 `npm run scan:vars` 升格评估，优先 Risk-sensitive）：
+  - `runReconciliation()` (bank-bu-recon-session.js) — 资金红线对账算法入口
+  - `bank_bu_recon_runs.status` 字段 — v0.4 设计 `success` / `failed_anomaly`；v0.8 后实际只用 `success`（schema 字段保留兼容）
+  - `PENDING_MATCH_KEY_DB_COLUMN='recon_id'` / `BANK_MATCH_KEY_DB_COLUMN='reconciliation_id'` — 匹配 key 锚点
+  - `PENDING_DIFF_FIELD_DB_COLUMN='finance_bu'` / `BANK_DIFF_FIELD_DB_COLUMN='remark_bu'` — 差异字段锚点
+  - `normalize(v)` (bank-bu-recon-session.js) — BU 比较归一化函数
+
+---
+
 ## 2.1.1 - 2026-05-12
 
 v2.1.0-beta.3 之后追加 patch 迭代：**PDF 整体移除**（破坏性变更）+ C4 dialog 文案优化 + **BillDate ±N 可配置** + tooltip + 按钮文案优化。6 个主 task / 8 个实现 commit 完成（PR #41 累计 17 commit，含 PM 1 + 实现 8 + PR 草稿 1 + 用户反馈 self-review fix 2 + 草稿改名 1 + PR review round-1/2/3 fix 3 + self-review-final fix 1）。

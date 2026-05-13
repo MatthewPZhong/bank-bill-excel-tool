@@ -162,6 +162,19 @@ function runUsageStatsSmokeTests() {
       check('U11', Object.isFrozen(FUNCTION_REGISTRY), 'FUNCTION_REGISTRY 必须 frozen');
     }
 
+    // U11.bbr (PR #43 Codex F1)：月度银行对账单BU回填校验已注册（main.js trackedIpcHandle 用此 moduleKey）
+    {
+      check('U11.bbr.module', '月度银行对账单BU回填校验' in FUNCTION_REGISTRY, 'BU 回填模块必须在 FUNCTION_REGISTRY 注册');
+      const fns = FUNCTION_REGISTRY['月度银行对账单BU回填校验'] || [];
+      ['导入文件', '开始运行', '导出差异'].forEach((fn) => {
+        check(`U11.bbr.fn[${fn}]`, fns.includes(fn), `${fn} 必须在 BU 回填模块的 FUNCTION_REGISTRY`);
+      });
+      // 实际计数验证
+      const s = defaultStats();
+      incrementFunction(s, '月度银行对账单BU回填校验', '开始运行');
+      check('U11.bbr.count', s.modules['月度银行对账单BU回填校验']['开始运行'] === 1, 'incrementFunction 必须真正写入计数');
+    }
+
     // U12（PR #34 Codex round 1 P2）：saveStats 写盘失败时 throw（让调用方保留 dirty 重试）
     {
       const s = defaultStats();

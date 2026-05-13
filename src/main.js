@@ -13,6 +13,13 @@ const pendingDiffRepo = require('./backend/pending-db/diff-repository');
 const pendingReconcileEngine = require('./backend/pending-reconcile/engine');
 const pendingExportWriter = require('./backend/pending-export/writer');
 const { createPendingSession } = require('./main-process/pending-session');
+// v2.1.2 T2：月度银行对账单BU回填校验模块
+const { createBankBuReconSession, runReconciliation: runBankBuRecon } = require('./main-process/bank-bu-recon-session');
+const {
+  writeDiffWorkbook: writeBankBuReconDiffWorkbook,
+  writeAggregateDiffWorkbook: writeBankBuReconAggregateDiffWorkbook
+} = require('./main-process/bank-bu-recon-writer');
+const { readPendingGuanliFile, readBankFile } = require('./backend/bank-bu-recon-import/reader');
 const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-dispatcher');
 const {
   readBankStatement,
@@ -115,6 +122,11 @@ let database = null;
 let pendingDb = null;
 const pendingSession = createPendingSession({
   getPendingDb: () => pendingDb,
+  getStorageRoot: () => ensureStorageRoot()
+});
+// v2.1.2 T2：月度银行对账单BU回填校验 session（主 DB tool-data.sqlite）
+const bankBuReconSession = createBankBuReconSession({
+  getDb: () => database && database.db,
   getStorageRoot: () => ensureStorageRoot()
 });
 let lastGeneratedExports = {
@@ -9514,6 +9526,203 @@ function registerNewAccountHandlers() {
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
+  });
+
+  // ============================================================
+  // v2.1.2 T2：月度银行对账单BU回填校验 — bankBuRecon:* IPC handler
+  // PRD §三 / spec §3.5：10 个 handler；资金红线模块（OPEN ISSUE #10 v0.8 修订：1:1/1:N/N:1 视为对账成功，N:M 异常 sheet）
+  // ============================================================
+
+  ipcMain.handle('bankBuRecon:months:list', () => {
+    if (!database || !database.db) return [];
+    try { return bankBuReconSession.listMonths(); } catch (_e) { return []; }
+  });
+
+  ipcMain.handle('bankBuRecon:status', (_event, payload = {}) => {
+    if (!database || !database.db) return null;
+    const { yearMonth } = payload || {};
+    if (!yearMonth) return null;
+    try {
+      const meta = bankBuReconSession.getMonthMeta(yearMonth);
+      const latestRun = bankBuReconSession.listRuns(yearMonth)[0] || null;
+      return { meta, latestRun };
+    } catch (_e) {
+      return null;
+    }
+  });
+
+  // v2.1.2 spec v0.4 修正：拆为两个独立单选 IPC，前端用 Clear 风 modal 串联流程
+  // 旧的 bankBuRecon:import:pick-files（一次返回两个路径 + showMessageBox 提示）已删除：
+  //   - macOS dialog.showOpenDialog.title 不显示 → showMessageBox 兜底
+  //   - 但 showMessageBox 是系统对话框，与项目其他模块的前端 modal 风格割裂
+  // 现在前端用 createBankBuReconFileImportPromptDialog（Clear 风 modal）显式提示，再各调一次 pick-*-file
+  ipcMain.handle('bankBuRecon:import:pick-pending-file', async (_event, payload = {}) => {
+    const { yearMonth } = payload || {};
+    if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return { status: 'error', message: 'yearMonth 格式错误（应为 YYYY-MM）' };
+    }
+    const res = await dialog.showOpenDialog({
+      title: `Pending 数据管理文件（${yearMonth}）`,
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      properties: ['openFile']
+    });
+    if (res.canceled || !res.filePaths || res.filePaths.length === 0) {
+      return { status: 'cancelled' };
+    }
+    return { status: 'success', filePath: res.filePaths[0] };
+  });
+
+  ipcMain.handle('bankBuRecon:import:pick-bank-file', async (_event, payload = {}) => {
+    const { yearMonth } = payload || {};
+    if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return { status: 'error', message: 'yearMonth 格式错误（应为 YYYY-MM）' };
+    }
+    const res = await dialog.showOpenDialog({
+      title: `银行对账单文件（${yearMonth}）`,
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      properties: ['openFile']
+    });
+    if (res.canceled || !res.filePaths || res.filePaths.length === 0) {
+      return { status: 'cancelled' };
+    }
+    return { status: 'success', filePath: res.filePaths[0] };
+  });
+
+  trackedIpcHandle('bankBuRecon:import:run', '月度银行对账单BU回填校验', '导入文件', async (_event, payload = {}) => {
+    const { yearMonth, pendingPath, bankPath } = payload || {};
+    if (!database || !database.db) {
+      return { status: 'error', message: '数据库未初始化' };
+    }
+    if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return { status: 'error', message: 'yearMonth 格式错误（应为 YYYY-MM）' };
+    }
+    if (!pendingPath || !bankPath) {
+      return { status: 'error', message: '缺少文件路径' };
+    }
+    try {
+      const pendingResult = readPendingGuanliFile(pendingPath);
+      const bankResult = readBankFile(bankPath);
+      const counts = bankBuReconSession.importMonth(yearMonth, pendingResult.rows, bankResult.rows);
+      return { status: 'success', yearMonth, ...counts };
+    } catch (err) {
+      if (err && err.name === 'FileValidationError') {
+        return {
+          status: 'error',
+          code: err.code,
+          message: err.message,
+          detailLines: err.detailLines || [],
+          context: err.context || {}
+        };
+      }
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  trackedIpcHandle('bankBuRecon:run', '月度银行对账单BU回填校验', '开始运行', (_event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
+    const { yearMonth } = payload || {};
+    if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return { status: 'error', message: 'yearMonth 格式错误' };
+    }
+    try {
+      const result = bankBuReconSession.run(yearMonth);
+      return { status: 'success', ...result };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // v0.5: 弹另存为对话框（前端→后端）
+  ipcMain.handle('bankBuRecon:export:pick-save-path', async (_event, payload = {}) => {
+    const { defaultFileName } = payload || {};
+    const result = await dialog.showSaveDialog({
+      title: '保存差异表',
+      defaultPath: defaultFileName || '月度银行对账单BU回填校验.xlsx',
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+    });
+    if (result.canceled || !result.filePath) return { status: 'cancelled' };
+    return { status: 'success', savePath: result.filePath };
+  });
+
+  // v0.5: 单月导出到用户指定路径（替代旧 bankBuRecon:export）
+  trackedIpcHandle('bankBuRecon:export:single', '月度银行对账单BU回填校验', '导出差异', async (_event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
+    const { runId, savePath } = payload || {};
+    const runIdNum = Number(runId);
+    if (!Number.isFinite(runIdNum) || runIdNum <= 0) {
+      return { status: 'error', message: 'runId 无效' };
+    }
+    if (!savePath) return { status: 'error', message: '保存路径未指定' };
+    const run = bankBuReconSession.getRun(runIdNum);
+    if (!run) return { status: 'error', message: '运行记录不存在' };
+    if (run.status !== 'success') {
+      return { status: 'error', message: '运行未成功（status=' + run.status + '），无法导出差异表' };
+    }
+    try {
+      const lastResult = bankBuReconSession.loadRunResultByRunId(runIdNum);
+      if (!lastResult) {
+        return { status: 'error', message: '加载 run 数据失败（可能源数据已变）' };
+      }
+      const exp = await writeBankBuReconDiffWorkbook({
+        storageRoot: ensureStorageRoot(),
+        yearMonth: run.year_month,
+        matchedPending: lastResult.matchedPending,
+        matchedBank: lastResult.matchedBank,
+        buDiffPendingIds: lastResult.buDiffPendingIds,
+        buDiffBankIds: lastResult.buDiffBankIds,
+        nmAnomalies: lastResult.nmAnomalies,   // v0.8: N:M 异常组写入第 3 sheet
+        // v0.5：用 savePath 直接写到用户指定路径，不走 buildOutputPath
+        overrideSavePath: savePath
+      });
+      bankBuReconSession.recordExportPath(runIdNum, exp.filePath);
+      return { status: 'success', filePath: exp.filePath };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // v0.5: 跨月汇总导出到用户指定路径
+  trackedIpcHandle('bankBuRecon:export:aggregate', '月度银行对账单BU回填校验', '导出差异', async (_event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
+    const { savePath } = payload || {};
+    if (!savePath) return { status: 'error', message: '保存路径未指定' };
+    try {
+      const { months, skippedMonths } = bankBuReconSession.aggregateLatestSuccessRuns();
+      if (months.length === 0) {
+        return { status: 'error', message: '无可汇总的成功运行记录', skippedMonths };
+      }
+      const exp = await writeBankBuReconAggregateDiffWorkbook({
+        matchedMonths: months,
+        savePath
+      });
+      return { status: 'success', filePath: exp.filePath, skippedMonths, includedMonths: months.map((m) => m.yearMonth) };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  ipcMain.handle('bankBuRecon:run:history', (_event, payload = {}) => {
+    if (!database || !database.db) return [];
+    const { yearMonth } = payload || {};
+    if (!yearMonth) return [];
+    try { return bankBuReconSession.listRuns(yearMonth); } catch (_e) { return []; }
+  });
+
+  // v0.5: 列出"两侧都已导入"的月份（用于「开始运行」弹窗）
+  ipcMain.handle('bankBuRecon:run:list-ready-months', () => {
+    if (!database || !database.db) return [];
+    try {
+      const list = bankBuReconSession.listReadyMonths();
+      return list.map((m) => m.yearMonth);
+    } catch (_e) {
+      return [];
+    }
+  });
+
+  // v0.5: 列出"有 status=success run"的月份（用于「导出差异」弹窗）
+  ipcMain.handle('bankBuRecon:run:list-success-months', () => {
+    if (!database || !database.db) return [];
+    try { return bankBuReconSession.listSuccessMonths(); } catch (_e) { return []; }
   });
 }
 

@@ -29,6 +29,8 @@ const FUNCTION_REGISTRY = Object.freeze({
   '银行对账单处理': ['场景管理', '导入文件', '开始运行', '导出文件'],
   // v2.1.0-beta.1 PR-B：单据对账 ReconID 修复模块
   '单据对账ReconID修复': ['导入文件', '开始运行', '导出文件'],
+  // v2.1.2 T2：月度银行对账单BU回填校验（PR #43 Codex F1 修复 — main.js trackedIpcHandle 已用此 moduleKey 但 registry 未注册导致计数静默失败）
+  '月度银行对账单BU回填校验': ['导入文件', '开始运行', '导出差异'],
   '切换页面风格': ['切换']
 });
 

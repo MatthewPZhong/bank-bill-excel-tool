@@ -5,6 +5,7 @@ const {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
   ensureAmountSplitRulesSupport,
+  ensureBankBuReconTablesSupport,
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
@@ -134,6 +135,9 @@ class AppDatabase {
     this.migrateC4ReconGroupsAmountLockedFieldPair();
     this.ensureC3GwFieldCurrencyCaseFix();
     this.ensureBuiltinScenarioNamesUpdate();
+    // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表
+    // 与其他迁移完全独立，调用顺序无依赖；放在最末尾即可
+    this.ensureBankBuReconTablesSupport();
   }
 
   hasColumn(tableName, columnName) {
@@ -183,6 +187,11 @@ class AppDatabase {
   // v1.5.3 需求 R2：自有账号合并入大账号表 — 幂等 schema 迁移
   ensureTemplateBigAccountNatureSupport() {
     return ensureTemplateBigAccountNatureSupport(this.db);
+  }
+
+  // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表（pending_imports / bank_imports / runs）
+  ensureBankBuReconTablesSupport() {
+    return ensureBankBuReconTablesSupport(this.db);
   }
 
   listTemplates() {

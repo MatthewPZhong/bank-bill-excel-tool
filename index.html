@@ -43,6 +43,7 @@
               <button class="module-option" type="button" data-module="pending-reconciliation">月度 Pending 数据核对</button>
               <button class="module-option" type="button" data-module="bank-statement-process">银行对账单处理</button>
               <button class="module-option" type="button" data-module="recon-id-fix">对账单ReconID修复</button>
+              <button class="module-option" type="button" data-module="bank-bu-recon">月度银行对账单BU回填校验</button>
             </div>
           </div>
 
@@ -178,6 +179,32 @@
                     <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusPending" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusPending)"/></svg>
                   </span>
                   <span class="status-box-text">初次使用请确认用来筛选的字段~</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- v2.1.2 T2：月度银行对账单BU回填校验模块面板（PRD §3.2.5：导入按钮 → 月份对话框 → 文件选择）-->
+          <section id="bankBuReconModulePanel" class="control-board module-panel pending-board" hidden>
+            <div class="control-row">
+              <div class="cell left"></div>
+              <div class="cell right">
+                <div class="pending-action-pair">
+                  <button id="bankBuReconImportBtn" class="primary-btn" type="button">导入文件</button>
+                  <button id="bankBuReconRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
+                </div>
+              </div>
+            </div>
+            <div class="control-row">
+              <div class="cell left">
+                <button id="bankBuReconExportBtn" class="secondary-btn" type="button" disabled>导出差异</button>
+              </div>
+              <div class="cell right">
+                <div id="bankBuReconStatusBox" class="status-box">
+                  <span class="status-spark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusBankBuRecon" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusBankBuRecon)"/></svg>
+                  </span>
+                  <span class="status-box-text">欢迎使用小助手</span>
                 </div>
               </div>
             </div>
