@@ -2,9 +2,10 @@
 // 资金红线（PRD §六.2 OPEN ISSUE #10 拍板）：
 //   - 严格 1:1 匹配（Pending.主对账单号 ↔ 银行对账单.ReconciliationId）
 //   - 任何 1:N / N:1 / N:M 异常 → 运行立即中断 + 异常报告 + 弹窗
-// BU 比较语义（PRD §六 OPEN ISSUE #5 拍板）：
-//   - normalize(v): null/undefined/'' → ''；其余 String(v).trim()
-//   - 不做大小写归一化（财务 BU 是受控枚举，可审计）
+// BU 比较语义（PRD §六 OPEN ISSUE #5 拍板，v0.9 修订）：
+//   - normalizeBu(v): null/undefined/'' → ''；其余 String(v).trim().toLowerCase()
+//   - 容忍 BU 字段大小写差异（如 Flowmore vs FlowMore，财务侧实际命名不规范不再误报）
+//   - 对账单号匹配仍用 normalizeKey（仅 trim 不大小写归一）
 
 const fs = require('node:fs');
 const path = require('node:path');

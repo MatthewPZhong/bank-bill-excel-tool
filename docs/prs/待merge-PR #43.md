@@ -20,22 +20,29 @@ integrated: false
    - 仅作用于 `isReconIdFixCategory` 分支（`recon-id-fix` + `gateway-recon-id-fix`）
    - **不动**：C1/C2/C3 dialog 同名文案、内部变量名 `billTypes` / `reconFields` / `reconGroups`、HTML data 属性
 
-2. **T2 — 新增模块「月度银行对账单BU回填校验」**：
-   - 主菜单新入口 + 模块面板（月份 select + 导入文件 + 开始运行 + 导出差异 3 按钮）
-   - 资金红线对账：Pending.主对账单号 ↔ 银行对账单.ReconciliationId **严格 1:1**，任何 1:N / N:1 / N:M 异常 → 运行立即中断
-   - SQLite 主 DB 新增 3 张表（pending_imports / bank_imports / runs）
-   - 8 个 IPC handler（`bankBuRecon:*`）
-   - 异常报告（.txt 文件 + 弹窗显示前 20 条 + 「打开错误报告」按钮）
-   - 差异表 2-sheet xlsx：Pending（20 列）+ 银行对账单（44 列），BU 差异行整行黄底（`FFFFFF00`）
+2. **T2 — 新增模块「月度银行对账单BU回填校验」**（最终规则 v0.8/v0.9，下方 §资金红线 / §修正 8/9 详述）：
+   - 主菜单新入口 + 模块面板（**3 按钮**：导入文件 / 开始运行 / 导出差异，月份选择改为对话框形态）
+   - **资金红线对账**：1:1 / 1:N / N:1 视为对账成功；**仅 N:M（双侧 ≥2）视为数据异常 → 跳过 + 写入差异表第 3 sheet「异常」（不中断运行）**
+   - **BU 比较**：trim + toLowerCase + 空值归一（v0.9 OPEN ISSUE #5 重新拍板，容忍 `Flowmore` vs `FlowMore` 大小写差异）
+   - **BU 标黄精准到子对**（v0.8）：1:1 双侧不等都标；1:N 仅标不等的银行行；N:1 仅标不等的 Pending 行
+   - SQLite 主 DB 新增 3 张表 + 5 索引（pending_imports / bank_imports / runs）
+   - **10 个 IPC handler**（`bankBuRecon:*`）+ preload 7 个 API 方法
+   - **3 个前端对话框**（Clear 风）：月份选择（年/月两下拉对齐 Pending 模块）/ 文件导入提示 / 异常列表
+   - 「开始运行」/「导出差异」分别弹月份选择 / 导出选项 dialog；导出支持指定月份 / 全月份汇总 + 用户另存为路径
+   - 差异表 **3-sheet** xlsx：Pending（20 列）+ 银行对账单（44 列）+ **异常（5 列）**；BU 差异行整行黄底（`FFFFFF00`）
+   - 汇总导出多 1 列「对账月份」区分跨月数据；最新 run 是异常的月份不参与汇总
+   - `.gitignore` 修复：`assets/{银行对账单,Pending数据管理}.xlsx` 模板入库 + `.~*.xlsx` 全局忽略
 
-OPEN ISSUE 拍板（10/10）见 `docs/iterations/v2.1.2/PRD-v2.1.2.md` §六。
+⚠️ **关键术语修正**：v0.4 草稿期曾设计为"严格 1:1，任何重复中断运行"，但用户在 v0.5 → v0.8 修订过程中重新拍板了 OPEN ISSUE #10（详见 §修正 8）+ #5（详见 §修正 9）。**Reviewer 应以 §资金红线 + §修正 8/9 为准**，不要参考 v0.4 文档残留。
+
+OPEN ISSUE 拍板（10/10）见 `docs/iterations/v2.1.2/PRD-v2.1.2.md` §六（PRD 已 v0.4 → v0.6）。
 
 ## ⚠️ 资金红线 — 必须人工 review（v0.8 重新拍板）
 
 T2.6 对账算法 (`src/main-process/bank-bu-recon-session.js#runReconciliation`) 是本 PR 最核心的资金安全边界：
 
 - **匹配规则**（v0.8 修订）：1:1 / 1:N / N:1 视为对账成功；N:M（双侧 ≥2）视为异常 → 跳过 BU 比较 + 写入差异表第 3 sheet「异常」（**不中断运行**）
-- **BU 比较语义**：`normalize(v) = String(v).trim()`（空值归一为 `""`）；不大小写归一化
+- **BU 比较语义**（v0.9 修订）：拆 `normalizeKey`（对账单号匹配，仅 trim）+ `normalizeBu`（BU 比较，trim + toLowerCase + 空值归一为 `""`）；容忍 BU 字段大小写差异（如 `Flowmore` vs `FlowMore`），但对账单号匹配仍区分大小写
 - **BU 标黄精准到子对**（v0.8 OPEN ISSUE Q1=A 拍板）：
   - 1:1：双侧不等都标黄
   - 1:N：Pending 不标；银行行逐一比，仅标不等的银行行
@@ -51,25 +58,33 @@ T2.6 对账算法 (`src/main-process/bank-bu-recon-session.js#runReconciliation`
 
 ## 测试
 
-### 自动化（npm run smoke）
+### 自动化（node 端到端用例 — 资金红线核心路径，本地全 PASS）
 
-新增 4 用例（资金红线核心路径）— **本地全 PASS**：
+⚠️ **v0.4 老设计是 4 用例（A-D, 1:1 + 1:N/N:1 视为异常中断），v0.8/v0.9 重新拍板后扩为 8 用例（A-E + F-H 大小写边界）**：
 
-| Case | 输入 | 期望 | 实际 |
+| Case | 输入 | 期望（v0.8/v0.9） | 实际 |
 |---|---|---|---|
-| A 全相等无差异 | 5 行 1:1，BU 全等 | matched=5 / buDiff=0 / 无黄底 | ✓ PASS |
-| B 部分 BU 差异 | 5 行 1:1，2 行 BU 不等 | matched=5 / buDiff=2 / Pending 2 行黄底 + 银行 2 行黄底 | ✓ PASS |
-| C 1:N 异常 | Pending 1 行 ↔ 银行 3 行 | status=failed_anomaly / 1 个 anomaly / .txt 报告生成 | ✓ PASS |
-| D N:1 异常 | Pending 2 行 ↔ 银行 1 行 | status=failed_anomaly / 1 个 anomaly / .txt 报告生成 | ✓ PASS |
+| A 1:1 全等 | 2 行 1:1，BU 全等 | status=success / matched=4（双侧合计）/ buDiff=0 / nm=0 | ✓ |
+| B 1:1 部分差异 | 2 行 1:1，1 行 BU 不等 | matched=4 / buDiff=2（P+B 双侧标黄）/ nm=0 | ✓ |
+| **C 1:N 部分差异** | Pending 1 行 ↔ 银行 3 行（B[1] BU 不等） | matched=4 / buDiff=1 / **P 不标，仅 B[1] 标黄**（精准子对）| ✓ |
+| **D N:1 部分差异** | Pending 3 行（P[1] BU 不等）↔ 银行 1 行 | matched=4 / buDiff=1 / **B 不标，仅 P[1] 标黄**（精准子对）| ✓ |
+| **E N:M 异常** | Pending 2 行 ↔ 银行 2 行 | status=success（**不中断**）/ matched=0 / nm=1 / 异常 sheet 1 行 + 行号正确 | ✓ |
+| **F BU 大小写归一**（v0.9）| Pending=`Flowmore`/`FLOWMORE` vs 银行=`FlowMore`/`flowmore` | buDiff=0（大小写不再算差异） | ✓ |
+| **G BU 真差异**（v0.9）| Pending=`Flowmore` vs 银行=`OtherBU` | buDiff=2（真差异仍标） | ✓ |
+| **H 对账单号大小写**（v0.9）| Pending=`rec1` vs 银行=`REC1` | matched=0 / 双侧 unmatched 各 1（对账单号未归一）| ✓ |
 
-### 手动测试 checklist（用户本机 GUI）
+### 手动测试 checklist（用户本机 GUI — v0.8/v0.9 最终 UX）
 
 - [ ] 启动 app，主菜单看到「月度银行对账单BU回填校验」入口
-- [ ] 切到该模块，月份 select 显示最近 13 个月 + 已导入月份的行数提示
-- [ ] 点「导入文件」→ 顺序弹两次文件选择对话框（标题分别提示 Pending / 银行对账单）
+- [ ] 切到该模块，状态栏显示「欢迎使用小助手」，「导入文件」按钮可点（其余 2 按钮 disabled）
+- [ ] 点「导入文件」→ 弹**月份对话框**（年/月两下拉，默认预选当前年+上月）→ 点「下一步」
+- [ ] 弹**Clear 风提示**「请导入 Pending 数据管理文件」 → 点「继续选择」 → 系统文件选择 → 选 Pending xlsx
+- [ ] 弹「请导入银行对账单文件」 → 点「继续选择」 → 系统文件选择 → 选银行 xlsx
 - [ ] 用 `assets/Pending数据管理.xlsx` + `assets/银行对账单.xlsx` 模板（空数据）测试导入流程通畅
-- [ ] 用真实业务数据测试：导入 → 运行 → 导出 → 打开导出文件验证 2 sheet + 黄底
-- [ ] 故意构造一笔 1:N 数据：运行后弹窗显示异常对账单号 + 行号 + 「打开错误报告」可打开 file explorer
+- [ ] 用真实业务数据测试：导入完成 → 状态栏显示行数 → 点「开始运行」弹**月份对账对话框**（仅列两侧都已导入的月份）→ 选月份 + 完成 → 状态栏显示「成功 X 行 / BU 差异 Y 行 / Pending 未匹上银行 Z 行 / 银行未匹上 Pending W 行 / N:M 异常 V 组」
+- [ ] 点「导出差异」弹**导出对话框**（指定月份 / 全月份汇总 二选一）→ 选完点「导出」→ 弹另存为 → 用户选路径 → 验证生成的 xlsx 有 **3 sheet**（Pending / 银行对账单 / 异常）+ BU 差异行整行黄底
+- [ ] 故意构造 N:M 数据（Pending 2 行 + 银行 2 行同对账单号）：**运行不中断**，状态栏显示「N:M 异常 1 组」，导出后 Sheet 3「异常」列出该对账单号 + 双侧行号
+- [ ] 故意构造 BU 大小写差异（`Flowmore` vs `FlowMore`）：BU 差异 0 行（v0.9 容忍大小写）
 - [ ] C4 dialog 打开新增/编辑场景：看到「对账字段」+「对账内容」新文案
 - [ ] C1/C2/C3 dialog 打开：看到原文案保持不变（防 T1 误伤）
 
@@ -82,11 +97,10 @@ npm run preview:scenario-config-c4-both
 npm run preview:scenario-config-c4-gateway
 npm run preview:scenario-config-c4-gateway-1vN
 
-# T2 — 4 张新模块截图
+# T2 — 3 张新模块截图（v0.8 已删除 anomaly preview，因为 N:M 不再弹中断窗）
 npm run preview:bank-bu-recon-panel-initial
 npm run preview:bank-bu-recon-panel-importing
 npm run preview:bank-bu-recon-panel-result
-npm run preview:bank-bu-recon-panel-anomaly
 ```
 
 ## ⚠️ 关联功能 review（npm run check:vars 输出 — 2026-05-13 最终刷新）
@@ -140,6 +154,15 @@ npm run preview:bank-bu-recon-panel-anomaly
 ```
 
 ## Reverse Sync 修正
+
+⚠️ **修正按时间顺序记录，不是优先级顺序**。最重要的资金红线变更在 §修正 8（v0.8 算法重写）+ §修正 9（v0.9 BU 大小写归一）+ §修正 10（v0.10 文案口语化）。
+
+修正时间线速览：
+- 修正 1-4：PM/spec 阶段误标 + UX 调整（v0.1-v0.4 草稿期）
+- 修正 5-7：3 个对话框前端化 + UX 微调（v0.4 → v0.7b）
+- **修正 8（v0.8）**：资金红线规则重新拍板 — 1:N/N:1 改为正常 + N:M 异常 sheet
+- **修正 9（v0.9）**：BU 比较加大小写归一化（`Flowmore` vs `FlowMore` 不再误报）
+- **修正 10（v0.10）**：「未匹配」文案改「未匹上」口语化
 
 ### 修正 1：T1 文案行号误标（PRD 草稿期）
 
