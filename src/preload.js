@@ -221,5 +221,23 @@ contextBridge.exposeInMainWorld('desktopApi', {
       exportSingle: (payload) => ipcRenderer.invoke('pending:diff:export-single', payload),
       exportAggregate: () => ipcRenderer.invoke('pending:diff:export-aggregate')
     }
+  },
+  // v2.1.2 T2：月度银行对账单BU回填校验
+  // spec v0.4：pick-files 拆为 pickPendingFile / pickBankFile（前端串联 Clear 风 modal 提示）
+  bankBuRecon: {
+    listMonths: () => ipcRenderer.invoke('bankBuRecon:months:list'),
+    status: (payload) => ipcRenderer.invoke('bankBuRecon:status', payload),
+    pickPendingFile: (payload) => ipcRenderer.invoke('bankBuRecon:import:pick-pending-file', payload),
+    pickBankFile: (payload) => ipcRenderer.invoke('bankBuRecon:import:pick-bank-file', payload),
+    runImport: (payload) => ipcRenderer.invoke('bankBuRecon:import:run', payload),
+    run: (payload) => ipcRenderer.invoke('bankBuRecon:run', payload),
+    // v0.5: 拆 export → single + aggregate + 另存为 picker
+    pickSavePath: (payload) => ipcRenderer.invoke('bankBuRecon:export:pick-save-path', payload),
+    exportSingle: (payload) => ipcRenderer.invoke('bankBuRecon:export:single', payload),
+    exportAggregate: (payload) => ipcRenderer.invoke('bankBuRecon:export:aggregate', payload),
+    listRuns: (payload) => ipcRenderer.invoke('bankBuRecon:run:history', payload),
+    // v0.5: 新增 ready/success 月份列表 IPC
+    listReadyMonths: () => ipcRenderer.invoke('bankBuRecon:run:list-ready-months'),
+    listSuccessMonths: () => ipcRenderer.invoke('bankBuRecon:run:list-success-months')
   }
 });

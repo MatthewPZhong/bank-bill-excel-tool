@@ -9,6 +9,35 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.2（2026-05-13）
+
+v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更** + **新增模块「月度银行对账单BU回填校验」**。资金红线（OPEN ISSUE #10）拍板：严格 1:1 匹配，任何 1:N / N:1 / N:M 异常 → 运行立即中断 + 错误报告 + 弹窗。
+
+### 新增
+
+- **新模块「月度银行对账单BU回填校验」**：T-1 月 Pending 数据管理 + 银行对账单导入 → 1:1 / 1:N / N:1 对账成功 → 3-sheet 差异 Excel 导出（Pending / 银行对账单 / 异常）。
+  - 主菜单入口 + 模块面板 3 按钮（导入文件 / 开始运行 / 导出差异）
+  - 「导入文件」→ 月份对话框 → 文件提示 + 选择 ×2
+  - 「开始运行」→ 月份选择对话框（仅 ready 月份）→ 触发对账
+  - 「导出差异」→ 选指定月份 / 所有月份汇总 → 另存为对话框 → 写入用户指定路径
+  - **资金红线**：1:1/1:N/N:1 视为正常匹配（精准标差异子对：仅标 BU 不等的子对）；N:M（双侧 ≥2）跳过 BU 比较 + 写入第 3 个「异常」sheet（不中断运行）
+  - 资金红线对账：Pending.主对账单号 ↔ 银行对账单.ReconciliationId 严格 1:1，任何重复 → 运行中断
+  - BU 比较语义：`String(v).trim()`（空值 → ''），不大小写归一化
+  - 差异表 sheet：Pending（20 列）+ 银行对账单（44 列）；BU 差异行整行 `FFFFFF00` 黄底
+  - 异常报告：纯文本到 `Documents/网银账单生成小助手/error-reports/{date}/`，含全部异常对账单号 + 行号
+  - SQLite 主 DB 新增 3 张表（pending_imports / bank_imports / runs）；与 Pending 模块独立 DB 完全隔离
+- **8 个 IPC handler**（`bankBuRecon:*`）+ preload API 暴露
+
+### 变更
+
+- **版本号**：2.1.1 → 2.1.2
+- **C4 dialog 文案变更**（仅 ReconID 修复 / `isReconIdFixCategory` 分支）：
+  - 「账单类型」→「对账字段」（dialog label / 按钮 / 错误消息 / 确认弹窗）
+  - 「对账字段」→「对账内容」（同上）
+  - 不动：内部变量名 / data 属性 / C1/C2/C3 dialog 同名文案
+- **smoke 扩展**：4 用例（A 全相等 / B 部分差异 / C 1:N 异常 / D N:1 异常）
+- **preview 入口**：新增 4 张截图脚本
+
 ## 2.1.1（2026-05-12）
 
 v2.1.0-beta.3 之后追加 patch 迭代：**PDF 整体移除**（破坏性变更）+ C4 dialog 文案优化 + **BillDate ±N 可配置** + tooltip + 按钮文案。6 个主 task / 8 个实现 commit / 单 PR 合并（PR #41 累计 17 commit，含 PM + 实现 + PR 草稿 + 用户反馈 fix + PR review round-1/2/3 fix + self-review-final fix）。

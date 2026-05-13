@@ -61,6 +61,11 @@ const MODULES = Object.freeze({
   reconIdFix: {
     id: 'recon-id-fix',
     name: '对账单ReconID修复'
+  },
+  // v2.1.2 T2：月度银行对账单BU回填校验
+  bankBuRecon: {
+    id: 'bank-bu-recon',
+    name: '月度银行对账单BU回填校验'
   }
 });
 const RENDERER_STARTUP_MARKS = Object.freeze({
@@ -246,6 +251,12 @@ const elements = {
   bankStatementRunBtn: document.getElementById('bankStatementRunBtn'),
   bankStatementExportBtn: document.getElementById('bankStatementExportBtn'),
   bankStatementStatusBox: document.getElementById('bankStatementStatusBox'),
+  // v2.1.2 T2：月度银行对账单BU回填校验模块（5 项 DOM 缓存；月份选择改为对话框，无 select）
+  bankBuReconModulePanel: document.getElementById('bankBuReconModulePanel'),
+  bankBuReconImportBtn: document.getElementById('bankBuReconImportBtn'),
+  bankBuReconRunBtn: document.getElementById('bankBuReconRunBtn'),
+  bankBuReconExportBtn: document.getElementById('bankBuReconExportBtn'),
+  bankBuReconStatusBox: document.getElementById('bankBuReconStatusBox'),
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（spec §一.1 + §七 — 6 项 DOM 缓存）
   // v2.1.0-beta.3 T4：新增主面板"账单类别"下拉 + 行 2 整行 wrapper（可隐藏）
   reconIdFixModulePanel: document.getElementById('reconIdFixModulePanel'),
@@ -302,7 +313,18 @@ const {
   createScenarioConfigDialogC3,
   createScenarioConfirmDetailDialog,
   // v2.1.0-beta.1 PR-A（task A7）：C4 类配置弹窗
-  createScenarioConfigDialogC4
+  createScenarioConfigDialogC4,
+  // v2.1.2 T2：月份选择对话框（PRD §3.2.5 拍板修正）
+  createBankBuReconMonthPickerDialog,
+  // v2.1.2 T2：文件导入提示对话框（Clear 风前端 modal）
+  createBankBuReconFileImportPromptDialog,
+  // v2.1.2 T2 (spec v0.5)：开始运行 / 导出差异 弹窗
+  createBankBuReconReconcileDialog,
+  createBankBuReconExportDialog,
+  // v2.1.2 T2：preview state apply 函数（v0.8 删除 anomaly preview）
+  applyBankBuReconPanelInitialPreviewState,
+  applyBankBuReconPanelImportingPreviewState,
+  applyBankBuReconPanelResultPreviewState
 } = window.__rendererDialogs.createRendererDialogs({
   state,
   elements,
@@ -1236,6 +1258,13 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块面板隐藏控制
   if (elements.reconIdFixModulePanel) {
     elements.reconIdFixModulePanel.hidden = moduleId !== MODULES.reconIdFix.id;
+  }
+  // v2.1.2 T2：月度银行对账单BU回填校验模块面板隐藏控制
+  if (elements.bankBuReconModulePanel) {
+    elements.bankBuReconModulePanel.hidden = moduleId !== MODULES.bankBuRecon.id;
+    if (moduleId === MODULES.bankBuRecon.id) {
+      restoreBankBuReconPanelState();
+    }
   }
 
   Array.from(elements.moduleSwitcherMenu.querySelectorAll('.module-option')).forEach((button) => {
@@ -3764,6 +3793,226 @@ function handlePaletteStyleConfirm() {
   );
 }
 
+// ============================================================
+// v2.1.2 T2：月度银行对账单BU回填校验 — UI 状态机 + IPC 调用
+// PRD §3.2.5 数据流：[点导入文件] → [弹月份对话框] → [弹 2 次文件选择] → [导入] → [运行] → [导出]
+// 状态机：[空闲] → [导入中] → [导入完成] → [运行中] → [运行完成] → [导出完成]
+//        异常路径：[运行中] → [异常中断]（重新走「导入文件」流程）
+// ============================================================
+
+// v0.5: 状态模型简化 — 按钮 enable 不再依赖单一 currentSessionMonth；改为基于后端 ready/success 月份计数
+const bankBuReconState = {
+  readyMonthsCount: 0,    // 两侧都已导入的月份数（决定「开始运行」是否亮）
+  successMonthsCount: 0   // 至少 1 个 success run 的月份数（决定「导出差异」是否亮）
+};
+
+function setBankBuReconStatus(message, tone = 'info') {
+  if (!elements.bankBuReconStatusBox) return;
+  updateStatusBox(elements.bankBuReconStatusBox, message, tone, {
+    idleTitle: '欢迎使用小助手'
+  });
+}
+
+function applyBankBuReconButtonState() {
+  // 「导入文件」永远 enabled（点击后弹月份对话框，PRD §3.2.5 数据流第一步）
+  if (elements.bankBuReconImportBtn) elements.bankBuReconImportBtn.disabled = false;
+  // 「开始运行」：至少 1 个月份两侧都已导入（OPEN ISSUE Q2 拍板 A）
+  if (elements.bankBuReconRunBtn) elements.bankBuReconRunBtn.disabled = bankBuReconState.readyMonthsCount === 0;
+  // 「导出差异」：至少 1 个 success run（OPEN ISSUE Q5 拍板 A）
+  if (elements.bankBuReconExportBtn) elements.bankBuReconExportBtn.disabled = bankBuReconState.successMonthsCount === 0;
+}
+
+async function refreshBankBuReconButtonAvailability() {
+  try {
+    const [ready, success] = await Promise.all([
+      window.desktopApi.bankBuRecon.listReadyMonths().catch(() => []),
+      window.desktopApi.bankBuRecon.listSuccessMonths().catch(() => [])
+    ]);
+    bankBuReconState.readyMonthsCount = Array.isArray(ready) ? ready.length : 0;
+    bankBuReconState.successMonthsCount = Array.isArray(success) ? success.length : 0;
+  } catch (_e) {
+    bankBuReconState.readyMonthsCount = 0;
+    bankBuReconState.successMonthsCount = 0;
+  }
+  applyBankBuReconButtonState();
+}
+
+// 切到本模块时拉服务器状态 → 同步按钮可用性
+function restoreBankBuReconPanelState() {
+  applyBankBuReconButtonState();
+  setBankBuReconStatus('欢迎使用小助手', 'info');
+  refreshBankBuReconButtonAvailability();
+}
+
+async function handleBankBuReconImport() {
+  // PRD §3.2.5 数据流第一步：弹月份选择对话框（年+月两下拉，spec v0.3）
+  openModal(createBankBuReconMonthPickerDialog({
+    onConfirm: async (yearMonth) => {
+      await pickFilesAndImport(yearMonth);
+    },
+    onCancel: () => {
+      // 用户取消月份选择，状态栏不变
+    }
+  }));
+}
+
+async function pickFilesAndImport(yearMonth) {
+  // PRD §3.2.5 数据流第 2-3 步：前端 Clear 风 modal 提示 → 调 IPC 单选文件
+  // 流程：[prompt 1] → [pick pending] → [prompt 2] → [pick bank] → [import:run]
+
+  // === 步骤 1：Pending 数据管理文件 ===
+  openModal(createBankBuReconFileImportPromptDialog({
+    title: '请导入 Pending 数据管理文件',
+    detail: `接下来弹出的文件选择对话框中，请选择对应的 xlsx 文件（对账月份 ${yearMonth}）。`,
+    onConfirm: async () => {
+      const pendingRes = await window.desktopApi.bankBuRecon.pickPendingFile({ yearMonth });
+      if (!pendingRes || pendingRes.status === 'cancelled') {
+        setBankBuReconStatus(`${yearMonth}：已取消选择 Pending 数据管理文件`, 'info');
+        return;
+      }
+      if (pendingRes.status === 'error') {
+        setBankBuReconStatus(pendingRes.message || '选择 Pending 文件失败', 'error');
+        return;
+      }
+      const pendingPath = pendingRes.filePath;
+
+      // === 步骤 2：银行对账单文件 ===
+      openModal(createBankBuReconFileImportPromptDialog({
+        title: '请导入银行对账单文件',
+        detail: `接下来弹出的文件选择对话框中，请选择对应的 xlsx 文件（对账月份 ${yearMonth}）。`,
+        onConfirm: async () => {
+          const bankRes = await window.desktopApi.bankBuRecon.pickBankFile({ yearMonth });
+          if (!bankRes || bankRes.status === 'cancelled') {
+            setBankBuReconStatus(`${yearMonth}：已取消选择银行对账单文件`, 'info');
+            return;
+          }
+          if (bankRes.status === 'error') {
+            setBankBuReconStatus(bankRes.message || '选择银行对账单文件失败', 'error');
+            return;
+          }
+          const bankPath = bankRes.filePath;
+
+          // === 步骤 3：导入 ===
+          setBankBuReconStatus(`正在导入 ${yearMonth} 数据...`, 'info');
+          const impResult = await window.desktopApi.bankBuRecon.runImport({
+            yearMonth,
+            pendingPath,
+            bankPath
+          });
+          if (impResult.status === 'error') {
+            const detail = impResult.detailLines && impResult.detailLines.length > 0
+              ? '\n' + impResult.detailLines.join('\n')
+              : '';
+            setBankBuReconStatus(`导入失败：${impResult.message}${detail}`, 'error');
+            return;
+          }
+
+          // 导入成功 → 刷新按钮可用性（readyMonths 可能新增此月）
+          setBankBuReconStatus(
+            `已导入 ${yearMonth}：Pending ${impResult.pendingCount} 行 / 银行对账单 ${impResult.bankCount} 行 — 点击「开始运行」对账`,
+            'success'
+          );
+          await refreshBankBuReconButtonAvailability();
+        },
+        onCancel: () => {
+          setBankBuReconStatus(`${yearMonth}：已取消导入`, 'info');
+        }
+      }));
+    },
+    onCancel: () => {
+      setBankBuReconStatus(`${yearMonth}：已取消导入`, 'info');
+    }
+  }));
+}
+
+// v0.5: 「开始运行」流程 — 弹月份对话框 → 选月份 → 直接跑（无二次确认）
+async function handleBankBuReconRun() {
+  const readyMonths = await window.desktopApi.bankBuRecon.listReadyMonths().catch(() => []);
+  if (!readyMonths || readyMonths.length === 0) {
+    openModal(createAlertDialog('暂无可对账的月份。请先用「导入文件」按月份导入 Pending + 银行对账单两份源文件。'));
+    return;
+  }
+  openModal(createBankBuReconReconcileDialog({
+    readyMonths,
+    defaultMonth: readyMonths[0],
+    onConfirm: async (yearMonth) => {
+      setBankBuReconStatus(`正在对账 ${yearMonth}...`, 'info');
+      const result = await window.desktopApi.bankBuRecon.run({ yearMonth });
+      if (result.status === 'error') {
+        setBankBuReconStatus(`运行失败：${result.message}`, 'error');
+        return;
+      }
+      // v0.8: 永远 status=success（不再有 failed_anomaly 中断分支）
+      const s = result.stats;
+      const nmTail = s.nmAnomalyCount > 0 ? ` / N:M 异常 ${s.nmAnomalyCount} 组` : '';
+      const tone = s.buDiffCount > 0 || s.nmAnomalyCount > 0 ? 'info' : 'success';
+      setBankBuReconStatus(
+        `${yearMonth} 对账完成：成功 ${s.matchedCount} 行 / BU 差异 ${s.buDiffCount} 行 / Pending 未匹上银行 ${s.pendingUnmatched} 行 / 银行未匹上 Pending ${s.bankUnmatched} 行${nmTail}`,
+        tone
+      );
+      await refreshBankBuReconButtonAvailability();
+    },
+    onCancel: () => {}
+  }));
+}
+
+// v0.5: 「导出差异」流程 — 弹 export 弹窗 → radio (single/aggregate) → 弹另存为 → 写文件
+async function handleBankBuReconExport() {
+  const successMonths = await window.desktopApi.bankBuRecon.listSuccessMonths().catch(() => []);
+  if (!successMonths || successMonths.length === 0) {
+    openModal(createAlertDialog('暂无可导出的成功运行记录。请先用「开始运行」对账。'));
+    return;
+  }
+  openModal(createBankBuReconExportDialog({
+    successMonths,
+    onConfirm: async (choice) => {
+      // 弹另存为对话框拿 savePath
+      const ts = formatBbrTimestampForFilename();
+      const defaultFileName = choice.scope === 'aggregate'
+        ? `月度银行对账单BU回填校验_汇总_${ts}.xlsx`
+        : `月度银行对账单BU回填校验_${(choice.yearMonth || '').replace('-', '')}_${ts}.xlsx`;
+      const pickRes = await window.desktopApi.bankBuRecon.pickSavePath({ defaultFileName });
+      if (!pickRes || pickRes.status === 'cancelled') {
+        setBankBuReconStatus('已取消导出', 'info');
+        return;
+      }
+      if (pickRes.status === 'error') {
+        setBankBuReconStatus(`选择保存路径失败：${pickRes.message}`, 'error');
+        return;
+      }
+      const savePath = pickRes.savePath;
+
+      setBankBuReconStatus('正在导出差异表...', 'info');
+      let result;
+      if (choice.scope === 'single') {
+        result = await window.desktopApi.bankBuRecon.exportSingle({ runId: choice.runId, savePath });
+      } else {
+        result = await window.desktopApi.bankBuRecon.exportAggregate({ savePath });
+      }
+
+      if (result.status !== 'success') {
+        setBankBuReconStatus(`导出失败：${result.message || '未知错误'}`, 'error');
+        return;
+      }
+      setBankBuReconStatus(`差异表已生成：${result.filePath}`, 'success');
+
+      // 汇总场景：若有 skippedMonths，弹 alert 提示（OPEN ISSUE Q7 拍板 A）
+      if (choice.scope === 'aggregate' && Array.isArray(result.skippedMonths) && result.skippedMonths.length > 0) {
+        openModal(createAlertDialog(
+          `汇总完成。${result.skippedMonths.length} 个月份因数据异常或未运行成功未包含在汇总中：${result.skippedMonths.join(', ')}`
+        ));
+      }
+    },
+    onCancel: () => {}
+  }));
+}
+
+function formatBbrTimestampForFilename() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
 async function initialize() {
   markRendererStartup(RENDERER_STARTUP_MARKS.initializeStart);
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoStart);
@@ -3934,6 +4183,18 @@ async function initialize() {
       closeModuleMenu();
     });
   });
+
+  // v2.1.2 T2：月度银行对账单BU回填校验事件绑定（月份选择改为对话框，无 select change 事件）
+  if (elements.bankBuReconImportBtn) {
+    elements.bankBuReconImportBtn.addEventListener('click', handleBankBuReconImport);
+  }
+  if (elements.bankBuReconRunBtn) {
+    elements.bankBuReconRunBtn.addEventListener('click', handleBankBuReconRun);
+  }
+  if (elements.bankBuReconExportBtn) {
+    elements.bankBuReconExportBtn.addEventListener('click', handleBankBuReconExport);
+  }
+
   elements.backgroundPaletteBtn.addEventListener('click', () => {
     if (state.isBackgroundPaletteOpen) {
       closeBackgroundPalette();
@@ -4249,6 +4510,12 @@ async function initialize() {
     setTimeout(() => {
       applyScenarioConfigC4Gateway1vNPreviewState();
     }, 120);
+  } else if (info.previewModal === 'bank-bu-recon-panel-initial') {
+    setTimeout(() => { applyBankBuReconPanelInitialPreviewState(); }, 120);
+  } else if (info.previewModal === 'bank-bu-recon-panel-importing') {
+    setTimeout(() => { applyBankBuReconPanelImportingPreviewState(); }, 120);
+  } else if (info.previewModal === 'bank-bu-recon-panel-result') {
+    setTimeout(() => { applyBankBuReconPanelResultPreviewState(); }, 120);
   }
 
   markRendererStartup(RENDERER_STARTUP_MARKS.initComplete);

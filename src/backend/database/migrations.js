@@ -788,10 +788,156 @@ function ensureC3GwFieldCurrencyCaseFix(db) {
   });
 }
 
+// v2.1.2 T2 — 月度银行对账单BU回填校验模块的 3 张表
+// PRD §三 / spec §3.4：
+//   - bank_bu_recon_pending_imports：按月份存 Pending 数据管理.xlsx (20 列) 的导入数据
+//   - bank_bu_recon_bank_imports：按月份存 银行对账单.xlsx (44 列) 的导入数据
+//   - bank_bu_recon_runs：对账运行历史 + 统计 + 异常报告路径
+// 幂等：CREATE TABLE / INDEX IF NOT EXISTS，多次启动 no-op
+// 与 Pending 模块（pending-db 独立 DB）完全隔离：本模块 3 张表都在主 DB（tool-data.sqlite）
+function ensureBankBuReconTablesSupport(db) {
+  db.exec('BEGIN');
+
+  try {
+    // 表 1：Pending 数据管理导入（spec §3.4.1，20 列源数据）
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS bank_bu_recon_pending_imports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        year_month TEXT NOT NULL,
+        row_index INTEGER NOT NULL,
+        pending_biz_id TEXT,
+        bill_date TEXT,
+        pending_type TEXT,
+        fund_type TEXT,
+        entity TEXT,
+        finance_bu TEXT,
+        biz_dept TEXT,
+        counter_dept TEXT,
+        recon_id TEXT,
+        channel TEXT,
+        account_no TEXT,
+        amount TEXT,
+        currency TEXT,
+        bank_period TEXT,
+        balance_period TEXT,
+        remark TEXT,
+        status TEXT,
+        update_time TEXT,
+        operator TEXT,
+        bu_fix_flag TEXT,
+        imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_bbr_pending_month
+        ON bank_bu_recon_pending_imports(year_month);
+    `);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_bbr_pending_reconid
+        ON bank_bu_recon_pending_imports(year_month, recon_id);
+    `);
+
+    // 表 2：银行对账单导入（spec §3.4.2，44 列源数据）
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS bank_bu_recon_bank_imports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        year_month TEXT NOT NULL,
+        row_index INTEGER NOT NULL,
+        account_entity TEXT,
+        account_bu TEXT,
+        biz_id TEXT,
+        bill_date TEXT,
+        value_date TEXT,
+        channel TEXT,
+        region TEXT,
+        merchant_id TEXT,
+        currency TEXT,
+        credit_amount TEXT,
+        debit_amount TEXT,
+        reconciliation_id TEXT,
+        channel_order_no TEXT,
+        customer_ref TEXT,
+        account_reference TEXT,
+        transaction_description TEXT,
+        extra_information TEXT,
+        payment_detail TEXT,
+        payee_name TEXT,
+        payee_card_no TEXT,
+        drawee_name TEXT,
+        drawee_card_no TEXT,
+        by_order_of_beneficiary TEXT,
+        extra_fee TEXT,
+        trade_channel TEXT,
+        fund_type TEXT,
+        remark_description TEXT,
+        datasource TEXT,
+        remark_bu TEXT,
+        fill_method TEXT,
+        related_account TEXT,
+        auto_category_rule TEXT,
+        categorized_by TEXT,
+        clearing_network TEXT,
+        last_modified_time TEXT,
+        recon_amount TEXT,
+        origin_bill_id TEXT,
+        fx_channel TEXT,
+        fx_recon_id TEXT,
+        buy_currency TEXT,
+        buy_amount TEXT,
+        sell_currency TEXT,
+        sell_amount TEXT,
+        split_info TEXT,
+        imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_bbr_bank_month
+        ON bank_bu_recon_bank_imports(year_month);
+    `);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_bbr_bank_reconid
+        ON bank_bu_recon_bank_imports(year_month, reconciliation_id);
+    `);
+
+    // 表 3：对账运行历史（spec §3.4.3）
+    // status: 'success' / 'failed_anomaly'
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS bank_bu_recon_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        year_month TEXT NOT NULL,
+        run_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        status TEXT NOT NULL,
+        pending_total INTEGER NOT NULL,
+        bank_total INTEGER NOT NULL,
+        matched_count INTEGER NOT NULL,
+        bu_diff_count INTEGER NOT NULL,
+        pending_unmatched INTEGER NOT NULL,
+        bank_unmatched INTEGER NOT NULL,
+        anomaly_count INTEGER NOT NULL DEFAULT 0,
+        anomaly_report_path TEXT,
+        export_path TEXT
+      );
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_bbr_runs_month
+        ON bank_bu_recon_runs(year_month, run_at DESC);
+    `);
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
   ensureAmountSplitRulesSupport,
+  ensureBankBuReconTablesSupport,
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,

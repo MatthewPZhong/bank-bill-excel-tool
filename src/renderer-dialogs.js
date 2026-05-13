@@ -5865,17 +5865,17 @@
         }
         const billTypesArr = Array.isArray(c.billTypes) ? c.billTypes : [];
         if (billTypesArr.length === 0) {
-          errors.push('账单类型至少需要 1 行');
+          errors.push('对账字段至少需要 1 行');
         } else {
           billTypesArr.forEach((bt, idx) => {
             if (!bt.side || (bt.side !== 'main' && bt.side !== 'opp')) {
-              errors.push(`账单类型 #${bt.seq || idx + 1} 的"主/从"必填`);
+              errors.push(`对账字段 #${bt.seq || idx + 1} 的"主/从"必填`);
             }
             const conds = Array.isArray(bt.conditions) ? bt.conditions : [];
             if (conds.length === 0) {
-              errors.push(`账单类型 #${bt.seq || idx + 1} 至少需要 1 个条件`);
+              errors.push(`对账字段 #${bt.seq || idx + 1} 至少需要 1 个条件`);
             } else if (conds.some((cd) => !cd.field || (opNeedsValue(cd.op) && (cd.value === '' || cd.value === undefined)))) {
-              errors.push(`账单类型 #${bt.seq || idx + 1} 每行的字段不能为空；非"空值/非空值"操作的值不能为空`);
+              errors.push(`对账字段 #${bt.seq || idx + 1} 每行的字段不能为空；非"空值/非空值"操作的值不能为空`);
             }
           });
         }
@@ -5884,8 +5884,8 @@
         const hasMainBillType = billTypesArr.some((bt) => bt.side === 'main');
         const hasOppBillType = billTypesArr.some((bt) => bt.side === 'opp');
         if (billTypesArr.length > 0) {
-          if (!hasMainBillType) errors.push('账单类型必须至少包含 1 条"主边"账单类型');
-          if (!hasOppBillType) errors.push('账单类型必须至少包含 1 条"从边"账单类型');
+          if (!hasMainBillType) errors.push('对账字段必须至少包含 1 条"主边"对账字段');
+          if (!hasOppBillType) errors.push('对账字段必须至少包含 1 条"从边"对账字段');
         }
 
         // v2.1.0-beta.1 PR-B（Q1=B 决策，2026-04-30）：对账字段以 reconGroups[] 形式存储
@@ -5893,10 +5893,10 @@
         //   - 一个 group 内部 AND（fieldPair 数 ≥ 1）
         //   - 多个 group 之间 OR（group 数 ≥ 1）
         if (!Array.isArray(c.reconGroups) || c.reconGroups.length === 0) {
-          errors.push('对账字段至少需要 1 个分组');
+          errors.push('对账内容至少需要 1 个分组');
         } else {
           c.reconGroups.forEach((grp, gIdx) => {
-            const grpLabel = `对账字段分组 #${gIdx + 1}`;
+            const grpLabel = `对账内容分组 #${gIdx + 1}`;
             if (!grp || typeof grp !== 'object') {
               errors.push(`${grpLabel} 结构错误`);
               return;
@@ -5915,18 +5915,18 @@
           const sideBySeq = new Map(billTypesArr.map((bt) => [Number(bt.seq), bt.side]));
           c.reconGroups.forEach((grp, gIdx) => {
             if (!grp || typeof grp !== 'object') return;
-            const grpLabel = `对账字段分组 #${gIdx + 1}`;
+            const grpLabel = `对账内容分组 #${gIdx + 1}`;
             const leftSeq = Number(grp.leftTypeSeq);
             const rightSeq = Number(grp.rightTypeSeq);
             if (!sideBySeq.has(leftSeq)) {
-              errors.push(`${grpLabel} 左侧的账单类型序号 #${grp.leftTypeSeq} 不在账单类型列表中`);
+              errors.push(`${grpLabel} 左侧的对账字段序号 #${grp.leftTypeSeq} 不在对账字段列表中`);
             } else if (sideBySeq.get(leftSeq) !== 'main') {
-              errors.push(`${grpLabel} 左侧必须指向"主边"账单类型`);
+              errors.push(`${grpLabel} 左侧必须指向"主边"对账字段`);
             }
             if (!sideBySeq.has(rightSeq)) {
-              errors.push(`${grpLabel} 右侧的账单类型序号 #${grp.rightTypeSeq} 不在账单类型列表中`);
+              errors.push(`${grpLabel} 右侧的对账字段序号 #${grp.rightTypeSeq} 不在对账字段列表中`);
             } else if (sideBySeq.get(rightSeq) !== 'opp') {
-              errors.push(`${grpLabel} 右侧必须指向"从边"账单类型`);
+              errors.push(`${grpLabel} 右侧必须指向"从边"对账字段`);
             }
           });
         }
@@ -6864,17 +6864,17 @@
             </div>
           </div>
           <div class="scenario-config-row scenario-config-row-multi">
-            <span class="scenario-config-label">账单类型</span>
+            <span class="scenario-config-label">对账字段</span>
             <div class="scenario-config-multi-wrap">
               <div class="scenario-config-multi-rows" data-c4-bill-types></div>
-              ${isReadonly ? '' : '<button class="text-action small" type="button" data-c4-action="add-bill-type">+ 新增账单类型</button>'}
+              ${isReadonly ? '' : '<button class="text-action small" type="button" data-c4-action="add-bill-type">+ 新增对账字段</button>'}
             </div>
           </div>
           <div class="scenario-config-row scenario-config-row-multi">
-            <span class="scenario-config-label">对账字段</span>
+            <span class="scenario-config-label">对账内容</span>
             <div class="scenario-config-multi-wrap">
               <div class="scenario-config-multi-rows" data-c4-recon-groups></div>
-              ${isReadonly ? '' : '<button class="text-action small" type="button" data-c4-action="add-recon-group">+ 新增对账分组</button>'}
+              ${isReadonly ? '' : '<button class="text-action small" type="button" data-c4-action="add-recon-group">+ 新增对账内容分组</button>'}
             </div>
           </div>
           <div class="scenario-config-row scenario-config-row-mutex">
@@ -7135,7 +7135,7 @@
         });
       }
 
-      // 行 3：账单类型动态行
+      // 行 3：对账字段动态行（内部变量名 billTypes 保留）
       billTypesEl.addEventListener('change', (event) => {
         if (isReadonly) return;
         const sideSel = event.target.closest('select[data-c4-bt-field="side"]');
@@ -7234,7 +7234,7 @@
         renderReconGroups();
       });
 
-      // 行 4：对账字段（reconGroups[] — 每个 group 内 AND；多个 group OR）
+      // 行 4：对账内容（reconGroups[] — 每个 group 内 AND；多个 group OR；内部变量名 reconGroups 保留）
       // change 事件：处理"分组头的 leftTypeSeq/rightTypeSeq"和"字段对的 leftField/rightField"
       reconGroupsEl.addEventListener('change', (event) => {
         if (isReadonly) return;
@@ -7440,7 +7440,7 @@
         const sideLabel = (s) => isGwSubMode
           ? (s === 'opp' ? '渠道' : '网关')
           : (s === 'opp' ? '从边' : '主边');
-        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">账单类型：</span><ul>${(c.billTypes || []).map((bt) => {
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段：</span><ul>${(c.billTypes || []).map((bt) => {
           const condsHtml = (bt.conditions || []).map((cd) => `${escapeHtml(cd.field)} ${escapeHtml(cd.op)}${opNeedsValue(cd.op) ? ' ' + escapeHtml(String(cd.value || '')) : ''}`).join(' AND ');
           return `<li>类型#${bt.seq} (${sideLabel(bt.side)})：${condsHtml}</li>`;
         }).join('')}</ul></div>`;
@@ -7455,7 +7455,7 @@
                   return m;
                 }, new Map()).values())
               : []);
-        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段：</span><ul>${reconGroupsForPreview.map((grp, gIdx) => {
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账内容：</span><ul>${reconGroupsForPreview.map((grp, gIdx) => {
           const fpStr = (grp.fieldPairs || []).map((fp) => `${escapeHtml(fp.leftField || '')}=${escapeHtml(fp.rightField || '')}`).join(' AND ');
           const orPrefix = gIdx > 0 ? '<span class="scenario-confirm-detail-or">OR</span> ' : '';
           return `<li>${orPrefix}类型#${grp.leftTypeSeq} vs 类型#${grp.rightTypeSeq}：${fpStr}</li>`;
@@ -7611,8 +7611,419 @@
       createScenarioConfigDialogC3,
       createScenarioConfirmDetailDialog,
       // v2.1.0-beta.1 PR-A（task A7）：C4 类配置弹窗
-      createScenarioConfigDialogC4
+      createScenarioConfigDialogC4,
+      // v2.1.2 T2：月份选择对话框（PRD §3.2.5 数据流第一步）
+      createBankBuReconMonthPickerDialog,
+      // v2.1.2 T2：文件导入提示对话框（取代 Electron showMessageBox，Clear 风前端 modal）
+      createBankBuReconFileImportPromptDialog,
+      // v2.1.2 T2 (spec v0.5)：开始运行 / 导出差异 弹窗
+      createBankBuReconReconcileDialog,
+      createBankBuReconExportDialog,
+      // v2.1.2 T2：preview state apply 函数 3 个（initial / importing / result）
+      // anomaly preview 在 v0.8 已删除（N:M 不中断不弹窗）
+      applyBankBuReconPanelInitialPreviewState,
+      applyBankBuReconPanelImportingPreviewState,
+      applyBankBuReconPanelResultPreviewState
     };
+
+    // v2.1.2 T2 (spec v0.4 拍板)：月份选择对话框
+    // 前端结构和样式参照月度 Pending 数据核对模块的 buildImportMonthDialog（src/renderer-pending.js:311+）
+    // 复用 class：.pending-import-month-dialog / .pending-dialog-title / .monthly-balance-time-picker /
+    //            .pending-import-month-picker / .monthly-balance-year-select.mapping-text-input /
+    //            .monthly-balance-month-select.mapping-text-input / .dialog-actions.center / .secondary-btn.small / .primary-btn.small
+    // 业务差异（与 Pending 不同）：
+    //   - 标题文案：「选择对账月份」
+    //   - 年份范围：当前年 ± 1（OPEN ISSUE Q1 拍板，不同于 Pending 的 current-9 ~ current+1）
+    //   - 默认预选：当前年 + 上个月（OPEN ISSUE Q3 拍板）
+    //   - 按钮文案：取消 / 下一步（后续还有 2 步文件选择）
+    function createBankBuReconMonthPickerDialog({ onConfirm, onCancel } = {}) {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.dataset.previewModal = 'bank-bu-recon-month-picker';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card pending-import-month-dialog';
+      overlay.appendChild(dialog);
+
+      const title = document.createElement('div');
+      title.className = 'pending-dialog-title';
+      title.textContent = '选择对账月份';
+      dialog.appendChild(title);
+
+      // 复用 Pending 模块 picker 结构（year + month 两 select 横排）
+      const picker = document.createElement('div');
+      picker.className = 'monthly-balance-time-picker pending-import-month-picker';
+
+      // 默认预选：当前年 + 上个月（new Date(y, m-1, 1) 跨年初自动回退到上年 12 月）
+      const now = new Date();
+      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const defaultYear = lastMonth.getFullYear();
+      const defaultMonthNum = lastMonth.getMonth() + 1;
+
+      // 年份范围：当前年 ± 1（用日历年 now.getFullYear() 计算，避免 1 月时漏当前年）
+      const curYear = now.getFullYear();
+      const yearSelect = document.createElement('select');
+      yearSelect.className = 'monthly-balance-year-select mapping-text-input';
+      for (let y = curYear - 1; y <= curYear + 1; y += 1) {
+        const opt = document.createElement('option');
+        opt.value = String(y);
+        opt.textContent = `${y} 年`;
+        if (y === defaultYear) opt.selected = true;
+        yearSelect.appendChild(opt);
+      }
+
+      const monthSelect = document.createElement('select');
+      monthSelect.className = 'monthly-balance-month-select mapping-text-input';
+      for (let m = 1; m <= 12; m += 1) {
+        const opt = document.createElement('option');
+        opt.value = String(m).padStart(2, '0');
+        opt.textContent = `${m} 月`;
+        if (m === defaultMonthNum) opt.selected = true;
+        monthSelect.appendChild(opt);
+      }
+
+      picker.appendChild(yearSelect);
+      picker.appendChild(monthSelect);
+      dialog.appendChild(picker);
+
+      const actions = document.createElement('div');
+      actions.className = 'dialog-actions center';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'secondary-btn small';
+      cancelBtn.type = 'button';
+      cancelBtn.textContent = '取消';
+      cancelBtn.addEventListener('click', () => {
+        closeModal();
+        if (typeof onCancel === 'function') onCancel();
+      });
+
+      const confirmBtn = document.createElement('button');
+      confirmBtn.className = 'primary-btn small';
+      confirmBtn.type = 'button';
+      confirmBtn.textContent = '下一步';
+      confirmBtn.addEventListener('click', () => {
+        const yearMonth = `${yearSelect.value}-${monthSelect.value}`;
+        closeModal();
+        if (typeof onConfirm === 'function') onConfirm(yearMonth);
+      });
+
+      actions.appendChild(cancelBtn);
+      actions.appendChild(confirmBtn);
+      dialog.appendChild(actions);
+
+      return overlay;
+    }
+
+    // v2.1.2 T2 (spec v0.4 拍板)：文件导入提示对话框（Clear 风前端 modal）
+    // 取代 main.js 的 dialog.showMessageBox（macOS 上系统对话框样式割裂 + title 不显示）
+    // 复用 .modal-card.alert-card / .alert-body / .alert-icon / .alert-message / .dialog-actions.center 风格
+    // 用法：
+    //   openModal(createBankBuReconFileImportPromptDialog({
+    //     title: '请导入 Pending 数据管理文件',
+    //     detail: '接下来弹出的文件选择对话框中，请选择对应的 xlsx 文件（对账月份 2026-04）。',
+    //     onConfirm: async () => { /* 触发 IPC pickPendingFile */ },
+    //     onCancel: () => {}
+    //   }));
+    function createBankBuReconFileImportPromptDialog({ title = '', detail = '', onConfirm, onCancel } = {}) {
+      const overlay = createOverlay();
+      const card = document.createElement('div');
+      card.className = 'modal-card alert-card';
+      card.dataset.previewModal = 'bank-bu-recon-file-import-prompt';
+      card.innerHTML = `
+        <div class="alert-body">
+          <div class="alert-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28"><defs><linearGradient id="bbrFilePromptIconG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="100%" stop-color="#9B72F2"/></linearGradient></defs><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6z" fill="none" stroke="url(#bbrFilePromptIconG)" stroke-width="2" stroke-linejoin="round"/><path d="M14 3v6h6" fill="none" stroke="url(#bbrFilePromptIconG)" stroke-width="2" stroke-linejoin="round"/></svg>
+          </div>
+          <div class="alert-message">
+            <div style="font-weight:600; font-size:15px; margin-bottom:6px;">${escapeHtmlSafe(title)}</div>
+            <div style="font-size:13px; color:#666; line-height:1.55;">${escapeHtmlSafe(detail)}</div>
+          </div>
+        </div>
+        <div class="dialog-actions center">
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="confirm">继续选择</button>
+        </div>
+      `;
+      card.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+        closeModal();
+        if (typeof onCancel === 'function') onCancel();
+      });
+      card.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
+        closeModal();
+        if (typeof onConfirm === 'function') await onConfirm();
+      });
+      overlay.appendChild(card);
+      return overlay;
+    }
+
+    // v2.1.2 T2：preview state apply 函数集 — 由 preview script 通过 APP_PREVIEW_MODAL 触发
+    function switchToBankBuReconPanel() {
+      // 隐藏其他面板，显示 bankBuReconModulePanel
+      ['statementModulePanel','newAccountModulePanel','pendingModulePanel','bankStatementModulePanel','reconIdFixModulePanel'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.hidden = true;
+      });
+      const panel = document.getElementById('bankBuReconModulePanel');
+      if (panel) panel.hidden = false;
+      const nameEl = document.getElementById('currentModuleName');
+      if (nameEl) nameEl.textContent = '月度银行对账单BU回填校验';
+    }
+
+    function applyBankBuReconPanelInitialPreviewState() {
+      switchToBankBuReconPanel();
+      const importBtn = document.getElementById('bankBuReconImportBtn');
+      if (importBtn) importBtn.disabled = false;  // PRD §3.2.5：导入按钮默认可点击
+      const statusBox = document.getElementById('bankBuReconStatusBox');
+      const statusText = statusBox && statusBox.querySelector('.status-box-text');
+      if (statusText) statusText.textContent = '欢迎使用小助手';
+    }
+
+    function applyBankBuReconPanelImportingPreviewState() {
+      switchToBankBuReconPanel();
+      const importBtn = document.getElementById('bankBuReconImportBtn');
+      if (importBtn) importBtn.disabled = false;
+      const statusBox = document.getElementById('bankBuReconStatusBox');
+      const statusText = statusBox && statusBox.querySelector('.status-box-text');
+      if (statusText) statusText.textContent = '正在导入 2026-04 数据...';
+    }
+
+    function applyBankBuReconPanelResultPreviewState() {
+      switchToBankBuReconPanel();
+      ['bankBuReconImportBtn','bankBuReconRunBtn','bankBuReconExportBtn'].forEach((id) => {
+        const b = document.getElementById(id);
+        if (b) b.disabled = false;
+      });
+      const statusBox = document.getElementById('bankBuReconStatusBox');
+      const statusText = statusBox && statusBox.querySelector('.status-box-text');
+      if (statusText) statusText.textContent = '2026-04 对账完成：成功 145 行 / BU 差异 7 行 / Pending 未匹上银行 7 行 / 银行未匹上 Pending 3 行';
+    }
+
+    // v0.8 已删除 applyBankBuReconPanelAnomalyPreviewState + createBankBuReconAnomalyDialog
+    // 原因：N:M 异常不再中断运行 + 不再弹窗，改为写入差异表 Sheet 3「异常」（spec §3.8 v0.8 废弃）
+
+    function escapeHtmlSafe(s) {
+      return String(s || '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[ch]));
+    }
+
+    // v2.1.2 T2 (spec v0.5)：「开始运行」对账月份选择对话框
+    // 参照 src/renderer-pending.js#buildReconcileDialog 但改为单列单月（BU 回填是单月对账）
+    function createBankBuReconReconcileDialog({ readyMonths = [], defaultMonth = '', onConfirm, onCancel } = {}) {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.dataset.previewModal = 'bank-bu-recon-reconcile';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card pending-reconcile-dialog';
+      overlay.appendChild(dialog);
+
+      const title = document.createElement('div');
+      title.className = 'pending-dialog-title';
+      title.textContent = '选取需要对账的月份';
+      dialog.appendChild(title);
+
+      // 单列结构（仍用 .pending-rule-columns，只放 1 个 column）
+      const columnsWrap = document.createElement('div');
+      columnsWrap.className = 'pending-rule-columns';
+      dialog.appendChild(columnsWrap);
+
+      const column = document.createElement('div');
+      column.className = 'pending-rule-column';
+      const header = document.createElement('div');
+      header.className = 'pending-rule-column-header';
+      header.textContent = '对账月份';
+      column.appendChild(header);
+
+      const select = document.createElement('select');
+      select.className = 'mapping-text-input pending-reconcile-month-select';
+      const initialMonth = defaultMonth && readyMonths.includes(defaultMonth)
+        ? defaultMonth
+        : (readyMonths[0] || '');
+      readyMonths.forEach((m) => {
+        const opt = document.createElement('option');
+        opt.value = m;
+        opt.textContent = m;
+        if (m === initialMonth) opt.selected = true;
+        select.appendChild(opt);
+      });
+      column.appendChild(select);
+      columnsWrap.appendChild(column);
+
+      const actions = document.createElement('div');
+      actions.className = 'dialog-actions center';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'secondary-btn small';
+      cancelBtn.type = 'button';
+      cancelBtn.textContent = '取消';
+      cancelBtn.addEventListener('click', () => {
+        closeModal();
+        if (typeof onCancel === 'function') onCancel();
+      });
+
+      const confirmBtn = document.createElement('button');
+      confirmBtn.className = 'primary-btn small';
+      confirmBtn.type = 'button';
+      confirmBtn.textContent = '完成';
+      confirmBtn.addEventListener('click', () => {
+        const yearMonth = select.value;
+        if (!yearMonth) return;
+        closeModal();
+        if (typeof onConfirm === 'function') onConfirm(yearMonth);
+      });
+
+      actions.appendChild(confirmBtn);
+      actions.appendChild(cancelBtn);
+      dialog.appendChild(actions);
+
+      return overlay;
+    }
+
+    // v2.1.2 T2 (spec v0.5)：「导出差异」弹窗
+    // 参照 src/renderer-pending.js#buildExportDialog；但「指定月份」只显示月份下拉（自动用最新 success run）
+    function createBankBuReconExportDialog({ successMonths = [], onConfirm, onCancel } = {}) {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.dataset.previewModal = 'bank-bu-recon-export';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card pending-export-dialog';
+      overlay.appendChild(dialog);
+
+      const title = document.createElement('div');
+      title.className = 'pending-dialog-title';
+      title.textContent = '导出差异';
+      dialog.appendChild(title);
+
+      // Radio 1 + 月份下拉 — singleBlock 包裹 radio row 和 select row
+      // select 左边缘 = label「导」字起点（用 padding-left 实现）
+      // select 右边缘 = label「份」字末尾（dialog attach 后 JS 测量 label 宽度，强制设 select width）
+      // 纯 CSS 不可行：select 自带 min-width:200px (.pending-reconcile-month-select) + native intrinsic 宽度会撑大 inline-block，循环依赖
+      const RADIO_WIDTH_PX = 16;     // input[type=radio] 默认 ~13-16px
+      const RADIO_GAP_PX = 8;        // radio 与 label 之间的 gap
+      const SELECT_LEFT_OFFSET = `${RADIO_WIDTH_PX + RADIO_GAP_PX}px`;
+
+      const singleBlock = document.createElement('div');
+
+      const radioSingle = document.createElement('input');
+      radioSingle.type = 'radio';
+      radioSingle.name = 'bbr-export-scope';
+      radioSingle.id = 'bbr-export-radio-single';
+      radioSingle.value = 'single';
+      radioSingle.checked = true;
+      const radioSingleLabel = document.createElement('label');
+      radioSingleLabel.setAttribute('for', 'bbr-export-radio-single');
+      radioSingleLabel.textContent = '导出指定月份';
+      const radioSingleRow = document.createElement('div');
+      radioSingleRow.style.display = 'inline-flex';   // 让 row 自然收缩到内容宽度（用于 align 测量）
+      radioSingleRow.style.alignItems = 'center';
+      radioSingleRow.style.gap = `${RADIO_GAP_PX}px`;
+      radioSingleRow.appendChild(radioSingle);
+      radioSingleRow.appendChild(radioSingleLabel);
+      singleBlock.appendChild(radioSingleRow);
+
+      // 月份下拉 wrapper — padding-left 让 select 左边缘对齐 label 文字起点
+      // marginTop 拉开与上方 radio row 的距离（用户拍板"距离太近"）
+      const monthRow = document.createElement('div');
+      monthRow.style.marginTop = '14px';
+      monthRow.style.paddingLeft = SELECT_LEFT_OFFSET;
+      const monthSelect = document.createElement('select');
+      monthSelect.className = 'mapping-text-input pending-reconcile-month-select';
+      monthSelect.style.minWidth = '0';   // 覆盖 .pending-reconcile-month-select 的 min-width:200px
+      monthSelect.style.boxSizing = 'border-box';
+      successMonths.forEach((m, idx) => {
+        const opt = document.createElement('option');
+        opt.value = String(m.latestSuccessRunId);
+        opt.textContent = m.yearMonth;
+        opt.dataset.yearMonth = m.yearMonth;
+        if (idx === 0) opt.selected = true;
+        monthSelect.appendChild(opt);
+      });
+      monthRow.appendChild(monthSelect);
+      singleBlock.appendChild(monthRow);
+
+      dialog.appendChild(singleBlock);
+
+      // dialog attach 到 DOM 后测量 label 实际渲染宽度，强制设 select 宽度对齐
+      // 用 setTimeout 0 等 openModal 完成 DOM attach；document.fonts.ready 兜底字体延迟加载
+      // v0.7b 拍板：select 右侧再拓宽 SELECT_RIGHT_EXTEND px，用户视觉偏好
+      const SELECT_RIGHT_EXTEND_PX = 32;
+      function alignSelectToLabel() {
+        if (!radioSingleLabel.isConnected) return;
+        const labelWidth = radioSingleLabel.getBoundingClientRect().width;
+        if (labelWidth > 0) {
+          const targetWidth = labelWidth + SELECT_RIGHT_EXTEND_PX;
+          monthSelect.style.width = targetWidth + 'px';
+          monthSelect.style.maxWidth = targetWidth + 'px';
+        }
+      }
+      setTimeout(alignSelectToLabel, 0);
+      if (document.fonts && typeof document.fonts.ready === 'object') {
+        document.fonts.ready.then(() => alignSelectToLabel()).catch(() => {});
+      }
+
+      // Radio 2：所有月份汇总（独立行，宽度自适应 label 内容）
+      const radioAggr = document.createElement('input');
+      radioAggr.type = 'radio';
+      radioAggr.name = 'bbr-export-scope';
+      radioAggr.id = 'bbr-export-radio-aggr';
+      radioAggr.value = 'aggregate';
+      const radioAggrLabel = document.createElement('label');
+      radioAggrLabel.setAttribute('for', 'bbr-export-radio-aggr');
+      radioAggrLabel.textContent = '导出所有月份汇总（每月取最新 success run）';
+      const radioAggrRow = document.createElement('div');
+      radioAggrRow.style.display = 'flex';
+      radioAggrRow.style.alignItems = 'center';
+      radioAggrRow.style.gap = `${RADIO_GAP_PX}px`;
+      radioAggrRow.style.marginTop = '14px';   // 与上方 select 拉开
+      radioAggrRow.appendChild(radioAggr);
+      radioAggrRow.appendChild(radioAggrLabel);
+      dialog.appendChild(radioAggrRow);
+
+      function updateMode() {
+        monthSelect.disabled = !radioSingle.checked;
+      }
+      radioSingle.addEventListener('change', updateMode);
+      radioAggr.addEventListener('change', updateMode);
+      updateMode();
+
+      const actions = document.createElement('div');
+      actions.className = 'dialog-actions center';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'secondary-btn small';
+      cancelBtn.type = 'button';
+      cancelBtn.textContent = '取消';
+      cancelBtn.addEventListener('click', () => {
+        closeModal();
+        if (typeof onCancel === 'function') onCancel();
+      });
+      const confirmBtn = document.createElement('button');
+      confirmBtn.className = 'primary-btn small';
+      confirmBtn.type = 'button';
+      confirmBtn.textContent = '导出';
+      confirmBtn.addEventListener('click', () => {
+        if (radioSingle.checked) {
+          const runId = Number(monthSelect.value);
+          const ym = monthSelect.options[monthSelect.selectedIndex]?.dataset?.yearMonth || '';
+          if (!runId) {
+            openModal(createAlertDialog('请选择一个月份'));
+            return;
+          }
+          closeModal();
+          if (typeof onConfirm === 'function') onConfirm({ scope: 'single', runId, yearMonth: ym });
+        } else {
+          closeModal();
+          if (typeof onConfirm === 'function') onConfirm({ scope: 'aggregate' });
+        }
+      });
+      actions.appendChild(confirmBtn);
+      actions.appendChild(cancelBtn);
+      dialog.appendChild(actions);
+
+      return overlay;
+    }
   }
 
   global.__rendererDialogs = {

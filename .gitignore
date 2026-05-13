@@ -11,3 +11,8 @@ tmp
 # v2.0.0-beta.3 PR #32b：用户样例文件（dry-run 用，不入 git）
 银行对账单.xlsx
 资金对账导出不平.xlsx
+# v2.1.2 T2：assets/ 下的银行对账单 + Pending 数据管理是模块**模板文件**，必须入库
+!assets/银行对账单.xlsx
+!assets/Pending数据管理.xlsx
+# Excel 临时锁文件（打开 xlsx 时 Office 自动产生 .~filename.xlsx，永远不入 git）
+.~*.xlsx
