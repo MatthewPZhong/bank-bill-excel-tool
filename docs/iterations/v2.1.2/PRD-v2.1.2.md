@@ -326,6 +326,50 @@ normalizeKey(v):  # 用于对账单号匹配（不大小写归一，保留原行
 
 ---
 
-## 七、实施记录（合并后回写）
+## 七、实施记录
 
-_PR 合并后由 team-lead 补全 commit / PR 链接 / 验证结果。_
+### 7.1 PR #43 合并完成
+
+| 字段 | 值 |
+|---|---|
+| PR | #43 [v2.1.2] patch — C4 dialog 文案变更 + 新增模块「月度银行对账单BU回填校验」 |
+| URL | https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/43 |
+| base / head | `main` ← `v2.1.2` |
+| created | 2026-05-13 |
+| merged_at | 2026-05-13T05:50:40Z |
+| merge_commit | `50e0a0a` |
+| 总改动 | 27+ 文件，+6641 / -752（主提交） + 7 个 review/self-review fix commit |
+| smoke 验证 | usage-stats 46/46 PASS + bank-bu-recon 41/41 PASS（含 P1 / F3 / F5 资金红线 regression） |
+| GitHub Actions | smoke-test SUCCESS / build SKIPPED |
+
+### 7.2 实施提交时间线（10 commits）
+
+| commit | 类型 | 描述 |
+|---|---|---|
+| `b4a0e98` | feat | 主提交：T1 文案 + T2 新模块（v0.4 严格 1:1 起步） |
+| `ab02497` | self-review r1 | C1/C2/I1/I2/M1/M2 PR body Summary + smoke 表 + checklist 同步 |
+| `494eb83` | self-review r2 | N1-N5 v0.4 残留全清（11 处分布在 spec/tasks/CHANGELOG/USER_GUIDE/VFH/session.js） |
+| `ee7e954` | Codex r1 | P1 资金红线（覆盖导入清旧 runs）+ P2 lockfile + P2 接 smoke + P3 trailing whitespace |
+| `47344e0` | Codex r2 | F1 usage-stats FUNCTION_REGISTRY 注册 + F2 docs 残留 + F3 importMonth 原子事务 |
+| `94e658a` | Codex r3 | F4 docs 残留 + F5 reader.js blankrows 行号空行真 bug |
+| `7a71dc2` | self-review r3 | S1 删 month-repository 3 死代码 export + S3 8 处文案/注释残留 |
+| `ab02405` | self-review r4 | R1 month-repository.js 头部注释 stale + R3/R5 PR 草稿补齐修正 11-16 |
+| `434a651` | docs | 草稿改名归档（待merge-PR #43.md → PR43-v2.1.2.md） |
+| `3cdf1d4` | docs | frontmatter 字段对齐 PR41-v2.1.1 归档样式 |
+
+### 7.3 关键设计变更（与原 PRD v0.4 对比）
+
+| OPEN ISSUE | v0.4 草稿期拍板 | 最终版本 | 重新拍板时间 |
+|---|---|---|---|
+| #5 BU 比较语义 | A：trim + 严格相等（不大小写归一） | C：trim + toLowerCase + 空值归一（v0.9） | 2026-05-13（实测「Flowmore」vs「FlowMore」误报触发） |
+| #10 一对多/多对一/多对多匹配 | D + A：严格 1:1，任何重复 → 中断 + 错误报告 + 弹窗 | v0.5/v0.8：1:N/N:1 视为正常匹配；仅 N:M（双侧 ≥2）异常 → 跳过 + 写第 3 sheet「异常」（不中断） | 2026-05-13 |
+
+### 7.4 实测发现并修复的真 bug（Codex inline review 价值）
+
+- **F5（reader.js blankrows 行号空行 bug）**：`XLSX.utils.sheet_to_json` 用 `blankrows: false` 移除空行后，array index 不再对应 Excel 真实行号，导致 N:M 异常 sheet / 错误报告里行号指向错误源行。修复 `blankrows: true` + smoke Case J 5 assert 回归。
+- **F3（importMonth 三步独立事务）**：clearMonth + insertPending + insertBank 三独立事务，bank insert 失败时会留"清空 + 仅 pending 已写"不一致状态。修复 `importMonthAtomic()` 包 4 步同事务。
+- **P1（覆盖导入旧 runs 不清）**：旧 runId 与新数据混搭，用户重新导入后不重跑也能"导出旧 runId + 新数据"。修复 `importMonthAtomic` 内部 `DELETE FROM bank_bu_recon_runs`。
+
+### 7.5 资金红线最终验证
+
+8 用例端到端 smoke（A-E + F-H）+ 1 regression case（I 覆盖导入）+ 1 真 bug regression（J 行号空行）+ 5 normalize 单测 + 11 normalize/registry 等单测 = **bank-bu-recon: 41/41 PASS** + **usage-stats: 46/46 PASS**。
