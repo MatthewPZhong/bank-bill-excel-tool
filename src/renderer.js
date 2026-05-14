@@ -117,6 +117,8 @@ const state = {
   backgroundDraft: { ...DEFAULT_BACKGROUND_SETTINGS },
   isBackgroundPaletteOpen: false,
   currentModule: MODULES.statementGenerator.id,
+  // v2.1.4 T3：左上角模块切换按钮的启用列表（启动时由 info.enabledModules 注入）
+  enabledModules: [],
   pending: {
     rule: null,
     months: [],
@@ -284,6 +286,8 @@ const elements = {
   backgroundTool: document.getElementById('backgroundTool'),
   backgroundPaletteBtn: document.getElementById('backgroundPaletteBtn'),
   saveUserGuideBtn: document.getElementById('saveUserGuideBtn'),
+  // v2.1.4 T3：小助手功能收纳触发按钮（紧贴 saveUserGuideBtn 右侧）
+  moduleCabinetBtn: document.getElementById('moduleCabinetBtn'),
   backgroundPalettePanel: document.getElementById('backgroundPalettePanel'),
   backgroundSpectrumArea: document.getElementById('backgroundSpectrumArea'),
   backgroundSpectrumCanvas: document.getElementById('backgroundSpectrumCanvas'),
@@ -349,7 +353,9 @@ const {
   applyBizOpReconPanelExportDialogPreviewState,
   // v2.1.3-fix1：状态框冒号换行 formatter + 默认日期 helper
   formatBizOpReconStatusHtml,
-  getBizOpReconDefaultDate
+  getBizOpReconDefaultDate,
+  // v2.1.4 T3：小助手功能收纳弹窗工厂
+  createModuleCabinetDialog
 } = window.__rendererDialogs.createRendererDialogs({
   state,
   elements,
@@ -433,7 +439,9 @@ const {
   applyReconIdFixPanelBusinessPreviewState,
   applyReconIdFixPanelGatewayPreviewState,
   applyScenarioConfigC4GatewayPreviewState,
-  applyScenarioConfigC4Gateway1vNPreviewState
+  applyScenarioConfigC4Gateway1vNPreviewState,
+  // v2.1.4 T3：小助手功能收纳弹窗 preview
+  applyModuleCabinetPreviewState
 } = window.__rendererPreviews.createRendererPreviews({
   state,
   elements,
@@ -486,7 +494,9 @@ const {
   createScenarioConfigDialogC3,
   createScenarioConfirmDetailDialog,
   // v2.1.0-beta.1 PR-A（task A7）：C4 配置弹窗 preview 所需
-  createScenarioConfigDialogC4
+  createScenarioConfigDialogC4,
+  // v2.1.4 T3：小助手功能收纳弹窗工厂
+  createModuleCabinetDialog
 });
 
 function updateStatusBox(box, message, tone = 'info', options = {}) {
@@ -1337,6 +1347,29 @@ function closeModuleMenu() {
   state.isModuleMenuOpen = false;
   elements.moduleSwitcherMenu.hidden = true;
   elements.moduleSwitcherBtn.setAttribute('aria-expanded', 'false');
+}
+
+// v2.1.4 T3：按 state.enabledModules 动态渲染左上角模块切换菜单
+//   - 用户通过 🔄 收纳弹窗调整启用列表 / 顺序后，外部调用方负责再次触发本函数 re-render
+//   - 触发点：initialize() / openModuleCabinetDialog 提交回调 / 顶部模块切换菜单项被新增/移除/重排时
+function renderTopModuleSwitcher() {
+  const menu = elements.moduleSwitcherMenu;
+  if (!menu) return;
+  const enabledIds = Array.isArray(state.enabledModules) && state.enabledModules.length > 0
+    ? state.enabledModules
+    : [MODULES.statementGenerator.id];  // 兜底（理论上 sanitize 不会让它为空）
+  menu.innerHTML = '';
+  enabledIds.forEach((id) => {
+    const moduleDef = Object.values(MODULES).find((m) => m.id === id);
+    if (!moduleDef) return;  // 防御：理论上 settings-repository 的 sanitize 已过滤非法 ID
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'module-option';
+    if (id === state.currentModule) btn.classList.add('is-active');
+    btn.dataset.module = id;
+    btn.textContent = moduleDef.name;
+    menu.appendChild(btn);
+  });
 }
 
 function normalizeColorHex(colorHex) {
@@ -4415,9 +4448,16 @@ async function initialize() {
   state.hasErrorReport = Boolean(info.hasErrorReport);
   state.currencyOptions = Array.isArray(info.currencyOptions) ? info.currencyOptions.slice() : [];
   // v2.1.0-beta.3 T4：从持久化恢复对账单ReconID修复模块「账单类别」
-  state.reconIdFixBillCategory = (info.reconIdFixBillCategory === 'business' || info.reconIdFixBillCategory === 'gateway')
-    ? info.reconIdFixBillCategory
-    : null;
+  // v2.1.4 T4：DB 持久化为空（'' / null）时默认 'gateway' 并写回（O2 拍板）
+  //   - 主面板下拉占位项 "请选择账单类别" 已删，UI 层不再可能为空；DB 历史空值在此一次性迁移
+  if (info.reconIdFixBillCategory === 'business' || info.reconIdFixBillCategory === 'gateway') {
+    state.reconIdFixBillCategory = info.reconIdFixBillCategory;
+  } else {
+    state.reconIdFixBillCategory = 'gateway';
+    window.desktopApi?.settings?.setReconIdFixBillCategory?.('gateway').catch((error) => {
+      console.warn('persist default reconIdFixBillCategory failed:', error);
+    });
+  }
   state.backgroundSettings = cloneBackgroundSettings(info.backgroundConfig);
   state.backgroundDraft = cloneBackgroundSettings(info.backgroundConfig);
   applyBackgroundSettings(state.backgroundSettings);
@@ -4432,11 +4472,17 @@ async function initialize() {
   });
   setNewAccountExportAvailability(false);
   updateNewAccountGenerateAvailability();
-  const validModuleIds = Object.values(MODULES).map((m) => m.id);
-  const restoredModuleId = validModuleIds.includes(info.currentModule)
+  // v2.1.4 T3：启用列表（左上角切换菜单）由 enabledModules 决定，currentModule 必须在其中
+  state.enabledModules = Array.isArray(info.enabledModules) && info.enabledModules.length > 0
+    ? info.enabledModules
+    : [MODULES.statementGenerator.id];
+  renderTopModuleSwitcher();
+  const restoredModuleId = state.enabledModules.includes(info.currentModule)
     ? info.currentModule
-    : MODULES.statementGenerator.id;
-  setCurrentModule(restoredModuleId, { persist: false });
+    : state.enabledModules[0];
+  // 若 currentModule 不在启用列表 → 通过 persist=true 让 setCurrentModule 内部把 fallback 写回 DB
+  const needsPersistFallback = restoredModuleId !== info.currentModule;
+  setCurrentModule(restoredModuleId, { persist: needsPersistFallback });
   closeModuleMenu();
   await rendererPending.initialize();
   rendererPending.bindEvents();
@@ -4564,11 +4610,12 @@ async function initialize() {
 
     openModuleMenu();
   });
-  Array.from(elements.moduleSwitcherMenu.querySelectorAll('.module-option')).forEach((button) => {
-    button.addEventListener('click', () => {
-      setCurrentModule(button.dataset.module);
-      closeModuleMenu();
-    });
+  // v2.1.4 T3：module-option 改为动态渲染（renderTopModuleSwitcher）后用 event delegation 一次绑定
+  elements.moduleSwitcherMenu.addEventListener('click', (event) => {
+    const btn = event.target.closest('.module-option');
+    if (!btn || !btn.dataset.module) return;
+    setCurrentModule(btn.dataset.module);
+    closeModuleMenu();
   });
 
   // v2.1.2 T2：月度银行对账单BU回填校验事件绑定（月份选择改为对话框，无 select change 事件）
@@ -4613,6 +4660,29 @@ async function initialize() {
 
     setStatus(result.message, result.status === 'success' ? 'success' : 'error');
   });
+  // v2.1.4 T3：小助手功能收纳触发按钮
+  if (elements.moduleCabinetBtn) {
+    elements.moduleCabinetBtn.addEventListener('click', () => {
+      openModal(createModuleCabinetDialog({
+        enabledModules: state.enabledModules,
+        allModules: Object.values(MODULES),
+        onCommit: async (nextEnabledIds) => {
+          const result = await window.desktopApi.settings.setEnabledModules(nextEnabledIds);
+          if (!result || result.status !== 'ok') {
+            console.warn('persist enabledModules failed:', result && result.message);
+            return false;
+          }
+          state.enabledModules = [...nextEnabledIds];
+          // O4 拍板：若 currentModule 被移出启用列表 → 自动切到启用区第 1 个（persist=true 写回 DB）
+          if (!state.enabledModules.includes(state.currentModule)) {
+            setCurrentModule(state.enabledModules[0], { persist: true });
+          }
+          renderTopModuleSwitcher();
+          return true;
+        }
+      }));
+    });
+  }
   elements.backgroundSpectrumArea.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     state.isBackgroundSpectrumDragging = true;
@@ -4925,6 +4995,8 @@ async function initialize() {
     setTimeout(() => { applyBizOpReconPanelResultPreviewState(); }, 120);
   } else if (info.previewModal === 'biz-op-recon-panel-export-dialog') {
     setTimeout(() => { applyBizOpReconPanelExportDialogPreviewState(); }, 120);
+  } else if (info.previewModal === 'module-cabinet') {
+    setTimeout(() => { applyModuleCabinetPreviewState(); }, 120);
   }
 
   markRendererStartup(RENDERER_STARTUP_MARKS.initComplete);

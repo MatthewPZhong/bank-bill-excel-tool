@@ -9,8 +9,8 @@
 
 | 字段 | 值 |
 |---|---|
-| 清单版本 | v5（对应 app v2.1.3 — 2026-05-14 round 4 self-review 新增 2 条：`runBizOpImportAsync` 升格 Critical（Codex P1 资金红线 — 业务OP 重导清下一日 runs，与 round 3 `runFlowImportAsync` 升格 Critical 对齐 — 两个重导入口同级红线）+ `addOneDay` 升格 Risk-sensitive（round 4 P1 新增 helper，与 `subOneDay` round 2 升格 Risk-sensitive 对齐 — 时区错乱直接错日期）；v4 = 2026-05-14 round 3 新增 3 条：`runFlowImportAsync` Critical + `clearRunsAndDiffsByDate` Risk-sensitive + `clearRunsAndDiffsByDateBu` Risk-sensitive；v3 = 2026-05-14 round 2 新增 1 条 `subOneDay`；round 1 已升格 13 条 v2.1.3 新符号保持） |
-| 上次人工 review | 2026-05-14（round 7 — 内部 reviewer + Codex 累计 5 轮 + 内部 reviewer 复核 round 6/8 共 7 轮 self-review 全部 finding 修复） |
+| 清单版本 | v6（对应 app v2.1.4 — 2026-05-14 v2.1.4 dev round 7 新增 2 条 Important-skeleton：`enabled_modules`（全链路跨 ≥ 5 文件 / 左上角模块菜单状态驱动）+ `ALL_MODULE_IDS`（settings-repository.js 7 模块全集 anchor，被 `CURRENT_MODULE_VALID` + `setEnabledModules` 共用）；v5 = v2.1.3 round 4 self-review 新增 2 条：`runBizOpImportAsync` 升格 Critical + `addOneDay` 升格 Risk-sensitive；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
+| 上次人工 review | 2026-05-14（v2.1.4 dev round 7 check-vars） |
 | 基线数据 | `docs/analysis/var-reference-stats.md`（76 个 JS 文件 / 755 顶层声明 — round 7 I3 刷新） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
@@ -220,6 +220,33 @@
   - 改顺序/列名 → 表头严格匹配会拒绝旧版流水文件
   - 与 BIZ_OP_HEADERS 同步管理（配套常量）
   - 必跑：smoke biz-op-recon Case D（流水累加 + 出入方向）+ 真实流水文件回放
+
+### `ALL_MODULE_IDS`（v2.1.4 — 7 个主模块 ID 全集 anchor）
+- 定义：`src/backend/database/settings-repository.js`
+- 关联功能：单文件定义，但被 `CURRENT_MODULE_VALID`（`setCurrentModule` 校验）+ `setEnabledModules`（启用列表校验）共用；renderer 端 `MODULES` 常量必须与之一致；新增模块时两边都要加
+- 变更 review 要点：
+  - 新增模块 → 必须同步加到 `ALL_MODULE_IDS` + renderer 端 `src/renderer.js` 的 `MODULES` 常量（两边定义必须完全一致）
+  - 如忘了同步 → 用户切到新模块会抛 `Invalid current_module`（v2.1.2/v2.1.3 即遗留过此 bug，v2.1.4 修复）
+  - 修改 ID 字符串 → DB 内已持久化的 `current_module` / `enabled_modules` 会因 sanitize 被回退到默认值
+  - 必跑：`npm run smoke`（settings-repository 内部测试）+ 手动验证 7 个模块逐一切换 + 收纳弹窗启用各模块后切换
+
+### `enabled_modules`（v2.1.4 — 左上角模块切换菜单的启用列表全链路）
+- 定义：
+  - 持久化 key：`app_settings.enabled_modules`（JSON 数组）— `src/backend/database/settings-repository.js`（`ENABLED_MODULES_KEY` 常量 + `getEnabledModules` / `setEnabledModules` / `DEFAULT_ENABLED_MODULES`）
+  - facade：`src/backend/database.js`（`AppDatabase.getEnabledModules` / `setEnabledModules`）
+  - IPC channel：`settings:get-enabled-modules` / `settings:set-enabled-modules` — `src/main.js` + `src/preload.js`
+  - app:get-info 启动注入字段：`enabledModules`
+  - renderer 缓存：`state.enabledModules`（`src/renderer.js`）
+  - 渲染入口：`renderTopModuleSwitcher()`（`src/renderer.js`，按 `state.enabledModules` 动态渲染 `#moduleSwitcherMenu`）
+  - 收纳弹窗工厂：`createModuleCabinetDialog`（`src/renderer-dialogs.js`）
+- 关联功能：左上角模块切换菜单的状态驱动；用户可通过 🔄 收纳弹窗自定义启用模块及顺序；持久化跨重启
+- 跨文件度：5+ 文件（settings-repository / database / main / preload / renderer / renderer-dialogs / renderer-previews）
+- 变更 review 要点：
+  - 改持久化 schema（JSON 数组元素 → 对象）→ 必须写迁移读旧格式 + 改 `getEnabledModules` sanitize 逻辑
+  - 改 `DEFAULT_ENABLED_MODULES`（默认 3 个 → 改 N 个）→ 影响新用户首次启动体验；旧用户已 seed 不受影响
+  - 改启用区"至少保留 1"约束（O3）→ 需同步 renderer 端 `updateControls` + repo 端 `setEnabledModules('') throw` 校验
+  - 改 `setCurrentModule` fallback 逻辑（`current_module` 不在启用列表时切到第 1 个）→ 影响 `initialize()` 启动序 + 收纳弹窗 `onCommit` 回调
+  - 必跑：① 新 DB 启动 → seed 默认值；② 旧 DB（无该 key）启动 → seed；③ DB 写入非法 JSON → 回退默认；④ `setEnabledModules([])` 抛错；⑤ 弹窗 ➡️/⬅️/拖拽 三种交互后菜单同步刷新
 
 ---
 

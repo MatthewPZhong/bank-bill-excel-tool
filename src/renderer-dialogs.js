@@ -7574,6 +7574,245 @@
       return overlay;
     }
 
+    // v2.1.4 T3 + Fix1：小助手功能收纳弹窗（双区域 + ➡️/⬅️ + 启用区行内拖拽排序 + 完成/取消 两阶段提交）
+    //   opts.enabledModules : 初始启用列表（ID 数组）— 同时充当"取消"时的还原基准
+    //   opts.allModules     : 全集 [{id, name}, ...]（从 renderer 的 MODULES 常量传入，工厂与常量解耦）
+    //   opts.onCommit       : async (nextEnabledIds) => Promise<boolean>；true 表示落库成功
+    //
+    //   Fix1.2：撤回 v2.1.4 v0.1 的 O6 "即时落库" 设计 — 改为两阶段提交：
+    //     - 弹窗内所有 ➡️/⬅️/拖拽 仅修改本地 workingEnabled，不调 onCommit
+    //     - 「完成」按钮 → 一次性调 onCommit + 关弹窗；「取消」/× / overlay 点外 → 丢 workingEnabled + 关弹窗
+    //   Fix1.4：再次点击同一行 → 取消选中（toggle）
+    //   Fix1.5：闲置区排序由 String.length 改为视觉宽度（CJK 字符算 2，其他算 1）
+    function createModuleCabinetDialog({ enabledModules, allModules, onCommit }) {
+      const originalEnabled = Array.isArray(enabledModules) ? [...enabledModules] : [];
+      let workingEnabled = [...originalEnabled];
+      const safeAllModules = Array.isArray(allModules) ? allModules : [];
+      const cabinetState = {
+        selectedRegion: null,    // 'idle' | 'enabled' | null
+        selectedModuleId: null,
+        dragSourceId: null
+      };
+
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.dataset.previewModal = 'module-cabinet';
+
+      const card = document.createElement('div');
+      card.className = 'modal-card module-cabinet-card';
+      card.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">小助手功能收纳</div>
+          <button class="icon-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="module-cabinet-body">
+          <section class="module-cabinet-section">
+            <div class="module-cabinet-section-title">闲置功能</div>
+            <ul class="module-cabinet-list" data-region="idle" role="listbox"></ul>
+          </section>
+          <div class="module-cabinet-controls">
+            <button class="module-cabinet-control" type="button" data-action="enable" aria-label="移到启用功能">➡️</button>
+            <button class="module-cabinet-control" type="button" data-action="disable" aria-label="移到闲置功能">⬅️</button>
+          </div>
+          <section class="module-cabinet-section">
+            <div class="module-cabinet-section-title">启用功能</div>
+            <ul class="module-cabinet-list" data-region="enabled" role="listbox"></ul>
+          </section>
+        </div>
+        <div class="dialog-actions module-cabinet-footer">
+          <button class="primary-btn small" type="button" data-action="confirm">完成</button>
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        </div>
+      `;
+      overlay.appendChild(card);
+
+      const idleListEl = card.querySelector('[data-region="idle"]');
+      const enabledListEl = card.querySelector('[data-region="enabled"]');
+      const moveEnableBtn = card.querySelector('[data-action="enable"]');
+      const moveDisableBtn = card.querySelector('[data-action="disable"]');
+      const confirmBtn = card.querySelector('[data-action="confirm"]');
+      const cancelBtn = card.querySelector('[data-action="cancel"]');
+      const closeBtn = card.querySelector('.icon-close');
+
+      // 取消：丢 workingEnabled + 关弹窗（× / overlay 外部 / 取消按钮 三者等价）
+      function cancelAndClose() {
+        closeModal();
+      }
+      closeBtn.addEventListener('click', cancelAndClose);
+      cancelBtn.addEventListener('click', cancelAndClose);
+      overlay.addEventListener('click', (ev) => {
+        if (ev.target === overlay) cancelAndClose();
+      });
+
+      // 完成：调 onCommit 落库 + 关弹窗
+      confirmBtn.addEventListener('click', async () => {
+        confirmBtn.disabled = true;
+        const ok = await onCommit(workingEnabled);
+        if (ok) {
+          closeModal();
+        } else {
+          confirmBtn.disabled = false;
+        }
+      });
+
+      function getModuleName(id) {
+        const m = safeAllModules.find((x) => x.id === id);
+        return m ? m.name : id;
+      }
+
+      // Fix1.5：视觉宽度（CJK 字符算 2，其它算 1）— 让"月度银行对账单BU回填校验"(24) 排在"月度 Pending 数据核对"(21) 后面
+      function visualLength(s) {
+        const str = String(s || '');
+        let len = 0;
+        for (let i = 0; i < str.length; i += 1) {
+          const code = str.charCodeAt(i);
+          if (
+            (code >= 0x4E00 && code <= 0x9FFF) ||   // CJK 统一汉字
+            (code >= 0x3400 && code <= 0x4DBF) ||   // CJK 扩展 A
+            (code >= 0xF900 && code <= 0xFAFF) ||   // CJK 兼容
+            (code >= 0xFF01 && code <= 0xFF60) ||   // 全角 ASCII
+            (code >= 0x3000 && code <= 0x303F)      // CJK 符号与标点
+          ) {
+            len += 2;
+          } else {
+            len += 1;
+          }
+        }
+        return len;
+      }
+
+      // 闲置区按视觉宽度升序（O1 拍板 + Fix1.5，tie-break 用 allModules 声明顺序）
+      function buildSortedIdle() {
+        const enabledSet = new Set(workingEnabled);
+        return safeAllModules
+          .filter((m) => !enabledSet.has(m.id))
+          .sort((a, b) => {
+            const la = visualLength(a.name);
+            const lb = visualLength(b.name);
+            if (la !== lb) return la - lb;
+            return safeAllModules.indexOf(a) - safeAllModules.indexOf(b);
+          })
+          .map((m) => m.id);
+      }
+
+      function renderRegion(ulEl, ids, region) {
+        ulEl.innerHTML = '';
+        ids.forEach((id) => {
+          const li = document.createElement('li');
+          li.className = 'module-cabinet-item';
+          li.dataset.moduleId = id;
+          li.dataset.region = region;
+          li.setAttribute('role', 'option');
+          li.tabIndex = 0;
+          if (id === cabinetState.selectedModuleId && region === cabinetState.selectedRegion) {
+            li.classList.add('is-selected');
+          }
+
+          const label = document.createElement('span');
+          label.className = 'module-cabinet-item-label';
+          label.textContent = getModuleName(id);
+          li.appendChild(label);
+
+          if (region === 'enabled') {
+            const handle = document.createElement('span');
+            handle.className = 'module-cabinet-drag-handle';
+            handle.textContent = '⋮⋮';
+            handle.setAttribute('aria-label', '拖拽排序');
+            li.appendChild(handle);
+            li.draggable = true;
+            li.addEventListener('dragstart', (ev) => {
+              cabinetState.dragSourceId = id;
+              ev.dataTransfer.effectAllowed = 'move';
+              ev.dataTransfer.setData('text/plain', id);
+              li.classList.add('is-dragging');
+            });
+            li.addEventListener('dragover', (ev) => {
+              ev.preventDefault();
+              ev.dataTransfer.dropEffect = 'move';
+              li.classList.add('is-drag-over');
+            });
+            li.addEventListener('dragleave', () => {
+              li.classList.remove('is-drag-over');
+            });
+            li.addEventListener('drop', (ev) => {
+              ev.preventDefault();
+              li.classList.remove('is-drag-over');
+              const draggedId = cabinetState.dragSourceId;
+              if (!draggedId || draggedId === id) return;
+              const next = [...workingEnabled];
+              const fromIdx = next.indexOf(draggedId);
+              const toIdx = next.indexOf(id);
+              if (fromIdx === -1 || toIdx === -1) return;
+              next.splice(fromIdx, 1);
+              next.splice(toIdx, 0, draggedId);
+              // Fix1.2：拖拽仅改本地 workingEnabled，不调 onCommit（由「完成」按钮统一提交）
+              workingEnabled = next;
+              cabinetState.selectedRegion = null;
+              cabinetState.selectedModuleId = null;
+              renderLists();
+            });
+            li.addEventListener('dragend', () => {
+              li.classList.remove('is-dragging');
+              enabledListEl.querySelectorAll('.is-drag-over').forEach((x) => x.classList.remove('is-drag-over'));
+              cabinetState.dragSourceId = null;
+            });
+          }
+
+          li.addEventListener('click', () => {
+            // Fix1.4：再次点击同一选中行 → 取消选中（toggle）
+            const isSameSelected =
+              cabinetState.selectedRegion === region && cabinetState.selectedModuleId === id;
+            if (isSameSelected) {
+              cabinetState.selectedRegion = null;
+              cabinetState.selectedModuleId = null;
+            } else {
+              cabinetState.selectedRegion = region;
+              cabinetState.selectedModuleId = id;
+            }
+            renderLists();
+          });
+          ulEl.appendChild(li);
+        });
+      }
+
+      function renderLists() {
+        renderRegion(idleListEl, buildSortedIdle(), 'idle');
+        renderRegion(enabledListEl, workingEnabled, 'enabled');
+        updateControls();
+      }
+
+      function updateControls() {
+        moveEnableBtn.disabled =
+          cabinetState.selectedRegion !== 'idle' || !cabinetState.selectedModuleId;
+        // O3 拍板：启用区至少保留 1 个 → 仅剩 1 时禁用 ⬅️
+        moveDisableBtn.disabled =
+          cabinetState.selectedRegion !== 'enabled' ||
+          !cabinetState.selectedModuleId ||
+          workingEnabled.length <= 1;
+      }
+
+      // Fix1.2：➡️/⬅️ 仅改本地 workingEnabled，不调 onCommit
+      function applyLocal(next) {
+        workingEnabled = next;
+        cabinetState.selectedRegion = null;
+        cabinetState.selectedModuleId = null;
+        renderLists();
+      }
+
+      moveEnableBtn.addEventListener('click', () => {
+        if (cabinetState.selectedRegion !== 'idle' || !cabinetState.selectedModuleId) return;
+        applyLocal([...workingEnabled, cabinetState.selectedModuleId]);
+      });
+      moveDisableBtn.addEventListener('click', () => {
+        if (cabinetState.selectedRegion !== 'enabled' || !cabinetState.selectedModuleId) return;
+        if (workingEnabled.length <= 1) return;
+        applyLocal(workingEnabled.filter((x) => x !== cabinetState.selectedModuleId));
+      });
+
+      renderLists();
+      return overlay;
+    }
+
     return {
       closeModal,
       openModal,
@@ -7636,7 +7875,9 @@
       applyBizOpReconPanelExportDialogPreviewState,
       // v2.1.3-fix1：状态框冒号换行 formatter + 默认日期 helper（renderer.js 复用）
       formatBizOpReconStatusHtml,
-      getBizOpReconDefaultDate
+      getBizOpReconDefaultDate,
+      // v2.1.4 T3：小助手功能收纳弹窗工厂
+      createModuleCabinetDialog
     };
 
     // v2.1.2 T2 (spec v0.4 拍板)：月份选择对话框

@@ -2740,3 +2740,118 @@ select.mapping-text-input {
   white-space: normal;
   line-height: 1.5;
 }
+
+/* v2.1.4 T3：小助手功能收纳弹窗（Clear theme，index.html 实际加载的样式） */
+.module-cabinet-card {
+  width: min(100%, 720px);
+  display: flex;
+  flex-direction: column;
+}
+.module-cabinet-body {
+  display: grid;
+  grid-template-columns: 1fr 80px 1fr;
+  gap: 14px;
+  /* Fix1.1：左右各 28px 内缩，与 dialog-header padding-left/right=28px 对齐（"小助手功能收纳"标题最左 = section 最左） */
+  padding: 6px 28px 0 28px;
+  /* Fix1.1：两栏最下侧边界往上平移 32px（原 360 → 328） */
+  min-height: 328px;
+}
+.module-cabinet-section {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #d8def0;
+  border-radius: 12px;
+  background: #ffffff;
+  overflow: hidden;
+}
+.module-cabinet-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #1c1f29);
+  padding: 8px 12px;
+  background: #f4f6fb;
+  border-bottom: 1px solid #d8def0;
+}
+.module-cabinet-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  flex: 1;
+  overflow-y: auto;
+  /* Fix1.1：list 高度同步缩 32px（原 280 → 248） */
+  min-height: 248px;
+  max-height: 348px;
+}
+.module-cabinet-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text, #1c1f29);
+  font-size: 14px;
+  border: 1px solid transparent;
+}
+.module-cabinet-item:hover {
+  background: #f4f6fb;
+}
+.module-cabinet-item.is-selected {
+  background: rgba(66, 133, 244, 0.12);
+  border-color: rgba(66, 133, 244, 0.5);
+}
+.module-cabinet-item.is-dragging {
+  opacity: 0.45;
+}
+.module-cabinet-item.is-drag-over {
+  border-top: 2px solid #4285F4;
+}
+.module-cabinet-item-label {
+  flex: 1;
+  pointer-events: none;
+}
+.module-cabinet-drag-handle {
+  cursor: grab;
+  color: #94a0b8;
+  font-size: 14px;
+  letter-spacing: -3px;
+  padding: 0 2px;
+}
+.module-cabinet-drag-handle:active {
+  cursor: grabbing;
+}
+.module-cabinet-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Fix1.3：➡️/⬅️ 上移到与第一行 li 平行（section-title ≈ 31px + section padding-top 0 + list padding-top 6px = 37px → padding-top 37px 让按钮顶部对齐第一行 li 顶部） */
+  justify-content: flex-start;
+  align-self: start;
+  padding-top: 37px;
+  gap: 14px;
+}
+.module-cabinet-control {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid #d8def0;
+  background: #ffffff;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s, opacity 0.15s;
+}
+.module-cabinet-control:not(:disabled):hover {
+  background: #f4f6fb;
+}
+.module-cabinet-control:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+/* Fix1.2：完成 / 取消 按钮 footer — 右下角 right-align（沿用 .dialog-actions 基础样式 padding 16px 28px 22px + 横线 + 灰背景） */
+.module-cabinet-footer {
+  justify-content: flex-end;
+}

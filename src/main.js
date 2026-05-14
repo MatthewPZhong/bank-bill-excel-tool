@@ -2737,6 +2737,8 @@ function registerAppHandlers() {
       currentModule: database.getCurrentModule() || 'statement-generator',
       // v2.1.0-beta.3 T4：对账单ReconID修复模块「账单类别」持久化（business | gateway | null）
       reconIdFixBillCategory: database.getReconIdFixBillCategory(),
+      // v2.1.4 T3：左上角模块切换按钮的启用列表（renderer 启动时一次拉，省一个 IPC round-trip）
+      enabledModules: database.getEnabledModules(),
       // v1.5.3 R2（D15）：启动时自有账号迁移失败的错误文案；null 表示无失败
       ownAccountsMigrationError: lastOwnAccountsMigrationError
     };
@@ -2765,6 +2767,23 @@ function registerAppHandlers() {
     try {
       database.setReconIdFixBillCategory(category);
       return { status: 'ok', reconIdFixBillCategory: category || null };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  // v2.1.4 T3：左上角模块切换按钮的启用列表（GET = 启动时拉取 + 首次 seed 默认）
+  ipcMain.handle('settings:get-enabled-modules', () => {
+    try {
+      return { status: 'ok', enabledModules: database.getEnabledModules() };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  // v2.1.4 T3：左上角模块切换按钮的启用列表（SET = 模块收纳弹窗内 ➡️/⬅️/拖拽 后写回）
+  ipcMain.handle('settings:set-enabled-modules', (_event, moduleList) => {
+    try {
+      database.setEnabledModules(moduleList);
+      return { status: 'ok', enabledModules: moduleList };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }

@@ -53,7 +53,9 @@
       createScenarioConfigDialogC3,
       createScenarioConfirmDetailDialog,
       // v2.1.0-beta.1 PR-A（task A7）：C4 类配置弹窗
-      createScenarioConfigDialogC4
+      createScenarioConfigDialogC4,
+      // v2.1.4 T3：小助手功能收纳弹窗工厂
+      createModuleCabinetDialog
     } = deps;
 
     function applyNewAccountPreviewState() {
@@ -1053,6 +1055,18 @@
       }, 120);
     }
 
+    // v2.1.4 T3：小助手功能收纳弹窗 preview（默认 3 启用 + 4 闲置，按 name.length 升序闲置区）
+    function applyModuleCabinetPreviewState() {
+      setCurrentModule(MODULES.statementGenerator.id);
+      setTimeout(() => {
+        openModal(createModuleCabinetDialog({
+          enabledModules: ['statement-generator', 'bank-statement-process', 'recon-id-fix'],
+          allModules: Object.values(MODULES),
+          onCommit: async () => true  // preview 不真正落库
+        }));
+      }, 120);
+    }
+
     return {
       applyNewAccountPreviewState,
       applyTemplateManagerPreviewState,
@@ -1106,7 +1120,9 @@
       applyReconIdFixPanelBusinessPreviewState,
       applyReconIdFixPanelGatewayPreviewState,
       applyScenarioConfigC4GatewayPreviewState,
-      applyScenarioConfigC4Gateway1vNPreviewState
+      applyScenarioConfigC4Gateway1vNPreviewState,
+      // v2.1.4 T3：小助手功能收纳弹窗 preview
+      applyModuleCabinetPreviewState
     };
   }
 

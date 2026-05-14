@@ -97,7 +97,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
     setUiStyle: (style) => ipcRenderer.invoke('settings:set-ui-style', style),
     setCurrentModule: (moduleId) => ipcRenderer.invoke('settings:set-current-module', moduleId),
     // v2.1.0-beta.3 T4：对账单ReconID修复模块「账单类别」持久化（business | gateway | null）
-    setReconIdFixBillCategory: (category) => ipcRenderer.invoke('settings:set-recon-id-fix-bill-category', category)
+    setReconIdFixBillCategory: (category) => ipcRenderer.invoke('settings:set-recon-id-fix-bill-category', category),
+    // v2.1.4 T3：左上角模块切换按钮的启用列表
+    getEnabledModules: () => ipcRenderer.invoke('settings:get-enabled-modules'),
+    setEnabledModules: (moduleList) => ipcRenderer.invoke('settings:set-enabled-modules', moduleList)
   },
   // v2.0.0-beta.3：银行对账单处理模块 — 场景 CRUD
   scenarios: {
