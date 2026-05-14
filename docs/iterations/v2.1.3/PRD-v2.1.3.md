@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.9（2026-05-14 round 3 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（流水重导清该 date 所有 BU 的 runs/diff_rows，新增 `clearRunsAndDiffsByDate` 函数 + smoke Case P）+ 2 P2（package-lock.json 同步 2.1.3 / usage-stats 接入 17 IPC trackedIpcHandle）+ 1 P3（preview:all 串入 biz-op-recon）；v0.8 = 2026-05-14 round 2 self-review 修订（0 critical + 3 important + 5 minor）；v0.7 = 2026-05-14 round 1 self-review 修订（1 critical C1 clearByDateBu LOWER+TRIM + 3 important I1/I2/I3 + 5 minor + 3 新 smoke Case L/M/N）；v0.6 = 2026-05-13 fix6：区间导出改单 sheet，原 #14 拍板回滚；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归；v0.2 = 14 项 OPEN ISSUE 全部拍板；v0.1 = 2026-05-13 起草） |
+| 文档版本 | v0.10（2026-05-14 round 4 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（业务OP 重导清下一日 (date+1, BU) runs/diff_rows — `runBizOpImportAsync` 事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), bu)` 调用 + 新增 `addOneDay(date)` helper UTC 实现 + smoke Case Q）+ USER_GUIDE 流水汇总性质解释段（用户明确要求："流水对账单业务上就是该日所有部门的流水汇总"，BU-A/BU-B 共用同一份流水文件 — 这是流水重导跨 BU 清的根因）；v0.9 = 2026-05-14 round 3 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（流水重导清该 date 所有 BU 的 runs/diff_rows，新增 `clearRunsAndDiffsByDate` 函数 + smoke Case P）+ 2 P2（package-lock.json 同步 2.1.3 / usage-stats 接入 17 IPC trackedIpcHandle）+ 1 P3（preview:all 串入 biz-op-recon）；v0.8 = 2026-05-14 round 2 self-review 修订（0 critical + 3 important + 5 minor）；v0.7 = 2026-05-14 round 1 self-review 修订（1 critical C1 clearByDateBu LOWER+TRIM + 3 important I1/I2/I3 + 5 minor + 3 新 smoke Case L/M/N）；v0.6 = 2026-05-13 fix6：区间导出改单 sheet，原 #14 拍板回滚；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归；v0.2 = 14 项 OPEN ISSUE 全部拍板；v0.1 = 2026-05-13 起草） |
 | 目标版本 | `v2.1.3`（patch） |
 | 起始版本 | `v2.1.2`（PR #43 已合并 main，2026-05-13，commit `50e0a0a` / merge `fc5d766`） |
 | 起草日期 | 2026-05-13 |
@@ -178,9 +178,10 @@ v2.1.3 包含 1 块独立改动：
   - 失败报告 xlsx 落 `Documents/网银账单生成小助手/error-reports/{date}/业务OP校验失败报告_{BU}_{YYYYMMDD}_{HHMMSS}.xlsx`
   - **状态栏文字提示 + 失败报告路径**（fix2 拍板：不再弹独立报错对话框；用户可直接 cmd+点击路径打开）
    ↓
-[全部通过] → 同事务内（#15 拍板 A）：
+[全部通过] → 同事务内（#15 拍板 A + round 4 P1 资金红线修订）：
   - DELETE 同 (date, BU) 旧业务 OP 数据
-  - DELETE 同 (date, BU) 旧 runs + diff_rows
+  - **`clearRunsAndDiffsByDateBu(db, date, BU)`** 清当天作为 T-1 的 runs/diff_rows
+  - **`clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)`** 清下一日作为 T-2 的 runs/diff_rows（round 4 P1 资金红线新增：业务OP 某日数据既是当天对账 T-1 也是下一日对账 T-2 输入；只清单日 runs 会让"用旧 T-2 算的下一日 run + 新 T-2 数据"导致差异表 stale → 资金事故）
   - INSERT 新业务 OP 行到 `biz_op_recon_imports`（每行打上 `data_date` + `bu_name`）
    ↓
 [判定：库里 (data_date, bu_name) 维度只有一日数据]：
@@ -203,7 +204,7 @@ v2.1.3 包含 1 块独立改动：
 ```
 
 **幂等性**：
-- 业务 OP 同 `(data_date, bu_name)` 重复导入：#4 拍板 A 替换 + 原子事务（DELETE + INSERT 同事务，并联动清空 #15 的 runs + diff_rows，按 (date, BU) 单 BU 清，函数 `clearRunsAndDiffsByDateBu`）
+- 业务 OP 同 `(data_date, bu_name)` 重复导入：#4 拍板 A 替换 + 原子事务（DELETE + INSERT 同事务，并联动清空 #15 的 runs + diff_rows，按 (date, BU) 单 BU 清，函数 `clearRunsAndDiffsByDateBu`）；**round 4 P1 资金红线修订**：事务内**同时调用** `clearRunsAndDiffsByDateBu(db, date, BU)` + `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)`，前者清当天作为 T-1 的 run，后者清下一日作为 T-2 的 run（业务OP 某日数据双角色：当天 T-1 + 下一日 T-2）
 - 流水对账单同 `data_date` 重复导入：同样替换（DELETE + INSERT 原子事务；**流水不分 BU，按 date 级清空 + 同事务内调用 `clearRunsAndDiffsByDate(db, date)` 清该 date 所有 BU 的 runs/diff_rows**，round 3 P1 资金红线修订）
 
 #### 3.3.2 运行流程
@@ -433,6 +434,30 @@ writer 阶段保持**无填充色**（移除整行黄底）。
 >
 > **回归测试**：smoke `scripts/smoke/biz-op-recon.js` 新增 Case P 覆盖（构造同 date 多 BU 已 success run，重导该日流水后断言所有 BU 的 runs/diff_rows 均被清；详见 spec §九 Case P assertion 草稿）。
 
+#### 3.5.7 关键不变量补丁（round 4 P1 资金红线 ⚠️）
+
+> **业务OP 重导清下一日 runs 不变量**（fix round 4 / Codex P1）：`runBizOpImportAsync` 事务必须包含 **两次** `clearRunsAndDiffsByDateBu` 调用：
+>
+> ```javascript
+> clearRunsAndDiffsByDateBu(db, date, BU);              // 清当天作为 T-1 的 run
+> clearRunsAndDiffsByDateBu(db, addOneDay(date), BU);   // 清下一日作为 T-2 的 run（round 4 新增）
+> ```
+>
+> **资金红线**：业务OP 换了对账没重跑 → 导出旧差异 = 资金事故。业务OP 某日数据 **既是当天对账 T-1 也是下一日对账 T-2 输入**（参见 §3.4.1 步骤 4.2.a：`计算 T-1 OP = T-2 期末 + 流水累加`，其中 T-2 = D-1）。重导某日业务OP 后：
+> - 当天作为 T-1 的旧 run 必须清（已实现 round 1+ #15 拍板 A）
+> - **下一日作为 T-2 的旧 run 也必须清**（round 4 新增）— 否则下一日 run 仍按"旧 T-2 期末 + 流水累加"算出 stale `计算 T-1 OP`，「导出差异」拿到错差额 = 资金事故
+>
+> **与 round 3 P1 (流水跨 BU 清) 互补**：
+>
+> | 重导对象 | 函数 | 粒度 | 跨日影响 |
+> |---|---|---|---|
+> | 业务OP `(date, BU)` 重导 | `clearRunsAndDiffsByDateBu` × 2 | 单 BU | **跨 2 日**（当天 + 下一日，round 4 新增） |
+> | 流水 `date` 重导 | `clearRunsAndDiffsByDate` | 跨所有 BU | 单日（流水按 date 跨 BU 共用，round 3 已有） |
+>
+> **`addOneDay(date)` helper 不变量**：与 `subOneDay(date)` 对偶，**必须 UTC 实现**（`new Date(date + 'T00:00:00Z')` + `setUTCDate(getUTCDate() + 1)` + `toISOString().slice(0, 10)`），避免本地时区抢跑/滞后导致跨日错位（典型陷阱：UTC+12/UTC-12 边界时区使用 `setDate(getDate() + 1)` 会抢跑或滞后 1 天，资金红线 — 时区错乱直接错日期）。已升格 `rules/important-variables.md` Risk-sensitive。
+>
+> **回归测试**：smoke `scripts/smoke/biz-op-recon.js` 新增 Case Q 覆盖（构造日期 D-1/D/D+1 三日业务OP + D 流水，跑 D 与 D+1 两个 run 成功后重导 D 业务OP，断言 D + D+1 两个 run 均被清；详见 spec §九 Case Q assertion 草稿）。
+
 ### 3.6 验收
 
 - 主导航第 5 个按钮可见，点击切换显示新模块（v2.1.2 4 个老模块不受影响）
@@ -556,9 +581,21 @@ writer 阶段保持**无填充色**（移除整行黄底）。
 - 4 张 preview 截图的具体场景与触发条件（spec.md §七 拍板）
 - **BU 行 CSS 宽度对齐"导出差异"按钮**（fix2.1）— 视觉约束，实施细节归 §6.3，PRD 仅提及
 
-### 6.4 fix1 + fix2 + fix4 + fix5 + fix6 + round1 + round2 + round3 增补（v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 — 2026-05-13 ~ 2026-05-14）
+### 6.4 fix1 + fix2 + fix4 + fix5 + fix6 + round1 + round2 + round3 + round4 增补（v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v0.10 — 2026-05-13 ~ 2026-05-14）
 
-> 用户手动测试 fix1+fix2+fix4+fix5+fix6 多轮回归后增补；2026-05-14 PR #45 提 PR 后 round 1 self-review 增补 9 条修订；同日 round 2 self-review 再增补 8 条修订（0 critical + 3 important + 5 minor）；同日 round 3 self-review 由 Codex 自动 review 补 4 条修订（1 P1 资金红线 + 2 P2 + 1 P3）；下列条目作为 §6.1 已拍板表的补充扩展。
+> 用户手动测试 fix1+fix2+fix4+fix5+fix6 多轮回归后增补；2026-05-14 PR #45 提 PR 后 round 1 self-review 增补 9 条修订；同日 round 2 self-review 再增补 8 条修订（0 critical + 3 important + 5 minor）；同日 round 3 self-review 由 Codex 自动 review 补 4 条修订（1 P1 资金红线 + 2 P2 + 1 P3）；同日 round 4 self-review 由 Codex 自动 review 补 1 条修订（1 P1 资金红线 — 业务OP 重导清下一日 runs，与 round 3 互补）+ USER_GUIDE 流水汇总性质解释段（用户明确要求）；下列条目作为 §6.1 已拍板表的补充扩展。
+
+**round 4 self-review 修订（2026-05-14，Codex 自动 review）**：
+
+- **P1 ⚠️ 资金红线**：业务OP 重导清下一日 (date+1, BU) runs/diff_rows
+  - 影响 §3.3.1 业务OP 流程 + §3.5.7 关键不变量 + spec §五 算法 + §九 smoke Case Q
+  - Dev 修法：`src/main-process/biz-op-recon-session.js` `runBizOpImportAsync` 事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 调用 + 新增 `addOneDay(date)` helper（UTC 实现，与 `subOneDay` 对偶）+ smoke Case Q 覆盖（同 BU 跨 D 与 D+1 两 run，重导 D 业务OP 后两 run 均被清）
+  - 与 round 3 P1（流水跨 BU 清）**互补**：业务OP 单 BU 跨 2 日清（D + D+1）；流水跨 BU 单日清（D 跨所有 BU）
+  - 业务原理：业务OP 某日数据 = 当天 T-1 + 下一日 T-2 双角色（参见 §3.4.1 步 4.2.a `计算 T-1 OP = T-2 期末 + 流水累加`）
+- **USER_GUIDE 流水汇总性质解释段**（用户明确要求）：
+  - 用户在 round 4 测试中提出 "BU-A 与 BU-B 共用同一份流水文件" 的解释空缺，要求把流水汇总性质讲清楚（这是 round 3 P1 流水重导跨 BU 清的根因）
+  - USER_GUIDE §1.7.x 流水导入说明附近补一段解释：流水文件 = 该日所有部门的流水汇总，按 normalizeBu 过滤跨 BU 共用 → 重导一份 = 所有 BU 对账失效
+  - 与 round 4 P1 业务OP 跨 2 日清说明合并到同一个 "重导规则" 小节（信息密度高，便于用户对照 流水跨 BU 共用 / 业务OP 跨日依赖 两种模型）
 
 **round 3 self-review 修订（2026-05-14，Codex 自动 review）**：
 

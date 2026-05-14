@@ -86,6 +86,26 @@ function subOneDay(yyyymmdd) {
   return d.toISOString().slice(0, 10);
 }
 
+// 资金红线 ⚠️ v2.1.3 PR #45 round 4 P1 fix：T → T+1 字符串日期加一（与 subOneDay 对偶）
+//
+// 用途：业务OP 重导某日 D 的 (date, BU) 时，须同时清"下一日 D+1 / 同 BU"的旧 runs/diff_rows
+//   - D 业务OP 既是 D 当日对账的 T-1（与 D 流水合算）
+//   - D 业务OP 也是 D+1 对账的 T-2（作为 T-2 期末余额基线）
+//   重导 D 后只清当天会留下 D+1 的旧 run，导出按旧 runId 仍是基于旧 T-2 算的差异 → 资金事故
+//
+// helper 位置决策（避免 round 2 review M4 双源风险）：
+//   - subOneDay 已存在 session.js + run-repository.js 双源（前者用于 runReconciliation/runBizOpImportAsync，
+//     后者用于 listReadyDates SQL 内部）
+//   - addOneDay 仅 runBizOpImportAsync 用 → 单源放 session.js（与同函数 subOneDay 对称、易维护）
+//   - 不再让 run-repository.js 二次实现 addOneDay
+//
+// 实现细节：与 subOneDay 完全对称，UTC 日期 + setUTCDate(+1) 避免本地时区抢跑
+function addOneDay(yyyymmdd) {
+  const d = new Date(yyyymmdd + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 function formatTimestamp(date = new Date()) {
   const pad = (n) => String(n).padStart(2, '0');
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}T${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
@@ -435,9 +455,15 @@ async function runBizOpImportAsync(db, params) {
   }
 
   // 全部通过 → 同事务：#15 清旧 runs + imports → INSERT
+  // 资金红线 ⚠️ v2.1.3 PR #45 round 4 P1 fix：业务OP 重导 (D, BU) 必须同时清"D+1 / 同 BU"的旧 runs
+  //   - D 业务OP 既是 D 当日对账的 T-1，也是 D+1 对账的 T-2
+  //   - 旧实现仅清 D 同 BU，留下 D+1 同 BU 的旧 run → listSuccessDates 仍含 D+1 → export:date
+  //     按旧 runId 读旧 diff_rows，而旧 diff_rows 是基于旧 T-2 算出 → 资金事故
+  //   - 业务OP 跨 BU 隔离（spec §4.2 #7 拍板 C），所以 D+1 也按"同 BU"清，不像流水跨 BU
   db.exec('BEGIN');
   try {
     runRepository.clearRunsAndDiffsByDateBu(db, date, firstBu);
+    runRepository.clearRunsAndDiffsByDateBu(db, addOneDay(date), firstBu);
     importsRepository.clearByDateBu(db, date, firstBu);
     importsRepository.insertRows(db, date, rows);
     db.exec('COMMIT');
@@ -607,6 +633,7 @@ module.exports = {
   parseAmount,
   parseSignedAmount,
   subOneDay,
+  addOneDay,
   formatTimestamp,
   formatDateCompact,
   formatTimeCompact,

@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.9.1（2026-05-14 round 3 self-review S2 grep 对齐：spec ↔ code IPC 数对齐 — §三 删描述但 code 不存在的 `bizOpRecon:run:pick-date` 行 + 表格说明列改为 5 tracked + 10 plain 分级标注 + 表头 round 3 P2 总述段重写为分级 pattern + §十二 P2 行 + §十六 验证步骤 grep 命令矫正；v0.9 = 2026-05-14 round 3 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（§五 新增 `clearRunsAndDiffsByDate(db, date)` 函数 + `runFlowImportAsync` 描述补流水重导事务内清 runs 调用 + §九 smoke Case P）+ 2 P2（lockfile 同步 / §三 IPC 表 usage-stats wrapper 标注）+ 1 P3（preview:all 接入 biz-op-recon）+ §十二 升格清单评估 `runFlowImportAsync` / `clearRunsAndDiffsByDate` + §十七 修订记录段；v0.8 = 2026-05-14 round 2 self-review 修订；v0.7 = 2026-05-14 round 1 self-review 修订（1 critical + 3 important + 5 minor + 3 新 smoke + §7.6 dialog 5→4）；v0.6 = 2026-05-13 fix6：writeDateRangeDiffWorkbook 由 N sheet 改单 sheet「差异」+ data_date+account_key 排序 + Billdate/data_date 一致性 console.warn + smoke Case K；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归；v0.2 = OPEN ISSUE 全部拍板；v0.1 = 起草） |
+| 文档版本 | v0.10（2026-05-14 round 4 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（§五 新增 `addOneDay(date)` helper UTC 实现 + `runBizOpImportAsync` 描述补事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 调用 + §九 smoke Case Q）+ §十二 升格清单评估 `runBizOpImportAsync` / `addOneDay` + §十八 round 4 修订记录段；v0.9.1 = 2026-05-14 round 3 self-review S2 grep 对齐：spec ↔ code IPC 数对齐 — §三 删描述但 code 不存在的 `bizOpRecon:run:pick-date` 行 + 表格说明列改为 5 tracked + 10 plain 分级标注 + 表头 round 3 P2 总述段重写为分级 pattern + §十二 P2 行 + §十六 验证步骤 grep 命令矫正；v0.9 = 2026-05-14 round 3 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（§五 新增 `clearRunsAndDiffsByDate(db, date)` 函数 + `runFlowImportAsync` 描述补流水重导事务内清 runs 调用 + §九 smoke Case P）+ 2 P2（lockfile 同步 / §三 IPC 表 usage-stats wrapper 标注）+ 1 P3（preview:all 接入 biz-op-recon）+ §十二 升格清单评估 `runFlowImportAsync` / `clearRunsAndDiffsByDate` + §十七 修订记录段；v0.8 = 2026-05-14 round 2 self-review 修订；v0.7 = 2026-05-14 round 1 self-review 修订（1 critical + 3 important + 5 minor + 3 新 smoke + §7.6 dialog 5→4）；v0.6 = 2026-05-13 fix6：writeDateRangeDiffWorkbook 由 N sheet 改单 sheet「差异」+ data_date+account_key 排序 + Billdate/data_date 一致性 console.warn + smoke Case K；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归；v0.2 = OPEN ISSUE 全部拍板；v0.1 = 起草） |
 | 关联 PRD | `PRD-v2.1.3.md` |
 | 关联 tasks | `tasks.md` |
 | 工作分支 | `v2.1.3`（基于 main `fc5d766`） |
@@ -349,6 +349,7 @@ const YELLOW_FILL_ARGB = 'FFFFFF00';    // 仅用于 §6.3 失败报告 writer�
 | `normalizeAccountKey(v)` | `v: unknown` | `string` | 仅 trim（账户号是资金 key，不做大小写归一） | `src/main-process/biz-op-recon-session.js` |
 | `parseAmount(v)` | `v: unknown` | `number \| NaN` | 字符串数值解析（去除千分位 `,`） | `src/main-process/biz-op-recon-session.js` |
 | `subOneDay(yyyymmdd)` | `'YYYY-MM-DD'` | `'YYYY-MM-DD'` | T-1 减一日 → T-2，字符串处理避免时区（实现：UTC + setUTCDate -1）。**round 2 R2-M4 双源说明**：实现完全一致的副本同时存在于 `src/backend/biz-op-recon-db/run-repository.js:155`，避免 backend 反向 import main-process 的工程偏好（保留双源符合 architecture 边界）。**维护时必须双侧同步**（任一处改实现 → 另一处必须同步改）；否则会出现"`runReconciliation` 用 session.js 版本 / `listReadyDates` 用 run-repository 版本"行为漂移的资金红线。已升格 `rules/important-variables.md` Risk-sensitive。 | `src/main-process/biz-op-recon-session.js` + `src/backend/biz-op-recon-db/run-repository.js`（双源） |
+| `addOneDay(yyyymmdd)` | `'YYYY-MM-DD'` | `'YYYY-MM-DD'` | **round 4 P1 资金红线新增**：D 加一日 → D+1，与 `subOneDay` 对偶；**必须 UTC 实现**：`new Date(date + 'T00:00:00Z')` + `setUTCDate(getUTCDate() + 1)` + `toISOString().slice(0, 10)`，避免本地时区（如 UTC+12 / UTC-12）使用 `setDate(getDate() + 1)` 抢跑或滞后 1 天。**用途**：业务OP `(date, BU)` 重导时，`runBizOpImportAsync` 在事务内调用 `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 清下一日作为 T-2 的 run（业务OP 某日数据双角色：当天 T-1 + 下一日 T-2，§3.4.1 步 4.2.a）。**资金红线**：时区错乱直接错日期 → 漏清下一日 run 或误清后天 run = 资金事故。round 4 升格 `rules/important-variables.md` Risk-sensitive。 | `src/main-process/biz-op-recon-session.js` |
 | `aggregateFlowByAccount(flowRows, buName)` | `flowRows: Array, buName: string` | `Map<string, number>` | 按 normalizeBu 过滤 + 按账户号 sum signedAmount（#3+#7 联动）| `src/main-process/biz-op-recon-session.js` |
 | `computeT1Op(t2OpRows, flowAggMap)` | `t2OpRows: Array, flowAggMap: Map<string, number>` | `{ map: Map<accountKey, number>, anomalyAccountSet: Set<accountKey> }` | T-2 期末 + 流水累加 = 计算 T-1 期末。**round 1 I3 修订 + round 2 R2-M2 签名 spec ↔ code 对齐**：T-2 `parseAmount(r.end_balance) === NaN` 时把 accKey 加入函数内部 `anomalyAccountSet`（去重）；该账户号跳过 `map.set`，后续 `compareT1OpWithComputed` 走"T-1 有 T-2 无"分支。**round 2 R2-I2 部分 NaN 容错**：循环结束后扫一遍 `validAccountSet` 与 `anomalyAccountSet` 做集合差（`for (const acc of validAccountSet) anomalyAccountSet.delete(acc)`）— 仅当账户号**所有行**都 NaN 才标 anomaly；任一行 valid 则用 valid 行的期末 + flowSum 写 map（不退化为 silent drop 整账户）。`console.warn` 由 caller `runReconciliation` 在循环 `anomalyAccountSet` 时输出（不在 `computeT1Op` 内部输出，便于 caller 拿到 `t2Date` / `buName` 上下文构造完整文案；详见 §5.1 实现）。`runReconciliation` 解构返回值后 `summary.t2AnomalyAccountCount = anomalyAccountSet.size` | `src/main-process/biz-op-recon-session.js` |
 | `compareT1OpWithComputed(t1OpRows, computedT1Map)` | `t1OpRows: Array, computedT1Map: Map<string, number>` | `{ diffRows: Array, stats: {amountDiffCount, multiOpAccountCount} }` | #6 拍板 A：1:N 逐行独立比，epsilon=1e-2。**v0.5 fix5 选项 B**：相等的多 OP 行（即 `t1Rows.length >= 2` 且 `diff <= epsilon`）也需 push 到 diffRows，meta 列填 `相等/空/是`；与不相等行的区别仅在 meta 取值。单 OP 相等行仍不进表。`amountDiffCount` 仍只累计"不相等"行（相等多 OP 行不计入差异计数）。 | `src/main-process/biz-op-recon-session.js` |
@@ -357,10 +358,13 @@ const YELLOW_FILL_ARGB = 'FFFFFF00';    // 仅用于 §6.3 失败报告 writer�
 | `clearRunsAndDiffsByDateBu(db, date, buName)` | `db: DatabaseSync, date: string, buName: string` | `void`（同事务调用） | #15 拍板 A：业务OP `(date, BU)` 重新导入时清空对应 BU 的旧 runs + diff_rows（**单 BU 清**）；DELETE 顺序：diff_rows → runs（FK 依赖） | `src/backend/biz-op-recon-db/run-repository.js` |
 | `clearRunsAndDiffsByDate(db, date)` | `db: DatabaseSync, date: string` | `void`（同事务调用） | **round 3 P1 资金红线新增**：流水 `data_date` 重新导入时清空该 date **跨所有 BU** 的 runs + diff_rows（**与 `clearRunsAndDiffsByDateBu` 区分语义**：流水按 date 跨所有 BU 共用 → 跨 BU 清；业务OP 按 (date, BU) 分片 → 单 BU 清）。DELETE 顺序：diff_rows（按 run_id IN SELECT）→ runs（按 data_date）。**资金红线**：流水换了对账没重跑 → 导出旧差异 = 资金事故 | `src/backend/biz-op-recon-db/run-repository.js` |
 | `runFlowImportAsync({date, filePath})` | `{date, filePath}` | `{status: 'success' \| 'rejected', totalCount?, errorReportPath?, errorRows?}` | **round 3 P1 资金红线修订**：流水重导事务（`bizOpRecon:import:run-flow` IPC handler 后端实现）必须包含 `clearRunsAndDiffsByDate(db, date)` 调用。事务内顺序：BEGIN → DELETE flow_imports WHERE data_date=? → **`clearRunsAndDiffsByDate(db, date)`**（round 3 新增）→ INSERT 新流水 → COMMIT；任一步失败回滚 | `src/main-process/biz-op-recon-session.js` |
+| `runBizOpImportAsync({date, filePath})` | `{date, filePath}` | `{status: 'success' \| 'rejected', buName?, validCount?, errorReportPath?, errorRows?}` | **round 4 P1 资金红线修订**：业务OP 重导事务（`bizOpRecon:import:run-biz-op` IPC handler 后端实现）必须包含 **两次** `clearRunsAndDiffsByDateBu` 调用：当天 + 下一日。事务内顺序：BEGIN → 双重校验 → DELETE imports WHERE (date, BU) → **`clearRunsAndDiffsByDateBu(db, date, BU)`**（清当天作为 T-1 的 run；#15 拍板 A 已实现）→ **`clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)`**（清下一日作为 T-2 的 run；round 4 新增）→ 落库前 `bu_name = String(rawBuName).trim()`（I2 round 1）→ INSERT 新业务OP → COMMIT；任一步失败回滚。**资金红线**：业务OP 某日数据 既是当天 T-1 也是下一日 T-2 输入（§3.4.1 步 4.2.a `计算 T-1 OP = T-2 期末 + 流水累加`），漏清下一日 run → 用旧 T-2 期末算的下一日 run + 新 T-2 期末数据 → 「导出差异」拿 stale 差额 = 资金事故 | `src/main-process/biz-op-recon-session.js` |
 
 > **multi_op_account_count 累加点**（fix4 修复）：除主路径外，`runReconciliation` 5.a (onlyInT1 路径) 也需累加；使用 `multiOpAccountSeen: Set<accountKey>` 防重复；判定标准 = `countAccountRows(t1OpRows, accKey) >= 2`。详见 PRD §3.5.4。
 
 > **流水重导清 runs 不变量**（round 3 P1 资金红线）：`runFlowImportAsync` 事务必须调 `clearRunsAndDiffsByDate(db, date)`（详见 PRD §3.5.6）。该函数清该 date **所有 BU** 的 runs + diff_rows，与 `clearRunsAndDiffsByDateBu` 单 BU 清不同。Dev 实施改 `src/main-process/biz-op-recon-session.js` `runFlowImportAsync` + `src/backend/biz-op-recon-db/run-repository.js` 新增 `clearRunsAndDiffsByDate` 函数；smoke Case P 防回归。
+
+> **业务OP 重导清下一日 runs 不变量**（round 4 P1 资金红线）：`runBizOpImportAsync` 事务必须调 **两次** `clearRunsAndDiffsByDateBu`（详见 PRD §3.5.7）：`clearRunsAndDiffsByDateBu(db, date, BU)`（当天 T-1，#15 已有）+ `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)`（下一日 T-2，round 4 新增）。业务OP 某日数据双角色（既是当天 T-1 也是下一日 T-2 输入），仅清当天 → 下一日 run 用旧 T-2 数据 = 资金事故。**与 round 3 P1 (流水跨 BU 清) 互补**：业务OP 单 BU 跨 2 日清；流水跨 BU 单日清。Dev 实施改 `src/main-process/biz-op-recon-session.js` `runBizOpImportAsync` + 新增 `addOneDay(date)` helper（UTC 实现，与 `subOneDay` 对偶）；smoke Case Q 防回归。
 
 > **t2AnomalyAccountCount 累加点**（round 1 I3 修复 + round 2 R2-M2 签名 spec ↔ code 对齐）：`runReconciliation` 1 步取数后调用 `const { map: calcT1ByAccount, anomalyAccountSet: t2AnomalyAccounts } = computeT1Op(t2OpRows, flowSumByAccount)` → 解构返回值 → 在 caller 端循环 `anomalyAccountSet` 调 `console.warn(...)`（详见 §5.1 实现 + §5.2 文案）→ `stats.t2AnomalyAccountCount = t2AnomalyAccounts.size`。**注意**：`anomalyAccountSet` 在 `computeT1Op` 内部完成"部分 NaN 容错"（`validAccountSet.delete(anomalyAccountSet)` 集合差），caller 拿到的已是"完全 silent drop"账户集合（即所有行都 NaN 的账户号；任一行 valid 的账户号已被剔除）。详见 PRD §3.5.5 关键不变量第 2 条。
 
@@ -1285,6 +1289,28 @@ async function refreshBizOpReconButtons() {
   - **资金红线**：用户拿旧差异表上报 → 资金事故
 - **覆盖目的**：守住 P1 资金红线 — 流水共用语义（按 date 跨 BU）必须正确反映在重导清逻辑
 
+### 9.16 用例 Q：业务OP 重导清下一日 runs + diff_rows 防回归（round 4 P1 资金红线 ⚠️）
+
+- **背景**：v0.9 之前 `runBizOpImportAsync` 成功路径只清当天作为 T-1 的 runs/diff_rows（`clearRunsAndDiffsByDateBu(db, date, bu)`），未清下一日作为 T-2 的 runs/diff_rows（`clearRunsAndDiffsByDateBu(db, addOneDay(date), bu)`）。当用户重新导入业务OP D 数据（修正后），D+1 日的旧 run 仍按"旧 T-2 (D 旧业务OP) 期末 + 流水累加"算出 `计算 T-1 OP`，与新 T-2 (D 新业务OP) 不一致 → 用户「导出 D+1 差异」拿到 stale 差额。**资金红线**：业务OP 换了对账没重跑 → 导出旧差异 = 资金事故。round 4 P1 修订引入 `addOneDay(date)` helper（UTC 实现，与 `subOneDay` 对偶）+ `runBizOpImportAsync` 事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), bu)` 调用。
+- **构造**：
+  - 同 BU=BU-A 跨 3 日：D-1=2026-05-11 / D=2026-05-12 / D+1=2026-05-13 各导入业务OP 各 1 行（同账户号 acc1）
+  - D=2026-05-12 + D+1=2026-05-13 各导入流水（按 BU-A 过滤后非空）
+  - 跑两个 success run：runD = (date=D=2026-05-12, bu=BU-A) 用 T-2=D-1 期末算；runD1 = (date=D+1=2026-05-13, bu=BU-A) 用 T-2=D 期末算；各对应若干 diff_rows
+  - **关键操作**：重新导入 D=2026-05-12 业务OP（修正后的文件，acc1 期末余额改）
+- **期望**：
+  - 重导后 `SELECT COUNT(*) FROM biz_op_recon_runs WHERE bu_name='BU-A' AND data_date IN ('2026-05-12','2026-05-13')` === 0（runD + runD1 均被清；跨 2 日单 BU）
+  - `SELECT COUNT(*) FROM biz_op_recon_diff_rows WHERE bu_name='BU-A' AND data_date IN ('2026-05-12','2026-05-13')` === 0
+  - 同 D 但**其他 BU runs 不动**：`SELECT COUNT(*) FROM biz_op_recon_runs WHERE data_date='2026-05-12' AND bu_name != 'BU-A'` === 重导前行数（业务OP 按 (date, BU) 单 BU 清，其他 BU 不受影响）
+  - 同 D 但**业务OP D-1 主表不动**：`SELECT COUNT(*) FROM biz_op_recon_imports WHERE data_date='2026-05-11' AND bu_name='BU-A'` === 重导前行数（仅 D 业务OP 被替换）
+  - **未来日期 D+2 不动**：`SELECT COUNT(*) FROM biz_op_recon_runs WHERE data_date='2026-05-14' AND bu_name='BU-A'`（如有）=== 重导前行数（addOneDay 仅 +1 日，不应级联清更远）
+  - 重新跑对账（`bizOpRecon:run` for D 与 D+1）→ 新 runId 对应新 diff_rows
+- **反例（防回归）**：
+  - 若 `runBizOpImportAsync` 退化为不调 `clearRunsAndDiffsByDateBu(db, addOneDay(date), bu)` → 重导后 runD1 仍存在 → 「导出 D+1 差异」拿 stale diff_rows → 断言失败
+  - 若 `addOneDay` 退化为本地时区 `setDate(getDate() + 1)`（非 UTC）→ UTC+12 / UTC-12 边界时区抢跑/滞后 1 天 → 误清 D+2 或漏清 D+1 → 断言失败
+  - 若误用 `clearRunsAndDiffsByDate`（跨 BU 清）→ 误清其他 BU 的 D 或 D+1 run → 断言失败
+  - **资金红线**：用户拿旧 D+1 差异表上报 → 资金事故
+- **覆盖目的**：守住 round 4 P1 资金红线 — 业务OP 双角色语义（当天 T-1 + 下一日 T-2）必须正确反映在重导清逻辑；同时验证 `addOneDay` UTC 实现的时区安全性
+
 ---
 
 ## 十、preview 入口（新增 4 处）
@@ -1344,6 +1370,15 @@ async function refreshBizOpReconButtons() {
 | `clearRunsAndDiffsByDateBu` (函数) | **Risk-sensitive** | #15 拍板 A 已实现；按 (date, BU) 单 BU 清；与新 `clearRunsAndDiffsByDate` 跨 BU 清需双门槛区分 | ✅ **round 3 升格 Risk-sensitive**（之前未升格）— "变更 review 要点"：与 `clearRunsAndDiffsByDate` 区分语义不能混；业务OP 重导专用 |
 
 **round 3 升格统计**：3 条进表（Critical 1 + Risk-sensitive 2）；元数据 v3 → v4 + 上次人工 review 改 2026-05-14。
+
+**round 4 升格评估（v0.10 — 2026-05-14，Codex P1 资金红线后续）**：
+
+| 符号 | 层级建议 | 理由 | round 4 升格状态 |
+|---|---|---|---|
+| `runBizOpImportAsync` (函数) | **Critical** | 业务OP 重导核心入口；与 `runFlowImportAsync` round 3 升格 Critical 对齐（两个重导入口同级红线）；P1 修订前漏清下一日 (date+1, BU) runs/diff_rows 即资金红线（用户「导出 D+1 差异」拿 stale 数据）；事务必须包含 **两次** `clearRunsAndDiffsByDateBu` 调用（当天 + 下一日） | ✅ **round 4 升格 Critical**（详见 `rules/important-variables.md` § 1 Critical）— "变更 review 要点"：业务OP 重导必须清当天 + 下一日 runs / smoke Case Q 覆盖 / 与 `runFlowImportAsync` 区分语义（业务OP 单 BU 跨 2 日清；流水跨 BU 单日清） |
+| `addOneDay` (函数，新) | **Risk-sensitive** | round 4 P1 新增；与 `subOneDay` 对偶（subOneDay round 2 R2-M4 已升格 Risk-sensitive），同样必须 UTC 实现避免时区抢跑；时区错乱直接错日期（漏清下一日 run 或误清后天 run）= 资金红线 | ✅ **round 4 升格 Risk-sensitive**（与 `subOneDay` 对齐）— "变更 review 要点"：UTC 实现不可改本地时区；`grep -n "function addOneDay" src/` 确认实现一致；smoke Case Q 验证时区安全性 |
+
+**round 4 升格统计**：2 条进表（Critical 1 + Risk-sensitive 1）；元数据 v4 → v5 + 上次人工 review 保持 2026-05-14。
 
 实施完成后执行 `npm run scan:vars` 重新生成统计，确认新符号的跨文件引用度，按 `rules/important-variables.md` 双门槛复核。
 
@@ -1494,3 +1529,30 @@ async function refreshBizOpReconButtons() {
 - 真实数据手测：导入业务OP T-2/T-1 + 流水（同 date 跨 2 个 BU），跑 2 个 BU 对账成功 → 重新导入同日流水 → 「导出差异」对话框两个 BU 的 success 日期均消失（runs 已清，需重新跑对账）
 
 **known issue（不在 round 3 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议 v2.1.4 补齐。
+
+---
+
+## 十八、round 4 self-review 修订记录（v0.10 — 2026-05-14）
+
+> PR #45 round 3 修订完成后再过 reviewer agent（Codex 自动 review）；reviewer 给 1 P1 ⚠️ 资金红线 finding（与 round 3 P1 流水跨 BU 清互补）+ 用户明确要求 USER_GUIDE 流水汇总性质解释段。用户拍板"全修"。下表为 round 4 修订全部条目（PM/Dev 两侧 task 划分）。
+
+| # | 级别 | 内容 | spec/PRD 落实点 | 代码改动文件（Dev 侧） |
+|---|---|---|---|---|
+| **P1** | ⚠️ Critical 资金红线 | `runBizOpImportAsync` 成功路径只清当天 (date, BU) 的 runs/diff_rows，不清下一日 (date+1, BU) 的 runs/diff_rows → 用户重导业务OP D 数据后 D+1 日的旧 run 仍按"旧 T-2 期末 + 流水累加"算 = stale 差额 → 「导出 D+1 差异」拿错数据 = 资金事故。修法：新增 `addOneDay(date)` helper（UTC 实现，与 `subOneDay` 对偶）+ `runBizOpImportAsync` 事务内追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), bu)` 调用 + smoke Case Q 覆盖。**与 round 3 P1 互补**：业务OP 单 BU 跨 2 日清；流水跨 BU 单日清 | PRD §3.3.1 业务OP 流程描述补 + PRD §3.5.7 关键不变量段新增（业务OP 重导清下一日 runs 不变量）+ spec §三 IPC `import:run-biz-op` 出参描述补（已隐含在 §5.0.1 函数签名表 `runBizOpImportAsync` 行）+ spec §5.0.1 函数签名表新增 `addOneDay` + `runBizOpImportAsync` 两行 + spec §九 Case Q 新增 + spec §十二 升格 2 条（runBizOpImportAsync Critical / addOneDay Risk-sensitive） | `src/main-process/biz-op-recon-session.js` `runBizOpImportAsync` 事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), bu)` 调用 + 新增 `addOneDay(date)` helper（UTC 实现，与 `subOneDay` 对偶）；`scripts/smoke-test.js` 新增 Case Q |
+| **USER_GUIDE 流水汇总性质解释** | 文档（用户明确要求） | 用户在 round 4 测试中提出"BU-A 与 BU-B 共用同一份流水文件"的解释空缺，要求把流水汇总性质讲清楚（这是 round 3 P1 流水重导跨 BU 清的根因）。USER_GUIDE §1.7.x 流水导入说明附近补一段：流水文件 = 该日所有部门的流水汇总（用户每日只导一份），按 normalizeBu 过滤跨 BU 共用 → 重导一份 = 所有 BU 对账失效。**建议合并到同一个"重导规则"小节**（与 round 4 P1 业务OP 跨 2 日清说明并列），便于用户对照"流水跨 BU 共用 / 业务OP 跨日依赖"两种模型 | docs/USER_GUIDE.md §1.7.x 流水导入说明附近合并新建"重导规则"小节（含流水汇总性质 + 业务OP 跨日清两段） | — (PM 侧文档；Dev 不动) |
+
+**协调（PM/Dev 并行）**：
+- Dev 改 `src/main-process/biz-op-recon-session.js` (P1 业务OP 重导清下一日 + addOneDay helper) + `scripts/smoke-test.js` (P1 Case Q) — PM 不动
+- PM 改 PRD/spec/tasks/important-variables/三件套 — Dev 不动
+- 字段名约定：`addOneDay(date)` (新 helper, UTC 实现，与 `subOneDay` 对偶；与 R2-M4 双源说明不同：addOneDay 单源，仅 session.js 定义)
+- USER_GUIDE 流水汇总性质段 + 业务OP 跨日清说明 **合并到同一个"重导规则"小节**（信息密度高，便于用户对照两种模型）
+
+**round 4 验证清单（PR self-review 前必跑）**：
+- `npm run smoke` 全套（含 Case A-K + Case L/M/N/O + Case P + 新 Case Q）→ 退出码 0
+- `grep -n "function addOneDay" src/` → 命中 1 处（`src/main-process/biz-op-recon-session.js`，单源）；与 `subOneDay` 双源不同（addOneDay 不在 run-repository.js 出现 — 业务OP 重导清逻辑只在 session.js 触发）
+- `grep -n "clearRunsAndDiffsByDateBu" src/main-process/biz-op-recon-session.js` → `runBizOpImportAsync` 函数体应有 **两次** 调用（当天 + addOneDay(date)）
+- `grep -n "addOneDay" src/main-process/biz-op-recon-session.js` → 至少 2 命中：函数定义 + `runBizOpImportAsync` 事务内调用
+- 真实数据手测：BU-A 跨 D-1 / D / D+1 三日导入业务OP + D / D+1 流水，跑 D 与 D+1 两 run 成功 → 重导 D 业务OP（修正后）→ 「导出差异」对话框 D 与 D+1 两个日期均消失（两 run 已清，需重新跑对账）
+- 真实数据手测：UTC+12 时区设备（如 New Zealand）跑 smoke Case Q → addOneDay 返回正确 D+1（不抢跑到 D+2）
+
+**known issue（不在 round 4 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议 v2.1.4 补齐。

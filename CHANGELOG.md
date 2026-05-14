@@ -94,6 +94,22 @@ v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。
 - **1 P3**：`package.json:71` `preview:all` script 串入 `preview:biz-op-recon`（参照 v2.1.2 月度BU preview 入串方式）
 - **新 smoke**：Case P（流水重导清 runs + diff_rows 跨 BU 防回归，资金红线 ⚠️）
 
+### round 4 self-review 修订（v0.10 — 2026-05-14，PR #45 round 3 完成后 Codex 自动 review 反馈）
+
+> **round 4 self-review 修订（Codex 自动 review）**：1 P1 资金红线（业务OP 重导清下一日 runs，与 round 3 P1 流水跨 BU 清互补）+ USER_GUIDE 流水汇总性质解释段（用户明确要求）
+
+- **1 P1 ⚠️ 资金红线**：业务OP 重导清下一日 (date+1, BU) runs/diff_rows
+  - 背景：`runBizOpImportAsync` 成功路径只清当天 (date, BU) 的 runs/diff_rows（`clearRunsAndDiffsByDateBu(db, date, bu)` — #15 拍板 A 已实现），未清下一日 (date+1, BU) 的 runs/diff_rows。业务OP 某日数据**双角色** — 既是当天对账 T-1 也是下一日对账 T-2 输入（PRD §3.4.1 步 4.2.a `计算 T-1 OP = T-2 期末 + 流水累加`）。漏清下一日 → D+1 日 run 仍按"旧 T-2 期末 + 流水累加"算 = stale 差额 → 「导出 D+1 差异」拿错数据 = 资金事故
+  - Dev 修法：`src/main-process/biz-op-recon-session.js` 新增 `addOneDay(date)` helper（**UTC 实现**：`new Date(date + 'T00:00:00Z')` + `setUTCDate(getUTCDate() + 1)` + `toISOString().slice(0, 10)`，与 `subOneDay` 对偶，避免本地时区抢跑） + `runBizOpImportAsync` 事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), bu)` 调用 + smoke Case Q 覆盖（构造 BU-A 跨 D-1/D/D+1 三日业务OP + 跑 D 与 D+1 两 run 成功 + 重导 D 业务OP + 断言 D 与 D+1 两 run 均被清；附反例：不调 addOneDay 清 / addOneDay 退化本地时区 / 误用 ByDate 跨 BU 清）
+  - **与 round 3 P1 互补**：业务OP 单 BU 跨 2 日清（D + D+1）；流水跨 BU 单日清（D 跨所有 BU）— 不可对调
+  - PRD 落实：§3.3.1 业务OP 流程描述补 + §3.5.7 关键不变量段新增（业务OP 重导清下一日 runs 不变量）+ §6.4 round4 段
+  - spec 落实：§5.0.1 函数签名表新增 2 行（`addOneDay` + `runBizOpImportAsync`）+ §九 Case Q 新增 + §十二 升格 2 条评估 + §十八 round 4 修订记录段
+  - rules/important-variables.md 升格：`runBizOpImportAsync` Critical（与 `runFlowImportAsync` round 3 升格 Critical 对齐 — 两个重导入口同级红线）+ `addOneDay` Risk-sensitive（与 `subOneDay` round 2 升格 Risk-sensitive 对齐 — 时区操作类 helper 同级红线）；元数据 v4 → v5
+- **USER_GUIDE 流水汇总性质解释段**（用户明确要求）：
+  - 用户在 round 4 测试中提出"BU-A 与 BU-B 共用同一份流水文件"的解释空缺，要求把流水汇总性质讲清楚（这是 round 3 P1 流水重导跨 BU 清的根因 — 流水文件 = 该日所有部门的流水汇总，按 normalizeBu 过滤跨 BU 共用 → 重导一份 = 所有 BU 对账失效）
+  - docs/USER_GUIDE.md §1.7.x 流水/业务OP 导入说明附近**合并新建"重导规则"小节**：流水汇总性质解释（用户原话）+ round 4 P1 业务OP 重导清下一日说明，便于用户对照"流水跨 BU 共用 / 业务OP 跨日依赖"两种模型
+- **新 smoke**：Case Q（业务OP 重导清下一日 runs + diff_rows 防回归，资金红线 ⚠️）
+
 ## 2.1.2 - 2026-05-13
 
 v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更**（账单类型→对账字段、对账字段→对账内容）+ **新增模块「月度银行对账单BU回填校验」**。OPEN ISSUE #10 资金红线（v0.5 → v0.8 重新拍板）：1:1 / 1:N / N:1 视为对账成功（精准标 BU 差异子对）；N:M（双侧 ≥2）视为数据异常 → 跳过 + 写入差异表 Sheet 3「异常」（**不中断运行**）。OPEN ISSUE #5 BU 比较（v0.9）：trim + toLowerCase + 空值归一（容忍 `Flowmore` vs `FlowMore` 大小写差异）。

@@ -1,5 +1,5 @@
 // v2.1.3 — 业务OP数据核对 smoke 测试
-// 资金红线核心路径 8 用例（A-G + H 重新导入清空回归）+ helper 单测
+// 资金红线核心路径 17 用例（A-Q）+ helper 单测
 //
 // 验证（spec §九 + PRD §6.1 18 项拍板）：
 //   A 核心对账：测算金额差异 + epsilon=1e-2 边界（资金红线 #1/#6）
@@ -10,6 +10,14 @@
 //   F 日期区间导出（v2.1.3-fix6 拍板回滚：单 sheet 合并 + 按 data_date 升序 + 同日内 account_no 升序）
 //   G BU 隔离（#7 拍板 C normalizeBu trim+lower，资金红线 ⚠️）
 //   H 重新导入清空旧 runs + diff_rows（#15 拍板 A，资金红线 P1 fix 回归）
+//   I 多 OP 账户精准统计（资金红线 ⚠️ fix3.1 回归）
+//   J 多 OP 相等行也进 diff_rows（v2.1.3 fix5 选项 B，资金红线 ⚠️）
+//   L T-2 end_balance NaN silent drop（v2.1.3-fix7-I3 回归，资金红线 ⚠️）
+//   M BU 大小写重新导入（v2.1.3-fix7-C1 回归，资金红线 ⚠️）
+//   N Billdate ≠ data_date console.warn（M5 spec § 6.2 已声明的调试线索）
+//   O I2 BU 名落库前 trim 归一防回归（round 2 R2-I3b，资金红线 ⚠️）
+//   P 流水重导清"该 date 跨所有 BU"的旧 runs/diff_rows（PR #45 round 3 P1 fix，资金红线 ⚠️）
+//   Q 业务OP 重导清"下一日 / 同 BU"的旧 runs/diff_rows（PR #45 round 4 P1 fix，资金红线 ⚠️）
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -1124,6 +1132,116 @@ async function runBizOpReconSmokeTests() {
   importsRepo.clearByDateBu(db, '2026-07-09', 'BU-P2');
   importsRepo.clearByDateBu(db, '2026-07-10', 'BU-P1');
   importsRepo.clearByDateBu(db, '2026-07-10', 'BU-P2');
+  flowRepo.clearByDate(db, '2026-07-10');
+  runRepo.clearRunsAndDiffsByDate(db, '2026-07-10');
+
+  // ========================================================================
+  // Case Q：业务OP 重导清"下一日 / 同 BU"的旧 runs/diff_rows（资金红线 ⚠️ PR #45 round 4 P1 fix）
+  //
+  // 背景：业务OP 某日 D 既是 D 当日对账的 T-1（与 D 流水合算），
+  //   也是 D+1 对账的 T-2（作为 T-2 期末余额基线）
+  //   原 bug：runBizOpImportAsync 仅清 (D, BU) → 留下 (D+1, BU) 旧 run，
+  //   listSuccessDates 仍含 D+1 → export:date 按旧 runId 读旧 diff_rows，
+  //   而旧 diff_rows 是基于旧 T-2 算出 → 源 T-2 已换，导出仍是旧 T-2 数 → 资金事故
+  //
+  // 与 Case H（业务OP 重导清单 BU 当日 runs）+ Case P（流水重导跨 BU）的关键区别：
+  //   - Case H：clearRunsAndDiffsByDateBu(D, BU) — 清当天同 BU
+  //   - Case Q：clearRunsAndDiffsByDateBu(D, BU) + clearRunsAndDiffsByDateBu(D+1, BU) — 清当天 + 下一日同 BU
+  //   - Case P：clearRunsAndDiffsByDate(D) — 流水跨 BU 全清
+  //
+  // 步骤：
+  //   1) 业务OP T-2=2026-07-09/BU-A 导入
+  //   2) 业务OP T-1=2026-07-10/BU-A 导入
+  //   3) 流水 T-1=2026-07-10 导入（仅 BU-A，不影响 Case Q 验证主题）
+  //   4) 跑 2026-07-10/BU-A 对账 → 拿 runId
+  //   5) 重导 2026-07-09/BU-A 业务OP（同 date 不同内容；模拟用户改源数据）
+  //   6) 验证：
+  //      a. listSuccessDates(BU-A) 不含 2026-07-10（旧 run 已清）
+  //      b. getRunById(旧 runId) === null（runs 表已删）
+  //      c. getDiffRowsByRun(旧 runId).length === 0（diff_rows 已先于 runs 删）
+  //      d. addOneDay helper 单元正确：'2026-07-09' → '2026-07-10' / 月末跨月 / 闰年
+  // ========================================================================
+
+  // helper 单元测试（Q 步 0：addOneDay 4 条边界）
+  check('Q0a addOneDay 普通日', session.addOneDay('2026-07-09') === '2026-07-10');
+  check('Q0b addOneDay 月末跨月', session.addOneDay('2026-05-31') === '2026-06-01');
+  check('Q0c addOneDay 年末跨年', session.addOneDay('2025-12-31') === '2026-01-01');
+  check('Q0d addOneDay 闰年 2-29', session.addOneDay('2024-02-29') === '2024-03-01');
+
+  // 步 1+2：业务OP T-2 + T-1 导入（BU-A 单 BU；与 Case A 完全无干扰：用 2026-07-09/10 + BU-Q）
+  // 注：避开 BU-A 防与前置 case 相互污染（Case G 也用 BU-A 但 date 不同，仍稳妥换 BU-Q）
+  importsRepo.insertRows(db, '2026-07-09', [
+    opRow(2, 'BU-Q', 'Q001', { begin:0, amount:1000, amountIn:1000, amountOut:0, end:1000 })
+  ]);
+  importsRepo.insertRows(db, '2026-07-10', [
+    opRow(2, 'BU-Q', 'Q001', { begin:1000, amount:100, amountIn:100, amountOut:0, end:1100 })
+  ]);
+
+  // 步 3：流水 T-1 导入（BU-Q +100 → 计算 T-1 = 1000+100 = 1100 ≈ 实际 1100 → 无差异）
+  flowRepo.insertRows(db, '2026-07-10', [
+    flowR(2, 'BU-Q', 'Q001', '入', 100)
+  ]);
+
+  // 步 4：跑 2026-07-10/BU-Q 对账 → 拿 runId
+  const resQ_run = session.runReconciliation(db, { date:'2026-07-10', buName:'BU-Q' });
+  check('Q 步 4 BU-Q 2026-07-10 run 落 runId', resQ_run.runId > 0);
+
+  // 验证旧 run 状态（前置：listSuccessDates 应含 2026-07-10）
+  const successQ_before = runRepo.listSuccessDates(db, 'BU-Q');
+  check('Q 步 4 listSuccessDates(BU-Q) 含 2026-07-10（前置）',
+    successQ_before.some(s => s.date === '2026-07-10'));
+
+  // 步 5：重导 2026-07-09/BU-Q 业务OP（同 date 不同内容 → 模拟用户重导 T-2 源数据）
+  const tmpXlsxQ = path.join(tmpRoot, 'case-Q-bizop.xlsx');
+  {
+    const XLSX = require('xlsx');
+    const { BIZ_OP_HEADERS } = require('../../src/backend/biz-op-recon-db/columns');
+    function rowArrQ(bu, acc, begin, amt, amtIn, amtOut, end) {
+      const obj = {
+        'Billdate': '', '业务方': bu, '客户编号': '', '主体': '', '账户号': acc,
+        '账户类型': '', '币种': 'CNY', '期初余额': begin, '发生额': amt,
+        '发生额（入）': amtIn, '发生额（出）': amtOut, '期末余额': end,
+        '期末可用余额': '', '期末冻结余额': '', '最近更新时间': '', '通道': '',
+        'ppCardId': '', '银行卡号': '', '扩展信息': '', '账户状态': '',
+        'BizId': '', '清结算系统创建时间': '', '清结算系统更新时间': ''
+      };
+      return BIZ_OP_HEADERS.map(h => obj[h]);
+    }
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      BIZ_OP_HEADERS,
+      // 重导：T-2 期末改为 2000（与原 1000 不同 → 源换了）
+      rowArrQ('BU-Q', 'Q001', 1000, 1000, 1000, 0, 2000)
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, 'sheet');
+    XLSX.writeFile(wb, tmpXlsxQ);
+  }
+  const resQ_reimport = await session.runBizOpImportAsync(db, {
+    date: '2026-07-09',
+    filePath: tmpXlsxQ,
+    readBizOpFile,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(tmpRoot, 'error-reports')
+  });
+  check('Q 步 5 业务OP 重导 success', resQ_reimport.status === 'success');
+
+  // 步 6.a：listSuccessDates(BU-Q) 不再含 2026-07-10（旧 run 已清）— 资金红线核心验证
+  const successQ_after = runRepo.listSuccessDates(db, 'BU-Q');
+  check('Q 步 6a listSuccessDates(BU-Q) 不再含 2026-07-10（下一日旧 run 已清）',
+    !successQ_after.some(s => s.date === '2026-07-10'),
+    '资金红线 P1：业务OP 重导未清下一日旧 run → export:date 按旧 runId 导出基于旧 T-2 算的差异');
+
+  // 步 6.b：getRunById(旧 runId) === null
+  const oldRunQ = runRepo.getRunById(db, resQ_run.runId);
+  check('Q 步 6b 旧 BU-Q 2026-07-10 runId 在 runs 表已不存在', oldRunQ === null);
+
+  // 步 6.c：getDiffRowsByRun(旧 runId) === []
+  const oldDiffQ = runRepo.getDiffRowsByRun(db, resQ_run.runId);
+  check('Q 步 6c 旧 BU-Q 2026-07-10 run 的 diff_rows 已清', oldDiffQ.length === 0);
+
+  // 清理 Q 用例
+  importsRepo.clearByDateBu(db, '2026-07-09', 'BU-Q');
+  importsRepo.clearByDateBu(db, '2026-07-10', 'BU-Q');
   flowRepo.clearByDate(db, '2026-07-10');
   runRepo.clearRunsAndDiffsByDate(db, '2026-07-10');
 

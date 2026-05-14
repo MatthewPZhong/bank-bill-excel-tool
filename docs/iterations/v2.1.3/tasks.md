@@ -2,12 +2,12 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.9（2026-05-14，基于 spec v0.9 — round 3 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（流水重导清该 date 跨 BU 的 runs/diff_rows，新增 `clearRunsAndDiffsByDate` 函数 + smoke Case P）+ 2 P2（lockfile 同步 / usage-stats 接入 17 IPC trackedIpcHandle）+ 1 P3（preview:all 接入 biz-op-recon）+ T17 round 3 修订记录；v0.8 = 2026-05-14 round 2 self-review 修订；v0.7 = 2026-05-14 round 1 self-review 修订；v0.6 = 2026-05-13 fix6 PRD #14 拍板回滚；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归） |
+| 文档版本 | v0.10（2026-05-14，基于 spec v0.10 — round 4 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（业务OP 重导清下一日 (date+1, BU) runs/diff_rows，新增 `addOneDay(date)` helper UTC 实现 + `runBizOpImportAsync` 事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), bu)` 调用 + smoke Case Q）+ USER_GUIDE 流水汇总性质解释段（用户明确要求）+ T18 round 4 修订记录；v0.9 = 2026-05-14 round 3 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（流水重导清该 date 跨 BU 的 runs/diff_rows，新增 `clearRunsAndDiffsByDate` 函数 + smoke Case P）+ 2 P2（lockfile 同步 / usage-stats 接入 17 IPC trackedIpcHandle）+ 1 P3（preview:all 接入 biz-op-recon）+ T17 round 3 修订记录；v0.8 = 2026-05-14 round 2 self-review 修订；v0.7 = 2026-05-14 round 1 self-review 修订；v0.6 = 2026-05-13 fix6 PRD #14 拍板回滚；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归） |
 | 关联 spec | `spec.md` |
 | 关联 PRD | `PRD-v2.1.3.md` |
 | 工作分支 | `v2.1.3` |
 | 起草人 | team-lead |
-| 总任务数 | 18（T0 spec、T1 migration、T2 reader/validator、T3 session/算法、T4 writer、T5 前端面板/dialog、T6 IPC、T7 smoke、T8 preview、T9 三件套 + version、T10 self-review + PR 草稿、T11 fix1+fix2 自测回归记录、T12 fix4 资金红线 bug 修复记录、T13 fix5 PRD 拍板修订 + Dev 实施、T14 fix6 PRD #14 拍板回滚 + Dev 实施、T15 round 1 self-review 修订、T16 round 2 self-review 修订、**T17 round 3 self-review 修订（round 2 完成后 Codex 自动 review 反馈：1 P1 资金红线 + 2 P2 + 1 P3）**） |
+| 总任务数 | 19（T0 spec、T1 migration、T2 reader/validator、T3 session/算法、T4 writer、T5 前端面板/dialog、T6 IPC、T7 smoke、T8 preview、T9 三件套 + version、T10 self-review + PR 草稿、T11 fix1+fix2 自测回归记录、T12 fix4 资金红线 bug 修复记录、T13 fix5 PRD 拍板修订 + Dev 实施、T14 fix6 PRD #14 拍板回滚 + Dev 实施、T15 round 1 self-review 修订、T16 round 2 self-review 修订、T17 round 3 self-review 修订、**T18 round 4 self-review 修订（round 3 完成后 Codex 自动 review 反馈：1 P1 资金红线 — 业务OP 重导清下一日 runs，与 round 3 P1 流水跨 BU 清互补；+ USER_GUIDE 流水汇总性质解释段用户明确要求）**） |
 
 ---
 
@@ -785,3 +785,35 @@
   - CHANGELOG.md / docs/USER_GUIDE.md / docs/VERSION_FEATURE_HISTORY.md
 - **commit message**：`[v2.1.3] docs(t17-round3): PRD/spec/tasks v0.8→v0.9 + P1 流水重导清 runs 跨 BU + spec §三 IPC tracked 标注 + Case P 新增 + important-vars 升格 3 条 + 三件套同步`
 - **预估**：M（1-2h，PM 侧文档同步 + 升格起草）
+
+---
+
+## T18 — round 4 self-review 修订（v0.10 — 2026-05-14，round 3 完成后 Codex 自动 review 反馈）
+
+- **触发**：PR #45 round 3 修订完成后再过 reviewer agent（Codex 自动 review）；reviewer 给 1 P1 ⚠️ 资金红线 finding（与 round 3 P1 流水跨 BU 清互补）+ 用户明确要求 USER_GUIDE 流水汇总性质解释段。用户拍板"全修"。
+- **PM 范围（本任务）**：
+  - **P1 PRD §3.3.1 业务OP 流程描述补**：事务内 `clearRunsAndDiffsByDateBu(db, date, BU)` + `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 双调用说明（资金红线 ⚠️：业务OP 某日数据双角色，重导后下一日 run 失效，必须强制清下一日 run + 重跑对账；漏清下一日 → 用旧 T-2 算的 D+1 差异表 = 资金事故）
+  - **P1 PRD §3.5.7 关键不变量段新增**「业务OP 重导清下一日 runs 不变量」+ 与 round 3 P1 流水跨 BU 清互补对照表（业务OP 单 BU 跨 2 日清；流水跨 BU 单日清）+ `addOneDay(date)` UTC 实现不变量 + smoke Case Q 引用
+  - **P1 spec §5.0.1 函数签名表新增 2 行**：`addOneDay(date)` helper（与 `subOneDay` 对偶，UTC 实现避免时区抢跑）+ `runBizOpImportAsync({date, filePath})` (round 4 P1 修订事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 调用)；表底部追加"业务OP 重导清下一日 runs 不变量"注释段
+  - **P1 spec §九 smoke 用例追加 Case Q**（业务OP 重导清下一日 runs + diff_rows 防回归，含构造 BU-A 跨 D-1/D/D+1 三日业务OP + 跑 D 与 D+1 两 run 成功 + 重导 D 业务OP + 断言两 run 均被清 + 反例（不调 addOneDay 清 / 退化本地时区 / 误用 ByDate 跨 BU 清）+ 资金红线说明）
+  - **P1 spec §十二 升格清单**：评估 `runBizOpImportAsync` / `addOneDay` 两个符号升格；新增 round 4 升格表段（runBizOpImportAsync 升格 Critical / addOneDay 升格 Risk-sensitive，与 subOneDay round 2 R2-M4 升格 Risk-sensitive 对齐）
+  - **PRD/spec/tasks v0.9 → v0.10** + round 4 修订记录段（spec §十八 新增）
+  - **PRD §6.4 标题**改 fix1+fix2+fix4+fix5+fix6+round1+round2+round3+round4 + 追加 round 4 段（P1 + USER_GUIDE 流水汇总解释段两条摘要）
+  - **rules/important-variables.md 升格 2 条**（runBizOpImportAsync Critical + addOneDay Risk-sensitive）+ 元数据 v4 → v5 + 上次人工 review 保持 2026-05-14
+  - **三件套同步**：CHANGELOG.md / docs/VERSION_FEATURE_HISTORY.md（追加 round 4 修订段）+ docs/USER_GUIDE.md §1.7.x 流水/业务OP 导入说明附近**合并新建"重导规则"小节**（含两段：6.A 业务OP 重导清下一日说明 + 6.B 流水汇总性质解释段，用户给的原话保留）
+- **Dev 范围（并行另一 agent）**：P1 (`runBizOpImportAsync` 事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), bu)` 调用 + 新增 `addOneDay(date)` helper UTC 实现 + smoke Case Q)；详见 spec §十八 round 4 修订记录表"代码改动文件"列
+- **acceptance criteria**：
+  - PRD 标题表 v0.9 → v0.10 + §3.3.1 业务OP 流程描述补 + §3.5.7 关键不变量段新增 + §6.4 round4 段（含 P1 + USER_GUIDE 流水汇总解释段）
+  - spec 标题表 v0.9.1 → v0.10 + §5.0.1 新增 2 行函数签名（addOneDay + runBizOpImportAsync）+ §九 Case Q 新增 + §十二 round 4 升格 2 条评估表 + §十八 round 4 修订记录段
+  - tasks 总任务 18 → 19 + T18 完整 task
+  - rules/important-variables.md 新增 2 条目（runBizOpImportAsync Critical + addOneDay Risk-sensitive）+ 元数据 v4 → v5
+  - CHANGELOG.md v2.1.3 段追加 round 4 修订段（含 P1 + USER_GUIDE 流水汇总解释段）
+  - docs/USER_GUIDE.md §1.7.x 流水/业务OP 导入说明附近合并新建"重导规则"小节（两段合一：6.A + 6.B）
+  - docs/VERSION_FEATURE_HISTORY.md v2.1.3 行追加 round 4 修订摘要
+- **关联文档**：
+  - PRD §3.3.1 + §3.5.7 + §6.4 round4 段
+  - spec §5.0.1 / §九 Case Q / §十二 round 4 升格 / §十八
+  - rules/important-variables.md `runBizOpImportAsync` / `addOneDay` 新条目
+  - CHANGELOG.md / docs/USER_GUIDE.md / docs/VERSION_FEATURE_HISTORY.md
+- **commit message**：`[v2.1.3] docs(t18-round4): PRD/spec/tasks v0.9→v0.10 + P1 业务OP 重导清下一日 runs + addOneDay helper + Case Q + USER_GUIDE 重导规则小节（流水汇总性质 + 业务OP 跨日清）+ important-vars 升格 2 条 + 三件套同步`
+- **预估**：M（1-2h，PM 侧文档同步 + 升格起草 + USER_GUIDE 用户原话融入）

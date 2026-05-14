@@ -9,7 +9,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 清单版本 | v4（对应 app v2.1.3 — 2026-05-14 round 3 self-review 新增 3 条：`runFlowImportAsync` 升格 Critical（Codex P1 资金红线 — 流水重导清 runs）+ `clearRunsAndDiffsByDate` 升格 Risk-sensitive（round 3 P1 新增函数，按 date 跨 BU 清）+ `clearRunsAndDiffsByDateBu` 升格 Risk-sensitive（已有，按 (date, BU) 单 BU 清，与新函数区分语义不能混）；v3 = 2026-05-14 round 2 新增 1 条 `subOneDay`；round 1 已升格 13 条 v2.1.3 新符号保持） |
+| 清单版本 | v5（对应 app v2.1.3 — 2026-05-14 round 4 self-review 新增 2 条：`runBizOpImportAsync` 升格 Critical（Codex P1 资金红线 — 业务OP 重导清下一日 runs，与 round 3 `runFlowImportAsync` 升格 Critical 对齐 — 两个重导入口同级红线）+ `addOneDay` 升格 Risk-sensitive（round 4 P1 新增 helper，与 `subOneDay` round 2 升格 Risk-sensitive 对齐 — 时区错乱直接错日期）；v4 = 2026-05-14 round 3 新增 3 条：`runFlowImportAsync` Critical + `clearRunsAndDiffsByDate` Risk-sensitive + `clearRunsAndDiffsByDateBu` Risk-sensitive；v3 = 2026-05-14 round 2 新增 1 条 `subOneDay`；round 1 已升格 13 条 v2.1.3 新符号保持） |
 | 上次人工 review | 2026-05-14（round 3） |
 | 基线数据 | `docs/analysis/var-reference-stats.md`（28 个 JS 文件 / 355 顶层声明） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
@@ -120,11 +120,22 @@
 ### `runFlowImportAsync`（v2.1.3 流水对账单导入入口，**round 3 P1 升格 ⚠️ 资金红线**）
 - 定义：`src/main-process/biz-op-recon-session.js`
 - 关联功能：业务OP 模块流水对账单导入核心入口；接收 `{date, filePath}`，事务内做 28 列表头校验 + 出入方向枚举校验 + DELETE 旧流水 + **`clearRunsAndDiffsByDate(db, date)` 清该 date 跨所有 BU 的旧 runs/diff_rows** + INSERT 新流水
-- 变更 review 要点：
+- 变更 review 要点:
   - **资金红线**（round 3 P1 修订前曾漏清）：流水换了对账没重跑 → 用户「导出差异」拿 stale 数据 = 资金事故。事务内必须包含 `clearRunsAndDiffsByDate(db, date)` 调用
   - **与业务OP 重导对照**：业务OP 重导只清单 BU（`clearRunsAndDiffsByDateBu`）；流水重导按 date 跨所有 BU 清（`clearRunsAndDiffsByDate`）— 两个清函数语义不可混
   - 改事务边界 / 清函数调用顺序 → 必跑 smoke Case P 防回归（构造同 date 跨 2 BU success run + 重导流水 + 断言所有 BU 的 runs/diff_rows 均被清）
   - 必跑：smoke biz-op-recon Case D（流水累加 + 出入方向）+ Case P（流水重导清 runs）+ 真实数据手测（同 date 跨 ≥ 2 BU 已 success run，重导流水后两 BU 的「导出差异」success 日期均消失，需重新跑对账）
+
+### `runBizOpImportAsync`（v2.1.3 业务OP 导入入口，**round 4 P1 升格 ⚠️ 资金红线**）
+- 定义：`src/main-process/biz-op-recon-session.js`
+- 关联功能：业务OP 模块业务OP 导入核心入口；接收 `{date, filePath}`，事务内做 23 列表头校验 + 双重校验 + DELETE 旧业务OP `(date, BU)` + **`clearRunsAndDiffsByDateBu(db, date, BU)` 清当天作为 T-1 的 runs/diff_rows**（#15 拍板 A 已实现）+ **`clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 清下一日作为 T-2 的 runs/diff_rows**（round 4 P1 新增）+ 落库前 `bu_name = String(rawBuName).trim()`（I2 round 1）+ INSERT 新业务OP
+- 变更 review 要点:
+  - **资金红线**（round 4 P1 修订前曾漏清下一日）：业务OP 某日数据**双角色** — 既是当天对账 T-1 也是下一日对账 T-2 输入（参见 PRD §3.4.1 步 4.2.a `计算 T-1 OP = T-2 期末 + 流水累加`）。漏清下一日 (date+1, BU) run → D+1 日 run 仍按"旧 T-2 期末 + 流水累加"算 = stale 差额 → 「导出 D+1 差异」拿错数据 = 资金事故
+  - **必须两次调用 `clearRunsAndDiffsByDateBu`**：一次 `(date, BU)`（当天 T-1）+ 一次 `(addOneDay(date), BU)`（下一日 T-2）；缺一不可
+  - **`addOneDay` 必须 UTC 实现**：避免本地时区抢跑/滞后导致跨日错位；时区错乱直接错日期 → 漏清下一日 run 或误清后天 run = 资金事故（详见 `addOneDay` 条目）
+  - **与 `runFlowImportAsync` 区分语义**：业务OP 单 BU 跨 2 日清（D + D+1）；流水跨 BU 单日清（D 跨所有 BU）— 不可对调
+  - 改事务边界 / 清函数调用次数 / addOneDay 实现 → 必跑 smoke Case Q 防回归（构造 BU-A 跨 D-1/D/D+1 三日业务OP + 跑 D 与 D+1 两 run 成功 + 重导 D 业务OP + 断言 D 与 D+1 两 run 均被清）
+  - 必跑：smoke biz-op-recon Case A（核心对账）+ Case M（C1 大小写归一）+ Case N（I2 BU trim 归一）+ Case Q（业务OP 重导清下一日 runs）+ 真实数据手测（同 BU 跨 ≥ 3 日业务OP + 跑 D 与 D+1 两 run，重导 D 业务OP 后两 run 「导出差异」success 日期均消失）
 
 ---
 
@@ -416,6 +427,19 @@
   - 不能改用 `setDate(getDate() - 1)`（本地时区版）— 在 UTC+12 / UTC-12 边界时区会抢跑或滞后 1 天
   - round 2 R2-M4 升格（spec ↔ code 对齐时发现双源；保留双源 + 加显式 review 要点）
   - 必跑：smoke biz-op-recon Case A（核心对账，验证 T-1/T-2 取数日期正确）
+
+### `addOneDay`（v2.1.3 业务OP D → D+1 日期加一 helper，**round 4 P1 资金红线 ⚠️ 新增**）
+- 定义：`src/main-process/biz-op-recon-session.js`（**单源**，与 `subOneDay` 双源不同 — addOneDay 仅在业务OP 重导清逻辑使用，无 backend 反向依赖问题）
+- 实现：`new Date(date + 'T00:00:00Z')` + `setUTCDate(getUTCDate() + 1)` + `toISOString().slice(0, 10)`（与 `subOneDay` 对偶；UTC 处理避免本地时区抢跑/滞后导致跨日错位）
+- 关联功能：业务OP `(date, BU)` 重导时，`runBizOpImportAsync` 在事务内调用 `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 清下一日作为 T-2 的 run（业务OP 某日数据双角色：当天 T-1 + 下一日 T-2，参见 PRD §3.4.1 步 4.2.a）
+- 变更 review 要点：
+  - **资金红线**（round 4 P1 新增）：时区错乱直接错日期 → 漏清下一日 (date+1) run（用 setDate 在 UTC+12 滞后到 date）或误清后天 (date+2) run（在 UTC-12 抢跑到 date+2）→ stale 差异表 = 资金事故
+  - **必须 UTC 实现**：不能改用 `setDate(getDate() + 1)`（本地时区版）；与 `subOneDay` UTC 实现完全对偶
+  - **单源**：addOneDay 仅在业务OP 重导清逻辑使用（仅 `runBizOpImportAsync` 调用），无 listReadyDates 一类的双源场景；改实现只动 `src/main-process/biz-op-recon-session.js` 一处
+  - **维护检查**：改实现后 `grep -n "function addOneDay" src/` 确认仅 1 处命中（如出现 2 处 → 评估是否可合并 / 是否双源同步）
+  - **与 `subOneDay` 对照**：subOneDay 双源（session.js + run-repository.js）；addOneDay 单源（仅 session.js）— 业务边界不同
+  - round 4 P1 升格 Risk-sensitive（与 `subOneDay` round 2 R2-M4 升格 Risk-sensitive 对齐 — 时区操作类 helper 同级红线）
+  - 必跑：smoke biz-op-recon Case Q（业务OP 重导清下一日 runs；验证 addOneDay 时区安全性 + 不抢跑 / 不滞后）+ 真实数据手测（UTC+12 / UTC-12 边界时区设备跑 Case Q 不出错）
 
 ### `clearRunsAndDiffsByDate`（v2.1.3 流水重导清 runs，**round 3 P1 资金红线 ⚠️ 新增**）
 - 定义：`src/backend/biz-op-recon-db/run-repository.js`
