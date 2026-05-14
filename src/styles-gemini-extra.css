@@ -2866,3 +2866,7 @@ select.mapping-text-input {
 .module-cabinet-error.is-visible {
   display: block;
 }
+/* round 2 self-review I-new-1：committing 期间整个 overlay 鼠标 cursor: wait（视觉反馈"正在保存"） */
+.modal-overlay.is-committing {
+  cursor: wait;
+}

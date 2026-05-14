@@ -1,7 +1,13 @@
 # Spec — v2.1.4 技术规格
 
 > 关联 `PRD-v2.1.4.md` / `tasks.md`（同目录）
-> 文档版本：v0.1（2026-05-14 起草）
+> 文档版本：v0.1（2026-05-14 起草），v0.2 修订标注（2026-05-15 round 2 self-review I-new-4）
+>
+> ⚠️ **v0.2 修订（Fix1）**：本 spec 起草于 v2.1.4 v0.1，记录的部分技术细节已被 Fix1（v0.2）撤回 / 修订：
+> - **§3.3 / §3.6 弹窗交互模式**：v0.1 设计"即时落库"（O6） → Fix1.2 撤回，改为「完成/取消」两阶段提交；最终实现见 `src/renderer-dialogs.js:7657` `confirmBtn.addEventListener` + `cancelAndClose`
+> - **§3.6 闲置区排序规则**：v0.1 设计 `String.length` 升序（O1） → Fix1.5 修订，改为视觉宽度（CJK×2 + 其他×1）；最终实现见 `src/renderer-dialogs.js:7690` `visualLength` helper
+> - **§3.7 CSS 布局**：v0.1 未规划 footer / inline error 行；Fix1.1 + round 1/2 self-review 追加 `.module-cabinet-footer` + `.module-cabinet-error` + `.modal-overlay.is-committing`
+> - 完整修订记录见 `PRD-v2.1.4.md §八 Round Fix1` + `CHANGELOG.md` Fix1 段
 
 ---
 

@@ -1226,3 +1226,7 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 .module-cabinet-error.is-visible {
   display: block;
 }
+/* round 2 self-review I-new-1：committing cursor: wait（preview HTML 备用同步） */
+.modal-overlay.is-committing {
+  cursor: wait;
+}

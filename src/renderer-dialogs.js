@@ -7651,30 +7651,42 @@
         if (ev.target === overlay) cancelAndClose();
       });
 
+      // round 2 self-review I-new-1：committing 期间所有可点击元素同步禁用视觉，
+      //   避免用户感知"按钮无反应"（之前仅逻辑 return，按钮 hover/cursor 视觉不变）
+      function setCommittingState(active) {
+        committing = active;
+        confirmBtn.disabled = active;
+        cancelBtn.disabled = active;
+        closeBtn.disabled = active;
+        if (active) {
+          overlay.classList.add('is-committing');
+        } else {
+          overlay.classList.remove('is-committing');
+        }
+      }
+
       // 完成：调 onCommit 落库 + 关弹窗
       //   round 1 self-review I3：失败时显示 inline error + 保留弹窗 / workingEnabled，让用户重试
       //   round 1 self-review I4：committing flag 锁定 cancel 路径
+      //   round 2 self-review I-new-7：try/finally 重构，committing reset 集中到一处
       confirmBtn.addEventListener('click', async () => {
-        committing = true;
+        setCommittingState(true);
         errorEl.classList.remove('is-visible');
         errorEl.textContent = '';
-        confirmBtn.disabled = true;
         try {
           const ok = await onCommit(workingEnabled);
           if (ok) {
-            committing = false;
             closeModal();
-          } else {
-            errorEl.textContent = '保存模块设置失败，请稍后重试。';
-            errorEl.classList.add('is-visible');
-            confirmBtn.disabled = false;
-            committing = false;
+            return;
           }
+          errorEl.textContent = '保存模块设置失败，请稍后重试。';
+          errorEl.classList.add('is-visible');
         } catch (err) {
           errorEl.textContent = `保存失败：${(err && err.message) || '未知错误'}`;
           errorEl.classList.add('is-visible');
-          confirmBtn.disabled = false;
-          committing = false;
+        } finally {
+          // 成功路径已 closeModal 销毁 DOM，下面 reset 仍跑但无副作用（disabled 写到已分离 element 不影响 UI）
+          setCommittingState(false);
         }
       });
 

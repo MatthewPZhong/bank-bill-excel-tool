@@ -3302,3 +3302,7 @@ select {
 .module-cabinet-error.is-visible {
   display: block;
 }
+/* round 2 self-review I-new-1：committing cursor: wait（General theme 同步） */
+.modal-overlay.is-committing {
+  cursor: wait;
+}
