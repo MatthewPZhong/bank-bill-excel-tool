@@ -1,5 +1,53 @@
 # Changelog
 
+## 2.1.3 - 2026-05-13
+
+v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。每日 T-2/T-1 业务OP + T-1 流水对账单导入 → 「业务OP T-2 期末余额 + 流水当日发生额 = 计算 T-1 OP」逻辑跑对账 → 与 T-1 业务OP 期末余额逐行精准比对（epsilon=1e-2）→ 三类差异（测算金额差异 / 多 OP 行 / 账户号增减）导出差异行 Excel（v0.3 fix2.4 回滚：差异表无颜色高亮，差异类型由新增 4 列 meta 字段表达）。OPEN ISSUE 18 项全部拍板（PRD §6.1），其中 #10 在 v0.3 fix2 回滚为 E。
+
+### ⚠️ 资金红线（必须人工 review）
+
+- **业务OP 双重校验**（#1 拍板 B + #5 整批拒绝）：`(1) 发生额 == 发生额（入） - 发生额（出）` AND `(2) 期末余额 == 期初余额 + 发生额`，epsilon=1e-2；任一不过 → 整批拒绝 + 失败报告 xlsx 落 `error-reports/{date}/`
+- **流水出入方向枚举**（#3 拍板）：仅允许中文「入」/「出」，入=+ 出=-；其他视为脏数据 → 整批拒绝
+- **多 OP 行精准标差异**（#6 拍板 A）：同账户号 N 条 T-1 OP 行各自与"计算 T-1 OP"逐行独立比，每条独立标"相等"/"不相等"（v0.3 fix2.4：差异表无颜色高亮）
+- **BU 比较语义**（#7 拍板 C）：`normalizeBu(v) = String(v).trim().toLowerCase()`，与 v2.1.2 完全一致
+- **重新导入清空旧 runs + diff_rows**（#15 拍板 A）：同 (date, BU) 重新导入业务OP 时同事务内清空旧 runs/diff_rows，避免"旧 runId 套到新数据上"的资金事故
+- 详见 `docs/iterations/v2.1.3/PRD-v2.1.3.md` §六.1
+
+### 新增
+
+- **新模块「业务OP数据核对」**：每日维度对账模块
+  - 主菜单新增第 5 个入口（与"月度银行对账单BU回填校验"同级）
+  - 主面板 3 个按钮：「导入文件」+「开始运行」+「导出差异」
+  - **BU 单选下拉框**（位于「导出差异」按钮上侧）：枚举动态来自业务OP `业务方` distinct（保留原值不 normalize；#A 拍板）
+  - 「导入文件」点击 → 弹业务OP 日期对话框（年±1 / 月 1-12 / 日 1-31 三下拉不联动，#8 拍板 A）→ 弹文件选择 → 校验通过即 INSERT，校验失败弹错误报告对话框（#5 拍板）
+  - 第 1 日导入完成弹「续导确认」对话框（#11 拍板 B）；已有多日 → 自动进入流水对账单导入流程
+  - 流水对账单 导入：同日期对话框 → 文件选择 → 「出入方向」枚举校验（仅「入」/「出」，#3 拍板）→ 校验失败整批拒绝 + 失败报告
+  - 「开始运行」点击 → 弹对账日期对话框，下拉只列"三件齐"日期（T-1/T-2 业务OP + T-1 流水均有，#12 拍板 A）→ 4 步对账算法 → 状态栏统计
+  - 「导出差异」点击 → 弹导出对话框，两 radio：「导出指定日期」（默认）/「导出指定日期区间」→ 弹另存为
+    - 指定日期 = 1 文件 1 sheet，sheet 名 `YYYY-MM-DD` ISO
+    - 区间 = 1 文件 N sheet（每个 success 日期一 sheet）；区间内无 success 的日期返回 `skippedDates`
+  - 差异表字段 = 业务OP 原 23 列 + 4 新增字段（比对T-2日 / 同账户号多个OP / 比对测算金额 / 测算金额差额）
+- **fix1 + fix2 手动测试调整**（v0.3 — 2026-05-13）：
+  - 差异表样式调整：**移除黄色高亮**（#10 拍板回滚为 E）；差异类型仅通过新增 4 列 meta 字段表达，便于 Excel 筛选器自由查询
+  - BU 下拉框：buList 非空时**移除空白 placeholder** + 默认选中第一项 + smart preserve（上次 selectedBu 仍在新 buList 时保留）；buList 为空时保留单一空白 option
+  - BU option label：**仅显示 BU 名**（去除 `(N 行)` 行计数附加）
+  - 业务OP / 流水对账单日期对话框默认值 = **系统日期 - 1**（fix1.4 / fix2.5）；"选择需要对账的日期"对话框保持现状不改
+  - 校验失败提示：**移除独立报错对话框**，改为状态栏文字 + 失败报告路径（用户 cmd+点击可直接打开）
+  - BU 行视觉对齐：BU 行容器左右边界与"导出差异"按钮对齐（fix2.1 CSS 视觉约束）
+  - 死代码清理：`createBizOpReconErrorReportDialog` factory 一并删除（dialog factory 由 6 个减为 5 个）
+- **fix4 资金红线 bug**：multi_op_account_count 在 onlyInT1 路径漏算（T-1 有 T-2 无 多 OP 账户号不计入状态栏统计）；差异表 meta 列「同账户号多个OP」未受影响。修复后 smoke 新增 Case I（3 个 sub-case，15 assertion）防回归。
+- **fix5 PRD 拍板修订**：多 OP 账户 N 行**全部进差异表**（不论相等/不相等），原"相等行不进表"规则回滚。便于资金审计逐行追溯。详见 PRD §3.4.1 步 4.2.b + §3.5.3。`compareT1OpWithComputed` 相等多 OP 行 push diffRows，meta = 相等/空/是；单 OP 相等仍不进表。`amountDiffCount` 统计不变（仅累计不相等行）；smoke 新增 Case J（含反例，防退化）。
+- **fix6 PRD #14 拍板回滚**：区间导出由**多 sheet 改单 sheet「差异」**。所有日期差异合并到一个 sheet，按 data_date 升序 + 同日内 source_account_key 升序排序；**不加新列**，依靠原表 Billdate 区分日期。**已知风险**：xlsx 原作者填的 Billdate 可能与导入时选的 data_date 不一致 → 用户在 Excel 筛选可能区分不出来 → writer 阶段写 `console.warn` 日志辅助 debug（不弹 UI 不阻断流程）。单日导出行为不变（仍 1 sheet，sheet 名 = `YYYY-MM-DD` ISO）。详见 PRD §3.3.3 + §6.1 #14 + §6.4 fix6 段。`writeDateRangeDiffWorkbook` 重写（一次性收集 → 排序 → 批量 add）；smoke 新增 Case K（含反例：sheet 数 > 1 / 表头列 > 27 / 排序失序均失败）。DB schema 不变；仅 writer 渲染层改动。
+- **数据库**：新增 4 张表（`biz_op_recon_imports` / `biz_op_recon_flow_imports` / `biz_op_recon_runs` / `biz_op_recon_diff_rows`），共主 DB `tool-data.sqlite`，与 v2.1.2 `bank_bu_recon_*` 完全独立
+- **IPC**：新增 15 个 `bizOpRecon:*` handler；`window.desktopApi.bizOpRecon.*` 暴露
+- **smoke**：新增 8 用例 A-H + helper/validator 单测，资金红线全覆盖
+- **preview**：新增 4 张截图（initial / importing / result / export-dialog）
+
+### 不影响
+
+- v2.1.2 「月度银行对账单BU回填校验」模块 + 其余 4 个老模块完全保留原状
+- v1.5.x / v2.0.0 / v3.0.0 分支无影响
+
 ## 2.1.2 - 2026-05-13
 
 v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更**（账单类型→对账字段、对账字段→对账内容）+ **新增模块「月度银行对账单BU回填校验」**。OPEN ISSUE #10 资金红线（v0.5 → v0.8 重新拍板）：1:1 / 1:N / N:1 视为对账成功（精准标 BU 差异子对）；N:M（双侧 ≥2）视为数据异常 → 跳过 + 写入差异表 Sheet 3「异常」（**不中断运行**）。OPEN ISSUE #5 BU 比较（v0.9）：trim + toLowerCase + 空值归一（容忍 `Flowmore` vs `FlowMore` 大小写差异）。

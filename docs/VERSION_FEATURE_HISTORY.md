@@ -9,6 +9,36 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.3（2026-05-13）
+
+v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。每日 T-2/T-1 业务OP + T-1 流水对账单 → 「T-2 期末 + 当日流水 = 计算 T-1 OP」对账规则 → 逐行精准比对（epsilon=1e-2）+ 1:N 精准标差异 + 账户增减检测。OPEN ISSUE 18 项全部拍板（PRD §6.1）。
+
+### 新增
+
+- **新模块「业务OP数据核对」**：每日维度对账模块（第 5 个主模块）
+  - 主菜单第 5 个入口 + 模块面板 3 按钮（导入文件 / 开始运行 / 导出差异）+ BU 单选下拉框
+  - 「导入文件」→ 业务OP 日期对话框（年±1 / 月 1-12 / 日 1-31 三下拉不联动）→ 文件选择 → 校验通过 INSERT，失败弹错误报告对话框；第 1 日导入完成弹「续导确认」；多日后自动进入流水对账单导入流程
+  - 「开始运行」→ 对账日期对话框（仅"三件齐"日期 = T-1/T-2 业务OP + T-1 流水按 BU 过滤齐全）→ 4 步对账算法
+  - 「导出差异」→ 两 radio（单日 / 区间）→ 另存为对话框 → 写入用户指定路径
+  - 数据库：4 张表（`biz_op_recon_imports/_flow_imports/_runs/_diff_rows`），共主 DB；与 v2.1.2 完全独立
+  - **资金红线**：
+    - 业务OP 双重校验（#1 拍板 B + #5 整批拒绝）：`发生额 == 入 - 出` AND `期末 == 期初 + 发生额`，epsilon=1e-2；任一不过整批拒绝 + 失败报告 xlsx
+    - 流水出入方向枚举（#3 拍板）：仅「入」/「出」，入=+ 出=-；其他视为脏数据 → 整批拒绝
+    - 多 OP 行精准标差异（#6 拍板 A）：同账户号 N 条 T-1 行各自独立比（v0.3 fix2.4：差异表无颜色高亮）
+    - BU 比较语义（#7 拍板 C）：`normalizeBu = String(v).trim().toLowerCase()`，与 v2.1.2 一致
+    - 重新导入清空旧 runs + diff_rows（#15 拍板 A）：避免"旧 runId 套到新数据上"
+  - 差异表字段：业务OP 原 23 列 + 4 新增字段（比对T-2日 / 同账户号多个OP / 比对测算金额 / 测算金额差额）
+  - **fix1+fix2 UI 微调**（v0.3 — 2026-05-13 手动测试回归）：BU 下拉空白占位切换 + option label 去行计数 + 业务OP/流水日期 dialog 默认值 = 系统日期-1 + 校验失败状态栏文字（去 ErrorReportDialog）+ **差异表无黄底**（#10 拍板回滚为 E）+ BU 行 CSS 宽度对齐
+  - **fix4 资金红线 bug 修复**（v0.4 — 2026-05-13）：multi_op_account_count 在 onlyInT1 路径漏算（详见 PRD §3.5.4）；smoke 新增 Case I（I-1/I-2/I-3，15 assertion）防回归
+  - **fix5 PRD 拍板修订**（v0.5 — 2026-05-13）：多 OP 账户 N 行全进差异表（不论相等/不相等），原"相等行不进表"规则回滚；`compareT1OpWithComputed` 相等多 OP 分支 push diffRows，meta = 相等/空/是；进表条件扩展为 `比对T-2日 非空 OR 比对测算金额 == 不相等 OR 同账户号多个OP == 是`；smoke 新增 Case J 防回归。便于资金审计逐行追溯。
+  - **fix6 PRD #14 拍板回滚**（v0.6 — 2026-05-13）：区间导出由 N sheet 改单 sheet「差异」（所有日期合并）。按 data_date + 账户号排序；**不加新列**，依靠原表 Billdate 区分；`writeDateRangeDiffWorkbook` 重写 + 写 `console.warn` 日志告警 Billdate ≠ data_date（不弹 UI）；smoke 新增 Case K 防回归（sheet 数 > 1 / 表头列 > 27 / 排序失序均失败）。DB schema + session 层 + 单日 writer 均不变。
+- **IPC**：新增 15 个 `bizOpRecon:*` handler；preload 暴露 `window.desktopApi.bizOpRecon.*`
+- **smoke**：新增 8 用例（A 核心 / B 多 OP / C 账户号差 / D 流水累加 / E 整批拒绝 / F 区间导出 / G BU 隔离 / H 重新导入清空）+ helper/validator 单测，资金红线全覆盖
+
+### 不影响
+
+- v2.1.2 4 个老模块（月度银行对账单BU回填校验 + 对账单ReconID修复 + 银行对账单处理 + 月度 Pending 数据核对）+ 新开账户 + 网银账单生成 主模块**完全保留原状**
+
 ## 2.1.2（2026-05-13）
 
 v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更** + **新增模块「月度银行对账单BU回填校验」**。资金红线（OPEN ISSUE #10 v0.5 → v0.8 重新拍板）：1:1 / 1:N / N:1 视为对账成功；N:M 视为数据异常 → 跳过 + 写入差异表 Sheet 3「异常」（不中断运行）。BU 比较（OPEN ISSUE #5 v0.9）：trim + toLowerCase + 空值归一（容忍 `Flowmore` vs `FlowMore` 大小写差异）。
