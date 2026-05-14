@@ -750,6 +750,168 @@ async function runBizOpReconSmokeTests() {
   flowRepo.clearByDate(db, '2026-05-12');
   runRepo.clearRunsAndDiffsByDateBu(db, '2026-05-12', 'B2B');
 
+  // ========================================================================
+  // Case L：BU 大小写重新导入（v2.1.3-fix7-C1 回归，资金红线 ⚠️）
+  //
+  // 拍板：clearByDateBu 改用 LOWER(TRIM(bu_name)) 与其他 4 个查询函数对齐
+  //
+  // 场景：
+  //   1) 第 1 次直接 insertRows: bu_name='BU-A' 3 行（模拟首次 import）
+  //   2) 第 2 次跑 runBizOpImportAsync xlsx 业务方='bu-a'（大小写差） 4 行
+  //      → 落库前 clearByDateBu 应 DELETE 旧 'BU-A' 3 行 → INSERT 新 'bu-a' 4 行
+  //   3) 期望：getRowsByDateBu(date, 'bu-a') 返回 4 行（不是 3+4=7 行）
+  //
+  // 资金红线 ⚠️：原 bug clearByDateBu 用精确 = 比较 → 大小写不同的旧 BU 行 silently 残留 →
+  // 对账时 normalizeBu 一致 → 同一账户号被算两次（'BU-A' + 'bu-a'）→ 期末余额翻倍
+  // ========================================================================
+  importsRepo.insertRows(db, '2026-05-20', [
+    opRow(2, 'BU-A', 'L001', { begin:0, amount:100, amountIn:100, amountOut:0, end:100 }),
+    opRow(3, 'BU-A', 'L002', { begin:0, amount:200, amountIn:200, amountOut:0, end:200 }),
+    opRow(4, 'BU-A', 'L003', { begin:0, amount:300, amountIn:300, amountOut:0, end:300 })
+  ]);
+  // 验证首次 insert 已落 3 行
+  const beforeL = importsRepo.getRowsByDateBu(db, '2026-05-20', 'BU-A');
+  check('L 首次落库 3 行（基线）', beforeL.length === 3);
+
+  // 第 2 次：xlsx 业务方='bu-a'（小写）
+  const tmpXlsxL = path.join(tmpRoot, 'case-L.xlsx');
+  {
+    const XLSX = require('xlsx');
+    const { BIZ_OP_HEADERS } = require('../../src/backend/biz-op-recon-db/columns');
+    function rowArrL(bu, acc, begin, amt, amtIn, amtOut, end) {
+      const obj = {
+        'Billdate': '', '业务方': bu, '客户编号': '', '主体': '', '账户号': acc,
+        '账户类型': '', '币种': 'CNY', '期初余额': begin, '发生额': amt,
+        '发生额（入）': amtIn, '发生额（出）': amtOut, '期末余额': end,
+        '期末可用余额': '', '期末冻结余额': '', '最近更新时间': '', '通道': '',
+        'ppCardId': '', '银行卡号': '', '扩展信息': '', '账户状态': '',
+        'BizId': '', '清结算系统创建时间': '', '清结算系统更新时间': ''
+      };
+      return BIZ_OP_HEADERS.map(h => obj[h]);
+    }
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      BIZ_OP_HEADERS,
+      rowArrL('bu-a', 'L101', 0, 10, 10, 0, 10),
+      rowArrL('bu-a', 'L102', 0, 20, 20, 0, 20),
+      rowArrL('bu-a', 'L103', 0, 30, 30, 0, 30),
+      rowArrL('bu-a', 'L104', 0, 40, 40, 0, 40)
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, 'sheet');
+    XLSX.writeFile(wb, tmpXlsxL);
+  }
+  const resL = await session.runBizOpImportAsync(db, {
+    date: '2026-05-20',
+    filePath: tmpXlsxL,
+    readBizOpFile,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(tmpRoot, 'error-reports')
+  });
+  check('L 第 2 次 import success', resL.status === 'success');
+
+  // 关键 assertion：getRowsByDateBu('bu-a') 返回 4 行（旧 'BU-A' 3 行已清）
+  const afterL_lower = importsRepo.getRowsByDateBu(db, '2026-05-20', 'bu-a');
+  check('L 第 2 次 import 后 getRowsByDateBu(bu-a) = 4 行（旧 BU-A 已清）',
+    afterL_lower.length === 4,
+    `资金红线 ⚠️ fix7-C1：clearByDateBu 大小写不一致漏清 → 实际 ${afterL_lower.length} 行`);
+  // 用大写查也应是 4 行（normalize 一致）
+  const afterL_upper = importsRepo.getRowsByDateBu(db, '2026-05-20', 'BU-A');
+  check('L 大写 BU-A 查询同样 4 行（normalize 等价）', afterL_upper.length === 4);
+
+  importsRepo.clearByDateBu(db, '2026-05-20', 'BU-A');
+  runRepo.clearRunsAndDiffsByDateBu(db, '2026-05-20', 'BU-A');
+
+  // ========================================================================
+  // Case M：T-2 end_balance NaN silent drop（v2.1.3-fix7-I3 回归，资金红线 ⚠️）
+  //
+  // 拍板：保守方案 — console.warn + summary.t2AnomalyAccountCount，不动 diff_rows schema
+  //
+  // 场景：T-2 (2026-05-25) M001 期末='abc'（NaN，绕过 import 校验直接 insertRows）+ M002 期末=500
+  //       T-1 (2026-05-26) M001 期末=100 + M002 期末=500
+  //       流水 (2026-05-26) 空
+  //       → M001 因 T-2 NaN silent drop（既不进 amount diff 也不进账户号差集，因为 T-2 set 含它）
+  //         M002 期末相等 → 无差异
+  //       → summary.t2AnomalyAccountCount === 1 (M001) + console.warn 至少 1 次
+  // ========================================================================
+  // spy console.warn
+  const origWarn = console.warn;
+  const warnLogs = [];
+  console.warn = (...args) => { warnLogs.push(args.join(' ')); };
+  try {
+    importsRepo.insertRows(db, '2026-05-25', [
+      opRow(2, 'BU-M', 'M001', { begin:0, amount:0, amountIn:0, amountOut:0, end:0 }),  // 占位
+      opRow(3, 'BU-M', 'M002', { begin:0, amount:500, amountIn:500, amountOut:0, end:500 })
+    ]);
+    // 直接改 M001 那一行的 end_balance 为 'abc' 模拟 NaN（绕过 validator）
+    db.prepare(`UPDATE biz_op_recon_imports SET end_balance = 'abc' WHERE data_date = ? AND account_no = ?`)
+      .run('2026-05-25', 'M001');
+    importsRepo.insertRows(db, '2026-05-26', [
+      opRow(2, 'BU-M', 'M001', { begin:0, amount:100, amountIn:100, amountOut:0, end:100 }),
+      opRow(3, 'BU-M', 'M002', { begin:0, amount:0, amountIn:0, amountOut:0, end:500 })
+    ]);
+    flowRepo.insertRows(db, '2026-05-26', []);
+
+    const resM = session.runReconciliation(db, { date:'2026-05-26', buName:'BU-M' });
+    check('M summary.t2AnomalyAccountCount=1 (M001)', resM.stats.t2AnomalyAccountCount === 1,
+      `资金红线 ⚠️ fix7-I3：T-2 NaN 账户号未计入 anomaly summary，实际 ${resM.stats.t2AnomalyAccountCount}`);
+    const m001Warned = warnLogs.some(l => l.includes('M001') && l.includes('NaN silent drop'));
+    check('M console.warn 含 M001 NaN silent drop 提示', m001Warned,
+      `资金红线 ⚠️ fix7-I3：警告未输出，警告日志：${JSON.stringify(warnLogs)}`);
+    // v2.1.3 round 1（spec §4.3）：DB 持久化验证 — t2_anomaly_account_count 列写入正确
+    const dbRowM = db.prepare('SELECT t2_anomaly_account_count FROM biz_op_recon_runs WHERE id = ?').get(resM.runId);
+    check('M DB 持久化 t2_anomaly_account_count = 1',
+      dbRowM && dbRowM.t2_anomaly_account_count === 1,
+      `spec §4.3：runs 表未持久化 anomaly count，实际行=${JSON.stringify(dbRowM)}`);
+  } finally {
+    console.warn = origWarn;
+  }
+
+  importsRepo.clearByDateBu(db, '2026-05-25', 'BU-M');
+  importsRepo.clearByDateBu(db, '2026-05-26', 'BU-M');
+  flowRepo.clearByDate(db, '2026-05-26');
+  runRepo.clearRunsAndDiffsByDateBu(db, '2026-05-26', 'BU-M');
+
+  // ========================================================================
+  // Case N：Billdate ≠ data_date console.warn（M5 spec § 6.2 已声明的调试线索）
+  //
+  // 场景：构造 1 行 OP T-1 = 2026-05-13 但 sourceRow.bill_date_raw='2026-05-12'
+  //       且产生差异 → 进入区间导出 collected
+  //       → console.warn 拦截至少 1 次
+  // ========================================================================
+  const origWarn2 = console.warn;
+  const warnLogs2 = [];
+  console.warn = (...args) => { warnLogs2.push(args.join(' ')); };
+  try {
+    // T-2 期末 1000；T-1 期末 1100（产差）；Billdate 字段故意写成前一日
+    importsRepo.insertRows(db, '2026-06-09', [
+      opRow(2, 'BU-N', 'N001', { begin:900, amount:100, amountIn:100, amountOut:0, end:1000, billDate:'2026-06-09' })
+    ]);
+    importsRepo.insertRows(db, '2026-06-10', [
+      opRow(2, 'BU-N', 'N001', { begin:1000, amount:100, amountIn:100, amountOut:0, end:1100, billDate:'2026-06-08' })  // 故意 ≠ data_date
+    ]);
+    flowRepo.insertRows(db, '2026-06-10', []);
+    session.runReconciliation(db, { date:'2026-06-10', buName:'BU-N' });
+
+    const nOutPath = path.join(tmpRoot, 'case-N-range.xlsx');
+    await writer.writeDateRangeDiffWorkbook({
+      db,
+      buName: 'BU-N',
+      startDate: '2026-06-10',
+      endDate: '2026-06-10',
+      savePath: nOutPath
+    });
+    const billdateWarned = warnLogs2.some(l => l.includes('Billdate') && l.includes('不一致'));
+    check('N console.warn 含 Billdate vs data_date 不一致提示', billdateWarned,
+      `M5 spec § 6.2：Billdate 不一致 console.warn 未触发，警告日志：${JSON.stringify(warnLogs2)}`);
+  } finally {
+    console.warn = origWarn2;
+  }
+
+  importsRepo.clearByDateBu(db, '2026-06-09', 'BU-N');
+  importsRepo.clearByDateBu(db, '2026-06-10', 'BU-N');
+  flowRepo.clearByDate(db, '2026-06-10');
+  runRepo.clearRunsAndDiffsByDateBu(db, '2026-06-10', 'BU-N');
+
   // 清理
   if (db && typeof db.close === 'function') db.close();
   fs.unlinkSync(tmpDb);

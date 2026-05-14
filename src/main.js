@@ -21,12 +21,12 @@ const {
 } = require('./main-process/bank-bu-recon-writer');
 const { readPendingGuanliFile, readBankFile } = require('./backend/bank-bu-recon-import/reader');
 // v2.1.3：业务OP数据核对模块
+// v2.1.3-fix7-M1：删 makeSingleDateDiffFileName / makeDateRangeDiffFileName 死 import
+// （文件名生成在 ipc handler 内部直接 require session 调用，main.js 顶层无引用）
 const {
   createBizOpReconSession,
   runBizOpImportAsync: runBizOpImport,
-  runFlowImportAsync: runFlowImport,
-  makeSingleDateDiffFileName: makeBizOpSingleDateDiffFileName,
-  makeDateRangeDiffFileName: makeBizOpDateRangeDiffFileName
+  runFlowImportAsync: runFlowImport
 } = require('./main-process/biz-op-recon-session');
 const {
   writeSingleDateDiffWorkbook: writeBizOpSingleDateDiffWorkbook,

@@ -7,12 +7,12 @@
 
 const {
   BIZ_OP_HEADERS,
-  FLOW_HEADERS
+  FLOW_HEADERS,
+  AMOUNT_EPSILON
 } = require('../biz-op-recon-db/columns');
 
 // 资金红线 ⚠️ ：epsilon = 1e-2（1 分钱）固化在双重校验
-// #1 拍板 B + #6 拍板 A 共用同一精度门槛
-const AMOUNT_EPSILON = 1e-2;
+// #1 拍板 B + #6 拍板 A 共用同一精度门槛；v2.1.3-fix7-M2 单一真理来源在 columns.js
 
 // 出入方向枚举（#3 拍板）：仅允许中文「入」/「出」
 const VALID_DIRECTION_IN = '入';

@@ -29,6 +29,8 @@ function insertRun(db, payload) {
     flowTotal = 0,
     amountDiffCount = 0,
     multiOpAccountCount = 0,
+    // v2.1.3 round 1（spec §4.3）：T-2 期末 NaN silent drop 账户号数量（资金红线 ⚠️ fix7-I3 持久化）
+    t2AnomalyAccountCount = 0,
     t1NotT2Count = 0,
     t2NotT1Count = 0
   } = stats;
@@ -37,9 +39,9 @@ function insertRun(db, payload) {
     INSERT INTO ${RUNS_TABLE}
       (data_date, bu_name, status,
        t1_op_total, t2_op_total, flow_total,
-       amount_diff_count, multi_op_account_count,
+       amount_diff_count, multi_op_account_count, t2_anomaly_account_count,
        t1_not_t2_count, t2_not_t1_count, export_path)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     date,
@@ -50,6 +52,7 @@ function insertRun(db, payload) {
     flowTotal,
     amountDiffCount,
     multiOpAccountCount,
+    t2AnomalyAccountCount,
     t1NotT2Count,
     t2NotT1Count,
     null

@@ -26,7 +26,14 @@ const INSERT_SQL = buildInsertSql();
 
 function clearByDateBu(db, date, buName) {
   // 仅清 imports；runs/diff_rows 联动清空由 run-repository.clearRunsAndDiffsByDateBu 调用（#15 拍板 A）
-  const stmt = db.prepare(`DELETE FROM ${TABLE} WHERE data_date = ? AND bu_name = ?`);
+  // 资金红线 ⚠️ v2.1.3-fix7-C1：BU 比较与 getRowsByDateBu / countDistinctDatesByBu / getLatestDateByBu
+  // 对齐用 LOWER(TRIM(bu_name))；否则首次落库 'BU-A' 后再用 ' bu-a ' 重新导入 → DELETE 命中 0 行 →
+  // INSERT 追加 → DB 同 (date) 出现两份 BU 数据 → 对账串入串出，资金红线穿透
+  const stmt = db.prepare(`
+    DELETE FROM ${TABLE}
+    WHERE data_date = ?
+      AND LOWER(TRIM(bu_name)) = LOWER(TRIM(?))
+  `);
   return stmt.run(date, buName).changes || 0;
 }
 

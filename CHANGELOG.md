@@ -48,6 +48,20 @@ v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。
 - v2.1.2 「月度银行对账单BU回填校验」模块 + 其余 4 个老模块完全保留原状
 - v1.5.x / v2.0.0 / v3.0.0 分支无影响
 
+### round 1 self-review 修订（v0.7 — 2026-05-14，PR #45 提 PR 后 reviewer agent 反馈）
+
+- **1 critical**：C1 `clearByDateBu` BU 比较 SQL 改 `LOWER(TRIM(bu_name)) = LOWER(TRIM(?))`（与 `getRowsByDateBu` 完全对齐；**资金红线**：避免大小写差异时清不掉旧数据导致脏数据混存）
+- **3 important**：
+  - I1：13 个 v2.1.3 新符号升格 `rules/important-variables.md`（Critical 2 + Important-skeleton 4 + Risk-sensitive 7）；元数据 v1 → v2
+  - I2：`runBizOpImportAsync` 落库前归一化 BU 名（`String(rawBuName).trim()`，保留大小写）— 避免源文件首尾空格导致 BU 下拉枚举重复
+  - I3：`computeT1Op` T-2 NaN end_balance 加 `console.warn(...)` + summary 新增 `t2AnomalyAccountCount` 字段 + DB schema `biz_op_recon_runs.t2_anomaly_account_count`（migration 幂等）；详见 PRD §3.5.5
+- **5 minor**：M1-M5（M2 `AMOUNT_EPSILON` 提取到 columns.js / M3 spec §7.6 dialog 描述 5→4 同步 / M4 区间 writer 排序 key 改 normalizeAccountKey 跨文件一致 / M1+M5 详见 spec §十五）
+- **3 新 smoke**（资金红线 + UX 防回归）：
+  - Case L：T-2 NaN end_balance + summary.t2AnomalyAccountCount 防回归（含 console.warn spy 校验）
+  - Case M：clearByDateBu 大小写归一防回归（构造 "BU-A" 与 " BU-A " 两次导入，验证旧数据被清）
+  - Case N：BU 名落库前 trim 归一防回归（验证 DISTINCT bu_name 仅 1 行）
+- **known issue（不在 round 1 修，留 PRD §6.5 KI-1）**：v2.1.2 月度BU 模块同位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议下一 round 或 v2.1.4 补齐 UX 对齐
+
 ## 2.1.2 - 2026-05-13
 
 v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更**（账单类型→对账字段、对账字段→对账内容）+ **新增模块「月度银行对账单BU回填校验」**。OPEN ISSUE #10 资金红线（v0.5 → v0.8 重新拍板）：1:1 / 1:N / N:1 视为对账成功（精准标 BU 差异子对）；N:M（双侧 ≥2）视为数据异常 → 跳过 + 写入差异表 Sheet 3「异常」（**不中断运行**）。OPEN ISSUE #5 BU 比较（v0.9）：trim + toLowerCase + 空值归一（容忍 `Flowmore` vs `FlowMore` 大小写差异）。

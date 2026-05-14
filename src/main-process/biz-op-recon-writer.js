@@ -30,6 +30,9 @@ const {
   DIFF_HEADER_TAIL,
   ERROR_HEADER_TAIL
 } = require('../backend/biz-op-recon-db/columns');
+// 资金红线 ⚠️ v2.1.3-fix7-M4：区间排序用 normalizeAccountKey 与对账算法 key 一致
+// 防 ' A001' / 'A001' 在排序时分组到不同位置，与 spec §6.2 行序"按账户号升序"语义偏差
+const { normalizeAccountKey } = require('../main-process/biz-op-recon-session');
 
 const YELLOW_FILL = {
   type: 'pattern',
@@ -95,10 +98,11 @@ async function writeDateRangeDiffWorkbook({ db, buName, startDate, endDate, save
   }
 
   // 2) 排序：data_date 升序 → account_no 升序
+  // 资金红线 ⚠️ fix7-M4：用 normalizeAccountKey 与对账算法 key 一致（trim only，大小写保留）
   collected.sort((a, b) => {
     if (a.dataDate !== b.dataDate) return a.dataDate < b.dataDate ? -1 : 1;
-    const ak = String(a.sourceRow.account_no || '');
-    const bk = String(b.sourceRow.account_no || '');
+    const ak = normalizeAccountKey(a.sourceRow.account_no);
+    const bk = normalizeAccountKey(b.sourceRow.account_no);
     if (ak < bk) return -1;
     if (ak > bk) return 1;
     return 0;

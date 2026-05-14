@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.6（2026-05-13 fix6：writeDateRangeDiffWorkbook 由 N sheet 改单 sheet「差异」+ data_date+account_key 排序 + Billdate/data_date 一致性 console.warn + smoke Case K；v0.5 = fix5 PRD 拍板修订：compareT1OpWithComputed 相等多 OP 行也 push diffRows + smoke Case J；v0.4 = fix4 资金红线 bug 修复：runReconciliation 5.a onlyInT1 路径补累加 multi_op_account_count + Case I 防回归；v0.3 = fix1+fix2 手动测试回归；v0.2 = OPEN ISSUE 全部拍板；v0.1 = 起草） |
+| 文档版本 | v0.7（2026-05-14 round 1 self-review 修订：1 critical（C1 clearByDateBu LOWER+TRIM）+ 3 important（I1 13 符号升格 / I2 BU 名 trim 归一 / I3 computeT1Op T-2 NaN console.warn + summary.t2AnomalyAccountCount + DB schema 增 t2_anomaly_account_count）+ 5 minor + 3 新 smoke（Case L/M/N）+ §7.6 dialog 5→4 + §六 writer 排序 key 改 normalizeAccountKey + §七 IPC schema 同步；v0.6 = 2026-05-13 fix6：writeDateRangeDiffWorkbook 由 N sheet 改单 sheet「差异」+ data_date+account_key 排序 + Billdate/data_date 一致性 console.warn + smoke Case K；v0.5 = fix5 PRD 拍板修订：compareT1OpWithComputed 相等多 OP 行也 push diffRows + smoke Case J；v0.4 = fix4 资金红线 bug 修复：runReconciliation 5.a onlyInT1 路径补累加 multi_op_account_count + Case I 防回归；v0.3 = fix1+fix2 手动测试回归；v0.2 = OPEN ISSUE 全部拍板；v0.1 = 起草） |
 | 关联 PRD | `PRD-v2.1.3.md` |
 | 关联 tasks | `tasks.md` |
 | 工作分支 | `v2.1.3`（基于 main `fc5d766`） |
@@ -122,7 +122,7 @@ function validateBizOpHeaders(actualHeaders) {
 | `bizOpRecon:import:check-single-day` | `{buName}` | `{onlyOneDay: boolean, count, latestDate?}` | "库里仅有一日数据"判定（#11 拍板 B 触发前的查询） |
 | `bizOpRecon:run:list-ready-dates` | `{buName}` | `[{date: 'YYYY-MM-DD'}]` | 列出"三件齐"日期（T-1 业务OP + T-2 业务OP + T-1 流水按 normalizeBu 过滤均非空）；用于 #12 前置 enable |
 | `bizOpRecon:run:pick-date` | `{buName, readyDates}` | `{date} \| null` | 弹"选择需要对账的日期"对话框（下拉只列 readyDates；空时 `完成` 按钮 disabled） |
-| `bizOpRecon:run` | `{date, buName}` | `{runId, status: 'success', stats: {amountDiffCount, t1NotT2Count, t2NotT1Count, multiOpAccountCount, t1OpTotal, t2OpTotal, flowTotal}}` | 后台跑对账（§五 算法），落 `biz_op_recon_runs` + `biz_op_recon_diff_rows` |
+| `bizOpRecon:run` | `{date, buName}` | `{runId, status: 'success', stats: {amountDiffCount, t1NotT2Count, t2NotT1Count, multiOpAccountCount, t1OpTotal, t2OpTotal, flowTotal, t2AnomalyAccountCount}}` | 后台跑对账（§五 算法），落 `biz_op_recon_runs` + `biz_op_recon_diff_rows`。**round 1 I3 新增 `t2AnomalyAccountCount`** = T-2 业务OP 期末余额非数值（NaN）的账户号去重计数；DB schema 字段 `biz_op_recon_runs.t2_anomaly_account_count`；详见 PRD §3.5.5 |
 | `bizOpRecon:export:list-success-dates` | `{buName}` | `[{date: 'YYYY-MM-DD', runId, runAt}]` | 列出有 success run 的日期（按 buName 过滤；#13 拍板 A 风格）；用于"导出指定日期"下拉 + 区间起止 |
 | `bizOpRecon:export:pick-save-path` | `{defaultFileName}` | `{savePath} \| null` | 弹另存为对话框（默认文件名 #9 拍板 A 格式） |
 | `bizOpRecon:export:date` | `{runId, savePath}` | `{status: 'success', filePath}` | 导出指定日期差异表（1 sheet，sheet 名 `YYYY-MM-DD` ISO，#14 拍板 A） |
@@ -259,6 +259,7 @@ CREATE TABLE IF NOT EXISTS biz_op_recon_runs (
   multi_op_account_count INTEGER NOT NULL DEFAULT 0,  -- "同账户号多个OP=是" 的账户号数量
   t1_not_t2_count INTEGER NOT NULL DEFAULT 0,
   t2_not_t1_count INTEGER NOT NULL DEFAULT 0,
+  t2_anomaly_account_count INTEGER NOT NULL DEFAULT 0,  -- round 1 I3 新增：T-2 NaN end_balance 账户号去重计数
 
   export_path TEXT                      -- 最近一次导出路径（debug）
 );
@@ -324,12 +325,14 @@ const YELLOW_FILL_ARGB = 'FFFFFF00';    // 仅用于 §6.3 失败报告 writer�
 | `parseAmount(v)` | `v: unknown` | `number \| NaN` | 字符串数值解析（去除千分位 `,`） | `src/main-process/biz-op-recon-session.js` |
 | `subOneDay(yyyymmdd)` | `'YYYY-MM-DD'` | `'YYYY-MM-DD'` | T-1 减一日 → T-2，字符串处理避免时区 | `src/main-process/biz-op-recon-session.js` |
 | `aggregateFlowByAccount(flowRows, buName)` | `flowRows: Array, buName: string` | `Map<string, number>` | 按 normalizeBu 过滤 + 按账户号 sum signedAmount（#3+#7 联动）| `src/main-process/biz-op-recon-session.js` |
-| `computeT1Op(t2OpRows, flowAggMap)` | `t2OpRows: Array, flowAggMap: Map<string, number>` | `Map<string, number>` | T-2 期末 + 流水累加 = 计算 T-1 期末 | `src/main-process/biz-op-recon-session.js` |
+| `computeT1Op(t2OpRows, flowAggMap, t2AnomalySeen?)` | `t2OpRows: Array, flowAggMap: Map<string, number>, t2AnomalySeen?: Set<string>` | `Map<string, number>` | T-2 期末 + 流水累加 = 计算 T-1 期末。**round 1 I3 修订**：T-2 `parseAmount(r.end_balance) === NaN` 时 `console.warn(...)` 输出 `[biz-op-recon] T-2 NaN end_balance: 账户={accKey} BU={buName} 原值="{raw}"` + 把 accKey 加入 `t2AnomalySeen` Set（去重）；该账户号跳过 `computedT1Map.set`（与原行为一致），后续会走"T-1 有 T-2 无"分支。`t2AnomalySeen` 由 `runReconciliation` 注入 + summary.t2AnomalyAccountCount 取 size。 | `src/main-process/biz-op-recon-session.js` |
 | `compareT1OpWithComputed(t1OpRows, computedT1Map)` | `t1OpRows: Array, computedT1Map: Map<string, number>` | `{ diffRows: Array, stats: {amountDiffCount, multiOpAccountCount} }` | #6 拍板 A：1:N 逐行独立比，epsilon=1e-2。**v0.5 fix5 选项 B**：相等的多 OP 行（即 `t1Rows.length >= 2` 且 `diff <= epsilon`）也需 push 到 diffRows，meta 列填 `相等/空/是`；与不相等行的区别仅在 meta 取值。单 OP 相等行仍不进表。`amountDiffCount` 仍只累计"不相等"行（相等多 OP 行不计入差异计数）。 | `src/main-process/biz-op-recon-session.js` |
 | `diffT1AndT2Accounts(t1OpRows, t2OpRows)` | `t1OpRows: Array, t2OpRows: Array` | `{ onlyInT1: Array, onlyInT2: Array }` | 步骤 4.3 账户号差集 | `src/main-process/biz-op-recon-session.js` |
-| `runBizOpReconciliation({date, buName})` | 见 §5.1 | `{runId, stats}` | 编排上述函数 + 落库 | `src/main-process/biz-op-recon-session.js` |
+| `runBizOpReconciliation({date, buName})` | 见 §5.1 | `{runId, stats: {amountDiffCount, multiOpAccountCount, t1NotT2Count, t2NotT1Count, t1OpTotal, t2OpTotal, flowTotal, t2AnomalyAccountCount}}` | 编排上述函数 + 落库；**round 1 I3**：summary 新增 `t2AnomalyAccountCount` 字段（注入 `t2AnomalySeen: Set<string>` 给 `computeT1Op` → 取 size 写 stats） | `src/main-process/biz-op-recon-session.js` |
 
 > **multi_op_account_count 累加点**（fix4 修复）：除主路径外，`runReconciliation` 5.a (onlyInT1 路径) 也需累加；使用 `multiOpAccountSeen: Set<accountKey>` 防重复；判定标准 = `countAccountRows(t1OpRows, accKey) >= 2`。详见 PRD §3.5.4。
+
+> **t2AnomalyAccountCount 累加点**（round 1 I3 修复）：`runReconciliation` 1 步取数后构造 `t2AnomalySeen: Set<string>` → 注入 `computeT1Op(t2OpRows, flowSumByAccount, t2AnomalySeen)` → 计算结束后 `stats.t2AnomalyAccountCount = t2AnomalySeen.size`。详见 PRD §3.5.5。
 
 ### 5.1 总体流程
 
@@ -358,7 +361,9 @@ async function runBizOpReconciliation({ date, buName }) {
   // }
 
   // 3. 步骤 4.2.a：基于 T-2 OP + 流水累加 计算 T-1 期末余额（按账户号汇总单值）
-  const calcT1ByAccount = computeT1Op(t2OpRows, flowSumByAccount);
+  // round 1 I3：注入 t2AnomalySeen 收集 NaN end_balance 账户号
+  const t2AnomalySeen = new Set();
+  const calcT1ByAccount = computeT1Op(t2OpRows, flowSumByAccount, t2AnomalySeen, buName);
   // 内部实现：
   // const map = new Map();
   // for (const r of t2OpRows) {
@@ -397,12 +402,13 @@ async function runBizOpReconciliation({ date, buName }) {
       amountDiffCount: stats.amountDiffCount,
       multiOpAccountCount: stats.multiOpAccountCount,
       t1NotT2Count: onlyInT1.length,
-      t2NotT1Count: onlyInT2.length
+      t2NotT1Count: onlyInT2.length,
+      t2AnomalyAccountCount: t2AnomalySeen.size                  // round 1 I3 新增
     }
   });
   repo.insertDiffRows(db, runId, date, buName, diffRows);
 
-  return { runId, stats: { ...stats, t1NotT2Count: onlyInT1.length, t2NotT1Count: onlyInT2.length, t1OpTotal: t1OpRows.length, t2OpTotal: t2OpRows.length, flowTotal: flowRows.length } };
+  return { runId, stats: { ...stats, t1NotT2Count: onlyInT1.length, t2NotT1Count: onlyInT2.length, t1OpTotal: t1OpRows.length, t2OpTotal: t2OpRows.length, flowTotal: flowRows.length, t2AnomalyAccountCount: t2AnomalySeen.size } };
 }
 ```
 
@@ -461,13 +467,23 @@ function aggregateFlowByAccount(flowRows, buName) {
 }
 
 // T-2 期末 + 流水累加 = 计算 T-1 期末
-function computeT1Op(t2OpRows, flowAggMap) {
+// round 1 I3 修订：第 3 个可选参数 t2AnomalySeen: Set<accountKey> 收集 NaN 异常账户号
+function computeT1Op(t2OpRows, flowAggMap, t2AnomalySeen, buName) {
   const map = new Map();
   for (const r of t2OpRows) {
     const accKey = normalizeAccountKey(r.account_no);
     if (!accKey) continue;
     const t2EndBal = parseAmount(r.end_balance);
-    if (Number.isNaN(t2EndBal)) continue;
+    if (Number.isNaN(t2EndBal)) {
+      // round 1 I3：T-2 NaN end_balance 记录到 anomaly Set + console.warn 辅助 debug
+      if (t2AnomalySeen) t2AnomalySeen.add(accKey);
+      console.warn(
+        `[biz-op-recon] T-2 NaN end_balance: ` +
+        `账户=${accKey} BU=${buName || '<unknown>'} 原值="${r.end_balance}" ` +
+        `(该账户号将走 "T-1 有 T-2 无" 分支，请用户核查 T-2 源文件期末余额列)`
+      );
+      continue;
+    }
     const flowSum = flowAggMap.get(accKey) || 0;
     map.set(accKey, t2EndBal + flowSum);
   }
@@ -765,6 +781,8 @@ async function writeDateRangeDiffWorkbook({ buName, startDate, endDate, savePath
   }
 
   // v0.6 fix6：排序 — data_date 升序 + 同日内 source_account_key 升序
+  // round 1 M4 修订：accountKey 必须用 normalizeAccountKey(sourceRow.account_no)（仅 trim）
+  // 与 session.js / repository 跨文件保持一致；不能直接用原值（可能含首尾空白导致排序错乱）
   allRows.sort((a, b) => {
     if (a.dataDate !== b.dataDate) return a.dataDate < b.dataDate ? -1 : 1;
     if (a.accountKey !== b.accountKey) return a.accountKey < b.accountKey ? -1 : 1;
@@ -968,17 +986,20 @@ async function refreshBizOpReconButtons() {
 
 **fix2.1 CSS 视觉约束**（实施细节）：BU 行容器（`bizOpReconBuRow`）的左右边界与"导出差异"按钮（`bizOpReconExportBtn`）左右边界完全对齐；建议通过 `.biz-op-recon-bu-row { width: 100%; box-sizing: border-box; }` + 按钮同级容器统一宽度实现，Dev 在 PR 中 self-review 截图核对。
 
-### 7.6 新增 dialog factory（`renderer-dialogs.js`，**5 个**；v0.3 fix1.5 + fix2 删除 ErrorReportDialog）
+### 7.6 新增 dialog factory（`renderer-dialogs.js`，**4 个**[^dialog-count]；v0.3 fix1.5 + fix2 删除 ErrorReportDialog 后实际剩 4 个；round 1 M3 修订：spec 描述从 5 同步为 4）
 
 | factory 名 | 用途 | 参照 / 配置 |
 |---|---|---|
 | `createBizOpReconDatePickerDialog({title, defaultDate, onConfirm, onCancel})` | "选择业务OP所属日期" / "选择流水对账单所属日期" 通用日期选择 | 参照 v2.1.2 `createBankBuReconMonthPickerDialog` + 扩展第 3 个下拉"日"。**#8 拍板 A**：年下拉 = `[currentYear-1, currentYear, currentYear+1]`（如 2025/2026/2027）；月下拉 = 1-12；日下拉 = 1-31（**三个下拉不联动**，错选日期由后端 `import:run-biz-op` 拒绝并状态栏报错）。**默认值 defaultDate** = 系统日期 - 1（fix1.4 / fix2.5 拍板；调用方在拉起业务OP / 流水对账单日期对话框时统一传入 `subOneDay(today)` 作为 defaultDate） |
-| `createBizOpReconFileImportPromptDialog({title, detail, onConfirm, onCancel})` | 提示用户即将弹文件选择对话框（如"接下来选择 业务OP xlsx 文件"） | 复用 v2.1.2 `createBankBuReconFileImportPromptDialog` 同结构 |
 | `createBizOpReconReconcileDialog({readyDates, defaultDate, onConfirm, onCancel})` | "开始运行" — 选对账日期 | 参照 v2.1.2 `createBankBuReconReconcileDialog`。**#12 拍板 A**：日期下拉 option 仅来自 `readyDates`（IPC `bizOpRecon:run:list-ready-dates` 返回）；`readyDates.length === 0` 时 `完成` 按钮 disabled。**fix2.5 明确不改**：本对话框保持 ready 日期列表展示，**不**做"默认 T-1"处理 |
 | `createBizOpReconExportDialog({successDates, onConfirm, onCancel})` | "导出差异" — 两 radio + 单日 / 区间联动 | 参照 v2.1.2 `createBankBuReconExportDialog`。**#9 拍板 A** 文件名格式 / **#13 拍板 A** `successDates` 来自 `bizOpRecon:export:list-success-dates`；radio 切换时控制单日下拉 vs 区间下拉的 disabled |
 | `createBizOpReconSecondImportPromptDialog({firstDate, onConfirm, onCancel})` | **#11 拍板 B**：第 1 日业务 OP 导入完成后弹「已导入第 1 日数据（{firstDate}），是否立即导入第 2 日？」。点 `是` → 再走一轮 `bizOpRecon:import:pick-biz-op-date` + `pick-biz-op-file` + `run-biz-op`；点 `否` → 状态栏提示"待手动再次点击导入按钮" | 参照 v2.1.2 `createBankBuReconFileImportPromptDialog` 同结构 |
 
 > **v0.3 删除**：`createBizOpReconErrorReportDialog` factory（fix1.5 已无业务调用 → fix2 一并删除）。校验失败提示由"独立报错对话框"改为**状态栏文字 + 失败报告路径**；用户可在 OS 内 cmd+点击路径打开（IPC `bizOpRecon:import:open-error-report-folder` 仍保留供后续可能场景调用，但当前主流程不再触发）。
+>
+> **round 1 M3 修订（2026-05-14）**：原 spec §7.6 文字描述了 5 个 factory（含 `createBizOpReconFileImportPromptDialog`），但实际代码 fix1.5/fix2 删除 ErrorReportDialog 后实际仅剩 4 个；本次同步把 `createBizOpReconFileImportPromptDialog` 一并从 spec 表格中移除（renderer-dialogs.js 中也无该 factory 实现）。表格仅保留代码实际存在的 4 个。
+
+[^dialog-count]: round 1 M3 修订前 spec 描述为 5 个，实际代码仅 4 个（fix1.5+fix2 已删 ErrorReportDialog）。round 1 把 spec 描述同步为 4 个。**known issue（KI-1，详见 PRD §6.5）**：v2.1.2 月度BU 模块同位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议下一 round 或 v2.1.4 补齐 UX 对齐，但**不在 round 1 修**。
 
 ---
 
@@ -1116,6 +1137,52 @@ async function refreshBizOpReconButtons() {
   - 若排序丢失 → 相邻 data_date 递减 → 断言失败
 - **附加场景**（可选）：构造一行 `Billdate ≠ data_date` 的源行 → 断言 `console.warn` 至少被调用一次（用 spy 拦截 console.warn）
 
+### 9.11 用例 L：T-2 NaN end_balance + summary.t2AnomalyAccountCount 防回归（round 1 I3 修订）
+
+- **背景**：v0.6 之前 `computeT1Op` 对 T-2 期末余额 NaN 行静默 continue，summary 无任何信号；用户无法感知 T-2 数据是否干净。round 1 I3 修订引入 `t2AnomalySeen: Set` + console.warn + summary.t2AnomalyAccountCount 字段（详见 PRD §3.5.5）。
+- **构造**：
+  - T-2 (2026-05-11) 业务OP（BU=BU-A）：账户 `A1` × 1 行（end_balance=`100`）+ 账户 `A2` × 1 行（end_balance=`#N/A`）+ 账户 `A3` × 1 行（end_balance=`""`）+ 账户 `A4` × 1 行（end_balance=`abc`）
+  - T-1 (2026-05-12) 业务OP（BU=BU-A）：账户 A1/A2/A3/A4 各 1 行（end_balance=100）
+  - T-1 (2026-05-12) 流水：A1-A4 各 1 行（净发生额=0）
+- **期望**：
+  - `summary.t2AnomalyAccountCount === 3`（A2/A3/A4 三个账户号 NaN，去重计数）
+  - `summary.amountDiffCount === 0`（A1 测算相等；A2/A3/A4 走 onlyInT1 不参与测算金额比较）
+  - `summary.t1NotT2Count === 3`（A2/A3/A4 因 T-2 NaN 不进 computedT1Map → T-1 有 T-2 无）
+  - 用 spy 拦截 `console.warn` → 至少被调用 3 次（A2/A3/A4 各一次），输出含 `[biz-op-recon] T-2 NaN end_balance: 账户=A2`等
+  - DB schema：`SELECT t2_anomaly_account_count FROM biz_op_recon_runs WHERE id=?` === 3
+- **反例（防回归）**：
+  - 若 `computeT1Op` 退化为静默 continue → `summary.t2AnomalyAccountCount === 0` → 断言失败
+  - 若 console.warn 缺失 → spy 调用次数 < 3 → 断言失败
+  - 若 DB schema 没有 `t2_anomaly_account_count` 字段 → SQL 报错 → 断言失败
+
+### 9.12 用例 M：clearByDateBu 大小写归一防回归（round 1 C1 修订）
+
+- **背景**：v0.6 之前 `clearByDateBu` 的 SQL WHERE 直接用 `bu_name = ?`，未对齐 `getRowsByDateBu` 的 `LOWER(TRIM(?))`。当业务OP 文件第一行业务方 = `"BU-A"`、第二次导入文件业务方 = `" BU-A "`（首尾空格）→ clearByDateBu 清不掉 `"BU-A"` 旧行 → 旧+新数据混存（资金红线 P0）。round 1 C1 修订统一改 `LOWER(TRIM(bu_name)) = LOWER(TRIM(?))`。
+- **构造**：
+  - 第 1 次导入 (BU=`BU-A`, date=2026-05-12) 5 行业务OP
+  - 跑对账 1 次 → diff_rows / runs 各 1 条
+  - 第 2 次导入 (BU=` bu-a `, date=2026-05-12) 8 行业务OP（注意大小写差异 + 首尾空格）
+- **期望**：
+  - 第 2 次导入完成后 `SELECT COUNT(*) FROM biz_op_recon_imports WHERE data_date='2026-05-12' AND LOWER(TRIM(bu_name))='bu-a'` === 8（仅新数据，旧 5 行已清）
+  - `SELECT COUNT(*) FROM biz_op_recon_runs WHERE data_date='2026-05-12' AND LOWER(TRIM(bu_name))='bu-a'` === 0（旧 run 已清）
+  - `SELECT COUNT(*) FROM biz_op_recon_diff_rows WHERE run_id=<旧 runId>` === 0
+- **反例（防回归）**：
+  - 若 `clearByDateBu` 退化为 `bu_name = ?` 字面比较 → 第 2 次导入后 imports 表存 5+8=13 行（旧脏数据未清）→ 断言失败
+  - **资金红线**：脏数据混入会让后续对账结果错乱
+
+### 9.13 用例 N：BU 名落库前 trim 归一防回归（round 1 I2 修订）
+
+- **背景**：v0.6 之前 `runBizOpImportAsync` 直接把源文件第一行 `业务方` 字段值落库为 `bu_name`，未做 trim。源文件首尾空格 → BU 下拉枚举出现 `"BU-A"` / `" BU-A "` 两条；用户视角下重复且选错。round 1 I2 修订：落库前 `bu_name = String(rawBuName).trim()`（**保留大小写**，与 `normalizeBu` toLowerCase 不同；账户号 normalize 也是仅 trim）。
+- **构造**：
+  - 第 1 次导入业务OP 文件，第一行业务方原值 = `"  BU-A  "`（前 2 空格 + 后 2 空格）
+  - 第 2 次导入业务OP 文件（不同日期 date=2026-05-13），第一行业务方原值 = `"BU-A"`（无空格）
+- **期望**：
+  - 两次导入后 `SELECT DISTINCT bu_name FROM biz_op_recon_imports` 仅 1 行 = `"BU-A"`（不会出现 `"  BU-A  "` 与 `"BU-A"` 两条）
+  - BU 下拉枚举 `[{buName: "BU-A", count: <total>}]`（合并计数）
+- **反例（防回归）**：
+  - 若 `runBizOpImportAsync` 退化为不 trim → DISTINCT bu_name 返回 2 行 → 断言失败
+  - 若误用 `normalizeBu`（toLowerCase） → bu_name 落库变 `"bu-a"` → UI 显示丢失原大小写 → 断言失败（业务期望保留原大小写）
+
 ---
 
 ## 十、preview 入口（新增 4 处）
@@ -1148,23 +1215,25 @@ async function refreshBizOpReconButtons() {
 
 新增的以下符号，spec 阶段评估是否升级进 `rules/important-variables.md`：
 
-| 符号 | 层级建议 | 理由 |
-|---|---|---|
-| `runBizOpReconciliation` (函数) | Risk-sensitive | 资金红线对账核心 |
-| `compareT1OpWithComputed` (函数) | Risk-sensitive | #6 拍板 A 1:N 精准标差异核心实现 |
-| `aggregateFlowByAccount` (函数) | Risk-sensitive | #3 + #7 联动，流水按账户号累加 |
-| `parseSignedAmount` (helper) | Risk-sensitive | 出入方向 → 正负号（#3 拍板），资金红线 |
-| `validateBizOpRow` (函数) | Risk-sensitive | 业务OP 双重校验（#1 拍板 B） |
-| `validateFlowRow` (函数) | Risk-sensitive | 流水出入方向枚举校验（#3 拍板） |
-| `normalizeBu` (helper) | Important-skeleton | BU 比较（#7 拍板 C，与 v2.1.2 `normalizeBu` 同名同义） |
-| `normalizeAccountKey` (helper) | Important-skeleton | 账户号匹配 anchor |
-| `AMOUNT_EPSILON` (常量) | Risk-sensitive | 1e-2 容差，资金红线门槛 |
-| `VALID_DIRECTION_IN` / `VALID_DIRECTION_OUT` (常量) | Risk-sensitive | 中文「入」/「出」枚举固化（#3 拍板） |
-| `biz_op_recon_runs.status` (字段) | Risk-sensitive | 'success'（系统错误不落 runs） |
-| `BIZ_OP_HEADERS` / `FLOW_HEADERS` (常量) | Important-skeleton | 模板表头校验 anchor |
-| `YELLOW_FILL` (常量) | Minor | 与 v2.1.2 复用 |
+| 符号 | 层级建议 | 理由 | round 1 升格状态 |
+|---|---|---|---|
+| `runBizOpReconciliation` / `runReconciliation` (函数) | **Critical** | 资金红线对账总入口；与 v1.5.x Pending 模块同名（命名冲突风险） | ✅ **已 round 1 升格 Critical**（详见 `rules/important-variables.md` § 1 Critical） |
+| `compareT1OpWithComputed` (函数) | **Critical** | #6 拍板 A 1:N 精准标差异核心实现；fix4/fix5 修正点 | ✅ **已 round 1 升格 Critical** |
+| `aggregateFlowByAccount` (函数) | Risk-sensitive | #3 + #7 联动，流水按账户号累加 | ✅ **已 round 1 升格 Risk-sensitive**（详见 § 4 Risk-sensitive） |
+| `parseSignedAmount` (helper) | Risk-sensitive | 出入方向 → 正负号（#3 拍板），资金红线 | ✅ **已 round 1 升格 Risk-sensitive** |
+| `validateBizOpRow` (函数) | Risk-sensitive | 业务OP 双重校验（#1 拍板 B） | ✅ **已 round 1 升格 Risk-sensitive** |
+| `validateFlowRow` (函数) | Risk-sensitive | 流水出入方向枚举校验（#3 拍板） | ✅ **已 round 1 升格 Risk-sensitive** |
+| `normalizeBu` (helper) | Important-skeleton | BU 比较（#7 拍板 C，与 v2.1.2 `normalizeBu` 同名同义） | ✅ **已 round 1 升格 Important-skeleton**（详见 § 2 Important-skeleton） |
+| `normalizeAccountKey` (helper) | Important-skeleton | 账户号匹配 anchor；M4 round1 writer 排序 key 共用 | ✅ **已 round 1 升格 Important-skeleton** |
+| `AMOUNT_EPSILON` (常量) | Risk-sensitive | 1e-2 容差，资金红线门槛；M2 round1 提取后 columns.js | ✅ **已 round 1 升格 Risk-sensitive** |
+| `VALID_DIRECTION_IN` / `VALID_DIRECTION_OUT` (常量) | Risk-sensitive | 中文「入」/「出」枚举固化（#3 拍板） | ✅ **已 round 1 升格 Risk-sensitive**（合并为 1 条目） |
+| `biz_op_recon_runs.status` (字段) | Risk-sensitive | 'success'（系统错误不落 runs） | ⚪ 暂不升格（DB 字段，靠 schema 自身约束；不需进表） |
+| `BIZ_OP_HEADERS` / `FLOW_HEADERS` (常量) | Important-skeleton | 模板表头校验 anchor | ✅ **已 round 1 升格 Important-skeleton**（2 条独立条目） |
+| `YELLOW_FILL` (常量) | Minor | 与 v2.1.2 复用 | ⚪ 暂不升格（v0.3 fix2.4 后差异表已无黄底；仅失败报告 writer 引用 1 处） |
 
-实施完成后执行 `npm run scan:vars` 重新生成统计，确认新符号的跨文件引用度，按 `rules/important-variables.md` 双门槛入表。
+**round 1 升格统计**：13 条进表（Critical 2 + Important-skeleton 4 + Risk-sensitive 7）；2 条暂不升格（DB 字段 + 低引用常量）。
+
+实施完成后执行 `npm run scan:vars` 重新生成统计，确认新符号的跨文件引用度，按 `rules/important-variables.md` 双门槛复核。
 
 ---
 
@@ -1215,3 +1284,33 @@ async function refreshBizOpReconButtons() {
 | B | 单 OP 行也比测算金额 | §5.2 `compareT1OpWithComputed` 无 N==1 特殊分支 |
 | C | T-2 有 T-1 无 行来源 T-2 表 | §四 `source_table='T2'`、§5.1 步骤 5.b |
 | D | 用户已提供模板入 assets/ | §2.1 / §2.2 表头来源 |
+
+---
+
+## 十五、round 1 self-review 修订记录（v0.7 — 2026-05-14）
+
+> PR #45 提 PR 后 reviewer agent 反馈 1 critical + 3 important + 5 minor + 3 测试遗漏建议；用户拍板"全修"。下表为 round 1 修订全部条目（PM/Dev 两侧 task 划分）。
+
+| # | 级别 | 内容 | spec/PRD 落实点 | 代码改动文件（Dev 侧） |
+|---|---|---|---|---|
+| **C1** | **Critical** | `clearByDateBu` BU 比较未对齐 `getRowsByDateBu` 的 `LOWER(TRIM(?))` → 大小写差异时清不掉旧数据（**资金红线**：脏数据混存）。统一改 `LOWER(TRIM(bu_name)) = LOWER(TRIM(?))` | §4.1 SQL DELETE 注释；spec §九 Case M 防回归 | `src/backend/biz-op-recon-db/imports-repository.js` `clearByDateBu` |
+| **I1** | Important | 13 个 v2.1.3 新符号升格 `rules/important-variables.md`（Critical 2 + Important-skeleton 4 + Risk-sensitive 7） | spec §十二 标注"已 round 1 升格"；`rules/important-variables.md` v2 元数据 | — (PM 侧文档) |
+| **I2** | Important | `runBizOpImportAsync` 落库前归一化 BU 名：`bu_name = String(rawBuName).trim()`（保留大小写，与 `normalizeBu` toLowerCase 不同）。避免源文件首尾空格导致 BU 下拉枚举重复 | spec §九 Case N 防回归；§5.4 流程注释 | `src/main-process/biz-op-recon-session.js` `runBizOpImport` 落库前 trim |
+| **I3** | Important | `computeT1Op` T-2 NaN end_balance 加 `console.warn(...)` + summary 新增 `t2AnomalyAccountCount` 字段 + DB schema 新增 `biz_op_recon_runs.t2_anomaly_account_count INTEGER NOT NULL DEFAULT 0`（migration 幂等） | PRD §3.5.5 + spec §5.0.1 函数签名表 + §5.1 编排 + §三 IPC 出参 schema + §4.3 DB schema + §九 Case L 防回归 | `src/main-process/biz-op-recon-session.js` `computeT1Op` + `runReconciliation` + `src/backend/biz-op-recon-db/migrations.js` (新增 ALTER) + `src/backend/biz-op-recon-db/run-repository.js` `insertRun` |
+| **M1** | Minor | （Dev 范围；占位 — Dev agent 给出最终条目内容） | — | — |
+| **M2** | Minor | `AMOUNT_EPSILON` 提取到公共 `src/backend/biz-op-recon-db/columns.js`，避免分散在 session.js + validator.js 两处不一致 | spec §5.0 常量定义 + `rules/important-variables.md` Risk-sensitive `AMOUNT_EPSILON` 条目 | `src/backend/biz-op-recon-db/columns.js` 新增 export + 改 session.js / validator.js import |
+| **M3** | Minor | spec §7.6 dialog factory 列表：5 → 4（fix1.5 + fix2 已删 ErrorReportDialog；本次 spec 描述同步）；删除 `createBizOpReconFileImportPromptDialog` 误描述 | spec §7.6 表格 + 注脚 [^dialog-count] | — (PM 侧文档；Dev 侧已删除 ErrorReportDialog 实现) |
+| **M4** | Minor | 区间 writer `writeDateRangeDiffWorkbook` 排序 key 必须用 `normalizeAccountKey(sourceRow.account_no)`（不能直接用原值），与 session.js / repository 跨文件保持一致 | spec §6.2 排序段加注释；`rules/important-variables.md` `normalizeAccountKey` 条目"writer.js 排序 key" | `src/main-process/biz-op-recon-writer.js` `writeDateRangeDiffWorkbook` 排序段 |
+| **M5** | Minor | （Dev 范围；占位 — Dev agent 给出最终条目内容） | — | — |
+| **Case L** | 测试遗漏 | T-2 NaN end_balance + summary.t2AnomalyAccountCount 防回归 | spec §9.11 Case L | `scripts/smoke-test.js` Case L |
+| **Case M** | 测试遗漏 | clearByDateBu 大小写归一防回归 | spec §9.12 Case M | `scripts/smoke-test.js` Case M |
+| **Case N** | 测试遗漏 | BU 名落库前 trim 归一防回归 | spec §9.13 Case N | `scripts/smoke-test.js` Case N |
+
+**known issue（不在 round 1 修，留 PRD §6.5 KI-1）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议下一 round（round 2）或 v2.1.4 补齐。
+
+**round 1 验证清单（PR self-review 前必跑）**：
+- `npm run smoke` 全套（含 Case A-K + Case L/M/N）→ 退出码 0
+- `npm run scan:vars` → 13 个新符号已在 `rules/important-variables.md` 命中
+- `grep -rn "createBizOpReconErrorReportDialog\|createBizOpReconFileImportPromptDialog" src/` → 应**无输出**（fix1.5/fix2 已删 + round 1 M3 spec 同步）
+- 真实数据手测：构造一个 T-2 含 NaN end_balance 的业务OP 文件 → 状态栏 / DevTools 看到 console.warn + summary.t2AnomalyAccountCount > 0
+- 真实数据手测：构造两个文件业务方分别为 `"BU-A"` 与 `" BU-A "` → 第二次导入清得掉第一次（防 C1 回归）；BU 下拉只显示 1 项 `"BU-A"`（防 I2 回归）

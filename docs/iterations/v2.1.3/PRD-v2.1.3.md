@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.6（2026-05-13 fix6：区间导出改单 sheet，原 #14 拍板回滚 — 多 sheet（按日期分）→ 单 sheet「差异」所有日期合并，按 data_date + 账户号排序，不加新列依靠原表 Billdate 区分；v0.5 = fix5 PRD 拍板修订：多 OP 账户 N 行全部进差异表，§3.4.1 步 4.2.b + §3.5.1 + §3.5.3 联动修订；v0.4 = fix4 资金红线 bug 修复 + multi_op_account_count 统计语义补丁；v0.3 = fix1+fix2 手动测试回归：OPEN ISSUE #10 拍板回滚 + 5 条 UI 微调；v0.2 = 14 项 OPEN ISSUE 全部拍板；v0.1 = 2026-05-13 起草） |
+| 文档版本 | v0.7（2026-05-14 round 1 self-review 修订：1 critical（C1 clearByDateBu 资金红线 — LOWER+TRIM 与 getRowsByDateBu 对齐）+ 3 important（I1 13 个 v2.1.3 新符号升格 important-variables.md / I2 runBizOpImportAsync 落库前归一化 BU 名 / I3 computeT1Op T-2 NaN end_balance 加 console.warn + summary.t2AnomalyAccountCount 新字段）+ 5 minor + 3 新 smoke（Case L/M/N）；v0.6 = 2026-05-13 fix6：区间导出改单 sheet，原 #14 拍板回滚 — 多 sheet（按日期分）→ 单 sheet「差异」所有日期合并，按 data_date + 账户号排序，不加新列依靠原表 Billdate 区分；v0.5 = fix5 PRD 拍板修订：多 OP 账户 N 行全部进差异表，§3.4.1 步 4.2.b + §3.5.1 + §3.5.3 联动修订；v0.4 = fix4 资金红线 bug 修复 + multi_op_account_count 统计语义补丁；v0.3 = fix1+fix2 手动测试回归：OPEN ISSUE #10 拍板回滚 + 5 条 UI 微调；v0.2 = 14 项 OPEN ISSUE 全部拍板；v0.1 = 2026-05-13 起草） |
 | 目标版本 | `v2.1.3`（patch） |
 | 起始版本 | `v2.1.2`（PR #43 已合并 main，2026-05-13，commit `50e0a0a` / merge `fc5d766`） |
 | 起草日期 | 2026-05-13 |
@@ -399,6 +399,27 @@ writer 阶段保持**无填充色**（移除整行黄底）。
 - 修复前已落库的 run 记录（`multi_op_account_count` 可能偏小）→ 用户重新跑对账（INSERT 新 run）即可拿到正确数
 - 不需要批量回刷历史 run 数据（用户场景每天滚动覆盖）
 
+#### 3.5.5 t2AnomalyAccountCount 统计语义（round 1 I3 新增）
+
+**定义**：状态栏文案「T-2 异常账户 N 个」与 IPC `bizOpRecon:run` 出参 `summary.t2AnomalyAccountCount` 字段的统计口径。
+
+**算法**：对一次对账运行 (BU, target_date)：
+1. 取该 BU 该日的 **T-2 业务OP 全集** t2OpRows
+2. 在 `computeT1Op` 内逐行 `parseAmount(r.end_balance)`：若返回 NaN → 调用 `console.warn(...)` 输出账户号 / BU / 期末余额原值 + 计入 `t2AnomalySeen: Set<accountKey>`（去重）
+3. `t2AnomalyAccountCount = t2AnomalySeen.size`
+
+**关键不变量**：
+- T-2 期末余额非数值的账户号 → 跳过 `computedT1Map` 写入（与原行为一致，不退化）→ 该账户号在 §3.4.2 步骤 4.2.b 会走"T-1 有 T-2 无"分支（cmp_t2='T-1有T-2无'）
+- console.warn 仅辅助 debug，**不弹 UI / 不阻断流程**
+- `t2AnomalyAccountCount === 0` 表示 T-2 数据干净；> 0 提醒用户核查 T-2 文件是否有"#N/A"/空字符串/非法字符等
+- 不影响 `amountDiffCount` / `multiOpAccountCount` / `t1NotT2Count` 等其它统计字段
+
+**回归测试**：smoke `scripts/smoke/biz-op-recon.js` 新增 Case L 覆盖（详见 spec §九 Case L assertion 草稿）。
+
+**历史数据兼容**：
+- 修复前已落库的 run 记录无 `t2AnomalyAccountCount` 字段 → 默认 `null`/`0`，前端状态栏兼容显示
+- DB schema 增加 `t2_anomaly_account_count INTEGER NOT NULL DEFAULT 0` 字段（migration 幂等）
+
 ### 3.6 验收
 
 - 主导航第 5 个按钮可见，点击切换显示新模块（v2.1.2 4 个老模块不受影响）
@@ -522,9 +543,20 @@ writer 阶段保持**无填充色**（移除整行黄底）。
 - 4 张 preview 截图的具体场景与触发条件（spec.md §七 拍板）
 - **BU 行 CSS 宽度对齐"导出差异"按钮**（fix2.1）— 视觉约束，实施细节归 §6.3，PRD 仅提及
 
-### 6.4 fix1 + fix2 + fix4 + fix5 + fix6 增补（v0.3 / v0.4 / v0.5 / v0.6 — 2026-05-13）
+### 6.4 fix1 + fix2 + fix4 + fix5 + fix6 + round1 增补（v0.3 / v0.4 / v0.5 / v0.6 / v0.7 — 2026-05-13 ~ 2026-05-14）
 
-> 用户手动测试 fix1+fix2+fix4+fix5+fix6 多轮回归后增补；下列条目作为 §6.1 已拍板表的补充扩展。
+> 用户手动测试 fix1+fix2+fix4+fix5+fix6 多轮回归后增补；2026-05-14 PR #45 提 PR 后 round 1 self-review 增补 9 条修订；下列条目作为 §6.1 已拍板表的补充扩展。
+
+**round 1 self-review 修订（2026-05-14，PR #45 提 PR 后 reviewer agent 给 1 critical + 3 important + 5 minor + 3 测试遗漏建议；用户拍板"全修"）**：
+
+- **C1（资金红线）**：`clearByDateBu` BU 比较未对齐 `getRowsByDateBu` 的 `LOWER(TRIM(?))`，存在大小写差异时清不掉旧数据 → 改 `clearByDateBu` SQL WHERE 改 `LOWER(TRIM(bu_name)) = LOWER(TRIM(?))`，与 `getRowsByDateBu` 完全一致
+- **I1**：13 个 v2.1.3 新符号升格 `rules/important-variables.md`（详见 spec §十二，分布：Critical 2 + Important-skeleton 4 + Risk-sensitive 7）
+- **I2**：`runBizOpImportAsync` 落库前归一化 BU 名（trim 保留大小写）— 避免源文件首尾空格导致 BU 下拉枚举出现 "BU-A" / " BU-A " 两条
+- **I3**：`computeT1Op` T-2 NaN end_balance 加 `console.warn(...)` + summary 新增字段 `t2AnomalyAccountCount`（详见 §3.5.5）+ DB schema `biz_op_recon_runs.t2_anomaly_account_count INTEGER NOT NULL DEFAULT 0`
+- **M1-M5**：详见 spec §十三 round 1 修订记录
+- **新 smoke**：Case L（I3 t2AnomalyAccountCount 防回归）+ Case M（C1 大小写差异 clearByDateBu 防回归）+ Case N（I2 BU 名首尾空白归一防回归）
+- **known issue（不在 round 1 修，留 PRD §6.5）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议下一 round 或 v2.1.4 补齐 UX 对齐
+
 
 **fix6（2026-05-13，PRD #14 拍板回滚）**：区间导出由多 sheet（按日期分）改为**单 sheet「差异」**（所有日期合并）。
 - **不加「数据日期」列**，依靠原 xlsx Billdate 列区分（**已知风险**：Billdate 可能与 data_date 不一致 → console.warn 日志告警，不弹 UI）
@@ -552,6 +584,21 @@ writer 阶段保持**无填充色**（移除整行黄底）。
 | fix2（共性） | fix2 | 校验失败提示由"独立报错对话框"改为**状态栏文字 + 失败报告路径**（与 fix1.5 死代码清理联动） |
 | **fix5** | **fix5（v0.5 PRD 拍板修订）** | **多 OP 账户 N 行全进差异表**（相等行也进；§3.4.1 步 4.2.b + §3.5.1 + §3.5.3 联动修订；compareT1OpWithComputed 相等多 OP 分支 push diffRows，meta = 相等/空/是） |
 | **fix6** | **fix6（v0.6 PRD #14 拍板回滚）** | **区间导出单 sheet「差异」**（原多 sheet 按日期分回滚为单 sheet 全合并；不加新列依赖原表 Billdate 区分；data_date+account_key 排序；console.warn 日志告警 Billdate ≠ data_date；详见 §3.3 + §6.1 #14 + 上方 fix6 段） |
+| **round1 C1** | **round1（v0.7 — 2026-05-14）** | **资金红线 — `clearByDateBu` BU 比较 SQL 改 `LOWER(TRIM(bu_name)) = LOWER(TRIM(?))`** 与 `getRowsByDateBu` 完全对齐；smoke Case M 防回归（构造 "BU-A" 与 " BU-A " 大小写差异） |
+| **round1 I1** | **round1（v0.7）** | **13 个 v2.1.3 新符号升格 `rules/important-variables.md`**（Critical 2 + Important-skeleton 4 + Risk-sensitive 7）；详见 spec §十二 |
+| **round1 I2** | **round1（v0.7）** | **`runBizOpImportAsync` 落库前归一化 BU 名（trim 保留大小写）**；smoke Case N 防回归 |
+| **round1 I3** | **round1（v0.7）** | **`computeT1Op` T-2 NaN end_balance 加 `console.warn` + 新字段 `summary.t2AnomalyAccountCount`**；DB schema `biz_op_recon_runs.t2_anomaly_account_count`；详见 §3.5.5；smoke Case L 防回归 |
+| **round1 M1-M5** | **round1（v0.7）** | **5 minor 修订**；详见 spec §十三 round 1 修订记录 |
+
+---
+
+### 6.5 已知问题（known issues — round 1 self-review 增补）
+
+> 已识别但本 round（round 1）暂不修，留迭代后续 round 或下个 patch 处理。
+
+| # | 问题 | 影响 | 修复建议 |
+|---|---|---|---|
+| KI-1 | v2.1.2 月度BU回填校验同位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗对齐 UX），v2.1.3 业务OP 模块当前缺失 | UX 不一致；用户从月度BU模块切到业务OP模块后体验差异 | 下一 round（round 2）或 v2.1.4 补 `createBizOpReconFileImportPromptDialog` 在「导入文件」点击后、弹文件选择对话框前插入提示弹窗 |
 
 ---
 

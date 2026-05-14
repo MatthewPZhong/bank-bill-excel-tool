@@ -31,7 +31,8 @@ const {
   FLOW_BU_FIELD_DB_COLUMN,
   FLOW_DIRECTION_DB_COLUMN,
   FLOW_ACCOUNT_KEY_DB_COLUMN,
-  FLOW_RECON_AMOUNT_DB_COLUMN
+  FLOW_RECON_AMOUNT_DB_COLUMN,
+  AMOUNT_EPSILON
 } = require('../backend/biz-op-recon-db/columns');
 const {
   validateBizOpRow,
@@ -40,8 +41,7 @@ const {
 
 // ---------------- 常量（spec §5.0） ----------------
 
-// 资金红线 ⚠️ ：1 分钱容差
-const AMOUNT_EPSILON = 1e-2;
+// 资金红线 ⚠️ ：1 分钱容差（v2.1.3-fix7-M2 单一真理来源在 columns.js，本文件 import 后 re-export）
 const VALID_DIRECTION_IN = '入';
 const VALID_DIRECTION_OUT = '出';
 
@@ -125,13 +125,28 @@ function aggregateFlowByAccount(flowRows, buName) {
 // 步骤 4.2.a：T-2 期末 + 流水累加 = 计算 T-1 期末（按账户号汇总单值）
 // 注意：T-2 业务 OP 同账户号 N 条时，按 row_index 顺序累加期末（即把"T-2 该账户的所有 OP 行"汇总
 // 成单一基线），spec §5.2 原文是"对 T-2 业务 OP 行"循环累加 — 若 T-2 同账户号 N 条则隐含 SUM
+//
+// 返回 { map, anomalyAccountSet }：
+//   map：account_no → calcT1（T-2 期末 + 流水净额）
+//   anomalyAccountSet：T-2 该账户号唯一行（或所有行）end_balance 全 NaN → silent drop 风险账户
+//     资金红线 ⚠️ v2.1.3-fix7-I3：原实现 NaN 行 continue 后，下游 compareT1OpWithComputed 因 calcT1
+//     undefined 又 continue → 该账户号在差异表完全不出现，导出文件看不出"丢账户"。修复：暴露集合让上层
+//     summary.t2AnomalyAccountCount 累加 + console.warn 输出，便于人工核查
 function computeT1Op(t2OpRows, flowAggMap) {
   const map = new Map();
+  const anomalyAccountSet = new Set();   // 资金红线 ⚠️ fix7-I3：T-2 NaN 账户号
+  const validAccountSet = new Set();
   for (const r of t2OpRows) {
     const accKey = normalizeAccountKey(r[BIZ_OP_ACCOUNT_KEY_DB_COLUMN]);
     if (!accKey) continue;
     const t2EndBal = parseAmount(r[BIZ_OP_END_BALANCE_DB_COLUMN]);
-    if (Number.isNaN(t2EndBal)) continue;
+    if (Number.isNaN(t2EndBal)) {
+      // 资金红线 ⚠️ fix7-I3：单条 NaN 不立即标 anomaly（同账户号可能有其他有效行）
+      // 仅当该账户号所有行都 NaN 时才标 — 在循环结束后比较 valid vs anomaly 集合
+      anomalyAccountSet.add(accKey);
+      continue;
+    }
+    validAccountSet.add(accKey);
     // 若 T-2 同账户号 N 条：spec §3.4.1 步 4.2.a 描述是"对每行 r"，所以同账户号多行
     // 这里 map.set 会覆盖；按 spec 5.2 第一段也是 map.set（同账户号 N 条取最后一行）
     // 但流水 flowSum 累加值是一致的（按账户号聚合），所以同账户号取任意一行的期末 + 同一 flowSum 都是一个候选基线
@@ -140,7 +155,9 @@ function computeT1Op(t2OpRows, flowAggMap) {
     const flowSum = flowAggMap.get(accKey) || 0;
     map.set(accKey, t2EndBal + flowSum);
   }
-  return map;
+  // 资金红线 ⚠️ fix7-I3：仅保留"完全 silent drop"的账户号（即所有行都 NaN，没有任何 valid 行）
+  for (const acc of validAccountSet) anomalyAccountSet.delete(acc);
+  return { map, anomalyAccountSet };
 }
 
 // 步骤 4.2.b：T-1 OP 与计算 T-1 OP 逐行独立对账（#6 拍板 A，资金红线 ⚠️）
@@ -262,7 +279,18 @@ function runReconciliation(db, { date, buName }) {
   const flowSumByAccount = aggregateFlowByAccount(flowRows, null);  // 上层 SQL 已过滤 BU
 
   // 3. 步 4.2.a：T-2 期末 + 流水累加 = 计算 T-1 期末
-  const calcT1ByAccount = computeT1Op(t2OpRows, flowSumByAccount);
+  // 资金红线 ⚠️ v2.1.3-fix7-I3：computeT1Op 返回 { map, anomalyAccountSet }
+  // anomalyAccountSet：T-2 该账户号所有行 end_balance 全 NaN 的账户集合
+  const { map: calcT1ByAccount, anomalyAccountSet: t2AnomalyAccounts } = computeT1Op(t2OpRows, flowSumByAccount);
+
+  // 资金红线 ⚠️ fix7-I3：每个 anomaly 账户号 console.warn 一行（不阻断对账，仅人工排查线索）
+  for (const acc of t2AnomalyAccounts) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[biz-op-recon] T-2 end_balance NaN silent drop date=${t2Date} bu=${buName} account=${acc} ` +
+      `(该账户在 T-1 实际 OP 与差异表均不可见，请检查源文件期末余额字段)`
+    );
+  }
 
   // 4. 步 4.2.b：1:N 逐行独立比（资金红线 ⚠️）
   const { diffRows, stats } = compareT1OpWithComputed(t1OpRows, calcT1ByAccount);
@@ -313,7 +341,10 @@ function runReconciliation(db, { date, buName }) {
     amountDiffCount: stats.amountDiffCount,
     multiOpAccountCount: stats.multiOpAccountCount,
     t1NotT2Count: onlyInT1.length,
-    t2NotT1Count: onlyInT2.length
+    t2NotT1Count: onlyInT2.length,
+    // 资金红线 ⚠️ v2.1.3-fix7-I3：T-2 end_balance NaN 导致 silent drop 的账户号数量
+    // 状态栏 / 对话框可拼一段 "T-2 异常 N 个账户" 文案（仅警示，不阻断导出）
+    t2AnomalyAccountCount: t2AnomalyAccounts.size
   };
 
   db.exec('BEGIN');
@@ -393,6 +424,14 @@ async function runBizOpImportAsync(db, params) {
       errorReportPath,
       errorRows: errorRows.map(e => ({ rowIndex: e.rowIndex, reason: e.reason }))
     };
+  }
+
+  // 资金红线 ⚠️ v2.1.3-fix7-I2：落库前把所有行 bu_name 改写为 firstBu（已 trim）
+  // 校验阶段用 normalizeBu 比较仅做相等性判断，原始字面值（含首尾空白 / 大小写差）会落进 DB；
+  // 但 listDistinctBus 不做 normalize → 下拉框出现 'BU-A' / ' BU-A '/'bu-a' 多个 entry，
+  // 用户视觉混乱；选保守方案保留首字母大小写但去首尾空白（不强制 lower）。
+  for (const r of rows) {
+    r.bu_name = firstBu;
   }
 
   // 全部通过 → 同事务：#15 清旧 runs + imports → INSERT

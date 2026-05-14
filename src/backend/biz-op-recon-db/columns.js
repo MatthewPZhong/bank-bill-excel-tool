@@ -140,6 +140,11 @@ const FLOW_DIRECTION_DB_COLUMN = 'direction';        // 列 9 出入方向（#3 
 const FLOW_ACCOUNT_KEY_DB_COLUMN = 'account_no';     // 列 12 账户编号
 const FLOW_RECON_AMOUNT_DB_COLUMN = 'recon_amount';  // 列 14 对账金额
 
+// 资金红线 ⚠️ v2.1.3-fix7-M2：AMOUNT_EPSILON 1 分钱容差
+// 之前 session.js + validator.js 各自定义 1e-2 → 双源存在调小一边漏改另一边的风险
+// 提取到本文件作单一真理来源；任何修改必须同步评估资金红线影响（PRD §3.4 + spec §五）
+const AMOUNT_EPSILON = 1e-2;
+
 // 差异表/失败报告：sheet 名 = 日期 ISO（spec §6.1 / §6.3，#14 拍板 A）
 const DIFF_HEADER_TAIL = Object.freeze([
   '比对T-2日',
@@ -151,6 +156,9 @@ const DIFF_HEADER_TAIL = Object.freeze([
 const ERROR_HEADER_TAIL = Object.freeze(['失败行号', '失败原因']);
 
 module.exports = {
+  // 资金红线常量（fix7-M2 提取）
+  AMOUNT_EPSILON,
+
   // 业务 OP
   BIZ_OP_COLUMN_DEFS,
   BIZ_OP_HEADERS,

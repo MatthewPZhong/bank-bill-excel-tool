@@ -32,6 +32,7 @@ v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。
   - **fix4 资金红线 bug 修复**（v0.4 — 2026-05-13）：multi_op_account_count 在 onlyInT1 路径漏算（详见 PRD §3.5.4）；smoke 新增 Case I（I-1/I-2/I-3，15 assertion）防回归
   - **fix5 PRD 拍板修订**（v0.5 — 2026-05-13）：多 OP 账户 N 行全进差异表（不论相等/不相等），原"相等行不进表"规则回滚；`compareT1OpWithComputed` 相等多 OP 分支 push diffRows，meta = 相等/空/是；进表条件扩展为 `比对T-2日 非空 OR 比对测算金额 == 不相等 OR 同账户号多个OP == 是`；smoke 新增 Case J 防回归。便于资金审计逐行追溯。
   - **fix6 PRD #14 拍板回滚**（v0.6 — 2026-05-13）：区间导出由 N sheet 改单 sheet「差异」（所有日期合并）。按 data_date + 账户号排序；**不加新列**，依靠原表 Billdate 区分；`writeDateRangeDiffWorkbook` 重写 + 写 `console.warn` 日志告警 Billdate ≠ data_date（不弹 UI）；smoke 新增 Case K 防回归（sheet 数 > 1 / 表头列 > 27 / 排序失序均失败）。DB schema + session 层 + 单日 writer 均不变。
+  - **round 1 self-review 修订**（v0.7 — 2026-05-14，PR #45 提 PR 后 reviewer agent 反馈）：1 critical（C1 资金红线 `clearByDateBu` LOWER+TRIM 与 `getRowsByDateBu` 对齐）+ 3 important（I1 13 个 v2.1.3 新符号升格 `rules/important-variables.md` Critical 2/Important-skeleton 4/Risk-sensitive 7 共 13 条；I2 落库前 BU trim 归一；I3 `computeT1Op` T-2 NaN end_balance 加 console.warn + summary 新增 `t2AnomalyAccountCount` 字段 + DB schema 新增字段 + 状态栏「T-2 异常 W 个」）+ 5 minor（M2 `AMOUNT_EPSILON` 提取到 columns.js 等）+ 3 新 smoke（Case L T-2 NaN 防回归 / Case M C1 大小写防回归 / Case N I2 BU trim 防回归）。known issue：v2.1.2 月度BU 模块 `createBankBuReconFileImportPromptDialog` UX 对齐留 KI-1 给下一 round。
 - **IPC**：新增 15 个 `bizOpRecon:*` handler；preload 暴露 `window.desktopApi.bizOpRecon.*`
 - **smoke**：新增 8 用例（A 核心 / B 多 OP / C 账户号差 / D 流水累加 / E 整批拒绝 / F 区间导出 / G BU 隔离 / H 重新导入清空）+ helper/validator 单测，资金红线全覆盖
 

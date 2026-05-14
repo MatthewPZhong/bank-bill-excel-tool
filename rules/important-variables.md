@@ -9,8 +9,8 @@
 
 | 字段 | 值 |
 |---|---|
-| 清单版本 | v1（对应 app v1.5.3） |
-| 上次人工 review | 2026-04-23 |
+| 清单版本 | v2（对应 app v2.1.3 — 2026-05-14 round 1 self-review 升格 13 条 v2.1.3 新符号） |
+| 上次人工 review | 2026-05-14 |
 | 基线数据 | `docs/analysis/var-reference-stats.md`（28 个 JS 文件 / 355 顶层声明） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
@@ -98,6 +98,25 @@
   - 字段 (code / message / detail lines / context) 是对外 error-report 的 schema
   - 改字段要同步所有 catch 分支 + 错误报告 writer
 
+### `runReconciliation`（v2.1.3 业务OP数据核对）
+- 定义：`src/main-process/biz-op-recon-session.js`
+- 关联功能：业务OP 数据核对模块**资金对账总入口**；编排 4 步算法（流水累加 → 计算 T-1 OP → 1:N 逐行精准比 → 账户号差集）+ 落库 runs/diff_rows
+- ⚠️ 命名冲突：与 v1.5.x Pending 模块同名 `runReconciliation` 存在；改前必先 `grep -rn "runReconciliation" src/` 确认改的是哪个模块
+- 变更 review 要点：
+  - **资金红线**：4 步流程任一改动直接影响差异判定结果
+  - 改函数签名 / summary 字段 → IPC handler `bizOpRecon:run` 出参 schema 同步 + 前端状态栏文案同步
+  - 关联拍板点：fix4（multiOpAccountSeen Set 防重复累加） / fix5（相等多 OP 行 push diffRows） / round1 I3（T-2 NaN end_balance 加 console.warn + summary.t2AnomalyAccountCount）
+  - 必跑：smoke biz-op-recon Case A-K 全套 + 真实数据样本回放
+
+### `compareT1OpWithComputed`（v2.1.3 1:N 精准标差异核心）
+- 定义：`src/main-process/biz-op-recon-session.js`
+- 关联功能：业务OP 模块 OPEN ISSUE #6 拍板 A 1:N 逐行独立比的核心算法；同账户号 N 条 T-1 OP 行各自与计算 T-1 期末余额比较，逐行独立标"相等/不相等"
+- 变更 review 要点：
+  - **资金红线**：epsilon=1e-2 容差不可放宽；超过 → 标"不相等"，进 diff_rows 表
+  - **fix5 选项 B 关键不变量**：多 OP 账户的相等行（`t1Rows.length >= 2 && diff <= epsilon`）也必须 push diffRows，meta = `相等/空/是`；单 OP 相等行不进表
+  - `amountDiffCount` 仅累计"不相等"行（相等多 OP 不计入差异计数）；`multiOpAccountCount` 按账户号去重统计
+  - 必跑：smoke biz-op-recon Case B（多 OP 行）+ Case J（fix5 反例防回归）
+
 ---
 
 ## 2. Important-skeleton — 系统骨架
@@ -145,6 +164,42 @@
 - 定义：`src/preload.js`（61 次出现）
 - 关联功能：主/渲染进程通讯唯一桥；整个 `window.desktopApi` 的底座
 - 变更 review 要点：新增/删除 IPC channel 必须同步 main 端 `ipcMain.handle`
+
+### `normalizeBu`（v2.1.3 业务OP / v2.1.2 月度BU回填校验共用）
+- 定义：`src/main-process/biz-op-recon-session.js` + `src/backend/biz-op-recon-import/validator.js`（v2.1.3）；v2.1.2 月度BU回填校验也有同名实现
+- 实现：`String(v).trim().toLowerCase()`
+- 关联功能：BU 名归一化比较；流水 `bu_dept` vs 业务OP `bu_name` 跨表关联；OPEN ISSUE #7 拍板 C
+- 变更 review 要点：
+  - 多文件多 repository SQL 内嵌 `LOWER(TRIM(...))` 必须与函数实现保持一致（C1 round1 fix：`clearByDateBu` 已对齐 `LOWER(TRIM(?))`）
+  - 改 normalize 规则要同步 v2.1.2 + v2.1.3 两处实现 + repository 内 SQL
+  - 仅用于比较，**不改写落库原值**
+  - 必跑：smoke biz-op-recon Case G（BU 隔离 + 大小写差异容忍）
+
+### `normalizeAccountKey`（v2.1.3 账户号匹配 anchor）
+- 定义：`src/main-process/biz-op-recon-session.js` + `src/main-process/biz-op-recon-writer.js`
+- 实现：仅 `String(v).trim()`（**不**做大小写归一；账户号是资金 key）
+- 关联功能：业务OP `账户号` 与流水 `账户编号` 跨表 key 归一；区间导出 sort key（M4 round1：writer 排序 key 改用 normalizeAccountKey）
+- 变更 review 要点：
+  - 跨 session.js / writer.js 两文件使用，改实现要同步
+  - 不可加 toLowerCase（账户号大小写有业务含义）
+  - 必跑：smoke biz-op-recon Case A/B + Case K（区间排序）
+
+### `BIZ_OP_HEADERS`（v2.1.3 业务OP 23 列定义）
+- 定义：`src/backend/biz-op-recon-db/columns.js`
+- 关联功能：业务OP 表头校验 anchor + writer 输出列顺序 + reader 字段映射；模板 `assets/业务OP账单.xlsx` 23 列冻结数组
+- 变更 review 要点：
+  - 改顺序/列名 → 表头严格匹配会拒绝旧版业务OP 文件
+  - writer / reader / validator 三处必须同步引用本数组
+  - 配合 differ 的 4 列 meta（比对T-2日 / 同账户号多个OP / 比对测算金额 / 测算金额差额）→ 差异表 27 列结构
+  - 必跑：smoke biz-op-recon Case A/E + 真实业务OP 文件回放
+
+### `FLOW_HEADERS`（v2.1.3 流水对账单 28 列定义）
+- 定义：`src/backend/biz-op-recon-db/columns.js`
+- 关联功能：流水对账单表头校验 anchor + reader 字段映射；模板 `assets/流水对账单.xlsx` 28 列冻结数组
+- 变更 review 要点：
+  - 改顺序/列名 → 表头严格匹配会拒绝旧版流水文件
+  - 与 BIZ_OP_HEADERS 同步管理（配套常量）
+  - 必跑：smoke biz-op-recon Case D（流水累加 + 出入方向）+ 真实流水文件回放
 
 ---
 
@@ -279,6 +334,65 @@
 - `normalizeInputFilePaths` — `main-process/statement-session.js`
 - 关联功能：跨平台路径处理（Windows 反斜杠 / 网络路径）
 - 变更 review 要点：必跑 Windows 环境 + 中文路径
+
+### `aggregateFlowByAccount`（v2.1.3 流水按账户汇总）
+- 定义：`src/main-process/biz-op-recon-session.js`
+- 关联功能：业务OP 模块步骤 4.1 — 按 normalizeBu 过滤 + 按账户号累加 signedAmount → Map
+- 变更 review 要点：
+  - **资金红线**：累加错误直接导致计算 T-1 期末错位 → 全表差异判定失效
+  - 内部依赖 `parseSignedAmount`（Risk-sensitive 红线）+ `normalizeBu` + `normalizeAccountKey` 三个函数
+  - NaN 行 continue 跳过（导入阶段已通过 `validateFlowRow` 拦截，对账阶段二次保护）
+  - 必跑：smoke biz-op-recon Case D（流水累加）+ Case G（BU 隔离）
+
+### `parseSignedAmount`（v2.1.3 出入方向 → 正负号）
+- 定义：`src/main-process/biz-op-recon-session.js`
+- 实现：`'入' → +num` / `'出' → -num` / 其他 → `NaN`（OPEN ISSUE #3 拍板）
+- 关联功能：流水累加时把出入方向枚举转换为正负发生额；**资金红线核心**
+- 变更 review 要点：
+  - **资金红线最高级**：错一个 case 分支直接资金事故（正负号倒置）
+  - case 必须**完全枚举**（仅「入」/「出」），未知值必须返回 NaN，不可默认 +/-
+  - 与 `VALID_DIRECTION_IN` / `VALID_DIRECTION_OUT` 常量配套（Risk-sensitive）
+  - 与 `validateFlowRow` 配套：导入拦截 + 对账二次保护
+  - 必跑：smoke biz-op-recon Case D（含「DEBIT」/ 空值 / 错别字反例）
+
+### `validateBizOpRow`（v2.1.3 业务OP 双重校验）
+- 定义：`src/backend/biz-op-recon-import/validator.js`
+- 关联功能：业务OP 行级双重校验（OPEN ISSUE #1 拍板 B）：
+  - `(1) 发生额 == 发生额（入） - 发生额（出）`
+  - `(2) 期末余额 == 期初余额 + 发生额`
+  - epsilon = `AMOUNT_EPSILON` (1e-2)
+- 变更 review 要点：
+  - **资金红线**：任一行不过 → 整批拒绝 + 失败报告（OPEN ISSUE #5 拍板）
+  - 改 epsilon 阈值 → 直接影响整批拒绝判定，可能让带瑕疵数据漏入主表
+  - reason 文案变化要同步失败报告 writer 的展示
+  - 必跑：smoke biz-op-recon Case E（双重校验失败 + 整批拒绝 + 失败报告 xlsx）
+
+### `validateFlowRow`（v2.1.3 流水出入方向枚举校验）
+- 定义：`src/backend/biz-op-recon-import/validator.js`
+- 关联功能：流水行级校验：`direction ∈ {入, 出}` + `recon_amount` 可数值化 + `account_no` 非空（OPEN ISSUE #3 拍板）
+- 变更 review 要点：
+  - **资金红线**：枚举判定不严会让脏值漏到对账阶段，触发 `parseSignedAmount` NaN → 静默跳过（资金事故）
+  - 与 `VALID_DIRECTION_IN` / `VALID_DIRECTION_OUT` 共用常量；改任一处必须同步
+  - 必跑：smoke biz-op-recon Case D + 真实流水样本检查脏值
+
+### `AMOUNT_EPSILON`（v2.1.3 浮点精度门槛）
+- 定义：`src/backend/biz-op-recon-db/columns.js`（M2 round1 提取后 — 原分散在 session.js / validator.js 两处）+ `src/backend/biz-op-recon-import/validator.js` + `src/main-process/biz-op-recon-session.js` 引用
+- 当前值：`1e-2`（即 1 分钱）
+- 关联功能：业务OP 双重校验（`validateBizOpRow`）+ 测算金额对比（`compareT1OpWithComputed`）共用浮点精度门槛
+- 变更 review 要点：
+  - **资金红线**：放宽 → 带瑕疵数据漏过校验/比对；收紧 → 误判增多
+  - 必须保证多处引用同一常量（M2 round1 已提取，避免数值不一致）
+  - 必跑：smoke biz-op-recon Case A/B/E（覆盖测算 + 双重校验两种使用路径）
+
+### `VALID_DIRECTION_IN` / `VALID_DIRECTION_OUT`（v2.1.3 出入方向枚举常量）
+- 定义：`src/backend/biz-op-recon-import/validator.js`（+ 引用 `src/main-process/biz-op-recon-session.js` `parseSignedAmount`）
+- 当前值：`'入'` / `'出'`（中文字符）
+- 关联功能：流水「出入方向」字段的合法值枚举（OPEN ISSUE #3 拍板）
+- 变更 review 要点：
+  - **资金红线**：值变化（如改成 'IN' / 'OUT'）→ 历史数据全部不通过校验，导入全部失败
+  - 与 `validateFlowRow` + `parseSignedAmount` 三处必须同步
+  - 不能加同义词（如 'in' / '入款'），避免歧义
+  - 必跑：smoke biz-op-recon Case D（覆盖正反例）
 
 ---
 

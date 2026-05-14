@@ -2,12 +2,12 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.6（2026-05-13，基于 spec v0.6 — fix6 PRD #14 拍板回滚：区间导出由 N sheet 改单 sheet「差异」 + 不加新列依赖 Billdate + data_date+account_key 排序 + Billdate/data_date console.warn + smoke Case K + T14 修订记录；v0.5 = fix5 PRD 拍板修订：多 OP 账户 N 行全进差异表 + compareT1OpWithComputed 相等多 OP 分支 push diffRows + smoke Case J 防回归 + T13 修订记录；v0.4 = fix4 资金红线 bug 修复：runReconciliation 5.a onlyInT1 路径补累加 multi_op_account_count + smoke Case I 防回归 + T12 修复记录；v0.3 = fix1+fix2 手动测试回归） |
+| 文档版本 | v0.7（2026-05-14，基于 spec v0.7 — round 1 self-review 修订：1 critical（C1 clearByDateBu LOWER+TRIM）+ 3 important（I1 13 符号升格 / I2 BU trim 归一 / I3 computeT1Op T-2 NaN console.warn + summary.t2AnomalyAccountCount + DB schema 增字段）+ 5 minor + 3 新 smoke（Case L/M/N）+ T15 round 1 修订记录；v0.6 = 2026-05-13 fix6 PRD #14 拍板回滚 + T14 修订记录；v0.5 = fix5 PRD 拍板修订 + T13 修订记录；v0.4 = fix4 资金红线 bug 修复 + T12 修复记录；v0.3 = fix1+fix2 手动测试回归） |
 | 关联 spec | `spec.md` |
 | 关联 PRD | `PRD-v2.1.3.md` |
 | 工作分支 | `v2.1.3` |
 | 起草人 | team-lead |
-| 总任务数 | 15（T0 spec、T1 migration、T2 reader/validator、T3 session/算法、T4 writer、T5 前端面板/dialog、T6 IPC、T7 smoke、T8 preview、T9 三件套 + version、T10 self-review + PR 草稿、T11 fix1+fix2 自测回归记录、T12 fix4 资金红线 bug 修复记录、T13 fix5 PRD 拍板修订 + Dev 实施、**T14 fix6 PRD #14 拍板回滚 + Dev 实施**） |
+| 总任务数 | 16（T0 spec、T1 migration、T2 reader/validator、T3 session/算法、T4 writer、T5 前端面板/dialog、T6 IPC、T7 smoke、T8 preview、T9 三件套 + version、T10 self-review + PR 草稿、T11 fix1+fix2 自测回归记录、T12 fix4 资金红线 bug 修复记录、T13 fix5 PRD 拍板修订 + Dev 实施、T14 fix6 PRD #14 拍板回滚 + Dev 实施、**T15 round 1 self-review 修订（PR #45 提 PR 后 reviewer 反馈）**） |
 
 ---
 
@@ -682,3 +682,38 @@
 **阶段 3（Dev 测试 + 文档）**：T7 → T8 → T9
 
 **阶段 4（PM/team-lead 收尾）**：T10（self-review + PR 草稿）→ 用户手动测试 → 用户明确说"提 PR" → 执行 `gh pr create`（memory `workflow_no_tester_no_auto_pr`）→ 合并后 PR 草稿归档（参照 `workflow_archive_pr_draft`）→ 整合进 PRD §七 实施记录（参照 `workflow_pr_integrate_prd`）
+
+---
+
+## T15 — round 1 self-review 修订（v0.7 — 2026-05-14，PR #45 提 PR 后 reviewer agent 反馈）
+
+- **触发**：PR #45 提 PR 后 reviewer agent 给 1 critical + 3 important + 5 minor + 3 测试遗漏建议。用户拍板"全修"。
+- **PM 范围（本任务）**：
+  - **I1 升格**：13 个 v2.1.3 新符号写入 `rules/important-variables.md`（Critical 2 + Important-skeleton 4 + Risk-sensitive 7）；元数据 v1 → v2，上次人工 review 改 2026-05-14
+  - **M3 spec §7.6 dialog 计数同步**：5 → 4（删除 `createBizOpReconFileImportPromptDialog` 误描述；fix1.5/fix2 已删 ErrorReportDialog 后实际仅 4 个）+ 注脚 [^dialog-count] + known issue（KI-1 留 PRD §6.5）
+  - **PRD/spec/tasks v0.6 → v0.7** + round 1 修订段落
+  - **PRD §3.5.5** 新增 `t2AnomalyAccountCount` 统计语义说明（对齐 I3 Dev 实施）
+  - **spec §三 IPC 出参 schema** 同步：`bizOpRecon:run` 出参 stats 加 `t2AnomalyAccountCount` 字段
+  - **spec §五 5.0.1 函数签名 + §5.1 编排 + §5.2 helper** 同步 I3：`computeT1Op` 第 3/4 参数 `t2AnomalySeen, buName` + 函数体 `console.warn` + summary.t2AnomalyAccountCount
+  - **spec §4.3 DB schema** 同步 I3：`biz_op_recon_runs.t2_anomaly_account_count INTEGER NOT NULL DEFAULT 0`
+  - **spec §6.2 区间 writer** 同步 M4：排序 key 必须用 `normalizeAccountKey(sourceRow.account_no)` + 跨文件一致性注释
+  - **spec §九 smoke 用例** 追加 Case L（I3 防回归）/ Case M（C1 防回归）/ Case N（I2 防回归）
+  - **spec §十二 升格清单** 标注"已 round 1 升格" + 引用 important-variables.md 对应条目
+  - **spec §十五 round 1 修订记录** 全 9 条修订项详表（含 C1/I1-I3/M1-M5/Case L-N）+ 验证清单
+  - **三件套同步**：CHANGELOG.md / docs/USER_GUIDE.md / docs/VERSION_FEATURE_HISTORY.md（详见 acceptance criteria）
+- **Dev 范围（并行另一 agent）**：C1 / I2 / I3 / M1 / M2 / M4 / M5 + Case L/M/N smoke 实现；详见 spec §十五 round 1 修订记录表"代码改动文件"列
+- **acceptance criteria**：
+  - `rules/important-variables.md` 新增 13 条（git diff 验证）
+  - PRD 标题表 v0.6 → v0.7 + §3.5.5 新增 + §6.4 round1 段 + §6.5 KI-1
+  - spec 标题表 v0.6 → v0.7 + §三 IPC schema 同步 + §五签名/编排/helper 同步 + §6.2 排序注释 + §7.6 dialog 5→4 + §九 Case L/M/N + §十二 标注升格 + §十五 修订记录
+  - tasks 总任务 15 → 16 + T15 完整 task
+  - CHANGELOG.md v2.1.3 段追加 round 1 修订段
+  - docs/USER_GUIDE.md §1.7.x 状态栏文案补 t2AnomalyAccountCount 描述（如状态栏会显示）
+  - docs/VERSION_FEATURE_HISTORY.md v2.1.3 行追加 round 1 修订
+- **关联文档**：
+  - PRD §3.5.5 + §6.4 round1 段 + §6.5 KI-1
+  - spec §三 / §四 / §五 / §六 / §7.6 / §九 / §十二 / §十五
+  - rules/important-variables.md 新 13 条目
+  - CHANGELOG.md / docs/USER_GUIDE.md / docs/VERSION_FEATURE_HISTORY.md
+- **commit message**：`[v2.1.3] docs(t15-round1): PRD/spec/tasks v0.6→v0.7 + important-variables 升格 13 条 + spec §7.6 dialog 5→4 + Case L/M/N 草稿 + 三件套同步`
+- **预估**：M（1-2h，PM 侧文档同步 + I1 升格起草）

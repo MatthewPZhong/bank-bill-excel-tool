@@ -8,6 +8,14 @@
 // 与 v2.1.2 bank_bu_recon_* 完全独立（主 DB tool-data.sqlite 内表名前缀严格区分）
 // 设计依据：spec §四（DDL 全部固化），#5 拍板 = 整批拒绝 + 失败报告 xlsx → 不需要 errors 表
 
+// v2.1.3 round 1（spec §4.3）：runs 表新增 t2_anomaly_account_count
+//   - 新装用户：CREATE TABLE 直接含该列
+//   - 已有库：通过 hasColumn + ALTER TABLE 幂等加列
+function hasColumn(db, tableName, columnName) {
+  const cols = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  return cols.some((c) => c.name === columnName);
+}
+
 function ensureBizOpReconTablesSupport(db) {
   db.exec('BEGIN');
 
@@ -123,11 +131,21 @@ function ensureBizOpReconTablesSupport(db) {
         flow_total INTEGER NOT NULL DEFAULT 0,
         amount_diff_count INTEGER NOT NULL DEFAULT 0,
         multi_op_account_count INTEGER NOT NULL DEFAULT 0,
+        t2_anomaly_account_count INTEGER NOT NULL DEFAULT 0,
         t1_not_t2_count INTEGER NOT NULL DEFAULT 0,
         t2_not_t1_count INTEGER NOT NULL DEFAULT 0,
         export_path TEXT
       );
     `);
+
+    // v2.1.3 round 1（spec §4.3）：已有库幂等加列
+    // 资金红线 ⚠️：T-2 期末 NaN silent drop 账户号数量（fix7-I3 持久化）
+    if (!hasColumn(db, 'biz_op_recon_runs', 't2_anomaly_account_count')) {
+      db.exec(`
+        ALTER TABLE biz_op_recon_runs
+        ADD COLUMN t2_anomaly_account_count INTEGER NOT NULL DEFAULT 0;
+      `);
+    }
 
     db.exec(`
       CREATE INDEX IF NOT EXISTS idx_biz_op_runs_date_bu
