@@ -294,11 +294,10 @@
        → 若 {status:'success'} → import:check-single-day → 若 onlyOneDay → 弹续导对话框 (#11)
       [接续路径] 第2日：同上一轮
       ```
-  - `src/renderer-dialogs.js`（修改 — **5 个 factory**；v0.3 删除 ErrorReportDialog）
+  - `src/renderer-dialogs.js`（修改 — **4 个 factory**；v0.3 删除 ErrorReportDialog；round 1 M3 spec §7.6 同步：`createBizOpReconFileImportPromptDialog` 仅 PRD §6.5 KI-1 描述未实现，留 v2.1.4 补）
     - `createBizOpReconDatePickerDialog({title, defaultDate, onConfirm, onCancel})` — 通用日期选择
       - **#8 拍板 A**：年下拉 = `[currentYear-1, currentYear, currentYear+1]`（2025/2026/2027），月 = 1-12，日 = 1-31，**不联动**
       - **v0.3 fix1.4 / fix2.5**：业务OP 日期 + 流水对账单日期对话框调用时 `defaultDate = subOneDay(today)`（系统日期 - 1）
-    - `createBizOpReconFileImportPromptDialog({title, detail, onConfirm, onCancel})` — 文件导入前置提示
     - `createBizOpReconReconcileDialog({readyDates, defaultDate, onConfirm, onCancel})` — "开始运行" 日期选择
       - **#12 拍板 A**：下拉 option 仅 readyDates；空时"完成"按钮 disabled
       - **v0.3 fix2.5 明确不改**：本对话框保持 ready 日期列表展示，不做"默认 T-1"处理
@@ -331,7 +330,7 @@
   ```bash
   npm start  # 手动测试
   ```
-- **commit message**：`[v2.1.3] feat(t5): biz-op-recon 前端面板 + 5 dialog factory + BU 下拉状态机`
+- **commit message**：`[v2.1.3] feat(t5): biz-op-recon 前端面板 + 4 dialog factory + BU 下拉状态机`
 - **预估**：L（4-5h）
 
 ---
@@ -529,7 +528,7 @@
   | 校验失败 UI | 状态栏文字 + 失败报告路径，无独立对话框 | 待 Dev 回填 |
 - **关联文档**：
   - PRD §6.4 fix1 + fix2 手动测试增补条目
-  - spec §6.1 / §7.5 / §7.6（writer 无黄底 + BU 下拉状态机 + 5 dialog factory）
+  - spec §6.1 / §7.5 / §7.6（writer 无黄底 + BU 下拉状态机 + 4 dialog factory）
 - **acceptance criteria**：
   - 上述 12 项占位全部通过（Dev 回填 ✅ / 失败原因）
   - 死代码 `createBizOpReconErrorReportDialog` 已删除（`grep` 验证）

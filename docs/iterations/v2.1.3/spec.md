@@ -1088,7 +1088,7 @@ async function refreshBizOpReconButtons() {
 | `src/preload.js` | 修改 | 追加 `window.desktopApi.bizOpRecon.*` 暴露 |
 | `index.html` | 修改 | 主导航第 5 按钮 + `bizOpReconModulePanel` section |
 | `src/renderer.js` | 修改 | 模块切换 + 状态机 + 按钮联动 + BU 下拉渲染 + 状态栏 |
-| `src/renderer-dialogs.js` | 修改 | 新增 **5 个** factory（§7.6；v0.3 fix1.5 + fix2 删除 ErrorReportDialog） |
+| `src/renderer-dialogs.js` | 修改 | 新增 **4 个** factory（§7.6 表格实际 4 行；v0.3 fix1.5 + fix2 删除 ErrorReportDialog 后；round 1 M3 同步 spec 描述 — `createBizOpReconFileImportPromptDialog` 仅 PRD §6.5 KI-1 描述未实现，留 v2.1.4 补） |
 | `scripts/smoke-test.js` | 修改 | 新增 7 用例 A-G（§九） |
 | `scripts/preview-biz-op-recon.js` | 新建 | preview script（参照 `preview-bank-bu-recon.js`） |
 | `assets/preview-biz-op-recon-initial.png` | 新建 | preview 截图 |
@@ -1498,7 +1498,7 @@ async function refreshBizOpReconButtons() {
 - 真实数据手测：构造一个 T-2 含部分 NaN（同账户号 2 行：1 行 valid + 1 行 NaN）的业务OP 文件 → summary.t2AnomalyAccountCount 不应包含该账户号（容错路径正确）
 - 状态栏：t2AnomalyAccountCount === 0 时**不显示** "T-2 异常 W 个"；> 0 时**显示**
 
-**known issue（不在 round 2 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；留 v2.1.4 补齐（round 3-5 都未补，KI-1 持续保留）。
+**known issue（不在 round 2 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；留 v2.1.4 补齐（round 1-7 都未补，KI-1 持续保留）。
 
 ---
 
@@ -1528,7 +1528,7 @@ async function refreshBizOpReconButtons() {
 - `cat package-lock.json | grep '"version":' | head -3` → 顶层 version 字段 = 2.1.3
 - 真实数据手测：导入业务OP T-2/T-1 + 流水（同 date 跨 2 个 BU），跑 2 个 BU 对账成功 → 重新导入同日流水 → 「导出差异」对话框两个 BU 的 success 日期均消失（runs 已清，需重新跑对账）
 
-**known issue（不在 round 3 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议 v2.1.4 补齐。
+**known issue（不在 round 3 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；留 v2.1.4 补齐（round 1-7 都未补，KI-1 持续保留）。
 
 ---
 
@@ -1575,6 +1575,6 @@ async function refreshBizOpReconButtons() {
 - `grep -n "ipcMain.handle('bizOpRecon:" src/main.js | wc -l` → 10（与 round 3 验证清单一致）
 - 文档口径 5 + 10 = 15 与 code 实际 5 + 10 = 15 完全一致
 
-**known issue（不在 round 5 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；留 v2.1.4 补齐（round 3-5 都未补，KI-1 持续保留）。
+**known issue（不在 round 5 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；留 v2.1.4 补齐（round 1-7 都未补，KI-1 持续保留）。
 
-**known issue（不在 round 4 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议 v2.1.4 补齐。
+**known issue（不在 round 4 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；留 v2.1.4 补齐（round 1-7 都未补，KI-1 持续保留）。

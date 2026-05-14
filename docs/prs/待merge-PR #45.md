@@ -28,7 +28,7 @@ v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。
 
 ## self-review 累计（5 轮）
 
-5 轮 self-review 累计 finding：1 critical + 6 important + 9 minor + 6 case，含 2 P1 资金红线（流水重导跨 BU 清 / 业务OP 重导清下一日）— 全修，详见 round 1-5 commit message 与 PRD §6.4。
+5 轮 self-review 累计 finding：3 critical + 8 important + 13 minor + 6 case（critical 含 round 3+4 两个 Codex P1 资金红线 — 流水重导跨 BU 清 / 业务OP 重导清下一日）— 全修，详见 round 1-5 commit message 与 PRD §6.4。
 
 - **round 1**（v0.7，PR 提后 reviewer agent）：1 critical（C1 clearByDateBu 大小写归一）+ 3 important（I1 升格 13 条 / I2 BU trim / I3 t2AnomalyAccountCount）+ 5 minor + 3 case L/M/N
 - **round 2**（v0.8，再过 reviewer agent）：0 critical + 3 important（R2-I1 状态栏文案 / R2-I2 部分 NaN 容错 / R2-I3 Case L↔M swap + 新 Case O）+ 5 minor（含 R2-M4 subOneDay 双源升格 Risk-sensitive）+ 1 case O
