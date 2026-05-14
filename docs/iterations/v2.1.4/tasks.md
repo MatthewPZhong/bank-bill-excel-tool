@@ -101,8 +101,8 @@ T0 (PM/spec) ──→ T1 ──→ T4 ──┐
 - `src/main.js` 注册 `settings:getEnabledModules` / `settings:setEnabledModules` handler
 
 **Verify**：
-- [ ] Renderer 调 `window.desktopApi.getEnabledModules()` 返回 `{success:true, data:[...]}`
-- [ ] Renderer 调 `window.desktopApi.setEnabledModules(['recon-id-fix'])` 返回 `{success:true}` 后 DB 内容更新
+- [ ] Renderer 调 `window.desktopApi.settings.getEnabledModules()` 返回 `{ status: 'ok', enabledModules: [...] }`（round 1 M5 修订 — 注意 `settings` 子对象 + `status` schema）
+- [ ] Renderer 调 `window.desktopApi.settings.setEnabledModules(['recon-id-fix'])` 返回 `{ status: 'ok', enabledModules: ['recon-id-fix'] }` 后 DB 内容更新
 
 **关联功能 review 命中预判（spec §五）**：
 - ⚠️ IPC 接口新增 → tracked IPC vs plain IPC 口径（与 v2.1.3 round 3 拍板的 "15 IPC = 5 tracked + 10 plain" 对齐）
@@ -167,8 +167,8 @@ T0 (PM/spec) ──→ T1 ──→ T4 ──┐
 
 **Verify**：
 - [ ] 点击左侧某行 → 高亮（右侧若有选中则清空）
-- [ ] 选中左侧 + 点 ➡️ → 该项移到右侧末尾，左侧按 name.length 重排
-- [ ] 选中右侧 + 点 ⬅️（启用区 ≥ 2 时）→ 该项移到左侧，按长度重排
+- [ ] 选中左侧 + 点 ➡️ → 该项移到右侧末尾，左侧按视觉宽度重排（Fix1.5 修订 — CJK×2 + 其他×1）
+- [ ] 选中右侧 + 点 ⬅️（启用区 ≥ 2 时）→ 该项移到左侧，按视觉宽度重排（Fix1.5 修订）
 - [ ] 右侧只剩 1 个 → ⬅️ disabled
 - [ ] 右侧拖拽某行到另一行 → 顺序变更，落库
 - [ ] 关闭弹窗 → 左上角切换按钮即时反映新列表/顺序

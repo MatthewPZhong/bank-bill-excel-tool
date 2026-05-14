@@ -69,7 +69,7 @@ setting_value = JSON string，e.g. '["statement-generator","bank-statement-proce
 
 - 数组元素：MODULES 常量里的 `id` 字段
 - 顺序：数组顺序 = 左上角切换按钮展示顺序
-- 闲置区：实时计算 `Object.values(MODULES).map(m => m.id).filter(id => !enabledModules.includes(id))`，再按 `MODULES[id].name.length` 升序排（tie-break 用 MODULES 声明顺序）
+- 闲置区：实时计算 `Object.values(MODULES).map(m => m.id).filter(id => !enabledModules.includes(id))`，再按 `visualLength(MODULES[id].name)` 升序排（Fix1.5 修订 — CJK×2 + 其他×1；tie-break 用 MODULES 声明顺序）
 
 #### 3.1.2 默认值（首次启动 / DB 无该 key）
 
@@ -81,7 +81,7 @@ const DEFAULT_ENABLED_MODULES = Object.freeze([
 ]);
 ```
 
-闲置区默认（按 name.length 升序）：
+闲置区默认（按视觉宽度升序 — Fix1.5 修订）：
 - `biz-op-recon` (8)
 - `new-account-generator` (10)
 - `bank-bu-recon` (12)
@@ -370,7 +370,7 @@ function renderModuleCabinetLists() {
   const enabledIds = state.enabledModules || [];
   const allIds = Object.values(MODULES).map((m) => m.id);
   const enabledSet = new Set(enabledIds);
-  // 闲置区：按 name.length 升序，tie-break 用 MODULES 声明顺序
+  // 闲置区：按 visualLength（CJK×2 + 其他×1）升序，tie-break 用 MODULES 声明顺序 — Fix1.5 修订
   const idleIds = allIds
     .filter((id) => !enabledSet.has(id))
     .sort((a, b) => {
@@ -563,11 +563,13 @@ function handleModuleCabinetDragEnd(ev) {
 ```javascript
 function renderLists() {
   const enabledSet = new Set(enabledIds);
-  // 闲置区：按 name.length 升序，tie-break 用 allModules 顺序
+  // 闲置区：按 visualLength（CJK×2 + 其他×1）升序 — Fix1.5 修订，tie-break 用 allModules 顺序
   const idleIds = allModules
     .filter((m) => !enabledSet.has(m.id))
     .sort((a, b) => {
-      if (a.name.length !== b.name.length) return a.name.length - b.name.length;
+      const la = visualLength(a.name);
+      const lb = visualLength(b.name);
+      if (la !== lb) return la - lb;
       return allModules.indexOf(a) - allModules.indexOf(b);
     })
     .map((m) => m.id);
@@ -630,7 +632,7 @@ function renderTopModuleSwitcher() {
 
 ```javascript
 // 启动时拉取启用列表（在 currentModule 加载前）
-const enabledResult = await window.desktopApi.getEnabledModules();
+const enabledResult = await window.desktopApi.settings.getEnabledModules();
 if (enabledResult && enabledResult.success) {
   state.enabledModules = enabledResult.data;
 } else {
