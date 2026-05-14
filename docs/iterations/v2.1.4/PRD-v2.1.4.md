@@ -453,3 +453,28 @@ setting_value = JSON.stringify(['statement-generator','bank-statement-process','
 - `npm run preview:module-cabinet` → 五点视觉验证通过（弹窗截图）
 - onCommit 调用方（`src/renderer.js` 🔄 按钮 click handler）无需改动 — 签名不变，只是调用时机从"多次"变为"完成时一次"
 - 不破坏既有行为：「O3 至少保留 1」、「O4 fallback currentModule」、「O5 拖拽手柄 ⋮⋮」、「拖拽排序 HTML5 drag/drop」均保持不变
+
+### 归档完成（2026-05-14）
+
+**PR #47 已合并到 main**：
+- Merge commit: `f7358ecf0d7da542bbd2ddeaff82c7452f546c90`
+- Merged at: 2026-05-14T18:05:08Z
+- PR URL: https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/47
+- 草稿 `docs/prs/待merge-PR #47.md` 已重命名为 `docs/prs/PR47-v2.1.4.md` + frontmatter `integrated: true`
+
+**Self-review 全程汇总（6 轮）**：
+
+| Round | 触发 | Commit | Finding |
+|---|---|---|---|
+| 1 | 内部 reviewer | `75fe791` | 4 Important + 6 Minor — fallback 写回 / footer CSS / inline error / committing guard / IPC return / 文档同步 |
+| 2 | 内部 reviewer 复核 | `a617780` | 1 Important + 5 Minor — committing 视觉禁用 / try-finally / 主段同步 / spec verify Note |
+| 3 | Codex 自动 review | `49c98cc` | 2 finding (P2 + P3) — package-lock 版本号 / PRD §3.3 主体 Fix1 标记 |
+| 4 | 内部 reviewer 复核 round 3 | `c7dc3de` | 2 Minor — §3.3.6 警示语扩展 + §3.3.3 默认值表视觉宽度同步 |
+| 5 | Codex 复核 round 4 | `88f80a1` | 1 P3 — spec.md 3 处 IPC 旧 API/return 残留 |
+| 6 | Codex 复核 round 5 | `c1893d6` | 1 P3 — spec/tasks 8 处 v0.1 旧示例（name.length / 旧 IPC schema）|
+
+- **Critical / Risk-sensitive 零命中**全程
+- 代码层面 round 1-2 完成主要 fix，round 3-6 全是文档同步残留（"剥洋葱"）
+- 后端改动顺手修了 v2.1.2/v2.1.3 遗留 bug：`CURRENT_MODULE_VALID` 5 → 7 模块（提炼 `ALL_MODULE_IDS` 全集）
+
+**`rules/important-variables.md` v5 → v6**：升格 2 条 Important-skeleton（`enabled_modules` 全链路 + `ALL_MODULE_IDS` 7 模块全集 anchor）
