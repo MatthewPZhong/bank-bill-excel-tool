@@ -239,5 +239,23 @@ contextBridge.exposeInMainWorld('desktopApi', {
     // v0.5: 新增 ready/success 月份列表 IPC
     listReadyMonths: () => ipcRenderer.invoke('bankBuRecon:run:list-ready-months'),
     listSuccessMonths: () => ipcRenderer.invoke('bankBuRecon:run:list-success-months')
+  },
+  // v2.1.3：业务OP数据核对模块
+  bizOpRecon: {
+    status: () => ipcRenderer.invoke('bizOpRecon:status'),
+    listBu: () => ipcRenderer.invoke('bizOpRecon:bu:list'),
+    pickBizOpFile: (payload) => ipcRenderer.invoke('bizOpRecon:import:pick-biz-op-file', payload),
+    pickFlowFile: (payload) => ipcRenderer.invoke('bizOpRecon:import:pick-flow-file', payload),
+    runBizOpImport: (payload) => ipcRenderer.invoke('bizOpRecon:import:run-biz-op', payload),
+    runFlowImport: (payload) => ipcRenderer.invoke('bizOpRecon:import:run-flow', payload),
+    openErrorReportFolder: (payload) => ipcRenderer.invoke('bizOpRecon:import:open-error-report-folder', payload),
+    checkSingleDay: (payload) => ipcRenderer.invoke('bizOpRecon:import:check-single-day', payload),
+    listReadyDates: (payload) => ipcRenderer.invoke('bizOpRecon:run:list-ready-dates', payload),
+    run: (payload) => ipcRenderer.invoke('bizOpRecon:run', payload),
+    listSuccessDates: (payload) => ipcRenderer.invoke('bizOpRecon:export:list-success-dates', payload),
+    pickSavePath: (payload) => ipcRenderer.invoke('bizOpRecon:export:pick-save-path', payload),
+    exportDate: (payload) => ipcRenderer.invoke('bizOpRecon:export:date', payload),
+    exportDateRange: (payload) => ipcRenderer.invoke('bizOpRecon:export:date-range', payload),
+    runHistory: (payload) => ipcRenderer.invoke('bizOpRecon:run:history', payload)
   }
 });

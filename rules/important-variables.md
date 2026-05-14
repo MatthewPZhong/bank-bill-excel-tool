@@ -9,9 +9,9 @@
 
 | 字段 | 值 |
 |---|---|
-| 清单版本 | v1（对应 app v1.5.3） |
-| 上次人工 review | 2026-04-23 |
-| 基线数据 | `docs/analysis/var-reference-stats.md`（28 个 JS 文件 / 355 顶层声明） |
+| 清单版本 | v5（对应 app v2.1.3 — 2026-05-14 round 4 self-review 新增 2 条：`runBizOpImportAsync` 升格 Critical（Codex P1 资金红线 — 业务OP 重导清下一日 runs，与 round 3 `runFlowImportAsync` 升格 Critical 对齐 — 两个重导入口同级红线）+ `addOneDay` 升格 Risk-sensitive（round 4 P1 新增 helper，与 `subOneDay` round 2 升格 Risk-sensitive 对齐 — 时区错乱直接错日期）；v4 = 2026-05-14 round 3 新增 3 条：`runFlowImportAsync` Critical + `clearRunsAndDiffsByDate` Risk-sensitive + `clearRunsAndDiffsByDateBu` Risk-sensitive；v3 = 2026-05-14 round 2 新增 1 条 `subOneDay`；round 1 已升格 13 条 v2.1.3 新符号保持） |
+| 上次人工 review | 2026-05-14（round 7 — 内部 reviewer + Codex 累计 5 轮 + 内部 reviewer 复核 round 6/8 共 7 轮 self-review 全部 finding 修复） |
+| 基线数据 | `docs/analysis/var-reference-stats.md`（76 个 JS 文件 / 755 顶层声明 — round 7 I3 刷新） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
 
@@ -98,6 +98,45 @@
   - 字段 (code / message / detail lines / context) 是对外 error-report 的 schema
   - 改字段要同步所有 catch 分支 + 错误报告 writer
 
+### `runReconciliation`（v2.1.3 业务OP数据核对）
+- 定义：`src/main-process/biz-op-recon-session.js`
+- 关联功能：业务OP 数据核对模块**资金对账总入口**；编排 4 步算法（流水累加 → 计算 T-1 OP → 1:N 逐行精准比 → 账户号差集）+ 落库 runs/diff_rows
+- ⚠️ 命名冲突：与 v1.5.x Pending 模块同名 `runReconciliation` 存在；改前必先 `grep -rn "runReconciliation" src/` 确认改的是哪个模块
+- 变更 review 要点：
+  - **资金红线**：4 步流程任一改动直接影响差异判定结果
+  - 改函数签名 / summary 字段 → IPC handler `bizOpRecon:run` 出参 schema 同步 + 前端状态栏文案同步
+  - 关联拍板点：fix4（multiOpAccountSeen Set 防重复累加） / fix5（相等多 OP 行 push diffRows） / round1 I3（T-2 NaN end_balance 加 console.warn + summary.t2AnomalyAccountCount）
+  - 必跑：smoke biz-op-recon Case A-K 全套 + 真实数据样本回放
+
+### `compareT1OpWithComputed`（v2.1.3 1:N 精准标差异核心）
+- 定义：`src/main-process/biz-op-recon-session.js`
+- 关联功能：业务OP 模块 OPEN ISSUE #6 拍板 A 1:N 逐行独立比的核心算法；同账户号 N 条 T-1 OP 行各自与计算 T-1 期末余额比较，逐行独立标"相等/不相等"
+- 变更 review 要点：
+  - **资金红线**：epsilon=1e-2 容差不可放宽；超过 → 标"不相等"，进 diff_rows 表
+  - **fix5 选项 B 关键不变量**：多 OP 账户的相等行（`t1Rows.length >= 2 && diff <= epsilon`）也必须 push diffRows，meta = `相等/空/是`；单 OP 相等行不进表
+  - `amountDiffCount` 仅累计"不相等"行（相等多 OP 不计入差异计数）；`multiOpAccountCount` 按账户号去重统计
+  - 必跑：smoke biz-op-recon Case B（多 OP 行）+ Case J（fix5 反例防回归）
+
+### `runFlowImportAsync`（v2.1.3 流水对账单导入入口，**round 3 P1 升格 ⚠️ 资金红线**）
+- 定义：`src/main-process/biz-op-recon-session.js`
+- 关联功能：业务OP 模块流水对账单导入核心入口；接收 `{date, filePath}`，事务内做 28 列表头校验 + 出入方向枚举校验 + DELETE 旧流水 + **`clearRunsAndDiffsByDate(db, date)` 清该 date 跨所有 BU 的旧 runs/diff_rows** + INSERT 新流水
+- 变更 review 要点:
+  - **资金红线**（round 3 P1 修订前曾漏清）：流水换了对账没重跑 → 用户「导出差异」拿 stale 数据 = 资金事故。事务内必须包含 `clearRunsAndDiffsByDate(db, date)` 调用
+  - **与业务OP 重导对照**：业务OP 重导只清单 BU（`clearRunsAndDiffsByDateBu`）；流水重导按 date 跨所有 BU 清（`clearRunsAndDiffsByDate`）— 两个清函数语义不可混
+  - 改事务边界 / 清函数调用顺序 → 必跑 smoke Case P 防回归（构造同 date 跨 2 BU success run + 重导流水 + 断言所有 BU 的 runs/diff_rows 均被清）
+  - 必跑：smoke biz-op-recon Case D（流水累加 + 出入方向）+ Case P（流水重导清 runs）+ 真实数据手测（同 date 跨 ≥ 2 BU 已 success run，重导流水后两 BU 的「导出差异」success 日期均消失，需重新跑对账）
+
+### `runBizOpImportAsync`（v2.1.3 业务OP 导入入口，**round 4 P1 升格 ⚠️ 资金红线**）
+- 定义：`src/main-process/biz-op-recon-session.js`
+- 关联功能：业务OP 模块业务OP 导入核心入口；接收 `{date, filePath}`，事务内做 23 列表头校验 + 双重校验 + DELETE 旧业务OP `(date, BU)` + **`clearRunsAndDiffsByDateBu(db, date, BU)` 清当天作为 T-1 的 runs/diff_rows**（#15 拍板 A 已实现）+ **`clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 清下一日作为 T-2 的 runs/diff_rows**（round 4 P1 新增）+ 落库前 `bu_name = String(rawBuName).trim()`（I2 round 1）+ INSERT 新业务OP
+- 变更 review 要点:
+  - **资金红线**（round 4 P1 修订前曾漏清下一日）：业务OP 某日数据**双角色** — 既是当天对账 T-1 也是下一日对账 T-2 输入（参见 PRD §3.4.1 步 4.2.a `计算 T-1 OP = T-2 期末 + 流水累加`）。漏清下一日 (date+1, BU) run → D+1 日 run 仍按"旧 T-2 期末 + 流水累加"算 = stale 差额 → 「导出 D+1 差异」拿错数据 = 资金事故
+  - **必须两次调用 `clearRunsAndDiffsByDateBu`**：一次 `(date, BU)`（当天 T-1）+ 一次 `(addOneDay(date), BU)`（下一日 T-2）；缺一不可
+  - **`addOneDay` 必须 UTC 实现**：避免本地时区抢跑/滞后导致跨日错位；时区错乱直接错日期 → 漏清下一日 run 或误清后天 run = 资金事故（详见 `addOneDay` 条目）
+  - **与 `runFlowImportAsync` 区分语义**：业务OP 单 BU 跨 2 日清（D + D+1）；流水跨 BU 单日清（D 跨所有 BU）— 不可对调
+  - 改事务边界 / 清函数调用次数 / addOneDay 实现 → 必跑 smoke Case Q 防回归（构造 BU-A 跨 D-1/D/D+1 三日业务OP + 跑 D 与 D+1 两 run 成功 + 重导 D 业务OP + 断言 D 与 D+1 两 run 均被清）
+  - 必跑：smoke biz-op-recon Case A（核心对账）+ Case M（C1 大小写归一）+ Case N（I2 BU trim 归一）+ Case Q（业务OP 重导清下一日 runs）+ 真实数据手测（同 BU 跨 ≥ 3 日业务OP + 跑 D 与 D+1 两 run，重导 D 业务OP 后两 run 「导出差异」success 日期均消失）
+
 ---
 
 ## 2. Important-skeleton — 系统骨架
@@ -145,6 +184,42 @@
 - 定义：`src/preload.js`（61 次出现）
 - 关联功能：主/渲染进程通讯唯一桥；整个 `window.desktopApi` 的底座
 - 变更 review 要点：新增/删除 IPC channel 必须同步 main 端 `ipcMain.handle`
+
+### `normalizeBu`（v2.1.3 业务OP / v2.1.2 月度BU回填校验共用）
+- 定义：`src/main-process/biz-op-recon-session.js` + `src/backend/biz-op-recon-import/validator.js`（v2.1.3）；v2.1.2 月度BU回填校验也有同名实现
+- 实现：`String(v).trim().toLowerCase()`
+- 关联功能：BU 名归一化比较；流水 `bu_dept` vs 业务OP `bu_name` 跨表关联；OPEN ISSUE #7 拍板 C
+- 变更 review 要点：
+  - 多文件多 repository SQL 内嵌 `LOWER(TRIM(...))` 必须与函数实现保持一致（C1 round1 fix：`clearByDateBu` 已对齐 `LOWER(TRIM(?))`）
+  - 改 normalize 规则要同步 v2.1.2 + v2.1.3 两处实现 + repository 内 SQL
+  - 仅用于比较，**不改写落库原值**
+  - 必跑：smoke biz-op-recon Case G（BU 隔离 + 大小写差异容忍）
+
+### `normalizeAccountKey`（v2.1.3 账户号匹配 anchor）
+- 定义：`src/main-process/biz-op-recon-session.js` + `src/main-process/biz-op-recon-writer.js`
+- 实现：仅 `String(v).trim()`（**不**做大小写归一；账户号是资金 key）
+- 关联功能：业务OP `账户号` 与流水 `账户编号` 跨表 key 归一；区间导出 sort key（M4 round1：writer 排序 key 改用 normalizeAccountKey）
+- 变更 review 要点：
+  - 跨 session.js / writer.js 两文件使用，改实现要同步
+  - 不可加 toLowerCase（账户号大小写有业务含义）
+  - 必跑：smoke biz-op-recon Case A/B + Case K（区间排序）
+
+### `BIZ_OP_HEADERS`（v2.1.3 业务OP 23 列定义）
+- 定义：`src/backend/biz-op-recon-db/columns.js`
+- 关联功能：业务OP 表头校验 anchor + writer 输出列顺序 + reader 字段映射；模板 `assets/业务OP账单.xlsx` 23 列冻结数组
+- 变更 review 要点：
+  - 改顺序/列名 → 表头严格匹配会拒绝旧版业务OP 文件
+  - writer / reader / validator 三处必须同步引用本数组
+  - 配合 differ 的 4 列 meta（比对T-2日 / 同账户号多个OP / 比对测算金额 / 测算金额差额）→ 差异表 27 列结构
+  - 必跑：smoke biz-op-recon Case A/E + 真实业务OP 文件回放
+
+### `FLOW_HEADERS`（v2.1.3 流水对账单 28 列定义）
+- 定义：`src/backend/biz-op-recon-db/columns.js`
+- 关联功能：流水对账单表头校验 anchor + reader 字段映射；模板 `assets/流水对账单.xlsx` 28 列冻结数组
+- 变更 review 要点：
+  - 改顺序/列名 → 表头严格匹配会拒绝旧版流水文件
+  - 与 BIZ_OP_HEADERS 同步管理（配套常量）
+  - 必跑：smoke biz-op-recon Case D（流水累加 + 出入方向）+ 真实流水文件回放
 
 ---
 
@@ -279,6 +354,112 @@
 - `normalizeInputFilePaths` — `main-process/statement-session.js`
 - 关联功能：跨平台路径处理（Windows 反斜杠 / 网络路径）
 - 变更 review 要点：必跑 Windows 环境 + 中文路径
+
+### `aggregateFlowByAccount`（v2.1.3 流水按账户汇总）
+- 定义：`src/main-process/biz-op-recon-session.js`
+- 关联功能：业务OP 模块步骤 4.1 — 按 normalizeBu 过滤 + 按账户号累加 signedAmount → Map
+- 变更 review 要点：
+  - **资金红线**：累加错误直接导致计算 T-1 期末错位 → 全表差异判定失效
+  - 内部依赖 `parseSignedAmount`（Risk-sensitive 红线）+ `normalizeBu` + `normalizeAccountKey` 三个函数
+  - NaN 行 continue 跳过（导入阶段已通过 `validateFlowRow` 拦截，对账阶段二次保护）
+  - 必跑：smoke biz-op-recon Case D（流水累加）+ Case G（BU 隔离）
+
+### `parseSignedAmount`（v2.1.3 出入方向 → 正负号）
+- 定义：`src/main-process/biz-op-recon-session.js`
+- 实现：`'入' → +num` / `'出' → -num` / 其他 → `NaN`（OPEN ISSUE #3 拍板）
+- 关联功能：流水累加时把出入方向枚举转换为正负发生额；**资金红线核心**
+- 变更 review 要点：
+  - **资金红线最高级**：错一个 case 分支直接资金事故（正负号倒置）
+  - case 必须**完全枚举**（仅「入」/「出」），未知值必须返回 NaN，不可默认 +/-
+  - 与 `VALID_DIRECTION_IN` / `VALID_DIRECTION_OUT` 常量配套（Risk-sensitive）
+  - 与 `validateFlowRow` 配套：导入拦截 + 对账二次保护
+  - 必跑：smoke biz-op-recon Case D（含「DEBIT」/ 空值 / 错别字反例）
+
+### `validateBizOpRow`（v2.1.3 业务OP 双重校验）
+- 定义：`src/backend/biz-op-recon-import/validator.js`
+- 关联功能：业务OP 行级双重校验（OPEN ISSUE #1 拍板 B）：
+  - `(1) 发生额 == 发生额（入） - 发生额（出）`
+  - `(2) 期末余额 == 期初余额 + 发生额`
+  - epsilon = `AMOUNT_EPSILON` (1e-2)
+- 变更 review 要点：
+  - **资金红线**：任一行不过 → 整批拒绝 + 失败报告（OPEN ISSUE #5 拍板）
+  - 改 epsilon 阈值 → 直接影响整批拒绝判定，可能让带瑕疵数据漏入主表
+  - reason 文案变化要同步失败报告 writer 的展示
+  - 必跑：smoke biz-op-recon Case E（双重校验失败 + 整批拒绝 + 失败报告 xlsx）
+
+### `validateFlowRow`（v2.1.3 流水出入方向枚举校验）
+- 定义：`src/backend/biz-op-recon-import/validator.js`
+- 关联功能：流水行级校验：`direction ∈ {入, 出}` + `recon_amount` 可数值化 + `account_no` 非空（OPEN ISSUE #3 拍板）
+- 变更 review 要点：
+  - **资金红线**：枚举判定不严会让脏值漏到对账阶段，触发 `parseSignedAmount` NaN → 静默跳过（资金事故）
+  - 与 `VALID_DIRECTION_IN` / `VALID_DIRECTION_OUT` 共用常量；改任一处必须同步
+  - 必跑：smoke biz-op-recon Case D + 真实流水样本检查脏值
+
+### `AMOUNT_EPSILON`（v2.1.3 浮点精度门槛）
+- 定义：`src/backend/biz-op-recon-db/columns.js`（M2 round1 提取后 — 原分散在 session.js / validator.js 两处）+ `src/backend/biz-op-recon-import/validator.js` + `src/main-process/biz-op-recon-session.js` 引用
+- 当前值：`1e-2`（即 1 分钱）
+- 关联功能：业务OP 双重校验（`validateBizOpRow`）+ 测算金额对比（`compareT1OpWithComputed`）共用浮点精度门槛
+- 变更 review 要点：
+  - **资金红线**：放宽 → 带瑕疵数据漏过校验/比对；收紧 → 误判增多
+  - 必须保证多处引用同一常量（M2 round1 已提取，避免数值不一致）
+  - 必跑：smoke biz-op-recon Case A/B/E（覆盖测算 + 双重校验两种使用路径）
+
+### `VALID_DIRECTION_IN` / `VALID_DIRECTION_OUT`（v2.1.3 出入方向枚举常量）
+- 定义：`src/backend/biz-op-recon-import/validator.js`（+ 引用 `src/main-process/biz-op-recon-session.js` `parseSignedAmount`）
+- 当前值：`'入'` / `'出'`（中文字符）
+- 关联功能：流水「出入方向」字段的合法值枚举（OPEN ISSUE #3 拍板）
+- 变更 review 要点：
+  - **资金红线**：值变化（如改成 'IN' / 'OUT'）→ 历史数据全部不通过校验，导入全部失败
+  - 与 `validateFlowRow` + `parseSignedAmount` 三处必须同步
+  - 不能加同义词（如 'in' / '入款'），避免歧义
+  - 必跑：smoke biz-op-recon Case D（覆盖正反例）
+
+### `subOneDay`（v2.1.3 业务OP T-1 → T-2 日期减一 helper，**双源**）
+- 定义：`src/main-process/biz-op-recon-session.js:83` + `src/backend/biz-op-recon-db/run-repository.js:155`（**双源副本**，实现完全一致）
+- 实现：`UTC + setUTCDate(getUTCDate() - 1)` + `toISOString().slice(0, 10)`（避免本地时区抢跑导致跨日错日期）
+- 关联功能：业务OP 模块对账日期减一（D → D-1），即 T-1 → T-2；
+  - `runReconciliation` 在 session.js 调用本地 `subOneDay` 计算 t2Date
+  - `listReadyDates` 在 run-repository.js 调用本地 `subOneDay` 判定"三件齐"日期
+- 变更 review 要点：
+  - **资金红线**：时区错乱直接错日期 → 整批对账日期偏 1 天 → 拿错 T-2 业务OP 数据 → 计算 T-1 OP 错位 → 差异表全部失真
+  - **双源**：保留双源符合 architecture 边界（避免 backend → main-process 反向依赖）；维护时**必须双侧同步**
+  - **维护检查**：改任一处实现后，`grep -n "function subOneDay" src/` 确认两处行为一致
+  - 不能改用 `setDate(getDate() - 1)`（本地时区版）— 在 UTC+12 / UTC-12 边界时区会抢跑或滞后 1 天
+  - round 2 R2-M4 升格（spec ↔ code 对齐时发现双源；保留双源 + 加显式 review 要点）
+  - 必跑：smoke biz-op-recon Case A（核心对账，验证 T-1/T-2 取数日期正确）
+
+### `addOneDay`（v2.1.3 业务OP D → D+1 日期加一 helper，**round 4 P1 资金红线 ⚠️ 新增**）
+- 定义：`src/main-process/biz-op-recon-session.js`（**单源**，与 `subOneDay` 双源不同 — addOneDay 仅在业务OP 重导清逻辑使用，无 backend 反向依赖问题）
+- 实现：`new Date(date + 'T00:00:00Z')` + `setUTCDate(getUTCDate() + 1)` + `toISOString().slice(0, 10)`（与 `subOneDay` 对偶；UTC 处理避免本地时区抢跑/滞后导致跨日错位）
+- 关联功能：业务OP `(date, BU)` 重导时，`runBizOpImportAsync` 在事务内调用 `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 清下一日作为 T-2 的 run（业务OP 某日数据双角色：当天 T-1 + 下一日 T-2，参见 PRD §3.4.1 步 4.2.a）
+- 变更 review 要点：
+  - **资金红线**（round 4 P1 新增）：时区错乱直接错日期 → 漏清下一日 (date+1) run（用 setDate 在 UTC+12 滞后到 date）或误清后天 (date+2) run（在 UTC-12 抢跑到 date+2）→ stale 差异表 = 资金事故
+  - **必须 UTC 实现**：不能改用 `setDate(getDate() + 1)`（本地时区版）；与 `subOneDay` UTC 实现完全对偶
+  - **单源**：addOneDay 仅在业务OP 重导清逻辑使用（仅 `runBizOpImportAsync` 调用），无 listReadyDates 一类的双源场景；改实现只动 `src/main-process/biz-op-recon-session.js` 一处
+  - **维护检查**：改实现后 `grep -n "function addOneDay" src/` 确认仅 1 处命中（如出现 2 处 → 评估是否可合并 / 是否双源同步）
+  - **与 `subOneDay` 对照**：subOneDay 双源（session.js + run-repository.js）；addOneDay 单源（仅 session.js）— 业务边界不同
+  - round 4 P1 升格 Risk-sensitive（与 `subOneDay` round 2 R2-M4 升格 Risk-sensitive 对齐 — 时区操作类 helper 同级红线）
+  - 必跑：smoke biz-op-recon Case Q（业务OP 重导清下一日 runs；验证 addOneDay 时区安全性 + 不抢跑 / 不滞后）+ 真实数据手测（UTC+12 / UTC-12 边界时区设备跑 Case Q 不出错）
+
+### `clearRunsAndDiffsByDate`（v2.1.3 流水重导清 runs，**round 3 P1 资金红线 ⚠️ 新增**）
+- 定义：`src/backend/biz-op-recon-db/run-repository.js`
+- 实现：DELETE diff_rows WHERE run_id IN (SELECT id FROM biz_op_recon_runs WHERE data_date=?) → DELETE biz_op_recon_runs WHERE data_date=?（按 date **跨所有 BU** 清）
+- 关联功能：流水对账单 (`biz_op_recon_flow_imports`) 重导时清该 date 所有 BU 的旧 runs + diff_rows；由 `runFlowImportAsync` 在事务内调用
+- 变更 review 要点：
+  - **资金红线**（round 3 P1 新增）：流水按 date 跨 BU 共用，重导后该 date 所有 BU 旧 run 失效；漏调本函数 → 用户拿旧差异表上报 = 资金事故
+  - **与 `clearRunsAndDiffsByDateBu` 区分语义不能混**：本函数按 date 跨 BU 清；`clearRunsAndDiffsByDateBu` 按 (date, BU) 单 BU 清。流水重导专用本函数；业务OP 重导专用 `clearRunsAndDiffsByDateBu`。误用对方 → 资金红线（流水重导只清单 BU 残留其他 BU stale / 业务OP 重导清光所有 BU 数据丢失）
+  - DELETE 顺序固定：diff_rows → runs（FK 依赖；若反序 → 外键约束错）
+  - 必跑：smoke biz-op-recon Case P（构造同 date 跨 2 BU success run + 重导流水 + 断言两 BU runs/diff_rows 均被清，业务OP 主表不动）
+
+### `clearRunsAndDiffsByDateBu`（v2.1.3 业务OP 重导清 runs，**round 3 升格 Risk-sensitive ⚠️**）
+- 定义：`src/backend/biz-op-recon-db/run-repository.js`
+- 实现：DELETE diff_rows WHERE run_id IN (SELECT id FROM biz_op_recon_runs WHERE data_date=? AND LOWER(TRIM(bu_name))=LOWER(TRIM(?))) → DELETE biz_op_recon_runs WHERE data_date=? AND LOWER(TRIM(bu_name))=LOWER(TRIM(?))（按 (date, BU) **单 BU** 清；C1 round 1 修订已对齐 LOWER+TRIM）
+- 关联功能：业务OP (`biz_op_recon_imports`) 重导时清该 (date, BU) 二元组的旧 runs + diff_rows；由 `runBizOpImportAsync` 在事务内调用（OPEN ISSUE #15 拍板 A 联动清空）
+- 变更 review 要点：
+  - **资金红线**：与 `clearRunsAndDiffsByDate` 区分语义不能混（详见上一条）；业务OP 按 (date, BU) 分片，本函数只清单 BU；其他 BU 数据保留
+  - **C1 round 1 修订**：BU 比较 SQL 必须 `LOWER(TRIM(bu_name)) = LOWER(TRIM(?))`，与 `getRowsByDateBu` 完全对齐；脱口 → 大小写差异时清不掉旧数据 = 资金红线
+  - DELETE 顺序固定：diff_rows → runs（FK 依赖）
+  - 必跑：smoke biz-op-recon Case L（C1 大小写归一防回归）+ Case O（I2 BU trim 边界扩展）
 
 ---
 

@@ -1,5 +1,126 @@
 # Changelog
 
+## 2.1.3 - 2026-05-13
+
+v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。每日 T-2/T-1 业务OP + T-1 流水对账单导入 → 「业务OP T-2 期末余额 + 流水当日发生额 = 计算 T-1 OP」逻辑跑对账 → 与 T-1 业务OP 期末余额逐行精准比对（epsilon=1e-2）→ 三类差异（测算金额差异 / 多 OP 行 / 账户号增减）导出差异行 Excel（v0.3 fix2.4 回滚：差异表无颜色高亮，差异类型由新增 4 列 meta 字段表达）。OPEN ISSUE 18 项全部拍板（PRD §6.1），其中 #10 在 v0.3 fix2 回滚为 E。
+
+### ⚠️ 资金红线（必须人工 review）
+
+- **业务OP 双重校验**（#1 拍板 B + #5 整批拒绝）：`(1) 发生额 == 发生额（入） - 发生额（出）` AND `(2) 期末余额 == 期初余额 + 发生额`，epsilon=1e-2；任一不过 → 整批拒绝 + 失败报告 xlsx 落 `error-reports/{date}/`
+- **流水出入方向枚举**（#3 拍板）：仅允许中文「入」/「出」，入=+ 出=-；其他视为脏数据 → 整批拒绝
+- **多 OP 行精准标差异**（#6 拍板 A）：同账户号 N 条 T-1 OP 行各自与"计算 T-1 OP"逐行独立比，每条独立标"相等"/"不相等"（v0.3 fix2.4：差异表无颜色高亮）
+- **BU 比较语义**（#7 拍板 C）：`normalizeBu(v) = String(v).trim().toLowerCase()`，与 v2.1.2 完全一致
+- **重新导入清空旧 runs + diff_rows**（#15 拍板 A）：同 (date, BU) 重新导入业务OP 时同事务内清空旧 runs/diff_rows，避免"旧 runId 套到新数据上"的资金事故
+- 详见 `docs/iterations/v2.1.3/PRD-v2.1.3.md` §六.1
+
+### 新增
+
+- **新模块「业务OP数据核对」**：每日维度对账模块
+  - 主菜单新增第 5 个入口（与"月度银行对账单BU回填校验"同级）
+  - 主面板 3 个按钮：「导入文件」+「开始运行」+「导出差异」
+  - **BU 单选下拉框**（位于「导出差异」按钮上侧）：枚举动态来自业务OP `业务方` distinct（保留原值不 normalize；#A 拍板）
+  - 「导入文件」点击 → 弹业务OP 日期对话框（年±1 / 月 1-12 / 日 1-31 三下拉不联动，#8 拍板 A）→ 弹文件选择 → 校验通过即 INSERT，校验失败弹错误报告对话框（#5 拍板）
+  - 第 1 日导入完成弹「续导确认」对话框（#11 拍板 B）；已有多日 → 自动进入流水对账单导入流程
+  - 流水对账单 导入：同日期对话框 → 文件选择 → 「出入方向」枚举校验（仅「入」/「出」，#3 拍板）→ 校验失败整批拒绝 + 失败报告
+  - 「开始运行」点击 → 弹对账日期对话框，下拉只列"三件齐"日期（T-1/T-2 业务OP + T-1 流水均有，#12 拍板 A）→ 4 步对账算法 → 状态栏统计
+  - 「导出差异」点击 → 弹导出对话框，两 radio：「导出指定日期」（默认）/「导出指定日期区间」→ 弹另存为
+    - 指定日期 = 1 文件 1 sheet，sheet 名 `YYYY-MM-DD` ISO
+    - 区间 = 1 文件 N sheet（每个 success 日期一 sheet）；区间内无 success 的日期返回 `skippedDates`
+  - 差异表字段 = 业务OP 原 23 列 + 4 新增字段（比对T-2日 / 同账户号多个OP / 比对测算金额 / 测算金额差额）
+- **fix1 + fix2 手动测试调整**（v0.3 — 2026-05-13）：
+  - 差异表样式调整：**移除黄色高亮**（#10 拍板回滚为 E）；差异类型仅通过新增 4 列 meta 字段表达，便于 Excel 筛选器自由查询
+  - BU 下拉框：buList 非空时**移除空白 placeholder** + 默认选中第一项 + smart preserve（上次 selectedBu 仍在新 buList 时保留）；buList 为空时保留单一空白 option
+  - BU option label：**仅显示 BU 名**（去除 `(N 行)` 行计数附加）
+  - 业务OP / 流水对账单日期对话框默认值 = **系统日期 - 1**（fix1.4 / fix2.5）；"选择需要对账的日期"对话框保持现状不改
+  - 校验失败提示：**移除独立报错对话框**，改为状态栏文字 + 失败报告路径（用户 cmd+点击可直接打开）
+  - BU 行视觉对齐：BU 行容器左右边界与"导出差异"按钮对齐（fix2.1 CSS 视觉约束）
+  - 死代码清理：`createBizOpReconErrorReportDialog` factory 一并删除（dialog factory 由 6 个减为 5 个）
+- **fix4 资金红线 bug**：multi_op_account_count 在 onlyInT1 路径漏算（T-1 有 T-2 无 多 OP 账户号不计入状态栏统计）；差异表 meta 列「同账户号多个OP」未受影响。修复后 smoke 新增 Case I（3 个 sub-case，15 assertion）防回归。
+- **fix5 PRD 拍板修订**：多 OP 账户 N 行**全部进差异表**（不论相等/不相等），原"相等行不进表"规则回滚。便于资金审计逐行追溯。详见 PRD §3.4.1 步 4.2.b + §3.5.3。`compareT1OpWithComputed` 相等多 OP 行 push diffRows，meta = 相等/空/是；单 OP 相等仍不进表。`amountDiffCount` 统计不变（仅累计不相等行）；smoke 新增 Case J（含反例，防退化）。
+- **fix6 PRD #14 拍板回滚**：区间导出由**多 sheet 改单 sheet「差异」**。所有日期差异合并到一个 sheet，按 data_date 升序 + 同日内 source_account_key 升序排序；**不加新列**，依靠原表 Billdate 区分日期。**已知风险**：xlsx 原作者填的 Billdate 可能与导入时选的 data_date 不一致 → 用户在 Excel 筛选可能区分不出来 → writer 阶段写 `console.warn` 日志辅助 debug（不弹 UI 不阻断流程）。单日导出行为不变（仍 1 sheet，sheet 名 = `YYYY-MM-DD` ISO）。详见 PRD §3.3.3 + §6.1 #14 + §6.4 fix6 段。`writeDateRangeDiffWorkbook` 重写（一次性收集 → 排序 → 批量 add）；smoke 新增 Case K（含反例：sheet 数 > 1 / 表头列 > 27 / 排序失序均失败）。DB schema 不变；仅 writer 渲染层改动。
+- **数据库**：新增 4 张表（`biz_op_recon_imports` / `biz_op_recon_flow_imports` / `biz_op_recon_runs` / `biz_op_recon_diff_rows`），共主 DB `tool-data.sqlite`，与 v2.1.2 `bank_bu_recon_*` 完全独立
+- **IPC**：新增 15 个 `bizOpRecon:*` handler；`window.desktopApi.bizOpRecon.*` 暴露
+- **smoke**：新增 8 用例 A-H + helper/validator 单测，资金红线全覆盖
+- **preview**：新增 4 张截图（initial / importing / result / export-dialog）
+
+### 不影响
+
+- v2.1.2 「月度银行对账单BU回填校验」模块 + 其余 4 个老模块完全保留原状
+- v1.5.x / v2.0.0 / v3.0.0 分支无影响
+
+### round 1 self-review 修订（v0.7 — 2026-05-14，PR #45 提 PR 后 reviewer agent 反馈）
+
+- **1 critical**：C1 `clearByDateBu` BU 比较 SQL 改 `LOWER(TRIM(bu_name)) = LOWER(TRIM(?))`（与 `getRowsByDateBu` 完全对齐；**资金红线**：避免大小写差异时清不掉旧数据导致脏数据混存）
+- **3 important**：
+  - I1：13 个 v2.1.3 新符号升格 `rules/important-variables.md`（Critical 2 + Important-skeleton 4 + Risk-sensitive 7）；元数据 v1 → v2
+  - I2：`runBizOpImportAsync` 落库前归一化 BU 名（`String(rawBuName).trim()`，保留大小写）— 避免源文件首尾空格导致 BU 下拉枚举重复
+  - I3：`computeT1Op` T-2 NaN end_balance 加 `console.warn(...)` + summary 新增 `t2AnomalyAccountCount` 字段 + DB schema `biz_op_recon_runs.t2_anomaly_account_count`（migration 幂等）；详见 PRD §3.5.5
+- **5 minor**：M1-M5（M2 `AMOUNT_EPSILON` 提取到 columns.js / M3 spec §7.6 dialog 描述 5→4 同步 / M4 区间 writer 排序 key 改 normalizeAccountKey 跨文件一致 / M1+M5 详见 spec §十五）
+- **3 新 smoke**（资金红线 + UX 防回归）：
+  - Case L：T-2 NaN end_balance + summary.t2AnomalyAccountCount 防回归（含 console.warn spy 校验）
+  - Case M：clearByDateBu 大小写归一防回归（构造 "BU-A" 与 " BU-A " 两次导入，验证旧数据被清）
+  - Case N：BU 名落库前 trim 归一防回归（验证 DISTINCT bu_name 仅 1 行）
+- **known issue（不在 round 1 修，留 PRD §6.5 KI-1）**：v2.1.2 月度BU 模块同位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗），v2.1.3 业务OP 模块当前缺失同位置 dialog；**留 v2.1.4 补齐**（round 1-7 都未补，KI-1 持续保留）
+
+### round 2 self-review 修订（v0.8 — 2026-05-14，PR #45 round 1 完成后再过 reviewer agent）
+
+- **0 critical**
+- **3 important**：
+  - R2-I1（UX 半成品）：状态栏文案补 `t2AnomalyAccountCount`：仅 > 0 时显示「T-2 异常 W 个」（= 0 时不显示，避免噪声）；round 1 落 DB + summary + USER_GUIDE 文案，但 renderer 状态栏未串通 — Dev 实施
+  - R2-I2（spec ↔ code 偏差）：PRD §3.5.5 关键不变量补"部分 NaN 容错路径"描述（同账户号多行：仅全 NaN 才标 anomaly + 跳过 map；任一行 valid 则用 valid 行的期末写 map，code 通过 `validAccountSet.delete(anomalyAccountSet)` 集合差实现）
+  - R2-I3（smoke 编号 + I2 回归覆盖扩展）：smoke Case L↔M swap（按依赖顺序 — Case L = clearByDateBu / Case M = T-2 NaN）+ 新 Case O（I2 BU trim 边界扩展，覆盖 tab / 全角空格 + 同 date 联动 C1）
+- **5 minor**：
+  - R2-M1：spec §三 IPC 表删假 handler `bizOpRecon:import:pick-biz-op-date` / `bizOpRecon:import:pick-flow-date`（main.js / preload.js 实际无定义；日期选择由前端 dialog factory `createBizOpReconDatePickerDialog` 直接处理，不走 IPC）
+  - R2-M2：`computeT1Op` 函数签名 spec ↔ code 对齐 — spec v0.7 描述 `(t2OpRows, flowAggMap, t2AnomalySeen, buName)` 返回 `Map`；code 实际 `(t2OpRows, flowAggMap)` 返回 `{ map, anomalyAccountSet }` → spec §5.0.1 + §5.1 + §5.2 全部改为 code 实际签名
+  - R2-M3：console.warn 文案 spec 跟 code 走 — spec v0.7 文案与 code 实际不一致（采纳 code `[biz-op-recon] T-2 end_balance NaN silent drop date=... bu=... account=...` 为 source of truth）
+  - R2-M4：`subOneDay` 双源说明（`src/main-process/biz-op-recon-session.js:83` + `src/backend/biz-op-recon-db/run-repository.js:155` 实现完全一致）— 保留双源符合工程偏好（避免 backend → main-process 反向依赖）；rules/important-variables.md 升格 Risk-sensitive（资金红线 — 时区错乱直接错日期）
+  - R2-M5：`AMOUNT_EPSILON` 位置同步 spec §5.0 描述位置从 session.js 改为 columns.js（M2 round1 提取后单一来源；session.js + validator.js 改 import）
+- **新 smoke**：Case L/M swap + 新 Case O（I2 BU trim 边界扩展）
+- **rules/important-variables.md**：v2 → v3 + `subOneDay` Risk-sensitive 新条目（双源说明）
+
+### round 3 self-review 修订（v0.9 — 2026-05-14，PR #45 round 2 完成后 Codex 自动 review 反馈）
+
+> **round 3 self-review 修订（Codex 自动 review）**：1 P1 资金红线（流水重导清 runs）+ 2 P2（lockfile 同步 / usage-stats 接入）+ 1 P3（preview:all 接入 biz-op-recon）
+
+- **1 P1 ⚠️ 资金红线**：流水重导清该 date 所有 BU 的 runs/diff_rows
+  - 背景：`runFlowImportAsync` 成功路径只清流水主表 `biz_op_recon_flow_imports`，不清该 date 所有 BU 的 `biz_op_recon_runs` + `biz_op_recon_diff_rows`。用户重新导入同日流水后旧 BU run 仍指向旧流水算出的 diff_rows → 「导出差异」拿 stale 数据 = 资金事故
+  - Dev 修法：`src/backend/biz-op-recon-db/run-repository.js` 新增 `clearRunsAndDiffsByDate(db, date)` 函数（按 date 跨所有 BU 清；与按 (date, BU) 单 BU 清的 `clearRunsAndDiffsByDateBu` 区分语义不可混）+ `src/main-process/biz-op-recon-session.js` `runFlowImportAsync` 事务内调用 + smoke Case P 覆盖（同 date 跨 2 BU success run + 重导流水 + 断言两 BU runs/diff_rows 均被清）
+  - PRD 落实：§3.4.1 步 4 流水重导描述补 + §3.5.6 关键不变量段新增（流水重导清 runs 不变量）
+  - spec 落实：§三 IPC 表 `import:run-flow` 出参补 + §5.0.1 函数签名表新增 3 行 + §八 run-repository 函数清单补 + §九 Case P 新增 + §十二 升格 3 条评估
+  - rules/important-variables.md 升格：`runFlowImportAsync` Critical + `clearRunsAndDiffsByDate` Risk-sensitive + `clearRunsAndDiffsByDateBu` Risk-sensitive；元数据 v3 → v4
+- **2 P2**：
+  - **lockfile 同步 2.1.3**：`package-lock.json` 顶层 version 字段同步 2.1.3（package.json 已 bump 但 lockfile 未同步）— Dev 跑 `npm install --package-lock-only` 处理
+  - **usage-stats 接入**：`src/backend/usage-stats.js` `FUNCTION_REGISTRY` 新增 `'业务OP数据核对': ['导入文件', '开始运行', '导出差异']`；`src/main.js` 共 15 个 `bizOpRecon:*` IPC handler，**5 个核心 action（导入业务OP / 导入流水 / 开始运行 / 导出指定日期 / 导出区间）用 `trackedIpcHandle` 包装**，**10 个 query/dialog/helper 保持 plain `ipcMain.handle`**（按 D6 拍板"仅成功 action 计数"+ 与 v2.1.2 月度BU 模块同款分级 pattern）；spec §三 IPC 表对应行已加 tracked/plain 标注
+- **1 P3**：`package.json:71` `preview:all` script 串入 `preview:biz-op-recon`（参照 v2.1.2 月度BU preview 入串方式）
+- **新 smoke**：Case P（流水重导清 runs + diff_rows 跨 BU 防回归，资金红线 ⚠️）
+
+### round 4 self-review 修订（v0.10 — 2026-05-14，PR #45 round 3 完成后 Codex 自动 review 反馈）
+
+> **round 4 self-review 修订（Codex 自动 review）**：1 P1 资金红线（业务OP 重导清下一日 runs，与 round 3 P1 流水跨 BU 清互补）+ USER_GUIDE 流水汇总性质解释段（用户明确要求）
+
+- **1 P1 ⚠️ 资金红线**：业务OP 重导清下一日 (date+1, BU) runs/diff_rows
+  - 背景：`runBizOpImportAsync` 成功路径只清当天 (date, BU) 的 runs/diff_rows（`clearRunsAndDiffsByDateBu(db, date, bu)` — #15 拍板 A 已实现），未清下一日 (date+1, BU) 的 runs/diff_rows。业务OP 某日数据**双角色** — 既是当天对账 T-1 也是下一日对账 T-2 输入（PRD §3.4.1 步 4.2.a `计算 T-1 OP = T-2 期末 + 流水累加`）。漏清下一日 → D+1 日 run 仍按"旧 T-2 期末 + 流水累加"算 = stale 差额 → 「导出 D+1 差异」拿错数据 = 资金事故
+  - Dev 修法：`src/main-process/biz-op-recon-session.js` 新增 `addOneDay(date)` helper（**UTC 实现**：`new Date(date + 'T00:00:00Z')` + `setUTCDate(getUTCDate() + 1)` + `toISOString().slice(0, 10)`，与 `subOneDay` 对偶，避免本地时区抢跑） + `runBizOpImportAsync` 事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), bu)` 调用 + smoke Case Q 覆盖（构造 BU-A 跨 D-1/D/D+1 三日业务OP + 跑 D 与 D+1 两 run 成功 + 重导 D 业务OP + 断言 D 与 D+1 两 run 均被清；附反例：不调 addOneDay 清 / addOneDay 退化本地时区 / 误用 ByDate 跨 BU 清）
+  - **与 round 3 P1 互补**：业务OP 单 BU 跨 2 日清（D + D+1）；流水跨 BU 单日清（D 跨所有 BU）— 不可对调
+  - PRD 落实：§3.3.1 业务OP 流程描述补 + §3.5.7 关键不变量段新增（业务OP 重导清下一日 runs 不变量）+ §6.4 round4 段
+  - spec 落实：§5.0.1 函数签名表新增 2 行（`addOneDay` + `runBizOpImportAsync`）+ §九 Case Q 新增 + §十二 升格 2 条评估 + §十八 round 4 修订记录段
+  - rules/important-variables.md 升格：`runBizOpImportAsync` Critical（与 `runFlowImportAsync` round 3 升格 Critical 对齐 — 两个重导入口同级红线）+ `addOneDay` Risk-sensitive（与 `subOneDay` round 2 升格 Risk-sensitive 对齐 — 时区操作类 helper 同级红线）；元数据 v4 → v5
+- **USER_GUIDE 流水汇总性质解释段**（用户明确要求）：
+  - 用户在 round 4 测试中提出"BU-A 与 BU-B 共用同一份流水文件"的解释空缺，要求把流水汇总性质讲清楚（这是 round 3 P1 流水重导跨 BU 清的根因 — 流水文件 = 该日所有部门的流水汇总，按 normalizeBu 过滤跨 BU 共用 → 重导一份 = 所有 BU 对账失效）
+  - docs/USER_GUIDE.md §1.7.x 流水/业务OP 导入说明附近**合并新建"重导规则"小节**：流水汇总性质解释（用户原话）+ round 4 P1 业务OP 重导清下一日说明，便于用户对照"流水跨 BU 共用 / 业务OP 跨日依赖"两种模型
+- **新 smoke**：Case Q（业务OP 重导清下一日 runs + diff_rows 防回归，资金红线 ⚠️）
+
+### round 5 self-review 修订（v0.10.1 — 2026-05-14，PR #45 round 4 完成后 Codex 自动 review 反馈）
+
+- **1 P3** — 5 处归档文档残留旧口径"17 IPC bizOpRecon:* 全部用 trackedIpcHandle 包装"，与 round 3 收口的实际"15 IPC = 5 tracked + 10 plain"不符：
+  - CHANGELOG.md:93 § round 3 P2 usage-stats 段
+  - docs/VERSION_FEATURE_HISTORY.md:37 round 3 修订摘要
+  - docs/iterations/v2.1.3/PRD-v2.1.3.md:5 标题表 v0.10 描述
+  - docs/iterations/v2.1.3/PRD-v2.1.3.md:607 §6.4 round 3 P2 段
+  - docs/prs/待merge-PR #45.md:55 (ipcRenderer 命中条目)
+- 5 处统一改为"5 个核心 action 用 trackedIpcHandle + 10 个 query/dialog/helper 保持 plain（共 15 个 bizOpRecon:* IPC handler）"
+- 不阻断功能但归档文档误导后续 review/验收 — 全文档统一口径
+
 ## 2.1.2 - 2026-05-13
 
 v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更**（账单类型→对账字段、对账字段→对账内容）+ **新增模块「月度银行对账单BU回填校验」**。OPEN ISSUE #10 资金红线（v0.5 → v0.8 重新拍板）：1:1 / 1:N / N:1 视为对账成功（精准标 BU 差异子对）；N:M（双侧 ≥2）视为数据异常 → 跳过 + 写入差异表 Sheet 3「异常」（**不中断运行**）。OPEN ISSUE #5 BU 比较（v0.9）：trim + toLowerCase + 空值归一（容忍 `Flowmore` vs `FlowMore` 大小写差异）。

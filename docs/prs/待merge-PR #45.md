@@ -1,0 +1,112 @@
+---
+pr_number: 45
+title: "[v2.1.3] feat — 新增模块「业务OP数据核对」+ 6 轮 fix + 5 轮 self-review（fix1-fix6 + round 1-5）"
+base: main
+head: v2.1.3
+created: 2026-05-14
+---
+
+# [v2.1.3] feat — 新增模块「业务OP数据核对」+ 6 轮 fix + 5 轮 self-review（fix1-fix6 + round 1-5）
+
+## Summary
+
+v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。
+
+每日 T-2/T-1 业务OP + T-1 流水对账单导入 → 「业务OP T-2 期末余额 + 流水当日发生额 = 计算 T-1 OP」逻辑跑对账 → 与 T-1 业务OP 期末余额逐行精准比对（epsilon=1e-2）→ 三类差异（测算金额差异 / 多 OP 行 / 账户号增减）导出差异行 Excel。
+
+## OPEN ISSUE 拍板（PRD §6.1，共 18 项 + 6 轮 fix 拍板补丁）
+
+**已拍板（4 项 #A-#D + 14 项 #1-#15，跳过 #2 已合并到 #B）**：
+- #A 动态 BU 枚举 / #B 单 OP 也对账 / #C T-2 残行追同 sheet / #D 模板入仓
+- #1 双重校验 (B) / #3 中文「入」/「出」 / #4 替换原子事务 / #5 整批拒绝+失败报告 / #6 1:N 精准标差异 / #7 normalizeBu trim+lower / #8 日期下拉年±1 / #9 文件名格式 / #11 续导确认对话框 / #12 只列 ready 日期 / #13 复用 v2.1.2 list-ready/success / #15 重新导入清 runs
+
+**fix 轮次拍板补丁**：
+- **#10 fix2 拍板回滚 E**：差异表**无颜色高亮**（原"三类差异都标黄"回滚）
+- **fix4 资金红线 bug**：multi_op_account_count 在 onlyInT1 路径漏算 → 修复 + smoke Case I 15 assertion
+- **fix5 选项 B**：多 OP 相等行**也进 diff_rows**（原"相等行不进表"回滚）+ smoke Case J
+- **#14 fix6 拍板回滚 F**：区间导出**单 sheet「差异」**（原多 sheet 按日期分回滚）
+
+## self-review 累计（5 轮）
+
+5 轮 self-review 累计 finding：3 critical + 8 important + 13 minor + 6 case（critical 含 round 3+4 两个 Codex P1 资金红线 — 流水重导跨 BU 清 / 业务OP 重导清下一日）— 全修，详见 round 1-5 commit message 与 PRD §6.4。
+
+- **round 1**（v0.7，PR 提后 reviewer agent）：1 critical（C1 clearByDateBu 大小写归一）+ 3 important（I1 升格 13 条 / I2 BU trim / I3 t2AnomalyAccountCount）+ 5 minor + 3 case L/M/N
+- **round 2**（v0.8，再过 reviewer agent）：0 critical + 3 important（R2-I1 状态栏文案 / R2-I2 部分 NaN 容错 / R2-I3 Case L↔M swap + 新 Case O）+ 5 minor（含 R2-M4 subOneDay 双源升格 Risk-sensitive）+ 1 case O
+- **round 3**（v0.9，Codex 自动 review）：1 P1 ⚠️ 资金红线（流水重导清跨 BU runs，新增 `clearRunsAndDiffsByDate`）+ 2 P2（lockfile 同步 / usage-stats 5 tracked + 10 plain = 15 IPC）+ 1 P3（preview:all）+ Case P + 升格 3 条
+- **round 4**（v0.10，Codex 自动 review）：1 P1 ⚠️ 资金红线（业务OP 重导清下一日 runs，新增 `addOneDay` helper UTC + `runBizOpImportAsync` 事务追加调用，与 round 3 P1 互补）+ USER_GUIDE 流水汇总性质解释段 + Case Q + 升格 2 条
+- **round 5**（v0.10.1，Codex 自动 review）：1 P3（5 处归档文档残留 "17 IPC trackedIpcHandle" 口径与 round 3 实际收口的 "15 IPC = 5 tracked + 10 plain" 不符，全部统一）— 纯文档口径回填，无代码 / 无 smoke 改动
+
+**升格 important-variables.md 累计 19 条**：round 1 13 条（Critical 2 + Important-skeleton 4 + Risk-sensitive 7）+ round 2 1 条（subOneDay Risk-sensitive）+ round 3 3 条（runFlowImportAsync Critical / clearRunsAndDiffsByDate + clearRunsAndDiffsByDateBu Risk-sensitive）+ round 4 2 条（runBizOpImportAsync Critical / addOneDay Risk-sensitive）；元数据 v1 → v5。
+
+## 改动范围
+
+**新增 11 个 src 文件 + 1 smoke + 4 preview PNG + 2 模板 xlsx**：
+- `src/backend/biz-op-recon-db/`（5 文件）：migration / columns / 3 repository
+- `src/backend/biz-op-recon-import/`（2 文件）：reader / validator
+- `src/main-process/biz-op-recon-{session,writer}.js`
+- `scripts/smoke/biz-op-recon.js`（154 assertion，含 round 1-4 新 Case L/M/N/O/P/Q）
+- `docs/previews/biz-op-recon-panel-*.png` × 4
+- `assets/{业务OP账单,流水对账单}.xlsx`
+
+**修改 13 个文件**：CHANGELOG / USER_GUIDE / VFH / package.json (2.1.2→2.1.3) / index.html / src/{main,renderer,renderer-dialogs,preload,backend/database}.js / src/styles-gemini-extra.css + Clear/styles-gemini-extra.css / scripts/smoke-test.js
+
+## 11 commits 粒度
+
+```
+bcbde19 fix(pr-45-self-review-round-5): 1 P3 — Codex 4 处文档 17→15 IPC 口径残留
+f786683 fix(pr-45-self-review-round-4): 1 P1 — Codex 业务OP 重导清下一日 runs
+00b2cc5 fix(pr-45-self-review-round-3): 1 P1 + 2 P2 + 1 P3 — Codex 自动 review
+f9c636a fix(pr-45-self-review-round-2): 0 critical + 3 important + 5 minor + 1 case
+ad21f17 fix(pr-45-self-review-round-1): 1 critical + 3 important + 5 minor + 3 case
+0854f14 docs(pr-45): 草稿入库
+60b219f chore(scan-vars): 刷新统计报告
+6135abb chore(release): version bump 2.1.3 + 三件套 + smoke 119 + preview + 模板
+c986503 feat(biz-op-recon): session 算法 + writer + IPC + 前端面板/dialog
+20422b6 feat(backend,biz-op-recon-db): SQLite 4 表 + reader/validator + 3 repository
+00717ed docs(iterations): PRD/spec/tasks v0.6 — 业务OP数据核对模块
+```
+
+## ⚠️ 关联功能 review（rules/important-variables.md 软约束）
+
+| 命中 | 层级 | 自查结论 |
+|---|---|---|
+| `ipcRenderer` | Important-skeleton | preload bridge 新增 `window.desktopApi.bizOpRecon` namespace；本模块共 15 个 `bizOpRecon:*` IPC handler，按 v2.1.2 月度BU `bankBuRecon:*` 同款分级 pattern 拆分：**5 个核心 action（导入业务OP / 导入流水 / 开始运行 / 导出指定日期 / 导出区间）用 `trackedIpcHandle` 包装；其余 10 个 query/dialog/helper handler 保持 plain `ipcMain.handle`**（共 15 个 `bizOpRecon:*` IPC handler；D6 拍板"仅成功 action 计数"+ round 5 P3 全文档统一口径）；与现有 namespace 无冲突 |
+| `MODULES` | Runtime-state | 新增 `biz-op-recon` 条目，主菜单新增「业务OP数据核对」入口；其他模块条目不动 |
+| `dialog` | Runtime-state | 新增 4 个 dialog factory（业务OP/流水共用日期 dialog × 2 调用 / 续导确认 / 对账日期 / 导出对话框）；fix1.5 删除 errorReport dialog 死代码后实际 4 个（round 1 M3 spec §7.6 5→4 同步） |
+| `elements` | Runtime-state | 新增 `bizOpReconModulePanel` + 3 按钮 + BU 下拉 + 状态栏 ID |
+| `state` | Runtime-state | 新增 `bizOpReconState` 子状态机（buList / selectedBu / 各按钮 disabled 状态等） |
+
+**round 3-4 升格 5 个核心红线符号 + round 1 升格 13 条 + round 2 升格 1 条 = 累计升格 19 个**：
+- round 3：`runFlowImportAsync` (Critical) / `clearRunsAndDiffsByDate` (Risk-sensitive) / `clearRunsAndDiffsByDateBu` (Risk-sensitive)
+- round 4：`runBizOpImportAsync` (Critical) / `addOneDay` (Risk-sensitive)
+- round 2：`subOneDay` (Risk-sensitive)
+- round 1：13 条（Critical 2: `runReconciliation` / `compareT1OpWithComputed`；Important-skeleton 4: `normalizeBu` / `normalizeAccountKey` / `BIZ_OP_HEADERS` / `FLOW_HEADERS`；Risk-sensitive 7: `aggregateFlowByAccount` / `parseSignedAmount` / `validateBizOpRow` / `validateFlowRow` / `AMOUNT_EPSILON` / `VALID_DIRECTION_IN_OUT` / `addOneDay`-类合并）
+
+## 自验证证据
+
+- `npm run smoke` → **退出码 0**：biz-op-recon **154/154 PASS**（含 round 1-4 新 Case L/M/N/O/P/Q）+ bank-bu-recon **41/41 PASS** + recon-id-fix 全套 + scenario-dispatcher 15/15 + usage-stats 46/46 + 全套 PASS
+- `npm run preview:biz-op-recon` → 4 张 PNG 重跑成功（fix6 + round 4 后版本，5月14 10:24）
+- `node --check` → 全 src/*.js 语法 OK
+- `npm run scan:vars` → 755 top-level names 统计已刷新（round 7 I3 重跑后含 hasColumn / addOneDay / clearRunsAndDiffsByDate 等新顶层符号）
+
+## 用户手动 UI 测试覆盖
+
+- A 段 UI 样式（fix1+fix2+fix3 BU 行+下拉+日期 dialog）
+- B 段业务OP 导入（含校验失败状态框 + 失败报告）
+- C 段流水对账单导入
+- D 段开始运行（含资金红线 D-红1/2/3/4）
+- E 段导出差异（指定日期 + 区间，含 fix6 单 sheet）
+- F 段边界（重新导入清 runs + 多 BU + round 3 P1 跨 BU 清 + round 4 P1 业务OP 跨日清）
+- G 段 v2.1.2 模块回归（Pending / 月度银行对账单 BU 回填校验 / 网银账单生成）
+- H 段交付物检查（package.json / CHANGELOG / USER_GUIDE / smoke / preview）
+
+## Test plan
+
+- [x] smoke 全套 154/154 + 41/41 + 全套 PASS
+- [x] preview 4 张 PNG 渲染正确（fix6 + round 4 后版本）
+- [x] 用户手动 UI 测试覆盖 8 个测试段
+- [x] 资金红线 D-红1/2/3/4 / E-红1/2 / F1 自动 + 手动双重验证
+- [x] round 3 P1 流水重导跨 BU 清 + round 4 P1 业务OP 重导清下一日 自动 smoke Case P/Q + 真实数据手测
+- [x] v2.1.2 模块回归（算法 smoke + 用户手动 UI）
+- [x] CHANGELOG / USER_GUIDE / VFH 三件套同步（含 round 1-5 段）
+- [x] PRD/spec/tasks **v0.10.1**（18 拍板 + 6 轮 fix + 5 轮 self-review 反向同步）

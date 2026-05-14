@@ -66,6 +66,11 @@ const MODULES = Object.freeze({
   bankBuRecon: {
     id: 'bank-bu-recon',
     name: '月度银行对账单BU回填校验'
+  },
+  // v2.1.3：业务OP数据核对（独立第 5 个模块）
+  bizOpRecon: {
+    id: 'biz-op-recon',
+    name: '业务OP数据核对'
   }
 });
 const RENDERER_STARTUP_MARKS = Object.freeze({
@@ -257,6 +262,14 @@ const elements = {
   bankBuReconRunBtn: document.getElementById('bankBuReconRunBtn'),
   bankBuReconExportBtn: document.getElementById('bankBuReconExportBtn'),
   bankBuReconStatusBox: document.getElementById('bankBuReconStatusBox'),
+  // v2.1.3：业务OP数据核对模块（spec §7.3 — 7 项 DOM 缓存）
+  bizOpReconModulePanel: document.getElementById('bizOpReconModulePanel'),
+  bizOpReconImportBtn: document.getElementById('bizOpReconImportBtn'),
+  bizOpReconRunBtn: document.getElementById('bizOpReconRunBtn'),
+  bizOpReconBuRow: document.getElementById('bizOpReconBuRow'),
+  bizOpReconBuSelect: document.getElementById('bizOpReconBuSelect'),
+  bizOpReconExportBtn: document.getElementById('bizOpReconExportBtn'),
+  bizOpReconStatusBox: document.getElementById('bizOpReconStatusBox'),
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（spec §一.1 + §七 — 6 项 DOM 缓存）
   // v2.1.0-beta.3 T4：新增主面板"账单类别"下拉 + 行 2 整行 wrapper（可隐藏）
   reconIdFixModulePanel: document.getElementById('reconIdFixModulePanel'),
@@ -324,7 +337,19 @@ const {
   // v2.1.2 T2：preview state apply 函数（v0.8 删除 anomaly preview）
   applyBankBuReconPanelInitialPreviewState,
   applyBankBuReconPanelImportingPreviewState,
-  applyBankBuReconPanelResultPreviewState
+  applyBankBuReconPanelResultPreviewState,
+  // v2.1.3：业务OP数据核对 dialog factory（v2.1.3-fix2 删除 createBizOpReconErrorReportDialog 后剩 4 个）+ preview state apply 函数 4 个
+  createBizOpReconDatePickerDialog,
+  createBizOpReconReconcileDialog,
+  createBizOpReconExportDialog,
+  createBizOpReconSecondImportPromptDialog,
+  applyBizOpReconPanelInitialPreviewState,
+  applyBizOpReconPanelImportingPreviewState,
+  applyBizOpReconPanelResultPreviewState,
+  applyBizOpReconPanelExportDialogPreviewState,
+  // v2.1.3-fix1：状态框冒号换行 formatter + 默认日期 helper
+  formatBizOpReconStatusHtml,
+  getBizOpReconDefaultDate
 } = window.__rendererDialogs.createRendererDialogs({
   state,
   elements,
@@ -1264,6 +1289,13 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
     elements.bankBuReconModulePanel.hidden = moduleId !== MODULES.bankBuRecon.id;
     if (moduleId === MODULES.bankBuRecon.id) {
       restoreBankBuReconPanelState();
+    }
+  }
+  // v2.1.3：业务OP数据核对模块面板隐藏控制
+  if (elements.bizOpReconModulePanel) {
+    elements.bizOpReconModulePanel.hidden = moduleId !== MODULES.bizOpRecon.id;
+    if (moduleId === MODULES.bizOpRecon.id) {
+      restoreBizOpReconPanelState();
     }
   }
 
@@ -4013,6 +4045,361 @@ function formatBbrTimestampForFilename() {
   return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 }
 
+// ============================================================
+// v2.1.3：业务OP数据核对 — UI 状态机 + IPC 调用
+// PRD §3.3 数据流：导入 (业务OP + 流水) → 选 BU → 开始运行 → 导出（单日 / 区间）
+// OPEN ISSUE 拍板固化点（PRD §6.1）：
+//   #1 双重校验 + #5 整批拒绝 → 错误报告对话框
+//   #8 年下拉 ±1 / 月 1-12 / 日 1-31 不联动
+//   #11 续导确认对话框
+//   #12 listReadyDates 前置 enable
+//   #13 listSuccessDates 复用 v2.1.2 命名风格
+// ============================================================
+
+const bizOpReconState = {
+  buList: [],           // [{buName, count}] 来自 imports.bu_name DISTINCT（保留原值不 normalize）
+  selectedBu: '',       // 用户在 BU 下拉框选中的原值
+  readyDates: [],       // [{date}] 当前 selectedBu 下三件齐日期
+  successDates: []      // [{date, runId, runAt}] 当前 selectedBu 下 success 日期
+};
+
+function setBizOpReconStatus(message, tone = 'info') {
+  if (!elements.bizOpReconStatusBox) return;
+  // v2.1.3-fix1.5：本模块状态框 — 冒号（: 或 ：）后强制换行
+  // updateStatusBox 用 textContent 写文案，无法识别 <br>；此处先 escape + 替换为 innerHTML，再回写 textContent 用于 dataset tone 等
+  updateStatusBox(elements.bizOpReconStatusBox, message, tone, {
+    idleTitle: '欢迎使用小助手'
+  });
+  // updateStatusBox 调用之后，覆盖 textEl 内容为 HTML（含 <br> 换行）
+  const textEl = elements.bizOpReconStatusBox.querySelector('.status-box-text');
+  if (textEl && typeof formatBizOpReconStatusHtml === 'function') {
+    textEl.innerHTML = formatBizOpReconStatusHtml(message);
+  }
+}
+
+function applyBizOpReconButtonState() {
+  // 「导入文件」永远 enabled
+  if (elements.bizOpReconImportBtn) elements.bizOpReconImportBtn.disabled = false;
+  // v2.1.3-fix1：BU 下拉框永远 enabled（buList 为空时仅 option 列表为空白 placeholder）
+  if (elements.bizOpReconBuSelect) elements.bizOpReconBuSelect.disabled = false;
+  // 「开始运行」：已选 BU + 该 BU 下至少 1 个 ready 日期
+  if (elements.bizOpReconRunBtn) {
+    elements.bizOpReconRunBtn.disabled = !(bizOpReconState.selectedBu && bizOpReconState.readyDates.length > 0);
+  }
+  // 「导出差异」：已选 BU + 该 BU 下至少 1 个 success 日期
+  if (elements.bizOpReconExportBtn) {
+    elements.bizOpReconExportBtn.disabled = !(bizOpReconState.selectedBu && bizOpReconState.successDates.length > 0);
+  }
+}
+
+function renderBizOpReconBuSelect() {
+  const sel = elements.bizOpReconBuSelect;
+  if (!sel) return;
+  // 清空旧 options
+  while (sel.firstChild) sel.removeChild(sel.firstChild);
+  if (bizOpReconState.buList.length === 0) {
+    // v2.1.3-fix1：buList 为空时仅 1 项空白 placeholder（option label 完全空白）
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '';
+    sel.appendChild(opt);
+    bizOpReconState.selectedBu = '';
+    sel.value = '';
+    return;
+  }
+  // v2.1.3-fix2.2：option label 仅 BU 名（去掉「（N 行）」附加值）
+  // v2.1.3-fix2.3：buList 有数据时不再追加空白 placeholder（避免下拉空值项）
+  for (const bu of bizOpReconState.buList) {
+    const opt = document.createElement('option');
+    opt.value = bu.buName;
+    opt.textContent = bu.buName;
+    sel.appendChild(opt);
+  }
+  // v2.1.3-fix2.3 smart preserve：
+  //   - 若上次 selectedBu 仍在新 buList → 保留
+  //   - 否则回到第一项（buList[0]）
+  const stillExists = bizOpReconState.selectedBu
+    && bizOpReconState.buList.some(b => b.buName === bizOpReconState.selectedBu);
+  if (!stillExists) {
+    bizOpReconState.selectedBu = bizOpReconState.buList[0].buName;
+  }
+  sel.value = bizOpReconState.selectedBu;
+}
+
+async function refreshBizOpReconButtonAvailability() {
+  // 拉 BU 列表
+  try {
+    const bus = await window.desktopApi.bizOpRecon.listBu().catch(() => []);
+    bizOpReconState.buList = Array.isArray(bus) ? bus : [];
+  } catch (_e) {
+    bizOpReconState.buList = [];
+  }
+  renderBizOpReconBuSelect();
+
+  // 若已选 BU → 拉 ready + success；否则清空
+  if (bizOpReconState.selectedBu) {
+    try {
+      const [ready, success] = await Promise.all([
+        window.desktopApi.bizOpRecon.listReadyDates({ buName: bizOpReconState.selectedBu }).catch(() => []),
+        window.desktopApi.bizOpRecon.listSuccessDates({ buName: bizOpReconState.selectedBu }).catch(() => [])
+      ]);
+      bizOpReconState.readyDates = Array.isArray(ready) ? ready : [];
+      bizOpReconState.successDates = Array.isArray(success) ? success : [];
+    } catch (_e) {
+      bizOpReconState.readyDates = [];
+      bizOpReconState.successDates = [];
+    }
+  } else {
+    bizOpReconState.readyDates = [];
+    bizOpReconState.successDates = [];
+  }
+
+  applyBizOpReconButtonState();
+}
+
+function restoreBizOpReconPanelState() {
+  applyBizOpReconButtonState();
+  setBizOpReconStatus('欢迎使用小助手', 'info');
+  refreshBizOpReconButtonAvailability();
+}
+
+function handleBizOpReconBuChange(e) {
+  bizOpReconState.selectedBu = String(e.target.value || '');
+  refreshBizOpReconButtonAvailability();
+}
+
+// 导入流程：业务OP → 续导确认 → 流水对账单
+async function handleBizOpReconImport() {
+  // 阶段一：业务OP
+  await importBizOpStage();
+}
+
+async function importBizOpStage() {
+  return new Promise((resolve) => {
+    openModal(createBizOpReconDatePickerDialog({
+      title: '选择业务OP所属日期',
+      // v2.1.3-fix1.4：默认值 = 系统今天 - 1 天（按本地时区，自动滚月/滚年）
+      defaultDate: getBizOpReconDefaultDate(),
+      onConfirm: async (date) => {
+        const pickRes = await window.desktopApi.bizOpRecon.pickBizOpFile({ date });
+        if (!pickRes || pickRes.status === 'cancelled') {
+          setBizOpReconStatus(`${date}：已取消选择业务OP文件`, 'info');
+          resolve();
+          return;
+        }
+        if (pickRes.status === 'error') {
+          setBizOpReconStatus(pickRes.message || '选择业务OP文件失败', 'error');
+          resolve();
+          return;
+        }
+        setBizOpReconStatus(`正在导入业务OP ${date} 数据...`, 'info');
+        const impResult = await window.desktopApi.bizOpRecon.runBizOpImport({
+          date,
+          filePath: pickRes.filePath
+        });
+        if (impResult.status === 'error') {
+          const detail = impResult.detailLines && impResult.detailLines.length > 0
+            ? '\n' + impResult.detailLines.join('\n')
+            : '';
+          setBizOpReconStatus(`业务OP 导入失败：${impResult.message}${detail}`, 'error');
+          resolve();
+          return;
+        }
+        if (impResult.status === 'rejected') {
+          // v2.1.3-fix1.5：校验失败 → 不再弹错误报告对话框，状态框显示行数 + 失败报告路径
+          const pathPart = impResult.errorReportPath
+            ? `；失败报告：${impResult.errorReportPath}`
+            : '';
+          setBizOpReconStatus(
+            `业务OP 校验失败：${impResult.errorRows.length} 行（整批拒绝）${pathPart}`,
+            'error'
+          );
+          resolve();
+          return;
+        }
+        // success
+        setBizOpReconStatus(
+          `业务OP（${date} / BU=${impResult.buName}）已导入 ${impResult.validCount} 行`,
+          'success'
+        );
+        await refreshBizOpReconButtonAvailability();
+
+        // #11 拍板 B：检查"库里仅一日数据"，弹续导确认
+        const single = await window.desktopApi.bizOpRecon.checkSingleDay({ buName: impResult.buName });
+        if (single && single.onlyOneDay) {
+          openModal(createBizOpReconSecondImportPromptDialog({
+            firstDate: date,
+            onConfirm: async () => {
+              // 再走一轮业务OP 导入
+              await importBizOpStage();
+              resolve();
+            },
+            onCancel: () => {
+              setBizOpReconStatus(`已导入第 1 日数据（${date} / BU=${impResult.buName}），待手动再次点击导入。`, 'info');
+              resolve();
+            }
+          }));
+          return;
+        }
+        // 已有多日 → 进入流水阶段
+        await importFlowStage();
+        resolve();
+      },
+      onCancel: () => resolve()
+    }));
+  });
+}
+
+async function importFlowStage() {
+  return new Promise((resolve) => {
+    openModal(createBizOpReconDatePickerDialog({
+      title: '选择流水对账单所属日期',
+      // v2.1.3-fix2.5：默认值 = 系统今天 - 1 天（与业务OP日期 dialog 同源 helper）
+      defaultDate: getBizOpReconDefaultDate(),
+      onConfirm: async (date) => {
+        const pickRes = await window.desktopApi.bizOpRecon.pickFlowFile({ date });
+        if (!pickRes || pickRes.status === 'cancelled') {
+          setBizOpReconStatus(`${date}：已取消选择流水对账单文件`, 'info');
+          resolve();
+          return;
+        }
+        if (pickRes.status === 'error') {
+          setBizOpReconStatus(pickRes.message || '选择流水对账单文件失败', 'error');
+          resolve();
+          return;
+        }
+        setBizOpReconStatus(`正在导入流水对账单 ${date} 数据...`, 'info');
+        const impResult = await window.desktopApi.bizOpRecon.runFlowImport({
+          date,
+          filePath: pickRes.filePath
+        });
+        if (impResult.status === 'error') {
+          const detail = impResult.detailLines && impResult.detailLines.length > 0
+            ? '\n' + impResult.detailLines.join('\n')
+            : '';
+          setBizOpReconStatus(`流水对账单 导入失败：${impResult.message}${detail}`, 'error');
+          resolve();
+          return;
+        }
+        if (impResult.status === 'rejected') {
+          // v2.1.3-fix1.5：校验失败 → 不再弹错误报告对话框，状态框显示行数 + 失败报告路径
+          const pathPart = impResult.errorReportPath
+            ? `；失败报告：${impResult.errorReportPath}`
+            : '';
+          setBizOpReconStatus(
+            `流水对账单 校验失败：${impResult.errorRows.length} 行（整批拒绝）${pathPart}`,
+            'error'
+          );
+          resolve();
+          return;
+        }
+        setBizOpReconStatus(
+          `流水对账单（${date}）已导入 ${impResult.totalCount} 行`,
+          'success'
+        );
+        await refreshBizOpReconButtonAvailability();
+        resolve();
+      },
+      onCancel: () => resolve()
+    }));
+  });
+}
+
+async function handleBizOpReconRun() {
+  if (!bizOpReconState.selectedBu) {
+    openModal(createAlertDialog('请先在下拉框中选择 BU。'));
+    return;
+  }
+  const buName = bizOpReconState.selectedBu;
+  // #12 拍板 A：列出 ready 日期
+  const readyDates = await window.desktopApi.bizOpRecon.listReadyDates({ buName }).catch(() => []);
+  if (!readyDates || readyDates.length === 0) {
+    openModal(createAlertDialog(
+      `BU=${buName} 暂无可对账日期。需要同时导入：T-1 业务OP + T-2 业务OP + T-1 流水对账单（同 BU），三件齐才会显示在此处。`
+    ));
+    return;
+  }
+  openModal(createBizOpReconReconcileDialog({
+    readyDates,
+    onConfirm: async (date) => {
+      setBizOpReconStatus(`正在对账 ${buName} / ${date}...`, 'info');
+      const result = await window.desktopApi.bizOpRecon.run({ date, buName });
+      if (result.status === 'error') {
+        setBizOpReconStatus(`运行失败：${result.message}`, 'error');
+        return;
+      }
+      const s = result.stats;
+      const tone = (s.amountDiffCount > 0 || s.t1NotT2Count > 0 || s.t2NotT1Count > 0) ? 'info' : 'success';
+      setBizOpReconStatus(
+        `${date} BU=${buName} 对账完成：测算金额差异 ${s.amountDiffCount} 笔 / T-1 有 T-2 无 ${s.t1NotT2Count} 笔 / T-2 有 T-1 无 ${s.t2NotT1Count} 笔 / 多 OP 账户 ${s.multiOpAccountCount} 个`
+        + (s.t2AnomalyAccountCount > 0 ? ` / T-2 异常账户 ${s.t2AnomalyAccountCount} 个` : ''),
+        tone
+      );
+      await refreshBizOpReconButtonAvailability();
+    },
+    onCancel: () => {}
+  }));
+}
+
+async function handleBizOpReconExport() {
+  if (!bizOpReconState.selectedBu) {
+    openModal(createAlertDialog('请先在下拉框中选择 BU。'));
+    return;
+  }
+  const buName = bizOpReconState.selectedBu;
+  const successDates = await window.desktopApi.bizOpRecon.listSuccessDates({ buName }).catch(() => []);
+  if (!successDates || successDates.length === 0) {
+    openModal(createAlertDialog(`BU=${buName} 暂无可导出的成功运行记录。请先用「开始运行」对账。`));
+    return;
+  }
+  openModal(createBizOpReconExportDialog({
+    successDates,
+    onConfirm: async (choice) => {
+      // 默认文件名（#9 拍板 A）
+      const ts = formatBbrTimestampForFilename();
+      let defaultFileName;
+      if (choice.scope === 'single') {
+        const compact = (choice.date || '').replace(/-/g, '');
+        defaultFileName = `业务OP数据核对_${buName}_${compact}_${ts}.xlsx`;
+      } else {
+        const sc = (choice.startDate || '').replace(/-/g, '');
+        const ec = (choice.endDate || '').replace(/-/g, '');
+        defaultFileName = `业务OP数据核对_${buName}_${sc}-${ec}_${ts}.xlsx`;
+      }
+      const pickRes = await window.desktopApi.bizOpRecon.pickSavePath({ defaultFileName });
+      if (!pickRes || pickRes.status === 'cancelled') {
+        setBizOpReconStatus('已取消导出', 'info');
+        return;
+      }
+      if (pickRes.status === 'error') {
+        setBizOpReconStatus(`选择保存路径失败：${pickRes.message}`, 'error');
+        return;
+      }
+      const savePath = pickRes.savePath;
+      setBizOpReconStatus('正在导出差异表...', 'info');
+      let result;
+      if (choice.scope === 'single') {
+        result = await window.desktopApi.bizOpRecon.exportDate({ runId: choice.runId, savePath });
+      } else {
+        result = await window.desktopApi.bizOpRecon.exportDateRange({
+          buName, startDate: choice.startDate, endDate: choice.endDate, savePath
+        });
+      }
+      if (result.status !== 'success') {
+        setBizOpReconStatus(`导出失败：${result.message || '未知错误'}`, 'error');
+        return;
+      }
+      setBizOpReconStatus(`差异表已生成：${result.filePath}`, 'success');
+      if (choice.scope === 'range' && Array.isArray(result.skippedDates) && result.skippedDates.length > 0) {
+        openModal(createAlertDialog(
+          `区间导出完成。${result.skippedDates.length} 个日期因未对账成功未包含在文件中：${result.skippedDates.join(', ')}`
+        ));
+      }
+    },
+    onCancel: () => {}
+  }));
+}
+
 async function initialize() {
   markRendererStartup(RENDERER_STARTUP_MARKS.initializeStart);
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoStart);
@@ -4193,6 +4580,20 @@ async function initialize() {
   }
   if (elements.bankBuReconExportBtn) {
     elements.bankBuReconExportBtn.addEventListener('click', handleBankBuReconExport);
+  }
+
+  // v2.1.3：业务OP数据核对模块事件绑定
+  if (elements.bizOpReconImportBtn) {
+    elements.bizOpReconImportBtn.addEventListener('click', handleBizOpReconImport);
+  }
+  if (elements.bizOpReconRunBtn) {
+    elements.bizOpReconRunBtn.addEventListener('click', handleBizOpReconRun);
+  }
+  if (elements.bizOpReconExportBtn) {
+    elements.bizOpReconExportBtn.addEventListener('click', handleBizOpReconExport);
+  }
+  if (elements.bizOpReconBuSelect) {
+    elements.bizOpReconBuSelect.addEventListener('change', handleBizOpReconBuChange);
   }
 
   elements.backgroundPaletteBtn.addEventListener('click', () => {
@@ -4516,6 +4917,14 @@ async function initialize() {
     setTimeout(() => { applyBankBuReconPanelImportingPreviewState(); }, 120);
   } else if (info.previewModal === 'bank-bu-recon-panel-result') {
     setTimeout(() => { applyBankBuReconPanelResultPreviewState(); }, 120);
+  } else if (info.previewModal === 'biz-op-recon-panel-initial') {
+    setTimeout(() => { applyBizOpReconPanelInitialPreviewState(); }, 120);
+  } else if (info.previewModal === 'biz-op-recon-panel-importing') {
+    setTimeout(() => { applyBizOpReconPanelImportingPreviewState(); }, 120);
+  } else if (info.previewModal === 'biz-op-recon-panel-result') {
+    setTimeout(() => { applyBizOpReconPanelResultPreviewState(); }, 120);
+  } else if (info.previewModal === 'biz-op-recon-panel-export-dialog') {
+    setTimeout(() => { applyBizOpReconPanelExportDialogPreviewState(); }, 120);
   }
 
   markRendererStartup(RENDERER_STARTUP_MARKS.initComplete);

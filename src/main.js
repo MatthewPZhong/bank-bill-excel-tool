@@ -20,6 +20,24 @@ const {
   writeAggregateDiffWorkbook: writeBankBuReconAggregateDiffWorkbook
 } = require('./main-process/bank-bu-recon-writer');
 const { readPendingGuanliFile, readBankFile } = require('./backend/bank-bu-recon-import/reader');
+// v2.1.3：业务OP数据核对模块
+// v2.1.3-fix7-M1：删 makeSingleDateDiffFileName / makeDateRangeDiffFileName 死 import
+// （文件名生成在 ipc handler 内部直接 require session 调用，main.js 顶层无引用）
+const {
+  createBizOpReconSession,
+  runBizOpImportAsync: runBizOpImport,
+  runFlowImportAsync: runFlowImport
+} = require('./main-process/biz-op-recon-session');
+const {
+  writeSingleDateDiffWorkbook: writeBizOpSingleDateDiffWorkbook,
+  writeDateRangeDiffWorkbook: writeBizOpDateRangeDiffWorkbook,
+  writeBizOpErrorReportXlsx,
+  writeFlowErrorReportXlsx
+} = require('./main-process/biz-op-recon-writer');
+const {
+  readBizOpFile,
+  readFlowFile
+} = require('./backend/biz-op-recon-import/reader');
 const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-dispatcher');
 const {
   readBankStatement,
@@ -126,6 +144,11 @@ const pendingSession = createPendingSession({
 });
 // v2.1.2 T2：月度银行对账单BU回填校验 session（主 DB tool-data.sqlite）
 const bankBuReconSession = createBankBuReconSession({
+  getDb: () => database && database.db,
+  getStorageRoot: () => ensureStorageRoot()
+});
+// v2.1.3：业务OP数据核对 session（主 DB tool-data.sqlite）
+const bizOpReconSession = createBizOpReconSession({
   getDb: () => database && database.db,
   getStorageRoot: () => ensureStorageRoot()
 });
@@ -9723,6 +9746,256 @@ function registerNewAccountHandlers() {
   ipcMain.handle('bankBuRecon:run:list-success-months', () => {
     if (!database || !database.db) return [];
     try { return bankBuReconSession.listSuccessMonths(); } catch (_e) { return []; }
+  });
+
+  // ==========================================================================
+  // v2.1.3：业务OP数据核对 IPC handlers（spec §三 共 17 个）
+  // 命名空间 bizOpRecon:*；与 bankBuRecon:* 完全独立
+  // ==========================================================================
+
+  // 模块状态查询
+  ipcMain.handle('bizOpRecon:status', () => {
+    if (!database || !database.db) return { importedDateBuPairs: [], buList: [], flowImportedDates: [] };
+    try {
+      return bizOpReconSession.getStatus();
+    } catch (_e) {
+      return { importedDateBuPairs: [], buList: [], flowImportedDates: [] };
+    }
+  });
+
+  // BU 下拉框枚举（保留原值不 normalize；#A 拍板）
+  ipcMain.handle('bizOpRecon:bu:list', () => {
+    if (!database || !database.db) return [];
+    try {
+      return bizOpReconSession.listBu();
+    } catch (_e) {
+      return [];
+    }
+  });
+
+  // 业务OP 文件选择（弹原生文件对话框）
+  ipcMain.handle('bizOpRecon:import:pick-biz-op-file', async (_event, payload = {}) => {
+    const { date } = payload || {};
+    try {
+      const result = await dialog.showOpenDialog({
+        title: `选择业务OP 文件（日期 ${date || ''}）`,
+        properties: ['openFile'],
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      return { status: 'ok', filePath: result.filePaths[0] };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // 流水对账单 文件选择
+  ipcMain.handle('bizOpRecon:import:pick-flow-file', async (_event, payload = {}) => {
+    const { date } = payload || {};
+    try {
+      const result = await dialog.showOpenDialog({
+        title: `选择流水对账单 文件（日期 ${date || ''}）`,
+        properties: ['openFile'],
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      return { status: 'ok', filePath: result.filePaths[0] };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // 业务OP 导入（#1 双重校验 + #4 替换原子事务 + #5 整批拒绝 + #15 清空旧 runs）
+  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数（rejected/error 不计，spec D6）
+  trackedIpcHandle('bizOpRecon:import:run-biz-op', '业务OP数据核对', '导入文件', async (_event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
+    const { date, filePath } = payload || {};
+    if (!date || !filePath) return { status: 'error', message: '入参缺失（date / filePath）' };
+    try {
+      const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
+      const result = await runBizOpImport(database.db, {
+        date,
+        filePath,
+        readBizOpFile,
+        writeBizOpErrorReportXlsx,
+        errorReportsDir
+      });
+      return result;
+    } catch (err) {
+      return {
+        status: 'error',
+        message: err && err.message ? err.message : String(err),
+        detailLines: err && err.detailLines ? err.detailLines : []
+      };
+    }
+  });
+
+  // 流水对账单 导入（#3 出入方向枚举 + #5 整批拒绝）
+  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
+  trackedIpcHandle('bizOpRecon:import:run-flow', '业务OP数据核对', '导入文件', async (_event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
+    const { date, filePath } = payload || {};
+    if (!date || !filePath) return { status: 'error', message: '入参缺失（date / filePath）' };
+    try {
+      const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
+      const result = await runFlowImport(database.db, {
+        date,
+        filePath,
+        readFlowFile,
+        writeFlowErrorReportXlsx,
+        errorReportsDir
+      });
+      return result;
+    } catch (err) {
+      return {
+        status: 'error',
+        message: err && err.message ? err.message : String(err),
+        detailLines: err && err.detailLines ? err.detailLines : []
+      };
+    }
+  });
+
+  // 打开错误报告文件夹（#5 拍板）
+  ipcMain.handle('bizOpRecon:import:open-error-report-folder', async (_event, payload = {}) => {
+    const { errorReportPath } = payload || {};
+    if (!errorReportPath) return { ok: false, message: '路径为空' };
+    try {
+      const { shell } = require('electron');
+      shell.showItemInFolder(errorReportPath);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // 检查"库里仅有一日数据"（#11 拍板 B）
+  ipcMain.handle('bizOpRecon:import:check-single-day', (_event, payload = {}) => {
+    if (!database || !database.db) return { onlyOneDay: false, count: 0 };
+    const { buName } = payload || {};
+    if (!buName) return { onlyOneDay: false, count: 0 };
+    try {
+      return bizOpReconSession.checkSingleDay(buName);
+    } catch (_e) {
+      return { onlyOneDay: false, count: 0 };
+    }
+  });
+
+  // 列 ready 日期（#12 + #13 拍板 A）
+  ipcMain.handle('bizOpRecon:run:list-ready-dates', (_event, payload = {}) => {
+    if (!database || !database.db) return [];
+    const { buName } = payload || {};
+    if (!buName) return [];
+    try {
+      return bizOpReconSession.listReadyDates(buName);
+    } catch (_e) {
+      return [];
+    }
+  });
+
+  // 跑对账（#3/#6/#7/#10 拍板）
+  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
+  trackedIpcHandle('bizOpRecon:run', '业务OP数据核对', '开始运行', (_event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
+    const { date, buName } = payload || {};
+    if (!date || !buName) return { status: 'error', message: '入参缺失（date / buName）' };
+    try {
+      const { runId, stats } = bizOpReconSession.run({ date, buName });
+      return { runId, status: 'success', stats };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // 列 success 日期（#13 拍板 A，导出指定日期下拉来源）
+  ipcMain.handle('bizOpRecon:export:list-success-dates', (_event, payload = {}) => {
+    if (!database || !database.db) return [];
+    const { buName } = payload || {};
+    if (!buName) return [];
+    try {
+      return bizOpReconSession.listSuccessDates(buName);
+    } catch (_e) {
+      return [];
+    }
+  });
+
+  // 弹另存为对话框（#9 拍板 A 默认文件名由前端拼好）
+  ipcMain.handle('bizOpRecon:export:pick-save-path', async (_event, payload = {}) => {
+    const { defaultFileName } = payload || {};
+    try {
+      const result = await dialog.showSaveDialog({
+        title: '另存为',
+        defaultPath: path.join(ensureStorageRoot(), 'exports', defaultFileName || 'export.xlsx'),
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (result.canceled || !result.filePath) return { status: 'cancelled' };
+      return { status: 'ok', savePath: result.filePath };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // 导出指定日期（#14 拍板 A sheet 名 ISO）
+  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
+  trackedIpcHandle('bizOpRecon:export:date', '业务OP数据核对', '导出差异', async (_event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
+    const { runId, savePath } = payload || {};
+    if (!runId || !savePath) return { status: 'error', message: '入参缺失（runId / savePath）' };
+    try {
+      const run = bizOpReconSession.getRun(runId);
+      if (!run) return { status: 'error', message: `run #${runId} 不存在` };
+      const result = await writeBizOpSingleDateDiffWorkbook({
+        db: database.db,
+        date: run.data_date,
+        buName: run.bu_name,
+        runId,
+        savePath
+      });
+      bizOpReconSession.recordExportPath(runId, result.filePath);
+      return { status: 'success', filePath: result.filePath, rowCount: result.rowCount };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // 导出指定日期区间（v2.1.3-fix6 拍板回滚：单 sheet 合并 + 第 1 列 Billdate 区分日期）
+  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
+  trackedIpcHandle('bizOpRecon:export:date-range', '业务OP数据核对', '导出差异', async (_event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
+    const { buName, startDate, endDate, savePath } = payload || {};
+    if (!buName || !startDate || !endDate || !savePath) {
+      return { status: 'error', message: '入参缺失（buName / startDate / endDate / savePath）' };
+    }
+    try {
+      const result = await writeBizOpDateRangeDiffWorkbook({
+        db: database.db,
+        buName, startDate, endDate, savePath
+      });
+      return {
+        status: 'success',
+        filePath: result.filePath,
+        sheetCount: result.sheetCount,
+        skippedDates: result.skippedDates
+      };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // 运行历史（debug 用，可选）
+  ipcMain.handle('bizOpRecon:run:history', (_event, payload = {}) => {
+    if (!database || !database.db) return [];
+    const { date, buName } = payload || {};
+    if (!date || !buName) return [];
+    try {
+      const runRepo = require('./backend/biz-op-recon-db/run-repository');
+      return runRepo.listRunsByDateBu(database.db, date, buName);
+    } catch (_e) {
+      return [];
+    }
   });
 }
 

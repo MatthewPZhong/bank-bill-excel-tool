@@ -23,6 +23,8 @@ const { runReconIdFixEndToEndSmokeTests } = require('./smoke/recon-id-fix-end-to
 const { runReconIdFixEngineGatewaySmokeTests } = require('./smoke/recon-id-fix-engine-gateway');
 // v2.1.2 T2：月度银行对账单BU回填校验（A-E + F-H + I 覆盖导入回归 + 5 normalize 单测）
 const { runBankBuReconSmokeTests } = require('./smoke/bank-bu-recon');
+// v2.1.3：业务OP数据核对（A-H 8 用例 + helper/validator 单测）
+const { runBizOpReconSmokeTests } = require('./smoke/biz-op-recon');
 
 async function run() {
   const context = createSmokeContext();
@@ -46,6 +48,8 @@ async function run() {
   runUsageStatsSmokeTests();
   // v2.1.2 T2：月度银行对账单BU回填校验
   await runBankBuReconSmokeTests();
+  // v2.1.3：业务OP数据核对
+  await runBizOpReconSmokeTests();
   console.log('smoke test passed');
 }
 
