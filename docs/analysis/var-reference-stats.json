@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "2.1.2",
-    "scannedAt": "2026-05-13T03:43:49.865Z",
+    "version": "2.1.3",
+    "scannedAt": "2026-05-14T02:26:32.702Z",
     "root": "src",
-    "totalFiles": 67,
-    "totalTopLevelNames": 669,
+    "totalFiles": 76,
+    "totalTopLevelNames": 753,
     "buckets": {
-      "shared": 115,
-      "paired": 184,
-      "local": 275,
-      "crossFile": 299
+      "shared": 133,
+      "paired": 220,
+      "local": 304,
+      "crossFile": 353
     }
   },
   "A": {
@@ -22,6 +22,7 @@
           "src/backend/bank-bu-recon-import/reader.js",
           "src/backend/big-account-mode-store.js",
           "src/backend/big-account-order-store.js",
+          "src/backend/biz-op-recon-import/reader.js",
           "src/backend/database.js",
           "src/backend/database/own-accounts-migration.js",
           "src/backend/file-service/readers.js",
@@ -34,6 +35,8 @@
           "src/main-process/bank-bu-recon-session.js",
           "src/main-process/bank-bu-recon-writer.js",
           "src/main-process/bank-statement-io.js",
+          "src/main-process/biz-op-recon-session.js",
+          "src/main-process/biz-op-recon-writer.js",
           "src/main-process/pending-session.js",
           "src/main-process/recon-id-fix-io.js",
           "src/main-process/statement-generation.js",
@@ -60,6 +63,10 @@
           {
             "file": "src/backend/big-account-order-store.js",
             "count": 3
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
           },
           {
             "file": "src/backend/database.js",
@@ -114,6 +121,14 @@
             "count": 3
           },
           {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 5
+          },
+          {
             "file": "src/main-process/pending-session.js",
             "count": 6
           },
@@ -142,8 +157,8 @@
             "count": 2
           }
         ],
-        "totalHits": 79,
-        "fileSpan": 25
+        "totalHits": 89,
+        "fileSpan": 28
       },
       {
         "name": "fs",
@@ -165,6 +180,8 @@
           "src/main-process/bank-bu-recon-session.js",
           "src/main-process/bank-bu-recon-writer.js",
           "src/main-process/bank-statement-io.js",
+          "src/main-process/biz-op-recon-session.js",
+          "src/main-process/biz-op-recon-writer.js",
           "src/main-process/pending-session.js",
           "src/main-process/recon-id-fix-io.js",
           "src/main.js"
@@ -239,6 +256,14 @@
             "count": 3
           },
           {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 5
+          },
+          {
             "file": "src/main-process/pending-session.js",
             "count": 2
           },
@@ -251,8 +276,8 @@
             "count": 1
           }
         ],
-        "totalHits": 54,
-        "fileSpan": 20
+        "totalHits": 60,
+        "fileSpan": 22
       },
       {
         "name": "parse",
@@ -357,6 +382,10 @@
             "count": 9
           },
           {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
             "file": "src/backend/file-service.js",
             "count": 34
           },
@@ -389,8 +418,8 @@
             "count": 1
           }
         ],
-        "totalHits": 93,
-        "fileSpan": 13
+        "totalHits": 95,
+        "fileSpan": 14
       },
       {
         "name": "FileValidationError",
@@ -414,6 +443,10 @@
           },
           {
             "file": "src/backend/bank-bu-recon-import/reader.js",
+            "count": 5
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
             "count": 5
           },
           {
@@ -453,13 +486,14 @@
             "count": 1
           }
         ],
-        "totalHits": 58,
-        "fileSpan": 12
+        "totalHits": 63,
+        "fileSpan": 13
       },
       {
         "name": "XLSX",
         "defFiles": [
           "src/backend/bank-bu-recon-import/reader.js",
+          "src/backend/biz-op-recon-import/reader.js",
           "src/backend/file-service/normalizers.js",
           "src/backend/file-service/readers.js",
           "src/backend/file-service/writers.js",
@@ -472,6 +506,10 @@
         "refFiles": [
           {
             "file": "src/backend/bank-bu-recon-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
             "count": 3
           },
           {
@@ -507,8 +545,8 @@
             "count": 1
           }
         ],
-        "totalHits": 57,
-        "fileSpan": 9
+        "totalHits": 60,
+        "fileSpan": 10
       },
       {
         "name": "PENDING_COLUMNS",
@@ -588,6 +626,10 @@
             "count": 14
           },
           {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 10
+          },
+          {
             "file": "src/main-process/pending-session.js",
             "count": 6
           },
@@ -600,8 +642,8 @@
             "count": 1
           }
         ],
-        "totalHits": 47,
-        "fileSpan": 7
+        "totalHits": 57,
+        "fileSpan": 8
       },
       {
         "name": "dialog",
@@ -615,7 +657,7 @@
           },
           {
             "file": "src/renderer-dialogs.js",
-            "count": 266
+            "count": 267
           },
           {
             "file": "src/renderer-pending.js",
@@ -630,7 +672,7 @@
             "count": 71
           }
         ],
-        "totalHits": 370,
+        "totalHits": 371,
         "fileSpan": 5
       },
       {
@@ -788,6 +830,38 @@
         "fileSpan": 5
       },
       {
+        "name": "runReconciliation",
+        "defFiles": [
+          "src/backend/pending-reconcile/engine.js",
+          "src/main-process/bank-bu-recon-session.js",
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 1
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 11,
+        "fileSpan": 5
+      },
+      {
         "name": "makeWarningCollector",
         "defFiles": [
           "src/main-process/scenario-engines/engine-utils.js"
@@ -923,10 +997,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 86
+            "count": 88
           }
         ],
-        "totalHits": 134,
+        "totalHits": 136,
         "fileSpan": 4
       },
       {
@@ -1039,6 +1113,113 @@
         "fileSpan": 4
       },
       {
+        "name": "BIZ_OP_DB_COLUMNS",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js",
+          "src/backend/biz-op-recon-db/imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/imports-repository.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 4
+      },
+      {
+        "name": "FLOW_DB_COLUMNS",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js",
+          "src/backend/biz-op-recon-db/flow-imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 4
+      },
+      {
+        "name": "isRowMeaningful",
+        "defFiles": [
+          "src/backend/file-service/common.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/common.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 4
+      },
+      {
+        "name": "validateHeaders",
+        "defFiles": [
+          "src/backend/pending-import/validator.js",
+          "src/backend/pending-import/worker.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-import/reader.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/pending-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 4
+      },
+      {
         "name": "ADVANCED_MAPPING_FIELDS",
         "defFiles": [
           "src/main.js",
@@ -1118,6 +1299,32 @@
         "fileSpan": 4
       },
       {
+        "name": "BIZ_OP_HEADERS",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 4
+      },
+      {
         "name": "PENDING_GUANLI_DB_COLUMNS",
         "defFiles": [
           "src/backend/bank-bu-recon-db/columns.js"
@@ -1138,33 +1345,6 @@
           {
             "file": "src/main-process/bank-bu-recon-writer.js",
             "count": 3
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 4
-      },
-      {
-        "name": "runReconciliation",
-        "defFiles": [
-          "src/backend/pending-reconcile/engine.js",
-          "src/main-process/bank-bu-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-reconcile/engine.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 5
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          },
-          {
-            "file": "src/renderer-pending.js",
-            "count": 2
           }
         ],
         "totalHits": 10,
@@ -1439,6 +1619,32 @@
         "fileSpan": 4
       },
       {
+        "name": "FLOW_HEADERS",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 4
+      },
+      {
         "name": "GATEWAY_BILL_FIELDS",
         "defFiles": [
           "src/constants/gateway-bill-recon-fields.js",
@@ -1681,6 +1887,35 @@
         "fileSpan": 4
       },
       {
+        "name": "formatTimestamp",
+        "defFiles": [
+          "src/main-process/bank-bu-recon-session.js",
+          "src/main-process/bank-bu-recon-writer.js",
+          "src/main-process/biz-op-recon-session.js",
+          "src/main-process/pending-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 4
+      },
+      {
         "name": "listAllRuns",
         "defFiles": [
           "src/backend/pending-db/diff-repository.js"
@@ -1831,6 +2066,33 @@
           },
           {
             "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 4
+      },
+      {
+        "name": "insertRun",
+        "defFiles": [
+          "src/backend/bank-bu-recon-db/run-repository.js",
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
             "count": 1
           }
         ],
@@ -2117,6 +2379,30 @@
         "fileSpan": 3
       },
       {
+        "name": "RUNS_TABLE",
+        "defFiles": [
+          "src/backend/bank-bu-recon-db/month-repository.js",
+          "src/backend/bank-bu-recon-db/run-repository.js",
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-db/month-repository.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/bank-bu-recon-db/run-repository.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 9
+          }
+        ],
+        "totalHits": 19,
+        "fileSpan": 3
+      },
+      {
         "name": "CONCAT_FIELDS_MAPPING_FIELD",
         "defFiles": [
           "src/main.js",
@@ -2160,6 +2446,30 @@
           }
         ],
         "totalHits": 16,
+        "fileSpan": 3
+      },
+      {
+        "name": "runRepository",
+        "defFiles": [
+          "src/main-process/bank-bu-recon-session.js",
+          "src/main-process/biz-op-recon-session.js",
+          "src/main-process/biz-op-recon-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 14,
         "fileSpan": 3
       },
       {
@@ -2207,6 +2517,54 @@
         "fileSpan": 3
       },
       {
+        "name": "YELLOW_FILL",
+        "defFiles": [
+          "src/main-process/bank-bu-recon-writer.js",
+          "src/main-process/biz-op-recon-writer.js",
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/bank-bu-recon-writer.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 3
+      },
+      {
+        "name": "ExcelJS",
+        "defFiles": [
+          "src/main-process/bank-bu-recon-writer.js",
+          "src/main-process/biz-op-recon-writer.js",
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/bank-bu-recon-writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 11,
+        "fileSpan": 3
+      },
+      {
         "name": "getSetting",
         "defFiles": [
           "src/backend/database/settings-repository.js"
@@ -2223,28 +2581,6 @@
           {
             "file": "src/backend/database/settings-repository.js",
             "count": 7
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 3
-      },
-      {
-        "name": "isRowMeaningful",
-        "defFiles": [
-          "src/backend/file-service/common.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/common.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 6
           }
         ],
         "totalHits": 10,
@@ -2548,29 +2884,6 @@
         "fileSpan": 3
       },
       {
-        "name": "validateHeaders",
-        "defFiles": [
-          "src/backend/pending-import/validator.js",
-          "src/backend/pending-import/worker.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-import/reader.js",
-            "count": 4
-          },
-          {
-            "file": "src/backend/pending-import/validator.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/pending-import/worker.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 3
-      },
-      {
         "name": "BANK_STATEMENT_FIELDS_FOR_C3",
         "defFiles": [
           "src/constants/bank-statement-fields.js",
@@ -2587,6 +2900,53 @@
           },
           {
             "file": "src/renderer-dialogs.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 3
+      },
+      {
+        "name": "buildInsertSql",
+        "defFiles": [
+          "src/backend/bank-bu-recon-db/month-repository.js",
+          "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "src/backend/biz-op-recon-db/imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-db/month-repository.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/imports-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 3
+      },
+      {
+        "name": "getRowsByDateBu",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "src/backend/biz-op-recon-db/imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/imports-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
             "count": 3
           }
         ],
@@ -2632,30 +2992,6 @@
           {
             "file": "src/main.js",
             "count": 1
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 3
-      },
-      {
-        "name": "formatTimestamp",
-        "defFiles": [
-          "src/main-process/bank-bu-recon-session.js",
-          "src/main-process/bank-bu-recon-writer.js",
-          "src/main-process/pending-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pending-session.js",
-            "count": 2
           }
         ],
         "totalHits": 6,
@@ -2723,6 +3059,29 @@
           {
             "file": "src/main.js",
             "count": 1
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
+        "name": "insertRows",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "src/backend/biz-op-recon-db/imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/imports-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
           }
         ],
         "totalHits": 6,
@@ -3042,6 +3401,29 @@
         "fileSpan": 3
       },
       {
+        "name": "getRunById",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/run-repository.js",
+          "src/backend/pending-db/diff-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-db/diff-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
         "name": "getStatementSessionEntries",
         "defFiles": [
           "src/main-process/statement-session.js"
@@ -3108,6 +3490,50 @@
         "fileSpan": 3
       },
       {
+        "name": "readBizOpFile",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
+        "name": "readFlowFile",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
         "name": "setReconIdFixBillCategory",
         "defFiles": [
           "src/backend/database/settings-repository.js"
@@ -3145,6 +3571,73 @@
           },
           {
             "file": "src/preload.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
+        "name": "updateRunExportPath",
+        "defFiles": [
+          "src/backend/bank-bu-recon-db/run-repository.js",
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
+        "name": "writeBizOpErrorReportXlsx",
+        "defFiles": [
+          "src/main-process/biz-op-recon-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
+        "name": "writeFlowErrorReportXlsx",
+        "defFiles": [
+          "src/main-process/biz-op-recon-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
             "count": 1
           }
         ],
@@ -3278,10 +3771,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 14
+            "count": 16
           }
         ],
-        "totalHits": 57,
+        "totalHits": 59,
         "fileSpan": 2
       },
       {
@@ -3360,6 +3853,25 @@
         "fileSpan": 2
       },
       {
+        "name": "TABLE",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "src/backend/biz-op-recon-db/imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+            "count": 7
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/imports-repository.js",
+            "count": 10
+          }
+        ],
+        "totalHits": 17,
+        "fileSpan": 2
+      },
+      {
         "name": "refreshBankStatementStatus",
         "defFiles": [
           "src/renderer.js"
@@ -3393,6 +3905,25 @@
           }
         ],
         "totalHits": 14,
+        "fileSpan": 2
+      },
+      {
+        "name": "normalizeBu",
+        "defFiles": [
+          "src/main-process/bank-bu-recon-session.js",
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 8
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 13,
         "fileSpan": 2
       },
       {
@@ -3447,6 +3978,43 @@
           }
         ],
         "totalHits": 12,
+        "fileSpan": 2
+      },
+      {
+        "name": "parseAmount",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/validator.js",
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 8
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 2
+      },
+      {
+        "name": "BIZ_OP_ACCOUNT_KEY_DB_COLUMN",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 9
+          }
+        ],
+        "totalHits": 11,
         "fileSpan": 2
       },
       {
@@ -3542,41 +4110,22 @@
         "fileSpan": 2
       },
       {
-        "name": "RUNS_TABLE",
+        "name": "importsRepository",
         "defFiles": [
-          "src/backend/bank-bu-recon-db/month-repository.js",
-          "src/backend/bank-bu-recon-db/run-repository.js"
+          "src/main-process/biz-op-recon-session.js",
+          "src/main-process/biz-op-recon-writer.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/bank-bu-recon-db/month-repository.js",
-            "count": 3
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 5
           },
           {
-            "file": "src/backend/bank-bu-recon-db/run-repository.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 2
-      },
-      {
-        "name": "YELLOW_FILL",
-        "defFiles": [
-          "src/main-process/bank-bu-recon-writer.js",
-          "src/main-process/exceljs-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/bank-bu-recon-writer.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/exceljs-writer.js",
+            "file": "src/main-process/biz-op-recon-writer.js",
             "count": 3
           }
         ],
-        "totalHits": 9,
+        "totalHits": 8,
         "fileSpan": 2
       },
       {
@@ -3592,6 +4141,25 @@
           },
           {
             "file": "src/main-process/pending-session.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 2
+      },
+      {
+        "name": "normalizeHeaderCell",
+        "defFiles": [
+          "src/backend/bank-bu-recon-import/validator.js",
+          "src/backend/biz-op-recon-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-import/validator.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
             "count": 4
           }
         ],
@@ -3800,6 +4368,25 @@
         "fileSpan": 2
       },
       {
+        "name": "AMOUNT_EPSILON",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/validator.js",
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
         "name": "BANK_DIFF_FIELD_DB_COLUMN",
         "defFiles": [
           "src/backend/bank-bu-recon-db/columns.js"
@@ -3830,6 +4417,81 @@
           {
             "file": "src/renderer.js",
             "count": 5
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "bizOpRowToArray",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "buildFileReader",
+        "defFiles": [
+          "src/backend/bank-bu-recon-import/reader.js",
+          "src/backend/biz-op-recon-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "buildHeaderValidator",
+        "defFiles": [
+          "src/backend/bank-bu-recon-import/validator.js",
+          "src/backend/biz-op-recon-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-import/validator.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "buildRowMapper",
+        "defFiles": [
+          "src/backend/bank-bu-recon-import/reader.js",
+          "src/backend/biz-op-recon-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 3
           }
         ],
         "totalHits": 6,
@@ -3956,6 +4618,25 @@
           {
             "file": "src/backend/database/migrations.js",
             "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "ensureBizOpReconTablesSupport",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/migrations.js",
+          "src/backend/database.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/migrations.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database.js",
+            "count": 4
           }
         ],
         "totalHits": 6,
@@ -4154,25 +4835,6 @@
           {
             "file": "src/backend/database/migrations.js",
             "count": 2
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 2
-      },
-      {
-        "name": "ExcelJS",
-        "defFiles": [
-          "src/main-process/bank-bu-recon-writer.js",
-          "src/main-process/exceljs-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/bank-bu-recon-writer.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/exceljs-writer.js",
-            "count": 3
           }
         ],
         "totalHits": 6,
@@ -4378,6 +5040,42 @@
         "fileSpan": 2
       },
       {
+        "name": "BIZ_OP_END_BALANCE_DB_COLUMN",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "DIFF_HEADER_TAIL",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "DIFF_OUTPUT_BANK_SHEET",
         "defFiles": [
           "src/backend/bank-bu-recon-db/columns.js"
@@ -4425,6 +5123,24 @@
           },
           {
             "file": "src/backend/file-service/readers.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "ERROR_HEADER_TAIL",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
             "count": 3
           }
         ],
@@ -4687,6 +5403,25 @@
         "fileSpan": 2
       },
       {
+        "name": "subOneDay",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/run-repository.js",
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "updateNewAccountGenerateAvailability",
         "defFiles": [
           "src/renderer.js"
@@ -4699,6 +5434,44 @@
           {
             "file": "src/renderer.js",
             "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "VALID_DIRECTION_IN",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/validator.js",
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "VALID_DIRECTION_OUT",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/validator.js",
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
           }
         ],
         "totalHits": 5,
@@ -4962,6 +5735,96 @@
         "fileSpan": 2
       },
       {
+        "name": "FLOW_ACCOUNT_KEY_DB_COLUMN",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "FLOW_BU_FIELD_DB_COLUMN",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "FLOW_DIRECTION_DB_COLUMN",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "FLOW_RECON_AMOUNT_DB_COLUMN",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "flowRowToArray",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "GATEWAY_BILL_SHEET_NAME",
         "defFiles": [
           "src/constants/gateway-bill-recon-fields.js"
@@ -5034,6 +5897,24 @@
         "fileSpan": 2
       },
       {
+        "name": "getDiffRowsByRun",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "getEnumConfig",
         "defFiles": [
           "src/backend/database/settings-repository.js"
@@ -5070,6 +5951,24 @@
         "fileSpan": 2
       },
       {
+        "name": "getRowById",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/imports-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "getTemplateByKey",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -5099,6 +5998,25 @@
           },
           {
             "file": "src/backend/database/template-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "INSERT_SQL",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "src/backend/biz-op-recon-db/imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/imports-repository.js",
             "count": 2
           }
         ],
@@ -5355,6 +6273,25 @@
           },
           {
             "file": "src/backend/database/template-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "readSheetAsRows",
+        "defFiles": [
+          "src/backend/bank-bu-recon-import/reader.js",
+          "src/backend/biz-op-recon-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
             "count": 2
           }
         ],
@@ -5706,6 +6643,78 @@
         "fileSpan": 2
       },
       {
+        "name": "validateBizOpHeaders",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "validateBizOpRow",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "validateFlowHeaders",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "validateFlowRow",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "validatePendingGuanliHeaders",
         "defFiles": [
           "src/backend/bank-bu-recon-import/validator.js"
@@ -5798,6 +6807,24 @@
         "fileSpan": 2
       },
       {
+        "name": "BIZ_OP_BU_FIELD_DB_COLUMN",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "buildDetailExportRows",
         "defFiles": [
           "src/backend/file-service.js"
@@ -5834,17 +6861,53 @@
         "fileSpan": 2
       },
       {
-        "name": "clearMonth",
+        "name": "clearByDate",
         "defFiles": [
-          "src/backend/bank-bu-recon-db/month-repository.js"
+          "src/backend/biz-op-recon-db/flow-imports-repository.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/bank-bu-recon-db/month-repository.js",
+            "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
             "count": 2
           },
           {
-            "file": "src/main-process/bank-bu-recon-session.js",
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "clearByDateBu",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/imports-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "clearRunsAndDiffsByDateBu",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
             "count": 1
           }
         ],
@@ -6014,24 +7077,6 @@
         "fileSpan": 2
       },
       {
-        "name": "getRunById",
-        "defFiles": [
-          "src/backend/pending-db/diff-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-db/diff-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/pending-export/writer.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 2
-      },
-      {
         "name": "getTemplatesByBankName",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -6050,7 +7095,7 @@
         "fileSpan": 2
       },
       {
-        "name": "insertBankRows",
+        "name": "importMonthAtomic",
         "defFiles": [
           "src/backend/bank-bu-recon-db/month-repository.js"
         ],
@@ -6068,35 +7113,17 @@
         "fileSpan": 2
       },
       {
-        "name": "insertPendingRows",
+        "name": "insertDiffRows",
         "defFiles": [
-          "src/backend/bank-bu-recon-db/month-repository.js"
+          "src/backend/biz-op-recon-db/run-repository.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/bank-bu-recon-db/month-repository.js",
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
             "count": 2
           },
           {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 2
-      },
-      {
-        "name": "insertRun",
-        "defFiles": [
-          "src/backend/bank-bu-recon-db/run-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-db/run-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
+            "file": "src/main-process/biz-op-recon-session.js",
             "count": 1
           }
         ],
@@ -6123,6 +7150,24 @@
         "fileSpan": 2
       },
       {
+        "name": "listReadyDates",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "listRunsForMonthPair",
         "defFiles": [
           "src/backend/pending-db/diff-repository.js"
@@ -6134,6 +7179,42 @@
           },
           {
             "file": "src/preload.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "listSuccessDates",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "listSuccessDatesInRange",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
             "count": 1
           }
         ],
@@ -6384,24 +7465,6 @@
         "fileSpan": 2
       },
       {
-        "name": "updateRunExportPath",
-        "defFiles": [
-          "src/backend/bank-bu-recon-db/run-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-db/run-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 2
-      },
-      {
         "name": "updateRunStats",
         "defFiles": [
           "src/backend/pending-db/diff-repository.js"
@@ -6512,6 +7575,24 @@
         "fileSpan": 2
       },
       {
+        "name": "writeDateRangeDiffWorkbook",
+        "defFiles": [
+          "src/main-process/biz-op-recon-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "writeDiffWorkbook",
         "defFiles": [
           "src/main-process/bank-bu-recon-writer.js"
@@ -6530,6 +7611,24 @@
         "fileSpan": 2
       },
       {
+        "name": "writeSingleDateDiffWorkbook",
+        "defFiles": [
+          "src/main-process/biz-op-recon-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "BALANCE_SEED_GENERATION_METHODS",
         "defFiles": [
           "src/backend/balance-seed-store.js"
@@ -6537,6 +7636,24 @@
         "refFiles": [
           {
             "file": "src/backend/balance-seed-store.js",
+            "count": 1
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 2
+      },
+      {
+        "name": "makeDateRangeDiffFileName",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
             "count": 1
           },
           {
@@ -6602,6 +7719,42 @@
         "fileSpan": 2
       },
       {
+        "name": "runBizOpImportAsync",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 1
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 2
+      },
+      {
+        "name": "runFlowImportAsync",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 1
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 2
+      },
+      {
         "name": "WINDOWS_RESERVED_NAMES",
         "defFiles": [
           "src/main-process/bank-statement-io.js",
@@ -6630,10 +7783,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 107
+            "count": 122
           }
         ],
-        "totalHits": 107,
+        "totalHits": 122,
         "fileSpan": 1
       },
       {
@@ -6819,6 +7972,20 @@
         "fileSpan": 1
       },
       {
+        "name": "normalizeAccountKey",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 10
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 1
+      },
+      {
         "name": "parseBillDateMs",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -6830,20 +7997,6 @@
           }
         ],
         "totalHits": 10,
-        "fileSpan": 1
-      },
-      {
-        "name": "monthRepository",
-        "defFiles": [
-          "src/main-process/bank-bu-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 9
-          }
-        ],
-        "totalHits": 9,
         "fileSpan": 1
       },
       {
@@ -6917,20 +8070,6 @@
         "fileSpan": 1
       },
       {
-        "name": "normalizeBu",
-        "defFiles": [
-          "src/main-process/bank-bu-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 8
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 1
-      },
-      {
         "name": "rendererStartupProfiler",
         "defFiles": [
           "src/renderer.js"
@@ -6994,6 +8133,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-export/writer.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
+        "name": "monthRepository",
+        "defFiles": [
+          "src/main-process/bank-bu-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
             "count": 7
           }
         ],
@@ -7099,20 +8252,6 @@
         "fileSpan": 1
       },
       {
-        "name": "runRepository",
-        "defFiles": [
-          "src/main-process/bank-bu-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 1
-      },
-      {
         "name": "STATEMENT_MODES",
         "defFiles": [
           "src/renderer.js"
@@ -7183,6 +8322,20 @@
         "fileSpan": 1
       },
       {
+        "name": "BIZ_OP_COLUMN_DEFS",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "buildExportRowsForDiff",
         "defFiles": [
           "src/backend/pending-export/writer.js"
@@ -7204,6 +8357,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "database",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
             "count": 5
           }
         ],
@@ -7260,6 +8427,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "FLOW_COLUMN_DEFS",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
             "count": 5
           }
         ],
@@ -7603,6 +8784,20 @@
         "fileSpan": 1
       },
       {
+        "name": "DIFF_TABLE",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "extractCurrencyAliases",
         "defFiles": [
           "src/backend/file-service/normalizers.js"
@@ -7624,6 +8819,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "flowImportsRepository",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
             "count": 4
           }
         ],
@@ -7680,20 +8889,6 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "normalizeHeaderCell",
-        "defFiles": [
-          "src/backend/bank-bu-recon-import/validator.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-import/validator.js",
             "count": 4
           }
         ],
@@ -8051,7 +9246,7 @@
         "fileSpan": 1
       },
       {
-        "name": "buildBatchInserter",
+        "name": "buildBatchInserterInTxn",
         "defFiles": [
           "src/backend/bank-bu-recon-db/month-repository.js"
         ],
@@ -8093,48 +9288,6 @@
         "fileSpan": 1
       },
       {
-        "name": "buildFileReader",
-        "defFiles": [
-          "src/backend/bank-bu-recon-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-import/reader.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "buildHeaderValidator",
-        "defFiles": [
-          "src/backend/bank-bu-recon-import/validator.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-import/validator.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "buildInsertSql",
-        "defFiles": [
-          "src/backend/bank-bu-recon-db/month-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-db/month-repository.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "buildNumericCellValue",
         "defFiles": [
           "src/backend/file-service/writers.js"
@@ -8156,20 +9309,6 @@
         "refFiles": [
           {
             "file": "src/main-process/bank-bu-recon-writer.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "buildRowMapper",
-        "defFiles": [
-          "src/backend/bank-bu-recon-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-import/reader.js",
             "count": 3
           }
         ],
@@ -8380,20 +9519,6 @@
         "refFiles": [
           {
             "file": "src/backend/database/settings-repository.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "database",
-        "defFiles": [
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main.js",
             "count": 3
           }
         ],
@@ -8639,6 +9764,20 @@
         "fileSpan": 1
       },
       {
+        "name": "listDatesInRange",
+        "defFiles": [
+          "src/main-process/biz-op-recon-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "makeFieldIndexName",
         "defFiles": [
           "src/backend/pending-reconcile/engine.js"
@@ -8660,6 +9799,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/own-accounts-migration.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "normalizeDateToISO",
+        "defFiles": [
+          "src/main-process/biz-op-recon-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
             "count": 3
           }
         ],
@@ -9101,6 +10254,20 @@
         "fileSpan": 1
       },
       {
+        "name": "aggregateFlowByAccount",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "AMOUNT_DIFF_COLUMN",
         "defFiles": [
           "src/backend/pending-export/writer.js"
@@ -9297,6 +10464,104 @@
         "fileSpan": 1
       },
       {
+        "name": "BIZ_OP_AMOUNT_DB_COLUMN",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "BIZ_OP_AMOUNT_IN_DB_COLUMN",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "BIZ_OP_AMOUNT_OUT_DB_COLUMN",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "BIZ_OP_BEGIN_BALANCE_DB_COLUMN",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "BIZ_OP_HEADER_TO_DB",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "bizOpHeaderToDbColumn",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "bizOpRowMapper",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "buildBackgroundStyle",
         "defFiles": [
           "src/renderer.js"
@@ -9409,6 +10674,34 @@
         "fileSpan": 1
       },
       {
+        "name": "compareT1OpWithComputed",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "computeT1Op",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "CONTENT_TYPES_XML",
         "defFiles": [
           "src/backend/pending-import/streaming-xlsx-writer.js"
@@ -9416,6 +10709,34 @@
         "refFiles": [
           {
             "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "countAccountRows",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "countDistinctDatesByBu",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/imports-repository.js",
             "count": 2
           }
         ],
@@ -9444,6 +10765,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-export/writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "diffT1AndT2Accounts",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
             "count": 2
           }
         ],
@@ -9521,6 +10856,76 @@
         "fileSpan": 1
       },
       {
+        "name": "FLOW_HEADER_TO_DB",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "FLOW_TABLE",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "flowHeaderToDbColumn",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "flowRowMapper",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "formatDateCompact",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "formatLocalDate",
         "defFiles": [
           "src/backend/logger.js"
@@ -9549,6 +10954,20 @@
         "fileSpan": 1
       },
       {
+        "name": "formatTimeCompact",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "getEnumStatusMessage",
         "defFiles": [
           "src/renderer.js"
@@ -9556,6 +10975,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "getLatestDateByBu",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/imports-repository.js",
             "count": 2
           }
         ],
@@ -9598,6 +11031,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/own-accounts-migration.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "getRowsByDate",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/flow-imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
             "count": 2
           }
         ],
@@ -9703,6 +11150,20 @@
         "fileSpan": 1
       },
       {
+        "name": "IMPORTS_TABLE",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "incrementFunction",
         "defFiles": [
           "src/backend/usage-stats.js"
@@ -9710,6 +11171,34 @@
         "refFiles": [
           {
             "file": "src/backend/usage-stats.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "insertBankRowsInTxn",
+        "defFiles": [
+          "src/backend/bank-bu-recon-db/month-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-db/month-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "insertPendingRowsInTxn",
+        "defFiles": [
+          "src/backend/bank-bu-recon-db/month-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-db/month-repository.js",
             "count": 2
           }
         ],
@@ -9759,6 +11248,62 @@
         "fileSpan": 1
       },
       {
+        "name": "listDistinctBus",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/imports-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "listImportedDateBuPairs",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/imports-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "listImportedDates",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/flow-imports-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "listRunsByDateBu",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "loadJobMeta",
         "defFiles": [
           "src/backend/pending-import/worker.js"
@@ -9780,6 +11325,20 @@
         "refFiles": [
           {
             "file": "src/backend/usage-stats.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "makeBizOpErrorReportFileName",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
             "count": 2
           }
         ],
@@ -9906,6 +11465,20 @@
         "refFiles": [
           {
             "file": "src/backend/file-service/normalizers.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "parseSignedAmount",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
             "count": 2
           }
         ],
@@ -10060,20 +11633,6 @@
         "refFiles": [
           {
             "file": "src/main-process/monthly-balance.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
-        "name": "readSheetAsRows",
-        "defFiles": [
-          "src/backend/bank-bu-recon-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-import/reader.js",
             "count": 2
           }
         ],
@@ -10483,6 +12042,7 @@
         "src/backend/bank-bu-recon-import/reader.js",
         "src/backend/big-account-mode-store.js",
         "src/backend/big-account-order-store.js",
+        "src/backend/biz-op-recon-import/reader.js",
         "src/backend/database.js",
         "src/backend/database/own-accounts-migration.js",
         "src/backend/file-service/readers.js",
@@ -10495,6 +12055,8 @@
         "src/main-process/bank-bu-recon-session.js",
         "src/main-process/bank-bu-recon-writer.js",
         "src/main-process/bank-statement-io.js",
+        "src/main-process/biz-op-recon-session.js",
+        "src/main-process/biz-op-recon-writer.js",
         "src/main-process/pending-session.js",
         "src/main-process/recon-id-fix-io.js",
         "src/main-process/statement-generation.js",
@@ -10521,6 +12083,10 @@
         {
           "file": "src/backend/big-account-order-store.js",
           "count": 3
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
         },
         {
           "file": "src/backend/database.js",
@@ -10575,6 +12141,14 @@
           "count": 3
         },
         {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 5
+        },
+        {
           "file": "src/main-process/pending-session.js",
           "count": 6
         },
@@ -10603,8 +12177,8 @@
           "count": 2
         }
       ],
-      "totalHits": 79,
-      "fileSpan": 25
+      "totalHits": 89,
+      "fileSpan": 28
     },
     {
       "name": "fs",
@@ -10626,6 +12200,8 @@
         "src/main-process/bank-bu-recon-session.js",
         "src/main-process/bank-bu-recon-writer.js",
         "src/main-process/bank-statement-io.js",
+        "src/main-process/biz-op-recon-session.js",
+        "src/main-process/biz-op-recon-writer.js",
         "src/main-process/pending-session.js",
         "src/main-process/recon-id-fix-io.js",
         "src/main.js"
@@ -10700,6 +12276,14 @@
           "count": 3
         },
         {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 5
+        },
+        {
           "file": "src/main-process/pending-session.js",
           "count": 2
         },
@@ -10712,8 +12296,8 @@
           "count": 1
         }
       ],
-      "totalHits": 54,
-      "fileSpan": 20
+      "totalHits": 60,
+      "fileSpan": 22
     },
     {
       "name": "parse",
@@ -10818,6 +12402,10 @@
           "count": 9
         },
         {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
           "file": "src/backend/file-service.js",
           "count": 34
         },
@@ -10850,8 +12438,8 @@
           "count": 1
         }
       ],
-      "totalHits": 93,
-      "fileSpan": 13
+      "totalHits": 95,
+      "fileSpan": 14
     },
     {
       "name": "FileValidationError",
@@ -10875,6 +12463,10 @@
         },
         {
           "file": "src/backend/bank-bu-recon-import/reader.js",
+          "count": 5
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
           "count": 5
         },
         {
@@ -10914,13 +12506,14 @@
           "count": 1
         }
       ],
-      "totalHits": 58,
-      "fileSpan": 12
+      "totalHits": 63,
+      "fileSpan": 13
     },
     {
       "name": "XLSX",
       "defFiles": [
         "src/backend/bank-bu-recon-import/reader.js",
+        "src/backend/biz-op-recon-import/reader.js",
         "src/backend/file-service/normalizers.js",
         "src/backend/file-service/readers.js",
         "src/backend/file-service/writers.js",
@@ -10933,6 +12526,10 @@
       "refFiles": [
         {
           "file": "src/backend/bank-bu-recon-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
           "count": 3
         },
         {
@@ -10968,8 +12565,8 @@
           "count": 1
         }
       ],
-      "totalHits": 57,
-      "fileSpan": 9
+      "totalHits": 60,
+      "fileSpan": 10
     },
     {
       "name": "PENDING_COLUMNS",
@@ -11049,6 +12646,10 @@
           "count": 14
         },
         {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 10
+        },
+        {
           "file": "src/main-process/pending-session.js",
           "count": 6
         },
@@ -11061,8 +12662,8 @@
           "count": 1
         }
       ],
-      "totalHits": 47,
-      "fileSpan": 7
+      "totalHits": 57,
+      "fileSpan": 8
     },
     {
       "name": "dialog",
@@ -11076,7 +12677,7 @@
         },
         {
           "file": "src/renderer-dialogs.js",
-          "count": 266
+          "count": 267
         },
         {
           "file": "src/renderer-pending.js",
@@ -11091,7 +12692,7 @@
           "count": 71
         }
       ],
-      "totalHits": 370,
+      "totalHits": 371,
       "fileSpan": 5
     },
     {
@@ -11249,6 +12850,38 @@
       "fileSpan": 5
     },
     {
+      "name": "runReconciliation",
+      "defFiles": [
+        "src/backend/pending-reconcile/engine.js",
+        "src/main-process/bank-bu-recon-session.js",
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-reconcile/engine.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 1
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 11,
+      "fileSpan": 5
+    },
+    {
       "name": "makeWarningCollector",
       "defFiles": [
         "src/main-process/scenario-engines/engine-utils.js"
@@ -11384,10 +13017,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 86
+          "count": 88
         }
       ],
-      "totalHits": 134,
+      "totalHits": 136,
       "fileSpan": 4
     },
     {
@@ -11500,6 +13133,113 @@
       "fileSpan": 4
     },
     {
+      "name": "BIZ_OP_DB_COLUMNS",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js",
+        "src/backend/biz-op-recon-db/imports-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/imports-repository.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 4
+    },
+    {
+      "name": "FLOW_DB_COLUMNS",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js",
+        "src/backend/biz-op-recon-db/flow-imports-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 4
+    },
+    {
+      "name": "isRowMeaningful",
+      "defFiles": [
+        "src/backend/file-service/common.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/common.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 6
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 4
+    },
+    {
+      "name": "validateHeaders",
+      "defFiles": [
+        "src/backend/pending-import/validator.js",
+        "src/backend/pending-import/worker.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-import/reader.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/pending-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 4
+    },
+    {
       "name": "ADVANCED_MAPPING_FIELDS",
       "defFiles": [
         "src/main.js",
@@ -11579,6 +13319,32 @@
       "fileSpan": 4
     },
     {
+      "name": "BIZ_OP_HEADERS",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 10,
+      "fileSpan": 4
+    },
+    {
       "name": "PENDING_GUANLI_DB_COLUMNS",
       "defFiles": [
         "src/backend/bank-bu-recon-db/columns.js"
@@ -11599,33 +13365,6 @@
         {
           "file": "src/main-process/bank-bu-recon-writer.js",
           "count": 3
-        }
-      ],
-      "totalHits": 10,
-      "fileSpan": 4
-    },
-    {
-      "name": "runReconciliation",
-      "defFiles": [
-        "src/backend/pending-reconcile/engine.js",
-        "src/main-process/bank-bu-recon-session.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pending-reconcile/engine.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-session.js",
-          "count": 5
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        },
-        {
-          "file": "src/renderer-pending.js",
-          "count": 2
         }
       ],
       "totalHits": 10,
@@ -11900,6 +13639,32 @@
       "fileSpan": 4
     },
     {
+      "name": "FLOW_HEADERS",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 4
+    },
+    {
       "name": "GATEWAY_BILL_FIELDS",
       "defFiles": [
         "src/constants/gateway-bill-recon-fields.js",
@@ -12142,6 +13907,35 @@
       "fileSpan": 4
     },
     {
+      "name": "formatTimestamp",
+      "defFiles": [
+        "src/main-process/bank-bu-recon-session.js",
+        "src/main-process/bank-bu-recon-writer.js",
+        "src/main-process/biz-op-recon-session.js",
+        "src/main-process/pending-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/pending-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 4
+    },
+    {
       "name": "listAllRuns",
       "defFiles": [
         "src/backend/pending-db/diff-repository.js"
@@ -12292,6 +14086,33 @@
         },
         {
           "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 4
+    },
+    {
+      "name": "insertRun",
+      "defFiles": [
+        "src/backend/bank-bu-recon-db/run-repository.js",
+        "src/backend/biz-op-recon-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
           "count": 1
         }
       ],
@@ -12578,6 +14399,30 @@
       "fileSpan": 3
     },
     {
+      "name": "RUNS_TABLE",
+      "defFiles": [
+        "src/backend/bank-bu-recon-db/month-repository.js",
+        "src/backend/bank-bu-recon-db/run-repository.js",
+        "src/backend/biz-op-recon-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-db/month-repository.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/bank-bu-recon-db/run-repository.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 9
+        }
+      ],
+      "totalHits": 19,
+      "fileSpan": 3
+    },
+    {
       "name": "CONCAT_FIELDS_MAPPING_FIELD",
       "defFiles": [
         "src/main.js",
@@ -12621,6 +14466,30 @@
         }
       ],
       "totalHits": 16,
+      "fileSpan": 3
+    },
+    {
+      "name": "runRepository",
+      "defFiles": [
+        "src/main-process/bank-bu-recon-session.js",
+        "src/main-process/biz-op-recon-session.js",
+        "src/main-process/biz-op-recon-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 14,
       "fileSpan": 3
     },
     {
@@ -12668,6 +14537,54 @@
       "fileSpan": 3
     },
     {
+      "name": "YELLOW_FILL",
+      "defFiles": [
+        "src/main-process/bank-bu-recon-writer.js",
+        "src/main-process/biz-op-recon-writer.js",
+        "src/main-process/exceljs-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/bank-bu-recon-writer.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/exceljs-writer.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 13,
+      "fileSpan": 3
+    },
+    {
+      "name": "ExcelJS",
+      "defFiles": [
+        "src/main-process/bank-bu-recon-writer.js",
+        "src/main-process/biz-op-recon-writer.js",
+        "src/main-process/exceljs-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/bank-bu-recon-writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/exceljs-writer.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 11,
+      "fileSpan": 3
+    },
+    {
       "name": "getSetting",
       "defFiles": [
         "src/backend/database/settings-repository.js"
@@ -12684,28 +14601,6 @@
         {
           "file": "src/backend/database/settings-repository.js",
           "count": 7
-        }
-      ],
-      "totalHits": 10,
-      "fileSpan": 3
-    },
-    {
-      "name": "isRowMeaningful",
-      "defFiles": [
-        "src/backend/file-service/common.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/bank-bu-recon-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/common.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 6
         }
       ],
       "totalHits": 10,
@@ -13009,29 +14904,6 @@
       "fileSpan": 3
     },
     {
-      "name": "validateHeaders",
-      "defFiles": [
-        "src/backend/pending-import/validator.js",
-        "src/backend/pending-import/worker.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/bank-bu-recon-import/reader.js",
-          "count": 4
-        },
-        {
-          "file": "src/backend/pending-import/validator.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/pending-import/worker.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 8,
-      "fileSpan": 3
-    },
-    {
       "name": "BANK_STATEMENT_FIELDS_FOR_C3",
       "defFiles": [
         "src/constants/bank-statement-fields.js",
@@ -13048,6 +14920,53 @@
         },
         {
           "file": "src/renderer-dialogs.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 3
+    },
+    {
+      "name": "buildInsertSql",
+      "defFiles": [
+        "src/backend/bank-bu-recon-db/month-repository.js",
+        "src/backend/biz-op-recon-db/flow-imports-repository.js",
+        "src/backend/biz-op-recon-db/imports-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-db/month-repository.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/imports-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 3
+    },
+    {
+      "name": "getRowsByDateBu",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/flow-imports-repository.js",
+        "src/backend/biz-op-recon-db/imports-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/imports-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
           "count": 3
         }
       ],
@@ -13093,30 +15012,6 @@
         {
           "file": "src/main.js",
           "count": 1
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 3
-    },
-    {
-      "name": "formatTimestamp",
-      "defFiles": [
-        "src/main-process/bank-bu-recon-session.js",
-        "src/main-process/bank-bu-recon-writer.js",
-        "src/main-process/pending-session.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/bank-bu-recon-session.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pending-session.js",
-          "count": 2
         }
       ],
       "totalHits": 6,
@@ -13184,6 +15079,29 @@
         {
           "file": "src/main.js",
           "count": 1
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
+      "name": "insertRows",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/flow-imports-repository.js",
+        "src/backend/biz-op-recon-db/imports-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/imports-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
         }
       ],
       "totalHits": 6,
@@ -13503,6 +15421,29 @@
       "fileSpan": 3
     },
     {
+      "name": "getRunById",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/run-repository.js",
+        "src/backend/pending-db/diff-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-db/diff-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
       "name": "getStatementSessionEntries",
       "defFiles": [
         "src/main-process/statement-session.js"
@@ -13569,6 +15510,50 @@
       "fileSpan": 3
     },
     {
+      "name": "readBizOpFile",
+      "defFiles": [
+        "src/backend/biz-op-recon-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
+      "name": "readFlowFile",
+      "defFiles": [
+        "src/backend/biz-op-recon-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
       "name": "setReconIdFixBillCategory",
       "defFiles": [
         "src/backend/database/settings-repository.js"
@@ -13606,6 +15591,73 @@
         },
         {
           "file": "src/preload.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
+      "name": "updateRunExportPath",
+      "defFiles": [
+        "src/backend/bank-bu-recon-db/run-repository.js",
+        "src/backend/biz-op-recon-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
+      "name": "writeBizOpErrorReportXlsx",
+      "defFiles": [
+        "src/main-process/biz-op-recon-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
+      "name": "writeFlowErrorReportXlsx",
+      "defFiles": [
+        "src/main-process/biz-op-recon-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
           "count": 1
         }
       ],
@@ -13737,10 +15789,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 14
+          "count": 16
         }
       ],
-      "totalHits": 57,
+      "totalHits": 59,
       "fileSpan": 2
     },
     {
@@ -13819,6 +15871,25 @@
       "fileSpan": 2
     },
     {
+      "name": "TABLE",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/flow-imports-repository.js",
+        "src/backend/biz-op-recon-db/imports-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "count": 7
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/imports-repository.js",
+          "count": 10
+        }
+      ],
+      "totalHits": 17,
+      "fileSpan": 2
+    },
+    {
       "name": "refreshBankStatementStatus",
       "defFiles": [
         "src/renderer.js"
@@ -13852,6 +15923,25 @@
         }
       ],
       "totalHits": 14,
+      "fileSpan": 2
+    },
+    {
+      "name": "normalizeBu",
+      "defFiles": [
+        "src/main-process/bank-bu-recon-session.js",
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 8
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 13,
       "fileSpan": 2
     },
     {
@@ -13906,6 +15996,43 @@
         }
       ],
       "totalHits": 12,
+      "fileSpan": 2
+    },
+    {
+      "name": "parseAmount",
+      "defFiles": [
+        "src/backend/biz-op-recon-import/validator.js",
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 8
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 2
+    },
+    {
+      "name": "BIZ_OP_ACCOUNT_KEY_DB_COLUMN",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 9
+        }
+      ],
+      "totalHits": 11,
       "fileSpan": 2
     },
     {
@@ -14001,41 +16128,22 @@
       "fileSpan": 2
     },
     {
-      "name": "RUNS_TABLE",
+      "name": "importsRepository",
       "defFiles": [
-        "src/backend/bank-bu-recon-db/month-repository.js",
-        "src/backend/bank-bu-recon-db/run-repository.js"
+        "src/main-process/biz-op-recon-session.js",
+        "src/main-process/biz-op-recon-writer.js"
       ],
       "refFiles": [
         {
-          "file": "src/backend/bank-bu-recon-db/month-repository.js",
-          "count": 3
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 5
         },
         {
-          "file": "src/backend/bank-bu-recon-db/run-repository.js",
-          "count": 6
-        }
-      ],
-      "totalHits": 9,
-      "fileSpan": 2
-    },
-    {
-      "name": "YELLOW_FILL",
-      "defFiles": [
-        "src/main-process/bank-bu-recon-writer.js",
-        "src/main-process/exceljs-writer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/bank-bu-recon-writer.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/exceljs-writer.js",
+          "file": "src/main-process/biz-op-recon-writer.js",
           "count": 3
         }
       ],
-      "totalHits": 9,
+      "totalHits": 8,
       "fileSpan": 2
     },
     {
@@ -14051,6 +16159,25 @@
         },
         {
           "file": "src/main-process/pending-session.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 2
+    },
+    {
+      "name": "normalizeHeaderCell",
+      "defFiles": [
+        "src/backend/bank-bu-recon-import/validator.js",
+        "src/backend/biz-op-recon-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-import/validator.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
           "count": 4
         }
       ],
@@ -14259,6 +16386,25 @@
       "fileSpan": 2
     },
     {
+      "name": "AMOUNT_EPSILON",
+      "defFiles": [
+        "src/backend/biz-op-recon-import/validator.js",
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
       "name": "BANK_DIFF_FIELD_DB_COLUMN",
       "defFiles": [
         "src/backend/bank-bu-recon-db/columns.js"
@@ -14289,6 +16435,81 @@
         {
           "file": "src/renderer.js",
           "count": 5
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "bizOpRowToArray",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "buildFileReader",
+      "defFiles": [
+        "src/backend/bank-bu-recon-import/reader.js",
+        "src/backend/biz-op-recon-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "buildHeaderValidator",
+      "defFiles": [
+        "src/backend/bank-bu-recon-import/validator.js",
+        "src/backend/biz-op-recon-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-import/validator.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "buildRowMapper",
+      "defFiles": [
+        "src/backend/bank-bu-recon-import/reader.js",
+        "src/backend/biz-op-recon-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 3
         }
       ],
       "totalHits": 6,
@@ -14415,6 +16636,25 @@
         {
           "file": "src/backend/database/migrations.js",
           "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "ensureBizOpReconTablesSupport",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/migrations.js",
+        "src/backend/database.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/migrations.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database.js",
+          "count": 4
         }
       ],
       "totalHits": 6,
@@ -14613,25 +16853,6 @@
         {
           "file": "src/backend/database/migrations.js",
           "count": 2
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 2
-    },
-    {
-      "name": "ExcelJS",
-      "defFiles": [
-        "src/main-process/bank-bu-recon-writer.js",
-        "src/main-process/exceljs-writer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/bank-bu-recon-writer.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/exceljs-writer.js",
-          "count": 3
         }
       ],
       "totalHits": 6,
@@ -14837,6 +17058,42 @@
       "fileSpan": 2
     },
     {
+      "name": "BIZ_OP_END_BALANCE_DB_COLUMN",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "DIFF_HEADER_TAIL",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "DIFF_OUTPUT_BANK_SHEET",
       "defFiles": [
         "src/backend/bank-bu-recon-db/columns.js"
@@ -14884,6 +17141,24 @@
         },
         {
           "file": "src/backend/file-service/readers.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "ERROR_HEADER_TAIL",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
           "count": 3
         }
       ],
@@ -15146,6 +17421,25 @@
       "fileSpan": 2
     },
     {
+      "name": "subOneDay",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/run-repository.js",
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "updateNewAccountGenerateAvailability",
       "defFiles": [
         "src/renderer.js"
@@ -15158,6 +17452,44 @@
         {
           "file": "src/renderer.js",
           "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "VALID_DIRECTION_IN",
+      "defFiles": [
+        "src/backend/biz-op-recon-import/validator.js",
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "VALID_DIRECTION_OUT",
+      "defFiles": [
+        "src/backend/biz-op-recon-import/validator.js",
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
         }
       ],
       "totalHits": 5,
@@ -15421,6 +17753,96 @@
       "fileSpan": 2
     },
     {
+      "name": "FLOW_ACCOUNT_KEY_DB_COLUMN",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "FLOW_BU_FIELD_DB_COLUMN",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "FLOW_DIRECTION_DB_COLUMN",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "FLOW_RECON_AMOUNT_DB_COLUMN",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "flowRowToArray",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "GATEWAY_BILL_SHEET_NAME",
       "defFiles": [
         "src/constants/gateway-bill-recon-fields.js"
@@ -15493,6 +17915,24 @@
       "fileSpan": 2
     },
     {
+      "name": "getDiffRowsByRun",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "getEnumConfig",
       "defFiles": [
         "src/backend/database/settings-repository.js"
@@ -15529,6 +17969,24 @@
       "fileSpan": 2
     },
     {
+      "name": "getRowById",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/imports-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/imports-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "getTemplateByKey",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -15558,6 +18016,25 @@
         },
         {
           "file": "src/backend/database/template-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "INSERT_SQL",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/flow-imports-repository.js",
+        "src/backend/biz-op-recon-db/imports-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/imports-repository.js",
           "count": 2
         }
       ],
@@ -15814,6 +18291,25 @@
         },
         {
           "file": "src/backend/database/template-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "readSheetAsRows",
+      "defFiles": [
+        "src/backend/bank-bu-recon-import/reader.js",
+        "src/backend/biz-op-recon-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
           "count": 2
         }
       ],
@@ -16165,6 +18661,78 @@
       "fileSpan": 2
     },
     {
+      "name": "validateBizOpHeaders",
+      "defFiles": [
+        "src/backend/biz-op-recon-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "validateBizOpRow",
+      "defFiles": [
+        "src/backend/biz-op-recon-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "validateFlowHeaders",
+      "defFiles": [
+        "src/backend/biz-op-recon-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "validateFlowRow",
+      "defFiles": [
+        "src/backend/biz-op-recon-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "validatePendingGuanliHeaders",
       "defFiles": [
         "src/backend/bank-bu-recon-import/validator.js"
@@ -16257,6 +18825,24 @@
       "fileSpan": 2
     },
     {
+      "name": "BIZ_OP_BU_FIELD_DB_COLUMN",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "buildDetailExportRows",
       "defFiles": [
         "src/backend/file-service.js"
@@ -16293,17 +18879,53 @@
       "fileSpan": 2
     },
     {
-      "name": "clearMonth",
+      "name": "clearByDate",
       "defFiles": [
-        "src/backend/bank-bu-recon-db/month-repository.js"
+        "src/backend/biz-op-recon-db/flow-imports-repository.js"
       ],
       "refFiles": [
         {
-          "file": "src/backend/bank-bu-recon-db/month-repository.js",
+          "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
           "count": 2
         },
         {
-          "file": "src/main-process/bank-bu-recon-session.js",
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "clearByDateBu",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/imports-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/imports-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "clearRunsAndDiffsByDateBu",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
           "count": 1
         }
       ],
@@ -16473,24 +19095,6 @@
       "fileSpan": 2
     },
     {
-      "name": "getRunById",
-      "defFiles": [
-        "src/backend/pending-db/diff-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pending-db/diff-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/pending-export/writer.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 3,
-      "fileSpan": 2
-    },
-    {
       "name": "getTemplatesByBankName",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -16509,7 +19113,7 @@
       "fileSpan": 2
     },
     {
-      "name": "insertBankRows",
+      "name": "importMonthAtomic",
       "defFiles": [
         "src/backend/bank-bu-recon-db/month-repository.js"
       ],
@@ -16527,35 +19131,17 @@
       "fileSpan": 2
     },
     {
-      "name": "insertPendingRows",
+      "name": "insertDiffRows",
       "defFiles": [
-        "src/backend/bank-bu-recon-db/month-repository.js"
+        "src/backend/biz-op-recon-db/run-repository.js"
       ],
       "refFiles": [
         {
-          "file": "src/backend/bank-bu-recon-db/month-repository.js",
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
           "count": 2
         },
         {
-          "file": "src/main-process/bank-bu-recon-session.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 3,
-      "fileSpan": 2
-    },
-    {
-      "name": "insertRun",
-      "defFiles": [
-        "src/backend/bank-bu-recon-db/run-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/bank-bu-recon-db/run-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-session.js",
+          "file": "src/main-process/biz-op-recon-session.js",
           "count": 1
         }
       ],
@@ -16582,6 +19168,24 @@
       "fileSpan": 2
     },
     {
+      "name": "listReadyDates",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "listRunsForMonthPair",
       "defFiles": [
         "src/backend/pending-db/diff-repository.js"
@@ -16593,6 +19197,42 @@
         },
         {
           "file": "src/preload.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "listSuccessDates",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "listSuccessDatesInRange",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
           "count": 1
         }
       ],
@@ -16843,24 +19483,6 @@
       "fileSpan": 2
     },
     {
-      "name": "updateRunExportPath",
-      "defFiles": [
-        "src/backend/bank-bu-recon-db/run-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/bank-bu-recon-db/run-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-session.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 3,
-      "fileSpan": 2
-    },
-    {
       "name": "updateRunStats",
       "defFiles": [
         "src/backend/pending-db/diff-repository.js"
@@ -16971,6 +19593,24 @@
       "fileSpan": 2
     },
     {
+      "name": "writeDateRangeDiffWorkbook",
+      "defFiles": [
+        "src/main-process/biz-op-recon-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "writeDiffWorkbook",
       "defFiles": [
         "src/main-process/bank-bu-recon-writer.js"
@@ -16989,6 +19629,24 @@
       "fileSpan": 2
     },
     {
+      "name": "writeSingleDateDiffWorkbook",
+      "defFiles": [
+        "src/main-process/biz-op-recon-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "BALANCE_SEED_GENERATION_METHODS",
       "defFiles": [
         "src/backend/balance-seed-store.js"
@@ -16996,6 +19654,24 @@
       "refFiles": [
         {
           "file": "src/backend/balance-seed-store.js",
+          "count": 1
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 2,
+      "fileSpan": 2
+    },
+    {
+      "name": "makeDateRangeDiffFileName",
+      "defFiles": [
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
           "count": 1
         },
         {
@@ -17050,6 +19726,42 @@
       "refFiles": [
         {
           "file": "src/main-process/recon-id-fix-io.js",
+          "count": 1
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 2,
+      "fileSpan": 2
+    },
+    {
+      "name": "runBizOpImportAsync",
+      "defFiles": [
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 1
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 2,
+      "fileSpan": 2
+    },
+    {
+      "name": "runFlowImportAsync",
+      "defFiles": [
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
           "count": 1
         },
         {
