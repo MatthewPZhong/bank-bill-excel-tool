@@ -52,7 +52,7 @@ c986503 feat(biz-op-recon): session 算法 + writer + IPC + 前端面板/dialog
 
 | 命中 | 层级 | 自查结论 |
 |---|---|---|
-| `ipcRenderer` | Important-skeleton | preload bridge 新增 `window.desktopApi.bizOpRecon` namespace（17 个 IPC handler）；与现有 namespace 无冲突 |
+| `ipcRenderer` | Important-skeleton | preload bridge 新增 `window.desktopApi.bizOpRecon` namespace（15 个 IPC handler；round 3+4 收口为 5 tracked + 10 plain）；与现有 namespace 无冲突 |
 | `MODULES` | Runtime-state | 新增 `biz-op-recon` 条目，主菜单新增「业务OP数据核对」入口；其他模块条目不动 |
 | `dialog` | Runtime-state | 新增 6 个 dialog factory（业务OP 日期 / 流水日期 / 续导确认 / 对账日期 / 导出指定日期 / 导出区间）；fix1.5 删除 errorReport dialog 死代码 |
 | `elements` | Runtime-state | 新增 `bizOpReconModulePanel` + 3 按钮 + BU 下拉 + 状态栏 ID |

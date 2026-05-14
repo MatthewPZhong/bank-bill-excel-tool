@@ -90,7 +90,7 @@ v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。
   - rules/important-variables.md 升格：`runFlowImportAsync` Critical + `clearRunsAndDiffsByDate` Risk-sensitive + `clearRunsAndDiffsByDateBu` Risk-sensitive；元数据 v3 → v4
 - **2 P2**：
   - **lockfile 同步 2.1.3**：`package-lock.json` 顶层 version 字段同步 2.1.3（package.json 已 bump 但 lockfile 未同步）— Dev 跑 `npm install --package-lock-only` 处理
-  - **usage-stats 接入**：`src/backend/usage-stats.js` `FUNCTION_REGISTRY` 新增 `'业务OP数据核对': ['导入文件', '开始运行', '导出差异']`；`src/main.js` 17 个 `bizOpRecon:*` IPC handler 全部用 `trackedIpcHandle` 包装（按 v2.1.2 月度BU 模块对齐风格）；spec §三 IPC 表 17 行说明列追加 "（tracked via usage-stats wrapper）" 标注
+  - **usage-stats 接入**：`src/backend/usage-stats.js` `FUNCTION_REGISTRY` 新增 `'业务OP数据核对': ['导入文件', '开始运行', '导出差异']`；`src/main.js` 共 15 个 `bizOpRecon:*` IPC handler，**5 个核心 action（导入业务OP / 导入流水 / 开始运行 / 导出指定日期 / 导出区间）用 `trackedIpcHandle` 包装**，**10 个 query/dialog/helper 保持 plain `ipcMain.handle`**（按 D6 拍板"仅成功 action 计数"+ 与 v2.1.2 月度BU 模块同款分级 pattern）；spec §三 IPC 表对应行已加 tracked/plain 标注
 - **1 P3**：`package.json:71` `preview:all` script 串入 `preview:biz-op-recon`（参照 v2.1.2 月度BU preview 入串方式）
 - **新 smoke**：Case P（流水重导清 runs + diff_rows 跨 BU 防回归，资金红线 ⚠️）
 
