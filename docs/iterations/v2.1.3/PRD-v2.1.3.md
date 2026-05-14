@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.10（2026-05-14 round 4 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（业务OP 重导清下一日 (date+1, BU) runs/diff_rows — `runBizOpImportAsync` 事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), bu)` 调用 + 新增 `addOneDay(date)` helper UTC 实现 + smoke Case Q）+ USER_GUIDE 流水汇总性质解释段（用户明确要求："流水对账单业务上就是该日所有部门的流水汇总"，BU-A/BU-B 共用同一份流水文件 — 这是流水重导跨 BU 清的根因）；v0.9 = 2026-05-14 round 3 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（流水重导清该 date 所有 BU 的 runs/diff_rows，新增 `clearRunsAndDiffsByDate` 函数 + smoke Case P）+ 2 P2（package-lock.json 同步 2.1.3 / usage-stats 接入 5 tracked + 10 plain = 15 IPC）+ 1 P3（preview:all 串入 biz-op-recon）；v0.8 = 2026-05-14 round 2 self-review 修订（0 critical + 3 important + 5 minor）；v0.7 = 2026-05-14 round 1 self-review 修订（1 critical C1 clearByDateBu LOWER+TRIM + 3 important I1/I2/I3 + 5 minor + 3 新 smoke Case L/M/N）；v0.6 = 2026-05-13 fix6：区间导出改单 sheet，原 #14 拍板回滚；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归；v0.2 = 14 项 OPEN ISSUE 全部拍板；v0.1 = 2026-05-13 起草） |
+| 文档版本 | v0.10.1（2026-05-14 round 5 self-review 修订：Codex 自动 review 1 P3 — 5 处归档文档残留 "17 IPC trackedIpcHandle" 口径与 round 3 实际收口的 "15 IPC = 5 tracked + 10 plain" 不符 → CHANGELOG / VFH / PRD 标题表 / PRD §6.4 round 3 段 / PR 草稿 5 处统一改 15 IPC + spec §十九 round 5 修订记录段；无代码改动 / 无 smoke 改动 — 纯文档口径回填；v0.10 = 2026-05-14 round 4 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（业务OP 重导清下一日 (date+1, BU) runs/diff_rows — `runBizOpImportAsync` 事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), bu)` 调用 + 新增 `addOneDay(date)` helper UTC 实现 + smoke Case Q）+ USER_GUIDE 流水汇总性质解释段（用户明确要求："流水对账单业务上就是该日所有部门的流水汇总"，BU-A/BU-B 共用同一份流水文件 — 这是流水重导跨 BU 清的根因）；v0.9 = 2026-05-14 round 3 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（流水重导清该 date 所有 BU 的 runs/diff_rows，新增 `clearRunsAndDiffsByDate` 函数 + smoke Case P）+ 2 P2（package-lock.json 同步 2.1.3 / usage-stats 接入 5 tracked + 10 plain = 15 IPC）+ 1 P3（preview:all 串入 biz-op-recon）；v0.8 = 2026-05-14 round 2 self-review 修订（0 critical + 3 important + 5 minor）；v0.7 = 2026-05-14 round 1 self-review 修订（1 critical C1 clearByDateBu LOWER+TRIM + 3 important I1/I2/I3 + 5 minor + 3 新 smoke Case L/M/N）；v0.6 = 2026-05-13 fix6：区间导出改单 sheet，原 #14 拍板回滚；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归；v0.2 = 14 项 OPEN ISSUE 全部拍板；v0.1 = 2026-05-13 起草） |
 | 目标版本 | `v2.1.3`（patch） |
 | 起始版本 | `v2.1.2`（PR #43 已合并 main，2026-05-13，commit `50e0a0a` / merge `fc5d766`） |
 | 起草日期 | 2026-05-13 |
@@ -581,9 +581,14 @@ writer 阶段保持**无填充色**（移除整行黄底）。
 - 4 张 preview 截图的具体场景与触发条件（spec.md §七 拍板）
 - **BU 行 CSS 宽度对齐"导出差异"按钮**（fix2.1）— 视觉约束，实施细节归 §6.3，PRD 仅提及
 
-### 6.4 fix1 + fix2 + fix4 + fix5 + fix6 + round1 + round2 + round3 + round4 增补（v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v0.10 — 2026-05-13 ~ 2026-05-14）
+### 6.4 fix1 + fix2 + fix4 + fix5 + fix6 + round1 + round2 + round3 + round4 + round5 增补（v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 / v0.10 / v0.10.1 — 2026-05-13 ~ 2026-05-14）
 
-> 用户手动测试 fix1+fix2+fix4+fix5+fix6 多轮回归后增补；2026-05-14 PR #45 提 PR 后 round 1 self-review 增补 9 条修订；同日 round 2 self-review 再增补 8 条修订（0 critical + 3 important + 5 minor）；同日 round 3 self-review 由 Codex 自动 review 补 4 条修订（1 P1 资金红线 + 2 P2 + 1 P3）；同日 round 4 self-review 由 Codex 自动 review 补 1 条修订（1 P1 资金红线 — 业务OP 重导清下一日 runs，与 round 3 互补）+ USER_GUIDE 流水汇总性质解释段（用户明确要求）；下列条目作为 §6.1 已拍板表的补充扩展。
+> 用户手动测试 fix1+fix2+fix4+fix5+fix6 多轮回归后增补；2026-05-14 PR #45 提 PR 后 round 1 self-review 增补 9 条修订；同日 round 2 self-review 再增补 8 条修订（0 critical + 3 important + 5 minor）；同日 round 3 self-review 由 Codex 自动 review 补 4 条修订（1 P1 资金红线 + 2 P2 + 1 P3）；同日 round 4 self-review 由 Codex 自动 review 补 1 条修订（1 P1 资金红线 — 业务OP 重导清下一日 runs，与 round 3 互补）+ USER_GUIDE 流水汇总性质解释段（用户明确要求）；同日 round 5 self-review 由 Codex 自动 review 补 1 条修订（1 P3 — 5 处归档文档残留 "17 IPC trackedIpcHandle" 口径，与 round 3 实际收口的 "15 IPC = 5 tracked + 10 plain" 不符，全部统一）；下列条目作为 §6.1 已拍板表的补充扩展。
+
+**round 5 self-review 修订（2026-05-14，Codex 自动 review）**：
+
+- 1 P3 — 5 处文档残留"17 IPC trackedIpcHandle"统一改 15 IPC = 5 tracked + 10 plain
+- 不动代码 / 不动 smoke — 纯文档口径回填
 
 **round 4 self-review 修订（2026-05-14，Codex 自动 review）**：
 

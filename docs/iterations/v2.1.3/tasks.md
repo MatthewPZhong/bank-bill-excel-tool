@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.10（2026-05-14，基于 spec v0.10 — round 4 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（业务OP 重导清下一日 (date+1, BU) runs/diff_rows，新增 `addOneDay(date)` helper UTC 实现 + `runBizOpImportAsync` 事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), bu)` 调用 + smoke Case Q）+ USER_GUIDE 流水汇总性质解释段（用户明确要求）+ T18 round 4 修订记录；v0.9 = 2026-05-14 round 3 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（流水重导清该 date 跨 BU 的 runs/diff_rows，新增 `clearRunsAndDiffsByDate` 函数 + smoke Case P）+ 2 P2（lockfile 同步 / usage-stats 接入 17 IPC trackedIpcHandle）+ 1 P3（preview:all 接入 biz-op-recon）+ T17 round 3 修订记录；v0.8 = 2026-05-14 round 2 self-review 修订；v0.7 = 2026-05-14 round 1 self-review 修订；v0.6 = 2026-05-13 fix6 PRD #14 拍板回滚；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归） |
+| 文档版本 | v0.10.1（2026-05-14，基于 spec v0.10.1 — round 5 self-review 修订：Codex 自动 review 1 P3 — 5 处归档文档残留 "17 IPC trackedIpcHandle" 口径与 round 3 实际收口的 "15 IPC = 5 tracked + 10 plain" 不符 → CHANGELOG / VFH / PRD 标题表 / PRD §6.4 round 3 段 / PR 草稿 5 处统一改 15 IPC + spec §十九 round 5 修订记录段；无代码改动 / 无 smoke 改动 — 纯文档口径回填；v0.10 = 2026-05-14 round 4 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（业务OP 重导清下一日 (date+1, BU) runs/diff_rows，新增 `addOneDay(date)` helper UTC 实现 + `runBizOpImportAsync` 事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), bu)` 调用 + smoke Case Q）+ USER_GUIDE 流水汇总性质解释段（用户明确要求）+ T18 round 4 修订记录；v0.9 = 2026-05-14 round 3 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（流水重导清该 date 跨 BU 的 runs/diff_rows，新增 `clearRunsAndDiffsByDate` 函数 + smoke Case P）+ 2 P2（lockfile 同步 / usage-stats 接入 5 tracked + 10 plain = 15 IPC）+ 1 P3（preview:all 接入 biz-op-recon）+ T17 round 3 修订记录；v0.8 = 2026-05-14 round 2 self-review 修订；v0.7 = 2026-05-14 round 1 self-review 修订；v0.6 = 2026-05-13 fix6 PRD #14 拍板回滚；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归） |
 | 关联 spec | `spec.md` |
 | 关联 PRD | `PRD-v2.1.3.md` |
 | 工作分支 | `v2.1.3` |
@@ -764,15 +764,15 @@
   - **P1 spec §八 文件路径**：`run-repository.js` 函数清单补 `clearRunsAndDiffsByDate`（标 round 3 P1 新增）
   - **P1 spec §九 smoke 用例追加 Case P**（流水重导清 runs + diff_rows 跨 BU 防回归，含构造同 date 跨 2 BU success run + 重导流水 + 断言 + 反例 + 资金红线说明）
   - **P1 spec §十二 升格清单**：评估 `runFlowImportAsync` / `clearRunsAndDiffsByDate` / `clearRunsAndDiffsByDateBu` 三个符号升格；新增 round 3 升格表段（runFlowImportAsync 升格 Critical / clearRunsAndDiffsByDate 升格 Risk-sensitive / clearRunsAndDiffsByDateBu 升格 Risk-sensitive）
-  - **P2 spec §三 IPC 表头**追加 round 3 P2 usage-stats 接入修订段（说明 17 IPC 全部用 trackedIpcHandle 包装 + FUNCTION_REGISTRY 注册「业务OP数据核对」）+ 17 行说明列分别追加 "（tracked via usage-stats wrapper）" 标注（按 v2.1.2 月度BU 模块对齐风格）
+  - **P2 spec §三 IPC 表头**追加 round 3 P2 usage-stats 接入修订段（说明 5 个核心 action 用 trackedIpcHandle + 10 个 query/dialog/helper 保持 plain，共 15 IPC + FUNCTION_REGISTRY 注册「业务OP数据核对」）+ 对应行说明列分别追加 "（tracked via usage-stats wrapper）" / "（plain — 未计入 usage-stats）" 分级标注（按 v2.1.2 月度BU 模块对齐风格）
   - **PRD/spec/tasks v0.8 → v0.9** + round 3 修订记录段（spec §十七 新增）
   - **PRD §6.4 标题**改 fix1+fix2+fix4+fix5+fix6+round1+round2+round3 + 追加 round 3 段（4 条修订摘要）
   - **rules/important-variables.md 升格 3 条**（runFlowImportAsync Critical + clearRunsAndDiffsByDate Risk-sensitive + clearRunsAndDiffsByDateBu Risk-sensitive）+ 元数据 v3 → v4 + 上次人工 review 改 2026-05-14
   - **三件套同步**：CHANGELOG.md / docs/VERSION_FEATURE_HISTORY.md（追加 round 3 修订段）+ docs/USER_GUIDE.md §1.7.x 流水导入说明补"重新导入同日流水后，该日期所有 BU 旧对账结果会被自动清空，请重新点开始运行生成新差异"
-- **Dev 范围（并行另一 agent）**：P1 (`runFlowImportAsync` 事务调 `clearRunsAndDiffsByDate` + `run-repository.js` 新增函数 + smoke Case P) + P2 lockfile (`npm install --package-lock-only`) + P2 usage-stats (FUNCTION_REGISTRY + main.js 17 IPC trackedIpcHandle 包装) + P3 package.json:71 preview:all 接入 biz-op-recon；详见 spec §十七 round 3 修订记录表"代码改动文件"列
+- **Dev 范围（并行另一 agent）**：P1 (`runFlowImportAsync` 事务调 `clearRunsAndDiffsByDate` + `run-repository.js` 新增函数 + smoke Case P) + P2 lockfile (`npm install --package-lock-only`) + P2 usage-stats (FUNCTION_REGISTRY + main.js 5 个核心 action 用 trackedIpcHandle + 10 个 query/dialog/helper 保持 plain，共 15 IPC) + P3 package.json:71 preview:all 接入 biz-op-recon；详见 spec §十七 round 3 修订记录表"代码改动文件"列
 - **acceptance criteria**：
   - PRD 标题表 v0.8 → v0.9 + §3.4.1 步 4 流水重导描述补 `clearRunsAndDiffsByDate` 调用 + §3.5.6 关键不变量段新增 + §6.4 round3 段
-  - spec 标题表 v0.8 → v0.9 + §三 IPC 表头 round 3 P2 段 + 17 行 tracked 标注 + `import:run-flow` 出参补清函数 + §5.0.1 新增 3 行函数签名 + §八 run-repository 补 `clearRunsAndDiffsByDate` + §九 Case P 新增 + §十二 round 3 升格 3 条评估表 + §十七 round 3 修订记录段
+  - spec 标题表 v0.8 → v0.9 + §三 IPC 表头 round 3 P2 段 + 5 tracked + 10 plain 分级标注 + `import:run-flow` 出参补清函数 + §5.0.1 新增 3 行函数签名 + §八 run-repository 补 `clearRunsAndDiffsByDate` + §九 Case P 新增 + §十二 round 3 升格 3 条评估表 + §十七 round 3 修订记录段
   - tasks 总任务 17 → 18 + T17 完整 task
   - rules/important-variables.md 新增 3 条目（runFlowImportAsync Critical + clearRunsAndDiffsByDate Risk-sensitive + clearRunsAndDiffsByDateBu Risk-sensitive）+ 元数据 v3 → v4 + 上次人工 review 2026-05-14
   - CHANGELOG.md v2.1.3 段追加 round 3 修订段

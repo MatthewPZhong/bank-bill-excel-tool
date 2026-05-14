@@ -31,7 +31,7 @@ const FUNCTION_REGISTRY = Object.freeze({
   '单据对账ReconID修复': ['导入文件', '开始运行', '导出文件'],
   // v2.1.2 T2：月度银行对账单BU回填校验（PR #43 Codex F1 修复 — main.js trackedIpcHandle 已用此 moduleKey 但 registry 未注册导致计数静默失败）
   '月度银行对账单BU回填校验': ['导入文件', '开始运行', '导出差异'],
-  // v2.1.3 T3：业务OP数据核对（PR #45 round 3 P2 修复 — 17 个 bizOpRecon:* IPC 接入 trackedIpcHandle）
+  // v2.1.3 T3：业务OP数据核对（PR #45 round 3 P2 修复 — 共 15 个 bizOpRecon:* IPC，5 个核心 action 接入 trackedIpcHandle，10 个 query/dialog/helper 保持 plain ipcMain.handle）
   // 仅核心成功路径计数（导入/运行/导出）；模块状态查询 / 文件选择对话框 / BU 列表等中间态不计
   '业务OP数据核对': ['导入文件', '开始运行', '导出差异'],
   '切换页面风格': ['切换']

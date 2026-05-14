@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.10（2026-05-14 round 4 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（§五 新增 `addOneDay(date)` helper UTC 实现 + `runBizOpImportAsync` 描述补事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 调用 + §九 smoke Case Q）+ §十二 升格清单评估 `runBizOpImportAsync` / `addOneDay` + §十八 round 4 修订记录段；v0.9.1 = 2026-05-14 round 3 self-review S2 grep 对齐：spec ↔ code IPC 数对齐 — §三 删描述但 code 不存在的 `bizOpRecon:run:pick-date` 行 + 表格说明列改为 5 tracked + 10 plain 分级标注 + 表头 round 3 P2 总述段重写为分级 pattern + §十二 P2 行 + §十六 验证步骤 grep 命令矫正；v0.9 = 2026-05-14 round 3 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（§五 新增 `clearRunsAndDiffsByDate(db, date)` 函数 + `runFlowImportAsync` 描述补流水重导事务内清 runs 调用 + §九 smoke Case P）+ 2 P2（lockfile 同步 / §三 IPC 表 usage-stats wrapper 标注）+ 1 P3（preview:all 接入 biz-op-recon）+ §十二 升格清单评估 `runFlowImportAsync` / `clearRunsAndDiffsByDate` + §十七 修订记录段；v0.8 = 2026-05-14 round 2 self-review 修订；v0.7 = 2026-05-14 round 1 self-review 修订（1 critical + 3 important + 5 minor + 3 新 smoke + §7.6 dialog 5→4）；v0.6 = 2026-05-13 fix6：writeDateRangeDiffWorkbook 由 N sheet 改单 sheet「差异」+ data_date+account_key 排序 + Billdate/data_date 一致性 console.warn + smoke Case K；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归；v0.2 = OPEN ISSUE 全部拍板；v0.1 = 起草） |
+| 文档版本 | v0.10.1（2026-05-14 round 5 self-review 修订：Codex 自动 review 1 P3 — 5 处归档文档残留 "17 IPC trackedIpcHandle" 口径与 round 3 实际收口的 "15 IPC = 5 tracked + 10 plain" 不符 → CHANGELOG / VFH / PRD 标题表 / PRD §6.4 round 3 段 / PR 草稿 5 处统一改 15 IPC + §十九 round 5 修订记录段（无代码改动 / 无 smoke 改动 — 纯文档口径回填）；v0.10 = 2026-05-14 round 4 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（§五 新增 `addOneDay(date)` helper UTC 实现 + `runBizOpImportAsync` 描述补事务追加 `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 调用 + §九 smoke Case Q）+ §十二 升格清单评估 `runBizOpImportAsync` / `addOneDay` + §十八 round 4 修订记录段；v0.9.1 = 2026-05-14 round 3 self-review S2 grep 对齐：spec ↔ code IPC 数对齐 — §三 删描述但 code 不存在的 `bizOpRecon:run:pick-date` 行 + 表格说明列改为 5 tracked + 10 plain 分级标注 + 表头 round 3 P2 总述段重写为分级 pattern + §十二 P2 行 + §十六 验证步骤 grep 命令矫正；v0.9 = 2026-05-14 round 3 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（§五 新增 `clearRunsAndDiffsByDate(db, date)` 函数 + `runFlowImportAsync` 描述补流水重导事务内清 runs 调用 + §九 smoke Case P）+ 2 P2（lockfile 同步 / §三 IPC 表 usage-stats wrapper 标注）+ 1 P3（preview:all 接入 biz-op-recon）+ §十二 升格清单评估 `runFlowImportAsync` / `clearRunsAndDiffsByDate` + §十七 修订记录段；v0.8 = 2026-05-14 round 2 self-review 修订；v0.7 = 2026-05-14 round 1 self-review 修订（1 critical + 3 important + 5 minor + 3 新 smoke + §7.6 dialog 5→4）；v0.6 = 2026-05-13 fix6：writeDateRangeDiffWorkbook 由 N sheet 改单 sheet「差异」+ data_date+account_key 排序 + Billdate/data_date 一致性 console.warn + smoke Case K；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归；v0.2 = OPEN ISSUE 全部拍板；v0.1 = 起草） |
 | 关联 PRD | `PRD-v2.1.3.md` |
 | 关联 tasks | `tasks.md` |
 | 工作分支 | `v2.1.3`（基于 main `fc5d766`） |
@@ -1498,7 +1498,7 @@ async function refreshBizOpReconButtons() {
 - 真实数据手测：构造一个 T-2 含部分 NaN（同账户号 2 行：1 行 valid + 1 行 NaN）的业务OP 文件 → summary.t2AnomalyAccountCount 不应包含该账户号（容错路径正确）
 - 状态栏：t2AnomalyAccountCount === 0 时**不显示** "T-2 异常 W 个"；> 0 时**显示**
 
-**known issue（不在 round 2 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议下一 round（round 3）或 v2.1.4 补齐。
+**known issue（不在 round 2 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；留 v2.1.4 补齐（round 3-5 都未补，KI-1 持续保留）。
 
 ---
 
@@ -1554,5 +1554,27 @@ async function refreshBizOpReconButtons() {
 - `grep -n "addOneDay" src/main-process/biz-op-recon-session.js` → 至少 2 命中：函数定义 + `runBizOpImportAsync` 事务内调用
 - 真实数据手测：BU-A 跨 D-1 / D / D+1 三日导入业务OP + D / D+1 流水，跑 D 与 D+1 两 run 成功 → 重导 D 业务OP（修正后）→ 「导出差异」对话框 D 与 D+1 两个日期均消失（两 run 已清，需重新跑对账）
 - 真实数据手测：UTC+12 时区设备（如 New Zealand）跑 smoke Case Q → addOneDay 返回正确 D+1（不抢跑到 D+2）
+
+---
+
+## 十九、round 5 self-review 修订记录（v0.10.1 — 2026-05-14）
+
+> PR #45 round 4 修订完成后再过 reviewer agent（Codex 自动 review）；reviewer 给 0 critical + 0 important + 1 P3（纯文档归档口径残留）finding。用户拍板"全修"。下表为 round 5 修订全部条目（PM 单侧 task — 无代码改动 / 无 smoke 改动）。
+
+| # | 级别 | 内容 | spec/PRD 落实点 | 代码改动文件（Dev 侧） |
+|---|---|---|---|---|
+| **P3** | Minor（纯文档归档口径残留） | 4 处归档文档残留旧口径 "17 IPC bizOpRecon:* 全部用 trackedIpcHandle 包装"，与 round 3 实际收口的 "15 IPC = 5 tracked + 10 plain"（D6 拍板"仅成功 action 计数"+ v2.1.2 月度BU 模块同款分级 pattern）不符。具体位置：CHANGELOG.md:93 § round 3 P2 usage-stats 段；docs/VERSION_FEATURE_HISTORY.md:37 round 3 修订摘要；docs/iterations/v2.1.3/PRD-v2.1.3.md:5 标题表 v0.10 描述；docs/iterations/v2.1.3/PRD-v2.1.3.md:607 §6.4 round 3 P2 段；docs/prs/待merge-PR #45.md:55 ipcRenderer 命中条目。5 处统一改为 "5 个核心 action 用 trackedIpcHandle + 10 个 query/dialog/helper 保持 plain（共 15 个 bizOpRecon:* IPC handler）"。**不阻断功能但归档文档误导后续 review/验收** — 全文档统一口径 | CHANGELOG.md round 3 P2 段 + VFH round 3 摘要行 + PRD §6.4 round 3 段 + PRD 标题表 v0.10 描述 + PR 草稿 ipcRenderer 行 + 本节 spec §十九 新增 | — (PM 纯文档；Dev 不动；smoke 不变) |
+
+**协调（PM 单侧）**：
+- 本 round 全部 PM 文档反向同步 — Dev 不参与（无代码改动 / 无 smoke 改动）
+- 5 处口径统一文案：`"5 个核心 action（导入业务OP / 导入流水 / 开始运行 / 导出指定日期 / 导出区间）用 trackedIpcHandle 包装；其余 10 个 query/dialog/helper handler 保持 plain ipcMain.handle（共 15 个 bizOpRecon:* IPC handler）"`
+
+**round 5 验证清单（PR self-review 前必跑）**：
+- `grep -rn "17 IPC\|17 个 bizOpRecon\|17 IPC bizOpRecon" CHANGELOG.md docs/VERSION_FEATURE_HISTORY.md docs/iterations/v2.1.3/ docs/prs/` → 应**无输出**（全文档口径统一为 15 IPC = 5 tracked + 10 plain）
+- `grep -n "trackedIpcHandle.*bizOpRecon:" src/main.js | wc -l` → 5（与 round 3 验证清单一致）
+- `grep -n "ipcMain.handle('bizOpRecon:" src/main.js | wc -l` → 10（与 round 3 验证清单一致）
+- 文档口径 5 + 10 = 15 与 code 实际 5 + 10 = 15 完全一致
+
+**known issue（不在 round 5 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；留 v2.1.4 补齐（round 3-5 都未补，KI-1 持续保留）。
 
 **known issue（不在 round 4 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议 v2.1.4 补齐。

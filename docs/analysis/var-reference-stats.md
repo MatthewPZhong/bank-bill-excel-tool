@@ -5,15 +5,15 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v2.1.3 |
-| 扫描时间 | 2026-5-14 11:29:06 |
+| 扫描时间 | 2026-5-14 13:29:58 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 76 |
-| 顶层声明总数 | 753 |
-| ≥2 次引用 | 656 |
+| 顶层声明总数 | 755 |
+| ≥2 次引用 | 658 |
 | 跨 ≥3 文件 (A-share) | 135 |
-| 跨 2 文件 (A-pair) | 218 |
-| 单文件 (A-local) | 303 |
-| 跨文件合计 (B) | 353 |
+| 跨 2 文件 (A-pair) | 219 |
+| 单文件 (A-local) | 304 |
+| 跨文件合计 (B) | 354 |
 
 ---
 
@@ -93,11 +93,11 @@
 | `normalizeText` | 3 | 70 | 2 | src/backend/database/migrations.js |
 | `setStatus` | 3 | 69 | 1 | src/renderer.js |
 | `lastGeneratedExports` | 3 | 24 | 1 | src/main.js |
+| `RUNS_TABLE` | 3 | 21 | 3 | src/backend/bank-bu-recon-db/month-repository.js |
 | `hasColumn` | 3 | 19 | 2 | src/backend/biz-op-recon-db/migrations.js |
-| `RUNS_TABLE` | 3 | 19 | 3 | src/backend/bank-bu-recon-db/month-repository.js |
 | `CONCAT_FIELDS_MAPPING_FIELD` | 3 | 17 | 2 | src/main.js |
 | `BALANCE_DISABLED_OPTION` | 3 | 16 | 2 | src/main.js |
-| `runRepository` | 3 | 14 | 3 | src/main-process/bank-bu-recon-session.js |
+| `runRepository` | 3 | 16 | 3 | src/main-process/bank-bu-recon-session.js |
 | `applyStatementResult` | 3 | 13 | 1 | src/renderer.js |
 | `setSetting` | 3 | 13 | 1 | src/backend/database/settings-repository.js |
 | `YELLOW_FILL` | 3 | 13 | 3 | src/main-process/bank-bu-recon-writer.js |
@@ -259,6 +259,7 @@
 | `BUSINESS_BILL_SHEET_NAME` | 4 | src/constants/recon-id-fix-fields.js |
 | `C4_CATEGORIES` | 4 | src/main-process/scenario-dispatcher.js |
 | `CHANNEL_BILL_SHEET_NAME` | 4 | src/constants/gateway-bill-recon-fields.js |
+| `clearRunsAndDiffsByDateBu` | 4 | src/backend/biz-op-recon-db/run-repository.js |
 | `closeAllNewAccountCurrencyDropdowns` | 4 | src/renderer.js |
 | `computeRowHash` | 4 | src/backend/pending-import/validator.js |
 | `createBankBuReconSession` | 4 | src/main-process/bank-bu-recon-session.js |
@@ -332,7 +333,7 @@
 | `buildStatementFileEntry` | 3 | src/main-process/statement-session.js |
 | `clearByDate` | 3 | src/backend/biz-op-recon-db/flow-imports-repository.js |
 | `clearByDateBu` | 3 | src/backend/biz-op-recon-db/imports-repository.js |
-| `clearRunsAndDiffsByDateBu` | 3 | src/backend/biz-op-recon-db/run-repository.js |
+| `clearRunsAndDiffsByDate` | 3 | src/backend/biz-op-recon-db/run-repository.js |
 | `countRowsInMonth` | 3 | src/backend/pending-db/month-repository.js |
 | `createRowInserter` | 3 | src/backend/pending-db/month-repository.js |
 | `createRun` | 3 | src/backend/pending-db/diff-repository.js |
@@ -422,7 +423,7 @@
 
 | 名字 | 总次数 |
 |---|---:|
-| `DIFF_TABLE` | 4 |
+| `DIFF_TABLE` | 5 |
 
 ### `src/backend/database.js`
 
@@ -835,11 +836,11 @@
 | `normalizeText` | 3 | 70 | 2 | src/backend/database/template-repository.js(57), src/backend/database/utils.js(10), src/backend/database/migrations.js(3) |
 | `setStatus` | 3 | 69 | 1 | src/renderer.js(36), src/renderer-dialogs.js(32), src/renderer-previews.js(1) |
 | `lastGeneratedExports` | 3 | 24 | 1 | src/main-process/statement-generation.js(17), src/main-process/statement-session.js(6), src/main.js(1) |
+| `RUNS_TABLE` | 3 | 21 | 3 | src/backend/biz-op-recon-db/run-repository.js(11), src/backend/bank-bu-recon-db/run-repository.js(6), src/backend/bank-bu-recon-db/month-repository.js(4) |
 | `hasColumn` | 3 | 19 | 2 | src/backend/database/migrations.js(14), src/backend/database.js(3), src/backend/biz-op-recon-db/migrations.js(2) |
-| `RUNS_TABLE` | 3 | 19 | 3 | src/backend/biz-op-recon-db/run-repository.js(9), src/backend/bank-bu-recon-db/run-repository.js(6), src/backend/bank-bu-recon-db/month-repository.js(4) |
 | `CONCAT_FIELDS_MAPPING_FIELD` | 3 | 17 | 2 | src/renderer-dialogs.js(14), src/renderer.js(2), src/main.js(1) |
 | `BALANCE_DISABLED_OPTION` | 3 | 16 | 2 | src/renderer-dialogs.js(9), src/renderer.js(6), src/main.js(1) |
-| `runRepository` | 3 | 14 | 3 | src/main-process/bank-bu-recon-session.js(6), src/main-process/biz-op-recon-session.js(4), src/main-process/biz-op-recon-writer.js(4) |
+| `runRepository` | 3 | 16 | 3 | src/main-process/bank-bu-recon-session.js(6), src/main-process/biz-op-recon-session.js(6), src/main-process/biz-op-recon-writer.js(4) |
 | `applyStatementResult` | 3 | 13 | 1 | src/renderer.js(7), src/renderer-dialogs.js(5), src/renderer-previews.js(1) |
 | `setSetting` | 3 | 13 | 1 | src/backend/database/settings-repository.js(9), src/backend/database.js(2), src/backend/database/own-accounts-migration.js(2) |
 | `YELLOW_FILL` | 3 | 13 | 3 | src/main-process/bank-bu-recon-writer.js(6), src/main-process/biz-op-recon-writer.js(4), src/main-process/exceljs-writer.js(3) |
@@ -996,6 +997,7 @@
 | `BUSINESS_BILL_SHEET_NAME` | 2 | 4 | 1 | src/constants/recon-id-fix-fields.js(2), src/main-process/recon-id-fix-io.js(2) |
 | `C4_CATEGORIES` | 2 | 4 | 2 | src/main-process/scenario-dispatcher.js(3), src/main.js(1) |
 | `CHANNEL_BILL_SHEET_NAME` | 2 | 4 | 1 | src/constants/gateway-bill-recon-fields.js(2), src/main-process/recon-id-fix-io.js(2) |
+| `clearRunsAndDiffsByDateBu` | 2 | 4 | 1 | src/backend/biz-op-recon-db/run-repository.js(2), src/main-process/biz-op-recon-session.js(2) |
 | `closeAllNewAccountCurrencyDropdowns` | 2 | 4 | 1 | src/renderer.js(3), src/renderer-previews.js(1) |
 | `computeRowHash` | 2 | 4 | 2 | src/backend/pending-import/validator.js(2), src/backend/pending-import/worker.js(2) |
 | `createBankBuReconSession` | 2 | 4 | 2 | src/main-process/bank-bu-recon-session.js(2), src/main.js(2) |
@@ -1069,7 +1071,7 @@
 | `buildStatementFileEntry` | 2 | 3 | 1 | src/main-process/statement-session.js(2), src/main.js(1) |
 | `clearByDate` | 2 | 3 | 1 | src/backend/biz-op-recon-db/flow-imports-repository.js(2), src/main-process/biz-op-recon-session.js(1) |
 | `clearByDateBu` | 2 | 3 | 1 | src/backend/biz-op-recon-db/imports-repository.js(2), src/main-process/biz-op-recon-session.js(1) |
-| `clearRunsAndDiffsByDateBu` | 2 | 3 | 1 | src/backend/biz-op-recon-db/run-repository.js(2), src/main-process/biz-op-recon-session.js(1) |
+| `clearRunsAndDiffsByDate` | 2 | 3 | 1 | src/backend/biz-op-recon-db/run-repository.js(2), src/main-process/biz-op-recon-session.js(1) |
 | `countRowsInMonth` | 2 | 3 | 1 | src/backend/pending-db/month-repository.js(2), src/main-process/pending-session.js(1) |
 | `createRowInserter` | 2 | 3 | 1 | src/backend/pending-db/month-repository.js(2), src/backend/pending-import/worker.js(1) |
 | `createRun` | 2 | 3 | 1 | src/backend/pending-db/diff-repository.js(2), src/backend/pending-reconcile/engine.js(1) |

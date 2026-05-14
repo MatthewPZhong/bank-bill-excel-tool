@@ -110,6 +110,17 @@ v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。
   - docs/USER_GUIDE.md §1.7.x 流水/业务OP 导入说明附近**合并新建"重导规则"小节**：流水汇总性质解释（用户原话）+ round 4 P1 业务OP 重导清下一日说明，便于用户对照"流水跨 BU 共用 / 业务OP 跨日依赖"两种模型
 - **新 smoke**：Case Q（业务OP 重导清下一日 runs + diff_rows 防回归，资金红线 ⚠️）
 
+### round 5 self-review 修订（v0.10.1 — 2026-05-14，PR #45 round 4 完成后 Codex 自动 review 反馈）
+
+- **1 P3** — 4 处归档文档残留旧口径"17 IPC bizOpRecon:* 全部用 trackedIpcHandle 包装"，与 round 3 收口的实际"15 IPC = 5 tracked + 10 plain"不符：
+  - CHANGELOG.md:93 § round 3 P2 usage-stats 段
+  - docs/VERSION_FEATURE_HISTORY.md:37 round 3 修订摘要
+  - docs/iterations/v2.1.3/PRD-v2.1.3.md:5 标题表 v0.10 描述
+  - docs/iterations/v2.1.3/PRD-v2.1.3.md:607 §6.4 round 3 P2 段
+  - docs/prs/待merge-PR #45.md:55 (ipcRenderer 命中条目)
+- 5 处统一改为"5 个核心 action 用 trackedIpcHandle + 10 个 query/dialog/helper 保持 plain（共 15 个 bizOpRecon:* IPC handler）"
+- 不阻断功能但归档文档误导后续 review/验收 — 全文档统一口径
+
 ## 2.1.2 - 2026-05-13
 
 v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更**（账单类型→对账字段、对账字段→对账内容）+ **新增模块「月度银行对账单BU回填校验」**。OPEN ISSUE #10 资金红线（v0.5 → v0.8 重新拍板）：1:1 / 1:N / N:1 视为对账成功（精准标 BU 差异子对）；N:M（双侧 ≥2）视为数据异常 → 跳过 + 写入差异表 Sheet 3「异常」（**不中断运行**）。OPEN ISSUE #5 BU 比较（v0.9）：trim + toLowerCase + 空值归一（容忍 `Flowmore` vs `FlowMore` 大小写差异）。
