@@ -4331,7 +4331,8 @@ async function handleBizOpReconRun() {
       const s = result.stats;
       const tone = (s.amountDiffCount > 0 || s.t1NotT2Count > 0 || s.t2NotT1Count > 0) ? 'info' : 'success';
       setBizOpReconStatus(
-        `${date} BU=${buName} 对账完成：测算金额差异 ${s.amountDiffCount} 笔 / T-1 有 T-2 无 ${s.t1NotT2Count} 笔 / T-2 有 T-1 无 ${s.t2NotT1Count} 笔 / 多 OP 账户 ${s.multiOpAccountCount} 个`,
+        `${date} BU=${buName} 对账完成：测算金额差异 ${s.amountDiffCount} 笔 / T-1 有 T-2 无 ${s.t1NotT2Count} 笔 / T-2 有 T-1 无 ${s.t2NotT1Count} 笔 / 多 OP 账户 ${s.multiOpAccountCount} 个`
+        + (s.t2AnomalyAccountCount > 0 ? ` / T-2 异常账户 ${s.t2AnomalyAccountCount} 个` : ''),
         tone
       );
       await refreshBizOpReconButtonAvailability();

@@ -751,78 +751,9 @@ async function runBizOpReconSmokeTests() {
   runRepo.clearRunsAndDiffsByDateBu(db, '2026-05-12', 'B2B');
 
   // ========================================================================
-  // Case L：BU 大小写重新导入（v2.1.3-fix7-C1 回归，资金红线 ⚠️）
+  // Case L：T-2 end_balance NaN silent drop（v2.1.3-fix7-I3 回归，资金红线 ⚠️）
   //
-  // 拍板：clearByDateBu 改用 LOWER(TRIM(bu_name)) 与其他 4 个查询函数对齐
-  //
-  // 场景：
-  //   1) 第 1 次直接 insertRows: bu_name='BU-A' 3 行（模拟首次 import）
-  //   2) 第 2 次跑 runBizOpImportAsync xlsx 业务方='bu-a'（大小写差） 4 行
-  //      → 落库前 clearByDateBu 应 DELETE 旧 'BU-A' 3 行 → INSERT 新 'bu-a' 4 行
-  //   3) 期望：getRowsByDateBu(date, 'bu-a') 返回 4 行（不是 3+4=7 行）
-  //
-  // 资金红线 ⚠️：原 bug clearByDateBu 用精确 = 比较 → 大小写不同的旧 BU 行 silently 残留 →
-  // 对账时 normalizeBu 一致 → 同一账户号被算两次（'BU-A' + 'bu-a'）→ 期末余额翻倍
-  // ========================================================================
-  importsRepo.insertRows(db, '2026-05-20', [
-    opRow(2, 'BU-A', 'L001', { begin:0, amount:100, amountIn:100, amountOut:0, end:100 }),
-    opRow(3, 'BU-A', 'L002', { begin:0, amount:200, amountIn:200, amountOut:0, end:200 }),
-    opRow(4, 'BU-A', 'L003', { begin:0, amount:300, amountIn:300, amountOut:0, end:300 })
-  ]);
-  // 验证首次 insert 已落 3 行
-  const beforeL = importsRepo.getRowsByDateBu(db, '2026-05-20', 'BU-A');
-  check('L 首次落库 3 行（基线）', beforeL.length === 3);
-
-  // 第 2 次：xlsx 业务方='bu-a'（小写）
-  const tmpXlsxL = path.join(tmpRoot, 'case-L.xlsx');
-  {
-    const XLSX = require('xlsx');
-    const { BIZ_OP_HEADERS } = require('../../src/backend/biz-op-recon-db/columns');
-    function rowArrL(bu, acc, begin, amt, amtIn, amtOut, end) {
-      const obj = {
-        'Billdate': '', '业务方': bu, '客户编号': '', '主体': '', '账户号': acc,
-        '账户类型': '', '币种': 'CNY', '期初余额': begin, '发生额': amt,
-        '发生额（入）': amtIn, '发生额（出）': amtOut, '期末余额': end,
-        '期末可用余额': '', '期末冻结余额': '', '最近更新时间': '', '通道': '',
-        'ppCardId': '', '银行卡号': '', '扩展信息': '', '账户状态': '',
-        'BizId': '', '清结算系统创建时间': '', '清结算系统更新时间': ''
-      };
-      return BIZ_OP_HEADERS.map(h => obj[h]);
-    }
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet([
-      BIZ_OP_HEADERS,
-      rowArrL('bu-a', 'L101', 0, 10, 10, 0, 10),
-      rowArrL('bu-a', 'L102', 0, 20, 20, 0, 20),
-      rowArrL('bu-a', 'L103', 0, 30, 30, 0, 30),
-      rowArrL('bu-a', 'L104', 0, 40, 40, 0, 40)
-    ]);
-    XLSX.utils.book_append_sheet(wb, ws, 'sheet');
-    XLSX.writeFile(wb, tmpXlsxL);
-  }
-  const resL = await session.runBizOpImportAsync(db, {
-    date: '2026-05-20',
-    filePath: tmpXlsxL,
-    readBizOpFile,
-    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
-    errorReportsDir: path.join(tmpRoot, 'error-reports')
-  });
-  check('L 第 2 次 import success', resL.status === 'success');
-
-  // 关键 assertion：getRowsByDateBu('bu-a') 返回 4 行（旧 'BU-A' 3 行已清）
-  const afterL_lower = importsRepo.getRowsByDateBu(db, '2026-05-20', 'bu-a');
-  check('L 第 2 次 import 后 getRowsByDateBu(bu-a) = 4 行（旧 BU-A 已清）',
-    afterL_lower.length === 4,
-    `资金红线 ⚠️ fix7-C1：clearByDateBu 大小写不一致漏清 → 实际 ${afterL_lower.length} 行`);
-  // 用大写查也应是 4 行（normalize 一致）
-  const afterL_upper = importsRepo.getRowsByDateBu(db, '2026-05-20', 'BU-A');
-  check('L 大写 BU-A 查询同样 4 行（normalize 等价）', afterL_upper.length === 4);
-
-  importsRepo.clearByDateBu(db, '2026-05-20', 'BU-A');
-  runRepo.clearRunsAndDiffsByDateBu(db, '2026-05-20', 'BU-A');
-
-  // ========================================================================
-  // Case M：T-2 end_balance NaN silent drop（v2.1.3-fix7-I3 回归，资金红线 ⚠️）
+  // round 2 R2-I3a swap：原 code 编号 Case M ↔ spec §9.11 Case L 对齐（先 I3 NaN）
   //
   // 拍板：保守方案 — console.warn + summary.t2AnomalyAccountCount，不动 diff_rows schema
   //
@@ -851,17 +782,17 @@ async function runBizOpReconSmokeTests() {
     ]);
     flowRepo.insertRows(db, '2026-05-26', []);
 
-    const resM = session.runReconciliation(db, { date:'2026-05-26', buName:'BU-M' });
-    check('M summary.t2AnomalyAccountCount=1 (M001)', resM.stats.t2AnomalyAccountCount === 1,
-      `资金红线 ⚠️ fix7-I3：T-2 NaN 账户号未计入 anomaly summary，实际 ${resM.stats.t2AnomalyAccountCount}`);
+    const resL = session.runReconciliation(db, { date:'2026-05-26', buName:'BU-M' });
+    check('L summary.t2AnomalyAccountCount=1 (M001)', resL.stats.t2AnomalyAccountCount === 1,
+      `资金红线 ⚠️ fix7-I3：T-2 NaN 账户号未计入 anomaly summary，实际 ${resL.stats.t2AnomalyAccountCount}`);
     const m001Warned = warnLogs.some(l => l.includes('M001') && l.includes('NaN silent drop'));
-    check('M console.warn 含 M001 NaN silent drop 提示', m001Warned,
+    check('L console.warn 含 M001 NaN silent drop 提示', m001Warned,
       `资金红线 ⚠️ fix7-I3：警告未输出，警告日志：${JSON.stringify(warnLogs)}`);
     // v2.1.3 round 1（spec §4.3）：DB 持久化验证 — t2_anomaly_account_count 列写入正确
-    const dbRowM = db.prepare('SELECT t2_anomaly_account_count FROM biz_op_recon_runs WHERE id = ?').get(resM.runId);
-    check('M DB 持久化 t2_anomaly_account_count = 1',
-      dbRowM && dbRowM.t2_anomaly_account_count === 1,
-      `spec §4.3：runs 表未持久化 anomaly count，实际行=${JSON.stringify(dbRowM)}`);
+    const dbRowL = db.prepare('SELECT t2_anomaly_account_count FROM biz_op_recon_runs WHERE id = ?').get(resL.runId);
+    check('L DB 持久化 t2_anomaly_account_count = 1',
+      dbRowL && dbRowL.t2_anomaly_account_count === 1,
+      `spec §4.3：runs 表未持久化 anomaly count，实际行=${JSON.stringify(dbRowL)}`);
   } finally {
     console.warn = origWarn;
   }
@@ -870,6 +801,79 @@ async function runBizOpReconSmokeTests() {
   importsRepo.clearByDateBu(db, '2026-05-26', 'BU-M');
   flowRepo.clearByDate(db, '2026-05-26');
   runRepo.clearRunsAndDiffsByDateBu(db, '2026-05-26', 'BU-M');
+
+  // ========================================================================
+  // Case M：BU 大小写重新导入（v2.1.3-fix7-C1 回归，资金红线 ⚠️）
+  //
+  // round 2 R2-I3a swap：原 code 编号 Case L ↔ spec §9.12 Case M 对齐（C1 大小写）
+  //
+  // 拍板：clearByDateBu 改用 LOWER(TRIM(bu_name)) 与其他 4 个查询函数对齐
+  //
+  // 场景：
+  //   1) 第 1 次直接 insertRows: bu_name='BU-A' 3 行（模拟首次 import）
+  //   2) 第 2 次跑 runBizOpImportAsync xlsx 业务方='bu-a'（大小写差） 4 行
+  //      → 落库前 clearByDateBu 应 DELETE 旧 'BU-A' 3 行 → INSERT 新 'bu-a' 4 行
+  //   3) 期望：getRowsByDateBu(date, 'bu-a') 返回 4 行（不是 3+4=7 行）
+  //
+  // 资金红线 ⚠️：原 bug clearByDateBu 用精确 = 比较 → 大小写不同的旧 BU 行 silently 残留 →
+  // 对账时 normalizeBu 一致 → 同一账户号被算两次（'BU-A' + 'bu-a'）→ 期末余额翻倍
+  // ========================================================================
+  importsRepo.insertRows(db, '2026-05-20', [
+    opRow(2, 'BU-A', 'L001', { begin:0, amount:100, amountIn:100, amountOut:0, end:100 }),
+    opRow(3, 'BU-A', 'L002', { begin:0, amount:200, amountIn:200, amountOut:0, end:200 }),
+    opRow(4, 'BU-A', 'L003', { begin:0, amount:300, amountIn:300, amountOut:0, end:300 })
+  ]);
+  // 验证首次 insert 已落 3 行
+  const beforeM = importsRepo.getRowsByDateBu(db, '2026-05-20', 'BU-A');
+  check('M 首次落库 3 行（基线）', beforeM.length === 3);
+
+  // 第 2 次：xlsx 业务方='bu-a'（小写）
+  const tmpXlsxM = path.join(tmpRoot, 'case-M.xlsx');
+  {
+    const XLSX = require('xlsx');
+    const { BIZ_OP_HEADERS } = require('../../src/backend/biz-op-recon-db/columns');
+    function rowArrM(bu, acc, begin, amt, amtIn, amtOut, end) {
+      const obj = {
+        'Billdate': '', '业务方': bu, '客户编号': '', '主体': '', '账户号': acc,
+        '账户类型': '', '币种': 'CNY', '期初余额': begin, '发生额': amt,
+        '发生额（入）': amtIn, '发生额（出）': amtOut, '期末余额': end,
+        '期末可用余额': '', '期末冻结余额': '', '最近更新时间': '', '通道': '',
+        'ppCardId': '', '银行卡号': '', '扩展信息': '', '账户状态': '',
+        'BizId': '', '清结算系统创建时间': '', '清结算系统更新时间': ''
+      };
+      return BIZ_OP_HEADERS.map(h => obj[h]);
+    }
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      BIZ_OP_HEADERS,
+      rowArrM('bu-a', 'L101', 0, 10, 10, 0, 10),
+      rowArrM('bu-a', 'L102', 0, 20, 20, 0, 20),
+      rowArrM('bu-a', 'L103', 0, 30, 30, 0, 30),
+      rowArrM('bu-a', 'L104', 0, 40, 40, 0, 40)
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, 'sheet');
+    XLSX.writeFile(wb, tmpXlsxM);
+  }
+  const resM = await session.runBizOpImportAsync(db, {
+    date: '2026-05-20',
+    filePath: tmpXlsxM,
+    readBizOpFile,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(tmpRoot, 'error-reports')
+  });
+  check('M 第 2 次 import success', resM.status === 'success');
+
+  // 关键 assertion：getRowsByDateBu('bu-a') 返回 4 行（旧 'BU-A' 3 行已清）
+  const afterM_lower = importsRepo.getRowsByDateBu(db, '2026-05-20', 'bu-a');
+  check('M 第 2 次 import 后 getRowsByDateBu(bu-a) = 4 行（旧 BU-A 已清）',
+    afterM_lower.length === 4,
+    `资金红线 ⚠️ fix7-C1：clearByDateBu 大小写不一致漏清 → 实际 ${afterM_lower.length} 行`);
+  // 用大写查也应是 4 行（normalize 一致）
+  const afterM_upper = importsRepo.getRowsByDateBu(db, '2026-05-20', 'BU-A');
+  check('M 大写 BU-A 查询同样 4 行（normalize 等价）', afterM_upper.length === 4);
+
+  importsRepo.clearByDateBu(db, '2026-05-20', 'BU-A');
+  runRepo.clearRunsAndDiffsByDateBu(db, '2026-05-20', 'BU-A');
 
   // ========================================================================
   // Case N：Billdate ≠ data_date console.warn（M5 spec § 6.2 已声明的调试线索）
@@ -911,6 +915,102 @@ async function runBizOpReconSmokeTests() {
   importsRepo.clearByDateBu(db, '2026-06-10', 'BU-N');
   flowRepo.clearByDate(db, '2026-06-10');
   runRepo.clearRunsAndDiffsByDateBu(db, '2026-06-10', 'BU-N');
+
+  // ========================================================================
+  // Case O：I2 BU 名落库前 trim 归一防回归（round 2 R2-I3b 新增，资金红线 ⚠️）
+  //
+  // 拍板（round 1 I2）：runBizOpImportAsync 落库前把所有行 bu_name 改写为 firstBu.trim()
+  // → DB 内 bu_name 始终是 trim 后值；listDistinctBus 不会出现 '  BU-A  ' / 'BU-A' 两条 distinct
+  //
+  // 场景：两次 runBizOpImportAsync（相同 date=2026-06-20）：
+  //   1) 第 1 次 xlsx 业务方='  BU-A  '（含首尾空白）3 行
+  //   2) 第 2 次 xlsx 业务方='BU-A'（已 trim）2 行
+  //      → 第 2 次落库前 clearByDateBu('BU-A') 经 LOWER(TRIM) 命中第 1 次的 'BU-A' 行 → 全清
+  //      → 最终 DB 只剩第 2 次 2 行
+  //
+  // 资金红线 ⚠️：原 bug（fix7-I2 之前）— 首尾空白 BU 落库后下拉显示两条 / clearByDateBu
+  //   按精确 = 漏清 → 同 BU 数据被双倍累加
+  // ========================================================================
+  const tmpXlsxO1 = path.join(tmpRoot, 'case-O-1.xlsx');
+  const tmpXlsxO2 = path.join(tmpRoot, 'case-O-2.xlsx');
+  {
+    const XLSX = require('xlsx');
+    const { BIZ_OP_HEADERS } = require('../../src/backend/biz-op-recon-db/columns');
+    function rowArrO(bu, acc, begin, amt, amtIn, amtOut, end) {
+      const obj = {
+        'Billdate': '', '业务方': bu, '客户编号': '', '主体': '', '账户号': acc,
+        '账户类型': '', '币种': 'CNY', '期初余额': begin, '发生额': amt,
+        '发生额（入）': amtIn, '发生额（出）': amtOut, '期末余额': end,
+        '期末可用余额': '', '期末冻结余额': '', '最近更新时间': '', '通道': '',
+        'ppCardId': '', '银行卡号': '', '扩展信息': '', '账户状态': '',
+        'BizId': '', '清结算系统创建时间': '', '清结算系统更新时间': ''
+      };
+      return BIZ_OP_HEADERS.map(h => obj[h]);
+    }
+    // 第 1 次：业务方='  BU-A  '（首尾空白）3 行
+    const wb1 = XLSX.utils.book_new();
+    const ws1 = XLSX.utils.aoa_to_sheet([
+      BIZ_OP_HEADERS,
+      rowArrO('  BU-A  ', 'O001', 0, 100, 100, 0, 100),
+      rowArrO('  BU-A  ', 'O002', 0, 200, 200, 0, 200),
+      rowArrO('  BU-A  ', 'O003', 0, 300, 300, 0, 300)
+    ]);
+    XLSX.utils.book_append_sheet(wb1, ws1, 'sheet');
+    XLSX.writeFile(wb1, tmpXlsxO1);
+    // 第 2 次：业务方='BU-A'（无空白）2 行
+    const wb2 = XLSX.utils.book_new();
+    const ws2 = XLSX.utils.aoa_to_sheet([
+      BIZ_OP_HEADERS,
+      rowArrO('BU-A', 'O101', 0, 50, 50, 0, 50),
+      rowArrO('BU-A', 'O102', 0, 60, 60, 0, 60)
+    ]);
+    XLSX.utils.book_append_sheet(wb2, ws2, 'sheet');
+    XLSX.writeFile(wb2, tmpXlsxO2);
+  }
+  const resO1 = await session.runBizOpImportAsync(db, {
+    date: '2026-06-20',
+    filePath: tmpXlsxO1,
+    readBizOpFile,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(tmpRoot, 'error-reports')
+  });
+  check('O 第 1 次 import success', resO1.status === 'success');
+  const resO2 = await session.runBizOpImportAsync(db, {
+    date: '2026-06-20',
+    filePath: tmpXlsxO2,
+    readBizOpFile,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(tmpRoot, 'error-reports')
+  });
+  check('O 第 2 次 import success', resO2.status === 'success');
+
+  // 1. listDistinctBus 中 BU-A* 系应只返回 1 行（不是 '  BU-A  ' + 'BU-A' 两条）
+  // 注：listDistinctBus 不 normalize 返回原值，因此前面 case 残留的 BU-F/BU-X 无关，仅看 BU-A 系
+  const distinctO = importsRepo.listDistinctBus(db);
+  const distinctOAVariants = distinctO.filter(b => String(b.buName || '').trim().toUpperCase() === 'BU-A');
+  check('O listDistinctBus 中 BU-A 系=1 条（首尾空白已 trim 归一）',
+    distinctOAVariants.length === 1,
+    `资金红线 ⚠️ fix7-I2：BU 名首尾空白未 trim → 下拉两条；实际 ${distinctOAVariants.length} 条 ${JSON.stringify(distinctOAVariants)}`);
+
+  // 2. distinct[0].buName === 'BU-A'（trim 后字面值）
+  check('O distinct[0].buName=BU-A（落库前 trim 改写后字面值）',
+    distinctOAVariants[0] && distinctOAVariants[0].buName === 'BU-A',
+    `资金红线 ⚠️ fix7-I2：DB bu_name 未 trim 改写；实际=${JSON.stringify(distinctOAVariants[0])}`);
+
+  // 3. getRowsByDateBu('BU-A') = 2 行（仅第 2 次；第 1 次被 clearByDateBu trim 归一后清掉）
+  const rowsByBuO = importsRepo.getRowsByDateBu(db, '2026-06-20', 'BU-A');
+  check('O getRowsByDateBu(BU-A)=2 行（C1+I2 联动；第 1 次已清）',
+    rowsByBuO.length === 2,
+    `资金红线 ⚠️：第 1 次 3 行未被 clearByDateBu 清；实际 ${rowsByBuO.length} 行`);
+
+  // 4. 用 '  BU-A  ' 查询同样 2 行（C1 LOWER+TRIM 仍命中）
+  const rowsByBuOWhite = importsRepo.getRowsByDateBu(db, '2026-06-20', '  BU-A  ');
+  check('O getRowsByDateBu(  BU-A  )=2 行（C1 LOWER+TRIM 容忍空白）',
+    rowsByBuOWhite.length === 2,
+    `资金红线 ⚠️ fix7-C1：getRowsByDateBu 未对查询参数 TRIM；实际 ${rowsByBuOWhite.length} 行`);
+
+  importsRepo.clearByDateBu(db, '2026-06-20', 'BU-A');
+  runRepo.clearRunsAndDiffsByDateBu(db, '2026-06-20', 'BU-A');
 
   // 清理
   if (db && typeof db.close === 'function') db.close();

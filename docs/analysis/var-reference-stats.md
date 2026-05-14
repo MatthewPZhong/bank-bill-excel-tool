@@ -5,14 +5,14 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v2.1.3 |
-| 扫描时间 | 2026-5-14 10:26:32 |
+| 扫描时间 | 2026-5-14 11:29:06 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 76 |
 | 顶层声明总数 | 753 |
-| ≥2 次引用 | 657 |
-| 跨 ≥3 文件 (A-share) | 133 |
-| 跨 2 文件 (A-pair) | 220 |
-| 单文件 (A-local) | 304 |
+| ≥2 次引用 | 656 |
+| 跨 ≥3 文件 (A-share) | 135 |
+| 跨 2 文件 (A-pair) | 218 |
+| 单文件 (A-local) | 303 |
 | 跨文件合计 (B) | 353 |
 
 ---
@@ -93,6 +93,7 @@
 | `normalizeText` | 3 | 70 | 2 | src/backend/database/migrations.js |
 | `setStatus` | 3 | 69 | 1 | src/renderer.js |
 | `lastGeneratedExports` | 3 | 24 | 1 | src/main.js |
+| `hasColumn` | 3 | 19 | 2 | src/backend/biz-op-recon-db/migrations.js |
 | `RUNS_TABLE` | 3 | 19 | 3 | src/backend/bank-bu-recon-db/month-repository.js |
 | `CONCAT_FIELDS_MAPPING_FIELD` | 3 | 17 | 2 | src/main.js |
 | `BALANCE_DISABLED_OPTION` | 3 | 16 | 2 | src/main.js |
@@ -107,6 +108,7 @@
 | `toExcelSerial` | 3 | 9 | 1 | src/backend/file-service/normalizers.js |
 | `AMOUNT_BASED_ACCOUNT_MAPPING_FIELD` | 3 | 8 | 2 | src/main.js |
 | `AMOUNT_BASED_NAME_MAPPING_FIELD` | 3 | 8 | 2 | src/main.js |
+| `AMOUNT_EPSILON` | 3 | 8 | 1 | src/backend/biz-op-recon-db/columns.js |
 | `AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION` | 3 | 8 | 2 | src/main.js |
 | `AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD` | 3 | 8 | 2 | src/main.js |
 | `applyHeaderRowFont` | 3 | 8 | 3 | src/backend/file-service/writers.js |
@@ -163,10 +165,10 @@
 | `templateRepository` | 33 | src/backend/database.js |
 | `emit` | 20 | src/backend/pending-import/worker.js |
 | `settingsRepository` | 20 | src/backend/database.js |
-| `hasColumn` | 17 | src/backend/database/migrations.js |
 | `TABLE` | 17 | src/backend/biz-op-recon-db/flow-imports-repository.js |
 | `refreshBankStatementStatus` | 14 | src/renderer.js |
 | `sanitizeAmountValue` | 14 | src/backend/file-service/normalizers.js |
+| `normalizeAccountKey` | 13 | src/main-process/biz-op-recon-session.js |
 | `normalizeBu` | 13 | src/main-process/bank-bu-recon-session.js |
 | `refreshTemplates` | 13 | src/renderer.js |
 | `reloadReconIdFixScenarios` | 13 | src/renderer.js |
@@ -192,7 +194,6 @@
 | `setNewAccountExportAvailability` | 7 | src/renderer.js |
 | `syncNewAccountCurrencyMode` | 7 | src/renderer.js |
 | `VALID_CATEGORIES` | 7 | src/backend/database/scenarios-repository.js |
-| `AMOUNT_EPSILON` | 6 | src/backend/biz-op-recon-import/validator.js |
 | `BANK_DIFF_FIELD_DB_COLUMN` | 6 | src/backend/bank-bu-recon-db/columns.js |
 | `bankStatementSession` | 6 | src/main.js |
 | `bizOpRowToArray` | 6 | src/backend/biz-op-recon-db/columns.js |
@@ -372,7 +373,6 @@
 | `writeDiffWorkbook` | 3 | src/main-process/bank-bu-recon-writer.js |
 | `writeSingleDateDiffWorkbook` | 3 | src/main-process/biz-op-recon-writer.js |
 | `BALANCE_SEED_GENERATION_METHODS` | 2 | src/backend/balance-seed-store.js |
-| `makeDateRangeDiffFileName` | 2 | src/main-process/biz-op-recon-session.js |
 | `readBankStatement` | 2 | src/main-process/bank-statement-io.js |
 | `readGatewayRecon` | 2 | src/main-process/bank-statement-io.js |
 | `readReconIdFixFile` | 2 | src/main-process/recon-id-fix-io.js |
@@ -605,7 +605,6 @@
 
 | 名字 | 总次数 |
 |---|---:|
-| `normalizeAccountKey` | 10 |
 | `flowImportsRepository` | 4 |
 
 ### `src/main-process/biz-op-recon-writer.js`
@@ -836,6 +835,7 @@
 | `normalizeText` | 3 | 70 | 2 | src/backend/database/template-repository.js(57), src/backend/database/utils.js(10), src/backend/database/migrations.js(3) |
 | `setStatus` | 3 | 69 | 1 | src/renderer.js(36), src/renderer-dialogs.js(32), src/renderer-previews.js(1) |
 | `lastGeneratedExports` | 3 | 24 | 1 | src/main-process/statement-generation.js(17), src/main-process/statement-session.js(6), src/main.js(1) |
+| `hasColumn` | 3 | 19 | 2 | src/backend/database/migrations.js(14), src/backend/database.js(3), src/backend/biz-op-recon-db/migrations.js(2) |
 | `RUNS_TABLE` | 3 | 19 | 3 | src/backend/biz-op-recon-db/run-repository.js(9), src/backend/bank-bu-recon-db/run-repository.js(6), src/backend/bank-bu-recon-db/month-repository.js(4) |
 | `CONCAT_FIELDS_MAPPING_FIELD` | 3 | 17 | 2 | src/renderer-dialogs.js(14), src/renderer.js(2), src/main.js(1) |
 | `BALANCE_DISABLED_OPTION` | 3 | 16 | 2 | src/renderer-dialogs.js(9), src/renderer.js(6), src/main.js(1) |
@@ -850,6 +850,7 @@
 | `toExcelSerial` | 3 | 9 | 1 | src/backend/file-service/writers.js(4), src/backend/file-service.js(3), src/backend/file-service/normalizers.js(2) |
 | `AMOUNT_BASED_ACCOUNT_MAPPING_FIELD` | 3 | 8 | 2 | src/renderer-previews.js(3), src/renderer.js(3), src/main.js(2) |
 | `AMOUNT_BASED_NAME_MAPPING_FIELD` | 3 | 8 | 2 | src/renderer-previews.js(3), src/renderer.js(3), src/main.js(2) |
+| `AMOUNT_EPSILON` | 3 | 8 | 1 | src/backend/biz-op-recon-import/validator.js(4), src/backend/biz-op-recon-db/columns.js(2), src/main-process/biz-op-recon-session.js(2) |
 | `AMOUNT_SPLIT_BY_FIELD_ENABLED_OPTION` | 3 | 8 | 2 | src/renderer-dialogs.js(5), src/renderer.js(2), src/main.js(1) |
 | `AMOUNT_SPLIT_BY_FIELD_MAPPING_FIELD` | 3 | 8 | 2 | src/renderer-dialogs.js(3), src/renderer.js(3), src/main.js(2) |
 | `applyHeaderRowFont` | 3 | 8 | 3 | src/backend/file-service/writers.js(3), src/main-process/pending-session.js(3), src/backend/pending-export/writer.js(2) |
@@ -901,10 +902,10 @@
 | `templateRepository` | 2 | 33 | 2 | src/backend/database.js(30), src/backend/database/own-accounts-migration.js(3) |
 | `emit` | 2 | 20 | 2 | src/backend/pending-import/worker.js(10), src/main-process/pending-archive-worker.js(10) |
 | `settingsRepository` | 2 | 20 | 2 | src/backend/database.js(16), src/backend/database/own-accounts-migration.js(4) |
-| `hasColumn` | 2 | 17 | 1 | src/backend/database/migrations.js(14), src/backend/database.js(3) |
 | `TABLE` | 2 | 17 | 2 | src/backend/biz-op-recon-db/imports-repository.js(10), src/backend/biz-op-recon-db/flow-imports-repository.js(7) |
 | `refreshBankStatementStatus` | 2 | 14 | 1 | src/renderer-dialogs.js(7), src/renderer.js(7) |
 | `sanitizeAmountValue` | 2 | 14 | 1 | src/backend/file-service.js(11), src/backend/file-service/normalizers.js(3) |
+| `normalizeAccountKey` | 2 | 13 | 2 | src/main-process/biz-op-recon-session.js(10), src/main-process/biz-op-recon-writer.js(3) |
 | `normalizeBu` | 2 | 13 | 2 | src/main-process/bank-bu-recon-session.js(8), src/main-process/biz-op-recon-session.js(5) |
 | `refreshTemplates` | 2 | 13 | 1 | src/renderer.js(7), src/renderer-dialogs.js(6) |
 | `reloadReconIdFixScenarios` | 2 | 13 | 1 | src/renderer-dialogs.js(9), src/renderer.js(4) |
@@ -930,7 +931,6 @@
 | `setNewAccountExportAvailability` | 2 | 7 | 1 | src/renderer.js(5), src/renderer-previews.js(2) |
 | `syncNewAccountCurrencyMode` | 2 | 7 | 1 | src/renderer.js(5), src/renderer-previews.js(2) |
 | `VALID_CATEGORIES` | 2 | 7 | 2 | src/backend/database/scenarios-repository.js(4), src/main-process/recon-id-fix-engine.js(3) |
-| `AMOUNT_EPSILON` | 2 | 6 | 2 | src/backend/biz-op-recon-import/validator.js(4), src/main-process/biz-op-recon-session.js(2) |
 | `BANK_DIFF_FIELD_DB_COLUMN` | 2 | 6 | 1 | src/main-process/bank-bu-recon-session.js(4), src/backend/bank-bu-recon-db/columns.js(2) |
 | `bankStatementSession` | 2 | 6 | 1 | src/renderer.js(5), src/main.js(1) |
 | `bizOpRowToArray` | 2 | 6 | 1 | src/main-process/biz-op-recon-writer.js(4), src/backend/biz-op-recon-db/columns.js(2) |
@@ -1110,7 +1110,6 @@
 | `writeDiffWorkbook` | 2 | 3 | 1 | src/main-process/bank-bu-recon-writer.js(2), src/main.js(1) |
 | `writeSingleDateDiffWorkbook` | 2 | 3 | 1 | src/main-process/biz-op-recon-writer.js(2), src/main.js(1) |
 | `BALANCE_SEED_GENERATION_METHODS` | 2 | 2 | 1 | src/backend/balance-seed-store.js(1), src/main.js(1) |
-| `makeDateRangeDiffFileName` | 2 | 2 | 1 | src/main-process/biz-op-recon-session.js(1), src/main.js(1) |
 | `readBankStatement` | 2 | 2 | 1 | src/main-process/bank-statement-io.js(1), src/main.js(1) |
 | `readGatewayRecon` | 2 | 2 | 1 | src/main-process/bank-statement-io.js(1), src/main.js(1) |
 | `readReconIdFixFile` | 2 | 2 | 1 | src/main-process/recon-id-fix-io.js(1), src/main.js(1) |

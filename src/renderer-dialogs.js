@@ -8486,7 +8486,8 @@
       const statusText = statusBox && statusBox.querySelector('.status-box-text');
       if (statusText) {
         // v2.1.3-fix1.5：状态框冒号后换行（仅本模块）
-        const raw = '2026-05-12 BU=BU-A 对账完成：测算金额差异 3 笔 / T-1 有 T-2 无 1 笔 / T-2 有 T-1 无 1 笔 / 多 OP 账户 2 个';
+        // v2.1.3 round 2 R2-I1：展示 t2 异常账户尾段（仅 > 0 才显示，preview 模拟 1 个 anomaly 账户场景）
+        const raw = '2026-05-12 BU=BU-A 对账完成：测算金额差异 3 笔 / T-1 有 T-2 无 1 笔 / T-2 有 T-1 无 1 笔 / 多 OP 账户 2 个 / T-2 异常账户 1 个';
         statusText.innerHTML = formatBizOpReconStatusHtml(raw);
       }
     }

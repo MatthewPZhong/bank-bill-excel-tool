@@ -62,6 +62,22 @@ v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。
   - Case N：BU 名落库前 trim 归一防回归（验证 DISTINCT bu_name 仅 1 行）
 - **known issue（不在 round 1 修，留 PRD §6.5 KI-1）**：v2.1.2 月度BU 模块同位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议下一 round 或 v2.1.4 补齐 UX 对齐
 
+### round 2 self-review 修订（v0.8 — 2026-05-14，PR #45 round 1 完成后再过 reviewer agent）
+
+- **0 critical**
+- **3 important**：
+  - R2-I1（UX 半成品）：状态栏文案补 `t2AnomalyAccountCount`：仅 > 0 时显示「T-2 异常 W 个」（= 0 时不显示，避免噪声）；round 1 落 DB + summary + USER_GUIDE 文案，但 renderer 状态栏未串通 — Dev 实施
+  - R2-I2（spec ↔ code 偏差）：PRD §3.5.5 关键不变量补"部分 NaN 容错路径"描述（同账户号多行：仅全 NaN 才标 anomaly + 跳过 map；任一行 valid 则用 valid 行的期末写 map，code 通过 `validAccountSet.delete(anomalyAccountSet)` 集合差实现）
+  - R2-I3（smoke 编号 + I2 回归覆盖扩展）：smoke Case L↔M swap（按依赖顺序 — Case L = clearByDateBu / Case M = T-2 NaN）+ 新 Case O（I2 BU trim 边界扩展，覆盖 tab / 全角空格 + 同 date 联动 C1）
+- **5 minor**：
+  - R2-M1：spec §三 IPC 表删假 handler `bizOpRecon:import:pick-biz-op-date` / `bizOpRecon:import:pick-flow-date`（main.js / preload.js 实际无定义；日期选择由前端 dialog factory `createBizOpReconDatePickerDialog` 直接处理，不走 IPC）
+  - R2-M2：`computeT1Op` 函数签名 spec ↔ code 对齐 — spec v0.7 描述 `(t2OpRows, flowAggMap, t2AnomalySeen, buName)` 返回 `Map`；code 实际 `(t2OpRows, flowAggMap)` 返回 `{ map, anomalyAccountSet }` → spec §5.0.1 + §5.1 + §5.2 全部改为 code 实际签名
+  - R2-M3：console.warn 文案 spec 跟 code 走 — spec v0.7 文案与 code 实际不一致（采纳 code `[biz-op-recon] T-2 end_balance NaN silent drop date=... bu=... account=...` 为 source of truth）
+  - R2-M4：`subOneDay` 双源说明（`src/main-process/biz-op-recon-session.js:83` + `src/backend/biz-op-recon-db/run-repository.js:155` 实现完全一致）— 保留双源符合工程偏好（避免 backend → main-process 反向依赖）；rules/important-variables.md 升格 Risk-sensitive（资金红线 — 时区错乱直接错日期）
+  - R2-M5：`AMOUNT_EPSILON` 位置同步 spec §5.0 描述位置从 session.js 改为 columns.js（M2 round1 提取后单一来源；session.js + validator.js 改 import）
+- **新 smoke**：Case L/M swap + 新 Case O（I2 BU trim 边界扩展）
+- **rules/important-variables.md**：v2 → v3 + `subOneDay` Risk-sensitive 新条目（双源说明）
+
 ## 2.1.2 - 2026-05-13
 
 v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更**（账单类型→对账字段、对账字段→对账内容）+ **新增模块「月度银行对账单BU回填校验」**。OPEN ISSUE #10 资金红线（v0.5 → v0.8 重新拍板）：1:1 / 1:N / N:1 视为对账成功（精准标 BU 差异子对）；N:M（双侧 ≥2）视为数据异常 → 跳过 + 写入差异表 Sheet 3「异常」（**不中断运行**）。OPEN ISSUE #5 BU 比较（v0.9）：trim + toLowerCase + 空值归一（容忍 `Flowmore` vs `FlowMore` 大小写差异）。

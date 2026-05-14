@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.7（2026-05-14 round 1 self-review 修订：1 critical（C1 clearByDateBu 资金红线 — LOWER+TRIM 与 getRowsByDateBu 对齐）+ 3 important（I1 13 个 v2.1.3 新符号升格 important-variables.md / I2 runBizOpImportAsync 落库前归一化 BU 名 / I3 computeT1Op T-2 NaN end_balance 加 console.warn + summary.t2AnomalyAccountCount 新字段）+ 5 minor + 3 新 smoke（Case L/M/N）；v0.6 = 2026-05-13 fix6：区间导出改单 sheet，原 #14 拍板回滚 — 多 sheet（按日期分）→ 单 sheet「差异」所有日期合并，按 data_date + 账户号排序，不加新列依靠原表 Billdate 区分；v0.5 = fix5 PRD 拍板修订：多 OP 账户 N 行全部进差异表，§3.4.1 步 4.2.b + §3.5.1 + §3.5.3 联动修订；v0.4 = fix4 资金红线 bug 修复 + multi_op_account_count 统计语义补丁；v0.3 = fix1+fix2 手动测试回归：OPEN ISSUE #10 拍板回滚 + 5 条 UI 微调；v0.2 = 14 项 OPEN ISSUE 全部拍板；v0.1 = 2026-05-13 起草） |
+| 文档版本 | v0.8（2026-05-14 round 2 self-review 修订：0 critical + 3 important（R2-I1 状态栏文案补 t2AnomalyAccountCount 仅 > 0 显示 / R2-I2 §3.5.5 关键不变量补"部分 NaN"容错路径 / R2-I3 smoke Case L/M swap + 新 Case O）+ 5 minor（R2-M1 spec §三 IPC 表删假 handler `pick-biz-op-date` / `pick-flow-date` + §7.6 dialog 处理说明 / R2-M2 `computeT1Op` 函数签名 spec ↔ code 对齐 / R2-M3 console.warn 文案 spec ↔ code 统一 / R2-M4 `subOneDay` 双源说明 / R2-M5 `AMOUNT_EPSILON` 位置同步 columns.js 单源）；v0.7 = 2026-05-14 round 1 self-review 修订（1 critical C1 clearByDateBu LOWER+TRIM + 3 important I1/I2/I3 + 5 minor + 3 新 smoke Case L/M/N）；v0.6 = 2026-05-13 fix6：区间导出改单 sheet，原 #14 拍板回滚；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归；v0.2 = 14 项 OPEN ISSUE 全部拍板；v0.1 = 2026-05-13 起草） |
 | 目标版本 | `v2.1.3`（patch） |
 | 起始版本 | `v2.1.2`（PR #43 已合并 main，2026-05-13，commit `50e0a0a` / merge `fc5d766`） |
 | 起草日期 | 2026-05-13 |
@@ -410,6 +410,7 @@ writer 阶段保持**无填充色**（移除整行黄底）。
 
 **关键不变量**：
 - T-2 期末余额非数值的账户号 → 跳过 `computedT1Map` 写入（与原行为一致，不退化）→ 该账户号在 §3.4.2 步骤 4.2.b 会走"T-1 有 T-2 无"分支（cmp_t2='T-1有T-2无'）
+- **同账户号多行情况（部分 NaN 容错路径，round 2 R2-I2 补充）**：仅当**所有行都 NaN** 才标 anomaly + 跳过 `computedT1Map` 写入；任一行 valid 则用第一个 valid 行的期末余额（实际是循环中最后一个 valid 行；多行同账户号同 BU 同日期末余额业务上应一致）+ 该账户号 flowSum 写入 map，**不计入 anomaly**。code 实现（`src/main-process/biz-op-recon-session.js:135-160`）通过 `validAccountSet` 与 `anomalyAccountSet` 在循环结束后做集合差（`for (const acc of validAccountSet) anomalyAccountSet.delete(acc)`）。该行为属于 round 1 fix 时的设计延伸，比第 1 条规则更宽松，便于真实数据中部分行被 Excel 转码异常时仍能跑通对账（不退化为 silent drop 整账户）
 - console.warn 仅辅助 debug，**不弹 UI / 不阻断流程**
 - `t2AnomalyAccountCount === 0` 表示 T-2 数据干净；> 0 提醒用户核查 T-2 文件是否有"#N/A"/空字符串/非法字符等
 - 不影响 `amountDiffCount` / `multiOpAccountCount` / `t1NotT2Count` 等其它统计字段
@@ -543,9 +544,20 @@ writer 阶段保持**无填充色**（移除整行黄底）。
 - 4 张 preview 截图的具体场景与触发条件（spec.md §七 拍板）
 - **BU 行 CSS 宽度对齐"导出差异"按钮**（fix2.1）— 视觉约束，实施细节归 §6.3，PRD 仅提及
 
-### 6.4 fix1 + fix2 + fix4 + fix5 + fix6 + round1 增补（v0.3 / v0.4 / v0.5 / v0.6 / v0.7 — 2026-05-13 ~ 2026-05-14）
+### 6.4 fix1 + fix2 + fix4 + fix5 + fix6 + round1 + round2 增补（v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 — 2026-05-13 ~ 2026-05-14）
 
-> 用户手动测试 fix1+fix2+fix4+fix5+fix6 多轮回归后增补；2026-05-14 PR #45 提 PR 后 round 1 self-review 增补 9 条修订；下列条目作为 §6.1 已拍板表的补充扩展。
+> 用户手动测试 fix1+fix2+fix4+fix5+fix6 多轮回归后增补；2026-05-14 PR #45 提 PR 后 round 1 self-review 增补 9 条修订；同日 round 2 self-review 再增补 8 条修订（0 critical + 3 important + 5 minor）；下列条目作为 §6.1 已拍板表的补充扩展。
+
+**round 2 self-review 修订（2026-05-14，PR #45 round 1 修订完成后再次过 reviewer agent；用户拍板"全修"）**：
+
+- **R2-I1（UX 半成品）**：状态栏文案补 `t2AnomalyAccountCount`（仅 > 0 时显示「T-2 异常 W 个」；= 0 时不显示，避免噪声）— Dev 侧实施 `src/renderer.js` 状态栏渲染分支
+- **R2-I2（spec ↔ code 偏差）**：PRD §3.5.5 关键不变量补"部分 NaN"容错路径描述（同账户号多行：仅全 NaN 才标 anomaly；任一 valid 则用 valid 行的期末余额写 map，详见 §3.5.5 第 2 条）
+- **R2-I3（smoke 编号 + I2 回归覆盖）**：smoke Case L↔M swap 编号（按依赖顺序：先 C1 大小写归一防回归 → 再 I3 NaN 防回归）+ 新 Case O（I2 BU trim 落库前归一防回归，扩展原 Case N 的边界场景）
+- **R2-M1（spec §三 IPC 表删假 handler）**：spec 描述中的 `bizOpRecon:import:pick-biz-op-date` / `bizOpRecon:import:pick-flow-date` 两个 handler 在 main.js / preload.js 实际不存在（日期选择由前端 dialog factory `createBizOpReconDatePickerDialog` 直接处理，不走 IPC）→ spec §三 IPC 表删除这两行 + §7.6 dialog 段补一句"日期选择由前端 factory 直接处理（不走 IPC，参考 `src/renderer-dialogs.js:8067`）"
+- **R2-M2（`computeT1Op` 函数签名 spec ↔ code 对齐）**：spec §5.0.1 + §5.1 + §5.2 当前签名 `computeT1Op(t2OpRows, flowAggMap, t2AnomalySeen, buName)`；code 实际签名 `computeT1Op(t2OpRows, flowAggMap)` 返回 `{ map, anomalyAccountSet }` → spec 全部改为 code 实际签名 + 返回结构 + caller 改为 `const { map: calcT1ByAccount, anomalyAccountSet: t2AnomalyAccounts } = computeT1Op(...)`
+- **R2-M3（console.warn 文案 spec ↔ code 统一）**：code 实际文案 `[biz-op-recon] T-2 end_balance NaN silent drop date=${t2Date} bu=${buName} account=${acc} (该账户在 T-1 实际 OP 与差异表均不可见，请检查源文件期末余额字段)` → spec §5.2 改为 code 实际文案（采纳 code 为 source of truth）
+- **R2-M4（`subOneDay` 双源说明）**：`subOneDay` 在 `src/main-process/biz-op-recon-session.js:83` + `src/backend/biz-op-recon-db/run-repository.js:155` 双源定义（实现完全一致 — UTC + setUTCDate -1，避免时区抢跑），保留双源符合工程偏好（避免 backend → main-process 反向依赖）；新增双源说明：spec §五 算法签名表 `subOneDay` 行加备注（双源：session.js + run-repository.js — 维护需双侧同步）；rules/important-variables.md 升格 Risk-sensitive（资金红线 — 时区错乱直接错日期）
+- **R2-M5（`AMOUNT_EPSILON` 位置同步）**：spec §5.0 当前描述 "在 src/main-process/biz-op-recon-session.js 模块顶部常量"；M2 round1 提取后单一来源在 `src/backend/biz-op-recon-db/columns.js:146`，session.js + validator.js import 该常量 → spec §5.0 改为新位置说明 + 强调"避免 import-time vs runtime epsilon 不同步的资金红线偏差"
 
 **round 1 self-review 修订（2026-05-14，PR #45 提 PR 后 reviewer agent 给 1 critical + 3 important + 5 minor + 3 测试遗漏建议；用户拍板"全修"）**：
 

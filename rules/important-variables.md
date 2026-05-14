@@ -9,8 +9,8 @@
 
 | 字段 | 值 |
 |---|---|
-| 清单版本 | v2（对应 app v2.1.3 — 2026-05-14 round 1 self-review 升格 13 条 v2.1.3 新符号） |
-| 上次人工 review | 2026-05-14 |
+| 清单版本 | v3（对应 app v2.1.3 — 2026-05-14 round 2 self-review 新增 1 条 `subOneDay` 升格 Risk-sensitive；round 1 已升格 13 条 v2.1.3 新符号保持） |
+| 上次人工 review | 2026-05-14（round 2） |
 | 基线数据 | `docs/analysis/var-reference-stats.md`（28 个 JS 文件 / 355 顶层声明） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
@@ -393,6 +393,20 @@
   - 与 `validateFlowRow` + `parseSignedAmount` 三处必须同步
   - 不能加同义词（如 'in' / '入款'），避免歧义
   - 必跑：smoke biz-op-recon Case D（覆盖正反例）
+
+### `subOneDay`（v2.1.3 业务OP T-1 → T-2 日期减一 helper，**双源**）
+- 定义：`src/main-process/biz-op-recon-session.js:83` + `src/backend/biz-op-recon-db/run-repository.js:155`（**双源副本**，实现完全一致）
+- 实现：`UTC + setUTCDate(getUTCDate() - 1)` + `toISOString().slice(0, 10)`（避免本地时区抢跑导致跨日错日期）
+- 关联功能：业务OP 模块对账日期减一（D → D-1），即 T-1 → T-2；
+  - `runReconciliation` 在 session.js 调用本地 `subOneDay` 计算 t2Date
+  - `listReadyDates` 在 run-repository.js 调用本地 `subOneDay` 判定"三件齐"日期
+- 变更 review 要点：
+  - **资金红线**：时区错乱直接错日期 → 整批对账日期偏 1 天 → 拿错 T-2 业务OP 数据 → 计算 T-1 OP 错位 → 差异表全部失真
+  - **双源**：保留双源符合 architecture 边界（避免 backend → main-process 反向依赖）；维护时**必须双侧同步**
+  - **维护检查**：改任一处实现后，`grep -n "function subOneDay" src/` 确认两处行为一致
+  - 不能改用 `setDate(getDate() - 1)`（本地时区版）— 在 UTC+12 / UTC-12 边界时区会抢跑或滞后 1 天
+  - round 2 R2-M4 升格（spec ↔ code 对齐时发现双源；保留双源 + 加显式 review 要点）
+  - 必跑：smoke biz-op-recon Case A（核心对账，验证 T-1/T-2 取数日期正确）
 
 ---
 

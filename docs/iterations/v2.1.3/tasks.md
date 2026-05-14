@@ -2,12 +2,12 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.7（2026-05-14，基于 spec v0.7 — round 1 self-review 修订：1 critical（C1 clearByDateBu LOWER+TRIM）+ 3 important（I1 13 符号升格 / I2 BU trim 归一 / I3 computeT1Op T-2 NaN console.warn + summary.t2AnomalyAccountCount + DB schema 增字段）+ 5 minor + 3 新 smoke（Case L/M/N）+ T15 round 1 修订记录；v0.6 = 2026-05-13 fix6 PRD #14 拍板回滚 + T14 修订记录；v0.5 = fix5 PRD 拍板修订 + T13 修订记录；v0.4 = fix4 资金红线 bug 修复 + T12 修复记录；v0.3 = fix1+fix2 手动测试回归） |
+| 文档版本 | v0.8（2026-05-14，基于 spec v0.8 — round 2 self-review 修订：0 critical + 3 important（R2-I1 状态栏文案 t2AnomalyAccountCount 仅 > 0 显示 / R2-I2 §3.5.5 关键不变量补部分 NaN 容错路径 / R2-I3 smoke Case L↔M swap + 新 Case O）+ 5 minor（R2-M1 spec §三 IPC 表删假 handler / R2-M2 computeT1Op 函数签名 spec ↔ code 对齐 / R2-M3 console.warn 文案 spec 跟 code 走 / R2-M4 subOneDay 双源说明 / R2-M5 AMOUNT_EPSILON 位置同步 columns.js）+ T16 round 2 修订记录；v0.7 = 2026-05-14 round 1 self-review 修订（1 critical + 3 important + 5 minor + 3 新 smoke Case L/M/N + T15 修订记录）；v0.6 = 2026-05-13 fix6 PRD #14 拍板回滚 + T14 修订记录；v0.5 = fix5 PRD 拍板修订 + T13 修订记录；v0.4 = fix4 资金红线 bug 修复 + T12 修复记录；v0.3 = fix1+fix2 手动测试回归） |
 | 关联 spec | `spec.md` |
 | 关联 PRD | `PRD-v2.1.3.md` |
 | 工作分支 | `v2.1.3` |
 | 起草人 | team-lead |
-| 总任务数 | 16（T0 spec、T1 migration、T2 reader/validator、T3 session/算法、T4 writer、T5 前端面板/dialog、T6 IPC、T7 smoke、T8 preview、T9 三件套 + version、T10 self-review + PR 草稿、T11 fix1+fix2 自测回归记录、T12 fix4 资金红线 bug 修复记录、T13 fix5 PRD 拍板修订 + Dev 实施、T14 fix6 PRD #14 拍板回滚 + Dev 实施、**T15 round 1 self-review 修订（PR #45 提 PR 后 reviewer 反馈）**） |
+| 总任务数 | 17（T0 spec、T1 migration、T2 reader/validator、T3 session/算法、T4 writer、T5 前端面板/dialog、T6 IPC、T7 smoke、T8 preview、T9 三件套 + version、T10 self-review + PR 草稿、T11 fix1+fix2 自测回归记录、T12 fix4 资金红线 bug 修复记录、T13 fix5 PRD 拍板修订 + Dev 实施、T14 fix6 PRD #14 拍板回滚 + Dev 实施、T15 round 1 self-review 修订（PR #45 提 PR 后 reviewer 反馈）、**T16 round 2 self-review 修订（round 1 完成后再过 reviewer 反馈）**） |
 
 ---
 
@@ -717,3 +717,36 @@
   - CHANGELOG.md / docs/USER_GUIDE.md / docs/VERSION_FEATURE_HISTORY.md
 - **commit message**：`[v2.1.3] docs(t15-round1): PRD/spec/tasks v0.6→v0.7 + important-variables 升格 13 条 + spec §7.6 dialog 5→4 + Case L/M/N 草稿 + 三件套同步`
 - **预估**：M（1-2h，PM 侧文档同步 + I1 升格起草）
+
+---
+
+## T16 — round 2 self-review 修订（v0.8 — 2026-05-14，round 1 完成后再过 reviewer agent）
+
+- **触发**：PR #45 round 1 修订完成后再过 reviewer agent；reviewer 给 0 critical + 3 important + 5 minor + 3 测试遗漏建议（按依赖顺序补编号 / 边界扩展）。用户拍板"全修"。
+- **PM 范围（本任务）**：
+  - **R2-I2 PRD §3.5.5 关键不变量补"部分 NaN"容错路径**：补充第 2 条不变量描述同账户号多行场景下 `validAccountSet.delete(anomalyAccountSet)` 集合差行为；spec §5.2 `computeT1Op` 实现注释 + §5.2.1 算法关键不变量段（与 PRD 同步）
+  - **R2-M1 spec §三 IPC 表删假 handler**：删除 `bizOpRecon:import:pick-biz-op-date` / `bizOpRecon:import:pick-flow-date` 两行（main.js / preload.js 实际无定义；日期选择由前端 dialog factory 直接处理）+ §7.6 dialog 段补处理路径说明（renderer.js 调用入口 + dialog 实现 line 号）
+  - **R2-M2 `computeT1Op` 函数签名 spec ↔ code 对齐**：spec v0.7 描述 `(t2OpRows, flowAggMap, t2AnomalySeen, buName)` 返回 `Map`；code 实际 `(t2OpRows, flowAggMap)` 返回 `{ map, anomalyAccountSet }` → spec §5.0.1 函数签名表 + §5.1 caller + §5.2 helper 全部改为 code 实际签名 + 描述返回结构 + caller 解构
+  - **R2-M3 console.warn 文案 spec ↔ code 统一**：spec v0.7 文案与 code 实际不一致 → spec §5.1 caller 实现 + §5.2.1 关键不变量第 3 条改为 code 实际版本（采纳 code 为 source of truth）
+  - **R2-M4 `subOneDay` 双源说明**：spec §五 算法签名表 `subOneDay` 行加双源备注（保留双源符合工程偏好；维护需双侧同步）；rules/important-variables.md 升格 Risk-sensitive（资金红线 — 时区错乱直接错日期）
+  - **R2-M5 `AMOUNT_EPSILON` 位置同步**：spec §5.0 常量段 + §5.3 validator 段顶部注释从 "session.js 模块顶部常量" 改为 "columns.js（M2 提取后单一来源）"
+  - **PRD/spec/tasks v0.7 → v0.8** + round 2 修订记录段（spec §十六 新增）
+  - **spec §九 smoke 用例编号 swap + 新增**：Case L↔M swap（Case L = clearByDateBu / Case M = T-2 NaN，按依赖顺序）+ 新 Case O（I2 BU trim 边界扩展，覆盖 tab / 全角空格 + 同 date 联动 C1）
+  - **三件套同步**：CHANGELOG.md / docs/USER_GUIDE.md / docs/VERSION_FEATURE_HISTORY.md（详见 acceptance criteria）
+  - **rules/important-variables.md**：`subOneDay` 升格 Risk-sensitive 新条目（双源说明）；元数据 v2 → v3 + 上次人工 review 改 2026-05-14
+- **Dev 范围（并行另一 agent）**：R2-I1 状态栏文案 + R2-I3 smoke Case L/M swap + 新 Case O；详见 spec §十六 round 2 修订记录表"代码改动文件"列
+- **acceptance criteria**：
+  - PRD 标题表 v0.7 → v0.8 + §3.5.5 关键不变量第 2 条新增 + §6.4 round2 段
+  - spec 标题表 v0.7 → v0.8 + §三 IPC 表删 2 行 + §三 表底 R2-M1 备注 + §5.0 AMOUNT_EPSILON 位置 + §5.0.1 函数签名 computeT1Op 同步 + §5.0.1 subOneDay 双源备注 + §5.1 caller 解构 + §5.2 computeT1Op 实现 + §5.2.1 关键不变量段新增 + §5.3 validator import 同步 + §7.6 round 2 R2-M1 修订段 + §9.11 Case L swap + §9.12 Case M swap + §9.14 Case O 新增 + §十六 round 2 修订记录段
+  - tasks 总任务 16 → 17 + T16 完整 task
+  - rules/important-variables.md 新增 `subOneDay` Risk-sensitive 条目 + 元数据 v3 + 上次人工 review 改 2026-05-14
+  - CHANGELOG.md v2.1.3 段追加 round 2 修订段
+  - docs/USER_GUIDE.md §1.7.4 步骤 4 状态栏文案补"仅 > 0 时显示"约束（约束 R2-I1 Dev 实施）
+  - docs/VERSION_FEATURE_HISTORY.md v2.1.3 行追加 round 2 修订
+- **关联文档**：
+  - PRD §3.5.5 + §6.4 round2 段
+  - spec §三 / §5.0 / §5.0.1 / §5.1 / §5.2 / §5.2.1 / §5.3 / §7.6 / §9.11 / §9.12 / §9.14 / §十六
+  - rules/important-variables.md `subOneDay` 新条目
+  - CHANGELOG.md / docs/USER_GUIDE.md / docs/VERSION_FEATURE_HISTORY.md
+- **commit message**：`[v2.1.3] docs(t16-round2): PRD/spec/tasks v0.7→v0.8 + spec §三 IPC 删假 handler + computeT1Op 签名 spec↔code 对齐 + Case L/M swap + 新 Case O + subOneDay 双源说明 + 三件套同步`
+- **预估**：M（1-2h，PM 侧文档同步 + subOneDay 升格起草）
