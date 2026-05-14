@@ -38,13 +38,8 @@
               <span class="module-switcher-caret" aria-hidden="true">▾</span>
             </button>
             <div id="moduleSwitcherMenu" class="module-switcher-menu" hidden>
-              <button class="module-option is-active" type="button" data-module="statement-generator">网银账单生成</button>
-              <button class="module-option" type="button" data-module="new-account-generator">新开账户余额账单生成</button>
-              <button class="module-option" type="button" data-module="pending-reconciliation">月度 Pending 数据核对</button>
-              <button class="module-option" type="button" data-module="bank-statement-process">银行对账单处理</button>
-              <button class="module-option" type="button" data-module="recon-id-fix">对账单ReconID修复</button>
-              <button class="module-option" type="button" data-module="bank-bu-recon">月度银行对账单BU回填校验</button>
-              <button class="module-option" type="button" data-module="biz-op-recon">业务OP数据核对</button>
+              <!-- v2.1.4 T3：module-option 改为运行时按 state.enabledModules 动态渲染（renderTopModuleSwitcher） -->
+              <!-- 用户通过 🔄 收纳弹窗调整启用列表 + 顺序后，本容器即时 re-render -->
             </div>
           </div>
 
@@ -283,8 +278,7 @@
                 <div class="recon-id-fix-bill-category-row">
                   <label class="recon-id-fix-bill-category-label" for="reconIdFixBillCategorySelect">账单类别</label>
                   <select id="reconIdFixBillCategorySelect" class="recon-id-fix-bill-category-select">
-                    <option value="">请选择账单类别</option>
-                    <option value="gateway">网关对账单</option>
+                    <option value="gateway" selected>网关对账单</option>
                     <option value="business">单据对账单</option>
                   </select>
                   <button id="reconIdFixManageScenariosBtn" class="secondary-btn" type="button" disabled>场景管理</button>
@@ -337,7 +331,24 @@
           >
             <span class="palette-trigger-emoji" aria-hidden="true">🎨</span>
           </button>
-          <button id="saveUserGuideBtn" class="text-action background-guide-btn" type="button">使用手册</button>
+          <button
+            id="saveUserGuideBtn"
+            class="palette-trigger"
+            type="button"
+            aria-label="使用手册"
+            title="使用手册"
+          >
+            <span class="palette-trigger-emoji" aria-hidden="true">📕</span>
+          </button>
+          <button
+            id="moduleCabinetBtn"
+            class="palette-trigger"
+            type="button"
+            aria-label="小助手功能收纳"
+            title="小助手功能收纳"
+          >
+            <span class="palette-trigger-emoji" aria-hidden="true">🔄</span>
+          </button>
         </div>
 
         <section id="backgroundPalettePanel" class="palette-panel" hidden aria-label="背景设置">

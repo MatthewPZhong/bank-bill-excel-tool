@@ -1,5 +1,78 @@
 # Changelog
 
+## 2.1.4 - 2026-05-14
+
+v2.1.3 之后追加 patch 迭代：**主页面工具栏小改 + 新增「小助手功能收纳」弹窗 + 对账单ReconID修复账单类别默认 gateway**。4 块改动均为 UI / UX 微调，无对账规则 / 资金算法变动。OPEN ISSUES 7 项（O1-O7）+ V1 版本号格式全部拍板（PRD §五）。
+
+### 新增
+
+- **小助手功能收纳弹窗**（PRD T3）：主页面右下角新增 🔄 按钮，点击弹出「小助手功能收纳」弹窗
+  - 双区域布局：左侧「闲置功能」（按模块名**视觉宽度**升序 — Fix1.5 修订：CJK 字符算 2，其他算 1）+ 右侧「启用功能」（=左上角模块切换菜单的显示顺序）
+  - 中间 ➡️ / ⬅️ 按钮：把选中模块在两区域间移动
+  - 右侧每行末尾拖拽手柄 ⋮⋮：HTML5 原生 draggable，松手时该行落到目标位置
+  - 两阶段提交（Fix1.2 修订 — 撤回原 v0.1 O6 即时落库设计）：弹窗内 ➡️/⬅️/拖拽 只改本地状态；「完成」按钮一次性写 SQLite `app_settings.enabled_modules`（JSON 数组）；「取消」/×/overlay 外部 丢弃所有变更
+  - 启用区至少保留 1 个（PRD O3 拍板）：仅剩 1 时 ⬅️ 按钮 disabled
+  - 当前激活模块被移到闲置时（PRD O4 拍板）：自动切换到启用区第 1 个
+- **左上角模块切换菜单**改为按 `enabled_modules` 动态渲染：默认显示 3 个启用模块（网银账单生成 / 银行对账单处理 / 对账单ReconID修复），其余 4 个模块默认在「闲置功能」区，用户通过 🔄 弹窗自定义
+- **设置默认值**：首次安装时 `app_settings.enabled_modules` seed 为 `["statement-generator","bank-statement-process","recon-id-fix"]`（幂等）
+
+### 变更
+
+- **使用手册按钮换皮**（PRD T1）：右下角「使用手册」从文字按钮（`text-action background-guide-btn`）改为圆形 emoji 📕（`palette-trigger` 类，与左侧 🎨 按钮统一视觉风格）。点击行为/导出 USER_GUIDE.md 流程不变
+- **对账单ReconID修复账单类别默认 gateway**（PRD T4）：
+  - 主面板「账单类别」下拉删除占位项 `<option value="">请选择账单类别</option>`
+  - 默认选中「网关对账单」（gateway）
+  - DB 持久化为空（历史空值）时启动自动写回 `'gateway'`（PRD O2 拍板）；DB 已是 `business` / `gateway` 时不强制覆盖
+- **使用手册版本号**（PRD T2）：`docs/USER_GUIDE.md` 顶部 `版本：v2.1.1` → `v2.1.4`（v2.1.2/v2.1.3 写正文时漏更新顶部版本号字段，本次一并修订）；§1.5 末追加"v2.1.4 起账单类别默认网关对账单"；§1.7 后新增 §1.8「主界面工具栏与模块收纳」
+- **使用手册 §一 模块列表补齐**（用户验收后发现）：v2.1.3 写 §1.7 业务OP数据核对正文时漏了同步 §一 模块清单（仍停留在 6 个，缺第 7 个"业务OP数据核对"）。v2.1.4 一并补：§一 改为 7 个完整模块列表 + 加 v2.1.4 收纳说明（左上角默认显示 3 个，其他通过 🔄 启用）
+
+### 修复
+
+- **⚠️ 关联 bug 修复**：`CURRENT_MODULE_VALID` 枚举（`src/backend/database/settings-repository.js`）在 v2.1.0-beta.1 写定后只列 5 个模块 ID，v2.1.2 新增 `bank-bu-recon` + v2.1.3 新增 `biz-op-recon` 时只动 renderer 端 `MODULES` 常量，没同步 backend 校验枚举 → 用户切到这两个模块时 `setCurrentModule` 会抛 `Invalid current_module`。本次提炼 `ALL_MODULE_IDS` 全集（7 个 ID），`CURRENT_MODULE_VALID` 与 `setEnabledModules` 校验共用，一次性修复 v2.1.2/v2.1.3 遗留
+
+### 内部
+
+- **新增 IPC（2 个 plain handler）**：
+  - `settings:get-enabled-modules` — 启动时拉取启用列表（首次返回 seed 默认值并写入）
+  - `settings:set-enabled-modules` — 模块收纳弹窗内 ➡️/⬅️/拖拽 后写回
+  - `window.desktopApi.settings.getEnabledModules` / `setEnabledModules` 暴露
+- **app:get-info 扩展**：返回新增 `enabledModules` 字段（renderer 启动一次性拉到，省一个 IPC round-trip）
+- **新增 settings repo 函数**：`getEnabledModules(db)` / `setEnabledModules(db, list)` + `ALL_MODULE_IDS` / `DEFAULT_ENABLED_MODULES` 常量
+- **renderer.js 启动 fallback**：若持久化 `current_module` 不在 `enabled_modules` 启用列表中，自动切到启用列表第 1 个 + 写回 DB
+- **顶部模块切换菜单**：从 index.html 静态 7 个 button 改为动态渲染（`renderTopModuleSwitcher`）+ event delegation 一次绑定
+- **新增弹窗工厂**：`createModuleCabinetDialog` in `src/renderer-dialogs.js`
+- **新增 preview**：`preview:module-cabinet` script + `applyModuleCabinetPreviewState` + 串入 `preview:all` 链
+
+### 未改动（明确）
+
+- 不动现有 7 个模块的内部对账逻辑 / 算法 / smoke case
+- 不动 saveUserGuideBtn 的 click handler（仅外观换皮）
+- 不动 v1.5.x / v2.0.0 / v3.0.0 等其他分支
+- USER_GUIDE 既有章节（§1.1-1.7）正文内容不重写，仅 §1.5 末追加一句 + §1.8 新增
+
+### smoke
+
+- `npm run smoke` 全绿（含 `bank-bu-recon 41/41` + `biz-op-recon 154/154`），无回归
+
+### 关联功能 review（check-vars）
+
+- 命中变量见 PR body「⚠️ 关联功能 review」段（PR 阶段跑 `/check-vars` 输出）
+
+### Fix1 修订（v0.2 — 2026-05-14 用户验收后反馈 5 点）
+
+- **F1.1 弹窗布局**：左右两区域内缩 28px 对齐标题"小助手功能收纳" + 整体高度 -32px（min-height 360 → 328）
+- **F1.2 撤回 O6 "即时落库"**：改为两阶段提交模式 — 弹窗内所有 ➡️/⬅️/拖拽操作只改本地状态，「完成」按钮一次性 onCommit 落库；「取消」/×/点击 overlay 外部 = 丢弃所有变更 + 关弹窗（还原成点击 🔄 之前的状态）
+- **F1.3 ➡️/⬅️ 按钮上移**：从中间垂直居中改为与第一行 item 顶部平行（CSS `align-self: start; padding-top: 37px`）
+- **F1.4 toggle 选中**：再次点击同一选中行 → 取消选中状态
+- **F1.5 闲置区排序规则变更**：由 `String.length`（UTF-16 code unit）改为视觉宽度（CJK 字符算 2，其他算 1）。新增 `visualLength` helper。修正用户感知问题："月度银行对账单BU回填校验"(视觉宽度 24) 现在排在"月度 Pending 数据核对"(视觉宽度 21) 之后
+
+### USER_GUIDE Fix1 同步
+
+- §1.8.2「小助手功能收纳弹窗」改"即时落库"为"完成/取消"两阶段；改"按模块名长度"为"按视觉宽度"
+- §1.8.5「持久化」补充"点'完成'一次性落库 / 点'取消'丢弃当次所有变更"说明
+
+---
+
 ## 2.1.3 - 2026-05-13
 
 v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。每日 T-2/T-1 业务OP + T-1 流水对账单导入 → 「业务OP T-2 期末余额 + 流水当日发生额 = 计算 T-1 OP」逻辑跑对账 → 与 T-1 业务OP 期末余额逐行精准比对（epsilon=1e-2）→ 三类差异（测算金额差异 / 多 OP 行 / 账户号增减）导出差异行 Excel（v0.3 fix2.4 回滚：差异表无颜色高亮，差异类型由新增 4 列 meta 字段表达）。OPEN ISSUE 18 项全部拍板（PRD §6.1），其中 #10 在 v0.3 fix2 回滚为 E。

@@ -1176,3 +1176,57 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   white-space: normal;
   line-height: 1.5;
 }
+
+/* v2.1.4 T3：小助手功能收纳弹窗（Clear theme 覆盖） */
+.module-cabinet-card {
+  width: min(100%, 720px);
+}
+.module-cabinet-section {
+  border: 1px solid #d8def0;
+  background: #ffffff;
+}
+.module-cabinet-section-title {
+  color: var(--text, #1c1f29);
+  background: #f4f6fb;
+  border-bottom: 1px solid #d8def0;
+}
+.module-cabinet-item {
+  color: var(--text, #1c1f29);
+  border: 1px solid transparent;
+}
+.module-cabinet-item:hover {
+  background: #f4f6fb;
+}
+.module-cabinet-item.is-selected {
+  background: rgba(66, 133, 244, 0.12);
+  border-color: rgba(66, 133, 244, 0.5);
+}
+.module-cabinet-drag-handle {
+  color: #94a0b8;
+}
+.module-cabinet-control {
+  border: 1px solid #d8def0;
+  background: #ffffff;
+}
+.module-cabinet-control:not(:disabled):hover {
+  background: #f4f6fb;
+}
+/* v2.1.4 Fix1.2 + round 1 self-review I2：preview HTML 备用样式同步 footer right-align */
+.module-cabinet-footer {
+  justify-content: flex-end;
+}
+/* round 1 self-review I3：preview HTML 备用 inline error 样式 */
+.module-cabinet-error {
+  display: none;
+  padding: 8px 28px 0;
+  color: #d32f2f;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.module-cabinet-error.is-visible {
+  display: block;
+}
+/* round 2 self-review I-new-1：committing cursor: wait（preview HTML 备用同步） */
+.modal-overlay.is-committing {
+  cursor: wait;
+}

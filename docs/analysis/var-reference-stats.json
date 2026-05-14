@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "2.1.3",
-    "scannedAt": "2026-05-14T05:29:58.060Z",
+    "version": "2.1.4",
+    "scannedAt": "2026-05-14T10:42:47.561Z",
     "root": "src",
     "totalFiles": 76,
-    "totalTopLevelNames": 755,
+    "totalTopLevelNames": 761,
     "buckets": {
-      "shared": 135,
+      "shared": 137,
       "paired": 219,
-      "local": 304,
-      "crossFile": 354
+      "local": 307,
+      "crossFile": 356
     }
   },
   "A": {
@@ -307,7 +307,7 @@
           },
           {
             "file": "src/backend/database/settings-repository.js",
-            "count": 2
+            "count": 3
           },
           {
             "file": "src/backend/database/utils.js",
@@ -346,7 +346,7 @@
             "count": 2
           }
         ],
-        "totalHits": 24,
+        "totalHits": 25,
         "fileSpan": 15
       },
       {
@@ -696,14 +696,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 43
+            "count": 44
           },
           {
             "file": "src/renderer.js",
             "count": 3
           }
         ],
-        "totalHits": 51,
+        "totalHits": 52,
         "fileSpan": 5
       },
       {
@@ -971,10 +971,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 135
+            "count": 139
           }
         ],
-        "totalHits": 248,
+        "totalHits": 252,
         "fileSpan": 4
       },
       {
@@ -997,10 +997,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 88
+            "count": 89
           }
         ],
-        "totalHits": 136,
+        "totalHits": 137,
         "fileSpan": 4
       },
       {
@@ -2449,6 +2449,28 @@
         "fileSpan": 3
       },
       {
+        "name": "setSetting",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/own-accounts-migration.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 13
+          }
+        ],
+        "totalHits": 17,
+        "fileSpan": 3
+      },
+      {
         "name": "BALANCE_DISABLED_OPTION",
         "defFiles": [
           "src/main.js",
@@ -2518,28 +2540,6 @@
         "fileSpan": 3
       },
       {
-        "name": "setSetting",
-        "defFiles": [
-          "src/backend/database/settings-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database/own-accounts-migration.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database/settings-repository.js",
-            "count": 9
-          }
-        ],
-        "totalHits": 13,
-        "fileSpan": 3
-      },
-      {
         "name": "YELLOW_FILL",
         "defFiles": [
           "src/main-process/bank-bu-recon-writer.js",
@@ -2603,10 +2603,10 @@
           },
           {
             "file": "src/backend/database/settings-repository.js",
-            "count": 7
+            "count": 8
           }
         ],
-        "totalHits": 10,
+        "totalHits": 11,
         "fileSpan": 3
       },
       {
@@ -3424,6 +3424,28 @@
         "fileSpan": 3
       },
       {
+        "name": "getEnabledModules",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
         "name": "getRule",
         "defFiles": [
           "src/backend/pending-db/rule-repository.js"
@@ -3572,6 +3594,28 @@
           },
           {
             "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
+        "name": "setEnabledModules",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
             "count": 1
           }
         ],
@@ -3812,14 +3856,14 @@
         "refFiles": [
           {
             "file": "src/renderer-previews.js",
-            "count": 43
+            "count": 45
           },
           {
             "file": "src/renderer.js",
-            "count": 16
+            "count": 18
           }
         ],
-        "totalHits": 59,
+        "totalHits": 63,
         "fileSpan": 2
       },
       {
@@ -3842,6 +3886,25 @@
         "fileSpan": 2
       },
       {
+        "name": "settingsRepository",
+        "defFiles": [
+          "src/backend/database.js",
+          "src/backend/database/own-accounts-migration.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 18
+          },
+          {
+            "file": "src/backend/database/own-accounts-migration.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 22,
+        "fileSpan": 2
+      },
+      {
         "name": "emit",
         "defFiles": [
           "src/backend/pending-import/worker.js",
@@ -3855,25 +3918,6 @@
           {
             "file": "src/main-process/pending-archive-worker.js",
             "count": 10
-          }
-        ],
-        "totalHits": 20,
-        "fileSpan": 2
-      },
-      {
-        "name": "settingsRepository",
-        "defFiles": [
-          "src/backend/database.js",
-          "src/backend/database/own-accounts-migration.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
-            "count": 16
-          },
-          {
-            "file": "src/backend/database/own-accounts-migration.js",
-            "count": 4
           }
         ],
         "totalHits": 20,
@@ -7810,10 +7854,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 122
+            "count": 124
           }
         ],
-        "totalHits": 122,
+        "totalHits": 124,
         "fileSpan": 1
       },
       {
@@ -8055,6 +8099,20 @@
         "fileSpan": 1
       },
       {
+        "name": "DEFAULT_ENABLED_MODULES",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 8
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 1
+      },
+      {
         "name": "handleNewAccountFormMutation",
         "defFiles": [
           "src/renderer.js"
@@ -8195,6 +8253,20 @@
         "fileSpan": 1
       },
       {
+        "name": "ALL_MODULE_IDS",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
         "name": "buildSingleExportRow",
         "defFiles": [
           "src/backend/pending-export/writer.js"
@@ -8230,6 +8302,20 @@
         "refFiles": [
           {
             "file": "src/main-process/pending-session.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
+        "name": "ENABLED_MODULES_KEY",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
             "count": 6
           }
         ],
@@ -12354,7 +12440,7 @@
         },
         {
           "file": "src/backend/database/settings-repository.js",
-          "count": 2
+          "count": 3
         },
         {
           "file": "src/backend/database/utils.js",
@@ -12393,7 +12479,7 @@
           "count": 2
         }
       ],
-      "totalHits": 24,
+      "totalHits": 25,
       "fileSpan": 15
     },
     {
@@ -12743,14 +12829,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 43
+          "count": 44
         },
         {
           "file": "src/renderer.js",
           "count": 3
         }
       ],
-      "totalHits": 51,
+      "totalHits": 52,
       "fileSpan": 5
     },
     {
@@ -13018,10 +13104,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 135
+          "count": 139
         }
       ],
-      "totalHits": 248,
+      "totalHits": 252,
       "fileSpan": 4
     },
     {
@@ -13044,10 +13130,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 88
+          "count": 89
         }
       ],
-      "totalHits": 136,
+      "totalHits": 137,
       "fileSpan": 4
     },
     {
@@ -14496,6 +14582,28 @@
       "fileSpan": 3
     },
     {
+      "name": "setSetting",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/own-accounts-migration.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 13
+        }
+      ],
+      "totalHits": 17,
+      "fileSpan": 3
+    },
+    {
       "name": "BALANCE_DISABLED_OPTION",
       "defFiles": [
         "src/main.js",
@@ -14565,28 +14673,6 @@
       "fileSpan": 3
     },
     {
-      "name": "setSetting",
-      "defFiles": [
-        "src/backend/database/settings-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database/own-accounts-migration.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database/settings-repository.js",
-          "count": 9
-        }
-      ],
-      "totalHits": 13,
-      "fileSpan": 3
-    },
-    {
       "name": "YELLOW_FILL",
       "defFiles": [
         "src/main-process/bank-bu-recon-writer.js",
@@ -14650,10 +14736,10 @@
         },
         {
           "file": "src/backend/database/settings-repository.js",
-          "count": 7
+          "count": 8
         }
       ],
-      "totalHits": 10,
+      "totalHits": 11,
       "fileSpan": 3
     },
     {
@@ -15471,6 +15557,28 @@
       "fileSpan": 3
     },
     {
+      "name": "getEnabledModules",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
       "name": "getRule",
       "defFiles": [
         "src/backend/pending-db/rule-repository.js"
@@ -15619,6 +15727,28 @@
         },
         {
           "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
+      "name": "setEnabledModules",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
           "count": 1
         }
       ],
@@ -15857,14 +15987,14 @@
       "refFiles": [
         {
           "file": "src/renderer-previews.js",
-          "count": 43
+          "count": 45
         },
         {
           "file": "src/renderer.js",
-          "count": 16
+          "count": 18
         }
       ],
-      "totalHits": 59,
+      "totalHits": 63,
       "fileSpan": 2
     },
     {
@@ -15887,6 +16017,25 @@
       "fileSpan": 2
     },
     {
+      "name": "settingsRepository",
+      "defFiles": [
+        "src/backend/database.js",
+        "src/backend/database/own-accounts-migration.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 18
+        },
+        {
+          "file": "src/backend/database/own-accounts-migration.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 22,
+      "fileSpan": 2
+    },
+    {
       "name": "emit",
       "defFiles": [
         "src/backend/pending-import/worker.js",
@@ -15900,25 +16049,6 @@
         {
           "file": "src/main-process/pending-archive-worker.js",
           "count": 10
-        }
-      ],
-      "totalHits": 20,
-      "fileSpan": 2
-    },
-    {
-      "name": "settingsRepository",
-      "defFiles": [
-        "src/backend/database.js",
-        "src/backend/database/own-accounts-migration.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database.js",
-          "count": 16
-        },
-        {
-          "file": "src/backend/database/own-accounts-migration.js",
-          "count": 4
         }
       ],
       "totalHits": 20,

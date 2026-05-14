@@ -383,6 +383,15 @@ class AppDatabase {
     return settingsRepository.setReconIdFixBillCategory(this.db, category);
   }
 
+  // v2.1.4 T3：左上角模块切换按钮的启用列表
+  getEnabledModules() {
+    return settingsRepository.getEnabledModules(this.db);
+  }
+
+  setEnabledModules(moduleList) {
+    return settingsRepository.setEnabledModules(this.db, moduleList);
+  }
+
   listAccountMappings(templateId) {
     return settingsRepository.listAccountMappings(this.db, templateId);
   }

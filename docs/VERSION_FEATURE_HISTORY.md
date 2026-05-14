@@ -9,6 +9,55 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.4（2026-05-14）
+
+v2.1.3 之后追加 patch 迭代：主页面工具栏小改 + 新增「小助手功能收纳」弹窗 + 对账单ReconID修复账单类别默认 gateway + 顺手修 v2.1.2/v2.1.3 遗留的 `CURRENT_MODULE_VALID` 枚举漏更新 bug。4 块改动 OPEN ISSUES 7 项 + V1 版本号格式全部拍板。
+
+### 新增
+
+- **小助手功能收纳弹窗**（PRD T3）：主页面右下角 🔄 按钮 → 弹窗双区域（闲置 / 启用）+ ➡️/⬅️ 移动 + 启用区行末 ⋮⋮ 拖拽手柄 + 两阶段提交（Fix1.2 修订）
+  - 持久化：SQLite `app_settings.enabled_modules`（JSON 数组）；首次启动 seed 默认 3 个启用模块（网银账单生成 / 银行对账单处理 / 对账单ReconID修复）；点「完成」一次性落库，点「取消」/×/overlay 外部 丢弃所有变更
+  - 启用区至少保留 1 个（O3）+ 当前激活模块被移出时自动切到启用区第 1 个（O4）
+  - 闲置区始终按**视觉宽度**升序展示（Fix1.5 修订 — 撤回原 v0.1 O1 String.length 排序；CJK 字符算 2，其它算 1，让"月度银行对账单BU回填校验" 24 排在 "月度 Pending 数据核对" 21 之后）
+- **左上角模块切换菜单**改为按 enabled_modules 动态渲染（旧版静态 7 个 button → 动态按启用列表生成 + event delegation）
+
+### 变更
+
+- **使用手册按钮换皮**（PRD T1）：文字按钮 → 圆形 emoji 📕（与左侧 🎨 统一），class 由 `text-action background-guide-btn` 改为 `palette-trigger`；点击行为不变
+- **对账单ReconID修复账单类别默认 gateway**（PRD T4）：删占位项「请选择账单类别」+ 默认 selected 「网关对账单」+ DB 历史空值启动写回 gateway（O2）；旧用户已选的 business 不强制覆盖
+- **USER_GUIDE 版本号 + 模块列表**：顶部 v2.1.1 → v2.1.4（v2.1.2/v2.1.3 写正文时漏更新顶部版本号字段，本次一并修订）+ §一 模块列表补齐第 7 个"业务OP数据核对（v2.1.3 新增）"（v2.1.3 漏同步）+ §一 加 v2.1.4 收纳说明 + §1.5 末追加 + §1.8 新增「主界面工具栏与模块收纳」章节
+
+### 修复
+
+- **⚠️ 关联 bug 修复**：`src/backend/database/settings-repository.js` 的 `CURRENT_MODULE_VALID` 在 v2.1.0-beta.1 写定后只列 5 模块 ID，v2.1.2 / v2.1.3 新增 `bank-bu-recon` / `biz-op-recon` 时只动 renderer 没同步 backend 校验 → 用户切到这两个模块 `setCurrentModule` 抛 Invalid current_module。本次提炼 `ALL_MODULE_IDS` 全集 7 ID，`CURRENT_MODULE_VALID` 与 `setEnabledModules` 校验共用
+
+### 内部
+
+- IPC：`settings:get-enabled-modules` / `settings:set-enabled-modules`（2 plain handler）；`app:get-info` 扩展返回 `enabledModules`
+- settings-repository.js：`ALL_MODULE_IDS` + `DEFAULT_ENABLED_MODULES` 常量 + `getEnabledModules` / `setEnabledModules` 函数
+- AppDatabase facade：`getEnabledModules` / `setEnabledModules` 方法
+- renderer.js：`renderTopModuleSwitcher` 函数 + startup currentModule fallback + state.enabledModules
+- renderer-dialogs.js：`createModuleCabinetDialog` 工厂
+- CSS：`src/styles-gemini-extra.css` 加 `.module-cabinet-*` 样式块（含 grid 布局 / 选中 / 拖拽视觉反馈）
+- preview：新增 `preview:module-cabinet` + `applyModuleCabinetPreviewState` + 加入 `preview:all` 链
+- smoke：未拓展（本迭代仅 UI / state 改动，资金/对账算法零变更）
+
+### 未改动
+
+- 既有 7 个模块对账逻辑 / 算法 / smoke case
+- v1.5.x / v2.0.0 / v3.0.0 等其他分支
+
+### Fix1 修订（v0.2 — 2026-05-14 用户验收后反馈）
+
+- **弹窗布局**：左右区域内缩对齐标题（28px padding）+ 高度 -32px
+- **撤回 O6 "即时落库"**：改两阶段提交（完成 / 取消）；取消还原到打开弹窗前数据
+- **➡️/⬅️ 上移**：与第一行 item 顶部平行
+- **toggle 选中**：再次点击同一选中行取消选中
+- **闲置区排序**：由 String.length 改为视觉宽度（CJK×2 + 其他×1），修正"月度银行对账单BU回填校验" 应排在 "月度 Pending 数据核对" 之后的感知问题
+- USER_GUIDE §1.8.2 + §1.8.5 同步更新
+
+---
+
 ## 2.1.3（2026-05-13）
 
 v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。每日 T-2/T-1 业务OP + T-1 流水对账单 → 「T-2 期末 + 当日流水 = 计算 T-1 OP」对账规则 → 逐行精准比对（epsilon=1e-2）+ 1:N 精准标差异 + 账户增减检测。OPEN ISSUE 18 项全部拍板（PRD §6.1）。

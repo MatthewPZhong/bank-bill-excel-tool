@@ -4,16 +4,16 @@
 
 | 字段 | 值 |
 |---|---|
-| 版本 | v2.1.3 |
-| 扫描时间 | 2026-5-14 13:29:58 |
+| 版本 | v2.1.4 |
+| 扫描时间 | 2026-5-14 18:42:47 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 76 |
-| 顶层声明总数 | 755 |
-| ≥2 次引用 | 658 |
-| 跨 ≥3 文件 (A-share) | 135 |
+| 顶层声明总数 | 761 |
+| ≥2 次引用 | 663 |
+| 跨 ≥3 文件 (A-share) | 137 |
 | 跨 2 文件 (A-pair) | 219 |
-| 单文件 (A-local) | 304 |
-| 跨文件合计 (B) | 354 |
+| 单文件 (A-local) | 307 |
+| 跨文件合计 (B) | 356 |
 
 ---
 
@@ -23,14 +23,14 @@
 |---|---:|---:|---:|---|
 | `path` | 28 | 89 | 25 | src/backend/balance-adjustment-store.js |
 | `fs` | 22 | 60 | 22 | src/backend/balance-adjustment-store.js |
-| `parse` | 15 | 24 | 1 | src/backend/usage-stats.js |
+| `parse` | 15 | 25 | 1 | src/backend/usage-stats.js |
 | `normalizeCell` | 14 | 95 | 7 | src/backend/balance-adjustment-store.js |
 | `FileValidationError` | 13 | 63 | 7 | src/backend/balance-seed-store.js |
 | `XLSX` | 10 | 60 | 10 | src/backend/bank-bu-recon-import/reader.js |
 | `PENDING_COLUMNS` | 9 | 33 | 9 | src/backend/pending-db/migrations.js |
 | `pad` | 8 | 57 | 2 | src/backend/logger.js |
 | `dialog` | 5 | 371 | 1 | src/main.js |
-| `setCurrentModule` | 5 | 51 | 2 | src/backend/database/settings-repository.js |
+| `setCurrentModule` | 5 | 52 | 2 | src/backend/database/settings-repository.js |
 | `normalizeCellValue` | 5 | 35 | 1 | src/main-process/scenario-engines/engine-utils.js |
 | `parseNumericValue` | 5 | 26 | 2 | src/backend/balance-seed-store.js |
 | `listMonths` | 5 | 12 | 2 | src/backend/bank-bu-recon-db/month-repository.js |
@@ -39,8 +39,8 @@
 | `makeWarningCollector` | 5 | 10 | 1 | src/main-process/scenario-engines/engine-utils.js |
 | `saveMappings` | 5 | 9 | 1 | src/backend/database/template-repository.js |
 | `deleteTemplate` | 5 | 7 | 1 | src/backend/database/template-repository.js |
-| `state` | 4 | 248 | 1 | src/renderer.js |
-| `elements` | 4 | 136 | 1 | src/renderer.js |
+| `state` | 4 | 252 | 1 | src/renderer.js |
+| `elements` | 4 | 137 | 1 | src/renderer.js |
 | `FIXED_FIELD_VALUE_PREFIX` | 4 | 21 | 2 | src/backend/database/utils.js |
 | `BANK_STATEMENT_FIELDS` | 4 | 17 | 3 | src/constants/bank-statement-fields.js |
 | `MERCHANT_ID_SELF_INPUT_OPTION` | 4 | 17 | 2 | src/main.js |
@@ -96,13 +96,13 @@
 | `RUNS_TABLE` | 3 | 21 | 3 | src/backend/bank-bu-recon-db/month-repository.js |
 | `hasColumn` | 3 | 19 | 2 | src/backend/biz-op-recon-db/migrations.js |
 | `CONCAT_FIELDS_MAPPING_FIELD` | 3 | 17 | 2 | src/main.js |
+| `setSetting` | 3 | 17 | 1 | src/backend/database/settings-repository.js |
 | `BALANCE_DISABLED_OPTION` | 3 | 16 | 2 | src/main.js |
 | `runRepository` | 3 | 16 | 3 | src/main-process/bank-bu-recon-session.js |
 | `applyStatementResult` | 3 | 13 | 1 | src/renderer.js |
-| `setSetting` | 3 | 13 | 1 | src/backend/database/settings-repository.js |
 | `YELLOW_FILL` | 3 | 13 | 3 | src/main-process/bank-bu-recon-writer.js |
 | `ExcelJS` | 3 | 11 | 3 | src/main-process/bank-bu-recon-writer.js |
-| `getSetting` | 3 | 10 | 1 | src/backend/database/settings-repository.js |
+| `getSetting` | 3 | 11 | 1 | src/backend/database/settings-repository.js |
 | `inferDateCellFormat` | 3 | 9 | 1 | src/backend/file-service/normalizers.js |
 | `parseJsonArray` | 3 | 9 | 2 | src/backend/database/utils.js |
 | `toExcelSerial` | 3 | 9 | 1 | src/backend/file-service/normalizers.js |
@@ -139,6 +139,7 @@
 | `ALL_BANKS_TEMPLATE_SCOPE` | 3 | 5 | 2 | src/main-process/monthly-balance.js |
 | `calculateEndingBalanceFromAmounts` | 3 | 5 | 1 | src/backend/file-service/normalizers.js |
 | `exportAggregate` | 3 | 5 | 1 | src/backend/pending-export/writer.js |
+| `getEnabledModules` | 3 | 5 | 1 | src/backend/database/settings-repository.js |
 | `getRule` | 3 | 5 | 1 | src/backend/pending-db/rule-repository.js |
 | `getRunById` | 3 | 5 | 2 | src/backend/biz-op-recon-db/run-repository.js |
 | `getStatementSessionEntries` | 3 | 5 | 1 | src/main-process/statement-session.js |
@@ -146,6 +147,7 @@
 | `mergeMappedDetailRows` | 3 | 5 | 1 | src/main-process/statement-session.js |
 | `readBizOpFile` | 3 | 5 | 1 | src/backend/biz-op-recon-import/reader.js |
 | `readFlowFile` | 3 | 5 | 1 | src/backend/biz-op-recon-import/reader.js |
+| `setEnabledModules` | 3 | 5 | 1 | src/backend/database/settings-repository.js |
 | `setReconIdFixBillCategory` | 3 | 5 | 1 | src/backend/database/settings-repository.js |
 | `setUiStyle` | 3 | 5 | 1 | src/backend/database/settings-repository.js |
 | `updateRunExportPath` | 3 | 5 | 2 | src/backend/bank-bu-recon-db/run-repository.js |
@@ -161,10 +163,10 @@
 
 | 名字 | 总次数 | 声明位置（首个） |
 |---|---:|---|
-| `MODULES` | 59 | src/renderer.js |
+| `MODULES` | 63 | src/renderer.js |
 | `templateRepository` | 33 | src/backend/database.js |
+| `settingsRepository` | 22 | src/backend/database.js |
 | `emit` | 20 | src/backend/pending-import/worker.js |
-| `settingsRepository` | 20 | src/backend/database.js |
 | `TABLE` | 17 | src/backend/biz-op-recon-db/flow-imports-repository.js |
 | `refreshBankStatementStatus` | 14 | src/renderer.js |
 | `sanitizeAmountValue` | 14 | src/backend/file-service/normalizers.js |
@@ -461,6 +463,9 @@
 
 | 名字 | 总次数 |
 |---|---:|
+| `DEFAULT_ENABLED_MODULES` | 8 |
+| `ALL_MODULE_IDS` | 6 |
+| `ENABLED_MODULES_KEY` | 6 |
 | `CURRENT_MODULE_VALID` | 4 |
 | `RECON_ID_FIX_BILL_CATEGORY_KEY` | 4 |
 | `RECON_ID_FIX_BILL_CATEGORY_VALID` | 4 |
@@ -713,7 +718,7 @@
 
 | 名字 | 总次数 |
 |---|---:|
-| `ipcRenderer` | 122 |
+| `ipcRenderer` | 124 |
 | `contextBridge` | 3 |
 
 ### `src/renderer.js`
@@ -766,14 +771,14 @@
 |---|---:|---:|---:|---|
 | `path` | 28 | 89 | 25 | src/main-process/scenario-engines/c4-recon-id-fix.js(15), src/backend/database/own-accounts-migration.js(6), src/main-process/pending-session.js(6) |
 | `fs` | 22 | 60 | 22 | src/backend/usage-stats.js(9), src/backend/database/own-accounts-migration.js(6), src/backend/big-account-mode-store.js(5) |
-| `parse` | 15 | 24 | 1 | src/backend/database/migrations.js(4), src/backend/usage-stats.js(3), src/main-process/pending-session.js(3) |
+| `parse` | 15 | 25 | 1 | src/backend/database/migrations.js(4), src/backend/database/settings-repository.js(3), src/backend/usage-stats.js(3) |
 | `normalizeCell` | 14 | 95 | 7 | src/backend/file-service.js(34), src/backend/file-service/normalizers.js(12), src/backend/file-service/readers.js(12) |
 | `FileValidationError` | 13 | 63 | 7 | src/backend/file-service/readers.js(15), src/backend/file-service/normalizers.js(7), src/main-process/bank-statement-io.js(7) |
 | `XLSX` | 10 | 60 | 10 | src/backend/file-service/writers.js(20), src/main-process/pending-session.js(11), src/backend/pending-export/writer.js(9) |
 | `PENDING_COLUMNS` | 9 | 33 | 9 | src/backend/pending-export/writer.js(6), src/backend/pending-import/validator.js(6), src/main-process/pending-session.js(6) |
 | `pad` | 8 | 57 | 2 | src/main-process/bank-statement-io.js(14), src/backend/logger.js(11), src/main-process/biz-op-recon-session.js(10) |
 | `dialog` | 5 | 371 | 1 | src/renderer-dialogs.js(267), src/renderer.js(71), src/renderer-pending.js(26) |
-| `setCurrentModule` | 5 | 51 | 2 | src/renderer-previews.js(43), src/renderer.js(3), src/backend/database.js(2) |
+| `setCurrentModule` | 5 | 52 | 2 | src/renderer-previews.js(44), src/renderer.js(3), src/backend/database.js(2) |
 | `normalizeCellValue` | 5 | 35 | 1 | src/main-process/scenario-engines/c4-recon-id-fix.js(19), src/main-process/scenario-engines/engine-utils.js(6), src/main-process/scenario-engines/c1-extract-recon-id.js(4) |
 | `parseNumericValue` | 5 | 26 | 2 | src/backend/file-service.js(14), src/backend/file-service/writers.js(6), src/backend/file-service/normalizers.js(4) |
 | `listMonths` | 5 | 12 | 2 | src/main-process/bank-bu-recon-session.js(4), src/backend/bank-bu-recon-db/month-repository.js(2), src/backend/pending-db/month-repository.js(2) |
@@ -782,8 +787,8 @@
 | `makeWarningCollector` | 5 | 10 | 1 | src/main-process/scenario-engines/c1-extract-recon-id.js(2), src/main-process/scenario-engines/c2-offset-bill-mark.js(2), src/main-process/scenario-engines/c3-gateway-recon-join.js(2) |
 | `saveMappings` | 5 | 9 | 1 | src/renderer-dialogs.js(3), src/backend/database.js(2), src/backend/database/template-repository.js(2) |
 | `deleteTemplate` | 5 | 7 | 1 | src/backend/database.js(2), src/backend/database/template-repository.js(2), src/preload.js(1) |
-| `state` | 4 | 248 | 1 | src/renderer.js(135), src/renderer-pending.js(54), src/renderer-previews.js(38) |
-| `elements` | 4 | 136 | 1 | src/renderer.js(88), src/renderer-previews.js(27), src/renderer-pending.js(17) |
+| `state` | 4 | 252 | 1 | src/renderer.js(139), src/renderer-pending.js(54), src/renderer-previews.js(38) |
+| `elements` | 4 | 137 | 1 | src/renderer.js(89), src/renderer-previews.js(27), src/renderer-pending.js(17) |
 | `FIXED_FIELD_VALUE_PREFIX` | 4 | 21 | 2 | src/backend/file-service.js(13), src/backend/database/utils.js(5), src/backend/file-service/common.js(2) |
 | `BANK_STATEMENT_FIELDS` | 4 | 17 | 3 | src/renderer-dialogs.js(9), src/constants/bank-statement-fields.js(3), src/preload.js(3) |
 | `MERCHANT_ID_SELF_INPUT_OPTION` | 4 | 17 | 2 | src/renderer.js(8), src/renderer-dialogs.js(6), src/renderer-previews.js(2) |
@@ -839,13 +844,13 @@
 | `RUNS_TABLE` | 3 | 21 | 3 | src/backend/biz-op-recon-db/run-repository.js(11), src/backend/bank-bu-recon-db/run-repository.js(6), src/backend/bank-bu-recon-db/month-repository.js(4) |
 | `hasColumn` | 3 | 19 | 2 | src/backend/database/migrations.js(14), src/backend/database.js(3), src/backend/biz-op-recon-db/migrations.js(2) |
 | `CONCAT_FIELDS_MAPPING_FIELD` | 3 | 17 | 2 | src/renderer-dialogs.js(14), src/renderer.js(2), src/main.js(1) |
+| `setSetting` | 3 | 17 | 1 | src/backend/database/settings-repository.js(13), src/backend/database.js(2), src/backend/database/own-accounts-migration.js(2) |
 | `BALANCE_DISABLED_OPTION` | 3 | 16 | 2 | src/renderer-dialogs.js(9), src/renderer.js(6), src/main.js(1) |
 | `runRepository` | 3 | 16 | 3 | src/main-process/bank-bu-recon-session.js(6), src/main-process/biz-op-recon-session.js(6), src/main-process/biz-op-recon-writer.js(4) |
 | `applyStatementResult` | 3 | 13 | 1 | src/renderer.js(7), src/renderer-dialogs.js(5), src/renderer-previews.js(1) |
-| `setSetting` | 3 | 13 | 1 | src/backend/database/settings-repository.js(9), src/backend/database.js(2), src/backend/database/own-accounts-migration.js(2) |
 | `YELLOW_FILL` | 3 | 13 | 3 | src/main-process/bank-bu-recon-writer.js(6), src/main-process/biz-op-recon-writer.js(4), src/main-process/exceljs-writer.js(3) |
 | `ExcelJS` | 3 | 11 | 3 | src/main-process/biz-op-recon-writer.js(5), src/main-process/bank-bu-recon-writer.js(3), src/main-process/exceljs-writer.js(3) |
-| `getSetting` | 3 | 10 | 1 | src/backend/database/settings-repository.js(7), src/backend/database.js(2), src/backend/database/own-accounts-migration.js(1) |
+| `getSetting` | 3 | 11 | 1 | src/backend/database/settings-repository.js(8), src/backend/database.js(2), src/backend/database/own-accounts-migration.js(1) |
 | `inferDateCellFormat` | 3 | 9 | 1 | src/backend/file-service/writers.js(4), src/backend/file-service.js(3), src/backend/file-service/normalizers.js(2) |
 | `parseJsonArray` | 3 | 9 | 2 | src/backend/database/template-repository.js(3), src/backend/database/utils.js(3), src/backend/pending-db/rule-repository.js(3) |
 | `toExcelSerial` | 3 | 9 | 1 | src/backend/file-service/writers.js(4), src/backend/file-service.js(3), src/backend/file-service/normalizers.js(2) |
@@ -882,6 +887,7 @@
 | `ALL_BANKS_TEMPLATE_SCOPE` | 3 | 5 | 2 | src/main-process/monthly-balance.js(3), src/main.js(1), src/renderer.js(1) |
 | `calculateEndingBalanceFromAmounts` | 3 | 5 | 1 | src/backend/file-service.js(2), src/backend/file-service/normalizers.js(2), src/main.js(1) |
 | `exportAggregate` | 3 | 5 | 1 | src/backend/pending-export/writer.js(2), src/preload.js(2), src/renderer-pending.js(1) |
+| `getEnabledModules` | 3 | 5 | 1 | src/backend/database.js(2), src/backend/database/settings-repository.js(2), src/preload.js(1) |
 | `getRule` | 3 | 5 | 1 | src/backend/pending-db/rule-repository.js(2), src/renderer-pending.js(2), src/preload.js(1) |
 | `getRunById` | 3 | 5 | 2 | src/backend/biz-op-recon-db/run-repository.js(2), src/backend/pending-db/diff-repository.js(2), src/backend/pending-export/writer.js(1) |
 | `getStatementSessionEntries` | 3 | 5 | 1 | src/main-process/statement-generation.js(2), src/main-process/statement-session.js(2), src/main.js(1) |
@@ -889,6 +895,7 @@
 | `mergeMappedDetailRows` | 3 | 5 | 1 | src/main-process/statement-generation.js(2), src/main-process/statement-session.js(2), src/main.js(1) |
 | `readBizOpFile` | 3 | 5 | 1 | src/backend/biz-op-recon-import/reader.js(2), src/main-process/biz-op-recon-session.js(2), src/main.js(1) |
 | `readFlowFile` | 3 | 5 | 1 | src/backend/biz-op-recon-import/reader.js(2), src/main-process/biz-op-recon-session.js(2), src/main.js(1) |
+| `setEnabledModules` | 3 | 5 | 1 | src/backend/database.js(2), src/backend/database/settings-repository.js(2), src/preload.js(1) |
 | `setReconIdFixBillCategory` | 3 | 5 | 1 | src/backend/database.js(2), src/backend/database/settings-repository.js(2), src/preload.js(1) |
 | `setUiStyle` | 3 | 5 | 1 | src/backend/database.js(2), src/backend/database/settings-repository.js(2), src/preload.js(1) |
 | `updateRunExportPath` | 3 | 5 | 2 | src/backend/bank-bu-recon-db/run-repository.js(2), src/backend/biz-op-recon-db/run-repository.js(2), src/main-process/bank-bu-recon-session.js(1) |
@@ -899,10 +906,10 @@
 | `writeErrorReport` | 3 | 4 | 1 | src/main-process/exceljs-writer.js(2), src/main-process/bank-statement-io.js(1), src/main.js(1) |
 | `buildTimestampMinute` | 3 | 3 | 2 | src/main-process/bank-statement-io.js(1), src/main-process/recon-id-fix-io.js(1), src/main.js(1) |
 | `createHash` | 3 | 3 | 1 | src/backend/pending-import/validator.js(1), src/backend/pending-reconcile/engine.js(1), src/main.js(1) |
-| `MODULES` | 2 | 59 | 1 | src/renderer-previews.js(43), src/renderer.js(16) |
+| `MODULES` | 2 | 63 | 1 | src/renderer-previews.js(45), src/renderer.js(18) |
 | `templateRepository` | 2 | 33 | 2 | src/backend/database.js(30), src/backend/database/own-accounts-migration.js(3) |
+| `settingsRepository` | 2 | 22 | 2 | src/backend/database.js(18), src/backend/database/own-accounts-migration.js(4) |
 | `emit` | 2 | 20 | 2 | src/backend/pending-import/worker.js(10), src/main-process/pending-archive-worker.js(10) |
-| `settingsRepository` | 2 | 20 | 2 | src/backend/database.js(16), src/backend/database/own-accounts-migration.js(4) |
 | `TABLE` | 2 | 17 | 2 | src/backend/biz-op-recon-db/imports-repository.js(10), src/backend/biz-op-recon-db/flow-imports-repository.js(7) |
 | `refreshBankStatementStatus` | 2 | 14 | 1 | src/renderer-dialogs.js(7), src/renderer.js(7) |
 | `sanitizeAmountValue` | 2 | 14 | 1 | src/backend/file-service.js(11), src/backend/file-service/normalizers.js(3) |

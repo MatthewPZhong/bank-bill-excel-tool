@@ -87,15 +87,21 @@ function ensureUiStyleDefault(db) {
   return current;
 }
 
-const CURRENT_MODULE_KEY = 'current_module';
-const CURRENT_MODULE_VALID = [
+// v2.1.4：7 个主模块的 ID 全集（renderer 端 MODULES 常量必须与此一致；新增模块时两边都要加）
+//   修复历史 bug — v2.1.2 新增 bank-bu-recon、v2.1.3 新增 biz-op-recon 时忘了同步 CURRENT_MODULE_VALID 枚举，
+//   导致用户切到这两个模块时 setCurrentModule 抛 "Invalid current_module"
+const ALL_MODULE_IDS = Object.freeze([
   'statement-generator',
   'new-account-generator',
   'pending-reconciliation',
   'bank-statement-process',
-  // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块
-  'recon-id-fix'
-];
+  'recon-id-fix',          // v2.1.0-beta.1 PR-A 新增
+  'bank-bu-recon',         // v2.1.2 新增
+  'biz-op-recon'           // v2.1.3 新增
+]);
+
+const CURRENT_MODULE_KEY = 'current_module';
+const CURRENT_MODULE_VALID = ALL_MODULE_IDS;
 const CURRENT_MODULE_DEFAULT = 'statement-generator';
 
 function getCurrentModule(db) {
@@ -138,6 +144,79 @@ function setReconIdFixBillCategory(db, category) {
     );
   }
   setSetting(db, RECON_ID_FIX_BILL_CATEGORY_KEY, category);
+}
+
+// v2.1.4 T3：左上角模块切换按钮的启用列表（JSON 数组，元素为 ALL_MODULE_IDS 子集）
+const ENABLED_MODULES_KEY = 'enabled_modules';
+const DEFAULT_ENABLED_MODULES = Object.freeze([
+  'statement-generator',
+  'bank-statement-process',
+  'recon-id-fix'
+]);
+
+function getEnabledModules(db) {
+  const raw = getSetting(db, ENABLED_MODULES_KEY);
+  if (!raw) {
+    // 首次启动 seed 默认值（幂等）
+    setSetting(db, ENABLED_MODULES_KEY, JSON.stringify(DEFAULT_ENABLED_MODULES));
+    return [...DEFAULT_ENABLED_MODULES];
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('not an array');
+  } catch (error) {
+    // 解析失败 → 回退默认值（不抛错，避免阻断启动）
+    // round 1 self-review M6：异常 fallback 路径加 console.warn 便于排查"启用列表自动重置"问题
+    console.warn(
+      `[settings-repository] enabled_modules JSON 解析失败，回退默认值。raw=${JSON.stringify(raw)} reason=${error && error.message ? error.message : error}`
+    );
+    setSetting(db, ENABLED_MODULES_KEY, JSON.stringify(DEFAULT_ENABLED_MODULES));
+    return [...DEFAULT_ENABLED_MODULES];
+  }
+  // 过滤非法 ID + 去重 + 保留顺序
+  const seen = new Set();
+  const sanitized = parsed.filter((id) => {
+    if (typeof id !== 'string' || !ALL_MODULE_IDS.includes(id)) return false;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  // 若 sanitize 后为空（DB 内全是非法 ID）→ 回退默认值，避免锁死 UI
+  if (sanitized.length === 0) {
+    // round 1 self-review M6：destructive 覆盖前打 warn
+    console.warn(
+      `[settings-repository] enabled_modules sanitize 后为空（全是非法 ID），回退默认值。raw=${JSON.stringify(raw)}`
+    );
+    setSetting(db, ENABLED_MODULES_KEY, JSON.stringify(DEFAULT_ENABLED_MODULES));
+    return [...DEFAULT_ENABLED_MODULES];
+  }
+  return sanitized;
+}
+
+function setEnabledModules(db, moduleList) {
+  if (!Array.isArray(moduleList)) {
+    throw new Error('enabled_modules must be an array');
+  }
+  const seen = new Set();
+  const sanitized = [];
+  moduleList.forEach((id) => {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new Error(`Invalid enabled_modules entry: ${JSON.stringify(id)}, must be non-empty string`);
+    }
+    if (!ALL_MODULE_IDS.includes(id)) {
+      throw new Error(
+        `Invalid module id: ${id}, must be one of ${ALL_MODULE_IDS.join(' | ')}`
+      );
+    }
+    if (seen.has(id)) return;  // 静默去重
+    seen.add(id);
+    sanitized.push(id);
+  });
+  if (sanitized.length === 0) {
+    throw new Error('enabled_modules must not be empty');  // PRD B1：至少保留 1 个
+  }
+  setSetting(db, ENABLED_MODULES_KEY, JSON.stringify(sanitized));
 }
 
 function listAccountMappings(db, templateId) {
@@ -191,9 +270,12 @@ function saveAccountMappings(db, templateId, mappings) {
 }
 
 module.exports = {
+  ALL_MODULE_IDS,
+  DEFAULT_ENABLED_MODULES,
   ensureUiStyleDefault,
   getBackgroundConfig,
   getCurrentModule,
+  getEnabledModules,
   getEnumConfig,
   getReconIdFixBillCategory,
   getSetting,
@@ -202,6 +284,7 @@ module.exports = {
   saveAccountMappings,
   setBackgroundConfig,
   setCurrentModule,
+  setEnabledModules,
   setEnumConfig,
   setReconIdFixBillCategory,
   setSetting,
