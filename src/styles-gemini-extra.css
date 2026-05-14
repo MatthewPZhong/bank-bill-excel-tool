@@ -2855,3 +2855,14 @@ select.mapping-text-input {
 .module-cabinet-footer {
   justify-content: flex-end;
 }
+/* round 1 self-review I3：inline error 行（onCommit 失败时显示，保留弹窗让用户重试） */
+.module-cabinet-error {
+  display: none;
+  padding: 8px 28px 0;
+  color: #d32f2f;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.module-cabinet-error.is-visible {
+  display: block;
+}

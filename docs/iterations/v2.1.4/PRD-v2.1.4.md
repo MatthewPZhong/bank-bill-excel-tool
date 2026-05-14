@@ -269,7 +269,7 @@ setting_value = JSON.stringify(['statement-generator','bank-statement-process','
 
 | # | 议题 | 拍板 | 备注 |
 |---|---|---|---|
-| O1 | 闲置区从启用区收回时排序方式 | **A=按 name.length 重排** | 与首次默认值一致，闲置区表现统一 |
+| ~~O1~~ | ~~闲置区从启用区收回时排序方式~~ | ~~A=按 name.length 重排~~ → **Fix1.5 修订改为按视觉宽度（CJK×2 + 其他×1）** | v2.1.4 v0.2 Fix1.5：用户感知"月度银行对账单BU回填校验"(视觉宽度 24) 应排在"月度 Pending 数据核对"(视觉宽度 21) 之后；String.length 是 UTF-16 code unit，混排中英文时与视觉感受不符 |
 | O2 | DB `recon_id_fix_bill_category` 持久化空值时启动写回 'gateway' | **A=写回** | DB 与 UI 状态一致 |
 | O3 | 启用区是否允许减到 0 | **A=禁止，至少 1 个** | ⬅️ 在启用区 ≤ 1 时 disabled |
 | O4 | 当前激活模块被移到闲置时 | **A=自动切到启用区第 1 个** | 复用既有 `switchModule` |

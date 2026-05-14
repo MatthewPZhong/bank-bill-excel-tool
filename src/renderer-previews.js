@@ -1055,7 +1055,8 @@
       }, 120);
     }
 
-    // v2.1.4 T3：小助手功能收纳弹窗 preview（默认 3 启用 + 4 闲置，按 name.length 升序闲置区）
+    // v2.1.4 T3：小助手功能收纳弹窗 preview（默认 3 启用 + 4 闲置，闲置区按视觉宽度升序，详见工厂内 visualLength helper）
+    // round 1 self-review M2：原注释 "name.length 升序" stale（Fix1.5 已改视觉宽度），更新口径
     function applyModuleCabinetPreviewState() {
       setCurrentModule(MODULES.statementGenerator.id);
       setTimeout(() => {

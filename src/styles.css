@@ -3287,3 +3287,18 @@ select {
   opacity: 0.35;
   cursor: not-allowed;
 }
+/* v2.1.4 Fix1.2 + round 1 self-review I2：General theme 同步 footer right-align（与 styles-gemini-extra.css 对齐） */
+.module-cabinet-footer {
+  justify-content: flex-end;
+}
+/* round 1 self-review I3：General theme 同步 inline error 样式 */
+.module-cabinet-error {
+  display: none;
+  padding: 8px 28px 0;
+  color: #d32f2f;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.module-cabinet-error.is-visible {
+  display: block;
+}

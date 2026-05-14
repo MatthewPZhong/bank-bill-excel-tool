@@ -2779,11 +2779,14 @@ function registerAppHandlers() {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
   });
-  // v2.1.4 T3：左上角模块切换按钮的启用列表（SET = 模块收纳弹窗内 ➡️/⬅️/拖拽 后写回）
+  // v2.1.4 T3：左上角模块切换按钮的启用列表（SET = 模块收纳弹窗「完成」按钮 落库）
+  // round 1 self-review M5：return DB 真值（getEnabledModules）而非入参 moduleList，
+  //   因为 setEnabledModules 内部 sanitize 会过滤非法 ID + 去重，sanitize 后可能与入参不一致；
+  //   renderer 收到后用真值更新 state.enabledModules 保证一致性。
   ipcMain.handle('settings:set-enabled-modules', (_event, moduleList) => {
     try {
       database.setEnabledModules(moduleList);
-      return { status: 'ok', enabledModules: moduleList };
+      return { status: 'ok', enabledModules: database.getEnabledModules() };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }

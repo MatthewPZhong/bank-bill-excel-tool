@@ -165,8 +165,12 @@ function getEnabledModules(db) {
   try {
     parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) throw new Error('not an array');
-  } catch (_error) {
+  } catch (error) {
     // 解析失败 → 回退默认值（不抛错，避免阻断启动）
+    // round 1 self-review M6：异常 fallback 路径加 console.warn 便于排查"启用列表自动重置"问题
+    console.warn(
+      `[settings-repository] enabled_modules JSON 解析失败，回退默认值。raw=${JSON.stringify(raw)} reason=${error && error.message ? error.message : error}`
+    );
     setSetting(db, ENABLED_MODULES_KEY, JSON.stringify(DEFAULT_ENABLED_MODULES));
     return [...DEFAULT_ENABLED_MODULES];
   }
@@ -180,6 +184,10 @@ function getEnabledModules(db) {
   });
   // 若 sanitize 后为空（DB 内全是非法 ID）→ 回退默认值，避免锁死 UI
   if (sanitized.length === 0) {
+    // round 1 self-review M6：destructive 覆盖前打 warn
+    console.warn(
+      `[settings-repository] enabled_modules sanitize 后为空（全是非法 ID），回退默认值。raw=${JSON.stringify(raw)}`
+    );
     setSetting(db, ENABLED_MODULES_KEY, JSON.stringify(DEFAULT_ENABLED_MODULES));
     return [...DEFAULT_ENABLED_MODULES];
   }

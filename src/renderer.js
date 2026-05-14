@@ -4480,9 +4480,17 @@ async function initialize() {
   const restoredModuleId = state.enabledModules.includes(info.currentModule)
     ? info.currentModule
     : state.enabledModules[0];
-  // 若 currentModule 不在启用列表 → 通过 persist=true 让 setCurrentModule 内部把 fallback 写回 DB
-  const needsPersistFallback = restoredModuleId !== info.currentModule;
-  setCurrentModule(restoredModuleId, { persist: needsPersistFallback });
+  // v2.1.4 round 1 self-review I1：fallback 写回必须绕过 setCurrentModule 内部的 previousModuleId guard。
+  //   state.currentModule 初值（renderer.js state 块）= MODULES.statementGenerator.id；当 fallback 目标
+  //   恰好也是 'statement-generator' 时，setCurrentModule 内部 `previousModuleId !== moduleId` guard 会短路
+  //   导致 persist 路径不发 IPC → DB 永久残留旧值（如 'biz-op-recon'），下次启动用户感知为"上次模块自动恢复"。
+  //   修复：fallback 时直接调 IPC 写回 DB，setCurrentModule 走 persist=false 路径只更新 UI/state。
+  if (restoredModuleId !== info.currentModule) {
+    window.desktopApi?.settings?.setCurrentModule?.(restoredModuleId).catch((error) => {
+      console.warn('persist fallback currentModule failed:', error);
+    });
+  }
+  setCurrentModule(restoredModuleId, { persist: false });
   closeModuleMenu();
   await rendererPending.initialize();
   rendererPending.bindEvents();
@@ -4672,7 +4680,10 @@ async function initialize() {
             console.warn('persist enabledModules failed:', result && result.message);
             return false;
           }
-          state.enabledModules = [...nextEnabledIds];
+          // round 1 self-review M5：用 IPC 返回的 DB 真值刷新 state（sanitize 后可能去重 / 过滤非法 ID）
+          state.enabledModules = Array.isArray(result.enabledModules) && result.enabledModules.length > 0
+            ? [...result.enabledModules]
+            : [...nextEnabledIds];
           // O4 拍板：若 currentModule 被移出启用列表 → 自动切到启用区第 1 个（persist=true 写回 DB）
           if (!state.enabledModules.includes(state.currentModule)) {
             setCurrentModule(state.enabledModules[0], { persist: true });

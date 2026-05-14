@@ -1211,3 +1211,18 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 .module-cabinet-control:not(:disabled):hover {
   background: #f4f6fb;
 }
+/* v2.1.4 Fix1.2 + round 1 self-review I2：preview HTML 备用样式同步 footer right-align */
+.module-cabinet-footer {
+  justify-content: flex-end;
+}
+/* round 1 self-review I3：preview HTML 备用 inline error 样式 */
+.module-cabinet-error {
+  display: none;
+  padding: 8px 28px 0;
+  color: #d32f2f;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.module-cabinet-error.is-visible {
+  display: block;
+}

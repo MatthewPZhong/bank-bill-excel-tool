@@ -7584,10 +7584,13 @@
     //     - 「完成」按钮 → 一次性调 onCommit + 关弹窗；「取消」/× / overlay 点外 → 丢 workingEnabled + 关弹窗
     //   Fix1.4：再次点击同一行 → 取消选中（toggle）
     //   Fix1.5：闲置区排序由 String.length 改为视觉宽度（CJK 字符算 2，其他算 1）
+    //   round 1 self-review I3：onCommit 失败显示 inline error 行 + 保留弹窗 / workingEnabled，用户可重试
+    //   round 1 self-review I4：onCommit 期间 committing flag 锁定 cancel 路径，防 in-flight race
     function createModuleCabinetDialog({ enabledModules, allModules, onCommit }) {
       const originalEnabled = Array.isArray(enabledModules) ? [...enabledModules] : [];
       let workingEnabled = [...originalEnabled];
       const safeAllModules = Array.isArray(allModules) ? allModules : [];
+      let committing = false;  // I4 in-flight guard
       const cabinetState = {
         selectedRegion: null,    // 'idle' | 'enabled' | null
         selectedModuleId: null,
@@ -7619,6 +7622,7 @@
             <ul class="module-cabinet-list" data-region="enabled" role="listbox"></ul>
           </section>
         </div>
+        <div class="module-cabinet-error" role="alert"></div>
         <div class="dialog-actions module-cabinet-footer">
           <button class="primary-btn small" type="button" data-action="confirm">完成</button>
           <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
@@ -7633,9 +7637,12 @@
       const confirmBtn = card.querySelector('[data-action="confirm"]');
       const cancelBtn = card.querySelector('[data-action="cancel"]');
       const closeBtn = card.querySelector('.icon-close');
+      const errorEl = card.querySelector('.module-cabinet-error');
 
       // 取消：丢 workingEnabled + 关弹窗（× / overlay 外部 / 取消按钮 三者等价）
+      // round 1 self-review I4：committing 期间禁止取消（防 IPC in-flight race）
       function cancelAndClose() {
+        if (committing) return;
         closeModal();
       }
       closeBtn.addEventListener('click', cancelAndClose);
@@ -7645,13 +7652,29 @@
       });
 
       // 完成：调 onCommit 落库 + 关弹窗
+      //   round 1 self-review I3：失败时显示 inline error + 保留弹窗 / workingEnabled，让用户重试
+      //   round 1 self-review I4：committing flag 锁定 cancel 路径
       confirmBtn.addEventListener('click', async () => {
+        committing = true;
+        errorEl.classList.remove('is-visible');
+        errorEl.textContent = '';
         confirmBtn.disabled = true;
-        const ok = await onCommit(workingEnabled);
-        if (ok) {
-          closeModal();
-        } else {
+        try {
+          const ok = await onCommit(workingEnabled);
+          if (ok) {
+            committing = false;
+            closeModal();
+          } else {
+            errorEl.textContent = '保存模块设置失败，请稍后重试。';
+            errorEl.classList.add('is-visible');
+            confirmBtn.disabled = false;
+            committing = false;
+          }
+        } catch (err) {
+          errorEl.textContent = `保存失败：${(err && err.message) || '未知错误'}`;
+          errorEl.classList.add('is-visible');
           confirmBtn.disabled = false;
+          committing = false;
         }
       });
 
@@ -7661,6 +7684,9 @@
       }
 
       // Fix1.5：视觉宽度（CJK 字符算 2，其它算 1）— 让"月度银行对账单BU回填校验"(24) 排在"月度 Pending 数据核对"(21) 后面
+      // round 1 self-review M1：scope 限定 BMP CJK 统一汉字 + CJK 扩展 A + 兼容 + 全角 ASCII + CJK 符号；
+      //   未覆盖：Hiragana / Katakana / Hangul / CJK 扩展 B-F（surrogate）/ 半角片假名。
+      //   当前 MODULES 7 个模块名全是 中文 + ASCII 字符，未来如增加日韩翻译名或 CJK 扩展字需扩展本范围。
       function visualLength(s) {
         const str = String(s || '');
         let len = 0;
