@@ -7623,7 +7623,20 @@
       // anomaly preview 在 v0.8 已删除（N:M 不中断不弹窗）
       applyBankBuReconPanelInitialPreviewState,
       applyBankBuReconPanelImportingPreviewState,
-      applyBankBuReconPanelResultPreviewState
+      applyBankBuReconPanelResultPreviewState,
+      // v2.1.3：业务OP数据核对 dialog factory（v2.1.3-fix2 删除 createBizOpReconErrorReportDialog 死代码后剩 4 个）
+      createBizOpReconDatePickerDialog,
+      createBizOpReconReconcileDialog,
+      createBizOpReconExportDialog,
+      createBizOpReconSecondImportPromptDialog,
+      // v2.1.3：preview state apply 函数 4 个（initial / importing / result / export-dialog）
+      applyBizOpReconPanelInitialPreviewState,
+      applyBizOpReconPanelImportingPreviewState,
+      applyBizOpReconPanelResultPreviewState,
+      applyBizOpReconPanelExportDialogPreviewState,
+      // v2.1.3-fix1：状态框冒号换行 formatter + 默认日期 helper（renderer.js 复用）
+      formatBizOpReconStatusHtml,
+      getBizOpReconDefaultDate
     };
 
     // v2.1.2 T2 (spec v0.4 拍板)：月份选择对话框
@@ -8023,6 +8036,472 @@
       dialog.appendChild(actions);
 
       return overlay;
+    }
+
+    // ============================================================
+    // v2.1.3：业务OP数据核对 dialog factory（6 个）+ preview state apply（4 个）
+    // OPEN ISSUE 拍板固化：#5 错误报告 / #8 年±1 月日不联动 / #9 文件名 / #11 续导确认 / #12 ready 前置 / #13 success 复用
+    // ============================================================
+
+    // v2.1.3-fix1.5：状态框冒号换行 formatter（仅本模块用）
+    // 规则：所有 ":" 和 "：" 紧跟一个 <br>，其余字符 HTML escape
+    function formatBizOpReconStatusHtml(text) {
+      const s = String(text == null ? '' : text);
+      return escapeHtml(s).replace(/([:：])/g, '$1<br>');
+    }
+
+    // v2.1.3-fix1.4：今天 - 1 天（本地时区，按月底/年初滚动）→ "YYYY-MM-DD"
+    function getBizOpReconDefaultDate() {
+      const d = new Date(Date.now() - 86400000);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    // 通用日期选择对话框（业务OP / 流水对账单 / 对账日期 共用结构）
+    // #8 拍板 A：年下拉 = currentYear ± 1（如 2025/2026/2027），月 1-12，日 1-31，三个下拉不联动
+    // 入参：{ title, defaultDate?, allowedDates?: [{date}], onConfirm(date), onCancel }
+    //   - allowedDates 非空：模式 = "下拉只列 allowedDates"（用于对账日期选择，#12 前置 enable）
+    //   - allowedDates 空：模式 = "三下拉自由组合（年±1 / 月 1-12 / 日 1-31，不联动）"
+    function createBizOpReconDatePickerDialog({ title = '选择日期', defaultDate = '', allowedDates = null, onConfirm, onCancel } = {}) {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.dataset.previewModal = 'biz-op-recon-date-picker';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card pending-import-month-dialog';
+      overlay.appendChild(dialog);
+
+      const titleEl = document.createElement('div');
+      titleEl.className = 'pending-dialog-title';
+      titleEl.textContent = title;
+      dialog.appendChild(titleEl);
+
+      const picker = document.createElement('div');
+      // v2.1.3-fix1.3：自由模式下年月日同行 flex，专用类 .biz-op-recon-date-picker（CSS 控宽度/间距）
+      picker.className = 'monthly-balance-time-picker pending-import-month-picker biz-op-recon-date-picker';
+
+      // allowedDates 模式（对账日期选择）：单个 select 列出 ready 日期
+      // 自由模式（业务OP / 流水日期选择）：年/月/日三 select 不联动
+      let yearSelect, monthSelect, daySelect, allowedSelect;
+      let mode;
+      if (Array.isArray(allowedDates)) {
+        mode = 'allowed';
+        allowedSelect = document.createElement('select');
+        allowedSelect.className = 'mapping-text-input pending-reconcile-month-select';
+        if (allowedDates.length === 0) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = '— 暂无可对账日期 —';
+          allowedSelect.appendChild(opt);
+          allowedSelect.disabled = true;
+        } else {
+          allowedDates.forEach((d, idx) => {
+            const opt = document.createElement('option');
+            opt.value = d.date;
+            opt.textContent = d.date;
+            if (idx === 0) opt.selected = true;
+            allowedSelect.appendChild(opt);
+          });
+        }
+        picker.appendChild(allowedSelect);
+      } else {
+        mode = 'free';
+        const now = new Date();
+        const curYear = now.getFullYear();
+        const def = parseDateLike(defaultDate) || now;
+        const defYear = def.getFullYear();
+        const defMonth = def.getMonth() + 1;
+        const defDay = def.getDate();
+
+        yearSelect = document.createElement('select');
+        // v2.1.3-fix1.3：年份 select 加专用 class（CSS 控宽 > 月/日）
+        yearSelect.className = 'monthly-balance-year-select mapping-text-input biz-op-recon-date-year';
+        for (let y = curYear - 1; y <= curYear + 1; y += 1) {
+          const opt = document.createElement('option');
+          opt.value = String(y);
+          opt.textContent = `${y} 年`;
+          if (y === defYear) opt.selected = true;
+          yearSelect.appendChild(opt);
+        }
+
+        monthSelect = document.createElement('select');
+        monthSelect.className = 'monthly-balance-month-select mapping-text-input biz-op-recon-date-month';
+        for (let m = 1; m <= 12; m += 1) {
+          const opt = document.createElement('option');
+          opt.value = String(m).padStart(2, '0');
+          opt.textContent = `${m} 月`;
+          if (m === defMonth) opt.selected = true;
+          monthSelect.appendChild(opt);
+        }
+
+        daySelect = document.createElement('select');
+        daySelect.className = 'monthly-balance-month-select mapping-text-input biz-op-recon-date-day';
+        for (let d = 1; d <= 31; d += 1) {
+          const opt = document.createElement('option');
+          opt.value = String(d).padStart(2, '0');
+          opt.textContent = `${d} 日`;
+          if (d === defDay) opt.selected = true;
+          daySelect.appendChild(opt);
+        }
+
+        picker.appendChild(yearSelect);
+        picker.appendChild(monthSelect);
+        picker.appendChild(daySelect);
+      }
+      dialog.appendChild(picker);
+
+      const actions = document.createElement('div');
+      actions.className = 'dialog-actions center';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'secondary-btn small';
+      cancelBtn.type = 'button';
+      cancelBtn.textContent = '取消';
+      cancelBtn.addEventListener('click', () => {
+        closeModal();
+        if (typeof onCancel === 'function') onCancel();
+      });
+
+      const confirmBtn = document.createElement('button');
+      confirmBtn.className = 'primary-btn small';
+      confirmBtn.type = 'button';
+      confirmBtn.textContent = '完成';
+      // #12 拍板 A：allowedDates 为空 → 完成按钮 disabled
+      if (mode === 'allowed' && allowedDates.length === 0) {
+        confirmBtn.disabled = true;
+      }
+      confirmBtn.addEventListener('click', () => {
+        let date;
+        if (mode === 'allowed') {
+          date = allowedSelect.value;
+          if (!date) return;
+        } else {
+          date = `${yearSelect.value}-${monthSelect.value}-${daySelect.value}`;
+        }
+        closeModal();
+        if (typeof onConfirm === 'function') onConfirm(date);
+      });
+
+      actions.appendChild(confirmBtn);
+      actions.appendChild(cancelBtn);
+      dialog.appendChild(actions);
+
+      return overlay;
+    }
+
+    function parseDateLike(s) {
+      if (!s) return null;
+      const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return null;
+      return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    }
+
+    // 「开始运行」对账日期选择（#12 拍板 A：下拉只列 ready 日期）
+    // 入参：{ readyDates: [{date}], onConfirm(date), onCancel }
+    function createBizOpReconReconcileDialog({ readyDates = [], onConfirm, onCancel } = {}) {
+      return createBizOpReconDatePickerDialog({
+        title: '选取需要对账的日期',
+        allowedDates: readyDates,
+        onConfirm,
+        onCancel
+      });
+    }
+
+    // 「导出差异」对话框 — 两 radio：指定日期 / 区间
+    // #9 拍板 A 文件名（前端只构造日期，文件名由 handler 拼装）
+    // #13 拍板 A successDates 来源
+    function createBizOpReconExportDialog({ successDates = [], onConfirm, onCancel } = {}) {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.dataset.previewModal = 'biz-op-recon-export';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card pending-export-dialog';
+      overlay.appendChild(dialog);
+
+      const title = document.createElement('div');
+      title.className = 'pending-dialog-title';
+      title.textContent = '导出差异';
+      dialog.appendChild(title);
+
+      const RADIO_GAP_PX = 8;
+
+      // Radio 1：指定日期
+      const radioSingle = document.createElement('input');
+      radioSingle.type = 'radio';
+      radioSingle.name = 'biz-op-recon-export-scope';
+      radioSingle.id = 'biz-op-recon-export-radio-single';
+      radioSingle.value = 'single';
+      radioSingle.checked = true;
+      const radioSingleLabel = document.createElement('label');
+      radioSingleLabel.setAttribute('for', radioSingle.id);
+      radioSingleLabel.textContent = '导出指定日期';
+      const radioSingleRow = document.createElement('div');
+      radioSingleRow.style.display = 'flex';
+      radioSingleRow.style.alignItems = 'center';
+      radioSingleRow.style.gap = `${RADIO_GAP_PX}px`;
+      radioSingleRow.appendChild(radioSingle);
+      radioSingleRow.appendChild(radioSingleLabel);
+      dialog.appendChild(radioSingleRow);
+
+      // 单日下拉
+      const singleRow = document.createElement('div');
+      singleRow.style.marginTop = '10px';
+      singleRow.style.paddingLeft = '24px';
+      const singleSelect = document.createElement('select');
+      singleSelect.className = 'mapping-text-input pending-reconcile-month-select';
+      successDates.forEach((d, idx) => {
+        const opt = document.createElement('option');
+        opt.value = String(d.runId);
+        opt.textContent = d.date;
+        opt.dataset.date = d.date;
+        if (idx === 0) opt.selected = true;
+        singleSelect.appendChild(opt);
+      });
+      singleRow.appendChild(singleSelect);
+      dialog.appendChild(singleRow);
+
+      // Radio 2：区间
+      const radioRange = document.createElement('input');
+      radioRange.type = 'radio';
+      radioRange.name = 'biz-op-recon-export-scope';
+      radioRange.id = 'biz-op-recon-export-radio-range';
+      radioRange.value = 'range';
+      const radioRangeLabel = document.createElement('label');
+      radioRangeLabel.setAttribute('for', radioRange.id);
+      radioRangeLabel.textContent = '导出指定日期区间';
+      const radioRangeRow = document.createElement('div');
+      radioRangeRow.style.display = 'flex';
+      radioRangeRow.style.alignItems = 'center';
+      radioRangeRow.style.gap = `${RADIO_GAP_PX}px`;
+      radioRangeRow.style.marginTop = '14px';
+      radioRangeRow.appendChild(radioRange);
+      radioRangeRow.appendChild(radioRangeLabel);
+      dialog.appendChild(radioRangeRow);
+
+      // 区间起止下拉
+      const rangeRow = document.createElement('div');
+      rangeRow.style.marginTop = '10px';
+      rangeRow.style.paddingLeft = '24px';
+      rangeRow.style.display = 'flex';
+      rangeRow.style.gap = '8px';
+      rangeRow.style.alignItems = 'center';
+      const startSelect = document.createElement('select');
+      startSelect.className = 'mapping-text-input pending-reconcile-month-select';
+      successDates.forEach((d, idx) => {
+        const opt = document.createElement('option');
+        opt.value = d.date;
+        opt.textContent = d.date;
+        if (idx === 0) opt.selected = true;
+        startSelect.appendChild(opt);
+      });
+      const dash = document.createElement('span');
+      dash.textContent = '—';
+      const endSelect = document.createElement('select');
+      endSelect.className = 'mapping-text-input pending-reconcile-month-select';
+      successDates.forEach((d, idx) => {
+        const opt = document.createElement('option');
+        opt.value = d.date;
+        opt.textContent = d.date;
+        if (idx === 0) opt.selected = true;
+        endSelect.appendChild(opt);
+      });
+      rangeRow.appendChild(startSelect);
+      rangeRow.appendChild(dash);
+      rangeRow.appendChild(endSelect);
+      dialog.appendChild(rangeRow);
+
+      function updateMode() {
+        singleSelect.disabled = !radioSingle.checked;
+        startSelect.disabled = !radioRange.checked;
+        endSelect.disabled = !radioRange.checked;
+      }
+      radioSingle.addEventListener('change', updateMode);
+      radioRange.addEventListener('change', updateMode);
+      updateMode();
+
+      const actions = document.createElement('div');
+      actions.className = 'dialog-actions center';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'secondary-btn small';
+      cancelBtn.type = 'button';
+      cancelBtn.textContent = '取消';
+      cancelBtn.addEventListener('click', () => {
+        closeModal();
+        if (typeof onCancel === 'function') onCancel();
+      });
+      const confirmBtn = document.createElement('button');
+      confirmBtn.className = 'primary-btn small';
+      confirmBtn.type = 'button';
+      confirmBtn.textContent = '导出';
+      confirmBtn.addEventListener('click', () => {
+        if (radioSingle.checked) {
+          const runId = Number(singleSelect.value);
+          const date = singleSelect.options[singleSelect.selectedIndex]?.dataset?.date || '';
+          if (!runId) {
+            openModal(createAlertDialog('请选择一个日期'));
+            return;
+          }
+          closeModal();
+          if (typeof onConfirm === 'function') onConfirm({ scope: 'single', runId, date });
+        } else {
+          const startDate = startSelect.value;
+          const endDate = endSelect.value;
+          if (!startDate || !endDate) {
+            openModal(createAlertDialog('请选择起止日期'));
+            return;
+          }
+          if (startDate > endDate) {
+            openModal(createAlertDialog('起始日期不能晚于结束日期'));
+            return;
+          }
+          closeModal();
+          if (typeof onConfirm === 'function') onConfirm({ scope: 'range', startDate, endDate });
+        }
+      });
+      actions.appendChild(confirmBtn);
+      actions.appendChild(cancelBtn);
+      dialog.appendChild(actions);
+
+      return overlay;
+    }
+
+    // #11 拍板 B：续导确认对话框
+    function createBizOpReconSecondImportPromptDialog({ firstDate = '', onConfirm, onCancel } = {}) {
+      const overlay = createOverlay();
+      const card = document.createElement('div');
+      card.className = 'modal-card alert-card';
+      card.dataset.previewModal = 'biz-op-recon-second-import-prompt';
+      card.innerHTML = `
+        <div class="alert-body">
+          <div class="alert-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28"><defs><linearGradient id="bopSecondPromptIconG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="100%" stop-color="#9B72F2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#bopSecondPromptIconG)"/></svg>
+          </div>
+          <div class="alert-message">
+            <div style="font-weight:600; font-size:15px; margin-bottom:6px;">已导入第 1 日数据（${escapeHtmlSafe(firstDate)}）</div>
+            <div style="font-size:13px; color:#666; line-height:1.55;">是否立即导入第 2 日数据？两日数据齐备后才能进入流水对账单导入。</div>
+          </div>
+        </div>
+        <div class="dialog-actions center">
+          <button class="secondary-btn small" type="button" data-action="cancel">否</button>
+          <button class="primary-btn small" type="button" data-action="confirm">是</button>
+        </div>
+      `;
+      card.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+        closeModal();
+        if (typeof onCancel === 'function') onCancel();
+      });
+      card.querySelector('[data-action="confirm"]').addEventListener('click', () => {
+        closeModal();
+        if (typeof onConfirm === 'function') onConfirm();
+      });
+      overlay.appendChild(card);
+      return overlay;
+    }
+
+    // v2.1.3-fix1.5/fix2：删除 createBizOpReconErrorReportDialog 死代码（导入失败已改为状态框报错 + 失败报告路径，无对话框路径）
+
+    // v2.1.3：preview state apply 函数（4 个 — initial / importing / result / export-dialog）
+    function switchToBizOpReconPanel() {
+      ['statementModulePanel','newAccountModulePanel','pendingModulePanel','bankStatementModulePanel','reconIdFixModulePanel','bankBuReconModulePanel'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.hidden = true;
+      });
+      const panel = document.getElementById('bizOpReconModulePanel');
+      if (panel) panel.hidden = false;
+      const nameEl = document.getElementById('currentModuleName');
+      if (nameEl) nameEl.textContent = '业务OP数据核对';
+    }
+
+    function applyBizOpReconPanelInitialPreviewState() {
+      switchToBizOpReconPanel();
+      const importBtn = document.getElementById('bizOpReconImportBtn');
+      if (importBtn) importBtn.disabled = false;
+      const runBtn = document.getElementById('bizOpReconRunBtn');
+      if (runBtn) runBtn.disabled = true;
+      const exportBtn = document.getElementById('bizOpReconExportBtn');
+      if (exportBtn) exportBtn.disabled = true;
+      const buSelect = document.getElementById('bizOpReconBuSelect');
+      if (buSelect) {
+        // v2.1.3-fix1：永远不 disabled，空白 placeholder（label 完全空白）
+        buSelect.disabled = false;
+        while (buSelect.firstChild) buSelect.removeChild(buSelect.firstChild);
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '';
+        buSelect.appendChild(opt);
+      }
+      const statusBox = document.getElementById('bizOpReconStatusBox');
+      const statusText = statusBox && statusBox.querySelector('.status-box-text');
+      // v2.1.3-fix1.5：状态框统一用 formatBizOpReconStatusHtml 写 innerHTML（冒号换行）
+      if (statusText) statusText.innerHTML = formatBizOpReconStatusHtml('欢迎使用小助手');
+    }
+
+    function applyBizOpReconPanelImportingPreviewState() {
+      switchToBizOpReconPanel();
+      const importBtn = document.getElementById('bizOpReconImportBtn');
+      if (importBtn) importBtn.disabled = false;
+      // BU 下拉已有项（模拟导入了 BU-A）
+      const buSelect = document.getElementById('bizOpReconBuSelect');
+      if (buSelect) {
+        buSelect.disabled = false;
+        while (buSelect.firstChild) buSelect.removeChild(buSelect.firstChild);
+        // v2.1.3-fix2.2：option label 仅 BU 名（去「（N 行）」）
+        // v2.1.3-fix2.3：buList 有数据时不留空白 placeholder
+        const opt = document.createElement('option');
+        opt.value = 'BU-A';
+        opt.textContent = 'BU-A';
+        opt.selected = true;
+        buSelect.appendChild(opt);
+        buSelect.value = 'BU-A';
+      }
+      const statusBox = document.getElementById('bizOpReconStatusBox');
+      const statusText = statusBox && statusBox.querySelector('.status-box-text');
+      // v2.1.3-fix1.5：状态框统一用 formatBizOpReconStatusHtml（无冒号时无变化）
+      if (statusText) statusText.innerHTML = formatBizOpReconStatusHtml('业务OP（2026-05-12 / BU=BU-A）已导入 120 行');
+    }
+
+    function applyBizOpReconPanelResultPreviewState() {
+      switchToBizOpReconPanel();
+      ['bizOpReconImportBtn','bizOpReconRunBtn','bizOpReconExportBtn'].forEach((id) => {
+        const b = document.getElementById(id);
+        if (b) b.disabled = false;
+      });
+      const buSelect = document.getElementById('bizOpReconBuSelect');
+      if (buSelect) {
+        buSelect.disabled = false;
+        while (buSelect.firstChild) buSelect.removeChild(buSelect.firstChild);
+        // v2.1.3-fix2.2：option label 仅 BU 名（去「（N 行）」）
+        // v2.1.3-fix2.3：buList 有数据时不留空白 placeholder
+        const opt = document.createElement('option');
+        opt.value = 'BU-A';
+        opt.textContent = 'BU-A';
+        opt.selected = true;
+        buSelect.appendChild(opt);
+        buSelect.value = 'BU-A';
+      }
+      const statusBox = document.getElementById('bizOpReconStatusBox');
+      const statusText = statusBox && statusBox.querySelector('.status-box-text');
+      if (statusText) {
+        // v2.1.3-fix1.5：状态框冒号后换行（仅本模块）
+        const raw = '2026-05-12 BU=BU-A 对账完成：测算金额差异 3 笔 / T-1 有 T-2 无 1 笔 / T-2 有 T-1 无 1 笔 / 多 OP 账户 2 个';
+        statusText.innerHTML = formatBizOpReconStatusHtml(raw);
+      }
+    }
+
+    function applyBizOpReconPanelExportDialogPreviewState() {
+      applyBizOpReconPanelResultPreviewState();
+      const successDates = [
+        { date: '2026-05-12', runId: 1, runAt: '2026-05-13 09:00:00' },
+        { date: '2026-05-13', runId: 2, runAt: '2026-05-13 10:00:00' }
+      ];
+      openModal(createBizOpReconExportDialog({
+        successDates,
+        onConfirm: () => {},
+        onCancel: () => {}
+      }));
     }
   }
 
