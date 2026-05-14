@@ -681,10 +681,56 @@ writer 阶段保持**无填充色**（移除整行黄底）。
 
 ## 七、实施记录
 
-> 待 Dev 完成 PR 合并后回填。占位结构参照 PRD-v2.1.2.md §七：
->
-> ### 7.1 PR #N 合并完成
-> ### 7.2 实施提交时间线（M commits）
-> ### 7.3 关键设计变更（与原 PRD v0.1 对比，若 OPEN ISSUE 拍板后有调整）
-> ### 7.4 实测发现并修复的真 bug
-> ### 7.5 资金红线最终验证
+### 7.1 PR #45 合并完成
+
+- **PR**：[#45](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/45) `[v2.1.3] feat — 新增模块「业务OP数据核对」+ 6 轮 fix + 5 轮 self-review（fix1-fix6 + round 1-5）`
+- **base** → **head**：`main` ← `v2.1.3`
+- **merged at**：`2026-05-14T06:16:20Z`（北京 14:16）
+- **merge commit**：`8a96bc36147dd3d0ebbe1faa057a86f0e36a809b`
+- **归档草稿**：`docs/prs/PR45-v2.1.3.md`（含完整 PR body + frontmatter `integrated: true`）
+
+### 7.2 实施提交时间线（13 commits）
+
+```
+be4d0f4 fix(pr-45-self-review-round-11): 5 important — round 10 reviewer 复核
+2baf1d7 fix(pr-45-self-review-round-9): 2 important + 5 minor — round 8 reviewer 复核
+c7bff38 fix(pr-45-self-review-round-7): 3 important + 4 minor — round 6 reviewer 内部复核
+bcbde19 fix(pr-45-self-review-round-5): 1 P3 — Codex 4 处文档 17→15 IPC 口径残留
+f786683 fix(pr-45-self-review-round-4): 1 P1 — Codex 业务OP 重导清下一日 runs
+00b2cc5 fix(pr-45-self-review-round-3): 1 P1 + 2 P2 + 1 P3 — Codex 自动 review
+f9c636a fix(pr-45-self-review-round-2): 0 critical + 3 important + 5 minor + 1 case
+ad21f17 fix(pr-45-self-review-round-1): 1 critical + 3 important + 5 minor + 3 case
+0854f14 docs(pr-45): 草稿入库
+60b219f chore(scan-vars): 刷新统计报告
+6135abb chore(release): version bump 2.1.3 + 三件套 + smoke 119 + preview + 模板
+c986503 feat(biz-op-recon): session 算法 + writer + IPC + 前端面板/dialog
+20422b6 feat(backend,biz-op-recon-db): SQLite 4 表 + reader/validator + 3 repository
+00717ed docs(iterations): PRD/spec/tasks v0.6 — 业务OP数据核对模块
+```
+
+### 7.3 关键设计变更（与 PRD v0.1 对比）
+
+OPEN ISSUE 18 项拍板（详见 §6.1） + 4 轮 fix 拍板回滚（详见 §6.4）：
+
+| 维度 | PRD v0.1 起草 | 实际落地 | 触发轮次 |
+|---|---|---|---|
+| 差异表标黄 | A 三类差异都黄 | **E 不标黄** | fix2 拍板回滚 #10 |
+| 多 OP 相等行 | 不进 diff_rows | **进 diff_rows**（meta=相等/空/是） | fix5 选项 B 拍板 |
+| 区间导出 sheet | A `{YYYY-MM-DD}` 多 sheet | **F 单 sheet「差异」**+ data_date+account_no 排序 | fix6 拍板回滚 #14 |
+| multi_op_account_count 统计 | T-1∩T-2 路径 | **包含 onlyInT1 路径**（fix4 修复） | fix4 资金红线 bug |
+
+### 7.4 实测发现并修复的真 bug（4 个，全资金红线 ⚠️）
+
+| Bug | 来源 | 修法 | smoke |
+|---|---|---|---|
+| **multi_op_account_count 漏算 onlyInT1** | 用户手动测试 fix4 | session.js 5.a 分支 Set 防重复累加 | Case I（15 assertion） |
+| **C1 `clearByDateBu` 大小写不一致** | round 1 内部 reviewer | SQL `LOWER(TRIM)` 与 getRowsByDateBu 对齐 | Case L/M（C1 回归） |
+| **流水重导未清跨 BU runs** | round 3 Codex P1 | runFlowImportAsync 事务追加 `clearRunsAndDiffsByDate(date)` | Case P（11 assertion） |
+| **业务OP 重导未清下一日 T-2 输入 runs** | round 4 Codex P1 | runBizOpImportAsync 事务追加 `clearRunsAndDiffsByDateBu(addOneDay(date), BU)` + 新建 `addOneDay` UTC helper | Case Q（9 assertion） |
+
+### 7.5 资金红线最终验证
+
+- 11 个核心红线符号（`runReconciliation` / `compareT1OpWithComputed` / `runFlowImportAsync` / `runBizOpImportAsync` / `clearRunsAndDiffsByDate` / `clearRunsAndDiffsByDateBu` / `addOneDay` / `subOneDay` / `parseSignedAmount` / `validateBizOpRow` / `AMOUNT_EPSILON`）spec ↔ code ↔ smoke 三方对齐
+- 累计升格 `rules/important-variables.md` **19 条**（v1 → v5）：round 1 13 + round 2 1（subOneDay）+ round 3 3（runFlowImportAsync Critical 等）+ round 4 2（runBizOpImportAsync Critical / addOneDay）
+- smoke biz-op-recon **154/154 PASS**（含 Case A-J + L-Q 共 16 case）+ bank-bu-recon 41/41 + 全套 0 退出
+- 12 轮 self-review 全过：3 critical + 8 important + 13 minor + 6 case 全修；最终 round 12 = **0 P 级 finding**（goal "self-review 无 P" 达成）
