@@ -9810,7 +9810,8 @@ function registerNewAccountHandlers() {
   });
 
   // 业务OP 导入（#1 双重校验 + #4 替换原子事务 + #5 整批拒绝 + #15 清空旧 runs）
-  ipcMain.handle('bizOpRecon:import:run-biz-op', async (_event, payload = {}) => {
+  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数（rejected/error 不计，spec D6）
+  trackedIpcHandle('bizOpRecon:import:run-biz-op', '业务OP数据核对', '导入文件', async (_event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
     const { date, filePath } = payload || {};
     if (!date || !filePath) return { status: 'error', message: '入参缺失（date / filePath）' };
@@ -9834,7 +9835,8 @@ function registerNewAccountHandlers() {
   });
 
   // 流水对账单 导入（#3 出入方向枚举 + #5 整批拒绝）
-  ipcMain.handle('bizOpRecon:import:run-flow', async (_event, payload = {}) => {
+  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
+  trackedIpcHandle('bizOpRecon:import:run-flow', '业务OP数据核对', '导入文件', async (_event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
     const { date, filePath } = payload || {};
     if (!date || !filePath) return { status: 'error', message: '入参缺失（date / filePath）' };
@@ -9895,7 +9897,8 @@ function registerNewAccountHandlers() {
   });
 
   // 跑对账（#3/#6/#7/#10 拍板）
-  ipcMain.handle('bizOpRecon:run', (_event, payload = {}) => {
+  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
+  trackedIpcHandle('bizOpRecon:run', '业务OP数据核对', '开始运行', (_event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
     const { date, buName } = payload || {};
     if (!date || !buName) return { status: 'error', message: '入参缺失（date / buName）' };
@@ -9936,7 +9939,8 @@ function registerNewAccountHandlers() {
   });
 
   // 导出指定日期（#14 拍板 A sheet 名 ISO）
-  ipcMain.handle('bizOpRecon:export:date', async (_event, payload = {}) => {
+  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
+  trackedIpcHandle('bizOpRecon:export:date', '业务OP数据核对', '导出差异', async (_event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
     const { runId, savePath } = payload || {};
     if (!runId || !savePath) return { status: 'error', message: '入参缺失（runId / savePath）' };
@@ -9958,7 +9962,8 @@ function registerNewAccountHandlers() {
   });
 
   // 导出指定日期区间（v2.1.3-fix6 拍板回滚：单 sheet 合并 + 第 1 列 Billdate 区分日期）
-  ipcMain.handle('bizOpRecon:export:date-range', async (_event, payload = {}) => {
+  // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
+  trackedIpcHandle('bizOpRecon:export:date-range', '业务OP数据核对', '导出差异', async (_event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
     const { buName, startDate, endDate, savePath } = payload || {};
     if (!buName || !startDate || !endDate || !savePath) {

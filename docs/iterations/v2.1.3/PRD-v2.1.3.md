@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.8（2026-05-14 round 2 self-review 修订：0 critical + 3 important（R2-I1 状态栏文案补 t2AnomalyAccountCount 仅 > 0 显示 / R2-I2 §3.5.5 关键不变量补"部分 NaN"容错路径 / R2-I3 smoke Case L/M swap + 新 Case O）+ 5 minor（R2-M1 spec §三 IPC 表删假 handler `pick-biz-op-date` / `pick-flow-date` + §7.6 dialog 处理说明 / R2-M2 `computeT1Op` 函数签名 spec ↔ code 对齐 / R2-M3 console.warn 文案 spec ↔ code 统一 / R2-M4 `subOneDay` 双源说明 / R2-M5 `AMOUNT_EPSILON` 位置同步 columns.js 单源）；v0.7 = 2026-05-14 round 1 self-review 修订（1 critical C1 clearByDateBu LOWER+TRIM + 3 important I1/I2/I3 + 5 minor + 3 新 smoke Case L/M/N）；v0.6 = 2026-05-13 fix6：区间导出改单 sheet，原 #14 拍板回滚；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归；v0.2 = 14 项 OPEN ISSUE 全部拍板；v0.1 = 2026-05-13 起草） |
+| 文档版本 | v0.9（2026-05-14 round 3 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（流水重导清该 date 所有 BU 的 runs/diff_rows，新增 `clearRunsAndDiffsByDate` 函数 + smoke Case P）+ 2 P2（package-lock.json 同步 2.1.3 / usage-stats 接入 17 IPC trackedIpcHandle）+ 1 P3（preview:all 串入 biz-op-recon）；v0.8 = 2026-05-14 round 2 self-review 修订（0 critical + 3 important + 5 minor）；v0.7 = 2026-05-14 round 1 self-review 修订（1 critical C1 clearByDateBu LOWER+TRIM + 3 important I1/I2/I3 + 5 minor + 3 新 smoke Case L/M/N）；v0.6 = 2026-05-13 fix6：区间导出改单 sheet，原 #14 拍板回滚；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归；v0.2 = 14 项 OPEN ISSUE 全部拍板；v0.1 = 2026-05-13 起草） |
 | 目标版本 | `v2.1.3`（patch） |
 | 起始版本 | `v2.1.2`（PR #43 已合并 main，2026-05-13，commit `50e0a0a` / merge `fc5d766`） |
 | 起草日期 | 2026-05-13 |
@@ -197,14 +197,14 @@ v2.1.3 包含 1 块独立改动：
    ↓
 [任一行「出入方向」非「入」/「出」] → 整批拒绝 + 失败报告（与业务OP 一致，#5）
    ↓
-[全部通过] → 同事务内：DELETE 同 date 旧流水 → INSERT 新流水到 `biz_op_recon_flow_imports`（每行保留 `业务部门` 原值，对账时按 `normalizeBu` 归一比较）
+[全部通过] → 同事务内：DELETE 同 date 旧流水 → **`clearRunsAndDiffsByDate(db, date)` 清该 date 所有 BU 的 runs/diff_rows**（round 3 P1 资金红线修订：与业务OP 重导仅清单 BU 不同，流水按 date 跨所有 BU 共用，重导后该 date 所有对账结果失效，必须强制重跑）→ INSERT 新流水到 `biz_op_recon_flow_imports`（每行保留 `业务部门` 原值，对账时按 `normalizeBu` 归一比较）
    ↓
 [状态栏显示]「业务OP（YYYY-MM-DD / BU=X）已导入 N 行 / 流水对账单（YYYY-MM-DD）已导入 M 行」
 ```
 
 **幂等性**：
-- 业务 OP 同 `(data_date, bu_name)` 重复导入：#4 拍板 A 替换 + 原子事务（DELETE + INSERT 同事务，并联动清空 #15 的 runs + diff_rows）
-- 流水对账单同 `data_date` 重复导入：同样替换（DELETE + INSERT 原子事务；流水不分 BU，按 date 级清空）
+- 业务 OP 同 `(data_date, bu_name)` 重复导入：#4 拍板 A 替换 + 原子事务（DELETE + INSERT 同事务，并联动清空 #15 的 runs + diff_rows，按 (date, BU) 单 BU 清，函数 `clearRunsAndDiffsByDateBu`）
+- 流水对账单同 `data_date` 重复导入：同样替换（DELETE + INSERT 原子事务；**流水不分 BU，按 date 级清空 + 同事务内调用 `clearRunsAndDiffsByDate(db, date)` 清该 date 所有 BU 的 runs/diff_rows**，round 3 P1 资金红线修订）
 
 #### 3.3.2 运行流程
 
@@ -421,6 +421,18 @@ writer 阶段保持**无填充色**（移除整行黄底）。
 - 修复前已落库的 run 记录无 `t2AnomalyAccountCount` 字段 → 默认 `null`/`0`，前端状态栏兼容显示
 - DB schema 增加 `t2_anomaly_account_count INTEGER NOT NULL DEFAULT 0` 字段（migration 幂等）
 
+#### 3.5.6 关键不变量补丁（round 3 P1 资金红线 ⚠️）
+
+> **流水重导清 runs 不变量**（fix round 3 / Codex P1）：`runFlowImportAsync` 事务必须包含 `clearRunsAndDiffsByDate(date)` 调用；该函数清该 date **所有 BU** 的 runs + diff_rows（与业务OP `clearRunsAndDiffsByDateBu(date, bu)` 单 BU 清不同）。
+>
+> **资金红线**：流水换了对账没重跑 → 导出旧差异 = 资金事故。流水按 date 跨所有 BU 共用（流水表 `biz_op_recon_flow_imports` 不分 BU），重新导入同日流水后，该日期所有 BU 的旧 run 和 diff_rows 都失效，必须强制清空，避免旧 runId 套到新流水数据上输出错误差异。
+>
+> **与业务OP 重导对照**：
+> - 业务OP 重导：`clearRunsAndDiffsByDateBu(db, date, bu)` — 按 (date, BU) 二元组清单 BU；其他 BU 的 run 不动
+> - 流水重导：`clearRunsAndDiffsByDate(db, date)` — 按 date 跨所有 BU 清；该 date 全部 BU 的 run 都清
+>
+> **回归测试**：smoke `scripts/smoke/biz-op-recon.js` 新增 Case P 覆盖（构造同 date 多 BU 已 success run，重导该日流水后断言所有 BU 的 runs/diff_rows 均被清；详见 spec §九 Case P assertion 草稿）。
+
 ### 3.6 验收
 
 - 主导航第 5 个按钮可见，点击切换显示新模块（v2.1.2 4 个老模块不受影响）
@@ -544,9 +556,20 @@ writer 阶段保持**无填充色**（移除整行黄底）。
 - 4 张 preview 截图的具体场景与触发条件（spec.md §七 拍板）
 - **BU 行 CSS 宽度对齐"导出差异"按钮**（fix2.1）— 视觉约束，实施细节归 §6.3，PRD 仅提及
 
-### 6.4 fix1 + fix2 + fix4 + fix5 + fix6 + round1 + round2 增补（v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 — 2026-05-13 ~ 2026-05-14）
+### 6.4 fix1 + fix2 + fix4 + fix5 + fix6 + round1 + round2 + round3 增补（v0.3 / v0.4 / v0.5 / v0.6 / v0.7 / v0.8 / v0.9 — 2026-05-13 ~ 2026-05-14）
 
-> 用户手动测试 fix1+fix2+fix4+fix5+fix6 多轮回归后增补；2026-05-14 PR #45 提 PR 后 round 1 self-review 增补 9 条修订；同日 round 2 self-review 再增补 8 条修订（0 critical + 3 important + 5 minor）；下列条目作为 §6.1 已拍板表的补充扩展。
+> 用户手动测试 fix1+fix2+fix4+fix5+fix6 多轮回归后增补；2026-05-14 PR #45 提 PR 后 round 1 self-review 增补 9 条修订；同日 round 2 self-review 再增补 8 条修订（0 critical + 3 important + 5 minor）；同日 round 3 self-review 由 Codex 自动 review 补 4 条修订（1 P1 资金红线 + 2 P2 + 1 P3）；下列条目作为 §6.1 已拍板表的补充扩展。
+
+**round 3 self-review 修订（2026-05-14，Codex 自动 review）**：
+
+- **P1 ⚠️ 资金红线**：流水重导清该 date 所有 BU 的 runs/diff_rows
+  - 影响 §3.4.1 流水流程 + §3.5.6 关键不变量 + spec §五 算法 + §九 smoke Case P
+  - Dev 修法：新增 `clearRunsAndDiffsByDate(db, date)` 函数（按 date 跨所有 BU 清）+ 流水重导事务内调用 + smoke Case P 覆盖
+  - 与 `clearRunsAndDiffsByDateBu(db, date, bu)` 区分语义：流水按 date 共用 → 跨 BU 清；业务OP 按 (date, BU) 分片 → 单 BU 清
+- **P2 lockfile 同步 2.1.3**：Dev 跑 `npm install --package-lock-only` 处理（PM 不动 lockfile）
+- **P2 usage-stats 接入**：FUNCTION_REGISTRY 注册「业务OP数据核对」+ 17 IPC trackedIpcHandle 包装
+  - 影响 spec §三 IPC 表 tracked 标注
+- **P3 preview:all 接入 biz-op-recon**：Dev 改 `package.json:71`（PM 不动 lockfile）
 
 **round 2 self-review 修订（2026-05-14，PR #45 round 1 修订完成后再次过 reviewer agent；用户拍板"全修"）**：
 

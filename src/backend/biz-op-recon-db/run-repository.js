@@ -215,6 +215,38 @@ function clearRunsAndDiffsByDateBu(db, date, buName) {
   return { diffRowsDeleted: diffDel, runsDeleted: runsDel };
 }
 
+// 资金红线 ⚠️ v2.1.3 PR #45 round 3 P1 fix：流水重导专用清空（按 date 跨所有 BU）
+//
+// 背景：
+//   - 业务OP 同 (date, BU) 重导 → clearRunsAndDiffsByDateBu(db, date, BU) 仅清该 BU 的 runs
+//   - 流水按 date 跨所有 BU 共用（spec §4.2 #4 拍板 A：流水不分 BU 按 date 级清空），
+//     重导后 ALL 该 date 的旧 runs 失效（旧 run 的对账结果是基于旧流水算出的）
+//
+// 为何需要独立函数（而非复用 ByDateBu 通配 BU）：
+//   - 函数名清晰区分粒度：ByDate（流水）vs ByDateBu（业务OP）— 维护时一眼分清
+//   - 流水路径不需要 buName 参数（业务OP 路径必须传 BU）
+//
+// FK 顺序：与 ByDateBu 一致，先 diff_rows 再 runs
+// 调用方：runFlowImportAsync（事务内）
+function clearRunsAndDiffsByDate(db, date) {
+  // 先删 diff_rows（按 run_id IN ...）
+  const diffDel = db.prepare(`
+    DELETE FROM ${DIFF_TABLE}
+    WHERE run_id IN (
+      SELECT id FROM ${RUNS_TABLE}
+      WHERE data_date = ?
+    )
+  `).run(date).changes || 0;
+
+  // 再删 runs（该 date 的所有 BU 的 run 全清）
+  const runsDel = db.prepare(`
+    DELETE FROM ${RUNS_TABLE}
+    WHERE data_date = ?
+  `).run(date).changes || 0;
+
+  return { diffRowsDeleted: diffDel, runsDeleted: runsDel };
+}
+
 module.exports = {
   insertRun,
   getRunById,
@@ -226,6 +258,7 @@ module.exports = {
   insertDiffRows,
   getDiffRowsByRun,
   clearRunsAndDiffsByDateBu,
+  clearRunsAndDiffsByDate,
   // 内部 helper 导出便于测试
   subOneDay
 };

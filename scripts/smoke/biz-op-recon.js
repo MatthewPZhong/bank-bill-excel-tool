@@ -1012,6 +1012,121 @@ async function runBizOpReconSmokeTests() {
   importsRepo.clearByDateBu(db, '2026-06-20', 'BU-A');
   runRepo.clearRunsAndDiffsByDateBu(db, '2026-06-20', 'BU-A');
 
+  // ========================================================================
+  // Case P：流水重导清"该 date 跨所有 BU"的旧 runs/diff_rows（资金红线 ⚠️ PR #45 round 3 P1 fix）
+  //
+  // 背景：流水按 date 跨所有 BU 共用（spec §4.2 #4 拍板 A），重导后 ALL 该 date 的旧 runs 失效
+  //   原 bug：runFlowImportAsync 仅 clearByDate(flow_imports) 不清 runs/diff_rows → 用户重导
+  //   流水后 listSuccessDates 仍显示旧 success run，export:date 按旧 runId 读旧 diff_rows，
+  //   而旧 diff_rows 是基于旧流水算出的 → 源换了导出仍是旧数据 → 资金事故
+  //
+  // 与 Case H（业务OP 重导清单 BU 的 runs）的关键区别：
+  //   - Case H：clearRunsAndDiffsByDateBu(date, BU) — 仅清单 BU
+  //   - Case P：clearRunsAndDiffsByDate(date) — 清该 date 跨所有 BU（流水级）
+  //
+  // 步骤：
+  //   1) 业务OP 导入 BU-P1 + BU-P2 两个 BU（同 date=2026-07-10 + T-2=2026-07-09）
+  //   2) 流水第 1 次导入（含 BU-P1 + BU-P2 两 BU 的流水）
+  //   3) 跑两次对账（BU-P1 + BU-P2）→ runs 表有 2 行 success run
+  //   4) 流水第 2 次导入（同 date 不同内容，仅含 BU-P1 流水）
+  //   5) 验证：runs 表两行 success run 全部消失（按 date 清，不按 BU）
+  //   6) 验证：listSuccessDates(BU-P1)=空 / listSuccessDates(BU-P2)=空
+  //   7) 验证：旧 runId 在 DB 中不存在 / getDiffRowsByRun(旧 runId) = 空
+  // ========================================================================
+
+  // 步 1：业务OP 导入 BU-P1 + BU-P2（T-2=2026-07-09 + T-1=2026-07-10）
+  importsRepo.insertRows(db, '2026-07-09', [
+    opRow(2, 'BU-P1', 'P101', { begin:0, amount:1000, amountIn:1000, amountOut:0, end:1000 }),
+    opRow(3, 'BU-P2', 'P201', { begin:0, amount:2000, amountIn:2000, amountOut:0, end:2000 })
+  ]);
+  importsRepo.insertRows(db, '2026-07-10', [
+    opRow(2, 'BU-P1', 'P101', { begin:1000, amount:100, amountIn:100, amountOut:0, end:1100 }),
+    opRow(3, 'BU-P2', 'P201', { begin:2000, amount:200, amountIn:200, amountOut:0, end:2200 })
+  ]);
+
+  // 步 2：流水第 1 次导入（含两 BU；BU-P1 +100 / BU-P2 +200）
+  flowRepo.insertRows(db, '2026-07-10', [
+    flowR(2, 'BU-P1', 'P101', '入', 100),
+    flowR(3, 'BU-P2', 'P201', '入', 200)
+  ]);
+
+  // 步 3：跑两次对账（BU-P1 + BU-P2），两 run 都应是 success
+  const resP_run1 = session.runReconciliation(db, { date:'2026-07-10', buName:'BU-P1' });
+  const resP_run2 = session.runReconciliation(db, { date:'2026-07-10', buName:'BU-P2' });
+  check('P 步 3 BU-P1 run 落 runId', resP_run1.runId > 0);
+  check('P 步 3 BU-P2 run 落 runId', resP_run2.runId > 0);
+
+  const successP_BU1_before = runRepo.listSuccessDates(db, 'BU-P1');
+  const successP_BU2_before = runRepo.listSuccessDates(db, 'BU-P2');
+  check('P 步 3 listSuccessDates(BU-P1) 含 2026-07-10',
+    successP_BU1_before.some(s => s.date === '2026-07-10'));
+  check('P 步 3 listSuccessDates(BU-P2) 含 2026-07-10',
+    successP_BU2_before.some(s => s.date === '2026-07-10'));
+
+  // 步 4：流水第 2 次导入（同 date=2026-07-10，仅含 BU-P1 一条；模拟用户改了源流水重导）
+  const tmpXlsxFlowP = path.join(tmpRoot, 'case-P-flow.xlsx');
+  {
+    const XLSX = require('xlsx');
+    const { FLOW_HEADERS } = require('../../src/backend/biz-op-recon-db/columns');
+    function flowRowArrP(bizId, bu, acc, dir, amt) {
+      const obj = {};
+      FLOW_HEADERS.forEach(h => { obj[h] = ''; });
+      obj['BizId'] = bizId;
+      obj['业务部门'] = bu;
+      obj['出入方向'] = dir;
+      obj['账户编号'] = acc;
+      obj['对账金额'] = amt;
+      obj['币种'] = 'CNY';
+      return FLOW_HEADERS.map(h => obj[h]);
+    }
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([
+      FLOW_HEADERS,
+      flowRowArrP('FP1', 'BU-P1', 'P101', '入', '999')
+    ]);
+    XLSX.utils.book_append_sheet(wb, ws, 'sheet');
+    XLSX.writeFile(wb, tmpXlsxFlowP);
+  }
+  const { readFlowFile } = require('../../src/backend/biz-op-recon-import/reader');
+  const resP_flow2 = await session.runFlowImportAsync(db, {
+    date: '2026-07-10',
+    filePath: tmpXlsxFlowP,
+    readFlowFile,
+    writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
+    errorReportsDir: path.join(tmpRoot, 'error-reports')
+  });
+  check('P 步 4 流水第 2 次 import success', resP_flow2.status === 'success');
+
+  // 步 5：runs 表两行 success run 全部消失（按 date 清，不按 BU）
+  const successP_BU1_after = runRepo.listSuccessDates(db, 'BU-P1');
+  const successP_BU2_after = runRepo.listSuccessDates(db, 'BU-P2');
+  check('P 步 5 listSuccessDates(BU-P1) 不再含 2026-07-10（旧 BU-P1 run 已清）',
+    !successP_BU1_after.some(s => s.date === '2026-07-10'),
+    '资金红线 P1：流水重导未清 BU-P1 旧 run → export:date 按旧 runId 读旧 diff_rows');
+  check('P 步 5 listSuccessDates(BU-P2) 不再含 2026-07-10（旧 BU-P2 run 已清）',
+    !successP_BU2_after.some(s => s.date === '2026-07-10'),
+    '资金红线 P1：流水重导未清 BU-P2 旧 run → 跨 BU 影响（流水按 date 共用）');
+
+  // 步 6：旧 runId getRunById 应返回 null（runs 表已删）
+  const oldRun1 = runRepo.getRunById(db, resP_run1.runId);
+  const oldRun2 = runRepo.getRunById(db, resP_run2.runId);
+  check('P 步 6 旧 BU-P1 runId 在 runs 表已不存在', oldRun1 === null);
+  check('P 步 6 旧 BU-P2 runId 在 runs 表已不存在', oldRun2 === null);
+
+  // 步 7：getDiffRowsByRun(旧 runId) = 空（diff_rows 已先于 runs 删除）
+  const oldDiff1 = runRepo.getDiffRowsByRun(db, resP_run1.runId);
+  const oldDiff2 = runRepo.getDiffRowsByRun(db, resP_run2.runId);
+  check('P 步 7 旧 BU-P1 run 的 diff_rows 已清', oldDiff1.length === 0);
+  check('P 步 7 旧 BU-P2 run 的 diff_rows 已清', oldDiff2.length === 0);
+
+  // 清理 P 用例
+  importsRepo.clearByDateBu(db, '2026-07-09', 'BU-P1');
+  importsRepo.clearByDateBu(db, '2026-07-09', 'BU-P2');
+  importsRepo.clearByDateBu(db, '2026-07-10', 'BU-P1');
+  importsRepo.clearByDateBu(db, '2026-07-10', 'BU-P2');
+  flowRepo.clearByDate(db, '2026-07-10');
+  runRepo.clearRunsAndDiffsByDate(db, '2026-07-10');
+
   // 清理
   if (db && typeof db.close === 'function') db.close();
   fs.unlinkSync(tmpDb);

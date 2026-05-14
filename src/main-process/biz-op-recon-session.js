@@ -485,8 +485,14 @@ async function runFlowImportAsync(db, params) {
     };
   }
 
+  // 资金红线 ⚠️ v2.1.3 PR #45 round 3 P1 fix：流水重导必须清该 date 跨所有 BU 的旧 runs/diff_rows
+  //   背景：流水按 date 跨所有 BU 共用（spec §4.2 #4 拍板 A）；重导后所有该 date 的旧 run 都失效
+  //   （旧 run 的对账结果是基于旧流水算出的，源换了但 diff_rows 仍是旧流水算的 → 资金事故）
+  //   - 业务OP 重导走 clearRunsAndDiffsByDateBu（按 (date, BU) 粒度）— 不变
+  //   - 流水重导走 clearRunsAndDiffsByDate（按 date 粒度，跨所有 BU）— 本 fix 新增
   db.exec('BEGIN');
   try {
+    runRepository.clearRunsAndDiffsByDate(db, date);
     flowImportsRepository.clearByDate(db, date);
     flowImportsRepository.insertRows(db, date, rows);
     db.exec('COMMIT');

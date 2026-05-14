@@ -78,6 +78,22 @@ v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。
 - **新 smoke**：Case L/M swap + 新 Case O（I2 BU trim 边界扩展）
 - **rules/important-variables.md**：v2 → v3 + `subOneDay` Risk-sensitive 新条目（双源说明）
 
+### round 3 self-review 修订（v0.9 — 2026-05-14，PR #45 round 2 完成后 Codex 自动 review 反馈）
+
+> **round 3 self-review 修订（Codex 自动 review）**：1 P1 资金红线（流水重导清 runs）+ 2 P2（lockfile 同步 / usage-stats 接入）+ 1 P3（preview:all 接入 biz-op-recon）
+
+- **1 P1 ⚠️ 资金红线**：流水重导清该 date 所有 BU 的 runs/diff_rows
+  - 背景：`runFlowImportAsync` 成功路径只清流水主表 `biz_op_recon_flow_imports`，不清该 date 所有 BU 的 `biz_op_recon_runs` + `biz_op_recon_diff_rows`。用户重新导入同日流水后旧 BU run 仍指向旧流水算出的 diff_rows → 「导出差异」拿 stale 数据 = 资金事故
+  - Dev 修法：`src/backend/biz-op-recon-db/run-repository.js` 新增 `clearRunsAndDiffsByDate(db, date)` 函数（按 date 跨所有 BU 清；与按 (date, BU) 单 BU 清的 `clearRunsAndDiffsByDateBu` 区分语义不可混）+ `src/main-process/biz-op-recon-session.js` `runFlowImportAsync` 事务内调用 + smoke Case P 覆盖（同 date 跨 2 BU success run + 重导流水 + 断言两 BU runs/diff_rows 均被清）
+  - PRD 落实：§3.4.1 步 4 流水重导描述补 + §3.5.6 关键不变量段新增（流水重导清 runs 不变量）
+  - spec 落实：§三 IPC 表 `import:run-flow` 出参补 + §5.0.1 函数签名表新增 3 行 + §八 run-repository 函数清单补 + §九 Case P 新增 + §十二 升格 3 条评估
+  - rules/important-variables.md 升格：`runFlowImportAsync` Critical + `clearRunsAndDiffsByDate` Risk-sensitive + `clearRunsAndDiffsByDateBu` Risk-sensitive；元数据 v3 → v4
+- **2 P2**：
+  - **lockfile 同步 2.1.3**：`package-lock.json` 顶层 version 字段同步 2.1.3（package.json 已 bump 但 lockfile 未同步）— Dev 跑 `npm install --package-lock-only` 处理
+  - **usage-stats 接入**：`src/backend/usage-stats.js` `FUNCTION_REGISTRY` 新增 `'业务OP数据核对': ['导入文件', '开始运行', '导出差异']`；`src/main.js` 17 个 `bizOpRecon:*` IPC handler 全部用 `trackedIpcHandle` 包装（按 v2.1.2 月度BU 模块对齐风格）；spec §三 IPC 表 17 行说明列追加 "（tracked via usage-stats wrapper）" 标注
+- **1 P3**：`package.json:71` `preview:all` script 串入 `preview:biz-op-recon`（参照 v2.1.2 月度BU preview 入串方式）
+- **新 smoke**：Case P（流水重导清 runs + diff_rows 跨 BU 防回归，资金红线 ⚠️）
+
 ## 2.1.2 - 2026-05-13
 
 v2.1.1 之后追加 patch 迭代：**C4 dialog 文案变更**（账单类型→对账字段、对账字段→对账内容）+ **新增模块「月度银行对账单BU回填校验」**。OPEN ISSUE #10 资金红线（v0.5 → v0.8 重新拍板）：1:1 / 1:N / N:1 视为对账成功（精准标 BU 差异子对）；N:M（双侧 ≥2）视为数据异常 → 跳过 + 写入差异表 Sheet 3「异常」（**不中断运行**）。OPEN ISSUE #5 BU 比较（v0.9）：trim + toLowerCase + 空值归一（容忍 `Flowmore` vs `FlowMore` 大小写差异）。

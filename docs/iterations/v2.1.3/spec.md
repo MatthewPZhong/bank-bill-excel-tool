@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.8（2026-05-14 round 2 self-review 修订：0 critical + 3 important（R2-I1 状态栏文案补 t2AnomalyAccountCount 仅 > 0 显示 / R2-I2 §5.2 关键不变量补"部分 NaN"容错路径 + PRD §3.5.5 同步 / R2-I3 smoke Case L↔M swap 编号 + 新 Case O）+ 5 minor（R2-M1 §三 IPC 表删假 handler `pick-biz-op-date` / `pick-flow-date` + §7.6 dialog 处理说明 / R2-M2 `computeT1Op` 函数签名 §5.0.1 + §5.1 + §5.2 spec ↔ code 对齐 / R2-M3 §5.2 console.warn 文案 spec 跟 code 走 / R2-M4 §五 算法签名表 `subOneDay` 双源备注 / R2-M5 §5.0 `AMOUNT_EPSILON` 位置同步 columns.js 单源）；v0.7 = 2026-05-14 round 1 self-review 修订（1 critical + 3 important + 5 minor + 3 新 smoke + §7.6 dialog 5→4）；v0.6 = 2026-05-13 fix6：writeDateRangeDiffWorkbook 由 N sheet 改单 sheet「差异」+ data_date+account_key 排序 + Billdate/data_date 一致性 console.warn + smoke Case K；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归；v0.2 = OPEN ISSUE 全部拍板；v0.1 = 起草） |
+| 文档版本 | v0.9.1（2026-05-14 round 3 self-review S2 grep 对齐：spec ↔ code IPC 数对齐 — §三 删描述但 code 不存在的 `bizOpRecon:run:pick-date` 行 + 表格说明列改为 5 tracked + 10 plain 分级标注 + 表头 round 3 P2 总述段重写为分级 pattern + §十二 P2 行 + §十六 验证步骤 grep 命令矫正；v0.9 = 2026-05-14 round 3 self-review 修订：Codex 自动 review 1 P1 ⚠️ 资金红线（§五 新增 `clearRunsAndDiffsByDate(db, date)` 函数 + `runFlowImportAsync` 描述补流水重导事务内清 runs 调用 + §九 smoke Case P）+ 2 P2（lockfile 同步 / §三 IPC 表 usage-stats wrapper 标注）+ 1 P3（preview:all 接入 biz-op-recon）+ §十二 升格清单评估 `runFlowImportAsync` / `clearRunsAndDiffsByDate` + §十七 修订记录段；v0.8 = 2026-05-14 round 2 self-review 修订；v0.7 = 2026-05-14 round 1 self-review 修订（1 critical + 3 important + 5 minor + 3 新 smoke + §7.6 dialog 5→4）；v0.6 = 2026-05-13 fix6：writeDateRangeDiffWorkbook 由 N sheet 改单 sheet「差异」+ data_date+account_key 排序 + Billdate/data_date 一致性 console.warn + smoke Case K；v0.5 = fix5 PRD 拍板修订；v0.4 = fix4 资金红线 bug 修复；v0.3 = fix1+fix2 手动测试回归；v0.2 = OPEN ISSUE 全部拍板；v0.1 = 起草） |
 | 关联 PRD | `PRD-v2.1.3.md` |
 | 关联 tasks | `tasks.md` |
 | 工作分支 | `v2.1.3`（基于 main `fc5d766`） |
@@ -108,24 +108,28 @@ function validateBizOpHeaders(actualHeaders) {
 
 参照 v2.1.2 `bankBuRecon:*` 风格设计（#13 拍板 A 完全复用）。
 
+> **round 3 P2 usage-stats 接入修订（2026-05-14；round 3 self-review S2 grep 对齐修订）**：本模块共 **15 个** `bizOpRecon:*` handler，按 v2.1.2 月度BU `bankBuRecon:*` 同款分级 pattern 拆分：
+> - **5 个核心 action handler 走 `trackedIpcHandle`（计入 usage-stats）**：`import:run-biz-op` / `import:run-flow`（functionKey='导入文件'）+ `run`（functionKey='开始运行'）+ `export:date` / `export:date-range`（functionKey='导出差异'）；详见 `src/main.js:9814 / :9839 / :9901 / :9943 / :9966` + `src/backend/usage-stats.js` `FUNCTION_REGISTRY['业务OP数据核对'] = ['导入文件', '开始运行', '导出差异']` 共 3 个 functionKey
+> - **10 个 query/dialog/helper handler 保持 `ipcMain.handle`（不计入 usage-stats）**：`status` / `bu:list` / `import:pick-biz-op-file` / `import:pick-flow-file` / `import:open-error-report-folder` / `import:check-single-day` / `run:list-ready-dates` / `export:list-success-dates` / `export:pick-save-path` / `run:history`；与 v2.1.2 `bankBuRecon` 同款分级（D6 拍板"仅成功 action 计数"）
+> 下表说明列对核心 action 标注 "（tracked via usage-stats wrapper — moduleKey/functionKey）"；query/dialog/helper 标注 "（plain — 未计入 usage-stats）"。
+
 | handler | 入参 | 出参 | 说明 |
 |---|---|---|---|
-| `bizOpRecon:status` | `{}` | `{importedDateBuPairs: [{date, buName, rowCount}], buList: [{buName, count}], flowImportedDates: [date]}` | 模块状态查询（业务OP 已导入 (date, BU) 二元组 + 流水已导入 date 列表 + BU 枚举） |
-| `bizOpRecon:bu:list` | `{}` | `[{buName, count}]` | BU 下拉框枚举：`SELECT DISTINCT bu_name, COUNT(*) FROM biz_op_recon_imports GROUP BY bu_name`（不做 `normalizeBu`，保留原值；#A 拍板） |
-| `bizOpRecon:import:pick-biz-op-file` | `{date}` | `{filePath} \| null` | 弹文件选择对话框（业务OP，*.xlsx） |
-| `bizOpRecon:import:run-biz-op` | `{date, filePath}` | `{status: 'success' \| 'rejected', buName?, validCount?, errorReportPath?, errorRows?: [{rowIndex, reason}]}` | 后台读取 + 表头校验（23 列严格匹配）+ **双重校验**（#1 拍板 B + #5 整批拒绝 + #15 清空旧 runs）：<br>- 全部通过 → 同事务内 `DELETE imports/runs/diff_rows` (date, BU) + `INSERT imports`，返回 `{status:'success', buName, validCount}`<br>- 任一不过 → 主表事务回滚 + 落失败报告 xlsx 到 `error-reports/{date}/`，返回 `{status:'rejected', errorReportPath, errorRows}`；**v0.3 fix2 拍板**：前端不再弹独立报错对话框，仅状态栏文字 + 失败报告路径（cmd+点击可打开） |
-| `bizOpRecon:import:pick-flow-file` | `{date}` | `{filePath} \| null` | 弹文件选择对话框（流水对账单，*.xlsx） |
-| `bizOpRecon:import:run-flow` | `{date, filePath}` | `{status: 'success' \| 'rejected', totalCount?, errorReportPath?, errorRows?: [{rowIndex, reason}]}` | 后台读取 + 表头校验（28 列）+ 「出入方向」枚举校验（#3：仅「入」/「出」）：<br>- 全部通过 → 同事务内 `DELETE flow_imports WHERE data_date=?` + `INSERT`，返回 `{status:'success', totalCount}`<br>- 任一不过 → 事务回滚 + 落失败报告 xlsx，返回 `{status:'rejected', errorReportPath, errorRows}` |
-| `bizOpRecon:import:open-error-report-folder` | `{errorReportPath}` | `{ok}` | 调用 `shell.showItemInFolder`。**v0.3 fix2 主流程不再触发**（校验失败改为状态栏文字 + 路径；用户 cmd+点击直接打开），handler 保留以备后续可能场景调用 |
-| `bizOpRecon:import:check-single-day` | `{buName}` | `{onlyOneDay: boolean, count, latestDate?}` | "库里仅有一日数据"判定（#11 拍板 B 触发前的查询） |
-| `bizOpRecon:run:list-ready-dates` | `{buName}` | `[{date: 'YYYY-MM-DD'}]` | 列出"三件齐"日期（T-1 业务OP + T-2 业务OP + T-1 流水按 normalizeBu 过滤均非空）；用于 #12 前置 enable |
-| `bizOpRecon:run:pick-date` | `{buName, readyDates}` | `{date} \| null` | 弹"选择需要对账的日期"对话框（下拉只列 readyDates；空时 `完成` 按钮 disabled） |
-| `bizOpRecon:run` | `{date, buName}` | `{runId, status: 'success', stats: {amountDiffCount, t1NotT2Count, t2NotT1Count, multiOpAccountCount, t1OpTotal, t2OpTotal, flowTotal, t2AnomalyAccountCount}}` | 后台跑对账（§五 算法），落 `biz_op_recon_runs` + `biz_op_recon_diff_rows`。**round 1 I3 新增 `t2AnomalyAccountCount`** = T-2 业务OP 期末余额非数值（NaN）的账户号去重计数；DB schema 字段 `biz_op_recon_runs.t2_anomaly_account_count`；详见 PRD §3.5.5 |
-| `bizOpRecon:export:list-success-dates` | `{buName}` | `[{date: 'YYYY-MM-DD', runId, runAt}]` | 列出有 success run 的日期（按 buName 过滤；#13 拍板 A 风格）；用于"导出指定日期"下拉 + 区间起止 |
-| `bizOpRecon:export:pick-save-path` | `{defaultFileName}` | `{savePath} \| null` | 弹另存为对话框（默认文件名 #9 拍板 A 格式） |
-| `bizOpRecon:export:date` | `{runId, savePath}` | `{status: 'success', filePath}` | 导出指定日期差异表（1 sheet，sheet 名 `YYYY-MM-DD` ISO，#14 拍板 A） |
-| `bizOpRecon:export:date-range` | `{buName, startDate, endDate, savePath}` | `{status, filePath, sheetCount, skippedDates}` | 导出日期区间差异表（N sheet，sheet 名 `YYYY-MM-DD`；skippedDates = 区间内无 success run 的日期） |
-| `bizOpRecon:run:history` | `{date, buName}` | `[runs]` | 单 (日期, BU) 运行历史（debug 用，可选） |
+| `bizOpRecon:status` | `{}` | `{importedDateBuPairs: [{date, buName, rowCount}], buList: [{buName, count}], flowImportedDates: [date]}` | 模块状态查询（业务OP 已导入 (date, BU) 二元组 + 流水已导入 date 列表 + BU 枚举）（plain — 未计入 usage-stats） |
+| `bizOpRecon:bu:list` | `{}` | `[{buName, count}]` | BU 下拉框枚举：`SELECT DISTINCT bu_name, COUNT(*) FROM biz_op_recon_imports GROUP BY bu_name`（不做 `normalizeBu`，保留原值；#A 拍板）（plain — 未计入 usage-stats） |
+| `bizOpRecon:import:pick-biz-op-file` | `{date}` | `{filePath} \| null` | 弹文件选择对话框（业务OP，*.xlsx）（plain — 未计入 usage-stats） |
+| `bizOpRecon:import:run-biz-op` | `{date, filePath}` | `{status: 'success' \| 'rejected', buName?, validCount?, errorReportPath?, errorRows?: [{rowIndex, reason}]}` | 后台读取 + 表头校验（23 列严格匹配）+ **双重校验**（#1 拍板 B + #5 整批拒绝 + #15 清空旧 runs）：<br>- 全部通过 → 同事务内 `DELETE imports/runs/diff_rows` (date, BU) + `INSERT imports`，返回 `{status:'success', buName, validCount}`<br>- 任一不过 → 主表事务回滚 + 落失败报告 xlsx 到 `error-reports/{date}/`，返回 `{status:'rejected', errorReportPath, errorRows}`；**v0.3 fix2 拍板**：前端不再弹独立报错对话框，仅状态栏文字 + 失败报告路径（cmd+点击可打开）（tracked via usage-stats wrapper — moduleKey='业务OP数据核对'/functionKey='导入文件'） |
+| `bizOpRecon:import:pick-flow-file` | `{date}` | `{filePath} \| null` | 弹文件选择对话框（流水对账单，*.xlsx）（plain — 未计入 usage-stats） |
+| `bizOpRecon:import:run-flow` | `{date, filePath}` | `{status: 'success' \| 'rejected', totalCount?, errorReportPath?, errorRows?: [{rowIndex, reason}]}` | 后台读取 + 表头校验（28 列）+ 「出入方向」枚举校验（#3：仅「入」/「出」）：<br>- 全部通过 → 同事务内 `DELETE flow_imports WHERE data_date=?` + **`clearRunsAndDiffsByDate(db, date)` 清该 date 跨所有 BU 的 runs/diff_rows**（round 3 P1 资金红线新增）+ `INSERT`，返回 `{status:'success', totalCount}`<br>- 任一不过 → 事务回滚 + 落失败报告 xlsx，返回 `{status:'rejected', errorReportPath, errorRows}`（tracked via usage-stats wrapper — moduleKey='业务OP数据核对'/functionKey='导入文件'） |
+| `bizOpRecon:import:open-error-report-folder` | `{errorReportPath}` | `{ok}` | 调用 `shell.showItemInFolder`。**v0.3 fix2 主流程不再触发**（校验失败改为状态栏文字 + 路径；用户 cmd+点击直接打开），handler 保留以备后续可能场景调用（plain — 未计入 usage-stats） |
+| `bizOpRecon:import:check-single-day` | `{buName}` | `{onlyOneDay: boolean, count, latestDate?}` | "库里仅有一日数据"判定（#11 拍板 B 触发前的查询）（plain — 未计入 usage-stats） |
+| `bizOpRecon:run:list-ready-dates` | `{buName}` | `[{date: 'YYYY-MM-DD'}]` | 列出"三件齐"日期（T-1 业务OP + T-2 业务OP + T-1 流水按 normalizeBu 过滤均非空）；用于 #12 前置 enable（plain — 未计入 usage-stats） |
+| `bizOpRecon:run` | `{date, buName}` | `{runId, status: 'success', stats: {amountDiffCount, t1NotT2Count, t2NotT1Count, multiOpAccountCount, t1OpTotal, t2OpTotal, flowTotal, t2AnomalyAccountCount}}` | 后台跑对账（§五 算法），落 `biz_op_recon_runs` + `biz_op_recon_diff_rows`。**round 1 I3 新增 `t2AnomalyAccountCount`** = T-2 业务OP 期末余额非数值（NaN）的账户号去重计数；DB schema 字段 `biz_op_recon_runs.t2_anomaly_account_count`；详见 PRD §3.5.5（tracked via usage-stats wrapper — moduleKey='业务OP数据核对'/functionKey='开始运行'） |
+| `bizOpRecon:export:list-success-dates` | `{buName}` | `[{date: 'YYYY-MM-DD', runId, runAt}]` | 列出有 success run 的日期（按 buName 过滤；#13 拍板 A 风格）；用于"导出指定日期"下拉 + 区间起止（plain — 未计入 usage-stats） |
+| `bizOpRecon:export:pick-save-path` | `{defaultFileName}` | `{savePath} \| null` | 弹另存为对话框（默认文件名 #9 拍板 A 格式）（plain — 未计入 usage-stats） |
+| `bizOpRecon:export:date` | `{runId, savePath}` | `{status: 'success', filePath}` | 导出指定日期差异表（1 sheet，sheet 名 `YYYY-MM-DD` ISO，#14 拍板 A）（tracked via usage-stats wrapper — moduleKey='业务OP数据核对'/functionKey='导出差异'） |
+| `bizOpRecon:export:date-range` | `{buName, startDate, endDate, savePath}` | `{status, filePath, sheetCount, skippedDates}` | 导出日期区间差异表（N sheet，sheet 名 `YYYY-MM-DD`；skippedDates = 区间内无 success run 的日期）（tracked via usage-stats wrapper — moduleKey='业务OP数据核对'/functionKey='导出差异'） |
+| `bizOpRecon:run:history` | `{date, buName}` | `[runs]` | 单 (日期, BU) 运行历史（debug 用，可选）（plain — 未计入 usage-stats） |
 
 > **round 2 R2-M1 修订（2026-05-14）**：原 spec v0.7 此表中描述了 `bizOpRecon:import:pick-biz-op-date` / `bizOpRecon:import:pick-flow-date` 两个 handler，但 main.js / preload.js 实际**无定义**（grep 验证无输出）。两个日期对话框在 code 中由前端 dialog factory `createBizOpReconDatePickerDialog`（`src/renderer-dialogs.js:8067`）直接渲染处理，**不走 IPC**；调用方在 `src/renderer.js:4179` / `src/renderer.js:4255` 直接 `openModal(createBizOpReconDatePickerDialog({...}))`。round 2 把 spec ↔ code 对齐：表中删除两行 + 在 §7.6 dialog factory 段补处理路径说明。
 
@@ -236,10 +240,22 @@ CREATE INDEX IF NOT EXISTS idx_flow_imports_account ON biz_op_recon_flow_imports
 **重新导入策略（#4 拍板 A，仅按 date 级清空，因流水不分 BU）**：
 ```sql
 BEGIN;
+-- 资金红线 ⚠️ PR #45 round 3 P1 fix（reverse sync 入 spec）：流水按 date 跨所有 BU 共用，
+-- 重导后该 date 所有旧 runs/diff_rows 都失效（旧 run 是基于旧流水算出的）—
+-- 必须按 date 跨所有 BU 清 runs + diff_rows，否则 export:date 按旧 runId 读旧 diff_rows
+-- → 源换了导出仍是旧数据 → 资金事故。
+-- 与业务OP 重导清单 BU runs（clearRunsAndDiffsByDateBu）粒度不同，函数名清晰区分：
+--   ByDate（流水路径） vs ByDateBu（业务OP 路径）。
+DELETE FROM biz_op_recon_diff_rows WHERE run_id IN (SELECT id FROM biz_op_recon_runs WHERE data_date=?);
+DELETE FROM biz_op_recon_runs WHERE data_date=?;
 DELETE FROM biz_op_recon_flow_imports WHERE data_date=?;
 -- INSERT 新行...
 COMMIT;
 ```
+
+实现：`src/backend/biz-op-recon-db/run-repository.js#clearRunsAndDiffsByDate(db, date)`；
+调用方：`src/main-process/biz-op-recon-session.js#runFlowImportAsync` 事务内（业务OP 路径继续用 `clearRunsAndDiffsByDateBu` 不变）。
+smoke 防回归：`scripts/smoke/biz-op-recon.js` Case P（构造两 BU 流水共用同 date 的 run，重导后断言两 BU run 全清）。
 
 ### 4.3 表 3：`biz_op_recon_runs`（运行记录）
 
@@ -338,8 +354,13 @@ const YELLOW_FILL_ARGB = 'FFFFFF00';    // 仅用于 §6.3 失败报告 writer�
 | `compareT1OpWithComputed(t1OpRows, computedT1Map)` | `t1OpRows: Array, computedT1Map: Map<string, number>` | `{ diffRows: Array, stats: {amountDiffCount, multiOpAccountCount} }` | #6 拍板 A：1:N 逐行独立比，epsilon=1e-2。**v0.5 fix5 选项 B**：相等的多 OP 行（即 `t1Rows.length >= 2` 且 `diff <= epsilon`）也需 push 到 diffRows，meta 列填 `相等/空/是`；与不相等行的区别仅在 meta 取值。单 OP 相等行仍不进表。`amountDiffCount` 仍只累计"不相等"行（相等多 OP 行不计入差异计数）。 | `src/main-process/biz-op-recon-session.js` |
 | `diffT1AndT2Accounts(t1OpRows, t2OpRows)` | `t1OpRows: Array, t2OpRows: Array` | `{ onlyInT1: Array, onlyInT2: Array }` | 步骤 4.3 账户号差集 | `src/main-process/biz-op-recon-session.js` |
 | `runBizOpReconciliation({date, buName})` | 见 §5.1 | `{runId, stats: {amountDiffCount, multiOpAccountCount, t1NotT2Count, t2NotT1Count, t1OpTotal, t2OpTotal, flowTotal, t2AnomalyAccountCount}}` | 编排上述函数 + 落库；**round 1 I3**：summary 新增 `t2AnomalyAccountCount` 字段（注入 `t2AnomalySeen: Set<string>` 给 `computeT1Op` → 取 size 写 stats） | `src/main-process/biz-op-recon-session.js` |
+| `clearRunsAndDiffsByDateBu(db, date, buName)` | `db: DatabaseSync, date: string, buName: string` | `void`（同事务调用） | #15 拍板 A：业务OP `(date, BU)` 重新导入时清空对应 BU 的旧 runs + diff_rows（**单 BU 清**）；DELETE 顺序：diff_rows → runs（FK 依赖） | `src/backend/biz-op-recon-db/run-repository.js` |
+| `clearRunsAndDiffsByDate(db, date)` | `db: DatabaseSync, date: string` | `void`（同事务调用） | **round 3 P1 资金红线新增**：流水 `data_date` 重新导入时清空该 date **跨所有 BU** 的 runs + diff_rows（**与 `clearRunsAndDiffsByDateBu` 区分语义**：流水按 date 跨所有 BU 共用 → 跨 BU 清；业务OP 按 (date, BU) 分片 → 单 BU 清）。DELETE 顺序：diff_rows（按 run_id IN SELECT）→ runs（按 data_date）。**资金红线**：流水换了对账没重跑 → 导出旧差异 = 资金事故 | `src/backend/biz-op-recon-db/run-repository.js` |
+| `runFlowImportAsync({date, filePath})` | `{date, filePath}` | `{status: 'success' \| 'rejected', totalCount?, errorReportPath?, errorRows?}` | **round 3 P1 资金红线修订**：流水重导事务（`bizOpRecon:import:run-flow` IPC handler 后端实现）必须包含 `clearRunsAndDiffsByDate(db, date)` 调用。事务内顺序：BEGIN → DELETE flow_imports WHERE data_date=? → **`clearRunsAndDiffsByDate(db, date)`**（round 3 新增）→ INSERT 新流水 → COMMIT；任一步失败回滚 | `src/main-process/biz-op-recon-session.js` |
 
 > **multi_op_account_count 累加点**（fix4 修复）：除主路径外，`runReconciliation` 5.a (onlyInT1 路径) 也需累加；使用 `multiOpAccountSeen: Set<accountKey>` 防重复；判定标准 = `countAccountRows(t1OpRows, accKey) >= 2`。详见 PRD §3.5.4。
+
+> **流水重导清 runs 不变量**（round 3 P1 资金红线）：`runFlowImportAsync` 事务必须调 `clearRunsAndDiffsByDate(db, date)`（详见 PRD §3.5.6）。该函数清该 date **所有 BU** 的 runs + diff_rows，与 `clearRunsAndDiffsByDateBu` 单 BU 清不同。Dev 实施改 `src/main-process/biz-op-recon-session.js` `runFlowImportAsync` + `src/backend/biz-op-recon-db/run-repository.js` 新增 `clearRunsAndDiffsByDate` 函数；smoke Case P 防回归。
 
 > **t2AnomalyAccountCount 累加点**（round 1 I3 修复 + round 2 R2-M2 签名 spec ↔ code 对齐）：`runReconciliation` 1 步取数后调用 `const { map: calcT1ByAccount, anomalyAccountSet: t2AnomalyAccounts } = computeT1Op(t2OpRows, flowSumByAccount)` → 解构返回值 → 在 caller 端循环 `anomalyAccountSet` 调 `console.warn(...)`（详见 §5.1 实现 + §5.2 文案）→ `stats.t2AnomalyAccountCount = t2AnomalyAccounts.size`。**注意**：`anomalyAccountSet` 在 `computeT1Op` 内部完成"部分 NaN 容错"（`validAccountSet.delete(anomalyAccountSet)` 集合差），caller 拿到的已是"完全 silent drop"账户集合（即所有行都 NaN 的账户号；任一行 valid 的账户号已被剔除）。详见 PRD §3.5.5 关键不变量第 2 条。
 
@@ -1056,7 +1077,7 @@ async function refreshBizOpReconButtons() {
 | `src/backend/biz-op-recon-db/columns.js` | 新建 | `BIZ_OP_HEADERS`（23 列冻结数组）+ `FLOW_HEADERS`（28 列冻结数组）+ 表头到 DB 列名映射函数 |
 | `src/backend/biz-op-recon-db/imports-repository.js` | 新建 | `biz_op_recon_imports` CRUD：`clearByDateBu` / `insertRows` / `getRowsByDateBu` / `listDistinctBus` / `listImportedDateBuPairs` / `getRowById` |
 | `src/backend/biz-op-recon-db/flow-imports-repository.js` | 新建 | `biz_op_recon_flow_imports` CRUD：`clearByDate` / `insertRows` / `getRowsByDate` / `getRowsByDateBu` / `listImportedDates` |
-| `src/backend/biz-op-recon-db/run-repository.js` | 新建 | `biz_op_recon_runs` + `biz_op_recon_diff_rows` CRUD：`insertRun` / `getRunById` / `listRunsByDateBu` / `listSuccessDates` / `listSuccessDatesInRange` / `listReadyDates` / `insertDiffRows` / `getDiffRowsByRun` / `clearRunsAndDiffsByDateBu`（**#15 联动清空**） |
+| `src/backend/biz-op-recon-db/run-repository.js` | 新建 | `biz_op_recon_runs` + `biz_op_recon_diff_rows` CRUD：`insertRun` / `getRunById` / `listRunsByDateBu` / `listSuccessDates` / `listSuccessDatesInRange` / `listReadyDates` / `insertDiffRows` / `getDiffRowsByRun` / `clearRunsAndDiffsByDateBu`（**#15 联动清空，按 (date, BU) 单 BU 清**） / **`clearRunsAndDiffsByDate`（round 3 P1 资金红线新增，按 date 跨所有 BU 清，流水重导专用，详见 §五 算法签名表 + PRD §3.5.6）** |
 | `src/backend/biz-op-recon-import/reader.js` | 新建 | xlsx 读（SheetJS）+ `blankrows:true` 保留行号（参照 v2.1.2 F5 fix）；通用业务OP / 流水 reader |
 | `src/backend/biz-op-recon-import/validator.js` | 新建 | `validateBizOpHeaders` / `validateFlowHeaders` / `validateBizOpRow`（**#1 拍板 B 双重校验**）/ `validateFlowRow`（**#3 拍板 出入方向枚举**） |
 | `src/main.js` | 修改 | 追加 `bizOpRecon:*` IPC handlers（≈ 16 个，见 §三） |
@@ -1244,6 +1265,26 @@ async function refreshBizOpReconButtons() {
   - 若 clearByDateBu 退化（C1 回归）→ 第 2 次导入后第 2 次的 BU-B 行 + 第 1 次的 `\tBU-B\t` 行混存 → 断言失败
 - **覆盖目的**：扩展 I2 边界 + 与 Case L C1 联动验证（trim + LOWER 跨函数协同）
 
+### 9.15 用例 P：流水重导清 runs + diff_rows 跨 BU 防回归（round 3 P1 资金红线 ⚠️）
+
+- **背景**：v0.8 之前 `runFlowImportAsync` 仅清流水主表 `biz_op_recon_flow_imports` 旧行（DELETE WHERE data_date=?），未清该 date 所有 BU 的 `biz_op_recon_runs` + `biz_op_recon_diff_rows`。当用户重新导入同日流水（修正流水数据）后，旧 BU run 仍指向旧流水算出的 diff_rows → 用户「导出差异」拿到 stale 数据。**资金红线**：流水换了对账没重跑 → 导出旧差异 = 资金事故。round 3 P1 修订引入 `clearRunsAndDiffsByDate(db, date)`（按 date 跨所有 BU 清；与按 (date, BU) 单 BU 清的 `clearRunsAndDiffsByDateBu` 区分语义）。
+- **构造**：
+  - 同 date=2026-05-12 跨 2 个 BU：BU-A + BU-B 各自完成业务OP T-2/T-1 + 流水导入 + 跑对账成功
+  - 三件齐：T-2 (2026-05-11) + T-1 (2026-05-12) 业务OP 各 BU 各 1 行 + T-1 (2026-05-12) 流水 4 行（BU-A 2 行 + BU-B 2 行）
+  - 已 success run 2 个：runA = (date=2026-05-12, bu=BU-A) / runB = (date=2026-05-12, bu=BU-B)；各对应若干 diff_rows
+  - **关键操作**：重新导入同日 (2026-05-12) 流水（修正后的流水文件）
+- **期望**：
+  - 重导后 `SELECT COUNT(*) FROM biz_op_recon_runs WHERE data_date='2026-05-12'` === 0（runA + runB 均被清；跨 BU）
+  - `SELECT COUNT(*) FROM biz_op_recon_diff_rows WHERE data_date='2026-05-12'` === 0（runA + runB 对应 diff_rows 均被清）
+  - `SELECT COUNT(*) FROM biz_op_recon_flow_imports WHERE data_date='2026-05-12'` === 新流水行数（旧流水已清 + 新流水入库）
+  - 同 date 但**业务OP 主表不动**：`SELECT COUNT(*) FROM biz_op_recon_imports WHERE data_date='2026-05-12'` === 重导前行数（业务OP 由 `clearRunsAndDiffsByDateBu` 单独负责，流水重导不应清业务OP）
+  - 重新跑对账（`bizOpRecon:run`）→ 新 runId 对应新 diff_rows
+- **反例（防回归）**：
+  - 若 `runFlowImportAsync` 退化为不调 `clearRunsAndDiffsByDate` → 重导后 runA + runB 仍存在 → 「导出差异」拿到 stale diff_rows → 断言失败
+  - 若误用 `clearRunsAndDiffsByDateBu`（单 BU 清）→ 只清 BU-A 或 BU-B 一个 → 跨 BU 残留 → 断言失败
+  - **资金红线**：用户拿旧差异表上报 → 资金事故
+- **覆盖目的**：守住 P1 资金红线 — 流水共用语义（按 date 跨 BU）必须正确反映在重导清逻辑
+
 ---
 
 ## 十、preview 入口（新增 4 处）
@@ -1293,6 +1334,16 @@ async function refreshBizOpReconButtons() {
 | `YELLOW_FILL` (常量) | Minor | 与 v2.1.2 复用 | ⚪ 暂不升格（v0.3 fix2.4 后差异表已无黄底；仅失败报告 writer 引用 1 处） |
 
 **round 1 升格统计**：13 条进表（Critical 2 + Important-skeleton 4 + Risk-sensitive 7）；2 条暂不升格（DB 字段 + 低引用常量）。
+
+**round 3 升格评估（v0.9 — 2026-05-14，Codex P1 资金红线后续）**：
+
+| 符号 | 层级建议 | 理由 | round 3 升格状态 |
+|---|---|---|---|
+| `runFlowImportAsync` (函数) | **Critical** | 流水重导核心入口；P1 修订前漏清跨 BU runs/diff_rows 即资金红线（用户「导出差异」拿 stale 数据）；事务必须包含 `clearRunsAndDiffsByDate` 调用 | ✅ **round 3 升格 Critical**（详见 `rules/important-variables.md` § 1 Critical） — "变更 review 要点"：流水重导必须清 runs / smoke Case P 覆盖 |
+| `clearRunsAndDiffsByDate` (函数，新) | **Risk-sensitive** | round 3 P1 新增；按 date **跨 BU** 清 runs + diff_rows；与 `clearRunsAndDiffsByDateBu` 单 BU 清不可混 | ✅ **round 3 升格 Risk-sensitive** — "变更 review 要点"：与 `clearRunsAndDiffsByDateBu` 区分语义不能混；流水重导专用 |
+| `clearRunsAndDiffsByDateBu` (函数) | **Risk-sensitive** | #15 拍板 A 已实现；按 (date, BU) 单 BU 清；与新 `clearRunsAndDiffsByDate` 跨 BU 清需双门槛区分 | ✅ **round 3 升格 Risk-sensitive**（之前未升格）— "变更 review 要点"：与 `clearRunsAndDiffsByDate` 区分语义不能混；业务OP 重导专用 |
+
+**round 3 升格统计**：3 条进表（Critical 1 + Risk-sensitive 2）；元数据 v3 → v4 + 上次人工 review 改 2026-05-14。
 
 实施完成后执行 `npm run scan:vars` 重新生成统计，确认新符号的跨文件引用度，按 `rules/important-variables.md` 双门槛复核。
 
@@ -1413,3 +1464,33 @@ async function refreshBizOpReconButtons() {
 - 状态栏：t2AnomalyAccountCount === 0 时**不显示** "T-2 异常 W 个"；> 0 时**显示**
 
 **known issue（不在 round 2 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议下一 round（round 3）或 v2.1.4 补齐。
+
+---
+
+## 十七、round 3 self-review 修订记录（v0.9 — 2026-05-14）
+
+> PR #45 round 2 修订完成后再过 reviewer agent（Codex 自动 review）；reviewer 给 1 P1 ⚠️ 资金红线 + 2 P2 + 1 P3 finding。用户拍板"全修"。下表为 round 3 修订全部条目（PM/Dev 两侧 task 划分）。
+
+| # | 级别 | 内容 | spec/PRD 落实点 | 代码改动文件（Dev 侧） |
+|---|---|---|---|---|
+| **P1** | ⚠️ Critical 资金红线 | `runFlowImportAsync` 成功路径只清流水主表，不清该 date 所有 BU 的 runs/diff_rows → 用户重导同日流水后「导出差异」拿 stale 数据 = 资金事故。修法：新增 `clearRunsAndDiffsByDate(db, date)` 函数（按 date 跨所有 BU 清；与 `clearRunsAndDiffsByDateBu` 单 BU 清区分语义）+ 流水重导事务内调用 + smoke Case P 覆盖 | PRD §3.4.1 步 4 流水重导描述 + PRD §3.5.6 关键不变量段新增 + spec §三 IPC `import:run-flow` 出参描述补 `clearRunsAndDiffsByDate` 调用 + spec §5.0.1 函数签名表新增 `clearRunsAndDiffsByDate` + `clearRunsAndDiffsByDateBu` + `runFlowImportAsync` 三行 + spec §八 run-repository.js 函数清单补 `clearRunsAndDiffsByDate` + spec §九 Case P 新增 + spec §十二 升格 3 条（runFlowImportAsync Critical / clearRunsAndDiffsByDate Risk-sensitive / clearRunsAndDiffsByDateBu Risk-sensitive） | `src/main-process/biz-op-recon-session.js` `runFlowImportAsync` 事务内补 `clearRunsAndDiffsByDate(db, date)` 调用；`src/backend/biz-op-recon-db/run-repository.js` 新增 `clearRunsAndDiffsByDate` 函数；`scripts/smoke-test.js` 新增 Case P |
+| **P2 lockfile** | Important | `package-lock.json` 同步 2.1.3（package.json 已 bump 但 lockfile 未同步） | — (Dev 自动跑 `npm install --package-lock-only` 处理；PM 不动 lockfile) | `package-lock.json` |
+| **P2 usage-stats** | Important | usage-stats 接入 — FUNCTION_REGISTRY 注册「业务OP数据核对」+ 5 个核心 action `bizOpRecon:*` handler 用 `trackedIpcHandle` 包装；其余 10 个 query/dialog/helper handler 保持 plain `ipcMain.handle`（与 v2.1.2 月度BU `bankBuRecon` 同款分级 pattern；D6 拍板"仅成功 action 计数"） | spec §三 IPC 表说明列按 5 tracked + 10 plain 分级标注 + 表头 round 3 P2 修订段说明分级理由 + FUNCTION_REGISTRY 注册 | `src/backend/usage-stats.js` `FUNCTION_REGISTRY` 新增 `'业务OP数据核对': ['导入文件', '开始运行', '导出差异']` 共 3 个 functionKey；`src/main.js` 5 个 action handler（`import:run-biz-op` / `import:run-flow` / `run` / `export:date` / `export:date-range`）改 `trackedIpcHandle('bizOpRecon:*', '业务OP数据核对', '<功能>', ...)` 包装；其余 10 个 handler 保持 plain |
+| **P3 preview:all** | Minor | `package.json:71` `preview:all` script 串入 `preview:biz-op-recon`（参照 v2.1.2 月度BU preview 入串方式） | — (Dev 改 package.json；PM 不动 lockfile) | `package.json` |
+
+**协调（PM/Dev 并行）**：
+- Dev 改 `src/main-process/biz-op-recon-session.js` (P1 流水重导清 runs) + `src/backend/biz-op-recon-db/run-repository.js` (P1 新增 `clearRunsAndDiffsByDate`) + `src/main.js` (P2 5 个核心 action IPC trackedIpcHandle 包装；其余 10 个 query/dialog/helper 保持 plain) + `src/backend/usage-stats.js` (P2 FUNCTION_REGISTRY 注册) + `package.json` + `package-lock.json` (P2/P3) + `scripts/smoke-test.js` (P1 Case P) — PM 不动
+- PM 改 PRD/spec/tasks/important-variables/三件套 — Dev 不动
+- 字段名约定：`clearRunsAndDiffsByDate(db, date)` (新函数，按 date 跨 BU)；`clearRunsAndDiffsByDateBu(db, date, bu)` (已有，按 (date, BU) 单 BU)
+- spec §三 IPC 表 tracked 标注：参照 v2.1.2 月度BU 模块风格（说明列追加 "（tracked via usage-stats wrapper）"）
+
+**round 3 验证清单（PR self-review 前必跑）**：
+- `npm run smoke` 全套（含 Case A-K + Case L/M/N/O + 新 Case P）→ 退出码 0
+- `grep -n "clearRunsAndDiffsByDate\b" src/backend/biz-op-recon-db/run-repository.js src/main-process/biz-op-recon-session.js` → run-repository.js 命中**函数定义**；session.js `runFlowImportAsync` 命中**调用**
+- `grep -n "trackedIpcHandle.*bizOpRecon:" src/main.js | wc -l` → 5（5 个核心 action handler 包装）；`grep -n "ipcMain.handle('bizOpRecon:" src/main.js | wc -l` → 10（其余 query/dialog/helper handler 保持 plain）；合计 15
+- `grep -n "业务OP数据核对" src/backend/usage-stats.js` → 命中 FUNCTION_REGISTRY 注册行
+- `grep -n "preview:biz-op-recon" package.json` → 命中 `preview:all` script 链
+- `cat package-lock.json | grep '"version":' | head -3` → 顶层 version 字段 = 2.1.3
+- 真实数据手测：导入业务OP T-2/T-1 + 流水（同 date 跨 2 个 BU），跑 2 个 BU 对账成功 → 重新导入同日流水 → 「导出差异」对话框两个 BU 的 success 日期均消失（runs 已清，需重新跑对账）
+
+**known issue（不在 round 3 修，留 PRD §6.5 KI-1 不变）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议 v2.1.4 补齐。
