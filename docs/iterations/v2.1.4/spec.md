@@ -210,7 +210,9 @@ ipcMain.handle('settings:get-enabled-modules', () => {
 ipcMain.handle('settings:set-enabled-modules', (_event, moduleList) => {
   try {
     database.setEnabledModules(moduleList);
-    return { status: 'ok', enabledModules: moduleList };
+    // round 1 self-review M5：return DB 真值（getEnabledModules）而非入参 moduleList，
+    // setEnabledModules 内部 sanitize 会去重，避免 renderer 缓存与 DB 偏离
+    return { status: 'ok', enabledModules: database.getEnabledModules() };
   } catch (error) {
     return { status: 'failed', message: String(error && error.message ? error.message : error) };
   }
@@ -292,23 +294,30 @@ setEnabledModules: (moduleList) => ipcRenderer.invoke('settings:set-enabled-modu
 moduleCabinetBtn: document.getElementById('moduleCabinetBtn'),
 
 // 事件绑定（启动时）
+// round 1 self-review M5：API 路径修正为 window.desktopApi.settings.setEnabledModules（preload 把 IPC 暴露在 settings 子对象下）
+// 返回 schema { status: 'ok' | 'failed', enabledModules, message? }，非 { success: bool }
 elements.moduleCabinetBtn.addEventListener('click', () => {
-  openModuleCabinetDialog({
-    getEnabledModules: () => state.enabledModules,
-    getAllModules: () => Object.values(MODULES),
-    onEnabledModulesChange: async (next) => {
-      // 调 IPC 写回 + 更新 renderer state + 刷顶部切换
-      const result = await window.desktopApi.setEnabledModules(next);
-      if (!result || !result.success) return false;
-      state.enabledModules = next;
-      // 若 currentModule 被移出启用列表 → 自动切换到启用区第 1 个（PRD B2）
-      if (!next.includes(state.currentModule)) {
-        await switchModule(next[0]);
+  openModal(createModuleCabinetDialog({
+    enabledModules: state.enabledModules,
+    allModules: Object.values(MODULES),
+    onCommit: async (nextEnabledIds) => {
+      const result = await window.desktopApi.settings.setEnabledModules(nextEnabledIds);
+      if (!result || result.status !== 'ok') {
+        console.warn('persist enabledModules failed:', result && result.message);
+        return false;
+      }
+      // round 1 self-review M5：用 IPC 返回的 DB 真值刷 state（sanitize 后可能去重）
+      state.enabledModules = Array.isArray(result.enabledModules) && result.enabledModules.length > 0
+        ? [...result.enabledModules]
+        : [...nextEnabledIds];
+      // O4 拍板：若 currentModule 被移出启用列表 → 自动切到启用区第 1 个
+      if (!state.enabledModules.includes(state.currentModule)) {
+        setCurrentModule(state.enabledModules[0], { persist: true });
       }
       renderTopModuleSwitcher();
       return true;
     }
-  });
+  }));
 });
 ```
 
@@ -488,14 +497,19 @@ async function handleMoveToIdle() {
   renderTopModuleSwitcher();
 }
 
-// 持久化 helper
+// 持久化 helper（v0.1 设计；v0.2 round 1 M5 后实际逻辑已合并入 §3.6.1 onCommit 回调）
+// API 修正：window.desktopApi.setEnabledModules → window.desktopApi.settings.setEnabledModules
+// 返回 schema 修正：result.success → result.status === 'ok'
 async function persistEnabledModules(next) {
-  const result = await window.desktopApi.setEnabledModules(next);
-  if (!result || !result.success) {
-    console.error('[persistEnabledModules] failed:', result && result.error);
+  const result = await window.desktopApi.settings.setEnabledModules(next);
+  if (!result || result.status !== 'ok') {
+    console.error('[persistEnabledModules] failed:', result && result.message);
     return;
   }
-  state.enabledModules = next;
+  // round 1 M5：用 DB 真值刷 state
+  state.enabledModules = Array.isArray(result.enabledModules) && result.enabledModules.length > 0
+    ? [...result.enabledModules]
+    : [...next];
 }
 
 // HTML5 drag/drop（仅右区域行内排序）
