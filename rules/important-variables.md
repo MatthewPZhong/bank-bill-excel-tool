@@ -10,8 +10,8 @@
 | 字段 | 值 |
 |---|---|
 | 清单版本 | v5（对应 app v2.1.3 — 2026-05-14 round 4 self-review 新增 2 条：`runBizOpImportAsync` 升格 Critical（Codex P1 资金红线 — 业务OP 重导清下一日 runs，与 round 3 `runFlowImportAsync` 升格 Critical 对齐 — 两个重导入口同级红线）+ `addOneDay` 升格 Risk-sensitive（round 4 P1 新增 helper，与 `subOneDay` round 2 升格 Risk-sensitive 对齐 — 时区错乱直接错日期）；v4 = 2026-05-14 round 3 新增 3 条：`runFlowImportAsync` Critical + `clearRunsAndDiffsByDate` Risk-sensitive + `clearRunsAndDiffsByDateBu` Risk-sensitive；v3 = 2026-05-14 round 2 新增 1 条 `subOneDay`；round 1 已升格 13 条 v2.1.3 新符号保持） |
-| 上次人工 review | 2026-05-14（round 4） |
-| 基线数据 | `docs/analysis/var-reference-stats.md`（28 个 JS 文件 / 355 顶层声明） |
+| 上次人工 review | 2026-05-14（round 7 — 内部 reviewer + Codex 累计 5 轮 + 内部 reviewer 复核 round 6/8 共 7 轮 self-review 全部 finding 修复） |
+| 基线数据 | `docs/analysis/var-reference-stats.md`（76 个 JS 文件 / 755 顶层声明 — round 7 I3 刷新） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
 

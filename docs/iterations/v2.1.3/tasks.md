@@ -340,32 +340,29 @@
 
 - **依赖**：T2 + T3 + T4 + T5
 - **文件**：
-  - `src/main.js`（修改）— 追加 **16 个** `ipcMain.handle('bizOpRecon:*')` handler（spec §三）
-    1. `bizOpRecon:status` — 模块状态查询
-    2. `bizOpRecon:bu:list` — BU 下拉框枚举
-    3. `bizOpRecon:import:pick-biz-op-date` — 业务OP 日期对话框
-    4. `bizOpRecon:import:pick-biz-op-file` — 业务OP 文件对话框
-    5. `bizOpRecon:import:run-biz-op` — 业务OP 导入（含双重校验 + 整批拒绝 + 失败报告 + 清空旧 runs，已拍板 #1/#4/#5/#15）
-    6. `bizOpRecon:import:pick-flow-date` — 流水日期对话框
-    7. `bizOpRecon:import:pick-flow-file` — 流水文件对话框
-    8. `bizOpRecon:import:run-flow` — 流水导入（含出入方向枚举校验 + 整批拒绝 + 失败报告，已拍板 #3/#5）
-    9. `bizOpRecon:import:open-error-report-folder` — 打开错误报告文件夹（shell.showItemInFolder）；**v0.3 fix2 主流程不再触发**，handler 保留以备后续场景
-    10. `bizOpRecon:import:check-single-day` — 检查"库里仅一日数据"（已拍板 #11）
-    11. `bizOpRecon:run:list-ready-dates` — 列出 ready 日期（已拍板 #12/#13）
-    12. `bizOpRecon:run:pick-date` — 对账日期对话框
-    13. `bizOpRecon:run` — 跑对账（已拍板 #3/#6/#7/#10）
-    14. `bizOpRecon:export:list-success-dates` — 列出 success 日期（已拍板 #13）
-    15. `bizOpRecon:export:pick-save-path` — 另存为对话框（已拍板 #9 默认文件名）
-    16. `bizOpRecon:export:date` — 单日导出（已拍板 #14 sheet 名 ISO）
-    17. `bizOpRecon:export:date-range` — 区间导出（已拍板 #14）
-    18. `bizOpRecon:run:history` — 运行历史（debug，可选）
-  - `src/preload.js`（修改）— `window.desktopApi.bizOpRecon.*` 暴露所有 18 个 handler
+  - `src/main.js`（修改）— 追加 **15 个** `bizOpRecon:*` IPC handler（spec §三；round 2 R2-M1 删假 handler `pick-biz-op-date` / `pick-flow-date` / `pick-date`，日期选择由前端 dialog factory `createBizOpReconDatePickerDialog` 直接处理；round 3 P2 usage-stats 接入按 D6 拍板"仅成功 action 计数"分级：5 个核心 action 用 `trackedIpcHandle` + 10 个 query/dialog/helper 保持 plain `ipcMain.handle`）
+    1. `bizOpRecon:status` — 模块状态查询（plain）
+    2. `bizOpRecon:bu:list` — BU 下拉框枚举（plain）
+    3. `bizOpRecon:import:pick-biz-op-file` — 业务OP 文件对话框（plain）
+    4. `bizOpRecon:import:run-biz-op` — 业务OP 导入（**tracked: 业务OP数据核对 / 导入文件**；含双重校验 + 整批拒绝 + 失败报告 + 清空旧 runs (date, BU) + (date+1, BU)，已拍板 #1/#4/#5/#15 + round 4 P1）
+    5. `bizOpRecon:import:pick-flow-file` — 流水文件对话框（plain）
+    6. `bizOpRecon:import:run-flow` — 流水导入（**tracked: 业务OP数据核对 / 导入文件**；含出入方向枚举校验 + 整批拒绝 + 失败报告 + 清跨 BU runs，已拍板 #3/#5 + round 3 P1）
+    7. `bizOpRecon:import:open-error-report-folder` — 打开错误报告文件夹（plain；shell.showItemInFolder；**v0.3 fix2 主流程不再触发**，handler 保留以备后续场景）
+    8. `bizOpRecon:import:check-single-day` — 检查"库里仅一日数据"（plain；已拍板 #11）
+    9. `bizOpRecon:run:list-ready-dates` — 列出 ready 日期（plain；已拍板 #12/#13）
+    10. `bizOpRecon:run` — 跑对账（**tracked: 业务OP数据核对 / 开始运行**；已拍板 #3/#6/#7/#10）
+    11. `bizOpRecon:export:list-success-dates` — 列出 success 日期（plain；已拍板 #13）
+    12. `bizOpRecon:export:pick-save-path` — 另存为对话框（plain；已拍板 #9 默认文件名）
+    13. `bizOpRecon:export:date` — 单日导出（**tracked: 业务OP数据核对 / 导出差异**；已拍板 #14 sheet 名 ISO）
+    14. `bizOpRecon:export:date-range` — 区间导出（**tracked: 业务OP数据核对 / 导出差异**；已拍板 #14 + fix6 单 sheet「差异」回滚）
+    15. `bizOpRecon:run:history` — 运行历史（plain；debug，可选）
+  - `src/preload.js`（修改）— `window.desktopApi.bizOpRecon.*` 暴露所有 15 个 handler
 - **关联 OPEN ISSUE**：
   - 已拍板 #5 = 新增 `import:open-error-report-folder` handler
   - 已拍板 #11 = 新增 `import:check-single-day` handler
   - 已拍板 #13 = A 命名风格对齐 v2.1.2（`list-ready-dates` / `list-success-dates`，不是 `list-ready` / `list-success`）
 - **acceptance criteria**：
-  - `grep "ipcMain.handle('bizOpRecon:" src/main.js` ≥ 17 匹配（不含 debug `run:history`）
+  - `grep -E "(ipcMain\.handle|trackedIpcHandle)\\(.bizOpRecon:" src/main.js` 共 15 匹配（含 debug `run:history`）；其中 `trackedIpcHandle` 5 匹配（5 核心 action），`ipcMain.handle` 10 匹配（10 plain）
   - 每个 handler 都有 try/catch 包装 + 错误返回 `{error: ...}` 标准化结构
   - 前端 `window.desktopApi.bizOpRecon.run({...})` 不报 undefined
   - 失败报告流程：`import:run-biz-op` 返回 `{status:'rejected', errorReportPath, errorRows}` 时前端在状态栏文字 + 路径显示（v0.3 fix2 改），用户可直接 cmd+点击路径打开（`import:open-error-report-folder` handler 保留但主流程不调）
@@ -373,7 +370,7 @@
   ```bash
   npm start  # 启动后 DevTools 验证 IPC 链通
   ```
-- **commit message**：`[v2.1.3] feat(t6): main.js IPC handlers + preload — bizOpRecon:* 17-18 个 handler`
+- **commit message**：`[v2.1.3] feat(t6): main.js IPC handlers + preload — bizOpRecon:* 15 个 handler（5 tracked + 10 plain）`
 - **预估**：M（2-3h）
 
 ---

@@ -87,7 +87,7 @@ c986503 feat(biz-op-recon): session 算法 + writer + IPC + 前端面板/dialog
 - `npm run smoke` → **退出码 0**：biz-op-recon **154/154 PASS**（含 round 1-4 新 Case L/M/N/O/P/Q）+ bank-bu-recon **41/41 PASS** + recon-id-fix 全套 + scenario-dispatcher 15/15 + usage-stats 46/46 + 全套 PASS
 - `npm run preview:biz-op-recon` → 4 张 PNG 重跑成功（fix6 + round 4 后版本，5月14 10:24）
 - `node --check` → 全 src/*.js 语法 OK
-- `npm run scan:vars` → 753 top-level names 统计已刷新
+- `npm run scan:vars` → 755 top-level names 统计已刷新（round 7 I3 重跑后含 hasColumn / addOneDay / clearRunsAndDiffsByDate 等新顶层符号）
 
 ## 用户手动 UI 测试覆盖
 

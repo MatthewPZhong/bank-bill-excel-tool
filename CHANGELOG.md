@@ -60,7 +60,7 @@ v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。
   - Case L：T-2 NaN end_balance + summary.t2AnomalyAccountCount 防回归（含 console.warn spy 校验）
   - Case M：clearByDateBu 大小写归一防回归（构造 "BU-A" 与 " BU-A " 两次导入，验证旧数据被清）
   - Case N：BU 名落库前 trim 归一防回归（验证 DISTINCT bu_name 仅 1 行）
-- **known issue（不在 round 1 修，留 PRD §6.5 KI-1）**：v2.1.2 月度BU 模块同位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议下一 round 或 v2.1.4 补齐 UX 对齐
+- **known issue（不在 round 1 修，留 PRD §6.5 KI-1）**：v2.1.2 月度BU 模块同位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗），v2.1.3 业务OP 模块当前缺失同位置 dialog；**留 v2.1.4 补齐**（round 1-7 都未补，KI-1 持续保留）
 
 ### round 2 self-review 修订（v0.8 — 2026-05-14，PR #45 round 1 完成后再过 reviewer agent）
 
@@ -112,7 +112,7 @@ v2.1.2 之后追加 patch 迭代：**新增模块「业务OP数据核对」**。
 
 ### round 5 self-review 修订（v0.10.1 — 2026-05-14，PR #45 round 4 完成后 Codex 自动 review 反馈）
 
-- **1 P3** — 4 处归档文档残留旧口径"17 IPC bizOpRecon:* 全部用 trackedIpcHandle 包装"，与 round 3 收口的实际"15 IPC = 5 tracked + 10 plain"不符：
+- **1 P3** — 5 处归档文档残留旧口径"17 IPC bizOpRecon:* 全部用 trackedIpcHandle 包装"，与 round 3 收口的实际"15 IPC = 5 tracked + 10 plain"不符：
   - CHANGELOG.md:93 § round 3 P2 usage-stats 段
   - docs/VERSION_FEATURE_HISTORY.md:37 round 3 修订摘要
   - docs/iterations/v2.1.3/PRD-v2.1.3.md:5 标题表 v0.10 描述

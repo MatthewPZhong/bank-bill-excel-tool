@@ -1067,7 +1067,7 @@ async function refreshBizOpReconButtons() {
 >
 > **round 2 R2-M1 修订（2026-05-14）**：日期选择对话框（业务OP 日期 / 流水对账单日期）由前端 dialog factory `createBizOpReconDatePickerDialog` 直接处理，**不走 IPC**（spec §三 IPC 表中原 `bizOpRecon:import:pick-biz-op-date` / `bizOpRecon:import:pick-flow-date` 在 main.js / preload.js 实际无定义，已 round 2 删除）。前端调用入口：`src/renderer.js:4179`（业务OP 日期 — fix1.4 默认值 = subOneDay(today)）+ `src/renderer.js:4255`（流水日期 — fix2.5 默认值 = subOneDay(today)）；对话框实现 `src/renderer-dialogs.js:8067` `createBizOpReconDatePickerDialog`。defaultDate 由 caller 传入（renderer 端用 JS Date 计算 `subOneDay(today)`，与 backend 的 `subOneDay` 双源 R2-M4 解耦）。
 
-[^dialog-count]: round 1 M3 修订前 spec 描述为 5 个，实际代码仅 4 个（fix1.5+fix2 已删 ErrorReportDialog）。round 1 把 spec 描述同步为 4 个。**known issue（KI-1，详见 PRD §6.5）**：v2.1.2 月度BU 模块同位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议下一 round 或 v2.1.4 补齐 UX 对齐，但**不在 round 1 修**。
+[^dialog-count]: round 1 M3 修订前 spec 描述为 5 个，实际代码仅 4 个（fix1.5+fix2 已删 ErrorReportDialog）。round 1 把 spec 描述同步为 4 个。**known issue（KI-1，详见 PRD §6.5）**：v2.1.2 月度BU 模块同位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗），v2.1.3 业务OP 模块当前缺失同位置 dialog；**留 v2.1.4 补齐**（round 1-7 都未补，KI-1 持续保留）。
 
 ---
 
@@ -1084,7 +1084,7 @@ async function refreshBizOpReconButtons() {
 | `src/backend/biz-op-recon-db/run-repository.js` | 新建 | `biz_op_recon_runs` + `biz_op_recon_diff_rows` CRUD：`insertRun` / `getRunById` / `listRunsByDateBu` / `listSuccessDates` / `listSuccessDatesInRange` / `listReadyDates` / `insertDiffRows` / `getDiffRowsByRun` / `clearRunsAndDiffsByDateBu`（**#15 联动清空，按 (date, BU) 单 BU 清**） / **`clearRunsAndDiffsByDate`（round 3 P1 资金红线新增，按 date 跨所有 BU 清，流水重导专用，详见 §五 算法签名表 + PRD §3.5.6）** |
 | `src/backend/biz-op-recon-import/reader.js` | 新建 | xlsx 读（SheetJS）+ `blankrows:true` 保留行号（参照 v2.1.2 F5 fix）；通用业务OP / 流水 reader |
 | `src/backend/biz-op-recon-import/validator.js` | 新建 | `validateBizOpHeaders` / `validateFlowHeaders` / `validateBizOpRow`（**#1 拍板 B 双重校验**）/ `validateFlowRow`（**#3 拍板 出入方向枚举**） |
-| `src/main.js` | 修改 | 追加 `bizOpRecon:*` IPC handlers（≈ 16 个，见 §三） |
+| `src/main.js` | 修改 | 追加 `bizOpRecon:*` IPC handlers（共 15 个；5 tracked + 10 plain，见 §三） |
 | `src/preload.js` | 修改 | 追加 `window.desktopApi.bizOpRecon.*` 暴露 |
 | `index.html` | 修改 | 主导航第 5 按钮 + `bizOpReconModulePanel` section |
 | `src/renderer.js` | 修改 | 模块切换 + 状态机 + 按钮联动 + BU 下拉渲染 + 状态栏 |
@@ -1453,7 +1453,7 @@ async function refreshBizOpReconButtons() {
 | **Case M** | 测试遗漏 | clearByDateBu 大小写归一防回归（round 1 编号；**round 2 R2-I3 swap 为 Case L**，详见 §9.11） | spec §9.11 Case L（round 2 swap 后） | `scripts/smoke-test.js` Case L |
 | **Case N** | 测试遗漏 | BU 名落库前 trim 归一防回归 | spec §9.13 Case N | `scripts/smoke-test.js` Case N |
 
-**known issue（不在 round 1 修，留 PRD §6.5 KI-1）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议下一 round（round 2）或 v2.1.4 补齐。
+**known issue（不在 round 1 修，留 PRD §6.5 KI-1）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗 UX 对齐），v2.1.3 业务OP 模块当前缺失同位置 dialog；**留 v2.1.4 补齐**（round 1-7 都未补，KI-1 持续保留）。
 
 **round 1 验证清单（PR self-review 前必跑）**：
 - `npm run smoke` 全套（含 Case A-K + Case L/M/N）→ 退出码 0
@@ -1563,7 +1563,7 @@ async function refreshBizOpReconButtons() {
 
 | # | 级别 | 内容 | spec/PRD 落实点 | 代码改动文件（Dev 侧） |
 |---|---|---|---|---|
-| **P3** | Minor（纯文档归档口径残留） | 4 处归档文档残留旧口径 "17 IPC bizOpRecon:* 全部用 trackedIpcHandle 包装"，与 round 3 实际收口的 "15 IPC = 5 tracked + 10 plain"（D6 拍板"仅成功 action 计数"+ v2.1.2 月度BU 模块同款分级 pattern）不符。具体位置：CHANGELOG.md:93 § round 3 P2 usage-stats 段；docs/VERSION_FEATURE_HISTORY.md:37 round 3 修订摘要；docs/iterations/v2.1.3/PRD-v2.1.3.md:5 标题表 v0.10 描述；docs/iterations/v2.1.3/PRD-v2.1.3.md:607 §6.4 round 3 P2 段；docs/prs/待merge-PR #45.md:55 ipcRenderer 命中条目。5 处统一改为 "5 个核心 action 用 trackedIpcHandle + 10 个 query/dialog/helper 保持 plain（共 15 个 bizOpRecon:* IPC handler）"。**不阻断功能但归档文档误导后续 review/验收** — 全文档统一口径 | CHANGELOG.md round 3 P2 段 + VFH round 3 摘要行 + PRD §6.4 round 3 段 + PRD 标题表 v0.10 描述 + PR 草稿 ipcRenderer 行 + 本节 spec §十九 新增 | — (PM 纯文档；Dev 不动；smoke 不变) |
+| **P3** | Minor（纯文档归档口径残留） | 5 处归档文档残留旧口径 "17 IPC bizOpRecon:* 全部用 trackedIpcHandle 包装"，与 round 3 实际收口的 "15 IPC = 5 tracked + 10 plain"（D6 拍板"仅成功 action 计数"+ v2.1.2 月度BU 模块同款分级 pattern）不符。具体位置：CHANGELOG.md:93 § round 3 P2 usage-stats 段；docs/VERSION_FEATURE_HISTORY.md:37 round 3 修订摘要；docs/iterations/v2.1.3/PRD-v2.1.3.md:5 标题表 v0.10 描述；docs/iterations/v2.1.3/PRD-v2.1.3.md:607 §6.4 round 3 P2 段；docs/prs/待merge-PR #45.md:55 ipcRenderer 命中条目。5 处统一改为 "5 个核心 action 用 trackedIpcHandle + 10 个 query/dialog/helper 保持 plain（共 15 个 bizOpRecon:* IPC handler）"。**不阻断功能但归档文档误导后续 review/验收** — 全文档统一口径 | CHANGELOG.md round 3 P2 段 + VFH round 3 摘要行 + PRD §6.4 round 3 段 + PRD 标题表 v0.10 描述 + PR 草稿 ipcRenderer 行 + 本节 spec §十九 新增 | — (PM 纯文档；Dev 不动；smoke 不变) |
 
 **协调（PM 单侧）**：
 - 本 round 全部 PM 文档反向同步 — Dev 不参与（无代码改动 / 无 smoke 改动）

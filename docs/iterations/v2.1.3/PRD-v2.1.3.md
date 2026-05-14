@@ -632,7 +632,7 @@ writer 阶段保持**无填充色**（移除整行黄底）。
 - **I3**：`computeT1Op` T-2 NaN end_balance 加 `console.warn(...)` + summary 新增字段 `t2AnomalyAccountCount`（详见 §3.5.5）+ DB schema `biz_op_recon_runs.t2_anomaly_account_count INTEGER NOT NULL DEFAULT 0`
 - **M1-M5**：详见 spec §十三 round 1 修订记录
 - **新 smoke**：Case L（I3 t2AnomalyAccountCount 防回归）+ Case M（C1 大小写差异 clearByDateBu 防回归）+ Case N（I2 BU 名首尾空白归一防回归）
-- **known issue（不在 round 1 修，留 PRD §6.5）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗），v2.1.3 业务OP 模块当前缺失同位置 dialog；建议下一 round 或 v2.1.4 补齐 UX 对齐
+- **known issue（不在 round 1 修，留 PRD §6.5）**：v2.1.2 月度BU回填校验对应位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗），v2.1.3 业务OP 模块当前缺失同位置 dialog；**留 v2.1.4 补齐**（round 1-7 都未补，KI-1 持续保留）
 
 
 **fix6（2026-05-13，PRD #14 拍板回滚）**：区间导出由多 sheet（按日期分）改为**单 sheet「差异」**（所有日期合并）。
@@ -675,7 +675,7 @@ writer 阶段保持**无填充色**（移除整行黄底）。
 
 | # | 问题 | 影响 | 修复建议 |
 |---|---|---|---|
-| KI-1 | v2.1.2 月度BU回填校验同位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗对齐 UX），v2.1.3 业务OP 模块当前缺失 | UX 不一致；用户从月度BU模块切到业务OP模块后体验差异 | 下一 round（round 2）或 v2.1.4 补 `createBizOpReconFileImportPromptDialog` 在「导入文件」点击后、弹文件选择对话框前插入提示弹窗 |
+| KI-1 | v2.1.2 月度BU回填校验同位置有 `createBankBuReconFileImportPromptDialog`（导入文件前提示弹原生窗对齐 UX），v2.1.3 业务OP 模块当前缺失 | UX 不一致；用户从月度BU模块切到业务OP模块后体验差异 | **留 v2.1.4 补** `createBizOpReconFileImportPromptDialog` 在「导入文件」点击后、弹文件选择对话框前插入提示弹窗（round 1-7 都未补，KI-1 持续保留） |
 
 ---
 
