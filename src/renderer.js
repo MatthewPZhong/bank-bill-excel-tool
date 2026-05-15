@@ -3573,6 +3573,7 @@ function renderReconIdFixScenarioSelect() {
   // v2.1.0-beta.3 修订（用户反馈）：账单类别为空时场景下拉显示真空白（不显示 "请先在场景管理中创建" placeholder）
   const hasCategory = state.reconIdFixBillCategory === 'business' || state.reconIdFixBillCategory === 'gateway';
   if (!hasCategory) {
+    // 档 1：账单类别为空 → 真空白（不变）
     select.innerHTML = '<option value=""></option>';
     select.disabled = true;
     select.value = '';
@@ -3580,31 +3581,37 @@ function renderReconIdFixScenarioSelect() {
   }
   const scenarios = Array.isArray(state.reconIdFixScenarios) ? state.reconIdFixScenarios : [];
   if (scenarios.length === 0) {
-    select.innerHTML = '<option value="">请先在场景管理中创建场景</option>';
+    // 档 2：v2.1.5 N2 改 — 真空白（去掉"请先在场景管理中创建场景"提示）
+    select.innerHTML = '<option value=""></option>';
     select.disabled = true;
     select.value = '';
     return;
   }
-  const opts = ['<option value="">请选择场景</option>']
-    .concat(scenarios.map((s) => {
-      const idStr = String(s.id);
-      const name = String(s.name || '');
-      // 简单 escape：避免 < / > / & / "
-      const escapedName = name
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-      return `<option value="${idStr}">${escapedName}</option>`;
-    }))
-    .join('');
+  // 档 3：v2.1.5 N2 改 — 直接列 scenarios（去掉"请选择场景"占位项）
+  const opts = scenarios.map((s) => {
+    const idStr = String(s.id);
+    const name = String(s.name || '');
+    // 简单 escape：避免 < / > / & / "
+    const escapedName = name
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    return `<option value="${idStr}">${escapedName}</option>`;
+  }).join('');
   select.innerHTML = opts;
   select.disabled = false;
   // 同步 select.value 与 state（防御 reload 后 currentSelected 仍存在的情况）
+  // ⚠️ v2.1.5 N2：去掉占位项后 HTML <select> 默认选中第 1 个 <option>，与「未选状态」矛盾；
+  //    用 select.selectedIndex = -1 显式置为"未选中"（HTML 标准用法，无可见占位项）
   const desired = state.reconIdFixSelectedScenarioId !== null
     ? String(state.reconIdFixSelectedScenarioId)
     : '';
-  select.value = desired;
+  if (desired === '') {
+    select.selectedIndex = -1;
+  } else {
+    select.value = desired;
+  }
 }
 
 function updateReconIdFixUi() {
