@@ -5846,6 +5846,32 @@
         else if (c.reconFields.some((r) => !r.gwField || !r.bankField)) errors.push('对账字段每行两端都不能为空');
         const a = c.assign || {};
         if (!a.gwField || !a.bankField) errors.push('对账成立后赋值的两端都不能为空');
+        // v2.1.5 N3：conditions 柔性校验
+        //   - conditions.length === 0 → 通过（视为不过滤）
+        //   - ≥ 1 行 → 每行 side / field 必填；非「空值/非空值」op 的 value 必填；side 与 field 一致性校验
+        const conds = Array.isArray(c.conditions) ? c.conditions : [];
+        if (conds.length > 0) {
+          conds.forEach((cd, idx) => {
+            const rowLabel = `条件 #${idx + 1}`;
+            if (cd.side !== '网关' && cd.side !== '银行') {
+              errors.push(`${rowLabel} 的"侧"必填（网关 / 银行）`);
+              return;
+            }
+            if (!cd.field || String(cd.field).trim() === '') {
+              errors.push(`${rowLabel} 的"字段"不能为空`);
+              return;
+            }
+            // side 与 field 一致性（防御左一切换未清空 + 手改 DB）
+            const validFields = cd.side === '网关' ? GATEWAY_RECON_FIELDS : BANK_STATEMENT_FIELDS_FOR_C3;
+            if (!validFields.includes(cd.field)) {
+              errors.push(`${rowLabel} 的"字段" ${cd.field} 不在 ${cd.side} 字段列表中`);
+              return;
+            }
+            if (opNeedsValue(cd.op) && (cd.value === '' || cd.value === undefined)) {
+              errors.push(`${rowLabel} 非"空值/非空值"操作的"值"不能为空`);
+            }
+          });
+        }
       } else if (isReconIdFixCategory(draft.category)) {
         // v2.1.0-beta.1 PR-A（task A7）：C4 校验
         // v2.1.0-beta.3 T6：两个 ReconID 子模式共用校验（schema 相同）；SubBizType 校验跳过逻辑由 T7 按 mode 实施
