@@ -2249,8 +2249,9 @@ select.mapping-text-input {
 
 .scenario-config-c3-cond-field {
   /* 240px 固定 — 浏览器原生 ellipsis 截断超长 option text；
-     下拉打开时 option 完整可见（HTML <select> 默认行为） */
-  flex: 0 0 240px;
+     下拉打开时 option 完整可见（HTML <select> 默认行为）。
+     v2.1.5 self-review-2 M-1：删 `flex: 0 0 240px`（grid item 上 flex 属性无效）；
+     保留 `width: 240px` 作为 future flex 父布局兜底 */
   width: 240px;
   min-width: 0;
   text-overflow: ellipsis;
