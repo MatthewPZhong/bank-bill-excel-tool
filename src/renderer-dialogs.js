@@ -7538,6 +7538,11 @@
         const mv = c.markValue || {};
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">打标：</span>类型#${mv.type} 的 ${escapeHtml(mv.field || '')} 写入 "${escapeHtml(String(mv.value || ''))}"</div>`;
       } else if (draft.category === 'gateway-recon-join') {
+        // v2.1.5 N3：conditions 段（仅当 ≥ 1 行时渲染）
+        const conds = Array.isArray(c.conditions) ? c.conditions : [];
+        if (conds.length > 0) {
+          html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">条件（AND）：</span><ul>${conds.map((cd) => `<li>${escapeHtml(cd.side)} ${escapeHtml(cd.field)} ${escapeHtml(cd.op)}${opNeedsValue(cd.op) ? ' ' + escapeHtml(String(cd.value || '')) : ''}</li>`).join('')}</ul></div>`;
+        }
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段（AND）：</span><ul>${(c.reconFields || []).map((r) => `<li>网关 ${escapeHtml(r.gwField)} = 银行 ${escapeHtml(r.bankField)}</li>`).join('')}</ul></div>`;
         const a = c.assign || {};
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">赋值：</span>网关 ${escapeHtml(a.gwField || '')} → 银行 ${escapeHtml(a.bankField || '')}</div>`;
