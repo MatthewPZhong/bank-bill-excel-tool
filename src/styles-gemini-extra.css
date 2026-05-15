@@ -2233,6 +2233,30 @@ select.mapping-text-input {
   width: 100px;
 }
 
+/* v2.1.5 fix1.1：C3「条件」row — grid 列宽固定，避免 side 切换"网关↔银行"时
+   左二字段 select 因字段名超长被撑开（GATEWAY_RECON_FIELDS 含 30+ 字符的
+   'Type(0:1对1,1:1对多,2:多对1,3:多对1（轧差合并)'）。
+   列宽：side 100px / field 240px / op 100px / value 1fr / × 22px */
+.scenario-config-c3-cond-row {
+  display: grid;
+  grid-template-columns: 100px 240px 100px minmax(0, 1fr) 22px;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 6px;
+  background: rgba(60, 64, 67, 0.04);
+  border-radius: 4px;
+}
+
+.scenario-config-c3-cond-field {
+  /* 240px 固定 — 浏览器原生 ellipsis 截断超长 option text；
+     下拉打开时 option 完整可见（HTML <select> 默认行为） */
+  flex: 0 0 240px;
+  width: 240px;
+  min-width: 0;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
 /* v2.1.0-beta.2 PR-A Round 3 v2（task R3-2）：场景名称 input 宽度收窄至 ~1/4 dialog body 宽（180px）；4 个 dialog 共用 */
 .scenario-config-row > input[data-field="name"] {
   flex: 0 0 180px;

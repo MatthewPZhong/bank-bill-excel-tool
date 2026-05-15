@@ -6080,16 +6080,20 @@
       const c3CondContainer = dialog.querySelector('[data-multi="c3-conditions"]');
 
       // ===== v2.1.5 N3：「条件」栏渲染 + 数据流 =====
+      // v2.1.5 fix1.1：用 scenario-config-c3-cond-row 专属 class（grid 布局列宽固定）
+      //   - 不复用 .scenario-config-multi-row（避免影响 reconFields 行的 flex 布局）
+      //   - 左二字段 select 固定 240px，超长字段名（如 GATEWAY_RECON_FIELDS 的 'Type(0:1对1...)'）
+      //     由浏览器原生 ellipsis 截断；下拉打开时 option 完整可见
       function renderC3ConditionRow(cd, idx) {
         const fields = cd.side === '银行' ? BANK_STATEMENT_FIELDS_FOR_C3 : GATEWAY_RECON_FIELDS;
         const valueHidden = !opNeedsValue(cd.op);
         return `
-          <div class="scenario-config-multi-row" data-c3-cond-row="${idx}">
+          <div class="scenario-config-c3-cond-row" data-c3-cond-row="${idx}">
             <select class="scenario-config-input scenario-config-input-narrow" data-c3-cond-field="side" ${isReadonly ? 'disabled' : ''}>
               <option value="网关"${cd.side === '网关' ? ' selected' : ''}>网关</option>
               <option value="银行"${cd.side === '银行' ? ' selected' : ''}>银行</option>
             </select>
-            <select class="scenario-config-input" data-c3-cond-field="field" ${isReadonly ? 'disabled' : ''}>
+            <select class="scenario-config-input scenario-config-c3-cond-field" data-c3-cond-field="field" ${isReadonly ? 'disabled' : ''}>
               <option value="">请选择字段</option>
               ${renderScenarioOptions(fields, cd.field)}
             </select>
@@ -6109,11 +6113,12 @@
       renderC3Conditions();
 
       // 「条件」事件绑定（参考 C1 模式 — change / input / click 三层）
+      // v2.1.5 fix1.1：closest selector 改为 .scenario-config-c3-cond-row（与 row 的专属 class 一致）
       c3CondContainer?.addEventListener('change', (event) => {
         if (isReadonly) return;
         const ctl = event.target.closest('[data-c3-cond-field]');
         if (!ctl) return;
-        const row = ctl.closest('.scenario-config-multi-row');
+        const row = ctl.closest('.scenario-config-c3-cond-row');
         const idx = Number(row?.dataset.c3CondRow);
         const f = ctl.dataset.c3CondField;
         if (!Number.isFinite(idx) || !config.conditions[idx]) return;
@@ -6131,7 +6136,7 @@
         if (isReadonly) return;
         const input = event.target.closest('input[data-c3-cond-field="value"]');
         if (!input) return;
-        const row = input.closest('.scenario-config-multi-row');
+        const row = input.closest('.scenario-config-c3-cond-row');
         const idx = Number(row?.dataset.c3CondRow);
         if (Number.isFinite(idx) && config.conditions[idx]) {
           config.conditions[idx].value = input.value;
@@ -6141,7 +6146,7 @@
         if (isReadonly) return;
         const removeBtn = event.target.closest('button[data-c3-cond-action="remove"]');
         if (!removeBtn) return;
-        const row = removeBtn.closest('.scenario-config-multi-row');
+        const row = removeBtn.closest('.scenario-config-c3-cond-row');
         const idx = Number(row?.dataset.c3CondRow);
         if (Number.isFinite(idx)) {
           // v2.1.5 N3 柔性校验：可删完所有条件
