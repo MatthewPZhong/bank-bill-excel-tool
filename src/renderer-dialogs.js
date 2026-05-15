@@ -6017,6 +6017,13 @@
             <input class="scenario-config-input scenario-config-input-narrow" type="number" min="0" max="3" data-field="priority" ${isReadonly ? 'disabled' : ''} value="${draft.priority ?? 0}">
           </div>
           <div class="scenario-config-row scenario-config-row-multi">
+            <span class="scenario-config-label">条件 <span class="scenario-config-tooltip" title="同时满足全部条件才进入提取（AND）">ⓘ</span></span>
+            <div class="scenario-config-multi-wrap">
+              <div class="scenario-config-multi-rows" data-multi="c3-conditions"></div>
+              ${isReadonly ? '' : '<button class="text-action small" type="button" data-action="add-c3-condition">+ 新增条件</button>'}
+            </div>
+          </div>
+          <div class="scenario-config-row scenario-config-row-multi">
             <span class="scenario-config-label">对账字段</span>
             <div class="scenario-config-multi-wrap">
               <div class="scenario-config-multi-rows" data-multi="reconFields"></div>
@@ -6044,6 +6051,83 @@
       `;
 
       const reconRowsContainer = dialog.querySelector('[data-multi="reconFields"]');
+      const c3CondContainer = dialog.querySelector('[data-multi="c3-conditions"]');
+
+      // ===== v2.1.5 N3：「条件」栏渲染 + 数据流 =====
+      function renderC3ConditionRow(cd, idx) {
+        const fields = cd.side === '银行' ? BANK_STATEMENT_FIELDS_FOR_C3 : GATEWAY_RECON_FIELDS;
+        const valueHidden = !opNeedsValue(cd.op);
+        return `
+          <div class="scenario-config-multi-row" data-c3-cond-row="${idx}">
+            <select class="scenario-config-input scenario-config-input-narrow" data-c3-cond-field="side" ${isReadonly ? 'disabled' : ''}>
+              <option value="网关"${cd.side === '网关' ? ' selected' : ''}>网关</option>
+              <option value="银行"${cd.side === '银行' ? ' selected' : ''}>银行</option>
+            </select>
+            <select class="scenario-config-input" data-c3-cond-field="field" ${isReadonly ? 'disabled' : ''}>
+              <option value="">请选择字段</option>
+              ${renderScenarioOptions(fields, cd.field)}
+            </select>
+            <select class="scenario-config-input scenario-config-input-narrow" data-c3-cond-field="op" ${isReadonly ? 'disabled' : ''}>
+              ${renderScenarioOptions(SCENARIO_CONDITION_OPS, cd.op || '等于')}
+            </select>
+            <input class="scenario-config-input" type="text" data-c3-cond-field="value" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(cd.value || '')}" placeholder="值" ${valueHidden ? 'style="visibility:hidden"' : ''}>
+            ${isReadonly ? '' : '<button class="icon-close-small" type="button" data-c3-cond-action="remove" title="删除">×</button>'}
+          </div>
+        `;
+      }
+
+      function renderC3Conditions() {
+        if (!c3CondContainer) return;
+        c3CondContainer.innerHTML = config.conditions.map((cd, idx) => renderC3ConditionRow(cd, idx)).join('');
+      }
+      renderC3Conditions();
+
+      // 「条件」事件绑定（参考 C1 模式 — change / input / click 三层）
+      c3CondContainer?.addEventListener('change', (event) => {
+        if (isReadonly) return;
+        const ctl = event.target.closest('[data-c3-cond-field]');
+        if (!ctl) return;
+        const row = ctl.closest('.scenario-config-multi-row');
+        const idx = Number(row?.dataset.c3CondRow);
+        const f = ctl.dataset.c3CondField;
+        if (!Number.isFinite(idx) || !config.conditions[idx]) return;
+        config.conditions[idx][f] = ctl.value;
+        // side 切换 → 重渲（重新拉字段下拉枚举）+ 清空 field（防御切换后旧字段名残留）
+        if (f === 'side') {
+          config.conditions[idx].field = '';
+          renderC3Conditions();
+        } else if (f === 'op') {
+          // op 切换 → 重渲（隐藏/显示 value 输入框）
+          renderC3Conditions();
+        }
+      });
+      c3CondContainer?.addEventListener('input', (event) => {
+        if (isReadonly) return;
+        const input = event.target.closest('input[data-c3-cond-field="value"]');
+        if (!input) return;
+        const row = input.closest('.scenario-config-multi-row');
+        const idx = Number(row?.dataset.c3CondRow);
+        if (Number.isFinite(idx) && config.conditions[idx]) {
+          config.conditions[idx].value = input.value;
+        }
+      });
+      c3CondContainer?.addEventListener('click', (event) => {
+        if (isReadonly) return;
+        const removeBtn = event.target.closest('button[data-c3-cond-action="remove"]');
+        if (!removeBtn) return;
+        const row = removeBtn.closest('.scenario-config-multi-row');
+        const idx = Number(row?.dataset.c3CondRow);
+        if (Number.isFinite(idx)) {
+          // v2.1.5 N3 柔性校验：可删完所有条件
+          config.conditions.splice(idx, 1);
+          renderC3Conditions();
+        }
+      });
+      dialog.querySelector('[data-action="add-c3-condition"]')?.addEventListener('click', () => {
+        if (isReadonly) return;
+        config.conditions.push({ side: '网关', field: '', op: '等于', value: '' });
+        renderC3Conditions();
+      });
 
       function renderReconFields() {
         reconRowsContainer.innerHTML = config.reconFields.map((rf, idx) => `
