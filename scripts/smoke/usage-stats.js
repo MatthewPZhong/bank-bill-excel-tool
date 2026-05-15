@@ -193,6 +193,74 @@ function runUsageStatsSmokeTests() {
       check('U12', threw, '写盘失败必须 throw（避免上层 swallow 后丢失 dirty）');
     }
 
+    // ===== v2.1.5 N1：usage-stats key 修复（spec §2.3 + tasks T1.4）=====
+    // 背景：v2.1.4 起 main.js trackedIpcHandle 用 moduleKey='对账单ReconID修复'（无空格）
+    //       但 FUNCTION_REGISTRY 注册的 key 是 '单据对账ReconID修复'（不一致）→ incrementFunction 静默丢弃 → long-standing bug
+    // v2.1.5 N1：main.js 改 '对账单 ReconID 修复'（带空格）+ FUNCTION_REGISTRY 同步改 '对账单 ReconID 修复'
+    //   → 两端 key 一致，bug 修复
+
+    // U13.N1-USAGE-NEW-KEY：incrementFunction 用新 key 能落盘
+    {
+      const s = defaultStats();
+      // 前置断言：新 key 已在 FUNCTION_REGISTRY 注册
+      check('U13.0', '对账单 ReconID 修复' in FUNCTION_REGISTRY, '新 key "对账单 ReconID 修复" 必须在 FUNCTION_REGISTRY 注册');
+      const fns = FUNCTION_REGISTRY['对账单 ReconID 修复'] || [];
+      ['导入文件', '开始运行', '导出文件'].forEach((fn) => {
+        check(`U13.fn[${fn}]`, fns.includes(fn), `${fn} 必须在新 key 的 FUNCTION_REGISTRY`);
+      });
+      // 实际累加：新 key 能写入计数
+      incrementFunction(s, '对账单 ReconID 修复', '导入文件');
+      check('U13.count', s.modules['对账单 ReconID 修复']['导入文件'] === 1, '新 key incrementFunction 必须真正写入计数');
+    }
+
+    // U14.N1-USAGE-OLD-KEY-IGNORED：用旧 key 静默丢弃（不抛异常 + registry 不再注册旧 key）
+    {
+      const s = defaultStats();
+      // 前置断言：旧 key 已从 FUNCTION_REGISTRY 移除
+      check('U14.0', !('对账单ReconID修复' in FUNCTION_REGISTRY), '旧 key "对账单ReconID修复" 必须已从 FUNCTION_REGISTRY 移除');
+      check('U14.0b', !('单据对账ReconID修复' in FUNCTION_REGISTRY), 'v2.1.4 旧旧 key "单据对账ReconID修复" 必须已从 FUNCTION_REGISTRY 移除');
+      // 用旧 key 调 incrementFunction：静默丢弃 + 不抛异常 + 不在 stats.modules 出现
+      const before = JSON.stringify(s);
+      let threw = false;
+      try {
+        incrementFunction(s, '对账单ReconID修复', '导入文件');
+        incrementFunction(s, '单据对账ReconID修复', '导入文件');
+      } catch (_err) {
+        threw = true;
+      }
+      check('U14.no-throw', !threw, '旧 key incrementFunction 不应抛异常');
+      check('U14.silent', JSON.stringify(s) === before, '旧 key 调用不应改变 stats（静默丢弃）');
+      check('U14.no-section', s.modules['对账单ReconID修复'] === undefined, 'stats.modules 不应出现旧 key section');
+    }
+
+    // U15.N1-USAGE-BUG-FIX：long-standing bug 修复证明
+    // 模拟 trackedIpcHandle 流程：incrementFunction → saveStats → loadStats round-trip
+    // v2.1.4 之前：FUNCTION_REGISTRY key 与 main.js trackedIpcHandle 第 2 参不一致 → round-trip 读回 0 / undefined
+    // v2.1.5：两端一致 → round-trip 必须读回准确计数
+    {
+      const bugFixDir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-stats-bugfix-'));
+      try {
+        const s = defaultStats();
+        // 模拟 trackedIpcHandle('recon-id-fix:import', '对账单 ReconID 修复', '导入文件', ...)
+        incrementFunction(s, '对账单 ReconID 修复', '导入文件');
+        incrementFunction(s, '对账单 ReconID 修复', '开始运行');
+        incrementFunction(s, '对账单 ReconID 修复', '导出文件');
+        // 写盘
+        saveStats(bugFixDir, s);
+        // 读回
+        const reloaded = loadStats(bugFixDir);
+        check('U15.import', reloaded.modules['对账单 ReconID 修复']['导入文件'] === 1, 'round-trip 后导入文件计数必须 = 1（v2.1.4 之前为 0 — long-standing bug）');
+        check('U15.run', reloaded.modules['对账单 ReconID 修复']['开始运行'] === 1, 'round-trip 后开始运行计数必须 = 1');
+        check('U15.export', reloaded.modules['对账单 ReconID 修复']['导出文件'] === 1, 'round-trip 后导出文件计数必须 = 1');
+        // 序列化文本验证：[对账单 ReconID 修复] section 必须出现在 .usage-stats.txt
+        const text = serialize(reloaded);
+        check('U15.section', text.includes('[对账单 ReconID 修复]'), '.usage-stats.txt 必须包含 [对账单 ReconID 修复] section');
+        check('U15.no-old-section', !text.includes('[单据对账ReconID修复]'), '.usage-stats.txt 不应再包含旧 [单据对账ReconID修复] section');
+      } finally {
+        fs.rmSync(bugFixDir, { recursive: true, force: true });
+      }
+    }
+
     console.log(`  usage-stats: ${count}/${count} PASS`);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
