@@ -845,6 +845,13 @@
         name: '与网关对账单根据金额币种一对一匹配对账ID',
         priority: 1,
         config: {
+          // v2.1.5 fix1.1 self-review I1：注入 ≥ 2 行 conditions（含网关 + 银行 + 超长字段 +
+          //   '非空值' op 用于验证 value 输入框隐藏），可视化验证 fix1.1 的列宽固定效果
+          conditions: [
+            { side: '网关', field: 'Type(0:1对1,1:1对多,2:多对1,3:多对1（轧差合并)', op: '等于', value: '0' },
+            { side: '银行', field: 'Currency', op: '等于', value: 'USD' },
+            { side: '网关', field: 'reconciliationId', op: '非空值', value: '' }
+          ],
           reconFields: [
             { seq: 1, gwField: 'Currency', bankField: 'Currency' },
             { seq: 2, gwField: 'Amount', bankField: '发生额绝对值' },
