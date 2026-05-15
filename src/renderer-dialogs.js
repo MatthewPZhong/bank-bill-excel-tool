@@ -5718,6 +5718,8 @@
       }
       if (category === 'gateway-recon-join') {
         return {
+          // v2.1.5 N3：柔性默认 — 空数组（不强制添加首行；区别于 C1 默认 1 行）
+          conditions: [],
           reconFields: [{ seq: 1, gwField: '', bankField: '' }],
           assign: { gwField: '', bankField: '' }
         };
@@ -5991,6 +5993,10 @@
         config.reconFields = [{ seq: 1, gwField: '', bankField: '' }];
       }
       if (!config.assign) config.assign = { gwField: '', bankField: '' };
+      // v2.1.5 N3：旧 v2.1.4 scenario 无 conditions 字段 → 默认空数组（不过滤）
+      if (!Array.isArray(config.conditions)) {
+        config.conditions = [];
+      }
 
       const overlay = createOverlay();
       const dialog = document.createElement('div');
