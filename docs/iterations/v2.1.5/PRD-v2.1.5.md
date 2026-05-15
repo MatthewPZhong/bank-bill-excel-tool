@@ -7,7 +7,7 @@
 | 起始版本 | `v2.1.4`（PR #47 已合并 main，2026-05-14，merge commit `f7358ec`） |
 | 起草日期 | 2026-05-15 |
 | 起草人 | team-lead（PM 角色） |
-| 状态 | 起草中，等待用户拍板待澄清问题 |
+| 状态 | ✅ 已完成 — Dev/smoke/preview/手测全部通过，PR #49 已提交（base: main, head: v2.1.5），待 reviewer 复核合并 |
 | 关联文档 | `spec.md` / `tasks.md`（同目录） |
 | 涉及模块 | 对账单 ReconID 修复（N1 + N2 — UI/IPC/usage-stats）+ 银行对账单处理（N3 — C3 场景配置 dialog + 引擎） |
 | 工作分支 | `v2.1.5`（基于 main 切出，PR 向 `v2.1.5 → main`） |
@@ -358,7 +358,7 @@ v2.1.5：    [对账单 ReconID 修复]
 ## 十、待澄清问题
 
 - [x] N1 业务OP数据核对是否一并改名？ — **用户已撤回，不改**
-- [x] N1 是否做 `.usage-stats.txt` 历史数据 migration？ — **用户已确认不做**（旧 key 历史从未成功累计；writeStatsFile 按 FUNCTION_REGISTRY 顺序输出，新 key 自动不出现旧 key） 
+- [x] N1 是否做 `.usage-stats.txt` 历史数据 migration？ — **用户已确认不做**（旧 key 历史从未成功累计；writeStatsFile 按 FUNCTION_REGISTRY 顺序输出，新 key 自动不出现旧 key）
 - [x] N1 IPC channel name 是否改名？ — **不改**（preload + DB schema 依赖）
 - [x] N2 scenarios 为空时 select.disabled 是否保留 true？ — **保留**（沿用现状）
 - [x] N2 有 scenarios 但用户未选时 select 默认显示？ — v0.2 ✅ **selectedIndex = -1**（HTML 标准未选状态，无可见占位项） → v0.3 fix1.2 ✅ **翻转：自动选第 1 个**（`reloadReconIdFixScenarios` 末尾设 `state.reconIdFixSelectedScenarioId = scenarios[0].id`；用户测试反馈，2026-05-15 拍板）

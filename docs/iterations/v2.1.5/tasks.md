@@ -47,7 +47,7 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 
 **Verify**：
 - [x] 三件套已生成（v0.2 重写完成）
-- [ ] 用户对 PRD §十 / spec §十 待澄清问题（Q1 / Q2）确认拍板
+- [x] 用户对 PRD §十 / spec §十 待澄清问题（Q1 / Q2）确认拍板（2026-05-15 拍板：Q1 走 / Q2 弹）
 - [x] 分支已切到 `v2.1.5`，基于 main
 
 **当前状态**：v0.2 重写完成，等待用户拍板待澄清问题后进入 Dev 阶段
@@ -70,9 +70,9 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 **新建辅助函数**：无
 
 **Verify**：
-- [ ] grep `'对账单ReconID修复'` 在 `src/renderer.js` 应 0 命中（注释除外）
-- [ ] `npm start` 后主页面左上角模块切换按钮显示「对账单 ReconID 修复」（含 2 空格）
-- [ ] `npm run preview` 重跑（CLAUDE.md memory `workflow_frontend_previews`）
+- [x] grep `'对账单ReconID修复'` 在 `src/renderer.js` 应 0 命中（注释除外）
+- [x] `npm start` 后主页面左上角模块切换按钮显示「对账单 ReconID 修复」（含 2 空格）
+- [x] `npm run preview` 重跑（CLAUDE.md memory `workflow_frontend_previews`）
 
 **关联功能 review 命中预判**：
 - ⚠️ `MODULE_REGISTRY.reconIdFix.name`（v2.1.4 升格 Important-skeleton）
@@ -97,8 +97,8 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 **新建辅助函数**：无
 
 **Verify**：
-- [ ] grep `'对账单ReconID修复'` 在 `src/main.js` 应 0 命中（注释除外）
-- [ ] 跑应用 → 进对账单 ReconID 修复模块 → 跑导入/运行/导出 → 关闭 → 检查 `<storageRoot>/.usage-stats.txt`，应有 `[对账单 ReconID 修复]` section + 3 个 fnKey 各 ≥ 1
+- [x] grep `'对账单ReconID修复'` 在 `src/main.js` 应 0 命中（注释除外）
+- [x] 跑应用 → 进对账单 ReconID 修复模块 → 跑导入/运行/导出 → 关闭 → 检查 `<storageRoot>/.usage-stats.txt`，应有 `[对账单 ReconID 修复]` section + 3 个 fnKey 各 ≥ 1
 
 **关联功能 review 命中预判**：
 - ⚠️ `trackedIpcHandle` 第 2 参（Important-skeleton）
@@ -121,8 +121,8 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 **新建辅助函数**：无
 
 **Verify**：
-- [ ] 在 gateway session 中跑「开始运行」选择 business 场景（或反之）→ 弹错时显示新文案（含空格）
-- [ ] grep `'对账单ReconID修复'` 在 `src/main.js` 应 0 命中（与 T1.2 一并验证）
+- [x] 在 gateway session 中跑「开始运行」选择 business 场景（或反之）→ 弹错时显示新文案（含空格）
+- [x] grep `'对账单ReconID修复'` 在 `src/main.js` 应 0 命中（与 T1.2 一并验证）
 
 **估时**：5 min
 
@@ -142,9 +142,9 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 **新建辅助函数**：无
 
 **Verify**：
-- [ ] grep `'单据对账ReconID修复'` 在 `src/backend/usage-stats.js` 应 0 命中
-- [ ] 启动新 DB 应用 → 进对账单 ReconID 修复模块跑 1 次 → 关闭 → cat `.usage-stats.txt`，应包含 `[对账单 ReconID 修复]` section + 3 个 fnKey 至少各 1
-- [ ] 旧 DB（含历史 `[单据对账ReconID修复]` section）启动 v2.1.5 → 跑 1 次 → 关闭 → cat 文件：旧 section 不再出现，新 section 出现
+- [x] grep `'单据对账ReconID修复'` 在 `src/backend/usage-stats.js` 应 0 命中
+- [x] 启动新 DB 应用 → 进对账单 ReconID 修复模块跑 1 次 → 关闭 → cat `.usage-stats.txt`，应包含 `[对账单 ReconID 修复]` section + 3 个 fnKey 至少各 1
+- [x] 旧 DB（含历史 `[单据对账ReconID修复]` section）启动 v2.1.5 → 跑 1 次 → 关闭 → cat 文件：旧 section 不再出现，新 section 出现（smoke U15 round-trip 已防回归）
 
 **关联功能 review 命中预判**：
 - ⚠️ `FUNCTION_REGISTRY`（Important-skeleton；本次修 long-standing bug 即修复了"对账单 ReconID 修复"模块的 calc 链路）
@@ -172,10 +172,10 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 **新建辅助函数**：无
 
 **Verify**：
-- [ ] 主面板「账单类别」选 gateway + DB 该类别下无场景 → 场景下拉显示真空白 + disabled
-- [ ] 主面板「账单类别」选 gateway + DB 有 ≥ 1 场景 → 场景下拉直接列 scenarios，select 显示空白（selectedIndex = -1），未主动选时「开始运行」按钮 disabled
-- [ ] 旧 v2.1.4 用户 DB 启动 → 行为按上述两档分流
-- [ ] grep `state.reconIdFixSelectedScenarioId` 用法，确认无任何代码假设 select.value 与 state 一一映射
+- [x] 主面板「账单类别」选 gateway + DB 该类别下无场景 → 场景下拉显示真空白 + disabled
+- [x] 主面板「账单类别」选 gateway + DB 有 ≥ 1 场景 → 场景下拉直接列 scenarios ~~select 显示空白（selectedIndex = -1），未主动选时「开始运行」按钮 disabled~~ — **v0.3 fix1.2 翻转：自动选第 1 个场景 + 按钮 enable**（详见 spec §3.5）
+- [x] 旧 v2.1.4 用户 DB 启动 → 行为按上述两档分流（fix1.2 后旧 DB 也自动选第 1 个）
+- [x] grep `state.reconIdFixSelectedScenarioId` 用法，确认无任何代码假设 select.value 与 state 一一映射
 
 **关联功能 review 命中预判**：
 - ⚠️ `state.reconIdFixSelectedScenarioId`（Runtime-state；select.value / selectedIndex 与 state 一致性）
@@ -207,9 +207,9 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 **新建辅助函数**：无
 
 **Verify**：
-- [ ] 新建 C3 场景 → draft.config.conditions === []
-- [ ] 旧 v2.1.4 DB 中已存在的 C3 scenario（无 config.conditions）打开 dialog → config.conditions 自动初始化为 []
-- [ ] v2.1.5 创建带 conditions 的 scenario → 重新打开 dialog 显示原 conditions
+- [x] 新建 C3 场景 → draft.config.conditions === []
+- [x] 旧 v2.1.4 DB 中已存在的 C3 scenario（无 config.conditions）打开 dialog → config.conditions 自动初始化为 []（smoke C3-COND-LEGACY 已覆盖）
+- [x] v2.1.5 创建带 conditions 的 scenario → 重新打开 dialog 显示原 conditions
 
 **估时**：15 min
 
@@ -237,12 +237,12 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 **新建辅助函数**：是（2 个，均在 `createScenarioConfigDialogC3` 闭包内）
 
 **Verify**：
-- [ ] 场景管理 → 新增 C3 场景 → 配置 dialog 在「优先级」与「对账字段」之间显示「条件」label + 空容器 + 「+ 新增条件」按钮（默认 0 条）
-- [ ] 点「+ 新增条件」加 1 条，左一默认「网关」+ 左二字段下拉 31 列
-- [ ] 左一切到「银行」→ 左二字段下拉重渲 45 项 + 当前值清空
-- [ ] 左三切「空值/非空值」→ 右值输入框 hidden
-- [ ] 行末「×」始终显示，点击删除该行（含删完最后一行的合法性）
-- [ ] CSS 样式与既有 multi-row（如 C1 的 conditions / 既有 C3 的 reconFields）一致（沿用 `.scenario-config-row-multi` / `.scenario-config-multi-rows` 类）
+- [x] 场景管理 → 新增 C3 场景 → 配置 dialog 在「优先级」与「对账字段」之间显示「条件」label + 空容器 + 「+ 新增条件」按钮（默认 0 条）
+- [x] 点「+ 新增条件」加 1 条，左一默认「网关」+ 左二字段下拉 31 列
+- [x] 左一切到「银行」→ 左二字段下拉重渲 45 项 + 当前值清空
+- [x] 左三切「空值/非空值」→ 右值输入框 hidden
+- [x] 行末「×」始终显示，点击删除该行（含删完最后一行的合法性）
+- [x] ~~CSS 样式与既有 multi-row（如 C1 的 conditions / 既有 C3 的 reconFields）一致（沿用 `.scenario-config-row-multi` / `.scenario-config-multi-rows` 类）~~ — **v0.3 fix1.1 翻转：改用专属 class `.scenario-config-c3-cond-row`（grid 布局）+ `.scenario-config-c3-cond-field`（240px 固定）**，避免 GATEWAY_RECON_FIELDS 超长字段名（'Type(0:1对1...)'）撑大 row 宽度（详见 spec §4.8）
 
 **估时**：1.5h
 
@@ -264,11 +264,11 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 **新建辅助函数**：无
 
 **Verify**：
-- [ ] 保存空 conditions → 校验通过（柔性）
-- [ ] 任一行 field 空 → alert 报错
-- [ ] 任一行非空值/非空值 op 的 value 空 → alert 报错
-- [ ] side='网关' 但 field='Currency'（Currency 不在 GATEWAY_RECON_FIELDS）→ alert 报错"字段 Currency 不在网关字段列表中"
-- [ ] side='银行' 但 field='Bank'（Bank 不在 BANK_STATEMENT_FIELDS_FOR_C3）→ alert 报错
+- [x] 保存空 conditions → 校验通过（柔性）
+- [x] 任一行 field 空 → alert 报错
+- [x] 任一行非空值/非空值 op 的 value 空 → alert 报错
+- [x] side='网关' 但 field='Currency'（Currency 不在 GATEWAY_RECON_FIELDS）→ alert 报错"字段 Currency 不在网关字段列表中"
+- [x] side='银行' 但 field='Bank'（Bank 不在 BANK_STATEMENT_FIELDS_FOR_C3）→ alert 报错
 
 **估时**：30 min
 
@@ -290,8 +290,8 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 **新建辅助函数**：无
 
 **Verify**：
-- [ ] 配置 ≥ 1 条 conditions → 保存前 confirm 弹窗显示「条件（AND）：网关 BillDate 等于 2026-04-01；银行 Currency 包含 USD」类似列表
-- [ ] conditions 为空 → confirm 弹窗中无 conditions 段（只显示原有的对账字段 + 赋值）
+- [x] 配置 ≥ 1 条 conditions → 保存前 confirm 弹窗显示「条件（AND）：网关 BillDate 等于 2026-04-01；银行 Currency 包含 USD」类似列表
+- [x] conditions 为空 → confirm 弹窗中无 conditions 段（只显示原有的对账字段 + 赋值）
 
 **估时**：20 min
 
@@ -317,10 +317,10 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 **新建辅助函数**：是（`evalCondition`）
 
 **Verify**：
-- [ ] C3 场景 `config.conditions = [{side:'网关',field:'Currency',op:'等于',value:'HKD'}]` + gwRows 2 行（HKD/USD）→ gwRowsFiltered 仅 1 行（HKD），bankRowsFiltered 不变；assign 写入按过滤后子集进行
-- [ ] C3 场景 `config.conditions = [{side:'银行',field:'发生额绝对值',op:'等于',value:'100'}]` + bankRows 含 \|Credit-Debit\|=100 行 → 引擎走 `getBankRowValueForC3`，过滤后命中
-- [ ] C3 场景 `config.conditions = []`（或 undefined）→ 不过滤，行为同 v2.1.4
-- [ ] 跑既有 smoke 全套（C3 用例）→ 全绿（旧 fixture 默认无 conditions，兜底空数组等价于不过滤）
+- [x] C3 场景 `config.conditions = [{side:'网关',field:'Currency',op:'等于',value:'HKD'}]` + gwRows 2 行（HKD/USD）→ gwRowsFiltered 仅 1 行（HKD），bankRowsFiltered 不变；assign 写入按过滤后子集进行（smoke C3-COND-1 已覆盖）
+- [x] C3 场景 `config.conditions = [{side:'银行',field:'发生额绝对值',op:'等于',value:'100'}]` + bankRows 含 \|Credit-Debit\|=100 行 → 引擎走 `getBankRowValueForC3`，过滤后命中（smoke C3-COND-VIRTUAL 已覆盖）
+- [x] C3 场景 `config.conditions = []`（或 undefined）→ 不过滤，行为同 v2.1.4（smoke C3-COND-EMPTY + C3-COND-LEGACY 已覆盖）
+- [x] 跑既有 smoke 全套（C3 用例）→ 全绿（旧 fixture 默认无 conditions，兜底空数组等价于不过滤）— 31/31 PASS
 
 **关联功能 review 命中预判**：
 - ⚠️ `runC3Scenario`（**Critical** — 资金对账引擎入口）
@@ -363,9 +363,9 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 - `npm run scan:vars` 重生成自动统计报告
 
 **Verify**：
-- [ ] `npm run smoke` 全绿
-- [ ] check-vars 命中变量与 spec §五预判一致（含 `runC3Scenario` Critical 命中）
-- [ ] PR body 段落已生成
+- [x] `npm run smoke` 全绿（scenario-engines 31/31 + usage-stats 61/61 + 全套）
+- [x] check-vars 命中变量与 spec §五预判一致（含 `runC3Scenario` Critical 命中 — `dialog` 按 important-variables.md:262 备注判定可忽略）
+- [x] PR body 段落已生成（PR #49 已提交 + self-review-2 已修正命中描述）
 
 **估时**：1.5h
 
@@ -390,11 +390,11 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 **新建辅助函数**：无
 
 **Verify**：
-- [ ] 切左一「网关」↔「银行」时 row 宽度无肉眼可见跳变
-- [ ] 即使选超长字段 `Type(0:1对1,1:1对多,2:多对1,3:多对1（轧差合并)`，select 闭合状态 ellipsis 截断
-- [ ] 下拉打开时 option 完整可见
-- [ ] reconFields / billTypes / assign 行不受影响（仍用 `.scenario-config-multi-row` flex 布局）
-- [ ] `npm run preview:scenario-config-c3` 重跑确认视觉
+- [x] 切左一「网关」↔「银行」时 row 宽度无肉眼可见跳变
+- [x] 即使选超长字段 `Type(0:1对1,1:1对多,2:多对1,3:多对1（轧差合并)`，select 闭合状态 ellipsis 截断
+- [x] 下拉打开时 option 完整可见
+- [x] reconFields / billTypes / assign 行不受影响（仍用 `.scenario-config-multi-row` flex 布局）
+- [x] `npm run preview:scenario-config-c3` 重跑确认视觉（self-review I1 后 fixture 注入 3 行 conditions 可视化验证 — 188563→212186 字节）
 
 **关联功能 review 命中预判**：
 - 无（仅 CSS + class name 改动；不涉及 important variables）
@@ -425,10 +425,10 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 **新建辅助函数**：无
 
 **Verify**：
-- [ ] 进对账单 ReconID 修复模块 + 账单类别选 business/gateway + 场景管理有场景 → 场景下拉自动显示第 1 个
-- [ ] 状态栏显示该场景对应的 ready/idle 状态（`refreshReconIdFixStatus` 在 reload 末端联动）
-- [ ] 删完所有场景再加 1 个 → 下拉自动选这个新加的（reloadReconIdFixScenarios 重跑）
-- [ ] 类别清空 → renderReconIdFixScenarioSelect 走档 1 真空白（与 v0.2 相同）
+- [x] 进对账单 ReconID 修复模块 + 账单类别选 business/gateway + 场景管理有场景 → 场景下拉自动显示第 1 个
+- [x] 状态栏显示该场景对应的 ready/idle 状态（`refreshReconIdFixStatus` 在 reload 末端联动）
+- [x] 删完所有场景再加 1 个 → 下拉自动选这个新加的（reloadReconIdFixScenarios 重跑）
+- [x] 类别清空 → renderReconIdFixScenarioSelect 走档 1 真空白（与 v0.2 相同）
 
 **关联功能 review 命中预判**：
 - ⚠️ `state.reconIdFixSelectedScenarioId`（Runtime-state）— state 写入路径增加（reload 自动选第 1 个）；下游 `updateReconIdFixUi` / `refreshReconIdFixStatus` / `handleReconIdFixRun` 均依赖此 state，本次改动让 state 不再为 null when scenarios 非空，下游分支「未选场景按钮 disabled」分支只在 scenarios 为空（档 1/2）时进入
@@ -450,9 +450,9 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 - check-vars 已二次跑（合并到 main 前的硬节点）
 
 **Verify**：
-- [ ] `git diff main..v2.1.5` 文件清单覆盖 spec §一表中所有条目
-- [ ] CHANGELOG / VFH / USER_GUIDE 三件套已更新（在 T5 之前作为最后一个 commit）
-- [ ] Codex 自动 review 0 Critical + 0 Important（如有 Important 必须修复）
+- [x] `git diff main..v2.1.5` 文件清单覆盖 spec §一表中所有条目
+- [x] CHANGELOG / VFH / USER_GUIDE 三件套已更新（在 T5 之前作为最后一个 commit — `8fdd327`）
+- [ ] Codex 自动 review 0 Critical + 0 Important（如有 Important 必须修复）— 待 PR #49 merge 前 GitHub Actions 触发 + reviewer 复核确认
 
 **估时**：1h
 

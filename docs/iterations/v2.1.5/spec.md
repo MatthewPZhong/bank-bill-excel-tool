@@ -804,5 +804,5 @@ case 'gateway-recon-join':
 
 ## 十、Open Technical Questions
 
-- [ ] **Q1**（同 PRD §十 待确认 1）：N3 银行侧虚拟字段「发生额绝对值」运行时走 `getBankRowValueForC3` 吗？dev 拟**走**（spec §4.5.1 已实现 `evalCondition({ useC3BankValueGetter: true })`）；待用户拍板
-- [ ] **Q2**（同 PRD §十 待确认 2）：side / field 一致性校验在 dialog 保存时同步弹 alert？dev 拟**弹**（spec §4.3 已实现）；待用户拍板
+- [x] **Q1**（同 PRD §十 待确认 1）：N3 银行侧虚拟字段「发生额绝对值」运行时走 `getBankRowValueForC3` 吗？— ✅ 用户确认按 dev 方案：**走**（spec §4.5.1 已实现 `evalCondition({ useC3BankValueGetter: true })` 包装；2026-05-15 拍板）
+- [x] **Q2**（同 PRD §十 待确认 2）：side / field 一致性校验在 dialog 保存时同步弹 alert？— ✅ 用户确认按 dev 方案：**弹 alert 拦住保存**（spec §4.3 已实现校验段；2026-05-15 拍板）
