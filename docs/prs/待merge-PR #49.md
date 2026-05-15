@@ -66,9 +66,10 @@ v2.1.5 三块独立改动：
 
 - **Critical**：0
 - **Important-skeleton**：0
-- **Runtime-state 命中 2**：
+- **Runtime-state 命中 1**：
   - `state`（`src/renderer.js`）— fix1.2 在 `reloadReconIdFixScenarios` 末尾自动设 `state.reconIdFixSelectedScenarioId = scenarios[0].id`（仅 ReconID 修复模块场景下拉初始化时序）；不涉及 模板列表 / 当前模块 / 导出可用性 三组联动；下游 `refreshReconIdFixStatus` 在末尾统一触发，副作用与用户手动选场景一致
-  - `dialog`（`src/renderer-dialogs.js`）— N3 在 `createScenarioConfigDialogC3` 内新增「条件」栏 DOM 与事件，仅作用于 C3 场景配置 dialog；不动其他 dialog 工厂；fix1.1 加专属 class `scenario-config-c3-cond-row` / `scenario-config-c3-cond-field` 不复用 `.scenario-config-multi-row` 避免影响 reconFields / billTypes 行
+- **可忽略**：
+  - `dialog`（`src/renderer-dialogs.js`）— 渲染层局部变量 `const dialog = document.createElement(...)`，按 `rules/important-variables.md:262` 备注判定可忽略（**非 Electron 主进程 dialog**）。N3 在 `createScenarioConfigDialogC3` 内新增「条件」栏 DOM 与事件，仅作用于 C3 场景配置 dialog；不动其他 dialog 工厂；fix1.1 加专属 class `scenario-config-c3-cond-row` / `scenario-config-c3-cond-field` 不复用 `.scenario-config-multi-row` 避免影响 reconFields / billTypes 行
 - **Risk-sensitive**：0
 
 **潜在风险（清单外，dev 自评估）**：
@@ -85,7 +86,7 @@ v2.1.5 三块独立改动：
 
 - [x] `npm run smoke` — 全绿（含 `scenario-engines 31/31` + `usage-stats 61/61` + 既有零回归）
 - [x] `npm run preview` / `npm run preview:account` / `npm run preview:module-cabinet` / `npm run preview:module-switcher-open` / `npm run preview:recon-id-fix` / `npm run preview:scenario-config-c3` — 8 张 preview 重跑入库
-- [x] `npm run check:vars -- --since main` — Critical 0 / Important-skeleton 0 / Runtime-state 2（state + dialog）已对齐 / Risk-sensitive 0
+- [x] `npm run check:vars -- --since main` — Critical 0 / Important-skeleton 0 / Runtime-state 1（`state`，已对齐）+ 1 可忽略（`dialog` 渲染层局部变量，按 `rules/important-variables.md:262` 判定）/ Risk-sensitive 0
 
 ### 手动验证（用户已验收）
 

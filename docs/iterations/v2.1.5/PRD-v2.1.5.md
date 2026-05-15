@@ -365,8 +365,8 @@ v2.1.5：    [对账单 ReconID 修复]
 - [x] N3 v2.1.5 范围是否包含运行时实现？ — **包含**（用户已选 A）
 - [x] N3 校验严格程度？ — **柔性**（用户已选 a：conditions 可 0 行）
 - [x] N3 字段枚举源歧义？ — **无歧义**（C3 既有的 GATEWAY_RECON_FIELDS / BANK_STATEMENT_FIELDS_FOR_C3 已与运行时字段名 byte-for-byte 对齐；区别于 v0.1 误判的 C4 模块）
-- [ ] **N3 待确认 1**：「条件」栏中 side='银行' + 银行侧虚拟字段「发生额绝对值」时，运行时引擎是否需要走 `getBankRowValueForC3` 取值？dev 拟**走**（与既有 reconFields 银行侧虚拟字段处理一致；新增包装函数 `evalCondition(row, cd, { useC3BankValueGetter })`）— 待用户拍板（PM 推荐）
-- [ ] **N3 待确认 2**：side / field 一致性校验是否在 dialog 保存时同步弹 alert？dev 拟**弹**（防御左一切换未清空 bug + 防御手改 DB） — 待用户拍板（PM 推荐）
+- [x] Q1 — ✅ 用户已确认按 dev 方案：N3 银行侧虚拟字段「发生额绝对值」走 `getBankRowValueForC3`（spec §4.5.1）
+- [x] Q2 — ✅ 用户已确认按 dev 方案：side / field 不一致时弹 alert 拦住保存（spec §4.3）
 
 ---
 
@@ -376,6 +376,7 @@ v2.1.5：    [对账单 ReconID 修复]
 |------|---------|
 | 2026-05-15 | 初稿 v0.1（N3 误定位 C4 模块） |
 | 2026-05-15 | v0.2 重写 — N3 修正定位到 C3（`gateway-recon-join` / `createScenarioConfigDialogC3` / `c3-gateway-recon-join.js`）；N1 / N2 不变 |
+| 2026-05-15 | v0.3 — fix1.1 C3 条件 row 列宽固定（spec §4.8）+ fix1.2 场景下拉默认选第 1 个（spec §3.5）+ Q9/Q10 拍板（用户已确认走 / 弹） |
 
 ---
 

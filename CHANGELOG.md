@@ -65,7 +65,8 @@ v2.1.4 之后追加 patch 迭代，3 块独立改动：**N1 对账单 ReconID �
 
 - Critical 命中：0
 - Important-skeleton 命中：0
-- Runtime-state 命中 2：`state` / `dialog`（fix1.2 在 `reloadReconIdFixScenarios` 末尾设 `state.reconIdFixSelectedScenarioId = scenarios[0].id`；不涉及模板列表 / 当前模块 / 导出可用性 三组联动）
+- Runtime-state 命中 1：`state`（fix1.2 在 `reloadReconIdFixScenarios` 末尾设 `state.reconIdFixSelectedScenarioId = scenarios[0].id`；不涉及模板列表 / 当前模块 / 导出可用性 三组联动）
+- 可忽略：`dialog`（渲染层局部变量 `const dialog = document.createElement(...)`，按 `rules/important-variables.md:262` 备注判定可忽略 — 非 Electron 主进程 dialog）
 - Risk-sensitive 命中：0
 
 ### Fix1 修订（v0.3 — 2026-05-15 用户测试反馈 2 点）

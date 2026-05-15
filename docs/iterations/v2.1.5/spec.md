@@ -1,7 +1,10 @@
 # Spec — v2.1.5 技术规格
 
 > 关联 `PRD-v2.1.5.md` / `tasks.md`（同目录）
-> 文档版本：v0.2（2026-05-15 重写：N3 由 C4/gateway-recon-id-fix 修正为 C3/gateway-recon-join）
+> 文档版本：
+> - v0.3（2026-05-15 fix1：§3.5 fix1.2 场景下拉默认选第 1 个 + §4.8 fix1.1 C3 条件 row 列宽固定）
+> - v0.2（2026-05-15 重写：N3 由 C4/gateway-recon-id-fix 修正为 C3/gateway-recon-join）
+> - v0.1（2026-05-15 起草）
 >
 > ⚠️ **v0.2 重写说明**：本 spec v0.1 起草时误把 N3 定位到「对账单 ReconID 修复」模块的 gateway 子模式（C4 / `createScenarioConfigDialogC4` / `c4-recon-id-fix.js`）。v0.2 起更正：
 > - 真正模块：**银行对账单处理**（`bankStatementProcess`）

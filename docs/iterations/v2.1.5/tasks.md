@@ -19,10 +19,11 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
                                                                                           │
                                                                                           └─→ T4 (smoke + preview + check-vars)
                                                                                                 │
-                                                                                                ├─→ T6 (fix1.1 C3 条件 row 列宽固定)   ← v0.3 用户测试反馈
-                                                                                                ├─→ T7 (fix1.2 场景下拉自动选第 1 个)  ← v0.3 用户测试反馈
+                                                                                                ├─→ T6 (fix1.1 CSS) ─→ T7 (fix1.2 reload) ─→ docs(fix1) ─→ preview refresh   ← v0.3 用户测试反馈
                                                                                                 │
-                                                                                                └─→ T5 (PR 准备)
+                                                                                                └─→ T0' (version bump) ─→ T5' (docs 三件套 + PR 草稿) ─→ T5 (PR 提交)
+                                                                                                              │
+                                                                                                              └─→ self-review (I1 preview fixture + M1-M6 docs)   ← v0.3 独立 reviewer 反馈
 ```
 
 **并行度建议**：
@@ -501,8 +502,8 @@ T0 (PM/spec) ──→ T1.1 ─→ T1.2 ─→ T1.3 ─→ T1.4   (N1 模块名�
 | O6 | N3 v2.1.5 范围是否包含运行时 | ✅ 用户已选 A | 包含 |
 | O7 | N3 校验严格程度 | ✅ 用户已选 a | 柔性（conditions 可 0 行）|
 | O8 | N3 字段枚举源歧义 | ✅ C3 模块无歧义 | 直接复用 GATEWAY_RECON_FIELDS（31）+ BANK_STATEMENT_FIELDS_FOR_C3（45） |
-| **O9** | N3 银行侧虚拟字段「发生额绝对值」运行时是否走 `getBankRowValueForC3`？ | ⏳ **待用户拍板** | dev 拟**走**（spec §4.5.1 已实现 `evalCondition({ useC3BankValueGetter: true })` 包装） |
-| **O10** | N3 side / field 一致性校验是否在 dialog 保存时同步弹 alert？ | ⏳ **待用户拍板** | dev 拟**弹**（防御左一切换未清空 + 防御手改 DB；spec §4.3 已实现） |
+| O9 | N3 银行侧虚拟字段「发生额绝对值」运行时是否走 `getBankRowValueForC3`？ | ✅ 拍板：走 dev 方案（用户 2026-05-15 确认） | spec §4.5.1 `evalCondition({ useC3BankValueGetter: true })` 包装 |
+| O10 | N3 side / field 一致性校验是否在 dialog 保存时同步弹 alert？ | ✅ 拍板：弹 dev 方案（用户 2026-05-15 确认） | spec §4.3 dialog 保存时 alert 校验 |
 | O11 | N3 C3 条件 row 列宽切「网关↔银行」时不一致（v0.3 fix1.1） | ✅ 已默认 | grid 布局列宽固定（spec §4.8） |
 
 ---
