@@ -60,7 +60,7 @@ const MODULES = Object.freeze({
   //      网关子模式 scenario.category = 'gateway-recon-id-fix'。
   reconIdFix: {
     id: 'recon-id-fix',
-    name: '对账单ReconID修复'
+    name: '对账单 ReconID 修复'
   },
   // v2.1.2 T2：月度银行对账单BU回填校验
   bankBuRecon: {
