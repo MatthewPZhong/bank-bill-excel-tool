@@ -20,7 +20,7 @@ v2.1.5 三块独立改动：
 
 完整规格见 `docs/iterations/v2.1.5/PRD-v2.1.5.md` v0.3 / `spec.md` v0.2 / `tasks.md`。
 
-## 改动清单（17 个 commit）
+## 改动清单（20 个 commit）
 
 | Commit | 描述 |
 |---|---|
@@ -41,6 +41,11 @@ v2.1.5 三块独立改动：
 | `436abef` | docs(fix1): reverse sync PRD/spec/tasks v0.3 |
 | `acd6545` | chore(fix1): refresh previews（8 张） |
 | `bc91413` | chore: bump version 2.1.5 |
+| `8fdd327` | docs: CHANGELOG + VERSION_FEATURE_HISTORY + USER_GUIDE bump 2.1.5 + PR #49 草稿 |
+| `fb52740` | fix(self-review): I1 preview fixture 注入 conditions 数据 + refresh preview |
+| `5c35cee` | docs(self-review): M1-M6 文档元数据齐整 + PR body 修正 |
+
+> **后 3 个 commit（`8fdd327` / `fb52740` / `5c35cee`）性质**：PR 提交前文档收尾（三件套 + PR 草稿）+ self-review 后 1 Important + 6 Minor finding 全修（preview fixture 注入 conditions 让 fix1.1 列宽固定效果可视化 + 文档元数据齐整 / Q1+Q2 拍板回填 / `dialog` 命中按 important-variables.md:262 备注判定可忽略）。
 
 ## 文件改动 / 新增清单
 

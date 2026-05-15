@@ -184,7 +184,7 @@ v2.1.5：    [对账单 ReconID 修复]
 ```
 档 1（账单类别空）：       [▼ ]
 档 2（无 scenarios）：      [▼ ]
-档 3（有 scenarios）：      [▼ 场景A | 场景B | 场景C ...]   ← 默认未选（selectedIndex = -1）
+档 3（有 scenarios）：      [▼ 场景A | 场景B | 场景C ...]   ← 默认选中第 1 个 (fix1.2)
 ```
 
 ### 5.3 N3：「提取ReconId-From 网关」场景 dialog 新增「条件」栏
