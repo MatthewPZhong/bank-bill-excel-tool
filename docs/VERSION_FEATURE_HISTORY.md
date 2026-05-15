@@ -9,6 +9,52 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.5（2026-05-15）
+
+v2.1.4 之后追加 patch 迭代，3 块独立改动：N1 对账单 ReconID 修复模块名加空格 + 修 usage-stats long-standing bug；N2 对账单 ReconID 修复场景下拉空状态统一；N3 银行对账单处理 C3「提取ReconId-From 网关」场景配置 dialog 新增「条件」栏。OPEN ISSUE 全部拍板（PRD §十）。
+
+### 新增
+
+- **N3 — 银行对账单处理 C3「提取ReconId-From 网关」场景新增「条件」栏**（PRD §5.3）：`createScenarioConfigDialogC3` 在「优先级」与「对账字段」之间插入「条件」栏 + 行级 AND 预过滤
+  - 条件行：`[侧↓ 网关/银行] [字段↓] [操作↓] [值] [×]`，操作沿用 `SCENARIO_CONDITION_OPS`（7 项）；左一切「网关/银行」时左二字段下拉重渲并清空
+  - 字段枚举源：网关 → `GATEWAY_RECON_FIELDS`（31 列）；银行 → `BANK_STATEMENT_FIELDS_FOR_C3`（45 项含虚拟「发生额绝对值」）
+  - **柔性校验**：conditions 可 0 行（兼容旧场景）；≥ 1 行时 side/field 必填 + 非空值/非空值 op 的 value 必填 + side 与 field 一致性校验
+  - **AND 语义**（区别于 C1 的 OR）；运行时引擎 `runC3Scenario` 入口加 Step 0 拆分 + 过滤 `gwRows` / `bankRows` 后传入既有比对循环；银行侧虚拟字段「发生额绝对值」由新增包装函数 `evalCondition(row, cd, { useC3BankValueGetter })` 走 `getBankRowValueForC3` 计算
+  - DB 兼容：v2.1.4 旧 scenario `config.conditions` 缺失 → 引擎兜底 `[]`，无需 migration
+  - confirm 预览段在 conditions ≥ 1 行时追加文案
+
+### 变更
+
+- **N1 — 对账单 ReconID 修复模块名加空格**（PRD §5.1）：`对账单ReconID修复` → `对账单 ReconID 修复`（ReconID 前后各加一个空格）
+  - 改动 6 处字面：`MODULE_REGISTRY.reconIdFix.name` + 3 处 `trackedIpcHandle` moduleKey + 1 处 error message + `usage-stats.js` `FUNCTION_REGISTRY` key
+  - 不动：`module.id = 'recon-id-fix'` / `scenario.category` 字段值 / IPC channel name（preload + DB schema 依赖）
+- **N2 — 对账单 ReconID 修复场景下拉空状态统一**（PRD §5.2）：3 档行为简化
+  - 档 1（账单类别空）：保持真空白下拉 + disabled
+  - 档 2（账单类别非空 + 0 场景）：改为真空白下拉（去掉「请先在场景管理中创建场景」提示文案）
+  - 档 3（账单类别非空 + ≥ 1 场景）：去掉「请选择场景」占位项；fix1.2 修订：scenarios 加载完成后**自动选第 1 个枚举值**（撤回 v0.2 `selectedIndex = -1` 设计）
+
+### 修复
+
+- **⚠️ N1 顺手修 usage-stats long-standing bug**（PRD §2.1）：`FUNCTION_REGISTRY` 注册 key `'单据对账ReconID修复'`（多了"单据"两字）与 `trackedIpcHandle` 第 2 参 `'对账单ReconID修复'` 不匹配 → 防御性静默丢弃 → 对账单 ReconID 修复模块从 v2.1.0-beta.1 起统计计数全部丢失。本版改 registry key 为 `'对账单 ReconID 修复'` 全链路一致 + 与 N1 改后的模块名对齐
+  - 旧 `.usage-stats.txt` `[单据对账ReconID修复]` section 在 v2.1.5 启动后下次 flush 时不再被写入；事实上历史 section 字段值全为 0，无有效数据丢失，未做 migration
+
+### 内部
+
+- 引擎接入：`c3-gateway-recon-join.js` 新增 `evalCondition` helper + `runC3Scenario` 入口 Step 0；模块导出 `evalCondition`
+- dialog 数据流：`createDefaultScenarioConfig('gateway-recon-join')` 加 `conditions: []`；`validateScenarioDraft` + `buildScenarioConfirmDetailHtml` 的 `'gateway-recon-join'` 分支
+- fix1.1 — C3 条件 row 列宽固定：CSS 加 `.scenario-config-c3-cond-row` grid 布局（`100px / 240px / 100px / 1fr / 22px`）+ `.scenario-config-c3-cond-field` 240px 固定列；不复用 `.scenario-config-multi-row` flex 避免影响 reconFields / billTypes 行；两套主题 `src/styles.css` + `src/styles-gemini-extra.css` 同步加规则
+- fix1.2 — 场景下拉默认选第 1 个：`reloadReconIdFixScenarios` 末尾检测未选 + 自动赋 `state.reconIdFixSelectedScenarioId = scenarios[0].id`；下游 `refreshReconIdFixStatus` 触发；`renderReconIdFixScenarioSelect` 末尾 `selectedIndex = -1` 兜底分支删除
+- smoke：`scenario-engines.js` 新增 8 case（C3 conditions 7 op + AND + 0 条件 + 银行虚拟字段，全 31 case）+ `usage-stats.js` 新增 3 case（FUNCTION_REGISTRY key 注册 + 旧 section 不再写入 + 三 fnKey 累加，全 61 case）
+- preview：8 张重跑入库（main-page / module-cabinet / module-switcher-open / account-mapping / recon-id-fix-panel + business + gateway / scenario-config-c3）
+
+### 不影响
+
+- 不动 C1 / C2 / C4 dialog（仅 C3）
+- 不动 C3 引擎核心 `gwMatchesBank` / assign / `getBankRowValueForC3` 写值逻辑
+- 不动 IPC channel `'recon-id-fix:xxx'` / `scenario.category` 字段值（DB 兼容）
+- 不动 v1.5.x / v2.0.0 / v3.0.0 等其他分支
+- 业务OP数据核对模块名保持原状（用户已撤回该项）
+
 ## 2.1.4（2026-05-14）
 
 v2.1.3 之后追加 patch 迭代：主页面工具栏小改 + 新增「小助手功能收纳」弹窗 + 对账单ReconID修复账单类别默认 gateway + 顺手修 v2.1.2/v2.1.3 遗留的 `CURRENT_MODULE_VALID` 枚举漏更新 bug。4 块改动 OPEN ISSUES 7 项 + V1 版本号格式全部拍板。

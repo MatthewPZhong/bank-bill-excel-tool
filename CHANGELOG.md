@@ -1,5 +1,81 @@
 # Changelog
 
+## 2.1.5 - 2026-05-15
+
+v2.1.4 之后追加 patch 迭代，3 块独立改动：**N1 对账单 ReconID 修复模块名加空格 + 修 usage-stats long-standing bug** + **N2 对账单 ReconID 修复场景下拉空状态统一** + **N3 银行对账单处理 C3「提取ReconId-From 网关」场景配置 dialog 新增「条件」栏（行级 AND 预过滤）**。OPEN ISSUE 全部拍板（PRD §十）；fix1 含 fix1.1（C3 条件 row 列宽固定）+ fix1.2（场景下拉默认选第 1 个）。
+
+### 新增
+
+- **N3 — 银行对账单处理 C3「提取ReconId-From 网关」场景新增「条件」栏**（PRD §5.3）：`createScenarioConfigDialogC3` 在「优先级」行下、「对账字段」行上插入「条件」栏，支持「网关 / 银行」侧的 AND 行级预过滤
+  - 条件行结构：`[侧↓ 网关/银行] [字段↓] [操作↓] [值] [×]`；操作沿用 `SCENARIO_CONDITION_OPS`（7 项 = 等于/不等于/包含/不包含/空值/非空值/开头为）
+  - 字段枚举源：左一=网关 → `GATEWAY_RECON_FIELDS`（31 列）；左一=银行 → `BANK_STATEMENT_FIELDS_FOR_C3`（45 项含虚拟「发生额绝对值」）；左一切换时左二字段下拉重渲并清空当前值
+  - **柔性校验**：conditions 可 0 行（空 = 不过滤，兼容旧场景）；≥ 1 行时 side/field 必填 + 非空值/非空值 op 的 value 必填 + side 与 field 一致性校验
+  - **多条件 AND**（区别于 C1 的 OR 语义）
+  - 运行时引擎 `runC3Scenario` 入口新增 Step 0：按 conditions 拆分两侧 + 行级过滤 `gwRows` / `bankRows` 后传入既有比对循环；银行侧虚拟字段「发生额绝对值」由新增包装函数 `evalCondition(row, cd, { useC3BankValueGetter })` 走 `getBankRowValueForC3` 计算
+  - DB 兼容：v2.1.4 旧 scenario 读出 `config.conditions` 缺失 → 引擎兜底 `[]`（不过滤），无需 migration
+  - scenario confirm 预览段在 conditions ≥ 1 行时追加文案
+
+### 变更
+
+- **N1 — 对账单 ReconID 修复模块名加空格**（PRD §5.1）：`对账单ReconID修复` → `对账单 ReconID 修复`（ReconID 前后各加一个空格）
+  - 改动：`MODULE_REGISTRY.reconIdFix.name`（`src/renderer.js:63`）+ 3 处 `trackedIpcHandle` 第 2 参 moduleKey（`src/main.js:3136 / 3187 / 3238`）+ 1 处 error message（`src/main.js:3202`）
+  - **不动**：`module.id = 'recon-id-fix'`（数十处 IPC 引用 + DB schema CHECK 约束）/ `scenario.category` 字段值 / IPC channel name `'recon-id-fix:xxx'`
+- **N2 — 对账单 ReconID 修复场景下拉空状态统一**（PRD §5.2）：`renderReconIdFixScenarioSelect` 3 档行为简化
+  - 档 1（账单类别空）：保持真空白下拉 + disabled
+  - 档 2（账单类别非空 + 0 场景）：从「请先在场景管理中创建场景」**改为真空白下拉**（去掉提示文案）
+  - 档 3（账单类别非空 + ≥ 1 场景）：去掉「请选择场景」占位项，直接列场景；**fix1.2 修订（v0.3）：scenarios 加载完成后自动选第 1 个枚举值**（v0.2 的 `selectedIndex = -1` 设计要求用户主动点开下拉，体感不佳）
+
+### 修复
+
+- **⚠️ N1 顺手修 usage-stats long-standing bug**（PRD §2.1）：`src/backend/usage-stats.js:31` `FUNCTION_REGISTRY` 注册 key 是 `'单据对账ReconID修复'`（多了"单据"两字），而 `src/main.js` 三处 `trackedIpcHandle` 第 2 参实际传 `'对账单ReconID修复'`，两边不匹配 → `usage-stats.js` 对未注册 moduleKey 静默丢弃计数（防御性设计），导致对账单 ReconID 修复模块从 v2.1.0-beta.1 起统计数据**全部静默丢失**（用户无感知，因为模块本身可用）。本版改 registry key 为 `'对账单 ReconID 修复'`（与 N1 改后的模块名一致），全链路对齐，bug 修复
+  - 旧 `.usage-stats.txt` 中 `[单据对账ReconID修复]` section 在 v2.1.5 启动后下次 flush 时不再被写入（`writeStatsFile` 按 `FUNCTION_REGISTRY` 顺序输出新 key）；事实上历史 section 字段值全为 0，无有效数据丢失，未做 migration
+
+### 内部
+
+- **新增 helper / 引擎接入**：
+  - `src/main-process/scenario-engines/c3-gateway-recon-join.js` 新增 `evalCondition(row, cd, { useC3BankValueGetter })`（包装 `evaluateCondition` 以支持银行侧虚拟字段）；`runC3Scenario` 入口加 Step 0（按 side 拆分 + 过滤 `gwRows` / `bankRows`）；`gwMatchesBank` / assign 字段映射 / `getBankRowValueForC3` 核心写值逻辑零修改（**资金红线零修改**）
+  - 模块导出 `evalCondition`（暴露给 smoke）
+- **新增 dialog 数据流**：
+  - `createDefaultScenarioConfig('gateway-recon-join')` 加 `conditions: []` 字段（默认 0 条 = 不过滤）
+  - `validateScenarioDraft` 中 `'gateway-recon-join'` 分支新增 conditions 柔性校验 + side/field 一致性校验
+  - `buildScenarioConfirmDetailHtml` 中 `'gateway-recon-join'` 分支追加 conditions 段（仅 ≥ 1 行时渲染）
+- **fix1.1 — C3 条件 row 列宽固定**（PRD §5.3.3 v0.3）：v0.2 实现复用 `.scenario-config-multi-row` flex 布局，左一切「网关」时左二字段 select 因 `GATEWAY_RECON_FIELDS` 含 30+ 字符的字段名（`'Type(0:1对1,1:1对多,2:多对1,3:多对1（轧差合并)'`）撑大 select 宽度，整行宽度比左一切「银行」时（最长 23 字符）更宽，row 切 side 时跳变。修复：给 C3 条件 row 加专属 class `scenario-config-c3-cond-row`（grid 布局，列宽固定 `100px / 240px / 100px / 1fr / 22px`）+ 字段 select class `scenario-config-c3-cond-field`（`flex: 0 0 240px; width: 240px;` + `text-overflow: ellipsis; overflow: hidden;`）；不复用 `.scenario-config-multi-row` 避免影响 reconFields / billTypes 行；下拉打开时 option 完整可见。CSS 改两套主题：`src/styles.css` + `src/styles-gemini-extra.css`
+- **fix1.2 — 场景下拉默认选第 1 个**（PRD §5.2.1 v0.3）：v0.2 档 3 设计为 `selectedIndex = -1`（显式未选），用户必须主动点开下拉才能选场景，体感不佳。修复：`reloadReconIdFixScenarios` 在加载完 scenarios 后检测 `state.reconIdFixSelectedScenarioId === null && scenarios.length > 0` → 自动设 `state.xxx = scenarios[0].id`；下游 `refreshReconIdFixStatus` 在末尾统一触发；`renderReconIdFixScenarioSelect` 末尾的 `selectedIndex = -1` 兜底分支可删
+- **smoke 拓展**：
+  - `scripts/smoke/scenario-engines.js` 新增 8 case（C3 引擎 conditions：网关侧单条件 / 银行侧虚拟字段 / AND 多条件 / 0 条件兼容 / 7 op 全枚举）— 全 31 case 通过
+  - `scripts/smoke/usage-stats.js` 新增 3 case（FUNCTION_REGISTRY key `'对账单 ReconID 修复'` 注册 / `[单据对账ReconID修复]` 旧 section 不再写入 / 三个 fnKey 各 1 次累加）— 全 61 case 通过
+- **preview**：8 张全量重跑入库（main-page / module-cabinet / module-switcher-open / account-mapping / recon-id-fix-panel + business + gateway 三态 / scenario-config-c3）
+
+### 未改动（明确）
+
+- 不动 C1 / C2 / C4 dialog 是否新增「条件」栏（仅 C3）
+- 不动 C3 引擎核心 `gwMatchesBank` / assign 字段映射 / `getBankRowValueForC3` 写值逻辑（资金红线零修改）
+- 不动 IPC channel name `'recon-id-fix:xxx'`（preload + DB schema 依赖）
+- 不动 `scenario.category` 字段值（`'recon-id-fix'` / `'gateway-recon-id-fix'`，DB 历史数据兼容）
+- 不动注释中"对账单ReconID修复"历史痕迹（仅修代码字面值）
+- 不做 `.usage-stats.txt` 历史数据 migration
+- 不动业务OP数据核对模块名（用户已撤回该项）
+- 不动 v1.5.x / v2.0.0 / v3.0.0 等其他分支
+
+### smoke
+
+- `npm run smoke` 全绿（含 `scenario-engines 31/31` + `usage-stats 61/61` + 既有零回归）
+
+### 关联功能 review（check-vars）
+
+- Critical 命中：0
+- Important-skeleton 命中：0
+- Runtime-state 命中 1：`state`（fix1.2 在 `reloadReconIdFixScenarios` 末尾设 `state.reconIdFixSelectedScenarioId = scenarios[0].id`；不涉及模板列表 / 当前模块 / 导出可用性 三组联动）
+- 可忽略：`dialog`（渲染层局部变量 `const dialog = document.createElement(...)`，按 `rules/important-variables.md:262` 备注判定可忽略 — 非 Electron 主进程 dialog）
+- Risk-sensitive 命中：0
+
+### Fix1 修订（v0.3 — 2026-05-15 用户测试反馈 2 点）
+
+- **F1.1 C3 条件 row 列宽固定**：见上文「内部」段；CSS 加 `.scenario-config-c3-cond-row` grid + `.scenario-config-c3-cond-field` 240px 固定列
+- **F1.2 场景下拉默认选第 1 个**：见上文「变更」段 N2 档 3；撤回 v0.2 `selectedIndex = -1` 设计
+
+---
+
 ## 2.1.4 - 2026-05-14
 
 v2.1.3 之后追加 patch 迭代：**主页面工具栏小改 + 新增「小助手功能收纳」弹窗 + 对账单ReconID修复账单类别默认 gateway**。4 块改动均为 UI / UX 微调，无对账规则 / 资金算法变动。OPEN ISSUES 7 项（O1-O7）+ V1 版本号格式全部拍板（PRD §五）。

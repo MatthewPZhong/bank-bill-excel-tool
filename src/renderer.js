@@ -60,7 +60,7 @@ const MODULES = Object.freeze({
   //      网关子模式 scenario.category = 'gateway-recon-id-fix'。
   reconIdFix: {
     id: 'recon-id-fix',
-    name: '对账单ReconID修复'
+    name: '对账单 ReconID 修复'
   },
   // v2.1.2 T2：月度银行对账单BU回填校验
   bankBuRecon: {
@@ -3541,6 +3541,12 @@ async function reloadReconIdFixScenarios(options = { scenariosChanged: true }) {
           && !state.reconIdFixScenarios.some((s) => s.id === state.reconIdFixSelectedScenarioId)) {
         state.reconIdFixSelectedScenarioId = null;
       }
+      // v2.1.5 fix1.2：scenarios 加载完成后，如果当前未选场景且列表非空 →
+      //   自动选第 1 个枚举值（user 反馈：N2 改动后 selectedIndex=-1 强迫用户主动点开下拉）
+      //   下游 refreshReconIdFixStatus 在本函数末尾统一触发，与用户手动选场景副作用一致
+      if (state.reconIdFixSelectedScenarioId === null && state.reconIdFixScenarios.length > 0) {
+        state.reconIdFixSelectedScenarioId = state.reconIdFixScenarios[0].id;
+      }
     } catch (error) {
       console.error('reloadReconIdFixScenarios failed:', error);
       state.reconIdFixScenarios = [];
@@ -3573,6 +3579,7 @@ function renderReconIdFixScenarioSelect() {
   // v2.1.0-beta.3 修订（用户反馈）：账单类别为空时场景下拉显示真空白（不显示 "请先在场景管理中创建" placeholder）
   const hasCategory = state.reconIdFixBillCategory === 'business' || state.reconIdFixBillCategory === 'gateway';
   if (!hasCategory) {
+    // 档 1：账单类别为空 → 真空白（不变）
     select.innerHTML = '<option value=""></option>';
     select.disabled = true;
     select.value = '';
@@ -3580,27 +3587,28 @@ function renderReconIdFixScenarioSelect() {
   }
   const scenarios = Array.isArray(state.reconIdFixScenarios) ? state.reconIdFixScenarios : [];
   if (scenarios.length === 0) {
-    select.innerHTML = '<option value="">请先在场景管理中创建场景</option>';
+    // 档 2：v2.1.5 N2 改 — 真空白（去掉"请先在场景管理中创建场景"提示）
+    select.innerHTML = '<option value=""></option>';
     select.disabled = true;
     select.value = '';
     return;
   }
-  const opts = ['<option value="">请选择场景</option>']
-    .concat(scenarios.map((s) => {
-      const idStr = String(s.id);
-      const name = String(s.name || '');
-      // 简单 escape：避免 < / > / & / "
-      const escapedName = name
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-      return `<option value="${idStr}">${escapedName}</option>`;
-    }))
-    .join('');
+  // 档 3：v2.1.5 N2 改 — 直接列 scenarios（去掉"请选择场景"占位项）
+  const opts = scenarios.map((s) => {
+    const idStr = String(s.id);
+    const name = String(s.name || '');
+    // 简单 escape：避免 < / > / & / "
+    const escapedName = name
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+    return `<option value="${idStr}">${escapedName}</option>`;
+  }).join('');
   select.innerHTML = opts;
   select.disabled = false;
-  // 同步 select.value 与 state（防御 reload 后 currentSelected 仍存在的情况）
+  // 同步 select.value 与 state（reloadReconIdFixScenarios fix1.2 已保证 scenarios 非空时
+  // state.reconIdFixSelectedScenarioId 必有值，此处直接 select.value = desired 即可）
   const desired = state.reconIdFixSelectedScenarioId !== null
     ? String(state.reconIdFixSelectedScenarioId)
     : '';

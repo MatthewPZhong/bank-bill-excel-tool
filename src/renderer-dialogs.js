@@ -5718,6 +5718,8 @@
       }
       if (category === 'gateway-recon-join') {
         return {
+          // v2.1.5 N3：柔性默认 — 空数组（不强制添加首行；区别于 C1 默认 1 行）
+          conditions: [],
           reconFields: [{ seq: 1, gwField: '', bankField: '' }],
           assign: { gwField: '', bankField: '' }
         };
@@ -5844,6 +5846,32 @@
         else if (c.reconFields.some((r) => !r.gwField || !r.bankField)) errors.push('对账字段每行两端都不能为空');
         const a = c.assign || {};
         if (!a.gwField || !a.bankField) errors.push('对账成立后赋值的两端都不能为空');
+        // v2.1.5 N3：conditions 柔性校验
+        //   - conditions.length === 0 → 通过（视为不过滤）
+        //   - ≥ 1 行 → 每行 side / field 必填；非「空值/非空值」op 的 value 必填；side 与 field 一致性校验
+        const conds = Array.isArray(c.conditions) ? c.conditions : [];
+        if (conds.length > 0) {
+          conds.forEach((cd, idx) => {
+            const rowLabel = `条件 #${idx + 1}`;
+            if (cd.side !== '网关' && cd.side !== '银行') {
+              errors.push(`${rowLabel} 的"侧"必填（网关 / 银行）`);
+              return;
+            }
+            if (!cd.field || String(cd.field).trim() === '') {
+              errors.push(`${rowLabel} 的"字段"不能为空`);
+              return;
+            }
+            // side 与 field 一致性（防御左一切换未清空 + 手改 DB）
+            const validFields = cd.side === '网关' ? GATEWAY_RECON_FIELDS : BANK_STATEMENT_FIELDS_FOR_C3;
+            if (!validFields.includes(cd.field)) {
+              errors.push(`${rowLabel} 的"字段" ${cd.field} 不在 ${cd.side} 字段列表中`);
+              return;
+            }
+            if (opNeedsValue(cd.op) && (cd.value === '' || cd.value === undefined)) {
+              errors.push(`${rowLabel} 非"空值/非空值"操作的"值"不能为空`);
+            }
+          });
+        }
       } else if (isReconIdFixCategory(draft.category)) {
         // v2.1.0-beta.1 PR-A（task A7）：C4 校验
         // v2.1.0-beta.3 T6：两个 ReconID 子模式共用校验（schema 相同）；SubBizType 校验跳过逻辑由 T7 按 mode 实施
@@ -5991,6 +6019,10 @@
         config.reconFields = [{ seq: 1, gwField: '', bankField: '' }];
       }
       if (!config.assign) config.assign = { gwField: '', bankField: '' };
+      // v2.1.5 N3：旧 v2.1.4 scenario 无 conditions 字段 → 默认空数组（不过滤）
+      if (!Array.isArray(config.conditions)) {
+        config.conditions = [];
+      }
 
       const overlay = createOverlay();
       const dialog = document.createElement('div');
@@ -6009,6 +6041,13 @@
           <div class="scenario-config-row">
             <span class="scenario-config-label">优先级 <span class="scenario-config-tooltip" title="3 = 最高，0 = 最低">ⓘ</span></span>
             <input class="scenario-config-input scenario-config-input-narrow" type="number" min="0" max="3" data-field="priority" ${isReadonly ? 'disabled' : ''} value="${draft.priority ?? 0}">
+          </div>
+          <div class="scenario-config-row scenario-config-row-multi">
+            <span class="scenario-config-label">条件 <span class="scenario-config-tooltip" title="同时满足全部条件才进入提取（AND）">ⓘ</span></span>
+            <div class="scenario-config-multi-wrap">
+              <div class="scenario-config-multi-rows" data-multi="c3-conditions"></div>
+              ${isReadonly ? '' : '<button class="text-action small" type="button" data-action="add-c3-condition">+ 新增条件</button>'}
+            </div>
           </div>
           <div class="scenario-config-row scenario-config-row-multi">
             <span class="scenario-config-label">对账字段</span>
@@ -6038,6 +6077,88 @@
       `;
 
       const reconRowsContainer = dialog.querySelector('[data-multi="reconFields"]');
+      const c3CondContainer = dialog.querySelector('[data-multi="c3-conditions"]');
+
+      // ===== v2.1.5 N3：「条件」栏渲染 + 数据流 =====
+      // v2.1.5 fix1.1：用 scenario-config-c3-cond-row 专属 class（grid 布局列宽固定）
+      //   - 不复用 .scenario-config-multi-row（避免影响 reconFields 行的 flex 布局）
+      //   - 左二字段 select 固定 240px，超长字段名（如 GATEWAY_RECON_FIELDS 的 'Type(0:1对1...)'）
+      //     由浏览器原生 ellipsis 截断；下拉打开时 option 完整可见
+      function renderC3ConditionRow(cd, idx) {
+        const fields = cd.side === '银行' ? BANK_STATEMENT_FIELDS_FOR_C3 : GATEWAY_RECON_FIELDS;
+        const valueHidden = !opNeedsValue(cd.op);
+        return `
+          <div class="scenario-config-c3-cond-row" data-c3-cond-row="${idx}">
+            <select class="scenario-config-input scenario-config-input-narrow" data-c3-cond-field="side" ${isReadonly ? 'disabled' : ''}>
+              <option value="网关"${cd.side === '网关' ? ' selected' : ''}>网关</option>
+              <option value="银行"${cd.side === '银行' ? ' selected' : ''}>银行</option>
+            </select>
+            <select class="scenario-config-input scenario-config-c3-cond-field" data-c3-cond-field="field" ${isReadonly ? 'disabled' : ''}>
+              <option value="">请选择字段</option>
+              ${renderScenarioOptions(fields, cd.field)}
+            </select>
+            <select class="scenario-config-input scenario-config-input-narrow" data-c3-cond-field="op" ${isReadonly ? 'disabled' : ''}>
+              ${renderScenarioOptions(SCENARIO_CONDITION_OPS, cd.op || '等于')}
+            </select>
+            <input class="scenario-config-input" type="text" data-c3-cond-field="value" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(cd.value || '')}" placeholder="值" ${valueHidden ? 'style="visibility:hidden"' : ''}>
+            ${isReadonly ? '' : '<button class="icon-close-small" type="button" data-c3-cond-action="remove" title="删除">×</button>'}
+          </div>
+        `;
+      }
+
+      function renderC3Conditions() {
+        if (!c3CondContainer) return;
+        c3CondContainer.innerHTML = config.conditions.map((cd, idx) => renderC3ConditionRow(cd, idx)).join('');
+      }
+      renderC3Conditions();
+
+      // 「条件」事件绑定（参考 C1 模式 — change / input / click 三层）
+      // v2.1.5 fix1.1：closest selector 改为 .scenario-config-c3-cond-row（与 row 的专属 class 一致）
+      c3CondContainer?.addEventListener('change', (event) => {
+        if (isReadonly) return;
+        const ctl = event.target.closest('[data-c3-cond-field]');
+        if (!ctl) return;
+        const row = ctl.closest('.scenario-config-c3-cond-row');
+        const idx = Number(row?.dataset.c3CondRow);
+        const f = ctl.dataset.c3CondField;
+        if (!Number.isFinite(idx) || !config.conditions[idx]) return;
+        config.conditions[idx][f] = ctl.value;
+        // side 切换 → 重渲（重新拉字段下拉枚举）+ 清空 field（防御切换后旧字段名残留）
+        if (f === 'side') {
+          config.conditions[idx].field = '';
+          renderC3Conditions();
+        } else if (f === 'op') {
+          // op 切换 → 重渲（隐藏/显示 value 输入框）
+          renderC3Conditions();
+        }
+      });
+      c3CondContainer?.addEventListener('input', (event) => {
+        if (isReadonly) return;
+        const input = event.target.closest('input[data-c3-cond-field="value"]');
+        if (!input) return;
+        const row = input.closest('.scenario-config-c3-cond-row');
+        const idx = Number(row?.dataset.c3CondRow);
+        if (Number.isFinite(idx) && config.conditions[idx]) {
+          config.conditions[idx].value = input.value;
+        }
+      });
+      c3CondContainer?.addEventListener('click', (event) => {
+        if (isReadonly) return;
+        const removeBtn = event.target.closest('button[data-c3-cond-action="remove"]');
+        if (!removeBtn) return;
+        const row = removeBtn.closest('.scenario-config-c3-cond-row');
+        const idx = Number(row?.dataset.c3CondRow);
+        if (Number.isFinite(idx)) {
+          // v2.1.5 N3 柔性校验：可删完所有条件
+          config.conditions.splice(idx, 1);
+          renderC3Conditions();
+        }
+      });
+      dialog.querySelector('[data-action="add-c3-condition"]')?.addEventListener('click', () => {
+        if (isReadonly) return;
+        config.conditions.push({ side: '网关', field: '', op: '等于', value: '' });
+        renderC3Conditions();
+      });
 
       function renderReconFields() {
         reconRowsContainer.innerHTML = config.reconFields.map((rf, idx) => `
@@ -7422,6 +7543,11 @@
         const mv = c.markValue || {};
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">打标：</span>类型#${mv.type} 的 ${escapeHtml(mv.field || '')} 写入 "${escapeHtml(String(mv.value || ''))}"</div>`;
       } else if (draft.category === 'gateway-recon-join') {
+        // v2.1.5 N3：conditions 段（仅当 ≥ 1 行时渲染）
+        const conds = Array.isArray(c.conditions) ? c.conditions : [];
+        if (conds.length > 0) {
+          html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">条件（AND）：</span><ul>${conds.map((cd) => `<li>${escapeHtml(cd.side)} ${escapeHtml(cd.field)} ${escapeHtml(cd.op)}${opNeedsValue(cd.op) ? ' ' + escapeHtml(String(cd.value || '')) : ''}</li>`).join('')}</ul></div>`;
+        }
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段（AND）：</span><ul>${(c.reconFields || []).map((r) => `<li>网关 ${escapeHtml(r.gwField)} = 银行 ${escapeHtml(r.bankField)}</li>`).join('')}</ul></div>`;
         const a = c.assign || {};
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">赋值：</span>网关 ${escapeHtml(a.gwField || '')} → 银行 ${escapeHtml(a.bankField || '')}</div>`;

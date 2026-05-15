@@ -298,7 +298,244 @@ function runScenarioEngineSmokeTests() {
     assert.strictEqual(result.lockedRowIds.size, 0, 'C3-9 不应锁任何行');
   }
 
-  console.log('  scenario-engines: 23/23 PASS');
+  // ===== v2.1.5 N3：C3 conditions 段（spec §6 / §4.5）=====
+  // 工厂：基于 makeC3Scenario 注入 conditions（不修改 baseline 行为）
+  function makeC3ScenarioWithConditions(conditions) {
+    const s = makeC3Scenario();
+    s.config.conditions = conditions;
+    return s;
+  }
+
+  // C3-COND-1：网关单侧 1 条条件 AND 过滤
+  // gwRow USD 行通过条件；CNY 行被过滤掉，只有 USD 行参与 join
+  // bankRow 配 USD → join 命中 USD gwRow，写入 GW_USD
+  {
+    const scenario = makeC3ScenarioWithConditions([
+      { side: '网关', field: 'Currency', op: '等于', value: 'USD' }
+    ]);
+    const bankRows = [
+      { _rowId: 'b-usd', Currency: 'USD', 'Credit Amount': 200, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
+    ];
+    const gwRows = [
+      { Currency: 'USD', Amount: 200, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_USD' },
+      { Currency: 'CNY', Amount: 200, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_CNY' }
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'GW_USD', 'C3-COND-1 应只命中 USD 网关行');
+    assert.strictEqual(result.modifications.length, 1, 'C3-COND-1 modifications 仅 1 条');
+    assert.strictEqual(result.modifications[0].newValue, 'GW_USD', 'C3-COND-1 modification newValue=GW_USD');
+    // 防御断言：CNY 行被条件过滤后没机会被命中（即使 reconFields 也匹配）
+    assert(!result.warnings.some(w => w.code === 'multi-gateway-match'), 'C3-COND-1 不应有 multi 警告（CNY 已被过滤）');
+  }
+
+  // C3-COND-2：双侧 AND（网关 + 银行 各 1 条）
+  // 两侧都过滤 USD 行；只有 USD-on-USD 的 join 命中
+  {
+    const scenario = makeC3ScenarioWithConditions([
+      { side: '网关', field: 'Currency', op: '等于', value: 'USD' },
+      { side: '银行', field: 'Currency', op: '等于', value: 'USD' }
+    ]);
+    const bankRows = [
+      { _rowId: 'b-usd', Currency: 'USD', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'b-cny', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
+    ];
+    const gwRows = [
+      { Currency: 'USD', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_USD' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_CNY' }
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'GW_USD', 'C3-COND-2 USD 行应命中 USD 网关');
+    assert.strictEqual(bankRows[1].ReconciliationId, '', 'C3-COND-2 CNY 行应被银行侧条件过滤');
+    assert.strictEqual(result.modifications.length, 1, 'C3-COND-2 modifications 仅 1 条');
+    assert(result.lockedRowIds.has('b-usd'), 'C3-COND-2 应锁 b-usd');
+    assert(!result.lockedRowIds.has('b-cny'), 'C3-COND-2 不应锁 b-cny');
+  }
+
+  // C3-COND-VIRTUAL：银行侧虚拟字段「发生额绝对值」
+  // 必须走 getBankRowValueForC3 → Math.abs(Credit - Debit)
+  // bankRow 1: Credit=100, Debit=0   → 虚拟值 100 ✅
+  // bankRow 2: Credit=0,   Debit=100 → 虚拟值 100 ✅（abs）
+  // bankRow 3: Credit=200, Debit=50  → 虚拟值 150 ❌
+  {
+    const scenario = makeC3ScenarioWithConditions([
+      { side: '银行', field: '发生额绝对值', op: '等于', value: '100' }
+    ]);
+    // 注意：scenario.config.reconFields 的 seq=2 也用「发生额绝对值」做 join；
+    // 为了让 bankRow 1/2 在 join 阶段都命中相同的 gwRow，让它们 Currency/MerchantId/Channel 一致
+    const bankRows = [
+      { _rowId: 'b-virt-1', Currency: 'USD', 'Credit Amount': 100, 'Debit Amount': 0,   MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'b-virt-2', Currency: 'USD', 'Credit Amount': 0,   'Debit Amount': 100, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'b-virt-3', Currency: 'USD', 'Credit Amount': 200, 'Debit Amount': 50,  MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
+    ];
+    const gwRows = [
+      { Currency: 'USD', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_100' }
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'GW_100', 'C3-COND-VIRTUAL b-virt-1 (Credit=100) 应命中虚拟值 100');
+    assert.strictEqual(bankRows[1].ReconciliationId, 'GW_100', 'C3-COND-VIRTUAL b-virt-2 (Debit=100) 应命中虚拟值 100');
+    assert.strictEqual(bankRows[2].ReconciliationId, '', 'C3-COND-VIRTUAL b-virt-3 (虚拟值 150) 应被过滤');
+    assert.strictEqual(result.modifications.length, 2, 'C3-COND-VIRTUAL modifications 应为 2 条');
+  }
+
+  // C3-COND-EMPTY：conditions = [] 退化等同 v2.1.4 行为
+  // 用 C3-1 的 baseline 数据 + conditions=[] → modifications 应与 baseline 完全一致
+  // baseline (C3-1)：bankRow CNY+100 / gwRow CNY+100/M001/BankA → 写入 GW_999
+  {
+    const scenario = makeC3ScenarioWithConditions([]); // 显式空数组
+    const bankRows = [{ _rowId: 'b1', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }];
+    const gwRows = [{ Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_999' }];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'GW_999', 'C3-COND-EMPTY 应等同 baseline C3-1 行为');
+    assert(result.lockedRowIds.has('b1'), 'C3-COND-EMPTY 应锁 b1（同 baseline）');
+    assert.strictEqual(result.modifications.length, 1, 'C3-COND-EMPTY modifications 数量同 baseline');
+  }
+
+  // C3-COND-LEGACY：旧场景无 conditions 字段
+  // scenario.config 不含 conditions key（模拟 v2.1.4 老数据）
+  // 引擎应兜底为 [] → 退化为现有行为；与 baseline C3-1 一致
+  {
+    const scenario = makeC3Scenario(); // 不注入 conditions
+    assert.strictEqual(scenario.config.conditions, undefined, 'C3-COND-LEGACY 前置：fixture 不含 conditions 字段');
+    const bankRows = [{ _rowId: 'b1-legacy', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }];
+    const gwRows = [{ Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_999' }];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'GW_999', 'C3-COND-LEGACY 旧 DB 数据应等同 baseline');
+    assert(result.lockedRowIds.has('b1-legacy'), 'C3-COND-LEGACY 应锁 b1-legacy');
+    assert.strictEqual(result.modifications.length, 1, 'C3-COND-LEGACY modifications 数量同 baseline');
+  }
+
+  // C3-COND-OP-EMPTY：op = 空值 / 非空值 各 1 case
+  // case A：'空值' → 网关 reconciliationId 为空的行进入 join → 写入空字符串（不写）
+  // case B：'非空值' → 网关 reconciliationId 非空的行进入 join → 写入对应 ID
+  {
+    // case A：空值
+    const scenarioA = makeC3ScenarioWithConditions([
+      { side: '网关', field: 'reconciliationId', op: '空值' }
+    ]);
+    const bankRowsA = [{ _rowId: 'bA', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: 'KEEP_A' }];
+    const gwRowsA = [
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: '' },        // 空值 ✅ 通过条件
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'NON_EMPTY' } // 非空 ❌ 被过滤
+    ];
+    const resultA = runC3Scenario(scenarioA, bankRowsA, gwRowsA);
+    // 唯一通过条件的 gwRow.reconciliationId='' → assign chosen[gwField] 是 '' → 引擎跳过写入（normalizeCellValue 后不写）
+    assert.strictEqual(bankRowsA[0].ReconciliationId, 'KEEP_A', 'C3-COND-OP-EMPTY-A 网关源字段为空 → 不写入（保留原值）');
+    assert.strictEqual(resultA.modifications.length, 0, 'C3-COND-OP-EMPTY-A 不产生 modifications');
+    // 关键防御：未抛异常 + 没误命中 NON_EMPTY 行
+    assert(!resultA.warnings.some(w => w.code === 'multi-gateway-match'), 'C3-COND-OP-EMPTY-A 不应有 multi 警告（NON_EMPTY 已过滤）');
+
+    // case B：非空值
+    const scenarioB = makeC3ScenarioWithConditions([
+      { side: '网关', field: 'reconciliationId', op: '非空值' }
+    ]);
+    const bankRowsB = [{ _rowId: 'bB', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }];
+    const gwRowsB = [
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: '' },        // 空 ❌
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'NON_EMPTY' } // 非空 ✅
+    ];
+    const resultB = runC3Scenario(scenarioB, bankRowsB, gwRowsB);
+    assert.strictEqual(bankRowsB[0].ReconciliationId, 'NON_EMPTY', 'C3-COND-OP-EMPTY-B 应命中 NON_EMPTY 网关行');
+    assert.strictEqual(resultB.modifications.length, 1, 'C3-COND-OP-EMPTY-B modifications 仅 1 条');
+  }
+
+  // C3-COND-OP-ALL：剩下 5 种 op 各 1 case（等于 / 不等于 / 包含 / 不包含 / 开头为）
+  // 每个 op：1 行条件 + 2 行 gwRows（一行匹配一行不匹配） + 1 行 bankRow
+  function runOpCase(op, value, gw1Currency, gw2Currency, expectedReconId) {
+    const scenario = makeC3ScenarioWithConditions([
+      { side: '网关', field: 'Currency', op, value }
+    ]);
+    const bankRows = [{ _rowId: `b-${op}`, Currency: gw1Currency, 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }];
+    const gwRows = [
+      { Currency: gw1Currency, Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_OK' },  // 匹配条件 → 通过
+      { Currency: gw2Currency, Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_NO' }   // 不匹配 → 被过滤
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    return { reconId: bankRows[0].ReconciliationId, modCount: result.modifications.length };
+  }
+
+  // 等于：Currency=USD → USD 行通过，CNY 行过滤
+  {
+    const r = runOpCase('等于', 'USD', 'USD', 'CNY', 'GW_OK');
+    assert.strictEqual(r.reconId, 'GW_OK', 'C3-COND-OP-ALL[等于] 应命中 USD 网关');
+    assert.strictEqual(r.modCount, 1, 'C3-COND-OP-ALL[等于] mod 数 1');
+  }
+  // 不等于：Currency≠USD → USD 行过滤；用 CNY 与 USD 测试
+  // 注意 bankRow Currency 必须能在 reconFields 中与 gwRow Currency 匹配
+  {
+    const scenario = makeC3ScenarioWithConditions([
+      { side: '网关', field: 'Currency', op: '不等于', value: 'USD' }
+    ]);
+    const bankRows = [{ _rowId: 'b-neq', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }];
+    const gwRows = [
+      { Currency: 'USD', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_USD' }, // 等于 USD → 被过滤
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_CNY' }  // 不等于 USD → 通过
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'GW_CNY', 'C3-COND-OP-ALL[不等于] 应命中 CNY 网关');
+    assert.strictEqual(result.modifications.length, 1, 'C3-COND-OP-ALL[不等于] mod 数 1');
+  }
+  // 包含：Bank 字段 op=包含 'USD' → "USD-Bank" 通过；"CNY-Bank" 过滤
+  {
+    const scenario = makeC3ScenarioWithConditions([
+      { side: '网关', field: 'Bank', op: '包含', value: 'USD' }
+    ]);
+    const bankRows = [{ _rowId: 'b-contains', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'USD-Bank', ReconciliationId: '' }];
+    const gwRows = [
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'USD-Bank', reconciliationId: 'GW_OK' }, // 包含 USD ✅
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'CNY-Bank', reconciliationId: 'GW_NO' }  // 不含 USD ❌
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'GW_OK', 'C3-COND-OP-ALL[包含] 应命中 USD-Bank');
+    assert.strictEqual(result.modifications.length, 1, 'C3-COND-OP-ALL[包含] mod 数 1');
+  }
+  // 不包含：Bank 字段 op=不包含 'USD' → "CNY-Bank" 通过；"USD-Bank" 过滤
+  {
+    const scenario = makeC3ScenarioWithConditions([
+      { side: '网关', field: 'Bank', op: '不包含', value: 'USD' }
+    ]);
+    const bankRows = [{ _rowId: 'b-notcontains', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'CNY-Bank', ReconciliationId: '' }];
+    const gwRows = [
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'USD-Bank', reconciliationId: 'GW_NO' },  // 含 USD ❌
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'CNY-Bank', reconciliationId: 'GW_OK' }   // 不含 ✅
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'GW_OK', 'C3-COND-OP-ALL[不包含] 应命中 CNY-Bank');
+    assert.strictEqual(result.modifications.length, 1, 'C3-COND-OP-ALL[不包含] mod 数 1');
+  }
+  // 开头为：reconciliationId 字段 op='开头为' value='REF_' → "REF_001" 通过；"GW_002" 过滤
+  {
+    const scenario = makeC3ScenarioWithConditions([
+      { side: '网关', field: 'reconciliationId', op: '开头为', value: 'REF_' }
+    ]);
+    const bankRows = [{ _rowId: 'b-startsWith', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }];
+    const gwRows = [
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'REF_001' }, // 开头 REF_ ✅
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_002' }   // ❌
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'REF_001', 'C3-COND-OP-ALL[开头为] 应命中 REF_001');
+    assert.strictEqual(result.modifications.length, 1, 'C3-COND-OP-ALL[开头为] mod 数 1');
+  }
+
+  // C3-COND-CLEAR：左一切换字段清空后引擎不报错
+  // conditions = [{ side: '网关', field: '', op: '等于', value: 'X' }]（field 为空模拟左一切换后未填）
+  // 引擎应跳过该条件（spec §4.5.1：!cd.field → return true）→ 退化为不过滤
+  // 等同于 baseline C3-1 行为
+  {
+    const scenario = makeC3ScenarioWithConditions([
+      { side: '网关', field: '', op: '等于', value: 'X' }
+    ]);
+    const bankRows = [{ _rowId: 'b1-clear', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }];
+    const gwRows = [{ Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_999' }];
+    let result;
+    assert.doesNotThrow(() => {
+      result = runC3Scenario(scenario, bankRows, gwRows);
+    }, 'C3-COND-CLEAR field 为空不应抛异常');
+    assert.strictEqual(bankRows[0].ReconciliationId, 'GW_999', 'C3-COND-CLEAR 应等同 baseline（field 空 → 视为无效条件，不过滤）');
+    assert.strictEqual(result.modifications.length, 1, 'C3-COND-CLEAR modifications 数量同 baseline');
+  }
+
+  console.log('  scenario-engines: 31/31 PASS');
 }
 
 module.exports = {

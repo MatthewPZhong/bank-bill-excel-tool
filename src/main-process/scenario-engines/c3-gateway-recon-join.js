@@ -10,6 +10,7 @@
 
 const {
   ensureRowId,
+  evaluateCondition,
   isEmptyValue,
   makeModificationCollector,
   makeWarningCollector,
@@ -29,6 +30,21 @@ function getBankRowValueForC3(bankRow, fieldName) {
     return Math.abs((credit || 0) - (debit || 0));
   }
   return bankRow[fieldName];
+}
+
+// v2.1.5 N3：包装 evaluateCondition 以支持银行侧虚拟字段「发生额绝对值」
+//   - useC3BankValueGetter: false → 网关侧，直接调 evaluateCondition(row, cd)
+//   - useC3BankValueGetter: true  → 银行侧，先用 getBankRowValueForC3(row, cd.field) 取值再代入临时 row 调 evaluateCondition
+function evalCondition(row, cd, { useC3BankValueGetter = false } = {}) {
+  if (!cd || !cd.field) return true; // 防御：未配置 field 视为通过
+  if (!useC3BankValueGetter) {
+    return evaluateCondition(row, cd);
+  }
+  // 银行侧：包装一层把虚拟字段计算结果注入临时 row
+  const value = getBankRowValueForC3(row, cd.field);
+  // value 可能是 number（虚拟字段）/ 字符串 / undefined；evaluateCondition 内部 normalizeCellValue 会兜底
+  const wrappedRow = { [cd.field]: value };
+  return evaluateCondition(wrappedRow, cd);
 }
 
 // 数值字段启发式（与 C2 保持一致）
@@ -89,9 +105,24 @@ function runC3Scenario(scenario, bankRows, gwRows) {
     };
   }
 
-  bankRows.forEach((bankRow, index) => {
+  // ===== v2.1.5 N3：Step 0 — 按 conditions 拆分两侧 + 行级过滤（AND 关系）=====
+  //   - 兜底：cfg.conditions 缺失 / 空数组 → gwConditions/bankConditions 各为空 → 不过滤（向下兼容 v2.1.4）
+  //   - 网关侧条件用 evalCondition(row, cd, { useC3BankValueGetter: false })
+  //   - 银行侧条件用 evalCondition(row, cd, { useC3BankValueGetter: true })（支持虚拟字段「发生额绝对值」）
+  const conditions = Array.isArray(config.conditions) ? config.conditions : [];
+  const gwConditions = conditions.filter((c) => c && c.side === '网关' && c.field);
+  const bankConditions = conditions.filter((c) => c && c.side === '银行' && c.field);
+
+  const gwRowsFiltered = gwConditions.length === 0
+    ? gwRows
+    : gwRows.filter((row) => gwConditions.every((c) => evalCondition(row, c, { useC3BankValueGetter: false })));
+  const bankRowsFiltered = bankConditions.length === 0
+    ? bankRows
+    : bankRows.filter((row) => bankConditions.every((c) => evalCondition(row, c, { useC3BankValueGetter: true })));
+
+  bankRowsFiltered.forEach((bankRow, index) => {
     const rowId = ensureRowId(bankRow, index);
-    const matched = gwRows.filter((gwRow) => gwMatchesBank(gwRow, bankRow, reconFields));
+    const matched = gwRowsFiltered.filter((gwRow) => gwMatchesBank(gwRow, bankRow, reconFields));
     if (matched.length === 0) return;
 
     if (matched.length > 1) {
@@ -121,6 +152,7 @@ function runC3Scenario(scenario, bankRows, gwRows) {
 }
 
 module.exports = {
+  evalCondition, // v2.1.5 N3 新增（暴露给 smoke）
   getBankRowValueForC3,
   gwMatchesBank,
   runC3Scenario
