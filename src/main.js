@@ -3133,7 +3133,7 @@ function registerAppHandlers() {
     ].join('|');
   }
 
-  trackedIpcHandle('recon-id-fix:import', '对账单ReconID修复', '导入文件', async (_event, payload) => {
+  trackedIpcHandle('recon-id-fix:import', '对账单 ReconID 修复', '导入文件', async (_event, payload) => {
     try {
       // v2.1.0-beta.3 T9：renderer 传 subMode（'business' | 'gateway'，从 state.reconIdFixBillCategory 推导）
       const subMode = (payload && payload.subMode === 'gateway') ? 'gateway' : 'business';
@@ -3184,7 +3184,7 @@ function registerAppHandlers() {
     }
   });
 
-  trackedIpcHandle('recon-id-fix:run', '对账单ReconID修复', '开始运行', (_event, payload) => {
+  trackedIpcHandle('recon-id-fix:run', '对账单 ReconID 修复', '开始运行', (_event, payload) => {
     try {
       if (!reconIdFixSession) {
         return { status: 'failed', message: '请先点击"导入文件"' };
@@ -3235,7 +3235,7 @@ function registerAppHandlers() {
     }
   });
 
-  trackedIpcHandle('recon-id-fix:export', '对账单ReconID修复', '导出文件', async () => {
+  trackedIpcHandle('recon-id-fix:export', '对账单 ReconID 修复', '导出文件', async () => {
     try {
       if (!reconIdFixResult) {
         return { status: 'failed', message: '请先点击"开始运行"' };
