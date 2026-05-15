@@ -177,7 +177,7 @@ v2.1.5：    [对账单 ReconID 修复]
 - 后端：无
 - 数据库：无
 - 兼容性：纯 UI 行为变更，无 state / 持久化变更
-- 风险：档 3 改后用户进模块默认 select 无可见选中项（与 v2.1.4 占位项可见但 value="" 的体感等价）；下游 enable 按钮逻辑（`updateReconIdFixUi` 等）依赖 `state.reconIdFixSelectedScenarioId !== null` 判断，**未选场景时按钮 disabled 行为不变**
+- 风险：档 3 改后用户进模块默认 select **自动选中第 1 个场景**（v0.3 fix1.2 拍板 — `reloadReconIdFixScenarios` 末尾自动设 `state.reconIdFixSelectedScenarioId = scenarios[0].id`）；下游 enable 按钮逻辑（`updateReconIdFixUi` 等）依赖 `state.reconIdFixSelectedScenarioId !== null` 判断，**自动选第 1 个后按钮立即可点**（区别于 v0.2 设计为 selectedIndex=-1 + 按钮 disabled 直到用户主动选）
 
 #### 5.2.3 UI Mockup
 
@@ -273,8 +273,8 @@ v2.1.5：    [对账单 ReconID 修复]
 |---------|---------|
 | AC2-1 | 进对账单 ReconID 修复模块 + 主面板「账单类别」select 设为空（开发者工具手动模拟）→ 场景下拉显示真空白 + disabled |
 | AC2-2 | 主面板「账单类别」选 `gateway`（默认）+ DB 该类别下无任何场景 → 场景下拉显示真空白 + disabled（**不再显示「请先在场景管理中创建场景」**） |
-| AC2-3 | 主面板「账单类别」选 `gateway` + DB 有 ≥ 1 个场景 → 场景下拉直接列 scenarios（**无「请选择场景」占位项**），select 显示空白（selectedIndex = -1） |
-| AC2-4 | AC2-3 状态下用户未主动选场景 → 主面板「开始运行」按钮 disabled（沿用既有「未选 scenarioId 不能跑」行为）|
+| AC2-3 | 主面板「账单类别」选 `gateway` + DB 有 ≥ 1 个场景 → 场景下拉直接列 scenarios（**无「请选择场景」占位项**），select **自动选中第 1 个场景**（`state.reconIdFixSelectedScenarioId = scenarios[0].id`） — **v0.3 fix1.2 修订**（v0.2 设计为 `selectedIndex = -1` 已撤回） |
+| AC2-4 | AC2-3 自动选第 1 个场景后，主面板「开始运行」按钮 **enable**（state 非 null，session ready 时直接可点）— **v0.3 fix1.2 修订**（v0.2 描述「未选 scenarioId disabled」与 fix1.2 拍板矛盾） |
 
 ### 6.3 N3：C3「条件」栏 AC
 
@@ -361,7 +361,7 @@ v2.1.5：    [对账单 ReconID 修复]
 - [x] N1 是否做 `.usage-stats.txt` 历史数据 migration？ — **用户已确认不做**（旧 key 历史从未成功累计；writeStatsFile 按 FUNCTION_REGISTRY 顺序输出，新 key 自动不出现旧 key） 
 - [x] N1 IPC channel name 是否改名？ — **不改**（preload + DB schema 依赖）
 - [x] N2 scenarios 为空时 select.disabled 是否保留 true？ — **保留**（沿用现状）
-- [x] N2 有 scenarios 但用户未选时 select 默认显示？ — **selectedIndex = -1**（HTML 标准未选状态，无可见占位项）
+- [x] N2 有 scenarios 但用户未选时 select 默认显示？ — v0.2 ✅ **selectedIndex = -1**（HTML 标准未选状态，无可见占位项） → v0.3 fix1.2 ✅ **翻转：自动选第 1 个**（`reloadReconIdFixScenarios` 末尾设 `state.reconIdFixSelectedScenarioId = scenarios[0].id`；用户测试反馈，2026-05-15 拍板）
 - [x] N3 v2.1.5 范围是否包含运行时实现？ — **包含**（用户已选 A）
 - [x] N3 校验严格程度？ — **柔性**（用户已选 a：conditions 可 0 行）
 - [x] N3 字段枚举源歧义？ — **无歧义**（C3 既有的 GATEWAY_RECON_FIELDS / BANK_STATEMENT_FIELDS_FOR_C3 已与运行时字段名 byte-for-byte 对齐；区别于 v0.1 误判的 C4 模块）
