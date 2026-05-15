@@ -27,8 +27,8 @@ const FUNCTION_REGISTRY = Object.freeze({
   '新开账户': ['生成余额账单', '导出余额'],
   '月度 Pending': ['规则管理', '导入文件', '开始运行', '导出差异'],
   '银行对账单处理': ['场景管理', '导入文件', '开始运行', '导出文件'],
-  // v2.1.0-beta.1 PR-B：单据对账 ReconID 修复模块
-  '单据对账ReconID修复': ['导入文件', '开始运行', '导出文件'],
+  // v2.1.0-beta.1 PR-B：对账单 ReconID 修复模块（v2.1.5 修复 long-standing bug — 旧 key '单据对账ReconID修复' 与 main.js trackedIpcHandle 第二参不匹配，导致计数静默失败；同步与 N1 模块名加空格保持一致）
+  '对账单 ReconID 修复': ['导入文件', '开始运行', '导出文件'],
   // v2.1.2 T2：月度银行对账单BU回填校验（PR #43 Codex F1 修复 — main.js trackedIpcHandle 已用此 moduleKey 但 registry 未注册导致计数静默失败）
   '月度银行对账单BU回填校验': ['导入文件', '开始运行', '导出差异'],
   // v2.1.3 T3：业务OP数据核对（PR #45 round 3 P2 修复 — 共 15 个 bizOpRecon:* IPC，5 个核心 action 接入 trackedIpcHandle，10 个 query/dialog/helper 保持 plain ipcMain.handle）
