@@ -3199,7 +3199,7 @@ function registerAppHandlers() {
       }
       // v2.1.0-beta.3 T9：扩 category 校验到两个 ReconID 子模式 + 验证 session 的 subMode 与 scenario.category 一致
       if (scenario.category !== 'recon-id-fix' && scenario.category !== 'gateway-recon-id-fix') {
-        return { status: 'failed', message: `场景 "${scenario.name}" 不是对账单ReconID修复类，无法运行` };
+        return { status: 'failed', message: `场景 "${scenario.name}" 不是对账单 ReconID 修复类，无法运行` };
       }
       const expectedSubMode = scenario.category === 'gateway-recon-id-fix' ? 'gateway' : 'business';
       const sessionSubMode = reconIdFixSession.subMode || 'business';
