@@ -3541,6 +3541,12 @@ async function reloadReconIdFixScenarios(options = { scenariosChanged: true }) {
           && !state.reconIdFixScenarios.some((s) => s.id === state.reconIdFixSelectedScenarioId)) {
         state.reconIdFixSelectedScenarioId = null;
       }
+      // v2.1.5 fix1.2：scenarios 加载完成后，如果当前未选场景且列表非空 →
+      //   自动选第 1 个枚举值（user 反馈：N2 改动后 selectedIndex=-1 强迫用户主动点开下拉）
+      //   下游 refreshReconIdFixStatus 在本函数末尾统一触发，与用户手动选场景副作用一致
+      if (state.reconIdFixSelectedScenarioId === null && state.reconIdFixScenarios.length > 0) {
+        state.reconIdFixSelectedScenarioId = state.reconIdFixScenarios[0].id;
+      }
     } catch (error) {
       console.error('reloadReconIdFixScenarios failed:', error);
       state.reconIdFixScenarios = [];
@@ -3601,17 +3607,12 @@ function renderReconIdFixScenarioSelect() {
   }).join('');
   select.innerHTML = opts;
   select.disabled = false;
-  // 同步 select.value 与 state（防御 reload 后 currentSelected 仍存在的情况）
-  // ⚠️ v2.1.5 N2：去掉占位项后 HTML <select> 默认选中第 1 个 <option>，与「未选状态」矛盾；
-  //    用 select.selectedIndex = -1 显式置为"未选中"（HTML 标准用法，无可见占位项）
+  // 同步 select.value 与 state（reloadReconIdFixScenarios fix1.2 已保证 scenarios 非空时
+  // state.reconIdFixSelectedScenarioId 必有值，此处直接 select.value = desired 即可）
   const desired = state.reconIdFixSelectedScenarioId !== null
     ? String(state.reconIdFixSelectedScenarioId)
     : '';
-  if (desired === '') {
-    select.selectedIndex = -1;
-  } else {
-    select.value = desired;
-  }
+  select.value = desired;
 }
 
 function updateReconIdFixUi() {
