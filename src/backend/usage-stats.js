@@ -34,6 +34,8 @@ const FUNCTION_REGISTRY = Object.freeze({
   // v2.1.3 T3：业务OP数据核对（PR #45 round 3 P2 修复 — 共 15 个 bizOpRecon:* IPC，5 个核心 action 接入 trackedIpcHandle，10 个 query/dialog/helper 保持 plain ipcMain.handle）
   // 仅核心成功路径计数（导入/运行/导出）；模块状态查询 / 文件选择对话框 / BU 列表等中间态不计
   '业务OP数据核对': ['导入文件', '开始运行', '导出差异'],
+  // v2.1.6：收单单据币种校验（与 main.js trackedIpcHandle 第 3 参严格一致；listMonths / sessionStatus / clearMonth 走 plain ipcMain.handle 不计）
+  '收单单据币种校验': ['导入流水表', '导入单据表', '开始运行', '导出差异'],
   '切换页面风格': ['切换']
 });
 

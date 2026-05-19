@@ -260,5 +260,15 @@ contextBridge.exposeInMainWorld('desktopApi', {
     exportDate: (payload) => ipcRenderer.invoke('bizOpRecon:export:date', payload),
     exportDateRange: (payload) => ipcRenderer.invoke('bizOpRecon:export:date-range', payload),
     runHistory: (payload) => ipcRenderer.invoke('bizOpRecon:run:history', payload)
+  },
+  // v2.1.6 Module B：收单单据币种校验
+  acquiringBillCurrency: {
+    listMonths: () => ipcRenderer.invoke('acquiringBillCurrency:listMonths'),
+    sessionStatus: (payload) => ipcRenderer.invoke('acquiringBillCurrency:sessionStatus', payload),
+    importFlow: (payload) => ipcRenderer.invoke('acquiringBillCurrency:importFlow', payload),
+    importBill: (payload) => ipcRenderer.invoke('acquiringBillCurrency:importBill', payload),
+    run: (payload) => ipcRenderer.invoke('acquiringBillCurrency:run', payload),
+    export: (payload) => ipcRenderer.invoke('acquiringBillCurrency:export', payload),
+    clearMonth: (payload) => ipcRenderer.invoke('acquiringBillCurrency:clearMonth', payload)
   }
 });

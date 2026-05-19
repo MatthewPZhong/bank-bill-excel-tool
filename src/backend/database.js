@@ -4,6 +4,7 @@ const { DatabaseSync } = require('node:sqlite');
 const {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
+  ensureAcquiringBillCurrencyTablesSupport,
   ensureAmountSplitRulesSupport,
   ensureBankBuReconTablesSupport,
   ensureBillSplitMergeSupport,
@@ -142,6 +143,9 @@ class AppDatabase {
     // v2.1.3 T1：业务OP数据核对模块 4 张表（imports / flow_imports / runs / diff_rows）
     // 与 v2.1.2 bank_bu_recon_* 完全独立，调用顺序无依赖
     this.ensureBizOpReconTablesSupport();
+    // v2.1.6 T4：收单单据币种校验模块 4 张表（flow_imports / bill_imports / runs / diff_rows）
+    // 与 v2.1.2/v2.1.3 完全独立，调用顺序无依赖
+    this.ensureAcquiringBillCurrencyTablesSupport();
   }
 
   hasColumn(tableName, columnName) {
@@ -201,6 +205,11 @@ class AppDatabase {
   // v2.1.3 T1：业务OP数据核对模块 4 张表（imports / flow_imports / runs / diff_rows）
   ensureBizOpReconTablesSupport() {
     return ensureBizOpReconTablesSupport(this.db);
+  }
+
+  // v2.1.6 T4：收单单据币种校验模块 4 张表（flow_imports / bill_imports / runs / diff_rows）
+  ensureAcquiringBillCurrencyTablesSupport() {
+    return ensureAcquiringBillCurrencyTablesSupport(this.db);
   }
 
   listTemplates() {

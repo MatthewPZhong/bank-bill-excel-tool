@@ -4,6 +4,7 @@ const path = require('node:path');
 // 仅 writers.js 内部切换，其它文件仍用 xlsx（减少打包体积）
 const XLSX = require('xlsx-js-style');
 const { FileValidationError, normalizeCell } = require('./common');
+const { applyWatermark } = require('../../main-process/workbook-watermark');
 
 // v1.5.3 R3：给表头行（第 1 行）每个单元格注入 Courier New 字体
 // 决策 D14：字体名写死 'Courier New'，不加可选参数、不加回退链
@@ -227,6 +228,7 @@ function writeWorkbookRows({ rows, outputFilePath, sheetName = 'COMMON' }, forma
 
   XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
   fs.mkdirSync(path.dirname(outputFilePath), { recursive: true });
+  applyWatermark(workbook);
   XLSX.writeFile(workbook, outputFilePath);
 
   return outputFilePath;
@@ -293,6 +295,7 @@ function writeBalanceWorkbook({
   applyHeaderRowFont(worksheet, 0);
 
   fs.mkdirSync(path.dirname(outputFilePath), { recursive: true });
+  applyWatermark(workbook);
   XLSX.writeFile(workbook, outputFilePath);
   return outputFilePath;
 }

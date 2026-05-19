@@ -933,9 +933,172 @@ function ensureBankBuReconTablesSupport(db) {
   }
 }
 
+// v2.1.6 T4 — 收单单据币种校验模块（acquiring-bill-currency）4 张表
+// 复用 v2.1.2 bankBuRecon 范式，主 DB（tool-data.sqlite）
+//   - acquiring_bill_currency_flow_imports：流水表导入（关键字段 recon_main_id / settle_amount / settle_currency）
+//   - acquiring_bill_currency_bill_imports：单据表导入（关键字段 recon_main_id / settle_currency）
+//   - acquiring_bill_currency_runs：对账运行历史 + 统计
+//   - acquiring_bill_currency_diff_rows：差异行（仅币种不一致 + 单据币种缺失）
+// UNIQUE(month_key, recon_main_id) 强制保障 1:1 关联假设（spec §3.1 / §4.1 / §4.2）
+// v0.7 fix4：流水侧取列从「币种/对账金额」改为「通道清算币种/通道清算金额」，DB 列名 recon_amount/currency → settle_amount/settle_currency
+// 幂等：CREATE TABLE / INDEX IF NOT EXISTS，多次启动 no-op
+function ensureAcquiringBillCurrencyTablesSupport(db) {
+  db.exec('BEGIN');
+
+  try {
+    // 表 1：流水表导入（spec §3.1 + §4.1，v0.7 字段名）
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS acquiring_bill_currency_flow_imports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        month_key TEXT NOT NULL,
+        source_file TEXT NOT NULL,
+        source_row_index INTEGER NOT NULL,
+        recon_main_id TEXT NOT NULL,
+        settle_amount TEXT NOT NULL,
+        settle_amount_abs TEXT NOT NULL,
+        settle_currency TEXT,
+        settle_currency_norm TEXT,
+        raw_json TEXT NOT NULL,
+        imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (month_key, recon_main_id)
+      );
+    `);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_flow_month
+        ON acquiring_bill_currency_flow_imports(month_key);
+    `);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_flow_join
+        ON acquiring_bill_currency_flow_imports(month_key, recon_main_id);
+    `);
+
+    // 表 2：单据表导入（spec §3.2 + §4.2，v0.7 字段名）
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS acquiring_bill_currency_bill_imports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        month_key TEXT NOT NULL,
+        source_file TEXT NOT NULL,
+        source_row_index INTEGER NOT NULL,
+        recon_main_id TEXT NOT NULL,
+        settle_currency TEXT,
+        settle_currency_norm TEXT,
+        raw_json TEXT NOT NULL,
+        imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (month_key, recon_main_id)
+      );
+    `);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_bill_month
+        ON acquiring_bill_currency_bill_imports(month_key);
+    `);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_bill_join
+        ON acquiring_bill_currency_bill_imports(month_key, recon_main_id);
+    `);
+
+    // 表 3：对账运行历史（spec §4.3）
+    // v0.8 fix5：新增 diff_file_path + report_file_path 存 run 时生成的输出文件路径
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS acquiring_bill_currency_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        month_key TEXT NOT NULL,
+        ran_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        total_bill_rows INTEGER NOT NULL,
+        matched_rows INTEGER NOT NULL,
+        mismatch_rows INTEGER NOT NULL,
+        unmatched_rows INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        diff_file_path TEXT,
+        report_file_path TEXT
+      );
+    `);
+
+    // 表 4：差异行（spec §4.4） — 仅含币种不一致 + 单据币种缺失的行
+    // flow_currency / flow_amount_abs 列名 v0.7 保留（避免 schema 二次变更），内容指向流水侧 settle_currency / settle_amount_abs
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS acquiring_bill_currency_diff_rows (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL,
+        bill_import_id INTEGER NOT NULL,
+        flow_currency TEXT,
+        flow_amount_abs TEXT,
+        diff_type TEXT NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES acquiring_bill_currency_runs(id),
+        FOREIGN KEY (bill_import_id) REFERENCES acquiring_bill_currency_bill_imports(id)
+      );
+    `);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_diff_run
+        ON acquiring_bill_currency_diff_rows(run_id);
+    `);
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+
+  // v0.7 fix4：对已存在的老 schema 库做幂等列重命名（v0.6 → v0.7）
+  ensureAcquiringBillCurrencyFix4ColumnsRename(db);
+  // v0.8 fix5：runs 表加 diff_file_path + report_file_path 两列（幂等）
+  ensureAcquiringBillCurrencyFix5RunPathColumns(db);
+}
+
+// v0.8 fix5：runs 表加 diff_file_path + report_file_path（幂等）
+function ensureAcquiringBillCurrencyFix5RunPathColumns(db) {
+  const cols = db.prepare("PRAGMA table_info(acquiring_bill_currency_runs)").all();
+  const hasDiff = cols.some((c) => c.name === 'diff_file_path');
+  const hasReport = cols.some((c) => c.name === 'report_file_path');
+  if (hasDiff && hasReport) return;
+
+  db.exec('BEGIN');
+  try {
+    if (!hasDiff) db.exec(`ALTER TABLE acquiring_bill_currency_runs ADD COLUMN diff_file_path TEXT`);
+    if (!hasReport) db.exec(`ALTER TABLE acquiring_bill_currency_runs ADD COLUMN report_file_path TEXT`);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_e) { /* idempotent */ }
+    throw error;
+  }
+}
+
+// v0.7 fix4：将 v0.6 入库的列名（recon_amount/recon_amount_abs/currency/currency_norm）
+// 重命名为 v0.7 的 settle_* 命名。
+// 幂等：先 PRAGMA table_info 检查列是否已重命名，跳过已迁移的库。
+// ⚠️ 仅 ALTER 列名，**不动数据值** —— v0.6 已入库的 currency_norm 内容是订单视角，
+//    用户必须配合「清月 2026-03 + 重导」才能让对账逻辑用上新字段「通道清算币种」。
+function ensureAcquiringBillCurrencyFix4ColumnsRename(db) {
+  const flowCols = db.prepare("PRAGMA table_info(acquiring_bill_currency_flow_imports)").all();
+  const billCols = db.prepare("PRAGMA table_info(acquiring_bill_currency_bill_imports)").all();
+  const flowHasOld = flowCols.some((c) => c.name === 'recon_amount');
+  const flowHasNew = flowCols.some((c) => c.name === 'settle_amount');
+  const billHasOld = billCols.some((c) => c.name === 'currency') && !billCols.some((c) => c.name === 'settle_currency');
+
+  if (!flowHasOld && flowHasNew && !billHasOld) return; // 已是新 schema
+
+  db.exec('BEGIN');
+  try {
+    if (flowHasOld) {
+      db.exec(`ALTER TABLE acquiring_bill_currency_flow_imports RENAME COLUMN recon_amount TO settle_amount`);
+      db.exec(`ALTER TABLE acquiring_bill_currency_flow_imports RENAME COLUMN recon_amount_abs TO settle_amount_abs`);
+      db.exec(`ALTER TABLE acquiring_bill_currency_flow_imports RENAME COLUMN currency TO settle_currency`);
+      db.exec(`ALTER TABLE acquiring_bill_currency_flow_imports RENAME COLUMN currency_norm TO settle_currency_norm`);
+    }
+    if (billHasOld) {
+      db.exec(`ALTER TABLE acquiring_bill_currency_bill_imports RENAME COLUMN currency TO settle_currency`);
+      db.exec(`ALTER TABLE acquiring_bill_currency_bill_imports RENAME COLUMN currency_norm TO settle_currency_norm`);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
+  ensureAcquiringBillCurrencyTablesSupport,
   ensureAmountSplitRulesSupport,
   ensureBankBuReconTablesSupport,
   ensureBillSplitMergeSupport,

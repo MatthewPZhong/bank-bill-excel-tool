@@ -13,6 +13,7 @@
 
 const ExcelJS = require('exceljs');
 const { errorCodeToCause } = require('../backend/file-service/error-causes');
+const { applyWatermark } = require('./workbook-watermark');
 
 const YELLOW_FILL = {
   type: 'pattern',
@@ -60,6 +61,7 @@ async function writeBankStatementOutput(rows, headers, savePath) {
     });
   });
 
+  applyWatermark(workbook);
   await workbook.xlsx.writeFile(savePath);
   return { filePath: savePath };
 }
@@ -86,6 +88,7 @@ async function writeErrorReport(warnings, savePath) {
     ]);
   });
 
+  applyWatermark(workbook);
   await workbook.xlsx.writeFile(savePath);
   return { filePath: savePath };
 }

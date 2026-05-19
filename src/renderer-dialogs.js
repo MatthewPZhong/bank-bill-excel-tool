@@ -8017,6 +8017,8 @@
       createScenarioConfigDialogC4,
       // v2.1.2 T2：月份选择对话框（PRD §3.2.5 数据流第一步）
       createBankBuReconMonthPickerDialog,
+      // v2.1.6 fix5：收单单据币种校验月份选择对话框（spec v0.8 §8.1）
+      createAcquiringBillCurrencyMonthPickerDialog,
       // v2.1.2 T2：文件导入提示对话框（取代 Electron showMessageBox，Clear 风前端 modal）
       createBankBuReconFileImportPromptDialog,
       // v2.1.2 T2 (spec v0.5)：开始运行 / 导出差异 弹窗
@@ -8120,6 +8122,92 @@
       confirmBtn.className = 'primary-btn small';
       confirmBtn.type = 'button';
       confirmBtn.textContent = '下一步';
+      confirmBtn.addEventListener('click', () => {
+        const yearMonth = `${yearSelect.value}-${monthSelect.value}`;
+        closeModal();
+        if (typeof onConfirm === 'function') onConfirm(yearMonth);
+      });
+
+      actions.appendChild(cancelBtn);
+      actions.appendChild(confirmBtn);
+      dialog.appendChild(actions);
+
+      return overlay;
+    }
+
+    // v2.1.6 fix5：收单单据币种校验月份选择对话框（spec v0.8 §8.1）
+    // 结构 + 样式同 createBankBuReconMonthPickerDialog，按钮文字「下一步」改为 actionLabel（"导入" / "运行" / "导出"）
+    function createAcquiringBillCurrencyMonthPickerDialog({ actionLabel = '导入', onConfirm, onCancel } = {}) {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.dataset.previewModal = 'acquiring-bill-currency-month-picker';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card pending-import-month-dialog';
+      overlay.appendChild(dialog);
+
+      const title = document.createElement('div');
+      title.className = 'pending-dialog-title';
+      // v2.1.6 fix15：actionLabel 三分支标题文案
+      //   - '导入'（流水表/单据表点击）→「请选择导入文件的月份」
+      //   - '导出'（导出差异点击）→「选择导出差异的月份」
+      //   - 其他（默认含'运行'）→「选择对账月份」
+      title.textContent = actionLabel === '导出'
+        ? '选择导出差异的月份'
+        : actionLabel === '导入'
+          ? '请选择导入文件的月份'
+          : '选择对账月份';
+      dialog.appendChild(title);
+
+      const picker = document.createElement('div');
+      picker.className = 'monthly-balance-time-picker pending-import-month-picker';
+
+      const now = new Date();
+      const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const defaultYear = lastMonth.getFullYear();
+      const defaultMonthNum = lastMonth.getMonth() + 1;
+
+      const curYear = now.getFullYear();
+      const yearSelect = document.createElement('select');
+      yearSelect.className = 'monthly-balance-year-select mapping-text-input';
+      for (let y = curYear - 1; y <= curYear + 1; y += 1) {
+        const opt = document.createElement('option');
+        opt.value = String(y);
+        opt.textContent = `${y} 年`;
+        if (y === defaultYear) opt.selected = true;
+        yearSelect.appendChild(opt);
+      }
+
+      const monthSelect = document.createElement('select');
+      monthSelect.className = 'monthly-balance-month-select mapping-text-input';
+      for (let m = 1; m <= 12; m += 1) {
+        const opt = document.createElement('option');
+        opt.value = String(m).padStart(2, '0');
+        opt.textContent = `${m} 月`;
+        if (m === defaultMonthNum) opt.selected = true;
+        monthSelect.appendChild(opt);
+      }
+
+      picker.appendChild(yearSelect);
+      picker.appendChild(monthSelect);
+      dialog.appendChild(picker);
+
+      const actions = document.createElement('div');
+      actions.className = 'dialog-actions center';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'secondary-btn small';
+      cancelBtn.type = 'button';
+      cancelBtn.textContent = '取消';
+      cancelBtn.addEventListener('click', () => {
+        closeModal();
+        if (typeof onCancel === 'function') onCancel();
+      });
+
+      const confirmBtn = document.createElement('button');
+      confirmBtn.className = 'primary-btn small';
+      confirmBtn.type = 'button';
+      confirmBtn.textContent = actionLabel;
       confirmBtn.addEventListener('click', () => {
         const yearMonth = `${yearSelect.value}-${monthSelect.value}`;
         closeModal();
