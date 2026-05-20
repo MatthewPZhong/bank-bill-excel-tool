@@ -1,8 +1,12 @@
 // v2.0.0-beta.3：C1 提取 ReconId 算法引擎
 // PRD §7.1 / §10 决策 D2.1-D2.3
+// v2.1.7 F1：行 3 条件聚合支持 AND/OR 切换（PRD §六 / spec §二）
+//   - config.conditionsLogic 'AND' / 'OR'；缺失时 fallback 'OR'（向下兼容旧 scenario）
 //
 // 行为：
-//   1. 行不满足任一 condition（OR）→ 该场景对该行不命中（first-match-wins 不锁定）
+//   1. 行不满足条件 → 该场景对该行不命中（first-match-wins 不锁定）
+//      - logic='OR'：任一条件 true 即命中（与 v2.1.6 一致）
+//      - logic='AND'：所有条件 true 才命中
 //   2. extractByFeature.enabled 时：
 //      - regex 公式：[A-Z]{englishExtraN}<featureCode>\d{digitCount}
 //      - englishExtraN = totalLength - len(featureCode) - digitCount
@@ -33,12 +37,16 @@ function buildFeatureRegex({ featureCode, digitCount, totalLength }) {
   return new RegExp(`[A-Z]{${englishExtraN}}${featureCode}\\d{${digitCount}}`, 'g');
 }
 
-function rowMatchesAnyCondition(row, conditions) {
+// v2.1.7 F1：按 logic（'AND' / 'OR'）聚合条件
+//   - logic === 'AND' → 全部条件 true 才命中（conditions.every）
+//   - 其它（含 'OR' / undefined / 任意非 'AND' 值）→ 任一条件 true 即命中（conditions.some），保持 v2.1.6 行为
+//   - 没有条件 → 任意行都不命中（保守，与原 rowMatchesAnyCondition 一致）
+function rowMatchesConditions(row, conditions, logic) {
   if (!Array.isArray(conditions) || conditions.length === 0) {
-    // 没有条件 → 任意行都不命中（保守）
     return false;
   }
-  return conditions.some((cond) => evaluateCondition(row, cond));
+  const fn = (logic === 'AND') ? 'every' : 'some';
+  return conditions[fn]((cond) => evaluateCondition(row, cond));
 }
 
 function findReconIdValueForRow(row, scenarioConfig, warnings, scenario) {
@@ -97,10 +105,12 @@ function runC1Scenario(scenario, bankRows) {
   const modCollector = makeModificationCollector();
   const config = scenario.config || {};
   const conditions = config.conditions || [];
+  // v2.1.7 F1：取 conditionsLogic；缺失或非 'AND' → fallback 'OR'（向下兼容旧 scenario）
+  const conditionsLogic = (config.conditionsLogic === 'AND') ? 'AND' : 'OR';
 
   bankRows.forEach((row, index) => {
     const rowId = ensureRowId(row, index);
-    if (!rowMatchesAnyCondition(row, conditions)) return;
+    if (!rowMatchesConditions(row, conditions, conditionsLogic)) return;
 
     const reconIdValue = findReconIdValueForRow(row, config, {
       push: (payload) => warningCollector.push(payload)
