@@ -142,6 +142,68 @@ function runScenarioEngineSmokeTests() {
     assert.strictEqual(rows[0].ReconciliationId, 'CUSTOM_VAL_123', 'C1-9 应复制 CustomerRef');
   }
 
+  // ===== v2.1.7 F1：C1 conditionsLogic AND/OR 切换 smoke（spec §2.4 Case F1-A/B/C/D）=====
+  // 工厂：基于 extractByOtherField 模式（最小依赖；不挑 regex 路径）
+  function makeC1ScenarioWithLogic(conditions, conditionsLogic) {
+    return {
+      id: 100, name: 'c1-logic', category: 'extract-recon-id',
+      config: {
+        conditions,
+        ...(conditionsLogic !== undefined ? { conditionsLogic } : {}),
+        extractByFeature: null,
+        extractByOtherField: { field: 'A' }
+      }
+    };
+  }
+
+  // F1-A：conditions=[A=true, B=false], logic='OR' → 命中
+  // A 字段 = 'X'（条件 A==='X' true）；B 字段 = 'Q'（条件 B==='Y' false）
+  {
+    const scen = makeC1ScenarioWithLogic([
+      { field: 'A', op: '等于', value: 'X' },
+      { field: 'B', op: '等于', value: 'Y' }
+    ], 'OR');
+    const rows = [{ _rowId: 'f1a', A: 'X', B: 'Q', ReconciliationId: '' }];
+    runC1Scenario(scen, rows);
+    assert.strictEqual(rows[0].ReconciliationId, 'X', 'F1-A OR 一真即命中');
+  }
+
+  // F1-B：conditions=[A=true, B=false], logic='AND' → 不命中
+  {
+    const scen = makeC1ScenarioWithLogic([
+      { field: 'A', op: '等于', value: 'X' },
+      { field: 'B', op: '等于', value: 'Y' }
+    ], 'AND');
+    const rows = [{ _rowId: 'f1b', A: 'X', B: 'Q', ReconciliationId: '' }];
+    runC1Scenario(scen, rows);
+    assert.strictEqual(rows[0].ReconciliationId, '', 'F1-B AND 一假即不命中');
+  }
+
+  // F1-C：conditions=[A=true, B=true], logic='AND' → 命中
+  {
+    const scen = makeC1ScenarioWithLogic([
+      { field: 'A', op: '等于', value: 'X' },
+      { field: 'B', op: '等于', value: 'Y' }
+    ], 'AND');
+    const rows = [{ _rowId: 'f1c', A: 'X', B: 'Y', ReconciliationId: '' }];
+    runC1Scenario(scen, rows);
+    assert.strictEqual(rows[0].ReconciliationId, 'X', 'F1-C AND 全真即命中');
+  }
+
+  // F1-D：scenario.config 无 conditionsLogic 字段（模拟 v2.1.6 老数据）
+  //   引擎 fallback OR；与原 v2.1.6 OR 行为完全一致
+  //   conditions=[A=true, B=false] → OR fallback 命中（如 F1-A）
+  {
+    const scen = makeC1ScenarioWithLogic([
+      { field: 'A', op: '等于', value: 'X' },
+      { field: 'B', op: '等于', value: 'Y' }
+    ], undefined); // 不传 logic
+    assert.strictEqual(scen.config.conditionsLogic, undefined, 'F1-D 前置：fixture 不含 conditionsLogic 字段');
+    const rows = [{ _rowId: 'f1d', A: 'X', B: 'Q', ReconciliationId: '' }];
+    runC1Scenario(scen, rows);
+    assert.strictEqual(rows[0].ReconciliationId, 'X', 'F1-D 老数据 fallback OR 命中（与 v2.1.6 一致）');
+  }
+
   // ===== C2 =====
   // C2-1：一对一配对 → 改 type2 行 + 双方都进 lockedRowIds
   {
@@ -535,7 +597,7 @@ function runScenarioEngineSmokeTests() {
     assert.strictEqual(result.modifications.length, 1, 'C3-COND-CLEAR modifications 数量同 baseline');
   }
 
-  console.log('  scenario-engines: 31/31 PASS');
+  console.log('  scenario-engines: 35/35 PASS');
 }
 
 module.exports = {

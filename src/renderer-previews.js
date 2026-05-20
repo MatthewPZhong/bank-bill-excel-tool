@@ -783,6 +783,7 @@
     }
 
     // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 preview
+    // v2.1.7 F1：默认无 conditionsLogic 字段 → dialog 渲染 OR radio 默认选中（fallback 行为 baseline）
     function applyScenarioConfigC1PreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
       state.scenarioDraft = {
@@ -796,6 +797,36 @@
             { field: 'CustomerRef', op: '包含', value: 'AFT' },
             { field: 'Extra Information', op: '包含', value: 'AFT' }
           ],
+          extractByFeature: {
+            enabled: true,
+            searchFields: ['CustomerRef', 'Extra Information'],
+            featureCode: 'FT',
+            digitCount: 12,
+            totalLength: 15
+          },
+          extractByOtherField: null
+        }
+      };
+      setTimeout(() => {
+        openModal(createScenarioConfigDialogC1());
+      }, 120);
+    }
+
+    // v2.1.7 F1：C1 dialog AND 模式 preview（conditionsLogic='AND' 显式注入，截图验证 AND radio 选中）
+    function applyScenarioConfigC1AndPreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      state.scenarioDraft = {
+        mode: 'create',
+        category: 'extract-recon-id',
+        scenarioId: null,
+        name: '从银行对账单的信息里提取对账ID（AND）',
+        priority: 3,
+        config: {
+          conditions: [
+            { field: 'CustomerRef', op: '包含', value: 'AFT' },
+            { field: 'Extra Information', op: '包含', value: 'AFT' }
+          ],
+          conditionsLogic: 'AND',
           extractByFeature: {
             enabled: true,
             searchFields: ['CustomerRef', 'Extra Information'],
@@ -1116,7 +1147,9 @@
       applyScenariosManagerPreviewState,
       applyScenarioCategorySelectPreviewState,
       // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 preview（4 张）
+      // v2.1.7 F1：C1 dialog 新增 AND 模式 preview（OR fallback baseline + AND 显式各 1 张）
       applyScenarioConfigC1PreviewState,
+      applyScenarioConfigC1AndPreviewState,
       applyScenarioConfigC2PreviewState,
       applyScenarioConfigC3PreviewState,
       applyScenarioConfirmDetailPreviewState,

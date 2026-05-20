@@ -442,7 +442,9 @@ const {
   applyScenariosManagerPreviewState,
   applyScenarioCategorySelectPreviewState,
   // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 preview（4 张）
+  // v2.1.7 F1：C1 dialog 新增 AND 模式 preview
   applyScenarioConfigC1PreviewState,
+  applyScenarioConfigC1AndPreviewState,
   applyScenarioConfigC2PreviewState,
   applyScenarioConfigC3PreviewState,
   applyScenarioConfirmDetailPreviewState,
@@ -5193,6 +5195,11 @@ async function initialize() {
   } else if (info.previewModal === 'scenario-config-c1') {
     setTimeout(() => {
       applyScenarioConfigC1PreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenario-config-c1-and') {
+    // v2.1.7 F1：C1 dialog AND 模式截图入口
+    setTimeout(() => {
+      applyScenarioConfigC1AndPreviewState();
     }, 120);
   } else if (info.previewModal === 'scenario-config-c2') {
     setTimeout(() => {
