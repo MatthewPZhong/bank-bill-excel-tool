@@ -721,7 +721,80 @@ function runScenarioEngineSmokeTests() {
   // F2-F：first-match-wins 防回归 — 上面 C3-1 ~ C3-9 + C3-COND-* + 旧 baseline 全部仍通过
   //   （由 smoke 全套通过验证，不重复用例）
 
-  console.log('  scenario-engines: 40/40 PASS');
+  // ===== v2.1.7 F4：C2 引擎放宽 smoke（spec §5.9 Case F4-A/B/C/D）=====
+  //   F4-A 由 C2-1 ~ C2-5 covered（旧 baseline 2 billTypes + 1 reconFields + markValue）
+  //   新增 F4-B/C/D
+
+  // F4-B：1 billType + 0 reconFields + markValue.type=billTypes[0].seq → 凡命中 billType 的行无条件写赋值
+  {
+    const scenario = {
+      id: 200, name: 'F4-B', category: 'offset-bill-mark',
+      config: {
+        billTypes: [{ seq: 1, field: 'FundType', op: '等于', value: 'targetType' }],
+        reconFields: [],
+        markValue: { type: 1, field: 'CustomFlag', value: 'MARKED' }
+      }
+    };
+    const rows = [
+      { _rowId: 'F4B-r1', FundType: 'targetType',  CustomFlag: '' },       // 命中 billType → 写 MARKED
+      { _rowId: 'F4B-r2', FundType: 'other',       CustomFlag: '' },       // 不命中 → 不写
+      { _rowId: 'F4B-r3', FundType: 'targetType',  CustomFlag: 'OLD' }     // 命中 → 写 MARKED（覆盖 OLD）
+    ];
+    const result = runC2Scenario(scenario, rows);
+    assert.strictEqual(rows[0].CustomFlag, 'MARKED', 'F4-B r1 命中 billType 应写赋值');
+    assert.strictEqual(rows[1].CustomFlag, '', 'F4-B r2 不命中应不改');
+    assert.strictEqual(rows[2].CustomFlag, 'MARKED', 'F4-B r3 命中 + 覆盖原值');
+    assert.strictEqual(result.modifications.length, 2, 'F4-B 2 条 modifications');
+    assert(result.lockedRowIds.has('F4B-r1'), 'F4-B r1 应锁定');
+    assert(result.lockedRowIds.has('F4B-r3'), 'F4-B r3 应锁定');
+    assert(!result.lockedRowIds.has('F4B-r2'), 'F4-B r2 不锁定');
+    // 衍生：无 warnings（不再 return invalid-config）
+    assert.strictEqual(result.warnings.length, 0, 'F4-B 无条件赋值路径无 warning');
+  }
+
+  // F4-C：0 billTypes → 引擎 warning + return（dialog 校验也会拦，但引擎守住红线）
+  {
+    const scenario = {
+      id: 201, name: 'F4-C', category: 'offset-bill-mark',
+      config: {
+        billTypes: [],
+        reconFields: [],
+        markValue: { type: 1, field: 'CustomFlag', value: 'MARKED' }
+      }
+    };
+    const rows = [{ _rowId: 'F4C-r1', FundType: 'X', CustomFlag: '' }];
+    const result = runC2Scenario(scenario, rows);
+    assert.strictEqual(rows[0].CustomFlag, '', 'F4-C billTypes=0 应不改任何行');
+    assert(result.warnings.some(w => w.code === 'invalid-config' && /至少需要 1 行/.test(w.message)), 'F4-C 应 warn invalid-config / 1 行');
+    assert.strictEqual(result.modifications.length, 0, 'F4-C 无 modifications');
+  }
+
+  // F4-D：1 billType + 1 reconFields（左右 typeSeq 都 = 1，自己 vs 自己）
+  //   按 spec §5.9 推荐：dialog 已有 reconFields ≥ 1 + 配对路径，引擎走原配对逻辑
+  //   pairsMatch 比较 leftRow 与 rightRow 同字段：自己 vs 自己永远相等 → 命中
+  //   但 markValue 还是会照旧写入；这里只验证不抛错且行为可预测
+  {
+    const scenario = {
+      id: 202, name: 'F4-D', category: 'offset-bill-mark',
+      config: {
+        billTypes: [{ seq: 1, field: 'FundType', op: '等于', value: 'targetType' }],
+        reconFields: [{ seq: 1, leftType: 1, leftField: 'CustomerRef', rightType: 1, rightField: 'CustomerRef' }],
+        markValue: { type: 1, field: 'CustomFlag', value: 'PAIRED' }
+      }
+    };
+    // 单行 bankRow 自己 vs 自己（leftRows = rightRows = [r1]）→ pairsMatch 比较 r1.CustomerRef vs r1.CustomerRef 相等
+    //   r1 既是 leftRow 又是 rightRow → 一对一配对成功 → 锁定 + 写 CustomFlag
+    const rows = [{ _rowId: 'F4D-r1', FundType: 'targetType', CustomerRef: 'CUST-A', CustomFlag: '' }];
+    let result;
+    assert.doesNotThrow(() => {
+      result = runC2Scenario(scenario, rows);
+    }, 'F4-D 自配对不应抛异常');
+    // 行为可预测：自配对 = 一对一（match.length=1），引擎写 PAIRED
+    assert.strictEqual(rows[0].CustomFlag, 'PAIRED', 'F4-D 自配对引擎应写 markValue');
+    assert(result.lockedRowIds.has('F4D-r1'), 'F4-D 自配对锁定 r1');
+  }
+
+  console.log('  scenario-engines: 43/43 PASS');
 }
 
 module.exports = {
