@@ -262,6 +262,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
     runHistory: (payload) => ipcRenderer.invoke('bizOpRecon:run:history', payload)
   },
   // v2.1.6 Module B：收单单据币种校验
+  // v2.1.7 F6：新增 onImportProgress / onRunProgress 订阅 API（spec §6.4）
+  //   返回 unsubscribe 函数；renderer 必须在 finally 调用避免 listener 内存泄漏
   acquiringBillCurrency: {
     listMonths: () => ipcRenderer.invoke('acquiringBillCurrency:listMonths'),
     sessionStatus: (payload) => ipcRenderer.invoke('acquiringBillCurrency:sessionStatus', payload),
@@ -269,6 +271,16 @@ contextBridge.exposeInMainWorld('desktopApi', {
     importBill: (payload) => ipcRenderer.invoke('acquiringBillCurrency:importBill', payload),
     run: (payload) => ipcRenderer.invoke('acquiringBillCurrency:run', payload),
     export: (payload) => ipcRenderer.invoke('acquiringBillCurrency:export', payload),
-    clearMonth: (payload) => ipcRenderer.invoke('acquiringBillCurrency:clearMonth', payload)
+    clearMonth: (payload) => ipcRenderer.invoke('acquiringBillCurrency:clearMonth', payload),
+    onImportProgress: (listener) => {
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('acquiringBillCurrency:import:progress', wrapped);
+      return () => ipcRenderer.removeListener('acquiringBillCurrency:import:progress', wrapped);
+    },
+    onRunProgress: (listener) => {
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('acquiringBillCurrency:run:progress', wrapped);
+      return () => ipcRenderer.removeListener('acquiringBillCurrency:run:progress', wrapped);
+    }
   }
 });

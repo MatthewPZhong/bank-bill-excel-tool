@@ -4243,6 +4243,45 @@ function setAcquiringBillCurrencyStatus(message, tone = 'info') {
   if (tone) box.classList.add('is-' + tone);
 }
 
+// v2.1.7 F6：进度事件 → 状态框文案 helper（spec §6.5）
+//   import 阶段：
+//     - reading      → '正在导入 xxx.xlsx 文件 (i/n 个文件)'
+//     - inserting    → '正在写入 xxx：已读取 N 行 (i/n 个文件)'
+//   run 阶段：
+//     - clearing-old-runs / computing-stats / inserting-run / sql-joining / writing-xlsx / updating-paths
+//   未识别事件 → 返回空串（caller 跳过 setStatus，保留前一文案）
+function formatAcquiringBillCurrencyProgress(ev) {
+  if (!ev || !ev.phase) return '';
+  if (ev.phase === 'import') {
+    if (ev.stage === 'reading') {
+      const i = (typeof ev.fileIndex === 'number') ? ev.fileIndex + 1 : '?';
+      const n = ev.fileCount || '?';
+      const file = ev.filePath ? String(ev.filePath).split(/[\\/]/).pop() : '?';
+      return `正在导入 ${file} 文件 (${i}/${n} 个文件)`;
+    }
+    if (ev.stage === 'inserting') {
+      const i = (typeof ev.fileIndex === 'number') ? ev.fileIndex + 1 : '?';
+      const n = ev.fileCount || '?';
+      const file = ev.sourceFile || '?';
+      const c = (ev.importedCount || 0).toLocaleString();
+      return `正在写入 ${file}：已读取 ${c} 行 (${i}/${n} 个文件)`;
+    }
+    return '';
+  }
+  if (ev.phase === 'run') {
+    switch (ev.stage) {
+      case 'clearing-old-runs': return '正在清理该月旧 run 数据...';
+      case 'computing-stats':   return '正在统计行数...';
+      case 'inserting-run':     return '正在创建 run 记录...';
+      case 'sql-joining':       return '正在做 SQL JOIN 比对币种...';
+      case 'writing-xlsx':      return '正在写入差异表 Excel...';
+      case 'updating-paths':    return '正在回填文件路径...';
+      default: return `运行中：${ev.stage}`;
+    }
+  }
+  return '';
+}
+
 function restoreAcquiringBillCurrencyPanelState() {
   setAcquiringBillCurrencyStatus('欢迎使用小助手', 'info');
   // fix5：删月份下拉后，按钮可用性不再依赖 selectedMonth，4 按钮均默认 enabled
@@ -4290,6 +4329,19 @@ async function runAcquiringBillCurrencyImport(kind) {
 
   setAcquiringBillCurrencyButtonsDisabled(true);
   setAcquiringBillCurrencyStatus(`正在导入${labelTable}（${monthKey}）...`, 'info');
+
+  // v2.1.7 F6：订阅 import 进度事件（spec §6.5）；finally 必须 unsubscribe 防内存泄漏
+  let unsubscribe = null;
+  try {
+    const api = window.desktopApi && window.desktopApi.acquiringBillCurrency;
+    if (api && typeof api.onImportProgress === 'function') {
+      unsubscribe = api.onImportProgress((ev) => {
+        const text = formatAcquiringBillCurrencyProgress(ev);
+        if (text) setAcquiringBillCurrencyStatus(text, 'info');
+      });
+    }
+  } catch (_e) { /* swallow — preload 异常不应中断业务流程 */ }
+
   try {
     // 第 2 步：调 IPC 选文件 + peek + 月份校验 + 导入
     const first = await apiCall({ monthKey });
@@ -4337,6 +4389,10 @@ async function runAcquiringBillCurrencyImport(kind) {
   } catch (e) {
     setAcquiringBillCurrencyStatus(`${labelTable}导入异常：${e.message || e}`, 'error');
   } finally {
+    // v2.1.7 F6：显式 unsubscribe 防 listener 累积（切到其它模块再回来不报错）
+    if (typeof unsubscribe === 'function') {
+      try { unsubscribe(); } catch (_e) { /* swallow */ }
+    }
     setAcquiringBillCurrencyButtonsDisabled(false);
   }
 }
@@ -4358,6 +4414,19 @@ async function handleAcquiringBillCurrencyRun() {
   }
   setAcquiringBillCurrencyButtonsDisabled(true);
   setAcquiringBillCurrencyStatus(`正在对账（${monthKey}）...`, 'info');
+
+  // v2.1.7 F6：订阅 run 进度事件（6 阶段）；finally 必须 unsubscribe
+  let unsubscribe = null;
+  try {
+    const api = window.desktopApi && window.desktopApi.acquiringBillCurrency;
+    if (api && typeof api.onRunProgress === 'function') {
+      unsubscribe = api.onRunProgress((ev) => {
+        const text = formatAcquiringBillCurrencyProgress(ev);
+        if (text) setAcquiringBillCurrencyStatus(text, 'info');
+      });
+    }
+  } catch (_e) { /* swallow */ }
+
   try {
     const result = await window.desktopApi.acquiringBillCurrency.run({ monthKey });
     if (result.status !== 'success') {
@@ -4374,6 +4443,9 @@ async function handleAcquiringBillCurrencyRun() {
   } catch (e) {
     setAcquiringBillCurrencyStatus(`对账异常：${e.message || e}`, 'error');
   } finally {
+    if (typeof unsubscribe === 'function') {
+      try { unsubscribe(); } catch (_e) { /* swallow */ }
+    }
     setAcquiringBillCurrencyButtonsDisabled(false);
   }
 }
