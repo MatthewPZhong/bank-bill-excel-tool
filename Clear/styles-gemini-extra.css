@@ -396,6 +396,9 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
   display: flex; align-items: center; justify-content: center;
 }
 .ba-file-name {
+  /* v2.1.7 F3：与 src/ 同步 — flex 子项缺 min-width:0 → ellipsis 触发不了导致 "PP..." */
+  min-width: 0;
+  flex: 1 1 auto;
   font-family: "Roboto Mono", ui-monospace, monospace;
   font-size: 13px;
   color: var(--text);

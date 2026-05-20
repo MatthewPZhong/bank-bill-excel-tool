@@ -1020,6 +1020,11 @@ select {
 }
 
 .big-account-file-meta {
+  /* v2.1.7 F3：multiMode-grouped 拼接后缀（→ 大账号）后挤压触发 ellipsis 只剩 "PP..."
+     根因是 flex 子项默认 min-width:auto = content size 不让缩；显式 min-width:0 + flex:1 1 auto 后
+     ellipsis 规则才能生效（PRD §四 / spec §4.1 改动点 1） */
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
