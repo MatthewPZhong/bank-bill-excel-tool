@@ -550,7 +550,7 @@
 
 1. **场景管理**：维护"场景"清单。每条场景属于 3 类之一：
    - **提取ReconId-From Self**（C1）：从银行对账单字段里按特征码 / 长度 / 其他字段值提取 `ReconciliationId`
-   - **账单打标**（C2）：双类型行（如 outbound Fail / outbound）按 CustomerRef + 金额配对，把 outbound 改标为 outbound Fail
+   - **银行对账单字段赋值**（C2）：账单类型 ≥ 1 行 + 对账字段允许 0 行；当 ≥ 2 类型 + ≥ 1 对账字段时走笛卡尔配对（如 outbound Fail / outbound 按 CustomerRef + 金额配对）；当 1 类型 + 0 对账字段时凡命中该类型的行直接写赋值（v2.1.7 F4 改名 + 校验放宽，原名"账单打标"）
    - **提取ReconId-From 网关**（C3）：与「资金对账不平结果表」按币种 + 金额 + MerchantId + Channel 4 字段 AND 匹配，把网关侧 reconciliationId 写入银行单
 2. **导入文件**：选择银行对账单 xlsx；表头列数 / 列名顺序严格校验，任一不符整批拒绝。导入成功后，**若启用了 C3 类场景且未导入资金对账不平结果表，会立即弹 confirmDialog 询问是否导入**。
 3. **开始运行**：按 `priority desc, id asc` 顺序执行所有启用的场景；**first-match-wins**——一行被高优先级场景锁定后，低优先级场景跳过该行；命中场景的 ID 显示在状态框 `（场景 1、3）`。

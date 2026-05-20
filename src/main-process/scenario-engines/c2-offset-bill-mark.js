@@ -1,4 +1,4 @@
-// v2.0.0-beta.3：C2 冲销账单打标 算法引擎
+// v2.0.0-beta.3：C2 冲销账单打标 算法引擎（v2.1.7 F4 UI 展示名 → 银行对账单字段赋值）
 // PRD §7.2 / §10 决策 D3
 // v2.1.7 F4：UI 改名「账单打标」→「银行对账单字段赋值」（DB category 'offset-bill-mark' 不变）
 //   引擎校验放宽：billTypes < 2 → < 1；reconFields = 0 不再 return，走「衍生方案 A 无条件赋值」
@@ -160,7 +160,7 @@ function runC2Scenario(scenario, bankRows) {
     }
   });
 
-  // 写打标值（跳过被 blocked 的 rightRow）
+  // 写赋值（跳过被 blocked 的 rightRow）— v2.1.7 F4 注释术语更新
   // PRD §7.2：配对成功后 r1 + matched[0] 都被场景命中（→ first-match-wins 锁定），
   // 不论实际改字段的是哪一侧（Codex PR #31 F2 P1 修复）
   successfulPairs.forEach(({ leftRow, rightRow }) => {

@@ -5389,7 +5389,8 @@
     // 内置场景与用户场景同等地位（D14）：可删除可编辑
     const SCENARIO_CATEGORY_LABELS = {
       'extract-recon-id': '提取ReconId-From Self',
-      'offset-bill-mark': '账单打标',
+      // v2.1.7 F4：类别展示名重命名 — '账单打标' → '银行对账单字段赋值'（DB category 不变）
+      'offset-bill-mark': '银行对账单字段赋值',
       'gateway-recon-join': '提取ReconId-From 网关',
       // v2.1.0-beta.1 PR-A（task A6）：单据对账修复
       // v2.1.0-beta.3 修订（用户反馈）：'单据对账修复' → '单据对账单修复'
@@ -5638,7 +5639,7 @@
     function createScenarioCategorySelectDialog(allowedCategories = null) {
       const ALL_CATEGORY_OPTIONS = [
         { value: 'extract-recon-id', label: '提取ReconId-From Self' },
-        { value: 'offset-bill-mark', label: '账单打标' },
+        { value: 'offset-bill-mark', label: '银行对账单字段赋值' },
         { value: 'gateway-recon-join', label: '提取ReconId-From 网关' },
         { value: 'recon-id-fix', label: '单据对账 ReconID 修复' },
         { value: 'gateway-recon-id-fix', label: '网关对账单 ReconID 修复' }
@@ -6647,7 +6648,7 @@
             </div>
           </div>
           <div class="scenario-config-row">
-            <span class="scenario-config-label">打标值</span>
+            <span class="scenario-config-label">赋值</span>
             <div class="scenario-config-vs-row" data-mark-value-row></div>
           </div>
         </div>
@@ -6799,7 +6800,7 @@
         renderReconFields();
       });
 
-      // 行 5 打标值
+      // 行 5 赋值（v2.1.7 F4 重命名）
       markRow.addEventListener('change', (event) => {
         const ctl = event.target.closest('[data-mark-field]');
         if (!ctl) return;
@@ -7564,7 +7565,7 @@
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">账单类型：</span><ul>${(c.billTypes || []).map((bt) => `<li>#${bt.seq}：${escapeHtml(bt.field)} ${escapeHtml(bt.op)}${opNeedsValue(bt.op) ? ' ' + escapeHtml(String(bt.value || '')) : ''}</li>`).join('')}</ul></div>`;
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段：</span><ul>${(c.reconFields || []).map((r) => `<li>类型#${r.leftType} ${escapeHtml(r.leftField)} = 类型#${r.rightType} ${escapeHtml(r.rightField)}</li>`).join('')}</ul></div>`;
         const mv = c.markValue || {};
-        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">打标：</span>类型#${mv.type} 的 ${escapeHtml(mv.field || '')} 写入 "${escapeHtml(String(mv.value || ''))}"</div>`;
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">赋值：</span>类型#${mv.type} 的 ${escapeHtml(mv.field || '')} 写入 "${escapeHtml(String(mv.value || ''))}"</div>`;
       } else if (draft.category === 'gateway-recon-join') {
         // v2.1.5 N3：conditions 段（仅当 ≥ 1 行时渲染）
         const conds = Array.isArray(c.conditions) ? c.conditions : [];
