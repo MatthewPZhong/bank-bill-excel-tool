@@ -576,26 +576,53 @@ async function caseO_settleAmountEmpty() {
   const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-15';
-    const flowRow = new Array(48).fill('');
-    flowRow[0] = date; flowRow[6] = 'O1'; flowRow[12] = '10'; flowRow[13] = 'USD';
-    flowRow[28] = ''; // 通道清算金额空（业务上 S10010706 等非清算子类型）
-    flowRow[29] = ''; // 通道清算币种也空
-    await writeXlsx(path.join(tmpdir, 'flow.xlsx'), FLOW_HEADERS, [flowRow]);
+    // 流水 1: 金额币种都空（非清算流水）+ 有对应单据
+    const flowRowEmpty = new Array(48).fill('');
+    flowRowEmpty[0] = date; flowRowEmpty[6] = 'O_EMPTY'; flowRowEmpty[12] = '10'; flowRowEmpty[13] = 'USD';
+    flowRowEmpty[28] = ''; // 通道清算金额空
+    flowRowEmpty[29] = ''; // 通道清算币种也空
+    // 流水 2: 正常清算流水
+    const flowRowNormal = new Array(48).fill('');
+    flowRowNormal[0] = date; flowRowNormal[6] = 'O_NORMAL'; flowRowNormal[12] = '20'; flowRowNormal[13] = 'USD';
+    flowRowNormal[28] = '20'; flowRowNormal[29] = 'USD';
+    await writeXlsx(path.join(tmpdir, 'flow.xlsx'), FLOW_HEADERS, [flowRowEmpty, flowRowNormal]);
+
+    // 单据：两行都有币种（与流水 O_EMPTY/O_NORMAL 对应）
+    const billEmpty = makeBill('O_EMPTY', date, '10', 'EUR'); // 与流水侧空形成「流水空 vs 单据有」
+    const billNormal = makeBill('O_NORMAL', date, '20', 'USD'); // 与流水侧一致 → 不入差异
+    await writeXlsx(path.join(tmpdir, 'bill.xlsx'), BILL_HEADERS, [billEmpty, billNormal]);
 
     // 入库不应抛错
     let threw = false;
     try {
       await session.importFlowFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'flow.xlsx')] });
+      await session.importBillFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'bill.xlsx')] });
     } catch (e) {
       threw = true;
     }
     assertTrue(!threw, 'O.金额空入库成功');
 
-    const dbRows = db.db.prepare('SELECT settle_amount, settle_amount_abs, settle_currency FROM acquiring_bill_currency_flow_imports').all();
-    assertEq(dbRows.length, 1, 'O.入库 1 行');
+    // O.1 入库 sanity check
+    const dbRows = db.db.prepare("SELECT settle_amount, settle_amount_abs, settle_currency, settle_currency_norm FROM acquiring_bill_currency_flow_imports WHERE recon_main_id = 'O_EMPTY'").all();
+    assertEq(dbRows.length, 1, 'O.flow O_EMPTY 入库 1 行');
     assertEq(dbRows[0].settle_amount, '', 'O.settle_amount 空字符串');
     assertEq(dbRows[0].settle_amount_abs, '', 'O.settle_amount_abs 空字符串');
     assertEq(dbRows[0].settle_currency, '', 'O.settle_currency 空字符串');
+    assertEq(dbRows[0].settle_currency_norm, '', 'O.settle_currency_norm 空字符串');
+
+    // O.2（PR #50 NewF1 修正）：run 后，空金额/币种行**保留参与对账**，作为「流水空 vs 单据有」mismatch 入 diff_rows
+    const r = await session.runCheck({ db: db.db, monthKey: '2026-03', storageRoot: tmpdir });
+    assertEq(r.mismatchRows, 1, 'O.run 后 mismatch_rows = 1（O_EMPTY 流水空 vs O_EMPTY 单据 EUR）');
+    assertEq(r.matchedRows, 2, 'O.run 后 matched_rows = 2（两行都 INNER JOIN 上）');
+
+    // 注意：fix9 cleanup 是 main.js handler 异步触发的；smoke 走 session.runCheck 不触发 cleanup
+    // 所以 diff_rows 这里还在
+    const diffRows = db.db.prepare("SELECT flow_currency, flow_amount_abs, diff_type FROM acquiring_bill_currency_diff_rows WHERE run_id = ?").all(r.runId);
+    assertEq(diffRows.length, 1, 'O.diff_rows 含 1 行（流水空对单据非空）');
+    assertEq(diffRows[0].flow_currency, '', 'O.diff_rows.flow_currency = 空字符串（流水侧 settle_currency 原值）');
+    assertEq(diffRows[0].flow_amount_abs, '', 'O.diff_rows.flow_amount_abs = 空字符串（流水侧 settle_amount_abs 原值）');
+    // spec §5.2 SQL CASE 判 diff_type 看单据侧 settle_currency_norm — 单据有币种 → currency_mismatch（不是 bill_currency_missing）
+    assertEq(diffRows[0].diff_type, 'currency_mismatch', 'O.diff_type = currency_mismatch（单据侧有币种）');
   } finally {
     cleanup();
   }

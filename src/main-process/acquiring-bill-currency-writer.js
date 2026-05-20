@@ -76,7 +76,7 @@ function formatRanAtLocal(ranAt) {
 
 // v0.14 fix11：按账单日期升序贪心切分 segments
 //   - segments[i] = { startDate, endDate, rowCount }
-//   - 同一日期内的行不切开（rowCount 累计超过 MAX 时切到下一 sheet）
+//   - 同一日期内的行不切开（rowCount 累计超过 MAX 时切到下一 sheet；单日 > MAX 时单 segment 携带大 rowCount，Pass 2 写入时自动切多 sub-sheet 加后缀 (2)(3)）
 //   - 0 差异行：返回单个空 segment（仍输出 1 个空表头 sheet）
 //   - 账单日期为空 ''：归入第一个 segment（不参与切分判断）
 function planSegments(dateCounts) {
@@ -144,9 +144,14 @@ async function writeDiffWorkbook({ db, runId, monthKey, savePath, runElapsedMs =
   let totalWritten = 0;
 
   for (const seg of segments) {
-    const sheetName = fmtSheetName(seg);
-    const sheet = writer.addWorksheet(sheetName);
+    const sheetBaseName = fmtSheetName(seg);
+    // PR #50 Codex P1：单 segment 写入时实时检测行数，超 MAX 自动开 sub-sheet 加后缀 (2)(3)
+    // 触发条件：单日差异行 > MAX_DATA_ROWS_PER_SHEET（罕见 edge case）
+    let sheet = writer.addWorksheet(sheetBaseName);
     sheet.addRow(WRITER_OUTPUT_HEADERS.slice()).commit();
+    let curSubSheetName = sheetBaseName;
+    let curSubSheetRowCount = 0;
+    let subSheetIndex = 1;
 
     let segWritten = 0;
     if (seg.rowCount > 0) {
@@ -161,6 +166,17 @@ async function writeDiffWorkbook({ db, runId, monthKey, savePath, runElapsedMs =
         });
         if (rows.length === 0) break;
         for (const d of rows) {
+          // 当前 sub-sheet 满 MAX → commit + 开新 sub-sheet
+          if (curSubSheetRowCount >= MAX_DATA_ROWS_PER_SHEET) {
+            await sheet.commit();
+            segmentStats.push({ sheetName: curSubSheetName, startDate: seg.startDate, endDate: seg.endDate, rowCount: curSubSheetRowCount });
+            subSheetIndex++;
+            const subName = sanitizeSheetName(`${sheetBaseName}(${subSheetIndex})`);
+            sheet = writer.addWorksheet(subName);
+            sheet.addRow(WRITER_OUTPUT_HEADERS.slice()).commit();
+            curSubSheetName = subName;
+            curSubSheetRowCount = 0;
+          }
           const rawObj = JSON.parse(d.bill_raw_json);
           const row = new Array(WRITER_OUTPUT_HEADERS.length);
           // 第 1-26 列：按 BILL_HEADERS 顺序取 raw_json 值
@@ -175,6 +191,7 @@ async function writeDiffWorkbook({ db, runId, monthKey, savePath, runElapsedMs =
           // 第 29 列：流水_通道清算金额
           row[BILL_HEADERS.length + 2] = d.flow_amount_abs === null ? '' : d.flow_amount_abs;
           sheet.addRow(row).commit();
+          curSubSheetRowCount++;
         }
         segWritten += rows.length;
         offset += rows.length;
@@ -183,7 +200,7 @@ async function writeDiffWorkbook({ db, runId, monthKey, savePath, runElapsedMs =
     }
     await sheet.commit();
     totalWritten += segWritten;
-    segmentStats.push({ sheetName, startDate: seg.startDate, endDate: seg.endDate, rowCount: segWritten });
+    segmentStats.push({ sheetName: curSubSheetName, startDate: seg.startDate, endDate: seg.endDate, rowCount: curSubSheetRowCount });
   }
 
   const diffWriteElapsedMs = Date.now() - diffWriteT0;

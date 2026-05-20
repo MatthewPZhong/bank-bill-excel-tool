@@ -43,6 +43,11 @@ function updateRunPaths(db, { runId, diffFilePath, reportFilePath }) {
     .run(diffFilePath || null, reportFilePath || null, runId);
 }
 
+// PR #50 NewF2：写盘失败后 run.status 改 'success-no-files'，让 cleanupOrphanData 跳过此类可恢复 run
+function updateRunStatus(db, { runId, status }) {
+  db.prepare(`UPDATE ${RUNS_TABLE} SET status = ? WHERE id = ?`).run(status, runId);
+}
+
 // 清空某月历史 runs + diff_rows（重新运行前调用，避免累积旧 diff_rows）
 function clearRunsByMonth(db, monthKey) {
   db.prepare(`DELETE FROM ${DIFF_TABLE} WHERE run_id IN (SELECT id FROM ${RUNS_TABLE} WHERE month_key = ?)`).run(monthKey);
@@ -187,6 +192,7 @@ module.exports = {
   getRunById,
   getLatestRun,
   updateRunPaths,
+  updateRunStatus,
   clearRunsByMonth,
   insertDiffRowsByJoin,
   computeRunStats,

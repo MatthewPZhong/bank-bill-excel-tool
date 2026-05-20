@@ -288,14 +288,18 @@ async function streamImportOneFile({
       sharedStrings = [];
     }
 
-    await streamSheetRows({
+    // PR #50 NewF3：streamSheetRows resolve 时携带 stopValue（header 错的 ImportValidationError），优先 rethrow
+    // 避免被下面的「xlsx 无表头」兜底吞掉真实表头列差异明细
+    const streamStopValue = await streamSheetRows({
       zip,
       sheetEntry,
       expectedHeaders,
       sharedStrings,
       onRow: ({ rowR, values }) => {
         if (rowR === 1) {
-          const headerCells = values.slice(0, expectedHeaders.length).map((v) => v == null ? '' : String(v));
+          // PR #50 CodexP2：不 truncate 到 expectedHeaders.length，让 validator 检测「列多」情况
+          // 旧实现 `.slice(0, expectedHeaders.length)` 永远裁到 expected 长度 → 列多被静默忽略
+          const headerCells = values.map((v) => v == null ? '' : String(v));
           const headerResult = validateHeaders(headerCells);
           if (!headerResult.ok) {
             const err = new ImportValidationError(
@@ -374,8 +378,11 @@ async function streamImportOneFile({
 
     // 行流被 header 失败 stop 时，headerValidated=false → 抛出之前累积的错
     if (!headerValidated) {
-      // streamSheetRows 已经 resolve(stopValue=err)；这里 err 已被 stopValue 携带回来。
-      // 但流程上更稳：检查 errors 中是否有 header 失败信号，没有则报缺表头
+      // PR #50 NewF3：streamSheetRows resolve 时携带 stopValue（含 ImportValidationError 的 detailLines），优先 rethrow
+      // 旧实现这里抛「xlsx 无表头（r=1）」会吞掉真实的列差异明细，多文件批量导入时把后续文件错误误报
+      if (streamStopValue instanceof ImportValidationError) {
+        throw streamStopValue;
+      }
       throw new ImportValidationError(`${sourceFile}：xlsx 无表头（r=1）`, []);
     }
   } finally {

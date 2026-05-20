@@ -213,9 +213,16 @@ async function runCheck({ db, monthKey, storageRoot }) {
       reportFilePath = out.reportFilePath;
       runRepo.updateRunPaths(db, { runId, diffFilePath, reportFilePath });
     } catch (writeError) {
-      // 写盘失败不回滚 DB；run 记录 status 改 'success-no-files' 表示数据有效但文件未生成
+      // PR #50 NewF2：写盘失败不回滚 DB；run.status 改 'success-no-files'（数据有效但文件未生成）
+      // 让 cleanupOrphanData 识别此状态为「可恢复」不清数据；用户可手动修复路径/权限后重跑 / 重新生成
       // eslint-disable-next-line no-console
-      console.error('[acquiring-bill-currency] run 写盘失败（DB 已 COMMIT）:', writeError && writeError.message);
+      console.error('[acquiring-bill-currency] run 写盘失败（DB 已 COMMIT，run.status → success-no-files）:', writeError && writeError.message);
+      try {
+        runRepo.updateRunStatus(db, { runId, status: 'success-no-files' });
+      } catch (statusErr) {
+        // eslint-disable-next-line no-console
+        console.error('[acquiring-bill-currency] updateRunStatus 失败:', statusErr && statusErr.message);
+      }
       throw writeError;
     }
   }
@@ -276,7 +283,10 @@ async function cleanupAfterRunBackground({ db, monthKey, runId, onProgress }) {
 
 // v0.13 fix10：启动期孤儿数据清理
 // 触发：app.whenReady + migration 完成后，main.js setImmediate 后台调
-// 孤儿定义：① runs.status != 'success'；② runs.status='success' 但 diff/report 文件丢失（fix7 之前 OOM 闪退后 writer 中途崩，DB 已 COMMIT 但 xlsx 未生成）
+// 孤儿定义（PR #50 NewF2 修正）：
+//   ① runs.status != 'success' AND runs.status != 'success-no-files'（真正异常：中断 / OOM 闪退 / 强制退出）
+//   ② runs.status='success' 但 diff/report 文件丢失（fix7 之前 OOM 闪退后 writer 中途崩，DB 已 COMMIT 但 xlsx 未生成）
+//   ③ runs.status='success-no-files' → 跳过（NewF2：可恢复 run，用户可重跑 / 修复路径后再导出，cleanup 不动数据）
 // Phase 1 收集 orphan runs → Phase 2 对每个 orphan 复用 cleanupAfterRunBackground + DELETE run 记录 → Phase 3 兜底清 ghost diff_rows（run_id 不在 runs 表）
 // 用户感知：main.js 加 onProgress 回调更新主面板状态文案「清理上次未完成的对账数据中…」
 // 失败容忍：单条 orphan 清理抛错只 console.error，不中断整个 cleanup 流程
@@ -290,6 +300,8 @@ async function cleanupOrphanData({ db, onProgress }) {
 
   const orphanRuns = [];
   for (const run of allRuns) {
+    // NewF2：'success-no-files' 是可恢复状态，跳过 cleanup
+    if (run.status === 'success-no-files') continue;
     const fileBroken = !run.diff_file_path || !run.report_file_path
       || !fs.existsSync(run.diff_file_path) || !fs.existsSync(run.report_file_path);
     if (run.status !== 'success' || fileBroken) {

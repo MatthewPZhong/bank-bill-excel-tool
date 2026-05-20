@@ -43,6 +43,13 @@ v2.1.5 之后追加 patch 迭代，2 块独立改动：**Module A 个人痕迹�
   - **后端 handler 级 mutex**：`main.js` 的 `acquiringBillCurrencyImportLock.inFlight` 全局 flag；handler 入口检查，已 inFlight 立即返回 `{ status: 'error', message: '当前已有导入任务在执行...' }`
   - **前端按钮禁用**：`renderer.js` 的 `runAcquiringBillCurrencyImport` 入口禁用 4 个按钮，finally 恢复（`refreshAcquiringBillCurrencyStatus` 按当前状态重置 Run/Export 启用）
   - **session.js 容错性补强**：`safeRollback` 吞掉 "no active txn" 二次错避免掩盖主错；`safeBegin` 仅作语义包装**不主动清理事务**（会破坏并发其他 IPC 路径的事务）；所有 4 处事务边界（`importFilesInTransaction` / `importFilesWithOverwrite` / `runCheck` / `clearMonth`）统一改造
+- **PR #50 round 2 reviewer findings 修复**（spec v0.18）：
+  - **NewF1 [P1]** spec Case O 描述错（code 保留正确）：spec Case O 写「run JOIN 跳过空金额行」但实际 code 保留参与对账。实测 466w 流水 30,057 行（0.6%）金额币种**同步**为空（0 单边空）+ 461w 单据 100% 都有币种 → 用户业务意图 = 空金额行保留参与对账，对单据有币种时 COALESCE 比较 `''` ≠ `非空` 触发 mismatch 写入差异表，财务能看到「单据有币种但流水非清算」状态。**修 spec 不修 code**：Case O 描述「跳过」→「保留参与对账，写 currency_mismatch」+ USER_GUIDE §1.8.6 同步；smoke Case O 加 7 个 assert 验证 run 行为
+  - **CodexP1 [P1]** writer Pass 2 加单 sheet 行数实时检测 + 超 MAX 开 sub-sheet 后缀 `(2)(3)`（防单日 > 1,048,575 行 edge case；planSegments 保持原逻辑同日不切，Pass 2 内部细切）
+  - **NewF2 [P2]** `session.runCheck` 写盘失败 catch **真正** `runs.status='success-no-files'`（之前注释说做但 code 没做）；run-repository 新增 `updateRunStatus`；`cleanupOrphanData` 跳过 `'success-no-files'` 识别为可恢复 run 不清数据；用户写盘失败后修复路径/权限可重新生成而非数据被清
+  - **NewF3 [P2]** reader `streamImportOneFile` 接 `streamSheetRows` resolve 返回值 `streamStopValue`，header 失败时优先 rethrow 携带 detailLines（之前抛「xlsx 无表头」吞掉真实列差异；多文件批量导入误报）
+  - **CodexP2 [P2]** reader header 解析去 `.slice(0, expectedHeaders.length)` truncate，让 validator 看到实际列数（之前列多被静默忽略，弱化模板列数严格校验）
+  - smoke 161 → 168（Case O +7）
 - **PR #50 reviewer findings F1+F2+F3 修复**（spec v0.17）：
   - **F1 [P1]** Windows CI smoke 失败：`setupTmpDb()` 打开 `AppDatabase` 后没关 DB 就 `fs.rmSync(tmpdir)` → Windows `EBUSY: resource busy or locked, unlink ... t.sqlite`。修复：`setupTmpDb()` 返回 `{ tmpdir, db, cleanup }`，cleanup 先 `db.db.close()` 再 `fs.rmSync`；21 处 case finally 统一改用 `cleanup()`
   - **F2 [P1]** reader 允许 `YYYY/MM/DD` 但 writer fmtSheetName 仅识别 `-`：① validator.js 新增 `normalizeBillDate(raw)` 支持 `YYYY-MM-DD` / `YYYY/M/D` / 含时间 / 无时间各种格式归一化为 `YYYY-MM-DD`；② import-repository insertFlowRow/insertBillRow 写 raw_json 前对索引 0「账单日期」字段调 `normalizeBillDate`（SQL `GROUP BY json_extract` 不会因 `/` vs `-` 拆成两组）；③ writer.js 加 `sanitizeSheetName` 防御性兜底（替换 `/\*?[]:` 为 `-` + 截断到 31 字符 Excel 上限）；smoke 加 Case F2（16 个 assert）

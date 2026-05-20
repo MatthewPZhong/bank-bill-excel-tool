@@ -1,15 +1,15 @@
 {
   "meta": {
     "version": "2.1.6",
-    "scannedAt": "2026-05-20T01:52:53.238Z",
+    "scannedAt": "2026-05-20T03:02:04.401Z",
     "root": "src",
     "totalFiles": 85,
-    "totalTopLevelNames": 850,
+    "totalTopLevelNames": 851,
     "buckets": {
       "shared": 146,
-      "paired": 246,
+      "paired": 247,
       "local": 358,
-      "crossFile": 392
+      "crossFile": 393
     }
   },
   "A": {
@@ -1317,7 +1317,7 @@
         "refFiles": [
           {
             "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-            "count": 8
+            "count": 9
           },
           {
             "file": "src/backend/bank-bu-recon-db/month-repository.js",
@@ -1332,7 +1332,7 @@
             "count": 11
           }
         ],
-        "totalHits": 29,
+        "totalHits": 30,
         "fileSpan": 4
       },
       {
@@ -4481,6 +4481,25 @@
         "fileSpan": 2
       },
       {
+        "name": "runRepo",
+        "defFiles": [
+          "src/main-process/acquiring-bill-currency-session.js",
+          "src/main-process/acquiring-bill-currency-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 8
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 2
+      },
+      {
         "name": "BIZ_OP_ACCOUNT_KEY_DB_COLUMN",
         "defFiles": [
           "src/backend/biz-op-recon-db/columns.js"
@@ -4511,25 +4530,6 @@
           {
             "file": "src/renderer.js",
             "count": 2
-          }
-        ],
-        "totalHits": 11,
-        "fileSpan": 2
-      },
-      {
-        "name": "runRepo",
-        "defFiles": [
-          "src/main-process/acquiring-bill-currency-session.js",
-          "src/main-process/acquiring-bill-currency-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/acquiring-bill-currency-session.js",
-            "count": 7
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-writer.js",
-            "count": 4
           }
         ],
         "totalHits": 11,
@@ -5521,6 +5521,25 @@
         "fileSpan": 2
       },
       {
+        "name": "sanitizeSheetName",
+        "defFiles": [
+          "src/backend/pending-export/writer.js",
+          "src/main-process/acquiring-bill-currency-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
         "name": "splitSignedAmountValue",
         "defFiles": [
           "src/backend/file-service/normalizers.js"
@@ -5533,6 +5552,24 @@
           {
             "file": "src/backend/file-service/normalizers.js",
             "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "WRITER_OUTPUT_HEADERS",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 4
           }
         ],
         "totalHits": 6,
@@ -5942,25 +5979,6 @@
         "fileSpan": 2
       },
       {
-        "name": "sanitizeSheetName",
-        "defFiles": [
-          "src/backend/pending-export/writer.js",
-          "src/main-process/acquiring-bill-currency-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-export/writer.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-writer.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
         "name": "setExportAvailability",
         "defFiles": [
           "src/renderer.js"
@@ -6103,24 +6121,6 @@
           {
             "file": "src/backend/acquiring-bill-currency-import/validator.js",
             "count": 2
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
-        "name": "WRITER_OUTPUT_HEADERS",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/columns.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/columns.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-writer.js",
-            "count": 3
           }
         ],
         "totalHits": 5,
@@ -8422,6 +8422,24 @@
         "fileSpan": 2
       },
       {
+        "name": "updateRunStatus",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "upsertMonthMeta",
         "defFiles": [
           "src/backend/pending-db/month-repository.js"
@@ -8788,10 +8806,10 @@
         "refFiles": [
           {
             "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 14
+            "count": 15
           }
         ],
-        "totalHits": 14,
+        "totalHits": 15,
         "fileSpan": 1
       },
       {
@@ -9985,6 +10003,20 @@
         "fileSpan": 1
       },
       {
+        "name": "MAX_DATA_ROWS_PER_SHEET",
+        "defFiles": [
+          "src/main-process/acquiring-bill-currency-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "mixRgb",
         "defFiles": [
           "src/renderer.js"
@@ -11014,20 +11046,6 @@
         "refFiles": [
           {
             "file": "src/backend/pending-reconcile/engine.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "MAX_DATA_ROWS_PER_SHEET",
-        "defFiles": [
-          "src/main-process/acquiring-bill-currency-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/acquiring-bill-currency-writer.js",
             "count": 3
           }
         ],
@@ -15014,7 +15032,7 @@
       "refFiles": [
         {
           "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "count": 8
+          "count": 9
         },
         {
           "file": "src/backend/bank-bu-recon-db/month-repository.js",
@@ -15029,7 +15047,7 @@
           "count": 11
         }
       ],
-      "totalHits": 29,
+      "totalHits": 30,
       "fileSpan": 4
     },
     {
@@ -18176,6 +18194,25 @@
       "fileSpan": 2
     },
     {
+      "name": "runRepo",
+      "defFiles": [
+        "src/main-process/acquiring-bill-currency-session.js",
+        "src/main-process/acquiring-bill-currency-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 8
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-writer.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 2
+    },
+    {
       "name": "BIZ_OP_ACCOUNT_KEY_DB_COLUMN",
       "defFiles": [
         "src/backend/biz-op-recon-db/columns.js"
@@ -18206,25 +18243,6 @@
         {
           "file": "src/renderer.js",
           "count": 2
-        }
-      ],
-      "totalHits": 11,
-      "fileSpan": 2
-    },
-    {
-      "name": "runRepo",
-      "defFiles": [
-        "src/main-process/acquiring-bill-currency-session.js",
-        "src/main-process/acquiring-bill-currency-writer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/acquiring-bill-currency-session.js",
-          "count": 7
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-writer.js",
-          "count": 4
         }
       ],
       "totalHits": 11,
@@ -19216,6 +19234,25 @@
       "fileSpan": 2
     },
     {
+      "name": "sanitizeSheetName",
+      "defFiles": [
+        "src/backend/pending-export/writer.js",
+        "src/main-process/acquiring-bill-currency-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-writer.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
       "name": "splitSignedAmountValue",
       "defFiles": [
         "src/backend/file-service/normalizers.js"
@@ -19228,6 +19265,24 @@
         {
           "file": "src/backend/file-service/normalizers.js",
           "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "WRITER_OUTPUT_HEADERS",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-writer.js",
+          "count": 4
         }
       ],
       "totalHits": 6,
@@ -19637,25 +19692,6 @@
       "fileSpan": 2
     },
     {
-      "name": "sanitizeSheetName",
-      "defFiles": [
-        "src/backend/pending-export/writer.js",
-        "src/main-process/acquiring-bill-currency-writer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pending-export/writer.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-writer.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
       "name": "setExportAvailability",
       "defFiles": [
         "src/renderer.js"
@@ -19798,24 +19834,6 @@
         {
           "file": "src/backend/acquiring-bill-currency-import/validator.js",
           "count": 2
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
-      "name": "WRITER_OUTPUT_HEADERS",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-db/columns.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-db/columns.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-writer.js",
-          "count": 3
         }
       ],
       "totalHits": 5,
@@ -22110,6 +22128,24 @@
         },
         {
           "file": "src/backend/pending-reconcile/engine.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "updateRunStatus",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
           "count": 1
         }
       ],
