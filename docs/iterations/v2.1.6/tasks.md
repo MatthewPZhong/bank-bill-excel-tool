@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.9（2026-05-20 — fix14 UI 镜像布局：以 bank-statement-board 为模板左右镜像，2 行 × 2 cell grid，4 按钮 min-width 140px 统一）；v0.8 = fix11/12/13 联合调整；v0.7 = fix5-fix10 任务追溯；v0.6-v0.1 起草 |
+| 文档版本 | v0.12（2026-05-20 — PR #50 round 1/2/3 reviewer findings 修复集中追溯）；v0.10 = fix15 月份弹窗标题三分支；v0.9 = fix14 UI 镜像布局；v0.8 = fix11/12/13 联合调整；v0.7 = fix5-fix10 任务追溯；v0.6-v0.1 起草 |
 | 关联 PRD | `PRD-v2.1.6.md` |
 | 关联 spec | `spec.md` |
 | 工作分支 | `v2.1.6` |
@@ -615,3 +615,6 @@
 | v0.7 | 2026-05-19 | **fix5-fix10 集中追溯**（前期 fix5-fix9 task 子项未单独建，本次一并 catch-up + 加 T-fix10）：fix5 UX 重构（删月份下拉/导入弹窗/输出形态反转，~6h）+ fix6 通道清算金额允空（~1h）+ fix7 diff writer OOM 修复（~2h）+ fix8 run 后清原始数据（~2h）+ fix9 cleanup 异步 + 通用 lock（~3h）+ fix10 启动期孤儿 cleanup（~4.5h）。新增 T-fix10 节 4 个子任务；工时合计表全套补齐 |
 | v0.8 | 2026-05-20 | **fix11/12/13 联合调整**：fix11 writer 按账单日期切分多 sheet（≤ 1M 行/sheet）+ sheet 名 `YYYY-MM-DD~MM-DD` + 资金红线 sum==mismatch_rows；fix12 ran_at 用 ISO 8601 带 Z + writer 显示转本地（formatRanAtLocal）；fix13 report 嵌入 diff 末尾 sheet「运行结果汇总」+ 不再生成独立 report.xlsx + exports 去掉 report/ 子目录。新增 T-fix11/12/13 节 5 个子任务（spec sync / fix11 writer / fix12 ran_at / fix13 嵌入 / smoke R/S/T / PR 收尾），工时 +7.5h |
 | v0.9 | 2026-05-20 | **fix14 UI 镜像布局**：以 bank-statement-board 为模板左右镜像，2 行 × 2 cell grid，4 按钮 min-width 140px 统一（覆盖 secondary 默认 180px）；index.html acquiringBillCurrencyModulePanel 重写 + styles-gemini-extra.css 加 .acquiring-bill-currency-board 规则段；renderer 零改动（按钮 ID 全保留）；先 mockup 后实施。新增 T-fix14 节 5 子任务（spec sync / html+css / preview / smoke / PR），工时 +2h |
+| v0.10 | 2026-05-20 | **fix15 月份选择弹窗标题三分支**：renderer-dialogs.js `createAcquiringBillCurrencyMonthPickerDialog` 标题文案 2 分支扩 3 分支（'导入' → '请选择导入文件的月份'）。工时 +0.5h |
+| v0.11 | 2026-05-20 | **PR #50 round 1 reviewer findings 修复**（F1 P1 + F2 P1 + F3 P2）：smoke cleanup helper 解 Windows CI EBUSY / 账单日期归一化 / USER_GUIDE 同步。smoke 145 → 161（+16）。工时 +1.5h |
+| v0.12 | 2026-05-20 | **PR #50 round 2 + round 3 reviewer findings 修复**：round 2（NewF1 P1 spec Case O 描述错只修文档 / CodexP1 P1 sub-sheet 切分 / NewF2 P2 success-no-files / NewF3 P2 header detailLines 透传 / CodexP2 P2 不完整修复）+ round 3（NewF1 P2 sax 层 header dynamic array 真正修复列多严格校验）。smoke 161 → 168（+7） → 172（+4）。工时 +2h |
