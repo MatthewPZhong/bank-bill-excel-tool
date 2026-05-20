@@ -939,6 +939,36 @@ async function caseS_ranAtTimezone() {
   }
 }
 
+// PR #50 round 3 NewF1 — Case ExtraCol：表头列多（额外尾列）应被 validator 拒绝
+async function caseExtraColumn_headerStrictness() {
+  const { tmpdir, db, cleanup } = setupTmpDb();
+  try {
+    // 在 FLOW_HEADERS（48 列）后面加 1 列「多余列」生成 49 列表头
+    const extraFlowHeaders = [...FLOW_HEADERS, '多余列'];
+    const dataRow = new Array(49).fill('');
+    dataRow[0] = '2026-03-10'; dataRow[6] = 'E1'; dataRow[28] = '10'; dataRow[29] = 'USD';
+    dataRow[48] = '多余值'; // 第 49 列数据
+    await writeXlsx(path.join(tmpdir, 'flow-extra.xlsx'), extraFlowHeaders, [dataRow]);
+
+    let err = null;
+    try {
+      await session.importFlowFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'flow-extra.xlsx')] });
+    } catch (e) {
+      err = e;
+    }
+    assertTrue(!!err, 'ExtraCol.列多 xlsx 应被拒');
+    assertTrue(err && /表头列数不匹配/.test(String(err.message || '')), `ExtraCol.错误信息含「表头列数不匹配」：${err && err.message}`);
+    // validator: error.message = "...模板 48 列，文件 49 列"，detailLines = [模板表头, 文件表头]
+    const msg = String((err && err.message) || '');
+    assertTrue(msg.includes('48 列') && msg.includes('49 列'), `ExtraCol.error.message 含模板列数 + 文件列数：${msg}`);
+    // detailLines 应含「多余列」文本（文件表头序列化里）
+    const detailStr = (err && err.detailLines || []).join('|');
+    assertTrue(detailStr.includes('多余列'), `ExtraCol.detailLines 含「多余列」额外列名：${detailStr.slice(0, 300)}...`);
+  } finally {
+    cleanup();
+  }
+}
+
 // PR #50 reviewer finding F2 — Case F2：账单日期 `YYYY/MM/DD` 归一化为 YYYY-MM-DD + writer sheet 名不含 `/`
 async function caseF2_billDateNormalize() {
   const validator = require('../../src/backend/acquiring-bill-currency-import/validator');
@@ -1077,6 +1107,7 @@ async function runAcquiringBillCurrencySmokeTests() {
   await caseS_ranAtTimezone();
   await caseT_reportEmbeddedInDiff();
   await caseF2_billDateNormalize();
+  await caseExtraColumn_headerStrictness();
 
   const total = passed + failed;
   if (failed === 0) {

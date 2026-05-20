@@ -159,7 +159,13 @@ function streamSheetRows({
         if (tag === 'row') {
           const r = parseInt(n.attributes.r, 10) || 0;
           currentRowR = r;
-          currentRowValues = new Array(expectedHeaders.length).fill('');
+          // PR #50 round 3 NewF1：header row（r=1）用 dynamic array，让 validator 检测「列多」
+          // data row 用固定 expectedHeaders.length 防越界 + 内存安全
+          if (r === 1) {
+            currentRowValues = [];
+          } else {
+            currentRowValues = new Array(expectedHeaders.length).fill('');
+          }
         } else if (tag === 'c') {
           const ref = n.attributes.r || '';
           currentCellCol = parseColumnFromCellRef(ref);
@@ -193,7 +199,11 @@ function streamSheetRows({
         else if (tag === 'is') inIs = false;
         else if (tag === 'v') inV = false;
         else if (tag === 'c') {
-          if (currentRowValues && currentCellCol >= 0 && currentCellCol < currentRowValues.length) {
+          // PR #50 round 3 NewF1：header row（r=1）允许任意列号（array sparse 扩容），让 validator 检测「列多」
+          // data row 仍限制 col < expectedHeaders.length 防越界
+          const allowWrite = currentRowValues && currentCellCol >= 0
+            && (currentRowR === 1 || currentCellCol < currentRowValues.length);
+          if (allowWrite) {
             let val = '';
             if (currentCellType === 'inlineStr' || currentCellType === 'str') {
               val = currentText;
