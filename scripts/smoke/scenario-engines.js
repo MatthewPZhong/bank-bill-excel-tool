@@ -418,23 +418,26 @@ function runScenarioEngineSmokeTests() {
   // bankRow 1: Credit=100, Debit=0   → 虚拟值 100 ✅
   // bankRow 2: Credit=0,   Debit=100 → 虚拟值 100 ✅（abs）
   // bankRow 3: Credit=200, Debit=50  → 虚拟值 150 ❌
+  //
+  // v2.1.7 F2 调整：方案 A 1v1 消费 gw 行，原 fixture 单 gw 行无法同时命中 b-virt-1 + b-virt-2
+  //   → 加到 2 笔等额 gw（GW_100_A / GW_100_B），让 b-virt-1 ←GW_100_A、b-virt-2 ←GW_100_B
+  //   该用例本意是验证「虚拟字段 abs 路径」+「条件过滤虚拟字段」，无关 1v1 配对策略
   {
     const scenario = makeC3ScenarioWithConditions([
       { side: '银行', field: '发生额绝对值', op: '等于', value: '100' }
     ]);
-    // 注意：scenario.config.reconFields 的 seq=2 也用「发生额绝对值」做 join；
-    // 为了让 bankRow 1/2 在 join 阶段都命中相同的 gwRow，让它们 Currency/MerchantId/Channel 一致
     const bankRows = [
       { _rowId: 'b-virt-1', Currency: 'USD', 'Credit Amount': 100, 'Debit Amount': 0,   MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
       { _rowId: 'b-virt-2', Currency: 'USD', 'Credit Amount': 0,   'Debit Amount': 100, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
       { _rowId: 'b-virt-3', Currency: 'USD', 'Credit Amount': 200, 'Debit Amount': 50,  MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
     ];
     const gwRows = [
-      { Currency: 'USD', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_100' }
+      { Currency: 'USD', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_100_A' },
+      { Currency: 'USD', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_100_B' }
     ];
     const result = runC3Scenario(scenario, bankRows, gwRows);
-    assert.strictEqual(bankRows[0].ReconciliationId, 'GW_100', 'C3-COND-VIRTUAL b-virt-1 (Credit=100) 应命中虚拟值 100');
-    assert.strictEqual(bankRows[1].ReconciliationId, 'GW_100', 'C3-COND-VIRTUAL b-virt-2 (Debit=100) 应命中虚拟值 100');
+    assert.strictEqual(bankRows[0].ReconciliationId, 'GW_100_A', 'C3-COND-VIRTUAL b-virt-1 (Credit=100) 应命中第 1 个 GW（方案 A）');
+    assert.strictEqual(bankRows[1].ReconciliationId, 'GW_100_B', 'C3-COND-VIRTUAL b-virt-2 (Debit=100) 应命中第 2 个 GW（方案 A 1v1）');
     assert.strictEqual(bankRows[2].ReconciliationId, '', 'C3-COND-VIRTUAL b-virt-3 (虚拟值 150) 应被过滤');
     assert.strictEqual(result.modifications.length, 2, 'C3-COND-VIRTUAL modifications 应为 2 条');
   }

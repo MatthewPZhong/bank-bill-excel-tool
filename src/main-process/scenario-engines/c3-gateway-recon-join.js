@@ -1,11 +1,15 @@
 // v2.0.0-beta.3：C3 资金对账不平 join 算法引擎
 // PRD §7.3 / §10 决策 D4
+// v2.1.7 F2 ⚠️ 资金红线：bank → gw 多笔等额改 1v1（方案 A）
+//   - 主循环加 usedGwRowIdx Set 标记已用网关行（first-match-wins 风格）
+//   - 同金额组 bank > gw 数量时，多余 bank 行 unmatched（不抛错、不警告）
+//   - PRD §七 / spec §三 / §3.2 边界场景
 //
 // 行为：
-//   1. 对 bankRow 遍历 gwRows，按 reconFields AND 比对
-//   2. 多行满足 → 取第一条 + warn（数据脏）
-//   3. 没匹配 → 该场景对该行不命中（first-match-wins 不锁定）
-//   4. 配对成功 → 写 assign.bankField = chosen[assign.gwField]
+//   1. 对 bankRow 遍历 gwRows，按 reconFields AND 比对（gw 已用行自动排除）
+//   2. 多行满足 → 取第一条未用 + warn（数据脏）
+//   3. 没匹配 / gw 池子被抢空 → 该场景对该行不命中（first-match-wins 不锁定）
+//   4. 配对成功 → 写 assign.bankField = chosen[assign.gwField]，标记 gwRow 已用
 //   5. 写入前若 bankRow[assign.bankField] 原值非空 → warn（仍执行覆盖）
 
 const {
@@ -120,21 +124,33 @@ function runC3Scenario(scenario, bankRows, gwRows) {
     ? bankRows
     : bankRows.filter((row) => bankConditions.every((c) => evalCondition(row, c, { useC3BankValueGetter: true })));
 
+  // v2.1.7 F2 ⚠️ 资金红线：网关候选池标记已用（spec §3.1 方案 A）
+  //   - usedGwRowIdx：已被前面 bank 行消费的 gw 行索引集合
+  //   - 候选 filter 时排除已用 gw 行 → 保证 bank 单向消费 gw 单，不再多 bank 抢同 1 条 gw
+  //   - gwRowsFiltered 顺序稳定（来自 reader）→ usedGwRowIdx 索引确定
+  //   - bankRowsFiltered 顺序稳定（forEach）→ deterministic 同输入同输出
+  const usedGwRowIdx = new Set();
+
   bankRowsFiltered.forEach((bankRow, index) => {
     const rowId = ensureRowId(bankRow, index);
-    const matched = gwRowsFiltered.filter((gwRow) => gwMatchesBank(gwRow, bankRow, reconFields));
+    // candidates 仅保留"未被前面 bank 行消费"且"reconFields AND 匹配"的 gw 行
+    const matched = gwRowsFiltered
+      .map((g, gIdx) => ({ row: g, gIdx }))
+      .filter((x) => !usedGwRowIdx.has(x.gIdx) && gwMatchesBank(x.row, bankRow, reconFields));
     if (matched.length === 0) return;
 
     if (matched.length > 1) {
       warningCollector.push({
         rowId,
         code: 'multi-gateway-match',
-        message: `bankRow 在网关账单中匹配到 ${matched.length} 行，取第一条（数据脏）`
+        message: `bankRow 在网关账单中匹配到 ${matched.length} 行（未用），取第一条（数据脏）`
       });
     }
     const chosen = matched[0];
+    // 标记 gw 行已用 — 后续 bank 行的 candidates 池中将排除该索引
+    usedGwRowIdx.add(chosen.gIdx);
 
-    const newValue = normalizeCellValue(chosen[assign.gwField]);
+    const newValue = normalizeCellValue(chosen.row[assign.gwField]);
     if (newValue === '') return; // 网关账单的源字段为空 → 不写入
 
     const oldValue = normalizeCellValue(bankRow[assign.bankField]);
