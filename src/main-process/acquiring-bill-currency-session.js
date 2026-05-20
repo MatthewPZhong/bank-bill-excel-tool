@@ -151,6 +151,10 @@ async function peekImportTarget({ db, kind, filePaths }) {
 
 // 对账核心（⚠️ 资金红线，spec §5）
 // v0.8 fix5：跑 run 时同步产出 diff + report 到 exports/{date}/acquiring-bill-currency/(report/)
+// v2.1.7 F6：新增 onProgress 入参（守护式埋点，旧 caller 无 onProgress 时行为不变）
+//   阶段事件：clearing-old-runs / computing-stats / inserting-run / sql-joining / writing-xlsx / updating-paths
+//   spec §6.2 / PRD §六
+//
 // 流程：
 //   1. 清空该月历史 runs + diff_rows（避免累积）
 //   2. 统计 totalBillRows / matched / mismatch / unmatched
@@ -160,7 +164,7 @@ async function peekImportTarget({ db, kind, filePaths }) {
 //   6. 调 writer 同步生成 diff.xlsx + report.xlsx；UPDATE runs.diff_file_path/report_file_path 回填
 //   7. 返回 stats + filePaths
 // 关键不变量：写盘失败不应回滚 DB 事务（数据已 COMMIT 有效）；写盘错误仅 throw 给 caller
-async function runCheck({ db, monthKey, storageRoot }) {
+async function runCheck({ db, monthKey, storageRoot, onProgress }) {
   if (!monthKey) {
     throw new Error('runCheck：monthKey 必填');
   }
@@ -175,8 +179,16 @@ async function runCheck({ db, monthKey, storageRoot }) {
 
   safeBegin(db);
   try {
+    // v2.1.7 F6 埋点 1/6：清理历史 runs
+    if (onProgress) onProgress({ phase: 'run', stage: 'clearing-old-runs' });
     runRepo.clearRunsByMonth(db, monthKey);
+
+    // v2.1.7 F6 埋点 2/6：统计行数
+    if (onProgress) onProgress({ phase: 'run', stage: 'computing-stats' });
     stats = runRepo.computeRunStats(db, { monthKey });
+
+    // v2.1.7 F6 埋点 3/6：创建 run 记录
+    if (onProgress) onProgress({ phase: 'run', stage: 'inserting-run' });
     runId = runRepo.insertRun(db, {
       monthKey,
       // v0.14 fix12：显式传 ISO 8601（带 Z 后缀），避免依赖 SQLite DEFAULT CURRENT_TIMESTAMP（返回 UTC 无后缀，writer 显示时容易错位）
@@ -187,6 +199,9 @@ async function runCheck({ db, monthKey, storageRoot }) {
       unmatchedRows: stats.unmatchedRows,
       status: 'success'
     });
+
+    // v2.1.7 F6 埋点 4/6：SQL JOIN 比对币种（耗时大头）
+    if (onProgress) onProgress({ phase: 'run', stage: 'sql-joining', mismatchHint: stats.mismatchRows });
     insertedDiffRows = runRepo.insertDiffRowsByJoin(db, { runId, monthKey });
     db.exec('COMMIT');
 
@@ -207,10 +222,15 @@ async function runCheck({ db, monthKey, storageRoot }) {
   let reportFilePath = null;
   if (storageRoot) {
     try {
+      // v2.1.7 F6 埋点 5/6：写 xlsx
+      if (onProgress) onProgress({ phase: 'run', stage: 'writing-xlsx' });
       const writer = require('./acquiring-bill-currency-writer');
       const out = await writer.writeRunOutputs({ db, runId, monthKey, storageRoot, runElapsedMs });
       diffFilePath = out.diffFilePath;
       reportFilePath = out.reportFilePath;
+
+      // v2.1.7 F6 埋点 6/6：回填路径
+      if (onProgress) onProgress({ phase: 'run', stage: 'updating-paths' });
       runRepo.updateRunPaths(db, { runId, diffFilePath, reportFilePath });
     } catch (writeError) {
       // PR #50 NewF2：写盘失败不回滚 DB；run.status 改 'success-no-files'（数据有效但文件未生成）
