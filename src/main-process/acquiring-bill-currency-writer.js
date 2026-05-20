@@ -101,11 +101,17 @@ function planSegments(dateCounts) {
   return segments;
 }
 
+// PR #50 reviewer finding F2 防御性兜底：sanitize 非法 sheet 字符（Excel 禁用 / \ * ? [ ] :）
+// 主路径靠 import-repository.normalizeBillDate 归一化为 YYYY-MM-DD；本函数额外防御未来路径绕过
+function sanitizeSheetName(name) {
+  return String(name).replace(/[\/\\*?\[\]:]/g, '-').slice(0, 31);
+}
+
 function fmtSheetName(seg) {
   if (!seg.startDate) return '差异';
   const m1 = seg.startDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
   const m2 = seg.endDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m1 || !m2) return seg.startDate + '~' + seg.endDate;
+  if (!m1 || !m2) return sanitizeSheetName(seg.startDate + '~' + seg.endDate);
   return `${m1[1]}-${m1[2]}-${m1[3]}~${m2[2]}-${m2[3]}`;
 }
 

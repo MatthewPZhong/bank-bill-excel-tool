@@ -75,6 +75,22 @@ function extractMonthKey(billDateRaw) {
   return `${year}-${month}`;
 }
 
+// PR #50 reviewer finding F2：reader 允许 `YYYY/MM/DD` 但 writer fmtSheetName 仅识别 `YYYY-MM-DD`
+// 入库时把账单日期统一标准化为 `YYYY-MM-DD`（去掉时间部分），避免 writer sheet 名出现非法字符 `/`
+// 同时让 SQL `GROUP BY json_extract($."账单日期")` 按规整后日期分组，不再因 `/` vs `-` 拆成两组
+// 失败（不能解析年月日）→ 返回原值（reader 已通过 extractMonthKey 校验，正常路径不应进到 fallback）
+function normalizeBillDate(billDateRaw) {
+  if (billDateRaw === null || billDateRaw === undefined) return '';
+  const str = String(billDateRaw).trim();
+  if (!str) return '';
+  const m = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (!m) return str;
+  const y = m[1];
+  const mo = String(m[2]).padStart(2, '0');
+  const d = String(m[3]).padStart(2, '0');
+  return `${y}-${mo}-${d}`;
+}
+
 // 校验同一批导入的所有行属于同一月份（spec §3.3）
 // rows: Array<{ billDateRaw, sourceFile, sourceRowIndex }>
 // 返回 { ok, monthKey?, error?, detailLines? }
@@ -124,5 +140,6 @@ module.exports = {
   validateFlowHeaders,
   validateBillHeaders,
   extractMonthKey,
+  normalizeBillDate,
   validateMonthConsistency
 };

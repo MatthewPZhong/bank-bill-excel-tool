@@ -1,15 +1,15 @@
 {
   "meta": {
     "version": "2.1.6",
-    "scannedAt": "2026-05-19T18:12:49.853Z",
+    "scannedAt": "2026-05-20T01:52:53.238Z",
     "root": "src",
     "totalFiles": 85,
-    "totalTopLevelNames": 849,
+    "totalTopLevelNames": 850,
     "buckets": {
       "shared": 146,
-      "paired": 244,
-      "local": 359,
-      "crossFile": 390
+      "paired": 246,
+      "local": 358,
+      "crossFile": 392
     }
   },
   "A": {
@@ -743,7 +743,7 @@
           },
           {
             "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
-            "count": 4
+            "count": 6
           },
           {
             "file": "src/backend/acquiring-bill-currency-import/reader.js",
@@ -770,7 +770,7 @@
             "count": 2
           }
         ],
-        "totalHits": 23,
+        "totalHits": 25,
         "fileSpan": 8
       },
       {
@@ -1021,7 +1021,7 @@
           },
           {
             "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
-            "count": 4
+            "count": 6
           },
           {
             "file": "src/backend/acquiring-bill-currency-import/reader.js",
@@ -1036,7 +1036,7 @@
             "count": 6
           }
         ],
-        "totalHits": 22,
+        "totalHits": 24,
         "fileSpan": 5
       },
       {
@@ -5848,6 +5848,25 @@
         "fileSpan": 2
       },
       {
+        "name": "normalizeBillDate",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/import-repository.js",
+          "src/backend/acquiring-bill-currency-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/validator.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "performance",
         "defFiles": [
           "src/main.js"
@@ -5917,6 +5936,25 @@
           {
             "file": "src/main-process/scenario-engines/index.js",
             "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "sanitizeSheetName",
+        "defFiles": [
+          "src/backend/pending-export/writer.js",
+          "src/main-process/acquiring-bill-currency-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 2
           }
         ],
         "totalHits": 5,
@@ -11221,20 +11259,6 @@
         "fileSpan": 1
       },
       {
-        "name": "sanitizeSheetName",
-        "defFiles": [
-          "src/backend/pending-export/writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-export/writer.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "sanitizeSignedAmountValue",
         "defFiles": [
           "src/backend/file-service/normalizers.js"
@@ -14416,7 +14440,7 @@
         },
         {
           "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
-          "count": 4
+          "count": 6
         },
         {
           "file": "src/backend/acquiring-bill-currency-import/reader.js",
@@ -14443,7 +14467,7 @@
           "count": 2
         }
       ],
-      "totalHits": 23,
+      "totalHits": 25,
       "fileSpan": 8
     },
     {
@@ -14694,7 +14718,7 @@
         },
         {
           "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
-          "count": 4
+          "count": 6
         },
         {
           "file": "src/backend/acquiring-bill-currency-import/reader.js",
@@ -14709,7 +14733,7 @@
           "count": 6
         }
       ],
-      "totalHits": 22,
+      "totalHits": 24,
       "fileSpan": 5
     },
     {
@@ -19519,6 +19543,25 @@
       "fileSpan": 2
     },
     {
+      "name": "normalizeBillDate",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/import-repository.js",
+        "src/backend/acquiring-bill-currency-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/validator.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "performance",
       "defFiles": [
         "src/main.js"
@@ -19588,6 +19631,25 @@
         {
           "file": "src/main-process/scenario-engines/index.js",
           "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "sanitizeSheetName",
+      "defFiles": [
+        "src/backend/pending-export/writer.js",
+        "src/main-process/acquiring-bill-currency-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-writer.js",
+          "count": 2
         }
       ],
       "totalHits": 5,

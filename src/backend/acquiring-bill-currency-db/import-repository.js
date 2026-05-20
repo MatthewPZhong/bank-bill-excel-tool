@@ -22,6 +22,8 @@ const BILL_INSERT_SQL = `
   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
+const { normalizeBillDate } = require('../acquiring-bill-currency-import/validator');
+
 function normalizeCurrency(value) {
   if (value === null || value === undefined) return '';
   return String(value).trim().toLowerCase();
@@ -60,6 +62,10 @@ function insertFlowRow(stmt, { monthKey, sourceFile, row, importedAt }) {
   for (let i = 0; i < FLOW_HEADERS.length; i++) {
     rawObj[FLOW_HEADERS[i]] = values[i] === undefined ? '' : String(values[i]);
   }
+  // PR #50 reviewer finding F2：raw_json 写入前归一化「账单日期」为 YYYY-MM-DD
+  // 原值可能是 `2026/3/10` / `2026-03-10 03:45:56` 等格式，writer 的 fmtSheetName 仅识别 YYYY-MM-DD
+  // 且 SQL `GROUP BY json_extract($."账单日期")` 按归一化后日期分组（避免格式差异拆成两组）
+  rawObj[FLOW_HEADERS[0]] = normalizeBillDate(rawObj[FLOW_HEADERS[0]]);
   const rawJson = JSON.stringify(rawObj);
   stmt.run(monthKey, sourceFile, rowIndex, reconMainId, settleAmount, settleAmountAbs, settleCurrency, settleCurrencyNorm, rawJson, importedAt);
 }
@@ -78,6 +84,8 @@ function insertBillRow(stmt, { monthKey, sourceFile, row, importedAt }) {
   for (let i = 0; i < BILL_HEADERS.length; i++) {
     rawObj[BILL_HEADERS[i]] = values[i] === undefined ? '' : String(values[i]);
   }
+  // PR #50 reviewer finding F2：raw_json 写入前归一化「账单日期」为 YYYY-MM-DD（writer fmtSheetName / SQL GROUP BY 依赖）
+  rawObj[BILL_HEADERS[0]] = normalizeBillDate(rawObj[BILL_HEADERS[0]]);
   const rawJson = JSON.stringify(rawObj);
   stmt.run(monthKey, sourceFile, rowIndex, reconMainId, settleCurrency, settleCurrencyNorm, rawJson, importedAt);
 }

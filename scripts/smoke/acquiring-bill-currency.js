@@ -67,12 +67,18 @@ function setupTmpDb() {
   const tmpdir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'abc-smoke-'));
   const db = new AppDatabase(path.join(tmpdir, 't.sqlite'));
   db.init();
-  return { tmpdir, db };
+  // PR #50 reviewer finding F1：Windows CI 上 fs.rmSync 不能先于 DB close（DatabaseSync 句柄占用 .sqlite 文件 → EBUSY）
+  // 所有 case 用 cleanup() 代替手写 rmSync，强制先 close 再 rm
+  const cleanup = () => {
+    try { db.db.close(); } catch (_e) { /* 已 close 或异常 */ }
+    try { fs.rmSync(tmpdir, { recursive: true, force: true }); } catch (_e) { /* 已删 / 锁住 → swallow */ }
+  };
+  return { tmpdir, db, cleanup };
 }
 
 async function caseA_happyPath() {
   // 流水 5 行 / 单据 5 行（1 行不一致 + 4 行一致）
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const flowFile = path.join(tmpdir, 'flow.xlsx');
     const billFile = path.join(tmpdir, 'bill.xlsx');
@@ -117,12 +123,12 @@ async function caseA_happyPath() {
     // A1 watermark 断言
     assertEq(wb.lastModifiedBy, 'pzhong', 'A1.watermark.lastModifiedBy');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 async function caseB_duplicateReconId() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const flowFile = path.join(tmpdir, 'flow.xlsx');
     const date = '2026-03-01';
@@ -146,12 +152,12 @@ async function caseB_duplicateReconId() {
     const count = db.db.prepare('SELECT COUNT(*) AS c FROM acquiring_bill_currency_flow_imports').get().c;
     assertEq(count, 0, 'B.ROLLBACK 生效');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 async function caseC_billCurrencyMissing() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-01';
     await writeXlsx(path.join(tmpdir, 'flow.xlsx'), FLOW_HEADERS, [makeFlow('C1', date, '10', 'USD')]);
@@ -165,12 +171,12 @@ async function caseC_billCurrencyMissing() {
     const diff = db.db.prepare('SELECT diff_type FROM acquiring_bill_currency_diff_rows').get();
     assertEq(diff.diff_type, 'bill_currency_missing', 'C.diff_type');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 async function caseD_multiFile1to1() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-01';
     await writeXlsx(path.join(tmpdir, 'flow.xlsx'), FLOW_HEADERS, [
@@ -189,12 +195,12 @@ async function caseD_multiFile1to1() {
     assertTrue(exp.diffFilePath && fs.existsSync(exp.diffFilePath), 'D.diff 文件存在');
     assertTrue(exp.reportFilePath && fs.existsSync(exp.reportFilePath), 'D.report 文件存在');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 async function caseE_currencyCaseNormalize() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-01';
     await writeXlsx(path.join(tmpdir, 'flow.xlsx'), FLOW_HEADERS, [
@@ -213,12 +219,12 @@ async function caseE_currencyCaseNormalize() {
     const r = await session.runCheck({ db: db.db, monthKey: '2026-03' });
     assertEq(r.mismatchRows, 0, 'E.大小写/空格归一后视为一致');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 async function caseF_headerMismatch() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     // 故意少 1 列
     const badHeaders = FLOW_HEADERS.slice(0, 47);
@@ -240,12 +246,12 @@ async function caseF_headerMismatch() {
     assertTrue(threw, 'F.表头不匹配整批拒绝');
     assertEq(errName, 'ImportValidationError', 'F.errType');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 async function caseG_unmatchedNotInDiff() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-01';
     await writeXlsx(path.join(tmpdir, 'flow.xlsx'), FLOW_HEADERS, [makeFlow('G1', date, '10', 'USD')]);
@@ -263,13 +269,13 @@ async function caseG_unmatchedNotInDiff() {
     assertEq(r.unmatchedRows, 1, 'G.unmatchedRows=1 (G2)');
     assertEq(r.mismatchRows, 0, 'G.mismatchRows=0 (G1 一致 / G2 unmatched 不入 diff)');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 // fix1 (spec §3.4) — H1：已有数据 → peek 返回 overwrite-required（不进事务）
 async function caseH1_peekOverwriteRequired() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-01';
     const billFile = path.join(tmpdir, 'bill.xlsx');
@@ -292,13 +298,13 @@ async function caseH1_peekOverwriteRequired() {
     const after = db.db.prepare('SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports').get().c;
     assertEq(after, 2, 'H1.peek 后行数不变');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 // fix1 (spec §3.4) — H2：已有数据 → confirmOverwrite=true → 单侧清+导入；不动 runs/diff_rows
 async function caseH2_overwriteImport() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-01';
     const flowFile = path.join(tmpdir, 'flow.xlsx');
@@ -339,7 +345,7 @@ async function caseH2_overwriteImport() {
     const runsAfter = db.db.prepare('SELECT COUNT(*) AS c FROM acquiring_bill_currency_runs').get().c;
     assertEq(runsAfter, 1, 'H2.runs 表未变');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
@@ -397,7 +403,7 @@ function inlineCell(col, rowR, val) {
 }
 
 async function caseI_inlineStrDataDescriptor() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     // 构造 flow xlsx：表头 1 行（48 列 FLOW_HEADERS）+ 数据 1 行
     const cols = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','AA','AB','AC','AD','AE','AF','AG','AH','AI','AJ','AK','AL','AM','AN','AO','AP','AQ','AR','AS','AT','AU','AV'];
@@ -433,14 +439,14 @@ async function caseI_inlineStrDataDescriptor() {
     assertEq(dbRows[0].settle_amount, '99.50', 'I.settle_amount');
     assertEq(dbRows[0].settle_amount_abs, '99.5', 'I.settle_amount_abs');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 // fix4 (spec §3.1 §5.2) — Case J：通道清算币种与原币种不同，按 settle_currency 比对而非 currency
 // flow.[13]=USD（订单币种）+ flow.[29]=EUR（通道清算）+ bill.[19]=EUR（对账币种）→ matched, mismatch=0
 async function caseJ_settleCurrencyMatching() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-15';
     const flowRow = new Array(48).fill('');
@@ -456,13 +462,13 @@ async function caseJ_settleCurrencyMatching() {
     assertEq(r.matchedRows, 1, 'J.matched=1（按 settle_currency EUR↔EUR 比对）');
     assertEq(r.mismatchRows, 0, 'J.mismatch=0（不再被订单币种 USD ≠ EUR 误判）');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 // fix4 — Case K：流水通道清算币种 ≠ 单据对账币种 → mismatch
 async function caseK_settleCurrencyMismatch() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-15';
     const flowRow = new Array(48).fill('');
@@ -480,13 +486,13 @@ async function caseK_settleCurrencyMismatch() {
     assertEq(diff.flow_amount_abs, '50', 'K.diff_rows.flow_amount_abs=50');
     assertEq(diff.diff_type, 'currency_mismatch', 'K.diff_type');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 // fix4 — Case L：流水通道清算币种为空 + 单据对账币种有值 → mismatch（currency_mismatch，非 bill_currency_missing）
 async function caseL_flowSettleCurrencyEmpty() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-15';
     const flowRow = new Array(48).fill('');
@@ -503,13 +509,13 @@ async function caseL_flowSettleCurrencyEmpty() {
     assertEq(diff.flow_currency, '', 'L.flow_currency 入库为空字符串');
     assertEq(diff.diff_type, 'currency_mismatch', 'L.diff_type（单据有值 → mismatch 而非 missing）');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 // fix8 (spec v0.11 §3.4) — Case P：run 成功 + diff/report 落盘后自动清 flow/bill/diff_rows，保留 runs
 async function caseP_cleanupAfterRun() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-01';
     await writeXlsx(path.join(tmpdir, 'flow.xlsx'), FLOW_HEADERS, [
@@ -561,13 +567,13 @@ async function caseP_cleanupAfterRun() {
     assertEq(cleanupStats.billDeleted, 2, 'P.cleanupStats.billDeleted=2');
     assertEq(cleanupStats.diffDeleted, 1, 'P.cleanupStats.diffDeleted=1');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 // fix6 (spec v0.9 §3.1) — Case O：流水「通道清算金额」为空允许入库（与币种对称，业务上 4 种非清算子类型）
 async function caseO_settleAmountEmpty() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-15';
     const flowRow = new Array(48).fill('');
@@ -591,13 +597,13 @@ async function caseO_settleAmountEmpty() {
     assertEq(dbRows[0].settle_amount_abs, '', 'O.settle_amount_abs 空字符串');
     assertEq(dbRows[0].settle_currency, '', 'O.settle_currency 空字符串');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 // fix5 (spec §3.3) — Case M：用户选月份 ≠ xlsx 内账单日期月份 → 整批拒绝（跨月份混杂）
 async function caseM_userMonthMismatch() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     // xlsx 账单日期是 2026-04
     const flowFile = path.join(tmpdir, 'flow.xlsx');
@@ -622,13 +628,13 @@ async function caseM_userMonthMismatch() {
     const count = db.db.prepare('SELECT COUNT(*) AS c FROM acquiring_bill_currency_flow_imports').get().c;
     assertEq(count, 0, 'M.ROLLBACK 生效');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 // fix1 (spec §3.4) — H3：peek 时表头不匹配 → 抛错（不进事务）
 async function caseH3_peekHeaderMismatch() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     // 故意少 1 列
     const badHeaders = BILL_HEADERS.slice(0, 25);
@@ -652,13 +658,13 @@ async function caseH3_peekHeaderMismatch() {
     const count = db.db.prepare('SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports').get().c;
     assertEq(count, 0, 'H3.peek 失败后 DB 仍空');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
 // fix10 (spec v0.13 §5.4) — Case Q：cleanupOrphanData 处理 ① status != 'success' 的孤儿 run + ② status='success' 但文件丢失的 run；正常 success+file-exists run 不受影响
 async function caseQ_cleanupOrphanData() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     // 步骤 1：跑一个正常 success run（month 2026-01），不调 cleanupAfterRunBackground，模拟 fix9 path 但 cleanup 未跑
     const dateA = '2026-01-15';
@@ -743,7 +749,7 @@ async function caseQ_cleanupOrphanData() {
     assertEq(stats3.deletedDiff, 0, 'Q3.deletedDiff=0');
     assertEq(stats3.deletedRuns, 0, 'Q3.deletedRuns=0');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
@@ -824,7 +830,7 @@ async function caseR_multiSheetSplit() {
   // ============================================================
   // R2: 实跑 run 验证 sheet 结构（小 fixture 不触发切分，但验证 1 diff sheet + 1 summary sheet = 2 sheet）
   // ============================================================
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-10';
     await writeXlsx(path.join(tmpdir, 'flow.xlsx'), FLOW_HEADERS, [
@@ -854,7 +860,7 @@ async function caseR_multiSheetSplit() {
     const diffSheet = wb.worksheets[0];
     assertEq(diffSheet.actualRowCount - 1, 1, 'R2.diff sheet 数据行数 (减表头) = 1');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
@@ -889,7 +895,7 @@ async function caseS_ranAtTimezone() {
   }
 
   // S4: 实跑 run 后断言 runs.ran_at 含 'Z' 后缀（ISO 8601）
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-10';
     await writeXlsx(path.join(tmpdir, 'flow.xlsx'), FLOW_HEADERS, [makeFlow('S1', date, '10', 'USD')]);
@@ -902,13 +908,68 @@ async function caseS_ranAtTimezone() {
     assertTrue(run.ran_at && run.ran_at.endsWith('Z'), `S4.runs.ran_at 含 Z 后缀 = ${run.ran_at}`);
     assertTrue(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(run.ran_at), 'S4.runs.ran_at ISO 8601 格式');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
+  }
+}
+
+// PR #50 reviewer finding F2 — Case F2：账单日期 `YYYY/MM/DD` 归一化为 YYYY-MM-DD + writer sheet 名不含 `/`
+async function caseF2_billDateNormalize() {
+  const validator = require('../../src/backend/acquiring-bill-currency-import/validator');
+  const writer = require('../../src/main-process/acquiring-bill-currency-writer');
+  const { normalizeBillDate } = validator;
+  const { fmtSheetName } = writer;
+
+  // 单元：normalizeBillDate 各种输入格式
+  assertEq(normalizeBillDate('2026-03-10'), '2026-03-10', 'F2.YYYY-MM-DD 不变');
+  assertEq(normalizeBillDate('2026/3/10'), '2026-03-10', 'F2.YYYY/M/D → YYYY-MM-DD');
+  assertEq(normalizeBillDate('2026/03/10'), '2026-03-10', 'F2.YYYY/MM/DD → YYYY-MM-DD');
+  assertEq(normalizeBillDate('2026-3-10 03:45:56'), '2026-03-10', 'F2.YYYY-M-D HH:MM:SS → YYYY-MM-DD（去时间）');
+  assertEq(normalizeBillDate('2026/3/10 03:45:56'), '2026-03-10', 'F2.YYYY/M/D HH:MM:SS → YYYY-MM-DD');
+  assertEq(normalizeBillDate(''), '', 'F2.空字符串');
+  assertEq(normalizeBillDate(null), '', 'F2.null');
+  assertEq(normalizeBillDate('invalid'), 'invalid', 'F2.无法解析原样返回（reader 已校验，不会走到）');
+
+  // 单元：fmtSheetName 防御性 sanitize — 即使 startDate/endDate 含 `/`（绕过归一化），输出 sheet 名不含 `/`
+  const safeName = fmtSheetName({ startDate: '2026/03/01', endDate: '2026/03/10', rowCount: 100 });
+  assertTrue(!safeName.includes('/'), `F2.sheet 名不含 /：${safeName}`);
+  assertTrue(safeName.length <= 31, `F2.sheet 名长度 <= 31：${safeName} (${safeName.length})`);
+
+  // 集成：reader 入库 `YYYY/M/D` 后 raw_json 「账单日期」字段 = YYYY-MM-DD
+  const { tmpdir, db, cleanup } = setupTmpDb();
+  try {
+    // 用 YYYY/M/D 格式
+    const flowRow = new Array(48).fill('');
+    flowRow[0] = '2026/3/10'; flowRow[6] = 'F2_1'; flowRow[28] = '100'; flowRow[29] = 'USD';
+    const billRow = new Array(26).fill('');
+    billRow[0] = '2026/3/10'; billRow[14] = 'F2_1'; billRow[18] = '100'; billRow[19] = 'EUR';
+    await writeXlsx(path.join(tmpdir, 'flow.xlsx'), FLOW_HEADERS, [flowRow]);
+    await writeXlsx(path.join(tmpdir, 'bill.xlsx'), BILL_HEADERS, [billRow]);
+
+    await session.importFlowFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'flow.xlsx')] });
+    await session.importBillFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'bill.xlsx')] });
+
+    // 断言：raw_json 「账单日期」字段是归一化后的 YYYY-MM-DD
+    const flowJson = db.db.prepare("SELECT raw_json FROM acquiring_bill_currency_flow_imports WHERE recon_main_id = 'F2_1'").get().raw_json;
+    const billJson = db.db.prepare("SELECT raw_json FROM acquiring_bill_currency_bill_imports WHERE recon_main_id = 'F2_1'").get().raw_json;
+    assertEq(JSON.parse(flowJson)['账单日期'], '2026-03-10', 'F2.flow raw_json 账单日期归一化');
+    assertEq(JSON.parse(billJson)['账单日期'], '2026-03-10', 'F2.bill raw_json 账单日期归一化');
+
+    // 集成：跑 run + 输出 diff xlsx，sheet 名不含 `/`
+    const r = await session.runCheck({ db: db.db, monthKey: '2026-03', storageRoot: tmpdir });
+    const wb = new (require('exceljs').Workbook)();
+    await wb.xlsx.readFile(r.diffFilePath);
+    for (const ws of wb.worksheets) {
+      assertTrue(!ws.name.includes('/'), `F2.diff sheet 名「${ws.name}」不含 /`);
+      assertTrue(!ws.name.includes('\\'), `F2.diff sheet 名「${ws.name}」不含 \\`);
+    }
+  } finally {
+    cleanup();
   }
 }
 
 // fix13 (spec v0.14 §6.3.2) — Case T：report 嵌入 diff 末尾 sheet「运行结果汇总」+ 不生成独立 report.xlsx
 async function caseT_reportEmbeddedInDiff() {
-  const { tmpdir, db } = setupTmpDb();
+  const { tmpdir, db, cleanup } = setupTmpDb();
   try {
     const date = '2026-03-10';
     await writeXlsx(path.join(tmpdir, 'flow.xlsx'), FLOW_HEADERS, [makeFlow('T1', date, '10', 'USD')]);
@@ -957,7 +1018,7 @@ async function caseT_reportEmbeddedInDiff() {
     assertTrue(typeof runTimeValue === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(runTimeValue), `T6.运行时间是本地格式 = ${runTimeValue}`);
     assertTrue(!String(runTimeValue).includes('Z'), 'T6.运行时间不含 Z');
   } finally {
-    fs.rmSync(tmpdir, { recursive: true, force: true });
+    cleanup();
   }
 }
 
@@ -988,6 +1049,7 @@ async function runAcquiringBillCurrencySmokeTests() {
   await caseR_multiSheetSplit();
   await caseS_ranAtTimezone();
   await caseT_reportEmbeddedInDiff();
+  await caseF2_billDateNormalize();
 
   const total = passed + failed;
   if (failed === 0) {
