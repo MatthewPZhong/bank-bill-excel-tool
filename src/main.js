@@ -10087,18 +10087,44 @@ function registerNewAccountHandlers() {
   const tryAcquireOpLock = tryAcquireAcquiringBillCurrencyOpLock;
   const releaseOpLock = releaseAcquiringBillCurrencyOpLock;
 
-  async function handleImportFlowOrBill(kind, payload) {
+  // v2.1.7 F6：进度事件 forwarder（spec §6.3 改动点 2）
+  //   - createImportProgressForwarder：100ms 节流；stage='reading' 切换事件必发（文件切换）
+  //   - createRunProgressForwarder：无节流（每 run 仅 6 个事件）
+  //   - try/catch swallow webContents.send 失败（参考 main.js:9520 pending:import:progress 范式）
+  function createImportProgressForwarder(event) {
+    if (!event || !event.sender) return null;
+    let lastSentAt = 0;
+    const THROTTLE_MS = 100;
+    return (ev) => {
+      const isStageSwitch = ev && ev.stage === 'reading';   // 文件切换必发，不节流
+      const now = Date.now();
+      if (!isStageSwitch && now - lastSentAt < THROTTLE_MS) return;
+      lastSentAt = now;
+      try { event.sender.send('acquiringBillCurrency:import:progress', { ...ev, phase: 'import' }); }
+      catch (_e) { /* swallow — 窗口已销毁等 */ }
+    };
+  }
+  function createRunProgressForwarder(event) {
+    if (!event || !event.sender) return null;
+    return (ev) => {
+      try { event.sender.send('acquiringBillCurrency:run:progress', { ...ev, phase: 'run' }); }
+      catch (_e) { /* swallow */ }
+    };
+  }
+
+  async function handleImportFlowOrBill(kind, payload, event) {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const lock = tryAcquireOpLock('import', payload && payload.monthKey);
     if (!lock.acquired) return { status: 'error', message: lock.message, detailLines: [] };
     try {
-      return await doHandleImportFlowOrBill(kind, payload);
+      return await doHandleImportFlowOrBill(kind, payload, event);
     } finally {
       releaseOpLock();
     }
   }
   // fix5（spec v0.8 §3.3）：handler 入参必传 monthKey（用户弹窗选）；peek 校验 xlsx 内月份 = 用户选的月份；不一致整批拒绝
-  async function doHandleImportFlowOrBill(kind, payload) {
+  // v2.1.7 F6：event 透传 → onProgress forwarder
+  async function doHandleImportFlowOrBill(kind, payload, event) {
     const isFlow = kind === 'flow';
     const sessionImport = isFlow
       ? acquiringBillCurrencySession.importFlowFiles
@@ -10119,10 +10145,12 @@ function registerNewAccountHandlers() {
     // 分支 2：renderer 已确认覆盖
     if (payload.confirmOverwrite === true && Array.isArray(payload.filePaths) && payload.filePaths.length > 0) {
       try {
+        const onProgress = createImportProgressForwarder(event);
         const result = await sessionOverwrite({
           db: database.db,
           monthKey,
-          filePaths: payload.filePaths
+          filePaths: payload.filePaths,
+          onProgress
         });
         return { status: 'success', overwritten: true, ...result };
       } catch (err) {
@@ -10180,10 +10208,12 @@ function registerNewAccountHandlers() {
     }
 
     try {
+      const onProgress = createImportProgressForwarder(event);
       const result = await sessionImport({
         db: database.db,
         monthKey,
-        filePaths: res.filePaths
+        filePaths: res.filePaths,
+        onProgress
       });
       return { status: 'success', ...result };
     } catch (err) {
@@ -10195,17 +10225,19 @@ function registerNewAccountHandlers() {
     }
   }
 
-  trackedIpcHandle('acquiringBillCurrency:importFlow', '收单单据币种校验', '导入流水表', async (_event, payload = {}) => {
-    return handleImportFlowOrBill('flow', payload);
+  // v2.1.7 F6：trackedIpcHandle 回调收 (event, payload)；event 透传到 handleImportFlowOrBill → forwarder
+  trackedIpcHandle('acquiringBillCurrency:importFlow', '收单单据币种校验', '导入流水表', async (event, payload = {}) => {
+    return handleImportFlowOrBill('flow', payload, event);
   });
 
-  trackedIpcHandle('acquiringBillCurrency:importBill', '收单单据币种校验', '导入单据表', async (_event, payload = {}) => {
-    return handleImportFlowOrBill('bill', payload);
+  trackedIpcHandle('acquiringBillCurrency:importBill', '收单单据币种校验', '导入单据表', async (event, payload = {}) => {
+    return handleImportFlowOrBill('bill', payload, event);
   });
 
   // v0.8 fix5：runCheck 改 async，传 storageRoot 让 session 同步产出 diff.xlsx + report.xlsx
   // v0.12 fix9：handler 接入 operation lock；runCheck return 后异步触发 cleanup（不阻塞 IPC return）
-  trackedIpcHandle('acquiringBillCurrency:run', '收单单据币种校验', '开始运行', async (_event, payload = {}) => {
+  // v2.1.7 F6：透传 event → onProgress forwarder（spec §6.3 改动点 2）
+  trackedIpcHandle('acquiringBillCurrency:run', '收单单据币种校验', '开始运行', async (event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const { monthKey } = payload || {};
     if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
@@ -10216,7 +10248,8 @@ function registerNewAccountHandlers() {
     let result;
     try {
       const storageRoot = ensureStorageRoot();
-      result = await acquiringBillCurrencySession.runCheck({ db: database.db, monthKey, storageRoot });
+      const onProgress = createRunProgressForwarder(event);
+      result = await acquiringBillCurrencySession.runCheck({ db: database.db, monthKey, storageRoot, onProgress });
     } catch (err) {
       releaseOpLock();
       return { status: 'error', message: err && err.message ? err.message : String(err) };
