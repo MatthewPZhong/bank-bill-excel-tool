@@ -5702,6 +5702,8 @@
       if (category === 'extract-recon-id') {
         return {
           conditions: [{ field: '', op: '等于', value: '' }],
+          // v2.1.7 F1：新增条件聚合逻辑字段；默认 OR（与 v2.1.6 行为一致）
+          conditionsLogic: 'OR',
           extractByFeature: null,
           extractByOtherField: null
         };
@@ -6286,10 +6288,16 @@
             <input class="scenario-config-input scenario-config-input-narrow" type="number" min="0" max="3" data-field="priority" ${isReadonly ? 'disabled' : ''} value="${draft.priority ?? 0}">
           </div>
           <div class="scenario-config-row scenario-config-row-multi">
-            <span class="scenario-config-label">条件 <span class="scenario-config-tooltip" title="满足任一条件即可进入提取">ⓘ</span></span>
+            <span class="scenario-config-label">条件 <span class="scenario-config-tooltip" title="按下方选择的逻辑聚合条件">ⓘ</span></span>
             <div class="scenario-config-multi-wrap">
               <div class="scenario-config-multi-rows" data-multi="conditions"></div>
               ${isReadonly ? '' : '<button class="text-action small" type="button" data-action="add-condition">+ 新增条件</button>'}
+              <!-- v2.1.7 F1：条件聚合逻辑 radio（默认 OR；旧 scenario 无 logic 字段 → fallback OR 选中） -->
+              <div class="scenario-config-logic-row">
+                <span class="scenario-config-logic-label">条件聚合：</span>
+                <label class="scenario-config-logic-option"><input type="radio" name="conditionsLogic" value="OR" ${config.conditionsLogic !== 'AND' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}> OR（满足任一）</label>
+                <label class="scenario-config-logic-option"><input type="radio" name="conditionsLogic" value="AND" ${config.conditionsLogic === 'AND' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}> AND（同时满足）</label>
+              </div>
             </div>
           </div>
           <div class="scenario-config-row scenario-config-row-mutex">
@@ -6389,6 +6397,17 @@
         if (isReadonly) return;
         config.conditions.push({ field: '', op: '等于', value: '' });
         renderConditions();
+      });
+
+      // v2.1.7 F1：AND/OR radio 切换 → 直接落 config.conditionsLogic
+      //   只读模式 disabled 已在 innerHTML 渲染时设置；这里仍多一层 isReadonly 防御
+      dialog.querySelectorAll('input[name="conditionsLogic"]').forEach((radio) => {
+        radio.addEventListener('change', () => {
+          if (isReadonly) return;
+          if (radio.checked) {
+            config.conditionsLogic = (radio.value === 'AND') ? 'AND' : 'OR';
+          }
+        });
       });
 
       // 行 4/5 互斥 + 启用切换
@@ -7529,7 +7548,9 @@
       html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">名称：</span>${escapeHtml(draft.name)}</div>`;
       html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">优先级：</span>${draft.priority}</div>`;
       if (draft.category === 'extract-recon-id') {
-        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">条件（OR）：</span><ul>${(c.conditions || []).map((cd) => `<li>${escapeHtml(cd.field)} ${escapeHtml(cd.op)}${opNeedsValue(cd.op) ? ' ' + escapeHtml(String(cd.value || '')) : ''}</li>`).join('')}</ul></div>`;
+        // v2.1.7 F1：条件聚合 label 按 conditionsLogic 切换；旧 scenario 无字段 → OR
+        const c1LogicLabel = (c.conditionsLogic === 'AND') ? 'AND' : 'OR';
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">条件（${c1LogicLabel}）：</span><ul>${(c.conditions || []).map((cd) => `<li>${escapeHtml(cd.field)} ${escapeHtml(cd.op)}${opNeedsValue(cd.op) ? ' ' + escapeHtml(String(cd.value || '')) : ''}</li>`).join('')}</ul></div>`;
         if (c.extractByFeature && c.extractByFeature.enabled) {
           const f = c.extractByFeature;
           html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">根据特征提取：</span>筛选字段 [${(f.searchFields || []).map(escapeHtml).join(', ')}]，特征 ${escapeHtml(f.featureCode)}，数字位 ${f.digitCount}，总位 ${f.totalLength}</div>`;

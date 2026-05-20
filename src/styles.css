@@ -3017,6 +3017,34 @@ select {
   gap: 6px;
 }
 
+/* v2.1.7 F1：C1 dialog 条件聚合 AND/OR radio 行 */
+.scenario-config-logic-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 6px;
+  font-size: 13px;
+  color: #8b7355;
+}
+
+.scenario-config-logic-label {
+  font-weight: 500;
+  color: #8b7355;
+}
+
+.scenario-config-logic-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--text, #333);
+  font-size: 13px;
+}
+
+.scenario-config-logic-option input[disabled] {
+  cursor: not-allowed;
+}
+
 .scenario-config-multi-row {
   display: flex;
   align-items: center;
