@@ -600,7 +600,128 @@ function runScenarioEngineSmokeTests() {
     assert.strictEqual(result.modifications.length, 1, 'C3-COND-CLEAR modifications 数量同 baseline');
   }
 
-  console.log('  scenario-engines: 35/35 PASS');
+  // ===== v2.1.7 F2 ⚠️ 资金红线：方案 A 1v1 配对 smoke（spec §3.3 Case F2-A 至 F2-F）=====
+  // 共享 fixture：M001/BankA 同账户；reconFields 比对 Currency + Amount + MerchantId + Bank
+  // 测试 bank 多笔等额 → 不再全部映射同 1 条 gwRow（v2.1.6 反例 → v2.1.7 修复）
+
+  // F2-A：3 笔等额 bank + 3 笔等额 gw → B1←G1, B2←G2, B3←G3
+  {
+    const scenario = makeC3Scenario();
+    const bankRows = [
+      { _rowId: 'F2A-b1', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2A-b2', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2A-b3', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
+    ];
+    const gwRows = [
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2A_G1' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2A_G2' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2A_G3' }
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'F2A_G1', 'F2-A B1 应 ←G1');
+    assert.strictEqual(bankRows[1].ReconciliationId, 'F2A_G2', 'F2-A B2 应 ←G2（方案 A 1v1 — v2.1.6 反例：B2 ←G1）');
+    assert.strictEqual(bankRows[2].ReconciliationId, 'F2A_G3', 'F2-A B3 应 ←G3（方案 A 1v1）');
+    // 真实数据回测核心断言：distinct gw 值 = 3，不是全部 ←G1
+    const distinctNew = new Set(result.modifications.map((m) => m.newValue));
+    assert.strictEqual(distinctNew.size, 3, 'F2-A modifications.newValue distinct count = 3（方案 A 关键性质）');
+    assert.strictEqual(result.modifications.length, 3, 'F2-A modifications 3 条');
+  }
+
+  // F2-B：3 笔等额 bank + 5 笔等额 gw → B1-B3 命中 G1-G3；G4/G5 不被消费（不修改 gwRows）
+  {
+    const scenario = makeC3Scenario();
+    const bankRows = [
+      { _rowId: 'F2B-b1', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2B-b2', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2B-b3', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
+    ];
+    const gwRows = [
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2B_G1' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2B_G2' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2B_G3' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2B_G4' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2B_G5' }
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'F2B_G1', 'F2-B B1 ←G1');
+    assert.strictEqual(bankRows[1].ReconciliationId, 'F2B_G2', 'F2-B B2 ←G2');
+    assert.strictEqual(bankRows[2].ReconciliationId, 'F2B_G3', 'F2-B B3 ←G3');
+    // 多 candidates 时仍有 multi-gateway-match warning（matched.length > 1）
+    assert(result.warnings.some(w => w.code === 'multi-gateway-match'), 'F2-B 多候选时应有 multi-gateway-match warning');
+    assert.strictEqual(result.modifications.length, 3, 'F2-B 仅 3 条 modifications（G4/G5 不被消费）');
+    // 防御：gwRows 不被改（gw 单向不被写回）
+    assert.strictEqual(gwRows[3].reconciliationId, 'F2B_G4', 'F2-B gw 行不被改（gw 不被写回）');
+    assert.strictEqual(gwRows[4].reconciliationId, 'F2B_G5', 'F2-B gw 行不被改');
+  }
+
+  // F2-C：5 笔等额 bank + 3 笔等额 gw → B1-B3 命中；B4/B5 unmatched（不抛错、不警告）
+  // 这是 spec §3.2 情况 1 "gw 池子被前面 bank 抢空" 的核心边界用例
+  {
+    const scenario = makeC3Scenario();
+    const bankRows = [
+      { _rowId: 'F2C-b1', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2C-b2', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2C-b3', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2C-b4', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2C-b5', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
+    ];
+    const gwRows = [
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2C_G1' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2C_G2' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2C_G3' }
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'F2C_G1', 'F2-C B1 ←G1');
+    assert.strictEqual(bankRows[1].ReconciliationId, 'F2C_G2', 'F2-C B2 ←G2');
+    assert.strictEqual(bankRows[2].ReconciliationId, 'F2C_G3', 'F2-C B3 ←G3');
+    // B4/B5：gw 池子已被抢空 → matched.length === 0 → 不命中、不抛错、不警告
+    assert.strictEqual(bankRows[3].ReconciliationId, '', 'F2-C B4 unmatched（gw 已被消费）');
+    assert.strictEqual(bankRows[4].ReconciliationId, '', 'F2-C B5 unmatched（spec §3.2 情况 1）');
+    assert.strictEqual(result.modifications.length, 3, 'F2-C 仅 3 条 modifications');
+    // 防御：B4/B5 unmatched 时不抛 'multi-gateway-match' / 'no-gateway-rows'
+    //   (gwRows 非空所以不应有 no-gateway-rows；matched 为空也不应有 multi-gateway-match)
+    //   注：F2-C 前 3 笔 bank 行（B1/B2/B3）的 candidates 池仍可能 > 1（matched.length > 1）→ 应有 multi
+    //   只验证：B4/B5 unmatched 时不抛新 warning，warnings 内不应出现关联 B4/B5 rowId 的 multi
+    const b4Warnings = result.warnings.filter(w => w.rowId === 'F2C-b4');
+    const b5Warnings = result.warnings.filter(w => w.rowId === 'F2C-b5');
+    assert.strictEqual(b4Warnings.length, 0, 'F2-C B4 unmatched 不应有任何 warning');
+    assert.strictEqual(b5Warnings.length, 0, 'F2-C B5 unmatched 不应有任何 warning');
+  }
+
+  // F2-D：2 笔不等额 bank（A=100, B=200）+ 2 笔不等额 gw（C=100, D=200）→ 旧行为（不受影响）
+  // BA←GC, BB←GD（reconFields 强约束分流 — 与是否 1v1 无关）
+  {
+    const scenario = makeC3Scenario();
+    const bankRows = [
+      { _rowId: 'F2D-ba', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2D-bb', Currency: 'CNY', 'Credit Amount': 200, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
+    ];
+    const gwRows = [
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2D_GC' },
+      { Currency: 'CNY', Amount: 200, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2D_GD' }
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'F2D_GC', 'F2-D BA(100) ←GC(100)');
+    assert.strictEqual(bankRows[1].ReconciliationId, 'F2D_GD', 'F2-D BB(200) ←GD(200)');
+    assert.strictEqual(result.modifications.length, 2, 'F2-D 2 条 modifications');
+    // 此用例 candidates 永远只有 1 个 → 不应有 multi-gateway-match
+    assert(!result.warnings.some(w => w.code === 'multi-gateway-match'), 'F2-D 不等额无 multi-gateway-match warning');
+  }
+
+  // F2-E：1 bank + 1 gw 匹配 — 旧 baseline（最小用例）
+  {
+    const scenario = makeC3Scenario();
+    const bankRows = [{ _rowId: 'F2E-b1', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }];
+    const gwRows = [{ Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2E_GC' }];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'F2E_GC', 'F2-E baseline 1v1 命中');
+    assert.strictEqual(result.modifications.length, 1, 'F2-E 1 条 modification');
+  }
+
+  // F2-F：first-match-wins 防回归 — 上面 C3-1 ~ C3-9 + C3-COND-* + 旧 baseline 全部仍通过
+  //   （由 smoke 全套通过验证，不重复用例）
+
+  console.log('  scenario-engines: 40/40 PASS');
 }
 
 module.exports = {
