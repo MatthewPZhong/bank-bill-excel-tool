@@ -112,7 +112,9 @@
     ],
     "win": {
       "icon": "build/icon.ico",
-      "publisherName": "pzhong",
+      "signtoolOptions": {
+        "publisherName": "pzhong"
+      },
       "target": [
         "nsis",
         "portable"
