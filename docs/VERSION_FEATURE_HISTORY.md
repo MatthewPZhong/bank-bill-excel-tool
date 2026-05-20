@@ -9,6 +9,31 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.6（2026-05-18）
+
+v2.1.5 之后追加 patch 迭代，2 块独立改动：**Module A 个人痕迹元数据**（package.json author/copyright/publisherName + 跨库 watermark + 启动 log 头 + 构建时 git short SHA）+ **Module B 新增模块「收单单据币种校验」**（独立第 8 个主模块，按月对比收单流水表 vs 收单流水单据表币种 + 差异表 29 列对比区 1 对 1 输出）。OPEN ISSUE 全部拍板（PRD §六）。
+
+### 新增
+
+- **Module A 个人痕迹**（无业务影响）：
+  - package.json author 对象化 + electron-builder 注入 Windows 文件属性 publisher = `pzhong`
+  - 跨库 `applyWatermark()` 在 8 个 writer 共 17 处调用前注入 `lastModifiedBy = 'pzhong'`
+  - 启动 log 头新增一行 `crafted by pzhong (pzhong1212@gmail.com) · build {sha}`
+  - 构建脚本 `scripts/gen-build-info.js` + prebuild 钩子注入 git short SHA
+- **Module B 新增「收单单据币种校验」模块**（⚠️ 资金红线）：
+  - 主导航第 8 个独立面板（月份下拉 + 4 按钮 + 状态栏）
+  - 按月组织：导入收单流水表（多 xlsx）+ 导入收单流水单据表（多 xlsx）
+  - 关联键：流水 `对账主Id` ↔ 单据 `主对账Id`，1:1 严格关系
+  - 币种判定：`LOWER + TRIM` 归一后比较（`usd` ≡ `USD`）
+  - 流水金额入库 ABS（`recon_amount_abs`）
+  - 差异表输出 29 列 = 单据原 26 列 + 末尾 3 列对比区（`单据_对账币种` / `流水币种` / `流水金额绝对值`）
+  - 仅含差异行（不一致 + 缺失）；一致行 + unmatched 不入差异表
+  - 1 对 1 输出：每个输入单据 xlsx → 1 个差异 xlsx；0 差异行也输出仅表头版
+  - 4 张 SQLite 表（`acquiring_bill_currency_{flow_imports,bill_imports,runs,diff_rows}`）+ 5 索引 + UNIQUE(month_key, recon_main_id)
+  - 7 个 IPC（`acquiringBillCurrency:*` 命名空间）
+- smoke 用例新增 `scripts/smoke/acquiring-bill-currency.js`：A-G 7 case + A1 watermark 集成 = 26 assert
+- reader 选型：ExcelJS streaming 4.4.0 race bug → 改 SheetJS dense
+
 ## 2.1.5（2026-05-15）
 
 v2.1.4 之后追加 patch 迭代，3 块独立改动：N1 对账单 ReconID 修复模块名加空格 + 修 usage-stats long-standing bug；N2 对账单 ReconID 修复场景下拉空状态统一；N3 银行对账单处理 C3「提取ReconId-From 网关」场景配置 dialog 新增「条件」栏。OPEN ISSUE 全部拍板（PRD §十）。

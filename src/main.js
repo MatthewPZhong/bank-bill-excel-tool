@@ -13,6 +13,14 @@ const pendingDiffRepo = require('./backend/pending-db/diff-repository');
 const pendingReconcileEngine = require('./backend/pending-reconcile/engine');
 const pendingExportWriter = require('./backend/pending-export/writer');
 const { createPendingSession } = require('./main-process/pending-session');
+const { applyWatermark } = require('./main-process/workbook-watermark');
+// v2.1.6 Module B T9：收单单据币种校验 — session + writer
+const acquiringBillCurrencySession = require('./main-process/acquiring-bill-currency-session');
+const acquiringBillCurrencyWriter = require('./main-process/acquiring-bill-currency-writer');
+// v2.1.6 Module A T3：启动 log 头注入作者 + build SHA
+const pkg = require('../package.json');
+let buildInfo = { commit: 'dev' };
+try { buildInfo = require('./build-info'); } catch (_) { /* dev 期 src/build-info.js 不存在 */ }
 // v2.1.2 T2：月度银行对账单BU回填校验模块
 const { createBankBuReconSession, runReconciliation: runBankBuRecon } = require('./main-process/bank-bu-recon-session');
 const {
@@ -188,6 +196,30 @@ let startupMetricsReported = false;
 // v1.5.3 R2：自有账号迁移失败消息（D15）。null = 无失败；字符串 = 启动时发生失败，
 // renderer 首次 app:get-info 时读取并用 error tone 显示状态栏告警
 let lastOwnAccountsMigrationError = null;
+
+// v2.1.6 fix3 → fix9 → fix10：收单单据币种校验模块的通用 operation lock
+// 提到 module-level 是为 fix10 启动钩子（app.whenReady 链中 setImmediate 调 cleanupOrphanData）
+// 也需要 acquire lock，避免和 IPC handler 并发；register 函数内部仍可访问（JS 闭包向外查找）
+const acquiringBillCurrencyOperationLock = { inFlight: false, operation: null, monthKey: null };
+function tryAcquireAcquiringBillCurrencyOpLock(operation, monthKey) {
+  if (acquiringBillCurrencyOperationLock.inFlight) {
+    const lock = acquiringBillCurrencyOperationLock;
+    const opLabel = { import: '导入', run: '对账', export: '导出', cleanup: '上一次对账后清理' }[lock.operation] || lock.operation;
+    const message = lock.operation === 'cleanup'
+      ? `${opLabel} ${lock.monthKey || ''} 数据中，请稍后再操作`
+      : `当前有${opLabel}任务在执行，请等待完成后再试`;
+    return { acquired: false, message };
+  }
+  acquiringBillCurrencyOperationLock.inFlight = true;
+  acquiringBillCurrencyOperationLock.operation = operation;
+  acquiringBillCurrencyOperationLock.monthKey = monthKey || null;
+  return { acquired: true };
+}
+function releaseAcquiringBillCurrencyOpLock() {
+  acquiringBillCurrencyOperationLock.inFlight = false;
+  acquiringBillCurrencyOperationLock.operation = null;
+  acquiringBillCurrencyOperationLock.monthKey = null;
+}
 
 const DEFAULT_BACKGROUND_COLOR = '#efe8da';
 // v2.0.0-beta.2 D16：Clear 风格的默认背景色（白）
@@ -439,6 +471,11 @@ function initializeActivityLog() {
     level: 'info',
     message: '应用启动',
     details: [`版本：${app.getVersion()}`]
+  });
+  // v2.1.6 Module A T3：个人痕迹 — 紧贴"应用启动"后写入作者 + 构建 SHA
+  appendActivityLogEntry({
+    level: 'info',
+    message: `crafted by ${pkg.author.name} (${pkg.author.email}) · build ${buildInfo.commit}`
   });
   return activityLogFilePath;
 }
@@ -6101,6 +6138,7 @@ function mergeGeneratedXlsxFiles(filePaths, mergedOutputPath) {
     };
   }
   fs.mkdirSync(path.dirname(mergedOutputPath), { recursive: true });
+  applyWatermark(baseWb);
   XLSXStyle.writeFile(baseWb, mergedOutputPath);
   return mergedOutputPath;
 }
@@ -10019,6 +10057,246 @@ function registerNewAccountHandlers() {
       return [];
     }
   });
+
+  // ============================================================
+  // v2.1.6 Module B T9：收单单据币种校验 — acquiringBillCurrency:* IPC handler
+  // spec §七：7 个 handler；⚠️ 资金红线模块
+  // ============================================================
+
+  ipcMain.handle('acquiringBillCurrency:listMonths', () => {
+    if (!database || !database.db) return [];
+    try { return acquiringBillCurrencySession.listMonths({ db: database.db }); } catch (_e) { return []; }
+  });
+
+  ipcMain.handle('acquiringBillCurrency:sessionStatus', (_event, payload = {}) => {
+    if (!database || !database.db) return { monthKey: null, flowReady: false, billReady: false };
+    const { monthKey } = payload || {};
+    try {
+      return acquiringBillCurrencySession.getSessionStatus({ db: database.db, monthKey });
+    } catch (_e) {
+      return { monthKey: monthKey || null, flowReady: false, billReady: false };
+    }
+  });
+
+  // fix1（spec §3.4）：importFlow / importBill 改造为三段式
+  //   1. 首调（无 payload）：弹 dialog → peek → 查 existingCount → 0 直接进事务；>0 返回 overwrite-required
+  //   2. 二次调（{ filePaths, confirmOverwrite: true }）：跳过 dialog/peek，进"单侧清+导入"事务
+  //   3. 异常分支：cancelled / error 携带 detailLines
+  // fix3 → fix9 → fix10：通用 operation lock 提到 module-level（line 200 附近），import/run/export/cleanup
+  // 互斥；cleanup 异步后台跑也持锁；fix10 启动钩子也共享同一把锁，避免 cleanup vs 用户首次 import 并发
+  const tryAcquireOpLock = tryAcquireAcquiringBillCurrencyOpLock;
+  const releaseOpLock = releaseAcquiringBillCurrencyOpLock;
+
+  async function handleImportFlowOrBill(kind, payload) {
+    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
+    const lock = tryAcquireOpLock('import', payload && payload.monthKey);
+    if (!lock.acquired) return { status: 'error', message: lock.message, detailLines: [] };
+    try {
+      return await doHandleImportFlowOrBill(kind, payload);
+    } finally {
+      releaseOpLock();
+    }
+  }
+  // fix5（spec v0.8 §3.3）：handler 入参必传 monthKey（用户弹窗选）；peek 校验 xlsx 内月份 = 用户选的月份；不一致整批拒绝
+  async function doHandleImportFlowOrBill(kind, payload) {
+    const isFlow = kind === 'flow';
+    const sessionImport = isFlow
+      ? acquiringBillCurrencySession.importFlowFiles
+      : acquiringBillCurrencySession.importBillFiles;
+    const sessionOverwrite = isFlow
+      ? acquiringBillCurrencySession.importFlowFilesWithOverwrite
+      : acquiringBillCurrencySession.importBillFilesWithOverwrite;
+
+    const monthKey = payload && payload.monthKey;
+    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
+      return {
+        status: 'error',
+        message: '缺少月份参数（请先在弹窗中选择对账月份）',
+        detailLines: []
+      };
+    }
+
+    // 分支 2：renderer 已确认覆盖
+    if (payload.confirmOverwrite === true && Array.isArray(payload.filePaths) && payload.filePaths.length > 0) {
+      try {
+        const result = await sessionOverwrite({
+          db: database.db,
+          monthKey,
+          filePaths: payload.filePaths
+        });
+        return { status: 'success', overwritten: true, ...result };
+      } catch (err) {
+        return {
+          status: 'error',
+          message: err && err.message ? err.message : String(err),
+          detailLines: err && err.detailLines ? err.detailLines : []
+        };
+      }
+    }
+
+    // 分支 1：弹 dialog 选文件
+    const res = await dialog.showOpenDialog({
+      title: isFlow ? `选择收单流水表（月份 ${monthKey}，可多选）` : `选择收单流水单据表（月份 ${monthKey}，可多选）`,
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      properties: ['openFile', 'multiSelections']
+    });
+    if (res.canceled || !res.filePaths || res.filePaths.length === 0) {
+      return { status: 'cancelled' };
+    }
+
+    // peek：读首文件 → 表头校验 + 解析首条数据行 monthKey → 与用户选月份比对
+    let peeked;
+    try {
+      peeked = await acquiringBillCurrencySession.peekImportTarget({
+        db: database.db,
+        kind,
+        filePaths: res.filePaths
+      });
+    } catch (err) {
+      return {
+        status: 'error',
+        message: err && err.message ? err.message : String(err),
+        detailLines: err && err.detailLines ? err.detailLines : []
+      };
+    }
+
+    // fix5：文件月份与用户选月份必须一致
+    if (peeked.monthKey !== monthKey) {
+      return {
+        status: 'error',
+        message: `文件月份 ${peeked.monthKey} 与所选月份 ${monthKey} 不一致，请检查选择`,
+        detailLines: [`首文件解析月份：${peeked.monthKey}`, `用户选择月份：${monthKey}`]
+      };
+    }
+
+    if (peeked.existingCount > 0) {
+      return {
+        status: 'overwrite-required',
+        kind,
+        monthKey,
+        existingCount: peeked.existingCount,
+        filePaths: res.filePaths
+      };
+    }
+
+    try {
+      const result = await sessionImport({
+        db: database.db,
+        monthKey,
+        filePaths: res.filePaths
+      });
+      return { status: 'success', ...result };
+    } catch (err) {
+      return {
+        status: 'error',
+        message: err && err.message ? err.message : String(err),
+        detailLines: err && err.detailLines ? err.detailLines : []
+      };
+    }
+  }
+
+  trackedIpcHandle('acquiringBillCurrency:importFlow', '收单单据币种校验', '导入流水表', async (_event, payload = {}) => {
+    return handleImportFlowOrBill('flow', payload);
+  });
+
+  trackedIpcHandle('acquiringBillCurrency:importBill', '收单单据币种校验', '导入单据表', async (_event, payload = {}) => {
+    return handleImportFlowOrBill('bill', payload);
+  });
+
+  // v0.8 fix5：runCheck 改 async，传 storageRoot 让 session 同步产出 diff.xlsx + report.xlsx
+  // v0.12 fix9：handler 接入 operation lock；runCheck return 后异步触发 cleanup（不阻塞 IPC return）
+  trackedIpcHandle('acquiringBillCurrency:run', '收单单据币种校验', '开始运行', async (_event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
+    const { monthKey } = payload || {};
+    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
+      return { status: 'error', message: 'monthKey 格式错误（应为 YYYY-MM）' };
+    }
+    const lock = tryAcquireOpLock('run', monthKey);
+    if (!lock.acquired) return { status: 'error', message: lock.message };
+    let result;
+    try {
+      const storageRoot = ensureStorageRoot();
+      result = await acquiringBillCurrencySession.runCheck({ db: database.db, monthKey, storageRoot });
+    } catch (err) {
+      releaseOpLock();
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+    // v0.12 fix9：release run lock，立即 acquire cleanup lock，setImmediate 异步分批清理（不阻塞 handler return）
+    releaseOpLock();
+    if (result.cleanupNeeded) {
+      const cleanupLock = tryAcquireOpLock('cleanup', monthKey);
+      if (cleanupLock.acquired) {
+        setImmediate(async () => {
+          try {
+            const cleanupStats = await acquiringBillCurrencySession.cleanupAfterRunBackground({
+              db: database.db,
+              monthKey,
+              runId: result.runId
+            });
+            // eslint-disable-next-line no-console
+            console.log(`[acquiring-bill-currency] background cleanup done for ${monthKey}:`, cleanupStats);
+          } catch (cleanupErr) {
+            // eslint-disable-next-line no-console
+            console.error(`[acquiring-bill-currency] background cleanup failed for ${monthKey}:`, cleanupErr && cleanupErr.message);
+          } finally {
+            releaseOpLock();
+          }
+        });
+      }
+    }
+    return { status: 'success', ...result };
+  });
+
+  // v0.8 fix5：export = 另存为最近 run 的 diff.xlsx（fs.copyFile）
+  // v0.12 fix9：handler 接入 operation lock
+  trackedIpcHandle('acquiringBillCurrency:export', '收单单据币种校验', '导出差异', async (_event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
+    const { monthKey } = payload || {};
+    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
+      return { status: 'error', message: 'monthKey 格式错误' };
+    }
+    const lock = tryAcquireOpLock('export', monthKey);
+    if (!lock.acquired) return { status: 'error', message: lock.message };
+    try {
+      const runRepo = require('./backend/acquiring-bill-currency-db/run-repository');
+      const latestRun = runRepo.getLatestRun(database.db, monthKey);
+      if (!latestRun) {
+        return { status: 'error', message: `月份 ${monthKey} 暂无 run 记录，请先点「开始运行」` };
+      }
+      if (!latestRun.diff_file_path || !fs.existsSync(latestRun.diff_file_path)) {
+        return { status: 'error', message: `月份 ${monthKey} 的差异表文件不存在，请重新「开始运行」` };
+      }
+      const defaultName = path.basename(latestRun.diff_file_path);
+      const res = await dialog.showSaveDialog({
+        title: '导出差异表另存为',
+        defaultPath: defaultName,
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (res.canceled || !res.filePath) {
+        return { status: 'cancelled' };
+      }
+      fs.copyFileSync(latestRun.diff_file_path, res.filePath);
+      return { status: 'success', savedPath: res.filePath, sourceDiffPath: latestRun.diff_file_path };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    } finally {
+      releaseOpLock();
+    }
+  });
+
+  ipcMain.handle('acquiringBillCurrency:clearMonth', (_event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
+    const { monthKey } = payload || {};
+    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
+      return { status: 'error', message: 'monthKey 格式错误' };
+    }
+    try {
+      acquiringBillCurrencySession.clearMonth({ db: database.db, monthKey });
+      return { status: 'success' };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
 }
 
 // v2.0.0-beta.4：usage-stats 模块（隐藏 .usage-stats.txt）
@@ -10157,6 +10435,56 @@ app.whenReady()
     registerNewAccountHandlers();
     markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);
     createWindow();
+
+    // v2.1.6 fix10：启动期孤儿数据 cleanup（后台异步，不阻塞窗口 ready）
+    // 触发场景：上一次 run 中途 OOM 闪退 / 异常退出 / 用户 force quit，导致 DB 残留 diff_rows + flow/bill imports
+    // 检测口径：runs.status != 'success' OR diff/report 文件丢失（spec §5.4）
+    // 复用 fix9 cleanupAfterRunBackground 分批 DELETE + setImmediate 让出 event loop
+    // 失败容忍：抛错只记 activity log，不阻塞应用使用
+    setImmediate(async () => {
+      if (!database || !database.db) return;
+      const lock = tryAcquireAcquiringBillCurrencyOpLock('cleanup', null);
+      if (!lock.acquired) return;
+      try {
+        const stats = await acquiringBillCurrencySession.cleanupOrphanData({
+          db: database.db,
+          onProgress: (p) => {
+            try {
+              appendActivityLogEntry({
+                level: 'info',
+                message: `[acquiring-bill-currency] startup cleanup ${p.phase}`,
+                details: [JSON.stringify(p)]
+              });
+            } catch (_logErr) { /* swallow */ }
+          }
+        });
+        if (stats && (stats.orphanRunIds.length > 0 || stats.deletedDiff > 0 || stats.deletedFlow > 0 || stats.deletedBill > 0)) {
+          try {
+            appendActivityLogEntry({
+              level: 'info',
+              message: '[acquiring-bill-currency] 启动期 cleanup 完成（fix10）',
+              details: [
+                `孤儿 run: ${stats.orphanRunIds.length} 个 (${stats.orphanRunIds.join(', ')})`,
+                `清空 diff_rows: ${stats.deletedDiff}`,
+                `清空 flow_imports: ${stats.deletedFlow}`,
+                `清空 bill_imports: ${stats.deletedBill}`,
+                `删除 run 记录: ${stats.deletedRuns}`
+              ]
+            });
+          } catch (_logErr) { /* swallow */ }
+        }
+      } catch (err) {
+        try {
+          appendActivityLogEntry({
+            level: 'error',
+            message: '[acquiring-bill-currency] 启动期 cleanup 失败（fix10）',
+            details: [String(err && err.stack ? err.stack : err)]
+          });
+        } catch (_logErr) { /* swallow */ }
+      } finally {
+        releaseAcquiringBillCurrencyOpLock();
+      }
+    });
   })
   .catch((error) => {
     handleStartupFailure(error);

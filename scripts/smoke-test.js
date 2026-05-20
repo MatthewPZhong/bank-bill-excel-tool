@@ -25,6 +25,8 @@ const { runReconIdFixEngineGatewaySmokeTests } = require('./smoke/recon-id-fix-e
 const { runBankBuReconSmokeTests } = require('./smoke/bank-bu-recon');
 // v2.1.3：业务OP数据核对（A-H 8 用例 + helper/validator 单测）
 const { runBizOpReconSmokeTests } = require('./smoke/biz-op-recon');
+// v2.1.6 Module B：收单单据币种校验（A-G 7 用例 + Module A A1 watermark 集成）
+const { runAcquiringBillCurrencySmokeTests } = require('./smoke/acquiring-bill-currency');
 
 async function run() {
   const context = createSmokeContext();
@@ -50,6 +52,8 @@ async function run() {
   await runBankBuReconSmokeTests();
   // v2.1.3：业务OP数据核对
   await runBizOpReconSmokeTests();
+  // v2.1.6 Module B：收单单据币种校验
+  await runAcquiringBillCurrencySmokeTests();
   console.log('smoke test passed');
 }
 

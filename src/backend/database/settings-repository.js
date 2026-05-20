@@ -95,9 +95,10 @@ const ALL_MODULE_IDS = Object.freeze([
   'new-account-generator',
   'pending-reconciliation',
   'bank-statement-process',
-  'recon-id-fix',          // v2.1.0-beta.1 PR-A 新增
-  'bank-bu-recon',         // v2.1.2 新增
-  'biz-op-recon'           // v2.1.3 新增
+  'recon-id-fix',           // v2.1.0-beta.1 PR-A 新增
+  'bank-bu-recon',          // v2.1.2 新增
+  'biz-op-recon',           // v2.1.3 新增
+  'acquiring-bill-currency' // v2.1.6 新增
 ]);
 
 const CURRENT_MODULE_KEY = 'current_module';

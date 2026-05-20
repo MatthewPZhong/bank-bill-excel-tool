@@ -6,6 +6,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 // v2.0.0 GA：切到 xlsx-js-style 以支持表头字号样式（与其他 writer 一致）
 const XLSX = require('xlsx-js-style');
+const { applyWatermark } = require('./workbook-watermark');
 
 const PENDING_COLUMNS = require('../backend/pending-db/columns');
 const monthRepo = require('../backend/pending-db/month-repository');
@@ -91,6 +92,7 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
     applyHeaderRowFont(ws);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+    applyWatermark(wb);
     XLSX.writeFile(wb, archivePath);
     return archivePath;
   }
@@ -265,6 +267,7 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
     applyHeaderRowFont(ws);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '错误报告');
+    applyWatermark(wb);
     XLSX.writeFile(wb, savePath);
     return { status: 'success', path: savePath, errorCount: lastImportErrors.errors.length };
   }

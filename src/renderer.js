@@ -71,6 +71,11 @@ const MODULES = Object.freeze({
   bizOpRecon: {
     id: 'biz-op-recon',
     name: '业务OP数据核对'
+  },
+  // v2.1.6 Module B：收单单据币种校验
+  acquiringBillCurrency: {
+    id: 'acquiring-bill-currency',
+    name: '收单单据币种校验'
   }
 });
 const RENDERER_STARTUP_MARKS = Object.freeze({
@@ -272,6 +277,14 @@ const elements = {
   bizOpReconBuSelect: document.getElementById('bizOpReconBuSelect'),
   bizOpReconExportBtn: document.getElementById('bizOpReconExportBtn'),
   bizOpReconStatusBox: document.getElementById('bizOpReconStatusBox'),
+
+  // v2.1.6 Module B：收单单据币种校验
+  acquiringBillCurrencyModulePanel: document.getElementById('acquiringBillCurrencyModulePanel'),
+  acquiringBillCurrencyImportFlowBtn: document.getElementById('acquiringBillCurrencyImportFlowBtn'),
+  acquiringBillCurrencyImportBillBtn: document.getElementById('acquiringBillCurrencyImportBillBtn'),
+  acquiringBillCurrencyRunBtn: document.getElementById('acquiringBillCurrencyRunBtn'),
+  acquiringBillCurrencyExportBtn: document.getElementById('acquiringBillCurrencyExportBtn'),
+  acquiringBillCurrencyStatusBox: document.getElementById('acquiringBillCurrencyStatusBox'),
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（spec §一.1 + §七 — 6 项 DOM 缓存）
   // v2.1.0-beta.3 T4：新增主面板"账单类别"下拉 + 行 2 整行 wrapper（可隐藏）
   reconIdFixModulePanel: document.getElementById('reconIdFixModulePanel'),
@@ -333,6 +346,8 @@ const {
   createScenarioConfigDialogC4,
   // v2.1.2 T2：月份选择对话框（PRD §3.2.5 拍板修正）
   createBankBuReconMonthPickerDialog,
+  // v2.1.6 fix5：收单单据币种校验月份选择对话框（spec v0.8 §8.1）
+  createAcquiringBillCurrencyMonthPickerDialog,
   // v2.1.2 T2：文件导入提示对话框（Clear 风前端 modal）
   createBankBuReconFileImportPromptDialog,
   // v2.1.2 T2 (spec v0.5)：开始运行 / 导出差异 弹窗
@@ -1306,6 +1321,13 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
     elements.bizOpReconModulePanel.hidden = moduleId !== MODULES.bizOpRecon.id;
     if (moduleId === MODULES.bizOpRecon.id) {
       restoreBizOpReconPanelState();
+    }
+  }
+  // v2.1.6 Module B：收单单据币种校验模块面板隐藏控制
+  if (elements.acquiringBillCurrencyModulePanel) {
+    elements.acquiringBillCurrencyModulePanel.hidden = moduleId !== MODULES.acquiringBillCurrency.id;
+    if (moduleId === MODULES.acquiringBillCurrency.id) {
+      restoreAcquiringBillCurrencyPanelState();
     }
   }
 
@@ -4204,6 +4226,204 @@ function restoreBizOpReconPanelState() {
   refreshBizOpReconButtonAvailability();
 }
 
+// ===== v2.1.6 Module B：收单单据币种校验（spec v0.8 §3.5 / §8，fix5 删月份下拉 + 月份选弹窗）=====
+
+const acquiringBillCurrencyState = {
+  latestMonth: null     // 最近成功操作的月份（导入/运行/导出后回写，仅状态栏文案展示用）
+};
+
+function setAcquiringBillCurrencyStatus(message, tone = 'info') {
+  const box = elements.acquiringBillCurrencyStatusBox;
+  if (!box) return;
+  const text = box.querySelector('.status-box-text');
+  if (text) text.textContent = message || '';
+  box.classList.remove('is-info', 'is-success', 'is-error', 'is-warn');
+  if (tone) box.classList.add('is-' + tone);
+}
+
+function restoreAcquiringBillCurrencyPanelState() {
+  setAcquiringBillCurrencyStatus('欢迎使用小助手', 'info');
+  // fix5：删月份下拉后，按钮可用性不再依赖 selectedMonth，4 按钮均默认 enabled
+  setAcquiringBillCurrencyButtonsDisabled(false);
+}
+
+// fix1（spec §3.4）：两段式导入 handler — 首调若已有数据返回 overwrite-required，confirm 后二次调带 confirmOverwrite
+// fix3：进入 handler 时禁用 4 个导入/运行/导出按钮，结束/异常时恢复，防止用户连点触发并发 IPC
+function setAcquiringBillCurrencyButtonsDisabled(disabled) {
+  const btns = [
+    elements.acquiringBillCurrencyImportFlowBtn,
+    elements.acquiringBillCurrencyImportBillBtn,
+    elements.acquiringBillCurrencyRunBtn,
+    elements.acquiringBillCurrencyExportBtn
+  ];
+  for (const b of btns) {
+    if (b) b.disabled = disabled;
+  }
+}
+
+// fix5：弹「选择对账月份」picker（复用 bankBuRecon 范式 createAcquiringBillCurrencyMonthPickerDialog）
+// 返回 Promise<string|null>（'YYYY-MM' 或 null 表示取消）
+function pickAcquiringBillCurrencyMonth(actionLabel) {
+  return new Promise((resolve) => {
+    openModal(createAcquiringBillCurrencyMonthPickerDialog({
+      actionLabel,
+      onConfirm: (yearMonth) => resolve(yearMonth),
+      onCancel: () => resolve(null)
+    }));
+  });
+}
+
+async function runAcquiringBillCurrencyImport(kind) {
+  const labelTable = kind === 'flow' ? '流水表' : '单据表';
+  const apiCall = kind === 'flow'
+    ? (payload) => window.desktopApi.acquiringBillCurrency.importFlow(payload)
+    : (payload) => window.desktopApi.acquiringBillCurrency.importBill(payload);
+
+  // 第 1 步：弹月份选择
+  const monthKey = await pickAcquiringBillCurrencyMonth('导入');
+  if (!monthKey) {
+    setAcquiringBillCurrencyStatus('已取消导入', 'info');
+    return;
+  }
+
+  setAcquiringBillCurrencyButtonsDisabled(true);
+  setAcquiringBillCurrencyStatus(`正在导入${labelTable}（${monthKey}）...`, 'info');
+  try {
+    // 第 2 步：调 IPC 选文件 + peek + 月份校验 + 导入
+    const first = await apiCall({ monthKey });
+    if (first.status === 'cancelled') {
+      setAcquiringBillCurrencyStatus('已取消导入', 'info');
+      return;
+    }
+    if (first.status === 'error') {
+      const detail = (first.detailLines || []).slice(0, 3).join('；');
+      setAcquiringBillCurrencyStatus(`${labelTable}导入失败：${first.message}${detail ? '（' + detail + '）' : ''}`, 'error');
+      return;
+    }
+
+    let result = first;
+    if (first.status === 'overwrite-required') {
+      const ok = window.confirm(
+        `检测到月份 ${first.monthKey} 已有 ${first.existingCount} 行${labelTable}数据。\n` +
+        `点击「确定」将先清空该月份的${labelTable}数据，再导入本次选择的 ${first.filePaths.length} 个文件。\n` +
+        `（仅清单侧数据，不影响该月份对账历史 / 差异结果）\n\n继续？`
+      );
+      if (!ok) {
+        setAcquiringBillCurrencyStatus(`已取消覆盖导入（月份 ${first.monthKey} 数据保留）`, 'info');
+        return;
+      }
+      setAcquiringBillCurrencyStatus(`正在覆盖导入${labelTable}（${monthKey}）...`, 'info');
+      const second = await apiCall({ monthKey, filePaths: first.filePaths, confirmOverwrite: true });
+      if (second.status === 'cancelled') {
+        setAcquiringBillCurrencyStatus('已取消导入', 'info');
+        return;
+      }
+      if (second.status === 'error') {
+        const detail = (second.detailLines || []).slice(0, 3).join('；');
+        setAcquiringBillCurrencyStatus(`${labelTable}覆盖导入失败：${second.message}${detail ? '（' + detail + '）' : ''}`, 'error');
+        return;
+      }
+      result = second;
+    }
+
+    const overwriteNote = result.overwritten ? `（已清旧 ${result.deletedCount} 行）` : '';
+    setAcquiringBillCurrencyStatus(
+      `${labelTable}导入成功：月份 ${result.monthKey}，共 ${result.totalImported} 行${overwriteNote}`,
+      'success'
+    );
+    acquiringBillCurrencyState.latestMonth = result.monthKey;
+  } catch (e) {
+    setAcquiringBillCurrencyStatus(`${labelTable}导入异常：${e.message || e}`, 'error');
+  } finally {
+    setAcquiringBillCurrencyButtonsDisabled(false);
+  }
+}
+
+async function handleAcquiringBillCurrencyImportFlow() {
+  return runAcquiringBillCurrencyImport('flow');
+}
+
+async function handleAcquiringBillCurrencyImportBill() {
+  return runAcquiringBillCurrencyImport('bill');
+}
+
+async function handleAcquiringBillCurrencyRun() {
+  // fix5：弹月份选择 → run → 同步生成 diff + report
+  const monthKey = await pickAcquiringBillCurrencyMonth('运行');
+  if (!monthKey) {
+    setAcquiringBillCurrencyStatus('已取消运行', 'info');
+    return;
+  }
+  setAcquiringBillCurrencyButtonsDisabled(true);
+  setAcquiringBillCurrencyStatus(`正在对账（${monthKey}）...`, 'info');
+  try {
+    const result = await window.desktopApi.acquiringBillCurrency.run({ monthKey });
+    if (result.status !== 'success') {
+      setAcquiringBillCurrencyStatus(`对账失败：${result.message || ''}`, 'error');
+      return;
+    }
+    acquiringBillCurrencyState.latestMonth = monthKey;
+    const diffNote = result.diffFilePath ? `\n差异表：${result.diffFilePath}` : '';
+    const reportNote = result.reportFilePath ? `\n结果表：${result.reportFilePath}` : '';
+    setAcquiringBillCurrencyStatus(
+      `对账完成（${monthKey}）：共 ${result.totalBillRows} 条，币种差异 ${result.mismatchRows} 条，未匹配 ${result.unmatchedRows} 条${diffNote}${reportNote}`,
+      'success'
+    );
+  } catch (e) {
+    setAcquiringBillCurrencyStatus(`对账异常：${e.message || e}`, 'error');
+  } finally {
+    setAcquiringBillCurrencyButtonsDisabled(false);
+  }
+}
+
+async function handleAcquiringBillCurrencyExport() {
+  // fix5：弹月份选择 → 弹另存为对话框 → IPC fs.copyFile 已生成的 diff.xlsx
+  const monthKey = await pickAcquiringBillCurrencyMonth('导出');
+  if (!monthKey) {
+    setAcquiringBillCurrencyStatus('已取消导出', 'info');
+    return;
+  }
+  setAcquiringBillCurrencyButtonsDisabled(true);
+  setAcquiringBillCurrencyStatus(`正在导出差异表（${monthKey}）...`, 'info');
+  try {
+    const result = await window.desktopApi.acquiringBillCurrency.export({ monthKey });
+    if (result.status === 'cancelled') {
+      setAcquiringBillCurrencyStatus('已取消导出', 'info');
+      return;
+    }
+    if (result.status !== 'success') {
+      setAcquiringBillCurrencyStatus(`导出失败：${result.message || ''}`, 'error');
+      return;
+    }
+    setAcquiringBillCurrencyStatus(`差异表已导出：${result.savedPath}`, 'success');
+  } catch (e) {
+    setAcquiringBillCurrencyStatus(`导出异常：${e.message || e}`, 'error');
+  } finally {
+    setAcquiringBillCurrencyButtonsDisabled(false);
+  }
+}
+
+// preview 状态模拟（仅用于 preview 截图，不影响生产逻辑）
+function applyAcquiringBillCurrencyPanelInitialPreviewState() {
+  setCurrentModule(MODULES.acquiringBillCurrency.id, { persist: false });
+  setAcquiringBillCurrencyStatus('欢迎使用小助手', 'info');
+}
+
+function applyAcquiringBillCurrencyPanelImportingPreviewState() {
+  setCurrentModule(MODULES.acquiringBillCurrency.id, { persist: false });
+  setAcquiringBillCurrencyStatus('流水表导入成功：月份 2026-03，共 4,873,210 行', 'success');
+}
+
+function applyAcquiringBillCurrencyPanelResultPreviewState() {
+  setCurrentModule(MODULES.acquiringBillCurrency.id, { persist: false });
+  if (elements.acquiringBillCurrencyRunBtn) elements.acquiringBillCurrencyRunBtn.disabled = false;
+  if (elements.acquiringBillCurrencyExportBtn) elements.acquiringBillCurrencyExportBtn.disabled = false;
+  setAcquiringBillCurrencyStatus(
+    '对账完成：共 4,873,210 条，币种差异 1,247 条，未匹配 38 条',
+    'success'
+  );
+}
+
 function handleBizOpReconBuChange(e) {
   bizOpReconState.selectedBu = String(e.target.value || '');
   refreshBizOpReconButtonAvailability();
@@ -4659,6 +4879,20 @@ async function initialize() {
     elements.bizOpReconBuSelect.addEventListener('change', handleBizOpReconBuChange);
   }
 
+  // v2.1.6 Module B：收单单据币种校验事件绑定
+  if (elements.acquiringBillCurrencyImportFlowBtn) {
+    elements.acquiringBillCurrencyImportFlowBtn.addEventListener('click', handleAcquiringBillCurrencyImportFlow);
+  }
+  if (elements.acquiringBillCurrencyImportBillBtn) {
+    elements.acquiringBillCurrencyImportBillBtn.addEventListener('click', handleAcquiringBillCurrencyImportBill);
+  }
+  if (elements.acquiringBillCurrencyRunBtn) {
+    elements.acquiringBillCurrencyRunBtn.addEventListener('click', handleAcquiringBillCurrencyRun);
+  }
+  if (elements.acquiringBillCurrencyExportBtn) {
+    elements.acquiringBillCurrencyExportBtn.addEventListener('click', handleAcquiringBillCurrencyExport);
+  }
+
   elements.backgroundPaletteBtn.addEventListener('click', () => {
     if (state.isBackgroundPaletteOpen) {
       closeBackgroundPalette();
@@ -5014,6 +5248,12 @@ async function initialize() {
     setTimeout(() => { applyBizOpReconPanelResultPreviewState(); }, 120);
   } else if (info.previewModal === 'biz-op-recon-panel-export-dialog') {
     setTimeout(() => { applyBizOpReconPanelExportDialogPreviewState(); }, 120);
+  } else if (info.previewModal === 'acquiring-bill-currency-panel-initial') {
+    setTimeout(() => { applyAcquiringBillCurrencyPanelInitialPreviewState(); }, 120);
+  } else if (info.previewModal === 'acquiring-bill-currency-panel-importing') {
+    setTimeout(() => { applyAcquiringBillCurrencyPanelImportingPreviewState(); }, 120);
+  } else if (info.previewModal === 'acquiring-bill-currency-panel-result') {
+    setTimeout(() => { applyAcquiringBillCurrencyPanelResultPreviewState(); }, 120);
   } else if (info.previewModal === 'module-cabinet') {
     setTimeout(() => { applyModuleCabinetPreviewState(); }, 120);
   }

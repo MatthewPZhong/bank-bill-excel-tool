@@ -12,6 +12,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const XLSX = require('xlsx');
 const XLSXStyle = require('xlsx-js-style');
+const { applyWatermark } = require('./workbook-watermark');
 
 const { FileValidationError } = require('../backend/file-service/common');
 const {
@@ -256,6 +257,7 @@ async function writeReconIdFixOutput({ fixedRows, savePath, subMode = 'business'
 
   const wb = XLSXStyle.utils.book_new();
   XLSXStyle.utils.book_append_sheet(wb, ws, cfg.orderRepairSheetName);
+  applyWatermark(wb);
   XLSXStyle.writeFile(wb, savePath);
 
   return {
@@ -297,6 +299,7 @@ async function writeUnmatchedReport({ unmatchedRows, savePath }) {
 
   const wb = XLSXStyle.utils.book_new();
   XLSXStyle.utils.book_append_sheet(wb, ws, UNMATCHED_REPORT_SHEET_NAME);
+  applyWatermark(wb);
   XLSXStyle.writeFile(wb, savePath);
 
   return {

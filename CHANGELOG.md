@@ -1,5 +1,139 @@
 # Changelog
 
+## 2.1.6 - 2026-05-18
+
+v2.1.5 之后追加 patch 迭代，2 块独立改动：**Module A 个人痕迹元数据**（package.json author/copyright/publisherName + 8 个 writer 跨库 watermark + 启动 log 头 crafted by + 构建时 git short SHA）+ **Module B 新增模块「收单单据币种校验」**（独立第 8 个主模块，按月对比收单流水表 vs 收单流水单据表币种 + 差异表 29 列对比区）。OPEN ISSUE 全部拍板（PRD §六）；用户拍板 v0.2 改 4 列对比区 + v0.3 去掉「单据_对账金额」copy。fix1：用户实测发现"二次导入相同月份 UNIQUE 整批拒绝无引导" UX 漏洞 → 导入前 peek monthKey + 弹窗覆盖确认（流水/单据对称，仅清单侧，不动 runs/diff_rows）。**fix2**：用户实测发现 v0.3 SheetJS dense reader 对真实清结算数据（30w 行/文件 + inlineStr 格式 + 800MB 解压 + POI ZIP data descriptor）完全跑不动（fflate/unzipper 双双拒解）→ reader 重写为 yauzl + sax 流式（单文件 RAM < 50MB / peek O(1) < 100ms / 实测 30w 行 55s）。**fix3**：用户实测多次快速点击导入按钮触发 `cannot start a transaction within a transaction` → handler 级 mutex + renderer 按钮禁用双重保护。**fix4**：用户实测发现 v0.6 用「币种」+「对账金额」（订单视角）对账时 466 万行 100% match = 字段语义错位 → 流水侧切换到「通道清算币种」+「通道清算金额」（清算视角，与单据「对账币种」对齐），DB 字段重命名 recon_* → settle_*，预估抓出 ~259 万行真实差异。**fix5**：UX 重构 + 输出形态反转 — 删月份下拉 + 导入/运行/导出按钮触发月份选择弹窗（复用 bankBuRecon 范式）；§6.3 反转 v0.3 拍板的「1 对 1 输出」为**单文件单 sheet 合并输出**；§6.4 新增结果表 report（11 区块极详细单 sheet）；run 时同步产出 diff + report 到 exports/{date}/acquiring-bill-currency/(report/)，导出差异 = fs.copyFile 另存为。**fix6**：通道清算金额允许为空（与币种空值对称，业务上 4 种非清算流水子类型 ~0.6% 行无值）。**fix7**：差异表 writer 改 ExcelJS streaming + SQL 分批拉取，解决 259w 差异行 V8 OOM 闪退问题（内存常驻 < 100MB）。**fix8**：run 成功 + diff/report 落盘后自动清原始数据 flow_imports/bill_imports/diff_rows（runs 保留），DB 不再无限膨胀；同月份重跑须重导表。**fix9**：cleanup 改异步后台分批（每批 50k 行 + setImmediate 让出 event loop）+ 通用 operation lock，UI 不再卡几分钟。**fix10**：启动期孤儿数据 cleanup — 应对 OOM 闪退 / 异常退出 / 用户 force quit 后 DB 残留 4.6M flow + 4.6M bill + 2.6M diff_rows ≈ 15 GB 撑爆磁盘（`database or disk is full`）的场景；`app.whenReady` + migration 完成后 `setImmediate` 后台扫 `runs WHERE status != 'success' OR diff/report 文件丢失` + 复用 fix9 `cleanupAfterRunBackground` 分批 DELETE；用户首次救急用 sqlite3 CLI DROP 4 表 + VACUUM 释放 14.56 GB。**fix11**：writer 按账单日期升序贪心切分多 sheet（≤ 1,048,575 行/sheet）解决 Excel 单 sheet 显示硬上限 2^20 行问题（用户实测 2.6M 差异行单 sheet 写入 xlsx 但 Excel/WPS 截断显示「100w 行」）；sheet 名 `YYYY-MM-DD~MM-DD`；资金红线 `sum(sheet rows) == mismatch_rows`。**fix12**：`runs.ran_at` 时区修复 — `insertRun` 显式传 `new Date().toISOString()`（ISO 8601 带 Z 后缀）+ writer 显示用 `formatRanAtLocal` 转本地时区；兼容旧 SQLite CURRENT_TIMESTAMP 无 Z 字符串当 UTC 解析。**fix13**：report 嵌入 diff 末尾 sheet「运行结果汇总」（不再独立 report.xlsx + 不再生成 `report/` 子目录），单文件多 sheet 形态最终化。**fix14**：UI 镜像布局 — 以 bank-statement-board 为模板左右镜像（grid 1fr:1.4fr → 1.4fr:1fr），2 行 × 2 cell 结构 + 按钮严格镜像 bank-statement 尺寸（pair 内 140px / 独占 cell 180px）+ 状态框同 bank-statement 卡片样式（max 360 × min 110 白底圆角 18 左对齐多行）；按钮 ID 全保留 renderer 零改动。**fix15**：月份选择弹窗标题三分支 — 导入按钮触发的弹窗标题改为「请选择导入文件的月份」（语义更准确，跟开始运行/导出差异区分）。**PR #50 review**：F1 smoke cleanup helper（修 Windows CI EBUSY）+ F2 账单日期入库归一化为 YYYY-MM-DD（reader 允许 `YYYY/MM/DD` 但 writer sheet 名只识别 `-`） + F3 USER_GUIDE.md 同步 fix5/11/13/14 后口径。
+
+### 新增
+
+- **Module A 个人痕迹元数据**（无业务影响 / ⚠️ 不命中 important-variables）：
+  - `package.json` author 字段对象化（pzhong / pzhong1212@gmail.com）+ `build.copyright "© 2024-2026 pzhong"` + `build.win.publisherName "pzhong"`（Windows 文件属性发布者显示真实作者）
+  - 新增 `src/main-process/workbook-watermark.js` 跨库 helper（ExcelJS `workbook.lastModifiedBy` + SheetJS `wb.Props.LastAuthor`），8 个 writer 入口 17 处 `applyWatermark()` 调用（覆盖率 100%，所有 7 个模块导出 xlsx 含 `lastModifiedBy = 'pzhong'`）
+  - 启动 log 头紧贴现有"应用启动 | 版本：x.x.x"后追加 `crafted by pzhong (pzhong1212@gmail.com) · build {git-short-sha}`
+  - 新增 `scripts/gen-build-info.js` + `package.json prebuild:meta` 钩子（dist:win/portable/setup 串入），构建时生成 `src/build-info.js`（不入 git）
+- **Module B 新增模块「收单单据币种校验」**（spec §3 / §六 ⚠️ 资金红线）：
+  - 主导航新增第 8 个 `acquiring-bill-currency` 模块，独立面板（按月组织：月份下拉 + 导入流水表 + 导入单据表 + 开始运行 + 导出差异 + 状态栏）
+  - **业务规则**：按 `对账主Id ↔ 主对账Id` 1:1 关联，币种 `LOWER+TRIM` 归一比较；不一致行入差异表，差异表 = 单据原 26 列 + 末尾 3 列对比区（`单据_对账币种` / `流水币种` / `流水金额绝对值`）= 29 列；仅差异行进表（一致行不入；unmatched 仅在 `runs.unmatched_rows` 计数不入表）
+  - **资金规则**：流水侧金额入库时 `recon_amount_abs = ABS(parseFloat(对账金额))`；差异表 `流水金额绝对值` = ABS 后值；原 `对账金额` / `对账币种` 列保持不变（不替换）
+  - **校验规则**：表头列数 + 列名 + 列顺序完全匹配；同月内主对账Id 唯一（UNIQUE(month_key, recon_main_id) SQL 约束 + reader 累积错误）；跨月份混杂整批拒绝；任一失败 → 整批 ROLLBACK + ImportValidationError
+  - **数据持久化**：4 张主 DB 表 `acquiring_bill_currency_{flow_imports, bill_imports, runs, diff_rows}` + 5 个索引（迁移幂等，IF NOT EXISTS）
+  - **IPC 命名空间**：`acquiringBillCurrency:*`（7 个 handler — listMonths / sessionStatus / importFlow / importBill / run / export / clearMonth）
+  - **输出**：1 对 1 — 每个输入单据 xlsx → 1 个 `{stem}-diff-{YYYYMMDD-HHMMSS}.xlsx`（0 差异行也输出仅表头版以保留对应关系）；输出路径 `Documents/网银账单生成小助手/exports/{date}/acquiring-bill-currency/`
+- **smoke 测试**：新增 `scripts/smoke/acquiring-bill-currency.js`（Case A-G 7 用例 + fix1 H1/H2/H3 3 用例 + **fix2 Case I**（inlineStr + data descriptor ZIP）+ Module A A1 watermark 集成断言 = 48 个 assert）
+- **reader 选型决策**（fix2 修订）：v0.3 SheetJS dense 假设错（POI 流式导出 xlsx 用 ZIP data descriptor 模式 + inlineStr cell 格式，单文件 30w 行解压 800MB）；fflate（SheetJS 解压器）严格校验 `local file header.uncompressedSize` 拒解；ExcelJS streaming 同样依赖 `unzipper` 也拒解 → fix2 重写为 **yauzl + sax 流式**（yauzl 纯 JS ZIP 流式支持 data descriptor + ZIP64；sax 纯 JS SAX 流式 XML；单文件 RAM < 50MB；peek 早退出 O(1) < 100ms；跨平台无 native 编译）
+
+### 修复
+
+- **fix1 收单单据币种校验：重复月份导入 UNIQUE 整批拒绝 UX 漏洞**（spec §3.4）：用户实测发现"二次导入相同月份的单据表/流水表 → 第一行即撞 UNIQUE constraint → 整批 ROLLBACK + 错误信息不引导用户"。新增导入前 peek monthKey（不进事务的轻量预检）+ 弹窗覆盖确认机制：
+  - `acquiringBillCurrency:importFlow` / `:importBill` IPC 入参补 `{ filePaths?, confirmOverwrite? }`，出参补 `overwrite-required` 状态
+  - reader 新增 `peekMonthKeyFromFile`（读首文件首行 + 表头校验，不 INSERT）
+  - 覆盖导入**仅清单侧**数据（流水 → 只 DELETE flow_imports；单据 → 只 DELETE bill_imports）；不连带清 runs / diff_rows（保留对账历史）
+  - renderer `window.confirm` 弹窗（文案：「检测到月份 X 已有 N 行 {流水/单据} 数据，是否覆盖？」）
+  - smoke 新增 H1（peek 不进事务）/ H2（覆盖仅清单侧）/ H3（peek 表头错抛错）3 用例
+- **fix2 收单单据币种校验：reader 选型变更**（spec §3.5）：用户实测发现 v0.3 SheetJS dense 假设对真实清结算数据（30w 行/文件 + inlineStr 格式 + 800MB 解压 + POI ZIP data descriptor）完全跑不动。重写 reader 为 yauzl + sax 流式：
+  - `src/backend/acquiring-bill-currency-import/reader.js` 完全重写（yauzl 打开 ZIP + 一次性 listEntries + sax 流式解析 sheet1.xml）
+  - 新增依赖 `yauzl@^3.3.0` + `sax@^1.6.0`（顶层 dependencies）+ `yazl@^3.3.1`（devDependencies，仅 smoke fixture 用）
+  - cell 类型识别：`inlineStr`（清结算导出用此）/ `s`（sharedStrings）/ `str` / `b` / `e` / 默认数字
+  - peek 函数改 async：早退出 O(1)，首条数据行解析出月份后立即停 sax + close zip
+  - session.peekImportTarget 改 async；main.js handler / smoke 调用处加 await
+  - 实测性能（用户 30w 行 / 832MB 解压 / 48 列 inlineStr xlsx）：peek 8ms / 完整导入 55.4s / 内存峰值 210MB
+  - spec §3.5「Reader 实现」+ §3.7 性能预估全部重写（v0.5）
+  - smoke 新增 Case I（用 yazl 构造 inlineStr + data descriptor ZIP，验证 reader 解析正确）= 48 个 assert
+- **fix3 收单单据币种校验：嵌套事务防御**（spec §3.4 并发防御段，v0.6）：用户实测多次快速点击导入按钮触发 `cannot start a transaction within a transaction`。根因 = Electron async IPC handler 在 `await dialog.showOpenDialog` / `await importFn` 时让出 event loop，第二个 click 触发的 handler 进入 BEGIN 与第一个事务嵌套。
+  - **后端 handler 级 mutex**：`main.js` 的 `acquiringBillCurrencyImportLock.inFlight` 全局 flag；handler 入口检查，已 inFlight 立即返回 `{ status: 'error', message: '当前已有导入任务在执行...' }`
+  - **前端按钮禁用**：`renderer.js` 的 `runAcquiringBillCurrencyImport` 入口禁用 4 个按钮，finally 恢复（`refreshAcquiringBillCurrencyStatus` 按当前状态重置 Run/Export 启用）
+  - **session.js 容错性补强**：`safeRollback` 吞掉 "no active txn" 二次错避免掩盖主错；`safeBegin` 仅作语义包装**不主动清理事务**（会破坏并发其他 IPC 路径的事务）；所有 4 处事务边界（`importFilesInTransaction` / `importFilesWithOverwrite` / `runCheck` / `clearMonth`）统一改造
+- **PR #50 round 3 reviewer NewF1 修复**（spec v0.19）：reviewer 指出 round 2 CodexP2 修复**未真正生效** — reader.js sax 层 `new Array(expectedHeaders.length).fill('')` + cell write `currentCellCol < currentRowValues.length` 双重限制让多余列在解析时就被丢弃，validator 永远看不到「列多」。修复：① row tag 处理区分 header row（r=1 用 dynamic `[]` 让 sparse 扩容）vs data row（固定 length 防越界）；② cell closetag write 条件改为 `currentRowR === 1 || currentCellCol < currentRowValues.length`（header row 允许任意列号）。smoke Case ExtraColumn：49 列 xlsx 应被 validator 拒（4 assert：抛错 + message 含「模板 48 列，文件 49 列」+ detailLines 含「多余列」+ 详情对比） — **真正修复列多严格校验**
+- **PR #50 round 2 reviewer findings 修复**（spec v0.18）：
+  - **NewF1 [P1]** spec Case O 描述错（code 保留正确）：spec Case O 写「run JOIN 跳过空金额行」但实际 code 保留参与对账。实测 466w 流水 30,057 行（0.6%）金额币种**同步**为空（0 单边空）+ 461w 单据 100% 都有币种 → 用户业务意图 = 空金额行保留参与对账，对单据有币种时 COALESCE 比较 `''` ≠ `非空` 触发 mismatch 写入差异表，财务能看到「单据有币种但流水非清算」状态。**修 spec 不修 code**：Case O 描述「跳过」→「保留参与对账，写 currency_mismatch」+ USER_GUIDE §1.8.6 同步；smoke Case O 加 7 个 assert 验证 run 行为
+  - **CodexP1 [P1]** writer Pass 2 加单 sheet 行数实时检测 + 超 MAX 开 sub-sheet 后缀 `(2)(3)`（防单日 > 1,048,575 行 edge case；planSegments 保持原逻辑同日不切，Pass 2 内部细切）
+  - **NewF2 [P2]** `session.runCheck` 写盘失败 catch **真正** `runs.status='success-no-files'`（之前注释说做但 code 没做）；run-repository 新增 `updateRunStatus`；`cleanupOrphanData` 跳过 `'success-no-files'` 识别为可恢复 run 不清数据；用户写盘失败后修复路径/权限可重新生成而非数据被清
+  - **NewF3 [P2]** reader `streamImportOneFile` 接 `streamSheetRows` resolve 返回值 `streamStopValue`，header 失败时优先 rethrow 携带 detailLines（之前抛「xlsx 无表头」吞掉真实列差异；多文件批量导入误报）
+  - **CodexP2 [P2]** reader header 解析去 `.slice(0, expectedHeaders.length)` truncate，让 validator 看到实际列数（之前列多被静默忽略，弱化模板列数严格校验）
+  - smoke 161 → 168（Case O +7）
+- **PR #50 reviewer findings F1+F2+F3 修复**（spec v0.17）：
+  - **F1 [P1]** Windows CI smoke 失败：`setupTmpDb()` 打开 `AppDatabase` 后没关 DB 就 `fs.rmSync(tmpdir)` → Windows `EBUSY: resource busy or locked, unlink ... t.sqlite`。修复：`setupTmpDb()` 返回 `{ tmpdir, db, cleanup }`，cleanup 先 `db.db.close()` 再 `fs.rmSync`；21 处 case finally 统一改用 `cleanup()`
+  - **F2 [P1]** reader 允许 `YYYY/MM/DD` 但 writer fmtSheetName 仅识别 `-`：① validator.js 新增 `normalizeBillDate(raw)` 支持 `YYYY-MM-DD` / `YYYY/M/D` / 含时间 / 无时间各种格式归一化为 `YYYY-MM-DD`；② import-repository insertFlowRow/insertBillRow 写 raw_json 前对索引 0「账单日期」字段调 `normalizeBillDate`（SQL `GROUP BY json_extract` 不会因 `/` vs `-` 拆成两组）；③ writer.js 加 `sanitizeSheetName` 防御性兜底（替换 `/\*?[]:` 为 `-` + 截断到 31 字符 Excel 上限）；smoke 加 Case F2（16 个 assert）
+  - **F3 [P2]** USER_GUIDE.md 同步 fix5/11/13/14 后口径：§1.8.2 模板文件加 fix4 字段切换（通道清算币种/金额）+ fix15 账单日期格式说明；§1.8.3 主要功能从「4 按钮 + 月份下拉」改为「4 按钮 + 月份选择弹窗」+ 各按钮弹窗标题；§1.8.4 工作流从月份下拉流程改为弹窗流程；§1.8.5 输出形态从「1 对 1 多文件」改为「单文件多 sheet + 末尾运行结果汇总」+ 文件名 `acquiring-bill-currency-{monthKey}-diff-{HHMMSS}.xlsx`；§1.8.6 资金红线加 fix4 通道清算金额 / fix6 金额可空 / fix1 覆盖导入；§1.8.7 性能基线用 fix2/7/11 实测数据替换 SheetJS dense 已废弃数据；新增 §1.8.8 启动期 cleanup（fix10）；§1.8.9 截图标 fix14 镜像布局
+  - smoke：145 → 161（+16）全过
+- **fix15 收单单据币种校验：月份选择弹窗标题三分支**（spec v0.16 §3.4 / 8.1 / renderer-dialogs.js:8151）：用户反馈「导入流水表/导入单据表点击后的弹窗左上角文本改为『请选择导入文件的月份』」。
+  - `renderer-dialogs.js createAcquiringBillCurrencyMonthPickerDialog` 标题逻辑从 2 分支扩到 3 分支：`actionLabel === '导入'` → '请选择导入文件的月份' / `'导出'` → '选择导出差异的月份' / 其他（含 '运行'）→ '选择对账月份'
+  - `renderer.js runAcquiringBillCurrencyImport`（处理流水 + 单据两个导入按钮）调用处 `pickAcquiringBillCurrencyMonth('导入')`，所以两个导入按钮都触发新标题
+  - 开始运行（`'运行'`）和导出差异（`'导出'`）标题不变
+  - 不命中 important-variables；纯文案层；smoke 145/145 不变
+- **fix14 收单单据币种校验：UI 镜像布局**（spec v0.15 §8.1）：用户拍板「以 bank-statement-board（v1.x「网银账单生成助手」主模块）为模板左右镜像」+ 给定 5 元素映射关系（导入流水表 + 导入单据表 + 开始运行 + 状态框 + 导出差异 一一对位 bank-statement 镜像后的格子）。先做 HTML mockup `~/Desktop/acquiring-bill-currency-panel-mockup.html` 视觉确认，用户「OK」后改 index.html + CSS。
+  - `index.html` `acquiringBillCurrencyModulePanel` class 从 `pending-board` 切到 `acquiring-bill-currency-board`（自己的命名空间）；结构重写为 2 个 `.control-row` × 2 个 `.cell` 布局（Row 1：[导入流水表+导入单据表] / 开始运行；Row 2：状态框 / 导出差异）
+  - `src/styles-gemini-extra.css` 新增 `.acquiring-bill-currency-board` 规则段：`grid-template-columns: 1.4fr 1fr`（bank-statement 原版 `1fr 1.4fr` 镜像 = 调换比例）+ cell 居中 + pending-action-pair gap 12px + **按钮分级**：pair 内 primary（导入流水表/导入单据表）`min-width: 140px` + 独占 right cell（开始运行 primary / 导出差异 secondary）`min-width: 180px`（严格镜像 bank-statement 的 secondary 180px 规则）+ 所有 `flex: none` 覆盖全局 stretch（**fix 中途发现 bug**：styles-gemini.css `.cell.right .primary-btn { flex: 1 }` 全局规则）
+  - 状态框加入 `.pending-board, .bank-statement-board, .acquiring-bill-currency-board` 共享规则（max-width 360 / min-height 110 / 圆角 18 / 白底 / 左对齐多行卡片，与 bank-statement 同款 — 用户拍板「状态框大小一致」）
+  - 按钮 ID 全部保留：`acquiringBillCurrencyImportFlowBtn` / `ImportBillBtn` / `RunBtn` / `ExportBtn` / `StatusBox` — renderer 监听 / IPC 调用零改动
+  - preview 重生成 3 张（initial / importing / result）— 4 按钮视觉大小一致 + 状态框占左 cell 1.4fr 宽足够显示长文案（如「对账完成：共 4,873,210 条，币种差异 1,247 条，未匹配 38 条」）
+  - 不命中 important-variables（纯 UI 布局 + CSS）；smoke 145/145 全过（DOM 无关）
+- **fix11 + fix12 + fix13 收单单据币种校验：writer 多 sheet + 时区 + report 嵌入末尾 sheet**（spec v0.14 §6.3 / §6.4 / §6.6）：用户实测 v0.13 跑出 2,596,169 差异行单 sheet 写入 xlsx → Excel/WPS 单 sheet 显示硬上限 1,048,576 行（含表头）= 2^20 → 用户「只看到 100 万行」误以为 writer 漏 150 万；同步发现 `runs.ran_at` 是 UTC 未转本地（北京时间差 8 小时）；用户希望「运行结果汇总」直接嵌入差异表末尾 sheet 而非独立文件。
+  - **fix11**：`run-repository.js` 新增 `getBillDateCounts({ db, runId })` 用 `json_extract(b.raw_json, '$."账单日期"')` 统计每个账单日期的差异行数 + `listDiffRowsByDateRange({ runId, startDate, endDate, limit, offset })` 按日期范围分批拉
+  - `writer.js` 新增 `planSegments(dateCounts)` 贪心切分（同日不切开，单 sheet 超 MAX 时按日切下一 sheet）+ `fmtSheetName(seg)` 命名 `YYYY-MM-DD~MM-DD`
+  - `writeDiffWorkbook` 改造为 Pass 1 dateCounts + Pass 2 按 segment 流式写 sheet（仍用 ExcelJS streaming writer + per-row commit，单 workbook 多 sheet）
+  - 资金红线 sanity check：`sum(written rows) == expectedTotal`，不一致 console.warn（数据已 COMMIT，仅 log）
+  - **fix12**：`run-repository.js insertRun` 接 `ranAt` 参数（默认走 schema DEFAULT 兼容旧调用方，新 caller 显式传 `new Date().toISOString()`）；`session.js runCheck` 调 insertRun 时传 `ranAt: nowIso()`；`writer.js` 新增 `formatRanAtLocal(s)` 处理 ① ISO 8601 带 Z → toLocaleString 转本地 ② 无 Z 字符串当 UTC（兼容旧 SQLite CURRENT_TIMESTAMP）+ 「运行时间」字段调用此函数
+  - **fix13**：`writer.js` 在 `writeDiffWorkbook` 末尾追加 `addWorksheet('运行结果汇总')` 流式写 11 区块（替代独立 report.xlsx）；`writeRunOutputs` 不再调 `writeReportWorkbook` 独立写文件；`writeReportWorkbook` 保留 stub（return `filePath = diffFilePath`）兼容历史 caller；`exports/{date}/acquiring-bill-currency/` 不再生成 `report/` 子目录；`runs.report_file_path` 字段语义 = `diff_file_path`（向后兼容 IPC 出参）
+  - **smoke 新增 Case R/S/T**（共 43 个 assert，总 145/145）：R = planSegments 6 个 unit case + 实跑 run 验证 2 sheet 结构 + 资金红线对账；S = formatRanAtLocal 4 个 case + 实跑 run 验证 runs.ran_at 含 Z；T = 实跑 run 验证 diff xlsx 末尾 sheet = 运行结果汇总 + 不存在 report/ 子目录 + 运行时间字段是本地格式
+- **fix10 收单单据币种校验：启动期孤儿数据 cleanup**（spec v0.13 §5.4）：用户实测前一轮 OOM 闪退（fix7 之前 writer 阶段，事务已 COMMIT）+ fix9 之前的 sync cleanup 中断，导致重启后 DB 残留 4.65M flow + 4.62M bill + 2.6M diff_rows ≈ 15 GB，磁盘 97% 满，下次 INSERT 触发 `database or disk is full`。fix8/fix9 仅覆盖「run 成功后」清理路径，闪退/异常退出场景无人善后。
+  - `session.cleanupOrphanData({ db, onProgress })` 扫两类孤儿：① `runs.status != 'success'`；② `status='success'` 但 `diff_file_path` / `report_file_path` 文件丢失（fix7 之前 OOM in writer + DB 已 COMMIT 场景）
+  - 复用 fix9 `cleanupAfterRunBackground` 分批 DELETE 逻辑（每批 50k + setImmediate）；额外 Phase 3 兜底清 ghost diff_rows（run_id 不在 runs 表的差异行）
+  - `main.js` `app.whenReady` + migration 完成后 `setImmediate` 后台异步触发；acquire `'cleanup'` op-lock（防与用户首次 import 并发）；finally 释放 lock；抛错只记 activity log 不阻塞应用
+  - Operation lock 提到 module-level（`tryAcquireAcquiringBillCurrencyOpLock` / `releaseAcquiringBillCurrencyOpLock`），register 函数内部用闭包别名引用
+  - smoke 加 Case Q（人造 status='running' orphan run + 关联 imports/diff_rows + 后续模拟「success run 但文件丢失」+ 验证不误清正常 success run）= 102 个 assert
+  - **救急（用户机器历史 15 GB 残留）**：sqlite3 CLI `DROP TABLE` 4 表（DROP 在 delete journal 模式下不写大量数据）+ `VACUUM`（剩余 ~200 MB 临时空间）；DB 14.84 GB → 285 MB，磁盘释放 14.56 GB
+- **fix9 收单单据币种校验：cleanup 改异步后台 + 通用 operation lock**（spec v0.12 §3.4 / §5）：用户实测 fix8 同步 cleanup 在 466w+462w+259w 行下耗时几分钟，期间 UI not responding。
+  - `session.runCheck` 不再调 cleanup，改返回 `cleanupNeeded` 标识 + diff/report 路径
+  - 新增 `session.cleanupAfterRunBackground({ db, monthKey, runId })`：分批 DELETE（每批 50,000 行）+ `await new Promise(r => setImmediate(r))` 让出 event loop；DELETE 用 `WHERE rowid IN (SELECT rowid ... LIMIT 50000)` 子查询限定批次大小
+  - main.js handler：fix3 import-only lock 升级为通用 `acquiringBillCurrencyOperationLock`，operation 字段互斥 'import' / 'run' / 'export' / 'cleanup'；run/export handler 也接入 lock
+  - run handler return success 前释放 'run' lock、acquire 'cleanup' lock、`setImmediate` 启动后台 cleanup，handler return 即时
+  - 用户在 cleanup 进行中点其他按钮 → 「上一次对账后清理 {monthKey} 数据中，请稍后再操作」
+  - smoke Case P 适配（runCheck 后显式调 cleanupAfterRunBackground 验证）= 83 个 assert
+- **fix8 收单单据币种校验：run 后自动清原始数据**（spec v0.11 §3.4 / §5）：用户实测 DB 累积到 15.2 GB（多次覆盖导入 + ALTER COLUMN + WAL 未 checkpoint）。决策：flow_imports/bill_imports 仅作「导入→对账」中转，跑 run 成功生成 diff+report 落盘后自动 DELETE，runs 保留供「导出差异」找文件。
+  - `importRepo.deleteRawDataAndDiffRows(db, { monthKey, runId })`：DELETE diff_rows (by run_id) + flow_imports + bill_imports (by month_key)
+  - `session.runCheck`：writeRunOutputs + updateRunPaths 后 `fs.existsSync(diff) && fs.existsSync(report)` 双校验 → 单独 safeBegin/COMMIT 事务清理；写盘失败或文件不存在则**不清理**（保留原数据供重跑）
+  - 同月份重跑 run 必须重导表（getMonthReadiness 看不到 flow/bill → 报错）；导出差异不受影响（读 runs.diff_file_path）
+  - smoke 加 Case P 验证 cleanup + cleanupStats 返回值（79 个 assert）
+- **fix7 收单单据币种校验：diff writer OOM 修复**（spec v0.10 §6.3）：用户实测点「开始运行」V8 OOM 闪退（`Ineffective mark-compacts near heap limit`）。根因 = `listAllDiffRowsByRun.all()` 把 259w 差异行 × raw_json ~3KB ≈ 7-8GB 全 load 内存 + ExcelJS 默认 `new Workbook()` 把所有 addRow 累积在 in-memory 后才 writeFile。
+  - `writeDiffWorkbook` 改用 `ExcelJS.stream.xlsx.WorkbookWriter`（每 `sheet.addRow(row).commit()` 立即落盘 + `useStyles:false` + `useSharedStrings:false` 减少内存开销）
+  - SQL 用 prepared statement + `LIMIT N OFFSET M` 分批拉取（每批 5000 行），不再一次性 `.all()`
+  - writer 内存常驻 < 100MB（流式）；smoke A 自然覆盖（fixture 小，1 批就完）
+  - `writeReportWorkbook` 不变（report 数据量小，几百行可承受 in-memory）
+- **fix6 收单单据币种校验：通道清算金额允许为空**（spec v0.9 §3.1）：用户实测真实数据 466 万行中 30,057 行（0.6%）「通道清算金额」为空（4 种非清算流水子类型 S10010706/S10010703/S10030403/S10030406）。fix4 沿用 v0.6「对账金额必填」语义错，与「通道清算币种允许空」处理不对称。
+  - `insertFlowRow`：空值时 `settle_amount=''` / `settle_amount_abs=''`（不调 parseAmountAbs）；非空时仍走 parseAmountAbs 校验数值合法性
+  - spec §3.1 第 29 列备注 + 导入校验段同步「允许为空」
+  - smoke 新增 Case O = 68 个 assert
+- **fix5 收单单据币种校验：UX 重构 + 输出形态反转**（spec v0.8 §3.3 / §6.3 / §6.4 / §七 / §8.1）：用户连续提出 5 个 UX/形态改进点。
+  - **UI**：删除月份下拉框 `acquiringBillCurrencyMonthSelect`；4 按钮均默认 enabled；导入/运行/导出按钮 click 都触发月份选择弹窗（复用 bankBuRecon 范式，按钮文字「下一步」改为「导入」/「运行」/「导出」）；新增 `createAcquiringBillCurrencyMonthPickerDialog`（renderer-dialogs.js）
+  - **月份输入**：§3.3 反转 v0.7 的「自动从 xlsx 推月份」为「**用户弹窗主动选 + xlsx 月份必须一致，不一致整批拒绝**」；reader expectedMonthKey 由 caller（session 层）传入；smoke 新增 Case M（跨月份拒绝）
+  - **输出形态反转**：§6.3 v0.3 拍板的「1 对 1 输出」**完全作废**；改为**单文件单 sheet 合并所有差异行**；writer 重写 `writeDiffWorkbook` 用 `listAllDiffRowsByRun` 一次拉所有差异行按 source_file + source_row_index 排序
+  - **新增 report 表**：§6.4 11 区块极详细汇总（基础统计 / 流水侧统计 / 单据侧统计 / 流水币种分布 top 20 / 单据币种分布 top 20 / diff_type 分布 / 币种对比 top 10 / 文件清单 / 性能数据 / 元信息含 app 版本 + git sha）；`writeReportWorkbook` 新增
+  - **产出时机**：run 时同步生成 diff + report 到 exports/{date}/acquiring-bill-currency/(report/)；DB schema 加 `runs.diff_file_path` + `runs.report_file_path`（migration 幂等 ALTER COLUMN ADD）；导出差异 = fs.copyFile 已生成的 diff.xlsx 到用户选的路径（不重新生成 writer）
+  - **IPC schema 改动**：`importFlow`/`importBill` 入参 `{ monthKey, ... }`（monthKey 必填）；`run` 出参补 `{ diffFilePath, reportFilePath }`；`export` 入参 `{ monthKey }`（弹 saveDialog）出参 `{ savedPath, sourceDiffPath }`
+  - **smoke 改造**：既有 Case A/D 改用 `writer.writeRunOutputs`；Case A 末 4 列表头标签更新；新增 Case M = 63 个 assert（v0.7 时 58）
+- **fix4 收单单据币种校验：对账字段语义校正**（spec v0.7 §3.1/§4.1/§4.2/§5.2/§6.2）：用户实测 v0.6 reader 跑通后对账 466 万行 100% match = 字段语义错位（流水侧第 14 列「币种」是订单视角，单据「对账币种」是清算视角，对账维度不对齐）。改用流水侧第 30 列「通道清算币种」+ 第 29 列「通道清算金额」做对账。
+  - **DB schema 重命名**（流水侧 4 列 + 单据侧 2 列）：`recon_amount` → `settle_amount` / `recon_amount_abs` → `settle_amount_abs` / `currency` → `settle_currency` / `currency_norm` → `settle_currency_norm`；`migrations.js` 加幂等 `ensureAcquiringBillCurrencyFix4ColumnsRename`（PRAGMA table_info 检查后 ALTER TABLE RENAME COLUMN）
+  - **reader 入库取列变更**：`insertFlowRow` 从 `values[12]/[13]` 切到 `values[28]/[29]`；单据侧 `values[19]` 不变（语义本就是清算视角）
+  - **SQL JOIN 比对字段**：`f.currency_norm` → `f.settle_currency_norm`（`run-repository.insertDiffRowsByJoin` + `computeRunStats`）
+  - **输出 xlsx 列名**：「流水币种」→「流水_通道清算币种」、「流水金额绝对值」→「流水_通道清算金额」（`WRITER_OUTPUT_FLOW_CURRENCY_HEADER` / `_FLOW_AMOUNT_ABS_HEADER` 常量）
+  - **smoke 新增 Case J/K/L**：J = 通道清算币种与原币种不同时按 settle_currency 比对（matched=1）；K = 流水通道清算币种 ≠ 单据对账币种（mismatch + diff_rows.flow_currency 来自 settle_currency 原值）；L = 流水通道清算币种为空（diff_type=currency_mismatch 非 missing）= 58 个 assert
+  - **important-variables v8**：`flow_imports.settle_amount_abs` Critical 条目更新；新增 `*.settle_currency` / `settle_currency_norm` Critical 条目
+  - ⚠️ **用户机器历史 466 万行数据需清月 2026-03 + 重导**（migration 仅改列名不动数据值，旧数据存的是订单视角，对账会错）
+
+### 关联功能 review ⚠️
+
+- ⚠️ 资金红线：Module B 涉及金额 ABS 计算 + 币种归一比较 + 新增列写入；smoke A-G + H1/H2/H3 + I + J/K/L 全覆盖；v8 important-variables 命中：`acquiring_bill_currency_diff_rows.flow_currency`/`.flow_amount_abs`、`flow_imports.settle_amount_abs`、`*.settle_currency`/`settle_currency_norm`（v0.7 fix4 新增 Critical），`*.recon_main_id`（Important-skeleton）
+- ⚠️ fix1 命中 Important-skeleton `acquiring_bill_currency_*.recon_main_id`（UNIQUE 约束语义未变；仅在 UNIQUE 触发前增加 peek 预检；覆盖路径不绕过 UNIQUE，先 DELETE 再 INSERT）
+- ⚠️ fix2 命中 Critical `acquiring_bill_currency_flow_imports.recon_amount_abs`（v0.6 字段名；fix4 重命名为 settle_amount_abs）（ABS 入库语义未变；reader 仅换解析路径，最终调用同一个 `insertFlowRow` prepared INSERT）
+- ⚠️ fix4 命中 Critical（多条）：`flow_imports.settle_currency` / `settle_currency_norm`（**新对账核心比对字段，取值列号 values[29] 切换决定 100% 对账结果差异**）+ `bill_imports.settle_currency` / `settle_currency_norm`（仅 DB 字段重命名，列号 values[19] 不变）+ `flow_imports.settle_amount_abs`（取值列从 values[12] 切到 values[28]）+ `diff_rows.flow_currency` / `flow_amount_abs`（语义指向变 settle）
+- ⚠️ fix10 命中 Critical / Risk-sensitive（多条）：`acquiring_bill_currency_diff_rows.flow_currency` / `.flow_amount_abs`（启动期可能批量 DELETE，但语义未变 — 复用 fix9 已通过的分批逻辑）+ `runs.status` / `runs.diff_file_path` / `runs.report_file_path`（启动期作为孤儿判定条件，未修改写入路径）；启动钩子异常被 try/catch + activity log 兜底，不阻塞 UI；smoke Case Q 覆盖人造孤儿场景
+- ⚠️ fix11 命中 Critical：`acquiring_bill_currency_diff_rows.flow_currency` / `.flow_amount_abs`（writer 改造按账单日期分桶 + 流式分批拉，每行 cell 内容不变；planSegments 单元 + 实跑双重验证；资金红线 = sum(sheet rows) == expectedTotal 在 writer 内 sanity check + smoke Case R 资金红线断言）
+- ⚠️ fix12 不命中 important-variables：仅修改 `runs.ran_at` 写入语义（带 Z 后缀的 ISO 8601）+ writer 显示层 `formatRanAtLocal` 函数，不影响业务字段 / 状态机 / 资金红线
+- ⚠️ fix13 不命中 important-variables：仅修改输出形态（独立 report.xlsx → diff 末尾 sheet），不影响 `runs.report_file_path` schema（字段值改为 = `diff_file_path` 但 schema 不动）；renderer 端 IPC 出参兼容字段名保留
+- ⚠️ fix14 不命中 important-variables：纯 UI 布局调整（index.html `acquiringBillCurrencyModulePanel` 结构 + styles-gemini-extra.css 加 `.acquiring-bill-currency-board` 规则段）；按钮 ID + IPC + renderer 监听全部保留；preview 3 张回归确认布局正确
+- Module A 不命中 important-variables 任一层（纯元数据 / 启动 log / 构建脚本）
+
 ## 2.1.5 - 2026-05-15
 
 v2.1.4 之后追加 patch 迭代，3 块独立改动：**N1 对账单 ReconID 修复模块名加空格 + 修 usage-stats long-standing bug** + **N2 对账单 ReconID 修复场景下拉空状态统一** + **N3 银行对账单处理 C3「提取ReconId-From 网关」场景配置 dialog 新增「条件」栏（行级 AND 预过滤）**。OPEN ISSUE 全部拍板（PRD §十）；fix1 含 fix1.1（C3 条件 row 列宽固定）+ fix1.2（场景下拉默认选第 1 个）。

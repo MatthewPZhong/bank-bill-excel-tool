@@ -10,6 +10,7 @@
 //  - 若 compareFields 含"pending资金类型" → 新增一张专门 sheet "pending资金类型差异"
 
 const XLSX = require('xlsx-js-style');
+const { applyWatermark } = require('../../main-process/workbook-watermark');
 const PENDING_COLUMNS = require('../pending-db/columns');
 const diffRepo = require('../pending-db/diff-repository');
 
@@ -282,6 +283,7 @@ function exportSingleRun(db, runId, savePath) {
     appendSheetWithHeaderFont(wb, SHEET_FUND_TYPE_DIFF_NAME, headers, fundDiffRows);
   }
 
+  applyWatermark(wb);
   XLSX.writeFile(wb, savePath);
   return {
     status: 'success',
@@ -381,6 +383,7 @@ function exportAggregate(db, savePath) {
     appendSheetWithHeaderFont(wb, SHEET_FUND_TYPE_DIFF_NAME, headers, fundDiffRows);
   }
 
+  applyWatermark(wb);
   XLSX.writeFile(wb, savePath);
   return {
     status: 'success',

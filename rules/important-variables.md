@@ -9,8 +9,8 @@
 
 | 字段 | 值 |
 |---|---|
-| 清单版本 | v6（对应 app v2.1.4 — 2026-05-14 v2.1.4 dev round 7 新增 2 条 Important-skeleton：`enabled_modules`（全链路跨 ≥ 5 文件 / 左上角模块菜单状态驱动）+ `ALL_MODULE_IDS`（settings-repository.js 7 模块全集 anchor，被 `CURRENT_MODULE_VALID` + `setEnabledModules` 共用）；v5 = v2.1.3 round 4 self-review 新增 2 条：`runBizOpImportAsync` 升格 Critical + `addOneDay` 升格 Risk-sensitive；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
-| 上次人工 review | 2026-05-14（v2.1.4 dev round 7 check-vars） |
+| 清单版本 | v8（对应 app v2.1.6 — 2026-05-19 v0.7 fix4：流水侧对账字段切换 + DB 重命名 settle_*：`flow_imports.settle_amount_abs`（v0.6 = recon_amount_abs）+ 新增 `flow_imports/bill_imports.settle_currency`/`settle_currency_norm`（对账核心比对字段，Critical）；diff_rows.flow_currency/flow_amount_abs 列名保留，值的语义改为通道清算视角；v7 = 2026-05-18 acquiring-bill-currency 模块初版（v0.6 字段名 recon_amount_abs + currency_norm）；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
+| 上次人工 review | 2026-05-18（v2.1.6 acquiring-bill-currency 模块发布） |
 | 基线数据 | `docs/analysis/var-reference-stats.md`（76 个 JS 文件 / 755 顶层声明 — round 7 I3 刷新） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
@@ -136,6 +136,36 @@
   - **与 `runFlowImportAsync` 区分语义**：业务OP 单 BU 跨 2 日清（D + D+1）；流水跨 BU 单日清（D 跨所有 BU）— 不可对调
   - 改事务边界 / 清函数调用次数 / addOneDay 实现 → 必跑 smoke Case Q 防回归（构造 BU-A 跨 D-1/D/D+1 三日业务OP + 跑 D 与 D+1 两 run 成功 + 重导 D 业务OP + 断言 D 与 D+1 两 run 均被清）
   - 必跑：smoke biz-op-recon Case A（核心对账）+ Case M（C1 大小写归一）+ Case N（I2 BU trim 归一）+ Case Q（业务OP 重导清下一日 runs）+ 真实数据手测（同 BU 跨 ≥ 3 日业务OP + 跑 D 与 D+1 两 run，重导 D 业务OP 后两 run 「导出差异」success 日期均消失）
+
+### `acquiring_bill_currency_flow_imports.settle_amount_abs`（v2.1.6 收单流水通道清算金额绝对值入库列，v0.7 fix4 重命名自 recon_amount_abs）
+- 定义：`src/backend/database/migrations.js` 中 `ensureAcquiringBillCurrencyTablesSupport` DDL；写入路径在 `src/backend/acquiring-bill-currency-db/import-repository.js` 的 `parseAmountAbs` + `insertFlowRow`
+- 关联功能：收单单据币种校验 — 流水侧**通道清算金额**绝对值入库列；差异表 `流水_通道清算金额` 直接取该列值（无二次 ABS）
+- v0.7 fix4 变更：取值列从 Excel 第 13 列「对账金额」(values[12]) 切换为第 29 列「通道清算金额」(values[28])
+- 变更 review 要点：
+  - **资金红线**：`parseAmountAbs` 改实现（含 `Number(...)` 解析方式 / `Math.abs` / `toString` 精度） → 差异表金额值漂移
+  - 修改 DDL 列类型（TEXT → REAL 等） → 必须同步 reader 入库 + writer 输出格式
+  - 改取值列号（values[28]） → 必须同步 spec §3.1 ★ 标列 + smoke fixture
+  - 必跑：smoke acquiring-bill-currency Case A / J（通道清算金额入库 + 输出值精度）+ 真实数据手测（含负数金额行）
+
+### `acquiring_bill_currency_*.settle_currency` / `settle_currency_norm`（v2.1.6 收单流水/单据通道清算币种入库列，v0.7 fix4 对账核心字段）
+- 定义：`src/backend/database/migrations.js` DDL；写入路径在 `src/backend/acquiring-bill-currency-db/import-repository.js` 的 `insertFlowRow`（流水侧取 values[29]「通道清算币种」）/ `insertBillRow`（单据侧取 values[19]「对账币种」）+ `normalizeCurrency`
+- 关联功能：收单单据币种校验 — **对账核心比对字段**，SQL JOIN 时与对侧 settle_currency_norm 比较判定是否差异
+- v0.7 fix4 关键决策：流水侧取值列从 Excel 第 14 列「币种」(values[13]) 切换为第 30 列「通道清算币种」(values[29])；单据侧列号 values[19] 保持（语义本就是清算视角，仅 DB 字段重命名）。原因 = 单据「对账币种」是清算视角，订单视角的「币种」对账必然 100% match 是字段语义错位
+- 变更 review 要点：
+  - **资金红线**：流水侧取值列号改动 → 完全改变对账结果（v0.6 = 100% match / v0.7 ≈ 56% mismatch）
+  - `normalizeCurrency`（LOWER+TRIM）改实现 → 大小写/空格差异被误判为不一致
+  - 必跑：smoke acquiring-bill-currency Case J/K/L 全套（matching / mismatch / 流水侧空） + 真实数据手测（混合多币种）
+
+### `acquiring_bill_currency_diff_rows.flow_currency` / `flow_amount_abs`（v2.1.6 差异表输出关键 2 列）
+- 定义：`src/backend/database/migrations.js` DDL；写入路径在 `src/backend/acquiring-bill-currency-db/run-repository.js` 的 `insertDiffRowsByJoin`（核心 SQL JOIN）
+- 关联功能：收单单据币种校验差异表输出末尾 2 列 — `流水_通道清算币种` + `流水_通道清算金额`（v0.7 fix4 输出标签修订）；财务据此判断是否需要修正单据币种
+- v0.7 fix4 变更：DB 列名保留 flow_currency/flow_amount_abs（避免 schema 二次变更），**值的语义改为通道清算视角**（SQL `SELECT f.settle_currency, f.settle_amount_abs`）
+- 变更 review 要点：
+  - **资金红线**：`insertDiffRowsByJoin` SQL JOIN 条件改动（`f.month_key = b.month_key AND f.recon_main_id = b.recon_main_id` + `COALESCE(b.settle_currency_norm, '') <> COALESCE(f.settle_currency_norm, '')`） → 直接影响差异表行选择
+  - 改 `diff_type` 判定逻辑（`bill_currency_missing` vs `currency_mismatch`）→ 用户语义混淆
+  - 改 SQL `settle_currency_norm` 比较 → 必须同步 import-repository 入库归一函数 `normalizeCurrency`
+  - 改输出列名常量 `WRITER_OUTPUT_FLOW_CURRENCY_HEADER` / `_FLOW_AMOUNT_ABS_HEADER` → 必须同步 spec §6.2 + smoke Case A 末列表头断言
+  - 必跑：smoke acquiring-bill-currency Case A/C/E/J/K/L 全套 + writer 输出 xlsx 末 3 列值断言
 
 ---
 

@@ -7,6 +7,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const ExcelJS = require('exceljs');
+const { applyWatermark } = require('./workbook-watermark');
 
 const {
   PENDING_GUANLI_HEADERS,
@@ -107,6 +108,7 @@ async function writeDiffWorkbook({
     anomalySheet.addRow(anomalyRowToArray(a));
   });
 
+  applyWatermark(workbook);
   await workbook.xlsx.writeFile(savePath);
   return { filePath: savePath };
 }
@@ -155,6 +157,7 @@ async function writeAggregateDiffWorkbook({ matchedMonths, savePath }) {
     });
   }
 
+  applyWatermark(workbook);
   await workbook.xlsx.writeFile(savePath);
   return { filePath: savePath };
 }

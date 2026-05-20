@@ -17,6 +17,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const ExcelJS = require('exceljs');
+const { applyWatermark } = require('./workbook-watermark');
 
 const importsRepository = require('../backend/biz-op-recon-db/imports-repository');
 const runRepository = require('../backend/biz-op-recon-db/run-repository');
@@ -65,6 +66,7 @@ async function writeSingleDateDiffWorkbook({ db, date, buName, runId, savePath }
 
   // 若没有差异行，仍保留单 sheet + 表头（保持输出一致性，与 v2.1.2 风格一致）
   await fs.promises.mkdir(path.dirname(savePath), { recursive: true });
+  applyWatermark(workbook);
   await workbook.xlsx.writeFile(savePath);
   return { filePath: savePath, rowCount: outputRowCount };
 }
@@ -136,6 +138,7 @@ async function writeDateRangeDiffWorkbook({ db, buName, startDate, endDate, save
   }
 
   await fs.promises.mkdir(path.dirname(savePath), { recursive: true });
+  applyWatermark(workbook);
   await workbook.xlsx.writeFile(savePath);
   return {
     filePath: savePath,
@@ -206,6 +209,7 @@ async function writeBizOpErrorReportXlsx({ date, buName, errorRows, saveDir, fil
     r.eachCell((cell) => { cell.fill = YELLOW_FILL; });
   }
 
+  applyWatermark(workbook);
   await workbook.xlsx.writeFile(savePath);
   return savePath;
 }
@@ -231,6 +235,7 @@ async function writeFlowErrorReportXlsx({ date, errorRows, saveDir, fileName }) 
     r.eachCell((cell) => { cell.fill = YELLOW_FILL; });
   }
 
+  applyWatermark(workbook);
   await workbook.xlsx.writeFile(savePath);
   return savePath;
 }

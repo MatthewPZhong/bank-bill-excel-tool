@@ -313,6 +313,38 @@
               </div>
             </div>
           </section>
+
+          <!-- v2.1.6 Module B：收单单据币种校验模块面板（spec v0.8 §3.5 / §8.1，fix5 删月份下拉）
+               流程：导入流水/单据时弹「选择对账月份」弹窗 → 选文件 → 跑对账 → 跑 run 时自动生成 diff/report → 导出差异 = 另存为 -->
+          <!-- v2.1.6 fix14（spec v0.15 §8.1）：以 bankStatementModulePanel 为模板左右镜像
+               grid-template-columns 在 .acquiring-bill-currency-board 内是 1.4fr 1fr（bank-statement 原版是 1fr 1.4fr，镜像 = 调换比例）
+               按钮 ID 全部保留与 fix5 一致：ImportFlowBtn / ImportBillBtn / RunBtn / ExportBtn / StatusBox -->
+          <section id="acquiringBillCurrencyModulePanel" class="control-board module-panel acquiring-bill-currency-board" hidden>
+            <div class="control-row">
+              <div class="cell left">
+                <div class="pending-action-pair">
+                  <button id="acquiringBillCurrencyImportFlowBtn" class="primary-btn" type="button">导入流水表</button>
+                  <button id="acquiringBillCurrencyImportBillBtn" class="primary-btn" type="button">导入单据表</button>
+                </div>
+              </div>
+              <div class="cell right">
+                <button id="acquiringBillCurrencyRunBtn" class="primary-btn" type="button">开始运行</button>
+              </div>
+            </div>
+            <div class="control-row">
+              <div class="cell left">
+                <div id="acquiringBillCurrencyStatusBox" class="status-box">
+                  <span class="status-spark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusAcquiringBillCurrency" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusAcquiringBillCurrency)"/></svg>
+                  </span>
+                  <span class="status-box-text">欢迎使用小助手</span>
+                </div>
+              </div>
+              <div class="cell right">
+                <button id="acquiringBillCurrencyExportBtn" class="secondary-btn" type="button">导出差异</button>
+              </div>
+            </div>
+          </section>
         </section>
       </main>
 

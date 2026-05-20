@@ -894,6 +894,29 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 .pending-board .pending-action-pair .primary-btn,
 .bank-statement-board .pending-action-pair .primary-btn { min-width: 140px; }
 
+/* v2.1.6 fix14（spec v0.15 §8.1）：收单单据币种校验主面板 — 以 bank-statement-board 为模板左右镜像
+   bank-statement 原版 grid = 1fr 1.4fr（左窄右宽，pair/状态框在右）
+   镜像版（acquiring-bill-currency-board）= 1.4fr 1fr（左宽右窄，pair/状态框在左）
+   按钮尺寸严格镜像 bank-statement：pair 内 primary = 140px / 独占 cell 按钮 = 180px
+   ⚠️ flex:none 覆盖 styles-gemini.css 的 `.cell.right .primary-btn { flex: 1 }` 全局规则
+      （否则 right cell 独占的「开始运行」「导出差异」会被 stretch 撑满 cell） */
+.acquiring-bill-currency-board .control-row { grid-template-columns: 1.4fr 1fr; }
+.acquiring-bill-currency-board .cell.left { display: flex; justify-content: center; }
+.acquiring-bill-currency-board .cell.right { display: flex; justify-content: center; }
+.acquiring-bill-currency-board .pending-action-pair { display: flex; gap: 12px; justify-content: center; }
+/* pair 内 primary（导入流水表 / 导入单据表）= 140px，与 bank-statement 「导入文件 / 开始运行」对齐 */
+.acquiring-bill-currency-board .pending-action-pair .primary-btn {
+  flex: none;
+  min-width: 140px;
+}
+/* 独占 right cell 的「开始运行」(primary) / 「导出差异」(secondary) = 180px
+   严格镜像 bank-statement 的 .cell.left secondary 180px 规则 */
+.acquiring-bill-currency-board .cell.right .primary-btn,
+.acquiring-bill-currency-board .cell.right .secondary-btn {
+  flex: none;
+  min-width: 180px;
+}
+
 /* v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块主面板（Q4 主面板"场景"下拉布局） */
 .recon-id-fix-board .recon-id-fix-action-row {
   display: flex;
@@ -1721,9 +1744,11 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 
 /* Pending 模块主面板 status-box（D6.1：HTML 用 status-box class 沿用阶段 2，
  * Clear 风格下让其呈现成设计稿 .pending-status 的卡片样式）
- * v2.0.0-beta.3 PR #32b：bank-statement-board 同款样式 */
+ * v2.0.0-beta.3 PR #32b：bank-statement-board 同款样式
+ * v2.1.6 fix14：acquiring-bill-currency-board 共享同款样式（用户拍板「状态框大小一致」） */
 .pending-board .status-box,
-.bank-statement-board .status-box {
+.bank-statement-board .status-box,
+.acquiring-bill-currency-board .status-box {
   width: 100%;
   max-width: 360px;
   min-height: 110px;
@@ -1737,19 +1762,22 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   color: var(--text);
 }
 .pending-board .status-box[data-tone="success"],
-.bank-statement-board .status-box[data-tone="success"] {
+.bank-statement-board .status-box[data-tone="success"],
+.acquiring-bill-currency-board .status-box[data-tone="success"] {
   border-color: rgba(30,142,62,.28);
   background: #e6f4ea;
   color: var(--success);
 }
 .pending-board .status-box[data-tone="error"],
-.bank-statement-board .status-box[data-tone="error"] {
+.bank-statement-board .status-box[data-tone="error"],
+.acquiring-bill-currency-board .status-box[data-tone="error"] {
   border-color: rgba(217,48,37,.28);
   background: #fce8e6;
   color: var(--danger);
 }
 .pending-board .status-box[data-tone="neutral"],
-.bank-statement-board .status-box[data-tone="neutral"] {
+.bank-statement-board .status-box[data-tone="neutral"],
+.acquiring-bill-currency-board .status-box[data-tone="neutral"] {
   border-color: var(--line);
   background: var(--bg-soft);
 }
