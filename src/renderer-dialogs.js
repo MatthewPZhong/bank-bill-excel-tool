@@ -5709,13 +5709,12 @@
         };
       }
       if (category === 'offset-bill-mark') {
+        // v2.1.7 F4：默认清空 — 不再预填 2 行 billTypes / 1 行 reconFields / markValue.type=2
+        //   spec §5.1 / PRD §五；DB category 不变
         return {
-          billTypes: [
-            { seq: 1, field: '', op: '等于', value: '' },
-            { seq: 2, field: '', op: '等于', value: '' }
-          ],
-          reconFields: [{ seq: 1, leftType: 1, leftField: '', rightType: 2, rightField: '' }],
-          markValue: { type: 2, field: '', value: '' }
+          billTypes: [],
+          reconFields: [],
+          markValue: { type: null, field: '', value: '' }
         };
       }
       if (category === 'gateway-recon-join') {
@@ -5830,18 +5829,22 @@
         }
         if (otherChosen && (!o.field || o.field === '')) errors.push('"根据其他字段提取"的字段不能为空');
       } else if (draft.category === 'offset-bill-mark') {
+        // v2.1.7 F4：放宽 — billTypes < 2 改 < 1；reconFields 允许 0 行；保留 reconFields ≥ 1 时内容校验
+        //   赋值文案：spec §5.2 — '打标值' → '赋值'（保持向后兼容也含"赋值"语义）
         const c = draft.config || {};
-        if (!Array.isArray(c.billTypes) || c.billTypes.length < 2) errors.push('账单类型至少需要 2 行');
+        if (!Array.isArray(c.billTypes) || c.billTypes.length < 1) errors.push('账单类型至少需要 1 行');
         else if (c.billTypes.some((b) => !b.field || (opNeedsValue(b.op) && (b.value === '' || b.value === undefined)))) {
           errors.push('账单类型每行的字段不能为空；非「空值/非空值」操作的值不能为空');
         }
-        if (!Array.isArray(c.reconFields) || c.reconFields.length === 0) errors.push('对账字段至少需要 1 行');
-        else if (c.reconFields.some((r) => !r.leftField || !r.rightField)) errors.push('对账字段每行两端的字段都不能为空');
+        // 删 "对账字段至少需要 1 行" 卡校验；保留非空行的两端字段必填
+        if (Array.isArray(c.reconFields) && c.reconFields.some((r) => !r.leftField || !r.rightField)) {
+          errors.push('对账字段每行两端的字段都不能为空');
+        }
         const mv = c.markValue || {};
         const billTypeSeqs = (c.billTypes || []).map((b) => b.seq);
-        if (!billTypeSeqs.includes(Number(mv.type))) errors.push('打标值的"账单类型"必须存在于上方账单类型列表中');
-        if (!mv.field) errors.push('打标值的字段不能为空');
-        if (mv.value === '' || mv.value === undefined) errors.push('打标值的写入值不能为空');
+        if (!billTypeSeqs.includes(Number(mv.type))) errors.push('赋值的"账单类型"必须存在于上方账单类型列表中');
+        if (!mv.field) errors.push('赋值的字段不能为空');
+        if (mv.value === '' || mv.value === undefined) errors.push('赋值的写入值不能为空');
       } else if (draft.category === 'gateway-recon-join') {
         const c = draft.config || {};
         if (!Array.isArray(c.reconFields) || c.reconFields.length === 0) errors.push('对账字段至少需要 1 行');
@@ -6601,16 +6604,15 @@
       const isReadonly = mode === 'view';
       if (!draft.config) draft.config = createDefaultScenarioConfig('offset-bill-mark');
       const config = draft.config;
-      if (!Array.isArray(config.billTypes) || config.billTypes.length < 2) {
-        config.billTypes = [
-          { seq: 1, field: '', op: '等于', value: '' },
-          { seq: 2, field: '', op: '等于', value: '' }
-        ];
+      // v2.1.7 F4：仅保证是数组，不强补行（dialog 加载时允许 0 行；校验时按新规则放宽）
+      //   spec §5.3 / PRD §五
+      if (!Array.isArray(config.billTypes)) {
+        config.billTypes = [];
       }
-      if (!Array.isArray(config.reconFields) || config.reconFields.length === 0) {
-        config.reconFields = [{ seq: 1, leftType: 1, leftField: '', rightType: 2, rightField: '' }];
+      if (!Array.isArray(config.reconFields)) {
+        config.reconFields = [];
       }
-      if (!config.markValue) config.markValue = { type: 2, field: '', value: '' };
+      if (!config.markValue) config.markValue = { type: null, field: '', value: '' };
 
       const overlay = createOverlay();
       const dialog = document.createElement('div');
