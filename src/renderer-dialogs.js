@@ -6355,15 +6355,19 @@
                资金红线护栏 R5 三层不动（默认 config / pickConditionsLogicChecked / 引擎 fallback OR） -->
           <div class="scenario-config-row scenario-config-row-multi">
             <div class="scenario-config-label-stack">
-              <span class="scenario-config-label">条件 <span class="scenario-config-tooltip" title="按下方选择的聚合逻辑">ⓘ</span></span>
+              <!-- v2.1.7 round 5 B1（spec §11.2.3 方案 B 单 tooltip 整合）：
+                   去掉 radio 括号文本 '（同时满足）/（满足任一）'；提示合到 '条件' label tooltip 多行
+                   &#10; 是 HTML 实体换行（macOS / Windows / Linux native tooltip 都兼容）
+                   资金红线护栏 R5 三层不动；B1 round 4 Layout-1 字体/布局不动 -->
+              <span class="scenario-config-label">条件 <span class="scenario-config-tooltip" title="按下方选择的聚合逻辑：&#10;AND — 同时满足所有条件才命中&#10;OR — 满足任一条件即命中">ⓘ</span></span>
               <div class="scenario-config-logic-inline">
                 <label class="scenario-config-logic-option">
                   <input type="radio" name="conditionsLogic" value="AND" ${checkedLogic === 'AND' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-                  AND（同时满足）
+                  AND
                 </label>
                 <label class="scenario-config-logic-option">
                   <input type="radio" name="conditionsLogic" value="OR" ${checkedLogic === 'OR' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
-                  OR（满足任一）
+                  OR
                 </label>
               </div>
             </div>
