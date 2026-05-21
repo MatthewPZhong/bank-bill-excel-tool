@@ -1123,8 +1123,11 @@ select {
 }
 
 .extract-order-list {
+  /* v2.1.7 round 2 R6c：spec 参考路径（实际生效在 styles-gemini-extra.css）；保持文档语义同步（spec §8.9.2） */
   display: flex;
   flex-direction: column;
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
 }
 
 .extract-order-row {

@@ -1299,7 +1299,11 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   letter-spacing: .04em; margin-bottom: 8px;
 }
 .extract-order-list {
+  /* v2.1.7 round 2 R6c：超屏滚动恢复（spec §8.9.2 — 留 280px 给 modal header/body padding/dialog-actions/col-header + 余量）
+     ⚠️ 实际生效定义在下文（同文件 L1916+ 后置覆盖）；此处同步保持文档语义一致 */
   display: flex; flex-direction: column;
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
 }
 .extract-order-row {
   display: grid;
@@ -1920,7 +1924,14 @@ select.mapping-text-input {
 }
 .ba-multi-toggle-btn.is-hidden { display: none; }
 
-.extract-order-list { display: flex; flex-direction: column; gap: 4px; }
+/* v2.1.7 round 2 R6c：超屏滚动恢复（实际生效路径 — 后置覆盖 L1301 + L1090 同名定义；spec §8.9.2）
+   max-height calc(100vh - 280px) 留余量给 modal header/body padding/dialog-actions/col-header
+   overflow-y: auto 内容超屏自动出现垂直滚动条 */
+.extract-order-list {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
+}
 .extract-order-btn {
   font-size: 13px;
   padding: 6px 12px;

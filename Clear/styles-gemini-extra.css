@@ -1088,8 +1088,11 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   font-size: 12px; color: var(--muted); font-weight: 500;
   letter-spacing: .04em; margin-bottom: 8px;
 }
+/* v2.1.7 round 2 R6c：与 src/styles-gemini-extra.css 同步 — 超屏滚动恢复（spec §8.9.2） */
 .extract-order-list {
   display: flex; flex-direction: column;
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
 }
 .extract-order-row {
   display: grid;
