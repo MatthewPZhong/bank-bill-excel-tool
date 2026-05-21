@@ -375,6 +375,22 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
   overflow-y: auto;
   padding: 6px 8px;
   display: flex; flex-direction: column; gap: 4px;
+  /* v2.1.7 round 3 B4：与 src/ 同步 — 强制滚动条可见（防 macOS overlay-style 仅 hover） */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 80, 60, 0.3) transparent;
+}
+.big-account-file-list::-webkit-scrollbar,
+.big-account-order-list::-webkit-scrollbar {
+  width: 8px;
+}
+.big-account-file-list::-webkit-scrollbar-thumb,
+.big-account-order-list::-webkit-scrollbar-thumb {
+  background: rgba(100, 80, 60, 0.3);
+  border-radius: 4px;
+}
+.big-account-file-list::-webkit-scrollbar-thumb:hover,
+.big-account-order-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 80, 60, 0.5);
 }
 /* v2.1.7 round 3 B2（spec §9.3.2 方案 A）：与 src/styles-gemini-extra.css 同步 — letter 列宽兜底 */
 .big-account-order-index--alpha {

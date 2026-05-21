@@ -49,6 +49,7 @@
     "preview:new-account-multi": "node scripts/render-modal-preview.js new-account-multi new-account-multi.png",
     "preview:new-account-currency-dropdown": "node scripts/render-modal-preview.js new-account-currency-dropdown new-account-currency-dropdown.png",
     "preview:big-account-selection-multi": "node scripts/render-modal-preview.js big-account-selection-multi big-account-selection-multi.png",
+    "preview:big-account-selection-multi-large": "node scripts/render-modal-preview.js big-account-selection-multi-large big-account-selection-multi-large.png",
     "preview:extract-order": "node scripts/render-modal-preview.js extract-order extract-order.png",
     "preview:account-mapping-editing": "node scripts/render-modal-preview.js account-mapping-editing account-mapping-editing.png",
     "preview:bank-statement-panel": "node scripts/render-modal-preview.js bank-statement-panel bank-statement-panel.png",

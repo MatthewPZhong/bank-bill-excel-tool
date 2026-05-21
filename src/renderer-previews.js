@@ -653,6 +653,42 @@
       }));
     }
 
+    // v2.1.7 round 3 B4（spec §9.5.2）：≥20 文件 fixture 复现"滚动条不可用"
+    //   构造 20 文件 + 8 大账号；高度链：.ba-scroll-container max-height 52vh
+    //   若 R6c B3 之后仍发现 ≥20 文件 无滚动条，dev 阶段在此 preview 上 DevTools 调试
+    function applyBigAccountSelectionMultiLargePreviewState() {
+      setCurrentModule(MODULES.statementGenerator.id);
+      state.currencyOptions = ['USD', 'HKD', 'CNY', 'EUR', 'JPY', 'SGD'];
+      const rows = [];
+      for (let i = 0; i < 20; i++) {
+        rows.push({
+          index: i,
+          fileIndex: i,
+          fileName: `HSBC-SG-2026-03-batch${String(i).padStart(2, '0')}.xlsx`,
+          sourceRowNumber: 1
+        });
+      }
+      openModal(createBigAccountSelectionDialog({
+        rows,
+        rowsWithEmptyBlocks: rows,
+        expandedBigAccountOptions: [
+          { merchantId: '6222000000000001', currency: 'USD' },
+          { merchantId: '6222000000000001', currency: 'HKD' },
+          { merchantId: '6222000000000001', currency: 'SGD' },
+          { merchantId: '9558800000000008', currency: 'SGD' },
+          { merchantId: '9558800000000008', currency: 'USD' },
+          { merchantId: '4567000000000003', currency: 'USD' },
+          { merchantId: '4567000000000003', currency: 'HKD' },
+          { merchantId: '7777000000000007', currency: 'CNY' }
+        ],
+        templateId: 'preview-template-4',
+        templateName: 'HSBC-SG',
+        canRemember: true,
+        onDone: () => {},
+        onCancel: closeModal
+      }));
+    }
+
     // 23. "确认大账号顺序" 对话框（extract-order-card）
     //     直接手搓 DOM（showExtractDialog 是 createBigAccountSelectionDialog 内部闭包，
     //     无法从外部调用；视觉 class 名保持与实际实现一致即可）
@@ -1147,6 +1183,7 @@
       applyNewAccountMultiPreviewState,
       applyNewAccountCurrencyDropdownPreviewState,
       applyBigAccountSelectionMultiPreviewState,
+      applyBigAccountSelectionMultiLargePreviewState,   // v2.1.7 round 3 B4
       applyExtractOrderPreviewState,
       applyAccountMappingEditingPreviewState,
       // v2.0.0-beta.3：银行对账单处理模块 preview（3 张）

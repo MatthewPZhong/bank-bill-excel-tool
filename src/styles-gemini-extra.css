@@ -388,6 +388,23 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
   overflow-y: auto;
   padding: 6px 8px;
   display: flex; flex-direction: column; gap: 4px;
+  /* v2.1.7 round 3 B4（spec §9.5.4 推荐方向）：强制滚动条可见（防 macOS overlay-style 仅 hover 时显示导致用户误判"滚动条不可用"）
+     scrollbar-width: thin 是标准属性（Firefox + 现代 Webkit）；::-webkit-scrollbar 是 macOS Electron 兜底 */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 80, 60, 0.3) transparent;
+}
+.big-account-file-list::-webkit-scrollbar,
+.big-account-order-list::-webkit-scrollbar {
+  width: 8px;
+}
+.big-account-file-list::-webkit-scrollbar-thumb,
+.big-account-order-list::-webkit-scrollbar-thumb {
+  background: rgba(100, 80, 60, 0.3);
+  border-radius: 4px;
+}
+.big-account-file-list::-webkit-scrollbar-thumb:hover,
+.big-account-order-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 80, 60, 0.5);
 }
 /* v2.1.7 round 2 R6a 方案 C：grid 2 列硬编码 → 3 列适配 multi 模式各分支 3 子项渲染（spec §8.7.3）
    - multi 编辑态：    [checkbox + letter + 文件名] 3 子项

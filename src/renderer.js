@@ -435,6 +435,7 @@ const {
   applyNewAccountMultiPreviewState,
   applyNewAccountCurrencyDropdownPreviewState,
   applyBigAccountSelectionMultiPreviewState,
+  applyBigAccountSelectionMultiLargePreviewState,   // v2.1.7 round 3 B4: ≥20 文件 fixture
   applyExtractOrderPreviewState,
   applyAccountMappingEditingPreviewState,
   // v2.0.0-beta.3：银行对账单处理模块 preview（3 张）
@@ -5268,6 +5269,11 @@ async function initialize() {
   } else if (info.previewModal === 'big-account-selection-multi') {
     setTimeout(() => {
       applyBigAccountSelectionMultiPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'big-account-selection-multi-large') {
+    // v2.1.7 round 3 B4：≥20 文件 fixture，验证大数据集滚动行为
+    setTimeout(() => {
+      applyBigAccountSelectionMultiLargePreviewState();
     }, 120);
   } else if (info.previewModal === 'extract-order') {
     setTimeout(() => {
