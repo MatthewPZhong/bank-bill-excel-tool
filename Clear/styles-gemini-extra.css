@@ -350,6 +350,13 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
 .ba-scroll-container {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  /* v2.1.7 round 6 B4 真根因 fix（DevTools 数据揭示）：grid-template-rows 缺失 → 默认 grid-auto-rows: auto = content size
+     → grid item (split-left) 撑到 content 高度（实测 5952px）远超父 max-height: 52vh (实测 447px)
+     → file-list 自身父级无限制 → overflow-y:auto 永不触发
+     round 4/5 加的 split-left/right + file-list + split-body min-height: 0 全部 computed = "0px" 但不解决问题
+     真 fix = grid-template-rows: 1fr 让 row 等于父高度，grid item 跟随 row 限到 447px
+     spec §11.3 反向同步待 T14 PM 处理 */
+  grid-template-rows: 1fr;
   gap: 16px;
   height: 100%;
   min-height: 360px;
