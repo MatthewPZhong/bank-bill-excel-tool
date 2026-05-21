@@ -2906,10 +2906,12 @@ select.mapping-text-input {
   width: 80px;
 }
 
-/* v2.1.3-fix1.5：业务OP数据核对状态框 — 冒号后换行（仅本模块）
-   状态框文本由 formatBizOpReconStatusHtml 注入 innerHTML，含 <br> 标签 */
+/* v2.1.3-fix1.5：业务OP数据核对状态框 — line-height 视觉保留
+   v2.1.7 round 6 C-1 fix（self-review 阻塞）：white-space 由 normal → pre-wrap，
+   与 R3 全局规则 .status-box-text { white-space: pre-wrap } 对齐，让中文「：」后 \n 真换行
+   （原 normal ID 选择器优先级高于全局 class，导致 R3 在 bizOpRecon 视觉不生效） */
 #bizOpReconStatusBox .status-box-text {
-  white-space: normal;
+  white-space: pre-wrap;
   line-height: 1.5;
 }
 
