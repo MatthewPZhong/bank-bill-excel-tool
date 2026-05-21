@@ -1025,16 +1025,34 @@
             meta.textContent = displayName;
             item.append(checkbox, letterSpan, meta);
           } else if (multiMode && !multiEditing && covered) {
-            // 闭合态已入组 block��显示 "✓ a. 文件名 → 大账号"
+            // 闭合态已入组 block：显示 "✓ a. 文件名 → 大账号"
+            // v2.1.7 round 4 B2（spec §10.4.2 路径 A 真根因 fix）：
+            //   isRowIndexCovered 同时认 pendingGroup + closed 组；本分支也会命中 pending case
+            //   findGroupByRowIndex 命中 pending 时返回 { source: 'pending', groupIndex: -1 }
+            //   → multiGroups[-1] = undefined → letterSpan.textContent = '' + meta 不带 "→ 大账号" 后缀
+            //   修复：显式判 source === 'closed' && groupIndex >= 0 才渲染字母 + 大账号；pending 边界 case 给 '?.' 占位 + warn
+            //
+            //   代码证据：findGroupByRowIndex L1191-1198 pendingGroup → { source:'pending', groupIndex: -1 }
+            //            multiGroups[-1] === undefined → 原 group ternary fallback 空串
             item.classList.add('ba-multi-grouped');
             const groupInfo = findGroupByRowIndex(rowIndex);
-            const group = groupInfo ? multiGroups[groupInfo.groupIndex] : null;
+            const isClosedGroup = !!(groupInfo && groupInfo.source === 'closed' && groupInfo.groupIndex >= 0);
+            const group = isClosedGroup ? multiGroups[groupInfo.groupIndex] : null;
+            let letterText = '';
+            if (isClosedGroup) {
+              letterText = `${String.fromCharCode(97 + groupInfo.groupIndex)}.`;
+            } else if (groupInfo) {
+              // 完成态命中 pending（边界 case）→ console 警告 + '?' 占位避免字母列完全空白
+              // eslint-disable-next-line no-console
+              console.warn(`B2 round 4: ba-multi-grouped 分支命中 pendingGroup row ${rowIndex}，字母用 '?.' 占位`);
+              letterText = '?.';
+            }
             const markerSpan = document.createElement('span');
             markerSpan.className = 'ba-multi-group-marker';
             markerSpan.textContent = '✓';
             const letterSpan = document.createElement('span');
             letterSpan.className = 'big-account-order-index ba-left-letter big-account-order-index--alpha';
-            letterSpan.textContent = group ? `${String.fromCharCode(97 + groupInfo.groupIndex)}.` : '';
+            letterSpan.textContent = letterText;
             const meta = document.createElement('span');
             meta.className = 'big-account-file-meta ba-file-name';
             meta.title = fullMeta;
