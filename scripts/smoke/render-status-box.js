@@ -127,6 +127,78 @@ function caseR3_wiringGrep() {
     'R3-7-4 formatBizOpReconStatusHtml 函数定义保留（preview 仍用）');
 }
 
+// =====================================================================
+// B5 round 3：R3 wiring 漏接审计（spec §9.6.4）
+//   全局 grep src/renderer.js，所有 .querySelector('.status-box-text') 后 .textContent =
+//   应只出现在 updateStatusBox 函数内（容许 1 处）
+//   spec 提到 updateStatusBox 大致 L519-538；改造后函数体可能略漂移，用动态定位
+// =====================================================================
+function caseB5_wiringAudit() {
+  const rendererSrc = fs.readFileSync(path.join(__dirname, '../../src/renderer.js'), 'utf-8');
+  const lines = rendererSrc.split('\n');
+
+  // 1. 动态定位 updateStatusBox 函数体范围（从 'function updateStatusBox' 到下一个 '\n}' 顶级）
+  let updateStartLine = -1;
+  let updateEndLine = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^function updateStatusBox\(/.test(lines[i])) {
+      updateStartLine = i + 1; // 1-based
+      // 找匹配的闭合 '}'（基于缩进，function 顶级 → 闭合 '}' 顶格在第 0 列）
+      for (let j = i + 1; j < lines.length; j++) {
+        if (/^}/.test(lines[j])) {
+          updateEndLine = j + 1; // 1-based
+          break;
+        }
+      }
+      break;
+    }
+  }
+  assertTrue(updateStartLine > 0 && updateEndLine > 0,
+    `B5-1 updateStatusBox 函数定位成功 (${updateStartLine}-${updateEndLine})`);
+
+  // 2. 扫描所有 querySelector('.status-box-text') 后续 5 行内含 .textContent = 的位置
+  const directWriteLines = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes(".querySelector('.status-box-text')")) {
+      for (let j = i; j < Math.min(i + 5, lines.length); j++) {
+        if (/\.textContent\s*=/.test(lines[j])) {
+          directWriteLines.push(j + 1); // 1-based
+          break;
+        }
+      }
+    }
+  }
+
+  // 3. updateStatusBox 函数体内允许 1 次（合法直写）；其它视为漏接
+  const leakedOutside = directWriteLines.filter(
+    (ln) => ln < updateStartLine || ln > updateEndLine
+  );
+  assertEq(leakedOutside, [],
+    `B5-2 .status-box-text 直写 .textContent = 漏接审计：函数体外应 0 处（实际 ${leakedOutside.length} 处，行号 ${leakedOutside.join(', ')}）`);
+
+  // 4. updateStatusBox 函数体内应至少 1 次（合法直写）
+  const insideUpdate = directWriteLines.filter(
+    (ln) => ln >= updateStartLine && ln <= updateEndLine
+  );
+  assertTrue(insideUpdate.length >= 1,
+    `B5-3 updateStatusBox 函数体内至少 1 处合法直写（实际 ${insideUpdate.length} 处）`);
+
+  // 5. spec §9.6.1 验证 3 个 'setXxxStatus' / 'updateXxxUi' 全部走 updateStatusBox
+  //   grep 函数体内必须含 'updateStatusBox(' 调用
+  const targetFns = [
+    { name: 'setBizOpReconStatus', label: 'B5-4 setBizOpReconStatus' },
+    { name: 'setAcquiringBillCurrencyStatus', label: 'B5-4 setAcquiringBillCurrencyStatus' },
+    { name: 'updateBankStatementUi', label: 'B5-4 updateBankStatementUi' },
+    { name: 'updateReconIdFixUi', label: 'B5-4 updateReconIdFixUi' }
+  ];
+  for (const tf of targetFns) {
+    const reFn = new RegExp(`function ${tf.name}\\([\\s\\S]+?^}`, 'm');
+    const m = rendererSrc.match(reFn);
+    assertTrue(m && /updateStatusBox\(/.test(m[0]),
+      `${tf.label} 函数体内调用 updateStatusBox（防 B5 漏接回归）`);
+  }
+}
+
 function runRenderStatusBoxSmokeTests() {
   caseR3_basicTransform();
   caseR3_nullUndefined();
@@ -135,6 +207,7 @@ function runRenderStatusBoxSmokeTests() {
   caseR3_mixedColons();
   caseR3_edgeCases();
   caseR3_wiringGrep();
+  caseB5_wiringAudit();
 
   const total = passed + failed;
   if (failed === 0) {

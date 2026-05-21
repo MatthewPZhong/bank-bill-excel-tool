@@ -3326,10 +3326,10 @@ function updateBankStatementUi() {
     if (gw) text += `\n不平账结果表：${gw.fileName}（${gw.rowCount} 行）`;
     tone = 'info';
   }
-  // 仅替换文本节点，保留 .status-spark SVG（与 setStatus 模式一致）
-  const textEl = elements.bankStatementStatusBox.querySelector('.status-box-text');
-  if (textEl) textEl.textContent = text;
-  elements.bankStatementStatusBox.dataset.tone = tone;
+  // v2.1.7 round 3 B5：走 updateStatusBox 入口（R3 wiring — 自动获中文「：」换行 + null 兜底）
+  //   原现状：直写 textEl.textContent = text + dataset.tone = tone（漏 R3 replace 处理）
+  //   spec §9.6.2
+  updateStatusBox(elements.bankStatementStatusBox, text, tone);
 
   // 按钮 disabled 控制
   if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = false;
@@ -3681,9 +3681,8 @@ function updateReconIdFixUi() {
     text = '欢迎使用小助手';
     tone = 'neutral';
   }
-  const textEl = elements.reconIdFixStatusBox.querySelector('.status-box-text');
-  if (textEl) textEl.textContent = text;
-  elements.reconIdFixStatusBox.dataset.tone = tone;
+  // v2.1.7 round 3 B5：走 updateStatusBox 入口（R3 wiring — spec §9.6.2）
+  updateStatusBox(elements.reconIdFixStatusBox, text, tone);
 
   // 按钮可用性（spec §七 + Q4 决策）
   if (elements.reconIdFixImportBtn) elements.reconIdFixImportBtn.disabled = false;
@@ -4245,10 +4244,13 @@ const acquiringBillCurrencyState = {
 function setAcquiringBillCurrencyStatus(message, tone = 'info') {
   const box = elements.acquiringBillCurrencyStatusBox;
   if (!box) return;
-  const text = box.querySelector('.status-box-text');
-  if (text) text.textContent = message || '';
-  box.classList.remove('is-info', 'is-success', 'is-error', 'is-warn');
-  if (tone) box.classList.add('is-' + tone);
+  // v2.1.7 round 2 B5：走 updateStatusBox 入口（R3 wiring — 自动获中文「：」换行 + null 兜底）
+  //   原现状直写 textEl.textContent = message + classList.add('is-' + tone) 是历史死代码
+  //   （PM grep 验证：styles-gemini-extra.css 中 .acquiring-bill-currency-board .status-box[data-tone="success"]
+  //    才是生效 CSS；is-* class 无对应 CSS 规则）
+  //   改走 updateStatusBox 反而修复历史隐藏 bug：tone 真正生效（dataset.tone 联动 data-tone 属性选择器）
+  //   spec §9.6.2 / §9.6.3
+  updateStatusBox(box, message, tone);
 }
 
 // v2.1.7 F6：进度事件 → 状态框文案 helper（spec §6.5）
