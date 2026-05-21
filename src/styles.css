@@ -1105,30 +1105,29 @@ select {
   max-width: 960px;
 }
 
+/* v2.1.7 round 3 B3（spec §9.4.2 方案 A，spec 文档参考路径）：单 grid + 外层 overflow */
 .extract-order-body {
   padding: 18px 24px 8px;
   display: grid;
   grid-template-columns: 1fr 1.15fr;
-  gap: 24px;
-  max-height: 50vh;
+  gap: 0 24px;
+  max-height: calc(100vh - 220px);
   overflow-y: auto;
 }
 
 .extract-order-col-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
   font-size: 12px;
   color: rgba(56, 30, 17, 0.6);
   font-weight: 500;
   letter-spacing: 0.04em;
-  margin-bottom: 8px;
+  padding: 0 0 8px;
 }
 
-.extract-order-list {
-  /* v2.1.7 round 2 R6c：spec 参考路径（实际生效在 styles-gemini-extra.css）；保持文档语义同步（spec §8.9.2） */
-  display: flex;
-  flex-direction: column;
-  max-height: calc(100vh - 280px);
-  overflow-y: auto;
-}
+/* v2.1.7 round 3 B3：.extract-order-list 已删除（DOM 切到单 grid 方案 A，spec §9.4.2） */
 
 .extract-order-row {
   display: grid;

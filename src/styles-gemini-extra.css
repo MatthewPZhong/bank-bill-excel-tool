@@ -1290,21 +1290,29 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 
 /* =================== Extract-order confirm card =================== */
 .extract-order-card { width: min(100%, 760px); }
+/* v2.1.7 round 3 B3（spec §9.4.2 用户拍板方案 A）：单 grid 表格 + 每行横跨左右 + 外层单 overflow
+   - 移除 .extract-order-list 子层 overflow（R6c L1301/L1916 max-height + overflow-y 迁移到此）
+   - 左右 cell 按本 row max height 自动对齐（grid auto row）
+   - col gap 28（保留视觉分隔）；row gap 0（行边界由 .extract-order-row border-bottom 提供） */
 .extract-order-body {
   padding: 18px 28px 8px;
-  display: grid; grid-template-columns: 1fr 1.15fr; gap: 28px;
-}
-.extract-order-col-header {
-  font-size: 12px; color: var(--muted); font-weight: 500;
-  letter-spacing: .04em; margin-bottom: 8px;
-}
-.extract-order-list {
-  /* v2.1.7 round 2 R6c：超屏滚动恢复（spec §8.9.2 — 留 280px 给 modal header/body padding/dialog-actions/col-header + 余量）
-     ⚠️ 实际生效定义在下文（同文件 L1916+ 后置覆盖）；此处同步保持文档语义一致 */
-  display: flex; flex-direction: column;
-  max-height: calc(100vh - 280px);
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 0 28px;
+  max-height: calc(100vh - 220px);
   overflow-y: auto;
 }
+.extract-order-col-header {
+  /* B3：col-header sticky 在顶部，跨 grid 第 1 / 2 列 */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
+  font-size: 12px; color: var(--muted); font-weight: 500;
+  letter-spacing: .04em; padding: 0 0 8px;
+}
+/* B3：.extract-order-list 不再使用（spec §9.4.2 删除整段）
+   保留旧规则下方 L1916+ 后置覆盖也已删除（见同文件下方） */
 .extract-order-row {
   display: grid;
   grid-template-columns: 24px 1fr auto;
@@ -1930,14 +1938,8 @@ select.mapping-text-input {
 }
 .ba-multi-toggle-btn.is-hidden { display: none; }
 
-/* v2.1.7 round 2 R6c：超屏滚动恢复（实际生效路径 — 后置覆盖 L1301 + L1090 同名定义；spec §8.9.2）
-   max-height calc(100vh - 280px) 留余量给 modal header/body padding/dialog-actions/col-header
-   overflow-y: auto 内容超屏自动出现垂直滚动条 */
-.extract-order-list {
-  display: flex; flex-direction: column; gap: 4px;
-  max-height: calc(100vh - 280px);
-  overflow-y: auto;
-}
+/* v2.1.7 round 3 B3（spec §9.4.2）：删除 .extract-order-list 整段（DOM 已切到单 grid 方案 A）
+   原 R6c (T13.11) 的 max-height + overflow-y 迁移到 .extract-order-body 外层（见 L1297-1308） */
 .extract-order-btn {
   font-size: 13px;
   padding: 6px 12px;

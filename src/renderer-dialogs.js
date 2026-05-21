@@ -1684,103 +1684,113 @@
           const extractOverlay = createOverlay();
           const extractDialog = document.createElement('div');
           extractDialog.className = 'modal-card extract-order-card';
+          // v2.1.7 round 3 B3（spec §9.4.2 用户拍板方案 A）：单 grid + 每行 2 cell + 外层单 overflow
+          //   - col-header 跨 grid 第 1 / 2 列（sticky 在顶部）
+          //   - max(N, M) 循环；每对 [leftCell, rightCell] append 到 .extract-order-body
+          //   - 左右 cell 按本 row max height 自动对齐（grid auto row）
+          //   - .extract-order-list 不再使用（删除 list 套娃 + 子层 overflow）
           extractDialog.innerHTML = `
             <div class="dialog-header">
               <div class="dialog-title">确认大账号顺序</div>
               <button class="icon-close extract-close-btn" type="button" style="margin-left:auto;">×</button>
             </div>
             <div class="extract-order-body">
-              <div>
-                <div class="extract-order-col-header">文件顺序：</div>
-                <div class="extract-order-list extract-file-list"></div>
-              </div>
-              <div>
-                <div class="extract-order-col-header">大账号信息：</div>
-                <div class="extract-order-list extract-account-list"></div>
-              </div>
+              <div class="extract-order-col-header">文件顺序</div>
+              <div class="extract-order-col-header">大账号信息</div>
+              <!-- 每行 = 一对 [leftCell, rightCell]，JS 循环 append -->
             </div>
             <div class="dialog-actions right">
               <button class="primary-btn small" type="button" data-action="extract-done">完成</button>
             </div>
           `;
 
-          const extractFileList = extractDialog.querySelector('.extract-file-list');
-          const extractOrderList = extractDialog.querySelector('.extract-account-list');
-
-
-
+          const extractBody = extractDialog.querySelector('.extract-order-body');
 
           // v1.5.2：确认大账号顺序弹窗只显示未被"单个账号匹多个文件"映射的 block
-          extractableRows.forEach((row, index) => {
-            const item = document.createElement('div');
-            item.className = 'extract-order-row';
-            const fullName = row.fileName || '';
-            const rowSuffix = row.sourceRowNumber ? ` 第${row.sourceRowNumber}行` : '';
-            const displayName = truncateFileName(fullName, 20) + rowSuffix;
-            const fullMeta = fullName + rowSuffix;
-            item.innerHTML = `<span class="eo-idx">${index + 1}.</span><span class="eo-name" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span><span></span>`;
-            extractFileList.appendChild(item);
-          });
+          // v2.1.7 round 3 B3：max(N, M) 循环（文件数 vs 大账号数不等时补空 cell）
+          const maxRows = Math.max(extractableRows.length, extractedAccounts.length);
+          for (let i = 0; i < maxRows; i++) {
+            const fileRow = extractableRows[i];
+            const accountRow = extractedAccounts[i];
 
-          extractedAccounts.forEach((account, index) => {
-            const item = document.createElement('div');
-            item.className = 'extract-order-row';
-            item.dataset.index = index;
-            item.dataset.merchantId = account.merchantId;
-            item.dataset.currency = account.currency;
+            // ===== 左 cell：文件顺序 =====
+            const leftCell = document.createElement('div');
+            leftCell.className = 'extract-order-row';
+            if (fileRow) {
+              const fullName = fileRow.fileName || '';
+              const rowSuffix = fileRow.sourceRowNumber ? ` 第${fileRow.sourceRowNumber}行` : '';
+              const displayName = truncateFileName(fullName, 20) + rowSuffix;
+              const fullMeta = fullName + rowSuffix;
+              leftCell.innerHTML = `<span class="eo-idx">${i + 1}.</span><span class="eo-name" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span><span></span>`;
+            } else {
+              // 补空 cell（占位，行高自动）
+              leftCell.classList.add('extract-order-row--empty');
+            }
+            extractBody.appendChild(leftCell);
 
-            const indexSpan = document.createElement('span');
-            indexSpan.className = 'eo-idx';
-            indexSpan.textContent = `${index + 1}.`;
+            // ===== 右 cell：大账号信息（含编辑按钮）=====
+            const rightCell = document.createElement('div');
+            rightCell.className = 'extract-order-row';
+            if (accountRow) {
+              rightCell.dataset.index = i;
+              rightCell.dataset.merchantId = accountRow.merchantId;
+              rightCell.dataset.currency = accountRow.currency;
 
-            const textSpan = document.createElement('span');
-            textSpan.className = 'eo-name';
-            textSpan.textContent = `${account.merchantId} ${account.currency}`;
+              const indexSpan = document.createElement('span');
+              indexSpan.className = 'eo-idx';
+              indexSpan.textContent = `${i + 1}.`;
 
-            const editBtn = document.createElement('button');
-            editBtn.className = 'text-action eo-edit';
-            editBtn.type = 'button';
-            editBtn.textContent = '编辑';
+              const textSpan = document.createElement('span');
+              textSpan.className = 'eo-name';
+              textSpan.textContent = `${accountRow.merchantId} ${accountRow.currency}`;
 
-            const editContainer = document.createElement('div');
-            editContainer.className = 'extract-edit-container';
-            editContainer.hidden = true;
-            editContainer.innerHTML = `
-              <input class="mapping-text-input extract-edit-input extract-edit-merchant" type="text" placeholder="账户号" value="${escapeHtml(account.merchantId)}" />
-              <input class="mapping-text-input extract-edit-input extract-edit-currency" type="text" placeholder="币种" value="${escapeHtml(account.currency)}" />
-              <button class="secondary-btn small extract-edit-done" type="button">完成</button>
-            `;
+              const editBtn = document.createElement('button');
+              editBtn.className = 'text-action eo-edit';
+              editBtn.type = 'button';
+              editBtn.textContent = '编辑';
 
-            editBtn.addEventListener('click', () => {
-              textSpan.hidden = true;
-              editBtn.hidden = true;
-              editContainer.hidden = false;
-            });
-
-            editContainer.querySelector('.extract-edit-done').addEventListener('click', () => {
-              const newMerchantId = editContainer.querySelector('.extract-edit-merchant').value.trim();
-              const newCurrency = editContainer.querySelector('.extract-edit-currency').value.trim();
-              const matched = expandedOptions.find(
-                (o) => o.merchantId === newMerchantId && o.currency === newCurrency
-              );
-              if (!matched) {
-                openModal(createAlertDialog('大账号信息不存在，请重新输入。', {
-                  onConfirm: () => { openModal(extractOverlay); }
-                }));
-                return;
-              }
-              item.dataset.merchantId = newMerchantId;
-              item.dataset.currency = newCurrency;
-              extractedAccounts[index] = { merchantId: newMerchantId, currency: newCurrency, matchType: 'exact' };
-              textSpan.textContent = `${newMerchantId} ${newCurrency}`;
-              textSpan.hidden = false;
-              editBtn.hidden = false;
+              const editContainer = document.createElement('div');
+              editContainer.className = 'extract-edit-container';
               editContainer.hidden = true;
-            });
+              editContainer.innerHTML = `
+                <input class="mapping-text-input extract-edit-input extract-edit-merchant" type="text" placeholder="账户号" value="${escapeHtml(accountRow.merchantId)}" />
+                <input class="mapping-text-input extract-edit-input extract-edit-currency" type="text" placeholder="币种" value="${escapeHtml(accountRow.currency)}" />
+                <button class="secondary-btn small extract-edit-done" type="button">完成</button>
+              `;
 
-            item.append(indexSpan, textSpan, editBtn, editContainer);
-            extractOrderList.appendChild(item);
-          });
+              editBtn.addEventListener('click', () => {
+                textSpan.hidden = true;
+                editBtn.hidden = true;
+                editContainer.hidden = false;
+              });
+
+              editContainer.querySelector('.extract-edit-done').addEventListener('click', () => {
+                const newMerchantId = editContainer.querySelector('.extract-edit-merchant').value.trim();
+                const newCurrency = editContainer.querySelector('.extract-edit-currency').value.trim();
+                const matched = expandedOptions.find(
+                  (o) => o.merchantId === newMerchantId && o.currency === newCurrency
+                );
+                if (!matched) {
+                  openModal(createAlertDialog('大账号信息不存在，请重新输入。', {
+                    onConfirm: () => { openModal(extractOverlay); }
+                  }));
+                  return;
+                }
+                rightCell.dataset.merchantId = newMerchantId;
+                rightCell.dataset.currency = newCurrency;
+                extractedAccounts[i] = { merchantId: newMerchantId, currency: newCurrency, matchType: 'exact' };
+                textSpan.textContent = `${newMerchantId} ${newCurrency}`;
+                textSpan.hidden = false;
+                editBtn.hidden = false;
+                editContainer.hidden = true;
+              });
+
+              rightCell.append(indexSpan, textSpan, editBtn, editContainer);
+            } else {
+              rightCell.classList.add('extract-order-row--empty');
+            }
+            extractBody.appendChild(rightCell);
+          }
 
           extractDialog.querySelector('.extract-close-btn').addEventListener('click', () => {
             openModal(overlay);
