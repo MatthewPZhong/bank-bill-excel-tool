@@ -200,16 +200,17 @@ function caseR5_wiringGrep() {
   assertTrue(/checkedLogic === 'OR' \? 'checked' : ''/.test(dialogsSrc),
     'R5-W-3 dialog radio OR checked 由 checkedLogic 决定');
 
-  // 4. dialog HTML 含 scenario-config-logic-stack（独立 row + 纵向）
-  assertTrue(/scenario-config-logic-stack/.test(dialogsSrc),
-    'R5-W-4 dialog HTML 含 scenario-config-logic-stack 独立 row 纵向布局');
+  // 4. dialog HTML 含 conditionsLogic radio 容器（B1 round 3 后 .scenario-config-logic-stack
+  //    → .scenario-config-logic-inline 移回"条件"row 内部；spec §9.2.2）
+  assertTrue(/scenario-config-logic-(stack|inline)/.test(dialogsSrc),
+    'R5-W-4 dialog HTML 含 conditionsLogic radio 容器（stack 独立 row 或 inline 内嵌"条件"row）');
 
-  // 5. dialog HTML AND 在 OR 之前（纵向 AND 在上 OR 在下）
-  const stackMatch = dialogsSrc.match(/scenario-config-logic-stack[^]*?<\/div>/);
-  assertTrue(stackMatch !== null, 'R5-W-5 找到 scenario-config-logic-stack 块');
-  if (stackMatch) {
-    const andIdx = stackMatch[0].indexOf('value="AND"');
-    const orIdx = stackMatch[0].indexOf('value="OR"');
+  // 5. dialog HTML AND 在 OR 之前（纵向 AND 在上 OR 在下；B1 后仍保持）
+  const containerMatch = dialogsSrc.match(/scenario-config-logic-(stack|inline)[^]*?<\/div>/);
+  assertTrue(containerMatch !== null, 'R5-W-5 找到 conditionsLogic radio 容器块');
+  if (containerMatch) {
+    const andIdx = containerMatch[0].indexOf('value="AND"');
+    const orIdx = containerMatch[0].indexOf('value="OR"');
     assertTrue(andIdx > 0 && orIdx > 0 && andIdx < orIdx,
       'R5-W-5 AND radio 在 OR radio 之前（纵向 AND 在上 OR 在下，spec §8.6.3）');
   }
