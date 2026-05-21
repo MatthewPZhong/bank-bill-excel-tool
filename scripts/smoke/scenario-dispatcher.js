@@ -395,7 +395,128 @@ async function runScenarioDispatcherSmokeTests() {
     assert.strictEqual(result.stats.skippedC4Count, 0, 'D12 disabled C4 不计入 skippedC4Count');
   }
 
-  console.log('  scenario-dispatcher: 15/15 PASS');
+  // ===== v2.1.7 round 3 F8 (spec §9.8.7 🚨 资金红线)：unmatchedRows 反向 filter =====
+
+  // F8-1：unmatchedRows = bankRows - modifiedRows（完整性 + 互斥）
+  {
+    const bankRows = [
+      { _rowId: 'F8-r1', CustomerRef: 'FT', ReconciliationId: '', 'Credit Amount': 100, 'Debit Amount': 0 },
+      { _rowId: 'F8-r2', CustomerRef: 'NO_MATCH', ReconciliationId: '' },
+      { _rowId: 'F8-r3', CustomerRef: 'FT', ReconciliationId: '', 'Credit Amount': 200, 'Debit Amount': 0 }
+    ];
+    // 仅 C1 场景命中 'FT' 前缀
+    const c1 = {
+      id: 1, name: 'F8 C1', category: 'extract-recon-id', priority: 1, enabled: true,
+      config: {
+        conditions: [{ field: 'CustomerRef', op: '包含', value: 'FT' }],
+        conditionsLogic: 'OR',
+        extractByFeature: null,
+        extractByOtherField: { field: 'CustomerRef' }
+      }
+    };
+    const result = runAllScenarios(bankRows, null, [c1]);
+    // 资金红线断言
+    assert(Array.isArray(result.unmatchedRows), 'F8-1 unmatchedRows 是数组');
+    assert.strictEqual(
+      result.modifiedRows.length + result.unmatchedRows.length,
+      bankRows.length,
+      'F8-1 modifiedRows + unmatchedRows = bankRows (无遗漏)'
+    );
+    // F8-r1 / F8-r3 命中（CustomerRef 含 FT），F8-r2 未命中
+    assert.strictEqual(result.modifiedRows.length, 2, 'F8-1 modifiedRows = 2');
+    assert.strictEqual(result.unmatchedRows.length, 1, 'F8-1 unmatchedRows = 1');
+    assert.strictEqual(result.unmatchedRows[0]._rowId, 'F8-r2', 'F8-1 unmatchedRows[0] = F8-r2');
+    assert.strictEqual(result.stats.unmatchedRowCount, 1, 'F8-1 stats.unmatchedRowCount = 1');
+  }
+
+  // F8-2：无重复（first-match-wins 互斥；modifiedIds ∩ unmatchedIds = ∅）
+  {
+    const bankRows = [
+      { _rowId: 'F8-r1', CustomerRef: 'AFT123456789012', ReconciliationId: '' },
+      { _rowId: 'F8-r2', CustomerRef: 'NO', ReconciliationId: '' },
+      { _rowId: 'F8-r3', CustomerRef: 'BFT222333444555', ReconciliationId: '' }
+    ];
+    const c1 = {
+      id: 1, name: 'F8-2 C1', category: 'extract-recon-id', priority: 1, enabled: true,
+      config: {
+        conditions: [{ field: 'CustomerRef', op: '包含', value: 'FT' }],
+        conditionsLogic: 'OR',
+        extractByFeature: null,
+        extractByOtherField: { field: 'CustomerRef' }
+      }
+    };
+    const result = runAllScenarios(bankRows, null, [c1]);
+    const modifiedIds = new Set(result.modifiedRows.map((r) => r._rowId));
+    const unmatchedIds = new Set(result.unmatchedRows.map((r) => r._rowId));
+    const intersection = [...modifiedIds].filter((id) => unmatchedIds.has(id));
+    assert.strictEqual(intersection.length, 0, 'F8-2 modifiedRows ∩ unmatchedRows = ∅');
+  }
+
+  // F8-3 🚨 资金红线 baseline：modifiedRows 行为完全不动
+  //   重跑 baseline 用例（C1 多字段命中 + r5）;modifiedRows.length 必须等于 v2.1.6 baseline 1
+  //   spec §9.8.3 关键不变量：rowLockSet.has(r._rowId) 条件完全不动
+  {
+    const bankRows = [
+      { _rowId: 'F8-base-r1', CustomerRef: 'AFT123456789012', 'Extra Information': '', ReconciliationId: '' }
+    ];
+    const c1 = {
+      id: 1, name: 'F8-3 baseline', category: 'extract-recon-id', priority: 1, enabled: true,
+      config: {
+        conditions: [{ field: 'CustomerRef', op: '包含', value: 'FT' }],
+        conditionsLogic: 'OR',
+        extractByFeature: {
+          enabled: true,
+          searchFields: ['CustomerRef', 'Extra Information'],
+          featureCode: 'FT',
+          digitCount: 12,
+          totalLength: 15
+        },
+        extractByOtherField: null
+      }
+    };
+    const result = runAllScenarios(bankRows, null, [c1]);
+    // 资金红线核心：modifiedRows.length === 1（与 v2.1.6 baseline 完全一致）
+    assert.strictEqual(result.modifiedRows.length, 1, 'F8-3 🚨 modifiedRows.length = 1 (与 v2.1.6 baseline 完全一致)');
+    assert.strictEqual(result.modifiedRows[0]._rowId, 'F8-base-r1', 'F8-3 modifiedRows[0] = F8-base-r1');
+    assert.strictEqual(bankRows[0].ReconciliationId, 'AFT123456789012', 'F8-3 ReconciliationId 写入正确');
+    assert.strictEqual(result.unmatchedRows.length, 0, 'F8-3 unmatchedRows = 0');
+  }
+
+  // F8-4：空 bankRows
+  {
+    const result = runAllScenarios([], null, []);
+    assert.strictEqual(result.modifiedRows.length, 0, 'F8-4 空输入 modifiedRows = 0');
+    assert.strictEqual(result.unmatchedRows.length, 0, 'F8-4 空输入 unmatchedRows = 0');
+    assert.strictEqual(result.stats.unmatchedRowCount, 0, 'F8-4 stats.unmatchedRowCount = 0');
+  }
+
+  // F8-5：无场景 enabled → 全部 unmatched
+  {
+    const bankRows = [
+      { _rowId: 'F8-5-r1', CustomerRef: 'X', ReconciliationId: '' },
+      { _rowId: 'F8-5-r2', CustomerRef: 'Y', ReconciliationId: '' }
+    ];
+    const result = runAllScenarios(bankRows, null, []);
+    assert.strictEqual(result.modifiedRows.length, 0, 'F8-5 无场景 modifiedRows = 0');
+    assert.strictEqual(result.unmatchedRows.length, 2, 'F8-5 无场景 unmatchedRows = 全部');
+  }
+
+  // F8-6：unmatchedRows 保留原始字段（不带 _hitScenarioId / _modifiedColumns 等诊断列）
+  {
+    const bankRows = [{ _rowId: 'F8-6-r1', CustomerRef: 'NO', ReconciliationId: '', 'Credit Amount': 50 }];
+    const result = runAllScenarios(bankRows, null, []);
+    assert.strictEqual(result.unmatchedRows.length, 1, 'F8-6 unmatchedRows = 1');
+    const unmatched = result.unmatchedRows[0];
+    assert.strictEqual(unmatched._rowId, 'F8-6-r1', 'F8-6 _rowId 保留（内部字段）');
+    assert.strictEqual(unmatched.CustomerRef, 'NO', 'F8-6 原始 CustomerRef 保留');
+    assert.strictEqual(unmatched['Credit Amount'], 50, 'F8-6 原始 Credit Amount 保留');
+    // 不带诊断列
+    assert.strictEqual(unmatched._hitScenarioId, undefined, 'F8-6 不带 _hitScenarioId 诊断列');
+    assert.strictEqual(unmatched._hitScenarioName, undefined, 'F8-6 不带 _hitScenarioName 诊断列');
+    assert.strictEqual(unmatched._modifiedColumns, undefined, 'F8-6 不带 _modifiedColumns 诊断列');
+  }
+
+  console.log('  scenario-dispatcher: 21/21 PASS');
 }
 
 // ===== exceljs-writer round-trip =====
@@ -467,10 +588,88 @@ async function runExceljsWriterSmokeTests() {
     assert.strictEqual(sheet.actualRowCount, 1, 'I3 仅表头 1 行');
   }
 
+  // ===== v2.1.7 round 3 F8 (spec §9.8.7)：第 2 sheet "未命中场景行" =====
+
+  // F8-W1：caller 不传 unmatchedRows → 仅 1 sheet（向下兼容旧 caller）
+  {
+    const headers = ['col1', 'col2'];
+    const rows = [{ col1: 'a', col2: 'b', _rowId: 'r1', _modifiedColumns: new Set() }];
+    const out = path.join(tmpDir, 'f8-w1.xlsx');
+    await writeBankStatementOutput(rows, headers, out);
+    // 不传 unmatchedRows → 仅"渠道对账单" 1 sheet
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(out);
+    assert.strictEqual(wb.worksheets.length, 1, 'F8-W1 旧 caller (无 unmatchedRows) 仅 1 sheet');
+    assert.strictEqual(wb.worksheets[0].name, '渠道对账单', 'F8-W1 sheet 1 = "渠道对账单"');
+  }
+
+  // F8-W2：传 unmatchedRows = [] → 2 sheet，第 2 sheet 仅表头
+  {
+    const headers = ['col1', 'col2'];
+    const rows = [{ col1: 'a', col2: 'b', _rowId: 'r1', _modifiedColumns: new Set() }];
+    const out = path.join(tmpDir, 'f8-w2.xlsx');
+    await writeBankStatementOutput(rows, headers, out, []);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(out);
+    assert.strictEqual(wb.worksheets.length, 2, 'F8-W2 传 unmatchedRows 即使空也 2 sheet');
+    assert.strictEqual(wb.worksheets[1].name, '未命中场景行', 'F8-W2 sheet 2 = "未命中场景行"');
+    assert.strictEqual(wb.worksheets[1].actualRowCount, 1, 'F8-W2 空 unmatched 仅表头 1 行');
+    assert.strictEqual(wb.worksheets[1].getCell(1, 1).value, 'col1', 'F8-W2 sheet 2 表头 col1');
+    assert.strictEqual(wb.worksheets[1].getCell(1, 2).value, 'col2', 'F8-W2 sheet 2 表头 col2');
+  }
+
+  // F8-W3：传 unmatchedRows = N 行 → 第 2 sheet 含 N 行数据（不含内部 _ 前缀字段；headers 投影）
+  {
+    const headers = ['col1', 'col2', 'col3'];
+    const rows = [{ col1: 'mod1', col2: 'mod2', col3: 'mod3', _rowId: 'r-mod', _modifiedColumns: new Set(['col1']) }];
+    const unmatched = [
+      { col1: 'um1-a', col2: 'um1-b', col3: 'um1-c', _rowId: 'r-um1', _modifiedColumns: new Set() },
+      { col1: 'um2-a', col2: 'um2-b', col3: 'um2-c', _rowId: 'r-um2', _modifiedColumns: new Set() }
+    ];
+    const out = path.join(tmpDir, 'f8-w3.xlsx');
+    await writeBankStatementOutput(rows, headers, out, unmatched);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(out);
+    assert.strictEqual(wb.worksheets.length, 2, 'F8-W3 2 sheet');
+    const sheet2 = wb.worksheets[1];
+    assert.strictEqual(sheet2.name, '未命中场景行', 'F8-W3 sheet 2 名');
+    assert.strictEqual(sheet2.actualRowCount, 3, 'F8-W3 sheet 2 行数 = 1 表头 + 2 数据');
+    // 表头按 headers 顺序
+    assert.strictEqual(sheet2.getCell(1, 1).value, 'col1', 'F8-W3 表头 col1');
+    assert.strictEqual(sheet2.getCell(1, 2).value, 'col2', 'F8-W3 表头 col2');
+    assert.strictEqual(sheet2.getCell(1, 3).value, 'col3', 'F8-W3 表头 col3');
+    // 第 1 数据行
+    assert.strictEqual(sheet2.getCell(2, 1).value, 'um1-a', 'F8-W3 r1.col1 = um1-a');
+    assert.strictEqual(sheet2.getCell(2, 3).value, 'um1-c', 'F8-W3 r1.col3 = um1-c');
+    // 第 2 数据行
+    assert.strictEqual(sheet2.getCell(3, 1).value, 'um2-a', 'F8-W3 r2.col1 = um2-a');
+    // 防泄漏：表头不含 _ 前缀字段（headers=['col1','col2','col3'] 投影自动过滤）
+    for (let c = 1; c <= 3; c++) {
+      const cellHeader = String(sheet2.getCell(1, c).value || '');
+      assert.ok(!cellHeader.startsWith('_'), `F8-W3 sheet 2 表头不含 _ 前缀字段（实际 ${cellHeader}）`);
+    }
+  }
+
+  // F8-W4：stripInternalFields helper 单测
+  {
+    const { stripInternalFields } = require('../../src/main-process/exceljs-writer');
+    const cleaned = stripInternalFields({
+      col1: 'a',
+      _rowId: 'r1',
+      col2: 'b',
+      _hitScenarioId: 99,
+      _modifiedColumns: new Set(['col1']),
+      _hitScenarioName: 'X'
+    });
+    assert.deepStrictEqual(Object.keys(cleaned).sort(), ['col1', 'col2'], 'F8-W4 stripInternalFields 仅保留非 _ 前缀字段');
+    assert.strictEqual(cleaned.col1, 'a', 'F8-W4 col1 保留');
+    assert.strictEqual(cleaned.col2, 'b', 'F8-W4 col2 保留');
+  }
+
   // 清理
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
-  console.log('  exceljs-writer: 3/3 PASS');
+  console.log('  exceljs-writer: 7/7 PASS');
 }
 
 module.exports = {

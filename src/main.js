@@ -3030,6 +3030,10 @@ function registerAppHandlers() {
       const result = runAllScenarios(workingBankRows, workingGwRows, dispatchScenarios);
       processingResult = {
         modifiedRows: result.modifiedRows,
+        // v2.1.7 round 3 F8 (spec §9.8.5)：保留 dispatcher 返回的 unmatchedRows（导出阶段写第 2 sheet 用）
+        //   保留原始 bankRows 顺序 + 原始字段（dispatcher 反向 filter 未做 .map 转换）
+        //   ⚠️ 资金红线：modifiedRows + unmatchedRows = workingBankRows（无遗漏 + 互斥）
+        unmatchedRows: result.unmatchedRows,
         modifications: result.modifications,
         errorReport: result.errorReport,
         stats: result.stats,
@@ -3102,10 +3106,14 @@ function registerAppHandlers() {
           errorReportName: errorReport ? errorReport.fileName : null
         };
       }
+      // v2.1.7 round 3 F8 (spec §9.8.5)：透传 unmatchedRows 给 writer 输出第 2 sheet "未命中场景行"
+      //   ⚠️ 资金红线：unmatchedRows = bankRows - modifiedRows（dispatcher 反向 filter 保证互斥）
+      //   sheet 1 '渠道对账单'：保留命中行 + 标黄；sheet 2 '未命中场景行'：未命中行（原始字段，无诊断列）
       const main = await writeBankStatementMainOutput({
         modifiedRows: processingResult.modifiedRows,
         headers: bankStatementSession.headers,
-        mainFilePath
+        mainFilePath,
+        unmatchedRows: Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows : []
       });
       return {
         status: 'ok',
