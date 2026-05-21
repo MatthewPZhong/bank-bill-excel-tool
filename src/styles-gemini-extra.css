@@ -373,6 +373,11 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
   border-radius: var(--radius-md);
   overflow: hidden;
   background: #fff;
+  /* v2.1.7 round 4 B4（spec §10.3.2 真根因 fix）：让 grid 子项允许收缩到 < content size
+     不加这行 → grid item min-height: auto = content size 穿透父 .ba-scroll-container max-height: 52vh
+     → file-list overflow-y:auto 永不触发 → 20+ 文件无滚动条
+     与 dev round 3 加的 scrollbar-width: thin / ::-webkit-scrollbar 形成"滚动条出现 + 可见"两阶段完整覆盖 */
+  min-height: 0;
 }
 .big-account-split-header {
   padding: 12px 16px;
