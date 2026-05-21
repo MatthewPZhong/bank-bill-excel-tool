@@ -4270,12 +4270,12 @@ function formatAcquiringBillCurrencyProgress(ev) {
   }
   if (ev.phase === 'run') {
     switch (ev.stage) {
-      case 'clearing-old-runs': return '正在清理该月旧 run 数据...';
-      case 'computing-stats':   return '正在统计行数...';
-      case 'inserting-run':     return '正在创建 run 记录...';
-      case 'sql-joining':       return '正在做 SQL JOIN 比对币种...';
-      case 'writing-xlsx':      return '正在写入差异表 Excel...';
-      case 'updating-paths':    return '正在回填文件路径...';
+      case 'clearing-old-runs': return '正在清理该月历史结果...';
+      case 'computing-stats':   return '正在统计数据量...';
+      case 'inserting-run':     return '正在初始化对账批次...';
+      case 'sql-joining':       return '正在比对币种（耗时较长，请稍候）...';
+      case 'writing-xlsx':      return '正在写入差异 Excel 文件...';
+      case 'updating-paths':    return '正在收尾结果文件...';
       default: return `运行中：${ev.stage}`;
     }
   }

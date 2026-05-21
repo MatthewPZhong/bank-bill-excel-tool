@@ -180,15 +180,24 @@ async function runCheck({ db, monthKey, storageRoot, onProgress }) {
   safeBegin(db);
   try {
     // v2.1.7 F6 埋点 1/6：清理历史 runs
-    if (onProgress) onProgress({ phase: 'run', stage: 'clearing-old-runs' });
+    if (onProgress) {
+      onProgress({ phase: 'run', stage: 'clearing-old-runs' });
+      await new Promise((r) => setImmediate(r));
+    }
     runRepo.clearRunsByMonth(db, monthKey);
 
     // v2.1.7 F6 埋点 2/6：统计行数
-    if (onProgress) onProgress({ phase: 'run', stage: 'computing-stats' });
+    if (onProgress) {
+      onProgress({ phase: 'run', stage: 'computing-stats' });
+      await new Promise((r) => setImmediate(r));
+    }
     stats = runRepo.computeRunStats(db, { monthKey });
 
     // v2.1.7 F6 埋点 3/6：创建 run 记录
-    if (onProgress) onProgress({ phase: 'run', stage: 'inserting-run' });
+    if (onProgress) {
+      onProgress({ phase: 'run', stage: 'inserting-run' });
+      await new Promise((r) => setImmediate(r));
+    }
     runId = runRepo.insertRun(db, {
       monthKey,
       // v0.14 fix12：显式传 ISO 8601（带 Z 后缀），避免依赖 SQLite DEFAULT CURRENT_TIMESTAMP（返回 UTC 无后缀，writer 显示时容易错位）
@@ -201,7 +210,11 @@ async function runCheck({ db, monthKey, storageRoot, onProgress }) {
     });
 
     // v2.1.7 F6 埋点 4/6：SQL JOIN 比对币种（耗时大头）
-    if (onProgress) onProgress({ phase: 'run', stage: 'sql-joining', mismatchHint: stats.mismatchRows });
+    //   await setImmediate 让 IPC 把"正在比对币种"文案送达渲染端，再开始阻塞 SQL
+    if (onProgress) {
+      onProgress({ phase: 'run', stage: 'sql-joining', mismatchHint: stats.mismatchRows });
+      await new Promise((r) => setImmediate(r));
+    }
     insertedDiffRows = runRepo.insertDiffRowsByJoin(db, { runId, monthKey });
     db.exec('COMMIT');
 
