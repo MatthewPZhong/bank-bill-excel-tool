@@ -6673,7 +6673,7 @@
               ${renderScenarioOptions(SCENARIO_CONDITION_OPS, bt.op || '等于')}
             </select>
             <input class="scenario-config-input" type="text" data-multi-field="value" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(bt.value || '')}" placeholder="值" ${!opNeedsValue(bt.op) ? 'style="visibility:hidden"' : ''}>
-            ${isReadonly || config.billTypes.length <= 2 ? '' : '<button class="icon-close-small" type="button" data-multi-action="remove" title="删除">×</button>'}
+            ${isReadonly || config.billTypes.length === 1 ? '' : '<button class="icon-close-small" type="button" data-multi-action="remove" title="删除">×</button>'}
           </div>
         `).join('');
       }
