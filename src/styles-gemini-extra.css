@@ -1790,6 +1790,15 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   white-space: pre-line;
 }
 
+/* v2.1.7 round 2 R3：全局识别 updateStatusBox 注入的「：」后 \n
+ * 配合 src/renderer.js:519 updateStatusBox 内 String(message).replace(/：/g, '：\n')
+ * #bankStatementStatusBox .status-box-text { white-space: pre-line } 仍生效（ID 优先级）；
+ * pre-line / pre-wrap 都识别 \n，bankStatement 行为不变
+ */
+.status-box-text {
+  white-space: pre-wrap;
+}
+
 /* =================== v2.0.0-beta.2 阶段 5 增量：reconcile + export 对话框 Clear 适配 ===================
  * src renderer 用 .pending-reconcile-dialog / .pending-export-dialog（设计师 .pending-reconcile-card /
  * .pending-export-runs-card 是另一套），且 select 用 .mapping-text-input 基础 class（Clear 没有此 class
@@ -2311,6 +2320,28 @@ select.mapping-text-input {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* v2.1.7 round 2 R5：C1 dialog 条件聚合 radio 重排 — 独立 row + 纵向（AND 在上 OR 在下）
+   label 字体大小/字重通过 HTML 复用 .scenario-config-label 标准样式（spec §8.6.1） */
+.scenario-config-logic-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.scenario-config-logic-stack-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--text, #333);
+  font-size: 13px;
+}
+
+.scenario-config-logic-stack-option input[disabled] {
+  cursor: not-allowed;
 }
 
 .scenario-config-multi-row {

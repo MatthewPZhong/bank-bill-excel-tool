@@ -3031,7 +3031,7 @@ select {
   gap: 6px;
 }
 
-/* v2.1.7 F1：C1 dialog 条件聚合 AND/OR radio 行 */
+/* v2.1.7 F1：C1 dialog 条件聚合 AND/OR radio 行（round 1 横向版） */
 .scenario-config-logic-row {
   display: flex;
   align-items: center;
@@ -3056,6 +3056,28 @@ select {
 }
 
 .scenario-config-logic-option input[disabled] {
+  cursor: not-allowed;
+}
+
+/* v2.1.7 round 2 R5：C1 dialog 条件聚合 radio 重排 — 独立 row + 纵向（AND 在上 OR 在下）
+   label 字体大小/字重通过 HTML 复用 .scenario-config-label 标准样式（spec §8.6.1） */
+.scenario-config-logic-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.scenario-config-logic-stack-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--text, #333);
+  font-size: 13px;
+}
+
+.scenario-config-logic-stack-option input[disabled] {
   cursor: not-allowed;
 }
 

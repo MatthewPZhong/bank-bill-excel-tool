@@ -103,14 +103,20 @@ function caseR3_edgeCases() {
 function caseR3_wiringGrep() {
   const rendererSrc = fs.readFileSync(path.join(__dirname, '../../src/renderer.js'), 'utf-8');
   const stylesSrc = fs.readFileSync(path.join(__dirname, '../../src/styles.css'), 'utf-8');
+  // index.html 加载顺序：styles.css (disabled) → styles-gemini.css → styles-gemini-extra.css
+  // R3 生效路径必须在 styles-gemini-extra.css；styles.css 仅作为 spec §8.4.2 文档参考
+  const styleGeminiExtraSrc = fs.readFileSync(path.join(__dirname, '../../src/styles-gemini-extra.css'), 'utf-8');
   const dialogsSrc = fs.readFileSync(path.join(__dirname, '../../src/renderer-dialogs.js'), 'utf-8');
 
   // 1. updateStatusBox 含 replace（必须用中文「：」U+FF1A）
   assertTrue(/String\(message\)\.replace\(\/：\/g, '：\\n'\)/.test(rendererSrc),
     'R3-7-1 updateStatusBox 含 String(message).replace(/：/g, "：\\n")');
-  // 2. CSS pre-wrap 全局
+  // 2a. spec §8.4.2 参考路径 src/styles.css 有规则（即使 disabled，文档参考）
   assertTrue(/\.status-box-text\s*\{[^}]*white-space:\s*pre-wrap/.test(stylesSrc),
-    'R3-7-2 styles.css .status-box-text { white-space: pre-wrap }');
+    'R3-7-2a src/styles.css .status-box-text { white-space: pre-wrap }（spec §8.4.2 参考）');
+  // 2b. 实际生效路径 styles-gemini-extra.css 必须有规则（index.html 加载的是 disabled styles.css → 必走 gemini-extra）
+  assertTrue(/\.status-box-text\s*\{[^}]*white-space:\s*pre-wrap/.test(styleGeminiExtraSrc),
+    'R3-7-2b styles-gemini-extra.css .status-box-text { white-space: pre-wrap }（实际生效路径）');
   // 3. setBizOpReconStatus hack 已删（不再含 innerHTML = formatBizOpReconStatusHtml）
   //   函数内已不应有 textEl.innerHTML 调用
   const setBizOpFnMatch = rendererSrc.match(/function setBizOpReconStatus[\s\S]+?^}/m);

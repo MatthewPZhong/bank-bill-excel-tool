@@ -5703,8 +5703,13 @@
       if (category === 'extract-recon-id') {
         return {
           conditions: [{ field: '', op: '等于', value: '' }],
-          // v2.1.7 F1：新增条件聚合逻辑字段；默认 OR（与 v2.1.6 行为一致）
-          conditionsLogic: 'OR',
+          // v2.1.7 round 2 R5：新建默认 AND（用户日常 90% 用 AND；spec §8.6.2）
+          //   ⚠️ 资金红线三层护栏（spec §8.6.5）：
+          //     1) createDefaultScenarioConfig（仅 mode=create 路径）默认 AND ←本行
+          //     2) pickConditionsLogicChecked helper：mode=edit + 老 scenario 无 logic 字段 → OR 选中
+          //     3) c1-extract-recon-id.js runC1Scenario fallback：undefined → OR（不动；spec §2.2 引擎保护）
+          //   绝不允许"老 scenario 加载时 UI 显示 AND"，否则用户点保存（未察觉默认值变化）就把语义从 OR 翻成 AND
+          conditionsLogic: 'AND',
           extractByFeature: null,
           extractByOtherField: null
         };
@@ -6250,6 +6255,25 @@
     }
 
     // ===== F2 — C1 配置弹窗（5 行 + 行 4/5 互斥）=====
+    // v2.1.7 round 2 R5 资金红线护栏 helper（spec §8.6.4 / §8.6.5）：
+    //   决定 C1 dialog 加载时 AND/OR radio 哪个选中
+    //   - mode=create：用 draft.config.conditionsLogic（createDefaultScenarioConfig 已注入 'AND'）
+    //   - mode=edit / view：老 scenario 无 conditionsLogic 字段 → 显示 OR 选中（与引擎 fallback OR 行为一致）
+    //   - mode=edit / view：新 scenario 有 'AND' / 'OR' → 用本值
+    //
+    //   ⚠️ 禁止修改 draft.config（helper 只读决策；用户切换 radio 后才落 config.conditionsLogic）
+    //   ⚠️ 绝不允许"老 scenario 加载时 UI 显示 AND"，否则保存（未察觉默认值变化）会把语义从 OR 翻成 AND
+    function pickConditionsLogicChecked(draft) {
+      const mode = draft && draft.mode;
+      const cfg = (draft && draft.config) || {};
+      if (mode === 'create') {
+        // 新建：使用 createDefaultScenarioConfig 注入的默认值（AND）；防御性 fallback 'AND'
+        return cfg.conditionsLogic === 'OR' ? 'OR' : 'AND';
+      }
+      // 编辑 / 查看：老 scenario undefined → OR；新 scenario 用本值
+      return cfg.conditionsLogic === 'AND' ? 'AND' : 'OR';
+    }
+
     function createScenarioConfigDialogC1() {
       const draft = state.scenarioDraft;
       if (!draft || draft.category !== 'extract-recon-id') {
@@ -6262,6 +6286,9 @@
       if (!Array.isArray(config.conditions) || config.conditions.length === 0) {
         config.conditions = [{ field: '', op: '等于', value: '' }];
       }
+      // v2.1.7 round 2 R5：用 helper 决定 radio 选中状态（资金红线护栏，spec §8.6.5）
+      //   helper 只读，不改 draft.config —— 用户切换 radio 后才落 config.conditionsLogic
+      const checkedLogic = pickConditionsLogicChecked(draft);
       // 互斥状态：行 4 vs 行 5 最多勾一个
       const featureChecked = !!(config.extractByFeature && config.extractByFeature.enabled);
       const otherChecked = !!(config.extractByOtherField);
@@ -6296,12 +6323,21 @@
             <div class="scenario-config-multi-wrap">
               <div class="scenario-config-multi-rows" data-multi="conditions"></div>
               ${isReadonly ? '' : '<button class="text-action small" type="button" data-action="add-condition">+ 新增条件</button>'}
-              <!-- v2.1.7 F1：条件聚合逻辑 radio（默认 OR；旧 scenario 无 logic 字段 → fallback OR 选中） -->
-              <div class="scenario-config-logic-row">
-                <span class="scenario-config-logic-label">条件聚合：</span>
-                <label class="scenario-config-logic-option"><input type="radio" name="conditionsLogic" value="OR" ${config.conditionsLogic !== 'AND' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}> OR（满足任一）</label>
-                <label class="scenario-config-logic-option"><input type="radio" name="conditionsLogic" value="AND" ${config.conditionsLogic === 'AND' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}> AND（同时满足）</label>
-              </div>
+            </div>
+          </div>
+          <!-- v2.1.7 round 2 R5：条件聚合 radio 拆成独立 row + 纵向（AND 在上 OR 在下）+ label 复用标准 scenario-config-label
+               资金红线护栏：checkedLogic 由 pickConditionsLogicChecked(draft) 决定（spec §8.6.3 / §8.6.5） -->
+          <div class="scenario-config-row">
+            <span class="scenario-config-label">条件聚合</span>
+            <div class="scenario-config-logic-stack">
+              <label class="scenario-config-logic-stack-option">
+                <input type="radio" name="conditionsLogic" value="AND" ${checkedLogic === 'AND' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+                AND（同时满足）
+              </label>
+              <label class="scenario-config-logic-stack-option">
+                <input type="radio" name="conditionsLogic" value="OR" ${checkedLogic === 'OR' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+                OR（满足任一）
+              </label>
             </div>
           </div>
           <div class="scenario-config-row scenario-config-row-mutex">

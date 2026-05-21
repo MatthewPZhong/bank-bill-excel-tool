@@ -1180,6 +1180,32 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   line-height: 1.5;
 }
 
+/* v2.1.7 round 2 R3：与 src/styles-gemini-extra.css 同步 — 全局状态框识别 \n（updateStatusBox 中文「：」后注入） */
+.status-box-text {
+  white-space: pre-wrap;
+}
+
+/* v2.1.7 round 2 R5：与 src/styles-gemini-extra.css 同步 — C1 dialog 条件聚合 radio 重排 */
+.scenario-config-logic-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.scenario-config-logic-stack-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--text, #333);
+  font-size: 13px;
+}
+
+.scenario-config-logic-stack-option input[disabled] {
+  cursor: not-allowed;
+}
+
 /* v2.1.4 T3：小助手功能收纳弹窗（Clear theme 覆盖） */
 .module-cabinet-card {
   width: min(100%, 720px);
