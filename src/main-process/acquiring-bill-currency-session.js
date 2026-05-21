@@ -60,7 +60,9 @@ async function importFilesInTransaction({ db, kind, monthKey, filePaths, onProgr
         importedAt,
         expectedMonthKey: monthKey,
         onProgress: (p) => {
-          if (onProgress) onProgress({ stage: 'inserting', fileIndex: i, ...p });
+          // v2.1.7 round 2 R2：fileCount 在 ...p 之后（后置 = 覆盖；reader 不带 fileCount 但防御性写法保证 source-of-truth）
+          //   renderer formatAcquiringBillCurrencyProgress 用 ev.fileCount 显示 "(i/n 个文件)"；缺失时 fallback "?"（spec §8.3）
+          if (onProgress) onProgress({ stage: 'inserting', fileIndex: i, ...p, fileCount: filePaths.length });
         }
       });
       totalImported += result.importedCount;
@@ -111,7 +113,8 @@ async function importFilesWithOverwrite({ db, kind, monthKey, filePaths, onProgr
         importedAt,
         expectedMonthKey: detectedMonthKey,
         onProgress: (p) => {
-          if (onProgress) onProgress({ stage: 'inserting', fileIndex: i, ...p });
+          // v2.1.7 round 2 R2：同 importFilesInTransaction（spec §8.3）
+          if (onProgress) onProgress({ stage: 'inserting', fileIndex: i, ...p, fileCount: filePaths.length });
         }
       });
       // 防御：detectedMonthKey 已是 peek 出来的值，新文件 monthKey 应一致；

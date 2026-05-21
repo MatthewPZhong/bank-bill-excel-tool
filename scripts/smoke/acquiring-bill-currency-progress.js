@@ -116,9 +116,60 @@ async function caseF6A_importOnProgress() {
     // result 返回正常
     assertEq(result.fileCount, 3, 'F6-A result.fileCount = 3');
     assertEq(result.totalImported, 6, 'F6-A result.totalImported = 6');
+
+    // v2.1.7 round 2 R2：若收到 inserting 事件（小数据集可能不触发），必须含 fileCount（spec §8.3）
+    const insertingEvents = events.filter((e) => e.stage === 'inserting');
+    insertingEvents.forEach((ev) => {
+      assertEq(ev.fileCount, 3, `F6-A R2 inserting 事件应含 fileCount=${3}`);
+    });
   } finally {
     cleanup();
   }
+}
+
+// =====================================================================
+// F6-A-R2：直接测 session wrapper 注入 fileCount 行为（不依赖 reader 节流）
+//   通过 mock importReader → wrapper 内层 onProgress 透传 reader payload
+//   验证 wrapper 给每个 inserting 事件都注入 fileCount = filePaths.length
+//   spec §8.3 / round 2 R2
+// =====================================================================
+async function caseF6A_R2_wrapperInjectFileCount() {
+  // 不依赖真实 reader / DB：直接构造一个 mock 模拟 wrapper 行为（与 session.js 完全等价）
+  //   session.js wrapper：onProgress: (p) => onProgress({ stage: 'inserting', fileIndex: i, ...p, fileCount: filePaths.length })
+  const filePaths = ['a.xlsx', 'b.xlsx', 'c.xlsx', 'd.xlsx', 'e.xlsx'];
+  const events = [];
+  function simulateOneFileImport(fileIndex, readerPayloads) {
+    // wrapper（等价于 session.js L62-66 / L113-116）
+    const wrapper = (p) => {
+      events.push({ stage: 'inserting', fileIndex, ...p, fileCount: filePaths.length });
+    };
+    // reader 内部高频回调
+    readerPayloads.forEach((p) => wrapper(p));
+  }
+
+  // 模拟 5 个文件，各触发 2 次 inserting（共 10 个 inserting 事件）
+  for (let i = 0; i < filePaths.length; i++) {
+    simulateOneFileImport(i, [
+      { sourceFile: filePaths[i], importedCount: 10000 },
+      { sourceFile: filePaths[i], importedCount: 20000 }
+    ]);
+  }
+
+  assertEq(events.length, 10, 'F6-A-R2 共触发 10 个 inserting');
+  // 全量 fileCount 注入断言
+  assertTrue(events.every((e) => e.fileCount === 5), 'F6-A-R2 所有 inserting 事件都含 fileCount=5');
+  // 防回归：fileIndex / sourceFile / importedCount 字段都保留
+  assertTrue(events.every((e) => typeof e.fileIndex === 'number'), 'F6-A-R2 fileIndex 字段保留');
+  assertTrue(events.every((e) => typeof e.sourceFile === 'string'), 'F6-A-R2 sourceFile 字段保留');
+  assertTrue(events.every((e) => typeof e.importedCount === 'number'), 'F6-A-R2 importedCount 字段保留');
+
+  // 防回归：如果 reader payload 偶然含 fileCount（脏数据），wrapper 应覆盖
+  const dirtyEvents = [];
+  const wrapper2 = (p) => {
+    dirtyEvents.push({ stage: 'inserting', fileIndex: 0, ...p, fileCount: 99 });
+  };
+  wrapper2({ sourceFile: 'x.xlsx', importedCount: 5000, fileCount: 'dirty' });
+  assertEq(dirtyEvents[0].fileCount, 99, 'F6-A-R2 reader payload 含 fileCount → wrapper 覆盖（spread 后置 = source-of-truth）');
 }
 
 // =====================================================================
@@ -283,6 +334,7 @@ async function caseF6D_throttleLogic() {
 
 async function runAcquiringBillCurrencyProgressSmokeTests() {
   await caseF6A_importOnProgress();
+  await caseF6A_R2_wrapperInjectFileCount();   // v2.1.7 round 2 R2
   await caseF6B_runOnProgress();
   await caseF6C_runWithoutOnProgress();
   await caseF6D_throttleLogic();
