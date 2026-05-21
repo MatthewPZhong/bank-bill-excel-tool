@@ -1791,7 +1791,8 @@ select {
 }
 
 .big-account-selection-card {
-  width: min(100%, 920px);
+  /* v2.1.7 round 2 R6a 方案 C：spec 参考路径（实际生效在 styles-gemini-extra.css 1200px）；保持文档语义同步 */
+  width: min(100%, 1200px);
 }
 
 .big-account-selection-toolbar {

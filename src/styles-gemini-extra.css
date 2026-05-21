@@ -187,7 +187,8 @@ td .muted { color: var(--muted); }
 .amount-split-rules-card { width: min(100%, 880px); }
 .bill-split-mappings-card { width: 80vw; max-width: 1280px; }
 .bill-split-rows-card { width: min(100%, 1180px); }
-.big-account-selection-card { width: min(100%, 1080px); min-height: 540px; }
+/* v2.1.7 round 2 R6a 方案 C：弹窗 1080 → 1200（spec §8.7.3 — 给文件名 + 后缀 ' → MERCHANT USD' 多 120px 横向空间） */
+.big-account-selection-card { width: min(100%, 1200px); min-height: 540px; }
 .big-account-selection-split { min-height: 600px; }
 
 /* =================== Export-scope vertical buttons =================== */
@@ -388,9 +389,15 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
   padding: 6px 8px;
   display: flex; flex-direction: column; gap: 4px;
 }
+/* v2.1.7 round 2 R6a 方案 C：grid 2 列硬编码 → 3 列适配 multi 模式各分支 3 子项渲染（spec §8.7.3）
+   - multi 编辑态：    [checkbox + letter + 文件名] 3 子项
+   - multi grouped 闭合态：[✓ + a. + 文件名 → MERCHANT USD] 3 子项
+   - multi uncovered 态：[空 letter + idx + 文件名] 3 子项
+   - 非 multi 普通态：  [idx + 文件名] 2 子项（col-3 留白，meta 靠左 ellipsis 正常）
+   - PM 建议：preview 验证后若非 multi 视觉破版，可加 `:not(.ba-multi-editing):not(.ba-multi-grouped)` 限定 grid-column 兜底 */
 .ba-file-row {
   display: grid;
-  grid-template-columns: 28px 1fr;
+  grid-template-columns: auto auto 1fr;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
@@ -409,9 +416,9 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
   display: flex; align-items: center; justify-content: center;
 }
 .ba-file-name {
-  /* v2.1.7 F3：与 .big-account-file-meta 同步 — flex 子项缺 min-width:0 → ellipsis 触发不了导致 "PP..." */
+  /* v2.1.7 round 2 R6a 方案 C：grid 子项不接受 flex（round 1 b1ba84b 误加 flex:1 1 auto 对 grid 子项无效）
+     靠 min-width:0 + ellipsis + 父 grid 1fr 列即可实现自适应收缩 + 末尾截断（spec §8.7.3） */
   min-width: 0;
-  flex: 1 1 auto;
   font-family: "Roboto Mono", ui-monospace, monospace;
   font-size: 13px;
   color: var(--text);

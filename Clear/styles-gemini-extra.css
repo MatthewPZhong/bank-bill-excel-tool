@@ -174,7 +174,8 @@ td .muted { color: var(--muted); }
 .amount-split-rules-card { width: min(100%, 880px); }
 .bill-split-mappings-card { width: 80vw; max-width: 1280px; }
 .bill-split-rows-card { width: min(100%, 1180px); }
-.big-account-selection-card { width: min(100%, 1080px); min-height: 540px; }
+/* v2.1.7 round 2 R6a 方案 C：与 src/ 同步 — 弹窗 1080 → 1200 */
+.big-account-selection-card { width: min(100%, 1200px); min-height: 540px; }
 .big-account-selection-split { min-height: 600px; }
 
 /* =================== Export-scope vertical buttons =================== */
@@ -375,9 +376,10 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
   padding: 6px 8px;
   display: flex; flex-direction: column; gap: 4px;
 }
+/* v2.1.7 round 2 R6a 方案 C：与 src/styles-gemini-extra.css 同步 — grid 2 列 → 3 列适配 multi 模式 3 子项 */
 .ba-file-row {
   display: grid;
-  grid-template-columns: 28px 1fr;
+  grid-template-columns: auto auto 1fr;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
@@ -396,9 +398,8 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
   display: flex; align-items: center; justify-content: center;
 }
 .ba-file-name {
-  /* v2.1.7 F3：与 src/ 同步 — flex 子项缺 min-width:0 → ellipsis 触发不了导致 "PP..." */
+  /* v2.1.7 round 2 R6a 方案 C：与 src/ 同步 — grid 子项不接受 flex（删 flex:1 1 auto），靠 min-width:0 + ellipsis + 父 grid 1fr 列 */
   min-width: 0;
-  flex: 1 1 auto;
   font-family: "Roboto Mono", ui-monospace, monospace;
   font-size: 13px;
   color: var(--text);

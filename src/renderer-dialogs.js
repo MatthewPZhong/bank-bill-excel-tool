@@ -996,7 +996,11 @@
           }
           const fullName = row.fileName || '';
           const rowSuffix = row.sourceRowNumber ? ` 第${row.sourceRowNumber}行` : '';
-          const displayName = truncateFileName(fullName, 20) + rowSuffix;
+          // v2.1.7 round 2 R6a 方案 B（防御性）：multi 模式下文件名 maxLen 14（grid 3 列 + meta 列宽收缩；spec §8.7.4）
+          //   - 非 multi 模式（普通态）：保持 20（grid 2 子项不挤压，向下兼容）
+          //   - rowSuffix（如 " 第9行"）不算入 truncateFileName 长度，单独拼接
+          const truncateMaxLen = multiMode ? 14 : 20;
+          const displayName = truncateFileName(fullName, truncateMaxLen) + rowSuffix;
           const fullMeta = fullName + rowSuffix;
 
           if (multiMode && multiEditing) {
