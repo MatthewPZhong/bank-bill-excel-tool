@@ -5,14 +5,14 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v2.1.6 |
-| 扫描时间 | 2026-5-20 11:56:57 |
+| 扫描时间 | 2026-5-21 20:49:45 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 85 |
-| 顶层声明总数 | 851 |
-| ≥2 次引用 | 751 |
+| 顶层声明总数 | 853 |
+| ≥2 次引用 | 752 |
 | 跨 ≥3 文件 (A-share) | 146 |
 | 跨 2 文件 (A-pair) | 247 |
-| 单文件 (A-local) | 358 |
+| 单文件 (A-local) | 359 |
 | 跨文件合计 (B) | 393 |
 
 ---
@@ -35,8 +35,8 @@
 | `validateHeaders` | 6 | 17 | 2 | src/backend/pending-import/validator.js |
 | `insertRun` | 6 | 9 | 3 | src/backend/acquiring-bill-currency-db/run-repository.js |
 | `dialog` | 5 | 379 | 1 | src/main.js |
-| `setCurrentModule` | 5 | 52 | 2 | src/backend/database/settings-repository.js |
-| `normalizeCellValue` | 5 | 35 | 1 | src/main-process/scenario-engines/engine-utils.js |
+| `setCurrentModule` | 5 | 54 | 2 | src/backend/database/settings-repository.js |
+| `normalizeCellValue` | 5 | 36 | 1 | src/main-process/scenario-engines/engine-utils.js |
 | `parseNumericValue` | 5 | 26 | 2 | src/backend/balance-seed-store.js |
 | `BILL_HEADERS` | 5 | 24 | 3 | src/backend/acquiring-bill-currency-db/columns.js |
 | `readRows` | 5 | 12 | 2 | src/backend/bank-account-import.js |
@@ -46,8 +46,8 @@
 | `saveMappings` | 5 | 9 | 1 | src/backend/database/template-repository.js |
 | `getRunById` | 5 | 8 | 3 | src/backend/acquiring-bill-currency-db/run-repository.js |
 | `deleteTemplate` | 5 | 7 | 1 | src/backend/database/template-repository.js |
-| `state` | 4 | 256 | 1 | src/renderer.js |
-| `elements` | 4 | 139 | 1 | src/renderer.js |
+| `state` | 4 | 258 | 1 | src/renderer.js |
+| `elements` | 4 | 138 | 1 | src/renderer.js |
 | `RUNS_TABLE` | 4 | 30 | 4 | src/backend/acquiring-bill-currency-db/run-repository.js |
 | `FIXED_FIELD_VALUE_PREFIX` | 4 | 21 | 2 | src/backend/database/utils.js |
 | `BANK_STATEMENT_FIELDS` | 4 | 17 | 3 | src/constants/bank-statement-fields.js |
@@ -172,7 +172,7 @@
 
 | 名字 | 总次数 | 声明位置（首个） |
 |---|---:|---|
-| `MODULES` | 65 | src/renderer.js |
+| `MODULES` | 67 | src/renderer.js |
 | `templateRepository` | 33 | src/backend/database.js |
 | `settingsRepository` | 22 | src/backend/database.js |
 | `emit` | 20 | src/backend/pending-import/worker.js |
@@ -709,6 +709,12 @@
 | `listDatesInRange` | 3 |
 | `normalizeDateToISO` | 3 |
 
+### `src/main-process/exceljs-writer.js`
+
+| 名字 | 总次数 |
+|---|---:|
+| `buildSheetData` | 3 |
+
 ### `src/main-process/monthly-balance.js`
 
 | 名字 | 总次数 |
@@ -815,7 +821,7 @@
 
 | 名字 | 总次数 |
 |---|---:|
-| `ipcRenderer` | 131 |
+| `ipcRenderer` | 135 |
 | `contextBridge` | 3 |
 
 ### `src/renderer.js`
@@ -851,6 +857,7 @@
 | `syncNewAccountDropdownFlag` | 4 |
 | `updateBankStatementUi` | 4 |
 | `updateNewAccountCurrencySuggestion` | 4 |
+| `updateStatusBox` | 4 |
 | `BACKGROUND_FILE_HINT` | 3 |
 | `closeBackgroundPalette` | 3 |
 | `getSpectrumColorAtPosition` | 3 |
@@ -860,7 +867,6 @@
 | `resetBackgroundPickerSelection` | 3 |
 | `syncNewAccountOpenDateInputType` | 3 |
 | `updateSelectedColorSwatch` | 3 |
-| `updateStatusBox` | 3 |
 
 ## B — 跨文件引用完整表
 
@@ -879,9 +885,9 @@
 | `listMonths` | 7 | 18 | 4 | src/main-process/bank-bu-recon-session.js(4), src/main-process/acquiring-bill-currency-session.js(3), src/preload.js(3) |
 | `validateHeaders` | 6 | 17 | 2 | src/backend/acquiring-bill-currency-import/reader.js(4), src/backend/bank-bu-recon-import/reader.js(4), src/backend/biz-op-recon-import/reader.js(4) |
 | `insertRun` | 6 | 9 | 3 | src/backend/acquiring-bill-currency-db/run-repository.js(2), src/backend/bank-bu-recon-db/run-repository.js(2), src/backend/biz-op-recon-db/run-repository.js(2) |
-| `dialog` | 5 | 379 | 1 | src/renderer-dialogs.js(275), src/renderer.js(71), src/renderer-pending.js(26) |
-| `setCurrentModule` | 5 | 52 | 2 | src/renderer-previews.js(44), src/renderer.js(3), src/backend/database.js(2) |
-| `normalizeCellValue` | 5 | 35 | 1 | src/main-process/scenario-engines/c4-recon-id-fix.js(19), src/main-process/scenario-engines/engine-utils.js(6), src/main-process/scenario-engines/c1-extract-recon-id.js(4) |
+| `dialog` | 5 | 379 | 1 | src/renderer-dialogs.js(276), src/renderer.js(71), src/renderer-pending.js(26) |
+| `setCurrentModule` | 5 | 54 | 2 | src/renderer-previews.js(46), src/renderer.js(3), src/backend/database.js(2) |
+| `normalizeCellValue` | 5 | 36 | 1 | src/main-process/scenario-engines/c4-recon-id-fix.js(19), src/main-process/scenario-engines/engine-utils.js(6), src/main-process/scenario-engines/c1-extract-recon-id.js(4) |
 | `parseNumericValue` | 5 | 26 | 2 | src/backend/file-service.js(14), src/backend/file-service/writers.js(6), src/backend/file-service/normalizers.js(4) |
 | `BILL_HEADERS` | 5 | 24 | 3 | src/backend/acquiring-bill-currency-db/columns.js(7), src/backend/acquiring-bill-currency-db/import-repository.js(6), src/main-process/acquiring-bill-currency-writer.js(6) |
 | `readRows` | 5 | 12 | 2 | src/backend/file-service/readers.js(4), src/backend/file-service.js(3), src/backend/bank-account-import.js(2) |
@@ -891,8 +897,8 @@
 | `saveMappings` | 5 | 9 | 1 | src/renderer-dialogs.js(3), src/backend/database.js(2), src/backend/database/template-repository.js(2) |
 | `getRunById` | 5 | 8 | 3 | src/backend/acquiring-bill-currency-db/run-repository.js(2), src/backend/biz-op-recon-db/run-repository.js(2), src/backend/pending-db/diff-repository.js(2) |
 | `deleteTemplate` | 5 | 7 | 1 | src/backend/database.js(2), src/backend/database/template-repository.js(2), src/preload.js(1) |
-| `state` | 4 | 256 | 1 | src/renderer.js(143), src/renderer-pending.js(54), src/renderer-previews.js(38) |
-| `elements` | 4 | 139 | 1 | src/renderer.js(91), src/renderer-previews.js(27), src/renderer-pending.js(17) |
+| `state` | 4 | 258 | 1 | src/renderer.js(143), src/renderer-pending.js(54), src/renderer-previews.js(40) |
+| `elements` | 4 | 138 | 1 | src/renderer.js(90), src/renderer-previews.js(27), src/renderer-pending.js(17) |
 | `RUNS_TABLE` | 4 | 30 | 4 | src/backend/biz-op-recon-db/run-repository.js(11), src/backend/acquiring-bill-currency-db/run-repository.js(9), src/backend/bank-bu-recon-db/run-repository.js(6) |
 | `FIXED_FIELD_VALUE_PREFIX` | 4 | 21 | 2 | src/backend/file-service.js(13), src/backend/database/utils.js(5), src/backend/file-service/common.js(2) |
 | `BANK_STATEMENT_FIELDS` | 4 | 17 | 3 | src/renderer-dialogs.js(9), src/constants/bank-statement-fields.js(3), src/preload.js(3) |
@@ -1012,7 +1018,7 @@
 | `writeErrorReport` | 3 | 4 | 1 | src/main-process/exceljs-writer.js(2), src/main-process/bank-statement-io.js(1), src/main.js(1) |
 | `buildTimestampMinute` | 3 | 3 | 2 | src/main-process/bank-statement-io.js(1), src/main-process/recon-id-fix-io.js(1), src/main.js(1) |
 | `createHash` | 3 | 3 | 1 | src/backend/pending-import/validator.js(1), src/backend/pending-reconcile/engine.js(1), src/main.js(1) |
-| `MODULES` | 2 | 65 | 1 | src/renderer-previews.js(45), src/renderer.js(20) |
+| `MODULES` | 2 | 67 | 1 | src/renderer-previews.js(47), src/renderer.js(20) |
 | `templateRepository` | 2 | 33 | 2 | src/backend/database.js(30), src/backend/database/own-accounts-migration.js(3) |
 | `settingsRepository` | 2 | 22 | 2 | src/backend/database.js(18), src/backend/database/own-accounts-migration.js(4) |
 | `emit` | 2 | 20 | 2 | src/backend/pending-import/worker.js(10), src/main-process/pending-archive-worker.js(10) |

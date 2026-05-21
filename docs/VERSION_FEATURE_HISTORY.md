@@ -9,6 +9,33 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.7（2026-05-21）
+
+v2.1.6 之后 7 轮迭代收敛，39 commit。6 项主功能（F1-F4 / F6-F8）+ R3 状态框中文「：」全局换行 + B5 全局 wiring 加固 + B4 CSS flex/grid 嵌套 4 round 收敛。F5（C4 BillDate 数字日期 + 算法重设）延期 v2.1.8 与 A3（worker_threads）联合主题。5 资金红线（F2/F4/F7-A1/F8/R5）+ 4 全局影响（F7-A1/R3/B5/F4）+ 10 important-variables 升格。
+
+### 新增
+
+- **F1 C1 提取ReconId-From Self AND/OR 切换**（⚠️ R5 三层护栏）：dialog "条件" label 下方 AND/OR radio；新建默认 AND / 老 scenario fallback OR；引擎 fallback OR 保 v2.1.6 行为
+- **F2 C3 提取ReconId-From 网关 1v1 化**（🚨 资金红线）：`usedGwRowIdx` Set 单向消费 gw 池，避免一笔网关被多笔银行重复"幽灵核销"
+- **F4 「账单打标」→ 「银行对账单字段赋值」**：类目名 + 子 row 名「打标值」→「赋值」+ 默认空 + 校验放宽（账单类型 ≥ 1 / 对账字段允许 0）+ 衍生方案 A 无条件赋值
+- **F6 收单单据币种校验进度提示**：导入文件 / 6 阶段运行业务化文案 + setImmediate 让 IPC 送达
+- **F7-A1 全局 SQLite PRAGMA**（⚠️ 全局影响）：WAL + NORMAL + 64MB cache + 256MB mmap；用户备份 DB 必须同时备份 `*-wal` + `*-shm` 旁文件（USER_GUIDE §5.1）
+- **F7-A2 source_file 索引 + ANALYZE**
+- **F7-B1 完成系统通知**：macOS 通知中心 / Windows 任务栏原生
+- **F8 银行账单结果第 2 sheet「未命中场景行」**（🚨 资金红线 baseline）：dispatcher 反向 filter `unmatchedRows` + writer 第 2 sheet；`modifiedRows` 完全不动
+- **knowledge 沉淀**：`knowledge/css-flex-grid-overflow-pitfalls.md` — flex/grid 嵌套穿透 max-height 必修两条线（每层 min-height: 0 + grid 父 grid-template-rows: 1fr）
+
+### 变更
+
+- **R3 状态框中文「：」全局自动换行 + B5 wiring 全局加固**：3 处 setStatus 漏接修复 + smoke 新增 wiring 审计断言防再漏；C-1 self-review fix 删 `#bizOpReconStatusBox` ID specificity 覆盖
+- **大账号确认页 4 round 收敛**：F3 文件名 grid 3 列 + B2 multi 字母 + B3 单 grid 表格 + B4 真根因 `grid-template-rows: 1fr`（DevTools 实测锁定）
+
+### 文档
+
+- PRD/spec/tasks v0.11/v0.9/v0.8（含 §二十三 39 commit 实施记录 + spec 反向同步 3 处）
+- `rules/important-variables.md` v9 升格 10 条（Critical 3 + Important-skeleton 2 + Risk-sensitive 5）
+- USER_GUIDE §五 v2.1.7 新增能力
+
 ## 2.1.6（2026-05-18）
 
 v2.1.5 之后追加 patch 迭代，2 块独立改动：**Module A 个人痕迹元数据**（package.json author/copyright/publisherName + 跨库 watermark + 启动 log 头 + 构建时 git short SHA）+ **Module B 新增模块「收单单据币种校验」**（独立第 8 个主模块，按月对比收单流水表 vs 收单流水单据表币种 + 差异表 29 列对比区 1 对 1 输出）。OPEN ISSUE 全部拍板（PRD §六）。

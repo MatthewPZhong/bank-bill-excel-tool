@@ -1,14 +1,14 @@
 {
   "meta": {
     "version": "2.1.6",
-    "scannedAt": "2026-05-20T03:56:57.258Z",
+    "scannedAt": "2026-05-21T12:49:45.758Z",
     "root": "src",
     "totalFiles": 85,
-    "totalTopLevelNames": 851,
+    "totalTopLevelNames": 853,
     "buckets": {
       "shared": 146,
       "paired": 247,
-      "local": 358,
+      "local": 359,
       "crossFile": 393
     }
   },
@@ -897,7 +897,7 @@
           },
           {
             "file": "src/renderer-dialogs.js",
-            "count": 275
+            "count": 276
           },
           {
             "file": "src/renderer-pending.js",
@@ -905,7 +905,7 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 6
+            "count": 5
           },
           {
             "file": "src/renderer.js",
@@ -936,14 +936,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 44
+            "count": 46
           },
           {
             "file": "src/renderer.js",
             "count": 3
           }
         ],
-        "totalHits": 52,
+        "totalHits": 54,
         "fileSpan": 5
       },
       {
@@ -958,7 +958,7 @@
           },
           {
             "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-            "count": 3
+            "count": 4
           },
           {
             "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
@@ -973,7 +973,7 @@
             "count": 6
           }
         ],
-        "totalHits": 35,
+        "totalHits": 36,
         "fileSpan": 5
       },
       {
@@ -1270,14 +1270,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 38
+            "count": 40
           },
           {
             "file": "src/renderer.js",
             "count": 143
           }
         ],
-        "totalHits": 256,
+        "totalHits": 258,
         "fileSpan": 4
       },
       {
@@ -1300,10 +1300,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 91
+            "count": 90
           }
         ],
-        "totalHits": 139,
+        "totalHits": 138,
         "fileSpan": 4
       },
       {
@@ -4209,14 +4209,14 @@
         "refFiles": [
           {
             "file": "src/renderer-previews.js",
-            "count": 45
+            "count": 47
           },
           {
             "file": "src/renderer.js",
             "count": 20
           }
         ],
-        "totalHits": 65,
+        "totalHits": 67,
         "fileSpan": 2
       },
       {
@@ -8722,10 +8722,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 131
+            "count": 135
           }
         ],
-        "totalHits": 131,
+        "totalHits": 135,
         "fileSpan": 1
       },
       {
@@ -10325,6 +10325,20 @@
         "fileSpan": 1
       },
       {
+        "name": "updateStatusBox",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "validateEnabled",
         "defFiles": [
           "src/backend/database/scenarios-repository.js"
@@ -10514,6 +10528,20 @@
         "refFiles": [
           {
             "file": "src/main-process/bank-bu-recon-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildSheetData",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
             "count": 3
           }
         ],
@@ -11515,20 +11543,6 @@
         "fileSpan": 1
       },
       {
-        "name": "updateStatusBox",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "validateName",
         "defFiles": [
           "src/backend/database/scenarios-repository.js"
@@ -12040,20 +12054,6 @@
         "refFiles": [
           {
             "file": "src/backend/database/own-accounts-migration.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
-        "name": "buildSheetData",
-        "defFiles": [
-          "src/main-process/exceljs-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/exceljs-writer.js",
             "count": 2
           }
         ],
@@ -13419,7 +13419,7 @@
         "fileSpan": 1
       },
       {
-        "name": "rowMatchesAnyCondition",
+        "name": "rowMatchesConditions",
         "defFiles": [
           "src/main-process/scenario-engines/c1-extract-recon-id.js"
         ],
@@ -13538,6 +13538,20 @@
         "refFiles": [
           {
             "file": "src/main.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "stripInternalFields",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
             "count": 2
           }
         ],
@@ -14612,7 +14626,7 @@
         },
         {
           "file": "src/renderer-dialogs.js",
-          "count": 275
+          "count": 276
         },
         {
           "file": "src/renderer-pending.js",
@@ -14620,7 +14634,7 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 6
+          "count": 5
         },
         {
           "file": "src/renderer.js",
@@ -14651,14 +14665,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 44
+          "count": 46
         },
         {
           "file": "src/renderer.js",
           "count": 3
         }
       ],
-      "totalHits": 52,
+      "totalHits": 54,
       "fileSpan": 5
     },
     {
@@ -14673,7 +14687,7 @@
         },
         {
           "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-          "count": 3
+          "count": 4
         },
         {
           "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
@@ -14688,7 +14702,7 @@
           "count": 6
         }
       ],
-      "totalHits": 35,
+      "totalHits": 36,
       "fileSpan": 5
     },
     {
@@ -14985,14 +14999,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 38
+          "count": 40
         },
         {
           "file": "src/renderer.js",
           "count": 143
         }
       ],
-      "totalHits": 256,
+      "totalHits": 258,
       "fileSpan": 4
     },
     {
@@ -15015,10 +15029,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 91
+          "count": 90
         }
       ],
-      "totalHits": 139,
+      "totalHits": 138,
       "fileSpan": 4
     },
     {
@@ -17922,14 +17936,14 @@
       "refFiles": [
         {
           "file": "src/renderer-previews.js",
-          "count": 45
+          "count": 47
         },
         {
           "file": "src/renderer.js",
           "count": 20
         }
       ],
-      "totalHits": 65,
+      "totalHits": 67,
       "fileSpan": 2
     },
     {
