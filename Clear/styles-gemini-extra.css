@@ -344,6 +344,8 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
 .big-account-split-body {
   flex: 1; padding: 8px 12px 0;
   overflow: hidden;
+  /* v2.1.7 round 5 B4 防御性兜底（spec §11.3.3 第 1 层）：与 src/ 同步 — 极小屏 edge case 兜底 */
+  min-height: 0;
 }
 .ba-scroll-container {
   display: grid;
@@ -376,6 +378,9 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
 .big-account-order-list {
   flex: 1;
   overflow-y: auto;
+  /* v2.1.7 round 5 B4 真根因第 2 层主修（spec §11.3.3 第 3 层）：与 src/ 同步 — 经典 flex 嵌套坑
+     每层 flex item 都需要显式 min-height: 0，否则 content size 从最内层一路撑过所有父级 max-height 约束 */
+  min-height: 0;
   padding: 6px 8px;
   display: flex; flex-direction: column; gap: 4px;
   /* v2.1.7 round 3 B4：与 src/ 同步 — 强制滚动条可见（防 macOS overlay-style 仅 hover） */

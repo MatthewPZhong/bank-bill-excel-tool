@@ -357,6 +357,11 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
 .big-account-split-body {
   flex: 1; padding: 8px 12px 0;
   overflow: hidden;
+  /* v2.1.7 round 5 B4 防御性兜底（spec §11.3.3 第 1 层）：modal-card 的 flex column 子项
+     主路径 1080p viewport 下 split-body flex:1 可用 ~944px >> ba-scroll-container max-height 52vh = 562px → 不触发
+     极小屏（< 700px 高）边界 case 下可能 content size 撑超 modal-card max-height: calc(100vh - 56px)
+     防御性加 min-height: 0 兜底（不影响主路径，与第 3 层 file-list min-height: 0 联合形成完整高度链） */
+  min-height: 0;
 }
 .ba-scroll-container {
   display: grid;
@@ -391,6 +396,12 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
 .big-account-order-list {
   flex: 1;
   overflow-y: auto;
+  /* v2.1.7 round 5 B4 真根因第 2 层主修（spec §11.3.3 第 3 层）：用户报告主路径
+     与 round 4 给 .big-account-split-left/right 的 min-height: 0 配套（经典 flex 嵌套坑）
+     默认 min-height: auto = content size → 即使父 split-left 加了 min-height: 0，file-list 自己仍把父撑到 content size 高
+     → 祖父 ba-scroll-container max-height: 52vh 仍被穿透 → 自己 overflow-y: auto 永不触发
+     每层 flex item 都需要显式 min-height: 0，content size 才不会从最内层一路撑过所有父级约束 */
+  min-height: 0;
   padding: 6px 8px;
   display: flex; flex-direction: column; gap: 4px;
   /* v2.1.7 round 3 B4（spec §9.5.4 推荐方向）：强制滚动条可见（防 macOS overlay-style 仅 hover 时显示导致用户误判"滚动条不可用"）
