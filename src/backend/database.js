@@ -154,6 +154,10 @@ class AppDatabase {
     // v2.1.6 T4：收单单据币种校验模块 4 张表（flow_imports / bill_imports / runs / diff_rows）
     // 与 v2.1.2/v2.1.3 完全独立，调用顺序无依赖
     this.ensureAcquiringBillCurrencyTablesSupport();
+    // v2.1.7 F7-A2：启动期 ANALYZE — 让规划器统计所有索引（含 idx_acquiring_bill_currency_bill_source_file）
+    //   必须在所有 ensure*Support / migrate* 之后（否则统计的是旧 schema）
+    //   ANALYZE 幂等可重复；用户 DB 体量下开销 < 100ms（spec §7.9）
+    this.db.exec('ANALYZE;');
   }
 
   hasColumn(tableName, columnName) {
