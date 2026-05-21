@@ -4234,7 +4234,12 @@ function restoreBizOpReconPanelState() {
 // ===== v2.1.6 Module B：收单单据币种校验（spec v0.8 §3.5 / §8，fix5 删月份下拉 + 月份选弹窗）=====
 
 const acquiringBillCurrencyState = {
-  latestMonth: null     // 最近成功操作的月份（导入/运行/导出后回写，仅状态栏文案展示用）
+  latestMonth: null,    // 最近成功操作的月份（导入/运行/导出后回写，仅状态栏文案展示用）
+  // v2.1.7 round 2 R4：当前正在执行的操作（'import' | 'run' | 'export' | null）
+  //   切模块后 restoreAcquiringBillCurrencyPanelState 据此决定按钮 disabled
+  //   防止用户切走→切回时按钮被无脑解禁，重复点击触发并发 IPC
+  //   spec §8.5.2 / PRD §十三-R4
+  inflightOperation: null
 };
 
 function setAcquiringBillCurrencyStatus(message, tone = 'info') {
@@ -4288,7 +4293,9 @@ function formatAcquiringBillCurrencyProgress(ev) {
 function restoreAcquiringBillCurrencyPanelState() {
   setAcquiringBillCurrencyStatus('欢迎使用小助手', 'info');
   // fix5：删月份下拉后，按钮可用性不再依赖 selectedMonth，4 按钮均默认 enabled
-  setAcquiringBillCurrencyButtonsDisabled(false);
+  // v2.1.7 round 2 R4：若当前有 inflight 操作（用户切走前点了导入/运行/导出），保持按钮 disabled
+  //   spec §8.5.2 — 防切回后用户重复点击触发并发 IPC（main 端 acquiringBillCurrencyOperationLock 兜底，renderer 端体感正确）
+  setAcquiringBillCurrencyButtonsDisabled(!!acquiringBillCurrencyState.inflightOperation);
 }
 
 // fix1（spec §3.4）：两段式导入 handler — 首调若已有数据返回 overwrite-required，confirm 后二次调带 confirmOverwrite
@@ -4330,6 +4337,8 @@ async function runAcquiringBillCurrencyImport(kind) {
     return;
   }
 
+  // v2.1.7 round 2 R4：set inflight flag —— 在按钮 disable 之前那一刻（取消月份不设；spec §8.5.2 关键不变量）
+  acquiringBillCurrencyState.inflightOperation = 'import';
   setAcquiringBillCurrencyButtonsDisabled(true);
   setAcquiringBillCurrencyStatus(`正在导入${labelTable}（${monthKey}）...`, 'info');
 
@@ -4392,6 +4401,9 @@ async function runAcquiringBillCurrencyImport(kind) {
   } catch (e) {
     setAcquiringBillCurrencyStatus(`${labelTable}导入异常：${e.message || e}`, 'error');
   } finally {
+    // v2.1.7 round 2 R4：清 inflight flag —— 必须先于 setAcquiringBillCurrencyButtonsDisabled(false)
+    //   异常路径也要清；spec §8.5.2 关键不变量
+    acquiringBillCurrencyState.inflightOperation = null;
     // v2.1.7 F6：显式 unsubscribe 防 listener 累积（切到其它模块再回来不报错）
     if (typeof unsubscribe === 'function') {
       try { unsubscribe(); } catch (_e) { /* swallow */ }
@@ -4415,6 +4427,8 @@ async function handleAcquiringBillCurrencyRun() {
     setAcquiringBillCurrencyStatus('已取消运行', 'info');
     return;
   }
+  // v2.1.7 round 2 R4：set inflight flag（spec §8.5.2）
+  acquiringBillCurrencyState.inflightOperation = 'run';
   setAcquiringBillCurrencyButtonsDisabled(true);
   setAcquiringBillCurrencyStatus(`正在对账（${monthKey}）...`, 'info');
 
@@ -4446,6 +4460,8 @@ async function handleAcquiringBillCurrencyRun() {
   } catch (e) {
     setAcquiringBillCurrencyStatus(`对账异常：${e.message || e}`, 'error');
   } finally {
+    // v2.1.7 round 2 R4：清 inflight flag（spec §8.5.2）
+    acquiringBillCurrencyState.inflightOperation = null;
     if (typeof unsubscribe === 'function') {
       try { unsubscribe(); } catch (_e) { /* swallow */ }
     }
@@ -4460,6 +4476,8 @@ async function handleAcquiringBillCurrencyExport() {
     setAcquiringBillCurrencyStatus('已取消导出', 'info');
     return;
   }
+  // v2.1.7 round 2 R4：set inflight flag（spec §8.5.2）
+  acquiringBillCurrencyState.inflightOperation = 'export';
   setAcquiringBillCurrencyButtonsDisabled(true);
   setAcquiringBillCurrencyStatus(`正在导出差异表（${monthKey}）...`, 'info');
   try {
@@ -4476,6 +4494,8 @@ async function handleAcquiringBillCurrencyExport() {
   } catch (e) {
     setAcquiringBillCurrencyStatus(`导出异常：${e.message || e}`, 'error');
   } finally {
+    // v2.1.7 round 2 R4：清 inflight flag（spec §8.5.2）
+    acquiringBillCurrencyState.inflightOperation = null;
     setAcquiringBillCurrencyButtonsDisabled(false);
   }
 }
