@@ -31,6 +31,8 @@ const { runAcquiringBillCurrencySmokeTests } = require('./smoke/acquiring-bill-c
 const { runAcquiringBillCurrencyProgressSmokeTests } = require('./smoke/acquiring-bill-currency-progress');
 // v2.1.7 F7：收单单据币种校验 SQL 调优 + 完成系统通知（F7-A1 PRAGMA / F7-A2 索引+ANALYZE / F7-B1 Notification）
 const { runAcquiringBillCurrencyPragmaSmokeTests } = require('./smoke/acquiring-bill-currency-pragma');
+// v2.1.7 round 2 R3：状态框「：」换行全局规则 + setBizOpReconStatus hack 清理
+const { runRenderStatusBoxSmokeTests } = require('./smoke/render-status-box');
 
 async function run() {
   const context = createSmokeContext();
@@ -62,6 +64,8 @@ async function run() {
   await runAcquiringBillCurrencyProgressSmokeTests();
   // v2.1.7 F7：PRAGMA + 索引 + ANALYZE + Notification 桩
   runAcquiringBillCurrencyPragmaSmokeTests();
+  // v2.1.7 round 2 R3：updateStatusBox 中文「：」换行规则 + setBizOpReconStatus hack 清理 + CSS pre-wrap
+  runRenderStatusBoxSmokeTests();
   console.log('smoke test passed');
 }
 

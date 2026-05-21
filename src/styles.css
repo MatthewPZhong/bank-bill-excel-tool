@@ -376,6 +376,15 @@ select {
   border-color: rgba(165, 61, 48, 0.35);
 }
 
+/* v2.1.7 round 2 R3：全局识别 updateStatusBox 注入的「：」后 \n
+ * 配合 src/renderer.js:519 updateStatusBox 内 String(message).replace(/：/g, '：\n')
+ * #bankStatementStatusBox .status-box-text { white-space: pre-line } 仍生效（ID 优先级）；
+ * pre-line / pre-wrap 都识别 \n，bankStatement 行为不变
+ */
+.status-box-text {
+  white-space: pre-wrap;
+}
+
 .new-account-panel {
   min-height: 280px;
   display: flex;

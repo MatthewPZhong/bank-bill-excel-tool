@@ -524,8 +524,13 @@ function updateStatusBox(box, message, tone = 'info', options = {}) {
   } = options;
 
   // v2.0.0-beta.2：只更新 .status-box-text 子节点的文案，保留同级 .status-spark SVG 不被清空
+  // v2.1.7 round 2 R3：中文「：」（U+FF1A）后强制换行；半角 ':' 不动（避开 URL/timestamp/账号 case）
+  //   null/undefined 兜底空串（防 String(null) === 'null' 显示）
+  //   配合 CSS .status-box-text { white-space: pre-wrap; } 识别 \n
+  //   spec §8.4.2
+  const text = (message === null || message === undefined) ? '' : String(message).replace(/：/g, '：\n');
   const textEl = box.querySelector('.status-box-text');
-  if (textEl) textEl.textContent = message;
+  if (textEl) textEl.textContent = text;
   box.dataset.tone = tone;
   box.dataset.errorReportReady = errorReportReady ? 'true' : 'false';
   box.dataset.manualBalancePromptReady = manualBalancePromptReady ? 'true' : 'false';
@@ -4130,16 +4135,14 @@ const bizOpReconState = {
 
 function setBizOpReconStatus(message, tone = 'info') {
   if (!elements.bizOpReconStatusBox) return;
-  // v2.1.3-fix1.5：本模块状态框 — 冒号（: 或 ：）后强制换行
-  // updateStatusBox 用 textContent 写文案，无法识别 <br>；此处先 escape + 替换为 innerHTML，再回写 textContent 用于 dataset tone 等
+  // v2.1.7 round 2 R3：删除原 innerHTML hack（formatBizOpReconStatusHtml 覆盖）
+  //   全局 updateStatusBox 已在 spec §8.4.2 加 String(message).replace(/：/g, '：\n')
+  //   + 全局 CSS .status-box-text { white-space: pre-wrap } 识别 \n
+  //   bizOpRecon 模块的「：」换行行为与原 hack 等价（textContent 路径，无 XSS 风险）
+  //   formatBizOpReconStatusHtml 函数定义保留（renderer-dialogs.js preview 内部仍在用，不动）
   updateStatusBox(elements.bizOpReconStatusBox, message, tone, {
     idleTitle: '欢迎使用小助手'
   });
-  // updateStatusBox 调用之后，覆盖 textEl 内容为 HTML（含 <br> 换行）
-  const textEl = elements.bizOpReconStatusBox.querySelector('.status-box-text');
-  if (textEl && typeof formatBizOpReconStatusHtml === 'function') {
-    textEl.innerHTML = formatBizOpReconStatusHtml(message);
-  }
 }
 
 function applyBizOpReconButtonState() {
