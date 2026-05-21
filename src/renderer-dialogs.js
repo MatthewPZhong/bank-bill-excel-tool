@@ -6710,7 +6710,7 @@
               ${renderScenarioOptions(SCENARIO_CONDITION_OPS, bt.op || '等于')}
             </select>
             <input class="scenario-config-input" type="text" data-multi-field="value" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(bt.value || '')}" placeholder="值" ${!opNeedsValue(bt.op) ? 'style="visibility:hidden"' : ''}>
-            ${isReadonly || config.billTypes.length === 1 ? '' : '<button class="icon-close-small" type="button" data-multi-action="remove" title="删除">×</button>'}
+            ${isReadonly ? '' : '<button class="icon-close-small" type="button" data-multi-action="remove" title="删除">×</button>'}
           </div>
         `).join('');
       }
@@ -6788,7 +6788,11 @@
         if (!btn || isReadonly) return;
         const row = btn.closest('.scenario-config-multi-row');
         const idx = Number(row?.dataset.rowIndex);
-        if (Number.isFinite(idx) && config.billTypes.length > 2) {
+        // v2.1.7 round 3 F4 删空（spec §9.7.2）：允许删到 0 行
+        //   - T13.4 R1 已改 display 门槛 (length === 1 → 永远显示)
+        //   - T13.17 同步 handler 门槛 (length > 2 → length >= 1)，否则按钮显示但点击无效
+        //   - 保存校验兜底 (validateScenarioDraft 'billTypes 至少需要 1 行') 已就绪 L5832
+        if (Number.isFinite(idx) && config.billTypes.length >= 1) {
           config.billTypes.splice(idx, 1);
           // 重排 seq（关键：行 4/5 引用要更新）
           config.billTypes.forEach((b, i) => { b.seq = i + 1; });
