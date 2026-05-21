@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
-const { app, BrowserWindow, dialog, ipcMain, nativeImage } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification } = require('electron');
 const { AppDatabase } = require('./backend/database');
 const { openPendingDb, PENDING_DB_FILENAME } = require('./backend/pending-db');
 const PENDING_COLUMNS = require('./backend/pending-db/columns');
@@ -10112,6 +10112,28 @@ function registerNewAccountHandlers() {
     };
   }
 
+  // v2.1.7 F7-B1：runCheck 完成/失败弹系统通知（spec §7.5.2 / PRD §十一-B1）
+  //   success：「收单单据币种校验」{monthKey} 对账完成（共 N 行差异）
+  //   error：  「收单单据币种校验」对账失败：{message}（body 200 字符截断兜底 macOS 通知中心）
+  //   不弹 cancel 通知（仅 success + 真正 error）
+  //   helper 内部 try/catch swallow，通知失败不影响 IPC return
+  //   Notification.isSupported() 兜底极端环境（如无 GUI 的 CI / SSH 头）
+  function notifyAcquiringBillCurrencyResult(monthKey, kind, payload) {
+    try {
+      if (!Notification || typeof Notification.isSupported !== 'function' || !Notification.isSupported()) return;
+      const title = '「收单单据币种校验」';
+      let body;
+      if (kind === 'success') {
+        const mismatch = (payload && typeof payload.mismatchRows === 'number') ? payload.mismatchRows : 0;
+        body = `${monthKey} 对账完成（共 ${mismatch} 行差异）`;
+      } else {
+        const msg = (payload && payload.message) ? String(payload.message) : '未知错误';
+        body = `对账失败：${msg}`.slice(0, 200);
+      }
+      new Notification({ title, body }).show();
+    } catch (_e) { /* swallow — 通知失败不影响业务 return */ }
+  }
+
   async function handleImportFlowOrBill(kind, payload, event) {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const lock = tryAcquireOpLock('import', payload && payload.monthKey);
@@ -10252,6 +10274,8 @@ function registerNewAccountHandlers() {
       result = await acquiringBillCurrencySession.runCheck({ db: database.db, monthKey, storageRoot, onProgress });
     } catch (err) {
       releaseOpLock();
+      // v2.1.7 F7-B1：error 路径弹通知（spec §7.5.2）
+      notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
     // v0.12 fix9：release run lock，立即 acquire cleanup lock，setImmediate 异步分批清理（不阻塞 handler return）
@@ -10277,6 +10301,8 @@ function registerNewAccountHandlers() {
         });
       }
     }
+    // v2.1.7 F7-B1：success 路径弹通知（spec §7.5.2）
+    notifyAcquiringBillCurrencyResult(monthKey, 'success', { mismatchRows: result.mismatchRows });
     return { status: 'success', ...result };
   });
 
