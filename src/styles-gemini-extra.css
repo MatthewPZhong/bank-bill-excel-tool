@@ -1884,7 +1884,13 @@ select.mapping-text-input {
   border-color: var(--primary, #1a73e8);
 }
 
-.big-account-order-index--alpha { color: var(--muted); }
+.big-account-order-index--alpha {
+  color: var(--muted);
+  /* v2.1.7 round 3 B2（spec §9.3.2 方案 A）：letter 列宽兜底，防 R6a grid `auto auto 1fr` 第 2 列收缩到 'a.' 宽度时挤压
+     min-width:24px 保证 a/b/c 字母列至少 24px 宽；text-align:center 字母居中（与其它 letter 列视觉一致）*/
+  min-width: 24px;
+  text-align: center;
+}
 .big-account-order-text-item {
   font-size: 13px; font-weight: 500;
   color: var(--text);
