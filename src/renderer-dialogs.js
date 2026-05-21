@@ -6332,23 +6332,26 @@
             <span class="scenario-config-label">优先级 <span class="scenario-config-tooltip" title="3 = 最高，0 = 最低">ⓘ</span></span>
             <input class="scenario-config-input scenario-config-input-narrow" type="number" min="0" max="3" data-field="priority" ${isReadonly ? 'disabled' : ''} value="${draft.priority ?? 0}">
           </div>
+          <!-- v2.1.7 round 4 B1（spec §10.2.2 Layout-1 用户拍板）：
+               左列 .scenario-config-label-stack 纵向堆叠 label "条件" + AND/OR radio；右列 conditions 列表 + 按钮
+               资金红线护栏 R5 三层不动（默认 config / pickConditionsLogicChecked / 引擎 fallback OR） -->
           <div class="scenario-config-row scenario-config-row-multi">
-            <span class="scenario-config-label">条件 <span class="scenario-config-tooltip" title="按下方选择的聚合逻辑">ⓘ</span></span>
-            <div class="scenario-config-multi-wrap">
-              <div class="scenario-config-multi-rows" data-multi="conditions"></div>
-              ${isReadonly ? '' : '<button class="text-action small" type="button" data-action="add-condition">+ 新增条件</button>'}
-              <!-- v2.1.7 round 3 B1：radio 移回"条件"row 内部（用户反馈 R5 独立 row 视觉不一致；spec §9.2.2）
-                   保留 R5 资金红线三层护栏（默认 config / pickConditionsLogicChecked / 引擎 fallback OR）不动 -->
-              <div class="scenario-config-logic-inline" style="margin-top:8px;">
-                <label style="display:block; margin-bottom:4px;">
+            <div class="scenario-config-label-stack">
+              <span class="scenario-config-label">条件 <span class="scenario-config-tooltip" title="按下方选择的聚合逻辑">ⓘ</span></span>
+              <div class="scenario-config-logic-inline">
+                <label class="scenario-config-logic-option">
                   <input type="radio" name="conditionsLogic" value="AND" ${checkedLogic === 'AND' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
                   AND（同时满足）
                 </label>
-                <label style="display:block;">
+                <label class="scenario-config-logic-option">
                   <input type="radio" name="conditionsLogic" value="OR" ${checkedLogic === 'OR' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
                   OR（满足任一）
                 </label>
               </div>
+            </div>
+            <div class="scenario-config-multi-wrap">
+              <div class="scenario-config-multi-rows" data-multi="conditions"></div>
+              ${isReadonly ? '' : '<button class="text-action small" type="button" data-action="add-condition">+ 新增条件</button>'}
             </div>
           </div>
           <div class="scenario-config-row scenario-config-row-mutex">

@@ -2370,25 +2370,44 @@ select.mapping-text-input {
   gap: 6px;
 }
 
-/* v2.1.7 round 2 R5：C1 dialog 条件聚合 radio 重排 — 独立 row + 纵向（AND 在上 OR 在下）
-   label 字体大小/字重通过 HTML 复用 .scenario-config-label 标准样式（spec §8.6.1） */
-.scenario-config-logic-stack {
+/* v2.1.7 round 4 B1（spec §10.2.3 Layout-1 用户拍板）：scenario-config-label-stack 左列容器
+   纵向堆叠 label "条件" + AND/OR radio；右列 .scenario-config-multi-wrap conditions 列表
+   注：原 round 2/3 .scenario-config-logic-stack / -stack-option 死代码（无 HTML 引用）已被本块替换 */
+.scenario-config-label-stack {
+  flex-shrink: 0;
+  width: 120px;            /* 与 .scenario-config-label 同宽（保持右列视觉位置不变）*/
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-top: 4px;
+  gap: 8px;
+  align-self: flex-start;
+  padding-top: 6px;        /* 对齐原 .scenario-config-row-multi .scenario-config-label padding-top */
 }
 
-.scenario-config-logic-stack-option {
+/* B1 round 4：label-stack 内部 radio 容器（纵向 AND 在上 OR 在下） */
+.scenario-config-logic-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* B1 round 4：radio label 字体 13px（与 .scenario-config-feature-grid label "筛选字段" 对齐；spec §10.2.3）
+   不复用 .scenario-config-label 的 font-weight: 500（radio 是控件标签，非标题文案） */
+.scenario-config-logic-option {
   display: flex;
   align-items: center;
   gap: 6px;
-  cursor: pointer;
-  color: var(--text, #333);
   font-size: 13px;
+  font-weight: normal;
+  color: #3c4043;
+  cursor: pointer;
 }
 
-.scenario-config-logic-stack-option input[disabled] {
+.scenario-config-logic-option input[type="radio"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.scenario-config-logic-option input[disabled] {
   cursor: not-allowed;
 }
 

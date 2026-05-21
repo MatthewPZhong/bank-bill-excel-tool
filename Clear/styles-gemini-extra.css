@@ -1218,24 +1218,40 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   white-space: pre-wrap;
 }
 
-/* v2.1.7 round 2 R5：与 src/styles-gemini-extra.css 同步 — C1 dialog 条件聚合 radio 重排 */
-.scenario-config-logic-stack {
+/* v2.1.7 round 4 B1（spec §10.2.3 Layout-1）：与 src/styles-gemini-extra.css 同步
+   左列 label-stack + radio 纵向；右列 conditions（原 round 2/3 -stack 死代码替换为 round 4 范式）*/
+.scenario-config-label-stack {
+  flex-shrink: 0;
+  width: 120px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-top: 4px;
+  gap: 8px;
+  align-self: flex-start;
+  padding-top: 6px;
 }
 
-.scenario-config-logic-stack-option {
+.scenario-config-logic-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scenario-config-logic-option {
   display: flex;
   align-items: center;
   gap: 6px;
-  cursor: pointer;
-  color: var(--text, #333);
   font-size: 13px;
+  font-weight: normal;
+  color: #3c4043;
+  cursor: pointer;
 }
 
-.scenario-config-logic-stack-option input[disabled] {
+.scenario-config-logic-option input[type="radio"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.scenario-config-logic-option input[disabled] {
   cursor: not-allowed;
 }
 
