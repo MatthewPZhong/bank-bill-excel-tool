@@ -33,10 +33,13 @@ v2.1.6 之后 7 轮迭代收敛，**共 39 commit + 6 项主功能 + 多轮用�
 
 ### 已知边界 case
 
-- **F2 方案 A 极端**：gw 行 gwField 为空时被"误消费"（极少；需数据脏 + 单 bank 行 + 候选 gw 多笔 + first 候选 gwField 空才复现），v2.1.8 优化
-- **F8 全 unmatched edge**：`modifiedRows.length === 0` 时主文件不输出 → 第 2 sheet 也不输出；下个 patch 优化
 - **F7 跨平台**：macOS 已实测；Windows / Linux 通过 `Notification.isSupported()` 兜底不抛错，UI 体感未实测
 - **F1 tooltip 多行**：`&#10;` HTML 实体在 macOS / Windows native tooltip OK；Linux 部分 GTK/Qt 可能不解析
+
+### 已在本 PR round 8/9 闭环（self-review 早期列为 known issue，现已修复）
+
+- **F2 方案 A**：round 7 移动 `usedGwRowIdx.add()` 后引入"空 gw / 已等值 gw 永远不消费"反向问题；round 9 双方向修（filter 排除空 gw + `oldValue===newValue` 时 lock+消费 gw）。reviewer round 3 Finding 1 确认闭环
+- **F8 全未命中 edge**：round 7 改 return 'empty' 条件 + round 8 改 saveDialog 触发条件 `modifiedRows>0 || unmatchedRows>0`。reviewer round 2 Finding 1 确认闭环，对齐 PRD AC-F8-5
 
 ## 2.1.6 - 2026-05-18
 
