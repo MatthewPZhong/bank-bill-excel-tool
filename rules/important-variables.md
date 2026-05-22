@@ -625,7 +625,7 @@
 
 ### `writeBankStatementOutput`（v2.1.7 F8 升格 Risk-sensitive ⚠️ 资金红线 + F8 第 2 sheet 契约）
 - 定义：`src/main-process/exceljs-writer.js:53` `async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null)`
-- 关联功能：银行账单导出唯一 writer — 仅修改行 + 单元格黄底 + 表头；**v2.1.7 F8 新增第 4 参数 `unmatchedRows`**：非 null 时输出第 2 sheet "未命中场景行"；命名 sheet 1 = "已处理"、sheet 2 = "未命中场景行"
+- 关联功能：银行账单导出唯一 writer — 仅修改行 + 单元格黄底 + 表头；**v2.1.7 F8 新增第 4 参数 `unmatchedRows`**：非 null 时输出第 2 sheet "未命中场景行"；命名 sheet 1 = "渠道对账单"（exceljs-writer.js:56 SHEET_NAME 常量真实值，self-review I-10 修正）、sheet 2 = "未命中场景行"
 - 跨文件度：2+（自身定义 + `src/main-process/bank-statement-io.js:20/212-213` 桥接调用）
 - 变更 review 要点：
   - **资金红线**（F8 契约）：sheet 1 仅写 rows（modifiedRows）— 严守 v2.1.7 之前 baseline 不变（smoke baseline 已锁定 modifiedRows.length 不漂移）
