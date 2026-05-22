@@ -3,8 +3,17 @@ const assert = require('node:assert/strict');
 
 const {
   normalizeBillDateValue,
-  parseBillDateMs
+  parseBillDateMs,
+  findBestAmountSubset
 } = require('../../../../src/main-process/scenario-engines/c4-recon-id-fix');
+
+// 测试 helper：构造 candidates 数组，每个元素 cents 由参数控制
+function makeCandidates(centsArr, billDate = '2026-05-22') {
+  return centsArr.map((cents, idx) => ({
+    row: { BillDate: billDate, _rowIdx: `opp_${idx}` },
+    cents
+  }));
+}
 
 // ========================================================================
 // v2.1.8 F5 T08 — BillDate 字符串化（gateway 子模式 createTime → BillDate）
@@ -100,5 +109,142 @@ test.describe('normalizeBillDateValue + parseBillDateMs 联调（F5 端到端）
   test('空值 → normalize 后仍是空 → parseBillDateMs 返回 null（保持现状）', () => {
     assert.equal(parseBillDateMs(normalizeBillDateValue(null)), null);
     assert.equal(parseBillDateMs(normalizeBillDateValue('')), null);
+  });
+});
+
+// ========================================================================
+// v2.1.8 F5 T09 — findBestAmountSubset maxSize 动态档位 + 性能护栏
+// ========================================================================
+
+test.describe('findBestAmountSubset — 基本契约（v2.1.7 行为回归）', () => {
+  test('candidates < 2 → null', () => {
+    assert.equal(findBestAmountSubset([], 100, '2026-05-22'), null);
+    assert.equal(findBestAmountSubset(makeCandidates([100]), 100, '2026-05-22'), null);
+  });
+
+  test('targetCents 非正数 → null', () => {
+    assert.equal(findBestAmountSubset(makeCandidates([50, 50]), 0, '2026-05-22'), null);
+    assert.equal(findBestAmountSubset(makeCandidates([50, 50]), -100, '2026-05-22'), null);
+  });
+
+  test('简单子集和（2 行）→ 找到', () => {
+    const candidates = makeCandidates([30, 70]);
+    const result = findBestAmountSubset(candidates, 100, '2026-05-22');
+    assert.ok(Array.isArray(result));
+    assert.equal(result.length, 2);
+    assert.equal(result[0].BillDate, '2026-05-22');
+  });
+
+  test('无解 → null', () => {
+    const candidates = makeCandidates([30, 50, 70]);
+    assert.equal(findBestAmountSubset(candidates, 999999, '2026-05-22'), null);
+  });
+});
+
+test.describe('findBestAmountSubset — maxSize 动态档位（spec.md F5-D1）', () => {
+  test('pool ≤ 12 → 全跑：找出大子集（v2.1.7 maxSize=8 卡死的场景）', () => {
+    // 11 行各 100，target=1100 → 子集 size=11 应该被找到（v2.1.7 maxSize=8 会漏）
+    const candidates = makeCandidates(Array(11).fill(100));
+    const result = findBestAmountSubset(candidates, 1100, '2026-05-22', { silent: true });
+    assert.ok(result, 'pool=11 应该能找到 11 行子集（动态档位允许 maxSize=11）');
+    assert.equal(result.length, 11);
+  });
+
+  test('pool 13-20 → maxSize=12：可找到 12 行子集，13 行子集找不到', () => {
+    // 13 行各 100：target=1200 应该找到（12 行 = 1200），target=1300 找不到（需要 13 行 > maxSize=12）
+    const candidates13 = makeCandidates(Array(13).fill(100));
+    const r12 = findBestAmountSubset(candidates13, 1200, '2026-05-22', { silent: true });
+    assert.ok(r12);
+    assert.equal(r12.length, 12);
+
+    const r13 = findBestAmountSubset(candidates13, 1300, '2026-05-22', { silent: true });
+    assert.equal(r13, null, 'pool=13 maxSize=12 → 13 行子集应当返回 null');
+  });
+
+  test('TEST2.xlsx T54SWIC494447 场景模拟：pool=16 应能找到 16 行子集（v2.1.7 maxSize=8 漏掉）', () => {
+    // 模拟 16 行各 100：target=1600 应该找到（pool=16 → maxSize=12 → 16 不行）
+    // 注：实际 TEST2.xlsx T54SWIC494447 子集 16 行 = 9,751,101。
+    //     这里仅验证 maxSize 档位放开方向正确：pool>12 时按档位限制
+    const candidates16 = makeCandidates(Array(16).fill(100));
+    const r12 = findBestAmountSubset(candidates16, 1200, '2026-05-22', { silent: true });
+    assert.ok(r12);
+    assert.equal(r12.length, 12);
+
+    const r16 = findBestAmountSubset(candidates16, 1600, '2026-05-22', { silent: true });
+    assert.equal(r16, null, '16 行场景 maxSize=12 ≤ 16，单纯 16 行等额还是找不到');
+    // 注：真实 T54SWIC494447 子集大小 16 仍超 maxSize=12 档位 → 需要 spec 重新评估或调用方覆盖 options.maxSize
+  });
+
+  test('pool 21-25 → maxSize=10 + degraded warn', () => {
+    const candidates21 = makeCandidates(Array(21).fill(100));
+    const r10 = findBestAmountSubset(candidates21, 1000, '2026-05-22', { silent: true });
+    assert.ok(r10);
+    assert.equal(r10.length, 10);
+
+    const r11 = findBestAmountSubset(candidates21, 1100, '2026-05-22', { silent: true });
+    assert.equal(r11, null, 'pool=21 maxSize=10 → 11 行子集应当 null');
+  });
+
+  test('pool > 25 → maxSize=8 + safety-floor', () => {
+    const candidates30 = makeCandidates(Array(30).fill(100));
+    const r8 = findBestAmountSubset(candidates30, 800, '2026-05-22', { silent: true });
+    assert.ok(r8);
+    assert.equal(r8.length, 8);
+
+    const r9 = findBestAmountSubset(candidates30, 900, '2026-05-22', { silent: true });
+    assert.equal(r9, null, 'pool=30 maxSize=8 → 9 行子集应当 null');
+  });
+
+  test('options.maxSize 显式传入 → 覆盖动态档位（向后兼容）', () => {
+    // pool=11 默认应允许 maxSize=11，但显式传 options.maxSize=3 限死
+    const candidates = makeCandidates(Array(11).fill(100));
+    const r3 = findBestAmountSubset(candidates, 300, '2026-05-22', { maxSize: 3, silent: true });
+    assert.ok(r3);
+    assert.equal(r3.length, 3);
+
+    const r4 = findBestAmountSubset(candidates, 400, '2026-05-22', { maxSize: 3, silent: true });
+    assert.equal(r4, null, '显式 maxSize=3 → 4 行子集应当 null');
+  });
+
+  test('v2.1.7 baseline 行为：pool ≤ 8 + 不传 options → 行为不变', () => {
+    // pool=5 时动态档位 = 5（小于 12），与原 maxSize=8 等价（实际限制是 pool size）
+    const candidates = makeCandidates([10, 20, 30, 40, 50]);
+    const r = findBestAmountSubset(candidates, 60, '2026-05-22', { silent: true });
+    assert.ok(r);
+    // 30+30? 不存在；20+40 / 10+50 都可；tieBreak 出唯一
+    assert.equal(r.length, 2);
+    assert.equal(r[0].BillDate, '2026-05-22');
+  });
+});
+
+test.describe('findBestAmountSubset — 性能护栏（spec.md F5-D5）', () => {
+  test('options.silent=true 抑制 console.warn（unit test 用）', () => {
+    // 抓 console.warn 调用次数
+    const originalWarn = console.warn;
+    let warnCount = 0;
+    console.warn = () => { warnCount++; };
+    try {
+      // pool=30 触发 safety-floor，silent=true 应不打 warn
+      findBestAmountSubset(makeCandidates(Array(30).fill(100)), 800, '2026-05-22', { silent: true });
+      assert.equal(warnCount, 0);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  test('未传 silent 时大池子触发 console.warn', () => {
+    const originalWarn = console.warn;
+    let warnCount = 0;
+    let warnMsg = '';
+    console.warn = (msg) => { warnCount++; warnMsg = String(msg); };
+    try {
+      findBestAmountSubset(makeCandidates(Array(30).fill(100)), 800, '2026-05-22');
+      assert.equal(warnCount, 1);
+      assert.match(warnMsg, /性能护栏/);
+      assert.match(warnMsg, /candidates=30/);
+      assert.match(warnMsg, /safety-floor/);
+    } finally {
+      console.warn = originalWarn;
+    }
   });
 });

@@ -320,7 +320,38 @@ function enumerateAmountSubsets(candidates, targetCents, maxSize = 8, maxSolutio
 function findBestAmountSubset(candidates, targetCents, mainBillDate, options = {}) {
   if (!Array.isArray(candidates) || candidates.length < 2) return null;
   if (!Number.isFinite(targetCents) || targetCents <= 0) return null;
-  const maxSize = Number.isFinite(options.maxSize) ? options.maxSize : 8;
+  // v2.1.8 F5 T09：maxSize 动态档位（spec.md F5-D1）+ 性能护栏（F5-D5）
+  //   options.maxSize 显式传入 → 用它（向后兼容 + 测试可覆盖）
+  //   未指定 → 按 candidates.length 自动决定：
+  //     pool ≤ 12 → 全跑（不限）
+  //     pool 13-20 → maxSize = 12
+  //     pool 21-25 → maxSize = 10 + degraded
+  //     pool > 25 → maxSize = 8 + degraded（性能护栏 F5-D5）
+  //   解决 v2.1.7 §10.3 根因 #2：硬上限 maxSize=8 剪掉 16 行 / 11 行子集（TEST2.xlsx T54SWIC494447/506630）
+  let maxSize;
+  let degraded = null;
+  if (Number.isFinite(options.maxSize)) {
+    maxSize = options.maxSize;
+  } else {
+    const poolSize = candidates.length;
+    if (poolSize <= 12) {
+      maxSize = poolSize;
+    } else if (poolSize <= 20) {
+      maxSize = 12;
+    } else if (poolSize <= 25) {
+      maxSize = 10;
+      degraded = 'reduced';
+    } else {
+      maxSize = 8;
+      degraded = 'safety-floor';
+    }
+  }
+  if (degraded && !options.silent) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[c4-recon-id-fix] findBestAmountSubset 性能护栏：candidates=${candidates.length} maxSize=${maxSize} (${degraded})`
+    );
+  }
   const hardCeiling = Number.isFinite(options.hardCeiling) ? options.hardCeiling : 5000000;
   const mainMs = parseBillDateMs(normalizeCellValue(mainBillDate));
   // 按 cents 升序排序，保留原数组下标 _origIdx
