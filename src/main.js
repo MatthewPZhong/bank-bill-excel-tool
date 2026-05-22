@@ -3070,10 +3070,16 @@ function registerAppHandlers() {
       }
       const exportRootDir = path.join(ensureStorageRoot(), 'bank-statement-process');
 
+      // v2.1.7 round 8 F8 fix（PR #51 reviewer round 2 Finding 1）：
+      //   保存框触发条件必须涵盖 unmatchedRows，否则全未命中时 mainFilePath=null →
+      //   后面 writeBankStatementMainOutput 因缺 mainFilePath 抛错（bank-statement-io.js:205）
+      //   提前算 unmatchedCount，保存框 + empty 返回两处共用
+      const unmatchedCount = Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows.length : 0;
+
       // 主输出走 saveDialog（用户另存为）；先弹保存框，让用户选位置
-      // 若 modifiedRows 为空 → 跳过 saveDialog，仅落 error-report
+      // 若 modifiedRows + unmatchedRows 都为空 → 跳过 saveDialog，仅落 error-report
       let mainFilePath = null;
-      if (processingResult.modifiedRows.length > 0) {
+      if (processingResult.modifiedRows.length > 0 || unmatchedCount > 0) {
         const defaultFileName = buildMainOutputFileName();
         const saveResult = await dialog.showSaveDialog(mainWindow, {
           title: '保存处理结果',
@@ -3097,12 +3103,11 @@ function registerAppHandlers() {
           exportRootDir
         });
       }
-      // v2.1.7 round 7 F8 fix（PR #51 reviewer P1 / self-review I-5）：
-      //   原条件 `modifiedRows.length === 0` 直接 return 'empty' → F8 第 2 sheet「未命中场景行」无法落盘
-      //   修复：仅当 modifiedRows + unmatchedRows 都为 0 才 return empty；
-      //   有 unmatchedRows 时仍走 writeBankStatementMainOutput（主 sheet 空但第 2 sheet 输出全部未命中行）
+      // v2.1.7 round 7 F8 fix（PR #51 reviewer P1 / self-review I-5）+ round 8 (Finding 1 follow-up)：
+      //   仅当 modifiedRows + unmatchedRows 都为 0 才 return empty；
+      //   有 unmatchedRows 时上方保存框已经弹过（round 8 fix），mainFilePath 非 null，
+      //   下方 writeBankStatementMainOutput 才能正确写主 sheet 空 + 第 2 sheet 全部未命中行
       //   对齐 PRD AC-F8-5：「所有行都未命中场景时，第 2 sheet 应包含全部 N 行」
-      const unmatchedCount = Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows.length : 0;
       if (processingResult.modifiedRows.length === 0 && unmatchedCount === 0) {
         // PRD §717 P0-11：modifiedRows + unmatchedRows 都为 0 才不生成主输出，但 error-report 仍可能已生成
         return {
