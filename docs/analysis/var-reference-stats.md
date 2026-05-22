@@ -4,8 +4,8 @@
 
 | 字段 | 值 |
 |---|---|
-| 版本 | v2.1.6 |
-| 扫描时间 | 2026-5-21 20:49:45 |
+| 版本 | v2.1.7 |
+| 扫描时间 | 2026-5-22 11:31:58 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 85 |
 | 顶层声明总数 | 853 |
@@ -36,7 +36,7 @@
 | `insertRun` | 6 | 9 | 3 | src/backend/acquiring-bill-currency-db/run-repository.js |
 | `dialog` | 5 | 379 | 1 | src/main.js |
 | `setCurrentModule` | 5 | 54 | 2 | src/backend/database/settings-repository.js |
-| `normalizeCellValue` | 5 | 36 | 1 | src/main-process/scenario-engines/engine-utils.js |
+| `normalizeCellValue` | 5 | 37 | 1 | src/main-process/scenario-engines/engine-utils.js |
 | `parseNumericValue` | 5 | 26 | 2 | src/backend/balance-seed-store.js |
 | `BILL_HEADERS` | 5 | 24 | 3 | src/backend/acquiring-bill-currency-db/columns.js |
 | `readRows` | 5 | 12 | 2 | src/backend/bank-account-import.js |
@@ -887,7 +887,7 @@
 | `insertRun` | 6 | 9 | 3 | src/backend/acquiring-bill-currency-db/run-repository.js(2), src/backend/bank-bu-recon-db/run-repository.js(2), src/backend/biz-op-recon-db/run-repository.js(2) |
 | `dialog` | 5 | 379 | 1 | src/renderer-dialogs.js(276), src/renderer.js(71), src/renderer-pending.js(26) |
 | `setCurrentModule` | 5 | 54 | 2 | src/renderer-previews.js(46), src/renderer.js(3), src/backend/database.js(2) |
-| `normalizeCellValue` | 5 | 36 | 1 | src/main-process/scenario-engines/c4-recon-id-fix.js(19), src/main-process/scenario-engines/engine-utils.js(6), src/main-process/scenario-engines/c1-extract-recon-id.js(4) |
+| `normalizeCellValue` | 5 | 37 | 1 | src/main-process/scenario-engines/c4-recon-id-fix.js(19), src/main-process/scenario-engines/engine-utils.js(6), src/main-process/scenario-engines/c1-extract-recon-id.js(4) |
 | `parseNumericValue` | 5 | 26 | 2 | src/backend/file-service.js(14), src/backend/file-service/writers.js(6), src/backend/file-service/normalizers.js(4) |
 | `BILL_HEADERS` | 5 | 24 | 3 | src/backend/acquiring-bill-currency-db/columns.js(7), src/backend/acquiring-bill-currency-db/import-repository.js(6), src/main-process/acquiring-bill-currency-writer.js(6) |
 | `readRows` | 5 | 12 | 2 | src/backend/file-service/readers.js(4), src/backend/file-service.js(3), src/backend/bank-account-import.js(2) |

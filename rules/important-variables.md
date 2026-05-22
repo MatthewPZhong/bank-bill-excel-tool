@@ -9,9 +9,9 @@
 
 | 字段 | 值 |
 |---|---|
-| 清单版本 | v9（对应 app v2.1.7 — 2026-05-21 T14 收口升格 10 条：Critical 3 条（`runAllScenarios` / `unmatchedRows` / `conditionsLogic`） + Important-skeleton 2 条（`AppDatabase`/`init` 含 PRAGMA / `updateStatusBox` 含 R3 全局换行） + Risk-sensitive 5 条（`pickConditionsLogicChecked` / `runC1Scenario` / `runC2Scenario` / `runC3Scenario` / `writeBankStatementOutput`）；F8 dispatcher 反向 filter 契约 + R5 三层护栏 + F4 重命名扇出 + F7-A1 全局 PRAGMA 是主要升格触发；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
-| 上次人工 review | 2026-05-21（v2.1.7 T14 收口 — 6 项主功能 + B5 wiring 加固 + F8 dispatcher 第 2 sheet） |
-| 基线数据 | `docs/analysis/var-reference-stats.md`（76 个 JS 文件 / 755 顶层声明 — round 7 I3 刷新；v2.1.7 T14 重跑后更新计数） |
+| 清单版本 | v10（对应 app v2.1.8 — 2026-05-22 Phase 0 T02 升格 11 条 v2.1.8 涉及变量：Critical 2 条（`findBestAmountSubset` / `tryManyToOnePool` — F5）+ Important-skeleton 4 条（`parseBillDateMs` — F5 / `cleanupAfterRunBackground` — N1 / `INTERNAL_FIELDS` — N3-2 / `BANK_STATEMENT_FIELDS_FOR_C3` — N2）+ Risk-sensitive 4 条（`cleanup_pending` — N1 / `config_json.assign` — N2 / `hitScenarios` — N3-1 / `displayIndex` — N3-1）+ Minor 1 条（`recon-id-fix-io.js raw 模式` — F5）；触发：v2.1.7 §十延期 F5 + 用户 2026-05-22 立项 N1/N2/N3 + G1 spec §七 升格评估）；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
+| 上次人工 review | 2026-05-22（v2.1.8 Phase 0 T02 升格 11 条 — F5/A3/N1/N2/N3 spec.md §七 评估） |
+| 基线数据 | `docs/analysis/var-reference-stats.md`（85 个 JS 文件 / 853 顶层声明 — v2.1.7 T14 重跑后；A-share 146 / A-pair 247 / A-local 359 / B 393） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
 
@@ -202,6 +202,26 @@
   - 改值域字符串（'AND'/'OR' → 'AND_MODE'/'OR_MODE'）→ 同上失效
   - 必跑：smoke c1 AND/OR 切换 + 新建场景 dialog 默认 AND radio 选中（preview F1 截图）+ 老 scenario 编辑 OR radio 选中（兼容性）
 
+### `findBestAmountSubset`（v2.1.8 F5 新增 Critical ⚠️ 资金红线 — C4 manyToOne subset-sum 核心）
+- 定义：`src/main-process/scenario-engines/c4-recon-id-fix.js:298` `function findBestAmountSubset(candidates, targetCents, mainBillDate, options = {})`
+- 关联功能：C4 网关对账 ReconID 修复模块 manyToOne 子集和算法核心；从 left 候选池找出金额合计 = right 目标金额的子集；F5 算法重设主修对象（v2.1.7 PRD §10.3 根因 #2 maxSize=8 硬上限）
+- 变更 review 要点：
+  - **资金红线**：subset-sum 等式 `Σ(left subset amount) === right.amount` 不变量绝对不可破坏
+  - F5 实施方案（spec.md §1.2 F5-D1）：maxSize 动态档位 — pool ≤ 12 全跑 / 12-20 maxSize=12 / > 20 maxSize=10 + warn；F5-D5 性能护栏 — candidates > 25 → 降级 maxSize=8
+  - 改 maxSize → 性能 O(2^n) 影响巨大，必须性能 smoke + 单渠道超时降级
+  - F5 acceptance（spec.md §1.4）：TEST2.xlsx 跑出 57 行 / 10 渠道；TEST.xlsx 仍为 0 行（不应误升）
+  - 必跑：smoke `npm run smoke` 全套 + F5 fixture（F5-TEST.xlsx / F5-TEST2.xlsx）+ unit case（G1 协同）
+
+### `tryManyToOnePool`（v2.1.8 F5 新增 Critical ⚠️ 资金红线 — C4 网关单向消费遍历）
+- 定义：`src/main-process/scenario-engines/c4-recon-id-fix.js:719` `function tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode, ...)`
+- 关联功能：C4 manyToOne 主循环；按 right 行遍历 left 池子（subset-sum + 单向消费）；F5 算法重设核心改造点（v2.1.7 PRD §10.3 根因 #3 遍历顺序偏置）
+- 变更 review 要点：
+  - **资金红线**：「网关 right 行单向消费」不变量（每条 right 最多匹配 1 个 left subset）+ first-match-wins 不可破坏
+  - F5 实施方案（spec.md §1.2 F5-D2）：复合排序 — 金额降序 + 子集大小降序；保大渠道优先
+  - F5-D3 currency 字段过滤：在候选池构造时加 currency 等值过滤
+  - 改遍历顺序 → 命中行数变化（v2.1.7 实测 28 行 vs TEST2.xlsx 期望 57 行差距即源于此）
+  - 必跑：smoke + F5 fixture + TEST2.xlsx 3 个关键子集验证（T54SWIC494447 16 行 / T54SWIC506630 11 行 / T54SWIC470181 4M 子池）
+
 ---
 
 ## 2. Important-skeleton — 系统骨架
@@ -312,6 +332,43 @@
   - 改启用区"至少保留 1"约束（O3）→ 需同步 renderer 端 `updateControls` + repo 端 `setEnabledModules('') throw` 校验
   - 改 `setCurrentModule` fallback 逻辑（`current_module` 不在启用列表时切到第 1 个）→ 影响 `initialize()` 启动序 + 收纳弹窗 `onCommit` 回调
   - 必跑：① 新 DB 启动 → seed 默认值；② 旧 DB（无该 key）启动 → seed；③ DB 写入非法 JSON → 回退默认；④ `setEnabledModules([])` 抛错；⑤ 弹窗 ➡️/⬅️/拖拽 三种交互后菜单同步刷新
+
+### `parseBillDateMs`（v2.1.8 F5 新增 Important-skeleton — BillDate 字符串化入口）
+- 定义：`src/main-process/scenario-engines/c4-recon-id-fix.js:168` `function parseBillDateMs(s)`
+- 关联功能：C4 BillDate 日期解析，正则 `^(\d{4})[-/](\d{1,2})[-/](\d{1,2})`；v2.1.7 PRD §10.3 根因 #1 — Excel 真日期 raw:true 读出 number 序列号导致解析全 fail（v2.1.7 单点 fix 仅修 28 行的根因）
+- 变更 review 要点：
+  - F5 实施方案（spec.md §1.2 F5-D4）：从 reader 入口统一字符串化（`recon-id-fix-io.js:70` raw:true → raw:false），不在 parseBillDateMs 内做兼容
+  - 跨文件度 10（scan-vars baseline），改函数签名 / 返回类型要 grep 全部调用方
+  - 改正则 → 历史 BillDate 字符串可能匹配失败 → 候选池消失
+  - 必跑：smoke c4 + F5 fixture + unit case（输入字符串 / 输入 number 序列号 对比）
+
+### `cleanupAfterRunBackground`（v2.1.8 N1 新增 Important-skeleton — runCheck 后置清理函数）
+- 定义：`src/main-process/acquiring-bill-currency-session.js:278` `async function cleanupAfterRunBackground({ db, monthKey, runId, onProgress })`
+- 关联功能：收单单据币种校验模块 runCheck 后清理 3 张表（diff_rows / flow_imports / bill_imports），每批 50000 行 + setImmediate 让出 event loop
+- 变更 review 要点：
+  - N1 β 方案（spec.md §三）：触发链路改造 — 从 runCheck return 后 setImmediate 触发 → 改为应用退出时（app.before-quit）为主 + 进入模块时为兜底
+  - **不动 cleanup 算法本身**（50000 行/批 + setImmediate）；本次仅改触发时机
+  - 跨文件度 3（scan-vars baseline），调用方变化（v2.1.7 main.js:10307 setImmediate → v2.1.8 移除，改 app.before-quit + IPC 入口检查）
+  - 必跑：smoke N1（runCheck 后 DB 数据保留 / 退出时清完 / 进入兜底 / 启动孤儿仍工作）
+
+### `INTERNAL_FIELDS`（v2.1.8 N3-2 新增 Important-skeleton — writer 内部字段过滤白名单）
+- 定义：`src/main-process/exceljs-writer.js:25` `const INTERNAL_FIELDS = new Set([...])`
+- 关联功能：exceljs-writer 输出 Excel 时过滤行数据的"内部字段"（`_hitScenarioId` / `_hitScenarioName` / `_rowId` 等下划线前缀字段不暴露给用户）
+- 变更 review 要点：
+  - N3-2 实施（spec.md §五）：新增 Sheet 3「命中场景行」时，保留 INTERNAL_FIELDS 过滤总规则，仅「命中场景」列通过**白名单显式拼装**（不破坏其他下划线字段的过滤）
+  - 改字段名集合 → 其他下游 writer 可能漏过滤导致内部字段泄露
+  - 必跑：smoke N3-2（Sheet 3 含「命中场景」列 + 其他 _ 前缀字段仍被过滤）+ N3-1 状态框 displayIndex 对齐
+
+### `BANK_STATEMENT_FIELDS_FOR_C3`（v2.1.8 N2 新增 Important-skeleton ⚠️ preload 双写坑）
+- 定义：
+  - `src/constants/bank-statement-fields.js:60` `const BANK_STATEMENT_FIELDS_FOR_C3 = Object.freeze([...])`
+  - `src/preload.js:19`（inline 重复一份，**双写坑**）
+- 关联功能：C3「对账成立后赋值」第二下拉（assign-bank）的枚举源；45 项（44 标准字段 + 1 虚拟字段「发生额绝对值」）
+- 变更 review 要点：
+  - N2 实施（spec.md §四）：枚举列表第 2 位插入「自取值」`{ value: '__CUSTOM__', label: '自取值' }`
+  - **必须两处同步**：`bank-statement-fields.js` + `preload.js` —— 漏改一处 UI / 引擎语义就分裂
+  - 跨文件度 3（scan-vars baseline），改字段集合 → C3 dialog 显示 / 引擎赋值 / scenario 持久化都受影响
+  - 必跑：smoke N2（dialog 显示「自取值」第 2 位 + 引擎 mode='custom' 分支 + DB migration 旧 scenario 升级）
 
 ---
 
@@ -636,6 +693,47 @@
   - **ExcelJS vs SheetJS**：v2.1.7 dev 路径已用 ExcelJS（commit d289779）；spec §9.8.4 PM sketch 当初按 SheetJS 起草已反向同步双版本说明；改 writer 库需评估 cellStyle / sheet 命名 / 性能
   - 必跑：smoke `npm run smoke` 全 19 suite（含 F8 第 2 sheet 行数断言）+ 真实银行账单端到端（带未命中场景）+ baseline modifiedRows 防回归
 
+### `cleanup_pending`（v2.1.8 N1 新增 Risk-sensitive — DB 新列，cleanup 延后触发标志）
+- 定义：`acquiring_bill_currency_runs.cleanup_pending INTEGER DEFAULT 0`（v2.1.8 N1 新增列，migration 在 `src/backend/database/migrations.js`）
+- 关联功能：N1 β 方案 — runCheck 成功后 SET=1 标识"待清理"；app.before-quit 钩子检测并触发清理；cleanup 完成后 SET=0
+- 变更 review 要点：
+  - **migration 必须幂等**：`ALTER TABLE ... ADD COLUMN ... DEFAULT 0`，旧记录默认 0（已完成清理）
+  - 改默认值 → 旧记录可能被误判为"待清理"触发不必要的清理
+  - 改列类型 / 列名 → 所有 runs 表查询 / repository 方法同步
+  - 涉及 API：`run-repository.js` 新增 `markCleanupPending` / `clearCleanupPending` / `listPendingCleanupRuns`
+  - 必跑：smoke N1（migration 幂等 + 标志位 SET/CLEAR + 启动孤儿清理仍工作）
+
+### `config_json.assign`（v2.1.8 N2 新增 Risk-sensitive ⚠️ 对账契约扩展）
+- 定义：scenarios.config_json 字段下 `assign` 对象（v2.1.7 仅 `{gwField, bankField}`，v2.1.8 扩展为 `{gwField, bankField, mode, customValue}`）
+- 关联功能：C3「对账成立后赋值」配置；v2.1.8 N2 新增"自取值"模式 — `mode: 'direct' | 'custom'`；`customValue` 在 mode='custom' 时使用
+- 变更 review 要点：
+  - **对账契约扩展**：scenarios 数据结构升级，老 scenario 必须 graceful 升级（用户场景库已沉淀不能丢）
+  - migration 必须幂等：扫描所有 category='gateway-recon-join' 的 scenarios，对缺 `assign.mode` 的补 `mode='direct'`
+  - bundle 兼容（spec.md §四 N2-D4/D5）：v3 bundle 向前兼容 — 旧 bundle 自动补 mode='direct'；v2.1.8 bundle export 时 mode='direct' 省略字段（体积更小）
+  - `__CUSTOM__` 特殊 value（N2-D1）：旧 reader 看到时 fallback 不赋值
+  - 引擎读取（`c3-gateway-recon-join.js:158-172`）必须按 mode 分支：`mode==='custom'` → `assign.customValue` / 否则 → `chosen.row[assign.gwField]`
+  - 必跑：smoke N2（migration + 引擎分支 + bundle 来回 import/export 兼容）
+
+### `hitScenarios`（v2.1.8 N3-1 新增 Risk-sensitive ⚠️ IPC 字段重命名 + 结构变更）
+- 定义：scenario-dispatcher.js stats.hitScenarios 数组元素 `{id, displayIndex, name}` —— **取代 v2.1.7 的 hitScenarioIds (number[])**
+- 关联功能：
+  - 推送：`src/main-process/scenario-dispatcher.js:99` `hitScenarios.push({id, displayIndex, name})`
+  - IPC：`src/main.js:3045` 返回 `stats.hitScenarios`
+  - 状态框：`src/renderer.js:3319` 显示 `displayIndex` 替代 DB id
+- 变更 review 要点：
+  - **IPC 字段重命名**：`hitScenarioIds` → `hitScenarios`，必须 grep 全部调用方同步
+  - 结构变更（number[] → object[]）：消费方读取方式从 `ids.join('、')` 改 `arr.map(s => s.displayIndex).join('、')`
+  - 不变量护栏（v2.1.7 F8 已有）：`modifiedRows + unmatchedRows = inputRows` 不变
+  - 必跑：smoke N3-1（状态框序号 = 场景管理 UI 序号 + grep `hitScenarioIds` 零命中）+ smoke F8（modifiedRows + unmatchedRows 守恒）
+
+### `displayIndex`（v2.1.8 N3-1 新增 Risk-sensitive ⚠️ 跨多层一致性）
+- 定义：scenarios 实体新增计算字段 `displayIndex`（1-based 按 sort_order + id 顺序），在 `src/backend/database/scenarios-repository.js.listScenarios` 返回时统一附加
+- 关联功能：N3-1 修复"状态框命中场景号与场景管理 UI 序号不一致"
+- 变更 review 要点：
+  - **派发口径**（spec.md §五 N3-D1）：在 repository 层统一附 displayIndex，UI / 引擎共享同一份计算 — 避免双源真理
+  - 改派发口径（移到 UI 自算 / dispatcher 入参时算）→ 编号体系再次分裂，N3-1 修复失效
+  - 必跑：smoke N3-1（main 端 displayIndex 与 UI 列表 displayIndex 字段值逐项相等）+ 手测对比场景管理 dialog 与状态框
+
 ---
 
 ## 5. Minor — 提示性（次要）
@@ -649,6 +747,7 @@
 - `getStatementSessionEntries` / `getStatementSessionKey` — session 查询
 - `getSetting` / `setSetting` — settings 读写
 - `loadEnumValues` / `loadCurrencyMappings` — 资源加载入口
+- `recon-id-fix-io.js raw 模式`（v2.1.8 F5 新增）— reader 入口 `raw:true → raw:false`（spec.md §1.2 F5-D4），统一 BillDate 字符串化口径，1 文件 1 行改但是 F5 算法重设的前置依赖
 
 这一层从自动扫描报告里可以随时捞出 top—N，不需要在本表硬编码。
 

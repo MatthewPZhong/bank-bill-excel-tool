@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "2.1.6",
-    "scannedAt": "2026-05-21T12:49:45.758Z",
+    "version": "2.1.7",
+    "scannedAt": "2026-05-22T03:31:58.138Z",
     "root": "src",
     "totalFiles": 85,
     "totalTopLevelNames": 853,
@@ -962,7 +962,7 @@
           },
           {
             "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 3
+            "count": 4
           },
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
@@ -973,7 +973,7 @@
             "count": 6
           }
         ],
-        "totalHits": 36,
+        "totalHits": 37,
         "fileSpan": 5
       },
       {
@@ -14691,7 +14691,7 @@
         },
         {
           "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 3
+          "count": 4
         },
         {
           "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
@@ -14702,7 +14702,7 @@
           "count": 6
         }
       ],
-      "totalHits": 36,
+      "totalHits": 37,
       "fileSpan": 5
     },
     {
