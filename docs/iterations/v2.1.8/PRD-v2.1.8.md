@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.1（2026-05-22 — 初始版，基于 backlog.md 7 项决策展开） |
+| 文档版本 | v0.2（2026-05-22 — T08 Reverse Sync 修订 F5 改动点：BillDate 字符串化从 reader 入口 → c4 引擎入口；spec.md F5-D4 同步改为 (b)）；v0.1 = 初始版起草 |
 | 目标版本 | `v2.1.8`（patch / minor 待定，G1 引入新目录可能升 minor） |
 | 起始版本 | `v2.1.7`（v2.1.7 完成时 main 状态；本 PRD 制定时 v2.1.7 尚未合并 main） |
 | 起草日期 | 2026-05-22 |
@@ -100,7 +100,7 @@ v2.1.7 PRD §十 延期项。用户提供 `/Users/pzhong/Desktop/小助手-Debug
 
 ### 4.3 改动点
 
-- [ ] **BillDate 数字日期解析**：`recon-id-fix-io.js:70` `raw:true` → `raw:false`（或在 c4 引擎入口转字符串），让 `parseBillDateMs` 能识别
+- [ ] **BillDate 数字日期解析**（T08 Reverse Sync 改 — spec.md F5-D4 v0.3）：在 `c4-recon-id-fix.js:1058-1065` gateway 映射段，把 `createTime` number 序列号转 ISO 字符串后赋给 `BillDate`，让 `parseBillDateMs` 能识别。**不动** `recon-id-fix-io.js:70` raw 模式（共用函数 sheetToObjects 影响 8 sheet × N 字段，资金红线扩面）
 - [ ] **maxSize 放开**：`c4-recon-id-fix.js:findBestAmountSubset` 的 maxSize=8 改为动态（如按金额量级 / 候选池大小）；或干脆放开到 candidates.length，按性能 trade-off
 - [ ] **manyToOne 遍历顺序**：`tryManyToOnePool` 改"子集大小降序"或"金额降序"，避免大子集被先消费
 - [ ] **currency 字段过滤**（评估）：增加 currency 等值过滤，缩小候选池

@@ -68,6 +68,28 @@ const { ORDER_REPAIR_FIELDS_GATEWAY } = require('../../constants/gateway-bill-re
 
 // ===== 工具函数 =====
 
+// v2.1.8 F5 T08：BillDate 值规范化为 'YYYY-MM-DD' 字符串
+//   gateway 子模式 createTime 列在 Excel 真日期格式下 sheetToObjects raw:true 读出 number 序列号
+//   parseBillDateMs 正则只认字符串 → 需在 gateway 映射段先规范化
+//   不动 recon-id-fix-io.js raw 模式（共用函数影响 8 sheet × N 字段，资金红线扩面）
+//   spec.md F5-D4 v0.3 Reverse Sync 决策方案 C
+function normalizeBillDateValue(value) {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'number') {
+    // Infinity / NaN / -Infinity 不是有效 Excel 序列号，返回 '' 让 parseBillDateMs 拿到空也 fail（避免诡异字符串）
+    if (!Number.isFinite(value)) return '';
+    // Excel epoch = 1899-12-30（修正 1900 闰年 bug 后），1 serial = 1 day
+    const ms = Date.UTC(1899, 11, 30) + Math.floor(value) * 86400000;
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return '';
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  return String(value);
+}
+
 // 把 row 按 billTypes 分类：row._types = Set<seq>
 function classifyRows(rows, billTypes, side) {
   const sideTypes = (billTypes || []).filter((t) => t.side === side);
@@ -1055,10 +1077,14 @@ function runC4Scenario(scenario, sheets, subMode) {
   //   算法骨架（billDateMatches / pickBestByTieBreak 等）硬编码 row.BillDate。
   //   渠道账单 sheet 字段是 createTime（不是 BillDate），引擎入口做字段映射 createTime → BillDate，
   //   避免改动算法骨架。映射后 oppRow 同时拥有 createTime（原值）和 BillDate（=createTime）。
+  // v2.1.8 F5 T08：createTime 在 Excel 里若是"真日期"格式，sheetToObjects raw:true 读出来是 number 序列号；
+  //   parseBillDateMs 正则只认 'YYYY-MM-DD' 字符串 → 直接赋 number 会 fail。
+  //   方案 C（spec.md F5-D4 v0.3）：在此处把 number → ISO 字符串后再赋给 BillDate。
+  //   不动 recon-id-fix-io.js raw 模式（共用函数影响 8 sheet × N 字段，资金红线扩面）。
   if (effectiveSubMode === 'gateway') {
     opponentBills = opponentBills.map((row) => {
       if (row && (row.BillDate === '' || row.BillDate === undefined || row.BillDate === null)) {
-        return Object.assign({}, row, { BillDate: row.createTime || '' });
+        return Object.assign({}, row, { BillDate: normalizeBillDateValue(row.createTime) });
       }
       return row;
     });
@@ -1152,7 +1178,7 @@ function runC4Scenario(scenario, sheets, subMode) {
 
 module.exports = {
   runC4Scenario,
-  // 内部工具（暴露给 smoke）
+  // 内部工具（暴露给 smoke + unit）
   classifyRows,
   groupReconFields,
   findAmountLockedPair,
@@ -1163,6 +1189,7 @@ module.exports = {
   rowsMatchOtherFieldPairs,
   toCents,
   enumerateAmountSubsets,
+  normalizeBillDateValue, // v2.1.8 F5 T08 暴露给 unit case
   findBestAmountSubset,
   tieBreakSubsets,
   pickBestByTieBreak,

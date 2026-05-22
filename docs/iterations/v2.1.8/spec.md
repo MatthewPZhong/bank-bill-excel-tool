@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.2（2026-05-22 — 用户拍板 27 决策点全按 PM 推荐，状态：定稿）；v0.1 = 初版起草 |
+| 文档版本 | v0.3（2026-05-22 — T08 Reverse Sync 修订 F5-D4：reader 入口 → 引擎入口转字符串，因 sheetToObjects 是共用函数 raw:false 会影响 8 sheet × N 字段太广）；v0.2 = 用户拍板 27 决策点；v0.1 = 初版起草 |
 | 关联 PRD | `PRD-v2.1.8.md` v0.1 |
 | 关联 tasks | `tasks.md`（待建） |
 | 评审范围 | F5（算法重设）/ A3（跨进程）/ N1（cleanup 移出对账链路）/ N2（配置数据结构变更）/ N3（IPC 字段重命名 + 新 Sheet） |
@@ -26,7 +26,7 @@
 | F5-D1 ✅ | maxSize 放开策略 | (a) 完全放开 / (b) 按金额量级动态 / (c) 按 candidates pool size 动态 | **(c)**：pool ≤ 12 全跑；12-20 maxSize=12；> 20 maxSize=10 + warn |
 | F5-D2 ✅ | manyToOne 遍历顺序 | (a) 子集大小降序 / (b) 金额降序 / (c) 复合 | **(c)**：金额降序 + 子集大小降序 |
 | F5-D3 ✅ | currency 字段过滤 | (a) 加 / (b) 不加 | **(a)**：加 |
-| F5-D4 ✅ | BillDate 字符串化位置 | (a) reader 入口 / (b) 引擎入口 | **(a)**：reader 入口 `raw:false` |
+| F5-D4 🔄 | BillDate 字符串化位置 | (a) reader 入口 / (b) 引擎入口 | **(b) 引擎入口**（T08 Reverse Sync 2026-05-22 改 — (a) 影响共用函数 sheetToObjects 跨 8 sheet 全部字段，资金红线扩面；(b) 仅在 `c4-recon-id-fix.js:1058-1065` gateway 映射段把 createTime number → ISO 字符串后赋给 BillDate，影响面收敛到 c4 引擎一处）|
 | F5-D5 ✅ | 性能护栏 | (a) 单渠道超时降级 / (b) 全局超时 / (c) 不做 | **(a)**：candidates > 25 → 降级 maxSize=8 + 日志 |
 
 ### 1.3 fixture 文件映射（2026-05-22 验证）
@@ -359,6 +359,9 @@ Phase 0 T02 启动后需对照 `rules/important-variables.md` 评估升格。
 - [x] 整体并行带宽 5 周 ✅ 已拍板单版本走完
 
 **用户决策口径**：「全按推荐」（2026-05-22）
+
+**Reverse Sync 修订记录**：
+- F5-D4 reader 入口 → 引擎入口（2026-05-22 T08 实施前调研发现 sheetToObjects 共用函数影响 8 sheet × N 字段，资金红线扩面）— 用户 2026-05-22 拍板方案 C
 
 ---
 

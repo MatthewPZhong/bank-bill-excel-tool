@@ -337,10 +337,10 @@
 - 定义：`src/main-process/scenario-engines/c4-recon-id-fix.js:168` `function parseBillDateMs(s)`
 - 关联功能：C4 BillDate 日期解析，正则 `^(\d{4})[-/](\d{1,2})[-/](\d{1,2})`；v2.1.7 PRD §10.3 根因 #1 — Excel 真日期 raw:true 读出 number 序列号导致解析全 fail（v2.1.7 单点 fix 仅修 28 行的根因）
 - 变更 review 要点：
-  - F5 实施方案（spec.md §1.2 F5-D4）：从 reader 入口统一字符串化（`recon-id-fix-io.js:70` raw:true → raw:false），不在 parseBillDateMs 内做兼容
+  - F5 实施方案（spec.md F5-D4 v0.3 Reverse Sync 后）：**不动** parseBillDateMs 本身，**不动** reader 入口 raw 模式；改在 `c4-recon-id-fix.js:1058-1065` gateway 映射段做 number → ISO 字符串转换后再赋给 BillDate（让 parseBillDateMs 拿到字符串能解析）
   - 跨文件度 10（scan-vars baseline），改函数签名 / 返回类型要 grep 全部调用方
   - 改正则 → 历史 BillDate 字符串可能匹配失败 → 候选池消失
-  - 必跑：smoke c4 + F5 fixture + unit case（输入字符串 / 输入 number 序列号 对比）
+  - 必跑：smoke c4 + F5 fixture + unit case（输入字符串 / 输入 number 序列号 → ISO 后输入对比）
 
 ### `cleanupAfterRunBackground`（v2.1.8 N1 新增 Important-skeleton — runCheck 后置清理函数）
 - 定义：`src/main-process/acquiring-bill-currency-session.js:278` `async function cleanupAfterRunBackground({ db, monthKey, runId, onProgress })`
@@ -747,7 +747,7 @@
 - `getStatementSessionEntries` / `getStatementSessionKey` — session 查询
 - `getSetting` / `setSetting` — settings 读写
 - `loadEnumValues` / `loadCurrencyMappings` — 资源加载入口
-- `recon-id-fix-io.js raw 模式`（v2.1.8 F5 新增）— reader 入口 `raw:true → raw:false`（spec.md §1.2 F5-D4），统一 BillDate 字符串化口径，1 文件 1 行改但是 F5 算法重设的前置依赖
+- ~~`recon-id-fix-io.js raw 模式`~~（v2.1.8 F5 立项时计划，**T08 Reverse Sync v0.2 已撤回** — sheetToObjects 共用函数 raw:false 影响 8 sheet × N 字段；改为方案 C：在 `c4-recon-id-fix.js:1058-1065` gateway 映射段做 number → ISO 字符串转换，影响面收敛到 c4 引擎一处。详 spec.md F5-D4 v0.3）
 
 这一层从自动扫描报告里可以随时捞出 top—N，不需要在本表硬编码。
 

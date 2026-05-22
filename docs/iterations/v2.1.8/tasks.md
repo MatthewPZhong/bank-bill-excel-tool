@@ -101,13 +101,20 @@
 
 ## 四、Phase 2 — F5 算法重设
 
-### T08 — BillDate 字符串化 fix
+### T08 — BillDate 字符串化 fix（Reverse Sync v0.2 改）
 
 - **Owner**：Dev
 - **依赖**：T01
-- **文件**：`src/main-process/recon-id-fix-io.js`
-- **动作**：`readRows` 入口 `raw:true` → `raw:false`（按 spec F5-D4）
-- **验收**：手测 TEST2.xlsx BillDate 列出来是字符串
+- **文件**：`src/main-process/scenario-engines/c4-recon-id-fix.js`（**改文件 from recon-id-fix-io.js**）+ `tests/unit/main-process/scenario-engines/c4-recon-id-fix.test.js`（unit case）
+- **动作**：
+  - `c4-recon-id-fix.js:1058-1065` gateway 映射段：把 `createTime` number 序列号（Excel 序列号）转 ISO 'YYYY-MM-DD' 字符串后赋给 `BillDate`
+  - 用 `XLSX.SSF.parse_date_code()` 把 number → 日期对象 → ISO 字符串（normalizers.js 内部已有先例）
+  - **不动** `recon-id-fix-io.js:70` raw 模式（spec F5-D4 v0.3 Reverse Sync — 共用函数影响 8 sheet × N 字段，资金红线扩面）
+- **验收**：
+  - unit case：createTime = 46168（number）→ BillDate = '2026-05-22'（字符串）
+  - unit case：createTime = '2026-05-22'（字符串）→ BillDate = '2026-05-22'（不变）
+  - unit case：createTime = ''（空）→ BillDate = ''（不变）
+  - 手测 TEST2.xlsx：F5 还没全部做完前看 28 行 baseline 应稳定（不应回退到 0 行）
 
 ### T09 — findBestAmountSubset 放开 maxSize
 
