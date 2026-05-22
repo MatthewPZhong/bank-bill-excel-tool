@@ -737,10 +737,12 @@ function tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode,
     lastStepByLeft.set(leftRow._rowIdx, stepLabel);
     // 候选过滤：BillDate + 其他对账字段 AND 全等（Amount 不参与 AND 过滤）
     // v2.1.1 T2-2：days 参数化
+    // v2.1.8 F5 T11 spec.md F5-D3：加 currency 等值过滤（与 tryManyToOnePool 对称；仅 gateway 子模式生效）
     const candidates = rightRows.filter((r) =>
       !pairedRight.has(r._rowIdx)
         && billDateMatches(leftRow.BillDate, r.BillDate, billDateMode, cfg._billDateDays)
         && rowsMatchOtherFieldPairs(leftRow, r, otherFieldPairs)
+        && currencyMatches(leftRow, r, cfg)
     );
     if (candidates.length < 2) {
       candidates.forEach((r) => lastStepByRight.set(r._rowIdx, stepLabel));
@@ -767,6 +769,22 @@ function tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode,
   }
 }
 
+// v2.1.8 F5 T11（spec.md F5-D3）：currency 字段等值过滤
+//
+//   仅 gateway 子模式生效（cfg._subMode === 'gateway'）；其他子模式直通 true（影响面收敛）
+//   字段名硬编码大小写差异（来自 gateway-bill-recon-fields.js）：
+//     网关账单 GATEWAY_BILL_FIELDS:16 → 'Currency'（首字母大写）
+//     渠道账单 CHANNEL_BILL_FIELDS:24 → 'currency'（小写）
+//   任一为空 → 不过滤（数据质量兼容，避免空值场景比 v2.1.7 退步）
+//   独立 export 供 unit case 测试
+function currencyMatches(leftRow, rightRow, cfg) {
+  if (!cfg || cfg._subMode !== 'gateway') return true;
+  const left = normalizeCellValue(leftRow && leftRow.Currency);
+  const right = normalizeCellValue(rightRow && rightRow.currency);
+  if (left === '' || right === '') return true;
+  return left === right;
+}
+
 // v2.1.8 F5 T10（spec.md F5-D2）：tryManyToOnePool 遍历顺序复合排序
 //
 //   v2.1.7 根因 #3：按 rightRows 原数组顺序遍历 → 大金额 right 排后面，
@@ -777,9 +795,10 @@ function tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode,
 //   性能优化：预 build rightCandidatesCount Map，避免 sort comparator 内 O(n) filter
 //   注：count 是 sort 起始时的 snapshot（pairedLeft 在遍历中变化但排序已锁；可接受）
 //   独立 export 供 unit case 测试
+//   v2.1.8 F5 T11 集成：candidates count 计算同步纳入 currency 过滤（与 tryManyToOnePool 实际 candidates 一致）
 function sortRightRowsForManyToOne({
   rightRows, leftRows, rightAmountField, otherFieldPairs,
-  billDateMode, billDateDays, pairedLeft, pairedRight
+  billDateMode, billDateDays, pairedLeft, pairedRight, cfg
 }) {
   const rightCandidatesCount = new Map();
   for (const r of rightRows) {
@@ -792,6 +811,7 @@ function sortRightRowsForManyToOne({
       if (pairedLeft.has(l._rowIdx)) continue;
       if (!billDateMatches(l.BillDate, r.BillDate, billDateMode, billDateDays)) continue;
       if (!rowsMatchOtherFieldPairs(l, r, otherFieldPairs)) continue;
+      if (!currencyMatches(l, r, cfg)) continue;
       count++;
     }
     rightCandidatesCount.set(r._rowIdx, count);
@@ -824,10 +844,11 @@ function tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode,
   );
 
   // v2.1.8 F5 T10（spec.md F5-D2）：遍历顺序复合排序（金额降序 + candidates pool size 降序）
+  // v2.1.8 F5 T11（spec.md F5-D3）：cfg 传入让 sort 的 candidates count 与下面 filter 一致（同步纳入 currency 过滤）
   const sortedRightRows = sortRightRowsForManyToOne({
     rightRows, leftRows, rightAmountField,
     otherFieldPairs, billDateMode, billDateDays: cfg._billDateDays,
-    pairedLeft, pairedRight
+    pairedLeft, pairedRight, cfg
   });
 
   for (const rightRow of sortedRightRows) {
@@ -837,6 +858,7 @@ function tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode,
       !pairedLeft.has(l._rowIdx)
         && billDateMatches(l.BillDate, rightRow.BillDate, billDateMode, cfg._billDateDays)
         && rowsMatchOtherFieldPairs(l, rightRow, otherFieldPairs)
+        && currencyMatches(l, rightRow, cfg) // v2.1.8 F5 T11 spec.md F5-D3
     );
     if (candidates.length < 2) {
       candidates.forEach((l) => lastStepByLeft.set(l._rowIdx, stepLabel));
@@ -1282,5 +1304,6 @@ module.exports = {
   tryOneToOne,
   tryOneToManyPool,
   tryManyToOnePool,
-  sortRightRowsForManyToOne // v2.1.8 F5 T10 暴露给 unit case
+  sortRightRowsForManyToOne, // v2.1.8 F5 T10 暴露给 unit case
+  currencyMatches // v2.1.8 F5 T11 暴露给 unit case
 };

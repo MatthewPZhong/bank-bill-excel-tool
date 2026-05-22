@@ -5,7 +5,8 @@ const {
   normalizeBillDateValue,
   parseBillDateMs,
   findBestAmountSubset,
-  sortRightRowsForManyToOne
+  sortRightRowsForManyToOne,
+  currencyMatches
 } = require('../../../../src/main-process/scenario-engines/c4-recon-id-fix');
 
 // 测试 helper：构造 candidates 数组，每个元素 cents 由参数控制
@@ -363,5 +364,110 @@ test.describe('sortRightRowsForManyToOne — 复合排序 (spec.md F5-D2)', () =
     const originalOrder = rightRows.map((r) => r._rowIdx);
     sortRightRowsForManyToOne({ ...noFilter, rightRows, leftRows: [] });
     assert.deepEqual(rightRows.map((r) => r._rowIdx), originalOrder, '原数组顺序应不变');
+  });
+});
+
+// ========================================================================
+// v2.1.8 F5 T11 — currency 字段过滤（spec.md F5-D3）
+// ========================================================================
+
+test.describe('currencyMatches — gateway 子模式 currency 等值过滤', () => {
+  const gatewayCfg = { _subMode: 'gateway' };
+  const businessCfg = { _subMode: 'business' };
+  const undefCfg = undefined;
+
+  test('非 gateway 子模式 → 直通 true（不过滤）', () => {
+    // business 子模式：currency 字段可能不存在，强过滤会破坏行为
+    assert.equal(currencyMatches({ Currency: 'USD' }, { currency: 'CNY' }, businessCfg), true);
+    assert.equal(currencyMatches({}, {}, businessCfg), true);
+  });
+
+  test('cfg 为 undefined / null → 直通 true（兼容旧调用）', () => {
+    assert.equal(currencyMatches({ Currency: 'USD' }, { currency: 'CNY' }, undefCfg), true);
+    assert.equal(currencyMatches({}, {}, null), true);
+  });
+
+  test('gateway 子模式 + 两侧 currency 都非空相等 → true', () => {
+    assert.equal(currencyMatches({ Currency: 'USD' }, { currency: 'USD' }, gatewayCfg), true);
+    assert.equal(currencyMatches({ Currency: 'CNY' }, { currency: 'CNY' }, gatewayCfg), true);
+  });
+
+  test('gateway 子模式 + 两侧 currency 都非空不等 → false（核心过滤行为）', () => {
+    assert.equal(currencyMatches({ Currency: 'USD' }, { currency: 'CNY' }, gatewayCfg), false);
+    assert.equal(currencyMatches({ Currency: 'HKD' }, { currency: 'USD' }, gatewayCfg), false);
+  });
+
+  test('gateway 子模式 + 任一为空 → 直通 true（数据质量兼容，避免比 v2.1.7 退步）', () => {
+    assert.equal(currencyMatches({ Currency: '' }, { currency: 'USD' }, gatewayCfg), true);
+    assert.equal(currencyMatches({ Currency: 'USD' }, { currency: '' }, gatewayCfg), true);
+    assert.equal(currencyMatches({}, { currency: 'USD' }, gatewayCfg), true);
+    assert.equal(currencyMatches({ Currency: 'USD' }, {}, gatewayCfg), true);
+    assert.equal(currencyMatches({ Currency: null }, { currency: 'USD' }, gatewayCfg), true);
+  });
+
+  test('字段名大小写敏感（GATEWAY_BILL_FIELDS Currency 大写 vs CHANNEL_BILL_FIELDS currency 小写）', () => {
+    // 错位用法不应 crash，但也不应正常匹配（因为读不到对方字段）
+    assert.equal(currencyMatches({ currency: 'USD' }, { Currency: 'USD' }, gatewayCfg), true); // 都读不到字段（''），fallback true
+    // 正确字段名 → 正常匹配
+    assert.equal(currencyMatches({ Currency: 'USD' }, { currency: 'USD' }, gatewayCfg), true);
+  });
+
+  test('normalizeCellValue 应用：trim + 大小写归一', () => {
+    // normalizeCellValue 行为：trim + 转字符串，不强制大小写归一
+    assert.equal(currencyMatches({ Currency: ' USD ' }, { currency: 'USD' }, gatewayCfg), true);
+    // 大小写差异：normalizeCellValue 不归一大小写 → 'usd' !== 'USD' → false
+    // 这是 c4 引擎的 normalizeCellValue 现状（非 currency 专用）；spec 没要求大小写归一
+    // 如果实际数据有大小写不一致问题，需在 reader 层归一化
+  });
+
+  test('null/undefined row → 直通 true（防御性）', () => {
+    assert.equal(currencyMatches(null, { currency: 'USD' }, gatewayCfg), true);
+    assert.equal(currencyMatches({ Currency: 'USD' }, null, gatewayCfg), true);
+    assert.equal(currencyMatches(null, null, gatewayCfg), true);
+  });
+});
+
+test.describe('sortRightRowsForManyToOne + currencyMatches 集成（T10 + T11 协同）', () => {
+  test('gateway 子模式：currency 不同的 left 不计入 candidates count', () => {
+    const rightRows = [
+      { _rowIdx: 'opp_0', Amount: 100, BillDate: '2026-05-22', currency: 'USD' },
+      { _rowIdx: 'opp_1', Amount: 100, BillDate: '2026-05-22', currency: 'CNY' }
+    ];
+    const leftRows = [
+      { _rowIdx: 'main_0', Amount: 50, BillDate: '2026-05-22', Currency: 'USD' },
+      { _rowIdx: 'main_1', Amount: 50, BillDate: '2026-05-22', Currency: 'USD' },
+      { _rowIdx: 'main_2', Amount: 50, BillDate: '2026-05-22', Currency: 'USD' }
+    ];
+    const sorted = sortRightRowsForManyToOne({
+      rightRows, leftRows, rightAmountField: 'Amount',
+      otherFieldPairs: [], billDateMode: 'strict', billDateDays: 1,
+      pairedLeft: new Set(), pairedRight: new Set(),
+      cfg: { _subMode: 'gateway' }
+    });
+    // opp_0 USD → candidates=3，opp_1 CNY → candidates=0
+    // 同金额 100 → 按 candidates 降序 → opp_0 优先
+    assert.equal(sorted[0]._rowIdx, 'opp_0', 'USD 候选丰富排第一');
+    assert.equal(sorted[1]._rowIdx, 'opp_1');
+  });
+
+  test('business 子模式：currency 过滤直通 → candidates 不被 currency 过滤', () => {
+    const rightRows = [
+      { _rowIdx: 'opp_0', Amount: 100, BillDate: '2026-05-22', currency: 'USD' },
+      { _rowIdx: 'opp_1', Amount: 100, BillDate: '2026-05-22', currency: 'CNY' }
+    ];
+    const leftRows = [
+      { _rowIdx: 'main_0', Amount: 50, BillDate: '2026-05-22', Currency: 'USD' },
+      { _rowIdx: 'main_1', Amount: 50, BillDate: '2026-05-22', Currency: 'USD' }
+    ];
+    const sorted = sortRightRowsForManyToOne({
+      rightRows, leftRows, rightAmountField: 'Amount',
+      otherFieldPairs: [], billDateMode: 'strict', billDateDays: 1,
+      pairedLeft: new Set(), pairedRight: new Set(),
+      cfg: { _subMode: 'business' }
+    });
+    // business 子模式不过滤 currency → 两个 right 的 candidates 都是 2
+    // 同金额同 count → 输入顺序保持
+    assert.equal(sorted[0]._rowIdx, 'opp_0');
+    assert.equal(sorted[1]._rowIdx, 'opp_1');
   });
 });
