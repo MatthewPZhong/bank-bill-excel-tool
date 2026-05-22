@@ -924,18 +924,27 @@
   - 升格 Important-skeleton：`AppDatabase.init` / `updateStatusBox`
 - ☑ **T14-F PR body 完整草稿**：粘贴给用户用 gh pr create
 
-**team-lead 工作（用户负责执行）**：
-- ☐ **T14-G version bump**：`package.json` 2.1.6 → 2.1.7 + `package-lock.json` 同步
-- ☐ **T14-H 三件套文档更新**：
-  - `CHANGELOG.md` — 新增 v2.1.7 段（6 项需求 + round 2 R1-R5 + R6a-R6c + round 3 B1-B5+F4+F8 + round 4 B1+B2+B4 + round 5 B1+B4 + round 6 B4 + 资金红线声明 F2/F4/F7-A1/F8/R5 + 全局 PRAGMA + 状态框「：」全局换行 + F4 重命名扇出；**不提 F5**）
+**team-lead 工作（已全部完成；commit 见 PR #51）**：
+- ☑ **T14-G version bump**：`package.json` 2.1.6 → 2.1.7（commit 10116f1）+ `package-lock.json` 同步到 2.1.7（commit 2fe0b77 round 10 补，npm install --package-lock-only）
+- ☑ **T14-H 三件套文档更新**（commit 10116f1）：
+  - `CHANGELOG.md` — 新增 v2.1.7 段（6 项需求 + round 2/3/4/5/6 + 资金红线 F2/F4/F7-A1/F8/R5 + 全局 PRAGMA + R3 状态框换行 + F4 重命名扇出；不提 F5）；round 10 (commit 2fe0b77) 删 F2/F8 已修边界 case + 新增「已在本 PR round 8/9 闭环」段
   - `docs/VERSION_FEATURE_HISTORY.md` — 同上
-  - `docs/USER_GUIDE.md` — F4 改名当前章节 + F6 进度反馈说明 + F7 WAL 旁文件备份提示 + R3 状态框换行说明（可选 1 句）+ F1 AND/OR 切换说明 + F8 第 2 sheet 命名 + 未命中规则数据范围说明；**F4 历史段不动 / F5 不提**
-- ☐ **T14-I rules/important-variables.md 落盘**（PM 已起草，team-lead commit）
-- ☐ **T14-J commit + push + PR**：
-  - commit message：`[v2.1.7] release: 6 项主功能 + B5 wiring 加固 + F8 dispatcher 第 2 sheet`
-  - PR body 用 PM 起草草稿
-  - 等用户显式"提 PR" → 才能 push + gh pr create（按 memory `workflow_no_tester_no_auto_pr`）
-- ☐ **T14-K PR 草稿归档**：按 memory `workflow_archive_pr_draft`，提 PR 后将 `docs/prs/待merge-PR #NN.md` 改名 `PR{N}-v2.1.7.md` + 加 `integrated: true`
+  - `docs/USER_GUIDE.md` — §五 v2.1.7 新增能力（§5.1 WAL 旁文件备份 + §5.2-5.7 F6/F7/F8/R3/F1/F2/F4/B4）
+- ☑ **T14-I rules/important-variables.md 落盘**（commit d337068 PM 同步起草 + team-lead 一并 commit 10 升格条目）
+- ☑ **T14-J commit + push + PR**：
+  - PM docs commit d337068 + team-lead release commit 10116f1（按 PM 建议拆 2 个 commit）
+  - 用户显式说"提 PR" 后 push origin v2.1.7 + gh pr create
+  - PR #51 created: https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/51
+- ☑ **T14-K PR 草稿归档**（commit e7604b0 mv + 070c0b9 YAML 回填）：
+  - `docs/prs/待merge-PR #51.md` → `docs/prs/PR51-v2.1.7.md`
+  - YAML 回填 `pr_url` + `status: open` + `integrated: true` + `opened_at` + `opened_by` + `total_commits: 42`
+
+**T14 后 PR review 反馈循环（round 7-10，44-47 commit）**：
+- ☑ **round 7**（commit 2781d7c）：F2 gw 误消费 + F8 sheet 不落盘 + PRD trailing whitespace（Codex review + reviewer Finding 1/2）
+- ☑ **round 8**（commit c142e45）：F8 saveDialog 触发条件 follow-up（reviewer round 2 Finding 1，对齐 AC-F8-5）
+- ☑ **round 9**（commit e1264ae）：F2 空 gw / 已等值 gw 卡池双方向（reviewer round 3 Finding 1，方案 A filter + B lock）
+- ☑ **round 10**（commit 2fe0b77）：package-lock 同步 + CHANGELOG 已知 case 闭环（reviewer round 4 P2/P3）
+- ☑ **round 11**（本 commit）：tasks T14 收口标 ☑ + PR draft Test plan 勾选 + smoke 数 19→22（reviewer round 5 Finding 1/2）
 
 ### 原 T14 字段（保留作 reference）
 - **改动文件**：
