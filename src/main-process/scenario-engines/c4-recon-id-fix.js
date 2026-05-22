@@ -767,6 +767,48 @@ function tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode,
   }
 }
 
+// v2.1.8 F5 T10（spec.md F5-D2）：tryManyToOnePool 遍历顺序复合排序
+//
+//   v2.1.7 根因 #3：按 rightRows 原数组顺序遍历 → 大金额 right 排后面，
+//                  对应大 left 子池被前面小渠道抢光（TEST2.xlsx T54SWIC470181 4M 被 1M 抢光）
+//   修复：金额降序主键 → 大金额优先消费 left 池
+//         同金额：candidates pool size 降序（spec F5-D2 "子集大小降序"代理 — right 行无法预知子集大小，
+//                 用 candidates count 近似；子集必为 candidates 的子集，pool 大的更可能找到大子集）
+//   性能优化：预 build rightCandidatesCount Map，避免 sort comparator 内 O(n) filter
+//   注：count 是 sort 起始时的 snapshot（pairedLeft 在遍历中变化但排序已锁；可接受）
+//   独立 export 供 unit case 测试
+function sortRightRowsForManyToOne({
+  rightRows, leftRows, rightAmountField, otherFieldPairs,
+  billDateMode, billDateDays, pairedLeft, pairedRight
+}) {
+  const rightCandidatesCount = new Map();
+  for (const r of rightRows) {
+    if (pairedRight.has(r._rowIdx)) {
+      rightCandidatesCount.set(r._rowIdx, -1);
+      continue;
+    }
+    let count = 0;
+    for (const l of leftRows) {
+      if (pairedLeft.has(l._rowIdx)) continue;
+      if (!billDateMatches(l.BillDate, r.BillDate, billDateMode, billDateDays)) continue;
+      if (!rowsMatchOtherFieldPairs(l, r, otherFieldPairs)) continue;
+      count++;
+    }
+    rightCandidatesCount.set(r._rowIdx, count);
+  }
+  return rightRows.slice().sort((a, b) => {
+    const aPaired = pairedRight.has(a._rowIdx) ? 1 : 0;
+    const bPaired = pairedRight.has(b._rowIdx) ? 1 : 0;
+    if (aPaired !== bPaired) return aPaired - bPaired; // 未配对优先
+    const aCents = toCents(a[rightAmountField]) || 0;
+    const bCents = toCents(b[rightAmountField]) || 0;
+    if (aCents !== bCents) return bCents - aCents; // 金额降序（主键）
+    const aPool = rightCandidatesCount.get(a._rowIdx) || 0;
+    const bPool = rightCandidatesCount.get(b._rowIdx) || 0;
+    return bPool - aPool; // candidates count 降序（子集大小代理）
+  });
+}
+
 // Round 4：池子 多v1 — subset-sum(候选主.Amount) === 从.Amount
 // 候选过滤：BillDate（按 mode）+ 除 Amount 外其他 fieldPairs AND 全等
 function tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode,
@@ -780,7 +822,15 @@ function tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode,
   const otherFieldPairs = (fieldPairs || []).filter(
     (fp) => fp && fp !== amountPair && !(fp.locked === true)
   );
-  for (const rightRow of rightRows) {
+
+  // v2.1.8 F5 T10（spec.md F5-D2）：遍历顺序复合排序（金额降序 + candidates pool size 降序）
+  const sortedRightRows = sortRightRowsForManyToOne({
+    rightRows, leftRows, rightAmountField,
+    otherFieldPairs, billDateMode, billDateDays: cfg._billDateDays,
+    pairedLeft, pairedRight
+  });
+
+  for (const rightRow of sortedRightRows) {
     if (pairedRight.has(rightRow._rowIdx)) continue;
     lastStepByRight.set(rightRow._rowIdx, stepLabel);
     const candidates = leftRows.filter((l) =>
@@ -1231,5 +1281,6 @@ module.exports = {
   collectUnmatchedRows,
   tryOneToOne,
   tryOneToManyPool,
-  tryManyToOnePool
+  tryManyToOnePool,
+  sortRightRowsForManyToOne // v2.1.8 F5 T10 暴露给 unit case
 };

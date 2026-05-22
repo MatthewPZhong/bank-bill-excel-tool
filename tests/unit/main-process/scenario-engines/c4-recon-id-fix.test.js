@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const {
   normalizeBillDateValue,
   parseBillDateMs,
-  findBestAmountSubset
+  findBestAmountSubset,
+  sortRightRowsForManyToOne
 } = require('../../../../src/main-process/scenario-engines/c4-recon-id-fix');
 
 // 测试 helper：构造 candidates 数组，每个元素 cents 由参数控制
@@ -246,5 +247,121 @@ test.describe('findBestAmountSubset — 性能护栏（spec.md F5-D5）', () => 
     } finally {
       console.warn = originalWarn;
     }
+  });
+});
+
+// ========================================================================
+// v2.1.8 F5 T10 — tryManyToOnePool 遍历顺序复合排序（金额降序 + candidates count 降序）
+// ========================================================================
+
+// 测试 helper：构造 right 行（rightField='Amount' 默认）
+function makeRight(rows) {
+  // rows: [{idx, amount, billDate?}]
+  return rows.map(({ idx, amount, billDate }) => ({
+    _rowIdx: `opp_${idx}`,
+    Amount: amount,
+    BillDate: billDate || '2026-05-22'
+  }));
+}
+// 测试 helper：构造 left 行
+function makeLeft(rows) {
+  return rows.map(({ idx, amount, billDate }) => ({
+    _rowIdx: `main_${idx}`,
+    Amount: amount,
+    BillDate: billDate || '2026-05-22'
+  }));
+}
+
+test.describe('sortRightRowsForManyToOne — 复合排序 (spec.md F5-D2)', () => {
+  const noFilter = {
+    rightAmountField: 'Amount',
+    otherFieldPairs: [],
+    billDateMode: 'strict',
+    billDateDays: 1,
+    pairedLeft: new Set(),
+    pairedRight: new Set()
+  };
+
+  test('金额降序：大金额 right 排前面（root case — TEST2.xlsx T54SWIC470181 4M 优先消费 left 池）', () => {
+    const rightRows = makeRight([
+      { idx: 0, amount: 100 },   // 原数组小金额排前面
+      { idx: 1, amount: 4000000 }, // 4M 排后面 → v2.1.7 被前面渠道抢光
+      { idx: 2, amount: 1000000 }  // 1M
+    ]);
+    const leftRows = makeLeft([
+      { idx: 0, amount: 50 }, { idx: 1, amount: 50 },
+      { idx: 2, amount: 2000000 }, { idx: 3, amount: 2000000 }
+    ]);
+    const sorted = sortRightRowsForManyToOne({ rightRows, leftRows, ...noFilter });
+    assert.equal(sorted[0]._rowIdx, 'opp_1', '4M 应该排第一（金额降序）');
+    assert.equal(sorted[1]._rowIdx, 'opp_2', '1M 应该排第二');
+    assert.equal(sorted[2]._rowIdx, 'opp_0', '100 排最后');
+  });
+
+  test('同金额：candidates pool size 降序（spec F5-D2 子集大小代理）', () => {
+    const rightRows = makeRight([
+      { idx: 0, amount: 100, billDate: '2026-05-22' },
+      { idx: 1, amount: 100, billDate: '2099-12-31' } // billDate 远离 → candidates=0
+    ]);
+    const leftRows = makeLeft([
+      { idx: 0, amount: 50, billDate: '2026-05-22' },
+      { idx: 1, amount: 50, billDate: '2026-05-22' },
+      { idx: 2, amount: 50, billDate: '2026-05-22' }
+    ]);
+    const sorted = sortRightRowsForManyToOne({ rightRows, leftRows, ...noFilter });
+    // opp_0 同 BillDate → candidates=3；opp_1 异 BillDate → candidates=0
+    // 同金额 100 → 按 candidates 降序 → opp_0 优先
+    assert.equal(sorted[0]._rowIdx, 'opp_0');
+    assert.equal(sorted[1]._rowIdx, 'opp_1');
+  });
+
+  test('pairedRight 中的行排到最后', () => {
+    const rightRows = makeRight([
+      { idx: 0, amount: 100 },
+      { idx: 1, amount: 4000000 },  // 4M 但已配对
+      { idx: 2, amount: 1000 }
+    ]);
+    const leftRows = makeLeft([{ idx: 0, amount: 50 }, { idx: 1, amount: 50 }]);
+    const sorted = sortRightRowsForManyToOne({
+      ...noFilter, rightRows, leftRows,
+      pairedRight: new Set(['opp_1']) // 4M 已配对
+    });
+    assert.equal(sorted[2]._rowIdx, 'opp_1', '已配对的 4M 应排到最后');
+    assert.equal(sorted[0]._rowIdx, 'opp_2', '1000 最大未配对，排第一');
+  });
+
+  test('pairedLeft 影响 candidates count 计算', () => {
+    const rightRows = makeRight([
+      { idx: 0, amount: 100, billDate: '2026-05-22' },
+      { idx: 1, amount: 100, billDate: '2026-05-22' }
+    ]);
+    const leftRows = makeLeft([
+      { idx: 0, amount: 50 }, { idx: 1, amount: 50 }, { idx: 2, amount: 50 }
+    ]);
+    // pairedLeft 包含 main_0 + main_1 → 只剩 main_2 可用 → 两个 right 都只有 1 candidate
+    // → candidates count 相同 → 按 sort stable 保持原顺序
+    const sorted = sortRightRowsForManyToOne({
+      ...noFilter, rightRows, leftRows,
+      pairedLeft: new Set(['main_0', 'main_1'])
+    });
+    assert.equal(sorted.length, 2);
+    // 同 amount 同 candidates → 输入顺序保持
+    assert.equal(sorted[0]._rowIdx, 'opp_0');
+    assert.equal(sorted[1]._rowIdx, 'opp_1');
+  });
+
+  test('rightRows 空 → 返回空数组（不应抛错）', () => {
+    const sorted = sortRightRowsForManyToOne({ ...noFilter, rightRows: [], leftRows: [] });
+    assert.deepEqual(sorted, []);
+  });
+
+  test('原数组不被修改（稳定 slice）', () => {
+    const rightRows = makeRight([
+      { idx: 0, amount: 100 },
+      { idx: 1, amount: 1000 }
+    ]);
+    const originalOrder = rightRows.map((r) => r._rowIdx);
+    sortRightRowsForManyToOne({ ...noFilter, rightRows, leftRows: [] });
+    assert.deepEqual(rightRows.map((r) => r._rowIdx), originalOrder, '原数组顺序应不变');
   });
 });
