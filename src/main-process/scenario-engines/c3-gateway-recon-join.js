@@ -133,32 +133,45 @@ function runC3Scenario(scenario, bankRows, gwRows) {
 
   bankRowsFiltered.forEach((bankRow, index) => {
     const rowId = ensureRowId(bankRow, index);
-    // candidates 仅保留"未被前面 bank 行消费"且"reconFields AND 匹配"的 gw 行
+    // candidates 三层过滤（v2.1.7 round 9 F2 fix，PR #51 reviewer round 3 Finding 1）：
+    //   1. 未被前面 bank 行消费（!usedGwRowIdx.has）
+    //   2. reconFields AND 匹配
+    //   3. **gw 字段非空**（方案 A：不可写的 gw 不进候选，避免"空 gw 反复被选 → 永远轮不到有效 gw"）
     const matched = gwRowsFiltered
       .map((g, gIdx) => ({ row: g, gIdx }))
-      .filter((x) => !usedGwRowIdx.has(x.gIdx) && gwMatchesBank(x.row, bankRow, reconFields));
+      .filter((x) =>
+        !usedGwRowIdx.has(x.gIdx)
+        && gwMatchesBank(x.row, bankRow, reconFields)
+        && normalizeCellValue(x.row[assign.gwField]) !== ''
+      );
     if (matched.length === 0) return;
 
     if (matched.length > 1) {
       warningCollector.push({
         rowId,
         code: 'multi-gateway-match',
-        message: `bankRow 在网关账单中匹配到 ${matched.length} 行（未用），取第一条（数据脏）`
+        message: `bankRow 在网关账单中匹配到 ${matched.length} 行（未用 + 非空），取第一条（数据脏）`
       });
     }
     const chosen = matched[0];
 
+    // 上方 filter 已保证 chosen.row[assign.gwField] 非空，此处 newValue 必非空
     const newValue = normalizeCellValue(chosen.row[assign.gwField]);
-    if (newValue === '') return; // 网关账单的源字段为空 → 不写入（gw 不标记已用，留给后续 bank）
 
     const oldValue = normalizeCellValue(bankRow[assign.bankField]);
-    if (oldValue === newValue) return; // 值未变，不算修改（gw 不标记已用）
+    if (oldValue === newValue) {
+      // v2.1.7 round 9 F2 fix（PR #51 reviewer round 3 Finding 1）方案 B：
+      //   bank 已经等于 gw 的值（无需 record 修改），但**仍要 lock + 消费 gw**：
+      //   - lock 防其它场景误改这条 bank（first-match-wins 红线）
+      //   - 消费 gw 让后续 bank 不再选中同一条 gw（严格 1v1 红线）
+      modCollector.lock(rowId);
+      usedGwRowIdx.add(chosen.gIdx);
+      return;
+    }
 
     bankRow[assign.bankField] = newValue;
     modCollector.record(rowId, assign.bankField, oldValue, newValue);
-    // v2.1.7 round 7 F2 fix（PR #51 Codex P1 / self-review C-2）：
-    //   gw 行标记已用必须在"确认能写值"之后，避免 gw 被白白消耗（newValue=='' / oldValue==newValue 兜底 return 时）
-    //   导致后续 bank 行的同金额 gw 候选池少一条 → 错失匹配（dirty-data 真实回归 bug）
+    // gw 标记已用（round 7 fix：在确认能写值 + record 之后；round 9 fix：oldValue==newValue 分支已上方提前 add）
     usedGwRowIdx.add(chosen.gIdx);
   });
 
