@@ -2,12 +2,12 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.10（2026-05-21 — round 5 用户测试 round 4 后反馈 2 项未通过 + 1 项 B1 微调：B1 round 4 字号 / Layout 正确，但用户要求去掉"（同时满足）/（满足任一）"文本，提示移到 tooltip / B4 round 4 加 `.big-account-split-left/right min-height: 0` 仍不能滚动 — PM 二次 grep 锁定**第 3 层 flex 嵌套坑**：`.big-account-file-list/order-list` 缺 `min-height: 0` / B2 跟随 B4 修好后才能验证）；v0.9 = round 4；v0.1-0.8 略 |
+| 文档版本 | v0.11（2026-05-22 — T14 收口 + round 6 B4 真根因 + round 7-11 PR review 反馈循环；49 commit ahead main，PR #51 OPEN；详 §22 v0.11 entry + §23 实施记录）；v0.10（2026-05-21 — round 5 用户测试 round 4 后反馈 2 项未通过 + 1 项 B1 微调：B1 round 4 字号 / Layout 正确，但用户要求去掉"（同时满足）/（满足任一）"文本，提示移到 tooltip / B4 round 4 加 `.big-account-split-left/right min-height: 0` 仍不能滚动 — PM 二次 grep 锁定**第 3 层 flex 嵌套坑**：`.big-account-file-list/order-list` 缺 `min-height: 0` / B2 跟随 B4 修好后才能验证）；v0.9 = round 4；v0.1-0.8 略 |
 | 目标版本 | `v2.1.7`（patch） |
 | 起始版本 | `v2.1.6`（main 含 v2.1.6 + 3 个 fix） |
 | 起草日期 | 2026-05-20 |
 | 起草人 | PM |
-| 状态 | 定稿（v0.10）— B1 round 5 + B4 round 5 立即入 Dev；B2 跟随 B4 修好后用户实测决定 round 6 走路径 B 与否 |
+| 状态 | 定稿（v0.11）— round 6 B4 真根因 + T14 收口 + round 7-11 PR review 反馈循环全闭环；PR #51 OPEN |
 | 关联文档 | `spec.md` v0.8 / `tasks.md` v0.7 |
 | 涉及模块 | 银行对账单处理（C1/C2/C3）+ 网银账单生成（大账号 UI）+ 收单单据币种校验（状态框进度 + SQL 调优 + 系统通知）+ **全局数据库（F7-A1 PRAGMA 影响 3 套业务引擎：bank-bu-recon / biz-op-recon / acquiring-bill-currency）**。**F5 涉及的 C4 gateway 子模式延期 v2.1.8** |
 | 工作分支 | `v2.1.7`（基于 `main`，PR 向 `v2.1.7 → main`） |

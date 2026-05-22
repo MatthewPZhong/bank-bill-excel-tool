@@ -939,7 +939,7 @@
   - `docs/prs/待merge-PR #51.md` → `docs/prs/PR51-v2.1.7.md`
   - YAML 回填 `pr_url` + `status: open` + `integrated: true` + `opened_at` + `opened_by` + `total_commits: 42`
 
-**T14 后 PR review 反馈循环（round 7-10，44-47 commit）**：
+**T14 后 PR review 反馈循环（round 7-11，44-48 commit）**：
 - ☑ **round 7**（commit 2781d7c）：F2 gw 误消费 + F8 sheet 不落盘 + PRD trailing whitespace（Codex review + reviewer Finding 1/2）
 - ☑ **round 8**（commit c142e45）：F8 saveDialog 触发条件 follow-up（reviewer round 2 Finding 1，对齐 AC-F8-5）
 - ☑ **round 9**（commit e1264ae）：F2 空 gw / 已等值 gw 卡池双方向（reviewer round 3 Finding 1，方案 A filter + B lock）
