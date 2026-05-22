@@ -1,11 +1,11 @@
 # v2.1.8 迭代清单（Backlog）
 
 > 立项阶段清单，spec 评审启动后逐项展开为 PRD-v2.1.8.md / spec.md / tasks.md。
-> 来源：v2.1.7 PRD §十「F5 延期 + A3 联合」预告 + 本次（2026-05-22）用户新增 G1。
+> 来源：v2.1.7 PRD §十「F5 延期 + A3 联合」预告 + 2026-05-22 用户新增 G1 + 2026-05-22 用户新增 N1/N2/N3。
 
 ## 主题概览
 
-v2.1.8 双线绑定 + 工程基建一线，共 **4 个独立条目**：
+v2.1.8 双线绑定 + 工程基建一线 + 3 项功能/缺陷，共 **7 个独立条目**：
 
 | 编号 | 主题 | 性质 | 风险 | 工期预估 | 来源 |
 |---|---|---|---|---|---|
@@ -13,8 +13,11 @@ v2.1.8 双线绑定 + 工程基建一线，共 **4 个独立条目**：
 | **A3** | `acquiringBillCurrency.runCheck` 搬到 worker_threads / utilityProcess | 架构级 · 跨进程 IPC | 🔴 HIGH | ~1-1.5 周 | v2.1.7 PRD §10.6 / §12.1.3 联合主题 |
 | **A4** | SQL JOIN chunked LIMIT/OFFSET 分批跑（与 A3 联合决策） | 性能优化 | 🟡 MID | 与 A3 合并评估 | v2.1.7 PRD §12.1.3 留挂 |
 | **G1** | 引入单元测试框架 + 全量铺设 unit test | 工程基建 · 测试基础设施 | 🟢 LOW | ~1-2 周（按"全量铺"口径） | 2026-05-22 用户立项 |
+| **N1** | 收单单据币种校验：两种导入表 cleanup 动作置后执行 | 性能优化 · cleanup 时机 | 🟡 MID（待澄清"置后"语义） | ~0.5-1 天 | 2026-05-22 用户立项 |
+| **N2** | 场景管理 — From 网关 — 对账成立后赋值：第二下拉框新增"自取值" + 输入框 | 功能增强 · UI + 引擎 + DB migration | 🟡 MID | ~1-2 天 | 2026-05-22 用户立项 |
+| **N3** | 银行对账单处理：(1) 状态框命中场景号与 UI 序号不一致修复；(2) 新增"处理后行数据 + 命中场景"列导出 | 缺陷修复 + 功能增强 | 🟡 MID | ~1-2 天 | 2026-05-22 用户立项 |
 
-**资金红线提醒（CLAUDE.md 规则 7）**：F5 + A3 + A4 三条都涉及资金 / 对账 / 状态机变更，spec 阶段必须有专门 reviewer。G1 不动业务代码，但 unit case 一旦落地会**钉死现有金额/币种/对账契约**，PR review 需关注 case 期望值的准确性。
+**资金红线提醒（CLAUDE.md 规则 7）**：F5 + A3 + A4 三条都涉及资金 / 对账 / 状态机变更，spec 阶段必须有专门 reviewer。G1 不动业务代码，但 unit case 一旦落地会**钉死现有金额/币种/对账契约**，PR review 需关注 case 期望值的准确性。N2/N3 触及对账配置/对账结果导出，属于对账契约边缘，spec 阶段需 review。
 
 ---
 
@@ -196,6 +199,246 @@ F5 算法重设过程中产生的"输入 → 期望输出"对，**直接落成 c
 
 ---
 
+## N1 — 收单单据币种校验：两种表 cleanup 置后执行
+
+**用户原话**：「收单单据币种校验模块两种表的 cleanup 的动作置后执行」
+
+### 代码现状（PM 调研 2026-05-22）
+
+**两张表（实际共涉及 3 张）**：
+- `acquiring_bill_currency_flow_imports` — 收单流水表（48 列）
+- `acquiring_bill_currency_bill_imports` — 收单单据表（26 列）
+- `acquiring_bill_currency_diff_rows` — 差异行结果表（cleanup 时一起清）
+
+**cleanup 函数**：
+- `cleanupAfterRunBackground`：`src/main-process/acquiring-bill-currency-session.js:278`
+- `cleanupOrphanData`：`src/main-process/acquiring-bill-currency-session.js:329`（启动期孤儿清理，与本需求**无关**）
+
+**cleanup 当前调用点**：
+- 对账后异步清理：`src/main.js:10307`（`acquiringBillCurrency:run` IPC handler 内，runCheck return 后 `setImmediate` 触发）
+- 启动期孤儿清理：`src/main.js:10527`（migration 完成后 `setImmediate`）
+
+**runCheck 6 阶段流水**：
+```
+P1: clearing-old-runs      → clearRunsByMonth 清历史
+P2: computing-stats        → 计算本月 flow/bill 统计
+P3: inserting-run          → 插入新 run 记录
+P4: sql-joining            → SQL JOIN 写 diff_rows
+P5: writing-xlsx           → 生成 diff.xlsx + report.xlsx
+P6: updating-paths         → 回填文件路径
+→ handler return 后 setImmediate → cleanupAfterRunBackground（异步分批清 3 张表）
+```
+
+### 用户决策（2026-05-22）
+
+✅ **采用解读 B**：移出对账链路，改延后触发。
+
+### 改动点（解读 B）
+
+- [ ] runCheck return 后**不再立即触发** `cleanupAfterRunBackground`，仅打 `cleanupPending=true` 标志
+- [ ] 标志位持久化到 SQLite（settings 表或 runs 表新列）—— 应用退出也不丢
+- [ ] 接入选定触发时机的钩子（详见下方"待澄清")
+
+### 待澄清（B 内部子决策）
+
+**用户反问 Q1（2026-05-22）**：「下次进入模块时清——清的过程会卡吗？」
+
+**PM 读代码回答**（`acquiring-bill-currency-session.js:275-318` + `main.js:204-222`）：
+- UI 渲染层：**不卡**（每批 50000 + `setImmediate` 让出 + 单批短事务）
+- mutex lock 层：**间接卡**——用户进入模块想立即按"导入/运行"，会被 mutex 挡到 cleanup 完成（500w 行约 20-40 秒/表，3 表合计可能 1 分钟级）
+
+**PM 重新倾向（推翻原 (1)+(2) 组合）**：
+
+| 方案 | 触发点 | 用户感知 | PM 推荐 |
+|---|---|---|---|
+| α | 进入模块时清 + UI 显示进度 + 按钮 disable | 看见状态但等待感强 | |
+| **β** | **应用退出时清**（`app.before-quit`）为主 + 进入模块时为兜底 | 主路径 0 感知，退出多等几十秒可接受 | ✅ |
+| γ | 进入模块 + N 秒无操作触发（idle callback） | 感知最小但实现复杂 | |
+
+**用户拍板（2026-05-22）**：✅ **β** — 应用退出时清为主（`app.before-quit`）+ 进入模块时为兜底。
+
+### 改动点细化（β 方案）
+
+- [ ] `app.before-quit` 钩子：检测 `cleanupPending=true` → 阻塞退出（`event.preventDefault()`）→ 弹"正在清理上次结果..."进度框 → cleanup 完成后 `app.quit()`
+- [ ] 进入模块兜底：用户切到收单单据币种校验模块时，main.js handler 检查 `cleanupPending=true` → 若有，触发后台 cleanup（保持 v2.1.7 setImmediate 异步模式）+ UI 仅 toast 提示不阻断
+- [ ] `cleanupPending` 持久化：建议存 SQLite `acquiring_bill_currency_runs` 表新列 `cleanup_pending INTEGER DEFAULT 0`，runCheck 成功后 SET=1，cleanup 完成 SET=0
+- [ ] runCheck 内 `setImmediate(cleanupAfterRunBackground)` 触发链路**移除**（main.js:10307），改为仅打标志位
+- [ ] 启动期 `cleanupOrphanData` 不变（已覆盖应用强杀场景，β 不影响）
+
+### 风险点
+
+- **DB 写锁竞争**：cleanup 异步分批 DELETE 每批自包含 `safeBegin/COMMIT`，置后不解决根本问题，反而推迟问题
+- **重试语义变化**：cleanup 推迟后，若用户重跑 runCheck，需确认 P1 `clearRunsByMonth` 是否覆盖未清的 diff_rows
+- **重要变量影响**：触及 `acquiring-bill-currency-session.js` Runtime-state 层多项
+
+---
+
+## N2 — 场景管理：From 网关「对账成立后赋值」新增"自取值"
+
+**用户原话**：「新增/修改场景 — 提取ReconId-From 网关中，"对账成立后赋值"的右侧第二个下拉框新增枚举值"自取值"，"自取值"置于下拉框枚举值列表从上向下数第二个；"对账成立后赋值"的右侧第二个下拉框的为"自取值"时，下拉框的右侧出现输入框」
+
+### 代码现状（PM 调研 2026-05-22）
+
+**场景类型 → 引擎**：
+- 场景类型：`gateway-recon-join`（C3）
+- 引擎文件：`src/main-process/scenario-engines/c3-gateway-recon-join.js`
+- 关键函数：`runC3Scenario()`（:68），赋值逻辑 :99-173
+
+**UI 位置**：
+- 对话框工厂：`src/renderer-dialogs.js:6103-6115`（C3 dialog）
+- 第二下拉框：`<select data-field="assign-bank">` —— 用户口中的"右侧第二个下拉框"
+- 事件绑定：`renderer-dialogs.js:6228-6233`
+
+**当前枚举值（45 项）**：
+- 来源常量：`src/constants/bank-statement-fields.js:60-63` 的 `BANK_STATEMENT_FIELDS_FOR_C3`
+- 字段：44 个标准银行字段 + 1 个虚拟字段「发生额绝对值」
+- preload 中也 inline 一份（需同步）
+
+**数据存储结构**：
+```js
+config_json.assign = {
+  gwField: "Amount",          // 网关字段
+  bankField: "Credit Amount"  // 银行字段（第二下拉当前值）
+}
+```
+
+**引擎读取逻辑**：`c3-gateway-recon-join.js:158-172` 直接 `chosen.row[assign.gwField]` 赋值
+
+**项目已有"下拉=X 时显示输入框"先例**：`renderer-dialogs.js:6420-6435`（C1 条件行 `opNeedsValue()` 模式）—— **可直接复用**
+
+### 改动点
+
+#### UI 层（`renderer-dialogs.js`）
+
+- [ ] 第二下拉框枚举列表插入「自取值」到从上往下第 2 位
+- [ ] 第二下拉框 change 事件新增分支：选「自取值」→ 右侧显示 `<input type="text">`
+- [ ] dialog 保存时收集 `customValue` 字段
+- [ ] dialog 打开时按 `assign.mode` 回显（"direct" → 隐藏 input，"custom" → 显示 input）
+
+#### 数据结构（`config_json.assign`）
+
+- [ ] 扩展为 `{ gwField, bankField, mode: 'direct' | 'custom', customValue: string }`
+- [ ] **数据库 migration 必需**：`src/backend/database/migrations.js` 新增 idempotent migration，扫描所有 scenarios 的 `config_json`，为旧 scenario 补 `assign.mode = 'direct'`
+
+#### 引擎层（`c3-gateway-recon-join.js`）
+
+- [ ] :158-172 新增分支：
+  ```js
+  const newValue = (assign.mode === 'custom')
+    ? assign.customValue
+    : normalizeCellValue(chosen.row[assign.gwField]);
+  ```
+
+#### 同步点
+
+- [ ] `src/preload.js` 中 inline 的 `BANK_STATEMENT_FIELDS_FOR_C3` 需同步（或评估是否能去重）
+- [ ] 场景模板 bundle 导出 v3 → 是否需要 bundleVersion 升 v4？（取决于旧版本能否 graceful 降级）
+
+### 用户决策（2026-05-22）
+
+✅ **采用 (a) 静态字符串**：用户填什么就赋什么，纯静态值。表达式/模板留 v2.1.9+。
+✅ **v2.1.8 就做**（不延期）。
+
+### 用户决策（2026-05-22 Q2）
+
+✅ **字段命名**：`assign.mode`（`'direct' | 'custom'`）+ `assign.customValue`（字符串）
+✅ **输入框校验**：不允许空（保存时校验报错）+ 200 字符上限 + 不限字符类型
+✅ **模板 bundle 版本**：继续 v3（向后兼容只追加字段，旧版本 reader 忽略走 direct 路径）
+
+### 风险点
+
+- **对账契约变更**：scenarios 数据结构升级，需保证 v2.1.7 老 scenario 自动 graceful 升级（用户场景库已沉淀，不能丢） → migration 补 `assign.mode='direct'`
+- **模板 bundle 兼容**：CLAUDE.md 已记录 `bundleVersion` v2→v3，需评估 N2 是否触发 v4（PM 评估：不需要，向前兼容）
+
+---
+
+## N3 — 银行对账单处理：场景号修复 + 新增导出列
+
+**用户原话**：
+- (1)「银行对账单处理对账后，状态框显示的命中场景号与场景管理里的序号对不上」
+- (2)「银行对账单处理对账后，还需生成一个 xlsx 文件，存放经过处理后的行数据，加一个字段显示命中了什么场景」
+
+### 代码现状（PM 调研 2026-05-22）
+
+**模块入口**：
+- Session：`src/main-process/bank-bu-recon-session.js:51` `runReconciliation()`
+- Dispatcher：`src/main-process/scenario-dispatcher.js:66` `runAllScenarios()`（first-match-wins 调度，v2.1.7 F8 扩展）
+- C4 独立流水线：`src/main-process/recon-id-fix-engine.js:12` `runReconIdFix()`
+- IPC：`src/main.js:3011` `bank-statement:run` handler
+
+### N3-1 现状 — 命中场景号不对齐根因
+
+| 端 | 编号来源 | 值示例 |
+|---|---|---|
+| **Main 端** | `scenario-dispatcher.js:99` → `hitScenarioIds.push(scenario.id)` **直接推 DB 自增 id** | `[1, 5, 7, 9]`（如场景表中部分被删除） |
+| **IPC 字段** | `main.js:3045` 返回 `stats.hitScenarioIds` | |
+| **Renderer 显示** | `renderer.js:3319` `已处理：xx 行命中（场景 ${ids.join('、')}）` **直接渲染 DB id** | "场景 1、5、7、9" |
+| **场景管理 UI 列表** | `renderer-dialogs.js:5506` 用 `displayIndex` (1-based 列表顺序) | "1、2、3、4"（同样 4 个场景） |
+
+**根因**：Main 端用 DB id，UI 列表用 displayIndex —— 两者编号体系不同。
+
+### N3-2 现状 — 处理后行数据 + 命中场景列
+
+**当前导出**：
+- **主输出** xlsx（用户 saveDialog 选路径）：
+  - Sheet 1「渠道对账单」（命中行）
+  - Sheet 2「未命中场景行」（v2.1.7 F8 新增）
+- **Error-report** xlsx（自动落 `exports/{date}/`）：5 列错误报告
+
+**行数据持有**：
+- 变量：`processingResult.modifiedRows`（`main.js:3032`）
+- **已有 metadata**：`_hitScenarioId` + `_hitScenarioName`（`scenario-dispatcher.js:141` 已附加）
+- 但 `exceljs-writer.js:25-29` 的 `INTERNAL_FIELDS` 过滤掉了 `_` 前缀字段 → Excel 不可见
+
+**与 v2.1.7 F8 关系**：N3-2 是 `exceljs-writer` 同一 writer 的**扩展**，不是新起独立 xlsx —— 复用现有第 2 sheet 机制 + 新增可见列。
+
+### 改动点
+
+#### N3-1（命中场景号修复）
+
+**方案二选一（用户拍板）**：
+
+| 方案 | 改动 | 优点 | 缺点 |
+|---|---|---|---|
+| **A** | Main 端推 displayIndex（按 scenarios 列表顺序的 1-based 编号） | UI 一致 | Main 端需查询 scenarios 列表算 displayIndex |
+| **B** | Renderer 端显示前查 scenarios 列表把 DB id 翻成 displayIndex | Main 端不动 | Renderer 多一次查询 |
+
+PM 倾向 A（场景编号是用户视角概念，应在数据源头统一）。
+
+- [ ] 修改 `scenario-dispatcher.js:99` 推送结构 `{ id, displayIndex, name }`
+- [ ] 修改 `renderer.js:3319` 显示 `displayIndex` 而非 `id`
+
+#### N3-2（新增 Sheet 3 — 用户决策 2026-05-22）
+
+✅ **采用：复用同一 xlsx，新增 Sheet 3** 放"处理后行数据 + 命中场景列"。
+
+**Sheet 1（渠道对账单）和 Sheet 2（未命中场景行）保持原状不动**，避免破坏 v2.1.6/v2.1.7 已稳定的输出格式。
+
+- [ ] 修改 `exceljs-writer.js`：新增 Sheet 3 写入分支
+- [ ] Sheet 3 数据源：`processingResult.modifiedRows`（已附 `_hitScenarioId` + `_hitScenarioName` metadata）
+- [ ] Sheet 3 列结构 = 原 44 列 banker headers + 末尾新增「命中场景」列
+- [ ] `INTERNAL_FIELDS` 过滤逻辑保留（其他下划线字段仍然过滤，仅"命中场景"通过显式列拼装）
+
+### 用户决策（2026-05-22）
+
+✅ **N3-2 方案**：复用 xlsx + 新增 Sheet 3（非 Sheet 1 加列，非独立 xlsx）
+
+### 用户决策（2026-05-22 Q3 + Q4）
+
+✅ **N3-1 方案**：A — Main 端推 `displayIndex`（源头统一，源数据 = `scenarios` 列表按顺序的 1-based 序号）
+✅ **N3-2 Sheet 3 命名**：`命中场景行`（与 Sheet 2 "未命中场景行" 对仗）
+✅ **N3-2 Sheet 3 范围**：只放 `modifiedRows`（命中行）
+✅ **N3-2 "命中场景"列位置**：末尾追加（44 列原 headers 之后）
+✅ **N3-2 "命中场景"列值格式**：`[序号] 场景名称`（与 N3-1 状态框文案对仗，序号同样用 displayIndex）
+
+### 风险点
+
+- **资金红线**：bank-bu-recon 是核心对账模块，N3-1 改 IPC 字段结构需 smoke 全跑
+- **modifiedRows + unmatchedRows = bankRows** 不变量已护栏，新增列不影响
+- **重要变量影响**：触及 `scenario-dispatcher.js` 的 `hitScenarioIds`、`exceljs-writer.js` 的 `INTERNAL_FIELDS` —— 至少 Important-skeleton 层 1 项
+
+---
+
 ## v2.1.8 spec 评审启动 checklist
 
 启动 v2.1.8 spec 评审时需要补齐：
@@ -203,10 +446,26 @@ F5 算法重设过程中产生的"输入 → 期望输出"对，**直接落成 c
 - [ ] 建立 `PRD-v2.1.8.md`（仿 v2.1.7 PRD 结构，每条目独立章节）
 - [ ] 建立 `spec.md`（资金红线评审输出）
 - [ ] 建立 `tasks.md`（task 颗粒拆分）
-- [ ] F5 / A3 / A4 / G1 顺序与并行带宽决策
-- [ ] 重新跑 `npm run scan:vars`，评估 c4-recon-id-fix 相关变量是否需升格
+- [ ] F5 / A3 / A4 / G1 / N1 / N2 / N3 顺序与并行带宽决策
+- [ ] 重新跑 `npm run scan:vars`，评估相关变量是否需升格
 - [ ] TEST.xlsx / TEST2.xlsx 是否纳入 fixture 库
+- [x] N1 "置后"语义 → **B：移出对账链路**（2026-05-22 用户拍板）
+- [x] **N1-B 触发时机** → **β：退出时清为主 + 进入时兜底**（2026-05-22 用户拍板）
+- [x] N2 "自取值"语义 → **(a) 静态字符串**（2026-05-22 用户拍板）
+- [x] N2 v2.1.8 范围 → **就做，不延期**（2026-05-22 用户拍板）
+- [x] N2 字段命名 → **`assign.mode` + `assign.customValue`**；输入框：不允许空 + 200 字符 + 不限字符（2026-05-22 用户拍板）
+- [x] N3-1 修复方案 → **A：Main 端推 displayIndex**（2026-05-22 用户拍板）
+- [x] N3-2 输出形态 → **复用同一 xlsx + 新增 Sheet 3**（2026-05-22 用户拍板）
+- [x] N3-2 Sheet 3 → 名"命中场景行" / 只放 modifiedRows / 末尾追加列 / `[序号] 场景名称`（2026-05-22 用户拍板）
+- [x] **整体并行带宽** → **v2.1.8 单版本走完 7 项**（2026-05-22 用户拍板）
 
 ---
 
-**当前状态**：立项 backlog，**v2.1.7 未合并 main 前不开始 v2.1.8 任何代码**（沿用 v2.1.7 PRD §10.6 约束）。
+**当前状态**：~~立项 backlog~~ → **已升级为 PRD/spec/tasks 三件套**（2026-05-22 v0.1）。本文件保留作为立项画像与决策溯源参考，不再更新。
+
+**升级后文档**：
+- `PRD-v2.1.8.md` v0.1 — 14 章节，含需求概述/版本目标/7 项功能详细/验收矩阵/风险汇总/三件套登记
+- `spec.md` v0.1 — 8 章节，含 27 个 spec 决策点（F5/A3/N1/N2/N3 资金红线评审）
+- `tasks.md` v0.1 — 42 个 task / 9 Phase / 依赖图
+
+**仍按 v2.1.7 PRD §10.6 约束**：v2.1.7 未合并 main 前不开始 v2.1.8 任何代码。

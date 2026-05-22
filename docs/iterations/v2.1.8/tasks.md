@@ -1,0 +1,461 @@
+# Tasks — v2.1.8 任务拆分
+
+| 字段 | 值 |
+|---|---|
+| 文档版本 | v0.1（2026-05-22，与 PRD-v2.1.8.md / spec.md v0.1 同步） |
+| 关联文档 | `PRD-v2.1.8.md` / `spec.md` |
+| 任务总数 | 38 |
+| 任务拆分原则 | 单 task 3-5 文件内（CLAUDE.md 小批次原则）；按文件粒度拆，避免 task 间共享文件 |
+
+---
+
+## 一、任务总览
+
+| 阶段 | task 数 | 累计工期 | 关键产出 |
+|---|---|---|---|
+| Phase 0 - 准备 | 3 | 1-2 天 | 分支 + scan:vars + fixture 归档 |
+| Phase 1 - G1 框架 | 4 | 3-5 天 | tests/unit/ + node:test 跑通 + 第 1 层 1 个示例文件 |
+| Phase 2 - F5 实现 | 5 | 4-5 天 | 算法重设 + smoke + G1 c4 unit case |
+| Phase 3 - G1 全量铺 | 6 | 5-7 天 | 第 1 层剩余 + 第 2 层全部 |
+| Phase 4 - N2 实现 | 5 | 2-3 天 | dialog + 引擎 + migration |
+| Phase 5 - N3 实现 | 4 | 2-3 天 | dispatcher + writer + IPC 字段 |
+| Phase 6 - N1 实现 | 5 | 2-3 天 | app.before-quit + migration + 兜底 |
+| Phase 7 - A3 实现 | 5 | 5-7 天 | worker + IPC 桥接 + smoke |
+| Phase 8 - A4 决策 | 1 | 0.5 天 | 做 / 不做评估 |
+| Phase 9 - 收尾 | 5 | 2-3 天 | 三件套 + check-vars + PR |
+
+---
+
+## 二、Phase 0 — 准备
+
+### T01 — 建立 v2.1.8 工作分支
+
+- **Owner**：用户
+- **依赖**：v2.1.7 → main 合并完成
+- **动作**：`git checkout main && git pull && git checkout -b v2.1.8`
+- **验收**：`git branch --show-current` = `v2.1.8`
+
+### T02 — 重跑 scan:vars 评估升格
+
+- **Owner**：PM
+- **依赖**：T01
+- **动作**：`npm run scan:vars`；对照 spec.md §七 升格建议，更新 `rules/important-variables.md`
+- **验收**：scan-vars 报告刷新 + important-variables 含 N1/N2/N3/F5/A3 涉及新条目
+
+### T03 — TEST.xlsx / TEST2.xlsx fixture 归档
+
+- **Owner**：PM
+- **依赖**：T01
+- **动作**：将 `/Users/pzhong/Desktop/小助手-Debug/2.1.7/` 下 TEST.xlsx / TEST2.xlsx 拷贝到 `scripts/fixtures/v2.1.8/`（或 `tests/unit/fixtures/`）
+- **验收**：文件存在 + smoke 可读
+
+---
+
+## 三、Phase 1 — G1 单元测试框架搭建
+
+### T04 — package.json 加 test:unit 脚本
+
+- **Owner**：Dev
+- **依赖**：T01
+- **文件**：`package.json`
+- **动作**：新增 `"test:unit": "node --test tests/unit/"` + `"test:unit:coverage": "node --test --experimental-test-coverage tests/unit/"`
+- **验收**：`npm run test:unit` 命令存在（即使无 case 也应正常退出）
+
+### T05 — 建立 tests/unit/ 目录结构（镜像 src）
+
+- **Owner**：Dev
+- **依赖**：T04
+- **文件**：`tests/unit/README.md` + `tests/unit/.gitkeep`
+- **动作**：建立目录骨架：
+  ```
+  tests/unit/
+    backend/
+      file-service/
+      database/
+      acquiring-bill-currency-db/
+      ...
+    main-process/
+      scenario-engines/
+    constants/
+    fixtures/
+  ```
+- **验收**：目录存在 + README 含目录说明 + 镜像 src 分层
+
+### T06 — 第 1 个 unit case 示例：normalizers.js
+
+- **Owner**：Dev
+- **依赖**：T05
+- **文件**：`tests/unit/backend/file-service/normalizers.test.js`
+- **动作**：用 `node:test` + `node:assert` 写第 1 批 case，覆盖日期归一 / 金额归一 / 币种归一 各 5+ case
+- **验收**：`npm run test:unit` 全绿 + case ≥ 15
+
+### T07 — G1 框架使用文档
+
+- **Owner**：PM
+- **依赖**：T06
+- **文件**：`tests/unit/README.md`（扩展）
+- **动作**：写 unit case 模板 + 命名规范 + fixture 复用模式 + 与 smoke 边界说明
+- **验收**：README 含示例 + 新人 30 分钟能上手
+
+---
+
+## 四、Phase 2 — F5 算法重设
+
+### T08 — BillDate 字符串化 fix
+
+- **Owner**：Dev
+- **依赖**：T01
+- **文件**：`src/main-process/recon-id-fix-io.js`
+- **动作**：`readRows` 入口 `raw:true` → `raw:false`（按 spec F5-D4）
+- **验收**：手测 TEST2.xlsx BillDate 列出来是字符串
+
+### T09 — findBestAmountSubset 放开 maxSize
+
+- **Owner**：Dev
+- **依赖**：T01
+- **文件**：`src/main-process/scenario-engines/c4-recon-id-fix.js`
+- **动作**：按 spec F5-D1 实现动态 maxSize（pool ≤ 12 → 全跑 / 12-20 → maxSize=12 / > 20 → maxSize=10 + warn）
+- **验收**：unit case 验证多档位行为
+
+### T10 — tryManyToOnePool 遍历顺序改造
+
+- **Owner**：Dev
+- **依赖**：T09
+- **文件**：`src/main-process/scenario-engines/c4-recon-id-fix.js`
+- **动作**：按 spec F5-D2 改"金额降序 + 子集大小降序"复合排序
+- **验收**：unit case 验证大渠道先消费
+
+### T11 — currency 字段过滤增强
+
+- **Owner**：Dev
+- **依赖**：T10
+- **文件**：`src/main-process/scenario-engines/c4-recon-id-fix.js`
+- **动作**：按 spec F5-D3 在候选池构造时加 currency 等值过滤
+- **验收**：unit case 验证候选池缩小
+
+### T12 — F5 smoke + unit case 沉淀
+
+- **Owner**：Dev + Tester
+- **依赖**：T11
+- **文件**：`scripts/test-v2.1.8-f5-baseline.js`（smoke）+ `tests/unit/main-process/scenario-engines/c4-recon-id-fix.test.js`（unit）
+- **动作**：
+  - smoke 跑 TEST2.xlsx → 期望 ≥ 57 行 / 10 渠道
+  - smoke 跑 TEST.xlsx → 期望 0 行（不应误升）
+  - smoke 跑 19 个 v2.1.7 suite → 0 regression
+  - unit case：spec §1.4 列表全部覆盖
+- **验收**：smoke 全绿 + unit ≥ 15 case
+
+---
+
+## 五、Phase 3 — G1 全量铺设
+
+### T13 — 第 1 层覆盖（剩余 13 文件）
+
+- **Owner**：Dev
+- **依赖**：T06
+- **文件**：见 PRD §7.4 第 1 层列表（normalizers 已在 T06）
+- **动作**：每文件按 spec/README 模板写 case，平均 10+ case/文件
+- **验收**：`npm run test:unit` 全绿 + 第 1 层 14 文件全有 case
+
+### T14 — 第 2 层覆盖：database/*-repository（3 文件）
+
+- **Owner**：Dev
+- **依赖**：T13
+- **文件**：`tests/unit/backend/database/{template,scenarios,settings}-repository.test.js`
+- **动作**：用 `:memory:` SQLite + migration setup 写 case
+- **验收**：CRUD case + migration idempotent case 全覆盖
+
+### T15 — 第 2 层覆盖：store 类（5 文件）
+
+- **Owner**：Dev
+- **依赖**：T13
+- **文件**：`tests/unit/backend/{balance-seed,balance-adjustment,big-account-mode,big-account-order,own-account}-store.test.js`
+- **动作**：用 tmpdir 写 case
+- **验收**：所有 store 增删改查 case
+
+### T16 — 第 2 层覆盖：reader/writer（2 文件 + fixture）
+
+- **Owner**：Dev
+- **依赖**：T13
+- **文件**：`tests/unit/backend/file-service/{readers,writers}.test.js` + `tests/unit/fixtures/sample-*.xlsx`
+- **动作**：写最小 xlsx fixture + case 覆盖正常 / 缺列 / 空表
+- **验收**：fixture + case 跑通
+
+### T17 — 第 2 层覆盖：业务 DB repository（11 文件）
+
+- **Owner**：Dev
+- **依赖**：T13
+- **文件**：`tests/unit/backend/{pending-db,acquiring-bill-currency-db,bank-bu-recon-db,biz-op-recon-db}/*.test.js`
+- **动作**：用 `:memory:` SQLite + 各模块 schema setup 写 case
+- **验收**：所有 repository 公开方法有 case
+
+### T18 — 第 2 层覆盖：main-process（3 文件）
+
+- **Owner**：Dev
+- **依赖**：T13 + T17
+- **文件**：`tests/unit/main-process/{monthly-balance,recon-id-fix-engine,statement-generation}.test.js`
+- **动作**：mock store + DB 写 case
+- **验收**：核心计算路径有 case
+
+---
+
+## 六、Phase 4 — N2 自取值实现
+
+### T19 — constants 新增"自取值"枚举
+
+- **Owner**：Dev
+- **依赖**：T01
+- **文件**：`src/constants/bank-statement-fields.js` + `src/preload.js`
+- **动作**：`BANK_STATEMENT_FIELDS_FOR_C3` 数组第 2 位插入 `{ value: '__CUSTOM__', label: '自取值' }`；preload 同步
+- **验收**：UI 下拉显示"自取值"在第 2 位
+
+### T20 — C3 dialog UI 改造
+
+- **Owner**：Dev
+- **依赖**：T19
+- **文件**：`src/renderer-dialogs.js`（C3 dialog factory 约 6103-6233）
+- **动作**：
+  - 第二下拉 change 事件：选 `__CUSTOM__` → 右侧显示 `<input maxlength="200">`
+  - 保存校验：mode='custom' && customValue 空 → 报错
+  - 打开时按 mode 回显
+- **验收**：preview 截图 + 手测
+
+### T21 — DB migration
+
+- **Owner**：Dev
+- **依赖**：T01
+- **文件**：`src/backend/database/migrations.js`
+- **动作**：幂等 migration 扫描 scenarios where category='gateway-recon-join'，对 config_json 缺 `assign.mode` 的补 `mode='direct'`
+- **验收**：unit case（启动 migration + 验证旧 scenario 升级）
+
+### T22 — C3 引擎赋值分支
+
+- **Owner**：Dev
+- **依赖**：T19 + T21
+- **文件**：`src/main-process/scenario-engines/c3-gateway-recon-join.js`（:158-172）
+- **动作**：加 `assign.mode === 'custom'` 分支
+- **验收**：unit case（mode='custom' 输出 customValue / mode='direct' 行为不变）
+
+### T23 — N2 smoke
+
+- **Owner**：Dev + Tester
+- **依赖**：T22
+- **文件**：`scripts/test-v2.1.8-n2-custom-assign.js`
+- **动作**：smoke 覆盖：
+  - 旧 scenario 升级 → 行为不变
+  - 新 scenario mode='custom' → 引擎赋值
+  - dialog 保存校验
+- **验收**：smoke 全绿
+
+---
+
+## 七、Phase 5 — N3 银行对账单修复 + Sheet 3
+
+### T24 — displayIndex 派发口径统一
+
+- **Owner**：Dev
+- **依赖**：T01
+- **文件**：`src/backend/database/scenarios-repository.js`
+- **动作**：按 spec §5.3 在 `listScenarios` 返回时附 `displayIndex` 字段（1-based 按 sort_order + id）
+- **验收**：unit case + grep 调用方
+
+### T25 — dispatcher + IPC 字段重命名
+
+- **Owner**：Dev
+- **依赖**：T24
+- **文件**：`src/main-process/scenario-dispatcher.js`（:99）+ `src/main.js`（:3045）
+- **动作**：
+  - `hitScenarioIds: [1, 5, 7]` → `hitScenarios: [{id, displayIndex, name}]`
+  - grep 全部调用方同步
+- **验收**：grep `hitScenarioIds` 零命中 + smoke
+
+### T26 — renderer 状态框文案改 displayIndex
+
+- **Owner**：Dev
+- **依赖**：T25
+- **文件**：`src/renderer.js`（:3319）
+- **动作**：状态框 ids 渲染改用 displayIndex
+- **验收**：手测对比场景管理 UI 序号
+
+### T27 — Sheet 3「命中场景行」写入
+
+- **Owner**：Dev
+- **依赖**：T25
+- **文件**：`src/main-process/exceljs-writer.js`（+ 可能 `bank-bu-recon-writer.js`）
+- **动作**：
+  - 新增 Sheet 3 写入分支
+  - 列结构 = 原 44 列 + 末尾「命中场景」列
+  - 列值格式 `[${displayIndex}] ${scenarioName}`
+  - `INTERNAL_FIELDS` 过滤逻辑保留，白名单显式拼装「命中场景」
+- **验收**：smoke + 手测 xlsx 第 3 sheet 列对齐
+
+---
+
+## 八、Phase 6 — N1 cleanup 移出对账链路（β）
+
+### T28 — DB schema migration + runs 表新列
+
+- **Owner**：Dev
+- **依赖**：T01
+- **文件**：`src/backend/database/migrations.js`
+- **动作**：幂等 migration `ALTER TABLE acquiring_bill_currency_runs ADD COLUMN cleanup_pending INTEGER DEFAULT 0`
+- **验收**：unit case（启动 + 旧库升级 + 字段存在）
+
+### T29 — run-repository 加 cleanup_pending 操作 API
+
+- **Owner**：Dev
+- **依赖**：T28
+- **文件**：`src/backend/acquiring-bill-currency-db/run-repository.js`
+- **动作**：新增 `markCleanupPending(db, runId)` / `clearCleanupPending(db, runId)` / `listPendingCleanupRuns(db)`
+- **验收**：unit case 覆盖三个 API
+
+### T30 — runCheck 解耦 + main.js 移除 setImmediate
+
+- **Owner**：Dev
+- **依赖**：T29
+- **文件**：`src/main-process/acquiring-bill-currency-session.js` + `src/main.js`（:10307）
+- **动作**：
+  - runCheck 成功后 `markCleanupPending`
+  - main.js:10307 移除 setImmediate(cleanupAfterRunBackground)
+- **验收**：手测 runCheck 后 DB 数据保留 + cleanup_pending=1
+
+### T31 — app.before-quit 钩子 + 进度模态框
+
+- **Owner**：Dev
+- **依赖**：T30
+- **文件**：`src/main.js` + `src/preload.js` + `src/renderer.js`
+- **动作**：
+  - main.js 加 `app.on('before-quit', async (event) => {...})`
+  - preload 加 `onCleanupQuitProgress` 订阅 API
+  - renderer 加退出进度模态框
+- **验收**：手测退出 → 弹模态框 → 清完才退出
+
+### T32 — 进入模块兜底 + N1 smoke
+
+- **Owner**：Dev + Tester
+- **依赖**：T31
+- **文件**：`src/main.js` acquiringBillCurrency IPC 入口 + `scripts/test-v2.1.8-n1-cleanup.js`
+- **动作**：
+  - IPC 入口检查 cleanupPending → 后台 cleanup + toast
+  - smoke 覆盖：runCheck → 标志位 / 退出触发 / 进入兜底 / 启动孤儿仍工作
+- **验收**：smoke 全绿
+
+---
+
+## 九、Phase 7 — A3 跨进程化
+
+### T33 — worker entry 搭建
+
+- **Owner**：Dev
+- **依赖**：T01
+- **文件**：`src/main-process/acquiring-bill-currency-worker.js`（新建）
+- **动作**：utilityProcess entry，包含 runCheck 主循环 + DB 重开 + PRAGMA 应用 + 进度回调 + 错误序列化 + 取消协议
+- **验收**：worker 独立可启动 + 收发消息
+
+### T34 — worker-host 单例 + IPC 桥接
+
+- **Owner**：Dev
+- **依赖**：T33
+- **文件**：`src/main-process/acquiring-bill-currency-worker-host.js`（新建）
+- **动作**：main 端单例，worker 异常退出自动重启；包装 postMessage / on-message
+- **验收**：worker 崩溃后自动重启
+
+### T35 — main.js handler 改 worker 调度
+
+- **Owner**：Dev
+- **依赖**：T34
+- **文件**：`src/main.js`（:10281）
+- **动作**：handler 改为通过 worker-host 调度；progress 透传到 renderer
+- **验收**：手测 500w 行主窗口仍可交互
+
+### T36 — A3 smoke
+
+- **Owner**：Dev + Tester
+- **依赖**：T35
+- **文件**：`scripts/test-v2.1.8-a3-worker.js`
+- **动作**：smoke 覆盖：
+  - 主进程不阻塞
+  - FileValidationError 跨进程保留
+  - 取消后 DB 无锁残留
+  - worker 崩溃自动重启
+  - 进度 5 阶段依次到达
+  - 19 个 v2.1.7 smoke suite 全跑
+- **验收**：smoke 全绿
+
+### T37 — A4 决策
+
+- **Owner**：PM
+- **依赖**：T36
+- **动作**：评估 A3 worker 是否已解决主进程不阻塞；做 / 不做决策；记录到 PRD-v2.1.8.md §六
+- **验收**：决策记录归档
+
+---
+
+## 十、Phase 9 — 收尾
+
+### T38 — 文档三件套更新
+
+- **Owner**：PM
+- **依赖**：所有 Phase 0-7 完成
+- **文件**：`CHANGELOG.md` + `docs/VERSION_FEATURE_HISTORY.md` + `docs/USER_GUIDE.md`
+- **动作**：v2.1.8 章节 + N1/N2/N3 用户视角说明
+- **验收**：三件套一致
+
+### T39 — check-vars 跑 + PR body 段落
+
+- **Owner**：PM
+- **依赖**：T38
+- **动作**：`npm run check:vars`；输出粘贴到 PR body
+- **验收**：check-vars 报告含 N1/N2/N3/F5/A3 涉及变量
+
+### T40 — preview 回归（前端改动）
+
+- **Owner**：Dev
+- **依赖**：T20（N2 dialog 改动）
+- **动作**：`npm run preview` + `npm run preview:* (相关入口)`
+- **验收**：preview 截图与 v2.1.7 对比（除 N2 dialog 外其他不变）
+
+### T41 — backlog 归档
+
+- **Owner**：PM
+- **依赖**：T39
+- **文件**：`docs/iterations/v2.1.8/backlog.md`
+- **动作**：末尾标"已升级为 PRD/spec/tasks，本文件归档参考"
+- **验收**：backlog 末尾有归档标记
+
+### T42 — package.json bump + PR
+
+- **Owner**：用户 / team-lead（按 memory `workflow_no_tester_no_auto_pr`）
+- **依赖**：T41
+- **动作**：用户明确说"提 PR" → bump 2.1.7 → 2.1.8 → 走标准 PR 流程
+- **验收**：PR OPEN + v2.1.7 → main 已合并
+
+---
+
+## 十一、依赖图（精简）
+
+```
+T01 (分支) ── T02 (scan:vars) ── T03 (fixture)
+  │
+  ├── Phase 1 (G1 框架)：T04 → T05 → T06 → T07
+  │     │
+  │     └── T13-T18 (G1 全量铺，可并行)
+  │
+  ├── Phase 2 (F5)：T08 → T09 → T10 → T11 → T12
+  │     │
+  │     └── 协同：T12 unit case ↔ T13/T17
+  │
+  ├── Phase 4 (N2)：T19 → T20 → T21 → T22 → T23
+  │
+  ├── Phase 5 (N3)：T24 → T25 → T26 + T27
+  │
+  ├── Phase 6 (N1)：T28 → T29 → T30 → T31 → T32
+  │
+  └── Phase 7 (A3)：T33 → T34 → T35 → T36 → T37 (A4 决策)
+
+Phase 9 (收尾)：T38 → T39 → T40 → T41 → T42（blocked by 所有 Phase 0-7）
+```
+
+---
+
+**当前状态**：v0.1，等用户对 spec.md §八 27 个决策点拍板后，Phase 0 启动。
