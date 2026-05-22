@@ -3097,8 +3097,14 @@ function registerAppHandlers() {
           exportRootDir
         });
       }
-      if (processingResult.modifiedRows.length === 0) {
-        // PRD §717 P0-11：不生成主输出，但 error-report 仍可能已生成
+      // v2.1.7 round 7 F8 fix（PR #51 reviewer P1 / self-review I-5）：
+      //   原条件 `modifiedRows.length === 0` 直接 return 'empty' → F8 第 2 sheet「未命中场景行」无法落盘
+      //   修复：仅当 modifiedRows + unmatchedRows 都为 0 才 return empty；
+      //   有 unmatchedRows 时仍走 writeBankStatementMainOutput（主 sheet 空但第 2 sheet 输出全部未命中行）
+      //   对齐 PRD AC-F8-5：「所有行都未命中场景时，第 2 sheet 应包含全部 N 行」
+      const unmatchedCount = Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows.length : 0;
+      if (processingResult.modifiedRows.length === 0 && unmatchedCount === 0) {
+        // PRD §717 P0-11：modifiedRows + unmatchedRows 都为 0 才不生成主输出，但 error-report 仍可能已生成
         return {
           status: 'empty',
           message: '无修改记录，未生成主输出文件',

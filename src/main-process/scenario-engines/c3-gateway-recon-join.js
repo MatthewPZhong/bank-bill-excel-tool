@@ -147,17 +147,19 @@ function runC3Scenario(scenario, bankRows, gwRows) {
       });
     }
     const chosen = matched[0];
-    // 标记 gw 行已用 — 后续 bank 行的 candidates 池中将排除该索引
-    usedGwRowIdx.add(chosen.gIdx);
 
     const newValue = normalizeCellValue(chosen.row[assign.gwField]);
-    if (newValue === '') return; // 网关账单的源字段为空 → 不写入
+    if (newValue === '') return; // 网关账单的源字段为空 → 不写入（gw 不标记已用，留给后续 bank）
 
     const oldValue = normalizeCellValue(bankRow[assign.bankField]);
-    if (oldValue === newValue) return; // 值未变，不算修改
+    if (oldValue === newValue) return; // 值未变，不算修改（gw 不标记已用）
 
     bankRow[assign.bankField] = newValue;
     modCollector.record(rowId, assign.bankField, oldValue, newValue);
+    // v2.1.7 round 7 F2 fix（PR #51 Codex P1 / self-review C-2）：
+    //   gw 行标记已用必须在"确认能写值"之后，避免 gw 被白白消耗（newValue=='' / oldValue==newValue 兜底 return 时）
+    //   导致后续 bank 行的同金额 gw 候选池少一条 → 错失匹配（dirty-data 真实回归 bug）
+    usedGwRowIdx.add(chosen.gIdx);
   });
 
   return {
