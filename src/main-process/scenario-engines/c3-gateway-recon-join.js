@@ -1,11 +1,15 @@
 // v2.0.0-beta.3：C3 资金对账不平 join 算法引擎
 // PRD §7.3 / §10 决策 D4
+// v2.1.7 F2 ⚠️ 资金红线：bank → gw 多笔等额改 1v1（方案 A）
+//   - 主循环加 usedGwRowIdx Set 标记已用网关行（first-match-wins 风格）
+//   - 同金额组 bank > gw 数量时，多余 bank 行 unmatched（不抛错、不警告）
+//   - PRD §七 / spec §三 / §3.2 边界场景
 //
 // 行为：
-//   1. 对 bankRow 遍历 gwRows，按 reconFields AND 比对
-//   2. 多行满足 → 取第一条 + warn（数据脏）
-//   3. 没匹配 → 该场景对该行不命中（first-match-wins 不锁定）
-//   4. 配对成功 → 写 assign.bankField = chosen[assign.gwField]
+//   1. 对 bankRow 遍历 gwRows，按 reconFields AND 比对（gw 已用行自动排除）
+//   2. 多行满足 → 取第一条未用 + warn（数据脏）
+//   3. 没匹配 / gw 池子被抢空 → 该场景对该行不命中（first-match-wins 不锁定）
+//   4. 配对成功 → 写 assign.bankField = chosen[assign.gwField]，标记 gwRow 已用
 //   5. 写入前若 bankRow[assign.bankField] 原值非空 → warn（仍执行覆盖）
 
 const {
@@ -120,28 +124,55 @@ function runC3Scenario(scenario, bankRows, gwRows) {
     ? bankRows
     : bankRows.filter((row) => bankConditions.every((c) => evalCondition(row, c, { useC3BankValueGetter: true })));
 
+  // v2.1.7 F2 ⚠️ 资金红线：网关候选池标记已用（spec §3.1 方案 A）
+  //   - usedGwRowIdx：已被前面 bank 行消费的 gw 行索引集合
+  //   - 候选 filter 时排除已用 gw 行 → 保证 bank 单向消费 gw 单，不再多 bank 抢同 1 条 gw
+  //   - gwRowsFiltered 顺序稳定（来自 reader）→ usedGwRowIdx 索引确定
+  //   - bankRowsFiltered 顺序稳定（forEach）→ deterministic 同输入同输出
+  const usedGwRowIdx = new Set();
+
   bankRowsFiltered.forEach((bankRow, index) => {
     const rowId = ensureRowId(bankRow, index);
-    const matched = gwRowsFiltered.filter((gwRow) => gwMatchesBank(gwRow, bankRow, reconFields));
+    // candidates 三层过滤（v2.1.7 round 9 F2 fix，PR #51 reviewer round 3 Finding 1）：
+    //   1. 未被前面 bank 行消费（!usedGwRowIdx.has）
+    //   2. reconFields AND 匹配
+    //   3. **gw 字段非空**（方案 A：不可写的 gw 不进候选，避免"空 gw 反复被选 → 永远轮不到有效 gw"）
+    const matched = gwRowsFiltered
+      .map((g, gIdx) => ({ row: g, gIdx }))
+      .filter((x) =>
+        !usedGwRowIdx.has(x.gIdx)
+        && gwMatchesBank(x.row, bankRow, reconFields)
+        && normalizeCellValue(x.row[assign.gwField]) !== ''
+      );
     if (matched.length === 0) return;
 
     if (matched.length > 1) {
       warningCollector.push({
         rowId,
         code: 'multi-gateway-match',
-        message: `bankRow 在网关账单中匹配到 ${matched.length} 行，取第一条（数据脏）`
+        message: `bankRow 在网关账单中匹配到 ${matched.length} 行（未用 + 非空），取第一条（数据脏）`
       });
     }
     const chosen = matched[0];
 
-    const newValue = normalizeCellValue(chosen[assign.gwField]);
-    if (newValue === '') return; // 网关账单的源字段为空 → 不写入
+    // 上方 filter 已保证 chosen.row[assign.gwField] 非空，此处 newValue 必非空
+    const newValue = normalizeCellValue(chosen.row[assign.gwField]);
 
     const oldValue = normalizeCellValue(bankRow[assign.bankField]);
-    if (oldValue === newValue) return; // 值未变，不算修改
+    if (oldValue === newValue) {
+      // v2.1.7 round 9 F2 fix（PR #51 reviewer round 3 Finding 1）方案 B：
+      //   bank 已经等于 gw 的值（无需 record 修改），但**仍要 lock + 消费 gw**：
+      //   - lock 防其它场景误改这条 bank（first-match-wins 红线）
+      //   - 消费 gw 让后续 bank 不再选中同一条 gw（严格 1v1 红线）
+      modCollector.lock(rowId);
+      usedGwRowIdx.add(chosen.gIdx);
+      return;
+    }
 
     bankRow[assign.bankField] = newValue;
     modCollector.record(rowId, assign.bankField, oldValue, newValue);
+    // gw 标记已用（round 7 fix：在确认能写值 + record 之后；round 9 fix：oldValue==newValue 分支已上方提前 add）
+    usedGwRowIdx.add(chosen.gIdx);
   });
 
   return {

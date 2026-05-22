@@ -197,7 +197,8 @@ function ensureDateDir(exportRootDir) {
 
 // ===== writeBankStatementMainOutput =====
 // 用户已通过 saveDialog 选定 mainFilePath（绝对路径） → 直接写
-async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePath }) {
+// v2.1.7 round 3 F8（spec §9.8.5）：unmatchedRows 可选（undefined / null → 单 sheet 旧行为；Array → 含 '未命中场景行' 第 2 sheet）
+async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePath, unmatchedRows = null }) {
   if (!Array.isArray(modifiedRows)) {
     throw new Error('writeBankStatementMainOutput: modifiedRows 必须是数组');
   }
@@ -208,7 +209,8 @@ async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePat
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  const result = await writeBankStatementOutput(modifiedRows, headers, mainFilePath);
+  // v2.1.7 round 3 F8：透传 unmatchedRows 给 writeBankStatementOutput
+  const result = await writeBankStatementOutput(modifiedRows, headers, mainFilePath, unmatchedRows);
   return { ...result, fileName: path.basename(mainFilePath) };
 }
 

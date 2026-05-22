@@ -34,10 +34,23 @@ function buildSheetData(rows, headers) {
   return [headers, ...dataRows];
 }
 
+// v2.1.7 round 3 F8 (spec §9.8.4)：stripInternalFields helper
+//   过滤 _ 前缀字段（如 _rowId / _hitScenarioId / _modifiedColumns），返回干净对象
+//   未命中场景行 sheet 不应暴露内部诊断字段（用户期望"原始银行对账单行所有列"）
+//   注：写 sheet 用 headers 投影，本 helper 主要给未来需要 JSON 输出场景用
+function stripInternalFields(row) {
+  const cleaned = {};
+  for (const k of Object.keys(row)) {
+    if (!k.startsWith('_')) cleaned[k] = row[k];
+  }
+  return cleaned;
+}
+
 // rows: Array<{ ...原列, _rowId, _modifiedColumns: Set<columnName>, _hitScenarioName }>
 // headers: Array<string>（44 列原表头）
 // savePath: 绝对路径（含 .xlsx）
-async function writeBankStatementOutput(rows, headers, savePath) {
+// unmatchedRows: Array<{...原列}> | null（v2.1.7 F8 round 3 可选；spec §9.8.4 第 2 sheet "未命中场景行"）
+async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null) {
   const workbook = new ExcelJS.Workbook();
   // sheet 名沿用样例文件 / PRD §7.5 约定：'渠道对账单'
   const sheet = workbook.addWorksheet('渠道对账单');
@@ -60,6 +73,19 @@ async function writeBankStatementOutput(rows, headers, savePath) {
       cell.fill = YELLOW_FILL;
     });
   });
+
+  // v2.1.7 round 3 F8 (spec §9.8.4)：可选第 2 sheet "未命中场景行"
+  //   - 仅当 caller 显式传 unmatchedRows（Array）时输出（向下兼容旧 caller 不传 → 单 sheet 不变）
+  //   - 即使 0 行也输出含表头 sheet（与 v2.1.6 acquiring-bill-currency 差异表"0 差异行仍输出"一致）
+  //   - 用 headers 投影（与第 1 sheet 同 44 列），自动过滤内部 _ 前缀字段
+  //   - 不标黄（未命中行无 _modifiedColumns 数据）
+  if (Array.isArray(unmatchedRows)) {
+    const unmatchedSheet = workbook.addWorksheet('未命中场景行');
+    const unmatchedSheetData = buildSheetData(unmatchedRows, headers);
+    unmatchedSheetData.forEach((rowValues) => unmatchedSheet.addRow(rowValues));
+    const unmatchedHeaderRow = unmatchedSheet.getRow(1);
+    unmatchedHeaderRow.font = { bold: true, size: 10 };
+  }
 
   applyWatermark(workbook);
   await workbook.xlsx.writeFile(savePath);
@@ -96,6 +122,7 @@ async function writeErrorReport(warnings, savePath) {
 module.exports = {
   writeBankStatementOutput,
   writeErrorReport,
+  stripInternalFields,     // v2.1.7 round 3 F8 (spec §9.8.4)
   YELLOW_FILL,
   INTERNAL_FIELDS
 };

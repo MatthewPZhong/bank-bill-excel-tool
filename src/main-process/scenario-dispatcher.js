@@ -1,5 +1,9 @@
 // v2.0.0-beta.3 PR #32a：first-match-wins 调度引擎
 // PRD §7.4 / spec.md F2
+// v2.1.7 round 3 F8 (spec §9.8 🚨 资金红线)：
+//   - 反向 filter：unmatchedRows = bankRows.filter(r => !rowLockSet.has(r._rowId))
+//   - 不动 modifiedRows filter（资金红线护栏；rowLockSet.has 条件完全保留）
+//   - return 加 unmatchedRows + stats.unmatchedRowCount
 //
 // 行为：
 //   1. enabledScenarios 按 priority desc, id asc 排序
@@ -9,6 +13,11 @@
 //   5. merge 到全局：rowLockSet ∪= lockedRowIds；modifications/warnings 注入 scenarioId/scenarioName
 //   6. modifiedRows = bankRows.filter(r => rowLockSet.has(r._rowId))
 //   7. 每行加 _modifiedColumns（Set） + _hitScenarioId + _hitScenarioName
+//   8. unmatchedRows = bankRows.filter(r => !rowLockSet.has(r._rowId))（保留原始顺序 + 原始字段）
+//
+// 关键不变量（spec §9.8.3）：
+//   - modifiedRows + unmatchedRows = bankRows（无遗漏 + 互斥；first-match-wins 保证）
+//   - C4 走独立流水线（不进 dispatcher）→ 不影响 unmatchedRows
 
 const { runScenario } = require('./scenario-engines');
 
@@ -135,13 +144,22 @@ function runAllScenarios(bankRows, gwRows, scenarios) {
       };
     });
 
+  // v2.1.7 round 3 F8 (spec §9.8.2 🚨 资金红线)：反向 filter 得未命中 dispatcher 任何 scenario 的行
+  //   - 保留原始 bankRows 顺序（forEach 顺序稳定）
+  //   - 不做 .map 转换（用户期望"原始行"；诊断列 _hitScenarioId 等不加）
+  //   - 互斥保证：bankRows 同一行不可能同时进 modifiedRows 和 unmatchedRows（filter 条件互否）
+  //   - 完整性保证：modifiedRows.length + unmatchedRows.length === bankRows.length
+  const unmatchedRows = bankRows.filter((r) => !rowLockSet.has(r._rowId));
+
   return {
     modifiedRows,
+    unmatchedRows,                                  // ⭐ F8 round 3 新增
     modifications: allModifications,
     errorReport: allWarnings,
     stats: {
       totalRows: bankRows.length,
       hitRowCount: modifiedRows.length,
+      unmatchedRowCount: unmatchedRows.length,      // ⭐ F8 round 3 新增
       scenarioHitCount,
       hitScenarioIds,
       warningCount: allWarnings.length,

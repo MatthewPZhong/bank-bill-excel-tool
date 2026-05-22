@@ -376,6 +376,15 @@ select {
   border-color: rgba(165, 61, 48, 0.35);
 }
 
+/* v2.1.7 round 2 R3：全局识别 updateStatusBox 注入的「：」后 \n
+ * 配合 src/renderer.js:519 updateStatusBox 内 String(message).replace(/：/g, '：\n')
+ * #bankStatementStatusBox .status-box-text { white-space: pre-line } 仍生效（ID 优先级）；
+ * pre-line / pre-wrap 都识别 \n，bankStatement 行为不变
+ */
+.status-box-text {
+  white-space: pre-wrap;
+}
+
 .new-account-panel {
   min-height: 280px;
   display: flex;
@@ -1020,6 +1029,11 @@ select {
 }
 
 .big-account-file-meta {
+  /* v2.1.7 F3：multiMode-grouped 拼接后缀（→ 大账号）后挤压触发 ellipsis 只剩 "PP..."
+     根因是 flex 子项默认 min-width:auto = content size 不让缩；显式 min-width:0 + flex:1 1 auto 后
+     ellipsis 规则才能生效（PRD §四 / spec §4.1 改动点 1） */
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1091,27 +1105,29 @@ select {
   max-width: 960px;
 }
 
+/* v2.1.7 round 3 B3（spec §9.4.2 方案 A，spec 文档参考路径）：单 grid + 外层 overflow */
 .extract-order-body {
   padding: 18px 24px 8px;
   display: grid;
   grid-template-columns: 1fr 1.15fr;
-  gap: 24px;
-  max-height: 50vh;
+  gap: 0 24px;
+  max-height: calc(100vh - 220px);
   overflow-y: auto;
 }
 
 .extract-order-col-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
   font-size: 12px;
   color: rgba(56, 30, 17, 0.6);
   font-weight: 500;
   letter-spacing: 0.04em;
-  margin-bottom: 8px;
+  padding: 0 0 8px;
 }
 
-.extract-order-list {
-  display: flex;
-  flex-direction: column;
-}
+/* v2.1.7 round 3 B3：.extract-order-list 已删除（DOM 切到单 grid 方案 A，spec §9.4.2） */
 
 .extract-order-row {
   display: grid;
@@ -1777,7 +1793,8 @@ select {
 }
 
 .big-account-selection-card {
-  width: min(100%, 920px);
+  /* v2.1.7 round 2 R6a 方案 C：spec 参考路径（实际生效在 styles-gemini-extra.css 1200px）；保持文档语义同步 */
+  width: min(100%, 1200px);
 }
 
 .big-account-selection-toolbar {
@@ -3015,6 +3032,45 @@ select {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* v2.1.7 round 4 B1（spec §10.2.3 Layout-1，spec 参考路径；实际生效在 styles-gemini-extra.css）
+   左列 label-stack 纵向堆叠 label "条件" + AND/OR radio；右列 conditions
+   原 round 1 横向 .scenario-config-logic-row / -label / round 2 -stack / -stack-option 已废弃
+   保留 .scenario-config-logic-option / -inline 作 round 4 范式 */
+.scenario-config-label-stack {
+  flex-shrink: 0;
+  width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: flex-start;
+  padding-top: 6px;
+}
+
+.scenario-config-logic-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scenario-config-logic-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: normal;
+  color: #3c4043;
+  cursor: pointer;
+}
+
+.scenario-config-logic-option input[type="radio"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.scenario-config-logic-option input[disabled] {
+  cursor: not-allowed;
 }
 
 .scenario-config-multi-row {

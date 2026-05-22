@@ -19,3 +19,4 @@ tmp
 
 # v2.1.6 Module A T3：构建时由 scripts/gen-build-info.js 生成，含 git SHA，不入 git
 src/build-info.js
+.claude/scheduled_tasks.lock

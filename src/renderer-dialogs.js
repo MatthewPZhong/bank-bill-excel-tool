@@ -996,7 +996,11 @@
           }
           const fullName = row.fileName || '';
           const rowSuffix = row.sourceRowNumber ? ` 第${row.sourceRowNumber}行` : '';
-          const displayName = truncateFileName(fullName, 20) + rowSuffix;
+          // v2.1.7 round 2 R6a 方案 B（防御性）：multi 模式下文件名 maxLen 14（grid 3 列 + meta 列宽收缩；spec §8.7.4）
+          //   - 非 multi 模式（普通态）：保持 20（grid 2 子项不挤压，向下兼容）
+          //   - rowSuffix（如 " 第9行"）不算入 truncateFileName 长度，单独拼接
+          const truncateMaxLen = multiMode ? 14 : 20;
+          const displayName = truncateFileName(fullName, truncateMaxLen) + rowSuffix;
           const fullMeta = fullName + rowSuffix;
 
           if (multiMode && multiEditing) {
@@ -1021,16 +1025,34 @@
             meta.textContent = displayName;
             item.append(checkbox, letterSpan, meta);
           } else if (multiMode && !multiEditing && covered) {
-            // 闭合态已入组 block��显示 "✓ a. 文件名 → 大账号"
+            // 闭合态已入组 block：显示 "✓ a. 文件名 → 大账号"
+            // v2.1.7 round 4 B2（spec §10.4.2 路径 A 真根因 fix）：
+            //   isRowIndexCovered 同时认 pendingGroup + closed 组；本分支也会命中 pending case
+            //   findGroupByRowIndex 命中 pending 时返回 { source: 'pending', groupIndex: -1 }
+            //   → multiGroups[-1] = undefined → letterSpan.textContent = '' + meta 不带 "→ 大账号" 后缀
+            //   修复：显式判 source === 'closed' && groupIndex >= 0 才渲染字母 + 大账号；pending 边界 case 给 '?.' 占位 + warn
+            //
+            //   代码证据：findGroupByRowIndex L1191-1198 pendingGroup → { source:'pending', groupIndex: -1 }
+            //            multiGroups[-1] === undefined → 原 group ternary fallback 空串
             item.classList.add('ba-multi-grouped');
             const groupInfo = findGroupByRowIndex(rowIndex);
-            const group = groupInfo ? multiGroups[groupInfo.groupIndex] : null;
+            const isClosedGroup = !!(groupInfo && groupInfo.source === 'closed' && groupInfo.groupIndex >= 0);
+            const group = isClosedGroup ? multiGroups[groupInfo.groupIndex] : null;
+            let letterText = '';
+            if (isClosedGroup) {
+              letterText = `${String.fromCharCode(97 + groupInfo.groupIndex)}.`;
+            } else if (groupInfo) {
+              // 完成态命中 pending（边界 case）→ console 警告 + '?' 占位避免字母列完全空白
+              // eslint-disable-next-line no-console
+              console.warn(`B2 round 4: ba-multi-grouped 分支命中 pendingGroup row ${rowIndex}，字母用 '?.' 占位`);
+              letterText = '?.';
+            }
             const markerSpan = document.createElement('span');
             markerSpan.className = 'ba-multi-group-marker';
             markerSpan.textContent = '✓';
             const letterSpan = document.createElement('span');
             letterSpan.className = 'big-account-order-index ba-left-letter big-account-order-index--alpha';
-            letterSpan.textContent = group ? `${String.fromCharCode(97 + groupInfo.groupIndex)}.` : '';
+            letterSpan.textContent = letterText;
             const meta = document.createElement('span');
             meta.className = 'big-account-file-meta ba-file-name';
             meta.title = fullMeta;
@@ -1680,103 +1702,113 @@
           const extractOverlay = createOverlay();
           const extractDialog = document.createElement('div');
           extractDialog.className = 'modal-card extract-order-card';
+          // v2.1.7 round 3 B3（spec §9.4.2 用户拍板方案 A）：单 grid + 每行 2 cell + 外层单 overflow
+          //   - col-header 跨 grid 第 1 / 2 列（sticky 在顶部）
+          //   - max(N, M) 循环；每对 [leftCell, rightCell] append 到 .extract-order-body
+          //   - 左右 cell 按本 row max height 自动对齐（grid auto row）
+          //   - .extract-order-list 不再使用（删除 list 套娃 + 子层 overflow）
           extractDialog.innerHTML = `
             <div class="dialog-header">
               <div class="dialog-title">确认大账号顺序</div>
               <button class="icon-close extract-close-btn" type="button" style="margin-left:auto;">×</button>
             </div>
             <div class="extract-order-body">
-              <div>
-                <div class="extract-order-col-header">文件顺序：</div>
-                <div class="extract-order-list extract-file-list"></div>
-              </div>
-              <div>
-                <div class="extract-order-col-header">大账号信息：</div>
-                <div class="extract-order-list extract-account-list"></div>
-              </div>
+              <div class="extract-order-col-header">文件顺序</div>
+              <div class="extract-order-col-header">大账号信息</div>
+              <!-- 每行 = 一对 [leftCell, rightCell]，JS 循环 append -->
             </div>
             <div class="dialog-actions right">
               <button class="primary-btn small" type="button" data-action="extract-done">完成</button>
             </div>
           `;
 
-          const extractFileList = extractDialog.querySelector('.extract-file-list');
-          const extractOrderList = extractDialog.querySelector('.extract-account-list');
-
-
-
+          const extractBody = extractDialog.querySelector('.extract-order-body');
 
           // v1.5.2：确认大账号顺序弹窗只显示未被"单个账号匹多个文件"映射的 block
-          extractableRows.forEach((row, index) => {
-            const item = document.createElement('div');
-            item.className = 'extract-order-row';
-            const fullName = row.fileName || '';
-            const rowSuffix = row.sourceRowNumber ? ` 第${row.sourceRowNumber}行` : '';
-            const displayName = truncateFileName(fullName, 20) + rowSuffix;
-            const fullMeta = fullName + rowSuffix;
-            item.innerHTML = `<span class="eo-idx">${index + 1}.</span><span class="eo-name" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span><span></span>`;
-            extractFileList.appendChild(item);
-          });
+          // v2.1.7 round 3 B3：max(N, M) 循环（文件数 vs 大账号数不等时补空 cell）
+          const maxRows = Math.max(extractableRows.length, extractedAccounts.length);
+          for (let i = 0; i < maxRows; i++) {
+            const fileRow = extractableRows[i];
+            const accountRow = extractedAccounts[i];
 
-          extractedAccounts.forEach((account, index) => {
-            const item = document.createElement('div');
-            item.className = 'extract-order-row';
-            item.dataset.index = index;
-            item.dataset.merchantId = account.merchantId;
-            item.dataset.currency = account.currency;
+            // ===== 左 cell：文件顺序 =====
+            const leftCell = document.createElement('div');
+            leftCell.className = 'extract-order-row';
+            if (fileRow) {
+              const fullName = fileRow.fileName || '';
+              const rowSuffix = fileRow.sourceRowNumber ? ` 第${fileRow.sourceRowNumber}行` : '';
+              const displayName = truncateFileName(fullName, 20) + rowSuffix;
+              const fullMeta = fullName + rowSuffix;
+              leftCell.innerHTML = `<span class="eo-idx">${i + 1}.</span><span class="eo-name" title="${escapeHtml(fullMeta)}">${escapeHtml(displayName)}</span><span></span>`;
+            } else {
+              // 补空 cell（占位，行高自动）
+              leftCell.classList.add('extract-order-row--empty');
+            }
+            extractBody.appendChild(leftCell);
 
-            const indexSpan = document.createElement('span');
-            indexSpan.className = 'eo-idx';
-            indexSpan.textContent = `${index + 1}.`;
+            // ===== 右 cell：大账号信息（含编辑按钮）=====
+            const rightCell = document.createElement('div');
+            rightCell.className = 'extract-order-row';
+            if (accountRow) {
+              rightCell.dataset.index = i;
+              rightCell.dataset.merchantId = accountRow.merchantId;
+              rightCell.dataset.currency = accountRow.currency;
 
-            const textSpan = document.createElement('span');
-            textSpan.className = 'eo-name';
-            textSpan.textContent = `${account.merchantId} ${account.currency}`;
+              const indexSpan = document.createElement('span');
+              indexSpan.className = 'eo-idx';
+              indexSpan.textContent = `${i + 1}.`;
 
-            const editBtn = document.createElement('button');
-            editBtn.className = 'text-action eo-edit';
-            editBtn.type = 'button';
-            editBtn.textContent = '编辑';
+              const textSpan = document.createElement('span');
+              textSpan.className = 'eo-name';
+              textSpan.textContent = `${accountRow.merchantId} ${accountRow.currency}`;
 
-            const editContainer = document.createElement('div');
-            editContainer.className = 'extract-edit-container';
-            editContainer.hidden = true;
-            editContainer.innerHTML = `
-              <input class="mapping-text-input extract-edit-input extract-edit-merchant" type="text" placeholder="账户号" value="${escapeHtml(account.merchantId)}" />
-              <input class="mapping-text-input extract-edit-input extract-edit-currency" type="text" placeholder="币种" value="${escapeHtml(account.currency)}" />
-              <button class="secondary-btn small extract-edit-done" type="button">完成</button>
-            `;
+              const editBtn = document.createElement('button');
+              editBtn.className = 'text-action eo-edit';
+              editBtn.type = 'button';
+              editBtn.textContent = '编辑';
 
-            editBtn.addEventListener('click', () => {
-              textSpan.hidden = true;
-              editBtn.hidden = true;
-              editContainer.hidden = false;
-            });
-
-            editContainer.querySelector('.extract-edit-done').addEventListener('click', () => {
-              const newMerchantId = editContainer.querySelector('.extract-edit-merchant').value.trim();
-              const newCurrency = editContainer.querySelector('.extract-edit-currency').value.trim();
-              const matched = expandedOptions.find(
-                (o) => o.merchantId === newMerchantId && o.currency === newCurrency
-              );
-              if (!matched) {
-                openModal(createAlertDialog('大账号信息不存在，请重新输入。', {
-                  onConfirm: () => { openModal(extractOverlay); }
-                }));
-                return;
-              }
-              item.dataset.merchantId = newMerchantId;
-              item.dataset.currency = newCurrency;
-              extractedAccounts[index] = { merchantId: newMerchantId, currency: newCurrency, matchType: 'exact' };
-              textSpan.textContent = `${newMerchantId} ${newCurrency}`;
-              textSpan.hidden = false;
-              editBtn.hidden = false;
+              const editContainer = document.createElement('div');
+              editContainer.className = 'extract-edit-container';
               editContainer.hidden = true;
-            });
+              editContainer.innerHTML = `
+                <input class="mapping-text-input extract-edit-input extract-edit-merchant" type="text" placeholder="账户号" value="${escapeHtml(accountRow.merchantId)}" />
+                <input class="mapping-text-input extract-edit-input extract-edit-currency" type="text" placeholder="币种" value="${escapeHtml(accountRow.currency)}" />
+                <button class="secondary-btn small extract-edit-done" type="button">完成</button>
+              `;
 
-            item.append(indexSpan, textSpan, editBtn, editContainer);
-            extractOrderList.appendChild(item);
-          });
+              editBtn.addEventListener('click', () => {
+                textSpan.hidden = true;
+                editBtn.hidden = true;
+                editContainer.hidden = false;
+              });
+
+              editContainer.querySelector('.extract-edit-done').addEventListener('click', () => {
+                const newMerchantId = editContainer.querySelector('.extract-edit-merchant').value.trim();
+                const newCurrency = editContainer.querySelector('.extract-edit-currency').value.trim();
+                const matched = expandedOptions.find(
+                  (o) => o.merchantId === newMerchantId && o.currency === newCurrency
+                );
+                if (!matched) {
+                  openModal(createAlertDialog('大账号信息不存在，请重新输入。', {
+                    onConfirm: () => { openModal(extractOverlay); }
+                  }));
+                  return;
+                }
+                rightCell.dataset.merchantId = newMerchantId;
+                rightCell.dataset.currency = newCurrency;
+                extractedAccounts[i] = { merchantId: newMerchantId, currency: newCurrency, matchType: 'exact' };
+                textSpan.textContent = `${newMerchantId} ${newCurrency}`;
+                textSpan.hidden = false;
+                editBtn.hidden = false;
+                editContainer.hidden = true;
+              });
+
+              rightCell.append(indexSpan, textSpan, editBtn, editContainer);
+            } else {
+              rightCell.classList.add('extract-order-row--empty');
+            }
+            extractBody.appendChild(rightCell);
+          }
 
           extractDialog.querySelector('.extract-close-btn').addEventListener('click', () => {
             openModal(overlay);
@@ -5389,7 +5421,8 @@
     // 内置场景与用户场景同等地位（D14）：可删除可编辑
     const SCENARIO_CATEGORY_LABELS = {
       'extract-recon-id': '提取ReconId-From Self',
-      'offset-bill-mark': '账单打标',
+      // v2.1.7 F4：类别展示名重命名 — '账单打标' → '银行对账单字段赋值'（DB category 不变）
+      'offset-bill-mark': '银行对账单字段赋值',
       'gateway-recon-join': '提取ReconId-From 网关',
       // v2.1.0-beta.1 PR-A（task A6）：单据对账修复
       // v2.1.0-beta.3 修订（用户反馈）：'单据对账修复' → '单据对账单修复'
@@ -5638,7 +5671,7 @@
     function createScenarioCategorySelectDialog(allowedCategories = null) {
       const ALL_CATEGORY_OPTIONS = [
         { value: 'extract-recon-id', label: '提取ReconId-From Self' },
-        { value: 'offset-bill-mark', label: '账单打标' },
+        { value: 'offset-bill-mark', label: '银行对账单字段赋值' },
         { value: 'gateway-recon-join', label: '提取ReconId-From 网关' },
         { value: 'recon-id-fix', label: '单据对账 ReconID 修复' },
         { value: 'gateway-recon-id-fix', label: '网关对账单 ReconID 修复' }
@@ -5702,18 +5735,24 @@
       if (category === 'extract-recon-id') {
         return {
           conditions: [{ field: '', op: '等于', value: '' }],
+          // v2.1.7 round 2 R5：新建默认 AND（用户日常 90% 用 AND；spec §8.6.2）
+          //   ⚠️ 资金红线三层护栏（spec §8.6.5）：
+          //     1) createDefaultScenarioConfig（仅 mode=create 路径）默认 AND ←本行
+          //     2) pickConditionsLogicChecked helper：mode=edit + 老 scenario 无 logic 字段 → OR 选中
+          //     3) c1-extract-recon-id.js runC1Scenario fallback：undefined → OR（不动；spec §2.2 引擎保护）
+          //   绝不允许"老 scenario 加载时 UI 显示 AND"，否则用户点保存（未察觉默认值变化）就把语义从 OR 翻成 AND
+          conditionsLogic: 'AND',
           extractByFeature: null,
           extractByOtherField: null
         };
       }
       if (category === 'offset-bill-mark') {
+        // v2.1.7 F4：默认清空 — 不再预填 2 行 billTypes / 1 行 reconFields / markValue.type=2
+        //   spec §5.1 / PRD §五；DB category 不变
         return {
-          billTypes: [
-            { seq: 1, field: '', op: '等于', value: '' },
-            { seq: 2, field: '', op: '等于', value: '' }
-          ],
-          reconFields: [{ seq: 1, leftType: 1, leftField: '', rightType: 2, rightField: '' }],
-          markValue: { type: 2, field: '', value: '' }
+          billTypes: [],
+          reconFields: [],
+          markValue: { type: null, field: '', value: '' }
         };
       }
       if (category === 'gateway-recon-join') {
@@ -5828,18 +5867,22 @@
         }
         if (otherChosen && (!o.field || o.field === '')) errors.push('"根据其他字段提取"的字段不能为空');
       } else if (draft.category === 'offset-bill-mark') {
+        // v2.1.7 F4：放宽 — billTypes < 2 改 < 1；reconFields 允许 0 行；保留 reconFields ≥ 1 时内容校验
+        //   赋值文案：spec §5.2 — '打标值' → '赋值'（保持向后兼容也含"赋值"语义）
         const c = draft.config || {};
-        if (!Array.isArray(c.billTypes) || c.billTypes.length < 2) errors.push('账单类型至少需要 2 行');
+        if (!Array.isArray(c.billTypes) || c.billTypes.length < 1) errors.push('账单类型至少需要 1 行');
         else if (c.billTypes.some((b) => !b.field || (opNeedsValue(b.op) && (b.value === '' || b.value === undefined)))) {
           errors.push('账单类型每行的字段不能为空；非「空值/非空值」操作的值不能为空');
         }
-        if (!Array.isArray(c.reconFields) || c.reconFields.length === 0) errors.push('对账字段至少需要 1 行');
-        else if (c.reconFields.some((r) => !r.leftField || !r.rightField)) errors.push('对账字段每行两端的字段都不能为空');
+        // 删 "对账字段至少需要 1 行" 卡校验；保留非空行的两端字段必填
+        if (Array.isArray(c.reconFields) && c.reconFields.some((r) => !r.leftField || !r.rightField)) {
+          errors.push('对账字段每行两端的字段都不能为空');
+        }
         const mv = c.markValue || {};
         const billTypeSeqs = (c.billTypes || []).map((b) => b.seq);
-        if (!billTypeSeqs.includes(Number(mv.type))) errors.push('打标值的"账单类型"必须存在于上方账单类型列表中');
-        if (!mv.field) errors.push('打标值的字段不能为空');
-        if (mv.value === '' || mv.value === undefined) errors.push('打标值的写入值不能为空');
+        if (!billTypeSeqs.includes(Number(mv.type))) errors.push('赋值的"账单类型"必须存在于上方账单类型列表中');
+        if (!mv.field) errors.push('赋值的字段不能为空');
+        if (mv.value === '' || mv.value === undefined) errors.push('赋值的写入值不能为空');
       } else if (draft.category === 'gateway-recon-join') {
         const c = draft.config || {};
         if (!Array.isArray(c.reconFields) || c.reconFields.length === 0) errors.push('对账字段至少需要 1 行');
@@ -6244,6 +6287,25 @@
     }
 
     // ===== F2 — C1 配置弹窗（5 行 + 行 4/5 互斥）=====
+    // v2.1.7 round 2 R5 资金红线护栏 helper（spec §8.6.4 / §8.6.5）：
+    //   决定 C1 dialog 加载时 AND/OR radio 哪个选中
+    //   - mode=create：用 draft.config.conditionsLogic（createDefaultScenarioConfig 已注入 'AND'）
+    //   - mode=edit / view：老 scenario 无 conditionsLogic 字段 → 显示 OR 选中（与引擎 fallback OR 行为一致）
+    //   - mode=edit / view：新 scenario 有 'AND' / 'OR' → 用本值
+    //
+    //   ⚠️ 禁止修改 draft.config（helper 只读决策；用户切换 radio 后才落 config.conditionsLogic）
+    //   ⚠️ 绝不允许"老 scenario 加载时 UI 显示 AND"，否则保存（未察觉默认值变化）会把语义从 OR 翻成 AND
+    function pickConditionsLogicChecked(draft) {
+      const mode = draft && draft.mode;
+      const cfg = (draft && draft.config) || {};
+      if (mode === 'create') {
+        // 新建：使用 createDefaultScenarioConfig 注入的默认值（AND）；防御性 fallback 'AND'
+        return cfg.conditionsLogic === 'OR' ? 'OR' : 'AND';
+      }
+      // 编辑 / 查看：老 scenario undefined → OR；新 scenario 用本值
+      return cfg.conditionsLogic === 'AND' ? 'AND' : 'OR';
+    }
+
     function createScenarioConfigDialogC1() {
       const draft = state.scenarioDraft;
       if (!draft || draft.category !== 'extract-recon-id') {
@@ -6256,6 +6318,9 @@
       if (!Array.isArray(config.conditions) || config.conditions.length === 0) {
         config.conditions = [{ field: '', op: '等于', value: '' }];
       }
+      // v2.1.7 round 2 R5：用 helper 决定 radio 选中状态（资金红线护栏，spec §8.6.5）
+      //   helper 只读，不改 draft.config —— 用户切换 radio 后才落 config.conditionsLogic
+      const checkedLogic = pickConditionsLogicChecked(draft);
       // 互斥状态：行 4 vs 行 5 最多勾一个
       const featureChecked = !!(config.extractByFeature && config.extractByFeature.enabled);
       const otherChecked = !!(config.extractByOtherField);
@@ -6285,8 +6350,27 @@
             <span class="scenario-config-label">优先级 <span class="scenario-config-tooltip" title="3 = 最高，0 = 最低">ⓘ</span></span>
             <input class="scenario-config-input scenario-config-input-narrow" type="number" min="0" max="3" data-field="priority" ${isReadonly ? 'disabled' : ''} value="${draft.priority ?? 0}">
           </div>
+          <!-- v2.1.7 round 4 B1（spec §10.2.2 Layout-1 用户拍板）：
+               左列 .scenario-config-label-stack 纵向堆叠 label "条件" + AND/OR radio；右列 conditions 列表 + 按钮
+               资金红线护栏 R5 三层不动（默认 config / pickConditionsLogicChecked / 引擎 fallback OR） -->
           <div class="scenario-config-row scenario-config-row-multi">
-            <span class="scenario-config-label">条件 <span class="scenario-config-tooltip" title="满足任一条件即可进入提取">ⓘ</span></span>
+            <div class="scenario-config-label-stack">
+              <!-- v2.1.7 round 5 B1（spec §11.2.3 方案 B 单 tooltip 整合）：
+                   去掉 radio 括号文本 '（同时满足）/（满足任一）'；提示合到 '条件' label tooltip 多行
+                   &#10; 是 HTML 实体换行（macOS / Windows / Linux native tooltip 都兼容）
+                   资金红线护栏 R5 三层不动；B1 round 4 Layout-1 字体/布局不动 -->
+              <span class="scenario-config-label">条件 <span class="scenario-config-tooltip" title="按下方选择的聚合逻辑：&#10;AND — 同时满足所有条件才命中&#10;OR — 满足任一条件即命中">ⓘ</span></span>
+              <div class="scenario-config-logic-inline">
+                <label class="scenario-config-logic-option">
+                  <input type="radio" name="conditionsLogic" value="AND" ${checkedLogic === 'AND' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+                  AND
+                </label>
+                <label class="scenario-config-logic-option">
+                  <input type="radio" name="conditionsLogic" value="OR" ${checkedLogic === 'OR' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+                  OR
+                </label>
+              </div>
+            </div>
             <div class="scenario-config-multi-wrap">
               <div class="scenario-config-multi-rows" data-multi="conditions"></div>
               ${isReadonly ? '' : '<button class="text-action small" type="button" data-action="add-condition">+ 新增条件</button>'}
@@ -6389,6 +6473,17 @@
         if (isReadonly) return;
         config.conditions.push({ field: '', op: '等于', value: '' });
         renderConditions();
+      });
+
+      // v2.1.7 F1：AND/OR radio 切换 → 直接落 config.conditionsLogic
+      //   只读模式 disabled 已在 innerHTML 渲染时设置；这里仍多一层 isReadonly 防御
+      dialog.querySelectorAll('input[name="conditionsLogic"]').forEach((radio) => {
+        radio.addEventListener('change', () => {
+          if (isReadonly) return;
+          if (radio.checked) {
+            config.conditionsLogic = (radio.value === 'AND') ? 'AND' : 'OR';
+          }
+        });
       });
 
       // 行 4/5 互斥 + 启用切换
@@ -6582,16 +6677,15 @@
       const isReadonly = mode === 'view';
       if (!draft.config) draft.config = createDefaultScenarioConfig('offset-bill-mark');
       const config = draft.config;
-      if (!Array.isArray(config.billTypes) || config.billTypes.length < 2) {
-        config.billTypes = [
-          { seq: 1, field: '', op: '等于', value: '' },
-          { seq: 2, field: '', op: '等于', value: '' }
-        ];
+      // v2.1.7 F4：仅保证是数组，不强补行（dialog 加载时允许 0 行；校验时按新规则放宽）
+      //   spec §5.3 / PRD §五
+      if (!Array.isArray(config.billTypes)) {
+        config.billTypes = [];
       }
-      if (!Array.isArray(config.reconFields) || config.reconFields.length === 0) {
-        config.reconFields = [{ seq: 1, leftType: 1, leftField: '', rightType: 2, rightField: '' }];
+      if (!Array.isArray(config.reconFields)) {
+        config.reconFields = [];
       }
-      if (!config.markValue) config.markValue = { type: 2, field: '', value: '' };
+      if (!config.markValue) config.markValue = { type: null, field: '', value: '' };
 
       const overlay = createOverlay();
       const dialog = document.createElement('div');
@@ -6626,7 +6720,7 @@
             </div>
           </div>
           <div class="scenario-config-row">
-            <span class="scenario-config-label">打标值</span>
+            <span class="scenario-config-label">赋值</span>
             <div class="scenario-config-vs-row" data-mark-value-row></div>
           </div>
         </div>
@@ -6651,7 +6745,7 @@
               ${renderScenarioOptions(SCENARIO_CONDITION_OPS, bt.op || '等于')}
             </select>
             <input class="scenario-config-input" type="text" data-multi-field="value" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(bt.value || '')}" placeholder="值" ${!opNeedsValue(bt.op) ? 'style="visibility:hidden"' : ''}>
-            ${isReadonly || config.billTypes.length <= 2 ? '' : '<button class="icon-close-small" type="button" data-multi-action="remove" title="删除">×</button>'}
+            ${isReadonly ? '' : '<button class="icon-close-small" type="button" data-multi-action="remove" title="删除">×</button>'}
           </div>
         `).join('');
       }
@@ -6729,7 +6823,11 @@
         if (!btn || isReadonly) return;
         const row = btn.closest('.scenario-config-multi-row');
         const idx = Number(row?.dataset.rowIndex);
-        if (Number.isFinite(idx) && config.billTypes.length > 2) {
+        // v2.1.7 round 3 F4 删空（spec §9.7.2）：允许删到 0 行
+        //   - T13.4 R1 已改 display 门槛 (length === 1 → 永远显示)
+        //   - T13.17 同步 handler 门槛 (length > 2 → length >= 1)，否则按钮显示但点击无效
+        //   - 保存校验兜底 (validateScenarioDraft 'billTypes 至少需要 1 行') 已就绪 L5832
+        if (Number.isFinite(idx) && config.billTypes.length >= 1) {
           config.billTypes.splice(idx, 1);
           // 重排 seq（关键：行 4/5 引用要更新）
           config.billTypes.forEach((b, i) => { b.seq = i + 1; });
@@ -6778,7 +6876,7 @@
         renderReconFields();
       });
 
-      // 行 5 打标值
+      // 行 5 赋值（v2.1.7 F4 重命名）
       markRow.addEventListener('change', (event) => {
         const ctl = event.target.closest('[data-mark-field]');
         if (!ctl) return;
@@ -7529,7 +7627,9 @@
       html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">名称：</span>${escapeHtml(draft.name)}</div>`;
       html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">优先级：</span>${draft.priority}</div>`;
       if (draft.category === 'extract-recon-id') {
-        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">条件（OR）：</span><ul>${(c.conditions || []).map((cd) => `<li>${escapeHtml(cd.field)} ${escapeHtml(cd.op)}${opNeedsValue(cd.op) ? ' ' + escapeHtml(String(cd.value || '')) : ''}</li>`).join('')}</ul></div>`;
+        // v2.1.7 F1：条件聚合 label 按 conditionsLogic 切换；旧 scenario 无字段 → OR
+        const c1LogicLabel = (c.conditionsLogic === 'AND') ? 'AND' : 'OR';
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">条件（${c1LogicLabel}）：</span><ul>${(c.conditions || []).map((cd) => `<li>${escapeHtml(cd.field)} ${escapeHtml(cd.op)}${opNeedsValue(cd.op) ? ' ' + escapeHtml(String(cd.value || '')) : ''}</li>`).join('')}</ul></div>`;
         if (c.extractByFeature && c.extractByFeature.enabled) {
           const f = c.extractByFeature;
           html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">根据特征提取：</span>筛选字段 [${(f.searchFields || []).map(escapeHtml).join(', ')}]，特征 ${escapeHtml(f.featureCode)}，数字位 ${f.digitCount}，总位 ${f.totalLength}</div>`;
@@ -7541,7 +7641,7 @@
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">账单类型：</span><ul>${(c.billTypes || []).map((bt) => `<li>#${bt.seq}：${escapeHtml(bt.field)} ${escapeHtml(bt.op)}${opNeedsValue(bt.op) ? ' ' + escapeHtml(String(bt.value || '')) : ''}</li>`).join('')}</ul></div>`;
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段：</span><ul>${(c.reconFields || []).map((r) => `<li>类型#${r.leftType} ${escapeHtml(r.leftField)} = 类型#${r.rightType} ${escapeHtml(r.rightField)}</li>`).join('')}</ul></div>`;
         const mv = c.markValue || {};
-        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">打标：</span>类型#${mv.type} 的 ${escapeHtml(mv.field || '')} 写入 "${escapeHtml(String(mv.value || ''))}"</div>`;
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">赋值：</span>类型#${mv.type} 的 ${escapeHtml(mv.field || '')} 写入 "${escapeHtml(String(mv.value || ''))}"</div>`;
       } else if (draft.category === 'gateway-recon-join') {
         // v2.1.5 N3：conditions 段（仅当 ≥ 1 行时渲染）
         const conds = Array.isArray(c.conditions) ? c.conditions : [];

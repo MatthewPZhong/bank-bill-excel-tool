@@ -9,9 +9,9 @@
 
 | 字段 | 值 |
 |---|---|
-| 清单版本 | v8（对应 app v2.1.6 — 2026-05-19 v0.7 fix4：流水侧对账字段切换 + DB 重命名 settle_*：`flow_imports.settle_amount_abs`（v0.6 = recon_amount_abs）+ 新增 `flow_imports/bill_imports.settle_currency`/`settle_currency_norm`（对账核心比对字段，Critical）；diff_rows.flow_currency/flow_amount_abs 列名保留，值的语义改为通道清算视角；v7 = 2026-05-18 acquiring-bill-currency 模块初版（v0.6 字段名 recon_amount_abs + currency_norm）；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
-| 上次人工 review | 2026-05-18（v2.1.6 acquiring-bill-currency 模块发布） |
-| 基线数据 | `docs/analysis/var-reference-stats.md`（76 个 JS 文件 / 755 顶层声明 — round 7 I3 刷新） |
+| 清单版本 | v9（对应 app v2.1.7 — 2026-05-21 T14 收口升格 10 条：Critical 3 条（`runAllScenarios` / `unmatchedRows` / `conditionsLogic`） + Important-skeleton 2 条（`AppDatabase`/`init` 含 PRAGMA / `updateStatusBox` 含 R3 全局换行） + Risk-sensitive 5 条（`pickConditionsLogicChecked` / `runC1Scenario` / `runC2Scenario` / `runC3Scenario` / `writeBankStatementOutput`）；F8 dispatcher 反向 filter 契约 + R5 三层护栏 + F4 重命名扇出 + F7-A1 全局 PRAGMA 是主要升格触发；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
+| 上次人工 review | 2026-05-21（v2.1.7 T14 收口 — 6 项主功能 + B5 wiring 加固 + F8 dispatcher 第 2 sheet） |
+| 基线数据 | `docs/analysis/var-reference-stats.md`（76 个 JS 文件 / 755 顶层声明 — round 7 I3 刷新；v2.1.7 T14 重跑后更新计数） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
 
@@ -166,6 +166,41 @@
   - 改 SQL `settle_currency_norm` 比较 → 必须同步 import-repository 入库归一函数 `normalizeCurrency`
   - 改输出列名常量 `WRITER_OUTPUT_FLOW_CURRENCY_HEADER` / `_FLOW_AMOUNT_ABS_HEADER` → 必须同步 spec §6.2 + smoke Case A 末列表头断言
   - 必跑：smoke acquiring-bill-currency Case A/C/E/J/K/L 全套 + writer 输出 xlsx 末 3 列值断言
+
+### `runAllScenarios` / scenario-dispatcher（v2.1.7 F8 升格 Critical ⚠️ 资金红线契约锚点）
+- 定义：`src/main-process/scenario-dispatcher.js:66` `function runAllScenarios(bankRows, gwRows, scenarios)`
+- 关联功能：银行账单场景化引擎统一入口 — 编排 C1（提取reconId）/ C2（账单打标）/ C3（网关核销）三类场景；按 scenarios 顺序遍历 first-match-wins；维护 `rowLockSet` 命中集合；**v2.1.7 F8 新增反向 filter `unmatchedRows = bankRows.filter(r => !rowLockSet.has(r._rowId))` 保证 `modifiedRows + unmatchedRows = bankRows`（无遗漏 + 互斥契约）**
+- 跨文件度：3+（`src/main.js:3033/3036/3109/3116` IPC handler 接入 + `src/main-process/bank-statement-io.js:213` writer 桥接 + 自身 dispatcher）
+- 变更 review 要点：
+  - **资金红线**：first-match-wins 改为多 match 会破契约 → 同一行可能被 C1+C2 双改 → 输出错列；改遍历顺序（C1→C2→C3）→ 优先级语义变 → 用户配置场景顺序失效
+  - **`unmatchedRows` 反向 filter 契约**（v2.1.7 F8 新增 Critical）：`modifiedRows + unmatchedRows.length === bankRows.length` 必须永远成立；改 `rowLockSet.has(r._rowId)` 判断条件 → 双计 / 漏计 → 第 2 sheet "未命中场景行" 数据集合错位
+  - 改返回字段 schema（`{modifiedRows, unmatchedRows, stats}`）→ `src/main.js:3033-3116` IPC + `src/main-process/bank-statement-io.js:212-213` writer 接入必须同步
+  - C4 走独立流水线（reconIdFix 模块）**不进 dispatcher** — 不要把 C4 加进 scenarios 数组
+  - 必跑：smoke `npm run smoke`（19 suite 含 c1/c2/c3 全套）+ 真实银行账单端到端（混合 C1+C2+C3+空场景） + F8 第 2 sheet 行数 = bankRows - modifiedRows 断言
+
+### `unmatchedRows`（v2.1.7 F8 dispatcher 反向 filter 输出字段，升格 Critical ⚠️ 资金红线）
+- 定义：`src/main-process/scenario-dispatcher.js:152` 反向 filter；引用 `src/main.js:3036/3110/3116/3270/3309-3420`（reconIdFix 模块也用同名字段，**两条流水线共享名但语义独立** — 见下方区分说明）+ `src/main-process/bank-statement-io.js:212-213` writer 第 2 sheet 输入 + `src/main-process/acquiring-bill-currency-session.js:211` 收单单据校验也用
+- 关联功能：dispatcher first-match-wins 遍历后未命中任何场景规则的行集合；导出阶段透传给 `writeBankStatementOutput` 输出第 2 sheet "未命中场景行"
+- 跨流水线区分（两条 unmatchedRows 不可混）：
+  1. **dispatcher unmatchedRows**（`scenario-dispatcher.js:152`）— 所有场景未命中的银行账单行；服务于 F8 第 2 sheet
+  2. **reconIdFix unmatchedRows**（`src/main.js:3309-3420`）— C4 reconId 修复模块的未匹配行；服务于"导出未匹配"独立功能
+- 变更 review 要点：
+  - **资金红线**：dispatcher unmatchedRows 是反向 filter 派生数据；保证 `modifiedRows + unmatchedRows = bankRows` 是核心契约（F8 spec §9.8 + spec §11.3 反向同步明确）
+  - 改 `_rowId` 内部字段名 → 必须同步 dispatcher rowLockSet add + 反向 filter has 判断 + writer 输出剥 internal field
+  - dispatcher 与 reconIdFix 两条同名字段维护**严格分离** — 改一条不要扩散到另一条
+  - writer `stripInternalFields` helper 必须保证第 2 sheet 输出不暴露 `_rowId` 等内部字段
+  - 必跑：smoke 19 suite 含 baseline `modifiedRows.length` 不变（F8 上线后 baseline 严守）+ F8 第 2 sheet 行数 + unmatchedRowCount stats
+
+### `conditionsLogic`（v2.1.7 F1 C1 AND/OR 切换契约字段，升格 Critical ⚠️ 资金红线）
+- 定义：scenario.config 持久化字段 — `src/main-process/scenario-engines/c1-extract-recon-id.js:103` `runC1Scenario` 消费 + `src/renderer-dialogs.js:5744/6292/6298/6303/6306` dialog 创建+读取 + `src/renderer-previews.js:872` preview 注入；schema 位置：scenario 配置 JSON（数据库 + 内存）
+- 当前值域：`'AND'` / `'OR'` / `undefined`（老 scenario 无字段 → fallback `'OR'` 维持 v2.1.7 前历史行为）
+- 关联功能：F1 C1 提取 reconId 场景多条件聚合逻辑切换 — `'AND'` = 同时满足所有条件才命中；`'OR'` = 满足任一条件即命中（默认 fallback）；**新 scenario 强制默认 `'AND'`**（R5 资金红线三层护栏：createDefaultScenarioConfig 注入 + dialog helper + 引擎 fallback）
+- 变更 review 要点：
+  - **资金红线**（R5 三层护栏拍板）：默认值改回 `'OR'` 或删除 fallback → 用户新建多条件场景被静默"或"逻辑命中过多行 → 错改账单
+  - 三层护栏缺一不可：① `createDefaultScenarioConfig` 默认 `'AND'`（renderer-dialogs.js:5744）② `pickConditionsLogicChecked` helper mode=create 跟随 draft / mode=edit-老数据 fallback `'OR'`（renderer-dialogs.js:6298-6306）③ `runC1Scenario` 引擎 fallback `'OR'`（c1-extract-recon-id.js:103）
+  - 改字段名 `conditionsLogic` → 所有 scenario 持久化 JSON 失效 + 老用户配置回退到默认
+  - 改值域字符串（'AND'/'OR' → 'AND_MODE'/'OR_MODE'）→ 同上失效
+  - 必跑：smoke c1 AND/OR 切换 + 新建场景 dialog 默认 AND radio 选中（preview F1 截图）+ 老 scenario 编辑 OR radio 选中（兼容性）
 
 ---
 
@@ -336,6 +371,31 @@
 - 定义：`src/main.js`（来自 `require('electron')`）
 - 关联功能：Electron app 生命周期
 - 变更 review 要点：改启动 / 退出钩子要考虑未保存状态
+
+### `AppDatabase` / `AppDatabase.init`（v2.1.7 F7-A1 升格 Important-skeleton ⚠️ 全局影响）
+- 定义：`src/backend/database.js:33` `class AppDatabase`（门面）；`init()` 方法在 `database.js:42` 附近设全局 PRAGMA
+- 关联功能：项目唯一 SQLite DB 入口；CLAUDE.md State Management § SQLite 唯一持久化层；**v2.1.7 F7-A1 在 init() 内设全局 PRAGMA**（`journal_mode=WAL` / `synchronous=NORMAL` / `cache_size=-65536` 即 64 MB / `mmap_size=268435456` 即 256 MB）
+- 跨文件度：2+（`src/backend/database.js` 定义 + `src/main.js:10431` 单例 `new AppDatabase(dataPath)`）
+- 变更 review 要点：
+  - **WAL 模式破坏性副作用**：用户机器 `tool-data.sqlite` 同目录会产生 `*.sqlite-wal` + `*.sqlite-shm` 旁文件；备份策略必须同步含旁文件（USER_GUIDE 已加 F7 WAL 旁文件备份提示）
+  - 改 `cache_size` / `mmap_size` 数值 → 内存占用直接放大（64M cache + 256M mmap）；低配 Windows 机器需评估
+  - 改 `journal_mode` → 回滚到 DELETE/MEMORY 会让并发读写性能退化（v2.1.6 → v2.1.7 性能提升核心来源）
+  - 改 `synchronous` → NORMAL→FULL 写性能下降 ~2x；NORMAL→OFF 崩溃可能丢已提交事务（资金红线警戒）
+  - init() 调用时机变化（如延迟到首次操作）→ 启动期间未跑迁移即用 DB
+  - 必跑：smoke 19 suite 全套（PRAGMA 全局影响）+ 真实 DB 备份恢复演练（含 WAL 旁文件）+ 启动 cold/warm 双跑
+
+### `updateStatusBox`（v2.1.7 R3+B5 升格 Important-skeleton ⚠️ 全局影响）
+- 定义：`src/renderer.js:520` `function updateStatusBox(box, message, tone, options)`
+- 当前实现：`String(message).replace(/：/g, '：\n')` 中文「：」自动换行（R3 全局规则）+ `box.dataset.tone = tone` 联动 `data-tone` 属性选择器（解决历史 tone 不生效 bug）
+- 关联功能：渲染层状态栏唯一写入口；**v2.1.7 R3 加全局中文「：」换行**（配合 `src/styles-gemini-extra.css:1852` `white-space: pre-wrap`）；**B5 wiring 加固后**所有模块（acquiring / bankStatement / reconIdFix / bankBuRecon / bizOpRecon 等 6+ 模块）的状态栏全部走该入口
+- 跨文件度：4+（`src/renderer.js`:520/552/561/3333/3686/3913/4143/4254 共 8+ 直接调用 + `src/styles-gemini-extra.css` + `src/styles.css` CSS 联动 + `src/renderer-dialogs.js` 部分模块间接调用）
+- 变更 review 要点：
+  - **全局影响**：改 `replace(/：/g, '：\n')` 规则 → 全模块状态栏文案视觉变化；删除 → 所有 ":" 文案重新挤一行
+  - **B5 wiring 契约**（v2.1.7 round 3）：所有 statusBox 写入必须走 `updateStatusBox(box, message, tone)` 不能直写 `box.textContent = ...`（绕过会丢 tone + 换行）；新增模块状态栏时必须走该入口
+  - 改 `box.dataset.tone` 联动逻辑 → CSS `[data-tone="error"]` / `[data-tone="success"]` 选择器失效
+  - 改 `options` 参数 schema → 6+ 调用方需同步
+  - **半角 `:`** 不在 R3 规则范围（仅中文「：」）；改规则覆盖半角需评估 acquiring 模块时间戳文案影响
+  - 必跑：smoke 19 suite（含 R3 全局回归）+ 6+ 模块状态栏手测（每模块写入一次状态后检查换行 + tone 颜色生效）+ B5 wiring 防回归（直写 `box.textContent` 引入 → smoke 应拒绝）
 
 ---
 
@@ -517,6 +577,64 @@
   - **C1 round 1 修订**：BU 比较 SQL 必须 `LOWER(TRIM(bu_name)) = LOWER(TRIM(?))`，与 `getRowsByDateBu` 完全对齐；脱口 → 大小写差异时清不掉旧数据 = 资金红线
   - DELETE 顺序固定：diff_rows → runs（FK 依赖）
   - 必跑：smoke biz-op-recon Case L（C1 大小写归一防回归）+ Case O（I2 BU trim 边界扩展）
+
+### `pickConditionsLogicChecked`（v2.1.7 F1+R5 helper，升格 Risk-sensitive ⚠️ 资金红线三层护栏第 2 层）
+- 定义：`src/renderer-dialogs.js:6298-6306` 函数
+- 实现：
+  - mode=create（draft.config.conditionsLogic 已注入 'AND'）→ `cfg.conditionsLogic === 'OR' ? 'OR' : 'AND'`（跟随 draft）
+  - mode=edit/view（老 scenario 无字段）→ `cfg.conditionsLogic === 'AND' ? 'AND' : 'OR'`（fallback 'OR' 兼容历史）
+- 关联功能：F1 C1 dialog conditionsLogic radio 默认选中决策；R5 资金红线**三层护栏第 2 层**（第 1 层 createDefaultScenarioConfig 默认 / 第 3 层 runC1Scenario fallback）
+- 变更 review 要点：
+  - **资金红线**（R5 三层护栏）：与 `conditionsLogic` 字段配套维护；改 helper 决策方向（如把 edit fallback 改为 AND）→ 老用户编辑场景被默认改为 AND → 多条件场景命中行数突变 → 错改账单
+  - helper 必须**只读决策**：不能修改 draft.config（用户切换 radio 后才落 config.conditionsLogic）
+  - 改 mode 判定逻辑（mode === 'create' / 'edit' / 'view' 分支）→ 必须同步 dialog 三种入口的 wiring
+  - 必跑：smoke c1 AND/OR 默认值（mode=create 新建场景默认 AND）+ 老 scenario 编辑（mode=edit，conditionsLogic 字段缺失，默认 OR）+ preview F1 mode=create 截图 AND radio 选中
+
+### `runC1Scenario`（v2.1.7 F1 C1 提取 reconId 引擎，升格 Risk-sensitive ⚠️ 资金红线三层护栏第 3 层）
+- 定义：`src/main-process/scenario-engines/c1-extract-recon-id.js:103` `function runC1Scenario(scenario, bankRows)`
+- 关联功能：C1 场景执行 — 按 scenario.config.conditions（数组）+ scenario.config.conditionsLogic（'AND'/'OR'/undefined）遍历 bankRows；命中行按 regex 提取 reconId 写入 row[reconIdField]；**v2.1.7 F1 引擎 fallback**：`conditionsLogic === 'AND' ? AND逻辑 : OR逻辑`（**默认 OR 维持历史行为** — R5 三层护栏第 3 层）
+- 跨文件度：2+（自身定义 + `src/main-process/scenario-dispatcher.js` runAllScenarios 调用 + smoke test 引用）
+- 变更 review 要点：
+  - **资金红线**（R5 三层护栏第 3 层）：fallback 默认改为 AND → 老 scenario 无 conditionsLogic 字段会被引擎"且"逻辑跳过原本应命中行 → 漏改账单
+  - 改 conditions 数组语义（regex / value 字段判定）→ 影响所有 C1 场景命中行集合
+  - 改 reconId 写入字段名（默认 `reconId`）→ 下游所有依赖该字段的功能失效（C3 网关核销 / reconIdFix / 导出）
+  - 与 `pickConditionsLogicChecked` helper 默认值"对偶"：helper edit fallback `'OR'` ↔ 引擎 fallback `'OR'` 必须一致
+  - 必跑：smoke c1 AND/OR 切换全套 + 真实银行账单 C1 端到端 + R5 三层护栏防回归
+
+### `runC2Scenario`（v2.1.7 F4 C2 银行对账单字段赋值引擎，升格 Risk-sensitive ⚠️ 资金红线）
+- 定义：`src/main-process/scenario-engines/c2-offset-bill-mark.js:57` `function runC2Scenario(scenario, bankRows)`
+- 关联功能：C2 场景执行 — 按 scenario.config.billTypes（≥ 1，v2.1.7 F4 放宽，原为 ≥ 2）+ scenario.config.reconFields（可 0，v2.1.7 F4 放宽）筛选命中行，命中行字段赋值；**v2.1.7 F4 重命名**：原 "账单打标" → "银行对账单字段赋值"（功能扇出 ~10 处文案）
+- 跨文件度：2+（自身定义 + `src/main-process/scenario-dispatcher.js` runAllScenarios 调用 + smoke）
+- 变更 review 要点：
+  - **资金红线**（F4 放宽）：billTypes ≥ 1 + reconFields 0 无条件赋值是 v2.1.7 拍板（spec §5.7 方案 A），改回 ≥ 2 + ≥ 1 → 用户场景全部失效
+  - reconFields = 0 时无条件赋值（不需要条件匹配）— 改回带条件 → 用户单 billType + 0 reconFields 场景失效
+  - 改 billTypes 校验逻辑 → 必须同步 dialog 校验（renderer-dialogs.js C2 dialog `>= 1` 门槛）+ delete 按钮门槛（F4 R1 + F4 删空）
+  - 字段重命名扇出（10+ 处）→ 已 v2.1.7 commit a5d6eed 全量替换；新增引用必须用新名"银行对账单字段赋值"
+  - 必跑：smoke c2 全套（billTypes=1 / reconFields=0 / 混合）+ 真实银行账单 C2 端到端
+
+### `runC3Scenario`（v2.1.7 F2 C3 网关 1v1 引擎，升格 Risk-sensitive ⚠️ 资金红线方案 A）
+- 定义：`src/main-process/scenario-engines/c3-gateway-recon-join.js:68` `function runC3Scenario(scenario, bankRows, gwRows)`
+- 关联功能：C3 场景执行 — 网关 reconId 1v1 join；**v2.1.7 F2 方案 A**：用 Set 候选池（gwCandidatePool）严格 1v1 — 一个网关行匹配后从池移除，避免同一网关行被多个银行行重复匹配（资金红线核心修复）
+- 跨文件度：2+（自身定义 + `src/main-process/scenario-dispatcher.js` runAllScenarios 调用 + smoke c3 5 case）
+- 变更 review 要点：
+  - **资金红线**（F2 方案 A 核心契约）：删除 Set 候选池 / 改回 1v多 → 同一网关行可能被多个银行行重复匹配 → 用户错改账单出现"幽灵核销"
+  - 改 Set 数据结构（如改 Array indexOf）→ 性能 O(n²) 风险 + 删除语义不变
+  - 改 match key（默认 reconId）→ 必须同步 dialog 配置 + bankRows / gwRows reader 字段
+  - gwRows 入参允许 null/empty（C3 场景 gw 文件可选）→ 改逻辑必须保留空数组兜底
+  - 必跑：smoke c3 5 case（包含 1v1 / 1v多反例 / 候选池耗尽 / 空 gw）+ 真实银行账单 + 网关账单端到端
+
+### `writeBankStatementOutput`（v2.1.7 F8 升格 Risk-sensitive ⚠️ 资金红线 + F8 第 2 sheet 契约）
+- 定义：`src/main-process/exceljs-writer.js:53` `async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null)`
+- 关联功能：银行账单导出唯一 writer — 仅修改行 + 单元格黄底 + 表头；**v2.1.7 F8 新增第 4 参数 `unmatchedRows`**：非 null 时输出第 2 sheet "未命中场景行"；命名 sheet 1 = "渠道对账单"（exceljs-writer.js:56 SHEET_NAME 常量真实值，self-review I-10 修正）、sheet 2 = "未命中场景行"
+- 跨文件度：2+（自身定义 + `src/main-process/bank-statement-io.js:20/212-213` 桥接调用）
+- 变更 review 要点：
+  - **资金红线**（F8 契约）：sheet 1 仅写 rows（modifiedRows）— 严守 v2.1.7 之前 baseline 不变（smoke baseline 已锁定 modifiedRows.length 不漂移）
+  - sheet 2 输入 unmatchedRows 必须经 `stripInternalFields` 剥 `_rowId` 等内部字段
+  - 改第 4 参数默认值（null → []）→ 老调用方未传第 4 参数时**不应**触发第 2 sheet 输出（兼容性）
+  - 改 sheet 命名（"已处理" / "未命中场景行"）→ 用户文件名认知不一致 + USER_GUIDE 同步
+  - 改黄底单元格判定逻辑 → 全模块视觉变化
+  - **ExcelJS vs SheetJS**：v2.1.7 dev 路径已用 ExcelJS（commit d289779）；spec §9.8.4 PM sketch 当初按 SheetJS 起草已反向同步双版本说明；改 writer 库需评估 cellStyle / sheet 命名 / 性能
+  - 必跑：smoke `npm run smoke` 全 19 suite（含 F8 第 2 sheet 行数断言）+ 真实银行账单端到端（带未命中场景）+ baseline modifiedRows 防回归
 
 ---
 

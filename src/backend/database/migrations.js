@@ -995,6 +995,15 @@ function ensureAcquiringBillCurrencyTablesSupport(db) {
       CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_bill_join
         ON acquiring_bill_currency_bill_imports(month_key, recon_main_id);
     `);
+    // v2.1.7 F7-A2：writer 阶段高频查询用 source_file 索引（spec §7.4.1）
+    //   覆盖 run-repository.js: listDiffRowsBySourceFile (WHERE source_file=?)
+    //                          listAllDiffRowsByRun (ORDER BY source_file ASC)
+    //                          listSourceFilesByRun (SELECT DISTINCT source_file ORDER BY source_file ASC)
+    //   CREATE INDEX IF NOT EXISTS 幂等
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_bill_source_file
+        ON acquiring_bill_currency_bill_imports(source_file);
+    `);
 
     // 表 3：对账运行历史（spec §4.3）
     // v0.8 fix5：新增 diff_file_path + report_file_path 存 run 时生成的输出文件路径

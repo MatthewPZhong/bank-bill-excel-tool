@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
-const { app, BrowserWindow, dialog, ipcMain, nativeImage } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification } = require('electron');
 const { AppDatabase } = require('./backend/database');
 const { openPendingDb, PENDING_DB_FILENAME } = require('./backend/pending-db');
 const PENDING_COLUMNS = require('./backend/pending-db/columns');
@@ -3030,6 +3030,10 @@ function registerAppHandlers() {
       const result = runAllScenarios(workingBankRows, workingGwRows, dispatchScenarios);
       processingResult = {
         modifiedRows: result.modifiedRows,
+        // v2.1.7 round 3 F8 (spec §9.8.5)：保留 dispatcher 返回的 unmatchedRows（导出阶段写第 2 sheet 用）
+        //   保留原始 bankRows 顺序 + 原始字段（dispatcher 反向 filter 未做 .map 转换）
+        //   ⚠️ 资金红线：modifiedRows + unmatchedRows = workingBankRows（无遗漏 + 互斥）
+        unmatchedRows: result.unmatchedRows,
         modifications: result.modifications,
         errorReport: result.errorReport,
         stats: result.stats,
@@ -3066,10 +3070,16 @@ function registerAppHandlers() {
       }
       const exportRootDir = path.join(ensureStorageRoot(), 'bank-statement-process');
 
+      // v2.1.7 round 8 F8 fix（PR #51 reviewer round 2 Finding 1）：
+      //   保存框触发条件必须涵盖 unmatchedRows，否则全未命中时 mainFilePath=null →
+      //   后面 writeBankStatementMainOutput 因缺 mainFilePath 抛错（bank-statement-io.js:205）
+      //   提前算 unmatchedCount，保存框 + empty 返回两处共用
+      const unmatchedCount = Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows.length : 0;
+
       // 主输出走 saveDialog（用户另存为）；先弹保存框，让用户选位置
-      // 若 modifiedRows 为空 → 跳过 saveDialog，仅落 error-report
+      // 若 modifiedRows + unmatchedRows 都为空 → 跳过 saveDialog，仅落 error-report
       let mainFilePath = null;
-      if (processingResult.modifiedRows.length > 0) {
+      if (processingResult.modifiedRows.length > 0 || unmatchedCount > 0) {
         const defaultFileName = buildMainOutputFileName();
         const saveResult = await dialog.showSaveDialog(mainWindow, {
           title: '保存处理结果',
@@ -3093,8 +3103,13 @@ function registerAppHandlers() {
           exportRootDir
         });
       }
-      if (processingResult.modifiedRows.length === 0) {
-        // PRD §717 P0-11：不生成主输出，但 error-report 仍可能已生成
+      // v2.1.7 round 7 F8 fix（PR #51 reviewer P1 / self-review I-5）+ round 8 (Finding 1 follow-up)：
+      //   仅当 modifiedRows + unmatchedRows 都为 0 才 return empty；
+      //   有 unmatchedRows 时上方保存框已经弹过（round 8 fix），mainFilePath 非 null，
+      //   下方 writeBankStatementMainOutput 才能正确写主 sheet 空 + 第 2 sheet 全部未命中行
+      //   对齐 PRD AC-F8-5：「所有行都未命中场景时，第 2 sheet 应包含全部 N 行」
+      if (processingResult.modifiedRows.length === 0 && unmatchedCount === 0) {
+        // PRD §717 P0-11：modifiedRows + unmatchedRows 都为 0 才不生成主输出，但 error-report 仍可能已生成
         return {
           status: 'empty',
           message: '无修改记录，未生成主输出文件',
@@ -3102,10 +3117,14 @@ function registerAppHandlers() {
           errorReportName: errorReport ? errorReport.fileName : null
         };
       }
+      // v2.1.7 round 3 F8 (spec §9.8.5)：透传 unmatchedRows 给 writer 输出第 2 sheet "未命中场景行"
+      //   ⚠️ 资金红线：unmatchedRows = bankRows - modifiedRows（dispatcher 反向 filter 保证互斥）
+      //   sheet 1 '渠道对账单'：保留命中行 + 标黄；sheet 2 '未命中场景行'：未命中行（原始字段，无诊断列）
       const main = await writeBankStatementMainOutput({
         modifiedRows: processingResult.modifiedRows,
         headers: bankStatementSession.headers,
-        mainFilePath
+        mainFilePath,
+        unmatchedRows: Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows : []
       });
       return {
         status: 'ok',
@@ -10087,18 +10106,66 @@ function registerNewAccountHandlers() {
   const tryAcquireOpLock = tryAcquireAcquiringBillCurrencyOpLock;
   const releaseOpLock = releaseAcquiringBillCurrencyOpLock;
 
-  async function handleImportFlowOrBill(kind, payload) {
+  // v2.1.7 F6：进度事件 forwarder（spec §6.3 改动点 2）
+  //   - createImportProgressForwarder：100ms 节流；stage='reading' 切换事件必发（文件切换）
+  //   - createRunProgressForwarder：无节流（每 run 仅 6 个事件）
+  //   - try/catch swallow webContents.send 失败（参考 main.js:9520 pending:import:progress 范式）
+  function createImportProgressForwarder(event) {
+    if (!event || !event.sender) return null;
+    let lastSentAt = 0;
+    const THROTTLE_MS = 100;
+    return (ev) => {
+      const isStageSwitch = ev && ev.stage === 'reading';   // 文件切换必发，不节流
+      const now = Date.now();
+      if (!isStageSwitch && now - lastSentAt < THROTTLE_MS) return;
+      lastSentAt = now;
+      try { event.sender.send('acquiringBillCurrency:import:progress', { ...ev, phase: 'import' }); }
+      catch (_e) { /* swallow — 窗口已销毁等 */ }
+    };
+  }
+  function createRunProgressForwarder(event) {
+    if (!event || !event.sender) return null;
+    return (ev) => {
+      try { event.sender.send('acquiringBillCurrency:run:progress', { ...ev, phase: 'run' }); }
+      catch (_e) { /* swallow */ }
+    };
+  }
+
+  // v2.1.7 F7-B1：runCheck 完成/失败弹系统通知（spec §7.5.2 / PRD §十一-B1）
+  //   success：「收单单据币种校验」{monthKey} 对账完成（共 N 行差异）
+  //   error：  「收单单据币种校验」对账失败：{message}（body 200 字符截断兜底 macOS 通知中心）
+  //   不弹 cancel 通知（仅 success + 真正 error）
+  //   helper 内部 try/catch swallow，通知失败不影响 IPC return
+  //   Notification.isSupported() 兜底极端环境（如无 GUI 的 CI / SSH 头）
+  function notifyAcquiringBillCurrencyResult(monthKey, kind, payload) {
+    try {
+      if (!Notification || typeof Notification.isSupported !== 'function' || !Notification.isSupported()) return;
+      const title = '「收单单据币种校验」';
+      let body;
+      if (kind === 'success') {
+        const mismatch = (payload && typeof payload.mismatchRows === 'number') ? payload.mismatchRows : 0;
+        body = `${monthKey} 对账完成（共 ${mismatch} 行差异）`;
+      } else {
+        const msg = (payload && payload.message) ? String(payload.message) : '未知错误';
+        body = `对账失败：${msg}`.slice(0, 200);
+      }
+      new Notification({ title, body }).show();
+    } catch (_e) { /* swallow — 通知失败不影响业务 return */ }
+  }
+
+  async function handleImportFlowOrBill(kind, payload, event) {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const lock = tryAcquireOpLock('import', payload && payload.monthKey);
     if (!lock.acquired) return { status: 'error', message: lock.message, detailLines: [] };
     try {
-      return await doHandleImportFlowOrBill(kind, payload);
+      return await doHandleImportFlowOrBill(kind, payload, event);
     } finally {
       releaseOpLock();
     }
   }
   // fix5（spec v0.8 §3.3）：handler 入参必传 monthKey（用户弹窗选）；peek 校验 xlsx 内月份 = 用户选的月份；不一致整批拒绝
-  async function doHandleImportFlowOrBill(kind, payload) {
+  // v2.1.7 F6：event 透传 → onProgress forwarder
+  async function doHandleImportFlowOrBill(kind, payload, event) {
     const isFlow = kind === 'flow';
     const sessionImport = isFlow
       ? acquiringBillCurrencySession.importFlowFiles
@@ -10119,10 +10186,12 @@ function registerNewAccountHandlers() {
     // 分支 2：renderer 已确认覆盖
     if (payload.confirmOverwrite === true && Array.isArray(payload.filePaths) && payload.filePaths.length > 0) {
       try {
+        const onProgress = createImportProgressForwarder(event);
         const result = await sessionOverwrite({
           db: database.db,
           monthKey,
-          filePaths: payload.filePaths
+          filePaths: payload.filePaths,
+          onProgress
         });
         return { status: 'success', overwritten: true, ...result };
       } catch (err) {
@@ -10180,10 +10249,12 @@ function registerNewAccountHandlers() {
     }
 
     try {
+      const onProgress = createImportProgressForwarder(event);
       const result = await sessionImport({
         db: database.db,
         monthKey,
-        filePaths: res.filePaths
+        filePaths: res.filePaths,
+        onProgress
       });
       return { status: 'success', ...result };
     } catch (err) {
@@ -10195,17 +10266,19 @@ function registerNewAccountHandlers() {
     }
   }
 
-  trackedIpcHandle('acquiringBillCurrency:importFlow', '收单单据币种校验', '导入流水表', async (_event, payload = {}) => {
-    return handleImportFlowOrBill('flow', payload);
+  // v2.1.7 F6：trackedIpcHandle 回调收 (event, payload)；event 透传到 handleImportFlowOrBill → forwarder
+  trackedIpcHandle('acquiringBillCurrency:importFlow', '收单单据币种校验', '导入流水表', async (event, payload = {}) => {
+    return handleImportFlowOrBill('flow', payload, event);
   });
 
-  trackedIpcHandle('acquiringBillCurrency:importBill', '收单单据币种校验', '导入单据表', async (_event, payload = {}) => {
-    return handleImportFlowOrBill('bill', payload);
+  trackedIpcHandle('acquiringBillCurrency:importBill', '收单单据币种校验', '导入单据表', async (event, payload = {}) => {
+    return handleImportFlowOrBill('bill', payload, event);
   });
 
   // v0.8 fix5：runCheck 改 async，传 storageRoot 让 session 同步产出 diff.xlsx + report.xlsx
   // v0.12 fix9：handler 接入 operation lock；runCheck return 后异步触发 cleanup（不阻塞 IPC return）
-  trackedIpcHandle('acquiringBillCurrency:run', '收单单据币种校验', '开始运行', async (_event, payload = {}) => {
+  // v2.1.7 F6：透传 event → onProgress forwarder（spec §6.3 改动点 2）
+  trackedIpcHandle('acquiringBillCurrency:run', '收单单据币种校验', '开始运行', async (event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const { monthKey } = payload || {};
     if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
@@ -10216,9 +10289,12 @@ function registerNewAccountHandlers() {
     let result;
     try {
       const storageRoot = ensureStorageRoot();
-      result = await acquiringBillCurrencySession.runCheck({ db: database.db, monthKey, storageRoot });
+      const onProgress = createRunProgressForwarder(event);
+      result = await acquiringBillCurrencySession.runCheck({ db: database.db, monthKey, storageRoot, onProgress });
     } catch (err) {
       releaseOpLock();
+      // v2.1.7 F7-B1：error 路径弹通知（spec §7.5.2）
+      notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
     // v0.12 fix9：release run lock，立即 acquire cleanup lock，setImmediate 异步分批清理（不阻塞 handler return）
@@ -10244,6 +10320,8 @@ function registerNewAccountHandlers() {
         });
       }
     }
+    // v2.1.7 F7-B1：success 路径弹通知（spec §7.5.2）
+    notifyAcquiringBillCurrencyResult(monthKey, 'success', { mismatchRows: result.mismatchRows });
     return { status: 'success', ...result };
   });
 

@@ -653,10 +653,49 @@
       }));
     }
 
+    // v2.1.7 round 3 B4（spec §9.5.2）：≥20 文件 fixture 复现"滚动条不可用"
+    //   构造 20 文件 + 8 大账号；高度链：.ba-scroll-container max-height 52vh
+    //   若 R6c B3 之后仍发现 ≥20 文件 无滚动条，dev 阶段在此 preview 上 DevTools 调试
+    function applyBigAccountSelectionMultiLargePreviewState() {
+      setCurrentModule(MODULES.statementGenerator.id);
+      state.currencyOptions = ['USD', 'HKD', 'CNY', 'EUR', 'JPY', 'SGD'];
+      const rows = [];
+      for (let i = 0; i < 20; i++) {
+        rows.push({
+          index: i,
+          fileIndex: i,
+          fileName: `HSBC-SG-2026-03-batch${String(i).padStart(2, '0')}.xlsx`,
+          sourceRowNumber: 1
+        });
+      }
+      openModal(createBigAccountSelectionDialog({
+        rows,
+        rowsWithEmptyBlocks: rows,
+        expandedBigAccountOptions: [
+          { merchantId: '6222000000000001', currency: 'USD' },
+          { merchantId: '6222000000000001', currency: 'HKD' },
+          { merchantId: '6222000000000001', currency: 'SGD' },
+          { merchantId: '9558800000000008', currency: 'SGD' },
+          { merchantId: '9558800000000008', currency: 'USD' },
+          { merchantId: '4567000000000003', currency: 'USD' },
+          { merchantId: '4567000000000003', currency: 'HKD' },
+          { merchantId: '7777000000000007', currency: 'CNY' }
+        ],
+        templateId: 'preview-template-4',
+        templateName: 'HSBC-SG',
+        canRemember: true,
+        onDone: () => {},
+        onCancel: closeModal
+      }));
+    }
+
     // 23. "确认大账号顺序" 对话框（extract-order-card）
     //     直接手搓 DOM（showExtractDialog 是 createBigAccountSelectionDialog 内部闭包，
     //     无法从外部调用；视觉 class 名保持与实际实现一致即可）
     function applyExtractOrderPreviewState() {
+      // v2.1.7 round 3 B3（spec §9.4.2 方案 A）：preview DOM 同步切到单 grid 范式
+      //   - col-header 跨 grid 第 1 / 2 列（sticky）
+      //   - max(N, M) 循环，每对 [leftCell, rightCell] append 到 .extract-order-body
       setCurrentModule(MODULES.statementGenerator.id);
       const overlay = document.createElement('div');
       overlay.className = 'modal-overlay';
@@ -668,14 +707,9 @@
           <button class="icon-close extract-close-btn" type="button" style="margin-left:auto;">×</button>
         </div>
         <div class="extract-order-body">
-          <div>
-            <div class="extract-order-col-header">文件顺序：</div>
-            <div class="extract-order-list extract-file-list"></div>
-          </div>
-          <div>
-            <div class="extract-order-col-header">大账号信息：</div>
-            <div class="extract-order-list extract-account-list"></div>
-          </div>
+          <div class="extract-order-col-header">文件顺序</div>
+          <div class="extract-order-col-header">大账号信息</div>
+          <!-- 每行 = [leftCell, rightCell] 一对，JS 循环 append -->
         </div>
         <div class="dialog-actions right">
           <button class="primary-btn small" type="button" data-action="extract-done">完成</button>
@@ -683,8 +717,7 @@
       `;
       overlay.appendChild(dialog);
 
-      const extractFileList = dialog.querySelector('.extract-file-list');
-      const extractOrderList = dialog.querySelector('.extract-account-list');
+      const body = dialog.querySelector('.extract-order-body');
       const fileRows = [
         'HSBC-SG-2026-03.xlsx',
         'HSBC-SG-2026-03-block2.xlsx',
@@ -697,33 +730,43 @@
         { merchantId: '9558800000000008', currency: 'SGD' },
         { merchantId: '4567000000000003', currency: 'USD' }
       ];
-      fileRows.forEach((fileName, index) => {
-        const item = document.createElement('div');
-        item.className = 'extract-order-row';
-        item.innerHTML =
-          `<span class="eo-idx">${index + 1}.</span>` +
-          `<span class="eo-name" title="${fileName}">${fileName}</span>` +
-          `<span></span>`;
-        extractFileList.appendChild(item);
-      });
-      extracted.forEach((account, index) => {
-        const item = document.createElement('div');
-        item.className = 'extract-order-row';
-        const indexSpan = document.createElement('span');
-        indexSpan.className = 'eo-idx';
-        indexSpan.textContent = `${index + 1}.`;
-        const textSpan = document.createElement('span');
-        textSpan.className = 'eo-name';
-        textSpan.textContent = `${account.merchantId} ${account.currency}`;
-        const editBtn = document.createElement('button');
-        editBtn.className = 'text-action eo-edit';
-        editBtn.type = 'button';
-        editBtn.textContent = '编辑';
-        item.appendChild(indexSpan);
-        item.appendChild(textSpan);
-        item.appendChild(editBtn);
-        extractOrderList.appendChild(item);
-      });
+      const maxRows = Math.max(fileRows.length, extracted.length);
+      for (let i = 0; i < maxRows; i++) {
+        // 左 cell
+        const leftCell = document.createElement('div');
+        leftCell.className = 'extract-order-row';
+        const fileName = fileRows[i];
+        if (fileName) {
+          leftCell.innerHTML =
+            `<span class="eo-idx">${i + 1}.</span>` +
+            `<span class="eo-name" title="${fileName}">${fileName}</span>` +
+            `<span></span>`;
+        } else {
+          leftCell.classList.add('extract-order-row--empty');
+        }
+        body.appendChild(leftCell);
+
+        // 右 cell
+        const rightCell = document.createElement('div');
+        rightCell.className = 'extract-order-row';
+        const account = extracted[i];
+        if (account) {
+          const indexSpan = document.createElement('span');
+          indexSpan.className = 'eo-idx';
+          indexSpan.textContent = `${i + 1}.`;
+          const textSpan = document.createElement('span');
+          textSpan.className = 'eo-name';
+          textSpan.textContent = `${account.merchantId} ${account.currency}`;
+          const editBtn = document.createElement('button');
+          editBtn.className = 'text-action eo-edit';
+          editBtn.type = 'button';
+          editBtn.textContent = '编辑';
+          rightCell.append(indexSpan, textSpan, editBtn);
+        } else {
+          rightCell.classList.add('extract-order-row--empty');
+        }
+        body.appendChild(rightCell);
+      }
       openModal(overlay);
     }
 
@@ -783,6 +826,7 @@
     }
 
     // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 preview
+    // v2.1.7 F1：默认无 conditionsLogic 字段 → dialog 渲染 OR radio 默认选中（fallback 行为 baseline）
     function applyScenarioConfigC1PreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
       state.scenarioDraft = {
@@ -796,6 +840,36 @@
             { field: 'CustomerRef', op: '包含', value: 'AFT' },
             { field: 'Extra Information', op: '包含', value: 'AFT' }
           ],
+          extractByFeature: {
+            enabled: true,
+            searchFields: ['CustomerRef', 'Extra Information'],
+            featureCode: 'FT',
+            digitCount: 12,
+            totalLength: 15
+          },
+          extractByOtherField: null
+        }
+      };
+      setTimeout(() => {
+        openModal(createScenarioConfigDialogC1());
+      }, 120);
+    }
+
+    // v2.1.7 F1：C1 dialog AND 模式 preview（conditionsLogic='AND' 显式注入，截图验证 AND radio 选中）
+    function applyScenarioConfigC1AndPreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      state.scenarioDraft = {
+        mode: 'create',
+        category: 'extract-recon-id',
+        scenarioId: null,
+        name: '从银行对账单的信息里提取对账ID（AND）',
+        priority: 3,
+        config: {
+          conditions: [
+            { field: 'CustomerRef', op: '包含', value: 'AFT' },
+            { field: 'Extra Information', op: '包含', value: 'AFT' }
+          ],
+          conditionsLogic: 'AND',
           extractByFeature: {
             enabled: true,
             searchFields: ['CustomerRef', 'Extra Information'],
@@ -1109,6 +1183,7 @@
       applyNewAccountMultiPreviewState,
       applyNewAccountCurrencyDropdownPreviewState,
       applyBigAccountSelectionMultiPreviewState,
+      applyBigAccountSelectionMultiLargePreviewState,   // v2.1.7 round 3 B4
       applyExtractOrderPreviewState,
       applyAccountMappingEditingPreviewState,
       // v2.0.0-beta.3：银行对账单处理模块 preview（3 张）
@@ -1116,7 +1191,9 @@
       applyScenariosManagerPreviewState,
       applyScenarioCategorySelectPreviewState,
       // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 preview（4 张）
+      // v2.1.7 F1：C1 dialog 新增 AND 模式 preview（OR fallback baseline + AND 显式各 1 张）
       applyScenarioConfigC1PreviewState,
+      applyScenarioConfigC1AndPreviewState,
       applyScenarioConfigC2PreviewState,
       applyScenarioConfigC3PreviewState,
       applyScenarioConfirmDetailPreviewState,

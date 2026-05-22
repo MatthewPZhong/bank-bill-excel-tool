@@ -27,6 +27,14 @@ const { runBankBuReconSmokeTests } = require('./smoke/bank-bu-recon');
 const { runBizOpReconSmokeTests } = require('./smoke/biz-op-recon');
 // v2.1.6 Module B：收单单据币种校验（A-G 7 用例 + Module A A1 watermark 集成）
 const { runAcquiringBillCurrencySmokeTests } = require('./smoke/acquiring-bill-currency');
+// v2.1.7 F6：收单单据币种校验进度提示（F6-A/B/C/D 4 用例）
+const { runAcquiringBillCurrencyProgressSmokeTests } = require('./smoke/acquiring-bill-currency-progress');
+// v2.1.7 F7：收单单据币种校验 SQL 调优 + 完成系统通知（F7-A1 PRAGMA / F7-A2 索引+ANALYZE / F7-B1 Notification）
+const { runAcquiringBillCurrencyPragmaSmokeTests } = require('./smoke/acquiring-bill-currency-pragma');
+// v2.1.7 round 2 R3：状态框「：」换行全局规则 + setBizOpReconStatus hack 清理
+const { runRenderStatusBoxSmokeTests } = require('./smoke/render-status-box');
+// v2.1.7 round 2 R5：F1 默认 AND（仅新建）+ 资金红线三层护栏
+const { runScenarioC1DefaultsSmokeTests } = require('./smoke/scenario-c1-defaults');
 
 async function run() {
   const context = createSmokeContext();
@@ -54,6 +62,14 @@ async function run() {
   await runBizOpReconSmokeTests();
   // v2.1.6 Module B：收单单据币种校验
   await runAcquiringBillCurrencySmokeTests();
+  // v2.1.7 F6：进度事件 onProgress 链路 + 节流 + regression baseline
+  await runAcquiringBillCurrencyProgressSmokeTests();
+  // v2.1.7 F7：PRAGMA + 索引 + ANALYZE + Notification 桩
+  runAcquiringBillCurrencyPragmaSmokeTests();
+  // v2.1.7 round 2 R3：updateStatusBox 中文「：」换行规则 + setBizOpReconStatus hack 清理 + CSS pre-wrap
+  runRenderStatusBoxSmokeTests();
+  // v2.1.7 round 2 R5：F1 默认 AND（仅新建）+ pickConditionsLogicChecked + 资金红线三层护栏 + 引擎 fallback OR 回归
+  runScenarioC1DefaultsSmokeTests();
   console.log('smoke test passed');
 }
 

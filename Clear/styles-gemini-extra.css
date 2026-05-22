@@ -174,7 +174,8 @@ td .muted { color: var(--muted); }
 .amount-split-rules-card { width: min(100%, 880px); }
 .bill-split-mappings-card { width: 80vw; max-width: 1280px; }
 .bill-split-rows-card { width: min(100%, 1180px); }
-.big-account-selection-card { width: min(100%, 1080px); min-height: 540px; }
+/* v2.1.7 round 2 R6a 方案 C：与 src/ 同步 — 弹窗 1080 → 1200 */
+.big-account-selection-card { width: min(100%, 1200px); min-height: 540px; }
 .big-account-selection-split { min-height: 600px; }
 
 /* =================== Export-scope vertical buttons =================== */
@@ -343,10 +344,19 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
 .big-account-split-body {
   flex: 1; padding: 8px 12px 0;
   overflow: hidden;
+  /* v2.1.7 round 5 B4 防御性兜底（spec §11.3.3 第 1 层）：与 src/ 同步 — 极小屏 edge case 兜底 */
+  min-height: 0;
 }
 .ba-scroll-container {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  /* v2.1.7 round 6 B4 真根因 fix（DevTools 数据揭示）：grid-template-rows 缺失 → 默认 grid-auto-rows: auto = content size
+     → grid item (split-left) 撑到 content 高度（实测 5952px）远超父 max-height: 52vh (实测 447px)
+     → file-list 自身父级无限制 → overflow-y:auto 永不触发
+     round 4/5 加的 split-left/right + file-list + split-body min-height: 0 全部 computed = "0px" 但不解决问题
+     真 fix = grid-template-rows: 1fr 让 row 等于父高度，grid item 跟随 row 限到 447px
+     spec §11.3 反向同步待 T14 PM 处理 */
+  grid-template-rows: 1fr;
   gap: 16px;
   height: 100%;
   min-height: 360px;
@@ -359,6 +369,9 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
   border-radius: var(--radius-md);
   overflow: hidden;
   background: #fff;
+  /* v2.1.7 round 4 B4（spec §10.3.2 真根因 fix）：与 src/ 同步 — grid 子项 min-height: 0
+     破除 auto = content size 让父 .ba-scroll-container max-height: 52vh 生效 */
+  min-height: 0;
 }
 .big-account-split-header {
   padding: 12px 16px;
@@ -372,12 +385,38 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
 .big-account-order-list {
   flex: 1;
   overflow-y: auto;
+  /* v2.1.7 round 5 B4 真根因第 2 层主修（spec §11.3.3 第 3 层）：与 src/ 同步 — 经典 flex 嵌套坑
+     每层 flex item 都需要显式 min-height: 0，否则 content size 从最内层一路撑过所有父级 max-height 约束 */
+  min-height: 0;
   padding: 6px 8px;
   display: flex; flex-direction: column; gap: 4px;
+  /* v2.1.7 round 3 B4：与 src/ 同步 — 强制滚动条可见（防 macOS overlay-style 仅 hover） */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 80, 60, 0.3) transparent;
 }
+.big-account-file-list::-webkit-scrollbar,
+.big-account-order-list::-webkit-scrollbar {
+  width: 8px;
+}
+.big-account-file-list::-webkit-scrollbar-thumb,
+.big-account-order-list::-webkit-scrollbar-thumb {
+  background: rgba(100, 80, 60, 0.3);
+  border-radius: 4px;
+}
+.big-account-file-list::-webkit-scrollbar-thumb:hover,
+.big-account-order-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 80, 60, 0.5);
+}
+/* v2.1.7 round 3 B2（spec §9.3.2 方案 A）：与 src/styles-gemini-extra.css 同步 — letter 列宽兜底 */
+.big-account-order-index--alpha {
+  color: var(--muted);
+  min-width: 24px;
+  text-align: center;
+}
+/* v2.1.7 round 2 R6a 方案 C：与 src/styles-gemini-extra.css 同步 — grid 2 列 → 3 列适配 multi 模式 3 子项 */
 .ba-file-row {
   display: grid;
-  grid-template-columns: 28px 1fr;
+  grid-template-columns: auto auto 1fr;
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
@@ -396,6 +435,8 @@ tr.migration-empty-row td .mapping-select { border-color: #fbc9c9; }
   display: flex; align-items: center; justify-content: center;
 }
 .ba-file-name {
+  /* v2.1.7 round 2 R6a 方案 C：与 src/ 同步 — grid 子项不接受 flex（删 flex:1 1 auto），靠 min-width:0 + ellipsis + 父 grid 1fr 列 */
+  min-width: 0;
   font-family: "Roboto Mono", ui-monospace, monospace;
   font-size: 13px;
   color: var(--text);
@@ -1076,17 +1117,24 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 
 /* =================== Extract-order confirm card =================== */
 .extract-order-card { width: min(100%, 760px); }
+/* v2.1.7 round 3 B3（spec §9.4.2 方案 A）：与 src/styles-gemini-extra.css 同步 — 单 grid + 外层 overflow */
 .extract-order-body {
   padding: 18px 28px 8px;
-  display: grid; grid-template-columns: 1fr 1.15fr; gap: 28px;
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 0 28px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
 }
 .extract-order-col-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
   font-size: 12px; color: var(--muted); font-weight: 500;
-  letter-spacing: .04em; margin-bottom: 8px;
+  letter-spacing: .04em; padding: 0 0 8px;
 }
-.extract-order-list {
-  display: flex; flex-direction: column;
-}
+/* B3：.extract-order-list 不再使用（spec §9.4.2 删除整段，DOM 已切到单 grid 方案 A） */
 .extract-order-row {
   display: grid;
   grid-template-columns: 24px 1fr auto;
@@ -1171,10 +1219,54 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   width: 80px;
 }
 
-/* v2.1.3-fix1.5：业务OP数据核对状态框 — 冒号后换行（仅本模块） */
+/* v2.1.3-fix1.5：业务OP数据核对状态框 — line-height 视觉保留
+   v2.1.7 round 6 C-1 fix（self-review 阻塞）：white-space 由 normal → pre-wrap，
+   与 R3 全局规则对齐让中文「：」后 \n 真换行（原 normal ID 选择器覆盖了 R3 全局规则） */
 #bizOpReconStatusBox .status-box-text {
-  white-space: normal;
+  white-space: pre-wrap;
   line-height: 1.5;
+}
+
+/* v2.1.7 round 2 R3：与 src/styles-gemini-extra.css 同步 — 全局状态框识别 \n（updateStatusBox 中文「：」后注入） */
+.status-box-text {
+  white-space: pre-wrap;
+}
+
+/* v2.1.7 round 4 B1（spec §10.2.3 Layout-1）：与 src/styles-gemini-extra.css 同步
+   左列 label-stack + radio 纵向；右列 conditions（原 round 2/3 -stack 死代码替换为 round 4 范式）*/
+.scenario-config-label-stack {
+  flex-shrink: 0;
+  width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: flex-start;
+  padding-top: 6px;
+}
+
+.scenario-config-logic-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.scenario-config-logic-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: normal;
+  color: #3c4043;
+  cursor: pointer;
+}
+
+.scenario-config-logic-option input[type="radio"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+.scenario-config-logic-option input[disabled] {
+  cursor: not-allowed;
 }
 
 /* v2.1.4 T3：小助手功能收纳弹窗（Clear theme 覆盖） */

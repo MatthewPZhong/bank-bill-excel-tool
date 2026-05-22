@@ -435,6 +435,7 @@ const {
   applyNewAccountMultiPreviewState,
   applyNewAccountCurrencyDropdownPreviewState,
   applyBigAccountSelectionMultiPreviewState,
+  applyBigAccountSelectionMultiLargePreviewState,   // v2.1.7 round 3 B4: ≥20 文件 fixture
   applyExtractOrderPreviewState,
   applyAccountMappingEditingPreviewState,
   // v2.0.0-beta.3：银行对账单处理模块 preview（3 张）
@@ -442,7 +443,9 @@ const {
   applyScenariosManagerPreviewState,
   applyScenarioCategorySelectPreviewState,
   // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 preview（4 张）
+  // v2.1.7 F1：C1 dialog 新增 AND 模式 preview
   applyScenarioConfigC1PreviewState,
+  applyScenarioConfigC1AndPreviewState,
   applyScenarioConfigC2PreviewState,
   applyScenarioConfigC3PreviewState,
   applyScenarioConfirmDetailPreviewState,
@@ -522,8 +525,13 @@ function updateStatusBox(box, message, tone = 'info', options = {}) {
   } = options;
 
   // v2.0.0-beta.2：只更新 .status-box-text 子节点的文案，保留同级 .status-spark SVG 不被清空
+  // v2.1.7 round 2 R3：中文「：」（U+FF1A）后强制换行；半角 ':' 不动（避开 URL/timestamp/账号 case）
+  //   null/undefined 兜底空串（防 String(null) === 'null' 显示）
+  //   配合 CSS .status-box-text { white-space: pre-wrap; } 识别 \n
+  //   spec §8.4.2
+  const text = (message === null || message === undefined) ? '' : String(message).replace(/：/g, '：\n');
   const textEl = box.querySelector('.status-box-text');
-  if (textEl) textEl.textContent = message;
+  if (textEl) textEl.textContent = text;
   box.dataset.tone = tone;
   box.dataset.errorReportReady = errorReportReady ? 'true' : 'false';
   box.dataset.manualBalancePromptReady = manualBalancePromptReady ? 'true' : 'false';
@@ -3319,10 +3327,10 @@ function updateBankStatementUi() {
     if (gw) text += `\n不平账结果表：${gw.fileName}（${gw.rowCount} 行）`;
     tone = 'info';
   }
-  // 仅替换文本节点，保留 .status-spark SVG（与 setStatus 模式一致）
-  const textEl = elements.bankStatementStatusBox.querySelector('.status-box-text');
-  if (textEl) textEl.textContent = text;
-  elements.bankStatementStatusBox.dataset.tone = tone;
+  // v2.1.7 round 3 B5：走 updateStatusBox 入口（R3 wiring — 自动获中文「：」换行 + null 兜底）
+  //   原现状：直写 textEl.textContent = text + dataset.tone = tone（漏 R3 replace 处理）
+  //   spec §9.6.2
+  updateStatusBox(elements.bankStatementStatusBox, text, tone);
 
   // 按钮 disabled 控制
   if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = false;
@@ -3674,9 +3682,8 @@ function updateReconIdFixUi() {
     text = '欢迎使用小助手';
     tone = 'neutral';
   }
-  const textEl = elements.reconIdFixStatusBox.querySelector('.status-box-text');
-  if (textEl) textEl.textContent = text;
-  elements.reconIdFixStatusBox.dataset.tone = tone;
+  // v2.1.7 round 3 B5：走 updateStatusBox 入口（R3 wiring — spec §9.6.2）
+  updateStatusBox(elements.reconIdFixStatusBox, text, tone);
 
   // 按钮可用性（spec §七 + Q4 决策）
   if (elements.reconIdFixImportBtn) elements.reconIdFixImportBtn.disabled = false;
@@ -4128,16 +4135,14 @@ const bizOpReconState = {
 
 function setBizOpReconStatus(message, tone = 'info') {
   if (!elements.bizOpReconStatusBox) return;
-  // v2.1.3-fix1.5：本模块状态框 — 冒号（: 或 ：）后强制换行
-  // updateStatusBox 用 textContent 写文案，无法识别 <br>；此处先 escape + 替换为 innerHTML，再回写 textContent 用于 dataset tone 等
+  // v2.1.7 round 2 R3：删除原 innerHTML hack（formatBizOpReconStatusHtml 覆盖）
+  //   全局 updateStatusBox 已在 spec §8.4.2 加 String(message).replace(/：/g, '：\n')
+  //   + 全局 CSS .status-box-text { white-space: pre-wrap } 识别 \n
+  //   bizOpRecon 模块的「：」换行行为与原 hack 等价（textContent 路径，无 XSS 风险）
+  //   formatBizOpReconStatusHtml 函数定义保留（renderer-dialogs.js preview 内部仍在用，不动）
   updateStatusBox(elements.bizOpReconStatusBox, message, tone, {
     idleTitle: '欢迎使用小助手'
   });
-  // updateStatusBox 调用之后，覆盖 textEl 内容为 HTML（含 <br> 换行）
-  const textEl = elements.bizOpReconStatusBox.querySelector('.status-box-text');
-  if (textEl && typeof formatBizOpReconStatusHtml === 'function') {
-    textEl.innerHTML = formatBizOpReconStatusHtml(message);
-  }
 }
 
 function applyBizOpReconButtonState() {
@@ -4229,22 +4234,71 @@ function restoreBizOpReconPanelState() {
 // ===== v2.1.6 Module B：收单单据币种校验（spec v0.8 §3.5 / §8，fix5 删月份下拉 + 月份选弹窗）=====
 
 const acquiringBillCurrencyState = {
-  latestMonth: null     // 最近成功操作的月份（导入/运行/导出后回写，仅状态栏文案展示用）
+  latestMonth: null,    // 最近成功操作的月份（导入/运行/导出后回写，仅状态栏文案展示用）
+  // v2.1.7 round 2 R4：当前正在执行的操作（'import' | 'run' | 'export' | null）
+  //   切模块后 restoreAcquiringBillCurrencyPanelState 据此决定按钮 disabled
+  //   防止用户切走→切回时按钮被无脑解禁，重复点击触发并发 IPC
+  //   spec §8.5.2 / PRD §十三-R4
+  inflightOperation: null
 };
 
 function setAcquiringBillCurrencyStatus(message, tone = 'info') {
   const box = elements.acquiringBillCurrencyStatusBox;
   if (!box) return;
-  const text = box.querySelector('.status-box-text');
-  if (text) text.textContent = message || '';
-  box.classList.remove('is-info', 'is-success', 'is-error', 'is-warn');
-  if (tone) box.classList.add('is-' + tone);
+  // v2.1.7 round 2 B5：走 updateStatusBox 入口（R3 wiring — 自动获中文「：」换行 + null 兜底）
+  //   原现状直写 textEl.textContent = message + classList.add('is-' + tone) 是历史死代码
+  //   （PM grep 验证：styles-gemini-extra.css 中 .acquiring-bill-currency-board .status-box[data-tone="success"]
+  //    才是生效 CSS；is-* class 无对应 CSS 规则）
+  //   改走 updateStatusBox 反而修复历史隐藏 bug：tone 真正生效（dataset.tone 联动 data-tone 属性选择器）
+  //   spec §9.6.2 / §9.6.3
+  updateStatusBox(box, message, tone);
+}
+
+// v2.1.7 F6：进度事件 → 状态框文案 helper（spec §6.5）
+//   import 阶段：
+//     - reading      → '正在导入 xxx.xlsx 文件 (i/n 个文件)'
+//     - inserting    → '正在写入 xxx：已读取 N 行 (i/n 个文件)'
+//   run 阶段：
+//     - clearing-old-runs / computing-stats / inserting-run / sql-joining / writing-xlsx / updating-paths
+//   未识别事件 → 返回空串（caller 跳过 setStatus，保留前一文案）
+function formatAcquiringBillCurrencyProgress(ev) {
+  if (!ev || !ev.phase) return '';
+  if (ev.phase === 'import') {
+    if (ev.stage === 'reading') {
+      const i = (typeof ev.fileIndex === 'number') ? ev.fileIndex + 1 : '?';
+      const n = ev.fileCount || '?';
+      const file = ev.filePath ? String(ev.filePath).split(/[\\/]/).pop() : '?';
+      return `正在导入 ${file} 文件 (${i}/${n} 个文件)`;
+    }
+    if (ev.stage === 'inserting') {
+      const i = (typeof ev.fileIndex === 'number') ? ev.fileIndex + 1 : '?';
+      const n = ev.fileCount || '?';
+      const file = ev.sourceFile || '?';
+      const c = (ev.importedCount || 0).toLocaleString();
+      return `正在写入 ${file}：已读取 ${c} 行 (${i}/${n} 个文件)`;
+    }
+    return '';
+  }
+  if (ev.phase === 'run') {
+    switch (ev.stage) {
+      case 'clearing-old-runs': return '正在清理该月历史结果...';
+      case 'computing-stats':   return '正在统计数据量...';
+      case 'inserting-run':     return '正在初始化对账批次...';
+      case 'sql-joining':       return '正在比对币种（耗时较长，请稍候）...';
+      case 'writing-xlsx':      return '正在写入差异 Excel 文件...';
+      case 'updating-paths':    return '正在收尾结果文件...';
+      default: return `运行中：${ev.stage}`;
+    }
+  }
+  return '';
 }
 
 function restoreAcquiringBillCurrencyPanelState() {
   setAcquiringBillCurrencyStatus('欢迎使用小助手', 'info');
   // fix5：删月份下拉后，按钮可用性不再依赖 selectedMonth，4 按钮均默认 enabled
-  setAcquiringBillCurrencyButtonsDisabled(false);
+  // v2.1.7 round 2 R4：若当前有 inflight 操作（用户切走前点了导入/运行/导出），保持按钮 disabled
+  //   spec §8.5.2 — 防切回后用户重复点击触发并发 IPC（main 端 acquiringBillCurrencyOperationLock 兜底，renderer 端体感正确）
+  setAcquiringBillCurrencyButtonsDisabled(!!acquiringBillCurrencyState.inflightOperation);
 }
 
 // fix1（spec §3.4）：两段式导入 handler — 首调若已有数据返回 overwrite-required，confirm 后二次调带 confirmOverwrite
@@ -4286,8 +4340,23 @@ async function runAcquiringBillCurrencyImport(kind) {
     return;
   }
 
+  // v2.1.7 round 2 R4：set inflight flag —— 在按钮 disable 之前那一刻（取消月份不设；spec §8.5.2 关键不变量）
+  acquiringBillCurrencyState.inflightOperation = 'import';
   setAcquiringBillCurrencyButtonsDisabled(true);
   setAcquiringBillCurrencyStatus(`正在导入${labelTable}（${monthKey}）...`, 'info');
+
+  // v2.1.7 F6：订阅 import 进度事件（spec §6.5）；finally 必须 unsubscribe 防内存泄漏
+  let unsubscribe = null;
+  try {
+    const api = window.desktopApi && window.desktopApi.acquiringBillCurrency;
+    if (api && typeof api.onImportProgress === 'function') {
+      unsubscribe = api.onImportProgress((ev) => {
+        const text = formatAcquiringBillCurrencyProgress(ev);
+        if (text) setAcquiringBillCurrencyStatus(text, 'info');
+      });
+    }
+  } catch (_e) { /* swallow — preload 异常不应中断业务流程 */ }
+
   try {
     // 第 2 步：调 IPC 选文件 + peek + 月份校验 + 导入
     const first = await apiCall({ monthKey });
@@ -4335,6 +4404,13 @@ async function runAcquiringBillCurrencyImport(kind) {
   } catch (e) {
     setAcquiringBillCurrencyStatus(`${labelTable}导入异常：${e.message || e}`, 'error');
   } finally {
+    // v2.1.7 round 2 R4：清 inflight flag —— 必须先于 setAcquiringBillCurrencyButtonsDisabled(false)
+    //   异常路径也要清；spec §8.5.2 关键不变量
+    acquiringBillCurrencyState.inflightOperation = null;
+    // v2.1.7 F6：显式 unsubscribe 防 listener 累积（切到其它模块再回来不报错）
+    if (typeof unsubscribe === 'function') {
+      try { unsubscribe(); } catch (_e) { /* swallow */ }
+    }
     setAcquiringBillCurrencyButtonsDisabled(false);
   }
 }
@@ -4354,8 +4430,23 @@ async function handleAcquiringBillCurrencyRun() {
     setAcquiringBillCurrencyStatus('已取消运行', 'info');
     return;
   }
+  // v2.1.7 round 2 R4：set inflight flag（spec §8.5.2）
+  acquiringBillCurrencyState.inflightOperation = 'run';
   setAcquiringBillCurrencyButtonsDisabled(true);
   setAcquiringBillCurrencyStatus(`正在对账（${monthKey}）...`, 'info');
+
+  // v2.1.7 F6：订阅 run 进度事件（6 阶段）；finally 必须 unsubscribe
+  let unsubscribe = null;
+  try {
+    const api = window.desktopApi && window.desktopApi.acquiringBillCurrency;
+    if (api && typeof api.onRunProgress === 'function') {
+      unsubscribe = api.onRunProgress((ev) => {
+        const text = formatAcquiringBillCurrencyProgress(ev);
+        if (text) setAcquiringBillCurrencyStatus(text, 'info');
+      });
+    }
+  } catch (_e) { /* swallow */ }
+
   try {
     const result = await window.desktopApi.acquiringBillCurrency.run({ monthKey });
     if (result.status !== 'success') {
@@ -4372,6 +4463,11 @@ async function handleAcquiringBillCurrencyRun() {
   } catch (e) {
     setAcquiringBillCurrencyStatus(`对账异常：${e.message || e}`, 'error');
   } finally {
+    // v2.1.7 round 2 R4：清 inflight flag（spec §8.5.2）
+    acquiringBillCurrencyState.inflightOperation = null;
+    if (typeof unsubscribe === 'function') {
+      try { unsubscribe(); } catch (_e) { /* swallow */ }
+    }
     setAcquiringBillCurrencyButtonsDisabled(false);
   }
 }
@@ -4383,6 +4479,8 @@ async function handleAcquiringBillCurrencyExport() {
     setAcquiringBillCurrencyStatus('已取消导出', 'info');
     return;
   }
+  // v2.1.7 round 2 R4：set inflight flag（spec §8.5.2）
+  acquiringBillCurrencyState.inflightOperation = 'export';
   setAcquiringBillCurrencyButtonsDisabled(true);
   setAcquiringBillCurrencyStatus(`正在导出差异表（${monthKey}）...`, 'info');
   try {
@@ -4399,6 +4497,8 @@ async function handleAcquiringBillCurrencyExport() {
   } catch (e) {
     setAcquiringBillCurrencyStatus(`导出异常：${e.message || e}`, 'error');
   } finally {
+    // v2.1.7 round 2 R4：清 inflight flag（spec §8.5.2）
+    acquiringBillCurrencyState.inflightOperation = null;
     setAcquiringBillCurrencyButtonsDisabled(false);
   }
 }
@@ -5170,6 +5270,11 @@ async function initialize() {
     setTimeout(() => {
       applyBigAccountSelectionMultiPreviewState();
     }, 120);
+  } else if (info.previewModal === 'big-account-selection-multi-large') {
+    // v2.1.7 round 3 B4：≥20 文件 fixture，验证大数据集滚动行为
+    setTimeout(() => {
+      applyBigAccountSelectionMultiLargePreviewState();
+    }, 120);
   } else if (info.previewModal === 'extract-order') {
     setTimeout(() => {
       applyExtractOrderPreviewState();
@@ -5193,6 +5298,11 @@ async function initialize() {
   } else if (info.previewModal === 'scenario-config-c1') {
     setTimeout(() => {
       applyScenarioConfigC1PreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenario-config-c1-and') {
+    // v2.1.7 F1：C1 dialog AND 模式截图入口
+    setTimeout(() => {
+      applyScenarioConfigC1AndPreviewState();
     }, 120);
   } else if (info.previewModal === 'scenario-config-c2') {
     setTimeout(() => {

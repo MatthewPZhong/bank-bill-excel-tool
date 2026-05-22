@@ -1,5 +1,46 @@
 # Changelog
 
+## 2.1.7 - 2026-05-21
+
+v2.1.6 之后 7 轮迭代收敛，**共 39 commit + 6 项主功能 + 多轮用户反馈修复**。F5（C4 gateway BillDate 数字日期 + 算法重设）延期 v2.1.8 与 A3（worker_threads 异步 SQL）联合主题。本版本聚焦 6 项主功能（F1-F4 / F6-F8）+ R3 状态框全局换行 + B5 全局 wiring 加固 + B4 CSS flex/grid 嵌套穿透 max-height 真根因（4 round 收敛）+ C-1 self-review 阻塞修复。⚠️ **5 个资金红线护栏**（F2 C3 1v1 / F4 C2 校验放宽 / F7-A1 全局 PRAGMA / F8 dispatcher 第 2 sheet / R5 F1 默认 AND 三层护栏）+ **4 个全局影响节点**（F7-A1 PRAGMA / R3 换行 / B5 wiring / F4 重命名）+ **10 个 important-variables 升格**（Critical 3 + Important-skeleton 2 + Risk-sensitive 5）。
+
+### 新增
+
+- **F1 C1 提取ReconId-From Self 支持 AND/OR 切换**（⚠️ R5 三层护栏）：C1 dialog "条件" label 下方新增 AND / OR 单选（Layout-1：左列纵向 + 字体 13px 与"筛选字段"对齐 + tooltip `&#10;` 多行整合）；新建场景默认 `conditionsLogic: 'AND'`；老 scenario.config 无字段时 fallback `'OR'`（保 v2.1.6 行为不变，资金红线护栏）。三层护栏：① `createDefaultScenarioConfig` 仅 create 默认 AND ② `pickConditionsLogicChecked(draft)` helper 按 mode 分支老 scenario 显示 OR ③ 引擎 `c1-extract-recon-id.js runC1Scenario` fallback OR
+- **F2 C3 提取ReconId-From 网关 1v1 化**（🚨 资金红线，方案 A）：多个银行行匹配同一笔网关单时仅第一个银行行获得网关 reconId（first-match-wins），其余进 unmatched；`c3-gateway-recon-join.js` 加 `usedGwRowIdx` Set 单向消费；避免一笔网关被多个银行行重复"幽灵核销"（v2.1.6 反例修复）
+- **F4 账单打标 → 「银行对账单字段赋值」**：类目名 + dialog 标题 + USER_GUIDE / preview 文案全量替换（DB category `'offset-bill-mark'` 不变保持向后兼容）；子 row 名"打标值" → "赋值"；新建场景账单类型 + 对账字段默认空；保存校验放宽（账单类型 ≥ 1 / 对账字段允许 0）；衍生方案 A：账单类型 = 1 且对账字段 = 0 时引擎走「无条件赋值」分支；账单类型 row 删除按钮始终显示
+- **F6 收单单据币种校验进度提示**：导入阶段 `正在导入 {file} (i/n 个文件)` / `正在写入 {file}：已读取 N 行 (i/n 个文件)`；开始运行后 6 阶段业务化文案：清理该月历史结果 → 统计数据量 → 初始化对账批次 → 比对币种（耗时较长，请稍候）→ 写入差异 Excel 文件 → 收尾结果文件；`session.runCheck` 加 `onProgress` 守护式埋点 + main.js IPC 桥接 + preload 订阅 + renderer 文案 helper；stage 1-4 后 `await new Promise(r => setImmediate(r))` 让 IPC 在主进程进入同步 SQL 前送达；模块切换后回到收单页按钮 disabled 状态保留
+- **F7-A1 全局 SQLite PRAGMA 调优**（⚠️ 全局影响 3 套业务引擎）：`database.js init()` 顺序应用 `journal_mode=WAL` / `synchronous=NORMAL` / `cache_size=-65536`（64MB cache）/ `mmap_size=268435456`（256MB mmap）；WAL 模式写并发更好 + 崩溃恢复更稳；**用户备份 DB 时必须同时备份 `*-wal` + `*-shm` 旁文件**（USER_GUIDE §5.1）；PRAGMA 顺序强约束（synchronous=NORMAL 必须在 WAL 之后）
+- **F7-A2 source_file 索引 + ANALYZE**：migrations 新增 `idx_acquiring_bill_currency_bill_source_file` 索引；`database.js init()` 末尾跑 ANALYZE
+- **F7-B1 收单单据币种校验完成系统通知**：macOS 通知中心 / Windows 任务栏弹原生 `new Notification(...)`；成功 = `「收单单据币种校验」{monthKey} 对账完成（共 N 行差异）` / 失败 = `「收单单据币种校验」对账失败：{message}`；仅 success + 真正 error 触发不弹 cancel；body 200 字符截断兜底
+- **F8 银行对账单处理结果第二个 sheet「未命中场景行」**（🚨 资金红线 baseline 契约）：`scenario-dispatcher.runAllScenarios` return shape 新增 `unmatchedRows` 字段（反向 filter `bankRows.filter(!rowLockSet.has(_rowId))`）+ `stats.unmatchedRowCount`；`exceljs-writer.writeBankStatementOutput` 新增可选 `unmatchedRows` 入参 + 追加第 2 sheet「未命中场景行」；`modifiedRows` filter 条件**完全不动**（与 v2.1.6 baseline 一致 — smoke 强制断言）；新增 6 dispatcher case + 4 writer case 覆盖 ① modifiedRows 一致 ② modifiedRows + unmatchedRows == bankRows.length ③ 互斥 ④ 边界
+- **knowledge 沉淀**：`knowledge/css-flex-grid-overflow-pitfalls.md`（v2.1.7 B4 round 3-6 完整经验，flex/grid 嵌套穿透 max-height 必修两条线 — 每层 `min-height: 0` + grid 父容器 `grid-template-rows: 1fr` 缺一不可；含 DevTools 实测数据 + 排查 SOP + 双写范式）
+
+### 变更
+
+- **R3 状态框中文「：」全局自动换行 + B5 wiring 全局加固**：`updateStatusBox` 入口加 `message.replace(/：/g, '：\n')`；`.status-box-text` CSS `white-space: pre-wrap`；**B5 wiring 漏接审计**：用户实测发现 1 处（`setAcquiringBillCurrencyStatus` 直写 textContent 跳过 updateStatusBox），PM grep 再发现 2 处（`updateBankStatementUi` / `updateReconIdFixUi`），共 3 处直写全部改走 `updateStatusBox`；`render-status-box` smoke 新增 `caseB5_wiringAudit` 7 断言防再漏（动态扫描 `.textContent =` 只能出现在 updateStatusBox 函数体内）；意外修复 acquiring 历史隐藏 bug（dataset.tone 才是生效 CSS）
+- **C-1 self-review 阻塞修复**：`#bizOpReconStatusBox .status-box-text { white-space: normal }` ID 选择器 specificity (0,1,0) 覆盖了 R3 全局 class (0,0,1) 让 bizOpRecon 状态框 R3 视觉失效；改为 `pre-wrap` 与全局规则对齐
+- **大账号确认页 UI 修复（F3 + B2 + B4，共 4 round 收敛）**：F3 round 1 multi 文件名 `.ba-file-name` 加 `min-width:0 + flex:1 1 auto`；F3 round 4 grid `auto auto 1fr` 3 列适配 + 弹窗 1080→1200 + `truncateFileName` maxLen 20→14；B2 round 5 multi 完成态字母 a/b/c 路径 A 修复；B3 「确认大账号顺序」改为单一 grid 表格 1 滚动条 + 左右对齐；B4（4 round 收敛）≥ 20 文件场景滚动条 — round 3 scrollbar-width:thin（修可见性）→ round 4 split-left/right min-height:0 → round 5 file-list / split-body min-height:0 → round 6 **真根因 `.ba-scroll-container` 缺 `grid-template-rows: 1fr`**（用户 DevTools 实测 splitLeft=5952 远超父 max-height=447；1 行 CSS 真修好）
+
+### 文档
+
+- `docs/iterations/v2.1.7/PRD-v2.1.7.md` v0.11（§二十三 实施记录 39 commit + 6 round 历程 + F5 延期）
+- `docs/iterations/v2.1.7/spec.md` v0.9（T14 反向同步 3 处：§8.4.2 styles.css→styles-gemini-extra.css / §9.8.4 SheetJS+ExcelJS / §11.3.8 B4 round 6 真根因补章）
+- `docs/iterations/v2.1.7/tasks.md` v0.8（T14 收口子项清单）
+- `rules/important-variables.md` v9 升格 10 条
+- `knowledge/css-flex-grid-overflow-pitfalls.md` 新建 + `knowledge/index.md` 加索引
+- `docs/USER_GUIDE.md` §五 v2.1.7 新增能力（§5.1 WAL 旁文件备份重要提示 + §5.2-5.7 各功能体验说明）
+
+### 已知边界 case
+
+- **F7 跨平台**：macOS 已实测；Windows / Linux 通过 `Notification.isSupported()` 兜底不抛错，UI 体感未实测
+- **F1 tooltip 多行**：`&#10;` HTML 实体在 macOS / Windows native tooltip OK；Linux 部分 GTK/Qt 可能不解析
+
+### 已在本 PR round 8/9 闭环（self-review 早期列为 known issue，现已修复）
+
+- **F2 方案 A**：round 7 移动 `usedGwRowIdx.add()` 后引入"空 gw / 已等值 gw 永远不消费"反向问题；round 9 双方向修（filter 排除空 gw + `oldValue===newValue` 时 lock+消费 gw）。reviewer round 3 Finding 1 确认闭环
+- **F8 全未命中 edge**：round 7 改 return 'empty' 条件 + round 8 改 saveDialog 触发条件 `modifiedRows>0 || unmatchedRows>0`。reviewer round 2 Finding 1 确认闭环，对齐 PRD AC-F8-5
+
 ## 2.1.6 - 2026-05-18
 
 v2.1.5 之后追加 patch 迭代，2 块独立改动：**Module A 个人痕迹元数据**（package.json author/copyright/publisherName + 8 个 writer 跨库 watermark + 启动 log 头 crafted by + 构建时 git short SHA）+ **Module B 新增模块「收单单据币种校验」**（独立第 8 个主模块，按月对比收单流水表 vs 收单流水单据表币种 + 差异表 29 列对比区）。OPEN ISSUE 全部拍板（PRD §六）；用户拍板 v0.2 改 4 列对比区 + v0.3 去掉「单据_对账金额」copy。fix1：用户实测发现"二次导入相同月份 UNIQUE 整批拒绝无引导" UX 漏洞 → 导入前 peek monthKey + 弹窗覆盖确认（流水/单据对称，仅清单侧，不动 runs/diff_rows）。**fix2**：用户实测发现 v0.3 SheetJS dense reader 对真实清结算数据（30w 行/文件 + inlineStr 格式 + 800MB 解压 + POI ZIP data descriptor）完全跑不动（fflate/unzipper 双双拒解）→ reader 重写为 yauzl + sax 流式（单文件 RAM < 50MB / peek O(1) < 100ms / 实测 30w 行 55s）。**fix3**：用户实测多次快速点击导入按钮触发 `cannot start a transaction within a transaction` → handler 级 mutex + renderer 按钮禁用双重保护。**fix4**：用户实测发现 v0.6 用「币种」+「对账金额」（订单视角）对账时 466 万行 100% match = 字段语义错位 → 流水侧切换到「通道清算币种」+「通道清算金额」（清算视角，与单据「对账币种」对齐），DB 字段重命名 recon_* → settle_*，预估抓出 ~259 万行真实差异。**fix5**：UX 重构 + 输出形态反转 — 删月份下拉 + 导入/运行/导出按钮触发月份选择弹窗（复用 bankBuRecon 范式）；§6.3 反转 v0.3 拍板的「1 对 1 输出」为**单文件单 sheet 合并输出**；§6.4 新增结果表 report（11 区块极详细单 sheet）；run 时同步产出 diff + report 到 exports/{date}/acquiring-bill-currency/(report/)，导出差异 = fs.copyFile 另存为。**fix6**：通道清算金额允许为空（与币种空值对称，业务上 4 种非清算流水子类型 ~0.6% 行无值）。**fix7**：差异表 writer 改 ExcelJS streaming + SQL 分批拉取，解决 259w 差异行 V8 OOM 闪退问题（内存常驻 < 100MB）。**fix8**：run 成功 + diff/report 落盘后自动清原始数据 flow_imports/bill_imports/diff_rows（runs 保留），DB 不再无限膨胀；同月份重跑须重导表。**fix9**：cleanup 改异步后台分批（每批 50k 行 + setImmediate 让出 event loop）+ 通用 operation lock，UI 不再卡几分钟。**fix10**：启动期孤儿数据 cleanup — 应对 OOM 闪退 / 异常退出 / 用户 force quit 后 DB 残留 4.6M flow + 4.6M bill + 2.6M diff_rows ≈ 15 GB 撑爆磁盘（`database or disk is full`）的场景；`app.whenReady` + migration 完成后 `setImmediate` 后台扫 `runs WHERE status != 'success' OR diff/report 文件丢失` + 复用 fix9 `cleanupAfterRunBackground` 分批 DELETE；用户首次救急用 sqlite3 CLI DROP 4 表 + VACUUM 释放 14.56 GB。**fix11**：writer 按账单日期升序贪心切分多 sheet（≤ 1,048,575 行/sheet）解决 Excel 单 sheet 显示硬上限 2^20 行问题（用户实测 2.6M 差异行单 sheet 写入 xlsx 但 Excel/WPS 截断显示「100w 行」）；sheet 名 `YYYY-MM-DD~MM-DD`；资金红线 `sum(sheet rows) == mismatch_rows`。**fix12**：`runs.ran_at` 时区修复 — `insertRun` 显式传 `new Date().toISOString()`（ISO 8601 带 Z 后缀）+ writer 显示用 `formatRanAtLocal` 转本地时区；兼容旧 SQLite CURRENT_TIMESTAMP 无 Z 字符串当 UTC 解析。**fix13**：report 嵌入 diff 末尾 sheet「运行结果汇总」（不再独立 report.xlsx + 不再生成 `report/` 子目录），单文件多 sheet 形态最终化。**fix14**：UI 镜像布局 — 以 bank-statement-board 为模板左右镜像（grid 1fr:1.4fr → 1.4fr:1fr），2 行 × 2 cell 结构 + 按钮严格镜像 bank-statement 尺寸（pair 内 140px / 独占 cell 180px）+ 状态框同 bank-statement 卡片样式（max 360 × min 110 白底圆角 18 左对齐多行）；按钮 ID 全保留 renderer 零改动。**fix15**：月份选择弹窗标题三分支 — 导入按钮触发的弹窗标题改为「请选择导入文件的月份」（语义更准确，跟开始运行/导出差异区分）。**PR #50 review**：F1 smoke cleanup helper（修 Windows CI EBUSY）+ F2 账单日期入库归一化为 YYYY-MM-DD（reader 允许 `YYYY/MM/DD` 但 writer sheet 名只识别 `-`） + F3 USER_GUIDE.md 同步 fix5/11/13/14 后口径。

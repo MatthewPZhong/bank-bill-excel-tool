@@ -142,6 +142,68 @@ function runScenarioEngineSmokeTests() {
     assert.strictEqual(rows[0].ReconciliationId, 'CUSTOM_VAL_123', 'C1-9 应复制 CustomerRef');
   }
 
+  // ===== v2.1.7 F1：C1 conditionsLogic AND/OR 切换 smoke（spec §2.4 Case F1-A/B/C/D）=====
+  // 工厂：基于 extractByOtherField 模式（最小依赖；不挑 regex 路径）
+  function makeC1ScenarioWithLogic(conditions, conditionsLogic) {
+    return {
+      id: 100, name: 'c1-logic', category: 'extract-recon-id',
+      config: {
+        conditions,
+        ...(conditionsLogic !== undefined ? { conditionsLogic } : {}),
+        extractByFeature: null,
+        extractByOtherField: { field: 'A' }
+      }
+    };
+  }
+
+  // F1-A：conditions=[A=true, B=false], logic='OR' → 命中
+  // A 字段 = 'X'（条件 A==='X' true）；B 字段 = 'Q'（条件 B==='Y' false）
+  {
+    const scen = makeC1ScenarioWithLogic([
+      { field: 'A', op: '等于', value: 'X' },
+      { field: 'B', op: '等于', value: 'Y' }
+    ], 'OR');
+    const rows = [{ _rowId: 'f1a', A: 'X', B: 'Q', ReconciliationId: '' }];
+    runC1Scenario(scen, rows);
+    assert.strictEqual(rows[0].ReconciliationId, 'X', 'F1-A OR 一真即命中');
+  }
+
+  // F1-B：conditions=[A=true, B=false], logic='AND' → 不命中
+  {
+    const scen = makeC1ScenarioWithLogic([
+      { field: 'A', op: '等于', value: 'X' },
+      { field: 'B', op: '等于', value: 'Y' }
+    ], 'AND');
+    const rows = [{ _rowId: 'f1b', A: 'X', B: 'Q', ReconciliationId: '' }];
+    runC1Scenario(scen, rows);
+    assert.strictEqual(rows[0].ReconciliationId, '', 'F1-B AND 一假即不命中');
+  }
+
+  // F1-C：conditions=[A=true, B=true], logic='AND' → 命中
+  {
+    const scen = makeC1ScenarioWithLogic([
+      { field: 'A', op: '等于', value: 'X' },
+      { field: 'B', op: '等于', value: 'Y' }
+    ], 'AND');
+    const rows = [{ _rowId: 'f1c', A: 'X', B: 'Y', ReconciliationId: '' }];
+    runC1Scenario(scen, rows);
+    assert.strictEqual(rows[0].ReconciliationId, 'X', 'F1-C AND 全真即命中');
+  }
+
+  // F1-D：scenario.config 无 conditionsLogic 字段（模拟 v2.1.6 老数据）
+  //   引擎 fallback OR；与原 v2.1.6 OR 行为完全一致
+  //   conditions=[A=true, B=false] → OR fallback 命中（如 F1-A）
+  {
+    const scen = makeC1ScenarioWithLogic([
+      { field: 'A', op: '等于', value: 'X' },
+      { field: 'B', op: '等于', value: 'Y' }
+    ], undefined); // 不传 logic
+    assert.strictEqual(scen.config.conditionsLogic, undefined, 'F1-D 前置：fixture 不含 conditionsLogic 字段');
+    const rows = [{ _rowId: 'f1d', A: 'X', B: 'Q', ReconciliationId: '' }];
+    runC1Scenario(scen, rows);
+    assert.strictEqual(rows[0].ReconciliationId, 'X', 'F1-D 老数据 fallback OR 命中（与 v2.1.6 一致）');
+  }
+
   // ===== C2 =====
   // C2-1：一对一配对 → 改 type2 行 + 双方都进 lockedRowIds
   {
@@ -356,23 +418,26 @@ function runScenarioEngineSmokeTests() {
   // bankRow 1: Credit=100, Debit=0   → 虚拟值 100 ✅
   // bankRow 2: Credit=0,   Debit=100 → 虚拟值 100 ✅（abs）
   // bankRow 3: Credit=200, Debit=50  → 虚拟值 150 ❌
+  //
+  // v2.1.7 F2 调整：方案 A 1v1 消费 gw 行，原 fixture 单 gw 行无法同时命中 b-virt-1 + b-virt-2
+  //   → 加到 2 笔等额 gw（GW_100_A / GW_100_B），让 b-virt-1 ←GW_100_A、b-virt-2 ←GW_100_B
+  //   该用例本意是验证「虚拟字段 abs 路径」+「条件过滤虚拟字段」，无关 1v1 配对策略
   {
     const scenario = makeC3ScenarioWithConditions([
       { side: '银行', field: '发生额绝对值', op: '等于', value: '100' }
     ]);
-    // 注意：scenario.config.reconFields 的 seq=2 也用「发生额绝对值」做 join；
-    // 为了让 bankRow 1/2 在 join 阶段都命中相同的 gwRow，让它们 Currency/MerchantId/Channel 一致
     const bankRows = [
       { _rowId: 'b-virt-1', Currency: 'USD', 'Credit Amount': 100, 'Debit Amount': 0,   MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
       { _rowId: 'b-virt-2', Currency: 'USD', 'Credit Amount': 0,   'Debit Amount': 100, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
       { _rowId: 'b-virt-3', Currency: 'USD', 'Credit Amount': 200, 'Debit Amount': 50,  MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
     ];
     const gwRows = [
-      { Currency: 'USD', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_100' }
+      { Currency: 'USD', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_100_A' },
+      { Currency: 'USD', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'GW_100_B' }
     ];
     const result = runC3Scenario(scenario, bankRows, gwRows);
-    assert.strictEqual(bankRows[0].ReconciliationId, 'GW_100', 'C3-COND-VIRTUAL b-virt-1 (Credit=100) 应命中虚拟值 100');
-    assert.strictEqual(bankRows[1].ReconciliationId, 'GW_100', 'C3-COND-VIRTUAL b-virt-2 (Debit=100) 应命中虚拟值 100');
+    assert.strictEqual(bankRows[0].ReconciliationId, 'GW_100_A', 'C3-COND-VIRTUAL b-virt-1 (Credit=100) 应命中第 1 个 GW（方案 A）');
+    assert.strictEqual(bankRows[1].ReconciliationId, 'GW_100_B', 'C3-COND-VIRTUAL b-virt-2 (Debit=100) 应命中第 2 个 GW（方案 A 1v1）');
     assert.strictEqual(bankRows[2].ReconciliationId, '', 'C3-COND-VIRTUAL b-virt-3 (虚拟值 150) 应被过滤');
     assert.strictEqual(result.modifications.length, 2, 'C3-COND-VIRTUAL modifications 应为 2 条');
   }
@@ -535,7 +600,201 @@ function runScenarioEngineSmokeTests() {
     assert.strictEqual(result.modifications.length, 1, 'C3-COND-CLEAR modifications 数量同 baseline');
   }
 
-  console.log('  scenario-engines: 31/31 PASS');
+  // ===== v2.1.7 F2 ⚠️ 资金红线：方案 A 1v1 配对 smoke（spec §3.3 Case F2-A 至 F2-F）=====
+  // 共享 fixture：M001/BankA 同账户；reconFields 比对 Currency + Amount + MerchantId + Bank
+  // 测试 bank 多笔等额 → 不再全部映射同 1 条 gwRow（v2.1.6 反例 → v2.1.7 修复）
+
+  // F2-A：3 笔等额 bank + 3 笔等额 gw → B1←G1, B2←G2, B3←G3
+  {
+    const scenario = makeC3Scenario();
+    const bankRows = [
+      { _rowId: 'F2A-b1', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2A-b2', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2A-b3', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
+    ];
+    const gwRows = [
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2A_G1' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2A_G2' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2A_G3' }
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'F2A_G1', 'F2-A B1 应 ←G1');
+    assert.strictEqual(bankRows[1].ReconciliationId, 'F2A_G2', 'F2-A B2 应 ←G2（方案 A 1v1 — v2.1.6 反例：B2 ←G1）');
+    assert.strictEqual(bankRows[2].ReconciliationId, 'F2A_G3', 'F2-A B3 应 ←G3（方案 A 1v1）');
+    // 真实数据回测核心断言：distinct gw 值 = 3，不是全部 ←G1
+    const distinctNew = new Set(result.modifications.map((m) => m.newValue));
+    assert.strictEqual(distinctNew.size, 3, 'F2-A modifications.newValue distinct count = 3（方案 A 关键性质）');
+    assert.strictEqual(result.modifications.length, 3, 'F2-A modifications 3 条');
+  }
+
+  // F2-B：3 笔等额 bank + 5 笔等额 gw → B1-B3 命中 G1-G3；G4/G5 不被消费（不修改 gwRows）
+  {
+    const scenario = makeC3Scenario();
+    const bankRows = [
+      { _rowId: 'F2B-b1', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2B-b2', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2B-b3', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
+    ];
+    const gwRows = [
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2B_G1' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2B_G2' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2B_G3' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2B_G4' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2B_G5' }
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'F2B_G1', 'F2-B B1 ←G1');
+    assert.strictEqual(bankRows[1].ReconciliationId, 'F2B_G2', 'F2-B B2 ←G2');
+    assert.strictEqual(bankRows[2].ReconciliationId, 'F2B_G3', 'F2-B B3 ←G3');
+    // 多 candidates 时仍有 multi-gateway-match warning（matched.length > 1）
+    assert(result.warnings.some(w => w.code === 'multi-gateway-match'), 'F2-B 多候选时应有 multi-gateway-match warning');
+    assert.strictEqual(result.modifications.length, 3, 'F2-B 仅 3 条 modifications（G4/G5 不被消费）');
+    // 防御：gwRows 不被改（gw 单向不被写回）
+    assert.strictEqual(gwRows[3].reconciliationId, 'F2B_G4', 'F2-B gw 行不被改（gw 不被写回）');
+    assert.strictEqual(gwRows[4].reconciliationId, 'F2B_G5', 'F2-B gw 行不被改');
+  }
+
+  // F2-C：5 笔等额 bank + 3 笔等额 gw → B1-B3 命中；B4/B5 unmatched（不抛错、不警告）
+  // 这是 spec §3.2 情况 1 "gw 池子被前面 bank 抢空" 的核心边界用例
+  {
+    const scenario = makeC3Scenario();
+    const bankRows = [
+      { _rowId: 'F2C-b1', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2C-b2', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2C-b3', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2C-b4', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2C-b5', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
+    ];
+    const gwRows = [
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2C_G1' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2C_G2' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2C_G3' }
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'F2C_G1', 'F2-C B1 ←G1');
+    assert.strictEqual(bankRows[1].ReconciliationId, 'F2C_G2', 'F2-C B2 ←G2');
+    assert.strictEqual(bankRows[2].ReconciliationId, 'F2C_G3', 'F2-C B3 ←G3');
+    // B4/B5：gw 池子已被抢空 → matched.length === 0 → 不命中、不抛错、不警告
+    assert.strictEqual(bankRows[3].ReconciliationId, '', 'F2-C B4 unmatched（gw 已被消费）');
+    assert.strictEqual(bankRows[4].ReconciliationId, '', 'F2-C B5 unmatched（spec §3.2 情况 1）');
+    assert.strictEqual(result.modifications.length, 3, 'F2-C 仅 3 条 modifications');
+    // 防御：B4/B5 unmatched 时不抛 'multi-gateway-match' / 'no-gateway-rows'
+    //   (gwRows 非空所以不应有 no-gateway-rows；matched 为空也不应有 multi-gateway-match)
+    //   注：F2-C 前 3 笔 bank 行（B1/B2/B3）的 candidates 池仍可能 > 1（matched.length > 1）→ 应有 multi
+    //   只验证：B4/B5 unmatched 时不抛新 warning，warnings 内不应出现关联 B4/B5 rowId 的 multi
+    const b4Warnings = result.warnings.filter(w => w.rowId === 'F2C-b4');
+    const b5Warnings = result.warnings.filter(w => w.rowId === 'F2C-b5');
+    assert.strictEqual(b4Warnings.length, 0, 'F2-C B4 unmatched 不应有任何 warning');
+    assert.strictEqual(b5Warnings.length, 0, 'F2-C B5 unmatched 不应有任何 warning');
+  }
+
+  // F2-D：2 笔不等额 bank（A=100, B=200）+ 2 笔不等额 gw（C=100, D=200）→ 旧行为（不受影响）
+  // BA←GC, BB←GD（reconFields 强约束分流 — 与是否 1v1 无关）
+  {
+    const scenario = makeC3Scenario();
+    const bankRows = [
+      { _rowId: 'F2D-ba', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' },
+      { _rowId: 'F2D-bb', Currency: 'CNY', 'Credit Amount': 200, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
+    ];
+    const gwRows = [
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2D_GC' },
+      { Currency: 'CNY', Amount: 200, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2D_GD' }
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'F2D_GC', 'F2-D BA(100) ←GC(100)');
+    assert.strictEqual(bankRows[1].ReconciliationId, 'F2D_GD', 'F2-D BB(200) ←GD(200)');
+    assert.strictEqual(result.modifications.length, 2, 'F2-D 2 条 modifications');
+    // 此用例 candidates 永远只有 1 个 → 不应有 multi-gateway-match
+    assert(!result.warnings.some(w => w.code === 'multi-gateway-match'), 'F2-D 不等额无 multi-gateway-match warning');
+  }
+
+  // F2-E：1 bank + 1 gw 匹配 — 旧 baseline（最小用例）
+  {
+    const scenario = makeC3Scenario();
+    const bankRows = [{ _rowId: 'F2E-b1', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }];
+    const gwRows = [{ Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2E_GC' }];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'F2E_GC', 'F2-E baseline 1v1 命中');
+    assert.strictEqual(result.modifications.length, 1, 'F2-E 1 条 modification');
+  }
+
+  // F2-F：first-match-wins 防回归 — 上面 C3-1 ~ C3-9 + C3-COND-* + 旧 baseline 全部仍通过
+  //   （由 smoke 全套通过验证，不重复用例）
+
+  // ===== v2.1.7 F4：C2 引擎放宽 smoke（spec §5.9 Case F4-A/B/C/D）=====
+  //   F4-A 由 C2-1 ~ C2-5 covered（旧 baseline 2 billTypes + 1 reconFields + markValue）
+  //   新增 F4-B/C/D
+
+  // F4-B：1 billType + 0 reconFields + markValue.type=billTypes[0].seq → 凡命中 billType 的行无条件写赋值
+  {
+    const scenario = {
+      id: 200, name: 'F4-B', category: 'offset-bill-mark',
+      config: {
+        billTypes: [{ seq: 1, field: 'FundType', op: '等于', value: 'targetType' }],
+        reconFields: [],
+        markValue: { type: 1, field: 'CustomFlag', value: 'MARKED' }
+      }
+    };
+    const rows = [
+      { _rowId: 'F4B-r1', FundType: 'targetType',  CustomFlag: '' },       // 命中 billType → 写 MARKED
+      { _rowId: 'F4B-r2', FundType: 'other',       CustomFlag: '' },       // 不命中 → 不写
+      { _rowId: 'F4B-r3', FundType: 'targetType',  CustomFlag: 'OLD' }     // 命中 → 写 MARKED（覆盖 OLD）
+    ];
+    const result = runC2Scenario(scenario, rows);
+    assert.strictEqual(rows[0].CustomFlag, 'MARKED', 'F4-B r1 命中 billType 应写赋值');
+    assert.strictEqual(rows[1].CustomFlag, '', 'F4-B r2 不命中应不改');
+    assert.strictEqual(rows[2].CustomFlag, 'MARKED', 'F4-B r3 命中 + 覆盖原值');
+    assert.strictEqual(result.modifications.length, 2, 'F4-B 2 条 modifications');
+    assert(result.lockedRowIds.has('F4B-r1'), 'F4-B r1 应锁定');
+    assert(result.lockedRowIds.has('F4B-r3'), 'F4-B r3 应锁定');
+    assert(!result.lockedRowIds.has('F4B-r2'), 'F4-B r2 不锁定');
+    // 衍生：无 warnings（不再 return invalid-config）
+    assert.strictEqual(result.warnings.length, 0, 'F4-B 无条件赋值路径无 warning');
+  }
+
+  // F4-C：0 billTypes → 引擎 warning + return（dialog 校验也会拦，但引擎守住红线）
+  {
+    const scenario = {
+      id: 201, name: 'F4-C', category: 'offset-bill-mark',
+      config: {
+        billTypes: [],
+        reconFields: [],
+        markValue: { type: 1, field: 'CustomFlag', value: 'MARKED' }
+      }
+    };
+    const rows = [{ _rowId: 'F4C-r1', FundType: 'X', CustomFlag: '' }];
+    const result = runC2Scenario(scenario, rows);
+    assert.strictEqual(rows[0].CustomFlag, '', 'F4-C billTypes=0 应不改任何行');
+    assert(result.warnings.some(w => w.code === 'invalid-config' && /至少需要 1 行/.test(w.message)), 'F4-C 应 warn invalid-config / 1 行');
+    assert.strictEqual(result.modifications.length, 0, 'F4-C 无 modifications');
+  }
+
+  // F4-D：1 billType + 1 reconFields（左右 typeSeq 都 = 1，自己 vs 自己）
+  //   按 spec §5.9 推荐：dialog 已有 reconFields ≥ 1 + 配对路径，引擎走原配对逻辑
+  //   pairsMatch 比较 leftRow 与 rightRow 同字段：自己 vs 自己永远相等 → 命中
+  //   但 markValue 还是会照旧写入；这里只验证不抛错且行为可预测
+  {
+    const scenario = {
+      id: 202, name: 'F4-D', category: 'offset-bill-mark',
+      config: {
+        billTypes: [{ seq: 1, field: 'FundType', op: '等于', value: 'targetType' }],
+        reconFields: [{ seq: 1, leftType: 1, leftField: 'CustomerRef', rightType: 1, rightField: 'CustomerRef' }],
+        markValue: { type: 1, field: 'CustomFlag', value: 'PAIRED' }
+      }
+    };
+    // 单行 bankRow 自己 vs 自己（leftRows = rightRows = [r1]）→ pairsMatch 比较 r1.CustomerRef vs r1.CustomerRef 相等
+    //   r1 既是 leftRow 又是 rightRow → 一对一配对成功 → 锁定 + 写 CustomFlag
+    const rows = [{ _rowId: 'F4D-r1', FundType: 'targetType', CustomerRef: 'CUST-A', CustomFlag: '' }];
+    let result;
+    assert.doesNotThrow(() => {
+      result = runC2Scenario(scenario, rows);
+    }, 'F4-D 自配对不应抛异常');
+    // 行为可预测：自配对 = 一对一（match.length=1），引擎写 PAIRED
+    assert.strictEqual(rows[0].CustomFlag, 'PAIRED', 'F4-D 自配对引擎应写 markValue');
+    assert(result.lockedRowIds.has('F4D-r1'), 'F4-D 自配对锁定 r1');
+  }
+
+  console.log('  scenario-engines: 43/43 PASS');
 }
 
 module.exports = {

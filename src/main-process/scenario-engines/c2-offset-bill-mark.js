@@ -1,11 +1,16 @@
-// v2.0.0-beta.3：C2 冲销账单打标 算法引擎
+// v2.0.0-beta.3：C2 冲销账单打标 算法引擎（v2.1.7 F4 UI 展示名 → 银行对账单字段赋值）
 // PRD §7.2 / §10 决策 D3
+// v2.1.7 F4：UI 改名「账单打标」→「银行对账单字段赋值」（DB category 'offset-bill-mark' 不变）
+//   引擎校验放宽：billTypes < 2 → < 1；reconFields = 0 不再 return，走「衍生方案 A 无条件赋值」
+//   PRD §5 / spec §5.7 / §9.5
 //
 // 行为：
 //   1. 行 3 billTypes：每行 = 一种独立账单类型（带序号 seq）
 //      给每行 bankRow 计算 row.types = [seq] 集合（一行可属多种类型）
-//   2. 行 4 reconFields：定义对账字段：{seq, leftType, leftField, rightType, rightField}
-//   3. 笛卡尔配对：leftType 类型的所有行 × rightType 类型的所有行
+//   2. 行 4 reconFields：
+//      - **v2.1.7 衍生方案 A**：reconFields = 0 时不走配对，凡命中 markValue.type 的行直接写赋值
+//      - reconFields ≥ 1 时定义对账字段：{seq, leftType, leftField, rightType, rightField}
+//   3. 笛卡尔配对（reconFields ≥ 1 时）：leftType 类型的所有行 × rightType 类型的所有行
 //      AND 比对所有 reconFields 是否相等
 //   4. 配对成功后：
 //      - 一对一：给 rightType 那行的 markValue.field 写 markValue.value
@@ -57,11 +62,12 @@ function runC2Scenario(scenario, bankRows) {
   const reconFields = config.reconFields || [];
   const markValue = config.markValue || {};
 
-  if (billTypes.length < 2) {
+  // v2.1.7 F4：billTypes 校验从 < 2 改 < 1（dialog 校验放宽同步）
+  if (billTypes.length < 1) {
     warningCollector.push({
       rowId: null,
       code: 'invalid-config',
-      message: '账单类型至少需要 2 行（PRD §7.2）'
+      message: '账单类型至少需要 1 行'
     });
     return {
       lockedRowIds: modCollector.listLockedRowIds(),
@@ -69,23 +75,13 @@ function runC2Scenario(scenario, bankRows) {
       warnings: warningCollector.list()
     };
   }
-  if (reconFields.length === 0) {
-    warningCollector.push({
-      rowId: null,
-      code: 'invalid-config',
-      message: '对账字段至少需要 1 行'
-    });
-    return {
-      lockedRowIds: modCollector.listLockedRowIds(),
-      modifications: modCollector.listModifications(),
-      warnings: warningCollector.list()
-    };
-  }
+  // v2.1.7 F4：reconFields = 0 不再 return，走「无条件赋值」分支（衍生方案 A，详 spec §5.7）
+  //   原校验保留 markValue.type / .field 必填（reconFields=0 走无条件赋值时仍需要 markValue 完整）
   if (!markValue.type || !markValue.field) {
     warningCollector.push({
       rowId: null,
       code: 'invalid-config',
-      message: '对账成立的打标值必须指定账单类型 + 字段'
+      message: '赋值必须指定账单类型 + 字段'
     });
     return {
       lockedRowIds: modCollector.listLockedRowIds(),
@@ -95,6 +91,29 @@ function runC2Scenario(scenario, bankRows) {
   }
 
   classifyRowsByBillTypes(bankRows, billTypes);
+
+  // v2.1.7 F4 衍生方案 A：reconFields = 0 → 无条件赋值
+  //   凡命中 markValue.type（billType seq）的行直接写 markValue.field = markValue.value
+  //   不走笛卡尔配对，不锁定双方（仅锁定被写值的行）
+  //   spec §5.7 改动点 2 / PRD §9.5
+  if (reconFields.length === 0) {
+    bankRows.forEach((row) => {
+      const types = Array.isArray(row._c2Types) ? row._c2Types : [];
+      if (!types.includes(Number(markValue.type))) return;
+      const oldValue = normalizeCellValue(row[markValue.field]);
+      const newValue = String(markValue.value || '');
+      if (oldValue === newValue) return; // 值未变，不算修改
+      modCollector.lock(row._rowId);
+      row[markValue.field] = newValue;
+      modCollector.record(row._rowId, markValue.field, oldValue, newValue);
+    });
+    bankRows.forEach((r) => { delete r._c2Types; });
+    return {
+      lockedRowIds: modCollector.listLockedRowIds(),
+      modifications: modCollector.listModifications(),
+      warnings: warningCollector.list()
+    };
+  }
 
   // reconFields 中所有的 leftType / rightType 应一致（PRD 自带场景所有 reconFields 都是 1 vs 2）
   // 我们以第一条 reconFields 的 leftType / rightType 为准（PRD 没明确多对类型混合）
@@ -141,7 +160,7 @@ function runC2Scenario(scenario, bankRows) {
     }
   });
 
-  // 写打标值（跳过被 blocked 的 rightRow）
+  // 写赋值（跳过被 blocked 的 rightRow）— v2.1.7 F4 注释术语更新
   // PRD §7.2：配对成功后 r1 + matched[0] 都被场景命中（→ first-match-wins 锁定），
   // 不论实际改字段的是哪一侧（Codex PR #31 F2 P1 修复）
   successfulPairs.forEach(({ leftRow, rightRow }) => {
