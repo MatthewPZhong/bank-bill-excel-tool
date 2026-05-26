@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.2（2026-05-26 — N1 方案重设，Phase 6 加 §八.1 v0.7 增量章节 T31a-f；旧 T28-T32 部分超越，状态见各 task 标注；spec v0.8 / PRD v0.7 同步）；v0.1 起草 |
+| 文档版本 | v0.3（2026-05-26 — **N4 新立项**：差异表瘦身 29→12 列 + raw_json migration（破坏性）；Phase 6.2 新增 T32a-g 共 7 task；spec v0.10 / PRD v0.9 同步）；v0.2 N1 方案重设；v0.1 起草 |
 | 关联文档 | `PRD-v2.1.8.md` / `spec.md` |
 | 任务总数 | 38 |
 | 任务拆分原则 | 单 task 3-5 文件内（CLAUDE.md 小批次原则）；按文件粒度拆，避免 task 间共享文件 |
@@ -21,6 +21,7 @@
 | Phase 5 - N3 实现 | 4 | 2-3 天 | dispatcher + writer + IPC 字段 |
 | Phase 6 - N1 实现 | 5 | 2-3 天 | app.before-quit + migration + 兜底（v0.6 β 落地） |
 | Phase 6.1 - N1' v0.7 增量 | 6 | 1-1.5 天 | idle 30min + 差异保留 + before-quit 简化 + smoke 重写 |
+| Phase 6.2 - N4 输出瘦身 | 7 | 2-3 天 | 模版 12 列 + writer 改 12 + raw_json migration（破坏性）+ smoke |
 | Phase 7 - A3 实现 | 5 | 5-7 天 | worker + IPC 桥接 + smoke |
 | Phase 8 - A4 决策 | 1 | 0.5 天 | 做 / 不做评估 |
 | Phase 9 - 收尾 | 5 | 2-3 天 | 三件套 + check-vars + PR |
@@ -435,6 +436,76 @@
 - **依赖**：T31a-e
 - **动作**：单 commit `[v2.1.8] feat(N1'): cleanup 改 idle 30min 触发 + 差异数据保留`
 - **验收**：commit msg 含决策表 + 验证证据
+
+---
+
+## 八.2、Phase 6.2 — N4 收单差异表输出瘦身（v0.3 新立项）🔴 资金红线 + 破坏性 migration
+
+> **背景**：2026-05-26 用户提出差异表 xlsx 字段冗余 + DB 体积膨胀，立项 N4 双绑定改造（输出 + DB）。
+
+### T32a — Reverse Sync spec/PRD/tasks/backlog ✅ 2026-05-26
+
+- **Owner**：PM
+- **依赖**：T31f（N1' 完成）
+- **文件**：`spec.md` §三.1 / `PRD-v2.1.8.md` §八.1 / `tasks.md`（本节）
+- **动作**：4 决策点 + 模版处理全锁 + 章节新增
+- **验收**：3 文档同步 + 决策点表完整
+
+### T32b — 模版补齐到 12 列
+
+- **Owner**：Dev
+- **依赖**：T32a
+- **文件**：`assets/收单币种校验导出差异表模版.xlsx`
+- **动作**：ExcelJS 写回模版，sheet 1 列从 9 → 12，追加列 10/11/12
+- **验收**：ExcelJS 读取确认 12 列 + 列名一致
+
+### T32c — columns.js 加 TEMPLATE_BILL_HEADERS + WRITER_OUTPUT_HEADERS_V2
+
+- **Owner**：Dev
+- **依赖**：T32a
+- **文件**：`src/backend/acquiring-bill-currency-db/columns.js`
+- **动作**：新增 9 列模版常量 + 12 列输出常量；旧 29 列常量加 deprecated 注释保留
+- **验收**：require 加载无误 + 常量字段名严格对齐模版
+
+### T32d — writer.js 切换到 12 列输出
+
+- **Owner**：Dev
+- **依赖**：T32b + T32c
+- **文件**：`src/main-process/acquiring-bill-currency-writer.js`
+- **动作**：`writeDiffWorkbook` 循环改：按 TEMPLATE_BILL_HEADERS 取 9 字段 + 单据_对账币种 副本 + 流水_通道清算币种 + 流水_通道清算金额
+- **验收**：smoke caseR 列数断言 29→12 通过
+
+### T32e — DB migration 启动期备份 + raw_json 瘦身（破坏性）
+
+- **Owner**：Dev
+- **依赖**：T32c
+- **文件**：`src/backend/database/migrations.js` + `src/backend/database.js`
+- **动作**：
+  1. 新增 `ensureBillRawJsonV2Slim` 函数（幂等）
+  2. 检测 settings.bill_raw_json_v2_migrated 标志位
+  3. 备份 DB 用 sqlite backup API → `<userData>/backups/tool-data-bak-pre-N4-<timestamp>.sqlite`
+  4. 事务包裹：扫所有 bill_imports → JSON.parse → 只保留 9 模版字段 → JSON.stringify → UPDATE
+  5. 完成后写 settings.bill_raw_json_v2_migrated=1
+  6. 失败回滚 + activityLog + 下次重试
+  7. 大数据量分批（每批 50000 + setImmediate 让出）
+- **验收**：smoke caseN4_billRawJsonSlimMigration 全绿（含中断恢复 + 幂等 + 备份文件存在）
+
+### T32f — smoke 改造 + N4 migration 用例
+
+- **Owner**：Dev
+- **依赖**：T32d + T32e
+- **文件**：`scripts/smoke/acquiring-bill-currency.js`
+- **动作**：
+  1. caseR 多 sheet 列数断言 29→12
+  2. 新加 caseN4_billRawJsonSlimMigration：旧库 raw_json 26 字段 → 跑 ensureBillRawJsonV2Slim → 断言只剩 9 + 标志位 + 备份文件 + 第二次启动幂等
+- **验收**：smoke 全套 PASS
+
+### T32g — Commit N4 全部内容
+
+- **Owner**：Dev
+- **依赖**：T32a-f
+- **动作**：单 commit `[v2.1.8] feat(N4): 差异表输出瘦身到 12 列 + bill_imports.raw_json migration（破坏性，含 DB 备份）`
+- **验收**：commit msg 含决策表 + 数据完整性提示 + 验证证据
 
 ---
 

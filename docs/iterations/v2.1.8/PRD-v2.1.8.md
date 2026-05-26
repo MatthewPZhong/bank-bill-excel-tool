@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.8（2026-05-26 — N1' T31b 实施发现 FK 约束 `diff_rows.bill_import_id` 无 CASCADE → bill_imports 也必须保留；§8.3 / §8.6 同步；spec v0.9）；v0.7 N1 方案重设 idle 30min + 差异保留；v0.6 GATEWAY_RECON_FIELDS 反向同步；v0.5 「自取值」改 assign-gw；v0.4 F5 范围收敛；v0.3 移除 TEST.xlsx；v0.2 T08 改 F5-D4；v0.1 初版 |
+| 文档版本 | v0.9（2026-05-26 — **N4 新立项**：差异表输出瘦身 29→12 列 + raw_json 也瘦身（破坏性 migration）；4 决策全锁；spec v0.10 同步；详 §八.1）；v0.8 FK 反向同步；v0.7 N1 方案重设 idle 30min + 差异保留；v0.6 GATEWAY_RECON_FIELDS 反向同步；v0.5 「自取值」改 assign-gw；v0.4 F5 范围收敛；v0.3 移除 TEST.xlsx；v0.2 T08 改 F5-D4；v0.1 初版 |
 | 目标版本 | `v2.1.8`（patch / minor 待定，G1 引入新目录可能升 minor） |
 | 起始版本 | `v2.1.7`（v2.1.7 完成时 main 状态；本 PRD 制定时 v2.1.7 尚未合并 main） |
 | 起草日期 | 2026-05-22 |
@@ -353,6 +353,46 @@ ALTER TABLE acquiring_bill_currency_runs ADD COLUMN cleanup_pending INTEGER DEFA
 | `main.js` | before-quit 钩子 + 进度 IPC 广播 + listMonths 兜底 | **加 idle 计时器**；**简化** before-quit（删模态框广播，保留串行 cleanup）；listMonths 兜底保留 |
 | `preload.js` | 4 个 onCleanupXXX 订阅 | **删** onCleanupQuitProgress/Start/Done；**加** reportUserActivity；保留 onCleanupBackgroundToast |
 | `renderer.js` | 退出进度模态框 + toast | **删** 退出模态框（β 时未实现完整，本次连带清掉）；**加** user-activity 监听上报 |
+
+---
+
+## 八.1、N4 — 收单差异表输出字段瘦身 🔴 资金红线 + 破坏性 migration（v0.9 新立项）
+
+### 8.1.1 用户决策（2026-05-26）
+
+- ✅ 输出差异表 xlsx 字段从 29 列瘦身到 12 列（模版 9 + 单据_对账币种 + 流水侧 2）
+- ✅ 同时改 DB bill_imports.raw_json 也瘦身（D4=b，破坏性 migration 永久删 17 字段值）
+- ✅ 模版补齐到 12 列作 truth
+
+### 8.1.2 现状回顾
+
+- 当前 writer 输出 29 列（`columns.js:72-77` WRITER_OUTPUT_HEADERS）= BILL_HEADERS(26) + 单据_对账币种 + 流水_通道清算币种 + 流水_通道清算金额
+- 模版（`assets/收单币种校验导出差异表模版.xlsx`）仅含 9 列单据侧字段
+- bill_imports.raw_json 存全 26 字段，每行 ~1-3 KB
+
+### 8.1.3 改动点
+
+- [ ] **模版补齐到 12 列**：ExcelJS 写回 assets/收单币种校验导出差异表模版.xlsx
+- [ ] **columns.js**：新增 `TEMPLATE_BILL_HEADERS`（9 列）+ `WRITER_OUTPUT_HEADERS_V2`（12 列）
+- [ ] **writer.js**：`writeDiffWorkbook` 列循环改 29→12
+- [ ] **DB migration**：`ensureBillRawJsonV2Slim` 函数（备份 DB → 事务批量 rewrite raw_json → 标志位）
+- [ ] **smoke**：caseR 列数 29→12 + 新加 caseN4_billRawJsonSlimMigration
+
+### 8.1.4 风险（升级到 🔴 Critical）
+
+- 🔴 **对外输出契约破坏性变更**：用户 Excel 自动化/VBA/Power Query 全部失效
+- 🔴 **DB 数据不可逆**：17 字段值永久删除，历史月份重导出也少这些列
+- 🔴 **migration 中断**：half-rewritten raw_json → 事务 + 失败回滚 + 标志位
+- 🟡 **首次启动备份耗时**：DB 大可能 5-30 秒
+- 🟡 **磁盘空间**：备份文件永久保留
+
+### 8.1.5 启动期 DB 备份
+
+- 位置：`<userData>/backups/tool-data-bak-pre-N4-<timestamp>.sqlite`
+- 方式：sqlite backup API（一致性保证）
+- 失败处理：备份失败 → migration 不启动 → activityLog 记录 → 下次启动重试
+
+详 spec.md v0.10 §三.1。
 
 ---
 

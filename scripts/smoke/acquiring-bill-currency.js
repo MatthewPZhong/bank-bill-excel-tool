@@ -7,7 +7,7 @@ const ExcelJS = require('exceljs');
 const yazl = require('yazl');
 
 const { AppDatabase } = require('../../src/backend/database');
-const { FLOW_HEADERS, BILL_HEADERS, WRITER_OUTPUT_HEADERS } = require('../../src/backend/acquiring-bill-currency-db/columns');
+const { FLOW_HEADERS, BILL_HEADERS, WRITER_OUTPUT_HEADERS, WRITER_OUTPUT_HEADERS_V2, TEMPLATE_BILL_HEADERS } = require('../../src/backend/acquiring-bill-currency-db/columns');
 const session = require('../../src/main-process/acquiring-bill-currency-session');
 const writer = require('../../src/main-process/acquiring-bill-currency-writer');
 const reader = require('../../src/backend/acquiring-bill-currency-import/reader');
@@ -116,10 +116,13 @@ async function caseA_happyPath() {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(exp.diffFilePath);
     const ws = wb.worksheets[0];
-    assertEq(ws.columnCount, 29, 'A.columns=29');
+    // v2.1.8 N4：差异表瘦身 29→12 列（spec v0.10 §三.1）
+    assertEq(ws.columnCount, 12, 'A.columns=12 (v2.1.8 N4)');
     assertEq(ws.rowCount, 2, 'A.rowCount=2(表头+1差异)');
-    assertEq(ws.getRow(1).values.slice(-4), [WRITER_OUTPUT_HEADERS[25], '单据_对账币种', '流水_通道清算币种', '流水_通道清算金额'], 'A.末4列表头');
+    assertEq(ws.getRow(1).values.slice(-4), ['channel', '单据_对账币种', '流水_通道清算币种', '流水_通道清算金额'], 'A.末4列表头');
     assertEq(ws.getRow(2).values.slice(-3), ['EUR', 'USD', '20'], 'A.差异行末3列');
+    // 首列 = 模版第 1 字段「账单日期」
+    assertEq(ws.getRow(1).getCell(1).value, '账单日期', 'A.首列表头=账单日期');
     // A1 watermark 断言
     assertEq(wb.lastModifiedBy, 'pzhong', 'A1.watermark.lastModifiedBy');
   } finally {
@@ -600,6 +603,84 @@ async function caseP2_cleanupAfterRunIncludeDiff() {
     assertEq(flowAfter, 0, 'P2.flow_imports 已清');
     assertEq(billAfter, 0, 'P2.bill_imports 已清');
     assertEq(diffAfter, 0, 'P2.diff_rows includeDiff=true → 已清');
+  } finally {
+    cleanup();
+  }
+}
+
+// v2.1.8 N4 — caseN4：bill_imports.raw_json 瘦身 migration（破坏性，永久删 17 字段值）
+//   spec v0.10 §三.1：备份 → 事务 rewrite → marker → 幂等
+//   注意：setupTmpDb db.init() 链已跑过一次 ensureBillRawJsonV2Slim（bill 表空，状态 = 'migrated-empty'，marker 已写）
+//        本用例模拟"老库升级"场景：先清掉 marker → 插数据 → 再跑 migration 验证全流程
+async function caseN4_billRawJsonSlimMigration() {
+  const { tmpdir, db, cleanup } = setupTmpDb();
+  try {
+    const migrations = require('../../src/backend/database/migrations');
+    // 重置 marker：模拟老库（v2.1.7 以前）首次升级
+    db.db.prepare("DELETE FROM app_settings WHERE setting_key = 'acquiring_bill_raw_json_v2_migrated'").run();
+    const date = '2026-05-01';
+    // 步骤 1：手动插入旧库 raw_json 含全 26 字段 + 17 非模版字段
+    const fullRaw = {
+      '账单日期': date,
+      'originBillBizId': 'N4-1',
+      'ReconBillBizId': 'RECON-1',                  // 非模版（17 之一）
+      '公司主体': 'COMP-A',                          // 非模版
+      '业务部门': 'DEPT-X',                          // 非模版
+      '对手部门': 'DEPT-Y',                          // 非模版
+      '订单创建来源': 'SRC',                         // 非模版
+      '财务BU': 'BU-1',                              // 非模版
+      '账单类型': 'TYPE-A',                          // 非模版
+      '单据类型': 'BILL-1',
+      '业务子类型': 'SUB',                           // 非模版
+      '交易类型': 'TRADE',                           // 非模版
+      '对账子类型': 'RECON-SUB',                     // 非模版
+      '单据状态': 'STATUS',                          // 非模版
+      '主对账Id': 'N4-MAIN-1',
+      '业务订单号': 'ORDER-1',
+      '用户编号': 'USER-1',                          // 非模版
+      '账户号': 'ACC-1',                             // 非模版
+      '对账金额': '100',
+      '对账币种': 'USD',
+      '账户类型': 'ACC-TYPE',                        // 非模版
+      'valueDate': '2026-05-02',
+      'channel': 'CH-1',
+      'remark': 'NOTE',                              // 非模版
+      '创建时间': '2026-05-01 12:00:00',             // 非模版
+      '完成时间': '2026-05-01 13:00:00'              // 非模版
+    };
+    db.db.prepare(`
+      INSERT INTO acquiring_bill_currency_bill_imports
+      (month_key, source_file, source_row_index, recon_main_id, settle_currency, settle_currency_norm, raw_json, imported_at)
+      VALUES ('2026-05', 'fake.xlsx', 2, 'N4-MAIN-1', 'USD', 'usd', ?, ?)
+    `).run(JSON.stringify(fullRaw), new Date().toISOString());
+
+    // 步骤 2：跑 ensureBillRawJsonV2Slim（首次）
+    const dbFilePath = path.join(tmpdir, 't.sqlite'); // setupTmpDb 使用 't.sqlite'
+    const result1 = migrations.ensureBillRawJsonV2Slim(db.db, dbFilePath);
+    assertEq(result1.status, 'migrated', 'N4.first migration status=migrated');
+    assertEq(result1.rowsAffected, 1, 'N4.first rowsAffected=1');
+    assertTrue(result1.backupPath && fs.existsSync(result1.backupPath), 'N4.first backup file exists');
+
+    // 步骤 3：验证 raw_json 只剩 9 模版字段
+    const rowAfter = db.db.prepare("SELECT raw_json FROM acquiring_bill_currency_bill_imports WHERE recon_main_id = 'N4-MAIN-1'").get();
+    const slimObj = JSON.parse(rowAfter.raw_json);
+    const slimKeys = Object.keys(slimObj).sort();
+    const expectedKeys = ['账单日期', 'originBillBizId', '单据类型', '主对账Id', '业务订单号', '对账金额', '对账币种', 'valueDate', 'channel'].sort();
+    assertEq(slimKeys.length, 9, 'N4.slim has exactly 9 fields');
+    assertEq(JSON.stringify(slimKeys), JSON.stringify(expectedKeys), 'N4.slim keys match template');
+    // 17 字段确实没了
+    const removedKeys = ['ReconBillBizId', '公司主体', '业务部门', '对手部门', '订单创建来源', '财务BU', '账单类型', '业务子类型', '交易类型', '对账子类型', '单据状态', '用户编号', '账户号', '账户类型', 'remark', '创建时间', '完成时间'];
+    for (const k of removedKeys) {
+      assertTrue(!(k in slimObj), `N4.removed key '${k}' not in slim raw_json`);
+    }
+
+    // 步骤 4：验证 marker 已写
+    const markerRow = db.db.prepare("SELECT setting_value FROM app_settings WHERE setting_key = 'acquiring_bill_raw_json_v2_migrated'").get();
+    assertEq(markerRow && markerRow.setting_value, 'true', 'N4.marker written = true');
+
+    // 步骤 5：第二次跑 migration → 幂等跳过
+    const result2 = migrations.ensureBillRawJsonV2Slim(db.db, dbFilePath);
+    assertEq(result2.status, 'already-migrated', 'N4.second run = already-migrated (idempotent)');
   } finally {
     cleanup();
   }
@@ -1137,6 +1218,7 @@ async function runAcquiringBillCurrencySmokeTests() {
   await caseO_settleAmountEmpty();
   await caseP_cleanupAfterRun();
   await caseP2_cleanupAfterRunIncludeDiff();
+  await caseN4_billRawJsonSlimMigration();
   await caseQ_cleanupOrphanData();
   await caseR_multiSheetSplit();
   await caseS_ranAtTimezone();

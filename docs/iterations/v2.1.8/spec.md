@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.9（2026-05-26 — N1' T31b 实施发现 **FK 约束**：diff_rows.bill_import_id REFERENCES bill_imports.id 无 CASCADE；保留 diff 必须连带保留 bill；§3.1 / §3.3 / §3.5 同步）；v0.8 N1 方案重设 idle 30min + 差异保留；v0.7 GATEWAY_RECON_FIELDS 反向同步；v0.6 「自取值」改 assign-gw；v0.5 F5 范围收敛；v0.4 移除 TEST.xlsx；v0.3 T08 改 F5-D4；v0.2 27 决策；v0.1 起草 |
+| 文档版本 | v0.10（2026-05-26 — **N4 新立项**：「导出差异表字段瘦身」按模版 9 列 + diff_rows 3 列 = 12 列；DB raw_json 也瘦身（破坏性 migration），4 项决策全锁；详 §五）；v0.9 FK 反向同步；v0.8 N1 方案重设 idle 30min + 差异保留；v0.7 GATEWAY_RECON_FIELDS 反向同步；v0.6 「自取值」改 assign-gw；v0.5 F5 范围收敛；v0.4 移除 TEST.xlsx；v0.3 T08 改 F5-D4；v0.2 27 决策；v0.1 起草 |
 | 关联 PRD | `PRD-v2.1.8.md` v0.1 |
 | 关联 tasks | `tasks.md`（待建） |
 | 评审范围 | F5（算法重设）/ A3（跨进程）/ N1（cleanup 移出对账链路）/ N2（配置数据结构变更）/ N3（IPC 字段重命名 + 新 Sheet） |
@@ -238,6 +238,96 @@ CREATE TABLE acquiring_bill_currency_diff_rows (
 - **采纳**：bill_imports 保留（最小变更，语义自然）；v2.1.9 可评估 schema 优化
 
 **spec §3.2.1 N1''-D1 ~ D5 语义不变**，仅 §3.1 + §3.3 + §3.5 加 bill_imports 同步条目。
+
+---
+
+## 三.1、N4 — 收单差异表输出字段瘦身（v0.10 新立项）🔴 资金红线 + 破坏性 migration
+
+> **背景**（2026-05-26）：v2.1.8 N1' 落地后用户反馈差异表 xlsx 字段冗余（29 列 → 用户实际只看 9 列模版字段 + 流水侧 3 列），同时关注 DB bill_imports 表长期保留导致体积膨胀。新立项 N4 = **输出契约瘦身（writer）+ DB raw_json 瘦身（破坏性 migration）双绑定**。
+
+### 4.1 不变量
+
+- 模版（assets/收单币种校验导出差异表模版.xlsx）= 字段契约 truth source
+- 输出列结构按模版顺序（PM 推荐 D3=a）
+- 差异判定算法 / diff_rows 表结构 / runCheck 流程不变
+- bill_imports 表已抽出的关键列（month_key / source_file / source_row_index / recon_main_id / settle_currency / settle_currency_norm）保留（FK + JOIN 依赖）
+- 删的是 **raw_json 内的 17 个非模版字段值**，不是表结构
+
+### 4.2 关键决策点（4 项全锁）
+
+| # | 决策 | 选项 | 锁定方案 |
+|---|---|---|---|
+| N4-D1 ✅ | 差异类型列（diff_type）是否新增到输出 | (a) 加 / (b) 不加 | **(b) 不加** —— 沿用现状，不暴露 currency_mismatch/missing 区分到用户输出 |
+| N4-D2 ✅ | 「单据_对账币种」(BILL raw 副本) 去留 | (a) 删 / (b) 保留 | **(b) 保留** —— 与模版"对账币种"列共存 |
+| N4-D3 ✅ | 列顺序 | (a) 模版 9 列原序 + 末尾追加 diff_rows / (b) BILL_HEADERS 原序保留 9 列 | **(a) 模版原序** |
+| N4-D4 ✅ | 是否同时改 DB schema 瘦身 bill_imports.raw_json | (a) 仅改 writer / (b) DB raw_json 也瘦身（破坏性）/ (c) 视图 | **(b) DB 也瘦身** —— 破坏性 migration，永久删 17 字段值 |
+| 模版处理 ✅ | 模版补齐 | (a) 补齐到 12 列 / (b) 仅 9 列 writer 加 3 列 | **(a) 模版补齐 12 列** —— 模版即 truth |
+
+### 4.3 12 列最终结构（D1-D3 + 模版 12 列）
+
+| # | 列名 | 来源 |
+|---|---|---|
+| 1 | 账单日期 | bill raw_json |
+| 2 | originBillBizId | bill raw_json |
+| 3 | 单据类型 | bill raw_json |
+| 4 | 主对账Id | bill raw_json |
+| 5 | 业务订单号 | bill raw_json |
+| 6 | 对账金额 | bill raw_json |
+| 7 | 对账币种 | bill raw_json |
+| 8 | valueDate | bill raw_json |
+| 9 | channel | bill raw_json |
+| 10 | 单据_对账币种 | bill raw_json['对账币种'] 副本（保留 D2=b）|
+| 11 | 流水_通道清算币种 | diff_rows.flow_currency |
+| 12 | 流水_通道清算金额 | diff_rows.flow_amount_abs |
+
+### 4.4 raw_json 17 字段永久删除清单
+
+```
+ReconBillBizId, 公司主体, 业务部门, 对手部门, 订单创建来源, 财务BU,
+账单类型, 业务子类型, 交易类型, 对账子类型, 单据状态, 用户编号,
+账户号, 账户类型, remark, 创建时间, 完成时间
+```
+
+### 4.5 改动影响面
+
+| 文件 | 改动 |
+|---|---|
+| `assets/收单币种校验导出差异表模版.xlsx` | 补齐 9 → 12 列（追加列 10/11/12）|
+| `src/backend/acquiring-bill-currency-db/columns.js` | 新增 `TEMPLATE_BILL_HEADERS`（9 列）+ `WRITER_OUTPUT_HEADERS_V2`（12 列）；旧 `WRITER_OUTPUT_HEADERS` 标记 deprecated 保留参照 |
+| `src/main-process/acquiring-bill-currency-writer.js` | `writeDiffWorkbook` 循环改：按 TEMPLATE_BILL_HEADERS 取 raw_json（9 字段）+ 第 10 列副本 + 11/12 列 flow 字段；29→12 |
+| `src/backend/database/migrations.js` | 新增 `ensureBillRawJsonV2Slim`：备份 DB → 事务包裹批量 rewrite raw_json → 标志位 settings.bill_raw_json_v2_migrated=1 |
+| `src/backend/database.js` | 绑定 + 调用 ensureBillRawJsonV2Slim（migration 链 startup 时）|
+| `scripts/smoke/acquiring-bill-currency.js` | caseR 列数断言 29→12；新加 caseN4_billRawJsonSlimMigration |
+| `rules/important-variables.md` | 新增 N4 条目（WRITER_OUTPUT_HEADERS 改 V2 / TEMPLATE_BILL_HEADERS / ensureBillRawJsonV2Slim） |
+
+### 4.6 raw_json 下游使用调研（确认 17 字段删除无 break）
+
+| 调用方 | 字段 | 是否在 9 模版 |
+|---|---|---|
+| `writer.js:180` JSON.parse 取 26 字段 | 全部 | 改造目标，本次重写 |
+| `run-repository.js:173, 196` SQL `json_extract '$."账单日期"'` | 账单日期 | ✅ #1 |
+| `smoke acquiring-bill-currency:1045-1046` 断言 | 账单日期 | ✅ #1 |
+| 其他 | 无 | — |
+
+**结论**：17 字段删除在代码层面 0 break；模版 9 字段中「账单日期」是高频访问字段（writer multi-sheet 分组 + SQL ORDER BY），瘦身后仍存在。
+
+### 4.7 风险（🔴 资金红线 + 破坏性 migration）
+
+- 🔴 **对外输出契约破坏性变更**：现有用户 Excel 自动化 / VBA / Power Query 基于 29 列结构 → 升级后报错
+- 🔴 **DB 数据不可逆**：17 字段值永久删除；历史月份差异表重导出也少这些列；不能 undo
+- 🔴 **migration 中断风险**：half-rewritten raw_json → 事务包裹 + 失败回滚 + 标志位防重入
+- 🟡 **首次启动备份耗时**：DB 大时备份可能 5-30 秒；用 sqlite backup API 保证一致性
+- 🟡 **磁盘空间**：备份文件保留永久（用户主动清）；提示用户备份位置
+
+### 4.8 启动期备份策略
+
+```
+触发：migration 进入前检测 settings.bill_raw_json_v2_migrated 未设置
+备份位置：<userData>/backups/tool-data-bak-pre-N4-<YYYYMMDDThhmmss>.sqlite
+备份方式：sqlite backup API（保证一致性，DB 可能在使用）
+保留策略：永久（用户主动清，N4 不加 UI 清理入口）
+失败处理：备份失败 → migration 不启动 → activityLog 记录 → 下次启动重试
+```
 
 ---
 

@@ -19,6 +19,7 @@ const {
   ensureC3GwFieldCurrencyCaseFix,
   ensureC3AssignAddMode,
   ensureAcquiringBillCurrencyRunsCleanupPending,
+  ensureBillRawJsonV2Slim,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
@@ -162,6 +163,27 @@ class AppDatabase {
     // v2.1.8 N1：给 acquiring_bill_currency_runs 加 cleanup_pending 列（β 方案：cleanup 移出对账链路）
     //   必须在 ensureAcquiringBillCurrencyTablesSupport 之后（依赖 runs 表已存在）
     this.ensureAcquiringBillCurrencyRunsCleanupPending();
+    // v2.1.8 N4：差异表瘦身 — bill_imports.raw_json 一次性 rewrite 仅保留 9 模版字段
+    //   🔴 资金红线 + 破坏性 migration；首次启动自动备份 DB 到 <dbDir>/backups/
+    //   幂等：app_settings.acquiring_bill_raw_json_v2_migrated = 'true' 跳过
+    //   必须在 ensureAcquiringBillCurrencyTablesSupport 之后（依赖 bill_imports 表已存在）
+    try {
+      const result = this.ensureBillRawJsonV2Slim();
+      // 仅在实际改了数据时打日志（'migrated-empty' = 空表首次启动，无业务意义不打）
+      if (result && result.status === 'migrated') {
+        // eslint-disable-next-line no-console
+        console.log(`[migration N4] bill_imports.raw_json slim done: rows=${result.rowsAffected}, backup=${result.backupPath || '(none)'}`);
+      } else if (result && result.status === 'backup-failed') {
+        // eslint-disable-next-line no-console
+        console.error(`[migration N4] backup failed, migration aborted, will retry next launch:`, result.error);
+      } else if (result && result.status === 'batch-failed') {
+        // eslint-disable-next-line no-console
+        console.error(`[migration N4] batch rewrite failed at row ${result.totalRewritten}:`, result.error);
+      }
+    } catch (n4Err) {
+      // eslint-disable-next-line no-console
+      console.error('[migration N4] unexpected failure (启动不阻塞，下次启动重试):', n4Err && n4Err.message);
+    }
     // v2.1.7 F7-A2：启动期 ANALYZE — 让规划器统计所有索引（含 idx_acquiring_bill_currency_bill_source_file）
     //   必须在所有 ensure*Support / migrate* 之后（否则统计的是旧 schema）
     //   ANALYZE 幂等可重复；用户 DB 体量下开销 < 100ms（spec §7.9）
@@ -234,6 +256,11 @@ class AppDatabase {
 
   ensureAcquiringBillCurrencyRunsCleanupPending() {
     return ensureAcquiringBillCurrencyRunsCleanupPending(this.db);
+  }
+
+  // v2.1.8 N4：差异表瘦身 migration（接收 dbPath 用于备份）
+  ensureBillRawJsonV2Slim() {
+    return ensureBillRawJsonV2Slim(this.db, this.dbPath);
   }
 
   listTemplates() {
