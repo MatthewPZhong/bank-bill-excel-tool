@@ -14,10 +14,10 @@ const path = require('node:path');
 const os = require('node:os');
 const ExcelJS = require('exceljs');
 
-const { AppDatabase } = require('../src/backend/database');
-const session = require('../src/main-process/acquiring-bill-currency-session');
-const runRepo = require('../src/backend/acquiring-bill-currency-db/run-repository');
-const { FLOW_HEADERS, BILL_HEADERS } = require('../src/backend/acquiring-bill-currency-db/columns');
+const { AppDatabase } = require('../../src/backend/database');
+const session = require('../../src/main-process/acquiring-bill-currency-session');
+const runRepo = require('../../src/backend/acquiring-bill-currency-db/run-repository');
+const { FLOW_HEADERS, BILL_HEADERS } = require('../../src/backend/acquiring-bill-currency-db/columns');
 
 // 与 main.js setupIdleCleanupTimer 保持同一值（spec v0.10 §3.2.2 N1''-D8）
 const IDLE_CLEANUP_MS = 30 * 60 * 1000;

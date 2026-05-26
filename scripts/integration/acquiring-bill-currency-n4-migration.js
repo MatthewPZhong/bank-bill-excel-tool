@@ -9,16 +9,16 @@ const path = require('node:path');
 const os = require('node:os');
 const ExcelJS = require('exceljs');
 
-const { AppDatabase } = require('../src/backend/database');
-const session = require('../src/main-process/acquiring-bill-currency-session');
-const writer = require('../src/main-process/acquiring-bill-currency-writer');
-const migrations = require('../src/backend/database/migrations');
+const { AppDatabase } = require('../../src/backend/database');
+const session = require('../../src/main-process/acquiring-bill-currency-session');
+const writer = require('../../src/main-process/acquiring-bill-currency-writer');
+const migrations = require('../../src/backend/database/migrations');
 const {
   FLOW_HEADERS,
   BILL_HEADERS,
   WRITER_OUTPUT_HEADERS_V2,
   TEMPLATE_BILL_HEADERS
-} = require('../src/backend/acquiring-bill-currency-db/columns');
+} = require('../../src/backend/acquiring-bill-currency-db/columns');
 
 let passed = 0;
 let failed = 0;

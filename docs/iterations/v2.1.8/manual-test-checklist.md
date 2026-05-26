@@ -6,7 +6,7 @@
 | 字段 | 值 |
 |---|---|
 | 测试目的 | v2.1.8 发版前 4 项核心改造 + 边界回归 |
-| 自动化已覆盖 | smoke 全套 PASS（acquiring 203 / progress 32 / pragma 27 / dispatcher 21 / scenario-engines 45 / ...）+ 3 集成脚本 159/159 + unit 123/123 |
+| 自动化已覆盖 | `npm run release-check` 一键 gate：smoke 全套 PASS（acquiring 203 / progress 32 / pragma 27 / dispatcher 21 / scenario-engines 45 / ...）+ **集成测试 6 脚本 273/273**（详见 `rules/integration-test-policy.md`）+ unit 123/123 |
 | 本 checklist 覆盖 | smoke 无法做到的：真实 GUI / OS-level / 真实 DB 量级 / 真实 30min 闲置 |
 | 备份建议 | 测试前先手动备份 `tool-data.sqlite` + `*-wal` + `*-shm` 3 文件到安全位置 |
 
@@ -14,6 +14,7 @@
 
 ## ⚠️ 测试前必做
 
+- [ ] **跑 `npm run release-check`**（自动化 hard gate）：smoke + unit + integration 全 PASS 才能继续手测
 - [ ] **手动备份 DB**（v2.1.8 启动会自动备份，但手测前再备份一份保险）：
   - macOS：`~/Library/Application Support/bank-bill-excel-tool/` 下 3 个文件
   - Windows：`%APPDATA%/bank-bill-excel-tool/` 下 3 个文件

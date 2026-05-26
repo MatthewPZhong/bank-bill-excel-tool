@@ -13,10 +13,10 @@ const os = require('node:os');
 const XLSX = require('xlsx');
 const ExcelJS = require('exceljs');
 
-const readers = require('../src/backend/file-service/readers');
-const writers = require('../src/backend/file-service/writers');
-const normalizers = require('../src/backend/file-service/normalizers');
-const common = require('../src/backend/file-service/common');
+const readers = require('../../src/backend/file-service/readers');
+const writers = require('../../src/backend/file-service/writers');
+const normalizers = require('../../src/backend/file-service/normalizers');
+const common = require('../../src/backend/file-service/common');
 
 let passed = 0;
 let failed = 0;

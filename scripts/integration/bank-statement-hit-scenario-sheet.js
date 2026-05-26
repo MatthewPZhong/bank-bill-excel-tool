@@ -10,8 +10,8 @@ const path = require('node:path');
 const os = require('node:os');
 const ExcelJS = require('exceljs');
 
-const { runAllScenarios } = require('../src/main-process/scenario-dispatcher');
-const { writeBankStatementOutput } = require('../src/main-process/exceljs-writer');
+const { runAllScenarios } = require('../../src/main-process/scenario-dispatcher');
+const { writeBankStatementOutput } = require('../../src/main-process/exceljs-writer');
 
 let passed = 0;
 let failed = 0;
