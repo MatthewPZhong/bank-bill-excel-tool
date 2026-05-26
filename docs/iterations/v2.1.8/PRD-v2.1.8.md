@@ -587,14 +587,47 @@ config_json.assign = {
 
 ## 十四、实施记录（dev 阶段填）
 
-待 dev 启动后按 round 累积。
+### PR #52 — v2.1.8 发版（2026-05-26 提交）
+
+- **PR**：https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/52
+- **分支**：v2.1.8 → main
+- **commit 数**：22（含发版收尾 + 集成测试基建）
+- **完整改动记录**：见 [`docs/prs/PR52-v2.1.8.md`](../../prs/PR52-v2.1.8.md)（草稿归档）
+
+#### 主题完成度
+
+| 主题 | 状态 | 备注 |
+|---|---|---|
+| **F5** C4 manyToOne 算法重设 | ✅ 4/5 根因 | 根因 #5 subset-sum 剪枝延期 v2.1.9（需 ILP 重写） |
+| **G1** 单元测试框架建立 | ✅ 框架 + 123 case | 全量铺第 1/2 层延期 v2.1.9 |
+| **N1 → N1'** cleanup 改 idle 30min 触发 + 差异保留 | ✅ | v0.6 β → v0.7 idle → v0.9 FK 反向同步 |
+| **N2** C3「自取值」 | ✅ | DB migration + dialog UI + 引擎 mode='custom' |
+| **N3-1/N3-2** 银行对账场景号 + Sheet 3 | ✅ | displayIndex + 可选 Sheet 3 + INTERNAL_FIELDS 白名单 |
+| **N4** 收单差异表 29→12 列瘦身 | ✅ | DB raw_json 破坏性 migration + 自动备份 |
+| **v2.1.7-cleanup** 10 minor | ✅ | 8 已修 + 2 不可修记录 |
+
+#### 工程化基建（v2.1.8 新增）
+
+- **集成测试体系**：`scripts/integration/` 目录 + `scripts/integration-runner.js` runner
+- **`npm run test:integration`** — 6 脚本 / 273 断言
+- **`npm run release-check`** — 一键 gate（smoke + unit + integration）
+- **`rules/integration-test-policy.md`** — 新模块硬约束（必须配 ≥ 1 集成测试）
+
+#### 自动化测试合计 ~1276 断言 / 0 regression
+
+- smoke ~880 断言
+- unit 123/123 / 28 suites
+- integration 273/273 / 6 脚本 / 1163ms
+
+#### 延期到 v2.1.9
+
+- F5 #5 根因（subset-sum 剪枝 → ILP 重写）
+- G1 全量铺（第 1 层剩余 13 + 第 2 层 24 文件）
+- A3 runCheck 跨进程化（worker_threads / utilityProcess）
+- A4 SQL chunked（与 A3 联合评估）
+- N4 后续优化：手动清入口 / 滚动保留窗口 / FK CASCADE 改造
 
 ---
 
-**当前状态**：v0.1 起草中，**v2.1.7 未合并 main 前不开始 v2.1.8 任何代码**（沿用 v2.1.7 PRD §10.6 约束）。
-
-下一步：
-1. 等 v2.1.7 → main 合并
-2. 启动 spec.md 资金红线评审（F5/A3/N2/N3 4 项）
-3. 启动 tasks.md task 颗粒拆分（按文件粒度 3-5 文件/task）
+**当前状态**：v2.1.8 已提 PR #52，等用户手测 + reviewer 评审 + merge。
 4. 跑 `npm run scan:vars` 评估重要变量升格
