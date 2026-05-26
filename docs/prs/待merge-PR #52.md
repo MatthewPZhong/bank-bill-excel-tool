@@ -65,17 +65,44 @@ v2.1.7 之后 **15 commit** 收敛，**6 项主题**：
 
 ## Test plan
 
-- [x] `npm run smoke` 全套通过：acquiring 203/203（含新 caseN4）+ progress 32 + pragma 27 + dispatcher 21 + scenario-engines 45 + bank-bu-recon 41 + biz-op-recon 154 + render-status 25 + scenario-c1 21 + ...
-- [x] `npm run test:unit` 123/123 / 28 suites
-- [x] `npm run scan:vars` 重新生成 var-reference-stats（v11 升格 7 条）
-- [ ] **手测 N4 升级路径**（用户）：v2.1.7 DB → 启动 v2.1.8 → 验证备份文件 + 差异表导出 12 列 + raw_json 仅 9 字段
-- [ ] **手测 N1' idle 30min 触发**（用户）：闲置 30min 后查 activity log + DB flow_imports 已清
-- [ ] **手测 N3 Sheet 3「命中场景行」**（用户）：银行对账跑完场景后导出 xlsx 验证 3 sheet 结构
-- [ ] **手测 N2 C3「自取值」**（用户）：场景管理新建 C3 → 选「自取值」→ 输入字符串 → 实际对账验证赋值
+### 自动化 hard gate（`npm run release-check` 一键跑）
 
-## Commits（15 个，v2.1.7 → HEAD）
+- [x] **`npm run smoke`** 全套通过：~880 断言（acquiring 203 含新 caseN4 / progress 32 / pragma 27 / dispatcher 21 / scenario-engines 45 / bank-bu-recon 41 / biz-op-recon 154 / render-status 25 / scenario-c1 21 / ...）
+- [x] **`npm run test:unit`** 123/123 / 28 suites
+- [x] **`npm run test:integration`** 273/273 / 6 脚本 / 1163ms 总耗时（v2.1.8 新增体系）：
+  - `acquiring-bill-currency-idle-cleanup` 18/18 — N1' idle 触发链路
+  - `acquiring-bill-currency-n4-migration` 115/115 — N4 raw_json migration e2e
+  - `bank-statement-hit-scenario-sheet` 26/26 — N3 Sheet 3 完整 pipeline
+  - `new-account-balance-statement` 36/36 — 主功能 2 余额账单 e2e（补缺）
+  - `pending-data-reconciliation` 33/33 — 主功能 3 Pending 核对 e2e（补缺）
+  - `statement-generation-pipeline` 45/45 — 主功能 1 网银账单 e2e
+- [x] `npm run scan:vars` 重新生成 var-reference-stats（v11 升格 7 条）
+
+### v2.1.8 工程化基建（reviewer 关注）
+
+- 新增统一集成测试入口 `scripts/integration-runner.js`（自动发现 `scripts/integration/*.js`）
+- 新增 `npm run test:integration` + `npm run release-check`（smoke && unit && integration）
+- 新增规则 `rules/integration-test-policy.md`：**新加业务模块必须配 ≥ 1 集成测试**
+- 4 个 v2.1.8 集成脚本去版本前缀（按模块命名，长期回归契约不绑定版本）
+- 补缺主功能 2 / 主功能 3 集成测试（v2.1.7 之前未覆盖）
+
+### GUI 手测（用户跑，依 `docs/iterations/v2.1.8/manual-test-checklist.md`）
+
+- [ ] **N4 升级路径**：v2.1.7 DB → 启动 v2.1.8 → 验证备份文件 + 差异表 12 列 + raw_json 仅 9 字段
+- [ ] **N1' idle 30min 触发**：闲置 30min（或临时缩短常量法）后查 activity log + flow_imports 已清
+- [ ] **N3 Sheet 3「命中场景行」**：银行对账跑完后导出 xlsx 验证 3 sheet + 命中场景列格式
+- [ ] **N2 C3「自取值」**：场景管理新建 C3 → 选「自取值」→ 输入字符串 → 实际对账验证赋值
+- [ ] **v2.1.7 回归 §六**：网银账单 / ReconID 修复 / 收单 / 各模块冒烟
+- [ ] **性能体感 §七**：启动时间 / DB 体积 / 内存
+
+## Commits（20 个，v2.1.7 → HEAD）
 
 ```
+33b50c3  [v2.1.8] refactor(test): 集成测试入口 + 模块 2/3 补缺 + 规则文档（B+D 改造）
+68a4eea  [v2.1.8] test(release): 主功能 1「生成网银账单」核心 pipeline 集成脚本
+4115b2b  [v2.1.8] docs(release): 手测 checklist（8 章 / 4 主题 + 回归 + 性能 + 反馈）
+3e2959c  [v2.1.8] test(release): 3 个 v2.1.8 集成验证脚本（N4 e2e / N1' idle / N3 Sheet 3）
+30fc5db  [v2.1.8] chore(release): 三件套 + 版本号 bump 2.1.7→2.1.8 + PR #52 草稿 + important-variables v11
 37299cf  [v2.1.8] feat(N4): 差异表输出瘦身到 12 列 + bill_imports.raw_json migration（破坏性 + DB 备份）
 913f868  [v2.1.8] feat(N1'): cleanup 改 idle 30min 触发 + 差异数据保留（v0.9 含 FK 反向同步）
 e07f02b  [v2.1.8] chore(v2.1.7-cleanup): self-review 10 项 minor 收尾（8 已修 + 2 不可修记录）
