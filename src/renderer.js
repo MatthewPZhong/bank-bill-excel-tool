@@ -3283,8 +3283,10 @@ async function refreshBankStatementStatus() {
         ? {
           hitRowCount: status.processingStats?.hitRowCount ?? 0,
           scenarioHitCount: status.processingStats?.scenarioHitCount ?? 0,
-          hitScenarioIds: Array.isArray(status.processingStats?.hitScenarioIds)
-            ? status.processingStats.hitScenarioIds.slice()
+          // v2.1.8 N3-1：hitScenarioIds → hitScenarios（{id, displayIndex, name}[]）
+          //   状态框显示用 displayIndex 与场景管理 UI 列表序号统一
+          hitScenarios: Array.isArray(status.processingStats?.hitScenarios)
+            ? status.processingStats.hitScenarios.slice()
             : [],
           warningCount: status.processingStats?.warningCount ?? 0,
           skippedC3Count: status.processingStats?.skippedC3Count ?? 0
@@ -3316,8 +3318,9 @@ function updateBankStatementUi() {
     if (ex.errorReportName) text += `\nerror-report：${ex.errorReportName}`;
     tone = 'success';
   } else if (pr) {
-    const ids = Array.isArray(pr.hitScenarioIds) ? pr.hitScenarioIds : [];
-    const idsText = ids.length > 0 ? `（场景 ${ids.join('、')}）` : '';
+    // v2.1.8 N3-1：hitScenarios.displayIndex 与场景管理 UI 列表序号统一（spec.md §五 N3-D1）
+    const arr = Array.isArray(pr.hitScenarios) ? pr.hitScenarios : [];
+    const idsText = arr.length > 0 ? `（场景 ${arr.map((s) => s.displayIndex).join('、')}）` : '';
     text = `已处理：${pr.hitRowCount} 行命中${idsText}，${pr.warningCount} 警告`;
     if (pr.skippedC3Count > 0) {
       text += ` · 跳过 ${pr.skippedC3Count} 个对账不平场景`;

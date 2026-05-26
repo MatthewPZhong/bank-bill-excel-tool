@@ -133,11 +133,12 @@ async function runScenarioEndToEndSmokeTests() {
 
       // 命中行数：r1（C1）+ r2/r3（C2 双锁）+ r4（C3）= 4
       check('E1.1', result.modifiedRows.length === 4, `命中应 4 行，实 ${result.modifiedRows.length}`);
-      // hitScenarioIds 应含 1, 2, 3
-      check('E1.2', result.stats.hitScenarioIds.length === 3, 'hitScenarioIds 应 3 项');
-      check('E1.3', result.stats.hitScenarioIds.includes(1), 'C1 应入 hitScenarioIds');
-      check('E1.4', result.stats.hitScenarioIds.includes(2), 'C2 应入 hitScenarioIds');
-      check('E1.5', result.stats.hitScenarioIds.includes(3), 'C3 应入 hitScenarioIds');
+      // v2.1.8 N3-1：hitScenarioIds → hitScenarios（{id, displayIndex, name}[]）
+      const hitIds = result.stats.hitScenarios.map((s) => s.id);
+      check('E1.2', hitIds.length === 3, 'hitScenarios 应 3 项');
+      check('E1.3', hitIds.includes(1), 'C1 应入 hitScenarios');
+      check('E1.4', hitIds.includes(2), 'C2 应入 hitScenarios');
+      check('E1.5', hitIds.includes(3), 'C3 应入 hitScenarios');
       // 写出
       const tsMinute = buildTimestampMinute();
       const expectedName = buildMainOutputFileName(tsMinute);
@@ -209,7 +210,7 @@ async function runScenarioEndToEndSmokeTests() {
         result.modifiedRows[0].ReconciliationId === 'AFT888888888888',
         `应被 C1 写入（高优先级），不应被 C3 覆盖`
       );
-      check('E2.3', result.stats.hitScenarioIds.length === 1 && result.stats.hitScenarioIds[0] === 1, 'hitScenarioIds 仅含 C1');
+      check('E2.3', result.stats.hitScenarios.length === 1 && result.stats.hitScenarios[0].id === 1, 'hitScenarios 仅含 C1');
     }
 
     // ===== E3：gwRows = null + 启用 C3 → skippedC3Count = 1 =====
@@ -217,7 +218,7 @@ async function runScenarioEndToEndSmokeTests() {
       const bankRows = [makeBankRow({ _rowId: 'rZ', CustomerRef: 'AFT111111111111', ReconciliationId: '' })];
       const result = runAllScenarios(bankRows, null, [makeC1Scenario(), makeC3Scenario()]);
       check('E3.1', result.stats.skippedC3Count === 1, 'C3 应被过滤 → skippedC3Count = 1');
-      check('E3.2', result.stats.hitScenarioIds.length === 1 && result.stats.hitScenarioIds[0] === 1, '仅 C1 命中');
+      check('E3.2', result.stats.hitScenarios.length === 1 && result.stats.hitScenarios[0].id === 1, '仅 C1 命中');
       check('E3.3', result.modifiedRows.length === 1, '仅 1 行命中');
     }
 

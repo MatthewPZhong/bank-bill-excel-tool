@@ -22,12 +22,17 @@ const YELLOW_FILL = {
 };
 
 // 内部字段（不写入 xlsx）
+// v2.1.8 N3-2：_hitScenarioDisplayIndex 新增（与 _hitScenarioId / _hitScenarioName 同源 dispatcher 注入）
 const INTERNAL_FIELDS = new Set([
   '_rowId',
   '_modifiedColumns',
   '_hitScenarioId',
+  '_hitScenarioDisplayIndex',
   '_hitScenarioName'
 ]);
+
+// v2.1.8 N3-2：Sheet 3「命中场景行」末尾「命中场景」列表头
+const HIT_SCENARIO_COLUMN = '命中场景';
 
 function buildSheetData(rows, headers) {
   const dataRows = rows.map((row) => headers.map((h) => row[h]));
@@ -46,11 +51,13 @@ function stripInternalFields(row) {
   return cleaned;
 }
 
-// rows: Array<{ ...原列, _rowId, _modifiedColumns: Set<columnName>, _hitScenarioName }>
+// rows: Array<{ ...原列, _rowId, _modifiedColumns: Set<columnName>, _hitScenarioId, _hitScenarioDisplayIndex, _hitScenarioName }>
 // headers: Array<string>（44 列原表头）
 // savePath: 绝对路径（含 .xlsx）
 // unmatchedRows: Array<{...原列}> | null（v2.1.7 F8 round 3 可选；spec §9.8.4 第 2 sheet "未命中场景行"）
-async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null) {
+// includeHitScenarioSheet: boolean（v2.1.8 N3-2 可选；true → 输出 Sheet 3「命中场景行」+ 末尾「命中场景」列）
+//   默认 false 保护 v2.1.7 F8 旧 caller 契约：不传 unmatchedRows + 不传 includeHitScenarioSheet → 仅 1 sheet
+async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null, includeHitScenarioSheet = false) {
   const workbook = new ExcelJS.Workbook();
   // sheet 名沿用样例文件 / PRD §7.5 约定：'渠道对账单'
   const sheet = workbook.addWorksheet('渠道对账单');
@@ -85,6 +92,28 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
     unmatchedSheetData.forEach((rowValues) => unmatchedSheet.addRow(rowValues));
     const unmatchedHeaderRow = unmatchedSheet.getRow(1);
     unmatchedHeaderRow.font = { bold: true, size: 10 };
+  }
+
+  // v2.1.8 N3-2（spec §五 N3-D3~D6）：Sheet 3「命中场景行」
+  //   - 仅当 caller 显式传 includeHitScenarioSheet=true 时输出（保护 v2.1.7 F8 旧 caller 契约）
+  //   - 数据源 = rows（modifiedRows，含 _hitScenarioDisplayIndex / _hitScenarioName，dispatcher 注入）
+  //   - 列结构 = headers（原 44 列）+ 末尾追加「命中场景」列
+  //   - 列值格式 = `[displayIndex] name`（与 N3-1 状态框文案统一）
+  //   - 行顺序 = 与 Sheet 1（modifiedRows）一致（spec N3-D6）
+  //   - 不标黄（用户期望"清晰的命中行 + 场景标签"，无需视觉重叠）
+  //   - 即使 0 行也输出含表头 sheet（与 Sheet 2 一致）
+  if (includeHitScenarioSheet) {
+    const sheet3Headers = headers.concat(HIT_SCENARIO_COLUMN);
+    const sheet3 = workbook.addWorksheet('命中场景行');
+    sheet3.addRow(sheet3Headers);
+    rows.forEach((row) => {
+      const baseValues = headers.map((h) => row[h]);
+      const di = row._hitScenarioDisplayIndex;
+      const nm = row._hitScenarioName;
+      const hitLabel = (di !== null && di !== undefined && nm) ? `[${di}] ${nm}` : '';
+      sheet3.addRow(baseValues.concat(hitLabel));
+    });
+    sheet3.getRow(1).font = { bold: true, size: 10 };
   }
 
   applyWatermark(workbook);

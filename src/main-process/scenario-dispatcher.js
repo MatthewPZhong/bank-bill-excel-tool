@@ -60,8 +60,8 @@ function filterOutReconIdFix(scenarios) {
 //                                          // 每行加 _modifiedColumns: Set + _hitScenarioId + _hitScenarioName
 //     modifications: Array<{ rowId, column, oldValue, newValue, scenarioId, scenarioName }>,
 //     errorReport: Array<{ scenarioId, scenarioName, rowId, code, message }>,
-//     stats: { totalRows, hitRowCount, scenarioHitCount, hitScenarioIds, warningCount, skippedC3Count }
-//     hitScenarioIds: 命中场景的 id 列表（按命中顺序，由 priority desc + id asc 决定）
+//     stats: { totalRows, hitRowCount, unmatchedRowCount, scenarioHitCount, hitScenarios, warningCount, skippedC3Count, skippedC4Count }
+//     hitScenarios: v2.1.8 N3-1 取代 hitScenarioIds — Array<{id, displayIndex, name}>（按命中顺序，priority desc + id asc）
 //   }
 function runAllScenarios(bankRows, gwRows, scenarios) {
   if (!Array.isArray(bankRows)) {
@@ -85,7 +85,11 @@ function runAllScenarios(bankRows, gwRows, scenarios) {
   const rowMeta = new Map(); // _rowId → { scenarioId, scenarioName, modifiedColumns: Set }
 
   let scenarioHitCount = 0;
-  const hitScenarioIds = [];
+  // v2.1.8 N3-1：hitScenarioIds (number[]) → hitScenarios ({id, displayIndex, name}[])
+  //   spec.md §五：状态框命中场景号显示与场景管理 UI 序号一致 — 改用 displayIndex 替代 DB id
+  //   displayIndex 来源：scenario.displayIndex（scenarios-repository.listScenarios 已附）
+  //   fallback：未带 displayIndex 时回退 scenario.id（兼容旧调用方 / smoke 直接构造 scenario）
+  const hitScenarios = [];
 
   for (const scenario of filtered) {
     const unlocked = bankRows.filter((r) => !rowLockSet.has(r._rowId));
@@ -96,12 +100,17 @@ function runAllScenarios(bankRows, gwRows, scenarios) {
 
     if (lockedRowIds && lockedRowIds.size > 0) {
       scenarioHitCount += 1;
-      hitScenarioIds.push(scenario.id);
+      hitScenarios.push({
+        id: scenario.id,
+        displayIndex: Number.isFinite(scenario.displayIndex) ? scenario.displayIndex : scenario.id,
+        name: scenario.name
+      });
       lockedRowIds.forEach((rowId) => {
         rowLockSet.add(rowId);
         if (!rowMeta.has(rowId)) {
           rowMeta.set(rowId, {
             scenarioId: scenario.id,
+            scenarioDisplayIndex: Number.isFinite(scenario.displayIndex) ? scenario.displayIndex : scenario.id,
             scenarioName: scenario.name,
             modifiedColumns: new Set()
           });
@@ -133,12 +142,15 @@ function runAllScenarios(bankRows, gwRows, scenarios) {
     .map((r) => {
       const meta = rowMeta.get(r._rowId) ?? {
         scenarioId: null,
+        scenarioDisplayIndex: null,
         scenarioName: null,
         modifiedColumns: new Set()
       };
       return {
         ...r,
         _hitScenarioId: meta.scenarioId,
+        // v2.1.8 N3-2：N3 Sheet 3「命中场景行」末尾「命中场景」列拼接 `[displayIndex] name`
+        _hitScenarioDisplayIndex: meta.scenarioDisplayIndex,
         _hitScenarioName: meta.scenarioName,
         _modifiedColumns: meta.modifiedColumns
       };
@@ -161,7 +173,9 @@ function runAllScenarios(bankRows, gwRows, scenarios) {
       hitRowCount: modifiedRows.length,
       unmatchedRowCount: unmatchedRows.length,      // ⭐ F8 round 3 新增
       scenarioHitCount,
-      hitScenarioIds,
+      // v2.1.8 N3-1：hitScenarioIds (number[]) → hitScenarios ({id, displayIndex, name}[])
+      //   spec.md §五 N3-D2 强制重命名，caller 同步更新（grep hitScenarioIds 零命中）
+      hitScenarios,
       warningCount: allWarnings.length,
       skippedC3Count,
       skippedC4Count
