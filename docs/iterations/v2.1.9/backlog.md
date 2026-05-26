@@ -5,7 +5,7 @@
 
 ## 主题概览
 
-v2.1.8 延期项 + self-review 补强项 + 已知坑收尾，共 **10 个独立条目**：
+v2.1.8 延期项 + self-review 补强项 + 已知坑收尾，共 **9 个独立条目**（N4-cont-3 已在 v2.1.8 SR7 完成）：
 
 | 编号 | 主题 | 性质 | 风险 | 工期预估 | 来源 |
 |---|---|---|---|---|---|
@@ -15,7 +15,7 @@ v2.1.8 延期项 + self-review 补强项 + 已知坑收尾，共 **10 个独立�
 | **A4** | SQL JOIN chunked LIMIT/OFFSET 分批 | 性能优化 | 🟡 MID | 与 A3 联合评估 | v2.1.7 PRD §12.1.3 + v2.1.8 §十四 |
 | **N4-cont-1** | 收单单据 raw_json 历史保留体积治理：手动清入口 / 滚动保留窗口 | 体积治理 · UX | 🟡 MID | ~3-5 天 | v2.1.8 PRD §十四 / N4 后续 |
 | **N4-cont-2** | FK CASCADE 改造：`diff_rows.bill_import_id` / `run_id` 加 ON DELETE CASCADE | DB schema 优化 | 🟡 MID | ~2-3 天 | v2.1.8 PRD §十四 |
-| **N4-cont-3** | import-repository 写 raw_json 时也按 9 字段裁字段（避免新写入 17 字段残留 DB） | 一致性补强 | 🟢 LOW | ~1 天 | v2.1.8 self-review SR2 N4 Minor-3 |
+| ~~N4-cont-3~~ | ~~import-repository 写 raw_json 时也按 9 字段裁字段~~ | — | — | — | ✅ **v2.1.8 SR7 已修**（PR #52 Matthew Finding 1 反馈） |
 | **SR-policy-1** | integration-runner.js 末尾自动输出"当前清单 markdown 表" → 自动同步 integration-test-policy.md §七 | 工程化补强 | 🟢 LOW | ~0.5 天 | v2.1.8 self-review SR4 |
 | **SR-backup-1** | N4 备份用 sqlite backup API（取代 fs.copyFileSync）— 保证一致性 + 大库无锁 | 鲁棒性补强 | 🟢 LOW | ~1 天 | v2.1.8 self-review SR2 N4 Important-1 |
 | **N1-settings** | idle 阈值 settings 化（v2.1.8 N1''-D8 锁定硬编码，v2.1.9 评估配置化） | UX · 可配置 | 🟢 LOW | ~0.5 天 | v2.1.8 spec §3.2.2 D8 |

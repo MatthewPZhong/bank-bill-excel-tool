@@ -114,12 +114,24 @@ async function run() {
     await session.importFlowFiles({ db: db.db, monthKey: '2026-04', filePaths: [flowFile] });
     await session.importBillFiles({ db: db.db, monthKey: '2026-04', filePaths: [billFile] });
 
-    // 验证 import 写入后 raw_json 确实是 26 字段（v2.1.7 老库语义；import 阶段 N4 还没动）
+    // v2.1.8 SR7（PR #52 Finding 1）反向同步：import-repository 改用 TEMPLATE_BILL_HEADERS 后
+    //   新 import 的 raw_json 已经是 9 字段，无须 migration → 本测试 Step 1 已不能"通过 import 模拟 v2.1.7 老库"
+    //   改为直接 UPDATE raw_json 注入 26 字段模拟"v2.1.7 老库数据"，然后跑 migration 验证瘦身
+    const fullRawSample = (() => {
+      const r = makeFullBill('E1');
+      const obj = {};
+      for (let i = 0; i < BILL_HEADERS.length; i++) obj[BILL_HEADERS[i]] = r[i] === undefined ? '' : String(r[i]);
+      return JSON.stringify(obj);
+    })();
+    const updateStmt = db.db.prepare(`UPDATE acquiring_bill_currency_bill_imports SET raw_json = ? WHERE month_key = '2026-04'`);
+    updateStmt.run(fullRawSample);
+
+    // 验证现在 raw_json 已经被注入 26 字段（模拟 v2.1.7 老库残留）
     const billBefore = db.db.prepare(`SELECT raw_json FROM acquiring_bill_currency_bill_imports WHERE recon_main_id = 'E1'`).get();
     const billObjBefore = JSON.parse(billBefore.raw_json);
-    assertEq(Object.keys(billObjBefore).length, 26, 'Step1.import 后 raw_json 含 26 字段');
-    assertEq(billObjBefore['公司主体'], 'COMPANY-A', 'Step1.非模版字段「公司主体」入库正确');
-    assertEq(billObjBefore['remark'], 'NOTE', 'Step1.非模版字段「remark」入库正确');
+    assertEq(Object.keys(billObjBefore).length, 26, 'Step1.手工注入 26 字段（模拟 v2.1.7 老库）');
+    assertEq(billObjBefore['公司主体'], 'COMPANY-A', 'Step1.非模版字段「公司主体」存在');
+    assertEq(billObjBefore['remark'], 'NOTE', 'Step1.非模版字段「remark」存在');
 
     // ============================================================
     // Step 2：重置 marker 模拟"v2.1.7 老库首次升级 v2.1.8"

@@ -79,13 +79,23 @@ function insertBillRow(stmt, { monthKey, sourceFile, row, importedAt }) {
   }
   const settleCurrency = String(values[19] /* 对账币种（语义即清算视角） */ || '').trim();
   const settleCurrencyNorm = normalizeCurrency(values[19]);
+  // v2.1.8 N4 + self-review SR7（PR #52 Matthew Finding 1）：
+  //   raw_json 改用 TEMPLATE_BILL_HEADERS 仅写 9 模版字段（非 BILL_HEADERS 全 26 列）
+  //   契约闭环：v2.1.8 起 bill_imports.raw_json **永远** 仅含 9 字段
+  //     - 老库：N4 migration ensureBillRawJsonV2Slim 瘦身（commit 37299cf）
+  //     - 新写：本函数按 TEMPLATE_BILL_HEADERS 投影（本 commit）
+  //   下游消费方仅 writer.js + run-repository 4 处 SQL json_extract '$."账单日期"'
+  //   都在 9 字段内，无 break
+  const { BILL_HEADERS, TEMPLATE_BILL_HEADERS } = require('./columns');
   const rawObj = {};
-  const BILL_HEADERS = require('./columns').BILL_HEADERS;
-  for (let i = 0; i < BILL_HEADERS.length; i++) {
-    rawObj[BILL_HEADERS[i]] = values[i] === undefined ? '' : String(values[i]);
+  for (const key of TEMPLATE_BILL_HEADERS) {
+    const idx = BILL_HEADERS.indexOf(key);
+    if (idx < 0) continue; // 防御：模版字段不在 BILL_HEADERS 中（不会发生，留作未来扩展兜底）
+    rawObj[key] = values[idx] === undefined ? '' : String(values[idx]);
   }
   // PR #50 reviewer finding F2：raw_json 写入前归一化「账单日期」为 YYYY-MM-DD（writer fmtSheetName / SQL GROUP BY 依赖）
-  rawObj[BILL_HEADERS[0]] = normalizeBillDate(rawObj[BILL_HEADERS[0]]);
+  //   注：「账单日期」是 TEMPLATE_BILL_HEADERS[0]，本归一化仍生效
+  rawObj['账单日期'] = normalizeBillDate(rawObj['账单日期']);
   const rawJson = JSON.stringify(rawObj);
   stmt.run(monthKey, sourceFile, rowIndex, reconMainId, settleCurrency, settleCurrencyNorm, rawJson, importedAt);
 }

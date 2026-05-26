@@ -35,6 +35,7 @@ v2.1.7 之后 15 commit 收敛，**6 项主题**：F5（C4 算法重设 4/5 根�
 
 - **首次启动 v2.1.8 自动备份 DB**：备份位置 `<userData>/backups/tool-data-bak-pre-N4-<timestamp>.sqlite`，DB 大可能 5-30 秒；备份成功才启动 raw_json migration
 - **17 字段永久删除**（不可逆）：升级后 `bill_imports.raw_json` 只剩 9 模版字段；历史月份差异表重导出也只有 12 列
+- **v2.1.8 后新导入也仅写 9 字段**（self-review SR7 / PR #52 Finding 1）：`import-repository.insertBillRow` 改用 `TEMPLATE_BILL_HEADERS` 投影，新写入数据不残留 17 字段（N4 契约真正闭环）
 - **Excel 自动化失效**：基于 29 列结构的 VBA / Power Query / Python pandas 脚本必须更新到 12 列
 - **idle 30min 自动清流水**：闲置 30 分钟后台自动清 `flow_imports`（不影响差异结果，bill/diff/runs 保留）
 
