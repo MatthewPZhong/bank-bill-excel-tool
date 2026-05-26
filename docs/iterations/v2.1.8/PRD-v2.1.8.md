@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.6（2026-05-26 — N2 实施前发现 GATEWAY_RECON_FIELDS 被 reader 校验使用，撤回 constants 修改，改为 dialog 渲染层单独拼 option；spec v0.7 同步）；v0.5 「自取值」改 assign-gw；v0.4 F5 范围收敛；v0.3 移除 TEST.xlsx；v0.2 T08 改 F5-D4；v0.1 初版 |
+| 文档版本 | v0.8（2026-05-26 — N1' T31b 实施发现 FK 约束 `diff_rows.bill_import_id` 无 CASCADE → bill_imports 也必须保留；§8.3 / §8.6 同步；spec v0.9）；v0.7 N1 方案重设 idle 30min + 差异保留；v0.6 GATEWAY_RECON_FIELDS 反向同步；v0.5 「自取值」改 assign-gw；v0.4 F5 范围收敛；v0.3 移除 TEST.xlsx；v0.2 T08 改 F5-D4；v0.1 初版 |
 | 目标版本 | `v2.1.8`（patch / minor 待定，G1 引入新目录可能升 minor） |
 | 起始版本 | `v2.1.7`（v2.1.7 完成时 main 状态；本 PRD 制定时 v2.1.7 尚未合并 main） |
 | 起草日期 | 2026-05-22 |
@@ -276,41 +276,83 @@ F5 算法重设的 TEST2.xlsx 期望基线 → 直接落成 `c4-recon-id-fix.js`
 
 ---
 
-## 八、N1 — 收单单据币种校验：cleanup 置后执行（β 方案）
+## 八、N1 — cleanup 改 idle 30min 触发 + 差异数据保留（v0.7 方案重设）
 
-### 8.1 用户决策（2026-05-22）
+> **v0.7 方案变更说明（2026-05-26）**：
+> β 方案（v0.6）落地后（commit 30247da、6e22375 等），用户提出两项语义级修订：
+> 1. **触发改 idle 30min** — 主链路从 `app.before-quit` 改为「应用闲置 30 分钟后台自动清」；before-quit 降级为退出兜底，进入模块降级为崩溃恢复兜底
+> 2. **差异数据不清** — `acquiring_bill_currency_diff_rows` 表保留，只清 flow + bill 两张输入表
+>
+> 详 spec.md v0.8 §三整章；本节 PRD 同步重写。
 
-✅ **β 方案**：移出对账链路，主清理时机改 `app.before-quit`，进入模块时为兜底。
+### 8.1 用户决策（2026-05-22 + 2026-05-26 修订）
 
-### 8.2 现状回顾
+| 阶段 | 决策 |
+|---|---|
+| 2026-05-22 | ✅ β 方案：移出对账链路，主清理时机 `app.before-quit`，进入模块兜底 |
+| 2026-05-26 | 🔄 修订：主触发改 idle 30min；差异数据不清；β 方案降级为兜底层 |
 
-- cleanup 函数：`acquiring-bill-currency-session.js:278` `cleanupAfterRunBackground`
-- 现调用点：`main.js:10307`（runCheck 成功后 setImmediate 触发）
-- 现状已是异步分批（每批 50000 行 + setImmediate 让出 event loop），UI 不卡
-- **间接卡点**：mutex lock 互斥 import/run/export/cleanup → 用户进入模块新一次导入会被 lock 挡到 cleanup 完成
+### 8.2 现状回顾（v0.7 起点）
 
-### 8.3 改动点
+- v0.6/β 已落地：DB 列 cleanup_pending + run-repository 三 API + runCheck 解耦 + before-quit 模态框 + 进入模块兜底
+- v0.7 增量改造，不全推翻：保留 DB schema + repository API + 进入模块兜底；改造触发机制 + cleanup 范围
 
-- [ ] **runCheck 解耦**：`main.js:10307` 移除 setImmediate(cleanupAfterRunBackground)；改为仅 SET `cleanupPending=1` 到 DB
-- [ ] **持久化标志位**：`acquiring_bill_currency_runs` 表新增 `cleanup_pending INTEGER DEFAULT 0`；runCheck 成功后 SET=1，cleanup 完成 SET=0
-- [ ] **app.before-quit 钩子**：检测 `cleanupPending=1` runs → `event.preventDefault()` 阻塞退出 → 弹"正在清理上次结果..."模态框（含进度 `onProgress` 回调）→ cleanup 完成后 `app.quit()`
-- [ ] **进入模块兜底**：用户切到收单单据币种校验模块时，main.js 检查 `cleanupPending=1` → 若有，触发后台 cleanup（保持 setImmediate 异步模式）+ UI 仅 toast 提示，不阻断用户操作
-- [ ] **启动期 cleanupOrphanData 不变**（已覆盖应用强杀场景，β 不影响）
+### 8.3 改动点（v0.7 增量）
 
-### 8.4 DB migration
+#### 三层触发设计
 
-```sql
--- 幂等 migration（database/migrations.js）
-ALTER TABLE acquiring_bill_currency_runs ADD COLUMN cleanup_pending INTEGER DEFAULT 0;
--- 旧记录默认 0（已完成清理）
+```
+触发 1（主）：idle 30 分钟 → 后台 setImmediate 串行清 cleanup_pending=1 runs
+触发 2（退出兜底）：app.before-quit → 静默串行清（删模态框，避免没闲够就退）
+触发 3（崩溃恢复兜底）：进入模块 listMonths → setImmediate 后台清（应用强杀后重启）
 ```
 
-### 8.5 风险
+#### 改动清单
 
-- 🟡 `app.before-quit` 钩子需谨慎处理重复进入（用户连续点关闭）
-- 🟡 模态框 UI 需新建（项目目前无"退出前阻塞"先例）
-- 🟡 进入模块兜底触发时机：spec 阶段确认是 IPC handler 入口 还是 renderer 切 tab 事件
-- 🟡 重要变量：`acquiring-bill-currency-session.js` Runtime-state 多项 + 新增 DB schema 列
+- [ ] **cleanupAfterRunBackground 加 includeDiff 参数**：默认 `false`（runCheck/idle/退出兜底/进入模块兜底 4 触发点用，**仅清 flow_imports**）；`true` 时清 3 表（cleanupOrphanData Phase 2 用，先 diff → bill → flow 解 FK）
+- [ ] **bill_imports 必须保留（v0.8 FK 反向同步）**：`diff_rows.bill_import_id REFERENCES bill_imports(id)` 无 CASCADE → 保留 diff 必须连带保留 bill；本次仅清 flow_imports
+- [ ] **cleanupOrphanData Phase 2 调整**：调用 `cleanupAfterRunBackground({ ..., includeDiff: true })` 清孤儿 run 全表 + 仍删 runs 记录（孤儿 run 元数据无意义保留）
+- [ ] **cleanupOrphanData Phase 3 保留**：ghost-diff 清理仍跑（仅清 run_id 真不在 runs 的孤儿）
+- [ ] **main.js idle 计时器**：`setupIdleCleanupTimer()` 维护 lastActiveTs + `setInterval` 检查；阈值常量 `IDLE_CLEANUP_MS = 30 * 60 * 1000`
+- [ ] **renderer user activity 上报**：mousemove/keydown/click 节流（10s）→ `desktopApi.reportUserActivity()` → main 更新 lastActiveTs
+- [ ] **before-quit 钩子简化**：删模态框/进度 IPC 广播；保留串行 cleanup 逻辑（静默）
+- [ ] **进入模块兜底保留**：listMonths IPC 入口 `triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded` 不变
+- [ ] **DB schema 保留**：cleanup_pending 列 + 三 API（三触发点共用）
+
+### 8.4 DB migration（v0.6 已落地，v0.7 不动）
+
+```sql
+-- 幂等 migration（v0.6 已实现于 database/migrations.js）
+ALTER TABLE acquiring_bill_currency_runs ADD COLUMN cleanup_pending INTEGER DEFAULT 0;
+```
+
+### 8.5 关键决策点（v0.7 新加 13 项，全按 PM 推荐 ✅）
+
+| 分组 | 决策数 | 锁定方案 |
+|---|---|---|
+| 差异保留语义（D1-D5）| 5 | D1 重跑覆盖 / D2 保留 ghost-diff 清 / D3 runs 保留 / D4 P1 覆盖 / D5 不加 UI 入口 |
+| idle 触发机制（D6-D13）| 8 | D6 main+renderer AND / D7 renderer 上报 / D8 硬编码 30min / D9 batch 完让出 / D10 before-quit 保留静默 / D11 进入模块保留 / D12 cleanup_pending 列保留 / D13 静默 |
+
+详 spec.md v0.8 §3.2。
+
+### 8.6 风险（v0.8 升级）
+
+- 🔴 **数据保留策略变更（资金红线）**：从"过性清理"改"长期保留"（diff + bill + runs 三表保留）；SQLite 体积持续增长，需 v2.1.9 评估手动清入口 / 滚动保留窗口 / FK schema CASCADE 改造
+- 🔴 **runs 记录生命周期变更**：cleanupOrphanData Phase 2 不删 runs，重新审视 orphan 定义
+- 🟡 **idle 误判风险**：长时间 SQL JOIN 跑 25 分钟主进程没收到 IPC 算 idle —— 需 renderer 上报 user-activity 当独立通道（D6 AND 设计兜底）
+- 🟡 **闲置触发中用户回来**：D9 选 batch 完即让出，依赖 mutex 抢锁；剩余下次 idle 再清
+- 🟡 **重要变量**：`acquiring-bill-currency-session.js` Runtime-state + 新增 `setupIdleCleanupTimer` / `reportUserActivity`
+
+### 8.7 v0.6 → v0.7 增量代码影响
+
+| 文件 | v0.6 状态 | v0.7 动作 |
+|---|---|---|
+| `database/migrations.js` | ✅ 已加 cleanup_pending 列 | 保留 |
+| `run-repository.js` | ✅ 已加 3 API | 保留 |
+| `acquiring-bill-currency-session.js` | runCheck → markCleanupPending；cleanup 函数清 3 表 | **改 cleanup 函数**：加 includeDiff 参数，false 时仅清 flow_imports（bill 受 FK 约束保留）；Phase 2 显式 includeDiff:true 清 3 表 + 仍删 runs |
+| `main.js` | before-quit 钩子 + 进度 IPC 广播 + listMonths 兜底 | **加 idle 计时器**；**简化** before-quit（删模态框广播，保留串行 cleanup）；listMonths 兜底保留 |
+| `preload.js` | 4 个 onCleanupXXX 订阅 | **删** onCleanupQuitProgress/Start/Done；**加** reportUserActivity；保留 onCleanupBackgroundToast |
+| `renderer.js` | 退出进度模态框 + toast | **删** 退出模态框（β 时未实现完整，本次连带清掉）；**加** user-activity 监听上报 |
 
 ---
 

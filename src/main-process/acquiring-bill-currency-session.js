@@ -287,13 +287,26 @@ async function runCheck({ db, monthKey, storageRoot, onProgress }) {
 // v0.12 fix9：异步分批 cleanup（caller setImmediate 排队，不阻塞 UI）
 // 每批 50000 行 DELETE + setImmediate 让出 event loop，避免 UI 长时间 not responding
 // 单独事务：每批 DELETE 自包含 safeBegin/COMMIT，失败仅记日志不抛
-async function cleanupAfterRunBackground({ db, monthKey, runId, onProgress }) {
+//
+// v2.1.8 N1' (v0.7)：新增 `includeDiff` 参数（默认 false）
+//   - false → 只清 flow_imports（runCheck/idle/退出兜底/进入模块兜底 4 触发点用）
+//             ⚠️ bill_imports **也保留**：diff_rows.bill_import_id FK → bill_imports.id（无 CASCADE），
+//                差异保留语义自然延伸到"差异关联的 bill 也保留"（bill 是差异行源数据快照）
+//             flow_imports 与 diff_rows 无 FK 引用，可独立清
+//   - true  → 清 3 表（cleanupOrphanData Phase 2 调用，孤儿 run 数据脏，需整体清掉）
+//             Phase 2 先清 diff（解 FK 引用）→ 再清 bill → 清 flow
+//   差异保留策略：每 monthKey 保留最新 1 run 的 diff，重跑由 P1 clearRunsByMonth 覆盖（spec §3.2.1 N1''-D1）
+//   FK 约束依据：migrations.js:1073-1074 diff_rows.bill_import_id REFERENCES bill_imports(id)
+async function cleanupAfterRunBackground({ db, monthKey, runId, onProgress, includeDiff = false }) {
   const BATCH = 50000;
-  const tables = [
-    { name: 'acquiring_bill_currency_diff_rows', where: 'run_id = ?', param: runId },
-    { name: 'acquiring_bill_currency_flow_imports', where: 'month_key = ?', param: monthKey },
-    { name: 'acquiring_bill_currency_bill_imports', where: 'month_key = ?', param: monthKey }
-  ];
+  const tables = [];
+  if (includeDiff) {
+    // includeDiff=true：清 3 表，顺序 diff → bill → flow（先清子表解 FK）
+    tables.push({ name: 'acquiring_bill_currency_diff_rows', where: 'run_id = ?', param: runId });
+    tables.push({ name: 'acquiring_bill_currency_bill_imports', where: 'month_key = ?', param: monthKey });
+  }
+  // 默认 includeDiff=false：仅清 flow_imports（bill_imports 保留以维持 FK）
+  tables.push({ name: 'acquiring_bill_currency_flow_imports', where: 'month_key = ?', param: monthKey });
 
   const stats = { diffDeleted: 0, flowDeleted: 0, billDeleted: 0 };
   const keyMap = {
@@ -364,12 +377,16 @@ async function cleanupOrphanData({ db, onProgress }) {
   }
 
   // Phase 2：对每个 orphan 复用 cleanupAfterRunBackground 分批清 + DELETE run 记录
+  // v2.1.8 N1' (v0.7)：孤儿 run 数据脏（status≠success / 文件丢失），传 includeDiff: true 整体清掉
+  //   常规触发点（runCheck/idle/退出/进入兜底）默认 includeDiff=false 保留有效 diff；
+  //   仅 Phase 2 这里显式打开，避免脏 diff 沉淀（spec §3.1 / §3.2.1 N1''-D3 仅约束常规 cleanup 后 runs 保留）
   for (const run of orphanRuns) {
     try {
       const result = await cleanupAfterRunBackground({
         db,
         monthKey: run.month_key,
         runId: run.id,
+        includeDiff: true,
         onProgress: (p) => { if (onProgress) onProgress({ phase: 'orphan-run', runId: run.id, ...p }); }
       });
       stats.deletedDiff += result.diffDeleted;

@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.1（2026-05-22，与 PRD-v2.1.8.md / spec.md v0.1 同步） |
+| 文档版本 | v0.2（2026-05-26 — N1 方案重设，Phase 6 加 §八.1 v0.7 增量章节 T31a-f；旧 T28-T32 部分超越，状态见各 task 标注；spec v0.8 / PRD v0.7 同步）；v0.1 起草 |
 | 关联文档 | `PRD-v2.1.8.md` / `spec.md` |
 | 任务总数 | 38 |
 | 任务拆分原则 | 单 task 3-5 文件内（CLAUDE.md 小批次原则）；按文件粒度拆，避免 task 间共享文件 |
@@ -19,7 +19,8 @@
 | Phase 3 - G1 全量铺 | 6 | 5-7 天 | 第 1 层剩余 + 第 2 层全部 |
 | Phase 4 - N2 实现 | 5 | 2-3 天 | dialog + 引擎 + migration |
 | Phase 5 - N3 实现 | 4 | 2-3 天 | dispatcher + writer + IPC 字段 |
-| Phase 6 - N1 实现 | 5 | 2-3 天 | app.before-quit + migration + 兜底 |
+| Phase 6 - N1 实现 | 5 | 2-3 天 | app.before-quit + migration + 兜底（v0.6 β 落地） |
+| Phase 6.1 - N1' v0.7 增量 | 6 | 1-1.5 天 | idle 30min + 差异保留 + before-quit 简化 + smoke 重写 |
 | Phase 7 - A3 实现 | 5 | 5-7 天 | worker + IPC 桥接 + smoke |
 | Phase 8 - A4 决策 | 1 | 0.5 天 | 做 / 不做评估 |
 | Phase 9 - 收尾 | 5 | 2-3 天 | 三件套 + check-vars + PR |
@@ -318,7 +319,7 @@
 
 ## 八、Phase 6 — N1 cleanup 移出对账链路（β）
 
-### T28 — DB schema migration + runs 表新列
+### T28 — DB schema migration + runs 表新列 ✅ v0.6 完成（v0.7 保留）
 
 - **Owner**：Dev
 - **依赖**：T01
@@ -326,7 +327,7 @@
 - **动作**：幂等 migration `ALTER TABLE acquiring_bill_currency_runs ADD COLUMN cleanup_pending INTEGER DEFAULT 0`
 - **验收**：unit case（启动 + 旧库升级 + 字段存在）
 
-### T29 — run-repository 加 cleanup_pending 操作 API
+### T29 — run-repository 加 cleanup_pending 操作 API ✅ v0.6 完成（v0.7 保留）
 
 - **Owner**：Dev
 - **依赖**：T28
@@ -334,7 +335,7 @@
 - **动作**：新增 `markCleanupPending(db, runId)` / `clearCleanupPending(db, runId)` / `listPendingCleanupRuns(db)`
 - **验收**：unit case 覆盖三个 API
 
-### T30 — runCheck 解耦 + main.js 移除 setImmediate
+### T30 — runCheck 解耦 + main.js 移除 setImmediate ✅ v0.6 完成（v0.7 保留）
 
 - **Owner**：Dev
 - **依赖**：T29
@@ -344,7 +345,7 @@
   - main.js:10307 移除 setImmediate(cleanupAfterRunBackground)
 - **验收**：手测 runCheck 后 DB 数据保留 + cleanup_pending=1
 
-### T31 — app.before-quit 钩子 + 进度模态框
+### T31 — app.before-quit 钩子 + 进度模态框 ⚠️ v0.6 完成 → v0.7 部分超越（见 T31c/d）
 
 - **Owner**：Dev
 - **依赖**：T30
@@ -354,8 +355,9 @@
   - preload 加 `onCleanupQuitProgress` 订阅 API
   - renderer 加退出进度模态框
 - **验收**：手测退出 → 弹模态框 → 清完才退出
+- **v0.7 超越**：模态框 IPC 广播改静默；renderer 进度模态框删除（T31c/d 处理）
 
-### T32 — 进入模块兜底 + N1 smoke
+### T32 — 进入模块兜底 + N1 smoke ⚠️ v0.6 完成 → v0.7 smoke 重写（见 T31e）
 
 - **Owner**：Dev + Tester
 - **依赖**：T31
@@ -364,6 +366,75 @@
   - IPC 入口检查 cleanupPending → 后台 cleanup + toast
   - smoke 覆盖：runCheck → 标志位 / 退出触发 / 进入兜底 / 启动孤儿仍工作
 - **验收**：smoke 全绿
+- **v0.7 超越**：smoke 用例断言改为「diff 表数据保留」+ 新增 idle 触发用例（T31e 处理）；进入模块兜底机制保留不变
+
+---
+
+## 八.1、Phase 6 v0.7 增量 — N1' idle 30min 触发 + 差异保留
+
+> **背景**：2026-05-26 用户在 v0.6 β 方案落地后提出修订（详 PRD §八 / spec §三）。本节为增量改造 task，非全推翻。
+
+### T31a — Reverse Sync spec/PRD/tasks（v0.7 文档同步）✅ 2026-05-26
+
+- **Owner**：PM
+- **依赖**：T32（v0.6 已完成）
+- **文件**：`spec.md` §三 / `PRD-v2.1.8.md` §八 / `tasks.md`（本节）
+- **动作**：13 项决策点全锁 + 章节重写 + 旧 T28-T32 状态标注
+- **验收**：3 文档同步 + 决策点表完整
+
+### T31b — session.js cleanupAfterRunBackground 移除 diff 表清理
+
+- **Owner**：Dev
+- **依赖**：T31a
+- **文件**：`src/main-process/acquiring-bill-currency-session.js`
+- **动作**：
+  - `cleanupAfterRunBackground` 新增 `includeDiff=false` 参数；false 时 tables 数组**仅含 flow_imports**（bill_imports 因 FK 约束保留：`diff_rows.bill_import_id REFERENCES bill_imports.id` 无 CASCADE）
+  - `cleanupOrphanData` Phase 2 调用 `cleanupAfterRunBackground({ ..., includeDiff: true })`，清 3 表（diff → bill → flow 顺序解 FK），仍删 runs 记录（孤儿 run 元数据无保留意义）
+  - Phase 3 ghost-diff 清理保留（仅清真孤儿）
+  - **v0.2 反向同步**：发现 FK 约束（migrations.js:1073-1074）→ bill_imports 必须保留；spec v0.9 §3.6 + PRD v0.8 §8.3 同步
+- **验收**：现有 unit case + 新加 case 覆盖"清完 diff 数据仍在"
+
+### T31c — main.js idle 计时器 + before-quit 简化
+
+- **Owner**：Dev
+- **依赖**：T31b
+- **文件**：`src/main.js` + `src/main-process/idle-cleanup-timer.js`（新建可选）
+- **动作**：
+  - 新增 `setupIdleCleanupTimer()`：常量 `IDLE_CLEANUP_MS = 30 * 60 * 1000` + lastActiveTs 维护 + `setInterval` 1-2min 检查 + 满 30min 触发 cleanup（mutex 抢锁）
+  - 新增 IPC handler `app:user-activity`（renderer 上报入口）+ 任意 IPC 入站时也更新 lastActiveTs
+  - `before-quit` 钩子简化：删模态框相关 IPC 广播（webContents.send onCleanupQuit*）；保留串行 cleanup + event.preventDefault + app.quit
+  - listMonths 兜底保留不动
+- **验收**：手测 + 单元（模拟 setInterval tick 触发）
+
+### T31d — preload + renderer user activity 上报
+
+- **Owner**：Dev
+- **依赖**：T31c
+- **文件**：`src/preload.js` + `src/renderer.js`
+- **动作**：
+  - preload 加 `reportUserActivity()` 接口（直调 `ipcRenderer.send('app:user-activity')`，无返回）
+  - preload 删 `onCleanupQuitStart` / `onCleanupQuitProgress` / `onCleanupQuitDone` 订阅 API
+  - renderer 加 mousemove/keydown/click 监听 + 10s 节流 + 调 `desktopApi.reportUserActivity()`
+  - renderer 删退出进度模态框相关代码（M-2 路径下 onCleanupQuitStart/Progress/Done 监听一并清理）
+- **验收**：手测移动鼠标后 main lastActiveTs 更新 + 30min 不动触发 cleanup
+
+### T31e — N1' smoke：idle 触发 + 差异保留断言
+
+- **Owner**：Dev
+- **依赖**：T31d
+- **文件**：`scripts/smoke/acquiring-bill-currency-n1.js` 或 `scripts/test-v2.1.8-n1-cleanup.js`
+- **动作**：
+  - 新增 N1-idle 用例：runCheck 完 → 手动调 cleanup 触发函数 → 断言 flow/bill 表空 + **diff 表数据保留** + runs 记录保留 + cleanup_pending=0
+  - 旧 N1 用例断言改：「DB 表均空」→「flow/bill 空，diff 保留」
+  - 新增 cleanupOrphanData 用例：Phase 2 不删 runs 记录 + Phase 3 仍清真 ghost-diff
+- **验收**：smoke 全绿
+
+### T31f — Commit N1' 全部内容
+
+- **Owner**：Dev
+- **依赖**：T31a-e
+- **动作**：单 commit `[v2.1.8] feat(N1'): cleanup 改 idle 30min 触发 + 差异数据保留`
+- **验收**：commit msg 含决策表 + 验证证据
 
 ---
 

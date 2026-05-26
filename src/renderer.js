@@ -217,6 +217,27 @@ function reportRendererStartupMetrics() {
   }
 }
 
+// v2.1.8 N1' (v0.7)：用户活动 10s 节流上报（spec §3.2.2 N1''-D7）
+//   - main 维护 lastUserActivityTs；idle 30min 后台触发 cleanup
+//   - 节流而非防抖：保证 10s 内必上报一次，避免长按/拖动时 main 误判 idle
+//   - 监听 mousemove / keydown / click / wheel / touchstart（覆盖 PC + 触控板）
+const USER_ACTIVITY_REPORT_INTERVAL_MS = 10 * 1000;
+let lastUserActivityReportTs = 0;
+function setupUserActivityReporter() {
+  if (!window.desktopApi || !window.desktopApi.app || !window.desktopApi.app.reportUserActivity) return;
+  const report = () => {
+    const now = Date.now();
+    if (now - lastUserActivityReportTs < USER_ACTIVITY_REPORT_INTERVAL_MS) return;
+    lastUserActivityReportTs = now;
+    try {
+      window.desktopApi.app.reportUserActivity();
+    } catch (_e) { /* swallow，main idle 误判由 mutex 兜底 */ }
+  };
+  ['mousemove', 'keydown', 'click', 'wheel', 'touchstart'].forEach((evt) => {
+    window.addEventListener(evt, report, { passive: true });
+  });
+}
+
 const elements = {
   appShell: document.getElementById('appShell'),
   importFileBtn: document.getElementById('importFileBtn'),
@@ -5378,6 +5399,8 @@ async function initialize() {
 
   markRendererStartup(RENDERER_STARTUP_MARKS.initComplete);
   reportRendererStartupMetrics();
+  // v2.1.8 N1' (v0.7)：注册用户活动监听 → 10s 节流上报 main，作为 idle 30min 判定依据
+  setupUserActivityReporter();
 }
 
 initialize().catch((error) => {

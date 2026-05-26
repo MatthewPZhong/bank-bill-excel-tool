@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.7（2026-05-26 — N2 实施前发现 GATEWAY_RECON_FIELDS 被 bank-statement-io.js:114 用作 reader 表头校验，**不能在 constants 加 '__CUSTOM__'**；改为 dialog 渲染层单独拼接 option / constants 保持不变）；v0.6 「自取值」改 assign-gw；v0.5 F5 范围收敛；v0.4 移除 TEST.xlsx；v0.3 T08 改 F5-D4；v0.2 27 决策；v0.1 起草 |
+| 文档版本 | v0.9（2026-05-26 — N1' T31b 实施发现 **FK 约束**：diff_rows.bill_import_id REFERENCES bill_imports.id 无 CASCADE；保留 diff 必须连带保留 bill；§3.1 / §3.3 / §3.5 同步）；v0.8 N1 方案重设 idle 30min + 差异保留；v0.7 GATEWAY_RECON_FIELDS 反向同步；v0.6 「自取值」改 assign-gw；v0.5 F5 范围收敛；v0.4 移除 TEST.xlsx；v0.3 T08 改 F5-D4；v0.2 27 决策；v0.1 起草 |
 | 关联 PRD | `PRD-v2.1.8.md` v0.1 |
 | 关联 tasks | `tasks.md`（待建） |
 | 评审范围 | F5（算法重设）/ A3（跨进程）/ N1（cleanup 移出对账链路）/ N2（配置数据结构变更）/ N3（IPC 字段重命名 + 新 Sheet） |
@@ -131,47 +131,113 @@ F5 实现过程中必须落的 unit case：
 
 ---
 
-## 三、N1 — cleanup 移出对账链路（β 方案）
+## 三、N1 — cleanup 改 idle 30min 触发 + 差异数据保留（v0.8 方案重设）
+
+> **v0.8 方案变更说明（2026-05-26）**：
+> 用户在 β 方案落地后（commit 30247da）提出两项语义级修订：
+> 1. **触发改 idle 30min** — 主链路从 `app.before-quit` 改为「应用闲置 30 分钟后台自动清」；before-quit 降级为退出兜底，进入模块降级为崩溃恢复兜底
+> 2. **差异数据不清** — `acquiring_bill_currency_diff_rows` 表不清；只清 flow + bill 两张输入表
+>
+> v0.8 设计 = **三层触发**（idle 主 + before-quit 退出兜底 + 进入模块崩溃恢复兜底）+ **DB cleanup_pending 列保留**（多触发点共用判断依据）+ **runs 记录保留**（diff 是有效数据，runs 删则 diff 变 ghost 被 Phase 3 误清）
 
 ### 3.1 不变量
 
 - runCheck 数据完整性：DB 已 COMMIT 的数据不允许丢失
-- 启动期孤儿清理（`cleanupOrphanData`）行为不变
+- 启动期孤儿清理（`cleanupOrphanData`）保留 Phase 3 ghost-diff 清理（仅清真孤儿）
 - 已有 mutex lock 仍保持 import/run/export/cleanup 互斥
+- **新**：差异表 `acquiring_bill_currency_diff_rows` 为有效输出数据，**runCheck/idle/退出兜底/进入模块兜底** 4 个常规触发点不清 diff
+- **新**：cleanup 完成后 runs 记录保留（避免 diff 变 ghost）；重跑同 monthKey 仍走 P1 `clearRunsByMonth` 覆盖旧 diff
+- **新（v0.9 实施反向同步）**：**bill_imports 也保留**。FK 约束 `diff_rows.bill_import_id REFERENCES bill_imports(id)`（migrations.js:1073-1074，无 `ON DELETE CASCADE`）→ 保留 diff 必须连带保留 bill。flow_imports 无 FK 约束，可独立清。常规触发点 `cleanupAfterRunBackground(includeDiff=false)` **仅清 flow_imports**
+- **新**：`cleanupOrphanData` Phase 2 孤儿 run（status≠success）数据脏 → **清 diff + bill + flow + 删 runs 记录**（保持 v0.6 行为，避免脏数据沉淀；顺序：先 diff 解 FK → bill → flow）
 
 ### 3.2 关键决策点
 
+#### 3.2.1 差异保留语义（N1''-D1 ~ D5，2026-05-26 锁定）
+
 | # | 决策 | 选项 | 锁定方案 |
 |---|---|---|---|
-| N1-D1 ✅ | `cleanupPending` 持久化位置 | (a) runs 表新列 / (b) settings 表 / (c) 内存 | **(a)** `acquiring_bill_currency_runs.cleanup_pending` 列 |
-| N1-D2 ✅ | app.before-quit 模态框 | (a) 自定义模态框 / (b) 系统对话框 | **(a)** 自定义模态框，支持进度条（复用 onProgress） |
-| N1-D3 ✅ | 进入模块兜底触发点 | (a) renderer 切 tab / (b) IPC handler 入口 / (c) UI 挂载钩子 | **(b)** IPC handler 入口 |
-| N1-D4 ✅ | 多 run 累积清理 | (a) 串行 / (b) 并行 | **(a)** 串行清 |
-| N1-D5 ✅ | 退出时 cleanup 失败处理 | (a) 仍退 / (b) 阻止退 / (c) 弹错 + 退 | **(c)** console.error + 弹错误 + 仍退出（启动 cleanupOrphanData 兜底）|
+| N1''-D1 ✅ | 差异数据保留策略 | (a) 永久 / (b) 滚动 N 月 / (c) 每 monthKey 保留最新 1 run，重跑覆盖 / (d) 手动清入口 | **(c)** 与"重新运行 = 重做"语义对齐 |
+| N1''-D2 ✅ | `cleanupOrphanData` Phase 3 ghost-diff 清理 | (a) 保留 / (b) 完全停 | **(a)** 仅清真孤儿（run_id 不在 runs），与差异保留不冲突 |
+| N1''-D3 ✅ | cleanup 完成后 runs 记录处理 | (a) 删 / (b) 保留 | **(b)** runs 是 diff 元数据，删则 diff 变 ghost 被 Phase 3 误清 |
+| N1''-D4 ✅ | 重跑同 monthKey 是否清旧 diff | (a) 不清累积 / (b) 重跑覆盖 / (c) round 维度并存 | **(b)** runCheck P1 `clearRunsByMonth` 保留覆盖语义 |
+| N1''-D5 ✅ | UI 加"手动清空差异"入口 | (a) 加 / (b) 不加 | **(b)** v2.1.8 范围控制；v2.1.9 评估 |
+
+#### 3.2.2 idle 触发机制（N1''-D6 ~ D13，2026-05-26 锁定）
+
+| # | 决策 | 选项 | 锁定方案 |
+|---|---|---|---|
+| N1''-D6 ✅ | "闲置"定义 | (a) renderer 无操作 / (b) main 无 IPC / (c) AND | **(c)** 避免后台 SQL 中误判 |
+| N1''-D7 ✅ | 计时器位置 | (a) main 内置 / (b) renderer 上报 + main 维护 | **(b)** renderer 节流上报 user-activity，main 维护 lastActiveTs + setInterval 检查 |
+| N1''-D8 ✅ | 闲置阈值 | (a) 硬编码 30min / (b) settings 可配 / (c) ENV | **(a)** 常量 `IDLE_CLEANUP_MS = 30 * 60 * 1000`；v2.1.9 评估 (b) |
+| N1''-D9 ✅ | 触发中用户回来 | (a) 让 cleanup 跑完 UI 显忙 / (b) 中断 / (c) 当前 batch 完，剩余推迟 | **(c)** 当前 batch 跑完即让出（mutex 保证 import/run 抢锁），剩余下次 idle 再清 |
+| N1''-D10 ✅ | before-quit 钩子去留 | (a) 删 / (b) 保留为退出兜底 / (c) 保留但静默 | **(c)** 保留（防没闲够就退）+ 简化为静默（删模态框/进度 IPC）|
+| N1''-D11 ✅ | 进入模块兜底去留 | (a) 删 / (b) 保留 | **(b)** 保留（崩溃恢复兜底，DB cleanup_pending 列 + listMonths 入口）|
+| N1''-D12 ✅ | DB `cleanup_pending` 列去留 | (a) 删 / (b) 保留 | **(b)** 保留（3 触发点共用判断依据） |
+| N1''-D13 ✅ | idle 触发的 toast | (a) 静默 / (b) toast 提示 / (c) 仅失败弹错 | **(a)** 用户已闲置 30min 大概率不在看屏；失败留下次进入模块兜底补救 + console.error |
 
 ### 3.3 改动影响面
 
 | 文件 | 改动 |
 |---|---|
-| `src/backend/database/migrations.js` | 新增 migration：`ALTER TABLE acquiring_bill_currency_runs ADD COLUMN cleanup_pending INTEGER DEFAULT 0` |
-| `src/backend/acquiring-bill-currency-db/run-repository.js` | 新增 `markCleanupPending(db, runId)` / `clearCleanupPending(db, runId)` / `listPendingCleanupRuns(db)` |
-| `src/main-process/acquiring-bill-currency-session.js` | runCheck return 前 `markCleanupPending`；移除 main.js 端 setImmediate 触发 |
-| `src/main.js:10307` | 移除 setImmediate(cleanupAfterRunBackground) |
-| `src/main.js` app.before-quit 钩子 | 新增 `app.on('before-quit', async (event) => { ... })` |
-| `src/main.js` acquiringBillCurrency IPC 入口 | 检查 `cleanupPending` runs → 触发后台 cleanup + toast |
-| `src/renderer.js` | 监听 cleanup toast 事件 + 退出进度模态框（preload 新增订阅 API） |
-| `src/preload.js` | 新增 `onCleanupQuitProgress` + `onCleanupBackgroundToast` 订阅 API |
+| `src/backend/database/migrations.js` | **保留** v0.7 migration（cleanup_pending 列）|
+| `src/backend/acquiring-bill-currency-db/run-repository.js` | **保留** v0.7 三个 API（markCleanupPending / clearCleanupPending / listPendingCleanupRuns）|
+| `src/main-process/acquiring-bill-currency-session.js` | **改 cleanupAfterRunBackground**：新增 `includeDiff=false` 参数；默认 false 时**只清 flow_imports**（bill 受 FK 约束必须保留）；true 时清 3 表（diff → bill → flow 顺序）；**Phase 2 调用显式传 `includeDiff: true`** 清脏数据 + 仍删 runs |
+| `src/main.js` runCheck handler | **保留** v0.7 解耦改造（不再 setImmediate 触发）|
+| `src/main.js` app.before-quit 钩子 | **简化**：保留串行 cleanup 逻辑 + 删模态框相关 IPC 广播；改为静默执行（D10=c）|
+| `src/main.js` 新增 idle 计时器 | `setupIdleCleanupTimer()`：维护 lastActiveTs + `setInterval` 检查 + 满 30min 触发 cleanup |
+| `src/main.js` acquiringBillCurrency IPC 入口 | **保留** v0.7 listMonths 兜底触发（D11=b）|
+| `src/preload.js` | **新增** `reportUserActivity()` API；**删** `onCleanupQuitProgress` / `onCleanupQuitStart` / `onCleanupQuitDone` 订阅 API（模态框无用了）|
+| `src/renderer.js` | **新增** mousemove/keydown/click 节流监听（10s）+ `desktopApi.reportUserActivity()`；**删** 退出进度模态框 UI 代码 |
 
 ### 3.4 回归保护
 
 | 用例 | 期望 |
 |---|---|
-| runCheck 成功后 DB 数据保留 | flow/bill/diff 表均有数据 |
-| cleanup_pending=1 标志位 | DB 查询确认 |
-| 退出时弹模态框 | 手测 |
-| 退出时 cleanup 完成 | 退出后启动查询，表为空 |
-| 进入模块兜底触发 | toast 出现 + 后台清完 |
-| 启动期孤儿清理仍工作 | 强杀应用后重启验证 |
+| runCheck 成功后 DB 数据 | flow/bill 表数据待清；**diff 表数据保留**；cleanup_pending=1 |
+| idle 30min 触发 cleanup | 模拟无活动 30min → cleanupAfterRunBackground 后台跑 → flow/bill 清空 + **diff 保留** + cleanup_pending=0 |
+| idle 触发中用户回来 | 当前 batch 跑完即让出 mutex；剩余下次 idle 再清 |
+| before-quit 退出兜底 | 用户闲置不到 30min 就退出 → cleanup 仍跑（静默串行）|
+| 进入模块崩溃恢复兜底 | 应用强杀后重启 → listMonths 入口检测 cleanup_pending=1 → 后台 setImmediate 清 |
+| 重跑同月份 | runCheck P1 `clearRunsByMonth` 覆盖旧 diff（保留单 monthKey × 1 run × 1 diff 语义）|
+| 启动期孤儿清理仍工作 | cleanupOrphanData Phase 2 不删 runs 记录；Phase 3 仍清真孤儿 ghost-diff |
+
+### 3.5 ⚠️ 数据保留策略变更（资金红线提醒）
+
+| 项 | β 方案（v0.7）| 新方案（v0.9）|
+|---|---|---|
+| diff_rows 表 | 每 run 后清 | **永久保留**（直到重跑同 monthKey 覆盖）|
+| flow_imports 表 | idle / 退出 / 进入兜底清 | 同前 |
+| bill_imports 表 | idle / 退出 / 进入兜底清 | **保留**（diff_rows.bill_import_id FK 约束，无 CASCADE）|
+| runs 表 | cleanupOrphanData 删 | **cleanup 后保留**（diff 元数据）|
+| SQLite 体积 | 过性，runCheck 完很快回落 | **持续增长**（flow 清 + bill/diff/runs 保留），需 v2.1.9 评估手动清入口 / 滚动保留窗口 |
+| UI"历史月份" | 每月 1 项 | 同前（runCheck 覆盖语义不变）|
+
+### 3.6 v0.9 FK 约束反向同步（2026-05-26 T31b 实施发现）
+
+实施 `session.js` 改造时跑 smoke caseP 报 `FOREIGN KEY constraint failed on acquiring_bill_currency_bill_imports`。
+
+**根因**：`migrations.js:1073-1074`
+
+```sql
+CREATE TABLE acquiring_bill_currency_diff_rows (
+  ...
+  FOREIGN KEY (run_id) REFERENCES acquiring_bill_currency_runs(id),
+  FOREIGN KEY (bill_import_id) REFERENCES acquiring_bill_currency_bill_imports(id)
+);
+```
+
+**两个 FK 都无 `ON DELETE CASCADE`** → 保留 diff 必须连带保留：
+1. `runs`（已在 D3 决策保留）
+2. `bill_imports`（**v0.9 新发现，本次同步**）
+
+**flow_imports** 与 diff_rows 无 FK 关系 → 仍可独立清。
+
+**评估替代方案**：
+- Schema 改 `ON DELETE SET NULL` 或 `CASCADE`：破坏性 schema 变更，要 migration 重建表
+- diff_rows 改 NULL bill_import_id 后再删 bill：丢失关联，对账上下文无法回溯
+- **采纳**：bill_imports 保留（最小变更，语义自然）；v2.1.9 可评估 schema 优化
+
+**spec §3.2.1 N1''-D1 ~ D5 语义不变**，仅 §3.1 + §3.3 + §3.5 加 bill_imports 同步条目。
 
 ---
 

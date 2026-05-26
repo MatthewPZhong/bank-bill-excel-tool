@@ -18,6 +18,15 @@ const { applyWatermark } = require('./main-process/workbook-watermark');
 const acquiringBillCurrencySession = require('./main-process/acquiring-bill-currency-session');
 // v2.1.8 N1：before-quit 钩子需 module-level runRepo（IPC handler 内 require 来不及）
 const runRepo = require('./backend/acquiring-bill-currency-db/run-repository');
+
+// v2.1.8 N1' (v0.7)：idle 30min 自动 cleanup 计时器（spec §3.2.2 N1''-D6 ~ D13）
+//   - lastActivityTs：renderer 上报的用户最后活动时间（IPC `app:user-activity`），main 也用 mutex 间接判定（D6 AND 设计）
+//   - IDLE_CLEANUP_MS：闲置阈值，常量硬编码（D8 锁定 30min）
+//   - IDLE_CHECK_INTERVAL_MS：定时器轮询粒度（2 分钟，远小于 30min 阈值，足够及时）
+const IDLE_CLEANUP_MS = 30 * 60 * 1000;
+const IDLE_CHECK_INTERVAL_MS = 2 * 60 * 1000;
+let lastUserActivityTs = Date.now();
+let idleCleanupTimer = null;
 const acquiringBillCurrencyWriter = require('./main-process/acquiring-bill-currency-writer');
 // v2.1.6 Module A T3：启动 log 头注入作者 + build SHA
 const pkg = require('../package.json');
@@ -3531,6 +3540,14 @@ function registerAppHandlers() {
     if (startupMetricsReported) {
       writeStartupMetricsSnapshot(buildStartupMetricsSnapshot());
     }
+  });
+
+  // v2.1.8 N1' (v0.7)：renderer 上报用户活动（mousemove/keydown/click 节流后）
+  //   - 仅更新 lastUserActivityTs（不做日志/统计）
+  //   - 高频事件 → ipcMain.on 选用单向通道（无 Promise / 无 reply），renderer 用 ipcRenderer.send
+  //   - 节流由 renderer 端做（10s 一次），main 不再做防抖
+  ipcMain.on('app:user-activity', () => {
+    lastUserActivityTs = Date.now();
   });
 }
 
@@ -10555,6 +10572,15 @@ app.whenReady()
         releaseAcquiringBillCurrencyOpLock();
       }
     });
+
+    // v2.1.8 N1' (v0.7)：启动 idle 30min 自动 cleanup 计时器（spec §3.2.2）
+    //   database init 完后启动；setInterval 2 分钟 tick，达 30min 闲置 → 触发 cleanup
+    try {
+      setupIdleCleanupTimer();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[acquiring-bill-currency] setupIdleCleanupTimer failed:', err && err.message);
+    }
   })
   .catch((error) => {
     handleStartupFailure(error);
@@ -10590,6 +10616,7 @@ function triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded() {
         try {
           await acquiringBillCurrencySession.cleanupAfterRunBackground({
             db: database.db, monthKey: run.month_key, runId: run.id
+            // v2.1.8 N1' (v0.7)：includeDiff 默认 false → 只清 flow + bill，保留 diff
           });
           runRepo.clearCleanupPending(database.db, { runId: run.id });
         } catch (cleanErr) {
@@ -10607,16 +10634,41 @@ function triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded() {
   });
 }
 
+// v2.1.8 N1' (v0.7)：idle 30min 自动 cleanup 计时器（spec §3.2.2）
+//   - 触发条件三个 AND：
+//       (1) renderer 上报的 lastUserActivityTs 距今 ≥ 30min（D6/D8）
+//       (2) mutex 可获取（间接表达 main 进程未在跑 import/run/export，D6 AND 设计）
+//       (3) listPendingCleanupRuns 非空（有待清 run）
+//   - 触发后复用 triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded 走同一条路径
+//     （已有 cleanupBackgroundInProgress 防重入 + tryAcquireOpLock 抢锁 + toast 通知）
+//   - 失败仅 console.error（D13 静默策略）；下次 idle 再试 + 进入模块兜底 + 启动 cleanupOrphanData 三重兜底
+//   - 启动时机：app.whenReady 后调用 setupIdleCleanupTimer（database init 完之后）
+function setupIdleCleanupTimer() {
+  if (idleCleanupTimer) return; // 重入保护
+  idleCleanupTimer = setInterval(() => {
+    try {
+      const elapsed = Date.now() - lastUserActivityTs;
+      if (elapsed < IDLE_CLEANUP_MS) return;
+      // idle 达标 → 复用进入模块兜底路径（含 mutex 抢锁 + cleanup_pending 判定 + 防重入）
+      triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[acquiring-bill-currency] idle cleanup tick 失败:', err && err.message);
+    }
+  }, IDLE_CHECK_INTERVAL_MS);
+  if (idleCleanupTimer.unref) idleCleanupTimer.unref(); // 不阻塞退出
+}
+
 // v2.0.0-beta.4：退出前 flush usage-stats（before-quit 在窗口全关后触发）
-// v2.1.8 N1：β 方案 — 退出前阻塞 + 串行清 acquiring_bill_currency_runs 中所有 cleanup_pending=1 的 runs
-//   spec §三 N1：app.before-quit 主清 + 进入模块时为兜底
+// v2.1.8 N1' (v0.7)：β 方案降级为退出兜底（D10=c）— 简化为静默串行清，删模态框 IPC 广播
+//   spec §三 N1'：idle 30min 主触发 + before-quit 退出兜底（防没闲够就退）+ listMonths 崩溃恢复兜底
 //   设计：
 //     1. 既有 usage-stats flush 不动（同步执行，毫秒级）
-//     2. 检查 listPendingCleanupRuns 是否有待清 runs
-//     3. 有 → event.preventDefault() 阻塞 → 异步串行清 → 完成后 app.quit()
+//     2. 检查 listPendingCleanupRuns 是否有待清 runs（cleanup_pending=1）
+//     3. 有 → event.preventDefault() 阻塞 → 异步静默串行清 → 完成后 app.quit()
 //     4. 无 → 直接退出（不阻塞）
-//     5. 退出失败 → console.error + 弹错误（spec N1-D5）+ 仍 quit（启动期 cleanupOrphanData 兜底）
-//     6. mainWindow.webContents.send 通知 renderer 显示进度模态框（renderer 端订阅 'acquiringBillCurrency:cleanup-quit:*'）
+//     5. 退出失败 → console.error + 仍 quit（spec N1''-D13 静默 + 进入模块兜底 + 启动 cleanupOrphanData 三重保险）
+//     6. cleanupAfterRunBackground 默认 includeDiff=false → 只清 flow + bill，保留 diff
 let cleanupQuitInProgress = false; // 防重入
 
 app.on('before-quit', (event) => {
@@ -10635,7 +10687,7 @@ app.on('before-quit', (event) => {
     console.warn('[usage-stats] before-quit flush failed:', err && err.message);
   }
 
-  // v2.1.8 N1：cleanup 退出阻塞
+  // v2.1.8 N1' (v0.7)：cleanup 退出兜底（静默）
   if (cleanupQuitInProgress) return; // 重入保护（cleanup 完成 app.quit 时会再次触发 before-quit）
   if (!database || !database.db) return;
   let pendingRuns;
@@ -10651,46 +10703,24 @@ app.on('before-quit', (event) => {
 
   event.preventDefault();
   cleanupQuitInProgress = true;
-  const totalRuns = pendingRuns.length;
 
-  // 通知 renderer 显示进度模态框
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('acquiringBillCurrency:cleanup-quit:start', { totalRuns });
-  }
-
-  // 异步串行清（N1-D4：避免事务冲突）
+  // 异步串行清（N1''-D9：当前 batch 内部 setImmediate 让出；N1''-D13：静默，无 IPC 广播）
   (async () => {
-    let cleanedCount = 0;
-    let lastError = null;
     for (const run of pendingRuns) {
       try {
         await acquiringBillCurrencySession.cleanupAfterRunBackground({
           db: database.db,
           monthKey: run.month_key,
-          runId: run.id,
-          onProgress: (ev) => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('acquiringBillCurrency:cleanup-quit:progress', {
-                runId: run.id, monthKey: run.month_key, cleanedCount, totalRuns, ...ev
-              });
-            }
-          }
+          runId: run.id
+          // includeDiff 默认 false → 保留 diff（spec §3.2.1 N1''-D1/D3）
         });
         runRepo.clearCleanupPending(database.db, { runId: run.id });
       } catch (cleanErr) {
-        lastError = cleanErr;
         // eslint-disable-next-line no-console
         console.error(`[acquiring-bill-currency] cleanup-quit run ${run.id} (${run.month_key}) 失败:`, cleanErr && cleanErr.message);
       }
-      cleanedCount++;
     }
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('acquiringBillCurrency:cleanup-quit:done', {
-        cleanedCount, totalRuns,
-        error: lastError ? (lastError.message || String(lastError)) : null
-      });
-    }
-    // N1-D5：失败也 quit（启动期 cleanupOrphanData 兜底）
+    // N1''-D13：失败也 quit（启动期 cleanupOrphanData 兜底）
     app.quit();
   })();
 });

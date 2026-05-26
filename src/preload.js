@@ -82,7 +82,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
   app: {
     getInfo: () => ipcRenderer.invoke('app:get-info'),
     saveUserGuide: () => ipcRenderer.invoke('app:save-user-guide'),
-    reportStartupMetrics: (payload) => ipcRenderer.send('app:report-startup-metrics', payload)
+    reportStartupMetrics: (payload) => ipcRenderer.send('app:report-startup-metrics', payload),
+    // v2.1.8 N1' (v0.7)：renderer 节流后上报用户活动（mousemove/keydown/click），main 维护 lastUserActivityTs
+    //   单向通道 ipcRenderer.send，不等回包；node-side 仅更新时间戳（无业务副作用）
+    reportUserActivity: () => ipcRenderer.send('app:user-activity')
   },
   errors: {
     exportLast: () => ipcRenderer.invoke('error:export-last')
@@ -282,23 +285,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
       ipcRenderer.on('acquiringBillCurrency:run:progress', wrapped);
       return () => ipcRenderer.removeListener('acquiringBillCurrency:run:progress', wrapped);
     },
-    // v2.1.8 N1 β：退出时 cleanup 进度订阅
-    onCleanupQuitStart: (listener) => {
-      const wrapped = (_event, ev) => listener(ev);
-      ipcRenderer.on('acquiringBillCurrency:cleanup-quit:start', wrapped);
-      return () => ipcRenderer.removeListener('acquiringBillCurrency:cleanup-quit:start', wrapped);
-    },
-    onCleanupQuitProgress: (listener) => {
-      const wrapped = (_event, ev) => listener(ev);
-      ipcRenderer.on('acquiringBillCurrency:cleanup-quit:progress', wrapped);
-      return () => ipcRenderer.removeListener('acquiringBillCurrency:cleanup-quit:progress', wrapped);
-    },
-    onCleanupQuitDone: (listener) => {
-      const wrapped = (_event, ev) => listener(ev);
-      ipcRenderer.on('acquiringBillCurrency:cleanup-quit:done', wrapped);
-      return () => ipcRenderer.removeListener('acquiringBillCurrency:cleanup-quit:done', wrapped);
-    },
-    // v2.1.8 N1 β：进入模块兜底 cleanup 后台进行中 toast
+    // v2.1.8 N1' (v0.7)：β 方案的 onCleanupQuitStart/Progress/Done 三 API 已移除
+    //   原因：退出兜底改静默（spec §3.2.2 N1''-D10/D13），main 不再 webContents.send 进度
+    //   若历史 renderer 仍订阅 → ipcRenderer.on 注册的 listener 不会触发任何回调（安全降级）
+    // v2.1.8 N1 β：进入模块兜底 cleanup 后台进行中 toast（保留）
     onCleanupBackgroundToast: (listener) => {
       const wrapped = (_event, ev) => listener(ev);
       ipcRenderer.on('acquiringBillCurrency:cleanup-background:toast', wrapped);
