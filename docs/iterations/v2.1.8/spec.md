@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.3（2026-05-22 — T08 Reverse Sync 修订 F5-D4：reader 入口 → 引擎入口转字符串，因 sheetToObjects 是共用函数 raw:false 会影响 8 sheet × N 字段太广）；v0.2 = 用户拍板 27 决策点；v0.1 = 初版起草 |
+| 文档版本 | v0.5（2026-05-26 — F5 范围收敛：T12 实测发现根因 #5（subset-sum 剪枝在大 pool 下误剪），需 ILP/网络流范式重写，延期 v2.1.9；F5 v2.1.8 acceptance 降级为"修复 4/5 根因 + 28-43 行"；用户 2026-05-26 拍板暂停 F5）；v0.4 移除 TEST.xlsx；v0.3 T08 改 F5-D4；v0.2 27 决策；v0.1 起草 |
 | 关联 PRD | `PRD-v2.1.8.md` v0.1 |
 | 关联 tasks | `tasks.md`（待建） |
 | 评审范围 | F5（算法重设）/ A3（跨进程）/ N1（cleanup 移出对账链路）/ N2（配置数据结构变更）/ N3（IPC 字段重命名 + 新 Sheet） |
@@ -33,32 +33,47 @@
 
 | spec 代号 | 实际文件名 | 大小 | sheet 结构 |
 |---|---|---|---|
-| **TEST.xlsx** | `资金对账导出不平_ADM转JPM 多笔订单对一笔资金-TEST.xlsx` | 42KB | 对账结果(76) + 网关账单(67) + 渠道账单(73) + **订单修复(0 行)** |
 | **TEST2.xlsx** | `资金对账导出不平_ADM转JPM 多笔订单对一笔资金-TEST2.xlsx` | 46KB | 对账结果(76) + 网关账单(67) + 渠道账单(73) + **订单修复(57 行)** |
+| ~~TEST.xlsx~~ | (历史快照，不作 acceptance) | 42KB | 与 TEST2 前 3 sheet 相同 + 订单修复(0 行) |
 
-**关键性质**：两个文件**前 3 sheet 输入数据完全相同**，仅第 4 sheet「订单修复」不同。TEST = v2.1.6 现状证据（0 行），TEST2 = 用户期望基线（57 行）。
+**关键性质**：两个文件**前 3 sheet 输入数据完全相同**，仅第 4 sheet「订单修复」不同。
+**Reverse Sync v0.4（2026-05-22 用户拍板）**：TEST.xlsx 不作 acceptance ——
+- 与 TEST2 前 3 sheet 完全相同 → 算法跑出来必然相同结果 → 无法用"0 行"做回归护栏
+- TEST.xlsx 仅作"v2.1.6 算法 bug 历史快照"参考，不进 smoke / 不做断言
 
-### 1.4 F5 acceptance criteria（用户 2026-05-22 拍板）
+### 1.4 F5 acceptance criteria（用户 2026-05-22 拍板，v0.4 修订）
 
 ```
 输入：TEST2.xlsx 前 3 sheet（对账结果 + 网关账单 + 渠道账单）
-场景：ADM（C4 manyToOne gateway 子模式）
+真实 scenario 配置：ADM（DB 导出，2026-05-22 T12 实测确认）：
+  matchRules: { oneToOne: false, oneToMany: false, manyToOne: true }
+  billTypes: MerchantId='6300156616' / merchantId='6300156616'
+  reconGroups: Amount/receiveAmount locked
+  output: { mode: 'opp', commonId: { source: 'main', suffix: '' } }
+  billDateRange: { enabled: true, days: 5 }
+
 F5 跑完后输出「订单修复」sheet：
   - 行数 = 57（= TEST2.xlsx 第 4 sheet A1:N58 数据行）
-  - 渠道命中数 = 10
+  - 渠道命中数（unique Reference） = 10
   - 与 TEST2.xlsx 第 4 sheet 逐行等价（按 ReconID 维度）
+
+T12 实测分布（spec F5-D1 档位影响）：
+  默认（safety-floor=8）: 28 行 / 9 Ref（= v2.1.7 单点 fix baseline）
+  maxSize=16（甜点）:      43 行 / 8 Ref（最佳，距 57 行差 14 行 / 2 Ref）
+  maxSize=20+:            21 行 / 6 Ref（非线性退步，PRD §10.3 根因 #4 类似现象）
 ```
 
-### 1.5 回归保护矩阵
+### 1.5 回归保护矩阵（v0.4 修订）
 
-| 用例 | 输入 | v2.1.7 期望 | v2.1.8 期望 |
-|---|---|---|---|
-| TEST.xlsx（0 命中样本，订单修复 0 行） | v2.1.6 baseline | 0 行 | 0 行（不应误升） |
-| TEST2.xlsx 期望基线 | 用户提供 57 行 | 28 行（不达标） | ≥ 57 行 / 10 渠道 |
-| TEST2.xlsx T54SWIC494447 子集 | 16 行 = 9,751,101 | 漏（maxSize=8） | 命中 |
-| TEST2.xlsx T54SWIC506630 子集 | 11 行 | 漏（maxSize=8） | 命中 |
-| TEST2.xlsx T54SWIC470181 子集 | 4M 子池 | 漏（被前面渠道抢） | 命中 |
-| 19 个 smoke suite | 现有 | 全绿 | 全绿（0 regression） |
+| 用例 | 输入 | v2.1.7 baseline | v2.1.8 期望 | T12 实测 |
+|---|---|---|---|---|
+| TEST2.xlsx 期望基线 | 真实 ADM scenario | 28 行 / 9 Ref | ≥ 57 行 / 10 Ref | 28-43 行（按 maxSize 档位） |
+| TEST2.xlsx T54SWIC494447 子集 | 16 行 = 9,751,101 | 漏（maxSize=8） | 命中 | 部分场景命中（待 spec F5-D1 二次评估） |
+| TEST2.xlsx T54SWIC506630 子集 | 11 行 | 漏（maxSize=8） | 命中 | 部分场景命中 |
+| TEST2.xlsx T54SWIC470181 子集 | 4M 子池 | 漏（被前面渠道抢） | 命中 | 待验证 |
+| 19+ 个 smoke suite | 现有 | 全绿 | 全绿（0 regression） | ✅ 全绿（T08-T11 实测） |
+
+~~TEST.xlsx（0 命中样本）~~ — 已从 v0.4 移除（与 TEST2 输入相同无法独立验证）
 
 ### 1.4 G1 协同 unit case 列表
 
@@ -361,7 +376,9 @@ Phase 0 T02 启动后需对照 `rules/important-variables.md` 评估升格。
 **用户决策口径**：「全按推荐」（2026-05-22）
 
 **Reverse Sync 修订记录**：
-- F5-D4 reader 入口 → 引擎入口（2026-05-22 T08 实施前调研发现 sheetToObjects 共用函数影响 8 sheet × N 字段，资金红线扩面）— 用户 2026-05-22 拍板方案 C
+- v0.3: F5-D4 reader 入口 → 引擎入口（2026-05-22 T08 实施前调研发现 sheetToObjects 共用函数影响 8 sheet × N 字段，资金红线扩面）— 用户 2026-05-22 拍板方案 C
+- v0.4: 移除 TEST.xlsx acceptance（2026-05-22 T12 实测发现 TEST/TEST2 前 3 sheet 相同，算法跑出来必然相同，无法独立验证）— 用户 2026-05-22 拍板「不要看 TEST.xlsx，是错的」
+- v0.5: F5 范围收敛 v2.1.8 / 根因 #5 延期 v2.1.9（2026-05-26 T12 深挖发现 subset-sum 剪枝在大 pool 下误剪正确解 — 孤立测试证据：仅 16 行 candidates + maxSize=30 ✅ 0ms 找到；38 行 pool + maxSize=30 ❌ 找不到，需 ILP/网络流范式重写超出 v2.1.8 范围）— 用户 2026-05-26 拍板「先别做 F5 了」
 
 ---
 

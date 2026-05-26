@@ -140,16 +140,22 @@
 - **动作**：按 spec F5-D3 在候选池构造时加 currency 等值过滤
 - **验收**：unit case 验证候选池缩小
 
-### T12 — F5 smoke + unit case 沉淀
+### T12 — F5 smoke + unit case 沉淀（v0.4 范围收敛 / 部分完成 2026-05-26）
 
 - **Owner**：Dev + Tester
 - **依赖**：T11
-- **文件**：`scripts/test-v2.1.8-f5-baseline.js`（smoke）+ `tests/unit/main-process/scenario-engines/c4-recon-id-fix.test.js`（unit）
-- **动作**：
-  - smoke 跑 TEST2.xlsx → 期望 ≥ 57 行 / 10 渠道
-  - smoke 跑 TEST.xlsx → 期望 0 行（不应误升）
-  - smoke 跑 19 个 v2.1.7 suite → 0 regression
-  - unit case：spec §1.4 列表全部覆盖
+- **文件**：`scripts/test-v2.1.8-f5-baseline.js`（smoke）+ `tests/unit/main-process/scenario-engines/c4-recon-id-fix.test.js`（unit）+ `src/main-process/scenario-engines/c4-recon-id-fix.js`（_maxSizeOverride 调试入口）
+- **完成内容**：
+  - ✅ scripts/test-v2.1.8-f5-baseline.js — fixture smoke 跑 F5-TEST2.xlsx 多档位（default/16/20）
+  - ✅ 全套 v2.1.7 smoke suite 0 regression（T11 实测 ✅ 全绿 21+ suites）
+  - ✅ unit case：normalizers + c4 normalizeBillDateValue + findBestAmountSubset 动态档位 + sortRightRowsForManyToOne + currencyMatches（111 case 全绿）
+- **部分完成 / 延期 v2.1.9**：
+  - ❌ TEST2.xlsx 57 行 acceptance 未达：实测 default 28 行 / maxSize=16 甜点 43 行
+  - 根因 #5 发现（T12 孤立测试）：subset-sum 剪枝在 38 行 pool + maxSize=30 时漏掉 sum=$9.75M 的 16 行子集解；仅 16 行 candidates 时 ✅ 找到
+  - 需要 ILP/网络流范式重写算法，DFS + 剪枝架构无法保证全局最优 → 延期 v2.1.9
+- **保留产物**：
+  - `_maxSizeOverride` 调试入口（cfg 内部字段，正常 IPC handler 不传，spec F5-D1 默认档位走；spec 评估 / unit case / fixture smoke 用）
+  - F5-TEST2.xlsx fixture（已归档 scripts/fixtures/v2.1.8/）保留供 v2.1.9 继续使用
 - **验收**：smoke 全绿 + unit ≥ 15 case
 
 ---

@@ -758,7 +758,11 @@ function tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode,
       .map((r) => ({ row: r, cents: toCents(r[rightAmountField]) }))
       .filter((c) => c.cents !== null);
     // PR #36 round 2 P2 修复：DFS 全遍历维护全局 best（取代旧 enumerate→tieBreak 二段式）
-    const chosen = findBestAmountSubset(candidatesWithCents, targetCents, leftRow.BillDate);
+    // v2.1.8 F5 T12 调试入口：cfg._maxSizeOverride 显式传 maxSize 覆盖 spec F5-D1 默认动态档位
+    //   仅用于 T12 fixture smoke 调试 / spec 二次 Reverse Sync 评估
+    const fbOptions = (cfg && Number.isFinite(cfg._maxSizeOverride))
+      ? { maxSize: cfg._maxSizeOverride, silent: true } : undefined;
+    const chosen = findBestAmountSubset(candidatesWithCents, targetCents, leftRow.BillDate, fbOptions);
     if (!chosen || chosen.length < 2) {
       candidates.forEach((r) => lastStepByRight.set(r._rowIdx, stepLabel));
       continue;
@@ -873,7 +877,10 @@ function tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode,
       .map((l) => ({ row: l, cents: toCents(l[leftAmountField]) }))
       .filter((c) => c.cents !== null);
     // PR #36 round 2 P2 修复：DFS 全遍历维护全局 best（取代旧 enumerate→tieBreak 二段式）
-    const chosen = findBestAmountSubset(candidatesWithCents, targetCents, rightRow.BillDate);
+    // v2.1.8 F5 T12 调试入口：cfg._maxSizeOverride 显式传 maxSize 覆盖 spec F5-D1 默认动态档位
+    const fbOptions = (cfg && Number.isFinite(cfg._maxSizeOverride))
+      ? { maxSize: cfg._maxSizeOverride, silent: true } : undefined;
+    const chosen = findBestAmountSubset(candidatesWithCents, targetCents, rightRow.BillDate, fbOptions);
     if (!chosen || chosen.length < 2) {
       candidates.forEach((l) => lastStepByLeft.set(l._rowIdx, stepLabel));
       continue;

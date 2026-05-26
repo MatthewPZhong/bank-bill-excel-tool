@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.2（2026-05-22 — T08 Reverse Sync 修订 F5 改动点：BillDate 字符串化从 reader 入口 → c4 引擎入口；spec.md F5-D4 同步改为 (b)）；v0.1 = 初始版起草 |
+| 文档版本 | v0.4（2026-05-26 — F5 v2.1.8 范围收敛：T08-T11 修 4/5 根因 + 28-43 行交付；根因 #5（subset-sum 剪枝大 pool 下误剪）需 ILP 范式重写延期 v2.1.9；用户 2026-05-26 拍板暂停 F5）；v0.3 移除 TEST.xlsx；v0.2 T08 改 F5-D4；v0.1 初版 |
 | 目标版本 | `v2.1.8`（patch / minor 待定，G1 引入新目录可能升 minor） |
 | 起始版本 | `v2.1.7`（v2.1.7 完成时 main 状态；本 PRD 制定时 v2.1.7 尚未合并 main） |
 | 起草日期 | 2026-05-22 |
@@ -89,14 +89,15 @@ v2.1.8 包含 **7 项独立改动**（F5/A3/A4/G1/N1/N2/N3），覆盖四个模�
 
 v2.1.7 PRD §十 延期项。用户提供 `/Users/pzhong/Desktop/小助手-Debug/2.1.7/TEST2.xlsx`「订单修复」sheet 含 57 行期望基线 / 10 渠道命中（最大子集 16 行 T54SWIC494447 = 9,751,101）。v2.1.7 仅做"BillDate 字符串化"单点 fix 实测 28 行 / 9 渠道命中，差距 29 行 / 1 渠道。
 
-### 4.2 根因（PM v2.1.7 已诊断）
+### 4.2 根因（PM v2.1.7 已诊断 + v2.1.8 T12 新发现）
 
-| # | 根因 | 影响 |
+| # | 根因 | v2.1.8 处理 |
 |---|---|---|
-| 1 | `recon-id-fix-io.js:70` `raw:true` 读 sheet → Excel 日期变 number 序列号 → `c4-recon-id-fix.js:1058-1065` 直接赋 BillDate → `parseBillDateMs` 正则不认 → 候选 fail | 28 行可解 |
-| 2 | `findBestAmountSubset` subset-sum `maxSize=8` 硬上限 → 16 行（T54SWIC494447）/ 11 行（T54SWIC506630）子集被剪 | ≥ 11 行 |
-| 3 | `tryManyToOnePool` 按 right 行顺序遍历 left → 4M 子池被前面渠道抢光（T54SWIC470181） | ≥ 1 渠道 |
-| 4 | 窗口扩大（±7/±10）反而下降（tie-break 偏置） | 反向影响 |
+| 1 | `recon-id-fix-io.js:70` `raw:true` 读 sheet → Excel 日期变 number 序列号 → `c4-recon-id-fix.js:1058-1065` 直接赋 BillDate → `parseBillDateMs` 正则不认 → 候选 fail | ✅ T08 修复（c4 引擎入口 normalizeBillDateValue） |
+| 2 | `findBestAmountSubset` subset-sum `maxSize=8` 硬上限 → 16 行（T54SWIC494447）/ 11 行（T54SWIC506630）子集被剪 | ✅ T09 动态档位（spec F5-D1） |
+| 3 | `tryManyToOnePool` 按 right 行顺序遍历 left → 4M 子池被前面渠道抢光（T54SWIC470181） | ✅ T10 金额降序 + candidates count 降序复合排序（spec F5-D2） |
+| 4 | 窗口扩大（±7/±10）反而下降（tie-break 偏置） | spec 已知，本迭代不专门修 |
+| **5** | **subset-sum 剪枝（升序排序 + 后缀和不足）在大 pool 下误剪正确解 — T12 实测新发现**：仅 16 行 candidates + maxSize=30 ✅ 0ms 找到 sum=$9.75M 子集；38 行同日 pool + maxSize=30 ❌ 找不到。说明 22 个非期望 left 行让 DFS 剪枝在仍可达 sum 时误判"不可达" | ❌ **延期 v2.1.9 ILP/网络流范式重写**（DFS + 剪枝架构无法保证全局最优；需引入新算法范式） |
 
 ### 4.3 改动点
 
@@ -425,8 +426,8 @@ config_json.assign = {
 
 | # | 验收项 | 验证手段 | 通过标准 |
 |---|---|---|---|
-| F5-1 | TEST2.xlsx 跑出 57 行 / 10 渠道命中 | 手测 + smoke fixture | ≥ 57 行 / 10 渠道 |
-| F5-2 | TEST.xlsx（0 命中样本）不应误升 | smoke | = 0 行 |
+| F5-1 | TEST2.xlsx acceptance（v0.4 范围收敛） | 手测 + smoke fixture | v2.1.8：T08-T11 修 4/5 根因 + 28-43 行（v2.1.7 baseline 28，maxSize=16 甜点 43）；57 行 acceptance 延期 v2.1.9 ILP 重写（根因 #5 subset-sum 剪枝在大 pool 下误剪正确解） |
+| ~~F5-2~~ | ~~TEST.xlsx 不应误升~~ | ~~smoke~~ | **移除**（v0.3：TEST 与 TEST2 输入相同算法必然相同结果，无法独立验证） |
 | F5-3 | 19 个 smoke suite 全跑 | npm run smoke | 全绿 0 regression |
 | F5-4 | maxSize 放开后性能 | 手测大样本 | 单渠道 < 30s |
 | A3-1 | runCheck 主进程不阻塞 | 手测 500w 行 | 跑期间主窗口能交互 |
