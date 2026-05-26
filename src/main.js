@@ -16,6 +16,8 @@ const { createPendingSession } = require('./main-process/pending-session');
 const { applyWatermark } = require('./main-process/workbook-watermark');
 // v2.1.6 Module B T9：收单单据币种校验 — session + writer
 const acquiringBillCurrencySession = require('./main-process/acquiring-bill-currency-session');
+// v2.1.8 N1：before-quit 钩子需 module-level runRepo（IPC handler 内 require 来不及）
+const runRepo = require('./backend/acquiring-bill-currency-db/run-repository');
 const acquiringBillCurrencyWriter = require('./main-process/acquiring-bill-currency-writer');
 // v2.1.6 Module A T3：启动 log 头注入作者 + build SHA
 const pkg = require('../package.json');
@@ -10084,6 +10086,9 @@ function registerNewAccountHandlers() {
 
   ipcMain.handle('acquiringBillCurrency:listMonths', () => {
     if (!database || !database.db) return [];
+    // v2.1.8 N1：进入模块兜底 — listMonths 是用户切到收单单据币种校验模块的第 1 个 IPC 调用
+    //   spec §三 N1-D3 兜底触发点；检测 cleanup_pending → setImmediate 后台清（不阻塞 listMonths）+ toast
+    triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
     try { return acquiringBillCurrencySession.listMonths({ db: database.db }); } catch (_e) { return []; }
   });
 
@@ -10297,29 +10302,11 @@ function registerNewAccountHandlers() {
       notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
-    // v0.12 fix9：release run lock，立即 acquire cleanup lock，setImmediate 异步分批清理（不阻塞 handler return）
+    // v0.12 fix9：release run lock，setImmediate 异步分批清理（不阻塞 handler return）
+    // v2.1.8 N1：β 方案 — cleanup 移出对账链路，runCheck 内已 markCleanupPending=1，
+    //   不再 setImmediate 立即触发；交 app.before-quit（主清）+ 进入模块时（兜底清）
+    //   保留 result.cleanupNeeded 字段（向后兼容；前端不消费此字段）
     releaseOpLock();
-    if (result.cleanupNeeded) {
-      const cleanupLock = tryAcquireOpLock('cleanup', monthKey);
-      if (cleanupLock.acquired) {
-        setImmediate(async () => {
-          try {
-            const cleanupStats = await acquiringBillCurrencySession.cleanupAfterRunBackground({
-              db: database.db,
-              monthKey,
-              runId: result.runId
-            });
-            // eslint-disable-next-line no-console
-            console.log(`[acquiring-bill-currency] background cleanup done for ${monthKey}:`, cleanupStats);
-          } catch (cleanupErr) {
-            // eslint-disable-next-line no-console
-            console.error(`[acquiring-bill-currency] background cleanup failed for ${monthKey}:`, cleanupErr && cleanupErr.message);
-          } finally {
-            releaseOpLock();
-          }
-        });
-      }
-    }
     // v2.1.7 F7-B1：success 路径弹通知（spec §7.5.2）
     notifyAcquiringBillCurrencyResult(monthKey, 'success', { mismatchRows: result.mismatchRows });
     return { status: 'success', ...result };
@@ -10568,8 +10555,67 @@ app.whenReady()
     handleStartupFailure(error);
   });
 
+// v2.1.8 N1：进入模块兜底 cleanup
+//   spec §三 N1-D3 / D4：listMonths 入口检测 cleanup_pending → 后台串行清 + toast 通知
+//   防重入：cleanupBackgroundInProgress flag，避免短时间内多次切回模块触发重复 cleanup
+//   并发隔离：用 tryAcquireOpLock('cleanup') 防与 import/run/export 冲突
+//   失败容忍：单 run 失败仅日志，继续清下一个；启动期 cleanupOrphanData 兜底
+let cleanupBackgroundInProgress = false;
+function triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded() {
+  if (cleanupBackgroundInProgress) return;
+  if (!database || !database.db) return;
+  let pendingRuns;
+  try {
+    pendingRuns = runRepo.listPendingCleanupRuns(database.db);
+  } catch (_e) {
+    return;
+  }
+  if (!pendingRuns || pendingRuns.length === 0) return;
+  const cleanupLock = tryAcquireAcquiringBillCurrencyOpLock('cleanup', null);
+  if (!cleanupLock.acquired) return; // import/run/export 进行中，放弃这次（下次入模块再试）
+  cleanupBackgroundInProgress = true;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('acquiringBillCurrency:cleanup-background:toast', {
+      stage: 'start', pendingCount: pendingRuns.length
+    });
+  }
+  setImmediate(async () => {
+    try {
+      for (const run of pendingRuns) {
+        try {
+          await acquiringBillCurrencySession.cleanupAfterRunBackground({
+            db: database.db, monthKey: run.month_key, runId: run.id
+          });
+          runRepo.clearCleanupPending(database.db, { runId: run.id });
+        } catch (cleanErr) {
+          // eslint-disable-next-line no-console
+          console.error(`[acquiring-bill-currency] background cleanup run ${run.id} 失败:`, cleanErr && cleanErr.message);
+        }
+      }
+    } finally {
+      releaseAcquiringBillCurrencyOpLock();
+      cleanupBackgroundInProgress = false;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('acquiringBillCurrency:cleanup-background:toast', { stage: 'done' });
+      }
+    }
+  });
+}
+
 // v2.0.0-beta.4：退出前 flush usage-stats（before-quit 在窗口全关后触发）
-app.on('before-quit', () => {
+// v2.1.8 N1：β 方案 — 退出前阻塞 + 串行清 acquiring_bill_currency_runs 中所有 cleanup_pending=1 的 runs
+//   spec §三 N1：app.before-quit 主清 + 进入模块时为兜底
+//   设计：
+//     1. 既有 usage-stats flush 不动（同步执行，毫秒级）
+//     2. 检查 listPendingCleanupRuns 是否有待清 runs
+//     3. 有 → event.preventDefault() 阻塞 → 异步串行清 → 完成后 app.quit()
+//     4. 无 → 直接退出（不阻塞）
+//     5. 退出失败 → console.error + 弹错误（spec N1-D5）+ 仍 quit（启动期 cleanupOrphanData 兜底）
+//     6. mainWindow.webContents.send 通知 renderer 显示进度模态框（renderer 端订阅 'acquiringBillCurrency:cleanup-quit:*'）
+let cleanupQuitInProgress = false; // 防重入
+
+app.on('before-quit', (event) => {
+  // usage-stats flush（不变）
   try {
     if (usageStats) {
       usageStatsModule.recordSessionEnd(usageStats);
@@ -10583,6 +10629,65 @@ app.on('before-quit', () => {
   } catch (err) {
     console.warn('[usage-stats] before-quit flush failed:', err && err.message);
   }
+
+  // v2.1.8 N1：cleanup 退出阻塞
+  if (cleanupQuitInProgress) return; // 重入保护（cleanup 完成 app.quit 时会再次触发 before-quit）
+  if (!database || !database.db) return;
+  let pendingRuns;
+  try {
+    pendingRuns = runRepo.listPendingCleanupRuns(database.db);
+  } catch (listErr) {
+    // listPending 失败 → 不阻塞退出（启动期 cleanupOrphanData 会兜底）
+    // eslint-disable-next-line no-console
+    console.error('[acquiring-bill-currency] before-quit listPendingCleanupRuns 失败，直接退出:', listErr && listErr.message);
+    return;
+  }
+  if (!pendingRuns || pendingRuns.length === 0) return;
+
+  event.preventDefault();
+  cleanupQuitInProgress = true;
+  const totalRuns = pendingRuns.length;
+
+  // 通知 renderer 显示进度模态框
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('acquiringBillCurrency:cleanup-quit:start', { totalRuns });
+  }
+
+  // 异步串行清（N1-D4：避免事务冲突）
+  (async () => {
+    let cleanedCount = 0;
+    let lastError = null;
+    for (const run of pendingRuns) {
+      try {
+        await acquiringBillCurrencySession.cleanupAfterRunBackground({
+          db: database.db,
+          monthKey: run.month_key,
+          runId: run.id,
+          onProgress: (ev) => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('acquiringBillCurrency:cleanup-quit:progress', {
+                runId: run.id, monthKey: run.month_key, cleanedCount, totalRuns, ...ev
+              });
+            }
+          }
+        });
+        runRepo.clearCleanupPending(database.db, { runId: run.id });
+      } catch (cleanErr) {
+        lastError = cleanErr;
+        // eslint-disable-next-line no-console
+        console.error(`[acquiring-bill-currency] cleanup-quit run ${run.id} (${run.month_key}) 失败:`, cleanErr && cleanErr.message);
+      }
+      cleanedCount++;
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('acquiringBillCurrency:cleanup-quit:done', {
+        cleanedCount, totalRuns,
+        error: lastError ? (lastError.message || String(lastError)) : null
+      });
+    }
+    // N1-D5：失败也 quit（启动期 cleanupOrphanData 兜底）
+    app.quit();
+  })();
 });
 
 app.on('window-all-closed', () => {

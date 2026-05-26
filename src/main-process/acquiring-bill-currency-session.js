@@ -266,8 +266,20 @@ async function runCheck({ db, monthKey, storageRoot, onProgress }) {
   // v0.12 fix9：cleanup 不再在 runCheck 内同步做（避免 UI 卡几分钟）
   // caller（main.js handler）在 handler return success 后通过 setImmediate 异步触发 cleanupAfterRunBackground
   // runCheck 仅返回 cleanupNeeded 标识 + 文件路径 + runId
+  // v2.1.8 N1：β 方案 cleanup 移出对账链路 — runCheck 成功后 SET cleanup_pending=1，
+  //   不再立即触发清理；交给 app.before-quit（主）+ 进入模块时（兜底）
+  //   main.js handler 的 setImmediate(cleanupAfterRunBackground) 已移除
   const cleanupNeeded = !!(storageRoot && diffFilePath && reportFilePath
     && fs.existsSync(diffFilePath) && fs.existsSync(reportFilePath));
+  if (cleanupNeeded) {
+    try {
+      runRepo.markCleanupPending(db, { runId });
+    } catch (markErr) {
+      // 标志位写失败不阻断 runCheck 成功（用户感知不到），仅日志
+      // eslint-disable-next-line no-console
+      console.error('[acquiring-bill-currency] markCleanupPending 失败:', markErr && markErr.message);
+    }
+  }
 
   return { runId, ...stats, diffFilePath, reportFilePath, cleanupNeeded };
 }

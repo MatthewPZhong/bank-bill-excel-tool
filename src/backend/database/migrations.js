@@ -788,6 +788,16 @@ function ensureC3GwFieldCurrencyCaseFix(db) {
   });
 }
 
+// v2.1.8 N1：给 acquiring_bill_currency_runs 加 cleanup_pending 列（β 方案：cleanup 移出对账链路）
+// 背景：v2.1.7 runCheck 成功后 main.js:10307 setImmediate(cleanupAfterRunBackground) 立即异步清；
+//       v2.1.8 N1 β 改为延迟到 app.before-quit（主清）+ 进入模块时（兜底）；
+//       runs 表加 cleanup_pending=1 标记"待清理"，cleanup 完成后 SET=0
+// 幂等：hasColumn 检查避免重复 ADD COLUMN
+function ensureAcquiringBillCurrencyRunsCleanupPending(db) {
+  if (hasColumn(db, 'acquiring_bill_currency_runs', 'cleanup_pending')) return;
+  db.exec(`ALTER TABLE acquiring_bill_currency_runs ADD COLUMN cleanup_pending INTEGER DEFAULT 0`);
+}
+
 // v2.1.8 N2：给历史 'gateway-recon-join' 场景的 assign 对象补 mode / customValue 字段
 // 背景：v2.1.7 之前 assign = { gwField, bankField }；v2.1.8 N2 扩展为
 //       { gwField, bankField, mode: 'direct' | 'custom', customValue }
@@ -1149,6 +1159,7 @@ module.exports = {
   migrateC4ReconGroupsAmountLockedFieldPair,
   ensureC3GwFieldCurrencyCaseFix,
   ensureC3AssignAddMode,
+  ensureAcquiringBillCurrencyRunsCleanupPending,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,

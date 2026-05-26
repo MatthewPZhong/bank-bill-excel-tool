@@ -281,6 +281,28 @@ contextBridge.exposeInMainWorld('desktopApi', {
       const wrapped = (_event, ev) => listener(ev);
       ipcRenderer.on('acquiringBillCurrency:run:progress', wrapped);
       return () => ipcRenderer.removeListener('acquiringBillCurrency:run:progress', wrapped);
+    },
+    // v2.1.8 N1 β：退出时 cleanup 进度订阅
+    onCleanupQuitStart: (listener) => {
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('acquiringBillCurrency:cleanup-quit:start', wrapped);
+      return () => ipcRenderer.removeListener('acquiringBillCurrency:cleanup-quit:start', wrapped);
+    },
+    onCleanupQuitProgress: (listener) => {
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('acquiringBillCurrency:cleanup-quit:progress', wrapped);
+      return () => ipcRenderer.removeListener('acquiringBillCurrency:cleanup-quit:progress', wrapped);
+    },
+    onCleanupQuitDone: (listener) => {
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('acquiringBillCurrency:cleanup-quit:done', wrapped);
+      return () => ipcRenderer.removeListener('acquiringBillCurrency:cleanup-quit:done', wrapped);
+    },
+    // v2.1.8 N1 β：进入模块兜底 cleanup 后台进行中 toast
+    onCleanupBackgroundToast: (listener) => {
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('acquiringBillCurrency:cleanup-background:toast', wrapped);
+      return () => ipcRenderer.removeListener('acquiringBillCurrency:cleanup-background:toast', wrapped);
     }
   }
 });

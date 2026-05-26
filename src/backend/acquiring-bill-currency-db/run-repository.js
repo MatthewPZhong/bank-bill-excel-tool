@@ -48,6 +48,27 @@ function updateRunStatus(db, { runId, status }) {
   db.prepare(`UPDATE ${RUNS_TABLE} SET status = ? WHERE id = ?`).run(status, runId);
 }
 
+// v2.1.8 N1：cleanup 延迟触发标志位（β 方案 — cleanup 移出对账链路）
+//   runCheck 成功后 SET=1 → app.before-quit / 进入模块时检查 → 触发清理 → 完成后 SET=0
+//   幂等：多次 SET 1 等价；mark 时不查重
+function markCleanupPending(db, { runId }) {
+  db.prepare(`UPDATE ${RUNS_TABLE} SET cleanup_pending = 1 WHERE id = ?`).run(runId);
+}
+
+function clearCleanupPending(db, { runId }) {
+  db.prepare(`UPDATE ${RUNS_TABLE} SET cleanup_pending = 0 WHERE id = ?`).run(runId);
+}
+
+// 列出所有 cleanup_pending=1 的 runs（按 ran_at 升序，先入先清；spec §三 N1-D4 串行清避免事务冲突）
+function listPendingCleanupRuns(db) {
+  return db.prepare(`
+    SELECT id, month_key, ran_at, status
+    FROM ${RUNS_TABLE}
+    WHERE cleanup_pending = 1
+    ORDER BY ran_at ASC
+  `).all();
+}
+
 // 清空某月历史 runs + diff_rows（重新运行前调用，避免累积旧 diff_rows）
 function clearRunsByMonth(db, monthKey) {
   db.prepare(`DELETE FROM ${DIFF_TABLE} WHERE run_id IN (SELECT id FROM ${RUNS_TABLE} WHERE month_key = ?)`).run(monthKey);
@@ -200,5 +221,9 @@ module.exports = {
   listAllDiffRowsByRun,
   getBillDateCounts,
   listDiffRowsByDateRange,
-  listSourceFilesByRun
+  listSourceFilesByRun,
+  // v2.1.8 N1：cleanup 延迟触发标志位 API
+  markCleanupPending,
+  clearCleanupPending,
+  listPendingCleanupRuns
 };
