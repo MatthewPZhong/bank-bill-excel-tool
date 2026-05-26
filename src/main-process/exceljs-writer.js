@@ -23,6 +23,12 @@ const YELLOW_FILL = {
 
 // 内部字段（不写入 xlsx）
 // v2.1.8 N3-2：_hitScenarioDisplayIndex 新增（与 _hitScenarioId / _hitScenarioName 同源 dispatcher 注入）
+//
+// 实现说明（v2.1.8 self-review SR4）：
+//   writer 实际不消费此 Set — 投影写盘走 `headers.map(h => row[h])`（buildSheetData / writeBankStatementOutput），
+//   headers 来源是 reader 校验过的 44 列固定表头，`_` 前缀字段不会进 headers → 投影自动过滤。
+//   本 Set 是声明式枚举，便于 grep 追溯哪些字段属"内部"；未来若 writer 改为遍历 row keys 写盘，
+//   必须用此 Set 显式过滤（防 _ 前缀字段泄漏）。
 const INTERNAL_FIELDS = new Set([
   '_rowId',
   '_modifiedColumns',

@@ -5,6 +5,12 @@
 // ⚠️ 同步提醒：Electron sandbox 限制 preload require 自定义模块，
 //   src/preload.js 顶部 inline 了一份副本（GATEWAY_RECON_FIELDS）。
 //   本文件改动必须同步更新 preload.js。
+//
+// ⚠️ v2.1.8 N2 sentinel 保留字（self-review SR4 警告）：
+//   `__CUSTOM__` 在 C3 dialog「对账成立后赋值-右侧下拉」中作为
+//   "自取值" 选项的 value sentinel（src/renderer-dialogs.js + src/main-process/scenario-engines/c3-gateway-recon-join.js:137）
+//   → **未来网关账单 sheet 加新字段时绝不可命名为 `__CUSTOM__`**
+//   （冲突后果：C3 引擎会把真实字段值当作"使用自取值"处理 → 资金红线 mode 误判）
 
 const GATEWAY_RECON_FIELDS = Object.freeze([
   'BillDate',

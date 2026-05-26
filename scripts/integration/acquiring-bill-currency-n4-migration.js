@@ -196,6 +196,92 @@ async function run() {
     cleanup();
   }
 
+  // ============================================================
+  // Step 7（SR2 强化）：fault injection — 备份失败路径
+  //   构造非法 dbPath 让 fs.copyFileSync 失败 → 验证 backup-failed + marker 不写 + 数据未变
+  // ============================================================
+  const { tmpdir: f1tmpdir, dbPath: f1dbPath, db: f1db, cleanup: f1cleanup } = setupTmpDb();
+  try {
+    f1db.db.prepare("DELETE FROM app_settings WHERE setting_key = 'acquiring_bill_raw_json_v2_migrated'").run();
+    // 插一行让 billCount > 0（触发完整备份分支）
+    f1db.db.prepare(`
+      INSERT INTO acquiring_bill_currency_bill_imports
+      (month_key, source_file, source_row_index, recon_main_id, settle_currency, settle_currency_norm, raw_json, imported_at)
+      VALUES ('2026-05', 'fake.xlsx', 2, 'F1-1', 'USD', 'usd', ?, ?)
+    `).run(JSON.stringify({ '账单日期': '2026-05-01', 'remark': 'test' }), new Date().toISOString());
+
+    // 让 dbPath 指向不存在的源文件 → fs.copyFileSync 必失败
+    const badDbPath = path.join(f1tmpdir, 'nonexistent-source.sqlite');
+    const r1 = migrations.ensureBillRawJsonV2Slim(f1db.db, badDbPath);
+    assertEq(r1.status, 'backup-failed', 'Step7.backup-failed 路径');
+    assertTrue(typeof r1.error === 'string' && r1.error.length > 0, 'Step7.error 信息存在');
+    // 验证 marker 未写
+    const markerAfterFail = f1db.db.prepare("SELECT setting_value FROM app_settings WHERE setting_key = 'acquiring_bill_raw_json_v2_migrated'").get();
+    assertTrue(!markerAfterFail || markerAfterFail.setting_value !== 'true', 'Step7.marker 未写（下次启动可重试）');
+    // 验证数据未动（仍 2 字段 raw_json）
+    const dataAfterFail = JSON.parse(f1db.db.prepare("SELECT raw_json FROM acquiring_bill_currency_bill_imports WHERE recon_main_id = 'F1-1'").get().raw_json);
+    assertEq(Object.keys(dataAfterFail).length, 2, 'Step7.数据未瘦身（事务未启动）');
+    assertTrue('remark' in dataAfterFail, 'Step7.被删字段 remark 仍在（migration 未执行）');
+  } finally {
+    f1cleanup();
+  }
+
+  // ============================================================
+  // Step 8（SR2 强化）：fault injection — batch UPDATE 失败路径
+  //   注入一个 db.prepare proxy 让 update 在第 1 次后抛错 → 验证 batch-failed + ROLLBACK + marker 不写
+  // ============================================================
+  const { tmpdir: f2tmpdir, dbPath: f2dbPath, db: f2db, cleanup: f2cleanup } = setupTmpDb();
+  try {
+    f2db.db.prepare("DELETE FROM app_settings WHERE setting_key = 'acquiring_bill_raw_json_v2_migrated'").run();
+    // 插 3 行
+    const insertStmt = f2db.db.prepare(`
+      INSERT INTO acquiring_bill_currency_bill_imports
+      (month_key, source_file, source_row_index, recon_main_id, settle_currency, settle_currency_norm, raw_json, imported_at)
+      VALUES ('2026-05', 'fake.xlsx', ?, ?, 'USD', 'usd', ?, ?)
+    `);
+    for (let i = 1; i <= 3; i++) {
+      insertStmt.run(i, `F2-${i}`, JSON.stringify({ '账单日期': '2026-05-01', 'remark': `keep-${i}` }), new Date().toISOString());
+    }
+
+    // proxy db.prepare：让 UPDATE 语句在 run 时抛错
+    const originalPrepare = f2db.db.prepare.bind(f2db.db);
+    let updateCallCount = 0;
+    f2db.db.prepare = (sql) => {
+      const stmt = originalPrepare(sql);
+      if (sql.startsWith('UPDATE acquiring_bill_currency_bill_imports')) {
+        return {
+          run: (...args) => {
+            updateCallCount++;
+            if (updateCallCount >= 2) {
+              throw new Error('injected fault: simulated UPDATE failure');
+            }
+            return stmt.run(...args);
+          }
+        };
+      }
+      return stmt;
+    };
+
+    const r2 = migrations.ensureBillRawJsonV2Slim(f2db.db, f2dbPath);
+    // 恢复 prepare（避免后续清理出错）
+    f2db.db.prepare = originalPrepare;
+
+    assertEq(r2.status, 'batch-failed', 'Step8.batch-failed 路径');
+    assertTrue(r2.error && /injected fault/.test(r2.error), 'Step8.error 含注入消息');
+    // 验证 marker 未写
+    const markerF2 = f2db.db.prepare("SELECT setting_value FROM app_settings WHERE setting_key = 'acquiring_bill_raw_json_v2_migrated'").get();
+    assertTrue(!markerF2 || markerF2.setting_value !== 'true', 'Step8.marker 未写');
+    // 验证 ROLLBACK：3 行数据应该都未瘦身（事务整体回滚）
+    const rowsF2 = f2db.db.prepare("SELECT recon_main_id, raw_json FROM acquiring_bill_currency_bill_imports ORDER BY recon_main_id").all();
+    assertEq(rowsF2.length, 3, 'Step8.3 行保留');
+    for (const row of rowsF2) {
+      const obj = JSON.parse(row.raw_json);
+      assertTrue('remark' in obj, `Step8.${row.recon_main_id} remark 仍在（ROLLBACK 生效）`);
+    }
+  } finally {
+    f2cleanup();
+  }
+
   // 汇报
   const total = passed + failed;
   console.log(`\n==== ${passed}/${total} PASS ====`);

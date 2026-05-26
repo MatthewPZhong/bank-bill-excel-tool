@@ -38,7 +38,11 @@
 
 1. **独立可跑**：`node scripts/integration/<file>.js` 直接执行
 2. **自包含 setup/cleanup**：自建 tmp 目录 / tmp DB，run 完清理
-3. **stdout 含 `N/N PASS`**：runner 抓这个字符串汇总
+3. **stdout 含 `N/N PASS`**（**硬约束**，self-review SR4 强化）：
+   - 必须输出形如 `==== 38/38 PASS ====` 的字符串
+   - runner 用 regex `(\d+)\/(\d+) PASS` 抓数字汇总
+   - **退出码（exit code 0/1）才是 PASS / FAIL 真理来源**，N/N 仅供汇总展示
+   - 若用其他格式（如 `Pass: 18/18 ✓`），runner summary 显示 `(no count)`，不影响判定但损失可读性
 4. **失败 `process.exit(1)` + 输出 FAILURES 列表**
 5. **顶部注释说明目标 + 覆盖范围 + 用法**
 
@@ -114,18 +118,25 @@ run().catch((e) => { console.error('FATAL', e); process.exit(1); });
 
 **版本号 bump 后必须跑一次**（与 `npm run scan:vars` + `/check-vars` 并列）。
 
+**仅在开发机本地跑**（self-review SR4 备注）：
+- 项目无 CI 配置；release-check 由开发者在 macOS / Windows / Linux 本地手动触发
+- `&&` 串联在 npm scripts 中由 shell（macOS/Linux：sh；Windows：cmd.exe）执行，三平台均支持短路语义
+- 跑完看「最后一行 `smoke test passed` + `tests N pass` + `全部 N 个集成脚本通过 ✓`」三段确认
+
 ## 七、当前集成测试清单（v2.1.8 起 6 个）
 
 | 文件 | 主功能 | 用例数 |
 |---|---|---|
-| `acquiring-bill-currency-n4-migration.js` | 8 收单单据币种校验 | 115 |
-| `acquiring-bill-currency-idle-cleanup.js` | 8 收单单据币种校验 | 18 |
+| `acquiring-bill-currency-n4-migration.js` | 8 收单单据币种校验 | 127（含 SR2 fault injection 2 用例）|
+| `acquiring-bill-currency-idle-cleanup.js` | 8 收单单据币种校验 | 38（含 SR3 多 run 串行 + Phase 2 FK 2 用例）|
 | `bank-statement-hit-scenario-sheet.js` | 4 银行对账单处理 | 26 |
 | `statement-generation-pipeline.js` | 1 生成网银账单 | 45 |
 | `new-account-balance-statement.js` | 2 新开银行账户余额账单 | 36 |
 | `pending-data-reconciliation.js` | 3 月度 Pending 数据核对 | 33 |
 
-**合计 273 断言**；新加脚本时把行加进表，保持文档与代码同步。
+**合计 305 断言**（v2.1.8 self-review +32）；新加脚本时把行加进表，保持文档与代码同步。
+
+⚠️ **手工维护提示**（self-review SR4 已记 v2.1.9 backlog）：未来考虑让 `integration-runner.js` 在末尾输出"当前清单 markdown 表"自动同步本节，避免手抖漏更新。
 
 ## 八、什么时候不写集成测试
 

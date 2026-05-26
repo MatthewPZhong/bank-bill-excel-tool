@@ -89,6 +89,12 @@ function runAllScenarios(bankRows, gwRows, scenarios) {
   //   spec.md §五：状态框命中场景号显示与场景管理 UI 序号一致 — 改用 displayIndex 替代 DB id
   //   displayIndex 来源：scenario.displayIndex（scenarios-repository.listScenarios 已附）
   //   fallback：未带 displayIndex 时回退 scenario.id（兼容旧调用方 / smoke 直接构造 scenario）
+  //
+  // ⚠️ 语义差警告（v2.1.8 self-review SR4）：
+  //   生产路径 dispatcher 入参经 scenarios-repository.listScenarios 必带 displayIndex（按 priority DESC + id ASC 1-based）
+  //   smoke / unit 直接构造 scenario 不带 displayIndex → 走 fallback 得 displayIndex == scenario.id
+  //   → smoke 看到的 "[id]" 与生产 "[列表序号]" 数字可能相同但语义不同
+  //   → 验证"删一条 scenario 后 displayIndex 重新分配 1-based"必须走真实 listScenarios 路径（如集成测试 bank-statement-hit-scenario-sheet.js）
   const hitScenarios = [];
 
   for (const scenario of filtered) {

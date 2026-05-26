@@ -801,11 +801,12 @@ function ensureC3GwFieldCurrencyCaseFix(db) {
 //   5. 大数据量分批（每批 5000 + COMMIT 让 event loop 喘气）
 //
 // 备份失败 → 整个 migration 不启动（cb 抛错，启动期 console.error）；保护用户数据完整性
+//
+// v2.1.8 self-review SR1 修订：从本地常量改 require columns.js 的 TEMPLATE_BILL_HEADERS
+//   避免双源真理 — 模版字段是 N4 输出契约，未来若 PM 改模版（如增字段）
+//   必须仅改 columns.js 一处，migration 自动跟随；不可在此处独立维护副本
+const { TEMPLATE_BILL_HEADERS } = require('../acquiring-bill-currency-db/columns');
 const BILL_RAW_JSON_V2_MIGRATED_KEY = 'acquiring_bill_raw_json_v2_migrated';
-const N4_TEMPLATE_BILL_HEADERS = [
-  '账单日期', 'originBillBizId', '单据类型', '主对账Id', '业务订单号',
-  '对账金额', '对账币种', 'valueDate', 'channel'
-];
 function ensureBillRawJsonV2Slim(db, dbPath) {
   // 1. 幂等检查
   let markerRow;
@@ -828,14 +829,30 @@ function ensureBillRawJsonV2Slim(db, dbPath) {
   }
 
   // 2. 备份 DB（不论 billCount > 0 与否，首次都备份一份；后续幂等跳过）
+  //   self-review SR2 强化：
+  //     (a) wal_checkpoint(TRUNCATE) 改 prepare/get 拿返回值 { busy, log, checkpointed }
+  //         若 busy=1（仍有 reader）→ 备份的 sqlite 文件可能不含 WAL 最新数据 → abort
+  //     (b) 时间戳从 ISO with T/.分号 改紧凑格式 YYYYMMDDThhmmss（与项目其他时间戳一致）
   let backupPath = null;
   if (dbPath) {
     try {
       // 强制 WAL 写回主 DB（避免 copy 时 WAL 含未 checkpoint 的数据）
-      db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+      // SR2 修订：检查 busy；启动期单线程理论安全，但作为资金红线最后防线显式断言
+      let checkpoint;
+      try {
+        checkpoint = db.prepare('PRAGMA wal_checkpoint(TRUNCATE);').get();
+      } catch (_e) {
+        // 非 WAL 模式（journal_mode=DELETE 等）会返回 undefined 或抛错；视为 OK
+        checkpoint = null;
+      }
+      if (checkpoint && Number(checkpoint.busy) > 0) {
+        console.error('[migration N4] WAL checkpoint busy (有 reader 未释放)，备份不可靠 → abort，下次启动重试:', checkpoint);
+        return { status: 'backup-failed', error: 'wal_checkpoint busy' };
+      }
       const backupDir = path.join(path.dirname(dbPath), 'backups');
       fs.mkdirSync(backupDir, { recursive: true });
-      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      // 紧凑时间戳 YYYYMMDDThhmmss（项目其他时间戳同格式）
+      const ts = new Date().toISOString().replace(/[-:.]/g, '').replace(/\.\d+Z?$/, '').slice(0, 15);
       backupPath = path.join(backupDir, `tool-data-bak-pre-N4-${ts}.sqlite`);
       fs.copyFileSync(dbPath, backupPath);
     } catch (backupErr) {
@@ -869,24 +886,27 @@ function ensureBillRawJsonV2Slim(db, dbPath) {
     const rows = selectStmt.all(lastId, BATCH);
     if (rows.length === 0) break;
     db.exec('BEGIN');
+    let batchUpdated = 0; // SR2 修订：实际 UPDATE 计数（剔除 JSON.parse 跳过的行），totalRewritten 累加更准
     try {
       for (const row of rows) {
         let rawObj;
         try {
           rawObj = JSON.parse(row.raw_json);
         } catch (_parseErr) {
-          // 单行 JSON 损坏 → 跳过这行（保留原值，避免误删）
+          // 单行 JSON 损坏 → 跳过这行（保留原值，避免误删）；lastId 仍前推保证游标进度
+          lastId = row.id;
           continue;
         }
         const slim = {};
-        for (const key of N4_TEMPLATE_BILL_HEADERS) {
+        for (const key of TEMPLATE_BILL_HEADERS) {
           if (key in rawObj) slim[key] = rawObj[key];
         }
         updateStmt.run(JSON.stringify(slim), row.id);
         lastId = row.id;
+        batchUpdated++;
       }
       db.exec('COMMIT');
-      totalRewritten += rows.length;
+      totalRewritten += batchUpdated;
     } catch (batchErr) {
       try { db.exec('ROLLBACK'); } catch (_e) { /* swallow */ }
       // eslint-disable-next-line no-console

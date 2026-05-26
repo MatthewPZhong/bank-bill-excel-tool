@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.10（2026-05-26 — **N4 新立项**：「导出差异表字段瘦身」按模版 9 列 + diff_rows 3 列 = 12 列；DB raw_json 也瘦身（破坏性 migration），4 项决策全锁；详 §五）；v0.9 FK 反向同步；v0.8 N1 方案重设 idle 30min + 差异保留；v0.7 GATEWAY_RECON_FIELDS 反向同步；v0.6 「自取值」改 assign-gw；v0.5 F5 范围收敛；v0.4 移除 TEST.xlsx；v0.3 T08 改 F5-D4；v0.2 27 决策；v0.1 起草 |
+| 文档版本 | v0.11（2026-05-26 — **PR #52 self-review 反向同步**：N1''-D6 实施简化（renderer + mutex 替代 main IPC 静默判定）/ N1''-D7 多窗口语义补 / N1''-D11 三重保险降级路径文档化）；v0.10 N4 新立项 + 4 决策；v0.9 FK 反向同步；v0.8 N1 方案重设 idle 30min + 差异保留；v0.7 GATEWAY_RECON_FIELDS 反向同步；v0.6 「自取值」改 assign-gw；v0.5 F5 范围收敛；v0.4 移除 TEST.xlsx；v0.3 T08 改 F5-D4；v0.2 27 决策；v0.1 起草 |
 | 关联 PRD | `PRD-v2.1.8.md` v0.1 |
 | 关联 tasks | `tasks.md`（待建） |
 | 评审范围 | F5（算法重设）/ A3（跨进程）/ N1（cleanup 移出对账链路）/ N2（配置数据结构变更）/ N3（IPC 字段重命名 + 新 Sheet） |
@@ -166,12 +166,12 @@ F5 实现过程中必须落的 unit case：
 
 | # | 决策 | 选项 | 锁定方案 |
 |---|---|---|---|
-| N1''-D6 ✅ | "闲置"定义 | (a) renderer 无操作 / (b) main 无 IPC / (c) AND | **(c)** 避免后台 SQL 中误判 |
-| N1''-D7 ✅ | 计时器位置 | (a) main 内置 / (b) renderer 上报 + main 维护 | **(b)** renderer 节流上报 user-activity，main 维护 lastActiveTs + setInterval 检查 |
+| N1''-D6 ✅ ⚠️ **v0.11 实施反向同步** | "闲置"定义 | (a) renderer 无操作 / (b) main 无 IPC / (c) AND | **(c) 锁定但 v0.11 简化实现**：renderer 上报 `lastUserActivityTs`（主信号）+ mutex `tryAcquireOpLock('cleanup')` 间接表达"该模块未跑 import/run/export"（替代 main IPC 静默判定）。生产场景 cleanup 仅清 acquiring 表，与生成网银账单等其他模块 DB 完全隔离 → mutex 间接判定足以。残余风险：极端场景 main 跑非 acquiring 模块长任务（如生成网银账单 pipeline），mutex 空闲 → cleanup 仍可能与之并发，但 DB 表无交集，不冲突 |
+| N1''-D7 ✅ | 计时器位置 | (a) main 内置 / (b) renderer 上报 + main 维护 | **(b)** renderer 节流上报 user-activity，main 维护 lastActiveTs + setInterval 检查；**多窗口语义**（v0.11 补）：任一窗口 reporter 上报刷新 `lastUserActivityTs`（模块级 `let`），等价"app 全局活跃" — 当前单窗口架构默认 OK，将来多窗口预案此设计天然兼容 |
 | N1''-D8 ✅ | 闲置阈值 | (a) 硬编码 30min / (b) settings 可配 / (c) ENV | **(a)** 常量 `IDLE_CLEANUP_MS = 30 * 60 * 1000`；v2.1.9 评估 (b) |
 | N1''-D9 ✅ | 触发中用户回来 | (a) 让 cleanup 跑完 UI 显忙 / (b) 中断 / (c) 当前 batch 完，剩余推迟 | **(c)** 当前 batch 跑完即让出（mutex 保证 import/run 抢锁），剩余下次 idle 再清 |
 | N1''-D10 ✅ | before-quit 钩子去留 | (a) 删 / (b) 保留为退出兜底 / (c) 保留但静默 | **(c)** 保留（防没闲够就退）+ 简化为静默（删模态框/进度 IPC）|
-| N1''-D11 ✅ | 进入模块兜底去留 | (a) 删 / (b) 保留 | **(b)** 保留（崩溃恢复兜底，DB cleanup_pending 列 + listMonths 入口）|
+| N1''-D11 ✅ ⚠️ **v0.11 降级路径明确** | 进入模块兜底去留 | (a) 删 / (b) 保留 | **(b) 保留**（崩溃恢复兜底，DB cleanup_pending 列 + listMonths 入口）；**降级路径**：idle 30min mutex 抢占失败（用户连续 30min 跑 import/run/export 占着 mutex）→ 跳过本轮 → 由本兜底 + before-quit 兜底 + 启动 `cleanupOrphanData` **三重保险**接住。三重都失败 → 累积 cleanup_pending 但数据已写盘安全 |
 | N1''-D12 ✅ | DB `cleanup_pending` 列去留 | (a) 删 / (b) 保留 | **(b)** 保留（3 触发点共用判断依据） |
 | N1''-D13 ✅ | idle 触发的 toast | (a) 静默 / (b) toast 提示 / (c) 仅失败弹错 | **(a)** 用户已闲置 30min 大概率不在看屏；失败留下次进入模块兜底补救 + console.error |
 

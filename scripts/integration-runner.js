@@ -49,11 +49,18 @@ function runScript(scriptPath) {
   }
 
   process.stdout.write(`FAIL (${elapsedMs}ms)\n`);
-  console.error('  --- stdout ---');
-  console.error(stdout.split('\n').map((l) => '  ' + l).join('\n'));
+  // SR4 强化：长 stderr / stdout 截最后 30 行（保留最相关的错误信息，避免日志被淹没）
+  const MAX_TAIL_LINES = 30;
+  const tailLines = (text) => {
+    const lines = text.split('\n');
+    if (lines.length <= MAX_TAIL_LINES) return text;
+    return `... (省略前 ${lines.length - MAX_TAIL_LINES} 行)\n` + lines.slice(-MAX_TAIL_LINES).join('\n');
+  };
+  console.error('  --- stdout (tail) ---');
+  console.error(tailLines(stdout).split('\n').map((l) => '  ' + l).join('\n'));
   if (stderr) {
-    console.error('  --- stderr ---');
-    console.error(stderr.split('\n').map((l) => '  ' + l).join('\n'));
+    console.error('  --- stderr (tail) ---');
+    console.error(tailLines(stderr).split('\n').map((l) => '  ' + l).join('\n'));
   }
   return { name, ok: false, summary, elapsedMs, exitCode: result.status };
 }

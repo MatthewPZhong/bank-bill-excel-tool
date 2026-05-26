@@ -181,6 +181,126 @@ async function run() {
     cleanup();
   }
 
+  // ============================================================
+  // Step 6（SR3 强化）：多 run 累积串行清（spec §3.2.1 N1''-D4）
+  //   模拟用户连续跑多个月 runCheck，全部 cleanup_pending=1，idle 触发后按 listPendingCleanupRuns 顺序串行清
+  // ============================================================
+  const { tmpdir: m6tmpdir, db: m6db, cleanup: m6cleanup } = setupTmpDb();
+  try {
+    const months = ['2026-01', '2026-02', '2026-03'];
+    for (const monthKey of months) {
+      const date = `${monthKey}-15`;
+      const ff = path.join(m6tmpdir, `flow-${monthKey}.xlsx`);
+      const bf = path.join(m6tmpdir, `bill-${monthKey}.xlsx`);
+      function makeFlow(id, currency) {
+        const r = new Array(48).fill(''); r[0]=date; r[6]=id; r[12]='50'; r[13]=currency; r[28]='50'; r[29]=currency; return r;
+      }
+      function makeBill(id, currency) {
+        const r = new Array(26).fill(''); r[0]=date; r[14]=id; r[18]='50'; r[19]=currency; return r;
+      }
+      await writeXlsx(ff, FLOW_HEADERS, [makeFlow(`${monthKey}-A`, 'USD')]);
+      await writeXlsx(bf, BILL_HEADERS, [makeBill(`${monthKey}-A`, 'EUR')]); // 币种差异
+      await session.importFlowFiles({ db: m6db.db, monthKey, filePaths: [ff] });
+      await session.importBillFiles({ db: m6db.db, monthKey, filePaths: [bf] });
+      await session.runCheck({ db: m6db.db, monthKey, storageRoot: m6tmpdir });
+    }
+
+    // 3 个 run 全部 cleanup_pending=1
+    const pendingCount = m6db.db.prepare(`SELECT COUNT(*) c FROM acquiring_bill_currency_runs WHERE cleanup_pending=1`).get().c;
+    assertEq(pendingCount, 3, 'Step6.3 个 run 全部 cleanup_pending=1');
+
+    // 单次 idle 触发应一次性串行清完所有
+    const result6 = await simulateIdleTrigger(m6db.db, Date.now() - IDLE_CLEANUP_MS - 5000);
+    assertEq(result6.triggered, true, 'Step6.idle 达标 → 触发');
+    assertEq(result6.pendingCount, 3, 'Step6.pendingCount=3（串行清 3 run）');
+    assertEq(result6.cleanedCount, 3, 'Step6.cleanedCount=3');
+
+    // 所有 run 的 cleanup_pending 都应归零
+    const pendingAfter = m6db.db.prepare(`SELECT COUNT(*) c FROM acquiring_bill_currency_runs WHERE cleanup_pending=1`).get().c;
+    assertEq(pendingAfter, 0, 'Step6.所有 cleanup_pending 归零');
+
+    // 3 个月 flow 全清，bill/diff/runs 全保留
+    const flowM6 = m6db.db.prepare(`SELECT COUNT(*) c FROM acquiring_bill_currency_flow_imports`).get().c;
+    const billM6 = m6db.db.prepare(`SELECT COUNT(*) c FROM acquiring_bill_currency_bill_imports`).get().c;
+    const diffM6 = m6db.db.prepare(`SELECT COUNT(*) c FROM acquiring_bill_currency_diff_rows`).get().c;
+    const runsM6 = m6db.db.prepare(`SELECT COUNT(*) c FROM acquiring_bill_currency_runs`).get().c;
+    assertEq(flowM6, 0, 'Step6.全 3 月 flow 清完');
+    assertEq(billM6, 3, 'Step6.3 月 bill 全保留');
+    assertEq(diffM6, 3, 'Step6.3 月 diff 全保留');
+    assertEq(runsM6, 3, 'Step6.3 月 runs 全保留');
+  } finally {
+    m6cleanup();
+  }
+
+  // ============================================================
+  // Step 7（SR3 强化）：cleanupOrphanData Phase 2 多 monthKey 孤儿 run FK 边界
+  //   模拟 2 个不同 monthKey 的孤儿 run（status='running'）；Phase 2 顺序清 diff → bill → flow
+  //   验证：FK 约束下两个 monthKey 都能成功清完不报错
+  // ============================================================
+  const { tmpdir: m7tmpdir, db: m7db, cleanup: m7cleanup } = setupTmpDb();
+  try {
+    const now = new Date().toISOString();
+    // 2 个孤儿 run（不同 monthKey）
+    for (const monthKey of ['2026-04', '2026-05']) {
+      const insert = m7db.db.prepare(`
+        INSERT INTO acquiring_bill_currency_runs
+        (month_key, ran_at, total_bill_rows, matched_rows, mismatch_rows, unmatched_rows, status)
+        VALUES (?, ?, 5, 3, 2, 0, 'running')
+      `).run(monthKey, now);
+      const runId = Number(insert.lastInsertRowid);
+      // 关联 bill（2 行）
+      for (let i = 0; i < 2; i++) {
+        m7db.db.prepare(`
+          INSERT INTO acquiring_bill_currency_bill_imports
+          (month_key, recon_main_id, settle_currency, settle_currency_norm, raw_json, source_file, source_row_index, imported_at)
+          VALUES (?, ?, 'EUR', 'eur', '{}', 'fake.xlsx', ?, ?)
+        `).run(monthKey, `ORPHAN-${monthKey}-${i}`, i + 2, now);
+      }
+      const billIds = m7db.db.prepare(`SELECT id FROM acquiring_bill_currency_bill_imports WHERE month_key=?`).all(monthKey);
+      // 关联 diff（每个 bill 1 行 diff）
+      for (const b of billIds) {
+        m7db.db.prepare(`
+          INSERT INTO acquiring_bill_currency_diff_rows (run_id, bill_import_id, flow_currency, flow_amount_abs, diff_type)
+          VALUES (?, ?, 'USD', '100', 'currency_mismatch')
+        `).run(runId, b.id);
+      }
+      // 关联 flow（1 行）
+      m7db.db.prepare(`
+        INSERT INTO acquiring_bill_currency_flow_imports
+        (month_key, recon_main_id, settle_currency, settle_currency_norm, settle_amount, settle_amount_abs, raw_json, source_file, source_row_index, imported_at)
+        VALUES (?, 'O', 'USD', 'usd', '100', '100', '{}', 'fake.xlsx', 2, ?)
+      `).run(monthKey, now);
+    }
+
+    const before = {
+      runs: m7db.db.prepare(`SELECT COUNT(*) c FROM acquiring_bill_currency_runs`).get().c,
+      bill: m7db.db.prepare(`SELECT COUNT(*) c FROM acquiring_bill_currency_bill_imports`).get().c,
+      diff: m7db.db.prepare(`SELECT COUNT(*) c FROM acquiring_bill_currency_diff_rows`).get().c,
+      flow: m7db.db.prepare(`SELECT COUNT(*) c FROM acquiring_bill_currency_flow_imports`).get().c
+    };
+    assertEq(before.runs, 2, 'Step7.before runs=2');
+    assertEq(before.bill, 4, 'Step7.before bill=4');
+    assertEq(before.diff, 4, 'Step7.before diff=4');
+    assertEq(before.flow, 2, 'Step7.before flow=2');
+
+    // cleanupOrphanData Phase 2 应顺序清 diff → bill → flow（不抛 FK 错）
+    const stats = await session.cleanupOrphanData({ db: m7db.db });
+    assertEq(stats.orphanRunIds.length, 2, 'Step7.识别 2 orphan runs');
+    assertEq(stats.deletedDiff, 4, 'Step7.deletedDiff=4（每 run 2 diff）');
+    assertEq(stats.deletedBill, 4, 'Step7.deletedBill=4');
+    assertEq(stats.deletedFlow, 2, 'Step7.deletedFlow=2');
+    assertEq(stats.deletedRuns, 2, 'Step7.deletedRuns=2（孤儿 run 元数据删除）');
+
+    const after = {
+      runs: m7db.db.prepare(`SELECT COUNT(*) c FROM acquiring_bill_currency_runs`).get().c,
+      bill: m7db.db.prepare(`SELECT COUNT(*) c FROM acquiring_bill_currency_bill_imports`).get().c
+    };
+    assertEq(after.runs, 0, 'Step7.runs 全清');
+    assertEq(after.bill, 0, 'Step7.bill 全清（FK 解开顺序正确）');
+  } finally {
+    m7cleanup();
+  }
+
   const total = passed + failed;
   console.log(`\n==== ${passed}/${total} PASS ====`);
   if (failed > 0) {
