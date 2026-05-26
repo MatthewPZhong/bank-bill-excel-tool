@@ -2,7 +2,7 @@
 
 ## 2.1.7 - 2026-05-21
 
-v2.1.6 之后 7 轮迭代收敛，**共 39 commit + 6 项主功能 + 多轮用户反馈修复**。F5（C4 gateway BillDate 数字日期 + 算法重设）延期 v2.1.8 与 A3（worker_threads 异步 SQL）联合主题。本版本聚焦 6 项主功能（F1-F4 / F6-F8）+ R3 状态框全局换行 + B5 全局 wiring 加固 + B4 CSS flex/grid 嵌套穿透 max-height 真根因（4 round 收敛）+ C-1 self-review 阻塞修复。⚠️ **5 个资金红线护栏**（F2 C3 1v1 / F4 C2 校验放宽 / F7-A1 全局 PRAGMA / F8 dispatcher 第 2 sheet / R5 F1 默认 AND 三层护栏）+ **4 个全局影响节点**（F7-A1 PRAGMA / R3 换行 / B5 wiring / F4 重命名）+ **10 个 important-variables 升格**（Critical 3 + Important-skeleton 2 + Risk-sensitive 5）。
+v2.1.6 之后 7 轮迭代收敛，**共 50 commit + 6 项主功能 + 多轮用户反馈修复**。F5（C4 gateway BillDate 数字日期 + 算法重设）延期 v2.1.8 与 A3（worker_threads 异步 SQL）联合主题。本版本聚焦 6 项主功能（F1-F4 / F6-F8）+ R3 状态框全局换行 + B5 全局 wiring 加固 + B4 CSS flex/grid 嵌套穿透 max-height 真根因（4 round 收敛）+ C-1 self-review 阻塞修复。⚠️ **5 个资金红线护栏**（F2 C3 1v1 / F4 C2 校验放宽 / F7-A1 全局 PRAGMA / F8 dispatcher 第 2 sheet / R5 F1 默认 AND 三层护栏）+ **4 个全局影响节点**（F7-A1 PRAGMA / R3 换行 / B5 wiring / F4 重命名）+ **10 个 important-variables 升格**（Critical 3 + Important-skeleton 2 + Risk-sensitive 5）。
 
 ### 新增
 
@@ -24,7 +24,7 @@ v2.1.6 之后 7 轮迭代收敛，**共 39 commit + 6 项主功能 + 多轮用�
 
 ### 文档
 
-- `docs/iterations/v2.1.7/PRD-v2.1.7.md` v0.11（§二十三 实施记录 39 commit + 6 round 历程 + F5 延期）
+- `docs/iterations/v2.1.7/PRD-v2.1.7.md` v0.11（§二十三 实施记录 50 commit + 6 round 历程 + F5 延期）
 - `docs/iterations/v2.1.7/spec.md` v0.9（T14 反向同步 3 处：§8.4.2 styles.css→styles-gemini-extra.css / §9.8.4 SheetJS+ExcelJS / §11.3.8 B4 round 6 真根因补章）
 - `docs/iterations/v2.1.7/tasks.md` v0.8（T14 收口子项清单）
 - `rules/important-variables.md` v9 升格 10 条

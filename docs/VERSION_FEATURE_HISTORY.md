@@ -11,7 +11,7 @@
 
 ## 2.1.7（2026-05-21）
 
-v2.1.6 之后 7 轮迭代收敛，39 commit。6 项主功能（F1-F4 / F6-F8）+ R3 状态框中文「：」全局换行 + B5 全局 wiring 加固 + B4 CSS flex/grid 嵌套 4 round 收敛。F5（C4 BillDate 数字日期 + 算法重设）延期 v2.1.8 与 A3（worker_threads）联合主题。5 资金红线（F2/F4/F7-A1/F8/R5）+ 4 全局影响（F7-A1/R3/B5/F4）+ 10 important-variables 升格。
+v2.1.6 之后 7 轮迭代收敛，50 commit。6 项主功能（F1-F4 / F6-F8）+ R3 状态框中文「：」全局换行 + B5 全局 wiring 加固 + B4 CSS flex/grid 嵌套 4 round 收敛。F5（C4 BillDate 数字日期 + 算法重设）延期 v2.1.8 与 A3（worker_threads）联合主题。5 资金红线（F2/F4/F7-A1/F8/R5）+ 4 全局影响（F7-A1/R3/B5/F4）+ 10 important-variables 升格。
 
 ### 新增
 
@@ -32,7 +32,7 @@ v2.1.6 之后 7 轮迭代收敛，39 commit。6 项主功能（F1-F4 / F6-F8）+
 
 ### 文档
 
-- PRD/spec/tasks v0.11/v0.9/v0.8（含 §二十三 39 commit 实施记录 + spec 反向同步 3 处）
+- PRD/spec/tasks v0.11/v0.9/v0.8（含 §二十三 50 commit 实施记录 + spec 反向同步 3 处）
 - `rules/important-variables.md` v9 升格 10 条（Critical 3 + Important-skeleton 2 + Risk-sensitive 5）
 - USER_GUIDE §五 v2.1.7 新增能力
 

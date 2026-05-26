@@ -721,6 +721,54 @@ function runScenarioEngineSmokeTests() {
   // F2-F：first-match-wins 防回归 — 上面 C3-1 ~ C3-9 + C3-COND-* + 旧 baseline 全部仍通过
   //   （由 smoke 全套通过验证，不重复用例）
 
+  // v2.1.8 v2.1.7-minor I-9：F2-G / F2-H 反向 case（封死 round 7-9 回归）
+  //   round 9 修：candidates filter 加 "gw 字段非空"层（避免空 gw 反复被选）+ "oldValue===newValue" 时 lock+消费 gw
+  //   F2-G 验证：空 gw 不进 candidates，让出位置给非空 gw
+  //   F2-H 验证：bank 已等值时仍 lock + 消费 gw（first-match-wins + 单向消费红线）
+
+  // F2-G：空 gw 不进候选 — 验证 round 9 filter 排除空 gw（避免数据脏时空 gw 反复被选）
+  {
+    const scenario = makeC3Scenario();
+    const bankRows = [
+      { _rowId: 'F2G-b1', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
+    ];
+    const gwRows = [
+      // 第 1 个 gw 匹配但 reconciliationId 空（脏数据）
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: '' },
+      // 第 2 个 gw 匹配且 reconciliationId 非空（应被选中）
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2G_GC_REAL' }
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    assert.strictEqual(bankRows[0].ReconciliationId, 'F2G_GC_REAL', 'F2-G 空 gw 应被 filter 排除，非空 gw 命中');
+    assert.strictEqual(result.modifications.length, 1, 'F2-G 1 条 modification（非空 gw 写入）');
+    // multi-gateway-match warning：matched.length=1（只有 1 个非空 gw），不应触发 multi
+    // 但若空 gw + 非空 gw 都进 rawMatched（rawMatched.length=2），matched.length=1 → 不触发 multi
+    // M-1 修改后：matched.length===1 不进 if(>1) 分支 → 无 multi warning（正确）
+    assert(!result.warnings.some(w => w.code === 'multi-gateway-match'), 'F2-G 只 1 个可用 gw 不应有 multi warning');
+  }
+
+  // F2-H：bank 已等值 gw 时仍 lock + 消费 gw（first-match-wins + 单向消费红线）
+  {
+    const scenario = makeC3Scenario();
+    const bankRows = [
+      // bank1 已经等于 gw1（oldValue === newValue）— 仍要 lock + 消费 gw1
+      { _rowId: 'F2H-b1', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: 'F2H_G1' },
+      // bank2 与 gw 匹配，应取 gw2（不是 gw1，因为 gw1 被 b1 消费）
+      { _rowId: 'F2H-b2', Currency: 'CNY', 'Credit Amount': 100, 'Debit Amount': 0, MerchantId: 'M001', Channel: 'BankA', ReconciliationId: '' }
+    ];
+    const gwRows = [
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2H_G1' },
+      { Currency: 'CNY', Amount: 100, MerchantId: 'M001', Bank: 'BankA', reconciliationId: 'F2H_G2' }
+    ];
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+    // bank1 已等值不进 modifications（不重写相同值），但 lock 应生效（first-match-wins）
+    assert.strictEqual(bankRows[0].ReconciliationId, 'F2H_G1', 'F2-H b1 保持原值（等值不重写）');
+    // bank2 应取 G2（G1 已被 b1 消费）— 验证 round 9 "已等值仍消费 gw" 修复
+    assert.strictEqual(bankRows[1].ReconciliationId, 'F2H_G2', 'F2-H b2 应取 G2（G1 已被 b1 消费走，single-consume 红线）');
+    assert.strictEqual(result.modifications.length, 1, 'F2-H 仅 b2 record modification（b1 等值不 record）');
+    assert.strictEqual(result.lockedRowIds.size, 2, 'F2-H b1 + b2 都 lock（first-match-wins 红线）');
+  }
+
   // ===== v2.1.7 F4：C2 引擎放宽 smoke（spec §5.9 Case F4-A/B/C/D）=====
   //   F4-A 由 C2-1 ~ C2-5 covered（旧 baseline 2 billTypes + 1 reconFields + markValue）
   //   新增 F4-B/C/D
@@ -794,7 +842,7 @@ function runScenarioEngineSmokeTests() {
     assert(result.lockedRowIds.has('F4D-r1'), 'F4-D 自配对锁定 r1');
   }
 
-  console.log('  scenario-engines: 43/43 PASS');
+  console.log('  scenario-engines: 45/45 PASS'); // v2.1.8 v2.1.7-minor I-9：+ F2-G + F2-H 反向 case
 }
 
 module.exports = {

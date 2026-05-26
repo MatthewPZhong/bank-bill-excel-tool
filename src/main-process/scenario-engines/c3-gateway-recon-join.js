@@ -152,20 +152,23 @@ function runC3Scenario(scenario, bankRows, gwRows) {
     //   2. reconFields AND 匹配
     //   3. **gw 字段非空**（方案 A：不可写的 gw 不进候选，避免"空 gw 反复被选 → 永远轮不到有效 gw"）
     //   v2.1.8 N2：mode='custom' 时跳过第 3 层过滤（newValue 不依赖 gw 字段，gwField='__CUSTOM__' 永远空）
-    const matched = gwRowsFiltered
+    //   v2.1.8 v2.1.7-minor M-1：拆 2 步 filter，warning 区分"可用 gw 数"+"空 gw 跳过数"，
+    //     数据质量监控视角能看到原始匹配数（不被"非空过滤"掩盖）
+    const rawMatched = gwRowsFiltered
       .map((g, gIdx) => ({ row: g, gIdx }))
-      .filter((x) =>
-        !usedGwRowIdx.has(x.gIdx)
-        && gwMatchesBank(x.row, bankRow, reconFields)
-        && (isCustom || normalizeCellValue(x.row[assign.gwField]) !== '')
-      );
+      .filter((x) => !usedGwRowIdx.has(x.gIdx) && gwMatchesBank(x.row, bankRow, reconFields));
+    const matched = rawMatched.filter((x) =>
+      isCustom || normalizeCellValue(x.row[assign.gwField]) !== ''
+    );
     if (matched.length === 0) return;
 
     if (matched.length > 1) {
+      const skippedEmpty = rawMatched.length - matched.length;
+      const skippedNote = skippedEmpty > 0 ? `（另有 ${skippedEmpty} 行空 gw 已跳过）` : '';
       warningCollector.push({
         rowId,
         code: 'multi-gateway-match',
-        message: `bankRow 在网关账单中匹配到 ${matched.length} 行（未用 + 非空），取第一条（数据脏）`
+        message: `bankRow 在网关账单中匹配到 ${matched.length} 行可用 gw${skippedNote}，取第一条（数据脏）`
       });
     }
     const chosen = matched[0];

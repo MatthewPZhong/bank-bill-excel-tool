@@ -3078,22 +3078,10 @@ function registerAppHandlers() {
       //   提前算 unmatchedCount，保存框 + empty 返回两处共用
       const unmatchedCount = Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows.length : 0;
 
-      // 主输出走 saveDialog（用户另存为）；先弹保存框，让用户选位置
-      // 若 modifiedRows + unmatchedRows 都为空 → 跳过 saveDialog，仅落 error-report
-      let mainFilePath = null;
-      if (processingResult.modifiedRows.length > 0 || unmatchedCount > 0) {
-        const defaultFileName = buildMainOutputFileName();
-        const saveResult = await dialog.showSaveDialog(mainWindow, {
-          title: '保存处理结果',
-          defaultPath: path.join(app.getPath('documents'), defaultFileName),
-          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-        });
-        if (saveResult.canceled || !saveResult.filePath) {
-          return { status: 'cancelled' };
-        }
-        mainFilePath = saveResult.filePath;
-      }
-
+      // v2.1.8 v2.1.7-minor M-2：errorReport 写入提前到 saveDialog 之前
+      //   原顺序：saveDialog → cancel return → errorReport 写（cancel 时 errorReport 漏写）
+      //   新顺序：errorReport 写（无条件，独立于 saveDialog）→ saveDialog → cancel 仍 return（但 errorReport 已落盘）
+      //   场景：F8 round 8 全未命中 + 用户取消保存框 → 用户至少能拿到错误报告查异常原因
       // error-report 与主输出独立（PRD §189：error-report xlsx 格式独立于主输出）
       // 即使 modifiedRows.length === 0，warnings 仍应落盘——避免唯一可追溯的异常信息被吞掉
       // （Codex Round 2 F1 P1 修复：C1 多字段值不一致 / C2 一对多多对一 时
@@ -3104,6 +3092,23 @@ function registerAppHandlers() {
           warnings: processingResult.errorReport,
           exportRootDir
         });
+      }
+
+      // 主输出走 saveDialog（用户另存为）；先弹保存框，让用户选位置
+      // 若 modifiedRows + unmatchedRows 都为空 → 跳过 saveDialog，仅落 error-report（上方已写）
+      let mainFilePath = null;
+      if (processingResult.modifiedRows.length > 0 || unmatchedCount > 0) {
+        const defaultFileName = buildMainOutputFileName();
+        const saveResult = await dialog.showSaveDialog(mainWindow, {
+          title: '保存处理结果',
+          defaultPath: path.join(app.getPath('documents'), defaultFileName),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (saveResult.canceled || !saveResult.filePath) {
+          // M-2：cancel 时仍 return，但 errorReport 已写入（上方提前），renderer 显示 errorReport 路径
+          return { status: 'cancelled', errorReport };
+        }
+        mainFilePath = saveResult.filePath;
       }
       // v2.1.7 round 7 F8 fix（PR #51 reviewer P1 / self-review I-5）+ round 8 (Finding 1 follow-up)：
       //   仅当 modifiedRows + unmatchedRows 都为 0 才 return empty；

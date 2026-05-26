@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.11（2026-05-22 — T14 收口 + round 6 B4 真根因 + round 7-11 PR review 反馈循环；49 commit ahead main，PR #51 OPEN；详 §22 v0.11 entry + §23 实施记录）；v0.10（2026-05-21 — round 5 用户测试 round 4 后反馈 2 项未通过 + 1 项 B1 微调：B1 round 4 字号 / Layout 正确，但用户要求去掉"（同时满足）/（满足任一）"文本，提示移到 tooltip / B4 round 4 加 `.big-account-split-left/right min-height: 0` 仍不能滚动 — PM 二次 grep 锁定**第 3 层 flex 嵌套坑**：`.big-account-file-list/order-list` 缺 `min-height: 0` / B2 跟随 B4 修好后才能验证）；v0.9 = round 4；v0.1-0.8 略 |
+| 文档版本 | v0.11（2026-05-22 — T14 收口 + round 6 B4 真根因 + round 7-11 PR review 反馈循环；50 commit（最终 PR #51 merge 进 main），PR #51 OPEN；详 §22 v0.11 entry + §23 实施记录）；v0.10（2026-05-21 — round 5 用户测试 round 4 后反馈 2 项未通过 + 1 项 B1 微调：B1 round 4 字号 / Layout 正确，但用户要求去掉"（同时满足）/（满足任一）"文本，提示移到 tooltip / B4 round 4 加 `.big-account-split-left/right min-height: 0` 仍不能滚动 — PM 二次 grep 锁定**第 3 层 flex 嵌套坑**：`.big-account-file-list/order-list` 缺 `min-height: 0` / B2 跟随 B4 修好后才能验证）；v0.9 = round 4；v0.1-0.8 略 |
 | 目标版本 | `v2.1.7`（patch） |
 | 起始版本 | `v2.1.6`（main 含 v2.1.6 + 3 个 fix） |
 | 起草日期 | 2026-05-20 |
@@ -3086,7 +3086,7 @@ PM 在 spec §10.4 已提供路径 B 完整 sketch，round 6 dev 直接照实施
 | v0.8 | 2026-05-21 | **用户手测 round 3 通过 F1/R4/R6 主功能；反馈 5 bug + 1 新需求 F8**：① B1 F1 radio 移回"条件"row 内部（DOM 重组，资金红线护栏不动）；② B2 multi 完成态字母列丢失（R6a 副作用，PM 推荐方案 A `min-width:24px`，待 dev 实测）；③ **B3 extract-order-card 左右对齐 + 共用滚动条 → 用户 round 3 拍板方案 A**（单 grid 表格，每行横跨左右 + 单 overflow，~20 行 HTML+CSS）；④ B4 ≥20 文件场景滚动条不可用（待 dev 实测真根因 + 新建 fixture）；⑤ **B5 🚨 R3 wiring 漏接审计** — 用户发现 setAcquiringBillCurrencyStatus 漏接；PM grep 再发现 2 处（updateBankStatementUi + updateReconIdFixUi）；三处全部改走 updateStatusBox + render-status-box smoke wiring 审计；⑥ F4 删空 — R1 只改 display 没改 handler（L6794 仍卡 `> 2`），同步两处为 `>= 1` 删空 + 保存校验 `< 1` 兜底；⑦ **F8 🚨 资金红线** — 用户 round 3 拍板定义"未处理" = **scenario-dispatcher first-match-wins 后无任何 scenario 命中的行**（不是 v2.1.x skippedRows）；PM grep 验证 `scenario-dispatcher.js:122-123` rowLockSet 已就绪，**一行反向 filter** 即可得 unmatchedRows；改 dispatcher return + writeWorkbookRows 加可选 unmatchedRows 入参 + 第 2 sheet "未命中场景行"（原始列，不映射，不加诊断列）；新增 §十四 round 3 专章（B1-B5 + F4 删空 7 节）+ §十五 F8 专章；原 §十四-§十九 顺延 §十六-§二十一；§十九 待澄清重整 + v0.8 已拍板项 7 条；本迭代 6 项需求 + round 2 8 项小修 + round 3 6 项小修 + F8；**PM 关键发现**：① B5 用户发现 1 处 + PM grep 再发现 2 处漏接（renderer.js:3330 + :3684）；② F4 R1 commit 只改 display L6716 没改 handler L6794，需同步两处；③ F8 dispatcher rowLockSet 已就绪，改造极轻量且不动 modifiedRows 资金红线 |
 | v0.9 | 2026-05-21 | **用户手测 round 3 后反馈 3 项未通过（B1 位置仍不对 + B2 字母没显示 + B4 滚动条没出现）；起 round 4 章节 + 3 task**：① **B1 用户拍板 Layout-1**（左列纵向"条件 label + AND radio + OR radio"，与右列 conditions 并排）；PM grep 验证字体差异 `.scenario-config-label` 14px vs `.scenario-config-feature-grid label` 13px → spec 显式设 radio label 13px；新增 `.scenario-config-label-stack` 容器 + `.scenario-config-logic-option` 字体 class；② **B4 PM grep 真根因已锁定**（不需要等截图）= `.big-account-split-left/right` 是 `.ba-scroll-container` 的 grid 子项，缺 `min-height: 0` → grid item 默认 `min-height: auto = content size` 穿透父 `max-height: 52vh` → file-list `overflow-y:auto` 永不触发（经典 CSS 陷阱）；1 行 CSS 修复双写 src + Clear；dev round 3 scrollbar 强制可见 CSS 保留（双覆盖）；③ **B2 跟随 B4 验证**（用户原话 B2 测试被 B4 阻塞）；PM 双路径 sketch：路径 A 修 letterSpan textContent 显式判 source='closed'（防 pendingGroup 边界 case 空字母）/ 路径 B 改 grid `auto minmax(24px, auto) 1fr`；dev 修完 B4 后用 DevTools 现场判断；新增 §十六 round 4 专章；原 §十六-§二十一 顺延 §十七-§二十二；§三总览 / §四代码现状 / §一/§二同步更新；§二十待澄清重整 v0.9 新增 + v0.8 锁定项；**PM 关键发现**：① B4 真根因不是滚动条可见性而是 grid item 穿透 max-height（与 R6a flex/grid item 教训类似的 CSS 陷阱）；② B2 被 B4 阻塞手测，需先修 B4 才能完整验证；③ B1 字体一致性需 `.scenario-config-logic-option { font-size: 13px; font-weight: normal }` 显式区别于 `.scenario-config-label` 14px+500 |
 | v0.10 | 2026-05-21 | **用户手测 round 4 反馈 B1 微调 + B4 仍不能滚动 + B2 跟随；起 round 5 章节 + 2 task**：① **B1 round 5 微调**（用户拍板：去掉 radio 文本"（同时满足）/（满足任一）"，提示合到"条件" label tooltip；PM 推荐方案 B 单 tooltip 整合到 6358 行现有 ⓘ tooltip 文案 `按下方选择的聚合逻辑：&#10;AND — 同时满足所有条件才命中&#10;OR — 满足任一条件即命中`，radio 仅保留 "AND"/"OR" 纯文字）；② **B4 round 5 真根因第 2 层 🚨** — dev round 4 修对第 2 层 grid item `.big-account-split-left/right` 但漏修第 3 层 flex item `.big-account-file-list/order-list`；PM 二次 grep 完整 3 层 flex/grid 嵌套高度链（modal-card → split-body → split-left/right → file-list）锁定真根因 = file-list 自己 `min-height: auto = content ~800px` 把父 split-left 撑超 `ba-scroll-container max-height: 52vh = 562px` 即使 split-left 加了 min-height: 0；round 5 一次性修齐第 3 层（主修）+ 防御性给第 1 层 split-body 也加（极小屏 edge case，1080p 不触发），2 行 CSS 双写；dev round 3 scrollbar 强制可见 CSS 保留；③ **B2 跟随 B4**：round 4 路径 A 已 commit，B4 修好后用户实测字母显示 → 路径 A 成功 / 仍不显示 → round 6 走路径 B（grid `auto minmax(24px, auto) 1fr`）；新增 §十七 round 5 专章（17.1-17.5）；原 §十七-§二十二 顺延 §十八-§二十三；§三总览 / §四代码现状 / §一/§二同步更新；**PM 关键发现**：① B4 是经典 flex 嵌套坑 — 每层 flex/grid item 都需要显式 min-height: 0（content size 会从最内层一路撑过所有父级 max-height 约束），round 4 只修第 2 层不够，必须修到最内层；② round 5 一次性给第 3 层（主修）+ 第 1 层（防御性兜底）都加 min-height: 0，避免 round 6 再发现遗漏；③ B1 文案微调用 HTML 实体 `&#10;` 实现多行 tooltip（原生浏览器支持），不需新 CSS |
-| v0.11 | 2026-05-21 | **T14 收口反向同步 + 实施记录**：① **§二十三 实施记录**完整填表（38 commit 全列表 + integrated:true 标记防 archive 重复；6 round 历程总结表）；② **B4 round 6 用户测试通过后实测发现 PM round 5 推断不完整** — DevTools 数据揭示 splitLeft_h=5952 远超 max-height 447，真根因是 `.ba-scroll-container` 缺 `grid-template-rows: 1fr`（grid 第 4 个坑）— 不是 min-height:0 不够（round 4/5 加的 3 处 min-height:0 都 computed = '0px' 生效），而是 grid 容器默认 `grid-auto-rows: auto = content size` 让 grid item 跑出父高度；commit a9cb2ad 加 1 行 CSS 双写修齐；spec §11.3.8 round 6 真根因补章已追加；③ **knowledge/css-flex-grid-overflow-pitfalls.md 沉淀** — flex/grid 嵌套穿透 max-height **必修两条线**（每层 flex/grid item min-height:0 + grid 父 grid-template-rows:1fr），缺一不可，附 v2.1.7 完整 4 round 历程 + DevTools 验证数据 + 排查 SOP；knowledge/index.md 同步入索引；④ spec 反向同步 3 处文件路径歧义已修（§8.4.2 styles.css→styles-gemini-extra.css / §9.8.4 F8 SheetJS 改 SheetJS + ExcelJS 双版本 / §11.3.8 round 6 grid-template-rows 真根因补章）；**PM round 5 推断为什么不完整** — flex 链路 min-height:0 思路对，但 grid 父容器还要管 grid-template-rows，spec 阶段如果父是 `display: grid` 必须显式检查 grid-template-rows 不能只看 min-height:0 链；T14 收口经验沉淀完成 |
+| v0.11 | 2026-05-21 | **T14 收口反向同步 + 实施记录**：① **§二十三 实施记录**完整填表（50 commit 全列表 + integrated:true 标记防 archive 重复；6 round 历程总结表）；② **B4 round 6 用户测试通过后实测发现 PM round 5 推断不完整** — DevTools 数据揭示 splitLeft_h=5952 远超 max-height 447，真根因是 `.ba-scroll-container` 缺 `grid-template-rows: 1fr`（grid 第 4 个坑）— 不是 min-height:0 不够（round 4/5 加的 3 处 min-height:0 都 computed = '0px' 生效），而是 grid 容器默认 `grid-auto-rows: auto = content size` 让 grid item 跑出父高度；commit a9cb2ad 加 1 行 CSS 双写修齐；spec §11.3.8 round 6 真根因补章已追加；③ **knowledge/css-flex-grid-overflow-pitfalls.md 沉淀** — flex/grid 嵌套穿透 max-height **必修两条线**（每层 flex/grid item min-height:0 + grid 父 grid-template-rows:1fr），缺一不可，附 v2.1.7 完整 4 round 历程 + DevTools 验证数据 + 排查 SOP；knowledge/index.md 同步入索引；④ spec 反向同步 3 处文件路径歧义已修（§8.4.2 styles.css→styles-gemini-extra.css / §9.8.4 F8 SheetJS 改 SheetJS + ExcelJS 双版本 / §11.3.8 round 6 grid-template-rows 真根因补章）；**PM round 5 推断为什么不完整** — flex 链路 min-height:0 思路对，但 grid 父容器还要管 grid-template-rows，spec 阶段如果父是 `display: grid` 必须显式检查 grid-template-rows 不能只看 min-height:0 链；T14 收口经验沉淀完成 |
 
 ---
 
@@ -3100,12 +3100,24 @@ total_commits: 38
 total_rounds: 7  # round 1（F1-F4+F6+F7）+ F6 微调 + round 2 R1-R5 + round 3 B1-B5+F4 删空+F8 + round 4 B1+B2+B4 + round 5 B1+B4 + round 6 B4
 ```
 
-### 23.1 38 commit 完整表（v2.1.7 vs main）
+### 23.1 50 commit 完整表（v2.1.7 vs main）
 
 按 commit 时间逆序（最新在上）；每行标对应 PRD/spec 章节定位：
 
 | # | Commit | Round | Type | 内容 | PRD § / spec § |
 |---|---|---|---|---|---|
+| 50 | `551f3bc` | round 12-补 | fix | I-10 important-variables sheet 1 名 + .gitignore 撤回 .claude lock | self-review I-10 follow-up |
+| 49 | `355a59b` | round 12 | fix | self-review I-1 / I-2 / I-3 / I-6 / I-10 — 6 处文档卫生 | self-review 收口 |
+| 48 | `51bf2bb` | round 11 | fix | tasks T14 收口标 ☑ + PR draft Test plan 勾选 + smoke 数 19→22 | PR #51 review round 2 follow-up |
+| 47 | `2fe0b77` | round 10 | fix | package-lock.json 同步 + CHANGELOG 已知 case 闭环 | release 文档对齐 |
+| 46 | `e1264ae` | round 9 | fix | **F2 1v1 空 gw / 已等值 gw 卡池修复** 🚨 资金红线（PR #51 reviewer round 3 Finding 1）| spec §3.8 反向同步补章（v2.1.8 v2.1.7-minor I-7） |
+| 45 | `c142e45` | round 8 | fix | F8 全未命中 saveDialog 触发条件 follow-up（PR #51 reviewer round 2 Finding 1）| PRD §15 AC-F8-5 |
+| 44 | `2781d7c` | round 7 | fix | PR #51 review 2 P1 + P3（F2 gw 误消费 + F8 全未命中 sheet + PRD trailing whitespace）| PRD §7 / §15 |
+| 43 | `070c0b9` | T14 后 | chore | PR #51 归档 YAML 回填 pr_url / status open / integrated true | workflow_archive_pr_draft |
+| 42 | `e7604b0` | T14 后 | chore | 归档 PR #51 草稿 → PR51-v2.1.7.md（integrated:true）| workflow_archive_pr_draft |
+| 41 | `10116f1` | T14 收口 | release | bump 2.1.6→2.1.7 + 文档三件套 + scan:vars 重跑 | workflow_docs_update |
+| 40 | `d337068` | T14 收口 | docs | **PM T14 反向同步 spec/PRD/tasks + check-vars 升格 10 + knowledge 沉淀** | spec §9 / §11 / PRD §23 / knowledge/css-flex-grid-overflow-pitfalls.md |
+| 39 | `7234c32` | C-1 self-review | fix | bizOpRecon 状态框 R3 换行失效 — white-space normal → pre-wrap | PRD §13.4 R3 + spec §8.4 |
 | 38 | `a9cb2ad` | round 6 | fix | B4 `.ba-scroll-container` 加 `grid-template-rows: 1fr` 真根因 | spec §11.3.8（T14 反向同步追加） |
 | 37 | `3f72cfc` | round 5 | fix | B4 file-list 第 3 层 min-height:0 + split-body 第 1 层防御 | PRD §17.3 / spec §11.3 |
 | 36 | `66a3559` | round 5 | fix | B1 去 AND/OR 括号 + 单 tooltip 整合 | PRD §17.2 / spec §11.2 |
@@ -3155,6 +3167,11 @@ total_rounds: 7  # round 1（F1-F4+F6+F7）+ F6 微调 + round 2 R1-R5 + round 3
 | **round 4**（B1 + B2 + B4） | 用户 round 3 测试反馈 3 项 | 3 | B4 第 1 次诊断：split-left/right grid item min-height:0；B1 Layout-1 字体一致 |
 | **round 5**（B1 + B4） | 用户 round 4 测试反馈 2 项 | 2 | B4 第 2 次诊断：file-list 第 3 层 + split-body 第 1 层 min-height:0；B1 去括号 + tooltip 整合 |
 | **round 6**（B4 真根因第 3 次诊断）| 用户 round 5 测试反馈 1 项 | 1 | **B4 真根因彻底锁定**：`.ba-scroll-container` 缺 `grid-template-rows: 1fr` —— DevTools 实测 splitLeft_h=5952 远超 max-height 447；min-height:0 是必要但不充分条件，grid-template-rows 才是 grid 容器关键 |
+| **C-1 + T14 收口**（v2.1.8 v2.1.7-minor M-4 补行）| bizOpRecon R3 self-review + PM T14 反向同步 + release bump + 归档 | 5（#39-#43）| C-1 fix bizOpRecon white-space normal→pre-wrap；T14 PM 反向同步 spec/PRD/tasks + check-vars 升格 10 + knowledge css-flex-grid-overflow-pitfalls.md 沉淀；release 2.1.6→2.1.7 + 文档三件套；PR #51 OPEN 归档草稿 + YAML 回填 |
+| **round 7**（PR #51 reviewer round 2 P1+P3，v2.1.8 v2.1.7-minor M-4 补行）| reviewer Finding × 3 | 1（#44）| F2 gw 误消费修 + F8 全未命中 sheet + PRD trailing whitespace |
+| **round 8**（F8 全未命中 saveDialog follow-up，v2.1.8 v2.1.7-minor M-4 补行）| reviewer round 2 Finding 1 follow-up | 1（#45）| F8 saveDialog 触发条件 `modifiedRows>0 \|\| unmatchedRows>0` 对齐 PRD AC-F8-5 |
+| **round 9**（F2 1v1 空 gw / 已等值 gw 卡池修复，v2.1.8 v2.1.7-minor M-4 补行）| reviewer round 3 Finding 1，🚨 资金红线 | 1（#46）| **F2 candidates filter 加第 3 层（空 gw 排除）+ oldValue===newValue 时仍 lock+消费 gw**；详 spec §3.8（v2.1.8 v2.1.7-minor I-7/I-8 反向同步） |
+| **round 10-12**（release 文档 + self-review 卫生，v2.1.8 v2.1.7-minor M-4 补行）| PR draft / Test plan / package-lock / 6 处文档卫生 | 4（#47-#50）| round 10 package-lock + CHANGELOG / round 11 tasks T14 标 ☑ + Test plan + smoke 数 / round 12 self-review I-1/2/3/6/10 / round 12-补 I-10 sheet 名 + .gitignore |
 
 ### 23.3 F5 延期 v2.1.8 状态
 
@@ -3164,3 +3181,22 @@ PRD §十 已明确 F5（C4 gateway 子模式 BillDate 数字日期解析 + 算�
 
 - v2.1.7 PR（T14 收口阶段 gh pr create，PR 号回填）
 - PR body 草稿存档：`docs/prs/待merge-PR #NN.md` → 提 PR 后改名 `PR{N}-v2.1.7.md` + 加 `integrated: true`
+
+### 23.5 v2.1.8 v2.1.7-minor 追修清单（2026-05-26）
+
+PR #51 merge 后 self-review 列 10 项 minor，由 v2.1.8 顺手处理（用户 2026-05-26 拍板）：
+
+| ID | 描述 | 状态 | 实施位置 |
+|---|---|---|---|
+| **I-4** | commit 数各处不一致（38/39/49 各处散）| ✅ 已修（v2.1.8 commit `XXX`）| 12 处引用统一对齐到 **50** commits（PR #51 merge 实际数）|
+| **I-5** | PRD §23.1 表追加 T14 + round 7-12 的 11 commit | ✅ 已修 | §23.1 表追加 12 行（#39 ~ #50） |
+| **I-7** | spec §三 F2 章节反向同步 round 9 三层 filter | ✅ 已修 | spec §3.8 新增「round 9 反向同步补章」 |
+| **I-8** | spec/PRD 明示 round 9 "空 gw 排除"业务规则 | ✅ 已修 | spec §3.8.3 业务规则明示（资金红线表） |
+| **I-9** | smoke 补 F2-G/H 反向 case（封死 round 7-9 回归）| ✅ 已修 | scripts/smoke/scenario-engines.js + F2-G/H（45/45）|
+| **M-1** | F2 round 9 warning 文案"匹配到 N 行"语义模糊 | ✅ 已修 | c3-gateway-recon-join.js 拆 2 步 filter + warning 区分原始/可用数 |
+| **M-2** | F8 全未命中 + 用户取消保存框 → errorReport 漏写 | ✅ 已修 | main.js errorReport 写入提前到 saveDialog 之前 |
+| **M-3** | round 10 commit `2fe0b77` 同时改 package-lock + CHANGELOG，commit 粒度风格漂移 | ❌ 不可修 | 历史 commit 不可改，仅 backlog 记录 |
+| **M-4** | PRD §23.2 表头"6 round 历程总结"但 round 7-11 没补 row | ✅ 已修 | §23.2 表追加 5 行（C-1+T14 / round 7 / 8 / 9 / 10-12） |
+| **M-5** | round 11 commit message 自反矛盾（"5 round"应为 round 7-11 = 5）| ❌ 不可修 | commit message 已上链；round 12 commit `355a59b` tasks.md 标题已纠正为"round 7-11" |
+
+**总结**：10 项中 **8 项已修 + 2 项不可修（仅记录）**。spec/PRD/CHANGELOG 文档对齐 + 业务代码 2 处优化（M-1 warning 文案 / M-2 errorReport 提前）+ smoke 补 2 case（F2-G/H）。

@@ -277,6 +277,8 @@ bank 行经 reconFields 比对无任何 gw 行匹配 → 跳过该行（与 v2.1
 | F2-D | 2 笔不等额 bank（A=100, B=200）+ 2 笔不等额 gw（C=100, D=200）| BA←GC, BB←GD（旧行为，不受影响） |
 | F2-E | 1 bank + 1 gw 匹配 | BA←GC（旧 baseline） |
 | F2-F | first-match 防回归：旧 smoke 全部仍通过 | regression 保护 |
+| **F2-G** ⭐ | **空 gw 不进候选**（round 9 反向同步 + v2.1.8 v2.1.7-minor I-9）：1 bank + 2 gw（第 1 个 reconciliationId 空 / 第 2 个非空）| bank 命中第 2 个非空 gw（不被脏空 gw 阻塞）|
+| **F2-H** ⭐ | **已等值 gw 仍 lock + 消费**（round 9 单向消费红线，v2.1.8 v2.1.7-minor I-9）：bank1 已等于 gw1 + bank2 同金额 | bank1 保持原值（不重写）但 lock + 消费 gw1；bank2 取 gw2（gw1 已被消费）|
 
 ### 3.4 真实数据回测
 
@@ -289,7 +291,59 @@ PR 前必须用用户提供的 v2.1.6 反例样本（多笔等额场景）手测
 - conditions / gwConditions / bankConditions 过滤逻辑（L108-121）
 - reconFields AND 比对（`gwMatchesBank`，L56-62）
 - virtual amount abs 计算（L25-33, L38-48）
-- warning code / message（仅 multi-gateway-match 文案略调整为"未用"语义）
+- warning code（multi-gateway-match）/ rowId 字段
+- ~~warning message 文案~~（**v2.1.8 v2.1.7-minor M-1 修订**：原"匹配到 N 行（未用 + 非空）"语义模糊，N 是 filter 后值；改"匹配到 N 行可用 gw（另有 M 行空 gw 已跳过）"，数据质量监控视角能看到原始匹配数）
+
+### 3.8 round 9 反向同步补章（v2.1.8 v2.1.7-minor I-7 / I-8 ⚠️ 资金红线）
+
+**背景**：spec §3.1 起草时仅含 round 1（v0.1）方案 A 骨架。PR #51 review 阶段 round 7 / round 9 加了 2 层关键修复，spec 当时未反向同步，由 v2.1.8 v2.1.7-minor I-7 / I-8 补回。
+
+#### 3.8.1 round 7 修复 — usedGwRowIdx.add() 位置调整
+
+原 spec §3.1 改后伪码 L214：`usedGwRowIdx.add(chosen.gIdx)` 在 chosen 选定后立即 add。round 7 移到"确认能写值 + record 之后"（避免 newValue 为空 / oldValue===newValue 时仍消费 gw 导致后续 bank 无 gw 可用）。
+
+#### 3.8.2 round 9 修复 — 双方向修齐（PR #51 reviewer round 3 Finding 1）
+
+**问题**：round 7 把 `usedGwRowIdx.add()` 移到写值后 → 引入新反向 bug：
+- **空 gw 反复被选**：gw 字段为空时 `newValue === ''` → continue → 不 add usedGwRowIdx → 同一空 gw 反复被后续 bank 选中（matched[0] 永远是它）→ 永远轮不到有效 gw
+- **已等值 gw 不消费**：`oldValue === newValue` → continue → 不 add usedGwRowIdx → 同一 gw 可被多个 bank 重复选中 → 违反方案 A 单向消费红线
+
+**修复（candidates filter 加第 3 层 + 等值时 lock+消费）**：
+
+```js
+// candidates 三层过滤（v2.1.7 round 9 fix，c3-gateway-recon-join.js:155-170）
+const rawMatched = gwRowsFiltered
+  .map((g, gIdx) => ({ row: g, gIdx }))
+  .filter((x) =>
+    !usedGwRowIdx.has(x.gIdx)            // 第 1 层：未消费
+    && gwMatchesBank(x.row, bankRow, reconFields)  // 第 2 层：reconFields AND
+  );
+const matched = rawMatched.filter((x) =>
+  normalizeCellValue(x.row[assign.gwField]) !== ''  // 第 3 层：gw 字段非空（v2.1.8 v2.1.7-minor M-1 拆 2 步）
+);
+// ...
+if (oldValue === newValue) {
+  modCollector.lock(rowId);              // round 9：仍 lock（first-match-wins 红线）
+  usedGwRowIdx.add(chosen.gIdx);         // round 9：仍消费 gw（单向消费红线）
+  return;
+}
+```
+
+#### 3.8.3 业务规则明示（资金红线）
+
+| 红线 | 规则 |
+|---|---|
+| **首层过滤** | gw 字段空（脏数据）→ 不进 candidates；让出位置给有效 gw |
+| **单向消费** | 即使 bank 已等值 gw（不重写），仍要 lock + 消费 gw → 防一 gw 被多 bank 重复选中 |
+| **first-match-wins** | matched[0]（数组首个）—— 候选有多个时 warning，但仍取首个保持确定性 |
+| **deterministic** | 同输入 → 同输出（bankRowsFiltered / gwRowsFiltered 顺序稳定 → usedGwRowIdx 添加顺序稳定）|
+
+#### 3.8.4 smoke 反向 case（封死 round 7-9 回归）
+
+- **F2-G**（v2.1.8 v2.1.7-minor I-9 补）：验证第 3 层 filter 排除空 gw（避免数据脏时空 gw 反复被选）
+- **F2-H**（v2.1.8 v2.1.7-minor I-9 补）：验证 `oldValue === newValue` 时仍 lock + 消费 gw（first-match-wins + 单向消费红线）
+
+详 §3.3 表 F2-G / F2-H 行 + `scripts/smoke/scenario-engines.js` 实现。
 
 ### 3.6 风险与回归保护 🚨 资金红线
 
