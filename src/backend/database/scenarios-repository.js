@@ -93,7 +93,9 @@ function listScenarios(db) {
       ORDER BY priority DESC, id ASC
     `)
     .all();
-  return rows.map(rowToListItem);
+  // v2.1.8 N3-1：派发 displayIndex（1-based 按查询顺序），UI 列表序号 + dispatcher 命中场景显示统一来源
+  //   spec.md §五 N3-D1 锁定：repository 层统一附 displayIndex，UI / 引擎共享 → 避免双源真理
+  return rows.map((row, idx) => Object.assign(rowToListItem(row), { displayIndex: idx + 1 }));
 }
 
 function getScenario(db, id) {

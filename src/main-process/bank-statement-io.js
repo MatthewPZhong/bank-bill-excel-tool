@@ -210,7 +210,8 @@ async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePat
     fs.mkdirSync(dir, { recursive: true });
   }
   // v2.1.7 round 3 F8：透传 unmatchedRows 给 writeBankStatementOutput
-  const result = await writeBankStatementOutput(modifiedRows, headers, mainFilePath, unmatchedRows);
+  // v2.1.8 N3-2：主业务流程启用 Sheet 3「命中场景行」（includeHitScenarioSheet=true）
+  const result = await writeBankStatementOutput(modifiedRows, headers, mainFilePath, unmatchedRows, true);
   return { ...result, fileName: path.basename(mainFilePath) };
 }
 

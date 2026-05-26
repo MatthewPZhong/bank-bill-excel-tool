@@ -1,6 +1,6 @@
 {
   "name": "bank-bill-excel-tool",
-  "version": "2.1.7",
+  "version": "2.1.8",
   "description": "网银账单小助手",
   "main": "src/main.js",
   "author": {
@@ -59,6 +59,7 @@
     "preview:scenario-config-c1-and": "node scripts/render-modal-preview.js scenario-config-c1-and scenario-config-c1-and.png",
     "preview:scenario-config-c2": "node scripts/render-modal-preview.js scenario-config-c2 scenario-config-c2.png",
     "preview:scenario-config-c3": "node scripts/render-modal-preview.js scenario-config-c3 scenario-config-c3.png",
+    "preview:scenario-config-c3-custom": "node scripts/render-modal-preview.js scenario-config-c3-custom scenario-config-c3-custom.png",
     "preview:scenario-confirm-detail": "node scripts/render-modal-preview.js scenario-confirm-detail scenario-confirm-detail.png",
     "preview:recon-id-fix-panel": "node scripts/render-modal-preview.js recon-id-fix-panel recon-id-fix-panel.png",
     "preview:scenario-config-c4": "node scripts/render-modal-preview.js scenario-config-c4 scenario-config-c4.png",
@@ -81,6 +82,10 @@
     "preview:acquiring-bill-currency": "npm run preview:acquiring-bill-currency-panel-initial && npm run preview:acquiring-bill-currency-panel-importing && npm run preview:acquiring-bill-currency-panel-result",
     "preview:all": "npm run preview && npm run preview:account && npm run preview:template-manager && npm run preview:mapping-dialog && npm run preview:template-rename && npm run preview:big-account-manager && npm run preview:big-account-manager-dropdown && npm run preview:big-account-selection && npm run preview:new-account && npm run preview:statement-palette && npm run preview:new-account-palette && npm run preview:monthly-balance-export && npm run preview:manual-balance-seed && npm run preview:balance-addon-manager && npm run preview:export-scope && npm run preview:amount-split-rules && npm run preview:bill-split-rows && npm run preview:bill-split-mappings && npm run preview:remember-order-mismatch && npm run preview:account-mapping-migration && npm run preview:pending-panel && npm run preview:pending-rule-dialog && npm run preview:pending-rule-confirm && npm run preview:pending-import-month && npm run preview:pending-reconcile && npm run preview:pending-export-runs && npm run preview:pending-panel-initial && npm run preview:pending-panel-importing && npm run preview:pending-panel-error && npm run preview:module-switcher-open && npm run preview:new-account-multi && npm run preview:new-account-currency-dropdown && npm run preview:big-account-selection-multi && npm run preview:extract-order && npm run preview:account-mapping-editing && npm run preview:bank-statement-panel && npm run preview:scenarios-manager && npm run preview:scenario-category-select && npm run preview:scenario-config-c1 && npm run preview:scenario-config-c1-and && npm run preview:scenario-config-c2 && npm run preview:scenario-config-c3 && npm run preview:scenario-confirm-detail && npm run preview:recon-id-fix-panel && npm run preview:scenario-config-c4 && npm run preview:scenario-config-c4-both && npm run preview:recon-id-fix-panel-business && npm run preview:recon-id-fix-panel-gateway && npm run preview:scenario-config-c4-gateway && npm run preview:scenario-config-c4-gateway-1vN && npm run preview:bank-bu-recon-panel-initial && npm run preview:bank-bu-recon-panel-importing && npm run preview:bank-bu-recon-panel-result && npm run preview:biz-op-recon-panel-initial && npm run preview:biz-op-recon-panel-importing && npm run preview:biz-op-recon-panel-result && npm run preview:biz-op-recon-panel-export-dialog && npm run preview:acquiring-bill-currency-panel-initial && npm run preview:acquiring-bill-currency-panel-importing && npm run preview:acquiring-bill-currency-panel-result && npm run preview:module-cabinet",
     "smoke": "node scripts/smoke-test.js",
+    "test:unit": "node scripts/run-unit-tests.js",
+    "test:unit:coverage": "node scripts/run-unit-tests.js --coverage",
+    "test:integration": "node scripts/integration-runner.js",
+    "release-check": "npm run smoke && npm run test:unit && npm run test:integration",
     "test:v1.5.2": "node scripts/test-v1.5.2-backend.js",
     "test:v1.5.2:sm": "node scripts/test-v1.5.2-state-machine.js",
     "test:v2.0.0:pending-import": "node scripts/test-v2.0.0-pending-import.js",

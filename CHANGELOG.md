@@ -1,8 +1,53 @@
 # Changelog
 
+## 2.1.8 - 2026-05-26
+
+v2.1.7 之后 15 commit 收敛，**6 项主题**：F5（C4 算法重设 4/5 根因）+ G1（单元测试框架建立）+ N1→N1' v0.7（cleanup 改 idle 30min 触发 + 差异保留 + FK 反向同步）+ N2（C3「自取值」）+ N3（银行对账场景号修复 + Sheet 3）+ N4（差异表 29→12 列瘦身 + 破坏性 migration）+ v2.1.7-cleanup（10 项 minor 收尾）。⚠️ **2 个🔴破坏性变更**（N4 raw_json 删 17 字段 + N4 输出契约 29→12）+ **3 个资金红线护栏**（F5 算法 + N4 输出 + cleanupAfterRunBackground includeDiff 参数）+ **7 个 important-variables v11 升格**（Critical 3 / Important-skeleton 2 / Runtime-state 1 / deprecated 标记 1）。
+
+### 新增
+
+- **F5 C4 manyToOne 算法重设**（🔴 资金红线，4/5 根因，#5 延期 v2.1.9）：①「BillDate 数字日期」修复 — `c4-recon-id-fix.js:1058-1065` gateway 映射段 createTime number → ISO 字符串再赋 BillDate（spec F5-D4 v0.3 Reverse Sync — `recon-id-fix-io.js` reader raw 模式不动，仅 c4 引擎入口转换）；② `findBestAmountSubset` maxSize 动态档位 — pool ≤ 12 全跑 / 12-20 maxSize=12 / > 20 maxSize=10 + warn（spec F5-D1）；③ `tryManyToOnePool` 复合排序 — 金额降序 + 子集大小降序（spec F5-D2）；④ currency 字段等值过滤（spec F5-D3）；⑤ 根因 #5 subset-sum 剪枝误剪延期 v2.1.9（需 ILP 算法重写，详 PRD §10.4）；F5 TEST2.xlsx baseline 28→43 行（57 行期望差 14 行属根因 #5 范畴）；43 行 unit case + smoke 全套 0 regression
+- **G1 单元测试框架建立**（工程基建）：Node 22+ 原生 `node:test`（零 devDependencies）+ `tests/unit/` 镜像 src 结构；`npm run test:unit` 入口跑 28 suites / 123 case；覆盖 normalizers (68) + c4-recon-id-fix (43) + c3-gateway-recon-join (12)；G1 全量铺（第 1 层剩余 13 + 第 2 层 24）延期 v2.1.9
+- **N1' (v0.7) cleanup 改 idle 30min 触发 + 差异保留**（🔴 资金红线 + FK 反向同步）：触发改三层 — ① idle 30min 主（`setupIdleCleanupTimer` setInterval 2min tick + `lastUserActivityTs` + `IDLE_CLEANUP_MS = 30 * 60 * 1000` + renderer 10s 节流上报 `mousemove/keydown/click/wheel/touchstart`）② before-quit 静默退出兜底 ③ listMonths 进入模块崩溃恢复兜底；范围 — `cleanupAfterRunBackground` 加 `includeDiff=false` 参数默认仅清 flow_imports（bill_imports 因 FK 约束 `diff_rows.bill_import_id REFERENCES bill_imports.id` 无 CASCADE 必须连带保留 + diff_rows 保留作为有效输出 + runs 保留作 diff 元数据）；cleanupOrphanData Phase 2 显式 includeDiff:true 仍清 3 表（先 diff → bill → flow 解 FK）；v0.6 β 方案"退出主清"降级为静默退出兜底；13 项决策点全锁（差异保留 D1-D5 + idle D6-D13）
+- **N2 C3「对账成立后赋值」新增"自取值"**：第二下拉新增 `__CUSTOM__` 枚举 + 静态字符串输入框；DB migration `ensureC3AssignAddMode` 给历史场景 assign 加 `mode='direct'` + `customValue=''`；引擎 `mode='custom'` 分支跳过 gw 字段非空过滤 + 静态字符串赋值；12 unit case + dialog HTML 内联 `__CUSTOM__` option（撤回 GATEWAY_RECON_FIELDS 修改，避免 reader 表头校验破坏）
+- **N3-1 银行对账场景号修复 + N3-2 Sheet 3「命中场景行」**：dispatcher `hitScenarioIds` → `hitScenarios` 结构带 `displayIndex`（按 priority DESC + id ASC 1-based）；renderer 状态框文案 + IPC 字段重命名零 regression（smoke 字段迁移）；writer 加可选 `includeHitScenarioSheet=false`（默认保 v2.1.7 F8 调用方）+ Sheet 3 列「命中场景」= `[displayIndex] name` 形式；`INTERNAL_FIELDS` 加 `_hitScenarioDisplayIndex` 白名单
+- **N4 收单差异表瘦身 29→12 列**（🔴 资金红线 + 破坏性 migration）：输出契约改造 — `WRITER_OUTPUT_HEADERS_V2`（12 列）= `TEMPLATE_BILL_HEADERS`（9 列模版）+ 单据_对账币种 + 流水_通道清算币种 + 流水_通道清算金额；模版 `assets/收单币种校验导出差异表模版.xlsx` 补齐到 12 列作 truth source；writer.js 循环重写按 TEMPLATE_BILL_HEADERS 取字段；旧 `WRITER_OUTPUT_HEADERS`（29 列）标 deprecated 保留参照。**🔴 DB 破坏性 migration** — `ensureBillRawJsonV2Slim` 启动期自动备份 DB 到 `<userData>/backups/tool-data-bak-pre-N4-<ts>.sqlite`（PRAGMA wal_checkpoint(TRUNCATE) + fs.copyFileSync）→ 事务包裹批量 rewrite `bill_imports.raw_json` 仅保留 9 模版字段（**永久删除 17 字段**：ReconBillBizId / 公司主体 / 业务部门 / 对手部门 / 订单创建来源 / 财务BU / 账单类型 / 业务子类型 / 交易类型 / 对账子类型 / 单据状态 / 用户编号 / 账户号 / 账户类型 / remark / 创建时间 / 完成时间）→ 写 marker `app_settings.acquiring_bill_raw_json_v2_migrated=true`；失败回滚 + 标志位防重入；4 决策点全锁（D1=b 不加 diff_type / D2=b 保留单据_对账币种副本 / D3=a 模版顺序 / D4=b DB 也瘦身）+ 模版处理=a 补齐 12 列；caseN4_billRawJsonSlimMigration 全流程 smoke
+
+### 变更
+
+- **F5 (T08) Reverse Sync F5-D4**：spec v0.3 改 `(a) reader 入口` → `(b) c4 引擎入口`（reader sheetToObjects 跨 8 sheet 共用，资金红线扩面 → 改入口收敛到 c4 一处）
+- **N1 → N1' Reverse Sync** spec v0.8 / PRD v0.7：方案从 β（退出主链路 + 进入兜底）重设为 idle 30min（主）+ before-quit（兜底）+ 进入模块（崩溃恢复兜底）；β 实施代码增量改造非全推翻（DB schema + repository API + before-quit 钩子保留）
+- **N1' v0.9 FK 反向同步**：实施 T31b 时 smoke caseP 报 `FOREIGN KEY constraint failed` → 调研 `diff_rows.bill_import_id REFERENCES bill_imports.id` 无 CASCADE → spec / PRD / tasks 反向同步加 §3.6 章节 + cleanupAfterRunBackground 加 includeDiff 参数（false 默认仅清 flow_imports）
+- **N4 输出契约破坏性变更（v0.8 → v0.9 → v0.10 三轮）**：v0.7 用户立项 idle 30min + 差异保留 → v0.8 FK 反向同步 bill 也保留 → v0.10 用户立项差异表瘦身 + DB raw_json 也瘦身（D4=b）；3 轮 Reverse Sync 之后稳定收敛
+- **`cleanupAfterRunBackground` 签名变更**：新增 `includeDiff = false` 参数；保持默认行为安全（仅清 flow），arity 增加不破坏现有 4 个调用方（main.js × 3 + session.js Phase 2 × 1，仅 Phase 2 显式传 true）
+- **v2.1.7 minor 10 项收尾**（commit `e07f02b`）：8 项已修（M-1 c3 warning 文案 / M-2 errorReport 提前到 saveDialog 之前 / I-7/I-8 spec F2 反向同步 round 9 / I-9 smoke F2-G/H 反向 case / I-4 12 处 commit 数对齐 50 / I-5 PRD §23.1 +12 行 / M-4 PRD §23.2 +5 round）+ 2 项不可修记录（M-3 commit 粒度漂移历史不可改 / M-5 commit message 已上链）
+
+### 文档
+
+- `docs/iterations/v2.1.8/PRD-v2.1.8.md` v0.9（§八.1 N4 + §八 N1' / N1 重设记录）
+- `docs/iterations/v2.1.8/spec.md` v0.10（§三.1 N4 + §三 N1' / N1 重设 + §3.6 FK 反向同步）
+- `docs/iterations/v2.1.8/tasks.md` v0.3（Phase 6.1 N1' 6 task + Phase 6.2 N4 7 task）
+- `docs/iterations/v2.1.8/backlog.md` 8 项 backlog（新增 N4）
+- `rules/important-variables.md` v11 升格 7 条（Critical 3 / Important-skeleton 2 / Runtime-state 1 / deprecated 1 / 更新 1）
+- `assets/收单币种校验导出差异表模版.xlsx` 9 → 12 列（首次纳入版本控制）
+
+### ⚠️ 升级提示（用户必读）
+
+- **首次启动 v2.1.8 自动备份 DB**：备份位置 `<userData>/backups/tool-data-bak-pre-N4-<timestamp>.sqlite`，DB 大可能 5-30 秒；备份成功才启动 raw_json migration
+- **17 字段永久删除**（不可逆）：升级后 `bill_imports.raw_json` 只剩 9 模版字段；历史月份差异表重导出也只有 12 列
+- **v2.1.8 后新导入也仅写 9 字段**（self-review SR7 / PR #52 Finding 1）：`import-repository.insertBillRow` 改用 `TEMPLATE_BILL_HEADERS` 投影，新写入数据不残留 17 字段（N4 契约真正闭环）
+- **Excel 自动化失效**：基于 29 列结构的 VBA / Power Query / Python pandas 脚本必须更新到 12 列
+- **idle 30min 自动清流水**：闲置 30 分钟后台自动清 `flow_imports`（不影响差异结果，bill/diff/runs 保留）
+
+### 已知边界 case
+
+- **F5 #5 根因延期**：subset-sum 剪枝误剪 → TEST2.xlsx 43/57 行命中（差 14 行）；需 ILP 算法重写延期 v2.1.9
+- **G1 全量铺延期**：第 1 层剩余 13 + 第 2 层 24 文件延期 v2.1.9（本版仅建框架 + 3 文件 case）
+- **A3 worker 跨进程化延期 v2.1.9**：runCheck 性能改造由 N1' idle 30min 部分缓解（用户闲置时清表不阻塞）
+
 ## 2.1.7 - 2026-05-21
 
-v2.1.6 之后 7 轮迭代收敛，**共 39 commit + 6 项主功能 + 多轮用户反馈修复**。F5（C4 gateway BillDate 数字日期 + 算法重设）延期 v2.1.8 与 A3（worker_threads 异步 SQL）联合主题。本版本聚焦 6 项主功能（F1-F4 / F6-F8）+ R3 状态框全局换行 + B5 全局 wiring 加固 + B4 CSS flex/grid 嵌套穿透 max-height 真根因（4 round 收敛）+ C-1 self-review 阻塞修复。⚠️ **5 个资金红线护栏**（F2 C3 1v1 / F4 C2 校验放宽 / F7-A1 全局 PRAGMA / F8 dispatcher 第 2 sheet / R5 F1 默认 AND 三层护栏）+ **4 个全局影响节点**（F7-A1 PRAGMA / R3 换行 / B5 wiring / F4 重命名）+ **10 个 important-variables 升格**（Critical 3 + Important-skeleton 2 + Risk-sensitive 5）。
+v2.1.6 之后 7 轮迭代收敛，**共 50 commit + 6 项主功能 + 多轮用户反馈修复**。F5（C4 gateway BillDate 数字日期 + 算法重设）延期 v2.1.8 与 A3（worker_threads 异步 SQL）联合主题。本版本聚焦 6 项主功能（F1-F4 / F6-F8）+ R3 状态框全局换行 + B5 全局 wiring 加固 + B4 CSS flex/grid 嵌套穿透 max-height 真根因（4 round 收敛）+ C-1 self-review 阻塞修复。⚠️ **5 个资金红线护栏**（F2 C3 1v1 / F4 C2 校验放宽 / F7-A1 全局 PRAGMA / F8 dispatcher 第 2 sheet / R5 F1 默认 AND 三层护栏）+ **4 个全局影响节点**（F7-A1 PRAGMA / R3 换行 / B5 wiring / F4 重命名）+ **10 个 important-variables 升格**（Critical 3 + Important-skeleton 2 + Risk-sensitive 5）。
 
 ### 新增
 
@@ -24,7 +69,7 @@ v2.1.6 之后 7 轮迭代收敛，**共 39 commit + 6 项主功能 + 多轮用�
 
 ### 文档
 
-- `docs/iterations/v2.1.7/PRD-v2.1.7.md` v0.11（§二十三 实施记录 39 commit + 6 round 历程 + F5 延期）
+- `docs/iterations/v2.1.7/PRD-v2.1.7.md` v0.11（§二十三 实施记录 50 commit + 6 round 历程 + F5 延期）
 - `docs/iterations/v2.1.7/spec.md` v0.9（T14 反向同步 3 处：§8.4.2 styles.css→styles-gemini-extra.css / §9.8.4 SheetJS+ExcelJS / §11.3.8 B4 round 6 真根因补章）
 - `docs/iterations/v2.1.7/tasks.md` v0.8（T14 收口子项清单）
 - `rules/important-variables.md` v9 升格 10 条

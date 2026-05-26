@@ -217,6 +217,27 @@ function reportRendererStartupMetrics() {
   }
 }
 
+// v2.1.8 N1' (v0.7)：用户活动 10s 节流上报（spec §3.2.2 N1''-D7）
+//   - main 维护 lastUserActivityTs；idle 30min 后台触发 cleanup
+//   - 节流而非防抖：保证 10s 内必上报一次，避免长按/拖动时 main 误判 idle
+//   - 监听 mousemove / keydown / click / wheel / touchstart（覆盖 PC + 触控板）
+const USER_ACTIVITY_REPORT_INTERVAL_MS = 10 * 1000;
+let lastUserActivityReportTs = 0;
+function setupUserActivityReporter() {
+  if (!window.desktopApi || !window.desktopApi.app || !window.desktopApi.app.reportUserActivity) return;
+  const report = () => {
+    const now = Date.now();
+    if (now - lastUserActivityReportTs < USER_ACTIVITY_REPORT_INTERVAL_MS) return;
+    lastUserActivityReportTs = now;
+    try {
+      window.desktopApi.app.reportUserActivity();
+    } catch (_e) { /* swallow，main idle 误判由 mutex 兜底 */ }
+  };
+  ['mousemove', 'keydown', 'click', 'wheel', 'touchstart'].forEach((evt) => {
+    window.addEventListener(evt, report, { passive: true });
+  });
+}
+
 const elements = {
   appShell: document.getElementById('appShell'),
   importFileBtn: document.getElementById('importFileBtn'),
@@ -448,6 +469,7 @@ const {
   applyScenarioConfigC1AndPreviewState,
   applyScenarioConfigC2PreviewState,
   applyScenarioConfigC3PreviewState,
+  applyScenarioConfigC3CustomPreviewState,
   applyScenarioConfirmDetailPreviewState,
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 preview（3 张）
   applyReconIdFixPanelPreviewState,
@@ -3282,8 +3304,10 @@ async function refreshBankStatementStatus() {
         ? {
           hitRowCount: status.processingStats?.hitRowCount ?? 0,
           scenarioHitCount: status.processingStats?.scenarioHitCount ?? 0,
-          hitScenarioIds: Array.isArray(status.processingStats?.hitScenarioIds)
-            ? status.processingStats.hitScenarioIds.slice()
+          // v2.1.8 N3-1：hitScenarioIds → hitScenarios（{id, displayIndex, name}[]）
+          //   状态框显示用 displayIndex 与场景管理 UI 列表序号统一
+          hitScenarios: Array.isArray(status.processingStats?.hitScenarios)
+            ? status.processingStats.hitScenarios.slice()
             : [],
           warningCount: status.processingStats?.warningCount ?? 0,
           skippedC3Count: status.processingStats?.skippedC3Count ?? 0
@@ -3315,8 +3339,9 @@ function updateBankStatementUi() {
     if (ex.errorReportName) text += `\nerror-report：${ex.errorReportName}`;
     tone = 'success';
   } else if (pr) {
-    const ids = Array.isArray(pr.hitScenarioIds) ? pr.hitScenarioIds : [];
-    const idsText = ids.length > 0 ? `（场景 ${ids.join('、')}）` : '';
+    // v2.1.8 N3-1：hitScenarios.displayIndex 与场景管理 UI 列表序号统一（spec.md §五 N3-D1）
+    const arr = Array.isArray(pr.hitScenarios) ? pr.hitScenarios : [];
+    const idsText = arr.length > 0 ? `（场景 ${arr.map((s) => s.displayIndex).join('、')}）` : '';
     text = `已处理：${pr.hitRowCount} 行命中${idsText}，${pr.warningCount} 警告`;
     if (pr.skippedC3Count > 0) {
       text += ` · 跳过 ${pr.skippedC3Count} 个对账不平场景`;
@@ -5312,6 +5337,10 @@ async function initialize() {
     setTimeout(() => {
       applyScenarioConfigC3PreviewState();
     }, 120);
+  } else if (info.previewModal === 'scenario-config-c3-custom') {
+    setTimeout(() => {
+      applyScenarioConfigC3CustomPreviewState();
+    }, 120);
   } else if (info.previewModal === 'scenario-confirm-detail') {
     setTimeout(() => {
       applyScenarioConfirmDetailPreviewState();
@@ -5370,6 +5399,8 @@ async function initialize() {
 
   markRendererStartup(RENDERER_STARTUP_MARKS.initComplete);
   reportRendererStartupMetrics();
+  // v2.1.8 N1' (v0.7)：注册用户活动监听 → 10s 节流上报 main，作为 idle 30min 判定依据
+  setupUserActivityReporter();
 }
 
 initialize().catch((error) => {

@@ -1,4 +1,6 @@
 const { randomUUID } = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const { normalizeText } = require('./utils');
 
 function hasColumn(db, tableName, columnName) {
@@ -788,6 +790,182 @@ function ensureC3GwFieldCurrencyCaseFix(db) {
   });
 }
 
+// v2.1.8 N4：差异表瘦身 — bill_imports.raw_json 一次性 rewrite 仅保留 9 模版字段（破坏性，永久删 17 字段值）
+// ⚠️ 资金红线 + 破坏性 schema：spec v0.10 §三.1 / PRD v0.9 §八.1
+//
+// 流程：
+//   1. 幂等检查 app_settings.acquiring_bill_raw_json_v2_migrated = 'true' → 跳过
+//   2. 备份 DB：PRAGMA wal_checkpoint(TRUNCATE) 强制 WAL 写回 → fs.copyFileSync 到 <dbDir>/backups/tool-data-bak-pre-N4-<ts>.sqlite
+//   3. 事务包裹：分批扫 bill_imports → JSON.parse → 只保留 TEMPLATE_BILL_HEADERS 9 字段 → JSON.stringify → UPDATE raw_json
+//   4. 成功后写 marker = 'true'；失败回滚事务 + activityLog（caller 端 console.error）+ marker 不写 → 下次启动重试
+//   5. 大数据量分批（每批 5000 + COMMIT 让 event loop 喘气）
+//
+// 备份失败 → 整个 migration 不启动（cb 抛错，启动期 console.error）；保护用户数据完整性
+//
+// v2.1.8 self-review SR1 修订：从本地常量改 require columns.js 的 TEMPLATE_BILL_HEADERS
+//   避免双源真理 — 模版字段是 N4 输出契约，未来若 PM 改模版（如增字段）
+//   必须仅改 columns.js 一处，migration 自动跟随；不可在此处独立维护副本
+const { TEMPLATE_BILL_HEADERS } = require('../acquiring-bill-currency-db/columns');
+const BILL_RAW_JSON_V2_MIGRATED_KEY = 'acquiring_bill_raw_json_v2_migrated';
+function ensureBillRawJsonV2Slim(db, dbPath) {
+  // 1. 幂等检查
+  let markerRow;
+  try {
+    markerRow = db.prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?').get(BILL_RAW_JSON_V2_MIGRATED_KEY);
+  } catch (_e) {
+    // app_settings 表不存在（极早期启动） → 跳过本次（等下一次启动）
+    return { status: 'skipped-no-settings-table' };
+  }
+  if (markerRow && String(markerRow.setting_value) === 'true') {
+    return { status: 'already-migrated' };
+  }
+
+  // 检查目标表是否存在（极早期启动）
+  let billCount;
+  try {
+    billCount = db.prepare('SELECT COUNT(*) as c FROM acquiring_bill_currency_bill_imports').get().c;
+  } catch (_e) {
+    return { status: 'skipped-no-bill-table' };
+  }
+
+  // 2. 备份 DB（不论 billCount > 0 与否，首次都备份一份；后续幂等跳过）
+  //   self-review SR2 强化：
+  //     (a) wal_checkpoint(TRUNCATE) 改 prepare/get 拿返回值 { busy, log, checkpointed }
+  //         若 busy=1（仍有 reader）→ 备份的 sqlite 文件可能不含 WAL 最新数据 → abort
+  //     (b) 时间戳从 ISO with T/.分号 改紧凑格式 YYYYMMDDThhmmss（与项目其他时间戳一致）
+  let backupPath = null;
+  if (dbPath) {
+    try {
+      // 强制 WAL 写回主 DB（避免 copy 时 WAL 含未 checkpoint 的数据）
+      // SR2 修订：检查 busy；启动期单线程理论安全，但作为资金红线最后防线显式断言
+      let checkpoint;
+      try {
+        checkpoint = db.prepare('PRAGMA wal_checkpoint(TRUNCATE);').get();
+      } catch (_e) {
+        // 非 WAL 模式（journal_mode=DELETE 等）会返回 undefined 或抛错；视为 OK
+        checkpoint = null;
+      }
+      if (checkpoint && Number(checkpoint.busy) > 0) {
+        console.error('[migration N4] WAL checkpoint busy (有 reader 未释放)，备份不可靠 → abort，下次启动重试:', checkpoint);
+        return { status: 'backup-failed', error: 'wal_checkpoint busy' };
+      }
+      const backupDir = path.join(path.dirname(dbPath), 'backups');
+      fs.mkdirSync(backupDir, { recursive: true });
+      // 紧凑时间戳 YYYYMMDDThhmmss（项目其他时间戳同格式）
+      const ts = new Date().toISOString().replace(/[-:.]/g, '').replace(/\.\d+Z?$/, '').slice(0, 15);
+      backupPath = path.join(backupDir, `tool-data-bak-pre-N4-${ts}.sqlite`);
+      fs.copyFileSync(dbPath, backupPath);
+    } catch (backupErr) {
+      // 备份失败 → 不启动 migration（数据完整性优先）；下次启动重试
+      // eslint-disable-next-line no-console
+      console.error('[migration N4] DB backup failed, aborting raw_json slim migration:', backupErr && backupErr.message);
+      return { status: 'backup-failed', error: backupErr.message };
+    }
+  }
+
+  // billCount=0 时直接写 marker 完事
+  if (billCount === 0) {
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO app_settings (setting_key, setting_value, updated_at)
+      VALUES (?, 'true', ?)
+      ON CONFLICT(setting_key) DO UPDATE
+      SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+    `).run(BILL_RAW_JSON_V2_MIGRATED_KEY, now);
+    return { status: 'migrated-empty', backupPath, rowsAffected: 0 };
+  }
+
+  // 3. 分批事务 rewrite
+  const BATCH = 5000;
+  let totalRewritten = 0;
+  let lastId = 0;
+  const selectStmt = db.prepare('SELECT id, raw_json FROM acquiring_bill_currency_bill_imports WHERE id > ? ORDER BY id ASC LIMIT ?');
+  const updateStmt = db.prepare('UPDATE acquiring_bill_currency_bill_imports SET raw_json = ? WHERE id = ?');
+
+  while (true) {
+    const rows = selectStmt.all(lastId, BATCH);
+    if (rows.length === 0) break;
+    db.exec('BEGIN');
+    let batchUpdated = 0; // SR2 修订：实际 UPDATE 计数（剔除 JSON.parse 跳过的行），totalRewritten 累加更准
+    try {
+      for (const row of rows) {
+        let rawObj;
+        try {
+          rawObj = JSON.parse(row.raw_json);
+        } catch (_parseErr) {
+          // 单行 JSON 损坏 → 跳过这行（保留原值，避免误删）；lastId 仍前推保证游标进度
+          lastId = row.id;
+          continue;
+        }
+        const slim = {};
+        for (const key of TEMPLATE_BILL_HEADERS) {
+          if (key in rawObj) slim[key] = rawObj[key];
+        }
+        updateStmt.run(JSON.stringify(slim), row.id);
+        lastId = row.id;
+        batchUpdated++;
+      }
+      db.exec('COMMIT');
+      totalRewritten += batchUpdated;
+    } catch (batchErr) {
+      try { db.exec('ROLLBACK'); } catch (_e) { /* swallow */ }
+      // eslint-disable-next-line no-console
+      console.error('[migration N4] batch rewrite failed, marker NOT written, will retry next launch:', batchErr && batchErr.message);
+      return { status: 'batch-failed', error: batchErr.message, totalRewritten, backupPath };
+    }
+    if (rows.length < BATCH) break;
+  }
+
+  // 4. 写 marker（仅全部成功才写，确保失败可重试）
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO app_settings (setting_key, setting_value, updated_at)
+    VALUES (?, 'true', ?)
+    ON CONFLICT(setting_key) DO UPDATE
+    SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+  `).run(BILL_RAW_JSON_V2_MIGRATED_KEY, now);
+
+  return { status: 'migrated', backupPath, rowsAffected: totalRewritten };
+}
+
+// v2.1.8 N1：给 acquiring_bill_currency_runs 加 cleanup_pending 列（β 方案：cleanup 移出对账链路）
+// 背景：v2.1.7 runCheck 成功后 main.js:10307 setImmediate(cleanupAfterRunBackground) 立即异步清；
+//       v2.1.8 N1 β 改为延迟到 app.before-quit（主清）+ 进入模块时（兜底）；
+//       runs 表加 cleanup_pending=1 标记"待清理"，cleanup 完成后 SET=0
+// 幂等：hasColumn 检查避免重复 ADD COLUMN
+function ensureAcquiringBillCurrencyRunsCleanupPending(db) {
+  if (hasColumn(db, 'acquiring_bill_currency_runs', 'cleanup_pending')) return;
+  db.exec(`ALTER TABLE acquiring_bill_currency_runs ADD COLUMN cleanup_pending INTEGER DEFAULT 0`);
+}
+
+// v2.1.8 N2：给历史 'gateway-recon-join' 场景的 assign 对象补 mode / customValue 字段
+// 背景：v2.1.7 之前 assign = { gwField, bankField }；v2.1.8 N2 扩展为
+//       { gwField, bankField, mode: 'direct' | 'custom', customValue }
+// 用户老 scenario 升级 v2.1.8 后，dialog 编辑 / 引擎读取需要 mode 字段才能进入 v2.1.8 新分支
+// 幂等：若 assign.mode 已存在 → no-op；多次启动只首次命中
+// 不变量：仅追加 mode='direct' + customValue=''，不修改任何已有字段（gwField/bankField 保持）
+function ensureC3AssignAddMode(db) {
+  const rows = db.prepare(
+    `SELECT id, config_json FROM scenarios WHERE category = 'gateway-recon-join'`
+  ).all();
+  if (rows.length === 0) return;
+  const update = db.prepare(`UPDATE scenarios SET config_json = ?, updated_at = ? WHERE id = ?`);
+  const now = new Date().toISOString();
+  rows.forEach((row) => {
+    let config;
+    try {
+      config = JSON.parse(row.config_json);
+    } catch (_e) {
+      return;
+    }
+    if (!config || !config.assign) return;
+    if (config.assign.mode) return; // 幂等：已有 mode 字段则跳过
+    config.assign.mode = 'direct';
+    if (!('customValue' in config.assign)) config.assign.customValue = '';
+    update.run(JSON.stringify(config), now, row.id);
+  });
+}
+
 // v2.1.2 T2 — 月度银行对账单BU回填校验模块的 3 张表
 // PRD §三 / spec §3.4：
 //   - bank_bu_recon_pending_imports：按月份存 Pending 数据管理.xlsx (20 列) 的导入数据
@@ -1120,6 +1298,9 @@ module.exports = {
   migrateC4ReconGroupsStructure,
   migrateC4ReconGroupsAmountLockedFieldPair,
   ensureC3GwFieldCurrencyCaseFix,
+  ensureC3AssignAddMode,
+  ensureAcquiringBillCurrencyRunsCleanupPending,
+  ensureBillRawJsonV2Slim,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,

@@ -127,7 +127,7 @@ async function runScenarioDispatcherSmokeTests() {
     assert(result.modifiedRows[0]._modifiedColumns.has('ReconciliationId'), 'D1 应记 column');
     assert.strictEqual(result.stats.hitRowCount, 1, 'D1 stats hitRowCount');
     assert.strictEqual(result.stats.scenarioHitCount, 1, 'D1 scenarioHitCount');
-    assert.deepStrictEqual(result.stats.hitScenarioIds, [1], 'D1 hitScenarioIds 应含命中场景 id');
+    assert.deepStrictEqual(result.stats.hitScenarios.map((s) => s.id), [1], 'D1 hitScenarioIds 应含命中场景 id');
   }
 
   // ===== Dispatcher D2: 单 C2 命中（双锁）=====
@@ -177,7 +177,7 @@ async function runScenarioDispatcherSmokeTests() {
       'D3 ReconciliationId 应被 C1 写入，C3 不再覆盖'
     );
     // PR #32b：hitScenarioIds 仅含命中的 C1（C3 被锁行了无命中）
-    assert.deepStrictEqual(result.stats.hitScenarioIds, [1], 'D3 hitScenarioIds 仅含 C1（C3 已被锁过）');
+    assert.deepStrictEqual(result.stats.hitScenarios.map((s) => s.id), [1], 'D3 hitScenarioIds 仅含 C1（C3 已被锁过）');
   }
 
   // ===== Dispatcher D4: gwRows = null → C3 类被过滤 =====
@@ -197,7 +197,7 @@ async function runScenarioDispatcherSmokeTests() {
     const result = runAllScenarios(bankRows, null, [c1Disabled]);
     assert.strictEqual(result.modifiedRows.length, 0, 'D5 全部 disabled 应 0 行');
     assert.strictEqual(result.stats.scenarioHitCount, 0, 'D5 scenarioHitCount');
-    assert.deepStrictEqual(result.stats.hitScenarioIds, [], 'D5 无命中时 hitScenarioIds 为空');
+    assert.deepStrictEqual(result.stats.hitScenarios.map((s) => s.id), [], 'D5 无命中时 hitScenarioIds 为空');
   }
 
   // ===== Dispatcher D6（Codex F1 P1 回归）：dispatcher in-place 修改特性 =====
@@ -369,7 +369,7 @@ async function runScenarioDispatcherSmokeTests() {
     const result = runAllScenarios(bankRows, null, [makeC1Scenario(), makeC4Scenario()]);
     assert.strictEqual(result.modifiedRows.length, 1, 'D10 应仅 C1 命中 1 行');
     assert.strictEqual(result.modifiedRows[0]._hitScenarioId, 1, 'D10 应是 C1 (id=1)');
-    assert.deepStrictEqual(result.stats.hitScenarioIds, [1], 'D10 hitScenarioIds 仅含 C1');
+    assert.deepStrictEqual(result.stats.hitScenarios.map((s) => s.id), [1], 'D10 hitScenarioIds 仅含 C1');
     assert.strictEqual(result.stats.skippedC4Count, 1, 'D10 stats.skippedC4Count 应等于 C4 数量');
   }
 
@@ -383,7 +383,7 @@ async function runScenarioDispatcherSmokeTests() {
     assert.strictEqual(result.modifiedRows.length, 0, 'D11 modifiedRows 应空');
     assert.strictEqual(result.stats.scenarioHitCount, 0, 'D11 scenarioHitCount=0');
     assert.strictEqual(result.stats.skippedC4Count, 1, 'D11 skippedC4Count=1');
-    assert.deepStrictEqual(result.stats.hitScenarioIds, [], 'D11 hitScenarioIds 空');
+    assert.deepStrictEqual(result.stats.hitScenarios.map((s) => s.id), [], 'D11 hitScenarioIds 空');
   }
 
   // ===== Dispatcher D12（v2.1.0-beta.1 PR-A round 2 P1）：=====

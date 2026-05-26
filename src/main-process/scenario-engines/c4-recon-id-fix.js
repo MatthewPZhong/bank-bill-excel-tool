@@ -68,6 +68,28 @@ const { ORDER_REPAIR_FIELDS_GATEWAY } = require('../../constants/gateway-bill-re
 
 // ===== 工具函数 =====
 
+// v2.1.8 F5 T08：BillDate 值规范化为 'YYYY-MM-DD' 字符串
+//   gateway 子模式 createTime 列在 Excel 真日期格式下 sheetToObjects raw:true 读出 number 序列号
+//   parseBillDateMs 正则只认字符串 → 需在 gateway 映射段先规范化
+//   不动 recon-id-fix-io.js raw 模式（共用函数影响 8 sheet × N 字段，资金红线扩面）
+//   spec.md F5-D4 v0.3 Reverse Sync 决策方案 C
+function normalizeBillDateValue(value) {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'number') {
+    // Infinity / NaN / -Infinity 不是有效 Excel 序列号，返回 '' 让 parseBillDateMs 拿到空也 fail（避免诡异字符串）
+    if (!Number.isFinite(value)) return '';
+    // Excel epoch = 1899-12-30（修正 1900 闰年 bug 后），1 serial = 1 day
+    const ms = Date.UTC(1899, 11, 30) + Math.floor(value) * 86400000;
+    const d = new Date(ms);
+    if (Number.isNaN(d.getTime())) return '';
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  return String(value);
+}
+
 // 把 row 按 billTypes 分类：row._types = Set<seq>
 function classifyRows(rows, billTypes, side) {
   const sideTypes = (billTypes || []).filter((t) => t.side === side);
@@ -298,7 +320,38 @@ function enumerateAmountSubsets(candidates, targetCents, maxSize = 8, maxSolutio
 function findBestAmountSubset(candidates, targetCents, mainBillDate, options = {}) {
   if (!Array.isArray(candidates) || candidates.length < 2) return null;
   if (!Number.isFinite(targetCents) || targetCents <= 0) return null;
-  const maxSize = Number.isFinite(options.maxSize) ? options.maxSize : 8;
+  // v2.1.8 F5 T09：maxSize 动态档位（spec.md F5-D1）+ 性能护栏（F5-D5）
+  //   options.maxSize 显式传入 → 用它（向后兼容 + 测试可覆盖）
+  //   未指定 → 按 candidates.length 自动决定：
+  //     pool ≤ 12 → 全跑（不限）
+  //     pool 13-20 → maxSize = 12
+  //     pool 21-25 → maxSize = 10 + degraded
+  //     pool > 25 → maxSize = 8 + degraded（性能护栏 F5-D5）
+  //   解决 v2.1.7 §10.3 根因 #2：硬上限 maxSize=8 剪掉 16 行 / 11 行子集（TEST2.xlsx T54SWIC494447/506630）
+  let maxSize;
+  let degraded = null;
+  if (Number.isFinite(options.maxSize)) {
+    maxSize = options.maxSize;
+  } else {
+    const poolSize = candidates.length;
+    if (poolSize <= 12) {
+      maxSize = poolSize;
+    } else if (poolSize <= 20) {
+      maxSize = 12;
+    } else if (poolSize <= 25) {
+      maxSize = 10;
+      degraded = 'reduced';
+    } else {
+      maxSize = 8;
+      degraded = 'safety-floor';
+    }
+  }
+  if (degraded && !options.silent) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[c4-recon-id-fix] findBestAmountSubset 性能护栏：candidates=${candidates.length} maxSize=${maxSize} (${degraded})`
+    );
+  }
   const hardCeiling = Number.isFinite(options.hardCeiling) ? options.hardCeiling : 5000000;
   const mainMs = parseBillDateMs(normalizeCellValue(mainBillDate));
   // 按 cents 升序排序，保留原数组下标 _origIdx
@@ -684,10 +737,12 @@ function tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode,
     lastStepByLeft.set(leftRow._rowIdx, stepLabel);
     // 候选过滤：BillDate + 其他对账字段 AND 全等（Amount 不参与 AND 过滤）
     // v2.1.1 T2-2：days 参数化
+    // v2.1.8 F5 T11 spec.md F5-D3：加 currency 等值过滤（与 tryManyToOnePool 对称；仅 gateway 子模式生效）
     const candidates = rightRows.filter((r) =>
       !pairedRight.has(r._rowIdx)
         && billDateMatches(leftRow.BillDate, r.BillDate, billDateMode, cfg._billDateDays)
         && rowsMatchOtherFieldPairs(leftRow, r, otherFieldPairs)
+        && currencyMatches(leftRow, r, cfg)
     );
     if (candidates.length < 2) {
       candidates.forEach((r) => lastStepByRight.set(r._rowIdx, stepLabel));
@@ -703,7 +758,11 @@ function tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode,
       .map((r) => ({ row: r, cents: toCents(r[rightAmountField]) }))
       .filter((c) => c.cents !== null);
     // PR #36 round 2 P2 修复：DFS 全遍历维护全局 best（取代旧 enumerate→tieBreak 二段式）
-    const chosen = findBestAmountSubset(candidatesWithCents, targetCents, leftRow.BillDate);
+    // v2.1.8 F5 T12 调试入口：cfg._maxSizeOverride 显式传 maxSize 覆盖 spec F5-D1 默认动态档位
+    //   仅用于 T12 fixture smoke 调试 / spec 二次 Reverse Sync 评估
+    const fbOptions = (cfg && Number.isFinite(cfg._maxSizeOverride))
+      ? { maxSize: cfg._maxSizeOverride, silent: true } : undefined;
+    const chosen = findBestAmountSubset(candidatesWithCents, targetCents, leftRow.BillDate, fbOptions);
     if (!chosen || chosen.length < 2) {
       candidates.forEach((r) => lastStepByRight.set(r._rowIdx, stepLabel));
       continue;
@@ -712,6 +771,66 @@ function tryOneToManyPool(leftRows, rightRows, fieldPairs, billDateMode,
     chosen.forEach((r) => pairedRight.add(r._rowIdx));
     apply1vNAssignment(leftRow, chosen, scenario, cfg, reconResult, fixedRows, warningCollector);
   }
+}
+
+// v2.1.8 F5 T11（spec.md F5-D3）：currency 字段等值过滤
+//
+//   仅 gateway 子模式生效（cfg._subMode === 'gateway'）；其他子模式直通 true（影响面收敛）
+//   字段名硬编码大小写差异（来自 gateway-bill-recon-fields.js）：
+//     网关账单 GATEWAY_BILL_FIELDS:16 → 'Currency'（首字母大写）
+//     渠道账单 CHANNEL_BILL_FIELDS:24 → 'currency'（小写）
+//   任一为空 → 不过滤（数据质量兼容，避免空值场景比 v2.1.7 退步）
+//   独立 export 供 unit case 测试
+function currencyMatches(leftRow, rightRow, cfg) {
+  if (!cfg || cfg._subMode !== 'gateway') return true;
+  const left = normalizeCellValue(leftRow && leftRow.Currency);
+  const right = normalizeCellValue(rightRow && rightRow.currency);
+  if (left === '' || right === '') return true;
+  return left === right;
+}
+
+// v2.1.8 F5 T10（spec.md F5-D2）：tryManyToOnePool 遍历顺序复合排序
+//
+//   v2.1.7 根因 #3：按 rightRows 原数组顺序遍历 → 大金额 right 排后面，
+//                  对应大 left 子池被前面小渠道抢光（TEST2.xlsx T54SWIC470181 4M 被 1M 抢光）
+//   修复：金额降序主键 → 大金额优先消费 left 池
+//         同金额：candidates pool size 降序（spec F5-D2 "子集大小降序"代理 — right 行无法预知子集大小，
+//                 用 candidates count 近似；子集必为 candidates 的子集，pool 大的更可能找到大子集）
+//   性能优化：预 build rightCandidatesCount Map，避免 sort comparator 内 O(n) filter
+//   注：count 是 sort 起始时的 snapshot（pairedLeft 在遍历中变化但排序已锁；可接受）
+//   独立 export 供 unit case 测试
+//   v2.1.8 F5 T11 集成：candidates count 计算同步纳入 currency 过滤（与 tryManyToOnePool 实际 candidates 一致）
+function sortRightRowsForManyToOne({
+  rightRows, leftRows, rightAmountField, otherFieldPairs,
+  billDateMode, billDateDays, pairedLeft, pairedRight, cfg
+}) {
+  const rightCandidatesCount = new Map();
+  for (const r of rightRows) {
+    if (pairedRight.has(r._rowIdx)) {
+      rightCandidatesCount.set(r._rowIdx, -1);
+      continue;
+    }
+    let count = 0;
+    for (const l of leftRows) {
+      if (pairedLeft.has(l._rowIdx)) continue;
+      if (!billDateMatches(l.BillDate, r.BillDate, billDateMode, billDateDays)) continue;
+      if (!rowsMatchOtherFieldPairs(l, r, otherFieldPairs)) continue;
+      if (!currencyMatches(l, r, cfg)) continue;
+      count++;
+    }
+    rightCandidatesCount.set(r._rowIdx, count);
+  }
+  return rightRows.slice().sort((a, b) => {
+    const aPaired = pairedRight.has(a._rowIdx) ? 1 : 0;
+    const bPaired = pairedRight.has(b._rowIdx) ? 1 : 0;
+    if (aPaired !== bPaired) return aPaired - bPaired; // 未配对优先
+    const aCents = toCents(a[rightAmountField]) || 0;
+    const bCents = toCents(b[rightAmountField]) || 0;
+    if (aCents !== bCents) return bCents - aCents; // 金额降序（主键）
+    const aPool = rightCandidatesCount.get(a._rowIdx) || 0;
+    const bPool = rightCandidatesCount.get(b._rowIdx) || 0;
+    return bPool - aPool; // candidates count 降序（子集大小代理）
+  });
 }
 
 // Round 4：池子 多v1 — subset-sum(候选主.Amount) === 从.Amount
@@ -727,13 +846,23 @@ function tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode,
   const otherFieldPairs = (fieldPairs || []).filter(
     (fp) => fp && fp !== amountPair && !(fp.locked === true)
   );
-  for (const rightRow of rightRows) {
+
+  // v2.1.8 F5 T10（spec.md F5-D2）：遍历顺序复合排序（金额降序 + candidates pool size 降序）
+  // v2.1.8 F5 T11（spec.md F5-D3）：cfg 传入让 sort 的 candidates count 与下面 filter 一致（同步纳入 currency 过滤）
+  const sortedRightRows = sortRightRowsForManyToOne({
+    rightRows, leftRows, rightAmountField,
+    otherFieldPairs, billDateMode, billDateDays: cfg._billDateDays,
+    pairedLeft, pairedRight, cfg
+  });
+
+  for (const rightRow of sortedRightRows) {
     if (pairedRight.has(rightRow._rowIdx)) continue;
     lastStepByRight.set(rightRow._rowIdx, stepLabel);
     const candidates = leftRows.filter((l) =>
       !pairedLeft.has(l._rowIdx)
         && billDateMatches(l.BillDate, rightRow.BillDate, billDateMode, cfg._billDateDays)
         && rowsMatchOtherFieldPairs(l, rightRow, otherFieldPairs)
+        && currencyMatches(l, rightRow, cfg) // v2.1.8 F5 T11 spec.md F5-D3
     );
     if (candidates.length < 2) {
       candidates.forEach((l) => lastStepByLeft.set(l._rowIdx, stepLabel));
@@ -748,7 +877,10 @@ function tryManyToOnePool(leftRows, rightRows, fieldPairs, billDateMode,
       .map((l) => ({ row: l, cents: toCents(l[leftAmountField]) }))
       .filter((c) => c.cents !== null);
     // PR #36 round 2 P2 修复：DFS 全遍历维护全局 best（取代旧 enumerate→tieBreak 二段式）
-    const chosen = findBestAmountSubset(candidatesWithCents, targetCents, rightRow.BillDate);
+    // v2.1.8 F5 T12 调试入口：cfg._maxSizeOverride 显式传 maxSize 覆盖 spec F5-D1 默认动态档位
+    const fbOptions = (cfg && Number.isFinite(cfg._maxSizeOverride))
+      ? { maxSize: cfg._maxSizeOverride, silent: true } : undefined;
+    const chosen = findBestAmountSubset(candidatesWithCents, targetCents, rightRow.BillDate, fbOptions);
     if (!chosen || chosen.length < 2) {
       candidates.forEach((l) => lastStepByLeft.set(l._rowIdx, stepLabel));
       continue;
@@ -1055,10 +1187,14 @@ function runC4Scenario(scenario, sheets, subMode) {
   //   算法骨架（billDateMatches / pickBestByTieBreak 等）硬编码 row.BillDate。
   //   渠道账单 sheet 字段是 createTime（不是 BillDate），引擎入口做字段映射 createTime → BillDate，
   //   避免改动算法骨架。映射后 oppRow 同时拥有 createTime（原值）和 BillDate（=createTime）。
+  // v2.1.8 F5 T08：createTime 在 Excel 里若是"真日期"格式，sheetToObjects raw:true 读出来是 number 序列号；
+  //   parseBillDateMs 正则只认 'YYYY-MM-DD' 字符串 → 直接赋 number 会 fail。
+  //   方案 C（spec.md F5-D4 v0.3）：在此处把 number → ISO 字符串后再赋给 BillDate。
+  //   不动 recon-id-fix-io.js raw 模式（共用函数影响 8 sheet × N 字段，资金红线扩面）。
   if (effectiveSubMode === 'gateway') {
     opponentBills = opponentBills.map((row) => {
       if (row && (row.BillDate === '' || row.BillDate === undefined || row.BillDate === null)) {
-        return Object.assign({}, row, { BillDate: row.createTime || '' });
+        return Object.assign({}, row, { BillDate: normalizeBillDateValue(row.createTime) });
       }
       return row;
     });
@@ -1152,7 +1288,7 @@ function runC4Scenario(scenario, sheets, subMode) {
 
 module.exports = {
   runC4Scenario,
-  // 内部工具（暴露给 smoke）
+  // 内部工具（暴露给 smoke + unit）
   classifyRows,
   groupReconFields,
   findAmountLockedPair,
@@ -1163,6 +1299,7 @@ module.exports = {
   rowsMatchOtherFieldPairs,
   toCents,
   enumerateAmountSubsets,
+  normalizeBillDateValue, // v2.1.8 F5 T08 暴露给 unit case
   findBestAmountSubset,
   tieBreakSubsets,
   pickBestByTieBreak,
@@ -1173,5 +1310,7 @@ module.exports = {
   collectUnmatchedRows,
   tryOneToOne,
   tryOneToManyPool,
-  tryManyToOnePool
+  tryManyToOnePool,
+  sortRightRowsForManyToOne, // v2.1.8 F5 T10 暴露给 unit case
+  currencyMatches // v2.1.8 F5 T11 暴露给 unit case
 };

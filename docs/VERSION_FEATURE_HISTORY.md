@@ -9,9 +9,35 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.8（2026-05-26）
+
+v2.1.7 之后 15 commit 收敛，6 项主题：F5（C4 算法重设 4/5 根因）+ G1（单元测试框架建立）+ N1→N1' v0.7（cleanup 改 idle 30min 触发 + 差异保留 + FK 反向同步）+ N2（C3「自取值」）+ N3（银行对账场景号修复 + Sheet 3）+ N4（差异表 29→12 列瘦身 + 破坏性 migration）+ v2.1.7-cleanup（10 项 minor）。⚠️ 2 个🔴破坏性（N4 raw_json 删 17 字段 + N4 输出契约 29→12）+ 3 个资金红线护栏 + 7 个 important-variables v11 升格。
+
+### 新增
+
+- **F5 C4 manyToOne 算法重设**（🔴 资金红线，4/5 根因）：BillDate 数字日期 fix + maxSize 动态档位 + 复合排序 + currency 等值过滤；TEST2.xlsx 28→43 行；根因 #5 subset-sum 剪枝延期 v2.1.9
+- **G1 单元测试框架**：Node 22+ 原生 `node:test`（零 devDep）+ `tests/unit/` + `npm run test:unit` 28 suites / 123 case；G1 全量铺延期 v2.1.9
+- **N1' (v0.7) cleanup idle 30min 触发 + 差异保留**（🔴 FK 反向同步）：3 层触发（idle 主 + before-quit 兜底 + 进入模块崩溃恢复）+ `cleanupAfterRunBackground` 加 `includeDiff=false` 仅清 flow（bill 因 FK 必须保留 + diff/runs 也保留作有效数据 + 元数据）
+- **N2 C3「自取值」**：第二下拉新增 `__CUSTOM__` + 静态字符串输入框；DB migration 给历史场景加 `mode='direct'`；引擎 `mode='custom'` 分支
+- **N3-1/N3-2 银行对账场景号修复 + Sheet 3「命中场景行」**：dispatcher `hitScenarios` 带 `displayIndex`；writer 可选 `includeHitScenarioSheet`；INTERNAL_FIELDS 加 `_hitScenarioDisplayIndex`
+- **N4 收单差异表 29→12 列瘦身**（🔴 破坏性）：模版 9 列 + 单据_对账币种 + 流水侧 2 列 = 12；DB 破坏性 migration `ensureBillRawJsonV2Slim`（自动备份 → 事务 rewrite → 标志位），**永久删 17 字段**（ReconBillBizId / 公司主体 / 业务部门 / 对手部门 / 订单创建来源 / 财务BU / 账单类型 / 业务子类型 / 交易类型 / 对账子类型 / 单据状态 / 用户编号 / 账户号 / 账户类型 / remark / 创建时间 / 完成时间）
+
+### 变更
+
+- **F5 (T08) Reverse Sync F5-D4**：reader 入口 → c4 引擎入口（资金红线扩面收敛）
+- **N1 → N1' Reverse Sync** β 方案降级为退出兜底，主触发改 idle 30min
+- **N1' v0.9 FK 反向同步**：smoke caseP FK 错误 → bill_imports 必须连带保留
+- **N4 输出契约破坏性变更**：3 轮 Reverse Sync（v0.8 → v0.9 → v0.10）后稳定收敛
+- **`cleanupAfterRunBackground` 签名**：新增 `includeDiff = false` 参数；默认安全（仅清 flow）
+- **v2.1.7 minor 10 项收尾**：8 已修 + 2 不可修记录
+
+### 移除
+
+- **N4 差异表输出 17 列**：ReconBillBizId / 公司主体 / 业务部门 / 对手部门 / 订单创建来源 / 财务BU / 账单类型 / 业务子类型 / 交易类型 / 对账子类型 / 单据状态 / 用户编号 / 账户号 / 账户类型 / remark / 创建时间 / 完成时间（仅输出 + DB raw_json 同步删除）
+
 ## 2.1.7（2026-05-21）
 
-v2.1.6 之后 7 轮迭代收敛，39 commit。6 项主功能（F1-F4 / F6-F8）+ R3 状态框中文「：」全局换行 + B5 全局 wiring 加固 + B4 CSS flex/grid 嵌套 4 round 收敛。F5（C4 BillDate 数字日期 + 算法重设）延期 v2.1.8 与 A3（worker_threads）联合主题。5 资金红线（F2/F4/F7-A1/F8/R5）+ 4 全局影响（F7-A1/R3/B5/F4）+ 10 important-variables 升格。
+v2.1.6 之后 7 轮迭代收敛，50 commit。6 项主功能（F1-F4 / F6-F8）+ R3 状态框中文「：」全局换行 + B5 全局 wiring 加固 + B4 CSS flex/grid 嵌套 4 round 收敛。F5（C4 BillDate 数字日期 + 算法重设）延期 v2.1.8 与 A3（worker_threads）联合主题。5 资金红线（F2/F4/F7-A1/F8/R5）+ 4 全局影响（F7-A1/R3/B5/F4）+ 10 important-variables 升格。
 
 ### 新增
 
@@ -32,7 +58,7 @@ v2.1.6 之后 7 轮迭代收敛，39 commit。6 项主功能（F1-F4 / F6-F8）+
 
 ### 文档
 
-- PRD/spec/tasks v0.11/v0.9/v0.8（含 §二十三 39 commit 实施记录 + spec 反向同步 3 处）
+- PRD/spec/tasks v0.11/v0.9/v0.8（含 §二十三 50 commit 实施记录 + spec 反向同步 3 处）
 - `rules/important-variables.md` v9 升格 10 条（Critical 3 + Important-skeleton 2 + Risk-sensitive 5）
 - USER_GUIDE §五 v2.1.7 新增能力
 

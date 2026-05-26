@@ -19,9 +19,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const ExcelJS = require('exceljs');
 
+// v2.1.8 N4：差异表瘦身 29→12 列，使用 WRITER_OUTPUT_HEADERS_V2 + TEMPLATE_BILL_HEADERS
+//   旧 BILL_HEADERS / WRITER_OUTPUT_HEADERS 仅供历史参照，不再用于本 writer 输出
 const {
-  BILL_HEADERS,
-  WRITER_OUTPUT_HEADERS
+  TEMPLATE_BILL_HEADERS,
+  WRITER_OUTPUT_HEADERS_V2
 } = require('../backend/acquiring-bill-currency-db/columns');
 const runRepo = require('../backend/acquiring-bill-currency-db/run-repository');
 const { applyWatermark } = require('./workbook-watermark');
@@ -148,7 +150,7 @@ async function writeDiffWorkbook({ db, runId, monthKey, savePath, runElapsedMs =
     // PR #50 Codex P1：单 segment 写入时实时检测行数，超 MAX 自动开 sub-sheet 加后缀 (2)(3)
     // 触发条件：单日差异行 > MAX_DATA_ROWS_PER_SHEET（罕见 edge case）
     let sheet = writer.addWorksheet(sheetBaseName);
-    sheet.addRow(WRITER_OUTPUT_HEADERS.slice()).commit();
+    sheet.addRow(WRITER_OUTPUT_HEADERS_V2.slice()).commit();
     let curSubSheetName = sheetBaseName;
     let curSubSheetRowCount = 0;
     let subSheetIndex = 1;
@@ -173,23 +175,25 @@ async function writeDiffWorkbook({ db, runId, monthKey, savePath, runElapsedMs =
             subSheetIndex++;
             const subName = sanitizeSheetName(`${sheetBaseName}(${subSheetIndex})`);
             sheet = writer.addWorksheet(subName);
-            sheet.addRow(WRITER_OUTPUT_HEADERS.slice()).commit();
+            sheet.addRow(WRITER_OUTPUT_HEADERS_V2.slice()).commit();
             curSubSheetName = subName;
             curSubSheetRowCount = 0;
           }
           const rawObj = JSON.parse(d.bill_raw_json);
-          const row = new Array(WRITER_OUTPUT_HEADERS.length);
-          // 第 1-26 列：按 BILL_HEADERS 顺序取 raw_json 值
-          for (let i = 0; i < BILL_HEADERS.length; i++) {
-            const v = rawObj[BILL_HEADERS[i]];
+          // v2.1.8 N4：12 列输出（spec §三.1）
+          //   1-9 模版字段 / 10 单据_对账币种副本 / 11-12 流水侧 diff_rows 字段
+          const row = new Array(WRITER_OUTPUT_HEADERS_V2.length);
+          for (let i = 0; i < TEMPLATE_BILL_HEADERS.length; i++) {
+            const v = rawObj[TEMPLATE_BILL_HEADERS[i]];
             row[i] = v === undefined || v === null ? '' : v;
           }
-          // 第 27 列：单据_对账币种
-          row[BILL_HEADERS.length] = rawObj['对账币种'] === undefined || rawObj['对账币种'] === null ? '' : rawObj['对账币种'];
-          // 第 28 列：流水_通道清算币种
-          row[BILL_HEADERS.length + 1] = d.flow_currency === null ? '' : d.flow_currency;
-          // 第 29 列：流水_通道清算金额
-          row[BILL_HEADERS.length + 2] = d.flow_amount_abs === null ? '' : d.flow_amount_abs;
+          // 第 10 列：单据_对账币种（bill raw_json['对账币种'] 副本，D2=b 保留）
+          row[TEMPLATE_BILL_HEADERS.length] =
+            rawObj['对账币种'] === undefined || rawObj['对账币种'] === null ? '' : rawObj['对账币种'];
+          // 第 11 列：流水_通道清算币种
+          row[TEMPLATE_BILL_HEADERS.length + 1] = d.flow_currency === null ? '' : d.flow_currency;
+          // 第 12 列：流水_通道清算金额
+          row[TEMPLATE_BILL_HEADERS.length + 2] = d.flow_amount_abs === null ? '' : d.flow_amount_abs;
           sheet.addRow(row).commit();
           curSubSheetRowCount++;
         }

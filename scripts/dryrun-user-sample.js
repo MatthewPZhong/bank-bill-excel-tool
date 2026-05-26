@@ -190,21 +190,24 @@ async function main() {
     console.log('errorReport 为空 → 不生成 error-report');
   }
 
+  // v2.1.8 N3-1：dispatcher 字段从 hitScenarioIds (number[]) 改为 hitScenarios ({id, displayIndex, name}[])
+  //   本脚本提取 ids 列表用 .map(s => s.id) 兼容
+  const hitScenarioIds = (result.stats.hitScenarios || []).map((s) => s.id);
   divider('6. PRD §13.1 P0 用例自动验证矩阵');
-  console.log('  P0-1 内置 C1 调拨自提取        →  ' + (result.stats.hitScenarioIds.includes(1) ? '✅ C1 命中' : '❓ C1 未命中（样例可能无 AFT/BFT 行）'));
+  console.log('  P0-1 内置 C1 调拨自提取        →  ' + (hitScenarioIds.includes(1) ? '✅ C1 命中' : '❓ C1 未命中（样例可能无 AFT/BFT 行）'));
   console.log('  P0-2 C1 多字段值不一致         →  ' + (result.errorReport.some((w) => w.code === 'inconsistent-recon-id-values') ? '✅ 触发 inconsistent warn' : '❓ 样例无该场景'));
-  console.log('  P0-3 内置 C2 outbound Fail 打标 →  ' + (result.stats.hitScenarioIds.includes(2) ? '✅ C2 命中' : '❓ C2 未命中'));
+  console.log('  P0-3 内置 C2 outbound Fail 打标 →  ' + (hitScenarioIds.includes(2) ? '✅ C2 命中' : '❓ C2 未命中'));
   console.log('  P0-4 C2 一对多报错              →  ' + (result.errorReport.some((w) => w.code === 'one-to-many') ? '✅ 触发 one-to-many warn' : '❓ 样例无该场景'));
   console.log('  P0-5 内置 C3 默认关闭           →  GUI 行为（需用户在场景管理里确认默认 enabled=0）');
   console.log('  P0-6 启用 C3 触发"导入资金对账"提示 →  GUI 行为（需用户启用 C3 后导入银行单确认提示弹）');
   console.log('  P0-7 C3 跳过                    →  smoke E3 已覆盖（gwRows=null + C3 启用 → skippedC3Count=1）');
-  console.log('  P0-8 C3 join 命中               →  ' + (result.stats.hitScenarioIds.includes(3) ? '✅ C3 命中' : '❓ C3 未命中（需样例文件含匹配的 4 字段全等行）'));
+  console.log('  P0-8 C3 join 命中               →  ' + (hitScenarioIds.includes(3) ? '✅ C3 命中' : '❓ C3 未命中（需样例文件含匹配的 4 字段全等行）'));
   console.log('  P0-9 first-match-wins           →  smoke E2 已覆盖（同行 C1 优先级 3 > C3 优先级 1）');
   console.log('  P0-10 标黄 + 仅导修改行         →  ' + (result.modifiedRows.length > 0 ? `✅ 主输出含 ${result.modifiedRows.length} 行（< 全部 ${bank.rowCount} 行），抽样验证黄底已 PASS` : '⚠️ 当前样例 0 命中'));
   console.log('  P0-11 空运行结果                →  ' + (result.modifiedRows.length === 0 ? '✅ 当前命中此用例（无主输出）' : `❓ 当前样例 ${result.modifiedRows.length} 行命中，需另构造空命中样例`));
 
-  divider('7. 命中场景汇总（按 hitScenarioIds 顺序）');
-  result.stats.hitScenarioIds.forEach((id) => {
+  divider('7. 命中场景汇总（按 hitScenarios 顺序）');
+  hitScenarioIds.forEach((id) => {
     const s = BUILTIN_SCENARIOS.find((x) => x.id === id);
     const hitsForS = result.modifications.filter((m) => m.scenarioId === id);
     console.log(`  场景 ${id} ${s.name}（${s.category}） — ${hitsForS.length} modifications`);

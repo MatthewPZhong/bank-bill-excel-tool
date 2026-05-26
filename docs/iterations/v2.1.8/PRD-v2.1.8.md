@@ -1,0 +1,633 @@
+# PRD — v2.1.8 迭代：C4 算法重设 + runCheck 跨进程化 + 单元测试框架 + 3 项功能/缺陷
+
+| 字段 | 值 |
+|---|---|
+| 文档版本 | v0.9（2026-05-26 — **N4 新立项**：差异表输出瘦身 29→12 列 + raw_json 也瘦身（破坏性 migration）；4 决策全锁；spec v0.10 同步；详 §八.1）；v0.8 FK 反向同步；v0.7 N1 方案重设 idle 30min + 差异保留；v0.6 GATEWAY_RECON_FIELDS 反向同步；v0.5 「自取值」改 assign-gw；v0.4 F5 范围收敛；v0.3 移除 TEST.xlsx；v0.2 T08 改 F5-D4；v0.1 初版 |
+| 目标版本 | `v2.1.8`（patch / minor 待定，G1 引入新目录可能升 minor） |
+| 起始版本 | `v2.1.7`（v2.1.7 完成时 main 状态；本 PRD 制定时 v2.1.7 尚未合并 main） |
+| 起草日期 | 2026-05-22 |
+| 起草人 | PM |
+| 状态 | 起草中（v0.1，待 spec 评审 + 用户最终拍板） |
+| 关联文档 | `backlog.md`（立项画像）/ `spec.md`（待建）/ `tasks.md`（待建）/ v2.1.7 PRD §十（F5 延期记录） |
+| 涉及模块 | 银行对账单处理（C4 算法 + N3-1/N3-2）+ 收单单据币种校验（A3 跨进程 + A4 SQL 分批 + N1 cleanup 置后）+ 场景管理（N2 自取值）+ 全局工程基建（G1 单元测试） |
+| 工作分支 | `v2.1.8`（基于 `main`，待 v2.1.7 → main 合并后从 main 拉） |
+| 依赖 | v2.1.7（含 F7-A1 全局 PRAGMA / F7-A2 索引 + ANALYZE / F8 scenario-dispatcher unmatchedRows + 第 2 sheet / 18+ 个 smoke suite） |
+| package.json.version | 暂保持 `2.1.7`；发布前由用户决策是否 bump 到 `2.1.8` |
+
+---
+
+## 一、需求概述
+
+v2.1.8 包含 **7 项独立改动**（F5/A3/A4/G1/N1/N2/N3），覆盖四个模块 + 一项工程基建：
+
+1. **F5 — C4 manyToOne 算法重设 🔴 资金红线**：v2.1.7 延期项，用户提供 TEST2.xlsx 期望基线 57 行 / 10 渠道命中，v2.1.7 单点 fix 仅达 28 行 / 9 渠道命中。根因 = `recon-id-fix-io.js:70` BillDate 数字日期 + `c4-recon-id-fix.js:findBestAmountSubset` maxSize=8 硬上限 + `tryManyToOnePool` 遍历顺序偏置。本次重设：BillDate 字符串化 + 放开 maxSize + 改遍历顺序 + 评估 currency 字段过滤。
+2. **A3 — runCheck 跨进程化**：v2.1.7 F7-A1/A2/B1 是短期缓解（PRAGMA + 索引 + 通知），unresponsive 概率仅降 30-50%。A3 把 `acquiring-bill-currency-session.runCheck` 整体搬到 `worker_threads` 或 Electron `utilityProcess`，彻底解除主进程 SQL 阻塞。
+3. **A4 — SQL JOIN chunked 分批跑**：与 A3 联合评估；若 A3 worker 方案直接解决主进程不阻塞，A4 可能不必要。spec 阶段二选一。
+4. **G1 — 单元测试框架引入（全量铺设）**：当前无单元测试框架，只有 smoke 集成测试。引入 Node 内置 `node:test`（零依赖），全量覆盖第 1 层纯函数（normalizers / validators / scenario-engines / constants）+ 第 2 层带 fixture 模块（repository / store / writer / reader）。第 3 层 main.js / renderer / session 明确不做 unit。
+5. **N1 — 收单单据币种校验 cleanup 置后执行**：用户反馈"cleanup 动作置后执行"。现状（`acquiring-bill-currency-session.js:278`）已是异步分批（每批 50000 行 + setImmediate 让出），UI 不卡；但用户进入模块新一次导入会被 mutex 挡到 cleanup 完成（500w 行约 1 分钟）。采用 **β 方案**：移出对账链路，主清理时机改 `app.before-quit`（应用退出时），进入模块时为兜底。
+6. **N2 — 场景管理 From 网关「对账成立后赋值」新增"自取值"**：C3 引擎 `assign.bankField` 第二下拉框新增「自取值」枚举（位置：从上往下第 2 位），选中时下拉框右侧显示输入框（静态字符串，不允许空 + 200 字符上限）。数据结构 `config_json.assign` 扩展 `{ mode: 'direct' | 'custom', customValue }`，DB migration 自动补旧 scenario `mode='direct'`。模板 bundle 继续 v3。
+7. **N3 — 银行对账单处理：场景号修复 + Sheet 3 导出**：
+   - N3-1：状态框命中场景号显示 DB id 但场景管理 UI 用 displayIndex 编号 → 不对齐。**方案 A**：Main 端（`scenario-dispatcher.js:99`）推 `displayIndex` 替换 DB id。
+   - N3-2：复用同一 xlsx 新增 **Sheet 3「命中场景行」**，放 `modifiedRows` 命中行 + 末尾追加列「命中场景」格式 `[序号] 场景名称`。Sheet 1/Sheet 2 不动。
+
+7 项改动相对独立，无强依赖（F5 ↔ G1 有协同点：F5 算法 case 沉淀到 G1 unit case）。
+
+---
+
+## 二、版本目标
+
+### 2.1 必做
+
+- **F5** — `recon-id-fix-io.js:70` BillDate 字符串化 + `c4-recon-id-fix.js:findBestAmountSubset` 放开 maxSize（或按金额量级动态调整）+ `tryManyToOnePool` 遍历改"子集大小降序 / 金额降序"+ 评估 currency 字段过滤。验证基线：TEST2.xlsx 期望 57 行 / 10 渠道命中
+- **A3** — `runCheck` 搬到 worker_threads / utilityProcess（spec 阶段二选一），worker 内重开 DB 连接（同 PRAGMA），进度回调跨进程，错误序列化跨进程
+- **A4** — 二选一：(a) A3 worker 已解决问题 → A4 不做；(b) 仍需要 → chunked LIMIT/OFFSET（spec 阶段决策）
+- **G1** — 引入 `node:test`；新建 `tests/unit/` 目录镜像 src 分层；`package.json` 加 `"test:unit": "node --test tests/unit/"`；全量覆盖第 1+2 层
+- **N1** — `app.before-quit` 钩子触发 cleanup 为主路径 + 进入模块时为兜底；`cleanupPending` 标志位持久化到 `acquiring_bill_currency_runs` 表新列；runCheck 内 setImmediate 触发链路移除
+- **N2**（v0.5 修订）— `renderer-dialogs.js` C3 dialog **第一下拉框 `assign-gw`**（数据源）新增"自取值"枚举（从上往下第 2 位，占位符之后）+ assign-gw 右侧条件输入框（input）；`config_json.assign` 扩展 `mode: 'direct' | 'custom'` + `customValue` + gwField sentinel `__CUSTOM__`；`c3-gateway-recon-join.js:158-172` 加分支：mode==='custom' → newValue=customValue，否则按原逻辑取 chosen.row[gwField]；DB migration 旧 scenario 补 `assign.mode='direct'`；GATEWAY_RECON_FIELDS（不是 BANK_STATEMENT_FIELDS_FOR_C3）+ preload 双写同步
+- **N3-1** — `scenario-dispatcher.js:99` 推送结构改 `{ id, displayIndex, name }`，`main.js:3045` IPC 字段扩展，`renderer.js:3319` 显示 displayIndex
+- **N3-2** — `exceljs-writer.js` 新增 Sheet 3「命中场景行」写入分支，列结构 = 原 44 列 + 末尾「命中场景」格式 `[序号] 场景名称`
+- 三件套（CHANGELOG / VFH / USER_GUIDE）发布前一次性更新
+- smoke：F5（TEST2.xlsx fixture 期望 57 行 1 个用例）/ A3（worker 启动 + DB 连接 + 进度回传 + 错误序列化 4 用例）/ N1（cleanup 触发时机 2 用例）/ N2（assign.mode='custom' 引擎赋值 1 用例 + dialog 保存校验 1 用例 + migration 旧场景升级 1 用例）/ N3-1（displayIndex 对齐 1 用例）/ N3-2（Sheet 3 写入 + 列对齐 1 用例）；G1 不在 smoke 覆盖范围，独立 `npm run test:unit`
+
+### 2.2 明确不做
+
+- **不做** F5 引入更激进的全局最优算法（如 ILP / 网络流），保持 subset-sum + 遍历顺序优化的小步方案
+- **不做** A3 把全套业务模块（bank-bu-recon / biz-op-recon）也搬到 worker（仅 acquiring-bill-currency.runCheck），评估通过后续版本再扩散
+- **不做** A3 worker 间 DB 共享（worker 内独立连接，避免 SQLite 跨线程坑）
+- **不做** A4 与 A3 双轨实施（二选一）
+- **不做** G1 强制 CI 阻断（先观察 1-2 版本，再决定升级阻断）
+- **不做** G1 追求覆盖率数字目标（覆盖率 ≠ 质量；只测纯逻辑 + 高 bug 风险）
+- **不做** G1 第 3 层（main.js / renderer / session）unit 覆盖（继续靠 smoke + preview + 手动）
+- **不做** N1 cleanup 算法优化（保持 50000 行/批 + setImmediate；本次仅改触发时机）
+- **不做** N1 cleanup 进度条 UI（β 方案应用退出时已经会弹"正在清理上次结果..."进度框，进入模块兜底走静默 toast）
+- **不做** N2 "自取值"支持表达式 / 模板（如 `{{xxx}}`），仅静态字符串；表达式留 v2.1.9+
+- **不做** N2 模板 bundle 升 v4（向前兼容只追加字段，旧 reader 忽略 mode/customValue 走 direct）
+- **不做** N3-1 改场景管理 UI 显示 DB id（保持 displayIndex 不变；统一让 Main 端跟 UI 走）
+- **不做** N3-2 在 Sheet 1（渠道对账单）追加「命中场景」列（避免破坏 v2.1.6/v2.1.7 已稳定的输出格式）
+- **不做** N3-2 新起独立 xlsx 文件（复用同一 xlsx 文件，新增 Sheet 3）
+- **不做** N3-2 Sheet 2「未命中场景行」补「未命中原因」列（用户未要求；保持 v2.1.7 F8 原状）
+
+---
+
+## 三、需求清单总览
+
+| # | 标题 | 模块 | 类型 | 风险 | 文件预估 | 用户拍板 |
+|---|---|---|---|---|---|---|
+| F5 | C4 manyToOne 算法重设 | 网关对账ReconID修复 / C4 | 算法重设 | 🔴 **HIGH（资金红线）** | engine × 1 + io × 1 + smoke × 2-3 + fixture × 2 | ✓ v2.1.7 §十延期项；TEST2.xlsx 期望 57 行 / 10 渠道 |
+| A3 | runCheck 跨进程化 | 收单单据币种校验 | 架构级 · 跨进程 IPC | 🔴 **HIGH** | session × 1 + main × 1 + preload × 1 + worker × 1（新建） + smoke × 3-4 | ✓ v2.1.7 §10.6 立项；worker_threads vs utilityProcess 待 spec 拍板 |
+| A4 | SQL JOIN chunked 分批跑 | 收单单据币种校验 | 性能优化 | 🟡 MID | 与 A3 联合 | ⏸ 二选一：若 A3 解决问题则不做 |
+| G1 | 单元测试框架引入（全量） | 全局工程基建 | 测试基础设施 | 🟢 LOW | tests/unit/ 镜像目录（~30+ 文件） + package.json | ✓ 2026-05-22 用户立项，全量铺第 1+2 层 |
+| N1 | cleanup 置后执行（β 方案） | 收单单据币种校验 | 性能 / UX | 🟡 MID | session × 1 + main × 1 + DB migration × 1 + smoke × 2 | ✓ 2026-05-22 用户拍板 β（退出时为主 + 进入时兜底） |
+| N2 | 「对账成立后赋值」新增"自取值" | 场景管理 / C3 | 功能增强 · UI + 引擎 + DB | 🟡 MID | dialog × 1 + engine × 1 + migration × 1 + constants × 1 + preload × 1 + smoke × 3 | ✓ 2026-05-22 用户拍板：静态字符串 / mode+customValue / v3 兼容 |
+| N3 | 银行对账单：场景号修复 + Sheet 3 | 银行对账单处理 | 缺陷修复 + 功能增强 | 🟡 MID（IPC 字段变更） | dispatcher × 1 + main × 1 + renderer × 1 + writer × 1 + smoke × 2 | ✓ 2026-05-22 用户拍板：N3-1=A / N3-2=Sheet 3 复用 xlsx |
+
+---
+
+## 四、F5 — C4 manyToOne 算法重设 🔴 资金红线
+
+### 4.1 背景
+
+v2.1.7 PRD §十 延期项。用户提供 `/Users/pzhong/Desktop/小助手-Debug/2.1.7/TEST2.xlsx`「订单修复」sheet 含 57 行期望基线 / 10 渠道命中（最大子集 16 行 T54SWIC494447 = 9,751,101）。v2.1.7 仅做"BillDate 字符串化"单点 fix 实测 28 行 / 9 渠道命中，差距 29 行 / 1 渠道。
+
+### 4.2 根因（PM v2.1.7 已诊断 + v2.1.8 T12 新发现）
+
+| # | 根因 | v2.1.8 处理 |
+|---|---|---|
+| 1 | `recon-id-fix-io.js:70` `raw:true` 读 sheet → Excel 日期变 number 序列号 → `c4-recon-id-fix.js:1058-1065` 直接赋 BillDate → `parseBillDateMs` 正则不认 → 候选 fail | ✅ T08 修复（c4 引擎入口 normalizeBillDateValue） |
+| 2 | `findBestAmountSubset` subset-sum `maxSize=8` 硬上限 → 16 行（T54SWIC494447）/ 11 行（T54SWIC506630）子集被剪 | ✅ T09 动态档位（spec F5-D1） |
+| 3 | `tryManyToOnePool` 按 right 行顺序遍历 left → 4M 子池被前面渠道抢光（T54SWIC470181） | ✅ T10 金额降序 + candidates count 降序复合排序（spec F5-D2） |
+| 4 | 窗口扩大（±7/±10）反而下降（tie-break 偏置） | spec 已知，本迭代不专门修 |
+| **5** | **subset-sum 剪枝（升序排序 + 后缀和不足）在大 pool 下误剪正确解 — T12 实测新发现**：仅 16 行 candidates + maxSize=30 ✅ 0ms 找到 sum=$9.75M 子集；38 行同日 pool + maxSize=30 ❌ 找不到。说明 22 个非期望 left 行让 DFS 剪枝在仍可达 sum 时误判"不可达" | ❌ **延期 v2.1.9 ILP/网络流范式重写**（DFS + 剪枝架构无法保证全局最优；需引入新算法范式） |
+
+### 4.3 改动点
+
+- [ ] **BillDate 数字日期解析**（T08 Reverse Sync 改 — spec.md F5-D4 v0.3）：在 `c4-recon-id-fix.js:1058-1065` gateway 映射段，把 `createTime` number 序列号转 ISO 字符串后赋给 `BillDate`，让 `parseBillDateMs` 能识别。**不动** `recon-id-fix-io.js:70` raw 模式（共用函数 sheetToObjects 影响 8 sheet × N 字段，资金红线扩面）
+- [ ] **maxSize 放开**：`c4-recon-id-fix.js:findBestAmountSubset` 的 maxSize=8 改为动态（如按金额量级 / 候选池大小）；或干脆放开到 candidates.length，按性能 trade-off
+- [ ] **manyToOne 遍历顺序**：`tryManyToOnePool` 改"子集大小降序"或"金额降序"，避免大子集被先消费
+- [ ] **currency 字段过滤**（评估）：增加 currency 等值过滤，缩小候选池
+- [ ] **性能护栏**：maxSize 放开后 subset-sum 复杂度 O(2^n)，需评估超时阈值（如单渠道 candidates > 20 时降级）
+
+### 4.4 资金红线护栏
+
+- [ ] smoke 矩阵 19 个 suite **全跑 + 0 regression**
+- [ ] v2.1.6 baseline 命中数不得下降
+- [ ] TEST2.xlsx 期望 57 行 / 10 渠道作为新基线
+- [ ] TEST.xlsx（0 命中样本）继续作为护栏（不应该误升）
+
+### 4.5 G1 协同
+
+F5 算法重设过程中产生的"输入 → 期望输出"对，**直接落成 `c4-recon-id-fix.js` 的 unit case**：
+- TEST2.xlsx 57 行期望基线 → 解析为 fixture JSON
+- 每个子集匹配关系 → 1 个 unit case
+- maxSize 放开前后行为对比 → 回归 case
+
+### 4.6 风险
+
+- 🔴 资金红线：subset-sum 改 maxSize 涉及性能与正确性 trade-off
+- 🔴 算法重设需专门 reviewer
+- 🟡 性能：放开 maxSize 可能导致单渠道处理超时
+- 🟡 重要变量：`findBestAmountSubset` / `tryManyToOnePool` / `parseBillDateMs` 至少 Critical 1 + Important-skeleton 1 项
+
+---
+
+## 五、A3 — runCheck 跨进程化
+
+### 5.1 背景
+
+v2.1.7 F7-A1（PRAGMA）+ F7-A2（索引 + ANALYZE）+ F7-B1（Notification）是短期缓解，预计降低 unresponsive 概率 30-50%。A3 是根本解。
+
+### 5.2 待 spec 阶段决策
+
+| # | 决策点 | 选项 | PM 倾向 |
+|---|---|---|---|
+| D1 | 跨进程方案 | (a) worker_threads（Node 原生） / (b) Electron utilityProcess（深度整合） | (b) — Electron 生命周期一致性更好 |
+| D2 | DB 连接 | worker 内重开 DB 连接 + 同 PRAGMA（v2.1.7 F7-A1） | 必须重开（worker_threads 无法共享 DatabaseSync 实例） |
+| D3 | 进度回调链路 | worker → main → renderer（多一跳 IPC，复用 v2.1.7 F6 的 `acquiringBillCurrency:run:progress` 范式） | 必须；冗余传输换实现简单 |
+| D4 | 错误传播 | worker 抛错 → message 包装 → main 反序列化 → IPC | 必须；FileValidationError 结构需保持 |
+| D5 | 取消语义 | renderer 取消 → main → `worker.terminate()` 或 `postMessage('cancel')` | 推荐 `postMessage('cancel')` + worker 内主动检查（terminate 暴力，DB 锁可能残留） |
+| D6 | 冷启动开销 | worker 启动 + DB 重连 ~ 100-500ms | 可接受（runCheck 本身分钟级） |
+
+### 5.3 改动点
+
+- [ ] 新建 `src/main-process/acquiring-bill-currency-worker.js`（worker entry）
+- [ ] `acquiring-bill-currency-session.js` 拆出 runCheck 可跨进程部分（去 Electron 依赖）
+- [ ] `main.js:10281` handler 改为 worker 调度
+- [ ] `preload.js` progress 订阅 API 不变（保持 F6 范式）
+- [ ] worker 内 DB 重开 + PRAGMA 应用复用 `database.js` 启动钩子
+
+### 5.4 风险
+
+- 🔴 架构级改动，涉及 IPC 桥接 + 数据序列化 + 错误传播 + 进度回调 4 个维度
+- 🟡 worker 启动开销 + DB 重连
+- 🟡 错误堆栈跨进程信息丢失
+- 🟡 取消语义需新增协议
+- 🟡 重要变量：`acquiring-bill-currency-session.js` Runtime-state 多项
+
+---
+
+## 六、A4 — SQL JOIN chunked 分批跑
+
+### 6.1 二选一决策
+
+- **(a) A3 worker 已解决主进程不阻塞 → A4 不做**：PM 倾向
+- **(b) 仍需要 chunked**：spec 阶段决定 chunk size（10w / 50w / 100w 行）+ 拆分点（外层 JOIN / 内层子查询）
+
+### 6.2 待 spec 阶段决策
+
+依赖 A3 设计完成后再决定。
+
+---
+
+## 七、G1 — 单元测试框架引入（全量铺设）
+
+### 7.1 背景
+
+CLAUDE.md 已陈述：无单元测试框架，`npm run smoke` 是唯一被认可的自动化测试（集成级）。纯逻辑层 0 unit 兜底。
+
+### 7.2 用户决策（2026-05-22）
+
+✅ 要做就直接全部做，不渐进试点。
+
+### 7.3 框架选型
+
+**默认推荐：Node 内置 `node:test`**
+- 零 devDependencies 新增（符合项目轻量化偏好）
+- Node 22 已稳定，与 `node:sqlite`（项目已用）同代
+- 语法接近 Jest，零学习成本
+- 自带 TAP reporter
+
+> spec 阶段如需对比 Vitest / Jest，可在 spec.md 加替代方案对比。
+
+### 7.4 覆盖范围
+
+🟢 **第 1 层（纯函数）100% 覆盖**：
+
+- `src/backend/file-service/normalizers.js`
+- `src/backend/file-service/common.js`
+- `src/backend/file-service/error-causes.js`
+- `src/backend/acquiring-bill-currency-import/validator.js`
+- `src/backend/bank-bu-recon-import/validator.js`
+- `src/backend/biz-op-recon-import/validator.js`
+- `src/backend/pending-import/validator.js`
+- `src/main-process/scenario-engines/engine-utils.js`
+- `src/main-process/scenario-engines/c1-extract-recon-id.js`
+- `src/main-process/scenario-engines/c2-offset-bill-mark.js`
+- `src/main-process/scenario-engines/c3-gateway-recon-join.js`
+- `src/main-process/scenario-engines/c4-recon-id-fix.js`（**与 F5 强相关，作为 F5 算法正确性 guard**）
+- `src/constants/*.js`
+- `src/backend/*-db/columns.js`
+
+🟡 **第 2 层（带轻副作用，fixture 支持）100% 覆盖**：
+
+- `src/backend/database/template-repository.js`（in-memory sqlite）
+- `src/backend/database/scenarios-repository.js`
+- `src/backend/database/settings-repository.js`
+- `src/backend/balance-seed-store.js` / `balance-adjustment-store.js`
+- `src/backend/big-account-mode-store.js` / `big-account-order-store.js` / `own-account-store.js`
+- `src/backend/file-service/readers.js` / `writers.js`（tmpdir + 小 fixture xlsx）
+- `src/backend/pending-db/*-repository.js`（4 个）
+- `src/backend/acquiring-bill-currency-db/*-repository.js`（2 个）
+- `src/backend/bank-bu-recon-db/*-repository.js`（2 个）
+- `src/backend/biz-op-recon-db/*-repository.js`（3 个）
+- `src/main-process/monthly-balance.js`
+- `src/main-process/recon-id-fix-engine.js`
+- `src/main-process/statement-generation.js`
+
+🔴 **第 3 层（编排 / UI）明确不做 unit**，依赖 smoke + preview + 手动测试：
+
+- `src/main.js` / `src/preload.js` / `src/renderer*.js` / `src/main-process/*-session.js` / `src/main-process/pending-archive-worker.js`
+
+### 7.5 流程影响
+
+| 维度 | 变化 |
+|---|---|
+| 目录新增 | `tests/unit/`（按 src 镜像分层） |
+| package.json | 新增 `"test:unit": "node --test tests/unit/"` |
+| PR body | 触及第 1/2 层模块时，新增"unit case 列表"段落 |
+| check-vars | 重要变量 case 钉死（变更需同步更新 case） |
+| smoke / preview | **不变** |
+| 文档三件套 | 同步登记 G1 |
+| 多版本维护 | cherry-pick 时 unit case 一起带走，**降低**回归风险 |
+
+### 7.6 不做
+
+- ❌ 不强制 CI 阻断（试跑 1-2 版本再决定）
+- ❌ 不追求覆盖率数字
+- ❌ 不动 `scripts/test-v*.js`（保留作为集成层）
+- ❌ 不替代 smoke / preview / 手动测试
+
+### 7.7 与 F5 协同
+
+F5 算法重设的 TEST2.xlsx 期望基线 → 直接落成 `c4-recon-id-fix.js` 的 unit case，等于把"57 行期望"沉淀为永久契约。
+
+### 7.8 实施顺序建议
+
+1. G1 框架搭建 + 第 1 层全量铺（前 3-5 天）
+2. F5 spec 评审同时启动，TEST2.xlsx 期望基线先转 unit case
+3. F5 实现 + 第 2 层 unit 并行
+4. A3 spec 评审晚启动（worker 架构设计 ≥ 3 天）
+5. A4 决策跟随 A3
+
+### 7.9 风险
+
+- 🟢 不动业务代码，不影响线上行为
+- 🟡 **case 期望值的"权威性"问题**：第一批 case 直接基于"当前实现"录入，等于把"当前行为"凝固成契约 → PR review 需人工复核每条 case 是不是"业务真实期望"而非"实现 bug 的复刻"
+- 🟡 工期：1-2 周全量铺，会挤压 F5/A3/A4 并行带宽
+
+---
+
+## 八、N1 — cleanup 改 idle 30min 触发 + 差异数据保留（v0.7 方案重设）
+
+> **v0.7 方案变更说明（2026-05-26）**：
+> β 方案（v0.6）落地后（commit 30247da、6e22375 等），用户提出两项语义级修订：
+> 1. **触发改 idle 30min** — 主链路从 `app.before-quit` 改为「应用闲置 30 分钟后台自动清」；before-quit 降级为退出兜底，进入模块降级为崩溃恢复兜底
+> 2. **差异数据不清** — `acquiring_bill_currency_diff_rows` 表保留，只清 flow + bill 两张输入表
+>
+> 详 spec.md v0.8 §三整章；本节 PRD 同步重写。
+
+### 8.1 用户决策（2026-05-22 + 2026-05-26 修订）
+
+| 阶段 | 决策 |
+|---|---|
+| 2026-05-22 | ✅ β 方案：移出对账链路，主清理时机 `app.before-quit`，进入模块兜底 |
+| 2026-05-26 | 🔄 修订：主触发改 idle 30min；差异数据不清；β 方案降级为兜底层 |
+
+### 8.2 现状回顾（v0.7 起点）
+
+- v0.6/β 已落地：DB 列 cleanup_pending + run-repository 三 API + runCheck 解耦 + before-quit 模态框 + 进入模块兜底
+- v0.7 增量改造，不全推翻：保留 DB schema + repository API + 进入模块兜底；改造触发机制 + cleanup 范围
+
+### 8.3 改动点（v0.7 增量）
+
+#### 三层触发设计
+
+```
+触发 1（主）：idle 30 分钟 → 后台 setImmediate 串行清 cleanup_pending=1 runs
+触发 2（退出兜底）：app.before-quit → 静默串行清（删模态框，避免没闲够就退）
+触发 3（崩溃恢复兜底）：进入模块 listMonths → setImmediate 后台清（应用强杀后重启）
+```
+
+#### 改动清单
+
+- [ ] **cleanupAfterRunBackground 加 includeDiff 参数**：默认 `false`（runCheck/idle/退出兜底/进入模块兜底 4 触发点用，**仅清 flow_imports**）；`true` 时清 3 表（cleanupOrphanData Phase 2 用，先 diff → bill → flow 解 FK）
+- [ ] **bill_imports 必须保留（v0.8 FK 反向同步）**：`diff_rows.bill_import_id REFERENCES bill_imports(id)` 无 CASCADE → 保留 diff 必须连带保留 bill；本次仅清 flow_imports
+- [ ] **cleanupOrphanData Phase 2 调整**：调用 `cleanupAfterRunBackground({ ..., includeDiff: true })` 清孤儿 run 全表 + 仍删 runs 记录（孤儿 run 元数据无意义保留）
+- [ ] **cleanupOrphanData Phase 3 保留**：ghost-diff 清理仍跑（仅清 run_id 真不在 runs 的孤儿）
+- [ ] **main.js idle 计时器**：`setupIdleCleanupTimer()` 维护 lastActiveTs + `setInterval` 检查；阈值常量 `IDLE_CLEANUP_MS = 30 * 60 * 1000`
+- [ ] **renderer user activity 上报**：mousemove/keydown/click 节流（10s）→ `desktopApi.reportUserActivity()` → main 更新 lastActiveTs
+- [ ] **before-quit 钩子简化**：删模态框/进度 IPC 广播；保留串行 cleanup 逻辑（静默）
+- [ ] **进入模块兜底保留**：listMonths IPC 入口 `triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded` 不变
+- [ ] **DB schema 保留**：cleanup_pending 列 + 三 API（三触发点共用）
+
+### 8.4 DB migration（v0.6 已落地，v0.7 不动）
+
+```sql
+-- 幂等 migration（v0.6 已实现于 database/migrations.js）
+ALTER TABLE acquiring_bill_currency_runs ADD COLUMN cleanup_pending INTEGER DEFAULT 0;
+```
+
+### 8.5 关键决策点（v0.7 新加 13 项，全按 PM 推荐 ✅）
+
+| 分组 | 决策数 | 锁定方案 |
+|---|---|---|
+| 差异保留语义（D1-D5）| 5 | D1 重跑覆盖 / D2 保留 ghost-diff 清 / D3 runs 保留 / D4 P1 覆盖 / D5 不加 UI 入口 |
+| idle 触发机制（D6-D13）| 8 | D6 main+renderer AND / D7 renderer 上报 / D8 硬编码 30min / D9 batch 完让出 / D10 before-quit 保留静默 / D11 进入模块保留 / D12 cleanup_pending 列保留 / D13 静默 |
+
+详 spec.md v0.8 §3.2。
+
+### 8.6 风险（v0.8 升级）
+
+- 🔴 **数据保留策略变更（资金红线）**：从"过性清理"改"长期保留"（diff + bill + runs 三表保留）；SQLite 体积持续增长，需 v2.1.9 评估手动清入口 / 滚动保留窗口 / FK schema CASCADE 改造
+- 🔴 **runs 记录生命周期变更**：cleanupOrphanData Phase 2 不删 runs，重新审视 orphan 定义
+- 🟡 **idle 误判风险**：长时间 SQL JOIN 跑 25 分钟主进程没收到 IPC 算 idle —— 需 renderer 上报 user-activity 当独立通道（D6 AND 设计兜底）
+- 🟡 **闲置触发中用户回来**：D9 选 batch 完即让出，依赖 mutex 抢锁；剩余下次 idle 再清
+- 🟡 **重要变量**：`acquiring-bill-currency-session.js` Runtime-state + 新增 `setupIdleCleanupTimer` / `reportUserActivity`
+
+### 8.7 v0.6 → v0.7 增量代码影响
+
+| 文件 | v0.6 状态 | v0.7 动作 |
+|---|---|---|
+| `database/migrations.js` | ✅ 已加 cleanup_pending 列 | 保留 |
+| `run-repository.js` | ✅ 已加 3 API | 保留 |
+| `acquiring-bill-currency-session.js` | runCheck → markCleanupPending；cleanup 函数清 3 表 | **改 cleanup 函数**：加 includeDiff 参数，false 时仅清 flow_imports（bill 受 FK 约束保留）；Phase 2 显式 includeDiff:true 清 3 表 + 仍删 runs |
+| `main.js` | before-quit 钩子 + 进度 IPC 广播 + listMonths 兜底 | **加 idle 计时器**；**简化** before-quit（删模态框广播，保留串行 cleanup）；listMonths 兜底保留 |
+| `preload.js` | 4 个 onCleanupXXX 订阅 | **删** onCleanupQuitProgress/Start/Done；**加** reportUserActivity；保留 onCleanupBackgroundToast |
+| `renderer.js` | 退出进度模态框 + toast | **删** 退出模态框（β 时未实现完整，本次连带清掉）；**加** user-activity 监听上报 |
+
+---
+
+## 八.1、N4 — 收单差异表输出字段瘦身 🔴 资金红线 + 破坏性 migration（v0.9 新立项）
+
+### 8.1.1 用户决策（2026-05-26）
+
+- ✅ 输出差异表 xlsx 字段从 29 列瘦身到 12 列（模版 9 + 单据_对账币种 + 流水侧 2）
+- ✅ 同时改 DB bill_imports.raw_json 也瘦身（D4=b，破坏性 migration 永久删 17 字段值）
+- ✅ 模版补齐到 12 列作 truth
+
+### 8.1.2 现状回顾
+
+- 当前 writer 输出 29 列（`columns.js:72-77` WRITER_OUTPUT_HEADERS）= BILL_HEADERS(26) + 单据_对账币种 + 流水_通道清算币种 + 流水_通道清算金额
+- 模版（`assets/收单币种校验导出差异表模版.xlsx`）仅含 9 列单据侧字段
+- bill_imports.raw_json 存全 26 字段，每行 ~1-3 KB
+
+### 8.1.3 改动点
+
+- [ ] **模版补齐到 12 列**：ExcelJS 写回 assets/收单币种校验导出差异表模版.xlsx
+- [ ] **columns.js**：新增 `TEMPLATE_BILL_HEADERS`（9 列）+ `WRITER_OUTPUT_HEADERS_V2`（12 列）
+- [ ] **writer.js**：`writeDiffWorkbook` 列循环改 29→12
+- [ ] **DB migration**：`ensureBillRawJsonV2Slim` 函数（备份 DB → 事务批量 rewrite raw_json → 标志位）
+- [ ] **smoke**：caseR 列数 29→12 + 新加 caseN4_billRawJsonSlimMigration
+
+### 8.1.4 风险（升级到 🔴 Critical）
+
+- 🔴 **对外输出契约破坏性变更**：用户 Excel 自动化/VBA/Power Query 全部失效
+- 🔴 **DB 数据不可逆**：17 字段值永久删除，历史月份重导出也少这些列
+- 🔴 **migration 中断**：half-rewritten raw_json → 事务 + 失败回滚 + 标志位
+- 🟡 **首次启动备份耗时**：DB 大可能 5-30 秒
+- 🟡 **磁盘空间**：备份文件永久保留
+
+### 8.1.5 启动期 DB 备份
+
+- 位置：`<userData>/backups/tool-data-bak-pre-N4-<timestamp>.sqlite`
+- 方式：sqlite backup API（一致性保证）
+- 失败处理：备份失败 → migration 不启动 → activityLog 记录 → 下次启动重试
+
+详 spec.md v0.10 §三.1。
+
+---
+
+## 九、N2 — 场景管理 From 网关「对账成立后赋值」新增"自取值"
+
+### 9.1 用户决策（2026-05-22）
+
+✅ "自取值" = **静态字符串**（用户填什么就赋什么）
+✅ 字段命名：`assign.mode`（`'direct' | 'custom'`）+ `assign.customValue`（字符串）
+✅ 输入框校验：不允许空 + 200 字符上限 + 不限字符类型
+✅ 模板 bundle 继续 v3（向前兼容）
+
+### 9.2 改动点（v0.5 修订 — 加到 assign-gw 数据源而非 assign-bank 写入目标）
+
+**关键 Reverse Sync**：v0.1 起草时按用户原话"第二下拉框"字面理解为 `assign-bank`，但 c3 引擎语义（:158-172 `newValue = chosen.row[assign.gwField]; bankRow[assign.bankField] = newValue`）表明 assign-bank 是写入目标必须真实字段名 → "自取值"作为数据源应加在 **assign-gw（第 1 下拉框）**。用户 2026-05-26 拍板方案 A。
+
+#### UI 层（`src/renderer-dialogs.js`）
+
+- [ ] C3 dialog **第 1 下拉框 `select[data-field="assign-gw"]`**（数据源 GATEWAY_RECON_FIELDS）插入「自取值」到从上往下第 2 位（"请选择网关账单字段"占位符之后、所有真实字段之前）
+- [ ] **assign-gw** change 事件新增分支：value === '__CUSTOM__' → 该 select **右侧显示** `<input type="text" maxlength="200">`；切回真实字段 → 隐藏 input
+- [ ] dialog 保存时：
+  - 若 mode='custom' && customValue 为空 → 校验报错"自取值不能为空"
+  - 若 mode='custom' → 保存 `assign.mode='custom' + assign.gwField='__CUSTOM__' + assign.customValue`
+  - 若 mode='direct' → 保存 `assign.mode='direct' + assign.gwField=真实字段名`，不保存 customValue
+- [ ] dialog 打开时按 `assign.mode` 回显（'direct' → 隐藏 input，'custom' → 显示 input + 填回 customValue）
+
+#### 数据结构
+
+```js
+config_json.assign = {
+  gwField: 'BillDate' | '__CUSTOM__',  // 真实字段名 / sentinel for custom mode
+  bankField: 'Reference',              // 写入目标（始终是真实银行字段）
+  mode: 'direct' | 'custom',           // 新增字段
+  customValue: '用户填写的字符串'      // 仅 mode='custom' 时有意义
+}
+```
+
+#### 引擎层（`src/main-process/scenario-engines/c3-gateway-recon-join.js`）
+
+- [ ] :158-172 赋值逻辑加分支：
+  ```js
+  const newValue = (assign.mode === 'custom')
+    ? String(assign.customValue || '')
+    : normalizeCellValue(chosen.row[assign.gwField]);
+  ```
+- 旧 reader（无 mode 字段）graceful 降级：gwField='__CUSTOM__' → chosen.row['__CUSTOM__']=undefined → normalizeCellValue → '' → 不破坏（行为退化为"写空值"）
+
+#### DB migration（`src/backend/database/migrations.js`）
+
+- [ ] 幂等 migration：扫描 category='gateway-recon-join' 的 scenarios，对 config_json 缺 `assign.mode` 的补 `mode='direct'`
+
+#### 同步点（v0.6 修订 — constants 保持不变，仅 dialog 渲染层加 option）
+
+⚠️ **不能改 GATEWAY_RECON_FIELDS constants**（v0.6 实施前发现）：被 `bank-statement-io.js:114` 用作网关账单 reader 表头校验 + `:5908` validFields 字段合法性校验 + `:6131 renderC3ConditionRow` 条件下拉 + `:6212` reconFields 行字段下拉。加 `'__CUSTOM__'` 会破坏 reader + 让条件下拉显示"自取值"（错位）。
+
+- [ ] `src/constants/gateway-recon-fields.js` **不改**
+- [ ] `src/preload.js` **不改**
+- [ ] `src/renderer-dialogs.js:6105-6108` assign-gw select 渲染时单独拼接：
+  ```html
+  <select data-field="assign-gw">
+    <option value="">请选择网关账单字段</option>
+    <option value="__CUSTOM__"${config.assign.gwField === '__CUSTOM__' ? ' selected' : ''}>自取值</option>
+    ${renderScenarioOptions(GATEWAY_RECON_FIELDS, config.assign.gwField)}
+  </select>
+  ```
+- [ ] 验证：renderC3ConditionRow（:6131）+ reconFields 行（:6212）+ bank-statement-io reader（:114）行为完全不变
+
+### 9.3 项目复用模式
+
+`src/renderer-dialogs.js:6420-6435` 已有「下拉值=X 时显示输入框」先例（C1 条件行 `opNeedsValue()` 模式），可直接复用 DOM 结构 + 事件绑定模式。
+
+### 9.4 风险
+
+- 🟡 对账契约变更：scenarios 数据结构升级，migration 必须确保旧 scenario graceful 升级
+- 🟡 模板 bundle 兼容：CLAUDE.md 已记录 `bundleVersion` v3，本次不升 v4（向前兼容只追加字段）
+- 🟡 preload inline 常量需同步（项目历史坑 — v0.5 改 GATEWAY_RECON_FIELDS 双写）
+- 🟡 重要变量：`scenarios` 数据结构 + `c3-gateway-recon-join.js` 赋值逻辑 + GATEWAY_RECON_FIELDS（升 Important-skeleton）
+- 🟡 旧 reader graceful 降级：gwField='__CUSTOM__' 在 v2.1.7 reader 中 → newValue='' → 不抛错但行为退化（用户应升级到 v2.1.8 才能用"自取值"）
+
+---
+
+## 十、N3 — 银行对账单处理：场景号修复 + Sheet 3 导出
+
+### 10.1 用户决策（2026-05-22）
+
+✅ **N3-1 方案 A**：Main 端推 `displayIndex`（源头统一）
+✅ **N3-2 输出形态**：复用同一 xlsx + 新增 Sheet 3「命中场景行」
+✅ Sheet 3 范围：只放 `modifiedRows`（命中行）
+✅ Sheet 3 列结构：原 44 列 headers + 末尾「命中场景」列
+✅ 列值格式：`[序号] 场景名称`
+
+### 10.2 N3-1 现状根因
+
+| 端 | 编号来源 | 值 |
+|---|---|---|
+| Main | `scenario-dispatcher.js:99` `hitScenarioIds.push(scenario.id)` 推 DB id | `[1, 5, 7, 9]` |
+| IPC | `main.js:3045` 返回 `stats.hitScenarioIds` | |
+| Renderer | `renderer.js:3319` 直接显示 ids | "场景 1、5、7、9" |
+| UI 列表 | `renderer-dialogs.js:5506` 用 `displayIndex` 1-based 顺序 | "1、2、3、4" |
+
+### 10.3 N3-1 改动点
+
+- [ ] **`scenario-dispatcher.js:99`** 推送结构改为 `{ id, displayIndex, name }`
+- [ ] **`main.js:3045`** IPC 返回 `stats.hitScenarios = [{id, displayIndex, name}]`（注：字段重命名 from `hitScenarioIds` to `hitScenarios`，需 grep 调用方同步）
+- [ ] **`renderer.js:3319`** 状态框文案改用 `displayIndex`
+- [ ] **displayIndex 来源**：spec 阶段确认是从 `scenarios-repository.js` 按列表顺序 1-based 派发，还是 dispatcher 入参时 main.js 计算
+
+### 10.4 N3-2 改动点
+
+- [ ] **`exceljs-writer.js`** 新增 Sheet 3 写入分支
+- [ ] Sheet 3 数据源：`processingResult.modifiedRows`（v2.1.7 F8 已附 `_hitScenarioId` + `_hitScenarioName` metadata）
+- [ ] Sheet 3 列结构 = 原 44 列 bank headers + 末尾新增「命中场景」列
+- [ ] 「命中场景」列值 = `[${displayIndex}] ${scenarioName}`（displayIndex 同 N3-1 派发）
+- [ ] `INTERNAL_FIELDS` 过滤逻辑保留（其他 `_` 前缀字段仍过滤）；「命中场景」列通过白名单显式拼装
+- [ ] Sheet 1/Sheet 2 完全不动
+
+### 10.5 风险
+
+- 🟡 N3-1 IPC 字段结构变更 → 需 grep 所有调用方
+- 🟡 N3-1 displayIndex 派发口径需统一（避免 main 端和 UI 计算不一致）
+- 🟢 N3-2 新增 Sheet 不影响 v2.1.6/v2.1.7 现有输出格式
+- 🟢 v2.1.7 F8 已有 `modifiedRows + unmatchedRows = bankRows` 不变量护栏
+- 🟡 重要变量：`scenario-dispatcher.js` hitScenarioIds（字段重命名）+ `exceljs-writer.js` INTERNAL_FIELDS（白名单扩展）
+
+---
+
+## 十一、验收矩阵
+
+| # | 验收项 | 验证手段 | 通过标准 |
+|---|---|---|---|
+| F5-1 | TEST2.xlsx acceptance（v0.4 范围收敛） | 手测 + smoke fixture | v2.1.8：T08-T11 修 4/5 根因 + 28-43 行（v2.1.7 baseline 28，maxSize=16 甜点 43）；57 行 acceptance 延期 v2.1.9 ILP 重写（根因 #5 subset-sum 剪枝在大 pool 下误剪正确解） |
+| ~~F5-2~~ | ~~TEST.xlsx 不应误升~~ | ~~smoke~~ | **移除**（v0.3：TEST 与 TEST2 输入相同算法必然相同结果，无法独立验证） |
+| F5-3 | 19 个 smoke suite 全跑 | npm run smoke | 全绿 0 regression |
+| F5-4 | maxSize 放开后性能 | 手测大样本 | 单渠道 < 30s |
+| A3-1 | runCheck 主进程不阻塞 | 手测 500w 行 | 跑期间主窗口能交互 |
+| A3-2 | worker 错误传播 | smoke | FileValidationError 结构保留 |
+| A3-3 | worker 取消 | smoke | 取消后 DB 无锁残留 |
+| A3-4 | 进度回调 | 手测 | 5 阶段文案依次到达 |
+| G1-1 | 第 1 层 100% 覆盖 | npm run test:unit | 14 个文件全部有 case |
+| G1-2 | 第 2 层 100% 覆盖 | npm run test:unit | ~20 个文件全部有 case |
+| G1-3 | 不影响 smoke | npm run smoke | 全绿 |
+| N1-1 | runCheck 后无自动 cleanup | 手测 | DB 表数据保留，cleanup_pending=1 |
+| N1-2 | app.before-quit 触发 cleanup | 手测退出 | 弹模态框 + 清完才退出 |
+| N1-3 | 进入模块兜底 | 手测切回模块 | toast 提示 + 后台清 |
+| N2-1 | dialog 新增"自取值" | 手测 + preview | 枚举第 2 位 + 选中显示 input |
+| N2-2 | 引擎 mode='custom' 赋值 | smoke | 写入 customValue |
+| N2-3 | DB migration 旧场景升级 | smoke | 旧 scenario 自动补 mode='direct' |
+| N2-4 | 校验空值报错 | 手测 | 选自取值不填 → 保存报错 |
+| N3-1-1 | 状态框 displayIndex 对齐 | 手测 | 状态框序号 = 场景管理序号 |
+| N3-2-1 | Sheet 3 写入 + 列对齐 | smoke + 手测 | Sheet 名"命中场景行" + 末尾列 `[序号] 场景名称` |
+| N3-2-2 | Sheet 1/Sheet 2 不变 | smoke | 列结构与 v2.1.7 一致 |
+
+---
+
+## 十二、风险汇总
+
+### 12.1 资金红线（CLAUDE.md 规则 7）
+
+- 🔴 **F5** 算法重设：subset-sum maxSize 改动涉及性能与正确性 trade-off，必须专门 reviewer + 多轮 smoke + TEST2.xlsx 基线验证
+- 🔴 **A3** 跨进程改动：IPC 数据序列化 + 错误传播 + 取消语义 4 个维度均涉及对账正确性
+- 🟡 **N2** 对账配置数据结构变更：旧 scenario 必须 graceful 升级
+- 🟡 **N3-1** IPC 字段重命名：需 grep 全部调用方
+- 🟡 **G1** unit case 期望值权威性：避免把实现 bug 凝固成契约
+
+### 12.2 重要变量影响（待 `npm run scan:vars` 重跑后评估升格）
+
+- F5：`findBestAmountSubset` / `tryManyToOnePool` / `parseBillDateMs` / `BillDate`
+- A3：`acquiring-bill-currency-session` Runtime-state 全套
+- N1：`cleanup_pending`（DB 新列）+ `cleanupPending`（runtime flag）
+- N2：`config_json.assign` 结构（接口契约）+ `BANK_STATEMENT_FIELDS_FOR_C3`
+- N3：`hitScenarioIds` → `hitScenarios`（IPC 字段重命名）+ `INTERNAL_FIELDS`（白名单扩展）+ `displayIndex` 派发口径
+
+### 12.3 工期与并行带宽
+
+- 总工期粗估：4-5 周
+- 用户决策：**单版本走完**，不拆分
+- PM 建议串并行：G1 框架（前 3-5 天单独）→ F5 + N1 + N2 + N3 并行（中段 1-2 周）→ A3 + A4 收尾（后段 1-1.5 周）
+
+---
+
+## 十三、文档三件套登记（发版前一次性更新）
+
+- [ ] `CHANGELOG.md` v2.1.8 章节
+- [ ] `docs/VERSION_FEATURE_HISTORY.md` v2.1.8 主题概述
+- [ ] `docs/USER_GUIDE.md`：
+  - N2 场景管理「对账成立后赋值 - 自取值」使用说明
+  - N1 应用退出时清理提示说明
+  - N3-2 处理结果 xlsx 第 3 个 sheet 说明
+  - G1 不写入用户手册（开发者工具）
+
+---
+
+## 十四、实施记录（dev 阶段填）
+
+### PR #52 — v2.1.8 发版（2026-05-26 提交）
+
+- **PR**：https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/52
+- **分支**：v2.1.8 → main
+- **commit 数**：22（含发版收尾 + 集成测试基建）
+- **完整改动记录**：见 [`docs/prs/PR52-v2.1.8.md`](../../prs/PR52-v2.1.8.md)（草稿归档）
+
+#### 主题完成度
+
+| 主题 | 状态 | 备注 |
+|---|---|---|
+| **F5** C4 manyToOne 算法重设 | ✅ 4/5 根因 | 根因 #5 subset-sum 剪枝延期 v2.1.9（需 ILP 重写） |
+| **G1** 单元测试框架建立 | ✅ 框架 + 123 case | 全量铺第 1/2 层延期 v2.1.9 |
+| **N1 → N1'** cleanup 改 idle 30min 触发 + 差异保留 | ✅ | v0.6 β → v0.7 idle → v0.9 FK 反向同步 |
+| **N2** C3「自取值」 | ✅ | DB migration + dialog UI + 引擎 mode='custom' |
+| **N3-1/N3-2** 银行对账场景号 + Sheet 3 | ✅ | displayIndex + 可选 Sheet 3 + INTERNAL_FIELDS 白名单 |
+| **N4** 收单差异表 29→12 列瘦身 | ✅ | DB raw_json 破坏性 migration + 自动备份 |
+| **v2.1.7-cleanup** 10 minor | ✅ | 8 已修 + 2 不可修记录 |
+
+#### 工程化基建（v2.1.8 新增）
+
+- **集成测试体系**：`scripts/integration/` 目录 + `scripts/integration-runner.js` runner
+- **`npm run test:integration`** — 6 脚本 / 273 断言
+- **`npm run release-check`** — 一键 gate（smoke + unit + integration）
+- **`rules/integration-test-policy.md`** — 新模块硬约束（必须配 ≥ 1 集成测试）
+
+#### 自动化测试合计 ~1276 断言 / 0 regression
+
+- smoke ~880 断言
+- unit 123/123 / 28 suites
+- integration 273/273 / 6 脚本 / 1163ms
+
+#### 延期到 v2.1.9
+
+- F5 #5 根因（subset-sum 剪枝 → ILP 重写）
+- G1 全量铺（第 1 层剩余 13 + 第 2 层 24 文件）
+- A3 runCheck 跨进程化（worker_threads / utilityProcess）
+- A4 SQL chunked（与 A3 联合评估）
+- N4 后续优化：手动清入口 / 滚动保留窗口 / FK CASCADE 改造
+
+---
+
+**当前状态**：v2.1.8 已提 PR #52，等用户手测 + reviewer 评审 + merge。
+4. 跑 `npm run scan:vars` 评估重要变量升格

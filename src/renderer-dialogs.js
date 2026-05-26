@@ -5760,7 +5760,8 @@
           // v2.1.5 N3：柔性默认 — 空数组（不强制添加首行；区别于 C1 默认 1 行）
           conditions: [],
           reconFields: [{ seq: 1, gwField: '', bankField: '' }],
-          assign: { gwField: '', bankField: '' }
+          // v2.1.8 N2：扩展 assign 数据结构（mode='direct' 兼容旧逻辑，'custom' = 自取值静态字符串）
+          assign: { gwField: '', bankField: '', mode: 'direct', customValue: '' }
         };
       }
       // v2.1.0-beta.1 PR-A（task A7）：C4 类默认 config（spec §8.2）
@@ -5889,6 +5890,10 @@
         else if (c.reconFields.some((r) => !r.gwField || !r.bankField)) errors.push('对账字段每行两端都不能为空');
         const a = c.assign || {};
         if (!a.gwField || !a.bankField) errors.push('对账成立后赋值的两端都不能为空');
+        // v2.1.8 N2：mode='custom' 时 customValue 必填（dialog UI 已限制 maxlength=200）
+        if (a.mode === 'custom' && (!a.customValue || String(a.customValue).trim() === '')) {
+          errors.push('对账成立后赋值的"自取值"内容不能为空');
+        }
         // v2.1.5 N3：conditions 柔性校验
         //   - conditions.length === 0 → 通过（视为不过滤）
         //   - ≥ 1 行 → 每行 side / field 必填；非「空值/非空值」op 的 value 必填；side 与 field 一致性校验
@@ -6104,8 +6109,14 @@
             <div class="scenario-config-vs-row">
               <select class="scenario-config-input" data-field="assign-gw" ${isReadonly ? 'disabled' : ''}>
                 <option value="">请选择网关账单字段</option>
+                <option value="__CUSTOM__"${config.assign.gwField === '__CUSTOM__' ? ' selected' : ''}>自取值</option>
                 ${renderScenarioOptions(GATEWAY_RECON_FIELDS, config.assign.gwField)}
               </select>
+              <input class="scenario-config-input" type="text" data-field="assign-custom-value"
+                     maxlength="200" placeholder="请填写自取值"
+                     value="${escapeHtml(config.assign.customValue || '')}"
+                     ${isReadonly ? 'disabled' : ''}
+                     style="${config.assign.mode === 'custom' ? '' : 'display:none;'}">
               <span class="scenario-config-vs-arrow">赋值给</span>
               <select class="scenario-config-input" data-field="assign-bank" ${isReadonly ? 'disabled' : ''}>
                 <option value="">请选择银行对账单字段</option>
@@ -6226,7 +6237,20 @@
 
       // 行 4 赋值字段同步
       dialog.querySelector('select[data-field="assign-gw"]')?.addEventListener('change', (e) => {
-        config.assign.gwField = e.target.value;
+        const v = e.target.value;
+        config.assign.gwField = v;
+        // v2.1.8 N2：选「自取值」→ 显示 input + 设 mode='custom'；选真实字段 → 隐藏 input + 设 mode='direct'
+        const customInput = dialog.querySelector('input[data-field="assign-custom-value"]');
+        if (v === '__CUSTOM__') {
+          config.assign.mode = 'custom';
+          if (customInput) customInput.style.display = '';
+        } else {
+          config.assign.mode = 'direct';
+          if (customInput) customInput.style.display = 'none';
+        }
+      });
+      dialog.querySelector('input[data-field="assign-custom-value"]')?.addEventListener('input', (e) => {
+        config.assign.customValue = e.target.value;
       });
       dialog.querySelector('select[data-field="assign-bank"]')?.addEventListener('change', (e) => {
         config.assign.bankField = e.target.value;

@@ -912,7 +912,7 @@
   - 更新 `knowledge/index.md` 入索引
 - ☑ **T14-C PRD v0.11 实施记录**：
   - §二十三 加 YAML front matter `integrated: true`（防 archive PR 草稿重复，按 memory `workflow_pr_integrate_prd`）
-  - §23.1 38 commit 全列表（按时间逆序 + commit hash + 类型 + 内容 + 对应 PRD §引用）
+  - §23.1 50 commit 全列表（按时间逆序 + commit hash + 类型 + 内容 + 对应 PRD §引用）
   - §23.2 6 round 历程总结表
   - §23.3 F5 延期 v2.1.8 状态说明
   - §23.4 关联 PR（PR 号留待回填）

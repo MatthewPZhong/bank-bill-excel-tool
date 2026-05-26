@@ -16,6 +16,17 @@ const { createPendingSession } = require('./main-process/pending-session');
 const { applyWatermark } = require('./main-process/workbook-watermark');
 // v2.1.6 Module B T9：收单单据币种校验 — session + writer
 const acquiringBillCurrencySession = require('./main-process/acquiring-bill-currency-session');
+// v2.1.8 N1：before-quit 钩子需 module-level runRepo（IPC handler 内 require 来不及）
+const runRepo = require('./backend/acquiring-bill-currency-db/run-repository');
+
+// v2.1.8 N1' (v0.7)：idle 30min 自动 cleanup 计时器（spec §3.2.2 N1''-D6 ~ D13）
+//   - lastActivityTs：renderer 上报的用户最后活动时间（IPC `app:user-activity`），main 也用 mutex 间接判定（D6 AND 设计）
+//   - IDLE_CLEANUP_MS：闲置阈值，常量硬编码（D8 锁定 30min）
+//   - IDLE_CHECK_INTERVAL_MS：定时器轮询粒度（2 分钟，远小于 30min 阈值，足够及时）
+const IDLE_CLEANUP_MS = 30 * 60 * 1000;
+const IDLE_CHECK_INTERVAL_MS = 2 * 60 * 1000;
+let lastUserActivityTs = Date.now();
+let idleCleanupTimer = null;
 const acquiringBillCurrencyWriter = require('./main-process/acquiring-bill-currency-writer');
 // v2.1.6 Module A T3：启动 log 头注入作者 + build SHA
 const pkg = require('../package.json');
@@ -3076,22 +3087,10 @@ function registerAppHandlers() {
       //   提前算 unmatchedCount，保存框 + empty 返回两处共用
       const unmatchedCount = Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows.length : 0;
 
-      // 主输出走 saveDialog（用户另存为）；先弹保存框，让用户选位置
-      // 若 modifiedRows + unmatchedRows 都为空 → 跳过 saveDialog，仅落 error-report
-      let mainFilePath = null;
-      if (processingResult.modifiedRows.length > 0 || unmatchedCount > 0) {
-        const defaultFileName = buildMainOutputFileName();
-        const saveResult = await dialog.showSaveDialog(mainWindow, {
-          title: '保存处理结果',
-          defaultPath: path.join(app.getPath('documents'), defaultFileName),
-          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-        });
-        if (saveResult.canceled || !saveResult.filePath) {
-          return { status: 'cancelled' };
-        }
-        mainFilePath = saveResult.filePath;
-      }
-
+      // v2.1.8 v2.1.7-minor M-2：errorReport 写入提前到 saveDialog 之前
+      //   原顺序：saveDialog → cancel return → errorReport 写（cancel 时 errorReport 漏写）
+      //   新顺序：errorReport 写（无条件，独立于 saveDialog）→ saveDialog → cancel 仍 return（但 errorReport 已落盘）
+      //   场景：F8 round 8 全未命中 + 用户取消保存框 → 用户至少能拿到错误报告查异常原因
       // error-report 与主输出独立（PRD §189：error-report xlsx 格式独立于主输出）
       // 即使 modifiedRows.length === 0，warnings 仍应落盘——避免唯一可追溯的异常信息被吞掉
       // （Codex Round 2 F1 P1 修复：C1 多字段值不一致 / C2 一对多多对一 时
@@ -3102,6 +3101,23 @@ function registerAppHandlers() {
           warnings: processingResult.errorReport,
           exportRootDir
         });
+      }
+
+      // 主输出走 saveDialog（用户另存为）；先弹保存框，让用户选位置
+      // 若 modifiedRows + unmatchedRows 都为空 → 跳过 saveDialog，仅落 error-report（上方已写）
+      let mainFilePath = null;
+      if (processingResult.modifiedRows.length > 0 || unmatchedCount > 0) {
+        const defaultFileName = buildMainOutputFileName();
+        const saveResult = await dialog.showSaveDialog(mainWindow, {
+          title: '保存处理结果',
+          defaultPath: path.join(app.getPath('documents'), defaultFileName),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (saveResult.canceled || !saveResult.filePath) {
+          // M-2：cancel 时仍 return，但 errorReport 已写入（上方提前），renderer 显示 errorReport 路径
+          return { status: 'cancelled', errorReport };
+        }
+        mainFilePath = saveResult.filePath;
       }
       // v2.1.7 round 7 F8 fix（PR #51 reviewer P1 / self-review I-5）+ round 8 (Finding 1 follow-up)：
       //   仅当 modifiedRows + unmatchedRows 都为 0 才 return empty；
@@ -3524,6 +3540,14 @@ function registerAppHandlers() {
     if (startupMetricsReported) {
       writeStartupMetricsSnapshot(buildStartupMetricsSnapshot());
     }
+  });
+
+  // v2.1.8 N1' (v0.7)：renderer 上报用户活动（mousemove/keydown/click 节流后）
+  //   - 仅更新 lastUserActivityTs（不做日志/统计）
+  //   - 高频事件 → ipcMain.on 选用单向通道（无 Promise / 无 reply），renderer 用 ipcRenderer.send
+  //   - 节流由 renderer 端做（10s 一次），main 不再做防抖
+  ipcMain.on('app:user-activity', () => {
+    lastUserActivityTs = Date.now();
   });
 }
 
@@ -10084,6 +10108,9 @@ function registerNewAccountHandlers() {
 
   ipcMain.handle('acquiringBillCurrency:listMonths', () => {
     if (!database || !database.db) return [];
+    // v2.1.8 N1：进入模块兜底 — listMonths 是用户切到收单单据币种校验模块的第 1 个 IPC 调用
+    //   spec §三 N1-D3 兜底触发点；检测 cleanup_pending → setImmediate 后台清（不阻塞 listMonths）+ toast
+    triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
     try { return acquiringBillCurrencySession.listMonths({ db: database.db }); } catch (_e) { return []; }
   });
 
@@ -10297,29 +10324,11 @@ function registerNewAccountHandlers() {
       notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
-    // v0.12 fix9：release run lock，立即 acquire cleanup lock，setImmediate 异步分批清理（不阻塞 handler return）
+    // v0.12 fix9：release run lock，setImmediate 异步分批清理（不阻塞 handler return）
+    // v2.1.8 N1：β 方案 — cleanup 移出对账链路，runCheck 内已 markCleanupPending=1，
+    //   不再 setImmediate 立即触发；交 app.before-quit（主清）+ 进入模块时（兜底清）
+    //   保留 result.cleanupNeeded 字段（向后兼容；前端不消费此字段）
     releaseOpLock();
-    if (result.cleanupNeeded) {
-      const cleanupLock = tryAcquireOpLock('cleanup', monthKey);
-      if (cleanupLock.acquired) {
-        setImmediate(async () => {
-          try {
-            const cleanupStats = await acquiringBillCurrencySession.cleanupAfterRunBackground({
-              db: database.db,
-              monthKey,
-              runId: result.runId
-            });
-            // eslint-disable-next-line no-console
-            console.log(`[acquiring-bill-currency] background cleanup done for ${monthKey}:`, cleanupStats);
-          } catch (cleanupErr) {
-            // eslint-disable-next-line no-console
-            console.error(`[acquiring-bill-currency] background cleanup failed for ${monthKey}:`, cleanupErr && cleanupErr.message);
-          } finally {
-            releaseOpLock();
-          }
-        });
-      }
-    }
     // v2.1.7 F7-B1：success 路径弹通知（spec §7.5.2）
     notifyAcquiringBillCurrencyResult(monthKey, 'success', { mismatchRows: result.mismatchRows });
     return { status: 'success', ...result };
@@ -10563,13 +10572,107 @@ app.whenReady()
         releaseAcquiringBillCurrencyOpLock();
       }
     });
+
+    // v2.1.8 N1' (v0.7)：启动 idle 30min 自动 cleanup 计时器（spec §3.2.2）
+    //   database init 完后启动；setInterval 2 分钟 tick，达 30min 闲置 → 触发 cleanup
+    try {
+      setupIdleCleanupTimer();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[acquiring-bill-currency] setupIdleCleanupTimer failed:', err && err.message);
+    }
   })
   .catch((error) => {
     handleStartupFailure(error);
   });
 
+// v2.1.8 N1：进入模块兜底 cleanup
+//   spec §三 N1-D3 / D4：listMonths 入口检测 cleanup_pending → 后台串行清 + toast 通知
+//   防重入：cleanupBackgroundInProgress flag，避免短时间内多次切回模块触发重复 cleanup
+//   并发隔离：用 tryAcquireOpLock('cleanup') 防与 import/run/export 冲突
+//   失败容忍：单 run 失败仅日志，继续清下一个；启动期 cleanupOrphanData 兜底
+let cleanupBackgroundInProgress = false;
+function triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded() {
+  if (cleanupBackgroundInProgress) return;
+  if (!database || !database.db) return;
+  let pendingRuns;
+  try {
+    pendingRuns = runRepo.listPendingCleanupRuns(database.db);
+  } catch (_e) {
+    return;
+  }
+  if (!pendingRuns || pendingRuns.length === 0) return;
+  const cleanupLock = tryAcquireAcquiringBillCurrencyOpLock('cleanup', null);
+  if (!cleanupLock.acquired) return; // import/run/export 进行中，放弃这次（下次入模块再试）
+  cleanupBackgroundInProgress = true;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('acquiringBillCurrency:cleanup-background:toast', {
+      stage: 'start', pendingCount: pendingRuns.length
+    });
+  }
+  setImmediate(async () => {
+    try {
+      for (const run of pendingRuns) {
+        try {
+          await acquiringBillCurrencySession.cleanupAfterRunBackground({
+            db: database.db, monthKey: run.month_key, runId: run.id
+            // v2.1.8 N1' (v0.7)：includeDiff 默认 false → 只清 flow + bill，保留 diff
+          });
+          runRepo.clearCleanupPending(database.db, { runId: run.id });
+        } catch (cleanErr) {
+          // eslint-disable-next-line no-console
+          console.error(`[acquiring-bill-currency] background cleanup run ${run.id} 失败:`, cleanErr && cleanErr.message);
+        }
+      }
+    } finally {
+      releaseAcquiringBillCurrencyOpLock();
+      cleanupBackgroundInProgress = false;
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('acquiringBillCurrency:cleanup-background:toast', { stage: 'done' });
+      }
+    }
+  });
+}
+
+// v2.1.8 N1' (v0.7)：idle 30min 自动 cleanup 计时器（spec §3.2.2）
+//   - 触发条件三个 AND：
+//       (1) renderer 上报的 lastUserActivityTs 距今 ≥ 30min（D6/D8）
+//       (2) mutex 可获取（间接表达 main 进程未在跑 import/run/export，D6 AND 设计）
+//       (3) listPendingCleanupRuns 非空（有待清 run）
+//   - 触发后复用 triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded 走同一条路径
+//     （已有 cleanupBackgroundInProgress 防重入 + tryAcquireOpLock 抢锁 + toast 通知）
+//   - 失败仅 console.error（D13 静默策略）；下次 idle 再试 + 进入模块兜底 + 启动 cleanupOrphanData 三重兜底
+//   - 启动时机：app.whenReady 后调用 setupIdleCleanupTimer（database init 完之后）
+function setupIdleCleanupTimer() {
+  if (idleCleanupTimer) return; // 重入保护
+  idleCleanupTimer = setInterval(() => {
+    try {
+      const elapsed = Date.now() - lastUserActivityTs;
+      if (elapsed < IDLE_CLEANUP_MS) return;
+      // idle 达标 → 复用进入模块兜底路径（含 mutex 抢锁 + cleanup_pending 判定 + 防重入）
+      triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[acquiring-bill-currency] idle cleanup tick 失败:', err && err.message);
+    }
+  }, IDLE_CHECK_INTERVAL_MS);
+  if (idleCleanupTimer.unref) idleCleanupTimer.unref(); // 不阻塞退出
+}
+
 // v2.0.0-beta.4：退出前 flush usage-stats（before-quit 在窗口全关后触发）
-app.on('before-quit', () => {
+// v2.1.8 N1' (v0.7)：β 方案降级为退出兜底（D10=c）— 简化为静默串行清，删模态框 IPC 广播
+//   spec §三 N1'：idle 30min 主触发 + before-quit 退出兜底（防没闲够就退）+ listMonths 崩溃恢复兜底
+//   设计：
+//     1. 既有 usage-stats flush 不动（同步执行，毫秒级）
+//     2. 检查 listPendingCleanupRuns 是否有待清 runs（cleanup_pending=1）
+//     3. 有 → event.preventDefault() 阻塞 → 异步静默串行清 → 完成后 app.quit()
+//     4. 无 → 直接退出（不阻塞）
+//     5. 退出失败 → console.error + 仍 quit（spec N1''-D13 静默 + 进入模块兜底 + 启动 cleanupOrphanData 三重保险）
+//     6. cleanupAfterRunBackground 默认 includeDiff=false → 只清 flow + bill，保留 diff
+let cleanupQuitInProgress = false; // 防重入
+
+app.on('before-quit', (event) => {
+  // usage-stats flush（不变）
   try {
     if (usageStats) {
       usageStatsModule.recordSessionEnd(usageStats);
@@ -10583,6 +10686,43 @@ app.on('before-quit', () => {
   } catch (err) {
     console.warn('[usage-stats] before-quit flush failed:', err && err.message);
   }
+
+  // v2.1.8 N1' (v0.7)：cleanup 退出兜底（静默）
+  if (cleanupQuitInProgress) return; // 重入保护（cleanup 完成 app.quit 时会再次触发 before-quit）
+  if (!database || !database.db) return;
+  let pendingRuns;
+  try {
+    pendingRuns = runRepo.listPendingCleanupRuns(database.db);
+  } catch (listErr) {
+    // listPending 失败 → 不阻塞退出（启动期 cleanupOrphanData 会兜底）
+    // eslint-disable-next-line no-console
+    console.error('[acquiring-bill-currency] before-quit listPendingCleanupRuns 失败，直接退出:', listErr && listErr.message);
+    return;
+  }
+  if (!pendingRuns || pendingRuns.length === 0) return;
+
+  event.preventDefault();
+  cleanupQuitInProgress = true;
+
+  // 异步串行清（N1''-D9：当前 batch 内部 setImmediate 让出；N1''-D13：静默，无 IPC 广播）
+  (async () => {
+    for (const run of pendingRuns) {
+      try {
+        await acquiringBillCurrencySession.cleanupAfterRunBackground({
+          db: database.db,
+          monthKey: run.month_key,
+          runId: run.id
+          // includeDiff 默认 false → 保留 diff（spec §3.2.1 N1''-D1/D3）
+        });
+        runRepo.clearCleanupPending(database.db, { runId: run.id });
+      } catch (cleanErr) {
+        // eslint-disable-next-line no-console
+        console.error(`[acquiring-bill-currency] cleanup-quit run ${run.id} (${run.month_key}) 失败:`, cleanErr && cleanErr.message);
+      }
+    }
+    // N1''-D13：失败也 quit（启动期 cleanupOrphanData 兜底）
+    app.quit();
+  })();
 });
 
 app.on('window-all-closed', () => {
