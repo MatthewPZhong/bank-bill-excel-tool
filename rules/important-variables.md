@@ -9,7 +9,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 清单版本 | v10（对应 app v2.1.8 — 2026-05-22 Phase 0 T02 升格 11 条 v2.1.8 涉及变量：Critical 2 条（`findBestAmountSubset` / `tryManyToOnePool` — F5）+ Important-skeleton 4 条（`parseBillDateMs` — F5 / `cleanupAfterRunBackground` — N1 / `INTERNAL_FIELDS` — N3-2 / `BANK_STATEMENT_FIELDS_FOR_C3` — N2）+ Risk-sensitive 4 条（`cleanup_pending` — N1 / `config_json.assign` — N2 / `hitScenarios` — N3-1 / `displayIndex` — N3-1）+ Minor 1 条（`recon-id-fix-io.js raw 模式` — F5）；触发：v2.1.7 §十延期 F5 + 用户 2026-05-22 立项 N1/N2/N3 + G1 spec §七 升格评估）；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
+| 清单版本 | v11（对应 app v2.1.8 — 2026-05-26 发版收尾再升格 7 条 N1' + N4 涉及变量：Critical 3 条（`WRITER_OUTPUT_HEADERS_V2` / `TEMPLATE_BILL_HEADERS` / `bill_imports.raw_json` 内容契约 — N4）+ Important-skeleton 2 条（`ensureBillRawJsonV2Slim` — N4 / `setupIdleCleanupTimer` — N1'）+ Runtime-state 1 条（`lastUserActivityTs` 含 `IDLE_CLEANUP_MS` + `reportUserActivity` — N1'）+ deprecated 标记 1 条（`WRITER_OUTPUT_HEADERS` — N4）+ 更新 1 条（`cleanupAfterRunBackground` review 要点加 N1' v0.7 `includeDiff` 参数 + FK 反向同步）；触发：用户 2026-05-26 立项 N1' + N4；v10 = 2026-05-22 Phase 0 T02 升格 11 条；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
 | 上次人工 review | 2026-05-22（v2.1.8 Phase 0 T02 升格 11 条 — F5/A3/N1/N2/N3 spec.md §七 评估） |
 | 基线数据 | `docs/analysis/var-reference-stats.md`（85 个 JS 文件 / 853 顶层声明 — v2.1.7 T14 重跑后；A-share 146 / A-pair 247 / A-local 359 / B 393） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
@@ -222,6 +222,35 @@
   - 改遍历顺序 → 命中行数变化（v2.1.7 实测 28 行 vs TEST2.xlsx 期望 57 行差距即源于此）
   - 必跑：smoke + F5 fixture + TEST2.xlsx 3 个关键子集验证（T54SWIC494447 16 行 / T54SWIC506630 11 行 / T54SWIC470181 4M 子池）
 
+### `WRITER_OUTPUT_HEADERS_V2`（v2.1.8 N4 新增 Critical ⚠️ 资金红线 — 收单差异表对外输出 12 列契约）
+- 定义：`src/backend/acquiring-bill-currency-db/columns.js:88` `const WRITER_OUTPUT_HEADERS_V2 = Object.freeze([...TEMPLATE_BILL_HEADERS, 单据_对账币种, 流水_通道清算币种, 流水_通道清算金额])`
+- 关联功能：收单单据币种校验差异表 xlsx 12 列输出契约（spec v0.10 §三.1 N4-D3 = 模版顺序）；用户 / 财务 / Excel 自动化下游 100% 依赖
+- 变更 review 要点：
+  - **对外输出契约**：任何修改（加/删/换列名 / 改顺序）→ 用户 Excel 自动化失效
+  - 必须同步：模版 xlsx + writer.js + smoke caseA 末 N 列断言 + USER_GUIDE
+  - 旧 `WRITER_OUTPUT_HEADERS`（29 列）标 deprecated 仅历史参照，新代码用 V2
+  - 列名常量来源：`TEMPLATE_BILL_HEADERS`（前 9）+ `WRITER_OUTPUT_BILL_COPY_HEADER`（10）+ `WRITER_OUTPUT_FLOW_CURRENCY_HEADER`（11）+ `WRITER_OUTPUT_FLOW_AMOUNT_ABS_HEADER`（12）
+  - 必跑：smoke caseA 列数 = 12 + 末 4 列表头断言 + N4 migration 用例
+
+### `TEMPLATE_BILL_HEADERS`（v2.1.8 N4 新增 Critical ⚠️ 资金红线 — 模版 9 列 truth source）
+- 定义：`src/backend/acquiring-bill-currency-db/columns.js:82` `const TEMPLATE_BILL_HEADERS = Object.freeze(['账单日期', 'originBillBizId', '单据类型', '主对账Id', '业务订单号', '对账金额', '对账币种', 'valueDate', 'channel'])`
+- 关联功能：模版（`assets/收单币种校验导出差异表模版.xlsx`）前 9 列字段；writer + migration 共用 truth；DB raw_json 瘦身后唯一保留的 9 字段
+- 变更 review 要点：
+  - **对外输出契约**：模版字段是 N4 设计的 PSU；改之 → migration 失效 + 历史数据中 raw_json 仅含旧 9 字段
+  - 必须同步：assets/收单币种校验导出差异表模版.xlsx + WRITER_OUTPUT_HEADERS_V2 + ensureBillRawJsonV2Slim N4_TEMPLATE_BILL_HEADERS 内部副本
+  - 字段顺序（D3=a）：必须与模版一致；不可按其他顺序保留
+  - 必跑：N4 caseN4_billRawJsonSlimMigration 全流程
+
+### `bill_imports.raw_json`（v2.1.8 N4 内容契约变更 ⚠️ 资金红线 — 永久删除 17 字段）
+- 定义：`src/backend/database/migrations.js:1023` DDL `raw_json TEXT NOT NULL`
+- 关联功能：收单单据导入数据的 JSON 序列化字段；v2.1.7 及之前存 26 字段，v2.1.8 N4 起仅存 9 模版字段；migration 通过 `ensureBillRawJsonV2Slim` 一次性 rewrite
+- 变更 review 要点：
+  - **数据不可逆**：17 字段值（ReconBillBizId / 公司主体 / 业务部门 / 对手部门 / 订单创建来源 / 财务BU / 账单类型 / 业务子类型 / 交易类型 / 对账子类型 / 单据状态 / 用户编号 / 账户号 / 账户类型 / remark / 创建时间 / 完成时间）永久删除
+  - 历史月份差异表重导出也少这些字段 → 不能反悔
+  - 下游消费方调研（v2.1.8 commit 37299cf）：仅 writer.js + run-repository.js 4 处 SQL `json_extract '$."账单日期"'` 使用；17 字段无下游消费
+  - import-repository 写入 raw_json 时**仍按 26 字段写入**（reader 读 xlsx 全字段），migration 后续生效；下次需要时可在 import 阶段也裁字段
+  - 必跑：N4 migration 全流程 + caseA 末 N 列表头 + readback raw_json 仅 9 字段
+
 ---
 
 ## 2. Important-skeleton — 系统骨架
@@ -342,14 +371,28 @@
   - 改正则 → 历史 BillDate 字符串可能匹配失败 → 候选池消失
   - 必跑：smoke c4 + F5 fixture + unit case（输入字符串 / 输入 number 序列号 → ISO 后输入对比）
 
-### `cleanupAfterRunBackground`（v2.1.8 N1 新增 Important-skeleton — runCheck 后置清理函数）
-- 定义：`src/main-process/acquiring-bill-currency-session.js:278` `async function cleanupAfterRunBackground({ db, monthKey, runId, onProgress })`
-- 关联功能：收单单据币种校验模块 runCheck 后清理 3 张表（diff_rows / flow_imports / bill_imports），每批 50000 行 + setImmediate 让出 event loop
+### `cleanupAfterRunBackground`（v2.1.8 N1 新增 Important-skeleton — runCheck 后置清理函数；v0.7 N1' 加 includeDiff 参数）
+- 定义：`src/main-process/acquiring-bill-currency-session.js:295` `async function cleanupAfterRunBackground({ db, monthKey, runId, onProgress, includeDiff = false })`
+- 关联功能：收单单据币种校验模块 runCheck 后清理；每批 50000 行 + setImmediate 让出 event loop
 - 变更 review 要点：
-  - N1 β 方案（spec.md §三）：触发链路改造 — 从 runCheck return 后 setImmediate 触发 → 改为应用退出时（app.before-quit）为主 + 进入模块时为兜底
-  - **不动 cleanup 算法本身**（50000 行/批 + setImmediate）；本次仅改触发时机
-  - 跨文件度 3（scan-vars baseline），调用方变化（v2.1.7 main.js:10307 setImmediate → v2.1.8 移除，改 app.before-quit + IPC 入口检查）
-  - 必跑：smoke N1（runCheck 后 DB 数据保留 / 退出时清完 / 进入兜底 / 启动孤儿仍工作）
+  - N1 β 方案（spec.md §三）：触发链路改造 — runCheck → app.before-quit 主 + 进入模块兜底
+  - **N1' v0.7 改造**（spec.md v0.10 §三）：
+    - 主触发改 idle 30min（`setupIdleCleanupTimer`）；before-quit 降级静默兜底；进入模块降级崩溃恢复兜底
+    - 新增 `includeDiff=false` 参数（默认）：仅清 flow_imports；bill_imports + diff_rows 保留（**FK 约束** `diff_rows.bill_import_id REFERENCES bill_imports(id)` 无 CASCADE 强制）
+    - `includeDiff=true` 仅 cleanupOrphanData Phase 2 用（清孤儿 run 脏数据 → diff → bill → flow 顺序解 FK）
+  - **不动 cleanup 算法本身**（50000 行/批 + setImmediate）；仅触发时机 + 范围
+  - 调用方变化：v2.1.7 main.js:10307 setImmediate → v2.1.8 移除 → v0.7 新增 setupIdleCleanupTimer / before-quit / listMonths 三触发
+  - 必跑：smoke caseP（默认 includeDiff=false → bill/diff 保留 + flow 清）+ caseP2（includeDiff=true → 3 表清）+ caseQ cleanupOrphanData 不动
+
+### `setupIdleCleanupTimer`（v2.1.8 N1' v0.7 新增 Important-skeleton — idle 30min cleanup 触发器）
+- 定义：`src/main.js:10620` `function setupIdleCleanupTimer()`；关联常量 `IDLE_CLEANUP_MS = 30 * 60 * 1000` / `IDLE_CHECK_INTERVAL_MS = 2 * 60 * 1000`；关联状态 `lastUserActivityTs`
+- 关联功能：app.whenReady 后启动定时器；每 2min tick 检查 `Date.now() - lastUserActivityTs >= 30min` → 复用 `triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded`（含 mutex 抢锁 + 防重入）
+- 变更 review 要点：
+  - **触发条件 AND 设计**（spec v0.10 §3.2.2 N1''-D6）：renderer 上报 user-activity + mutex 间接判定 main 未忙；改任一条件 → idle 误判风险
+  - 改 IDLE_CLEANUP_MS 常量 → 用户体验大变（短 → cleanup 频繁打扰；长 → 数据长期不清）
+  - 改 tick 粒度 → 触发延迟 + CPU 开销 trade-off
+  - **不能加 .unref() 删除**（避免阻塞退出，但要确保 cleanup mutex 在 before-quit 之前抢到）
+  - 必跑：手测 30min 不动 → 触发 + log；smoke 中 fake timer 验证 idle 路径（v2.1.9 G1 全量铺时补 unit case）
 
 ### `INTERNAL_FIELDS`（v2.1.8 N3-2 新增 Important-skeleton — writer 内部字段过滤白名单）
 - 定义：`src/main-process/exceljs-writer.js:25` `const INTERNAL_FIELDS = new Set([...])`
@@ -514,6 +557,31 @@
   - 新增迁移必须幂等（可重复运行不破坏）
   - 必跑：空库启动 + 老版本库启动（可用之前的 `tool-data.sqlite` 备份）
   - 不允许 DROP / 破坏性 ALTER
+  - **N4 例外（v2.1.8 破坏性 raw_json rewrite）**：`ensureBillRawJsonV2Slim` 是已立项的破坏性 migration，强制配套 DB 备份 + 事务回滚 + 标志位
+
+### `ensureBillRawJsonV2Slim`（v2.1.8 N4 新增 Important-skeleton + 🔴 破坏性 + 资金红线）
+- 定义：`src/backend/database/migrations.js:803` `function ensureBillRawJsonV2Slim(db, dbPath)`
+- 关联功能：v2.1.8 首次启动自动备份 DB 到 `<dbDir>/backups/tool-data-bak-pre-N4-<ts>.sqlite` → 事务包裹分批 rewrite `acquiring_bill_currency_bill_imports.raw_json` 仅保留 9 模版字段 → 写 marker `app_settings.acquiring_bill_raw_json_v2_migrated=true`
+- 变更 review 要点：
+  - **数据不可逆**：17 字段值永久删除；备份失败 → migration 不启动（数据完整性优先）
+  - 幂等保护：marker 已写 → 跳过；失败回滚不写 marker → 下次重试
+  - **不能改 N4_TEMPLATE_BILL_HEADERS 内部副本**而不同步 `TEMPLATE_BILL_HEADERS` 常量（Critical §1）
+  - 备份方式 `PRAGMA wal_checkpoint(TRUNCATE) + fs.copyFileSync` 不能改成不一致的方式
+  - 必跑：smoke caseN4_billRawJsonSlimMigration（首次 migrated + 幂等跳过 + 备份文件存在 + 9 字段保留 + 17 字段删除）
+
+### `lastUserActivityTs` + `IDLE_CLEANUP_MS` + `reportUserActivity`（v2.1.8 N1' v0.7 新增 Runtime-state）
+- 定义：
+  - `src/main.js:25` `let lastUserActivityTs = Date.now()`（模块级）
+  - `src/main.js:23` `const IDLE_CLEANUP_MS = 30 * 60 * 1000`
+  - `src/preload.js:88` `reportUserActivity: () => ipcRenderer.send('app:user-activity')`
+  - `src/main.js:3550` `ipcMain.on('app:user-activity', () => { lastUserActivityTs = Date.now(); })`
+  - `src/renderer.js:226` `setupUserActivityReporter()`（mousemove/keydown/click/wheel/touchstart 10s 节流）
+- 关联功能：N1' idle 30min 后台 cleanup 判定依据（spec v0.10 §3.2.2 N1''-D6/D7/D8）
+- 变更 review 要点：
+  - **节流间隔 10s**：renderer 10s 内必上报一次（避免长按拖动误判）；改短 → IPC 压力；改长 → 误判风险
+  - **常量 IDLE_CLEANUP_MS 改值** → 用户体验大变；建议常量集中保留，未来 v2.1.9 评估 settings 化（D8=a 锁定不做）
+  - lastUserActivityTs 是模块级单例 `let`，跨 IPC handler 共享；不能改成对象属性 + 多实例
+  - 必跑：手测移鼠标 → lastUserActivityTs 更新；闲置 30min → setupIdleCleanupTimer tick 触发 cleanup
 
 ### 大账号数据迁移
 - `splitTemplateName` — `database/own-accounts-migration.js` + `database.js`
