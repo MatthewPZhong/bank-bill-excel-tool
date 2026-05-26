@@ -940,6 +940,37 @@
       }, 120);
     }
 
+    // v2.1.8 N2：C3 dialog mode='custom' 自取值视觉状态
+    //   gwField='__CUSTOM__' + customValue 静态字符串 → assign-gw 右侧 input 显示
+    function applyScenarioConfigC3CustomPreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      state.scenarioDraft = {
+        mode: 'create',
+        category: 'gateway-recon-join',
+        scenarioId: null,
+        name: 'N2 自取值 demo — 写入静态对账号',
+        priority: 1,
+        config: {
+          conditions: [
+            { side: '网关', field: 'Bank', op: '等于', value: 'JPM' }
+          ],
+          reconFields: [
+            { seq: 1, gwField: 'Currency', bankField: 'Currency' },
+            { seq: 2, gwField: 'Amount', bankField: '发生额绝对值' }
+          ],
+          assign: {
+            gwField: '__CUSTOM__',
+            bankField: 'ReconciliationId',
+            mode: 'custom',
+            customValue: 'AUTO-GEN-RECON-20260526'
+          }
+        }
+      };
+      setTimeout(() => {
+        openModal(createScenarioConfigDialogC3());
+      }, 120);
+    }
+
     function applyScenarioConfirmDetailPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
       // 预填 C1 配置然后进入确认详情
@@ -1196,6 +1227,7 @@
       applyScenarioConfigC1AndPreviewState,
       applyScenarioConfigC2PreviewState,
       applyScenarioConfigC3PreviewState,
+      applyScenarioConfigC3CustomPreviewState,
       applyScenarioConfirmDetailPreviewState,
       // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 preview（3 张）
       applyReconIdFixPanelPreviewState,

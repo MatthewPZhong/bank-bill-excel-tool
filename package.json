@@ -59,6 +59,7 @@
     "preview:scenario-config-c1-and": "node scripts/render-modal-preview.js scenario-config-c1-and scenario-config-c1-and.png",
     "preview:scenario-config-c2": "node scripts/render-modal-preview.js scenario-config-c2 scenario-config-c2.png",
     "preview:scenario-config-c3": "node scripts/render-modal-preview.js scenario-config-c3 scenario-config-c3.png",
+    "preview:scenario-config-c3-custom": "node scripts/render-modal-preview.js scenario-config-c3-custom scenario-config-c3-custom.png",
     "preview:scenario-confirm-detail": "node scripts/render-modal-preview.js scenario-confirm-detail scenario-confirm-detail.png",
     "preview:recon-id-fix-panel": "node scripts/render-modal-preview.js recon-id-fix-panel recon-id-fix-panel.png",
     "preview:scenario-config-c4": "node scripts/render-modal-preview.js scenario-config-c4 scenario-config-c4.png",

@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.4（2026-05-26 — F5 v2.1.8 范围收敛：T08-T11 修 4/5 根因 + 28-43 行交付；根因 #5（subset-sum 剪枝大 pool 下误剪）需 ILP 范式重写延期 v2.1.9；用户 2026-05-26 拍板暂停 F5）；v0.3 移除 TEST.xlsx；v0.2 T08 改 F5-D4；v0.1 初版 |
+| 文档版本 | v0.6（2026-05-26 — N2 实施前发现 GATEWAY_RECON_FIELDS 被 reader 校验使用，撤回 constants 修改，改为 dialog 渲染层单独拼 option；spec v0.7 同步）；v0.5 「自取值」改 assign-gw；v0.4 F5 范围收敛；v0.3 移除 TEST.xlsx；v0.2 T08 改 F5-D4；v0.1 初版 |
 | 目标版本 | `v2.1.8`（patch / minor 待定，G1 引入新目录可能升 minor） |
 | 起始版本 | `v2.1.7`（v2.1.7 完成时 main 状态；本 PRD 制定时 v2.1.7 尚未合并 main） |
 | 起草日期 | 2026-05-22 |
@@ -43,7 +43,7 @@ v2.1.8 包含 **7 项独立改动**（F5/A3/A4/G1/N1/N2/N3），覆盖四个模�
 - **A4** — 二选一：(a) A3 worker 已解决问题 → A4 不做；(b) 仍需要 → chunked LIMIT/OFFSET（spec 阶段决策）
 - **G1** — 引入 `node:test`；新建 `tests/unit/` 目录镜像 src 分层；`package.json` 加 `"test:unit": "node --test tests/unit/"`；全量覆盖第 1+2 层
 - **N1** — `app.before-quit` 钩子触发 cleanup 为主路径 + 进入模块时为兜底；`cleanupPending` 标志位持久化到 `acquiring_bill_currency_runs` 表新列；runCheck 内 setImmediate 触发链路移除
-- **N2** — `renderer-dialogs.js` C3 dialog 第二下拉新增"自取值"枚举（第 2 位）+ 右侧条件输入框；`config_json.assign` 扩展 `mode` + `customValue`；`c3-gateway-recon-join.js:158-172` 加分支；DB migration 旧 scenario 补 `mode='direct'`
+- **N2**（v0.5 修订）— `renderer-dialogs.js` C3 dialog **第一下拉框 `assign-gw`**（数据源）新增"自取值"枚举（从上往下第 2 位，占位符之后）+ assign-gw 右侧条件输入框（input）；`config_json.assign` 扩展 `mode: 'direct' | 'custom'` + `customValue` + gwField sentinel `__CUSTOM__`；`c3-gateway-recon-join.js:158-172` 加分支：mode==='custom' → newValue=customValue，否则按原逻辑取 chosen.row[gwField]；DB migration 旧 scenario 补 `assign.mode='direct'`；GATEWAY_RECON_FIELDS（不是 BANK_STATEMENT_FIELDS_FOR_C3）+ preload 双写同步
 - **N3-1** — `scenario-dispatcher.js:99` 推送结构改 `{ id, displayIndex, name }`，`main.js:3045` IPC 字段扩展，`renderer.js:3319` 显示 displayIndex
 - **N3-2** — `exceljs-writer.js` 新增 Sheet 3「命中场景行」写入分支，列结构 = 原 44 列 + 末尾「命中场景」格式 `[序号] 场景名称`
 - 三件套（CHANGELOG / VFH / USER_GUIDE）发布前一次性更新
@@ -323,26 +323,28 @@ ALTER TABLE acquiring_bill_currency_runs ADD COLUMN cleanup_pending INTEGER DEFA
 ✅ 输入框校验：不允许空 + 200 字符上限 + 不限字符类型
 ✅ 模板 bundle 继续 v3（向前兼容）
 
-### 9.2 改动点
+### 9.2 改动点（v0.5 修订 — 加到 assign-gw 数据源而非 assign-bank 写入目标）
+
+**关键 Reverse Sync**：v0.1 起草时按用户原话"第二下拉框"字面理解为 `assign-bank`，但 c3 引擎语义（:158-172 `newValue = chosen.row[assign.gwField]; bankRow[assign.bankField] = newValue`）表明 assign-bank 是写入目标必须真实字段名 → "自取值"作为数据源应加在 **assign-gw（第 1 下拉框）**。用户 2026-05-26 拍板方案 A。
 
 #### UI 层（`src/renderer-dialogs.js`）
 
-- [ ] C3 dialog 第二下拉框（`select[data-field="assign-bank"]`）枚举列表插入「自取值」到从上往下第 2 位
-- [ ] 第二下拉 change 事件新增分支：选「自取值」→ 右侧显示 `<input type="text" maxlength="200">`
+- [ ] C3 dialog **第 1 下拉框 `select[data-field="assign-gw"]`**（数据源 GATEWAY_RECON_FIELDS）插入「自取值」到从上往下第 2 位（"请选择网关账单字段"占位符之后、所有真实字段之前）
+- [ ] **assign-gw** change 事件新增分支：value === '__CUSTOM__' → 该 select **右侧显示** `<input type="text" maxlength="200">`；切回真实字段 → 隐藏 input
 - [ ] dialog 保存时：
   - 若 mode='custom' && customValue 为空 → 校验报错"自取值不能为空"
-  - 若 mode='custom' → 保存 `assign.customValue`
-  - 若 mode='direct' → 不保存 customValue
+  - 若 mode='custom' → 保存 `assign.mode='custom' + assign.gwField='__CUSTOM__' + assign.customValue`
+  - 若 mode='direct' → 保存 `assign.mode='direct' + assign.gwField=真实字段名`，不保存 customValue
 - [ ] dialog 打开时按 `assign.mode` 回显（'direct' → 隐藏 input，'custom' → 显示 input + 填回 customValue）
 
 #### 数据结构
 
 ```js
 config_json.assign = {
-  gwField: "Amount",
-  bankField: "Credit Amount",  // 'direct' 模式
-  mode: 'direct' | 'custom',
-  customValue: "用户填写的字符串"  // 'custom' 模式
+  gwField: 'BillDate' | '__CUSTOM__',  // 真实字段名 / sentinel for custom mode
+  bankField: 'Reference',              // 写入目标（始终是真实银行字段）
+  mode: 'direct' | 'custom',           // 新增字段
+  customValue: '用户填写的字符串'      // 仅 mode='custom' 时有意义
 }
 ```
 
@@ -351,18 +353,30 @@ config_json.assign = {
 - [ ] :158-172 赋值逻辑加分支：
   ```js
   const newValue = (assign.mode === 'custom')
-    ? assign.customValue
+    ? String(assign.customValue || '')
     : normalizeCellValue(chosen.row[assign.gwField]);
   ```
+- 旧 reader（无 mode 字段）graceful 降级：gwField='__CUSTOM__' → chosen.row['__CUSTOM__']=undefined → normalizeCellValue → '' → 不破坏（行为退化为"写空值"）
 
 #### DB migration（`src/backend/database/migrations.js`）
 
-- [ ] 幂等 migration：扫描所有 scenarios，对 category='gateway-recon-join' 的 config_json，若 `assign.mode` 字段不存在，补 `mode='direct'`
+- [ ] 幂等 migration：扫描 category='gateway-recon-join' 的 scenarios，对 config_json 缺 `assign.mode` 的补 `mode='direct'`
 
-#### 同步点
+#### 同步点（v0.6 修订 — constants 保持不变，仅 dialog 渲染层加 option）
 
-- [ ] `src/constants/bank-statement-fields.js:60-63` `BANK_STATEMENT_FIELDS_FOR_C3` 在数组第 2 位插入「自取值」（含特殊 value 如 `__CUSTOM__`）
-- [ ] `src/preload.js` 中 inline 的 `BANK_STATEMENT_FIELDS_FOR_C3` 同步
+⚠️ **不能改 GATEWAY_RECON_FIELDS constants**（v0.6 实施前发现）：被 `bank-statement-io.js:114` 用作网关账单 reader 表头校验 + `:5908` validFields 字段合法性校验 + `:6131 renderC3ConditionRow` 条件下拉 + `:6212` reconFields 行字段下拉。加 `'__CUSTOM__'` 会破坏 reader + 让条件下拉显示"自取值"（错位）。
+
+- [ ] `src/constants/gateway-recon-fields.js` **不改**
+- [ ] `src/preload.js` **不改**
+- [ ] `src/renderer-dialogs.js:6105-6108` assign-gw select 渲染时单独拼接：
+  ```html
+  <select data-field="assign-gw">
+    <option value="">请选择网关账单字段</option>
+    <option value="__CUSTOM__"${config.assign.gwField === '__CUSTOM__' ? ' selected' : ''}>自取值</option>
+    ${renderScenarioOptions(GATEWAY_RECON_FIELDS, config.assign.gwField)}
+  </select>
+  ```
+- [ ] 验证：renderC3ConditionRow（:6131）+ reconFields 行（:6212）+ bank-statement-io reader（:114）行为完全不变
 
 ### 9.3 项目复用模式
 
@@ -372,8 +386,9 @@ config_json.assign = {
 
 - 🟡 对账契约变更：scenarios 数据结构升级，migration 必须确保旧 scenario graceful 升级
 - 🟡 模板 bundle 兼容：CLAUDE.md 已记录 `bundleVersion` v3，本次不升 v4（向前兼容只追加字段）
-- 🟡 preload inline 常量需同步（项目历史坑）
-- 🟡 重要变量：`scenarios` 数据结构 + `c3-gateway-recon-join.js` 赋值逻辑
+- 🟡 preload inline 常量需同步（项目历史坑 — v0.5 改 GATEWAY_RECON_FIELDS 双写）
+- 🟡 重要变量：`scenarios` 数据结构 + `c3-gateway-recon-join.js` 赋值逻辑 + GATEWAY_RECON_FIELDS（升 Important-skeleton）
+- 🟡 旧 reader graceful 降级：gwField='__CUSTOM__' 在 v2.1.7 reader 中 → newValue='' → 不抛错但行为退化（用户应升级到 v2.1.8 才能用"自取值"）
 
 ---
 

@@ -448,6 +448,7 @@ const {
   applyScenarioConfigC1AndPreviewState,
   applyScenarioConfigC2PreviewState,
   applyScenarioConfigC3PreviewState,
+  applyScenarioConfigC3CustomPreviewState,
   applyScenarioConfirmDetailPreviewState,
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 preview（3 张）
   applyReconIdFixPanelPreviewState,
@@ -5311,6 +5312,10 @@ async function initialize() {
   } else if (info.previewModal === 'scenario-config-c3') {
     setTimeout(() => {
       applyScenarioConfigC3PreviewState();
+    }, 120);
+  } else if (info.previewModal === 'scenario-config-c3-custom') {
+    setTimeout(() => {
+      applyScenarioConfigC3CustomPreviewState();
     }, 120);
   } else if (info.previewModal === 'scenario-confirm-detail') {
     setTimeout(() => {

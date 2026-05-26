@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.5（2026-05-26 — F5 范围收敛：T12 实测发现根因 #5（subset-sum 剪枝在大 pool 下误剪），需 ILP/网络流范式重写，延期 v2.1.9；F5 v2.1.8 acceptance 降级为"修复 4/5 根因 + 28-43 行"；用户 2026-05-26 拍板暂停 F5）；v0.4 移除 TEST.xlsx；v0.3 T08 改 F5-D4；v0.2 27 决策；v0.1 起草 |
+| 文档版本 | v0.7（2026-05-26 — N2 实施前发现 GATEWAY_RECON_FIELDS 被 bank-statement-io.js:114 用作 reader 表头校验，**不能在 constants 加 '__CUSTOM__'**；改为 dialog 渲染层单独拼接 option / constants 保持不变）；v0.6 「自取值」改 assign-gw；v0.5 F5 范围收敛；v0.4 移除 TEST.xlsx；v0.3 T08 改 F5-D4；v0.2 27 决策；v0.1 起草 |
 | 关联 PRD | `PRD-v2.1.8.md` v0.1 |
 | 关联 tasks | `tasks.md`（待建） |
 | 评审范围 | F5（算法重设）/ A3（跨进程）/ N1（cleanup 移出对账链路）/ N2（配置数据结构变更）/ N3（IPC 字段重命名 + 新 Sheet） |
@@ -207,11 +207,12 @@ config_json.assign = {
 
 | # | 决策 | 选项 | 锁定方案 |
 |---|---|---|---|
-| N2-D1 ✅ | 'custom' 模式 bankField 取值 | (a) 保留 / (b) 清空 / (c) 特殊 value | **(c)** `bankField='__CUSTOM__'`，旧 reader 看到时 fallback 不赋值 |
-| N2-D2 ✅ | migration 触发时机 | (a) 启动 / (b) lazy / (c) 首次保存 | **(a)** 启动 migration |
+| N2-D1 🔄 | 'custom' 模式 sentinel 设计（v0.6 修订）| (a) 加到 assign-bank / (b) 加到 assign-gw | **(b) 加到 assign-gw（数据源）— 用 sentinel `__CUSTOM__`**，UI label 显示"自取值"；assign.mode='custom' 时 gwField='__CUSTOM__' + customValue=用户输入；旧 reader 看到 gwField='__CUSTOM__' 取 chosen.row['__CUSTOM__']=undefined → normalizeCellValue → '' → graceful 降级（不破坏） |
+| N2-D2 ✅ | migration 触发时机 | (a) 启动 / (b) lazy / (c) 首次保存 | **(a)** 启动 migration（v0.6 不变 — 给旧 gateway-recon-join scenario 补 assign.mode='direct'） |
 | N2-D3 ✅ | "自取值" UI label 文案 | (a) "自取值" / (b) "自定义值" / (c) "固定值" | **(a)** 按用户原话 |
 | N2-D4 ✅ | bundle import 行为 | (a) 自动补 mode='direct' / (b) 报错 | **(a)** 静默升级 |
 | N2-D5 ✅ | bundle export 行为 | (a) 永远导 / (b) mode='direct' 时省略 | **(b)** 省略，体积更小 + 旧 reader 兼容 |
+| **N2-D6 🆕** | UI 中"自取值"位置（v0.6 新增） | 从上向下第 2 位（"请选择..."占位符之后、所有真实字段之前） | 按用户原话定 |
 
 ### 4.4 模板 bundle 兼容性测试
 
@@ -379,6 +380,8 @@ Phase 0 T02 启动后需对照 `rules/important-variables.md` 评估升格。
 - v0.3: F5-D4 reader 入口 → 引擎入口（2026-05-22 T08 实施前调研发现 sheetToObjects 共用函数影响 8 sheet × N 字段，资金红线扩面）— 用户 2026-05-22 拍板方案 C
 - v0.4: 移除 TEST.xlsx acceptance（2026-05-22 T12 实测发现 TEST/TEST2 前 3 sheet 相同，算法跑出来必然相同，无法独立验证）— 用户 2026-05-22 拍板「不要看 TEST.xlsx，是错的」
 - v0.5: F5 范围收敛 v2.1.8 / 根因 #5 延期 v2.1.9（2026-05-26 T12 深挖发现 subset-sum 剪枝在大 pool 下误剪正确解 — 孤立测试证据：仅 16 行 candidates + maxSize=30 ✅ 0ms 找到；38 行 pool + maxSize=30 ❌ 找不到，需 ILP/网络流范式重写超出 v2.1.8 范围）— 用户 2026-05-26 拍板「先别做 F5 了」
+- v0.6: N2 「自取值」加在 assign-gw（数据源）而非 assign-bank（写入目标）— v0.2 当初按用户原话"第二下拉框"字面理解为 assign-bank，但 c3 引擎语义（:158-172 `newValue = chosen.row[assign.gwField]` 然后 `bankRow[assign.bankField] = newValue`）表明 assign-bank 是写入目标必须真实字段名，"自取值"作为数据源应在 assign-gw；用户 2026-05-26 拍板方案 A；spec 数据 shape 不变（mode + customValue），仅 UI 加入下拉的位置改
+- v0.7: N2 实施前发现 GATEWAY_RECON_FIELDS 被 bank-statement-io.js:114 `sheetToObjects(sheet, GATEWAY_RECON_FIELDS)` 用作网关账单**reader 表头校验**（加 '__CUSTOM__' 字段会破坏读文件 + 影响 :5908 validFields / :6131 renderC3ConditionRow / :6212 reconFields 字段下拉）；改为仅在 `assign-gw` select 渲染时单独拼接 `<option value="__CUSTOM__">自取值</option>`，constants 保持不变；GATEWAY_RECON_FIELDS 从 important-variables.md 撤回 Important-skeleton 升格
 
 ---
 

@@ -17,6 +17,7 @@ const {
   migrateC4ReconGroupsStructure,
   migrateC4ReconGroupsAmountLockedFieldPair,
   ensureC3GwFieldCurrencyCaseFix,
+  ensureC3AssignAddMode,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
@@ -144,6 +145,9 @@ class AppDatabase {
     // 必须在 migrateC4ReconGroupsStructure 之后（依赖 reconGroups 结构已就位）。
     this.migrateC4ReconGroupsAmountLockedFieldPair();
     this.ensureC3GwFieldCurrencyCaseFix();
+    // v2.1.8 N2：给 'gateway-recon-join' assign 对象补 mode='direct' + customValue=''
+    //   必须在 ensureC3GwFieldCurrencyCaseFix 之后（先修 currency 大小写再扩字段，互不影响）
+    this.ensureC3AssignAddMode();
     this.ensureBuiltinScenarioNamesUpdate();
     // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表
     // 与其他迁移完全独立，调用顺序无依赖；放在最末尾即可
@@ -454,6 +458,10 @@ class AppDatabase {
 
   ensureC3GwFieldCurrencyCaseFix() {
     return ensureC3GwFieldCurrencyCaseFix(this.db);
+  }
+
+  ensureC3AssignAddMode() {
+    return ensureC3AssignAddMode(this.db);
   }
 
   ensureBuiltinScenarioNamesUpdate() {

@@ -131,18 +131,33 @@ function runC3Scenario(scenario, bankRows, gwRows) {
   //   - bankRowsFiltered 顺序稳定（forEach）→ deterministic 同输入同输出
   const usedGwRowIdx = new Set();
 
+  // v2.1.8 N2：mode='custom' 时 newValue 来自 assign.customValue 静态字符串
+  //   - gwField='__CUSTOM__' sentinel，不从 gw 字段取值 → candidates 过滤跳过 gw 非空检查
+  //   - 仍走 reconFields 匹配（决定是否锁定 bank 行）+ usedGwRowIdx 单向消费（红线不变）
+  const isCustom = assign.mode === 'custom';
+
   bankRowsFiltered.forEach((bankRow, index) => {
     const rowId = ensureRowId(bankRow, index);
+    // v2.1.8 N2：mode='custom' && customValue 空 → 防御性 skip（dialog 校验已拦截，此为 bundle import / 手改 DB 兜底）
+    if (isCustom && String(assign.customValue || '').trim() === '') {
+      warningCollector.push({
+        rowId,
+        code: 'invalid-custom-value',
+        message: 'assign.mode=custom 但 customValue 为空，跳过此行（请检查 scenario 配置）'
+      });
+      return;
+    }
     // candidates 三层过滤（v2.1.7 round 9 F2 fix，PR #51 reviewer round 3 Finding 1）：
     //   1. 未被前面 bank 行消费（!usedGwRowIdx.has）
     //   2. reconFields AND 匹配
     //   3. **gw 字段非空**（方案 A：不可写的 gw 不进候选，避免"空 gw 反复被选 → 永远轮不到有效 gw"）
+    //   v2.1.8 N2：mode='custom' 时跳过第 3 层过滤（newValue 不依赖 gw 字段，gwField='__CUSTOM__' 永远空）
     const matched = gwRowsFiltered
       .map((g, gIdx) => ({ row: g, gIdx }))
       .filter((x) =>
         !usedGwRowIdx.has(x.gIdx)
         && gwMatchesBank(x.row, bankRow, reconFields)
-        && normalizeCellValue(x.row[assign.gwField]) !== ''
+        && (isCustom || normalizeCellValue(x.row[assign.gwField]) !== '')
       );
     if (matched.length === 0) return;
 
@@ -155,8 +170,10 @@ function runC3Scenario(scenario, bankRows, gwRows) {
     }
     const chosen = matched[0];
 
-    // 上方 filter 已保证 chosen.row[assign.gwField] 非空，此处 newValue 必非空
-    const newValue = normalizeCellValue(chosen.row[assign.gwField]);
+    // v2.1.8 N2：mode='custom' → newValue 来自 customValue；mode='direct' / 缺失 → 走原逻辑
+    const newValue = isCustom
+      ? String(assign.customValue || '')
+      : normalizeCellValue(chosen.row[assign.gwField]);
 
     const oldValue = normalizeCellValue(bankRow[assign.bankField]);
     if (oldValue === newValue) {

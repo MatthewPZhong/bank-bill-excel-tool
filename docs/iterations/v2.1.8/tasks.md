@@ -214,24 +214,25 @@
 
 ## 六、Phase 4 — N2 自取值实现
 
-### T19 — constants 新增"自取值"枚举
+### T19 — ~~constants 新增"自取值"枚举~~（v0.6 撤回 — constants 不改）
 
-- **Owner**：Dev
-- **依赖**：T01
-- **文件**：`src/constants/bank-statement-fields.js` + `src/preload.js`
-- **动作**：`BANK_STATEMENT_FIELDS_FOR_C3` 数组第 2 位插入 `{ value: '__CUSTOM__', label: '自取值' }`；preload 同步
-- **验收**：UI 下拉显示"自取值"在第 2 位
+**v0.6 撤回原因**：实施前 grep 发现 GATEWAY_RECON_FIELDS 被 `bank-statement-io.js:114` 用作网关账单 reader 表头校验 + 多处条件下拉，加 `'__CUSTOM__'` 会破坏 reader。改为在 dialog 渲染层 T20 单独拼接 option，constants 保持不变。
 
-### T20 — C3 dialog UI 改造
+- **状态**：cancelled / 合并到 T20
+- **important-variables**：GATEWAY_RECON_FIELDS 撤回 Important-skeleton 升格
+
+### T20 — C3 dialog UI 改造（v0.5 修订 — assign-gw 数据源下拉，非 assign-bank）
 
 - **Owner**：Dev
 - **依赖**：T19
 - **文件**：`src/renderer-dialogs.js`（C3 dialog factory 约 6103-6233）
 - **动作**：
-  - 第二下拉 change 事件：选 `__CUSTOM__` → 右侧显示 `<input maxlength="200">`
-  - 保存校验：mode='custom' && customValue 空 → 报错
-  - 打开时按 mode 回显
-- **验收**：preview 截图 + 手测
+  - assign-gw select 渲染：在 GATEWAY_RECON_FIELDS 选项前先拼 `<option value="__CUSTOM__">自取值</option>`（按 N2-D6 第 2 位规则）；options 列表中遇到 '__CUSTOM__' 字符串时跳过（避免重复）
+  - **assign-gw** change 事件：选 `__CUSTOM__` → 该 select 右侧显示 `<input type="text" maxlength="200" placeholder="自取值">` + 设 `assign.mode='custom'`；选真实字段 → 隐藏 input + 设 `assign.mode='direct'`
+  - dialog HTML 在 assign-gw select 右侧加 input 容器（默认 hidden）
+  - 保存校验：mode='custom' && customValue 空 → 校验报错 "自取值不能为空"
+  - 打开时按 `assign.mode` 回显：'custom' → 显示 input + 填回 customValue；'direct' → 隐藏 input
+- **验收**：preview 截图 + 手测（dialog 切换 dropdown / 保存 / 重开回显）
 
 ### T21 — DB migration
 
@@ -241,13 +242,24 @@
 - **动作**：幂等 migration 扫描 scenarios where category='gateway-recon-join'，对 config_json 缺 `assign.mode` 的补 `mode='direct'`
 - **验收**：unit case（启动 migration + 验证旧 scenario 升级）
 
-### T22 — C3 引擎赋值分支
+### T22 — C3 引擎赋值分支（v0.5 修订）
 
 - **Owner**：Dev
 - **依赖**：T19 + T21
-- **文件**：`src/main-process/scenario-engines/c3-gateway-recon-join.js`（:158-172）
-- **动作**：加 `assign.mode === 'custom'` 分支
-- **验收**：unit case（mode='custom' 输出 customValue / mode='direct' 行为不变）
+- **文件**：`src/main-process/scenario-engines/c3-gateway-recon-join.js`（:158-172）+ `tests/unit/main-process/scenario-engines/c3-gateway-recon-join.test.js`（unit）
+- **动作**：
+  - :158-172 修改：
+    ```js
+    const newValue = (assign.mode === 'custom')
+      ? String(assign.customValue || '')
+      : normalizeCellValue(chosen.row[assign.gwField]);
+    ```
+  - 旧 reader 兼容：若 mode 字段缺失 → 默认走 'direct' 分支
+- **验收**：unit case
+  - mode='custom' + customValue='ABC123' → newValue='ABC123'
+  - mode='custom' + customValue='' → newValue='' （后续 dialog 校验拦截）
+  - mode='direct' / mode 缺失 → 行为不变（按 gwField 取值）
+  - mode='direct' + gwField='__CUSTOM__'（异常状态）→ newValue='' graceful 不抛错
 
 ### T23 — N2 smoke
 

@@ -703,16 +703,22 @@
   - 涉及 API：`run-repository.js` 新增 `markCleanupPending` / `clearCleanupPending` / `listPendingCleanupRuns`
   - 必跑：smoke N1（migration 幂等 + 标志位 SET/CLEAR + 启动孤儿清理仍工作）
 
-### `config_json.assign`（v2.1.8 N2 新增 Risk-sensitive ⚠️ 对账契约扩展）
+### `config_json.assign`（v2.1.8 N2 新增 Risk-sensitive ⚠️ 对账契约扩展 — v0.5 修订）
 - 定义：scenarios.config_json 字段下 `assign` 对象（v2.1.7 仅 `{gwField, bankField}`，v2.1.8 扩展为 `{gwField, bankField, mode, customValue}`）
-- 关联功能：C3「对账成立后赋值」配置；v2.1.8 N2 新增"自取值"模式 — `mode: 'direct' | 'custom'`；`customValue` 在 mode='custom' 时使用
+- 关联功能：C3「对账成立后赋值」配置；v2.1.8 N2 新增"自取值"模式 — **「自取值」加在 assign-gw（数据源），v0.5 修订 from assign-bank（写入目标）**；`mode: 'direct' | 'custom'`；`customValue` 在 mode='custom' 时使用
 - 变更 review 要点：
   - **对账契约扩展**：scenarios 数据结构升级，老 scenario 必须 graceful 升级（用户场景库已沉淀不能丢）
   - migration 必须幂等：扫描所有 category='gateway-recon-join' 的 scenarios，对缺 `assign.mode` 的补 `mode='direct'`
   - bundle 兼容（spec.md §四 N2-D4/D5）：v3 bundle 向前兼容 — 旧 bundle 自动补 mode='direct'；v2.1.8 bundle export 时 mode='direct' 省略字段（体积更小）
-  - `__CUSTOM__` 特殊 value（N2-D1）：旧 reader 看到时 fallback 不赋值
-  - 引擎读取（`c3-gateway-recon-join.js:158-172`）必须按 mode 分支：`mode==='custom'` → `assign.customValue` / 否则 → `chosen.row[assign.gwField]`
+  - **`__CUSTOM__` sentinel（v0.5）**：mode='custom' 时 gwField='__CUSTOM__'（数据源 sentinel）+ customValue=用户输入；bankField 不变（仍是真实银行字段写入目标）；旧 reader 看到 gwField='__CUSTOM__' → chosen.row['__CUSTOM__']=undefined → normalizeCellValue → '' → 不抛错但行为退化为"写空值"
+  - 引擎读取（`c3-gateway-recon-join.js:158-172`）必须按 mode 分支：`mode==='custom'` → `String(assign.customValue || '')` / 否则 → `normalizeCellValue(chosen.row[assign.gwField])`
   - 必跑：smoke N2（migration + 引擎分支 + bundle 来回 import/export 兼容）
+
+### ~~`GATEWAY_RECON_FIELDS`~~（v0.5 升 Important-skeleton 计划 → **v0.6 撤回**）
+
+**v0.6 撤回原因**：v2.1.8 N2 实施前发现 GATEWAY_RECON_FIELDS 被 `bank-statement-io.js:114` 用作网关账单 reader 表头校验 + `renderer-dialogs.js:5908/6131/6212` 多处条件下拉。在数组里加 `'__CUSTOM__'` 会破坏 reader 表头校验。改为仅在 `renderer-dialogs.js:6105-6108` assign-gw select 渲染层单独拼接 `<option value="__CUSTOM__">自取值</option>`，constants 保持不变。
+
+GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-share 跨度）。
 
 ### `hitScenarios`（v2.1.8 N3-1 新增 Risk-sensitive ⚠️ IPC 字段重命名 + 结构变更）
 - 定义：scenario-dispatcher.js stats.hitScenarios 数组元素 `{id, displayIndex, name}` —— **取代 v2.1.7 的 hitScenarioIds (number[])**

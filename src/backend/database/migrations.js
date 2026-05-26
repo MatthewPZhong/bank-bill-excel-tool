@@ -788,6 +788,34 @@ function ensureC3GwFieldCurrencyCaseFix(db) {
   });
 }
 
+// v2.1.8 N2：给历史 'gateway-recon-join' 场景的 assign 对象补 mode / customValue 字段
+// 背景：v2.1.7 之前 assign = { gwField, bankField }；v2.1.8 N2 扩展为
+//       { gwField, bankField, mode: 'direct' | 'custom', customValue }
+// 用户老 scenario 升级 v2.1.8 后，dialog 编辑 / 引擎读取需要 mode 字段才能进入 v2.1.8 新分支
+// 幂等：若 assign.mode 已存在 → no-op；多次启动只首次命中
+// 不变量：仅追加 mode='direct' + customValue=''，不修改任何已有字段（gwField/bankField 保持）
+function ensureC3AssignAddMode(db) {
+  const rows = db.prepare(
+    `SELECT id, config_json FROM scenarios WHERE category = 'gateway-recon-join'`
+  ).all();
+  if (rows.length === 0) return;
+  const update = db.prepare(`UPDATE scenarios SET config_json = ?, updated_at = ? WHERE id = ?`);
+  const now = new Date().toISOString();
+  rows.forEach((row) => {
+    let config;
+    try {
+      config = JSON.parse(row.config_json);
+    } catch (_e) {
+      return;
+    }
+    if (!config || !config.assign) return;
+    if (config.assign.mode) return; // 幂等：已有 mode 字段则跳过
+    config.assign.mode = 'direct';
+    if (!('customValue' in config.assign)) config.assign.customValue = '';
+    update.run(JSON.stringify(config), now, row.id);
+  });
+}
+
 // v2.1.2 T2 — 月度银行对账单BU回填校验模块的 3 张表
 // PRD §三 / spec §3.4：
 //   - bank_bu_recon_pending_imports：按月份存 Pending 数据管理.xlsx (20 列) 的导入数据
@@ -1120,6 +1148,7 @@ module.exports = {
   migrateC4ReconGroupsStructure,
   migrateC4ReconGroupsAmountLockedFieldPair,
   ensureC3GwFieldCurrencyCaseFix,
+  ensureC3AssignAddMode,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
