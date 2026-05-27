@@ -70,6 +70,12 @@ const {
   detectBundleType,
   SUPPORTED_SCENARIO_BUNDLE_VERSION
 } = require('./backend/scenarios-bundle-io');
+// v2.1.9 SR-FIX-1 round 3 / spec §16.3.5：bundle import 主体提取到独立 module
+//   方便 integration test 直接走真实代码路径（round 2 因 main.js 局部函数未 exports
+//   → integration Case F 只能手写 sham 模拟 → 漏掉 F1+F2 协同 bug）
+const {
+  applyScenarioBundleImport: applyScenarioBundleImportImpl
+} = require('./main-process/scenarios-bundle-import');
 const {
   readBankStatement,
   readGatewayRecon,
@@ -339,125 +345,24 @@ function formatDateYYYYMMDD(date = new Date()) {
 
 // v2.1.9 N7 (Phase 7 T30)：场景模板 bundle 应用导入（事务包裹 + 缺失渠道创建 + 同名场景跳过）
 //
-// 入参：
-//   bundle:                                  parseScenarioBundle 输出
-//   options.confirmCreateMissingChannels:    用户已点确认创建缺失渠道（true 才允许 INSERT 渠道）
+// v2.1.9 SR-FIX-1 round 3 / spec §16.3.5：主体提取到 src/main-process/scenarios-bundle-import.js
+//   本处保留薄壳 wrapper（保持函数名 + signature 不变，IPC handler 调用接口零变更）；
+//   实际逻辑由 applyScenarioBundleImportImpl 实现，deps 注入 database facade。
 //
-// 行为：
-//   1. 事务包裹（BEGIN ... COMMIT / ROLLBACK）
-//   2. 对每个 bundle.channels 元素：
-//      - 查 channel by (name, ownerLocation)
-//      - 不存在且非 builtin：
-//          confirmCreateMissingChannels=true → createChannel
-//          confirmCreateMissingChannels=false → 跳过该渠道下所有 scenarios（收集到 conflicts）
-//      - 不存在且 builtin：理论不可能（builtin 仅「通用」且 ensureChannelsTable 启动期建出）
-//        → fallback 到通用 id=1，但若已被显式排除（理论不会发生）则收集到 conflicts
-//   3. 对每个 channel 下的 scenarios：
-//      - 按 name 查 channel 内是否已存在（同 channel + 同 name 唯一性）
-//      - 已存在 → 跳过 + 收集到 conflicts: [{channel: 'X-Y', scenario: 'name'}]
-//      - 不存在 → createScenario + UPDATE channel_id 落到目标渠道（因 createScenario 无 channelId 参数）
-//   4. 出错 → ROLLBACK 整批
-//
-// 返回：{ importedCount, conflicts: [{channel, scenario, reason}], createdChannels: [{name, ownerLocation, id}] }
-//
-// 资金红线（spec §10.2）：
-//   - 事务包裹保证导入失败不留半状态（创建了渠道但场景没插完 → ROLLBACK 退回到导入前）
-//   - 同名场景跳过 + 报告（不静默覆盖）— 用户能 review 哪些被跳过
-//   - confirmCreateMissingChannels=false 时 → 跳过缺失渠道的所有 scenarios（不创建渠道）
+// 函数语义详见 src/main-process/scenarios-bundle-import.js 顶部注释。
 function applyScenarioBundleImport(bundle, options = {}) {
-  const confirmCreateMissingChannels = options.confirmCreateMissingChannels === true;
-  const conflicts = [];
-  const createdChannels = [];
-  let importedCount = 0;
-
   const db = database && database.db;
   if (!db) {
     throw new Error('applyScenarioBundleImport: database 未就绪');
   }
-
-  db.exec('BEGIN');
-  try {
-    // 缓存 channel 名→记录映射，避免每个 scenario 都查 DB
-    const allChannels = database.listChannels();
-    const channelKeyToRecord = new Map(allChannels.map((c) => [`${c.name} ${c.ownerLocation}`, c]));
-
-    for (const bundleChannel of bundle.channels) {
-      const channelKey = `${bundleChannel.name} ${bundleChannel.ownerLocation}`;
-      const channelLabel = `${bundleChannel.name}-${bundleChannel.ownerLocation}`;
-      let targetChannel = channelKeyToRecord.get(channelKey);
-
-      if (!targetChannel) {
-        // 缺失渠道处理
-        if (bundleChannel.isBuiltin) {
-          // builtin 渠道理论应当已存在（「通用」固定 id=1）；fallback 到通用
-          targetChannel = database.getBuiltinGeneralChannel();
-          channelKeyToRecord.set(channelKey, targetChannel);
-        } else if (confirmCreateMissingChannels) {
-          const newChannel = database.createChannel({
-            name: bundleChannel.name,
-            ownerLocation: bundleChannel.ownerLocation
-          });
-          channelKeyToRecord.set(channelKey, newChannel);
-          targetChannel = newChannel;
-          createdChannels.push({
-            id: newChannel.id,
-            name: newChannel.name,
-            ownerLocation: newChannel.ownerLocation
-          });
-        } else {
-          // 未确认创建 → 跳过该渠道所有 scenarios
-          for (const s of bundleChannel.scenarios) {
-            conflicts.push({ channel: channelLabel, scenario: s.name, reason: 'channel-missing' });
-          }
-          continue;
-        }
-      }
-
-      // v2.1.9 SR-FIX-1 round 2 F2（spec §16.3.3）：复合 UNIQUE (channel_id, name) 落地后
-      //   改用 channel 内查重（findByChannelAndName）→ 跨渠道同名场景可正常导入
-      //   原行为：「全表 SELECT WHERE name = ?」会让跨 channel 同名也匹配 → 错误跳过
-      //   D39 + spec §6.3.2 明确允许跨渠道同名 → 本修订修复 N7 跨渠道 bundle 互通失效 bug
-      for (const bundleScenario of bundleChannel.scenarios) {
-        const existingInChannel = database.findScenarioByChannelAndName(
-          targetChannel.id,
-          bundleScenario.name
-        );
-        if (existingInChannel) {
-          conflicts.push({
-            channel: channelLabel,
-            scenario: bundleScenario.name,
-            reason: 'name-duplicate'
-          });
-          continue;
-        }
-        // 解析 configJson（已在 parseScenarioBundle 透传；apply 时再 serialize 到 DB）
-        let configValue = bundleScenario.configJson;
-        if (typeof configValue === 'string') {
-          try { configValue = JSON.parse(configValue); } catch (_e) { /* 透传原值 */ }
-        }
-        // 创建场景（database.createScenario 内部转发到 scenariosRepository.createScenario）
-        const createResult = database.createScenario({
-          category: bundleScenario.category,
-          name: bundleScenario.name,
-          priority: Number.isInteger(bundleScenario.sortOrder) ? bundleScenario.sortOrder : 0,
-          enabled: bundleScenario.enabled === 1,
-          config: configValue
-        });
-        // v2.1.9 SR-FIX-1 round 2 F2 注：createScenario 现已支持 channelId 入参（F1 修复），
-        // 保留 UPDATE 作为最小破坏面（避免 round 2 同时改两处导致集成路径回归风险）。
-        // 后续 v2.1.10 可优化为 createScenario({ ..., channelId: targetChannel.id }) + 删除 UPDATE。
-        db.prepare('UPDATE scenarios SET channel_id = ? WHERE id = ?')
-          .run(targetChannel.id, createResult.id);
-        importedCount += 1;
-      }
-    }
-
-    db.exec('COMMIT');
-    return { importedCount, conflicts, createdChannels };
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
+  return applyScenarioBundleImportImpl(bundle, options, {
+    db,
+    listChannels: () => database.listChannels(),
+    getBuiltinGeneralChannel: () => database.getBuiltinGeneralChannel(),
+    createChannel: (payload) => database.createChannel(payload),
+    findScenarioByChannelAndName: (channelId, name) => database.findScenarioByChannelAndName(channelId, name),
+    createScenario: (payload) => database.createScenario(payload)
+  });
 }
 
 function stripMarkdown(md) {
