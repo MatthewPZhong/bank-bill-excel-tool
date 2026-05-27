@@ -338,6 +338,37 @@ test.describe('transferScenarios', () => {
       /scenario id 必须是正整数/
     );
   });
+
+  // v2.1.9 SR-FIX-1 v0.10 reverse sync（spec §16.3.1）：
+  //   transferScenarios UPDATE channel_id 也是 (channel_id, name) UNIQUE 入口
+  //   目标渠道已有同名场景 → 抛 friendly error（与 createScenario / updateScenario UX 一致）
+  test('转移到已有同名的目标渠道 → 抛 friendly error + 事务回滚', () => {
+    // 跑 migration 切到复合 UNIQUE（setupDb 默认仍是全表 UNIQUE）— 否则跨 channel 同名 createScenario 会被全表 UNIQUE 拦
+    const r = ensureScenariosNameUniqueByChannelId(db);
+    assert.ok(['migrated', 'skipped', 'skipped-already-composite'].includes(r.status));
+
+    // setup: icbc_sh 有 name='对账场景' + cmb_bj 也有 name='对账场景'（v2.1.9 SR-FIX-1 后跨 channel 同名允许）
+    //   createScenario 不传 channel_id → DB 默认 NULL；用 setScenarioChannel UPDATE 设定（与 case 13 / R1 模式一致）
+    const sA = scenariosRepo.createScenario(db, makeC1Payload('对账场景', 1));
+    setScenarioChannel(sA.id, channels.icbc_sh.id);
+    const sB = scenariosRepo.createScenario(db, makeC1Payload('对账场景', 1));
+    setScenarioChannel(sB.id, channels.cmb_bj.id);
+
+    // 把 cmb_bj 的「对账场景」transfer 到 icbc_sh → 撞 (icbc_sh.id, '对账场景') UNIQUE
+    assert.throws(
+      () => scenariosRepo.transferScenarios(db, [sB.id], channels.icbc_sh.id),
+      /目标渠道已有同名场景/,
+      '抛 friendly error 而不是原始 SQLite UNIQUE 错误'
+    );
+
+    // 事务回滚验证：双方仍各 1 条同名场景，channel_id 不变
+    const icbcRow = db.prepare('SELECT channel_id, name FROM scenarios WHERE id=?').get(sA.id);
+    const cmbRow = db.prepare('SELECT channel_id, name FROM scenarios WHERE id=?').get(sB.id);
+    assert.strictEqual(icbcRow.channel_id, channels.icbc_sh.id, '事务回滚后 sA 仍在 icbc_sh');
+    assert.strictEqual(cmbRow.channel_id, channels.cmb_bj.id, '事务回滚后 sB 仍在 cmb_bj');
+    assert.strictEqual(icbcRow.name, '对账场景');
+    assert.strictEqual(cmbRow.name, '对账场景');
+  });
 });
 
 test.describe('batchDelete', () => {

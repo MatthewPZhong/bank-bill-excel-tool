@@ -425,6 +425,12 @@ function transferScenarios(db, scenarioIds, targetChannelId) {
     return { transferredCount, targetChannelId: numericTargetChannelId };
   } catch (error) {
     db.exec('ROLLBACK');
+    // v2.1.9 SR-FIX-1 v0.10 reverse sync（spec §16.3.1）：transferScenarios UPDATE channel_id 也是
+    //   (channel_id, name) 组合变更入口 — 目标渠道已有同名场景会撞复合 UNIQUE → 抛 friendly error
+    //   与 createScenario / updateScenario UX 一致
+    if (isScenarioNameUniqueError(error)) {
+      throw new Error('目标渠道已有同名场景，请先重命名或删除目标渠道的同名场景');
+    }
     throw error;
   }
 }
