@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.9（2026-05-27 — **SR-FIX-1 资金红线修复**；§1.6 加 D38-D40 3 项；§2.1 / §2.4 / §3.1 / §3.2 / §5.2 / §6.3.2 加 Reverse Sync marker；新增 §十六 完整修复设计）；v0.4 SR-log-1 立项；v0.3 加 D19-D22 + 4 个新主题详设；v0.2 D18 grep 修订；v0.1 起草 |
+| 文档版本 | v0.11（2026-05-27 — **SR-FIX-1 round 2 Codex 自动 review 修复**；§16.3 加 §16.3.2 F1 createScenario channel_id 漏修 + §16.3.3 F2 applyScenarioBundleImport 全表查重漏修 + §16.3.4 F3 batchDelete 内置场景一致性）；v0.10 加 §16.3.1 transferScenarios；v0.9 SR-FIX-1 资金红线修复；v0.4 SR-log-1 立项；v0.3 加 D19-D22 + 4 个新主题详设；v0.2 D18 grep 修订；v0.1 起草 |
 | 关联文档 | `PRD-v2.1.9.md` v0.3 / `backlog.md` v0.5 / `tasks.md` v0.4（SR-FIX-1 已加）/ `manual-test-checklist.md` v0.4（SR-FIX-1 已加） |
 | 评审范围 | N5（银行渠道区分场景）+ N7（场景模板按渠道导入/导出）+ N6（状态框换行）+ SR-backup-1（前置） |
 | 评审人 | PM + 用户（资金红线条目必复核） |
@@ -1631,6 +1631,100 @@ ensureSchemaV2_1_9_N5（已有）
 **unit + integration 覆盖**：
 - `tests/unit/backend/database/scenarios-repository.test.js` 新增 case：转移到已有同名的目标渠道 → 抛 friendly error
 - `scripts/integration/v2.1.9-sr-fix-1-coverage.js` Case C 1.2 更新：断言改 friendly error 文案；额外加 transferScenarios 跨同名场景目标场景
+
+#### 16.3.2 F1 — createScenario 漏写 channel_id（v0.11 round 2 Codex 自动 review 抓到）
+
+> 2026-05-27 PR #53 push 后 Codex 自动 review 抓到 P1 功能 bug：UI「新增场景」路径调用 `desktopApi.scenarios.create({...})` 不传 channelId → main.js handler 透传 → `scenariosRepo.createScenario` INSERT 不写 `channel_id` → 落 **NULL** → `listByChannelIdAndCategory(db, 1, ...)` `WHERE channel_id = ?` 查不到 NULL → 用户新建的场景在 dispatcher 永远不命中。
+
+**严重度**：🔴 **P1 — v2.1.9 N5 核心功能完全失效**（v2.1.9 任何渠道新建场景都不工作；列表显示「在通用」是 `rowToListItem` NULL 兜底显示，DB 实际 NULL）
+
+**根因**（按入口）：
+
+| 文件:行 | 路径 | 行为 |
+|---|---|---|
+| `src/renderer-dialogs.js:8720-8726` | UI 完成新建 | payload 不含 channelId（只有 category/name/priority/enabled/config）|
+| `src/main.js:3069-3078` `scenarios:create` IPC | 透传 | `database.createScenario(payload)` 直接透传，未补 channel_id |
+| `src/backend/database/scenarios-repository.js:257-285` `createScenario` | INSERT | SQL INSERT 字段不含 channel_id → 落 NULL |
+| `src/backend/database/scenarios-repository.js:182` `rowToListItem` | 列表显示兜底 | `channelId: r.channel_id ?? 1` → 让 UI 误以为在通用 |
+| `dispatcher / listByChannelIdAndCategory` | 查询 | `WHERE channel_id = ?` 不匹配 NULL → 跨所有渠道查询都返 0 |
+
+**修订设计**：
+
+1. **scenariosRepo.createScenario 加 channelId 入参**（带默认值兜底）：
+   ```js
+   function createScenario(db, payload) {
+     // ...validate
+     const channelId = Number.isFinite(payload.channelId) ? payload.channelId : 1; // 缺省落「通用」
+     // INSERT 包含 channel_id
+     db.prepare(`
+       INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at, channel_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     `).run(nextId, category, name, priority, enabled, configJson, isBuiltin, now, now, channelId);
+     // ...
+   }
+   ```
+2. **main.js scenarios:create IPC handler 不需要改**（payload 透传即可，UI 端补 channelId）
+3. **UI src/renderer-dialogs.js:8720** 完成新建时附 `channelId: state.activeScenarioChannelId`（场景管理弹框维护当前选中渠道 id；缺省 1）
+
+> v0.11 Reverse Sync：dev agent 实施时 grep 验证 UI state 字段实际名是 `state.activeScenarioChannelId`（非 spec 原写的 `state.activeChannelId`），按代码事实修正。grep 命中 6077/6078/6081/6199/6214。
+4. **N7 applyScenarioBundleImport** main.js:438 处可去掉 line 446 `UPDATE channel_id` 这一手补救（createScenario 现在直接接受 channelId）— 但保留作为最小破坏面以防回退兼容
+
+**覆盖**：
+- `tests/unit/backend/database/scenarios-repository.test.js` 新增 case：createScenario 传 channelId → INSERT 落对应 channel_id（含缺省 1）
+- `scripts/integration/v2.1.9-sr-fix-1-coverage.js` 新增 Case E：UI 端到端 — createScenario(channelId=工商-上海) → dispatcher 调用 → listByChannelIdAndCategory 返 1 条 → dispatcher 命中工商-上海 行
+
+#### 16.3.3 F2 — applyScenarioBundleImport 全表查重漏修（v0.11 round 2 Codex 自动 review 抓到）
+
+> Codex 抓到 P1：SR-FIX-1 改了 scenarios.name UNIQUE schema 但 `src/main.js:419-431` `applyScenarioBundleImport` 内部仍用 `SELECT id, channel_id FROM scenarios WHERE name = ?` 全表查重 → 跨渠道导入同名场景被错误跳过（与 D39 + spec §6.3.2 矛盾）。
+
+**严重度**：🔴 **P1 — N7 跨渠道 bundle 互通失效**（v2.1.9 D39 + spec §6.3.2 设计明确允许跨渠道同名，但 N7 实际 import 总是跳过；用户体验「导入成功 0 场景」）
+
+**根因**：
+- `src/main.js:417` 注释「scenarios.name 是全表 UNIQUE」是 SR-FIX-1 之前的注释，SR-FIX-1 改了 schema 但漏改这里
+- line 421 `WHERE name = ?` 仍是全表查 → 跨 channel 同名也匹配 → 错跳过
+
+**修订设计**：
+
+`main.js:419-431` 改用 `database.findByChannelAndName(targetChannel.id, name)`（SR-FIX-1 已建 API）：
+
+```js
+for (const bundleScenario of bundleChannel.scenarios) {
+  // v2.1.9 SR-FIX-1 round 2 F2：复合 UNIQUE (channel_id, name) 后改用 channel 内查重
+  const existingInChannel = database.findByChannelAndName(targetChannel.id, bundleScenario.name);
+  if (existingInChannel) {
+    conflicts.push({ channel: channelLabel, scenario: bundleScenario.name, reason: 'name-duplicate' });
+    continue;
+  }
+  // ... 后续 createScenario（带 channelId）+ 删掉 line 446 UPDATE channel_id 手补
+}
+```
+
+**覆盖**：
+- `scripts/integration/v2.1.9-sr-fix-1-coverage.js` Case C 加 1.x：通用有「对账场景」→ 导入工商-上海 bundle 也含「对账场景」→ 期望落入工商-上海（不跳过）
+
+#### 16.3.4 F3 — batchDelete vs deleteScenario 内置场景语义不一致（v0.11 round 2 Codex 自动 review 抓到）
+
+> Codex 抓到 P2：`scenariosRepo.batchDelete` 拒绝删除 `is_builtin=1` 抛错，但 `scenariosRepo.deleteScenario`（单条）允许删除内置；USER_GUIDE 也说内置场景「可编辑、可禁用、可删除」。单条与批量行为不一致让用户困惑。
+
+**严重度**：🟡 P2 — UX 不一致 + 与产品文档矛盾
+
+**修订设计**（按推荐选 a）：
+
+`scenariosRepo.batchDelete` 移除 is_builtin 检查与 deleteScenario 对齐：
+
+```js
+function batchDelete(db, scenarioIds) {
+  // ... validate
+  db.exec('BEGIN');
+  try {
+    // 删除前先查记录（用于返回 deleted 列表）— 不再拒绝 is_builtin=1
+    // ... DELETE ... WHERE id IN (...)
+  }
+}
+```
+
+**覆盖**：
+- `tests/unit/backend/database/scenarios-repository.test.js` 既有 batchDelete「内置不可删」case 改为「内置可删（与单条 deleteScenario 对齐）」
 
 ### 16.4 C2/C3 双维 unit case 矩阵（SR1 #4）
 

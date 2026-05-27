@@ -243,7 +243,7 @@
   - 渠道管理弹框「新增」按钮复用相同 class + 行为模式（inline 新行 + 编辑态）
 - **验收**：preview 截图与账户映射页面对比一致
 
-### T14 — IPC handler channels:* 
+### T14 — IPC handler channels:*
 
 - **Owner**：Dev
 - **依赖**：T10 + T12

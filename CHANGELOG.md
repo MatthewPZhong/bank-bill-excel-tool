@@ -46,6 +46,21 @@ v2.1.8 之后 1 轮迭代（α 范围），**9 项主题**：N5（银行渠道�
 - **SR-log-1 永久保留磁盘风险**：用户手动维护；v2.1.10+ 评估批量清理 UI
 - **N5 跨 channel 跨 scenario gw 重消费**（SR-FIX-1 §16.2 已知边界）：阶段 A 专属 C3 消费的 gw 行，阶段 B 通用 C3 仍可消费同一行；与 v2.1.8 单维行为一致；用户层规避见 USER_GUIDE §1.4
 
+### SR-FIX-1 round 2 — Codex 自动 review 修复（合并前补丁）
+
+PR push 后 Codex 自动 review 抓 5 个 finding：2 个 P1 🔴 + 2 个 P2 + 1 个 P3。**全部合并前修**（spec §16.3.2/16.3.3/16.3.4 reverse sync）：
+
+- **🔴 F1 createScenario 漏写 channel_id 修复**（P1 — v2.1.9 N5 核心功能失效）：UI 新增场景 payload 不传 channelId → 后端 INSERT 不写 channel_id → 落 NULL → dispatcher `WHERE channel_id=?` 永远查不到 → 用户新建的任何场景实际不工作。修复：`scenariosRepo.createScenario` 加 channelId 入参（缺省 1 + Number.isFinite 兜底 + hasChannelIdColumn 分支兼容老 schema）+ UI src/renderer-dialogs.js:8720-8732 完成新建附 `state.activeScenarioChannelId`；新增 5 unit case + 集成 Case E 端到端验证
+- **🔴 F2 applyScenarioBundleImport 全表查重漏修**（P1 — N7 跨渠道 bundle 互通失效）：SR-FIX-1 改了 schema 但 main.js:419 仍用 `SELECT WHERE name = ?` 全表查 → 跨 channel 同名错误跳过（与 D39 + spec §6.3.2 矛盾）。修复：改用 `database.findScenarioByChannelAndName(targetChannel.id, name)`（SR-FIX-1 已建 API + 新加 facade）；集成 Case F 验证
+- **🟡 F3 batchDelete vs deleteScenario 内置场景语义不一致**（P2）：`batchDelete` 拒删 is_builtin=1 但 `deleteScenario` 允许 + USER_GUIDE 说内置可删 → 不一致。修复：移除 batchDelete is_builtin 检查与 deleteScenario 对齐；unit/IPC case 同步修订
+- **🟡 F4 package-lock.json 版本未同步**（P2）：package.json=2.1.9 但 lockfile 顶部=2.1.8 → 元数据不一致。修复：`npm install --package-lock-only` 同步 3 处 version
+- **🟢 F5 git diff --check 不干净**（P3）：tasks.md:246 trailing whitespace + dispatcher.test.js:1137 EOF 多余空行。修复：删除
+
+**修复后测试**：
+- `npm run test:unit` 1140 → **1145**（+5 case F1）
+- `npm run test:integration` 595 → **614 / 10 脚本**（v2.1.9-sr-fix-1-coverage.js 98 → 117，Case E + Case F 新增）
+- `npm run smoke` 0 regression
+
 ### SR-FIX-1 修复（合并前补丁 — PR #53 self-review 闭环）
 
 PR 提交后 self-review 发现 5 个 🔴 Critical + 9 Important + 5 Minor finding（详 `docs/iterations/v2.1.9/spec.md §十六`）。Critical 5 项中 #1-#4 涉及资金红线，**合并前**用 F1 方案修复：
