@@ -572,5 +572,62 @@ v2.1.9 期间 `appendActivityRecord` 内部**同时**写新结构 + `app_activit
 
 ---
 
-**当前状态**：v0.2（2026-05-27 — α / β 拆分；4 项 v2.1.10 候选升格到 α；D19-D22 4 个新决策点待拍板）。
-**下一步**：spec.md / tasks.md / manual-test-checklist.md 反向同步加 4 个新主题 → 用户审 → 建 v2.1.9 分支 → Phase 0 启动。
+**当前状态**：v0.4（2026-05-27 — α 已提 PR #53 + 实施记录已补；详 §十六 实施记录）。
+**下一步**：用户测试 + reviewer 评审 → merge → α merge 后立即建 v2.1.10 β 分支启动 spec 评审。
+
+---
+
+## 十六、实施记录（已提交 — 2026-05-27）
+
+### PR #53 — v2.1.9 α 发版
+
+- **PR URL**：https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/53
+- **分支**：v2.1.9 → main
+- **commit**：1 个主 commit `[v2.1.9] feat: α 范围 9 主题 + 4 关键 fix`（2df26f6）
+- **改动统计**：101 文件 / +20357 / -588 行
+- **完整改动记录**：见 [`docs/prs/PR53-v2.1.9.md`](../../prs/PR53-v2.1.9.md)（草稿已归档 + `integrated: true`）
+
+#### 主题完成度
+
+| 主题 | 状态 | 关键产出 |
+|---|---|---|
+| **N5** 银行渠道区分场景 | ✅ | channels 表 + scenarios.channel_id FK + 双维 dispatcher + 渠道 CRUD + 转移搬运 + 批量操作 + Sheet 3 撤除 + 独立报表（落 error-reports/{date}/）|
+| **N6** 状态框换行修复 | ✅ | renderer.js 删 2 处 `\n`（D18=a） |
+| **N7** 场景模板按渠道导入/导出 | ✅ | scenarioBundleVersion=1 + 二阶段确认 + 同名跳过 |
+| **SR-backup-1** sqlite 安全备份 | ✅ | VACUUM INTO（POC 后 spec 修订 — DatabaseSync.backup 不存在） |
+| **G1-cont** 单元测试全量铺 | ✅ | 1128 case / 280 suites（baseline 123 → +1005）|
+| **SR-policy-1** integration-runner 自动同步 | ✅ | in-place 编辑 policy.md §七 |
+| **N1-settings** idle 阈值 settings 化 | ✅ | D21=c 修订（无 UI；sqlite3 UPDATE + 重启） |
+| **N4 重构（顺带）** | ✅ | ensureBillRawJsonV2Slim 切到 createBackupFn |
+| **SR-log-1** 全局告警日志化 | ✅ | 49+ 处 console 改造 + wrapper hijack + logs/{YYYY-MM}/{MM-DD}/{level}.log JSON Lines + 双写 |
+
+#### 关键 reverse sync（设计与实施差异）
+
+- **D2=(c)**：「都需过通用」解读 = 通用作为兜底（非每行强制必经）
+- **D16 (a) → (b)**：「匹配渠道」列从原始 `<Channel>-<地区>` 改为实际命中渠道 label（用户期望与命中场景列对齐）
+- **D18 (b) → (a)**：N6 修复位置从 updateStatusBox 内层改为外层文案（基于 grep 事实其他 5 模块零外溢）
+- **D21 (a) → (c)**：N1-settings UI 入口回退（dev agent 自扩展 createAppSettingsDialog factory + ⚙️ 按钮被用户否决）
+- **SR-backup-1 API**：DatabaseSync.backup 不存在 → 改用 VACUUM INTO
+
+#### 4 关键 fix（手测发现 + 主线程修复）
+
+| Fix | 根因 | 修复 |
+|---|---|---|
+| getScenario channelId 缺失 | SQL SELECT 漏 channel_id → dispatcher.groupScenariosByChannelId 全部归通用 → CITI-HK 场景被错应用到 BOSH-CN 行 | getScenario SQL 加 channel_id 列 + hasChannelIdColumn 老 schema 兼容 |
+| listScenarios displayIndex 串号 | 全表 1-based（v2.1.8 N3-1）vs UI 渠道内 1-based 不一致 → 状态框显示「场景 7、8、9」UI 显示 1、2、3 | listScenarios 按 channelId 分组算 1-based + main.js detailedEnabled 透传 displayIndex/channelId |
+| N1-settings UI 自扩展 | dev agent 实施时 spec 假设错误，自行新建 factory + ⚙️ 入口（用户没说要加） | 全部回退（删 179 行 + 7 处文档同步） |
+| 匹配渠道列语义割裂 | D16=a 原始 Channel-地区 + 命中通用场景 → 列与「命中场景」割裂 | D16=b：dispatcher 写 _hitChannelId + writer 反查 channels label |
+
+#### 测试覆盖
+
+| 测试类型 | v2.1.8 基线 | v2.1.9 α 终态 |
+|---|---|---|
+| `npm run test:unit` | 123 / 28 suites | **1128 / 280 suites / 0 fail**（+1005 case / +252 suites） |
+| `npm run test:integration` | 6 脚本 / 305 case | **9 脚本 / 497 case 全 PASS**（+3 脚本 +192 case） |
+| `npm run smoke` | 全绿 | 全绿 0 regression |
+| `npm run check:vars` | — | 23 命中（Critical 3 + Important-skeleton 5 + Runtime-state 7 + Risk-sensitive 6 + Minor 2，均在 spec 范围内） |
+
+#### 后续节点
+
+- α merge 后立即按用户 2026-05-27 拍板建 v2.1.10 β 分支 + 启动 spec 评审
+- β 范围：A3 / A4 / N4-cont-1 / N4-cont-2 / SR-backup-1 N4 重构续 / N5-channels-scale 评估
