@@ -2,8 +2,8 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.3（2026-05-27 — SR-log-1 立项 Phase 8.8 加验收项）；v0.2 α 范围扩 4 主题；v0.1 起草 |
-| 关联文档 | `PRD-v2.1.9.md` v0.3 / `spec.md` v0.4 / `tasks.md` v0.3 |
+| 文档版本 | v0.4（2026-05-27 — **SR-FIX-1 合并前修补** Phase 10 验收项 §九.5）；v0.3 SR-log-1 立项 Phase 8.8 加验收项；v0.2 α 范围扩 4 主题；v0.1 起草 |
+| 关联文档 | `PRD-v2.1.9.md` v0.3 / `spec.md` v0.9 / `tasks.md` v0.4 |
 | 测试范围 | α 范围 — N5（银行渠道）+ N7（场景模板）+ N6（状态框）+ SR-backup-1（前置）+ G1-cont（unit 全量铺）+ SR-policy-1（自动同步）+ N1-settings（idle 阈值）+ N4 重构（顺带）+ **SR-log-1（全局告警统一日志化）** |
 | 测试节奏 | 每完成一个 Phase 由用户手测；全部 Phase 完成后跑 release-check + 用户验收 |
 
@@ -501,6 +501,88 @@
 
 - [ ] 模拟 `Documents/网银账单生成小助手/logs/` 下含 6+ 个月份目录
 - [ ] **预期**：应用启动不会自动删（D32=a / D35 取消）；用户手动 `rm -rf logs/2025-XX` 后应用正常
+
+---
+
+## 八.9、Phase 10 — SR-FIX-1 合并前修补验收（2026-05-27 加）
+
+> 触发条件：PR #53 self-review 发现 SR1 #1-#4 4 个 🔴 Critical（详 `spec.md §十六`）；F1 方案合并前修；本节验收 T41-T44 完成度。
+
+### 8.9.1 dispatcher per-channel batch 单元覆盖（T41 + T43 — spec §16.4 矩阵）
+
+- [ ] `npm run test:unit -- tests/unit/main-process/scenario-dispatcher.test.js` 全绿
+- [ ] **预期**：
+  - [ ] 既有 30+ 双维 C1 case 全绿（0 regression）
+  - [ ] 新增 case 1-6（C3 阶段 A/B + 1v1 红线 + 跨阶段 gw 边界）全绿
+  - [ ] 新增 case 7-10（C2 阶段 A/B + 笛卡尔配对 + reconFields=0）全绿
+  - [ ] 新增 case 11-12（混合 first-match-wins）全绿
+  - [ ] 新增 case 13-15（跨 channel + 兜底 metadata）全绿
+  - [ ] dispatcher.test.js 总 case ≥ 50
+
+### 8.9.2 C3 1v1 红线手测（关键）— 修复确认
+
+- [ ] 准备：
+  - 库内有「工商-上海」渠道 + 该渠道下配 1 个 C3 场景（如「工行上海对账」，reconFields 配 Amount 字段）
+  - 库内「通用」渠道无场景
+- [ ] 银行对账单 fixture：2 行（Channel=工商, 地区=上海），同金额（如 100.00）
+- [ ] 资金对账不平 fixture：2 行 gw（金额都是 100.00）
+- [ ] 导入 + 处理
+- [ ] **预期**：
+  - [ ] 状态框 `已处理：2 行命中（场景 1）`
+  - [ ] 主输出 xlsx Sheet 1 含 2 行命中行
+  - [ ] **关键**：独立报表的 2 行 bank → 严格对应**不同** gw 行（不应共费同 1 行 gw）
+  - [ ] activityLog 无 `multi-gateway-match` 警告（除非数据本身有重复）
+
+### 8.9.3 C2 笛卡尔配对手测 — 修复确认
+
+- [ ] 准备：「工商-上海」渠道下配 1 个 C2 场景（账单类型 2 行 + reconFields 1 行）
+- [ ] 银行对账单 fixture：3+ 行（Channel=工商, 地区=上海），含至少 1 leftType + 1 rightType 配对
+- [ ] 导入 + 处理
+- [ ] **预期**：
+  - [ ] C2 笛卡尔配对正常触发（修复前永不命中）
+  - [ ] 状态框显示场景命中数 > 0
+  - [ ] rightRow 字段 markValue 被改
+
+### 8.9.4 跨 channel 同名场景插入（T42 — D39 修复）
+
+- [ ] 通过 N7 导入或 UI 新增 — 通用渠道有「对账场景 A」+ 工商-上海渠道新增「对账场景 A」
+- [ ] **预期**：
+  - [ ] 跨 channel 同名**允许**并存（D39 修复前会被全表 UNIQUE 拦下）
+  - [ ] 同 channel 同名**拒绝**（不变）
+  - [ ] friendly error 文案：「场景名「对账场景 A」在该渠道下已存在」
+
+### 8.9.5 UNIQUE migration 老库升级
+
+- [ ] 准备 v2.1.8 老库 fixture（scenarios.name 全表 UNIQUE）+ 已被 N5 加 channel_id + backfill=1
+- [ ] 启动 v2.1.9 应用
+- [ ] **预期**：
+  - [ ] activityLog 含 `[scenarios-unique migration] 备份完成` + `成功`
+  - [ ] sqlite3 `PRAGMA index_list('scenarios')` 显示新 UNIQUE INDEX `scenarios_channel_name_unique`
+  - [ ] settings 表 `n5_scenarios_unique_migrated='1'`
+  - [ ] 重启幂等（不重复跑）
+
+### 8.9.6 D16=b writer 行为（T44）
+
+- [ ] 复跑 §5.4 独立报表验收
+- [ ] **预期**：
+  - [ ] 行 A（命中专属「工商-上海」C3）「匹配渠道」列 = `工商-上海`
+  - [ ] 行 B（命中通用 C3 兜底）「匹配渠道」列 = `通用`
+  - [ ] 行 C（未命中任何场景）「匹配渠道」列 = 空字符串
+
+### 8.9.7 USER_GUIDE / CHANGELOG / PR body 文档收口
+
+- [ ] `docs/USER_GUIDE.md` 含「已知边界」段说明：
+  - [ ] 跨 channel gw 重消费边界 + 用户规避指引
+  - [ ] scenarios.name 跨渠道复用允许说明
+- [ ] `CHANGELOG.md` v2.1.9 章节追加 SR-FIX-1 修复说明
+- [ ] `docs/prs/PR53-v2.1.9.md` 含「SR-FIX-1 修复」段（19 finding 收口表）
+
+### 8.9.8 release-check + check-vars
+
+- [ ] `npm run smoke` 全绿（0 regression）
+- [ ] `npm run test:unit` 全绿
+- [ ] `npm run test:integration` 全绿
+- [ ] `npm run check:vars` 无新增 Critical 命中
 
 ---
 

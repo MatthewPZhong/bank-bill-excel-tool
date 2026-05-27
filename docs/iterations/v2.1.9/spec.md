@@ -2,8 +2,8 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.4（2026-05-27 — SR-log-1 立项；§1.5 加 D29-D37 9 项决策点 + 新增 §十五 详设；章节号后移）；v0.3 加 D19-D22 + 4 个新主题详设；v0.2 D18 grep 修订；v0.1 起草 |
-| 关联文档 | `PRD-v2.1.9.md` v0.3 / `backlog.md` v0.5 / `tasks.md` v0.3（待修订）/ `manual-test-checklist.md` v0.3（待修订） |
+| 文档版本 | v0.9（2026-05-27 — **SR-FIX-1 资金红线修复**；§1.6 加 D38-D40 3 项；§2.1 / §2.4 / §3.1 / §3.2 / §5.2 / §6.3.2 加 Reverse Sync marker；新增 §十六 完整修复设计）；v0.4 SR-log-1 立项；v0.3 加 D19-D22 + 4 个新主题详设；v0.2 D18 grep 修订；v0.1 起草 |
+| 关联文档 | `PRD-v2.1.9.md` v0.3 / `backlog.md` v0.5 / `tasks.md` v0.4（SR-FIX-1 已加）/ `manual-test-checklist.md` v0.4（SR-FIX-1 已加） |
 | 评审范围 | N5（银行渠道区分场景）+ N7（场景模板按渠道导入/导出）+ N6（状态框换行）+ SR-backup-1（前置） |
 | 评审人 | PM + 用户（资金红线条目必复核） |
 
@@ -73,11 +73,25 @@
 
 **D35 级联推断说明**：D32=a 永久保留 → D35「自动清理 > 90 天日志」永远清不到 = 死代码 → 级联取消。如未来用户希望保留清理能力（如 UI 按钮），可在 v2.1.10+ 立项。
 
+### 1.6 SR-FIX-1 决策点（3 项 — 2026-05-27 用户合并前 self-review 后拍板 F1）
+
+> v2.1.9 PR #53 提交后的 self-review 发现 SR1 #1/#2/#3/#4 4 个 Critical（详 §十六 修复设计）：dispatcher per-row 单调破坏 C3 1v1 资金红线 + C2 笛卡尔配对永不命中 + scenarios.name 全表 UNIQUE 与 N7 channel 内同名跳过语义冲突 + C2/C3 双维 0 测试覆盖。用户拍板 F1 方案：合并前修。
+
+| ID | 决策点 | 拍板 | 含义 |
+|---|---|---|---|
+| **D38** | dispatcher 调度模型修订 | **(a) per-channel batch first-match-wins** | 阶段 A 每个专属渠道独立批量调 `runScenario(scenario, candidateRows, gwRows)`，阶段 B 通用渠道批量；保留 v2.1.7 F2 + F8 资金红线不变量（C3 `usedGwRowIdx` 在 runScenario 内自然 1v1；C2 笛卡尔配对收到完整 row 集；rowLockSet 跨阶段累积保证 first-match-wins）；详 §16.1 / §16.2 |
+| **D39** | scenarios.name UNIQUE 修订 | **(a) 复合 UNIQUE (channel_id, name)** | 全表 UNIQUE 改为 channel 内 UNIQUE；与 spec §6.3.2「channel 内同名跳过」语义一致；migration 检查老库跨渠道同名冲突（理论上 N5 migration 后所有 scenarios.channel_id=1 不会冲突，但 N7 导入路径修复后需要）；详 §16.3 |
+| **D40** | C2/C3 双维单元覆盖 | **(a) 必须补 ≥15 case** | 现有 dispatcher.test.js 30+ 双维 case 全用 C1，C2/C3 双维路径 0 覆盖；新增矩阵：C3 阶段 A 命中 / C3 阶段 B 兜底 / C3 跨阶段 gw 共享边界 / C2 阶段 A 命中 / C2 阶段 B 兜底 / 复合 UNIQUE 跨渠道同名插入；详 §16.4 |
+
+**D38 关键约束**：跨 scenario / 跨 channel 的 gw 行**可能**被多次消费（如阶段 A 工商-上海 C3 消费 gw[0]，阶段 B 通用 C3 又消费 gw[0]）— 这是 v2.1.8 单维 + N5 双维**一致**的已知边界（v2.1.7 F2 1v1 红线只约束单 scenario 内）；用户层规避：同 gw 字段的 C3 场景不应在专属 + 通用同时启用相同 reconFields。USER_GUIDE 同步加注解。
+
 ---
 
 ## 二、N5 资金红线评审
 
 ### 2.1 dispatcher 双维调度模型（D2=c）伪代码
+
+> ⚠️ **v0.9 SR-FIX-1 Reverse Sync（2026-05-27）**：本节伪代码为 **per-row 单调** 设计，已被 §十六 修订为 **per-channel batch first-match-wins**。原 per-row 路径破坏 C3 `usedGwRowIdx` 1v1 资金红线 + C2 笛卡尔配对永不命中（详 §16.1）。**实施以 §16.2 伪代码为准**；本节保留供历史参考。
 
 **调度入口**：`src/main-process/scenario-dispatcher.js:runAllScenarios`（v2.1.8 N3-1 已含 displayIndex / hitScenarios，本次扩双维）
 
@@ -176,18 +190,23 @@ async function runAllScenarios(row, deps) {
 
 ### 2.4 first-match-wins 不变量
 
+> ⚠️ **v0.9 SR-FIX-1 Reverse Sync（2026-05-27）**：本节不变量描述基于 per-row 作用域，已被 §16.2 修订为「per (channel × phase) 子作用域 + 跨子作用域 rowLockSet 累积」。语义保持「同一行最多命中 1 个场景」；变化点见 §16.2。
+
 - v2.1.7 F8 + v2.1.8 N3-1 已确立 first-match-wins 调度（dispatcher.js:99 改 hitScenarios.push 后 break）
 - v2.1.9 N5 保持 first-match-wins，但**作用域扩为分阶段执行**：
   - 阶段 A（专属）first-match-wins，命中 → break，不进阶段 B
   - 阶段 A 未命中 → 进阶段 B（通用）first-match-wins，命中 → break
   - 阶段 A + B 都未命中 → 行进 Sheet 2
 - 同一行**最多命中 1 个场景**（无双重处理）
+- **v0.9 SR-FIX-1 修订（§16.2）**：作用域细化为「每个 (channel × phase) 子作用域内 first-match-wins 批量执行」，跨子作用域通过 `rowLockSet` 累积保证「同行最多 1 命中」不变量；同时让 C3 `usedGwRowIdx` 在每次 runScenario 调用内自然 1v1 + C2 笛卡尔配对收到完整 row 集
 
 ---
 
 ## 三、DB schema 设计
 
 ### 3.1 `channels` 表 DDL
+
+> v0.9 SR-FIX-1 Reverse Sync：本节 channels 表 DDL 不变；scenarios.name UNIQUE 全表 → (channel_id, name) 复合 UNIQUE 详 §16.3。
 
 ```sql
 CREATE TABLE IF NOT EXISTS channels (
@@ -412,7 +431,9 @@ const fileName = `命中场景行-${baseName}-${timestamp}.xlsx`;
 const fullPath = path.join(reportDir, fileName);
 ```
 
-### 5.2 列结构（D16=a + D17=b）
+### 5.2 列结构（D16=b ✅ + D17=b）
+
+> v0.9 SR-FIX-1 Reverse Sync（SR1 #5 修订）：D16 已从 (a) 修订到 (b) — 「匹配渠道」列取**实际命中场景所属渠道 label**（详 §1.1 D16）。本表描述同步更新。
 
 ```
 | 原 44 列银行账单 headers ... | 匹配渠道 | 匹配状态 | 命中场景 |
@@ -421,9 +442,23 @@ const fullPath = path.join(reportDir, fileName);
 | 列 | 取值 | 示例 |
 |---|---|---|
 | 原 44 列 | bank-statement-fields headers | （v2.1.6 标准银行字段） |
-| 匹配渠道 | `${row.Channel}-${row['地区']}` 保留原始值 | `工商-上海` / `工商-北京`（未匹配） |
-| 匹配状态 | `命中` / `兜底` | （由 _matchStatus 字段决定） |
+| 匹配渠道 | **D16=b**：实际命中场景所属渠道 label；命中专属 → `${name}-${ownerLocation}`；命中通用兜底 → `通用`；未命中 → 空字符串 | `工商-上海` / `通用` / `` |
+| 匹配状态 | `命中` / `兜底` | （由 _matchStatus 字段决定 — 行匹配到专属渠道 = 命中；未匹配 = 兜底） |
 | 命中场景 | `[displayIndex] ${scenarioName}` | `[1] 工行上海对账场景` |
+
+**writer 实现要点**（dispatcher 写 `_hitChannelId` → writer 反查 channels.label）：
+
+```js
+const channels = channelsRepo.listChannels(db);
+const channelLabelById = new Map(channels.map(c => [
+  c.id, c.isBuiltin ? '通用' : `${c.name}-${c.ownerLocation}`
+]));
+
+const matchedLabel = row._hitChannelId
+  ? channelLabelById.get(row._hitChannelId) || ''
+  : '';
+cells.push(matchedLabel);
+```
 
 ### 5.3 writer 实现（新建 `src/main-process/scenario-hit-rows-writer.js`）
 
@@ -557,6 +592,8 @@ if (missingChannels.length > 0) {
 ```
 
 #### 6.3.2 同名场景冲突（D12=a）
+
+> v0.9 SR-FIX-1 Reverse Sync（SR1 #3 修订）：v0.8 实施时 scenarios.name 仍是**全表 UNIQUE**（migrations.js:407/519/571），跨渠道复用同名会被 catch 全表 UNIQUE 错误误判为「冲突跳过」（如「通用」有「工行对账场景」+ 导入「工商-上海」也叫「工行对账场景」→ 应该按 channel 内 UNIQUE 允许并存，但实际被跳过）。SR-FIX-1 D39 修订 UNIQUE 为 (channel_id, name)，本节 `findByChannelAndName` + catch 逻辑配套修订；详 §16.3。
 
 ```js
 const conflicts = [];
@@ -1328,7 +1365,307 @@ scan:vars 阶段二次确认。
 
 ---
 
-## 十六、spec 评审 checklist
+## 十六、SR-FIX-1 — 资金红线修复设计（PR #53 self-review 后补丁）
+
+> v0.9 立项（2026-05-27 — PR #53 提交后 self-review 发现 5 个 SR1 Critical；用户拍板 F1 合并前修；本章为完整修复设计）。
+>
+> 关联 §1.6 D38-D40 / §2.1 / §2.4 / §3.1 / §5.2 / §6.3.2 Reverse Sync marker。
+
+### 16.1 现状审计（self-review SR1 5 个 Critical）
+
+| # | 严重度 | finding | 事实证据（文件:行） |
+|---|---|---|---|
+| **#1** | 🔴 资金红线 | C3 1v1 不变量被打破 — dispatcher per-row 单调 → C3 `usedGwRowIdx` 每次重置 → 多 bank 行共费同一 gw 行（违反 v2.1.7 F2） | `scenario-dispatcher.js:147` `runScenario(scenario, [row], gwRows)` + `c3-gateway-recon-join.js:132` `const usedGwRowIdx = new Set();` |
+| **#2** | 🔴 资金红线 | C2 双维完全失效 — 笛卡尔配对依赖 ≥2 行；per-row `[row]` 入参 → leftRows / rightRows 至多一个非空 → 永不命中 | `c2-offset-bill-mark.js:124-148` 笛卡尔 + `scenario-dispatcher.js:142-153` per-row |
+| **#3** | 🔴 spec 内部冲突 | scenarios.name 全表 UNIQUE 与 spec §6.3.2「channel 内同名跳过」语义冲突 — 跨渠道复用场景名会被全表 UNIQUE 错误跳过 | `migrations.js:407/519/571` `UNIQUE (name)` + `scenarios-repository.js:236/294` catch 全表错误 |
+| **#4** | 🔴 测试盲区 | dispatcher.test.js 30+ 双维 case 全用 C1（attribute-fill），C2/C3 双维路径 0 覆盖 — 4 个 fix 全为生产手测发现 | `tests/unit/main-process/scenario-dispatcher.test.js` grep `offset-bill-mark\|gateway-recon-join` = 0 命中 |
+| **#5** | 🟡 spec 滞后 | spec §5.2 列结构表「匹配渠道」描述未同步 D16 (a)→(b) 修订 — 后续 dev 误读风险 | v0.8 spec §5.2 表内仍写「保留原始值」（已在本版 v0.9 修订） |
+
+### 16.2 修复设计（dispatcher per-channel batch first-match-wins）
+
+**核心策略**：dispatcher 不再 per-row 调 `runScenario([row], gwRows)`，而是 per (channel × phase) 子作用域批量调 `runScenario(channelScenarios[i], candidateRows, gwRows)`。每个 channel 内复用 v2.1.8 legacy 单维 first-match-wins 模型（rowLockSet 累积 + 每场景跑前 filter unlocked rows）。
+
+**伪代码（替换 §2.1 + §2.4 实施基准）**：
+
+```js
+function runAllScenarios(bankRows, gwRows, scenarios, deps) {
+  // 入参约束不变：scenarios 已 enabled + 已 filterOutReconIdFix + 已 sort priority DESC + filterByGwAvailability
+  const { channelsRepo, db } = deps;
+  if (!deps || !channelsRepo || !db) {
+    // 向后兼容：deps 缺失 → 走 legacy 单维（v2.1.8 路径，本次不动）
+    return runLegacySingleDimensionDispatch(bankRows, gwRows, scenarios, ctx);
+  }
+
+  // Step 1 — 按 channel_id 切片场景（caller 保证排序已稳定）
+  const scenariosByChannelId = groupScenariosByChannelId(scenarios);
+  const generalChannel = channelsRepo.getBuiltinGeneral(db);
+
+  // Step 2 — 为每行预查 matchedChannel（hot path：1 行 1 次 DB 查询）
+  const rowMatchedChannelMap = new Map(); // _rowId → { id, name, owner_location } | null
+  for (const row of bankRows) {
+    const matched = channelsRepo.findByNameAndLocation(
+      db, extractChannelName(row), extractChannelLocation(row)
+    );
+    rowMatchedChannelMap.set(row._rowId, matched);
+  }
+
+  // 跨阶段共享状态（保证 first-match-wins 不变量「同行最多 1 命中」）
+  const rowLockSet = new Set();
+  const rowMeta = new Map();          // _rowId → { scenarioId, scenarioDisplayIndex, scenarioName, modifiedColumns, hitChannelId, matchedChannel, isFallback }
+  const allModifications = [];
+  const allWarnings = [];
+  let scenarioHitCount = 0;
+  const hitScenarioIdSet = new Set();
+  const hitScenarios = [];
+
+  // Step 3 — 阶段 A：每个专属渠道独立批量 first-match-wins
+  //   不变量：channel 内 scenarios 按 priority DESC + id ASC 顺序逐个调，rowLockSet 在 channel 内累积
+  //   候选行 = matchedChannel == 该 channel ∩ !rowLockSet
+  for (const [channelId, channelScenarios] of scenariosByChannelId) {
+    if (channelId === generalChannel.id) continue; // 通用留给阶段 B
+    const candidateRows = bankRows.filter(r =>
+      !rowLockSet.has(r._rowId) &&
+      rowMatchedChannelMap.get(r._rowId)?.id === channelId
+    );
+    if (candidateRows.length === 0) continue;
+
+    runChannelBatch({
+      scenarios: channelScenarios,
+      bankRows: candidateRows,
+      gwRows,
+      // 共享状态
+      rowLockSet, rowMeta, allModifications, allWarnings,
+      hitScenarioIdSet, hitScenarios,
+      scenarioHitCountRef: { value: scenarioHitCount },
+      // metadata 标识
+      hitChannelId: channelId,
+      isFallbackPhase: false,
+      matchedChannelMap: rowMatchedChannelMap,
+    });
+    scenarioHitCount = scenarioHitCountRef.value; // 同步回外层
+  }
+
+  // Step 4 — 阶段 B：通用渠道批量（候选 = 全部未锁定行：含「matched 专属未命中」+「未 matched」）
+  const generalScenarios = scenariosByChannelId.get(generalChannel.id) || [];
+  if (generalScenarios.length > 0) {
+    const candidateRows = bankRows.filter(r => !rowLockSet.has(r._rowId));
+    if (candidateRows.length > 0) {
+      runChannelBatch({
+        scenarios: generalScenarios,
+        bankRows: candidateRows,
+        gwRows,
+        rowLockSet, rowMeta, allModifications, allWarnings,
+        hitScenarioIdSet, hitScenarios,
+        scenarioHitCountRef: { value: scenarioHitCount },
+        hitChannelId: generalChannel.id,
+        isFallbackPhase: true,        // 决定 _matchStatus / _fallbackChannelId
+        matchedChannelMap: rowMatchedChannelMap,
+      });
+    }
+  }
+
+  // Step 5 — 构造 modifiedRows + unmatchedRows + 写 N5 metadata
+  const modifiedRows = bankRows.filter(r => rowLockSet.has(r._rowId)).map(r => {
+    const meta = rowMeta.get(r._rowId);
+    const matched = rowMatchedChannelMap.get(r._rowId);
+    return {
+      ...r,
+      _hitScenarioId: meta.scenarioId,
+      _hitScenarioDisplayIndex: meta.scenarioDisplayIndex,
+      _hitScenarioName: meta.scenarioName,
+      _modifiedColumns: meta.modifiedColumns,
+      _hitChannelKey: buildChannelKey(r),
+      _matchStatus: matched ? '命中' : '兜底',
+      _matchedChannelId: matched?.id || null,
+      _fallbackChannelId: (matched && matched.id !== generalChannel.id && meta.hitChannelId === generalChannel.id)
+        ? generalChannel.id : null,
+      _hitChannelId: meta.hitChannelId,
+    };
+  });
+
+  const unmatchedRows = bankRows.filter(r => !rowLockSet.has(r._rowId)).map(r => {
+    const matched = rowMatchedChannelMap.get(r._rowId);
+    return {
+      ...r,
+      _hitChannelKey: buildChannelKey(r),
+      _matchStatus: matched ? '命中' : '兜底',
+      _matchedChannelId: matched?.id || null,
+      _fallbackChannelId: null,
+      _hitChannelId: null,
+    };
+  });
+
+  return { modifiedRows, unmatchedRows, modifications: allModifications, errorReport: allWarnings, stats: { ... } };
+}
+
+// 单 channel 子作用域 first-match-wins 批量调度（等同 v2.1.8 legacy 单维行为）
+function runChannelBatch(args) {
+  const { scenarios, bankRows, gwRows, rowLockSet, rowMeta,
+          allModifications, allWarnings, hitScenarioIdSet, hitScenarios,
+          scenarioHitCountRef, hitChannelId, matchedChannelMap } = args;
+
+  for (const scenario of scenarios) {
+    const unlocked = bankRows.filter(r => !rowLockSet.has(r._rowId));
+    if (unlocked.length === 0) break;
+
+    // 关键：unlocked 是整组未锁定候选行，C3 内 usedGwRowIdx 在此次 runScenario 调用内自然 1v1
+    // C2 笛卡尔配对收到完整 leftRows + rightRows 集
+    const result = runScenario(scenario, unlocked, gwRows);
+    const { lockedRowIds, modifications, warnings } = result;
+
+    if (lockedRowIds && lockedRowIds.size > 0) {
+      scenarioHitCountRef.value += 1;
+      if (!hitScenarioIdSet.has(scenario.id)) {
+        hitScenarioIdSet.add(scenario.id);
+        hitScenarios.push({
+          id: scenario.id,
+          displayIndex: Number.isFinite(scenario.displayIndex) ? scenario.displayIndex : scenario.id,
+          name: scenario.name,
+        });
+      }
+      lockedRowIds.forEach(rowId => {
+        rowLockSet.add(rowId);
+        if (!rowMeta.has(rowId)) {
+          rowMeta.set(rowId, {
+            scenarioId: scenario.id,
+            scenarioDisplayIndex: Number.isFinite(scenario.displayIndex) ? scenario.displayIndex : scenario.id,
+            scenarioName: scenario.name,
+            modifiedColumns: new Set(),
+            hitChannelId,
+          });
+        }
+      });
+    }
+
+    if (Array.isArray(modifications)) {
+      modifications.forEach(m => {
+        allModifications.push({ ...m, scenarioId: scenario.id, scenarioName: scenario.name });
+        const meta = rowMeta.get(m.rowId);
+        if (meta) meta.modifiedColumns.add(m.column);
+      });
+    }
+    if (Array.isArray(warnings)) warnings.forEach(w => allWarnings.push({ ...w }));
+  }
+}
+```
+
+**关键不变量声明**：
+
+1. **C3 单 scenario 调用内 1v1**（v2.1.7 F2 资金红线）：`usedGwRowIdx` 在 runScenario 函数 scope 内创建并消费 → 批量入参下 N 行 bank × M 行 gw 严格 1:1 — ✅ 修复
+2. **C2 笛卡尔配对**：runChannelBatch 传入完整 unlocked rows → C2 内 `leftRows.filter` + `rightRows.filter` 收到完整集 → 配对正常 — ✅ 修复
+3. **first-match-wins**（v2.1.7 F8）：rowLockSet 跨 channel 跨阶段累积 → 同行最多 1 命中 — ✅ 保持
+4. **D2=c 专属优先 + 通用兜底**：阶段 A 先跑专属（按 channel 切片独立批量）→ 阶段 B 通用兜底（全部未锁定行）— ✅ 保持
+5. **行序保持**：modifiedRows + unmatchedRows 按 bankRows 原始顺序 filter，无 reorder — ✅ 保持
+6. **D16=b**：每行 `_hitChannelId` = 命中场景所属 channel_id，writer 反查 label 渲染「匹配渠道」列 — ✅ §5.2 实现
+
+**已知边界（USER_GUIDE 文档化）**：
+
+- ⚠️ 跨 scenario / 跨 channel 的 gw 行可能被多次消费（如阶段 A 工商-上海 C3 消费 gw[0]，阶段 B 通用 C3 又消费 gw[0]）
+  - 与 v2.1.8 单维行为**一致**（v2.1.7 F2 1v1 红线只约束单 scenario 调用内）
+  - 用户层规避：同 gw 字段的 C3 场景不应在专属 + 通用同时启用相同 reconFields
+- ⚠️ matchedChannel 查询缓存（`rowMatchedChannelMap`）— 单次 dispatcher 调用内有效，无跨调用持久化
+- ⚠️ scenarios.displayIndex 来源：caller 传入 `scenarios-repository.listScenarios()` 已附（v2.1.8 N3-1 + v2.1.9 N5 channel 内 1-based 修订），dispatcher 透传，无重新计算
+
+### 16.3 scenarios.name UNIQUE 全表 → (channel_id, name) 修订设计
+
+**现状代码**：
+
+- `migrations.js:407` 主表 DDL：`UNIQUE (name)`
+- `migrations.js:519` v2.0.0-beta.3 老库无损迁移分支：`UNIQUE (name)`
+- `migrations.js:571` v2.0.0-beta.3 二次迁移：`UNIQUE (name)`
+- `scenarios-repository.js:236/294` 捕获 `'UNIQUE constraint failed: scenarios.name'` 抛 friendly error
+
+**修订设计**：
+
+1. **新增 migration 函数** `ensureScenariosNameUniqueByChannelId(db)`：
+   - 检测当前 schema：`PRAGMA index_list('scenarios')` 看是否仍是 `(name)` UNIQUE
+   - 若是：BEGIN → 检查全表是否有「同 channel_id 下重名」记录（理论上 N5 backfill 后所有 channel_id=1，全表 UNIQUE 等价于 channel 内 UNIQUE → 不会冲突）
+     - 若有冲突（理论不应发生 — 防御性）：activityLog 报错 + 抛 + ROLLBACK + 用户介入
+     - 若无：drop old UNIQUE index + create new UNIQUE INDEX `scenarios_channel_name_unique (channel_id, name)`
+   - 写标志位 `n5_scenarios_unique_migrated='1'`
+   - 备份：前置 `createBackup(db, 'pre-scenarios-unique-migration')`
+2. **scenarios-repository.js 错误捕获升级**：
+   - 老错误 `UNIQUE constraint failed: scenarios.name` 继续兼容（migration 前的库）
+   - 新错误 `UNIQUE constraint failed: scenarios.channel_id, scenarios.name`（migration 后）
+   - 同时 catch 这两个模式 → 抛 `场景名「{name}」在该渠道下已存在` friendly error
+3. **N7 import 路径**：`findByChannelAndName(channelId, name)` 已在 §6.3.2 中预留实现；本次只需补 scenariosRepo 上对应方法（如不存在）
+
+**调用顺序**：
+
+```
+ensureSchemaV2_1_9_N5（已有）
+  → ensureScenariosChannelIdColumn （已有 — backfill channel_id=1）
+  → ensureScenariosNameUniqueByChannelId（新增 — 改 UNIQUE 索引）
+```
+
+**注意**：migration 顺序保证 `ensureScenariosChannelIdColumn` 先完成（所有 scenarios 都有 channel_id 值），再做 UNIQUE 索引切换，否则跨 channel 同名场景的迁移会因为旧库无 channel_id 列报错。
+
+### 16.4 C2/C3 双维 unit case 矩阵（SR1 #4）
+
+**新增 case 至 `tests/unit/main-process/scenario-dispatcher.test.js`**（最少 15 case）：
+
+| # | category | 场景 | 候选 bank 行 | gw 行 | 预期 |
+|---|---|---|---|---|---|
+| 1 | C3 | 阶段 A 专属 channel `工商-上海` C3 命中 | 行 A (Channel=工商, 地区=上海) × 1 | gw[0] 金额匹配 | 行 A locked + 改字段；gw[0] 标记 used |
+| 2 | C3 | 阶段 A 同 channel 多行 1v1 — 红线护栏 | 行 A1+A2 (金额相同) × 2 | gw[0]+gw[1] (金额相同) × 2 | A1 → gw[0] + A2 → gw[1]（严格 1v1，不共费） |
+| 3 | C3 | 阶段 A gw 不够 → 部分 bank 未命中 | 行 A1+A2 × 2 | gw[0] × 1 | A1 命中 gw[0]，A2 unmatched |
+| 4 | C3 | 阶段 A 未命中 → 阶段 B 通用 C3 命中 | 行 A (Channel=工商, 专属无 C3 匹配规则) | gw[0] 在通用 C3 规则下匹配 | 行 A 进阶段 B + 通用 C3 命中 + `_hitChannelId=1` |
+| 5 | C3 | 行未 matched channel → 阶段 B 通用 C3 命中 | 行 X (Channel=招商, 库内无招商渠道) | gw[0] 在通用 C3 规则下匹配 | 行 X 兜底命中通用 + `_matchStatus='兜底'` |
+| 6 | C3 | 阶段 A + B 跨 channel gw 重消费边界 | 行 A (matched 工商) + 行 X (未 matched) | gw[0] × 1 | A 在阶段 A 消费 gw[0] + X 在阶段 B 又消费 gw[0]（已知边界 — 记录不抛错） |
+| 7 | C2 | 阶段 A 专属 C2 笛卡尔配对成功 | 行 A1 (leftType) + A2 (rightType) × 2 (matched 工商) | — | A1+A2 locked + rightRow 字段被改 |
+| 8 | C2 | 阶段 A 专属 C2 单行入参 — 防御性 | 行 A1 (leftType, matched 工商) × 1 | — | 无配对 → unmatched（不抛错） |
+| 9 | C2 | 阶段 A 未命中 → 阶段 B 通用 C2 命中 | 行 X (Channel=招商) + 行 Y (Channel=招商) | — | 进阶段 B + 通用 C2 命中 |
+| 10 | C2 | C2 reconFields=0 无条件赋值（衍生方案 A）| 行 A (matched 工商, billType match) | — | A locked + 字段改值（不走笛卡尔） |
+| 11 | C1+C2 | 阶段 A C1 命中 后 C2 候选缺右侧 → C2 不再命中 | 行 A1 (C1 命中) + A2 (右侧) | — | first-match-wins：A1 锁定后 A2 仍可能命中其他场景（验证 rowLockSet 不变量） |
+| 12 | C3 | 阶段 A C3 命中 同行 C2 不再命中 | 行 A (matched 工商，C2/C3 都可能命中) | gw[0] | A 先被 C3 锁定 → C2 阶段不再处理 A |
+| 13 | mixed | 跨 channel 同名场景插入（D39 验证）| — | — | scenariosRepo.insert: 同 channel 同名 → UNIQUE constraint；跨 channel 同名 → 允许并存 |
+| 14 | mixed | 全部场景在通用，行 matched 专属 → 阶段 A 空跑 → 阶段 B 兜底命中 | 行 A (matched 工商) | gw[0] | 阶段 A 空跑（专属无场景）→ 阶段 B 通用命中 + `_fallbackChannelId=1` |
+| 15 | mixed | 全部场景在通用 + 行未 matched 渠道 → 阶段 B 命中 | 行 X | — | `_matchStatus='兜底'` + `_hitChannelId=1` |
+
+**新增 case 至 `tests/unit/backend/database/scenarios-repository.test.js`**（最少 3 case 验证 D39）：
+
+| # | 场景 | 预期 |
+|---|---|---|
+| R1 | 同 channel 同 name 插入 | 抛 friendly error |
+| R2 | 跨 channel 同 name 插入（如「通用」+「工商-上海」都叫「对账场景」）| 双方都落库成功 |
+| R3 | findByChannelAndName 跨 channel 同名查询 | 仅返回指定 channel 的记录 |
+
+### 16.5 D16=b writer 同步实现（SR1 #5 spec sync）
+
+§5.2 已在 v0.9 修订表内同步 D16=b；本节为 writer 实现细节归档：
+
+- `src/main-process/scenario-hit-rows-writer.js`：
+  - 入参增加 `channels: channelsRepo.listChannels(db)` 或在 writer 内自查
+  - 构造 `channelLabelById: Map<id, string>`，键 = channel.id，值 = `isBuiltin ? '通用' : ${name}-${ownerLocation}`
+  - 渲染「匹配渠道」列：`row._hitChannelId ? channelLabelById.get(row._hitChannelId) || '' : ''`
+- 主进程 `src/main.js` 调用 writer 处加 `channels` 参数（或 deps 传 db + repo）
+
+### 16.6 风险与边界
+
+| 风险 | 等级 | 缓解 |
+|---|---|---|
+| dispatcher 改造退化 v2.1.7 F2 1v1 红线 | 🔴 资金红线 | 单元 case 2 + 3 强制覆盖；smoke 全跑 0 regression；集成 v2.1.9-n5-channel-dispatch 加入 C3 1v1 验证 |
+| 跨 channel 跨 scenario gw 多次消费 | 🟡 已知边界（v2.1.8 一致） | USER_GUIDE / CHANGELOG 文档化 + 用户层规避指引 |
+| UNIQUE migration 老库冲突 | 🟢 理论不发生 | N5 backfill 后所有 scenarios.channel_id=1，全表 UNIQUE 等价 channel 内 UNIQUE；防御性检测 + ROLLBACK |
+| C2 reconFields=0 衍生方案 A 单行入参 | 🟡 现状 | per-channel batch 后接收完整 unlocked rows，与 v2.1.8 行为一致 |
+| dispatcher 测试 30+ 既有 case 退化 | 🟢 设计兼容 | 既有 case 全用 C1 attribute-fill 路径，per-channel batch 下行为不变（C1 不依赖批量语义）；运行全套验证 |
+| scenarios.displayIndex 跨 channel 不重号 | 🟢 已有 | v2.1.9 已修订 `listScenarios` 按 channel 分组 1-based；本次不动 |
+
+### 16.7 验收清单（SR-FIX-1 完成判定）
+
+- [ ] §16.2 dispatcher per-channel batch 实施完成 + 6 不变量 unit case 全绿
+- [ ] §16.3 UNIQUE migration 落地 + R1/R2/R3 unit case 全绿
+- [ ] §16.4 C2/C3 双维 unit case ≥ 15 case 全绿
+- [ ] `npm run smoke` 0 regression
+- [ ] `npm run test:integration` 0 regression（不强制新增 C2/C3 双维集成 case；unit 覆盖足够）
+- [ ] §5.2 writer 实现 D16=b 行为通过 case 5 验证
+- [ ] CHANGELOG / USER_GUIDE 同步「已知边界（跨 channel gw 重消费）」+「scenarios.name 跨渠道复用」说明
+- [ ] PR #53 body 追加「SR-FIX-1 修复」段（19 finding 收口表）
+- [ ] check-vars 不引入新 Critical 命中
+
+---
+
+## 十七、spec 评审 checklist
 
 启动 dev 前用户必须确认：
 

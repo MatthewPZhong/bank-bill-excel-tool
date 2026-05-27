@@ -2,9 +2,9 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.3（2026-05-27 — SR-log-1 立项 Phase 8.8 加 5 task；任务总数 51→56）；v0.2 α 范围扩 4 主题；v0.1 起草 |
-| 关联文档 | `PRD-v2.1.9.md` v0.3 / `spec.md` v0.4 / `backlog.md` v0.5 |
-| 任务总数 | 56（α 范围，原 38 + G1-cont 7 + SR-policy-1 1 + N1-settings 3 + N4 重构 2 + **SR-log-1 5**） |
+| 文档版本 | v0.4（2026-05-27 — **SR-FIX-1 合并前修补**；Phase 10 加 T41-T44 4 task；任务总数 56→60）；v0.3 SR-log-1 立项 Phase 8.8 加 5 task；v0.2 α 范围扩 4 主题；v0.1 起草 |
+| 关联文档 | `PRD-v2.1.9.md` v0.3 / `spec.md` v0.9 / `backlog.md` v0.5 |
+| 任务总数 | 60（α 范围，原 56 + **SR-FIX-1 4 task**） |
 | 任务拆分原则 | 单 task 3-5 文件内（CLAUDE.md 小批次原则）；按文件粒度拆，避免 task 间共享文件 |
 | 关键约束 | SR-backup-1 必须在 N5 migration + N4 重构 前完成；N7 必须在 N5 channels 表落地后；G1-cont 与所有 N 项并行可独立推进 |
 
@@ -644,6 +644,82 @@
 
 ---
 
+## 十一.5、Phase 10 — SR-FIX-1 合并前修补（4 task / 2026-05-27 加）
+
+> 触发条件：PR #53 提交后 self-review 发现 SR1 #1/#2/#3/#4 4 个 🔴 Critical（详 `spec.md §十六`）；用户拍板 F1 方案合并前修；本 Phase 4 task 在 PR #53 合并前完成。
+
+### T41 — dispatcher per-channel batch first-match-wins 重写
+
+- **Owner**：Dev agent
+- **依赖**：T38（PR #53 已开）
+- **文件**：`src/main-process/scenario-dispatcher.js`（重写 runDualDimensionDispatch + 新增 runChannelBatch helper）
+- **动作**：spec §16.2 伪代码 → 实施
+  - 删除 `dispatchSingleRow` / `firstMatchWinsForRow`（per-row 路径不再使用）
+  - 新增 `runChannelBatch(args)` helper（per-channel 子作用域 first-match-wins）
+  - `runDualDimensionDispatch` 改：Step 1 切片 + Step 2 rowMatchedChannelMap 预查 + Step 3 阶段 A 每专属 channel batch + Step 4 阶段 B 通用 batch + Step 5 modifiedRows/unmatchedRows 构造
+  - rowMeta 加 hitChannelId 字段
+  - 保留向后兼容：deps 缺失 → runLegacySingleDimensionDispatch（不动）
+- **验收**：
+  - dispatcher 单元 6 不变量 case 全绿（spec §16.4 case 1-6）
+  - smoke 全跑 0 regression
+  - dispatcher.test.js 既有 30+ case 全绿（C1 路径不变）
+
+### T42 — scenarios.name UNIQUE 全表 → (channel_id, name) migration
+
+- **Owner**：Dev agent
+- **依赖**：T41（dispatcher 先就位避免测试期歧义）
+- **文件**：
+  - `src/backend/database/migrations.js`（新增 `ensureScenariosNameUniqueByChannelId(db)`）
+  - `src/backend/database/scenarios-repository.js`（catch 升级支持新旧两种 UNIQUE 错误消息）
+- **动作**：spec §16.3
+  - 新 migration 函数：检测 + 备份 + 冲突预检 + drop old UNIQUE + create new UNIQUE INDEX (channel_id, name) + 写标志位 `n5_scenarios_unique_migrated`
+  - 调用顺序在 `ensureScenariosChannelIdColumn` 之后
+  - `scenarios-repository.js` 同时 catch `scenarios.name` 和 `scenarios.channel_id, scenarios.name` 两种错误模式
+  - 新增（如缺失）`findByChannelAndName(db, channelId, name)` API（N7 import 路径已预留依赖）
+- **验收**：
+  - 单元：R1（同 channel 同 name 抛错）+ R2（跨 channel 同 name 允许）+ R3（findByChannelAndName 隔离）全绿（spec §16.4）
+  - 老库迁移：v2.1.8 库（无 channel_id）→ N5 channel_id 加列 + backfill → UNIQUE migration → 标志位写入 → 重启幂等
+
+### T43 — C2/C3 双维 unit case 补 15+（SR1 #4 修复）
+
+- **Owner**：Dev agent
+- **依赖**：T41 + T42
+- **文件**：
+  - `tests/unit/main-process/scenario-dispatcher.test.js`（新增 15 case）
+  - `tests/unit/backend/database/scenarios-repository.test.js`（新增 3 case）
+- **动作**：spec §16.4 矩阵实现
+  - case 1-6：C3 阶段 A/B + 1v1 红线 + 跨阶段 gw 重消费边界
+  - case 7-10：C2 阶段 A/B + 笛卡尔配对 + reconFields=0 无条件赋值
+  - case 11-12：混合 first-match-wins 不变量
+  - case 13-15：scenarios.name 跨 channel + 全场景在通用 + 兜底 fallback metadata
+  - R1-R3：UNIQUE migration 行为
+- **验收**：
+  - 新增 ≥ 15 case + 3 case = 18 case 全绿
+  - 既有 case 0 regression
+  - dispatcher.test.js 总 case ≥ 50（v2.1.9 baseline 30+ + 新增 15+）
+
+### T44 — D16=b writer 同步实现 + 文档收口
+
+- **Owner**：Dev agent + 主线程
+- **依赖**：T41 + T43
+- **文件**：
+  - `src/main-process/scenario-hit-rows-writer.js`（确认 D16=b 落地 — 若 v0.4 实施已含则跳过）
+  - `docs/USER_GUIDE.md`（加「已知边界」段：跨 channel gw 重消费 + scenarios.name 跨渠道复用）
+  - `CHANGELOG.md`（v2.1.9 章节追加 SR-FIX-1 修复说明）
+  - `docs/prs/PR53-v2.1.9.md`（追加「SR-FIX-1 修复」段 — 19 finding 收口表）
+- **动作**：
+  - 主线程：复核 T41-T43 diff
+  - Dev agent：USER_GUIDE / CHANGELOG / PR body 更新
+  - 主线程：跑 `npm run smoke && npm run test:unit && npm run test:integration` 验证全绿
+  - 主线程：跑 `npm run check:vars` 确认无新增 Critical 命中
+- **验收**：
+  - 3 文档段落写完
+  - release-check（smoke + unit + integration）全绿
+  - check-vars 无新增 Critical 命中
+  - PR body 含 SR-FIX-1 修复段
+
+---
+
 ## 十二、依赖图
 
 ```
@@ -679,6 +755,8 @@ T01 (分支) ── T02 (scan:vars) ── T03 (grep updateStatusBox) ✅
 
 Phase 9 (集成测试 + 收尾)：T33 / T34 / T35 / T06g (G1 全绿) / T32a (policy 同步) / T32d (N1-settings smoke) / T32f (N4 重构回归) / T32k (SR-log-1 集成)
                        → T36 → T37 → T38
+
+Phase 10 (SR-FIX-1 合并前修补)：T38 (PR #53 已开) → T41 (dispatcher 重写) → T42 (UNIQUE migration) → T43 (unit case 18+) → T44 (writer + 文档收口) → 合并 PR #53
 ```
 
 ---
