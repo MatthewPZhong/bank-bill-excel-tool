@@ -727,6 +727,15 @@ class AppDatabase {
     return scenariosRepository.listAllByChannelId(this.db, channelId);
   }
 
+  // v2.1.9 SR-FIX-1 round 2 F2（spec §16.3.3）：按 (channel_id, name) 查场景
+  //   - N7 bundle import 路径同 channel 内查重依赖此 API（applyScenarioBundleImport 替换
+  //     原「全表 SELECT WHERE name = ?」逻辑 → 跨 channel 同名场景被错误跳过的 bug 修复）
+  //   - 返回完整 detail（含 config）便于 caller 决定 skip / overwrite
+  //   - 返 null 表示该 channel 内无同名场景（可安全插入）
+  findScenarioByChannelAndName(channelId, name) {
+    return scenariosRepository.findByChannelAndName(this.db, channelId, name);
+  }
+
   // v2.1.9 N5：channels CRUD（银行渠道）
   //   底层 schema 在 ensureChannelsTable 建表；「通用」内置渠道 id=1 不可删不可改名
   //   findByNameAndLocation 是 dispatcher hot path（每行调度都查渠道）

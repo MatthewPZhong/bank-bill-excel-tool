@@ -8717,12 +8717,22 @@
         try {
           let result;
           if (draft.mode === 'create') {
+            // v2.1.9 SR-FIX-1 round 2 F1（spec §16.3.2）：UI 新建场景必须附 channelId
+            //   不带 channelId → 后端 INSERT 不写 channel_id → 落 NULL → dispatcher
+            //   listByChannelIdAndCategory(WHERE channel_id = ?) 不匹配 NULL → 新建场景
+            //   在 dispatcher 永远不命中（v2.1.9 N5 核心功能完全失效）
+            //   state.activeScenarioChannelId 由场景管理弹框（createScenariosManagerDialog）维护
+            //   当前选中渠道 id；缺省兜底「通用」(id=1)，最小破坏面
+            const activeChannelId = Number(state.activeScenarioChannelId) > 0
+              ? Number(state.activeScenarioChannelId)
+              : 1;
             result = await desktopApi.scenarios.create({
               category: draft.category,
               name: String(draft.name || '').trim(),
               priority: Number(draft.priority),
               enabled: true,
-              config: draft.config
+              config: draft.config,
+              channelId: activeChannelId
             });
           } else if (draft.mode === 'edit') {
             result = await desktopApi.scenarios.update(draft.scenarioId, {

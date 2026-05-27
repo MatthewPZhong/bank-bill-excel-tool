@@ -264,13 +264,29 @@ function createScenario(db, payload) {
   const isBuiltin = payload.isBuiltin ? 1 : 0;
   const now = new Date().toISOString();
   const nextId = calculateNextScenarioId(db);
+  // v2.1.9 SR-FIX-1 round 2 F1（spec §16.3.2）：createScenario 现在接受 channelId 入参
+  //   原因：UI 新增场景 / IPC 透传时若不传 channelId，INSERT 不写 channel_id 列 → 落 NULL
+  //   → listByChannelIdAndCategory(WHERE channel_id = ?) 不匹配 NULL → 用户新建场景在 dispatcher
+  //      永远不命中（v2.1.9 N5 核心功能完全失效）
+  //   兜底：payload.channelId 非有限数字 → 落「通用」(id=1)，最小破坏面
+  //   兼容老 schema（无 channel_id 列）：fallback 到不含 channel_id 的 INSERT
+  const channelId = Number.isFinite(payload.channelId) ? Number(payload.channelId) : 1;
 
   try {
-    db.prepare(`
-        INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      .run(nextId, category, name, priority, enabled, configJson, isBuiltin, now, now);
+    if (hasChannelIdColumn(db)) {
+      db.prepare(`
+          INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at, channel_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(nextId, category, name, priority, enabled, configJson, isBuiltin, now, now, channelId);
+    } else {
+      // 老 schema（migrations 未跑 N5）：fallback 到不含 channel_id 列的 INSERT
+      db.prepare(`
+          INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(nextId, category, name, priority, enabled, configJson, isBuiltin, now, now);
+    }
     return { id: nextId };
   } catch (error) {
     // v2.1.9 SR-FIX-1 (spec §16.3)：兼容新旧两种 UNIQUE 错误消息
@@ -440,14 +456,14 @@ function transferScenarios(db, scenarioIds, targetChannelId) {
 //   校验：
 //     - scenarioIds 必须是非空数组
 //     - 所有 id 必须能转成有限正整数
-//     - 内置场景（is_builtin=1）阻止删除（DB 层保护，不依赖 UI；spec §10.1 资金红线）
-//   行为：事务包裹 DELETE FROM scenarios WHERE id IN (...) AND is_builtin = 0
+//   行为：事务包裹 DELETE FROM scenarios WHERE id IN (...)
 //   返回：{ deletedCount }
 //
-// 资金红线（spec §10.1 批量删除有数据丢失风险）：
-//   - is_builtin=1 保护必须在 DB 层（不依赖 UI 层禁用，防 DevTools 绕过）
-//   - 事务包裹：内置场景检测失败时整批回滚（不允许"已删一半再抛错"）
-//   - 内置场景命中即抛错（不静默跳过，让 UI 能反馈"操作未完成"）
+// v2.1.9 SR-FIX-1 round 2 F3（spec §16.3.4）：移除 is_builtin 检查
+//   原行为：拒绝删除 is_builtin=1 → 与单条 deleteScenario（允许）不一致
+//   USER_GUIDE 明确「内置场景可编辑、可禁用、可删除」→ 单条与批量统一
+//   修订后：is_builtin 保护交给单条 deleteScenario 同等语义（即不保护，与文档一致）
+//   事务包裹仍保留：批量 DELETE 任何异常都整批回滚
 function batchDelete(db, scenarioIds) {
   if (!Array.isArray(scenarioIds) || scenarioIds.length === 0) {
     throw new Error('batchDelete: scenarioIds 必须是非空数组');
@@ -463,17 +479,9 @@ function batchDelete(db, scenarioIds) {
   db.exec('BEGIN');
   try {
     const placeholders = numericIds.map(() => '?').join(',');
-    // 1. 内置场景检测（DB 层保护）
-    const builtinRows = db
-      .prepare(`SELECT id, name FROM scenarios WHERE id IN (${placeholders}) AND is_builtin = 1`)
-      .all(...numericIds);
-    if (builtinRows.length > 0) {
-      const names = builtinRows.map((r) => `"${r.name}"(id=${r.id})`).join(', ');
-      throw new Error(`内置场景不可删：${names}`);
-    }
-    // 2. 批量删除（is_builtin=0 双保险条件，与 builtin 检测互为兜底）
+    // 批量删除（不再做 is_builtin 检查，与 deleteScenario 单条行为对齐）
     const result = db
-      .prepare(`DELETE FROM scenarios WHERE id IN (${placeholders}) AND is_builtin = 0`)
+      .prepare(`DELETE FROM scenarios WHERE id IN (${placeholders})`)
       .run(...numericIds);
     const deletedCount = Number(result.changes);
     db.exec('COMMIT');

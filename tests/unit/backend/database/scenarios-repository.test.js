@@ -391,31 +391,27 @@ test.describe('batchDelete', () => {
     assert.strictEqual(scenariosRepo.getScenario(db, r3.id), null);
   });
 
-  test('内置场景（is_builtin=1）阻止删除：DB 层保护（不依赖 UI）', () => {
+  // v2.1.9 SR-FIX-1 round 2 F3（spec §16.3.4）：batchDelete 移除 is_builtin 检查
+  //   原行为：内置场景阻止删除（与单条 deleteScenario 不一致）
+  //   修订后：内置场景可删（与单条 deleteScenario 对齐 + USER_GUIDE 文档一致）
+  test('内置场景（is_builtin=1）可删：与单条 deleteScenario 行为对齐（F3 修订）', () => {
     const { id } = scenariosRepo.createScenario(db, makeC1Payload('builtin-s', 1));
     db.prepare('UPDATE scenarios SET is_builtin = 1 WHERE id = ?').run(id);
 
-    assert.throws(
-      () => scenariosRepo.batchDelete(db, [id]),
-      /内置场景不可删/
-    );
-    // 验证场景未删
-    const scenario = scenariosRepo.getScenario(db, id);
-    assert.ok(scenario, '内置场景应仍存在');
+    const result = scenariosRepo.batchDelete(db, [id]);
+    assert.strictEqual(result.deletedCount, 1, '内置场景被成功删除');
+    assert.strictEqual(scenariosRepo.getScenario(db, id), null, '内置场景已不存在');
   });
 
-  test('混合内置 + 非内置 → 整批回滚（事务保护）', () => {
+  test('混合内置 + 非内置 → 全部删除（F3 修订后行为）', () => {
     const r1 = scenariosRepo.createScenario(db, makeC1Payload('s1', 1));
     const r2 = scenariosRepo.createScenario(db, makeC1Payload('builtin-s', 2));
     db.prepare('UPDATE scenarios SET is_builtin = 1 WHERE id = ?').run(r2.id);
 
-    assert.throws(
-      () => scenariosRepo.batchDelete(db, [r1.id, r2.id]),
-      /内置场景不可删/
-    );
-    // 验证整批回滚：r1 也未删（关键：不能删一半再抛错）
-    assert.ok(scenariosRepo.getScenario(db, r1.id), '非内置场景因事务回滚仍在');
-    assert.ok(scenariosRepo.getScenario(db, r2.id), '内置场景仍在');
+    const result = scenariosRepo.batchDelete(db, [r1.id, r2.id]);
+    assert.strictEqual(result.deletedCount, 2, '内置 + 非内置 共 2 条全删');
+    assert.strictEqual(scenariosRepo.getScenario(db, r1.id), null);
+    assert.strictEqual(scenariosRepo.getScenario(db, r2.id), null);
   });
 
   test('空数组 → throw 不动 DB', () => {
@@ -439,6 +435,67 @@ test.describe('batchDelete', () => {
     // batchDelete 不做存在性校验（只做内置场景保护）→ 不存在的 id 静默忽略
     const result = scenariosRepo.batchDelete(db, [99999]);
     assert.strictEqual(result.deletedCount, 0);
+  });
+});
+
+// ========================================================================
+// v2.1.9 SR-FIX-1 round 2 F1（spec §16.3.2）— createScenario 接受 channelId 入参
+// ========================================================================
+// 背景：原 createScenario INSERT 不写 channel_id 列 → 落 NULL → dispatcher
+// listByChannelIdAndCategory(WHERE channel_id = ?) 不匹配 NULL → 用户新建场景在
+// dispatcher 永远不命中（v2.1.9 N5 核心功能完全失效）。
+//
+// F1 修订：createScenario(db, payload) 增加可选 payload.channelId 入参
+//   - 传 channelId=N → INSERT 落 channel_id=N
+//   - 不传 / 非有限数字 → 兜底落 channel_id=1（通用），最小破坏面
+test.describe('F1 — createScenario 接受 channelId 入参（spec §16.3.2）', () => {
+  test('传 channelId=icbc_sh.id → INSERT 落 channel_id=icbc_sh.id', () => {
+    const { id } = scenariosRepo.createScenario(db, Object.assign(
+      makeC1Payload('s-with-channel', 1),
+      { channelId: channels.icbc_sh.id }
+    ));
+    const row = db.prepare('SELECT channel_id FROM scenarios WHERE id = ?').get(id);
+    assert.strictEqual(row.channel_id, channels.icbc_sh.id, '落对应 channel_id');
+    // 验证 dispatcher hot path 能匹配
+    const list = scenariosRepo.listByChannelIdAndCategory(db, channels.icbc_sh.id, 'extract-recon-id');
+    assert.strictEqual(list.length, 1, 'listByChannelIdAndCategory 能查到');
+    assert.strictEqual(list[0].id, id);
+  });
+
+  test('不传 channelId → 兜底落 channel_id=1（通用）', () => {
+    const { id } = scenariosRepo.createScenario(db, makeC1Payload('s-no-channel', 1));
+    const row = db.prepare('SELECT channel_id FROM scenarios WHERE id = ?').get(id);
+    assert.strictEqual(row.channel_id, 1, '缺省兜底通用 id=1');
+  });
+
+  test('channelId 非有限数字（string）→ 兜底落 channel_id=1', () => {
+    const { id } = scenariosRepo.createScenario(db, Object.assign(
+      makeC1Payload('s-invalid-channel', 1),
+      { channelId: 'invalid' }
+    ));
+    const row = db.prepare('SELECT channel_id FROM scenarios WHERE id = ?').get(id);
+    assert.strictEqual(row.channel_id, 1, 'string channelId 兜底通用');
+  });
+
+  test('channelId=NaN → 兜底落 channel_id=1', () => {
+    const { id } = scenariosRepo.createScenario(db, Object.assign(
+      makeC1Payload('s-nan-channel', 1),
+      { channelId: NaN }
+    ));
+    const row = db.prepare('SELECT channel_id FROM scenarios WHERE id = ?').get(id);
+    assert.strictEqual(row.channel_id, 1, 'NaN channelId 兜底通用');
+  });
+
+  test('channelId=cmb_bj.id 跨 channel 创建 → list 查通用应返空', () => {
+    scenariosRepo.createScenario(db, Object.assign(
+      makeC1Payload('s-cmb-only', 1),
+      { channelId: channels.cmb_bj.id }
+    ));
+    const generalList = scenariosRepo.listByChannelIdAndCategory(db, 1, 'extract-recon-id');
+    // 通用只有 setupDb seed 的 builtin 场景（无新建的 s-cmb-only）
+    assert.ok(!generalList.some((s) => s.name === 's-cmb-only'), '通用渠道不应见到 cmb_bj 专属场景');
+    const cmbList = scenariosRepo.listByChannelIdAndCategory(db, channels.cmb_bj.id, 'extract-recon-id');
+    assert.ok(cmbList.some((s) => s.name === 's-cmb-only'), 'cmb_bj 渠道应能查到');
   });
 });
 

@@ -192,14 +192,16 @@ test.describe('scenarios:batch-delete handler', () => {
     assert.strictEqual(result.deletedCount, 3);
   });
 
-  test('内置场景（is_builtin=1）阻止删除 → status=failed', () => {
+  // v2.1.9 SR-FIX-1 round 2 F3（spec §16.3.4）：batchDelete 移除 is_builtin 检查
+  //   原行为：内置场景阻止删除（与单条 deleteScenario 不一致）
+  //   修订后：内置场景可删（与单条 deleteScenario 对齐 + USER_GUIDE 文档一致）
+  test('内置场景（is_builtin=1）可删 → status=ok（F3 修订）', () => {
     const s = createScenarioFixture('builtin-s', channels.icbc_sh.id);
     database.db.prepare('UPDATE scenarios SET is_builtin = 1 WHERE id = ?').run(s.id);
     const result = handlerScenariosBatchDelete(database, { scenarioIds: [s.id] });
-    assert.strictEqual(result.status, 'failed');
-    assert.match(result.message, /内置场景不可删/);
-    // 验证未删
-    assert.ok(database.getScenario(s.id));
+    assert.strictEqual(result.status, 'ok');
+    assert.strictEqual(result.deletedCount, 1);
+    assert.strictEqual(database.getScenario(s.id), null, '内置场景已被删除');
   });
 
   test('payload 为 null → status=failed', () => {
@@ -220,7 +222,7 @@ test.describe('scenarios:batch-delete handler', () => {
     assert.strictEqual(result.deletedCount, 0);
   });
 
-  test('混合内置 + 非内置 → 整批回滚（status=failed）', () => {
+  test('混合内置 + 非内置 → 全部删除 (F3 修订后行为)', () => {
     const s1 = createScenarioFixture('s1', channels.icbc_sh.id);
     const s2 = createScenarioFixture('builtin-s', channels.icbc_sh.id);
     database.db.prepare('UPDATE scenarios SET is_builtin = 1 WHERE id = ?').run(s2.id);
@@ -228,10 +230,9 @@ test.describe('scenarios:batch-delete handler', () => {
     const result = handlerScenariosBatchDelete(database, {
       scenarioIds: [s1.id, s2.id]
     });
-    assert.strictEqual(result.status, 'failed');
-    assert.match(result.message, /内置场景不可删/);
-    // 关键：s1 也未删（事务保护）
-    assert.ok(database.getScenario(s1.id), '事务回滚后 s1 未删');
-    assert.ok(database.getScenario(s2.id));
+    assert.strictEqual(result.status, 'ok');
+    assert.strictEqual(result.deletedCount, 2);
+    assert.strictEqual(database.getScenario(s1.id), null, '非内置场景被删除');
+    assert.strictEqual(database.getScenario(s2.id), null, '内置场景也被删除');
   });
 });

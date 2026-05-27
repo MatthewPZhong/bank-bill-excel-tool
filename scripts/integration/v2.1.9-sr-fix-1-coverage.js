@@ -395,60 +395,56 @@ async function run() {
         extractByOtherField: { field: 'BizOrderId' },
       };
 
-      // 1.1 第一次 createScenario + transferScenarios 到通用 (id=1)
+      // v2.1.9 SR-FIX-1 round 2 F1：createScenario 现在接受 channelId 入参 → 直接落 channel_id
+      //   不再需要 transferScenarios 二次 UPDATE 补 channel_id
+
+      // 1.1 第一次 createScenario 落通用 (id=1)
       const createRes1 = scenariosRepo.createScenario(db, {
         category: 'extract-recon-id',
         name: '对账场景',
         priority: 1,
         enabled: true,
         config: scenarioConfig,
+        channelId: 1,
       });
       assertTrue(createRes1 && createRes1.id > 0, 'CaseC.1.1 第一次 createScenario 落库');
-      scenariosRepo.transferScenarios(db, [createRes1.id], 1);  // 显式 transfer 到「通用」
       const inserted1 = db.prepare('SELECT channel_id, name FROM scenarios WHERE id=?').get(createRes1.id);
-      assertEq(inserted1.channel_id, 1, 'CaseC.1.1 transfer 后 channel_id=1（通用）');
-      assertEq(inserted1.name, '对账场景', 'CaseC.1.1 transfer 后 name 保留');
+      assertEq(inserted1.channel_id, 1, 'CaseC.1.1 直接落 channel_id=1（通用）');
+      assertEq(inserted1.name, '对账场景', 'CaseC.1.1 name 保留');
 
-      // 1.2 第二次 createScenario 同 name + 同 transfer 通用 → UNIQUE 冲突 → friendly error（spec §16.3 R1）
-      //   生产 N7 import 路径：createScenario 抛错前先尝试 createScenario，由 transferScenarios 触发 UNIQUE
-      //   或在 createScenario 阶段就触发（视 NULL → 不抛；但 transfer 到同 channel 同 name 时触发）
-      //   - createScenario(name='对账场景') 成功（NULL 不参与 UNIQUE）
-      //   - transferScenarios(目标=1) 触发同 channel 同名冲突 → repo 内 catch 改写为 friendly
-      const tempRes = scenariosRepo.createScenario(db, {
-        category: 'extract-recon-id',
-        name: '对账场景',
-        priority: 1,
-        enabled: true,
-        config: scenarioConfig,
-      });
-      // 此时 tempRes.id 在库内但 channel_id=NULL（未 transfer）
-      // transfer 到通用 (1) 会触发同 (channel_id=1, name='对账场景') UNIQUE 冲突
-      // v0.10 reverse sync（spec §16.3.1）：transferScenarios catch 升级抛 friendly error
-      //   与 createScenario / updateScenario UX 一致
+      // 1.2 第二次 createScenario 同 channel 同 name → 直接 friendly error（F1 后行为）
+      //   原（F1 前）：createScenario 不写 channel_id → 落 NULL → 不撞 UNIQUE → transferScenarios 才触发
+      //   F1 后：createScenario 接 channelId 入参 → 直接落 (channel_id=1, name='对账场景') → 撞 UNIQUE
+      //          → scenarios-repository 内 catch 改写为 friendly error
       assertThrows(
-        () => scenariosRepo.transferScenarios(db, [tempRes.id], 1),
-        'CaseC.1.2 同 channel 同名 transferScenarios 抛 friendly error',
-        /目标渠道已有同名场景/
+        () => scenariosRepo.createScenario(db, {
+          category: 'extract-recon-id',
+          name: '对账场景',
+          priority: 1,
+          enabled: true,
+          config: scenarioConfig,
+          channelId: 1,
+        }),
+        'CaseC.1.2 同 channel 同名 createScenario 直接抛 friendly error（F1 修订）',
+        /在该渠道下已存在/
       );
-      // 清理 tempRes（事务回滚后 channel_id 仍 NULL，主动删除避免污染后续断言）
-      db.prepare('DELETE FROM scenarios WHERE id=?').run(tempRes.id);
 
       // 1.3 建工商-上海渠道
       const gsChan = channelsRepo.createChannel(db, { name: '工商', ownerLocation: '上海' });
       assertTrue(gsChan && gsChan.id > 1, `CaseC.1.3 工商-上海 建立 (id=${gsChan.id})`);
 
-      // 1.4 模拟 N7 import 路径：createScenario + transferScenarios 到工商-上海
-      //     成功条件：复合 UNIQUE (channel_id, name) 允许跨 channel 同名
+      // 1.4 跨 channel 同名场景 — F1 后直接 createScenario(channelId=gsChan.id) 即可
+      //     spec §6.3.2 + D39：复合 UNIQUE (channel_id, name) 允许跨渠道同名
       const createRes2 = scenariosRepo.createScenario(db, {
         category: 'extract-recon-id',
         name: '对账场景',
         priority: 1,
         enabled: true,
         config: scenarioConfig,
+        channelId: gsChan.id,
       });
-      scenariosRepo.transferScenarios(db, [createRes2.id], gsChan.id);
       const inserted2 = db.prepare('SELECT channel_id, name FROM scenarios WHERE id=?').get(createRes2.id);
-      assertEq(inserted2.channel_id, gsChan.id, 'CaseC.1.4 transfer 到工商-上海 channel_id 正确');
+      assertEq(inserted2.channel_id, gsChan.id, 'CaseC.1.4 createScenario(channelId=gsChan.id) 直接落对应 channel');
       assertEq(inserted2.name, '对账场景', 'CaseC.1.4 跨 channel 同名 落库 name 保留');
 
       // 1.5 验证 listScenarios 返 2 条同名场景，channelId 不同
@@ -677,6 +673,194 @@ async function run() {
       // 行 C 回退到 _hitChannelKey='通用'
       assertEq(sheet2.getRow(4).getCell(lastBase + 1).value, '通用',
         'CaseD.compat 行C 匹配渠道=_hitChannelKey 回退（通用）');
+    } finally {
+      try { fs.rmSync(tmpdir, { recursive: true, force: true }); } catch (_) {}
+    }
+  }
+
+  // ============================================================
+  // Case E — F1 端到端（spec §16.3.2）：createScenario(channelId) → dispatcher 命中
+  //   spec §16.3.2 P1：原 createScenario 不写 channel_id → 落 NULL →
+  //   listByChannelIdAndCategory(WHERE channel_id=?) 不匹配 NULL → 新建场景
+  //   在 dispatcher 永远不命中（v2.1.9 N5 核心功能完全失效）
+  //
+  //   测试覆盖：
+  //     E.1 createScenario(channelId=工商-上海.id) → listByChannelIdAndCategory 返 1 条
+  //         + runAllScenarios 调度命中工商-上海 行（_hitChannelId=工商-上海 id）
+  //     E.2 createScenario(不传 channelId)（兜底通用 id=1）→ 行未 matched 任何 channel
+  //         走兜底路径命中通用场景（验证 F1 兜底链路 - 不破坏未 matched 兜底）
+  // ============================================================
+  {
+    const tmpdir = setupTmpDir('sr-fix-1-caseE-');
+    const dbPath = path.join(tmpdir, 'tool-data.sqlite');
+    const backupDir = path.join(tmpdir, 'backups');
+    try {
+      const db = new DatabaseSync(dbPath);
+      db.exec('PRAGMA foreign_keys = ON;');
+      bootstrapV218Schema(db);
+      // 跑双 migration：N5 + UNIQUE
+      migrations.ensureSchemaV2_1_9_N5(db, (label) => createBackup(db, label, backupDir));
+      migrations.ensureScenariosNameUniqueByChannelId(db, (label) => createBackup(db, label, backupDir));
+
+      // E.1：建工商-上海渠道 → createScenario(channelId=gsChan.id) → 验证 list + dispatcher 命中
+      const gsChan = channelsRepo.createChannel(db, { name: '工商', ownerLocation: '上海' });
+      assertTrue(gsChan && gsChan.id > 1, `CaseE.1.0 工商-上海建立 (id=${gsChan.id})`);
+
+      // F1 修订：createScenario 直接接受 channelId 入参（不再需要 transferScenarios 二次 UPDATE）
+      //   插一个 C1 (extract-recon-id) 场景，仅工商-上海 enabled
+      const c1Res = scenariosRepo.createScenario(db, {
+        category: 'extract-recon-id',
+        name: 'GS-SH-C1-extract',
+        priority: 2,
+        enabled: true,
+        config: {
+          conditionsLogic: 'AND',
+          conditions: [{ field: 'CustomerRef', op: '包含', value: 'AFT' }],
+          extractByOtherField: { field: 'CustomerRef' },
+        },
+        channelId: gsChan.id,  // ★ F1 核心：直接传 channelId
+      });
+      assertTrue(c1Res && c1Res.id > 0, 'CaseE.1.1 createScenario(channelId=gsChan.id) 返 id');
+
+      // 直查 DB 验证 channel_id 落对
+      const dbRow = db.prepare('SELECT channel_id, name FROM scenarios WHERE id=?').get(c1Res.id);
+      assertEq(dbRow.channel_id, gsChan.id, 'CaseE.1.2 DB row channel_id=gsChan.id（不是 NULL）');
+
+      // listByChannelIdAndCategory(gsChan.id, 'extract-recon-id') 应返 1 条（F1 修复前为 0）
+      const listByGs = scenariosRepo.listByChannelIdAndCategory(db, gsChan.id, 'extract-recon-id');
+      const matchGs = listByGs.filter((s) => s.id === c1Res.id);
+      assertEq(matchGs.length, 1, 'CaseE.1.3 listByChannelIdAndCategory(gsChan.id) 返本场景 1 条');
+
+      // 跑 dispatcher：bankRow Channel=工商, 地区=上海 → 匹配工商-上海 → 阶段 A 命中 C1
+      const bankRow = buildBankRow('R1', {
+        Channel: '工商', 地区: '上海', MerchantId: 'M001', Currency: 'CNY', CustomerRef: 'AFT123456789',
+      });
+      const scenariosForDispatch = loadEnabledScenariosWithChannel(db);
+      const dispatchResult = runAllScenarios([bankRow], null, scenariosForDispatch, { channelsRepo, db });
+
+      // 至少有 1 行命中（含本次新建 C1）
+      assertTrue(dispatchResult.modifiedRows.length >= 1,
+        `CaseE.1.4 dispatcher modifiedRows >= 1 (实际=${dispatchResult.modifiedRows.length})`);
+      const hitC1Row = dispatchResult.modifiedRows.find((r) => r._hitScenarioId === c1Res.id);
+      assertTrue(!!hitC1Row, `CaseE.1.4 找到 _hitScenarioId=${c1Res.id} 的行 — 证明本场景被 dispatcher 调度`);
+      if (hitC1Row) {
+        assertEq(hitC1Row._hitChannelId, gsChan.id, 'CaseE.1.5 _hitChannelId=gsChan.id（专属命中 - 非通用兜底）');
+        assertEq(hitC1Row._matchStatus, '命中', 'CaseE.1.5 _matchStatus=命中（非兜底）');
+      }
+
+      // E.2：createScenario 不传 channelId → 兜底通用（id=1）→ 行未 matched 渠道时走 fallback 命中
+      const c1GeneralRes = scenariosRepo.createScenario(db, {
+        category: 'extract-recon-id',
+        name: 'GENERAL-C1-fallback',
+        priority: 1,
+        enabled: true,
+        config: {
+          conditionsLogic: 'AND',
+          conditions: [{ field: 'CustomerRef', op: '包含', value: 'GENFB' }],
+          extractByOtherField: { field: 'CustomerRef' },
+        },
+        // 不传 channelId → F1 兜底落 channel_id=1（通用）
+      });
+      const dbRowGeneral = db.prepare('SELECT channel_id FROM scenarios WHERE id=?').get(c1GeneralRes.id);
+      assertEq(dbRowGeneral.channel_id, 1, 'CaseE.2.1 不传 channelId → 兜底落 channel_id=1（通用）');
+
+      // 构造未 matched 渠道的 bank 行（招商-广州 不在 channels 表）
+      const bankRowGeneral = buildBankRow('R2', {
+        Channel: '招商', 地区: '广州', MerchantId: 'M999', Currency: 'USD', CustomerRef: 'GENFB-001',
+      });
+      const dispatchResultGeneral = runAllScenarios([bankRowGeneral], null, loadEnabledScenariosWithChannel(db), { channelsRepo, db });
+      const hitGeneralRow = dispatchResultGeneral.modifiedRows.find((r) => r._hitScenarioId === c1GeneralRes.id);
+      assertTrue(!!hitGeneralRow, 'CaseE.2.2 未 matched channel 行通过通用兜底命中 (F1 兜底链路验证)');
+      if (hitGeneralRow) {
+        assertEq(hitGeneralRow._matchStatus, '兜底', 'CaseE.2.3 _matchStatus=兜底（未 matched → 走 fallback）');
+        assertEq(hitGeneralRow._hitChannelId, 1, 'CaseE.2.3 _hitChannelId=1（通用命中）');
+      }
+
+      try { db.close(); } catch (_) {}
+    } finally {
+      try { fs.rmSync(tmpdir, { recursive: true, force: true }); } catch (_) {}
+    }
+  }
+
+  // ============================================================
+  // Case F — F2 端到端（spec §16.3.3）：findByChannelAndName + applyScenarioBundleImport
+  //   验证：N7 bundle import 路径同 channel 查重（非全表查重）允许跨渠道同名
+  //   applyScenarioBundleImport 是 main.js 局部函数（未 module.exports），无法直接调；
+  //   本测试通过 database.findScenarioByChannelAndName 直查（main.js 同源 API）+ 模拟
+  //   import 循环验证查重逻辑（即 F2 修订核心 — 替换 SELECT WHERE name = ? 为
+  //   findScenarioByChannelAndName）。
+  // ============================================================
+  {
+    const tmpdir = setupTmpDir('sr-fix-1-caseF-');
+    const dbPath = path.join(tmpdir, 'tool-data.sqlite');
+    const backupDir = path.join(tmpdir, 'backups');
+    try {
+      const db = new DatabaseSync(dbPath);
+      db.exec('PRAGMA foreign_keys = ON;');
+      bootstrapV218Schema(db);
+      migrations.ensureSchemaV2_1_9_N5(db, (label) => createBackup(db, label, backupDir));
+      migrations.ensureScenariosNameUniqueByChannelId(db, (label) => createBackup(db, label, backupDir));
+
+      // 前置：通用渠道已有「对账场景」
+      const sGeneral = scenariosRepo.createScenario(db, {
+        category: 'extract-recon-id',
+        name: '对账场景',
+        priority: 1,
+        enabled: true,
+        config: { conditions: [{ field: 'X', op: '等于', value: 'A' }], extractByOtherField: { field: 'X' } },
+        channelId: 1,
+      });
+      assertTrue(sGeneral && sGeneral.id > 0, 'CaseF.1.1 通用渠道「对账场景」创建成功');
+
+      // 建工商-上海渠道
+      const gsChan = channelsRepo.createChannel(db, { name: '工商', ownerLocation: '上海' });
+
+      // F2 核心：findByChannelAndName(gsChan.id, '对账场景') 应返 null（工商-上海下没有同名）
+      //         原 bug：SELECT WHERE name = ? 全表查 → 错返通用的「对账场景」 → 错跳过导入
+      const existingInGs = scenariosRepo.findByChannelAndName(db, gsChan.id, '对账场景');
+      assertEq(existingInGs, null,
+        'CaseF.2.1 工商-上海 渠道无「对账场景」→ findByChannelAndName 返 null（F2 修订：不再被全表查重错跳过）');
+
+      // 反证：通用渠道下查「对账场景」应返 1 条
+      const existingInGeneral = scenariosRepo.findByChannelAndName(db, 1, '对账场景');
+      assertTrue(existingInGeneral && existingInGeneral.id === sGeneral.id,
+        'CaseF.2.2 通用渠道查「对账场景」返 sGeneral');
+
+      // 模拟 N7 import 循环（main.js applyScenarioBundleImport F2 修订后路径）：
+      //   bundle 含 channels=[{ name: 工商, ownerLocation: 上海, scenarios: [{ name: 对账场景 }] }]
+      //   apply：findByChannelAndName(gsChan.id, '对账场景') → null（不冲突）→ createScenario 落 channel_id=gsChan.id
+      const importSuccess = (() => {
+        const found = scenariosRepo.findByChannelAndName(db, gsChan.id, '对账场景');
+        if (found) return { status: 'conflict' };  // F2 修订前 bug：返通用的，错认为冲突
+        const created = scenariosRepo.createScenario(db, {
+          category: 'extract-recon-id',
+          name: '对账场景',
+          priority: 1,
+          enabled: true,
+          config: { conditions: [{ field: 'X', op: '等于', value: 'B' }], extractByOtherField: { field: 'X' } },
+          channelId: gsChan.id,
+        });
+        return { status: 'imported', id: created.id };
+      })();
+      assertEq(importSuccess.status, 'imported',
+        'CaseF.2.3 跨渠道同名场景成功导入（F2 修订前会被全表查重错跳过）');
+
+      // 验证：库内现在有 2 条「对账场景」（通用 1 条 + 工商-上海 1 条）
+      const all = db.prepare('SELECT id, channel_id, name FROM scenarios WHERE name=?').all('对账场景');
+      assertEq(all.length, 2, 'CaseF.2.4 库内有 2 条「对账场景」（跨渠道同名）');
+      const channelIds = all.map((r) => r.channel_id).sort();
+      assertEq(channelIds, [1, gsChan.id].sort(), 'CaseF.2.4 两条分别在通用 + 工商-上海');
+
+      // 反证：再 import 一次工商-上海的「对账场景」→ findByChannelAndName 返非 null → 应 skip
+      const importSkipped = (() => {
+        const found = scenariosRepo.findByChannelAndName(db, gsChan.id, '对账场景');
+        if (found) return { status: 'conflict' };
+        return { status: 'imported' };
+      })();
+      assertEq(importSkipped.status, 'conflict',
+        'CaseF.2.5 二次 import 同 channel 同名 → findByChannelAndName 返已存在 → 应 skip（F2 channel 内查重正确）');
+
+      try { db.close(); } catch (_) {}
     } finally {
       try { fs.rmSync(tmpdir, { recursive: true, force: true }); } catch (_) {}
     }

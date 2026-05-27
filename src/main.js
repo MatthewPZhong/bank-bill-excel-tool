@@ -413,15 +413,16 @@ function applyScenarioBundleImport(bundle, options = {}) {
         }
       }
 
-      // 同 channel 内 scenario name 唯一性检测（v2.1.9 N7 D12=a 同名跳过）
-      // 注意：scenarios.name 是全表 UNIQUE，不仅是 channel 内（schema 现状）
-      // → 同名场景在任何 channel 下都会冲突 — 这里查 channel 内是否已有，再 fallback 查全表
+      // v2.1.9 SR-FIX-1 round 2 F2（spec §16.3.3）：复合 UNIQUE (channel_id, name) 落地后
+      //   改用 channel 内查重（findByChannelAndName）→ 跨渠道同名场景可正常导入
+      //   原行为：「全表 SELECT WHERE name = ?」会让跨 channel 同名也匹配 → 错误跳过
+      //   D39 + spec §6.3.2 明确允许跨渠道同名 → 本修订修复 N7 跨渠道 bundle 互通失效 bug
       for (const bundleScenario of bundleChannel.scenarios) {
-        // 全表查同名场景
-        const existingRow = db
-          .prepare('SELECT id, channel_id FROM scenarios WHERE name = ?')
-          .get(bundleScenario.name);
-        if (existingRow) {
+        const existingInChannel = database.findScenarioByChannelAndName(
+          targetChannel.id,
+          bundleScenario.name
+        );
+        if (existingInChannel) {
           conflicts.push({
             channel: channelLabel,
             scenario: bundleScenario.name,
@@ -442,7 +443,9 @@ function applyScenarioBundleImport(bundle, options = {}) {
           enabled: bundleScenario.enabled === 1,
           config: configValue
         });
-        // 落 channel_id 到目标渠道（createScenario 不支持 channel_id 参数 → 单独 UPDATE）
+        // v2.1.9 SR-FIX-1 round 2 F2 注：createScenario 现已支持 channelId 入参（F1 修复），
+        // 保留 UPDATE 作为最小破坏面（避免 round 2 同时改两处导致集成路径回归风险）。
+        // 后续 v2.1.10 可优化为 createScenario({ ..., channelId: targetChannel.id }) + 删除 UPDATE。
         db.prepare('UPDATE scenarios SET channel_id = ? WHERE id = ?')
           .run(targetChannel.id, createResult.id);
         importedCount += 1;
