@@ -2,6 +2,8 @@ const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { normalizeText } = require('./utils');
+// v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
+const { appendModuleLog } = require('../logger');
 
 function hasColumn(db, tableName, columnName) {
   const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
@@ -795,7 +797,9 @@ function ensureC3GwFieldCurrencyCaseFix(db) {
 //
 // 流程：
 //   1. 幂等检查 app_settings.acquiring_bill_raw_json_v2_migrated = 'true' → 跳过
-//   2. 备份 DB：PRAGMA wal_checkpoint(TRUNCATE) 强制 WAL 写回 → fs.copyFileSync 到 <dbDir>/backups/tool-data-bak-pre-N4-<ts>.sqlite
+//   2. 备份 DB：v2.1.9 N4 重构 (T32e, D22=a) 切换到 createBackupFn (SR-backup-1 sqlite VACUUM INTO)
+//      旧实现：PRAGMA wal_checkpoint(TRUNCATE) + fs.copyFileSync 到 <dbDir>/backups/tool-data-bak-pre-N4-<ts>.sqlite
+//      新实现：createBackupFn('pre-N4') → 内部 VACUUM INTO + atomic rename；备份路径仍是 <dbDir>/backups/tool-data-bak-pre-N4-{timestamp}.sqlite（行为不变）
 //   3. 事务包裹：分批扫 bill_imports → JSON.parse → 只保留 TEMPLATE_BILL_HEADERS 9 字段 → JSON.stringify → UPDATE raw_json
 //   4. 成功后写 marker = 'true'；失败回滚事务 + activityLog（caller 端 console.error）+ marker 不写 → 下次启动重试
 //   5. 大数据量分批（每批 5000 + COMMIT 让 event loop 喘气）
@@ -807,7 +811,7 @@ function ensureC3GwFieldCurrencyCaseFix(db) {
 //   必须仅改 columns.js 一处，migration 自动跟随；不可在此处独立维护副本
 const { TEMPLATE_BILL_HEADERS } = require('../acquiring-bill-currency-db/columns');
 const BILL_RAW_JSON_V2_MIGRATED_KEY = 'acquiring_bill_raw_json_v2_migrated';
-function ensureBillRawJsonV2Slim(db, dbPath) {
+function ensureBillRawJsonV2Slim(db, dbPath, createBackupFn) {
   // 1. 幂等检查
   let markerRow;
   try {
@@ -829,36 +833,26 @@ function ensureBillRawJsonV2Slim(db, dbPath) {
   }
 
   // 2. 备份 DB（不论 billCount > 0 与否，首次都备份一份；后续幂等跳过）
-  //   self-review SR2 强化：
-  //     (a) wal_checkpoint(TRUNCATE) 改 prepare/get 拿返回值 { busy, log, checkpointed }
-  //         若 busy=1（仍有 reader）→ 备份的 sqlite 文件可能不含 WAL 最新数据 → abort
-  //     (b) 时间戳从 ISO with T/.分号 改紧凑格式 YYYYMMDDThhmmss（与项目其他时间戳一致）
+  //   v2.1.9 N4 重构 (T32e, D22=a)：切换到 createBackupFn（SR-backup-1 VACUUM INTO 体系）
+  //     - VACUUM INTO 原子写 + WAL 一致 + 备份过程库可读
+  //     - 备份路径仍是 <dbDir>/backups/tool-data-bak-pre-N4-{timestamp}.sqlite（行为不变 — v2.1.8 已发用户机器路径契约保护）
+  //     - 注入函数解耦 migrations.js 与 backup.js → 单元测试可注入 mock
+  //   兼容性：createBackupFn 缺失（无 dbPath 或老调用方）→ 跳过备份阶段（既有行为不变）
   let backupPath = null;
-  if (dbPath) {
+  if (dbPath && typeof createBackupFn === 'function') {
     try {
-      // 强制 WAL 写回主 DB（避免 copy 时 WAL 含未 checkpoint 的数据）
-      // SR2 修订：检查 busy；启动期单线程理论安全，但作为资金红线最后防线显式断言
-      let checkpoint;
-      try {
-        checkpoint = db.prepare('PRAGMA wal_checkpoint(TRUNCATE);').get();
-      } catch (_e) {
-        // 非 WAL 模式（journal_mode=DELETE 等）会返回 undefined 或抛错；视为 OK
-        checkpoint = null;
-      }
-      if (checkpoint && Number(checkpoint.busy) > 0) {
-        console.error('[migration N4] WAL checkpoint busy (有 reader 未释放)，备份不可靠 → abort，下次启动重试:', checkpoint);
-        return { status: 'backup-failed', error: 'wal_checkpoint busy' };
-      }
-      const backupDir = path.join(path.dirname(dbPath), 'backups');
-      fs.mkdirSync(backupDir, { recursive: true });
-      // 紧凑时间戳 YYYYMMDDThhmmss（项目其他时间戳同格式）
-      const ts = new Date().toISOString().replace(/[-:.]/g, '').replace(/\.\d+Z?$/, '').slice(0, 15);
-      backupPath = path.join(backupDir, `tool-data-bak-pre-N4-${ts}.sqlite`);
-      fs.copyFileSync(dbPath, backupPath);
+      backupPath = createBackupFn('pre-N4');
     } catch (backupErr) {
       // 备份失败 → 不启动 migration（数据完整性优先）；下次启动重试
-      // eslint-disable-next-line no-console
-      console.error('[migration N4] DB backup failed, aborting raw_json slim migration:', backupErr && backupErr.message);
+      // v2.1.9 SR-log-1：替换 console.error → 日志上报
+      appendModuleLog({
+        level: 'error',
+        source: 'main',
+        domain: 'migration',
+        message: '[migration N4] DB backup failed, aborting raw_json slim migration',
+        details: [backupErr && backupErr.message ? backupErr.message : String(backupErr)],
+        stack: backupErr && backupErr.stack ? backupErr.stack : undefined
+      });
       return { status: 'backup-failed', error: backupErr.message };
     }
   }
@@ -909,8 +903,15 @@ function ensureBillRawJsonV2Slim(db, dbPath) {
       totalRewritten += batchUpdated;
     } catch (batchErr) {
       try { db.exec('ROLLBACK'); } catch (_e) { /* swallow */ }
-      // eslint-disable-next-line no-console
-      console.error('[migration N4] batch rewrite failed, marker NOT written, will retry next launch:', batchErr && batchErr.message);
+      // v2.1.9 SR-log-1：替换 console.error → 日志上报
+      appendModuleLog({
+        level: 'error',
+        source: 'main',
+        domain: 'migration',
+        message: '[migration N4] batch rewrite failed, marker NOT written, will retry next launch',
+        details: [batchErr && batchErr.message ? batchErr.message : String(batchErr)],
+        stack: batchErr && batchErr.stack ? batchErr.stack : undefined
+      });
       return { status: 'batch-failed', error: batchErr.message, totalRewritten, backupPath };
     }
     if (rows.length < BATCH) break;
@@ -936,6 +937,123 @@ function ensureBillRawJsonV2Slim(db, dbPath) {
 function ensureAcquiringBillCurrencyRunsCleanupPending(db) {
   if (hasColumn(db, 'acquiring_bill_currency_runs', 'cleanup_pending')) return;
   db.exec(`ALTER TABLE acquiring_bill_currency_runs ADD COLUMN cleanup_pending INTEGER DEFAULT 0`);
+}
+
+// v2.1.9 N1-settings (T32b)：把硬编码 30min idle cleanup 阈值改为 settings 化
+//   spec.md §13.2 / tasks.md T32b / 资金红线缓解：阈值过小会过于频繁清理；过大会让 cleanup 永不触发
+//   范围 5-180 分钟前端 + 后端双校验（main.js IPC handler + renderer-dialogs.js input 属性）
+//   默认 30（与 v2.1.8 N1' 硬编码值一致 → 升级不改行为）
+//   幂等：INSERT OR IGNORE 不覆盖用户已设值
+const ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY = 'acquiring_bill_idle_cleanup_minutes';
+const ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT = '30';
+function ensureAcquiringBillIdleCleanupMinutesSetting(db) {
+  // app_settings 表理论上由 ensureScenariosSupport 之前就建好（既有 settings 调用方都依赖）
+  // 防御性检查：若表不存在则跳过，等下次启动 schema 完整后再 seed
+  try {
+    db.prepare('SELECT 1 FROM app_settings LIMIT 1').get();
+  } catch (_e) {
+    return { status: 'skipped-no-table' };
+  }
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT OR IGNORE INTO app_settings (setting_key, setting_value, updated_at)
+    VALUES (?, ?, ?)
+  `).run(
+    ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY,
+    ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT,
+    now
+  );
+  return { status: 'seeded', key: ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY };
+}
+
+// v2.1.9 N5：channels 表 + 「通用」内置渠道（id=1）
+// 幂等：CREATE TABLE IF NOT EXISTS + INSERT OR IGNORE
+// is_builtin=1 系统内置渠道，不可删不可改名（D1=a 拍板；保护在 channels-repository + UI 层）
+function ensureChannelsTable(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS channels (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      owner_location TEXT NOT NULL,
+      is_builtin INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0, 1)),
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (name, owner_location)
+    );
+  `);
+  // 启动期幂等插入「通用」内置渠道（保留 id=1 给通用，方便 dispatcher 兜底查询）
+  db.exec(`
+    INSERT OR IGNORE INTO channels (id, name, owner_location, is_builtin, sort_order, created_at)
+    VALUES (1, '通用', '通用', 1, 0, CURRENT_TIMESTAMP);
+  `);
+}
+
+// v2.1.9 N5：scenarios 表加 channel_id 列 + backfill 「通用」（id=1）
+// 幂等：pragma_table_info 检测 channel_id 已存在则 no-op
+// FK：ON UPDATE CASCADE（避免渠道改名级联问题；不加 ON DELETE CASCADE → 删除阻止策略由 channels-repository + UI 双重保护）
+function ensureScenariosChannelIdColumn(db) {
+  if (hasColumn(db, 'scenarios', 'channel_id')) return false;
+  db.exec(`ALTER TABLE scenarios ADD COLUMN channel_id INTEGER REFERENCES channels(id) ON UPDATE CASCADE`);
+  db.exec(`UPDATE scenarios SET channel_id = 1 WHERE channel_id IS NULL`);
+  return true;
+}
+
+const N5_MIGRATED_MARKER = 'n5_channels_migrated';
+
+// v2.1.9 N5：DB schema 总迁移函数（🔴 资金红线 + 破坏性 schema 变更，不可逆）
+//
+// 步骤：
+//   1. 标志位检测 app_settings.n5_channels_migrated='true' 跳过
+//   2. 前置备份（事务外，SR-backup-1 sqlite VACUUM INTO）→ <dbDir>/backups/tool-data-bak-pre-N5-{ts}.sqlite
+//   3. 事务包裹：ensureChannelsTable + ensureScenariosChannelIdColumn + 写标志位
+//   4. 失败 ROLLBACK + 备份保留 + 返回错误状态（启动不阻塞，下次重试）
+//
+// 返回 { status, backupPath?, columnAdded?, error? }
+//   status:
+//     - 'skipped'           : 标志位 = true，已迁移
+//     - 'migrated'          : 本次成功执行
+//     - 'backup-failed'     : 备份失败，未执行 schema 改动
+//     - 'migration-failed'  : 事务失败已回滚，备份保留
+function ensureSchemaV2_1_9_N5(db, createBackupFn) {
+  // 1. 标志位检测
+  const markerRow = db
+    .prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?')
+    .get(N5_MIGRATED_MARKER);
+  if (markerRow && String(markerRow.setting_value) === 'true') {
+    return { status: 'skipped' };
+  }
+
+  // 2. 前置备份（事务外）
+  let backupPath = null;
+  if (typeof createBackupFn === 'function') {
+    try {
+      backupPath = createBackupFn('pre-N5');
+    } catch (e) {
+      return { status: 'backup-failed', error: e && e.message ? e.message : String(e) };
+    }
+  }
+
+  // 3. 事务：建表 + 加列 + backfill + 标志位
+  try {
+    db.exec('BEGIN');
+    ensureChannelsTable(db);
+    const columnAdded = ensureScenariosChannelIdColumn(db);
+    db.prepare(`
+      INSERT INTO app_settings (setting_key, setting_value, updated_at)
+      VALUES (?, 'true', ?)
+      ON CONFLICT(setting_key) DO UPDATE
+      SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+    `).run(N5_MIGRATED_MARKER, new Date().toISOString());
+    db.exec('COMMIT');
+    return { status: 'migrated', backupPath, columnAdded };
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch (_) {}
+    return {
+      status: 'migration-failed',
+      error: e && e.message ? e.message : String(e),
+      backupPath,
+    };
+  }
 }
 
 // v2.1.8 N2：给历史 'gateway-recon-join' 场景的 assign 对象补 mode / customValue 字段
@@ -1300,12 +1418,19 @@ module.exports = {
   ensureC3GwFieldCurrencyCaseFix,
   ensureC3AssignAddMode,
   ensureAcquiringBillCurrencyRunsCleanupPending,
+  ensureAcquiringBillIdleCleanupMinutesSetting,
   ensureBillRawJsonV2Slim,
+  ensureChannelsTable,
+  ensureScenariosChannelIdColumn,
+  ensureSchemaV2_1_9_N5,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
   ensureTemplateFilenameFixedFieldSupport,
   ensureTemplateMappingEnhancements,
   ensureTemplateKeySupport,
-  hasColumn
+  hasColumn,
+  // v2.1.9 N1-settings：导出常量供 settings-repository / main.js 共享
+  ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY,
+  ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT,
 };

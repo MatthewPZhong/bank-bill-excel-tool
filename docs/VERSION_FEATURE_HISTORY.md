@@ -9,6 +9,35 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.9（2026-05-27 — 待发布草稿）
+
+v2.1.8 之后 1 轮迭代（α 范围），9 项主题：N5（银行渠道区分场景 — 🔴 资金红线 + DB schema 破坏性 migration）+ N6（状态框换行修复）+ N7（场景模板按渠道导入/导出 — 新 bundle 类型）+ SR-backup-1（sqlite VACUUM INTO 备份基建）+ G1-cont（单元测试 37 文件全量铺）+ SR-policy-1（integration-runner 清单自动同步）+ N1-settings（idle 阈值 settings 化）+ N4 重构（migration 备份切到新 API）+ SR-log-1（全局告警日志化 + JSON Lines）。⚠️ 1 个🔴破坏性（Sheet 3 主输出撤除 → 独立报表）+ 3 个资金红线护栏。
+
+### 新增
+
+- **N5 银行对账单按"银行渠道"区分场景**（🔴 资金红线 + 破坏性 migration）：channels 表 + 「通用」内置（id=1, is_builtin=1, 不可删不可改名）+ scenarios.channel_id FK ON UPDATE CASCADE；启动期 N5 migration（VACUUM INTO 备份 → 事务建表/加列/backfill 通用）；场景管理顶部「银行渠道」过滤 + 「管理」按钮 + createChannelManagerDialog；场景行「转移」按钮（搬运语义）；footer 「批量操作」+ 勾选列 + 批量转移/删除；dispatcher 双维 first-match-wins（专属优先 + 通用兜底，spec §2.1）；导入按 `<Channel>-<地区>` 匹配 → 未命中走通用兜底但保留原始 channelKey
+- **N5 Sheet 3 拆出**（🔴 对外契约）：v2.1.8 N3-2 主输出 Sheet 3 撤除 → 独立报表 `命中场景行-{原文件 basename}-{timestamp}.xlsx` 落 `error-reports/{date}/`；列 = 44 原 + 匹配渠道/匹配状态/命中场景
+- **N7 场景模板按渠道导入/导出**：独立 `scenarioBundleVersion=1` 与 `bundleVersion=4` 互认隔离；多选导出单文件多渠道；导入二阶段（needs-confirm → apply）+ 缺失渠道弹框 + 同名场景跳过；事务包裹
+- **N6 状态框换行修复**：renderer.js 删冒号后冗余 \n（仅 2 行）；updateStatusBox 内层不动；其他 5 模块零外溢
+- **SR-backup-1 sqlite 安全备份**：`src/backend/database/backup.js` 用 `VACUUM INTO`（POC 后 spec 反向同步，DatabaseSync.backup 不存在）；label 白名单防 SQL 注入 + tmp atomic rename
+- **N4 重构**：N4 migration 备份切到新 createBackupFn（删 fs.copyFileSync + wal_checkpoint）；备份路径前缀 / 标志位 / 9 字段裁剪不变（v2.1.8 已发契约护栏）
+- **N1-settings idle 阈值 settings 化**（D21=c 修订）：v2.1.8 硬编码 30min 改 settings 表 `acquiring_bill_idle_cleanup_minutes`（默认 30 / 范围 5-180）；启动期 loadIdleCleanupMsFromSettings 读取 + getter 兜底；**不做 UI** — 用户用 sqlite3 改 settings 表 + 重启生效
+- **SR-policy-1 integration-runner 自动同步**：in-place 编辑 `rules/integration-test-policy.md §七`（全 PASS 才写）+ 时间戳东八区 + stdout
+- **SR-log-1 全局告警日志化**（数据待 Phase 8.8 完成定稿）：preload reportLog + main IPC + renderer wrapper hijack + main 49 处 console.error 改造 + 新结构 `logs/{YYYY-MM}/{MM-DD}/{level}.log`（永久保留）+ JSON Lines + 双写兼容 app_activity_log.txt
+- **G1-cont 单元测试全量铺**（数据待 Phase 1.5 完成定稿）：第 1 层 13 + 第 2 层 24 = 37 文件；累计 case 目标 ≥ 400（v2.1.8 baseline 123）
+
+### 变更
+
+- **N5 spec Reverse Sync 三轮**：v0.6 VACUUM INTO + v0.7 channelId 字段 + 不渲染删除按钮 + v0.8 createAppSettingsDialog 新建 + N4 调用方契约 + regex 兼容
+- **集成测试改造**：`bank-statement-hit-scenario-sheet.js` 26 → `*-report.js` 44 case；6 脚本 / 324 断言
+- **tasks T18/T26 笔误**：实际接入 main.js:3077（dispatcher） + main.js:3140（独立报表）
+
+### α/β 拆分
+
+- **v2.1.9 α**（本版）：9 主题如上
+- **v2.1.10 β**（拆出）：A3 worker 跨进程化 + A4 SQL chunked + N4-cont-1 raw_json 治理 + N4-cont-2 FK CASCADE 改造
+- **v2.1.11+ 继续延期**：F5-cont（C4 ILP 重写） / N5-channels-scale（虚拟滚动评估）
+
 ## 2.1.8（2026-05-26）
 
 v2.1.7 之后 15 commit 收敛，6 项主题：F5（C4 算法重设 4/5 根因）+ G1（单元测试框架建立）+ N1→N1' v0.7（cleanup 改 idle 30min 触发 + 差异保留 + FK 反向同步）+ N2（C3「自取值」）+ N3（银行对账场景号修复 + Sheet 3）+ N4（差异表 29→12 列瘦身 + 破坏性 migration）+ v2.1.7-cleanup（10 项 minor）。⚠️ 2 个🔴破坏性（N4 raw_json 删 17 字段 + N4 输出契约 29→12）+ 3 个资金红线护栏 + 7 个 important-variables v11 升格。

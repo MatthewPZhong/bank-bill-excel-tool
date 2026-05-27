@@ -17,6 +17,8 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+// v2.1.9 SR-log-1 (T32h)：替换 console.warn → appendModuleLog 双写
+const { appendModuleLog } = require('./logger');
 
 const STATS_FILENAME = '.usage-stats.txt';
 const STATS_TMP_FILENAME = '.usage-stats.txt.tmp';
@@ -154,7 +156,15 @@ function loadStats(storageRoot) {
     return parse(text);
   } catch (err) {
     // 文件损坏 → 返回默认（不影响主流程）
-    console.warn('[usage-stats] load failed, using default:', err.message);
+    // v2.1.9 SR-log-1：替换 console.warn → 日志上报
+    appendModuleLog({
+      level: 'warning',
+      source: 'main',
+      domain: 'usage-stats',
+      message: '[usage-stats] load failed, using default',
+      details: [err && err.message ? err.message : String(err)],
+      stack: err && err.stack ? err.stack : undefined
+    });
     return defaultStats();
   }
 }
@@ -183,7 +193,14 @@ function saveStats(storageRoot, stats) {
 function incrementFunction(stats, moduleKey, functionKey) {
   const allowed = FUNCTION_REGISTRY[moduleKey];
   if (!allowed || !allowed.includes(functionKey)) {
-    console.warn(`[usage-stats] unregistered function: ${moduleKey} / ${functionKey}`);
+    // v2.1.9 SR-log-1：替换 console.warn → 日志上报
+    appendModuleLog({
+      level: 'warning',
+      source: 'main',
+      domain: 'usage-stats',
+      message: '[usage-stats] unregistered function',
+      details: [`moduleKey=${moduleKey}`, `functionKey=${functionKey}`]
+    });
     return stats;
   }
   if (!stats.modules[moduleKey]) stats.modules[moduleKey] = {};

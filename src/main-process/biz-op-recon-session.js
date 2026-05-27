@@ -24,6 +24,9 @@ const path = require('node:path');
 const importsRepository = require('../backend/biz-op-recon-db/imports-repository');
 const flowImportsRepository = require('../backend/biz-op-recon-db/flow-imports-repository');
 const runRepository = require('../backend/biz-op-recon-db/run-repository');
+// v2.1.9 SR-log-1 (T32h)：替换 console.warn → appendModuleLog 双写
+//   不用解构赋值（smoke / unit spy 可改 logger.appendModuleLog 单点劫持）
+const logger = require('../backend/logger');
 const {
   BIZ_OP_ACCOUNT_KEY_DB_COLUMN,
   BIZ_OP_END_BALANCE_DB_COLUMN,
@@ -303,13 +306,21 @@ function runReconciliation(db, { date, buName }) {
   // anomalyAccountSet：T-2 该账户号所有行 end_balance 全 NaN 的账户集合
   const { map: calcT1ByAccount, anomalyAccountSet: t2AnomalyAccounts } = computeT1Op(t2OpRows, flowSumByAccount);
 
-  // 资金红线 ⚠️ fix7-I3：每个 anomaly 账户号 console.warn 一行（不阻断对账，仅人工排查线索）
+  // 资金红线 ⚠️ fix7-I3：每个 anomaly 账户号写一条日志（不阻断对账，仅人工排查线索）
+  // v2.1.9 SR-log-1：替换 console.warn → 日志上报；用 logger.appendModuleLog 便于 smoke spy
   for (const acc of t2AnomalyAccounts) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      `[biz-op-recon] T-2 end_balance NaN silent drop date=${t2Date} bu=${buName} account=${acc} ` +
-      `(该账户在 T-1 实际 OP 与差异表均不可见，请检查源文件期末余额字段)`
-    );
+    logger.appendModuleLog({
+      level: 'warning',
+      source: 'main',
+      domain: 'biz-op-recon',
+      message: '[biz-op-recon] T-2 end_balance NaN silent drop',
+      details: [
+        `date=${t2Date}`,
+        `bu=${buName}`,
+        `account=${acc}`,
+        '该账户在 T-1 实际 OP 与差异表均不可见，请检查源文件期末余额字段'
+      ]
+    });
   }
 
   // 4. 步 4.2.b：1:N 逐行独立比（资金红线 ⚠️）

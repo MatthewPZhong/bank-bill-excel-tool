@@ -1,4 +1,6 @@
 const { randomUUID } = require('node:crypto');
+// v2.1.9 SR-log-1 (T32h)：替换 console.warn → appendModuleLog 双写
+const { appendModuleLog } = require('../logger');
 const {
   buildTemplateSummaryFromRow,
   groupBigAccountRows,
@@ -551,10 +553,18 @@ function saveMappings(
   // v1.5.3 R2 round 6 second-pass self-review (C2)：
   // skippedOwnRows 的 warn 移到 COMMIT 之后；如果上面 transaction rollback 已抛出，这行不会执行 → warn 不会误打
   if (skippedOwnRows.length > 0) {
-    // 不 throw，因为 caller 可能是 batch import / bundle 误传 own 行；warn 让排障可见但不阻塞写入
-    console.warn(
-      `[v1.5.3] saveMappings(preserveOwn=true) 防御性跳过 ${skippedOwnRows.length} 个 own 行（caller 应只传 client）：${skippedOwnRows.join(', ')}`
-    );
+    // 不 throw，因为 caller 可能是 batch import / bundle 误传 own 行；让排障可见但不阻塞写入
+    // v2.1.9 SR-log-1：替换 console.warn → 日志上报
+    appendModuleLog({
+      level: 'warning',
+      source: 'main',
+      domain: 'template-repository',
+      message: '[v1.5.3] saveMappings(preserveOwn=true) 防御性跳过 own 行（caller 应只传 client）',
+      details: [
+        `skippedCount=${skippedOwnRows.length}`,
+        `rows=${skippedOwnRows.join(', ')}`
+      ]
+    });
   }
 }
 

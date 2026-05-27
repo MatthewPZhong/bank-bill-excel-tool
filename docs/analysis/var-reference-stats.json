@@ -1,14 +1,14 @@
 {
   "meta": {
-    "version": "2.1.7",
-    "scannedAt": "2026-05-26T04:40:31.112Z",
+    "version": "2.1.8",
+    "scannedAt": "2026-05-27T03:19:01.927Z",
     "root": "src",
     "totalFiles": 85,
-    "totalTopLevelNames": 874,
+    "totalTopLevelNames": 873,
     "buckets": {
-      "shared": 147,
-      "paired": 251,
-      "local": 370,
+      "shared": 148,
+      "paired": 250,
+      "local": 369,
       "crossFile": 398
     }
   },
@@ -1341,34 +1341,6 @@
         "fileSpan": 4
       },
       {
-        "name": "BILL_HEADERS",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/columns.js",
-          "src/backend/acquiring-bill-currency-import/reader.js",
-          "src/backend/acquiring-bill-currency-import/validator.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/columns.js",
-            "count": 7
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
-            "count": 6
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/validator.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 18,
-        "fileSpan": 4
-      },
-      {
         "name": "BANK_STATEMENT_FIELDS",
         "defFiles": [
           "src/constants/bank-statement-fields.js",
@@ -1451,6 +1423,34 @@
         "fileSpan": 4
       },
       {
+        "name": "BILL_HEADERS",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/columns.js",
+          "src/backend/acquiring-bill-currency-import/reader.js",
+          "src/backend/acquiring-bill-currency-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/columns.js",
+            "count": 7
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/validator.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 14,
+        "fileSpan": 4
+      },
+      {
         "name": "ExcelJS",
         "defFiles": [
           "src/main-process/acquiring-bill-currency-writer.js",
@@ -1474,6 +1474,33 @@
           {
             "file": "src/main-process/exceljs-writer.js",
             "count": 3
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 4
+      },
+      {
+        "name": "TEMPLATE_BILL_HEADERS",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/columns.js",
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/columns.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 6
           }
         ],
         "totalHits": 13,
@@ -4596,24 +4623,6 @@
           {
             "file": "src/backend/file-service/normalizers.js",
             "count": 2
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 2
-      },
-      {
-        "name": "TEMPLATE_BILL_HEADERS",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/columns.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/columns.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-writer.js",
-            "count": 6
           }
         ],
         "totalHits": 9,
@@ -13212,20 +13221,6 @@
         "fileSpan": 1
       },
       {
-        "name": "N4_TEMPLATE_BILL_HEADERS",
-        "defFiles": [
-          "src/backend/database/migrations.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/migrations.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "normalize",
         "defFiles": [
           "src/main-process/bank-bu-recon-session.js"
@@ -15325,34 +15320,6 @@
       "fileSpan": 4
     },
     {
-      "name": "BILL_HEADERS",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-db/columns.js",
-        "src/backend/acquiring-bill-currency-import/reader.js",
-        "src/backend/acquiring-bill-currency-import/validator.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-db/columns.js",
-          "count": 7
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
-          "count": 6
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/validator.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 18,
-      "fileSpan": 4
-    },
-    {
       "name": "BANK_STATEMENT_FIELDS",
       "defFiles": [
         "src/constants/bank-statement-fields.js",
@@ -15435,6 +15402,34 @@
       "fileSpan": 4
     },
     {
+      "name": "BILL_HEADERS",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/columns.js",
+        "src/backend/acquiring-bill-currency-import/reader.js",
+        "src/backend/acquiring-bill-currency-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/columns.js",
+          "count": 7
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/validator.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 14,
+      "fileSpan": 4
+    },
+    {
       "name": "ExcelJS",
       "defFiles": [
         "src/main-process/acquiring-bill-currency-writer.js",
@@ -15458,6 +15453,33 @@
         {
           "file": "src/main-process/exceljs-writer.js",
           "count": 3
+        }
+      ],
+      "totalHits": 13,
+      "fileSpan": 4
+    },
+    {
+      "name": "TEMPLATE_BILL_HEADERS",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/columns.js",
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/columns.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-writer.js",
+          "count": 6
         }
       ],
       "totalHits": 13,
@@ -18578,24 +18600,6 @@
         {
           "file": "src/backend/file-service/normalizers.js",
           "count": 2
-        }
-      ],
-      "totalHits": 9,
-      "fileSpan": 2
-    },
-    {
-      "name": "TEMPLATE_BILL_HEADERS",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-db/columns.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-db/columns.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-writer.js",
-          "count": 6
         }
       ],
       "totalHits": 9,

@@ -19,7 +19,9 @@ const {
   ensureC3GwFieldCurrencyCaseFix,
   ensureC3AssignAddMode,
   ensureAcquiringBillCurrencyRunsCleanupPending,
+  ensureAcquiringBillIdleCleanupMinutesSetting,
   ensureBillRawJsonV2Slim,
+  ensureSchemaV2_1_9_N5,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
@@ -32,6 +34,10 @@ const { ensureBizOpReconTablesSupport } = require('./biz-op-recon-db/migrations'
 const scenariosRepository = require('./database/scenarios-repository');
 const settingsRepository = require('./database/settings-repository');
 const templateRepository = require('./database/template-repository');
+const channelsRepository = require('./database/channels-repository');
+const { createBackup: createBackupImpl } = require('./database/backup');
+// v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
+const { appendModuleLog } = require('./logger');
 
 class AppDatabase {
   constructor(dbPath) {
@@ -151,6 +157,60 @@ class AppDatabase {
     //   必须在 ensureC3GwFieldCurrencyCaseFix 之后（先修 currency 大小写再扩字段，互不影响）
     this.ensureC3AssignAddMode();
     this.ensureBuiltinScenarioNamesUpdate();
+    // v2.1.9 N5：channels 表 + scenarios.channel_id FK + backfill 到「通用」
+    //   🔴 资金红线 + 破坏性 schema 变更（不可逆）；首次启动自动备份 DB 到 <dbDir>/backups/
+    //   幂等：app_settings.n5_channels_migrated = 'true' 跳过
+    //   必须在 ensureScenariosSupport 系列之后（依赖 scenarios 表已存在）
+    //   失败处理：参考 ensureBillRawJsonV2Slim — try-catch + console.log 输出状态（启动不阻塞，下次重试）
+    try {
+      const n5Result = this.ensureSchemaV2_1_9_N5();
+      if (n5Result && n5Result.status === 'migrated') {
+        // v2.1.9 SR-log-1：替换 console.log → 日志上报（info 级别 — migration 成功审计）
+        appendModuleLog({
+          level: 'info',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration N5] channels 表 + scenarios.channel_id 已建',
+          details: [
+            `backup=${n5Result.backupPath || '(none)'}`,
+            `columnAdded=${n5Result.columnAdded}`
+          ]
+        });
+      } else if (n5Result && n5Result.status === 'backup-failed') {
+        // v2.1.9 SR-log-1：替换 console.error → 日志上报
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration N5] 备份失败，schema 未改动，下次启动重试',
+          details: [n5Result.error && n5Result.error.message ? n5Result.error.message : String(n5Result.error)],
+          stack: n5Result.error && n5Result.error.stack ? n5Result.error.stack : undefined
+        });
+      } else if (n5Result && n5Result.status === 'migration-failed') {
+        // v2.1.9 SR-log-1：替换 console.error → 日志上报
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration N5] 事务失败已回滚',
+          details: [
+            `备份保留: ${n5Result.backupPath || '(none)'}`,
+            n5Result.error && n5Result.error.message ? n5Result.error.message : String(n5Result.error)
+          ],
+          stack: n5Result.error && n5Result.error.stack ? n5Result.error.stack : undefined
+        });
+      }
+    } catch (n5Err) {
+      // v2.1.9 SR-log-1：替换 console.error → 日志上报
+      appendModuleLog({
+        level: 'error',
+        source: 'main',
+        domain: 'migration',
+        message: '[migration N5] unexpected failure (启动不阻塞，下次启动重试)',
+        details: [n5Err && n5Err.message ? n5Err.message : String(n5Err)],
+        stack: n5Err && n5Err.stack ? n5Err.stack : undefined
+      });
+    }
     // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表
     // 与其他迁移完全独立，调用顺序无依赖；放在最末尾即可
     this.ensureBankBuReconTablesSupport();
@@ -163,6 +223,10 @@ class AppDatabase {
     // v2.1.8 N1：给 acquiring_bill_currency_runs 加 cleanup_pending 列（β 方案：cleanup 移出对账链路）
     //   必须在 ensureAcquiringBillCurrencyTablesSupport 之后（依赖 runs 表已存在）
     this.ensureAcquiringBillCurrencyRunsCleanupPending();
+    // v2.1.9 N1-settings (T32b)：idle cleanup 阈值 settings 化（seed default=30）
+    //   依赖 app_settings 表存在（启动 init 时第一段 CREATE TABLE IF NOT EXISTS 已建）
+    //   幂等：INSERT OR IGNORE → 用户已改值不被覆盖
+    this.ensureAcquiringBillIdleCleanupMinutesSetting();
     // v2.1.8 N4：差异表瘦身 — bill_imports.raw_json 一次性 rewrite 仅保留 9 模版字段
     //   🔴 资金红线 + 破坏性 migration；首次启动自动备份 DB 到 <dbDir>/backups/
     //   幂等：app_settings.acquiring_bill_raw_json_v2_migrated = 'true' 跳过
@@ -171,18 +235,48 @@ class AppDatabase {
       const result = this.ensureBillRawJsonV2Slim();
       // 仅在实际改了数据时打日志（'migrated-empty' = 空表首次启动，无业务意义不打）
       if (result && result.status === 'migrated') {
-        // eslint-disable-next-line no-console
-        console.log(`[migration N4] bill_imports.raw_json slim done: rows=${result.rowsAffected}, backup=${result.backupPath || '(none)'}`);
+        // v2.1.9 SR-log-1：替换 console.log → 日志上报
+        appendModuleLog({
+          level: 'info',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration N4] bill_imports.raw_json slim done',
+          details: [
+            `rows=${result.rowsAffected}`,
+            `backup=${result.backupPath || '(none)'}`
+          ]
+        });
       } else if (result && result.status === 'backup-failed') {
-        // eslint-disable-next-line no-console
-        console.error(`[migration N4] backup failed, migration aborted, will retry next launch:`, result.error);
+        // v2.1.9 SR-log-1：替换 console.error → 日志上报
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration N4] backup failed, migration aborted, will retry next launch',
+          details: [result.error && result.error.message ? result.error.message : String(result.error)],
+          stack: result.error && result.error.stack ? result.error.stack : undefined
+        });
       } else if (result && result.status === 'batch-failed') {
-        // eslint-disable-next-line no-console
-        console.error(`[migration N4] batch rewrite failed at row ${result.totalRewritten}:`, result.error);
+        // v2.1.9 SR-log-1：替换 console.error → 日志上报
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: `[migration N4] batch rewrite failed at row ${result.totalRewritten}`,
+          details: [result.error && result.error.message ? result.error.message : String(result.error)],
+          stack: result.error && result.error.stack ? result.error.stack : undefined
+        });
       }
     } catch (n4Err) {
-      // eslint-disable-next-line no-console
-      console.error('[migration N4] unexpected failure (启动不阻塞，下次启动重试):', n4Err && n4Err.message);
+      // v2.1.9 SR-log-1：替换 console.error → 日志上报
+      appendModuleLog({
+        level: 'error',
+        source: 'main',
+        domain: 'migration',
+        message: '[migration N4] unexpected failure (启动不阻塞，下次启动重试)',
+        details: [n4Err && n4Err.message ? n4Err.message : String(n4Err)],
+        stack: n4Err && n4Err.stack ? n4Err.stack : undefined
+      });
     }
     // v2.1.7 F7-A2：启动期 ANALYZE — 让规划器统计所有索引（含 idx_acquiring_bill_currency_bill_source_file）
     //   必须在所有 ensure*Support / migrate* 之后（否则统计的是旧 schema）
@@ -258,9 +352,33 @@ class AppDatabase {
     return ensureAcquiringBillCurrencyRunsCleanupPending(this.db);
   }
 
-  // v2.1.8 N4：差异表瘦身 migration（接收 dbPath 用于备份）
+  // v2.1.9 N1-settings (T32b)：idle cleanup 阈值 settings 化 — seed default=30 + 暴露 get/set 接口
+  ensureAcquiringBillIdleCleanupMinutesSetting() {
+    return ensureAcquiringBillIdleCleanupMinutesSetting(this.db);
+  }
+
+  getAcquiringBillIdleCleanupMinutes() {
+    return settingsRepository.getAcquiringBillIdleCleanupMinutes(this.db);
+  }
+
+  setAcquiringBillIdleCleanupMinutes(minutes) {
+    return settingsRepository.setAcquiringBillIdleCleanupMinutes(this.db, minutes);
+  }
+
+  // v2.1.8 N4 → v2.1.9 N4 重构 (T32e, D22=a)：差异表瘦身 migration
+  //   原 v2.1.8 实现：内部 fs.copyFileSync(dbPath, backupPath) — 大库阻塞 / WAL 不一致 / 失败无回滚
+  //   v2.1.9 改造：注入 createBackup 函数 → migration 复用 SR-backup-1 sqlite VACUUM INTO（与 N5 同 backup 体系）
+  //   备份路径仍是 <dbDir>/backups/tool-data-bak-pre-N4-{timestamp}.sqlite（行为不变）
+  //   标志位 / raw_json 字段裁剪 / 事务流程全部不变（v2.1.8 N4 已发代码契约保护）
   ensureBillRawJsonV2Slim() {
-    return ensureBillRawJsonV2Slim(this.db, this.dbPath);
+    return ensureBillRawJsonV2Slim(this.db, this.dbPath, (label) => this.createBackup(label));
+  }
+
+  // v2.1.9 N5：channels 表 + scenarios.channel_id FK + backfill 到「通用」
+  //   传 createBackup 函数给 migration（事务外执行 SR-backup-1 sqlite VACUUM INTO）
+  //   返回 { status, backupPath?, columnAdded?, error? }
+  ensureSchemaV2_1_9_N5() {
+    return ensureSchemaV2_1_9_N5(this.db, (label) => this.createBackup(label));
   }
 
   listTemplates() {
@@ -525,6 +643,66 @@ class AppDatabase {
 
   toggleScenarioEnabled(id, enabled) {
     return scenariosRepository.toggleScenarioEnabled(this.db, id, enabled);
+  }
+
+  // v2.1.9 N5 Phase 5 T23：批量转移场景到目标渠道（单条 = 长度 1）
+  //   payload: { scenarioIds: number[], targetChannelId: number }
+  //   底层事务包裹；任何 id 不存在或目标渠道不存在 → 整批回滚抛错
+  transferScenarios(scenarioIds, targetChannelId) {
+    return scenariosRepository.transferScenarios(this.db, scenarioIds, targetChannelId);
+  }
+
+  // v2.1.9 N5 Phase 5 T23：批量删除场景（DB 层 is_builtin=1 保护）
+  //   payload: { scenarioIds: number[] }
+  //   底层事务包裹；任何 id 命中内置场景 → 整批回滚抛错
+  batchDeleteScenarios(scenarioIds) {
+    return scenariosRepository.batchDelete(this.db, scenarioIds);
+  }
+
+  // v2.1.9 N7 Phase 7 T29：按渠道拉全部场景（含 disabled + 全 category），导出 bundle 用
+  listAllScenariosByChannelId(channelId) {
+    return scenariosRepository.listAllByChannelId(this.db, channelId);
+  }
+
+  // v2.1.9 N5：channels CRUD（银行渠道）
+  //   底层 schema 在 ensureChannelsTable 建表；「通用」内置渠道 id=1 不可删不可改名
+  //   findByNameAndLocation 是 dispatcher hot path（每行调度都查渠道）
+  listChannels() {
+    return channelsRepository.listChannels(this.db);
+  }
+
+  getChannelById(id) {
+    return channelsRepository.getChannelById(this.db, id);
+  }
+
+  findChannelByNameAndLocation(name, ownerLocation) {
+    return channelsRepository.findByNameAndLocation(this.db, name, ownerLocation);
+  }
+
+  getBuiltinGeneralChannel() {
+    return channelsRepository.getBuiltinGeneral(this.db);
+  }
+
+  createChannel(payload) {
+    return channelsRepository.createChannel(this.db, payload || {});
+  }
+
+  updateChannel(id, fields) {
+    return channelsRepository.updateChannel(this.db, id, fields || {});
+  }
+
+  deleteChannel(id) {
+    return channelsRepository.deleteChannel(this.db, id);
+  }
+
+  // SR-backup-1 (v2.1.9)：sqlite 安全备份 API（VACUUM INTO）
+  // 用法：const backupPath = appDb.createBackup('pre-N5');
+  //   - label：仅支持 [A-Za-z0-9_-]（用于文件名 + 防 SQL 注入）
+  //   - 备份落 <dbDir>/backups/tool-data-bak-{label}-{timestamp}.sqlite
+  createBackup(label) {
+    if (!this.db) throw new Error('AppDatabase.createBackup: db 未初始化');
+    const backupDir = path.join(path.dirname(this.dbPath), 'backups');
+    return createBackupImpl(this.db, label, backupDir);
   }
 }
 

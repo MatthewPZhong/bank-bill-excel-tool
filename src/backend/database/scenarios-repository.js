@@ -73,6 +73,10 @@ function rowToListItem(row) {
     priority: Number(row.priority),
     enabled: Number(row.enabled) === 1,
     isBuiltin: Number(row.is_builtin) === 1,
+    // v2.1.9 N5：返 channel_id 给 UI（场景管理弹框按渠道过滤）
+    //   channel_id 列在 N5 migration 中加上，老库升级后默认 backfill 到 1（通用）
+    //   未 migration 的列不存在场景使用 row.channel_id ?? 1 兜底（不影响幂等）
+    channelId: row.channel_id != null ? Number(row.channel_id) : 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -85,28 +89,119 @@ function rowToDetail(row) {
   };
 }
 
+// v2.1.9 N5 Phase 2 → Phase 4 reverse sync：listScenarios SQL 需兼容 channel_id 列
+//   不存在的旧 schema（smoke 内部直接 CREATE TABLE 不跑 N5 migration 的场景）
+//   - 优先 SELECT 含 channel_id（生产路径走 migration 后必有该列）
+//   - 列不存在 → fallback 到不含 channel_id 的 SQL（rowToListItem 用 row.channel_id ?? 1 兜底）
+//   - 用 db 实例 WeakMap 缓存检测结果，避免 hot path 每次 pragma 查询
+const hasChannelIdColumnCache = new WeakMap();
+
+function hasChannelIdColumn(db) {
+  if (hasChannelIdColumnCache.has(db)) return hasChannelIdColumnCache.get(db);
+  try {
+    const row = db
+      .prepare("SELECT COUNT(*) AS cnt FROM pragma_table_info('scenarios') WHERE name='channel_id'")
+      .get();
+    const has = row && Number(row.cnt) > 0;
+    hasChannelIdColumnCache.set(db, has);
+    return has;
+  } catch (e) {
+    hasChannelIdColumnCache.set(db, false);
+    return false;
+  }
+}
+
 function listScenarios(db) {
+  const hasChannel = hasChannelIdColumn(db);
+  const sql = hasChannel
+    ? `SELECT id, category, name, priority, enabled, is_builtin, channel_id, created_at, updated_at
+       FROM scenarios ORDER BY priority DESC, id ASC`
+    : `SELECT id, category, name, priority, enabled, is_builtin, created_at, updated_at
+       FROM scenarios ORDER BY priority DESC, id ASC`;
+  const rows = db.prepare(sql).all();
+  // v2.1.8 N3-1：派发 displayIndex（1-based），UI 列表序号 + dispatcher 命中场景显示统一来源
+  //   spec.md §五 N3-D1 锁定：repository 层统一附 displayIndex，UI / 引擎共享 → 避免双源真理
+  // 2026-05-27 N5 fix（资金红线）：N5 引入渠道维度后 displayIndex 必须按 channel 分组 1-based
+  //   - UI 渠道过滤后 visible.forEach((s, idx) => renderRow(s, idx + 1)) — 渠道内序号
+  //   - 全表 displayIndex 会导致 dispatcher 命中显示 7/8/9 但 UI 显示 1/2/3 串号
+  //   - 老库无 channel_id 列 → 全部归通用 → 行为退化为全表 1-based（与 v2.1.8 一致）
+  const idxByChannel = new Map();
+  return rows.map((row) => {
+    const item = rowToListItem(row);
+    const next = (idxByChannel.get(item.channelId) || 0) + 1;
+    idxByChannel.set(item.channelId, next);
+    return Object.assign(item, { displayIndex: next });
+  });
+}
+
+// v2.1.9 N5 (Phase 4 T17) — 双维调度 hot path API：
+//   按 channelId + category 过滤 enabled scenarios，返回完整详情（含 config）
+//   - 排序与 listScenarios 一致：priority DESC, id ASC（spec §2.4 first-match-wins 不变量依赖）
+//   - 只返 enabled=1（dispatcher 调度不跑禁用场景，逻辑前置降低 caller 复杂度）
+//   - 返字段：包含 config（dispatcher 内的 runScenario 需读 config）→ getScenario 同等粒度
+//   - displayIndex 来源：在过滤后子集内 1-based（与全局 listScenarios 序号语义脱钩，
+//     仅作为本次调度子集的位次，N5 实施初版统一附；caller 当前不依赖此 displayIndex）
+//
+// 资金红线（spec §2.4）：sort 顺序必须与 listScenarios 完全一致，否则 first-match-wins
+//   在两套排序间漂移 → 同一行专属/通用阶段命中场景可能不一致。
+function listByChannelIdAndCategory(db, channelId, category) {
+  const numericChannelId = Number(channelId);
+  if (!Number.isFinite(numericChannelId)) {
+    throw new Error(`listByChannelIdAndCategory: channelId 必须是数字，当前为 ${channelId}`);
+  }
+  if (typeof category !== 'string' || !category) {
+    throw new Error(`listByChannelIdAndCategory: category 必须是非空字符串，当前为 ${category}`);
+  }
   const rows = db
     .prepare(`
-      SELECT id, category, name, priority, enabled, is_builtin, created_at, updated_at
+      SELECT id, category, name, priority, enabled, is_builtin, channel_id, config_json, created_at, updated_at
       FROM scenarios
+      WHERE channel_id = ? AND category = ? AND enabled = 1
       ORDER BY priority DESC, id ASC
     `)
-    .all();
-  // v2.1.8 N3-1：派发 displayIndex（1-based 按查询顺序），UI 列表序号 + dispatcher 命中场景显示统一来源
-  //   spec.md §五 N3-D1 锁定：repository 层统一附 displayIndex，UI / 引擎共享 → 避免双源真理
-  return rows.map((row, idx) => Object.assign(rowToListItem(row), { displayIndex: idx + 1 }));
+    .all(numericChannelId, String(category));
+  return rows.map((row, idx) => Object.assign(rowToDetail(row), { displayIndex: idx + 1 }));
 }
 
 function getScenario(db, id) {
-  const row = db
-    .prepare(`
-      SELECT id, category, name, priority, enabled, is_builtin, config_json, created_at, updated_at
-      FROM scenarios
-      WHERE id = ?
-    `)
-    .get(Number(id));
+  // v2.1.9 N5 fix（资金红线）：必须 SELECT channel_id —— dispatcher.groupScenariosByChannelId
+  //   依赖 scenario.channelId 切片；缺失会兜底到 1（通用），导致专属渠道场景被错应用到其他渠道行
+  //   兼容老 schema（无 channel_id 列）：rowToDetail 内部 channelId 字段在 rowToListItem 已用 `row.channel_id != null ? Number(row.channel_id) : 1` 兜底
+  const hasChannel = hasChannelIdColumn(db);
+  const sql = hasChannel
+    ? `SELECT id, category, name, priority, enabled, is_builtin, channel_id, config_json, created_at, updated_at
+       FROM scenarios WHERE id = ?`
+    : `SELECT id, category, name, priority, enabled, is_builtin, config_json, created_at, updated_at
+       FROM scenarios WHERE id = ?`;
+  const row = db.prepare(sql).get(Number(id));
   return row ? rowToDetail(row) : null;
+}
+
+// v2.1.9 N7 (Phase 7 T29) — 按 channelId 拉全部场景（含 disabled + 全 category）做 bundle 导出
+//   - listByChannelIdAndCategory 受 enabled=1 + category 双重过滤，不适合导出场景
+//   - 导出语义：用户当前看到的渠道全集（含 disabled），便于跨机器复制完整配置
+//   - 排序与 listScenarios 一致：(priority desc, id asc)，保证 bundle 落盘顺序稳定（git diff 友好）
+//   - 返字段含 config（已 JSON.parse）+ channelId（缺失列兜底为 1）
+function listAllByChannelId(db, channelId) {
+  const numericChannelId = Number(channelId);
+  if (!Number.isFinite(numericChannelId)) {
+    throw new Error(`listAllByChannelId: channelId 必须是数字，当前为 ${channelId}`);
+  }
+  const hasChannel = hasChannelIdColumn(db);
+  if (!hasChannel) {
+    // 老 schema 无 channel_id 列 → 仅当请求「通用」(id=1) 时返全表；其他渠道返空
+    if (numericChannelId !== 1) return [];
+    const rows = db
+      .prepare(`SELECT id, category, name, priority, enabled, is_builtin, config_json, created_at, updated_at
+                FROM scenarios ORDER BY priority DESC, id ASC`)
+      .all();
+    return rows.map(rowToDetail);
+  }
+  const rows = db
+    .prepare(`SELECT id, category, name, priority, enabled, is_builtin, channel_id, config_json, created_at, updated_at
+              FROM scenarios WHERE channel_id = ? ORDER BY priority DESC, id ASC`)
+    .all(numericChannelId);
+  return rows.map(rowToDetail);
 }
 
 // 计算最小未使用的 scenario id：从 1 起找第一个 missing
@@ -222,6 +317,122 @@ function toggleScenarioEnabled(db, id, enabled) {
   return { id: numericId, enabled: validatedEnabled === 1 };
 }
 
+// v2.1.9 N5 (Phase 5 T23) — 批量转移场景到目标渠道
+//   入参：
+//     scenarioIds 数组（单条转移 = 长度 1；批量转移 = 长度 N）
+//     targetChannelId 目标渠道 id
+//   校验：
+//     - scenarioIds 必须是非空数组
+//     - 所有 id 必须能转成有限数字（防 NaN / 字符串）
+//     - targetChannelId 必须存在于 channels 表（避免 dispatch fallback 到不存在的渠道）
+//     - 所有 scenarioIds 必须存在于 scenarios 表（部分缺失抛错；不可静默忽略）
+//   行为：事务包裹 UPDATE scenarios SET channel_id=? WHERE id IN (...)
+//   返回：{ transferredCount, targetChannelId }
+//
+// 资金红线（spec §10.1 转移搬运语义不可逆）：
+//   - D4=a 搬运语义：A→B 后 A 内场景不再存在 → 必须事务包裹 + UI 二次确认
+//   - 单事务原子性：任何一行 id 不存在或 channels 表无 targetChannelId → 全部回滚
+//   - is_builtin scenarios 也允许转移（spec §4.3 未禁止内置场景在渠道间搬运）
+function transferScenarios(db, scenarioIds, targetChannelId) {
+  if (!Array.isArray(scenarioIds) || scenarioIds.length === 0) {
+    throw new Error('transferScenarios: scenarioIds 必须是非空数组');
+  }
+  const numericTargetChannelId = Number(targetChannelId);
+  if (!Number.isFinite(numericTargetChannelId) || numericTargetChannelId <= 0) {
+    throw new Error(`transferScenarios: targetChannelId 必须是正整数，当前为 ${targetChannelId}`);
+  }
+  const numericIds = scenarioIds.map((id) => {
+    const n = Number(id);
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new Error(`transferScenarios: scenario id 必须是正整数，当前为 ${id}`);
+    }
+    return n;
+  });
+
+  db.exec('BEGIN');
+  try {
+    // 1. 校验目标渠道存在
+    const channelRow = db
+      .prepare('SELECT id FROM channels WHERE id = ?')
+      .get(numericTargetChannelId);
+    if (!channelRow) {
+      throw new Error(`目标渠道 id=${numericTargetChannelId} 不存在`);
+    }
+    // 2. 校验所有 scenarioIds 存在（事务内一次性查，找出缺失 id）
+    const placeholders = numericIds.map(() => '?').join(',');
+    const existRows = db
+      .prepare(`SELECT id FROM scenarios WHERE id IN (${placeholders})`)
+      .all(...numericIds);
+    const existIds = new Set(existRows.map((r) => Number(r.id)));
+    const missing = numericIds.filter((id) => !existIds.has(id));
+    if (missing.length > 0) {
+      throw new Error(`场景 id=${missing.join(',')} 不存在`);
+    }
+    // 3. 批量 UPDATE
+    const now = new Date().toISOString();
+    const updateStmt = db.prepare('UPDATE scenarios SET channel_id = ?, updated_at = ? WHERE id = ?');
+    let transferredCount = 0;
+    for (const id of numericIds) {
+      const r = updateStmt.run(numericTargetChannelId, now, id);
+      transferredCount += Number(r.changes);
+    }
+    db.exec('COMMIT');
+    return { transferredCount, targetChannelId: numericTargetChannelId };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+// v2.1.9 N5 (Phase 5 T23) — 批量删除场景
+//   入参：scenarioIds 数组（单条删除 = 长度 1；批量删除 = 长度 N）
+//   校验：
+//     - scenarioIds 必须是非空数组
+//     - 所有 id 必须能转成有限正整数
+//     - 内置场景（is_builtin=1）阻止删除（DB 层保护，不依赖 UI；spec §10.1 资金红线）
+//   行为：事务包裹 DELETE FROM scenarios WHERE id IN (...) AND is_builtin = 0
+//   返回：{ deletedCount }
+//
+// 资金红线（spec §10.1 批量删除有数据丢失风险）：
+//   - is_builtin=1 保护必须在 DB 层（不依赖 UI 层禁用，防 DevTools 绕过）
+//   - 事务包裹：内置场景检测失败时整批回滚（不允许"已删一半再抛错"）
+//   - 内置场景命中即抛错（不静默跳过，让 UI 能反馈"操作未完成"）
+function batchDelete(db, scenarioIds) {
+  if (!Array.isArray(scenarioIds) || scenarioIds.length === 0) {
+    throw new Error('batchDelete: scenarioIds 必须是非空数组');
+  }
+  const numericIds = scenarioIds.map((id) => {
+    const n = Number(id);
+    if (!Number.isFinite(n) || n <= 0) {
+      throw new Error(`batchDelete: scenario id 必须是正整数，当前为 ${id}`);
+    }
+    return n;
+  });
+
+  db.exec('BEGIN');
+  try {
+    const placeholders = numericIds.map(() => '?').join(',');
+    // 1. 内置场景检测（DB 层保护）
+    const builtinRows = db
+      .prepare(`SELECT id, name FROM scenarios WHERE id IN (${placeholders}) AND is_builtin = 1`)
+      .all(...numericIds);
+    if (builtinRows.length > 0) {
+      const names = builtinRows.map((r) => `"${r.name}"(id=${r.id})`).join(', ');
+      throw new Error(`内置场景不可删：${names}`);
+    }
+    // 2. 批量删除（is_builtin=0 双保险条件，与 builtin 检测互为兜底）
+    const result = db
+      .prepare(`DELETE FROM scenarios WHERE id IN (${placeholders}) AND is_builtin = 0`)
+      .run(...numericIds);
+    const deletedCount = Number(result.changes);
+    db.exec('COMMIT');
+    return { deletedCount };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 module.exports = {
   VALID_CATEGORIES,
   calculateNextScenarioId,
@@ -229,6 +440,13 @@ module.exports = {
   deleteScenario,
   getScenario,
   listScenarios,
+  // v2.1.9 N5 Phase 4 T17：双维调度 hot path
+  listByChannelIdAndCategory,
+  // v2.1.9 N7 Phase 7 T29：按渠道拉全部场景（导出 bundle 用）
+  listAllByChannelId,
+  // v2.1.9 N5 Phase 5 T23：转移 + 批量删除
+  transferScenarios,
+  batchDelete,
   toggleScenarioEnabled,
   updateScenario
 };

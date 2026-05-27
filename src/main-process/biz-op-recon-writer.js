@@ -18,6 +18,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const ExcelJS = require('exceljs');
 const { applyWatermark } = require('./workbook-watermark');
+// v2.1.9 SR-log-1 (T32h)：替换 console.warn → appendModuleLog 双写
+//   不用解构赋值（smoke / unit spy 可改 logger.appendModuleLog 单点劫持）
+const logger = require('../backend/logger');
 
 const importsRepository = require('../backend/biz-op-recon-db/imports-repository');
 const runRepository = require('../backend/biz-op-recon-db/run-repository');
@@ -121,14 +124,22 @@ async function writeDateRangeDiffWorkbook({ db, buName, startDate, endDate, save
       sheet.addRow(rowData);
       // v2.1.3-fix2.4：差异表不再标黄（拍板回滚 #10）
 
-      // Billdate vs data_date 一致性检查（仅 console.warn，便于 debug；不阻断导出）
+      // Billdate vs data_date 一致性检查（仅 warning，便于 debug；不阻断导出）
       const billdateISO = normalizeDateToISO(sourceRow.bill_date_raw);
       if (billdateISO && billdateISO !== dataDate) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[biz-op-recon-writer] data_date=${dataDate} vs Billdate=${billdateISO} 不一致 ` +
-          `acc=${sourceRow.account_no || ''} bu=${sourceRow.bu_name || buName}`
-        );
+        // v2.1.9 SR-log-1：替换 console.warn → 日志上报（warning 级别，不阻断导出）；smoke spy 用
+        logger.appendModuleLog({
+          level: 'warning',
+          source: 'main',
+          domain: 'biz-op-recon-writer',
+          message: '[biz-op-recon-writer] data_date vs Billdate 不一致',
+          details: [
+            `data_date=${dataDate}`,
+            `Billdate=${billdateISO}`,
+            `acc=${sourceRow.account_no || ''}`,
+            `bu=${sourceRow.bu_name || buName}`
+          ]
+        });
       }
     }
   } else {

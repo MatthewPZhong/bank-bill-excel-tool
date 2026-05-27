@@ -85,7 +85,15 @@ contextBridge.exposeInMainWorld('desktopApi', {
     reportStartupMetrics: (payload) => ipcRenderer.send('app:report-startup-metrics', payload),
     // v2.1.8 N1' (v0.7)：renderer 节流后上报用户活动（mousemove/keydown/click），main 维护 lastUserActivityTs
     //   单向通道 ipcRenderer.send，不等回包；node-side 仅更新时间戳（无业务副作用）
-    reportUserActivity: () => ipcRenderer.send('app:user-activity')
+    reportUserActivity: () => ipcRenderer.send('app:user-activity'),
+    // v2.1.9 SR-log-1 (T32g)：renderer 通用告警上报 IPC（spec §15.4）
+    //   payload schema (spec §15.3)：{ ts?, level, source?, domain?, message, details?, stack? }
+    //     - level: 'error' | 'warning' | 'info'
+    //     - source 缺省 → main 端兜底 'renderer'
+    //   单向通道 ipcRenderer.send，不等回包；main 端用 appendActivityLogEntry 双写日志
+    //   typical caller：setStatus(msg, 'error')/createAlertDialog wrapper hijack（spec §15.5）
+    //   失败 graceful：renderer 内 try-catch 不阻塞 UI（spec §15.10）
+    reportLog: (payload) => ipcRenderer.send('app:report-log', payload)
   },
   errors: {
     exportLast: () => ipcRenderer.invoke('error:export-last')
@@ -106,13 +114,40 @@ contextBridge.exposeInMainWorld('desktopApi', {
     setEnabledModules: (moduleList) => ipcRenderer.invoke('settings:set-enabled-modules', moduleList)
   },
   // v2.0.0-beta.3：银行对账单处理模块 — 场景 CRUD
+  // v2.1.9 N5 Phase 5：新增 transfer / batchDelete（单条 + 批量同接口）
   scenarios: {
     list: () => ipcRenderer.invoke('scenarios:list'),
     get: (id) => ipcRenderer.invoke('scenarios:get', id),
     create: (payload) => ipcRenderer.invoke('scenarios:create', payload),
     update: (id, fields) => ipcRenderer.invoke('scenarios:update', id, fields),
     deleteOne: (id) => ipcRenderer.invoke('scenarios:delete', id),
-    toggleEnabled: (id, enabled) => ipcRenderer.invoke('scenarios:toggle-enabled', id, enabled)
+    toggleEnabled: (id, enabled) => ipcRenderer.invoke('scenarios:toggle-enabled', id, enabled),
+    // 转移：payload = { scenarioIds: number[], targetChannelId: number }
+    //   单条转移 = scenarioIds 长度 1；批量转移 = 长度 N
+    transfer: (payload) => ipcRenderer.invoke('scenarios:transfer', payload),
+    // 批量删除：payload = { scenarioIds: number[] }
+    //   DB 层 is_builtin=1 保护；事务包裹保证原子性
+    batchDelete: (scenarioIds) => ipcRenderer.invoke('scenarios:batch-delete', { scenarioIds }),
+    // v2.1.9 N7 Phase 7：场景模板按渠道导入/导出（独立 scenarioBundleVersion=1，与网银账单 bundleVersion=4 互认隔离）
+    //   exportBundle(channelIds)：main 端拉所选渠道全部场景 → serialize → showSaveDialog → 写文件
+    //   importBundle()：main 端 showOpenDialog → parse + detect → 若有缺失渠道返 needs-confirm，否则直接 apply
+    //   applyImport({ bundle, confirmCreateMissingChannels })：renderer 确认创建缺失渠道后调用 apply
+    exportBundle: (channelIds) => ipcRenderer.invoke('scenarios:export-bundle', { channelIds }),
+    importBundle: () => ipcRenderer.invoke('scenarios:import-bundle'),
+    applyImport: (bundle, opts = {}) => ipcRenderer.invoke('scenarios:import-bundle-apply', {
+      bundle,
+      confirmCreateMissingChannels: opts && opts.confirmCreateMissingChannels === true
+    })
+  },
+  // v2.1.9 N5：银行渠道 CRUD（银行对账单处理 / 场景管理依赖；spec §4）
+  //   list 返回所有渠道（含「通用」内置 id=1, displayIndex 1-based）
+  //   create 失败抛错（UNIQUE / 校验失败 → renderer 接 result.status='failed'）
+  //   update / delete 对「通用」（is_builtin=1）会 DB 层抛错 — UI 同步做 disabled 兜底
+  channels: {
+    list: () => ipcRenderer.invoke('channels:list'),
+    create: (payload) => ipcRenderer.invoke('channels:create', payload),
+    update: (id, fields) => ipcRenderer.invoke('channels:update', id, fields),
+    deleteOne: (id) => ipcRenderer.invoke('channels:delete', id)
   },
   // v2.0.0-beta.3 PR #32a：银行对账单处理模块 — IO + 调度
   bankStatement: {

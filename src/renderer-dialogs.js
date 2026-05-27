@@ -145,6 +145,28 @@
 
     function createAlertDialog(message, options = {}) {
       const { onConfirm = null } = options;
+      // v2.1.9 SR-log-1 (T32i)：wrapper hijack — createAlertDialog 默认告警弹框（spec §15.5）
+      //   - 所有 createAlertDialog 调用方（误用 / 业务异常 / 校验失败）自动上报 error 级
+      //   - try-catch graceful：desktopApi 不存在 → 不阻塞弹框渲染
+      //   - 调用方可通过 options.logLevel / options.logDomain / options.logDetails 自定义
+      //   - 调用方可 options.skipLogReport=true 显式跳过（如 info 类提示框）
+      try {
+        if (!options.skipLogReport
+          && window.desktopApi
+          && window.desktopApi.app
+          && typeof window.desktopApi.app.reportLog === 'function'
+        ) {
+          window.desktopApi.app.reportLog({
+            level: options.logLevel || 'error',
+            source: 'renderer',
+            domain: options.logDomain || 'dialog',
+            message: String(message || ''),
+            details: Array.isArray(options.logDetails) ? options.logDetails : []
+          });
+        }
+      } catch (_error) {
+        // graceful
+      }
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card alert-card';
@@ -5445,6 +5467,522 @@
       return null;
     }
 
+    // v2.1.9 N5：银行渠道管理弹框 factory（spec §4.2）
+    //   表头：名称 / 开户地 / 执行操作
+    //   表体行：[完成/修改] [删除]；「通用」(is_builtin=1) 行 input disabled + 删除按钮 disabled + tooltip
+    //   表尾「新增」行复用 createAccountMappingDialog 范式（行 5228 createAddRow）
+    //   onClose 回调由调用方传（场景管理 dialog 调用时关闭 → reopen scenarios manager）
+    function createChannelManagerDialog({ onClose } = {}) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manager-card channels-manager-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">银行渠道管理</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table channels-table">
+            <thead>
+              <tr>
+                <th style="width: 40%; text-align: left;">名称</th>
+                <th style="width: 30%; text-align: left;">开户地</th>
+                <th class="manager-action-header" style="width: 30%;"><span class="manager-action-header-label">执行操作</span></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="done">完成</button>
+        </div>
+      `;
+
+      const tbody = dialog.querySelector('tbody');
+
+      function closeAndCallback() {
+        closeModal();
+        if (typeof onClose === 'function') onClose();
+      }
+
+      // 渲染查看态行（已落库 + 非编辑中）
+      function createReadOnlyRow(channel) {
+        const tr = document.createElement('tr');
+        tr.dataset.channelId = String(channel.id);
+        // v2.1.9 N5 T15：「通用」(is_builtin=1) UI 保护
+        //   builtin 行：名称/开户地 input disabled；操作列只渲提示文案不渲按钮
+        //   非 builtin 行：渲 [修改] [删除]
+        tr.dataset.builtin = channel.isBuiltin ? '1' : '0';
+
+        const nameTd = document.createElement('td');
+        const locationTd = document.createElement('td');
+        const actionTd = document.createElement('td');
+        actionTd.className = 'channels-action-cell';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = channel.name;
+        const locationSpan = document.createElement('span');
+        locationSpan.textContent = channel.ownerLocation;
+
+        const nameInput = document.createElement('input');
+        nameInput.className = 'mapping-text-input';
+        nameInput.type = 'text';
+        nameInput.spellcheck = false;
+        nameInput.value = channel.name;
+        nameInput.style.display = 'none';
+
+        const locationInput = document.createElement('input');
+        locationInput.className = 'mapping-text-input';
+        locationInput.type = 'text';
+        locationInput.spellcheck = false;
+        locationInput.value = channel.ownerLocation;
+        locationInput.style.display = 'none';
+
+        nameTd.append(nameSpan, nameInput);
+        locationTd.append(locationSpan, locationInput);
+
+        if (channel.isBuiltin) {
+          // 内置「通用」：input disabled + 操作列 placeholder
+          nameInput.disabled = true;
+          locationInput.disabled = true;
+          const placeholder = document.createElement('span');
+          placeholder.className = 'channels-builtin-placeholder';
+          placeholder.title = '系统内置渠道，不可修改 / 删除';
+          placeholder.textContent = '（内置不可删）';
+          actionTd.append(placeholder);
+        } else {
+          // 非 builtin：[修改] [删除]
+          const editBtn = document.createElement('button');
+          editBtn.className = 'text-action';
+          editBtn.type = 'button';
+          editBtn.textContent = '修改';
+
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'text-action danger-text';
+          deleteBtn.type = 'button';
+          deleteBtn.textContent = '删除';
+
+          let isEditing = false;
+          editBtn.addEventListener('click', async () => {
+            if (!isEditing) {
+              // 进入编辑态
+              isEditing = true;
+              nameSpan.style.display = 'none';
+              locationSpan.style.display = 'none';
+              nameInput.style.display = '';
+              locationInput.style.display = '';
+              editBtn.textContent = '完成';
+            } else {
+              // 提交修改
+              const nextName = nameInput.value.trim();
+              const nextLocation = locationInput.value.trim();
+              if (!nextName) {
+                openModal(createAlertDialog('渠道名称不能为空', { onConfirm: () => openModal(createChannelManagerDialog({ onClose })) }));
+                return;
+              }
+              if (!nextLocation) {
+                openModal(createAlertDialog('开户地不能为空', { onConfirm: () => openModal(createChannelManagerDialog({ onClose })) }));
+                return;
+              }
+              const result = await desktopApi.channels.update(channel.id, {
+                name: nextName,
+                ownerLocation: nextLocation
+              });
+              if (!result || result.status !== 'ok') {
+                openModal(createAlertDialog(`修改渠道失败：${result?.message || '未知错误'}`, {
+                  onConfirm: () => openModal(createChannelManagerDialog({ onClose }))
+                }));
+                return;
+              }
+              await refreshTable();
+            }
+          });
+
+          deleteBtn.addEventListener('click', () => {
+            openModal(createConfirmDialog({
+              message: `确认删除渠道「${channel.name}-${channel.ownerLocation}」？此操作不可撤销。`,
+              confirmText: '删除',
+              cancelText: '取消',
+              onConfirm: async () => {
+                const result = await desktopApi.channels.deleteOne(channel.id);
+                if (!result || result.status !== 'ok') {
+                  // 删除失败（如下属 scenarios > 0）→ 错误提示 + reopen 渠道管理
+                  openModal(createAlertDialog(`删除渠道失败：${result?.message || '未知错误'}`, {
+                    onConfirm: () => openModal(createChannelManagerDialog({ onClose }))
+                  }));
+                  return;
+                }
+                // 成功删除 → reopen 渠道管理刷新
+                openModal(createChannelManagerDialog({ onClose }));
+              }
+            }));
+          });
+
+          actionTd.append(editBtn, deleteBtn);
+        }
+
+        tr.append(nameTd, locationTd, actionTd);
+        return tr;
+      }
+
+      // 渲染新增态行（点击「新增」插入到表底「+ 新增」按钮之上；用户填名称+开户地后点「完成」落库）
+      function createEditableNewRow() {
+        const tr = document.createElement('tr');
+        tr.dataset.newRow = '1';
+
+        const nameTd = document.createElement('td');
+        const locationTd = document.createElement('td');
+        const actionTd = document.createElement('td');
+        actionTd.className = 'channels-action-cell';
+
+        const nameInput = document.createElement('input');
+        nameInput.className = 'mapping-text-input';
+        nameInput.type = 'text';
+        nameInput.spellcheck = false;
+        // 2026-05-27 fix1-N5-UI-2：去掉新增行 placeholder（之前是「例：工商」「例：上海」）
+
+        const locationInput = document.createElement('input');
+        locationInput.className = 'mapping-text-input';
+        locationInput.type = 'text';
+        locationInput.spellcheck = false;
+        // 2026-05-27 fix1-N5-UI-2：去掉新增行 placeholder
+
+        const doneBtn = document.createElement('button');
+        doneBtn.className = 'text-action';
+        doneBtn.type = 'button';
+        doneBtn.textContent = '完成';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'text-action danger-text';
+        cancelBtn.type = 'button';
+        cancelBtn.textContent = '取消';
+
+        doneBtn.addEventListener('click', async () => {
+          const name = nameInput.value.trim();
+          const location = locationInput.value.trim();
+          if (!name) {
+            openModal(createAlertDialog('渠道名称不能为空', { onConfirm: () => openModal(createChannelManagerDialog({ onClose })) }));
+            return;
+          }
+          if (!location) {
+            openModal(createAlertDialog('开户地不能为空', { onConfirm: () => openModal(createChannelManagerDialog({ onClose })) }));
+            return;
+          }
+          const result = await desktopApi.channels.create({ name, ownerLocation: location });
+          if (!result || result.status !== 'ok') {
+            openModal(createAlertDialog(`新增渠道失败：${result?.message || '未知错误'}`, {
+              onConfirm: () => openModal(createChannelManagerDialog({ onClose }))
+            }));
+            return;
+          }
+          await refreshTable();
+        });
+
+        cancelBtn.addEventListener('click', () => {
+          tr.remove();
+        });
+
+        nameTd.append(nameInput);
+        locationTd.append(locationInput);
+        actionTd.append(doneBtn, cancelBtn);
+        tr.append(nameTd, locationTd, actionTd);
+        return tr;
+      }
+
+      // 复用 createAccountMappingDialog（行 5228 createAddRow）的「新增」行范式：
+      //   表尾固定一行 [新增] 按钮（占满 td.colspan=3 视觉左对齐），点击 insertBefore 编辑行
+      function createAddRow() {
+        const tr = document.createElement('tr');
+        tr.className = 'add-row';
+        tr.innerHTML = `
+          <td><button class="text-action" type="button" data-action="add">新增</button></td>
+          <td></td>
+          <td></td>
+        `;
+        tr.querySelector('[data-action="add"]').addEventListener('click', () => {
+          tbody.insertBefore(createEditableNewRow(), tr);
+        });
+        return tr;
+      }
+
+      async function refreshTable() {
+        let channels = [];
+        try {
+          const result = await desktopApi.channels.list();
+          if (result && result.status === 'ok' && Array.isArray(result.channels)) {
+            channels = result.channels;
+          } else {
+            openModal(createAlertDialog(`加载银行渠道列表失败：${result?.message || '未知错误'}`));
+            return;
+          }
+        } catch (err) {
+          openModal(createAlertDialog(`加载银行渠道列表异常：${err && err.message ? err.message : err}`));
+          return;
+        }
+        tbody.innerHTML = '';
+        // 2026-05-27 fix1-N5-UI-6.1：银行渠道管理页面跳过 is_builtin=1 行
+        //   「通用」作为系统兜底渠道仍存在于 DB，但用户不应在管理界面看到 / 编辑 / 删除；
+        //   DB 层 deleteChannel / updateChannel 已抛错（防御性，即使有 bug 让 UI 透出仍阻止落库）
+        channels
+          .filter((channel) => !channel.isBuiltin)
+          .forEach((channel) => {
+            tbody.appendChild(createReadOnlyRow(channel));
+          });
+        tbody.appendChild(createAddRow());
+      }
+
+      dialog.querySelector('.icon-close').addEventListener('click', closeAndCallback);
+      dialog.querySelector('[data-action="done"]').addEventListener('click', closeAndCallback);
+
+      refreshTable();
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // v2.1.9 N7 Phase 7 T29：场景模板导出弹框 factory（spec §4.5 + §6）
+    //   标题：「选择导出的银行渠道的模板」
+    //   内容：多选 checklist（枚举 = channels 表全集，含「通用」）
+    //   操作：「导出」按钮 → 调 desktopApi.scenarios.exportBundle(selectedChannelIds)
+    //   main 端 saveDialog 让用户选路径 → 写入 JSON 文件 → 返回 status
+    //
+    // 资金红线（spec §10.2）：
+    //   - 必须 ≥ 1 个渠道勾选才允许导出（前端 + main 端双校验）
+    //   - main 端用 SUPPORTED_SCENARIO_BUNDLE_VERSION + scenarios-bundle-io 保证类型隔离
+    function createExportScenarioBundleDialog({ onCompleted, onCancel } = {}) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card export-scenario-bundle-card';
+      // 2026-05-27 fix1-N5-UI-5：
+      //   5.1 多选下拉用项目内 .new-account-currency-option + .new-account-checkbox 范式
+      //       checkbox 在左、文本在右（与"维护大账号"模块一致）
+      //   5.2 删除"加载渠道列表中..."loading hint 文案，仅保留标题 + 多选区 + 按钮
+      //       （加载异常仍弹 alert；列表为空时也用 alert 而非 inline hint）
+      //   5.3 右下角按钮顺序：导出（左）+ 取消（右）
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">选择导出的银行渠道的模板</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body" style="padding: 16px 24px;">
+          <div class="export-scenario-bundle-checklist" data-role="channel-checklist"></div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="confirm-export">导出</button>
+          <button class="secondary-btn small" type="button" data-action="cancel-export">取消</button>
+        </div>
+      `;
+
+      const checklistContainer = dialog.querySelector('[data-role="channel-checklist"]');
+      const exportBtn = dialog.querySelector('[data-action="confirm-export"]');
+      const cancelBtn = dialog.querySelector('[data-action="cancel-export"]');
+      exportBtn.disabled = true;
+
+      function closeWithCancel() {
+        closeModal();
+        if (typeof onCancel === 'function') onCancel();
+      }
+      dialog.querySelector('.icon-close').addEventListener('click', closeWithCancel);
+      // 2026-05-27 fix1-N5-UI-5.3：取消按钮 = 同 closeWithCancel（关弹框 + 回调）
+      cancelBtn.addEventListener('click', closeWithCancel);
+
+      (async () => {
+        let channels = [];
+        try {
+          const result = await desktopApi.channels.list();
+          if (result && result.status === 'ok' && Array.isArray(result.channels)) {
+            channels = result.channels;
+          } else {
+            openModal(createAlertDialog(
+              `加载银行渠道列表失败：${result?.message || '未知错误'}`,
+              { onConfirm: closeWithCancel }
+            ));
+            return;
+          }
+        } catch (err) {
+          openModal(createAlertDialog(
+            `加载银行渠道列表异常：${err && err.message ? err.message : err}`,
+            { onConfirm: closeWithCancel }
+          ));
+          return;
+        }
+        if (channels.length === 0) {
+          openModal(createAlertDialog(
+            '渠道列表为空，请先新建渠道再导出',
+            { onConfirm: closeWithCancel }
+          ));
+          return;
+        }
+        // 2026-05-27 fix1-N5-UI-5.1：每行 <label class="new-account-currency-option">
+        //   DOM 顺序：checkbox 在左 + text 在右（覆盖 .new-account-currency-option 默认的 space-between；
+        //   配套 CSS .export-scenario-bundle-checklist 强制 justify-content: flex-start + gap）
+        checklistContainer.innerHTML = channels.map((c) => {
+          const label = escapeHtml(c.label || `${c.name}-${c.ownerLocation}`);
+          // 默认全选（用户体验：导出场景一般是完整复制，全选符合直觉；用户可去勾不需要的）
+          return `
+            <label class="new-account-currency-option">
+              <input type="checkbox" class="new-account-checkbox" data-role="channel-checkbox" data-channel-id="${c.id}" checked />
+              <span class="new-account-currency-option-text">${label}</span>
+            </label>
+          `;
+        }).join('');
+        exportBtn.disabled = false;
+      })();
+
+      exportBtn.addEventListener('click', async () => {
+        const checkedBoxes = checklistContainer.querySelectorAll('input[data-role="channel-checkbox"]:checked');
+        const channelIds = Array.from(checkedBoxes).map((cb) => Number(cb.dataset.channelId)).filter((n) => Number.isFinite(n) && n > 0);
+        if (channelIds.length === 0) {
+          openModal(createAlertDialog('请至少勾选一个银行渠道再导出', {
+            onConfirm: () => openModal(createExportScenarioBundleDialog({ onCompleted, onCancel }))
+          }));
+          return;
+        }
+        exportBtn.disabled = true;
+        let result;
+        try {
+          result = await desktopApi.scenarios.exportBundle(channelIds);
+        } catch (err) {
+          exportBtn.disabled = false;
+          openModal(createAlertDialog(
+            `导出异常：${err && err.message ? err.message : err}`,
+            { onConfirm: () => openModal(createExportScenarioBundleDialog({ onCompleted, onCancel })) }
+          ));
+          return;
+        }
+        if (!result || result.status === 'cancelled') {
+          // 用户取消 saveDialog → 不关弹框，让用户重选
+          exportBtn.disabled = false;
+          return;
+        }
+        if (result.status === 'failed') {
+          exportBtn.disabled = false;
+          openModal(createAlertDialog(
+            `导出失败：${result.message || '未知错误'}`,
+            { onConfirm: () => openModal(createExportScenarioBundleDialog({ onCompleted, onCancel })) }
+          ));
+          return;
+        }
+        // status='ok'
+        closeModal();
+        openModal(createAlertDialog(
+          `导出成功：<br/>文件：${escapeHtml(result.filePath || '')}<br/>渠道数：${result.exportedChannels || 0}<br/>场景数：${result.exportedScenarios || 0}`,
+          { onConfirm: () => { if (typeof onCompleted === 'function') onCompleted(); } }
+        ));
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // v2.1.9 N5 Phase 5 T20 / T22：场景「转移到目标银行渠道」弹框 factory（spec §4.3）
+    //   单条转移（T20）：opts.scenarioIds = [oneId]
+    //   批量转移（T22）：opts.scenarioIds = [...allCheckedIds]
+    //   currentChannelId：当前所在渠道（从下拉中排除，防止"转移到自己"）
+    //   onCompleted：转移成功回调（关弹框 + 刷新场景管理）
+    //   onCancel：用户点 ×/空白处取消的回调（回到场景管理 dialog）
+    //
+    // 资金红线（spec §10.1 转移搬运语义不可逆）：
+    //   弹框文案明确含场景 id 数；用户点「完成」前可二次确认
+    //   DB 层事务保护：失败抛错 → UI 弹错误 + 不关弹框（用户可改选目标重试）
+    function createTransferScenariosDialog({ scenarioIds, currentChannelId, onCompleted, onCancel }) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card transfer-scenarios-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">请选择转移到的目标银行渠道</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body" style="padding: 16px 24px;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <label class="select-label" style="white-space: nowrap;">目标渠道</label>
+            <!-- 2026-05-27 fix1-N5-UI-3：转移弹框下拉视觉同主面板"模式"下拉（.select-shell + .template-select） -->
+            <div class="select-shell" style="flex: 1;">
+              <select class="template-select" data-role="target-channel" style="min-width: 220px;"></select>
+            </div>
+          </div>
+          <div data-role="loading-hint" style="margin-top: 8px; color: #888; font-size: 12px;">加载渠道列表中...</div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="confirm">完成</button>
+        </div>
+      `;
+
+      const select = dialog.querySelector('[data-role="target-channel"]');
+      const loadingHint = dialog.querySelector('[data-role="loading-hint"]');
+      const confirmBtn = dialog.querySelector('[data-action="confirm"]');
+      confirmBtn.disabled = true;
+
+      function closeWithCancel() {
+        closeModal();
+        if (typeof onCancel === 'function') onCancel();
+      }
+      dialog.querySelector('.icon-close').addEventListener('click', closeWithCancel);
+
+      (async () => {
+        let channels = [];
+        try {
+          const result = await desktopApi.channels.list();
+          if (result && result.status === 'ok' && Array.isArray(result.channels)) {
+            channels = result.channels;
+          } else {
+            openModal(createAlertDialog(
+              `加载银行渠道列表失败：${result?.message || '未知错误'}`,
+              { onConfirm: () => { if (typeof onCancel === 'function') onCancel(); } }
+            ));
+            return;
+          }
+        } catch (err) {
+          openModal(createAlertDialog(
+            `加载银行渠道列表异常：${err && err.message ? err.message : err}`,
+            { onConfirm: () => { if (typeof onCancel === 'function') onCancel(); } }
+          ));
+          return;
+        }
+        // 排除当前所在渠道（spec §4.3：不含当前所在渠道）
+        const filtered = channels.filter((c) => Number(c.id) !== Number(currentChannelId));
+        if (filtered.length === 0) {
+          loadingHint.textContent = '没有可转移到的其他渠道，请先新建渠道';
+          loadingHint.style.color = '#c00';
+          return;
+        }
+        select.innerHTML = filtered.map((c) => {
+          const label = escapeHtml(c.label || `${c.name}-${c.ownerLocation}`);
+          return `<option value="${c.id}">${label}</option>`;
+        }).join('');
+        loadingHint.style.display = 'none';
+        confirmBtn.disabled = false;
+      })();
+
+      confirmBtn.addEventListener('click', async () => {
+        const targetChannelId = Number(select.value);
+        if (!Number.isFinite(targetChannelId) || targetChannelId <= 0) {
+          openModal(createAlertDialog('请先选择目标渠道', {
+            onConfirm: () => openModal(createTransferScenariosDialog({
+              scenarioIds, currentChannelId, onCompleted, onCancel
+            }))
+          }));
+          return;
+        }
+        const result = await desktopApi.scenarios.transfer({ scenarioIds, targetChannelId });
+        if (!result || result.status !== 'ok') {
+          openModal(createAlertDialog(
+            `转移失败：${result?.message || '未知错误'}`,
+            { onConfirm: () => openModal(createTransferScenariosDialog({
+              scenarioIds, currentChannelId, onCompleted, onCancel
+            })) }
+          ));
+          return;
+        }
+        closeModal();
+        if (typeof onCompleted === 'function') onCompleted(targetChannelId, result.transferredCount);
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     function createScenariosManagerDialog(allowedCategories = null) {
       // v2.1.0-beta.2 PR-A：白名单过滤（null = 不过滤，向后兼容）
       // 同时落 state.activeScenarioListFilter，让所有 reopen 链路（reopenScenariosManager helper）
@@ -5465,15 +6003,35 @@
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card manager-card scenarios-manager-card';
+      // v2.1.9 N5：场景管理顶部新增「银行渠道」选择器 + 「管理」按钮（spec §4.1）
+      //   初始默认选「通用」(id=1)；下拉渲染由 refreshChannelFilter 延迟填充
+      //   activeChannelId 状态局部维护；切换时 refreshTable 重新拉取场景列表
+      // v2.1.9 N5 Phase 5 T21：批量操作模式（局部状态）
+      //   inBatchMode = false → 隐藏勾选列 + 隐藏批量动作按钮
+      //   inBatchMode = true  → 表格左侧出现勾选列（含表头全选）+ footer 右侧出现「转移」「删除」按钮
+      //   再次点「批量操作」→ 退出批量模式
+      // 关键设计决策：勾选列用 <th>/<td> hidden 切换（CSS display:none），不动表结构 → 列宽不抖动
+      // 行内「转移」按钮 + footer「批量操作」组合可叠加（单条转移不阻塞批量模式）
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">场景管理</div>
+          <div class="scenario-channel-filter-wrapper" style="display: inline-flex; align-items: center; gap: 8px; margin-left: 16px;">
+            <label class="select-label channel-filter-label" style="white-space: nowrap;">银行渠道</label>
+            <!-- 2026-05-27 fix1-N5-UI-3：单选下拉视觉同主面板"模式"下拉（.select-shell + .template-select.small） -->
+            <div class="select-shell channel-filter-shell" style="flex: 0 0 auto;">
+              <select id="scenario-channel-filter" class="template-select small" data-role="channel-filter" data-channel-id="1" style="min-width: 160px;"></select>
+            </div>
+            <button class="secondary-btn small" type="button" data-action="manage-channels">管理</button>
+          </div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="table-wrapper">
           <table class="data-table scenarios-table">
             <thead>
               <tr>
+                <th class="scenarios-col-checkbox" data-role="checkbox-col" style="width: 32px; padding-left: 8px; padding-right: 0; text-align: center; display: none;">
+                  <input type="checkbox" data-role="select-all" title="全选 / 取消全选" />
+                </th>
                 <th class="scenarios-col-id" style="width: ${idWidth}; padding-left: 0; padding-right: 0; text-align: left; white-space: nowrap;"><span style="display: inline-block; margin-left: 21px;">序号</span></th>
                 <th class="scenarios-col-category" style="width: ${categoryWidth}; padding-left: 0; padding-right: 4px; text-align: left;">功能类别</th>
                 <th class="scenarios-col-name" style="width: ${nameWidth}; padding-left: 0; text-align: left;">场景名称</th>
@@ -5485,13 +6043,42 @@
             <tbody></tbody>
           </table>
         </div>
+        <!-- 2026-05-27 fix1-N5-UI-4：footer 重排为「左组 + spacer + 右组」
+             左组：新增场景 + 批量操作（普通模式）/ 新增场景 + 退出批量 + 转移 + 删除（批量模式）
+             右组：导入模板文件 + 导出模板文件 + 完成（始终紧贴右）
+             spacer 用 margin-left:auto 把右组推到最右；左组按钮紧贴；右组按钮间隙缩小 -->
         <div class="dialog-actions scenarios-manager-footer">
           <button class="primary-btn small" type="button" data-action="add-scenario">新增场景</button>
-          <button class="primary-btn small" type="button" data-action="finish">完成</button>
+          <button class="secondary-btn small" type="button" data-action="batch-mode-toggle">批量操作</button>
+          <button class="secondary-btn small" type="button" data-action="batch-transfer" style="display: none;">转移</button>
+          <button class="danger-btn small" type="button" data-action="batch-delete" style="display: none;">删除</button>
+          <!-- spacer：占据剩余宽度，把右组推到最右；display:flex 已 gap，spacer 是空 div + flex:1 -->
+          <div class="scenarios-footer-spacer" style="flex: 1 1 auto;"></div>
+          <!-- v2.1.9 N7 Phase 7 T28：场景模板按渠道导入/导出 -->
+          <div class="scenarios-footer-right-group">
+            <button class="secondary-btn small" type="button" data-action="import-scenario-bundle">导入模板文件</button>
+            <button class="secondary-btn small" type="button" data-action="export-scenario-bundle">导出模板文件</button>
+            <button class="primary-btn small" type="button" data-action="finish">完成</button>
+          </div>
         </div>
       `;
 
       const tbody = dialog.querySelector('tbody');
+      const channelFilterSelect = dialog.querySelector('[data-role="channel-filter"]');
+      // v2.1.9 N5 Phase 5 T21：批量模式 DOM 引用
+      const checkboxHeaderTh = dialog.querySelector('[data-role="checkbox-col"]');
+      const selectAllCheckbox = dialog.querySelector('[data-role="select-all"]');
+      const batchModeToggleBtn = dialog.querySelector('[data-action="batch-mode-toggle"]');
+      const batchTransferBtn = dialog.querySelector('[data-action="batch-transfer"]');
+      const batchDeleteBtn = dialog.querySelector('[data-action="batch-delete"]');
+      let inBatchMode = false;
+
+      // v2.1.9 N5：当前选定渠道 id（默认「通用」id=1）；refreshTable 按此过滤场景
+      //   state.activeScenarioChannelId 同步落给 reopen 链路（reopenScenariosManager helper）使用
+      let activeChannelId = Number(state.activeScenarioChannelId) > 0
+        ? Number(state.activeScenarioChannelId)
+        : 1;
+      state.activeScenarioChannelId = activeChannelId;
 
       function renderRow(scenario, displayIndex) {
         const tr = document.createElement('tr');
@@ -5502,13 +6089,19 @@
         // - task R2-8：compact 模式（单类别入口）隐藏 优先级 + 是否启动 td
         const priorityTd = isCompactView ? '' : `<td class="scenarios-col-priority">${escapeHtml(String(scenario.priority))}</td>`;
         const enabledTd = isCompactView ? '' : `<td class="scenarios-col-enabled"><input type="checkbox" data-row-action="toggle-enabled" ${scenario.enabled ? 'checked' : ''} /></td>`;
+        // v2.1.9 N5 Phase 5 T21：勾选列（批量模式下显示）
+        const checkboxDisplay = inBatchMode ? '' : 'display: none;';
         tr.innerHTML = `
+          <td class="scenarios-col-checkbox" data-role="row-checkbox-cell" style="width: 32px; padding-left: 8px; padding-right: 0; text-align: center; ${checkboxDisplay}">
+            <input type="checkbox" data-row-action="select-row" />
+          </td>
           <td class="scenarios-col-id" style="padding-left: 0; padding-right: 0; text-align: left; white-space: nowrap;"><span style="display: inline-block; margin-left: 21px;">${escapeHtml(String(displayIndex))}</span></td>
           <td class="scenarios-col-category">${escapeHtml(getCategoryLabel(scenario.category))}</td>
           <td class="scenarios-col-name">${escapeHtml(scenario.name)}</td>
           ${priorityTd}
           <td class="scenarios-col-actions">
             <button class="text-action" type="button" data-row-action="manage">管理</button>
+            <button class="text-action" type="button" data-row-action="transfer">转移</button>
             <button class="text-action danger-text" type="button" data-row-action="delete">删除</button>
           </td>
           ${enabledTd}
@@ -5516,15 +6109,124 @@
         return tr;
       }
 
+      // v2.1.9 N5 Phase 5 T21：批量模式切换 — 显隐勾选列 + 批量动作按钮
+      //   再次点击 batch-mode-toggle 退出批量模式 + 清空所有勾选状态（避免下次进入时残留）
+      function setBatchMode(next) {
+        inBatchMode = !!next;
+        checkboxHeaderTh.style.display = inBatchMode ? '' : 'none';
+        batchTransferBtn.style.display = inBatchMode ? '' : 'none';
+        batchDeleteBtn.style.display = inBatchMode ? '' : 'none';
+        batchModeToggleBtn.classList.toggle('active', inBatchMode);
+        batchModeToggleBtn.textContent = inBatchMode ? '退出批量' : '批量操作';
+        // 显隐所有行的勾选列；退出时清空勾选状态
+        tbody.querySelectorAll('[data-role="row-checkbox-cell"]').forEach((td) => {
+          td.style.display = inBatchMode ? '' : 'none';
+        });
+        if (!inBatchMode) {
+          tbody.querySelectorAll('input[data-row-action="select-row"]').forEach((cb) => {
+            cb.checked = false;
+          });
+          if (selectAllCheckbox) selectAllCheckbox.checked = false;
+        }
+      }
+
+      // 收集当前批量勾选的 scenario id 数组
+      function collectCheckedScenarioIds() {
+        const ids = [];
+        tbody.querySelectorAll('tr').forEach((tr) => {
+          const cb = tr.querySelector('input[data-row-action="select-row"]');
+          if (cb && cb.checked && tr.dataset.id) {
+            ids.push(Number(tr.dataset.id));
+          }
+        });
+        return ids;
+      }
+
+      // 收集当前批量勾选的场景名（用于批量删除确认框列出清单）
+      function collectCheckedScenarioNames() {
+        const names = [];
+        tbody.querySelectorAll('tr').forEach((tr) => {
+          const cb = tr.querySelector('input[data-row-action="select-row"]');
+          if (cb && cb.checked) {
+            const nameTd = tr.querySelector('.scenarios-col-name');
+            if (nameTd) names.push(nameTd.textContent || '');
+          }
+        });
+        return names;
+      }
+
       async function refreshTable() {
         const scenarios = await loadScenariosOrAlert();
         if (scenarios === null) return;
         // v2.1.0-beta.2 PR-A：按白名单过滤
-        const visible = filter ? scenarios.filter((s) => filter.includes(s.category)) : scenarios;
+        let visible = filter ? scenarios.filter((s) => filter.includes(s.category)) : scenarios;
+        // v2.1.9 N5：再按当前选定渠道过滤（spec §4.1；activeChannelId 默认 1 = 通用）
+        //   场景列表的 channelId 字段由 scenarios-repository.listScenarios 返回（N5 加列）
+        //   老库未 backfill 行 channelId == null → repository rowToListItem 已兜底为 1
+        visible = visible.filter((s) => Number(s.channelId || 1) === Number(activeChannelId));
         tbody.innerHTML = '';
         // v2.1.0-beta.2 PR-A Round 2（task R2-7）：传 displayIndex（1-based 列表内顺序）给 renderRow
         visible.forEach((scenario, idx) => {
           tbody.appendChild(renderRow(scenario, idx + 1));
+        });
+        // v2.1.9 N5 Phase 5 T21：refresh 后重置「全选」状态（新建 rows 都未勾）
+        if (selectAllCheckbox) selectAllCheckbox.checked = false;
+      }
+
+      // v2.1.9 N5：拉取渠道列表 + 填充 select 下拉
+      //   保留当前选定 activeChannelId（若仍存在）；否则 fallback 「通用」(id=1)
+      //   IPC 失败时静默兜底为单选「通用」（保持下拉至少 1 项可用）
+      async function refreshChannelFilter() {
+        let channels = [];
+        try {
+          const result = await desktopApi.channels.list();
+          if (result && result.status === 'ok' && Array.isArray(result.channels)) {
+            channels = result.channels;
+          } else {
+            openModal(createAlertDialog(`加载银行渠道列表失败：${result?.message || '未知错误'}`));
+          }
+        } catch (err) {
+          openModal(createAlertDialog(`加载银行渠道列表异常：${err && err.message ? err.message : err}`));
+        }
+        if (channels.length === 0) {
+          // 兜底：至少塞一个「通用」占位防 select 空表
+          // 2026-05-27 fix1-N5-UI-6.2：兜底 label 同步退化为 '通用'（不再「通用-通用」）
+          channels = [{ id: 1, name: '通用', ownerLocation: '通用', label: '通用', displayIndex: 1, isBuiltin: true }];
+        }
+        // 若当前 activeChannelId 在新列表中不存在 → 回退「通用」
+        if (!channels.some((c) => Number(c.id) === Number(activeChannelId))) {
+          activeChannelId = 1;
+          state.activeScenarioChannelId = 1;
+        }
+        channelFilterSelect.innerHTML = channels.map((c) => {
+          const label = escapeHtml(c.label || `${c.name}-${c.ownerLocation}`);
+          const selected = Number(c.id) === Number(activeChannelId) ? ' selected' : '';
+          return `<option value="${c.id}"${selected}>${label}</option>`;
+        }).join('');
+        channelFilterSelect.dataset.channelId = String(activeChannelId);
+      }
+
+      // v2.1.9 N5：渠道下拉 change → 切换 activeChannelId + 重渲场景列表
+      channelFilterSelect.addEventListener('change', async () => {
+        const next = Number(channelFilterSelect.value);
+        if (!Number.isFinite(next) || next <= 0) return;
+        activeChannelId = next;
+        state.activeScenarioChannelId = next;
+        channelFilterSelect.dataset.channelId = String(next);
+        await refreshTable();
+      });
+
+      // v2.1.9 N5：「管理」按钮 → 打开渠道管理弹框
+      //   渠道弹框关闭时回调 reopen 当前场景管理 dialog + 刷新渠道下拉
+      const manageChannelsBtn = dialog.querySelector('[data-action="manage-channels"]');
+      if (manageChannelsBtn) {
+        manageChannelsBtn.addEventListener('click', () => {
+          openModal(createChannelManagerDialog({
+            onClose: () => {
+              // 关闭渠道管理后回到当前场景管理 dialog（保留 filter + activeChannelId）
+              openModal(reopenScenariosManager());
+            }
+          }));
         });
       }
 
@@ -5557,6 +6259,24 @@
           return;
         }
 
+        // v2.1.9 N5 Phase 5 T20：单条「转移」按钮 → 转移弹框（复用 createTransferScenariosDialog）
+        //   单条转移：scenarioIds = [id]，currentChannelId = 当前 activeChannelId
+        //   onCompleted：关弹框 + reopen 场景管理（保留当前 filter + activeChannelId）
+        //   onCancel：关弹框 + reopen 场景管理（用户取消不损失任何状态）
+        if (action === 'transfer') {
+          openModal(createTransferScenariosDialog({
+            scenarioIds: [id],
+            currentChannelId: activeChannelId,
+            onCompleted: () => {
+              openModal(reopenScenariosManager());
+            },
+            onCancel: () => {
+              openModal(reopenScenariosManager());
+            }
+          }));
+          return;
+        }
+
         if (action === 'delete') {
           const name = tr.querySelector('.scenarios-col-name')?.textContent || '';
           openModal(createConfirmDialog({
@@ -5584,6 +6304,27 @@
           return;
         }
       });
+
+      // v2.1.9 N5 Phase 5 T21：勾选列交互（行选中 change + 全选/取消全选）
+      //   全选 checkbox 状态联动：所有行勾选 → 表头自动 checked；任一未勾 → 表头 unchecked
+      tbody.addEventListener('change', (event) => {
+        const rowCb = event.target.closest('input[data-row-action="select-row"]');
+        if (!rowCb) return;
+        // 同步表头状态
+        if (selectAllCheckbox) {
+          const allCbs = Array.from(tbody.querySelectorAll('input[data-row-action="select-row"]'));
+          selectAllCheckbox.checked = allCbs.length > 0 && allCbs.every((cb) => cb.checked);
+        }
+      });
+
+      if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', () => {
+          const next = selectAllCheckbox.checked;
+          tbody.querySelectorAll('input[data-row-action="select-row"]').forEach((cb) => {
+            cb.checked = next;
+          });
+        });
+      }
 
       // 是否启动 checkbox 用 change 事件单独绑（与 click 区分）
       tbody.addEventListener('change', async (event) => {
@@ -5650,7 +6391,204 @@
         openModal(createScenarioCategorySelectDialog(filter));
       });
 
-      refreshTable();
+      // v2.1.9 N5 Phase 5 T21：「批量操作」按钮 — 切换批量模式
+      if (batchModeToggleBtn) {
+        batchModeToggleBtn.addEventListener('click', () => {
+          setBatchMode(!inBatchMode);
+        });
+      }
+
+      // v2.1.9 N5 Phase 5 T22：「批量转移」按钮 — 复用 createTransferScenariosDialog
+      //   payload.scenarioIds = 当前所有勾选的 id；空选时弹提示
+      if (batchTransferBtn) {
+        batchTransferBtn.addEventListener('click', () => {
+          const ids = collectCheckedScenarioIds();
+          if (ids.length === 0) {
+            openModal(createAlertDialog('请先勾选至少一个场景再点「转移」', {
+              onConfirm: () => openModal(reopenScenariosManager())
+            }));
+            return;
+          }
+          openModal(createTransferScenariosDialog({
+            scenarioIds: ids,
+            currentChannelId: activeChannelId,
+            onCompleted: () => {
+              openModal(reopenScenariosManager());
+            },
+            onCancel: () => {
+              openModal(reopenScenariosManager());
+            }
+          }));
+        });
+      }
+
+      // v2.1.9 N5 Phase 5 T22：「批量删除」按钮 — 确认框列出场景名清单 + 确认后调 batch-delete IPC
+      //   资金红线（spec §10.1）：确认框必须含场景名清单（让用户能 review，不能盲删）
+      if (batchDeleteBtn) {
+        batchDeleteBtn.addEventListener('click', () => {
+          const ids = collectCheckedScenarioIds();
+          const names = collectCheckedScenarioNames();
+          if (ids.length === 0) {
+            openModal(createAlertDialog('请先勾选至少一个场景再点「删除」', {
+              onConfirm: () => openModal(reopenScenariosManager())
+            }));
+            return;
+          }
+          const nameList = names.map((n) => `• ${escapeHtml(n)}`).join('<br/>');
+          openModal(createConfirmDialog({
+            message: `确认批量删除以下 ${ids.length} 个场景？此操作不可撤销。<br/><br/>${nameList}`,
+            confirmText: '删除',
+            cancelText: '取消',
+            onConfirm: async () => {
+              const result = await desktopApi.scenarios.batchDelete(ids);
+              if (result && result.status === 'ok') {
+                // 双清缓存语义已在 IPC handler 内做（processingResult + reconIdFixResult 双清）
+                // 这里走 UI 侧两个 refresh，与单条 delete 保持一致 — 但批量可能跨 category，全跑覆盖
+                if (typeof refreshBankStatementStatus === 'function') await refreshBankStatementStatus();
+                if (typeof reloadReconIdFixScenarios === 'function') await reloadReconIdFixScenarios();
+                openModal(reopenScenariosManager());
+              } else {
+                openModal(createAlertDialog(
+                  `批量删除失败：${result?.message || '未知错误'}`,
+                  { onConfirm: () => openModal(reopenScenariosManager()) }
+                ));
+              }
+            },
+            onCancel: () => {
+              // 取消 → 不关 dialog；用户停留在场景管理
+            }
+          }));
+        });
+      }
+
+      // v2.1.9 N7 Phase 7 T28：「导入模板文件」按钮 — 调 desktopApi.scenarios.importBundle()
+      //   流程：openFile → main 解析 → 二阶段处理
+      //     - status='cancelled'  → 静默回 reopen
+      //     - status='failed'     → 弹错误 + reopen
+      //     - status='needs-confirm' → 弹确认框（列出缺失渠道）→ 确认后调 applyImport(bundle, {confirm=true})
+      //     - status='ok'         → 弹结果框（导入数 + 跳过数 + 创建渠道数）→ reopen
+      //   资金红线：误用 bundleVersion=4 文件 main 端会返 failed「文件类型不匹配」
+      const importBundleBtn = dialog.querySelector('[data-action="import-scenario-bundle"]');
+      if (importBundleBtn) {
+        importBundleBtn.addEventListener('click', async () => {
+          let result;
+          try {
+            result = await desktopApi.scenarios.importBundle();
+          } catch (err) {
+            openModal(createAlertDialog(
+              `导入场景模板文件异常：${err && err.message ? err.message : err}`,
+              { onConfirm: () => openModal(reopenScenariosManager()) }
+            ));
+            return;
+          }
+          if (!result || result.status === 'cancelled') {
+            // 用户取消文件选择 → 静默返回（不弹任何提示，与现有 templates.importBundle 模式一致）
+            return;
+          }
+          if (result.status === 'failed') {
+            openModal(createAlertDialog(
+              `导入失败：${result.message || '未知错误'}`,
+              { onConfirm: () => openModal(reopenScenariosManager()) }
+            ));
+            return;
+          }
+          if (result.status === 'needs-confirm') {
+            // 缺失渠道二阶段确认框（spec §6.3.1 D11=a）
+            const missing = Array.isArray(result.missingChannels) ? result.missingChannels : [];
+            const missingList = missing
+              .map((c) => `• ${escapeHtml(c.name)}-${escapeHtml(c.ownerLocation)}`)
+              .join('<br/>');
+            openModal(createConfirmDialog({
+              message: `导入将自动创建以下 ${missing.length} 个新渠道：<br/><br/>${missingList}<br/><br/>是否确认创建并继续导入？`,
+              confirmText: '确认创建',
+              cancelText: '取消',
+              onConfirm: async () => {
+                let applyResult;
+                try {
+                  applyResult = await desktopApi.scenarios.applyImport(result.bundle, {
+                    confirmCreateMissingChannels: true
+                  });
+                } catch (err) {
+                  closeModal();
+                  openModal(createAlertDialog(
+                    `应用导入异常：${err && err.message ? err.message : err}`,
+                    { onConfirm: () => openModal(reopenScenariosManager()) }
+                  ));
+                  return;
+                }
+                closeModal();
+                if (applyResult && applyResult.status === 'ok') {
+                  showImportResultDialog(applyResult);
+                } else {
+                  openModal(createAlertDialog(
+                    `导入失败：${applyResult?.message || '未知错误'}`,
+                    { onConfirm: () => openModal(reopenScenariosManager()) }
+                  ));
+                }
+              },
+              onCancel: () => {
+                closeModal();
+                openModal(reopenScenariosManager());
+              }
+            }));
+            return;
+          }
+          if (result.status === 'ok') {
+            showImportResultDialog(result);
+          }
+        });
+      }
+
+      // 导入结果框（成功后展示 导入数 / 跳过同名数 / 创建渠道数）
+      function showImportResultDialog(result) {
+        const importedCount = Number(result.importedCount) || 0;
+        const conflicts = Array.isArray(result.conflicts) ? result.conflicts : [];
+        const createdChannels = Array.isArray(result.createdChannels) ? result.createdChannels : [];
+        const lines = [];
+        lines.push(`成功导入 <b>${importedCount}</b> 个场景`);
+        if (createdChannels.length > 0) {
+          lines.push(`新建 ${createdChannels.length} 个渠道：${createdChannels.map((c) => escapeHtml(`${c.name}-${c.ownerLocation}`)).join(', ')}`);
+        }
+        if (conflicts.length > 0) {
+          const conflictList = conflicts
+            .map((c) => {
+              const reasonLabel = c.reason === 'channel-missing'
+                ? '渠道缺失未创建'
+                : (c.reason === 'name-duplicate' ? '同名场景已存在' : c.reason || '冲突');
+              return `• ${escapeHtml(c.channel || '')} / ${escapeHtml(c.scenario || '')} (${reasonLabel})`;
+            })
+            .join('<br/>');
+          lines.push(`跳过 ${conflicts.length} 个场景：<br/>${conflictList}`);
+        }
+        openModal(createAlertDialog(lines.join('<br/><br/>'), {
+          onConfirm: async () => {
+            // 导入完成 → 刷新场景列表（如选中渠道 ∈ createdChannels，仍按 activeChannelId 过滤）
+            await refreshChannelFilter();
+            await refreshTable();
+            // 双清 main 端缓存的语义已在 IPC handler 内完成；UI 侧补刷渠道下拉即可
+          }
+        }));
+      }
+
+      // v2.1.9 N7 Phase 7 T29：「导出模板文件」按钮 — 弹出导出选择弹框
+      //   弹框：多选渠道下拉 → 「导出」按钮 → 调 desktopApi.scenarios.exportBundle(channelIds)
+      //   main 端 saveDialog 让用户选路径；返回 status=ok/cancelled/failed
+      const exportBundleBtn = dialog.querySelector('[data-action="export-scenario-bundle"]');
+      if (exportBundleBtn) {
+        exportBundleBtn.addEventListener('click', () => {
+          openModal(createExportScenarioBundleDialog({
+            onCancel: () => openModal(reopenScenariosManager()),
+            onCompleted: () => openModal(reopenScenariosManager())
+          }));
+        });
+      }
+
+      // v2.1.9 N5：先拉渠道下拉，再渲场景表（场景表需 activeChannelId 正确才能正确过滤）
+      //   refreshChannelFilter 内部可能回退 activeChannelId（当原值不存在于渠道列表）
+      (async () => {
+        await refreshChannelFilter();
+        await refreshTable();
+      })();
 
       overlay.appendChild(dialog);
       return overlay;
@@ -8132,6 +9070,8 @@
       // v2.0.0-beta.3：银行对账单处理模块场景管理
       createScenariosManagerDialog,
       createScenarioCategorySelectDialog,
+      // v2.1.9 N5：银行渠道管理弹框（spec §4.2）
+      createChannelManagerDialog,
       // v2.0.0-beta.3 PR #32b：4 dialog factory（C1/C2/C3 配置 + 确认场景详情）
       createScenarioConfigDialogC1,
       createScenarioConfigDialogC2,
