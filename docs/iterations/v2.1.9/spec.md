@@ -1600,6 +1600,38 @@ ensureSchemaV2_1_9_N5（已有）
 
 **注意**：migration 顺序保证 `ensureScenariosChannelIdColumn` 先完成（所有 scenarios 都有 channel_id 值），再做 UNIQUE 索引切换，否则跨 channel 同名场景的迁移会因为旧库无 channel_id 列报错。
 
+#### 16.3.1 transferScenarios catch 配套修订（v0.10 Reverse Sync — 集成测试发现）
+
+> v0.9 起草 §16.3 时只列了 `createScenario` / `updateScenario` 两个 INSERT/UPDATE 入口；2026-05-27 集成测试 Case C 实施时发现 **transferScenarios 也是 (channel_id, name) 组合变更入口** — 它 UPDATE `channel_id` 列，可能让组合撞目标渠道已有同名 → 触发新复合 UNIQUE。本节补齐 reverse sync。
+
+**3 个写入入口与 UNIQUE 关系**：
+
+| 入口 | 改变的字段 | 可能触发新 UNIQUE (channel_id, name) |
+|---|---|---|
+| `createScenario` | INSERT name + channel_id（v2.1.9 N5 后默认 NULL，由 transferScenarios 补）| ✓ 但实际上 NULL 不参与去重 → 通常在 transferScenarios 阶段才触发 |
+| `updateScenario` | UPDATE name | ✓ 改 name 撞同 channel 同名 |
+| `transferScenarios` | UPDATE channel_id | ✓ 改 channel 撞目标 channel 同名 |
+
+**配套修订**：
+
+`transferScenarios` 的 catch 块也需要识别新 UNIQUE 错误并抛 friendly：
+
+```js
+} catch (error) {
+  db.exec('ROLLBACK');
+  if (isScenarioNameUniqueError(error)) {
+    throw new Error('目标渠道已有同名场景，请先重命名或删除目标渠道的同名场景');
+  }
+  throw error;
+}
+```
+
+**用户视角**：转移操作（场景管理→单条「转移」/ 批量「转移」）撞目标渠道同名场景时，UX 与 createScenario / updateScenario 一致。
+
+**unit + integration 覆盖**：
+- `tests/unit/backend/database/scenarios-repository.test.js` 新增 case：转移到已有同名的目标渠道 → 抛 friendly error
+- `scripts/integration/v2.1.9-sr-fix-1-coverage.js` Case C 1.2 更新：断言改 friendly error 文案；额外加 transferScenarios 跨同名场景目标场景
+
 ### 16.4 C2/C3 双维 unit case 矩阵（SR1 #4）
 
 **新增 case 至 `tests/unit/main-process/scenario-dispatcher.test.js`**（最少 15 case）：
