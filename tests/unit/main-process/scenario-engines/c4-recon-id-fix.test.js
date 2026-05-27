@@ -220,33 +220,46 @@ test.describe('findBestAmountSubset — maxSize 动态档位（spec.md F5-D1）'
 });
 
 test.describe('findBestAmountSubset — 性能护栏（spec.md F5-D5）', () => {
-  test('options.silent=true 抑制 console.warn（unit test 用）', () => {
-    // 抓 console.warn 调用次数
-    const originalWarn = console.warn;
+  // v2.1.9 SR-log-1 (T32h)：c4-recon-id-fix 的 console.warn 已替换为 appendModuleLog
+  //   spy 改为劫持 logger.appendModuleLog 而非 console.warn（spec §15.6）
+  test('options.silent=true 抑制告警日志（unit test 用）', () => {
+    const logger = require('../../../../src/backend/logger');
+    const originalAppend = logger.appendModuleLog;
     let warnCount = 0;
-    console.warn = () => { warnCount++; };
+    logger.appendModuleLog = (payload) => {
+      if (payload && (payload.level === 'warning' || payload.level === 'warn')) warnCount++;
+    };
     try {
       // pool=30 触发 safety-floor，silent=true 应不打 warn
       findBestAmountSubset(makeCandidates(Array(30).fill(100)), 800, '2026-05-22', { silent: true });
       assert.equal(warnCount, 0);
     } finally {
-      console.warn = originalWarn;
+      logger.appendModuleLog = originalAppend;
     }
   });
 
-  test('未传 silent 时大池子触发 console.warn', () => {
-    const originalWarn = console.warn;
+  test('未传 silent 时大池子触发 appendModuleLog warning（性能护栏告警）', () => {
+    const logger = require('../../../../src/backend/logger');
+    const originalAppend = logger.appendModuleLog;
     let warnCount = 0;
-    let warnMsg = '';
-    console.warn = (msg) => { warnCount++; warnMsg = String(msg); };
+    let warnPayload = null;
+    logger.appendModuleLog = (payload) => {
+      if (payload && (payload.level === 'warning' || payload.level === 'warn')) {
+        warnCount++;
+        warnPayload = payload;
+      }
+    };
     try {
       findBestAmountSubset(makeCandidates(Array(30).fill(100)), 800, '2026-05-22');
       assert.equal(warnCount, 1);
-      assert.match(warnMsg, /性能护栏/);
-      assert.match(warnMsg, /candidates=30/);
-      assert.match(warnMsg, /safety-floor/);
+      assert.ok(warnPayload, 'appendModuleLog 应被调用一次');
+      // 关键字段断言（替代原 console.warn 字符串 match）
+      assert.match(String(warnPayload.message || ''), /性能护栏/);
+      const detailsText = (warnPayload.details || []).join(' ');
+      assert.match(detailsText, /candidates=30/);
+      assert.match(detailsText, /safety-floor/);
     } finally {
-      console.warn = originalWarn;
+      logger.appendModuleLog = originalAppend;
     }
   });
 });

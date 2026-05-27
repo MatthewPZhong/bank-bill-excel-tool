@@ -538,9 +538,55 @@
 
 ---
 
-## 1.4 银行对账单处理（v2.0.0-beta.3 新增）
+## 1.4 银行对账单处理（v2.0.0-beta.3 新增；v2.1.9 N5 引入"银行渠道"维度）
 
 将一份银行对账单 xlsx（含 44 列固定表头 sheet「渠道对账单」）按用户配置的"场景"规则自动批处理，命中行被修改的单元格黄底输出，警告写到独立 error-report。
+
+### ⭐ v2.1.9 N5 重大变化：「银行渠道」维度引入
+
+**v2.1.9 起，场景按"银行渠道"分组管理**。每行银行账单按其 `Channel + 地区` 字段匹配到具体渠道（如「工商-上海」），调度时按**专属优先 + 通用兜底**双维 first-match-wins：
+
+```
+行 R → 拼 <Channel-地区> → 匹配渠道库
+  ↓ 命中（如「工商-上海」）
+[阶段 A：跑「工商-上海」专属场景集] first-match-wins
+  ↓ 未命中
+[阶段 B：跑「通用」场景集] first-match-wins
+  ↓ 未命中
+→ 行 R 进入 Sheet 2「未命中场景行」
+```
+
+**关键点**：
+
+- 「通用」是系统内置渠道（不可删不可改名），所有未匹配到具体渠道的行 + 专属未命中的行都走通用兜底
+- 单行最多命中 1 个场景（first-match-wins 不变量保留）
+- 场景管理顶部下拉过滤当前渠道；用「转移」按钮可把场景从一个渠道搬到另一个（搬运语义：A→B 后 A 内消失）
+- 「批量操作」按钮 + 勾选列支持批量转移/批量删除
+
+**N5 「场景模板」按渠道导入/导出**：场景管理底部「导出模板文件」选渠道生成 `scenarios-bundle-{YYYYMMDD}.json`；「导入模板文件」缺失渠道会弹确认框（用户确认后自动创建）+ 同名场景跳过报告。
+
+### ⭐ v2.1.9 N5 「命中场景行」独立报表（v2.1.8 Sheet 3 撤除）
+
+**v2.1.8 N3-2 引入的主输出 xlsx Sheet 3「命中场景行」在 v2.1.9 撤除**，迁移到独立报表：
+
+- **路径**：`Documents/网银账单生成小助手/error-reports/{date}/`
+- **文件名**：`命中场景行-{原文件 basename}-{timestamp}.xlsx`
+- **列结构**：原 44 列银行账单 headers + 末尾 3 列
+  - **匹配渠道**（D16=b 2026-05-27 修订）= **实际命中场景所属渠道 label**；命中专属 → `${name}-${ownerLocation}`（如「工商-上海」）；命中通用兜底 → `通用`；未命中 → 空字符串
+  - **匹配状态** = `命中`（行匹配到任意 channels 表记录，含通用本身）/ `兜底`（行未匹配，走通用兜底）
+  - **命中场景** = `[displayIndex] 场景名称`
+
+⚠️ 如有 VBA / Power Query / Python pandas 脚本读 v2.1.8 主输出 Sheet 3，必须改读独立报表。
+
+### ⚠️ v2.1.9 SR-FIX-1 — N5 银行渠道双维 dispatcher 已知边界（合并前补丁）
+
+PR #53 提交后的 self-review 发现 4 个 🔴 资金红线 bug，**已在合并前修复**（详 `docs/iterations/v2.1.9/spec.md §十六`）。修复后语义如下：
+
+- **C3 单 scenario 调用内 1v1 严格保留**（v2.1.7 F2 红线）：同 scenario 内一条 gw 行只能被一条 bank 行消费；dispatcher per-channel batch 调度天然满足
+- **C2 笛卡尔配对正常工作**：「专属渠道」下配的 C2 场景（账单类型 ≥ 1 行 + 对账字段 ≥ 1 行）现在能正确触发笛卡尔配对，修复 self-review 期发现的「专属渠道 C2 永不命中」bug
+- ⚠️ **跨 channel 跨 scenario gw 行可能被多次消费**（与 v2.1.8 单维行为一致；非 bug）：阶段 A 专属渠道 C3 消费的 gw 行，阶段 B 通用渠道 C3 仍可消费同一 gw 行。**用户层规避**：同 reconFields 配置的 C3 场景**不应**在专属渠道 + 通用渠道同时启用，否则同一 gw 金额会被多次匹配。如确需跨渠道 C3 复用，请确保 reconFields 互斥
+- ⚠️ **scenarios.name 跨渠道复用允许**（v2.1.9 SR-FIX-1 后行为）：v2.1.9 之前全表 UNIQUE(name) 不允许跨渠道复用场景名；v2.1.9 SR-FIX-1 改为 (channel_id, name) 复合 UNIQUE — 「通用」可有「对账场景」+「工商-上海」也可有「对账场景」，两条独立。同 channel 同名仍拒绝
+
 
 ### 工作流（4 按钮）
 
@@ -1302,6 +1348,89 @@ C4 类场景配置弹窗（`createScenarioConfigDialogC4`）共 5 行：
 
 ---
 
+## 故障排查（v2.1.9 SR-log-1 新增）
+
+应用运行期所有 `error` / `warning` / `info` 级别告警自动写入持久化日志，便于事后排查（无需再依赖临时控制台输出）。
+
+### 日志位置
+
+```
+Documents/网银账单生成小助手/
+├── app_activity_log.txt          ← 旧路径（v2.1.8 既有）；v2.1.9 起继续保留双写
+└── logs/                         ← v2.1.9 新结构（JSON Lines）
+    ├── 2026-05/                  ← 月级归档
+    │   ├── 05-27/                ← 日级目录
+    │   │   ├── error.log         ← 错误级（含 stack trace）
+    │   │   ├── warning.log       ← 警告级（容忍但需排查的提示）
+    │   │   └── info.log          ← 信息级（启动 / 操作记录）
+    │   └── 05-28/
+    └── 2026-06/
+```
+
+**说明**：
+- 日志按月+日两层归档，跨年自动归到下一年目录
+- 同级别日志按日累积（每行 1 个 JSON）；不滚动、不清理（永久保留）
+- 旧 `app_activity_log.txt` 文本格式保留（双写过渡）
+
+### JSON Lines 行格式
+
+每行一个独立 JSON 对象，字段：
+
+| 字段 | 含义 | 示例 |
+|---|---|---|
+| `ts` | ISO 8601 时间戳（含时区） | `"2026-05-27T14:32:18.456+08:00"` |
+| `level` | 级别 | `"error"` / `"warning"` / `"info"` |
+| `source` | 进程来源 | `"main"` / `"renderer"` |
+| `domain` | 业务域标签 | `"db"` / `"migration"` / `"ui"` / `"acquiring-bill-currency"` 等 |
+| `message` | 主消息 | `"数据库连接失败"` |
+| `details` | 附加细节数组 | `["ECONNREFUSED", "retry=3"]` |
+| `stack` | error 时附 stack trace | `"Error: ...\n  at foo"`（可选） |
+
+### 常用解析示例
+
+如果安装了 `jq`（macOS / Linux 自带或 brew install jq）：
+
+```bash
+# 查看今日所有错误
+cat ~/Documents/网银账单生成小助手/logs/2026-05/05-27/error.log | jq -c .
+
+# 按 domain 过滤（例如只看 migration 相关错误）
+cat ~/Documents/网银账单生成小助手/logs/2026-05/05-27/error.log | jq -c '. | select(.domain=="migration")'
+
+# 提取 stack trace 关键路径
+cat ~/Documents/网银账单生成小助手/logs/2026-05/05-27/error.log | jq -r '.stack' | head -20
+```
+
+无 jq 时 Excel 也可直接打开（导入 → 文本 → JSON 模式）；或用 VS Code 装 JSON Lines 插件高亮。
+
+### 手动清理建议
+
+v2.1.9 不自动清理日志（永久保留策略）。日志体积估算：
+
+- 单条 JSON Line 平均 200-500 字节
+- 普通使用约 100-300 条/日 → ~50-150 KB/日 → ~1-5 MB/月 → ~12-60 MB/年
+
+如长期使用磁盘紧张，可手动清理：
+
+```bash
+# 清理 30 天前的日志（macOS / Linux）
+find ~/Documents/网银账单生成小助手/logs -type f -name "*.log" -mtime +30 -delete
+
+# Windows PowerShell 等价：
+Get-ChildItem "$env:USERPROFILE\Documents\网银账单生成小助手\logs" -Recurse -Filter "*.log" |
+  Where-Object {$_.LastWriteTime -lt (Get-Date).AddDays(-30)} | Remove-Item
+```
+
+提示：清理日志**不影响应用运行**（仅是历史排查记录），但请先备份 `app_activity_log.txt` 以保留早期 audit trail。
+
+### 排查工作流（推荐）
+
+1. **看 `app_activity_log.txt` 总览**：按日期块倒序找最近异常
+2. **进 `logs/{YYYY-MM}/{MM-DD}/error.log`** 拿 stack trace + domain 定位代码模块
+3. **跨日检索**：`grep -r "关键字" logs/` 找历史相似问题
+
+---
+
 ## 三、错误报告（v2.0.0 增强）
 
 应用在导入 / 处理失败时会生成错误报告文件，落盘位置因模块不同：
@@ -1340,6 +1469,71 @@ C4 类场景配置弹窗（`createScenarioConfigDialogC4`）共 5 行：
 - TXT：纯文本，适合粘贴到聊天工具或快速搜索
 
 ---
+
+## 七、v2.1.9 新增能力 / 升级提示（重要）
+
+### 7.1 🔴 首次启动 v2.1.9 自动备份 DB + N5 migration（必看）
+
+v2.1.9 启动时检测旧版本 schema（无 `channels` 表），将一次性执行 N5 migration：
+
+1. **自动备份**：用 SQLite `VACUUM INTO`（不锁写，比 v2.1.8 `fs.copyFileSync` 更安全）
+   - macOS：`~/Library/Application Support/bank-bill-excel-tool/backups/tool-data-bak-pre-N5-<timestamp>.sqlite`
+   - Windows：`%APPDATA%/bank-bill-excel-tool/backups/tool-data-bak-pre-N5-<timestamp>.sqlite`
+2. **新建 `channels` 表 + 「通用」内置渠道**（id=1, is_builtin=1, 不可删不可改名）
+3. **现有 scenarios 全部自动归到「通用」渠道**（backfill `channel_id = 1`）
+4. **配置完整保留** — 升级后场景管理打开默认显示「通用」渠道的全部场景
+
+### 7.2 主输出 xlsx Sheet 3 撤除（v2.1.8 → v2.1.9 二次变更）
+
+v2.1.8 N3-2 引入的「命中场景行」Sheet 3 在 v2.1.9 **从主输出移除**，迁移到独立报表：
+
+- **路径**：`Documents/网银账单生成小助手/error-reports/{date}/命中场景行-{原文件 basename}-{timestamp}.xlsx`
+- **列结构**：原 44 列 + 「匹配渠道」+「匹配状态（命中/兜底）」+「命中场景 [序号] 名称」
+- **影响**：如有 VBA / Power Query / Python pandas 脚本读 v2.1.8 主输出 Sheet 3，必须改读独立报表路径
+
+### 7.3 N7 场景模板按渠道导入/导出
+
+场景管理 dialog footer 新增 2 个按钮：
+
+- **导出模板文件**：弹框多选渠道 → 生成 `scenarios-bundle-{YYYYMMDD}.json`（独立 bundle 类型 `scenarioBundleVersion=1`）
+  - 跨环境/同事分享场景配置（独立于网银账单模板 `bundleVersion=4`，互认隔离）
+- **导入模板文件**：选 JSON 文件 → 解析
+  - 缺失渠道弹确认框列清单 + 用户确认后自动创建
+  - 同名场景跳过 + 结果框报告冲突清单
+  - 事务包裹保证导入失败不留半状态
+
+### 7.4 idle 清理阈值配置化（N1-settings，D21=c 无 UI）
+
+v2.1.8 起 idle 30min 阈值原为硬编码；v2.1.9 改为 settings 表存储 `acquiring_bill_idle_cleanup_minutes`（默认 30 / 范围 5-180）。
+
+**当前版本不提供 UI 入口**。如需修改，使用 sqlite3 客户端：
+
+```bash
+# macOS 路径
+sqlite3 ~/Library/Application\ Support/bank-bill-excel-tool/tool-data.sqlite
+# Windows 路径
+sqlite3 %APPDATA%\bank-bill-excel-tool\tool-data.sqlite
+
+# 改为 60 分钟（值必须在 5-180 范围内）
+UPDATE app_settings SET setting_value = '60', updated_at = datetime('now')
+WHERE setting_key = 'acquiring_bill_idle_cleanup_minutes';
+```
+
+**重启应用后生效**。`loadIdleCleanupMsFromSettings` 启动期读取 + 范围 5-180 兜底（非法值/超范围自动回退默认 30，避免 cleanup 永不触发）。
+
+### 7.5 状态框冒号后换行修复（N6）
+
+银行对账单处理模块状态框「已导出：xxx」/「已导入：xxx」之前冒号后双换行 bug 修复，现仅 1 次换行（其他 5 模块状态框视觉零外溢）。
+
+### 7.6 SR-log-1 全局告警日志化（待 Phase 8.8 完成后补充细节）
+
+所有告警（renderer setStatus error/warning + main console.error）统一写入 `Documents/网银账单生成小助手/logs/{YYYY-MM}/{MM-DD}/{level}.log`：
+
+- **路径示例**：`logs/2026-05/05-27/error.log`
+- **格式**：JSON Lines（`{"ts","level","source","domain","message","details?","stack?"}` 单行一条）
+- **解析示例**：`cat error.log | jq -c .`（每行独立 JSON 对象）
+- **永久保留不自动清理** — 用户视磁盘空间手动删超期月份目录（如 `rm -rf logs/2025-XX`）
+- 旧 `app_activity_log.txt` 仍正常 append（v2.1.9 双写兼容，v2.1.10 评估删旧）
 
 ## 六、v2.1.8 新增能力 / 升级提示（重要）
 

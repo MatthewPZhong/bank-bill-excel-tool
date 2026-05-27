@@ -27,6 +27,8 @@ const {
 } = require('../backend/acquiring-bill-currency-db/columns');
 const runRepo = require('../backend/acquiring-bill-currency-db/run-repository');
 const { applyWatermark } = require('./workbook-watermark');
+// v2.1.9 SR-log-1 (T32h)：替换 console.warn → appendModuleLog 双写
+const { appendModuleLog } = require('../backend/logger');
 
 let pkg = null;
 try { pkg = require('../../package.json'); } catch (_e) { pkg = { version: 'dev', author: { name: 'pzhong' } }; }
@@ -211,8 +213,17 @@ async function writeDiffWorkbook({ db, runId, monthKey, savePath, runElapsedMs =
 
   // ⚠️ 资金红线 sanity check：sum(segment rows) == 预期差异总数
   if (expectedTotal > 0 && totalWritten !== expectedTotal) {
-    // eslint-disable-next-line no-console
-    console.warn(`[acquiring-bill-currency] writeDiffWorkbook 行数对账失败：expected ${expectedTotal} vs written ${totalWritten}`);
+    // v2.1.9 SR-log-1：替换 console.warn → 日志上报（资金红线 sanity check 失败 → 关键审计线索）
+    appendModuleLog({
+      level: 'warning',
+      source: 'main',
+      domain: 'acquiring-bill-currency',
+      message: '[acquiring-bill-currency] writeDiffWorkbook 行数对账失败',
+      details: [
+        `expected=${expectedTotal}`,
+        `written=${totalWritten}`
+      ]
+    });
   }
 
   // ============================================================

@@ -1,5 +1,105 @@
 # Changelog
 
+## 2.1.9 - 2026-05-27（待发布草稿）
+
+v2.1.8 之后 1 轮迭代（α 范围），**9 项主题**：N5（银行渠道区分场景 — 🔴 资金红线 + DB schema 破坏性 migration）+ N6（状态框换行修复）+ N7（场景模板按渠道导入/导出 — 新 bundle 类型）+ SR-backup-1（sqlite VACUUM INTO 备份基建）+ G1-cont（单元测试 37 文件全量铺）+ SR-policy-1（integration-runner 清单自动同步）+ N1-settings（idle 30min 阈值 settings 化）+ N4 重构（migration 备份切到新 API）+ SR-log-1（全局告警统一日志化 + JSON Lines）。⚠️ **1 个🔴破坏性变更**（Sheet 3 主输出撤除 → 独立报表）+ **3 个资金红线护栏**（N5 双维 dispatcher + Sheet 3 输出契约 + DB schema migration）+ **N 个 important-variables 升格**（待 Phase 9 check-vars 跑后定稿）。
+
+### 新增
+
+- **N5 银行对账单按"银行渠道"区分场景**（🔴 资金红线 + 破坏性 migration）：新增 `channels` 表 + 「通用」内置渠道（is_builtin=1, id=1, 不可删不可改名）+ `scenarios.channel_id INTEGER REFERENCES channels(id) ON UPDATE CASCADE`；启动期 N5 migration（VACUUM INTO 备份 → 事务建表 + 加列 + backfill 现有 scenarios 到通用 → 标志位 `n5_channels_migrated=true`）；场景管理 dialog 顶部新增「银行渠道」单选过滤 + 「管理」按钮；新建 `createChannelManagerDialog` factory（名称/开户地/完成-修改/删除 3 列 + 「新增」按钮）；场景行新增「转移」按钮（搬运语义 A→B 后 A 内消失）；footer 加「批量操作」按钮 + 勾选列（含全选）+ 批量转移/批量删除；dispatcher 双维 first-match-wins（专属优先 + 通用兜底；spec §2.1 §2.4 不变量）+ 4 个新 metadata 字段 `_hitChannelKey` / `_matchStatus` / `_matchedChannelId` / `_fallbackChannelId`；导入时按 `<Channel>-<地区>` 匹配渠道 → 未命中走通用兜底但保留原始 channelKey 用于审计
+- **N5 Sheet 3 拆出**（🔴 对外契约破坏性变更）：v2.1.8 N3-2 引入的主输出 xlsx Sheet 3「命中场景行」**本版撤除**；改为独立报表 `命中场景行-{原文件 basename}-{timestamp}.xlsx` 落 `Documents/网银账单生成小助手/error-reports/{date}/`；列结构 = 原 44 列银行账单 headers + 末尾 3 列（匹配渠道 / 匹配状态 / 命中场景）；新建 `scenario-hit-rows-writer.js`；失败 graceful 不阻塞对账主流程
+- **N7 场景模板按渠道导入/导出**（新 bundle 类型）：独立 `scenarioBundleVersion=1` 与现有 `bundleVersion=4` 互认隔离；场景管理 footer 加「导入模板文件」「导出模板文件」按钮；导出弹框多选 channels → 单文件多渠道结构；导入二阶段确认（needs-confirm → apply）+ 缺失渠道弹确认框创建 + 同名场景跳过报告冲突 + 事务包裹
+- **N6 状态框「：」后两次换行 → 一次**：`renderer.js:3338` `:3351` 删冒号后冗余 `\n`（D18=a 仅银行对账单 2 行）；内层 `updateStatusBox` 零改动（v2.1.7 R3 §8.4.2 设计保留）；其他 5 模块 statusBox 视觉零外溢
+- **SR-backup-1 sqlite 安全备份基建**：新建 `src/backend/database/backup.js` — `createBackup(db, label, backupDir)` 用 `VACUUM INTO` 原子写（取代 v2.1.8 N4 `fs.copyFileSync` 三大隐患）；POC 后修订 spec API 名（DataBaseSync.backup 不存在 → VACUUM INTO）；label 白名单防 SQL 注入 + tmp + atomic rename；AppDatabase.createBackup 实例方法暴露
+- **N4 重构（顺带）**：v2.1.8 `ensureBillRawJsonV2Slim` 备份切到 `createBackup(db, 'pre-N4')`；签名加第三参 `createBackupFn`；标志位 / 9 字段裁剪 / 备份路径前缀 `tool-data-bak-pre-N4-*` 全部不变（v2.1.8 已发契约护栏）；调用方 4+2 处同步契约改造
+- **N1-settings idle 阈值 settings 化**（D21=c 修订）：硬编码 30min 改 settings 表 `acquiring_bill_idle_cleanup_minutes`（默认 30 + 范围 5-180）；启动期 `loadIdleCleanupMsFromSettings` 读取；getter 兜底（非法值回退默认 30）；**不做 UI** — 用户改阈值需用 sqlite3 客户端 `UPDATE app_settings SET setting_value = '60' WHERE setting_key = 'acquiring_bill_idle_cleanup_minutes';` + 重启应用生效（Phase 8.6 dev agent 自扩展的 `createAppSettingsDialog` + ⚙️ 入口按钮已回退）
+- **SR-policy-1 integration-runner 自动同步清单**：末尾生成 markdown 表 in-place 替换 `rules/integration-test-policy.md §七`（全 PASS 才同步）；时间戳东八区 + DO NOT EDIT 注释 + stdout 同步
+- **SR-log-1 全局告警统一日志化**：preload `desktopApi.app.reportLog` + main `app:report-log` IPC handler；renderer `updateStatusBox` + `createAlertDialog` wrapper hijack（175+ 调用方零改动覆盖）；49+ 处 console.error/warn 改造（main.js + main-process + backend 全部消除，logger.js 内部 stderr 兜底保留）；新日志结构 `logs/{YYYY-MM}/{MM-DD}/{level}.log`（月+日两层归档 + 永久保留 D32=a）+ JSON Lines 格式（`{ts, level, source, domain, message, details?, stack?}`）+ 双写兼容 `app_activity_log.txt`；新增 `appendModuleLog` + `setActivityLogStorageRoot` module-level storageRoot 注入；告警覆盖率 19% → 100%；35 集成 case + 19 logger unit + 11 preload-report-log unit
+- **G1-cont 单元测试全量铺**：v2.1.8 baseline 123 → **1099 case / 277 suites**（+976 case，远超 spec §11.5 ≥ 400 阈值）；铺设 37+ unit test 文件（第 1 层 14 + 第 2 层 24 + 配套 ipc/集成 测试）；CI 不阻断保留 v2.1.8 既定决策（D19=a）
+
+### 变更
+
+- **N5 spec Reverse Sync**（v0.6 / v0.7 / v0.8 三轮）：v0.6 SR-backup-1 POC 后改 API 名；v0.7 scenarios-repository.listScenarios 加 channelId 字段 +「通用」UI 删除按钮"不渲染"（防 DevTools 绕过）；v0.8 N1-settings 新建 createAppSettingsDialog factory + 9 文件 + N4 重构调用方契约同步 + SR-policy-1 regex `\Z` → `$(?![\s\S])` JS 兼容
+- **集成测试改造**：`bank-statement-hit-scenario-sheet.js` 26 case → 重命名 `*-report.js` 44 case；累计 **7 脚本 / 359 断言**（v2.1.8 6 脚本 324 + SR-log-1 新增 v2.1.9-sr-log-1.js 35 case）
+- **tasks.md T18 / T26 描述笔误**：实际接入点是 main.js:3077（dispatcher）+ main.js:3140（独立报表）；dev agent 严格遵守 task boundary 后 reverse sync 报告
+
+### 文档（待 Phase 9 T36 收尾）
+
+- `docs/iterations/v2.1.9/*.md` v0.5-0.8 五件套
+- `docs/iterations/v2.1.10/backlog.md` v0.1（β 范围 A3/A4/N4-cont-1/N4-cont-2）
+- `rules/important-variables.md` v12 升格（待 check-vars 定稿）
+- `docs/USER_GUIDE.md` 待补「渠道概念 / 导入导出 / 独立报表位置 / 故障排查日志位置」段
+
+### ⚠️ 升级提示（用户必读）
+
+- **首次启动自动备份 DB + N5 migration**：`<userData>/backups/tool-data-bak-pre-N5-<timestamp>.sqlite`（VACUUM INTO 不锁写）；现有 scenarios 全部自动归到「通用」渠道；配置完整保留
+- **主输出 Sheet 3 撤除（v2.1.8→v2.1.9 二次变更）**：迁移到独立报表 `命中场景行-{原文件 basename}-{timestamp}.xlsx` 落 `error-reports/{date}/`；如有读 v2.1.8 主输出 Sheet 3 的 VBA / Python 脚本必须改读独立报表
+- **N7 场景配置导出**：选渠道 → 生成 `scenarios-bundle-{YYYYMMDD}.json`；跨环境分享；导入时缺失渠道弹框 + 同名冲突报告
+- **N1-settings idle 阈值**（D21=c）：v2.1.8 硬编码 30min 改为 settings 表 `acquiring_bill_idle_cleanup_minutes`（默认 30 / 范围 5-180）；**不做 UI** — 用户改阈值用 sqlite3 客户端 `UPDATE app_settings SET setting_value = '60' WHERE setting_key = 'acquiring_bill_idle_cleanup_minutes';` + 重启应用生效
+- **SR-log-1 日志新位置**：`logs/{YYYY-MM}/{MM-DD}/{level}.log`（JSON Lines）+ 旧 `app_activity_log.txt` 仍写（双写）；`cat error.log | jq -c .` 解析；**永久保留不自动清理**，用户视磁盘手动删超期月份目录
+
+### 已知边界 case
+
+- **F5 #5 根因继续延期 v2.1.11+**：subset-sum 剪枝误剪 → TEST2.xlsx 43/57 行命中
+- **A3 worker 跨进程化拆 v2.1.10 β**：与 N4-cont-1/N4-cont-2 / A4 合并
+- **N5 渠道枚举膨胀（> 50 个）UI 虚拟滚动延期 v2.1.11+ 评估**
+- **SR-log-1 永久保留磁盘风险**：用户手动维护；v2.1.10+ 评估批量清理 UI
+- **N5 跨 channel 跨 scenario gw 重消费**（SR-FIX-1 §16.2 已知边界）：阶段 A 专属 C3 消费的 gw 行，阶段 B 通用 C3 仍可消费同一行；与 v2.1.8 单维行为一致；用户层规避见 USER_GUIDE §1.4
+
+### SR-FIX-1 round 3 — Codex 二次 review 修复（F1+F2 协同 bug + refactor）
+
+round 2 push 后 Codex 二次 review 抓到 1 个 P1 🔴：F2 修不彻底 — F1+F2 协同 bug。
+
+**根因**：round 2 保留 `applyScenarioBundleImport` 调 `createScenario` 不传 channelId + 后置 UPDATE 模式（spec 当时认为「最小破坏面」）。但 F1 让 createScenario 默认 channelId=1（通用），导致跨渠道同名 bundle 导入时先撞通用 UNIQUE 抛错 → UPDATE 永远到不了 → 合法的「通用 + 工商-上海同名场景」bundle 导入仍失败。
+
+**修复**：
+- 提取 `applyScenarioBundleImport` 到独立 module `src/main-process/scenarios-bundle-import.js`（155 行，deps 注入设计便于测试）
+- main.js 留 16 行 wrapper 转发（IPC handler 接口不变）
+- 修代码：`createScenario({..., channelId: targetChannel.id})` 直接传 + 删除后置 UPDATE
+- Case F 改造为真实端到端：F.0 sanity 保留 + F.1-F.4 4 个子 case 调真实 module（F.1 是 round 3 主要 bug 路径，bug 时此处 importedCount=0 或抛错）
+- spec §16.3.3 删「保留 UPDATE」决策 + 新增 §16.3.5 完整 F1+F2 协同 bug 设计
+
+**复盘 round 2 漏抓原因**：
+- 决策错误：spec §16.3.3 写「保留 UPDATE 作最小破坏面」— F1/F2 单独评估合理，协同后引入 bug
+- 测试盲区：round 2 Case F 直接 scenariosRepo.createScenario(channelId) 手写模拟，绕过了 main.js applyScenarioBundleImport 的真实代码路径
+
+**修复后测试**：
+- `npm run test:unit` 1145 → 1145（refactor 不增 case；既有 case 全过）
+- `npm run test:integration` 614 → **645 / 10 脚本**（v2.1.9-sr-fix-1-coverage.js 117 → **148** +31 断言，Case F 5 子 case 全过）
+- `npm run smoke` 0 regression
+
+### SR-FIX-1 round 2 — Codex 自动 review 修复（合并前补丁）
+
+PR push 后 Codex 自动 review 抓 5 个 finding：2 个 P1 🔴 + 2 个 P2 + 1 个 P3。**全部合并前修**（spec §16.3.2/16.3.3/16.3.4 reverse sync）：
+
+- **🔴 F1 createScenario 漏写 channel_id 修复**（P1 — v2.1.9 N5 核心功能失效）：UI 新增场景 payload 不传 channelId → 后端 INSERT 不写 channel_id → 落 NULL → dispatcher `WHERE channel_id=?` 永远查不到 → 用户新建的任何场景实际不工作。修复：`scenariosRepo.createScenario` 加 channelId 入参（缺省 1 + Number.isFinite 兜底 + hasChannelIdColumn 分支兼容老 schema）+ UI src/renderer-dialogs.js:8720-8732 完成新建附 `state.activeScenarioChannelId`；新增 5 unit case + 集成 Case E 端到端验证
+- **🔴 F2 applyScenarioBundleImport 全表查重漏修**（P1 — N7 跨渠道 bundle 互通失效）：SR-FIX-1 改了 schema 但 main.js:419 仍用 `SELECT WHERE name = ?` 全表查 → 跨 channel 同名错误跳过（与 D39 + spec §6.3.2 矛盾）。修复：改用 `database.findScenarioByChannelAndName(targetChannel.id, name)`（SR-FIX-1 已建 API + 新加 facade）；集成 Case F 验证
+- **🟡 F3 batchDelete vs deleteScenario 内置场景语义不一致**（P2）：`batchDelete` 拒删 is_builtin=1 但 `deleteScenario` 允许 + USER_GUIDE 说内置可删 → 不一致。修复：移除 batchDelete is_builtin 检查与 deleteScenario 对齐；unit/IPC case 同步修订
+- **🟡 F4 package-lock.json 版本未同步**（P2）：package.json=2.1.9 但 lockfile 顶部=2.1.8 → 元数据不一致。修复：`npm install --package-lock-only` 同步 3 处 version
+- **🟢 F5 git diff --check 不干净**（P3）：tasks.md:246 trailing whitespace + dispatcher.test.js:1137 EOF 多余空行。修复：删除
+
+**修复后测试**：
+- `npm run test:unit` 1140 → **1145**（+5 case F1）
+- `npm run test:integration` 595 → **614 / 10 脚本**（v2.1.9-sr-fix-1-coverage.js 98 → 117，Case E + Case F 新增）
+- `npm run smoke` 0 regression
+
+### SR-FIX-1 修复（合并前补丁 — PR #53 self-review 闭环）
+
+PR 提交后 self-review 发现 5 个 🔴 Critical + 9 Important + 5 Minor finding（详 `docs/iterations/v2.1.9/spec.md §十六`）。Critical 5 项中 #1-#4 涉及资金红线，**合并前**用 F1 方案修复：
+
+- **🔴 SR1 #1 修复 C3 1v1 红线**（dispatcher.js 重写）：v2.1.9 N5 dispatcher 初版 per-row 单调（`runScenario(scenario, [row], gwRows)`）→ C3 `usedGwRowIdx` 在 c3-gateway-recon-join.js:132 函数 scope 局部每次重置 → 多 bank 行可共费同一 gw 行（违反 v2.1.7 F2）。改 per-channel batch 调度（新增 `runChannelBatch` helper）：阶段 A 每个专属 channel 独立批量调 `runScenario(scenario, candidateRows, gwRows)`，阶段 B 通用渠道批量；C3 `usedGwRowIdx` 在每次 runScenario 调用 scope 内自然 1v1
+- **🔴 SR1 #2 修复 C2 永不命中**：C2 笛卡尔配对（c2-offset-bill-mark.js:124-148）依赖 `leftRows.filter` + `rightRows.filter` ≥ 1 行；per-row `[row]` 入参下 leftRows 或 rightRows 必空 → for 循环空跑 → 永不命中。per-channel batch 修复后接收完整 unlocked rows 集 → 配对正常
+- **🔴 SR1 #3 修复 scenarios.name UNIQUE 与 spec §6.3.2 冲突**：全表 `UNIQUE (name)` → 复合 `UNIQUE (channel_id, name)`；新增 `ensureScenariosNameUniqueByChannelId` migration（SR-backup-1 VACUUM INTO 备份 + 冲突预检 + 事务 swap rebuild + 标志位 `n5_scenarios_unique_migrated`）；`scenarios-repository.js` 新增 `isScenarioNameUniqueError` helper 兼容新旧错误消息 + `findByChannelAndName` API；N7 bundle 导入跨渠道复用场景名不再误判冲突
+- **🔴 SR1 #4 修复 C2/C3 双维 0 测试覆盖**：dispatcher.test.js 既有 30+ 双维 case 全用 C1；新增 15 case（spec §16.4 矩阵 case 1-15：C3 1v1 红线 + C2 笛卡尔 + 跨阶段 gw 边界 + reconFields=0 衍生方案 + 混合 first-match-wins + metadata 全字段断言）+ scenarios-repository.test.js 新增 5 case（R1-R3 + 2 migration 幼等）= 共 20 case；case 2 关键断言 `['GW-A', 'GW-B']` 严格 1v1 不共费
+- **🟡 SR1 #5 spec §5.2 同步**：D16 (a)→(b) 修订后 spec 表格滞后描述同步入文；USER_GUIDE §1.4「匹配渠道」列定义同步
+
+**修复后测试增量**：
+- `npm run test:unit` 从 1099 → **1139 / 0 fail**（+40，主因 dispatcher.test.js 重构 +15 - 9 删 + scenarios-repository.test.js +5 + 1 migration test ×2）
+- `npm run test:integration` **497/497** 9 脚本全过（acquiring-bill-currency-idle-cleanup 38 + acquiring-bill-currency-n4-migration 128 + bank-statement-hit-scenario-report 47 + new-account-balance-statement 36 + pending-data-reconciliation 33 + statement-generation-pipeline 45 + v2.1.9-n5-end-to-end 68 + v2.1.9-n5-migration 67 + v2.1.9-sr-log-1 35）
+- `npm run smoke` 11 模块全过 0 regression
+
+**未修 SR2/SR3 finding**：14 项 Important / Minor 留 v2.1.10 self-review 一轮收尾（不影响合并）
+
 ## 2.1.8 - 2026-05-26
 
 v2.1.7 之后 15 commit 收敛，**6 项主题**：F5（C4 算法重设 4/5 根因）+ G1（单元测试框架建立）+ N1→N1' v0.7（cleanup 改 idle 30min 触发 + 差异保留 + FK 反向同步）+ N2（C3「自取值」）+ N3（银行对账场景号修复 + Sheet 3）+ N4（差异表 29→12 列瘦身 + 破坏性 migration）+ v2.1.7-cleanup（10 项 minor 收尾）。⚠️ **2 个🔴破坏性变更**（N4 raw_json 删 17 字段 + N4 输出契约 29→12）+ **3 个资金红线护栏**（F5 算法 + N4 输出 + cleanupAfterRunBackground includeDiff 参数）+ **7 个 important-variables v11 升格**（Critical 3 / Important-skeleton 2 / Runtime-state 1 / deprecated 标记 1）。

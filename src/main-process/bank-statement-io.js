@@ -198,6 +198,9 @@ function ensureDateDir(exportRootDir) {
 // ===== writeBankStatementMainOutput =====
 // 用户已通过 saveDialog 选定 mainFilePath（绝对路径） → 直接写
 // v2.1.7 round 3 F8（spec §9.8.5）：unmatchedRows 可选（undefined / null → 单 sheet 旧行为；Array → 含 '未命中场景行' 第 2 sheet）
+// v2.1.9 N5 T25（spec §5.4 🔴 对外契约破坏性变更）：
+//   v2.1.8 N3-2 引入的 Sheet 3「命中场景行」已撤除 — 改独立报表
+//   独立报表 caller：main.js bank-statement:export handler → writeScenarioHitRows（scenario-hit-rows-writer.js）
 async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePath, unmatchedRows = null }) {
   if (!Array.isArray(modifiedRows)) {
     throw new Error('writeBankStatementMainOutput: modifiedRows 必须是数组');
@@ -210,8 +213,7 @@ async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePat
     fs.mkdirSync(dir, { recursive: true });
   }
   // v2.1.7 round 3 F8：透传 unmatchedRows 给 writeBankStatementOutput
-  // v2.1.8 N3-2：主业务流程启用 Sheet 3「命中场景行」（includeHitScenarioSheet=true）
-  const result = await writeBankStatementOutput(modifiedRows, headers, mainFilePath, unmatchedRows, true);
+  const result = await writeBankStatementOutput(modifiedRows, headers, mainFilePath, unmatchedRows);
   return { ...result, fileName: path.basename(mainFilePath) };
 }
 

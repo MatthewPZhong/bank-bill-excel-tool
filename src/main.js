@@ -21,9 +21,12 @@ const runRepo = require('./backend/acquiring-bill-currency-db/run-repository');
 
 // v2.1.8 N1' (v0.7)：idle 30min 自动 cleanup 计时器（spec §3.2.2 N1''-D6 ~ D13）
 //   - lastActivityTs：renderer 上报的用户最后活动时间（IPC `app:user-activity`），main 也用 mutex 间接判定（D6 AND 设计）
-//   - IDLE_CLEANUP_MS：闲置阈值，常量硬编码（D8 锁定 30min）
+//   - IDLE_CLEANUP_MS：闲置阈值
+//     v2.1.8：常量硬编码 30min（D8）
+//     v2.1.9 N1-settings (T32c, D21=c)：改 settings 化（5-180 分钟可调，默认 30）；启动期从 DB 读
+//       D21=c 决议：不提供 UI 设置入口，用户需用 sqlite3 客户端 UPDATE app_settings 后重启应用生效
 //   - IDLE_CHECK_INTERVAL_MS：定时器轮询粒度（2 分钟，远小于 30min 阈值，足够及时）
-const IDLE_CLEANUP_MS = 30 * 60 * 1000;
+let IDLE_CLEANUP_MS = 30 * 60 * 1000; // 启动后会被 setupIdleCleanupTimer 内 settings 值覆盖（默认 30 fallback）
 const IDLE_CHECK_INTERVAL_MS = 2 * 60 * 1000;
 let lastUserActivityTs = Date.now();
 let idleCleanupTimer = null;
@@ -58,6 +61,21 @@ const {
   readFlowFile
 } = require('./backend/biz-op-recon-import/reader');
 const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-dispatcher');
+// v2.1.9 N5：dispatcher 双维调度依赖 channels-repository（findByNameAndLocation + getBuiltinGeneral）
+const channelsRepository = require('./backend/database/channels-repository');
+// v2.1.9 N7：场景模板 bundle 序列化 / 解析 / 类型识别（spec §六）
+const {
+  serializeScenarioBundle,
+  parseScenarioBundle,
+  detectBundleType,
+  SUPPORTED_SCENARIO_BUNDLE_VERSION
+} = require('./backend/scenarios-bundle-io');
+// v2.1.9 SR-FIX-1 round 3 / spec §16.3.5：bundle import 主体提取到独立 module
+//   方便 integration test 直接走真实代码路径（round 2 因 main.js 局部函数未 exports
+//   → integration Case F 只能手写 sham 模拟 → 漏掉 F1+F2 协同 bug）
+const {
+  applyScenarioBundleImport: applyScenarioBundleImportImpl
+} = require('./main-process/scenarios-bundle-import');
 const {
   readBankStatement,
   readGatewayRecon,
@@ -65,6 +83,10 @@ const {
   writeErrorReportOutput,
   buildMainOutputFileName
 } = require('./main-process/bank-statement-io');
+// v2.1.9 N5 T26（spec §5.4 🔴 对外契约破坏性变更）：场景命中行独立报表 writer
+//   v2.1.8 主输出 Sheet 3 撤除 → 改 error-reports/{date}/命中场景行-{basename}-{ts}.xlsx
+//   失败 graceful：不阻塞主对账流程，仅 log 警告（spec §5.4）
+const { writeScenarioHitRows } = require('./main-process/scenario-hit-rows-writer');
 // v2.1.0-beta.1 PR-B：单据对账 ReconID 修复模块 IO + 引擎
 //   Round 3 增加 writeUnmatchedReport / buildUnmatchedReportFileName / buildTimestampMinute（双文件 export）
 const {
@@ -117,7 +139,9 @@ const {
   appendActivityRecord,
   appendLog,
   ensureActivityLogFile,
-  writeErrorReport
+  writeErrorReport,
+  // v2.1.9 SR-log-1 (T32h)：注入 storageRoot 给 main-process / backend 模块共用 appendModuleLog
+  setActivityLogStorageRoot
 } = require('./backend/logger');
 const {
   reportStartupFailure
@@ -314,6 +338,33 @@ function sanitizeFileName(value) {
     .trim();
 }
 
+// v2.1.9 N7 (Phase 7 T29)：场景模板 bundle 默认文件名时间戳（D13=a：scenarios-bundle-{YYYYMMDD}.json）
+function formatDateYYYYMMDD(date = new Date()) {
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
+}
+
+// v2.1.9 N7 (Phase 7 T30)：场景模板 bundle 应用导入（事务包裹 + 缺失渠道创建 + 同名场景跳过）
+//
+// v2.1.9 SR-FIX-1 round 3 / spec §16.3.5：主体提取到 src/main-process/scenarios-bundle-import.js
+//   本处保留薄壳 wrapper（保持函数名 + signature 不变，IPC handler 调用接口零变更）；
+//   实际逻辑由 applyScenarioBundleImportImpl 实现，deps 注入 database facade。
+//
+// 函数语义详见 src/main-process/scenarios-bundle-import.js 顶部注释。
+function applyScenarioBundleImport(bundle, options = {}) {
+  const db = database && database.db;
+  if (!db) {
+    throw new Error('applyScenarioBundleImport: database 未就绪');
+  }
+  return applyScenarioBundleImportImpl(bundle, options, {
+    db,
+    listChannels: () => database.listChannels(),
+    getBuiltinGeneralChannel: () => database.getBuiltinGeneralChannel(),
+    createChannel: (payload) => database.createChannel(payload),
+    findScenarioByChannelAndName: (channelId, name) => database.findScenarioByChannelAndName(channelId, name),
+    createScenario: (payload) => database.createScenario(payload)
+  });
+}
+
 function stripMarkdown(md) {
   return md
     .replace(/```\w*\n/g, '')
@@ -476,6 +527,8 @@ function initializeActivityLog() {
   }
 
   activityLogFilePath = ensureActivityLogFile(getActivityLogFallbackFilePath());
+  // v2.1.9 SR-log-1 (T32h)：注入 storageRoot 让 backend / main-process 模块走 appendModuleLog
+  setActivityLogStorageRoot(ensureStorageRoot());
   markStartupMetric(STARTUP_METRIC_MARKS.activityLogReady);
 
   appendActivityLogEntry({
@@ -497,10 +550,14 @@ function handleStartupFailure(error) {
   try {
     logPath = initializeActivityLog();
   } catch (logError) {
-    console.error(logError);
+    // v2.1.9 SR-log-1：日志系统初始化失败的最后兜底场景
+    //   - appendActivityLogEntry 此时尚未 ready，仅能 stderr 兜底
+    //   - 不写 console（v2.1.9 SR-log-1 要求 src/main.js 0 console 调用）
+    try { process.stderr.write(`[startup logger init failed] ${logError && logError.stack ? logError.stack : String(logError)}\n`); } catch (_) {}
   }
 
-  console.error(error);
+  // v2.1.9 SR-log-1：启动失败兜底，日志系统不一定 ready → stderr 兜底
+  try { process.stderr.write(`[startup failure] ${error && error.stack ? error.stack : String(error)}\n`); } catch (_) {}
 
   reportStartupFailure({
     error,
@@ -511,16 +568,28 @@ function handleStartupFailure(error) {
   });
 }
 
-function appendActivityLogEntry({ level = 'info', message, details = [] }) {
+// v2.1.9 SR-log-1 (T32g + T32j)：扩展 source / domain / stack 字段以支持双写新日志结构
+//   - 旧 caller（仅传 level/message/details）保持兼容（source/domain/stack 默认 undefined → logger 用兜底值）
+//   - 新 caller（renderer reportLog / main console.error 改造）传入完整 schema（spec §15.3）
+//   - appendActivityRecord 内部双写：旧 app_activity_log.txt（保持 v2.1.8 行为） + 新 logs/ 结构（JSON Lines）
+function appendActivityLogEntry({ level = 'info', message, details = [], source, domain, stack } = {}) {
   try {
     const targetPath = activityLogFilePath || initializeActivityLog();
     appendActivityRecord(targetPath, {
       level,
       message,
-      details
+      details,
+      ...(source !== undefined ? { source } : {}),
+      ...(domain !== undefined ? { domain } : {}),
+      ...(stack !== undefined ? { stack } : {})
     });
   } catch (error) {
-    console.error(error);
+    // 旧实现用 console.error；v2.1.9 SR-log-1 要求 src/main.js 0 console 调用
+    //   兜底：写 stderr.write（绕开 console），避免无限递归（appendActivityLog → 写日志失败 → console.error → 再触发？）
+    //   logger.js 是日志写入兜底链最末端，唯一允许使用 process.stderr/stdout
+    try {
+      process.stderr.write(`[appendActivityLogEntry fallback] ${error && error.stack ? error.stack : String(error)}\n`);
+    } catch (_e) {}
   }
 }
 
@@ -1265,7 +1334,15 @@ function getAvailableCurrencyCodes() {
         .values()
     );
   } catch (error) {
-    console.error(error);
+    // v2.1.9 SR-log-1：币种映射表读取失败 → 上报日志，返回空数组兜底
+    appendActivityLogEntry({
+      level: 'error',
+      source: 'main',
+      domain: 'currency-mapping',
+      message: 'getAvailableCurrencyCodes 失败',
+      details: [error && error.message ? error.message : String(error)],
+      stack: error && error.stack ? error.stack : undefined
+    });
     return [];
   }
 }
@@ -2716,7 +2793,15 @@ function createWindow() {
           fs.mkdirSync(path.dirname(process.env.APP_CAPTURE_PATH), { recursive: true });
           fs.writeFileSync(process.env.APP_CAPTURE_PATH, image.toPNG());
         } catch (error) {
-          console.error(error);
+          // v2.1.9 SR-log-1：startup capture（preview 截图）失败 → 日志上报
+          appendActivityLogEntry({
+            level: 'error',
+            source: 'main',
+            domain: 'startup-capture',
+            message: 'APP_CAPTURE_PATH 截图失败',
+            details: [error && error.message ? error.message : String(error)],
+            stack: error && error.stack ? error.stack : undefined
+          });
         } finally {
           app.quit();
         }
@@ -2839,6 +2924,7 @@ function registerAppHandlers() {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
   });
+
   // v2.0.0-beta.3：银行对账单处理模块 — 场景 CRUD IPC
   ipcMain.handle('scenarios:list', () => {
     try {
@@ -2876,7 +2962,14 @@ function registerAppHandlers() {
     } else if (BANK_STATEMENT_CATEGORIES.has(category)) {
       processingResult = null;
     } else {
-      console.warn(`[scenarios:*] 未知 category=${category}，保险起见双清 processingResult + reconIdFixResult`);
+      // v2.1.9 SR-log-1：未知 category 兜底（防止未来加新 category 漏改本函数）→ 上报 warning + 双清
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'scenarios',
+        message: '[scenarios:*] 未知 category 双清 cache 兜底',
+        details: [`category=${category}`, '双清 processingResult + reconIdFixResult']
+      });
       processingResult = null;
       reconIdFixResult = null;
     }
@@ -2924,6 +3017,289 @@ function registerAppHandlers() {
       const result = database.toggleScenarioEnabled(id, enabled);
       clearResultCacheForCategory(existing && existing.category);
       return { status: 'ok', id, enabled: result.enabled };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+
+  // v2.1.9 N5 Phase 5 T22-T23：批量转移 + 批量删除
+  //   payload = { scenarioIds: number[], targetChannelId: number }
+  //   scenarios:transfer 单条 / 批量同入口（数组长度 1 即为单条转移）
+  //   - 转移前后命中场景的 category 可能跨 BANK_STATEMENT_CATEGORIES / RECON_ID_FIX_CATEGORIES，
+  //     保险起见双清 processingResult + reconIdFixResult（场景集变化必须清缓存避免老结果误用）
+  //   - DB 层事务保护：任何 id 不存在或目标渠道不存在 → 整批回滚
+  trackedIpcHandle('scenarios:transfer', '银行对账单处理', '场景管理', (_event, payload) => {
+    try {
+      const { scenarioIds, targetChannelId } = payload || {};
+      const result = database.transferScenarios(scenarioIds, targetChannelId);
+      // 转移会影响调度命中场景的归属 → 双清两组缓存
+      processingResult = null;
+      reconIdFixResult = null;
+      return { status: 'ok', transferredCount: result.transferredCount, targetChannelId: result.targetChannelId };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  // scenarios:batch-delete payload = { scenarioIds: number[] }
+  //   DB 层 is_builtin=1 保护（防 DevTools 绕过 UI）；任何内置命中整批回滚
+  //   清缓存策略同 transfer：双清避免老结果误用
+  trackedIpcHandle('scenarios:batch-delete', '银行对账单处理', '场景管理', (_event, payload) => {
+    try {
+      const { scenarioIds } = payload || {};
+      const result = database.batchDeleteScenarios(scenarioIds);
+      processingResult = null;
+      reconIdFixResult = null;
+      return { status: 'ok', deletedCount: result.deletedCount };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+
+  // v2.1.9 N5：channels CRUD IPC（银行渠道管理）
+  //   list 无副作用不进 trackedIpcHandle 计数（参考 scenarios:list 范式）
+  //   create/update/delete 进 trackedIpcHandle('银行对账单处理' / '渠道管理') 计数
+  //   「通用」内置渠道（is_builtin=1）保护：DB 层在 channels-repository 已实现（updateChannel / deleteChannel 抛错）
+  ipcMain.handle('channels:list', () => {
+    try {
+      return { status: 'ok', channels: database.listChannels() };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  trackedIpcHandle('channels:create', '银行对账单处理', '渠道管理', (_event, payload) => {
+    try {
+      const channel = database.createChannel(payload || {});
+      return { status: 'ok', channel };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  trackedIpcHandle('channels:update', '银行对账单处理', '渠道管理', (_event, id, fields) => {
+    try {
+      const channel = database.updateChannel(id, fields || {});
+      return { status: 'ok', channel };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  trackedIpcHandle('channels:delete', '银行对账单处理', '渠道管理', (_event, id) => {
+    try {
+      database.deleteChannel(id);
+      return { status: 'ok', id };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+
+  // v2.1.9 N7 (Phase 7 T29/T30)：场景模板按渠道导入/导出 — bundle IPC（spec §六）
+  //
+  //   scenarios:export-bundle  payload = { channelIds: number[] }
+  //     → 拉所选渠道 + 各自全部 scenarios（含 disabled）→ serializeScenarioBundle
+  //     → showSaveDialog 默认文件名 scenarios-bundle-{YYYYMMDD}.json
+  //     → 写文件 → return { status: 'ok', filePath, exportedChannels, exportedScenarios }
+  //
+  //   scenarios:import-bundle  无 payload
+  //     → showOpenDialog → 读文件 → JSON.parse → detectBundleType
+  //       - 不是 'scenarios' → 抛错「文件类型不匹配」给场景管理入口
+  //       - 是 'scenarios' → parseScenarioBundle 解析
+  //     → 扫描缺失渠道（非 builtin 且库内不存在）→ 二阶段：
+  //       - 有缺失 → return { status: 'needs-confirm', missingChannels, bundle, filePath }
+  //       - 无缺失 → 走 apply 路径
+  //
+  //   scenarios:import-bundle-apply  payload = { bundle, confirmCreateMissingChannels }
+  //     → 事务包裹（创建缺失渠道 + 插入新场景；同名场景跳过 + 收集冲突）
+  //     → return { status: 'ok', importedCount, createdChannels, conflicts }
+  //
+  // 资金红线（spec §10.2）：
+  //   - 导入涉及用户场景库改动 → 必须二阶段（needs-confirm → apply）避免误覆盖
+  //   - bundle 类型互认严格 — reader 必须按顶层 key 区分；误用 bundleVersion=4 文件必报错
+  //   - apply 事务包裹保证导入失败不留半状态
+  //   - 同名场景跳过 + 收集到冲突清单（D12=a 保守策略）— 不静默覆盖
+  trackedIpcHandle('scenarios:export-bundle', '银行对账单处理', '场景管理', async (_event, payload = {}) => {
+    try {
+      const inputIds = Array.isArray(payload.channelIds) ? payload.channelIds : [];
+      const channelIds = inputIds
+        .map((v) => Number(v))
+        .filter((v) => Number.isFinite(v) && v > 0);
+      if (channelIds.length === 0) {
+        return { status: 'failed', message: '请至少选择一个银行渠道' };
+      }
+
+      // 拉渠道全集 + 过滤所选
+      const allChannels = database.listChannels();
+      const channelById = new Map(allChannels.map((c) => [Number(c.id), c]));
+      const selectedChannels = [];
+      const unknownIds = [];
+      for (const id of channelIds) {
+        if (channelById.has(id)) {
+          selectedChannels.push(channelById.get(id));
+        } else {
+          unknownIds.push(id);
+        }
+      }
+      if (selectedChannels.length === 0) {
+        return { status: 'failed', message: `选中的渠道 id=${unknownIds.join(',')} 不存在` };
+      }
+
+      // 拉各渠道的全部 scenarios（含 disabled）
+      const scenariosByChannel = new Map();
+      let totalScenarios = 0;
+      for (const ch of selectedChannels) {
+        const scenarios = database.listAllScenariosByChannelId(ch.id);
+        scenariosByChannel.set(ch.id, scenarios);
+        totalScenarios += scenarios.length;
+      }
+
+      // 序列化
+      const jsonText = serializeScenarioBundle(selectedChannels, scenariosByChannel, app.getVersion());
+
+      // saveDialog 默认文件名（D13=a）
+      const dateStr = formatDateYYYYMMDD(new Date());
+      const defaultFileName = `scenarios-bundle-${dateStr}.json`;
+      const saveResult = await dialog.showSaveDialog(mainWindow, {
+        title: '导出场景模板文件',
+        defaultPath: defaultFileName,
+        filters: [{ name: 'JSON', extensions: ['json'] }]
+      });
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { status: 'cancelled' };
+      }
+
+      fs.mkdirSync(path.dirname(saveResult.filePath), { recursive: true });
+      fs.writeFileSync(saveResult.filePath, jsonText, 'utf8');
+
+      appendActivityLogEntry({
+        level: 'info',
+        message: '导出场景模板文件成功',
+        details: [
+          `导出路径：${saveResult.filePath}`,
+          `渠道数：${selectedChannels.length}`,
+          `场景数：${totalScenarios}`
+        ]
+      });
+      return {
+        status: 'ok',
+        filePath: saveResult.filePath,
+        exportedChannels: selectedChannels.length,
+        exportedScenarios: totalScenarios
+      };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+
+  trackedIpcHandle('scenarios:import-bundle', '银行对账单处理', '场景管理', async () => {
+    try {
+      const choice = await dialog.showOpenDialog(mainWindow, {
+        title: '导入场景模板文件',
+        properties: ['openFile'],
+        filters: [{ name: 'JSON', extensions: ['json'] }]
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      const filePath = choice.filePaths[0];
+
+      let jsonText;
+      try {
+        jsonText = fs.readFileSync(filePath, 'utf8');
+      } catch (e) {
+        return { status: 'failed', message: `读取文件失败：${e && e.message ? e.message : e}` };
+      }
+
+      // detectBundleType 必须先 JSON.parse；解析失败 → 友好错误
+      let parsedRaw;
+      try {
+        parsedRaw = JSON.parse(jsonText);
+      } catch (e) {
+        return { status: 'failed', message: `场景模板文件格式错误：${e && e.message ? e.message : '不是合法 JSON'}` };
+      }
+      let bundleType;
+      try {
+        bundleType = detectBundleType(parsedRaw);
+      } catch (e) {
+        return { status: 'failed', message: String(e && e.message ? e.message : e) };
+      }
+      if (bundleType !== 'scenarios') {
+        // 误用网银账单 bundleVersion=4 文件 → 报错（spec §6.2 / 资金红线）
+        return {
+          status: 'failed',
+          message: `文件类型不匹配：当前文件是「网银账单模板」（bundleVersion），场景管理入口仅接受「场景模板」（scenarioBundleVersion）`
+        };
+      }
+
+      // 解析为结构化 bundle（版本号校验 + 字段归一化）
+      let bundle;
+      try {
+        bundle = parseScenarioBundle(jsonText);
+      } catch (e) {
+        return { status: 'failed', message: String(e && e.message ? e.message : e) };
+      }
+
+      // 扫描缺失渠道（非 builtin 且库内不存在）— 二阶段确认核心数据
+      const allChannels = database.listChannels();
+      const channelKeyToRecord = new Map(
+        allChannels.map((c) => [`${c.name} ${c.ownerLocation}`, c])
+      );
+      const missingChannels = [];
+      for (const ch of bundle.channels) {
+        if (ch.isBuiltin) continue;
+        const key = `${ch.name} ${ch.ownerLocation}`;
+        if (!channelKeyToRecord.has(key)) {
+          missingChannels.push({ name: ch.name, ownerLocation: ch.ownerLocation });
+        }
+      }
+
+      if (missingChannels.length > 0) {
+        // 不直接 apply；返回 needs-confirm 给 renderer 弹确认框
+        return {
+          status: 'needs-confirm',
+          missingChannels,
+          bundle,
+          filePath
+        };
+      }
+
+      // 无缺失渠道 → 直接 apply
+      const applyResult = applyScenarioBundleImport(bundle, { confirmCreateMissingChannels: false });
+      appendActivityLogEntry({
+        level: 'info',
+        message: '导入场景模板文件成功',
+        details: [
+          `导入路径：${filePath}`,
+          `新增场景数：${applyResult.importedCount}`,
+          `跳过同名场景数：${applyResult.conflicts.length}`,
+          `创建渠道数：${applyResult.createdChannels.length}`
+        ]
+      });
+      return Object.assign({ status: 'ok', filePath }, applyResult);
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+
+  trackedIpcHandle('scenarios:import-bundle-apply', '银行对账单处理', '场景管理', (_event, payload = {}) => {
+    try {
+      const { bundle, confirmCreateMissingChannels } = payload || {};
+      if (!bundle || !Array.isArray(bundle.channels)) {
+        return { status: 'failed', message: 'apply: 缺少有效的 bundle 参数' };
+      }
+      const applyResult = applyScenarioBundleImport(bundle, {
+        confirmCreateMissingChannels: confirmCreateMissingChannels === true
+      });
+      // 导入会变更 scenarios 库 → 双清 processingResult + reconIdFixResult 避免老结果误用
+      processingResult = null;
+      reconIdFixResult = null;
+      appendActivityLogEntry({
+        level: 'info',
+        message: '应用场景模板导入成功',
+        details: [
+          `新增场景数：${applyResult.importedCount}`,
+          `跳过同名场景数：${applyResult.conflicts.length}`,
+          `创建渠道数：${applyResult.createdChannels.length}`
+        ]
+      });
+      return Object.assign({ status: 'ok' }, applyResult);
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
@@ -3026,7 +3402,14 @@ function registerAppHandlers() {
       }
       const allScenarios = database.listScenarios();
       const enabled = allScenarios.filter((s) => s.enabled === 1 || s.enabled === true);
-      const detailedEnabled = enabled.map((s) => database.getScenario(s.id)).filter(Boolean);
+      // 2026-05-27 N5 fix：getScenario 不返 displayIndex / channelId（缺失）— 用 list item 的字段补
+      //   listScenarios 已计算渠道内 1-based displayIndex（与 UI 渠道过滤序号一致）
+      //   不补则 dispatcher 兜底 scenario.id（DB 自增）→ 状态框「场景 7、8、9」与 UI 序号不一致
+      const detailedEnabled = enabled.map((s) => {
+        const detail = database.getScenario(s.id);
+        if (!detail) return null;
+        return { ...detail, displayIndex: s.displayIndex, channelId: s.channelId };
+      }).filter(Boolean);
       // v2.1.0-beta.1 PR-A round 2 P1（资金红线）：C4 (`recon-id-fix`) 走独立模块
       // `recon-id-fix:run`，不应进入银行对账单 dispatcher（C4 没有对应的 case，
       // dispatcher 内 `runScenario` default 分支会 throw "未知 category"）。
@@ -3038,7 +3421,13 @@ function registerAppHandlers() {
       //  → first-match-wins 失效，低优先级场景可能覆盖高优先级写入的字段）
       const workingBankRows = structuredClone(bankStatementSession.rows);
       const workingGwRows = gatewayReconSession ? structuredClone(gatewayReconSession.gwRows) : null;
-      const result = runAllScenarios(workingBankRows, workingGwRows, dispatchScenarios);
+      // v2.1.9 N5：双维 first-match-wins（spec §2.1）— deps 提供激活双维；缺省走 legacy 单维
+      //   channelsRepo.findByNameAndLocation/getBuiltinGeneral 用于行的渠道匹配（专属 + 通用兜底）
+      //   保留 first-match-wins 不变量：同一行最多命中 1 个场景（spec §2.4）
+      const result = runAllScenarios(workingBankRows, workingGwRows, dispatchScenarios, {
+        channelsRepo: channelsRepository,
+        db: database.db,
+      });
       processingResult = {
         modifiedRows: result.modifiedRows,
         // v2.1.7 round 3 F8 (spec §9.8.5)：保留 dispatcher 返回的 unmatchedRows（导出阶段写第 2 sheet 用）
@@ -3142,12 +3531,45 @@ function registerAppHandlers() {
         mainFilePath,
         unmatchedRows: Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows : []
       });
+
+      // v2.1.9 N5 T26（spec §5.1-5.4 🔴 对外契约破坏性变更）：场景命中行独立报表
+      //   v2.1.8 主输出 Sheet 3「命中场景行」撤除 → 改 error-reports/{date}/命中场景行-{basename}-{ts}.xlsx
+      //   失败 graceful：不阻塞主对账流程，仅 log + return 主流程（spec §5.4）
+      //   仅当 modifiedRows.length > 0 时输出（含表头但 0 行的报表对用户审计无价值）
+      //
+      //   v2.1.9 D16=b（2026-05-27 用户拍板）：传 channels 给 writer
+      //     writer 用 row._hitChannelId 反查 channels.label 渲染「匹配渠道」列
+      //     通用 label='通用' / 非通用 label='name-ownerLocation'（与场景管理 UI 一致）
+      let hitRowsReport = null;
+      if (processingResult.modifiedRows.length > 0) {
+        try {
+          const originalFilePath = bankStatementSession.filePath;
+          const channels = channelsRepository.listChannels(database.db);
+          hitRowsReport = await writeScenarioHitRows(
+            processingResult.modifiedRows,
+            originalFilePath,
+            { exportRoot: ensureStorageRoot(), channels }
+          );
+        } catch (e) {
+          // graceful — log 警告但不阻塞主流程返回
+          appendActivityLogEntry({
+            level: 'warning',
+            message: '[banking-statement-process] 命中场景行独立报表生成失败',
+            details: [e && e.message ? e.message : String(e)]
+          });
+          hitRowsReport = null;
+        }
+      }
+
       return {
         status: 'ok',
         mainFilePath: main.filePath,
         mainFileName: main.fileName,
         errorReportPath: errorReport ? errorReport.filePath : null,
-        errorReportName: errorReport ? errorReport.fileName : null
+        errorReportName: errorReport ? errorReport.fileName : null,
+        // v2.1.9 N5 T26：renderer 用于状态框提示「命中场景行报表已生成：{path}」（详 USER_GUIDE v2.1.9）
+        hitRowsReportPath: hitRowsReport ? hitRowsReport.filePath : null,
+        hitRowsReportName: hitRowsReport ? hitRowsReport.fileName : null
       };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -3548,6 +3970,27 @@ function registerAppHandlers() {
   //   - 节流由 renderer 端做（10s 一次），main 不再做防抖
   ipcMain.on('app:user-activity', () => {
     lastUserActivityTs = Date.now();
+  });
+
+  // v2.1.9 SR-log-1 (T32g)：renderer 通用告警上报 handler（spec §15.4）
+  //   - 转调 appendActivityLogEntry → 双写 app_activity_log.txt + logs/{YYYY-MM}/{MM-DD}/{level}.log
+  //   - 单向通道（与 app:user-activity 一致），不需要 reply
+  //   - payload 字段全部用兜底值（防 renderer 漏字段崩 main）
+  //   - 异常 graceful：appendActivityLogEntry 内部 try-catch，外层兜底防御
+  ipcMain.on('app:report-log', (_event, payload = {}) => {
+    try {
+      const safePayload = payload && typeof payload === 'object' ? payload : {};
+      appendActivityLogEntry({
+        level: safePayload.level || 'info',
+        source: safePayload.source || 'renderer',
+        domain: safePayload.domain,
+        message: safePayload.message,
+        details: Array.isArray(safePayload.details) ? safePayload.details : [],
+        stack: safePayload.stack
+      });
+    } catch (_error) {
+      // graceful — 不向 renderer 抛错（单向通道），不阻塞业务
+    }
   });
 }
 
@@ -7101,7 +7544,14 @@ function registerBigAccountHandlers() {
   // 保留该 handler 仅作兼容（防止老调用链报错），任何新调用应改走 saveMappings。
   ipcMain.handle('big-account:save-own-accounts', (_event, payload = {}) => {
     try {
-      console.warn('[v1.5.3] big-account:save-own-accounts is deprecated; own accounts should be persisted via template:save-mappings');
+      // v2.1.9 SR-log-1：deprecated IPC 调用警告 → 日志上报
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'big-account',
+        message: '[v1.5.3] big-account:save-own-accounts is deprecated',
+        details: ['own accounts should be persisted via template:save-mappings']
+      });
       const template = database.getTemplate(payload.templateId);
       if (!template) {
         return { status: 'error', message: '未找到对应模板' };
@@ -10426,7 +10876,15 @@ function flushUsageStats() {
   } catch (err) {
     // PR #34 Codex round 1 P2：写盘失败保留 dirty 让下次 tick 重试
     // （原实现无论成败都清 dirty，磁盘满 / 权限错时 session 计数静默丢失）
-    console.warn('[usage-stats] flush failed (will retry next tick):', err && err.message);
+    // v2.1.9 SR-log-1：替换 console.warn → 日志上报
+    appendActivityLogEntry({
+      level: 'warning',
+      source: 'main',
+      domain: 'usage-stats',
+      message: '[usage-stats] flush failed (will retry next tick)',
+      details: [err && err.message ? err.message : String(err)],
+      stack: err && err.stack ? err.stack : undefined
+    });
   }
 }
 
@@ -10443,7 +10901,15 @@ app.whenReady()
       flushUsageStats();
       usageStatsAutoFlushTimer = setInterval(flushUsageStats, USAGE_STATS_FLUSH_INTERVAL_MS);
     } catch (err) {
-      console.warn('[usage-stats] init failed:', err && err.message);
+      // v2.1.9 SR-log-1：替换 console.warn → 日志上报；usage-stats init 失败 → 默认值兜底
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'usage-stats',
+        message: '[usage-stats] init failed',
+        details: [err && err.message ? err.message : String(err)],
+        stack: err && err.stack ? err.stack : undefined
+      });
       usageStats = usageStatsModule.defaultStats();
     }
 
@@ -10578,8 +11044,15 @@ app.whenReady()
     try {
       setupIdleCleanupTimer();
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[acquiring-bill-currency] setupIdleCleanupTimer failed:', err && err.message);
+      // v2.1.9 SR-log-1：替换 console.error → 日志上报
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'acquiring-bill-currency',
+        message: '[acquiring-bill-currency] setupIdleCleanupTimer failed',
+        details: [err && err.message ? err.message : String(err)],
+        stack: err && err.stack ? err.stack : undefined
+      });
     }
   })
   .catch((error) => {
@@ -10620,8 +11093,15 @@ function triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded() {
           });
           runRepo.clearCleanupPending(database.db, { runId: run.id });
         } catch (cleanErr) {
-          // eslint-disable-next-line no-console
-          console.error(`[acquiring-bill-currency] background cleanup run ${run.id} 失败:`, cleanErr && cleanErr.message);
+          // v2.1.9 SR-log-1：替换 console.error → 日志上报
+          appendActivityLogEntry({
+            level: 'error',
+            source: 'main',
+            domain: 'acquiring-bill-currency',
+            message: `[acquiring-bill-currency] background cleanup run ${run.id} 失败`,
+            details: [cleanErr && cleanErr.message ? cleanErr.message : String(cleanErr)],
+            stack: cleanErr && cleanErr.stack ? cleanErr.stack : undefined
+          });
         }
       }
     } finally {
@@ -10643,8 +11123,39 @@ function triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded() {
 //     （已有 cleanupBackgroundInProgress 防重入 + tryAcquireOpLock 抢锁 + toast 通知）
 //   - 失败仅 console.error（D13 静默策略）；下次 idle 再试 + 进入模块兜底 + 启动 cleanupOrphanData 三重兜底
 //   - 启动时机：app.whenReady 后调用 setupIdleCleanupTimer（database init 完之后）
+//
+// v2.1.9 N1-settings (T32c, D21=c)：阈值从硬编码改 settings 化（不提供 UI）
+//   - 启动期：调 database.getAcquiringBillIdleCleanupMinutes() 拿值（默认 30；范围外回退 30 — 资金红线兜底）
+//   - 改阈值方式：用户用 sqlite3 客户端执行
+//       UPDATE app_settings SET setting_value = '<5..180>' WHERE setting_key = 'acquiring_bill_idle_cleanup_minutes';
+//     然后重启应用生效。
+//   - 范围 5-180 分钟：后端 setAcquiringBillIdleCleanupMinutes 校验 + getter 范围外回退默认 30（settings-repository）
+function loadIdleCleanupMsFromSettings() {
+  try {
+    if (database && typeof database.getAcquiringBillIdleCleanupMinutes === 'function') {
+      const minutes = database.getAcquiringBillIdleCleanupMinutes();
+      IDLE_CLEANUP_MS = minutes * 60 * 1000;
+      return minutes;
+    }
+  } catch (err) {
+    // v2.1.9 SR-log-1：替换 console.error → 日志上报；阈值回退 30min（资金红线兜底）
+    appendActivityLogEntry({
+      level: 'error',
+      source: 'main',
+      domain: 'acquiring-bill-currency',
+      message: '[acquiring-bill-currency] loadIdleCleanupMsFromSettings failed (回退 30min)',
+      details: [err && err.message ? err.message : String(err)],
+      stack: err && err.stack ? err.stack : undefined
+    });
+  }
+  IDLE_CLEANUP_MS = 30 * 60 * 1000;
+  return 30;
+}
+
 function setupIdleCleanupTimer() {
   if (idleCleanupTimer) return; // 重入保护
+  // v2.1.9 N1-settings：启动期从 settings 读阈值（默认 30）
+  loadIdleCleanupMsFromSettings();
   idleCleanupTimer = setInterval(() => {
     try {
       const elapsed = Date.now() - lastUserActivityTs;
@@ -10652,8 +11163,15 @@ function setupIdleCleanupTimer() {
       // idle 达标 → 复用进入模块兜底路径（含 mutex 抢锁 + cleanup_pending 判定 + 防重入）
       triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[acquiring-bill-currency] idle cleanup tick 失败:', err && err.message);
+      // v2.1.9 SR-log-1：替换 console.error → 日志上报；idle tick 失败不阻塞下次 tick
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'acquiring-bill-currency',
+        message: '[acquiring-bill-currency] idle cleanup tick 失败',
+        details: [err && err.message ? err.message : String(err)],
+        stack: err && err.stack ? err.stack : undefined
+      });
     }
   }, IDLE_CHECK_INTERVAL_MS);
   if (idleCleanupTimer.unref) idleCleanupTimer.unref(); // 不阻塞退出
@@ -10684,7 +11202,15 @@ app.on('before-quit', (event) => {
       usageStatsAutoFlushTimer = null;
     }
   } catch (err) {
-    console.warn('[usage-stats] before-quit flush failed:', err && err.message);
+    // v2.1.9 SR-log-1：替换 console.warn → 日志上报
+    appendActivityLogEntry({
+      level: 'warning',
+      source: 'main',
+      domain: 'usage-stats',
+      message: '[usage-stats] before-quit flush failed',
+      details: [err && err.message ? err.message : String(err)],
+      stack: err && err.stack ? err.stack : undefined
+    });
   }
 
   // v2.1.8 N1' (v0.7)：cleanup 退出兜底（静默）
@@ -10695,8 +11221,15 @@ app.on('before-quit', (event) => {
     pendingRuns = runRepo.listPendingCleanupRuns(database.db);
   } catch (listErr) {
     // listPending 失败 → 不阻塞退出（启动期 cleanupOrphanData 会兜底）
-    // eslint-disable-next-line no-console
-    console.error('[acquiring-bill-currency] before-quit listPendingCleanupRuns 失败，直接退出:', listErr && listErr.message);
+    // v2.1.9 SR-log-1：替换 console.error → 日志上报
+    appendActivityLogEntry({
+      level: 'error',
+      source: 'main',
+      domain: 'acquiring-bill-currency',
+      message: '[acquiring-bill-currency] before-quit listPendingCleanupRuns 失败，直接退出',
+      details: [listErr && listErr.message ? listErr.message : String(listErr)],
+      stack: listErr && listErr.stack ? listErr.stack : undefined
+    });
     return;
   }
   if (!pendingRuns || pendingRuns.length === 0) return;
@@ -10716,8 +11249,15 @@ app.on('before-quit', (event) => {
         });
         runRepo.clearCleanupPending(database.db, { runId: run.id });
       } catch (cleanErr) {
-        // eslint-disable-next-line no-console
-        console.error(`[acquiring-bill-currency] cleanup-quit run ${run.id} (${run.month_key}) 失败:`, cleanErr && cleanErr.message);
+        // v2.1.9 SR-log-1：替换 console.error → 日志上报；cleanup-quit 单 run 失败容忍继续清下一个
+        appendActivityLogEntry({
+          level: 'error',
+          source: 'main',
+          domain: 'acquiring-bill-currency',
+          message: `[acquiring-bill-currency] cleanup-quit run ${run.id} (${run.month_key}) 失败`,
+          details: [cleanErr && cleanErr.message ? cleanErr.message : String(cleanErr)],
+          stack: cleanErr && cleanErr.stack ? cleanErr.stack : undefined
+        });
       }
     }
     // N1''-D13：失败也 quit（启动期 cleanupOrphanData 兜底）

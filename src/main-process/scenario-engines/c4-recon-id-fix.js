@@ -65,6 +65,9 @@ const {
 const { ORDER_REPAIR_FIELDS } = require('../../constants/recon-id-fix-fields');
 // v2.1.0-beta.3 T8：网关子模式输出列模板（14 列，无 SubBizType）
 const { ORDER_REPAIR_FIELDS_GATEWAY } = require('../../constants/gateway-bill-recon-fields');
+// v2.1.9 SR-log-1 (T32h)：替换 console.warn → appendModuleLog 双写
+//   不用解构赋值（unit test spy 可改 logger.appendModuleLog 单点劫持）
+const logger = require('../../backend/logger');
 
 // ===== 工具函数 =====
 
@@ -347,10 +350,19 @@ function findBestAmountSubset(candidates, targetCents, mainBillDate, options = {
     }
   }
   if (degraded && !options.silent) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      `[c4-recon-id-fix] findBestAmountSubset 性能护栏：candidates=${candidates.length} maxSize=${maxSize} (${degraded})`
-    );
+    // v2.1.9 SR-log-1：替换 console.warn → 日志上报
+    //   ⚠️ 必须 logger.appendModuleLog 而非解构 — 让 unit test 通过替换 logger.appendModuleLog 即可 spy
+    logger.appendModuleLog({
+      level: 'warning',
+      source: 'main',
+      domain: 'c4-recon-id-fix',
+      message: '[c4-recon-id-fix] findBestAmountSubset 性能护栏',
+      details: [
+        `candidates=${candidates.length}`,
+        `maxSize=${maxSize}`,
+        `degraded=${degraded}`
+      ]
+    });
   }
   const hardCeiling = Number.isFinite(options.hardCeiling) ? options.hardCeiling : 5000000;
   const mainMs = parseBillDateMs(normalizeCellValue(mainBillDate));

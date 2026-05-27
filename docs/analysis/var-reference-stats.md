@@ -4,15 +4,15 @@
 
 | 字段 | 值 |
 |---|---|
-| 版本 | v2.1.7 |
-| 扫描时间 | 2026-5-26 12:40:31 |
+| 版本 | v2.1.8 |
+| 扫描时间 | 2026-5-27 11:19:01 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 85 |
-| 顶层声明总数 | 874 |
-| ≥2 次引用 | 768 |
-| 跨 ≥3 文件 (A-share) | 147 |
-| 跨 2 文件 (A-pair) | 251 |
-| 单文件 (A-local) | 370 |
+| 顶层声明总数 | 873 |
+| ≥2 次引用 | 767 |
+| 跨 ≥3 文件 (A-share) | 148 |
+| 跨 2 文件 (A-pair) | 250 |
+| 单文件 (A-local) | 369 |
 | 跨文件合计 (B) | 398 |
 
 ---
@@ -49,11 +49,12 @@
 | `elements` | 4 | 138 | 1 | src/renderer.js |
 | `RUNS_TABLE` | 4 | 33 | 4 | src/backend/acquiring-bill-currency-db/run-repository.js |
 | `FIXED_FIELD_VALUE_PREFIX` | 4 | 21 | 2 | src/backend/database/utils.js |
-| `BILL_HEADERS` | 4 | 18 | 3 | src/backend/acquiring-bill-currency-db/columns.js |
 | `BANK_STATEMENT_FIELDS` | 4 | 17 | 3 | src/constants/bank-statement-fields.js |
 | `MERCHANT_ID_SELF_INPUT_OPTION` | 4 | 17 | 2 | src/main.js |
 | `BALANCE_CALCULATED_OPTION` | 4 | 14 | 2 | src/main.js |
+| `BILL_HEADERS` | 4 | 14 | 3 | src/backend/acquiring-bill-currency-db/columns.js |
 | `ExcelJS` | 4 | 13 | 4 | src/main-process/acquiring-bill-currency-writer.js |
+| `TEMPLATE_BILL_HEADERS` | 4 | 13 | 2 | src/backend/acquiring-bill-currency-db/columns.js |
 | `BIZ_OP_DB_COLUMNS` | 4 | 12 | 2 | src/backend/biz-op-recon-db/columns.js |
 | `FLOW_DB_COLUMNS` | 4 | 12 | 2 | src/backend/biz-op-recon-db/columns.js |
 | `isRowMeaningful` | 4 | 12 | 1 | src/backend/file-service/common.js |
@@ -193,7 +194,6 @@
 | `getTemplate` | 10 | src/backend/database/template-repository.js |
 | `diffRepo` | 9 | src/backend/pending-export/writer.js |
 | `hasEffectiveAmount` | 9 | src/backend/file-service/normalizers.js |
-| `TEMPLATE_BILL_HEADERS` | 9 | src/backend/acquiring-bill-currency-db/columns.js |
 | `importsRepository` | 8 | src/main-process/biz-op-recon-session.js |
 | `monthRepo` | 8 | src/backend/pending-import/worker.js |
 | `pkg` | 8 | src/main-process/acquiring-bill-currency-writer.js |
@@ -910,11 +910,12 @@
 | `elements` | 4 | 138 | 1 | src/renderer.js(90), src/renderer-previews.js(27), src/renderer-pending.js(17) |
 | `RUNS_TABLE` | 4 | 33 | 4 | src/backend/acquiring-bill-currency-db/run-repository.js(12), src/backend/biz-op-recon-db/run-repository.js(11), src/backend/bank-bu-recon-db/run-repository.js(6) |
 | `FIXED_FIELD_VALUE_PREFIX` | 4 | 21 | 2 | src/backend/file-service.js(13), src/backend/database/utils.js(5), src/backend/file-service/common.js(2) |
-| `BILL_HEADERS` | 4 | 18 | 3 | src/backend/acquiring-bill-currency-db/columns.js(7), src/backend/acquiring-bill-currency-db/import-repository.js(6), src/backend/acquiring-bill-currency-import/reader.js(3) |
 | `BANK_STATEMENT_FIELDS` | 4 | 17 | 3 | src/renderer-dialogs.js(9), src/constants/bank-statement-fields.js(3), src/preload.js(3) |
 | `MERCHANT_ID_SELF_INPUT_OPTION` | 4 | 17 | 2 | src/renderer.js(8), src/renderer-dialogs.js(6), src/renderer-previews.js(2) |
 | `BALANCE_CALCULATED_OPTION` | 4 | 14 | 2 | src/renderer-dialogs.js(5), src/renderer.js(5), src/renderer-previews.js(3) |
+| `BILL_HEADERS` | 4 | 14 | 3 | src/backend/acquiring-bill-currency-db/columns.js(7), src/backend/acquiring-bill-currency-import/reader.js(3), src/backend/acquiring-bill-currency-db/import-repository.js(2) |
 | `ExcelJS` | 4 | 13 | 4 | src/main-process/biz-op-recon-writer.js(5), src/main-process/bank-bu-recon-writer.js(3), src/main-process/exceljs-writer.js(3) |
+| `TEMPLATE_BILL_HEADERS` | 4 | 13 | 2 | src/main-process/acquiring-bill-currency-writer.js(6), src/backend/acquiring-bill-currency-db/columns.js(3), src/backend/acquiring-bill-currency-db/import-repository.js(2) |
 | `BIZ_OP_DB_COLUMNS` | 4 | 12 | 2 | src/backend/biz-op-recon-db/columns.js(4), src/backend/biz-op-recon-db/imports-repository.js(4), src/backend/biz-op-recon-import/reader.js(2) |
 | `FLOW_DB_COLUMNS` | 4 | 12 | 2 | src/backend/biz-op-recon-db/columns.js(4), src/backend/biz-op-recon-db/flow-imports-repository.js(4), src/backend/biz-op-recon-import/reader.js(2) |
 | `isRowMeaningful` | 4 | 12 | 1 | src/backend/file-service/readers.js(6), src/backend/bank-bu-recon-import/reader.js(2), src/backend/biz-op-recon-import/reader.js(2) |
@@ -1049,7 +1050,6 @@
 | `getTemplate` | 2 | 10 | 1 | src/backend/database/template-repository.js(8), src/backend/database.js(2) |
 | `diffRepo` | 2 | 9 | 2 | src/backend/pending-export/writer.js(6), src/backend/pending-reconcile/engine.js(3) |
 | `hasEffectiveAmount` | 2 | 9 | 1 | src/backend/file-service.js(7), src/backend/file-service/normalizers.js(2) |
-| `TEMPLATE_BILL_HEADERS` | 2 | 9 | 1 | src/main-process/acquiring-bill-currency-writer.js(6), src/backend/acquiring-bill-currency-db/columns.js(3) |
 | `importsRepository` | 2 | 8 | 2 | src/main-process/biz-op-recon-session.js(5), src/main-process/biz-op-recon-writer.js(3) |
 | `monthRepo` | 2 | 8 | 2 | src/backend/pending-import/worker.js(4), src/main-process/pending-session.js(4) |
 | `pkg` | 2 | 8 | 2 | src/main-process/acquiring-bill-currency-writer.js(7), src/main.js(1) |

@@ -763,19 +763,27 @@ async function runBizOpReconSmokeTests() {
   //
   // round 2 R2-I3a swap：原 code 编号 Case M ↔ spec §9.11 Case L 对齐（先 I3 NaN）
   //
-  // 拍板：保守方案 — console.warn + summary.t2AnomalyAccountCount，不动 diff_rows schema
+  // 拍板：保守方案 — appendModuleLog warning + summary.t2AnomalyAccountCount，不动 diff_rows schema
+  //
+  // v2.1.9 SR-log-1 (T32h)：原 console.warn 已替换为 logger.appendModuleLog；
+  //   smoke spy 从拦截 console.warn 改为劫持 logger.appendModuleLog（保 spec §15.6 意图 + 测试覆盖）
   //
   // 场景：T-2 (2026-05-25) M001 期末='abc'（NaN，绕过 import 校验直接 insertRows）+ M002 期末=500
   //       T-1 (2026-05-26) M001 期末=100 + M002 期末=500
   //       流水 (2026-05-26) 空
   //       → M001 因 T-2 NaN silent drop（既不进 amount diff 也不进账户号差集，因为 T-2 set 含它）
   //         M002 期末相等 → 无差异
-  //       → summary.t2AnomalyAccountCount === 1 (M001) + console.warn 至少 1 次
+  //       → summary.t2AnomalyAccountCount === 1 (M001) + appendModuleLog warning 至少 1 次
   // ========================================================================
-  // spy console.warn
-  const origWarn = console.warn;
+  // v2.1.9 SR-log-1：spy logger.appendModuleLog（替代旧 console.warn spy）
+  const logger = require('../../src/backend/logger');
+  const origAppend = logger.appendModuleLog;
   const warnLogs = [];
-  console.warn = (...args) => { warnLogs.push(args.join(' ')); };
+  logger.appendModuleLog = (payload) => {
+    if (payload && (payload.level === 'warning' || payload.level === 'warn')) {
+      warnLogs.push(`${payload.message || ''} ${(payload.details || []).join(' ')}`);
+    }
+  };
   try {
     importsRepo.insertRows(db, '2026-05-25', [
       opRow(2, 'BU-M', 'M001', { begin:0, amount:0, amountIn:0, amountOut:0, end:0 }),  // 占位
@@ -794,15 +802,15 @@ async function runBizOpReconSmokeTests() {
     check('L summary.t2AnomalyAccountCount=1 (M001)', resL.stats.t2AnomalyAccountCount === 1,
       `资金红线 ⚠️ fix7-I3：T-2 NaN 账户号未计入 anomaly summary，实际 ${resL.stats.t2AnomalyAccountCount}`);
     const m001Warned = warnLogs.some(l => l.includes('M001') && l.includes('NaN silent drop'));
-    check('L console.warn 含 M001 NaN silent drop 提示', m001Warned,
-      `资金红线 ⚠️ fix7-I3：警告未输出，警告日志：${JSON.stringify(warnLogs)}`);
+    check('L appendModuleLog warning 含 M001 NaN silent drop 提示', m001Warned,
+      `资金红线 ⚠️ fix7-I3 + SR-log-1：warning 日志未触发，日志：${JSON.stringify(warnLogs)}`);
     // v2.1.3 round 1（spec §4.3）：DB 持久化验证 — t2_anomaly_account_count 列写入正确
     const dbRowL = db.prepare('SELECT t2_anomaly_account_count FROM biz_op_recon_runs WHERE id = ?').get(resL.runId);
     check('L DB 持久化 t2_anomaly_account_count = 1',
       dbRowL && dbRowL.t2_anomaly_account_count === 1,
       `spec §4.3：runs 表未持久化 anomaly count，实际行=${JSON.stringify(dbRowL)}`);
   } finally {
-    console.warn = origWarn;
+    logger.appendModuleLog = origAppend;
   }
 
   importsRepo.clearByDateBu(db, '2026-05-25', 'BU-M');
@@ -884,15 +892,22 @@ async function runBizOpReconSmokeTests() {
   runRepo.clearRunsAndDiffsByDateBu(db, '2026-05-20', 'BU-A');
 
   // ========================================================================
-  // Case N：Billdate ≠ data_date console.warn（M5 spec § 6.2 已声明的调试线索）
+  // Case N：Billdate ≠ data_date 告警日志（M5 spec § 6.2 已声明的调试线索）
   //
-  // 场景：构造 1 行 OP T-1 = 2026-05-13 但 sourceRow.bill_date_raw='2026-05-12'
+  // v2.1.9 SR-log-1 (T32h)：原 console.warn 已替换为 logger.appendModuleLog（spec §15.6）；
+  //   smoke spy 从 console.warn 改为劫持 logger.appendModuleLog
+  //
+  // 场景：构造 1 行 OP T-1 = 2026-06-10 但 sourceRow.bill_date_raw='2026-06-08'
   //       且产生差异 → 进入区间导出 collected
-  //       → console.warn 拦截至少 1 次
+  //       → appendModuleLog warning 拦截至少 1 次
   // ========================================================================
-  const origWarn2 = console.warn;
+  const origAppend2 = logger.appendModuleLog;
   const warnLogs2 = [];
-  console.warn = (...args) => { warnLogs2.push(args.join(' ')); };
+  logger.appendModuleLog = (payload) => {
+    if (payload && (payload.level === 'warning' || payload.level === 'warn')) {
+      warnLogs2.push(`${payload.message || ''} ${(payload.details || []).join(' ')}`);
+    }
+  };
   try {
     // T-2 期末 1000；T-1 期末 1100（产差）；Billdate 字段故意写成前一日
     importsRepo.insertRows(db, '2026-06-09', [
@@ -913,10 +928,10 @@ async function runBizOpReconSmokeTests() {
       savePath: nOutPath
     });
     const billdateWarned = warnLogs2.some(l => l.includes('Billdate') && l.includes('不一致'));
-    check('N console.warn 含 Billdate vs data_date 不一致提示', billdateWarned,
-      `M5 spec § 6.2：Billdate 不一致 console.warn 未触发，警告日志：${JSON.stringify(warnLogs2)}`);
+    check('N appendModuleLog warning 含 Billdate vs data_date 不一致提示', billdateWarned,
+      `M5 spec § 6.2 + SR-log-1：Billdate 不一致 warning 未触发，日志：${JSON.stringify(warnLogs2)}`);
   } finally {
-    console.warn = origWarn2;
+    logger.appendModuleLog = origAppend2;
   }
 
   importsRepo.clearByDateBu(db, '2026-06-09', 'BU-N');

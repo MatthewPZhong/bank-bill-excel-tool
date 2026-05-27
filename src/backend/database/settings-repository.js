@@ -1,3 +1,6 @@
+// v2.1.9 SR-log-1 (T32h)：替换 console.warn → appendModuleLog 双写
+const { appendModuleLog } = require('../logger');
+
 function getSetting(db, settingKey) {
   const row = db
     .prepare(`
@@ -168,10 +171,19 @@ function getEnabledModules(db) {
     if (!Array.isArray(parsed)) throw new Error('not an array');
   } catch (error) {
     // 解析失败 → 回退默认值（不抛错，避免阻断启动）
-    // round 1 self-review M6：异常 fallback 路径加 console.warn 便于排查"启用列表自动重置"问题
-    console.warn(
-      `[settings-repository] enabled_modules JSON 解析失败，回退默认值。raw=${JSON.stringify(raw)} reason=${error && error.message ? error.message : error}`
-    );
+    // round 1 self-review M6：异常 fallback 路径加日志便于排查"启用列表自动重置"问题
+    // v2.1.9 SR-log-1：替换 console.warn → 日志上报
+    appendModuleLog({
+      level: 'warning',
+      source: 'main',
+      domain: 'settings-repository',
+      message: '[settings-repository] enabled_modules JSON 解析失败，回退默认值',
+      details: [
+        `raw=${JSON.stringify(raw)}`,
+        `reason=${error && error.message ? error.message : String(error)}`
+      ],
+      stack: error && error.stack ? error.stack : undefined
+    });
     setSetting(db, ENABLED_MODULES_KEY, JSON.stringify(DEFAULT_ENABLED_MODULES));
     return [...DEFAULT_ENABLED_MODULES];
   }
@@ -186,9 +198,14 @@ function getEnabledModules(db) {
   // 若 sanitize 后为空（DB 内全是非法 ID）→ 回退默认值，避免锁死 UI
   if (sanitized.length === 0) {
     // round 1 self-review M6：destructive 覆盖前打 warn
-    console.warn(
-      `[settings-repository] enabled_modules sanitize 后为空（全是非法 ID），回退默认值。raw=${JSON.stringify(raw)}`
-    );
+    // v2.1.9 SR-log-1：替换 console.warn → 日志上报
+    appendModuleLog({
+      level: 'warning',
+      source: 'main',
+      domain: 'settings-repository',
+      message: '[settings-repository] enabled_modules sanitize 后为空（全是非法 ID），回退默认值',
+      details: [`raw=${JSON.stringify(raw)}`]
+    });
     setSetting(db, ENABLED_MODULES_KEY, JSON.stringify(DEFAULT_ENABLED_MODULES));
     return [...DEFAULT_ENABLED_MODULES];
   }
@@ -218,6 +235,39 @@ function setEnabledModules(db, moduleList) {
     throw new Error('enabled_modules must not be empty');  // PRD B1：至少保留 1 个
   }
   setSetting(db, ENABLED_MODULES_KEY, JSON.stringify(sanitized));
+}
+
+// v2.1.9 N1-settings (T32b)：收单单据 idle 清理阈值（5-180 分钟，默认 30；硬编码 → settings 化）
+//   spec.md §13.2 / tasks.md T32b / 资金红线：范围外值会让 idle cleanup 永不触发（>180）或过于频繁（<5）
+//   migration `ensureAcquiringBillIdleCleanupMinutesSetting` 启动期 seed 默认 30；本仓暴露 get/set 接口
+const ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY = 'acquiring_bill_idle_cleanup_minutes';
+const ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT = 30;
+const ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MIN = 5;
+const ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MAX = 180;
+
+function getAcquiringBillIdleCleanupMinutes(db) {
+  const raw = getSetting(db, ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY);
+  if (raw == null || raw === '') return ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT;
+  // 范围外（包括外部直接改 DB 写入非法值）→ 不报错，回退默认（资金红线兜底：never let cleanup never trigger）
+  if (n < ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MIN || n > ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MAX) {
+    return ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT;
+  }
+  return n;
+}
+
+function setAcquiringBillIdleCleanupMinutes(db, minutes) {
+  const n = Number(minutes);
+  if (!Number.isInteger(n)) {
+    throw new Error(`acquiring_bill_idle_cleanup_minutes 必须是整数，收到：${JSON.stringify(minutes)}`);
+  }
+  if (n < ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MIN || n > ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MAX) {
+    throw new Error(
+      `acquiring_bill_idle_cleanup_minutes 必须在 ${ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MIN}-${ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MAX} 分钟范围内，收到：${n}`
+    );
+  }
+  setSetting(db, ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY, String(n));
 }
 
 function listAccountMappings(db, templateId) {
@@ -289,5 +339,12 @@ module.exports = {
   setEnumConfig,
   setReconIdFixBillCategory,
   setSetting,
-  setUiStyle
+  setUiStyle,
+  // v2.1.9 N1-settings (T32b)：idle cleanup 阈值
+  getAcquiringBillIdleCleanupMinutes,
+  setAcquiringBillIdleCleanupMinutes,
+  ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY,
+  ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT,
+  ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MIN,
+  ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MAX,
 };

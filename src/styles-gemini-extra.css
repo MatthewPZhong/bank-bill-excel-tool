@@ -2143,6 +2143,73 @@ select.mapping-text-input {
 .scenarios-manager-card .table-wrapper {
   margin-left: -1px;
   margin-right: -1px;
+  /* 2026-05-27 fix1-N5-UI-1：固定 8 行行数据时的高度（超出滚动）
+     单行 td：padding 12px×2 + font 14px lh 1.4 ≈ 44px；
+     表头 th：padding 12px + 10px + font 12px lh 1.2 ≈ 36px；
+     wrapper padding：8px×2 = 16px；
+     合计 = 36 + 8×44 + 16 = 404px */
+  height: 404px;
+  max-height: 404px;
+  overflow-y: auto;
+}
+
+/* 2026-05-27 fix1-N5-UI-3：场景管理 header 的「银行渠道」下拉 + 转移弹框「目标渠道」下拉
+   视觉对齐主面板「模式」下拉（.template-select）；header 区里高度收 36px 与 small 按钮齐高 */
+/* fix2-2 (2026-05-27)：转移弹框宽度缩小一半（基线 .modal-card 940px → 470px） */
+.modal-card.transfer-scenarios-card {
+  width: min(100%, 470px);
+}
+
+/* fix2-1 (2026-05-27)：渠道管理「执行操作」表头与「修改」按钮最左侧对齐
+   .channels-action-cell 第一个 .text-action 去掉默认 margin-left + padding-left，
+   与表头 .manager-action-header 起点对齐（同 row-actions / account-mapping-action-cell 范式）*/
+.channels-action-cell .text-action:first-child {
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.scenarios-manager-card .channel-filter-shell .template-select.small,
+.transfer-scenarios-card .template-select {
+  height: 36px;
+  padding: 0 32px 0 14px;
+  font-size: 13px;
+  background-position: right 12px center;
+  background-size: 12px 12px;
+}
+.scenarios-manager-card .channel-filter-label {
+  font-size: 13px;
+  color: var(--muted, #5f6368);
+  font-weight: 500;
+}
+
+/* 2026-05-27 fix1-N5-UI-5：导出渠道弹框 — 多选下拉视觉同维护大账号
+   复用 .new-account-currency-option + .new-account-checkbox class（外部已有 Clear 风格）；
+   外层 wrapper 给一个 panel-like 视觉（白底 + 圆角 + 边框 + 内 padding），
+   选项行 justify-content 改为 flex-start（默认是 space-between）让 checkbox 紧贴文本左侧。 */
+.export-scenario-bundle-card {
+  width: min(94vw, 520px);
+}
+.export-scenario-bundle-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--line, rgba(60,64,67,0.16));
+  border-radius: 12px;
+  background: #fff;
+  padding: 8px;
+}
+.export-scenario-bundle-checklist .new-account-currency-option {
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+}
+.export-scenario-bundle-checklist .new-account-currency-option-text {
+  /* 渠道名场景：用中文渠道名（非货币代码）— 改回常规字体避免 mono 缩窄字距 */
+  font-family: inherit;
+  letter-spacing: normal;
+  font-size: 14px;
 }
 
 .scenarios-table .scenarios-col-id {
@@ -2790,9 +2857,18 @@ select.mapping-text-input {
   width: 155px;
 }
 
-/* v2.1.0-beta.2 PR-A Round 2（task R2-6）：场景管理 dialog footer = 左 [新增场景] / 右 [完成]，space-between 布局 */
+/* v2.1.0-beta.2 PR-A Round 2（task R2-6）：场景管理 dialog footer = 左 [新增场景] / 右 [完成]
+   2026-05-27 fix1-N5-UI-4：footer 由 space-between 改为左组 + 右组紧贴
+   - 左组按钮自然 flex gap：批量操作紧贴新增场景右侧；批量模式下退出批量+转移+删除继续紧贴
+   - .scenarios-footer-spacer 用 flex:1 占据中间空白把右组推到最右
+   - 右组（.scenarios-footer-right-group）内部 gap 收窄到 6px → 导入/导出/完成 间隙比左组紧凑 */
 .scenarios-manager-footer {
-  justify-content: space-between;
+  justify-content: flex-start;
+}
+.scenarios-manager-footer .scenarios-footer-right-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .scenario-config-vs-arrow {

@@ -655,8 +655,9 @@ async function caseN4_billRawJsonSlimMigration() {
     `).run(JSON.stringify(fullRaw), new Date().toISOString());
 
     // 步骤 2：跑 ensureBillRawJsonV2Slim（首次）
+    //   v2.1.9 N4 重构 (T32e)：注入 createBackupFn（与 AppDatabase.ensureBillRawJsonV2Slim wrapper 同模式）
     const dbFilePath = path.join(tmpdir, 't.sqlite'); // setupTmpDb 使用 't.sqlite'
-    const result1 = migrations.ensureBillRawJsonV2Slim(db.db, dbFilePath);
+    const result1 = migrations.ensureBillRawJsonV2Slim(db.db, dbFilePath, (label) => db.createBackup(label));
     assertEq(result1.status, 'migrated', 'N4.first migration status=migrated');
     assertEq(result1.rowsAffected, 1, 'N4.first rowsAffected=1');
     assertTrue(result1.backupPath && fs.existsSync(result1.backupPath), 'N4.first backup file exists');
@@ -679,7 +680,7 @@ async function caseN4_billRawJsonSlimMigration() {
     assertEq(markerRow && markerRow.setting_value, 'true', 'N4.marker written = true');
 
     // 步骤 5：第二次跑 migration → 幂等跳过
-    const result2 = migrations.ensureBillRawJsonV2Slim(db.db, dbFilePath);
+    const result2 = migrations.ensureBillRawJsonV2Slim(db.db, dbFilePath, (label) => db.createBackup(label));
     assertEq(result2.status, 'already-migrated', 'N4.second run = already-migrated (idempotent)');
   } finally {
     cleanup();

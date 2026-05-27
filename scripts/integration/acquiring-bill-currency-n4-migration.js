@@ -3,6 +3,11 @@
 //   覆盖：caseN4（migration 单元）+ caseA（writer 输出列）+ 未覆盖的 e2e 联合
 //
 // 用法：node scripts/test-v2.1.8-n4-e2e.js
+//
+// v2.1.9 N4 重构 (T32f, D22=a)：ensureBillRawJsonV2Slim 签名加 createBackupFn 第三参
+//   旧调用形态：migrations.ensureBillRawJsonV2Slim(db.db, dbPath)
+//   新调用形态：migrations.ensureBillRawJsonV2Slim(db.db, dbPath, (label) => appDb.createBackup(label))
+//   集成测试直接调底层 migration 函数（绕过 AppDatabase wrapper），需要自己注入 createBackupFn
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -140,10 +145,17 @@ async function run() {
     // ============================================================
     db.db.prepare("DELETE FROM app_settings WHERE setting_key = 'acquiring_bill_raw_json_v2_migrated'").run();
 
-    const result1 = migrations.ensureBillRawJsonV2Slim(db.db, dbPath);
+    // v2.1.9 N4 重构 (T32e)：注入 createBackupFn（与 AppDatabase.ensureBillRawJsonV2Slim wrapper 同模式）
+    const result1 = migrations.ensureBillRawJsonV2Slim(db.db, dbPath, (label) => db.createBackup(label));
     assertEq(result1.status, 'migrated', 'Step2.first migration status=migrated');
     assertEq(result1.rowsAffected, 5, 'Step2.rowsAffected=5');
     assertTrue(result1.backupPath && fs.existsSync(result1.backupPath), 'Step2.backup file exists');
+
+    // v2.1.9 N4 重构 (T32e)：备份路径仍是 <dbDir>/backups/tool-data-bak-pre-N4-{timestamp}.sqlite（v2.1.8 契约保留）
+    assertTrue(
+      /tool-data-bak-pre-N4-\d{8}T\d{6}\.sqlite$/.test(result1.backupPath),
+      `Step2.backup path 路径格式仍是 tool-data-bak-pre-N4-{timestamp}.sqlite (actual=${result1.backupPath})`
+    );
 
     // 验证 backup 文件大小 > 0
     const backupSize = fs.statSync(result1.backupPath).size;
@@ -202,7 +214,7 @@ async function run() {
     // ============================================================
     // Step 6：第二次跑 migration → 幂等跳过
     // ============================================================
-    const result2 = migrations.ensureBillRawJsonV2Slim(db.db, dbPath);
+    const result2 = migrations.ensureBillRawJsonV2Slim(db.db, dbPath, (label) => db.createBackup(label));
     assertEq(result2.status, 'already-migrated', 'Step6.second run = already-migrated');
   } finally {
     cleanup();
@@ -222,9 +234,11 @@ async function run() {
       VALUES ('2026-05', 'fake.xlsx', 2, 'F1-1', 'USD', 'usd', ?, ?)
     `).run(JSON.stringify({ '账单日期': '2026-05-01', 'remark': 'test' }), new Date().toISOString());
 
-    // 让 dbPath 指向不存在的源文件 → fs.copyFileSync 必失败
-    const badDbPath = path.join(f1tmpdir, 'nonexistent-source.sqlite');
-    const r1 = migrations.ensureBillRawJsonV2Slim(f1db.db, badDbPath);
+    // v2.1.9 N4 重构 (T32e)：fault injection — 给 createBackupFn 注入抛错的 fake，模拟备份失败
+    //   原 v2.1.8 路径：构造非法 dbPath 让 fs.copyFileSync 失败
+    //   新 v2.1.9 路径：注入 fake createBackupFn 直接 throw → 走相同 backup-failed 分支
+    const failingBackupFn = (_label) => { throw new Error('injected backup failure'); };
+    const r1 = migrations.ensureBillRawJsonV2Slim(f1db.db, f1dbPath, failingBackupFn);
     assertEq(r1.status, 'backup-failed', 'Step7.backup-failed 路径');
     assertTrue(typeof r1.error === 'string' && r1.error.length > 0, 'Step7.error 信息存在');
     // 验证 marker 未写
@@ -274,7 +288,7 @@ async function run() {
       return stmt;
     };
 
-    const r2 = migrations.ensureBillRawJsonV2Slim(f2db.db, f2dbPath);
+    const r2 = migrations.ensureBillRawJsonV2Slim(f2db.db, f2dbPath, (label) => f2db.createBackup(label));
     // 恢复 prepare（避免后续清理出错）
     f2db.db.prepare = originalPrepare;
 

@@ -16,6 +16,8 @@ const fs = require('node:fs');
 const importReader = require('../backend/acquiring-bill-currency-import/reader');
 const importRepo = require('../backend/acquiring-bill-currency-db/import-repository');
 const runRepo = require('../backend/acquiring-bill-currency-db/run-repository');
+// v2.1.9 SR-log-1 (T32h)：替换 console.warn/error → appendModuleLog 双写
+const { appendModuleLog } = require('../backend/logger');
 
 function nowIso() {
   return new Date().toISOString();
@@ -224,8 +226,17 @@ async function runCheck({ db, monthKey, storageRoot, onProgress }) {
     // sanity check：mismatchRows（统计口径）与实际 INSERT 行数应一致
     if (insertedDiffRows !== stats.mismatchRows) {
       // 不抛错（数据已提交），但记日志供后续审计
-      // eslint-disable-next-line no-console
-      console.warn(`[acquiring-bill-currency] diff row count mismatch: stats.mismatchRows=${stats.mismatchRows} vs INSERT changes=${insertedDiffRows}`);
+      // v2.1.9 SR-log-1：替换 console.warn → 日志上报
+      appendModuleLog({
+        level: 'warning',
+        source: 'main',
+        domain: 'acquiring-bill-currency',
+        message: '[acquiring-bill-currency] diff row count mismatch',
+        details: [
+          `stats.mismatchRows=${stats.mismatchRows}`,
+          `INSERT changes=${insertedDiffRows}`
+        ]
+      });
     }
   } catch (error) {
     safeRollback(db);
@@ -251,13 +262,27 @@ async function runCheck({ db, monthKey, storageRoot, onProgress }) {
     } catch (writeError) {
       // PR #50 NewF2：写盘失败不回滚 DB；run.status 改 'success-no-files'（数据有效但文件未生成）
       // 让 cleanupOrphanData 识别此状态为「可恢复」不清数据；用户可手动修复路径/权限后重跑 / 重新生成
-      // eslint-disable-next-line no-console
-      console.error('[acquiring-bill-currency] run 写盘失败（DB 已 COMMIT，run.status → success-no-files）:', writeError && writeError.message);
+      // v2.1.9 SR-log-1：替换 console.error → 日志上报
+      appendModuleLog({
+        level: 'error',
+        source: 'main',
+        domain: 'acquiring-bill-currency',
+        message: '[acquiring-bill-currency] run 写盘失败（DB 已 COMMIT，run.status → success-no-files）',
+        details: [writeError && writeError.message ? writeError.message : String(writeError)],
+        stack: writeError && writeError.stack ? writeError.stack : undefined
+      });
       try {
         runRepo.updateRunStatus(db, { runId, status: 'success-no-files' });
       } catch (statusErr) {
-        // eslint-disable-next-line no-console
-        console.error('[acquiring-bill-currency] updateRunStatus 失败:', statusErr && statusErr.message);
+        // v2.1.9 SR-log-1：替换 console.error → 日志上报
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'acquiring-bill-currency',
+          message: '[acquiring-bill-currency] updateRunStatus 失败',
+          details: [statusErr && statusErr.message ? statusErr.message : String(statusErr)],
+          stack: statusErr && statusErr.stack ? statusErr.stack : undefined
+        });
       }
       throw writeError;
     }
@@ -276,8 +301,15 @@ async function runCheck({ db, monthKey, storageRoot, onProgress }) {
       runRepo.markCleanupPending(db, { runId });
     } catch (markErr) {
       // 标志位写失败不阻断 runCheck 成功（用户感知不到），仅日志
-      // eslint-disable-next-line no-console
-      console.error('[acquiring-bill-currency] markCleanupPending 失败:', markErr && markErr.message);
+      // v2.1.9 SR-log-1：替换 console.error → 日志上报
+      appendModuleLog({
+        level: 'error',
+        source: 'main',
+        domain: 'acquiring-bill-currency',
+        message: '[acquiring-bill-currency] markCleanupPending 失败',
+        details: [markErr && markErr.message ? markErr.message : String(markErr)],
+        stack: markErr && markErr.stack ? markErr.stack : undefined
+      });
     }
   }
 
@@ -327,8 +359,15 @@ async function cleanupAfterRunBackground({ db, monthKey, runId, onProgress, incl
         db.exec('COMMIT');
       } catch (err) {
         safeRollback(db);
-        // eslint-disable-next-line no-console
-        console.error(`[acquiring-bill-currency] cleanup batch failed on ${t.name}:`, err && err.message);
+        // v2.1.9 SR-log-1：替换 console.error → 日志上报（单 batch 失败 → 跳出本表循环，下表继续）
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'acquiring-bill-currency',
+          message: `[acquiring-bill-currency] cleanup batch failed on ${t.name}`,
+          details: [err && err.message ? err.message : String(err)],
+          stack: err && err.stack ? err.stack : undefined
+        });
         break;
       }
       stats[keyMap[t.name]] += changes;
@@ -401,12 +440,26 @@ async function cleanupOrphanData({ db, onProgress }) {
         stats.orphanRunIds.push(run.id);
       } catch (err) {
         safeRollback(db);
-        // eslint-disable-next-line no-console
-        console.error(`[acquiring-bill-currency] cleanupOrphanData delete run ${run.id} failed:`, err && err.message);
+        // v2.1.9 SR-log-1：替换 console.error → 日志上报；单 orphan 删除失败容忍继续
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'acquiring-bill-currency',
+          message: `[acquiring-bill-currency] cleanupOrphanData delete run ${run.id} failed`,
+          details: [err && err.message ? err.message : String(err)],
+          stack: err && err.stack ? err.stack : undefined
+        });
       }
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error(`[acquiring-bill-currency] cleanupOrphanData orphan run ${run.id} failed:`, err && err.message);
+      // v2.1.9 SR-log-1：替换 console.error → 日志上报
+      appendModuleLog({
+        level: 'error',
+        source: 'main',
+        domain: 'acquiring-bill-currency',
+        message: `[acquiring-bill-currency] cleanupOrphanData orphan run ${run.id} failed`,
+        details: [err && err.message ? err.message : String(err)],
+        stack: err && err.stack ? err.stack : undefined
+      });
     }
   }
 
@@ -434,8 +487,15 @@ async function cleanupOrphanData({ db, onProgress }) {
         db.exec('COMMIT');
       } catch (err) {
         safeRollback(db);
-        // eslint-disable-next-line no-console
-        console.error('[acquiring-bill-currency] cleanupOrphanData ghost-diff batch failed:', err && err.message);
+        // v2.1.9 SR-log-1：替换 console.error → 日志上报；ghost-diff batch 失败 → 跳出本表循环
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'acquiring-bill-currency',
+          message: '[acquiring-bill-currency] cleanupOrphanData ghost-diff batch failed',
+          details: [err && err.message ? err.message : String(err)],
+          stack: err && err.stack ? err.stack : undefined
+        });
         break;
       }
       stats.deletedDiff += changes;

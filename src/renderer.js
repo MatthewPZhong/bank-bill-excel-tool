@@ -563,6 +563,28 @@ function updateStatusBox(box, message, tone = 'info', options = {}) {
     : errorReportReady
       ? '点击导出报错文件'
       : idleTitle;
+
+  // v2.1.9 SR-log-1 (T32i)：wrapper hijack — tone='error'/'warning' 自动上报告警（spec §15.5）
+  //   - 集中在 updateStatusBox 出口，setStatus / setNewAccountStatus / setBankBuReconStatus / setBizOpReconStatus /
+  //     setAcquiringBillCurrencyStatus / updateReconIdFixUi 等全部走这条路径 → 一处覆盖 175+ 调用方
+  //   - try-catch graceful：desktopApi 不存在 / IPC 抛错 → 不阻塞 UI 文案显示
+  //   - 仅 error / warning 上报，info / success / neutral 不打扰日志
+  //   - logDomain 取自 options 或 box.dataset.logDomain（dialog 工厂可选注入）
+  if (tone === 'error' || tone === 'warning') {
+    try {
+      if (window.desktopApi && window.desktopApi.app && typeof window.desktopApi.app.reportLog === 'function') {
+        window.desktopApi.app.reportLog({
+          level: tone,
+          source: 'renderer',
+          domain: options.logDomain || (box && box.dataset && box.dataset.logDomain) || 'ui',
+          message: String(message || ''),
+          details: Array.isArray(options.logDetails) ? options.logDetails : []
+        });
+      }
+    } catch (_error) {
+      // graceful — wrapper hijack 异常绝不阻塞 UI
+    }
+  }
 }
 
 function setStatus(message, tone = 'info', options = {}) {
@@ -3335,7 +3357,10 @@ function updateBankStatementUi() {
     text = '欢迎使用小助手';
     tone = 'neutral';
   } else if (ex) {
-    text = `已导出：\n${ex.mainFileName}`;
+    // v2.1.9 N6 (T31, D18=a)：删冒号后冗余 \n
+    //   updateStatusBox 内层 (`renderer.js:542-566` `String(message).replace(/：/g, '：\n')`) 已统一处理「：」后换行，
+    //   外层不能再重复加 \n（否则双换行）。`\nerror-report：` 是行间换行，保留不动。
+    text = `已导出：${ex.mainFileName}`;
     if (ex.errorReportName) text += `\nerror-report：${ex.errorReportName}`;
     tone = 'success';
   } else if (pr) {
@@ -3348,7 +3373,8 @@ function updateBankStatementUi() {
     }
     tone = pr.warningCount > 0 ? 'error' : 'success';
   } else {
-    text = `已导入：\n${bs.fileName}（${bs.rowCount} 行）`;
+    // v2.1.9 N6 (T31, D18=a)：删冒号后冗余 \n（同上）；`\n不平账结果表：` 是行间换行保留
+    text = `已导入：${bs.fileName}（${bs.rowCount} 行）`;
     if (gw) text += `\n不平账结果表：${gw.fileName}（${gw.rowCount} 行）`;
     tone = 'info';
   }
@@ -5061,6 +5087,7 @@ async function initialize() {
       }));
     });
   }
+
   elements.backgroundSpectrumArea.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     state.isBackgroundSpectrumDragging = true;
