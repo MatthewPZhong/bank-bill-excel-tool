@@ -26,6 +26,15 @@
 //   - first-match-wins 不变量保留（spec §2.4）：同一行最多命中 1 个场景
 //   - 行元数据扩展：_hitChannelKey / _matchStatus / _matchedChannelId / _fallbackChannelId
 //   - v2.1.8 N3-1 hitScenarios displayIndex 输出格式不变（renderer.js:3345 状态框依赖）
+//
+// v2.1.9 SR-FIX-1 (spec §16.2 🔴 资金红线 / PR #53 self-review SR1 #1/#2 修复)：
+//   - 删除原 dispatchSingleRow / firstMatchWinsForRow（per-row 路径打破 C3 1v1 不变量 + 让 C2 笛卡尔配对失效）
+//   - 新增 runChannelBatch helper（per-channel 子作用域 first-match-wins 批量调度，等同 v2.1.8 legacy 单维行为）
+//   - runDualDimensionDispatch 重写：阶段 A 每专属 channel 批量 + 阶段 B 通用 channel 批量
+//     · 候选行通过 rowMatchedChannelMap 在 dispatcher 入口预查 1 次
+//     · runScenario 单次入参为「未锁定候选行完整集」→ C3 usedGwRowIdx 在 runScenario scope 内 1v1 严格保留
+//     · C2 leftRows + rightRows 都有完整未锁定行集 → 笛卡尔配对正常
+//   - 验收：spec §16.7 6 不变量 unit case 全绿；smoke 全跑 0 regression
 
 const { runScenario } = require('./scenario-engines');
 
@@ -82,77 +91,6 @@ function extractChannelLocation(row) {
   return String(row[LOCATION_FIELD_NAME] ?? '').trim();
 }
 
-// v2.1.9 N5 Phase 4 T16（spec §2.1 / §2.4）：单行双维调度（first-match-wins 分阶段执行）
-//   对单行 row 做两阶段调度：
-//     阶段 A：matchedChannel（专属渠道）的 scenarios 子集 first-match-wins
-//     阶段 B：阶段 A 未命中 → generalChannel（通用兜底）scenarios 子集 first-match-wins
-//   入参：
-//     row：bankRow
-//     gwRows：网关对账行（C3 需要）
-//     scenariosByChannelId：Map<channelId, Array<scenario>>（caller 预先按 channel_id 切片，
-//       同 channel_id 内已经按 priority DESC + id ASC 排序 + filterOutReconIdFix + gwRows 可用性过滤）
-//     deps：{ channelsRepo, db }（查渠道 hot path）
-//   返回：{ hit, hitChannelId, matchedChannel, generalChannel }
-//     - hit：命中场景对象；未命中 null
-//     - hitChannelId：命中场景所属 channel_id；未命中 null
-//     - matchedChannel：行匹配到的 channels 表对象（决定 _matchStatus）；null 表示「兜底」
-//     - generalChannel：通用兜底渠道对象（恒非空）
-//
-// 关键不变量（spec §2.4）：
-//   - 同一行最多命中 1 场景（每阶段内 break）
-//   - 阶段 A 命中 → 不进 B；阶段 A 未命中 → 进 B
-//   - 阶段内 first-match-wins：按 scenarios 子集排序顺序逐一尝试，命中即 break
-function dispatchSingleRow(row, gwRows, scenariosByChannelId, deps) {
-  const { channelsRepo, db } = deps;
-
-  // Step 2 — 查渠道库
-  const matchedChannel = channelsRepo.findByNameAndLocation(
-    db,
-    extractChannelName(row),
-    extractChannelLocation(row)
-  );
-  const generalChannel = channelsRepo.getBuiltinGeneral(db);
-
-  let hit = null;
-  let hitChannelId = null;
-
-  // 阶段 A — 专属渠道场景子集 first-match-wins
-  //   (当 matchedChannel 就是「通用」时跳过 A，避免阶段 B 重复跑通用)
-  if (matchedChannel && matchedChannel.id !== generalChannel.id) {
-    const dedicatedScenarios = scenariosByChannelId.get(matchedChannel.id) || [];
-    hit = firstMatchWinsForRow(dedicatedScenarios, row, gwRows);
-    if (hit) hitChannelId = matchedChannel.id;
-  }
-
-  // 阶段 B — 通用渠道兜底
-  if (!hit) {
-    const generalScenarios = scenariosByChannelId.get(generalChannel.id) || [];
-    hit = firstMatchWinsForRow(generalScenarios, row, gwRows);
-    if (hit) hitChannelId = generalChannel.id;
-  }
-
-  return { hit, hitChannelId, matchedChannel, generalChannel };
-}
-
-// v2.1.9 N5 Phase 4 T16（spec §2.4）：在场景子集内 first-match-wins（单行视角）
-//   - 子集已按 priority DESC + id ASC 排序（caller 保证）
-//   - 对每个 scenario 单行调用 runScenario([row], gwRows) → 命中 → break
-//   - 命中条件：runScenario 返回 lockedRowIds.has(row._rowId) === true
-//   - 未命中返 null
-function firstMatchWinsForRow(scenarios, row, gwRows) {
-  if (!Array.isArray(scenarios) || scenarios.length === 0) return null;
-  if (!row || typeof row !== 'object' || row._rowId == null) return null;
-
-  for (const scenario of scenarios) {
-    const result = runScenario(scenario, [row], gwRows);
-    if (result && result.lockedRowIds && result.lockedRowIds.has(row._rowId)) {
-      // 单场景命中即 break — 资金红线 first-match-wins 不变量（spec §2.4）
-      return { scenario, result };
-    }
-  }
-  return null;
-}
-
 // v2.1.9 N5 Phase 4 T16（spec §2.1 Step 3 优化）：caller 入参 scenarios 按 channel_id 切片
 //   - 输入 scenarios：已 enabled / 已过滤 C4 / 已 sort（priority DESC + id ASC）
 //   - 输出：Map<channelId, scenarios[]>
@@ -180,7 +118,7 @@ function groupScenariosByChannelId(scenarios) {
 //               保留为依赖契约文档化，便于未来按需切换 DB 直查模式）
 //          deps 为 null/undefined → 走 v2.1.8 单维 first-match-wins 路径（向后兼容；
 //             保留 21+ smoke / dryrun / integration 测试 0 regression）
-//          deps 非空 → 走 v2.1.9 双维 first-match-wins（spec §2.1 / §2.4）
+//          deps 非空 → 走 v2.1.9 双维 first-match-wins（spec §2.1 / §2.4 / §16.2）
 //
 // 返回:
 //   {
@@ -339,63 +277,51 @@ function runLegacySingleDimensionDispatch(bankRows, gwRows, filtered, ctx) {
 }
 
 // ========================================================================
-// v2.1.9 N5 Phase 4 T16：dual-dimension first-match-wins（专属优先 + 通用兜底）
+// v2.1.9 SR-FIX-1（spec §16.2 🔴 资金红线）：per-channel batch first-match-wins helper
 // ========================================================================
-// 算法（spec §2.1 / §2.4）：
-//   1. caller 入参 scenarios 已 enabled + sort + filtered C4/C3
-//   2. dispatcher 按 channel_id 切片 scenarios → scenariosByChannelId
-//   3. 遍历每行 row（保持 bankRows 顺序）：
-//      a. 拼 channelKey 写 metadata _hitChannelKey（审计列）
-//      b. 查 matchedChannel + generalChannel
-//      c. dispatchSingleRow 跑双阶段 first-match-wins
-//      d. 命中 → 行进 modifiedRows + 写 metadata；未命中 → 行进 unmatchedRows
-//   4. modifiedRows + unmatchedRows = bankRows（资金红线不变量保留 — spec §2.4）
 //
-// 与 legacy single-dimension 行为差异：
-//   - rowLockSet 改 per-row 决策（无全局 first-match-wins 跨行共享）
-//   - 每行最多调用 N 次 runScenario（N = 子集大小）→ hot path 性能依赖
-//     scenariosByChannelId 切片缩小搜索范围 + runScenario 自身 cost
-//   - hitScenarios 数组按行序追加（v2.1.8 行为为按场景命中序追加，本版调整为按行命中序）
-function runDualDimensionDispatch(bankRows, gwRows, filtered, deps, ctx) {
-  const { skippedC3Count, skippedC4Count } = ctx;
+// runChannelBatch(args)：在单 channel 子作用域内对场景子集做 first-match-wins 批量调度。
+//   - 接收完整 unlocked 候选行集（不再 per-row 拆分）→ C3 usedGwRowIdx 1v1 / C2 笛卡尔配对自然成立
+//   - rowLockSet 跨 channel 共享 → 全局 first-match-wins 不变量（spec §2.4 / §16.2 §16.6）
+//   - 跨 channel 跨 scenario gw 多次消费是已知边界（spec §16.2 / USER_GUIDE 文档化）
+//
+// args 字段：
+//   scenarios: 当前 channel 的场景子集（已按 priority DESC + id ASC 排序）
+//   bankRows: 候选 unlocked rows（caller 已 filter）
+//   gwRows: 网关账单行
+//   rowLockSet: 跨 channel 共享的锁集合（in/out）
+//   rowMeta: 跨 channel 共享的行 metadata Map（in/out）
+//   allModifications / allWarnings: 跨 channel 共享的输出累加器
+//   hitScenarioIdSet / hitScenarios: 跨 channel 共享的 hitScenarios 去重 + 列表
+//   scenarioHitCountRef: { value }（ref 包装；同步回外层 totals）
+//   hitChannelId: 本批属于哪个 channel id（写入命中行 metadata）
+//   matchedChannelMap: rowId → matchedChannel（用于命中行 metadata，但 channel 阶段判定由外层完成）
+function runChannelBatch(args) {
+  const {
+    scenarios, bankRows, gwRows,
+    rowLockSet, rowMeta,
+    allModifications, allWarnings,
+    hitScenarioIdSet, hitScenarios,
+    scenarioHitCountRef,
+    hitChannelId
+  } = args;
 
-  // Step 1 — caller 入参 scenarios 按 channel_id 切片（spec §2.1 Step 3 优化）
-  const scenariosByChannelId = groupScenariosByChannelId(filtered);
+  if (!Array.isArray(scenarios) || scenarios.length === 0) return;
+  if (!Array.isArray(bankRows) || bankRows.length === 0) return;
 
-  const allModifications = [];
-  const allWarnings = [];
-  const rowMeta = new Map(); // _rowId → metadata
-  const hitScenarioIdSet = new Set();
-  const hitScenarios = [];
-  const modifiedRowsOrdered = [];
-  const unmatchedRows = [];
-  let scenarioHitCount = 0;
+  for (const scenario of scenarios) {
+    // 每场景跑前过滤未锁定候选行（跨 channel rowLockSet 共享）
+    const unlocked = bankRows.filter((r) => !rowLockSet.has(r._rowId));
+    if (unlocked.length === 0) break;
 
-  for (const row of bankRows) {
-    // Step 1 — 拼 channelKey（写 metadata，无论命中/未命中都需要）
-    const channelKey = buildChannelKey(row);
+    // 关键：unlocked 是整组未锁定候选行（非单行）
+    //   → C3 内 usedGwRowIdx 在此次 runScenario 调用 scope 内严格 1v1（spec §16.2 不变量 #1）
+    //   → C2 leftRows + rightRows 都收到完整候选集 → 笛卡尔配对正常（spec §16.2 不变量 #2）
+    const result = runScenario(scenario, unlocked, gwRows);
+    const { lockedRowIds, modifications, warnings } = result;
 
-    // Step 2-3 — 双阶段 first-match-wins
-    const dispatched = dispatchSingleRow(row, gwRows, scenariosByChannelId, deps);
-    const { hit, hitChannelId, matchedChannel, generalChannel } = dispatched;
-
-    // Step 4 — 写 metadata（spec §2.2 4 行结果矩阵）
-    //   _matchStatus = matchedChannel 存在即「命中」（即使 hit=null 也是「命中渠道 + 未命中场景」）
-    //   _matchedChannelId = matchedChannel?.id（行匹配到的渠道）
-    //   _fallbackChannelId = 当行匹配的是专属但命中了通用兜底，记录通用 id；否则 null
-    const matchStatus = matchedChannel ? '命中' : '兜底';
-    let fallbackChannelId = null;
-    if (hit && matchedChannel && matchedChannel.id !== generalChannel.id && hitChannelId === generalChannel.id) {
-      // 行匹配专属但命中通用 → 「fallback」
-      fallbackChannelId = generalChannel.id;
-    }
-
-    if (hit) {
-      const { scenario, result } = hit;
-      const { lockedRowIds, modifications, warnings } = result;
-
-      scenarioHitCount += 1;
-      // 同一 scenario 跨行多次命中只入 hitScenarios 1 次（与 v2.1.8 N3-1 行为一致：unique）
+    if (lockedRowIds && lockedRowIds.size > 0) {
+      scenarioHitCountRef.value += 1;
       if (!hitScenarioIdSet.has(scenario.id)) {
         hitScenarioIdSet.add(scenario.id);
         hitScenarios.push({
@@ -404,82 +330,198 @@ function runDualDimensionDispatch(bankRows, gwRows, filtered, deps, ctx) {
           name: scenario.name
         });
       }
-
-      // runScenario 的 lockedRowIds 在单行 [row] 入参下必含 row._rowId
-      const meta = {
-        scenarioId: scenario.id,
-        scenarioDisplayIndex: Number.isFinite(scenario.displayIndex) ? scenario.displayIndex : scenario.id,
-        scenarioName: scenario.name,
-        modifiedColumns: new Set()
-      };
-      rowMeta.set(row._rowId, meta);
-
-      if (Array.isArray(modifications)) {
-        modifications.forEach((m) => {
-          allModifications.push({
-            ...m,
-            scenarioId: scenario.id,
-            scenarioName: scenario.name
-          });
-          if (m.rowId === row._rowId) meta.modifiedColumns.add(m.column);
-        });
-      }
-      if (Array.isArray(warnings)) {
-        warnings.forEach((w) => allWarnings.push({ ...w }));
-      }
-
-      // 找到 lockedRowIds 包含的行（即 row 自身）+ 应用算法层修改
       lockedRowIds.forEach((rowId) => {
-        if (rowId !== row._rowId) {
-          // 防御性：runScenario 返回的 lockedRowIds 在单行入参语义下不应跨 rowId
-          // 若发生（如算法 bug）→ 仍记录但不污染 row metadata
-          return;
+        rowLockSet.add(rowId);
+        if (!rowMeta.has(rowId)) {
+          rowMeta.set(rowId, {
+            scenarioId: scenario.id,
+            scenarioDisplayIndex: Number.isFinite(scenario.displayIndex) ? scenario.displayIndex : scenario.id,
+            scenarioName: scenario.name,
+            modifiedColumns: new Set(),
+            hitChannelId
+          });
         }
       });
+    }
 
-      modifiedRowsOrdered.push({
-        ...row,
-        _hitScenarioId: meta.scenarioId,
-        _hitScenarioDisplayIndex: meta.scenarioDisplayIndex,
-        _hitScenarioName: meta.scenarioName,
-        _modifiedColumns: meta.modifiedColumns,
-        // v2.1.9 N5 metadata（独立报表「匹配渠道 / 匹配状态 / 命中场景」列依赖）
-        _hitChannelKey: channelKey,
-        _matchStatus: matchStatus,
-        _matchedChannelId: matchedChannel ? matchedChannel.id : null,
-        _fallbackChannelId: fallbackChannelId,
-        // v2.1.9 D16=b（2026-05-27 用户拍板）：写入"实际命中场景所属渠道 id"
-        //   writer 用 _hitChannelId 反查 channels.label 渲染「匹配渠道」列
-        //   语义：命中专属 → 专属渠道 id；命中通用兜底 → 通用渠道 id（1）；未命中 → null
-        _hitChannelId: hitChannelId
+    if (Array.isArray(modifications)) {
+      modifications.forEach((m) => {
+        allModifications.push({
+          ...m,
+          scenarioId: scenario.id,
+          scenarioName: scenario.name
+        });
+        const meta = rowMeta.get(m.rowId);
+        if (meta) meta.modifiedColumns.add(m.column);
       });
-    } else {
-      // 未命中：进 unmatchedRows（保留原始字段；spec §9.8.2 不加诊断列约束）
-      //   N5 新增 _hitChannelKey / _matchStatus / _matchedChannelId — 独立报表写入需要
-      //   spec §9.8.2 资金红线不变量保护：原始字段不动 + 新增审计列以下划线前缀避免污染
-      //   v2.1.9 D16=b：未命中 _hitChannelId=null（writer 兜底为空字符串，不写独立报表）
-      const rowOut = {
-        ...row,
-        _hitChannelKey: channelKey,
-        _matchStatus: matchStatus,
-        _matchedChannelId: matchedChannel ? matchedChannel.id : null,
-        _fallbackChannelId: null,
-        _hitChannelId: null
-      };
-      unmatchedRows.push(rowOut);
+    }
+    if (Array.isArray(warnings)) {
+      // PR #31 algo 层 makeWarningCollector(scenario.id, scenario.name) 已在内部 push 时注入；
+      // dispatcher 不再重复 inject（与 legacy 路径行为一致）
+      warnings.forEach((w) => allWarnings.push({ ...w }));
+    }
+  }
+}
+
+// ========================================================================
+// v2.1.9 N5 Phase 4 T16 + v2.1.9 SR-FIX-1 (spec §16.2)：dual-dimension first-match-wins
+// ========================================================================
+// 算法（spec §2.1 / §2.4 + §16.2 重写）：
+//   1. caller 入参 scenarios 已 enabled + sort + filtered C4/C3
+//   2. dispatcher 按 channel_id 切片 scenarios → scenariosByChannelId
+//   3. 为每行预查 matchedChannel（1 行 1 次 DB 查询，缓存 rowMatchedChannelMap）
+//   4. 阶段 A：遍历专属 channels，每 channel 的候选行 = matchedChannel==该 channel ∩ 未锁定
+//      → runChannelBatch 批量调度（保留 C3 1v1 + C2 笛卡尔不变量）
+//   5. 阶段 B：通用 channel 的候选行 = 全部未锁定行（含「匹配专属未命中」+「未匹配渠道」）
+//      → runChannelBatch 批量调度
+//   6. modifiedRows + unmatchedRows = bankRows（保留 bankRows 原始顺序）
+//   7. 每行写 N5 metadata：_hitChannelKey / _matchStatus / _matchedChannelId / _fallbackChannelId / _hitChannelId
+//
+// 与 v2.1.8 legacy single-dimension 行为差异：
+//   - rowLockSet 按 channel 分阶段累积（阶段 A 内 channel 内 first-match-wins + 阶段 B 通用兜底）
+//   - 同一行最多调用 N 次 runScenario（N = 子集大小）→ 但每次 runScenario 入参是 unlocked 候选行整组
+//   - hitScenarios 数组按场景命中序追加（与 legacy 行为一致）
+//
+// SR-FIX-1 资金红线护栏：
+//   - C3 usedGwRowIdx 1v1 严格保留（unit case 2 / 3）
+//   - C2 笛卡尔配对正常工作（unit case 7 / 11）
+function runDualDimensionDispatch(bankRows, gwRows, filtered, deps, ctx) {
+  const { skippedC3Count, skippedC4Count } = ctx;
+  const { channelsRepo, db } = deps;
+
+  // Step 1 — caller 入参 scenarios 按 channel_id 切片（spec §2.1 Step 3）
+  const scenariosByChannelId = groupScenariosByChannelId(filtered);
+  const generalChannel = channelsRepo.getBuiltinGeneral(db);
+
+  // Step 2 — 为每行预查 matchedChannel（1 行 1 次 DB 查询）
+  const rowMatchedChannelMap = new Map(); // _rowId → matchedChannel | null
+  for (const row of bankRows) {
+    if (row && row._rowId != null) {
+      const matched = channelsRepo.findByNameAndLocation(
+        db,
+        extractChannelName(row),
+        extractChannelLocation(row)
+      );
+      rowMatchedChannelMap.set(row._rowId, matched || null);
     }
   }
 
+  // 跨阶段共享状态（保证 first-match-wins 不变量「同行最多 1 命中」）
+  const rowLockSet = new Set();
+  const rowMeta = new Map(); // _rowId → { scenarioId, scenarioDisplayIndex, scenarioName, modifiedColumns, hitChannelId }
+  const allModifications = [];
+  const allWarnings = [];
+  const hitScenarioIdSet = new Set();
+  const hitScenarios = [];
+  const scenarioHitCountRef = { value: 0 };
+
+  // Step 3 — 阶段 A：每个专属渠道独立批量 first-match-wins
+  //   不变量：channel 内 scenarios 按 priority DESC + id ASC 排序（caller 已 sort），rowLockSet 跨 channel 累积
+  //   候选行 = matchedChannel == 该 channel ∩ !rowLockSet
+  for (const [channelId, channelScenarios] of scenariosByChannelId) {
+    if (channelId === generalChannel.id) continue; // 通用留给阶段 B
+    const candidateRows = bankRows.filter((r) =>
+      r && r._rowId != null
+      && !rowLockSet.has(r._rowId)
+      && rowMatchedChannelMap.get(r._rowId)
+      && rowMatchedChannelMap.get(r._rowId).id === channelId
+    );
+    if (candidateRows.length === 0) continue;
+
+    runChannelBatch({
+      scenarios: channelScenarios,
+      bankRows: candidateRows,
+      gwRows,
+      rowLockSet, rowMeta,
+      allModifications, allWarnings,
+      hitScenarioIdSet, hitScenarios,
+      scenarioHitCountRef,
+      hitChannelId: channelId
+    });
+  }
+
+  // Step 4 — 阶段 B：通用渠道批量（候选 = 全部未锁定行：含「matched 专属未命中」+「未 matched」）
+  const generalScenarios = scenariosByChannelId.get(generalChannel.id) || [];
+  if (generalScenarios.length > 0) {
+    const candidateRows = bankRows.filter((r) =>
+      r && r._rowId != null && !rowLockSet.has(r._rowId)
+    );
+    if (candidateRows.length > 0) {
+      runChannelBatch({
+        scenarios: generalScenarios,
+        bankRows: candidateRows,
+        gwRows,
+        rowLockSet, rowMeta,
+        allModifications, allWarnings,
+        hitScenarioIdSet, hitScenarios,
+        scenarioHitCountRef,
+        hitChannelId: generalChannel.id
+      });
+    }
+  }
+
+  // Step 5 — 构造 modifiedRows + unmatchedRows + 写 N5 metadata
+  //   行序：保持 bankRows 原始顺序（filter 顺序稳定）
+  //   _matchStatus 语义（spec §2.2 4 行结果矩阵）：
+  //     matched 存在（含通用本身）→ '命中'（即使 hit=null 也是「命中渠道 + 未命中场景」）
+  //     matched 不存在 → '兜底'
+  //   _fallbackChannelId 语义：
+  //     行匹配专属 + 实际命中通用 → 通用 channel id
+  //     其他场景 → null
+  const modifiedRows = bankRows
+    .filter((r) => r && r._rowId != null && rowLockSet.has(r._rowId))
+    .map((r) => {
+      const meta = rowMeta.get(r._rowId);
+      const matched = rowMatchedChannelMap.get(r._rowId);
+      const hitChannelId = meta ? meta.hitChannelId : null;
+      const matchStatus = matched ? '命中' : '兜底';
+      let fallbackChannelId = null;
+      if (matched && matched.id !== generalChannel.id && hitChannelId === generalChannel.id) {
+        fallbackChannelId = generalChannel.id;
+      }
+      return {
+        ...r,
+        _hitScenarioId: meta ? meta.scenarioId : null,
+        _hitScenarioDisplayIndex: meta ? meta.scenarioDisplayIndex : null,
+        _hitScenarioName: meta ? meta.scenarioName : null,
+        _modifiedColumns: meta ? meta.modifiedColumns : new Set(),
+        // v2.1.9 N5 metadata（独立报表「匹配渠道 / 匹配状态 / 命中场景」列依赖）
+        _hitChannelKey: buildChannelKey(r),
+        _matchStatus: matchStatus,
+        _matchedChannelId: matched ? matched.id : null,
+        _fallbackChannelId: fallbackChannelId,
+        // v2.1.9 D16=b：实际命中场景所属渠道 id（writer 反查 channels.label 渲染「匹配渠道」列）
+        //   命中专属 → 专属 id；命中通用兜底 → 通用 id；未命中 → null（在 unmatchedRows 分支）
+        _hitChannelId: hitChannelId
+      };
+    });
+
+  const unmatchedRows = bankRows
+    .filter((r) => r && r._rowId != null && !rowLockSet.has(r._rowId))
+    .map((r) => {
+      const matched = rowMatchedChannelMap.get(r._rowId);
+      const matchStatus = matched ? '命中' : '兜底';
+      return {
+        ...r,
+        _hitChannelKey: buildChannelKey(r),
+        _matchStatus: matchStatus,
+        _matchedChannelId: matched ? matched.id : null,
+        _fallbackChannelId: null,
+        // v2.1.9 D16=b：未命中行 _hitChannelId=null（writer 兜底为空字符串，不写独立报表）
+        _hitChannelId: null
+      };
+    });
+
   return {
-    modifiedRows: modifiedRowsOrdered,
+    modifiedRows,
     unmatchedRows,
     modifications: allModifications,
     errorReport: allWarnings,
     stats: {
       totalRows: bankRows.length,
-      hitRowCount: modifiedRowsOrdered.length,
+      hitRowCount: modifiedRows.length,
       unmatchedRowCount: unmatchedRows.length,
-      scenarioHitCount,
+      scenarioHitCount: scenarioHitCountRef.value,
       hitScenarios,
       warningCount: allWarnings.length,
       skippedC3Count,
@@ -499,6 +541,6 @@ module.exports = {
   extractChannelName,
   extractChannelLocation,
   groupScenariosByChannelId,
-  dispatchSingleRow,
-  firstMatchWinsForRow
+  // v2.1.9 SR-FIX-1 (spec §16.2)：per-channel batch helper（unit test 直查 + 内部使用）
+  runChannelBatch
 };

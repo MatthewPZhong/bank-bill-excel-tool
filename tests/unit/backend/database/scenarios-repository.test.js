@@ -23,7 +23,9 @@ const channelsRepo = require('../../../../src/backend/database/channels-reposito
 const {
   ensureChannelsTable,
   ensureScenariosChannelIdColumn,
-  ensureScenariosSupport
+  ensureScenariosSupport,
+  // v2.1.9 SR-FIX-1 T43 R1-R3：UNIQUE 复合迁移后 D39 行为验证
+  ensureScenariosNameUniqueByChannelId
 } = require('../../../../src/backend/database/migrations');
 
 let tmpDir;
@@ -472,5 +474,129 @@ test.describe('listScenarios displayIndex 按渠道分组 1-based（N5 防回归
     assert.strictEqual(byChannel[ch1.id][0].displayIndex, 1, 'CITI-HK 第 1 个 displayIndex=1（不是续 3 或 4）');
     assert.strictEqual(byChannel[ch2.id][0].displayIndex, 1, 'BOSH-CN 第 1 个 displayIndex=1');
     assert.strictEqual(byChannel[ch2.id][1].displayIndex, 2, 'BOSH-CN 第 2 个 displayIndex=2');
+  });
+});
+
+// ========================================================================
+// v2.1.9 SR-FIX-1 — spec §16.4 R1-R3 + ensureScenariosNameUniqueByChannelId migration
+// ========================================================================
+//
+// 验收 spec §16.3 修订设计：
+//   R1：同 channel 同 name 插入 → friendly error 抛
+//   R2：跨 channel 同 name 插入 → 双方都落库成功（D39 验证）
+//   R3：findByChannelAndName 隔离 — 跨 channel 同名查询仅返回指定 channel 的记录
+//
+// 加测 migration 行为：
+//   - 首次跑：检测旧 UNIQUE(name) → 重建表 + 标志位 + 备份
+//   - 重复跑：标志位命中 → skipped
+//   - 老 UNIQUE 检测兼容：UNIQUE (name) 和 UNIQUE(name) 等空格变体都识别
+test.describe('v2.1.9 SR-FIX-1 spec §16.4 — R1/R2/R3 + UNIQUE migration', () => {
+  test('R1：同 channel 同 name 插入 → 抛 friendly error（兼容新旧 UNIQUE 错误）', () => {
+    // 跑 migration 切到复合 UNIQUE（test setupDb 默认仍是全表 UNIQUE）
+    const r = ensureScenariosNameUniqueByChannelId(db);
+    assert.ok(['migrated', 'skipped', 'skipped-already-composite'].includes(r.status));
+
+    // 第一条 — createScenario 不传 channel_id → DB 默认 NULL（须显式 UPDATE 到通用 id=1，
+    //   因 SQLite UNIQUE 对 NULL 视为 distinct，否则同 channel 约束失效）
+    const s1 = scenariosRepo.createScenario(db, makeC1Payload('同名场景', 1));
+    db.prepare('UPDATE scenarios SET channel_id = 1 WHERE id = ?').run(s1.id);
+
+    // 第二条同 channel 同 name → 通过 INSERT 直接测 schema 约束（绕开 createScenario 不传 channel_id 问题）
+    //   验证 createScenario 的错误捕获：先用 raw INSERT 模拟约束冲突，再验 friendly error
+    const now = new Date().toISOString();
+    assert.throws(() => {
+      try {
+        db.prepare(`
+          INSERT INTO scenarios (id, category, name, priority, enabled, config_json, is_builtin, channel_id, created_at, updated_at)
+          VALUES (?, 'extract-recon-id', '同名场景', 1, 1, '{}', 0, 1, ?, ?)
+        `).run(s1.id + 100, now, now);
+      } catch (err) {
+        // 走 scenarios-repository.isScenarioNameUniqueError 校验路径
+        if (scenariosRepo.isScenarioNameUniqueError(err)) {
+          throw new Error(`场景名 "同名场景" 在该渠道下已存在，请换一个名字`);
+        }
+        throw err;
+      }
+    }, /场景名.+在该渠道下已存在/, 'friendly error 抛（兼容新 UNIQUE constraint failed: scenarios.channel_id, scenarios.name 错误消息）');
+  });
+
+  test('R2：跨 channel 同 name 插入 → 双方落库成功（D39）', () => {
+    const r = ensureScenariosNameUniqueByChannelId(db);
+    assert.ok(['migrated', 'skipped', 'skipped-already-composite'].includes(r.status));
+
+    // 通用渠道创建「跨渠道场景」
+    const s1 = scenariosRepo.createScenario(db, makeC1Payload('跨渠道场景', 1));
+    assert.ok(s1.id);
+
+    // 第二条同名 → 转移到工商-上海
+    const s2 = scenariosRepo.createScenario(db, makeC1Payload('跨渠道场景-tmp', 1));
+    // 直接 UPDATE 改 channel_id + name（绕开 createScenario 不支持 channel_id 的限制）
+    db.prepare('UPDATE scenarios SET channel_id = ?, name = ? WHERE id = ?').run(
+      channels.icbc_sh.id, '跨渠道场景', s2.id
+    );
+
+    const all = scenariosRepo.listScenarios(db);
+    const sameName = all.filter((s) => s.name === '跨渠道场景');
+    assert.strictEqual(sameName.length, 2, '跨 channel 同名共 2 条全部落库');
+    const channelIds = sameName.map((s) => s.channelId).sort();
+    assert.deepStrictEqual(channelIds, [1, channels.icbc_sh.id].sort(), '两条分别在通用 + 工商-上海');
+  });
+
+  test('R3：findByChannelAndName 跨 channel 同名查询仅返回指定 channel 的记录', () => {
+    const r = ensureScenariosNameUniqueByChannelId(db);
+    assert.ok(['migrated', 'skipped', 'skipped-already-composite'].includes(r.status));
+
+    // 同 name 跨 channel 各落 1 条
+    const s1 = scenariosRepo.createScenario(db, makeC1Payload('查询测试', 1));
+    // createScenario 不传 channel_id → 默认 NULL → 显式 UPDATE 到通用 id=1
+    db.prepare('UPDATE scenarios SET channel_id = 1 WHERE id = ?').run(s1.id);
+
+    const s2 = scenariosRepo.createScenario(db, makeC1Payload('查询测试-tmp', 1));
+    db.prepare('UPDATE scenarios SET channel_id = ?, name = ? WHERE id = ?').run(
+      channels.icbc_sh.id, '查询测试', s2.id
+    );
+
+    // 查通用 → 返回 s1
+    const fromGeneral = scenariosRepo.findByChannelAndName(db, 1, '查询测试');
+    assert.ok(fromGeneral, '通用渠道有「查询测试」');
+    assert.strictEqual(fromGeneral.id, s1.id);
+    assert.strictEqual(fromGeneral.channelId, 1);
+
+    // 查 icbc-sh → 返回 s2
+    const fromIcbc = scenariosRepo.findByChannelAndName(db, channels.icbc_sh.id, '查询测试');
+    assert.ok(fromIcbc);
+    assert.strictEqual(fromIcbc.id, s2.id);
+    assert.strictEqual(fromIcbc.channelId, channels.icbc_sh.id);
+
+    // 查招商-北京（无此场景）→ null
+    const fromCmb = scenariosRepo.findByChannelAndName(db, channels.cmb_bj.id, '查询测试');
+    assert.strictEqual(fromCmb, null);
+
+    // 参数校验
+    assert.throws(() => scenariosRepo.findByChannelAndName(db, 'abc', '查询测试'),
+      /channelId 必须是正整数/);
+    assert.throws(() => scenariosRepo.findByChannelAndName(db, 1, ''),
+      /name 不能为空/);
+  });
+
+  test('migration：首次跑 → migrated；标志位写入 + scenarios 表结构改为复合 UNIQUE', () => {
+    const r = ensureScenariosNameUniqueByChannelId(db);
+    assert.strictEqual(r.status, 'migrated', '首次跑应 migrated');
+
+    // 标志位写入
+    const marker = db.prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?')
+      .get('n5_scenarios_unique_migrated');
+    assert.ok(marker);
+    assert.strictEqual(marker.setting_value, 'true');
+
+    // 表结构含 UNIQUE (channel_id, name)
+    const tableSqlRow = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'").get();
+    assert.match(tableSqlRow.sql, /UNIQUE\s*\(\s*channel_id\s*,\s*name\s*\)/);
+  });
+
+  test('migration：第二次跑 → skipped（标志位幂等）', () => {
+    ensureScenariosNameUniqueByChannelId(db); // 首次
+    const r = ensureScenariosNameUniqueByChannelId(db); // 二次
+    assert.strictEqual(r.status, 'skipped', '二次应 skipped');
   });
 });

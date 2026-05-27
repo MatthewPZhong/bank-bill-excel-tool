@@ -46,6 +46,15 @@ function validateName(name) {
   return trimmed;
 }
 
+// v2.1.9 SR-FIX-1 (spec §16.3)：判定是否「scenarios.name UNIQUE 冲突」（兼容新旧约束）
+//   旧：UNIQUE (name) → "UNIQUE constraint failed: scenarios.name"
+//   新：UNIQUE (channel_id, name) → "UNIQUE constraint failed: scenarios.channel_id, scenarios.name"
+function isScenarioNameUniqueError(error) {
+  const msg = String(error && error.message ? error.message : error || '');
+  return msg.includes('UNIQUE constraint failed: scenarios.name')
+    || msg.includes('UNIQUE constraint failed: scenarios.channel_id, scenarios.name');
+}
+
 function serializeConfig(config) {
   if (config === null || config === undefined) {
     throw new Error('场景配置 (config) 不能为空');
@@ -163,6 +172,37 @@ function listByChannelIdAndCategory(db, channelId, category) {
   return rows.map((row, idx) => Object.assign(rowToDetail(row), { displayIndex: idx + 1 }));
 }
 
+// v2.1.9 SR-FIX-1 (spec §16.3 / §6.3.2)：按 (channel_id, name) 查场景
+//   - N7 bundle import 路径「channel 内同名跳过」语义依赖：先查目标 channel 内同名是否已存在
+//   - 返回完整 detail（含 config）便于 caller 决定 skip / overwrite
+//   - 返 null 表示该 channel 内无同名场景（可安全插入）
+//   - 老 schema（无 channel_id 列）兜底：仅当 channelId=1（通用）时做全表 name 查；其他渠道返 null
+function findByChannelAndName(db, channelId, name) {
+  const numericChannelId = Number(channelId);
+  if (!Number.isFinite(numericChannelId) || numericChannelId <= 0) {
+    throw new Error(`findByChannelAndName: channelId 必须是正整数，当前为 ${channelId}`);
+  }
+  const trimmedName = String(name || '').trim();
+  if (!trimmedName) {
+    throw new Error('findByChannelAndName: name 不能为空');
+  }
+  const hasChannel = hasChannelIdColumn(db);
+  if (!hasChannel) {
+    // 老 schema 无 channel_id 列 → 仅当请求「通用」(id=1) 时做全表 name 查
+    if (numericChannelId !== 1) return null;
+    const row = db
+      .prepare(`SELECT id, category, name, priority, enabled, is_builtin, config_json, created_at, updated_at
+                FROM scenarios WHERE name = ?`)
+      .get(trimmedName);
+    return row ? rowToDetail(row) : null;
+  }
+  const row = db
+    .prepare(`SELECT id, category, name, priority, enabled, is_builtin, channel_id, config_json, created_at, updated_at
+              FROM scenarios WHERE channel_id = ? AND name = ?`)
+    .get(numericChannelId, trimmedName);
+  return row ? rowToDetail(row) : null;
+}
+
 function getScenario(db, id) {
   // v2.1.9 N5 fix（资金红线）：必须 SELECT channel_id —— dispatcher.groupScenariosByChannelId
   //   依赖 scenario.channelId 切片；缺失会兜底到 1（通用），导致专属渠道场景被错应用到其他渠道行
@@ -233,8 +273,12 @@ function createScenario(db, payload) {
       .run(nextId, category, name, priority, enabled, configJson, isBuiltin, now, now);
     return { id: nextId };
   } catch (error) {
-    if (String(error.message || '').includes('UNIQUE constraint failed: scenarios.name')) {
-      throw new Error(`场景名 "${name}" 已存在，请换一个名字`);
+    // v2.1.9 SR-FIX-1 (spec §16.3)：兼容新旧两种 UNIQUE 错误消息
+    //   - 旧：UNIQUE (name) → "UNIQUE constraint failed: scenarios.name"
+    //   - 新：UNIQUE (channel_id, name) → "UNIQUE constraint failed: scenarios.channel_id, scenarios.name"
+    //   两种都抛 friendly error（同 channel 内同名）
+    if (isScenarioNameUniqueError(error)) {
+      throw new Error(`场景名 "${name}" 在该渠道下已存在，请换一个名字`);
     }
     throw error;
   }
@@ -291,8 +335,9 @@ function updateScenario(db, id, fields) {
     db.prepare(`UPDATE scenarios SET ${sets.join(', ')} WHERE id = ?`).run(...params);
     return { id: numericId, changed: true };
   } catch (error) {
-    if (String(error.message || '').includes('UNIQUE constraint failed: scenarios.name')) {
-      throw new Error(`场景名 "${fields.name}" 已存在，请换一个名字`);
+    // v2.1.9 SR-FIX-1 (spec §16.3)：兼容新旧两种 UNIQUE 错误消息（同 createScenario）
+    if (isScenarioNameUniqueError(error)) {
+      throw new Error(`场景名 "${fields.name}" 在该渠道下已存在，请换一个名字`);
     }
     throw error;
   }
@@ -448,5 +493,9 @@ module.exports = {
   transferScenarios,
   batchDelete,
   toggleScenarioEnabled,
-  updateScenario
+  updateScenario,
+  // v2.1.9 SR-FIX-1 (spec §16.3 / §6.3.2)：按 (channel_id, name) 查（bundle import 路径用）
+  findByChannelAndName,
+  // 测试 hook：暴露 UNIQUE 错误判定 helper（unit test 验证兼容性用）
+  isScenarioNameUniqueError
 };

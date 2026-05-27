@@ -28,15 +28,20 @@ const {
   extractChannelName,
   extractChannelLocation,
   groupScenariosByChannelId,
-  dispatchSingleRow,
-  firstMatchWinsForRow
+  // v2.1.9 SR-FIX-1 (spec §16.2)：dispatchSingleRow / firstMatchWinsForRow 已删（per-row 路径
+  //   打破 C3 1v1 不变量 + 让 C2 笛卡尔配对失效）；新增 runChannelBatch（per-channel batch）。
+  runChannelBatch
 } = require('../../../src/main-process/scenario-dispatcher');
 
 const channelsRepo = require('../../../src/backend/database/channels-repository');
+// v2.1.9 SR-FIX-1 T43 case 13：scenarios 跨 channel 同名验证（D39）
+const scenariosRepo = require('../../../src/backend/database/scenarios-repository');
 const {
   ensureChannelsTable,
   ensureScenariosChannelIdColumn,
-  ensureScenariosSupport
+  ensureScenariosSupport,
+  // v2.1.9 SR-FIX-1 T43 case 13：跨 channel 同名场景需 schema 切到复合 UNIQUE 才能落库
+  ensureScenariosNameUniqueByChannelId
 } = require('../../../src/backend/database/migrations');
 
 // ---------- Fixtures ----------
@@ -196,45 +201,12 @@ test.describe('groupScenariosByChannelId', () => {
 });
 
 // ========================================================================
-// 2) firstMatchWinsForRow — 子集级 first-match-wins
+// 2) 双维 runAllScenarios — spec §2.2 4 种行结果矩阵
 // ========================================================================
-
-test.describe('firstMatchWinsForRow', () => {
-  test('空场景子集 → null', () => {
-    const row = makeBankRow({ rowId: 'r1', channel: '工商', location: '上海', customerRef: 'FT123456789012' });
-    assert.strictEqual(firstMatchWinsForRow([], row, null), null);
-  });
-
-  test('null 子集 → null', () => {
-    const row = makeBankRow({ rowId: 'r1', channel: '工商', location: '上海', customerRef: 'X' });
-    assert.strictEqual(firstMatchWinsForRow(null, row, null), null);
-  });
-
-  test('row 缺 _rowId → null', () => {
-    const scenarios = [makeC1Scenario({ id: 1 })];
-    const row = { Channel: '工商', CustomerRef: 'FT123456789012' };
-    assert.strictEqual(firstMatchWinsForRow(scenarios, row, null), null);
-  });
-
-  test('首个匹配 → 返回 { scenario, result }（命中即 break，验证 first-match-wins）', () => {
-    const s1 = makeC1Scenario({ id: 10, name: 'A', priority: 2 });
-    const s2 = makeC1Scenario({ id: 11, name: 'B', priority: 1 });
-    const row = makeBankRow({ rowId: 'r1', channel: '工商', location: '上海', customerRef: 'AFT123456789012' });
-    const out = firstMatchWinsForRow([s1, s2], row, null);
-    assert.ok(out);
-    assert.strictEqual(out.scenario.id, 10, '应命中第一个（id=10）— first-match-wins 验证');
-  });
-
-  test('全部未命中 → null', () => {
-    const s1 = makeC1Scenario({ id: 10, featureCode: 'ZZ' });
-    const row = makeBankRow({ rowId: 'r1', channel: '工商', location: '上海', customerRef: 'no_match' });
-    assert.strictEqual(firstMatchWinsForRow([s1], row, null), null);
-  });
-});
-
-// ========================================================================
-// 3) 双维 runAllScenarios — spec §2.2 4 种行结果矩阵
-// ========================================================================
+//
+// 注：原 firstMatchWinsForRow 9 case 已删（v2.1.9 SR-FIX-1 spec §16.2 — per-row 路径
+//   打破 C3 1v1 不变量 + 让 C2 笛卡尔配对失效；改用 per-channel batch 后该函数已删除）。
+//   first-match-wins 不变量改由「first-match-wins 不变量」+「matrix 5 case」+ T43 新增 case 验证。
 
 test.describe('runAllScenarios 双维调度 — spec §2.2 4 种行结果矩阵', () => {
   // 矩阵 1：_matchStatus='命中' + hit≠null（专属命中）
@@ -504,66 +476,12 @@ test.describe('first-match-wins 不变量 + 分阶段执行', () => {
 });
 
 // ========================================================================
-// 5) dispatchSingleRow 单行级 unit
+// 4) 向后兼容：deps 缺省 → legacy 单维路径
 // ========================================================================
-
-test.describe('dispatchSingleRow（单行视角）', () => {
-  test('阶段 A 命中', () => {
-    const map = new Map();
-    map.set(channels.icbc_sh.id, [makeC1Scenario({ id: 10, channelId: channels.icbc_sh.id })]);
-    map.set(channels.general.id, [makeC1Scenario({ id: 11, channelId: channels.general.id })]);
-
-    const row = makeBankRow({ rowId: 'r1', channel: '工商', location: '上海', customerRef: 'AFT123456789012' });
-    const out = dispatchSingleRow(row, null, map, makeDeps());
-
-    assert.ok(out.hit);
-    assert.strictEqual(out.hit.scenario.id, 10, '专属命中');
-    assert.strictEqual(out.hitChannelId, channels.icbc_sh.id);
-    assert.strictEqual(out.matchedChannel.id, channels.icbc_sh.id);
-    assert.strictEqual(out.generalChannel.id, channels.general.id);
-  });
-
-  test('阶段 A 未命中 → 阶段 B 通用兜底命中', () => {
-    const map = new Map();
-    map.set(channels.icbc_sh.id, [makeC1Scenario({ id: 10, channelId: channels.icbc_sh.id, featureCode: 'ZZ' })]);
-    map.set(channels.general.id, [makeC1Scenario({ id: 11, channelId: channels.general.id })]);
-
-    const row = makeBankRow({ rowId: 'r1', channel: '工商', location: '上海', customerRef: 'AFT123456789012' });
-    const out = dispatchSingleRow(row, null, map, makeDeps());
-
-    assert.ok(out.hit);
-    assert.strictEqual(out.hit.scenario.id, 11);
-    assert.strictEqual(out.hitChannelId, channels.general.id);
-    assert.strictEqual(out.matchedChannel.id, channels.icbc_sh.id, '行仍匹配到专属');
-  });
-
-  test('行匹配到通用（即 channels 表里只有「通用」） → 跳过阶段 A 直接走 B', () => {
-    const map = new Map();
-    map.set(channels.general.id, [makeC1Scenario({ id: 11, channelId: channels.general.id })]);
-
-    const row = makeBankRow({ rowId: 'r1', channel: '通用', location: '通用', customerRef: 'AFT123456789012' });
-    const out = dispatchSingleRow(row, null, map, makeDeps());
-
-    assert.ok(out.hit);
-    assert.strictEqual(out.hit.scenario.id, 11);
-    assert.strictEqual(out.hitChannelId, channels.general.id);
-    assert.strictEqual(out.matchedChannel.id, channels.general.id, '匹配的是通用本身');
-  });
-
-  test('未匹配渠道 + 通用为空 → hit=null', () => {
-    const map = new Map();  // 无任何 scenarios
-    const row = makeBankRow({ rowId: 'r1', channel: '浦发', location: '深圳', customerRef: 'AFT123456789012' });
-    const out = dispatchSingleRow(row, null, map, makeDeps());
-
-    assert.strictEqual(out.hit, null);
-    assert.strictEqual(out.hitChannelId, null);
-    assert.strictEqual(out.matchedChannel, null);
-  });
-});
-
-// ========================================================================
-// 6) 向后兼容：deps 缺省 → legacy 单维路径
-// ========================================================================
+//
+// 注：原 dispatchSingleRow 4 case 已删（v2.1.9 SR-FIX-1 spec §16.2 — per-row 入口
+//   不再保留；调度通过 runAllScenarios + runChannelBatch 入口）。
+//   单行阶段 A/B 行为改由「runAllScenarios 双维调度 4 矩阵」case 覆盖。
 
 test.describe('向后兼容：deps 缺省走 v2.1.8 legacy 单维路径', () => {
   test('deps 为 undefined → legacy 路径（无 _hitChannelKey 字段）', () => {
@@ -639,7 +557,10 @@ test.describe('v2.1.8 输出契约：hitScenarios / displayIndex / stats', () =>
     const result = runAllScenarios(rows, null, scenarios, makeDeps());
 
     assert.strictEqual(result.modifiedRows.length, 2);
-    assert.strictEqual(result.stats.scenarioHitCount, 2, '行级命中次数 = 2');
+    // v2.1.9 SR-FIX-1 (spec §16.2) reverse sync：scenarioHitCount 是「场景级命中次数」（与 v2.1.8
+    //   legacy 单维路径一致 — 一个 scenario 命中即 +1，不论命中多少行；N5 v0.3 per-row 误算成「行级」）
+    //   per-channel batch 重写后回归 legacy 语义：单 scenario 命中 1+ 行 → scenarioHitCount += 1
+    assert.strictEqual(result.stats.scenarioHitCount, 1, '场景级命中次数 = 1（一个 scenario 命中 2 行算一次）');
     assert.strictEqual(result.stats.hitScenarios.length, 1, 'hitScenarios 去重后仅 1 个场景');
     assert.strictEqual(result.stats.hitScenarios[0].id, 11);
   });
@@ -718,3 +639,499 @@ test.describe('runAllScenarios 输入校验', () => {
     assert.strictEqual(result.unmatchedRows[0]._matchStatus, '命中', '行仍匹配到工商-上海渠道');
   });
 });
+
+// ========================================================================
+// v2.1.9 SR-FIX-1 — spec §16.4 case 矩阵：C2/C3 双维 unit case 18 个
+// ========================================================================
+//
+// 范围（spec §16.4 表 1-15 + R1-R3）：
+//   case 1-6  : C3 阶段 A/B + 1v1 资金红线 + 跨阶段 gw 重消费已知边界
+//   case 7-10 : C2 阶段 A/B + 笛卡尔配对 + reconFields=0 衍生方案 A
+//   case 11-12: 混合 first-match-wins 不变量（C1 锁定后 C2 / C3 锁定后 C2 不再处理同行）
+//   case 13   : 跨 channel 同名场景 — D39 验证（在 scenarios-repository 维度 R2 也覆盖）
+//   case 14-15: 全部场景在通用 + 行匹配/未匹配渠道 — metadata fallback 验证
+//
+// 关键资金红线断言：
+//   - case 2: C3 1v1 严格 — 不同 bank 行配不同 gw 行（usedGwRowIdx 在 runScenario scope 内独占）
+//   - case 7: C2 笛卡尔配对 — leftRows / rightRows 各 ≥1 才命中（per-channel batch 修复 SR1 #2）
+
+// ---- C2/C3 场景构造器 ----
+
+// C3 场景：1v1 金额匹配（assign 直取 gw 字段写 bank 字段）
+function makeC3Scenario({
+  id, name, channelId = 1, priority = 1,
+  gwField = 'Reference', bankField = 'ReconciliationId'
+} = {}) {
+  return {
+    id,
+    name: name || `C3-${id}`,
+    category: 'gateway-recon-join',
+    priority,
+    enabled: true,
+    channelId,
+    displayIndex: id,
+    config: {
+      reconFields: [{ seq: 1, gwField: 'Amount', bankField: '发生额绝对值' }],
+      assign: { gwField, bankField, mode: 'direct', customValue: '' }
+    }
+  };
+}
+
+// C3 bank 行：要 Credit / Debit Amount + ReconciliationId
+function makeC3BankRow({ rowId, channel, location, creditAmount = 0, debitAmount = 0, recon = '' }) {
+  return {
+    _rowId: rowId,
+    Channel: channel,
+    地区: location,
+    'Credit Amount': creditAmount,
+    'Debit Amount': debitAmount,
+    ReconciliationId: recon
+  };
+}
+
+// C2 场景：billTypes seq=1/2 + reconFields 配对（按 OrderId） + markValue 写 rightRow
+function makeC2Scenario({
+  id, name, channelId = 1, priority = 1,
+  rightField = 'Remark-description', rightValue = 'PAIRED'
+} = {}) {
+  return {
+    id,
+    name: name || `C2-${id}`,
+    category: 'offset-bill-mark',
+    priority,
+    enabled: true,
+    channelId,
+    displayIndex: id,
+    config: {
+      billTypes: [
+        { seq: 1, field: 'type', op: '等于', value: 'A' },
+        { seq: 2, field: 'type', op: '等于', value: 'B' }
+      ],
+      reconFields: [
+        { seq: 1, leftType: 1, leftField: 'OrderId', rightType: 2, rightField: 'OrderId' }
+      ],
+      markValue: { type: 2, field: rightField, value: rightValue }
+    }
+  };
+}
+
+// C2 bank 行：含 type + OrderId + 目标字段
+function makeC2BankRow({ rowId, channel, location, type, orderId, mark = '' }) {
+  return {
+    _rowId: rowId,
+    Channel: channel,
+    地区: location,
+    type,
+    OrderId: orderId,
+    'Remark-description': mark
+  };
+}
+
+// C2 reconFields=0「衍生方案 A」场景：无条件按 billType 命中写 markValue
+function makeC2NoReconFieldsScenario({
+  id, name, channelId = 1, priority = 1,
+  markField = 'Remark-description', markValue = 'NO-RECON', markType = 1
+} = {}) {
+  return {
+    id,
+    name: name || `C2NR-${id}`,
+    category: 'offset-bill-mark',
+    priority,
+    enabled: true,
+    channelId,
+    displayIndex: id,
+    config: {
+      billTypes: [
+        { seq: 1, field: 'type', op: '等于', value: 'X' }
+      ],
+      reconFields: [],
+      markValue: { type: markType, field: markField, value: markValue }
+    }
+  };
+}
+
+test.describe('v2.1.9 SR-FIX-1 spec §16.4 — C3 矩阵 case 1-6', () => {
+  // case 1：阶段 A 专属 channel C3 命中
+  test('case 1：阶段 A 专属 channel C3 命中 + gw 行被消费', () => {
+    const scenarios = [
+      makeC3Scenario({ id: 10, name: 'C3-icbc', channelId: channels.icbc_sh.id })
+    ];
+    const rows = [
+      makeC3BankRow({ rowId: 'r1', channel: '工商', location: '上海', creditAmount: 100 })
+    ];
+    const gwRows = [
+      { Amount: 100, Reference: 'GW-REF-A' }
+    ];
+    const result = runAllScenarios(rows, gwRows, scenarios, makeDeps());
+
+    assert.strictEqual(result.modifiedRows.length, 1, '阶段 A 应命中');
+    assert.strictEqual(result.modifiedRows[0]._hitScenarioId, 10);
+    assert.strictEqual(result.modifiedRows[0]._matchedChannelId, channels.icbc_sh.id);
+    assert.strictEqual(result.modifiedRows[0]._hitChannelId, channels.icbc_sh.id);
+    assert.strictEqual(result.modifiedRows[0].ReconciliationId, 'GW-REF-A', '应写入 gw Reference');
+  });
+
+  // case 2：C3 阶段 A 同 channel 多行 1v1 — 🔴 资金红线护栏
+  test('case 2：阶段 A 同 channel 多 bank 行多 gw 行严格 1v1（C3 资金红线 1v1 不变量）', () => {
+    const scenarios = [
+      makeC3Scenario({ id: 10, channelId: channels.icbc_sh.id })
+    ];
+    // 2 行 bank 都金额=100 + matched 工商-上海
+    const rows = [
+      makeC3BankRow({ rowId: 'r1', channel: '工商', location: '上海', creditAmount: 100 }),
+      makeC3BankRow({ rowId: 'r2', channel: '工商', location: '上海', creditAmount: 100 })
+    ];
+    // 2 行 gw 都金额=100 但 Reference 不同
+    const gwRows = [
+      { Amount: 100, Reference: 'GW-A' },
+      { Amount: 100, Reference: 'GW-B' }
+    ];
+    const result = runAllScenarios(rows, gwRows, scenarios, makeDeps());
+
+    assert.strictEqual(result.modifiedRows.length, 2, '2 行 bank 都应命中');
+    // 关键：2 行写入的 gw Reference 必须不同（严格 1v1）— per-row 路径 bug 会让两行都写 GW-A
+    const refs = result.modifiedRows.map((r) => r.ReconciliationId).sort();
+    assert.deepStrictEqual(refs, ['GW-A', 'GW-B'], 'C3 1v1 红线：不同 bank 行写入不同 gw 行（不共费）');
+  });
+
+  // case 3：C3 阶段 A gw 不够 → 部分 bank 未命中
+  test('case 3：阶段 A C3 gw 行不够 → 多余 bank 行 unmatched', () => {
+    const scenarios = [
+      makeC3Scenario({ id: 10, channelId: channels.icbc_sh.id })
+    ];
+    const rows = [
+      makeC3BankRow({ rowId: 'r1', channel: '工商', location: '上海', creditAmount: 100 }),
+      makeC3BankRow({ rowId: 'r2', channel: '工商', location: '上海', creditAmount: 100 })
+    ];
+    const gwRows = [
+      { Amount: 100, Reference: 'GW-A' }
+    ];
+    const result = runAllScenarios(rows, gwRows, scenarios, makeDeps());
+
+    assert.strictEqual(result.modifiedRows.length, 1, '只 1 行能命中 gw');
+    assert.strictEqual(result.unmatchedRows.length, 1, '另 1 行 unmatched');
+    assert.strictEqual(result.modifiedRows[0].ReconciliationId, 'GW-A');
+  });
+
+  // case 4：阶段 A 未命中 → 阶段 B 通用 C3 命中
+  test('case 4：阶段 A 专属 C3 不匹配 → 阶段 B 通用 C3 命中', () => {
+    const scenarios = [
+      // 专属 C3 reconFields 比通用严格（金额必须 200）→ 不会命中 100
+      {
+        ...makeC3Scenario({ id: 10, channelId: channels.icbc_sh.id }),
+        config: {
+          reconFields: [
+            { seq: 1, gwField: 'Amount', bankField: '发生额绝对值' },
+            { seq: 1, gwField: 'StrictKey', bankField: 'OrderId' }
+          ],
+          assign: { gwField: 'Reference', bankField: 'ReconciliationId', mode: 'direct', customValue: '' }
+        }
+      },
+      makeC3Scenario({ id: 11, channelId: channels.general.id })
+    ];
+    const rows = [
+      makeC3BankRow({ rowId: 'r1', channel: '工商', location: '上海', creditAmount: 100 })
+    ];
+    const gwRows = [
+      // 第一个不命中专属（StrictKey 不匹配 OrderId），但命中通用
+      { Amount: 100, Reference: 'GW-GEN', StrictKey: 'NONE' }
+    ];
+    const result = runAllScenarios(rows, gwRows, scenarios, makeDeps());
+
+    assert.strictEqual(result.modifiedRows.length, 1);
+    const row = result.modifiedRows[0];
+    assert.strictEqual(row._hitScenarioId, 11, '通用 C3 命中');
+    assert.strictEqual(row._hitChannelId, channels.general.id);
+    assert.strictEqual(row._fallbackChannelId, channels.general.id, '专属未命中 → fallback 通用');
+  });
+
+  // case 5：行未 matched channel → 阶段 B 通用 C3 命中
+  test('case 5：行未匹配任何渠道 → 阶段 B 通用 C3 命中（兜底）', () => {
+    const scenarios = [
+      makeC3Scenario({ id: 11, channelId: channels.general.id })
+    ];
+    const rows = [
+      // 浦发-深圳 不在 channels 表
+      makeC3BankRow({ rowId: 'r1', channel: '浦发', location: '深圳', creditAmount: 100 })
+    ];
+    const gwRows = [
+      { Amount: 100, Reference: 'GW-GEN' }
+    ];
+    const result = runAllScenarios(rows, gwRows, scenarios, makeDeps());
+
+    assert.strictEqual(result.modifiedRows.length, 1);
+    assert.strictEqual(result.modifiedRows[0]._matchStatus, '兜底');
+    assert.strictEqual(result.modifiedRows[0]._hitChannelId, channels.general.id);
+  });
+
+  // case 6：跨 channel gw 重消费已知边界（spec §16.2 文档化）
+  test('case 6：跨 channel + 跨场景的 gw 行允许多次消费（已知边界，记录不抛错）', () => {
+    // 同一个 gwRow 在专属 C3 + 通用 C3 都能匹配（同 reconFields = Amount）
+    const scenarios = [
+      makeC3Scenario({ id: 10, channelId: channels.icbc_sh.id }),
+      makeC3Scenario({ id: 11, channelId: channels.general.id })
+    ];
+    const rows = [
+      // r1: matched 工商-上海 → 走阶段 A 专属（消费 gw[0]）
+      makeC3BankRow({ rowId: 'r1', channel: '工商', location: '上海', creditAmount: 100 }),
+      // r2: 未 matched 浦发-深圳 → 走阶段 B 通用（理论能消费 gw[0]，但已被消费 → 红线问题？）
+      makeC3BankRow({ rowId: 'r2', channel: '浦发', location: '深圳', creditAmount: 100 })
+    ];
+    const gwRows = [
+      { Amount: 100, Reference: 'GW-A' }
+    ];
+    const result = runAllScenarios(rows, gwRows, scenarios, makeDeps());
+
+    // 已知边界（spec §16.2 / USER_GUIDE 文档化）：
+    //   - 阶段 A runScenario(专属 C3, [r1], gw) 内 usedGwRowIdx 消费 gw[0]
+    //   - 阶段 B runScenario(通用 C3, [r2], gw) 内 usedGwRowIdx 是新 Set → 能再消费 gw[0]
+    //   - 与 v2.1.8 单维行为一致：单 runScenario 调用内 1v1，跨调用允许多次消费
+    //   - 不抛错；调用方需在 USER_GUIDE 引导用户避免「专属 + 通用同时配相同 reconFields」
+    assert.ok(result.modifiedRows.length >= 1, '至少 1 行命中（专属 r1）');
+    // 不强断言 r2 命中或不命中 — 行为是「允许跨调用重消费」（实际会再命中）
+    // 严格断言：r1 必命中专属
+    const r1 = result.modifiedRows.find((r) => r._rowId === 'r1');
+    assert.ok(r1, 'r1 应被专属命中');
+    assert.strictEqual(r1._hitChannelId, channels.icbc_sh.id);
+  });
+});
+
+test.describe('v2.1.9 SR-FIX-1 spec §16.4 — C2 矩阵 case 7-10', () => {
+  // case 7：阶段 A 专属 C2 笛卡尔配对成功 — 🔴 修复 SR1 #2（per-row 路径 C2 失效）
+  test('case 7：阶段 A 专属 C2 leftRow + rightRow 笛卡尔配对成功（修复 SR1 #2）', () => {
+    const scenarios = [
+      makeC2Scenario({ id: 10, channelId: channels.icbc_sh.id })
+    ];
+    // 2 行 bank：A 行（type=A，leftType=1） + B 行（type=B，rightType=2）+ 同 channel 同 OrderId
+    const rows = [
+      makeC2BankRow({ rowId: 'r1', channel: '工商', location: '上海', type: 'A', orderId: 'O1' }),
+      makeC2BankRow({ rowId: 'r2', channel: '工商', location: '上海', type: 'B', orderId: 'O1' })
+    ];
+    const result = runAllScenarios(rows, null, scenarios, makeDeps());
+
+    assert.strictEqual(result.modifiedRows.length, 2, 'C2 笛卡尔配对成功 — 左右双方都被锁定');
+    // rightRow 应被写入 markValue
+    const r2 = result.modifiedRows.find((r) => r._rowId === 'r2');
+    assert.ok(r2);
+    assert.strictEqual(r2['Remark-description'], 'PAIRED', 'rightRow 字段被写入');
+  });
+
+  // case 8：阶段 A 专属 C2 单行入参（防御性 — 仅 leftType 一行）
+  test('case 8：阶段 A 专属 C2 仅 leftRow 一行 → 无配对 → unmatched（不抛错）', () => {
+    const scenarios = [
+      makeC2Scenario({ id: 10, channelId: channels.icbc_sh.id })
+    ];
+    const rows = [
+      makeC2BankRow({ rowId: 'r1', channel: '工商', location: '上海', type: 'A', orderId: 'O1' })
+    ];
+    const result = runAllScenarios(rows, null, scenarios, makeDeps());
+
+    assert.strictEqual(result.modifiedRows.length, 0, '无 rightRow → C2 无法配对');
+    assert.strictEqual(result.unmatchedRows.length, 1);
+  });
+
+  // case 9：阶段 A 未命中 → 阶段 B 通用 C2 命中
+  test('case 9：阶段 A 无专属 C2 → 阶段 B 通用 C2 笛卡尔配对成功', () => {
+    const scenarios = [
+      // 通用 C2（无专属）
+      makeC2Scenario({ id: 11, channelId: channels.general.id })
+    ];
+    // 招商-北京 是已知 channel，但无专属 C2 → 进阶段 B 通用
+    const rows = [
+      makeC2BankRow({ rowId: 'r1', channel: '招商', location: '北京', type: 'A', orderId: 'O1' }),
+      makeC2BankRow({ rowId: 'r2', channel: '招商', location: '北京', type: 'B', orderId: 'O1' })
+    ];
+    const result = runAllScenarios(rows, null, scenarios, makeDeps());
+
+    assert.strictEqual(result.modifiedRows.length, 2);
+    const r2 = result.modifiedRows.find((r) => r._rowId === 'r2');
+    assert.ok(r2);
+    assert.strictEqual(r2['Remark-description'], 'PAIRED');
+    assert.strictEqual(r2._fallbackChannelId, channels.general.id, '专属无 C2 → fallback 通用');
+  });
+
+  // case 10：C2 reconFields=0 衍生方案 A 无条件赋值
+  test('case 10：C2 reconFields=0 衍生方案 A — 命中 billType 即写字段（不走笛卡尔）', () => {
+    const scenarios = [
+      makeC2NoReconFieldsScenario({ id: 10, channelId: channels.icbc_sh.id })
+    ];
+    const rows = [
+      {
+        _rowId: 'r1', Channel: '工商', 地区: '上海',
+        type: 'X', // 命中 billType seq=1
+        'Remark-description': ''
+      }
+    ];
+    const result = runAllScenarios(rows, null, scenarios, makeDeps());
+
+    assert.strictEqual(result.modifiedRows.length, 1);
+    assert.strictEqual(result.modifiedRows[0]['Remark-description'], 'NO-RECON', 'reconFields=0 → 直接写值');
+  });
+});
+
+test.describe('v2.1.9 SR-FIX-1 spec §16.4 — 混合 case 11-15', () => {
+  // case 11：first-match-wins 不变量验证 — C1 锁定后同行不再被 C2 处理
+  test('case 11：C1 命中行后 first-match-wins 锁定 → 后续 C2 场景不再处理同行', () => {
+    // C1 先命中 r1（CustomerRef 含 AFT）→ r1 锁定
+    // C2 想配对 r1 + r2，但 r1 已锁定 → C2 收到 unlocked = [r2] → 无法配对（leftRows 空）
+    const scenarios = [
+      // C1 priority=3 优先（专属 + 高优先级 → 阶段 A 先跑）
+      makeC1Scenario({ id: 10, channelId: channels.icbc_sh.id, priority: 3 }),
+      // C2 priority=1
+      makeC2Scenario({ id: 11, channelId: channels.icbc_sh.id, priority: 1 })
+    ];
+    const rows = [
+      // r1：C1 能命中（AFT123 含 FT 编码）+ C2 是 leftType A
+      {
+        _rowId: 'r1', Channel: '工商', 地区: '上海',
+        CustomerRef: 'AFT123456789012', ReconciliationId: '',
+        type: 'A', OrderId: 'O1', 'Remark-description': ''
+      },
+      // r2：仅 C2 rightType B（CustomerRef 不含 AFT）
+      {
+        _rowId: 'r2', Channel: '工商', 地区: '上海',
+        CustomerRef: 'no_match', ReconciliationId: '',
+        type: 'B', OrderId: 'O1', 'Remark-description': ''
+      }
+    ];
+    const result = runAllScenarios(rows, null, scenarios, makeDeps());
+
+    // r1: C1 命中（priority=3 优先），不再被 C2 触及
+    const r1 = result.modifiedRows.find((r) => r._rowId === 'r1');
+    assert.ok(r1, 'r1 应命中');
+    assert.strictEqual(r1._hitScenarioId, 10, 'r1 命中 C1（first-match-wins）');
+    // r2: 因 r1 锁定，C2 入参 unlocked = [r2]（仅 rightRow），无 leftRow → 无配对 → r2 unmatched
+    const r2unmatched = result.unmatchedRows.find((r) => r._rowId === 'r2');
+    assert.ok(r2unmatched, 'r2 在 C2 入参无 leftRow → unmatched');
+  });
+
+  // case 12：C3 命中行后同行 C2 不再处理
+  test('case 12：C3 命中行 → 锁定后 C2 同 channel 同行不再处理', () => {
+    const scenarios = [
+      makeC3Scenario({ id: 10, channelId: channels.icbc_sh.id, priority: 3 }),
+      makeC2Scenario({ id: 11, channelId: channels.icbc_sh.id, priority: 1 })
+    ];
+    // r1：C3 能命中（金额 100 + 工商-上海）+ 同时是 C2 leftType A（type=A + OrderId=O1）
+    // r2: 仅 C2 rightType B（type=B + OrderId=O1）
+    const rows = [
+      {
+        _rowId: 'r1', Channel: '工商', 地区: '上海',
+        'Credit Amount': 100, 'Debit Amount': 0,
+        ReconciliationId: '',
+        type: 'A', OrderId: 'O1', 'Remark-description': ''
+      },
+      {
+        _rowId: 'r2', Channel: '工商', 地区: '上海',
+        'Credit Amount': 0, 'Debit Amount': 0,
+        ReconciliationId: '',
+        type: 'B', OrderId: 'O1', 'Remark-description': ''
+      }
+    ];
+    const gwRows = [{ Amount: 100, Reference: 'GW-A' }];
+    const result = runAllScenarios(rows, gwRows, scenarios, makeDeps());
+
+    // r1 应命中 C3（priority=3 优先）
+    const r1 = result.modifiedRows.find((r) => r._rowId === 'r1');
+    assert.ok(r1);
+    assert.strictEqual(r1._hitScenarioId, 10, 'r1 命中 C3');
+    // r2 在 C2 入参无 leftRow（r1 锁定）→ unmatched
+    const r2 = result.unmatchedRows.find((r) => r._rowId === 'r2');
+    assert.ok(r2, 'r2 unmatched');
+  });
+
+  // case 13：scenarios.name 跨 channel 同名允许（D39 验证，通过 dispatcher 间接验证）
+  test('case 13：跨 channel 同名 scenarios 都能在 dispatcher 内正确归属各自 channel', () => {
+    // 前置：跑 T42 UNIQUE migration 把 schema 从全表 UNIQUE(name) 切换到 (channel_id, name)
+    // （test setupDb 只跑 ensureScenariosSupport，未跑 ensureScenariosNameUniqueByChannelId）
+    const migResult = ensureScenariosNameUniqueByChannelId(db);
+    assert.ok(['migrated', 'skipped', 'skipped-already-composite'].includes(migResult.status),
+      `migration 必须成功，实际 status=${migResult.status} error=${migResult.error || 'n/a'}`);
+
+    // 创建跨 channel 同名场景（D39 允许）— 用 SQL 直接 UPDATE channel_id 模拟 N7 import 已落库
+    const s1Id = scenariosRepo.createScenario(db, {
+      category: 'extract-recon-id',
+      name: '对账场景',
+      priority: 1,
+      enabled: true,
+      config: {
+        conditions: [{ field: 'CustomerRef', op: '包含', value: 'AFT' }],
+        extractByFeature: { enabled: true, searchFields: ['CustomerRef'], featureCode: 'FT', digitCount: 12, totalLength: 15 },
+        extractByOtherField: null
+      }
+    }).id;
+    db.prepare('UPDATE scenarios SET channel_id = ? WHERE id = ?').run(channels.icbc_sh.id, s1Id);
+
+    // 第二个同名场景留在通用渠道（migration 后 UNIQUE (channel_id, name) 允许跨 channel 同名）
+    const s2Id = scenariosRepo.createScenario(db, {
+      category: 'extract-recon-id',
+      name: '对账场景',  // 同名（不同 channel_id：通用 = 1，s1 = icbc-sh）→ migration 后允许
+      priority: 1,
+      enabled: true,
+      config: {
+        conditions: [{ field: 'CustomerRef', op: '包含', value: 'AFT' }],
+        extractByFeature: { enabled: true, searchFields: ['CustomerRef'], featureCode: 'FT', digitCount: 12, totalLength: 15 },
+        extractByOtherField: null
+      }
+    }).id;
+
+    const allScenarios = scenariosRepo.listScenarios(db);
+    const sameName = allScenarios.filter((s) => s.name === '对账场景');
+    assert.strictEqual(sameName.length, 2, '跨 channel 同名场景共 2 条');
+    assert.notStrictEqual(sameName[0].channelId, sameName[1].channelId, '两条 channelId 不同');
+
+    // dispatcher 视角：拉完整 detail（含 config） + 跑双维调度
+    const detailScenarios = sameName.map((s) => ({
+      ...s,
+      ...scenariosRepo.getScenario(db, s.id) // 加 config
+    }));
+    const rows = [
+      makeBankRow({ rowId: 'r1', channel: '工商', location: '上海', customerRef: 'AFT123456789012' })
+    ];
+    const result = runAllScenarios(rows, null, detailScenarios, makeDeps());
+
+    assert.strictEqual(result.modifiedRows.length, 1, '行命中');
+    // 命中专属（icbc-sh）— 阶段 A 优先于阶段 B 通用
+    assert.strictEqual(result.modifiedRows[0]._hitChannelId, channels.icbc_sh.id, '命中专属（阶段 A 优先）');
+  });
+
+  // case 14：全部场景在通用 + 行 matched 专属 → 阶段 A 空跑 → 阶段 B 兜底命中
+  test('case 14：全部场景在通用 + 行匹配专属 → 阶段 A 空跑 → 阶段 B 通用命中 + fallback', () => {
+    const scenarios = [
+      // 仅通用 C1（无专属场景）
+      makeC1Scenario({ id: 11, channelId: channels.general.id })
+    ];
+    const rows = [
+      // 行匹配 工商-上海（专属）
+      makeBankRow({ rowId: 'r1', channel: '工商', location: '上海', customerRef: 'AFT123456789012' })
+    ];
+    const result = runAllScenarios(rows, null, scenarios, makeDeps());
+
+    assert.strictEqual(result.modifiedRows.length, 1);
+    const row = result.modifiedRows[0];
+    assert.strictEqual(row._hitChannelId, channels.general.id, '阶段 B 命中通用');
+    assert.strictEqual(row._matchedChannelId, channels.icbc_sh.id, '行仍 matched 专属');
+    assert.strictEqual(row._fallbackChannelId, channels.general.id, '专属未命中 + 通用命中 → fallback 通用');
+    assert.strictEqual(row._matchStatus, '命中', '行 matched 专属，状态=命中');
+  });
+
+  // case 15：全部场景在通用 + 行未 matched → 阶段 B 兜底
+  test('case 15：全部场景在通用 + 行未 matched 任何渠道 → 阶段 B 命中（兜底）+ metadata 完整', () => {
+    const scenarios = [
+      makeC1Scenario({ id: 11, channelId: channels.general.id })
+    ];
+    const rows = [
+      // 浦发-深圳 不在 channels 表
+      makeBankRow({ rowId: 'r1', channel: '浦发', location: '深圳', customerRef: 'AFT123456789012' })
+    ];
+    const result = runAllScenarios(rows, null, scenarios, makeDeps());
+
+    assert.strictEqual(result.modifiedRows.length, 1);
+    const row = result.modifiedRows[0];
+    assert.strictEqual(row._matchStatus, '兜底', '未 matched → 兜底');
+    assert.strictEqual(row._matchedChannelId, null, '未 matched 任何渠道 → matchedChannelId=null');
+    assert.strictEqual(row._hitChannelId, channels.general.id, '兜底命中通用');
+    assert.strictEqual(row._fallbackChannelId, null, '兜底场景：fallback=null（仅在 matched 专属命中通用时才记录）');
+    assert.strictEqual(row._hitChannelKey, '浦发-深圳', '_hitChannelKey 保留原始审计 key');
+  });
+});
+

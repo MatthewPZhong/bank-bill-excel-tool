@@ -999,6 +999,188 @@ function ensureScenariosChannelIdColumn(db) {
 }
 
 const N5_MIGRATED_MARKER = 'n5_channels_migrated';
+const N5_SCENARIOS_UNIQUE_MIGRATED_MARKER = 'n5_scenarios_unique_migrated';
+
+// v2.1.9 SR-FIX-1 (spec §16.3 🔴 资金红线 + 破坏性 schema 变更)：
+//   scenarios.name UNIQUE 全表约束 → (channel_id, name) 复合 UNIQUE 约束
+//
+// 背景（PR #53 self-review SR1 #3）：
+//   - 既有 schema 是 UNIQUE (name) 全表约束（migrations.js:407/519/571）
+//   - spec §6.3.2「channel 内同名跳过」语义要求：跨 channel 同名场景允许并存
+//   - 全表 UNIQUE 与该语义冲突 → bundle 导入跨渠道复用场景名会被错误跳过
+//
+// 修复策略（spec §16.3）：
+//   1. 检测当前是否仍是全表 UNIQUE(name)：解析 sqlite_master.sql 含 `UNIQUE (name)` / `UNIQUE(name)`
+//   2. 检测标志位 N5_SCENARIOS_UNIQUE_MIGRATED_MARKER 已写 → no-op
+//   3. 冲突预检（防御性）：SELECT channel_id, name, COUNT(*) GROUP BY ... HAVING > 1
+//      - N5 backfill 后所有 channel_id=1，全表 UNIQUE 等价 channel 内 UNIQUE → 理论不应有冲突
+//      - 若有冲突 → 抛错（用户介入决定如何处理）
+//   4. SQLite 不支持 DROP CONSTRAINT → 重建表 swap：
+//      CREATE scenarios_tmp + INSERT SELECT * + DROP old + RENAME → 保留 id / 列结构 / 默认值
+//      新表用复合 UNIQUE (channel_id, name)
+//   5. 写标志位 N5_SCENARIOS_UNIQUE_MIGRATED_MARKER='true'
+//   6. 备份：调用方传 createBackupFn 时前置 `createBackupFn('pre-scenarios-unique-migration')`
+//
+// 调用顺序：
+//   ensureSchemaV2_1_9_N5 （ensureChannelsTable + ensureScenariosChannelIdColumn + backfill）
+//     → ensureScenariosNameUniqueByChannelId（本函数）
+//   缺一不可：必须保证 scenarios.channel_id 列已加 + 所有行都有非空 channel_id 值
+//
+// 返回 { status, backupPath?, error? }
+//   status:
+//     - 'skipped'                 : 标志位 = true，已迁移
+//     - 'skipped-no-table'        : scenarios 表不存在
+//     - 'skipped-already-composite': 已经是复合 UNIQUE，无需迁移（防御性兜底）
+//     - 'skipped-no-channel-id'   : scenarios.channel_id 列缺失（前置 migration 未跑）
+//     - 'migrated'                : 本次成功执行
+//     - 'backup-failed'           : 备份失败，schema 未改动
+//     - 'conflict-detected'       : 同 channel_id 同 name 冲突 → ROLLBACK + 抛
+//     - 'migration-failed'        : 事务失败已回滚
+function ensureScenariosNameUniqueByChannelId(db, createBackupFn) {
+  // 1. 标志位检测
+  let markerRow;
+  try {
+    markerRow = db
+      .prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?')
+      .get(N5_SCENARIOS_UNIQUE_MIGRATED_MARKER);
+  } catch (_) {
+    // app_settings 表不存在 → 跳过（理论不发生：migrations 入口已建表）
+    return { status: 'skipped-no-table' };
+  }
+  if (markerRow && String(markerRow.setting_value) === 'true') {
+    return { status: 'skipped' };
+  }
+
+  // 2. 解析 scenarios 表 DDL，判定当前 UNIQUE 形态
+  const tableSqlRow = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'")
+    .get();
+  if (!tableSqlRow || !tableSqlRow.sql) {
+    return { status: 'skipped-no-table' };
+  }
+  const sql = tableSqlRow.sql;
+  // 已含复合 UNIQUE → 标志位补写 + no-op
+  // 兼容 `UNIQUE (channel_id, name)` / `UNIQUE(channel_id, name)` / 任意空格
+  if (/UNIQUE\s*\(\s*channel_id\s*,\s*name\s*\)/i.test(sql)) {
+    writeUniqueMigratedMarker(db);
+    return { status: 'skipped-already-composite' };
+  }
+  // 全表 UNIQUE (name) 仍存在（待迁移）
+  // 兼容 `UNIQUE (name)` / `UNIQUE(name)`
+  const hasOldUnique = /UNIQUE\s*\(\s*name\s*\)/i.test(sql);
+  if (!hasOldUnique) {
+    // 未识别到 UNIQUE(name)，也未识别到 UNIQUE(channel_id, name) → 防御性补标志位 + no-op
+    writeUniqueMigratedMarker(db);
+    return { status: 'skipped-already-composite' };
+  }
+
+  // 3. 前置：必须保证 scenarios 已有 channel_id 列（前置 N5 migration 必须先跑）
+  if (!hasColumn(db, 'scenarios', 'channel_id')) {
+    return { status: 'skipped-no-channel-id' };
+  }
+
+  // 4. 前置备份（事务外，SR-backup-1 sqlite VACUUM INTO）
+  let backupPath = null;
+  if (typeof createBackupFn === 'function') {
+    try {
+      backupPath = createBackupFn('pre-scenarios-unique-migration');
+    } catch (e) {
+      return { status: 'backup-failed', error: e && e.message ? e.message : String(e) };
+    }
+  }
+
+  // 5. 事务：冲突预检 + 重建表 swap + 标志位
+  try {
+    db.exec('BEGIN');
+
+    // 5a. 冲突预检（防御性）：理论 N5 backfill 后所有 channel_id=1 不会冲突
+    const conflictRows = db
+      .prepare(`
+        SELECT channel_id, name, COUNT(*) AS cnt
+        FROM scenarios
+        GROUP BY channel_id, name
+        HAVING COUNT(*) > 1
+      `)
+      .all();
+    if (conflictRows && conflictRows.length > 0) {
+      db.exec('ROLLBACK');
+      const detail = conflictRows
+        .map((r) => `channel_id=${r.channel_id}, name="${r.name}", count=${r.cnt}`)
+        .join('; ');
+      return {
+        status: 'conflict-detected',
+        backupPath,
+        error: `scenarios 表内存在同 channel_id 下重名记录（理论不应发生），需用户介入：${detail}`,
+      };
+    }
+
+    // 5b. 重建表 swap（SQLite 不支持 DROP CONSTRAINT；保留 id / 列结构 / 默认值 / FK）
+    //   - 解析现有 category CHECK 约束（v2.1.0-beta.3 已扩到 5 值）
+    //   - 保留 channel_id FK ON UPDATE CASCADE（spec §3.2）
+    //   - 复合 UNIQUE (channel_id, name)
+    db.exec('ALTER TABLE scenarios RENAME TO scenarios_old;');
+    db.exec(`
+      CREATE TABLE scenarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL CHECK (category IN (
+          'extract-recon-id',
+          'offset-bill-mark',
+          'gateway-recon-join',
+          'recon-id-fix',
+          'gateway-recon-id-fix'
+        )),
+        name TEXT NOT NULL,
+        priority INTEGER NOT NULL CHECK (priority BETWEEN 0 AND 3),
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        config_json TEXT NOT NULL,
+        is_builtin INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        channel_id INTEGER REFERENCES channels(id) ON UPDATE CASCADE,
+        UNIQUE (channel_id, name)
+      );
+    `);
+    db.exec(`
+      INSERT INTO scenarios
+        (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at, channel_id)
+      SELECT id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at, channel_id
+      FROM scenarios_old;
+    `);
+    db.exec('DROP TABLE scenarios_old;');
+
+    // 5c. 写标志位
+    db.prepare(`
+      INSERT INTO app_settings (setting_key, setting_value, updated_at)
+      VALUES (?, 'true', ?)
+      ON CONFLICT(setting_key) DO UPDATE
+      SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+    `).run(N5_SCENARIOS_UNIQUE_MIGRATED_MARKER, new Date().toISOString());
+
+    db.exec('COMMIT');
+    return { status: 'migrated', backupPath };
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch (_) {}
+    return {
+      status: 'migration-failed',
+      error: e && e.message ? e.message : String(e),
+      backupPath,
+    };
+  }
+}
+
+// 辅助：写 N5_SCENARIOS_UNIQUE_MIGRATED_MARKER（用于"已经是复合 UNIQUE"分支补写）
+function writeUniqueMigratedMarker(db) {
+  try {
+    db.prepare(`
+      INSERT INTO app_settings (setting_key, setting_value, updated_at)
+      VALUES (?, 'true', ?)
+      ON CONFLICT(setting_key) DO UPDATE
+      SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+    `).run(N5_SCENARIOS_UNIQUE_MIGRATED_MARKER, new Date().toISOString());
+  } catch (_) {
+    // app_settings 表不存在 → 忽略（理论不发生）
+  }
+}
 
 // v2.1.9 N5：DB schema 总迁移函数（🔴 资金红线 + 破坏性 schema 变更，不可逆）
 //
@@ -1423,6 +1605,8 @@ module.exports = {
   ensureChannelsTable,
   ensureScenariosChannelIdColumn,
   ensureSchemaV2_1_9_N5,
+  // v2.1.9 SR-FIX-1 (spec §16.3)：scenarios.name UNIQUE 全表 → (channel_id, name) 复合
+  ensureScenariosNameUniqueByChannelId,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,

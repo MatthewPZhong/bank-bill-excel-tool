@@ -22,6 +22,7 @@ const {
   ensureAcquiringBillIdleCleanupMinutesSetting,
   ensureBillRawJsonV2Slim,
   ensureSchemaV2_1_9_N5,
+  ensureScenariosNameUniqueByChannelId,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
@@ -211,6 +212,62 @@ class AppDatabase {
         stack: n5Err && n5Err.stack ? n5Err.stack : undefined
       });
     }
+    // v2.1.9 SR-FIX-1 (spec §16.3 🔴 资金红线 + 破坏性 schema 变更)：
+    //   scenarios.name UNIQUE 全表 → (channel_id, name) 复合 UNIQUE
+    //   必须在 ensureSchemaV2_1_9_N5 之后（依赖 scenarios.channel_id 列 + backfill 全部完成）
+    //   幂等：app_settings.n5_scenarios_unique_migrated='true' 跳过
+    //   失败处理：try-catch + 日志上报；启动不阻塞，下次重试
+    try {
+      const uniqueResult = this.ensureScenariosNameUniqueByChannelId();
+      if (uniqueResult && uniqueResult.status === 'migrated') {
+        appendModuleLog({
+          level: 'info',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration SR-FIX-1] scenarios.name UNIQUE 已切换到 (channel_id, name) 复合',
+          details: [`backup=${uniqueResult.backupPath || '(none)'}`]
+        });
+      } else if (uniqueResult && uniqueResult.status === 'backup-failed') {
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration SR-FIX-1] 备份失败，schema 未改动，下次启动重试',
+          details: [uniqueResult.error || '(no error message)']
+        });
+      } else if (uniqueResult && uniqueResult.status === 'conflict-detected') {
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration SR-FIX-1] 同 channel_id 下重名冲突（理论不应发生），需用户介入',
+          details: [
+            `备份保留: ${uniqueResult.backupPath || '(none)'}`,
+            uniqueResult.error || '(no error message)'
+          ]
+        });
+      } else if (uniqueResult && uniqueResult.status === 'migration-failed') {
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration SR-FIX-1] 事务失败已回滚',
+          details: [
+            `备份保留: ${uniqueResult.backupPath || '(none)'}`,
+            uniqueResult.error || '(no error message)'
+          ]
+        });
+      }
+    } catch (uniqueErr) {
+      appendModuleLog({
+        level: 'error',
+        source: 'main',
+        domain: 'migration',
+        message: '[migration SR-FIX-1] unexpected failure (启动不阻塞，下次启动重试)',
+        details: [uniqueErr && uniqueErr.message ? uniqueErr.message : String(uniqueErr)],
+        stack: uniqueErr && uniqueErr.stack ? uniqueErr.stack : undefined
+      });
+    }
     // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表
     // 与其他迁移完全独立，调用顺序无依赖；放在最末尾即可
     this.ensureBankBuReconTablesSupport();
@@ -379,6 +436,12 @@ class AppDatabase {
   //   返回 { status, backupPath?, columnAdded?, error? }
   ensureSchemaV2_1_9_N5() {
     return ensureSchemaV2_1_9_N5(this.db, (label) => this.createBackup(label));
+  }
+
+  // v2.1.9 SR-FIX-1 (spec §16.3) facade：scenarios.name UNIQUE 全表 → (channel_id, name)
+  //   注入 createBackup 函数 → migration 复用 SR-backup-1 sqlite VACUUM INTO（与 N5 同 backup 体系）
+  ensureScenariosNameUniqueByChannelId() {
+    return ensureScenariosNameUniqueByChannelId(this.db, (label) => this.createBackup(label));
   }
 
   listTemplates() {
