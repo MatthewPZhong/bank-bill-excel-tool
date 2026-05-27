@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.11（2026-05-27 — **SR-FIX-1 round 2 Codex 自动 review 修复**；§16.3 加 §16.3.2 F1 createScenario channel_id 漏修 + §16.3.3 F2 applyScenarioBundleImport 全表查重漏修 + §16.3.4 F3 batchDelete 内置场景一致性）；v0.10 加 §16.3.1 transferScenarios；v0.9 SR-FIX-1 资金红线修复；v0.4 SR-log-1 立项；v0.3 加 D19-D22 + 4 个新主题详设；v0.2 D18 grep 修订；v0.1 起草 |
+| 文档版本 | v0.12（2026-05-27 — **SR-FIX-1 round 3 Codex 二次 review 修复**；§16.3 加 §16.3.5 F1+F2 协同 bug + applyScenarioBundleImport refactor 到独立 module + Case F 真实端到端 reverse sync；§16.3.3 修订删「保留 UPDATE」决策）；v0.11 round 2 Codex 自动 review；v0.10 加 §16.3.1 transferScenarios；v0.9 SR-FIX-1 资金红线修复 |
 | 关联文档 | `PRD-v2.1.9.md` v0.3 / `backlog.md` v0.5 / `tasks.md` v0.4（SR-FIX-1 已加）/ `manual-test-checklist.md` v0.4（SR-FIX-1 已加） |
 | 评审范围 | N5（银行渠道区分场景）+ N7（场景模板按渠道导入/导出）+ N6（状态框换行）+ SR-backup-1（前置） |
 | 评审人 | PM + 用户（资金红线条目必复核） |
@@ -1702,6 +1702,8 @@ for (const bundleScenario of bundleChannel.scenarios) {
 **覆盖**：
 - `scripts/integration/v2.1.9-sr-fix-1-coverage.js` Case C 加 1.x：通用有「对账场景」→ 导入工商-上海 bundle 也含「对账场景」→ 期望落入工商-上海（不跳过）
 
+> ⚠️ **v0.12 round 3 修订**（2026-05-27）：v0.11 §16.3.3 写「保留 line 446 UPDATE 作最小破坏面」的决策**反向引入 bug**（详 §16.3.5）。Codex 二次 review 抓到：F1 让 createScenario 默认 channelId=1（通用），F2 保留 UPDATE 模式 → applyScenarioBundleImport 调 createScenario 不传 channelId → 先撞通用同名 UNIQUE 抛错 → UPDATE 永远到不了。**正确做法是 F1+F2 协同修：直接传 `channelId: targetChannel.id` + 删 UPDATE**。本节决策 reverse sync 到「直接传 channelId + 删 UPDATE」；详 §16.3.5。
+
 #### 16.3.4 F3 — batchDelete vs deleteScenario 内置场景语义不一致（v0.11 round 2 Codex 自动 review 抓到）
 
 > Codex 抓到 P2：`scenariosRepo.batchDelete` 拒绝删除 `is_builtin=1` 抛错，但 `scenariosRepo.deleteScenario`（单条）允许删除内置；USER_GUIDE 也说内置场景「可编辑、可禁用、可删除」。单条与批量行为不一致让用户困惑。
@@ -1725,6 +1727,73 @@ function batchDelete(db, scenarioIds) {
 
 **覆盖**：
 - `tests/unit/backend/database/scenarios-repository.test.js` 既有 batchDelete「内置不可删」case 改为「内置可删（与单条 deleteScenario 对齐）」
+
+#### 16.3.5 F2-cont — applyScenarioBundleImport F1+F2 协同 bug + refactor 真实端到端覆盖（v0.12 round 3 Codex 二次 review 抓到）
+
+> 2026-05-27 round 2 push 后 Codex 二次 review 抓到 P1：F2 修了**查重路径**但**创建路径**仍是 `createScenario` 不传 channelId + 后置 UPDATE → F1 让 createScenario 默认 channelId=1 → 通用同名场景会撞 INSERT UNIQUE 抛 friendly error → UPDATE 永远到不了 → 合法的跨渠道同名 bundle 导入仍失败。
+
+**严重度**：🔴 **P1 — F2 修不彻底**（与 round 2 报告的 F2 同 finding，N7 跨渠道 bundle 导入仍失效；用户视角与 round 2 前没区别）
+
+**根因**（F1+F2 协同 bug）：
+
+| 步骤 | 行为 | 问题 |
+|---|---|---|
+| 1 | 通用渠道有「对账场景」 | （前置）|
+| 2 | bundle 含 channels=[{name:工商, ownerLocation:上海, scenarios:[{name:对账场景}]}] 导入 | （前置）|
+| 3 | round 2 F2 修了查重 — `findScenarioByChannelAndName(targetChannel.id=工商-上海, '对账场景')` 返 null → 不跳过 | ✓ |
+| 4 | round 2 F2 留「保留 UPDATE 模式」决策 — `createScenario({...})` 不传 channelId | 🔴 协同 bug 触发点 |
+| 5 | F1 让 createScenario 默认 channelId=1（通用）→ INSERT 撞通用已有「对账场景」UNIQUE → 抛 friendly error 「场景名"对账场景" 在该渠道下已存在」 | 🔴 抛 |
+| 6 | 后置 `UPDATE channel_id` 永远到不了 → applyScenarioBundleImport 整体失败 | 🔴 |
+
+**为什么 round 2 没抓到**：
+
+| 原因 | 详情 |
+|---|---|
+| **决策错误**（spec §16.3.3 line 1668-1671）| round 2 spec 写「保留 line 446 UPDATE 作最小破坏面」— F1/F2 单独评估时合理，但 F1+F2 协同后 createScenario 默认 channelId=1 反而引入 bug |
+| **测试盲区**（Case F 手写模拟）| Case F 直接调 `scenariosRepo.createScenario(db, {channelId: gsChan.id})` — 绕过了 main.js applyScenarioBundleImport 的真实代码路径（不传 channelId + UPDATE） |
+
+**修订设计**：
+
+1. **`main.js:439-449` 修代码**（F1+F2 协同修，删 round 2 「保留 UPDATE」）：
+   ```js
+   const createResult = database.createScenario({
+     category: bundleScenario.category,
+     name: bundleScenario.name,
+     priority: ...,
+     enabled: ...,
+     config: configValue,
+     channelId: targetChannel.id   // ← F1 已让 createScenario 支持 channelId，直接传
+   });
+   // 删除 line 446-449 的 UPDATE channel_id（不再需要）
+   ```
+
+2. **refactor — 提取 applyScenarioBundleImport 到独立 module**：
+   - 新文件 `src/main-process/scenarios-bundle-import.js` exports `applyScenarioBundleImport(bundle, opts, deps)`
+   - `deps` 注入 `{ db, channelsRepo, scenariosRepo, listChannels, getBuiltinGeneralChannel, createChannel, createScenario, findScenarioByChannelAndName }`（保持 main.js facade 可测）
+   - main.js 留薄壳 require 这个 module 直接转发
+   - 让测试可 `require('src/main-process/scenarios-bundle-import')` 直接调真实代码
+
+3. **Case F 改真实端到端**：
+   - 在 `scripts/integration/v2.1.9-sr-fix-1-coverage.js` Case F 内：require 新 module + 构造 db + bundle → 调真实 `applyScenarioBundleImport(bundle, opts, deps)`
+   - 关键断言：通用有「对账场景」+ bundle 导入工商-上海「对账场景」→ 期望 `importedCount=1` + `conflicts=[]` + 工商-上海 channel_id 落对 + 通用渠道场景不变
+   - 反证 case：bundle 导入到通用渠道已有同名场景 → 期望走 `findScenarioByChannelAndName` 跳过（conflicts +1 + importedCount=0）
+
+**架构权衡**：
+
+- 提取出独立 module（refactor）增加文件数（main.js → -90 行 / scenarios-bundle-import.js → +95 行 + module exports）但**显著降低测试成本**（真实端到端 vs 手写模拟）
+- main.js facade 保留 `applyScenarioBundleImport(bundle, opts)` wrapper 透传到 module → 内部依赖（database 单例）由 wrapper 注入 → 测试可注入 mock/真实 sqlite + repo
+- F1 + F2 + F3 + F4 + F5 + F2-cont 后，main.js applyScenarioBundleImport 路径全部走 `createScenario({channelId})` 一致 — UPDATE channel_id 模式仅在 N7 老路径残留（删 main.js UPDATE 后 0 残留）
+
+**覆盖矩阵**：
+
+| Case | 验证 |
+|---|---|
+| F.1 | 通用「对账场景」存在 + bundle 导入工商-上海「对账场景」→ importedCount=1 + 工商-上海 channel_id 正确 + 通用渠道场景不变（**round 2 主要 bug 路径**）|
+| F.2 | bundle 导入「通用」渠道 + 已有同名场景 → findScenarioByChannelAndName 跳过 + conflicts+1 + importedCount=0 |
+| F.3 | bundle 缺失渠道 + confirmCreateMissingChannels=false → 整 channel 跳过（与 round 2 既有逻辑保持）|
+| F.4 | bundle 缺失渠道 + confirmCreateMissingChannels=true → createChannel + createdChannels+1 + scenarios 落入新 channel |
+
+**与 round 2 既有 Case F 关系**：round 2 的 Case F 改为 F.1-F.4 端到端；round 2 手写模拟 case 保留为 F.0「scenariosRepo + findByChannelAndName 直查 sanity check」（不删，作为 schema/repo 层底层验证）。
 
 ### 16.4 C2/C3 双维 unit case 矩阵（SR1 #4）
 

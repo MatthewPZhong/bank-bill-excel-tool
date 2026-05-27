@@ -46,6 +46,28 @@ v2.1.8 之后 1 轮迭代（α 范围），**9 项主题**：N5（银行渠道�
 - **SR-log-1 永久保留磁盘风险**：用户手动维护；v2.1.10+ 评估批量清理 UI
 - **N5 跨 channel 跨 scenario gw 重消费**（SR-FIX-1 §16.2 已知边界）：阶段 A 专属 C3 消费的 gw 行，阶段 B 通用 C3 仍可消费同一行；与 v2.1.8 单维行为一致；用户层规避见 USER_GUIDE §1.4
 
+### SR-FIX-1 round 3 — Codex 二次 review 修复（F1+F2 协同 bug + refactor）
+
+round 2 push 后 Codex 二次 review 抓到 1 个 P1 🔴：F2 修不彻底 — F1+F2 协同 bug。
+
+**根因**：round 2 保留 `applyScenarioBundleImport` 调 `createScenario` 不传 channelId + 后置 UPDATE 模式（spec 当时认为「最小破坏面」）。但 F1 让 createScenario 默认 channelId=1（通用），导致跨渠道同名 bundle 导入时先撞通用 UNIQUE 抛错 → UPDATE 永远到不了 → 合法的「通用 + 工商-上海同名场景」bundle 导入仍失败。
+
+**修复**：
+- 提取 `applyScenarioBundleImport` 到独立 module `src/main-process/scenarios-bundle-import.js`（155 行，deps 注入设计便于测试）
+- main.js 留 16 行 wrapper 转发（IPC handler 接口不变）
+- 修代码：`createScenario({..., channelId: targetChannel.id})` 直接传 + 删除后置 UPDATE
+- Case F 改造为真实端到端：F.0 sanity 保留 + F.1-F.4 4 个子 case 调真实 module（F.1 是 round 3 主要 bug 路径，bug 时此处 importedCount=0 或抛错）
+- spec §16.3.3 删「保留 UPDATE」决策 + 新增 §16.3.5 完整 F1+F2 协同 bug 设计
+
+**复盘 round 2 漏抓原因**：
+- 决策错误：spec §16.3.3 写「保留 UPDATE 作最小破坏面」— F1/F2 单独评估合理，协同后引入 bug
+- 测试盲区：round 2 Case F 直接 scenariosRepo.createScenario(channelId) 手写模拟，绕过了 main.js applyScenarioBundleImport 的真实代码路径
+
+**修复后测试**：
+- `npm run test:unit` 1145 → 1145（refactor 不增 case；既有 case 全过）
+- `npm run test:integration` 614 → **645 / 10 脚本**（v2.1.9-sr-fix-1-coverage.js 117 → **148** +31 断言，Case F 5 子 case 全过）
+- `npm run smoke` 0 regression
+
 ### SR-FIX-1 round 2 — Codex 自动 review 修复（合并前补丁）
 
 PR push 后 Codex 自动 review 抓 5 个 finding：2 个 P1 🔴 + 2 个 P2 + 1 个 P3。**全部合并前修**（spec §16.3.2/16.3.3/16.3.4 reverse sync）：
