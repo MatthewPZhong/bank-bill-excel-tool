@@ -44,6 +44,24 @@ v2.1.8 之后 1 轮迭代（α 范围），**9 项主题**：N5（银行渠道�
 - **A3 worker 跨进程化拆 v2.1.10 β**：与 N4-cont-1/N4-cont-2 / A4 合并
 - **N5 渠道枚举膨胀（> 50 个）UI 虚拟滚动延期 v2.1.11+ 评估**
 - **SR-log-1 永久保留磁盘风险**：用户手动维护；v2.1.10+ 评估批量清理 UI
+- **N5 跨 channel 跨 scenario gw 重消费**（SR-FIX-1 §16.2 已知边界）：阶段 A 专属 C3 消费的 gw 行，阶段 B 通用 C3 仍可消费同一行；与 v2.1.8 单维行为一致；用户层规避见 USER_GUIDE §1.4
+
+### SR-FIX-1 修复（合并前补丁 — PR #53 self-review 闭环）
+
+PR 提交后 self-review 发现 5 个 🔴 Critical + 9 Important + 5 Minor finding（详 `docs/iterations/v2.1.9/spec.md §十六`）。Critical 5 项中 #1-#4 涉及资金红线，**合并前**用 F1 方案修复：
+
+- **🔴 SR1 #1 修复 C3 1v1 红线**（dispatcher.js 重写）：v2.1.9 N5 dispatcher 初版 per-row 单调（`runScenario(scenario, [row], gwRows)`）→ C3 `usedGwRowIdx` 在 c3-gateway-recon-join.js:132 函数 scope 局部每次重置 → 多 bank 行可共费同一 gw 行（违反 v2.1.7 F2）。改 per-channel batch 调度（新增 `runChannelBatch` helper）：阶段 A 每个专属 channel 独立批量调 `runScenario(scenario, candidateRows, gwRows)`，阶段 B 通用渠道批量；C3 `usedGwRowIdx` 在每次 runScenario 调用 scope 内自然 1v1
+- **🔴 SR1 #2 修复 C2 永不命中**：C2 笛卡尔配对（c2-offset-bill-mark.js:124-148）依赖 `leftRows.filter` + `rightRows.filter` ≥ 1 行；per-row `[row]` 入参下 leftRows 或 rightRows 必空 → for 循环空跑 → 永不命中。per-channel batch 修复后接收完整 unlocked rows 集 → 配对正常
+- **🔴 SR1 #3 修复 scenarios.name UNIQUE 与 spec §6.3.2 冲突**：全表 `UNIQUE (name)` → 复合 `UNIQUE (channel_id, name)`；新增 `ensureScenariosNameUniqueByChannelId` migration（SR-backup-1 VACUUM INTO 备份 + 冲突预检 + 事务 swap rebuild + 标志位 `n5_scenarios_unique_migrated`）；`scenarios-repository.js` 新增 `isScenarioNameUniqueError` helper 兼容新旧错误消息 + `findByChannelAndName` API；N7 bundle 导入跨渠道复用场景名不再误判冲突
+- **🔴 SR1 #4 修复 C2/C3 双维 0 测试覆盖**：dispatcher.test.js 既有 30+ 双维 case 全用 C1；新增 15 case（spec §16.4 矩阵 case 1-15：C3 1v1 红线 + C2 笛卡尔 + 跨阶段 gw 边界 + reconFields=0 衍生方案 + 混合 first-match-wins + metadata 全字段断言）+ scenarios-repository.test.js 新增 5 case（R1-R3 + 2 migration 幼等）= 共 20 case；case 2 关键断言 `['GW-A', 'GW-B']` 严格 1v1 不共费
+- **🟡 SR1 #5 spec §5.2 同步**：D16 (a)→(b) 修订后 spec 表格滞后描述同步入文；USER_GUIDE §1.4「匹配渠道」列定义同步
+
+**修复后测试增量**：
+- `npm run test:unit` 从 1099 → **1139 / 0 fail**（+40，主因 dispatcher.test.js 重构 +15 - 9 删 + scenarios-repository.test.js +5 + 1 migration test ×2）
+- `npm run test:integration` **497/497** 9 脚本全过（acquiring-bill-currency-idle-cleanup 38 + acquiring-bill-currency-n4-migration 128 + bank-statement-hit-scenario-report 47 + new-account-balance-statement 36 + pending-data-reconciliation 33 + statement-generation-pipeline 45 + v2.1.9-n5-end-to-end 68 + v2.1.9-n5-migration 67 + v2.1.9-sr-log-1 35）
+- `npm run smoke` 11 模块全过 0 regression
+
+**未修 SR2/SR3 finding**：14 项 Important / Minor 留 v2.1.10 self-review 一轮收尾（不影响合并）
 
 ## 2.1.8 - 2026-05-26
 

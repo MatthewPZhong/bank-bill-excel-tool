@@ -572,11 +572,20 @@
 - **路径**：`Documents/网银账单生成小助手/error-reports/{date}/`
 - **文件名**：`命中场景行-{原文件 basename}-{timestamp}.xlsx`
 - **列结构**：原 44 列银行账单 headers + 末尾 3 列
-  - **匹配渠道** = 行原始 `<Channel>-<地区>`（保留原值，未匹配行如「工商-北京」原样保留）
-  - **匹配状态** = `命中` / `兜底`
+  - **匹配渠道**（D16=b 2026-05-27 修订）= **实际命中场景所属渠道 label**；命中专属 → `${name}-${ownerLocation}`（如「工商-上海」）；命中通用兜底 → `通用`；未命中 → 空字符串
+  - **匹配状态** = `命中`（行匹配到任意 channels 表记录，含通用本身）/ `兜底`（行未匹配，走通用兜底）
   - **命中场景** = `[displayIndex] 场景名称`
 
 ⚠️ 如有 VBA / Power Query / Python pandas 脚本读 v2.1.8 主输出 Sheet 3，必须改读独立报表。
+
+### ⚠️ v2.1.9 SR-FIX-1 — N5 银行渠道双维 dispatcher 已知边界（合并前补丁）
+
+PR #53 提交后的 self-review 发现 4 个 🔴 资金红线 bug，**已在合并前修复**（详 `docs/iterations/v2.1.9/spec.md §十六`）。修复后语义如下：
+
+- **C3 单 scenario 调用内 1v1 严格保留**（v2.1.7 F2 红线）：同 scenario 内一条 gw 行只能被一条 bank 行消费；dispatcher per-channel batch 调度天然满足
+- **C2 笛卡尔配对正常工作**：「专属渠道」下配的 C2 场景（账单类型 ≥ 1 行 + 对账字段 ≥ 1 行）现在能正确触发笛卡尔配对，修复 self-review 期发现的「专属渠道 C2 永不命中」bug
+- ⚠️ **跨 channel 跨 scenario gw 行可能被多次消费**（与 v2.1.8 单维行为一致；非 bug）：阶段 A 专属渠道 C3 消费的 gw 行，阶段 B 通用渠道 C3 仍可消费同一 gw 行。**用户层规避**：同 reconFields 配置的 C3 场景**不应**在专属渠道 + 通用渠道同时启用，否则同一 gw 金额会被多次匹配。如确需跨渠道 C3 复用，请确保 reconFields 互斥
+- ⚠️ **scenarios.name 跨渠道复用允许**（v2.1.9 SR-FIX-1 后行为）：v2.1.9 之前全表 UNIQUE(name) 不允许跨渠道复用场景名；v2.1.9 SR-FIX-1 改为 (channel_id, name) 复合 UNIQUE — 「通用」可有「对账场景」+「工商-上海」也可有「对账场景」，两条独立。同 channel 同名仍拒绝
 
 
 ### 工作流（4 按钮）
