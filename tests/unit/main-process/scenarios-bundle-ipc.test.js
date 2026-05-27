@@ -1,11 +1,13 @@
 // v2.1.9 N7 Phase 7 T27/T30：scenarios:export-bundle / scenarios:import-bundle / scenarios:import-bundle-apply
-// IPC handler 单元测试（同构 sham 函数复刻 handler 主体逻辑）
+// IPC handler 单元测试
 //
 // 测试策略（与 scenarios-batch-ipc.test.js 同范式）：
-//   - 抽出 main.js handler 内部主体逻辑为可测函数
+//   - 抽出 main.js handler 内部主体逻辑为可测函数（export / import 入口的薄壳）
 //   - serialize / parse / detect 直接复用 src/backend/scenarios-bundle-io
-//   - applyScenarioBundleImport 同构版本（事务包裹 + 缺失渠道处理 + 同名场景跳过）
-//   - 用真实 SQLite tmpdir 文件 + AppDatabase（init 跑 N5 migration）
+//   - applyScenarioBundleImport 直接调真实 module（v2.1.9 SR-FIX-1 round 3 / spec §16.3.5）：
+//     round 3 refactor 后真实逻辑提到 src/main-process/scenarios-bundle-import.js；
+//     unit test 直接 require + 注入 deps（database facade），永久消除「sham vs real」分叉风险
+//   - 用真实 SQLite tmpdir 文件 + AppDatabase（init 跑 N5 + UNIQUE migration）
 //   - 文件 IO（saveDialog / openDialog）由集成测试覆盖，本测试只测逻辑层
 //
 // 用户验证：grep 'scenarios:export-bundle\|scenarios:import-bundle\|scenarios:import-bundle-apply' src/main.js
@@ -24,6 +26,21 @@ const {
   detectBundleType,
   SUPPORTED_SCENARIO_BUNDLE_VERSION
 } = require('../../../src/backend/scenarios-bundle-io');
+// v2.1.9 SR-FIX-1 round 3：真实 module（取代 round 2 之前的 applyImportSham 手写同构）
+const { applyScenarioBundleImport } = require('../../../src/main-process/scenarios-bundle-import');
+
+// deps 注入 helper：把 AppDatabase facade 适配成 applyScenarioBundleImport 期望的 deps 接口
+//   与 src/main.js:353-358 wrapper 用相同的 deps 注入模式
+function makeImportDeps(database) {
+  return {
+    db: database.db,
+    listChannels: () => database.listChannels(),
+    getBuiltinGeneralChannel: () => database.getBuiltinGeneralChannel(),
+    createChannel: (payload) => database.createChannel(payload),
+    findScenarioByChannelAndName: (channelId, name) => database.findScenarioByChannelAndName(channelId, name),
+    createScenario: (payload) => database.createScenario(payload),
+  };
+}
 
 // ---- handler 内部主体逻辑同构（与 src/main.js 行 ~3007+ 三个 handler 一致）----
 
@@ -100,7 +117,7 @@ function handlerImportBundleScan(database, jsonText) {
     if (missingChannels.length > 0) {
       return { status: 'needs-confirm', missingChannels, bundle };
     }
-    const applyResult = applyImportSham(database, bundle, { confirmCreateMissingChannels: false });
+    const applyResult = applyScenarioBundleImport(bundle, { confirmCreateMissingChannels: false }, makeImportDeps(database));
     return Object.assign({ status: 'ok' }, applyResult);
   } catch (error) {
     return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -113,77 +130,19 @@ function handlerImportBundleApply(database, payload) {
     if (!bundle || !Array.isArray(bundle.channels)) {
       return { status: 'failed', message: 'apply: 缺少有效的 bundle 参数' };
     }
-    const applyResult = applyImportSham(database, bundle, {
+    const applyResult = applyScenarioBundleImport(bundle, {
       confirmCreateMissingChannels: confirmCreateMissingChannels === true
-    });
+    }, makeImportDeps(database));
     return Object.assign({ status: 'ok' }, applyResult);
   } catch (error) {
     return { status: 'failed', message: String(error && error.message ? error.message : error) };
   }
 }
 
-// applyScenarioBundleImport 同构（与 main.js 行 ~340 同步实现；事务包裹）
-function applyImportSham(database, bundle, options) {
-  const confirmCreateMissingChannels = options.confirmCreateMissingChannels === true;
-  const conflicts = [];
-  const createdChannels = [];
-  let importedCount = 0;
-  const db = database.db;
-  db.exec('BEGIN');
-  try {
-    const allChannels = database.listChannels();
-    const channelKeyToRecord = new Map(allChannels.map((c) => [`${c.name} ${c.ownerLocation}`, c]));
-    for (const bundleChannel of bundle.channels) {
-      const channelKey = `${bundleChannel.name} ${bundleChannel.ownerLocation}`;
-      const channelLabel = `${bundleChannel.name}-${bundleChannel.ownerLocation}`;
-      let targetChannel = channelKeyToRecord.get(channelKey);
-      if (!targetChannel) {
-        if (bundleChannel.isBuiltin) {
-          targetChannel = database.getBuiltinGeneralChannel();
-          channelKeyToRecord.set(channelKey, targetChannel);
-        } else if (confirmCreateMissingChannels) {
-          const newChannel = database.createChannel({
-            name: bundleChannel.name,
-            ownerLocation: bundleChannel.ownerLocation
-          });
-          channelKeyToRecord.set(channelKey, newChannel);
-          targetChannel = newChannel;
-          createdChannels.push({ id: newChannel.id, name: newChannel.name, ownerLocation: newChannel.ownerLocation });
-        } else {
-          for (const s of bundleChannel.scenarios) {
-            conflicts.push({ channel: channelLabel, scenario: s.name, reason: 'channel-missing' });
-          }
-          continue;
-        }
-      }
-      for (const bundleScenario of bundleChannel.scenarios) {
-        const existingRow = db.prepare('SELECT id FROM scenarios WHERE name = ?').get(bundleScenario.name);
-        if (existingRow) {
-          conflicts.push({ channel: channelLabel, scenario: bundleScenario.name, reason: 'name-duplicate' });
-          continue;
-        }
-        let configValue = bundleScenario.configJson;
-        if (typeof configValue === 'string') {
-          try { configValue = JSON.parse(configValue); } catch (_e) {}
-        }
-        const createResult = database.createScenario({
-          category: bundleScenario.category,
-          name: bundleScenario.name,
-          priority: Number.isInteger(bundleScenario.sortOrder) ? bundleScenario.sortOrder : 0,
-          enabled: bundleScenario.enabled === 1,
-          config: configValue
-        });
-        db.prepare('UPDATE scenarios SET channel_id = ? WHERE id = ?').run(targetChannel.id, createResult.id);
-        importedCount += 1;
-      }
-    }
-    db.exec('COMMIT');
-    return { importedCount, conflicts, createdChannels };
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-}
+// v2.1.9 SR-FIX-1 round 3：applyImportSham 已删（spec §16.3.5）— 真实逻辑由 require 的 module 提供
+//   round 1/2 用 sham 手写同构 main.js applyScenarioBundleImport，导致 sham 与真实代码可能分叉
+//   round 3 refactor 提取 module + 本 unit test 直接 require + makeImportDeps 注入 deps
+//   → 永久消除「sham 与生产逻辑不一致」的 review 风险（Codex 三次 review F1 即为此）
 
 // ---- 测试上下文 ----
 
