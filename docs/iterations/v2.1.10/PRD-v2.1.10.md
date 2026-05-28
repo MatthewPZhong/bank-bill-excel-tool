@@ -443,3 +443,59 @@ CREATE TABLE IF NOT EXISTS acquiring_bill_currency_diff_rows (
 
 **当前状态**：v0.2（2026-05-28 reverse synced — D25/D26/D27 用户拍板 + N4-cont-1 重大方案变更已落 PRD/spec/tasks/checklist；D23/D24/D28 接受 v0.1 PM 倾向；待 Phase 0 POC 启动）。
 **下一步**：通知 Dev 启动 Phase 0 POC（worker_threads vs utilityProcess 实测 — D23/D24 最终拍板）→ Phase 1。N4-cont-1 / N4-cont-2 / A4 可与 Phase 1 并行（独立模块；无强依赖）。
+
+---
+
+## 十五、实施记录（PR #54 已合并 — 2026-05-28T15:48:39Z）
+
+### PR #54 — v2.1.10 β 发版（merge commit `4ad10f9`）
+
+- **PR**：https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/54
+- **分支**：v2.1.10 → main
+- **commits 数**：80（含 Phase 0-6 + Option A SR1 + SR-FIX-1 Round 1-7 + v2.1.11 backlog + PR 草稿 + 归档）
+- **merge_commit**：`4ad10f9`
+- **merged_at**：2026-05-28T15:48:39Z
+- **完整改动记录**：见 [`docs/prs/PR54-v2.1.10.md`](../../prs/PR54-v2.1.10.md)（已归档 `integrated: true`）
+
+#### 主题完成度
+
+| 主题 | 状态 | 备注 |
+|---|---|---|
+| **A3** runCheck 跨进程化（worker_threads + 独立 DB 连接） | ✅ | 主进程 event loop lag 48x 改善（66ms → 1ms）；worker cold-start 11ms |
+| **A4** SQL JOIN chunked 分批跑（10w/chunk + resume from chunk） | ✅ | chunked vs non-chunked 0.99x（零开销）；cancel 响应 < 1s |
+| **N4-cont-1** `bill_imports.raw_json` idle 自动清理 | ✅ | 仅清对账成功行 + 7 天窗口 + 复用 N1' idle 30min + 0 UI；v0.3 sentinel `''`（兼容 v2.1.8 N4 NOT NULL）|
+| **N4-cont-2** `diff_rows` FK CASCADE 改造 | ✅ | 8-status migration state machine + SR-backup-1 前置；460w 行真实老库 0 数据丢失 + 0 FK violation |
+| **SR-FIX-1 Round 1** dev self-review | ✅ | 21 finding（P0:4 / P1:9 / P2:8） |
+| **SR-FIX-1 Round 2** 修 P0+P1 | ✅ | 13 闭环 + 14 commits + unit/integration +5/+15 |
+| **SR-FIX-1 Round 3** Codex 初次 | ✅ | 2 finding（F1 资金红线 NOT IN + F2 first-chunk crash）+ 3 commits |
+| **SR-FIX-1 Round 4** Codex 复审 | ✅ | 3 finding（F1 4 链路 + F2 shutdown + F3 卫生）+ 4 commits |
+| **SR-FIX-1 Round 5** Codex 三复审 | ✅ | 1 finding（G1 窗口期 race）+ 2 commits |
+| **SR-FIX-1 Round 6** Codex 4 复审 | ✅ | 4 finding（H1 同事务原子化 + H2 spec 卫生 + H3 init-time crash + H4 chunkSize 持久化）+ 5 commits |
+| **SR-FIX-1 Round 7** Codex 5 复审 | ✅ | 2 finding（I1 全路径补全 + I2 PR 草稿同步）+ 3 commits |
+| **v2.1.11 backlog v0.1 立项** | ✅ | A3-multi-worker + F5-cont + SR-log-1-dual-write-removal + A3-spread（含 acquiringBillCurrency / bizOpRecon / pending 3 模块复用）|
+
+#### 工程化数据
+
+- **总 commits**：80（v2.1.10 分支 → main）
+- **release-check 终态**：smoke 全过 + unit **1258 / 297 suites** + integration **892 断言 / 15 脚本**
+- **byte-for-byte 资金红线**：a3-phase1 40/40 + a3-phase2 56/56 + a4-phase3 75/75 = 171/171
+- **rules/important-variables.md**：v11 → v12（+5 Critical/Important-skeleton 升格 — runCheckCore / clearStaleSuccessfulRawJson / ensureDiffRowsCascadeMigration_v2_1_10 / diff_rows FK schema / serializeError）
+- **CHANGELOG.md** v2.1.10 章节定稿（含 4 主线 + SR-FIX Round 1-7 全段）
+- **USER_GUIDE.md** §1.8.10-12 + §八 + FAQ + 故障排查（raw_json / worker / DB 备份恢复）
+- **真实环境验证**：用户 460 万行真实老库 N4-cont-2 一步迁 0 丢失 + 5.8GB 自动备份保留
+
+#### 关键 reverse sync（设计与实施差异）
+
+- **N4-cont-1 sentinel**：v0.2 `NULL` → v0.3 `''`（Phase 4 T28 发现 v2.1.8 N4 NOT NULL 约束冲突 + 用户拍板 Option A）
+- **A3 worker 化主目标**：缩短"主进程 event loop lag"非"对账总耗时"；worker 化对小数据有 5%-1300% 开销（cold-start + IPC 序列化）；500w 行外推仅 ~1.05x
+
+#### 后续节点
+
+1. v2.1.11 分支启动（PM 起 PRD/spec/tasks/manual-test-checklist 四件套）
+2. Obsidian Vault sync（docs/iterations/v2.1.10/*.md）
+3. SR-FIX-1 多轮 Codex 复审收敛模式可沉淀为 v2.1.11+ 范式
+
+---
+
+**当前状态**：v0.6（2026-05-28T15:48 — PR #54 已 merged + post-merge 实施记录归档）。
+**下一步**：v2.1.11 启动。
