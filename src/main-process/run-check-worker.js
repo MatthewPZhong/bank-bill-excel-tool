@@ -150,8 +150,7 @@ if (!isMainThread) {
   };
 
   // ── runCheck 执行（worker 端） ──
-  //   T06 阶段直接 require session.runCheck（与主进程路径完全一致）
-  //   T09 阶段切到 require 抽出后的 runCheckCore，保持 byte-for-byte
+  //   T09：直接调 session.runCheckCore（抽出后的纯函数；与主进程直调路径 byte-for-byte 一致）
   async function runCheckInWorker(workerDb, payload, jobId, cancelToken) {
     const { monthKey, storageRoot } = payload || {};
     if (!monthKey) {
@@ -163,11 +162,11 @@ if (!isMainThread) {
         parentPort.postMessage({ type: 'progress', jobId, payload: ev });
       } catch (_e) { /* swallow */ }
     };
-    // cancelToken 占位（T13 接入 graceful cancel；T06 阶段仅检查启动前一次）
+    // cancelToken 占位（T13 接入 graceful cancel；T06/T09 阶段仅检查启动前一次）
     if (cancelToken && cancelToken.cancelled) {
       throw new Error('worker canceled before runCheck start');
     }
-    return await session.runCheck({ db: workerDb, monthKey, storageRoot, onProgress });
+    return await session.runCheckCore({ db: workerDb, monthKey, storageRoot, onProgress });
   }
 
   // ── 主消息循环 ──

@@ -160,6 +160,11 @@ async function peekImportTarget({ db, kind, filePaths }) {
 //   阶段事件：clearing-old-runs / computing-stats / inserting-run / sql-joining / writing-xlsx / updating-paths
 //   spec §6.2 / PRD §六
 //
+// v2.1.10 A3 T09：抽出 `runCheckCore(args)` 纯函数 — worker 内可直接调（无 Electron API 依赖）
+//   原 `runCheck` 保留作 alias 透传（向后兼容所有既有 caller — main.js IPC handler / 集成测试）
+//   contract test（scripts/integration/v2.1.10-a3-phase1.js）验证：
+//     - 直 require 跑 vs worker pool dispatch 跑 → diff_rows 表内容 byte-for-byte 一致
+//
 // 流程：
 //   1. 清空该月历史 runs + diff_rows（避免累积）
 //   2. 统计 totalBillRows / matched / mismatch / unmatched
@@ -169,7 +174,7 @@ async function peekImportTarget({ db, kind, filePaths }) {
 //   6. 调 writer 同步生成 diff.xlsx + report.xlsx；UPDATE runs.diff_file_path/report_file_path 回填
 //   7. 返回 stats + filePaths
 // 关键不变量：写盘失败不应回滚 DB 事务（数据已 COMMIT 有效）；写盘错误仅 throw 给 caller
-async function runCheck({ db, monthKey, storageRoot, onProgress }) {
+async function runCheckCore({ db, monthKey, storageRoot, onProgress }) {
   if (!monthKey) {
     throw new Error('runCheck：monthKey 必填');
   }
@@ -541,6 +546,13 @@ function listMonths({ db }) {
   return importRepo.listMonths(db);
 }
 
+// v2.1.10 A3 T09：runCheck 是 runCheckCore 的 alias（向后兼容）
+//   - 既有 caller（main.js IPC handler / 集成测试 / smoke）调 runCheck 行为不变
+//   - worker 端（src/main-process/run-check-worker.js）也通过 alias 复用，
+//     T06 暂直接 require session.runCheck；contract test 验证两条路径结果一致
+//   - 后续如 runCheck 需要做 worker / 主进程语义分歧（如 worker 内不调 backup API），可解耦此 alias
+const runCheck = runCheckCore;
+
 module.exports = {
   importFlowFiles,
   importBillFiles,
@@ -548,6 +560,7 @@ module.exports = {
   importBillFilesWithOverwrite,
   peekImportTarget,
   runCheck,
+  runCheckCore, // v2.1.10 A3 T09：worker 端可直接调用的纯函数版本
   cleanupAfterRunBackground,
   cleanupOrphanData,
   getSessionStatus,
