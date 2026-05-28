@@ -9,9 +9,9 @@
 
 | 字段 | 值 |
 |---|---|
-| 清单版本 | v11（对应 app v2.1.8 — 2026-05-26 发版收尾再升格 7 条 N1' + N4 涉及变量：Critical 3 条（`WRITER_OUTPUT_HEADERS_V2` / `TEMPLATE_BILL_HEADERS` / `bill_imports.raw_json` 内容契约 — N4）+ Important-skeleton 2 条（`ensureBillRawJsonV2Slim` — N4 / `setupIdleCleanupTimer` — N1'）+ Runtime-state 1 条（`lastUserActivityTs` 含 `IDLE_CLEANUP_MS` + `reportUserActivity` — N1'）+ deprecated 标记 1 条（`WRITER_OUTPUT_HEADERS` — N4）+ 更新 1 条（`cleanupAfterRunBackground` review 要点加 N1' v0.7 `includeDiff` 参数 + FK 反向同步）；触发：用户 2026-05-26 立项 N1' + N4；v10 = 2026-05-22 Phase 0 T02 升格 11 条；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
-| 上次人工 review | 2026-05-22（v2.1.8 Phase 0 T02 升格 11 条 — F5/A3/N1/N2/N3 spec.md §七 评估） |
-| 基线数据 | `docs/analysis/var-reference-stats.md`（85 个 JS 文件 / 853 顶层声明 — v2.1.7 T14 重跑后；A-share 146 / A-pair 247 / A-local 359 / B 393） |
+| 清单版本 | v12（对应 app v2.1.10-beta.1 — 2026-05-28 Phase 6 T33 升格 5 条 v2.1.10 4 主线变量：Critical 4 条（`runCheckCore` — A3 worker/main 共用 / `clearStaleSuccessfulRawJson` — N4-cont-1 NOT IN 子查询资金红线 / `ensureDiffRowsCascadeMigration_v2_1_10` — N4-cont-2 DB 不可逆 8-status / `acquiring_bill_currency_diff_rows` FK CASCADE schema — N4-cont-2 spec §九 拍板）+ Important-skeleton 1 条（`serializeError` / `deserializeError` — A3 跨进程错误回传契约）+ 更新 1 条（`bill_imports.raw_json` 内容契约扩 v2.1.10 N4-cont-1 sentinel `''` 语义 + 差异行永不清空契约）；触发：用户 2026-05-28 Phase 6 T33 版本 bump 前必跑 check-vars 节点；v11 = 2026-05-26 N1' + N4 升格 7 条；v10 = 2026-05-22 Phase 0 T02 升格 11 条；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
+| 上次人工 review | 2026-05-28（v2.1.10 Phase 6 T33 升格 5 条 — A3 + N4-cont-1 + N4-cont-2 / spec §九 评估）|
+| 基线数据 | `docs/analysis/var-reference-stats.md`（94 个 JS 文件 / 1000 顶层声明 — v2.1.10-beta.1 T33 重跑后；A-share 159 / A-pair 290 / A-local 444 / B 449） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
 
@@ -241,15 +241,65 @@
   - 字段顺序（D3=a）：必须与模版一致；不可按其他顺序保留
   - 必跑：N4 caseN4_billRawJsonSlimMigration 全流程
 
-### `bill_imports.raw_json`（v2.1.8 N4 内容契约变更 ⚠️ 资金红线 — 永久删除 17 字段）
+### `bill_imports.raw_json`（v2.1.8 N4 内容契约变更 ⚠️ 资金红线 — 永久删除 17 字段；v2.1.10 N4-cont-1 扩内容语义）
 - 定义：`src/backend/database/migrations.js:1023` DDL `raw_json TEXT NOT NULL`
-- 关联功能：收单单据导入数据的 JSON 序列化字段；v2.1.7 及之前存 26 字段，v2.1.8 N4 起仅存 9 模版字段；migration 通过 `ensureBillRawJsonV2Slim` 一次性 rewrite
+- 关联功能：收单单据导入数据的 JSON 序列化字段；v2.1.7 及之前存 26 字段，v2.1.8 N4 起仅存 9 模版字段；migration 通过 `ensureBillRawJsonV2Slim` 一次性 rewrite；**v2.1.10 N4-cont-1 起对账成功老行 raw_json 可被自动清空为 `''`（sentinel，非 NULL — 兼容 v2.1.8 NOT NULL schema）；差异行 raw_json 永远保留以保证差异 xlsx 完整可重导**
 - 变更 review 要点：
   - **数据不可逆**：17 字段值（ReconBillBizId / 公司主体 / 业务部门 / 对手部门 / 订单创建来源 / 财务BU / 账单类型 / 业务子类型 / 交易类型 / 对账子类型 / 单据状态 / 用户编号 / 账户号 / 账户类型 / remark / 创建时间 / 完成时间）永久删除
   - 历史月份差异表重导出也少这些字段 → 不能反悔
   - 下游消费方调研（v2.1.8 commit 37299cf）：仅 writer.js + run-repository.js 4 处 SQL `json_extract '$."账单日期"'` 使用；17 字段无下游消费
   - import-repository 写入 raw_json 时**仍按 26 字段写入**（reader 读 xlsx 全字段），migration 后续生效；下次需要时可在 import 阶段也裁字段
-  - 必跑：N4 migration 全流程 + caseA 末 N 列表头 + readback raw_json 仅 9 字段
+  - **v2.1.10 N4-cont-1 sentinel 修订（v0.3）**：清空标记必须用 `''`（空字符串）而非 `NULL` — v2.1.8 N4 DDL 含 `NOT NULL` 约束；改用 `NULL` 会让 UPDATE 失败（CHECK 违反）。所有 idempotent guard / 查询请用 `raw_json != ''` 而非 `raw_json IS NOT NULL`
+  - **v2.1.10 N4-cont-1 差异行永不清空契约**：`clearStaleSuccessfulRawJson` 用 `NOT IN (SELECT bill_import_id FROM diff_rows)` 子查询排除；改子查询 → 资金红线（差异 xlsx 重导丢字段）
+  - 必跑：N4 migration 全流程 + caseA 末 N 列表头 + readback raw_json 仅 9 字段；v2.1.10 必跑 `v2.1.10-n4-cont-1-phase4` 集成（差异行 `raw_json != ''` 100% + 对账成功老行 `raw_json = ''` + retention 边界）
+
+### `runCheckCore`（v2.1.10 A3 新增 Critical ⚠️ 资金红线 — runCheck 核心算法 worker/main 共用入口）
+- 定义：`src/main-process/acquiring-bill-currency-session.js:runCheckCore(workerDb, payload, onProgress, cancelToken)`（Phase 1 T09 提取自原 `runCheck` 内 DB/算法部分）
+- 跨文件度：A-pair（`acquiring-bill-currency-session.js` 定义 + `run-check-worker.js` 调用；总命中 4 次 — `src/main-process/acquiring-bill-currency-session.js(3), src/main-process/run-check-worker.js(1)`）
+- 关联功能：v2.1.10 A3 跨进程化的核心 — runCheck 5 阶段 (`clearOldRuns / computeStats / insertRun / insertDiffByJoin / writeRunOutputs`) 算法主体；**worker 进程与主进程必须 byte-for-byte 一致**（contract test 锁定）
+- 变更 review 要点：
+  - **资金红线**：runCheckCore 输出（diff_rows 内容 + 行数）与 v2.1.9 旧 runCheck 必须 byte-for-byte 一致；改一个 SQL / 阶段顺序 / cancel 边界都可能影响差异表内容
+  - **cancelToken 必须在 5 阶段间检查**（T13 已实现）：cancel 触发当前事务 graceful ROLLBACK；不能跳过任何阶段间检查 → cancel 响应延迟超阈值
+  - **worker / main 双调用方**：worker 路径调用走 `dispatchRunCheck` → IPC 序列化；main 路径走 facade 直调（兼容老调用方）；任一路径改动必须双侧验证
+  - **A4 chunked 分批集成**：runCheckCore 内 `insertDiffByJoin` 阶段已透传 chunkSize 给 `insertDiffRowsByJoinChunked`；chunk 边界 cancel + idempotent / 重跑保护由本函数 + run-repository 共同维护
+  - 跨主线影响：A3 worker 跨进程化 + A4 chunked 分批 + N4-cont-2 CASCADE 删 run 时 diff_rows 自动清 — 改 runCheckCore 必须同步验证 4 主线集成路径
+  - 必跑：unit `tests/unit/main-process/run-check-worker.test.js` 12 case + 集成 `v2.1.10-a3-phase1` 40 case + `v2.1.10-a3-phase2` 33 case + `v2.1.10-a4-phase3` 25 case
+
+### `clearStaleSuccessfulRawJson`（v2.1.10 N4-cont-1 新增 Critical ⚠️ 资金红线 — NOT IN 子查询排除差异行）
+- 定义：`src/backend/acquiring-bill-currency-db/raw-json-retention.js:clearStaleSuccessfulRawJson(db, retentionDays)`
+- 跨文件度：A-pair（`raw-json-retention.js` 定义 + `main.js` idle cleanup 回调调用；总命中 3 次 — `src/backend/acquiring-bill-currency-db/raw-json-retention.js(2), src/main.js(1)`）
+- 关联功能：v2.1.10 N4-cont-1 raw_json 体积治理核心 — 单 SQL `UPDATE acquiring_bill_currency_bill_imports SET raw_json = '' WHERE id NOT IN (SELECT bill_import_id FROM acquiring_bill_currency_diff_rows) AND imported_at < datetime('now', '-N days') AND raw_json != ''`；由 N1' idle 30min cleanup 回调自动触发；返回 `{ affectedRows }`
+- 变更 review 要点：
+  - **资金红线**：`NOT IN (SELECT bill_import_id FROM diff_rows)` 子查询是差异行保留的**唯一保护**；改子查询条件 / 写错表名 / 列名 → 差异行 raw_json 被误清 → 差异 xlsx 重导丢字段 = 资金事故
+  - **sentinel = `''`**（v0.3 修订）：不能用 `NULL`（违反 v2.1.8 N4 NOT NULL 约束）；所有 idempotent guard 用 `raw_json != ''`
+  - **idempotent**：函数本身按 `raw_json != ''` 守卫；重复调用 0 行影响；不能改成 `raw_json IS NOT NULL`（无效查询，落 v2.1.8 NOT NULL schema 后没有 NULL 行）
+  - **失败 graceful**：调用方 (main.js setupIdleCleanupTimer 回调) 必须独立 try/catch + activity log + 不阻塞主 cleanup
+  - **retention_days 边界**：由 `getAcquiringBillRawJsonRetentionDays(db)` 提供（settings 单键 + 范围 1-30 + 范围外回退 7）；改函数签名要同步 setting key
+  - 必跑：unit `tests/unit/backend/acquiring-bill-currency-db/raw-json-retention.test.js` 8 case + 集成 `v2.1.10-n4-cont-1-phase4` 23 case
+
+### `ensureDiffRowsCascadeMigration_v2_1_10`（v2.1.10 N4-cont-2 新增 Critical ⚠️ DB 不可逆 schema + 8-status state machine）
+- 定义：`src/backend/database/migrations.js:ensureDiffRowsCascadeMigration_v2_1_10(db, dbPath, createBackupFn)`
+- 跨文件度：A-pair（`migrations.js` 定义 + `database.js` 启动期调用；总命中 6 次 — `src/backend/database.js(4), src/backend/database/migrations.js(2)`）
+- 关联功能：v2.1.10 N4-cont-2 FK CASCADE 改造核心 — 在 `acquiring_bill_currency_diff_rows` 的 2 个 FK（`bill_import_id` → `acquiring_bill_currency_bill_imports.id` 和 `run_id` → `acquiring_bill_currency_runs.id`）上加 `ON DELETE CASCADE`；沿用 v2.1.9 N5 8-status state machine 范式（pending / backed-up / checked / rebuilt / data-copied / fk-verified / cleaned-up / done）+ 复用 SR-backup-1 createBackupFn 注入；标志位 `n4_cont_2_diff_rows_cascade_migrated`
+- 变更 review 要点：
+  - **数据不可逆**：FK CASCADE 改造涉及 schema rebuild（CREATE TEMP TABLE + DROP + RENAME）；migration 失败必须 ROLLBACK 到 v2.1.9 状态 + 备份保留（SR-backup-1 VACUUM INTO 前置）
+  - **8-status state machine 顺序固定**：pending → backed-up → checked → rebuilt → data-copied → fk-verified → cleaned-up → done；改顺序 → 中断恢复时 status 判断错乱 → 重复 migration 或漏 backfill
+  - **跨版本迁移**：必须支持 v2.1.7 / v2.1.8 / v2.1.9 → v2.1.10 一步迁；不能假设上游 migration 已跑（启动期 migration 序列由 `database.js` 编排）
+  - **PRAGMA foreign_key_check 0 violation 是 hard requirement**：fk-verified status 若有 violation 必须 fail-fast + ROLLBACK；不能跳过
+  - **FK 范式 vs v2.1.9 N5**：N5 `channels` FK 是 `ON UPDATE CASCADE`（不带 ON DELETE — channels 禁删）；N4-cont-2 是 `ON DELETE CASCADE`（删 run → diff_rows 自动清）+ 不带 ON UPDATE；两者范式差异是设计 — 不能复用同一辅助函数
+  - **createBackupFn 注入范式**：沿用 v2.1.9 N4 重构 + SR-backup-1 范式；不能改用 `fs.copyFileSync`（v2.1.8 N4 旧方式已废弃）
+  - **幂等保护**：标志位 `n4_cont_2_diff_rows_cascade_migrated='1'` 已设 → 跳过；ROLLBACK 不写 marker → 下次重试
+  - 必跑：unit `tests/unit/backend/database/migrations-n4-cont-2.test.js` 12 case + 集成 `v2.1.10-n4-cont-2-phase5` 43 case（含跨版本 fixture + ROLLBACK + 老数据保留 + 幂等）
+
+### `acquiring_bill_currency_diff_rows` FK CASCADE schema（v2.1.10 N4-cont-2 升格 Critical ⚠️ DB schema 契约 — spec §九 拍板）
+- 定义：`src/backend/database/migrations.js:1506-1515` DDL — `bill_import_id INTEGER REFERENCES acquiring_bill_currency_bill_imports(id) ON DELETE CASCADE` + `run_id INTEGER REFERENCES acquiring_bill_currency_runs(id) ON DELETE CASCADE`（v2.1.10 N4-cont-2 改造完成后）
+- 关联功能：v2.1.10 N4-cont-2 改造目标 schema；之前（v2.1.7/v2.1.8/v2.1.9）FK 不带 CASCADE，删 run / 删 bill_import 时孤儿 diff_rows 残留；本版 ON DELETE CASCADE 后自动清；clearOldRuns + chunked 重跑 idempotent 也依赖本契约
+- 变更 review 要点：
+  - **资金红线**：改 FK schema 必须配套 migration（不能直接改 DDL 不写 migration → 老库不升级）；FK 引用错表 / 错列 / 错 action（CASCADE / SET NULL / RESTRICT）→ 资金事故
+  - **与 N4-cont-1 配合**：N4-cont-1 clearStaleSuccessfulRawJson 排除差异行；如果 N4-cont-2 CASCADE 删了 run → diff_rows 跟着删 → 这些行的 raw_json 不再受 N4-cont-1 保护 → 可被下一轮 idle cleanup 清空；这是预期行为（用户删了 run 表示不再需要差异记录）
+  - **不能加 ON UPDATE CASCADE**：v2.1.10 spec §6.2 只加 ON DELETE；ON UPDATE 与 v2.1.9 N5 channels FK 范式不同（详 `ensureDiffRowsCascadeMigration_v2_1_10` 条目）
+  - **PRAGMA foreign_keys=ON** 必须在 worker / main 双进程连接生效（v2.1.10 A3 worker DB 连接 PRAGMA 6 条清单）；FK 不开启 CASCADE 不生效
+  - 必跑：sqlite3 `PRAGMA foreign_key_list('acquiring_bill_currency_diff_rows')` 显示 ON DELETE CASCADE × 2 + 集成 `v2.1.10-n4-cont-2-phase5` 删 run / 删 bill_import case
 
 ---
 
@@ -412,6 +462,18 @@
   - **必须两处同步**：`bank-statement-fields.js` + `preload.js` —— 漏改一处 UI / 引擎语义就分裂
   - 跨文件度 3（scan-vars baseline），改字段集合 → C3 dialog 显示 / 引擎赋值 / scenario 持久化都受影响
   - 必跑：smoke N2（dialog 显示「自取值」第 2 位 + 引擎 mode='custom' 分支 + DB migration 旧 scenario 升级）
+
+### `serializeError` / `deserializeError`（v2.1.10 A3 新增 Important-skeleton — worker / main 跨进程错误回传契约）
+- 定义：`src/main-process/serialize-error.js`（v2.1.10 Phase 1 T08 新建）
+- 跨文件度：A-pair（`serialize-error.js` 定义 + `run-check-worker.js` worker 端 + `run-check-worker-pool.js` main 端反序列化；serializeError 总命中 10 次 / deserializeError 4 次）
+- 关联功能：worker 内 throw error → 跨进程 IPC 序列化 → main 进程 deserialize → 调用方 catch；保留 stack / cause 链 / FileValidationError 专属字段（code / detailLines / context）；spec §2.4 完整契约
+- 变更 review 要点：
+  - **错误堆栈完整度**：worker 内 throw 的 err.stack 必须含 worker 内文件路径 + 行号（POC §四 已验证）；改序列化逻辑漏字段 → 主进程 catch 的 err 失去定位能力
+  - **FileValidationError 专属字段**：`code / message / detailLines / context` 必须完整回传；反序列化后 `err.name === 'FileValidationError'` 判断（**注意**：跨进程 prototype 链丢失，`err instanceof FileValidationError = false`）
+  - **cause 链递归序列化**：错误的 `err.cause` 必须递归走 serializeError；改实现不能漏 cause 链
+  - **双侧契约**：改 serializeError 输出 schema 必须同步 deserializeError 反序列化逻辑；不能单侧改
+  - **与 SR-log-1 集成**：worker 内告警通过 message pipe 上报到 main 后写入同一 SR-log-1 日志（`logs/{YYYY-MM}/{MM-DD}/{level}.log`）；改序列化字段 → SR-log-1 日志格式变化
+  - 必跑：unit `tests/unit/main-process/serialize-error.test.js` 8 case + 集成 `v2.1.10-a3-phase1` 错误回传 case
 
 ---
 
