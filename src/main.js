@@ -11197,6 +11197,13 @@ function loadIdleCleanupMsFromSettings() {
   return 30;
 }
 
+// v2.1.10 Phase 2 T12：worker busy / grace 内 skip idle cleanup（spec §2.3.2）
+//   - workerPool.isBusy()=true：worker 正在跑 runCheck，禁止 cleanup（避免抢 DB 写锁）
+//   - Phase 1 surprise #1 mitigate：worker reject 后 isBusy() 立即翻 false，但 worker 内 DB 事务可能仍在
+//     → 30s grace（默认）内不触发 cleanup；下个 5min tick 再判
+//   - GRACE_MS 可在 unit test 中 monkey-patch；生产固定 30s
+const RUN_CHECK_WORKER_GRACE_MS = 30000;
+
 function setupIdleCleanupTimer() {
   if (idleCleanupTimer) return; // 重入保护
   // v2.1.9 N1-settings：启动期从 settings 读阈值（默认 30）
@@ -11205,8 +11212,39 @@ function setupIdleCleanupTimer() {
     try {
       const elapsed = Date.now() - lastUserActivityTs;
       if (elapsed < IDLE_CLEANUP_MS) return;
+
+      // v2.1.10 Phase 2 T12：worker busy guard（spec §2.3.2 协调策略）
+      //   worker 正在跑 runCheck → skip 本次 idle cleanup（避免与 worker DB 写抢锁）
+      if (runCheckWorkerPool && typeof runCheckWorkerPool.isBusy === 'function' && runCheckWorkerPool.isBusy()) {
+        appendActivityLogEntry({
+          level: 'info',
+          source: 'main',
+          domain: 'acquiring-bill-currency',
+          message: '[acquiring-bill-currency] idle cleanup skip — worker busy（spec §2.3.2）',
+          details: [`activeJobId=${(runCheckWorkerPool.getStatus && runCheckWorkerPool.getStatus().activeJobId) || ''}`]
+        });
+        return;
+      }
+
+      // v2.1.10 Phase 2 T12：30s grace（Phase 1 surprise #1 mitigate）
+      //   isBusy() 已 false 但 worker 刚 reject/done — worker 内 DB 事务可能仍在
+      //   30s grace 内不触发 cleanup；下个 tick 再判
+      if (runCheckWorkerPool && typeof runCheckWorkerPool.getLastBusyEndTs === 'function') {
+        const lastBusyEndTs = runCheckWorkerPool.getLastBusyEndTs();
+        if (lastBusyEndTs > 0 && Date.now() - lastBusyEndTs < RUN_CHECK_WORKER_GRACE_MS) {
+          // grace 期内 skip — 不写 activity log（30s 内每 5min 一次 tick 至多 1 次 grace skip，
+          // 日志噪声小可忽略；如需诊断可临时打开）
+          return;
+        }
+      }
+
       // idle 达标 → 复用进入模块兜底路径（含 mutex 抢锁 + cleanup_pending 判定 + 防重入）
       triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
+
+      // === Phase 4 N4-cont-1 raw_json 清理在此插入 ===
+      //   spec §4.3.1：在 triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded 后追加
+      //   try/catch + clearStaleSuccessfulRawJson(database.db, retentionDays)
+      //   失败不阻塞主 cleanup（独立 try/catch + activity log + 下次 idle 重试）
     } catch (err) {
       // v2.1.9 SR-log-1：替换 console.error → 日志上报；idle tick 失败不阻塞下次 tick
       appendActivityLogEntry({

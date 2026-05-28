@@ -39,6 +39,14 @@ let workerInstance = null;     // 当前 worker 实例（null = 未启动 / 已 
 let workerInitPromise = null;  // 启动期 promise（避免并发 dispatch 触发多次 cold-start）
 let workerDbPath = null;       // 记 init 时传的 dbPath（重启时复用）
 let activeJob = null;          // { jobId, resolve, reject, onProgress, onLog }
+// v2.1.10 Phase 2 T12 — Phase 1 surprise #1 mitigate（spec §2.3.2）：
+//   isBusy() 仅反映 activeJob 槽位；worker 内 DB 事务结束可能滞后 isBusy() 翻转
+//   → idle cleanup timer 必须 30s grace 内不触发，防与 worker 残留事务抢写锁
+//   每次 done / reject / crash 都更新 lastBusyEndTs；初始 0（不参与判断）
+let lastBusyEndTs = 0;
+// v2.1.10 Phase 2 T14 — worker failure 监听器（Notification + op lock 释放交给主进程）
+//   pool 不直接调 Electron API，而是 emit 通知；caller (main.js) 注册回调
+let failureListener = null;    // (info: { source, message, cause }) => void
 
 // ─────────────────────────────────────────────────────────────────
 // jobId 生成（timestamp + 6 位随机；够低冲突概率 + 无外部依赖）
@@ -94,6 +102,8 @@ function coldStartWorker(dbPath) {
       if (activeJob && activeJob.jobId === msg.jobId) {
         const job = activeJob;
         activeJob = null;
+        // v2.1.10 Phase 2 T12 — 记录 busy 结束时间（spec §2.3.2 grace 30s）
+        lastBusyEndTs = Date.now();
         try { job.resolve(msg.result); } catch (_e) { /* swallow */ }
       }
       return;
@@ -102,6 +112,8 @@ function coldStartWorker(dbPath) {
       if (activeJob && activeJob.jobId === msg.jobId) {
         const job = activeJob;
         activeJob = null;
+        // v2.1.10 Phase 2 T12 — 记录 busy 结束时间（spec §2.3.2 grace 30s）
+        lastBusyEndTs = Date.now();
         try { job.reject(deserializeFromMessage(msg.error)); } catch (_e) { /* swallow */ }
       }
       return;
@@ -119,16 +131,34 @@ function handleWorkerFailure(failedWorker, err, source) {
   if (workerInstance !== failedWorker) return;
   workerInstance = null;
   workerInitPromise = null;
+  const hadActiveJob = !!activeJob;
+  let wrappedErr = null;
   if (activeJob) {
     const job = activeJob;
     activeJob = null;
+    // v2.1.10 Phase 2 T12 — crash 也更新 lastBusyEndTs（spec §2.3.2 grace 30s）
+    lastBusyEndTs = Date.now();
     // 给 caller 透传 error，附带 source（'error' / 'exit'）便于诊断
-    const wrappedErr = new Error(
+    wrappedErr = new Error(
       `worker ${source} 异常：${err && err.message ? err.message : String(err)}`
     );
     wrappedErr.cause = err;
     wrappedErr.workerFailureSource = source;
     try { job.reject(wrappedErr); } catch (_e) { /* swallow */ }
+  }
+  // v2.1.10 Phase 2 T14 — 通知主进程：释放 op lock + Notification + 下次 dispatch cold-start
+  //   pool 不直接 require electron / op lock 模块（保持模块独立可 unit test）
+  //   caller (main.js) 通过 setFailureListener 注册回调
+  if (failureListener) {
+    try {
+      failureListener({
+        source, // 'error' | 'exit'
+        message: err && err.message ? err.message : String(err),
+        cause: err,
+        hadActiveJob,
+        wrappedError: wrappedErr, // null when no active job
+      });
+    } catch (_e) { /* swallow — listener 抛错不阻塞 pool 状态恢复 */ }
   }
 }
 
@@ -221,18 +251,35 @@ async function dispatchRunCheck(payload, callbacks = {}) {
 }
 
 // cancel — 取消当前 job（worker 内 graceful 退出）
-//   仅设 cancelFlag，不强制 terminate；worker 完成当前批后自然抛 'canceled' error
-//   T13 阶段配合 runCheckCore 内 cancelToken 检查
-function cancel(jobId) {
+//   仅设 cancelFlag，不强制 terminate；worker 内下个 cancelToken check 点自然抛 CancelError
+//   T13 已配合 runCheckCore 内 cancelToken 5 阶段间检查（spec §2.1.3 + spec §3.2 chunked cancel）
+//
+// v2.1.10 Phase 2 T13 — hard terminate fallback：
+//   - cancel 后 hardTimeoutMs（默认 5000ms）内 worker 仍未 exit / done / reject → terminate
+//   - 防 worker 内死循环（如 SQL 卡死 / 死锁）导致 main 端永远拿不到 reject
+function cancel(jobId, options = {}) {
   if (!workerInstance) return false;
   if (!activeJob) return false;
   if (jobId && activeJob.jobId !== jobId) return false;
+  const targetJobId = activeJob.jobId;
+  const hardTimeoutMs = typeof options.hardTimeoutMs === 'number' ? options.hardTimeoutMs : 5000;
   try {
-    workerInstance.postMessage({ type: 'cancel', jobId: activeJob.jobId });
-    return true;
+    workerInstance.postMessage({ type: 'cancel', jobId: targetJobId });
   } catch (_e) {
     return false;
   }
+  // hard timeout — 5s 内 activeJob 仍未释放则 terminate（pool message handler 监听 done/error 会清 activeJob）
+  if (hardTimeoutMs > 0) {
+    setTimeout(() => {
+      // 只有 activeJob 仍是同一个 jobId 才 terminate（防 done/error 已正常完成）
+      if (activeJob && activeJob.jobId === targetJobId && workerInstance) {
+        const w = workerInstance;
+        try { w.terminate(); } catch (_e) { /* swallow — exit handler 接管 */ }
+        // exit handler 会 reject activeJob + 调 failureListener
+      }
+    }, hardTimeoutMs);
+  }
+  return true;
 }
 
 // pre-warm — 显式预热（T10 IPC handler 可选调用；POC surprise #3 表明非必需）
@@ -274,9 +321,28 @@ async function shutdown(timeoutMs = 5000) {
   activeJob = null;
 }
 
-// isBusy — 主进程 idle timer 协调使用（Phase 2 T12 才接入；Phase 1 暴露 API）
+// isBusy — 主进程 idle timer 协调使用（Phase 2 T12 接入；spec §2.3.2）
+//   ⚠️ 仅反映 activeJob 槽位；worker DB 事务结束可能滞后 isBusy() 翻转
+//   → caller 需结合 getLastBusyEndTs() 做 30s grace 判断
 function isBusy() {
   return !!activeJob;
+}
+
+// v2.1.10 Phase 2 T12 — Phase 1 surprise #1 mitigate（spec §2.3.2 grace 30s）
+//   返回上次 worker busy 结束的 timestamp（ms）；初始 0
+//   caller（main.js setupIdleCleanupTimer）判断 Date.now() - getLastBusyEndTs() < 30000 时 skip cleanup
+function getLastBusyEndTs() {
+  return lastBusyEndTs;
+}
+
+// v2.1.10 Phase 2 T14 — 注册 worker failure 监听器
+//   caller (main.js) 负责：释放 op lock + Electron Notification + activity log
+//   pool 自身不调 Electron API，保持模块独立可在 Node 直跑 unit test
+function setFailureListener(fn) {
+  if (fn !== null && typeof fn !== 'function') {
+    throw new Error('setFailureListener：参数必须是 function 或 null');
+  }
+  failureListener = fn;
 }
 
 // getStatus — 调试 / unit test 用
@@ -287,6 +353,7 @@ function getStatus() {
     busy: !!activeJob,
     activeJobId: activeJob ? activeJob.jobId : null,
     dbPath: workerDbPath,
+    lastBusyEndTs,
   };
 }
 
@@ -297,6 +364,8 @@ async function __reset_for_test__() {
   workerInitPromise = null;
   workerDbPath = null;
   activeJob = null;
+  lastBusyEndTs = 0;
+  failureListener = null;
 }
 
 module.exports = {
@@ -305,6 +374,8 @@ module.exports = {
   preWarm,
   shutdown,
   isBusy,
+  getLastBusyEndTs,
+  setFailureListener,
   getStatus,
   __reset_for_test__,
 };
