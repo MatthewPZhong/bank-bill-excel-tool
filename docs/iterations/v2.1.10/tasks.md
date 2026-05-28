@@ -102,7 +102,14 @@ Phase 1 (A3 worker 框架) ────► Phase 2 (A3 + idle 联调) ───�
   - `initWorkerDb(dbPath)` helper（含 6 条 PRAGMA 强制清单 — spec §2.5）
   - `runCheckInWorker(workerDb, payload)` — 调用 session.runCheck 等价逻辑
   - PRAGMA verify 步骤（spec §2.5.2）
-- **验证**：unit test `tests/unit/main-process/run-check-worker.test.js` 12 case 全绿
+- **验证**（v0.3 SR-FIX-1 round 2 P1-6 reverse sync）：
+  - worker 入口 `src/main-process/run-check-worker.js` 的主要副作用都在 `if (!isMainThread)` 路径内（worker 进程内），主线程 unit test 直接 require 时仅拿 `__test_only__.initWorkerDb` / `PRAGMA_STATEMENTS` / `PRAGMA_EXPECTED` 3 个 export
+  - 通过 pool unit `run-check-worker-pool.test.js` 17 case 端到端覆盖：
+    - case 1-2：dispatchRunCheck 正常 + 错误（init / run / done / error 全流程）
+    - case 3-6：cancel / getStatus / preWarm / shutdown
+    - case 7-16：crash recovery / failureListener / lastBusyEndTs / DB 状态
+    - **case 17（SR-FIX-1 round 2 P0-2）**：init-error 路径 + 下次 cold-start（覆盖原 finding P1-6 的 init-error 覆盖要求）
+  - 17 case 覆盖度 ≥ tasks 原描述 12 case；不再单独建 `run-check-worker.test.js`（重复建文件价值低 — initWorkerDb 6 PRAGMA 已在 pool case 1 间接 verify；其余测试都需要 worker 进程才能跑）
 - **跟主线映射**：A3-1 / A3-2
 
 ### T07 — worker pool 管理
