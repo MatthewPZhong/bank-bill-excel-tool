@@ -11099,6 +11099,50 @@ app.whenReady()
         stack: err && err.stack ? err.stack : undefined
       });
     }
+
+    // v2.1.10 A3 Phase 2 T14：注册 worker pool failure listener
+    //   - worker exit (code≠0) / error 事件 → pool 自动 reject activeJob + 调本回调
+    //   - 主进程职责：① 释放 op lock；② Notification 通知用户；③ activity log；④ 下次 dispatch cold-start（pool 自动 — workerInstance=null）
+    //   - hadActiveJob=true：有 job 正在跑挂掉 → 必须释放 op lock（caller IPC handler catch 也会 release，
+    //     但 failure 路径走 reject 后 caller catch 释放；此处兜底释放防 caller 异常路径漏释）
+    //   - 当 caller 已 release（reject 路径正常走完）则此处 release 是 no-op（lock.inFlight=false 时 release 幂等）
+    try {
+      runCheckWorkerPool.setFailureListener((info) => {
+        try {
+          appendActivityLogEntry({
+            level: 'error',
+            source: 'main',
+            domain: 'acquiring-bill-currency',
+            message: `[acquiring-bill-currency] worker ${info && info.source} 异常（A3 Phase 2 T14 recover）`,
+            details: [
+              `message=${info && info.message ? info.message : 'unknown'}`,
+              `hadActiveJob=${info && info.hadActiveJob ? 'true' : 'false'}`,
+            ],
+            stack: info && info.cause && info.cause.stack ? info.cause.stack : undefined
+          });
+        } catch (_logErr) { /* swallow */ }
+        // 释放 op lock（防 caller catch 漏释；release 内部不抛错 — 状态置为 inFlight=false）
+        try { releaseAcquiringBillCurrencyOpLock(); } catch (_lockErr) { /* swallow */ }
+        // Notification（用户提示）— 复用既有 notifyAcquiringBillCurrencyResult error 路径
+        //   ⚠️ notifyAcquiringBillCurrencyResult 在 IPC handler 闭包内；模块顶层无法访问
+        //   直接构造 Notification — 与 notifyAcquiringBillCurrencyResult 内部一致的 isSupported 兜底
+        try {
+          if (Notification && typeof Notification.isSupported === 'function' && Notification.isSupported()) {
+            const body = `worker 异常请重试：${(info && info.message) ? String(info.message).slice(0, 160) : 'worker crash'}`;
+            new Notification({ title: '「收单单据币种校验」', body }).show();
+          }
+        } catch (_notifyErr) { /* swallow — 通知失败不影响业务 */ }
+      });
+    } catch (err) {
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'acquiring-bill-currency',
+        message: '[acquiring-bill-currency] setFailureListener 注册失败',
+        details: [err && err.message ? err.message : String(err)],
+        stack: err && err.stack ? err.stack : undefined
+      });
+    }
   })
   .catch((error) => {
     handleStartupFailure(error);

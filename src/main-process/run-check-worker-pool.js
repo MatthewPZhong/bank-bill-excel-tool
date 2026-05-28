@@ -368,6 +368,14 @@ async function __reset_for_test__() {
   failureListener = null;
 }
 
+// v2.1.10 A3 Phase 2 T14 — __test_only_post__：测试专用，给当前 worker 发一条 raw message
+//   生产代码不应调用（dispatchRunCheck / cancel / preWarm / shutdown 已覆盖所有正常路径）
+//   仅集成 / unit test 用于注入 `__crash_for_test__` 等测试 message
+function __test_only_post__(msg) {
+  if (!workerInstance) throw new Error('__test_only_post__：worker 未启动');
+  workerInstance.postMessage(msg);
+}
+
 module.exports = {
   dispatchRunCheck,
   cancel,
@@ -378,4 +386,5 @@ module.exports = {
   setFailureListener,
   getStatus,
   __reset_for_test__,
+  __test_only_post__,
 };

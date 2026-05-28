@@ -354,31 +354,88 @@ test.describe('run-check-worker-pool', () => {
     pool.setFailureListener(null);
   });
 
-  // v2.1.10 Phase 2 T14 — crash 模拟（用 process.exit 让 worker 异常退出）
-  test('15. worker crash（process.exit(1)）→ failureListener 触发 + activeJob reject', async () => {
+  // v2.1.10 Phase 2 T14 — crash 模拟（用 __crash_for_test__ message 让 worker process.exit(1)）
+  test('15. worker crash（process.exit(1) via __crash_for_test__）→ failureListener 触发 + activeJob reject + lastBusyEndTs 更新', async () => {
     const ctx = await setupTmpDb();
     try {
       let failureInfo = null;
       pool.setFailureListener((info) => { failureInfo = info; });
 
       await pool.preWarm(ctx.dbPath);
+      const before = Date.now();
       const runPromise = pool.dispatchRunCheck(
         { __dbPath: ctx.dbPath, monthKey: '2026-04', storageRoot: ctx.tmpdir },
         {}
       );
       // 等 dispatch 进 activeJob
       for (let i = 0; i < 5; i++) await Promise.resolve();
+      // 发 __crash_for_test__ 让 worker process.exit(1)
+      // worker 此时正在 'run' message handler 内 await runCheckInWorker —
+      //   __crash_for_test__ 在 message queue 中 — Node worker_threads message handler 串行处理 —
+      //   要先 await runCheck 完，再处理 __crash_for_test__
+      //   但 runCheck 又会去 await session.runCheckCore 内 setImmediate ——
+      //   实际上 message handler 是 EventEmitter on 注册的；多个 message 不会等前一个 await 完
+      //   测试时 message handler 是 async/await — 但 Node 上 emit 是同步派发到每个 listener
+      //   每个 listener 调用 async fn 立刻返回 Promise，下一个 message 同步派发
+      // → __crash_for_test__ 应能在 'run' handler 还在 await 时被处理 → process.exit(1)
+      pool.__test_only_post__({ type: '__crash_for_test__', code: 1 });
 
-      // 模拟 crash：用 shutdown(0) 强制 terminate（exit handler 触发 failure 路径）
-      // shutdown(0) 内部先 reject pending job 再 terminate；reject 走 shutdown 路径不算 failure
-      // 改用：在 case 内直接 terminate worker — 但 pool 未暴露 worker；
-      // 替代方案：用 message 'close' + 短 timeout terminate → exit code 0 不触发 failureListener
-      //
-      // 真正 crash 模拟（process.exit(1)）需要 worker 端有 'crash' 消息处理；当前 worker.js 无此 API
-      // → 本 case 验证 failureListener 注册路径不抛错（功能正常即可，真实 crash 在集成测试 T15 验证）
-      try { await runPromise; } catch (_e) { /* swallow */ }
-      // 业务正常完成 — failureInfo 仍为 null（crash 路径在集成测试覆盖）
-      assert.equal(failureInfo, null, '正常 done 不触发 failureListener（crash 路径见 integration T15）');
+      // runPromise 应 reject（worker exit 触发 handleWorkerFailure）
+      let rejectErr;
+      try { await runPromise; } catch (e) { rejectErr = e; }
+      const after = Date.now();
+
+      assert.ok(rejectErr, 'crash 后 dispatch 应 reject');
+      // failureInfo 应被回调
+      assert.ok(failureInfo, 'failureListener 应被回调');
+      assert.ok(['error', 'exit'].includes(failureInfo.source), `source 应是 error 或 exit（实际 ${failureInfo.source}）`);
+      assert.equal(failureInfo.hadActiveJob, true, 'hadActiveJob=true');
+      // 错误 message 含 'exit code=1' 或 worker 异常字样
+      assert.ok(
+        rejectErr.message.includes('exit') || rejectErr.message.includes('worker'),
+        `rejectErr.message 应含 exit/worker（实际 ${rejectErr.message}）`
+      );
+
+      // lastBusyEndTs 已更新（crash 时间窗口内）
+      const lastBusyEndTs = pool.getLastBusyEndTs();
+      assert.ok(
+        lastBusyEndTs >= before - 10 && lastBusyEndTs <= after + 10,
+        `lastBusyEndTs 应在 crash 时间窗口内（实际 ${lastBusyEndTs} / 窗口 [${before},${after}]）`
+      );
+
+      // workerInstance 已清空 — 下次 dispatch 自动 cold-start
+      const status = pool.getStatus();
+      assert.equal(status.workerAlive, false, 'crash 后 workerAlive=false');
+      assert.equal(status.busy, false, 'crash 后 busy=false');
+
+      pool.setFailureListener(null);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  // v2.1.10 Phase 2 T14 — crash 后自动 cold-start
+  test('16. crash 后下次 dispatch 自动 cold-start + 成功', async () => {
+    const ctx = await setupTmpDb();
+    try {
+      pool.setFailureListener(() => {}); // 注册 noop listener
+
+      await pool.preWarm(ctx.dbPath);
+      const runPromise = pool.dispatchRunCheck(
+        { __dbPath: ctx.dbPath, monthKey: '2026-04', storageRoot: ctx.tmpdir },
+        {}
+      );
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+      pool.__test_only_post__({ type: '__crash_for_test__', code: 1 });
+      try { await runPromise; } catch (_e) { /* expected reject */ }
+
+      // 第二次 dispatch 应自动 cold-start
+      const result = await pool.dispatchRunCheck(
+        { __dbPath: ctx.dbPath, monthKey: '2026-04', storageRoot: ctx.tmpdir },
+        {}
+      );
+      assert.equal(typeof result.runId, 'number', 'cold-start 后 dispatch 成功');
+      assert.equal(pool.getStatus().workerAlive, true, '新 worker alive');
 
       pool.setFailureListener(null);
     } finally {

@@ -244,6 +244,14 @@ if (!isMainThread) {
         try { if (workerDb) workerDb.close(); } catch (_e) { /* swallow */ }
         process.exit(0);
       }
+
+      // v2.1.10 A3 Phase 2 T14：测试专用 — 模拟 worker crash（process.exit(非 0)）
+      //   仅供 unit / integration test 验证 crash recover 路径；生产代码不发此 message
+      //   不写 worker DB 关闭：让 DB 连接 leak 模拟硬崩
+      if (type === '__crash_for_test__') {
+        const code = (msg && typeof msg.code === 'number') ? msg.code : 1;
+        process.exit(code);
+      }
     } catch (err) {
       const jobIdForError = msg && msg.jobId ? msg.jobId : null;
       if (type === 'init') {
