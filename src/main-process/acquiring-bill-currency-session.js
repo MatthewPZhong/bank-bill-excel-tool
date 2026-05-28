@@ -367,15 +367,27 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
   } catch (chunkedErr) {
     // chunked 中途异常（cancel 或 SQL 错）— 失败 chunk 已自行 ROLLBACK 本批；已 COMMIT 批保留
     //   写 chunk_progress { status:'partial' } 让 caller 决策 resume / 弃
-    //   即使 totalChunks 为 0（极端 SELECT COUNT 失败）仍尝试写一次 partial
+    //   ⚠️ 关键 idempotent 不变量：复用 onChunkDone 已正确写入的 progress（lastCompletedChunkIndex / totalChunks），
+    //      仅把 status 改 'partial'；若 onChunkDone 从未触发（chunk 0 边界即 cancel）→ 写 -1 / 0 兜底
     try {
-      const totalChunksHint = (chunkedErr && chunkedErr.__chunkedHint && chunkedErr.__chunkedHint.totalChunks) || 0;
-      runRepo.setRunChunkProgress(db, {
-        runId,
-        lastCompletedChunkIndex: -1, // 我们不知道异常前最后 COMMIT 到几（cancel 抛错时 onChunkDone 已更新过）
-        totalChunks: totalChunksHint,
-        status: 'partial',
-      });
+      const existingProgress = runRepo.getRunChunkProgress(db, runId);
+      if (existingProgress) {
+        // onChunkDone 已写过至少一次 — 复用其值（lastCompletedChunkIndex 指向最后一个 COMMIT 成功的 chunk）
+        runRepo.setRunChunkProgress(db, {
+          runId,
+          lastCompletedChunkIndex: existingProgress.lastCompletedChunkIndex,
+          totalChunks: existingProgress.totalChunks,
+          status: 'partial',
+        });
+      } else {
+        // onChunkDone 从未触发（chunk 0 之前 cancel；或 chunkedResult.totalChunks=0 边界）
+        runRepo.setRunChunkProgress(db, {
+          runId,
+          lastCompletedChunkIndex: -1,
+          totalChunks: 0,
+          status: 'partial',
+        });
+      }
     } catch (_progressErr) {
       // chunk_progress 写失败 — 不阻塞错误透传（caller 不能 resume 也只能重跑）
     }
