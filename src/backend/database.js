@@ -28,6 +28,8 @@ const {
   ensureBillRawJsonV2Slim,
   ensureSchemaV2_1_9_N5,
   ensureScenariosNameUniqueByChannelId,
+  // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造
+  ensureDiffRowsCascadeMigration_v2_1_10,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
@@ -351,6 +353,71 @@ class AppDatabase {
         stack: n4Err && n4Err.stack ? n4Err.stack : undefined
       });
     }
+    // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造（🔴 资金红线 + 不可逆 DB schema）
+    //   必须在 ensureAcquiringBillCurrencyTablesSupport 之后（依赖 diff_rows / runs / bill_imports 表已存在）
+    //   也必须在 ensureBillRawJsonV2Slim (v2.1.8 N4) 之后（避免 N4 重写 raw_json 期间 schema 改动冲突）
+    //   N4-cont-1 settings (上面 ensureAcquiringBillCurrencyRawJsonRetentionSettings) 与本 migration 顺序无关
+    //   （spec §八.3：settings INSERT OR IGNORE 与 schema rebuild 互不影响；固定为 settings 在前便于排查）
+    //   失败处理：try-catch + 4 status 分别日志上报；启动不阻塞，下次重试（参考 v2.1.9 N5 范式）
+    try {
+      const n4Cont2Result = this.ensureDiffRowsCascadeMigration_v2_1_10();
+      if (n4Cont2Result && n4Cont2Result.status === 'migrated') {
+        appendModuleLog({
+          level: 'info',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration N4-cont-2] diff_rows FK 已加 ON DELETE CASCADE',
+          details: [
+            `backup=${n4Cont2Result.backupPath || '(none)'}`,
+            `rowsMigrated=${n4Cont2Result.rowsAffected}`,
+            `statusReached=${n4Cont2Result.statusReached}`
+          ]
+        });
+      } else if (n4Cont2Result && n4Cont2Result.status === 'backup-failed') {
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration N4-cont-2] 备份失败，schema 未改动，下次启动重试',
+          details: [n4Cont2Result.error || '(no error message)']
+        });
+      } else if (n4Cont2Result && n4Cont2Result.status === 'conflict-detected') {
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration N4-cont-2] 行数对账失败 (rebuild new ≠ old)，需用户介入',
+          details: [
+            `备份保留: ${n4Cont2Result.backupPath || '(none)'}`,
+            n4Cont2Result.error || '(no error message)'
+          ]
+        });
+      } else if (n4Cont2Result && n4Cont2Result.status === 'migration-failed') {
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration N4-cont-2] 事务失败已回滚',
+          details: [
+            `备份保留: ${n4Cont2Result.backupPath || '(none)'}`,
+            `statusReached: ${n4Cont2Result.statusReached || '(none)'}`,
+            n4Cont2Result.error || '(no error message)'
+          ]
+        });
+      }
+      // skipped / skipped-no-table / skipped-already-cascaded / skipped-no-flag-table：静默
+      //   - skipped 是稳态正常路径（每次启动重复触达 → 不打 log 防噪音）
+      //   - skipped-no-* 是极少数边界 → 不阻塞且无操作意义
+    } catch (n4Cont2Err) {
+      appendModuleLog({
+        level: 'error',
+        source: 'main',
+        domain: 'migration',
+        message: '[migration N4-cont-2] unexpected failure (启动不阻塞，下次启动重试)',
+        details: [n4Cont2Err && n4Cont2Err.message ? n4Cont2Err.message : String(n4Cont2Err)],
+        stack: n4Cont2Err && n4Cont2Err.stack ? n4Cont2Err.stack : undefined
+      });
+    }
     // v2.1.7 F7-A2：启动期 ANALYZE — 让规划器统计所有索引（含 idx_acquiring_bill_currency_bill_source_file）
     //   必须在所有 ensure*Support / migrate* 之后（否则统计的是旧 schema）
     //   ANALYZE 幂等可重复；用户 DB 体量下开销 < 100ms（spec §7.9）
@@ -489,6 +556,18 @@ class AppDatabase {
   //   注入 createBackup 函数 → migration 复用 SR-backup-1 sqlite VACUUM INTO（与 N5 同 backup 体系）
   ensureScenariosNameUniqueByChannelId() {
     return ensureScenariosNameUniqueByChannelId(this.db, (label) => this.createBackup(label));
+  }
+
+  // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造 facade
+  //   传 createBackup 函数给 migration（事务外执行 SR-backup-1 sqlite VACUUM INTO）
+  //   注入 dbPath 第二参（保持与 ensureBillRawJsonV2Slim 同签名；本函数当前未用 dbPath 但保留契约）
+  //   返回 { status, backupPath?, error?, statusReached?, rowsAffected? }
+  ensureDiffRowsCascadeMigration_v2_1_10() {
+    return ensureDiffRowsCascadeMigration_v2_1_10(
+      this.db,
+      this.dbPath,
+      (label) => this.createBackup(label)
+    );
   }
 
   listTemplates() {

@@ -357,52 +357,48 @@ test.describe('ensureDiffRowsCascadeMigration_v2_1_10', () => {
     assert.ok(fkList.every((f) => String(f.on_delete).toUpperCase() === 'NO ACTION'));
   });
 
-  test('case 8：跨版本 v2.1.7 老 schema → v2.1.10 一步迁（N4 + N5 链协同 + 单独触发 N4-cont-2）', () => {
-    // 模拟 v2.1.7 老库 — 仅起 minimum schema，由 AppDatabase init 跑 N4/N5 链
+  test('case 8：跨版本 v2.1.7 老 schema → v2.1.10 一步迁（T30 集成后 N4 / N5 / N4-cont-2 三链协同 + 二次幂等）', () => {
+    // 模拟 v2.1.7 老库 — 仅起 minimum schema，由 AppDatabase init 跑全链 migration
     db.close();
     db = null;
 
-    // Step 1：AppDatabase init 走 N4 + N5（T30 集成后会自然带上 N4-cont-2；这里独立验 chain）
+    // Step 1：AppDatabase init 完整走 N4 (v2.1.8) + N5 (v2.1.9) + N4-cont-2 (v2.1.10)
     const { AppDatabase } = require('../../../../src/backend/database');
     const v217DbPath = path.join(tmpDir, 'v217-bootstrap.sqlite');
     const appDb = new AppDatabase(v217DbPath);
     appDb.init();
 
-    // N4 / N5 标志位已写
+    // 三链标志位全部写入
     const n4Marker = appDb.db.prepare(
       "SELECT setting_value FROM app_settings WHERE setting_key='acquiring_bill_raw_json_v2_migrated'"
     ).get();
     const n5Marker = appDb.db.prepare(
       "SELECT setting_value FROM app_settings WHERE setting_key='n5_channels_migrated'"
     ).get();
-    assert.strictEqual(n4Marker && n4Marker.setting_value, 'true', 'N4 标志位 = true（v2.1.7 → v2.1.8 N4 已迁）');
-    assert.strictEqual(n5Marker && n5Marker.setting_value, 'true', 'N5 标志位 = true（v2.1.8 → v2.1.9 N5 已迁）');
-
-    // diff_rows 表 FK 当前无 CASCADE（N4-cont-2 未跑）
-    const fkBefore = appDb.db.prepare(`PRAGMA foreign_key_list('acquiring_bill_currency_diff_rows')`).all();
-    assert.ok(fkBefore.every((f) => String(f.on_delete).toUpperCase() === 'NO ACTION'), 'init 后 FK 无 CASCADE（T30 集成前路径）');
-
-    // Step 2：手动触发 N4-cont-2 migration（模拟 T30 在 init 末尾的调用）
-    const v210BackupDir = path.join(tmpDir, 'v217-backups');
-    const result = ensureDiffRowsCascadeMigration_v2_1_10(
-      appDb.db,
-      v217DbPath,
-      (label) => createBackup(appDb.db, label, v210BackupDir)
-    );
-    assert.strictEqual(result.status, 'migrated', 'N4-cont-2 迁移成功');
-
-    // N4-cont-2 标志位写入
     const n4Cont2Marker = appDb.db.prepare(
       "SELECT setting_value FROM app_settings WHERE setting_key='n4_cont_2_diff_rows_cascade_migrated'"
     ).get();
-    assert.strictEqual(n4Cont2Marker && n4Cont2Marker.setting_value, '1', 'N4-cont-2 标志位 = "1"');
+    assert.strictEqual(n4Marker && n4Marker.setting_value, 'true', 'N4 标志位 = true（v2.1.7 → v2.1.8 N4 已迁）');
+    assert.strictEqual(n5Marker && n5Marker.setting_value, 'true', 'N5 标志位 = true（v2.1.8 → v2.1.9 N5 已迁）');
+    assert.strictEqual(n4Cont2Marker && n4Cont2Marker.setting_value, '1', 'N4-cont-2 标志位 = "1"（v2.1.9 → v2.1.10 已迁）');
 
-    // schema 已含 CASCADE
+    // schema 已含 CASCADE（T30 集成后 init 末尾自然完成 N4-cont-2）
     const fkAfter = appDb.db.prepare(`PRAGMA foreign_key_list('acquiring_bill_currency_diff_rows')`).all();
-    assert.strictEqual(fkAfter.length, 2);
-    assert.ok(fkAfter.every((f) => String(f.on_delete).toUpperCase() === 'CASCADE'));
+    assert.strictEqual(fkAfter.length, 2, 'diff_rows FK 数 = 2 (run_id + bill_import_id)');
+    assert.ok(fkAfter.every((f) => String(f.on_delete).toUpperCase() === 'CASCADE'), '2 FK 都已含 ON DELETE CASCADE');
 
+    // Step 2：二次 init 幂等 — 标志位仍 = '1' / schema 不变 / N4-cont-2 跳过（skipped 路径）
     try { appDb.db.close(); } catch (_) {}
+    const appDb2 = new AppDatabase(v217DbPath);
+    appDb2.init();
+    const n4Cont2Marker2 = appDb2.db.prepare(
+      "SELECT setting_value FROM app_settings WHERE setting_key='n4_cont_2_diff_rows_cascade_migrated'"
+    ).get();
+    assert.strictEqual(n4Cont2Marker2 && n4Cont2Marker2.setting_value, '1', '二次 init 后 N4-cont-2 标志位仍 = "1"');
+    const fkAfter2 = appDb2.db.prepare(`PRAGMA foreign_key_list('acquiring_bill_currency_diff_rows')`).all();
+    assert.ok(fkAfter2.every((f) => String(f.on_delete).toUpperCase() === 'CASCADE'), '二次 init 后 FK 仍 CASCADE');
+
+    try { appDb2.db.close(); } catch (_) {}
   });
 
   test('case 9：CASCADE 实测 — DELETE run → diff_rows 自动清；DELETE bill_import → diff_rows 自动清', () => {
