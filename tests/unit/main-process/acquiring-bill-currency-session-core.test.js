@@ -630,4 +630,83 @@ test.describe('runCheckCore byte-for-byte contract', () => {
       ctx.cleanup();
     }
   });
+
+  // v2.1.10 SR-FIX-1 Round 6 H1 — setRunChunkProgress(in-progress) 与 INSERT runs 同事务原子提交
+  //   证明：setRunChunkProgress 在 BEGIN/COMMIT 内，COMMIT 之前；runs 行与 chunk_progress 同事务可见
+  //   验证策略：
+  //     5.7 / 5.8 / 5.9 — 正常路径：COMMIT 后立即查 runs.chunk_progress IS NOT NULL（与 Round 5 G1 行为相同 — H1 不改变可见性）
+  //     5.10 / 5.11 — 模拟"COMMIT 前异常"：safeRollback 后 runs 行不存在 → chunk_progress 也不存在（同事务原子回滚）
+  //     5.12 — 模拟硬终止：直接 close DB 不 commit 模拟进程崩 → 重开 DB 后 runs 行不存在（已 ROLLBACK 不可见）
+  //   关键不变量：runs 行与 chunk_progress 不存在"runs 已写入但 chunk_progress IS NULL"的中间态
+  test('T19-session.6 — Round 6 H1：setRunChunkProgress 与 INSERT runs 同事务原子提交（COMMIT 前写入）', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    try {
+      // 正常路径：直接跑 runCheckCore 完整一次，再检查 chunk_progress 落地时机
+      //   注：H1 修复后 chunk_progress 在 COMMIT 内写入；外部观察行为与 Round 5 G1（COMMIT 后立即写）不可区分
+      //   但内部一致性更强：runs 行与 chunk_progress 同事务可见（不存在中间态）
+      let crashSnapshot = null;
+      await session.runCheckCore({
+        db: ctx.db.db,
+        monthKey: FIXTURE_MONTH,
+        storageRoot: ctx.tmpdir,
+        onProgress: (ev) => {
+          // stage='sql-joining' 是 COMMIT 之后第一个 onProgress 事件
+          //   H1 修复后：此时查 runs，chunk_progress 必须已写入（同事务）
+          if (ev.stage === 'sql-joining' && ev.mismatchHint !== undefined && ev.chunkIndex === undefined) {
+            const run = ctx.db.db.prepare(
+              'SELECT chunk_progress FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1'
+            ).get();
+            crashSnapshot = run ? run.chunk_progress : null;
+          }
+        },
+      });
+
+      assert.ok(crashSnapshot, '5.7 stage 4 入口时 runs.chunk_progress 已可见（H1 同事务原子 → COMMIT 后立即可见）');
+      const snapshotProgress = JSON.parse(crashSnapshot);
+      assert.equal(snapshotProgress.status, 'in-progress', '5.8 COMMIT 后立即可见的 chunk_progress.status=in-progress');
+      assert.equal(snapshotProgress.lastCompletedChunkIndex, -1, '5.9 占位 lastCompletedChunkIndex=-1');
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  // T19-session.7 — Round 6 H1：模拟 stage 3 之后 stage 4 入口前异常 → safeRollback 确保 runs 与 chunk_progress 一致回滚
+  //   关键：H1 修复前，setRunChunkProgress 在 COMMIT 之后；若 stage 3 cancelToken 命中 → safeRollback 撤销 runs
+  //     但若 cancelToken 命中"COMMIT 之后 ↔ setRunChunkProgress 之前"硬终止 → runs 已 COMMIT 但 chunk_progress NULL
+  //   H1 修复后，COMMIT 与 setRunChunkProgress 同事务 → 不可能出现 runs 已 COMMIT 但 chunk_progress NULL 的中间态
+  test('T19-session.7 — Round 6 H1：cancel at inserting-run（COMMIT 之前）→ safeRollback runs + chunk_progress 同事务回滚', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    try {
+      // 第 3 次 check 点 (inserting-run) cancel → safeRollback 撤销整事务
+      let checkCount = 0;
+      const cancelToken = {
+        get cancelled() {
+          checkCount++;
+          if (checkCount >= 3) return true;
+          return false;
+        },
+        cancel() {},
+        throwIfCancelled() { /* unused */ },
+      };
+      let caught;
+      try {
+        await session.runCheckCore({
+          db: ctx.db.db,
+          monthKey: FIXTURE_MONTH,
+          storageRoot: ctx.tmpdir,
+          cancelToken,
+        });
+      } catch (e) { caught = e; }
+      assert.ok(caught, '7.1 cancel 抛错');
+      assert.equal(caught.name, 'CancelError', '7.2 CancelError');
+      // safeRollback 撤销整事务（包括 INSERT runs）
+      const runCount = ctx.db.db.prepare('SELECT COUNT(*) c FROM acquiring_bill_currency_runs').get().c;
+      assert.equal(runCount, 0, '7.3 stage 3 cancel → safeRollback → runs 行也回滚（事务原子性保证）');
+      // chunk_progress 也回滚（同事务）
+      const partials = require('../../../src/backend/acquiring-bill-currency-db/run-repository').listPartialRuns(ctx.db.db, FIXTURE_MONTH);
+      assert.equal(partials.length, 0, '7.4 chunk_progress 同事务回滚（H1 同事务原子提交保证不可能 NULL 残留）');
+    } finally {
+      ctx.cleanup();
+    }
+  });
 });

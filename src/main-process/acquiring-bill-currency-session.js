@@ -295,33 +295,29 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
         safeRollback(db);
         throw new CancelError('runCheck cancelled at stage=inserting-run', { stage: 'inserting-run' });
       }
-      // v2.1.10 A4 T18：主事务 COMMIT — 让 stage 4' chunked 各 chunk 独立 BEGIN/COMMIT
-      db.exec('COMMIT');
 
-      // v2.1.10 SR-FIX-1 Round 5 G1：setRunChunkProgress(in-progress) 必须在 COMMIT 后、任何 await 前
-      //   触发场景（Codex Round 4 复审 finding，2026-05-28T10:52）：
-      //     Round 3 F2 把 in-progress 占位写在 chunked 入口前（line 344），但中间还有
-      //     stage 4' 的 progress event + `await setImmediate` 让出 event loop。
-      //     如果 worker / app 在 COMMIT 后 ↔ Round 3 F2 写入前的窗口期退出：
-      //       → runs 行已落库（status='success'，chunk_progress IS NULL）
-      //       → failureListener（Round 4 F2 兜底路径）扫描 in-progress 找不到（chunk_progress NULL）
-      //       → 启动期 cleanupOrphanData 守卫（partial OR in-progress）也不命中 → 当 orphan 清掉
-      //       → 用户无法 resume
-      //   修复：把 in-progress 占位提前到 COMMIT 后、**第一个 await 之前**（无 await 让出窗口）
+      // v2.1.10 SR-FIX-1 Round 6 H1：setRunChunkProgress(in-progress) 与 INSERT runs 同事务原子提交
+      //   触发场景（Codex Round 5 四复审 finding，2026-05-28T11:38）：
+      //     Round 5 G1 把 in-progress 占位移到 COMMIT 之后任何 await 之前 — 修了 event-loop / await 窗口
+      //     但如果 worker 被硬终止（SIGKILL / OOM kill）/ 进程在 line 299 COMMIT 与 line 316
+      //     setRunChunkProgress 之间崩 → 仍会留下 `runs` 已提交但 `chunk_progress IS NULL` 残留
+      //     → failureListener / cleanupOrphanData 守卫仍可能把它当 orphan 清掉
+      //   修复：把 setRunChunkProgress 移到 BEGIN/COMMIT 内、`db.exec('COMMIT')` 之前
+      //     → runs 行与 in-progress 占位同一事务原子可见（SQLite 单连接事务隔离保证）
+      //     → 任何 COMMIT 后的硬终止：runs.chunk_progress 已是 in-progress（非 NULL）
       //     - 仅在 !isResume 时写（resume 路径已有有效 chunk_progress；不要重写覆盖）
       //     - onChunkDone 第一次触发时会用真实 totalChunks 覆盖此值
-      //     - cancel 路径 catch 块仍覆盖此值为 partial（byte-for-byte 兼容 Round 3 F2 不变）
-      //   关键不变量：本块到下一行 `} catch (error)` 之间不能再有任何 await
-      try {
-        runRepo.setRunChunkProgress(db, {
-          runId,
-          lastCompletedChunkIndex: -1, // 起始值；onChunkDone 第一次会覆盖
-          totalChunks: 0,              // 未知；onChunkDone 第一次会算出真实值（与 0-chunk 边界 fallback 一致）
-          status: 'in-progress',
-        });
-      } catch (_progressErr) {
-        // 写失败不阻塞主流程（unit fixture 表不存在 / 极小概率 SQLITE_BUSY）
-      }
+      //     - cancel 路径 catch 块仍覆盖此值为 partial（byte-for-byte 兼容 Round 5 G1 不变）
+      //   关键不变量：setRunChunkProgress 必须在 db.exec('COMMIT') 之前（同事务内）
+      runRepo.setRunChunkProgress(db, {
+        runId,
+        lastCompletedChunkIndex: -1, // 起始值；onChunkDone 第一次会覆盖
+        totalChunks: 0,              // 未知；onChunkDone 第一次会算出真实值（与 0-chunk 边界 fallback 一致）
+        status: 'in-progress',
+      });
+      // v2.1.10 A4 T18：主事务 COMMIT — 让 stage 4' chunked 各 chunk 独立 BEGIN/COMMIT
+      //   Round 6 H1：COMMIT 之前 setRunChunkProgress 已写入 → runs 行与 chunk_progress 同事务原子可见
+      db.exec('COMMIT');
     } catch (error) {
       safeRollback(db);
       throw error;
@@ -346,9 +342,10 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
 
   // ── stage 4' chunked INSERT diff_rows ──
   //   主事务已 COMMIT；进入 chunked 区域（各 chunk 独立 BEGIN/COMMIT）
-  //   v2.1.10 SR-FIX-1 Round 5 G1：in-progress 占位已在 COMMIT 后立即写入（line ~300）
-  //     窗口期 0：COMMIT → setRunChunkProgress 之间没有 await/event loop 让出
-  //     原 Round 3 F2 此处的占位写入已迁移到 COMMIT 后（避免 await 窗口）
+  //   v2.1.10 SR-FIX-1 Round 6 H1：in-progress 占位与 INSERT runs 同事务原子提交（COMMIT 前写入）
+  //     → 任何硬终止（SIGKILL / OOM / 进程崩）：runs 行与 chunk_progress 同时可见或同时回滚
+  //     → 不再有 Round 5 G1 的 "COMMIT 后 ↔ 第一次 await 前" 窗口期 race
+  //     原 Round 5 G1 在 COMMIT 后立即写入的占位代码已合并到 BEGIN/COMMIT 内（line ~302-307）
   // v2.1.7 F6 埋点 4/6：SQL JOIN 比对币种（耗时大头）→ chunked 模式
   if (onProgress) {
     onProgress({ phase: 'run', stage: 'sql-joining', mismatchHint: stats.mismatchRows });
