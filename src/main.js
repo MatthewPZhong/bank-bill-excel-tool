@@ -24,6 +24,11 @@ const runRepo = require('./backend/acquiring-bill-currency-db/run-repository');
 //   - isBusy：N1' idle cleanup 协调用（Phase 2 T12）
 //   - shutdown：app.before-quit 时清理（Phase 2 T15）
 const runCheckWorkerPool = require('./main-process/run-check-worker-pool');
+// v2.1.10 N4-cont-1 T23 (Phase 4)：raw_json idle 自动清理函数
+//   - 复用 v2.1.9 N1' idle 30min cleanup 计时器（spec §4.3.1）
+//   - 仅清「对账成功」（不在 diff_rows）且 imported_at < retentionDays 天前的 bill_imports.raw_json
+//   - 差异行 raw_json 永远保留（writer.js:184 重导差异 xlsx 依赖）
+const { clearStaleSuccessfulRawJson } = require('./backend/acquiring-bill-currency-db/raw-json-retention');
 
 // v2.1.8 N1' (v0.7)：idle 30min 自动 cleanup 计时器（spec §3.2.2 N1''-D6 ~ D13）
 //   - lastActivityTs：renderer 上报的用户最后活动时间（IPC `app:user-activity`），main 也用 mutex 间接判定（D6 AND 设计）
@@ -11367,10 +11372,38 @@ function setupIdleCleanupTimer() {
       // idle 达标 → 复用进入模块兜底路径（含 mutex 抢锁 + cleanup_pending 判定 + 防重入）
       triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
 
-      // === Phase 4 N4-cont-1 raw_json 清理在此插入 ===
-      //   spec §4.3.1：在 triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded 后追加
-      //   try/catch + clearStaleSuccessfulRawJson(database.db, retentionDays)
+      // === Phase 4 N4-cont-1 raw_json 清理 ===
+      //   spec §4.3 + PRD §五.2：复用 N1' idle 30min cleanup 时序
+      //   顺序：先 v2.1.8 cleanupAfterRunBackground（清 flow + bill 整行）后 raw_json 清理（NULL 化对账成功老行）
       //   失败不阻塞主 cleanup（独立 try/catch + activity log + 下次 idle 重试）
+      //   ⚠️ 资金红线：clearStaleSuccessfulRawJson 内 NOT IN 子查询排除差异行；retentionDays 用 settings getter 范围外回退 7
+      try {
+        const retentionDays = database.getAcquiringBillRawJsonRetentionDays();
+        const rawJsonResult = clearStaleSuccessfulRawJson(database.db, { retentionDays });
+        if (rawJsonResult.clearedCount > 0) {
+          appendActivityLogEntry({
+            level: 'info',
+            source: 'main',
+            domain: 'acquiring-bill-currency',
+            message: '[N4-cont-1] idle cleanup raw_json 清理完成',
+            details: [
+              `affected=${rawJsonResult.clearedCount}`,
+              `retentionDays=${retentionDays}`,
+              `elapsedMs=${rawJsonResult.elapsedMs}`
+            ]
+          });
+        }
+      } catch (rawJsonErr) {
+        // raw_json 清失败不阻塞主 cleanup；下次 idle（30min 后）重试
+        appendActivityLogEntry({
+          level: 'error',
+          source: 'main',
+          domain: 'acquiring-bill-currency',
+          message: '[N4-cont-1] idle cleanup raw_json 清理失败（下次 idle 重试）',
+          details: [rawJsonErr && rawJsonErr.message ? rawJsonErr.message : String(rawJsonErr)],
+          stack: rawJsonErr && rawJsonErr.stack ? rawJsonErr.stack : undefined
+        });
+      }
     } catch (err) {
       // v2.1.9 SR-log-1：替换 console.error → 日志上报；idle tick 失败不阻塞下次 tick
       appendActivityLogEntry({
