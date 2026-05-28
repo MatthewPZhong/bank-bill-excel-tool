@@ -506,4 +506,74 @@ test.describe('T19 — chunk_progress get/set', () => {
     );
   });
 
+  // v2.1.10 SR-FIX-1 round 2 P1-5：listPartialRuns API
+  test('T19.7 — listPartialRuns 返回某月所有 chunk_progress.status="partial" 的 runs（SR-FIX-1 round 2 P1-5）', () => {
+    const monthKey = '2026-04';
+    seedMismatchRows(db, { monthKey, count: 100 });
+    // 3 个 run：partial / complete / partial（按 ran_at 升序）
+    const r1 = insertRun(db, monthKey, 100);
+    runRepo.setRunChunkProgress(db, { runId: r1, lastCompletedChunkIndex: 0, totalChunks: 3, status: 'partial' });
+    const r2 = insertRun(db, monthKey, 100);
+    runRepo.setRunChunkProgress(db, { runId: r2, lastCompletedChunkIndex: 2, totalChunks: 3, status: 'complete' });
+    const r3 = insertRun(db, monthKey, 100);
+    runRepo.setRunChunkProgress(db, { runId: r3, lastCompletedChunkIndex: 1, totalChunks: 3, status: 'partial' });
+
+    // 不同月份的 partial run — 不应混入
+    seedMismatchRows(db, { monthKey: '2026-05', count: 100 });
+    const rOther = insertRun(db, '2026-05', 100);
+    runRepo.setRunChunkProgress(db, { runId: rOther, lastCompletedChunkIndex: 0, totalChunks: 3, status: 'partial' });
+
+    const partials = runRepo.listPartialRuns(db, monthKey);
+    assert.strictEqual(partials.length, 2, 'T19.7.1 含 2 个 partial run（r1 + r3）');
+    // 按 ran_at DESC + id DESC — r3 在前（id 大）
+    assert.strictEqual(partials[0].id, r3, 'T19.7.2 第一个 = 最近 partial（r3）');
+    assert.strictEqual(partials[1].id, r1, 'T19.7.3 第二个 = 较老 partial（r1）');
+    // chunk_progress 字段已解析
+    assert.strictEqual(partials[0].chunk_progress.status, 'partial', 'T19.7.4 chunk_progress.status=partial');
+    assert.strictEqual(partials[0].chunk_progress.lastCompletedChunkIndex, 1, 'T19.7.5 lastCompletedChunkIndex=1');
+    assert.strictEqual(partials[0].chunk_progress.totalChunks, 3, 'T19.7.6 totalChunks=3');
+    // 不含 complete run
+    assert.ok(!partials.find(p => p.id === r2), 'T19.7.7 不含 complete run');
+    // 不含其他月份 partial
+    assert.ok(!partials.find(p => p.id === rOther), 'T19.7.8 不含其他月份 partial run');
+  });
+
+  test('T19.8 — listPartialRuns monthKey 缺失 / 无 run → 空数组', () => {
+    assert.deepStrictEqual(runRepo.listPartialRuns(db, ''), [], 'T19.8.1 空 monthKey → []');
+    assert.deepStrictEqual(runRepo.listPartialRuns(db, null), [], 'T19.8.2 null monthKey → []');
+    assert.deepStrictEqual(runRepo.listPartialRuns(db, '2099-99'), [], 'T19.8.3 无 run 月份 → []');
+  });
+
+  // v2.1.10 SR-FIX-1 round 2 P1-7：模拟 worker crash 后兜底 in-progress → partial
+  //   生产路径：failureListener 内扫所有 chunk_progress IS NOT NULL 的 runs → status='in-progress' → 改 'partial'
+  //   本 case 验证 setRunChunkProgress 接受 in-progress / partial round-trip + 兜底改 partial 后 listPartialRuns 能命中
+  test('T19.9 — chunk_progress status in-progress → 兜底改 partial 后 listPartialRuns 能命中（SR-FIX-1 round 2 P1-7）', () => {
+    const monthKey = '2026-04';
+    seedMismatchRows(db, { monthKey, count: 100 });
+    const runId = insertRun(db, monthKey, 100);
+
+    // 模拟 worker 跑 chunk 1/3 完成后 crash — chunk_progress 停留 in-progress
+    runRepo.setRunChunkProgress(db, { runId, lastCompletedChunkIndex: 1, totalChunks: 3, status: 'in-progress' });
+    const before = runRepo.getRunChunkProgress(db, runId);
+    assert.strictEqual(before.status, 'in-progress', 'T19.9.1 crash 前 status=in-progress');
+
+    // 验证 listPartialRuns 此时不命中（只看 partial）
+    const partialsBefore = runRepo.listPartialRuns(db, monthKey);
+    assert.strictEqual(partialsBefore.length, 0, 'T19.9.2 兜底前 listPartialRuns 不命中 in-progress');
+
+    // 模拟 main.js failureListener 兜底改 in-progress → partial
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: before.lastCompletedChunkIndex,
+      totalChunks: before.totalChunks,
+      status: 'partial',
+    });
+
+    // listPartialRuns 现在能命中
+    const partialsAfter = runRepo.listPartialRuns(db, monthKey);
+    assert.strictEqual(partialsAfter.length, 1, 'T19.9.3 兜底后 listPartialRuns 命中 1');
+    assert.strictEqual(partialsAfter[0].id, runId, 'T19.9.4 命中正确的 runId');
+    assert.strictEqual(partialsAfter[0].chunk_progress.lastCompletedChunkIndex, 1, 'T19.9.5 兜底保留 lastCompletedChunkIndex');
+  });
+
 });

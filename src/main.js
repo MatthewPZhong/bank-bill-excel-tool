@@ -11235,6 +11235,58 @@ app.whenReady()
         } catch (_logErr) { /* swallow */ }
         // 释放 op lock（防 caller catch 漏释；release 内部不抛错 — 状态置为 inFlight=false）
         try { releaseAcquiringBillCurrencyOpLock(); } catch (_lockErr) { /* swallow */ }
+        // v2.1.10 SR-FIX-1 round 2 P1-7：worker crash 时主进程兜底设 chunk_progress='partial'
+        //   触发场景：worker 跑到 chunk M/N 突然 process.exit(1) / OOM / SIGKILL → catch 块（runCheckCore L367-394）不执行
+        //     → chunk_progress 停留在 'in-progress'（onChunkDone 写的最后一次值）
+        //     → resume handler 检查 progress.status !== 'partial' → 拒绝 resume
+        //   修复：crash 后扫所有 chunk_progress.status='in-progress' 的 runs（生产正常路径下 in-progress
+        //     只在 chunk 边界短暂存在；crash 时残留）→ 兜底改成 'partial' → resume 可用
+        //   失败容忍：try/catch + activity log（不影响其他 failure 处理路径）
+        if (info && info.hadActiveJob && database && database.db) {
+          try {
+            const inProgressRuns = database.db.prepare(`
+              SELECT id, month_key, chunk_progress
+              FROM acquiring_bill_currency_runs
+              WHERE chunk_progress IS NOT NULL
+            `).all();
+            for (const row of inProgressRuns) {
+              try {
+                const progress = JSON.parse(row.chunk_progress);
+                if (progress && progress.status === 'in-progress') {
+                  runRepo.setRunChunkProgress(database.db, {
+                    runId: row.id,
+                    lastCompletedChunkIndex: progress.lastCompletedChunkIndex,
+                    totalChunks: progress.totalChunks,
+                    status: 'partial',
+                  });
+                  appendActivityLogEntry({
+                    level: 'warning',
+                    source: 'main',
+                    domain: 'acquiring-bill-currency',
+                    message: '[SR-FIX-1 P1-7] worker crash 后 chunk_progress in-progress → partial 兜底',
+                    details: [
+                      `runId=${row.id}`,
+                      `monthKey=${row.month_key}`,
+                      `lastCompletedChunkIndex=${progress.lastCompletedChunkIndex}`,
+                      `totalChunks=${progress.totalChunks}`,
+                    ]
+                  });
+                }
+              } catch (_parseErr) { /* swallow — 破坏 JSON 跳过 */ }
+            }
+          } catch (scanErr) {
+            try {
+              appendActivityLogEntry({
+                level: 'error',
+                source: 'main',
+                domain: 'acquiring-bill-currency',
+                message: '[SR-FIX-1 P1-7] worker crash chunk_progress 兜底扫描失败',
+                details: [scanErr && scanErr.message ? scanErr.message : String(scanErr)],
+                stack: scanErr && scanErr.stack ? scanErr.stack : undefined
+              });
+            } catch (_logErr) { /* swallow */ }
+          }
+        }
         // Notification（用户提示）— 复用既有 notifyAcquiringBillCurrencyResult error 路径
         //   ⚠️ notifyAcquiringBillCurrencyResult 在 IPC handler 闭包内；模块顶层无法访问
         //   直接构造 Notification — 与 notifyAcquiringBillCurrencyResult 内部一致的 isSupported 兜底
