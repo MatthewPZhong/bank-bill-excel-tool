@@ -980,5 +980,50 @@ migration 顺序固定（启动期，与 `src/backend/database.js` AppDatabase.i
 
 ---
 
-**当前状态**：v0.4（2026-05-28 SR-FIX-1 Round 2 完成 — Phase 0-6 + 13 commits 修 P0+P1 + closeout commit）。
-**下一步**：通知主线程 → 用户验收 / Codex review / Round 3 决策（如发现新 finding）。
+## 十七、SR-FIX-1 Round 3 — Codex review 抓 finding 修复（v0.5 reverse sync）
+
+> v0.5 立项（2026-05-28 — PR #54 已 push 后 Codex 自动 review 2026-05-28T09:16 完成，抓 2 finding；用户拍板修 F1 资金红线 + F2 P2 边界）
+
+### 17.1 Codex finding 清单
+
+| Finding | 严重度 | 位置 | 描述 |
+|---|---|---|---|
+| **F1** | 🟠 P1（资金红线 — Round 2 dev 漏抓的跨 Phase 协同 bug）| `src/backend/acquiring-bill-currency-db/raw-json-retention.js:55` | chunked run 半途 cancel/crash 时，`diff_rows` 仅含「已处理 mismatches」；后续 bill rows 仍未进 diff_rows。idle retention 在 bill imported_at 老于窗口时跑 → 清掉这些"未来 mismatch"raw_json → resume 后 writer 路径仍解析 `d.bill_raw_json` → 输出 broken / 不完整 |
+| **F2** | 🟢 P2（小概率边界 case，1 commit 小改）| `src/main-process/acquiring-bill-currency-session.js:335` | worker 跑第一个 chunk 时 die（onChunkDone 触发前），chunk_progress 从未写入；crash listener（P1-7）只把已存在的 in-progress 转 partial；startup cleanup（P0-1）只保护 partial → first-chunk crash 后 run 被当孤儿无法 resume |
+
+### 17.2 Round 3 修复清单（2 项 F1 + F2 + closeout）
+
+| Finding | 严重度 | 修复 commit | 修复说明 |
+|---|---|---|---|
+| **F1** N4-cont-1 SQL 排除 partial run 关联 month | 🟠 | `d8f6446` | `raw-json-retention.js:CLEAR_STALE_SQL` 加第二个 NOT IN 子查询：`b.month_key NOT IN (SELECT month_key FROM runs WHERE chunk_progress IS NOT NULL AND json_extract($.status)='partial')`；解除条件：`status='complete'` 后下次 idle 可清；unit case 9-11 +3 (88 → 96 断言)；integration n4-cont-1-phase4 case 4 +5 (23 → 28 断言) |
+| **F2** chunked 入口前初始 in-progress + cleanupOrphanData 守卫扩展 | 🟢 | `334a470` | `runCheckCore` 进 chunked 前先写 `{lastCompletedChunkIndex:-1, totalChunks:0, status:'in-progress'}`（仅 `!isResume`）；`cleanupOrphanData` 守卫扩为 `partial OR in-progress` 一起保护；unit T19.10 +1；integration a4-phase3 case 5 +7 (40 → 47 断言) |
+
+### 17.3 测试增量（Round 3 完成后）
+
+| 阶段 | Round 2 baseline | Round 3 完成后 | 增量 |
+|---|---:|---:|---:|
+| unit | 1243 case | **1247 case** | +4（raw-json-retention Case 9-11 = 3 + run-repository T19.10 = 1）|
+| integration | 824 断言 | **836 断言** | +12（n4-cont-1-phase4 case 4 = 5 + a4-phase3 case 5 = 7）|
+| smoke | 全过 | **全过** | 0 regression |
+
+### 17.4 资金红线护栏（Round 3 维持 + 加强）
+
+1. **`clearStaleSuccessfulRawJson`** 双 NOT IN 子查询（v0.5）：
+   - 第一 NOT IN 排除差异行（既有 v0.2 守卫不变）
+   - 第二 NOT IN 排除 partial run 关联月份的全部 bill（v0.5 Round 3 F1 新增 — 跨 Phase 协同保护）
+2. **`runCheckCore` chunked 入口前 in-progress 占位**（v0.5 Round 3 F2）：
+   - 保证 `chunk_progress IS NOT NULL` — first-chunk crash 后兜底路径能识别
+   - byte-for-byte 不破坏（cancel 路径 catch 块仍覆盖入口 in-progress → partial）
+3. **`cleanupOrphanData`** 守卫范畴扩展 — 从 partial 扩为 partial OR in-progress（idempotent 保持，FK CASCADE 范畴扩 + bill_imports 不被错清）
+
+### 17.5 Round 3 → Round 4 建议
+
+- **release-check 全绿**（unit 1247 / integration 836 / smoke 全过）— ✅ closeout commit 已跑
+- **PR #54 自动同步**（git push 后）— 不重命名草稿 `docs/prs/PR54-v2.1.10.md`
+- **用户测试**（manual-test-checklist 不需新增 — F1+F2 修复在既有 chunked / N4-cont-1 测试覆盖范畴）
+- **可选 Round 4 Codex review**（如新发现 finding；本次 Round 3 修复 byte-for-byte 兼容 + 双 NOT IN 子查询性能验证已在 phase4 fixture 通过 — Round 4 风险低）
+
+---
+
+**当前状态**：v0.5（2026-05-28 SR-FIX-1 Round 3 完成 — Round 2 13 commits + Round 3 F1+F2+closeout 3 commits）。
+**下一步**：通知主线程 → 验证 push / 用户测试 / merge 决策。

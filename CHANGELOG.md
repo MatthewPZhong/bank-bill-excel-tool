@@ -52,6 +52,37 @@ Phase 0-6 完成 + 37 commits 后 dev self-review 输出 21 finding（P0 4 / P1 
 
 **rules/important-variables.md 升格评估**：留 Round 3 collective — 候选 `listPartialRuns` / `needsWorkerShutdown` / `shutdownWorkerPoolGracefully` 是否升 Important-skeleton
 
+### SR-FIX-1 round 3 — Codex review 抓 finding 修复（合并前补丁，2 项 F1+F2）
+
+PR #54 已 push 后 Codex 自动 review 2026-05-28T09:16 完成，抓 2 finding：F1 资金红线（跨 Phase 协同 bug — Round 2 dev 漏抓）+ F2 P2 边界 case（1 commit 小改）。用户拍板 Round 3 修两项。详见 `docs/iterations/v2.1.10/spec.md §17`。
+
+**🟠 F1（资金红线 — N4-cont-1 SQL 排除 partial run 关联 month）**：
+
+- 触发场景：chunked run 半途 cancel/crash → `chunk_progress.status='partial'`；`diff_rows` 仅含「已处理 mismatches」；后续 bill rows 仍未进 diff_rows。idle retention 在 bill imported_at 老于窗口时跑 → 清掉这些"未来 mismatch"raw_json → resume 后 writer 路径解析 `d.bill_raw_json` → 输出 broken / 不完整
+- 修复：`raw-json-retention.js:CLEAR_STALE_SQL` 加第二个 NOT IN 子查询：`b.month_key NOT IN (SELECT month_key FROM runs WHERE chunk_progress IS NOT NULL AND json_extract($.status)='partial')`；解除条件：partial 完成 resume → status='complete' 后下次 idle 可清
+- 配套测试：unit raw-json-retention case 9-11 +3（partial 整月排除 / resume→complete 后可清 / 跨月份不干扰）；integration n4-cont-1-phase4 case 4 +5（端到端 partial → resume → complete）
+- commit `d8f6446`
+
+**🟢 F2（P2 边界 — chunked 入口前初始 in-progress + cleanupOrphanData 守卫扩展）**：
+
+- 触发场景：worker 跑第一个 chunk 时 die（onChunkDone 触发前），chunk_progress 从未写入；crash listener（P1-7）只把已存在的 in-progress 转 partial；startup cleanup（P0-1）只保护 partial → first-chunk crash 后 run 被当孤儿无法 resume
+- 修复：`runCheckCore` 进 `insertDiffRowsByJoinChunked` 前先写 `{lastCompletedChunkIndex:-1, totalChunks:0, status:'in-progress'}`（仅 `!isResume`）；`cleanupOrphanData` 守卫扩为 `partial OR in-progress` 一起保护
+- 配套测试：unit run-repository T19.10 +1（入口写入 round-trip）；integration a4-phase3 case 5 +7（first-chunk crash 模拟 + cleanup 保护）
+- commit `334a470`
+
+**Round 3 修复后测试增量**：
+
+- `npm run test:unit` 1243 → **1247 case / 297 suites**（+4：raw-json-retention 3 + run-repository 1）
+- `npm run test:integration` 824 → **836 断言 / 15 脚本**（+12：n4-cont-1-phase4 case 4 = 5 + a4-phase3 case 5 = 7）
+- `npm run smoke` 0 regression
+
+**资金红线 byte-for-byte 验证不破坏**：
+
+- `clearStaleSuccessfulRawJson` 双 NOT IN 子查询（v0.5）— 第一守卫不变 + 第二守卫加跨 Phase 协同保护
+- `runCheckCore` byte-for-byte（worker vs main / chunked vs non-chunked）— 入口 in-progress 占位被 cancel/正常路径覆盖，不破坏既有契约
+- `cleanupOrphanData` partial OR in-progress 双守卫扩展（idempotent 保持）
+- contract test a3-phase1 40/40 仍通过
+
 ### 性能基线（vs v2.1.9）
 
 | 指标 | v2.1.9 baseline | v2.1.10 实测 | 改善 |
@@ -67,7 +98,7 @@ Phase 0-6 完成 + 37 commits 后 dev self-review 输出 21 finding（P0 4 / P1 
 
 ### 测试
 
-- release-check 三段全绿（smoke ✅ / unit **1243 case / 297 suites** ✅（含 SR-FIX-1 round 2 增量 +5）/ integration **824 断言 / 15 脚本** ✅（含 SR-FIX-1 round 2 phase3 case 4 +15 断言））
+- release-check 三段全绿（smoke ✅ / unit **1247 case / 297 suites** ✅（含 SR-FIX-1 round 2 +5 + round 3 +4 = +9）/ integration **836 断言 / 15 脚本** ✅（含 round 2 +15 + round 3 +12 = +27 断言））
 - v2.1.10 新增集成脚本 5 个（v2.1.10-a3-phase1 40 + v2.1.10-a3-phase2 33 + v2.1.10-a4-phase3 25 + v2.1.10-n4-cont-1-phase4 23 + v2.1.10-n4-cont-2-phase5 43 = 164 新增断言）
 - check-vars v11 → v12 升格 5 条（Critical 4: `runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1: `serializeError` / `deserializeError`）+ 更新 1 条（`bill_imports.raw_json` 扩 N4-cont-1 sentinel 语义）
 

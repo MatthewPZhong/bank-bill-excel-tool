@@ -5,7 +5,7 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v2.1.10-beta.1 |
-| 扫描时间 | 2026-5-28 15:41:39 |
+| 扫描时间 | 2026-5-28 17:55:11 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 94 |
 | 顶层声明总数 | 1001 |
@@ -105,7 +105,7 @@
 | `setStatus` | 3 | 69 | 1 | src/renderer.js |
 | `lastGeneratedExports` | 3 | 24 | 1 | src/main.js |
 | `hasColumn` | 3 | 23 | 2 | src/backend/biz-op-recon-db/migrations.js |
-| `runRepo` | 3 | 22 | 3 | src/main-process/acquiring-bill-currency-session.js |
+| `runRepo` | 3 | 23 | 3 | src/main-process/acquiring-bill-currency-session.js |
 | `pad2` | 3 | 21 | 3 | src/backend/usage-stats.js |
 | `setSetting` | 3 | 20 | 1 | src/backend/database/settings-repository.js |
 | `CONCAT_FIELDS_MAPPING_FIELD` | 3 | 17 | 2 | src/main.js |
@@ -230,6 +230,7 @@
 | `parseNumber` | 7 | src/main-process/scenario-engines/engine-utils.js |
 | `roundAmount` | 7 | src/backend/file-service/normalizers.js |
 | `setNewAccountExportAvailability` | 7 | src/renderer.js |
+| `setRunChunkProgress` | 7 | src/backend/acquiring-bill-currency-db/run-repository.js |
 | `syncNewAccountCurrencyMode` | 7 | src/renderer.js |
 | `VALID_CATEGORIES` | 7 | src/backend/database/scenarios-repository.js |
 | `BANK_DIFF_FIELD_DB_COLUMN` | 6 | src/backend/bank-bu-recon-db/columns.js |
@@ -279,7 +280,6 @@
 | `PENDING_DIFF_FIELD_DB_COLUMN` | 6 | src/backend/bank-bu-recon-db/columns.js |
 | `processingResult` | 6 | src/main.js |
 | `sanitizeSheetName` | 6 | src/backend/pending-export/writer.js |
-| `setRunChunkProgress` | 6 | src/backend/acquiring-bill-currency-db/run-repository.js |
 | `splitSignedAmountValue` | 6 | src/backend/file-service/normalizers.js |
 | `SUPPORTED_SCENARIO_BUNDLE_VERSION` | 6 | src/backend/scenarios-bundle-io.js |
 | `validateName` | 6 | src/backend/database/channels-repository.js |
@@ -1104,7 +1104,7 @@
 | `setStatus` | 3 | 69 | 1 | src/renderer.js(36), src/renderer-dialogs.js(32), src/renderer-previews.js(1) |
 | `lastGeneratedExports` | 3 | 24 | 1 | src/main-process/statement-generation.js(17), src/main-process/statement-session.js(6), src/main.js(1) |
 | `hasColumn` | 3 | 23 | 2 | src/backend/database/migrations.js(18), src/backend/database.js(3), src/backend/biz-op-recon-db/migrations.js(2) |
-| `runRepo` | 3 | 22 | 3 | src/main-process/acquiring-bill-currency-session.js(17), src/main-process/acquiring-bill-currency-writer.js(4), src/main.js(1) |
+| `runRepo` | 3 | 23 | 3 | src/main-process/acquiring-bill-currency-session.js(18), src/main-process/acquiring-bill-currency-writer.js(4), src/main.js(1) |
 | `pad2` | 3 | 21 | 3 | src/main-process/acquiring-bill-currency-writer.js(11), src/backend/usage-stats.js(6), src/main-process/monthly-balance.js(4) |
 | `setSetting` | 3 | 20 | 1 | src/backend/database/settings-repository.js(16), src/backend/database.js(2), src/backend/database/own-accounts-migration.js(2) |
 | `CONCAT_FIELDS_MAPPING_FIELD` | 3 | 17 | 2 | src/renderer-dialogs.js(14), src/renderer.js(2), src/main.js(1) |
@@ -1224,6 +1224,7 @@
 | `parseNumber` | 2 | 7 | 1 | src/main-process/scenario-engines/engine-utils.js(4), src/main-process/scenario-engines/c3-gateway-recon-join.js(3) |
 | `roundAmount` | 2 | 7 | 1 | src/backend/file-service/normalizers.js(5), src/backend/file-service.js(2) |
 | `setNewAccountExportAvailability` | 2 | 7 | 1 | src/renderer.js(5), src/renderer-previews.js(2) |
+| `setRunChunkProgress` | 2 | 7 | 1 | src/main-process/acquiring-bill-currency-session.js(5), src/backend/acquiring-bill-currency-db/run-repository.js(2) |
 | `syncNewAccountCurrencyMode` | 2 | 7 | 1 | src/renderer.js(5), src/renderer-previews.js(2) |
 | `VALID_CATEGORIES` | 2 | 7 | 2 | src/backend/database/scenarios-repository.js(4), src/main-process/recon-id-fix-engine.js(3) |
 | `BANK_DIFF_FIELD_DB_COLUMN` | 2 | 6 | 1 | src/main-process/bank-bu-recon-session.js(4), src/backend/bank-bu-recon-db/columns.js(2) |
@@ -1273,7 +1274,6 @@
 | `PENDING_DIFF_FIELD_DB_COLUMN` | 2 | 6 | 1 | src/main-process/bank-bu-recon-session.js(4), src/backend/bank-bu-recon-db/columns.js(2) |
 | `processingResult` | 2 | 6 | 1 | src/renderer.js(5), src/main.js(1) |
 | `sanitizeSheetName` | 2 | 6 | 2 | src/backend/pending-export/writer.js(3), src/main-process/acquiring-bill-currency-writer.js(3) |
-| `setRunChunkProgress` | 2 | 6 | 1 | src/main-process/acquiring-bill-currency-session.js(4), src/backend/acquiring-bill-currency-db/run-repository.js(2) |
 | `splitSignedAmountValue` | 2 | 6 | 1 | src/backend/file-service.js(4), src/backend/file-service/normalizers.js(2) |
 | `SUPPORTED_SCENARIO_BUNDLE_VERSION` | 2 | 6 | 1 | src/backend/scenarios-bundle-io.js(5), src/main.js(1) |
 | `validateName` | 2 | 6 | 2 | src/backend/database/channels-repository.js(3), src/backend/database/scenarios-repository.js(3) |

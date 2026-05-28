@@ -1,7 +1,7 @@
 {
   "meta": {
     "version": "2.1.10-beta.1",
-    "scannedAt": "2026-05-28T07:41:39.006Z",
+    "scannedAt": "2026-05-28T09:55:11.359Z",
     "root": "src",
     "totalFiles": 94,
     "totalTopLevelNames": 1001,
@@ -2944,7 +2944,7 @@
         "refFiles": [
           {
             "file": "src/main-process/acquiring-bill-currency-session.js",
-            "count": 17
+            "count": 18
           },
           {
             "file": "src/main-process/acquiring-bill-currency-writer.js",
@@ -2955,7 +2955,7 @@
             "count": 1
           }
         ],
-        "totalHits": 22,
+        "totalHits": 23,
         "fileSpan": 3
       },
       {
@@ -5467,6 +5467,24 @@
         "fileSpan": 2
       },
       {
+        "name": "setRunChunkProgress",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 2
+      },
+      {
         "name": "syncNewAccountCurrencyMode",
         "defFiles": [
           "src/renderer.js"
@@ -6350,24 +6368,6 @@
           {
             "file": "src/main-process/acquiring-bill-currency-writer.js",
             "count": 3
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 2
-      },
-      {
-        "name": "setRunChunkProgress",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/run-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-session.js",
-            "count": 4
           }
         ],
         "totalHits": 6,
@@ -19090,7 +19090,7 @@
       "refFiles": [
         {
           "file": "src/main-process/acquiring-bill-currency-session.js",
-          "count": 17
+          "count": 18
         },
         {
           "file": "src/main-process/acquiring-bill-currency-writer.js",
@@ -19101,7 +19101,7 @@
           "count": 1
         }
       ],
-      "totalHits": 22,
+      "totalHits": 23,
       "fileSpan": 3
     },
     {
@@ -21611,6 +21611,24 @@
       "fileSpan": 2
     },
     {
+      "name": "setRunChunkProgress",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 2
+    },
+    {
       "name": "syncNewAccountCurrencyMode",
       "defFiles": [
         "src/renderer.js"
@@ -22494,24 +22512,6 @@
         {
           "file": "src/main-process/acquiring-bill-currency-writer.js",
           "count": 3
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 2
-    },
-    {
-      "name": "setRunChunkProgress",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-db/run-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-session.js",
-          "count": 4
         }
       ],
       "totalHits": 6,
