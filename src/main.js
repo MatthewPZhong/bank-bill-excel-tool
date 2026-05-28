@@ -10909,9 +10909,54 @@ function registerNewAccountHandlers() {
 
       const storageRoot = ensureStorageRoot();
       const onProgress = createRunProgressForwarder(event);
-      const chunkSize = typeof database.getAcquiringBillChunkSize === 'function'
+      // v2.1.10 SR-FIX-1 Round 6 H4：resume 时 chunkSize 优先从 chunk_progress 复用
+      //   触发场景（Codex Round 5 四复审 P2 资金红线 finding）：
+      //     用户跑到一半 cancel → settings 改 chunk size（如 100000 → 10000）→ resume
+      //     原实现读当前 settings → insertDiffRowsByJoinChunked 用 OFFSET=chunkIndex*chunkSize 计算错位
+      //     → diff_rows 行 skip / 重复（与全新 run byte-for-byte 不一致）
+      //   修复：优先复用 progress.chunkSize（H1 占位 / onChunkDone 持久化）
+      //     - 持久化值缺失（老 partial run）→ fallback 当前 settings + warning log
+      //     - 持久化值与当前 settings 不一致 → warning log（提示用户）；用持久化值（资金红线优先）
+      const currentSettingsChunkSize = typeof database.getAcquiringBillChunkSize === 'function'
         ? database.getAcquiringBillChunkSize()
         : undefined;
+      let chunkSize;
+      if (Number.isInteger(progress.chunkSize) && progress.chunkSize > 0) {
+        chunkSize = progress.chunkSize;
+        if (Number.isInteger(currentSettingsChunkSize) && currentSettingsChunkSize !== progress.chunkSize) {
+          // H4：mismatch warning — 用户改 settings 后 resume；用持久化值优先（资金红线）
+          try {
+            appendActivityLogEntry({
+              level: 'warning',
+              source: 'main',
+              domain: 'acquiring-bill-currency',
+              message: '[acquiring-bill-currency:resume] chunkSize mismatch — 用持久化值（H4 资金红线护栏）',
+              details: [
+                `runId=${targetRunId}`,
+                `monthKey=${monthKey}`,
+                `progress.chunkSize=${progress.chunkSize}`,
+                `currentSettings.chunkSize=${currentSettingsChunkSize}`,
+              ],
+            });
+          } catch (_e) { /* swallow */ }
+        }
+      } else {
+        // 老 partial run（升级前 chunk_progress 没 chunkSize 字段）→ fallback 当前 settings
+        chunkSize = currentSettingsChunkSize;
+        try {
+          appendActivityLogEntry({
+            level: 'warning',
+            source: 'main',
+            domain: 'acquiring-bill-currency',
+            message: '[acquiring-bill-currency:resume] chunk_progress 缺 chunkSize（老 partial run）— fallback settings',
+            details: [
+              `runId=${targetRunId}`,
+              `monthKey=${monthKey}`,
+              `fallback chunkSize=${chunkSize}`,
+            ],
+          });
+        } catch (_e) { /* swallow */ }
+      }
 
       // 透传 resumeFromRun = { runId, lastCompletedChunkIndex } → worker → runCheckCore
       //   runCheckCore 跳过 stage 1-3（复用旧 runId / 旧 stats），stage 4' 从 lastCompletedChunkIndex+1 起跑

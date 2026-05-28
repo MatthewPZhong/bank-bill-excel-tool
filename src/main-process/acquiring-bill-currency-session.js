@@ -309,11 +309,13 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
       //     - onChunkDone 第一次触发时会用真实 totalChunks 覆盖此值
       //     - cancel 路径 catch 块仍覆盖此值为 partial（byte-for-byte 兼容 Round 5 G1 不变）
       //   关键不变量：setRunChunkProgress 必须在 db.exec('COMMIT') 之前（同事务内）
+      // v2.1.10 SR-FIX-1 Round 6 H4：持久化 chunkSize（用于 resume 时复用，防 settings 改导致 OFFSET 偏移错位）
       runRepo.setRunChunkProgress(db, {
         runId,
         lastCompletedChunkIndex: -1, // 起始值；onChunkDone 第一次会覆盖
         totalChunks: 0,              // 未知；onChunkDone 第一次会算出真实值（与 0-chunk 边界 fallback 一致）
         status: 'in-progress',
+        chunkSize: effectiveChunkSize, // H4：存原始 chunkSize 供 resume 复用
       });
       // v2.1.10 A4 T18：主事务 COMMIT — 让 stage 4' chunked 各 chunk 独立 BEGIN/COMMIT
       //   Round 6 H1：COMMIT 之前 setRunChunkProgress 已写入 → runs 行与 chunk_progress 同事务原子可见
@@ -366,12 +368,14 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
       onChunkDone: ({ chunkIndex, totalChunks, processedRows, insertedDiffRows: chunkInsertedDiffRows, elapsedMs }) => {
         // 每 chunk 完成后 — 更新 chunk_progress（in-progress 直至最后一 chunk 改 complete）
         // 失败不抛（caller catch 写 partial）；progress 回调透传 caller
+        // v2.1.10 SR-FIX-1 Round 6 H4：持续持久化 chunkSize（resume 时复用）
         try {
           runRepo.setRunChunkProgress(db, {
             runId,
             lastCompletedChunkIndex: chunkIndex,
             totalChunks,
             status: (chunkIndex + 1 >= totalChunks) ? 'complete' : 'in-progress',
+            chunkSize: effectiveChunkSize, // H4：每次 onChunkDone 都续写 chunkSize（防 H1 占位被覆盖时丢失）
           });
         } catch (_progressErr) {
           // chunk_progress 写失败不阻断主循环（unit test 防御；生产 SQLITE_BUSY 极少）
@@ -394,6 +398,7 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
     //   写 chunk_progress { status:'partial' } 让 caller 决策 resume / 弃
     //   ⚠️ 关键 idempotent 不变量：复用 onChunkDone 已正确写入的 progress（lastCompletedChunkIndex / totalChunks），
     //      仅把 status 改 'partial'；若 onChunkDone 从未触发（chunk 0 边界即 cancel）→ 写 -1 / 0 兜底
+    // v2.1.10 SR-FIX-1 Round 6 H4：partial 路径也持久化 chunkSize（resume 时复用）
     try {
       const existingProgress = runRepo.getRunChunkProgress(db, runId);
       if (existingProgress) {
@@ -403,6 +408,8 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
           lastCompletedChunkIndex: existingProgress.lastCompletedChunkIndex,
           totalChunks: existingProgress.totalChunks,
           status: 'partial',
+          // H4：优先复用 existingProgress.chunkSize（H1 占位 / onChunkDone 写入）；缺失时用 effectiveChunkSize 兜底
+          chunkSize: Number.isInteger(existingProgress.chunkSize) ? existingProgress.chunkSize : effectiveChunkSize,
         });
       } else {
         // onChunkDone 从未触发（chunk 0 之前 cancel；或 chunkedResult.totalChunks=0 边界）
@@ -411,6 +418,7 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
           lastCompletedChunkIndex: -1,
           totalChunks: 0,
           status: 'partial',
+          chunkSize: effectiveChunkSize, // H4：无 existing 时写 effectiveChunkSize
         });
       }
     } catch (_progressErr) {
@@ -439,6 +447,7 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
 
   // chunked 成功后 — chunk_progress 已被 onChunkDone 标记为 complete（最后一 chunk 时）
   //   0 chunk 边界（totalChunks=0）— 显式补一次 status='complete'（onChunkDone 不会触发）
+  // v2.1.10 SR-FIX-1 Round 6 H4：0-chunk 边界也持久化 chunkSize（保持一致性 — complete 状态也带 chunkSize）
   if (chunkedResult.totalChunks === 0) {
     try {
       runRepo.setRunChunkProgress(db, {
@@ -446,6 +455,7 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
         lastCompletedChunkIndex: -1,
         totalChunks: 0,
         status: 'complete',
+        chunkSize: effectiveChunkSize,
       });
     } catch (_progressErr) { /* 不阻塞主流程 */ }
   }

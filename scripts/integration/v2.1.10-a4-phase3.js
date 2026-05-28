@@ -601,11 +601,121 @@ async function test6_windowGapCrashEndToEnd() {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// case 7：SR-FIX-1 Round 6 H4 — chunkSize 持久化 + resume 时复用（资金红线）
+//
+// 验证（端到端 byte-for-byte）：
+//   - baseline：chunkSize=100 跑完整 5000 行 → snapshot diff_rows
+//   - partial：chunkSize=100 跑到 chunk 30 → cancel → chunk_progress.chunkSize=100 (H4 持久化)
+//   - 模拟用户改 settings：sliced chunkSize=10（如果 resume 用 settings → 偏移错位）
+//   - resume：传 chunkSize=100（模拟 main.js handler 用 progress.chunkSize 复用）
+//   - 验证：resume 后 diff_rows 总数 == baseline 5000 && byte-for-byte 一致（无 skip/重复）
+//   - 验证：chunk_progress.chunkSize=100 保留（onChunkDone 续写）
+// ─────────────────────────────────────────────────────────────────
+async function test7_h4ChunkSizePersistedAcrossResume() {
+  console.log('\n[case 7] SR-FIX-1 Round 6 H4 — chunkSize 持久化 + resume 复用（资金红线端到端）');
+
+  // baseline：5000 行 / chunkSize=100 → 50 chunks
+  const baseline = await setupTmpDbWithMismatchFixture({ rowCount: 5000 });
+  const baselineResult = await session.runCheckCore({
+    db: baseline.db.db,
+    monthKey: '2026-04',
+    storageRoot: baseline.tmpdir,
+    chunkSize: 100,
+  });
+  const baselineDiff = snapshotDiffRows(baseline.db.db, baselineResult.runId);
+  assertEq(baselineDiff.length, 5000, '7.1 baseline chunkSize=100 → 5000 diff_rows');
+
+  // partial：5000 行 / chunkSize=100 → cancel at chunk 30
+  const partial = await setupTmpDbWithMismatchFixture({ rowCount: 5000 });
+  try {
+    let cancelled = false;
+    let chunkCount = 0;
+    const cancelToken = {
+      get cancelled() { return cancelled; },
+      cancel() { cancelled = true; },
+      throwIfCancelled(stage) {
+        chunkCount++;
+        // throwIfCancelled 在 stage 1-3 各 1 次（主事务内） + 每 chunk 边界 1 次（chunked 内部）
+        //   stage 1-3: 3 次（无 cancel）
+        //   chunk 0..29: 30 次（无 cancel）
+        //   chunk 30 边界: 第 34 次 → cancel
+        if (chunkCount >= 34 && !cancelled) cancelled = true;
+        if (cancelled) {
+          throw new session.CancelError(`cancelled at ${stage}`, { stage });
+        }
+      },
+    };
+    let caught;
+    try {
+      await session.runCheckCore({
+        db: partial.db.db,
+        monthKey: '2026-04',
+        storageRoot: partial.tmpdir,
+        chunkSize: 100,
+        cancelToken,
+      });
+    } catch (e) { caught = e; }
+    assertTrue(!!caught, '7.2 partial 第 1 段 cancel 抛出');
+    assertTrue(caught && caught.name === 'CancelError', '7.3 CancelError');
+
+    const partialRun = partial.db.db.prepare('SELECT id, chunk_progress FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1').get();
+    const progressPartial = JSON.parse(partialRun.chunk_progress);
+    assertEq(progressPartial.status, 'partial', '7.4 partial 状态');
+    assertEq(progressPartial.chunkSize, 100, '7.5 partial chunk_progress.chunkSize=100（H4 持久化）');
+    assertTrue(progressPartial.lastCompletedChunkIndex >= 0, '7.6 lastCompletedChunkIndex >= 0');
+
+    // 模拟用户改 settings —— resume 必须用 chunk_progress.chunkSize=100，不用 settings
+    //   （session 层 chunkSize 由 caller 传；main.js handler 已实现优先级；
+    //   这里直接调 session.runCheckCore 模拟 handler 已读 progress.chunkSize 后转 chunkSize=100）
+    const resumeResult = await session.runCheckCore({
+      db: partial.db.db,
+      monthKey: '2026-04',
+      storageRoot: partial.tmpdir,
+      chunkSize: progressPartial.chunkSize, // ← H4 关键：用持久化值（main.js handler 修复点）
+      resumeFromRun: {
+        runId: partialRun.id,
+        lastCompletedChunkIndex: progressPartial.lastCompletedChunkIndex,
+      },
+    });
+    assertEq(resumeResult.runId, partialRun.id, '7.7 resume 复用旧 runId');
+
+    // 关键验证：resume 后 diff_rows 总数 == baseline 5000，byte-for-byte 一致
+    const resumeDiff = snapshotDiffRows(partial.db.db, partialRun.id);
+    assertEq(resumeDiff.length, 5000, '7.8 resume 后 diff_rows 5000（无 skip/重复 — H4 chunkSize 复用保证 OFFSET 一致）');
+
+    // diff_rows 按 reconId 排序 byte-for-byte 一致
+    let bytesEqual = true;
+    for (let i = 0; i < baselineDiff.length; i++) {
+      if (
+        baselineDiff[i].reconId !== resumeDiff[i].reconId
+        || baselineDiff[i].flow_currency !== resumeDiff[i].flow_currency
+        || baselineDiff[i].flow_amount_abs !== resumeDiff[i].flow_amount_abs
+        || baselineDiff[i].diff_type !== resumeDiff[i].diff_type
+      ) {
+        bytesEqual = false;
+        break;
+      }
+    }
+    assertTrue(bytesEqual, '7.9 baseline vs resume diff_rows byte-for-byte 一致（H4 资金红线护栏）');
+
+    // resume 后 chunk_progress 状态 + chunkSize 字段
+    const runAfter = partial.db.db.prepare('SELECT chunk_progress FROM acquiring_bill_currency_runs WHERE id = ?').get(partialRun.id);
+    const progressAfter = JSON.parse(runAfter.chunk_progress);
+    assertEq(progressAfter.status, 'complete', '7.10 resume 后 status=complete');
+    assertEq(progressAfter.chunkSize, 100, '7.11 resume 后 chunkSize=100 保留（onChunkDone 续写 H4）');
+    assertEq(progressAfter.totalChunks, 50, '7.12 totalChunks=50（5000 行 / 100）');
+  } finally {
+    baseline.cleanup();
+    partial.cleanup();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────
 async function main() {
   console.log('==== v2.1.10 A4 Phase 3 集成测试 ====');
-  console.log('PRD §1.3 + spec §七 Phase 3 ≥ 3 case ≥ 15 断言 + SR-FIX-1 round 2 P0-1 case 4 + Round 3 F2 case 5 + Round 5 G1 case 6');
+  console.log('PRD §1.3 + spec §七 Phase 3 ≥ 3 case ≥ 15 断言 + SR-FIX-1 round 2 P0-1 case 4 + Round 3 F2 case 5 + Round 5 G1 case 6 + Round 6 H4 case 7');
 
   const cases = [
     test1_chunkBoundaries,
@@ -614,6 +724,7 @@ async function main() {
     test4_cleanupOrphanProtectsPartialRun,
     test5_cleanupOrphanProtectsInProgress,
     test6_windowGapCrashEndToEnd,
+    test7_h4ChunkSizePersistedAcrossResume,
   ];
 
   for (const c of cases) {

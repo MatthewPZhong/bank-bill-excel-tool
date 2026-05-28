@@ -278,23 +278,35 @@ function insertDiffRowsByJoinChunked(db, {
 }
 
 // v2.1.10 A4 T19 — chunk_progress 列读写 API（JSON 序列化）
-//   值结构：{ lastCompletedChunkIndex, totalChunks, status: 'in-progress' | 'partial' | 'complete' }
+//   值结构：{ lastCompletedChunkIndex, totalChunks, status: 'in-progress' | 'partial' | 'complete', chunkSize? }
 //   - in-progress: 刚开始 chunked stage 4'，totalChunks 已算出（lastCompletedChunkIndex=-1）
 //   - partial: cancel 或 crash 中途；lastCompletedChunkIndex 指向最后一个 COMMIT 的 chunk
 //   - complete: 所有 chunk 都 COMMIT 完毕
-function setRunChunkProgress(db, { runId, lastCompletedChunkIndex, totalChunks, status }) {
+//
+// v2.1.10 SR-FIX-1 Round 6 H4：新增 chunkSize 字段（资金红线 — 防 resume 时 chunk size 变化导致行 skip/重复）
+//   触发场景（Codex Round 5 四复审 P2 资金红线 finding）：
+//     原 partial run 用 chunkSize=100000；用户改 settings 到 chunkSize=10000 后重启 → resume handler 读
+//     当前 settings → insertDiffRowsByJoinChunked 用 OFFSET=chunkIndex*chunkSize → 偏移计算错位
+//     → diff_rows 行 skip 或重复（与 baseline byte-for-byte 不一致）
+//   修复：把 chunkSize 存进 chunk_progress JSON，resume 时优先复用持久化值（不读当前 settings）
+//   兼容：老 partial run（升级前的 chunk_progress 没 chunkSize 字段）→ resume handler fallback 当前 settings + warning
+function setRunChunkProgress(db, { runId, lastCompletedChunkIndex, totalChunks, status, chunkSize }) {
   if (!runId || typeof runId !== 'number') {
     throw new Error('setRunChunkProgress: runId 必填');
   }
   if (!status || !['in-progress', 'partial', 'complete'].includes(status)) {
     throw new Error(`setRunChunkProgress: status 必须是 in-progress / partial / complete，收到：${JSON.stringify(status)}`);
   }
-  const payload = JSON.stringify({
+  const payload = {
     lastCompletedChunkIndex: Number.isFinite(lastCompletedChunkIndex) ? lastCompletedChunkIndex : -1,
     totalChunks: Number.isFinite(totalChunks) ? totalChunks : 0,
     status,
-  });
-  db.prepare(`UPDATE ${RUNS_TABLE} SET chunk_progress = ? WHERE id = ?`).run(payload, runId);
+  };
+  // Round 6 H4：chunkSize 可选 — 显式传值才写入；不传时不写（向后兼容旧 caller / 旧 row）
+  if (Number.isInteger(chunkSize) && chunkSize > 0) {
+    payload.chunkSize = chunkSize;
+  }
+  db.prepare(`UPDATE ${RUNS_TABLE} SET chunk_progress = ? WHERE id = ?`).run(JSON.stringify(payload), runId);
 }
 
 function getRunChunkProgress(db, runId) {

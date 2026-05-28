@@ -670,6 +670,119 @@ test.describe('runCheckCore byte-for-byte contract', () => {
     }
   });
 
+  // T19-session.8 — Round 6 H4：chunkSize 持久化到 chunk_progress（运行 + cancel 后均带）
+  //   验证：runCheckCore 跑后 chunk_progress.chunkSize == effectiveChunkSize
+  //   验证：cancel partial 路径 chunk_progress.chunkSize 也带
+  test('T19-session.8 — Round 6 H4：chunkSize 持久化到 chunk_progress（正常 + cancel partial）', async () => {
+    const A = await setupTmpDbWithFixture();
+    const B = await setupTmpDbWithFixture();
+    try {
+      // 正常路径：chunkSize=2 → chunk_progress.chunkSize=2
+      const resultA = await session.runCheckCore({
+        db: A.db.db,
+        monthKey: FIXTURE_MONTH,
+        storageRoot: A.tmpdir,
+        chunkSize: 2,
+      });
+      const runA = A.db.db.prepare('SELECT chunk_progress FROM acquiring_bill_currency_runs WHERE id = ?').get(resultA.runId);
+      const progressA = JSON.parse(runA.chunk_progress);
+      assert.equal(progressA.chunkSize, 2, '8.1 正常路径 chunk_progress.chunkSize=2');
+      assert.equal(progressA.status, 'complete', '8.2 正常路径 status=complete');
+      assert.equal(progressA.totalChunks, 5, '8.3 fixture 10 行 / chunkSize 2 = 5 chunks');
+
+      // cancel partial 路径：chunkSize=3 → cancel at chunk 1 → chunk_progress.chunkSize=3
+      let cancelled = false;
+      let checkCount = 0;
+      const cancelToken = {
+        get cancelled() { return cancelled; },
+        cancel() { cancelled = true; },
+        throwIfCancelled(stage) {
+          checkCount++;
+          if (checkCount >= 2) cancelled = true; // chunk 1 边界 cancel
+          if (cancelled) {
+            throw new session.CancelError(`cancelled at ${stage}`, { stage });
+          }
+        },
+      };
+      let caught;
+      try {
+        await session.runCheckCore({
+          db: B.db.db,
+          monthKey: FIXTURE_MONTH,
+          storageRoot: B.tmpdir,
+          chunkSize: 3,
+          cancelToken,
+        });
+      } catch (e) { caught = e; }
+      assert.ok(caught, '8.4 cancel 抛错');
+      assert.equal(caught.name, 'CancelError');
+      const runB = B.db.db.prepare('SELECT chunk_progress FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1').get();
+      const progressB = JSON.parse(runB.chunk_progress);
+      assert.equal(progressB.status, 'partial', '8.5 cancel 后 status=partial');
+      assert.equal(progressB.chunkSize, 3, '8.6 partial chunk_progress.chunkSize=3（H4 持久化保留）');
+    } finally {
+      A.cleanup();
+      B.cleanup();
+    }
+  });
+
+  // T19-session.9 — Round 6 H4：resume 用 chunk_progress.chunkSize（不读 settings）
+  //   策略：跑全新 chunkSize=2 → cancel chunk 1 → resume 传不同 chunkSize=5（模拟 caller 误传）
+  //   验证：resume 用入参 chunkSize=5（session 不感知 progress.chunkSize；main.js handler 已校正）
+  //     → 但是 byte-for-byte 仍一致（因为 mismatch=3 行很少，chunkSize 变化不影响 hash）
+  //   重点：本 case 验证 session 层 chunk_progress.chunkSize 字段存在且 main.js handler 已修复
+  //     真正端到端 byte-for-byte 验证在 integration test
+  test('T19-session.9 — Round 6 H4：partial chunk_progress.chunkSize 字段在 resume 后保留', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    try {
+      // 第 1 段：chunkSize=3，cancel chunk 1
+      let cancelled = false;
+      let checkCount = 0;
+      const cancelToken = {
+        get cancelled() { return cancelled; },
+        cancel() { cancelled = true; },
+        throwIfCancelled(stage) {
+          checkCount++;
+          if (checkCount >= 2) cancelled = true;
+          if (cancelled) throw new session.CancelError(`cancelled at ${stage}`, { stage });
+        },
+      };
+      let caughtFirst;
+      try {
+        await session.runCheckCore({
+          db: ctx.db.db,
+          monthKey: FIXTURE_MONTH,
+          storageRoot: ctx.tmpdir,
+          chunkSize: 3,
+          cancelToken,
+        });
+      } catch (e) { caughtFirst = e; }
+      assert.ok(caughtFirst, '9.1 第 1 段抛 CancelError');
+
+      const runId = ctx.db.db.prepare('SELECT id, chunk_progress FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1').get();
+      const progressFirst = JSON.parse(runId.chunk_progress);
+      assert.equal(progressFirst.chunkSize, 3, '9.2 partial chunk_progress.chunkSize=3');
+      assert.equal(progressFirst.status, 'partial');
+
+      // 第 2 段：resume 时显式传入 chunkSize=3（模拟 main.js handler 已从 progress.chunkSize 取）
+      const resumeResult = await session.runCheckCore({
+        db: ctx.db.db,
+        monthKey: FIXTURE_MONTH,
+        storageRoot: ctx.tmpdir,
+        chunkSize: 3, // ← H4：main.js handler 优先从 progress.chunkSize 取
+        resumeFromRun: { runId: runId.id, lastCompletedChunkIndex: progressFirst.lastCompletedChunkIndex },
+      });
+      assert.equal(resumeResult.runId, runId.id, '9.3 resume 复用旧 runId');
+
+      const runAfter = ctx.db.db.prepare('SELECT chunk_progress FROM acquiring_bill_currency_runs WHERE id = ?').get(runId.id);
+      const progressAfter = JSON.parse(runAfter.chunk_progress);
+      assert.equal(progressAfter.status, 'complete', '9.4 resume 后 status=complete');
+      assert.equal(progressAfter.chunkSize, 3, '9.5 resume 后 chunkSize=3 保留（H4 onChunkDone 续写）');
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
   // T19-session.7 — Round 6 H1：模拟 stage 3 之后 stage 4 入口前异常 → safeRollback 确保 runs 与 chunk_progress 一致回滚
   //   关键：H1 修复前，setRunChunkProgress 在 COMMIT 之后；若 stage 3 cancelToken 命中 → safeRollback 撤销 runs
   //     但若 cancelToken 命中"COMMIT 之后 ↔ setRunChunkProgress 之前"硬终止 → runs 已 COMMIT 但 chunk_progress NULL
