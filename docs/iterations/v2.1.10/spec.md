@@ -2,11 +2,11 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.3（2026-05-28 — N4-cont-1 sentinel 修订 `NULL → ''` 兼容 v2.1.8 N4 NOT NULL schema）/ v0.2（A4 必做 + N4-cont-1 重大方案变更）|
-| 关联 PRD | `PRD-v2.1.10.md` v0.3（同步 sentinel 修订）|
+| 文档版本 | v0.4（2026-05-28 — SR-FIX-1 round 2 P0 4 + P1 9 = 13 项修复 + §16 reverse sync + §8.3 migration 顺序修订）/ v0.3（N4-cont-1 sentinel 修订 `NULL → ''`）/ v0.2（A4 必做 + N4-cont-1 重大方案变更）|
+| 关联 PRD | `PRD-v2.1.10.md` v0.4（同步 §5.3 migration 顺序修订；§4.2 sentinel 修订）|
 | 关联 backlog | `backlog.md` v0.2（D23-D28 全部拍板 + Phase 0 POC 完成）|
-| 起草人 | PM + Dev Phase 4 T28 发现 + 主线程 T29' 修订 |
-| 状态 | v0.3 sentinel 修订（用户拍板 Option A — spec reverse sync `NULL → ''`；Phase 0 POC 数据已回写 §2.6；Phase 1-5 全部完成）|
+| 起草人 | PM + Dev Phase 4 T28 发现 + 主线程 T29' 修订 + Dev SR-FIX-1 round 2 dev 自审 |
+| 状态 | v0.4 SR-FIX-1 round 2 完成（13 commits + closeout；release-check 全绿：unit 1243 / integration 824 / smoke 全过）|
 
 ---
 
@@ -897,3 +897,65 @@ migration 顺序固定（启动期，与 `src/backend/database.js` AppDatabase.i
 
 **当前状态**：v0.2（2026-05-28 reverse synced — D25/D26/D27 用户拍板 + N4-cont-1 重大方案变更已落 §三 / §四 / §六 / §七 / §九；A3 部分 POC 实测项仍待 Phase 0 填）。
 **下一步**：通知 Dev 启动 Phase 0 POC（worker_threads vs utilityProcess 实测 — D23/D24 最终拍板）→ Phase 0 完成后回写 §2.6 实测列 + backlog D23 拍板 → Phase 1。N4-cont-1 / N4-cont-2 / A4 可与 Phase 1 并行（独立模块；无强依赖）。
+
+---
+
+## 十六、SR-FIX-1 — 合并前 self-review 修复（v0.4 reverse sync）
+
+> v0.4 立项（2026-05-28 — Phase 0-6 全部完成 + 37 commits 后 dev self-review 输出 21 findings；用户拍板 Round 2 全修 P0 + P1）。
+>
+> 关联文档：`docs/iterations/v2.1.10/sr-fix-1-round1-findings.md`（Round 1 finding 详单）
+
+### 16.1 现状审计（Round 1 finding 数量）
+
+| 分级 | 数量 | 说明 |
+|---|---:|---|
+| 🔴 P0 Critical（合并前必修） | 4 | cleanupOrphanData × chunked partial / worker init-error brick / before-quit 缺 shutdown / cleanup 顺序契约 |
+| 🟡 P1 Important（合并前修） | 9 | 文档遗漏 sentinel / spec/code 顺序倒置 / state machine 缺 'checked' / IPC handler CancelError UX / resume scan / worker 单测 / chunk_progress 兜底 / USER_GUIDE 警告 / forwarder 注释 |
+| 🟢 P2 Minor（合并后可补 patch） | 8 | 注释 / typo / fixture / 边界 — 留 v2.1.10 后续 patch 或 v2.1.11+ |
+| **合计** | **21** | Round 2 全修 P0 + P1 = 13 项 |
+
+### 16.2 Round 2 修复清单（13 项 P0 + P1）
+
+| Finding | 严重度 | 修复 commit | 修复说明 |
+|---|---|---|---|
+| **P0-1** cleanupOrphanData × chunked partial run | 🔴 | `0e4a87e` | session.js:582 cleanupOrphanData fileBroken 判定加 chunk_progress 检查 — partial 状态 continue 保留（A4 resume 路径保护）；phase3 集成 case 4（15 子断言） |
+| **P0-2** worker init-error 后 brick | 🔴 | `45bd81e` | run-check-worker-pool.js:200-208 init-error 分支加 workerInitPromise=null + workerInstance=null + w.terminate() — 下次 dispatch 触发 cold-start；pool unit case 17 |
+| **P0-3** before-quit 缺 workerPool.shutdown | 🔴 | `d16ec19` | main.js before-quit 加 needsWorkerShutdown helper + shutdownWorkerPoolGracefully helper — workerAlive=true 时 preventDefault + 异步 ① shutdown worker → ② cleanup pending → ③ app.quit |
+| **P0-4** idle cleanup 顺序契约（spec §4.3.2 不符）| 🔴 | `ea2a443` | trigger 改返 Promise（早返回路径 Promise.resolve；执行路径 finally resolve）— idle tick 改 async + 在 trigger 后 await 再调 raw_json |
+| **P1-1** tasks + manual-test-checklist 5 处 sentinel 残留 | 🟡 | `e8aec42` | tasks T23/T28 + manual-test §5.1 (3) + §10.3 D26 全部 `NULL` → `''` / `IS NULL` → `= ''` / `IS NOT NULL` → `!= ''`；保留 1 处 v0.3 修订标记 |
+| **P1-2** spec §8.3 + PRD §5.3 migration 顺序倒置 | 🟡 | `b3e3c5d` | spec §8.3 改写匹配 code 现状（N4-cont-1 settings → N4 slim → N4-cont-2 schema）；PRD §5.3 同步；不动 code（避免触发 schema migration 风险）|
+| **P1-3** ensureDiffRowsCascadeMigration 缺 'checked' status | 🟡 | `058c167` | migrations.js Step 4 backup-done 后加 Step 4.5 'checked' — 跑 PRAGMA foreign_key_check；如有 violation → status='pre-fk-violation' + 备份保留；migrations-n4-cont-2 unit case 13 |
+| **P1-4** IPC handler CancelError 走 error 路径 | 🟡 | `ad207f9` | notifyAcquiringBillCurrencyResult 加 'cancelled' kind；run / resume IPC handler catch 加 `err.name === 'CancelError'` 守卫 → return status='cancelled' + 短 toast |
+| **P1-5** resume handler 只扫最近 1 run | 🟡 | `c8c7cf8` | run-repository.js 新增 listPartialRuns(db, monthKey) API；resume handler 改造（payloadRunId 不传时扫所有 partial 取最近）；run-repository unit T19.7 + T19.8 |
+| **P1-6** tasks T06 描述与实际不符 | 🟡 | `2432ffe` | tasks.md T06 \"验证\"章节重写 reverse sync — pool 17 case 已覆盖（含 P0-2 case 17）；不单独建 run-check-worker.test.js |
+| **P1-7** worker crash 时 chunk_progress 不 partial | 🟡 | `ab4f06b` | main.js failureListener 内（hadActiveJob=true）扫所有 chunk_progress IS NOT NULL → status='in-progress' → 改 'partial' 兜底；run-repository unit T19.9 |
+| **P1-8** USER_GUIDE 缺 partial run 警告 | 🟡 | `0bcd365` | USER_GUIDE §1.8.12 资金红线契约后追加 \"Resume 边界条件\" 5 项（P0-1 修复后跨重启可 resume / P1-7 worker crash 兜底 / v2.1.11+ UI / 不想 resume 重跑路径）|
+| **P1-9** createRunProgressForwarder 注释过时 | 🟡 | `4ef2cc3` | main.js:10599 注释改 \"每 run 6 + chunkCount 事件\" + chunkCount > 100 节流 TODO（v2.1.11+）|
+
+### 16.3 测试增量（Round 2 完成后）
+
+| 阶段 | Round 1 baseline | Round 2 完成后 | 增量 |
+|---|---:|---:|---:|
+| unit | 1238 case / 297 suites | **1243 case / 297 suites** | +5（P0-2 / P1-3 / P1-5 ×2 / P1-7 = 5）|
+| integration | 809 断言 / 15 脚本 | **824 断言 / 15 脚本** | +15（phase3 case 4 — P0-1 cleanupOrphanData × partial run 15 子断言） |
+| smoke | 全过 | **全过** | 0 regression |
+
+### 16.4 资金红线护栏（Round 2 维持）
+
+1. **`clearStaleSuccessfulRawJson`** NOT IN 子查询排除差异行 — 不变（P1-1 仅文档修订；P0-4 顺序契约不影响 SQL）
+2. **`runCheckCore`** worker vs main byte-for-byte — 不变（A3 P0-2 init-error reset 不影响 runCheck 正常路径；phase3 P0-1 case 4 验证 cleanup 不破坏 partial run 数据）
+3. **`ensureDiffRowsCascadeMigration_v2_1_10`** 8-status state machine — 加 'checked' status；pre-FK violation 拒绝 migration 保护老数据（P1-3）
+4. **`cleanupOrphanData`** partial run 保护 — P0-1 修复后 partial run 不被启动期清掉；FK CASCADE 范畴扩 + idempotent 保持
+
+### 16.5 Round 2 → Round 3 建议
+
+- **跑 release-check 全绿**（unit 1243 / integration 824 / smoke 全过）— ✅ closeout commit 已跑
+- **可选 Codex review**（参考 v2.1.9 SR-FIX-1 Round 3 范式 — 主线程协调）
+- **用户测试** — manual-test-checklist §5（N4-cont-1）+ §6（N4-cont-2）+ §三（A3 worker）+ §四（A4 chunked）+ §10.3 用户验收
+- **rules/important-variables.md 升格评估**（留 Round 3 collective — 候选：`listPartialRuns` / `needsWorkerShutdown` / `shutdownWorkerPoolGracefully` 是否升 Important-skeleton）
+
+---
+
+**当前状态**：v0.4（2026-05-28 SR-FIX-1 Round 2 完成 — Phase 0-6 + 13 commits 修 P0+P1 + closeout commit）。
+**下一步**：通知主线程 → 用户验收 / Codex review / Round 3 决策（如发现新 finding）。

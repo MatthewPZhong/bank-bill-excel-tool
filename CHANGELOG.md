@@ -18,6 +18,40 @@ v2.1.9 之后 1 轮迭代（β 范围），**4 主线**：A3（runCheck 跨进�
 
 - **N4-cont-1 sentinel 修订（v0.3）**：原 v0.2 spec 设计为 `SET raw_json = NULL`；Phase 4 T28 集成测试发现与 v2.1.8 N4 DDL `raw_json TEXT NOT NULL` 约束冲突 → UPDATE 会触发 CHECK 违反；用户拍板 Option A 修订 `SET raw_json = ''`；所有 idempotent 守卫 / SQL 查询从 `IS NOT NULL` 改为 `!= ''`（commit `740fdc8`）
 
+### SR-FIX-1 round 2 — dev self-review 修复（合并前补丁，13 项 P0+P1）
+
+Phase 0-6 完成 + 37 commits 后 dev self-review 输出 21 finding（P0 4 / P1 9 / P2 8）。用户拍板 Round 2 全修 P0 + P1 = 13 项；P2 留后续 patch。详见 `docs/iterations/v2.1.10/sr-fix-1-round1-findings.md` + `docs/iterations/v2.1.10/spec.md §16`。
+
+**🔴 P0 Critical（4 项 — 功能性死锁 / cleanup 冲突 / resume 路径破坏）**：
+
+- **🔴 P0-1 cleanupOrphanData × chunked partial 冲突**（A4 resume 跨重启失效）：cleanupOrphanData 启动期把 `chunk_progress.status='partial'` 的 run 当孤儿清掉 → 用户重启后 resume 失败。修复：`session.js:582` fileBroken 判定加 chunk_progress 检查 — partial 状态 continue 保留；phase3 集成 case 4（15 子断言）验证（commit `0e4a87e`）
+- **🔴 P0-2 worker init-error 后 brick**：ensureInitialized init-error 仅 reject promise，不重置 workerInstance / workerInitPromise → 下次 dispatch 永久 brick，必须重启 app。修复：`run-check-worker-pool.js:200-208` init-error 分支加 reset + terminate；pool unit case 17（commit `45bd81e`）
+- **🔴 P0-3 before-quit 缺 workerPool.shutdown**：app.before-quit 不调 `runCheckWorkerPool.shutdown()` → worker DB 连接不 graceful close → .wal/.shm 残留。修复：加 needsWorkerShutdown + shutdownWorkerPoolGracefully helper；workerAlive=true 时 preventDefault + 异步 shutdown → cleanup pending → app.quit（commit `d16ec19`）
+- **🔴 P0-4 idle cleanup 顺序契约不符**（spec §4.3.2）：trigger() setImmediate 异步立即返回 + raw_json 同步立即跑 → 两 cleanup 实质并发。修复：trigger 改返 Promise（早返回路径 Promise.resolve；执行路径 finally resolve）；idle tick 改 async + 在 trigger 后 await 再调 raw_json（commit `ea2a443`）
+
+**🟡 P1 Important（9 项 — 文档遗漏 / spec/code 一致性 / state machine / UX / 单测 / 兜底）**：
+
+- **🟡 P1-1 tasks + manual-test-checklist 5 处 sentinel 残留**：tasks T23/T28 + manual-test §5.1 / §10.3 全部 `NULL` → `''` / `IS NULL/NOT NULL` → `= ''/!= ''`（commit `e8aec42`）
+- **🟡 P1-2 spec §8.3 + PRD §5.3 migration 顺序倒置**：文档说"先 N4-cont-2 → 后 N4-cont-1"但 code 实际"先 N4-cont-1 → 中间 N4 → 后 N4-cont-2"。修复：改文档匹配 code（不动 code 避免触发 schema migration 风险）（commit `b3e3c5d`）
+- **🟡 P1-3 ensureDiffRowsCascadeMigration 缺 'checked' status**：spec §5.3.2 定义 8 status，code 漏 pre-FK check。修复：Step 4.5 加 PRAGMA foreign_key_check；violation → status='pre-fk-violation' + 备份保留；unit case 13（commit `058c167`）
+- **🟡 P1-4 IPC handler CancelError 走 error 路径**：用户主动 cancel 弹"对账失败" Notification（违反 spec §2.4 设计意图）。修复：notifyAcquiringBillCurrencyResult 加 'cancelled' kind；run / resume handler catch 加 `err.name === 'CancelError'` 守卫（commit `ad207f9`）
+- **🟡 P1-5 resume handler 只扫最近 1 run**：注释说"自动找最近 partial"但只取 getLatestRun → 最近 run 是 complete 时无法 resume 前一个 partial。修复：新增 `listPartialRuns(db, monthKey)` API；resume handler 改造（payloadRunId 不传时扫所有 partial 取最近）；unit T19.7 + T19.8（commit `c8c7cf8`）
+- **🟡 P1-6 tasks T06 描述与实际不符**：T06 描述 12 case 单测文件未建。修复：tasks.md T06 reverse sync — pool 17 case 已覆盖；不单独建 run-check-worker.test.js（commit `2432ffe`）
+- **🟡 P1-7 worker crash 时 chunk_progress 不 partial**：worker process.exit / OOM → chunk_progress 停留 in-progress → resume 拒绝。修复：main.js failureListener 内（hadActiveJob=true）扫所有 in-progress 兜底改 partial；unit T19.9（commit `ab4f06b`）
+- **🟡 P1-8 USER_GUIDE 缺 partial run 警告**：§1.8.12 仅说 chunked + cancel + resume IPC，未提重启场景。修复：追加"Resume 边界条件" 5 项（P0-1 修复后跨重启可 resume / P1-7 worker crash 兜底 / v2.1.11+ UI / 不想 resume 重跑路径）（commit `0bcd365`）
+- **🟡 P1-9 createRunProgressForwarder 注释过时**：注释说"每 run 仅 6 个事件"，A4 chunked 后实际 6+chunkCount。修复：注释更新 + chunkCount > 100 节流 TODO（v2.1.11+）（commit `4ef2cc3`）
+
+**Round 2 修复后测试增量**：
+- `npm run test:unit` 1238 → **1243 case / 297 suites**（+5：P0-2 / P1-3 / P1-5 ×2 / P1-7）
+- `npm run test:integration` 809 → **824 断言 / 15 脚本**（+15：phase3 case 4 — P0-1 cleanupOrphanData × partial run 15 子断言）
+- `npm run smoke` 0 regression
+
+**资金红线 byte-for-byte 验证不破坏**：`clearStaleSuccessfulRawJson` / `runCheckCore` worker vs main / `ensureDiffRowsCascadeMigration_v2_1_10` 三道护栏 Round 2 维持
+
+**未修 P2（8 项）**：留 v2.1.10 后续 patch 或 v2.1.11+ — 注释 / fixture / 防御性边界（不影响合并）
+
+**rules/important-variables.md 升格评估**：留 Round 3 collective — 候选 `listPartialRuns` / `needsWorkerShutdown` / `shutdownWorkerPoolGracefully` 是否升 Important-skeleton
+
 ### 性能基线（vs v2.1.9）
 
 | 指标 | v2.1.9 baseline | v2.1.10 实测 | 改善 |
@@ -33,7 +67,7 @@ v2.1.9 之后 1 轮迭代（β 范围），**4 主线**：A3（runCheck 跨进�
 
 ### 测试
 
-- release-check 三段全绿（smoke ✅ / unit **1238 case / 297 suites** ✅ / integration **809 断言 / 15 脚本** ✅）
+- release-check 三段全绿（smoke ✅ / unit **1243 case / 297 suites** ✅（含 SR-FIX-1 round 2 增量 +5）/ integration **824 断言 / 15 脚本** ✅（含 SR-FIX-1 round 2 phase3 case 4 +15 断言））
 - v2.1.10 新增集成脚本 5 个（v2.1.10-a3-phase1 40 + v2.1.10-a3-phase2 33 + v2.1.10-a4-phase3 25 + v2.1.10-n4-cont-1-phase4 23 + v2.1.10-n4-cont-2-phase5 43 = 164 新增断言）
 - check-vars v11 → v12 升格 5 条（Critical 4: `runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1: `serializeError` / `deserializeError`）+ 更新 1 条（`bill_imports.raw_json` 扩 N4-cont-1 sentinel 语义）
 

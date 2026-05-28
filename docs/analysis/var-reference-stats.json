@@ -1,14 +1,14 @@
 {
   "meta": {
     "version": "2.1.10-beta.1",
-    "scannedAt": "2026-05-28T06:14:35.674Z",
+    "scannedAt": "2026-05-28T07:41:39.006Z",
     "root": "src",
     "totalFiles": 94,
-    "totalTopLevelNames": 1000,
+    "totalTopLevelNames": 1001,
     "buckets": {
       "shared": 159,
       "paired": 290,
-      "local": 444,
+      "local": 445,
       "crossFile": 449
     }
   },
@@ -342,7 +342,7 @@
         "refFiles": [
           {
             "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-            "count": 1
+            "count": 2
           },
           {
             "file": "src/backend/big-account-mode-store.js",
@@ -421,7 +421,7 @@
             "count": 2
           }
         ],
-        "totalHits": 33,
+        "totalHits": 34,
         "fileSpan": 20
       },
       {
@@ -1547,7 +1547,7 @@
         "refFiles": [
           {
             "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-            "count": 14
+            "count": 15
           },
           {
             "file": "src/backend/bank-bu-recon-db/month-repository.js",
@@ -1562,7 +1562,7 @@
             "count": 11
           }
         ],
-        "totalHits": 35,
+        "totalHits": 36,
         "fileSpan": 4
       },
       {
@@ -2935,6 +2935,30 @@
         "fileSpan": 3
       },
       {
+        "name": "runRepo",
+        "defFiles": [
+          "src/main-process/acquiring-bill-currency-session.js",
+          "src/main-process/acquiring-bill-currency-writer.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 17
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 4
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 22,
+        "fileSpan": 3
+      },
+      {
         "name": "pad2",
         "defFiles": [
           "src/backend/usage-stats.js",
@@ -2953,30 +2977,6 @@
           {
             "file": "src/main-process/monthly-balance.js",
             "count": 4
-          }
-        ],
-        "totalHits": 21,
-        "fileSpan": 3
-      },
-      {
-        "name": "runRepo",
-        "defFiles": [
-          "src/main-process/acquiring-bill-currency-session.js",
-          "src/main-process/acquiring-bill-currency-writer.js",
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/acquiring-bill-currency-session.js",
-            "count": 16
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-writer.js",
-            "count": 4
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
           }
         ],
         "totalHits": 21,
@@ -7616,6 +7616,24 @@
         "fileSpan": 2
       },
       {
+        "name": "getRunChunkProgress",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "getTemplateByKey",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -8976,24 +8994,6 @@
         "fileSpan": 2
       },
       {
-        "name": "getRunChunkProgress",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/run-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-session.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 2
-      },
-      {
         "name": "getTemplatesByBankName",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -9949,10 +9949,10 @@
         "refFiles": [
           {
             "file": "src/main-process/run-check-worker-pool.js",
-            "count": 22
+            "count": 24
           }
         ],
-        "totalHits": 22,
+        "totalHits": 24,
         "fileSpan": 1
       },
       {
@@ -10152,6 +10152,20 @@
         "fileSpan": 1
       },
       {
+        "name": "workerInitPromise",
+        "defFiles": [
+          "src/main-process/run-check-worker-pool.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/run-check-worker-pool.js",
+            "count": 11
+          }
+        ],
+        "totalHits": 11,
+        "fileSpan": 1
+      },
+      {
         "name": "getRendererStartupValue",
         "defFiles": [
           "src/renderer.js"
@@ -10173,6 +10187,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 10
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 1
+      },
+      {
+        "name": "N4_CONT_2_DIFF_ROWS_TABLE",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
             "count": 10
           }
         ],
@@ -10222,20 +10250,6 @@
         "fileSpan": 1
       },
       {
-        "name": "workerInitPromise",
-        "defFiles": [
-          "src/main-process/run-check-worker-pool.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/run-check-worker-pool.js",
-            "count": 10
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 1
-      },
-      {
         "name": "acquiringBillCurrencyOperationLock",
         "defFiles": [
           "src/main.js"
@@ -10243,20 +10257,6 @@
         "refFiles": [
           {
             "file": "src/main.js",
-            "count": 9
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 1
-      },
-      {
-        "name": "N4_CONT_2_DIFF_ROWS_TABLE",
-        "defFiles": [
-          "src/backend/database/migrations.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/migrations.js",
             "count": 9
           }
         ],
@@ -15108,6 +15108,20 @@
         "fileSpan": 1
       },
       {
+        "name": "listPartialRuns",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "listPendingCleanupRuns",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/run-repository.js"
@@ -16474,7 +16488,7 @@
       "refFiles": [
         {
           "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "count": 1
+          "count": 2
         },
         {
           "file": "src/backend/big-account-mode-store.js",
@@ -16553,7 +16567,7 @@
           "count": 2
         }
       ],
-      "totalHits": 33,
+      "totalHits": 34,
       "fileSpan": 20
     },
     {
@@ -17679,7 +17693,7 @@
       "refFiles": [
         {
           "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "count": 14
+          "count": 15
         },
         {
           "file": "src/backend/bank-bu-recon-db/month-repository.js",
@@ -17694,7 +17708,7 @@
           "count": 11
         }
       ],
-      "totalHits": 35,
+      "totalHits": 36,
       "fileSpan": 4
     },
     {
@@ -19067,6 +19081,30 @@
       "fileSpan": 3
     },
     {
+      "name": "runRepo",
+      "defFiles": [
+        "src/main-process/acquiring-bill-currency-session.js",
+        "src/main-process/acquiring-bill-currency-writer.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 17
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-writer.js",
+          "count": 4
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 22,
+      "fileSpan": 3
+    },
+    {
       "name": "pad2",
       "defFiles": [
         "src/backend/usage-stats.js",
@@ -19085,30 +19123,6 @@
         {
           "file": "src/main-process/monthly-balance.js",
           "count": 4
-        }
-      ],
-      "totalHits": 21,
-      "fileSpan": 3
-    },
-    {
-      "name": "runRepo",
-      "defFiles": [
-        "src/main-process/acquiring-bill-currency-session.js",
-        "src/main-process/acquiring-bill-currency-writer.js",
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/acquiring-bill-currency-session.js",
-          "count": 16
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-writer.js",
-          "count": 4
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
         }
       ],
       "totalHits": 21,
@@ -23746,6 +23760,24 @@
       "fileSpan": 2
     },
     {
+      "name": "getRunChunkProgress",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "getTemplateByKey",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -25099,24 +25131,6 @@
         },
         {
           "file": "src/main-process/bank-bu-recon-session.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 3,
-      "fileSpan": 2
-    },
-    {
-      "name": "getRunChunkProgress",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-db/run-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-session.js",
           "count": 1
         }
       ],
