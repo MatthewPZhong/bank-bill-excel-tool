@@ -83,6 +83,45 @@ PR #54 已 push 后 Codex 自动 review 2026-05-28T09:16 完成，抓 2 finding�
 - `cleanupOrphanData` partial OR in-progress 双守卫扩展（idempotent 保持）
 - contract test a3-phase1 40/40 仍通过
 
+### SR-FIX-1 round 4 — Codex 复审抓 finding 修复（合并前补丁，3 项 F1+F2+F3 + closeout）
+
+PR #54 Round 3 push 后 Codex 二次复审 2026-05-28T10:02:42Z 完成，抓 3 finding：F1 in-progress 状态机扩展只做了一半 / F2 before-quit shutdown 仍 race 清 activeJob / F3 git diff --check 卫生。用户拍板 Round 4 修 3 finding + closeout = 4 commits。详见 `docs/iterations/v2.1.10/spec.md §18`。
+
+**🟠 F1（in-progress 状态机 4 处链路统一扩展 — Round 3 修复不完整）**：
+
+- 触发场景：Round 3 P0-1 扩 `cleanupOrphanData` 守卫为 `partial OR in-progress`，但其他 3 处链路（`listPartialRuns` SQL / `resume` IPC handler / `clearStaleSuccessfulRawJson` SQL）仍只看 `partial` → first-chunk crash 后 run 保留 ✓ 但不能 resume + raw_json 保护不完整
+- 修复：4 处链路统一对齐 `partial OR in-progress`
+  - `run-repository.js:listPartialRuns` JSON status check 扩展（保留函数名，语义扩为「可恢复 runs」）
+  - `main.js:resume` IPC handler 显式 runId 拒绝逻辑 `!['partial','in-progress'].includes(progress.status)`
+  - `raw-json-retention.js:CLEAR_STALE_SQL` `json_extract = 'partial'` → `IN ('partial', 'in-progress')`
+- 配套测试：unit run-repository +2 case + 1 适配（T19.11/T19.12 + T19.9 改语义对称）；unit raw-json-retention +2 case（Case 12/13）；integration n4-cont-1-phase4 +5 断言（case 5 in-progress 整月保护端到端）
+- commit `2b4f34f`
+
+**🟠 F2（before-quit shutdown 不抹 activeJob 让 failureListener 兜底）**：
+
+- 触发场景：`shutdown()` 在 worker 真正退出前 `activeJob=null` + reject → close 超时 terminate → `handleWorkerFailure` 看到 `hadActiveJob=false` → `failureListener` 不执行 `in-progress → partial` 兜底 → 制造 F1 修复的 in-progress 残留路径
+- 修复：`shutdown()` 不抹 activeJob — 仍 reject caller promise（防 unhandled rejection），但加 `shutdownPending` 标记让 message handler 跳过二次 settle；`handleWorkerFailure` 看到 `hadActiveJob=true` 路径下若 `shutdownPending=true` 跳过二次 reject 防 UnhandledPromiseRejection 但仍调 failureListener → main.js 兜底 in-progress → partial
+- 配套测试：unit run-check-worker-pool +1 case 18；integration a3-phase2 +9 断言（case 7 dispatch → 强制 shutdown → failureListener 收 hadActiveJob=true）
+- commit `2555c4c`
+
+**🟢 F3（git diff --check 卫生）**：
+
+- `changes/rpa-statement-fetch/spec.md:391` trailing whitespace + `scripts/perf/v2.1.10-a4-chunked-report.md:81` EOF blank line 清掉
+- `git diff --check origin/main...HEAD` 0 warning
+- commit `0e174c4`
+
+**Round 4 修复后测试增量**：
+
+- `npm run test:unit` 1247 → **1252 case / 297 suites**（+5：raw-json-retention 2 + run-repository 2 + worker-pool 1）
+- `npm run test:integration` 836 → **850 断言 / 15 脚本**（+14：n4-cont-1-phase4 case 5 = 5 + a3-phase2 case 7 = 9）
+- `npm run smoke` 0 regression
+
+**资金红线 byte-for-byte 验证不破坏**：
+
+- 状态机 4 处链路统一（Round 4 F1）— SQL/JSON status 范畴扩 `partial OR in-progress`，既有 partial 路径不变；新增 in-progress 路径与 Round 3 F2 入口写入对齐
+- before-quit shutdown 失败兜底路径（Round 4 F2）— shutdown reject 不变 + 失败 listener 路径恢复正常，无双 reject 风险
+- contract test a3-phase1 40/40 / a3-phase2 42/42 / a4-phase3 47/47 仍通过
+
 ### 性能基线（vs v2.1.9）
 
 | 指标 | v2.1.9 baseline | v2.1.10 实测 | 改善 |
@@ -98,8 +137,8 @@ PR #54 已 push 后 Codex 自动 review 2026-05-28T09:16 完成，抓 2 finding�
 
 ### 测试
 
-- release-check 三段全绿（smoke ✅ / unit **1247 case / 297 suites** ✅（含 SR-FIX-1 round 2 +5 + round 3 +4 = +9）/ integration **836 断言 / 15 脚本** ✅（含 round 2 +15 + round 3 +12 = +27 断言））
-- v2.1.10 新增集成脚本 5 个（v2.1.10-a3-phase1 40 + v2.1.10-a3-phase2 33 + v2.1.10-a4-phase3 25 + v2.1.10-n4-cont-1-phase4 23 + v2.1.10-n4-cont-2-phase5 43 = 164 新增断言）
+- release-check 三段全绿（smoke ✅ / unit **1252 case / 297 suites** ✅（含 SR-FIX-1 round 2 +5 + round 3 +4 + round 4 +5 = +14）/ integration **850 断言 / 15 脚本** ✅（含 round 2 +15 + round 3 +12 + round 4 +14 = +41 断言））
+- v2.1.10 新增集成脚本 5 个（v2.1.10-a3-phase1 40 + v2.1.10-a3-phase2 42 + v2.1.10-a4-phase3 47 + v2.1.10-n4-cont-1-phase4 33 + v2.1.10-n4-cont-2-phase5 43 = 205 新增断言）
 - check-vars v11 → v12 升格 5 条（Critical 4: `runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1: `serializeError` / `deserializeError`）+ 更新 1 条（`bill_imports.raw_json` 扩 N4-cont-1 sentinel 语义）
 
 ### 文档

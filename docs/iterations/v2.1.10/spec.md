@@ -1062,16 +1062,16 @@ migration 顺序固定（启动期，与 `src/backend/database.js` AppDatabase.i
 | Finding | 严重度 | 修复 commit | 修复说明 |
 |---|---|---|---|
 | **F1** in-progress 状态机 4 处链路统一扩展 | 🟠 | `2b4f34f` | `run-repository.js:listPartialRuns` JSON status check 扩展（保留函数名，语义扩为可恢复 runs）；`main.js:resume` 显式 runId 拒绝逻辑 `!['partial','in-progress'].includes(...)`；`raw-json-retention.js:CLEAR_STALE_SQL` `json_extract = 'partial'` → `IN ('partial', 'in-progress')`；unit run-repository +2 case +1 适配（T19.11/T19.12 + T19.9 改语义对称）；unit raw-json-retention +2 case（Case 12/13）；integration n4-cont-1-phase4 +5 断言（case 5 in-progress 整月保护端到端）；spec §3.3 + §4.2.1/§4.2.2/§4.2.3 + PRD §1.3/§2.3.3 reverse sync |
-| **F2** before-quit shutdown 不抹 activeJob | 🟠 | `<待 commit>` | `shutdown()` 不抹 activeJob 状态 — 仍 reject caller promise（防 unhandled rejection），但加 `shutdownPending` 标记让 message handler 跳过二次 settle；`handleWorkerFailure` 看到 `hadActiveJob=true` 路径下若 `shutdownPending=true` 跳过二次 reject 防 UnhandledPromiseRejection 但仍调 failureListener；unit pool +1 case 18；integration a3-phase2 +9 断言（case 7） |
-| **F3** git diff --check 卫生 | 🟢 | `<待 commit>` | `changes/rpa-statement-fetch/spec.md:391` trailing whitespace + `scripts/perf/v2.1.10-a4-chunked-report.md:81` EOF blank line 清掉 |
-| **closeout** Round 4 收尾 | — | `<待 commit>` | spec §17 Round 4 章节 + CHANGELOG v2.1.10 SR-FIX-1 Round 4 段 + release-check 全跑 + scan:vars 数据同步 |
+| **F2** before-quit shutdown 不抹 activeJob | 🟠 | `2555c4c` | `shutdown()` 不抹 activeJob 状态 — 仍 reject caller promise（防 unhandled rejection），但加 `shutdownPending` 标记让 message handler 跳过二次 settle；`handleWorkerFailure` 看到 `hadActiveJob=true` 路径下若 `shutdownPending=true` 跳过二次 reject 防 UnhandledPromiseRejection 但仍调 failureListener；unit pool +1 case 18；integration a3-phase2 +9 断言（case 7） |
+| **F3** git diff --check 卫生 | 🟢 | `0e174c4` | `changes/rpa-statement-fetch/spec.md:391` trailing whitespace + `scripts/perf/v2.1.10-a4-chunked-report.md:81` EOF blank line 清掉；diff --check origin/main...HEAD 0 warning |
+| **closeout** Round 4 收尾 | — | `<本 commit>` | spec §18 Round 4 章节定稿 + CHANGELOG v2.1.10 SR-FIX-1 Round 4 段 + release-check 全跑（unit 1252 / integration 850 / smoke 全过）+ scan:vars 数据同步 |
 
 ### 18.3 测试增量（Round 4 完成后）
 
 | 阶段 | Round 3 baseline | Round 4 完成后 | 增量 |
 |---|---:|---:|---:|
-| unit | 1247 case | **待 closeout 跑统计** | +5（raw-json-retention Case 12-13 = 2 + run-repository T19.11-12 = 2 + worker-pool case 18 = 1）|
-| integration | 836 断言 | **待 closeout 跑统计** | +14（n4-cont-1-phase4 case 5 = 5 + a3-phase2 case 7 = 9）|
+| unit | 1247 case | **1252 case** | +5（raw-json-retention Case 12-13 = 2 + run-repository T19.11-12 = 2 + worker-pool case 18 = 1）|
+| integration | 836 断言 | **850 断言** | +14（n4-cont-1-phase4 case 5 = 5 + a3-phase2 case 7 = 9）|
 | smoke | 全过 | **全过** | 0 regression |
 
 ### 18.4 资金红线护栏（Round 4 维持 + 加强）
