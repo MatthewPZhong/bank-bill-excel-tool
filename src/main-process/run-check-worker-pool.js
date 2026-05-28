@@ -104,6 +104,8 @@ function coldStartWorker(dbPath) {
         activeJob = null;
         // v2.1.10 Phase 2 T12 — 记录 busy 结束时间（spec §2.3.2 grace 30s）
         lastBusyEndTs = Date.now();
+        // v2.1.10 SR-FIX-1 Round 4 F2：shutdown 已 reject promise — 跳过二次 resolve
+        if (job.shutdownPending) return;
         try { job.resolve(msg.result); } catch (_e) { /* swallow */ }
       }
       return;
@@ -114,6 +116,8 @@ function coldStartWorker(dbPath) {
         activeJob = null;
         // v2.1.10 Phase 2 T12 — 记录 busy 结束时间（spec §2.3.2 grace 30s）
         lastBusyEndTs = Date.now();
+        // v2.1.10 SR-FIX-1 Round 4 F2：shutdown 已 reject promise — 跳过二次 reject
+        if (job.shutdownPending) return;
         try { job.reject(deserializeFromMessage(msg.error)); } catch (_e) { /* swallow */ }
       }
       return;
@@ -144,11 +148,20 @@ function handleWorkerFailure(failedWorker, err, source) {
     );
     wrappedErr.cause = err;
     wrappedErr.workerFailureSource = source;
-    try { job.reject(wrappedErr); } catch (_e) { /* swallow */ }
+    // v2.1.10 SR-FIX-1 Round 4 F2：shutdown 已 reject — 跳过二次 reject 防 UnhandledPromiseRejection
+    //   shutdown 路径下 job.shutdownPending=true；reject 已经发生
+    //   仍走 failureListener 通知主进程兜底 in-progress → partial
+    if (!job.shutdownPending) {
+      try { job.reject(wrappedErr); } catch (_e) { /* swallow */ }
+    }
   }
   // v2.1.10 Phase 2 T14 — 通知主进程：释放 op lock + Notification + 下次 dispatch cold-start
   //   pool 不直接 require electron / op lock 模块（保持模块独立可 unit test）
   //   caller (main.js) 通过 setFailureListener 注册回调
+  //
+  // v2.1.10 SR-FIX-1 Round 4 F2：shutdown 路径下 hadActiveJob=true → failureListener 兜底执行
+  //   main.js failureListener 内调 setRunChunkProgress(runId, ..., 'partial')
+  //   防 first-chunk crash + before-quit shutdown 双重路径残留 in-progress
   if (failureListener) {
     try {
       failureListener({
@@ -305,19 +318,37 @@ async function preWarm(dbPath) {
 }
 
 // shutdown — 主进程 quit 前调用；关闭 worker + 等 exit
-//   若 activeJob 仍在挂着，主动 reject（防 caller pending Promise 变 unhandled rejection）
+//   若 activeJob 仍在挂着，主动 reject caller promise（防 unhandled rejection）
+//
+// v2.1.10 SR-FIX-1 Round 4 F2：shutdown 不抹 activeJob 状态
+//   修复前（Round 3 / round 2 P0-3 留下）：if (activeJob) { ...job.reject; activeJob=null; }
+//     问题：reject 后立即 activeJob=null → 后续 worker exit/terminate 触发 handleWorkerFailure 时
+//       看到 hadActiveJob=false → failureListener 不执行 in-progress → partial 兜底 →
+//       run.chunk_progress 残留 'in-progress' → 制造 Round 4 F1 修复的场景（first-chunk crash 残留路径）
+//   修复后（Round 4 F2）：
+//     - 仍 reject caller promise（防 unhandled rejection — caller pending Promise 必须 settle）
+//     - 但 activeJob 留着 — 让后续 worker exit/terminate 触发 handleWorkerFailure 时 hadActiveJob=true
+//       → failureListener 调用（main.js setFailureListener 注册的回调） → 把 in-progress 兜底转 partial
+//     - 加 shutdownPending 标记 — 让 message handler 在 done/error 到来时判断 "shutdown 已 reject，跳过二次 reject/resolve"
+//   注：close → exit 路径走的是 worker 'exit' 事件 → handleWorkerFailure(source='exit')
+//        terminate 路径走 'exit' 事件（code 非 0）→ handleWorkerFailure(source='exit')
+//        两路径都会触发 failureListener — Round 4 F2 修复后 hadActiveJob=true → main.js 兜底执行
 async function shutdown(timeoutMs = 5000) {
   if (!workerInstance) return;
   const w = workerInstance;
   // 主动 reject 任何 pending job — 防 unhandled rejection
+  // Round 4 F2：不抹 activeJob — 让 handleWorkerFailure 看到 hadActiveJob=true，failureListener 能兜底
   if (activeJob) {
-    const job = activeJob;
-    activeJob = null;
     try {
       const err = new Error('worker pool 已 shutdown，pending job 被主动中断');
       err.code = 'WORKER_POOL_SHUTDOWN';
-      job.reject(err);
+      activeJob.reject(err);
     } catch (_e) { /* swallow */ }
+    // 标记 shutdown 已 reject — 防 done/error message 到来时二次 settle caller promise
+    //   handleWorkerFailure 仍会调 failureListener 兜底（不依赖此标记）
+    //   message handler 用 shutdownPending 跳过 done/error 的 reject/resolve（promise 已 reject）
+    activeJob.shutdownPending = true;
+    // 注：activeJob 不抹 — workerInstance 也保留，让 exit 事件能正常派发到 handleWorkerFailure
   }
   const exitPromise = new Promise((resolve) => {
     w.on('exit', () => resolve());
@@ -332,6 +363,8 @@ async function shutdown(timeoutMs = 5000) {
   if (timedOut) {
     try { await w.terminate(); } catch (_e) { /* swallow */ }
   }
+  // exit 事件处理后 workerInstance / activeJob 已被 handleWorkerFailure 清空（hadActiveJob=true 路径）
+  //   或 'exit' 正常路径（activeJob 已被 done message 清）— 这里兜底再清一遍防泄漏
   workerInstance = null;
   workerInitPromise = null;
   activeJob = null;

@@ -455,6 +455,62 @@ test.describe('run-check-worker-pool', () => {
     }
   });
 
+  // v2.1.10 SR-FIX-1 Round 4 F2 — shutdown 不抹 activeJob → failureListener 收到 hadActiveJob=true
+  //   修复前（Round 3 / round 2 P0-3）：shutdown 内 activeJob.reject + activeJob=null →
+  //     worker exit 触发 handleWorkerFailure 时 hadActiveJob=false → failureListener 不执行 in-progress → partial 兜底
+  //     → run.chunk_progress 残留 'in-progress' → 制造 first-chunk crash 残留路径（Round 4 F1 修复场景）
+  //   修复后：activeJob 保留 + shutdownPending 标记 → worker exit 触发 handleWorkerFailure 时 hadActiveJob=true
+  //     → failureListener 收到回调 → main.js 兜底 in-progress → partial
+  //   本 case 验证：shutdown 时 activeJob 留着 + failureListener 收到 hadActiveJob=true
+  test('18. shutdown 不抹 activeJob → failureListener 收到 hadActiveJob=true（SR-FIX-1 Round 4 F2）', async () => {
+    const ctx = await setupTmpDb();
+    try {
+      let failureInfo = null;
+      pool.setFailureListener((info) => { failureInfo = info; });
+
+      await pool.preWarm(ctx.dbPath);
+      const runPromise = pool.dispatchRunCheck(
+        { __dbPath: ctx.dbPath, monthKey: '2026-04', storageRoot: ctx.tmpdir },
+        {}
+      );
+      // 等 dispatch 进 activeJob 槽
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+      assert.equal(pool.getStatus().busy, true, '前置：dispatch 进 activeJob → busy=true');
+
+      // 用极短 timeout 触发 shutdown → terminate → exit 事件 → handleWorkerFailure
+      //   activeJob 留 → handleWorkerFailure 看 hadActiveJob=true → failureListener 回调
+      const shutdownPromise = pool.shutdown(50);
+
+      // runPromise 应 reject（shutdown 主动 reject + handleWorkerFailure 不二次 reject）
+      let rejectErr;
+      try { await runPromise; } catch (e) { rejectErr = e; }
+      assert.ok(rejectErr, 'shutdown 后 runPromise 应 reject');
+      assert.ok(
+        rejectErr.code === 'WORKER_POOL_SHUTDOWN' ||
+          rejectErr.message.includes('shutdown'),
+        `rejectErr 应是 shutdown 来源（实际 code=${rejectErr.code} msg=${rejectErr.message}）`
+      );
+
+      await shutdownPromise;
+
+      // ✅ Round 4 F2 修复后：failureListener 收到 hadActiveJob=true（shutdown 不抹 activeJob）
+      assert.ok(failureInfo, 'failureListener 应被 worker exit 事件回调');
+      assert.equal(failureInfo.hadActiveJob, true,
+        'Round 4 F2 修复：shutdown 不抹 activeJob → handleWorkerFailure 看到 hadActiveJob=true → main.js failureListener 可兜底 in-progress → partial');
+      assert.ok(['error', 'exit'].includes(failureInfo.source),
+        `failureInfo.source 应是 error/exit（实际 ${failureInfo.source}）`);
+
+      // 状态清理：shutdown 完成后 workerInstance / activeJob 都已清
+      const status = pool.getStatus();
+      assert.equal(status.workerAlive, false, 'shutdown 后 workerAlive=false');
+      assert.equal(status.busy, false, 'shutdown 后 busy=false（activeJob 已清）');
+
+      pool.setFailureListener(null);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
   // v2.1.10 Phase 2 T14 — crash 后自动 cold-start
   test('16. crash 后下次 dispatch 自动 cold-start + 成功', async () => {
     const ctx = await setupTmpDb();

@@ -374,12 +374,74 @@ async function test6_workerCrashRecovery() {
   }
 }
 
+// ── case 7：v2.1.10 SR-FIX-1 Round 4 F2 — before-quit shutdown 不抹 activeJob ──
+//   触发场景：app 退出前用户在跑 chunked → main 调 pool.shutdown(5000) → worker terminate
+//   修复前（Round 3 留下）：shutdown 抹 activeJob → handleWorkerFailure 看 hadActiveJob=false →
+//     failureListener 不执行 → run.chunk_progress 残留 'in-progress' → 重启后无法 resume
+//   修复后（Round 4 F2）：shutdown 留 activeJob + shutdownPending 标记 → handleWorkerFailure 看 hadActiveJob=true →
+//     failureListener 收到回调 → main.js 兜底 in-progress → partial → 重启后可 resume
+//
+//   本 case 用 stubbed failureListener 直接模拟 main.js 兜底回调（pool 模块独立可测，不依赖 main.js IPC）
+//   验证：dispatch → 立即 shutdown(50) → exit 触发 → failureListener 收到 hadActiveJob=true
+async function test7_beforeQuitShutdownPreservesActiveJobForFallback() {
+  console.log('\n[case 7] before-quit shutdown 不抹 activeJob → failureListener 收 hadActiveJob=true（Round 4 F2）');
+  const ctx = await setupTmpDb({ rowCount: 5 });
+  try {
+    ctx.db.db.close();
+
+    let failureInfo = null;
+    pool.setFailureListener((info) => { failureInfo = info; });
+
+    await pool.preWarm(ctx.dbPath);
+    assertEq(pool.getStatus().workerAlive, true, '7.1 preWarm 后 workerAlive=true');
+
+    const runPromise = pool.dispatchRunCheck(
+      { __dbPath: ctx.dbPath, monthKey: '2026-04', storageRoot: ctx.tmpdir },
+      {}
+    );
+    // 等 dispatch 进 activeJob 槽
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    assertEq(pool.getStatus().busy, true, '7.2 dispatch 进 activeJob → busy=true');
+
+    // 用极短 timeout 强制 terminate worker（模拟 before-quit shutdown 触发的退出路径）
+    //   Round 4 F2 关键：shutdown 不抹 activeJob → worker exit/terminate 触发 handleWorkerFailure 时 hadActiveJob=true
+    const shutdownPromise = pool.shutdown(50);
+
+    let rejectErr;
+    try { await runPromise; } catch (e) { rejectErr = e; }
+    assertTrue(!!rejectErr, '7.3 shutdown 后 runPromise 应 reject');
+    assertTrue(
+      rejectErr.code === 'WORKER_POOL_SHUTDOWN' || rejectErr.message.includes('shutdown'),
+      `7.4 rejectErr 应是 shutdown 来源（实际 code=${rejectErr.code} msg=${rejectErr.message}）`
+    );
+
+    await shutdownPromise;
+
+    // ✅ Round 4 F2 关键断言：failureListener 收到 hadActiveJob=true
+    assertTrue(!!failureInfo, '7.5 failureListener 应被 worker exit 事件回调');
+    assertEq(failureInfo.hadActiveJob, true,
+      '7.6 🟠 Round 4 F2：shutdown 不抹 activeJob → handleWorkerFailure 看 hadActiveJob=true → main.js 可兜底 in-progress → partial');
+    assertTrue(['error', 'exit'].includes(failureInfo.source),
+      `7.7 failureInfo.source ∈ {error,exit}（实际 ${failureInfo.source}）`);
+
+    // 状态清理：shutdown 完成后 workerInstance / activeJob 均已清
+    assertEq(pool.getStatus().workerAlive, false, '7.8 shutdown 后 workerAlive=false');
+    assertEq(pool.getStatus().busy, false, '7.9 shutdown 后 busy=false（activeJob 已清）');
+
+    pool.setFailureListener(null);
+  } finally {
+    await pool.__reset_for_test__();
+    ctx.db.db = { close: () => {} };
+    ctx.cleanup();
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────
 async function main() {
   console.log('==== v2.1.10 A3 Phase 2 集成测试 ====');
-  console.log('PRD §1.3 + spec §七 Phase 2 ≥ 6 case ≥ 25 断言');
+  console.log('PRD §1.3 + spec §七 Phase 2 ≥ 7 case ≥ 32 断言（Round 4 F2 加 case 7）');
 
   const cases = [
     test1_idleSkipBusy,
@@ -388,6 +450,7 @@ async function main() {
     test4_cancelStage4,
     test5_cancelHardTimeout,
     test6_workerCrashRecovery,
+    test7_beforeQuitShutdownPreservesActiveJobForFallback,
   ];
 
   for (const c of cases) {

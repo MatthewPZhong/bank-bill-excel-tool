@@ -1045,5 +1045,56 @@ migration 顺序固定（启动期，与 `src/backend/database.js` AppDatabase.i
 
 ---
 
-**当前状态**：v0.5（2026-05-28 SR-FIX-1 Round 3 完成 — Round 2 13 commits + Round 3 F1+F2+closeout 3 commits）。
+## 十八、SR-FIX-1 Round 4 — Codex 复审 finding 修复（v0.6 reverse sync）
+
+> v0.6 立项（2026-05-28 — PR #54 Round 3 push 后 Codex 二次复审 2026-05-28T10:02:42Z 完成，抓 3 finding；用户拍板 4 commits = F1+F2+F3+closeout）
+
+### 18.1 Codex 复审 finding 清单
+
+| Finding | 严重度 | 位置 | 描述 |
+|---|---|---|---|
+| **F1** | 🟠 P2（Round 3 修复不完整 — in-progress 状态机扩展只做了一半）| `run-repository.js:317` / `main.js:10880-10903` / `raw-json-retention.js:78-82` | Round 3 P0-1 扩 `cleanupOrphanData` 守卫为 `partial OR in-progress` 是对的，但其他 3 处链路（`listPartialRuns` / `resume` IPC handler / `clearStaleSuccessfulRawJson` SQL）仍只看 `partial` → first-chunk crash 后 run 保留 ✓ 但不能 resume + raw_json 保护不完整 |
+| **F2** | 🟠 P2（before-quit shutdown 仍 race 清 activeJob）| `src/main-process/run-check-worker-pool.js:313-320` | `shutdown()` 在 worker 真正退出前 `activeJob=null` + reject。运行中退出 app → close 超时 terminate worker → `handleWorkerFailure()` 看到 `hadActiveJob=false` → `failureListener` 不执行 `in-progress → partial` 兜底 → 制造 Finding 1 的 in-progress 残留 |
+| **F3** | 🟢 P3（git diff --check 卫生）| `changes/rpa-statement-fetch/spec.md:391` / `scripts/perf/v2.1.10-a4-chunked-report.md:81` | trailing whitespace + EOF blank line |
+
+### 18.2 Round 4 修复清单（3 finding + closeout = 4 commits）
+
+| Finding | 严重度 | 修复 commit | 修复说明 |
+|---|---|---|---|
+| **F1** in-progress 状态机 4 处链路统一扩展 | 🟠 | `2b4f34f` | `run-repository.js:listPartialRuns` JSON status check 扩展（保留函数名，语义扩为可恢复 runs）；`main.js:resume` 显式 runId 拒绝逻辑 `!['partial','in-progress'].includes(...)`；`raw-json-retention.js:CLEAR_STALE_SQL` `json_extract = 'partial'` → `IN ('partial', 'in-progress')`；unit run-repository +2 case +1 适配（T19.11/T19.12 + T19.9 改语义对称）；unit raw-json-retention +2 case（Case 12/13）；integration n4-cont-1-phase4 +5 断言（case 5 in-progress 整月保护端到端）；spec §3.3 + §4.2.1/§4.2.2/§4.2.3 + PRD §1.3/§2.3.3 reverse sync |
+| **F2** before-quit shutdown 不抹 activeJob | 🟠 | `<待 commit>` | `shutdown()` 不抹 activeJob 状态 — 仍 reject caller promise（防 unhandled rejection），但加 `shutdownPending` 标记让 message handler 跳过二次 settle；`handleWorkerFailure` 看到 `hadActiveJob=true` 路径下若 `shutdownPending=true` 跳过二次 reject 防 UnhandledPromiseRejection 但仍调 failureListener；unit pool +1 case 18；integration a3-phase2 +9 断言（case 7） |
+| **F3** git diff --check 卫生 | 🟢 | `<待 commit>` | `changes/rpa-statement-fetch/spec.md:391` trailing whitespace + `scripts/perf/v2.1.10-a4-chunked-report.md:81` EOF blank line 清掉 |
+| **closeout** Round 4 收尾 | — | `<待 commit>` | spec §17 Round 4 章节 + CHANGELOG v2.1.10 SR-FIX-1 Round 4 段 + release-check 全跑 + scan:vars 数据同步 |
+
+### 18.3 测试增量（Round 4 完成后）
+
+| 阶段 | Round 3 baseline | Round 4 完成后 | 增量 |
+|---|---:|---:|---:|
+| unit | 1247 case | **待 closeout 跑统计** | +5（raw-json-retention Case 12-13 = 2 + run-repository T19.11-12 = 2 + worker-pool case 18 = 1）|
+| integration | 836 断言 | **待 closeout 跑统计** | +14（n4-cont-1-phase4 case 5 = 5 + a3-phase2 case 7 = 9）|
+| smoke | 全过 | **全过** | 0 regression |
+
+### 18.4 资金红线护栏（Round 4 维持 + 加强）
+
+1. **状态机 4 处链路统一**（Round 4 F1）：
+   - cleanupOrphanData 守卫（Round 3 已扩 partial OR in-progress）
+   - listPartialRuns SQL（Round 4 新扩）
+   - resume IPC handler（Round 4 新扩）
+   - clearStaleSuccessfulRawJson SQL（Round 4 新扩）
+2. **before-quit shutdown 失败兜底路径**（Round 4 F2）：
+   - shutdown 不抹 activeJob → handleWorkerFailure 看 hadActiveJob=true
+   - failureListener 调用 → main.js 兜底 in-progress → partial
+   - 保证 run 不残留 in-progress + 重启后 listPartialRuns 命中
+3. **git diff --check 0 warning**（Round 4 F3）：消除 PR 噪音
+
+### 18.5 Round 4 → 后续建议
+
+- **release-check 全绿**（unit / integration 增量见 §18.3，closeout commit 跑后回填）
+- **PR #54 自动同步**（git push 后）— 不重命名草稿 `docs/prs/PR54-v2.1.10.md`
+- **用户测试**（manual-test-checklist 不需新增 — F1+F2+F3 修复在既有覆盖范畴）
+- **是否再开 Round 5 Codex review**：Round 4 修复点是 Round 3 留下的状态机扩展不完整 + race condition + 卫生；状态机已 4 处链路对齐 + before-quit shutdown 测试覆盖；建议直接 merge 不再开 Round 5
+
+---
+
+**当前状态**：v0.6（2026-05-28 SR-FIX-1 Round 4 完成 — Round 2 13 + Round 3 3 + Round 4 4 = 20 commits）。
 **下一步**：通知主线程 → 验证 push / 用户测试 / merge 决策。
