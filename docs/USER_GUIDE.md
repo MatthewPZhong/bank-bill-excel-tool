@@ -1271,6 +1271,96 @@ C4 类场景配置弹窗（`createScenarioConfigDialogC4`）共 5 行：
 - 导入中（流水已导入）：`docs/previews/acquiring-bill-currency-panel-importing.png`
 - 对账结果（运行完成）：`docs/previews/acquiring-bill-currency-panel-result.png`
 
+### 1.8.10 raw_json 历史保留与自动清理（v2.1.10 N4-cont-1 新增 ⚠️ 体积治理）
+
+> 🔴 **新规则（v2.1.10 起）**：DB 体积长期治理 — 对账成功老行 raw_json 自动清理；差异行 raw_json 永远保留。
+
+**背景**：v2.1.8 N4 起单据原始 JSON（`bill_imports.raw_json`）仅保留 9 模版字段；但即便如此，长期累积下来对账成功行的 raw_json 仍是 DB 体积的主要来源（估算 6 月使用后 DB 可达 24GB+）。v2.1.10 N4-cont-1 引入自动清理机制，目标 6 月体积降 ~99%（仅保留差异行 raw_json + 7 天内新行 raw_json）。
+
+**清理策略**：
+
+| 项 | 默认值 | 说明 |
+|---|---|---|
+| 保留窗口 | **7 天** | 7 天内的对账成功行 raw_json 保留；> 7 天的清空为 `''` |
+| settings key | `acquiring_bill_raw_json_retention_days` | sqlite3 客户端修改：`UPDATE app_settings SET setting_value='14' WHERE setting_key='acquiring_bill_raw_json_retention_days';` + 重启应用生效 |
+| 范围 | 1-30 天 | 范围外（< 1 或 > 30 或非数字）→ 自动回退默认 7 |
+| **差异行** | **永远保留 raw_json** | 即使 imported_at > 7 天，只要行已记录在差异表（`acquiring_bill_currency_diff_rows`）→ raw_json 完整保留 — **保证差异 xlsx 完整可重导** |
+| 触发时机 | **idle 30min 自动**（v2.1.9 N1' 复用）| 用户离开 30min 后台自动清；用户无感知；无 UI 入口（D27 = 0 UI 拍板）|
+| 失败 graceful | 独立 try/catch | 清理 SQL 失败 → activity log 记 ERROR + 主 cleanup 已完成；下一个 idle tick 重试 |
+
+**清空形态**（v0.3 sentinel 修订）：
+
+- 清空 = `SET raw_json = ''`（空字符串，**不是 NULL**）— 兼容 v2.1.8 N4 DDL 中的 `NOT NULL` 约束
+- 行本身仍存在（只是 `raw_json` 字段被清空），其他列（`imported_at` / `bill_date` / `recon_main_id` / `settle_currency_norm` 等）完整保留
+- 重导差异 xlsx 时差异行 raw_json 仍可正常 `JSON.parse` 解析（writer.js 路径未变）
+
+**SQL 验证**：
+
+```sql
+-- 差异行 raw_json 完整（应等于差异表行数）
+SELECT COUNT(*) FROM acquiring_bill_currency_bill_imports b
+WHERE b.raw_json != ''
+  AND b.id IN (SELECT bill_import_id FROM acquiring_bill_currency_diff_rows);
+
+-- 对账成功老行 raw_json 已清（7 天前）
+SELECT COUNT(*) FROM acquiring_bill_currency_bill_imports
+WHERE raw_json = ''
+  AND imported_at < datetime('now', '-7 days')
+  AND id NOT IN (SELECT bill_import_id FROM acquiring_bill_currency_diff_rows);
+
+-- 7 天内对账成功行 raw_json 保留
+SELECT COUNT(*) FROM acquiring_bill_currency_bill_imports
+WHERE raw_json != ''
+  AND imported_at >= datetime('now', '-7 days');
+```
+
+**⚠️ 不可逆警告**：
+
+- 一旦 `raw_json` 字段被清空（设为 `''`），原始 JSON 数据**无法从应用内恢复**
+- 如果不慎清空了仍需要的数据（如 7 天内的对账成功行，因 settings 调小到 1 天）：
+  1. 优先尝试 SQLite 备份恢复（`<userData>/backups/tool-data-bak-pre-*.sqlite`，由 SR-backup-1 / N4-cont-2 migration 自动备份）
+  2. 关闭应用 → 用备份覆盖 `tool-data.sqlite` → 重启 → 数据回到备份时刻状态
+  3. **没备份的情况**：差异行 raw_json 永远保留 → 差异 xlsx 可完整重导出；对账成功行 raw_json 已无法恢复（业务上对账成功 = 数据已落 diff xlsx 历史，不应有二次使用需求）
+
+### 1.8.11 跨进程对账（v2.1.10 A3 新增 ⚠️ 架构改造）
+
+> 🔴 **重大架构变更**：runCheck 跑在独立 worker 进程；主进程不再卡死。
+
+**背景**：v2.1.9 及之前，「开始运行」对账时主进程会卡住（500w 行 ~5-10s freeze），用户感知是窗口无响应 + 偶发系统 unresponsive 弹窗。v2.1.10 A3 把 runCheck 移到独立 worker 进程（worker_threads），主进程 event loop 恢复流畅。
+
+**用户感知变化**：
+
+| 行为 | v2.1.9 旧 | v2.1.10 新 |
+|---|---|---|
+| 「开始运行」期间主窗口 | 卡顿 / 拖动迟滞 | **流畅可用**（其他模块可继续操作）|
+| 系统 unresponsive 弹窗 | 偶发触发 | **不再触发**（实测 event loop lag 改善 48x）|
+| 取消 runCheck | 等执行完才能再点 | 点取消 → **< 5s 内** worker 退出 + 释放 op lock |
+| worker 异常崩溃 | 整个应用卡死 | **自动恢复**（释放 op lock + Notification 通知「worker 异常请重试」+ 下次自动 cold-start）|
+
+**性能数据**（脚本档实测 — `scripts/perf/v2.1.10-a3-baseline-report.md`）：
+
+- worker cold-start：~11ms（pre-warm 后接近 0）
+- IPC round-trip：~0.010ms（1000 次均值）
+- runCheck 总耗时：worker 比主进程多 ~5%（500w 行外推；fixed cost 摊销）— 但**主进程不再卡**是核心收益
+
+### 1.8.12 分批运行 chunked（v2.1.10 A4 新增）
+
+> v2.1.10 A4 起 SQL JOIN insertDiffRowsByJoin 改为分批；cancel 响应在 chunk 边界。
+
+| 项 | 默认值 | 说明 |
+|---|---|---|
+| chunk size | **10w 行** | spec §3.2 选定；cancel 响应 + 内存峰值 + 总耗时三方平衡 |
+| settings key | （v2.1.11+ 评估暴露）| 当前固定 10w；性能脚本验证 1k / 1w / 10w 不同档位差异（chunk=1k → 总耗时 +14% 慢；chunk=10w → 最优）|
+| cancel 响应 | < 1s（实测 < 0.01ms 同步抛）| 在 chunk 边界检查；不需要等当前批 INSERT 完成 |
+| resume 入口 | IPC handler `acquiringBillCurrency:run:resume` | 已暴露但**v2.1.10 无 UI**；v2.1.11+ 评估收单 panel 加 resume 按钮 |
+| 性能 | chunked vs non-chunked 总耗时 0.99x | byte-for-byte 输出一致（4 层 contract test 锁定）|
+
+**资金红线契约**（spec §3.3）：
+
+- chunked 中途 cancel → 当前批 ROLLBACK + 已 INSERT 批保留
+- 重跑时 clearOldRuns + N4-cont-2 CASCADE 自动清旧 diff_rows → idempotent
+- 差异表行内容（数量 + 内容）与 v2.1.9 单条大 SQL 一致（contract test 锁定）
+
 ---
 
 ## 1.9 主界面工具栏与模块收纳（v2.1.4 新增）
@@ -1429,6 +1519,98 @@ Get-ChildItem "$env:USERPROFILE\Documents\网银账单生成小助手\logs" -Rec
 2. **进 `logs/{YYYY-MM}/{MM-DD}/error.log`** 拿 stack trace + domain 定位代码模块
 3. **跨日检索**：`grep -r "关键字" logs/` 找历史相似问题
 
+### DB 备份恢复路径（v2.1.10 N4-cont-2 新增 / 复用 v2.1.9 SR-backup-1）
+
+> 🔴 **重要**：N4-cont-2 FK CASCADE migration **不可逆** — 失败时必须能恢复到升级前状态。
+
+**备份位置**：
+
+```
+<userData>/backups/
+├── tool-data-bak-pre-N4-{timestamp}.sqlite           ← v2.1.8 N4 升级前自动备份
+├── tool-data-bak-pre-N5-{timestamp}.sqlite           ← v2.1.9 N5 升级前自动备份
+├── tool-data-bak-pre-N4-cont-2-{timestamp}.sqlite    ← v2.1.10 N4-cont-2 升级前自动备份（本版新增）
+└── tool-data-bak-<label>-{timestamp}.sqlite          ← 用户手工触发的备份
+```
+
+> 路径展开（不同 OS）：
+> - **macOS**：`~/Library/Application Support/bank-bill-excel-tool/backups/`
+> - **Windows**：`%AppData%\bank-bill-excel-tool\backups\`
+> - **Linux**：`~/.config/bank-bill-excel-tool/backups/`
+
+**备份产生时机**：
+
+| 时机 | 触发 | 文件前缀 |
+|---|---|---|
+| 首次启动 v2.1.10（老库） | N4-cont-2 migration 自动 | `pre-N4-cont-2-` |
+| 首次启动 v2.1.9（老库） | N5 migration 自动 | `pre-N5-` |
+| 首次启动 v2.1.8（老库） | N4 migration 自动 | `pre-N4-` |
+| 用户手工触发 | （未来 UI / sqlite3 调 backup API） | 自定义 label |
+
+**手动恢复步骤**（含 N4-cont-2 migration 失败场景）：
+
+1. **关闭应用**（务必，防止 wal/shm 文件 lock）
+2. **备份当前损坏的库**（防止恢复后想再 diff 排错）：
+   ```bash
+   # macOS
+   cp ~/Library/Application\ Support/bank-bill-excel-tool/tool-data.sqlite \
+      ~/Library/Application\ Support/bank-bill-excel-tool/tool-data-FAILED-$(date +%Y%m%d-%H%M%S).sqlite
+   ```
+3. **用备份覆盖**：
+   ```bash
+   # macOS（用最近 pre-N4-cont-2 备份）
+   cp ~/Library/Application\ Support/bank-bill-excel-tool/backups/tool-data-bak-pre-N4-cont-2-*.sqlite \
+      ~/Library/Application\ Support/bank-bill-excel-tool/tool-data.sqlite
+   ```
+4. **删 wal/shm 旁文件**（防止 SQLite 用 stale WAL 覆盖恢复内容）：
+   ```bash
+   rm -f ~/Library/Application\ Support/bank-bill-excel-tool/tool-data.sqlite-wal
+   rm -f ~/Library/Application\ Support/bank-bill-excel-tool/tool-data.sqlite-shm
+   ```
+5. **如需重置 migration 标志位**（防止再次自动 migrate）：
+   ```bash
+   sqlite3 ~/Library/Application\ Support/bank-bill-excel-tool/tool-data.sqlite \
+     "DELETE FROM app_settings WHERE setting_key='n4_cont_2_diff_rows_cascade_migrated';"
+   ```
+6. **重启应用**：
+   - 若步骤 5 跳过：应用回到 v2.1.9 状态（仍含老 FK 不带 CASCADE）；启动期会再次尝试 N4-cont-2 migration → 如再次失败，建议先看 activity log + error.log 定位根因
+   - 若步骤 5 已删 marker：N4-cont-2 migration 会重新触发；如仍失败，建议反馈 issue + 附上 error.log + 备份的 FAILED 库
+
+**备份失败处理**：
+
+如启动期 N4-cont-2 migration 之前的 SR-backup-1 备份就失败（如磁盘满 / 权限错）：
+
+- activity log 含 `[backup] failed: <错误>`
+- migration **不启动**（数据完整性优先 — 没备份不动 schema）
+- 应用启动失败 / UI 显示「启动失败请联系支持」
+- 处理：清理磁盘 / 修复权限 → 重启应用
+
+### worker 进程异常（v2.1.10 A3 新增）
+
+> ⚠️ A3 跨进程化后 runCheck 跑在 worker 进程；worker 异常崩溃时主进程会自动恢复 + 用户通知。
+
+**用户感知**：
+
+- **Notification 弹出**：「对账 worker 异常，请重试」（系统通知中心 / macOS 通知 / Windows toast）
+- **op lock 释放**：「开始运行」按钮重新可点击
+- **下次运行自动 cold-start**：用户重新点「开始运行」→ 主进程自动起新 worker（耗时 ~11ms 用户无感）
+
+**排查路径**：
+
+1. **看主进程日志**：`logs/{YYYY-MM}/{MM-DD}/error.log` 找 `[A3 worker]` 关键字
+   ```bash
+   cat ~/Documents/网银账单生成小助手/logs/2026-05/05-28/error.log | jq -c '.|select(.domain=="acquiring-bill-currency")'
+   ```
+2. **看 worker 内部 stack**：worker 错误经 serializeError 跨进程回传 → 主进程日志含完整 stack trace + 文件路径 + 行号
+3. **持续失败**（如连续 3 次 worker crash）：
+   - 可能是数据问题（如导入的 fixture 含异常）→ 备份数据 + 反馈 issue
+   - 可能是 OS 资源问题（如内存不足）→ 重启电脑
+
+**已知边界**：
+
+- worker 启动时静默 `ExperimentalWarning: SQLite is an experimental feature` — 这是 Node 24 自带的提示，**非异常**（POC §六 surprise #1 已处理）
+- worker 退出时 DB 连接自动 close — 不会残留 `.wal` / `.shm` 锁
+
 ---
 
 ## 三、错误报告（v2.0.0 增强）
@@ -1467,6 +1649,82 @@ Get-ChildItem "$env:USERPROFILE\Documents\网银账单生成小助手\logs" -Rec
 
 - 推荐 HTML：保留排版、表格、链接、字体层级，适合在浏览器查看或打印
 - TXT：纯文本，适合粘贴到聊天工具或快速搜索
+
+---
+
+## 八、v2.1.10 新增能力 / 升级提示（重要）
+
+### 8.1 🔴 首次启动 v2.1.10 自动备份 DB + N4-cont-2 migration（必看）
+
+v2.1.10 启动时检测旧版本 schema（`acquiring_bill_currency_diff_rows` FK 不带 CASCADE），将一次性执行 N4-cont-2 migration：
+
+1. **自动备份**：复用 v2.1.9 SR-backup-1 VACUUM INTO API（不锁写）
+   - macOS：`~/Library/Application Support/bank-bill-excel-tool/backups/tool-data-bak-pre-N4-cont-2-<timestamp>.sqlite`
+   - Windows：`%APPDATA%/bank-bill-excel-tool/backups/tool-data-bak-pre-N4-cont-2-<timestamp>.sqlite`
+2. **8-status state machine**（沿用 v2.1.9 N5 范式）：pending → backed-up → checked → rebuilt → data-copied → fk-verified → cleaned-up → done
+3. **FK CASCADE 改造**：`acquiring_bill_currency_diff_rows.bill_import_id` + `run_id` 加 `ON DELETE CASCADE`
+4. **跨版本路径**：v2.1.7 / v2.1.8 / v2.1.9 → v2.1.10 一步迁（启动期 migration 序列自动编排）
+5. **失败自动 ROLLBACK** + 备份保留（路径同步骤 1）
+
+**如何回滚**：见「故障排查 → DB 备份恢复路径」段。
+
+### 8.2 raw_json 自动清理（N4-cont-1）— 6 月体积治理 ~99%
+
+详见 §1.8.10。简要：
+
+- **保留窗口默认 7 天**（settings `acquiring_bill_raw_json_retention_days` 可调 1-30）
+- **差异行 raw_json 永远保留**（保证差异 xlsx 完整可重导）
+- **idle 30min 自动触发**（v2.1.9 N1' 复用）；用户无感知 / 0 UI
+- **不可逆** ⚠️：清空后无法从应用恢复；必要时用 SR-backup-1 备份恢复
+
+### 8.3 跨进程对账（A3）— 主进程不再卡
+
+详见 §1.8.11。简要：
+
+- runCheck 跑在独立 worker 进程（worker_threads）
+- 主进程 event loop lag 改善 48x（500w 行场景）
+- cancel 响应 < 5s（chunked 边界）
+- worker crash 自动恢复 + Notification 通知
+
+### 8.4 分批运行 chunked（A4）
+
+详见 §1.8.12。简要：
+
+- chunk size 10w 行（spec §3.2 选定 / 当前固定 / v2.1.11+ 评估 settings 化）
+- chunked vs non-chunked 总耗时 0.99x（byte-for-byte 一致）
+- resume 入口已暴露 IPC handler；v2.1.11+ 评估 UI
+
+### 8.5 worker 异常 / DB 备份恢复
+
+详见「故障排查 → DB 备份恢复路径」+「故障排查 → worker 进程异常」段。
+
+### 8.6 ⚠️ 升级注意（用户必读）
+
+- **N4-cont-2 不可逆**：FK CASCADE 改造完成后无法回退到 v2.1.9 schema；若 migration 失败必须用备份恢复
+- **N4-cont-1 不可逆**：raw_json 自动清理后无法在应用内恢复；必要时用备份恢复
+- **首次启动可能耗时较长**（含 N4-cont-2 自动备份 + migration + N4-cont-1 settings 初始化）—— 建议等启动屏完成后再操作
+- **N4-cont-1 默认 7 天**：如希望保留更长，启动后用 sqlite3 调 settings `acquiring_bill_raw_json_retention_days` 到 14 / 30 + 重启
+- **跨版本路径**：v2.1.7 / v2.1.8 / v2.1.9 → v2.1.10 一步迁支持；建议首次启动前备份 `tool-data.sqlite`（应用关闭状态下复制）
+
+### 8.7 常见问题（FAQ）
+
+**Q: raw_json 数据被自动清了能恢复吗？**
+
+A: 分两种情况：
+- **差异行**：raw_json 永远保留，不会被清；差异 xlsx 可完整重导出（writer 路径正常解析）
+- **对账成功老行（> 7 天）**：raw_json 已清为 `''`；如有保留必要，需从 SQLite 备份恢复（`<userData>/backups/tool-data-bak-pre-*.sqlite`），用法见「故障排查 → DB 备份恢复路径」段。对账成功行业务上等价于"已落 diff xlsx 历史 + 差异不存在"，不应有二次使用 raw_json 的需求。
+
+**Q: runCheck 报「worker 异常请重试」怎么办？**
+
+A: 用户感知 = 主进程 op lock 已释放 + 「开始运行」按钮可点；直接点击重试即可，主进程会自动重启 worker（cold-start ~11ms）。如连续 3 次失败，看「故障排查 → worker 进程异常」段排查日志。
+
+**Q: N4-cont-2 migration 失败启动失败怎么办？**
+
+A: 看「故障排查 → DB 备份恢复路径」段。简要：关闭应用 → 删 wal/shm 旁文件 → 复制 `backups/tool-data-bak-pre-N4-cont-2-*.sqlite` 覆盖 `tool-data.sqlite` → 删 settings 标志位 `n4_cont_2_diff_rows_cascade_migrated` → 重启。
+
+**Q: 大数据量（500w+ 行）对账 worker 路径会不会比 v2.1.9 慢？**
+
+A: 500w 行外推 worker 比 v2.1.9 主进程多 ~5%（fixed cost 摊销后；spec §性能 budget），但**主进程不再卡顿是核心收益** — runCheck 期间其他模块可继续操作 + 0 unresponsive 弹窗。
 
 ---
 
