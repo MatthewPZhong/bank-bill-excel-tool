@@ -216,4 +216,184 @@ test.describe('runCheckCore byte-for-byte contract', () => {
       ctx.cleanup();
     }
   });
+
+  // ─────────────────────────────────────────────────────────────────
+  // v2.1.10 A3 Phase 2 T13 — cancelToken 透传 5 阶段间检查
+  // ─────────────────────────────────────────────────────────────────
+
+  test('T13.1 — 不传 cancelToken（向后兼容；runCheckCore 行为不变）', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    try {
+      const result = await session.runCheckCore({
+        db: ctx.db.db,
+        monthKey: FIXTURE_MONTH,
+        storageRoot: ctx.tmpdir,
+      });
+      assert.equal(typeof result.runId, 'number', 'runId 是 number');
+      assert.equal(result.totalBillRows, 10, 'totalBillRows=10');
+      assert.equal(result.mismatchRows, 3, 'mismatchRows=3（fixture）');
+      // 不传 cancelToken 应与 v2.1.10 Phase 1 路径完全一致
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  test('T13.2 — cancelToken.cancelled=true 在 stage 1 (clearing-old-runs) → CancelError + ROLLBACK + DB 无锁残留', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    try {
+      // 提前 cancel — clearOldRuns 后第一个 check 点立即抛
+      const cancelToken = session.createCancelToken();
+      cancelToken.cancel();
+
+      let caught;
+      try {
+        await session.runCheckCore({
+          db: ctx.db.db,
+          monthKey: FIXTURE_MONTH,
+          storageRoot: ctx.tmpdir,
+          cancelToken,
+        });
+      } catch (e) { caught = e; }
+
+      assert.ok(caught, '应 throw');
+      assert.equal(caught.name, 'CancelError', `应是 CancelError（实际 name=${caught && caught.name}）`);
+      assert.ok(caught.stage, `应带 stage 字段（实际 stage=${caught && caught.stage}）`);
+      // 第一个 check 点是 clearing-old-runs；既可能命中 stage 1（clearing-old-runs）也可能命中
+      // 启动前快路径（before-start，仅 worker 内）— 这里直调 runCheckCore 走 stage 1 路径
+      assert.equal(caught.stage, 'clearing-old-runs', 'stage 应是 clearing-old-runs');
+
+      // DB 无锁残留：手动再起一个事务应成功
+      assert.doesNotThrow(() => {
+        ctx.db.db.exec('BEGIN');
+        ctx.db.db.exec('ROLLBACK');
+      }, 'ROLLBACK 后 DB 可正常开新事务');
+
+      // 没有 run 记录写入
+      const runCount = ctx.db.db.prepare('SELECT COUNT(*) c FROM acquiring_bill_currency_runs').get().c;
+      assert.equal(runCount, 0, 'cancel 后无 run 记录');
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  test('T13.3 — cancelToken 在 stage 4 (sql-joining 后) → ROLLBACK + CancelError', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    try {
+      // 用 wrapper token：到 stage 4 时才 cancel（模拟 sql-joining 中途 cancel）
+      let cancelled = false;
+      let checkCount = 0;
+      const cancelToken = {
+        get cancelled() {
+          checkCount++;
+          // 前 3 个 check 点返回 false，第 4 个（sql-joining 后）返回 true
+          if (checkCount >= 4 && !cancelled) cancelled = true;
+          return cancelled;
+        },
+        cancel() { cancelled = true; },
+        throwIfCancelled(stage) {
+          if (this.cancelled) {
+            const CancelErrorCtor = session.CancelError;
+            throw new CancelErrorCtor(`runCheck cancelled at stage=${stage}`, { stage });
+          }
+        },
+      };
+
+      let caught;
+      try {
+        await session.runCheckCore({
+          db: ctx.db.db,
+          monthKey: FIXTURE_MONTH,
+          storageRoot: ctx.tmpdir,
+          cancelToken,
+        });
+      } catch (e) { caught = e; }
+
+      assert.ok(caught, '应 throw');
+      assert.equal(caught.name, 'CancelError');
+      assert.equal(caught.stage, 'sql-joining', '应在 sql-joining 阶段后命中');
+
+      // 事务被 ROLLBACK；新事务可正常开
+      assert.doesNotThrow(() => {
+        ctx.db.db.exec('BEGIN');
+        ctx.db.db.exec('ROLLBACK');
+      });
+
+      // ROLLBACK 后无 run 记录残留
+      const runCount = ctx.db.db.prepare('SELECT COUNT(*) c FROM acquiring_bill_currency_runs').get().c;
+      assert.equal(runCount, 0, 'ROLLBACK 后无 run 记录');
+      const diffCount = ctx.db.db.prepare('SELECT COUNT(*) c FROM acquiring_bill_currency_diff_rows').get().c;
+      assert.equal(diffCount, 0, 'ROLLBACK 后无 diff_rows 残留');
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  test('T13.4 — cancelToken 在 stage 5 (写盘前；COMMIT 后) → CancelError 但 DB 数据已落库', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    try {
+      // 5 个 check 点都过；第 5 个（writeRunOutputs 前）才 cancel
+      let cancelled = false;
+      let checkCount = 0;
+      const cancelToken = {
+        get cancelled() {
+          checkCount++;
+          // 前 4 个 false，第 5 个 true
+          if (checkCount >= 5 && !cancelled) cancelled = true;
+          return cancelled;
+        },
+        cancel() { cancelled = true; },
+        throwIfCancelled(stage) {
+          if (this.cancelled) {
+            const CancelErrorCtor = session.CancelError;
+            throw new CancelErrorCtor(`runCheck cancelled at stage=${stage}`, { stage });
+          }
+        },
+      };
+
+      let caught;
+      try {
+        await session.runCheckCore({
+          db: ctx.db.db,
+          monthKey: FIXTURE_MONTH,
+          storageRoot: ctx.tmpdir,
+          cancelToken,
+        });
+      } catch (e) { caught = e; }
+
+      assert.ok(caught, '应 throw');
+      assert.equal(caught.name, 'CancelError');
+      assert.equal(caught.stage, 'before-writing-xlsx', '应在 before-writing-xlsx 阶段命中');
+
+      // 注意：stage 5 时 db.exec('COMMIT') 已执行，DB 数据已落库
+      // 但 writer 未跑，diff_file_path / report_file_path 未回填
+      const runCount = ctx.db.db.prepare('SELECT COUNT(*) c FROM acquiring_bill_currency_runs').get().c;
+      assert.equal(runCount, 1, 'COMMIT 后 run 已落库（cancel 不撤销）');
+      const run = ctx.db.db.prepare('SELECT * FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1').get();
+      assert.equal(run.diff_file_path, null, 'cancel 在写盘前 — diff_file_path 仍为 NULL');
+      assert.equal(run.report_file_path, null, 'cancel 在写盘前 — report_file_path 仍为 NULL');
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  test('T13.5 — createCancelToken 接口（cancelled / cancel / throwIfCancelled）', () => {
+    const token = session.createCancelToken();
+    assert.equal(token.cancelled, false, '初始 cancelled=false');
+    assert.doesNotThrow(() => token.throwIfCancelled('test'), '未 cancel 时 throwIfCancelled 不抛');
+    token.cancel();
+    assert.equal(token.cancelled, true, 'cancel() 后 cancelled=true');
+    assert.throws(
+      () => token.throwIfCancelled('test-stage'),
+      (err) => err.name === 'CancelError' && err.stage === 'test-stage',
+      'cancel 后 throwIfCancelled 抛 CancelError + 带 stage'
+    );
+  });
+
+  test('T13.6 — CancelError 类（name + stage 字段 + 继承 Error）', () => {
+    const err = new session.CancelError('test msg', { stage: 'foo' });
+    assert.equal(err.name, 'CancelError');
+    assert.equal(err.message, 'test msg');
+    assert.equal(err.stage, 'foo');
+    assert.ok(err instanceof Error, 'CancelError 是 Error 子类');
+  });
 });

@@ -151,6 +151,7 @@ if (!isMainThread) {
 
   // ── runCheck 执行（worker 端） ──
   //   T09：直接调 session.runCheckCore（抽出后的纯函数；与主进程直调路径 byte-for-byte 一致）
+  //   v2.1.10 T13：cancelToken 透传 runCheckCore；5 阶段间 check + 事务中 cancel → ROLLBACK + CancelError
   async function runCheckInWorker(workerDb, payload, jobId, cancelToken) {
     const { monthKey, storageRoot } = payload || {};
     if (!monthKey) {
@@ -162,11 +163,14 @@ if (!isMainThread) {
         parentPort.postMessage({ type: 'progress', jobId, payload: ev });
       } catch (_e) { /* swallow */ }
     };
-    // cancelToken 占位（T13 接入 graceful cancel；T06/T09 阶段仅检查启动前一次）
+    // T13：cancel 启动前快路径
     if (cancelToken && cancelToken.cancelled) {
-      throw new Error('worker canceled before runCheck start');
+      // 用 session.CancelError 保持错误类型统一（caller 按 err.name='CancelError' 识别）
+      const CancelErrorCtor = session.CancelError || Error;
+      throw new CancelErrorCtor('runCheck cancelled before start', { stage: 'before-start' });
     }
-    return await session.runCheckCore({ db: workerDb, monthKey, storageRoot, onProgress });
+    // T13：cancelToken 直接透传 — runCheckCore 内 5 阶段间自己 check + ROLLBACK + throw
+    return await session.runCheckCore({ db: workerDb, monthKey, storageRoot, onProgress, cancelToken });
   }
 
   // ── 主消息循环 ──
@@ -204,7 +208,13 @@ if (!isMainThread) {
         if (activeJob) {
           throw new Error(`worker 正在执行 jobId=${activeJob.jobId}，拒绝并发 run`);
         }
-        const cancelToken = { cancelled: false };
+        // v2.1.10 T13：cancelToken 用 session.createCancelToken 工厂构造（带 throwIfCancelled 接口）
+        //   - 'cancel' message 收到 → token.cancel() → cancelled = true
+        //   - runCheckCore 5 阶段间 check cancelled → safeRollback + throw CancelError
+        const session = require('./acquiring-bill-currency-session');
+        const cancelToken = session.createCancelToken
+          ? session.createCancelToken()
+          : { cancelled: false, cancel() { this.cancelled = true; } };
         activeJob = { jobId, cancelToken };
         try {
           const result = await runCheckInWorker(workerDb, payload, jobId, cancelToken);
@@ -220,7 +230,12 @@ if (!isMainThread) {
       if (type === 'cancel') {
         const { jobId } = msg;
         if (activeJob && (!jobId || activeJob.jobId === jobId)) {
-          activeJob.cancelToken.cancelled = true;
+          // v2.1.10 T13：用 cancel() 方法（兼容工厂构造的 token 和兜底 plain object）
+          if (typeof activeJob.cancelToken.cancel === 'function') {
+            activeJob.cancelToken.cancel();
+          } else {
+            activeJob.cancelToken.cancelled = true;
+          }
         }
         return;
       }

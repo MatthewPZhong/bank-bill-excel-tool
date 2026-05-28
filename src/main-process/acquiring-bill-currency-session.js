@@ -154,6 +154,32 @@ async function peekImportTarget({ db, kind, filePaths }) {
   return { monthKey, existingCount, kind };
 }
 
+// v2.1.10 A3 Phase 2 T13 — CancelError：可中断 runCheckCore 的专用错误类
+//   - 调用方按 err.name === 'CancelError' 识别（worker 跨进程后 instanceof 不可靠 — 见 serialize-error 注释）
+//   - 业务语义：用户主动取消（cancel button），不是真正的失败
+//   - main.js IPC handler 应识别此 error 不弹错误 Notification，仅 toast「已取消」
+class CancelError extends Error {
+  constructor(message, options = {}) {
+    super(message || 'runCheck cancelled by user');
+    this.name = 'CancelError';
+    if (options.stage) this.stage = options.stage;
+  }
+}
+
+// v2.1.10 A3 Phase 2 T13 — cancelToken 工厂（unit test / 集成测试用；生产由 worker pool 自动注入）
+//   接口：{ get cancelled, throwIfCancelled }
+//   生产逻辑：worker 收到 'cancel' message → token.cancelled = true（不立刻 throw，让 runCheckCore 在下个 check 点 throw）
+function createCancelToken() {
+  let cancelled = false;
+  return {
+    get cancelled() { return cancelled; },
+    cancel() { cancelled = true; },
+    throwIfCancelled(stage) {
+      if (cancelled) throw new CancelError(`runCheck cancelled at stage=${stage || 'unknown'}`, { stage });
+    },
+  };
+}
+
 // 对账核心（⚠️ 资金红线，spec §5）
 // v0.8 fix5：跑 run 时同步产出 diff + report 到 exports/{date}/acquiring-bill-currency/(report/)
 // v2.1.7 F6：新增 onProgress 入参（守护式埋点，旧 caller 无 onProgress 时行为不变）
@@ -165,6 +191,13 @@ async function peekImportTarget({ db, kind, filePaths }) {
 //   contract test（scripts/integration/v2.1.10-a3-phase1.js）验证：
 //     - 直 require 跑 vs worker pool dispatch 跑 → diff_rows 表内容 byte-for-byte 一致
 //
+// v2.1.10 A3 Phase 2 T13：cancelToken 可选入参（spec §2.1.3 + spec §3.2 cancel < 5s）
+//   - cancelToken 必须可选（向后兼容；主进程直调 / unit test / smoke 都不传 cancelToken）
+//   - 在 5 阶段间插 cancelToken?.throwIfCancelled(stage)
+//   - 事务中 cancel → safeRollback + throw CancelError（保证 DB 无锁残留）
+//   - 写盘阶段不可中断（writer.writeRunOutputs 已经在事务外；中断会留半个 xlsx）
+//   - byte-for-byte 不变（不传 cancelToken 时行为完全等价 v2.1.10 Phase 1）
+//
 // 流程：
 //   1. 清空该月历史 runs + diff_rows（避免累积）
 //   2. 统计 totalBillRows / matched / mismatch / unmatched
@@ -174,7 +207,7 @@ async function peekImportTarget({ db, kind, filePaths }) {
 //   6. 调 writer 同步生成 diff.xlsx + report.xlsx；UPDATE runs.diff_file_path/report_file_path 回填
 //   7. 返回 stats + filePaths
 // 关键不变量：写盘失败不应回滚 DB 事务（数据已 COMMIT 有效）；写盘错误仅 throw 给 caller
-async function runCheckCore({ db, monthKey, storageRoot, onProgress }) {
+async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken }) {
   if (!monthKey) {
     throw new Error('runCheck：monthKey 必填');
   }
@@ -195,6 +228,11 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress }) {
       await new Promise((r) => setImmediate(r));
     }
     runRepo.clearRunsByMonth(db, monthKey);
+    // v2.1.10 T13 cancel check 1/5（事务中 — cancel 触发 safeRollback + throw）
+    if (cancelToken && cancelToken.cancelled) {
+      safeRollback(db);
+      throw new CancelError('runCheck cancelled at stage=clearing-old-runs', { stage: 'clearing-old-runs' });
+    }
 
     // v2.1.7 F6 埋点 2/6：统计行数
     if (onProgress) {
@@ -202,6 +240,11 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress }) {
       await new Promise((r) => setImmediate(r));
     }
     stats = runRepo.computeRunStats(db, { monthKey });
+    // v2.1.10 T13 cancel check 2/5
+    if (cancelToken && cancelToken.cancelled) {
+      safeRollback(db);
+      throw new CancelError('runCheck cancelled at stage=computing-stats', { stage: 'computing-stats' });
+    }
 
     // v2.1.7 F6 埋点 3/6：创建 run 记录
     if (onProgress) {
@@ -218,6 +261,11 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress }) {
       unmatchedRows: stats.unmatchedRows,
       status: 'success'
     });
+    // v2.1.10 T13 cancel check 3/5
+    if (cancelToken && cancelToken.cancelled) {
+      safeRollback(db);
+      throw new CancelError('runCheck cancelled at stage=inserting-run', { stage: 'inserting-run' });
+    }
 
     // v2.1.7 F6 埋点 4/6：SQL JOIN 比对币种（耗时大头）
     //   await setImmediate 让 IPC 把"正在比对币种"文案送达渲染端，再开始阻塞 SQL
@@ -226,6 +274,11 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress }) {
       await new Promise((r) => setImmediate(r));
     }
     insertedDiffRows = runRepo.insertDiffRowsByJoin(db, { runId, monthKey });
+    // v2.1.10 T13 cancel check 4/5（最长阶段后；A4 chunked 落地后此 check 在每 chunk 后）
+    if (cancelToken && cancelToken.cancelled) {
+      safeRollback(db);
+      throw new CancelError('runCheck cancelled at stage=sql-joining', { stage: 'sql-joining' });
+    }
     db.exec('COMMIT');
 
     // sanity check：mismatchRows（统计口径）与实际 INSERT 行数应一致
@@ -246,6 +299,13 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress }) {
   } catch (error) {
     safeRollback(db);
     throw error;
+  }
+
+  // v2.1.10 T13 cancel check 5/5（写盘前 — 非事务期；cancel 不 ROLLBACK）
+  //   说明：写盘阶段开始后不可中断（writer 内部分文件可能已落盘 — 部分 xlsx 残留更糟）
+  //   COMMIT 后 cancel 仍返回 CancelError，但 run 数据已落库；caller 决策保留（success-no-files）或人工清
+  if (cancelToken && cancelToken.cancelled) {
+    throw new CancelError('runCheck cancelled at stage=before-writing-xlsx (DB COMMIT 已完成)', { stage: 'before-writing-xlsx' });
   }
 
   // v0.8 fix5：DB 事务成功后同步写盘 diff + report
@@ -565,5 +625,8 @@ module.exports = {
   cleanupOrphanData,
   getSessionStatus,
   clearMonth,
-  listMonths
+  listMonths,
+  // v2.1.10 A3 Phase 2 T13：cancel 工具
+  CancelError,
+  createCancelToken
 };
