@@ -1205,3 +1205,58 @@ migration 顺序固定（启动期，与 `src/backend/database.js` AppDatabase.i
 
 **当前状态**：v0.8（2026-05-28 SR-FIX-1 Round 6 完成 — Round 2 13 + Round 3 3 + Round 4 4 + Round 5 2 + Round 6 5 = 27 commits）。
 **下一步**：通知主线程 → 验证 push / 用户测试 / merge 决策。
+
+---
+
+## 二十一、SR-FIX-1 Round 7 — Codex 5 次复审 I1+I2 修复（v0.9 reverse sync）
+
+### 21.1 Codex 5 次复审抓的 finding
+
+| ID | 严重度 | 位置 | 触发场景 |
+|---|---|---|---|
+| **I1** | 🟡 P2（资金红线 — Round 6 H4 全路径补全）| `src/main.js:11313` worker failureListener crash 路径 | Round 6 H4 把 chunkSize 存到 chunk_progress，但 worker crash 后 failureListener rewrite `chunk_progress=partial` 路径**没透传 progress.chunkSize**；用户改 chunk-size setting 后 resume → IPC handler fallback 用新 setting → `insertDiffRowsByJoinChunked` OFFSET 不同 scale → 行 skip/重复（资金红线） |
+| **I2** | 🟢 P3 | `docs/prs/PR54-v2.1.10.md:38-179` | PR 归档草稿停在 Round 2 测试数据 + commits 列表；Round 3-6 修复后只同步 spec/CHANGELOG/USER_GUIDE，没同步 PR 草稿 |
+
+### 21.2 Round 7 修复清单（2 finding + closeout = 3 commits）
+
+| Finding | 修复 commit | 修复说明 |
+|---|---|---|
+| **I1** failureListener crash 路径透传 chunkSize | `bbf2dd5` | 扫**所有** setRunChunkProgress caller — main.js / worker-pool / session 内全路径加 chunkSize 透传；I1 焦点是 main.js:11313 failureListener crash → setRunChunkProgress({status:'partial', chunkSize: progress.chunkSize})；unit run-check-worker-pool +1 case 20 / integration a3-phase2 +14 断言（case 7 chunkSize 持久化 + case 8 crash→resume byte-for-byte 一致）|
+| **I2** PR54 草稿 Round 3-7 同步 | `0f09fd8` | PR54-v2.1.10.md Summary 改 "Round 1-7 闭环"；主题完成度表加 Round 3-7 段；资金红线护栏加"chunkSize 全路径持久化"段；保留 frontmatter pr_number=54 / pr_url 不动 |
+| **closeout** Round 7 收尾 | `<本 commit>` | spec §二十一 Round 7 章节 + CHANGELOG v2.1.10 SR-FIX-1 Round 7 段 + release-check 全跑（unit 1258 / integration 892 / smoke 全过） |
+
+### 21.3 测试增量（Round 7 完成后）
+
+| 阶段 | Round 6 baseline | Round 7 完成后 | 增量 |
+|---|---:|---:|---:|
+| unit | 1258 case | **1258 case** | 0（I1 unit 已合入 case 18-20 既有 + I2 仅文档）|
+| integration | 878 断言 | **892 断言** | +14（a3-phase2 case 7+8 chunkSize 全路径）|
+| smoke | 全过 | **全过** | 0 regression |
+
+### 21.4 资金红线护栏（Round 7 维持 + 加强）
+
+5. **chunkSize 全路径持久化**（Round 6 H4 + Round 7 I1 全路径补全）：
+   - 主路径：setRunChunkProgress 4 处调用全持久化 chunkSize（Round 6 H4）
+   - **crash 路径**：worker failureListener rewrite chunk_progress=partial 时透传 progress.chunkSize（Round 7 I1）
+   - resume IPC handler 优先复用持久化值（不读当前 settings）
+   - settings 变化 → warning log + 用持久化值（资金红线优先）
+6. **byte-for-byte 不破坏**（Round 7 I1 仅修透传，不改 chunked 行为）：
+   - contract test a3-phase1 40/40 / a3-phase2 56/56 / a4-phase3 75/75 全过
+
+### 21.5 SR-FIX-1 收敛趋势（Round 1-7）
+
+| Round | finding | commits | 触发 |
+|---|---:|---:|---|
+| 1 | 21 | — | dev self-review |
+| 2 | 13 | 14 | 修 P0+P1 |
+| 3 | 2 | 3 | Codex 初次 review |
+| 4 | 3 | 4 | Codex 复审 |
+| 5 | 1 | 2 | Codex 三复审 |
+| 6 | 4 | 5 | Codex 4 复审（H4 全新维度反弹）|
+| **7** | **2** | **3** | Codex 5 复审（持续收敛 — I1 H4 全路径补全 + I2 文档同步） |
+| **合计** | **46** | **31** | 7 轮闭环 |
+
+---
+
+**当前状态**：v0.9（2026-05-28 SR-FIX-1 Round 7 完成 — Round 2-7 累计 31 commits / 46 finding 全闭环）。
+**下一步**：用户授权直接 merge PR #54（跳过 Round 8 Codex 复审）。

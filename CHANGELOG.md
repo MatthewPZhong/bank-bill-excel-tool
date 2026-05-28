@@ -189,6 +189,34 @@ PR #54 Round 5 push 后 Codex 4 次复审 2026-05-28T11:38:30Z 完成，抓 4 fi
 - resume 时 chunk size 持久化（Round 6 H4）— chunk_progress JSON 新增 chunkSize 字段（4 处 setRunChunkProgress 调用全持久化）；resume IPC handler 优先复用持久化值（不读当前 settings）；settings 变化 → warning log + 用持久化值（资金红线优先）；老 partial run（升级前无 chunkSize 字段）→ fallback settings + warning
 - contract test a3-phase1 40/40 / a3-phase2 42/42 / a4-phase3 75/75 仍通过
 
+### SR-FIX-1 round 7 — Codex 5 次复审抓 finding 修复（合并前补丁，2 项 I1+I2 + closeout）
+
+PR #54 Round 6 push 后 Codex 5 次复审 2026-05-28T12:10:03Z 完成，抓 2 finding：I1 failureListener crash 路径漏透传 chunkSize（Round 6 H4 全路径补全 — 资金红线）+ I2 PR54 草稿停在 Round 2 数据（P3 文档卫生）。用户拍板 Round 7 全修后直接 merge（跳过 Codex 8 次复审）+ 3 commits。详见 `docs/iterations/v2.1.10/spec.md §二十一`。
+
+**🟡 I1（failureListener crash 路径透传 chunkSize — 资金红线 Round 6 H4 全路径补全）**：
+
+- 触发场景：Round 6 H4 把 chunkSize 存到 chunk_progress + resume IPC handler 优先复用持久化值。但 worker crash 后 main.js failureListener 路径调 setRunChunkProgress({status:'partial', ...}) 时**没透传 progress.chunkSize** → chunk_progress.chunkSize 丢失 → 用户改 chunk-size setting 后 resume → IPC handler fallback 用新 setting → `insertDiffRowsByJoinChunked` 用 OFFSET = chunkIndex × chunkSize 计算错位 → 行 skip / 重复（资金红线）
+- 修复：扫**所有** setRunChunkProgress caller — main.js / worker-pool / session 内全路径加 chunkSize 透传；I1 焦点是 main.js:11313 failureListener crash → setRunChunkProgress({status:'partial', chunkSize: progress.chunkSize})
+- 配套测试：unit run-check-worker-pool +1 case 20；integration a3-phase2 +14 断言（case 7 chunkSize 持久化 + case 8 crash→resume byte-for-byte 一致）
+- commit `bbf2dd5`
+
+**🟢 I2（PR54 草稿 Round 3-7 同步 — P3 文档卫生）**：
+
+- 触发场景：PR54-v2.1.10.md 草稿是 PR #54 提交时写的（含 SR-FIX Round 1+2）；Round 3-7 每 round 都同步 spec/CHANGELOG/USER_GUIDE，但**没同步 PR 草稿** → PR 归档文档停在过时数据
+- 修复：PR54-v2.1.10.md Summary 改 "Round 1-7 闭环"；主题完成度表加 Round 3-7 段；资金红线护栏加"chunkSize 全路径持久化"段；保留 frontmatter pr_number=54 / pr_url 不动
+- commit `0f09fd8`（dev stall 后主线程接手）
+
+**Round 7 修复后测试增量**：
+
+- `npm run test:unit` 1258 → **1258 case / 297 suites**（0：I1 unit 合入 case 18-20 既有 + I2 仅文档）
+- `npm run test:integration` 878 → **892 断言 / 15 脚本**（+14：a3-phase2 case 7+8 chunkSize 全路径）
+- `npm run smoke` 0 regression
+
+**资金红线 byte-for-byte 验证不破坏**：
+
+- chunkSize 全路径持久化（Round 6 H4 + Round 7 I1）— 主路径 + crash 路径 + resume IPC 全持久化；settings 变化 warning + 用持久化值
+- contract test a3-phase1 40/40 / a3-phase2 56/56 / a4-phase3 75/75 全过
+
 ### 性能基线（vs v2.1.9）
 
 | 指标 | v2.1.9 baseline | v2.1.10 实测 | 改善 |
