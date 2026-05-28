@@ -18,6 +18,12 @@ const { applyWatermark } = require('./main-process/workbook-watermark');
 const acquiringBillCurrencySession = require('./main-process/acquiring-bill-currency-session');
 // v2.1.8 N1：before-quit 钩子需 module-level runRepo（IPC handler 内 require 来不及）
 const runRepo = require('./backend/acquiring-bill-currency-db/run-repository');
+// v2.1.10 A3 T10：runCheck 跨进程化 — worker pool 在主进程单例
+//   - dispatchRunCheck：IPC handler 调用入口（替代 session.runCheck 直调）
+//   - cancel：acquiringBillCurrency:run:cancel handler 转发用
+//   - isBusy：N1' idle cleanup 协调用（Phase 2 T12）
+//   - shutdown：app.before-quit 时清理（Phase 2 T15）
+const runCheckWorkerPool = require('./main-process/run-check-worker-pool');
 
 // v2.1.8 N1' (v0.7)：idle 30min 自动 cleanup 计时器（spec §3.2.2 N1''-D6 ~ D13）
 //   - lastActivityTs：renderer 上报的用户最后活动时间（IPC `app:user-activity`），main 也用 mutex 间接判定（D6 AND 设计）
@@ -10755,6 +10761,13 @@ function registerNewAccountHandlers() {
   // v0.8 fix5：runCheck 改 async，传 storageRoot 让 session 同步产出 diff.xlsx + report.xlsx
   // v0.12 fix9：handler 接入 operation lock；runCheck return 后异步触发 cleanup（不阻塞 IPC return）
   // v2.1.7 F6：透传 event → onProgress forwarder（spec §6.3 改动点 2）
+  // v2.1.10 A3 T10：runCheck 改走 worker pool dispatchRunCheck（spec §2.1 进程边界）
+  //   - 长任务在 worker 进程内执行（不阻塞主进程 event loop / IPC / 渲染）
+  //   - progress 事件通过 callback → createRunProgressForwarder forward 到 renderer（IPC 通道不变）
+  //   - log 事件通过 callback → appendActivityLogEntry forward（spec §1.2：worker 不直写 log）
+  //   - 错误透传：worker error → dispatchRunCheck reject → handler catch → 维持现有 status='error' 返回格式
+  //   - op lock + notification 现有路径保留
+  //   - N1' idle cleanup 协调（worker busy 时 skip）留 Phase 2 T12 改 setupIdleCleanupTimer
   trackedIpcHandle('acquiringBillCurrency:run', '收单单据币种校验', '开始运行', async (event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const { monthKey } = payload || {};
@@ -10767,7 +10780,25 @@ function registerNewAccountHandlers() {
     try {
       const storageRoot = ensureStorageRoot();
       const onProgress = createRunProgressForwarder(event);
-      result = await acquiringBillCurrencySession.runCheck({ db: database.db, monthKey, storageRoot, onProgress });
+      // v2.1.10 A3 T10：worker pool dispatch（替代 session.runCheck 主进程直调）
+      //   - __dbPath 传 database.dbPath（worker 内 new DatabaseSync(dbPath) — D24 独立 connection）
+      //   - onLog：worker 内 appendModuleLog → message pipe → 主进程 appendActivityLogEntry
+      //     （避免主/子进程并发写 app_activity_log.txt 的 read-modify-write race）
+      result = await runCheckWorkerPool.dispatchRunCheck(
+        {
+          __dbPath: database.dbPath,
+          monthKey,
+          storageRoot,
+        },
+        {
+          onProgress,
+          onLog: (entry) => {
+            try {
+              appendActivityLogEntry(entry || {});
+            } catch (_e) { /* swallow — log forwarder 失败不阻塞业务 */ }
+          },
+        }
+      );
     } catch (err) {
       releaseOpLock();
       // v2.1.7 F7-B1：error 路径弹通知（spec §7.5.2）
@@ -10782,6 +10813,20 @@ function registerNewAccountHandlers() {
     // v2.1.7 F7-B1：success 路径弹通知（spec §7.5.2）
     notifyAcquiringBillCurrencyResult(monthKey, 'success', { mismatchRows: result.mismatchRows });
     return { status: 'success', ...result };
+  });
+
+  // v2.1.10 A3 T10：cancel handler（Phase 1 提供 API；Phase 2 T13 完善 graceful cancel）
+  //   - 调 workerPool.cancel() 设 cancelToken；当前 worker 内 runCheckCore 未读 cancelToken，
+  //     所以 Phase 1 cancel 不真打断（worker 完成当前 runCheck 后自然结束）
+  //   - Phase 2 T13 在 runCheckCore 内 5 阶段间 cancelToken check + ROLLBACK
+  ipcMain.handle('acquiringBillCurrency:run:cancel', (_event, payload = {}) => {
+    const jobId = payload && payload.jobId ? payload.jobId : null;
+    try {
+      const ok = runCheckWorkerPool.cancel(jobId);
+      return { status: ok ? 'success' : 'no-active-job' };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
   });
 
   // v0.8 fix5：export = 另存为最近 run 的 diff.xlsx（fs.copyFile）
