@@ -1,14 +1,14 @@
 {
   "meta": {
     "version": "2.1.10-beta.1",
-    "scannedAt": "2026-05-28T11:06:51.961Z",
+    "scannedAt": "2026-05-28T11:59:47.925Z",
     "root": "src",
     "totalFiles": 94,
-    "totalTopLevelNames": 1001,
+    "totalTopLevelNames": 1004,
     "buckets": {
       "shared": 159,
       "paired": 290,
-      "local": 445,
+      "local": 448,
       "crossFile": 449
     }
   },
@@ -13610,6 +13610,20 @@
         "fileSpan": 1
       },
       {
+        "name": "workerScriptOverride",
+        "defFiles": [
+          "src/main-process/run-check-worker-pool.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/run-check-worker-pool.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "writeN4Cont2Marker",
         "defFiles": [
           "src/backend/database/migrations.js"
@@ -13667,6 +13681,20 @@
       },
       {
         "name": "__test_only_post__",
+        "defFiles": [
+          "src/main-process/run-check-worker-pool.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/run-check-worker-pool.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "__test_only_set_worker_script__",
         "defFiles": [
           "src/main-process/run-check-worker-pool.js"
         ],
@@ -15689,6 +15717,20 @@
         "refFiles": [
           {
             "file": "src/backend/file-service/normalizers.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "resolveWorkerScript",
+        "defFiles": [
+          "src/main-process/run-check-worker-pool.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/run-check-worker-pool.js",
             "count": 2
           }
         ],

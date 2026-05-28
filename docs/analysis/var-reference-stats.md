@@ -5,14 +5,14 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v2.1.10-beta.1 |
-| 扫描时间 | 2026-5-28 19:06:51 |
+| 扫描时间 | 2026-5-28 19:59:47 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 94 |
-| 顶层声明总数 | 1001 |
-| ≥2 次引用 | 894 |
+| 顶层声明总数 | 1004 |
+| ≥2 次引用 | 897 |
 | 跨 ≥3 文件 (A-share) | 159 |
 | 跨 2 文件 (A-pair) | 290 |
-| 单文件 (A-local) | 445 |
+| 单文件 (A-local) | 448 |
 | 跨文件合计 (B) | 449 |
 
 ---
@@ -846,6 +846,7 @@
 | `deserializeFromMessage` | 3 |
 | `ensureInitialized` | 3 |
 | `shutdown` | 3 |
+| `workerScriptOverride` | 3 |
 
 ### `src/main-process/run-check-worker.js`
 

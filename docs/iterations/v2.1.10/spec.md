@@ -2,11 +2,11 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.7（2026-05-28 — SR-FIX-1 Round 5 Codex 复审 G1：setRunChunkProgress(in-progress) 提前到 COMMIT 后任何 await 前）/ v0.6（SR-FIX-1 Round 4 Codex 复审 F1+F2+F3：in-progress 状态机 4 处链路统一扩展 + before-quit shutdown 不抹 activeJob + git diff --check 卫生）/ v0.5（SR-FIX-1 Round 3 Codex F1+F2：N4-cont-1 SQL 加 partial run month 排除 + A4 chunked 入口前初始 in-progress + cleanupOrphanData 守卫扩展）/ v0.4（SR-FIX-1 round 2 P0 4 + P1 9 = 13 项修复 + §16 reverse sync + §8.3 migration 顺序修订）/ v0.3（N4-cont-1 sentinel 修订 `NULL → ''`）/ v0.2（A4 必做 + N4-cont-1 重大方案变更）|
-| 关联 PRD | `PRD-v2.1.10.md` v0.5（同步 §5.3 migration 顺序修订；§4.2 sentinel 修订；v0.5 Round 3 F1 + v0.6 Round 4 F1 N4-cont-1 SQL 守卫扩展 + v0.7 Round 5 G1 setRunChunkProgress 提前）|
+| 文档版本 | v0.8（2026-05-28 — SR-FIX-1 Round 6 Codex 4 次复审 H1+H2+H3+H4：chunk_progress 与 runs INSERT 原子事务化 + spec §18 残留旧结论清理 + worker init-time error/exit 接入 init promise reject + chunk size 存 chunk_progress + resume 复用）/ v0.7（SR-FIX-1 Round 5 Codex 复审 G1：setRunChunkProgress(in-progress) 提前到 COMMIT 后任何 await 前）/ v0.6（SR-FIX-1 Round 4 Codex 复审 F1+F2+F3：in-progress 状态机 4 处链路统一扩展 + before-quit shutdown 不抹 activeJob + git diff --check 卫生）/ v0.5（SR-FIX-1 Round 3 Codex F1+F2：N4-cont-1 SQL 加 partial run month 排除 + A4 chunked 入口前初始 in-progress + cleanupOrphanData 守卫扩展）/ v0.4（SR-FIX-1 round 2 P0 4 + P1 9 = 13 项修复 + §16 reverse sync + §8.3 migration 顺序修订）/ v0.3（N4-cont-1 sentinel 修订 `NULL → ''`）/ v0.2（A4 必做 + N4-cont-1 重大方案变更）|
+| 关联 PRD | `PRD-v2.1.10.md` v0.5（同步 §5.3 migration 顺序修订；§4.2 sentinel 修订；v0.5 Round 3 F1 + v0.6 Round 4 F1 N4-cont-1 SQL 守卫扩展 + v0.7 Round 5 G1 setRunChunkProgress 提前 + v0.8 Round 6 H1+H3+H4 同事务原子 / init-time crash / chunk size 持久化）|
 | 关联 backlog | `backlog.md` v0.2（D23-D28 全部拍板 + Phase 0 POC 完成）|
-| 起草人 | PM + Dev Phase 4 T28 发现 + 主线程 T29' 修订 + Dev SR-FIX-1 round 2 dev 自审 + Round 3 Codex review + Round 4 Codex 复审 + Round 5 Codex 三复审 |
-| 状态 | v0.7 SR-FIX-1 Round 5 完成（13 + 3 + 4 + 2 commits；release-check 全绿；unit / integration 增量见 §19.3）|
+| 起草人 | PM + Dev Phase 4 T28 发现 + 主线程 T29' 修订 + Dev SR-FIX-1 round 2 dev 自审 + Round 3 Codex review + Round 4 Codex 复审 + Round 5 Codex 三复审 + Round 6 Codex 4 次复审 |
+| 状态 | v0.8 SR-FIX-1 Round 6 完成（13 + 3 + 4 + 2 + 5 commits；release-check 全绿；unit / integration 增量见 §20.3）|
 
 ---
 
@@ -1144,5 +1144,64 @@ migration 顺序固定（启动期，与 `src/backend/database.js` AppDatabase.i
 
 ---
 
-**当前状态**：v0.7（2026-05-28 SR-FIX-1 Round 5 完成 — Round 2 13 + Round 3 3 + Round 4 4 + Round 5 2 = 22 commits）。
+## 二十、SR-FIX-1 Round 6 — Codex 4 次复审 H1+H2+H3+H4 修复（v0.8 reverse sync）
+
+> v0.8 立项（2026-05-28 — PR #54 Round 5 push 后 Codex 4 次复审 2026-05-28T11:38:30Z 完成，抓 4 finding；用户拍板 5 commits = H1+H2+H3+H4+closeout）
+
+### 20.1 Codex 4 次复审 finding 清单
+
+| Finding | 严重度 | 位置 | 描述 |
+|---|---|---|---|
+| **H1** | 🟡 P2（进程硬终止 race — Round 5 G1 修了 event-loop 窗口但未修硬终止）| `src/main-process/acquiring-bill-currency-session.js:299-324` | Round 5 G1 把 `setRunChunkProgress(in-progress)` 移到 `db.exec('COMMIT')` 之后第一个 await 之前 — 修了 event-loop / await 窗口。但如果 worker 被硬终止（SIGKILL / OOM kill）/ 进程在两条 SQLite 语句之间崩 → 仍会留下 `runs` 已提交但 `chunk_progress IS NULL` 残留 → cleanup 仍可能当 orphan 清掉 |
+| **H2** | 🟢 P3（spec 文档卫生）| `docs/iterations/v2.1.10/spec.md:1095` | §18.5 Round 4 段尾 "建议直接 merge 不再开 Round 5" 旧结论被 Round 5 推翻 — 同 §17.5 "可选 Round 4" / §19.5 "不再开 Round 6" 均已被后续 Round 推翻；需统一在 §17-§19 旧结论旁加 reverse sync 标记 |
+| **H3** | 🟠 P1（init-time worker crash 永久 hang — 资金红线相关：影响可用性 + 用户必须重启）| `src/main-process/run-check-worker-pool.js:137` | 如果 worker 在 `init-done` / `init-error` 之前就 exit（packaged path 错 / module-load failure / node:sqlite 启动失败 / 系统级 SIGKILL）→ `ensureInitialized()` 内的 promise 永远不被 resolve/reject（onInitMsg listener 永远不被触发；`handleWorkerFailure` 只 reset 模块级状态但不 reject pending promise）→ 第一次 `dispatchRunCheck()` 永远不返回 → 用户必须重启 app |
+| **H4** | 🟡 P2（资金红线 — resume 时 chunk size 不一致 → 行 skip/重复）| `src/main.js:10914` | resume IPC handler 读当前 settings `acquiring_bill_chunk_size`，但 `lastCompletedChunkIndex` 是用原始 partial run 的 chunkSize 算的。如果用户 cancel 后改 settings（如 100000 → 10000）→ `insertDiffRowsByJoinChunked` 用 `OFFSET = chunkIndex * chunkSize` 计算错位 → diff_rows 行 skip 或重复 → 与全新 run byte-for-byte 不一致 |
+
+### 20.2 Round 6 修复清单（4 finding + closeout = 5 commits）
+
+| Finding | 严重度 | 修复 commit | 修复说明 |
+|---|---|---|---|
+| **H1** chunk_progress 与 runs INSERT 原子事务化 | 🟡 | `5a98ab5` | `runCheckCore` `if (!isResume)` block 内：把 `setRunChunkProgress({status:'in-progress'})` 从 `db.exec('COMMIT')` **之后**移到 `db.exec('COMMIT')` **之前**（同事务内）；SQLite 单连接事务隔离保证 `runs` 行与 `chunk_progress` 同事务原子可见或同时回滚；任何 COMMIT 后的硬终止：`runs.chunk_progress` 已是 in-progress（非 NULL）；R5 G1 COMMIT 后 setRunChunkProgress + try-catch 包裹删除（合并到 BEGIN/COMMIT 内）。unit acquiring-bill-currency-session-core +2 case（T19.6 H1 同事务原子提交 + T19.7 cancel at inserting-run 同事务回滚）|
+| **H2** spec §18 Round 4 残留旧结论清理 | 🟢 | `aad6f91` | spec §17.5 / §18.5 / §19.5 三处 "可选 / 建议不再开" 旧结论加 reverse sync 标记 + 删除线 + 指向后续 §章节；保留历史可追溯 |
+| **H3** worker init-time error/exit 接入 init promise reject + timeout | 🟠 | `b88ddb1` | `ensureInitialized()` 重构：init promise 内额外 `once('error')` / `once('exit')` listener → reject + reset 模块级状态；加 10s init timeout 兜底（防 worker 启动卡死无任何信号）；五路径（init-done / init-error / error / exit / timeout）互斥 settle；任意失败路径都 reject promise + reset → 下次 dispatchRunCheck 自动 cold-start。新增 `__test_only_set_worker_script__` 测试钩子 + `tests/unit/main-process/__fixtures__/init-crash-worker.js`（process.exit(1) 立即退）。unit run-check-worker-pool +1 case 19 |
+| **H4** chunk size 存 chunk_progress + resume 复用 | 🟡 | `9e02836` | `setRunChunkProgress` 新增 `chunkSize` 可选参数 + JSON payload 字段；`runCheckCore` 4 处 setRunChunkProgress 调用全传 effectiveChunkSize（H1 COMMIT 前占位 / onChunkDone / catch partial 路径 / 0-chunk 边界）；catch 路径优先复用 `existingProgress.chunkSize`；`main.js` resume IPC handler 优先从 `progress.chunkSize` 取 chunkSize（fallback 当前 settings + warning log）；resume 时 chunkSize 不一致触发 warning（持久化值优先，资金红线）。unit acquiring-bill-currency-session-core +2 case（T19.8 chunkSize 持久化 + T19.9 partial 字段保留）；integration v2.1.10-a4-phase3 +1 case 7（端到端 baseline vs resume diff_rows byte-for-byte 一致 = 12 断言）|
+| **closeout** Round 6 收尾 | — | `<本 commit>` | spec §二十 Round 6 章节定稿 + CHANGELOG v2.1.10 SR-FIX-1 Round 6 段 + release-check 全跑（unit 1258 / integration 878 / smoke 全过）+ scan:vars 数据同步 |
+
+### 20.3 测试增量（Round 6 完成后）
+
+| 阶段 | Round 5 baseline | Round 6 完成后 | 增量 |
+|---|---:|---:|---:|
+| unit | 1253 case | **1258 case** | +5（acquiring-bill-currency-session-core T19.6+T19.7+T19.8+T19.9 = 4 + run-check-worker-pool case 19 = 1）|
+| integration | 866 断言 | **878 断言** | +12（a4-phase3 case 7 = 12）|
+| smoke | 全过 | **全过** | 0 regression |
+
+### 20.4 资金红线护栏（Round 6 维持 + 加强）
+
+1. **chunk_progress 同事务原子可见**（Round 6 H1）：
+   - `runs` 行 INSERT 与 `chunk_progress = 'in-progress'` 同 BEGIN/COMMIT 内
+   - 任何硬终止（SIGKILL / OOM / 进程崩）→ 同时可见或同时回滚（SQLite 事务隔离保证）
+   - 不可能出现 `runs` 已 COMMIT 但 `chunk_progress IS NULL` 中间态
+2. **worker init-time crash 不 brick**（Round 6 H3 资金红线相关 — 可用性）：
+   - init promise 五路径互斥 settle（init-done / init-error / error / exit / timeout）
+   - 任意失败路径 reject + reset 模块级状态 → 下次 dispatch 自动 cold-start
+   - 10s init timeout 防 worker 启动卡死无信号
+3. **resume 时 chunk size 持久化**（Round 6 H4 资金红线护栏）：
+   - chunk_progress JSON 新增 `chunkSize` 字段（4 处 setRunChunkProgress 调用全持久化）
+   - resume IPC handler 优先复用持久化值（不读当前 settings）
+   - settings 变化 → warning log + 用持久化值（资金红线优先）
+   - 老 partial run（升级前无 chunkSize 字段）→ fallback settings + warning
+4. **byte-for-byte 不破坏**（Round 6 H1+H3+H4 不改变成功路径行为）：
+   - contract test a3-phase1 40/40 / a3-phase2 42/42 / a4-phase3 75/75 仍通过
+   - H4 case 7 baseline (5000 行 / chunkSize=100) vs partial→resume (5000 行 / chunkSize=100) diff_rows byte-for-byte 一致
+
+### 20.5 Round 6 → 后续建议
+
+- **release-check 全绿**（unit 1258 / integration 878 / smoke 全过）— ✅ closeout commit 已跑
+- **PR #54 自动同步**（git push 后）— 不重命名草稿 `docs/prs/PR54-v2.1.10.md`
+- **用户测试**（manual-test-checklist 不需新增 — H1/H3/H4 修复均在既有 chunked / first-chunk crash / resume 覆盖范畴；新加 chunkSize 持久化字段对用户透明）
+- **是否再开 Round 7**：Round 6 修复点是 Round 5 G1 留下的进程硬终止 race + init-time crash hang + chunk size 持久化漏洞；3 类修复均已 unit + integration 端到端验证；建议触发 @codex review 确认无 finding 后直接 merge（可不再开 Round 7）
+
+---
+
+**当前状态**：v0.8（2026-05-28 SR-FIX-1 Round 6 完成 — Round 2 13 + Round 3 3 + Round 4 4 + Round 5 2 + Round 6 5 = 27 commits）。
 **下一步**：通知主线程 → 验证 push / 用户测试 / merge 决策。
