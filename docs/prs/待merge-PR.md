@@ -1,0 +1,193 @@
+---
+integrated: false
+pr_number: TBD
+pr_url: TBD
+version: 2.1.10-beta.1
+created_at: 2026-05-28
+---
+
+# v2.1.10 β PR（待提交）
+
+## Summary
+
+v2.1.9 α 之后 1 轮迭代（β 范围），**4 主线 + SR-FIX-1 Round 1+2 闭环 + v2.1.11 backlog 立项**：
+
+- **A3** `acquiringBillCurrency.runCheck` 跨进程化（worker_threads + 独立 DB 连接 + 错误序列化 + crash recover）
+- **A4** SQL JOIN chunked 分批跑（10w 行/chunk + 独立事务 + cancel/progress 透传 + resume from chunk）
+- **N4-cont-1** `bill_imports.raw_json` idle 自动清理（仅清"对账成功"行 + 7 天窗口 + 复用 N1' idle 30min + 0 UI；v0.3 sentinel `''`）
+- **N4-cont-2** `acquiring_bill_currency_diff_rows` FK CASCADE 改造（🔴 DB schema 不可逆 + 8-status migration state machine + SR-backup-1 前置备份）
+- **SR-FIX-1** 4 P0 + 9 P1 = 13 finding 全闭环（含 P0-1 cleanupOrphanData × chunked partial 保护 / P0-2 worker init-error reset / P0-3 before-quit graceful shutdown / P0-4 idle cleanup 顺序契约）
+
+⚠️ **资金红线 4 道护栏**（A3 byte-for-byte / A4 chunked vs non-chunked / N4-cont-1 NOT IN 子查询 / N4-cont-2 DB 不可逆 schema）+ **N4-cont-1 SR1 sentinel 修订**（v0.2 NULL → v0.3 `''` 兼容 v2.1.8 N4 NOT NULL schema）。
+
+## 主题完成度
+
+| 主题 | 状态 | 关键产出 |
+|---|---|---|
+| **A3** runCheck 跨进程化 | ✅ | `src/main-process/run-check-worker.js` + `run-check-worker-pool.js` + `serialize-error.js` + `runCheckCore` alias / byte-for-byte contract test / **48x event loop lag 改善**（主进程 66ms → worker 1ms） |
+| **A4** SQL JOIN chunked 分批 | ✅ | `insertDiffRowsByJoinChunked` 10w/chunk + 独立 BEGIN/COMMIT + `runs.chunk_progress` JSON 持久化 + `resumeFromRun` IPC + chunked vs non-chunked 0.99x（**几乎零开销**） |
+| **N4-cont-1** raw_json idle 治理 | ✅ | `clearStaleSuccessfulRawJson` + settings `retention_days=7`（可调 1-30）+ NOT IN diff_rows 排除差异行 + 复用 N1' idle hook + 0 UI；v0.3 sentinel `''` |
+| **N4-cont-2** FK CASCADE 改造 | ✅ | `ensureDiffRowsCascadeMigration_v2_1_10` 8-status state machine + diff_rows 表 rebuild + SR-backup-1 前置 + 跨版本 v2.1.7/v2.1.8/v2.1.9 → v2.1.10 一步迁 |
+| **SR-FIX-1 Round 1** | ✅ | dev self-review 21 finding（P0:4 / P1:9 / P2:8）→ `docs/iterations/v2.1.10/sr-fix-1-round1-findings.md` |
+| **SR-FIX-1 Round 2** | ✅ | P0 + P1 全 13 项闭环 + 14 commits（13 finding + 1 closeout）+ unit/integration 增量 +5/+15 |
+
+## 测试覆盖
+
+| 测试类型 | v2.1.9 baseline | v2.1.10 终态 | 增量 |
+|---|---|---|---|
+| `npm run test:unit` | 1099 / 277 suites | **1243 / 297 suites / 0 fail** | +144 case / +20 suites |
+| `npm run test:integration` | 6 脚本 / 359 断言 | **15 脚本 / 824 断言 / 0 fail** | +9 脚本 / +465 断言（v2.1.10 新增 5 脚本 164 断言） |
+| `npm run smoke` | 全绿 | **全绿 0 regression** | 0 退步 |
+
+资金红线 4 道护栏 byte-for-byte 锁定（多重 contract test）。
+
+## ⚡ 性能数据（vs v2.1.9）
+
+| 指标 | v2.1.9 | v2.1.10 | 变化 |
+|---|---:|---:|---|
+| 主进程 unresponsive 触发频率 | > 0 | **0** | A3 主目标达成 |
+| event loop lag @ 50000 行 (max) | 65.7 ms | **1.3 ms** | **48.7x 改善** |
+| worker cold-start | N/A | **10.9 ms** | — |
+| IPC 延迟（1000 次 round-trip 均值） | N/A | 0.010 ms | — |
+| runCheck 总耗时 50000 行 | 171.9 ms | 259.8 ms | +51%（worker 化开销） |
+| runCheck 500w 行外推 | baseline | ~1.05x（spec 5% budget 内） | 接近持平 |
+| chunked vs non-chunked 50000 行 | N/A | 174.8 ms vs 176.3 ms | **0.99x（几乎零开销）** |
+| DB 体积 6 月增长（潜在） | ~24GB（极端用户） | ~8GB | N4-cont-1 治理 |
+
+**A3 主目标**：主进程不再卡死（不是缩短总耗时）。**A4 chunked 主目标**：cancel 响应 < 1s + 进度回调精细化（不是缩短总耗时）。
+
+## 资金红线护栏
+
+| 风险 | 等级 | 缓解 |
+|---|---|---|
+| A3 worker 跨进程后 runCheck 结果与主进程版必须 byte-for-byte 一致 | 🔴 资金红线 | `runCheckCore` alias + 3 case contract test（fixture 10/8 行 stats + diff_rows byte-for-byte） |
+| A4 chunked vs non-chunked byte-for-byte | 🔴 资金红线 | 4 层 contract test（5000 行 4 路径 + cancel/resume + smoke + perf） |
+| N4-cont-1 自动删 raw_json 不可逆 | 🔴 不可逆 | NOT IN 子查询排除差异行（差异行 raw_json 永远保留）+ 7 天窗口 + USER_GUIDE 写明 SQLite 手动恢复路径 + 8 unit case 含 fail case 6（diff_rows 表损坏防误清） |
+| N4-cont-2 FK CASCADE DB 不可逆 schema | 🔴 不可逆 | SR-backup-1 前置 + 8-status state machine + `PRAGMA foreign_key_check` 0 violation + 失败 ROLLBACK + 备份保留 + 标志位幂等 |
+
+## ⚠️ 升级提示
+
+1. **首次启动自动备份 + N4-cont-2 migration**：`<userData>/backups/tool-data-bak-pre-N4-cont-2-<timestamp>.sqlite`；diff_rows 表 rebuild 加 ON DELETE CASCADE × 2 FK
+2. **真实环境验证**：实测用户 460w 行真实老库迁移 0 数据丢失 + 0 FK violation + 5.8GB 自动备份保留
+3. **N4-cont-1 sentinel v0.3 修订**：raw_json 清理 sentinel = `''`（不是 `NULL`，兼容 v2.1.8 N4 NOT NULL schema；v0.2 SR-FIX 修订）
+4. **A3 不解决"对账总耗时"** — 解决"主进程不卡"+ "cancel 响应 < 1s"+ "运行时可切其他模块"；如需缩短总耗时见 v2.1.11+ A3-multi-worker
+5. **A4 chunked + resume**：cancel 后 chunk_progress.status='partial' 持久化；可 resume（IPC handler 已就位；UI 入口留 v2.1.11+）
+
+## ⚠️ 关联功能 review（check-vars / 2026-05-28）
+
+| 层级 | 命中数 | 关键变量 |
+|---|---:|---|
+| 🔴 Critical | 6 | `FileValidationError`（A3 serializeError 覆盖✅）/ `unmatchedRows`（与本版无交集✅）/ **`runCheckCore`**（A3 核心算法✅）/ **`clearStaleSuccessfulRawJson`**（N4-cont-1 资金红线 NOT IN✅）/ **`ensureDiffRowsCascadeMigration_v2_1_10`**（N4-cont-2 8-status✅）/ **`acquiring_bill_currency_diff_rows` FK schema**（CASCADE × 2✅） |
+| 🟡 Important-skeleton | 5 | `cleanupAfterRunBackground` / `ipcRenderer` / **`serializeError`**（A3 跨进程错误回传契约✅）/ `settingsRepository` / `setupIdleCleanupTimer`（全部已对照 review，无回归） |
+| 🟢 Runtime-state | 3 | `app` / `dialog` / `state`（均无 schema 改动） |
+| 🟢 Risk-sensitive | 3 | `ensureBillRawJsonV2Slim` / `hasColumn` / `lastUserActivityTs`（均无契约改动） |
+
+### v2.1.10 升格（rules/important-variables.md v11 → v12，+5 条 / 更新 1 条）
+
+- 🔴 Critical：`runCheckCore`（A3）/ `clearStaleSuccessfulRawJson`（N4-cont-1 资金红线 NOT IN 子查询）/ `ensureDiffRowsCascadeMigration_v2_1_10`（N4-cont-2 DB 不可逆 8-status）/ `acquiring_bill_currency_diff_rows` FK CASCADE schema（N4-cont-2 spec §九 拍板）
+- 🟡 Important-skeleton：`serializeError` / `deserializeError`（A3 跨进程错误回传契约）
+- 更新 Critical：`bill_imports.raw_json` 扩 N4-cont-1 sentinel `''` 语义 + 差异行永不清空契约
+
+详见 `docs/iterations/v2.1.10/check-vars-report.md`。
+
+## SR-FIX-1 闭环（Round 1 + Round 2）
+
+### Round 1 — dev self-review（21 finding 收集）
+
+| 分级 | 数量 | 主要 finding |
+|---|---:|---|
+| 🔴 P0 Critical | 4 | P0-1 cleanupOrphanData × chunked partial / P0-2 worker init-error brick / P0-3 before-quit shutdown / P0-4 idle cleanup 顺序契约 |
+| 🟡 P1 Important | 9 | P1-1 文档残留 v0.2 sentinel / P1-2 migration 顺序 / P1-3 'checked' status / P1-4 CancelError UX / P1-5 resume 扫所有 partial / P1-6 unit case 17 / P1-7 chunk_progress crash 兜底 / P1-8 USER_GUIDE / P1-9 progress forwarder 注释 |
+| 🟢 P2 Minor | 8 | 留合并后 patch（注释/typo/防御性）|
+
+资金红线 0 命中（NOT IN 子查询 / byte-for-byte / 8-status 三道护栏均通过）。
+
+### Round 2 — 修复闭环（14 commits — 13 finding + 1 closeout）
+
+| Finding | Commit |
+|---|---|
+| P0-1 cleanupOrphanData partial 保护 | `0e4a87e` |
+| P0-2 worker init-error reset | `45bd81e` |
+| P0-3 before-quit workerPool shutdown | `d16ec19` |
+| P0-4 idle cleanup 顺序契约 | `ea2a443` |
+| P1-1 文档 sentinel v0.3 同步 | `e8aec42` |
+| P1-2 spec §8.3 migration 顺序 | `b3e3c5d` |
+| P1-3 'checked' status | `058c167` |
+| P1-4 CancelError → cancelled 路径 | `ad207f9` |
+| P1-5 listPartialRuns API | `c8c7cf8` |
+| P1-6 tasks T06 reverse sync | `2432ffe` |
+| P1-7 worker crash chunk_progress | `ab4f06b` |
+| P1-8 USER_GUIDE Resume 边界 | `0bcd365` |
+| P1-9 progress forwarder 注释 | `4ef2cc3` |
+| closeout（spec §16 + CHANGELOG + scan:vars） | `9cea6ff` |
+
+详见 `docs/iterations/v2.1.10/sr-fix-1-round1-findings.md` + `docs/iterations/v2.1.10/spec.md` §十六。
+
+## N4-cont-1 v0.3 sentinel 修订（Phase 4 T28 发现 + 用户拍板 Option A）
+
+| 维度 | v0.2（PM 起草） | v0.3（用户拍板 Option A） |
+|---|---|---|
+| sentinel | `NULL` | **`''`（空字符串）** |
+| WHERE 守卫 | `raw_json IS NOT NULL` | `raw_json != ''` |
+| 触发场景 | T28 集成发现 `UPDATE raw_json = NULL` 被 SQLite NOT NULL constraint 拒绝（v2.1.8 N4 schema）| `'' `兼容 NOT NULL；语义等价"已清"sentinel；字节代价 +1 vs NULL |
+| 改动面 | spec §4.2 / PRD §2.3.3 / unit fixture / integration test / commit `740fdc8` |
+
+## 关联文档
+
+- `docs/iterations/v2.1.10/PRD-v2.1.10.md` v0.3（D23-D28 决策点 + N4-cont-1 sentinel v0.3 修订）
+- `docs/iterations/v2.1.10/spec.md` v0.4（§一-§五 + §2.6 Phase 0 POC + §三 A4 实测 + §四 N4-cont-1 v0.3 + §五 N4-cont-2 + §十六 SR-FIX-1）
+- `docs/iterations/v2.1.10/tasks.md` v0.2（6 Phase + 37 task + SR-FIX 预留）
+- `docs/iterations/v2.1.10/manual-test-checklist.md` v0.2（46+ case + 0 regression 9 主题 + 三方签收）
+- `docs/iterations/v2.1.10/sr-fix-1-round1-findings.md`（Round 1 21 finding）
+- `docs/iterations/v2.1.10/check-vars-report.md`（v2.1.10 升格清单）
+- `docs/iterations/v2.1.10/v2.1.10-version-bump-recommendation.md`（保持 beta.1 — 不擅自 bump）
+- `docs/iterations/v2.1.11/backlog.md`（v2.1.11+ 立项 — A3-multi-worker + F5-cont + SR-log-1-dual-write-removal + A3-spread）
+- `scripts/poc/v2.1.10-a3-comparison.md`（Phase 0 POC 报告）
+- `scripts/perf/v2.1.10-a3-baseline-report.md` + `scripts/perf/v2.1.10-a4-chunked-report.md`
+- `CHANGELOG.md`（v2.1.10 章节 92 行）
+- `docs/VERSION_FEATURE_HISTORY.md`（v2.1.10 节）
+- `docs/USER_GUIDE.md`（§1.8.10-1.8.12 + 故障排查 + §八 + FAQ）
+- `rules/important-variables.md` v11 → v12（+5 条 / 更新 1 条）
+
+## 真实环境验证（460w 行用户老库）
+
+| 验证项 | 结果 |
+|---|---|
+| N4-cont-2 自动备份 | ✅ `tool-data-bak-pre-N4-cont-2-20260528T161707.sqlite`（5.8GB） |
+| migration marker | ✅ `n4_cont_2_diff_rows_cascade_migrated=1` @ 2026-05-28T08:17:26 |
+| diff_rows FK CASCADE | ✅ schema `ON DELETE CASCADE` × 2 FK 已就位 |
+| 数据完整性 | ✅ bill_imports 4,615,524 / flow_imports 4,658,440 / diff_rows 2,596,169 / runs 1 |
+| `PRAGMA foreign_key_check` | ✅ 0 violation |
+| 孤儿 diff_rows | ✅ 0 |
+| v2.1.9 N5 marker | ✅ `n5_channels_migrated=true` / `n5_scenarios_unique_migrated=true` |
+| v2.1.10 settings | ✅ `acquiring_bill_chunk_size=100000` / `retention_days=7` |
+
+## v2.1.11+ 立项（已落 backlog v0.1）
+
+| 主题 | 工期 | 优先级 |
+|---|---|---|
+| **A3-multi-worker**（多 worker pool — acquiringBillCurrency + bizOpRecon + pending 3 模块复用） | ~2 周 | 🔴 重点 |
+| **F5-cont** C4 manyToOne ILP/网络流重写 | ~2-3 周 | 🔴 持续延期至 v2.1.7-v2.1.10，v2.1.11 必做 |
+| **SR-log-1-dual-write-removal** | ~0.5 天 | 🟢 收尾 |
+| **A3-spread**（其他对账模块）| ~4 周 | 🟡 可选 |
+
+详见 `docs/iterations/v2.1.11/backlog.md`。
+
+## Test plan
+
+- [x] `npm run test:unit` 全绿（1243 / 297 suites / 0 fail）
+- [x] `npm run test:integration` 全绿（15 脚本 / 824 断言）
+- [x] `npm run smoke` 全绿（0 regression）
+- [x] `npm run release-check` 全绿
+- [x] **T1 启动 + migration 验证**（automated coverage：phase5 case 1 + migrations-n4-cont-2 12 unit case）
+- [x] **T2 跨版本升级**（automated + **真实 460w 行用户老库验证通过**：FK CASCADE / marker / 备份 / 0 violation）
+- [x] **T3 byte-for-byte**（contract test 多档锁定）
+- [x] **T4 cleanupOrphanData × partial run**（phase3 case 4 15 子断言）
+- [x] **T5 N4-cont-1 v0.3 sentinel 资金红线**（phase4 23 断言 + unit 8 case 含 fail case 6）
+
+## ⏭ 后续节点
+
+1. 用户测试 → 如有 P0/P1 SR-FIX Round 3+ 持续修
+2. Codex 二次复审（可选 — 重点 P0-3 异步 quit / P0-4 trigger Promise 改造的 caller 兼容性）
+3. merge main 后立即建 v2.1.11 分支启动 PM
+4. v2.1.10 → v2.1.11 PRD/spec/tasks/manual-test-checklist 四件套起草
