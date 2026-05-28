@@ -45,7 +45,7 @@
 - **A4（v0.2：D25 用户拍板必做，不等 A3 实测）**：chunked 分批跑 — cancel 响应 < 5s + 进度回调精细化（chunkIndex / chunkCount）是 hard requirement；chunk size 选 10w 行（spec §3.2 已选定，理由：cancel 响应 < 5s + 内存峰值 < 200MB）；idempotent / 重跑保护（必做不再"待 Phase 3 细化"）
 - **N4-cont-1（v0.2：重大方案变更）**：
   - (1) settings 表新增单键 `acquiring_bill_raw_json_retention_days`（默认 7 天；settings 可调范围 1-30；getter 沿用 v2.1.9 N1-settings 范式范围外回退默认值）
-  - (2) **完全复用 v2.1.9 N1' idle 30min cleanup 计时器**（`src/main.js:11155-11178`），在 idle cleanup 回调内追加 raw_json 清理逻辑 — 找出对账成功（不在 `acquiring_bill_currency_diff_rows` 中）且 `imported_at < datetime('now', '-N days')` 的 `acquiring_bill_currency_bill_imports` 行 → `UPDATE raw_json = ''`（v0.3 sentinel；保留行骨架 + 业务字段；兼容 v2.1.8 N4 NOT NULL 约束 — 详 spec §4.2.1）
+  - (2) **完全复用 v2.1.9 N1' idle 30min cleanup 计时器**（`src/main.js:11155-11178`），在 idle cleanup 回调内追加 raw_json 清理逻辑 — 找出对账成功（不在 `acquiring_bill_currency_diff_rows` 中）+ **不属于 partial run 关联月份**（v0.5 Round 3 F1 新增）+ `imported_at < datetime('now', '-N days')` 的 `acquiring_bill_currency_bill_imports` 行 → `UPDATE raw_json = ''`（v0.3 sentinel；保留行骨架 + 业务字段；兼容 v2.1.8 N4 NOT NULL 约束 — 详 spec §4.2.1）
   - (3) graceful 失败 + 活动日志（沿用 v2.1.9 SR-log-1 `appendActivityLogEntry` 范式）
   - (4) 失败不阻塞 N1' 主流程 cleanup（try/catch + 下次 idle 重试）；顺序：先执行 v2.1.8 cleanupAfterRunBackground，后执行 raw_json 清理
   - (5) **0 UI**（v0.2：D27 用户拍板）— 不加按钮、不加 dialog、不加 IPC handler；用户无感
@@ -161,7 +161,7 @@ v2.1.8 N4 引入 `bill_imports.raw_json` 9 字段保留范式 → v2.1.9 N4 重�
 #### 2.3.3 改造范围（v0.2 重写 — 从 6 条减为 2 条）
 
 - **DB**：settings 表新增 **1 键** — `acquiring_bill_raw_json_retention_days`（默认 `'7'`；settings 范围 1-30；getter 范围外回退 7）
-- **后端清理函数**：新建 `src/backend/acquiring-bill-currency-db/raw-json-retention.js`，导出 `clearStaleSuccessfulRawJson(db, retentionDays)` — 执行 SQL（**v0.3 sentinel = ''**，详 spec §4.2.1）：
+- **后端清理函数**：新建 `src/backend/acquiring-bill-currency-db/raw-json-retention.js`，导出 `clearStaleSuccessfulRawJson(db, retentionDays)` — 执行 SQL（**v0.5 Round 3 F1 双 NOT IN 子查询 + v0.3 sentinel = ''**，详 spec §4.2.1）：
   ```sql
   UPDATE acquiring_bill_currency_bill_imports
   SET raw_json = ''
@@ -172,9 +172,16 @@ v2.1.8 N4 引入 `bill_imports.raw_json` 9 字段保留范式 → v2.1.9 N4 重�
       AND b.id NOT IN (
         SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows
       )
+      -- v0.5 (Round 3 F1) 新增：排除 partial run 关联月份的所有 bill
+      AND b.month_key NOT IN (
+        SELECT DISTINCT month_key FROM acquiring_bill_currency_runs
+        WHERE chunk_progress IS NOT NULL
+          AND json_extract(chunk_progress, '$.status') = 'partial'
+      )
   )
   ```
-  - NOT IN 子查询排除差异行
+  - 第一 NOT IN 子查询排除差异行（既有 v0.2 守卫）
+  - **v0.5 (Round 3 F1) 第二 NOT IN 子查询排除 partial run 关联月份的全部 bill**（不仅差异行）— 保证 chunked run 半途 cancel 后 idle cleanup 不破坏未来 mismatch 行的 raw_json
   - `imported_at` 用于"老于 N 天"判断
   - `raw_json = ''` 保留行骨架 + 业务字段 + 业务主键（v0.3：兼容 v2.1.8 N4 NOT NULL 约束 — 之前 v0.2 写 NULL 在 NOT NULL schema 下会被 SQLite 拒绝）
 - **触发集成**：v2.1.9 N1' idle 30min cleanup 回调（`src/main.js:11155-11178` 内 `triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded`）内追加 `clearStaleSuccessfulRawJson(db, retentionDays)` — 顺序：先现有 cleanup（v2.1.8 `cleanupAfterRunBackground`），后 raw_json 清理；失败不阻塞主 cleanup（try/catch + 下次 idle 重试）

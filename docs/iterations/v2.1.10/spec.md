@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.4（2026-05-28 — SR-FIX-1 round 2 P0 4 + P1 9 = 13 项修复 + §16 reverse sync + §8.3 migration 顺序修订）/ v0.3（N4-cont-1 sentinel 修订 `NULL → ''`）/ v0.2（A4 必做 + N4-cont-1 重大方案变更）|
+| 文档版本 | v0.5（2026-05-28 — SR-FIX-1 Round 3 Codex F1+F2：N4-cont-1 SQL 加 partial run month 排除 + A4 chunked 入口前初始 in-progress + cleanupOrphanData 守卫扩展）/ v0.4（SR-FIX-1 round 2 P0 4 + P1 9 = 13 项修复 + §16 reverse sync + §8.3 migration 顺序修订）/ v0.3（N4-cont-1 sentinel 修订 `NULL → ''`）/ v0.2（A4 必做 + N4-cont-1 重大方案变更）|
 | 关联 PRD | `PRD-v2.1.10.md` v0.4（同步 §5.3 migration 顺序修订；§4.2 sentinel 修订）|
 | 关联 backlog | `backlog.md` v0.2（D23-D28 全部拍板 + Phase 0 POC 完成）|
 | 起草人 | PM + Dev Phase 4 T28 发现 + 主线程 T29' 修订 + Dev SR-FIX-1 round 2 dev 自审 |
@@ -516,12 +516,12 @@ function getAcquiringBillRawJsonRetentionDays(db) {
 }
 ```
 
-### 4.2 清理算法（v0.2 重写）— `clearStaleSuccessfulRawJson`
+### 4.2 清理算法（v0.5 SR-FIX-1 Round 3 F1）— `clearStaleSuccessfulRawJson`
 
-#### 4.2.1 核心 SQL（NOT IN 子查询排除差异行 — v0.3 sentinel = '')
+#### 4.2.1 核心 SQL（双 NOT IN 子查询 — v0.5 加 partial run month 守卫 + v0.3 sentinel）
 
 ```js
-// src/backend/acquiring-bill-currency-db/raw-json-retention.js（新建 — 极简）
+// src/backend/acquiring-bill-currency-db/raw-json-retention.js（v0.5 修订）
 function clearStaleSuccessfulRawJson(db, retentionDays) {
   const result = db.prepare(`
     UPDATE acquiring_bill_currency_bill_imports
@@ -533,30 +533,46 @@ function clearStaleSuccessfulRawJson(db, retentionDays) {
         AND b.id NOT IN (
           SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows
         )
+        -- v0.5 (Round 3 F1) 新增：排除 partial run 关联月份的所有 bill
+        AND b.month_key NOT IN (
+          SELECT DISTINCT month_key FROM acquiring_bill_currency_runs
+          WHERE chunk_progress IS NOT NULL
+            AND json_extract(chunk_progress, '$.status') = 'partial'
+        )
     )
   `).run(retentionDays);
-  return { affectedRows: result.changes };
+  return { clearedCount: result.changes, elapsedMs: ... };
 }
 
 module.exports = { clearStaleSuccessfulRawJson };
 ```
 
-> ⚠️ **v0.3 reverse sync（2026-05-28）**：sentinel 从 `NULL` 改 `''`。原因：`bill_imports.raw_json` schema = `TEXT NOT NULL`（`migrations.js:1500`，v2.1.8 N4 引入约束）— `SET raw_json = NULL` 被 SQLite 拒绝。`''` 兼容 NOT NULL + 等价"已清"sentinel（字节 +1 vs NULL；vs v0.1 `'{}'` 仍省 1 字节；不动 schema 不破坏 v2.1.8 N4 已发版本契约）。Phase 4 T28 集成测试发现 + 用户拍板 Option A。
+> ⚠️ **v0.5 reverse sync（2026-05-28 SR-FIX-1 Round 3 Codex F1）**：新增 partial run 关联 month 排除子查询。
+>
+> **触发场景**：chunked run 跑到 chunk M/N → cancel / worker crash → `chunk_progress.status='partial'`；此时 `diff_rows` 仅含「已处理 mismatches」；任何"后续 bill rows（resume 时会变 mismatches 的）"仍未进 `diff_rows`。如 idle retention 在 bill imported_at 老于窗口时跑 → 清掉这些"未来 mismatch"的 raw_json → 用户 resume 后 INSERT 进来的 diff rows，writer 路径仍解析 `d.bill_raw_json` → 输出 broken / 不完整。
+>
+> **修复**：partial run 关联 month 的所有 bill 整月排除（不仅差异行）— 直到 partial 完成 resume → `status='complete'` 不再排除。
+>
+> **代价**：增加 1 个 NOT IN 子查询；runs 子查询行数 < 100（每月最多 1-2 个 run）；`json_extract` 是 SQLite 内置（v2.1.8 N4 已使用）。性能损耗可忽略。
+>
+> ⚠️ **v0.3 reverse sync（2026-05-28）**：sentinel 从 `NULL` 改 `''`。原因：`bill_imports.raw_json` schema = `TEXT NOT NULL`（`migrations.js:1500`，v2.1.8 N4 引入约束）— `SET raw_json = NULL` 被 SQLite 拒绝。`''` 兼容 NOT NULL + 等价"已清"sentinel。
 
-#### 4.2.2 SQL 关键不变量（v0.3）
+#### 4.2.2 SQL 关键不变量（v0.5）
 
 - **`b.raw_json != ''`**：跳过已清的行（idempotent — 多次 idle 触发不会重复清同行；`''` 是 v0.3 "已清" sentinel）
 - **`b.imported_at < datetime('now', '-' || ? || ' days')`**：仅清"老于 N 天"的行 — `imported_at` 是 bill_imports 表既有列（v2.1.8 N4 schema）
-- **`NOT IN (SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows)`**：**排除差异行** — 这是 v0.2 关键不变量；保证差异行 raw_json 永远不被清，writer.js:184 重导差异 xlsx 不丢字段
+- **`b.id NOT IN (SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows)`**：**排除差异行** — 保证差异行 raw_json 永远不被清，writer.js:184 重导差异 xlsx 不丢字段
+- **v0.5 新增 `b.month_key NOT IN (SELECT month_key FROM runs WHERE chunk_progress IS NOT NULL AND json_extract(...) = 'partial')`**：排除 partial run 关联月份的全部 bill（无论是否已进 diff_rows）— 保证 resume 后新增 mismatch 行的 raw_json 完整；partial 完成 resume → status='complete' → 不再排除
 - **`SET raw_json = ''`**：保留行骨架 + 业务字段；不删整行；不破坏 N4-cont-2 FK CASCADE 路径（bill_import_id FK 仍有效）；兼容 v2.1.8 N4 NOT NULL 约束（v0.3）
 
-#### 4.2.3 v0.1 → v0.2 → v0.3 算法变更项
+#### 4.2.3 v0.1 → v0.2 → v0.3 → v0.5 算法变更项
 
 - ❌ `calculateExpiredRows`（v0.1 启动期计算超期）— v0.2 删除（无 UI 不需要预估）
 - ❌ `pruneOldRawJson`（v0.1 用户主动触发删除）— v0.2 删除（无用户主动路径）
 - ❌ "标记超期"算法（v0.1 启动期触发不删 + 等用户主动清）— v0.2 删除
 - ❌ `UPDATE raw_json = '{}'`（v0.1 留空 JSON）→ ❌ `UPDATE raw_json = NULL`（v0.2，但 schema NOT NULL 拒绝）→ ✅ **`UPDATE raw_json = ''`（v0.3 修订）**
 - ❌ 月份维度 + MB 双门槛 — v0.2 删除（改"天数"单一维度）
+- ✅ **v0.5 新增 partial run month 守卫子查询**（Round 3 F1）— 跨 Phase 协同保护：A4 chunked partial run × N4-cont-1 cleanup 不竞争数据完整性
 
 ### 4.3 触发集成（v0.2 复用 v2.1.9 N1' idle cleanup 计时器）
 

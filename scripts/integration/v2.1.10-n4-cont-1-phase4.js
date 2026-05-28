@@ -299,11 +299,72 @@ async function case3_failureGraceful() {
   }
 }
 
+// ============================================================
+// case 4: v0.5 (Round 3 F1) — partial run 整月保护 + resume 后可清的端到端
+//   触发场景：chunked run 跑到 chunk M/N → cancel → chunk_progress.status='partial'
+//   验证：clearStaleSuccessfulRawJson 跳过整月 bill；resume → status='complete' → 非差异行可被清
+// ============================================================
+async function case4_partialRunIntegralProtection() {
+  const ctx = setupTempDb();
+  try {
+    // fixture: 100 行 bill 全 imported_at = 10 天前 + month_key='2026-03'
+    //   30 行进 diff_rows + run.chunk_progress = partial
+    const old = nowMinusDays(10);
+    for (let i = 1; i <= 100; i++) {
+      insertBill(ctx.appDb.db, { id: i, monthKey: '2026-03', reconId: `R-${i}`, raw: `{"k":${i}}`, importedAt: old });
+    }
+    insertRun(ctx.appDb.db, { id: 1, monthKey: '2026-03' });
+    for (let i = 1; i <= 30; i++) insertDiff(ctx.appDb.db, { runId: 1, billImportId: i });
+
+    // 写 partial chunk_progress（模拟 chunked cancel）
+    const partialProgress = JSON.stringify({ lastCompletedChunkIndex: 1, totalChunks: 3, status: 'partial' });
+    ctx.appDb.db.prepare('UPDATE acquiring_bill_currency_runs SET chunk_progress = ? WHERE id = 1').run(partialProgress);
+
+    // 4.1: clearStaleSuccessfulRawJson 跳过整月 — clearedCount=0
+    const r1 = clearStaleSuccessfulRawJson(ctx.appDb.db, { retentionDays: 1 });
+    assertEq(r1.clearedCount, 0,
+      'case 4.1: 🟠 v0.5 partial run 整月排除 → clearedCount=0（端到端：N4-cont-1 SQL × A4 chunked partial run）');
+
+    // 4.2: 差异行 + 非差异行 raw_json 均保留
+    const keptAfterPartial = ctx.appDb.db.prepare(
+      "SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE month_key='2026-03' AND raw_json != ''"
+    ).get().c;
+    assertEq(keptAfterPartial, 100, 'case 4.2: partial 状态下 100 行 raw_json 全保留');
+
+    // 4.3: 模拟 resume 完成 → chunk_progress.status='complete'
+    const completeProgress = JSON.stringify({ lastCompletedChunkIndex: 2, totalChunks: 3, status: 'complete' });
+    ctx.appDb.db.prepare('UPDATE acquiring_bill_currency_runs SET chunk_progress = ? WHERE id = 1').run(completeProgress);
+
+    const r2 = clearStaleSuccessfulRawJson(ctx.appDb.db, { retentionDays: 1 });
+    assertEq(r2.clearedCount, 70,
+      'case 4.3: resume → complete 后 → 70 非差异行被清（partial month 守卫解除）');
+
+    // 4.4: 差异行 raw_json 仍保留（NOT IN diff_rows 守卫）
+    const diffKept = ctx.appDb.db.prepare(`
+      SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports
+      WHERE id IN (SELECT bill_import_id FROM acquiring_bill_currency_diff_rows)
+        AND raw_json != ''
+    `).get().c;
+    assertEq(diffKept, 30, 'case 4.4: resume 完成后差异行 raw_json 仍保留（NOT IN diff_rows 守卫不变）');
+
+    // 4.5: 非差异行 raw_json 已清
+    const nonDiffCleared = ctx.appDb.db.prepare(`
+      SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports
+      WHERE id NOT IN (SELECT bill_import_id FROM acquiring_bill_currency_diff_rows)
+        AND raw_json = ''
+    `).get().c;
+    assertEq(nonDiffCleared, 70, 'case 4.5: 非差异行 raw_json 已清（sentinel = \'\')');
+  } finally {
+    teardown(ctx);
+  }
+}
+
 // === 执行 ===
 (async () => {
   await case1_idleCleanupRespectsDiffRows();
   await case2_retentionDaysAdjustable();
   await case3_failureGraceful();
+  await case4_partialRunIntegralProtection();
 
   const total = passed + failed;
   console.log(`[v2.1.10-n4-cont-1-phase4] ${passed}/${total} PASS`);
