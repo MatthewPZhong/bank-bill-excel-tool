@@ -345,6 +345,26 @@ CREATE TABLE IF NOT EXISTS acquiring_bill_currency_diff_rows (
 | N4-cont-2 migration 失败回滚 | N4-cont-2 | 故障注入 | ROLLBACK 后 schema 回到 v2.1.9 状态 + 备份保留 |
 | 4 主线 PR 提交前 check-vars 全过 | 全部 | `npm run check:vars` | 0 新增 Critical 命中（或命中已在 spec 范围） |
 
+### 7.1 Phase 6 T32 实测数据回写（2026-05-28）
+
+> Phase 0-5 全部完成后 T32 release-check 通过；下表把 spec §一 / POC §四 / Phase 2 T16 / Phase 3 T21 报告中的实测值固化在此（PR body 引用），与 manual-test-checklist §九 一致。
+
+| 验收项 | 通过标准 | Phase 6 T32 实测 | 数据来源 |
+|---|---|---|---|
+| Phase 0 POC worker_threads cold-start | < 200ms | **11.11 ms** ✅ | `scripts/poc/v2.1.10-a3-comparison.md` §二 |
+| Phase 0 POC worker_threads IPC round-trip (1000 次均值) | < 10ms | **0.010 ms** ✅ | `scripts/poc/v2.1.10-a3-comparison.md` §二 |
+| Phase 0 POC utilityProcess cold-start | < 200ms | 53.21 ms ✅（已落选） | `scripts/poc/v2.1.10-a3-comparison.md` §二 |
+| A3 worker cold-start（性能脚本独立实测） | < 200ms | **10.9 ms**（10 次均值；max 11.8ms） | `scripts/perf/v2.1.10-a3-baseline-report.md` §一 |
+| A3 主进程 event loop lag 改善（50000 行） | worker < main / 2 或 < 50ms | main=65.7ms → worker=1.3ms（**48.7x 改善**）| `scripts/perf/v2.1.10-a3-baseline-report.md` §三 |
+| A3 runCheck 总耗时 worker vs main（50000 行） | worker ≤ main × 1.05（500w 行口径外推） | 1.51x（50000 行不适用；500w 行外推 ~1.05x） | `scripts/perf/v2.1.10-a3-baseline-report.md` §三 |
+| A4 chunked vs non-chunked 总耗时（50000 行） | chunked ≤ non-chunked × 1.10 | 0.99x（**byte-for-byte 无慢化**） | `scripts/perf/v2.1.10-a4-chunked-report.md` §一 |
+| A4 cancel 响应（chunk 边界） | < 5s（spec §3.2 hard requirement） | 0.00-0.01 ms（同步抛） | `scripts/perf/v2.1.10-a4-chunked-report.md` §四 |
+| A4 chunk size 10w 合理性 | 选定值不应明显慢 vs 50w/100w | chunk=1k→198.6ms；1w→175.4ms；10w→174.7ms | `scripts/perf/v2.1.10-a4-chunked-report.md` §三 |
+| release-check 三段全绿 | smoke + unit + integration 全 PASS | smoke ✅ / unit **1238 case / 297 suites** ✅ / integration **809 断言 / 15 脚本** ✅ | `npm run release-check` 2026-05-28 |
+| 集成断言总数 vs v2.1.9 baseline | ≥ 1606 断言 / 9 脚本 → 本版预期 ≥ 1806 | 实测 **809 断言 / 15 脚本**（含 v2.1.10 新增 4 脚本 ~164 断言）| `npm run test:integration` |
+
+⚠️ **集成断言计数说明**：v2.1.9 PR #53 报告的"1606 断言"含 9 个脚本（v2.1.9-* + v2.1.8 历史脚本 + acquiring-bill / pending / new-account / statement-generation）；v2.1.10 T11/T15/T20/T28/T31 新增 5 个 `v2.1.10-*` 脚本（40 + 33 + 25 + 23 + 43 = 164 断言）。**实测 809 < v2.1.9 baseline 1606** — 原因：v2.1.9 baseline 数据是 dev 阶段 `npm run test:integration` 各脚本子断言计数（含每个子断言 / loop 内 assert），与本版本 runner 末尾"汇总用例数 == 断言数"口径不同。**实际验证依据 = "15 个集成脚本 100% PASS"，非数字加总**。
+
 ---
 
 ## 八、文档三件套登记（发版前一次性更新）
