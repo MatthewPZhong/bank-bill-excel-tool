@@ -664,4 +664,77 @@ test.describe('T19 — chunk_progress get/set', () => {
     assert.strictEqual(recoverable[0].chunk_progress.lastCompletedChunkIndex, -1, 'T19.12.4 lastCompletedChunkIndex=-1（first-chunk 未完成）');
   });
 
+  // v2.1.10 SR-FIX-1 Round 7 I1：failureListener crash 兜底转 partial 必须透传 chunkSize（资金红线）
+  //   触发场景（Codex 5 次复审 finding — Round 6 H4 漏抓 main.js failureListener crash 路径）：
+  //     1. worker 跑 chunkSize=100000 到 chunk 2 → onChunkDone 写 progress={..., chunkSize:100000}
+  //     2. SIGKILL / OOM → main.js failureListener 触发
+  //     3. 修复前：setRunChunkProgress({..., status:'partial'}) 不传 chunkSize
+  //        → 持久化的 partial JSON 丢失 chunkSize 字段
+  //        → resume handler fallback 当前 settings（如 10000）→ insertDiffRowsByJoinChunked OFFSET 错位
+  //        → diff_rows 行 skip/重复 → 资金红线 byte-for-byte 不一致
+  //     4. 修复后：透传 progress.chunkSize → partial JSON 仍含 chunkSize=100000
+  //        → resume handler 优先复用持久化值（Round 6 H4 已修复 main.js handler 优先级）
+  //
+  //   本 case 模拟 main.js failureListener 闭包内的 SQL 行为（避开 main.js 闭包不易直接 import）：
+  //     1. 写入 in-progress + chunkSize=100000（模拟 onChunkDone 写过 H4 含 chunkSize 的 progress）
+  //     2. 调 setRunChunkProgress 把 in-progress → partial 并透传 chunkSize
+  //     3. 验证 getRunChunkProgress 读回的 partial 含 chunkSize=100000
+  test('T19.13 — Round 7 I1：failureListener crash 兜底 in-progress → partial 必须透传 chunkSize（资金红线）', () => {
+    const monthKey = '2026-04';
+    seedMismatchRows(db, { monthKey, count: 100 });
+    const runId = insertRun(db, monthKey, 100);
+
+    // Step 1：模拟 worker 跑 chunk 2/N 完成时 onChunkDone 写入 progress（含 chunkSize=100000 — Round 6 H4 持久化）
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: 2,
+      totalChunks: 10,
+      status: 'in-progress',
+      chunkSize: 100000, // Round 6 H4：onChunkDone 续写 chunkSize
+    });
+    const beforeCrash = runRepo.getRunChunkProgress(db, runId);
+    assert.strictEqual(beforeCrash.status, 'in-progress', 'T19.13.1 crash 前 status=in-progress');
+    assert.strictEqual(beforeCrash.chunkSize, 100000, 'T19.13.2 crash 前 chunkSize=100000（H4 持久化）');
+
+    // Step 2：模拟 main.js failureListener Round 7 I1 修复后的逻辑 — 透传 progress.chunkSize
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: beforeCrash.lastCompletedChunkIndex,
+      totalChunks: beforeCrash.totalChunks,
+      status: 'partial',
+      chunkSize: beforeCrash.chunkSize, // Round 7 I1：透传保证 resume 用原始 chunk size
+    });
+
+    // Step 3：验证 partial 仍含 chunkSize=100000
+    const afterCrash = runRepo.getRunChunkProgress(db, runId);
+    assert.strictEqual(afterCrash.status, 'partial', 'T19.13.3 兜底后 status=partial');
+    assert.strictEqual(afterCrash.chunkSize, 100000, 'T19.13.4 🔴 Round 7 I1：兜底后 chunkSize=100000 保留（资金红线 — 防 resume OFFSET 错位）');
+    assert.strictEqual(afterCrash.lastCompletedChunkIndex, 2, 'T19.13.5 兜底保留 lastCompletedChunkIndex');
+    assert.strictEqual(afterCrash.totalChunks, 10, 'T19.13.6 兜底保留 totalChunks');
+
+    // Step 4：老 partial run（升级前 chunk_progress 无 chunkSize）— 透传 undefined → setRunChunkProgress 内部跳过写入
+    //   验证 Round 7 I1 修复对老 row 不会引入回归（undefined / null / 非正整数 → 不写）
+    const runIdLegacy = insertRun(db, monthKey, 100);
+    runRepo.setRunChunkProgress(db, {
+      runId: runIdLegacy,
+      lastCompletedChunkIndex: 1,
+      totalChunks: 5,
+      status: 'in-progress',
+      // 无 chunkSize（模拟升级前老 row）
+    });
+    const legacyBefore = runRepo.getRunChunkProgress(db, runIdLegacy);
+    assert.strictEqual(legacyBefore.chunkSize, undefined, 'T19.13.7 老 row chunkSize=undefined（升级前无字段）');
+
+    runRepo.setRunChunkProgress(db, {
+      runId: runIdLegacy,
+      lastCompletedChunkIndex: legacyBefore.lastCompletedChunkIndex,
+      totalChunks: legacyBefore.totalChunks,
+      status: 'partial',
+      chunkSize: legacyBefore.chunkSize, // undefined — Round 7 I1 透传向后兼容
+    });
+    const legacyAfter = runRepo.getRunChunkProgress(db, runIdLegacy);
+    assert.strictEqual(legacyAfter.status, 'partial', 'T19.13.8 老 row 兜底后 status=partial');
+    assert.strictEqual(legacyAfter.chunkSize, undefined, 'T19.13.9 老 row 兜底后 chunkSize 仍 undefined（不引入回归 — resume handler fallback settings 路径不变）');
+  });
+
 });

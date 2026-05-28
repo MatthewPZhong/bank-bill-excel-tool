@@ -11294,6 +11294,18 @@ app.whenReady()
         //   修复：crash 后扫所有 chunk_progress.status='in-progress' 的 runs（生产正常路径下 in-progress
         //     只在 chunk 边界短暂存在；crash 时残留）→ 兜底改成 'partial' → resume 可用
         //   失败容忍：try/catch + activity log（不影响其他 failure 处理路径）
+        //
+        // v2.1.10 SR-FIX-1 Round 7 I1：透传 chunkSize（Codex 5 次复审 finding — 资金红线 P2）
+        //   原 Round 2 P1-7 实现：setRunChunkProgress(partial) 没传 chunkSize 入参
+        //     → setRunChunkProgress 内部不写 chunkSize 字段 → 持久化 partial JSON 丢失原 in-progress 的 chunkSize
+        //   触发场景（Round 6 H4 漏抓的路径）：
+        //     worker 跑 chunkSize=100000 到 chunk 2 → SIGKILL → failureListener 触发 → 此处 in-progress → partial
+        //     → 重写后 chunk_progress.chunkSize 丢失（变 undefined）
+        //     → resume handler fallback 当前 settings 的 chunkSize（如 10000） → OFFSET 偏移错位 → diff_rows 行 skip/重复
+        //   修复：透传 progress.chunkSize（H1 / onChunkDone 已写入持久化值）
+        //     - 老 partial run（升级前无 chunkSize 字段）→ progress.chunkSize undefined → setRunChunkProgress 不写
+        //       → resume handler fallback settings（Round 6 H4 兜底路径仍正确）
+        //     - 新场景（Round 6 H1 / H4 之后写入的 progress 都带 chunkSize）→ 透传保留 → 资金红线护栏闭合
         if (info && info.hadActiveJob && database && database.db) {
           try {
             const inProgressRuns = database.db.prepare(`
@@ -11310,6 +11322,9 @@ app.whenReady()
                     lastCompletedChunkIndex: progress.lastCompletedChunkIndex,
                     totalChunks: progress.totalChunks,
                     status: 'partial',
+                    // Round 7 I1：透传 chunkSize 保证 resume 用原始 chunk size（资金红线 — 防 OFFSET 错位）
+                    //   setRunChunkProgress 内部对 undefined / 非正整数自动跳过写入（向后兼容老 row）
+                    chunkSize: progress.chunkSize,
                   });
                   appendActivityLogEntry({
                     level: 'warning',
@@ -11321,6 +11336,8 @@ app.whenReady()
                       `monthKey=${row.month_key}`,
                       `lastCompletedChunkIndex=${progress.lastCompletedChunkIndex}`,
                       `totalChunks=${progress.totalChunks}`,
+                      // Round 7 I1：日志记录 chunkSize 透传（含 undefined 老 row）
+                      `chunkSize=${progress.chunkSize == null ? '(legacy/undefined)' : progress.chunkSize}`,
                     ]
                   });
                 }

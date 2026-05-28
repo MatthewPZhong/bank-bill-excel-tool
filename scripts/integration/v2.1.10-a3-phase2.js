@@ -7,9 +7,11 @@
 //   4. cancel 在 stage 4（sql-joining 后）触发 → ROLLBACK + CancelError + DB 无锁残留
 //   5. cancel 5s 内 worker 未 exit → terminate（cancel hardTimeoutMs 路径，用极小 timeout 模拟）
 //   6. worker process.exit(1) crash → 主进程 failureListener 触发 + op lock 释放 + 下次 dispatch 重启
+//   7. Round 4 F2: before-quit shutdown 不抹 activeJob → failureListener 收 hadActiveJob=true
+//   8. Round 7 I1: failureListener crash 兜底 in-progress → partial 必须透传 chunkSize（资金红线端到端）
 //
 // 跑：node scripts/integration/v2.1.10-a3-phase2.js
-// 期望：N/N PASS（≥ 25 断言）
+// 期望：N/N PASS
 
 'use strict';
 
@@ -436,12 +438,150 @@ async function test7_beforeQuitShutdownPreservesActiveJobForFallback() {
   }
 }
 
+// ── case 8：v2.1.10 SR-FIX-1 Round 7 I1 — failureListener crash 兜底转 partial 必须透传 chunkSize ──
+//   触发场景（Codex 5 次复审 finding — Round 6 H4 漏抓 main.js failureListener crash 路径）：
+//     1. worker 跑 chunkSize=100000 到 chunk 2 → onChunkDone 写 chunk_progress={..., chunkSize:100000}（H4 持久化）
+//     2. SIGKILL / OOM → main.js failureListener 触发（A3 Phase 2 T14 兜底回调）
+//     3. failureListener 闭包内调 setRunChunkProgress({status:'partial'}) 重写 chunk_progress
+//     4. Round 7 I1 修复前：未透传 chunkSize → 持久化 partial 丢失 chunkSize 字段
+//        → resume handler fallback 当前 settings（如 100000 → 10000）→ insertDiffRowsByJoinChunked OFFSET 错位
+//        → diff_rows 行 skip/重复 → 资金红线 byte-for-byte 不一致
+//     5. Round 7 I1 修复后：透传 progress.chunkSize → partial 仍含 chunkSize=100000
+//        → main.js resume IPC handler 优先用持久化值（Round 6 H4 已修复）→ OFFSET 一致 → byte-for-byte 不变
+//
+//   本 case 端到端模拟：
+//     1. 真实 worker dispatch 跑 chunkSize=2 到 chunk 2 → 用 cancelToken 触发 partial（避免真实 SIGKILL 不稳）
+//     2. 用 setRunChunkProgress 手工先把 partial 改回 in-progress + chunkSize=2（模拟 crash 残留 onChunkDone 写过的进度）
+//     3. 调 pool stub failureListener 模拟主进程 main.js failureListener 内的 SQL 行为（Round 7 I1 修复后）
+//     4. 验证：chunk_progress 转 partial 后 chunkSize=2 仍在
+//     5. 老 row 路径：chunk_progress 无 chunkSize → 透传 undefined → 不破坏向后兼容
+async function test8_round7I1FailureListenerPreservesChunkSize() {
+  console.log('\n[case 8] Round 7 I1 — failureListener crash 兜底 in-progress → partial 必须透传 chunkSize（资金红线端到端）');
+  const ctx = await setupTmpDb({ rowCount: 10 });
+  try {
+    const runRepo = require('../../src/backend/acquiring-bill-currency-db/run-repository');
+    const sessionMod = require('../../src/main-process/acquiring-bill-currency-session');
+
+    // Step 1：真实跑 runCheckCore chunkSize=2 → 触发 cancel at chunk 2 → partial run
+    //   不通过 worker（用主进程 runCheckCore 直接跑 — 跟 a4-phase3 case 7 同模式）
+    //   原因：worker dispatch 拿不到 cancelToken 句柄稳定触发；用 runCheckCore 直接跑可控触发 partial
+    let cancelled = false;
+    let checkCount = 0;
+    const cancelToken = {
+      get cancelled() { return cancelled; },
+      cancel() { cancelled = true; },
+      throwIfCancelled(stage) {
+        checkCount++;
+        if (checkCount >= 5) cancelled = true; // chunk 2 边界 cancel
+        if (cancelled) {
+          throw new sessionMod.CancelError(`cancelled at ${stage}`, { stage });
+        }
+      },
+    };
+    let caught;
+    try {
+      await sessionMod.runCheckCore({
+        db: ctx.db.db,
+        monthKey: '2026-04',
+        storageRoot: ctx.tmpdir,
+        chunkSize: 2,
+        cancelToken,
+      });
+    } catch (e) { caught = e; }
+    assertTrue(!!caught, '8.1 cancel 触发抛 CancelError');
+    assertEq(caught.name, 'CancelError', '8.2 CancelError 类型');
+
+    // Step 2：拿到 partial run 验证 H4 持久化（前置条件 — 否则 Round 7 I1 无法触发）
+    const partialRun = ctx.db.db.prepare('SELECT id, chunk_progress FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1').get();
+    const partialProgress = JSON.parse(partialRun.chunk_progress);
+    assertEq(partialProgress.status, 'partial', '8.3 partial status');
+    assertEq(partialProgress.chunkSize, 2, '8.4 partial chunk_progress.chunkSize=2（Round 6 H4 持久化）');
+
+    // Step 3：人工把 partial → in-progress（模拟 onChunkDone 写完最后一次后 worker 突然 SIGKILL — chunk_progress 残留 in-progress 含 chunkSize）
+    //   这是 Round 7 I1 真实触发场景：onChunkDone 已写过 chunk_progress + chunkSize；crash 时 catch 块 (partial) 未执行
+    runRepo.setRunChunkProgress(ctx.db.db, {
+      runId: partialRun.id,
+      lastCompletedChunkIndex: partialProgress.lastCompletedChunkIndex,
+      totalChunks: partialProgress.totalChunks,
+      status: 'in-progress', // 模拟 crash 残留
+      chunkSize: partialProgress.chunkSize, // H4 持久化的 chunkSize 仍在
+    });
+    const beforeRecover = runRepo.getRunChunkProgress(ctx.db.db, partialRun.id);
+    assertEq(beforeRecover.status, 'in-progress', '8.5 crash 残留 in-progress');
+    assertEq(beforeRecover.chunkSize, 2, '8.6 crash 残留 chunkSize=2');
+
+    // Step 4：模拟 main.js failureListener Round 7 I1 修复后的 SQL 行为（直接复制 main.js:11297-11341 逻辑）
+    //   关键：透传 progress.chunkSize（Round 7 I1 修复点）
+    let recoveredCount = 0;
+    const inProgressRuns = ctx.db.db.prepare(`
+      SELECT id, month_key, chunk_progress
+      FROM acquiring_bill_currency_runs
+      WHERE chunk_progress IS NOT NULL
+    `).all();
+    for (const row of inProgressRuns) {
+      try {
+        const progress = JSON.parse(row.chunk_progress);
+        if (progress && progress.status === 'in-progress') {
+          runRepo.setRunChunkProgress(ctx.db.db, {
+            runId: row.id,
+            lastCompletedChunkIndex: progress.lastCompletedChunkIndex,
+            totalChunks: progress.totalChunks,
+            status: 'partial',
+            chunkSize: progress.chunkSize, // Round 7 I1 关键透传
+          });
+          recoveredCount++;
+        }
+      } catch (_e) { /* swallow */ }
+    }
+    assertEq(recoveredCount, 1, '8.7 failureListener 兜底 1 个 in-progress run');
+
+    // Step 5：验证 chunkSize 字段在兜底转换后保留（Round 7 I1 资金红线核心断言）
+    const afterRecover = runRepo.getRunChunkProgress(ctx.db.db, partialRun.id);
+    assertEq(afterRecover.status, 'partial', '8.8 兜底后 status=partial');
+    assertEq(afterRecover.chunkSize, 2,
+      '8.9 🔴 Round 7 I1：failureListener 兜底后 chunkSize=2 保留（资金红线 — 防 resume handler fallback settings 导致 OFFSET 错位）');
+    assertEq(afterRecover.lastCompletedChunkIndex, partialProgress.lastCompletedChunkIndex, '8.10 兜底保留 lastCompletedChunkIndex');
+    assertEq(afterRecover.totalChunks, partialProgress.totalChunks, '8.11 兜底保留 totalChunks');
+
+    // Step 6：老 row 路径 — 升级前 chunk_progress 无 chunkSize → failureListener 透传 undefined → 不写
+    //   验证 Round 7 I1 对老 row 向后兼容（不会误抛 / 不会误写默认值 / resume handler fallback settings 路径不变）
+    const legacyRunId = runRepo.insertRun(ctx.db.db, {
+      monthKey: '2026-04',
+      ranAt: new Date().toISOString(),
+      totalBillRows: 100, matchedRows: 50, mismatchRows: 50, unmatchedRows: 0, status: 'success',
+    });
+    // 老 row：无 chunkSize 字段
+    runRepo.setRunChunkProgress(ctx.db.db, {
+      runId: legacyRunId,
+      lastCompletedChunkIndex: 1,
+      totalChunks: 5,
+      status: 'in-progress',
+    });
+    const legacyBefore = runRepo.getRunChunkProgress(ctx.db.db, legacyRunId);
+    assertEq(legacyBefore.chunkSize, undefined, '8.12 老 row chunkSize=undefined（升级前 H4 未引入字段）');
+
+    // 模拟 Round 7 I1 透传 progress.chunkSize（undefined）
+    runRepo.setRunChunkProgress(ctx.db.db, {
+      runId: legacyRunId,
+      lastCompletedChunkIndex: legacyBefore.lastCompletedChunkIndex,
+      totalChunks: legacyBefore.totalChunks,
+      status: 'partial',
+      chunkSize: legacyBefore.chunkSize, // undefined — setRunChunkProgress 内部跳过写入
+    });
+    const legacyAfter = runRepo.getRunChunkProgress(ctx.db.db, legacyRunId);
+    assertEq(legacyAfter.status, 'partial', '8.13 老 row 兜底后 status=partial');
+    assertEq(legacyAfter.chunkSize, undefined, '8.14 老 row chunkSize 仍 undefined（Round 7 I1 向后兼容 — fallback settings 路径不变）');
+  } finally {
+    ctx.cleanup();
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────
 async function main() {
   console.log('==== v2.1.10 A3 Phase 2 集成测试 ====');
-  console.log('PRD §1.3 + spec §七 Phase 2 ≥ 7 case ≥ 32 断言（Round 4 F2 加 case 7）');
+  console.log('PRD §1.3 + spec §七 Phase 2 ≥ 8 case ≥ 46 断言（Round 7 I1 加 case 8）');
 
   const cases = [
     test1_idleSkipBusy,
@@ -451,6 +591,7 @@ async function main() {
     test5_cancelHardTimeout,
     test6_workerCrashRecovery,
     test7_beforeQuitShutdownPreservesActiveJobForFallback,
+    test8_round7I1FailureListenerPreservesChunkSize,
   ];
 
   for (const c of cases) {
