@@ -1,5 +1,9 @@
 // v2.1.10 N4-cont-1 T23 (Phase 4)：raw_json idle 自动清理函数 unit test
 //
+// v0.6 (2026-05-28 SR-FIX-1 Round 4 F1)：partial → IN ('partial', 'in-progress')
+//   原因：Codex Round 3 复审指出 Round 3 修复只覆盖 partial；first-chunk crash 残留的 in-progress 没被守卫排除
+//   修复：SQL `IN ('partial', 'in-progress')`；加 Case 12-13 覆盖 in-progress month 排除
+//
 // v0.5 (2026-05-28 SR-FIX-1 Round 3 F1)：partial run 守卫
 //   原因：Codex review 指出 chunked run 半途 cancel/crash 后，"后续 bill rows"未进 diff_rows
 //     如 idle cleanup 此时跑会清掉这些"未来差异行"的 raw_json → resume 后 writer 输出 broken
@@ -10,9 +14,9 @@
 //   修复：fixture 改用真实 NOT NULL schema + 断言改 raw_json = '' 而非 null
 //
 // 资金红线：本函数不可逆 UPDATE raw_json = ''；双 NOT IN 子查询是数据保护核心
-//   必须 ≥ 8 unit case 覆盖差异行排除 + partial run 排除两层守卫边界
+//   必须 ≥ 8 unit case 覆盖差异行排除 + 可恢复 run 排除两层守卫边界
 //
-// 覆盖（spec §4.2 v0.5 + T23 require）：
+// 覆盖（spec §4.2 v0.6 + T23 require）：
 //   1. NOT IN 子查询正常排除差异行（100 行 bill + 50 差异 + retention=1 → 仅 50 非差异行被清；50 差异行 raw_json 保留）
 //   2. imported_at 边界（retention=7 天）：8 天前清；6 天前不清
 //   3. raw_json 已 '' 的行不重复 UPDATE（idempotent — sentinel 守卫）
@@ -23,6 +27,9 @@
 //   8. db 入参无效 → throw
 //   9. **v0.5 (Round 3 F1) — partial run 关联 month 全部保留**（差异行 + 非差异行均 raw_json 保留 → clearedCount=0）
 //   10. **v0.5 (Round 3 F1) — partial run 完成 resume → status='complete' → 非差异行可被清**
+//   11. **v0.5 (Round 3 F1) — 跨月份 partial run 不影响其他月份的清理**
+//   12. **v0.6 (Round 4 F1) — in-progress run 关联 month 整月排除**（first-chunk crash 残留路径）
+//   13. **v0.6 (Round 4 F1) — partial + in-progress 混合月份均整月排除；complete + 无 progress 月份正常清**
 
 const { test, describe, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert');
@@ -408,5 +415,114 @@ describe('clearStaleSuccessfulRawJson — NOT IN 子查询资金红线 (v0.5 par
     assert.strictEqual(monthBCleared, 20, 'Case 11.2: 月 B（无 partial run）20 行全清');
 
     assert.strictEqual(result.clearedCount, 20, 'Case 11.3: clearedCount 仅含月 B 的 20 行');
+  });
+
+  // v0.6 (2026-05-28 SR-FIX-1 Round 4 F1)：partial → IN ('partial', 'in-progress')
+  //   触发场景：first-chunk crash（worker 跑第一个 chunk 时 die，onChunkDone 触发前）
+  //     → chunk_progress 停留 'in-progress'（Round 3 F2 入口写入）
+  //     → 如 failureListener 未及时兜底（重启场景）+ idle cleanup 此时跑
+  //     → 原 v0.5 SQL `= 'partial'` 不命中 in-progress → 清掉"未来 mismatch"raw_json
+  //   修复：SQL `IN ('partial', 'in-progress')`
+  test('Case 12: 🟠 资金红线 v0.6 — in-progress run 关联 month 整月排除（first-chunk crash 残留路径）', () => {
+    // fixture：100 行 bill 全部 imported_at = 10 天前 + month_key='2026-03'
+    //   30 行进 diff_rows；run.chunk_progress.status='in-progress'（模拟 first-chunk crash 残留）
+    const old = nowMinusDays(10);
+    for (let i = 1; i <= 100; i++) {
+      insertBill(ctx.db, { id: i, monthKey: '2026-03', reconId: `R-${i}`, raw: `{"k":${i}}`, importedAt: old });
+    }
+    insertRun(ctx.db, { id: 1, monthKey: '2026-03' });
+    for (let i = 1; i <= 30; i++) {
+      insertDiff(ctx.db, { runId: 1, billImportId: i });
+    }
+    // 模拟 first-chunk crash + 重启 — chunk_progress 是 Round 3 F2 入口写入的初始 in-progress
+    setChunkProgress(ctx.db, { runId: 1, status: 'in-progress', lastCompletedChunkIndex: -1, totalChunks: 0 });
+
+    const beforeKept = ctx.db.prepare(
+      "SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE raw_json != ''"
+    ).get().c;
+    assert.strictEqual(beforeKept, 100, 'Case 12.0: baseline 100 行 raw_json 全保留');
+
+    const result = clearStaleSuccessfulRawJson(ctx.db, { retentionDays: 1 });
+    assert.strictEqual(result.clearedCount, 0,
+      'Case 12.1: 🟠 资金红线 — in-progress run 关联 month 整月排除 → clearedCount=0');
+
+    // 差异行 raw_json 保留（既有 NOT IN diff_rows 守卫）
+    const diffKept = ctx.db.prepare(`
+      SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports
+      WHERE id <= 30 AND raw_json != ''
+    `).get().c;
+    assert.strictEqual(diffKept, 30, 'Case 12.2: 差异行 raw_json 全部保留（既有守卫）');
+
+    // 非差异行 raw_json 也保留（v0.6 新增 in-progress month 守卫）
+    const nonDiffKept = ctx.db.prepare(`
+      SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports
+      WHERE id > 30 AND raw_json != ''
+    `).get().c;
+    assert.strictEqual(nonDiffKept, 70,
+      'Case 12.3: 🟠 in-progress run 关联 month 的非差异行 raw_json 也保留（v0.6 Round 4 F1 新增守卫）');
+  });
+
+  test('Case 13: v0.6 — partial + in-progress 混合月份均整月排除；complete + 无 progress 月份正常清', () => {
+    // fixture：4 个月
+    //   - 月 A (2026-01) → partial run → 整月保护
+    //   - 月 B (2026-02) → in-progress run → 整月保护
+    //   - 月 C (2026-03) → complete run → 非差异行可清
+    //   - 月 D (2026-04) → 无 run → 全部非差异行可清
+    const old = nowMinusDays(10);
+
+    // 月 A：20 行 + partial chunk_progress
+    for (let i = 1; i <= 20; i++) {
+      insertBill(ctx.db, { id: i, monthKey: '2026-01', reconId: `RA-${i}`, raw: `{"k":${i}}`, importedAt: old });
+    }
+    insertRun(ctx.db, { id: 1, monthKey: '2026-01' });
+    setChunkProgress(ctx.db, { runId: 1, status: 'partial', lastCompletedChunkIndex: 1, totalChunks: 3 });
+
+    // 月 B：20 行 + in-progress chunk_progress（first-chunk crash 路径）
+    for (let i = 21; i <= 40; i++) {
+      insertBill(ctx.db, { id: i, monthKey: '2026-02', reconId: `RB-${i}`, raw: `{"k":${i}}`, importedAt: old });
+    }
+    insertRun(ctx.db, { id: 2, monthKey: '2026-02' });
+    setChunkProgress(ctx.db, { runId: 2, status: 'in-progress', lastCompletedChunkIndex: -1, totalChunks: 0 });
+
+    // 月 C：20 行 + complete chunk_progress + 5 行 diff_rows
+    for (let i = 41; i <= 60; i++) {
+      insertBill(ctx.db, { id: i, monthKey: '2026-03', reconId: `RC-${i}`, raw: `{"k":${i}}`, importedAt: old });
+    }
+    insertRun(ctx.db, { id: 3, monthKey: '2026-03' });
+    for (let i = 41; i <= 45; i++) insertDiff(ctx.db, { runId: 3, billImportId: i });
+    setChunkProgress(ctx.db, { runId: 3, status: 'complete', lastCompletedChunkIndex: 2, totalChunks: 3 });
+
+    // 月 D：20 行 + 无 run
+    for (let i = 61; i <= 80; i++) {
+      insertBill(ctx.db, { id: i, monthKey: '2026-04', reconId: `RD-${i}`, raw: `{"k":${i}}`, importedAt: old });
+    }
+
+    const result = clearStaleSuccessfulRawJson(ctx.db, { retentionDays: 1 });
+
+    // 月 A（partial）：20 行全保留
+    const monthAKept = ctx.db.prepare(
+      "SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE month_key = '2026-01' AND raw_json != ''"
+    ).get().c;
+    assert.strictEqual(monthAKept, 20, 'Case 13.1: 月 A（partial）20 行全保留');
+
+    // 月 B（in-progress）：20 行全保留（Round 4 F1 新增）
+    const monthBKept = ctx.db.prepare(
+      "SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE month_key = '2026-02' AND raw_json != ''"
+    ).get().c;
+    assert.strictEqual(monthBKept, 20, 'Case 13.2: 月 B（in-progress）20 行全保留（v0.6 Round 4 F1 守卫）');
+
+    // 月 C（complete）：15 非差异行清，5 差异行保留
+    const monthCKept = ctx.db.prepare(
+      "SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE month_key = '2026-03' AND raw_json != ''"
+    ).get().c;
+    assert.strictEqual(monthCKept, 5, 'Case 13.3: 月 C（complete）5 差异行保留 + 15 非差异行清');
+
+    // 月 D（无 run）：20 行全清
+    const monthDCleared = ctx.db.prepare(
+      "SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE month_key = '2026-04' AND raw_json = ''"
+    ).get().c;
+    assert.strictEqual(monthDCleared, 20, 'Case 13.4: 月 D（无 run）20 行全清');
+
+    assert.strictEqual(result.clearedCount, 35, 'Case 13.5: clearedCount = 月 C 15 + 月 D 20 = 35');
   });
 });

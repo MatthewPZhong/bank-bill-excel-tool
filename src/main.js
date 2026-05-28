@@ -10878,14 +10878,15 @@ function registerNewAccountHandlers() {
       let targetRunId = payloadRunId;
       let progress;
       if (!targetRunId) {
-        // v2.1.10 SR-FIX-1 round 2 P1-5：扫该月所有 chunk_progress.status='partial' 的 runs
+        // v2.1.10 SR-FIX-1 round 2 P1-5：扫该月所有可恢复 chunk_progress 的 runs
         //   原实施只取 getLatestRun → 如最近 run 是 complete（如刚跑完新 run），
         //   前一个 run 是 partial → 用户无法 resume 前一个 partial
-        //   修复后：listPartialRuns 按 ran_at DESC 返回所有 partial → 取第一个（最近 partial）
+        //   修复后：listPartialRuns 按 ran_at DESC 返回所有可恢复 → 取第一个（最近可恢复）
+        // v2.1.10 SR-FIX-1 Round 4 F1：listPartialRuns 已扩为返回 partial OR in-progress
         const partialRuns = runRepoLocal.listPartialRuns(database.db, monthKey);
         if (!partialRuns || partialRuns.length === 0) {
           releaseOpLock();
-          return { status: 'error', message: `月份 ${monthKey} 暂无 partial run，无法 resume（上次 run 可能已跑完）` };
+          return { status: 'error', message: `月份 ${monthKey} 暂无可恢复 run，无法 resume（上次 run 可能已跑完）` };
         }
         const latestPartial = partialRuns[0];
         targetRunId = latestPartial.id;
@@ -10898,7 +10899,10 @@ function registerNewAccountHandlers() {
           return { status: 'error', message: `run ${targetRunId} 无 chunk_progress 记录，无法 resume` };
         }
       }
-      if (progress.status !== 'partial') {
+      // v2.1.10 SR-FIX-1 Round 4 F1：partial OR in-progress 均允许 resume
+      //   in-progress 场景：first-chunk crash + failureListener 未及时兜底（如重启后还未跑到）
+      //   → 应允许用户直接调 resume 续跑；resume 内部从 lastCompletedChunkIndex+1 起跑（in-progress 初始 -1 → 从 0 起跑 == 重头）
+      if (!['partial', 'in-progress'].includes(progress.status)) {
         releaseOpLock();
         return { status: 'error', message: `run ${targetRunId} 状态为 ${progress.status}，无需 resume` };
       }

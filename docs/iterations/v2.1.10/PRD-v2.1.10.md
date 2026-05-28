@@ -2,13 +2,13 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.3（2026-05-28 — N4-cont-1 sentinel 修订 `NULL → ''` 兼容 v2.1.8 N4 NOT NULL schema）/ v0.2（D25/D26/D27 + N4-cont-1 方案变更）/ v0.1（PM 初版） |
+| 文档版本 | v0.4（2026-05-28 — SR-FIX-1 Round 4 F1 N4-cont-1 SQL 守卫从 partial 扩为 partial OR in-progress；状态机 4 处链路统一）/ v0.3（2026-05-28 — N4-cont-1 sentinel 修订 `NULL → ''` 兼容 v2.1.8 N4 NOT NULL schema）/ v0.2（D25/D26/D27 + N4-cont-1 方案变更）/ v0.1（PM 初版） |
 | 目标版本 | `v2.1.10`（minor — 架构级：runCheck 跨进程 + DB schema 不可逆 FK 改造） |
 | 起始版本 | `v2.1.9`（α 已提 PR #53；β 启动节奏按用户拍板：α 提 PR 后立即开 β 分支） |
-| 起草日期 | 2026-05-28（v0.1 / v0.2 reverse sync / v0.3 sentinel 修订） |
-| 起草人 | PM + Dev Phase 4 T28 发现 + 主线程 修订 |
-| 状态 | v0.3 sentinel 修订（Phase 0-5 全部完成 + Phase 4 T28 集成测试发现 v0.2 NULL sentinel 与 v2.1.8 NOT NULL schema 冲突 + 用户拍板 Option A 修订 `SET raw_json = ''`） |
-| 关联文档 | `backlog.md` v0.2（D23-D28 全部拍板）/ `spec.md` v0.3（sentinel 修订）/ `tasks.md` v0.2 / `manual-test-checklist.md` v0.2 |
+| 起草日期 | 2026-05-28（v0.1 / v0.2 reverse sync / v0.3 sentinel 修订 / v0.4 Round 4 F1 状态机统一） |
+| 起草人 | PM + Dev Phase 4 T28 发现 + 主线程 修订 + Round 3/4 Codex review |
+| 状态 | v0.4 SR-FIX-1 Round 4 完成（Round 3 F1+F2 + Round 4 F1+F2+F3 收尾） |
+| 关联文档 | `backlog.md` v0.2（D23-D28 全部拍板）/ `spec.md` v0.6（Round 4 reverse sync）/ `tasks.md` v0.2 / `manual-test-checklist.md` v0.2 |
 | 涉及模块 | 收单单据币种校验（A3 worker / A4 chunked 必做 / N4-cont-1 raw_json 仅清对账成功行 / N4-cont-2 FK CASCADE）+ 全局 DB 基建（复用 SR-backup-1 + 沿用 v2.1.9 N5 channels FK 范式 + 复用 v2.1.9 N1' idle cleanup 计时器）+ 全局架构（worker 进程边界 + lastActiveTs 跨进程同步） |
 | 工作分支 | `v2.1.10`（基于 main，已建好；`package.json.version` = `2.1.10-beta.1`） |
 | 依赖 | v2.1.9 α 已上线产物：N5 channels FK 范式（ON UPDATE CASCADE） / SR-backup-1 backup API（VACUUM INTO） / N1' idle 30min cleanup 计时器（`src/main.js:11155-11178`，N4-cont-1 复用追加回调）/ N1-settings idle 阈值 settings 化 / N4 重构 createBackupFn 注入范式 / SR-log-1 全局告警日志 |
@@ -45,7 +45,7 @@
 - **A4（v0.2：D25 用户拍板必做，不等 A3 实测）**：chunked 分批跑 — cancel 响应 < 5s + 进度回调精细化（chunkIndex / chunkCount）是 hard requirement；chunk size 选 10w 行（spec §3.2 已选定，理由：cancel 响应 < 5s + 内存峰值 < 200MB）；idempotent / 重跑保护（必做不再"待 Phase 3 细化"）
 - **N4-cont-1（v0.2：重大方案变更）**：
   - (1) settings 表新增单键 `acquiring_bill_raw_json_retention_days`（默认 7 天；settings 可调范围 1-30；getter 沿用 v2.1.9 N1-settings 范式范围外回退默认值）
-  - (2) **完全复用 v2.1.9 N1' idle 30min cleanup 计时器**（`src/main.js:11155-11178`），在 idle cleanup 回调内追加 raw_json 清理逻辑 — 找出对账成功（不在 `acquiring_bill_currency_diff_rows` 中）+ **不属于 partial run 关联月份**（v0.5 Round 3 F1 新增）+ `imported_at < datetime('now', '-N days')` 的 `acquiring_bill_currency_bill_imports` 行 → `UPDATE raw_json = ''`（v0.3 sentinel；保留行骨架 + 业务字段；兼容 v2.1.8 N4 NOT NULL 约束 — 详 spec §4.2.1）
+  - (2) **完全复用 v2.1.9 N1' idle 30min cleanup 计时器**（`src/main.js:11155-11178`），在 idle cleanup 回调内追加 raw_json 清理逻辑 — 找出对账成功（不在 `acquiring_bill_currency_diff_rows` 中）+ **不属于可恢复 run 关联月份**（v0.6 Round 4 F1 扩 `partial OR in-progress`；v0.5 Round 3 F1 首版仅 partial）+ `imported_at < datetime('now', '-N days')` 的 `acquiring_bill_currency_bill_imports` 行 → `UPDATE raw_json = ''`（v0.3 sentinel；保留行骨架 + 业务字段；兼容 v2.1.8 N4 NOT NULL 约束 — 详 spec §4.2.1）
   - (3) graceful 失败 + 活动日志（沿用 v2.1.9 SR-log-1 `appendActivityLogEntry` 范式）
   - (4) 失败不阻塞 N1' 主流程 cleanup（try/catch + 下次 idle 重试）；顺序：先执行 v2.1.8 cleanupAfterRunBackground，后执行 raw_json 清理
   - (5) **0 UI**（v0.2：D27 用户拍板）— 不加按钮、不加 dialog、不加 IPC handler；用户无感
@@ -161,7 +161,7 @@ v2.1.8 N4 引入 `bill_imports.raw_json` 9 字段保留范式 → v2.1.9 N4 重�
 #### 2.3.3 改造范围（v0.2 重写 — 从 6 条减为 2 条）
 
 - **DB**：settings 表新增 **1 键** — `acquiring_bill_raw_json_retention_days`（默认 `'7'`；settings 范围 1-30；getter 范围外回退 7）
-- **后端清理函数**：新建 `src/backend/acquiring-bill-currency-db/raw-json-retention.js`，导出 `clearStaleSuccessfulRawJson(db, retentionDays)` — 执行 SQL（**v0.5 Round 3 F1 双 NOT IN 子查询 + v0.3 sentinel = ''**，详 spec §4.2.1）：
+- **后端清理函数**：新建 `src/backend/acquiring-bill-currency-db/raw-json-retention.js`，导出 `clearStaleSuccessfulRawJson(db, retentionDays)` — 执行 SQL（**v0.6 Round 4 F1 守卫扩 `partial OR in-progress` + v0.5 Round 3 F1 双 NOT IN 子查询 + v0.3 sentinel = ''**，详 spec §4.2.1）：
   ```sql
   UPDATE acquiring_bill_currency_bill_imports
   SET raw_json = ''
@@ -172,16 +172,16 @@ v2.1.8 N4 引入 `bill_imports.raw_json` 9 字段保留范式 → v2.1.9 N4 重�
       AND b.id NOT IN (
         SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows
       )
-      -- v0.5 (Round 3 F1) 新增：排除 partial run 关联月份的所有 bill
+      -- v0.6 (Round 4 F1) 修订：partial → IN ('partial', 'in-progress')
       AND b.month_key NOT IN (
         SELECT DISTINCT month_key FROM acquiring_bill_currency_runs
         WHERE chunk_progress IS NOT NULL
-          AND json_extract(chunk_progress, '$.status') = 'partial'
+          AND json_extract(chunk_progress, '$.status') IN ('partial', 'in-progress')
       )
   )
   ```
   - 第一 NOT IN 子查询排除差异行（既有 v0.2 守卫）
-  - **v0.5 (Round 3 F1) 第二 NOT IN 子查询排除 partial run 关联月份的全部 bill**（不仅差异行）— 保证 chunked run 半途 cancel 后 idle cleanup 不破坏未来 mismatch 行的 raw_json
+  - **v0.6 (Round 4 F1) 第二 NOT IN 子查询排除可恢复 run 关联月份的全部 bill**（partial OR in-progress 均守卫；与 cleanupOrphanData / listPartialRuns / resume handler 4 处链路统一）— 保证 chunked run 半途 cancel / first-chunk crash 后 idle cleanup 不破坏未来 mismatch 行的 raw_json
   - `imported_at` 用于"老于 N 天"判断
   - `raw_json = ''` 保留行骨架 + 业务字段 + 业务主键（v0.3：兼容 v2.1.8 N4 NOT NULL 约束 — 之前 v0.2 写 NULL 在 NOT NULL schema 下会被 SQLite 拒绝）
 - **触发集成**：v2.1.9 N1' idle 30min cleanup 回调（`src/main.js:11155-11178` 内 `triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded`）内追加 `clearStaleSuccessfulRawJson(db, retentionDays)` — 顺序：先现有 cleanup（v2.1.8 `cleanupAfterRunBackground`），后 raw_json 清理；失败不阻塞主 cleanup（try/catch + 下次 idle 重试）

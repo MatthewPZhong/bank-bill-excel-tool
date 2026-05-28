@@ -359,12 +359,72 @@ async function case4_partialRunIntegralProtection() {
   }
 }
 
+// ============================================================
+// case 5: v0.6 (Round 4 F1) — in-progress run 关联 month 整月保护
+//   触发场景：first-chunk crash → chunk_progress 停留 'in-progress'（Round 3 F2 入口写入）
+//     + failureListener 未及时把 in-progress 兜底转 partial（如重启场景）
+//   验证：clearStaleSuccessfulRawJson 跳过整月 bill（与 partial 路径行为对齐）
+//     + 模拟 failureListener 兜底 in-progress → partial 后仍保护
+//     + resume 完成 → complete → 非差异行可清
+// ============================================================
+async function case5_inProgressRunIntegralProtection() {
+  const ctx = setupTempDb();
+  try {
+    // fixture: 100 行 bill 全 imported_at = 10 天前 + month_key='2026-05'
+    //   30 行进 diff_rows + run.chunk_progress = in-progress（first-chunk crash 残留）
+    const old = nowMinusDays(10);
+    for (let i = 1; i <= 100; i++) {
+      insertBill(ctx.appDb.db, { id: i, monthKey: '2026-05', reconId: `R-${i}`, raw: `{"k":${i}}`, importedAt: old });
+    }
+    insertRun(ctx.appDb.db, { id: 1, monthKey: '2026-05' });
+    for (let i = 1; i <= 30; i++) insertDiff(ctx.appDb.db, { runId: 1, billImportId: i });
+
+    // 模拟 first-chunk crash 残留 — Round 3 F2 入口写入的初始 in-progress
+    const inProgressProgress = JSON.stringify({ lastCompletedChunkIndex: -1, totalChunks: 0, status: 'in-progress' });
+    ctx.appDb.db.prepare('UPDATE acquiring_bill_currency_runs SET chunk_progress = ? WHERE id = 1').run(inProgressProgress);
+
+    // 5.1: clearStaleSuccessfulRawJson 跳过整月（v0.6 Round 4 F1 新增）— clearedCount=0
+    const r1 = clearStaleSuccessfulRawJson(ctx.appDb.db, { retentionDays: 1 });
+    assertEq(r1.clearedCount, 0,
+      'case 5.1: 🟠 v0.6 Round 4 F1 — in-progress run 整月排除 → clearedCount=0（端到端：N4-cont-1 SQL × A4 first-chunk crash 残留）');
+
+    // 5.2: 差异行 + 非差异行 raw_json 均保留
+    const keptAfterInProgress = ctx.appDb.db.prepare(
+      "SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE month_key='2026-05' AND raw_json != ''"
+    ).get().c;
+    assertEq(keptAfterInProgress, 100, 'case 5.2: in-progress 状态下 100 行 raw_json 全保留');
+
+    // 5.3: 模拟 failureListener 兜底转 partial — 仍整月保护（v0.5 既有守卫）
+    const partialProgress = JSON.stringify({ lastCompletedChunkIndex: -1, totalChunks: 0, status: 'partial' });
+    ctx.appDb.db.prepare('UPDATE acquiring_bill_currency_runs SET chunk_progress = ? WHERE id = 1').run(partialProgress);
+    const r2 = clearStaleSuccessfulRawJson(ctx.appDb.db, { retentionDays: 1 });
+    assertEq(r2.clearedCount, 0, 'case 5.3: failureListener 兜底 → partial 仍整月保护（v0.5 既有守卫）');
+
+    // 5.4: resume → 完成 → chunk_progress.status='complete' → 非差异行可清
+    const completeProgress = JSON.stringify({ lastCompletedChunkIndex: 2, totalChunks: 3, status: 'complete' });
+    ctx.appDb.db.prepare('UPDATE acquiring_bill_currency_runs SET chunk_progress = ? WHERE id = 1').run(completeProgress);
+    const r3 = clearStaleSuccessfulRawJson(ctx.appDb.db, { retentionDays: 1 });
+    assertEq(r3.clearedCount, 70, 'case 5.4: resume → complete 后 → 70 非差异行被清（in-progress + partial 守卫均解除）');
+
+    // 5.5: 差异行 raw_json 仍保留
+    const diffKept = ctx.appDb.db.prepare(`
+      SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports
+      WHERE id IN (SELECT bill_import_id FROM acquiring_bill_currency_diff_rows)
+        AND raw_json != ''
+    `).get().c;
+    assertEq(diffKept, 30, 'case 5.5: complete 后差异行 raw_json 仍保留（NOT IN diff_rows 守卫不变）');
+  } finally {
+    teardown(ctx);
+  }
+}
+
 // === 执行 ===
 (async () => {
   await case1_idleCleanupRespectsDiffRows();
   await case2_retentionDaysAdjustable();
   await case3_failureGraceful();
   await case4_partialRunIntegralProtection();
+  await case5_inProgressRunIntegralProtection();
 
   const total = passed + failed;
   console.log(`[v2.1.10-n4-cont-1-phase4] ${passed}/${total} PASS`);

@@ -547,7 +547,12 @@ test.describe('T19 — chunk_progress get/set', () => {
   // v2.1.10 SR-FIX-1 round 2 P1-7：模拟 worker crash 后兜底 in-progress → partial
   //   生产路径：failureListener 内扫所有 chunk_progress IS NOT NULL 的 runs → status='in-progress' → 改 'partial'
   //   本 case 验证 setRunChunkProgress 接受 in-progress / partial round-trip + 兜底改 partial 后 listPartialRuns 能命中
-  test('T19.9 — chunk_progress status in-progress → 兜底改 partial 后 listPartialRuns 能命中（SR-FIX-1 round 2 P1-7）', () => {
+  //
+  // v2.1.10 SR-FIX-1 Round 4 F1 更新：listPartialRuns 扩为 partial OR in-progress
+  //   - 兜底前 listPartialRuns 也能命中 in-progress（新行为）
+  //   - 兜底后 status 转 partial，listPartialRuns 仍命中 — 行为对称
+  //   - 本 case 改为验证：兜底前后均命中 + 兜底前后 chunk_progress 状态正确切换
+  test('T19.9 — chunk_progress status in-progress → 兜底改 partial（Round 4 F1 后 listPartialRuns 前后均命中）', () => {
     const monthKey = '2026-04';
     seedMismatchRows(db, { monthKey, count: 100 });
     const runId = insertRun(db, monthKey, 100);
@@ -557,9 +562,10 @@ test.describe('T19 — chunk_progress get/set', () => {
     const before = runRepo.getRunChunkProgress(db, runId);
     assert.strictEqual(before.status, 'in-progress', 'T19.9.1 crash 前 status=in-progress');
 
-    // 验证 listPartialRuns 此时不命中（只看 partial）
+    // Round 4 F1：listPartialRuns 已扩为可恢复语义 — 兜底前已能命中 in-progress
     const partialsBefore = runRepo.listPartialRuns(db, monthKey);
-    assert.strictEqual(partialsBefore.length, 0, 'T19.9.2 兜底前 listPartialRuns 不命中 in-progress');
+    assert.strictEqual(partialsBefore.length, 1, 'T19.9.2 Round 4 F1：兜底前 listPartialRuns 已命中 in-progress');
+    assert.strictEqual(partialsBefore[0].chunk_progress.status, 'in-progress', 'T19.9.2.1 兜底前命中 status=in-progress');
 
     // 模拟 main.js failureListener 兜底改 in-progress → partial
     runRepo.setRunChunkProgress(db, {
@@ -569,10 +575,11 @@ test.describe('T19 — chunk_progress get/set', () => {
       status: 'partial',
     });
 
-    // listPartialRuns 现在能命中
+    // listPartialRuns 仍命中（行为对称）
     const partialsAfter = runRepo.listPartialRuns(db, monthKey);
-    assert.strictEqual(partialsAfter.length, 1, 'T19.9.3 兜底后 listPartialRuns 命中 1');
+    assert.strictEqual(partialsAfter.length, 1, 'T19.9.3 兜底后 listPartialRuns 仍命中 1');
     assert.strictEqual(partialsAfter[0].id, runId, 'T19.9.4 命中正确的 runId');
+    assert.strictEqual(partialsAfter[0].chunk_progress.status, 'partial', 'T19.9.4.1 兜底后命中 status=partial');
     assert.strictEqual(partialsAfter[0].chunk_progress.lastCompletedChunkIndex, 1, 'T19.9.5 兜底保留 lastCompletedChunkIndex');
   });
 
@@ -604,6 +611,57 @@ test.describe('T19 — chunk_progress get/set', () => {
     // 验证 raw runs.chunk_progress 列已写入（非 NULL）— cleanupOrphanData 守卫能识别
     const row = db.prepare('SELECT chunk_progress FROM acquiring_bill_currency_runs WHERE id = ?').get(runId);
     assert.ok(row.chunk_progress != null, 'T19.10.4 runs.chunk_progress 列非 NULL — cleanupOrphanData 守卫可识别');
+  });
+
+  // v2.1.10 SR-FIX-1 Round 4 F1：listPartialRuns 扩为 partial OR in-progress
+  //   触发场景：first-chunk crash → chunk_progress 停留 'in-progress'（Round 3 F2 入口写入）
+  //     + failureListener 未及时把 in-progress 兜底转 partial（如重启场景）
+  //   原 Round 3 listPartialRuns 仅返回 partial → resume handler 用户调用 → 找不到 in-progress run
+  //   修复：SQL `IN ('partial', 'in-progress')`
+  test('T19.11 — listPartialRuns Round 4 F1 扩为 partial OR in-progress（同月 2 个可恢复 run）', () => {
+    const monthKey = '2026-04';
+    seedMismatchRows(db, { monthKey, count: 100 });
+    // 3 个 run：partial / in-progress / complete
+    const rPartial = insertRun(db, monthKey, 100);
+    runRepo.setRunChunkProgress(db, {
+      runId: rPartial, lastCompletedChunkIndex: 1, totalChunks: 3, status: 'partial',
+    });
+    const rInProgress = insertRun(db, monthKey, 100);
+    runRepo.setRunChunkProgress(db, {
+      runId: rInProgress, lastCompletedChunkIndex: -1, totalChunks: 0, status: 'in-progress',
+    });
+    const rComplete = insertRun(db, monthKey, 100);
+    runRepo.setRunChunkProgress(db, {
+      runId: rComplete, lastCompletedChunkIndex: 2, totalChunks: 3, status: 'complete',
+    });
+
+    const recoverable = runRepo.listPartialRuns(db, monthKey);
+    assert.strictEqual(recoverable.length, 2, 'T19.11.1 含 2 个可恢复 run（partial + in-progress）');
+    // 按 ran_at DESC + id DESC — rInProgress 是最新插入的可恢复 run
+    assert.strictEqual(recoverable[0].id, rInProgress, 'T19.11.2 第一个 = 最新可恢复 run（in-progress）');
+    assert.strictEqual(recoverable[0].chunk_progress.status, 'in-progress', 'T19.11.3 第一个 status=in-progress');
+    assert.strictEqual(recoverable[1].id, rPartial, 'T19.11.4 第二个 = partial run');
+    assert.strictEqual(recoverable[1].chunk_progress.status, 'partial', 'T19.11.5 第二个 status=partial');
+    // complete 不应在结果里
+    assert.ok(!recoverable.find(r => r.id === rComplete), 'T19.11.6 不含 complete run');
+  });
+
+  test('T19.12 — listPartialRuns Round 4 F1：仅 in-progress 单个 run 可命中（first-chunk crash 路径）', () => {
+    const monthKey = '2026-04';
+    seedMismatchRows(db, { monthKey, count: 100 });
+    const runId = insertRun(db, monthKey, 100);
+
+    // 模拟 first-chunk crash：runCheckCore 入口前写 in-progress；onChunkDone 未触发；
+    //   failureListener 未及时兜底（如重启场景）
+    runRepo.setRunChunkProgress(db, {
+      runId, lastCompletedChunkIndex: -1, totalChunks: 0, status: 'in-progress',
+    });
+
+    const recoverable = runRepo.listPartialRuns(db, monthKey);
+    assert.strictEqual(recoverable.length, 1, 'T19.12.1 in-progress run 单独返回（Round 4 F1）');
+    assert.strictEqual(recoverable[0].id, runId, 'T19.12.2 命中正确 runId');
+    assert.strictEqual(recoverable[0].chunk_progress.status, 'in-progress', 'T19.12.3 chunk_progress.status=in-progress');
+    assert.strictEqual(recoverable[0].chunk_progress.lastCompletedChunkIndex, -1, 'T19.12.4 lastCompletedChunkIndex=-1（first-chunk 未完成）');
   });
 
 });

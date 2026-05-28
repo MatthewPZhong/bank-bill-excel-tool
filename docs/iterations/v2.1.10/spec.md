@@ -2,11 +2,11 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.5（2026-05-28 — SR-FIX-1 Round 3 Codex F1+F2：N4-cont-1 SQL 加 partial run month 排除 + A4 chunked 入口前初始 in-progress + cleanupOrphanData 守卫扩展）/ v0.4（SR-FIX-1 round 2 P0 4 + P1 9 = 13 项修复 + §16 reverse sync + §8.3 migration 顺序修订）/ v0.3（N4-cont-1 sentinel 修订 `NULL → ''`）/ v0.2（A4 必做 + N4-cont-1 重大方案变更）|
-| 关联 PRD | `PRD-v2.1.10.md` v0.4（同步 §5.3 migration 顺序修订；§4.2 sentinel 修订）|
+| 文档版本 | v0.6（2026-05-28 — SR-FIX-1 Round 4 Codex 复审 F1+F2+F3：in-progress 状态机 4 处链路统一扩展 + before-quit shutdown 不抹 activeJob + git diff --check 卫生）/ v0.5（SR-FIX-1 Round 3 Codex F1+F2：N4-cont-1 SQL 加 partial run month 排除 + A4 chunked 入口前初始 in-progress + cleanupOrphanData 守卫扩展）/ v0.4（SR-FIX-1 round 2 P0 4 + P1 9 = 13 项修复 + §16 reverse sync + §8.3 migration 顺序修订）/ v0.3（N4-cont-1 sentinel 修订 `NULL → ''`）/ v0.2（A4 必做 + N4-cont-1 重大方案变更）|
+| 关联 PRD | `PRD-v2.1.10.md` v0.4（同步 §5.3 migration 顺序修订；§4.2 sentinel 修订；v0.5 Round 3 F1 + v0.6 Round 4 F1 N4-cont-1 SQL 守卫扩展）|
 | 关联 backlog | `backlog.md` v0.2（D23-D28 全部拍板 + Phase 0 POC 完成）|
-| 起草人 | PM + Dev Phase 4 T28 发现 + 主线程 T29' 修订 + Dev SR-FIX-1 round 2 dev 自审 |
-| 状态 | v0.4 SR-FIX-1 round 2 完成（13 commits + closeout；release-check 全绿：unit 1243 / integration 824 / smoke 全过）|
+| 起草人 | PM + Dev Phase 4 T28 发现 + 主线程 T29' 修订 + Dev SR-FIX-1 round 2 dev 自审 + Round 3 Codex review + Round 4 Codex 复审 |
+| 状态 | v0.6 SR-FIX-1 Round 4 完成（13 + 3 + 4 commits；release-check 全绿；unit / integration 增量见 §17.6 / §17.7）|
 
 ---
 
@@ -470,7 +470,7 @@ async function insertDiffRowsByJoinChunked(db, runId, monthKey, chunkSize = 1000
 }
 ```
 
-### 3.3 idempotent / 重跑保护（v0.2 必做，不再"待 Phase 3 细化" + v0.5 Round 3 F2 first-chunk crash 防护）
+### 3.3 idempotent / 重跑保护（v0.2 必做，不再"待 Phase 3 细化" + v0.5 Round 3 F2 first-chunk crash 防护 + v0.6 Round 4 F1 状态机 4 处链路扩展）
 
 若用户重跑 runCheck（如失败后重试）：
 - `clearOldRuns(monthKey)` 已删除该月 runs + 通过 N4-cont-2 CASCADE 自动删 diff_rows
@@ -483,6 +483,19 @@ async function insertDiffRowsByJoinChunked(db, runId, monthKey, chunkSize = 1000
 - 目的：保证 `chunk_progress IS NOT NULL` — 后续兜底路径（main.js P1-7 failureListener `in-progress → partial` 兜底 + startup cleanupOrphanData 守卫）能识别该 run，不被当孤儿误清
 - 配套 cleanupOrphanData 守卫扩展（spec §3.3 / acquiring-bill-currency-session.js:608）：保护 `partial` OR `in-progress` 一起跳过 cleanup
 - 仅 `!isResume` 时写入；resume 路径下 `chunk_progress` 已是 partial（cleanup 守卫已能保护）
+
+**v0.6 (SR-FIX-1 Round 4 F1) in-progress 状态机 4 处链路统一扩展**：
+
+Round 3 修复只在 `cleanupOrphanData` 一处把守卫扩为 `partial OR in-progress`，但其余 3 处链路仍只看 `partial` — Codex 复审抓出。修复后 4 处链路全部对齐 `partial OR in-progress`：
+
+| 链路 | 文件 | 修订 |
+|---|---|---|
+| 1. `cleanupOrphanData` 启动期守卫（Round 3 已扩） | `acquiring-bill-currency-session.js:641` | `if (chunkProgress.status === 'partial' || chunkProgress.status === 'in-progress') continue;` |
+| 2. **`listPartialRuns` SQL 过滤（Round 4 新扩）** | `run-repository.js:325` | JSON status check 改 `(progress.status === 'partial' || progress.status === 'in-progress')`；函数名保留 `listPartialRuns`（语义扩为「可恢复 runs」） |
+| 3. **`acquiringBillCurrency:run:resume` IPC handler（Round 4 新扩）** | `main.js:10905` | 显式 runId 拒绝逻辑 `!['partial', 'in-progress'].includes(progress.status)` |
+| 4. **N4-cont-1 `clearStaleSuccessfulRawJson` SQL 守卫（Round 4 新扩）** | `raw-json-retention.js:79` | `json_extract(chunk_progress, '$.status') IN ('partial', 'in-progress')` |
+
+效果：first-chunk crash 后 run 保留 ✓ + 用户可以直接 resume（不依赖 failureListener 兜底转 partial）+ raw_json 保护完整。
 
 ---
 
@@ -523,12 +536,12 @@ function getAcquiringBillRawJsonRetentionDays(db) {
 }
 ```
 
-### 4.2 清理算法（v0.5 SR-FIX-1 Round 3 F1）— `clearStaleSuccessfulRawJson`
+### 4.2 清理算法（v0.6 SR-FIX-1 Round 4 F1 / v0.5 Round 3 F1）— `clearStaleSuccessfulRawJson`
 
-#### 4.2.1 核心 SQL（双 NOT IN 子查询 — v0.5 加 partial run month 守卫 + v0.3 sentinel）
+#### 4.2.1 核心 SQL（双 NOT IN 子查询 — v0.6 扩 in-progress / v0.5 加 partial run month 守卫 / v0.3 sentinel）
 
 ```js
-// src/backend/acquiring-bill-currency-db/raw-json-retention.js（v0.5 修订）
+// src/backend/acquiring-bill-currency-db/raw-json-retention.js（v0.6 修订）
 function clearStaleSuccessfulRawJson(db, retentionDays) {
   const result = db.prepare(`
     UPDATE acquiring_bill_currency_bill_imports
@@ -540,11 +553,11 @@ function clearStaleSuccessfulRawJson(db, retentionDays) {
         AND b.id NOT IN (
           SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows
         )
-        -- v0.5 (Round 3 F1) 新增：排除 partial run 关联月份的所有 bill
+        -- v0.6 (Round 4 F1) 修订：partial → IN ('partial', 'in-progress')
         AND b.month_key NOT IN (
           SELECT DISTINCT month_key FROM acquiring_bill_currency_runs
           WHERE chunk_progress IS NOT NULL
-            AND json_extract(chunk_progress, '$.status') = 'partial'
+            AND json_extract(chunk_progress, '$.status') IN ('partial', 'in-progress')
         )
     )
   `).run(retentionDays);
@@ -554,6 +567,12 @@ function clearStaleSuccessfulRawJson(db, retentionDays) {
 module.exports = { clearStaleSuccessfulRawJson };
 ```
 
+> ⚠️ **v0.6 reverse sync（2026-05-28 SR-FIX-1 Round 4 Codex F1）**：partial → `IN ('partial', 'in-progress')`。
+>
+> **触发场景**：first-chunk crash → chunk_progress 停留 'in-progress'（Round 3 F2 入口写入）+ failureListener 未及时把 in-progress 兜底转 partial（如重启场景，listener 未注册时）。原 v0.5 SQL `= 'partial'` 不命中 in-progress month → idle cleanup 仍清掉"未来 mismatch"raw_json。
+>
+> **修复**：与 cleanupOrphanData / listPartialRuns / resume handler 守卫范畴统一（详 §3.3 v0.6 状态机扩展表）。
+>
 > ⚠️ **v0.5 reverse sync（2026-05-28 SR-FIX-1 Round 3 Codex F1）**：新增 partial run 关联 month 排除子查询。
 >
 > **触发场景**：chunked run 跑到 chunk M/N → cancel / worker crash → `chunk_progress.status='partial'`；此时 `diff_rows` 仅含「已处理 mismatches」；任何"后续 bill rows（resume 时会变 mismatches 的）"仍未进 `diff_rows`。如 idle retention 在 bill imported_at 老于窗口时跑 → 清掉这些"未来 mismatch"的 raw_json → 用户 resume 后 INSERT 进来的 diff rows，writer 路径仍解析 `d.bill_raw_json` → 输出 broken / 不完整。
@@ -564,15 +583,15 @@ module.exports = { clearStaleSuccessfulRawJson };
 >
 > ⚠️ **v0.3 reverse sync（2026-05-28）**：sentinel 从 `NULL` 改 `''`。原因：`bill_imports.raw_json` schema = `TEXT NOT NULL`（`migrations.js:1500`，v2.1.8 N4 引入约束）— `SET raw_json = NULL` 被 SQLite 拒绝。`''` 兼容 NOT NULL + 等价"已清"sentinel。
 
-#### 4.2.2 SQL 关键不变量（v0.5）
+#### 4.2.2 SQL 关键不变量（v0.6）
 
 - **`b.raw_json != ''`**：跳过已清的行（idempotent — 多次 idle 触发不会重复清同行；`''` 是 v0.3 "已清" sentinel）
 - **`b.imported_at < datetime('now', '-' || ? || ' days')`**：仅清"老于 N 天"的行 — `imported_at` 是 bill_imports 表既有列（v2.1.8 N4 schema）
 - **`b.id NOT IN (SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows)`**：**排除差异行** — 保证差异行 raw_json 永远不被清，writer.js:184 重导差异 xlsx 不丢字段
-- **v0.5 新增 `b.month_key NOT IN (SELECT month_key FROM runs WHERE chunk_progress IS NOT NULL AND json_extract(...) = 'partial')`**：排除 partial run 关联月份的全部 bill（无论是否已进 diff_rows）— 保证 resume 后新增 mismatch 行的 raw_json 完整；partial 完成 resume → status='complete' → 不再排除
+- **v0.6 修订 `b.month_key NOT IN (SELECT month_key FROM runs WHERE chunk_progress IS NOT NULL AND json_extract(...) IN ('partial', 'in-progress'))`**（Round 4 F1）：排除 partial OR in-progress run 关联月份的全部 bill（无论是否已进 diff_rows）— 与 cleanupOrphanData / listPartialRuns / resume handler 守卫范畴对齐；可恢复 run 完成 resume → status='complete' → 不再排除
 - **`SET raw_json = ''`**：保留行骨架 + 业务字段；不删整行；不破坏 N4-cont-2 FK CASCADE 路径（bill_import_id FK 仍有效）；兼容 v2.1.8 N4 NOT NULL 约束（v0.3）
 
-#### 4.2.3 v0.1 → v0.2 → v0.3 → v0.5 算法变更项
+#### 4.2.3 v0.1 → v0.2 → v0.3 → v0.5 → v0.6 算法变更项
 
 - ❌ `calculateExpiredRows`（v0.1 启动期计算超期）— v0.2 删除（无 UI 不需要预估）
 - ❌ `pruneOldRawJson`（v0.1 用户主动触发删除）— v0.2 删除（无用户主动路径）
@@ -580,6 +599,7 @@ module.exports = { clearStaleSuccessfulRawJson };
 - ❌ `UPDATE raw_json = '{}'`（v0.1 留空 JSON）→ ❌ `UPDATE raw_json = NULL`（v0.2，但 schema NOT NULL 拒绝）→ ✅ **`UPDATE raw_json = ''`（v0.3 修订）**
 - ❌ 月份维度 + MB 双门槛 — v0.2 删除（改"天数"单一维度）
 - ✅ **v0.5 新增 partial run month 守卫子查询**（Round 3 F1）— 跨 Phase 协同保护：A4 chunked partial run × N4-cont-1 cleanup 不竞争数据完整性
+- ✅ **v0.6 守卫扩展 partial → IN ('partial', 'in-progress')**（Round 4 F1）— 与 4 处链路（cleanupOrphanData / listPartialRuns / resume handler / N4-cont-1 SQL）状态机范畴对齐
 
 ### 4.3 触发集成（v0.2 复用 v2.1.9 N1' idle cleanup 计时器）
 

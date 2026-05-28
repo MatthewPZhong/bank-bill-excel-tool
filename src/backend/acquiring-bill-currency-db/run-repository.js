@@ -308,12 +308,20 @@ function getRunChunkProgress(db, runId) {
   }
 }
 
-// v2.1.10 SR-FIX-1 round 2 P1-5：列出某月所有 chunk_progress.status='partial' 的 runs
-//   触发场景：resume handler 入参不带 runId → 自动找该月最近一个 partial run
+// v2.1.10 SR-FIX-1 round 2 P1-5：列出某月所有「可恢复」chunk_progress 状态的 runs
+//   触发场景：resume handler 入参不带 runId → 自动找该月最近一个可恢复 run
 //   原 resume handler 只取 getLatestRun（最近 1 个 run）→ 如最近 run 是 complete（如刚跑完新 run），
 //   前一个 run 是 partial → 用户无法 resume 前一个 partial
-//   修复后：扫该月所有 run.chunk_progress.status='partial' → 按 ran_at DESC 返回 → caller 取第一个
+//   修复后：扫该月所有可恢复 run.chunk_progress → 按 ran_at DESC 返回 → caller 取第一个
 //   性能：每月一般 1-2 个 run；扫描成本 O(N)；JSON 解析 cost 小
+//
+// v2.1.10 SR-FIX-1 Round 4 F1：扩为 partial OR in-progress 一起返回
+//   触发场景：first-chunk crash（onChunkDone 触发前 worker die）+ failureListener 未及时把 in-progress 兜底转 partial
+//     → chunk_progress 停留 'in-progress'（Round 3 F2 入口写入）
+//     → 用户重启后调 resume → listPartialRuns 不命中 in-progress → 无法 resume
+//   修复：SQL 直接 IN ('partial', 'in-progress')，与 cleanupOrphanData 守卫范畴对齐
+//     - 函数名保留 listPartialRuns（语义扩为「可恢复 runs」；不改名避免 PR diff 噪音）
+//     - caller (resume handler) 已经做 progress.status 二次校验（IN ('partial','in-progress')）
 function listPartialRuns(db, monthKey) {
   if (!monthKey) return [];
   const rows = db.prepare(`
@@ -326,7 +334,8 @@ function listPartialRuns(db, monthKey) {
   for (const row of rows) {
     try {
       const progress = JSON.parse(row.chunk_progress);
-      if (progress && progress.status === 'partial') {
+      // v2.1.10 Round 4 F1：partial OR in-progress 均视为可恢复
+      if (progress && (progress.status === 'partial' || progress.status === 'in-progress')) {
         result.push({
           id: row.id,
           month_key: row.month_key,
