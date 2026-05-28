@@ -1361,6 +1361,14 @@ WHERE raw_json != ''
 - 重跑时 clearOldRuns + N4-cont-2 CASCADE 自动清旧 diff_rows → idempotent
 - 差异表行内容（数量 + 内容）与 v2.1.9 单条大 SQL 一致（contract test 锁定）
 
+**Resume 边界条件**（v2.1.10 SR-FIX-1 round 2 P0-1 修复后）：
+
+- chunked cancel / worker crash → `chunk_progress.status='partial'`；下次 resume IPC 调用复用 `runId` 续跑（spec §3.3 / §5.4 idempotent）
+- **跨重启场景**：v2.1.10 SR-FIX-1 round 2 P0-1 修复后，`cleanupOrphanData` 启动期会**保护 partial run**（不再当孤儿清掉）；用户重启 app 后仍可 resume
+- worker crash 场景（v2.1.10 SR-FIX-1 round 2 P1-7）：主进程 `failureListener` 自动把残留 `in-progress` 改成 `partial`，保证 resume 路径可用
+- 当前 v2.1.10 UI 暂未暴露 resume 按钮（v2.1.11+ 评估）；高级用户 / 集成测试可通过 IPC `acquiringBillCurrency:run:resume` 调用
+- 如不想 resume → 直接重跑整月 runCheck（`acquiringBillCurrency:run`）会 `clearOldRuns` + 自动 CASCADE 清掉旧 partial run 数据
+
 ---
 
 ## 1.9 主界面工具栏与模块收纳（v2.1.4 新增）
