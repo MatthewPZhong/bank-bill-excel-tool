@@ -576,4 +576,34 @@ test.describe('T19 — chunk_progress get/set', () => {
     assert.strictEqual(partialsAfter[0].chunk_progress.lastCompletedChunkIndex, 1, 'T19.9.5 兜底保留 lastCompletedChunkIndex');
   });
 
+  // v2.1.10 SR-FIX-1 Round 3 F2：chunked 入口前初始 in-progress（first-chunk crash 防护）
+  //   触发场景：worker 跑第一个 chunk 时 die（onChunkDone 触发前 — chunk_progress 从未写入）
+  //   修复：runCheckCore 进 insertDiffRowsByJoinChunked 前先写 in-progress 占位
+  //     - lastCompletedChunkIndex=-1 / totalChunks=0 / status='in-progress'
+  //     - onChunkDone 第一次触发时会覆盖此值（正常路径不会残留）
+  //     - cleanupOrphanData 守卫扩展同时保护 partial + in-progress → 启动期不误清
+  //   本 case 仅验证 setRunChunkProgress 接受 in-progress 初始值的 round-trip
+  test('T19.10 — chunked 入口初始 in-progress 占位 round-trip（SR-FIX-1 Round 3 F2）', () => {
+    const monthKey = '2026-04';
+    seedMismatchRows(db, { monthKey, count: 100 });
+    const runId = insertRun(db, monthKey, 100);
+
+    // 模拟 runCheckCore F2 修复：进入 insertDiffRowsByJoinChunked 前先写初始 in-progress
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: -1,
+      totalChunks: 0,
+      status: 'in-progress',
+    });
+
+    const progress = runRepo.getRunChunkProgress(db, runId);
+    assert.strictEqual(progress.status, 'in-progress', 'T19.10.1 入口写入 status=in-progress');
+    assert.strictEqual(progress.lastCompletedChunkIndex, -1, 'T19.10.2 入口写入 lastCompletedChunkIndex=-1');
+    assert.strictEqual(progress.totalChunks, 0, 'T19.10.3 入口写入 totalChunks=0');
+
+    // 验证 raw runs.chunk_progress 列已写入（非 NULL）— cleanupOrphanData 守卫能识别
+    const row = db.prepare('SELECT chunk_progress FROM acquiring_bill_currency_runs WHERE id = ?').get(runId);
+    assert.ok(row.chunk_progress != null, 'T19.10.4 runs.chunk_progress 列非 NULL — cleanupOrphanData 守卫可识别');
+  });
+
 });

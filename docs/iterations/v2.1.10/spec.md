@@ -470,12 +470,19 @@ async function insertDiffRowsByJoinChunked(db, runId, monthKey, chunkSize = 1000
 }
 ```
 
-### 3.3 idempotent / 重跑保护（v0.2 必做，不再"待 Phase 3 细化"）
+### 3.3 idempotent / 重跑保护（v0.2 必做，不再"待 Phase 3 细化" + v0.5 Round 3 F2 first-chunk crash 防护）
 
 若用户重跑 runCheck（如失败后重试）：
 - `clearOldRuns(monthKey)` 已删除该月 runs + 通过 N4-cont-2 CASCADE 自动删 diff_rows
 - 新 runId 重新跑 — 不会有跨 run 数据污染
 - chunked 中途 cancel → 当前批 ROLLBACK；已 COMMIT 的批保留 → 再次触发 runCheck 时 clearOldRuns 会按 month_key 清掉本次旧 run + N4-cont-2 CASCADE 清旧 diff_rows → 新 runId 重头跑 → idempotent
+
+**v0.5 (SR-FIX-1 Round 3 F2) first-chunk crash 防护**：
+- `runCheckCore` 进入 `insertDiffRowsByJoinChunked` 前先写一个 in-progress 占位 `chunk_progress`（`lastCompletedChunkIndex=-1 / totalChunks=0 / status='in-progress'`）
+- 触发场景：worker 跑第一个 chunk 时 die（process.exit / OOM / SIGKILL），`onChunkDone` 触发前 chunk_progress 仍是入口写入的 in-progress
+- 目的：保证 `chunk_progress IS NOT NULL` — 后续兜底路径（main.js P1-7 failureListener `in-progress → partial` 兜底 + startup cleanupOrphanData 守卫）能识别该 run，不被当孤儿误清
+- 配套 cleanupOrphanData 守卫扩展（spec §3.3 / acquiring-bill-currency-session.js:608）：保护 `partial` OR `in-progress` 一起跳过 cleanup
+- 仅 `!isResume` 时写入；resume 路径下 `chunk_progress` 已是 partial（cleanup 守卫已能保护）
 
 ---
 

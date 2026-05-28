@@ -331,6 +331,29 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
     ? resumeFromRun.lastCompletedChunkIndex + 1
     : 0;
 
+  // v2.1.10 SR-FIX-1 Round 3 F2：first-chunk crash 防护
+  //   触发场景：worker 跑第一个 chunk 时 die（process.exit / OOM / SIGKILL），onChunkDone 触发前
+  //     → 根本没有 chunk_progress 写入
+  //     → crash listener（main.js failureListener，P1-7 兜底）扫 in-progress → partial，但**找不到该 run 因 chunk_progress IS NULL**
+  //     → 启动期 cleanupOrphanData（P0-1 修复）只保护 chunk_progress.status='partial' / 'in-progress' 的 run
+  //     → 该 run 被当孤儿清掉 → 用户无法 resume
+  //   修复：在 insertDiffRowsByJoinChunked 入口前先写一个 in-progress 记录，保证 chunk_progress IS NOT NULL
+  //     - onChunkDone 第一次触发时会覆盖此值（lastCompletedChunkIndex=0 / status='in-progress' 或 'complete'）
+  //     - 仅在 !isResume 时写（resume 路径 chunk_progress 已是 partial，已能被 cleanup 守卫识别）
+  //   注：cleanupOrphanData (P0-1) 守卫扩展为 partial OR in-progress 一起保护（spec §3.3 / §5.4 idempotent）
+  if (!isResume) {
+    try {
+      runRepo.setRunChunkProgress(db, {
+        runId,
+        lastCompletedChunkIndex: -1, // 起始值；onChunkDone 第一次会覆盖
+        totalChunks: 0,              // 未知；onChunkDone 第一次会算出真实值（与 0-chunk 边界 fallback 一致）
+        status: 'in-progress',
+      });
+    } catch (_progressErr) {
+      // 写失败不阻塞主流程（unit fixture 表不存在 / 极小概率 SQLITE_BUSY）
+    }
+  }
+
   try {
     chunkedResult = runRepo.insertDiffRowsByJoinChunked(db, {
       runId,
@@ -595,13 +618,19 @@ async function cleanupOrphanData({ db, onProgress }) {
   //   修复（spec §3.3 / §5.4 idempotent + tasks T19 resumeFromRun 设计意图）：
   //     如果 run 处于 chunk_progress.status='partial' 状态 → 视为「待 resume」非「孤儿」→ 保留供下次 resume IPC 调用
   //     对配套测试：scripts/integration/v2.1.10-a4-phase3.js 新增 case 验证「partial run 跨 cleanupOrphanData 仍存活」
+  //
+  // v2.1.10 SR-FIX-1 Round 3 F2 扩展：in-progress 也一起保护
+  //   触发场景：worker 跑第一个 chunk 时 die（onChunkDone 触发前）+ failureListener 兜底未及时跑到（如重启场景）
+  //     → chunk_progress 停留 'in-progress'（runCheckCore 入口前 F2 修复写入的初始值）
+  //     → 不能当孤儿清，否则用户重启后无法 resume
+  //   注：生产正常路径下 in-progress 只在 chunk 边界短暂存在；crash 或重启时残留即应保护
   for (const run of allRuns) {
     // NewF2：'success-no-files' 是可恢复状态，跳过 cleanup
     if (run.status === 'success-no-files') continue;
     const fileBroken = !run.diff_file_path || !run.report_file_path
       || !fs.existsSync(run.diff_file_path) || !fs.existsSync(run.report_file_path);
     if (run.status !== 'success' || fileBroken) {
-      // v2.1.10 SR-FIX-1 round 2 P0-1：partial chunked run 不当孤儿（A4 resume 路径保护）
+      // v2.1.10 SR-FIX-1 round 2 P0-1 + Round 3 F2：partial / in-progress chunked run 不当孤儿（A4 resume 路径保护）
       let chunkProgress = null;
       try {
         chunkProgress = runRepo.getRunChunkProgress(db, run.id);
@@ -609,8 +638,10 @@ async function cleanupOrphanData({ db, onProgress }) {
         // chunk_progress 列不存在 / JSON 解析失败 → 视为无 progress，按既有 fileBroken 逻辑当孤儿
         chunkProgress = null;
       }
-      if (chunkProgress && chunkProgress.status === 'partial') {
+      if (chunkProgress && (chunkProgress.status === 'partial' || chunkProgress.status === 'in-progress')) {
         // 跳过 — 保留供 resume IPC 调用（acquiringBillCurrency:run:resume）
+        // partial：cancel / 正常 catch 块写入
+        // in-progress：runCheckCore 入口前初始写入（F2）或 onChunkDone 中间状态（worker first-chunk crash 残留）
         continue;
       }
       orphanRuns.push(run);

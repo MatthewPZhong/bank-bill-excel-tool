@@ -436,17 +436,79 @@ async function test4_cleanupOrphanProtectsPartialRun() {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// case 5：SR-FIX-1 Round 3 F2 — first-chunk crash 模拟 + cleanupOrphanData 守卫扩展
+//   触发场景：runCheckCore 进 insertDiffRowsByJoinChunked 前已写初始 in-progress；
+//     worker 跑第一个 chunk 时 die（onChunkDone 触发前 — chunk_progress 仍是 in-progress）
+//     P1-7 failureListener（main.js）尚未触发（如重启场景）→ 启动期 cleanupOrphanData 需保护 in-progress
+//   修复后行为：
+//     - cleanupOrphanData 检查 chunk_progress.status='in-progress' → 跳过保护
+//     - run 不被清；用户可后续 resume（或 failureListener 兜底改 partial）
+// ─────────────────────────────────────────────────────────────────
+async function test5_cleanupOrphanProtectsInProgress() {
+  console.log('\n[case 5] SR-FIX-1 Round 3 F2 — cleanupOrphanData 保护 in-progress（first-chunk crash 防护）');
+
+  const ctx = await setupTmpDbWithMismatchFixture({ rowCount: 5000 });
+  try {
+    // 模拟 runCheckCore F2 修复入口：写一个 success runs 行 + 初始 in-progress chunk_progress
+    //   不实际跑 insertDiffRowsByJoinChunked（模拟 first-chunk crash 残留场景）
+    const runId = runRepo.insertRun(ctx.db.db, {
+      monthKey: '2026-04',
+      ranAt: new Date().toISOString(),
+      totalBillRows: 5000,
+      matchedRows: 5000,
+      mismatchRows: 5000,
+      unmatchedRows: 0,
+      status: 'success',
+    });
+    runRepo.setRunChunkProgress(ctx.db.db, {
+      runId,
+      lastCompletedChunkIndex: -1,
+      totalChunks: 0,
+      status: 'in-progress',
+    });
+
+    // 验证初始 in-progress 状态
+    const before = runRepo.getRunChunkProgress(ctx.db.db, runId);
+    assertEq(before.status, 'in-progress', '5.1 first-chunk crash 残留 chunk_progress.status=in-progress');
+    const runBefore = ctx.db.db.prepare('SELECT * FROM acquiring_bill_currency_runs WHERE id=?').get(runId);
+    assertEq(runBefore.diff_file_path, null, '5.2 diff_file_path=null（fileBroken=true）');
+    assertEq(runBefore.status, 'success', '5.3 runs.status=success（stage 3 写入）');
+
+    // 触发 cleanupOrphanData
+    const stats = await session.cleanupOrphanData({ db: ctx.db.db });
+
+    // 验证 in-progress run 不被清
+    assertEq(stats.orphanRunIds.includes(runId), false,
+      '5.4 in-progress run 不在 orphanRunIds（Round 3 F2 守卫扩展）');
+
+    const runAfter = ctx.db.db.prepare('SELECT * FROM acquiring_bill_currency_runs WHERE id=?').get(runId);
+    assertTrue(!!runAfter, '5.5 cleanupOrphanData 后 in-progress run 仍存在');
+    const progressAfter = JSON.parse(runAfter.chunk_progress);
+    assertEq(progressAfter.status, 'in-progress', '5.6 chunk_progress.status 仍是 in-progress');
+
+    // 验证 bill_imports 未被 CASCADE 清掉
+    const billCountAfter = ctx.db.db.prepare(
+      'SELECT COUNT(*) c FROM acquiring_bill_currency_bill_imports'
+    ).get().c;
+    assertEq(billCountAfter, 5000, '5.7 bill_imports 5000 行保留（cleanupAfterRunBackground 未触发）');
+  } finally {
+    ctx.cleanup();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────
 async function main() {
   console.log('==== v2.1.10 A4 Phase 3 集成测试 ====');
-  console.log('PRD §1.3 + spec §七 Phase 3 ≥ 3 case ≥ 15 断言 + SR-FIX-1 round 2 P0-1 case 4');
+  console.log('PRD §1.3 + spec §七 Phase 3 ≥ 3 case ≥ 15 断言 + SR-FIX-1 round 2 P0-1 case 4 + Round 3 F2 case 5');
 
   const cases = [
     test1_chunkBoundaries,
     test2_resumeAfterCancel,
     test3_perfAndCancelResponsiveness,
     test4_cleanupOrphanProtectsPartialRun,
+    test5_cleanupOrphanProtectsInProgress,
   ];
 
   for (const c of cases) {
