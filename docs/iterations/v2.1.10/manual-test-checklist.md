@@ -2,12 +2,12 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.1（2026-05-28 起草） |
-| 关联文档 | `PRD-v2.1.10.md` v0.1 / `spec.md` v0.1 / `tasks.md` v0.1 / `backlog.md` v0.1 |
-| 测试范围 | β 4 主线 — A3 runCheck 跨进程化 + A4 SQL JOIN chunked（条件触发） + N4-cont-1 raw_json 体积治理 + N4-cont-2 FK CASCADE 改造 + 0 regression（v2.1.9 α 9 主题全集） |
+| 文档版本 | v0.2（2026-05-28 reverse sync — A4 必做 / N4-cont-1 重写 ≥ 3 case / 删 UI 相关 case） |
+| 关联文档 | `PRD-v2.1.10.md` v0.2 / `spec.md` v0.2 / `tasks.md` v0.2 / `backlog.md` v0.1 |
+| 测试范围 | β 4 主线 — A3 runCheck 跨进程化 + A4 SQL JOIN chunked（v0.2 必做） + N4-cont-1 raw_json 体积治理（v0.2 仅清对账成功行 + idle 自动 + 0 UI） + N4-cont-2 FK CASCADE 改造 + 0 regression（v2.1.9 α 9 主题全集） |
 | 测试节奏 | Phase 0 完成后用户手测 → 每 Phase 完成后用户手测 → 全 Phase 完成后跑 release-check + 用户验收 |
-| 必做 case 数 | **≥ 22**（A3 ≥ 8 / A4 ≥ 3 / N4-cont-1 ≥ 5 / N4-cont-2 ≥ 6）+ 0 regression 9 主题 |
-| **危险等级** | 🔴 **本版 4 主线均高危**：跨进程架构改造 / DB schema 不可逆 / raw_json 删除不可逆 / FK CASCADE 不可逆 |
+| 必做 case 数 | **≥ 20**（A3 ≥ 8 / A4 ≥ 3 必做 / N4-cont-1 ≥ 3 / N4-cont-2 ≥ 6）+ 0 regression 9 主题 |
+| **危险等级** | 🔴 **本版 4 主线均高危**：跨进程架构改造 / DB schema 不可逆 / raw_json 自动清除不可逆 / FK CASCADE 不可逆 |
 
 ---
 
@@ -414,22 +414,22 @@ throw outer;
 
 ---
 
-## 四、A4 — SQL JOIN chunked（条件触发，≥ 3 case）
+## 四、A4 — SQL JOIN chunked（v0.2：必做 ≥ 3 case）
 
-> 关联 task：T17 / T18 / T19 / T20 / T21
-> **决策门**：T17 基于 A3 Phase 2 性能基线决策。若 worker 内单条 SQL < 30s 且 cancel < 5s → A4 closure，跳过本章节。
+> 关联 task：T18 / T19 / T20 / T21（v0.2 删除 T17 决策点）
+> **v0.2 D25 用户拍板必做**，不再"条件触发"。本章全跑。
 
-### 4.1 T17 决策结果回写
+### 4.1 必做基线确认（v0.2）
 
-- [ ] T17 决策 = ___（做 / 不做）
-- [ ] 若不做：本章节其余跳过；PRD §一 / spec §三 已回写 D25 = (a)
-- [ ] 若做：继续 §4.2-4.4
+- [ ] PRD §1.3 必做行确认：A4 必做
+- [ ] spec §3.2 chunk size 选定 10w 行
+- [ ] tasks.md Phase 3 改"实施"任务
 
-### 4.2 chunk size 边界（若做 A4）
+### 4.2 chunk size 边界（v0.2 必做）
 
-#### 4.2.1 10w 行 chunk
+#### 4.2.1 10w 行 chunk（v0.2 默认 baseline）
 
-**准备**：500w 行 fixture；chunkSize = 100000（手动改 settings 或代码默认值）。
+**准备**：500w 行 fixture；chunkSize = 100000（v0.2 spec §3.2 默认值）。
 
 **步骤**：
 1. 触发 runCheck
@@ -440,12 +440,13 @@ throw outer;
 - [ ] chunkCount = 50（500w / 10w）
 - [ ] 进度事件 50 个（每批 1 个）
 - [ ] 总耗时记录：___ s（与 §4.2.2/4.2.3 对比）
-- [ ] 每批之间 cancel 响应 < 1s
+- [ ] 每批之间 cancel 响应 < 5s（v0.2 hard requirement）
+- [ ] 内存峰值 < 200MB（v0.2 hard requirement）
 
 **实际**：__________
 **关联 task**：T18 / T21
 
-#### 4.2.2 50w 行 chunk（PM 倾向 baseline）
+#### 4.2.2 50w 行 chunk（对比组）
 
 **准备**：同上；chunkSize = 500000。
 
@@ -453,19 +454,18 @@ throw outer;
 - [ ] chunkCount = 10
 - [ ] 进度事件 10 个
 - [ ] 总耗时 ___ s
-- [ ] cancel 响应 < 3s（chunk 粒度大）
+- [ ] cancel 响应可能 > 5s ❌（验证 v0.2 spec §3.2 不选 50w 的理由）
 
 **实际**：__________
 **关联 task**：T18 / T21
 
-#### 4.2.3 100w 行 chunk
+#### 4.2.3 100w 行 chunk（对比组）
 
 **准备**：同上；chunkSize = 1000000。
 
 **预期**：
 - [ ] chunkCount = 5
-- [ ] 总耗时最小但 cancel 响应最大
-- [ ] cancel 响应 < 5s（接近不分批）
+- [ ] 总耗时最小但 cancel 响应 > 25s ❌（验证不选 100w 的理由）
 
 **实际**：__________
 **关联 task**：T18 / T21
@@ -530,223 +530,113 @@ throw outer;
 - [ ] §4.2 chunk size — 4 case
 - [ ] §4.3 中断恢复 — 1 case
 - [ ] §4.4 性能对比 — 1 case
-- **总计：6 case ≥ 3（PRD §1.3 必做）**（若 T17=不做则本章全部 N/A）
+- **总计：6 case ≥ 3（PRD §1.3 必做）**（v0.2 删除"若 T17=不做则本章全部 N/A"条件）
 
 ---
 
-## 五、N4-cont-1 — raw_json 体积治理（强制 ≥ 5 case）
+## 五、N4-cont-1 — raw_json 体积治理（v0.2 重写 · 强制 ≥ 3 case）
 
-> 关联 task：T22 / T23 / T24 / T25 / T26 / T27 / T28
-> 🔴 **危险操作**：raw_json 清理**不可逆**。本章 §5.2 强制验证二次确认；§5.4 验证取消路径。
+> 关联 task：T22 / T23 / T24 / T28（v0.2 删除 T25-T27 — 无 UI / 无 dialog / 无 IPC）
+> 🔴 **危险操作（v0.2 缓解方式变更）**：raw_json 清理**不可逆**；v0.2 等价缓解 = (1) 仅清"对账成功"行（不在 diff_rows 中）+ 差异行 raw_json 永远保留 + (2) 7 天保留窗口 + (3) settings 可调 1-30 + (4) USER_GUIDE 手动恢复路径
+> v0.2 删除 case：5.2 手动清按钮 / 5.3 二次确认输入校验 / 5.4 中途取消（idle 自动无中途）/ UI 相关全部
 
-### 5.1 启动期"标记超期"算法验证（保留窗口）
+### 5.1 case 1 — idle 30min 触发后差异行 raw_json 完整 + 对账成功老行 raw_json 已清
 
-#### 5.1.1 默认值兼容（v2.1.9 → v2.1.10 升级）
-
-**准备**：v2.1.9 老库 fixture（settings 表无 `acquiring_bill_raw_json_retention_months` / `_max_mb` 键）。
+**准备**：
+- 准备 fixture 含跨日数据（如近 30 天的对账数据，含部分差异行）：
+  - 100w 行 bill_imports（imported_at 跨 30 天）
+  - 其中 1w 行已记录在 `acquiring_bill_currency_diff_rows`（即差异行）
+  - 其余 99w 行为对账成功行
+- 修改 settings：`UPDATE app_settings SET setting_value='1' WHERE setting_key='acquiring_bill_idle_cleanup_minutes';` + `UPDATE app_settings SET setting_value='7' WHERE setting_key='acquiring_bill_raw_json_retention_days';`（idle 阈值 1 min 加速 + retention 7 天默认）
 
 **步骤**：
-1. 替换 `<userData>/tool-data.sqlite` 为 v2.1.9 fixture
-2. 启动 v2.1.10
-3. 验证 settings 默认值
+1. 启动 v2.1.10
+2. 不操作 UI（让 idle 计时器触发）
+3. 等 1 min + 5 min check interval
+4. 观察 activity log
+5. sqlite3 检查 DB 状态
 
 **预期**：
-- [ ] migration 自动 INSERT OR IGNORE 2 键
-- [ ] `SELECT setting_value FROM app_settings WHERE setting_key='acquiring_bill_raw_json_retention_months'` = `'6'`
-- [ ] `SELECT setting_value FROM app_settings WHERE setting_key='acquiring_bill_raw_json_retention_max_mb'` = `'500'`
-- [ ] activity log 含 `[N4-cont-1 settings] 默认值 INSERT`
+- [ ] activity log 含 `[N4-cont-1] idle cleanup raw_json 清理完成 affected=N retentionDays=7`
+- [ ] activity log 含先 v2.1.8 cleanup（`[acquiring-bill-currency] cleanup` 相关）后 N4-cont-1（顺序契约 spec §4.3.2）
+- [ ] **差异行 raw_json 完整**：`SELECT COUNT(*) FROM acquiring_bill_currency_bill_imports b WHERE b.raw_json IS NOT NULL AND b.id IN (SELECT bill_import_id FROM acquiring_bill_currency_diff_rows)` = 1w（不漏一行）
+- [ ] **对账成功老行 raw_json 已清**：`SELECT COUNT(*) FROM acquiring_bill_currency_bill_imports WHERE raw_json IS NULL AND imported_at < datetime('now', '-7 days') AND id NOT IN (SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows)` = 所有对账成功老行数
+- [ ] **7 天内对账成功行 raw_json 保留**：`SELECT COUNT(*) FROM acquiring_bill_currency_bill_imports WHERE raw_json IS NOT NULL AND imported_at >= datetime('now', '-7 days')` = 7 天内所有行
+- [ ] **bill_imports 行数不变**（仅清 raw_json 字段，不删整行）
+- [ ] 重导差异 xlsx 验证：`writer.js` 路径调用 `JSON.parse(d.bill_raw_json)` 不抛错且输出字段非空（差异行 raw_json 保留 → 重导能力完全保留）
+
+**实际**：__________
+**关联 task**：T22 / T23 / T24
+
+### 5.2 case 2 — settings retention_days 调整生效（1 天 / 30 天 / 7 天默认 / 范围外回退）
+
+**步骤 1（1 天激进）**：
+1. `sqlite3 tool-data.sqlite "UPDATE app_settings SET setting_value='1' WHERE setting_key='acquiring_bill_raw_json_retention_days';"`
+2. 重启应用 + 触发 idle cleanup
+3. 验证只保留 1 天内对账成功行 raw_json
+
+**预期**：
+- [ ] `getAcquiringBillRawJsonRetentionDays(db)` 返回 1
+- [ ] 1 天前对账成功行 raw_json 已清；1 天内保留
+
+**步骤 2（30 天保守上限）**：
+1. `UPDATE ... SET setting_value='30'`
+2. 重启 + idle 触发
+3. 验证 30 天内对账成功行 raw_json 保留
+
+**预期**：
+- [ ] `getAcquiringBillRawJsonRetentionDays(db)` 返回 30
+- [ ] 30 天前对账成功行 raw_json 已清；30 天内保留
+
+**步骤 3（默认 7）**：
+1. 删除 settings 行（模拟全新装）：`DELETE FROM app_settings WHERE setting_key='acquiring_bill_raw_json_retention_days';`
+2. 重启 — 应 migration `INSERT OR IGNORE` 补默认值 `'7'`
+
+**预期**：
+- [ ] `SELECT setting_value FROM app_settings WHERE setting_key='acquiring_bill_raw_json_retention_days'` = `'7'`
+- [ ] getter 返回 7
+
+**步骤 4（范围外 0 / 31 / 非数字 / 空 回退默认 7）**：
+1. 各种边界设置后 `getAcquiringBillRawJsonRetentionDays(db)` 测试
+2. 应全部 fallback 到 7
+
+**预期**：
+- [ ] `'0'` → 7（< min=1 回退）
+- [ ] `'31'` → 7（> max=30 回退）
+- [ ] `'abc'` → 7（非数字回退）
+- [ ] `''` → 7（空回退）
 
 **实际**：__________
 **关联 task**：T22
 
-#### 5.1.2 启动期"标记超期"计算
+### 5.3 case 3 — failure graceful + 活动日志（不阻塞主 cleanup）
 
-**准备**：v2.1.9 fixture 含跨月数据（如 2025-01 ~ 2026-05 共 17 个月）+ 总 raw_json ≥ 100MB。
+**准备**：
+- 模拟 `clearStaleSuccessfulRawJson` 抛错（dev-only hook）：在 raw-json-retention.js 加 `if (process.env.RAW_JSON_FAIL === '1') throw new Error('test failure');`
+- 启动应用带 `RAW_JSON_FAIL=1` + 加速 idle
 
 **步骤**：
-1. 启动 v2.1.10
-2. 等待启动期 N4-cont-1 calculate 完成
-3. 查 activity log
+1. 启动应用
+2. 等 idle cleanup 触发
+3. 观察 activity log
+4. 验证主 cleanup 仍完成
 
 **预期**：
-- [ ] activity log 含 `[N4-cont-1] 标记 X 行超期，预估 Y MB`
-- [ ] 标记的月份范围正确（最近 6 月内不标记，超过的标记）
-- [ ] 启动不阻塞（无 unresponsive 弹窗）
-- [ ] 仅"标记"不删（DB 中 bill_imports 行数不变）
+- [ ] activity log 含主 cleanup 完成日志（如 `[acquiring-bill-currency] cleanup` 相关）— 不被 raw_json 失败阻塞
+- [ ] activity log 含 ERROR：`[N4-cont-1] idle cleanup raw_json 清理失败（下次 idle 重试）` + `details: ['test failure']`
+- [ ] DB 中 raw_json 未被改动（UPDATE 抛错前）
+- [ ] 下一个 idle tick（30 min 后）仍尝试触发（重试）
 
 **实际**：__________
 **关联 task**：T23 / T24
 
-### 5.2 手动清入口按钮 + 确认 dialog 二次确认
+### 5.4 N4-cont-1 case 计数（v0.2 重写）
 
-> 🔴 **危险操作高亮**：清理后 raw_json = '{}'，**不可恢复**。二次确认是关键安全门。
-
-#### 5.2.1 按钮位置 + 文案
-
-**步骤**：
-1. 启动应用
-2. 进入「收单单据币种校验」模块面板
-3. 找「清理历史 raw_json 数据」按钮
-
-**预期**：
-- [ ] 按钮位于面板顶部工具栏（与「开始运行」/「导出差异」同行）
-- [ ] 按钮 hover tooltip = 「按保留窗口（默认 6 月 / 500MB）清理超期 raw_json 数据，释放磁盘空间」
-- [ ] 按钮样式与「导出差异」一致（secondary-btn）
-- [ ] 无数据时按钮 disabled 或显示 tooltip「当前无超期数据」
-
-**实际**：__________
-**关联 task**：T25
-
-#### 5.2.2 弹确认框文案 + 数据预估
-
-**准备**：fixture 含 4 个月超期数据（约 120MB）。
-
-**步骤**：
-1. 点「清理历史 raw_json 数据」按钮
-2. 等待弹框出现
-
-**预期**：弹框内容含：
-- [ ] 标题：「清理历史 raw_json 数据」
-- [ ] 「当前保留窗口：最近 6 月 + 500MB 上限」
-- [ ] 「待清理数据」段：月份范围 + 行数 + 预估释放 MB
-- [ ] 🔴 **「⚠️ 此操作不可逆」警示文案 + 建议先备份 DB 提示**
-- [ ] 「输入「确认」二次确认」段 + 文本框
-- [ ] 底部 [取消] / [确认清理] 按钮
-
-**实际**：__________
-**关联 task**：T26
-
-#### 5.2.3 二次确认输入校验
-
-**步骤**：
-1. 弹框打开
-2. 不输入 / 输入「ok」/ 输入「确認」（繁体）/ 输入空白
-3. 点「确认清理」
-
-**预期**：
-- [ ] 不输入 → 提示「请在输入框中输入「确认」二字才能执行清理」
-- [ ] 输入「ok」→ 提示同上
-- [ ] 输入「確認」→ 提示同上（必须简体「确认」）
-- [ ] 输入空白 → trim 后视为不输入
-
-**实际**：__________
-**关联 task**：T26
-
-#### 5.2.4 二次确认通过 → 执行删除
-
-**步骤**：
-1. 弹框打开
-2. 输入「确认」（精确匹配）
-3. 点「确认清理」
-
-**预期**：
-- [ ] 进度条 / 状态文案显示进度（如每 10000 行更新）
-- [ ] 完成后弹「清理完成：已更新 X 行，raw_json 共释放 Y MB」
-- [ ] 验证 DB：`SELECT raw_json FROM acquiring_bill_currency_bill_imports WHERE id IN (清理 id 列表) LIMIT 5` 全部 = `'{}'`
-- [ ] bill_imports **行数不变**（保留行结构 + 元数据，仅清 raw_json 内容）
-- [ ] diff_rows 不受影响（bill_import_id FK 仍有效）
-- [ ] activity log 含 `[N4-cont-1] 清理完成 ...`
-
-**实际**：__________
-**关联 task**：T23 / T27
-
-### 5.3 边界：无数据 / 仅 1 条 / 当月数据不清
-
-#### 5.3.1 无数据
-
-**准备**：空 DB（全新安装）。
-
-**步骤**：进入收单模块 → 点按钮。
-
-**预期**：
-- [ ] 按钮 disabled 或点击后弹框显示「当前无超期数据」
-- [ ] 不进入二次确认流程
-- [ ] 0 行被清
-
-**实际**：__________
-**关联 task**：T23 / T25
-
-#### 5.3.2 仅 1 条超期数据
-
-**准备**：fixture 仅 1 行 raw_json（如 2025-01 月份 1 条）。
-
-**步骤**：触发清理流程。
-
-**预期**：
-- [ ] 弹框正常显示「1 行 / 预估 X KB」
-- [ ] 二次确认后清成功
-- [ ] DB 该行 raw_json = '{}'
-
-**实际**：__________
-**关联 task**：T23
-
-#### 5.3.3 当月数据不清（保留窗口边界）
-
-**准备**：fixture 含当月数据（如当前 2026-05）+ 老数据。
-
-**步骤**：触发清理流程。
-
-**预期**：
-- [ ] 标记的范围 < 6 月前（即 2025-11 及更老）
-- [ ] 当月数据（2026-05）+ 最近 6 月内（2025-12 ~ 2026-05）**不**被标记
-- [ ] 清理后当月 raw_json 完整保留
-
-**实际**：__________
-**关联 task**：T23（边界条件）
-
-### 5.4 中途取消（graceful + 活动日志）
-
-> 🔴 **危险路径**：清理中途取消不能留下部分清空 + 部分完整的混乱状态。
-
-**准备**：fixture 含 10w+ 行待清。
-
-**步骤**：
-1. 触发清理流程，二次确认通过
-2. 清理进度到 30% 时点「取消」
-3. 验证 DB 状态
-
-**预期**：
-- [ ] 取消后弹「清理已取消：已更新 X 行」
-- [ ] DB 中已 UPDATE 的行 raw_json = '{}'，未 UPDATE 的行原样保留（事务边界明确）
-- [ ] 重新触发清理可继续清剩余（idempotent）
-- [ ] activity log 含 `[N4-cont-1] 用户取消清理`
-
-**实际**：__________
-**关联 task**：T23 / T27
-
-### 5.5 settings 调整（5-12 月 / 100-2000MB）
-
-> PRD §四 D26 PM 倾向：不提供 UI，沿用 v2.1.9 N1-settings 经验，仅 sqlite3 改 settings 表。
-
-**步骤**：
-1. `sqlite3 tool-data.sqlite "UPDATE app_settings SET setting_value='3' WHERE setting_key='acquiring_bill_raw_json_retention_months';"`
-2. 重启应用
-3. 验证保留窗口生效
-
-**预期**：
-- [ ] 标记范围变为 3 月前（更激进）
-- [ ] 弹框显示当前保留窗口「最近 3 月 + 500MB 上限」
-- [ ] 重启后值持久化
-
-**步骤（范围外回退测试）**：
-1. `UPDATE ... SET setting_value='0'`（小于 min=1）
-2. 重启应用
-
-**预期**：
-- [ ] getter 回退默认 6（settings-repository.js getAcquiringBillRawJsonRetentionMonths spec §4.1.2）
-- [ ] 应用行为按 6 月
-
-**实际**：__________
-**关联 task**：T22
-
-### 5.6 N4-cont-1 case 计数
-
-- [ ] §5.1 启动期标记 — 2 case
-- [ ] §5.2 手动清按钮 + 二次确认 — 4 case
-- [ ] §5.3 边界 — 3 case
-- [ ] §5.4 中途取消 — 1 case
-- [ ] §5.5 settings 调整 — 2 case
-- **总计：12 case ≥ 5（PRD §1.3 必做）**
+- [ ] §5.1 idle 触发 + 差异行保留 + 对账成功清 — 1 case
+- [ ] §5.2 settings retention_days 调整生效 — 1 case（含 4 子步骤）
+- [ ] §5.3 failure graceful + 活动日志 — 1 case
+- **总计：3 case ≥ 3（PRD §1.3 必做 v0.2）**
+- **v0.2 删除**：5.2 手动清按钮位置 / 5.2 弹框文案 / 5.2 二次确认输入校验 / 5.2 二次确认通过 / 5.3 无数据 / 5.3 仅 1 条 / 5.3 当月不清 / 5.4 中途取消 / 5.5 settings 月份 + MB 双门槛（共 9 case 删除）
 
 ---
 
@@ -1174,24 +1064,14 @@ throw outer;
 
 **实际**：__________
 
-### 8.3 N4-cont-1 大文件 IO（Windows）
+### ~~8.3 N4-cont-1 大文件 IO（Windows）~~ ❌ **v0.2 删除**
 
-**步骤**：
-1. Windows 准备 ≥ 500MB raw_json fixture
-2. 触发清理流程
-3. 测耗时 + 内存峰值
+v0.2 N4-cont-1 改"idle 自动 + SQL UPDATE 单条原子" — 无 UI 大文件操作；SQL UPDATE 性能由 SQLite 引擎处理（与 Windows / macOS 平台无关）；删除本节。
 
-**预期**：
-- [ ] 清理在 5min 内完成（500MB / 10000 行批次）
-- [ ] 内存峰值 < 1GB
-- [ ] 进度回调正常更新（不卡死）
-
-**实际**：__________
-
-### 8.4 macOS 必测项（开发机）
+### 8.3 macOS 必测项（开发机）
 
 - [ ] §三 A3 全部 case
-- [ ] §五 N4-cont-1 主路径（§5.2 / §5.4）
+- [ ] §五 N4-cont-1 主路径（§5.1 / §5.3 idle 自动 + failure graceful）
 - [ ] §六 N4-cont-2 §6.1.3（v2.1.9 → v2.1.10 标准路径）
 - [ ] §七 0 regression 跑批
 
@@ -1209,16 +1089,18 @@ throw outer;
 | 主进程 unresponsive 触发频率 | ___ 次/小时 | 0 次/小时（A3 worker 化后） | ___ 次/小时 | [ ] |
 | worker cold-start 延迟 | N/A | < 200ms | ___ ms | [ ] |
 | worker pre-warm 后 runCheck 启动延迟 | N/A | < 50ms | ___ ms | [ ] |
-| DB 文件大小（6 月数据保留） | ___ MB | ≤ baseline（按保留窗口） | ___ MB | [ ] |
-| N4-cont-1 清理 100MB raw_json 耗时 | N/A | < 30s | ___ s | [ ] |
+| **DB 文件大小**（v0.2 7 天数据保留 + 差异行永远保留）| ___ MB | 体积节省 ~99%（差异行 ~1% + 7 天内新数据）| ___ MB | [ ] |
+| **N4-cont-1 raw_json 占用率**（v0.2 新指标 — raw_json 非空行 / 总行数）| 100% | ≤ 1% + 7 天内新行占比 | ___ % | [ ] |
+| **N4-cont-1 idle cleanup 触发后差异行完好率**（v0.2 新指标）| N/A | 100%（一行不漏） | ___ % | [ ] |
+| N4-cont-1 idle cleanup SQL 耗时（100w 行 UPDATE WHERE NOT IN）| N/A | < 5s | ___ s | [ ] |
 | N4-cont-2 migration 耗时（100w 行 diff_rows） | N/A | < 10s | ___ s | [ ] |
 | worker 内 cancel 响应延迟 | N/A | < 5s | ___ s | [ ] |
-| 应用启动延迟（含 pre-warm + 标记超期） | ___ s | ≤ baseline + 1s | ___ s | [ ] |
+| 应用启动延迟（含 pre-warm；v0.2 删除"标记超期"启动期任务）| ___ s | ≤ baseline + 1s | ___ s | [ ] |
 
 ### 9.1 性能 budget 守护
 
 - [ ] runCheck 总耗时不慢 v2.1.9 baseline 超过 5%（worker 化代价 + 跨进程消息开销）
-- [ ] 应用启动延迟不增加超过 1s（pre-warm + 标记超期）
+- [ ] 应用启动延迟不增加超过 1s（pre-warm；v0.2 删除"标记超期"启动期任务）
 - [ ] 0 unresponsive 弹窗触发（A3 worker 化的核心收益）
 
 ---
@@ -1228,12 +1110,12 @@ throw outer;
 ### 10.1 PM 签收
 
 - [ ] PRD §七 验收矩阵全部项已勾选
-- [ ] 4 主线必做 case 数达标（A3 ≥ 8 / A4 ≥ 3 / N4-cont-1 ≥ 5 / N4-cont-2 ≥ 6）
+- [ ] 4 主线必做 case 数达标（v0.2：A3 ≥ 8 / A4 ≥ 3 / N4-cont-1 ≥ 3 / N4-cont-2 ≥ 6）
 - [ ] 0 regression §七 9 主题全 PASS
 - [ ] 跨平台 §八 Windows / macOS 主路径 PASS
-- [ ] 性能 §九 9 指标全达标
+- [ ] 性能 §九 9 指标全达标（v0.2 新增 raw_json 占用率 + 差异行完好率）
 - [ ] D23 POC 决策已回写 spec / backlog
-- [ ] D25 A4 决策已回写
+- ~~D25 A4 决策已回写~~ ✅ **v0.2 已锁**：用户拍板必做
 - [ ] 文档三件套已更新（CHANGELOG / VFH / USER_GUIDE）
 - [ ] check-vars 0 新增 Critical 命中
 
@@ -1246,7 +1128,9 @@ throw outer;
 - [ ] check-vars 报告已贴 PR body
 - [ ] N4-cont-2 备份恢复路径已 USER_GUIDE 文档化
 - [ ] A3 worker crash 恢复路径已集成测试覆盖
-- [ ] N4-cont-1 二次确认 + 不可逆警示 UI 已实装
+- ~~N4-cont-1 二次确认 + 不可逆警示 UI 已实装~~ ❌ **v0.2 删除**（D27 = 0 UI）
+- [ ] **v0.2 N4-cont-1 复用 N1' idle cleanup 时序集成已验证**（spec §4.3 顺序契约 + failure graceful）
+- [ ] **v0.2 N4-cont-1 USER_GUIDE 写明 SQLite 工具手动恢复 raw_json 路径**（如真有 7 天内误清需求 → 备份恢复）
 - [ ] 跨版本升级路径（v2.1.7 → v2.1.8 → v2.1.9 → v2.1.10）已全跑
 - [ ] PR 草稿归档到 `docs/prs/PR{N}-v2.1.10.md`
 
@@ -1256,12 +1140,13 @@ throw outer;
 ### 10.3 用户验收
 
 - [ ] 用户拍板 D23 POC 最终决策（worker_threads / utilityProcess）
-- [ ] 用户拍板 D25 A4 是否做
-- [ ] 用户拍板 D26 raw_json 清理执行方式（UPDATE 留行 / DELETE 整行）
-- [ ] 用户拍板 D27 raw_json UI 入口位置（收单模块按钮）
+- ~~用户拍板 D25 A4 是否做~~ ✅ **v0.2 已锁**：用户拍板必做
+- ~~用户拍板 D26 raw_json 清理执行方式（UPDATE 留行 / DELETE 整行）~~ ✅ **v0.2 已锁**：UPDATE raw_json = NULL（保留行骨架）
+- ~~用户拍板 D26 保留窗口策略~~ ✅ **v0.2 已锁**：7 天短窗口（settings 可调 1-30 天）
+- ~~用户拍板 D27 raw_json UI 入口位置（收单模块按钮）~~ ✅ **v0.2 已锁**：N/A 无 UI（idle 自动）
 - [ ] 用户拍板 D28 FK CASCADE 改造范围（仅 2 FK）
 - [ ] 用户在真实数据上验收 N4-cont-2 升级路径
-- [ ] 用户在真实数据上验收 N4-cont-1 清理流程（重点二次确认 + 不可逆警示）
+- [ ] **v0.2 用户在真实数据上验收 N4-cont-1 idle 自动清理流程**（重点：差异行 raw_json 永不丢 + 7 天前对账成功行 raw_json 已清 + 用户无感）
 - [ ] 用户在真实数据上验收 A3 worker 化后 unresponsive 0 触发
 - [ ] 用户拍板 β release（β → main 或继续 SR-FIX）
 
@@ -1300,7 +1185,7 @@ throw outer;
 | 🔴 A3 worker 跨进程后 runCheck 结果必须 byte-for-byte 一致 | A3 | 资金红线 | §三 + §七 0 regression |
 | 🔴 A3 worker crash → 主进程 op lock 永久占用 | A3 | 死锁 | §3.3 必跑 |
 | 🔴 N4-cont-2 FK CASCADE schema 不可逆 | N4-cont-2 | 数据迁移 | §6.1 跨版本路径 + §6.3 回滚 |
-| 🔴 N4-cont-1 raw_json 删除不可逆 | N4-cont-1 | 数据丢失 | §5.2 二次确认 必跑 |
+| 🔴 **N4-cont-1 raw_json 自动清不可逆**（v0.2 reverse sync）| N4-cont-1 | 数据丢失 | §5.1 idle 触发后差异行完整 + 对账成功老行已清 必跑；§5.3 failure graceful 必跑 |
 | 🔴 A3 worker DB 连接 + 主进程 DB 写冲突 | A3 | 并发 | §3.7 SQLITE_BUSY stress 必跑 |
 | 🟡 跨版本升级路径（v2.1.7 → v2.1.10）必须验证 | N4-cont-2 | 数据迁移 | §6.1.1 ~ §6.1.4 全跑 |
 | 🟡 A4 chunked 中断恢复 idempotent | A4 | 数据一致 | §4.3 必跑 |
@@ -1310,5 +1195,5 @@ throw outer;
 
 ---
 
-**当前状态**：v0.1（2026-05-28 — 起草完毕；Phase 0 POC 完成后启动 §二验收）。
-**下一步**：用户审 manual-test-checklist → Phase 0 POC 启动（worker_threads vs utilityProcess 实测）→ Phase 0 完成后 §二验收 → Phase 1 启动 → 逐 Phase 手测。
+**当前状态**：v0.2（2026-05-28 reverse synced — A4 改"必做" / N4-cont-1 重写 ≥ 3 case / 删 UI 相关 case / 删 N4-cont-1 大文件 IO 跨平台 case / 性能指标新增 raw_json 占用率 + 差异行完好率）。
+**下一步**：通知 Dev 启动 Phase 0 POC（worker_threads vs utilityProcess 实测）→ Phase 0 完成后 §二验收 → Phase 1 启动 → 逐 Phase 手测。

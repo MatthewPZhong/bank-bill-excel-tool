@@ -2,11 +2,11 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.1（2026-05-28 起草） |
-| 关联 PRD | `PRD-v2.1.10.md` v0.1（4 主线 + D23-D28 倾向） |
-| 关联 backlog | `backlog.md` v0.1（β 范围锁定） |
+| 文档版本 | v0.2（2026-05-28 reverse sync — A4 必做 + N4-cont-1 改"复用 N1' idle + 仅清对账成功行 + 7 天窗口 + 0 UI"） |
+| 关联 PRD | `PRD-v2.1.10.md` v0.2（D25/D26/D27 用户拍板 + N4-cont-1 重大方案变更）|
+| 关联 backlog | `backlog.md` v0.1（β 范围锁定）|
 | 起草人 | PM |
-| 状态 | 起草中（v0.1，待 Phase 0 POC + spec 评审；A3 部分含"待 POC 数据回写"占位） |
+| 状态 | v0.2 reverse synced（用户拍板 D25/D26/D27 + N4-cont-1 重大方案变更已落 §三 / §四；A3 部分仍待 Phase 0 POC 数据回写）|
 
 ---
 
@@ -82,15 +82,16 @@
 | 改造 session.runCheck 提取 worker 可执行部分 | `src/main-process/acquiring-bill-currency-session.js` | ~50 行（拆函数）|
 | 改造 IPC handler 接 workerPool | `src/main.js:10758-10785` | ~30 行 |
 | idle timer 协调 | `src/main.js:11155-11178` | ~10 行 |
-| N4-cont-1 settings + repository | `src/backend/database/settings-repository.js` + `migrations.js` | ~60 行 |
-| N4-cont-1 cleanup 函数 | `src/backend/acquiring-bill-currency-db/raw-json-retention.js`（新） | ~120 行 |
-| N4-cont-1 UI 按钮 + dialog | `src/renderer.js` + `index.html` + `renderer-dialogs.js` | ~80 行 |
-| N4-cont-1 IPC handler | `src/main.js` + `preload.js` | ~40 行 |
+| N4-cont-1 settings + repository（v0.2 单键） | `src/backend/database/settings-repository.js` + `migrations.js` | ~30 行（v0.2 单键 — 从 v0.1 ~60 行下降） |
+| N4-cont-1 cleanup 函数（v0.2 简化） | `src/backend/acquiring-bill-currency-db/raw-json-retention.js`（新） | ~40 行（v0.2 仅 `clearStaleSuccessfulRawJson` 单函数 — 从 v0.1 ~120 行下降） |
+| ~~N4-cont-1 UI 按钮 + dialog~~ ❌ **v0.2 删除**（0 UI） | ~~`src/renderer.js` + `index.html` + `renderer-dialogs.js`~~ | ~0 行（v0.2 从 ~80 行降为 0） |
+| ~~N4-cont-1 IPC handler~~ ❌ **v0.2 删除**（0 IPC） | ~~`src/main.js` + `preload.js`~~ | ~0 行（v0.2 从 ~40 行降为 0） |
+| **N4-cont-1 N1' idle cleanup 回调追加**（v0.2 新增） | `src/main.js:11155-11178`（`setupIdleCleanupTimer` 内 cleanup 回调） | ~10 行（在 `triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded` 后追加 try/catch + `clearStaleSuccessfulRawJson` 调用） |
 | N4-cont-2 migration | `src/backend/database/migrations.js` | ~100 行 |
-| A4（条件）chunked | `src/backend/acquiring-bill-currency-db/run-repository.js`（待 spec §三细化）| ~60 行（条件触发） |
-| 集成 + smoke + unit | `scripts/integration/` + `scripts/smoke/` + `tests/unit/` | ~30 文件 |
+| **A4 chunked**（v0.2 D25 必做） | `src/backend/acquiring-bill-currency-db/run-repository.js`（spec §3.2 细化） | ~80 行（v0.2 必做不再条件触发） |
+| 集成 + smoke + unit | `scripts/integration/` + `scripts/smoke/` + `tests/unit/` | ~25 文件（v0.2 N4-cont-1 UI / IPC case 删 → 文件数下降） |
 
-合计预估 ~ 50-70 文件改动（超 CLAUDE.md 5 软约束 — 因 4 主线打包结构性决定）。
+合计预估 ~ 40-55 文件改动（v0.2 reverse sync 后下降；超 CLAUDE.md 5 软约束 — 因 4 主线打包结构性决定）。
 
 ---
 
@@ -375,35 +376,35 @@ Phase 0 完成后 Dev 必须：
 
 ---
 
-## 三、A4 SQL JOIN chunked 分批（D25 = 待 A3 落地后评估）
+## 三、A4 SQL JOIN chunked 分批（v0.2：D25 用户拍板必做）
 
-### 3.1 触发条件
+### 3.1 触发条件（v0.2 reverse sync — 必做不再条件触发）
 
-A3 Phase 2 联调完成后 Dev 在 500w × 2 行真实数据上跑 → 测：
+**v0.2 D25 用户拍板**：A4 必做，**不等 A3 实测**。
 
-| 指标 | 阈值 | 决策 |
-|---|---|---|
-| worker 内单条 INSERT-FROM-SELECT-JOIN 时长 | < 30s | A4 closure（不做）|
-| worker 内单条 SQL 时长 | ≥ 30s | A4 触发，按下述细化 |
-| worker cancel 响应延迟 | < 5s | A4 closure |
-| worker cancel 响应延迟 | ≥ 5s | A4 触发（chunked 解决 cancel 粒度问题）|
+**理由（PRD §四 D25 行）**：
+1. **防 cancel 响应慢 + 进度回调精细化是 hard requirement** — 不是"看 A3 实测决定"的可选优化；用户预期对账长任务必须可中途取消（< 5s 响应）+ 进度按 chunkIndex / chunkCount 推送
+2. **A3 Phase 2 联调期间 A4 可并行开发**（无强依赖）
+3. ~~v0.1 决策树（worker SQL < 30s + cancel < 5s 不做 / ≥ 触发）已删除~~ — v0.2 不再依赖该决策树
 
-### 3.2 若触发的设计（待 Phase 3 决策后细化）
+### 3.2 chunk size 选定（v0.2 已选定 10w 行）
 
-#### 3.2.1 chunk size 候选
+| chunk size | 优点 | 缺点 | v0.2 选定 |
+|---|---|---|---|
+| **10w 行**（v0.2 PM 选定）| ✅ cancel 响应 < 5s（每批 < 5s）；✅ 进度回调精细（chunkIndex 推送频率适中）；✅ 内存峰值 < 200MB（10w 行 JOIN 中间结果 ≤ 200MB） | 总耗时 + 5-10%（事务切换开销，与 50w / 100w 对比） | ⭐ **选定** |
+| 50w 行 | 平衡点；总耗时损失更小 | cancel 响应 < 25s（一批 25s 左右）— 接近 5s 限制 ❌ | 否 |
+| 100w 行 | 总耗时影响最小 | cancel 响应 < 50s ❌ 严重超时 | 否 |
 
-| chunk size | 优点 | 缺点 |
-|---|---|---|
-| 10w 行 | cancel 粒度细，进度回调精细 | 总耗时 + 5-10%（事务切换开销）|
-| 50w 行 | 平衡点 | — |
-| 100w 行 | 总耗时影响最小 | cancel 粒度粗 |
+**v0.2 选定理由**：
+1. **cancel 响应 < 5s** 是 hard requirement（D25 拍板）→ 每批必须 < 5s
+2. **内存峰值 < 200MB** 防 worker 进程 OOM
+3. **进度回调精细度**：500w 行 / 10w = 50 批；用户感知"50 个 chunkIndex 跳动"≈ 进度条流畅
+4. **事务切换开销 5-10%** 可接受（A3 worker 化已大幅消除主进程阻塞，5-10% 总耗时增加用户感知弱）
 
-PM 倾向：50w 行（待 Phase 3 实测拍板）
-
-#### 3.2.2 实现伪代码
+#### 3.2.1 实现伪代码（v0.2 chunkSize 默认 10w）
 
 ```js
-async function insertDiffRowsByJoinChunked(db, runId, monthKey, chunkSize = 500000, onProgress, cancelFlag) {
+async function insertDiffRowsByJoinChunked(db, runId, monthKey, chunkSize = 100000, onProgress, cancelFlag) {
   const total = db.prepare(`SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE month_key = ?`).get(monthKey).c;
   const chunkCount = Math.ceil(total / chunkSize);
   for (let i = 0; i < chunkCount; i++) {
@@ -428,186 +429,181 @@ async function insertDiffRowsByJoinChunked(db, runId, monthKey, chunkSize = 5000
 }
 ```
 
-### 3.3 idempotent / 重跑保护
+### 3.3 idempotent / 重跑保护（v0.2 必做，不再"待 Phase 3 细化"）
 
 若用户重跑 runCheck（如失败后重试）：
 - `clearOldRuns(monthKey)` 已删除该月 runs + 通过 N4-cont-2 CASCADE 自动删 diff_rows
 - 新 runId 重新跑 — 不会有跨 run 数据污染
+- chunked 中途 cancel → 当前批 ROLLBACK；已 COMMIT 的批保留 → 再次触发 runCheck 时 clearOldRuns 会按 month_key 清掉本次旧 run + N4-cont-2 CASCADE 清旧 diff_rows → 新 runId 重头跑 → idempotent
 
 ---
 
-## 四、N4-cont-1 raw_json 体积治理
+## 四、N4-cont-1 raw_json 体积治理（v0.2 重大方案变更）
 
-### 4.1 D26 保留窗口策略（PM 倾向：(d) 组合 6 月 + 500MB）
+### 4.1 D26 = (e) 7 天短窗口（v0.2 用户拍板）；settings 单键
 
-#### 4.1.1 settings 表新增 2 键
+#### 4.1.1 settings 表新增单键（v0.2：从 2 键降为 1 键）
 
 ```js
 // src/backend/database/migrations.js（沿用 v2.1.9 N1-settings 范式）
-const ACQUIRING_BILL_RAW_JSON_RETENTION_MONTHS_KEY = 'acquiring_bill_raw_json_retention_months';
-const ACQUIRING_BILL_RAW_JSON_RETENTION_MONTHS_DEFAULT = '6';
-const ACQUIRING_BILL_RAW_JSON_RETENTION_MAX_MB_KEY = 'acquiring_bill_raw_json_retention_max_mb';
-const ACQUIRING_BILL_RAW_JSON_RETENTION_MAX_MB_DEFAULT = '500';
+const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY = 'acquiring_bill_raw_json_retention_days';
+const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT = '7';
 
 function ensureAcquiringBillRawJsonRetentionSettings(db) {
   db.prepare(`INSERT OR IGNORE INTO app_settings (setting_key, setting_value) VALUES (?, ?)`)
-    .run(ACQUIRING_BILL_RAW_JSON_RETENTION_MONTHS_KEY, ACQUIRING_BILL_RAW_JSON_RETENTION_MONTHS_DEFAULT);
-  db.prepare(`INSERT OR IGNORE INTO app_settings (setting_key, setting_value) VALUES (?, ?)`)
-    .run(ACQUIRING_BILL_RAW_JSON_RETENTION_MAX_MB_KEY, ACQUIRING_BILL_RAW_JSON_RETENTION_MAX_MB_DEFAULT);
+    .run(ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY, ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT);
 }
 ```
 
-#### 4.1.2 getter（沿用 v2.1.9 N1-settings 范式 — 范围外回退默认）
+#### 4.1.2 getter（沿用 v2.1.9 N1-settings 范式 — 范围 1-30，外回退默认 7）
 
 ```js
 // src/backend/database/settings-repository.js
-const ACQUIRING_BILL_RAW_JSON_RETENTION_MONTHS_MIN = 1;
-const ACQUIRING_BILL_RAW_JSON_RETENTION_MONTHS_MAX = 24;
-const ACQUIRING_BILL_RAW_JSON_RETENTION_MAX_MB_MIN = 100;
-const ACQUIRING_BILL_RAW_JSON_RETENTION_MAX_MB_MAX = 5000;
+const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MIN = 1;
+const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MAX = 30;
+const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_FALLBACK = 7;
 
-function getAcquiringBillRawJsonRetentionMonths(db) {
-  const raw = getSetting(db, ACQUIRING_BILL_RAW_JSON_RETENTION_MONTHS_KEY);
-  if (raw == null || raw === '') return 6;
+function getAcquiringBillRawJsonRetentionDays(db) {
+  const raw = getSetting(db, ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY);
+  if (raw == null || raw === '') return ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_FALLBACK;
   const n = parseInt(raw, 10);
-  if (!Number.isFinite(n)) return 6;
-  if (n < ACQUIRING_BILL_RAW_JSON_RETENTION_MONTHS_MIN || n > ACQUIRING_BILL_RAW_JSON_RETENTION_MONTHS_MAX) {
-    return 6;
+  if (!Number.isFinite(n)) return ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_FALLBACK;
+  if (n < ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MIN || n > ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MAX) {
+    return ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_FALLBACK;
   }
   return n;
 }
-// getAcquiringBillRawJsonRetentionMaxMb 类似
 ```
 
-#### 4.1.3 "标记超期" 算法（启动期触发，不删）
+### 4.2 清理算法（v0.2 重写）— `clearStaleSuccessfulRawJson`
+
+#### 4.2.1 核心 SQL（NOT IN 子查询排除差异行）
 
 ```js
-// src/backend/acquiring-bill-currency-db/raw-json-retention.js（新）
-function calculateExpiredRows(db, retentionMonths, maxMb) {
-  const cutoffMonth = computeCutoffMonth(retentionMonths); // e.g. 当前 12 月 - 6 = 7 月
-  const sizeRow = db.prepare(`
-    SELECT month_key, SUM(LENGTH(raw_json)) AS bytes, COUNT(*) AS rows
-    FROM acquiring_bill_currency_bill_imports
-    GROUP BY month_key
-    ORDER BY month_key ASC
-  `).all();
-
-  const expiredByMonth = sizeRow.filter(r => r.month_key < cutoffMonth);
-  const expiredByMonthBytes = expiredByMonth.reduce((s, r) => s + r.bytes, 0);
-
-  // 双门槛：任一超过即标记
-  let expired = expiredByMonth;
-  let total = sizeRow.reduce((s, r) => s + r.bytes, 0);
-  if (total > maxMb * 1024 * 1024) {
-    // 按 month_key 升序追加最老的，直到 total - expired <= maxMb
-    let cumulative = expiredByMonthBytes;
-    for (const r of sizeRow) {
-      if (r.month_key >= cutoffMonth) break;
-      // 已在 expiredByMonth 内
-    }
-    // 继续追加未超期但触发 MB 上限的
-    for (const r of sizeRow) {
-      if (r.month_key < cutoffMonth) continue;
-      if (total - cumulative <= maxMb * 1024 * 1024) break;
-      expired.push(r);
-      cumulative += r.bytes;
-    }
-  }
-
-  return {
-    months: expired.map(r => r.month_key),
-    totalRows: expired.reduce((s, r) => s + r.rows, 0),
-    totalBytes: expired.reduce((s, r) => s + r.bytes, 0),
-  };
+// src/backend/acquiring-bill-currency-db/raw-json-retention.js（新建 — 极简）
+function clearStaleSuccessfulRawJson(db, retentionDays) {
+  const result = db.prepare(`
+    UPDATE acquiring_bill_currency_bill_imports
+    SET raw_json = NULL
+    WHERE id IN (
+      SELECT b.id FROM acquiring_bill_currency_bill_imports b
+      WHERE b.raw_json IS NOT NULL
+        AND b.imported_at < datetime('now', '-' || ? || ' days')
+        AND b.id NOT IN (
+          SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows
+        )
+    )
+  `).run(retentionDays);
+  return { affectedRows: result.changes };
 }
+
+module.exports = { clearStaleSuccessfulRawJson };
 ```
 
-### 4.2 D27 手动清入口 UI 位置（PM 倾向：(a) 收单单据模块独立按钮）
+#### 4.2.2 SQL 关键不变量
 
-#### 4.2.1 UI 位置
+- **`b.raw_json IS NOT NULL`**：跳过已清的行（idempotent — 多次 idle 触发不会重复清同行）
+- **`b.imported_at < datetime('now', '-' || ? || ' days')`**：仅清"老于 N 天"的行 — `imported_at` 是 bill_imports 表既有列（v2.1.8 N4 schema）
+- **`NOT IN (SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows)`**：**排除差异行** — 这是 v0.2 关键不变量；保证差异行 raw_json 永远不被清，writer.js:184 重导差异 xlsx 不丢字段
+- **`SET raw_json = NULL`**：保留行骨架 + 业务字段；不删整行；不破坏 N4-cont-2 FK CASCADE 路径（bill_import_id FK 仍有效）
 
-收单单据币种校验模块面板顶部工具栏（与「开始运行」/ 「导出差异」按钮同行）新增按钮：
+#### 4.2.3 v0.1 → v0.2 算法删除项
 
-```html
-<button id="acquiringBillRawJsonCleanupBtn" class="secondary-btn">
-  清理历史 raw_json 数据
-</button>
-```
+- ❌ `calculateExpiredRows`（v0.1 启动期计算超期）— 删除（无 UI 不需要预估）
+- ❌ `pruneOldRawJson`（v0.1 用户主动触发删除）— 删除（无用户主动路径）
+- ❌ "标记超期"算法（v0.1 启动期触发不删 + 等用户主动清）— 删除
+- ❌ `UPDATE raw_json = '{}'`（v0.1 留空 JSON）— v0.2 改为 `raw_json = NULL`（更节省字节 + 语义更明确"已清")
+- ❌ 月份维度 + MB 双门槛 — 删除（改"天数"单一维度）
 
-#### 4.2.2 文案
+### 4.3 触发集成（v0.2 复用 v2.1.9 N1' idle cleanup 计时器）
 
-按钮 hover tooltip：「按保留窗口（默认 6 月 / 500MB）清理超期 raw_json 数据，释放磁盘空间」
+#### 4.3.1 集成点：src/main.js:11155-11178 setupIdleCleanupTimer
 
-#### 4.2.3 弹确认框文案
-
-```
-┌─────────────────────────────────────────────┐
-│  清理历史 raw_json 数据                     │
-├─────────────────────────────────────────────┤
-│  当前保留窗口：最近 6 月 + 500MB 上限       │
-│                                              │
-│  待清理数据：                                │
-│  • 月份范围：2025-08 ~ 2025-11（4 月）       │
-│  • 行数：1,234,567 行                        │
-│  • 预估释放：~120 MB                         │
-│                                              │
-│  ⚠️ 此操作不可逆。建议先备份 DB：           │
-│  [应用菜单 → 备份数据库] (或 sqlite3 客户端) │
-│                                              │
-│  输入「确认」二次确认：                      │
-│  [        输入框        ]                    │
-│                                              │
-│            [取消]   [确认清理]               │
-└─────────────────────────────────────────────┘
-```
-
-#### 4.2.4 二次确认校验
-
+v2.1.9 N1' 现状（grep 验证）：
 ```js
-function onConfirmClick() {
-  if (input.value.trim() !== '确认') {
-    setStatus('请在输入框中输入「确认」二字才能执行清理', 'warning');
-    return;
-  }
-  triggerCleanup();
-}
-```
-
-### 4.3 数据迁移路径
-
-#### 4.3.1 清理执行方式（PM 倾向：UPDATE raw_json = '{}' 留行 + 删内容）
-
-```js
-function pruneOldRawJson(db, candidateRowIds) {
-  db.exec('BEGIN');
+// src/main.js:11159-11178
+idleCleanupTimer = setInterval(() => {
   try {
-    const stmt = db.prepare(`UPDATE acquiring_bill_currency_bill_imports SET raw_json = '{}' WHERE id = ?`);
-    let updated = 0;
-    for (const id of candidateRowIds) {
-      stmt.run(id);
-      updated++;
-      // 每 10000 行 yield event loop（沿用 v2.1.8 N4 范式）
-      if (updated % 10000 === 0 && onProgress) onProgress({ updated, total: candidateRowIds.length });
-    }
-    db.exec('COMMIT');
-    return { updated };
+    const elapsed = Date.now() - lastUserActivityTs;
+    if (elapsed < IDLE_CLEANUP_MS) return;
+    triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
   } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
+    appendActivityLogEntry({ /* SR-log-1 */ });
   }
-}
+}, IDLE_CHECK_INTERVAL_MS);
 ```
 
-**理由**：
-- ✅ 保留 bill_imports 行结构 + month_key + recon_main_id + settle_currency 等业务关键字段
-- ✅ 只清最大体积消耗的 raw_json（9 字段 JSON 内容）
-- ✅ 用户审计仍能看到「这个月有过 X 行单据」
-- ✅ diff_rows 外键 bill_import_id 仍指向有效行（不破坏 N4-cont-2 引入的 CASCADE）
-- ✅ raw_json='{}' 是合法 JSON，下游读不会异常
+v0.2 改造（追加 raw_json 清理调用）：
+```js
+// src/main.js:11155-11178 改造
+idleCleanupTimer = setInterval(() => {
+  try {
+    const elapsed = Date.now() - lastUserActivityTs;
+    if (elapsed < IDLE_CLEANUP_MS) return;
 
-#### 4.3.2 如果用户想"彻底删除"
+    // A3 worker 忙时 skip cleanup（spec §2.3.2）
+    if (runCheckWorkerPool && runCheckWorkerPool.isBusy && runCheckWorkerPool.isBusy()) return;
 
-留 v2.1.11+ 评估提供 `DELETE FROM bill_imports WHERE id IN (?)` 路径（带 ON DELETE CASCADE 自动清 diff_rows）
+    // 1) 先现有 cleanup（v2.1.8 cleanupAfterRunBackground）
+    triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
+
+    // 2) 后 raw_json 清理（v0.2 N4-cont-1 追加 — 失败不阻塞主 cleanup）
+    try {
+      const retentionDays = getAcquiringBillRawJsonRetentionDays(database.db);
+      const { affectedRows } = clearStaleSuccessfulRawJson(database.db, retentionDays);
+      if (affectedRows > 0) {
+        appendActivityLogEntry({
+          level: 'info',
+          source: 'main',
+          domain: 'acquiring-bill-currency',
+          message: `[N4-cont-1] idle cleanup raw_json 清理完成`,
+          details: [`affected=${affectedRows}`, `retentionDays=${retentionDays}`],
+        });
+      }
+    } catch (rawJsonErr) {
+      // 失败不阻塞主 cleanup；下次 idle 重试
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'acquiring-bill-currency',
+        message: '[N4-cont-1] idle cleanup raw_json 清理失败（下次 idle 重试）',
+        details: [rawJsonErr && rawJsonErr.message ? rawJsonErr.message : String(rawJsonErr)],
+        stack: rawJsonErr && rawJsonErr.stack ? rawJsonErr.stack : undefined,
+      });
+    }
+  } catch (err) {
+    appendActivityLogEntry({ /* SR-log-1 */ });
+  }
+}, IDLE_CHECK_INTERVAL_MS);
+```
+
+#### 4.3.2 顺序契约（关键不变量）
+
+| 步骤 | 动作 | 失败处理 |
+|---|---|---|
+| 1 | 检查 idle 阈值 + worker busy guard | 不满足 → return |
+| 2 | 现有 `triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded`（v2.1.8 cleanup flow + bill）| 失败 → 抛到外层 catch（SR-log-1 记录） |
+| 3 | **v0.2 新增**：`clearStaleSuccessfulRawJson` | **失败不阻塞**（独立 try/catch + activity log + 下次 idle 重试） |
+
+**为什么先 v2.1.8 cleanup 后 raw_json 清理**：v2.1.8 `cleanupAfterRunBackground` 清 flow + bill rows（整行删除）— 删完后 raw_json 表中已不存在这些行的 raw_json 字段；剩余对账成功老行才进 raw_json 清理逻辑。顺序反过来会浪费 IO（先清 raw_json 再删整行）。
+
+### 4.4 失败处理（v0.2 简化）
+
+- `clearStaleSuccessfulRawJson` 单条 SQL 出错（如 SQLITE_BUSY）→ 外层 try/catch → activity log → 下次 idle（30min 后）重试
+- 无事务包裹（单条 SQL 原子执行）— SQLite UPDATE 单条天然原子
+- 无中途 cancel 路径（idle 自动触发，用户无操作机会取消）— 用户感知度 = 0
+
+### 4.5 体积治理效果论证（v0.2 新增）
+
+| 数据维度 | 估算 |
+|---|---|
+| 差异行占比（基于线上观察推断）| ~1%（取决于业务场景；理想对账无差异 → 接近 0%；问题对账日 ~5%）|
+| 7 天内对账成功行数据保留 | 100%（用户复查窗口）|
+| 7 天前对账成功行 raw_json 清理 | 100%（自动） |
+| 7 天前差异行 raw_json 保留 | 100%（writer.js:184 依赖）|
+| **净体积节省效果** | **~99%**（清 99% 对账成功行 raw_json；剩 1% 差异行 + 7 天内新数据保留）|
+
+对比 v0.1 (d) 6 月 + 500MB 双门槛：v0.1 6 月才清一次 + 500MB 内永不清 → 体积治理滞后于增长速度（线上每月新增 50-200MB）；v0.2 7 天循环清 + 仅留差异行 → 体积稳定在 "7 天新数据 + 累计差异行 1%" 量级。
 
 ---
 
@@ -715,11 +711,12 @@ ROLLBACK 后：
 
 ## 六、与 v2.1.9 N1' / N5 / SR-backup-1 / N4 顺带项的对接细节
 
-### 6.1 与 N1' idle cleanup 对接（详 §2.3）
+### 6.1 与 N1' idle cleanup 对接（详 §2.3 + §4.3）
 
 - `lastUserActivityTs` 仅主进程维护
 - worker 忙时 skip cleanup（避免抢锁）
 - worker 完成后下个 idle tick 自然过渡
+- **v0.2 新增**：N4-cont-1 raw_json 清理**完全复用 N1' idle cleanup 时序**（`src/main.js:11155-11178`） — 无新计时器；cleanup 回调内顺序：① 现有 v2.1.8 cleanup → ② v0.2 raw_json 清理（独立 try/catch + 失败不阻塞主 cleanup）
 
 ### 6.2 与 N5 channels FK 范式对接
 
@@ -731,13 +728,14 @@ ROLLBACK 后：
 
 - 所有 4 主线 migration / 体积治理操作都通过 `database.createBackup(label)` 复用
 - label 命名规范：`pre-{label}`（label 仅 `[A-Za-z0-9_-]`）
-- 本版新增 label：`pre-A3-worker-init`（A3 启动前可选备份）/ `pre-N4-cont-2`（N4-cont-2 migration）/ `pre-raw-json-prune`（N4-cont-1 用户清理前可选备份）
+- 本版新增 label：`pre-A3-worker-init`（A3 启动前可选备份）/ `pre-N4-cont-2`（N4-cont-2 migration）
+- ~~`pre-raw-json-prune`（N4-cont-1 用户清理前可选备份）~~ ❌ **v0.2 删除**：N4-cont-1 改 idle 自动触发无用户主动路径；不做 backup（缓解 = 7 天窗口 + 仅清成功行 + USER_GUIDE 手动恢复路径）
 
 ### 6.4 与 N4 顺带项重构（v2.1.9）一致性
 
 - v2.1.9 `ensureBillRawJsonV2Slim(db, dbPath, createBackupFn)` 引入第 3 参 createBackupFn 注入范式
 - 本版 N4-cont-2 `ensureDiffRowsCascadeMigration_v2_1_10(db, dbPath, createBackupFn)` 沿用同一签名
-- 本版 N4-cont-1 `cleanupOldRawJson(db, retentionMonths, maxMb)` + `pruneOldRawJson(db, candidateRowIds, createBackupFn?)`（备份可选）
+- **v0.2 N4-cont-1** `clearStaleSuccessfulRawJson(db, retentionDays)` 极简签名 — 不依赖 createBackupFn（无备份策略，由 7 天窗口 + 仅清成功行 + USER_GUIDE 手动恢复路径等价缓解）
 
 ---
 
@@ -750,11 +748,11 @@ ROLLBACK 后：
 | `tests/unit/main-process/run-check-worker.test.js` | initWorkerDb + serializeError + deserializeError | 12 |
 | `tests/unit/main-process/run-check-worker-pool.test.js` | preWarm / dispatch / cancel / crash recover | 10 |
 | `tests/unit/main-process/worker-error-utils.test.js` | serializeError / deserializeError（含 FileValidationError）| 8 |
-| `tests/unit/backend/acquiring-bill-currency-db/raw-json-retention.test.js` | calculateExpiredRows / pruneOldRawJson / 边界 | 15 |
+| `tests/unit/backend/acquiring-bill-currency-db/raw-json-retention.test.js`（v0.2 重写） | clearStaleSuccessfulRawJson / 差异行排除验证 / 7 天边界 / NULL idempotent / 0 行触发 | 8（v0.2 从 v0.1 15 case 下降 — 算法简化）|
 | `tests/unit/backend/database/migrations-n4-cont-2.test.js` | ensureDiffRowsCascadeMigration_v2_1_10 各 status / 幂等 / ROLLBACK | 12 |
-| `tests/unit/backend/database/settings-repository-raw-json-retention.test.js` | getter 范围外回退 | 6 |
+| `tests/unit/backend/database/settings-repository-raw-json-retention.test.js`（v0.2 简化为单 key） | getter 范围外回退（< 1 / > 30 / 非数字 / 空）| 4（v0.2 从 v0.1 6 case 下降 — 单 key）|
 
-合计 ~63 unit case
+合计 ~54 unit case（v0.2 reverse sync 后 — 从 v0.1 ~63 下降；N4-cont-1 简化）
 
 ### 7.2 集成测试（integration）
 
@@ -762,12 +760,12 @@ ROLLBACK 后：
 |---|---|---|
 | `scripts/integration/acquiring-bill-currency-worker.js` | 8+ | A3 |
 | `scripts/integration/acquiring-bill-currency-worker-crash.js` | 4+ | A3 |
-| `scripts/integration/acquiring-bill-currency-idle-cleanup-worker.js` | 5+ | A3 + v2.1.9 N1' 协调 |
-| `scripts/integration/acquiring-bill-currency-sql-chunked.js`（条件）| 3+ | A4（若做） |
-| `scripts/integration/acquiring-bill-currency-raw-json-retention.js` | 5+ | N4-cont-1 |
+| `scripts/integration/acquiring-bill-currency-idle-cleanup-worker.js`（v0.2 扩展验证 raw_json 清理共存）| 5+ | A3 + v2.1.9 N1' + v0.2 N4-cont-1 raw_json 集成 |
+| `scripts/integration/acquiring-bill-currency-sql-chunked.js`（v0.2 必做）| 3+ | A4（v0.2 D25 用户拍板必做）|
+| `scripts/integration/acquiring-bill-currency-raw-json-retention.js`（v0.2 重写）| 3+ | N4-cont-1（v0.2：idle 触发 + 差异行保留 + retention_days settings 生效；删 UI case）|
 | `scripts/integration/acquiring-bill-currency-fk-cascade-migration.js` | 6+ | N4-cont-2 |
 
-合计 ~ 28-31 集成 case；累计断言数预估 v2.1.9 baseline 1606 + ~200 = ~1806
+合计 ~ 29-31 集成 case（v0.2 reverse sync — A4 case 从条件改必做；N4-cont-1 case 数 5+ → 3+ 删 UI）；累计断言数预估 v2.1.9 baseline 1606 + ~180 = ~1786
 
 ### 7.3 smoke
 
@@ -808,7 +806,7 @@ migration 顺序固定（启动期）：
 1. 先 N4-cont-2 schema rebuild（FK CASCADE 改造）
 2. 后 N4-cont-1 settings INSERT OR IGNORE（注入默认值）
 
-理由：N4-cont-1 启动期"标记超期"逻辑依赖 settings 已存在；N4-cont-2 不依赖 settings；先做 schema 再做 settings 不会冲突。
+理由（v0.2 reverse sync）：**v0.2 N4-cont-1 不再有"启动期标记超期"逻辑**（删除）；N4-cont-1 settings 用于 idle cleanup 时读取 retention_days；N4-cont-2 不依赖 settings；先做 schema 再做 settings 不会冲突（任意顺序都可，固定为此顺序便于排查）。
 
 ---
 
@@ -827,9 +825,10 @@ migration 顺序固定（启动期）：
 | 🟡 Important-skeleton | `IDLE_CLEANUP_MS` + `lastUserActivityTs` + `setupIdleCleanupTimer` | main.js:11119-11178 | A3 改造 idle timer 协调 |
 | 🟡 Important-skeleton（新）| `runCheckWorkerPool` / `workerInstance` | run-check-worker-pool.js（新）| 新增 |
 | 🟡 Important-skeleton（新）| `serializeError` / `deserializeError` | worker-error-utils.js（新）| 新增 |
-| 🟢 Risk-sensitive | `bill_imports.raw_json` | migrations.js + N4-cont-1 cleanup | 内容契约扩 — 增加"可被清空"语义 |
+| 🟢 Risk-sensitive | `bill_imports.raw_json` | migrations.js + N4-cont-1 cleanup | 内容契约扩 — **v0.2** 增加"对账成功老行可被自动 NULL 清空"语义（差异行永远保留 — writer.js:184 依赖）|
 | 🟢 Runtime-state | `n4_cont_2_diff_rows_cascade_migrated` settings | migrations.js | 新增 migration 标志位 |
-| 🟢 Runtime-state | `acquiring_bill_raw_json_retention_*` settings | settings-repository.js | 新增 2 键 |
+| 🟢 Runtime-state | `acquiring_bill_raw_json_retention_days` settings（v0.2 单 key — 从 v0.1 2 key 降为 1）| settings-repository.js | v0.2 新增 1 键（默认 7 / 范围 1-30）|
+| 🟢 Runtime-state（v0.2 新增）| `clearStaleSuccessfulRawJson` | acquiring-bill-currency-db/raw-json-retention.js（新）| v0.2 新增：单 SQL UPDATE WHERE NOT IN 排除差异行；idempotent（raw_json IS NOT NULL 守卫）|
 
 ---
 
@@ -847,5 +846,5 @@ migration 顺序固定（启动期）：
 
 ---
 
-**当前状态**：v0.1（2026-05-28 — spec 起草完毕；A3 POC 实测项空表占位待 Phase 0 填）。
-**下一步**：用户审 spec → Dev 启动 Phase 0 POC（worker_threads vs utilityProcess 实测）→ Phase 0 完成后回写 §2.6 实测列 + backlog D23 拍板 → Phase 1。
+**当前状态**：v0.2（2026-05-28 reverse synced — D25/D26/D27 用户拍板 + N4-cont-1 重大方案变更已落 §三 / §四 / §六 / §七 / §九；A3 部分 POC 实测项仍待 Phase 0 填）。
+**下一步**：通知 Dev 启动 Phase 0 POC（worker_threads vs utilityProcess 实测 — D23/D24 最终拍板）→ Phase 0 完成后回写 §2.6 实测列 + backlog D23 拍板 → Phase 1。N4-cont-1 / N4-cont-2 / A4 可与 Phase 1 并行（独立模块；无强依赖）。

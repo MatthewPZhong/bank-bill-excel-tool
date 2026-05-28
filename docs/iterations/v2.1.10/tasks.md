@@ -2,11 +2,11 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.1（2026-05-28 起草） |
-| 关联 PRD | `PRD-v2.1.10.md` v0.1 |
-| 关联 spec | `spec.md` v0.1 |
+| 文档版本 | v0.2（2026-05-28 reverse sync — A4 必做 / N4-cont-1 重大方案变更 / N4-cont-1 task 范围更新） |
+| 关联 PRD | `PRD-v2.1.10.md` v0.2 |
+| 关联 spec | `spec.md` v0.2 |
 | 起草人 | PM |
-| 状态 | 起草中（v0.1，待 spec 评审 + Phase 0 POC 启动） |
+| 状态 | v0.2 reverse synced（A4 改"必做"工期 ~3-4 天 / N4-cont-1 工期 ~5 天 → ~2-3 天；T17 删除决策点；T22-T28 重写）|
 
 ---
 
@@ -19,13 +19,13 @@
 | **Phase 0** | D23 POC（worker_threads vs utilityProcess 实测）| 4 项实测目标 + Dev 调研报告回写 spec/backlog | ~2-3 天 | A3 |
 | **Phase 1** | A3 worker 框架 + DB 连接 + 错误序列化 | worker 入口 + worker pool + serializeError + PRAGMA 同步 | ~5-7 天 | A3 |
 | **Phase 2** | A3 N1' idle cleanup 跨进程对接 + 联调 | idle timer 协调 + cancel / crash recover + 性能基线 | ~3-5 天 | A3 |
-| **Phase 3** | A4 评估（基于 A3 实测结果决策做不做）| 决策 D25 + 若做：chunked 拆分 | ~2-3 天（若做） | A4 |
-| **Phase 4** | N4-cont-1 raw_json 体积治理（独立可并行）| settings + cleanup 函数 + UI + IPC + 启动期"标记超期" | ~4-5 天 | N4-cont-1 |
+| **Phase 3**（v0.2 改"实施"）| A4 chunked 实施（D25 已拍板必做，不再决策点）| chunked 拆分 + 10w chunk size + idempotent + 性能基线 | ~3-4 天（v0.2 必做）| A4 |
+| **Phase 4**（v0.2 重写）| N4-cont-1 raw_json 体积治理（独立可并行）| settings 单键 + clearStaleSuccessfulRawJson 函数 + 集成到 N1' idle cleanup 回调（无 UI / 无 IPC）| ~2-3 天（v0.2 从 ~4-5 天下降）| N4-cont-1 |
 | **Phase 5** | N4-cont-2 FK CASCADE（复用 SR-backup-1 backup）| migration + 8-status state machine + 回滚预案 | ~3 天 | N4-cont-2 |
-| **Phase 6** | 集成测试 + USER_GUIDE + CHANGELOG + 三件套 | 集成 ~28+ case / unit ~63 case / 文档三件套 / preview 回归 | ~3-5 天 | 全部 |
-| **SR-FIX** | self-review 修复预留位 | PR 提交后 self-review 发现的 finding 修复 | ~1-3 天（视发现量） | 全部 |
+| **Phase 6** | 集成测试 + USER_GUIDE + CHANGELOG + 三件套 | 集成 ~29-31 case / unit ~54 case / 文档三件套 / preview 回归（v0.2 删 N4-cont-1 UI 回归）| ~3-5 天 | 全部 |
+| **SR-FIX** | self-review 修复预留位 | PR 提交后 self-review 发现的 finding 修复 | ~1-3 天（视发现量）| 全部 |
 
-**β 合计**：~ 4 周（PM 上限估算）
+**β 合计**：~ 3.5 周（v0.2 reverse sync — N4-cont-1 工期下降 + A4 工期上升 ≈ 相抵；PM 上限估算）
 
 ---
 
@@ -195,98 +195,75 @@ Phase 1 (A3 worker 框架) ────► Phase 2 (A3 + idle 联调) ───�
 
 ---
 
-## 六、Phase 3 — A4 评估（基于 A3 实测结果决策做不做）
+## 六、Phase 3 — A4 chunked 实施（v0.2：D25 用户拍板必做，不再决策点）
 
-> 依赖：Phase 2 已完成 + 性能基线报告
+> 依赖：Phase 2 已完成 + 性能基线报告（不再决策门 — D25 已锁定必做）
+> v0.2 reverse sync：T17 删除（不再决策点）；T18-T21 改"实施"任务（不再"若 T17 决策做"）
 
-### T17 — D25 决策点
-- **动作**：基于 T16 性能基线报告 + worker cancel 响应延迟，决策 A4 做 / 不做
-- **决策树**：
-  - 若 worker 内单条 SQL < 30s 且 cancel 响应 < 5s → A4 closure，跳过 T18-T21
-  - 否则 → 启动 T18-T21
-- **验证**：spec §三决策回写 + PRD §一 标 D25 = 实际拍板
-- **跟主线映射**：A4
+### ~~T17 — D25 决策点~~ ❌ **v0.2 删除**
 
-### T18 — chunked 分批拆分（若 T17 决策做）
+v0.2 D25 用户拍板必做（PRD §四 D25 行），不再 Phase 3 决策点。Phase 3 直接进入 T18-T21 实施。
+
+### T18 — chunked 分批拆分（v0.2 必做）
 - **位置**：`src/backend/acquiring-bill-currency-db/run-repository.js`
-- **内容**：spec §3.2.2 伪代码实现；chunk size 默认 50w（settings 可配，PM 倾向）
+- **内容**：spec §3.2.1 伪代码实现；**chunk size 默认 10w**（v0.2 spec §3.2 已选定，理由：cancel 响应 < 5s + 内存峰值 < 200MB）；可后续 settings 化
 - **验证**：smoke + unit + 集成
 - **跟主线映射**：A4
 
-### T19 — chunked idempotent / 重跑保护（若 T17 决策做）
+### T19 — chunked idempotent / 重跑保护（v0.2 必做）
 - **位置**：同上 + session.runCheck 调用方
-- **内容**：spec §3.3
+- **内容**：spec §3.3 — 中途 cancel ROLLBACK 当前批；clearOldRuns + N4-cont-2 CASCADE 保证重跑无残留
 - **验证**：集成（中途 cancel → 重跑数据正确）
 
-### T20 — Phase 3 集成测试（若 T17 决策做）
+### T20 — Phase 3 集成测试（v0.2 必做）
 - **位置**：`scripts/integration/acquiring-bill-currency-sql-chunked.js`（新建）
 - **内容**：3+ case（chunk 边界 / 中断恢复 / 性能对比）
 - **验证**：`npm run test:integration` 全过
 
-### T21 — A4 性能验证（若 T17 决策做）
+### T21 — A4 性能验证（v0.2 必做）
 - **位置**：`scripts/perf/v2.1.10-a4-chunked-vs-single.js`（新建）
-- **内容**：chunk size 10w / 50w / 100w 对比
-- **验证**：报告生成 + 最终拍板 chunk size
+- **内容**：chunk size 10w（默认）/ 50w / 100w 对比；验证 v0.2 spec §3.2 选定 10w 的合理性
+- **验证**：报告生成 + 数据回写 spec §3.2（实测列）
 
 ---
 
-## 七、Phase 4 — N4-cont-1 raw_json 体积治理（独立可并行）
+## 七、Phase 4 — N4-cont-1 raw_json 体积治理（v0.2 重写 · 独立可并行）
 
 > 依赖：Phase 0 完成后即可启动（与 Phase 1-3 并行）
+> v0.2 reverse sync：整体重写 — 工期从 ~5 天 → ~2-3 天；T22 改单键 + T23 改 clearStaleSuccessfulRawJson；T24 改"集成到 N1' idle cleanup 回调"；T25-T27 删除（无 UI / 无 dialog / 无 IPC）；T28 集成测试改 ≥ 3 case
 
-### T22 — settings 表 2 键 + migration
-- **位置**：`src/backend/database/migrations.js` + `settings-repository.js`
-- **内容**：spec §4.1.1 + §4.1.2 全部实现
-- **验证**：unit + smoke（启动后 settings 表 2 键存在 + getter 范围外回退）
+### T22 — settings 单键 + migration（v0.2 简化）
+- **位置**：`src/backend/database/migrations.js` + `src/backend/database/settings-repository.js`
+- **内容**：spec §4.1.1 + §4.1.2 — 单键 `acquiring_bill_raw_json_retention_days`（默认 `'7'`；范围 1-30；外回退 7）+ `ensureAcquiringBillRawJsonRetentionSettings(db)` migration + `getAcquiringBillRawJsonRetentionDays(db)` getter
+- **验证**：unit + smoke（启动后 settings 表 1 键存在 + getter 范围外回退）
 - **跟主线映射**：N4-cont-1
 
-### T23 — raw-json-retention.js 新建（核心算法）
+### T23 — raw-json-retention.js 新建（v0.2 重写 · 极简）
 - **位置**：`src/backend/acquiring-bill-currency-db/raw-json-retention.js`（新建）
-- **内容**：
-  - `calculateExpiredRows(db, retentionMonths, maxMb)` — spec §4.1.3
-  - `pruneOldRawJson(db, candidateRowIds, onProgress?)` — spec §4.3.1
-  - 边界处理：无数据 / 仅 1 条 / month_key 格式错
-- **验证**：unit test `tests/unit/backend/acquiring-bill-currency-db/raw-json-retention.test.js` 15 case 全绿
+- **内容**：spec §4.2.1 单函数 `clearStaleSuccessfulRawJson(db, retentionDays)`：
+  - 核心 SQL：`UPDATE acquiring_bill_currency_bill_imports SET raw_json = NULL WHERE id IN (NOT IN 子查询排除差异行 + imported_at 老于 N 天 + raw_json IS NOT NULL)`
+  - 返回 `{ affectedRows }`
+- **验证**：unit test `tests/unit/backend/acquiring-bill-currency-db/raw-json-retention.test.js` 8 case 全绿（差异行排除 + 7 天边界 + NULL idempotent + 0 行触发）
 - **跟主线映射**：N4-cont-1
 
-### T24 — 启动期"标记超期"
-- **位置**：`src/main.js`（app.whenReady 后）
-- **内容**：
-  - 调用 `calculateExpiredRows` → activity log info `[N4-cont-1] 标记 X 行超期，预估 Y MB`
-  - 不删；仅记录
-- **验证**：手测 + 集成（启动后 activity log 含标记消息）
-- **跟主线映射**：N4-cont-1
+### T24 — 集成到 N1' idle cleanup 回调（v0.2 改"复用"）
+- **位置**：`src/main.js:11155-11178`（`setupIdleCleanupTimer` 内的 setInterval 回调）
+- **内容**：spec §4.3.1 改造 — 在 `triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded` 后**追加** `clearStaleSuccessfulRawJson(db, retentionDays)` 调用（独立 try/catch + activity log + 失败不阻塞主 cleanup）
+- **验证**：集成 — idle 触发后 activity log 含 `[N4-cont-1] idle cleanup raw_json 清理完成 affected=X`；失败时 activity log 含 ERROR + 主 cleanup 已完成
+- **跟主线映射**：N4-cont-1（v0.2 复用 v2.1.9 N1' idle 30min cleanup 时序）
 
-### T25 — UI：收单单据面板加按钮
-- **位置**：`src/renderer.js` + `index.html`（待 spec 阶段精确定位 panel id）
-- **内容**：spec §4.2.1 按钮 HTML + click handler
-- **验证**：手测 + preview 回归
-- **跟主线映射**：N4-cont-1
+### ~~T25 — UI：收单单据面板加按钮~~ ❌ **v0.2 删除**（D27 = N/A 无 UI）
 
-### T26 — UI：确认 dialog factory
-- **位置**：`src/renderer-dialogs.js`（新建 `createRawJsonCleanupConfirmDialog`）
-- **内容**：spec §4.2.3 弹框结构 + §4.2.4 二次确认校验
-- **验证**：手测 + 弹框文案 + 二次确认输入校验
-- **跟主线映射**：N4-cont-1
+### ~~T26 — UI：确认 dialog factory~~ ❌ **v0.2 删除**（D27 = N/A 无 UI）
 
-### T27 — IPC handler
-- **位置**：`src/main.js` + `src/preload.js`
-- **内容**：
-  - IPC `acquiringBillCurrency:rawJsonRetention:calculate` → 返回 candidate + 预估 MB
-  - IPC `acquiringBillCurrency:rawJsonRetention:prune` → 执行删除
-  - preload 暴露 `desktopApi.acquiringBillCurrency.rawJsonRetention.{calculate,prune}`
-- **验证**：smoke + 手测
-- **跟主线映射**：N4-cont-1
+### ~~T27 — IPC handler~~ ❌ **v0.2 删除**（D27 = N/A 无 UI；无 IPC）
 
-### T28 — Phase 4 集成测试
+### T28 — Phase 4 集成测试（v0.2 重写 ≥ 3 case）
 - **位置**：`scripts/integration/acquiring-bill-currency-raw-json-retention.js`（新建）
-- **内容**：
-  - 保留窗口触发（6 月 + 500MB 组合）
-  - 手动清确认弹框
-  - 无数据边界
-  - 仅 1 条边界
-  - 中途取消
-  - 5+ case
+- **内容**（v0.2 重写）：
+  - case 1：idle 30min 触发后 — 差异行 raw_json 完整（`SELECT COUNT(*) FROM bill_imports b WHERE b.raw_json IS NOT NULL AND b.id IN (SELECT bill_import_id FROM diff_rows)` = 全部差异行数）+ 对账成功老行 raw_json 已清（`SELECT COUNT(*) WHERE raw_json IS NULL AND imported_at < datetime('now', '-7 days') AND id NOT IN diff_rows` = 所有对账成功老行数）
+  - case 2：settings retention_days 调整生效（1 天 / 30 天 / 7 天默认 / 范围外 0 / 31 回退）
+  - case 3：failure graceful + 活动日志（模拟 raw_json SQL 抛错 → activity log 含 ERROR + 主 cleanup 已完成）
 - **验证**：`npm run test:integration` 全过
 
 ---
@@ -327,7 +304,7 @@ Phase 1 (A3 worker 框架) ────► Phase 2 (A3 + idle 联调) ───�
 
 ## 九、Phase 6 — 集成测试 + USER_GUIDE + CHANGELOG + 三件套
 
-> 依赖：Phase 1-5 全部完成（A4 是否做按 T17 决策决定）
+> 依赖：Phase 1-5 全部完成（v0.2 A4 已锁必做 — Phase 3 无决策门）
 
 ### T32 — release-check gate
 - **动作**：`npm run release-check`
@@ -341,13 +318,13 @@ Phase 1 (A3 worker 框架) ────► Phase 2 (A3 + idle 联调) ───�
   - 重要变量升格评估（如 `diff_rows` FK schema 升格 Critical）
 
 ### T34 — preview 回归
-- **动作**：`npm run preview` + `npm run preview:account`（视 N4-cont-1 UI 改动量）
+- **动作**：`npm run preview` + `npm run preview:account`（v0.2：N4-cont-1 已无 UI 改动，preview 仅验 A3 / A4 / N4-cont-2 路径未引入视觉副作用 — 通常一致）
 - **验证**：截图归档 + 与 v2.1.9 baseline 视觉无外溢
 
 ### T35 — USER_GUIDE 更新
 - **位置**：`docs/USER_GUIDE.md`
 - **内容**：
-  - 「收单单据币种校验」章节加「raw_json 历史保留与清理」段（保留窗口默认值 + 手动清入口 + 二次确认 + 不可逆警告）
+  - **v0.2** 「收单单据币种校验」章节加「raw_json idle 自动清理与体积治理」段（仅清对账成功老行 raw_json + 差异行永远保留 + 7 天保留窗口默认 + settings 可调 1-30 + SQLite 手动恢复路径）
   - 「故障排查」章节加「DB 备份恢复路径」段
   - 「故障排查」章节加「worker 进程异常」段
 - **验证**：文档审阅 + 截图对照
@@ -397,13 +374,13 @@ Phase 1 (A3 worker 框架) ────► Phase 2 (A3 + idle 联调) ───�
 | 主线 | 主要 Phase | 主要 task |
 |---|---|---|
 | **A3** runCheck 跨进程化 | Phase 0 / 1 / 2 | T03-T16 |
-| **A4** SQL JOIN chunked | Phase 3 | T17-T21（条件触发） |
-| **N4-cont-1** raw_json 体积治理 | Phase 4 | T22-T28 |
+| **A4** SQL JOIN chunked（v0.2 必做） | Phase 3 | T18-T21（v0.2 删 T17 决策点；改"实施"任务） |
+| **N4-cont-1** raw_json 体积治理（v0.2 重写） | Phase 4 | T22-T24 + T28（v0.2 删 T25-T27 — 无 UI / 无 dialog / 无 IPC） |
 | **N4-cont-2** FK CASCADE | Phase 5 | T29-T31 |
 | 全部（收尾） | Phase 6 | T32-T37 |
 | 全部（修复） | SR-FIX | TSR1-TSR2 |
 
 ---
 
-**当前状态**：v0.1（2026-05-28 — 任务全分解；Phase 0 强制前置 + Phase 4/5 可并行）。
-**下一步**：用户审 tasks → Phase 0 T03-T05 启动（worker_threads vs utilityProcess POC）。
+**当前状态**：v0.2（2026-05-28 reverse synced — A4 改必做 / N4-cont-1 task 重写工期下降 / T17 删除 / T25-T27 删除）。
+**下一步**：通知 Dev 启动 Phase 0 T03-T05（worker_threads vs utilityProcess POC）。Phase 4 / Phase 5 与 Phase 1-3 并行。

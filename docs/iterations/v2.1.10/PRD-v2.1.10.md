@@ -2,39 +2,39 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.1（2026-05-28 起草） |
+| 文档版本 | v0.2（2026-05-28 reverse sync — D25/D26/D27 拍板 + N4-cont-1 重大方案变更） |
 | 目标版本 | `v2.1.10`（minor — 架构级：runCheck 跨进程 + DB schema 不可逆 FK 改造） |
 | 起始版本 | `v2.1.9`（α 已提 PR #53；β 启动节奏按用户拍板：α 提 PR 后立即开 β 分支） |
-| 起草日期 | 2026-05-28 |
+| 起草日期 | 2026-05-28（v0.1）/ 2026-05-28（v0.2 reverse sync） |
 | 起草人 | PM |
-| 状态 | 起草中（v0.1，待 spec 评审；4 主线全部 backlog v0.1 已锁定） |
-| 关联文档 | `backlog.md` v0.1（β 范围）/ `spec.md` v0.1（待写）/ `tasks.md` v0.1（待写）/ `manual-test-checklist.md` v0.1（待写） |
-| 涉及模块 | 收单单据币种校验（A3 worker / A4 chunked / N4-cont-1 raw_json / N4-cont-2 FK CASCADE）+ 全局 DB 基建（复用 SR-backup-1 + 沿用 v2.1.9 N5 channels FK 范式）+ 全局架构（worker 进程边界 + lastActiveTs 跨进程同步） |
+| 状态 | v0.2 reverse synced（D25/D26/D27 用户拍板 + N4-cont-1 改"复用 N1' idle + 仅清对账成功行 raw_json + 7 天窗口 + 0 UI"；待 Phase 0 POC 启动） |
+| 关联文档 | `backlog.md` v0.1（β 范围）/ `spec.md` v0.2（reverse synced）/ `tasks.md` v0.2（reverse synced）/ `manual-test-checklist.md` v0.2（reverse synced） |
+| 涉及模块 | 收单单据币种校验（A3 worker / A4 chunked 必做 / N4-cont-1 raw_json 仅清对账成功行 / N4-cont-2 FK CASCADE）+ 全局 DB 基建（复用 SR-backup-1 + 沿用 v2.1.9 N5 channels FK 范式 + 复用 v2.1.9 N1' idle cleanup 计时器）+ 全局架构（worker 进程边界 + lastActiveTs 跨进程同步） |
 | 工作分支 | `v2.1.10`（基于 main，已建好；`package.json.version` = `2.1.10-beta.1`） |
-| 依赖 | v2.1.9 α 已上线产物：N5 channels FK 范式（ON UPDATE CASCADE） / SR-backup-1 backup API（VACUUM INTO） / N1' idle 30min cleanup 计时器 / N1-settings idle 阈值 settings 化 / N4 重构 createBackupFn 注入范式 / SR-log-1 全局告警日志 |
+| 依赖 | v2.1.9 α 已上线产物：N5 channels FK 范式（ON UPDATE CASCADE） / SR-backup-1 backup API（VACUUM INTO） / N1' idle 30min cleanup 计时器（`src/main.js:11155-11178`，N4-cont-1 复用追加回调）/ N1-settings idle 阈值 settings 化 / N4 重构 createBackupFn 注入范式 / SR-log-1 全局告警日志 |
 | package.json.version | 已 bump 到 `2.1.10-beta.1`（建分支时） |
 
 ---
 
 ## 一、版本目标 & 范围
 
-### 1.1 4 主线打包（用户已拍板）
+### 1.1 4 主线打包（用户已拍板 — v0.2 reverse sync 后）
 
 | 编号 | 主题 | 性质 | 风险 | 工期 |
 |---|---|---|---|---|
 | **A3** | `acquiring-bill-currency-session.runCheck` 跨进程化（worker_threads / utilityProcess 二选一） | 🔴 架构级 · 跨进程 IPC | 🔴 HIGH | ~1.5 周 |
-| **A4** | SQL JOIN chunked LIMIT/OFFSET 分批跑（与 A3 联合评估 — A3 落地后看是否仍必要） | 性能优化 | 🟡 MID | ~0.5 周 |
-| **N4-cont-1** | 收单单据 `bill_imports.raw_json` 历史保留体积治理（手动清入口 + 滚动保留窗口） | 体积治理 · UX | 🟡 MID | ~5 天 |
+| **A4** | SQL JOIN chunked LIMIT/OFFSET 分批跑（**v0.2：D25 用户拍板必做，不等 A3 实测**） | 性能优化 · 必做 | 🟡 MID | ~3-4 天 |
+| **N4-cont-1** | 收单单据 `bill_imports.raw_json` 历史保留体积治理（**v0.2：仅清"对账成功"行 raw_json + 复用 v2.1.9 N1' idle 30min cleanup + 7 天窗口（settings 可调 1-30） + 0 UI**） | 体积治理 · 复用 N1' idle | 🟡 MID | ~2-3 天 |
 | **N4-cont-2** | FK CASCADE 改造（`diff_rows.bill_import_id` / `run_id` 加 `ON DELETE CASCADE`） | 🔴 DB schema 不可逆 | 🔴 HIGH | ~3 天 |
 
-**β 合计预估**：~4 周（PM 上限估算 — 含 Phase 0 POC + 集成测试 + USER_GUIDE）
+**β 合计预估**：~3.5 周（v0.2 — N4-cont-1 工期下降 + A4 必做工期上升 ≈ 相抵；含 Phase 0 POC + 集成测试 + USER_GUIDE）
 
 ### 1.2 用户故事
 
 | 角色 | 故事 | 主线 |
 |---|---|---|
-| 财务用户（500w 行收单数据） | 点开始运行后，主窗口不应卡死 / 不应弹"无响应"对话框；运行中能继续点其他模块按钮（如查看历史 run） | A3（+ A4 兜底） |
-| 财务用户（重复运行多月份对账） | DB 文件不应无限膨胀 — 一年累计 10+ 月数据后仍能正常打开、备份、迁移 | N4-cont-1 |
+| 财务用户（500w 行收单数据） | 点开始运行后，主窗口不应卡死 / 不应弹"无响应"对话框；运行中能继续点其他模块按钮（如查看历史 run） | A3（+ A4 必做 — cancel 响应 < 5s + 进度回调精细化） |
+| 财务用户（重复运行多月份对账） | 用户无感，DB 自动按 idle 30min 触发清理对账成功行的老 raw_json（保留 7 天数据复查）；差异行 raw_json 永远保留以便重导差异 xlsx；一年累计 10+ 月数据后体积治理生效 | N4-cont-1 |
 | 财务用户（误操作删 run） | 删一个 run 时，对应差异行（diff_rows）应自动清掉；不应残留孤儿数据 | N4-cont-2 |
 | 开发者（接手项目） | runCheck 异常时主进程不应崩溃；worker 错误 stack 必须完整回传 | A3 |
 | 开发者（升级 v2.1.9 → v2.1.10） | DB schema 改造必须有自动备份 + 失败回滚；用户数据不丢 | N4-cont-2（复用 SR-backup-1） |
@@ -42,11 +42,21 @@
 ### 1.3 必做
 
 - **A3**：worker 进程（worker_threads 或 utilityProcess，Phase 0 POC 实测后决策 D23）启动 / pre-warm / cold-start / cancel / crash recover；worker 独立 DB 连接（D24）+ PRAGMA 同步；错误序列化（stack/cause/code）跨进程；进度回调跨进程；与 v2.1.9 N1' idle cleanup 计时器跨进程协调（lastActiveTs 同步策略 + worker 不应阻止 idle cleanup）
-- **A4**：基于 Phase 0 POC + A3 实测决策（D25）— 若 A3 worker 化后主进程已不阻塞且 worker 内 SQL 时长可接受 → 不做；若 worker 内 SQL 仍 > 30s → chunked 分批跑（chunk size 10w / 50w / 100w 待 spec 拍板）
-- **N4-cont-1**：(1) settings 表新增 `acquiring_bill_raw_json_retention_months`（默认 6 月）+ `acquiring_bill_raw_json_retention_max_mb`（默认 500MB）；(2) 收单单据模块面板加「清理历史 raw_json」按钮 — 弹确认框 → 计算清理范围 → 二次确认 → 执行；(3) 启动期自动按保留窗口标记超期数据（不立即删，等用户主动清）；(4) 失败 / 中途取消 graceful + 活动日志
+- **A4（v0.2：D25 用户拍板必做，不等 A3 实测）**：chunked 分批跑 — cancel 响应 < 5s + 进度回调精细化（chunkIndex / chunkCount）是 hard requirement；chunk size 选 10w 行（spec §3.2 已选定，理由：cancel 响应 < 5s + 内存峰值 < 200MB）；idempotent / 重跑保护（必做不再"待 Phase 3 细化"）
+- **N4-cont-1（v0.2：重大方案变更）**：
+  - (1) settings 表新增单键 `acquiring_bill_raw_json_retention_days`（默认 7 天；settings 可调范围 1-30；getter 沿用 v2.1.9 N1-settings 范式范围外回退默认值）
+  - (2) **完全复用 v2.1.9 N1' idle 30min cleanup 计时器**（`src/main.js:11155-11178`），在 idle cleanup 回调内追加 raw_json 清理逻辑 — 找出对账成功（不在 `acquiring_bill_currency_diff_rows` 中）且 `imported_at < datetime('now', '-N days')` 的 `acquiring_bill_currency_bill_imports` 行 → `UPDATE raw_json = NULL`（保留行骨架 + 业务字段）
+  - (3) graceful 失败 + 活动日志（沿用 v2.1.9 SR-log-1 `appendActivityLogEntry` 范式）
+  - (4) 失败不阻塞 N1' 主流程 cleanup（try/catch + 下次 idle 重试）；顺序：先执行 v2.1.8 cleanupAfterRunBackground，后执行 raw_json 清理
+  - (5) **0 UI**（v0.2：D27 用户拍板）— 不加按钮、不加 dialog、不加 IPC handler；用户无感
 - **N4-cont-2**：(1) SR-backup-1 前置备份；(2) 事务包裹 8-status migration state machine（沿用 v2.1.9 N5 范式）：`pending → backup-done → checked → rebuilt → indexed → fk-verified → flag-set → committed`；(3) `acquiring_bill_currency_diff_rows` 表 rebuild：新表 + `FOREIGN KEY (run_id) REFERENCES ... ON DELETE CASCADE` + `FOREIGN KEY (bill_import_id) REFERENCES ... ON DELETE CASCADE` + INSERT INTO SELECT + DROP 旧表 + RENAME；(4) 标志位 `n4_cont_2_diff_rows_cascade_migrated`；(5) 回滚预案 — 失败 ROLLBACK 后保留备份文件 + activity log 警示
 - 三件套（CHANGELOG / VFH / USER_GUIDE）发布前一次性更新（按 CLAUDE.md `workflow_docs_update`）
-- smoke / 集成 / unit：A3（≥ 8 用例：worker 启动、cancel、crash、错误序列化、进度回传、idle 跨进程、PRAGMA 同步、DB 连接独立性）+ A4（若做：≥ 3 用例：chunk 边界 / 中断恢复 / 性能对比）+ N4-cont-1（≥ 5 用例：保留窗口触发 / 手动清确认 / 无数据 / 仅 1 条 / 中途取消）+ N4-cont-2（≥ 6 用例：跨版本升级 / CASCADE 验证 / 回滚 / 老数据 backfill / 标志位幂等 / fk-verified 校验）+ **0 regression 硬约束**（v2.1.9 已上线 9 主题全部回归通过）
+- smoke / 集成 / unit（v0.2 调整 — A4 必做、N4-cont-1 删 UI case）：
+  - **A3**：≥ 8 用例（worker 启动、cancel、crash、错误序列化、进度回传、idle 跨进程、PRAGMA 同步、DB 连接独立性）
+  - **A4 必做**（v0.2）：≥ 3 用例（chunk 边界 / 中断恢复 / 性能对比）— 不再"条件触发"
+  - **N4-cont-1（v0.2 重写）**：≥ 3 用例（idle 30min 触发后差异行 raw_json 完整 + 对账成功老行 raw_json 已清 / settings retention_days 调整生效 / failure graceful + 活动日志）— 删 UI 相关 case
+  - **N4-cont-2**：≥ 6 用例（跨版本升级 / CASCADE 验证 / 回滚 / 老数据 backfill / 标志位幂等 / fk-verified 校验）
+  - **0 regression 硬约束**（v2.1.9 已上线 9 主题全部回归通过）
 
 ### 1.4 明确不做
 
@@ -54,9 +64,12 @@
 - **不做** N5-channels-scale 渠道虚拟滚动 — 视 v2.1.9 上线后实际使用观察（评估项）
 - **不做** A3 把 `bank-bu-recon-session.runCheck` / `biz-op-recon-session.runCheck` / `pending-import` 也搬到 worker（继续只针对 `acquiring-bill-currency.runCheck`；3 套引擎评估后续版本再扩散，沿用 v2.1.8 PRD §5 "不做"决策）
 - **不做** A3 worker 间共享 DatabaseSync 实例（worker 内独立连接，避免 SQLite 跨线程坑）
-- **不做** A4 与 A3 双轨实施（二选一 — A3 落地后才决策 A4）
-- **不做** N4-cont-1 自动删除（默认仅"标记超期"，删除一定要用户主动触发；理由：raw_json 一旦删不可逆）
-- **不做** N4-cont-1 数据归档导出（仅删，不导出归档 zip；如需保留请用户自行 SR-backup-1 备份后清）
+- ~~不做 A4 与 A3 双轨实施（二选一 — A3 落地后才决策 A4）~~ ❌ **v0.2 删除**（D25 用户拍板 A4 必做，与 A3 并行实施）
+- **不做** N4-cont-1 清整张 `bill_imports` 老月份 — v0.2 范围**仅清 raw_json 字段**而非整张表（行骨架 + 业务字段 + diff_rows 外键引用全部保留；理由：(1) 保留行结构便于审计"该月有过 X 行单据"；(2) 不破坏 N4-cont-2 引入的 FK CASCADE 路径）
+- **不做** N4-cont-1 清"差异行"raw_json — v0.2 **差异行 raw_json 永远保留**，仅清"对账成功"行（不在 `acquiring_bill_currency_diff_rows` 中的行）；理由：grep `src/main-process/acquiring-bill-currency-writer.js:184` 发现导出差异 xlsx 时用 `JSON.parse(d.bill_raw_json)`（来自 JOIN bill_imports），且 `acquiring_bill_currency_diff_rows` schema (`src/backend/database/migrations.js:1506-1515`) **只存 4 列业务字段 + 2 个外键**，不冗余存 bill_imports 字段；如清掉差异行的 raw_json → 重导差异 xlsx 输出列大量空白；仅清对账成功行 → 重导能力完全保留
+- **不做** N4-cont-1 手动清按钮 / dialog / IPC handler / 应用设置弹框（v0.2：D27=N/A 0 UI；用户无感）
+- ~~不做 N4-cont-1 自动删除~~ ❌ **v0.2 删除**（v0.2 新方案就是 idle 自动触发；缓解 = 7 天窗口 + 仅清成功行 + USER_GUIDE 写明 SQLite 工具手动恢复路径）
+- ~~不做 N4-cont-1 数据归档导出（zip）~~ — v0.1 历史决策；与 v0.2 新方案无关（保留注释作历史记录）
 - **不做** N4-cont-2 顺带改其他表 FK（仅 `acquiring_bill_currency_diff_rows` 2 个 FK；详 D28 倾向）
 - **不做** N4-cont-2 把 `bill_imports.bill_imports_id` / `flow_imports.flow_imports_id` 加 CASCADE（出于资金红线 — bill_imports 是数据真理源，不能跟随 run 删除消失）
 - **不做** SR-log-1 v2.1.10 双写删旧（v2.1.9 D34=a 锁双写 1 版本 = v2.1.9；v2.1.10 评估删旧 = 留到 v2.1.10 self-review 后期或 v2.1.11）
@@ -102,53 +115,76 @@ v2.1.7 F7-A1（PRAGMA WAL / synchronous=NORMAL / mmap_size）+ F7-A2（writer �
 - D23: worker_threads vs utilityProcess（Phase 0 POC 实测）
 - D24: DB 连接方案（独立 connection vs message-based RPC）
 
-### 2.2 A4 — SQL JOIN chunked LIMIT/OFFSET 分批跑（🟡 性能 — 条件触发）
+### 2.2 A4 — SQL JOIN chunked LIMIT/OFFSET 分批跑（🟡 性能 — v0.2 D25 用户拍板必做）
 
-#### 2.2.1 背景
+#### 2.2.1 背景（v0.2 reverse sync）
 
-v2.1.7 PRD §12.1.3 明确"留 v2.1.8 与 A3 联合决策"；v2.1.8 PRD §五（A3 节）二选一锁定（若 A3 worker 化解决主进程不阻塞 → A4 可不做）。本版 D25 倾向：**待 A3 落地后评估**（Phase 3 触发）。
+v2.1.7 PRD §12.1.3 明确"留 v2.1.8 与 A3 联合决策"；v2.1.8 PRD §五（A3 节）二选一锁定（若 A3 worker 化解决主进程不阻塞 → A4 可不做）。**v0.2 D25 用户拍板必做** — 不等 A3 实测；防 cancel 响应慢 + 进度回调精细化是 hard requirement。
 
 #### 2.2.2 代码现状
 
-`insertDiffRowsByJoin`（`src/backend/acquiring-bill-currency-db/run-repository.js`，待 spec 阶段精确定位）目前是单条大 SQL INSERT-FROM-SELECT-JOIN，500w 行级数据 ~30-60s。
+`insertDiffRowsByJoin`（`src/backend/acquiring-bill-currency-db/run-repository.js`，待 spec §3.2 精确定位）目前是单条大 SQL INSERT-FROM-SELECT-JOIN，500w 行级数据 ~30-60s。
 
-#### 2.2.3 改造范围（仅 A3 后 SQL 时长仍 > 30s 时才做）
+#### 2.2.3 改造范围（v0.2 必做，不再"仅 A3 后 SQL 时长仍 > 30s 时才做"）
 
-- chunked LIMIT/OFFSET 拆分 N 个子 INSERT；每批 ~10w 行
-- 进度回调附 `chunkIndex / chunkCount`
-- 失败回滚仅当前事务批次，已 INSERT 成功的批次保留 → 重跑时 idempotent（按 month_key + recon_main_id 去重 → 或全部 DELETE 重跑）
+- chunked LIMIT/OFFSET 拆分 N 个子 INSERT；**每批 10w 行**（v0.2 spec §3.2 选定）
+- 进度回调附 `chunkIndex / chunkCount`（hard requirement）
+- 每批之间检查 cancel flag → cancel 响应 < 5s
+- 失败回滚仅当前事务批次；已 INSERT 成功的批次保留 → 重跑时 idempotent（clearOldRuns + N4-cont-2 CASCADE 清旧 diff_rows → 新 runId 重头跑）
 
-### 2.3 N4-cont-1 — 收单单据 raw_json 历史保留体积治理（🟡 MID）
+### 2.3 N4-cont-1 — 收单单据 raw_json 体积治理（🟡 MID · v0.2 重大方案变更）
 
-#### 2.3.1 背景
+#### 2.3.1 背景（v0.2 reverse sync）
 
 v2.1.8 N4 引入 `bill_imports.raw_json` 9 字段保留范式 → v2.1.9 N4 重构 backup API 切换。**v2.1.8 PRD §十四 实施记录**列出延期项："手动清入口 / 滚动保留窗口 / FK CASCADE 改造"。
 
 **实际数据增长率**（用户上线 v2.1.8 后 1 个月反馈推断）：~500w 行 / 月 × 9 字段 JSON ≈ 50-200MB / 月（按平均字段长 100-400 字节）。一年累计 600MB - 2.4GB。
+
+**v0.2 方案变更关键事实（grep 验证）**：
+
+1. **差异行 raw_json 必须保留**（writer.js:184 依赖）：grep `src/main-process/acquiring-bill-currency-writer.js:184` 发现导出差异 xlsx 时 `const rawObj = JSON.parse(d.bill_raw_json);` — `d.bill_raw_json` 来自 JOIN `bill_imports` 表；如清掉差异行的 raw_json → 重导差异 xlsx 输出列大量空白，破坏用户复查能力。
+2. **diff_rows schema 不冗余存 bill_imports 字段**：grep `src/backend/database/migrations.js:1506-1515` 发现 `acquiring_bill_currency_diff_rows` schema 仅 4 列业务字段（`flow_currency / flow_amount_abs / diff_type`） + 2 个外键（`run_id / bill_import_id`），不冗余存 bill_imports 字段 → 必须依赖 JOIN 拿 raw_json。
+3. **结论**：仅清"对账成功"行（不在 diff_rows 中的 bill_imports 行）→ 差异行 raw_json 完整 → 重导能力完全保留。差异行占比 ~1%（基于用户线上观察推断）；清 99% 对账成功行 raw_json → 体积节省 ~99%。
 
 #### 2.3.2 代码现状
 
 | 锚点 | 文件:行 | 说明 |
 |---|---|---|
 | `bill_imports.raw_json` schema | `src/backend/database/migrations.js:1463`（TEXT NOT NULL） | v2.1.8 N4 已瘦身到 9 字段 |
+| `acquiring_bill_currency_diff_rows` schema | `src/backend/database/migrations.js:1506-1515` | 仅 4 列业务字段 + 2 外键，不冗余存 bill_imports 字段 |
+| 差异 xlsx writer raw_json 依赖 | `src/main-process/acquiring-bill-currency-writer.js:184` | `JSON.parse(d.bill_raw_json)` — 来自 JOIN bill_imports |
 | `ensureBillRawJsonV2Slim` migration | `src/backend/database/migrations.js:795-927` | v2.1.8 引入 + v2.1.9 N4 重构 createBackupFn 注入 |
 | 数据保留语义 | `cleanupAfterRunBackground`（session.js:332） | `includeDiff=false`（默认）：只清 flow + bill；`true`：连 diff 一起清 |
-| 启动期 orphan cleanup | `session.js:418-424` Phase 1/2/3 | 复用 `cleanupAfterRunBackground` 清 orphan runs |
-| settings 表 | `src/backend/database/settings-repository.js` | 已有 idle_cleanup_minutes 范式可参考 |
-| 收单单据面板 UI | `src/renderer.js` / `index.html`（待 spec 精确定位） | v2.1.9 N1-settings dev agent 自扩展 ⚙️ 按钮被否决，此处 D27 倾向"收单模块独立按钮"避免重蹈 |
+| **v2.1.9 N1' idle 30min cleanup 计时器**（v0.2 复用） | `src/main.js:11155-11178`（`setupIdleCleanupTimer`） | `setInterval(IDLE_CHECK_INTERVAL_MS)` → 检查 idle → 触发 `triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded`；**v0.2 在该回调内追加 raw_json 清理逻辑** |
+| settings 表 | `src/backend/database/settings-repository.js` | 已有 idle_cleanup_minutes 范式可参考；v0.2 沿用同范式增 1 键 |
 
-#### 2.3.3 改造范围
+#### 2.3.3 改造范围（v0.2 重写 — 从 6 条减为 2 条）
 
-- **DB**：settings 表新增 2 键 — `acquiring_bill_raw_json_retention_months`（默认 6 月）+ `acquiring_bill_raw_json_retention_max_mb`（默认 500MB）
-- **后端 cleanup 入口**：`cleanupOldRawJson(db, retentionMonths, maxMb)` 函数 — 计算超期数据 → 返回 `{ candidateRows, totalSizeMb }` 给 UI 弹确认框
-- **执行删除**：`pruneOldRawJson(db, candidateRowIds)` 函数 — 事务包裹 + 分批 UPDATE raw_json = '{}' 或 DELETE bill_imports 行（D26 子决策点）
-- **UI**：收单单据模块面板加「清理历史 raw_json」按钮（D27 倾向）→ 点击触发 calc + 弹确认框（含数据量 + 月份范围 + 预估释放 MB）→ 用户输入"确认"二次确认 → 执行
-- **启动期**：仅"标记"超期，不删（避免启动期阻塞 + 避免用户没感知就丢数据）
+- **DB**：settings 表新增 **1 键** — `acquiring_bill_raw_json_retention_days`（默认 `'7'`；settings 范围 1-30；getter 范围外回退 7）
+- **后端清理函数**：新建 `src/backend/acquiring-bill-currency-db/raw-json-retention.js`，导出 `clearStaleSuccessfulRawJson(db, retentionDays)` — 执行 SQL：
+  ```sql
+  UPDATE acquiring_bill_currency_bill_imports
+  SET raw_json = NULL
+  WHERE id IN (
+    SELECT b.id FROM acquiring_bill_currency_bill_imports b
+    WHERE b.raw_json IS NOT NULL
+      AND b.imported_at < datetime('now', '-' || ? || ' days')
+      AND b.id NOT IN (
+        SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows
+      )
+  )
+  ```
+  - NOT IN 子查询排除差异行
+  - `imported_at` 用于"老于 N 天"判断
+  - `raw_json = NULL` 保留行骨架 + 业务字段 + 业务主键
+- **触发集成**：v2.1.9 N1' idle 30min cleanup 回调（`src/main.js:11155-11178` 内 `triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded`）内追加 `clearStaleSuccessfulRawJson(db, retentionDays)` — 顺序：先现有 cleanup（v2.1.8 `cleanupAfterRunBackground`），后 raw_json 清理；失败不阻塞主 cleanup（try/catch + 下次 idle 重试）
+- **0 UI**（v0.2：D27 用户拍板）— 不加按钮 / dialog / IPC handler；用户无感
+- **删除项**（vs v0.1）：UI 按钮 / 确认 dialog factory / IPC handler / 启动期"标记超期"算法 / `calculateExpiredRows` / `pruneOldRawJson` 用户主动触发路径
 
-#### 2.3.4 决策点（详 §四）
+#### 2.3.4 决策点（详 §四 — v0.2 reverse sync 后）
 
-- D26: 保留窗口策略（最近 N 月 / N 个 run / N MB / 组合）
-- D27: 手动清入口 UI 位置（收单模块独立按钮 / 应用设置弹框 / 模态对话）
+- D26: 保留窗口策略 → **(e) 7 天短窗口 + settings 可调 1-30**（用户拍板）
+- D27: 手动清入口 UI 位置 → **N/A 不需要 UI（idle 自动触发，0 UI）**（用户拍板）
 
 ### 2.4 N4-cont-2 — FK CASCADE 改造（🔴 DB 不可逆）
 
@@ -204,7 +240,8 @@ CREATE TABLE IF NOT EXISTS acquiring_bill_currency_diff_rows (
 | 跨进程化备份（A3 worker 内 DB 备份 + N4-cont-2 migration 备份） | SR-backup-1 sqlite backup API（VACUUM INTO 范式） | `src/backend/database/backup.js` + `database.js` createBackup 实例方法 | 直接调 `database.createBackup('pre-A3-worker-init')` / `database.createBackup('pre-N4-cont-2')`；white-listed label `[A-Za-z0-9_-]` |
 | N4-cont-2 FK 范式延续 | v2.1.9 N5 已锁 channels FK 范式（ON UPDATE CASCADE） | `src/backend/database/migrations.js:996` + N5 spec §3.2 | N4-cont-2 改 ON DELETE CASCADE（注意：N5 是禁删 + UI 双保护；N4-cont-2 是自动 cascade — 业务语义不同） |
 | A3 worker 进程内 idle cleanup 协调 | v2.1.9 N1' idle cleanup 计时器 + N1-settings 阈值 settings 化 | `src/main.js:11119-11178`（setupIdleCleanupTimer + loadIdleCleanupMsFromSettings） | A3 worker 启动后必须 (1) 不阻止主进程 idle timer 触发；(2) worker 内 lastActiveTs 不要独立维护（详 spec §2.3）；(3) worker 在执行 runCheck 期间 idle cleanup 应 skip（避免抢占 DB 写锁） |
-| N4-cont-1 与 v2.1.9 N4 顺带项一致性 | v2.1.9 N4 重构（createBackupFn 注入范式） | `src/backend/database/migrations.js:ensureBillRawJsonV2Slim` 第 3 参 `createBackupFn` | N4-cont-1 cleanupOldRawJson / pruneOldRawJson 函数沿用同一签名风格（依赖注入） |
+| **N4-cont-1 复用 N1' idle cleanup 计时器**（v0.2 新增依赖） | v2.1.9 N1' idle cleanup 计时器 | `src/main.js:11155-11178`（setupIdleCleanupTimer 内的 setInterval 回调） | **v0.2 在该 cleanup 回调内追加 `clearStaleSuccessfulRawJson(db, retentionDays)` 调用**；顺序：先 v2.1.8 `cleanupAfterRunBackground`，后 raw_json 清理；失败不阻塞主 cleanup（try/catch + 下次 idle 重试）；**无新触发器、无新计时器**（0 新基建） |
+| N4-cont-1 与 v2.1.9 N4 顺带项一致性 | v2.1.9 N4 重构（createBackupFn 注入范式） | `src/backend/database/migrations.js:ensureBillRawJsonV2Slim` 第 3 参 `createBackupFn` | v0.2 N4-cont-1 `clearStaleSuccessfulRawJson(db, retentionDays)` 不需 backup（清理范围仅 raw_json 字段且为对账成功行；不可逆但 7 天窗口 + 用户可设回 30 天延后清理）|
 | 所有 4 主线告警 | v2.1.9 SR-log-1 全局日志化 | `src/backend/logger.js` + `appendActivityLogEntry({ level, source, domain, message, details, stack })` | A3 worker 内告警必须通过 message-pipe 上报到 main（worker 无法直写 main 进程日志文件） |
 
 ---
@@ -215,9 +252,9 @@ CREATE TABLE IF NOT EXISTS acquiring_bill_currency_diff_rows (
 |---|---|---|---|---|---|
 | **D23** | A3 | 跨进程方案：worker_threads（Node 原生）vs Electron utilityProcess（更深整合 Electron 生命周期） | (a) worker_threads / (b) utilityProcess | **(a) worker_threads + Phase 0 POC 验证后确认** | (1) Node 原生 API 文档全 + 主进程引入成本最低；(2) utilityProcess 是 Electron 27+ API 但**生命周期挂在主进程**，主进程崩溃 worker 跟死，相比 worker_threads 没本质优势；(3) DatabaseSync 不能跨线程共享 → 两种方案都要重开 DB 连接，差异点不在 DB 层；(4) Phase 0 POC 仍要实测 — `npm start` 启动一个最小 runCheck 子集，测启动延迟、进程间消息延迟、错误堆栈完整度、cancel 响应延迟 4 项；如 worker_threads 实测有不可接受问题（如 DatabaseSync require 在 worker 内异常）则切回 (b) |
 | **D24** | A3 | worker DB 连接方案：独立 connection vs message-based RPC | (a) 独立 connection（worker 内 `new DatabaseSync(dbPath)` + 重设 PRAGMA） / (b) message-based RPC（主进程 DB 单例 + worker 通过 message-pipe 调 SQL） | **(a) 独立 connection** | (1) **简单**：worker 内 `new DatabaseSync` + 重设 PRAGMA 5 行代码搞定；(2) **性能**：worker 内执行 SQL 无序列化跨进程开销（RPC 方案每条 SQL 都要 IPC 一次）；(3) **隔离**：worker 内 SQL 出错不影响主进程 DB 连接；(4) **代价**：worker 启动多 ~50-100ms（pre-warm 可摊销 cold start）+ PRAGMA 漏设风险（mitigate：抽 `initWorkerDb(workerDb)` helper + spec §2.5 强制清单）；(5) **WAL 兼容**：v2.1.7 F7-A1 已开 WAL，多连接读写并发安全；(6) Phase 0 POC 必须实测：两个连接同时写时是否会触发 SQLITE_BUSY |
-| **D25** | A4 | 是否做（条件触发） | (a) 不做（A3 worker 化已解决主进程阻塞，SQL 时长可接受） / (b) 做（A3 落地后实测 SQL 时长仍 > 30s 触发 chunked） | **(b) — 待 A3 落地后评估（Phase 3 决策点）** | (1) PM 不能现在拍 (a)：A3 worker 化只解决"主进程阻塞"，但 worker 内 SQL 时长本身不变（仍 30-60s）— 若 worker 长时间执行单条 SQL，cancel 响应慢、内存峰值高、错误堆栈丢上下文；(2) chunked 分批主要价值：(i) 取消语义可达（每批之间检查 cancel flag）；(ii) 进度回调更精细（chunkIndex / chunkCount）；(iii) 内存峰值降低；(3) 但 chunked 引入额外复杂度：跨批一致性 + 失败回滚 + 重跑 idempotent；(4) 决策路径：A3 Phase 2 联调完后跑 500w × 2 行真实数据 → 若 worker 内单条 INSERT-FROM-SELECT-JOIN < 30s 且取消响应 < 5s → 不做（更新本节为 (a) + closure A4）；否则做（spec 阶段补 §三细节） |
-| **D26** | N4-cont-1 | 保留窗口策略：最近 N 月 / N 个 run / N MB / 组合 | (a) 仅按月（最近 N 月） / (b) 仅按 run 数（最近 N runs） / (c) 仅按体积（max MB） / (d) **组合**：N 月 + max MB 双门槛（任一超过即标记） | **(d) 组合：最近 6 月 + 500MB 上限（任一超过即"标记"，等用户主动清）** | (1) **按月**直观符合财务对账周期感（季度报表、年报）；(2) **按 MB**保护磁盘资源（防止 1 个月 500w 行的极端用户撑爆 1GB）；(3) **组合双门槛**：早超期的月份先标记（如 7 月数据 + 当前 12 月，超 6 月）；体积爆掉时按 month_key 升序优先标记最老的；(4) **默认值理由**：6 月覆盖大多数财务对账场景（季度 + 半年）；500MB 是普通用户磁盘可接受峰值；(5) **不选纯 run 数**：1 月可能多次重导 run → 用 run 数标记策略易误删近期数据；(6) settings 可调（5-12 月 / 100-2000MB） |
-| **D27** | N4-cont-1 | 手动清入口 UI 位置 | (a) 收单单据模块面板独立按钮 / (b) 应用设置弹框 / (c) 模态对话从启动检测时触发 | **(a) 收单单据模块面板独立按钮** | (1) **场景一致性**：N4-cont-1 是收单单据专属功能（其他 6 模块不涉及），按钮放在收单模块面板符合用户心智模型；(2) **避免重蹈 v2.1.9 N1-settings 教训**：D21 dev agent 自扩展 createAppSettingsDialog + ⚙️ 按钮被用户否决（覆盖率不足）；本版 D27 明确"收单模块独立按钮"防止重演；(3) **不选 (b) 应用设置弹框**：应用设置是全局配置（如 idle 阈值），数据清理是业务操作，混杂违反 SRP；(4) **不选 (c) 启动检测**：启动期阻塞 UI（v2.1.9 N5 migration 已是启动期事件，再叠加易触发 unresponsive）；(5) 文案："清理历史 raw_json 数据"（按钮）+ 弹确认框（数据量 + 月份范围 + 预估释放 MB + 「输入 '确认' 二次确认」）|
+| **D25**（v0.2 用户拍板） | A4 | 是否做（v0.1 倾向"条件触发"→ v0.2 改"现在拍 做"） | (a) 不做（A3 worker 化已解决主进程阻塞，SQL 时长可接受） / (b) 做（不等 A3 实测 — 必做） | **(b) 做 A4（v0.2 用户拍板 — 必做，不等 A3 实测）** | **v0.2 用户拍板理由**：(1) **防 cancel 响应慢 + 进度回调精细化是 hard requirement**，不是可选优化 — 用户预期对账长任务必须可中途取消（< 5s 响应）+ 进度条按"已处理 N / 总 M"显示，单条大 SQL 满足不了；(2) chunked 分批主要价值：(i) cancel 语义可达（每批之间检查 cancel flag）；(ii) 进度回调更精细（chunkIndex / chunkCount）；(iii) 内存峰值降低；(3) 不等 A3 实测的好处：A3 Phase 2 联调期间 A4 可并行开发（无强依赖）；(4) chunk size 10w 行（spec §3.2 已选定 — cancel 响应 < 5s + 内存峰值 < 200MB）；(5) **历史 v0.1 倾向**：(b) — 待 A3 落地后评估（Phase 3 决策点）→ v0.2 替换为"现在拍 做" |
+| **D26**（v0.2 用户拍板） | N4-cont-1 | 保留窗口策略 | (a) 仅按月（最近 N 月） / (b) 仅按 run 数（最近 N runs） / (c) 仅按体积（max MB） / (d) 组合：N 月 + max MB 双门槛 / **(e) 7 天短窗口（settings 可调 1-30 天）** | **(e) 7 天短窗口 + settings 可调 1-30 天**（v0.2 用户拍板） | **v0.2 用户拍板理由**：(1) **新方案仅清"对账成功"行 raw_json，差异行永远保留** — 7 天足够用户复查对账成功的明细；(2) **长窗口反而失体积治理意义** — v0.1 (d) 组合 6 月 + 500MB 双门槛意味着 500MB 内永不清，对线上每月新增 ~50-200MB 的实际数据规模 → 6 月才清一次，体积治理滞后；7 天可让"对账完成"的 N+1 周自动清，体积下降速度跟得上增长速度；(3) **简化 settings**：从 v0.1 "2 键（months + max_mb）"减为"1 键（days）"，配置成本下降；(4) **settings 范围 1-30 天**：1 天极端激进 / 7 天默认 / 30 天保守上限；(5) **历史 v0.1 倾向**：(d) 组合 6 月 + 500MB 双门槛 → v0.2 替换为 (e) 7 天短窗口 |
+| **D27**（v0.2 用户拍板） | N4-cont-1 | 手动清入口 UI 位置 | (a) 收单单据模块面板独立按钮 / (b) 应用设置弹框 / (c) 模态对话从启动检测时触发 / **(-) N/A 不需要 UI（idle 自动触发，0 UI）** | **(-) N/A 无 UI**（v0.2 用户拍板：复用 N1' idle 自动触发，不需要 UI） | **v0.2 用户拍板理由**：(1) **新触发方式 = idle 自动**：用户无感（无按钮、无 dialog、无 IPC handler）；省 ~80 行 UI dev + 省 dialog factory + 省 preview 回归；(2) **避免重蹈 v2.1.9 N1-settings 教训**（D21 dev agent 自扩展 createAppSettingsDialog 被否决）— 直接 0 UI 不存在覆盖率争议；(3) **不可逆风险等价缓解**：v0.1 用"用户主动按按钮 + 二次确认"控制不可逆；v0.2 用"7 天窗口 + 仅清对账成功行 + 差异行永远保留 + USER_GUIDE 写明 SQLite 工具手动恢复路径"等价缓解；(4) **历史 v0.1 倾向**：(a) 收单模块独立按钮 → v0.2 替换为 (-) N/A 无 UI；(5) UI 改动量从 ~80 行降为 0 行；工期从 ~5 天降为 ~2-3 天 |
 | **D28** | N4-cont-2 | FK CASCADE 改造范围 | (a) 仅 `diff_rows.bill_import_id` + `run_id` 2 FK / (b) 顺带其他表（如 `bill_imports`、`flow_imports`、`runs` 内部 FK） | **(a) 仅这 2 个 FK** | (1) **最小改动面**：v2.1.10 β 已是 4 主线打包（4 周），N4-cont-2 控制在 3 天；扩散到其他表会撑爆工期；(2) **业务一致性**：`diff_rows` 是 run 的派生数据 — run / bill_imports 没了 diff_rows 必须跟着没（业务语义明确）；(3) **bill_imports / flow_imports 不能加 ON DELETE CASCADE 到 runs**：它们是数据真理源，run 是处理结果；run 删了不能连数据源一起删；(4) **runs 内部 FK**：runs 表没有 FK 指向其他表（独立顶层）；(5) 后续版本（v2.1.11+）若有需求再评估其他表（如 bill_imports → flow_imports 关系）；(6) ⚠️ 风险显式提醒：本决策是 🔴 DB 不可逆 schema 改造 — 后续无法回退到无 CASCADE 范式（除非再 rebuild），所以保守起步只动 2 FK |
 
 ---
@@ -232,7 +269,7 @@ CREATE TABLE IF NOT EXISTS acquiring_bill_currency_diff_rows (
 |---|---|---|---|
 | A3 worker 跨进程后 runCheck 5 阶段执行结果与主进程版必须 byte-for-byte 一致 | A3 | 🔴 资金红线 | (1) Phase 1 完成后跑 1276 + v2.1.9 新增断言全集回归；(2) 跑 TEST.xlsx + TEST2.xlsx baseline；(3) worker 与 main 各跑一次同一份数据对比 diff_rows 表 byte 级一致 |
 | N4-cont-2 FK CASCADE 改造（DB 不可逆 schema） | N4-cont-2 | 🔴 不可逆 | (1) SR-backup-1 前置自动备份；(2) 8-status migration state machine（沿用 v2.1.9 N5 范式）；(3) PRAGMA foreign_key_check 0 violation 验证；(4) 失败 ROLLBACK + 备份文件保留 + activity log 警示；(5) USER_GUIDE 写明手动恢复路径 |
-| N4-cont-1 raw_json 删除不可逆 | N4-cont-1 | 🔴 不可逆 | (1) 默认仅"标记"不自动删；(2) 手动清入口要求"输入 '确认' 二次确认"防误触；(3) 删前 SR-backup-1 备份提示（用户选项 — 默认不备份避免双倍磁盘占用，但 USER_GUIDE 强调先备份） |
+| **N4-cont-1 自动删 raw_json 不可逆**（v0.2 reverse sync） | N4-cont-1 | 🔴 不可逆 | (1) **仅清"对账成功"行 raw_json**（不在 `acquiring_bill_currency_diff_rows` 中的行 — SQL `NOT IN` 子查询）；(2) **差异行 raw_json 永远保留**（writer.js:184 重导差异 xlsx 依赖）；(3) **7 天保留窗口**（默认；settings 可调 1-30；激进用户 1 天 / 保守用户 30 天）；(4) **复用 N1' idle 30min cleanup 时序**（无新触发器；用户无感）；(5) **失败不阻塞主 cleanup**（try/catch + 下次 idle 重试）；(6) USER_GUIDE 写明 SQLite 工具手动恢复路径 + 用户可手动调 retention_days = 30 延后清理 |
 
 ### 5.2 并发 / 状态机类
 
@@ -241,13 +278,14 @@ CREATE TABLE IF NOT EXISTS acquiring_bill_currency_diff_rows (
 | A3 worker 进程崩溃 → 主进程 op lock 永久占用 | A3 | 🔴 高 | (1) worker 启动后注册 `error` / `exit` 事件 → 释放 op lock；(2) Notification 通知用户；(3) main.js handler try/catch finally releaseOpLock；(4) 集成测试 case：人为 process.exit(1) 模拟 worker crash |
 | A3 worker DB 连接 + 主进程 DB 连接同时写 → SQLITE_BUSY | A3 | 🟡 中 | (1) WAL 模式下读不阻塞写；(2) worker 仅在 runCheck 时执行写（其他时段 close）；(3) busy_timeout PRAGMA 设为 30000ms；(4) Phase 0 POC 测两个连接同时写 stress |
 | A3 worker 内 idle cleanup 与 worker 长任务冲突 | A3 | 🟡 中 | (1) worker 执行 runCheck 期间 main idle timer 暂停 cleanup 触发（详 spec §2.3）；(2) lastActiveTs 维护在主进程；worker 不独立维护；(3) cleanup 只在主进程触发，worker 不调 cleanupAfterRunBackground |
+| **N1' idle cleanup 与 N4-cont-1 raw_json 清理冲突**（v0.2 新增 — 同一 cleanup 调度需明确顺序） | N4-cont-1 + v2.1.9 N1' | 🟡 中 | (1) v0.2 在 `setupIdleCleanupTimer` 回调（`src/main.js:11155-11178`）内**追加** raw_json 清理，**不替换**也**不前置**；(2) cleanup 回调函数内**顺序执行**：① 先现有 v2.1.8 `cleanupAfterRunBackground`（flow + bill cleanup），② 后 raw_json `clearStaleSuccessfulRawJson`；(3) raw_json 清理失败不阻塞主 cleanup（try/catch 包裹）；(4) 性能预期：raw_json 清理 SQL `UPDATE … WHERE id IN (NOT IN subquery)` 在 100w 行规模 < 5s |
 | N4-cont-2 migration 期间用户操作（如启动 runCheck） | N4-cont-2 | 🟡 中 | (1) migration 必须在 app.whenReady 之前完成（启动期）；(2) UI 在 migration 完成前禁用所有操作按钮；(3) failure 状态 UI 显示"启动失败请联系支持"+ 不进入主界面 |
 
 ### 5.3 兼容性 / 升级路径
 
 | 风险 | 主线 | 等级 | 缓解 |
 |---|---|---|---|
-| v2.1.9 → v2.1.10 升级时 N4-cont-2 migration + N4-cont-1 settings 同时引入 | N4-cont-2 + N4-cont-1 | 🟡 中 | (1) migration 顺序固定：先 N4-cont-2 schema rebuild，后 N4-cont-1 settings INSERT OR IGNORE；(2) settings 失败 fallback 默认值（6 月 / 500MB） |
+| v2.1.9 → v2.1.10 升级时 N4-cont-2 migration + N4-cont-1 settings 同时引入 | N4-cont-2 + N4-cont-1 | 🟡 中 | (1) migration 顺序固定：先 N4-cont-2 schema rebuild，后 N4-cont-1 settings INSERT OR IGNORE；(2) **v0.2** settings 失败 fallback 默认值（7 天 — `acquiring_bill_raw_json_retention_days='7'`，单 key）|
 | A3 worker 化对老 v2.1.9 N5 channels FK 透明 | A3 | 🟢 低 | worker 内独立 connection 自动加载所有 schema，FK 沿用 |
 
 ### 5.4 强制要求（CLAUDE.md 规则 7）
@@ -291,13 +329,13 @@ CREATE TABLE IF NOT EXISTS acquiring_bill_currency_diff_rows (
 | worker crash 恢复 | A3 | smoke（人为 process.exit(1)） | 主进程感知 + 释放 op lock + Notification 通知 |
 | idle cleanup 跨进程协调 | A3 | 集成测试 | worker 执行期间 idle timer 不触发 cleanup（避免抢锁） |
 | **0 regression**：v2.1.9 9 主题 + v2.1.8 集成测试断言全集 | A3 | release-check + 集成测试 | 累计 ≥ 1606 断言（v2.1.9 baseline）全 PASS |
-| A4 chunked 触发条件（若做） | A4 | spec §三决策 | 若 A3 落地后 SQL 时长 > 30s → 触发；否则 closure |
-| A4 chunked 中断恢复（若做） | A4 | 集成测试 | 中途 cancel → 重跑 idempotent |
-| N4-cont-1 settings 默认值 | N4-cont-1 | smoke | 启动后 settings 表 `acquiring_bill_raw_json_retention_months='6'` + `_max_mb='500'` |
-| N4-cont-1 启动期"标记超期" | N4-cont-1 | 集成测试 | 启动后 activity log 含 `[N4-cont-1] 标记 X 行超期，预估 Y MB` |
-| N4-cont-1 手动清按钮 → 弹确认框 | N4-cont-1 | 手测 | 收单单据面板有按钮 + 点击弹确认框 + 含数据量统计 |
-| N4-cont-1 二次确认 → 执行删除 | N4-cont-1 | 手测 + smoke | 输入"确认"后 raw_json = '{}' 或行删除（按 D26 子决策） |
-| N4-cont-1 边界（无数据 / 仅 1 条） | N4-cont-1 | 集成测试 | 无数据时按钮 disabled / 仅 1 条仍能正常清 |
+| A4 chunked 必做（v0.2）| A4 | spec §三 | D25 已拍板必做；spec §3.1 不再"条件触发"标签 |
+| A4 chunked 中断恢复 | A4 | 集成测试 | 中途 cancel → 重跑 idempotent；cancel 响应 < 5s |
+| A4 chunk size 10w 行（v0.2 spec §3.2 选定） | A4 | 性能基线 | 100w 行 / chunk = 10 批；进度回调按 chunkIndex/chunkCount 推送 |
+| **N4-cont-1 settings 默认值**（v0.2 单键） | N4-cont-1 | smoke | 启动后 settings 表 `acquiring_bill_raw_json_retention_days='7'`；getter 范围外（如 0 / 31）回退 7 |
+| **N4-cont-1 idle 触发后差异行 raw_json 完整**（v0.2） | N4-cont-1 | 集成测试 | idle cleanup 后 `SELECT COUNT(*) FROM acquiring_bill_currency_bill_imports b WHERE b.raw_json IS NOT NULL AND b.id IN (SELECT bill_import_id FROM acquiring_bill_currency_diff_rows)` = 全部差异行数（不漏一行） |
+| **N4-cont-1 对账成功老行 raw_json 已清**（v0.2） | N4-cont-1 | 集成测试 | idle cleanup 后 `SELECT COUNT(*) FROM acquiring_bill_currency_bill_imports WHERE raw_json IS NULL AND imported_at < datetime('now', '-7 days') AND id NOT IN (SELECT bill_import_id FROM acquiring_bill_currency_diff_rows)` = 所有对账成功老行数 |
+| **N4-cont-1 失败不阻塞 N1' 主 cleanup**（v0.2） | N4-cont-1 | 集成测试 | 模拟 raw_json 清理 SQL 抛错 → activity log 含 ERROR + 主 cleanup 已完成（flow + bill 已清）|
 | N4-cont-2 migration 自动备份 | N4-cont-2 | 启动 + 集成测试 | `<userData>/backups/tool-data-bak-pre-N4-cont-2-{timestamp}.sqlite` 存在 |
 | N4-cont-2 schema 改造完成 | N4-cont-2 | sqlite3 + 集成 | `PRAGMA foreign_key_list('acquiring_bill_currency_diff_rows')` 显示 ON DELETE CASCADE × 2 |
 | N4-cont-2 PRAGMA foreign_key_check 0 violation | N4-cont-2 | migration 末尾 | 0 violation |
@@ -316,7 +354,7 @@ CREATE TABLE IF NOT EXISTS acquiring_bill_currency_diff_rows (
 - [ ] `CHANGELOG.md` — v2.1.10 章节 + 4 主线高亮 + **N4-cont-2 FK CASCADE 不可逆变更警告** + A3 worker 架构改造（影响开发者排错路径）+ N4-cont-1 raw_json 体积治理（用户感知：磁盘 / 清理）
 - [ ] `docs/VERSION_FEATURE_HISTORY.md` — v2.1.10 历史栏 + runCheck 跨进程化 + raw_json 体积治理 + FK CASCADE
 - [ ] `docs/USER_GUIDE.md` —
-  - 「收单单据币种校验」章节新增「raw_json 历史保留与清理」段（保留窗口默认值 + 手动清入口 + 二次确认 + 不可逆警告）
+  - **v0.2** 「收单单据币种校验」章节新增「raw_json idle 自动清理与体积治理」段（保留窗口默认 7 天 + settings 可调 1-30 + 仅清对账成功老行 raw_json + 差异行永远保留 + SQLite 手动恢复路径；**不再含**手动清入口 / 二次确认 / 不可逆警告 UI — 因 D27 = 0 UI）
   - 「故障排查」章节新增「DB 备份恢复路径」段（路径 `<userData>/backups/tool-data-bak-pre-{label}-{timestamp}.sqlite`；恢复方法：关闭应用 → 复制覆盖 tool-data.sqlite → 重启）
   - 「故障排查」章节新增「worker 进程异常」段（A3 worker crash 后用户感知 + 应对：重试 runCheck；持续失败 → 查日志 `logs/{YYYY-MM}/{MM-DD}/error.log`）
 
@@ -327,15 +365,18 @@ CREATE TABLE IF NOT EXISTS acquiring_bill_currency_diff_rows (
 | 日期 | 变更内容 |
 |---|---|
 | 2026-05-28 | v0.1 起草（PM；β 4 主线 + D23-D28 倾向 + 风险红线） |
+| 2026-05-28 | **v0.2 reverse sync**（PM；按用户 D23-D28 评审 3 项改 + N4-cont-1 重大方案变更）：**(1)** D25 = (b) 做 A4（用户拍板必做，不等 A3 实测；防 cancel 响应慢 + 进度回调精细化是 hard requirement；chunk size 10w 行）；**(2)** D26 = (e) 7 天短窗口（settings 可调 1-30 天；替换 v0.1 (d) 6 月 + 500MB 双门槛）；**(3)** D27 = N/A 0 UI（复用 N1' idle 自动；替换 v0.1 (a) 收单模块独立按钮）；**(4) N4-cont-1 重大方案变更**：清理范围改"仅清对账成功行 raw_json"（保留差异行 raw_json 保证差异 xlsx 可重导 — writer.js:184 依赖；diff_rows schema migrations.js:1506 不冗余存字段）；触发方式改"复用 v2.1.9 N1' idle 30min cleanup（src/main.js:11155-11178）"无新基建；保留窗口 7 天；UI 删除（按钮 / dialog / IPC）；工期 ~5 天 → ~2-3 天；体积治理效果 ~99%（差异行占 ~1%）；**(5) D23 / D24 / D28 接受 v0.1 PM 倾向不动** |
 
 ---
 
-## 十、待澄清问题
+## 十、待澄清问题（v0.2 reverse sync 后剩余）
 
 - [ ] D23 worker_threads vs utilityProcess 最终拍板需 Phase 0 POC 数据回写
-- [ ] D25 A4 是否做需 A3 Phase 2 联调后实测数据决策
-- [ ] D26 子决策：raw_json 清理执行方式 — UPDATE raw_json = '{}'（保留行 + 删内容）/ DELETE 整行（连带 bill_imports 行）— 需 spec 阶段拍板（PM 倾向 UPDATE 留行；保留 bill 元数据便于审计）
-- [ ] N4-cont-1 settings 调整 UI：是否提供 UI 改保留窗口（PM 倾向：不做 UI，沿用 v2.1.9 N1-settings 经验，仅 sqlite3 改 settings 表）— 需用户拍板
+- ~~D25 A4 是否做需 A3 Phase 2 联调后实测数据决策~~ ✅ **v0.2 已澄清**：用户拍板必做
+- ~~D26 子决策：raw_json 清理执行方式~~ ✅ **v0.2 已澄清**：UPDATE raw_json = NULL（保留行骨架；不做 DELETE 整行）
+- ~~D26 保留窗口大小~~ ✅ **v0.2 已澄清**：7 天默认（settings 可调 1-30）
+- ~~N4-cont-1 settings 调整 UI~~ ✅ **v0.2 已澄清**：无 UI（沿用 N1-settings 经验，仅 sqlite3 改 settings 表）
+- [ ] D24 worker DB 连接方案 — PM 倾向 (a) 独立 connection，待 Phase 0 POC 实测 SQLITE_BUSY 压测后最终确认
 
 ---
 
@@ -352,10 +393,10 @@ CREATE TABLE IF NOT EXISTS acquiring_bill_currency_diff_rows (
 
 | 主题 | 状态 | 备注 |
 |---|---|---|
-| **A3** runCheck 跨进程化 | ⏳ 待启动 | 6 决策（D23-D28）PM 倾向待 spec 评审 |
-| **A4** SQL JOIN chunked | ⏳ 待评估 | 待 A3 Phase 2 联调后决策（D25） |
-| **N4-cont-1** raw_json 体积治理 | ⏳ 待启动 | D26 = (d) 6 月 + 500MB / D27 = (a) 收单模块独立按钮（PM 倾向） |
-| **N4-cont-2** FK CASCADE 改造 | ⏳ 待启动 | D28 = (a) 仅 diff_rows 2 FK（PM 倾向） |
+| **A3** runCheck 跨进程化 | ⏳ 待启动 | D23/D24 倾向待 Phase 0 POC 实测拍板 |
+| **A4** SQL JOIN chunked | ⏳ 待启动 | **v0.2：D25 用户拍板必做**（chunk size 10w 行，spec §3.2 已选定）|
+| **N4-cont-1** raw_json 体积治理 | ⏳ 待启动 | **v0.2：D26 = (e) 7 天短窗口（settings 1-30 可调）/ D27 = N/A 0 UI**；仅清对账成功行 raw_json，差异行永远保留；复用 v2.1.9 N1' idle 30min cleanup（src/main.js:11155-11178）|
+| **N4-cont-2** FK CASCADE 改造 | ⏳ 待启动 | D28 = (a) 仅 diff_rows 2 FK（接受 v0.1 PM 倾向）|
 
 #### 关键 reverse sync（设计与实施差异）
 
@@ -373,5 +414,5 @@ CREATE TABLE IF NOT EXISTS acquiring_bill_currency_diff_rows (
 
 ---
 
-**当前状态**：v0.1（2026-05-28 — β 4 主线 PRD 起草完毕，D23-D28 全部给 PM 倾向，待 spec 评审 + Phase 0 POC）。
-**下一步**：用户审 PRD → spec.md 起草 → Phase 0 POC（worker_threads vs utilityProcess 实测）→ 启动 Phase 1。
+**当前状态**：v0.2（2026-05-28 reverse synced — D25/D26/D27 用户拍板 + N4-cont-1 重大方案变更已落 PRD/spec/tasks/checklist；D23/D24/D28 接受 v0.1 PM 倾向；待 Phase 0 POC 启动）。
+**下一步**：通知 Dev 启动 Phase 0 POC（worker_threads vs utilityProcess 实测 — D23/D24 最终拍板）→ Phase 1。N4-cont-1 / N4-cont-2 / A4 可与 Phase 1 并行（独立模块；无强依赖）。
