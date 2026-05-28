@@ -11431,6 +11431,40 @@ function setupIdleCleanupTimer() {
 //     6. cleanupAfterRunBackground 默认 includeDiff=false → 只清 flow + bill，保留 diff
 let cleanupQuitInProgress = false; // 防重入
 
+// v2.1.10 SR-FIX-1 round 2 P0-3：worker pool shutdown 辅助（spec §2.1.3 — 主进程退出 graceful close）
+//   - workerInstance 不存在（worker 从未启动 / 已退出）→ 立即返回 / 不 preventDefault
+//   - workerInstance 存在 → 调 shutdown(5000)；timeout 后 terminate
+//   失败 swallow + activity log（不阻塞 quit）；返回 boolean：是否需要异步 shutdown（true → caller 必须 preventDefault）
+function needsWorkerShutdown() {
+  if (!runCheckWorkerPool || typeof runCheckWorkerPool.getStatus !== 'function') return false;
+  try {
+    const status = runCheckWorkerPool.getStatus();
+    return !!(status && status.workerAlive);
+  } catch (_e) {
+    return false;
+  }
+}
+
+async function shutdownWorkerPoolGracefully() {
+  try {
+    if (runCheckWorkerPool && typeof runCheckWorkerPool.shutdown === 'function') {
+      await runCheckWorkerPool.shutdown(5000);
+    }
+  } catch (shutdownErr) {
+    // v2.1.10 SR-FIX-1 round 2 P0-3：shutdown 失败 swallow + 日志（不阻塞 app.quit）
+    try {
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'acquiring-bill-currency',
+        message: '[SR-FIX-1 P0-3] before-quit worker shutdown 失败（worker thread 将被强 kill）',
+        details: [shutdownErr && shutdownErr.message ? shutdownErr.message : String(shutdownErr)],
+        stack: shutdownErr && shutdownErr.stack ? shutdownErr.stack : undefined
+      });
+    } catch (_e) { /* swallow — 日志失败不阻塞 quit */ }
+  }
+}
+
 app.on('before-quit', (event) => {
   // usage-stats flush（不变）
   try {
@@ -11457,52 +11491,70 @@ app.on('before-quit', (event) => {
 
   // v2.1.8 N1' (v0.7)：cleanup 退出兜底（静默）
   if (cleanupQuitInProgress) return; // 重入保护（cleanup 完成 app.quit 时会再次触发 before-quit）
-  if (!database || !database.db) return;
+
+  // v2.1.10 SR-FIX-1 round 2 P0-3：worker pool shutdown（spec §2.1.3 — 主进程退出 graceful close）
+  //   决策：保守路径 — workerAlive=true 时 preventDefault + 异步 shutdown，避免 WAL/shm 残留
+  //   优先级：先 shutdown worker（防 DB 写锁残留）→ 再跑 pendingRuns cleanup → 最后 app.quit
+  const needWorker = needsWorkerShutdown();
+
   let pendingRuns;
-  try {
-    pendingRuns = runRepo.listPendingCleanupRuns(database.db);
-  } catch (listErr) {
-    // listPending 失败 → 不阻塞退出（启动期 cleanupOrphanData 会兜底）
-    // v2.1.9 SR-log-1：替换 console.error → 日志上报
-    appendActivityLogEntry({
-      level: 'error',
-      source: 'main',
-      domain: 'acquiring-bill-currency',
-      message: '[acquiring-bill-currency] before-quit listPendingCleanupRuns 失败，直接退出',
-      details: [listErr && listErr.message ? listErr.message : String(listErr)],
-      stack: listErr && listErr.stack ? listErr.stack : undefined
-    });
-    return;
+  if (database && database.db) {
+    try {
+      pendingRuns = runRepo.listPendingCleanupRuns(database.db);
+    } catch (listErr) {
+      // listPending 失败 → 不阻塞退出（启动期 cleanupOrphanData 会兜底）
+      // v2.1.9 SR-log-1：替换 console.error → 日志上报
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'acquiring-bill-currency',
+        message: '[acquiring-bill-currency] before-quit listPendingCleanupRuns 失败',
+        details: [listErr && listErr.message ? listErr.message : String(listErr)],
+        stack: listErr && listErr.stack ? listErr.stack : undefined
+      });
+      pendingRuns = null; // 走 worker-only 分支或 fast-quit
+    }
   }
-  if (!pendingRuns || pendingRuns.length === 0) return;
+  const hasPending = pendingRuns && pendingRuns.length > 0;
+
+  // Fast path：无 worker + 无 pending → 直接退出（既有行为不变）
+  if (!needWorker && !hasPending) return;
 
   event.preventDefault();
   cleanupQuitInProgress = true;
 
-  // 异步串行清（N1''-D9：当前 batch 内部 setImmediate 让出；N1''-D13：静默，无 IPC 广播）
+  // 异步串行：① shutdown worker → ② cleanup pending runs → ③ app.quit
   (async () => {
-    for (const run of pendingRuns) {
-      try {
-        await acquiringBillCurrencySession.cleanupAfterRunBackground({
-          db: database.db,
-          monthKey: run.month_key,
-          runId: run.id
-          // includeDiff 默认 false → 保留 diff（spec §3.2.1 N1''-D1/D3）
-        });
-        runRepo.clearCleanupPending(database.db, { runId: run.id });
-      } catch (cleanErr) {
-        // v2.1.9 SR-log-1：替换 console.error → 日志上报；cleanup-quit 单 run 失败容忍继续清下一个
-        appendActivityLogEntry({
-          level: 'error',
-          source: 'main',
-          domain: 'acquiring-bill-currency',
-          message: `[acquiring-bill-currency] cleanup-quit run ${run.id} (${run.month_key}) 失败`,
-          details: [cleanErr && cleanErr.message ? cleanErr.message : String(cleanErr)],
-          stack: cleanErr && cleanErr.stack ? cleanErr.stack : undefined
-        });
+    // ① worker shutdown（spec §2.1.3）— 在 cleanup 之前，避免 worker 写锁与 main cleanup 冲突
+    if (needWorker) {
+      await shutdownWorkerPoolGracefully();
+    }
+
+    // ② cleanup pending runs（v2.1.8 N1' 原逻辑保留 — N1''-D9 内部 setImmediate 让出；N1''-D13 静默）
+    if (hasPending && database && database.db) {
+      for (const run of pendingRuns) {
+        try {
+          await acquiringBillCurrencySession.cleanupAfterRunBackground({
+            db: database.db,
+            monthKey: run.month_key,
+            runId: run.id
+            // includeDiff 默认 false → 保留 diff（spec §3.2.1 N1''-D1/D3）
+          });
+          runRepo.clearCleanupPending(database.db, { runId: run.id });
+        } catch (cleanErr) {
+          // v2.1.9 SR-log-1：替换 console.error → 日志上报；cleanup-quit 单 run 失败容忍继续清下一个
+          appendActivityLogEntry({
+            level: 'error',
+            source: 'main',
+            domain: 'acquiring-bill-currency',
+            message: `[acquiring-bill-currency] cleanup-quit run ${run.id} (${run.month_key}) 失败`,
+            details: [cleanErr && cleanErr.message ? cleanErr.message : String(cleanErr)],
+            stack: cleanErr && cleanErr.stack ? cleanErr.stack : undefined
+          });
+        }
       }
     }
-    // N1''-D13：失败也 quit（启动期 cleanupOrphanData 兜底）
+    // ③ 失败也 quit（启动期 cleanupOrphanData 兜底；N1''-D13 静默）
     app.quit();
   })();
 });
