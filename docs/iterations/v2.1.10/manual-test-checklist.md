@@ -559,9 +559,9 @@ throw outer;
 **预期**：
 - [ ] activity log 含 `[N4-cont-1] idle cleanup raw_json 清理完成 affected=N retentionDays=7`
 - [ ] activity log 含先 v2.1.8 cleanup（`[acquiring-bill-currency] cleanup` 相关）后 N4-cont-1（顺序契约 spec §4.3.2）
-- [ ] **差异行 raw_json 完整**：`SELECT COUNT(*) FROM acquiring_bill_currency_bill_imports b WHERE b.raw_json IS NOT NULL AND b.id IN (SELECT bill_import_id FROM acquiring_bill_currency_diff_rows)` = 1w（不漏一行）
-- [ ] **对账成功老行 raw_json 已清**：`SELECT COUNT(*) FROM acquiring_bill_currency_bill_imports WHERE raw_json IS NULL AND imported_at < datetime('now', '-7 days') AND id NOT IN (SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows)` = 所有对账成功老行数
-- [ ] **7 天内对账成功行 raw_json 保留**：`SELECT COUNT(*) FROM acquiring_bill_currency_bill_imports WHERE raw_json IS NOT NULL AND imported_at >= datetime('now', '-7 days')` = 7 天内所有行
+- [ ] **差异行 raw_json 完整**（v0.3 sentinel `''`）：`SELECT COUNT(*) FROM acquiring_bill_currency_bill_imports b WHERE b.raw_json != '' AND b.id IN (SELECT bill_import_id FROM acquiring_bill_currency_diff_rows)` = 1w（不漏一行）
+- [ ] **对账成功老行 raw_json 已清**（v0.3 sentinel `''`）：`SELECT COUNT(*) FROM acquiring_bill_currency_bill_imports WHERE raw_json = '' AND imported_at < datetime('now', '-7 days') AND id NOT IN (SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows)` = 所有对账成功老行数
+- [ ] **7 天内对账成功行 raw_json 保留**（v0.3 sentinel `''`）：`SELECT COUNT(*) FROM acquiring_bill_currency_bill_imports WHERE raw_json != '' AND imported_at >= datetime('now', '-7 days')` = 7 天内所有行
 - [ ] **bill_imports 行数不变**（仅清 raw_json 字段，不删整行）
 - [ ] 重导差异 xlsx 验证：`writer.js` 路径调用 `JSON.parse(d.bill_raw_json)` 不抛错且输出字段非空（差异行 raw_json 保留 → 重导能力完全保留）
 
@@ -1160,7 +1160,7 @@ v0.2 N4-cont-1 改"idle 自动 + SQL UPDATE 单条原子" — 无 UI 大文件�
 
 - [ ] 用户拍板 D23 POC 最终决策（worker_threads / utilityProcess）
 - ~~用户拍板 D25 A4 是否做~~ ✅ **v0.2 已锁**：用户拍板必做
-- ~~用户拍板 D26 raw_json 清理执行方式（UPDATE 留行 / DELETE 整行）~~ ✅ **v0.2 已锁**：UPDATE raw_json = NULL（保留行骨架）
+- ~~用户拍板 D26 raw_json 清理执行方式（UPDATE 留行 / DELETE 整行）~~ ✅ **v0.2 已锁**：UPDATE raw_json = '' （保留行骨架；v0.3 sentinel 修订 — 原 NULL 与 NOT NULL DDL 冲突，详 spec §4.2）
 - ~~用户拍板 D26 保留窗口策略~~ ✅ **v0.2 已锁**：7 天短窗口（settings 可调 1-30 天）
 - ~~用户拍板 D27 raw_json UI 入口位置（收单模块按钮）~~ ✅ **v0.2 已锁**：N/A 无 UI（idle 自动）
 - [ ] 用户拍板 D28 FK CASCADE 改造范围（仅 2 FK）

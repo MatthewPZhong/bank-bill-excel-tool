@@ -238,12 +238,13 @@ v0.2 D25 用户拍板必做（PRD §四 D25 行），不再 Phase 3 决策点。
 - **验证**：unit + smoke（启动后 settings 表 1 键存在 + getter 范围外回退）
 - **跟主线映射**：N4-cont-1
 
-### T23 — raw-json-retention.js 新建（v0.2 重写 · 极简）
+### T23 — raw-json-retention.js 新建（v0.2 重写 · 极简 → v0.3 sentinel `''` 修订）
 - **位置**：`src/backend/acquiring-bill-currency-db/raw-json-retention.js`（新建）
 - **内容**：spec §4.2.1 单函数 `clearStaleSuccessfulRawJson(db, retentionDays)`：
-  - 核心 SQL：`UPDATE acquiring_bill_currency_bill_imports SET raw_json = NULL WHERE id IN (NOT IN 子查询排除差异行 + imported_at 老于 N 天 + raw_json IS NOT NULL)`
+  - 核心 SQL（v0.3 修订）：`UPDATE acquiring_bill_currency_bill_imports SET raw_json = '' WHERE id IN (NOT IN 子查询排除差异行 + imported_at 老于 N 天 + raw_json != '')`
   - 返回 `{ affectedRows }`
-- **验证**：unit test `tests/unit/backend/acquiring-bill-currency-db/raw-json-retention.test.js` 8 case 全绿（差异行排除 + 7 天边界 + NULL idempotent + 0 行触发）
+  - ⚠️ **v0.3 sentinel 修订**（SR1）：原 v0.2 `SET raw_json = NULL` + `IS NOT NULL` 守卫与 v2.1.8 N4 DDL `raw_json TEXT NOT NULL` 约束冲突 → 改 sentinel `''`（详 spec §4.2 v0.3 段）
+- **验证**：unit test `tests/unit/backend/acquiring-bill-currency-db/raw-json-retention.test.js` 8 case 全绿（差异行排除 + 7 天边界 + `''` sentinel idempotent + 0 行触发）
 - **跟主线映射**：N4-cont-1
 
 ### T24 — 集成到 N1' idle cleanup 回调（v0.2 改"复用"）
@@ -258,10 +259,10 @@ v0.2 D25 用户拍板必做（PRD §四 D25 行），不再 Phase 3 决策点。
 
 ### ~~T27 — IPC handler~~ ❌ **v0.2 删除**（D27 = N/A 无 UI；无 IPC）
 
-### T28 — Phase 4 集成测试（v0.2 重写 ≥ 3 case）
+### T28 — Phase 4 集成测试（v0.2 重写 ≥ 3 case → v0.3 sentinel `''` 修订）
 - **位置**：`scripts/integration/acquiring-bill-currency-raw-json-retention.js`（新建）
-- **内容**（v0.2 重写）：
-  - case 1：idle 30min 触发后 — 差异行 raw_json 完整（`SELECT COUNT(*) FROM bill_imports b WHERE b.raw_json IS NOT NULL AND b.id IN (SELECT bill_import_id FROM diff_rows)` = 全部差异行数）+ 对账成功老行 raw_json 已清（`SELECT COUNT(*) WHERE raw_json IS NULL AND imported_at < datetime('now', '-7 days') AND id NOT IN diff_rows` = 所有对账成功老行数）
+- **内容**（v0.2 重写 + v0.3 sentinel 修订）：
+  - case 1：idle 30min 触发后 — 差异行 raw_json 完整（`SELECT COUNT(*) FROM bill_imports b WHERE b.raw_json != '' AND b.id IN (SELECT bill_import_id FROM diff_rows)` = 全部差异行数）+ 对账成功老行 raw_json 已清（`SELECT COUNT(*) WHERE raw_json = '' AND imported_at < datetime('now', '-7 days') AND id NOT IN diff_rows` = 所有对账成功老行数）
   - case 2：settings retention_days 调整生效（1 天 / 30 天 / 7 天默认 / 范围外 0 / 31 回退）
   - case 3：failure graceful + 活动日志（模拟 raw_json SQL 抛错 → activity log 含 ERROR + 主 cleanup 已完成）
 - **验证**：`npm run test:integration` 全过
