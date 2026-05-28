@@ -308,6 +308,12 @@ contextBridge.exposeInMainWorld('desktopApi', {
     importFlow: (payload) => ipcRenderer.invoke('acquiringBillCurrency:importFlow', payload),
     importBill: (payload) => ipcRenderer.invoke('acquiringBillCurrency:importBill', payload),
     run: (payload) => ipcRenderer.invoke('acquiringBillCurrency:run', payload),
+    // v2.1.10 A3 T10 / A4 T19：cancel 和 resume IPC（spec §三）
+    //   - cancel：worker pool cancel API；renderer 加 cancel 按钮时调（v2.1.11+ 评估 UI）
+    //   - resume：续跑 chunk_progress.status='partial' 的 run（v2.1.11+ 评估 UI）
+    //   - 当前版本 renderer 不暴露入口；IPC 通道留好供集成测试 / 高级用户
+    runCancel: (payload) => ipcRenderer.invoke('acquiringBillCurrency:run:cancel', payload),
+    runResume: (payload) => ipcRenderer.invoke('acquiringBillCurrency:run:resume', payload),
     export: (payload) => ipcRenderer.invoke('acquiringBillCurrency:export', payload),
     clearMonth: (payload) => ipcRenderer.invoke('acquiringBillCurrency:clearMonth', payload),
     onImportProgress: (listener) => {

@@ -1,5 +1,269 @@
 # Changelog
 
+## 2.1.10 - 2026-05-28（待发布 β 草稿）
+
+v2.1.9 之后 1 轮迭代（β 范围），**4 主线**：A3（runCheck 跨进程化 — worker_threads + 独立 DB 连接 + 跨进程错误回传）+ A4（SQL JOIN chunked 分批 — chunk size 10w + cancel chunk 边界响应 + resume IPC handler）+ N4-cont-1（raw_json 体积治理 — 7 天保留窗口 + idle 30min 自动清 + sentinel `''` v0.3）+ N4-cont-2（FK CASCADE 改造 — `diff_rows.bill_import_id` + `run_id` 加 `ON DELETE CASCADE` + 8-status migration state machine + SR-backup-1 前置）。⚠️ **2 个🔴破坏性变更**（N4-cont-2 DB schema 不可逆 + N4-cont-1 raw_json 不可逆清空）+ **3 个资金红线护栏**（runCheckCore worker/main byte-for-byte + clearStaleSuccessfulRawJson NOT IN 子查询 + N4-cont-2 FK CASCADE schema）+ **5 个 important-variables v12 升格**（Critical 4 + Important-skeleton 1 + 更新 1）。Phase 0-6 完成 / 27+ commits / release-check 全绿（smoke + unit 1238 case / 297 suites + integration 809 断言 / 15 脚本）。
+
+### 重大变更
+
+- **A3 runCheck 跨进程化**（架构级 / spec §2 / Phase 0-2）：worker_threads 路径（D23 用户拍板）+ 独立 SQLite DatabaseSync 连接（D24=a / POC 验证）+ 6 条 PRAGMA 强制同步（foreign_keys / journal_mode=wal / synchronous=1 / cache_size=-65536 / mmap_size=268435456 / busy_timeout=30000）；新建 `src/main-process/run-check-worker.js` worker 入口 + `run-check-worker-pool.js` worker 池（pre-warm / dispatch / isBusy / cancel / terminate）+ `serialize-error.js` 跨进程错误回传（FileValidationError 专属字段 + cause 链递归）；`session.runCheck` 提取 `runCheckCore` 共用入口；IPC handler `acquiringBillCurrency:run` 接 workerPool；setupIdleCleanupTimer 加 `runCheckWorkerPool.isBusy()` 守卫（spec §2.3.2）+ 30s grace；cancel 5 阶段间检查 + graceful ROLLBACK + 5s 内 worker exit；worker crash 自动 cold-start + op lock 释放 + Notification 通知；**主进程 event loop lag 主进程 65.7ms → worker 1.3ms（48.7x 改善）；worker cold-start ~11ms / IPC round-trip ~0.010ms（1000 次均值）**
+- **A4 SQL JOIN chunked 分批**（性能 + cancel 响应 / spec §3 / Phase 3）：`insertDiffRowsByJoinChunked` 替代单条大 SQL；chunk size 10w 行（spec §3.2 选定，理由：cancel 响应 + 内存峰值 + 总耗时三方平衡 — 实测 chunk=1k → 总耗时 +14% 慢 / chunk=10w 最优 0.99x）+ 独立事务边界（每 chunk 一事务）；新增 `runs.chunk_progress` 列 + `setRunChunkProgress` / `getRunChunkProgress` 持久化；resume 入口 `acquiringBillCurrency:run:resume` IPC handler（v2.1.10 暴露 / UI 评估 v2.1.11+）；cancel 在 chunk 边界响应（实测 < 0.01ms 同步抛 / spec §3.2 业务阈值 < 5s）；chunked vs non-chunked **byte-for-byte 一致**（4 层 contract test 锁定）；500w 行外推 worker + chunked 总耗时 ~1.05x（接近 5% budget）
+
+### 新增
+
+- **N4-cont-1 raw_json idle 30min 自动清理**（体积治理 / spec §4 / Phase 4）：单 SQL `UPDATE acquiring_bill_currency_bill_imports SET raw_json = '' WHERE id NOT IN (SELECT bill_import_id FROM acquiring_bill_currency_diff_rows) AND imported_at < datetime('now', '-N days') AND raw_json != ''`；新建 `src/backend/acquiring-bill-currency-db/raw-json-retention.js` 含 `clearStaleSuccessfulRawJson(db, retentionDays)` 函数 + 单元 8 case；settings 单键 `acquiring_bill_raw_json_retention_days`（默认 `'7'` / 范围 1-30 / 范围外回退 7 / `ensureAcquiringBillRawJsonRetentionSettings(db)` migration + `getAcquiringBillRawJsonRetentionDays(db)` getter）；复用 v2.1.9 N1' idle 30min cleanup 计时器追加回调（src/main.js:11155-11178）— 用户无感 / 0 UI（D27 = N/A 拍板 / 删除按钮 / dialog / IPC）；**差异行 raw_json 永远保留**（NOT IN 子查询保护 — 保证差异 xlsx 完整可重导）；失败 graceful（独立 try/catch + activity log + 不阻塞主 cleanup + 下一个 idle tick 重试）；**v0.3 sentinel 修订**（详「修复」段）；目标 6 月体积降 ~99%（仅差异行 ~1% + 7 天内新行 raw_json 保留）
+- **N4-cont-2 FK CASCADE 改造**（DB schema 不可逆 / spec §5 / Phase 5）：`acquiring_bill_currency_diff_rows` 的 2 个 FK（`bill_import_id` → `acquiring_bill_currency_bill_imports.id` 和 `run_id` → `acquiring_bill_currency_runs.id`）加 `ON DELETE CASCADE`；新建 `ensureDiffRowsCascadeMigration_v2_1_10` migration + 8-status state machine（pending → backed-up → checked → rebuilt → data-copied → fk-verified → cleaned-up → done，沿用 v2.1.9 N5 范式）+ 复用 v2.1.9 SR-backup-1 createBackupFn 注入（VACUUM INTO 备份前置）+ 标志位 `n4_cont_2_diff_rows_cascade_migrated`；启动期集成到 `database.js` AppDatabase.init 序列（在 ensureBillRawJsonV2Slim 即 N4 之后调用）；跨版本路径支持（v2.1.7 / v2.1.8 / v2.1.9 → v2.1.10 一步迁）；PRAGMA `foreign_key_check` 0 violation 是 hard requirement（fk-verified status fail-fast）；migration 失败自动 ROLLBACK + 备份保留 + USER_GUIDE 手动恢复 6 步骤文档化
+
+### 修复（SR-FIX）
+
+- **N4-cont-1 sentinel 修订（v0.3）**：原 v0.2 spec 设计为 `SET raw_json = NULL`；Phase 4 T28 集成测试发现与 v2.1.8 N4 DDL `raw_json TEXT NOT NULL` 约束冲突 → UPDATE 会触发 CHECK 违反；用户拍板 Option A 修订 `SET raw_json = ''`；所有 idempotent 守卫 / SQL 查询从 `IS NOT NULL` 改为 `!= ''`（commit `740fdc8`）
+
+### SR-FIX-1 round 2 — dev self-review 修复（合并前补丁，13 项 P0+P1）
+
+Phase 0-6 完成 + 37 commits 后 dev self-review 输出 21 finding（P0 4 / P1 9 / P2 8）。用户拍板 Round 2 全修 P0 + P1 = 13 项；P2 留后续 patch。详见 `docs/iterations/v2.1.10/sr-fix-1-round1-findings.md` + `docs/iterations/v2.1.10/spec.md §16`。
+
+**🔴 P0 Critical（4 项 — 功能性死锁 / cleanup 冲突 / resume 路径破坏）**：
+
+- **🔴 P0-1 cleanupOrphanData × chunked partial 冲突**（A4 resume 跨重启失效）：cleanupOrphanData 启动期把 `chunk_progress.status='partial'` 的 run 当孤儿清掉 → 用户重启后 resume 失败。修复：`session.js:582` fileBroken 判定加 chunk_progress 检查 — partial 状态 continue 保留；phase3 集成 case 4（15 子断言）验证（commit `0e4a87e`）
+- **🔴 P0-2 worker init-error 后 brick**：ensureInitialized init-error 仅 reject promise，不重置 workerInstance / workerInitPromise → 下次 dispatch 永久 brick，必须重启 app。修复：`run-check-worker-pool.js:200-208` init-error 分支加 reset + terminate；pool unit case 17（commit `45bd81e`）
+- **🔴 P0-3 before-quit 缺 workerPool.shutdown**：app.before-quit 不调 `runCheckWorkerPool.shutdown()` → worker DB 连接不 graceful close → .wal/.shm 残留。修复：加 needsWorkerShutdown + shutdownWorkerPoolGracefully helper；workerAlive=true 时 preventDefault + 异步 shutdown → cleanup pending → app.quit（commit `d16ec19`）
+- **🔴 P0-4 idle cleanup 顺序契约不符**（spec §4.3.2）：trigger() setImmediate 异步立即返回 + raw_json 同步立即跑 → 两 cleanup 实质并发。修复：trigger 改返 Promise（早返回路径 Promise.resolve；执行路径 finally resolve）；idle tick 改 async + 在 trigger 后 await 再调 raw_json（commit `ea2a443`）
+
+**🟡 P1 Important（9 项 — 文档遗漏 / spec/code 一致性 / state machine / UX / 单测 / 兜底）**：
+
+- **🟡 P1-1 tasks + manual-test-checklist 5 处 sentinel 残留**：tasks T23/T28 + manual-test §5.1 / §10.3 全部 `NULL` → `''` / `IS NULL/NOT NULL` → `= ''/!= ''`（commit `e8aec42`）
+- **🟡 P1-2 spec §8.3 + PRD §5.3 migration 顺序倒置**：文档说"先 N4-cont-2 → 后 N4-cont-1"但 code 实际"先 N4-cont-1 → 中间 N4 → 后 N4-cont-2"。修复：改文档匹配 code（不动 code 避免触发 schema migration 风险）（commit `b3e3c5d`）
+- **🟡 P1-3 ensureDiffRowsCascadeMigration 缺 'checked' status**：spec §5.3.2 定义 8 status，code 漏 pre-FK check。修复：Step 4.5 加 PRAGMA foreign_key_check；violation → status='pre-fk-violation' + 备份保留；unit case 13（commit `058c167`）
+- **🟡 P1-4 IPC handler CancelError 走 error 路径**：用户主动 cancel 弹"对账失败" Notification（违反 spec §2.4 设计意图）。修复：notifyAcquiringBillCurrencyResult 加 'cancelled' kind；run / resume handler catch 加 `err.name === 'CancelError'` 守卫（commit `ad207f9`）
+- **🟡 P1-5 resume handler 只扫最近 1 run**：注释说"自动找最近 partial"但只取 getLatestRun → 最近 run 是 complete 时无法 resume 前一个 partial。修复：新增 `listPartialRuns(db, monthKey)` API；resume handler 改造（payloadRunId 不传时扫所有 partial 取最近）；unit T19.7 + T19.8（commit `c8c7cf8`）
+- **🟡 P1-6 tasks T06 描述与实际不符**：T06 描述 12 case 单测文件未建。修复：tasks.md T06 reverse sync — pool 17 case 已覆盖；不单独建 run-check-worker.test.js（commit `2432ffe`）
+- **🟡 P1-7 worker crash 时 chunk_progress 不 partial**：worker process.exit / OOM → chunk_progress 停留 in-progress → resume 拒绝。修复：main.js failureListener 内（hadActiveJob=true）扫所有 in-progress 兜底改 partial；unit T19.9（commit `ab4f06b`）
+- **🟡 P1-8 USER_GUIDE 缺 partial run 警告**：§1.8.12 仅说 chunked + cancel + resume IPC，未提重启场景。修复：追加"Resume 边界条件" 5 项（P0-1 修复后跨重启可 resume / P1-7 worker crash 兜底 / v2.1.11+ UI / 不想 resume 重跑路径）（commit `0bcd365`）
+- **🟡 P1-9 createRunProgressForwarder 注释过时**：注释说"每 run 仅 6 个事件"，A4 chunked 后实际 6+chunkCount。修复：注释更新 + chunkCount > 100 节流 TODO（v2.1.11+）（commit `4ef2cc3`）
+
+**Round 2 修复后测试增量**：
+- `npm run test:unit` 1238 → **1243 case / 297 suites**（+5：P0-2 / P1-3 / P1-5 ×2 / P1-7）
+- `npm run test:integration` 809 → **824 断言 / 15 脚本**（+15：phase3 case 4 — P0-1 cleanupOrphanData × partial run 15 子断言）
+- `npm run smoke` 0 regression
+
+**资金红线 byte-for-byte 验证不破坏**：`clearStaleSuccessfulRawJson` / `runCheckCore` worker vs main / `ensureDiffRowsCascadeMigration_v2_1_10` 三道护栏 Round 2 维持
+
+**未修 P2（8 项）**：留 v2.1.10 后续 patch 或 v2.1.11+ — 注释 / fixture / 防御性边界（不影响合并）
+
+**rules/important-variables.md 升格评估**：留 Round 3 collective — 候选 `listPartialRuns` / `needsWorkerShutdown` / `shutdownWorkerPoolGracefully` 是否升 Important-skeleton
+
+### SR-FIX-1 round 3 — Codex review 抓 finding 修复（合并前补丁，2 项 F1+F2）
+
+PR #54 已 push 后 Codex 自动 review 2026-05-28T09:16 完成，抓 2 finding：F1 资金红线（跨 Phase 协同 bug — Round 2 dev 漏抓）+ F2 P2 边界 case（1 commit 小改）。用户拍板 Round 3 修两项。详见 `docs/iterations/v2.1.10/spec.md §17`。
+
+**🟠 F1（资金红线 — N4-cont-1 SQL 排除 partial run 关联 month）**：
+
+- 触发场景：chunked run 半途 cancel/crash → `chunk_progress.status='partial'`；`diff_rows` 仅含「已处理 mismatches」；后续 bill rows 仍未进 diff_rows。idle retention 在 bill imported_at 老于窗口时跑 → 清掉这些"未来 mismatch"raw_json → resume 后 writer 路径解析 `d.bill_raw_json` → 输出 broken / 不完整
+- 修复：`raw-json-retention.js:CLEAR_STALE_SQL` 加第二个 NOT IN 子查询：`b.month_key NOT IN (SELECT month_key FROM runs WHERE chunk_progress IS NOT NULL AND json_extract($.status)='partial')`；解除条件：partial 完成 resume → status='complete' 后下次 idle 可清
+- 配套测试：unit raw-json-retention case 9-11 +3（partial 整月排除 / resume→complete 后可清 / 跨月份不干扰）；integration n4-cont-1-phase4 case 4 +5（端到端 partial → resume → complete）
+- commit `d8f6446`
+
+**🟢 F2（P2 边界 — chunked 入口前初始 in-progress + cleanupOrphanData 守卫扩展）**：
+
+- 触发场景：worker 跑第一个 chunk 时 die（onChunkDone 触发前），chunk_progress 从未写入；crash listener（P1-7）只把已存在的 in-progress 转 partial；startup cleanup（P0-1）只保护 partial → first-chunk crash 后 run 被当孤儿无法 resume
+- 修复：`runCheckCore` 进 `insertDiffRowsByJoinChunked` 前先写 `{lastCompletedChunkIndex:-1, totalChunks:0, status:'in-progress'}`（仅 `!isResume`）；`cleanupOrphanData` 守卫扩为 `partial OR in-progress` 一起保护
+- 配套测试：unit run-repository T19.10 +1（入口写入 round-trip）；integration a4-phase3 case 5 +7（first-chunk crash 模拟 + cleanup 保护）
+- commit `334a470`
+
+**Round 3 修复后测试增量**：
+
+- `npm run test:unit` 1243 → **1247 case / 297 suites**（+4：raw-json-retention 3 + run-repository 1）
+- `npm run test:integration` 824 → **836 断言 / 15 脚本**（+12：n4-cont-1-phase4 case 4 = 5 + a4-phase3 case 5 = 7）
+- `npm run smoke` 0 regression
+
+**资金红线 byte-for-byte 验证不破坏**：
+
+- `clearStaleSuccessfulRawJson` 双 NOT IN 子查询（v0.5）— 第一守卫不变 + 第二守卫加跨 Phase 协同保护
+- `runCheckCore` byte-for-byte（worker vs main / chunked vs non-chunked）— 入口 in-progress 占位被 cancel/正常路径覆盖，不破坏既有契约
+- `cleanupOrphanData` partial OR in-progress 双守卫扩展（idempotent 保持）
+- contract test a3-phase1 40/40 仍通过
+
+### SR-FIX-1 round 4 — Codex 复审抓 finding 修复（合并前补丁，3 项 F1+F2+F3 + closeout）
+
+PR #54 Round 3 push 后 Codex 二次复审 2026-05-28T10:02:42Z 完成，抓 3 finding：F1 in-progress 状态机扩展只做了一半 / F2 before-quit shutdown 仍 race 清 activeJob / F3 git diff --check 卫生。用户拍板 Round 4 修 3 finding + closeout = 4 commits。详见 `docs/iterations/v2.1.10/spec.md §18`。
+
+**🟠 F1（in-progress 状态机 4 处链路统一扩展 — Round 3 修复不完整）**：
+
+- 触发场景：Round 3 P0-1 扩 `cleanupOrphanData` 守卫为 `partial OR in-progress`，但其他 3 处链路（`listPartialRuns` SQL / `resume` IPC handler / `clearStaleSuccessfulRawJson` SQL）仍只看 `partial` → first-chunk crash 后 run 保留 ✓ 但不能 resume + raw_json 保护不完整
+- 修复：4 处链路统一对齐 `partial OR in-progress`
+  - `run-repository.js:listPartialRuns` JSON status check 扩展（保留函数名，语义扩为「可恢复 runs」）
+  - `main.js:resume` IPC handler 显式 runId 拒绝逻辑 `!['partial','in-progress'].includes(progress.status)`
+  - `raw-json-retention.js:CLEAR_STALE_SQL` `json_extract = 'partial'` → `IN ('partial', 'in-progress')`
+- 配套测试：unit run-repository +2 case + 1 适配（T19.11/T19.12 + T19.9 改语义对称）；unit raw-json-retention +2 case（Case 12/13）；integration n4-cont-1-phase4 +5 断言（case 5 in-progress 整月保护端到端）
+- commit `2b4f34f`
+
+**🟠 F2（before-quit shutdown 不抹 activeJob 让 failureListener 兜底）**：
+
+- 触发场景：`shutdown()` 在 worker 真正退出前 `activeJob=null` + reject → close 超时 terminate → `handleWorkerFailure` 看到 `hadActiveJob=false` → `failureListener` 不执行 `in-progress → partial` 兜底 → 制造 F1 修复的 in-progress 残留路径
+- 修复：`shutdown()` 不抹 activeJob — 仍 reject caller promise（防 unhandled rejection），但加 `shutdownPending` 标记让 message handler 跳过二次 settle；`handleWorkerFailure` 看到 `hadActiveJob=true` 路径下若 `shutdownPending=true` 跳过二次 reject 防 UnhandledPromiseRejection 但仍调 failureListener → main.js 兜底 in-progress → partial
+- 配套测试：unit run-check-worker-pool +1 case 18；integration a3-phase2 +9 断言（case 7 dispatch → 强制 shutdown → failureListener 收 hadActiveJob=true）
+- commit `2555c4c`
+
+**🟢 F3（git diff --check 卫生）**：
+
+- `changes/rpa-statement-fetch/spec.md:391` trailing whitespace + `scripts/perf/v2.1.10-a4-chunked-report.md:81` EOF blank line 清掉
+- `git diff --check origin/main...HEAD` 0 warning
+- commit `0e174c4`
+
+**Round 4 修复后测试增量**：
+
+- `npm run test:unit` 1247 → **1252 case / 297 suites**（+5：raw-json-retention 2 + run-repository 2 + worker-pool 1）
+- `npm run test:integration` 836 → **850 断言 / 15 脚本**（+14：n4-cont-1-phase4 case 5 = 5 + a3-phase2 case 7 = 9）
+- `npm run smoke` 0 regression
+
+**资金红线 byte-for-byte 验证不破坏**：
+
+- 状态机 4 处链路统一（Round 4 F1）— SQL/JSON status 范畴扩 `partial OR in-progress`，既有 partial 路径不变；新增 in-progress 路径与 Round 3 F2 入口写入对齐
+- before-quit shutdown 失败兜底路径（Round 4 F2）— shutdown reject 不变 + 失败 listener 路径恢复正常，无双 reject 风险
+- contract test a3-phase1 40/40 / a3-phase2 42/42 / a4-phase3 47/47 仍通过
+
+### SR-FIX-1 round 5 — Codex 三复审抓 finding 修复（合并前补丁，1 项 G1 + closeout）
+
+PR #54 Round 4 push 后 Codex 三复审 2026-05-28T10:52:03Z 完成，抓 1 finding：G1 窗口期 race condition — Round 3 F2 占位位置不够早 + Round 4 F2 兜底前置失效。用户拍板 Round 5 修 G1 + closeout = 2 commits。详见 `docs/iterations/v2.1.10/spec.md §19`。
+
+**🟡 G1（setRunChunkProgress(in-progress) 提前到 COMMIT 后任何 await 前 — 窗口期 0 缝隙）**：
+
+- 触发场景：`run` 已在 line 299 提交，但初始 `chunk_progress='in-progress'` 要到 line 344 才写入；中间 line 325-327 先发 `sql-joining` progress 并 `await setImmediate()`。如果 worker/app 在这个窗口期退出 → failureListener（Round 4 F2 兜底路径）扫不到 `chunk_progress` + 启动清理（Round 3 F2 守卫）也不识别可恢复状态 → 仍可能被当 orphan 清掉 → 用户无法 resume
+- 修复：`runCheckCore` `if (!isResume)` block 内：`db.exec('COMMIT')` 之后立即写入 `setRunChunkProgress({status:'in-progress'})`，**该块内到 `} catch (error)` 之间不能再有任何 await**；原 line 344 的 Round 3 F2 入口前占位代码迁移到 COMMIT 后；窗口期 0 缝隙 — 闭合 Round 4 F2 兜底前置依赖
+- 配套测试：unit run-checkcore byte-for-byte contract +1 case（T19-session.5）；integration a4-phase3 case 6 +16 断言（端到端 onProgress hook crash → cleanupOrphanData 守卫 → resume 真实路径 verify）
+- commit `a8d5a26`
+
+**Round 5 修复后测试增量**：
+
+- `npm run test:unit` 1252 → **1253 case / 297 suites**（+1：acquiring-bill-currency-session-core T19.5）
+- `npm run test:integration` 850 → **866 断言 / 15 脚本**（+16：a4-phase3 case 6）
+- `npm run smoke` 0 regression
+
+**资金红线 byte-for-byte 验证不破坏**：
+
+- 窗口期 0 缝隙（Round 5 G1）— COMMIT → setRunChunkProgress(in-progress) 之间无 `await` / event loop 让出；任何 worker/app crash 都能被 failureListener / cleanupOrphanData 识别
+- byte-for-byte 不破坏（Round 5 G1 不改变成功路径行为）— onChunkDone 第一次仍用真实 totalChunks 覆盖占位值；cancel 路径 catch 块仍覆盖占位为 partial
+- contract test a3-phase1 40/40 / a3-phase2 42/42 / a4-phase3 63/63 仍通过
+
+### SR-FIX-1 round 6 — Codex 4 次复审抓 finding 修复（合并前补丁，4 项 H1+H2+H3+H4 + closeout）
+
+PR #54 Round 5 push 后 Codex 4 次复审 2026-05-28T11:38:30Z 完成，抓 4 finding：H1 进程硬终止 race（Round 5 G1 修了 event-loop 窗口但未修硬终止）+ H2 spec §18 残留旧结论 + H3 init-time worker crash 永久 hang（P1 可用性资金红线相关）+ H4 resume 时 chunk size 不一致（P2 资金红线）。用户拍板 Round 6 修 4 finding + closeout = 5 commits。详见 `docs/iterations/v2.1.10/spec.md §二十`。
+
+**🟡 H1（chunk_progress 与 runs INSERT 原子事务化 — 进程硬终止 race）**：
+
+- 触发场景：Round 5 G1 把 `setRunChunkProgress(in-progress)` 移到 `db.exec('COMMIT')` 之后任何 await 之前 — 修了 event-loop / await 窗口。但如果 worker 被硬终止（SIGKILL / OOM kill）/ 进程在两条 SQLite 语句之间崩 → 仍会留下 `runs` 已提交但 `chunk_progress IS NULL` 残留 → cleanup 仍可能当 orphan 清掉
+- 修复：`runCheckCore` `if (!isResume)` block 内：把 `setRunChunkProgress({status:'in-progress'})` 从 `db.exec('COMMIT')` **之后**移到 `db.exec('COMMIT')` **之前**（同事务内）；SQLite 单连接事务隔离保证 `runs` 行与 `chunk_progress` 同事务原子可见或同时回滚
+- 配套测试：unit acquiring-bill-currency-session-core +2 case（T19.6 同事务原子提交 + T19.7 cancel at inserting-run 同事务回滚）
+- commit `5a98ab5`
+
+**🟢 H2（spec §18 Round 4 残留旧结论清理 — 文档卫生）**：
+
+- 触发场景：spec §17.5 "可选 Round 4 Codex review" / §18.5 "建议直接 merge 不再开 Round 5" / §19.5 "建议直接 merge 不再开 Round 6" 三条旧结论均被后续 Round 推翻，但未更新
+- 修复：三处旧结论加 reverse sync 标记 + 删除线 + 指向后续 §章节；保留历史可追溯
+- commit `aad6f91`
+
+**🟠 H3（worker init-time error/exit 接入 init promise reject + 10s timeout 兜底 — P1 可用性 / 资金红线相关）**：
+
+- 触发场景：如果 worker 在 `init-done` / `init-error` 之前就 exit（packaged path 错 / module-load failure / node:sqlite 启动失败 / 系统级 SIGKILL）→ `ensureInitialized()` 内 onInitMsg listener 永远不被触发；`handleWorkerFailure` 只 reset 模块级状态但不 reject pending promise → 第一次 `dispatchRunCheck()` 永远不返回 → 用户必须重启 app
+- 修复：`ensureInitialized()` 重构：init promise 内额外 `once('error')` / `once('exit')` listener → reject + reset 模块级状态；加 10s init timeout 兜底；五路径（init-done / init-error / error / exit / timeout）互斥 settle；任意失败路径都 reject promise + reset → 下次 dispatchRunCheck 自动 cold-start。新增 `__test_only_set_worker_script__` 测试钩子 + `tests/unit/main-process/__fixtures__/init-crash-worker.js`（process.exit(1) 立即退）
+- 配套测试：unit run-check-worker-pool +1 case 19（init 期 worker exit → ensureInitialized reject + reset + 下次 cold-start）
+- commit `b88ddb1`
+
+**🟡 H4（chunk size 存 chunk_progress + resume 复用 — P2 资金红线护栏）**：
+
+- 触发场景：resume IPC handler 读当前 settings `acquiring_bill_chunk_size`，但 `lastCompletedChunkIndex` 是用原始 partial run 的 chunkSize 算的。如果用户 cancel 后改 settings（如 100000 → 10000）→ `insertDiffRowsByJoinChunked` 用 `OFFSET = chunkIndex * chunkSize` 计算错位 → diff_rows 行 skip 或重复 → 与全新 run byte-for-byte 不一致
+- 修复：`setRunChunkProgress` 新增 `chunkSize` 可选参数 + JSON payload 字段；`runCheckCore` 4 处 setRunChunkProgress 调用全传 `effectiveChunkSize`（H1 COMMIT 前占位 / onChunkDone / catch partial 路径 / 0-chunk 边界）；catch 路径优先复用 `existingProgress.chunkSize`；`main.js` resume IPC handler 优先从 `progress.chunkSize` 取 chunkSize（fallback 当前 settings + warning log）；resume 时 chunkSize 不一致触发 warning（持久化值优先，资金红线）
+- 配套测试：unit acquiring-bill-currency-session-core +2 case（T19.8 chunkSize 持久化 + T19.9 partial 字段保留）；integration v2.1.10-a4-phase3 +1 case 7（端到端 baseline 5000 行 / chunkSize=100 vs partial→resume 5000 行 / chunkSize=100 → diff_rows byte-for-byte 一致 / 12 断言）
+- commit `9e02836`
+
+**Round 6 修复后测试增量**：
+
+- `npm run test:unit` 1253 → **1258 case / 297 suites**（+5：acquiring-bill-currency-session-core T19.6+T19.7+T19.8+T19.9 = 4 + run-check-worker-pool case 19 = 1）
+- `npm run test:integration` 866 → **878 断言 / 15 脚本**（+12：a4-phase3 case 7）
+- `npm run smoke` 0 regression
+
+**资金红线 byte-for-byte 验证不破坏**：
+
+- chunk_progress 同事务原子可见（Round 6 H1）— runs 行 INSERT 与 chunk_progress = 'in-progress' 同 BEGIN/COMMIT 内；任何硬终止 → 同时可见或同时回滚（SQLite 事务隔离保证）；不可能出现 runs 已 COMMIT 但 chunk_progress IS NULL 中间态
+- worker init-time crash 不 brick（Round 6 H3）— init promise 五路径互斥 settle；任意失败路径 reject + reset 模块级状态 → 下次 dispatch 自动 cold-start；10s init timeout 防 worker 启动卡死无信号
+- resume 时 chunk size 持久化（Round 6 H4）— chunk_progress JSON 新增 chunkSize 字段（4 处 setRunChunkProgress 调用全持久化）；resume IPC handler 优先复用持久化值（不读当前 settings）；settings 变化 → warning log + 用持久化值（资金红线优先）；老 partial run（升级前无 chunkSize 字段）→ fallback settings + warning
+- contract test a3-phase1 40/40 / a3-phase2 42/42 / a4-phase3 75/75 仍通过
+
+### SR-FIX-1 round 7 — Codex 5 次复审抓 finding 修复（合并前补丁，2 项 I1+I2 + closeout）
+
+PR #54 Round 6 push 后 Codex 5 次复审 2026-05-28T12:10:03Z 完成，抓 2 finding：I1 failureListener crash 路径漏透传 chunkSize（Round 6 H4 全路径补全 — 资金红线）+ I2 PR54 草稿停在 Round 2 数据（P3 文档卫生）。用户拍板 Round 7 全修后直接 merge（跳过 Codex 8 次复审）+ 3 commits。详见 `docs/iterations/v2.1.10/spec.md §二十一`。
+
+**🟡 I1（failureListener crash 路径透传 chunkSize — 资金红线 Round 6 H4 全路径补全）**：
+
+- 触发场景：Round 6 H4 把 chunkSize 存到 chunk_progress + resume IPC handler 优先复用持久化值。但 worker crash 后 main.js failureListener 路径调 setRunChunkProgress({status:'partial', ...}) 时**没透传 progress.chunkSize** → chunk_progress.chunkSize 丢失 → 用户改 chunk-size setting 后 resume → IPC handler fallback 用新 setting → `insertDiffRowsByJoinChunked` 用 OFFSET = chunkIndex × chunkSize 计算错位 → 行 skip / 重复（资金红线）
+- 修复：扫**所有** setRunChunkProgress caller — main.js / worker-pool / session 内全路径加 chunkSize 透传；I1 焦点是 main.js:11313 failureListener crash → setRunChunkProgress({status:'partial', chunkSize: progress.chunkSize})
+- 配套测试：unit run-check-worker-pool +1 case 20；integration a3-phase2 +14 断言（case 7 chunkSize 持久化 + case 8 crash→resume byte-for-byte 一致）
+- commit `bbf2dd5`
+
+**🟢 I2（PR54 草稿 Round 3-7 同步 — P3 文档卫生）**：
+
+- 触发场景：PR54-v2.1.10.md 草稿是 PR #54 提交时写的（含 SR-FIX Round 1+2）；Round 3-7 每 round 都同步 spec/CHANGELOG/USER_GUIDE，但**没同步 PR 草稿** → PR 归档文档停在过时数据
+- 修复：PR54-v2.1.10.md Summary 改 "Round 1-7 闭环"；主题完成度表加 Round 3-7 段；资金红线护栏加"chunkSize 全路径持久化"段；保留 frontmatter pr_number=54 / pr_url 不动
+- commit `0f09fd8`（dev stall 后主线程接手）
+
+**Round 7 修复后测试增量**：
+
+- `npm run test:unit` 1258 → **1258 case / 297 suites**（0：I1 unit 合入 case 18-20 既有 + I2 仅文档）
+- `npm run test:integration` 878 → **892 断言 / 15 脚本**（+14：a3-phase2 case 7+8 chunkSize 全路径）
+- `npm run smoke` 0 regression
+
+**资金红线 byte-for-byte 验证不破坏**：
+
+- chunkSize 全路径持久化（Round 6 H4 + Round 7 I1）— 主路径 + crash 路径 + resume IPC 全持久化；settings 变化 warning + 用持久化值
+- contract test a3-phase1 40/40 / a3-phase2 56/56 / a4-phase3 75/75 全过
+
+### 性能基线（vs v2.1.9）
+
+| 指标 | v2.1.9 baseline | v2.1.10 实测 | 改善 |
+|---|---|---|---|
+| 主进程 event loop lag max（50000 行 runCheck） | 65.7 ms | 1.3 ms | **48.7x** ✅ |
+| 主进程 unresponsive 触发频率 | >0 次/runCheck（500w 行 ~5-10s freeze） | 0（worker 化后）| ✅ |
+| worker cold-start | N/A | ~11 ms | ✅ (< 200ms 阈值) |
+| IPC round-trip（1000 次均值） | N/A | 0.010 ms | ✅ (< 10ms 阈值) |
+| runCheck 总耗时 worker vs main（500w 行外推） | — | ~1.05x | 🟡 (接近 5% budget) |
+| A4 chunked vs non-chunked 总耗时 | — | 0.99x | ✅ byte-for-byte 一致 |
+| A4 cancel 响应（chunk 边界） | N/A | < 0.01 ms（同步抛） | ✅ (< 5s 阈值) |
+| **DB 体积 6 个月增长**（N4-cont-1 治理后预期）| ~24 GB | ~8 GB（差异行 ~1% + 7 天新行）| ~99% 体积节省 |
+
+### 测试
+
+- release-check 三段全绿（smoke ✅ / unit **1258 case / 297 suites** ✅（含 SR-FIX-1 round 2 +5 + round 3 +4 + round 4 +5 + round 5 +1 + round 6 +5 = +20）/ integration **878 断言 / 15 脚本** ✅（含 round 2 +15 + round 3 +12 + round 4 +14 + round 5 +16 + round 6 +12 = +69 断言））
+- v2.1.10 新增集成脚本 5 个（v2.1.10-a3-phase1 40 + v2.1.10-a3-phase2 42 + v2.1.10-a4-phase3 75 + v2.1.10-n4-cont-1-phase4 33 + v2.1.10-n4-cont-2-phase5 43 = 233 新增断言）
+- check-vars v11 → v12 升格 5 条（Critical 4: `runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1: `serializeError` / `deserializeError`）+ 更新 1 条（`bill_imports.raw_json` 扩 N4-cont-1 sentinel 语义）
+
+### 文档
+
+- `docs/iterations/v2.1.10/*.md` v0.1-0.3 五件套（PRD / spec / tasks / manual-test-checklist / backlog / check-vars-report）
+- `rules/important-variables.md` v12 升格（详「测试」段）
+- `docs/USER_GUIDE.md` 加 §八 v2.1.10 新增能力 + §1.8.10/1.8.11/1.8.12 三章节（raw_json / 跨进程 / chunked）+ 故障排查 → DB 备份恢复路径 + worker 进程异常段 + FAQ 4 问答
+
+### ⚠️ 升级提示（用户必读）
+
+- **首次启动自动备份 DB + N4-cont-2 migration**：`<userData>/backups/tool-data-bak-pre-N4-cont-2-<timestamp>.sqlite`（VACUUM INTO 不锁写）；FK CASCADE 改造完成后**不可逆**回退到 v2.1.9 schema
+- **跨版本路径**：v2.1.7 / v2.1.8 / v2.1.9 → v2.1.10 一步迁支持；启动期 migration 序列自动编排（N4 → N5 → N4-cont-2）
+- **N4-cont-1 idle 30min 后台自动清理 raw_json**：仅清"对账成功老行"（差异行永远保留）；保留窗口默认 7 天（settings `acquiring_bill_raw_json_retention_days` 可调 1-30 / 范围外回退 7）；用户无感 / 0 UI；**不可逆**（用 SR-backup-1 备份恢复）
+- **A3 worker 化后用户感知**：主窗口不再卡顿；可以在 runCheck 期间继续操作其他模块；worker 异常时弹 Notification「对账 worker 异常请重试」+ op lock 释放 + 直接重试即可
+- **A4 chunked**：500w 行 runCheck 输出 50 个 chunk 进度事件（每 chunk 10w 行）；cancel 在 chunk 边界响应（< 1s）；resume 入口暴露但 UI v2.1.11+ 评估
+
+### 已知边界 case
+
+- **N4-cont-1 settings UI 缺失**：D27 = 0 UI 拍板；用户改 retention_days 需 sqlite3 改 settings 表 + 重启（沿用 v2.1.9 N1-settings 经验）
+- **A4 resume UI 缺失**：IPC handler 已暴露但收单 panel 无 resume 按钮；v2.1.11+ 评估
+- **A3 worker DB 双连接 SQLITE_BUSY 防御**：busy_timeout=30s 兜底；spec §2.5 stress test 已验证
+
+### 不影响（明确）
+
+- v2.1.9 N5 channels FK 范式（`ON UPDATE CASCADE`，不带 ON DELETE — channels 禁删）未改
+- v2.1.9 SR-backup-1 backup API（VACUUM INTO）未改；N4-cont-2 复用同 API
+- v2.1.9 N1' idle 30min cleanup 计时器未改；N4-cont-1 仅追加回调
+- v2.1.9 SR-log-1 全局告警日志路径未改；worker 内告警通过 message pipe 上报到 main 后写入同一日志
+- v2.1.8 N4 raw_json 9 字段瘦身契约未改；N4-cont-1 是 NULL/'' 空内容清理（v0.3 sentinel `''`），与 N4 一次性 schema rewrite 互补
+
 ## 2.1.9 - 2026-05-27（待发布草稿）
 
 v2.1.8 之后 1 轮迭代（α 范围），**9 项主题**：N5（银行渠道区分场景 — 🔴 资金红线 + DB schema 破坏性 migration）+ N6（状态框换行修复）+ N7（场景模板按渠道导入/导出 — 新 bundle 类型）+ SR-backup-1（sqlite VACUUM INTO 备份基建）+ G1-cont（单元测试 37 文件全量铺）+ SR-policy-1（integration-runner 清单自动同步）+ N1-settings（idle 30min 阈值 settings 化）+ N4 重构（migration 备份切到新 API）+ SR-log-1（全局告警统一日志化 + JSON Lines）。⚠️ **1 个🔴破坏性变更**（Sheet 3 主输出撤除 → 独立报表）+ **3 个资金红线护栏**（N5 双维 dispatcher + Sheet 3 输出契约 + DB schema migration）+ **N 个 important-variables 升格**（待 Phase 9 check-vars 跑后定稿）。

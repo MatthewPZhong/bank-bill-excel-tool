@@ -154,93 +154,317 @@ async function peekImportTarget({ db, kind, filePaths }) {
   return { monthKey, existingCount, kind };
 }
 
+// v2.1.10 A3 Phase 2 T13 — CancelError：可中断 runCheckCore 的专用错误类
+//   - 调用方按 err.name === 'CancelError' 识别（worker 跨进程后 instanceof 不可靠 — 见 serialize-error 注释）
+//   - 业务语义：用户主动取消（cancel button），不是真正的失败
+//   - main.js IPC handler 应识别此 error 不弹错误 Notification，仅 toast「已取消」
+class CancelError extends Error {
+  constructor(message, options = {}) {
+    super(message || 'runCheck cancelled by user');
+    this.name = 'CancelError';
+    if (options.stage) this.stage = options.stage;
+  }
+}
+
+// v2.1.10 A3 Phase 2 T13 — cancelToken 工厂（unit test / 集成测试用；生产由 worker pool 自动注入）
+//   接口：{ get cancelled, throwIfCancelled }
+//   生产逻辑：worker 收到 'cancel' message → token.cancelled = true（不立刻 throw，让 runCheckCore 在下个 check 点 throw）
+function createCancelToken() {
+  let cancelled = false;
+  return {
+    get cancelled() { return cancelled; },
+    cancel() { cancelled = true; },
+    throwIfCancelled(stage) {
+      if (cancelled) throw new CancelError(`runCheck cancelled at stage=${stage || 'unknown'}`, { stage });
+    },
+  };
+}
+
 // 对账核心（⚠️ 资金红线，spec §5）
 // v0.8 fix5：跑 run 时同步产出 diff + report 到 exports/{date}/acquiring-bill-currency/(report/)
 // v2.1.7 F6：新增 onProgress 入参（守护式埋点，旧 caller 无 onProgress 时行为不变）
 //   阶段事件：clearing-old-runs / computing-stats / inserting-run / sql-joining / writing-xlsx / updating-paths
 //   spec §6.2 / PRD §六
 //
+// v2.1.10 A3 T09：抽出 `runCheckCore(args)` 纯函数 — worker 内可直接调（无 Electron API 依赖）
+//   原 `runCheck` 保留作 alias 透传（向后兼容所有既有 caller — main.js IPC handler / 集成测试）
+//   contract test（scripts/integration/v2.1.10-a3-phase1.js）验证：
+//     - 直 require 跑 vs worker pool dispatch 跑 → diff_rows 表内容 byte-for-byte 一致
+//
+// v2.1.10 A3 Phase 2 T13：cancelToken 可选入参（spec §2.1.3 + spec §3.2 cancel < 5s）
+//   - cancelToken 必须可选（向后兼容；主进程直调 / unit test / smoke 都不传 cancelToken）
+//   - 在 5 阶段间插 cancelToken?.throwIfCancelled(stage)
+//   - 事务中 cancel → safeRollback + throw CancelError（保证 DB 无锁残留）
+//   - 写盘阶段不可中断（writer.writeRunOutputs 已经在事务外；中断会留半个 xlsx）
+//   - byte-for-byte 不变（不传 cancelToken 时行为完全等价 v2.1.10 Phase 1）
+//
+// v2.1.10 A4 Phase 3 T18 / T19 — chunked stage 4'：
+//   - stage 1-3 (clearOldRuns / computeStats / insertRun) 仍在主事务里
+//   - 主事务在 stage 4' 前 COMMIT — 让 stage 4' 各 chunk 独立 BEGIN/COMMIT
+//   - stage 4' (insertDiffRowsByJoinChunked) 每 chunk 之间 cancelToken.throwIfCancelled
+//   - chunk size 来自 caller 的 chunkSize 参数（main.js IPC 注入 settings 值；默认 100000）
+//   - chunked 中途 cancel → 抛 CancelError（带 stage='sql-joining-chunk-N'）；caller 写 chunk_progress
+//   - T19 resume 路径：caller 传 resumeFromRun 复用 runId 跳过 stage 1-3，stage 4' 从 lastCompletedChunkIndex+1 跑
+//
 // 流程：
-//   1. 清空该月历史 runs + diff_rows（避免累积）
-//   2. 统计 totalBillRows / matched / mismatch / unmatched
-//   3. 创建 runs 记录拿 runId
-//   4. INSERT diff_rows BY SQL JOIN（spec §5.2）
-//   5. COMMIT（数据落库，事务结束）
-//   6. 调 writer 同步生成 diff.xlsx + report.xlsx；UPDATE runs.diff_file_path/report_file_path 回填
-//   7. 返回 stats + filePaths
+//   1. 清空该月历史 runs + diff_rows（避免累积）（仅全新 run；resume 跳过）
+//   2. 统计 totalBillRows / matched / mismatch / unmatched（仅全新 run；resume 复用旧 runs 行）
+//   3. 创建 runs 记录拿 runId（仅全新 run；resume 复用旧 runId）
+//   4'. chunked INSERT diff_rows BY SQL JOIN（spec §3 + §5.2）— 各 chunk 独立 BEGIN/COMMIT
+//   5. 调 writer 同步生成 diff.xlsx + report.xlsx；UPDATE runs.diff_file_path/report_file_path 回填
+//   6. SET chunk_progress.status='complete' + 返回 stats + filePaths
 // 关键不变量：写盘失败不应回滚 DB 事务（数据已 COMMIT 有效）；写盘错误仅 throw 给 caller
-async function runCheck({ db, monthKey, storageRoot, onProgress }) {
+async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken, chunkSize, resumeFromRun }) {
   if (!monthKey) {
     throw new Error('runCheck：monthKey 必填');
   }
-  const { flowReady, billReady } = importRepo.getMonthReadiness(db, monthKey);
-  if (!flowReady) throw new Error(`${monthKey}：流水表尚未导入`);
-  if (!billReady) throw new Error(`${monthKey}：单据表尚未导入`);
 
   const runT0 = Date.now();
   let runId;
   let stats;
-  let insertedDiffRows;
+  let chunkedResult;
+  // v2.1.10 A4 T18：chunkSize 默认 100000（spec §3.2 拍板）— caller 不传时也 chunked（小数据档 totalChunks=1 等价 single SQL）
+  const effectiveChunkSize = Number.isInteger(chunkSize) && chunkSize > 0 ? chunkSize : 100000;
+  // v2.1.10 A4 T19：resume 路径 — caller 传 resumeFromRun = { runId, lastCompletedChunkIndex } 复用旧 runId
+  //   resumeFromRun.runId 必须存在 + status='partial'（caller 已验）；本函数仅按入参跳 stage 1-3
+  const isResume = !!(resumeFromRun && resumeFromRun.runId && Number.isInteger(resumeFromRun.runId));
 
-  safeBegin(db);
-  try {
-    // v2.1.7 F6 埋点 1/6：清理历史 runs
-    if (onProgress) {
-      onProgress({ phase: 'run', stage: 'clearing-old-runs' });
-      await new Promise((r) => setImmediate(r));
+  // resume 路径下先校验 runId 一致性（防 readiness 错误信息掩盖 resume 入参错）
+  //   - runId 不存在 → 抛"不存在"
+  //   - month_key 不匹配 → 抛 mismatch
+  //   - 之后再做 readiness check（resume 场景流水/单据不应被清，理论 readiness=true；防御性保留）
+  if (isResume) {
+    const existingRunForCheck = runRepo.getRunById(db, resumeFromRun.runId);
+    if (!existingRunForCheck) {
+      throw new Error(`resumeFromRun: runId=${resumeFromRun.runId} 不存在`);
     }
-    runRepo.clearRunsByMonth(db, monthKey);
-
-    // v2.1.7 F6 埋点 2/6：统计行数
-    if (onProgress) {
-      onProgress({ phase: 'run', stage: 'computing-stats' });
-      await new Promise((r) => setImmediate(r));
+    if (existingRunForCheck.month_key !== monthKey) {
+      throw new Error(`resumeFromRun: runId=${resumeFromRun.runId} month_key=${existingRunForCheck.month_key} 与请求 monthKey=${monthKey} 不一致`);
     }
-    stats = runRepo.computeRunStats(db, { monthKey });
+  }
 
-    // v2.1.7 F6 埋点 3/6：创建 run 记录
-    if (onProgress) {
-      onProgress({ phase: 'run', stage: 'inserting-run' });
-      await new Promise((r) => setImmediate(r));
-    }
-    runId = runRepo.insertRun(db, {
-      monthKey,
-      // v0.14 fix12：显式传 ISO 8601（带 Z 后缀），避免依赖 SQLite DEFAULT CURRENT_TIMESTAMP（返回 UTC 无后缀，writer 显示时容易错位）
-      ranAt: nowIso(),
-      totalBillRows: stats.totalBillRows,
-      matchedRows: stats.matchedRows,
-      mismatchRows: stats.mismatchRows,
-      unmatchedRows: stats.unmatchedRows,
-      status: 'success'
-    });
+  const { flowReady, billReady } = importRepo.getMonthReadiness(db, monthKey);
+  if (!flowReady) throw new Error(`${monthKey}：流水表尚未导入`);
+  if (!billReady) throw new Error(`${monthKey}：单据表尚未导入`);
 
-    // v2.1.7 F6 埋点 4/6：SQL JOIN 比对币种（耗时大头）
-    //   await setImmediate 让 IPC 把"正在比对币种"文案送达渲染端，再开始阻塞 SQL
-    if (onProgress) {
-      onProgress({ phase: 'run', stage: 'sql-joining', mismatchHint: stats.mismatchRows });
-      await new Promise((r) => setImmediate(r));
-    }
-    insertedDiffRows = runRepo.insertDiffRowsByJoin(db, { runId, monthKey });
-    db.exec('COMMIT');
+  if (!isResume) {
+    // ── 全新 run 路径 — stage 1-3 主事务 ──
+    safeBegin(db);
+    try {
+      // v2.1.7 F6 埋点 1/6：清理历史 runs
+      if (onProgress) {
+        onProgress({ phase: 'run', stage: 'clearing-old-runs' });
+        await new Promise((r) => setImmediate(r));
+      }
+      runRepo.clearRunsByMonth(db, monthKey);
+      // v2.1.10 T13 cancel check 1/5（事务中 — cancel 触发 safeRollback + throw）
+      if (cancelToken && cancelToken.cancelled) {
+        safeRollback(db);
+        throw new CancelError('runCheck cancelled at stage=clearing-old-runs', { stage: 'clearing-old-runs' });
+      }
 
-    // sanity check：mismatchRows（统计口径）与实际 INSERT 行数应一致
-    if (insertedDiffRows !== stats.mismatchRows) {
-      // 不抛错（数据已提交），但记日志供后续审计
-      // v2.1.9 SR-log-1：替换 console.warn → 日志上报
-      appendModuleLog({
-        level: 'warning',
-        source: 'main',
-        domain: 'acquiring-bill-currency',
-        message: '[acquiring-bill-currency] diff row count mismatch',
-        details: [
-          `stats.mismatchRows=${stats.mismatchRows}`,
-          `INSERT changes=${insertedDiffRows}`
-        ]
+      // v2.1.7 F6 埋点 2/6：统计行数
+      if (onProgress) {
+        onProgress({ phase: 'run', stage: 'computing-stats' });
+        await new Promise((r) => setImmediate(r));
+      }
+      stats = runRepo.computeRunStats(db, { monthKey });
+      // v2.1.10 T13 cancel check 2/5
+      if (cancelToken && cancelToken.cancelled) {
+        safeRollback(db);
+        throw new CancelError('runCheck cancelled at stage=computing-stats', { stage: 'computing-stats' });
+      }
+
+      // v2.1.7 F6 埋点 3/6：创建 run 记录
+      if (onProgress) {
+        onProgress({ phase: 'run', stage: 'inserting-run' });
+        await new Promise((r) => setImmediate(r));
+      }
+      runId = runRepo.insertRun(db, {
+        monthKey,
+        // v0.14 fix12：显式传 ISO 8601（带 Z 后缀），避免依赖 SQLite DEFAULT CURRENT_TIMESTAMP（返回 UTC 无后缀，writer 显示时容易错位）
+        ranAt: nowIso(),
+        totalBillRows: stats.totalBillRows,
+        matchedRows: stats.matchedRows,
+        mismatchRows: stats.mismatchRows,
+        unmatchedRows: stats.unmatchedRows,
+        status: 'success'
       });
+      // v2.1.10 T13 cancel check 3/5
+      if (cancelToken && cancelToken.cancelled) {
+        safeRollback(db);
+        throw new CancelError('runCheck cancelled at stage=inserting-run', { stage: 'inserting-run' });
+      }
+
+      // v2.1.10 SR-FIX-1 Round 6 H1：setRunChunkProgress(in-progress) 与 INSERT runs 同事务原子提交
+      //   触发场景（Codex Round 5 四复审 finding，2026-05-28T11:38）：
+      //     Round 5 G1 把 in-progress 占位移到 COMMIT 之后任何 await 之前 — 修了 event-loop / await 窗口
+      //     但如果 worker 被硬终止（SIGKILL / OOM kill）/ 进程在 line 299 COMMIT 与 line 316
+      //     setRunChunkProgress 之间崩 → 仍会留下 `runs` 已提交但 `chunk_progress IS NULL` 残留
+      //     → failureListener / cleanupOrphanData 守卫仍可能把它当 orphan 清掉
+      //   修复：把 setRunChunkProgress 移到 BEGIN/COMMIT 内、`db.exec('COMMIT')` 之前
+      //     → runs 行与 in-progress 占位同一事务原子可见（SQLite 单连接事务隔离保证）
+      //     → 任何 COMMIT 后的硬终止：runs.chunk_progress 已是 in-progress（非 NULL）
+      //     - 仅在 !isResume 时写（resume 路径已有有效 chunk_progress；不要重写覆盖）
+      //     - onChunkDone 第一次触发时会用真实 totalChunks 覆盖此值
+      //     - cancel 路径 catch 块仍覆盖此值为 partial（byte-for-byte 兼容 Round 5 G1 不变）
+      //   关键不变量：setRunChunkProgress 必须在 db.exec('COMMIT') 之前（同事务内）
+      // v2.1.10 SR-FIX-1 Round 6 H4：持久化 chunkSize（用于 resume 时复用，防 settings 改导致 OFFSET 偏移错位）
+      runRepo.setRunChunkProgress(db, {
+        runId,
+        lastCompletedChunkIndex: -1, // 起始值；onChunkDone 第一次会覆盖
+        totalChunks: 0,              // 未知；onChunkDone 第一次会算出真实值（与 0-chunk 边界 fallback 一致）
+        status: 'in-progress',
+        chunkSize: effectiveChunkSize, // H4：存原始 chunkSize 供 resume 复用
+      });
+      // v2.1.10 A4 T18：主事务 COMMIT — 让 stage 4' chunked 各 chunk 独立 BEGIN/COMMIT
+      //   Round 6 H1：COMMIT 之前 setRunChunkProgress 已写入 → runs 行与 chunk_progress 同事务原子可见
+      db.exec('COMMIT');
+    } catch (error) {
+      safeRollback(db);
+      throw error;
     }
-  } catch (error) {
-    safeRollback(db);
-    throw error;
+  } else {
+    // ── resume 路径 — 跳过 stage 1-3 复用旧 runId / 旧 stats ──
+    //   入参校验已在函数顶部 isResume 分支完成（runId 存在 + month_key 一致）
+    runId = resumeFromRun.runId;
+    const existingRun = runRepo.getRunById(db, runId);
+    // 重读 runs 行 — 复用 stats 给后续 sanity check / writer
+    stats = {
+      totalBillRows: existingRun.total_bill_rows,
+      matchedRows: existingRun.matched_rows,
+      mismatchRows: existingRun.mismatch_rows,
+      unmatchedRows: existingRun.unmatched_rows,
+    };
+    if (onProgress) {
+      onProgress({ phase: 'run', stage: 'resuming-from-chunk', resumeRunId: runId });
+      await new Promise((r) => setImmediate(r));
+    }
+  }
+
+  // ── stage 4' chunked INSERT diff_rows ──
+  //   主事务已 COMMIT；进入 chunked 区域（各 chunk 独立 BEGIN/COMMIT）
+  //   v2.1.10 SR-FIX-1 Round 6 H1：in-progress 占位与 INSERT runs 同事务原子提交（COMMIT 前写入）
+  //     → 任何硬终止（SIGKILL / OOM / 进程崩）：runs 行与 chunk_progress 同时可见或同时回滚
+  //     → 不再有 Round 5 G1 的 "COMMIT 后 ↔ 第一次 await 前" 窗口期 race
+  //     原 Round 5 G1 在 COMMIT 后立即写入的占位代码已合并到 BEGIN/COMMIT 内（line ~302-307）
+  // v2.1.7 F6 埋点 4/6：SQL JOIN 比对币种（耗时大头）→ chunked 模式
+  if (onProgress) {
+    onProgress({ phase: 'run', stage: 'sql-joining', mismatchHint: stats.mismatchRows });
+    await new Promise((r) => setImmediate(r));
+  }
+
+  const resumeFromChunkIndex = isResume && Number.isInteger(resumeFromRun.lastCompletedChunkIndex)
+    ? resumeFromRun.lastCompletedChunkIndex + 1
+    : 0;
+
+  try {
+    chunkedResult = runRepo.insertDiffRowsByJoinChunked(db, {
+      runId,
+      monthKey,
+      chunkSize: effectiveChunkSize,
+      cancelToken,
+      resumeFromChunkIndex,
+      onChunkDone: ({ chunkIndex, totalChunks, processedRows, insertedDiffRows: chunkInsertedDiffRows, elapsedMs }) => {
+        // 每 chunk 完成后 — 更新 chunk_progress（in-progress 直至最后一 chunk 改 complete）
+        // 失败不抛（caller catch 写 partial）；progress 回调透传 caller
+        // v2.1.10 SR-FIX-1 Round 6 H4：持续持久化 chunkSize（resume 时复用）
+        try {
+          runRepo.setRunChunkProgress(db, {
+            runId,
+            lastCompletedChunkIndex: chunkIndex,
+            totalChunks,
+            status: (chunkIndex + 1 >= totalChunks) ? 'complete' : 'in-progress',
+            chunkSize: effectiveChunkSize, // H4：每次 onChunkDone 都续写 chunkSize（防 H1 占位被覆盖时丢失）
+          });
+        } catch (_progressErr) {
+          // chunk_progress 写失败不阻断主循环（unit test 防御；生产 SQLITE_BUSY 极少）
+        }
+        if (onProgress) {
+          onProgress({
+            phase: 'run',
+            stage: 'sql-joining',
+            chunkIndex,
+            totalChunks,
+            processedRows,
+            insertedDiffRows: chunkInsertedDiffRows,
+            elapsedMs,
+          });
+        }
+      },
+    });
+  } catch (chunkedErr) {
+    // chunked 中途异常（cancel 或 SQL 错）— 失败 chunk 已自行 ROLLBACK 本批；已 COMMIT 批保留
+    //   写 chunk_progress { status:'partial' } 让 caller 决策 resume / 弃
+    //   ⚠️ 关键 idempotent 不变量：复用 onChunkDone 已正确写入的 progress（lastCompletedChunkIndex / totalChunks），
+    //      仅把 status 改 'partial'；若 onChunkDone 从未触发（chunk 0 边界即 cancel）→ 写 -1 / 0 兜底
+    // v2.1.10 SR-FIX-1 Round 6 H4：partial 路径也持久化 chunkSize（resume 时复用）
+    try {
+      const existingProgress = runRepo.getRunChunkProgress(db, runId);
+      if (existingProgress) {
+        // onChunkDone 已写过至少一次 — 复用其值（lastCompletedChunkIndex 指向最后一个 COMMIT 成功的 chunk）
+        runRepo.setRunChunkProgress(db, {
+          runId,
+          lastCompletedChunkIndex: existingProgress.lastCompletedChunkIndex,
+          totalChunks: existingProgress.totalChunks,
+          status: 'partial',
+          // H4：优先复用 existingProgress.chunkSize（H1 占位 / onChunkDone 写入）；缺失时用 effectiveChunkSize 兜底
+          chunkSize: Number.isInteger(existingProgress.chunkSize) ? existingProgress.chunkSize : effectiveChunkSize,
+        });
+      } else {
+        // onChunkDone 从未触发（chunk 0 之前 cancel；或 chunkedResult.totalChunks=0 边界）
+        runRepo.setRunChunkProgress(db, {
+          runId,
+          lastCompletedChunkIndex: -1,
+          totalChunks: 0,
+          status: 'partial',
+          chunkSize: effectiveChunkSize, // H4：无 existing 时写 effectiveChunkSize
+        });
+      }
+    } catch (_progressErr) {
+      // chunk_progress 写失败 — 不阻塞错误透传（caller 不能 resume 也只能重跑）
+    }
+    throw chunkedErr;
+  }
+
+  // sanity check：mismatchRows（统计口径）与实际 INSERT 行数应一致（chunked 累计后比对）
+  if (chunkedResult.totalInsertedDiffRows !== stats.mismatchRows && !isResume) {
+    // resume 路径下 totalInsertedDiffRows 只是本次 chunked 的累计（不含上次已 COMMIT 的 diff）— 跳过 sanity check
+    // 不抛错（数据已提交），但记日志供后续审计
+    // v2.1.9 SR-log-1：替换 console.warn → 日志上报
+    appendModuleLog({
+      level: 'warning',
+      source: 'main',
+      domain: 'acquiring-bill-currency',
+      message: '[acquiring-bill-currency] diff row count mismatch',
+      details: [
+        `stats.mismatchRows=${stats.mismatchRows}`,
+        `chunked INSERT total=${chunkedResult.totalInsertedDiffRows}`,
+        `totalChunks=${chunkedResult.totalChunks}`,
+      ]
+    });
+  }
+
+  // chunked 成功后 — chunk_progress 已被 onChunkDone 标记为 complete（最后一 chunk 时）
+  //   0 chunk 边界（totalChunks=0）— 显式补一次 status='complete'（onChunkDone 不会触发）
+  // v2.1.10 SR-FIX-1 Round 6 H4：0-chunk 边界也持久化 chunkSize（保持一致性 — complete 状态也带 chunkSize）
+  if (chunkedResult.totalChunks === 0) {
+    try {
+      runRepo.setRunChunkProgress(db, {
+        runId,
+        lastCompletedChunkIndex: -1,
+        totalChunks: 0,
+        status: 'complete',
+        chunkSize: effectiveChunkSize,
+      });
+    } catch (_progressErr) { /* 不阻塞主流程 */ }
+  }
+
+  // v2.1.10 T13 cancel check 5/5（写盘前 — 非事务期；cancel 不 ROLLBACK）
+  //   说明：写盘阶段开始后不可中断（writer 内部分文件可能已落盘 — 部分 xlsx 残留更糟）
+  //   COMMIT 后 cancel 仍返回 CancelError，但 run 数据已落库；caller 决策保留（success-no-files）或人工清
+  if (cancelToken && cancelToken.cancelled) {
+    throw new CancelError('runCheck cancelled at stage=before-writing-xlsx (DB COMMIT 已完成)', { stage: 'before-writing-xlsx' });
   }
 
   // v0.8 fix5：DB 事务成功后同步写盘 diff + report
@@ -399,12 +623,39 @@ async function cleanupOrphanData({ db, onProgress }) {
   ).all();
 
   const orphanRuns = [];
+  // v2.1.10 SR-FIX-1 round 2 P0-1：chunked partial run 保护
+  //   触发场景：chunked stage 4' 跑到 chunk M/N → cancel / worker crash → chunk_progress.status='partial'
+  //     runs.status='success'（stage 3 写时已落，writer 阶段未跑 → diff_file_path=null）→ fileBroken=true
+  //     v2.1.10 N4-cont-2 之前：cleanupOrphanData 把 partial run 当孤儿清掉 → 用户重启后无法 resume
+  //   修复（spec §3.3 / §5.4 idempotent + tasks T19 resumeFromRun 设计意图）：
+  //     如果 run 处于 chunk_progress.status='partial' 状态 → 视为「待 resume」非「孤儿」→ 保留供下次 resume IPC 调用
+  //     对配套测试：scripts/integration/v2.1.10-a4-phase3.js 新增 case 验证「partial run 跨 cleanupOrphanData 仍存活」
+  //
+  // v2.1.10 SR-FIX-1 Round 3 F2 扩展：in-progress 也一起保护
+  //   触发场景：worker 跑第一个 chunk 时 die（onChunkDone 触发前）+ failureListener 兜底未及时跑到（如重启场景）
+  //     → chunk_progress 停留 'in-progress'（runCheckCore 入口前 F2 修复写入的初始值）
+  //     → 不能当孤儿清，否则用户重启后无法 resume
+  //   注：生产正常路径下 in-progress 只在 chunk 边界短暂存在；crash 或重启时残留即应保护
   for (const run of allRuns) {
     // NewF2：'success-no-files' 是可恢复状态，跳过 cleanup
     if (run.status === 'success-no-files') continue;
     const fileBroken = !run.diff_file_path || !run.report_file_path
       || !fs.existsSync(run.diff_file_path) || !fs.existsSync(run.report_file_path);
     if (run.status !== 'success' || fileBroken) {
+      // v2.1.10 SR-FIX-1 round 2 P0-1 + Round 3 F2：partial / in-progress chunked run 不当孤儿（A4 resume 路径保护）
+      let chunkProgress = null;
+      try {
+        chunkProgress = runRepo.getRunChunkProgress(db, run.id);
+      } catch (_e) {
+        // chunk_progress 列不存在 / JSON 解析失败 → 视为无 progress，按既有 fileBroken 逻辑当孤儿
+        chunkProgress = null;
+      }
+      if (chunkProgress && (chunkProgress.status === 'partial' || chunkProgress.status === 'in-progress')) {
+        // 跳过 — 保留供 resume IPC 调用（acquiringBillCurrency:run:resume）
+        // partial：cancel / 正常 catch 块写入
+        // in-progress：runCheckCore 入口前初始写入（F2）或 onChunkDone 中间状态（worker first-chunk crash 残留）
+        continue;
+      }
       orphanRuns.push(run);
     }
   }
@@ -541,6 +792,13 @@ function listMonths({ db }) {
   return importRepo.listMonths(db);
 }
 
+// v2.1.10 A3 T09：runCheck 是 runCheckCore 的 alias（向后兼容）
+//   - 既有 caller（main.js IPC handler / 集成测试 / smoke）调 runCheck 行为不变
+//   - worker 端（src/main-process/run-check-worker.js）也通过 alias 复用，
+//     T06 暂直接 require session.runCheck；contract test 验证两条路径结果一致
+//   - 后续如 runCheck 需要做 worker / 主进程语义分歧（如 worker 内不调 backup API），可解耦此 alias
+const runCheck = runCheckCore;
+
 module.exports = {
   importFlowFiles,
   importBillFiles,
@@ -548,9 +806,13 @@ module.exports = {
   importBillFilesWithOverwrite,
   peekImportTarget,
   runCheck,
+  runCheckCore, // v2.1.10 A3 T09：worker 端可直接调用的纯函数版本
   cleanupAfterRunBackground,
   cleanupOrphanData,
   getSessionStatus,
   clearMonth,
-  listMonths
+  listMonths,
+  // v2.1.10 A3 Phase 2 T13：cancel 工具
+  CancelError,
+  createCancelToken
 };

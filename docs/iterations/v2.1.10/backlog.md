@@ -65,18 +65,29 @@ N4-cont-2 (FK CASCADE) ── 与 N4-cont-1 强关联（同收单模块 DB 改�
 | N4-cont-2 FK 改造 | v2.1.9 N5 已锁定的 channels FK 范式 |
 | N4-cont-1 体积治理与 v2.1.9 N4 重构（顺带项）一致性 | v2.1.9 顺带项 N4 重构（D22=是） |
 
-## 待 spec 阶段决策点（β 范围预留）
+## 待 spec 阶段决策点（β 范围预留 — v0.2 全部拍板）
 
-| ID | 主题 | 决策点 | PM 倾向 |
-|---|---|---|---|
-| **D23** | A3 | 架构选型：worker_threads（Node 原生）vs Electron utilityProcess（更深整合） | 待 POC |
-| **D24** | A3 | worker DB 连接：独立 connection 还是 message-based RPC | 独立 connection（简单） |
-| **D25** | A4 | 是否做（若 A3 解决主进程阻塞则不做） | 待 A3 落地后评估 |
-| **D26** | N4-cont-1 | 保留窗口策略：最近 N 月 / N 个 run / N MB | 待 spec 拍板 |
-| **D27** | N4-cont-1 | 手动清入口 UI 位置：收单模块独立按钮 / 应用设置弹框 | 收单模块独立按钮 |
-| **D28** | N4-cont-2 | FK CASCADE 改造范围：仅 `diff_rows.bill_import_id` + `run_id` / 顺带其他表 | 仅这 2 个 FK |
+| ID | 主题 | 决策点 | PM 倾向（v0.1） | 用户最终拍板（v0.2） |
+|---|---|---|---|---|
+| **D23** | A3 | 架构选型：worker_threads（Node 原生）vs Electron utilityProcess（更深整合） | 待 POC | ✅ **(a) worker_threads**（2026-05-28 Phase 0 POC 实测胜出 — 启动 4.8x + IPC 3.5x；详 `scripts/poc/v2.1.10-a3-comparison.md`）|
+| **D24** | A3 | worker DB 连接：独立 connection 还是 message-based RPC | 独立 connection（简单） | ✅ **(a) 独立 connection**（2026-05-28 Phase 0 POC DatabaseSync 两栈均通过；详 POC §三）|
+| **D25** | A4 | 是否做（若 A3 解决主进程阻塞则不做） | 待 A3 落地后评估 | ✅ **(b) 做 A4**（2026-05-28 评审拍板 — 不等 A3 实测；防 cancel 响应慢 + 进度回调精细化是 hard requirement；详 PRD §四 D25）|
+| **D26** | N4-cont-1 | 保留窗口策略：最近 N 月 / N 个 run / N MB | 待 spec 拍板 | ✅ **(e) 7 天短窗口 + settings 可调 1-30 天**（2026-05-28 评审拍板 — N4-cont-1 范围收敛为仅清"对账成功"行 raw_json，7 天足够复查；详 PRD §四 D26）|
+| **D27** | N4-cont-1 | 手动清入口 UI 位置：收单模块独立按钮 / 应用设置弹框 | 收单模块独立按钮 | ✅ **(-) N/A 无 UI**（2026-05-28 评审拍板 — 复用 v2.1.9 N1' idle 30min cleanup 自动触发，0 UI；详 PRD §四 D27）|
+| **D28** | N4-cont-2 | FK CASCADE 改造范围：仅 `diff_rows.bill_import_id` + `run_id` / 顺带其他表 | 仅这 2 个 FK | ✅ **(a) 仅这 2 个 FK**（接受 PM 倾向）|
+
+## N4-cont-1 重大方案变更（v0.2 reverse sync，非 D 决策点）
+
+| 维度 | v0.1 | v0.2 |
+|---|---|---|
+| **清理范围** | 清所有老月份 raw_json | **仅清"对账成功"行 raw_json**（保留差异行）|
+| **触发** | 手动按钮 + 启动期标记 | **复用 v2.1.9 N1' idle 30min cleanup**（src/main.js:11155-11178）|
+| **保留窗口** | 6 月 + 500MB 双门槛 | **7 天**（settings retention_days 单键，可调 1-30）|
+| **UI** | 收单模块独立按钮 + 弹框 | **0 UI** |
+| **工期** | ~5 天 | ~2-3 天 |
+| **依据** | PM 预测式立项 | 用户评审追问 + `diff_rows` schema 不冗余存字段（`src/backend/database/migrations.js:1506`）→ 仅清成功行可保留 diff xlsx 重导能力（`src/main-process/acquiring-bill-currency-writer.js:184`）|
 
 ---
 
-**当前状态**：v0.1（2026-05-27 — β 范围立项，等 v2.1.9 α 提 PR 后启动 spec 评审）。
-**下一步**：v2.1.9 α PR 提交后 PM 立即起草 PRD-v2.1.10.md / spec.md / tasks.md / manual-test-checklist.md。
+**当前状态**：v0.2（2026-05-28 — D23-D28 全部拍板 + Phase 0 POC 完成 + N4-cont-1 方案变更落地）。
+**下一步**：Phase 1 启动 — T06-T11 worker 框架 + DB 连接 + 错误序列化（详 tasks.md §四）。

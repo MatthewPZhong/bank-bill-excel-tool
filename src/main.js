@@ -18,6 +18,17 @@ const { applyWatermark } = require('./main-process/workbook-watermark');
 const acquiringBillCurrencySession = require('./main-process/acquiring-bill-currency-session');
 // v2.1.8 N1：before-quit 钩子需 module-level runRepo（IPC handler 内 require 来不及）
 const runRepo = require('./backend/acquiring-bill-currency-db/run-repository');
+// v2.1.10 A3 T10：runCheck 跨进程化 — worker pool 在主进程单例
+//   - dispatchRunCheck：IPC handler 调用入口（替代 session.runCheck 直调）
+//   - cancel：acquiringBillCurrency:run:cancel handler 转发用
+//   - isBusy：N1' idle cleanup 协调用（Phase 2 T12）
+//   - shutdown：app.before-quit 时清理（Phase 2 T15）
+const runCheckWorkerPool = require('./main-process/run-check-worker-pool');
+// v2.1.10 N4-cont-1 T23 (Phase 4)：raw_json idle 自动清理函数
+//   - 复用 v2.1.9 N1' idle 30min cleanup 计时器（spec §4.3.1）
+//   - 仅清「对账成功」（不在 diff_rows）且 imported_at < retentionDays 天前的 bill_imports.raw_json
+//   - 差异行 raw_json 永远保留（writer.js:184 重导差异 xlsx 依赖）
+const { clearStaleSuccessfulRawJson } = require('./backend/acquiring-bill-currency-db/raw-json-retention');
 
 // v2.1.8 N1' (v0.7)：idle 30min 自动 cleanup 计时器（spec §3.2.2 N1''-D6 ~ D13）
 //   - lastActivityTs：renderer 上报的用户最后活动时间（IPC `app:user-activity`），main 也用 mutex 间接判定（D6 AND 设计）
@@ -10585,7 +10596,10 @@ function registerNewAccountHandlers() {
 
   // v2.1.7 F6：进度事件 forwarder（spec §6.3 改动点 2）
   //   - createImportProgressForwarder：100ms 节流；stage='reading' 切换事件必发（文件切换）
-  //   - createRunProgressForwarder：无节流（每 run 仅 6 个事件）
+  //   - createRunProgressForwarder：无节流（v2.1.10 SR-FIX-1 round 2 P1-9 reverse sync — 注释过时修订）
+  //     v2.1.7 时每 run 仅 6 个事件；v2.1.10 A4 chunked 后每 run 6 + chunkCount 事件
+  //     （500w 行 / chunk=10w = 50 chunks → 56 events；5000w 行 → 506 events）
+  //     当前不节流；renderer 端 IPC listener 渲染抖动风险随数据量提升 — chunkCount > 100 时考虑节流（v2.1.11+）
   //   - try/catch swallow webContents.send 失败（参考 main.js:9520 pending:import:progress 范式）
   function createImportProgressForwarder(event) {
     if (!event || !event.sender) return null;
@@ -10611,7 +10625,7 @@ function registerNewAccountHandlers() {
   // v2.1.7 F7-B1：runCheck 完成/失败弹系统通知（spec §7.5.2 / PRD §十一-B1）
   //   success：「收单单据币种校验」{monthKey} 对账完成（共 N 行差异）
   //   error：  「收单单据币种校验」对账失败：{message}（body 200 字符截断兜底 macOS 通知中心）
-  //   不弹 cancel 通知（仅 success + 真正 error）
+  //   cancelled (v2.1.10 SR-FIX-1 round 2 P1-4)：「收单单据币种校验」{monthKey} 已取消（轻量提示，不当错误）
   //   helper 内部 try/catch swallow，通知失败不影响 IPC return
   //   Notification.isSupported() 兜底极端环境（如无 GUI 的 CI / SSH 头）
   function notifyAcquiringBillCurrencyResult(monthKey, kind, payload) {
@@ -10622,6 +10636,11 @@ function registerNewAccountHandlers() {
       if (kind === 'success') {
         const mismatch = (payload && typeof payload.mismatchRows === 'number') ? payload.mismatchRows : 0;
         body = `${monthKey} 对账完成（共 ${mismatch} 行差异）`;
+      } else if (kind === 'cancelled') {
+        // v2.1.10 SR-FIX-1 round 2 P1-4：用户主动取消（CancelError），轻量提示 — 不视为错误
+        //   spec §2.4 设计契约 + CancelError class 注释明确：业务语义是用户主动取消
+        const stage = payload && payload.stage ? String(payload.stage) : '';
+        body = stage ? `${monthKey} 已取消（${stage}）` : `${monthKey} 已取消`;
       } else {
         const msg = (payload && payload.message) ? String(payload.message) : '未知错误';
         body = `对账失败：${msg}`.slice(0, 200);
@@ -10755,6 +10774,13 @@ function registerNewAccountHandlers() {
   // v0.8 fix5：runCheck 改 async，传 storageRoot 让 session 同步产出 diff.xlsx + report.xlsx
   // v0.12 fix9：handler 接入 operation lock；runCheck return 后异步触发 cleanup（不阻塞 IPC return）
   // v2.1.7 F6：透传 event → onProgress forwarder（spec §6.3 改动点 2）
+  // v2.1.10 A3 T10：runCheck 改走 worker pool dispatchRunCheck（spec §2.1 进程边界）
+  //   - 长任务在 worker 进程内执行（不阻塞主进程 event loop / IPC / 渲染）
+  //   - progress 事件通过 callback → createRunProgressForwarder forward 到 renderer（IPC 通道不变）
+  //   - log 事件通过 callback → appendActivityLogEntry forward（spec §1.2：worker 不直写 log）
+  //   - 错误透传：worker error → dispatchRunCheck reject → handler catch → 维持现有 status='error' 返回格式
+  //   - op lock + notification 现有路径保留
+  //   - N1' idle cleanup 协调（worker busy 时 skip）留 Phase 2 T12 改 setupIdleCleanupTimer
   trackedIpcHandle('acquiringBillCurrency:run', '收单单据币种校验', '开始运行', async (event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const { monthKey } = payload || {};
@@ -10767,9 +10793,40 @@ function registerNewAccountHandlers() {
     try {
       const storageRoot = ensureStorageRoot();
       const onProgress = createRunProgressForwarder(event);
-      result = await acquiringBillCurrencySession.runCheck({ db: database.db, monthKey, storageRoot, onProgress });
+      // v2.1.10 A4 T18：从 settings 读 chunkSize（默认 100000；范围 1w-100w，外回退 default）
+      const chunkSize = typeof database.getAcquiringBillChunkSize === 'function'
+        ? database.getAcquiringBillChunkSize()
+        : undefined;
+      // v2.1.10 A3 T10：worker pool dispatch（替代 session.runCheck 主进程直调）
+      //   - __dbPath 传 database.dbPath（worker 内 new DatabaseSync(dbPath) — D24 独立 connection）
+      //   - onLog：worker 内 appendModuleLog → message pipe → 主进程 appendActivityLogEntry
+      //     （避免主/子进程并发写 app_activity_log.txt 的 read-modify-write race）
+      // v2.1.10 A4 T18：chunkSize 透传 worker → runCheckCore → insertDiffRowsByJoinChunked
+      result = await runCheckWorkerPool.dispatchRunCheck(
+        {
+          __dbPath: database.dbPath,
+          monthKey,
+          storageRoot,
+          chunkSize,
+        },
+        {
+          onProgress,
+          onLog: (entry) => {
+            try {
+              appendActivityLogEntry(entry || {});
+            } catch (_e) { /* swallow — log forwarder 失败不阻塞业务 */ }
+          },
+        }
+      );
     } catch (err) {
       releaseOpLock();
+      // v2.1.10 SR-FIX-1 round 2 P1-4：CancelError 走 cancelled 路径（spec §2.4 设计契约）
+      //   CancelError class 注释明确：业务语义=用户主动取消；handler 应识别，不弹错误 Notification
+      //   错误 source 失败时仍弹 error；cross-process worker → instanceof 不可靠 → 用 err.name
+      if (err && err.name === 'CancelError') {
+        notifyAcquiringBillCurrencyResult(monthKey, 'cancelled', { stage: err.stage });
+        return { status: 'cancelled', message: err.message, stage: err.stage };
+      }
       // v2.1.7 F7-B1：error 路径弹通知（spec §7.5.2）
       notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
       return { status: 'error', message: err && err.message ? err.message : String(err) };
@@ -10782,6 +10839,158 @@ function registerNewAccountHandlers() {
     // v2.1.7 F7-B1：success 路径弹通知（spec §7.5.2）
     notifyAcquiringBillCurrencyResult(monthKey, 'success', { mismatchRows: result.mismatchRows });
     return { status: 'success', ...result };
+  });
+
+  // v2.1.10 A3 T10：cancel handler（Phase 1 提供 API；Phase 2 T13 完善 graceful cancel）
+  //   - 调 workerPool.cancel() 设 cancelToken；当前 worker 内 runCheckCore 未读 cancelToken，
+  //     所以 Phase 1 cancel 不真打断（worker 完成当前 runCheck 后自然结束）
+  //   - Phase 2 T13 在 runCheckCore 内 5 阶段间 cancelToken check + ROLLBACK
+  ipcMain.handle('acquiringBillCurrency:run:cancel', (_event, payload = {}) => {
+    const jobId = payload && payload.jobId ? payload.jobId : null;
+    try {
+      const ok = runCheckWorkerPool.cancel(jobId);
+      return { status: ok ? 'success' : 'no-active-job' };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // v2.1.10 A4 T19：resume handler — 续跑 chunk_progress.status='partial' 的 run
+  //   - renderer 暂不暴露 UI（spec §三 / PRD §四 — v2.1.11+ 评估 UI）
+  //   - IPC 通道留好供 Phase 4-6 / SR-FIX 阶段加 UI；本 handler 用作集成测试 / 高级用户调用
+  //   - payload: { monthKey, runId? }
+  //     - 不传 runId：自动找该月最近一个 chunk_progress.status='partial' 的 run
+  //     - 传 runId：复用该 runId（caller 已知具体 run；验证 month_key 匹配）
+  //   - 返回：与 run handler 一致格式 { status: 'success', runId, ... } / { status: 'error', message }
+  trackedIpcHandle('acquiringBillCurrency:run:resume', '收单单据币种校验', '续跑（chunked resume）', async (event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
+    const { monthKey, runId: payloadRunId } = payload || {};
+    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
+      return { status: 'error', message: 'monthKey 格式错误（应为 YYYY-MM）' };
+    }
+    const lock = tryAcquireOpLock('run', monthKey);
+    if (!lock.acquired) return { status: 'error', message: lock.message };
+
+    let result;
+    try {
+      const runRepoLocal = require('./backend/acquiring-bill-currency-db/run-repository');
+      // 找出要 resume 的 run
+      let targetRunId = payloadRunId;
+      let progress;
+      if (!targetRunId) {
+        // v2.1.10 SR-FIX-1 round 2 P1-5：扫该月所有可恢复 chunk_progress 的 runs
+        //   原实施只取 getLatestRun → 如最近 run 是 complete（如刚跑完新 run），
+        //   前一个 run 是 partial → 用户无法 resume 前一个 partial
+        //   修复后：listPartialRuns 按 ran_at DESC 返回所有可恢复 → 取第一个（最近可恢复）
+        // v2.1.10 SR-FIX-1 Round 4 F1：listPartialRuns 已扩为返回 partial OR in-progress
+        const partialRuns = runRepoLocal.listPartialRuns(database.db, monthKey);
+        if (!partialRuns || partialRuns.length === 0) {
+          releaseOpLock();
+          return { status: 'error', message: `月份 ${monthKey} 暂无可恢复 run，无法 resume（上次 run 可能已跑完）` };
+        }
+        const latestPartial = partialRuns[0];
+        targetRunId = latestPartial.id;
+        progress = latestPartial.chunk_progress;
+      } else {
+        // caller 已知具体 runId — 直接读 progress（校验 month_key 一致）
+        progress = runRepoLocal.getRunChunkProgress(database.db, targetRunId);
+        if (!progress) {
+          releaseOpLock();
+          return { status: 'error', message: `run ${targetRunId} 无 chunk_progress 记录，无法 resume` };
+        }
+      }
+      // v2.1.10 SR-FIX-1 Round 4 F1：partial OR in-progress 均允许 resume
+      //   in-progress 场景：first-chunk crash + failureListener 未及时兜底（如重启后还未跑到）
+      //   → 应允许用户直接调 resume 续跑；resume 内部从 lastCompletedChunkIndex+1 起跑（in-progress 初始 -1 → 从 0 起跑 == 重头）
+      if (!['partial', 'in-progress'].includes(progress.status)) {
+        releaseOpLock();
+        return { status: 'error', message: `run ${targetRunId} 状态为 ${progress.status}，无需 resume` };
+      }
+
+      const storageRoot = ensureStorageRoot();
+      const onProgress = createRunProgressForwarder(event);
+      // v2.1.10 SR-FIX-1 Round 6 H4：resume 时 chunkSize 优先从 chunk_progress 复用
+      //   触发场景（Codex Round 5 四复审 P2 资金红线 finding）：
+      //     用户跑到一半 cancel → settings 改 chunk size（如 100000 → 10000）→ resume
+      //     原实现读当前 settings → insertDiffRowsByJoinChunked 用 OFFSET=chunkIndex*chunkSize 计算错位
+      //     → diff_rows 行 skip / 重复（与全新 run byte-for-byte 不一致）
+      //   修复：优先复用 progress.chunkSize（H1 占位 / onChunkDone 持久化）
+      //     - 持久化值缺失（老 partial run）→ fallback 当前 settings + warning log
+      //     - 持久化值与当前 settings 不一致 → warning log（提示用户）；用持久化值（资金红线优先）
+      const currentSettingsChunkSize = typeof database.getAcquiringBillChunkSize === 'function'
+        ? database.getAcquiringBillChunkSize()
+        : undefined;
+      let chunkSize;
+      if (Number.isInteger(progress.chunkSize) && progress.chunkSize > 0) {
+        chunkSize = progress.chunkSize;
+        if (Number.isInteger(currentSettingsChunkSize) && currentSettingsChunkSize !== progress.chunkSize) {
+          // H4：mismatch warning — 用户改 settings 后 resume；用持久化值优先（资金红线）
+          try {
+            appendActivityLogEntry({
+              level: 'warning',
+              source: 'main',
+              domain: 'acquiring-bill-currency',
+              message: '[acquiring-bill-currency:resume] chunkSize mismatch — 用持久化值（H4 资金红线护栏）',
+              details: [
+                `runId=${targetRunId}`,
+                `monthKey=${monthKey}`,
+                `progress.chunkSize=${progress.chunkSize}`,
+                `currentSettings.chunkSize=${currentSettingsChunkSize}`,
+              ],
+            });
+          } catch (_e) { /* swallow */ }
+        }
+      } else {
+        // 老 partial run（升级前 chunk_progress 没 chunkSize 字段）→ fallback 当前 settings
+        chunkSize = currentSettingsChunkSize;
+        try {
+          appendActivityLogEntry({
+            level: 'warning',
+            source: 'main',
+            domain: 'acquiring-bill-currency',
+            message: '[acquiring-bill-currency:resume] chunk_progress 缺 chunkSize（老 partial run）— fallback settings',
+            details: [
+              `runId=${targetRunId}`,
+              `monthKey=${monthKey}`,
+              `fallback chunkSize=${chunkSize}`,
+            ],
+          });
+        } catch (_e) { /* swallow */ }
+      }
+
+      // 透传 resumeFromRun = { runId, lastCompletedChunkIndex } → worker → runCheckCore
+      //   runCheckCore 跳过 stage 1-3（复用旧 runId / 旧 stats），stage 4' 从 lastCompletedChunkIndex+1 起跑
+      result = await runCheckWorkerPool.dispatchRunCheck(
+        {
+          __dbPath: database.dbPath,
+          monthKey,
+          storageRoot,
+          chunkSize,
+          resumeFromRun: {
+            runId: targetRunId,
+            lastCompletedChunkIndex: progress.lastCompletedChunkIndex,
+          },
+        },
+        {
+          onProgress,
+          onLog: (entry) => {
+            try { appendActivityLogEntry(entry || {}); } catch (_e) { /* swallow */ }
+          },
+        }
+      );
+    } catch (err) {
+      releaseOpLock();
+      // v2.1.10 SR-FIX-1 round 2 P1-4：CancelError 走 cancelled 路径（同 run handler）
+      if (err && err.name === 'CancelError') {
+        notifyAcquiringBillCurrencyResult(monthKey, 'cancelled', { stage: err.stage });
+        return { status: 'cancelled', resumed: true, message: err.message, stage: err.stage };
+      }
+      notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+    releaseOpLock();
+    notifyAcquiringBillCurrencyResult(monthKey, 'success', { mismatchRows: result.mismatchRows });
+    return { status: 'success', resumed: true, ...result };
   });
 
   // v0.8 fix5：export = 另存为最近 run 的 diff.xlsx（fs.copyFile）
@@ -11054,6 +11263,119 @@ app.whenReady()
         stack: err && err.stack ? err.stack : undefined
       });
     }
+
+    // v2.1.10 A3 Phase 2 T14：注册 worker pool failure listener
+    //   - worker exit (code≠0) / error 事件 → pool 自动 reject activeJob + 调本回调
+    //   - 主进程职责：① 释放 op lock；② Notification 通知用户；③ activity log；④ 下次 dispatch cold-start（pool 自动 — workerInstance=null）
+    //   - hadActiveJob=true：有 job 正在跑挂掉 → 必须释放 op lock（caller IPC handler catch 也会 release，
+    //     但 failure 路径走 reject 后 caller catch 释放；此处兜底释放防 caller 异常路径漏释）
+    //   - 当 caller 已 release（reject 路径正常走完）则此处 release 是 no-op（lock.inFlight=false 时 release 幂等）
+    try {
+      runCheckWorkerPool.setFailureListener((info) => {
+        try {
+          appendActivityLogEntry({
+            level: 'error',
+            source: 'main',
+            domain: 'acquiring-bill-currency',
+            message: `[acquiring-bill-currency] worker ${info && info.source} 异常（A3 Phase 2 T14 recover）`,
+            details: [
+              `message=${info && info.message ? info.message : 'unknown'}`,
+              `hadActiveJob=${info && info.hadActiveJob ? 'true' : 'false'}`,
+            ],
+            stack: info && info.cause && info.cause.stack ? info.cause.stack : undefined
+          });
+        } catch (_logErr) { /* swallow */ }
+        // 释放 op lock（防 caller catch 漏释；release 内部不抛错 — 状态置为 inFlight=false）
+        try { releaseAcquiringBillCurrencyOpLock(); } catch (_lockErr) { /* swallow */ }
+        // v2.1.10 SR-FIX-1 round 2 P1-7：worker crash 时主进程兜底设 chunk_progress='partial'
+        //   触发场景：worker 跑到 chunk M/N 突然 process.exit(1) / OOM / SIGKILL → catch 块（runCheckCore L367-394）不执行
+        //     → chunk_progress 停留在 'in-progress'（onChunkDone 写的最后一次值）
+        //     → resume handler 检查 progress.status !== 'partial' → 拒绝 resume
+        //   修复：crash 后扫所有 chunk_progress.status='in-progress' 的 runs（生产正常路径下 in-progress
+        //     只在 chunk 边界短暂存在；crash 时残留）→ 兜底改成 'partial' → resume 可用
+        //   失败容忍：try/catch + activity log（不影响其他 failure 处理路径）
+        //
+        // v2.1.10 SR-FIX-1 Round 7 I1：透传 chunkSize（Codex 5 次复审 finding — 资金红线 P2）
+        //   原 Round 2 P1-7 实现：setRunChunkProgress(partial) 没传 chunkSize 入参
+        //     → setRunChunkProgress 内部不写 chunkSize 字段 → 持久化 partial JSON 丢失原 in-progress 的 chunkSize
+        //   触发场景（Round 6 H4 漏抓的路径）：
+        //     worker 跑 chunkSize=100000 到 chunk 2 → SIGKILL → failureListener 触发 → 此处 in-progress → partial
+        //     → 重写后 chunk_progress.chunkSize 丢失（变 undefined）
+        //     → resume handler fallback 当前 settings 的 chunkSize（如 10000） → OFFSET 偏移错位 → diff_rows 行 skip/重复
+        //   修复：透传 progress.chunkSize（H1 / onChunkDone 已写入持久化值）
+        //     - 老 partial run（升级前无 chunkSize 字段）→ progress.chunkSize undefined → setRunChunkProgress 不写
+        //       → resume handler fallback settings（Round 6 H4 兜底路径仍正确）
+        //     - 新场景（Round 6 H1 / H4 之后写入的 progress 都带 chunkSize）→ 透传保留 → 资金红线护栏闭合
+        if (info && info.hadActiveJob && database && database.db) {
+          try {
+            const inProgressRuns = database.db.prepare(`
+              SELECT id, month_key, chunk_progress
+              FROM acquiring_bill_currency_runs
+              WHERE chunk_progress IS NOT NULL
+            `).all();
+            for (const row of inProgressRuns) {
+              try {
+                const progress = JSON.parse(row.chunk_progress);
+                if (progress && progress.status === 'in-progress') {
+                  runRepo.setRunChunkProgress(database.db, {
+                    runId: row.id,
+                    lastCompletedChunkIndex: progress.lastCompletedChunkIndex,
+                    totalChunks: progress.totalChunks,
+                    status: 'partial',
+                    // Round 7 I1：透传 chunkSize 保证 resume 用原始 chunk size（资金红线 — 防 OFFSET 错位）
+                    //   setRunChunkProgress 内部对 undefined / 非正整数自动跳过写入（向后兼容老 row）
+                    chunkSize: progress.chunkSize,
+                  });
+                  appendActivityLogEntry({
+                    level: 'warning',
+                    source: 'main',
+                    domain: 'acquiring-bill-currency',
+                    message: '[SR-FIX-1 P1-7] worker crash 后 chunk_progress in-progress → partial 兜底',
+                    details: [
+                      `runId=${row.id}`,
+                      `monthKey=${row.month_key}`,
+                      `lastCompletedChunkIndex=${progress.lastCompletedChunkIndex}`,
+                      `totalChunks=${progress.totalChunks}`,
+                      // Round 7 I1：日志记录 chunkSize 透传（含 undefined 老 row）
+                      `chunkSize=${progress.chunkSize == null ? '(legacy/undefined)' : progress.chunkSize}`,
+                    ]
+                  });
+                }
+              } catch (_parseErr) { /* swallow — 破坏 JSON 跳过 */ }
+            }
+          } catch (scanErr) {
+            try {
+              appendActivityLogEntry({
+                level: 'error',
+                source: 'main',
+                domain: 'acquiring-bill-currency',
+                message: '[SR-FIX-1 P1-7] worker crash chunk_progress 兜底扫描失败',
+                details: [scanErr && scanErr.message ? scanErr.message : String(scanErr)],
+                stack: scanErr && scanErr.stack ? scanErr.stack : undefined
+              });
+            } catch (_logErr) { /* swallow */ }
+          }
+        }
+        // Notification（用户提示）— 复用既有 notifyAcquiringBillCurrencyResult error 路径
+        //   ⚠️ notifyAcquiringBillCurrencyResult 在 IPC handler 闭包内；模块顶层无法访问
+        //   直接构造 Notification — 与 notifyAcquiringBillCurrencyResult 内部一致的 isSupported 兜底
+        try {
+          if (Notification && typeof Notification.isSupported === 'function' && Notification.isSupported()) {
+            const body = `worker 异常请重试：${(info && info.message) ? String(info.message).slice(0, 160) : 'worker crash'}`;
+            new Notification({ title: '「收单单据币种校验」', body }).show();
+          }
+        } catch (_notifyErr) { /* swallow — 通知失败不影响业务 */ }
+      });
+    } catch (err) {
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'acquiring-bill-currency',
+        message: '[acquiring-bill-currency] setFailureListener 注册失败',
+        details: [err && err.message ? err.message : String(err)],
+        stack: err && err.stack ? err.stack : undefined
+      });
+    }
   })
   .catch((error) => {
     handleStartupFailure(error);
@@ -11065,52 +11387,60 @@ app.whenReady()
 //   并发隔离：用 tryAcquireOpLock('cleanup') 防与 import/run/export 冲突
 //   失败容忍：单 run 失败仅日志，继续清下一个；启动期 cleanupOrphanData 兜底
 let cleanupBackgroundInProgress = false;
+// v2.1.10 SR-FIX-1 round 2 P0-4：返回 Promise（spec §4.3.2 顺序契约）
+//   - 早返回路径（cleanupBackgroundInProgress / 无 db / 无 pending / 锁拿不到）→ 立即 resolve（不算执行）
+//   - 实际执行路径 → 主 cleanup 全部完成后 resolve
+//   - 兼容现有 caller（启动期 + 进入模块兜底 + idle tick）— fire-and-forget 不 await 不破坏既有行为
+//   - idle tick caller 可 await 后再调 raw_json 清理，保证顺序契约
 function triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded() {
-  if (cleanupBackgroundInProgress) return;
-  if (!database || !database.db) return;
+  if (cleanupBackgroundInProgress) return Promise.resolve();
+  if (!database || !database.db) return Promise.resolve();
   let pendingRuns;
   try {
     pendingRuns = runRepo.listPendingCleanupRuns(database.db);
   } catch (_e) {
-    return;
+    return Promise.resolve();
   }
-  if (!pendingRuns || pendingRuns.length === 0) return;
+  if (!pendingRuns || pendingRuns.length === 0) return Promise.resolve();
   const cleanupLock = tryAcquireAcquiringBillCurrencyOpLock('cleanup', null);
-  if (!cleanupLock.acquired) return; // import/run/export 进行中，放弃这次（下次入模块再试）
+  if (!cleanupLock.acquired) return Promise.resolve(); // import/run/export 进行中，放弃这次（下次入模块再试）
   cleanupBackgroundInProgress = true;
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('acquiringBillCurrency:cleanup-background:toast', {
       stage: 'start', pendingCount: pendingRuns.length
     });
   }
-  setImmediate(async () => {
-    try {
-      for (const run of pendingRuns) {
-        try {
-          await acquiringBillCurrencySession.cleanupAfterRunBackground({
-            db: database.db, monthKey: run.month_key, runId: run.id
-            // v2.1.8 N1' (v0.7)：includeDiff 默认 false → 只清 flow + bill，保留 diff
-          });
-          runRepo.clearCleanupPending(database.db, { runId: run.id });
-        } catch (cleanErr) {
-          // v2.1.9 SR-log-1：替换 console.error → 日志上报
-          appendActivityLogEntry({
-            level: 'error',
-            source: 'main',
-            domain: 'acquiring-bill-currency',
-            message: `[acquiring-bill-currency] background cleanup run ${run.id} 失败`,
-            details: [cleanErr && cleanErr.message ? cleanErr.message : String(cleanErr)],
-            stack: cleanErr && cleanErr.stack ? cleanErr.stack : undefined
-          });
+  return new Promise((resolve) => {
+    setImmediate(async () => {
+      try {
+        for (const run of pendingRuns) {
+          try {
+            await acquiringBillCurrencySession.cleanupAfterRunBackground({
+              db: database.db, monthKey: run.month_key, runId: run.id
+              // v2.1.8 N1' (v0.7)：includeDiff 默认 false → 只清 flow + bill，保留 diff
+            });
+            runRepo.clearCleanupPending(database.db, { runId: run.id });
+          } catch (cleanErr) {
+            // v2.1.9 SR-log-1：替换 console.error → 日志上报
+            appendActivityLogEntry({
+              level: 'error',
+              source: 'main',
+              domain: 'acquiring-bill-currency',
+              message: `[acquiring-bill-currency] background cleanup run ${run.id} 失败`,
+              details: [cleanErr && cleanErr.message ? cleanErr.message : String(cleanErr)],
+              stack: cleanErr && cleanErr.stack ? cleanErr.stack : undefined
+            });
+          }
         }
+      } finally {
+        releaseAcquiringBillCurrencyOpLock();
+        cleanupBackgroundInProgress = false;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('acquiringBillCurrency:cleanup-background:toast', { stage: 'done' });
+        }
+        resolve();
       }
-    } finally {
-      releaseAcquiringBillCurrencyOpLock();
-      cleanupBackgroundInProgress = false;
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('acquiringBillCurrency:cleanup-background:toast', { stage: 'done' });
-      }
-    }
+    });
   });
 }
 
@@ -11152,16 +11482,87 @@ function loadIdleCleanupMsFromSettings() {
   return 30;
 }
 
+// v2.1.10 Phase 2 T12：worker busy / grace 内 skip idle cleanup（spec §2.3.2）
+//   - workerPool.isBusy()=true：worker 正在跑 runCheck，禁止 cleanup（避免抢 DB 写锁）
+//   - Phase 1 surprise #1 mitigate：worker reject 后 isBusy() 立即翻 false，但 worker 内 DB 事务可能仍在
+//     → 30s grace（默认）内不触发 cleanup；下个 5min tick 再判
+//   - GRACE_MS 可在 unit test 中 monkey-patch；生产固定 30s
+const RUN_CHECK_WORKER_GRACE_MS = 30000;
+
 function setupIdleCleanupTimer() {
   if (idleCleanupTimer) return; // 重入保护
   // v2.1.9 N1-settings：启动期从 settings 读阈值（默认 30）
   loadIdleCleanupMsFromSettings();
-  idleCleanupTimer = setInterval(() => {
+  idleCleanupTimer = setInterval(async () => {
     try {
       const elapsed = Date.now() - lastUserActivityTs;
       if (elapsed < IDLE_CLEANUP_MS) return;
+
+      // v2.1.10 Phase 2 T12：worker busy guard（spec §2.3.2 协调策略）
+      //   worker 正在跑 runCheck → skip 本次 idle cleanup（避免与 worker DB 写抢锁）
+      if (runCheckWorkerPool && typeof runCheckWorkerPool.isBusy === 'function' && runCheckWorkerPool.isBusy()) {
+        appendActivityLogEntry({
+          level: 'info',
+          source: 'main',
+          domain: 'acquiring-bill-currency',
+          message: '[acquiring-bill-currency] idle cleanup skip — worker busy（spec §2.3.2）',
+          details: [`activeJobId=${(runCheckWorkerPool.getStatus && runCheckWorkerPool.getStatus().activeJobId) || ''}`]
+        });
+        return;
+      }
+
+      // v2.1.10 Phase 2 T12：30s grace（Phase 1 surprise #1 mitigate）
+      //   isBusy() 已 false 但 worker 刚 reject/done — worker 内 DB 事务可能仍在
+      //   30s grace 内不触发 cleanup；下个 tick 再判
+      if (runCheckWorkerPool && typeof runCheckWorkerPool.getLastBusyEndTs === 'function') {
+        const lastBusyEndTs = runCheckWorkerPool.getLastBusyEndTs();
+        if (lastBusyEndTs > 0 && Date.now() - lastBusyEndTs < RUN_CHECK_WORKER_GRACE_MS) {
+          // grace 期内 skip — 不写 activity log（30s 内每 5min 一次 tick 至多 1 次 grace skip，
+          // 日志噪声小可忽略；如需诊断可临时打开）
+          return;
+        }
+      }
+
+      // v2.1.10 SR-FIX-1 round 2 P0-4：顺序契约（spec §4.3.2 + PRD §五.2）
+      //   修复前：trigger() setImmediate 异步立即返回 + raw_json 同步立即跑 → 两 cleanup 并发
+      //   修复后：trigger() 返 Promise → await → raw_json 后跑 → 保证顺序契约 + 日志顺序
+      //   兼容：trigger() 早返回路径（无 pending / 已 in progress）立即 resolve；await 立即返回
+      //
       // idle 达标 → 复用进入模块兜底路径（含 mutex 抢锁 + cleanup_pending 判定 + 防重入）
-      triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
+      await triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
+
+      // === Phase 4 N4-cont-1 raw_json 清理 ===
+      //   spec §4.3 + PRD §五.2：复用 N1' idle 30min cleanup 时序
+      //   顺序：先 v2.1.8 cleanupAfterRunBackground（清 flow + bill 整行）后 raw_json 清理（NULL 化对账成功老行）
+      //   失败不阻塞主 cleanup（独立 try/catch + activity log + 下次 idle 重试）
+      //   ⚠️ 资金红线：clearStaleSuccessfulRawJson 内 NOT IN 子查询排除差异行；retentionDays 用 settings getter 范围外回退 7
+      try {
+        const retentionDays = database.getAcquiringBillRawJsonRetentionDays();
+        const rawJsonResult = clearStaleSuccessfulRawJson(database.db, { retentionDays });
+        if (rawJsonResult.clearedCount > 0) {
+          appendActivityLogEntry({
+            level: 'info',
+            source: 'main',
+            domain: 'acquiring-bill-currency',
+            message: '[N4-cont-1] idle cleanup raw_json 清理完成',
+            details: [
+              `affected=${rawJsonResult.clearedCount}`,
+              `retentionDays=${retentionDays}`,
+              `elapsedMs=${rawJsonResult.elapsedMs}`
+            ]
+          });
+        }
+      } catch (rawJsonErr) {
+        // raw_json 清失败不阻塞主 cleanup；下次 idle（30min 后）重试
+        appendActivityLogEntry({
+          level: 'error',
+          source: 'main',
+          domain: 'acquiring-bill-currency',
+          message: '[N4-cont-1] idle cleanup raw_json 清理失败（下次 idle 重试）',
+          details: [rawJsonErr && rawJsonErr.message ? rawJsonErr.message : String(rawJsonErr)],
+          stack: rawJsonErr && rawJsonErr.stack ? rawJsonErr.stack : undefined
+        });
+      }
     } catch (err) {
       // v2.1.9 SR-log-1：替换 console.error → 日志上报；idle tick 失败不阻塞下次 tick
       appendActivityLogEntry({
@@ -11189,6 +11590,40 @@ function setupIdleCleanupTimer() {
 //     6. cleanupAfterRunBackground 默认 includeDiff=false → 只清 flow + bill，保留 diff
 let cleanupQuitInProgress = false; // 防重入
 
+// v2.1.10 SR-FIX-1 round 2 P0-3：worker pool shutdown 辅助（spec §2.1.3 — 主进程退出 graceful close）
+//   - workerInstance 不存在（worker 从未启动 / 已退出）→ 立即返回 / 不 preventDefault
+//   - workerInstance 存在 → 调 shutdown(5000)；timeout 后 terminate
+//   失败 swallow + activity log（不阻塞 quit）；返回 boolean：是否需要异步 shutdown（true → caller 必须 preventDefault）
+function needsWorkerShutdown() {
+  if (!runCheckWorkerPool || typeof runCheckWorkerPool.getStatus !== 'function') return false;
+  try {
+    const status = runCheckWorkerPool.getStatus();
+    return !!(status && status.workerAlive);
+  } catch (_e) {
+    return false;
+  }
+}
+
+async function shutdownWorkerPoolGracefully() {
+  try {
+    if (runCheckWorkerPool && typeof runCheckWorkerPool.shutdown === 'function') {
+      await runCheckWorkerPool.shutdown(5000);
+    }
+  } catch (shutdownErr) {
+    // v2.1.10 SR-FIX-1 round 2 P0-3：shutdown 失败 swallow + 日志（不阻塞 app.quit）
+    try {
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'acquiring-bill-currency',
+        message: '[SR-FIX-1 P0-3] before-quit worker shutdown 失败（worker thread 将被强 kill）',
+        details: [shutdownErr && shutdownErr.message ? shutdownErr.message : String(shutdownErr)],
+        stack: shutdownErr && shutdownErr.stack ? shutdownErr.stack : undefined
+      });
+    } catch (_e) { /* swallow — 日志失败不阻塞 quit */ }
+  }
+}
+
 app.on('before-quit', (event) => {
   // usage-stats flush（不变）
   try {
@@ -11215,52 +11650,70 @@ app.on('before-quit', (event) => {
 
   // v2.1.8 N1' (v0.7)：cleanup 退出兜底（静默）
   if (cleanupQuitInProgress) return; // 重入保护（cleanup 完成 app.quit 时会再次触发 before-quit）
-  if (!database || !database.db) return;
+
+  // v2.1.10 SR-FIX-1 round 2 P0-3：worker pool shutdown（spec §2.1.3 — 主进程退出 graceful close）
+  //   决策：保守路径 — workerAlive=true 时 preventDefault + 异步 shutdown，避免 WAL/shm 残留
+  //   优先级：先 shutdown worker（防 DB 写锁残留）→ 再跑 pendingRuns cleanup → 最后 app.quit
+  const needWorker = needsWorkerShutdown();
+
   let pendingRuns;
-  try {
-    pendingRuns = runRepo.listPendingCleanupRuns(database.db);
-  } catch (listErr) {
-    // listPending 失败 → 不阻塞退出（启动期 cleanupOrphanData 会兜底）
-    // v2.1.9 SR-log-1：替换 console.error → 日志上报
-    appendActivityLogEntry({
-      level: 'error',
-      source: 'main',
-      domain: 'acquiring-bill-currency',
-      message: '[acquiring-bill-currency] before-quit listPendingCleanupRuns 失败，直接退出',
-      details: [listErr && listErr.message ? listErr.message : String(listErr)],
-      stack: listErr && listErr.stack ? listErr.stack : undefined
-    });
-    return;
+  if (database && database.db) {
+    try {
+      pendingRuns = runRepo.listPendingCleanupRuns(database.db);
+    } catch (listErr) {
+      // listPending 失败 → 不阻塞退出（启动期 cleanupOrphanData 会兜底）
+      // v2.1.9 SR-log-1：替换 console.error → 日志上报
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'acquiring-bill-currency',
+        message: '[acquiring-bill-currency] before-quit listPendingCleanupRuns 失败',
+        details: [listErr && listErr.message ? listErr.message : String(listErr)],
+        stack: listErr && listErr.stack ? listErr.stack : undefined
+      });
+      pendingRuns = null; // 走 worker-only 分支或 fast-quit
+    }
   }
-  if (!pendingRuns || pendingRuns.length === 0) return;
+  const hasPending = pendingRuns && pendingRuns.length > 0;
+
+  // Fast path：无 worker + 无 pending → 直接退出（既有行为不变）
+  if (!needWorker && !hasPending) return;
 
   event.preventDefault();
   cleanupQuitInProgress = true;
 
-  // 异步串行清（N1''-D9：当前 batch 内部 setImmediate 让出；N1''-D13：静默，无 IPC 广播）
+  // 异步串行：① shutdown worker → ② cleanup pending runs → ③ app.quit
   (async () => {
-    for (const run of pendingRuns) {
-      try {
-        await acquiringBillCurrencySession.cleanupAfterRunBackground({
-          db: database.db,
-          monthKey: run.month_key,
-          runId: run.id
-          // includeDiff 默认 false → 保留 diff（spec §3.2.1 N1''-D1/D3）
-        });
-        runRepo.clearCleanupPending(database.db, { runId: run.id });
-      } catch (cleanErr) {
-        // v2.1.9 SR-log-1：替换 console.error → 日志上报；cleanup-quit 单 run 失败容忍继续清下一个
-        appendActivityLogEntry({
-          level: 'error',
-          source: 'main',
-          domain: 'acquiring-bill-currency',
-          message: `[acquiring-bill-currency] cleanup-quit run ${run.id} (${run.month_key}) 失败`,
-          details: [cleanErr && cleanErr.message ? cleanErr.message : String(cleanErr)],
-          stack: cleanErr && cleanErr.stack ? cleanErr.stack : undefined
-        });
+    // ① worker shutdown（spec §2.1.3）— 在 cleanup 之前，避免 worker 写锁与 main cleanup 冲突
+    if (needWorker) {
+      await shutdownWorkerPoolGracefully();
+    }
+
+    // ② cleanup pending runs（v2.1.8 N1' 原逻辑保留 — N1''-D9 内部 setImmediate 让出；N1''-D13 静默）
+    if (hasPending && database && database.db) {
+      for (const run of pendingRuns) {
+        try {
+          await acquiringBillCurrencySession.cleanupAfterRunBackground({
+            db: database.db,
+            monthKey: run.month_key,
+            runId: run.id
+            // includeDiff 默认 false → 保留 diff（spec §3.2.1 N1''-D1/D3）
+          });
+          runRepo.clearCleanupPending(database.db, { runId: run.id });
+        } catch (cleanErr) {
+          // v2.1.9 SR-log-1：替换 console.error → 日志上报；cleanup-quit 单 run 失败容忍继续清下一个
+          appendActivityLogEntry({
+            level: 'error',
+            source: 'main',
+            domain: 'acquiring-bill-currency',
+            message: `[acquiring-bill-currency] cleanup-quit run ${run.id} (${run.month_key}) 失败`,
+            details: [cleanErr && cleanErr.message ? cleanErr.message : String(cleanErr)],
+            stack: cleanErr && cleanErr.stack ? cleanErr.stack : undefined
+          });
+        }
       }
     }
-    // N1''-D13：失败也 quit（启动期 cleanupOrphanData 兜底）
+    // ③ 失败也 quit（启动期 cleanupOrphanData 兜底；N1''-D13 静默）
     app.quit();
   })();
 });

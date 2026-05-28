@@ -270,6 +270,78 @@ function setAcquiringBillIdleCleanupMinutes(db, minutes) {
   setSetting(db, ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY, String(n));
 }
 
+// v2.1.10 A4 T18：收单单据 SQL JOIN chunked 分批 size（行/批）
+//   spec §3.2 拍板默认 100000；范围 [10000, 1000000]（1w-100w）
+//   选 10w 理由：cancel 响应 < 5s + 内存峰值 < 200MB + 进度回调粒度适中
+//   高级用户可调（sqlite3 直改 settings 表 + 重启）；UI 暂不暴露
+//   migration `ensureAcquiringBillChunkSizeSetting` 启动期 seed 默认 100000；本仓暴露 get/set
+//   getter 范围外值 → 回退默认 100000（资金红线兜底；不能让 chunked 永远跑不动 / 1 行 1 批 OOM）
+const ACQUIRING_BILL_CHUNK_SIZE_KEY = 'acquiring_bill_chunk_size';
+const ACQUIRING_BILL_CHUNK_SIZE_DEFAULT = 100000;
+const ACQUIRING_BILL_CHUNK_SIZE_MIN = 10000;
+const ACQUIRING_BILL_CHUNK_SIZE_MAX = 1000000;
+
+function getAcquiringBillChunkSize(db) {
+  const raw = getSetting(db, ACQUIRING_BILL_CHUNK_SIZE_KEY);
+  if (raw == null || raw === '') return ACQUIRING_BILL_CHUNK_SIZE_DEFAULT;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return ACQUIRING_BILL_CHUNK_SIZE_DEFAULT;
+  // 范围外 → 不报错，回退默认（资金红线兜底）
+  if (n < ACQUIRING_BILL_CHUNK_SIZE_MIN || n > ACQUIRING_BILL_CHUNK_SIZE_MAX) {
+    return ACQUIRING_BILL_CHUNK_SIZE_DEFAULT;
+  }
+  return n;
+}
+
+function setAcquiringBillChunkSize(db, size) {
+  const n = Number(size);
+  if (!Number.isInteger(n)) {
+    throw new Error(`acquiring_bill_chunk_size 必须是整数，收到：${JSON.stringify(size)}`);
+  }
+  if (n < ACQUIRING_BILL_CHUNK_SIZE_MIN || n > ACQUIRING_BILL_CHUNK_SIZE_MAX) {
+    throw new Error(
+      `acquiring_bill_chunk_size 必须在 ${ACQUIRING_BILL_CHUNK_SIZE_MIN}-${ACQUIRING_BILL_CHUNK_SIZE_MAX} 范围内，收到：${n}`
+    );
+  }
+  setSetting(db, ACQUIRING_BILL_CHUNK_SIZE_KEY, String(n));
+}
+
+// v2.1.10 N4-cont-1 T22 (Phase 4)：收单单据 raw_json idle 自动清理保留窗口（默认 7 天）
+//   spec §4.1.2 单键 + 范围 [1, 30] 天 + 范围外回退 7
+//   - 仅清「对账成功」（不在 acquiring_bill_currency_diff_rows 中）且 imported_at < N 天前的 bill_imports.raw_json
+//   - 差异行 raw_json 永远保留（writer.js:184 重导差异 xlsx 依赖）
+//   - getter 范围外回退默认（资金红线兜底：clearStaleSuccessfulRawJson 永不能用非法 retention 误清正常数据）
+//   - 沿用 v2.1.9 N1-settings 范式（getAcquiringBillIdleCleanupMinutes / setAcquiringBillIdleCleanupMinutes）
+const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY = 'acquiring_bill_raw_json_retention_days';
+const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT = 7;
+const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MIN = 1;
+const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MAX = 30;
+
+function getAcquiringBillRawJsonRetentionDays(db) {
+  const raw = getSetting(db, ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY);
+  if (raw == null || raw === '') return ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT;
+  // 范围外（含外部直接改 DB 写入非法值，如 0 / -1 / 31 / 'abc'）→ 不报错，回退默认（资金红线兜底）
+  if (n < ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MIN || n > ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MAX) {
+    return ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT;
+  }
+  return n;
+}
+
+function setAcquiringBillRawJsonRetentionDays(db, days) {
+  const n = Number(days);
+  if (!Number.isInteger(n)) {
+    throw new Error(`acquiring_bill_raw_json_retention_days 必须是整数，收到：${JSON.stringify(days)}`);
+  }
+  if (n < ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MIN || n > ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MAX) {
+    throw new Error(
+      `acquiring_bill_raw_json_retention_days 必须在 ${ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MIN}-${ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MAX} 天范围内，收到：${n}`
+    );
+  }
+  setSetting(db, ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY, String(n));
+}
+
 function listAccountMappings(db, templateId) {
   return db
     .prepare(`
@@ -347,4 +419,18 @@ module.exports = {
   ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT,
   ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MIN,
   ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MAX,
+  // v2.1.10 A4 T18：chunked 分批 size
+  getAcquiringBillChunkSize,
+  setAcquiringBillChunkSize,
+  ACQUIRING_BILL_CHUNK_SIZE_KEY,
+  ACQUIRING_BILL_CHUNK_SIZE_DEFAULT,
+  ACQUIRING_BILL_CHUNK_SIZE_MIN,
+  ACQUIRING_BILL_CHUNK_SIZE_MAX,
+  // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口
+  getAcquiringBillRawJsonRetentionDays,
+  setAcquiringBillRawJsonRetentionDays,
+  ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY,
+  ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT,
+  ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MIN,
+  ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MAX,
 };

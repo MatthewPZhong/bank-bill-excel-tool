@@ -20,9 +20,16 @@ const {
   ensureC3AssignAddMode,
   ensureAcquiringBillCurrencyRunsCleanupPending,
   ensureAcquiringBillIdleCleanupMinutesSetting,
+  // v2.1.10 A4 T18 / T19：chunked 分批 size settings + runs.chunk_progress 列
+  ensureAcquiringBillChunkSizeSetting,
+  ensureAcquiringBillCurrencyRunsChunkProgress,
+  // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings
+  ensureAcquiringBillCurrencyRawJsonRetentionSettings,
   ensureBillRawJsonV2Slim,
   ensureSchemaV2_1_9_N5,
   ensureScenariosNameUniqueByChannelId,
+  // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造
+  ensureDiffRowsCascadeMigration_v2_1_10,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
@@ -284,6 +291,17 @@ class AppDatabase {
     //   依赖 app_settings 表存在（启动 init 时第一段 CREATE TABLE IF NOT EXISTS 已建）
     //   幂等：INSERT OR IGNORE → 用户已改值不被覆盖
     this.ensureAcquiringBillIdleCleanupMinutesSetting();
+    // v2.1.10 A4 T18：chunked 分批 size settings（seed default=100000）
+    //   同 N1-settings 范式：依赖 app_settings 表 + INSERT OR IGNORE 不覆盖用户已改
+    this.ensureAcquiringBillChunkSizeSetting();
+    // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings（seed default=7 天）
+    //   同 N1-settings + A4 T18 范式：依赖 app_settings 表 + INSERT OR IGNORE 不覆盖用户已改
+    //   spec §八.3：与 N4-cont-2 顺序无关；任意顺序都不冲突（settings 与 schema 互不影响）
+    this.ensureAcquiringBillCurrencyRawJsonRetentionSettings();
+    // v2.1.10 A4 T19：runs.chunk_progress 列（chunked 进度 JSON 序列化）
+    //   必须在 ensureAcquiringBillCurrencyRunsCleanupPending 之后（依赖 runs 表 + 列扩展顺序）
+    //   幂等：hasColumn 检查避免重复 ADD COLUMN
+    this.ensureAcquiringBillCurrencyRunsChunkProgress();
     // v2.1.8 N4：差异表瘦身 — bill_imports.raw_json 一次性 rewrite 仅保留 9 模版字段
     //   🔴 资金红线 + 破坏性 migration；首次启动自动备份 DB 到 <dbDir>/backups/
     //   幂等：app_settings.acquiring_bill_raw_json_v2_migrated = 'true' 跳过
@@ -333,6 +351,71 @@ class AppDatabase {
         message: '[migration N4] unexpected failure (启动不阻塞，下次启动重试)',
         details: [n4Err && n4Err.message ? n4Err.message : String(n4Err)],
         stack: n4Err && n4Err.stack ? n4Err.stack : undefined
+      });
+    }
+    // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造（🔴 资金红线 + 不可逆 DB schema）
+    //   必须在 ensureAcquiringBillCurrencyTablesSupport 之后（依赖 diff_rows / runs / bill_imports 表已存在）
+    //   也必须在 ensureBillRawJsonV2Slim (v2.1.8 N4) 之后（避免 N4 重写 raw_json 期间 schema 改动冲突）
+    //   N4-cont-1 settings (上面 ensureAcquiringBillCurrencyRawJsonRetentionSettings) 与本 migration 顺序无关
+    //   （spec §八.3：settings INSERT OR IGNORE 与 schema rebuild 互不影响；固定为 settings 在前便于排查）
+    //   失败处理：try-catch + 4 status 分别日志上报；启动不阻塞，下次重试（参考 v2.1.9 N5 范式）
+    try {
+      const n4Cont2Result = this.ensureDiffRowsCascadeMigration_v2_1_10();
+      if (n4Cont2Result && n4Cont2Result.status === 'migrated') {
+        appendModuleLog({
+          level: 'info',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration N4-cont-2] diff_rows FK 已加 ON DELETE CASCADE',
+          details: [
+            `backup=${n4Cont2Result.backupPath || '(none)'}`,
+            `rowsMigrated=${n4Cont2Result.rowsAffected}`,
+            `statusReached=${n4Cont2Result.statusReached}`
+          ]
+        });
+      } else if (n4Cont2Result && n4Cont2Result.status === 'backup-failed') {
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration N4-cont-2] 备份失败，schema 未改动，下次启动重试',
+          details: [n4Cont2Result.error || '(no error message)']
+        });
+      } else if (n4Cont2Result && n4Cont2Result.status === 'conflict-detected') {
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration N4-cont-2] 行数对账失败 (rebuild new ≠ old)，需用户介入',
+          details: [
+            `备份保留: ${n4Cont2Result.backupPath || '(none)'}`,
+            n4Cont2Result.error || '(no error message)'
+          ]
+        });
+      } else if (n4Cont2Result && n4Cont2Result.status === 'migration-failed') {
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration N4-cont-2] 事务失败已回滚',
+          details: [
+            `备份保留: ${n4Cont2Result.backupPath || '(none)'}`,
+            `statusReached: ${n4Cont2Result.statusReached || '(none)'}`,
+            n4Cont2Result.error || '(no error message)'
+          ]
+        });
+      }
+      // skipped / skipped-no-table / skipped-already-cascaded / skipped-no-flag-table：静默
+      //   - skipped 是稳态正常路径（每次启动重复触达 → 不打 log 防噪音）
+      //   - skipped-no-* 是极少数边界 → 不阻塞且无操作意义
+    } catch (n4Cont2Err) {
+      appendModuleLog({
+        level: 'error',
+        source: 'main',
+        domain: 'migration',
+        message: '[migration N4-cont-2] unexpected failure (启动不阻塞，下次启动重试)',
+        details: [n4Cont2Err && n4Cont2Err.message ? n4Cont2Err.message : String(n4Cont2Err)],
+        stack: n4Cont2Err && n4Cont2Err.stack ? n4Cont2Err.stack : undefined
       });
     }
     // v2.1.7 F7-A2：启动期 ANALYZE — 让规划器统计所有索引（含 idx_acquiring_bill_currency_bill_source_file）
@@ -422,6 +505,37 @@ class AppDatabase {
     return settingsRepository.setAcquiringBillIdleCleanupMinutes(this.db, minutes);
   }
 
+  // v2.1.10 A4 T18：chunked 分批 size — seed default=100000 + 暴露 get/set 接口
+  ensureAcquiringBillChunkSizeSetting() {
+    return ensureAcquiringBillChunkSizeSetting(this.db);
+  }
+
+  getAcquiringBillChunkSize() {
+    return settingsRepository.getAcquiringBillChunkSize(this.db);
+  }
+
+  setAcquiringBillChunkSize(size) {
+    return settingsRepository.setAcquiringBillChunkSize(this.db, size);
+  }
+
+  // v2.1.10 A4 T19：runs.chunk_progress 列 migration — 启动期幂等 ADD COLUMN
+  ensureAcquiringBillCurrencyRunsChunkProgress() {
+    return ensureAcquiringBillCurrencyRunsChunkProgress(this.db);
+  }
+
+  // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings — seed default=7 + 暴露 get/set
+  ensureAcquiringBillCurrencyRawJsonRetentionSettings() {
+    return ensureAcquiringBillCurrencyRawJsonRetentionSettings(this.db);
+  }
+
+  getAcquiringBillRawJsonRetentionDays() {
+    return settingsRepository.getAcquiringBillRawJsonRetentionDays(this.db);
+  }
+
+  setAcquiringBillRawJsonRetentionDays(days) {
+    return settingsRepository.setAcquiringBillRawJsonRetentionDays(this.db, days);
+  }
+
   // v2.1.8 N4 → v2.1.9 N4 重构 (T32e, D22=a)：差异表瘦身 migration
   //   原 v2.1.8 实现：内部 fs.copyFileSync(dbPath, backupPath) — 大库阻塞 / WAL 不一致 / 失败无回滚
   //   v2.1.9 改造：注入 createBackup 函数 → migration 复用 SR-backup-1 sqlite VACUUM INTO（与 N5 同 backup 体系）
@@ -442,6 +556,18 @@ class AppDatabase {
   //   注入 createBackup 函数 → migration 复用 SR-backup-1 sqlite VACUUM INTO（与 N5 同 backup 体系）
   ensureScenariosNameUniqueByChannelId() {
     return ensureScenariosNameUniqueByChannelId(this.db, (label) => this.createBackup(label));
+  }
+
+  // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造 facade
+  //   传 createBackup 函数给 migration（事务外执行 SR-backup-1 sqlite VACUUM INTO）
+  //   注入 dbPath 第二参（保持与 ensureBillRawJsonV2Slim 同签名；本函数当前未用 dbPath 但保留契约）
+  //   返回 { status, backupPath?, error?, statusReached?, rowsAffected? }
+  ensureDiffRowsCascadeMigration_v2_1_10() {
+    return ensureDiffRowsCascadeMigration_v2_1_10(
+      this.db,
+      this.dbPath,
+      (label) => this.createBackup(label)
+    );
   }
 
   listTemplates() {
