@@ -354,25 +354,48 @@ parentPort.postMessage({ type: 'pragma-verify', verify });
 
 | 项 | 测试方法 | 通过标准 | worker_threads 实测 | utilityProcess 实测 |
 |---|---|---|---|---|
-| **启动延迟**（cold-start） | 主进程 perf.now() → worker init-done | < 200ms | 待 POC | 待 POC |
-| **IPC 延迟**（双向 message round-trip） | 主进程 send ping → worker reply pong 1000 次平均 | < 10ms | 待 POC | 待 POC |
-| **错误堆栈完整度** | worker 内人为 throw new Error('test') → 主进程 catch 后 err.stack 含 worker 函数行号 | stack 含 worker 内文件路径 + 行号 | 待 POC | 待 POC |
-| **cancel 响应延迟** | worker 内执行 5s sleep → 主进程 1s 时发 cancel → worker exit | < 1s | 待 POC | 待 POC |
+| **启动延迟**（cold-start 10 次均值） | 主进程 perf.now() → worker init-done | < 200ms | **11.11 ms** ✅ | 53.21 ms ✅ |
+| **IPC 延迟**（1000 次 round-trip 均值） | 主进程 send ping → worker reply pong 1000 次平均 | < 10ms | **0.010 ms** ✅ | 0.035 ms ✅ |
+| **错误堆栈完整度** | worker 内人为 throw new Error('test') → 主进程 catch 后 err.stack 含 worker 函数行号 | stack 含 worker 内文件路径 + 行号 | ✅ 完整（含 deepFn + 行号） | ✅ 完整（含 deepFn + 行号） |
+| **cancel 响应延迟** | worker 内执行 5s sleep → 主进程 1s 时发 cancel → worker exit | < 1s | 17.91 ms ✅ | **2.32 ms** ✅ |
+| **DatabaseSync 可用性**（D24 验证） | require + 实例化 + 6 PRAGMA + SELECT 10000 行 | 全部通过 | ✅ | ✅ |
+
+**实测来源**：commits `3f46631` (T02) / `4d07ea9` (T03) / `77cc849` (T04)；汇总报告 `scripts/poc/v2.1.10-a3-comparison.md`。
 
 #### 2.6.2 POC 脚本位置
 
 ```
-scripts/poc/v2.1.10-a3-worker-threads.js     # worker_threads 实测
-scripts/poc/v2.1.10-a3-utility-process.js    # utilityProcess 实测
-scripts/poc/v2.1.10-a3-comparison.md         # Phase 0 Dev 报告（待写）
+scripts/poc/v2.1.10-a3-worker-threads.js          # worker_threads 实测 ✅
+scripts/poc/v2.1.10-a3-utility-process.js         # utilityProcess 实测（主） ✅
+scripts/poc/v2.1.10-a3-utility-process-child.js   # utilityProcess child ✅
+scripts/poc/v2.1.10-a3-comparison.md              # Phase 0 Dev 报告 ✅
 ```
 
 #### 2.6.3 POC 通过后回写
 
-Phase 0 完成后 Dev 必须：
-1. 在 spec §2.6 表格"实测"列填数据
-2. 在 backlog.md §"待 spec 阶段决策点"D23 行填最终拍板（worker_threads / utilityProcess）
-3. 启动 Phase 1（主线 worker 框架）
+✅ Phase 0 完成（2026-05-28）：
+1. ✅ spec §2.6 表格"实测"列已填数据
+2. ✅ backlog.md §"待 spec 阶段决策点" D23-D28 已回写最终拍板
+3. ✅ PRD §四 D23 / D24 加 Phase 0 拍板标识
+4. ⏭️ 启动 Phase 1（主线 worker 框架）— Phase 1 task T06-T11
+
+#### 2.6.4 D23 / D24 最终拍板（用户 2026-05-28）
+
+| ID | 拍板 | 理由 |
+|---|---|---|
+| **D23** | **(a) worker_threads** | 启动 + IPC 双线胜出 4-5x；同环境 Node + Electron 双栈跑（CI 集成测试不依赖 Electron）；cancel 17ms 远低于 1s 阈值 + A4 chunked 业务阈值 < 5s 更宽松；OS 资源占用更小；详 `scripts/poc/v2.1.10-a3-comparison.md` §四 |
+| **D24** | **(a) 独立 connection** | DatabaseSync 在 worker_threads 内 require + 实例化 + 6 PRAGMA + SELECT 10000 行全通过；无需 fallback 到 message-based RPC（spec §2.2.2 备选）；详 `scripts/poc/v2.1.10-a3-comparison.md` §三 |
+
+#### 2.6.5 Phase 1 实施小提示（基于 POC 6 surprise）
+
+| # | 提示 | 处理 |
+|---|---|---|
+| 1 | SQLite `ExperimentalWarning` 每 worker 启动都打印 | T06 worker 入口加 `process.on('warning')` 过滤（保留其他 warning） |
+| 2 | utilityProcess child payload 不一致 | 选 worker_threads 后忽略；POC 脚本归档保留 |
+| 3 | worker_threads cold-start 仅 11ms（spec §2.1.1 预测 100-200ms 偏保守）| pre-warm 策略可放宽为"有条件" |
+| 4 | utilityProcess 启动 53ms 但 << 200ms | 选 worker_threads 后无 Windows 低配风险 |
+| 5 | PRAGMA `synchronous=NORMAL` 返回 int 1 | T06 PRAGMA verify 用 int 比较（`=== 1`） |
+| 6 | DatabaseSync 两种容器都能正常工作 | D24=a 直接实施，无 fallback 路径 |
 
 ---
 
