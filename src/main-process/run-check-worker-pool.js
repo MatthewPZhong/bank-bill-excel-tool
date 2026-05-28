@@ -198,7 +198,15 @@ function ensureInitialized(dbPath) {
         w.off('message', onInitMsg);
         resolve(msg.pragmaValues);
       } else if (msg.type === 'init-error') {
+        // v2.1.10 SR-FIX-1 round 2 P0-2：reset 模块级状态 + terminate worker
+        //   修复前：仅 reject promise → workerInstance / workerInitPromise 仍引用 dead worker
+        //     下次 dispatchRunCheck 调 ensureInitialized → line 185-187 直接 return 已 rejected promise
+        //     → 永久 brick 主进程 runCheck 能力（必须重启 app）
+        //   修复后：reset + terminate → 下次 dispatchRunCheck 触发 cold-start（spec §2.1.3 异常恢复）
         w.off('message', onInitMsg);
+        workerInitPromise = null;
+        if (workerInstance === w) workerInstance = null;
+        try { w.terminate(); } catch (_e) { /* swallow — exit handler 接管 */ }
         reject(deserializeFromMessage(msg.error));
       }
     };

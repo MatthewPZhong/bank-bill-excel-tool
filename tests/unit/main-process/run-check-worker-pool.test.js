@@ -414,6 +414,47 @@ test.describe('run-check-worker-pool', () => {
     }
   });
 
+  // v2.1.10 SR-FIX-1 round 2 P0-2 — worker init-error 后 reset + 下次 dispatch cold-start（不 brick）
+  //   修复前：init-error 仅 reject promise，workerInstance / workerInitPromise 仍引用 dead worker
+  //     下次 dispatchRunCheck → ensureInitialized 直接 return 已 rejected promise → 永久 brick
+  //   修复后：reset + terminate → 下次 dispatchRunCheck cold-start
+  //   触发 init-error：传不可写 dbPath（不存在的 dir）→ worker 内 new DatabaseSync 抛错
+  test('17. init-error 后 reset + 下次 dispatch 触发新 cold-start（SR-FIX-1 round 2 P0-2）', async () => {
+    // 第一次 dispatch 传无效 dbPath → init-error
+    const invalidDbPath = '/proc/sr-fix-1-round-2-p0-2-non-existent/db.sqlite';
+    let initErr;
+    try {
+      await pool.dispatchRunCheck(
+        { __dbPath: invalidDbPath, monthKey: '2026-04', storageRoot: '/tmp' },
+        {}
+      );
+    } catch (e) { initErr = e; }
+    assert.ok(initErr, 'init-error 后 dispatch 应 reject');
+    // 错误 message 含 'unable to open database file' 或 'PRAGMA verify' 或类似 init 失败字样
+    assert.ok(
+      /database|init|PRAGMA|open/i.test(initErr.message),
+      `init-error 应是 DB 打开/init 类（实际：${initErr.message}）`
+    );
+
+    // ✅ 修复后：workerInstance 已 reset → 下次 dispatch 用合法 dbPath 应 cold-start 成功
+    const status = pool.getStatus();
+    assert.equal(status.workerAlive, false, 'init-error 后 workerAlive=false（已 reset）');
+    assert.equal(status.initialized, false, 'init-error 后 initialized=false（promise 已清）');
+
+    // 用合法 dbPath 再 dispatch
+    const ctx = await setupTmpDb();
+    try {
+      const result = await pool.dispatchRunCheck(
+        { __dbPath: ctx.dbPath, monthKey: '2026-04', storageRoot: ctx.tmpdir },
+        {}
+      );
+      assert.equal(typeof result.runId, 'number', '第二次 dispatch cold-start 成功（不 brick）');
+      assert.equal(pool.getStatus().workerAlive, true, '第二次 dispatch 后 workerAlive=true');
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
   // v2.1.10 Phase 2 T14 — crash 后自动 cold-start
   test('16. crash 后下次 dispatch 自动 cold-start + 成功', async () => {
     const ctx = await setupTmpDb();
