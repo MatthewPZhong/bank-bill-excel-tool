@@ -1003,6 +1003,34 @@ function ensureAcquiringBillCurrencyRunsChunkProgress(db) {
   db.exec(`ALTER TABLE acquiring_bill_currency_runs ADD COLUMN chunk_progress TEXT`);
 }
 
+// v2.1.10 N4-cont-1 T22 (Phase 4)：seed 收单单据 raw_json idle 自动清理保留窗口（默认 7 天）
+//   spec §4.1.1 单键策略（v0.2 reverse sync 后从 v0.1 双键降为单键）
+//   - 仅清「对账成功」（不在 acquiring_bill_currency_diff_rows 中）且 imported_at < N 天前的 bill_imports.raw_json
+//   - 差异行 raw_json 永远保留（writer.js:184 重导差异 xlsx 依赖；migrations.js:1543 diff_rows schema 不冗余存）
+//   - 范围 [1, 30] 天；getter 范围外回退默认 7（settings-repository）
+//   - 触发链路：v2.1.9 N1' idle 30min cleanup 回调追加调用（src/main.js setupIdleCleanupTimer）
+//   幂等：INSERT OR IGNORE — 用户已改值（sqlite3 直改）不被覆盖
+const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY = 'acquiring_bill_raw_json_retention_days';
+const ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT = '7';
+function ensureAcquiringBillCurrencyRawJsonRetentionSettings(db) {
+  // 同 ensureAcquiringBillIdleCleanupMinutesSetting：依赖 app_settings 表存在
+  try {
+    db.prepare('SELECT 1 FROM app_settings LIMIT 1').get();
+  } catch (_e) {
+    return { status: 'skipped-no-table' };
+  }
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT OR IGNORE INTO app_settings (setting_key, setting_value, updated_at)
+    VALUES (?, ?, ?)
+  `).run(
+    ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY,
+    ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT,
+    now
+  );
+  return { status: 'seeded', key: ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY };
+}
+
 // v2.1.9 N5：channels 表 + 「通用」内置渠道（id=1）
 // 幂等：CREATE TABLE IF NOT EXISTS + INSERT OR IGNORE
 // is_builtin=1 系统内置渠道，不可删不可改名（D1=a 拍板；保护在 channels-repository + UI 层）
@@ -1641,6 +1669,8 @@ module.exports = {
   // v2.1.10 A4 T18 / T19：chunked 分批 size settings + runs.chunk_progress 列 migration
   ensureAcquiringBillChunkSizeSetting,
   ensureAcquiringBillCurrencyRunsChunkProgress,
+  // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings（v0.2 单键）
+  ensureAcquiringBillCurrencyRawJsonRetentionSettings,
   ensureBillRawJsonV2Slim,
   ensureChannelsTable,
   ensureScenariosChannelIdColumn,
@@ -1660,4 +1690,7 @@ module.exports = {
   // v2.1.10 A4 T18：chunked 分批 size 常量（spec §3.2）
   ACQUIRING_BILL_CHUNK_SIZE_KEY,
   ACQUIRING_BILL_CHUNK_SIZE_DEFAULT,
+  // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json 保留窗口常量（v0.2 单键 默认 7 天）
+  ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY,
+  ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT,
 };

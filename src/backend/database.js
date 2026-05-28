@@ -23,6 +23,8 @@ const {
   // v2.1.10 A4 T18 / T19：chunked 分批 size settings + runs.chunk_progress 列
   ensureAcquiringBillChunkSizeSetting,
   ensureAcquiringBillCurrencyRunsChunkProgress,
+  // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings
+  ensureAcquiringBillCurrencyRawJsonRetentionSettings,
   ensureBillRawJsonV2Slim,
   ensureSchemaV2_1_9_N5,
   ensureScenariosNameUniqueByChannelId,
@@ -290,6 +292,10 @@ class AppDatabase {
     // v2.1.10 A4 T18：chunked 分批 size settings（seed default=100000）
     //   同 N1-settings 范式：依赖 app_settings 表 + INSERT OR IGNORE 不覆盖用户已改
     this.ensureAcquiringBillChunkSizeSetting();
+    // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings（seed default=7 天）
+    //   同 N1-settings + A4 T18 范式：依赖 app_settings 表 + INSERT OR IGNORE 不覆盖用户已改
+    //   spec §八.3：与 N4-cont-2 顺序无关；任意顺序都不冲突（settings 与 schema 互不影响）
+    this.ensureAcquiringBillCurrencyRawJsonRetentionSettings();
     // v2.1.10 A4 T19：runs.chunk_progress 列（chunked 进度 JSON 序列化）
     //   必须在 ensureAcquiringBillCurrencyRunsCleanupPending 之后（依赖 runs 表 + 列扩展顺序）
     //   幂等：hasColumn 检查避免重复 ADD COLUMN
@@ -448,6 +454,19 @@ class AppDatabase {
   // v2.1.10 A4 T19：runs.chunk_progress 列 migration — 启动期幂等 ADD COLUMN
   ensureAcquiringBillCurrencyRunsChunkProgress() {
     return ensureAcquiringBillCurrencyRunsChunkProgress(this.db);
+  }
+
+  // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings — seed default=7 + 暴露 get/set
+  ensureAcquiringBillCurrencyRawJsonRetentionSettings() {
+    return ensureAcquiringBillCurrencyRawJsonRetentionSettings(this.db);
+  }
+
+  getAcquiringBillRawJsonRetentionDays() {
+    return settingsRepository.getAcquiringBillRawJsonRetentionDays(this.db);
+  }
+
+  setAcquiringBillRawJsonRetentionDays(days) {
+    return settingsRepository.setAcquiringBillRawJsonRetentionDays(this.db, days);
   }
 
   // v2.1.8 N4 → v2.1.9 N4 重构 (T32e, D22=a)：差异表瘦身 migration
