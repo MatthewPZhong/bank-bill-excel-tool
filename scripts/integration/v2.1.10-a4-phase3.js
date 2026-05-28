@@ -340,16 +340,113 @@ async function test3_perfAndCancelResponsiveness() {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// case 4：SR-FIX-1 round 2 P0-1 — cleanupOrphanData × chunked partial run 不冲突
+//   触发场景：runCheckCore chunked 跑到 chunk M/N cancel → chunk_progress.status='partial'
+//     runs.status='success'（stage 3 写时已落）+ diff_file_path=null（未到 writer 阶段）→ fileBroken=true
+//   修复前：cleanupOrphanData 把 partial run 当孤儿清掉 → resume IPC 拒绝
+//   修复后：检测 chunk_progress.status==='partial' → 保留 run / diff_rows / bill_imports → resume 可用
+//   覆盖 spec §3.3 / §5.4 + tasks T19 resumeFromRun 设计意图 + USER_GUIDE §1.8.12 修订
+// ─────────────────────────────────────────────────────────────────
+async function test4_cleanupOrphanProtectsPartialRun() {
+  console.log('\n[case 4] SR-FIX-1 round 2 P0-1 — cleanupOrphanData 保护 chunked partial run');
+
+  const ctx = await setupTmpDbWithMismatchFixture({ rowCount: 5000 });
+  try {
+    // 第一段：跑到 chunk 2 边界 cancel（与 case 2 同一模式）
+    let cancelled = false;
+    let checkCount = 0;
+    const cancelToken = {
+      get cancelled() { return cancelled; },
+      cancel() { cancelled = true; },
+      throwIfCancelled(stage) {
+        checkCount++;
+        if (checkCount >= 3) cancelled = true;
+        if (cancelled) {
+          const CancelErrorCtor = session.CancelError;
+          throw new CancelErrorCtor(`cancelled at ${stage}`, { stage });
+        }
+      },
+    };
+    let caught;
+    try {
+      await session.runCheckCore({
+        db: ctx.db.db, monthKey: '2026-04', storageRoot: ctx.tmpdir,
+        chunkSize: 1000, cancelToken,
+      });
+    } catch (e) { caught = e; }
+    assertTrue(!!caught, '4.1 cancel 后应抛 CancelError');
+    assertEq(caught && caught.name, 'CancelError', '4.2 第一段抛 CancelError');
+
+    // 验证 partial 状态
+    const runBefore = ctx.db.db.prepare('SELECT * FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1').get();
+    const progressBefore = JSON.parse(runBefore.chunk_progress);
+    assertEq(progressBefore.status, 'partial', '4.3 cleanupOrphanData 前 chunk_progress=partial');
+    assertEq(runBefore.diff_file_path, null, '4.4 cleanupOrphanData 前 diff_file_path=null（fileBroken=true）');
+    assertEq(runBefore.status, 'success', '4.5 cleanupOrphanData 前 runs.status=success（stage 3 写入）');
+
+    const diffCountBefore = ctx.db.db.prepare(
+      'SELECT COUNT(*) c FROM acquiring_bill_currency_diff_rows WHERE run_id = ?'
+    ).get(runBefore.id).c;
+    assertTrue(diffCountBefore > 0, `4.6 cleanupOrphanData 前 diff_rows > 0（实际 ${diffCountBefore}）`);
+    const billCountBefore = ctx.db.db.prepare(
+      'SELECT COUNT(*) c FROM acquiring_bill_currency_bill_imports'
+    ).get().c;
+
+    // 触发 cleanupOrphanData（模拟启动期 cleanup）
+    const stats = await session.cleanupOrphanData({ db: ctx.db.db });
+    assertEq(stats.orphanRunIds.includes(runBefore.id), false,
+      '4.7 partial run 不在 orphanRunIds 列表（被保护）');
+
+    // 验证：partial run 仍存活
+    const runAfter = ctx.db.db.prepare('SELECT * FROM acquiring_bill_currency_runs WHERE id = ?').get(runBefore.id);
+    assertTrue(!!runAfter, '4.8 cleanupOrphanData 后 partial run 仍存在');
+    const progressAfter = JSON.parse(runAfter.chunk_progress);
+    assertEq(progressAfter.status, 'partial', '4.9 cleanupOrphanData 后 chunk_progress 仍是 partial');
+    assertEq(progressAfter.lastCompletedChunkIndex, progressBefore.lastCompletedChunkIndex,
+      '4.10 cleanupOrphanData 后 lastCompletedChunkIndex 保留');
+
+    const diffCountAfter = ctx.db.db.prepare(
+      'SELECT COUNT(*) c FROM acquiring_bill_currency_diff_rows WHERE run_id = ?'
+    ).get(runBefore.id).c;
+    assertEq(diffCountAfter, diffCountBefore, '4.11 cleanupOrphanData 后 diff_rows 数量保留');
+
+    const billCountAfter = ctx.db.db.prepare(
+      'SELECT COUNT(*) c FROM acquiring_bill_currency_bill_imports'
+    ).get().c;
+    assertEq(billCountAfter, billCountBefore, '4.12 cleanupOrphanData 后 bill_imports 数量保留（FK CASCADE 未触发）');
+
+    // 验证 resume 可成功跑完
+    const resultResume = await session.runCheckCore({
+      db: ctx.db.db, monthKey: '2026-04', storageRoot: ctx.tmpdir,
+      chunkSize: 1000,
+      resumeFromRun: { runId: runBefore.id, lastCompletedChunkIndex: progressAfter.lastCompletedChunkIndex },
+    });
+    assertEq(resultResume.runId, runBefore.id, '4.13 resume 复用旧 runId 成功');
+
+    const runFinal = ctx.db.db.prepare('SELECT * FROM acquiring_bill_currency_runs WHERE id = ?').get(runBefore.id);
+    const progressFinal = JSON.parse(runFinal.chunk_progress);
+    assertEq(progressFinal.status, 'complete', '4.14 resume 后 chunk_progress=complete');
+    const diffCountFinal = ctx.db.db.prepare(
+      'SELECT COUNT(*) c FROM acquiring_bill_currency_diff_rows WHERE run_id = ?'
+    ).get(runBefore.id).c;
+    assertEq(diffCountFinal, 5000, '4.15 resume 后 diff_rows = 5000（完整数据保留）');
+  } finally {
+    ctx.cleanup();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────
 async function main() {
   console.log('==== v2.1.10 A4 Phase 3 集成测试 ====');
-  console.log('PRD §1.3 + spec §七 Phase 3 ≥ 3 case ≥ 15 断言');
+  console.log('PRD §1.3 + spec §七 Phase 3 ≥ 3 case ≥ 15 断言 + SR-FIX-1 round 2 P0-1 case 4');
 
   const cases = [
     test1_chunkBoundaries,
     test2_resumeAfterCancel,
     test3_perfAndCancelResponsiveness,
+    test4_cleanupOrphanProtectsPartialRun,
   ];
 
   for (const c of cases) {

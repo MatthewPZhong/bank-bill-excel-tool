@@ -588,12 +588,31 @@ async function cleanupOrphanData({ db, onProgress }) {
   ).all();
 
   const orphanRuns = [];
+  // v2.1.10 SR-FIX-1 round 2 P0-1：chunked partial run 保护
+  //   触发场景：chunked stage 4' 跑到 chunk M/N → cancel / worker crash → chunk_progress.status='partial'
+  //     runs.status='success'（stage 3 写时已落，writer 阶段未跑 → diff_file_path=null）→ fileBroken=true
+  //     v2.1.10 N4-cont-2 之前：cleanupOrphanData 把 partial run 当孤儿清掉 → 用户重启后无法 resume
+  //   修复（spec §3.3 / §5.4 idempotent + tasks T19 resumeFromRun 设计意图）：
+  //     如果 run 处于 chunk_progress.status='partial' 状态 → 视为「待 resume」非「孤儿」→ 保留供下次 resume IPC 调用
+  //     对配套测试：scripts/integration/v2.1.10-a4-phase3.js 新增 case 验证「partial run 跨 cleanupOrphanData 仍存活」
   for (const run of allRuns) {
     // NewF2：'success-no-files' 是可恢复状态，跳过 cleanup
     if (run.status === 'success-no-files') continue;
     const fileBroken = !run.diff_file_path || !run.report_file_path
       || !fs.existsSync(run.diff_file_path) || !fs.existsSync(run.report_file_path);
     if (run.status !== 'success' || fileBroken) {
+      // v2.1.10 SR-FIX-1 round 2 P0-1：partial chunked run 不当孤儿（A4 resume 路径保护）
+      let chunkProgress = null;
+      try {
+        chunkProgress = runRepo.getRunChunkProgress(db, run.id);
+      } catch (_e) {
+        // chunk_progress 列不存在 / JSON 解析失败 → 视为无 progress，按既有 fileBroken 逻辑当孤儿
+        chunkProgress = null;
+      }
+      if (chunkProgress && chunkProgress.status === 'partial') {
+        // 跳过 — 保留供 resume IPC 调用（acquiringBillCurrency:run:resume）
+        continue;
+      }
       orphanRuns.push(run);
     }
   }
