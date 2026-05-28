@@ -511,6 +511,69 @@ test.describe('run-check-worker-pool', () => {
     }
   });
 
+  // v2.1.10 SR-FIX-1 Round 6 H3 — init 期 worker exit/error 接入 init promise reject + reset
+  //   触发场景：worker 在 init-done / init-error 之前就 exit（如 packaged path 错 / module-load failure /
+  //     node:sqlite 启动失败 / 系统级 SIGKILL）。
+  //   修复前：ensureInitialized 内 onInitMsg listener 永远不被触发；handleWorkerFailure 只 reset 模块级状态
+  //     但不 reject 当前 workerInitPromise → ensureInitialized 永远 hang → 第一次 dispatchRunCheck 永远不返回
+  //   修复后（Round 6 H3）：
+  //     - init promise 内额外 once('error') / once('exit') listener → reject + reset
+  //     - 加 10s init timeout 兜底
+  //     - 任意失败路径都 reject promise + reset → 下次 dispatchRunCheck 自动 cold-start
+  //   本 case 验证：
+  //     1. 注入 init-crash-worker fixture（process.exit(1) 立即退）
+  //     2. dispatchRunCheck 应 reject（不 hang）
+  //     3. status reset 后下次 dispatch 触发 cold-start（用回正常 worker script）成功
+  test('19. init 期 worker exit/error → ensureInitialized reject + 模块级状态 reset + 下次 dispatch cold-start（SR-FIX-1 Round 6 H3）', async () => {
+    const path = require('node:path');
+    const initCrashWorkerPath = path.join(__dirname, '__fixtures__', 'init-crash-worker.js');
+
+    // 注入 init-crash-worker（process.exit(1) 立即退）
+    pool.__test_only_set_worker_script__(initCrashWorkerPath);
+
+    // 第一次 dispatch — 应 reject 而非 hang
+    let firstErr;
+    const startTs = Date.now();
+    try {
+      // 限制 5s 内必须 reject（不能 hang 到 init timeout 10s）
+      await Promise.race([
+        pool.dispatchRunCheck(
+          { __dbPath: '/tmp/h3-test-not-used.sqlite', monthKey: '2026-04', storageRoot: '/tmp' },
+          {}
+        ),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('TEST_TIMEOUT_5S — H3 修复无效，仍然 hang')), 5000)),
+      ]);
+    } catch (e) { firstErr = e; }
+    const elapsedMs = Date.now() - startTs;
+
+    assert.ok(firstErr, '19.1 init 期 worker exit → dispatch 应 reject（不 hang）');
+    assert.ok(!/TEST_TIMEOUT_5S/.test(firstErr.message),
+      `19.2 reject 不能由 test 超时触发（实际：${firstErr.message}）— H3 修复前 race condition 仍未修`);
+    assert.ok(/exit|init/i.test(firstErr.message),
+      `19.3 reject 错误信息应反映 init 期 exit（实际：${firstErr.message}）`);
+    assert.ok(elapsedMs < 3000,
+      `19.4 reject 时延应短（实际 ${elapsedMs}ms）— worker exit 1 应被 once('exit') 立即捕获`);
+
+    // 状态 reset
+    const status = pool.getStatus();
+    assert.equal(status.workerAlive, false, '19.5 init 期 exit 后 workerAlive=false（已 reset）');
+    assert.equal(status.initialized, false, '19.6 init 期 exit 后 initialized=false（promise 已清）');
+
+    // 恢复默认 worker script + 用合法 dbPath 再 dispatch
+    pool.__test_only_set_worker_script__(null);
+    const ctx = await setupTmpDb();
+    try {
+      const result = await pool.dispatchRunCheck(
+        { __dbPath: ctx.dbPath, monthKey: '2026-04', storageRoot: ctx.tmpdir },
+        {}
+      );
+      assert.equal(typeof result.runId, 'number', '19.7 第二次 dispatch cold-start 成功（不 brick）');
+      assert.equal(pool.getStatus().workerAlive, true, '19.8 第二次 dispatch 后 workerAlive=true');
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
   // v2.1.10 Phase 2 T14 — crash 后自动 cold-start
   test('16. crash 后下次 dispatch 自动 cold-start + 成功', async () => {
     const ctx = await setupTmpDb();

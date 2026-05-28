@@ -32,6 +32,13 @@ const { Worker } = require('node:worker_threads');
 
 const WORKER_SCRIPT_PATH = path.join(__dirname, 'run-check-worker.js');
 
+// v2.1.10 SR-FIX-1 Round 6 H3：测试专用 — 允许 unit test 注入备用 worker script（如人为模拟 init 期 crash）
+//   生产代码不应调用；仅 __test_only_set_worker_script__ 显式注入测试 fixture
+let workerScriptOverride = null;
+function resolveWorkerScript() {
+  return workerScriptOverride || WORKER_SCRIPT_PATH;
+}
+
 // ─────────────────────────────────────────────────────────────────
 // 模块级状态（单例 worker）
 // ─────────────────────────────────────────────────────────────────
@@ -62,7 +69,7 @@ function coldStartWorker(dbPath) {
   if (!dbPath || typeof dbPath !== 'string') {
     throw new Error('coldStartWorker：dbPath 必填');
   }
-  const worker = new Worker(WORKER_SCRIPT_PATH);
+  const worker = new Worker(resolveWorkerScript());
   workerDbPath = dbPath;
 
   // 'error' / 'exit' 事件 → crash recovery
@@ -194,6 +201,20 @@ function deserializeFromMessage(serialized) {
 }
 
 // init worker（cold-start + 发 init message + 等 init-done）
+//
+// v2.1.10 SR-FIX-1 Round 6 H3：init 期 worker error / exit 接入 init promise reject + timeout 兜底
+//   触发场景（Codex Round 5 四复审 P1 finding，2026-05-28T11:38）：
+//     如果 worker 在 init-done / init-error 之前就 exit / error（如 packaged path 错 / module-load failure /
+//     node:sqlite 启动失败 / 系统级 SIGKILL），原 onInitMsg listener 永远不被触发；handleWorkerFailure
+//     只 reset 模块级状态但**不 reject 当前 workerInitPromise** → ensureInitialized 永远 hang
+//     → 第一次 dispatchRunCheck 永远不返回 → 用户必须重启 app
+//   修复：
+//     1. init promise 内额外 once('error') / once('exit') 监听器 → reject + reset 模块级状态
+//     2. 加 10s init timeout 兜底（防 worker 启动卡死无 exit/error 信号 — 极端情况）
+//     3. init-done / init-error / error / exit / timeout 五路径互斥（任一触发即清 timeout + 其他 listener）
+//   不变量：
+//     - 任意失败路径都 reject promise + reset 模块级状态 → 下次 dispatchRunCheck 自动 cold-start
+//     - module-level worker.on('error') / on('exit') 仍照常触发 handleWorkerFailure（多 listener 互不冲突）
 function ensureInitialized(dbPath) {
   if (workerInstance && workerInitPromise) {
     // 已 init 完毕（init-done 时 workerInitPromise 已 resolve）→ 复用
@@ -205,25 +226,77 @@ function ensureInitialized(dbPath) {
   workerInitPromise = new Promise((resolve, reject) => {
     const w = workerInstance;
     if (!w) return reject(new Error('worker cold-start 失败'));
+
+    // 互斥 settle 保护：任一路径触发后清 timeout + 移除其他 listener
+    let settled = false;
+    let initTimeout = null;
+
+    const cleanup = () => {
+      if (initTimeout) { clearTimeout(initTimeout); initTimeout = null; }
+      try { w.off('message', onInitMsg); } catch (_e) { /* swallow */ }
+      try { w.off('error', onInitError); } catch (_e) { /* swallow */ }
+      try { w.off('exit', onInitExit); } catch (_e) { /* swallow */ }
+    };
+
+    const safeReject = (err) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      // 失败统一 reset 模块级状态：下次 dispatch 自动 cold-start
+      workerInitPromise = null;
+      if (workerInstance === w) workerInstance = null;
+      reject(err);
+    };
+
+    const safeResolve = (value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+
     const onInitMsg = (msg) => {
       if (!msg || typeof msg !== 'object') return;
       if (msg.type === 'init-done') {
-        w.off('message', onInitMsg);
-        resolve(msg.pragmaValues);
+        safeResolve(msg.pragmaValues);
       } else if (msg.type === 'init-error') {
         // v2.1.10 SR-FIX-1 round 2 P0-2：reset 模块级状态 + terminate worker
         //   修复前：仅 reject promise → workerInstance / workerInitPromise 仍引用 dead worker
-        //     下次 dispatchRunCheck 调 ensureInitialized → line 185-187 直接 return 已 rejected promise
+        //     下次 dispatchRunCheck 调 ensureInitialized → 直接 return 已 rejected promise
         //     → 永久 brick 主进程 runCheck 能力（必须重启 app）
         //   修复后：reset + terminate → 下次 dispatchRunCheck 触发 cold-start（spec §2.1.3 异常恢复）
-        w.off('message', onInitMsg);
-        workerInitPromise = null;
-        if (workerInstance === w) workerInstance = null;
+        //   Round 6 H3：reset 逻辑由 safeReject 统一处理；terminate 仍保留（init-error 是受控失败）
         try { w.terminate(); } catch (_e) { /* swallow — exit handler 接管 */ }
-        reject(deserializeFromMessage(msg.error));
+        safeReject(deserializeFromMessage(msg.error));
       }
     };
+
+    // v2.1.10 SR-FIX-1 Round 6 H3：init 期 worker 'error' / 'exit' 接入 init promise reject
+    //   注：module-level worker.on('error') / on('exit')（coldStartWorker 注册）仍会触发 handleWorkerFailure
+    //     handleWorkerFailure 内会 workerInstance = null / workerInitPromise = null（与 safeReject 重复但幂等）
+    //     listener 顺序：node 触发 error/exit 时按注册顺序回调；safeReject 内 settled 检查防双重 reject
+    const onInitError = (err) => {
+      safeReject(new Error(`worker init 期 error 事件：${err && err.message ? err.message : String(err)}`));
+    };
+    const onInitExit = (code) => {
+      if (code !== 0) {
+        safeReject(new Error(`worker init 期意外 exit（code=${code}）`));
+      } else {
+        // exit code=0 但 init 未完成 — 罕见但仍是失败
+        safeReject(new Error('worker init 期 exit code=0 但未发 init-done'));
+      }
+    };
+
     w.on('message', onInitMsg);
+    w.once('error', onInitError);
+    w.once('exit', onInitExit);
+
+    // 10s timeout 兜底（极端：worker 启动卡死无任何信号）
+    initTimeout = setTimeout(() => {
+      try { w.terminate(); } catch (_e) { /* swallow */ }
+      safeReject(new Error('worker init 超时（10s）— 强制 terminate'));
+    }, 10000);
+
     w.postMessage({ type: 'init', dbPath });
   });
   return workerInitPromise;
@@ -425,6 +498,13 @@ function __test_only_post__(msg) {
   workerInstance.postMessage(msg);
 }
 
+// v2.1.10 SR-FIX-1 Round 6 H3 — __test_only_set_worker_script__：测试专用 — 注入备用 worker script
+//   仅 unit test 用于模拟"init 期 worker 立即 exit/error"路径（如指向一个 process.exit(1) 的 fixture）
+//   生产代码不应调用；传 null 恢复默认
+function __test_only_set_worker_script__(scriptPath) {
+  workerScriptOverride = scriptPath || null;
+}
+
 module.exports = {
   dispatchRunCheck,
   cancel,
@@ -436,4 +516,5 @@ module.exports = {
   getStatus,
   __reset_for_test__,
   __test_only_post__,
+  __test_only_set_worker_script__,
 };
