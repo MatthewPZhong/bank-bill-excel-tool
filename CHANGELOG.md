@@ -122,6 +122,29 @@ PR #54 Round 3 push 后 Codex 二次复审 2026-05-28T10:02:42Z 完成，抓 3 f
 - before-quit shutdown 失败兜底路径（Round 4 F2）— shutdown reject 不变 + 失败 listener 路径恢复正常，无双 reject 风险
 - contract test a3-phase1 40/40 / a3-phase2 42/42 / a4-phase3 47/47 仍通过
 
+### SR-FIX-1 round 5 — Codex 三复审抓 finding 修复（合并前补丁，1 项 G1 + closeout）
+
+PR #54 Round 4 push 后 Codex 三复审 2026-05-28T10:52:03Z 完成，抓 1 finding：G1 窗口期 race condition — Round 3 F2 占位位置不够早 + Round 4 F2 兜底前置失效。用户拍板 Round 5 修 G1 + closeout = 2 commits。详见 `docs/iterations/v2.1.10/spec.md §19`。
+
+**🟡 G1（setRunChunkProgress(in-progress) 提前到 COMMIT 后任何 await 前 — 窗口期 0 缝隙）**：
+
+- 触发场景：`run` 已在 line 299 提交，但初始 `chunk_progress='in-progress'` 要到 line 344 才写入；中间 line 325-327 先发 `sql-joining` progress 并 `await setImmediate()`。如果 worker/app 在这个窗口期退出 → failureListener（Round 4 F2 兜底路径）扫不到 `chunk_progress` + 启动清理（Round 3 F2 守卫）也不识别可恢复状态 → 仍可能被当 orphan 清掉 → 用户无法 resume
+- 修复：`runCheckCore` `if (!isResume)` block 内：`db.exec('COMMIT')` 之后立即写入 `setRunChunkProgress({status:'in-progress'})`，**该块内到 `} catch (error)` 之间不能再有任何 await**；原 line 344 的 Round 3 F2 入口前占位代码迁移到 COMMIT 后；窗口期 0 缝隙 — 闭合 Round 4 F2 兜底前置依赖
+- 配套测试：unit run-checkcore byte-for-byte contract +1 case（T19-session.5）；integration a4-phase3 case 6 +16 断言（端到端 onProgress hook crash → cleanupOrphanData 守卫 → resume 真实路径 verify）
+- commit `a8d5a26`
+
+**Round 5 修复后测试增量**：
+
+- `npm run test:unit` 1252 → **1253 case / 297 suites**（+1：acquiring-bill-currency-session-core T19.5）
+- `npm run test:integration` 850 → **866 断言 / 15 脚本**（+16：a4-phase3 case 6）
+- `npm run smoke` 0 regression
+
+**资金红线 byte-for-byte 验证不破坏**：
+
+- 窗口期 0 缝隙（Round 5 G1）— COMMIT → setRunChunkProgress(in-progress) 之间无 `await` / event loop 让出；任何 worker/app crash 都能被 failureListener / cleanupOrphanData 识别
+- byte-for-byte 不破坏（Round 5 G1 不改变成功路径行为）— onChunkDone 第一次仍用真实 totalChunks 覆盖占位值；cancel 路径 catch 块仍覆盖占位为 partial
+- contract test a3-phase1 40/40 / a3-phase2 42/42 / a4-phase3 63/63 仍通过
+
 ### 性能基线（vs v2.1.9）
 
 | 指标 | v2.1.9 baseline | v2.1.10 实测 | 改善 |
@@ -137,8 +160,8 @@ PR #54 Round 3 push 后 Codex 二次复审 2026-05-28T10:02:42Z 完成，抓 3 f
 
 ### 测试
 
-- release-check 三段全绿（smoke ✅ / unit **1252 case / 297 suites** ✅（含 SR-FIX-1 round 2 +5 + round 3 +4 + round 4 +5 = +14）/ integration **850 断言 / 15 脚本** ✅（含 round 2 +15 + round 3 +12 + round 4 +14 = +41 断言））
-- v2.1.10 新增集成脚本 5 个（v2.1.10-a3-phase1 40 + v2.1.10-a3-phase2 42 + v2.1.10-a4-phase3 47 + v2.1.10-n4-cont-1-phase4 33 + v2.1.10-n4-cont-2-phase5 43 = 205 新增断言）
+- release-check 三段全绿（smoke ✅ / unit **1253 case / 297 suites** ✅（含 SR-FIX-1 round 2 +5 + round 3 +4 + round 4 +5 + round 5 +1 = +15）/ integration **866 断言 / 15 脚本** ✅（含 round 2 +15 + round 3 +12 + round 4 +14 + round 5 +16 = +57 断言））
+- v2.1.10 新增集成脚本 5 个（v2.1.10-a3-phase1 40 + v2.1.10-a3-phase2 42 + v2.1.10-a4-phase3 63 + v2.1.10-n4-cont-1-phase4 33 + v2.1.10-n4-cont-2-phase5 43 = 221 新增断言）
 - check-vars v11 → v12 升格 5 条（Critical 4: `runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1: `serializeError` / `deserializeError`）+ 更新 1 条（`bill_imports.raw_json` 扩 N4-cont-1 sentinel 语义）
 
 ### 文档
