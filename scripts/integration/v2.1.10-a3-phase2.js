@@ -205,12 +205,15 @@ async function test3_cancelStage1() {
   }
 }
 
-// ── case 4：cancel 在 stage 4 (sql-joining) → ROLLBACK + CancelError + DB 无锁残留 ──
+// ── case 4：cancel 在 stage 4 chunked 边界（v2.1.10 A4 T18 改造后）→ chunked 内 CancelError + 部分 chunk 保留 ──
+//   改造前：stage 4 sql-joining 单 SQL 在主事务内 → cancel ROLLBACK 撤销整个 run
+//   改造后：stage 4' chunked 在主事务外 — runs 行已 COMMIT；各 chunk 独立 BEGIN/COMMIT；cancel 后已 COMMIT 批保留
+//   cancel 命中 stage 名变为 'sql-joining-chunk-N'（chunked 边界更精细）
 async function test4_cancelStage4() {
-  console.log('\n[case 4] cancel 在 stage 4 (sql-joining) → ROLLBACK + CancelError');
+  console.log('\n[case 4] cancel 在 stage 4 chunked 边界 → CancelError + chunk_progress=partial');
   const ctx = await setupTmpDb();
   try {
-    // 4 个 check 点 — 前 3 个 false，第 4 个 true（stage 4 = sql-joining 后）
+    // 4 个 check 点 — 前 3 个 false（stage 1-3 主事务内），第 4 个 true（chunked 第 0 chunk 边界）
     let cancelled = false;
     let checkCount = 0;
     const cancelToken = {
@@ -220,6 +223,14 @@ async function test4_cancelStage4() {
         return cancelled;
       },
       cancel() { cancelled = true; },
+      throwIfCancelled(stage) {
+        if (this.cancelled) {
+          const err = new Error(`cancelled at ${stage}`);
+          err.name = 'CancelError';
+          err.stage = stage;
+          throw err;
+        }
+      },
     };
 
     let caught;
@@ -234,13 +245,21 @@ async function test4_cancelStage4() {
 
     assertTrue(!!caught, '4.1 应 throw');
     assertEq(caught && caught.name, 'CancelError', '4.2 应是 CancelError');
-    assertEq(caught && caught.stage, 'sql-joining', '4.3 stage=sql-joining');
+    assertEq(caught && caught.stage, 'sql-joining-chunk-0', '4.3 stage=sql-joining-chunk-0（chunked 边界）');
 
-    // 无 run 记录残留（ROLLBACK 前 insertRun 但 cancel 后 ROLLBACK 撤销）
+    // v2.1.10 A4 T18：主事务 stage 1-3 已 COMMIT — runs 行保留 1 行（不 ROLLBACK）
     const runCount = ctx.db.db.prepare('SELECT COUNT(*) c FROM acquiring_bill_currency_runs').get().c;
-    assertEq(runCount, 0, '4.4 ROLLBACK 后无 run 记录');
+    assertEq(runCount, 1, '4.4 stage 4 cancel — runs 已 COMMIT（v2.1.10 A4 T18 事务边界改造）');
+
+    // chunk 0 之前 cancel → 无 diff_rows
     const diffCount = ctx.db.db.prepare('SELECT COUNT(*) c FROM acquiring_bill_currency_diff_rows').get().c;
-    assertEq(diffCount, 0, '4.5 ROLLBACK 后无 diff_rows 残留');
+    assertEq(diffCount, 0, '4.5 chunk 0 之前 cancel — 无 diff_rows');
+
+    // chunk_progress 已被 caller (session.runCheckCore) 标 partial — 供 T19 resume
+    const runRow = ctx.db.db.prepare('SELECT chunk_progress FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1').get();
+    assertTrue(!!runRow.chunk_progress, '4.6 chunk_progress 已写入');
+    const progress = JSON.parse(runRow.chunk_progress);
+    assertEq(progress.status, 'partial', '4.7 chunk_progress.status=partial（cancel 中途）');
 
     // DB 无锁残留
     let lockOk = true;
@@ -248,7 +267,7 @@ async function test4_cancelStage4() {
       ctx.db.db.exec('BEGIN');
       ctx.db.db.exec('ROLLBACK');
     } catch (_e) { lockOk = false; }
-    assertTrue(lockOk, '4.6 DB 无锁残留');
+    assertTrue(lockOk, '4.8 DB 无锁残留');
   } finally {
     ctx.cleanup();
   }

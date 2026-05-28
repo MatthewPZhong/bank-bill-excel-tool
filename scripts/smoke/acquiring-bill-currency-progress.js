@@ -203,21 +203,36 @@ async function caseF6B_runOnProgress() {
       onProgress: (ev) => events.push(ev)
     });
 
-    // 期望按顺序 6 次：clearing-old-runs / computing-stats / inserting-run / sql-joining / writing-xlsx / updating-paths
+    // v2.1.10 A4 T18：chunked 改造后 sql-joining 事件可能出现多次（chunked 内每 chunk done 一次）
+    //   - 阶段大顺序仍为 6 段（去重）：clearing-old-runs / computing-stats / inserting-run / sql-joining / writing-xlsx / updating-paths
+    //   - sql-joining 第一次为 "stage 启动" 信号（带 mismatchHint）；后续为 chunk done 信号（带 chunkIndex / totalChunks / processedRows）
+    //   - 小数据档（3 行 < chunk size 10w → totalChunks=1）→ sql-joining 期望 2 次（启动 + chunk 0 done）
     const stages = events.map((e) => e.stage);
-    assertEq(stages, [
+    // 去重并保持首次出现顺序
+    const dedupedStages = [];
+    for (const s of stages) {
+      if (dedupedStages[dedupedStages.length - 1] !== s) dedupedStages.push(s);
+    }
+    assertEq(dedupedStages, [
       'clearing-old-runs',
       'computing-stats',
       'inserting-run',
       'sql-joining',
       'writing-xlsx',
       'updating-paths'
-    ], 'F6-B run 6 阶段按顺序触发');
+    ], 'F6-B run 6 阶段按顺序触发（去重）');
     // phase 字段齐全
     assertTrue(events.every((e) => e.phase === 'run'), 'F6-B 所有事件 phase=run');
-    // sql-joining 事件应带 mismatchHint（stats.mismatchRows）
+    // sql-joining 启动事件应带 mismatchHint（stats.mismatchRows）
     const sqlEv = events.find((e) => e.stage === 'sql-joining');
-    assertTrue(typeof sqlEv.mismatchHint === 'number' && sqlEv.mismatchHint >= 0, 'F6-B sql-joining 带 mismatchHint 数值');
+    assertTrue(typeof sqlEv.mismatchHint === 'number' && sqlEv.mismatchHint >= 0, 'F6-B sql-joining 启动事件带 mismatchHint 数值');
+    // v2.1.10 A4 T18：chunked 内 sql-joining chunk done 事件带 chunkIndex / totalChunks（D25 hard requirement）
+    const sqlChunkEvents = events.filter((e) => e.stage === 'sql-joining' && typeof e.chunkIndex === 'number');
+    assertTrue(sqlChunkEvents.length >= 1, 'F6-B chunked 内至少 1 个 chunk done 事件');
+    assertTrue(
+      sqlChunkEvents.every((e) => typeof e.totalChunks === 'number' && e.totalChunks >= 1),
+      'F6-B chunk done 事件带 totalChunks ≥ 1'
+    );
     // run 业务返回值正常
     assertTrue(result && typeof result.runId === 'number', 'F6-B runCheck 返回 runId');
     assertEq(result.totalBillRows, 3, 'F6-B totalBillRows = 3');

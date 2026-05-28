@@ -966,6 +966,43 @@ function ensureAcquiringBillIdleCleanupMinutesSetting(db) {
   return { status: 'seeded', key: ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY };
 }
 
+// v2.1.10 A4 T18：seed 收单单据 SQL JOIN chunked 分批 size 默认值（100000）
+//   spec §3.2 拍板默认 10w + 范围 [1w, 100w]；getter 范围外回退默认（settings-repository.js）
+//   幂等：INSERT OR IGNORE — 用户已改值（sqlite3 直改）不被覆盖
+const ACQUIRING_BILL_CHUNK_SIZE_KEY = 'acquiring_bill_chunk_size';
+const ACQUIRING_BILL_CHUNK_SIZE_DEFAULT = '100000';
+function ensureAcquiringBillChunkSizeSetting(db) {
+  // 同 ensureAcquiringBillIdleCleanupMinutesSetting：依赖 app_settings 表存在
+  try {
+    db.prepare('SELECT 1 FROM app_settings LIMIT 1').get();
+  } catch (_e) {
+    return { status: 'skipped-no-table' };
+  }
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT OR IGNORE INTO app_settings (setting_key, setting_value, updated_at)
+    VALUES (?, ?, ?)
+  `).run(
+    ACQUIRING_BILL_CHUNK_SIZE_KEY,
+    ACQUIRING_BILL_CHUNK_SIZE_DEFAULT,
+    now
+  );
+  return { status: 'seeded', key: ACQUIRING_BILL_CHUNK_SIZE_KEY };
+}
+
+// v2.1.10 A4 T19：给 acquiring_bill_currency_runs 加 chunk_progress 列（chunked 进度 JSON 序列化）
+//   值结构：JSON `{ lastCompletedChunkIndex, totalChunks, status: 'in-progress' | 'partial' | 'complete' }`
+//   - in-progress：runCheckCore stage 4' chunked 循环刚开始（totalChunks 已算出）
+//   - partial：cancel 或 crash 中途；lastCompletedChunkIndex 指向最后一个 COMMIT 的 chunk
+//   - complete：所有 chunk 都 COMMIT 完毕
+//   resume 路径：renderer 调 acquiringBillCurrency:run:resume → 主进程查 runs.chunk_progress
+//     → 不存在 / status='complete' → 抛错；存在 → 从 lastCompletedChunkIndex+1 重启
+//   幂等：hasColumn 检查避免重复 ADD COLUMN
+function ensureAcquiringBillCurrencyRunsChunkProgress(db) {
+  if (hasColumn(db, 'acquiring_bill_currency_runs', 'chunk_progress')) return;
+  db.exec(`ALTER TABLE acquiring_bill_currency_runs ADD COLUMN chunk_progress TEXT`);
+}
+
 // v2.1.9 N5：channels 表 + 「通用」内置渠道（id=1）
 // 幂等：CREATE TABLE IF NOT EXISTS + INSERT OR IGNORE
 // is_builtin=1 系统内置渠道，不可删不可改名（D1=a 拍板；保护在 channels-repository + UI 层）
@@ -1601,6 +1638,9 @@ module.exports = {
   ensureC3AssignAddMode,
   ensureAcquiringBillCurrencyRunsCleanupPending,
   ensureAcquiringBillIdleCleanupMinutesSetting,
+  // v2.1.10 A4 T18 / T19：chunked 分批 size settings + runs.chunk_progress 列 migration
+  ensureAcquiringBillChunkSizeSetting,
+  ensureAcquiringBillCurrencyRunsChunkProgress,
   ensureBillRawJsonV2Slim,
   ensureChannelsTable,
   ensureScenariosChannelIdColumn,
@@ -1617,4 +1657,7 @@ module.exports = {
   // v2.1.9 N1-settings：导出常量供 settings-repository / main.js 共享
   ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_KEY,
   ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT,
+  // v2.1.10 A4 T18：chunked 分批 size 常量（spec §3.2）
+  ACQUIRING_BILL_CHUNK_SIZE_KEY,
+  ACQUIRING_BILL_CHUNK_SIZE_DEFAULT,
 };

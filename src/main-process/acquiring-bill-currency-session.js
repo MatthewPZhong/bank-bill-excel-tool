@@ -198,16 +198,23 @@ function createCancelToken() {
 //   - 写盘阶段不可中断（writer.writeRunOutputs 已经在事务外；中断会留半个 xlsx）
 //   - byte-for-byte 不变（不传 cancelToken 时行为完全等价 v2.1.10 Phase 1）
 //
+// v2.1.10 A4 Phase 3 T18 / T19 — chunked stage 4'：
+//   - stage 1-3 (clearOldRuns / computeStats / insertRun) 仍在主事务里
+//   - 主事务在 stage 4' 前 COMMIT — 让 stage 4' 各 chunk 独立 BEGIN/COMMIT
+//   - stage 4' (insertDiffRowsByJoinChunked) 每 chunk 之间 cancelToken.throwIfCancelled
+//   - chunk size 来自 caller 的 chunkSize 参数（main.js IPC 注入 settings 值；默认 100000）
+//   - chunked 中途 cancel → 抛 CancelError（带 stage='sql-joining-chunk-N'）；caller 写 chunk_progress
+//   - T19 resume 路径：caller 传 resumeFromRun 复用 runId 跳过 stage 1-3，stage 4' 从 lastCompletedChunkIndex+1 跑
+//
 // 流程：
-//   1. 清空该月历史 runs + diff_rows（避免累积）
-//   2. 统计 totalBillRows / matched / mismatch / unmatched
-//   3. 创建 runs 记录拿 runId
-//   4. INSERT diff_rows BY SQL JOIN（spec §5.2）
-//   5. COMMIT（数据落库，事务结束）
-//   6. 调 writer 同步生成 diff.xlsx + report.xlsx；UPDATE runs.diff_file_path/report_file_path 回填
-//   7. 返回 stats + filePaths
+//   1. 清空该月历史 runs + diff_rows（避免累积）（仅全新 run；resume 跳过）
+//   2. 统计 totalBillRows / matched / mismatch / unmatched（仅全新 run；resume 复用旧 runs 行）
+//   3. 创建 runs 记录拿 runId（仅全新 run；resume 复用旧 runId）
+//   4'. chunked INSERT diff_rows BY SQL JOIN（spec §3 + §5.2）— 各 chunk 独立 BEGIN/COMMIT
+//   5. 调 writer 同步生成 diff.xlsx + report.xlsx；UPDATE runs.diff_file_path/report_file_path 回填
+//   6. SET chunk_progress.status='complete' + 返回 stats + filePaths
 // 关键不变量：写盘失败不应回滚 DB 事务（数据已 COMMIT 有效）；写盘错误仅 throw 给 caller
-async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken }) {
+async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken, chunkSize, resumeFromRun }) {
   if (!monthKey) {
     throw new Error('runCheck：monthKey 必填');
   }
@@ -218,87 +225,181 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
   const runT0 = Date.now();
   let runId;
   let stats;
-  let insertedDiffRows;
+  let chunkedResult;
+  // v2.1.10 A4 T18：chunkSize 默认 100000（spec §3.2 拍板）— caller 不传时也 chunked（小数据档 totalChunks=1 等价 single SQL）
+  const effectiveChunkSize = Number.isInteger(chunkSize) && chunkSize > 0 ? chunkSize : 100000;
+  // v2.1.10 A4 T19：resume 路径 — caller 传 resumeFromRun = { runId, lastCompletedChunkIndex } 复用旧 runId
+  //   resumeFromRun.runId 必须存在 + status='partial'（caller 已验）；本函数仅按入参跳 stage 1-3
+  const isResume = !!(resumeFromRun && resumeFromRun.runId && Number.isInteger(resumeFromRun.runId));
 
-  safeBegin(db);
-  try {
-    // v2.1.7 F6 埋点 1/6：清理历史 runs
-    if (onProgress) {
-      onProgress({ phase: 'run', stage: 'clearing-old-runs' });
-      await new Promise((r) => setImmediate(r));
-    }
-    runRepo.clearRunsByMonth(db, monthKey);
-    // v2.1.10 T13 cancel check 1/5（事务中 — cancel 触发 safeRollback + throw）
-    if (cancelToken && cancelToken.cancelled) {
-      safeRollback(db);
-      throw new CancelError('runCheck cancelled at stage=clearing-old-runs', { stage: 'clearing-old-runs' });
-    }
+  if (!isResume) {
+    // ── 全新 run 路径 — stage 1-3 主事务 ──
+    safeBegin(db);
+    try {
+      // v2.1.7 F6 埋点 1/6：清理历史 runs
+      if (onProgress) {
+        onProgress({ phase: 'run', stage: 'clearing-old-runs' });
+        await new Promise((r) => setImmediate(r));
+      }
+      runRepo.clearRunsByMonth(db, monthKey);
+      // v2.1.10 T13 cancel check 1/5（事务中 — cancel 触发 safeRollback + throw）
+      if (cancelToken && cancelToken.cancelled) {
+        safeRollback(db);
+        throw new CancelError('runCheck cancelled at stage=clearing-old-runs', { stage: 'clearing-old-runs' });
+      }
 
-    // v2.1.7 F6 埋点 2/6：统计行数
-    if (onProgress) {
-      onProgress({ phase: 'run', stage: 'computing-stats' });
-      await new Promise((r) => setImmediate(r));
-    }
-    stats = runRepo.computeRunStats(db, { monthKey });
-    // v2.1.10 T13 cancel check 2/5
-    if (cancelToken && cancelToken.cancelled) {
-      safeRollback(db);
-      throw new CancelError('runCheck cancelled at stage=computing-stats', { stage: 'computing-stats' });
-    }
+      // v2.1.7 F6 埋点 2/6：统计行数
+      if (onProgress) {
+        onProgress({ phase: 'run', stage: 'computing-stats' });
+        await new Promise((r) => setImmediate(r));
+      }
+      stats = runRepo.computeRunStats(db, { monthKey });
+      // v2.1.10 T13 cancel check 2/5
+      if (cancelToken && cancelToken.cancelled) {
+        safeRollback(db);
+        throw new CancelError('runCheck cancelled at stage=computing-stats', { stage: 'computing-stats' });
+      }
 
-    // v2.1.7 F6 埋点 3/6：创建 run 记录
-    if (onProgress) {
-      onProgress({ phase: 'run', stage: 'inserting-run' });
-      await new Promise((r) => setImmediate(r));
-    }
-    runId = runRepo.insertRun(db, {
-      monthKey,
-      // v0.14 fix12：显式传 ISO 8601（带 Z 后缀），避免依赖 SQLite DEFAULT CURRENT_TIMESTAMP（返回 UTC 无后缀，writer 显示时容易错位）
-      ranAt: nowIso(),
-      totalBillRows: stats.totalBillRows,
-      matchedRows: stats.matchedRows,
-      mismatchRows: stats.mismatchRows,
-      unmatchedRows: stats.unmatchedRows,
-      status: 'success'
-    });
-    // v2.1.10 T13 cancel check 3/5
-    if (cancelToken && cancelToken.cancelled) {
-      safeRollback(db);
-      throw new CancelError('runCheck cancelled at stage=inserting-run', { stage: 'inserting-run' });
-    }
-
-    // v2.1.7 F6 埋点 4/6：SQL JOIN 比对币种（耗时大头）
-    //   await setImmediate 让 IPC 把"正在比对币种"文案送达渲染端，再开始阻塞 SQL
-    if (onProgress) {
-      onProgress({ phase: 'run', stage: 'sql-joining', mismatchHint: stats.mismatchRows });
-      await new Promise((r) => setImmediate(r));
-    }
-    insertedDiffRows = runRepo.insertDiffRowsByJoin(db, { runId, monthKey });
-    // v2.1.10 T13 cancel check 4/5（最长阶段后；A4 chunked 落地后此 check 在每 chunk 后）
-    if (cancelToken && cancelToken.cancelled) {
-      safeRollback(db);
-      throw new CancelError('runCheck cancelled at stage=sql-joining', { stage: 'sql-joining' });
-    }
-    db.exec('COMMIT');
-
-    // sanity check：mismatchRows（统计口径）与实际 INSERT 行数应一致
-    if (insertedDiffRows !== stats.mismatchRows) {
-      // 不抛错（数据已提交），但记日志供后续审计
-      // v2.1.9 SR-log-1：替换 console.warn → 日志上报
-      appendModuleLog({
-        level: 'warning',
-        source: 'main',
-        domain: 'acquiring-bill-currency',
-        message: '[acquiring-bill-currency] diff row count mismatch',
-        details: [
-          `stats.mismatchRows=${stats.mismatchRows}`,
-          `INSERT changes=${insertedDiffRows}`
-        ]
+      // v2.1.7 F6 埋点 3/6：创建 run 记录
+      if (onProgress) {
+        onProgress({ phase: 'run', stage: 'inserting-run' });
+        await new Promise((r) => setImmediate(r));
+      }
+      runId = runRepo.insertRun(db, {
+        monthKey,
+        // v0.14 fix12：显式传 ISO 8601（带 Z 后缀），避免依赖 SQLite DEFAULT CURRENT_TIMESTAMP（返回 UTC 无后缀，writer 显示时容易错位）
+        ranAt: nowIso(),
+        totalBillRows: stats.totalBillRows,
+        matchedRows: stats.matchedRows,
+        mismatchRows: stats.mismatchRows,
+        unmatchedRows: stats.unmatchedRows,
+        status: 'success'
       });
+      // v2.1.10 T13 cancel check 3/5
+      if (cancelToken && cancelToken.cancelled) {
+        safeRollback(db);
+        throw new CancelError('runCheck cancelled at stage=inserting-run', { stage: 'inserting-run' });
+      }
+      // v2.1.10 A4 T18：主事务 COMMIT — 让 stage 4' chunked 各 chunk 独立 BEGIN/COMMIT
+      db.exec('COMMIT');
+    } catch (error) {
+      safeRollback(db);
+      throw error;
     }
-  } catch (error) {
-    safeRollback(db);
-    throw error;
+  } else {
+    // ── resume 路径 — 跳过 stage 1-3 复用旧 runId / 旧 stats ──
+    runId = resumeFromRun.runId;
+    const existingRun = runRepo.getRunById(db, runId);
+    if (!existingRun) {
+      throw new Error(`resumeFromRun: runId=${runId} 不存在`);
+    }
+    if (existingRun.month_key !== monthKey) {
+      throw new Error(`resumeFromRun: runId=${runId} month_key=${existingRun.month_key} 与请求 monthKey=${monthKey} 不一致`);
+    }
+    stats = {
+      totalBillRows: existingRun.total_bill_rows,
+      matchedRows: existingRun.matched_rows,
+      mismatchRows: existingRun.mismatch_rows,
+      unmatchedRows: existingRun.unmatched_rows,
+    };
+    if (onProgress) {
+      onProgress({ phase: 'run', stage: 'resuming-from-chunk', resumeRunId: runId });
+      await new Promise((r) => setImmediate(r));
+    }
+  }
+
+  // ── stage 4' chunked INSERT diff_rows ──
+  //   主事务已 COMMIT；进入 chunked 区域（各 chunk 独立 BEGIN/COMMIT）
+  // v2.1.7 F6 埋点 4/6：SQL JOIN 比对币种（耗时大头）→ chunked 模式
+  if (onProgress) {
+    onProgress({ phase: 'run', stage: 'sql-joining', mismatchHint: stats.mismatchRows });
+    await new Promise((r) => setImmediate(r));
+  }
+
+  const resumeFromChunkIndex = isResume && Number.isInteger(resumeFromRun.lastCompletedChunkIndex)
+    ? resumeFromRun.lastCompletedChunkIndex + 1
+    : 0;
+
+  try {
+    chunkedResult = runRepo.insertDiffRowsByJoinChunked(db, {
+      runId,
+      monthKey,
+      chunkSize: effectiveChunkSize,
+      cancelToken,
+      resumeFromChunkIndex,
+      onChunkDone: ({ chunkIndex, totalChunks, processedRows, insertedDiffRows: chunkInsertedDiffRows, elapsedMs }) => {
+        // 每 chunk 完成后 — 更新 chunk_progress（in-progress 直至最后一 chunk 改 complete）
+        // 失败不抛（caller catch 写 partial）；progress 回调透传 caller
+        try {
+          runRepo.setRunChunkProgress(db, {
+            runId,
+            lastCompletedChunkIndex: chunkIndex,
+            totalChunks,
+            status: (chunkIndex + 1 >= totalChunks) ? 'complete' : 'in-progress',
+          });
+        } catch (_progressErr) {
+          // chunk_progress 写失败不阻断主循环（unit test 防御；生产 SQLITE_BUSY 极少）
+        }
+        if (onProgress) {
+          onProgress({
+            phase: 'run',
+            stage: 'sql-joining',
+            chunkIndex,
+            totalChunks,
+            processedRows,
+            insertedDiffRows: chunkInsertedDiffRows,
+            elapsedMs,
+          });
+        }
+      },
+    });
+  } catch (chunkedErr) {
+    // chunked 中途异常（cancel 或 SQL 错）— 失败 chunk 已自行 ROLLBACK 本批；已 COMMIT 批保留
+    //   写 chunk_progress { status:'partial' } 让 caller 决策 resume / 弃
+    //   即使 totalChunks 为 0（极端 SELECT COUNT 失败）仍尝试写一次 partial
+    try {
+      const totalChunksHint = (chunkedErr && chunkedErr.__chunkedHint && chunkedErr.__chunkedHint.totalChunks) || 0;
+      runRepo.setRunChunkProgress(db, {
+        runId,
+        lastCompletedChunkIndex: -1, // 我们不知道异常前最后 COMMIT 到几（cancel 抛错时 onChunkDone 已更新过）
+        totalChunks: totalChunksHint,
+        status: 'partial',
+      });
+    } catch (_progressErr) {
+      // chunk_progress 写失败 — 不阻塞错误透传（caller 不能 resume 也只能重跑）
+    }
+    throw chunkedErr;
+  }
+
+  // sanity check：mismatchRows（统计口径）与实际 INSERT 行数应一致（chunked 累计后比对）
+  if (chunkedResult.totalInsertedDiffRows !== stats.mismatchRows && !isResume) {
+    // resume 路径下 totalInsertedDiffRows 只是本次 chunked 的累计（不含上次已 COMMIT 的 diff）— 跳过 sanity check
+    // 不抛错（数据已提交），但记日志供后续审计
+    // v2.1.9 SR-log-1：替换 console.warn → 日志上报
+    appendModuleLog({
+      level: 'warning',
+      source: 'main',
+      domain: 'acquiring-bill-currency',
+      message: '[acquiring-bill-currency] diff row count mismatch',
+      details: [
+        `stats.mismatchRows=${stats.mismatchRows}`,
+        `chunked INSERT total=${chunkedResult.totalInsertedDiffRows}`,
+        `totalChunks=${chunkedResult.totalChunks}`,
+      ]
+    });
+  }
+
+  // chunked 成功后 — chunk_progress 已被 onChunkDone 标记为 complete（最后一 chunk 时）
+  //   0 chunk 边界（totalChunks=0）— 显式补一次 status='complete'（onChunkDone 不会触发）
+  if (chunkedResult.totalChunks === 0) {
+    try {
+      runRepo.setRunChunkProgress(db, {
+        runId,
+        lastCompletedChunkIndex: -1,
+        totalChunks: 0,
+        status: 'complete',
+      });
+    } catch (_progressErr) { /* 不阻塞主流程 */ }
   }
 
   // v2.1.10 T13 cancel check 5/5（写盘前 — 非事务期；cancel 不 ROLLBACK）

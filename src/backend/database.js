@@ -20,6 +20,9 @@ const {
   ensureC3AssignAddMode,
   ensureAcquiringBillCurrencyRunsCleanupPending,
   ensureAcquiringBillIdleCleanupMinutesSetting,
+  // v2.1.10 A4 T18 / T19：chunked 分批 size settings + runs.chunk_progress 列
+  ensureAcquiringBillChunkSizeSetting,
+  ensureAcquiringBillCurrencyRunsChunkProgress,
   ensureBillRawJsonV2Slim,
   ensureSchemaV2_1_9_N5,
   ensureScenariosNameUniqueByChannelId,
@@ -284,6 +287,13 @@ class AppDatabase {
     //   依赖 app_settings 表存在（启动 init 时第一段 CREATE TABLE IF NOT EXISTS 已建）
     //   幂等：INSERT OR IGNORE → 用户已改值不被覆盖
     this.ensureAcquiringBillIdleCleanupMinutesSetting();
+    // v2.1.10 A4 T18：chunked 分批 size settings（seed default=100000）
+    //   同 N1-settings 范式：依赖 app_settings 表 + INSERT OR IGNORE 不覆盖用户已改
+    this.ensureAcquiringBillChunkSizeSetting();
+    // v2.1.10 A4 T19：runs.chunk_progress 列（chunked 进度 JSON 序列化）
+    //   必须在 ensureAcquiringBillCurrencyRunsCleanupPending 之后（依赖 runs 表 + 列扩展顺序）
+    //   幂等：hasColumn 检查避免重复 ADD COLUMN
+    this.ensureAcquiringBillCurrencyRunsChunkProgress();
     // v2.1.8 N4：差异表瘦身 — bill_imports.raw_json 一次性 rewrite 仅保留 9 模版字段
     //   🔴 资金红线 + 破坏性 migration；首次启动自动备份 DB 到 <dbDir>/backups/
     //   幂等：app_settings.acquiring_bill_raw_json_v2_migrated = 'true' 跳过
@@ -420,6 +430,24 @@ class AppDatabase {
 
   setAcquiringBillIdleCleanupMinutes(minutes) {
     return settingsRepository.setAcquiringBillIdleCleanupMinutes(this.db, minutes);
+  }
+
+  // v2.1.10 A4 T18：chunked 分批 size — seed default=100000 + 暴露 get/set 接口
+  ensureAcquiringBillChunkSizeSetting() {
+    return ensureAcquiringBillChunkSizeSetting(this.db);
+  }
+
+  getAcquiringBillChunkSize() {
+    return settingsRepository.getAcquiringBillChunkSize(this.db);
+  }
+
+  setAcquiringBillChunkSize(size) {
+    return settingsRepository.setAcquiringBillChunkSize(this.db, size);
+  }
+
+  // v2.1.10 A4 T19：runs.chunk_progress 列 migration — 启动期幂等 ADD COLUMN
+  ensureAcquiringBillCurrencyRunsChunkProgress() {
+    return ensureAcquiringBillCurrencyRunsChunkProgress(this.db);
   }
 
   // v2.1.8 N4 → v2.1.9 N4 重构 (T32e, D22=a)：差异表瘦身 migration

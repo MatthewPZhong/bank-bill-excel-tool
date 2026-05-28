@@ -276,16 +276,20 @@ test.describe('runCheckCore byte-for-byte contract', () => {
     }
   });
 
-  test('T13.3 — cancelToken 在 stage 4 (sql-joining 后) → ROLLBACK + CancelError', async () => {
+  test('T13.3 — cancelToken 在 stage 4 chunked 边界（chunk 0 之前）→ throwIfCancelled + 无 diff_rows 残留', async () => {
+    // v2.1.10 A4 T18 改造后：stage 4 (sql-joining) 改为 stage 4' chunked，单 SQL 在事务内不可中断
+    //   原"第 4 次 cancel check 命中 sql-joining"语义升级为"chunked 第 0 个 chunk 前 throwIfCancelled"
+    //   stage 名变化：'sql-joining' → 'sql-joining-chunk-0'（chunked 内 cancel 边界更精细）
     const ctx = await setupTmpDbWithFixture();
     try {
-      // 用 wrapper token：到 stage 4 时才 cancel（模拟 sql-joining 中途 cancel）
+      // 用 wrapper token：到 stage 4' chunked 边界（第 4 次 check）才 cancel
+      // 注意：chunked 内 throwIfCancelled 内部会读 .cancelled getter（getter 计数 +1）
       let cancelled = false;
       let checkCount = 0;
       const cancelToken = {
         get cancelled() {
           checkCount++;
-          // 前 3 个 check 点返回 false，第 4 个（sql-joining 后）返回 true
+          // 前 3 个 check 点（stage 1-3 主事务内）返回 false，第 4 个（chunk 0 边界）返回 true
           if (checkCount >= 4 && !cancelled) cancelled = true;
           return cancelled;
         },
@@ -310,34 +314,52 @@ test.describe('runCheckCore byte-for-byte contract', () => {
 
       assert.ok(caught, '应 throw');
       assert.equal(caught.name, 'CancelError');
-      assert.equal(caught.stage, 'sql-joining', '应在 sql-joining 阶段后命中');
+      // v2.1.10 A4 T18：chunked 边界命中 stage 名为 'sql-joining-chunk-N'（精细化 cancel 时机）
+      assert.equal(caught.stage, 'sql-joining-chunk-0', '应在 chunked 第 0 chunk 边界命中');
 
-      // 事务被 ROLLBACK；新事务可正常开
+      // 事务边界：主事务 stage 1-3 已 COMMIT（v2.1.10 A4 T18 改造）
+      //   ⚠️ 改造前 stage 4 在主事务内 → cancel ROLLBACK 撤销 runs 写入
+      //   改造后 stage 4' 在主事务外 → cancel 时 runs 行已落库（chunk_progress 标 partial 供 resume）
       assert.doesNotThrow(() => {
         ctx.db.db.exec('BEGIN');
         ctx.db.db.exec('ROLLBACK');
       });
 
-      // ROLLBACK 后无 run 记录残留
+      // runs 表已有 1 行（stage 1-3 主事务 COMMIT 写入）
       const runCount = ctx.db.db.prepare('SELECT COUNT(*) c FROM acquiring_bill_currency_runs').get().c;
-      assert.equal(runCount, 0, 'ROLLBACK 后无 run 记录');
+      assert.equal(runCount, 1, 'stage 4 cancel — runs 已 COMMIT（v2.1.10 A4 T18 事务边界改造）');
+
+      // chunked 在第 0 chunk 之前抛 → 无 diff_rows 写入
       const diffCount = ctx.db.db.prepare('SELECT COUNT(*) c FROM acquiring_bill_currency_diff_rows').get().c;
-      assert.equal(diffCount, 0, 'ROLLBACK 后无 diff_rows 残留');
+      assert.equal(diffCount, 0, 'chunk 0 之前 cancel — 无 diff_rows 写入');
+
+      // chunk_progress 应标 partial（caller 决策 resume）
+      const run = ctx.db.db.prepare('SELECT chunk_progress FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1').get();
+      assert.ok(run.chunk_progress, 'chunk_progress 已写入');
+      const progress = JSON.parse(run.chunk_progress);
+      assert.equal(progress.status, 'partial', 'chunk_progress.status=partial');
     } finally {
       ctx.cleanup();
     }
   });
 
-  test('T13.4 — cancelToken 在 stage 5 (写盘前；COMMIT 后) → CancelError 但 DB 数据已落库', async () => {
+  test('T13.4 — cancelToken 在 stage 5 (写盘前；chunked 全部完成后) → CancelError 但 DB 数据已落库', async () => {
+    // v2.1.10 A4 T18 改造后：stage 5 = chunked 全部完成 + 写盘前 cancel check
+    //   getter check count 路径（fixture 10 行 < chunk size 10w → totalChunks=1）：
+    //     1. clearing-old-runs (主事务内 .cancelled)
+    //     2. computing-stats (主事务内 .cancelled)
+    //     3. inserting-run (主事务内 .cancelled)
+    //     4. chunk 0 之前 throwIfCancelled → 内部读 .cancelled
+    //     5. before-writing-xlsx (.cancelled)
+    //   第 5 次 check 命中 → CancelError stage='before-writing-xlsx'
     const ctx = await setupTmpDbWithFixture();
     try {
-      // 5 个 check 点都过；第 5 个（writeRunOutputs 前）才 cancel
       let cancelled = false;
       let checkCount = 0;
       const cancelToken = {
         get cancelled() {
           checkCount++;
-          // 前 4 个 false，第 5 个 true
+          // 前 4 个 false，第 5 个 true（before-writing-xlsx）
           if (checkCount >= 5 && !cancelled) cancelled = true;
           return cancelled;
         },
@@ -364,13 +386,23 @@ test.describe('runCheckCore byte-for-byte contract', () => {
       assert.equal(caught.name, 'CancelError');
       assert.equal(caught.stage, 'before-writing-xlsx', '应在 before-writing-xlsx 阶段命中');
 
-      // 注意：stage 5 时 db.exec('COMMIT') 已执行，DB 数据已落库
-      // 但 writer 未跑，diff_file_path / report_file_path 未回填
+      // 注意：stage 5 时 chunked 已完成 + chunk 各 BEGIN/COMMIT 已结束；run 数据 + diff_rows 已落库
       const runCount = ctx.db.db.prepare('SELECT COUNT(*) c FROM acquiring_bill_currency_runs').get().c;
       assert.equal(runCount, 1, 'COMMIT 后 run 已落库（cancel 不撤销）');
       const run = ctx.db.db.prepare('SELECT * FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1').get();
       assert.equal(run.diff_file_path, null, 'cancel 在写盘前 — diff_file_path 仍为 NULL');
       assert.equal(run.report_file_path, null, 'cancel 在写盘前 — report_file_path 仍为 NULL');
+
+      // chunk_progress 应标 complete（chunked 已完整跑完，仅写盘被 cancel）
+      assert.ok(run.chunk_progress, 'chunk_progress 已写入');
+      const progress = JSON.parse(run.chunk_progress);
+      assert.equal(progress.status, 'complete', 'chunked 完整 → chunk_progress.status=complete');
+      assert.equal(progress.totalChunks, 1, 'fixture 10 行 / chunkSize 10w = 1 chunk');
+      assert.equal(progress.lastCompletedChunkIndex, 0, 'chunk 0 已完成');
+
+      // diff_rows 应有 3 行（fixture 3 个 mismatch；chunked 已完整跑完）
+      const diffCount = ctx.db.db.prepare('SELECT COUNT(*) c FROM acquiring_bill_currency_diff_rows').get().c;
+      assert.equal(diffCount, 3, 'chunked 已完整跑完 — diff_rows 写入 3 行');
     } finally {
       ctx.cleanup();
     }

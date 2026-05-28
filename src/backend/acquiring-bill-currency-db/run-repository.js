@@ -83,6 +83,11 @@ function clearRunsByMonth(db, monthKey) {
 // 入库时已 LOWER+TRIM 归一到 settle_currency_norm，此处直接比较（spec §5.3 + §3.1/§3.2 实现优化）
 // v0.7 fix4：DB 字段重命名 currency_norm → settle_currency_norm / recon_amount_abs → settle_amount_abs
 // diff_rows.flow_currency / flow_amount_abs 列名保留（避免 schema 二次变更），内容指向流水侧 settle_*
+//
+// v2.1.10 A4 T18 — 保留 `insertDiffRowsByJoin` 单条 SQL 版本：
+//   1. unit test / 集成测试用作 byte-for-byte contract test 基线（chunked vs non-chunked 必须一致）
+//   2. 小数据档（行数 < 1 个 chunk）回退路径优势：单条 SQL 无事务切换开销
+//   3. session.runCheckCore 不再直调此函数，改调 insertDiffRowsByJoinChunked（含 chunk=∞ 等价路径）
 function insertDiffRowsByJoin(db, { runId, monthKey }) {
   const stmt = db.prepare(`
     INSERT INTO ${DIFF_TABLE} (run_id, bill_import_id, flow_currency, flow_amount_abs, diff_type)
@@ -103,6 +108,204 @@ function insertDiffRowsByJoin(db, { runId, monthKey }) {
   `);
   const result = stmt.run(runId, monthKey);
   return Number(result.changes);
+}
+
+// ⚠️ 资金红线 ⚠️ — v2.1.10 A4 T18 — chunked 分批版本（spec §三）
+//
+// 核心改造目标（PRD §四 D25 必做）：
+//   1. cancel 响应 < 5s — 每 chunk 之间 throwIfCancelled → 单 chunk 大小决定 cancel 延迟
+//   2. 进度回调精细化 — 每 chunk 完成后 onChunkDone({ chunkIndex, totalChunks, processedRows, elapsedMs })
+//   3. 内存峰值 < 200MB — chunk size 10w 行 JOIN 中间结果可控
+//
+// 事务边界（关键不变量 — 与 session.runCheckCore 协调）：
+//   - caller (session.runCheckCore) 已开 BEGIN 包裹 stage 1-3 (clearOldRuns / computeStats / insertRun)
+//   - 进 stage 4' 前 caller 必须 COMMIT 主事务 → 让 stage 4' 各 chunk 独立 BEGIN/COMMIT
+//   - 各 chunk 内 BEGIN → INSERT (LIMIT/OFFSET 拆) → COMMIT；失败仅 ROLLBACK 本批
+//   - cancel 在 chunk 间触发（chunk 内 SQL 不可中断；单 chunk 通常 < 5s）
+//
+// chunk 数据切片策略（v2.1.10 选定）：
+//   - 按 bill_imports.id 排序 + LIMIT/OFFSET（id 自增，单调；OFFSET = chunkIndex * chunkSize）
+//   - 单 chunk SQL：在 b.id 子查询里限定 id 范围 → JOIN flow + 比对币种 → INSERT diff_rows
+//   - 数据集稳定性：bill_imports 在 runCheckCore 启动时已 COMMIT（import 阶段先完）；chunked 期间无新 bill 插入
+//
+// 入参：
+//   - db                     : 主进程 / worker 共用的 DatabaseSync 实例
+//   - { runId, monthKey }    : 与 insertDiffRowsByJoin 一致
+//   - chunkSize              : 单 chunk 行数（行/批；默认 100000 由 caller 注入 settings 值）
+//   - onChunkDone            : 每 chunk COMMIT 后回调 { chunkIndex, totalChunks, processedRows, insertedDiffRows, elapsedMs }
+//   - cancelToken            : 可选；每 chunk 之间 throwIfCancelled
+//   - resumeFromChunkIndex   : 可选；T19 resume 路径从指定 chunk 起跑（默认 0 = 全新）
+//
+// 返回：{ totalChunks, totalProcessedBillRows, totalInsertedDiffRows, lastCompletedChunkIndex }
+//   - lastCompletedChunkIndex = -1 表示 0 chunk（空 bill 表）
+//   - cancel 抛错前 caller 应捕获 + 写 chunk_progress { lastCompletedChunkIndex, totalChunks, status:'partial' }
+function insertDiffRowsByJoinChunked(db, {
+  runId,
+  monthKey,
+  chunkSize = 100000,
+  onChunkDone = null,
+  cancelToken = null,
+  resumeFromChunkIndex = 0,
+} = {}) {
+  if (!runId || typeof runId !== 'number') {
+    throw new Error('insertDiffRowsByJoinChunked: runId 必填且为 number');
+  }
+  if (!monthKey) {
+    throw new Error('insertDiffRowsByJoinChunked: monthKey 必填');
+  }
+  const cs = Number(chunkSize);
+  if (!Number.isInteger(cs) || cs < 1) {
+    throw new Error(`insertDiffRowsByJoinChunked: chunkSize 必须为正整数，收到：${JSON.stringify(chunkSize)}`);
+  }
+  const resumeIdx = Number(resumeFromChunkIndex);
+  if (!Number.isInteger(resumeIdx) || resumeIdx < 0) {
+    throw new Error(`insertDiffRowsByJoinChunked: resumeFromChunkIndex 必须为非负整数，收到：${JSON.stringify(resumeFromChunkIndex)}`);
+  }
+
+  // 步骤 1：COUNT(*) 算出本月总 bill 行数 → 推 totalChunks
+  //   注：caller 已 COMMIT 主事务，此 SELECT 可看见 stage 1-3 写入（包括 runs 行）
+  const totalBillRows = db.prepare(`
+    SELECT COUNT(*) AS c FROM ${BILL_TABLE} WHERE month_key = ?
+  `).get(monthKey).c;
+  const totalChunks = totalBillRows === 0 ? 0 : Math.ceil(totalBillRows / cs);
+
+  // 0 chunk 边界（空 bill 表）— 直接返回，不触发 onChunkDone
+  if (totalChunks === 0) {
+    return {
+      totalChunks: 0,
+      totalProcessedBillRows: 0,
+      totalInsertedDiffRows: 0,
+      lastCompletedChunkIndex: -1,
+    };
+  }
+
+  // resume 边界校验：resumeFromChunkIndex >= totalChunks 等价 nothing-to-do
+  if (resumeIdx >= totalChunks) {
+    return {
+      totalChunks,
+      totalProcessedBillRows: 0,
+      totalInsertedDiffRows: 0,
+      lastCompletedChunkIndex: totalChunks - 1, // 等价 complete
+    };
+  }
+
+  // chunked INSERT SQL — 用 id 范围子查询 + JOIN flow 比对币种
+  //   注：SQLite 的 INSERT ... SELECT ... LIMIT 不支持复合 OFFSET 时 ORDER BY 跨 batch 稳定 ——
+  //   改用子查询先按 b.id 排序 + LIMIT/OFFSET 限定本批 bill_id 范围，外层 JOIN flow 比对
+  //   性能：b.id 是 INTEGER PRIMARY KEY AUTOINCREMENT，B-tree 索引天然有序，LIMIT/OFFSET 高效
+  const chunkStmt = db.prepare(`
+    INSERT INTO ${DIFF_TABLE} (run_id, bill_import_id, flow_currency, flow_amount_abs, diff_type)
+    SELECT
+      ?,
+      b.id,
+      f.settle_currency,
+      f.settle_amount_abs,
+      CASE
+        WHEN b.settle_currency_norm IS NULL OR b.settle_currency_norm = '' THEN 'bill_currency_missing'
+        ELSE 'currency_mismatch'
+      END
+    FROM (
+      SELECT id, month_key, recon_main_id, settle_currency_norm
+      FROM ${BILL_TABLE}
+      WHERE month_key = ?
+      ORDER BY id ASC
+      LIMIT ? OFFSET ?
+    ) b
+    INNER JOIN ${FLOW_TABLE} f
+      ON f.month_key = b.month_key AND f.recon_main_id = b.recon_main_id
+    WHERE COALESCE(b.settle_currency_norm, '') <> COALESCE(f.settle_currency_norm, '')
+  `);
+
+  let totalProcessedBillRows = 0;
+  let totalInsertedDiffRows = 0;
+  let lastCompletedChunkIndex = resumeIdx - 1; // 起步 -1（resumeIdx=0 时），实际起跑从 chunk 0
+
+  for (let chunkIndex = resumeIdx; chunkIndex < totalChunks; chunkIndex++) {
+    // cancel 检查在 chunk 之间（chunk 内 SQL 不可中断；单 chunk < 5s = cancel 响应 < 5s）
+    //   throwIfCancelled 抛 CancelError；caller 捕获后写 chunk_progress { status:'partial' }
+    if (cancelToken && typeof cancelToken.throwIfCancelled === 'function') {
+      cancelToken.throwIfCancelled(`sql-joining-chunk-${chunkIndex}`);
+    } else if (cancelToken && cancelToken.cancelled) {
+      // 兜底：cancelToken 是 plain object（无 throwIfCancelled 方法）
+      const err = new Error(`runCheck cancelled at chunk=${chunkIndex}`);
+      err.name = 'CancelError';
+      err.stage = `sql-joining-chunk-${chunkIndex}`;
+      throw err;
+    }
+
+    const chunkT0 = Date.now();
+    const offset = chunkIndex * cs;
+    const expectedRows = Math.min(cs, totalBillRows - offset);
+
+    // 各 chunk 独立 BEGIN / COMMIT — 失败仅 ROLLBACK 本批；已 COMMIT 批保留 → resume 不重复
+    db.exec('BEGIN');
+    let chunkInsertedRows = 0;
+    try {
+      const result = chunkStmt.run(runId, monthKey, cs, offset);
+      chunkInsertedRows = Number(result.changes);
+      db.exec('COMMIT');
+    } catch (err) {
+      try { db.exec('ROLLBACK'); } catch (_e) { /* 已 ROLLBACK 或事务已结束 */ }
+      // 透传错误 — caller (session.runCheckCore) 决策记 chunk_progress { status:'partial' } 或抛
+      throw err;
+    }
+
+    lastCompletedChunkIndex = chunkIndex;
+    totalProcessedBillRows += expectedRows;
+    totalInsertedDiffRows += chunkInsertedRows;
+
+    if (typeof onChunkDone === 'function') {
+      try {
+        onChunkDone({
+          chunkIndex,
+          totalChunks,
+          processedRows: expectedRows,
+          insertedDiffRows: chunkInsertedRows,
+          elapsedMs: Date.now() - chunkT0,
+        });
+      } catch (_callbackErr) {
+        // 回调抛错不阻塞主循环（caller 责任处理；防止 progress 回调 bug 卡 chunked）
+      }
+    }
+  }
+
+  return {
+    totalChunks,
+    totalProcessedBillRows,
+    totalInsertedDiffRows,
+    lastCompletedChunkIndex,
+  };
+}
+
+// v2.1.10 A4 T19 — chunk_progress 列读写 API（JSON 序列化）
+//   值结构：{ lastCompletedChunkIndex, totalChunks, status: 'in-progress' | 'partial' | 'complete' }
+//   - in-progress: 刚开始 chunked stage 4'，totalChunks 已算出（lastCompletedChunkIndex=-1）
+//   - partial: cancel 或 crash 中途；lastCompletedChunkIndex 指向最后一个 COMMIT 的 chunk
+//   - complete: 所有 chunk 都 COMMIT 完毕
+function setRunChunkProgress(db, { runId, lastCompletedChunkIndex, totalChunks, status }) {
+  if (!runId || typeof runId !== 'number') {
+    throw new Error('setRunChunkProgress: runId 必填');
+  }
+  if (!status || !['in-progress', 'partial', 'complete'].includes(status)) {
+    throw new Error(`setRunChunkProgress: status 必须是 in-progress / partial / complete，收到：${JSON.stringify(status)}`);
+  }
+  const payload = JSON.stringify({
+    lastCompletedChunkIndex: Number.isFinite(lastCompletedChunkIndex) ? lastCompletedChunkIndex : -1,
+    totalChunks: Number.isFinite(totalChunks) ? totalChunks : 0,
+    status,
+  });
+  db.prepare(`UPDATE ${RUNS_TABLE} SET chunk_progress = ? WHERE id = ?`).run(payload, runId);
+}
+
+function getRunChunkProgress(db, runId) {
+  const row = db.prepare(`SELECT chunk_progress FROM ${RUNS_TABLE} WHERE id = ?`).get(runId);
+  if (!row || !row.chunk_progress) return null;
+  try {
+    return JSON.parse(row.chunk_progress);
+  } catch (_e) {
+    // 防御：旧数据或破坏的 JSON → 视为 null（caller 视为不可 resume）
+    return null;
+  }
 }
 
 // 月内统计：单据总数 / matched（JOIN 上的） / mismatch / unmatched（单据有 ID 但流水无）
@@ -216,6 +419,10 @@ module.exports = {
   updateRunStatus,
   clearRunsByMonth,
   insertDiffRowsByJoin,
+  // v2.1.10 A4 T18 / T19：chunked 分批 + chunk_progress
+  insertDiffRowsByJoinChunked,
+  setRunChunkProgress,
+  getRunChunkProgress,
   computeRunStats,
   listDiffRowsBySourceFile,
   listAllDiffRowsByRun,
