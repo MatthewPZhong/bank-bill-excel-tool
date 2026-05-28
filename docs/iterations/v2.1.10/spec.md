@@ -1041,7 +1041,7 @@ migration 顺序固定（启动期，与 `src/backend/database.js` AppDatabase.i
 - **release-check 全绿**（unit 1247 / integration 836 / smoke 全过）— ✅ closeout commit 已跑
 - **PR #54 自动同步**（git push 后）— 不重命名草稿 `docs/prs/PR54-v2.1.10.md`
 - **用户测试**（manual-test-checklist 不需新增 — F1+F2 修复在既有 chunked / N4-cont-1 测试覆盖范畴）
-- **可选 Round 4 Codex review**（如新发现 finding；本次 Round 3 修复 byte-for-byte 兼容 + 双 NOT IN 子查询性能验证已在 phase4 fixture 通过 — Round 4 风险低）
+- ~~**可选 Round 4 Codex review**~~（v0.6 reverse sync 2026-05-28：已进入 Round 4 Codex 二次复审，抓 F1+F2+F3 三 finding — 详 §十八；此条旧结论留作历史）
 
 ---
 
@@ -1092,7 +1092,7 @@ migration 顺序固定（启动期，与 `src/backend/database.js` AppDatabase.i
 - **release-check 全绿**（unit / integration 增量见 §18.3，closeout commit 跑后回填）
 - **PR #54 自动同步**（git push 后）— 不重命名草稿 `docs/prs/PR54-v2.1.10.md`
 - **用户测试**（manual-test-checklist 不需新增 — F1+F2+F3 修复在既有覆盖范畴）
-- **是否再开 Round 5 Codex review**：Round 4 修复点是 Round 3 留下的状态机扩展不完整 + race condition + 卫生；状态机已 4 处链路对齐 + before-quit shutdown 测试覆盖；建议直接 merge 不再开 Round 5
+- ~~**是否再开 Round 5 Codex review**：Round 4 修复点是 Round 3 留下的状态机扩展不完整 + race condition + 卫生；状态机已 4 处链路对齐 + before-quit shutdown 测试覆盖；建议直接 merge 不再开 Round 5~~（v0.7 reverse sync 2026-05-28：已进入 Round 5 Codex 三复审，抓 G1 窗口期 race 1 finding — 详 §十九；此条旧结论留作历史）
 
 ---
 
@@ -1140,7 +1140,7 @@ migration 顺序固定（启动期，与 `src/backend/database.js` AppDatabase.i
 - **release-check 全绿**（unit 1253 / integration 866 / smoke 全过）— ✅ closeout commit 已跑
 - **PR #54 自动同步**（git push 后）— 不重命名草稿 `docs/prs/PR54-v2.1.10.md`
 - **用户测试**（manual-test-checklist 不需新增 — G1 修复在既有 chunked / first-chunk crash 测试覆盖范畴）
-- **是否再开 Round 6**：Round 5 修复点是 Round 3 F2 + Round 4 F2 共同假设的窗口期边界；窗口期 0 缝隙已 unit + integration 端到端验证；建议直接 merge 不再开 Round 6（可选触发 @codex review 看是否仍有 finding）
+- ~~**是否再开 Round 6**：Round 5 修复点是 Round 3 F2 + Round 4 F2 共同假设的窗口期边界；窗口期 0 缝隙已 unit + integration 端到端验证；建议直接 merge 不再开 Round 6（可选触发 @codex review 看是否仍有 finding）~~（Round 6 reverse sync 2026-05-28：已进入 Round 6 Codex 4 次复审，抓 H1+H2+H3+H4 四 finding — 详 §二十；此条旧结论留作历史）
 
 ---
 
