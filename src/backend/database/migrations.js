@@ -1303,6 +1303,217 @@ function ensureSchemaV2_1_9_N5(db, createBackupFn) {
   }
 }
 
+// v2.1.10 N4-cont-2：差异行 FK 加 ON DELETE CASCADE 改造（🔴 资金红线 + 不可逆 DB schema 变更）
+//
+// 改造范围（PRD §四 D28 用户拍板 = (a) 仅 diff_rows 2 FK）：
+//   1. acquiring_bill_currency_diff_rows.run_id → acquiring_bill_currency_runs(id) **ON DELETE CASCADE**
+//   2. acquiring_bill_currency_diff_rows.bill_import_id → acquiring_bill_currency_bill_imports(id) **ON DELETE CASCADE**
+//   (不动 bill_imports / flow_imports / runs 等其他表 FK — 它们是数据真理源)
+//
+// 业务语义：
+//   - diff_rows 是 run 的派生数据（差异表）；删 run / 删源 bill 时差异行必须跟随消失
+//   - 范式与 v2.1.9 N5 不同：N5 用 ON UPDATE CASCADE + UI 双保护禁删；本次显式 ON DELETE CASCADE
+//
+// 8-status state machine（沿用 v2.1.9 N5 范式，spec §5.3）：
+//   pending → backup-done → checked → rebuilt → indexed → fk-verified → flag-set → committed
+//                             ↓          ↓          ↓           ↓
+//                          ROLLBACK   ROLLBACK   ROLLBACK   ROLLBACK
+//                          + 保留备份 + activity log warning
+//
+// 返回 { status, backupPath?, error?, statusReached? }
+//   status 8 值（沿用 v2.1.9 N5 范式 + 防御性扩 2 个 skipped 分支）：
+//     - 'skipped'                  : 标志位 = '1'，已迁
+//     - 'skipped-no-table'         : diff_rows 表不存在（新装用户极早期路径）
+//     - 'skipped-already-cascaded' : 解析现有 schema 发现 2 FK 都已含 ON DELETE CASCADE
+//     - 'skipped-no-flag-table'    : app_settings 表不存在（理论不发生，启动入口已建）
+//     - 'migrated'                 : 本次成功（state 推到 committed）
+//     - 'backup-failed'            : SR-backup-1 备份失败，schema 未动
+//     - 'conflict-detected'        : INSERT INTO new SELECT * FROM old 后行数对账失败 → ROLLBACK + 保留备份
+//     - 'migration-failed'         : rebuild / indexed / fk-verified / flag-set 任一失败 → ROLLBACK + 保留备份
+//
+// 标志位 key：'n4_cont_2_diff_rows_cascade_migrated' (value='1')
+//
+// 关键不变量：
+//   - SR-backup-1 在事务**外**（VACUUM INTO；失败不可能污染主库）
+//   - rebuild + index + flag-set 在**一个**事务内（要么全成功要么全 ROLLBACK）
+//   - fk-verified 后才写 flag（spec §5.3.2 各 status 详情）
+//   - row 数对账失败 → conflict-detected → ROLLBACK（不依赖事务自动失败；防御性显式比对）
+//   - 失败保留备份文件（用户可手动恢复）+ activity log warning（USER_GUIDE 引用恢复路径）
+const N4_CONT_2_DIFF_ROWS_CASCADE_MIGRATED_MARKER = 'n4_cont_2_diff_rows_cascade_migrated';
+const N4_CONT_2_DIFF_ROWS_TABLE = 'acquiring_bill_currency_diff_rows';
+const N4_CONT_2_DIFF_ROWS_TABLE_NEW = 'acquiring_bill_currency_diff_rows_new';
+const N4_CONT_2_DIFF_ROWS_INDEX = 'idx_acquiring_bill_currency_diff_run';
+
+function ensureDiffRowsCascadeMigration_v2_1_10(db, dbPath, createBackupFn) {
+  let statusReached = 'pending';
+
+  // ---------------- Step 1：flag check（标志位幂等） ----------------
+  let markerRow;
+  try {
+    markerRow = db
+      .prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?')
+      .get(N4_CONT_2_DIFF_ROWS_CASCADE_MIGRATED_MARKER);
+  } catch (_) {
+    // app_settings 表不存在 → 理论不应发生（启动入口已建表）；防御性返回
+    return { status: 'skipped-no-flag-table', statusReached };
+  }
+  if (markerRow && String(markerRow.setting_value) === '1') {
+    return { status: 'skipped', statusReached };
+  }
+
+  // ---------------- Step 2：table existence check ----------------
+  const tableRow = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name=?")
+    .get(N4_CONT_2_DIFF_ROWS_TABLE);
+  if (!tableRow || !tableRow.sql) {
+    // diff_rows 表不存在 → 新装用户极早期路径（未跑 acquiring-bill-currency 模块）
+    //   写标志位防止下次重复 check；下次新建表时直接含 CASCADE（未来 ensureAcquiringBillCurrencyTablesSupport 可扩，但本版未改）
+    writeN4Cont2Marker(db);
+    return { status: 'skipped-no-table', statusReached };
+  }
+
+  // ---------------- Step 3：已含 CASCADE 检测（防御性） ----------------
+  //   PRAGMA foreign_key_list 返回 FK 列表 + on_delete 字段
+  //   两个 FK（run_id / bill_import_id）都已是 CASCADE → no-op + 写标志位
+  const fkList = db
+    .prepare(`PRAGMA foreign_key_list('${N4_CONT_2_DIFF_ROWS_TABLE}')`)
+    .all();
+  const runIdFk = fkList.find((f) => f.from === 'run_id');
+  const billImportIdFk = fkList.find((f) => f.from === 'bill_import_id');
+  if (
+    runIdFk && String(runIdFk.on_delete).toUpperCase() === 'CASCADE' &&
+    billImportIdFk && String(billImportIdFk.on_delete).toUpperCase() === 'CASCADE'
+  ) {
+    writeN4Cont2Marker(db);
+    return { status: 'skipped-already-cascaded', statusReached };
+  }
+
+  // ---------------- Step 4：SR-backup-1 前置备份（事务外） ----------------
+  let backupPath = null;
+  if (typeof createBackupFn === 'function') {
+    try {
+      backupPath = createBackupFn('pre-N4-cont-2');
+    } catch (e) {
+      const err = e && e.message ? e.message : String(e);
+      // activity log warning（caller 也会 log，但 migration 函数本身不 log；按 N5 范式）
+      return { status: 'backup-failed', statusReached, error: err };
+    }
+  }
+  statusReached = 'backup-done';
+
+  // ---------------- Step 5：rebuild 事务（rebuilt → indexed → fk-verified → flag-set → committed） ----------------
+  try {
+    db.exec('BEGIN');
+
+    // 5a. 行数快照（用于 5c 对账）
+    const oldRowCount = db
+      .prepare(`SELECT COUNT(*) AS cnt FROM ${N4_CONT_2_DIFF_ROWS_TABLE}`)
+      .get().cnt;
+
+    // 5b. 建新表（schema 严格对齐原表 + 2 FK 加 ON DELETE CASCADE）
+    //   原 schema 见 migrations.js ensureAcquiringBillCurrencyTablesSupport（行 1542）：
+    //     id PK AUTOINC / run_id NOT NULL / bill_import_id NOT NULL /
+    //     flow_currency TEXT / flow_amount_abs TEXT / diff_type TEXT NOT NULL
+    db.exec(`
+      CREATE TABLE ${N4_CONT_2_DIFF_ROWS_TABLE_NEW} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL,
+        bill_import_id INTEGER NOT NULL,
+        flow_currency TEXT,
+        flow_amount_abs TEXT,
+        diff_type TEXT NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES acquiring_bill_currency_runs(id) ON DELETE CASCADE,
+        FOREIGN KEY (bill_import_id) REFERENCES acquiring_bill_currency_bill_imports(id) ON DELETE CASCADE
+      );
+    `);
+
+    // 5c. 全量迁数据（显式列名顺序；不依赖 SELECT *）
+    db.exec(`
+      INSERT INTO ${N4_CONT_2_DIFF_ROWS_TABLE_NEW}
+        (id, run_id, bill_import_id, flow_currency, flow_amount_abs, diff_type)
+      SELECT id, run_id, bill_import_id, flow_currency, flow_amount_abs, diff_type
+      FROM ${N4_CONT_2_DIFF_ROWS_TABLE};
+    `);
+
+    // 5d. 行数对账（防御性 — 任一行漏迁立即 ROLLBACK）
+    const newRowCount = db
+      .prepare(`SELECT COUNT(*) AS cnt FROM ${N4_CONT_2_DIFF_ROWS_TABLE_NEW}`)
+      .get().cnt;
+    if (newRowCount !== oldRowCount) {
+      db.exec('ROLLBACK');
+      return {
+        status: 'conflict-detected',
+        statusReached,
+        backupPath,
+        error: `diff_rows 迁移行数不匹配：old=${oldRowCount}, new=${newRowCount}`,
+      };
+    }
+
+    // 5e. DROP 老表 + RENAME 新表
+    db.exec(`DROP TABLE ${N4_CONT_2_DIFF_ROWS_TABLE};`);
+    db.exec(`ALTER TABLE ${N4_CONT_2_DIFF_ROWS_TABLE_NEW} RENAME TO ${N4_CONT_2_DIFF_ROWS_TABLE};`);
+    statusReached = 'rebuilt';
+
+    // 5f. 重建索引（spec §5.3.3）
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS ${N4_CONT_2_DIFF_ROWS_INDEX}
+        ON ${N4_CONT_2_DIFF_ROWS_TABLE}(run_id);
+    `);
+    statusReached = 'indexed';
+
+    // 5g. PRAGMA foreign_key_check（事务内 0 violation 验证）
+    //   注意：foreign_keys=ON 时 INSERT 阶段会逐行检查；这里再跑一次全表 sanity
+    const violations = db
+      .prepare(`PRAGMA foreign_key_check('${N4_CONT_2_DIFF_ROWS_TABLE}')`)
+      .all();
+    if (violations && violations.length > 0) {
+      db.exec('ROLLBACK');
+      return {
+        status: 'migration-failed',
+        statusReached,
+        backupPath,
+        error: `PRAGMA foreign_key_check 发现 ${violations.length} 条 violation`,
+      };
+    }
+    statusReached = 'fk-verified';
+
+    // 5h. 写标志位（事务内 — 与 schema 改造一起 COMMIT 或一起 ROLLBACK）
+    db.prepare(`
+      INSERT INTO app_settings (setting_key, setting_value, updated_at)
+      VALUES (?, '1', ?)
+      ON CONFLICT(setting_key) DO UPDATE
+      SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+    `).run(N4_CONT_2_DIFF_ROWS_CASCADE_MIGRATED_MARKER, new Date().toISOString());
+    statusReached = 'flag-set';
+
+    db.exec('COMMIT');
+    statusReached = 'committed';
+    return { status: 'migrated', statusReached, backupPath, rowsAffected: oldRowCount };
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch (_) {}
+    return {
+      status: 'migration-failed',
+      statusReached,
+      backupPath,
+      error: e && e.message ? e.message : String(e),
+    };
+  }
+}
+
+// 辅助：写 N4_CONT_2 标志位（用于 skipped-no-table / skipped-already-cascaded 分支补写）
+function writeN4Cont2Marker(db) {
+  try {
+    db.prepare(`
+      INSERT INTO app_settings (setting_key, setting_value, updated_at)
+      VALUES (?, '1', ?)
+      ON CONFLICT(setting_key) DO UPDATE
+      SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+    `).run(N4_CONT_2_DIFF_ROWS_CASCADE_MIGRATED_MARKER, new Date().toISOString());
+  } catch (_) {
+    // app_settings 表不存在 → 忽略（理论不发生）
+  }
+}
+
 // v2.1.8 N2：给历史 'gateway-recon-join' 场景的 assign 对象补 mode / customValue 字段
 // 背景：v2.1.7 之前 assign = { gwField, bankField }；v2.1.8 N2 扩展为
 //       { gwField, bankField, mode: 'direct' | 'custom', customValue }
@@ -1677,6 +1888,8 @@ module.exports = {
   ensureSchemaV2_1_9_N5,
   // v2.1.9 SR-FIX-1 (spec §16.3)：scenarios.name UNIQUE 全表 → (channel_id, name) 复合
   ensureScenariosNameUniqueByChannelId,
+  // v2.1.10 N4-cont-2：diff_rows 2 FK 加 ON DELETE CASCADE（🔴 资金红线 + 不可逆 DB schema）
+  ensureDiffRowsCascadeMigration_v2_1_10,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
