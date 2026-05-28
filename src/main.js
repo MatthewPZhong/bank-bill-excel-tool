@@ -10622,7 +10622,7 @@ function registerNewAccountHandlers() {
   // v2.1.7 F7-B1：runCheck 完成/失败弹系统通知（spec §7.5.2 / PRD §十一-B1）
   //   success：「收单单据币种校验」{monthKey} 对账完成（共 N 行差异）
   //   error：  「收单单据币种校验」对账失败：{message}（body 200 字符截断兜底 macOS 通知中心）
-  //   不弹 cancel 通知（仅 success + 真正 error）
+  //   cancelled (v2.1.10 SR-FIX-1 round 2 P1-4)：「收单单据币种校验」{monthKey} 已取消（轻量提示，不当错误）
   //   helper 内部 try/catch swallow，通知失败不影响 IPC return
   //   Notification.isSupported() 兜底极端环境（如无 GUI 的 CI / SSH 头）
   function notifyAcquiringBillCurrencyResult(monthKey, kind, payload) {
@@ -10633,6 +10633,11 @@ function registerNewAccountHandlers() {
       if (kind === 'success') {
         const mismatch = (payload && typeof payload.mismatchRows === 'number') ? payload.mismatchRows : 0;
         body = `${monthKey} 对账完成（共 ${mismatch} 行差异）`;
+      } else if (kind === 'cancelled') {
+        // v2.1.10 SR-FIX-1 round 2 P1-4：用户主动取消（CancelError），轻量提示 — 不视为错误
+        //   spec §2.4 设计契约 + CancelError class 注释明确：业务语义是用户主动取消
+        const stage = payload && payload.stage ? String(payload.stage) : '';
+        body = stage ? `${monthKey} 已取消（${stage}）` : `${monthKey} 已取消`;
       } else {
         const msg = (payload && payload.message) ? String(payload.message) : '未知错误';
         body = `对账失败：${msg}`.slice(0, 200);
@@ -10812,6 +10817,13 @@ function registerNewAccountHandlers() {
       );
     } catch (err) {
       releaseOpLock();
+      // v2.1.10 SR-FIX-1 round 2 P1-4：CancelError 走 cancelled 路径（spec §2.4 设计契约）
+      //   CancelError class 注释明确：业务语义=用户主动取消；handler 应识别，不弹错误 Notification
+      //   错误 source 失败时仍弹 error；cross-process worker → instanceof 不可靠 → 用 err.name
+      if (err && err.name === 'CancelError') {
+        notifyAcquiringBillCurrencyResult(monthKey, 'cancelled', { stage: err.stage });
+        return { status: 'cancelled', message: err.message, stage: err.stage };
+      }
       // v2.1.7 F7-B1：error 路径弹通知（spec §7.5.2）
       notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
       return { status: 'error', message: err && err.message ? err.message : String(err) };
@@ -10908,6 +10920,11 @@ function registerNewAccountHandlers() {
       );
     } catch (err) {
       releaseOpLock();
+      // v2.1.10 SR-FIX-1 round 2 P1-4：CancelError 走 cancelled 路径（同 run handler）
+      if (err && err.name === 'CancelError') {
+        notifyAcquiringBillCurrencyResult(monthKey, 'cancelled', { stage: err.stage });
+        return { status: 'cancelled', resumed: true, message: err.message, stage: err.stage };
+      }
       notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
