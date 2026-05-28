@@ -297,6 +297,31 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
       }
       // v2.1.10 A4 T18：主事务 COMMIT — 让 stage 4' chunked 各 chunk 独立 BEGIN/COMMIT
       db.exec('COMMIT');
+
+      // v2.1.10 SR-FIX-1 Round 5 G1：setRunChunkProgress(in-progress) 必须在 COMMIT 后、任何 await 前
+      //   触发场景（Codex Round 4 复审 finding，2026-05-28T10:52）：
+      //     Round 3 F2 把 in-progress 占位写在 chunked 入口前（line 344），但中间还有
+      //     stage 4' 的 progress event + `await setImmediate` 让出 event loop。
+      //     如果 worker / app 在 COMMIT 后 ↔ Round 3 F2 写入前的窗口期退出：
+      //       → runs 行已落库（status='success'，chunk_progress IS NULL）
+      //       → failureListener（Round 4 F2 兜底路径）扫描 in-progress 找不到（chunk_progress NULL）
+      //       → 启动期 cleanupOrphanData 守卫（partial OR in-progress）也不命中 → 当 orphan 清掉
+      //       → 用户无法 resume
+      //   修复：把 in-progress 占位提前到 COMMIT 后、**第一个 await 之前**（无 await 让出窗口）
+      //     - 仅在 !isResume 时写（resume 路径已有有效 chunk_progress；不要重写覆盖）
+      //     - onChunkDone 第一次触发时会用真实 totalChunks 覆盖此值
+      //     - cancel 路径 catch 块仍覆盖此值为 partial（byte-for-byte 兼容 Round 3 F2 不变）
+      //   关键不变量：本块到下一行 `} catch (error)` 之间不能再有任何 await
+      try {
+        runRepo.setRunChunkProgress(db, {
+          runId,
+          lastCompletedChunkIndex: -1, // 起始值；onChunkDone 第一次会覆盖
+          totalChunks: 0,              // 未知；onChunkDone 第一次会算出真实值（与 0-chunk 边界 fallback 一致）
+          status: 'in-progress',
+        });
+      } catch (_progressErr) {
+        // 写失败不阻塞主流程（unit fixture 表不存在 / 极小概率 SQLITE_BUSY）
+      }
     } catch (error) {
       safeRollback(db);
       throw error;
@@ -321,6 +346,9 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
 
   // ── stage 4' chunked INSERT diff_rows ──
   //   主事务已 COMMIT；进入 chunked 区域（各 chunk 独立 BEGIN/COMMIT）
+  //   v2.1.10 SR-FIX-1 Round 5 G1：in-progress 占位已在 COMMIT 后立即写入（line ~300）
+  //     窗口期 0：COMMIT → setRunChunkProgress 之间没有 await/event loop 让出
+  //     原 Round 3 F2 此处的占位写入已迁移到 COMMIT 后（避免 await 窗口）
   // v2.1.7 F6 埋点 4/6：SQL JOIN 比对币种（耗时大头）→ chunked 模式
   if (onProgress) {
     onProgress({ phase: 'run', stage: 'sql-joining', mismatchHint: stats.mismatchRows });
@@ -330,29 +358,6 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
   const resumeFromChunkIndex = isResume && Number.isInteger(resumeFromRun.lastCompletedChunkIndex)
     ? resumeFromRun.lastCompletedChunkIndex + 1
     : 0;
-
-  // v2.1.10 SR-FIX-1 Round 3 F2：first-chunk crash 防护
-  //   触发场景：worker 跑第一个 chunk 时 die（process.exit / OOM / SIGKILL），onChunkDone 触发前
-  //     → 根本没有 chunk_progress 写入
-  //     → crash listener（main.js failureListener，P1-7 兜底）扫 in-progress → partial，但**找不到该 run 因 chunk_progress IS NULL**
-  //     → 启动期 cleanupOrphanData（P0-1 修复）只保护 chunk_progress.status='partial' / 'in-progress' 的 run
-  //     → 该 run 被当孤儿清掉 → 用户无法 resume
-  //   修复：在 insertDiffRowsByJoinChunked 入口前先写一个 in-progress 记录，保证 chunk_progress IS NOT NULL
-  //     - onChunkDone 第一次触发时会覆盖此值（lastCompletedChunkIndex=0 / status='in-progress' 或 'complete'）
-  //     - 仅在 !isResume 时写（resume 路径 chunk_progress 已是 partial，已能被 cleanup 守卫识别）
-  //   注：cleanupOrphanData (P0-1) 守卫扩展为 partial OR in-progress 一起保护（spec §3.3 / §5.4 idempotent）
-  if (!isResume) {
-    try {
-      runRepo.setRunChunkProgress(db, {
-        runId,
-        lastCompletedChunkIndex: -1, // 起始值；onChunkDone 第一次会覆盖
-        totalChunks: 0,              // 未知；onChunkDone 第一次会算出真实值（与 0-chunk 边界 fallback 一致）
-        status: 'in-progress',
-      });
-    } catch (_progressErr) {
-      // 写失败不阻塞主流程（unit fixture 表不存在 / 极小概率 SQLITE_BUSY）
-    }
-  }
 
   try {
     chunkedResult = runRepo.insertDiffRowsByJoinChunked(db, {

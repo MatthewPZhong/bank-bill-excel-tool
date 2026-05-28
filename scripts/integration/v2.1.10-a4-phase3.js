@@ -497,11 +497,115 @@ async function test5_cleanupOrphanProtectsInProgress() {
 }
 
 // ─────────────────────────────────────────────────────────────────
+// case 6：SR-FIX-1 Round 5 G1 — COMMIT 后 ↔ chunked 入口 窗口期 crash 端到端
+//   触发场景（Codex Round 4 复审 finding，2026-05-28T10:52）：
+//     Round 3 F2 把 in-progress 占位写在 chunked 入口前，但 COMMIT 后 → 该写入之间还有
+//     `await setImmediate()` 让出 event loop（progress event + setImmediate）。
+//     如果 worker 在窗口期退出 → chunk_progress IS NULL → failureListener / cleanupOrphanData 都不命中
+//   修复后（Round 5 G1）：in-progress 占位在 COMMIT 之后立即写入（无 await 让出窗口）
+//   端到端验证（区别于 case 5 — case 5 是手工塞 in-progress 测 cleanup；case 6 是真实 runCheckCore 路径）：
+//     - onProgress hook 在 stage 4' 入口（sql-joining）throw 模拟窗口期 crash
+//     - 验证：runs 行已 COMMIT + chunk_progress IS NOT NULL（Round 5 G1 写入生效）
+//     - 验证：chunk_progress.status='in-progress'
+//     - 验证：cleanupOrphanData 不清这个 run（Round 3/4 守卫）
+//     - 验证：resume IPC handler 能识别（Round 4 F1 状态机扩展）+ 真实 resume runCheckCore 跑通
+//     - 验证：resume 后 chunk_progress.status='complete' + diff_rows 5000 完整
+// ─────────────────────────────────────────────────────────────────
+async function test6_windowGapCrashEndToEnd() {
+  console.log('\n[case 6] SR-FIX-1 Round 5 G1 — COMMIT ↔ chunked 入口 窗口期 crash 端到端（runCheckCore 真实路径）');
+
+  const ctx = await setupTmpDbWithMismatchFixture({ rowCount: 5000 });
+  try {
+    // 步骤 1：跑 runCheckCore 但在 stage 4' 入口 onProgress 抛错（模拟窗口期 crash）
+    //   注：onProgress({stage:'sql-joining', mismatchHint}) 是 COMMIT 后第一个 onProgress 事件
+    //   旧 bug：in-progress 占位在 stage 4' 入口 onProgress 之后才写 → 此时抛错 chunk_progress IS NULL
+    //   Round 5 G1 修复：占位已在 COMMIT 后立即写 → chunk_progress IS NOT NULL
+    let crashErr;
+    try {
+      await session.runCheckCore({
+        db: ctx.db.db,
+        monthKey: '2026-04',
+        storageRoot: ctx.tmpdir,
+        chunkSize: 2000,
+        onProgress: (ev) => {
+          // stage 4' 入口（chunk 0 之前的 mismatchHint 事件） — 模拟 worker crash
+          if (ev.stage === 'sql-joining' && ev.mismatchHint !== undefined && ev.chunkIndex === undefined) {
+            throw new Error('SIMULATED_WORKER_CRASH_IN_WINDOW_GAP');
+          }
+        },
+      });
+    } catch (e) { crashErr = e; }
+
+    assertTrue(!!crashErr, '6.1 模拟 crash 被抛出');
+    assertTrue(/SIMULATED_WORKER_CRASH/.test(crashErr && crashErr.message), '6.2 crash 错误消息正确传播');
+
+    // 步骤 2：验证 runs 行已 COMMIT + chunk_progress IS NOT NULL（Round 5 G1 修复核心）
+    const runAfterCrash = ctx.db.db.prepare(
+      'SELECT * FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1'
+    ).get();
+    assertTrue(!!runAfterCrash, '6.3 runs 行已 COMMIT 落库（COMMIT 在 stage 4 入口之前）');
+    assertTrue(!!runAfterCrash.chunk_progress,
+      '6.4 Round 5 G1：窗口期 crash 后 chunk_progress IS NOT NULL（旧 bug：IS NULL）');
+
+    const progressAfterCrash = JSON.parse(runAfterCrash.chunk_progress);
+    assertEq(progressAfterCrash.status, 'in-progress', '6.5 chunk_progress.status=in-progress（Round 5 G1 占位）');
+    assertEq(progressAfterCrash.lastCompletedChunkIndex, -1, '6.6 lastCompletedChunkIndex=-1（起始）');
+
+    const crashedRunId = runAfterCrash.id;
+    const crashedMonth = runAfterCrash.month_key;
+    assertEq(crashedMonth, '2026-04', '6.7 runs.month_key=2026-04');
+
+    // 步骤 3：触发 cleanupOrphanData — Round 3/4 守卫不应清掉 in-progress run
+    const cleanupStats = await session.cleanupOrphanData({ db: ctx.db.db });
+    assertEq(cleanupStats.orphanRunIds.includes(crashedRunId), false,
+      '6.8 cleanupOrphanData 不清 in-progress run（Round 3 F2 守卫扩展）');
+
+    const runAfterCleanup = ctx.db.db.prepare(
+      'SELECT * FROM acquiring_bill_currency_runs WHERE id=?'
+    ).get(crashedRunId);
+    assertTrue(!!runAfterCleanup, '6.9 cleanupOrphanData 后 in-progress run 仍存在');
+
+    // 步骤 4：验证 listPartialRuns 能识别 in-progress（Round 4 F1 状态机扩展）
+    const partials = runRepo.listPartialRuns(ctx.db.db, '2026-04');
+    assertEq(partials.length, 1, '6.10 listPartialRuns 命中 1 个可恢复 run');
+    assertEq(partials[0].id, crashedRunId, '6.11 partials[0].id == crashedRunId');
+    assertEq(partials[0].chunk_progress.status, 'in-progress', '6.12 partials[0].status=in-progress');
+
+    // 步骤 5：真实 resume 跑 runCheckCore — 验证能从 in-progress 状态完整跑完
+    //   resume 路径：lastCompletedChunkIndex=-1 → resumeFromChunkIndex=0 → 从头跑所有 chunks
+    const resumeResult = await session.runCheckCore({
+      db: ctx.db.db,
+      monthKey: '2026-04',
+      storageRoot: ctx.tmpdir,
+      chunkSize: 2000,
+      resumeFromRun: { runId: crashedRunId, lastCompletedChunkIndex: -1 },
+    });
+
+    assertEq(resumeResult.runId, crashedRunId, '6.13 resume 复用同一 runId');
+
+    // 步骤 6：验证 resume 后 chunk_progress=complete + diff_rows 5000 完整
+    const runAfterResume = ctx.db.db.prepare(
+      'SELECT * FROM acquiring_bill_currency_runs WHERE id=?'
+    ).get(crashedRunId);
+    const progressAfterResume = JSON.parse(runAfterResume.chunk_progress);
+    assertEq(progressAfterResume.status, 'complete', '6.14 resume 后 chunk_progress.status=complete');
+    assertEq(progressAfterResume.totalChunks, 3, '6.15 totalChunks=3（5000 行 / chunk=2000）');
+
+    const diffCount = ctx.db.db.prepare(
+      'SELECT COUNT(*) c FROM acquiring_bill_currency_diff_rows WHERE run_id=?'
+    ).get(crashedRunId).c;
+    assertEq(diffCount, 5000, '6.16 resume 后 diff_rows 5000 完整（窗口期 crash 不破坏 byte-for-byte）');
+  } finally {
+    ctx.cleanup();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────
 async function main() {
   console.log('==== v2.1.10 A4 Phase 3 集成测试 ====');
-  console.log('PRD §1.3 + spec §七 Phase 3 ≥ 3 case ≥ 15 断言 + SR-FIX-1 round 2 P0-1 case 4 + Round 3 F2 case 5');
+  console.log('PRD §1.3 + spec §七 Phase 3 ≥ 3 case ≥ 15 断言 + SR-FIX-1 round 2 P0-1 case 4 + Round 3 F2 case 5 + Round 5 G1 case 6');
 
   const cases = [
     test1_chunkBoundaries,
@@ -509,6 +613,7 @@ async function main() {
     test3_perfAndCancelResponsiveness,
     test4_cleanupOrphanProtectsPartialRun,
     test5_cleanupOrphanProtectsInProgress,
+    test6_windowGapCrashEndToEnd,
   ];
 
   for (const c of cases) {

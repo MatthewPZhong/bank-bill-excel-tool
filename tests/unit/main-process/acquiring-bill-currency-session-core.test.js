@@ -576,4 +576,58 @@ test.describe('runCheckCore byte-for-byte contract', () => {
       ctx.cleanup();
     }
   });
+
+  // v2.1.10 SR-FIX-1 Round 5 G1 — setRunChunkProgress(in-progress) 提前到 COMMIT 后任何 await 前
+  //   证明：COMMIT 之后立即写入 chunk_progress.status='in-progress'，不是在 stage 4' 入口
+  //   验证方法：用 onProgress hook 在 stage='sql-joining' 时抛错（这是 COMMIT 后第一个 await 之后的第一个 onProgress）
+  //     → runCheckCore catches 抛错；此时若 in-progress 占位已在 COMMIT 后写入，则 chunk_progress IS NOT NULL
+  //     → 若仍在旧位置（chunked 入口前），则要等 stage 4' onProgress 触发后才写 → 抛错时 chunk_progress IS NULL
+  //   Round 4 F2 兜底前置：chunk_progress 必须 IS NOT NULL，failureListener 才能识别为可恢复
+  test('T19-session.5 — Round 5 G1：setRunChunkProgress(in-progress) 在 COMMIT 后立即写入（COMMIT → 首 await 之间窗口期 0 缝隙）', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    try {
+      // 用 onProgress hook 在 stage 4' 入口（sql-joining）抛错模拟 crash
+      //   注意：sql-joining 是 COMMIT 之后第一个 onProgress 事件
+      //   如果 in-progress 写入在 COMMIT 后（Round 5 G1 修复后），此时 chunk_progress 应已写入
+      //   如果还在旧位置（chunked 入口前），此时 chunk_progress 仍是 NULL（旧 bug）
+      let caught;
+      try {
+        await session.runCheckCore({
+          db: ctx.db.db,
+          monthKey: FIXTURE_MONTH,
+          storageRoot: ctx.tmpdir,
+          onProgress: (ev) => {
+            if (ev.stage === 'sql-joining' && !ev.chunkIndex && ev.chunkIndex !== 0) {
+              // chunk 0 的 sql-joining 事件（mismatchHint 字段标识入口事件）
+              if (ev.mismatchHint !== undefined) {
+                throw new Error('SIMULATED_CRASH_AT_SQL_JOINING_ENTRY');
+              }
+            }
+          },
+        });
+      } catch (e) { caught = e; }
+
+      // 模拟 crash 应该传播出来
+      assert.ok(caught, '应 throw（模拟 crash）');
+      assert.match(caught.message, /SIMULATED_CRASH/, 'crash error 被传播');
+
+      // 关键验证：chunk_progress 必须已写入（in-progress），证明 Round 5 G1 写入提前生效
+      //   旧 bug：chunk_progress IS NULL → 5.1 失败
+      const run = ctx.db.db.prepare('SELECT chunk_progress FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1').get();
+      assert.ok(run, '5.0 runs 行 COMMIT 后已落库');
+      assert.ok(run.chunk_progress, '5.1 Round 5 G1：COMMIT 后窗口期 chunk_progress IS NOT NULL（旧 bug 此处 IS NULL）');
+
+      const progress = JSON.parse(run.chunk_progress);
+      assert.equal(progress.status, 'in-progress', '5.2 chunk_progress.status=in-progress（Round 5 G1 占位）');
+      assert.equal(progress.lastCompletedChunkIndex, -1, '5.3 lastCompletedChunkIndex=-1（占位起始值）');
+      assert.equal(progress.totalChunks, 0, '5.4 totalChunks=0（占位起始值；待 onChunkDone 覆盖）');
+
+      // 验证 Round 4 F1 链路兼容：listPartialRuns 应能命中 in-progress
+      const partials = require('../../../src/backend/acquiring-bill-currency-db/run-repository').listPartialRuns(ctx.db.db, FIXTURE_MONTH);
+      assert.equal(partials.length, 1, '5.5 listPartialRuns 命中 in-progress run（Round 4 F1 状态机扩展兼容）');
+      assert.equal(partials[0].chunk_progress.status, 'in-progress', '5.6 partials[0].status=in-progress');
+    } finally {
+      ctx.cleanup();
+    }
+  });
 });

@@ -2,13 +2,13 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.4（2026-05-28 — SR-FIX-1 Round 4 F1 N4-cont-1 SQL 守卫从 partial 扩为 partial OR in-progress；状态机 4 处链路统一）/ v0.3（2026-05-28 — N4-cont-1 sentinel 修订 `NULL → ''` 兼容 v2.1.8 N4 NOT NULL schema）/ v0.2（D25/D26/D27 + N4-cont-1 方案变更）/ v0.1（PM 初版） |
+| 文档版本 | v0.5（2026-05-28 — SR-FIX-1 Round 5 G1 setRunChunkProgress 提前到 COMMIT 后任何 await 前；窗口期 0 缝隙）/ v0.4（SR-FIX-1 Round 4 F1 N4-cont-1 SQL 守卫从 partial 扩为 partial OR in-progress；状态机 4 处链路统一）/ v0.3（2026-05-28 — N4-cont-1 sentinel 修订 `NULL → ''` 兼容 v2.1.8 N4 NOT NULL schema）/ v0.2（D25/D26/D27 + N4-cont-1 方案变更）/ v0.1（PM 初版） |
 | 目标版本 | `v2.1.10`（minor — 架构级：runCheck 跨进程 + DB schema 不可逆 FK 改造） |
 | 起始版本 | `v2.1.9`（α 已提 PR #53；β 启动节奏按用户拍板：α 提 PR 后立即开 β 分支） |
-| 起草日期 | 2026-05-28（v0.1 / v0.2 reverse sync / v0.3 sentinel 修订 / v0.4 Round 4 F1 状态机统一） |
-| 起草人 | PM + Dev Phase 4 T28 发现 + 主线程 修订 + Round 3/4 Codex review |
-| 状态 | v0.4 SR-FIX-1 Round 4 完成（Round 3 F1+F2 + Round 4 F1+F2+F3 收尾） |
-| 关联文档 | `backlog.md` v0.2（D23-D28 全部拍板）/ `spec.md` v0.6（Round 4 reverse sync）/ `tasks.md` v0.2 / `manual-test-checklist.md` v0.2 |
+| 起草日期 | 2026-05-28（v0.1 / v0.2 reverse sync / v0.3 sentinel 修订 / v0.4 Round 4 F1 状态机统一 / v0.5 Round 5 G1 窗口期 0 缝隙） |
+| 起草人 | PM + Dev Phase 4 T28 发现 + 主线程 修订 + Round 3/4/5 Codex review |
+| 状态 | v0.5 SR-FIX-1 Round 5 完成（Round 3 F1+F2 + Round 4 F1+F2+F3 + Round 5 G1 收尾） |
+| 关联文档 | `backlog.md` v0.2（D23-D28 全部拍板）/ `spec.md` v0.7（Round 5 reverse sync §19）/ `tasks.md` v0.2 / `manual-test-checklist.md` v0.2 |
 | 涉及模块 | 收单单据币种校验（A3 worker / A4 chunked 必做 / N4-cont-1 raw_json 仅清对账成功行 / N4-cont-2 FK CASCADE）+ 全局 DB 基建（复用 SR-backup-1 + 沿用 v2.1.9 N5 channels FK 范式 + 复用 v2.1.9 N1' idle cleanup 计时器）+ 全局架构（worker 进程边界 + lastActiveTs 跨进程同步） |
 | 工作分支 | `v2.1.10`（基于 main，已建好；`package.json.version` = `2.1.10-beta.1`） |
 | 依赖 | v2.1.9 α 已上线产物：N5 channels FK 范式（ON UPDATE CASCADE） / SR-backup-1 backup API（VACUUM INTO） / N1' idle 30min cleanup 计时器（`src/main.js:11155-11178`，N4-cont-1 复用追加回调）/ N1-settings idle 阈值 settings 化 / N4 重构 createBackupFn 注入范式 / SR-log-1 全局告警日志 |

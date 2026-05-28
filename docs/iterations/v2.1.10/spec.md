@@ -2,11 +2,11 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.6（2026-05-28 — SR-FIX-1 Round 4 Codex 复审 F1+F2+F3：in-progress 状态机 4 处链路统一扩展 + before-quit shutdown 不抹 activeJob + git diff --check 卫生）/ v0.5（SR-FIX-1 Round 3 Codex F1+F2：N4-cont-1 SQL 加 partial run month 排除 + A4 chunked 入口前初始 in-progress + cleanupOrphanData 守卫扩展）/ v0.4（SR-FIX-1 round 2 P0 4 + P1 9 = 13 项修复 + §16 reverse sync + §8.3 migration 顺序修订）/ v0.3（N4-cont-1 sentinel 修订 `NULL → ''`）/ v0.2（A4 必做 + N4-cont-1 重大方案变更）|
-| 关联 PRD | `PRD-v2.1.10.md` v0.4（同步 §5.3 migration 顺序修订；§4.2 sentinel 修订；v0.5 Round 3 F1 + v0.6 Round 4 F1 N4-cont-1 SQL 守卫扩展）|
+| 文档版本 | v0.7（2026-05-28 — SR-FIX-1 Round 5 Codex 复审 G1：setRunChunkProgress(in-progress) 提前到 COMMIT 后任何 await 前）/ v0.6（SR-FIX-1 Round 4 Codex 复审 F1+F2+F3：in-progress 状态机 4 处链路统一扩展 + before-quit shutdown 不抹 activeJob + git diff --check 卫生）/ v0.5（SR-FIX-1 Round 3 Codex F1+F2：N4-cont-1 SQL 加 partial run month 排除 + A4 chunked 入口前初始 in-progress + cleanupOrphanData 守卫扩展）/ v0.4（SR-FIX-1 round 2 P0 4 + P1 9 = 13 项修复 + §16 reverse sync + §8.3 migration 顺序修订）/ v0.3（N4-cont-1 sentinel 修订 `NULL → ''`）/ v0.2（A4 必做 + N4-cont-1 重大方案变更）|
+| 关联 PRD | `PRD-v2.1.10.md` v0.5（同步 §5.3 migration 顺序修订；§4.2 sentinel 修订；v0.5 Round 3 F1 + v0.6 Round 4 F1 N4-cont-1 SQL 守卫扩展 + v0.7 Round 5 G1 setRunChunkProgress 提前）|
 | 关联 backlog | `backlog.md` v0.2（D23-D28 全部拍板 + Phase 0 POC 完成）|
-| 起草人 | PM + Dev Phase 4 T28 发现 + 主线程 T29' 修订 + Dev SR-FIX-1 round 2 dev 自审 + Round 3 Codex review + Round 4 Codex 复审 |
-| 状态 | v0.6 SR-FIX-1 Round 4 完成（13 + 3 + 4 commits；release-check 全绿；unit / integration 增量见 §17.6 / §17.7）|
+| 起草人 | PM + Dev Phase 4 T28 发现 + 主线程 T29' 修订 + Dev SR-FIX-1 round 2 dev 自审 + Round 3 Codex review + Round 4 Codex 复审 + Round 5 Codex 三复审 |
+| 状态 | v0.7 SR-FIX-1 Round 5 完成（13 + 3 + 4 + 2 commits；release-check 全绿；unit / integration 增量见 §19.3）|
 
 ---
 
@@ -1096,5 +1096,53 @@ migration 顺序固定（启动期，与 `src/backend/database.js` AppDatabase.i
 
 ---
 
-**当前状态**：v0.6（2026-05-28 SR-FIX-1 Round 4 完成 — Round 2 13 + Round 3 3 + Round 4 4 = 20 commits）。
+## 十九、SR-FIX-1 Round 5 — Codex 三复审 G1 修复（v0.7 reverse sync）
+
+> v0.7 立项（2026-05-28 — PR #54 Round 4 push 后 Codex 三复审 2026-05-28T10:52:03Z 完成，抓 1 finding；用户拍板 2 commits = G1 + closeout）
+
+### 19.1 Codex 三复审 finding 清单
+
+| Finding | 严重度 | 位置 | 描述 |
+|---|---|---|---|
+| **G1** | 🟡 P2（窗口期 race condition — Round 3 F2 位置不够早 + Round 4 F2 兜底前置失效）| `src/main-process/acquiring-bill-currency-session.js:299-344` | `run` 已在 line 299 提交，但初始 `chunk_progress='in-progress'` 要到 line 344 才写入；中间 line 325-327 先发 `sql-joining` progress 并 `await setImmediate()`。如果 worker/app 在这个窗口退出，failureListener（Round 4 F2 兜底路径）扫不到 `chunk_progress`，启动清理（Round 3 F2 守卫）也不会把这条 run 识别为 `partial/in-progress` 可恢复状态，仍可能被当 orphan 清掉，导致用户无法 resume |
+
+### 19.2 Round 5 修复清单（1 finding + closeout = 2 commits）
+
+| Finding | 严重度 | 修复 commit | 修复说明 |
+|---|---|---|---|
+| **G1** setRunChunkProgress(in-progress) 提前到 COMMIT 后任何 await 前 | 🟡 | `<本 commit>` | `runCheckCore` `if (!isResume)` block 内：`db.exec('COMMIT')` 之后立即写入 `setRunChunkProgress({status:'in-progress'})`，**该块内不能再有任何 await**；原 line 344 的 Round 3 F2 入口前占位代码迁移到 COMMIT 后（保留 `if (!isResume)` 语义因迁移后位置已在 if-block 内）；窗口期 0 缝隙 — 闭合 F2 兜底前置依赖。unit T19.5 +1（runCheckCore byte-for-byte contract 套件 14 case）；integration a4-phase3 case 6 +16（53 → 63 断言；端到端 onProgress hook crash → cleanupOrphanData 守卫 → resume 真实路径 verify）|
+| **closeout** Round 5 收尾 | — | `<下一 commit>` | spec §19 Round 5 章节定稿 + CHANGELOG v2.1.10 SR-FIX-1 Round 5 段 + release-check 全跑（unit 1253 / integration 866 / smoke 全过）+ scan:vars 数据同步 |
+
+### 19.3 测试增量（Round 5 完成后）
+
+| 阶段 | Round 4 baseline | Round 5 完成后 | 增量 |
+|---|---:|---:|---:|
+| unit | 1252 case | **1253 case** | +1（acquiring-bill-currency-session-core T19.5 = 1）|
+| integration | 850 断言 | **866 断言** | +16（a4-phase3 case 6 = 16）|
+| smoke | 全过 | **全过** | 0 regression |
+
+### 19.4 资金红线护栏（Round 5 维持 + 加强）
+
+1. **窗口期 0 缝隙**（Round 5 G1）：
+   - COMMIT → setRunChunkProgress(in-progress) 之间无 `await` / event loop 让出
+   - 关键代码区注释明确"本块到下一行 `} catch (error)` 之间不能再有任何 await"
+   - 写失败 catch 不抛（保持原 Round 3 F2 鲁棒性）
+2. **Round 4 F2 兜底路径完整启用**（Round 5 G1 是其前置条件）：
+   - chunk_progress 占位写入早于任何 await → 任何 worker/app crash 都能被 failureListener / cleanupOrphanData 识别
+   - 闭合 Round 4 F2 修复链路（shutdown 不抹 activeJob → failureListener 看 hadActiveJob=true → 兜底转 partial）
+3. **byte-for-byte 不破坏**（Round 5 G1 不改变成功路径行为）：
+   - onChunkDone 第一次触发时仍用真实 totalChunks 覆盖占位值
+   - cancel 路径 catch 块仍覆盖占位为 partial（语义不变）
+   - contract test a3-phase1 40/40 / a3-phase2 42/42 / a4-phase3 63/63 仍通过
+
+### 19.5 Round 5 → 后续建议
+
+- **release-check 全绿**（unit 1253 / integration 866 / smoke 全过）— ✅ closeout commit 已跑
+- **PR #54 自动同步**（git push 后）— 不重命名草稿 `docs/prs/PR54-v2.1.10.md`
+- **用户测试**（manual-test-checklist 不需新增 — G1 修复在既有 chunked / first-chunk crash 测试覆盖范畴）
+- **是否再开 Round 6**：Round 5 修复点是 Round 3 F2 + Round 4 F2 共同假设的窗口期边界；窗口期 0 缝隙已 unit + integration 端到端验证；建议直接 merge 不再开 Round 6（可选触发 @codex review 看是否仍有 finding）
+
+---
+
+**当前状态**：v0.7（2026-05-28 SR-FIX-1 Round 5 完成 — Round 2 13 + Round 3 3 + Round 4 4 + Round 5 2 = 22 commits）。
 **下一步**：通知主线程 → 验证 push / 用户测试 / merge 决策。
