@@ -10596,7 +10596,10 @@ function registerNewAccountHandlers() {
 
   // v2.1.7 F6：进度事件 forwarder（spec §6.3 改动点 2）
   //   - createImportProgressForwarder：100ms 节流；stage='reading' 切换事件必发（文件切换）
-  //   - createRunProgressForwarder：无节流（每 run 仅 6 个事件）
+  //   - createRunProgressForwarder：无节流（v2.1.10 SR-FIX-1 round 2 P1-9 reverse sync — 注释过时修订）
+  //     v2.1.7 时每 run 仅 6 个事件；v2.1.10 A4 chunked 后每 run 6 + chunkCount 事件
+  //     （500w 行 / chunk=10w = 50 chunks → 56 events；5000w 行 → 506 events）
+  //     当前不节流；renderer 端 IPC listener 渲染抖动风险随数据量提升 — chunkCount > 100 时考虑节流（v2.1.11+）
   //   - try/catch swallow webContents.send 失败（参考 main.js:9520 pending:import:progress 范式）
   function createImportProgressForwarder(event) {
     if (!event || !event.sender) return null;
