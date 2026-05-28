@@ -491,4 +491,46 @@ test.describe('ensureDiffRowsCascadeMigration_v2_1_10', () => {
     assert.strictEqual(r3.statusReached, 'pending', 'backup-failed 路径 statusReached=pending');
     db2.close();
   });
+
+  // v2.1.10 SR-FIX-1 round 2 P1-3：spec §5.3.2 8-status state machine 第 3 步 'checked'
+  //   pre-migration FK check（PRAGMA foreign_key_check）跑在 Step 4 backup-done 之后 / Step 5 rebuild 之前
+  //   如老库已有 FK violation（极少 — SQLite WAL replay 边界 / 用户 sqlite3 直改）→ 拒绝 migration 保护数据
+  test('case 13：pre-migration FK violation → status=pre-fk-violation + 备份保留 + schema 未动（SR-FIX-1 round 2 P1-3）', () => {
+    bootstrapV219DiffRowsSchema(db);
+    seedRunAndBills(db);
+
+    // 人为插一行 diff_row 引用不存在的 run_id（违反 FK 约束）
+    // 关键：PRAGMA foreign_keys = OFF 才能绕过约束插 orphan row
+    db.exec('PRAGMA foreign_keys = OFF;');
+    db.prepare(`
+      INSERT INTO acquiring_bill_currency_diff_rows
+        (run_id, bill_import_id, flow_currency, flow_amount_abs, diff_type)
+      VALUES (?, ?, 'CNY', '999.99', 'orphan-fk-violation')
+    `).run(99999, 99999); // 99999 不存在于 runs / bill_imports 表
+    db.exec('PRAGMA foreign_keys = ON;');
+
+    // sanity：foreign_key_check 应能 detect
+    const preCheck = db.prepare(`PRAGMA foreign_key_check('acquiring_bill_currency_diff_rows')`).all();
+    assert.strictEqual(preCheck.length >= 1, true, 'pre-check 应 detect ≥1 violation（sanity）');
+
+    const result = ensureDiffRowsCascadeMigration_v2_1_10(db, dbPath, makeBackupFn());
+
+    // 验证 status / statusReached
+    assert.strictEqual(result.status, 'pre-fk-violation', 'status=pre-fk-violation');
+    assert.strictEqual(result.statusReached, 'backup-done', 'statusReached=backup-done（未进 checked）');
+    assert.ok(result.error && result.error.includes('FK check'), 'error 含 FK check 字样');
+
+    // 验证：备份已保留
+    assert.ok(result.backupPath, '备份路径已记');
+    assert.ok(fs.existsSync(result.backupPath), '备份文件存在');
+
+    // 验证：schema 未动（仍是老 schema 无 ON DELETE CASCADE）
+    const fkList = db.prepare(`PRAGMA foreign_key_list('acquiring_bill_currency_diff_rows')`).all();
+    const cascadeCount = fkList.filter(fk => fk.on_delete === 'CASCADE').length;
+    assert.strictEqual(cascadeCount, 0, 'schema 未改造（仍无 CASCADE）');
+
+    // 验证：标志位未写（下次启动会 retry）
+    const flagRow = db.prepare(`SELECT setting_value FROM app_settings WHERE setting_key='n4_cont_2_diff_rows_cascade_migrated'`).get();
+    assert.strictEqual(flagRow, undefined, 'migration 标志位未写');
+  });
 });

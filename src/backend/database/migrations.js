@@ -1401,6 +1401,34 @@ function ensureDiffRowsCascadeMigration_v2_1_10(db, dbPath, createBackupFn) {
   }
   statusReached = 'backup-done';
 
+  // ---------------- Step 4.5：pre-migration FK check（spec §5.3.2 8-status state machine 第 3 步 'checked'） ----------------
+  // v2.1.10 SR-FIX-1 round 2 P1-3：spec §5.3.2 定义 8 status，原 code 漏 'checked'
+  //   触发场景：v2.1.7/v2.1.8/v2.1.9 老库已经有 FK violation（极少；理论 0，但 SQLite WAL replay 边界 / 用户 sqlite3 直改等极端场景可能引入）
+  //   修复后：跑 PRAGMA foreign_key_check 整表先验；如有 violation → 拒绝迁移（不动 schema，保留备份 + 错误信息供人工排查）
+  //   safer 不变：foreign_key_check 只读不锁；失败 path 不破坏已备份的 DB
+  try {
+    const preViolations = db
+      .prepare(`PRAGMA foreign_key_check('${N4_CONT_2_DIFF_ROWS_TABLE}')`)
+      .all();
+    if (preViolations && preViolations.length > 0) {
+      return {
+        status: 'pre-fk-violation',
+        statusReached,
+        backupPath,
+        error: `pre-migration FK check 发现 ${preViolations.length} 条 violation — 拒绝迁移以防破坏（备份已保留：${backupPath || '(none)'}）`,
+      };
+    }
+  } catch (preCheckErr) {
+    // PRAGMA 失败（如表不存在 — 但 Step 3 已检查；防御性）→ 走 migration-failed 路径
+    return {
+      status: 'migration-failed',
+      statusReached,
+      backupPath,
+      error: `pre-migration FK check 抛错：${preCheckErr && preCheckErr.message ? preCheckErr.message : String(preCheckErr)}`,
+    };
+  }
+  statusReached = 'checked';
+
   // ---------------- Step 5：rebuild 事务（rebuilt → indexed → fk-verified → flag-set → committed） ----------------
   try {
     db.exec('BEGIN');
