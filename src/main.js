@@ -10873,19 +10873,27 @@ function registerNewAccountHandlers() {
       const runRepoLocal = require('./backend/acquiring-bill-currency-db/run-repository');
       // 找出要 resume 的 run
       let targetRunId = payloadRunId;
+      let progress;
       if (!targetRunId) {
-        // 自动找最近一个 partial run（按 ran_at DESC）
-        const latestRun = runRepoLocal.getLatestRun(database.db, monthKey);
-        if (!latestRun) {
+        // v2.1.10 SR-FIX-1 round 2 P1-5：扫该月所有 chunk_progress.status='partial' 的 runs
+        //   原实施只取 getLatestRun → 如最近 run 是 complete（如刚跑完新 run），
+        //   前一个 run 是 partial → 用户无法 resume 前一个 partial
+        //   修复后：listPartialRuns 按 ran_at DESC 返回所有 partial → 取第一个（最近 partial）
+        const partialRuns = runRepoLocal.listPartialRuns(database.db, monthKey);
+        if (!partialRuns || partialRuns.length === 0) {
           releaseOpLock();
-          return { status: 'error', message: `月份 ${monthKey} 暂无 run 记录，无法 resume` };
+          return { status: 'error', message: `月份 ${monthKey} 暂无 partial run，无法 resume（上次 run 可能已跑完）` };
         }
-        targetRunId = latestRun.id;
-      }
-      const progress = runRepoLocal.getRunChunkProgress(database.db, targetRunId);
-      if (!progress) {
-        releaseOpLock();
-        return { status: 'error', message: `run ${targetRunId} 无 chunk_progress 记录，无法 resume` };
+        const latestPartial = partialRuns[0];
+        targetRunId = latestPartial.id;
+        progress = latestPartial.chunk_progress;
+      } else {
+        // caller 已知具体 runId — 直接读 progress（校验 month_key 一致）
+        progress = runRepoLocal.getRunChunkProgress(database.db, targetRunId);
+        if (!progress) {
+          releaseOpLock();
+          return { status: 'error', message: `run ${targetRunId} 无 chunk_progress 记录，无法 resume` };
+        }
       }
       if (progress.status !== 'partial') {
         releaseOpLock();

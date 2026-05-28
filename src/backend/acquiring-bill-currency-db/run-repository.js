@@ -308,6 +308,40 @@ function getRunChunkProgress(db, runId) {
   }
 }
 
+// v2.1.10 SR-FIX-1 round 2 P1-5：列出某月所有 chunk_progress.status='partial' 的 runs
+//   触发场景：resume handler 入参不带 runId → 自动找该月最近一个 partial run
+//   原 resume handler 只取 getLatestRun（最近 1 个 run）→ 如最近 run 是 complete（如刚跑完新 run），
+//   前一个 run 是 partial → 用户无法 resume 前一个 partial
+//   修复后：扫该月所有 run.chunk_progress.status='partial' → 按 ran_at DESC 返回 → caller 取第一个
+//   性能：每月一般 1-2 个 run；扫描成本 O(N)；JSON 解析 cost 小
+function listPartialRuns(db, monthKey) {
+  if (!monthKey) return [];
+  const rows = db.prepare(`
+    SELECT id, month_key, ran_at, status, chunk_progress
+    FROM ${RUNS_TABLE}
+    WHERE month_key = ? AND chunk_progress IS NOT NULL
+    ORDER BY ran_at DESC, id DESC
+  `).all(monthKey);
+  const result = [];
+  for (const row of rows) {
+    try {
+      const progress = JSON.parse(row.chunk_progress);
+      if (progress && progress.status === 'partial') {
+        result.push({
+          id: row.id,
+          month_key: row.month_key,
+          ran_at: row.ran_at,
+          status: row.status,
+          chunk_progress: progress,
+        });
+      }
+    } catch (_e) {
+      // 破坏的 JSON 跳过（与 getRunChunkProgress 防御一致）
+    }
+  }
+  return result;
+}
+
 // 月内统计：单据总数 / matched（JOIN 上的） / mismatch / unmatched（单据有 ID 但流水无）
 function computeRunStats(db, { monthKey }) {
   const totalBillRows = db.prepare(`SELECT COUNT(*) AS c FROM ${BILL_TABLE} WHERE month_key = ?`).get(monthKey).c;
@@ -423,6 +457,8 @@ module.exports = {
   insertDiffRowsByJoinChunked,
   setRunChunkProgress,
   getRunChunkProgress,
+  // v2.1.10 SR-FIX-1 round 2 P1-5：列出某月所有 partial run（用于 resume handler）
+  listPartialRuns,
   computeRunStats,
   listDiffRowsBySourceFile,
   listAllDiffRowsByRun,
