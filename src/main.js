@@ -10780,15 +10780,21 @@ function registerNewAccountHandlers() {
     try {
       const storageRoot = ensureStorageRoot();
       const onProgress = createRunProgressForwarder(event);
+      // v2.1.10 A4 T18：从 settings 读 chunkSize（默认 100000；范围 1w-100w，外回退 default）
+      const chunkSize = typeof database.getAcquiringBillChunkSize === 'function'
+        ? database.getAcquiringBillChunkSize()
+        : undefined;
       // v2.1.10 A3 T10：worker pool dispatch（替代 session.runCheck 主进程直调）
       //   - __dbPath 传 database.dbPath（worker 内 new DatabaseSync(dbPath) — D24 独立 connection）
       //   - onLog：worker 内 appendModuleLog → message pipe → 主进程 appendActivityLogEntry
       //     （避免主/子进程并发写 app_activity_log.txt 的 read-modify-write race）
+      // v2.1.10 A4 T18：chunkSize 透传 worker → runCheckCore → insertDiffRowsByJoinChunked
       result = await runCheckWorkerPool.dispatchRunCheck(
         {
           __dbPath: database.dbPath,
           monthKey,
           storageRoot,
+          chunkSize,
         },
         {
           onProgress,
@@ -10827,6 +10833,82 @@ function registerNewAccountHandlers() {
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
+  });
+
+  // v2.1.10 A4 T19：resume handler — 续跑 chunk_progress.status='partial' 的 run
+  //   - renderer 暂不暴露 UI（spec §三 / PRD §四 — v2.1.11+ 评估 UI）
+  //   - IPC 通道留好供 Phase 4-6 / SR-FIX 阶段加 UI；本 handler 用作集成测试 / 高级用户调用
+  //   - payload: { monthKey, runId? }
+  //     - 不传 runId：自动找该月最近一个 chunk_progress.status='partial' 的 run
+  //     - 传 runId：复用该 runId（caller 已知具体 run；验证 month_key 匹配）
+  //   - 返回：与 run handler 一致格式 { status: 'success', runId, ... } / { status: 'error', message }
+  trackedIpcHandle('acquiringBillCurrency:run:resume', '收单单据币种校验', '续跑（chunked resume）', async (event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
+    const { monthKey, runId: payloadRunId } = payload || {};
+    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
+      return { status: 'error', message: 'monthKey 格式错误（应为 YYYY-MM）' };
+    }
+    const lock = tryAcquireOpLock('run', monthKey);
+    if (!lock.acquired) return { status: 'error', message: lock.message };
+
+    let result;
+    try {
+      const runRepoLocal = require('./backend/acquiring-bill-currency-db/run-repository');
+      // 找出要 resume 的 run
+      let targetRunId = payloadRunId;
+      if (!targetRunId) {
+        // 自动找最近一个 partial run（按 ran_at DESC）
+        const latestRun = runRepoLocal.getLatestRun(database.db, monthKey);
+        if (!latestRun) {
+          releaseOpLock();
+          return { status: 'error', message: `月份 ${monthKey} 暂无 run 记录，无法 resume` };
+        }
+        targetRunId = latestRun.id;
+      }
+      const progress = runRepoLocal.getRunChunkProgress(database.db, targetRunId);
+      if (!progress) {
+        releaseOpLock();
+        return { status: 'error', message: `run ${targetRunId} 无 chunk_progress 记录，无法 resume` };
+      }
+      if (progress.status !== 'partial') {
+        releaseOpLock();
+        return { status: 'error', message: `run ${targetRunId} 状态为 ${progress.status}，无需 resume` };
+      }
+
+      const storageRoot = ensureStorageRoot();
+      const onProgress = createRunProgressForwarder(event);
+      const chunkSize = typeof database.getAcquiringBillChunkSize === 'function'
+        ? database.getAcquiringBillChunkSize()
+        : undefined;
+
+      // 透传 resumeFromRun = { runId, lastCompletedChunkIndex } → worker → runCheckCore
+      //   runCheckCore 跳过 stage 1-3（复用旧 runId / 旧 stats），stage 4' 从 lastCompletedChunkIndex+1 起跑
+      result = await runCheckWorkerPool.dispatchRunCheck(
+        {
+          __dbPath: database.dbPath,
+          monthKey,
+          storageRoot,
+          chunkSize,
+          resumeFromRun: {
+            runId: targetRunId,
+            lastCompletedChunkIndex: progress.lastCompletedChunkIndex,
+          },
+        },
+        {
+          onProgress,
+          onLog: (entry) => {
+            try { appendActivityLogEntry(entry || {}); } catch (_e) { /* swallow */ }
+          },
+        }
+      );
+    } catch (err) {
+      releaseOpLock();
+      notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+    releaseOpLock();
+    notifyAcquiringBillCurrencyResult(monthKey, 'success', { mismatchRows: result.mismatchRows });
+    return { status: 'success', resumed: true, ...result };
   });
 
   // v0.8 fix5：export = 另存为最近 run 的 diff.xlsx（fs.copyFile）

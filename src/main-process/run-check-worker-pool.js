@@ -242,10 +242,18 @@ async function dispatchRunCheck(payload, callbacks = {}) {
       onLog: typeof callbacks.onLog === 'function' ? callbacks.onLog : null,
     };
   });
+  // v2.1.10 A4 T18 / T19：payload 透传 chunkSize + resumeFromRun
+  //   - chunkSize：caller (main.js IPC handler) 从 settings 注入；undefined 时 runCheckCore 用 default 100000
+  //   - resumeFromRun：{ runId, lastCompletedChunkIndex }；undefined 时全新 run（默认 path）
   workerInstance.postMessage({
     type: 'run',
     jobId,
-    payload: { monthKey: payload.monthKey, storageRoot: payload.storageRoot },
+    payload: {
+      monthKey: payload.monthKey,
+      storageRoot: payload.storageRoot,
+      chunkSize: payload.chunkSize,
+      resumeFromRun: payload.resumeFromRun,
+    },
   });
   return jobPromise;
 }

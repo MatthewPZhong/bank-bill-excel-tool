@@ -218,9 +218,6 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
   if (!monthKey) {
     throw new Error('runCheck：monthKey 必填');
   }
-  const { flowReady, billReady } = importRepo.getMonthReadiness(db, monthKey);
-  if (!flowReady) throw new Error(`${monthKey}：流水表尚未导入`);
-  if (!billReady) throw new Error(`${monthKey}：单据表尚未导入`);
 
   const runT0 = Date.now();
   let runId;
@@ -231,6 +228,24 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
   // v2.1.10 A4 T19：resume 路径 — caller 传 resumeFromRun = { runId, lastCompletedChunkIndex } 复用旧 runId
   //   resumeFromRun.runId 必须存在 + status='partial'（caller 已验）；本函数仅按入参跳 stage 1-3
   const isResume = !!(resumeFromRun && resumeFromRun.runId && Number.isInteger(resumeFromRun.runId));
+
+  // resume 路径下先校验 runId 一致性（防 readiness 错误信息掩盖 resume 入参错）
+  //   - runId 不存在 → 抛"不存在"
+  //   - month_key 不匹配 → 抛 mismatch
+  //   - 之后再做 readiness check（resume 场景流水/单据不应被清，理论 readiness=true；防御性保留）
+  if (isResume) {
+    const existingRunForCheck = runRepo.getRunById(db, resumeFromRun.runId);
+    if (!existingRunForCheck) {
+      throw new Error(`resumeFromRun: runId=${resumeFromRun.runId} 不存在`);
+    }
+    if (existingRunForCheck.month_key !== monthKey) {
+      throw new Error(`resumeFromRun: runId=${resumeFromRun.runId} month_key=${existingRunForCheck.month_key} 与请求 monthKey=${monthKey} 不一致`);
+    }
+  }
+
+  const { flowReady, billReady } = importRepo.getMonthReadiness(db, monthKey);
+  if (!flowReady) throw new Error(`${monthKey}：流水表尚未导入`);
+  if (!billReady) throw new Error(`${monthKey}：单据表尚未导入`);
 
   if (!isResume) {
     // ── 全新 run 路径 — stage 1-3 主事务 ──
@@ -288,14 +303,10 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
     }
   } else {
     // ── resume 路径 — 跳过 stage 1-3 复用旧 runId / 旧 stats ──
+    //   入参校验已在函数顶部 isResume 分支完成（runId 存在 + month_key 一致）
     runId = resumeFromRun.runId;
     const existingRun = runRepo.getRunById(db, runId);
-    if (!existingRun) {
-      throw new Error(`resumeFromRun: runId=${runId} 不存在`);
-    }
-    if (existingRun.month_key !== monthKey) {
-      throw new Error(`resumeFromRun: runId=${runId} month_key=${existingRun.month_key} 与请求 monthKey=${monthKey} 不一致`);
-    }
+    // 重读 runs 行 — 复用 stats 给后续 sanity check / writer
     stats = {
       totalBillRows: existingRun.total_bill_rows,
       matchedRows: existingRun.matched_rows,

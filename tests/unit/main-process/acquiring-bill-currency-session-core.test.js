@@ -428,4 +428,152 @@ test.describe('runCheckCore byte-for-byte contract', () => {
     assert.equal(err.stage, 'foo');
     assert.ok(err instanceof Error, 'CancelError 是 Error 子类');
   });
+
+  // ─────────────────────────────────────────────────────────────────
+  // v2.1.10 A4 T19 — resumeFromRun 续跑 + idempotent
+  // ─────────────────────────────────────────────────────────────────
+
+  test('T19-session.1 — resumeFromRun 中途 cancel 后 resume → 与全新 run byte-for-byte 一致', async () => {
+    // A: 全新 run（baseline）
+    const A = await setupTmpDbWithFixture();
+    const B = await setupTmpDbWithFixture();
+    try {
+      const resultA = await session.runCheckCore({
+        db: A.db.db,
+        monthKey: FIXTURE_MONTH,
+        storageRoot: A.tmpdir,
+      });
+
+      // B: 第一段 chunked 在第 1 个 chunk 边界 cancel → resume 续跑 → 与 A 比对
+      // 用 chunk=2（fixture 10 行 → 5 chunks）让 cancel 容易切片
+      let cancelled = false;
+      let checkCount = 0;
+      const cancelToken = {
+        get cancelled() { return cancelled; },
+        cancel() { cancelled = true; },
+        throwIfCancelled(stage) {
+          checkCount++;
+          // chunk 2 边界 cancel（先跑 chunk 0/1 完成）
+          if (checkCount >= 3) cancelled = true;
+          if (cancelled) {
+            const CancelErrorCtor = session.CancelError;
+            throw new CancelErrorCtor(`cancelled at ${stage}`, { stage });
+          }
+        },
+      };
+
+      let caughtFirst;
+      try {
+        await session.runCheckCore({
+          db: B.db.db,
+          monthKey: FIXTURE_MONTH,
+          storageRoot: B.tmpdir,
+          chunkSize: 2,
+          cancelToken,
+        });
+      } catch (e) { caughtFirst = e; }
+      assert.ok(caughtFirst, '第一段应抛 CancelError');
+      assert.equal(caughtFirst.name, 'CancelError');
+      assert.equal(caughtFirst.stage, 'sql-joining-chunk-2', '第一段在 chunk 2 边界 cancel');
+
+      // 验证：B 第一段 chunk 0/1 已写入；run.chunk_progress=partial
+      const runB = B.db.db.prepare('SELECT * FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1').get();
+      assert.ok(runB.chunk_progress, 'chunk_progress 已写');
+      const progressFirst = JSON.parse(runB.chunk_progress);
+      assert.equal(progressFirst.status, 'partial');
+
+      // B 第二段：resumeFromRun = { runId, lastCompletedChunkIndex }（不传 cancelToken）
+      const resultBResume = await session.runCheckCore({
+        db: B.db.db,
+        monthKey: FIXTURE_MONTH,
+        storageRoot: B.tmpdir,
+        chunkSize: 2,
+        resumeFromRun: {
+          runId: runB.id,
+          lastCompletedChunkIndex: progressFirst.lastCompletedChunkIndex,
+        },
+      });
+
+      // resume 复用旧 runId
+      assert.equal(resultBResume.runId, runB.id, 'resume 复用旧 runId');
+
+      // 比对 stats（resume 后旧 run 行的 stats 复用）— mismatch_rows / total_bill_rows 一致
+      assert.equal(resultBResume.totalBillRows, resultA.totalBillRows);
+      assert.equal(resultBResume.mismatchRows, resultA.mismatchRows);
+
+      // 比对 diff_rows 内容（按 reconId 排序后 byte-for-byte）
+      const snapA = snapshotDiffRowsAndStats(A.db.db);
+      const snapB = snapshotDiffRowsAndStats(B.db.db);
+      assert.equal(snapA.rowCount, snapB.rowCount, 'diff_rows 行数一致（resume 后）');
+      for (let i = 0; i < snapA.rows.length; i++) {
+        assert.deepEqual(snapA.rows[i], snapB.rows[i], `resume 后 diff_rows[${i}] byte-for-byte 一致`);
+      }
+
+      // resume 后 chunk_progress=complete
+      const runBAfter = B.db.db.prepare('SELECT chunk_progress FROM acquiring_bill_currency_runs WHERE id = ?').get(runB.id);
+      const progressAfter = JSON.parse(runBAfter.chunk_progress);
+      assert.equal(progressAfter.status, 'complete', 'resume 后 chunk_progress.status=complete');
+    } finally {
+      A.cleanup();
+      B.cleanup();
+    }
+  });
+
+  test('T19-session.2 — resumeFromRun.runId 不存在 → throw', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    try {
+      await assert.rejects(
+        () => session.runCheckCore({
+          db: ctx.db.db,
+          monthKey: FIXTURE_MONTH,
+          storageRoot: ctx.tmpdir,
+          resumeFromRun: { runId: 99999, lastCompletedChunkIndex: 0 },
+        }),
+        /resumeFromRun: runId=99999 不存在/
+      );
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  test('T19-session.3 — resumeFromRun.runId month_key 不匹配 → throw', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    try {
+      // 先跑一个 2026-04 的 run，拿 runId；然后用 2026-05 月份 resume 应 throw
+      const result = await session.runCheckCore({
+        db: ctx.db.db,
+        monthKey: FIXTURE_MONTH,
+        storageRoot: ctx.tmpdir,
+      });
+      await assert.rejects(
+        () => session.runCheckCore({
+          db: ctx.db.db,
+          monthKey: '2026-05', // 不一致
+          storageRoot: ctx.tmpdir,
+          resumeFromRun: { runId: result.runId, lastCompletedChunkIndex: 0 },
+        }),
+        /month_key=2026-04 与请求 monthKey=2026-05 不一致/
+      );
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  test('T19-session.4 — chunkSize 默认 100000（不传时）vs 显式传值', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    try {
+      // 不传 chunkSize → effectiveChunkSize=100000 → totalChunks=1 (10 行 < 10w)
+      const result = await session.runCheckCore({
+        db: ctx.db.db,
+        monthKey: FIXTURE_MONTH,
+        storageRoot: ctx.tmpdir,
+      });
+      assert.equal(typeof result.runId, 'number');
+      const run = ctx.db.db.prepare('SELECT chunk_progress FROM acquiring_bill_currency_runs WHERE id = ?').get(result.runId);
+      const progress = JSON.parse(run.chunk_progress);
+      assert.equal(progress.totalChunks, 1, '默认 chunkSize 100000 / 10 行 = 1 chunk');
+    } finally {
+      ctx.cleanup();
+    }
+  });
 });

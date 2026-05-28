@@ -256,10 +256,12 @@ function caseF7B1_notificationStub() {
     assertTrue(/const \{[^}]*\bNotification\b[^}]*\} = require\('electron'\)/.test(mainSource),
       'F7-B1-7 main.js electron destructure 含 Notification');
     // 触发点：success + error 两处调用
+    //   v2.1.10 A4 T19：新增 acquiringBillCurrency:run:resume handler — 也调 success/error 通知
+    //     run 主路径 1 处 + resume 路径 1 处 = 总 2 处
     const successCallCount = (mainSource.match(/notifyAcquiringBillCurrencyResult\(monthKey, 'success'/g) || []).length;
     const errorCallCount = (mainSource.match(/notifyAcquiringBillCurrencyResult\(monthKey, 'error'/g) || []).length;
-    assertEq(successCallCount, 1, 'F7-B1-7 main.js success 触发点 = 1 处');
-    assertEq(errorCallCount, 1, 'F7-B1-7 main.js error 触发点 = 1 处');
+    assertEq(successCallCount, 2, 'F7-B1-7 main.js success 触发点 = 2 处（run + resume）');
+    assertEq(errorCallCount, 2, 'F7-B1-7 main.js error 触发点 = 2 处（run + resume）');
   }
 }
 

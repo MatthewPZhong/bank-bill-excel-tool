@@ -152,8 +152,10 @@ if (!isMainThread) {
   // ── runCheck 执行（worker 端） ──
   //   T09：直接调 session.runCheckCore（抽出后的纯函数；与主进程直调路径 byte-for-byte 一致）
   //   v2.1.10 T13：cancelToken 透传 runCheckCore；5 阶段间 check + 事务中 cancel → ROLLBACK + CancelError
+  //   v2.1.10 T18：payload 新增 chunkSize（caller 从 settings 注入；spec §3.2 默认 100000）
+  //   v2.1.10 T19：payload 新增 resumeFromRun = { runId, lastCompletedChunkIndex }（resume 路径）
   async function runCheckInWorker(workerDb, payload, jobId, cancelToken) {
-    const { monthKey, storageRoot } = payload || {};
+    const { monthKey, storageRoot, chunkSize, resumeFromRun } = payload || {};
     if (!monthKey) {
       throw new Error('runCheckInWorker：monthKey 必填');
     }
@@ -170,7 +172,16 @@ if (!isMainThread) {
       throw new CancelErrorCtor('runCheck cancelled before start', { stage: 'before-start' });
     }
     // T13：cancelToken 直接透传 — runCheckCore 内 5 阶段间自己 check + ROLLBACK + throw
-    return await session.runCheckCore({ db: workerDb, monthKey, storageRoot, onProgress, cancelToken });
+    // T18 / T19：chunkSize + resumeFromRun 透传（undefined 兼容旧 caller — runCheckCore 内 default 处理）
+    return await session.runCheckCore({
+      db: workerDb,
+      monthKey,
+      storageRoot,
+      onProgress,
+      cancelToken,
+      chunkSize,
+      resumeFromRun,
+    });
   }
 
   // ── 主消息循环 ──
