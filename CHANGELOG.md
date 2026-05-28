@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.1.10 - 2026-05-28（待发布 β 草稿）
+## 2.1.10 - 2026-05-29（已发布 — PR #54 merged 2026-05-28T15:48:39Z / merge commit 4ad10f9）
 
 v2.1.9 之后 1 轮迭代（β 范围），**4 主线**：A3（runCheck 跨进程化 — worker_threads + 独立 DB 连接 + 跨进程错误回传）+ A4（SQL JOIN chunked 分批 — chunk size 10w + cancel chunk 边界响应 + resume IPC handler）+ N4-cont-1（raw_json 体积治理 — 7 天保留窗口 + idle 30min 自动清 + sentinel `''` v0.3）+ N4-cont-2（FK CASCADE 改造 — `diff_rows.bill_import_id` + `run_id` 加 `ON DELETE CASCADE` + 8-status migration state machine + SR-backup-1 前置）。⚠️ **2 个🔴破坏性变更**（N4-cont-2 DB schema 不可逆 + N4-cont-1 raw_json 不可逆清空）+ **3 个资金红线护栏**（runCheckCore worker/main byte-for-byte + clearStaleSuccessfulRawJson NOT IN 子查询 + N4-cont-2 FK CASCADE schema）+ **5 个 important-variables v12 升格**（Critical 4 + Important-skeleton 1 + 更新 1）。Phase 0-6 完成 / 27+ commits / release-check 全绿（smoke + unit 1238 case / 297 suites + integration 809 断言 / 15 脚本）。
 
