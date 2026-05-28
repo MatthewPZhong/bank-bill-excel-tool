@@ -1,12 +1,16 @@
 // v2.1.10 N4-cont-1 T23 (Phase 4)：raw_json idle 自动清理函数 unit test
 //
-// 资金红线：本函数不可逆 UPDATE raw_json = NULL；NOT IN 子查询是数据保护核心
+// v0.3 (2026-05-28): sentinel 从 NULL 改 ''（spec §4.2 reverse sync）
+//   原因：bill_imports.raw_json schema = `TEXT NOT NULL`（migrations.js:1500，v2.1.8 N4）
+//   修复：fixture 改用真实 NOT NULL schema + 断言改 raw_json = '' 而非 null
+//
+// 资金红线：本函数不可逆 UPDATE raw_json = ''；NOT IN 子查询是数据保护核心
 //   必须 ≥ 6 unit case 覆盖 NOT IN 子查询边界 + fail case 6 验证错清差异行的灾难性结果不会发生
 //
-// 覆盖（spec §4.2 + T23 require）：
-//   1. NOT IN 子查询正常排除差异行（100 行 bill + 50 差异 + retention=0 → 仅 50 非差异行被清；50 差异行 raw_json 保留）
+// 覆盖（spec §4.2 v0.3 + T23 require）：
+//   1. NOT IN 子查询正常排除差异行（100 行 bill + 50 差异 + retention=1 → 仅 50 非差异行被清；50 差异行 raw_json 保留）
 //   2. imported_at 边界（retention=7 天）：8 天前清；6 天前不清
-//   3. raw_json 已 NULL 的行不重复 UPDATE（idempotent）
+//   3. raw_json 已 '' 的行不重复 UPDATE（idempotent — sentinel 守卫）
 //   4. 空表 → clearedCount=0 + 无错误
 //   5. 全是差异行 → clearedCount=0
 //   6. 🔴 资金红线 fail case：人为破坏 diff_rows 表（DROP）→ 函数 throw 而非错清差异行
@@ -25,6 +29,7 @@ const {
 
 // === Fixture：建 acquiring_bill_currency_bill_imports + acquiring_bill_currency_diff_rows 两表 ===
 //   schema 必须与 src/backend/database/migrations.js:1492 + :1543 一致（关键列 + FK）
+//   ⚠️ v0.3：raw_json 必须 NOT NULL DEFAULT ''（与生产 schema 一致，防 v0.2 漏洞复现）
 //   bill_imports 的 imported_at 列用 ISO 字符串（与 datetime('now', '-? days') 比较）
 function setupTempDb() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'raw-json-retention-fn-test-'));
@@ -39,7 +44,7 @@ function setupTempDb() {
       recon_main_id TEXT NOT NULL,
       settle_currency TEXT,
       settle_currency_norm TEXT,
-      raw_json TEXT,
+      raw_json TEXT NOT NULL DEFAULT '',
       imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       UNIQUE (month_key, recon_main_id)
     );
@@ -108,7 +113,7 @@ function insertRun(db, { id, monthKey = '2026-04' }) {
   `).run(id, monthKey);
 }
 
-describe('clearStaleSuccessfulRawJson — NOT IN 子查询资金红线 6 case', () => {
+describe('clearStaleSuccessfulRawJson — NOT IN 子查询资金红线 6 case (v0.3 sentinel = \'\')', () => {
   let ctx;
   beforeEach(() => { ctx = setupTempDb(); });
   afterEach(() => { teardown(ctx); });
@@ -124,7 +129,7 @@ describe('clearStaleSuccessfulRawJson — NOT IN 子查询资金红线 6 case', 
       insertDiff(ctx.db, { runId: 1, billImportId: i });  // 1-50 进 diff_rows
     }
 
-    const before = ctx.db.prepare('SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE raw_json IS NOT NULL').get().c;
+    const before = ctx.db.prepare("SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE raw_json != ''").get().c;
     assert.strictEqual(before, 100, '初始 100 行都有 raw_json');
 
     const result = clearStaleSuccessfulRawJson(ctx.db, { retentionDays: 1 });
@@ -134,16 +139,16 @@ describe('clearStaleSuccessfulRawJson — NOT IN 子查询资金红线 6 case', 
     // 差异行（id 1-50）raw_json 全部保留
     const diffRowsKept = ctx.db.prepare(`
       SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports
-      WHERE id <= 50 AND raw_json IS NOT NULL
+      WHERE id <= 50 AND raw_json != ''
     `).get().c;
     assert.strictEqual(diffRowsKept, 50, '🔴 资金红线：差异行 raw_json 必须全部保留');
 
-    // 非差异行（id 51-100）raw_json 全部清空
+    // 非差异行（id 51-100）raw_json 全部清空（sentinel = ''）
     const nonDiffCleared = ctx.db.prepare(`
       SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports
-      WHERE id > 50 AND raw_json IS NULL
+      WHERE id > 50 AND raw_json = ''
     `).get().c;
-    assert.strictEqual(nonDiffCleared, 50, '非差异行 raw_json 全清');
+    assert.strictEqual(nonDiffCleared, 50, '非差异行 raw_json 全清（sentinel = \'\')');
   });
 
   test('Case 2: imported_at 边界（retention=7 天）— 8 天前清；6 天前不清', () => {
@@ -156,20 +161,20 @@ describe('clearStaleSuccessfulRawJson — NOT IN 子查询资金红线 6 case', 
 
     const rowA = ctx.db.prepare('SELECT raw_json FROM acquiring_bill_currency_bill_imports WHERE id=1').get();
     const rowB = ctx.db.prepare('SELECT raw_json FROM acquiring_bill_currency_bill_imports WHERE id=2').get();
-    assert.strictEqual(rowA.raw_json, null, '8 天前行 raw_json 已清');
+    assert.strictEqual(rowA.raw_json, '', '8 天前行 raw_json 已清（sentinel = \'\')');
     assert.strictEqual(rowB.raw_json, '{}', '6 天前行 raw_json 保留');
   });
 
-  test('Case 3: raw_json 已 NULL 的行不重复 UPDATE（idempotent — 多次 idle 触发安全）', () => {
+  test('Case 3: raw_json 已 \'\' 的行不重复 UPDATE（idempotent — 多次 idle 触发安全）', () => {
     insertBill(ctx.db, { id: 1, monthKey: '2026-03', reconId: 'A', raw: '{}', importedAt: nowMinusDays(10) });
-    insertBill(ctx.db, { id: 2, monthKey: '2026-03', reconId: 'B', raw: null, importedAt: nowMinusDays(10) });
-    insertBill(ctx.db, { id: 3, monthKey: '2026-03', reconId: 'C', raw: null, importedAt: nowMinusDays(10) });
+    insertBill(ctx.db, { id: 2, monthKey: '2026-03', reconId: 'B', raw: '', importedAt: nowMinusDays(10) });  // 已 sentinel
+    insertBill(ctx.db, { id: 3, monthKey: '2026-03', reconId: 'C', raw: '', importedAt: nowMinusDays(10) });  // 已 sentinel
 
-    // 第一次清：仅 id=1（id=2/3 已 NULL）
+    // 第一次清：仅 id=1（id=2/3 已 ''）
     const r1 = clearStaleSuccessfulRawJson(ctx.db, { retentionDays: 7 });
     assert.strictEqual(r1.clearedCount, 1, '第一次仅清 id=1');
 
-    // 第二次清：已无 raw_json IS NOT NULL 的行 → 0
+    // 第二次清：已无 raw_json != '' 的行 → 0
     const r2 = clearStaleSuccessfulRawJson(ctx.db, { retentionDays: 7 });
     assert.strictEqual(r2.clearedCount, 0, '第二次幂等 — 无 UPDATE');
 
@@ -194,7 +199,7 @@ describe('clearStaleSuccessfulRawJson — NOT IN 子查询资金红线 6 case', 
     assert.strictEqual(result.clearedCount, 0, '全是差异行 → 0 清');
 
     // 验证全部 10 行 raw_json 保留
-    const kept = ctx.db.prepare('SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE raw_json IS NOT NULL').get().c;
+    const kept = ctx.db.prepare("SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE raw_json != ''").get().c;
     assert.strictEqual(kept, 10, '全部差异行 raw_json 保留');
   });
 
@@ -218,7 +223,7 @@ describe('clearStaleSuccessfulRawJson — NOT IN 子查询资金红线 6 case', 
     );
 
     // 验证 raw_json 全部保留（没有任何被清）
-    const kept = ctx.db.prepare('SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE raw_json IS NOT NULL').get().c;
+    const kept = ctx.db.prepare("SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE raw_json != ''").get().c;
     assert.strictEqual(kept, 10, '🔴 资金红线：throw 后 raw_json 必须全部保留（绝无误清）');
   });
 
@@ -266,7 +271,7 @@ describe('clearStaleSuccessfulRawJson — NOT IN 子查询资金红线 6 case', 
     );
 
     // 7.5: 验证 throw 后 raw_json 全保留（没有任何误清）
-    const kept = ctx.db.prepare('SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE raw_json IS NOT NULL').get().c;
+    const kept = ctx.db.prepare("SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE raw_json != ''").get().c;
     assert.strictEqual(kept, 10, '入口校验 throw 后 raw_json 必须全部保留');
   });
 

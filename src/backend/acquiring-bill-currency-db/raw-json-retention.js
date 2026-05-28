@@ -1,25 +1,31 @@
-// v2.1.10 N4-cont-1 T23 (Phase 4)：raw_json idle 自动清理函数（v0.2 重写 · 极简单 SQL）
+// v2.1.10 N4-cont-1 T23 (Phase 4)：raw_json idle 自动清理函数（v0.3 修订 · 极简单 SQL）
 //
-// 资金红线：本函数不可逆 UPDATE raw_json = NULL；NOT IN 子查询是数据保护核心 — 差异行 raw_json 永远保留
+// 资金红线：本函数不可逆 UPDATE raw_json = ''；NOT IN 子查询是数据保护核心 — 差异行 raw_json 永远保留
 //
-// 核心 SQL（spec §4.2.1）：
+// ⚠️ v0.3 修订（2026-05-28）：sentinel 从 NULL 改 ''
+//   原因：bill_imports.raw_json schema = `TEXT NOT NULL`（migrations.js:1500，v2.1.8 N4 引入约束）
+//   后果：SET raw_json = NULL 被 SQLite 拒绝 → 永远清不掉 → 治理效果 0
+//   修复：sentinel 改 ''（保持 NOT NULL 兼容，字节代价仅 +1 vs NULL；语义不变"已清"）
+//
+// 核心 SQL（spec §4.2.1 v0.3）：
 //   UPDATE acquiring_bill_currency_bill_imports
-//   SET raw_json = NULL
+//   SET raw_json = ''
 //   WHERE id IN (
 //     SELECT b.id FROM acquiring_bill_currency_bill_imports b
-//     WHERE b.raw_json IS NOT NULL
+//     WHERE b.raw_json != ''
 //       AND b.imported_at < datetime('now', '-' || ? || ' days')
 //       AND b.id NOT IN (
 //         SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows
 //       )
 //   )
 //
-// SQL 关键不变量（spec §4.2.2）：
-//   - `b.raw_json IS NOT NULL`：跳过已清的行（idempotent — 多次 idle 触发不重复清同行）
+// SQL 关键不变量（spec §4.2.2 v0.3）：
+//   - `b.raw_json != ''`：跳过已清的行（idempotent — 多次 idle 触发不重复清同行；'' 是 "已清" sentinel）
 //   - `b.imported_at < datetime('now', '-' || ? || ' days')`：仅清"老于 N 天"的行
 //   - `NOT IN (SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows)`：
 //     排除差异行 — 保证差异行 raw_json 永远不被清（writer.js:184 重导差异 xlsx 依赖）
-//   - `SET raw_json = NULL`：保留行骨架 + 业务字段；不删整行；不破坏 N4-cont-2 FK CASCADE 路径
+//   - `SET raw_json = ''`：保留行骨架 + 业务字段；不删整行；不破坏 N4-cont-2 FK CASCADE 路径；
+//     兼容 v2.1.8 N4 NOT NULL 约束（不动 schema）
 //
 // 调用契约：
 //   - retentionDays 必须来自 settings getter（settings-repository.getAcquiringBillRawJsonRetentionDays）
@@ -34,12 +40,15 @@
 
 'use strict';
 
+// v0.3 (2026-05-28): sentinel 从 NULL 改 ''
+//   - bill_imports.raw_json schema = `TEXT NOT NULL`（v2.1.8 N4）— NULL 会被 SQLite 拒绝
+//   - '' 兼容 NOT NULL + 等价 "已清" sentinel（字节 +1 vs NULL；vs v0.1 '{}' 仍省 1 字节）
 const CLEAR_STALE_SQL = `
   UPDATE acquiring_bill_currency_bill_imports
-  SET raw_json = NULL
+  SET raw_json = ''
   WHERE id IN (
     SELECT b.id FROM acquiring_bill_currency_bill_imports b
-    WHERE b.raw_json IS NOT NULL
+    WHERE b.raw_json != ''
       AND b.imported_at < datetime('now', '-' || ? || ' days')
       AND b.id NOT IN (
         SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows

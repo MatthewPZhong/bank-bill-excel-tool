@@ -1,15 +1,15 @@
 {
   "meta": {
     "version": "2.1.10-beta.1",
-    "scannedAt": "2026-05-28T04:06:16.646Z",
+    "scannedAt": "2026-05-28T05:31:17.742Z",
     "root": "src",
-    "totalFiles": 93,
-    "totalTopLevelNames": 974,
+    "totalFiles": 94,
+    "totalTopLevelNames": 1000,
     "buckets": {
       "shared": 159,
-      "paired": 275,
-      "local": 433,
-      "crossFile": 434
+      "paired": 290,
+      "local": 444,
+      "crossFile": 449
     }
   },
   "A": {
@@ -341,6 +341,10 @@
         ],
         "refFiles": [
           {
+            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+            "count": 1
+          },
+          {
             "file": "src/backend/big-account-mode-store.js",
             "count": 1
           },
@@ -417,8 +421,8 @@
             "count": 2
           }
         ],
-        "totalHits": 32,
-        "fileSpan": 19
+        "totalHits": 33,
+        "fileSpan": 20
       },
       {
         "name": "normalizeCell",
@@ -574,7 +578,7 @@
         "refFiles": [
           {
             "file": "src/backend/database.js",
-            "count": 14
+            "count": 19
           },
           {
             "file": "src/backend/database/migrations.js",
@@ -617,7 +621,7 @@
             "count": 1
           }
         ],
-        "totalHits": 41,
+        "totalHits": 46,
         "fileSpan": 11
       },
       {
@@ -967,6 +971,42 @@
           }
         ],
         "totalHits": 17,
+        "fileSpan": 6
+      },
+      {
+        "name": "getRunById",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "src/backend/biz-op-recon-db/run-repository.js",
+          "src/backend/pending-db/diff-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-db/diff-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 10,
         "fileSpan": 6
       },
       {
@@ -1415,38 +1455,6 @@
         "fileSpan": 5
       },
       {
-        "name": "getRunById",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "src/backend/biz-op-recon-db/run-repository.js",
-          "src/backend/pending-db/diff-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-db/run-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/pending-db/diff-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/pending-export/writer.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-writer.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 5
-      },
-      {
         "name": "deleteTemplate",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -1539,7 +1547,7 @@
         "refFiles": [
           {
             "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-            "count": 12
+            "count": 14
           },
           {
             "file": "src/backend/bank-bu-recon-db/month-repository.js",
@@ -1554,7 +1562,7 @@
             "count": 11
           }
         ],
-        "totalHits": 33,
+        "totalHits": 35,
         "fileSpan": 4
       },
       {
@@ -2920,10 +2928,10 @@
           },
           {
             "file": "src/backend/database/migrations.js",
-            "count": 17
+            "count": 18
           }
         ],
-        "totalHits": 22,
+        "totalHits": 23,
         "fileSpan": 3
       },
       {
@@ -2951,6 +2959,30 @@
         "fileSpan": 3
       },
       {
+        "name": "runRepo",
+        "defFiles": [
+          "src/main-process/acquiring-bill-currency-session.js",
+          "src/main-process/acquiring-bill-currency-writer.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 16
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 4
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 21,
+        "fileSpan": 3
+      },
+      {
         "name": "setSetting",
         "defFiles": [
           "src/backend/database/settings-repository.js"
@@ -2966,10 +2998,10 @@
           },
           {
             "file": "src/backend/database/settings-repository.js",
-            "count": 14
+            "count": 16
           }
         ],
-        "totalHits": 18,
+        "totalHits": 20,
         "fileSpan": 3
       },
       {
@@ -3043,24 +3075,22 @@
         "fileSpan": 3
       },
       {
-        "name": "runRepo",
+        "name": "getSetting",
         "defFiles": [
-          "src/main-process/acquiring-bill-currency-session.js",
-          "src/main-process/acquiring-bill-currency-writer.js",
-          "src/main.js"
+          "src/backend/database/settings-repository.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/acquiring-bill-currency-session.js",
-            "count": 9
+            "file": "src/backend/database.js",
+            "count": 2
           },
           {
-            "file": "src/main-process/acquiring-bill-currency-writer.js",
-            "count": 4
-          },
-          {
-            "file": "src/main.js",
+            "file": "src/backend/database/own-accounts-migration.js",
             "count": 1
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 11
           }
         ],
         "totalHits": 14,
@@ -3110,28 +3140,6 @@
           }
         ],
         "totalHits": 13,
-        "fileSpan": 3
-      },
-      {
-        "name": "getSetting",
-        "defFiles": [
-          "src/backend/database/settings-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database/own-accounts-migration.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/database/settings-repository.js",
-            "count": 9
-          }
-        ],
-        "totalHits": 12,
         "fileSpan": 3
       },
       {
@@ -4689,14 +4697,14 @@
         "refFiles": [
           {
             "file": "src/backend/database.js",
-            "count": 20
+            "count": 24
           },
           {
             "file": "src/backend/database/own-accounts-migration.js",
             "count": 4
           }
         ],
-        "totalHits": 24,
+        "totalHits": 28,
         "fileSpan": 2
       },
       {
@@ -4792,6 +4800,25 @@
         "fileSpan": 2
       },
       {
+        "name": "DIFF_TABLE",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+            "count": 8
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 2
+      },
+      {
         "name": "normalizeAccountKey",
         "defFiles": [
           "src/main-process/biz-op-recon-session.js",
@@ -4845,25 +4872,6 @@
           }
         ],
         "totalHits": 13,
-        "fileSpan": 2
-      },
-      {
-        "name": "DIFF_TABLE",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "src/backend/biz-op-recon-db/run-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-            "count": 7
-          },
-          {
-            "file": "src/backend/biz-op-recon-db/run-repository.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 12,
         "fileSpan": 2
       },
       {
@@ -4995,24 +5003,6 @@
         "fileSpan": 2
       },
       {
-        "name": "CancelError",
-        "defFiles": [
-          "src/main-process/acquiring-bill-currency-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/acquiring-bill-currency-session.js",
-            "count": 8
-          },
-          {
-            "file": "src/main-process/run-check-worker.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 2
-      },
-      {
         "name": "channelsRepository",
         "defFiles": [
           "src/backend/database.js",
@@ -5069,6 +5059,44 @@
         "fileSpan": 2
       },
       {
+        "name": "ACQUIRING_BILL_CHUNK_SIZE_DEFAULT",
+        "defFiles": [
+          "src/backend/database/migrations.js",
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 2
+      },
+      {
+        "name": "ACQUIRING_BILL_CHUNK_SIZE_KEY",
+        "defFiles": [
+          "src/backend/database/migrations.js",
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 2
+      },
+      {
         "name": "ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT",
         "defFiles": [
           "src/backend/database/migrations.js",
@@ -5101,6 +5129,62 @@
           {
             "file": "src/backend/database/settings-repository.js",
             "count": 4
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 2
+      },
+      {
+        "name": "ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT",
+        "defFiles": [
+          "src/backend/database/migrations.js",
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 2
+      },
+      {
+        "name": "ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY",
+        "defFiles": [
+          "src/backend/database/migrations.js",
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 2
+      },
+      {
+        "name": "CancelError",
+        "defFiles": [
+          "src/main-process/acquiring-bill-currency-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 7
+          },
+          {
+            "file": "src/main-process/run-check-worker.js",
+            "count": 1
           }
         ],
         "totalHits": 8,
@@ -5231,6 +5315,43 @@
           {
             "file": "src/renderer.js",
             "count": 4
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 2
+      },
+      {
+        "name": "createBackup",
+        "defFiles": [
+          "src/backend/database/backup.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/database/backup.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 2
+      },
+      {
+        "name": "FLOW_TABLE",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+            "count": 5
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 2
           }
         ],
         "totalHits": 7,
@@ -5493,24 +5614,6 @@
         "fileSpan": 2
       },
       {
-        "name": "createBackup",
-        "defFiles": [
-          "src/backend/database/backup.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
-            "count": 5
-          },
-          {
-            "file": "src/backend/database/backup.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 2
-      },
-      {
         "name": "ensureAccountMappingCurrencySupport",
         "defFiles": [
           "src/backend/database/migrations.js"
@@ -5530,6 +5633,60 @@
       },
       {
         "name": "ensureAccountMappingTemplateSupport",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "ensureAcquiringBillChunkSizeSetting",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "ensureAcquiringBillCurrencyRawJsonRetentionSettings",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "ensureAcquiringBillCurrencyRunsChunkProgress",
         "defFiles": [
           "src/backend/database/migrations.js"
         ],
@@ -5747,6 +5904,24 @@
       },
       {
         "name": "ensureC3GwFieldCurrencyCaseFix",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "ensureDiffRowsCascadeMigration_v2_1_10",
         "defFiles": [
           "src/backend/database/migrations.js"
         ],
@@ -6000,25 +6175,6 @@
         "fileSpan": 2
       },
       {
-        "name": "FLOW_TABLE",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "src/backend/biz-op-recon-db/run-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-            "count": 4
-          },
-          {
-            "file": "src/backend/biz-op-recon-db/run-repository.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 2
-      },
-      {
         "name": "getCurrencyOptionLabel",
         "defFiles": [
           "src/renderer.js"
@@ -6194,6 +6350,24 @@
           {
             "file": "src/main-process/acquiring-bill-currency-writer.js",
             "count": 3
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "setRunChunkProgress",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 4
           }
         ],
         "totalHits": 6,
@@ -7262,7 +7436,43 @@
         "fileSpan": 2
       },
       {
+        "name": "getAcquiringBillChunkSize",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "getAcquiringBillIdleCleanupMinutes",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "getAcquiringBillRawJsonRetentionDays",
         "defFiles": [
           "src/backend/database/settings-repository.js"
         ],
@@ -7989,7 +8199,43 @@
         "fileSpan": 2
       },
       {
+        "name": "setAcquiringBillChunkSize",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "setAcquiringBillIdleCleanupMinutes",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "setAcquiringBillRawJsonRetentionDays",
         "defFiles": [
           "src/backend/database/settings-repository.js"
         ],
@@ -8459,6 +8705,25 @@
         "fileSpan": 2
       },
       {
+        "name": "clearStaleSuccessfulRawJson",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/raw-json-retention.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/raw-json-retention.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "computeRunStats",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/run-repository.js"
@@ -8711,6 +8976,24 @@
         "fileSpan": 2
       },
       {
+        "name": "getRunChunkProgress",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "getTemplatesByBankName",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -8783,7 +9066,7 @@
         "fileSpan": 2
       },
       {
-        "name": "insertDiffRowsByJoin",
+        "name": "insertDiffRowsByJoinChunked",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/run-repository.js"
         ],
@@ -9652,10 +9935,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 148
+            "count": 150
           }
         ],
-        "totalHits": 148,
+        "totalHits": 150,
         "fileSpan": 1
       },
       {
@@ -9771,6 +10054,20 @@
         "fileSpan": 1
       },
       {
+        "name": "BILL_TABLE",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+            "count": 12
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 1
+      },
+      {
         "name": "cloneBackgroundSettings",
         "defFiles": [
           "src/renderer.js"
@@ -9841,20 +10138,6 @@
         "fileSpan": 1
       },
       {
-        "name": "safeRollback",
-        "defFiles": [
-          "src/main-process/acquiring-bill-currency-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/acquiring-bill-currency-session.js",
-            "count": 11
-          }
-        ],
-        "totalHits": 11,
-        "fileSpan": 1
-      },
-      {
         "name": "scenariosRepository",
         "defFiles": [
           "src/backend/database.js"
@@ -9866,20 +10149,6 @@
           }
         ],
         "totalHits": 11,
-        "fileSpan": 1
-      },
-      {
-        "name": "BILL_TABLE",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/run-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-            "count": 10
-          }
-        ],
-        "totalHits": 10,
         "fileSpan": 1
       },
       {
@@ -9939,6 +10208,20 @@
         "fileSpan": 1
       },
       {
+        "name": "safeRollback",
+        "defFiles": [
+          "src/main-process/acquiring-bill-currency-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 10
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 1
+      },
+      {
         "name": "workerInitPromise",
         "defFiles": [
           "src/main-process/run-check-worker-pool.js"
@@ -9960,6 +10243,20 @@
         "refFiles": [
           {
             "file": "src/main.js",
+            "count": 9
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 1
+      },
+      {
+        "name": "N4_CONT_2_DIFF_ROWS_TABLE",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
             "count": 9
           }
         ],
@@ -10401,6 +10698,34 @@
         "fileSpan": 1
       },
       {
+        "name": "ACQUIRING_BILL_CHUNK_SIZE_MAX",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "ACQUIRING_BILL_CHUNK_SIZE_MIN",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MAX",
         "defFiles": [
           "src/backend/database/settings-repository.js"
@@ -10416,6 +10741,34 @@
       },
       {
         "name": "ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_MIN",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MAX",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MIN",
         "defFiles": [
           "src/backend/database/settings-repository.js"
         ],
@@ -10688,6 +11041,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/own-accounts-migration.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "N4_CONT_2_DIFF_ROWS_TABLE_NEW",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
             "count": 5
           }
         ],
@@ -11248,6 +11615,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "N4_CONT_2_DIFF_ROWS_CASCADE_MIGRATED_MARKER",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
             "count": 4
           }
         ],
@@ -11976,6 +12357,20 @@
         "refFiles": [
           {
             "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "CLEAR_STALE_SQL",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/raw-json-retention.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/raw-json-retention.js",
             "count": 3
           }
         ],
@@ -13208,6 +13603,20 @@
         "refFiles": [
           {
             "file": "src/main-process/pending-session.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "writeN4Cont2Marker",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
             "count": 3
           }
         ],
@@ -14517,6 +14926,20 @@
         "fileSpan": 1
       },
       {
+        "name": "insertDiffRowsByJoin",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "insertPendingRowsInTxn",
         "defFiles": [
           "src/backend/bank-bu-recon-db/month-repository.js"
@@ -14804,6 +15227,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "N4_CONT_2_DIFF_ROWS_INDEX",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
             "count": 2
           }
         ],
@@ -16036,6 +16473,10 @@
       ],
       "refFiles": [
         {
+          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "count": 1
+        },
+        {
           "file": "src/backend/big-account-mode-store.js",
           "count": 1
         },
@@ -16112,8 +16553,8 @@
           "count": 2
         }
       ],
-      "totalHits": 32,
-      "fileSpan": 19
+      "totalHits": 33,
+      "fileSpan": 20
     },
     {
       "name": "normalizeCell",
@@ -16269,7 +16710,7 @@
       "refFiles": [
         {
           "file": "src/backend/database.js",
-          "count": 14
+          "count": 19
         },
         {
           "file": "src/backend/database/migrations.js",
@@ -16312,7 +16753,7 @@
           "count": 1
         }
       ],
-      "totalHits": 41,
+      "totalHits": 46,
       "fileSpan": 11
     },
     {
@@ -16662,6 +17103,42 @@
         }
       ],
       "totalHits": 17,
+      "fileSpan": 6
+    },
+    {
+      "name": "getRunById",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/run-repository.js",
+        "src/backend/biz-op-recon-db/run-repository.js",
+        "src/backend/pending-db/diff-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-db/diff-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-writer.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 10,
       "fileSpan": 6
     },
     {
@@ -17110,38 +17587,6 @@
       "fileSpan": 5
     },
     {
-      "name": "getRunById",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-db/run-repository.js",
-        "src/backend/biz-op-recon-db/run-repository.js",
-        "src/backend/pending-db/diff-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-db/run-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/pending-db/diff-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/pending-export/writer.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-writer.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 8,
-      "fileSpan": 5
-    },
-    {
       "name": "deleteTemplate",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -17234,7 +17679,7 @@
       "refFiles": [
         {
           "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "count": 12
+          "count": 14
         },
         {
           "file": "src/backend/bank-bu-recon-db/month-repository.js",
@@ -17249,7 +17694,7 @@
           "count": 11
         }
       ],
-      "totalHits": 33,
+      "totalHits": 35,
       "fileSpan": 4
     },
     {
@@ -18615,10 +19060,10 @@
         },
         {
           "file": "src/backend/database/migrations.js",
-          "count": 17
+          "count": 18
         }
       ],
-      "totalHits": 22,
+      "totalHits": 23,
       "fileSpan": 3
     },
     {
@@ -18646,6 +19091,30 @@
       "fileSpan": 3
     },
     {
+      "name": "runRepo",
+      "defFiles": [
+        "src/main-process/acquiring-bill-currency-session.js",
+        "src/main-process/acquiring-bill-currency-writer.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 16
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-writer.js",
+          "count": 4
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 21,
+      "fileSpan": 3
+    },
+    {
       "name": "setSetting",
       "defFiles": [
         "src/backend/database/settings-repository.js"
@@ -18661,10 +19130,10 @@
         },
         {
           "file": "src/backend/database/settings-repository.js",
-          "count": 14
+          "count": 16
         }
       ],
-      "totalHits": 18,
+      "totalHits": 20,
       "fileSpan": 3
     },
     {
@@ -18738,24 +19207,22 @@
       "fileSpan": 3
     },
     {
-      "name": "runRepo",
+      "name": "getSetting",
       "defFiles": [
-        "src/main-process/acquiring-bill-currency-session.js",
-        "src/main-process/acquiring-bill-currency-writer.js",
-        "src/main.js"
+        "src/backend/database/settings-repository.js"
       ],
       "refFiles": [
         {
-          "file": "src/main-process/acquiring-bill-currency-session.js",
-          "count": 9
+          "file": "src/backend/database.js",
+          "count": 2
         },
         {
-          "file": "src/main-process/acquiring-bill-currency-writer.js",
-          "count": 4
-        },
-        {
-          "file": "src/main.js",
+          "file": "src/backend/database/own-accounts-migration.js",
           "count": 1
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 11
         }
       ],
       "totalHits": 14,
@@ -18805,28 +19272,6 @@
         }
       ],
       "totalHits": 13,
-      "fileSpan": 3
-    },
-    {
-      "name": "getSetting",
-      "defFiles": [
-        "src/backend/database/settings-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database/own-accounts-migration.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/database/settings-repository.js",
-          "count": 9
-        }
-      ],
-      "totalHits": 12,
       "fileSpan": 3
     },
     {
@@ -20382,14 +20827,14 @@
       "refFiles": [
         {
           "file": "src/backend/database.js",
-          "count": 20
+          "count": 24
         },
         {
           "file": "src/backend/database/own-accounts-migration.js",
           "count": 4
         }
       ],
-      "totalHits": 24,
+      "totalHits": 28,
       "fileSpan": 2
     },
     {
@@ -20485,6 +20930,25 @@
       "fileSpan": 2
     },
     {
+      "name": "DIFF_TABLE",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/run-repository.js",
+        "src/backend/biz-op-recon-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "count": 8
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 13,
+      "fileSpan": 2
+    },
+    {
       "name": "normalizeAccountKey",
       "defFiles": [
         "src/main-process/biz-op-recon-session.js",
@@ -20538,25 +21002,6 @@
         }
       ],
       "totalHits": 13,
-      "fileSpan": 2
-    },
-    {
-      "name": "DIFF_TABLE",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-db/run-repository.js",
-        "src/backend/biz-op-recon-db/run-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "count": 7
-        },
-        {
-          "file": "src/backend/biz-op-recon-db/run-repository.js",
-          "count": 5
-        }
-      ],
-      "totalHits": 12,
       "fileSpan": 2
     },
     {
@@ -20688,24 +21133,6 @@
       "fileSpan": 2
     },
     {
-      "name": "CancelError",
-      "defFiles": [
-        "src/main-process/acquiring-bill-currency-session.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/acquiring-bill-currency-session.js",
-          "count": 8
-        },
-        {
-          "file": "src/main-process/run-check-worker.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 9,
-      "fileSpan": 2
-    },
-    {
       "name": "channelsRepository",
       "defFiles": [
         "src/backend/database.js",
@@ -20762,6 +21189,44 @@
       "fileSpan": 2
     },
     {
+      "name": "ACQUIRING_BILL_CHUNK_SIZE_DEFAULT",
+      "defFiles": [
+        "src/backend/database/migrations.js",
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 2
+    },
+    {
+      "name": "ACQUIRING_BILL_CHUNK_SIZE_KEY",
+      "defFiles": [
+        "src/backend/database/migrations.js",
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 2
+    },
+    {
       "name": "ACQUIRING_BILL_IDLE_CLEANUP_MINUTES_DEFAULT",
       "defFiles": [
         "src/backend/database/migrations.js",
@@ -20794,6 +21259,62 @@
         {
           "file": "src/backend/database/settings-repository.js",
           "count": 4
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 2
+    },
+    {
+      "name": "ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT",
+      "defFiles": [
+        "src/backend/database/migrations.js",
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 2
+    },
+    {
+      "name": "ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY",
+      "defFiles": [
+        "src/backend/database/migrations.js",
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 2
+    },
+    {
+      "name": "CancelError",
+      "defFiles": [
+        "src/main-process/acquiring-bill-currency-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 7
+        },
+        {
+          "file": "src/main-process/run-check-worker.js",
+          "count": 1
         }
       ],
       "totalHits": 8,
@@ -20924,6 +21445,43 @@
         {
           "file": "src/renderer.js",
           "count": 4
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 2
+    },
+    {
+      "name": "createBackup",
+      "defFiles": [
+        "src/backend/database/backup.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/database/backup.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 2
+    },
+    {
+      "name": "FLOW_TABLE",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/run-repository.js",
+        "src/backend/biz-op-recon-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "count": 5
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 2
         }
       ],
       "totalHits": 7,
@@ -21186,24 +21744,6 @@
       "fileSpan": 2
     },
     {
-      "name": "createBackup",
-      "defFiles": [
-        "src/backend/database/backup.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database.js",
-          "count": 5
-        },
-        {
-          "file": "src/backend/database/backup.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 2
-    },
-    {
       "name": "ensureAccountMappingCurrencySupport",
       "defFiles": [
         "src/backend/database/migrations.js"
@@ -21223,6 +21763,60 @@
     },
     {
       "name": "ensureAccountMappingTemplateSupport",
+      "defFiles": [
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "ensureAcquiringBillChunkSizeSetting",
+      "defFiles": [
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "ensureAcquiringBillCurrencyRawJsonRetentionSettings",
+      "defFiles": [
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "ensureAcquiringBillCurrencyRunsChunkProgress",
       "defFiles": [
         "src/backend/database/migrations.js"
       ],
@@ -21440,6 +22034,24 @@
     },
     {
       "name": "ensureC3GwFieldCurrencyCaseFix",
+      "defFiles": [
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "ensureDiffRowsCascadeMigration_v2_1_10",
       "defFiles": [
         "src/backend/database/migrations.js"
       ],
@@ -21693,25 +22305,6 @@
       "fileSpan": 2
     },
     {
-      "name": "FLOW_TABLE",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-db/run-repository.js",
-        "src/backend/biz-op-recon-db/run-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "count": 4
-        },
-        {
-          "file": "src/backend/biz-op-recon-db/run-repository.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 2
-    },
-    {
       "name": "getCurrencyOptionLabel",
       "defFiles": [
         "src/renderer.js"
@@ -21887,6 +22480,24 @@
         {
           "file": "src/main-process/acquiring-bill-currency-writer.js",
           "count": 3
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "setRunChunkProgress",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 4
         }
       ],
       "totalHits": 6,
@@ -22955,7 +23566,43 @@
       "fileSpan": 2
     },
     {
+      "name": "getAcquiringBillChunkSize",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "getAcquiringBillIdleCleanupMinutes",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "getAcquiringBillRawJsonRetentionDays",
       "defFiles": [
         "src/backend/database/settings-repository.js"
       ],
@@ -23682,7 +24329,43 @@
       "fileSpan": 2
     },
     {
+      "name": "setAcquiringBillChunkSize",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "setAcquiringBillIdleCleanupMinutes",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "setAcquiringBillRawJsonRetentionDays",
       "defFiles": [
         "src/backend/database/settings-repository.js"
       ],
@@ -24152,6 +24835,25 @@
       "fileSpan": 2
     },
     {
+      "name": "clearStaleSuccessfulRawJson",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/raw-json-retention.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/raw-json-retention.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "computeRunStats",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/run-repository.js"
@@ -24404,6 +25106,24 @@
       "fileSpan": 2
     },
     {
+      "name": "getRunChunkProgress",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "getTemplatesByBankName",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -24476,7 +25196,7 @@
       "fileSpan": 2
     },
     {
-      "name": "insertDiffRowsByJoin",
+      "name": "insertDiffRowsByJoinChunked",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/run-repository.js"
       ],

@@ -2,11 +2,11 @@
 
 | 字段 | 值 |
 |---|---|
-| 文档版本 | v0.2（2026-05-28 reverse sync — A4 必做 + N4-cont-1 改"复用 N1' idle + 仅清对账成功行 + 7 天窗口 + 0 UI"） |
-| 关联 PRD | `PRD-v2.1.10.md` v0.2（D25/D26/D27 用户拍板 + N4-cont-1 重大方案变更）|
-| 关联 backlog | `backlog.md` v0.1（β 范围锁定）|
-| 起草人 | PM |
-| 状态 | v0.2 reverse synced（用户拍板 D25/D26/D27 + N4-cont-1 重大方案变更已落 §三 / §四；A3 部分仍待 Phase 0 POC 数据回写）|
+| 文档版本 | v0.3（2026-05-28 — N4-cont-1 sentinel 修订 `NULL → ''` 兼容 v2.1.8 N4 NOT NULL schema）/ v0.2（A4 必做 + N4-cont-1 重大方案变更）|
+| 关联 PRD | `PRD-v2.1.10.md` v0.3（同步 sentinel 修订）|
+| 关联 backlog | `backlog.md` v0.2（D23-D28 全部拍板 + Phase 0 POC 完成）|
+| 起草人 | PM + Dev Phase 4 T28 发现 + 主线程 T29' 修订 |
+| 状态 | v0.3 sentinel 修订（用户拍板 Option A — spec reverse sync `NULL → ''`；Phase 0 POC 数据已回写 §2.6；Phase 1-5 全部完成）|
 
 ---
 
@@ -518,17 +518,17 @@ function getAcquiringBillRawJsonRetentionDays(db) {
 
 ### 4.2 清理算法（v0.2 重写）— `clearStaleSuccessfulRawJson`
 
-#### 4.2.1 核心 SQL（NOT IN 子查询排除差异行）
+#### 4.2.1 核心 SQL（NOT IN 子查询排除差异行 — v0.3 sentinel = '')
 
 ```js
 // src/backend/acquiring-bill-currency-db/raw-json-retention.js（新建 — 极简）
 function clearStaleSuccessfulRawJson(db, retentionDays) {
   const result = db.prepare(`
     UPDATE acquiring_bill_currency_bill_imports
-    SET raw_json = NULL
+    SET raw_json = ''
     WHERE id IN (
       SELECT b.id FROM acquiring_bill_currency_bill_imports b
-      WHERE b.raw_json IS NOT NULL
+      WHERE b.raw_json != ''
         AND b.imported_at < datetime('now', '-' || ? || ' days')
         AND b.id NOT IN (
           SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows
@@ -541,20 +541,22 @@ function clearStaleSuccessfulRawJson(db, retentionDays) {
 module.exports = { clearStaleSuccessfulRawJson };
 ```
 
-#### 4.2.2 SQL 关键不变量
+> ⚠️ **v0.3 reverse sync（2026-05-28）**：sentinel 从 `NULL` 改 `''`。原因：`bill_imports.raw_json` schema = `TEXT NOT NULL`（`migrations.js:1500`，v2.1.8 N4 引入约束）— `SET raw_json = NULL` 被 SQLite 拒绝。`''` 兼容 NOT NULL + 等价"已清"sentinel（字节 +1 vs NULL；vs v0.1 `'{}'` 仍省 1 字节；不动 schema 不破坏 v2.1.8 N4 已发版本契约）。Phase 4 T28 集成测试发现 + 用户拍板 Option A。
 
-- **`b.raw_json IS NOT NULL`**：跳过已清的行（idempotent — 多次 idle 触发不会重复清同行）
+#### 4.2.2 SQL 关键不变量（v0.3）
+
+- **`b.raw_json != ''`**：跳过已清的行（idempotent — 多次 idle 触发不会重复清同行；`''` 是 v0.3 "已清" sentinel）
 - **`b.imported_at < datetime('now', '-' || ? || ' days')`**：仅清"老于 N 天"的行 — `imported_at` 是 bill_imports 表既有列（v2.1.8 N4 schema）
 - **`NOT IN (SELECT DISTINCT bill_import_id FROM acquiring_bill_currency_diff_rows)`**：**排除差异行** — 这是 v0.2 关键不变量；保证差异行 raw_json 永远不被清，writer.js:184 重导差异 xlsx 不丢字段
-- **`SET raw_json = NULL`**：保留行骨架 + 业务字段；不删整行；不破坏 N4-cont-2 FK CASCADE 路径（bill_import_id FK 仍有效）
+- **`SET raw_json = ''`**：保留行骨架 + 业务字段；不删整行；不破坏 N4-cont-2 FK CASCADE 路径（bill_import_id FK 仍有效）；兼容 v2.1.8 N4 NOT NULL 约束（v0.3）
 
-#### 4.2.3 v0.1 → v0.2 算法删除项
+#### 4.2.3 v0.1 → v0.2 → v0.3 算法变更项
 
-- ❌ `calculateExpiredRows`（v0.1 启动期计算超期）— 删除（无 UI 不需要预估）
-- ❌ `pruneOldRawJson`（v0.1 用户主动触发删除）— 删除（无用户主动路径）
-- ❌ "标记超期"算法（v0.1 启动期触发不删 + 等用户主动清）— 删除
-- ❌ `UPDATE raw_json = '{}'`（v0.1 留空 JSON）— v0.2 改为 `raw_json = NULL`（更节省字节 + 语义更明确"已清")
-- ❌ 月份维度 + MB 双门槛 — 删除（改"天数"单一维度）
+- ❌ `calculateExpiredRows`（v0.1 启动期计算超期）— v0.2 删除（无 UI 不需要预估）
+- ❌ `pruneOldRawJson`（v0.1 用户主动触发删除）— v0.2 删除（无用户主动路径）
+- ❌ "标记超期"算法（v0.1 启动期触发不删 + 等用户主动清）— v0.2 删除
+- ❌ `UPDATE raw_json = '{}'`（v0.1 留空 JSON）→ ❌ `UPDATE raw_json = NULL`（v0.2，但 schema NOT NULL 拒绝）→ ✅ **`UPDATE raw_json = ''`（v0.3 修订）**
+- ❌ 月份维度 + MB 双门槛 — v0.2 删除（改"天数"单一维度）
 
 ### 4.3 触发集成（v0.2 复用 v2.1.9 N1' idle cleanup 计时器）
 
@@ -869,7 +871,7 @@ migration 顺序固定（启动期）：
 | 🟢 Risk-sensitive | `bill_imports.raw_json` | migrations.js + N4-cont-1 cleanup | 内容契约扩 — **v0.2** 增加"对账成功老行可被自动 NULL 清空"语义（差异行永远保留 — writer.js:184 依赖）|
 | 🟢 Runtime-state | `n4_cont_2_diff_rows_cascade_migrated` settings | migrations.js | 新增 migration 标志位 |
 | 🟢 Runtime-state | `acquiring_bill_raw_json_retention_days` settings（v0.2 单 key — 从 v0.1 2 key 降为 1）| settings-repository.js | v0.2 新增 1 键（默认 7 / 范围 1-30）|
-| 🟢 Runtime-state（v0.2 新增）| `clearStaleSuccessfulRawJson` | acquiring-bill-currency-db/raw-json-retention.js（新）| v0.2 新增：单 SQL UPDATE WHERE NOT IN 排除差异行；idempotent（raw_json IS NOT NULL 守卫）|
+| 🟢 Runtime-state（v0.2 新增 / v0.3 sentinel 修订）| `clearStaleSuccessfulRawJson` | acquiring-bill-currency-db/raw-json-retention.js（新）| v0.2 新增 + v0.3 sentinel 改 `''`：单 SQL UPDATE WHERE NOT IN 排除差异行；idempotent（`raw_json != ''` 守卫；兼容 v2.1.8 N4 NOT NULL schema）|
 
 ---
 
