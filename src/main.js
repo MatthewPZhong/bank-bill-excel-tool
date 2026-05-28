@@ -11241,52 +11241,60 @@ app.whenReady()
 //   并发隔离：用 tryAcquireOpLock('cleanup') 防与 import/run/export 冲突
 //   失败容忍：单 run 失败仅日志，继续清下一个；启动期 cleanupOrphanData 兜底
 let cleanupBackgroundInProgress = false;
+// v2.1.10 SR-FIX-1 round 2 P0-4：返回 Promise（spec §4.3.2 顺序契约）
+//   - 早返回路径（cleanupBackgroundInProgress / 无 db / 无 pending / 锁拿不到）→ 立即 resolve（不算执行）
+//   - 实际执行路径 → 主 cleanup 全部完成后 resolve
+//   - 兼容现有 caller（启动期 + 进入模块兜底 + idle tick）— fire-and-forget 不 await 不破坏既有行为
+//   - idle tick caller 可 await 后再调 raw_json 清理，保证顺序契约
 function triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded() {
-  if (cleanupBackgroundInProgress) return;
-  if (!database || !database.db) return;
+  if (cleanupBackgroundInProgress) return Promise.resolve();
+  if (!database || !database.db) return Promise.resolve();
   let pendingRuns;
   try {
     pendingRuns = runRepo.listPendingCleanupRuns(database.db);
   } catch (_e) {
-    return;
+    return Promise.resolve();
   }
-  if (!pendingRuns || pendingRuns.length === 0) return;
+  if (!pendingRuns || pendingRuns.length === 0) return Promise.resolve();
   const cleanupLock = tryAcquireAcquiringBillCurrencyOpLock('cleanup', null);
-  if (!cleanupLock.acquired) return; // import/run/export 进行中，放弃这次（下次入模块再试）
+  if (!cleanupLock.acquired) return Promise.resolve(); // import/run/export 进行中，放弃这次（下次入模块再试）
   cleanupBackgroundInProgress = true;
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('acquiringBillCurrency:cleanup-background:toast', {
       stage: 'start', pendingCount: pendingRuns.length
     });
   }
-  setImmediate(async () => {
-    try {
-      for (const run of pendingRuns) {
-        try {
-          await acquiringBillCurrencySession.cleanupAfterRunBackground({
-            db: database.db, monthKey: run.month_key, runId: run.id
-            // v2.1.8 N1' (v0.7)：includeDiff 默认 false → 只清 flow + bill，保留 diff
-          });
-          runRepo.clearCleanupPending(database.db, { runId: run.id });
-        } catch (cleanErr) {
-          // v2.1.9 SR-log-1：替换 console.error → 日志上报
-          appendActivityLogEntry({
-            level: 'error',
-            source: 'main',
-            domain: 'acquiring-bill-currency',
-            message: `[acquiring-bill-currency] background cleanup run ${run.id} 失败`,
-            details: [cleanErr && cleanErr.message ? cleanErr.message : String(cleanErr)],
-            stack: cleanErr && cleanErr.stack ? cleanErr.stack : undefined
-          });
+  return new Promise((resolve) => {
+    setImmediate(async () => {
+      try {
+        for (const run of pendingRuns) {
+          try {
+            await acquiringBillCurrencySession.cleanupAfterRunBackground({
+              db: database.db, monthKey: run.month_key, runId: run.id
+              // v2.1.8 N1' (v0.7)：includeDiff 默认 false → 只清 flow + bill，保留 diff
+            });
+            runRepo.clearCleanupPending(database.db, { runId: run.id });
+          } catch (cleanErr) {
+            // v2.1.9 SR-log-1：替换 console.error → 日志上报
+            appendActivityLogEntry({
+              level: 'error',
+              source: 'main',
+              domain: 'acquiring-bill-currency',
+              message: `[acquiring-bill-currency] background cleanup run ${run.id} 失败`,
+              details: [cleanErr && cleanErr.message ? cleanErr.message : String(cleanErr)],
+              stack: cleanErr && cleanErr.stack ? cleanErr.stack : undefined
+            });
+          }
         }
+      } finally {
+        releaseAcquiringBillCurrencyOpLock();
+        cleanupBackgroundInProgress = false;
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('acquiringBillCurrency:cleanup-background:toast', { stage: 'done' });
+        }
+        resolve();
       }
-    } finally {
-      releaseAcquiringBillCurrencyOpLock();
-      cleanupBackgroundInProgress = false;
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('acquiringBillCurrency:cleanup-background:toast', { stage: 'done' });
-      }
-    }
+    });
   });
 }
 
@@ -11339,7 +11347,7 @@ function setupIdleCleanupTimer() {
   if (idleCleanupTimer) return; // 重入保护
   // v2.1.9 N1-settings：启动期从 settings 读阈值（默认 30）
   loadIdleCleanupMsFromSettings();
-  idleCleanupTimer = setInterval(() => {
+  idleCleanupTimer = setInterval(async () => {
     try {
       const elapsed = Date.now() - lastUserActivityTs;
       if (elapsed < IDLE_CLEANUP_MS) return;
@@ -11369,8 +11377,13 @@ function setupIdleCleanupTimer() {
         }
       }
 
+      // v2.1.10 SR-FIX-1 round 2 P0-4：顺序契约（spec §4.3.2 + PRD §五.2）
+      //   修复前：trigger() setImmediate 异步立即返回 + raw_json 同步立即跑 → 两 cleanup 并发
+      //   修复后：trigger() 返 Promise → await → raw_json 后跑 → 保证顺序契约 + 日志顺序
+      //   兼容：trigger() 早返回路径（无 pending / 已 in progress）立即 resolve；await 立即返回
+      //
       // idle 达标 → 复用进入模块兜底路径（含 mutex 抢锁 + cleanup_pending 判定 + 防重入）
-      triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
+      await triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
 
       // === Phase 4 N4-cont-1 raw_json 清理 ===
       //   spec §4.3 + PRD §五.2：复用 N1' idle 30min cleanup 时序
