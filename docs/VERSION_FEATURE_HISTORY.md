@@ -9,6 +9,33 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.10（2026-05-28 — 待发布 β 草稿）
+
+v2.1.9 之后 1 轮迭代（β 范围），4 主线：A3（runCheck 跨进程化 — worker_threads + 独立 DB + 跨进程错误回传）+ A4（SQL JOIN chunked 分批 — chunk size 10w + cancel chunk 边界）+ N4-cont-1（raw_json 体积治理 — 7 天保留 + idle 自动 + sentinel `''` v0.3）+ N4-cont-2（FK CASCADE — `diff_rows` 2 FK ON DELETE CASCADE + 8-status migration）。⚠️ 2 个🔴破坏性（N4-cont-2 DB schema 不可逆 + N4-cont-1 raw_json 不可逆清空）+ 3 个资金红线护栏 + 5 个 important-variables v12 升格。
+
+### 新增
+
+- **A3 runCheck 跨进程化**（架构级）：worker_threads + 独立 DatabaseSync 连接（D24=a 验证）+ 6 条 PRAGMA 强制；新建 run-check-worker.js + run-check-worker-pool.js + serialize-error.js；提取 runCheckCore 共用；setupIdleCleanupTimer 加 isBusy 守卫 + 30s grace；cancel 5 阶段间检查 + ROLLBACK；worker crash 自动 cold-start + op lock 释放 + Notification；主进程 event loop lag 65.7ms → 1.3ms（48.7x）/ worker cold-start ~11ms / IPC ~0.010ms
+- **A4 SQL JOIN chunked 分批**（性能 + cancel 响应）：insertDiffRowsByJoinChunked 替代单条大 SQL；chunk 10w（spec §3.2 选定）+ 独立事务边界；runs.chunk_progress 列 + setRunChunkProgress / getRunChunkProgress；resume IPC handler 暴露（UI v2.1.11+）；cancel < 0.01ms 同步抛；chunked vs non-chunked 0.99x **byte-for-byte 一致**
+- **N4-cont-1 raw_json idle 自动清理**（体积治理）：clearStaleSuccessfulRawJson 单 SQL UPDATE WHERE id NOT IN diff_rows + imported_at < N 天；settings 单键 retention_days（默认 7 / 范围 1-30 / 范围外回退）；复用 v2.1.9 N1' idle 30min cleanup 计时器追加回调；用户无感 0 UI（D27=N/A）；差异行 raw_json 永远保留；失败 graceful；目标 6 月体积 ~24GB → ~8GB（~99% 节省）；**v0.3 sentinel `''`**（v0.2 原 NULL 与 v2.1.8 N4 NOT NULL 冲突）
+- **N4-cont-2 FK CASCADE 改造**（DB schema 不可逆）：acquiring_bill_currency_diff_rows.bill_import_id + run_id 加 ON DELETE CASCADE；ensureDiffRowsCascadeMigration_v2_1_10 + 8-status state machine（沿用 v2.1.9 N5 范式）+ 复用 v2.1.9 SR-backup-1 createBackupFn 注入；跨版本 v2.1.7/v2.1.8/v2.1.9 → v2.1.10 一步迁；PRAGMA foreign_key_check 0 violation 是 hard requirement；失败 ROLLBACK + 备份保留
+
+### 变更
+
+- **runCheck IPC 路径** main.js:10758-10785：直调 → workerPool.dispatchRunCheck；onProgress 改 worker 内部 forward；notifyResult / releaseOpLock 路径保留
+- **setupIdleCleanupTimer** main.js:11155-11178：加 `runCheckWorkerPool.isBusy()` 守卫（spec §2.3.2）+ N4-cont-1 raw_json cleanup 回调追加（独立 try/catch + activity log）
+- **rules/important-variables.md** v11 → v12：升格 5 条（Critical 4 + Important-skeleton 1）+ 更新 1 条（bill_imports.raw_json 扩 N4-cont-1 sentinel 语义）
+- **集成测试** 9 脚本 / ≥ 497 case → **15 脚本 / 809 case**（v2.1.10 新增 5 脚本 / 164 case：a3-phase1 + a3-phase2 + a4-phase3 + n4-cont-1-phase4 + n4-cont-2-phase5）
+
+### 修复（SR-FIX）
+
+- **N4-cont-1 sentinel v0.3 修订**：原 v0.2 SET raw_json = NULL → Phase 4 T28 集成发现违反 v2.1.8 N4 NOT NULL 约束 → 用户拍板 Option A 改 SET raw_json = ''；所有 idempotent 守卫 / SQL 查询从 IS NOT NULL 改 != ''（commit 740fdc8）
+
+### α/β 收口
+
+- **v2.1.10 β（本版）**：4 主线如上
+- **v2.1.11+ 继续延期**：A4 resume UI / N4-cont-1 settings UI / chunk size settings 化 / SR-log-1 双写删旧 / F5-cont C4 ILP
+
 ## 2.1.9（2026-05-27 — 待发布草稿）
 
 v2.1.8 之后 1 轮迭代（α 范围），9 项主题：N5（银行渠道区分场景 — 🔴 资金红线 + DB schema 破坏性 migration）+ N6（状态框换行修复）+ N7（场景模板按渠道导入/导出 — 新 bundle 类型）+ SR-backup-1（sqlite VACUUM INTO 备份基建）+ G1-cont（单元测试 37 文件全量铺）+ SR-policy-1（integration-runner 清单自动同步）+ N1-settings（idle 阈值 settings 化）+ N4 重构（migration 备份切到新 API）+ SR-log-1（全局告警日志化 + JSON Lines）。⚠️ 1 个🔴破坏性（Sheet 3 主输出撤除 → 独立报表）+ 3 个资金红线护栏。

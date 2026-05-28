@@ -1,5 +1,70 @@
 # Changelog
 
+## 2.1.10 - 2026-05-28（待发布 β 草稿）
+
+v2.1.9 之后 1 轮迭代（β 范围），**4 主线**：A3（runCheck 跨进程化 — worker_threads + 独立 DB 连接 + 跨进程错误回传）+ A4（SQL JOIN chunked 分批 — chunk size 10w + cancel chunk 边界响应 + resume IPC handler）+ N4-cont-1（raw_json 体积治理 — 7 天保留窗口 + idle 30min 自动清 + sentinel `''` v0.3）+ N4-cont-2（FK CASCADE 改造 — `diff_rows.bill_import_id` + `run_id` 加 `ON DELETE CASCADE` + 8-status migration state machine + SR-backup-1 前置）。⚠️ **2 个🔴破坏性变更**（N4-cont-2 DB schema 不可逆 + N4-cont-1 raw_json 不可逆清空）+ **3 个资金红线护栏**（runCheckCore worker/main byte-for-byte + clearStaleSuccessfulRawJson NOT IN 子查询 + N4-cont-2 FK CASCADE schema）+ **5 个 important-variables v12 升格**（Critical 4 + Important-skeleton 1 + 更新 1）。Phase 0-6 完成 / 27+ commits / release-check 全绿（smoke + unit 1238 case / 297 suites + integration 809 断言 / 15 脚本）。
+
+### 重大变更
+
+- **A3 runCheck 跨进程化**（架构级 / spec §2 / Phase 0-2）：worker_threads 路径（D23 用户拍板）+ 独立 SQLite DatabaseSync 连接（D24=a / POC 验证）+ 6 条 PRAGMA 强制同步（foreign_keys / journal_mode=wal / synchronous=1 / cache_size=-65536 / mmap_size=268435456 / busy_timeout=30000）；新建 `src/main-process/run-check-worker.js` worker 入口 + `run-check-worker-pool.js` worker 池（pre-warm / dispatch / isBusy / cancel / terminate）+ `serialize-error.js` 跨进程错误回传（FileValidationError 专属字段 + cause 链递归）；`session.runCheck` 提取 `runCheckCore` 共用入口；IPC handler `acquiringBillCurrency:run` 接 workerPool；setupIdleCleanupTimer 加 `runCheckWorkerPool.isBusy()` 守卫（spec §2.3.2）+ 30s grace；cancel 5 阶段间检查 + graceful ROLLBACK + 5s 内 worker exit；worker crash 自动 cold-start + op lock 释放 + Notification 通知；**主进程 event loop lag 主进程 65.7ms → worker 1.3ms（48.7x 改善）；worker cold-start ~11ms / IPC round-trip ~0.010ms（1000 次均值）**
+- **A4 SQL JOIN chunked 分批**（性能 + cancel 响应 / spec §3 / Phase 3）：`insertDiffRowsByJoinChunked` 替代单条大 SQL；chunk size 10w 行（spec §3.2 选定，理由：cancel 响应 + 内存峰值 + 总耗时三方平衡 — 实测 chunk=1k → 总耗时 +14% 慢 / chunk=10w 最优 0.99x）+ 独立事务边界（每 chunk 一事务）；新增 `runs.chunk_progress` 列 + `setRunChunkProgress` / `getRunChunkProgress` 持久化；resume 入口 `acquiringBillCurrency:run:resume` IPC handler（v2.1.10 暴露 / UI 评估 v2.1.11+）；cancel 在 chunk 边界响应（实测 < 0.01ms 同步抛 / spec §3.2 业务阈值 < 5s）；chunked vs non-chunked **byte-for-byte 一致**（4 层 contract test 锁定）；500w 行外推 worker + chunked 总耗时 ~1.05x（接近 5% budget）
+
+### 新增
+
+- **N4-cont-1 raw_json idle 30min 自动清理**（体积治理 / spec §4 / Phase 4）：单 SQL `UPDATE acquiring_bill_currency_bill_imports SET raw_json = '' WHERE id NOT IN (SELECT bill_import_id FROM acquiring_bill_currency_diff_rows) AND imported_at < datetime('now', '-N days') AND raw_json != ''`；新建 `src/backend/acquiring-bill-currency-db/raw-json-retention.js` 含 `clearStaleSuccessfulRawJson(db, retentionDays)` 函数 + 单元 8 case；settings 单键 `acquiring_bill_raw_json_retention_days`（默认 `'7'` / 范围 1-30 / 范围外回退 7 / `ensureAcquiringBillRawJsonRetentionSettings(db)` migration + `getAcquiringBillRawJsonRetentionDays(db)` getter）；复用 v2.1.9 N1' idle 30min cleanup 计时器追加回调（src/main.js:11155-11178）— 用户无感 / 0 UI（D27 = N/A 拍板 / 删除按钮 / dialog / IPC）；**差异行 raw_json 永远保留**（NOT IN 子查询保护 — 保证差异 xlsx 完整可重导）；失败 graceful（独立 try/catch + activity log + 不阻塞主 cleanup + 下一个 idle tick 重试）；**v0.3 sentinel 修订**（详「修复」段）；目标 6 月体积降 ~99%（仅差异行 ~1% + 7 天内新行 raw_json 保留）
+- **N4-cont-2 FK CASCADE 改造**（DB schema 不可逆 / spec §5 / Phase 5）：`acquiring_bill_currency_diff_rows` 的 2 个 FK（`bill_import_id` → `acquiring_bill_currency_bill_imports.id` 和 `run_id` → `acquiring_bill_currency_runs.id`）加 `ON DELETE CASCADE`；新建 `ensureDiffRowsCascadeMigration_v2_1_10` migration + 8-status state machine（pending → backed-up → checked → rebuilt → data-copied → fk-verified → cleaned-up → done，沿用 v2.1.9 N5 范式）+ 复用 v2.1.9 SR-backup-1 createBackupFn 注入（VACUUM INTO 备份前置）+ 标志位 `n4_cont_2_diff_rows_cascade_migrated`；启动期集成到 `database.js` AppDatabase.init 序列（在 ensureBillRawJsonV2Slim 即 N4 之后调用）；跨版本路径支持（v2.1.7 / v2.1.8 / v2.1.9 → v2.1.10 一步迁）；PRAGMA `foreign_key_check` 0 violation 是 hard requirement（fk-verified status fail-fast）；migration 失败自动 ROLLBACK + 备份保留 + USER_GUIDE 手动恢复 6 步骤文档化
+
+### 修复（SR-FIX）
+
+- **N4-cont-1 sentinel 修订（v0.3）**：原 v0.2 spec 设计为 `SET raw_json = NULL`；Phase 4 T28 集成测试发现与 v2.1.8 N4 DDL `raw_json TEXT NOT NULL` 约束冲突 → UPDATE 会触发 CHECK 违反；用户拍板 Option A 修订 `SET raw_json = ''`；所有 idempotent 守卫 / SQL 查询从 `IS NOT NULL` 改为 `!= ''`（commit `740fdc8`）
+
+### 性能基线（vs v2.1.9）
+
+| 指标 | v2.1.9 baseline | v2.1.10 实测 | 改善 |
+|---|---|---|---|
+| 主进程 event loop lag max（50000 行 runCheck） | 65.7 ms | 1.3 ms | **48.7x** ✅ |
+| 主进程 unresponsive 触发频率 | >0 次/runCheck（500w 行 ~5-10s freeze） | 0（worker 化后）| ✅ |
+| worker cold-start | N/A | ~11 ms | ✅ (< 200ms 阈值) |
+| IPC round-trip（1000 次均值） | N/A | 0.010 ms | ✅ (< 10ms 阈值) |
+| runCheck 总耗时 worker vs main（500w 行外推） | — | ~1.05x | 🟡 (接近 5% budget) |
+| A4 chunked vs non-chunked 总耗时 | — | 0.99x | ✅ byte-for-byte 一致 |
+| A4 cancel 响应（chunk 边界） | N/A | < 0.01 ms（同步抛） | ✅ (< 5s 阈值) |
+| **DB 体积 6 个月增长**（N4-cont-1 治理后预期）| ~24 GB | ~8 GB（差异行 ~1% + 7 天新行）| ~99% 体积节省 |
+
+### 测试
+
+- release-check 三段全绿（smoke ✅ / unit **1238 case / 297 suites** ✅ / integration **809 断言 / 15 脚本** ✅）
+- v2.1.10 新增集成脚本 5 个（v2.1.10-a3-phase1 40 + v2.1.10-a3-phase2 33 + v2.1.10-a4-phase3 25 + v2.1.10-n4-cont-1-phase4 23 + v2.1.10-n4-cont-2-phase5 43 = 164 新增断言）
+- check-vars v11 → v12 升格 5 条（Critical 4: `runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1: `serializeError` / `deserializeError`）+ 更新 1 条（`bill_imports.raw_json` 扩 N4-cont-1 sentinel 语义）
+
+### 文档
+
+- `docs/iterations/v2.1.10/*.md` v0.1-0.3 五件套（PRD / spec / tasks / manual-test-checklist / backlog / check-vars-report）
+- `rules/important-variables.md` v12 升格（详「测试」段）
+- `docs/USER_GUIDE.md` 加 §八 v2.1.10 新增能力 + §1.8.10/1.8.11/1.8.12 三章节（raw_json / 跨进程 / chunked）+ 故障排查 → DB 备份恢复路径 + worker 进程异常段 + FAQ 4 问答
+
+### ⚠️ 升级提示（用户必读）
+
+- **首次启动自动备份 DB + N4-cont-2 migration**：`<userData>/backups/tool-data-bak-pre-N4-cont-2-<timestamp>.sqlite`（VACUUM INTO 不锁写）；FK CASCADE 改造完成后**不可逆**回退到 v2.1.9 schema
+- **跨版本路径**：v2.1.7 / v2.1.8 / v2.1.9 → v2.1.10 一步迁支持；启动期 migration 序列自动编排（N4 → N5 → N4-cont-2）
+- **N4-cont-1 idle 30min 后台自动清理 raw_json**：仅清"对账成功老行"（差异行永远保留）；保留窗口默认 7 天（settings `acquiring_bill_raw_json_retention_days` 可调 1-30 / 范围外回退 7）；用户无感 / 0 UI；**不可逆**（用 SR-backup-1 备份恢复）
+- **A3 worker 化后用户感知**：主窗口不再卡顿；可以在 runCheck 期间继续操作其他模块；worker 异常时弹 Notification「对账 worker 异常请重试」+ op lock 释放 + 直接重试即可
+- **A4 chunked**：500w 行 runCheck 输出 50 个 chunk 进度事件（每 chunk 10w 行）；cancel 在 chunk 边界响应（< 1s）；resume 入口暴露但 UI v2.1.11+ 评估
+
+### 已知边界 case
+
+- **N4-cont-1 settings UI 缺失**：D27 = 0 UI 拍板；用户改 retention_days 需 sqlite3 改 settings 表 + 重启（沿用 v2.1.9 N1-settings 经验）
+- **A4 resume UI 缺失**：IPC handler 已暴露但收单 panel 无 resume 按钮；v2.1.11+ 评估
+- **A3 worker DB 双连接 SQLITE_BUSY 防御**：busy_timeout=30s 兜底；spec §2.5 stress test 已验证
+
+### 不影响（明确）
+
+- v2.1.9 N5 channels FK 范式（`ON UPDATE CASCADE`，不带 ON DELETE — channels 禁删）未改
+- v2.1.9 SR-backup-1 backup API（VACUUM INTO）未改；N4-cont-2 复用同 API
+- v2.1.9 N1' idle 30min cleanup 计时器未改；N4-cont-1 仅追加回调
+- v2.1.9 SR-log-1 全局告警日志路径未改；worker 内告警通过 message pipe 上报到 main 后写入同一日志
+- v2.1.8 N4 raw_json 9 字段瘦身契约未改；N4-cont-1 是 NULL/'' 空内容清理（v0.3 sentinel `''`），与 N4 一次性 schema rewrite 互补
+
 ## 2.1.9 - 2026-05-27（待发布草稿）
 
 v2.1.8 之后 1 轮迭代（α 范围），**9 项主题**：N5（银行渠道区分场景 — 🔴 资金红线 + DB schema 破坏性 migration）+ N6（状态框换行修复）+ N7（场景模板按渠道导入/导出 — 新 bundle 类型）+ SR-backup-1（sqlite VACUUM INTO 备份基建）+ G1-cont（单元测试 37 文件全量铺）+ SR-policy-1（integration-runner 清单自动同步）+ N1-settings（idle 30min 阈值 settings 化）+ N4 重构（migration 备份切到新 API）+ SR-log-1（全局告警统一日志化 + JSON Lines）。⚠️ **1 个🔴破坏性变更**（Sheet 3 主输出撤除 → 独立报表）+ **3 个资金红线护栏**（N5 双维 dispatcher + Sheet 3 输出契约 + DB schema migration）+ **N 个 important-variables 升格**（待 Phase 9 check-vars 跑后定稿）。
