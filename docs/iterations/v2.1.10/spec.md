@@ -424,6 +424,24 @@ scripts/poc/v2.1.10-a3-comparison.md              # Phase 0 Dev 报告 ✅
 3. **进度回调精细度**：500w 行 / 10w = 50 批；用户感知"50 个 chunkIndex 跳动"≈ 进度条流畅
 4. **事务切换开销 5-10%** 可接受（A3 worker 化已大幅消除主进程阻塞，5-10% 总耗时增加用户感知弱）
 
+#### 3.2-perf — T21 实测数据回写（2026-05-28）
+
+详 `scripts/perf/v2.1.10-a4-chunked-report.md`。**关键实测验证 spec §3.2 拍板**：
+
+| 测项 | 实测值 | spec 预测 | 验证结果 |
+|---|---|---|---|
+| 50000 行 chunkSize=100000 vs non-chunked 总耗时 | 174.8ms vs 176.3ms（0.99x）| +5-10% | ✅ 小于预期（接近持平 — 1 chunk 等价 single SQL）|
+| 50000 行 chunkSize=10000（5 chunks）总耗时 | 175.4ms | +5-10% | ✅ +0.4%（事务切换开销极小）|
+| 50000 行 chunkSize=1000（50 chunks）总耗时 | 198.6ms | — | 1.14x — 验证不选 1k 的合理性（小切片显著高开销）|
+| cancel 响应延迟（chunk 2 边界 cancel → throw） | 0.00ms - 0.01ms（500/5000/50000）| < 5s | ✅ 同步抛（chunk 边界 cancel 最优情况） |
+| 进度回调粒度 | onChunkDone === totalChunks | onChunkDone × N | ✅ 每 chunk 完成一次回调 |
+
+**结论**：
+1. **chunk size 10w 在 50000 行档与 single SQL 几乎等价**（差异 < 1%）— 验证 spec §3.2 选定合理性
+2. **500w 行场景外推**：按 50000 行 175ms 线性外推 → 17.5s（chunked 50 chunks 各 ~350ms）→ cancel 响应远低于 5s 阈值
+3. **chunkSize=1k 比 10w 慢 14%**：50 chunks vs 1 chunk 的事务 + 回调开销主导，证明 spec §3.2 不选小 chunk size 正确
+4. **内存峰值与 non-chunked 几乎相同**（50000 行 470MB vs 470MB）：chunked 不引入额外内存峰值
+
 #### 3.2.1 实现伪代码（v0.2 chunkSize 默认 10w）
 
 ```js
