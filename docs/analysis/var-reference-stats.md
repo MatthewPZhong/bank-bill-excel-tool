@@ -5,15 +5,15 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v2.1.10-beta.1 |
-| 扫描时间 | 2026-5-28 11:20:56 |
+| 扫描时间 | 2026-5-28 12:06:16 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 93 |
-| 顶层声明总数 | 967 |
-| ≥2 次引用 | 860 |
-| 跨 ≥3 文件 (A-share) | 158 |
-| 跨 2 文件 (A-pair) | 274 |
-| 单文件 (A-local) | 428 |
-| 跨文件合计 (B) | 432 |
+| 顶层声明总数 | 974 |
+| ≥2 次引用 | 867 |
+| 跨 ≥3 文件 (A-share) | 159 |
+| 跨 2 文件 (A-pair) | 275 |
+| 单文件 (A-local) | 433 |
+| 跨文件合计 (B) | 434 |
 
 ---
 
@@ -74,6 +74,7 @@
 | `PENDING_GUANLI_HEADERS` | 4 | 9 | 1 | src/backend/bank-bu-recon-db/columns.js |
 | `validateFlowHeaders` | 4 | 9 | 3 | src/backend/acquiring-bill-currency-import/reader.js |
 | `BUSINESS_BILL_FIELDS` | 4 | 8 | 2 | src/constants/recon-id-fix-fields.js |
+| `cancel` | 4 | 8 | 1 | src/main-process/run-check-worker-pool.js |
 | `CHANNEL_BILL_FIELDS` | 4 | 8 | 2 | src/constants/gateway-bill-recon-fields.js |
 | `ensureRowId` | 4 | 8 | 1 | src/main-process/scenario-engines/engine-utils.js |
 | `GATEWAY_BILL_FIELDS` | 4 | 8 | 2 | src/constants/gateway-bill-recon-fields.js |
@@ -185,7 +186,7 @@
 | 名字 | 总次数 | 声明位置（首个） |
 |---|---:|---|
 | `MODULES` | 68 | src/renderer.js |
-| `activeJob` | 42 | src/main-process/run-check-worker-pool.js |
+| `activeJob` | 47 | src/main-process/run-check-worker-pool.js |
 | `templateRepository` | 33 | src/backend/database.js |
 | `settingsRepository` | 24 | src/backend/database.js |
 | `emit` | 20 | src/backend/pending-import/worker.js |
@@ -204,6 +205,7 @@
 | `rendererPending` | 11 | src/renderer.js |
 | `getTemplate` | 10 | src/backend/database/template-repository.js |
 | `serializeError` | 10 | src/main-process/serialize-error.js |
+| `CancelError` | 9 | src/main-process/acquiring-bill-currency-session.js |
 | `channelsRepository` | 9 | src/backend/database.js |
 | `diffRepo` | 9 | src/backend/pending-export/writer.js |
 | `hasEffectiveAmount` | 9 | src/backend/file-service/normalizers.js |
@@ -308,12 +310,12 @@
 | `buildMappedRows` | 4 | src/backend/file-service.js |
 | `BUSINESS_BILL_SHEET_NAME` | 4 | src/constants/recon-id-fix-fields.js |
 | `C4_CATEGORIES` | 4 | src/main-process/scenario-dispatcher.js |
-| `cancel` | 4 | src/main-process/run-check-worker-pool.js |
 | `CHANNEL_BILL_SHEET_NAME` | 4 | src/constants/gateway-bill-recon-fields.js |
 | `clearRunsAndDiffsByDateBu` | 4 | src/backend/biz-op-recon-db/run-repository.js |
 | `closeAllNewAccountCurrencyDropdowns` | 4 | src/renderer.js |
 | `computeRowHash` | 4 | src/backend/pending-import/validator.js |
 | `createBankBuReconSession` | 4 | src/main-process/bank-bu-recon-session.js |
+| `createCancelToken` | 4 | src/main-process/acquiring-bill-currency-session.js |
 | `createPendingSession` | 4 | src/main-process/pending-session.js |
 | `crypto` | 4 | src/backend/pending-import/validator.js |
 | `deleteChannel` | 4 | src/backend/database/channels-repository.js |
@@ -717,8 +719,8 @@
 
 | 名字 | 总次数 |
 |---|---:|
+| `safeRollback` | 11 |
 | `safeBegin` | 7 |
-| `safeRollback` | 7 |
 | `importReader` | 6 |
 | `nowIso` | 4 |
 | `cleanupAfterRunBackground` | 3 |
@@ -806,8 +808,10 @@
 
 | 名字 | 总次数 |
 |---|---:|
-| `workerInstance` | 18 |
+| `workerInstance` | 22 |
 | `workerInitPromise` | 10 |
+| `lastBusyEndTs` | 7 |
+| `failureListener` | 5 |
 | `workerDbPath` | 5 |
 | `handleWorkerFailure` | 4 |
 | `deserializeFromMessage` | 3 |
@@ -1040,6 +1044,7 @@
 | `PENDING_GUANLI_HEADERS` | 4 | 9 | 1 | src/main-process/bank-bu-recon-writer.js(3), src/backend/bank-bu-recon-db/columns.js(2), src/backend/bank-bu-recon-import/reader.js(2) |
 | `validateFlowHeaders` | 4 | 9 | 3 | src/backend/acquiring-bill-currency-import/reader.js(3), src/backend/acquiring-bill-currency-import/validator.js(2), src/backend/biz-op-recon-import/reader.js(2) |
 | `BUSINESS_BILL_FIELDS` | 4 | 8 | 2 | src/constants/recon-id-fix-fields.js(2), src/main-process/recon-id-fix-io.js(2), src/preload.js(2) |
+| `cancel` | 4 | 8 | 1 | src/main-process/run-check-worker.js(3), src/main-process/run-check-worker-pool.js(2), src/renderer-dialogs.js(2) |
 | `CHANNEL_BILL_FIELDS` | 4 | 8 | 2 | src/constants/gateway-bill-recon-fields.js(2), src/main-process/recon-id-fix-io.js(2), src/preload.js(2) |
 | `ensureRowId` | 4 | 8 | 1 | src/main-process/scenario-engines/c1-extract-recon-id.js(2), src/main-process/scenario-engines/c2-offset-bill-mark.js(2), src/main-process/scenario-engines/c3-gateway-recon-join.js(2) |
 | `GATEWAY_BILL_FIELDS` | 4 | 8 | 2 | src/constants/gateway-bill-recon-fields.js(2), src/main-process/recon-id-fix-io.js(2), src/preload.js(2) |
@@ -1146,7 +1151,7 @@
 | `buildTimestampMinute` | 3 | 3 | 2 | src/main-process/bank-statement-io.js(1), src/main-process/recon-id-fix-io.js(1), src/main.js(1) |
 | `createHash` | 3 | 3 | 1 | src/backend/pending-import/validator.js(1), src/backend/pending-reconcile/engine.js(1), src/main.js(1) |
 | `MODULES` | 2 | 68 | 1 | src/renderer-previews.js(48), src/renderer.js(20) |
-| `activeJob` | 2 | 42 | 1 | src/main-process/run-check-worker-pool.js(34), src/main-process/run-check-worker.js(8) |
+| `activeJob` | 2 | 47 | 1 | src/main-process/run-check-worker-pool.js(37), src/main-process/run-check-worker.js(10) |
 | `templateRepository` | 2 | 33 | 2 | src/backend/database.js(30), src/backend/database/own-accounts-migration.js(3) |
 | `settingsRepository` | 2 | 24 | 2 | src/backend/database.js(20), src/backend/database/own-accounts-migration.js(4) |
 | `emit` | 2 | 20 | 2 | src/backend/pending-import/worker.js(10), src/main-process/pending-archive-worker.js(10) |
@@ -1165,6 +1170,7 @@
 | `rendererPending` | 2 | 11 | 1 | src/renderer-previews.js(9), src/renderer.js(2) |
 | `getTemplate` | 2 | 10 | 1 | src/backend/database/template-repository.js(8), src/backend/database.js(2) |
 | `serializeError` | 2 | 10 | 1 | src/main-process/run-check-worker.js(7), src/main-process/serialize-error.js(3) |
+| `CancelError` | 2 | 9 | 1 | src/main-process/acquiring-bill-currency-session.js(8), src/main-process/run-check-worker.js(1) |
 | `channelsRepository` | 2 | 9 | 2 | src/backend/database.js(8), src/main.js(1) |
 | `diffRepo` | 2 | 9 | 2 | src/backend/pending-export/writer.js(6), src/backend/pending-reconcile/engine.js(3) |
 | `hasEffectiveAmount` | 2 | 9 | 1 | src/backend/file-service.js(7), src/backend/file-service/normalizers.js(2) |
@@ -1269,12 +1275,12 @@
 | `buildMappedRows` | 2 | 4 | 1 | src/backend/file-service.js(3), src/main.js(1) |
 | `BUSINESS_BILL_SHEET_NAME` | 2 | 4 | 1 | src/constants/recon-id-fix-fields.js(2), src/main-process/recon-id-fix-io.js(2) |
 | `C4_CATEGORIES` | 2 | 4 | 2 | src/main-process/scenario-dispatcher.js(3), src/main.js(1) |
-| `cancel` | 2 | 4 | 1 | src/main-process/run-check-worker-pool.js(2), src/renderer-dialogs.js(2) |
 | `CHANNEL_BILL_SHEET_NAME` | 2 | 4 | 1 | src/constants/gateway-bill-recon-fields.js(2), src/main-process/recon-id-fix-io.js(2) |
 | `clearRunsAndDiffsByDateBu` | 2 | 4 | 1 | src/backend/biz-op-recon-db/run-repository.js(2), src/main-process/biz-op-recon-session.js(2) |
 | `closeAllNewAccountCurrencyDropdowns` | 2 | 4 | 1 | src/renderer.js(3), src/renderer-previews.js(1) |
 | `computeRowHash` | 2 | 4 | 2 | src/backend/pending-import/validator.js(2), src/backend/pending-import/worker.js(2) |
 | `createBankBuReconSession` | 2 | 4 | 2 | src/main-process/bank-bu-recon-session.js(2), src/main.js(2) |
+| `createCancelToken` | 2 | 4 | 1 | src/main-process/acquiring-bill-currency-session.js(2), src/main-process/run-check-worker.js(2) |
 | `createPendingSession` | 2 | 4 | 2 | src/main-process/pending-session.js(2), src/main.js(2) |
 | `crypto` | 2 | 4 | 2 | src/backend/pending-import/validator.js(2), src/backend/pending-reconcile/engine.js(2) |
 | `deleteChannel` | 2 | 4 | 1 | src/backend/database.js(2), src/backend/database/channels-repository.js(2) |

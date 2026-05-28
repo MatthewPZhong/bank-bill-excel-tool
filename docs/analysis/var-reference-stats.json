@@ -1,15 +1,15 @@
 {
   "meta": {
     "version": "2.1.10-beta.1",
-    "scannedAt": "2026-05-28T03:20:56.632Z",
+    "scannedAt": "2026-05-28T04:06:16.646Z",
     "root": "src",
     "totalFiles": 93,
-    "totalTopLevelNames": 967,
+    "totalTopLevelNames": 974,
     "buckets": {
-      "shared": 158,
-      "paired": 274,
-      "local": 428,
-      "crossFile": 432
+      "shared": 159,
+      "paired": 275,
+      "local": 433,
+      "crossFile": 434
     }
   },
   "A": {
@@ -2111,6 +2111,32 @@
           {
             "file": "src/preload.js",
             "count": 2
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 4
+      },
+      {
+        "name": "cancel",
+        "defFiles": [
+          "src/main-process/run-check-worker-pool.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/run-check-worker-pool.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/run-check-worker.js",
+            "count": 3
           },
           {
             "file": "src/renderer-dialogs.js",
@@ -4625,14 +4651,14 @@
         "refFiles": [
           {
             "file": "src/main-process/run-check-worker-pool.js",
-            "count": 34
+            "count": 37
           },
           {
             "file": "src/main-process/run-check-worker.js",
-            "count": 8
+            "count": 10
           }
         ],
-        "totalHits": 42,
+        "totalHits": 47,
         "fileSpan": 2
       },
       {
@@ -4966,6 +4992,24 @@
           }
         ],
         "totalHits": 10,
+        "fileSpan": 2
+      },
+      {
+        "name": "CancelError",
+        "defFiles": [
+          "src/main-process/acquiring-bill-currency-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 8
+          },
+          {
+            "file": "src/main-process/run-check-worker.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 9,
         "fileSpan": 2
       },
       {
@@ -6872,24 +6916,6 @@
         "fileSpan": 2
       },
       {
-        "name": "cancel",
-        "defFiles": [
-          "src/main-process/run-check-worker-pool.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/run-check-worker-pool.js",
-            "count": 2
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 2
-      },
-      {
         "name": "CHANNEL_BILL_SHEET_NAME",
         "defFiles": [
           "src/constants/gateway-bill-recon-fields.js"
@@ -6975,6 +7001,24 @@
           },
           {
             "file": "src/main.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "createCancelToken",
+        "defFiles": [
+          "src/main-process/acquiring-bill-currency-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/run-check-worker.js",
             "count": 2
           }
         ],
@@ -9615,6 +9659,20 @@
         "fileSpan": 1
       },
       {
+        "name": "workerInstance",
+        "defFiles": [
+          "src/main-process/run-check-worker-pool.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/run-check-worker-pool.js",
+            "count": 22
+          }
+        ],
+        "totalHits": 22,
+        "fileSpan": 1
+      },
+      {
         "name": "buildNormalizedDateResult",
         "defFiles": [
           "src/backend/file-service/normalizers.js"
@@ -9664,20 +9722,6 @@
         "refFiles": [
           {
             "file": "src/backend/file-service/normalizers.js",
-            "count": 18
-          }
-        ],
-        "totalHits": 18,
-        "fileSpan": 1
-      },
-      {
-        "name": "workerInstance",
-        "defFiles": [
-          "src/main-process/run-check-worker-pool.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/run-check-worker-pool.js",
             "count": 18
           }
         ],
@@ -9790,6 +9834,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 11
+          }
+        ],
+        "totalHits": 11,
+        "fileSpan": 1
+      },
+      {
+        "name": "safeRollback",
+        "defFiles": [
+          "src/main-process/acquiring-bill-currency-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
             "count": 11
           }
         ],
@@ -10077,6 +10135,20 @@
         "fileSpan": 1
       },
       {
+        "name": "lastBusyEndTs",
+        "defFiles": [
+          "src/main-process/run-check-worker-pool.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/run-check-worker-pool.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
         "name": "monthRepository",
         "defFiles": [
           "src/main-process/bank-bu-recon-session.js"
@@ -10120,20 +10192,6 @@
       },
       {
         "name": "safeBegin",
-        "defFiles": [
-          "src/main-process/acquiring-bill-currency-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/acquiring-bill-currency-session.js",
-            "count": 7
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 1
-      },
-      {
-        "name": "safeRollback",
         "defFiles": [
           "src/main-process/acquiring-bill-currency-session.js"
         ],
@@ -10490,6 +10548,20 @@
         "refFiles": [
           {
             "file": "src/backend/usage-stats.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "failureListener",
+        "defFiles": [
+          "src/main-process/run-check-worker-pool.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/run-check-worker-pool.js",
             "count": 5
           }
         ],
@@ -13185,6 +13257,20 @@
         "fileSpan": 1
       },
       {
+        "name": "__test_only_post__",
+        "defFiles": [
+          "src/main-process/run-check-worker-pool.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/run-check-worker-pool.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "addNewAccountRow",
         "defFiles": [
           "src/renderer.js"
@@ -14130,6 +14216,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "getLastBusyEndTs",
+        "defFiles": [
+          "src/main-process/run-check-worker-pool.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/run-check-worker-pool.js",
             "count": 2
           }
         ],
@@ -15278,6 +15378,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "setFailureListener",
+        "defFiles": [
+          "src/main-process/run-check-worker-pool.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/run-check-worker-pool.js",
             "count": 2
           }
         ],
@@ -17692,6 +17806,32 @@
         {
           "file": "src/preload.js",
           "count": 2
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 4
+    },
+    {
+      "name": "cancel",
+      "defFiles": [
+        "src/main-process/run-check-worker-pool.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/run-check-worker-pool.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/run-check-worker.js",
+          "count": 3
         },
         {
           "file": "src/renderer-dialogs.js",
@@ -20204,14 +20344,14 @@
       "refFiles": [
         {
           "file": "src/main-process/run-check-worker-pool.js",
-          "count": 34
+          "count": 37
         },
         {
           "file": "src/main-process/run-check-worker.js",
-          "count": 8
+          "count": 10
         }
       ],
-      "totalHits": 42,
+      "totalHits": 47,
       "fileSpan": 2
     },
     {
@@ -20545,6 +20685,24 @@
         }
       ],
       "totalHits": 10,
+      "fileSpan": 2
+    },
+    {
+      "name": "CancelError",
+      "defFiles": [
+        "src/main-process/acquiring-bill-currency-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 8
+        },
+        {
+          "file": "src/main-process/run-check-worker.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 9,
       "fileSpan": 2
     },
     {
@@ -22451,24 +22609,6 @@
       "fileSpan": 2
     },
     {
-      "name": "cancel",
-      "defFiles": [
-        "src/main-process/run-check-worker-pool.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/run-check-worker-pool.js",
-          "count": 2
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 2
-    },
-    {
       "name": "CHANNEL_BILL_SHEET_NAME",
       "defFiles": [
         "src/constants/gateway-bill-recon-fields.js"
@@ -22554,6 +22694,24 @@
         },
         {
           "file": "src/main.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "createCancelToken",
+      "defFiles": [
+        "src/main-process/acquiring-bill-currency-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/run-check-worker.js",
           "count": 2
         }
       ],
