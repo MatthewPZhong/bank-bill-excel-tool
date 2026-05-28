@@ -285,7 +285,7 @@ CREATE TABLE IF NOT EXISTS acquiring_bill_currency_diff_rows (
 
 | 风险 | 主线 | 等级 | 缓解 |
 |---|---|---|---|
-| v2.1.9 → v2.1.10 升级时 N4-cont-2 migration + N4-cont-1 settings 同时引入 | N4-cont-2 + N4-cont-1 | 🟡 中 | (1) migration 顺序固定：先 N4-cont-2 schema rebuild，后 N4-cont-1 settings INSERT OR IGNORE；(2) **v0.2** settings 失败 fallback 默认值（7 天 — `acquiring_bill_raw_json_retention_days='7'`，单 key）|
+| v2.1.9 → v2.1.10 升级时 N4-cont-2 migration + N4-cont-1 settings 同时引入 | N4-cont-2 + N4-cont-1 | 🟡 中 | (1) migration 顺序固定：**先 N4-cont-1 settings INSERT OR IGNORE → 中间 v2.1.8 N4 raw_json slim → 后 N4-cont-2 schema rebuild**（v0.4 SR-FIX-1 round 2 P1-2 reverse sync — 与 `src/backend/database.js` AppDatabase.init 实际顺序一致；任意顺序都不影响功能；详 spec §8.3）；(2) **v0.2** settings 失败 fallback 默认值（7 天 — `acquiring_bill_raw_json_retention_days='7'`，单 key）|
 | A3 worker 化对老 v2.1.9 N5 channels FK 透明 | A3 | 🟢 低 | worker 内独立 connection 自动加载所有 schema，FK 沿用 |
 
 ### 5.4 强制要求（CLAUDE.md 规则 7）

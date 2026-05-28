@@ -843,13 +843,19 @@ ROLLBACK 后：
 | v2.1.8 集成测试 ~1276 断言 | ✅ 全兼容；release-check gate |
 | TEST.xlsx / TEST2.xlsx baseline | ✅ A3 worker 化后必须 byte-for-byte 一致 |
 
-### 8.3 N4-cont-1 / N4-cont-2 顺序
+### 8.3 N4-cont-1 / N4-cont-2 顺序（v0.4 SR-FIX-1 round 2 P1-2 reverse sync）
 
-migration 顺序固定（启动期）：
-1. 先 N4-cont-2 schema rebuild（FK CASCADE 改造）
-2. 后 N4-cont-1 settings INSERT OR IGNORE（注入默认值）
+migration 顺序固定（启动期，与 `src/backend/database.js` AppDatabase.init 实际顺序一致）：
+1. **先 N4-cont-1 settings**（`ensureAcquiringBillCurrencyRawJsonRetentionSettings`） — INSERT OR IGNORE seed default=7（database.js:300）
+2. 中间 **v2.1.8 N4 raw_json slim**（`ensureBillRawJsonV2Slim`）— 已发版迁移（database.js:310）
+3. **后 N4-cont-2 schema rebuild**（`ensureDiffRowsCascadeMigration_v2_1_10`）— FK CASCADE 改造（database.js:363）
 
-理由（v0.2 reverse sync）：**v0.2 N4-cont-1 不再有"启动期标记超期"逻辑**（删除）；N4-cont-1 settings 用于 idle cleanup 时读取 retention_days；N4-cont-2 不依赖 settings；先做 schema 再做 settings 不会冲突（任意顺序都可，固定为此顺序便于排查）。
+理由：
+- **任意顺序都不影响功能**（settings INSERT OR IGNORE 与 schema rebuild 互不依赖）
+- 固定为"settings 先 / schema 后" — settings 注入完毕后，启动期即可读 retention_days；schema 改造放在最后（与 v2.1.8 N4 raw_json slim 在同一 try-catch 段，集中处理 migration 异常）
+- N4-cont-2 显式不依赖 N4-cont-1 settings；database.js:359-360 已注释说明"settings INSERT OR IGNORE 与 schema rebuild 互不影响；固定为 settings 在前便于排查"
+
+**v0.3 之前 spec 描述（"先 N4-cont-2 schema → 后 N4-cont-1 settings"）与 code 现状相反，v0.4 reverse sync 更新本节描述与 code 一致**（finding 决策：不改 code 顺序，避免触发 schema migration 链路风险；改 spec 跟随 code）。
 
 ---
 
