@@ -388,7 +388,7 @@ const rpaSessions = new Map();  // sessionId → RpaSession 实例
               │
               ▼
           [done] ──→ 交给 import 管线
-              
+
 任意状态：rpa:cancel → [cancelled]
 任意状态：step 抛错/超时 → [error]
 ```
