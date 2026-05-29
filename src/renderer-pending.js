@@ -466,9 +466,7 @@ window.__rendererPending = (function () {
       openModal(createConfirmDialog({
         message:
           `${yearMonth} 数据已导入。<br><br>` +
-          '是否核对<strong>移除pending数据</strong>？<br>' +
-          '<span style="font-size:12px;color:#888;">' +
-          '（导入"移除归档Pending账单"文件，对账时自动标记哪些"消失(missing)"行已被移除归档）</span>',
+          '是否核对<strong>移除pending数据</strong>？',
         confirmText: '是，导入移除文件',
         cancelText: '否，跳过',
         onConfirm: async () => {
