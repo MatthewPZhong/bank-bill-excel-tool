@@ -63,13 +63,31 @@ function upsertMonthMeta(db, { yearMonth, rowCount, sourceFiles, archivePath }) 
 // 覆盖导入时调用：清空该月的 pending_rows / pending_months
 // 另外清理**引用到该月**的 diff_runs / diff_rows —— 否则旧 run 的 upper_row_id / lower_row_id 悬空，
 // 导出差异时 readPendingRow 返回 null → 写出空快照，严重资金敏感
-// （FK ON DELETE CASCADE 在 migrations 声明了，但 DatabaseSync 默认 PRAGMA foreign_keys = OFF，
-//   这里手动两步删除更稳妥）
+// 还要清理 v2.1.11 T2 移除核对的 pending_removal_matches / removed_pending_rows —— 见下方注释。
+// （FK ON DELETE CASCADE 在 migrations 仅 diff_rows.run_id 声明了，且 DatabaseSync 默认
+//   PRAGMA foreign_keys = OFF；pending_removal_matches / removed_pending_rows 无 FK，
+//   这里全部手动删除更稳妥，删除顺序见下）
+//
+// ⚠️ Codex PR #55 Finding 1（🔴 对账数据污染红线）：覆盖导入某月 pending = 该月数据整体重来，
+//   该月所有相关数据（含移除归档 removed_pending_rows + 对账后核对匹配 pending_removal_matches）
+//   一并失效，必须同步清。否则旧归档残留：reconcile handler（main.js `pending:reconcile:run`）
+//   一旦发现该 upperMonth 仍有 removed_pending_rows（countByMonth>0）就自动跑移除核对，
+//   用陈旧旧归档给新 missing 行错误标「核对无误 / 核对有差异」——即使用户在导入提示里点「否，跳过」。
+//   语义：用户要核对需重新导入移除归档文件。
 function deleteMonth(db, yearMonth) {
+  // 1) 先删 pending_removal_matches（依赖 diff_runs.id；必须在删 diff_runs 之前，
+  //    否则 run 行删掉后 run_id 子查询取不到 id → 残留孤儿匹配记录）
+  db.prepare(`DELETE FROM pending_removal_matches WHERE run_id IN (
+    SELECT id FROM diff_runs WHERE upper_month = ? OR lower_month = ?
+  )`).run(yearMonth, yearMonth);
+  // 2) 删该月相关 diff_rows / diff_runs（diff_rows.run_id 同样依赖 diff_runs.id，先删 rows）
   db.prepare(`DELETE FROM diff_rows WHERE run_id IN (
     SELECT id FROM diff_runs WHERE upper_month = ? OR lower_month = ?
   )`).run(yearMonth, yearMonth);
   db.prepare('DELETE FROM diff_runs WHERE upper_month = ? OR lower_month = ?').run(yearMonth, yearMonth);
+  // 3) 删该月移除归档行（覆盖导入 = 该月数据重来，旧归档基于旧数据应失效；Codex PR #55 Finding 1）
+  db.prepare('DELETE FROM removed_pending_rows WHERE year_month = ?').run(yearMonth);
+  // 4) 删该月 pending 行 + 月元数据
   db.prepare('DELETE FROM pending_rows WHERE year_month = ?').run(yearMonth);
   db.prepare('DELETE FROM pending_months WHERE year_month = ?').run(yearMonth);
 }

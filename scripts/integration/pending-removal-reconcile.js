@@ -26,6 +26,7 @@ const { runMigrations } = require('../../src/backend/pending-db/migrations');
 const PENDING_COLUMNS = require('../../src/backend/pending-db/columns');
 const removedReader = require('../../src/backend/pending-import/removed-reader');
 const removedRepo = require('../../src/backend/pending-db/removed-repository');
+const monthRepo = require('../../src/backend/pending-db/month-repository');
 const reconcileEngine = require('../../src/backend/pending-reconcile/engine');
 const removalMatch = require('../../src/backend/pending-reconcile/removal-match');
 const ruleRepo = require('../../src/backend/pending-db/rule-repository');
@@ -394,6 +395,77 @@ async function run() {
     // 金额真不同 → 核对有差异，差异文字含字段名 + 原始值（500 / 600.00）
     assertEq(vdiffRow[statusColCmp], `${exportWriter.REMOVAL_STATUS_DIFF_PREFIX}金额(500≠600.00)`,
       'Step9.VDIFF 金额真不同 → 核对有差异：金额(500≠600.00)（展示原始值）');
+
+    // ============================================================
+    // Step 10 🔴 Codex PR #55 Finding 1（对账数据污染红线）：
+    //   覆盖导入同月 pending（worker.js:84 → monthRepo.deleteMonth）必须清掉该月旧移除归档
+    //   + 关联核对匹配。否则旧 removed_pending_rows 残留 → reconcile handler
+    //   （main.js `pending:reconcile:run`：countByMonth(upperMonth)>0 即自动 matchRemoval）
+    //   会用陈旧旧归档给新 missing 标错状态——即使用户点「否，跳过」也复用了旧归档。
+    //
+    //   构造：上月(2026-11) 先导入移除归档 + 对账产 missing + matchRemoval 落 matches，
+    //   随后覆盖导入同月 pending（deleteMonth）→ 断言旧移除/匹配全清，新对账不复用。
+    // ============================================================
+    const U5 = '2026-11';
+    const L5 = '2026-12';
+    const removedF1File = path.join(tmpDir, 'finding1-removed.xlsx');
+
+    // 上月 3 行（F1/F2/F3），下月配上 F1 → missing = F2 F3
+    insertPending(db, U5, 'F1');
+    insertPending(db, U5, 'F2');
+    insertPending(db, U5, 'F3');
+    insertPending(db, L5, 'F1');
+
+    // 导入移除归档：F2 命中 missing F2
+    writeRemovedXlsx(removedF1File, ['F2']);
+    const parsedF1 = removedReader.readRemovedPendingFile(removedF1File);
+    removedRepo.replaceByMonth(db, U5, parsedF1.rows, parsedF1.fileName);
+    assertEq(removedRepo.countByMonth(db, U5), 1, 'Step10.移除归档入库 countByMonth=1');
+
+    ruleRepo.upsertRule(db, { matchFields: ['order_no'], compareFields: [] });
+    const ruleF1 = ruleRepo.getRule(db);
+    const reconF1 = reconcileEngine.runReconciliation(db, { upperMonth: U5, lowerMonth: L5, rule: ruleF1 });
+    assertEq(reconF1.statMissing, 2, 'Step10.missing = 2（F2 F3）');
+    const mrF1 = removalMatch.matchRemoval(db, reconF1.runId, U5, ruleF1.matchFields);
+    assertEq(mrF1.matchedCount, 1, 'Step10.matchRemoval 配上 1 对（F2）');
+
+    // 前置：matches 表确有记录（覆盖导入前）
+    const matchesBefore = db
+      .prepare('SELECT COUNT(*) AS n FROM pending_removal_matches WHERE run_id = ?')
+      .get(reconF1.runId).n;
+    assertEq(matchesBefore, 1, 'Step10.覆盖导入前 pending_removal_matches = 1');
+
+    // 🔴 覆盖导入同月 pending（worker.js 覆盖导入核心调用）
+    monthRepo.deleteMonth(db, U5);
+
+    // 断言：旧移除归档已清（reconcile handler countByMonth>0 判定失效 → 新对账不复用旧归档）
+    assertEq(removedRepo.countByMonth(db, U5), 0,
+      'Step10.🔴 覆盖导入同月 → removed_pending_rows 清空（countByMonth=0，旧归档不复用）');
+    // 断言：该 run 关联的核对匹配清空（避免 run 删后留孤儿污染）
+    //   注意：用 WHERE run_id 限定本 run —— 前面 step（U3/U4 等）也调过 matchRemoval，
+    //   它们的 matches 属于各自月份，本次 deleteMonth(U5) 不应触及（隔离性见下条断言）。
+    const matchesAfter = db
+      .prepare('SELECT COUNT(*) AS n FROM pending_removal_matches WHERE run_id = ?')
+      .get(reconF1.runId).n;
+    assertEq(matchesAfter, 0, 'Step10.🔴 该 run 关联 pending_removal_matches 清空（无孤儿残留）');
+    // 隔离：其它月（如 U4=2026-09）的核对匹配不受 deleteMonth(U5) 影响
+    const u4RunId = db.prepare('SELECT id FROM diff_runs WHERE upper_month = ?').get('2026-09');
+    if (u4RunId) {
+      assertTrue(
+        db.prepare('SELECT COUNT(*) AS n FROM pending_removal_matches WHERE run_id = ?').get(u4RunId.id).n > 0,
+        'Step10.隔离：其它月（2026-09）的 pending_removal_matches 不受影响'
+      );
+    }
+    // 回归：该月 pending / diff 链路同样清空（不破坏现有 deleteMonth 行为）
+    assertEq(db.prepare('SELECT COUNT(*) AS n FROM pending_rows WHERE year_month = ?').get(U5).n, 0,
+      'Step10.回归：该月 pending_rows 清空');
+    assertEq(db.prepare('SELECT COUNT(*) AS n FROM diff_rows WHERE run_id = ?').get(reconF1.runId).n, 0,
+      'Step10.回归：该 run 的 diff_rows 清空');
+    assertEq(db.prepare('SELECT COUNT(*) AS n FROM diff_runs WHERE id = ?').get(reconF1.runId).n, 0,
+      'Step10.回归：该 run 的 diff_runs 清空');
+    // 隔离：下月（L5，非覆盖目标）pending 行不受影响
+    assertEq(db.prepare('SELECT COUNT(*) AS n FROM pending_rows WHERE year_month = ?').get(L5).n, 1,
+      'Step10.隔离：下月 pending_rows 不受影响');
 
     db.close();
   } finally {
