@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "2.1.10-beta.1",
-    "scannedAt": "2026-05-28T11:59:47.925Z",
+    "version": "2.1.11-beta.1",
+    "scannedAt": "2026-05-29T06:53:25.434Z",
     "root": "src",
-    "totalFiles": 94,
-    "totalTopLevelNames": 1004,
+    "totalFiles": 98,
+    "totalTopLevelNames": 1048,
     "buckets": {
-      "shared": 159,
-      "paired": 290,
-      "local": 448,
-      "crossFile": 449
+      "shared": 165,
+      "paired": 294,
+      "local": 479,
+      "crossFile": 459
     }
   },
   "A": {
@@ -33,8 +33,10 @@
           "src/backend/logger.js",
           "src/backend/own-account-store.js",
           "src/backend/pending-db.js",
+          "src/backend/pending-import/removed-reader.js",
           "src/backend/pending-import/worker.js",
           "src/backend/usage-stats.js",
+          "src/constants/fund-type-enum.js",
           "src/main-process/acquiring-bill-currency-writer.js",
           "src/main-process/bank-bu-recon-session.js",
           "src/main-process/bank-bu-recon-writer.js",
@@ -119,12 +121,20 @@
             "count": 2
           },
           {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 2
+          },
+          {
             "file": "src/backend/pending-import/worker.js",
             "count": 3
           },
           {
             "file": "src/backend/usage-stats.js",
             "count": 4
+          },
+          {
+            "file": "src/constants/fund-type-enum.js",
+            "count": 3
           },
           {
             "file": "src/main-process/acquiring-bill-currency-writer.js",
@@ -187,8 +197,8 @@
             "count": 2
           }
         ],
-        "totalHits": 108,
-        "fileSpan": 34
+        "totalHits": 113,
+        "fileSpan": 36
       },
       {
         "name": "fs",
@@ -209,6 +219,7 @@
           "src/backend/pending-import/streaming-xlsx-writer.js",
           "src/backend/pending-import/worker.js",
           "src/backend/usage-stats.js",
+          "src/constants/fund-type-enum.js",
           "src/main-process/acquiring-bill-currency-session.js",
           "src/main-process/acquiring-bill-currency-writer.js",
           "src/main-process/bank-bu-recon-session.js",
@@ -287,6 +298,10 @@
             "count": 9
           },
           {
+            "file": "src/constants/fund-type-enum.js",
+            "count": 2
+          },
+          {
             "file": "src/main-process/acquiring-bill-currency-session.js",
             "count": 5
           },
@@ -331,8 +346,8 @@
             "count": 1
           }
         ],
-        "totalHits": 78,
-        "fileSpan": 27
+        "totalHits": 80,
+        "fileSpan": 28
       },
       {
         "name": "parse",
@@ -381,11 +396,19 @@
             "count": 1
           },
           {
+            "file": "src/backend/pending-db/removed-repository.js",
+            "count": 1
+          },
+          {
             "file": "src/backend/pending-db/rule-repository.js",
             "count": 1
           },
           {
             "file": "src/backend/pending-import/worker.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
             "count": 1
           },
           {
@@ -421,8 +444,8 @@
             "count": 2
           }
         ],
-        "totalHits": 34,
-        "fileSpan": 20
+        "totalHits": 36,
+        "fileSpan": 22
       },
       {
         "name": "normalizeCell",
@@ -481,6 +504,10 @@
             "count": 4
           },
           {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 5
+          },
+          {
             "file": "src/main-process/statement-generation.js",
             "count": 3
           },
@@ -493,8 +520,8 @@
             "count": 1
           }
         ],
-        "totalHits": 95,
-        "fileSpan": 14
+        "totalHits": 100,
+        "fileSpan": 15
       },
       {
         "name": "FileValidationError",
@@ -545,6 +572,10 @@
             "count": 3
           },
           {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 5
+          },
+          {
             "file": "src/main-process/bank-statement-io.js",
             "count": 7
           },
@@ -561,8 +592,77 @@
             "count": 1
           }
         ],
-        "totalHits": 63,
-        "fileSpan": 13
+        "totalHits": 68,
+        "fileSpan": 14
+      },
+      {
+        "name": "XLSX",
+        "defFiles": [
+          "src/backend/bank-bu-recon-import/reader.js",
+          "src/backend/biz-op-recon-import/reader.js",
+          "src/backend/file-service/normalizers.js",
+          "src/backend/file-service/readers.js",
+          "src/backend/file-service/writers.js",
+          "src/backend/pending-export/writer.js",
+          "src/backend/pending-import/removed-reader.js",
+          "src/constants/fund-type-enum.js",
+          "src/main-process/bank-statement-io.js",
+          "src/main-process/pending-session.js",
+          "src/main-process/recon-id-fix-io.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/file-service/normalizers.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/file-service/writers.js",
+            "count": 20
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 9
+          },
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/constants/fund-type-enum.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/bank-statement-io.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 11
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 66,
+        "fileSpan": 12
       },
       {
         "name": "appendModuleLog",
@@ -737,65 +837,6 @@
           }
         ],
         "totalHits": 66,
-        "fileSpan": 10
-      },
-      {
-        "name": "XLSX",
-        "defFiles": [
-          "src/backend/bank-bu-recon-import/reader.js",
-          "src/backend/biz-op-recon-import/reader.js",
-          "src/backend/file-service/normalizers.js",
-          "src/backend/file-service/readers.js",
-          "src/backend/file-service/writers.js",
-          "src/backend/pending-export/writer.js",
-          "src/main-process/bank-statement-io.js",
-          "src/main-process/pending-session.js",
-          "src/main-process/recon-id-fix-io.js",
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-import/reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/file-service/normalizers.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/file-service/writers.js",
-            "count": 20
-          },
-          {
-            "file": "src/backend/pending-export/writer.js",
-            "count": 9
-          },
-          {
-            "file": "src/main-process/bank-statement-io.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/pending-session.js",
-            "count": 11
-          },
-          {
-            "file": "src/main-process/recon-id-fix-io.js",
-            "count": 3
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 60,
         "fileSpan": 10
       },
       {
@@ -1235,6 +1276,36 @@
         "fileSpan": 5
       },
       {
+        "name": "isRowMeaningful",
+        "defFiles": [
+          "src/backend/file-service/common.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/common.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 14,
+        "fileSpan": 5
+      },
+      {
         "name": "readRows",
         "defFiles": [
           "src/backend/bank-account-import.js",
@@ -1496,7 +1567,7 @@
           },
           {
             "file": "src/renderer-pending.js",
-            "count": 54
+            "count": 55
           },
           {
             "file": "src/renderer-previews.js",
@@ -1507,7 +1578,7 @@
             "count": 143
           }
         ],
-        "totalHits": 266,
+        "totalHits": 267,
         "fileSpan": 4
       },
       {
@@ -1776,32 +1847,6 @@
           {
             "file": "src/main-process/biz-op-recon-writer.js",
             "count": 2
-          }
-        ],
-        "totalHits": 12,
-        "fileSpan": 4
-      },
-      {
-        "name": "isRowMeaningful",
-        "defFiles": [
-          "src/backend/file-service/common.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/common.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 6
           }
         ],
         "totalHits": 12,
@@ -3119,6 +3164,30 @@
         "fileSpan": 3
       },
       {
+        "name": "diffRepo",
+        "defFiles": [
+          "src/backend/pending-export/writer.js",
+          "src/backend/pending-reconcile/engine.js",
+          "src/backend/pending-reconcile/removal-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 7
+          },
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 3
+      },
+      {
         "name": "YELLOW_FILL",
         "defFiles": [
           "src/main-process/bank-bu-recon-writer.js",
@@ -3236,6 +3305,30 @@
         "fileSpan": 3
       },
       {
+        "name": "isNumericFieldName",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js",
+          "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+          "src/main-process/scenario-engines/c3-gateway-recon-join.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 3
+      },
+      {
         "name": "parseJsonArray",
         "defFiles": [
           "src/backend/database/utils.js",
@@ -3253,6 +3346,29 @@
           {
             "file": "src/backend/pending-db/rule-repository.js",
             "count": 3
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 3
+      },
+      {
+        "name": "parseNumber",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js",
+          "src/main-process/scenario-engines/engine-utils.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "count": 4
           }
         ],
         "totalHits": 9,
@@ -3487,6 +3603,28 @@
         "fileSpan": 3
       },
       {
+        "name": "listDiffRows",
+        "defFiles": [
+          "src/backend/pending-db/diff-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/diff-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 3
+      },
+      {
         "name": "main",
         "defFiles": [
           "src/backend/pending-import/worker.js",
@@ -3662,6 +3800,30 @@
           {
             "file": "src/main.js",
             "count": 1
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 3
+      },
+      {
+        "name": "readSheetAsRows",
+        "defFiles": [
+          "src/backend/bank-bu-recon-import/reader.js",
+          "src/backend/biz-op-recon-import/reader.js",
+          "src/backend/pending-import/removed-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 3
           }
         ],
         "totalHits": 7,
@@ -4541,6 +4703,28 @@
         "fileSpan": 3
       },
       {
+        "name": "listByMonth",
+        "defFiles": [
+          "src/backend/pending-db/removed-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/removed-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 3
+      },
+      {
         "name": "sanitizeBankName",
         "defFiles": [
           "src/backend/balance-adjustment-store.js",
@@ -4764,6 +4948,25 @@
         "fileSpan": 2
       },
       {
+        "name": "REMOVED_PENDING_COLUMNS",
+        "defFiles": [
+          "src/backend/pending-export/writer.js",
+          "src/backend/pending-import/removed-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 13
+          }
+        ],
+        "totalHits": 16,
+        "fileSpan": 2
+      },
+      {
         "name": "reloadReconIdFixScenarios",
         "defFiles": [
           "src/renderer.js"
@@ -4949,6 +5152,24 @@
         "fileSpan": 2
       },
       {
+        "name": "removalMatch",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 4
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 11,
+        "fileSpan": 2
+      },
+      {
         "name": "rendererPending",
         "defFiles": [
           "src/renderer.js"
@@ -5016,25 +5237,6 @@
           {
             "file": "src/main.js",
             "count": 1
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 2
-      },
-      {
-        "name": "diffRepo",
-        "defFiles": [
-          "src/backend/pending-export/writer.js",
-          "src/backend/pending-reconcile/engine.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-export/writer.js",
-            "count": 6
-          },
-          {
-            "file": "src/backend/pending-reconcile/engine.js",
-            "count": 3
           }
         ],
         "totalHits": 9,
@@ -5388,43 +5590,6 @@
           {
             "file": "src/renderer.js",
             "count": 5
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 2
-      },
-      {
-        "name": "isNumericFieldName",
-        "defFiles": [
-          "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-          "src/main-process/scenario-engines/c3-gateway-recon-join.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 2
-      },
-      {
-        "name": "parseNumber",
-        "defFiles": [
-          "src/main-process/scenario-engines/engine-utils.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/engine-utils.js",
-            "count": 4
           }
         ],
         "totalHits": 7,
@@ -6355,6 +6520,25 @@
         "fileSpan": 2
       },
       {
+        "name": "removedRepo",
+        "defFiles": [
+          "src/backend/pending-export/writer.js",
+          "src/backend/pending-reconcile/removal-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
         "name": "sanitizeSheetName",
         "defFiles": [
           "src/backend/pending-export/writer.js",
@@ -6731,24 +6915,6 @@
           },
           {
             "file": "src/backend/database/template-repository.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
-        "name": "listDiffRows",
-        "defFiles": [
-          "src/backend/pending-db/diff-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-db/diff-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/pending-export/writer.js",
             "count": 3
           }
         ],
@@ -7163,6 +7329,24 @@
         "fileSpan": 2
       },
       {
+        "name": "countByMonth",
+        "defFiles": [
+          "src/backend/pending-db/removed-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/removed-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "createBankBuReconSession",
         "defFiles": [
           "src/main-process/bank-bu-recon-session.js",
@@ -7412,6 +7596,25 @@
           {
             "file": "src/main-process/biz-op-recon-writer.js",
             "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "FUND_TYPE_ENUM_FILE_NAME",
+        "defFiles": [
+          "src/constants/fund-type-enum.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/fund-type-enum.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
           }
         ],
         "totalHits": 4,
@@ -7974,25 +8177,6 @@
           },
           {
             "file": "src/backend/database/template-repository.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 2
-      },
-      {
-        "name": "readSheetAsRows",
-        "defFiles": [
-          "src/backend/bank-bu-recon-import/reader.js",
-          "src/backend/biz-op-recon-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader.js",
             "count": 2
           }
         ],
@@ -8742,6 +8926,24 @@
         "fileSpan": 2
       },
       {
+        "name": "compareMatchedContent",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "computeRunStats",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/run-repository.js"
@@ -9157,6 +9359,42 @@
         "fileSpan": 2
       },
       {
+        "name": "listMatchedDiffRowIds",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "listMatchedRemovedRowIds",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "listReadyDates",
         "defFiles": [
           "src/backend/biz-op-recon-db/run-repository.js"
@@ -9222,6 +9460,25 @@
           },
           {
             "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "loadFundTypeEnum",
+        "defFiles": [
+          "src/constants/fund-type-enum.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/fund-type-enum.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
             "count": 1
           }
         ],
@@ -9935,10 +10192,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 150
+            "count": 153
           }
         ],
-        "totalHits": 150,
+        "totalHits": 153,
         "fileSpan": 1
       },
       {
@@ -10264,6 +10521,20 @@
         "fileSpan": 1
       },
       {
+        "name": "appendSheetWithHeaderFont",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 9
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 1
+      },
+      {
         "name": "appendMigrationLog",
         "defFiles": [
           "src/backend/database/own-accounts-migration.js"
@@ -10376,6 +10647,20 @@
         "fileSpan": 1
       },
       {
+        "name": "TEMPLATE_LABEL",
+        "defFiles": [
+          "src/backend/pending-import/removed-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 8
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 1
+      },
+      {
         "name": "toCents",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -10387,20 +10672,6 @@
           }
         ],
         "totalHits": 8,
-        "fileSpan": 1
-      },
-      {
-        "name": "appendSheetWithHeaderFont",
-        "defFiles": [
-          "src/backend/pending-export/writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-export/writer.js",
-            "count": 7
-          }
-        ],
-        "totalHits": 7,
         "fileSpan": 1
       },
       {
@@ -10425,6 +10696,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-export/writer.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
+        "name": "indexValue",
+        "defFiles": [
+          "src/backend/pending-db/removed-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/removed-repository.js",
             "count": 7
           }
         ],
@@ -10530,6 +10815,20 @@
         "fileSpan": 1
       },
       {
+        "name": "buildExportRowsForDiff",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
         "name": "buildSingleExportRow",
         "defFiles": [
           "src/backend/pending-export/writer.js"
@@ -10579,6 +10878,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/settings-repository.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
+        "name": "ERROR_CODE",
+        "defFiles": [
+          "src/backend/pending-import/removed-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
             "count": 6
           }
         ],
@@ -10810,7 +11123,7 @@
         "fileSpan": 1
       },
       {
-        "name": "buildExportRowsForDiff",
+        "name": "buildHeaders",
         "defFiles": [
           "src/backend/pending-export/writer.js"
         ],
@@ -10901,6 +11214,20 @@
         "refFiles": [
           {
             "file": "src/backend/usage-stats.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "enumCacheByPath",
+        "defFiles": [
+          "src/constants/fund-type-enum.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/fund-type-enum.js",
             "count": 5
           }
         ],
@@ -11055,6 +11382,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/migrations.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "normalizeCompareKey",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
             "count": 5
           }
         ],
@@ -11321,20 +11662,6 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-dispatcher.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "buildHeaders",
-        "defFiles": [
-          "src/backend/pending-export/writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-export/writer.js",
             "count": 4
           }
         ],
@@ -11664,6 +11991,20 @@
         "fileSpan": 1
       },
       {
+        "name": "normalizeBillTypes",
+        "defFiles": [
+          "src/main-process/scenario-engines/c2-offset-bill-mark.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "normalizeColorHex",
         "defFiles": [
           "src/renderer.js"
@@ -11727,6 +12068,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "readRemovedFieldRaw",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
             "count": 4
           }
         ],
@@ -12049,6 +12404,20 @@
         "refFiles": [
           {
             "file": "src/main-process/bank-bu-recon-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "appendRemovalReconcileSheets",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
             "count": 3
           }
         ],
@@ -12686,6 +13055,20 @@
         "fileSpan": 1
       },
       {
+        "name": "getDefaultFundTypeEnumPath",
+        "defFiles": [
+          "src/constants/fund-type-enum.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/fund-type-enum.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "getMetaColIndices",
         "defFiles": [
           "src/backend/pending-export/writer.js"
@@ -12854,6 +13237,20 @@
         "fileSpan": 1
       },
       {
+        "name": "INDEX_FIELDS",
+        "defFiles": [
+          "src/backend/pending-import/removed-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "initializeNewAccountRow",
         "defFiles": [
           "src/renderer.js"
@@ -12980,6 +13377,20 @@
         "fileSpan": 1
       },
       {
+        "name": "mapRow",
+        "defFiles": [
+          "src/backend/pending-import/removed-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "MIGRATION_LOG_FILENAME",
         "defFiles": [
           "src/backend/database/own-accounts-migration.js"
@@ -13015,6 +13426,34 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "normalizeBillTypeRow",
+        "defFiles": [
+          "src/main-process/scenario-engines/c2-offset-bill-mark.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "normalizeC2Config",
+        "defFiles": [
+          "src/backend/database/scenarios-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/scenarios-repository.js",
             "count": 3
           }
         ],
@@ -13162,6 +13601,34 @@
         "fileSpan": 1
       },
       {
+        "name": "readPendingFieldRaw",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "readPendingFieldValue",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "readPendingRow",
         "defFiles": [
           "src/backend/pending-export/writer.js"
@@ -13169,6 +13636,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "readRemovedFieldValue",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
             "count": 3
           }
         ],
@@ -13218,6 +13699,62 @@
         "fileSpan": 1
       },
       {
+        "name": "REMOVAL_STATUS_COLUMN",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "REMOVAL_STATUS_DIFF_PREFIX",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "REMOVAL_STATUS_MISSING_ONLY",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "REMOVAL_STATUS_VERIFIED",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "REPORT_SHEET_NAME",
         "defFiles": [
           "src/main-process/scenario-hit-rows-writer.js"
@@ -13239,6 +13776,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "resolveRemovalStatus",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
             "count": 3
           }
         ],
@@ -13373,6 +13924,34 @@
       },
       {
         "name": "SHEET_FUND_TYPE_DIFF_NAME",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "SHEET_MISSING_REMOVAL_NAME",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "SHEET_REMOVAL_ONLY_NAME",
         "defFiles": [
           "src/backend/pending-export/writer.js"
         ],
@@ -13589,6 +14168,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/scenarios-repository.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "validateRemovedHeaders",
+        "defFiles": [
+          "src/backend/pending-import/removed-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
             "count": 3
           }
         ],
@@ -14940,6 +15533,20 @@
         "fileSpan": 1
       },
       {
+        "name": "INDEX_COLUMNS",
+        "defFiles": [
+          "src/backend/pending-db/removed-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/removed-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "insertBankRowsInTxn",
         "defFiles": [
           "src/backend/bank-bu-recon-db/month-repository.js"
@@ -15248,6 +15855,20 @@
         "fileSpan": 1
       },
       {
+        "name": "matchRemoval",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "MAX_ROW_ERRORS_EMITTED",
         "defFiles": [
           "src/backend/pending-import/worker.js"
@@ -15423,6 +16044,20 @@
         "refFiles": [
           {
             "file": "src/backend/file-service/normalizers.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "parseRaw",
+        "defFiles": [
+          "src/backend/pending-db/removed-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/removed-repository.js",
             "count": 2
           }
         ],
@@ -15626,6 +16261,34 @@
         "fileSpan": 1
       },
       {
+        "name": "readEnumFromWorkbook",
+        "defFiles": [
+          "src/constants/fund-type-enum.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/fund-type-enum.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "readRemovedPendingFile",
+        "defFiles": [
+          "src/backend/pending-import/removed-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "readXlsxStreamed",
         "defFiles": [
           "src/backend/pending-import/worker.js"
@@ -15696,6 +16359,20 @@
         "fileSpan": 1
       },
       {
+        "name": "replaceByMonth",
+        "defFiles": [
+          "src/backend/pending-db/removed-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-db/removed-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "REQUIRED_COLUMNS",
         "defFiles": [
           "src/backend/bank-account-import.js"
@@ -15703,6 +16380,20 @@
         "refFiles": [
           {
             "file": "src/backend/bank-account-import.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "resetFundTypeEnumCache",
+        "defFiles": [
+          "src/constants/fund-type-enum.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/fund-type-enum.js",
             "count": 2
           }
         ],
@@ -16221,8 +16912,10 @@
         "src/backend/logger.js",
         "src/backend/own-account-store.js",
         "src/backend/pending-db.js",
+        "src/backend/pending-import/removed-reader.js",
         "src/backend/pending-import/worker.js",
         "src/backend/usage-stats.js",
+        "src/constants/fund-type-enum.js",
         "src/main-process/acquiring-bill-currency-writer.js",
         "src/main-process/bank-bu-recon-session.js",
         "src/main-process/bank-bu-recon-writer.js",
@@ -16307,12 +17000,20 @@
           "count": 2
         },
         {
+          "file": "src/backend/pending-import/removed-reader.js",
+          "count": 2
+        },
+        {
           "file": "src/backend/pending-import/worker.js",
           "count": 3
         },
         {
           "file": "src/backend/usage-stats.js",
           "count": 4
+        },
+        {
+          "file": "src/constants/fund-type-enum.js",
+          "count": 3
         },
         {
           "file": "src/main-process/acquiring-bill-currency-writer.js",
@@ -16375,8 +17076,8 @@
           "count": 2
         }
       ],
-      "totalHits": 108,
-      "fileSpan": 34
+      "totalHits": 113,
+      "fileSpan": 36
     },
     {
       "name": "fs",
@@ -16397,6 +17098,7 @@
         "src/backend/pending-import/streaming-xlsx-writer.js",
         "src/backend/pending-import/worker.js",
         "src/backend/usage-stats.js",
+        "src/constants/fund-type-enum.js",
         "src/main-process/acquiring-bill-currency-session.js",
         "src/main-process/acquiring-bill-currency-writer.js",
         "src/main-process/bank-bu-recon-session.js",
@@ -16475,6 +17177,10 @@
           "count": 9
         },
         {
+          "file": "src/constants/fund-type-enum.js",
+          "count": 2
+        },
+        {
           "file": "src/main-process/acquiring-bill-currency-session.js",
           "count": 5
         },
@@ -16519,8 +17225,8 @@
           "count": 1
         }
       ],
-      "totalHits": 78,
-      "fileSpan": 27
+      "totalHits": 80,
+      "fileSpan": 28
     },
     {
       "name": "parse",
@@ -16569,11 +17275,19 @@
           "count": 1
         },
         {
+          "file": "src/backend/pending-db/removed-repository.js",
+          "count": 1
+        },
+        {
           "file": "src/backend/pending-db/rule-repository.js",
           "count": 1
         },
         {
           "file": "src/backend/pending-import/worker.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-reconcile/removal-match.js",
           "count": 1
         },
         {
@@ -16609,8 +17323,8 @@
           "count": 2
         }
       ],
-      "totalHits": 34,
-      "fileSpan": 20
+      "totalHits": 36,
+      "fileSpan": 22
     },
     {
       "name": "normalizeCell",
@@ -16669,6 +17383,10 @@
           "count": 4
         },
         {
+          "file": "src/backend/pending-import/removed-reader.js",
+          "count": 5
+        },
+        {
           "file": "src/main-process/statement-generation.js",
           "count": 3
         },
@@ -16681,8 +17399,8 @@
           "count": 1
         }
       ],
-      "totalHits": 95,
-      "fileSpan": 14
+      "totalHits": 100,
+      "fileSpan": 15
     },
     {
       "name": "FileValidationError",
@@ -16733,6 +17451,10 @@
           "count": 3
         },
         {
+          "file": "src/backend/pending-import/removed-reader.js",
+          "count": 5
+        },
+        {
           "file": "src/main-process/bank-statement-io.js",
           "count": 7
         },
@@ -16749,8 +17471,77 @@
           "count": 1
         }
       ],
-      "totalHits": 63,
-      "fileSpan": 13
+      "totalHits": 68,
+      "fileSpan": 14
+    },
+    {
+      "name": "XLSX",
+      "defFiles": [
+        "src/backend/bank-bu-recon-import/reader.js",
+        "src/backend/biz-op-recon-import/reader.js",
+        "src/backend/file-service/normalizers.js",
+        "src/backend/file-service/readers.js",
+        "src/backend/file-service/writers.js",
+        "src/backend/pending-export/writer.js",
+        "src/backend/pending-import/removed-reader.js",
+        "src/constants/fund-type-enum.js",
+        "src/main-process/bank-statement-io.js",
+        "src/main-process/pending-session.js",
+        "src/main-process/recon-id-fix-io.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/file-service/normalizers.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/file-service/writers.js",
+          "count": 20
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 9
+        },
+        {
+          "file": "src/backend/pending-import/removed-reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/constants/fund-type-enum.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/bank-statement-io.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/pending-session.js",
+          "count": 11
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 66,
+      "fileSpan": 12
     },
     {
       "name": "appendModuleLog",
@@ -16925,65 +17716,6 @@
         }
       ],
       "totalHits": 66,
-      "fileSpan": 10
-    },
-    {
-      "name": "XLSX",
-      "defFiles": [
-        "src/backend/bank-bu-recon-import/reader.js",
-        "src/backend/biz-op-recon-import/reader.js",
-        "src/backend/file-service/normalizers.js",
-        "src/backend/file-service/readers.js",
-        "src/backend/file-service/writers.js",
-        "src/backend/pending-export/writer.js",
-        "src/main-process/bank-statement-io.js",
-        "src/main-process/pending-session.js",
-        "src/main-process/recon-id-fix-io.js",
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/bank-bu-recon-import/reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/file-service/normalizers.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/file-service/writers.js",
-          "count": 20
-        },
-        {
-          "file": "src/backend/pending-export/writer.js",
-          "count": 9
-        },
-        {
-          "file": "src/main-process/bank-statement-io.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/pending-session.js",
-          "count": 11
-        },
-        {
-          "file": "src/main-process/recon-id-fix-io.js",
-          "count": 3
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 60,
       "fileSpan": 10
     },
     {
@@ -17423,6 +18155,36 @@
       "fileSpan": 5
     },
     {
+      "name": "isRowMeaningful",
+      "defFiles": [
+        "src/backend/file-service/common.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/common.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/pending-import/removed-reader.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 14,
+      "fileSpan": 5
+    },
+    {
       "name": "readRows",
       "defFiles": [
         "src/backend/bank-account-import.js",
@@ -17684,7 +18446,7 @@
         },
         {
           "file": "src/renderer-pending.js",
-          "count": 54
+          "count": 55
         },
         {
           "file": "src/renderer-previews.js",
@@ -17695,7 +18457,7 @@
           "count": 143
         }
       ],
-      "totalHits": 266,
+      "totalHits": 267,
       "fileSpan": 4
     },
     {
@@ -17964,32 +18726,6 @@
         {
           "file": "src/main-process/biz-op-recon-writer.js",
           "count": 2
-        }
-      ],
-      "totalHits": 12,
-      "fileSpan": 4
-    },
-    {
-      "name": "isRowMeaningful",
-      "defFiles": [
-        "src/backend/file-service/common.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/bank-bu-recon-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/common.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 6
         }
       ],
       "totalHits": 12,
@@ -19307,6 +20043,30 @@
       "fileSpan": 3
     },
     {
+      "name": "diffRepo",
+      "defFiles": [
+        "src/backend/pending-export/writer.js",
+        "src/backend/pending-reconcile/engine.js",
+        "src/backend/pending-reconcile/removal-match.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 7
+        },
+        {
+          "file": "src/backend/pending-reconcile/engine.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/pending-reconcile/removal-match.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 13,
+      "fileSpan": 3
+    },
+    {
       "name": "YELLOW_FILL",
       "defFiles": [
         "src/main-process/bank-bu-recon-writer.js",
@@ -19424,6 +20184,30 @@
       "fileSpan": 3
     },
     {
+      "name": "isNumericFieldName",
+      "defFiles": [
+        "src/backend/pending-reconcile/removal-match.js",
+        "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+        "src/main-process/scenario-engines/c3-gateway-recon-join.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-reconcile/removal-match.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 9,
+      "fileSpan": 3
+    },
+    {
       "name": "parseJsonArray",
       "defFiles": [
         "src/backend/database/utils.js",
@@ -19441,6 +20225,29 @@
         {
           "file": "src/backend/pending-db/rule-repository.js",
           "count": 3
+        }
+      ],
+      "totalHits": 9,
+      "fileSpan": 3
+    },
+    {
+      "name": "parseNumber",
+      "defFiles": [
+        "src/backend/pending-reconcile/removal-match.js",
+        "src/main-process/scenario-engines/engine-utils.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-reconcile/removal-match.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "count": 4
         }
       ],
       "totalHits": 9,
@@ -19675,6 +20482,28 @@
       "fileSpan": 3
     },
     {
+      "name": "listDiffRows",
+      "defFiles": [
+        "src/backend/pending-db/diff-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/diff-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/pending-reconcile/removal-match.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 3
+    },
+    {
       "name": "main",
       "defFiles": [
         "src/backend/pending-import/worker.js",
@@ -19850,6 +20679,30 @@
         {
           "file": "src/main.js",
           "count": 1
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 3
+    },
+    {
+      "name": "readSheetAsRows",
+      "defFiles": [
+        "src/backend/bank-bu-recon-import/reader.js",
+        "src/backend/biz-op-recon-import/reader.js",
+        "src/backend/pending-import/removed-reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/removed-reader.js",
+          "count": 3
         }
       ],
       "totalHits": 7,
@@ -20729,6 +21582,28 @@
       "fileSpan": 3
     },
     {
+      "name": "listByMonth",
+      "defFiles": [
+        "src/backend/pending-db/removed-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/removed-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-reconcile/removal-match.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 3
+    },
+    {
       "name": "sanitizeBankName",
       "defFiles": [
         "src/backend/balance-adjustment-store.js",
@@ -20950,6 +21825,25 @@
       "fileSpan": 2
     },
     {
+      "name": "REMOVED_PENDING_COLUMNS",
+      "defFiles": [
+        "src/backend/pending-export/writer.js",
+        "src/backend/pending-import/removed-reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/pending-import/removed-reader.js",
+          "count": 13
+        }
+      ],
+      "totalHits": 16,
+      "fileSpan": 2
+    },
+    {
       "name": "reloadReconIdFixScenarios",
       "defFiles": [
         "src/renderer.js"
@@ -21135,6 +22029,24 @@
       "fileSpan": 2
     },
     {
+      "name": "removalMatch",
+      "defFiles": [
+        "src/backend/pending-export/writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 4
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 7
+        }
+      ],
+      "totalHits": 11,
+      "fileSpan": 2
+    },
+    {
       "name": "rendererPending",
       "defFiles": [
         "src/renderer.js"
@@ -21202,25 +22114,6 @@
         {
           "file": "src/main.js",
           "count": 1
-        }
-      ],
-      "totalHits": 9,
-      "fileSpan": 2
-    },
-    {
-      "name": "diffRepo",
-      "defFiles": [
-        "src/backend/pending-export/writer.js",
-        "src/backend/pending-reconcile/engine.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pending-export/writer.js",
-          "count": 6
-        },
-        {
-          "file": "src/backend/pending-reconcile/engine.js",
-          "count": 3
         }
       ],
       "totalHits": 9,
@@ -21574,43 +22467,6 @@
         {
           "file": "src/renderer.js",
           "count": 5
-        }
-      ],
-      "totalHits": 7,
-      "fileSpan": 2
-    },
-    {
-      "name": "isNumericFieldName",
-      "defFiles": [
-        "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-        "src/main-process/scenario-engines/c3-gateway-recon-join.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 7,
-      "fileSpan": 2
-    },
-    {
-      "name": "parseNumber",
-      "defFiles": [
-        "src/main-process/scenario-engines/engine-utils.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/engine-utils.js",
-          "count": 4
         }
       ],
       "totalHits": 7,
@@ -22541,6 +23397,25 @@
       "fileSpan": 2
     },
     {
+      "name": "removedRepo",
+      "defFiles": [
+        "src/backend/pending-export/writer.js",
+        "src/backend/pending-reconcile/removal-match.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/pending-reconcile/removal-match.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
       "name": "sanitizeSheetName",
       "defFiles": [
         "src/backend/pending-export/writer.js",
@@ -22917,24 +23792,6 @@
         },
         {
           "file": "src/backend/database/template-repository.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
-      "name": "listDiffRows",
-      "defFiles": [
-        "src/backend/pending-db/diff-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pending-db/diff-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/pending-export/writer.js",
           "count": 3
         }
       ],
@@ -23349,6 +24206,24 @@
       "fileSpan": 2
     },
     {
+      "name": "countByMonth",
+      "defFiles": [
+        "src/backend/pending-db/removed-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-db/removed-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "createBankBuReconSession",
       "defFiles": [
         "src/main-process/bank-bu-recon-session.js",
@@ -23598,6 +24473,25 @@
         {
           "file": "src/main-process/biz-op-recon-writer.js",
           "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "FUND_TYPE_ENUM_FILE_NAME",
+      "defFiles": [
+        "src/constants/fund-type-enum.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/fund-type-enum.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
         }
       ],
       "totalHits": 4,
@@ -24160,25 +25054,6 @@
         },
         {
           "file": "src/backend/database/template-repository.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 2
-    },
-    {
-      "name": "readSheetAsRows",
-      "defFiles": [
-        "src/backend/bank-bu-recon-import/reader.js",
-        "src/backend/biz-op-recon-import/reader.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/bank-bu-recon-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader.js",
           "count": 2
         }
       ],
@@ -24928,6 +25803,24 @@
       "fileSpan": 2
     },
     {
+      "name": "compareMatchedContent",
+      "defFiles": [
+        "src/backend/pending-reconcile/removal-match.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-reconcile/removal-match.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "computeRunStats",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/run-repository.js"
@@ -25343,6 +26236,42 @@
       "fileSpan": 2
     },
     {
+      "name": "listMatchedDiffRowIds",
+      "defFiles": [
+        "src/backend/pending-reconcile/removal-match.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-reconcile/removal-match.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "listMatchedRemovedRowIds",
+      "defFiles": [
+        "src/backend/pending-reconcile/removal-match.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-reconcile/removal-match.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "listReadyDates",
       "defFiles": [
         "src/backend/biz-op-recon-db/run-repository.js"
@@ -25408,6 +26337,25 @@
         },
         {
           "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "loadFundTypeEnum",
+      "defFiles": [
+        "src/constants/fund-type-enum.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/fund-type-enum.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
           "count": 1
         }
       ],

@@ -2455,6 +2455,34 @@ select.mapping-text-input {
   gap: 6px;
 }
 
+/* v2.1.11 T3：账单类型分组块（多条件 AND 视觉分隔，同 styles.css） */
+.scenario-config-billtype-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  border-left: 3px solid rgba(139, 115, 85, 0.45);
+  background: rgba(0, 0, 0, 0.015);
+  border-radius: 4px;
+}
+
+.scenario-config-billtype-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.scenario-config-billtype-group-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: #8b7355;
+}
+
+.scenario-config-billtype-remove {
+  color: #c0392b;
+}
+
 /* v2.1.7 round 4 B1（spec §10.2.3 Layout-1 用户拍板）：scenario-config-label-stack 左列容器
    纵向堆叠 label "条件" + AND/OR radio；右列 .scenario-config-multi-wrap conditions 列表
    注：原 round 2/3 .scenario-config-logic-stack / -stack-option 死代码（无 HTML 引用）已被本块替换 */

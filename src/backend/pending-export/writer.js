@@ -13,6 +13,10 @@ const XLSX = require('xlsx-js-style');
 const { applyWatermark } = require('../../main-process/workbook-watermark');
 const PENDING_COLUMNS = require('../pending-db/columns');
 const diffRepo = require('../pending-db/diff-repository');
+// v2.1.11 T2 移除核对：导出 2 张新 sheet（仅 single run）
+const removedRepo = require('../pending-db/removed-repository');
+const removalMatch = require('../pending-reconcile/removal-match');
+const { REMOVED_PENDING_COLUMNS } = require('../pending-import/removed-reader');
 
 const FUND_TYPE_COLUMN = 'pending资金类型';
 const DIFF_TYPE_COLUMN = 'diff_type';
@@ -24,6 +28,17 @@ const CALC_AMOUNT_DIFF_COLUMN = '计算金额_diff';
 const SHEET_SUMMARY_NAME = '汇总';
 const SHEET_MONTHLY_BREAKDOWN_NAME = '按月维度区别汇总';
 const SHEET_FUND_TYPE_DIFF_NAME = 'pending资金类型差异';
+// v2.1.11 T2 移除核对（D-T2-6 状态列 / D-T2-7 sheet 名）
+const SHEET_MISSING_REMOVAL_NAME = 'missing核对移除';      // sheetA：missing 行 + 移除核对状态列
+const SHEET_REMOVAL_ONLY_NAME = '移除有_missing无';        // sheetB：未匹配 removed 行（条件生成）
+const REMOVAL_STATUS_COLUMN = '移除核对状态';
+// v2.1.11 T2 手测增强：状态列两态 → 三态（配对成功后用 compareFields 共用对账规则做内容核对）
+//   - 核对无误        ：matchFields 配上 + compareFields 全部归一化一致
+//   - 核对有差异:...   ：matchFields 配上但 compareFields 有不一致（前缀 + 差异文字，仅状态列写明）
+//   - missing有_移除无 ：matchFields 没配上（不变；移除行仍进 sheetB）
+const REMOVAL_STATUS_VERIFIED = '核对无误';
+const REMOVAL_STATUS_DIFF_PREFIX = '核对有差异：';
+const REMOVAL_STATUS_MISSING_ONLY = 'missing有_移除无';
 
 function applyHeaderRowFont(worksheet, headerRowIndex = 0) {
   if (!worksheet || !worksheet['!ref']) return;
@@ -235,6 +250,82 @@ function getMetaColIndices(compareFields) {
   };
 }
 
+// v2.1.11 T2 手测增强：算 missing diff 行的状态列三态文字
+//   - 不在 matchedDiffIds（matchFields 没配上）→ missing有_移除无
+//   - 配上且内容核对无差异 → 核对无误
+//   - 配上但内容有差异 → 核对有差异：<diffText>
+//   兜底：配上但 contentResults 无该行（理论不应发生，compareMatchedContent 覆盖全部配对行）→ 核对无误
+function resolveRemovalStatus(diffRowId, matchedDiffIds, contentResults) {
+  if (!matchedDiffIds.has(diffRowId)) return REMOVAL_STATUS_MISSING_ONLY;
+  const content = contentResults.get(Number(diffRowId));
+  if (content && content.status === '有差异') {
+    return `${REMOVAL_STATUS_DIFF_PREFIX}${content.diffText}`;
+  }
+  return REMOVAL_STATUS_VERIFIED;
+}
+
+// ========== v2.1.11 T2 移除核对：2 张新 sheet（仅 single run）==========
+// 位置：在现有 sheet（汇总 / 资金类型分组 / pending资金类型差异）之后追加 → 天然最右。
+//
+// sheetA「missing核对移除」（无条件生成）：该 run 全部 missing diff 行（复用 buildExportRowsForDiff
+//   的 missing 展开，列结构 = buildHeaders(compareFields)）+ 末列「移除核对状态」（三态，手测增强）：
+//     - 核对无误        （matchFields 配上 + compareFields 共用对账规则全部归一化一致）
+//     - 核对有差异：字段A(missing原值≠移除原值); …（配上但 compareFields 有不一致，仅状态列写明）
+//     - missing有_移除无（matchFields 没配上）
+//   ⚠️ compareFields 一致性判定复用 C1 数值归一化（removal-match.compareMatchedContent），
+//      "100" vs "100.00" 判一致不误报；差异文字显示原始值。
+// sheetB「移除有_missing无」（条件：存在未匹配 removed 行才建）：removed_pending_rows(upperMonth)
+//   中 id 不在 pending_removal_matches 的行，按 raw_json 还原 46 列（REMOVED_PENDING_COLUMNS）。
+//
+// 仅在该 run 的 upperMonth 有移除数据（countByMonth > 0）时才追加（无移除数据 → 行为零变化）。
+// 返回 { appended, missingReconRowCount, removalOnlyRowCount }；appended=false 表示无移除数据未追加。
+function appendRemovalReconcileSheets(wb, db, run, runId, compareFields) {
+  const upperMonth = run && run.upperMonth ? run.upperMonth : null;
+  if (!upperMonth) {
+    return { appended: false, missingReconRowCount: 0, removalOnlyRowCount: 0 };
+  }
+
+  // 该 upperMonth 无移除数据 → 不追加（选"否"路径 / 未导入移除文件场景，行为零变化）
+  if (removedRepo.countByMonth(db, upperMonth) === 0) {
+    return { appended: false, missingReconRowCount: 0, removalOnlyRowCount: 0 };
+  }
+
+  const matchedDiffIds = removalMatch.listMatchedDiffRowIds(db, runId);
+  const matchedRemovedIds = removalMatch.listMatchedRemovedRowIds(db, runId);
+  // 配对成功行的内容核对结果（compareFields 共用对账规则）：diff_row_id → { status, diffText }
+  const contentResults = removalMatch.compareMatchedContent(db, runId, compareFields);
+
+  // ===== sheetA「missing核对移除」=====
+  const headersA = [...buildHeaders(compareFields), REMOVAL_STATUS_COLUMN];
+  const missingDiffRows = diffRepo.listDiffRows(db, runId, 'missing');
+  const rowsA = [];
+  for (const d of missingDiffRows) {
+    // missing 展开恒为 1 行（buildExportRowsForDiff 对 type='missing' 返回单行）
+    const expanded = buildExportRowsForDiff(db, d, compareFields, compareFields);
+    const status = resolveRemovalStatus(d.id, matchedDiffIds, contentResults);
+    for (const r of expanded) {
+      rowsA.push([...r, status]);
+    }
+  }
+  appendSheetWithHeaderFont(wb, SHEET_MISSING_REMOVAL_NAME, headersA, rowsA);
+
+  // ===== sheetB「移除有_missing无」（条件：存在未匹配 removed 行才建）=====
+  const allRemoved = removedRepo.listByMonth(db, upperMonth);
+  const removalOnly = allRemoved.filter((r) => !matchedRemovedIds.has(r.id));
+  let removalOnlyRowCount = 0;
+  if (removalOnly.length > 0) {
+    const headersB = REMOVED_PENDING_COLUMNS.slice();
+    const rowsB = removalOnly.map((r) => {
+      const raw = r.raw && typeof r.raw === 'object' ? r.raw : {};
+      return REMOVED_PENDING_COLUMNS.map((c) => (raw[c] == null ? '' : raw[c]));
+    });
+    appendSheetWithHeaderFont(wb, SHEET_REMOVAL_ONLY_NAME, headersB, rowsB);
+    removalOnlyRowCount = rowsB.length;
+  }
+
+  return { appended: true, missingReconRowCount: rowsA.length, removalOnlyRowCount };
+}
+
 // ========== 单月（by runId）==========
 
 function exportSingleRun(db, runId, savePath) {
@@ -283,6 +374,9 @@ function exportSingleRun(db, runId, savePath) {
     appendSheetWithHeaderFont(wb, SHEET_FUND_TYPE_DIFF_NAME, headers, fundDiffRows);
   }
 
+  // v2.1.11 T2：追加移除核对 2 sheet（仅当 upperMonth 有移除数据；否则零变化）
+  const removalReconcile = appendRemovalReconcileSheets(wb, db, run, runId, compareFields);
+
   applyWatermark(wb);
   XLSX.writeFile(wb, savePath);
   return {
@@ -292,8 +386,15 @@ function exportSingleRun(db, runId, savePath) {
     upperMonth: run.upperMonth,
     lowerMonth: run.lowerMonth,
     rowCount: allRows.length,
-    sheetCount: 1 + groupsByType.size + (compareFields.includes(FUND_TYPE_COLUMN) ? 1 : 0),
-    fundTypeDiffRowCount
+    sheetCount: 1 + groupsByType.size
+      + (compareFields.includes(FUND_TYPE_COLUMN) ? 1 : 0)
+      + (removalReconcile.appended ? 1 : 0)
+      + (removalReconcile.appended && removalReconcile.removalOnlyRowCount > 0 ? 1 : 0),
+    fundTypeDiffRowCount,
+    // 移除核对结果（无移除数据时 appended=false，其余 0）
+    removalReconcileAppended: removalReconcile.appended,
+    missingReconRowCount: removalReconcile.missingReconRowCount,
+    removalOnlyRowCount: removalReconcile.removalOnlyRowCount
   };
 }
 
@@ -383,6 +484,16 @@ function exportAggregate(db, savePath) {
     appendSheetWithHeaderFont(wb, SHEET_FUND_TYPE_DIFF_NAME, headers, fundDiffRows);
   }
 
+  // I3（v2.1.11 SR-FIX Round 1）：聚合导出不含移除核对 2 sheet（仅 exportSingleRun 含）。
+  //   若涉及的任一 upperMonth 有移除归档数据 → 标记 removalDataOmitted，renderer 提示用户改用「导出指定月份」查看。
+  let removalDataOmitted = false;
+  for (const run of sortedLatest) {
+    if (run.upperMonth && removedRepo.countByMonth(db, run.upperMonth) > 0) {
+      removalDataOmitted = true;
+      break;
+    }
+  }
+
   applyWatermark(wb);
   XLSX.writeFile(wb, savePath);
   return {
@@ -390,13 +501,23 @@ function exportAggregate(db, savePath) {
     path: savePath,
     runsCount: sortedLatest.length,
     rowCount: flatRows.length,
-    fundTypeDiffRowCount
+    fundTypeDiffRowCount,
+    // 聚合导出省略了移除核对 sheet 且确有移除数据 → renderer 据此追加提示
+    removalDataOmitted
   };
 }
 
 module.exports = {
   exportSingleRun,
   exportAggregate,
+  // v2.1.11 T2 移除核对常量（供 integration 校验 sheet 名/状态值文案）
+  SHEET_MISSING_REMOVAL_NAME,
+  SHEET_REMOVAL_ONLY_NAME,
+  REMOVAL_STATUS_COLUMN,
+  // 状态列三态（手测增强：核对无误 / 核对有差异：<diffText> / missing有_移除无）
+  REMOVAL_STATUS_VERIFIED,
+  REMOVAL_STATUS_DIFF_PREFIX,
+  REMOVAL_STATUS_MISSING_ONLY,
   // 给测试用
   __internal: {
     buildHeaders,
@@ -404,6 +525,8 @@ module.exports = {
     buildSingleExportRow,
     sanitizeSheetName,
     computeChangedFields,
-    computeAmountDiff
+    computeAmountDiff,
+    appendRemovalReconcileSheets,
+    resolveRemovalStatus
   }
 };

@@ -137,7 +137,11 @@ contextBridge.exposeInMainWorld('desktopApi', {
     applyImport: (bundle, opts = {}) => ipcRenderer.invoke('scenarios:import-bundle-apply', {
       bundle,
       confirmCreateMissingChannels: opts && opts.confirmCreateMissingChannels === true
-    })
+    }),
+    // v2.1.11 T3（spec §4.5 / 决策 D-T3-2-src=xlsx）：C2 FundType 字段值枚举
+    //   - main 进程读 assets/FundType枚举值.xlsx（preload 无法 require 自定义模块，故走 IPC）
+    //   - 返回 { status:'ok', values: string[] }；文件缺失/读取失败 → values 为空数组（renderer 降级文本输入）
+    getFundTypeEnum: () => ipcRenderer.invoke('scenarios:fund-type-enum')
   },
   // v2.1.9 N5：银行渠道 CRUD（银行对账单处理 / 场景管理依赖；spec §4）
   //   list 返回所有渠道（含「通用」内置 id=1, displayIndex 1-based）
@@ -261,6 +265,11 @@ contextBridge.exposeInMainWorld('desktopApi', {
       getLatestRunForMonthPair: (payload) => ipcRenderer.invoke('pending:diff:latest-run-for', payload),
       exportSingle: (payload) => ipcRenderer.invoke('pending:diff:export-single', payload),
       exportAggregate: () => ipcRenderer.invoke('pending:diff:export-aggregate')
+    },
+    // v2.1.11 T2 移除核对：选移除归档 xlsx + 解析入库（关联导入月份；D-T2-1 = 后续对账的 upperMonth）
+    removed: {
+      pickFiles: () => ipcRenderer.invoke('pending:removed:pick-files'),
+      import: (payload) => ipcRenderer.invoke('pending:removed:import', payload)
     }
   },
   // v2.1.2 T2：月度银行对账单BU回填校验

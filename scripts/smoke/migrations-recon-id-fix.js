@@ -492,7 +492,15 @@ function runMigrationsReconIdFixSmokeTests() {
     `).run(1, 'offset-bill-mark', 'H4-c2', 0, 1, JSON.stringify(c2cfg), 0, now, now);
     migrateC4ReconGroupsAmountLockedFieldPair(db);
     const after = getScenario(db, 1);
-    assert.deepStrictEqual(after.config, c2cfg, 'H4 C2 reconFields 不被动');
+    // v2.1.11 T3：C2 读取经 normalizeC2Config 惰性迁移 billTypes 单条件 {field,op,value}
+    //   → {conditions:[{field,op,value}]}（spec §4.2）。本用例验证 C4 migration 不动 C2 的
+    //   reconFields/markValue —— billTypes 结构变化来自 T3 读取侧迁移，非 C4 migration 所为。
+    const c2cfgAfterMigration = {
+      billTypes: [{ seq: 1, conditions: [{ field: 'OrderId', op: '等于', value: 'X' }] }],
+      reconFields: [{ seq: 1, leftType: 1, leftField: 'Amount', rightType: 2, rightField: 'Amount' }],
+      markValue: { type: 1, field: 'Type', value: 1 }
+    };
+    assert.deepStrictEqual(after.config, c2cfgAfterMigration, 'H4 C2 reconFields/markValue 不被 C4 migration 改动（billTypes 经 T3 惰性迁移为 conditions）');
   }
 
   // ===== H5（v2.1.0-beta.3 PR #39 self-review P1-1）：migrateGatewayReconIdFixFieldPairs 主路径 =====

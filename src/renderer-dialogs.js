@@ -52,6 +52,94 @@
         .join('');
     }
 
+    // v2.1.11 T3（spec §4.5 / 决策 D-T3-2-src=xlsx / strict=a）：FundType 字段值枚举
+    //   - 经 IPC scenarios:fund-type-enum 从 main 进程读 assets/FundType枚举值.xlsx（preload 无法 require 自定义模块）
+    //   - 模块级缓存：首次加载后复用，避免每次打开 C2 弹窗重复 IPC
+    //   - 状态：'unloaded'（未拉取）/ 'loading'（拉取中）/ 'ready'（成功，含降级空数组）
+    //   - 降级：values 为空数组（文件缺失 / 读取失败）→ renderer 回退文本输入 + 一次性提示
+    let fundTypeEnumValues = [];
+    let fundTypeEnumState = 'unloaded';
+    let fundTypeEnumPromise = null;
+    let fundTypeEnumDowngradeNotified = false; // 一次性降级提示去重
+
+    // 拉取 FundType 枚举（带缓存）。返回 Promise<string[]>（resolve 后 fundTypeEnumValues 已就绪）。
+    //   - 已 ready → 直接 resolve 缓存
+    //   - loading 中 → 复用同一 Promise（去抖）
+    //   - 失败 → 降级为空数组（不 reject，保证调用方 .then 链不断）
+    function ensureFundTypeEnum() {
+      if (fundTypeEnumState === 'ready') return Promise.resolve(fundTypeEnumValues);
+      if (fundTypeEnumState === 'loading' && fundTypeEnumPromise) return fundTypeEnumPromise;
+      fundTypeEnumState = 'loading';
+      const api = desktopApi && desktopApi.scenarios && desktopApi.scenarios.getFundTypeEnum;
+      if (typeof api !== 'function') {
+        // 旧 preload / preview 兜底：无该 IPC → 直接降级
+        fundTypeEnumValues = [];
+        fundTypeEnumState = 'ready';
+        return Promise.resolve(fundTypeEnumValues);
+      }
+      fundTypeEnumPromise = Promise.resolve()
+        .then(() => api())
+        .then((result) => {
+          fundTypeEnumValues = result && Array.isArray(result.values) ? result.values : [];
+          fundTypeEnumState = 'ready';
+          return fundTypeEnumValues;
+        })
+        .catch(() => {
+          // IPC 异常 → 降级空数组（不抛，调用方据空数组回退文本输入）
+          fundTypeEnumValues = [];
+          fundTypeEnumState = 'ready';
+          return fundTypeEnumValues;
+        });
+      return fundTypeEnumPromise;
+    }
+
+    // 判断某字段是否应渲染为 FundType 枚举下拉（field==='FundType' 且枚举非空）
+    function shouldUseFundTypeDropdown(fieldName) {
+      return fieldName === 'FundType' && fundTypeEnumState === 'ready' && fundTypeEnumValues.length > 0;
+    }
+
+    // FundType 字段枚举是否处于「降级」态（已尝试加载但为空数组 → 文件缺失/读取失败）
+    function isFundTypeEnumDowngraded() {
+      return fundTypeEnumState === 'ready' && fundTypeEnumValues.length === 0;
+    }
+
+    // FundType 枚举降级时是否需要在弹窗内显示一次性提示（同一次会话只提示一次）
+    //   返回 true 仅一次（首次命中后置位 fundTypeEnumDowngradeNotified）
+    function shouldShowFundTypeDowngradeHint() {
+      if (fundTypeEnumDowngradeNotified) return false;
+      if (!isFundTypeEnumDowngraded()) return false;
+      fundTypeEnumDowngradeNotified = true;
+      return true;
+    }
+
+    // 渲染单个「值」控件：FundType 字段且枚举就绪 → 严格下拉（仅枚举值）；否则文本输入
+    //   - dataAttr：控件 data 属性串（如 'data-multi-field="value"' / 'data-mark-field="value"'）
+    //   - fieldName：当前行选中的字段名（决定 FundType 下拉与否）
+    //   - currentValue：当前值
+    //   - hidden：op 为 空值/非空值 时隐藏值控件（visibility:hidden 占位，保留布局）
+    //   strict（D-T3-2-strict=a）：下拉首项为空选项，用户必须从枚举中选；不混入自由文本
+    function renderScenarioValueControl(dataAttr, fieldName, currentValue, { isReadonly = false, hidden = false } = {}) {
+      const hiddenStyle = hidden ? ' style="visibility:hidden"' : '';
+      const disabled = isReadonly ? 'disabled' : '';
+      if (shouldUseFundTypeDropdown(fieldName)) {
+        // 严格枚举下拉：空选项 + 枚举值。
+        // I5（v2.1.11 SR-FIX Round 1）：currentValue 非空且不在枚举内（如枚举表更新后旧配置值失效）→
+        //   额外渲染一个 selected 的「旧值（不在枚举）」option，保留并显示旧值。
+        //   旧实现此时下拉回落到空选项 → 显示与 model 背离（model 仍留旧值）→ 用户误判未配置 / 误选覆盖旧值。
+        const cur = currentValue == null ? '' : String(currentValue);
+        const inEnum = fundTypeEnumValues.some((v) => String(v) === cur);
+        const staleOption = (cur !== '' && !inEnum)
+          ? `<option value="${escapeHtml(cur)}" selected>${escapeHtml(cur)}（不在枚举）</option>`
+          : '';
+        return `<select class="scenario-config-input" ${dataAttr} ${disabled}${hiddenStyle}>
+          <option value="">请选择 FundType</option>
+          ${staleOption}
+          ${renderScenarioOptions(fundTypeEnumValues, currentValue)}
+        </select>`;
+      }
+      return `<input class="scenario-config-input" type="text" ${dataAttr} ${disabled} value="${escapeHtml(currentValue || '')}" placeholder="值"${hiddenStyle}>`;
+    }
+
     function clearScenarioDraft() {
       state.scenarioDraft = null;
     }
@@ -6808,14 +6896,21 @@
       } else if (draft.category === 'offset-bill-mark') {
         // v2.1.7 F4：放宽 — billTypes < 2 改 < 1；reconFields 允许 0 行；保留 reconFields ≥ 1 时内容校验
         //   赋值文案：spec §5.2 — '打标值' → '赋值'（保持向后兼容也含"赋值"语义）
+        // v2.1.11 T3（spec §4.1 D-T3-1a=AND）：billTypes 行结构 {seq,field,op,value} → {seq,conditions:[{field,op,value}…]}
+        //   校验改遍历 conditions：每类型 ≥ 1 条件；每条件字段非空 + 非「空值/非空值」op 的值非空
         const c = draft.config || {};
         if (!Array.isArray(c.billTypes) || c.billTypes.length < 1) errors.push('账单类型至少需要 1 行');
-        else if (c.billTypes.some((b) => !b.field || (opNeedsValue(b.op) && (b.value === '' || b.value === undefined)))) {
-          errors.push('账单类型每行的字段不能为空；非「空值/非空值」操作的值不能为空');
+        else if (c.billTypes.some((b) => {
+          const conds = b && Array.isArray(b.conditions) ? b.conditions : [];
+          if (conds.length === 0) return true; // 空条件类型 → 不合法（引擎视为不命中，配置应禁止保存）
+          return conds.some((cd) => !cd.field || (opNeedsValue(cd.op) && (cd.value === '' || cd.value === undefined)));
+        })) {
+          errors.push('账单类型每个条件的字段不能为空；非「空值/非空值」操作的值不能为空');
         }
-        // 删 "对账字段至少需要 1 行" 卡校验；保留非空行的两端字段必填
+        // v2.1.11 T3（spec §4.6）：对账字段可空 — 不强制 ≥ 1 行；保留「非空行两端字段必填」
+        //   reconFields=0（全删）→ 引擎走「无条件赋值」（v2.1.7 衍生方案 A）；留空行（两端任一空）→ 报错提示用户补全或删除
         if (Array.isArray(c.reconFields) && c.reconFields.some((r) => !r.leftField || !r.rightField)) {
-          errors.push('对账字段每行两端的字段都不能为空');
+          errors.push('对账字段每行两端的字段都不能为空（如不需要对账请删除该行）');
         }
         const mv = c.markValue || {};
         const billTypeSeqs = (c.billTypes || []).map((b) => b.seq);
@@ -7644,6 +7739,31 @@
       if (!Array.isArray(config.billTypes)) {
         config.billTypes = [];
       }
+      // v2.1.11 T3（spec §4.2 D-T3-mig=a）：dialog 入口归一化 billTypes 单条件 → 多条件 conditions
+      //   - 三处归一化对齐（scenarios-repository.normalizeC2Config / 引擎入口 / 此处 dialog）
+      //   - 覆盖「不走 repository 的内存 draft」：preview fixture / 校验失败回填后的旧结构 / 老内存对象
+      //   - 已是 conditions 结构 → 幂等（仅补齐缺字段）；旧 {field,op,value} → 包成 conditions:[{...}]
+      config.billTypes = config.billTypes.map((bt) => {
+        if (!bt || typeof bt !== 'object') return { seq: undefined, conditions: [{ field: '', op: '等于', value: '' }] };
+        if (Array.isArray(bt.conditions)) {
+          const conditions = bt.conditions.map((c) => ({
+            field: (c && c.field) || '',
+            op: (c && c.op) || '等于',
+            value: c && c.value !== undefined && c.value !== null ? c.value : ''
+          }));
+          // 防御：conditions 为空 → 补 1 空条件占位（避免渲染出无条件行的空类型块）
+          return { ...bt, conditions: conditions.length > 0 ? conditions : [{ field: '', op: '等于', value: '' }] };
+        }
+        const { field, op, value, ...rest } = bt;
+        return {
+          ...rest,
+          conditions: [{
+            field: field || '',
+            op: op || '等于',
+            value: value !== undefined && value !== null ? value : ''
+          }]
+        };
+      });
       if (!Array.isArray(config.reconFields)) {
         config.reconFields = [];
       }
@@ -7695,21 +7815,52 @@
       const reconContainer = dialog.querySelector('[data-multi="reconFields"]');
       const markRow = dialog.querySelector('[data-mark-value-row]');
 
+      // v2.1.11 T3（spec §4.4 D-T3-1b=空白行 / D-T3-1c=子序号）：账单类型按 seq 分组渲染
+      //   - 每个账单类型 = 一个分组块（.scenario-config-billtype-group，data-seq）
+      //   - 块内每条件行子序号 #{seq}.{idx+1}，控件 [字段][操作][值][×删除][新增]
+      //   - 一种账单类型 = 块内所有条件 AND 全满足（引擎 conditions.every）
+      //   - 值控件：FundType 字段 → 严格枚举下拉；其它 → 文本输入（renderScenarioValueControl）
+      //   - 删除门槛（spec §4.6）：删条件到该类型最后 1 条保留占位（避免空块 / seq 空洞）；
+      //     整类型删除走顶部分组的「删类型」按钮（remove-bill-type），允许删到 0 个类型
       function renderBillTypes() {
-        billTypeContainer.innerHTML = config.billTypes.map((bt, idx) => `
-          <div class="scenario-config-multi-row" data-row-index="${idx}">
-            <span class="scenario-config-multi-seq">#${bt.seq}</span>
-            <select class="scenario-config-input" data-multi-field="field" ${isReadonly ? 'disabled' : ''}>
-              <option value="">请选择字段</option>
-              ${renderScenarioOptions(BANK_STATEMENT_FIELDS, bt.field)}
-            </select>
-            <select class="scenario-config-input scenario-config-input-narrow" data-multi-field="op" ${isReadonly ? 'disabled' : ''}>
-              ${renderScenarioOptions(SCENARIO_CONDITION_OPS, bt.op || '等于')}
-            </select>
-            <input class="scenario-config-input" type="text" data-multi-field="value" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(bt.value || '')}" placeholder="值" ${!opNeedsValue(bt.op) ? 'style="visibility:hidden"' : ''}>
-            ${isReadonly ? '' : '<button class="icon-close-small" type="button" data-multi-action="remove" title="删除">×</button>'}
-          </div>
-        `).join('');
+        // 降级提示（一次性）：若用户已配 FundType 字段但枚举为空，弹窗顶部显示一行提示
+        const fundTypeFields = config.billTypes.some((bt) => Array.isArray(bt.conditions) && bt.conditions.some((c) => c.field === 'FundType'))
+          || config.markValue.field === 'FundType';
+        billTypeContainer.innerHTML = config.billTypes.map((bt) => {
+          const conditions = Array.isArray(bt.conditions) ? bt.conditions : [];
+          const condRowsHtml = conditions.map((cond, ci) => `
+            <div class="scenario-config-multi-row" data-seq="${bt.seq}" data-cond-index="${ci}">
+              <span class="scenario-config-multi-seq">#${bt.seq}.${ci + 1}</span>
+              <select class="scenario-config-input" data-multi-field="field" ${isReadonly ? 'disabled' : ''}>
+                <option value="">请选择字段</option>
+                ${renderScenarioOptions(BANK_STATEMENT_FIELDS, cond.field)}
+              </select>
+              <select class="scenario-config-input scenario-config-input-narrow" data-multi-field="op" ${isReadonly ? 'disabled' : ''}>
+                ${renderScenarioOptions(SCENARIO_CONDITION_OPS, cond.op || '等于')}
+              </select>
+              ${renderScenarioValueControl('data-multi-field="value"', cond.field, cond.value, { isReadonly, hidden: !opNeedsValue(cond.op) })}
+              ${isReadonly ? '' : '<button class="icon-close-small" type="button" data-multi-action="remove-condition" title="删除条件">×</button>'}
+              ${isReadonly ? '' : '<button class="text-action small" type="button" data-multi-action="add-condition" title="在下方新增一个 AND 条件">新增</button>'}
+            </div>
+          `).join('');
+          return `
+            <div class="scenario-config-billtype-group" data-seq="${bt.seq}">
+              <div class="scenario-config-billtype-group-head">
+                <span class="scenario-config-billtype-group-title">账单类型 #${bt.seq}</span>
+                ${isReadonly ? '' : `<button class="text-action small scenario-config-billtype-remove" type="button" data-multi-action="remove-bill-type" data-seq="${bt.seq}" title="删除整个账单类型 #${bt.seq}（含其全部条件）">删除该类型</button>`}
+              </div>
+              ${condRowsHtml}
+            </div>
+          `;
+        }).join('');
+        // FundType 枚举降级（文件缺失）且当前已用到 FundType 字段 → 弹窗内一次性提示
+        if (fundTypeFields && shouldShowFundTypeDowngradeHint()) {
+          const hint = document.createElement('div');
+          hint.className = 'scenario-config-fundtype-hint';
+          hint.style.cssText = 'color:#c0392b;font-size:12px;margin-top:4px;';
+          hint.textContent = '未找到 FundType 枚举文件（assets/FundType枚举值.xlsx），FundType 字段值暂用手动输入';
+          billTypeContainer.appendChild(hint);
+        }
       }
       function renderReconFields() {
         const billTypeSeqs = config.billTypes.map((b) => b.seq);
@@ -7731,12 +7882,19 @@
               <option value="">请选择字段</option>
               ${renderScenarioOptions(BANK_STATEMENT_FIELDS, rf.rightField)}
             </select>
-            ${isReadonly || config.reconFields.length === 1 ? '' : '<button class="icon-close-small" type="button" data-multi-action="remove" title="删除">×</button>'}
+            ${isReadonly ? '' : '<button class="icon-close-small" type="button" data-multi-action="remove" title="删除">×</button>'}
           </div>
         `).join('');
       }
       function renderMarkValue() {
         const billTypeSeqs = config.billTypes.map((b) => b.seq);
+        // v2.1.11 fix（手测）：markValue.type 不在有效 seq 列表（新建场景初始 null / 新增类型未校正 / 删类型失效）时，
+        //   <select> 会回落显示第一项，但 model 仍是无效值 → 保存时 validateScenarioDraft
+        //   `billTypeSeqs.includes(Number(mv.type))` 误报"赋值的账单类型必须存在于上方列表"。
+        //   渲染前把 type 规整为第一个有效 seq，保证「下拉显示 = model」（覆盖初始/新增/删除/迁移所有路径）。
+        if (billTypeSeqs.length > 0 && !billTypeSeqs.includes(Number(config.markValue.type))) {
+          config.markValue.type = billTypeSeqs[0];
+        }
         markRow.innerHTML = `
           <select class="scenario-config-input scenario-config-input-narrow" data-mark-field="type" ${isReadonly ? 'disabled' : ''}>
             ${renderScenarioOptions(billTypeSeqs.map(String), String(config.markValue.type))}
@@ -7747,7 +7905,7 @@
             ${renderScenarioOptions(BANK_STATEMENT_FIELDS, config.markValue.field)}
           </select>
           <span class="scenario-config-vs-arrow">写入值</span>
-          <input class="scenario-config-input" type="text" data-mark-field="value" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(config.markValue.value || '')}" placeholder="值">
+          ${renderScenarioValueControl('data-mark-field="value"', config.markValue.field, config.markValue.value, { isReadonly })}
         `;
       }
       function rerender() {
@@ -7757,55 +7915,108 @@
       }
       rerender();
 
+      // v2.1.11 T3（spec §4.5）：异步拉取 FundType 枚举，就绪后重渲染（把已配 FundType 字段值升级为下拉）
+      //   - 首帧先以「枚举未就绪」渲染（FundType 值暂为文本输入），不阻塞弹窗弹出
+      //   - 枚举到位（或降级空数组）后 rerender：成功 → FundType 值变下拉；降级 → 保持文本 + 一次性提示
+      ensureFundTypeEnum().then(() => {
+        // 弹窗可能已被关闭（用户快速取消）→ 容器脱离 DOM 时跳过 rerender
+        if (billTypeContainer.isConnected) rerender();
+      });
+
       bindScenarioBasicFields(dialog, draft);
 
-      // 行 3 账单类型多行编辑
+      // v2.1.11 T3：按 seq + condition idx 定位某条 condition（替代旧 data-row-index 直查）
+      function findCondition(el) {
+        const row = el.closest('.scenario-config-multi-row');
+        if (!row) return null;
+        const seq = Number(row.dataset.seq);
+        const ci = Number(row.dataset.condIndex);
+        const bt = config.billTypes.find((b) => Number(b.seq) === seq);
+        if (!bt || !Array.isArray(bt.conditions) || !bt.conditions[ci]) return null;
+        return { bt, ci, condition: bt.conditions[ci] };
+      }
+
+      // 行 3 账单类型多行编辑（v2.1.11 T3：改按 seq + cond idx 定位 conditions）
       billTypeContainer.addEventListener('change', (event) => {
         const ctl = event.target.closest('[data-multi-field]');
         if (!ctl) return;
-        const row = ctl.closest('.scenario-config-multi-row');
-        const idx = Number(row?.dataset.rowIndex);
+        const loc = findCondition(ctl);
+        if (!loc) return;
         const f = ctl.dataset.multiField;
-        if (Number.isFinite(idx) && config.billTypes[idx]) {
-          config.billTypes[idx][f] = ctl.value;
-          if (f === 'op') renderBillTypes();
+        if (f === 'field') {
+          loc.condition.field = ctl.value;
+          // 字段变化可能影响值控件类型（FundType ↔ 普通）→ 重渲染该行；同时清空旧值（避免普通值残留进 FundType 下拉）
+          loc.condition.value = '';
+          renderBillTypes();
+        } else if (f === 'op') {
+          loc.condition.op = ctl.value;
+          renderBillTypes(); // op 变化影响值输入框显隐
+        } else if (f === 'value') {
+          // FundType 下拉的 value 走 change（select）
+          loc.condition.value = ctl.value;
         }
       });
       billTypeContainer.addEventListener('input', (event) => {
         const input = event.target.closest('input[data-multi-field="value"]');
         if (!input) return;
-        const row = input.closest('.scenario-config-multi-row');
-        const idx = Number(row?.dataset.rowIndex);
-        if (Number.isFinite(idx) && config.billTypes[idx]) {
-          config.billTypes[idx].value = input.value;
-        }
+        const loc = findCondition(input);
+        if (loc) loc.condition.value = input.value;
       });
+
+      // v2.1.11 T3：删整个账单类型后重排 seq（1-based 连续）+ 校正行 4/5 引用（超范围回退）
+      //   - 保留 v2.1.7 F4 删空语义：允许删到 0 个类型（保存校验兜底「至少 1 行」L5832 已就绪）
+      function reindexBillTypesAndFixRefs() {
+        config.billTypes.forEach((b, i) => { b.seq = i + 1; });
+        const validSeqs = config.billTypes.map((b) => b.seq);
+        config.reconFields.forEach((r) => {
+          if (!validSeqs.includes(Number(r.leftType))) r.leftType = validSeqs[0] || 1;
+          if (!validSeqs.includes(Number(r.rightType))) r.rightType = validSeqs[1] || validSeqs[0] || 1;
+        });
+        if (!validSeqs.includes(Number(config.markValue.type))) config.markValue.type = validSeqs[validSeqs.length - 1] || 1;
+      }
+
       billTypeContainer.addEventListener('click', (event) => {
-        const btn = event.target.closest('button[data-multi-action="remove"]');
-        if (!btn || isReadonly) return;
-        const row = btn.closest('.scenario-config-multi-row');
-        const idx = Number(row?.dataset.rowIndex);
-        // v2.1.7 round 3 F4 删空（spec §9.7.2）：允许删到 0 行
-        //   - T13.4 R1 已改 display 门槛 (length === 1 → 永远显示)
-        //   - T13.17 同步 handler 门槛 (length > 2 → length >= 1)，否则按钮显示但点击无效
-        //   - 保存校验兜底 (validateScenarioDraft 'billTypes 至少需要 1 行') 已就绪 L5832
-        if (Number.isFinite(idx) && config.billTypes.length >= 1) {
-          config.billTypes.splice(idx, 1);
-          // 重排 seq（关键：行 4/5 引用要更新）
-          config.billTypes.forEach((b, i) => { b.seq = i + 1; });
-          // 校正行 4 / 行 5 引用，超出范围的回退到 1
-          const validSeqs = config.billTypes.map((b) => b.seq);
-          config.reconFields.forEach((r) => {
-            if (!validSeqs.includes(Number(r.leftType))) r.leftType = validSeqs[0] || 1;
-            if (!validSeqs.includes(Number(r.rightType))) r.rightType = validSeqs[1] || validSeqs[0] || 1;
-          });
-          if (!validSeqs.includes(Number(config.markValue.type))) config.markValue.type = validSeqs[validSeqs.length - 1] || 1;
-          rerender();
+        if (isReadonly) return;
+        // 1) 删整个账单类型（spec §4.6：允许删到 0 个类型）
+        const removeTypeBtn = event.target.closest('button[data-multi-action="remove-bill-type"]');
+        if (removeTypeBtn) {
+          const seq = Number(removeTypeBtn.dataset.seq);
+          const typeIdx = config.billTypes.findIndex((b) => Number(b.seq) === seq);
+          if (typeIdx >= 0) {
+            config.billTypes.splice(typeIdx, 1);
+            reindexBillTypesAndFixRefs();
+            rerender();
+          }
+          return;
+        }
+        // 2) 删单个条件
+        const removeCondBtn = event.target.closest('button[data-multi-action="remove-condition"]');
+        if (removeCondBtn) {
+          const loc = findCondition(removeCondBtn);
+          if (!loc) return;
+          if (loc.bt.conditions.length > 1) {
+            loc.bt.conditions.splice(loc.ci, 1);
+          } else {
+            // 删该类型最后 1 条件 → 不留空块/seq 空洞：重置为 1 空白条件占位
+            //   （如需整类型删除，请用「删除类型」按钮）
+            loc.bt.conditions = [{ field: '', op: '等于', value: '' }];
+          }
+          renderBillTypes();
+          return;
+        }
+        // 3) 在当前条件下方新增一个空白 AND 条件（spec §4.4 D-T3-1b=空白行）
+        const addCondBtn = event.target.closest('button[data-multi-action="add-condition"]');
+        if (addCondBtn) {
+          const loc = findCondition(addCondBtn);
+          if (!loc) return;
+          loc.bt.conditions.splice(loc.ci + 1, 0, { field: '', op: '等于', value: '' });
+          renderBillTypes();
         }
       });
       dialog.querySelector('[data-action="add-bill-type"]')?.addEventListener('click', () => {
         if (isReadonly) return;
-        config.billTypes.push({ seq: config.billTypes.length + 1, field: '', op: '等于', value: '' });
+        // v2.1.11 T3：新增账单类型 = 1 个空白条件起步（多条件结构）
+        config.billTypes.push({ seq: config.billTypes.length + 1, conditions: [{ field: '', op: '等于', value: '' }] });
         rerender();
       });
 
@@ -7826,8 +8037,11 @@
         if (!btn || isReadonly) return;
         const row = btn.closest('.scenario-config-multi-row');
         const idx = Number(row?.dataset.rowIndex);
-        if (Number.isFinite(idx) && config.reconFields.length > 1) {
+        // v2.1.11 T3（spec §4.6）：对账字段可空 — 删除门槛放开到允许删到 0 行（引擎 reconFields=0 走无条件赋值）
+        if (Number.isFinite(idx) && config.reconFields.length >= 1) {
           config.reconFields.splice(idx, 1);
+          // 重排 seq（显示序号用 idx+1，内部 seq 字段同步保持连续）
+          config.reconFields.forEach((r, i) => { r.seq = i + 1; });
           renderReconFields();
         }
       });
@@ -7838,13 +8052,22 @@
         renderReconFields();
       });
 
-      // 行 5 赋值（v2.1.7 F4 重命名）
+      // 行 5 赋值（v2.1.7 F4 重命名；v2.1.11 T3：field 切 FundType 时值控件改严格下拉）
       markRow.addEventListener('change', (event) => {
         const ctl = event.target.closest('[data-mark-field]');
         if (!ctl) return;
         const f = ctl.dataset.markField;
-        if (f === 'type') config.markValue.type = Number(ctl.value);
-        else config.markValue[f] = ctl.value;
+        if (f === 'type') {
+          config.markValue.type = Number(ctl.value);
+        } else if (f === 'field') {
+          config.markValue.field = ctl.value;
+          // 字段变化可能切换值控件类型（FundType 下拉 ↔ 文本）→ 清空旧值并重渲染赋值行
+          config.markValue.value = '';
+          renderMarkValue();
+        } else if (f === 'value') {
+          // FundType 下拉的写入值走 change（select）
+          config.markValue.value = ctl.value;
+        }
       });
       markRow.addEventListener('input', (event) => {
         const input = event.target.closest('input[data-mark-field="value"]');
@@ -8600,7 +8823,15 @@
           html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">根据其他字段提取：</span>${escapeHtml(c.extractByOtherField.field)}</div>`;
         }
       } else if (draft.category === 'offset-bill-mark') {
-        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">账单类型：</span><ul>${(c.billTypes || []).map((bt) => `<li>#${bt.seq}：${escapeHtml(bt.field)} ${escapeHtml(bt.op)}${opNeedsValue(bt.op) ? ' ' + escapeHtml(String(bt.value || '')) : ''}</li>`).join('')}</ul></div>`;
+        // v2.1.11 T3（spec §4.1）：账单类型多条件 AND — 每类型块内 conditions 用 AND 连接渲染
+        //   兼容兜底：老内存 draft 仍是 {field,op,value} 单条件 → 包成单条件 AND 串
+        html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">账单类型：</span><ul>${(c.billTypes || []).map((bt) => {
+          const conds = Array.isArray(bt.conditions)
+            ? bt.conditions
+            : [{ field: bt.field, op: bt.op, value: bt.value }];
+          const condsHtml = conds.map((cd) => `${escapeHtml(cd.field)} ${escapeHtml(cd.op)}${opNeedsValue(cd.op) ? ' ' + escapeHtml(String(cd.value || '')) : ''}`).join(' AND ');
+          return `<li>#${bt.seq}：${condsHtml}</li>`;
+        }).join('')}</ul></div>`;
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">对账字段：</span><ul>${(c.reconFields || []).map((r) => `<li>类型#${r.leftType} ${escapeHtml(r.leftField)} = 类型#${r.rightType} ${escapeHtml(r.rightField)}</li>`).join('')}</ul></div>`;
         const mv = c.markValue || {};
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">赋值：</span>类型#${mv.type} 的 ${escapeHtml(mv.field || '')} 写入 "${escapeHtml(String(mv.value || ''))}"</div>`;

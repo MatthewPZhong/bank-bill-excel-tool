@@ -9,6 +9,34 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.11-beta.1（2026-05-29）
+
+v2.1.10 之后 1 轮迭代（β 范围），3 个用户追加需求（性能主线 A3-multi-worker / F5-cont 另起 spec）：T1（单元测试运行日志 — 终端 `N/N PASS` + 落盘带时间戳日志）+ T2（**新功能** pending 月度移除核对 — 导入移除归档文件入库 + 对账后自动用对账规则把移除数据与 `missing` 行匹配 + 导出 2 张新 sheet）+ T3（C2「银行对账单字段赋值」3 项增强 — 账单类型多条件 AND / FundType 严格下拉 / 对账字段可空）。⚠️ 1 个资金/对账红线护栏（T2 匹配复用对账规则 matchFields + compareFields + 数值归一化）+ 1 个向后兼容迁移（T3 C2 单条件→多条件惰性迁移）。质量收尾：3 路 adversarial self-review + SR-FIX round 1。
+
+### 新增
+
+- **T2 pending 月度移除核对**（**新功能** / 数据核对 · 导出契约）：「月度 Pending 数据核对」模块导入流程上叠加移除核对——导入某月数据成功后弹「是否核对移除pending数据」；选「否」流程零变化，选「是」导入「移除归档 Pending 账单」xlsx 入库（关联该月，作后续对账"上月"/`missing` 来源）；新增 DB 表 `removed_pending_rows`（全 46 列 raw_json + 6 索引列）+ `pending_removal_matches`（对账后匹配结果），幂等 migration、不动现有 `pending_rows`/`diff_rows`/`diff_runs`；新建 `removed-reader.js`（取第一个 sheet + 46 列表头映射）+ `removal-match.js`（对账后自动用对账规则 `matchFields` 多轮 fallback 配对 + `compareFields` 内容核对，与 `engine.js` 同语义）；导出（仅单 run）追加最右 2 sheet——「missing核对移除」（末列「移除核对状态」三态：`核对无误` / `核对有差异：字段(missing值≠移除值)` / `missing有_移除无`）+ 条件 sheet「移除有_missing无」（未配对移除行还原 46 列）；🔴 资金红线护栏 = 复用对账规则语义 + 数值字段归一化 + unit/integration/manual 三层
+- **T1 单元测试运行日志**（测试基建）：`npm run test:unit` 解析 `node --test` 输出，终端打印仿 integration-runner 的 `==== N/N PASS ====` + 每文件用例数/耗时；每次运行落盘 `logs/unit-tests/unit-<YYYYMMDD-HHmmss>.log`（gitignore）；退出码透传语义不变、`release-check` 串联不变；reverse sync 修正根 `CLAUDE.md` "No unit test framework" 过时表述
+
+### 变更
+
+- **T3 C2「银行对账单字段赋值」3 项增强**（业务规则 · UI · 引擎 / 类目 `offset-bill-mark`）：① 账单类型支持多筛选条件 AND 全满足（`billTypes` 由 `[{seq,field,op,value}]` → `[{seq,conditions:[…]}]`；条件行加「新增」按钮插空白条件行；按 seq 分组 + 子序号 `#1.1`/`#1.2`；引擎改 AND 全满足才归类）；② 字段 = `FundType` 时值改严格单选下拉（仅枚举、运行时读 `assets/FundType枚举值.xlsx`，缺失降级文本输入），作用于条件行 + 赋值行；③ 对账字段放开非空校验，允许留空/删到 0 行（与引擎 `reconFields=0` 对齐）；④ 老单条件场景读取时惰性迁移为多条件结构（向后兼容、配置不丢、引擎入口兜底归一化）；已跑 `/check-vars` + `npm run preview:scenario-config-c2`
+
+### 修复（SR-FIX round 1）
+
+- 🔴 C1 资金红线：removal-match 数值字段比较前统一数值归一化（复用 `engine-utils` `isNumericFieldName`+`parseNumber`），修复"100" vs "100.00" / 千分位串系统性失配导致同一笔同时误报两张 sheet
+- 🟡 I1 对账完成文案追加移除核对摘要（匹配 N 条/未匹配 M 条）；I4 `DELETE pending_removal_matches` 挪进与 INSERT 同一事务保原子性；I5 FundType 严格下拉保留旧值为 disabled option 防误覆盖
+- 手测修复：markValue 校验误报；「移除核对状态」列接入 compareFields 逐字段内容核对、输出差异字段明细
+
+### 测试
+
+- unit 1338 case / integration 943 断言（新增 `pending-removal-reconcile.js`；C2 多条件/迁移覆盖在 unit）/ smoke 0 regression
+
+### α/β 收口
+
+- **v2.1.11 β（本版）**：T1 + T2 + T3 三个用户追加需求
+- **v2.1.11 后续 Phase（另起 spec）**：性能主线 A3-multi-worker（多 worker 并行）+ F5-cont（C4 算法重写）
+
 ## 2.1.10（2026-05-29 — 已发布 / PR #54 merged 2026-05-28T15:48:39Z）
 
 v2.1.9 之后 1 轮迭代（β 范围），4 主线：A3（runCheck 跨进程化 — worker_threads + 独立 DB + 跨进程错误回传）+ A4（SQL JOIN chunked 分批 — chunk size 10w + cancel chunk 边界）+ N4-cont-1（raw_json 体积治理 — 7 天保留 + idle 自动 + sentinel `''` v0.3）+ N4-cont-2（FK CASCADE — `diff_rows` 2 FK ON DELETE CASCADE + 8-status migration）。⚠️ 2 个🔴破坏性（N4-cont-2 DB schema 不可逆 + N4-cont-1 raw_json 不可逆清空）+ 3 个资金红线护栏 + 5 个 important-variables v12 升格。
