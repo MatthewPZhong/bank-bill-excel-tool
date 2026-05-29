@@ -431,6 +431,10 @@ window.__rendererPending = (function () {
             (result.archivePath ? '旧数据已留底。' : '');
           await loadMonths();
           refreshPendingUi();
+          // v2.1.11 T2（spec §3.3 / D-T2-1）：导入成功后弹"是否核对移除pending数据？"
+          //   选否 → 现状不变；选是 → 选移除归档 xlsx → 解析入库（关联本次导入月份 yearMonth，
+          //   它将作为后续对账的 upperMonth；对账后自动匹配 missing↔移除）。
+          promptRemovalReconcile(yearMonth);
           return;
         }
 
@@ -449,6 +453,61 @@ window.__rendererPending = (function () {
         state.pending.errorMessage = null;
         refreshPendingUi();
         openModal(createAlertDialog('导入调用失败：' + (err && err.message ? err.message : String(err))));
+      }
+    }
+
+    // v2.1.11 T2：导入成功后的"是否核对移除pending数据？"提醒 + 移除文件导入入库
+    function promptRemovalReconcile(yearMonth) {
+      // 防御：旧 preload 无 removed api → 静默跳过（不影响导入主流程）
+      if (!desktopApi || !desktopApi.pending || !desktopApi.pending.removed
+          || typeof desktopApi.pending.removed.pickFiles !== 'function') {
+        return;
+      }
+      openModal(createConfirmDialog({
+        message:
+          `${yearMonth} 数据已导入。<br><br>` +
+          '是否核对<strong>移除pending数据</strong>？<br>' +
+          '<span style="font-size:12px;color:#888;">' +
+          '（导入"移除归档Pending账单"文件，对账时自动标记哪些"消失(missing)"行已被移除归档）</span>',
+        confirmText: '是，导入移除文件',
+        cancelText: '否，跳过',
+        onConfirm: async () => {
+          closeModal();
+          await importRemovedFile(yearMonth);
+        }
+        // onCancel 默认 closeModal（createConfirmDialog 内置）；选否 = 现状不变
+      }));
+    }
+
+    async function importRemovedFile(yearMonth) {
+      let pickResult;
+      try {
+        pickResult = await desktopApi.pending.removed.pickFiles();
+      } catch (err) {
+        openModal(createAlertDialog('打开文件选择对话框失败：' + (err && err.message ? err.message : String(err))));
+        return;
+      }
+      if (!pickResult || pickResult.cancelled
+          || !Array.isArray(pickResult.files) || pickResult.files.length === 0) {
+        return; // 用户取消选文件 = 不导入（现状不变）
+      }
+      try {
+        const result = await desktopApi.pending.removed.import({ yearMonth, files: pickResult.files });
+        if (!result || result.status === 'cancelled') return;
+        if (result.status === 'success') {
+          openModal(createAlertDialog(
+            `移除归档数据已入库：${yearMonth} 共 ${result.inserted} 行` +
+            (result.deleted > 0 ? `（覆盖旧 ${result.deleted} 行）` : '') +
+            '。<br>对账后将自动标记 missing 行的移除核对状态。'
+          ));
+        } else {
+          const detail = Array.isArray(result.detailLines) && result.detailLines.length > 0
+            ? '<br><span style="font-size:12px;color:#888;">' + result.detailLines.join('<br>') + '</span>'
+            : '';
+          openModal(createAlertDialog('移除文件导入失败：' + (result.message || '未知错误') + detail));
+        }
+      } catch (err) {
+        openModal(createAlertDialog('移除文件导入异常：' + (err && err.message ? err.message : String(err))));
       }
     }
 
@@ -596,6 +655,28 @@ window.__rendererPending = (function () {
       openDialog(months[1], months[0]);
     }
 
+    // I1 + I2（v2.1.11 SR-FIX Round 1）+ I-R2-1（SR Round 2）：拼接移除核对摘要文案
+    //   （纯文本，状态框 textContent 渲染）。reconcile:run 返回 removalMatch 三态：
+    //     - { error: true }（matchRemoval 抛错，main.js catch 返回失败标记，I-R2-1）
+    //         → "移除核对执行异常，请查看活动日志"
+    //         ⚠️ 必须与 null 区分：移除数据确实存在但匹配崩溃时，不能显示"无移除归档数据"（与事实相反，误导对账）
+    //     - { matchedCount, missingUnmatched, removedUnmatched }（该上月有移除归档数据，已执行核对）
+    //         → "移除核对：已匹配 N / missing 未匹配 M / 移除未匹配 K"
+    //     - null（该上月无移除归档数据 countByMonth=0，未触发核对，main.js:10094-10099）
+    //         → I2 提示"该上月无移除归档数据，未执行移除核对"，避免用户误判已生效
+    function buildRemovalMatchSummary(upperMonth, removalMatch) {
+      if (removalMatch && typeof removalMatch === 'object') {
+        if (removalMatch.error) {
+          return ' 移除核对执行异常，请查看活动日志。';
+        }
+        const matched = removalMatch.matchedCount || 0;
+        const missingUnmatched = removalMatch.missingUnmatched || 0;
+        const removedUnmatched = removalMatch.removedUnmatched || 0;
+        return ` 移除核对：已匹配 ${matched} / missing 未匹配 ${missingUnmatched} / 移除未匹配 ${removedUnmatched}。`;
+      }
+      return ` （上月 ${upperMonth} 无移除归档数据，未执行移除核对）`;
+    }
+
     async function runReconciliation(upperMonth, lowerMonth) {
       state.pending.running = true;
       state.pending.latestRunResult = null;
@@ -614,6 +695,10 @@ window.__rendererPending = (function () {
             `（${result.statNew || 0} 新增 / ${result.statMissing || 0} 消失 / ${result.statChanged || 0} 变更），` +
             '可点击"导出差异"另存。';
         }
+        // I1 + I2（v2.1.11 SR-FIX Round 1）：移除核对摘要反馈
+        //   - result.removalMatch 非 null（该上月有移除归档数据，已执行核对）→ 追加匹配摘要
+        //   - result.removalMatch 为 null（该上月无移除归档数据，未触发核对）→ 提示未执行，避免误判已生效
+        state.pending.latestRunResult += buildRemovalMatchSummary(upperMonth, result.removalMatch);
         state.pending.latestRunId = result.runId || null;
         refreshPendingUi();
       } catch (err) {
@@ -798,7 +883,13 @@ window.__rendererPending = (function () {
             }
             if (!result || result.status === 'cancelled') return;
             if (result.status === 'success') {
-              openModal(createAlertDialog(`导出成功：${result.path}（共 ${result.rowCount || 0} 行，changed 每对展 2 行）`));
+              let successMsg = `导出成功：${result.path}（共 ${result.rowCount || 0} 行，changed 每对展 2 行）`;
+              // I3（v2.1.11 SR-FIX Round 1）：聚合导出不含移除核对 sheet；若确有移除数据则提示改用「导出指定月份」
+              //   createAlertDialog 走 innerHTML 渲染 → 用 <br> 换行（与该弹窗既有 HTML 文案一致）
+              if (choice.scope === 'aggregate' && result.removalDataOmitted) {
+                successMsg += '<br>注意：聚合导出不含移除核对 sheet，请用"导出指定月份"查看移除核对结果。';
+              }
+              openModal(createAlertDialog(successMsg));
             } else {
               openModal(createAlertDialog('导出失败：' + (result.message || '未知错误')));
             }

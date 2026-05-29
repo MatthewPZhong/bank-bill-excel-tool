@@ -2,6 +2,8 @@ node_modules
 dist
 coverage
 *.log
+# v2.1.11 T1：unit/集成等运行日志落盘目录（含 logs/unit-tests/unit-*.log）
+logs/
 .DS_Store
 exports
 tmp

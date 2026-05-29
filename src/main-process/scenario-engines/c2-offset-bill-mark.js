@@ -3,10 +3,15 @@
 // v2.1.7 F4：UI 改名「账单打标」→「银行对账单字段赋值」（DB category 'offset-bill-mark' 不变）
 //   引擎校验放宽：billTypes < 2 → < 1；reconFields = 0 不再 return，走「衍生方案 A 无条件赋值」
 //   PRD §5 / spec §5.7 / §9.5
+// v2.1.11 T3（spec §四 / PRD §2.3 D-T3-1a=AND）：账单类型从单条件 → 多条件 AND
+//   billTypes 行结构 `{seq, field, op, value}` → `{seq, conditions:[{field,op,value},…]}`
+//   一种账单类型 = 多条件全满足（AND）才命中；空 conditions → 不命中任何行
+//   引擎入口 + classify 均做归一化兜底（防御老内存对象 / 跳过 repository 读取的调用方）
 //
 // 行为：
-//   1. 行 3 billTypes：每行 = 一种独立账单类型（带序号 seq）
-//      给每行 bankRow 计算 row.types = [seq] 集合（一行可属多种类型）
+//   1. 行 3 billTypes：每行 = 一种独立账单类型（带序号 seq + conditions 数组）
+//      给每行 bankRow 计算 row._c2Types = [seq] 集合（一行可属多种类型）
+//      命中判定：该类型 conditions.every(c => evaluateCondition(row, c))（AND 全满足）
 //   2. 行 4 reconFields：
 //      - **v2.1.7 衍生方案 A**：reconFields = 0 时不走配对，凡命中 markValue.type 的行直接写赋值
 //      - reconFields ≥ 1 时定义对账字段：{seq, leftType, leftField, rightType, rightField}
@@ -27,13 +32,57 @@ const {
   valuesEqual
 } = require('./engine-utils');
 
+// v2.1.11 T3（spec §4.2 D-T3-mig=a）：把单个 billType 行归一化为多条件结构
+//   - 旧结构 `{seq, field, op, value}` → `{seq, conditions:[{field,op,value}]}`
+//   - 已是新结构（含 conditions 数组）→ 原样保留（幂等）
+//   - 防御：缺失字段补默认（op 缺省 '等于'，其余空串）
+//   归一化是「读取/执行侧兜底」，与 scenarios-repository.normalizeC2Config / dialog 三处对齐，
+//   保证任意一处遗漏都不会让引擎拿到未归一化的老结构而误分类（资金红线）。
+function normalizeBillTypeRow(bt) {
+  if (!bt || typeof bt !== 'object') {
+    return { seq: undefined, conditions: [] };
+  }
+  if (Array.isArray(bt.conditions)) {
+    // 已是新结构：仅保证每条 condition 字段齐全（防御部分缺字段）
+    const conditions = bt.conditions.map((c) => ({
+      field: (c && c.field) || '',
+      op: (c && c.op) || '等于',
+      value: c && c.value !== undefined && c.value !== null ? c.value : ''
+    }));
+    return { ...bt, conditions };
+  }
+  // 旧结构：单条件 {field,op,value} → conditions:[{...}]
+  const { field, op, value, ...rest } = bt;
+  return {
+    ...rest,
+    conditions: [{
+      field: field || '',
+      op: op || '等于',
+      value: value !== undefined && value !== null ? value : ''
+    }]
+  };
+}
+
+// v2.1.11 T3：把整个 billTypes 数组归一化为多条件结构（引擎入口兜底用）
+function normalizeBillTypes(billTypes) {
+  if (!Array.isArray(billTypes)) return [];
+  return billTypes.map(normalizeBillTypeRow);
+}
+
 function classifyRowsByBillTypes(bankRows, billTypes) {
+  // v2.1.11 T3：入参兜底归一化（兼容老 `{seq,field,op,value}` 行 / 防御直接调用方未走 repository 归一化）
+  const normalizedTypes = normalizeBillTypes(billTypes);
   // 给每行 bankRow 算它属于哪些 type seq
   bankRows.forEach((row, index) => {
     ensureRowId(row, index);
     const types = [];
-    billTypes.forEach((typeRow) => {
-      if (evaluateCondition(row, typeRow)) {
+    normalizedTypes.forEach((typeRow) => {
+      const conditions = Array.isArray(typeRow.conditions) ? typeRow.conditions : [];
+      // v2.1.11 T3 D-T3-1a=AND：该类型全部 conditions 满足（AND）才命中
+      //   空 conditions → every 对空数组返 true，但语义上「未配置任何条件」应视为不命中（spec §4.3）
+      //   → 显式拦截：conditions.length === 0 不命中
+      if (conditions.length === 0) return;
+      if (conditions.every((c) => evaluateCondition(row, c))) {
         types.push(typeRow.seq);
       }
     });
@@ -58,7 +107,9 @@ function runC2Scenario(scenario, bankRows) {
   const warningCollector = makeWarningCollector(scenario.id, scenario.name);
   const modCollector = makeModificationCollector();
   const config = scenario.config || {};
-  const billTypes = config.billTypes || [];
+  // v2.1.11 T3（spec §4.2）：引擎入口兜底归一化 billTypes（防御老内存对象 / repository 未归一化的调用方）
+  //   classifyRowsByBillTypes 内部也会归一化一次（幂等），这里先归一化保证 billTypes.length / seq 判定一致
+  const billTypes = normalizeBillTypes(config.billTypes || []);
   const reconFields = config.reconFields || [];
   const markValue = config.markValue || {};
 
@@ -202,6 +253,9 @@ function runC2Scenario(scenario, bankRows) {
 module.exports = {
   classifyRowsByBillTypes,
   isNumericFieldName,
+  // v2.1.11 T3：归一化 helper（unit test + repository / dialog 复用兜底）
+  normalizeBillTypeRow,
+  normalizeBillTypes,
   pairsMatch,
   runC2Scenario
 };

@@ -3034,6 +3034,35 @@ select {
   gap: 6px;
 }
 
+/* v2.1.11 T3：账单类型分组块（每个 billType = 1 块，块内 N 个 AND 条件行）
+   用左边框 + 浅背景把不同账单类型在视觉上分隔（多条件 AND 才直观） */
+.scenario-config-billtype-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  border-left: 3px solid rgba(139, 115, 85, 0.45);
+  background: rgba(0, 0, 0, 0.015);
+  border-radius: 4px;
+}
+
+.scenario-config-billtype-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.scenario-config-billtype-group-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: #8b7355;
+}
+
+.scenario-config-billtype-remove {
+  color: #c0392b;
+}
+
 /* v2.1.7 round 4 B1（spec §10.2.3 Layout-1，spec 参考路径；实际生效在 styles-gemini-extra.css）
    左列 label-stack 纵向堆叠 label "条件" + AND/OR radio；右列 conditions
    原 round 1 横向 .scenario-config-logic-row / -label / round 2 -stack / -stack-option 已废弃

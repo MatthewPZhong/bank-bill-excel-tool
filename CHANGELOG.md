@@ -1,5 +1,54 @@
 # Changelog
 
+## 2.1.11-beta.1 - 2026-05-29
+
+v2.1.10 之后 1 轮迭代（β 范围），**3 个用户追加需求**（性能主线 A3-multi-worker / F5-cont 另起 spec、不在本版）：T1（单元测试运行日志 — 终端 `N/N PASS` 汇总 + 落盘带时间戳日志）+ T2（**新功能** pending 月度移除核对 — 导入「移除归档 Pending 账单」入库 + 对账后自动用对账规则把移除数据与 `missing` 行匹配 + 导出 2 张新 sheet）+ T3（C2「银行对账单字段赋值」配置页 3 项增强 — 账单类型多筛选条件 AND / FundType 严格下拉 / 对账字段可空）。⚠️ **1 个资金/对账红线护栏**（T2 missing↔移除匹配复用对账规则 matchFields + compareFields 语义 + 数值字段归一化）+ **1 个向后兼容迁移**（T3 C2 单条件→多条件惰性迁移）。质量收尾：3 路 adversarial self-review + SR-FIX round 1。
+
+### 新增
+
+- **T2 pending 月度移除核对**（**新功能** / 数据核对 · 导出契约 / spec §三）：在「月度 Pending 数据核对」模块的导入流程上叠加移除核对能力——
+  - **导入后提醒**：某月 pending 数据导入成功后弹 confirmDialog「是否核对移除pending数据？」；选「否」→ 流程零变化（与旧版完全一致）；选「是」→ 选取「移除归档 Pending 账单」xlsx 文件 → 解析入库，关联该导入月份（D-T2-1：该月将作为后续对账的"上月"/`missing` 来源月）
+  - **新增 DB 表**（幂等 migration，不动现有 `pending_rows` / `diff_rows` / `diff_runs`）：`removed_pending_rows`（全 46 列原始数据存 `raw_json` + `order_no` / `recon_id` / `金额` / `channel` / `merchant_id` / `bank_ref` 索引列加速配对 + `year_month` / `source_file` 留痕）+ `pending_removal_matches`（对账后匹配结果，关联 `run_id` / `diff_row_id` / `removed_row_id` / 命中的 `match_field`）；同月重复导入先删旧再插（`replaceByMonth` 幂等）
+  - **移除文件解析**（新建 `removed-reader.js`）：取 workbook 第一个 sheet（模板 sheet 名是数字 ID，不硬编码）→ 按 46 列表头映射；复用 `file-service` xlsx 读取 + `FileValidationError`（缺表头/空文件报错）
+  - **对账后自动匹配**（新建 `removal-match.js` / D-T2-2 对账后自动跑、结果随 run 持久化）：跑「对账」产出 `missing` 后，若该"上月"存在移除数据 → 用**对账规则的 `matchFields` 多轮 fallback 配对**（与 `engine.js` 同一套语义，不另造规则）把 `missing` 行与移除数据匹配；配对后再用**对账规则的 `compareFields` 做内容核对**逐字段比对（金额等数值字段走数值归一化，详「修复」段 SR-FIX C1）
+  - **导出 2 张新 sheet**（仅 `exportSingleRun` / D-T2-5 聚合导出本版不含；位置在现有 sheet 之后 → 天然最右）：
+    - **「missing核对移除」**：行 = 该 run 全部 `missing` 行，末尾新增 1 列**「移除核对状态」**，三态——`核对无误`（配对上且 compareFields 内容全一致）/ `核对有差异：字段(missing值≠移除值)`（配对上但某字段内容不一致）/ `missing有_移除无`（未配对上任何移除行）
+    - **「移除有_missing无」**（条件 sheet：存在未配对的移除行才生成）：按 `raw_json` 还原 46 列展示未匹配上任何 `missing` 的移除行
+  - 表头字体沿用 `Courier New`（与现有 pending 导出一致）
+  - 🔴 **资金/对账红线**：missing↔移除匹配错误会导致核对结论错误；护栏 = 复用经验证的 matchFields/compareFields 语义 + 数值字段归一化 + unit（匹配/内容核对多档）+ integration（端到端契约）+ manual GUI
+
+### 重大变更
+
+- **T3 C2「银行对账单字段赋值」配置页 3 项增强**（业务规则 · UI · 引擎 / 类目 `offset-bill-mark` / spec §四）：
+  - **① 账单类型多筛选条件（AND 全满足）**：`config.billTypes` 从 `[{seq, field, op, value}]` → `[{seq, conditions:[{field, op, value}, …]}]`；同一账单类型可由多个条件 AND 组合定义；UI 每条件行 `[×删除]` 右侧加 `[新增]` 按钮 → 在当前条件行下方插入**空白**条件行（同属一个账单类型 seq）；多条件按 seq 分组渲染、子序号 `#{seq}.{idx+1}`（如 `#1.1` / `#1.2`）；顶部「+新增账单类型」语义不变（新 seq）；引擎 `classifyRowsByBillTypes` 改为"某行满足该类型**全部** conditions(AND) 才归入该 seq"，`evaluateCondition` 单条件判定逻辑不变
+  - **② FundType 值严格单选下拉**（D-T3-2 scope=b / strict=a）：账单类型条件行 + 赋值行（markValue）的字段 = `FundType` 时，值输入框替换为**严格单选下拉**（仅可选枚举值，避免手输错）；枚举值与排序运行时读 `assets/FundType枚举值.xlsx`（新建 `fund-type-enum.js` 读第一个 sheet + 模块级缓存）；**降级**：枚举文件缺失/读取失败 → 回退文本输入 + 一次性提示
+  - **③ 对账字段可空**：放开 C2 对账字段行非空校验，允许整行留空 / 允许删到 0 行（与引擎已支持的 `reconFields=0`「衍生方案A无条件赋值」对齐）
+  - **④ 老数据向后兼容惰性迁移**（D-T3-mig=a）：`scenarios-repository.js` 读取 C2 场景 config 时 `normalizeC2Config` 把旧单条件结构 `{field, op, value}` 归一化为 `{conditions:[{field, op, value}]}`；引擎入口也做一次同样归一化兜底（防御旧内存对象）；写入时统一以 `conditions` 结构持久化——旧场景自动升级、配置不丢
+  - ⚠️ **important-variables**：T3 改 `scenario-engines` + scenario config 结构，已跑 `/check-vars`；前端改动已重跑 `npm run preview:scenario-config-c2`
+
+- **T1 单元测试运行日志**（测试基建 / spec §二）：`npm run test:unit` 不再仅把 `node --test` 输出直接打到终端——改为捕获并解析输出，终端额外打印仿 `integration-runner.js` 风格的 `==== N/N PASS ====` 汇总 + 每文件用例数/耗时；每次运行落盘一份带时间戳纯文本日志 `logs/unit-tests/unit-<YYYYMMDD-HHmmss>.log`（项目根 / gitignore / 头部元信息 + 完整原始输出 + 尾部汇总）；**退出码透传语义不变**（仍以 `node --test` 退出码为真理来源）、`release-check` 串联不变；reverse sync 修正根目录 `CLAUDE.md` 中"No unit test framework — npm run smoke is the only automated test"的过时表述（实际已有 `test:unit` / `test:integration` / `release-check` 三层）
+
+### 修复（SR-FIX round 1）
+
+Phase 完成后 3 路并行 adversarial self-review（sr-t2-redline / sr-t3-redline / sr-cross-cutting）+ 用户手动 GUI 测试，输出 1 实测复现红线 bug + 若干健壮性/体验缺口。详见 `docs/iterations/v2.1.11/self-review-round1-findings.md`。
+
+- **🔴 C1（资金红线 — removal-match 数值字段归一化）**：移除行解析走显示格式串（`"1,234.50"` / `"1,000.00"`）、pending 行入库走 `String(parseFloat(v))`（`"1234.5"` / `"1000"`），两侧裸字符串比较会让金额本应配对的 missing 与移除行系统性失配 → 同一笔同时误报在「missing有_移除无」+「移除有_missing无」两张 sheet。修复：removal-match 比较前对数值类字段两侧统一数值归一化（复用 `engine-utils` 的 `isNumericFieldName` + `parseNumber`，与 C2 引擎 `valuesEqual({numeric:true})` 同口径）；补"金额带千分位/尾零"unit + integration 覆盖
+- **🟡 I1（对账后移除核对结果 UI 反馈）**：对账完成文案追加移除核对摘要（匹配 N 条 / 未匹配 M 条），避免移除核对这一核心能力对用户零反馈
+- **🟡 I4（DELETE 事务原子性）**：`removal-match.js` 把重算前的 `DELETE pending_removal_matches` 挪进与 INSERT 同一事务，避免 INSERT 抛错 ROLLBACK 后旧匹配已删未重建
+- **🟡 I5（FundType 旧值保留）**：strict 下拉遇到旧值不在枚举内时，保留原值为 disabled option + 提示，避免显示与数据背离、用户误选覆盖旧值
+- **手测修复**：markValue 校验误报修复；「移除核对状态」列内容核对增强（接入 compareFields 逐字段内容比对，输出差异字段明细）
+
+### 测试
+
+- `npm run test:unit`：1338 case 全绿（新增 removed-reader / removal-match 数值归一化 / c2 多条件 AND / normalizeC2Config / fund-type-enum 等用例组）
+- `npm run test:integration`：943 断言全绿（新增 `pending-removal-reconcile.js` 端到端契约；C2 多条件分类/赋值/老场景迁移覆盖在 unit — `c2-offset-bill-mark.test.js` + `scenarios-repository-normalize-c2.test.js`）
+- `npm run smoke`：0 regression
+
+### α/β 收口
+
+- **v2.1.11 β（本版）**：T1 + T2 + T3 三个用户追加需求如上
+- **v2.1.11 后续 Phase（另起 spec）**：性能主线 A3-multi-worker（多 worker 并行）+ F5-cont（C4 算法重写），沿用 backlog 已有 D29-D36 决策，不在本 PRD/CHANGELOG 范围
+
 ## 2.1.10 - 2026-05-29（已发布 — PR #54 merged 2026-05-28T15:48:39Z / merge commit 4ad10f9）
 
 v2.1.9 之后 1 轮迭代（β 范围），**4 主线**：A3（runCheck 跨进程化 — worker_threads + 独立 DB 连接 + 跨进程错误回传）+ A4（SQL JOIN chunked 分批 — chunk size 10w + cancel chunk 边界响应 + resume IPC handler）+ N4-cont-1（raw_json 体积治理 — 7 天保留窗口 + idle 30min 自动清 + sentinel `''` v0.3）+ N4-cont-2（FK CASCADE 改造 — `diff_rows.bill_import_id` + `run_id` 加 `ON DELETE CASCADE` + 8-status migration state machine + SR-backup-1 前置）。⚠️ **2 个🔴破坏性变更**（N4-cont-2 DB schema 不可逆 + N4-cont-1 raw_json 不可逆清空）+ **3 个资金红线护栏**（runCheckCore worker/main byte-for-byte + clearStaleSuccessfulRawJson NOT IN 子查询 + N4-cont-2 FK CASCADE schema）+ **5 个 important-variables v12 升格**（Critical 4 + Important-skeleton 1 + 更新 1）。Phase 0-6 完成 / 27+ commits / release-check 全绿（smoke + unit 1238 case / 297 suites + integration 809 断言 / 15 脚本）。

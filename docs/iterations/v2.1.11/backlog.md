@@ -5,7 +5,17 @@
 
 ## 主题概览（候选 — 4 主线 + 2 评估）
 
-### v2.1.11 主线（4 项）
+> **v0.2 范围更新（2026-05-29 — reverse sync）**：用户在 main 新建 v2.1.11 分支后追加 **3 个需求**（T1 单测运行日志 / T2 pending 移除核对 / T3 C2「银行对账单字段赋值」增强），详见 `PRD-v2.1.11.md`。这 3 项与下方性能主线**并存**且**优先推进**；性能主线（A3-multi-worker / F5-cont）顺延为本版后续 Phase，沿用 D29-D36。
+
+### v2.1.11 用户追加需求（2026-05-29 — 优先推进，详见 PRD-v2.1.11.md）
+
+| 编号 | 主题 | 性质 | 风险 | 状态 |
+|---|---|---|---|---|
+| **T1-test-log** | 单元测试运行日志（终端 N/N 汇总 + 落盘存档） | 测试基建 | 🟢 LOW | spec 待产出 |
+| **T2-pending-removal** | pending 月度核对新增「导入移除pending并核对」流程 | 数据核对 · 导出契约 | 🔴 HIGH | spec 待产出 |
+| **T3-c2-config** | C2 字段赋值页增强（多条件 AND / FundType 下拉 / 对账字段可空） | 业务规则 · UI · 引擎 | 🟡 MID | spec 待产出 |
+
+### v2.1.11 性能主线（原立项 4 项 — 顺延为后续 Phase）
 
 | 编号 | 主题 | 性质 | 风险 | 工期预估 | 来源 |
 |---|---|---|---|---|---|
@@ -211,6 +221,6 @@ A3-spread（bankBuRecon / bankStatement / reconIdFix）── 独立可并行
 
 ---
 
-**当前状态**：v0.1（2026-05-28 — v2.1.10 评估"对账时间缩短"方案后立项；A3-multi-worker 主线锁定 acquiringBillCurrency + bizOpRecon + pending 3 模块）。
+**当前状态**：v0.2（2026-05-29 — 用户追加 T1/T2/T3 三需求，已从 main 建 `v2.1.11` 分支，`PRD-v2.1.11.md` v0.1 起草完成；性能主线 A3-multi-worker / F5-cont 顺延为后续 Phase）。
 
-**下一步**：等 v2.1.10 用户测试通过 + SR-FIX 闭环 + 提 PR + merge main → 在 main 上新建 `v2.1.11` 分支 → PM 起四件套。
+**下一步**：用户 review `PRD-v2.1.11.md`（尤其 §三.2 spec decision points）→ 落 spec / tasks / manual-test-checklist → 委托 dev 实现 T1/T2/T3。

@@ -23,7 +23,7 @@ npm run preview:account      # Render account mapping UI screenshot
 npm run startup:measure      # Startup performance profiling
 ```
 
-No unit test framework — `npm run smoke` is the only automated test (integration-level, creates temp dirs and test workbooks).
+Automated tests are three layers, chained by `npm run release-check` (the PASS/FAIL source of truth): `npm run test:unit` (`node:test` specs under `tests/unit/`, via `scripts/run-unit-tests.js` — prints `N/N PASS` and writes a timestamped log to `logs/unit-tests/`), `npm run test:integration` (`scripts/integration/*.js` end-to-end contract scripts, auto-discovered by `scripts/integration-runner.js`), and `npm run smoke` (`scripts/smoke-test.js`, integration-level — creates temp dirs and test workbooks). Add `--coverage` via `npm run test:unit:coverage`.
 
 ## Architecture
 

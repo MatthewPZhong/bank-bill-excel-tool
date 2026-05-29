@@ -887,6 +887,9 @@
 
     function applyScenarioConfigC2PreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
+      // v2.1.11 T3（spec §4.1 D-T3-1a=AND）：billTypes 改多条件 conditions 结构
+      //   类型 #1 演示「多条件 AND」（FundType=outbound Fail 且 Currency=USD），类型 #2 单条件
+      //   FundType 字段值在弹窗内会渲染为严格枚举下拉（来自 assets/FundType枚举值.xlsx，经 IPC 拉取）
       state.scenarioDraft = {
         mode: 'create',
         category: 'offset-bill-mark',
@@ -895,8 +898,13 @@
         priority: 2,
         config: {
           billTypes: [
-            { seq: 1, field: 'FundType', op: '等于', value: 'outbound Fail' },
-            { seq: 2, field: 'FundType', op: '等于', value: 'outbound' }
+            { seq: 1, conditions: [
+              { field: 'FundType', op: '等于', value: 'outbound Fail' },
+              { field: 'Currency', op: '等于', value: 'USD' }
+            ] },
+            { seq: 2, conditions: [
+              { field: 'FundType', op: '等于', value: 'outbound' }
+            ] }
           ],
           reconFields: [
             { seq: 1, leftType: 1, leftField: 'CustomerRef', rightType: 2, rightField: 'CustomerRef' },

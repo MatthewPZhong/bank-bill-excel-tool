@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const {
   classifyRowsByBillTypes,
   isNumericFieldName,
+  normalizeBillTypeRow,
+  normalizeBillTypes,
   pairsMatch,
   runC2Scenario
 } = require('../../../../src/main-process/scenario-engines/c2-offset-bill-mark');
@@ -355,5 +357,138 @@ test.describe('runC2Scenario — 边界', () => {
     const rows = [{ a: 'X', b: '' }];
     runC2Scenario(scenario, rows);
     assert.equal(rows[0]._c2Types, undefined);
+  });
+});
+
+// ========================================================================
+// v2.1.11 T3（spec §4.1-4.3 D-T3-1a=AND）：账单类型多条件 AND
+// ========================================================================
+
+test.describe('normalizeBillTypeRow — 单条件 → 多条件归一化', () => {
+  test('旧单条件 {seq,field,op,value} → conditions:[{...}]（删顶层 field/op/value）', () => {
+    const out = normalizeBillTypeRow({ seq: 1, field: 'FundType', op: '等于', value: 'outbound' });
+    assert.deepEqual(out, { seq: 1, conditions: [{ field: 'FundType', op: '等于', value: 'outbound' }] });
+    assert.equal(out.field, undefined);
+    assert.equal(out.op, undefined);
+    assert.equal(out.value, undefined);
+  });
+
+  test('已是 conditions 结构 → 幂等（仅补齐缺字段）', () => {
+    const input = { seq: 2, conditions: [{ field: 'a', op: '包含', value: 'x' }, { field: 'b', op: '等于', value: 'y' }] };
+    const out = normalizeBillTypeRow(input);
+    assert.deepEqual(out.conditions, [{ field: 'a', op: '包含', value: 'x' }, { field: 'b', op: '等于', value: 'y' }]);
+    // 二次归一化仍等价（幂等）
+    assert.deepEqual(normalizeBillTypeRow(out), out);
+  });
+
+  test('缺字段防御：op 缺省 等于、value 缺省 空串', () => {
+    const out = normalizeBillTypeRow({ seq: 3, conditions: [{ field: 'a' }] });
+    assert.deepEqual(out.conditions, [{ field: 'a', op: '等于', value: '' }]);
+  });
+
+  test('非对象入参 → 安全降级（seq undefined + 空 conditions）', () => {
+    assert.deepEqual(normalizeBillTypeRow(null), { seq: undefined, conditions: [] });
+    assert.deepEqual(normalizeBillTypeRow(undefined), { seq: undefined, conditions: [] });
+  });
+});
+
+test.describe('normalizeBillTypes — 整数组归一化幂等', () => {
+  test('混合新旧结构数组 → 全部归一化为 conditions', () => {
+    const input = [
+      { seq: 1, field: 'a', op: '等于', value: 'x' },
+      { seq: 2, conditions: [{ field: 'b', op: '包含', value: 'y' }] }
+    ];
+    const out = normalizeBillTypes(input);
+    assert.deepEqual(out[0].conditions, [{ field: 'a', op: '等于', value: 'x' }]);
+    assert.deepEqual(out[1].conditions, [{ field: 'b', op: '包含', value: 'y' }]);
+    // 幂等：再归一化一次结果不变
+    assert.deepEqual(normalizeBillTypes(out), out);
+  });
+
+  test('非数组 → 空数组', () => {
+    assert.deepEqual(normalizeBillTypes(null), []);
+    assert.deepEqual(normalizeBillTypes(undefined), []);
+    assert.deepEqual(normalizeBillTypes('x'), []);
+  });
+});
+
+test.describe('classifyRowsByBillTypes — 多条件 AND（D-T3-1a）', () => {
+  test('多条件全满足 → 命中', () => {
+    const rows = [{ FundType: 'outbound Fail', Currency: 'USD' }];
+    const billTypes = [
+      { seq: 1, conditions: [
+        { field: 'FundType', op: '等于', value: 'outbound Fail' },
+        { field: 'Currency', op: '等于', value: 'USD' }
+      ] }
+    ];
+    classifyRowsByBillTypes(rows, billTypes);
+    assert.deepEqual(rows[0]._c2Types, [1]);
+  });
+
+  test('多条件任一不满足 → 不命中', () => {
+    const rows = [{ FundType: 'outbound Fail', Currency: 'EUR' }];
+    const billTypes = [
+      { seq: 1, conditions: [
+        { field: 'FundType', op: '等于', value: 'outbound Fail' },
+        { field: 'Currency', op: '等于', value: 'USD' } // Currency 不满足
+      ] }
+    ];
+    classifyRowsByBillTypes(rows, billTypes);
+    assert.deepEqual(rows[0]._c2Types, []);
+  });
+
+  test('单条件兼容（旧结构）→ 归一化后命中', () => {
+    const rows = [{ FundType: 'outbound' }];
+    // 直接传旧单条件结构（classify 内部 normalizeBillTypes 兜底）
+    const billTypes = [{ seq: 1, field: 'FundType', op: '等于', value: 'outbound' }];
+    classifyRowsByBillTypes(rows, billTypes);
+    assert.deepEqual(rows[0]._c2Types, [1]);
+  });
+
+  test('空 conditions 类型 → 不命中任何行（spec §4.3）', () => {
+    const rows = [{ FundType: 'outbound' }];
+    const billTypes = [{ seq: 1, conditions: [] }];
+    classifyRowsByBillTypes(rows, billTypes);
+    assert.deepEqual(rows[0]._c2Types, []);
+  });
+
+  test('一行命中多个多条件类型 → _c2Types 多元素', () => {
+    const rows = [{ FundType: 'outbound', Currency: 'USD' }];
+    const billTypes = [
+      { seq: 1, conditions: [{ field: 'FundType', op: '等于', value: 'outbound' }] },
+      { seq: 2, conditions: [
+        { field: 'FundType', op: '等于', value: 'outbound' },
+        { field: 'Currency', op: '等于', value: 'USD' }
+      ] }
+    ];
+    classifyRowsByBillTypes(rows, billTypes);
+    assert.deepEqual(rows[0]._c2Types, [1, 2]);
+  });
+});
+
+test.describe('runC2Scenario — 多条件 AND 端到端赋值', () => {
+  test('多条件 AND 命中后无条件赋值（reconFields=0）', () => {
+    const scenario = {
+      id: 1,
+      name: 'C2-multi-cond',
+      config: {
+        billTypes: [
+          { seq: 1, conditions: [
+            { field: 'FundType', op: '等于', value: 'outbound' },
+            { field: 'Currency', op: '等于', value: 'USD' }
+          ] }
+        ],
+        reconFields: [],
+        markValue: { type: 1, field: 'Remark-description', value: 'HIT' }
+      }
+    };
+    const rows = [
+      { FundType: 'outbound', Currency: 'USD', 'Remark-description': '' }, // 命中（两条件全满足）
+      { FundType: 'outbound', Currency: 'EUR', 'Remark-description': '' }  // 不命中（Currency 不符）
+    ];
+    const r = runC2Scenario(scenario, rows);
+    assert.equal(r.modifications.length, 1);
+    assert.equal(rows[0]['Remark-description'], 'HIT');
+    assert.equal(rows[1]['Remark-description'], '');
   });
 });

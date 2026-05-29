@@ -12,6 +12,10 @@ const pendingMonthRepo = require('./backend/pending-db/month-repository');
 const pendingDiffRepo = require('./backend/pending-db/diff-repository');
 const pendingReconcileEngine = require('./backend/pending-reconcile/engine');
 const pendingExportWriter = require('./backend/pending-export/writer');
+// v2.1.11 T2 移除核对：移除归档文件 reader + 入库 repo + 对账后 missing↔移除 匹配
+const pendingRemovedReader = require('./backend/pending-import/removed-reader');
+const pendingRemovedRepo = require('./backend/pending-db/removed-repository');
+const pendingRemovalMatch = require('./backend/pending-reconcile/removal-match');
 const { createPendingSession } = require('./main-process/pending-session');
 const { applyWatermark } = require('./main-process/workbook-watermark');
 // v2.1.6 Module B T9：收单单据币种校验 — session + writer
@@ -46,6 +50,10 @@ const acquiringBillCurrencyWriter = require('./main-process/acquiring-bill-curre
 const pkg = require('../package.json');
 let buildInfo = { commit: 'dev' };
 try { buildInfo = require('./build-info'); } catch (_) { /* dev 期 src/build-info.js 不存在 */ }
+// v2.1.11 T3（spec §4.5 / 决策 D-T3-2-src=xlsx）：C2「银行对账单字段赋值」FundType 字段值枚举
+//   运行时读 assets/FundType枚举值.xlsx（main 进程 require；经 IPC scenarios:fund-type-enum 暴露给 renderer）
+//   preload 无法 require 自定义模块（Electron sandbox），故走 IPC 而非 inline 副本
+const { loadFundTypeEnum, FUND_TYPE_ENUM_FILE_NAME } = require('./constants/fund-type-enum');
 // v2.1.2 T2：月度银行对账单BU回填校验模块
 const { createBankBuReconSession, runReconciliation: runBankBuRecon } = require('./main-process/bank-bu-recon-session');
 const {
@@ -2953,6 +2961,27 @@ function registerAppHandlers() {
       return { status: 'ok', scenario };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  // v2.1.11 T3（spec §4.5 / 决策 D-T3-2-src=xlsx / strict=a）：C2 FundType 字段值枚举
+  //   - renderer 打开 C2 配置弹窗时拉取，条件行 value + 赋值行 value（field==='FundType'）渲染为严格下拉
+  //   - 路径解析：打包后用 app.getAppPath() 拼 assets（与 getBundledIconPath 同范式）；
+  //     dev 期传 undefined → fund-type-enum 模块用默认路径 <repo>/assets/
+  //   - 降级（文件缺失/读取失败）：loadFundTypeEnum 返空数组（不抛错）→ renderer 回退文本输入 + 一次性提示
+  //   - 模块级缓存（按解析路径）：重复调用不反复读盘
+  ipcMain.handle('scenarios:fund-type-enum', () => {
+    try {
+      const candidates = [
+        path.join(app.getAppPath(), 'assets', FUND_TYPE_ENUM_FILE_NAME),
+        path.join(__dirname, '..', 'assets', FUND_TYPE_ENUM_FILE_NAME)
+      ];
+      const found = candidates.find((p) => fs.existsSync(p));
+      // found 存在 → 显式传入（打包/dev 都命中）；都不存在 → 传第一个候选，loadFundTypeEnum 内降级返空数组
+      const values = loadFundTypeEnum(found || candidates[0]);
+      return { status: 'ok', values };
+    } catch (error) {
+      // 防御：任何异常也降级为空数组（renderer 据此回退文本输入），不阻塞弹窗
+      return { status: 'ok', values: [] };
     }
   });
   // PR #35 Codex round 3 P2（资金红线分流）：4 个 scenarios:* 入口
@@ -10055,7 +10084,37 @@ function registerNewAccountHandlers() {
       lowerMonth: payload.lowerMonth,
       rule
     });
-    return { status: 'success', ...result };
+
+    // v2.1.11 T2（D-T2-2 对账后自动匹配）：若该 upperMonth 有移除归档数据 → 用同一套 matchFields
+    //   把该 run 的 missing 行与移除数据配对，结果落 pending_removal_matches（供导出标记）。
+    //   matchFields 复用对账规则（资金红线：不另造规则）。匹配失败 graceful —— 对账已成功落库，
+    //   不因移除核对异常而让整个对账 IPC 报错（用户仍能拿到对账结果 + 重跑导出触发匹配）。
+    let removalMatchResult = null;
+    try {
+      if (result && result.runId
+          && pendingRemovedRepo.countByMonth(pendingDb, payload.upperMonth) > 0) {
+        removalMatchResult = pendingRemovalMatch.matchRemoval(
+          pendingDb, result.runId, payload.upperMonth, rule.matchFields
+        );
+      }
+    } catch (matchErr) {
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'pending-removal-match',
+        message: '[pending] 对账后移除核对匹配失败（对账结果不受影响）',
+        details: [matchErr && matchErr.message ? matchErr.message : String(matchErr)],
+        stack: matchErr && matchErr.stack ? matchErr.stack : undefined
+      });
+      // I-R2-1（v2.1.11 SR Round 2）：匹配抛错时返回「可区分的失败标记」，而非沿用 null。
+      //   null 语义已被「countByMonth=0 无移除归档数据，未触发核对」占用（上面 try 内 removalMatchResult
+      //   初值 null 且仅在有数据时才赋值）。若 error 也返回 null，renderer 会显示"无移除归档数据"——
+      //   与"数据确实存在但匹配崩溃"事实相反（资金/对账模块误导）。故 error 态独立标记 { error: true }，
+      //   由 buildRemovalMatchSummary 区分出"移除核对执行异常"文案。
+      removalMatchResult = { error: true };
+    }
+
+    return { status: 'success', ...result, removalMatch: removalMatchResult };
   });
 
   ipcMain.handle('pending:diff:runs-list', () => {
@@ -10110,6 +10169,64 @@ function registerNewAccountHandlers() {
     if (saveResult.canceled || !saveResult.filePath) return { status: 'cancelled' };
     try {
       return pendingExportWriter.exportAggregate(pendingDb, saveResult.filePath);
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // ============================================================
+  // v2.1.11 T2 移除核对：移除归档 Pending 文件 — pending:removed:* IPC handler
+  //   流程（spec §3.3 / D-T2-1）：导入某月数据成功 → renderer 弹"是否核对移除pending数据？"
+  //     → 是 → pickFiles → import（解析 + 入库 removed_pending_rows，关联导入月份 = 后续对账 upperMonth）
+  //   匹配在对账后自动触发（见 pending:reconcile:run handler 末尾，D-T2-2）。
+  // ============================================================
+
+  ipcMain.handle('pending:removed:pick-files', async () => {
+    const result = await dialog.showOpenDialog({
+      title: '选择移除归档 Pending 文件',
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      properties: ['openFile', 'multiSelections']
+    });
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return { cancelled: true };
+    }
+    return { cancelled: false, files: result.filePaths };
+  });
+
+  trackedIpcHandle('pending:removed:import', '月度 Pending', '导入移除核对', (_event, payload = {}) => {
+    if (!pendingDb) return { status: 'error', message: 'Pending DB 未初始化' };
+    const { yearMonth, files } = payload || {};
+    if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
+      return { status: 'error', message: 'yearMonth 格式错误（应为 YYYY-MM）' };
+    }
+    if (!Array.isArray(files) || files.length === 0) {
+      return { status: 'error', message: '未选择移除归档文件' };
+    }
+    // 多文件合并解析；任一文件解析失败（表头不符/空文件）→ 整体报错，不入库（资金红线：避免半写）
+    const allRows = [];
+    const sourceNames = [];
+    try {
+      for (const fp of files) {
+        const parsed = pendingRemovedReader.readRemovedPendingFile(fp);
+        for (const r of parsed.rows) allRows.push(r);
+        sourceNames.push(parsed.fileName || fp);
+      }
+    } catch (err) {
+      return {
+        status: 'error',
+        message: err && err.message ? err.message : String(err),
+        detailLines: err && Array.isArray(err.detailLines) ? err.detailLines : undefined
+      };
+    }
+    try {
+      const result = pendingRemovedRepo.replaceByMonth(pendingDb, yearMonth, allRows, sourceNames.join(', '));
+      return {
+        status: 'success',
+        yearMonth,
+        inserted: result.inserted,
+        deleted: result.deleted,
+        fileCount: files.length
+      };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }

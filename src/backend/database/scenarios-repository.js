@@ -74,6 +74,40 @@ function parseConfig(configJson) {
   }
 }
 
+// v2.1.11 T3（spec §4.2 / PRD §2.3 D-T3-mig=a）：C2「银行对账单字段赋值」老数据惰性迁移
+//   billTypes 行结构 `{seq, field, op, value}`（单条件）→ `{seq, conditions:[{field,op,value},…]}`（多条件）
+//   - 在读取 config 时归一化：旧顶层 {field,op,value} 包成 conditions:[{...}]；已是新结构则幂等
+//   - 写回（saveScenario）以新结构持久化；引擎入口（c2-offset-bill-mark.js）再兜底归一化一次
+//   - 仅作用于 category='offset-bill-mark'（C4 已是 conditions 结构，C1/C3 无 billTypes，不动）
+//   🔴 资金红线：C2 是赋值引擎，分类错会赋错值/漏赋值；老场景必须能正常打开 + 分类正确
+function normalizeC2Config(config) {
+  if (!config || typeof config !== 'object') return config;
+  if (!Array.isArray(config.billTypes)) return config;
+  const billTypes = config.billTypes.map((bt) => {
+    if (!bt || typeof bt !== 'object') return bt;
+    if (Array.isArray(bt.conditions)) {
+      // 已是新结构：保证每条 condition 字段齐全（防御部分缺字段）
+      const conditions = bt.conditions.map((c) => ({
+        field: (c && c.field) || '',
+        op: (c && c.op) || '等于',
+        value: c && c.value !== undefined && c.value !== null ? c.value : ''
+      }));
+      return { ...bt, conditions };
+    }
+    // 旧结构：单条件 {field,op,value} → conditions:[{...}]（删除顶层 field/op/value，以 conditions 为准）
+    const { field, op, value, ...rest } = bt;
+    return {
+      ...rest,
+      conditions: [{
+        field: field || '',
+        op: op || '等于',
+        value: value !== undefined && value !== null ? value : ''
+      }]
+    };
+  });
+  return { ...config, billTypes };
+}
+
 function rowToListItem(row) {
   return {
     id: Number(row.id),
@@ -92,9 +126,14 @@ function rowToListItem(row) {
 }
 
 function rowToDetail(row) {
+  let config = parseConfig(row.config_json);
+  // v2.1.11 T3：C2 读取时惰性迁移 billTypes 单条件 → 多条件 conditions（spec §4.2）
+  if (row.category === 'offset-bill-mark') {
+    config = normalizeC2Config(config);
+  }
   return {
     ...rowToListItem(row),
-    config: parseConfig(row.config_json)
+    config
   };
 }
 
@@ -511,5 +550,7 @@ module.exports = {
   // v2.1.9 SR-FIX-1 (spec §16.3 / §6.3.2)：按 (channel_id, name) 查（bundle import 路径用）
   findByChannelAndName,
   // 测试 hook：暴露 UNIQUE 错误判定 helper（unit test 验证兼容性用）
-  isScenarioNameUniqueError
+  isScenarioNameUniqueError,
+  // v2.1.11 T3：C2 老数据惰性迁移 helper（unit test 验证迁移幂等 + 写回路径复用）
+  normalizeC2Config
 };
