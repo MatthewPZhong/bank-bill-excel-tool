@@ -1,7 +1,7 @@
 {
   "meta": {
-    "version": "2.1.11-beta.1",
-    "scannedAt": "2026-05-29T06:53:25.434Z",
+    "version": "2.1.11",
+    "scannedAt": "2026-05-29T09:04:13.903Z",
     "root": "src",
     "totalFiles": 98,
     "totalTopLevelNames": 1048,
@@ -5134,6 +5134,24 @@
         "fileSpan": 2
       },
       {
+        "name": "removalMatch",
+        "defFiles": [
+          "src/backend/pending-export/writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 4
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 8
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 2
+      },
+      {
         "name": "BIZ_OP_ACCOUNT_KEY_DB_COLUMN",
         "defFiles": [
           "src/backend/biz-op-recon-db/columns.js"
@@ -5146,24 +5164,6 @@
           {
             "file": "src/main-process/biz-op-recon-session.js",
             "count": 9
-          }
-        ],
-        "totalHits": 11,
-        "fileSpan": 2
-      },
-      {
-        "name": "removalMatch",
-        "defFiles": [
-          "src/backend/pending-export/writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-export/writer.js",
-            "count": 4
-          },
-          {
-            "file": "src/renderer-pending.js",
-            "count": 7
           }
         ],
         "totalHits": 11,
@@ -22011,6 +22011,24 @@
       "fileSpan": 2
     },
     {
+      "name": "removalMatch",
+      "defFiles": [
+        "src/backend/pending-export/writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 4
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 8
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 2
+    },
+    {
       "name": "BIZ_OP_ACCOUNT_KEY_DB_COLUMN",
       "defFiles": [
         "src/backend/biz-op-recon-db/columns.js"
@@ -22023,24 +22041,6 @@
         {
           "file": "src/main-process/biz-op-recon-session.js",
           "count": 9
-        }
-      ],
-      "totalHits": 11,
-      "fileSpan": 2
-    },
-    {
-      "name": "removalMatch",
-      "defFiles": [
-        "src/backend/pending-export/writer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pending-export/writer.js",
-          "count": 4
-        },
-        {
-          "file": "src/renderer-pending.js",
-          "count": 7
         }
       ],
       "totalHits": 11,

@@ -9,7 +9,7 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
-## 2.1.11-beta.1（2026-05-29）
+## 2.1.11（2026-05-29）
 
 v2.1.10 之后 1 轮迭代（β 范围），3 个用户追加需求（性能主线 A3-multi-worker / F5-cont 另起 spec）：T1（单元测试运行日志 — 终端 `N/N PASS` + 落盘带时间戳日志）+ T2（**新功能** pending 月度移除核对 — 导入移除归档文件入库 + 对账后自动用对账规则把移除数据与 `missing` 行匹配 + 导出 2 张新 sheet）+ T3（C2「银行对账单字段赋值」3 项增强 — 账单类型多条件 AND / FundType 严格下拉 / 对账字段可空）。⚠️ 1 个资金/对账红线护栏（T2 匹配复用对账规则 matchFields + compareFields + 数值归一化）+ 1 个向后兼容迁移（T3 C2 单条件→多条件惰性迁移）。质量收尾：3 路 adversarial self-review + SR-FIX round 1。
 

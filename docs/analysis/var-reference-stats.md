@@ -4,8 +4,8 @@
 
 | 字段 | 值 |
 |---|---|
-| 版本 | v2.1.11-beta.1 |
-| 扫描时间 | 2026-5-29 14:53:25 |
+| 版本 | v2.1.11 |
+| 扫描时间 | 2026-5-29 17:04:13 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 98 |
 | 顶层声明总数 | 1048 |
@@ -208,8 +208,8 @@
 | `getCurrencyOptionEntries` | 12 | src/renderer.js |
 | `importRepo` | 12 | src/backend/acquiring-bill-currency-import/reader.js |
 | `parseAmount` | 12 | src/backend/biz-op-recon-import/validator.js |
+| `removalMatch` | 12 | src/backend/pending-export/writer.js |
 | `BIZ_OP_ACCOUNT_KEY_DB_COLUMN` | 11 | src/backend/biz-op-recon-db/columns.js |
-| `removalMatch` | 11 | src/backend/pending-export/writer.js |
 | `rendererPending` | 11 | src/renderer.js |
 | `getTemplate` | 10 | src/backend/database/template-repository.js |
 | `serializeError` | 10 | src/main-process/serialize-error.js |
@@ -1257,8 +1257,8 @@
 | `getCurrencyOptionEntries` | 2 | 12 | 1 | src/renderer.js(7), src/renderer-dialogs.js(5) |
 | `importRepo` | 2 | 12 | 2 | src/main-process/acquiring-bill-currency-session.js(7), src/backend/acquiring-bill-currency-import/reader.js(5) |
 | `parseAmount` | 2 | 12 | 2 | src/backend/biz-op-recon-import/validator.js(8), src/main-process/biz-op-recon-session.js(4) |
+| `removalMatch` | 2 | 12 | 1 | src/renderer-pending.js(8), src/backend/pending-export/writer.js(4) |
 | `BIZ_OP_ACCOUNT_KEY_DB_COLUMN` | 2 | 11 | 1 | src/main-process/biz-op-recon-session.js(9), src/backend/biz-op-recon-db/columns.js(2) |
-| `removalMatch` | 2 | 11 | 1 | src/renderer-pending.js(7), src/backend/pending-export/writer.js(4) |
 | `rendererPending` | 2 | 11 | 1 | src/renderer-previews.js(9), src/renderer.js(2) |
 | `getTemplate` | 2 | 10 | 1 | src/backend/database/template-repository.js(8), src/backend/database.js(2) |
 | `serializeError` | 2 | 10 | 1 | src/main-process/run-check-worker.js(7), src/main-process/serialize-error.js(3) |
