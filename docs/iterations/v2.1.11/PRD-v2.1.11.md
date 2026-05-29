@@ -220,6 +220,16 @@
 
 ---
 
-## 八、实施记录（dev 阶段填）
+## 八、实施记录（PR #55 已合并 — 2026-05-29）
 
-> Phase / PR / commit / 测试结果在此追加。
+### PR #55 — v2.1.11-beta.1（merge commit `a9d90bb`，merged 2026-05-29T08:54:22Z）
+
+- **范围**：T1 单测运行日志 + T2 pending 月度移除核对（新功能）+ T3 C2「银行对账单字段赋值」3 项增强。
+- **实现**：新增 5 个 backend 模块（`removed-reader` / `removed-repository` / `removal-match` / `fund-type-enum` + 2 新表 migration）；改造 `renderer-dialogs` / `renderer-pending` / `main` / `preload` / `writer` / `scenarios-repository` / c2 引擎；+8 新 unit + 1 新 integration（`pending-removal-reconcile`）。
+- **质量历程**：3 轮 adversarial self-review（实现后 3 路 / 提 PR 前 2 路 / 合并前 2 路）+ 用户手测 + Codex review。
+  - SR-FIX R1：C1 数值归一化红线 + I1-I5；手测：markValue 校验误报 + 状态列两态→三态内容核对。
+  - SR R2：清 4🔴（临时文件 / asset 未入库 / 编造脚本名 / 版本标记）+ I-R2-1（graceful 反馈区分）。
+  - Codex review：F1（覆盖导入清同月移除归档 · 🔴 删数据/对账污染红线）+ F2（lockfile 版本）→ 修复 + **Codex 复审 👍**。
+  - SR R3：F1 代码深审零问题 + 文档可追溯性补强（CHANGELOG/spec/PRD/PR body 回写 F1）。
+- **测试**：unit 1348 / integration 954（`pending-removal-reconcile` 62）/ smoke 全绿；release-check gate 通过。
+- **follow-up**（v2.1.12+ 评估）：I6 bundle 导入旧结构 C2 端到端测试；I7 `important-variables.md` 升格 C2 `billTypes`/`conditions` schema。
