@@ -131,6 +131,7 @@ renderer-pending.js 导入成功回调（约 :432，refreshPendingUi 前）
 
 ### 3.4 missing↔移除匹配（`removal-match.js`，D-T2-2=对账后自动）
 - 触发点：`engine.js` reconcile 跑完产出 diff_rows 后（或 `pending-session.js` 对账回调末尾），若 `removed_pending_rows` 存在该 `upperMonth` 数据 → 调 `matchRemoval(db, runId, upperMonth, matchFields)`。
+- ⚠️ **覆盖导入清理（Codex PR#55 F1 · 删除数据红线）**：`month-repository.deleteMonth`（覆盖导入某月时由 import worker 调用）必须同步清同月 `removed_pending_rows` + 关联 `pending_removal_matches`（matches 在删 `diff_runs` **之前**删，避免孤儿）。否则旧归档残留 → 上述 `countByMonth>0` 自动触发会用陈旧归档给新 missing 行错误标核对状态（即使导入时点「否，跳过」）。语义：覆盖导入某月 = 该月移除归档失效，需重新导入。
 - 算法（复用 engine 的 matchFields 多轮 fallback 语义）：
 ```
 matchRemoval(db, runId, upperMonth, matchFields):

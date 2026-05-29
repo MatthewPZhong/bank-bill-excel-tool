@@ -37,6 +37,7 @@ Phase 完成后 3 路并行 adversarial self-review（sr-t2-redline / sr-t3-redl
 - **🟡 I4（DELETE 事务原子性）**：`removal-match.js` 把重算前的 `DELETE pending_removal_matches` 挪进与 INSERT 同一事务，避免 INSERT 抛错 ROLLBACK 后旧匹配已删未重建
 - **🟡 I5（FundType 旧值保留）**：strict 下拉遇到旧值不在枚举内时，保留原值为 disabled option + 提示，避免显示与数据背离、用户误选覆盖旧值
 - **手测修复**：markValue 校验误报修复；「移除核对状态」列内容核对增强（接入 compareFields 逐字段内容比对，输出差异字段明细）
+- **🔴 Codex PR #55 review 修复 F1（对账数据污染 · 删除数据行为）**：覆盖导入某月 pending（`month-repository.deleteMonth`）时同步清除该月移除归档 `removed_pending_rows` + 核对匹配 `pending_removal_matches`——否则旧归档残留，`pending:reconcile:run`（`countByMonth>0` 自动触发）会用陈旧归档给新 missing 行错误标核对状态（即使导入时点「否，跳过」）；删除顺序 matches 在 diff_runs 之前避免孤儿。**注意：覆盖导入某月 = 该月移除归档失效，需重新导入移除文件核对**。补 unit 3 case + integration Step10。F2：`package-lock.json` 根版本同步 2.1.11-beta.1
 
 ### 测试
 

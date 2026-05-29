@@ -192,7 +192,7 @@
 | AC1 | `npm run test:unit` 输出 `N/N PASS`+耗时，且生成带时间戳日志文件 | 跑命令看输出 + 查日志文件 |
 | AC2 | `release-check` 仍全 PASS（退出码语义不变） | `npm run release-check` |
 | AC3 | 导入 pending 后弹移除核对提醒；选否流程不变 | GUI 手测 |
-| AC4 | 导入移除文件入库；对账后 missing 正确标记"已匹配/未匹配移除" | GUI + integration |
+| AC4 | 导入移除文件入库；对账后 missing 标三态（核对无误 / 核对有差异 / missing有_移除无）；覆盖导入同月时旧移除归档被清、不复用 | GUI + integration |
 | AC5 | 导出最右 sheet 含 missing+匹配标记；有"移除有missing无"时出第二 sheet | 打开导出文件核对 |
 | AC6 | C2 账单类型可加多条件(AND)；行内"新增"插空白条件行；老场景正常打开 | GUI + 迁移 unit |
 | AC7 | C2 字段=FundType 时 value 为下拉（枚举来自 xlsx，排序一致） | GUI（需 FundType xlsx 就位） |
