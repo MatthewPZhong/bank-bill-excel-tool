@@ -159,7 +159,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     importGatewayRecon: () => ipcRenderer.invoke('gateway-recon:import'),
     run: () => ipcRenderer.invoke('bank-statement:run'),
     export: () => ipcRenderer.invoke('bank-statement:export'),
-    sessionStatus: () => ipcRenderer.invoke('bank-statement:session-status')
+    sessionStatus: () => ipcRenderer.invoke('bank-statement:session-status'),
+    // v2.1.12 需求6：数据侧预检 — 当前导入银行对账单中满足启用 C3 场景「银行条件」的候选行数
+    c3CandidateCount: () => ipcRenderer.invoke('bank-statement:c3-candidate-count')
   },
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（PR-B 实装算法/IO；本 PR 占位）
   // payload 形态见 docs/iterations/v2.1.0-beta.1/spec.md §三

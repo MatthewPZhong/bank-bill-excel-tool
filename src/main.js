@@ -80,6 +80,8 @@ const {
   readFlowFile
 } = require('./backend/biz-op-recon-import/reader');
 const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-dispatcher');
+// v2.1.12 需求6：数据侧预检只读 helper（统计 C3 银行侧候选行，不触碰 runC3Scenario 资金逻辑）
+const { countC3BankCandidates } = require('./main-process/scenario-engines/c3-gateway-recon-join');
 // v2.1.9 N5：dispatcher 双维调度依赖 channels-repository（findByNameAndLocation + getBuiltinGeneral）
 const channelsRepository = require('./backend/database/channels-repository');
 // v2.1.9 N7：场景模板 bundle 序列化 / 解析 / 类型识别（spec §六）
@@ -3630,6 +3632,27 @@ function registerAppHandlers() {
       hasProcessingResult: processingResult !== null,
       processingStats: processingResult ? processingResult.stats : null
     };
+  });
+
+  // v2.1.12 需求6：数据侧预检 — 统计当前导入银行对账单中满足「启用的 C3(gateway-recon-join) 场景银行条件」的候选行数
+  //   用途：让「资金对账不平跳过提示」仅在确有候选行时弹出（启用 C3 但本次数据无命中行 → 不弹、不提示跳过）
+  //   只读查询，不进 trackedIpcHandle 计数（参考 scenarios:list 范式）
+  ipcMain.handle('bank-statement:c3-candidate-count', () => {
+    try {
+      if (!bankStatementSession || !Array.isArray(bankStatementSession.rows) || bankStatementSession.rows.length === 0) {
+        return { status: 'ok', candidateCount: 0 };
+      }
+      const c3Scenarios = database.listScenarios().filter((s) => s.category === 'gateway-recon-join' && s.enabled);
+      let candidateCount = 0;
+      for (const meta of c3Scenarios) {
+        const detail = database.getScenario(meta.id);
+        candidateCount += countC3BankCandidates(detail && detail.config, bankStatementSession.rows);
+        if (candidateCount > 0) break; // 有候选即可，提前退出
+      }
+      return { status: 'ok', candidateCount };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error), candidateCount: 0 };
+    }
   });
 
   // ===== v2.1.0-beta.1 PR-B：单据对账 ReconID 修复模块 IPC（PR-A 占位 → PR-B 实装）=====

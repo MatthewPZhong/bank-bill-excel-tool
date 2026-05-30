@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { runC3Scenario } = require('../../../../src/main-process/scenario-engines/c3-gateway-recon-join');
+const { runC3Scenario, countC3BankCandidates } = require('../../../../src/main-process/scenario-engines/c3-gateway-recon-join');
 
 // ========================================================================
 // v2.1.8 N2 — C3「对账成立后赋值」新增"自取值"模式（assign-gw）
@@ -22,6 +22,34 @@ function makeScenario(assignOverrides) {
     }
   };
 }
+
+test.describe('countC3BankCandidates — v2.1.12 需求6 数据侧预检只读 helper', () => {
+  test('无银行 conditions → 兜底所有行皆候选（与引擎 bankRowsFiltered 兜底一致）', () => {
+    assert.equal(countC3BankCandidates({ reconFields: [], assign: {} }, [{ OrderId: 'A' }, { OrderId: 'B' }]), 2);
+  });
+
+  test('有银行 condition「包含」→ 仅命中行计入', () => {
+    const config = { conditions: [{ side: '银行', field: 'BizType', op: '包含', value: 'PAY' }] };
+    const bankRows = [{ BizType: 'PAYMENT' }, { BizType: 'REFUND' }, { BizType: 'PAY-X' }];
+    assert.equal(countC3BankCandidates(config, bankRows), 2);
+  });
+
+  test('银行 condition 全不命中 → 0', () => {
+    const config = { conditions: [{ side: '银行', field: 'BizType', op: '包含', value: 'PAY' }] };
+    assert.equal(countC3BankCandidates(config, [{ BizType: 'REFUND' }, { BizType: 'FEE' }]), 0);
+  });
+
+  test('仅网关侧 conditions → 不影响银行候选（无银行条件视为全候选）', () => {
+    const config = { conditions: [{ side: '网关', field: 'Status', op: '等于', value: 'OK' }] };
+    assert.equal(countC3BankCandidates(config, [{ OrderId: 'A' }, { OrderId: 'B' }]), 2);
+  });
+
+  test('空 bankRows / null config 兜底不崩', () => {
+    assert.equal(countC3BankCandidates({ conditions: [] }, []), 0);
+    assert.equal(countC3BankCandidates(null, [{ X: 1 }]), 1);
+    assert.equal(countC3BankCandidates({}, null), 0);
+  });
+});
 
 test.describe('runC3Scenario — mode=direct 行为回归（v2.1.7 baseline）', () => {
   test('mode=direct：从 gw 字段取值写入 bank 字段', () => {

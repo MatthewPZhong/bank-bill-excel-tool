@@ -3420,6 +3420,9 @@ async function maybePromptGatewayReconImport() {
     const hasC3Enabled = scenarios.some((s) => s.category === 'gateway-recon-join' && (s.enabled === 1 || s.enabled === true));
     if (!hasC3Enabled) return;
     if (state.gatewayReconSession) return;
+    // v2.1.12 需求6：数据侧预检 — 启用 C3 但本次导入数据无候选行（无满足银行条件的行）→ 不弹提示
+    const cc = await window.desktopApi.bankStatement.c3CandidateCount();
+    if (!cc || cc.status !== 'ok' || !(cc.candidateCount > 0)) return;
     openModal(createConfirmDialog({
       message: '已启用「资金对账不平」类场景，需要导入「资金对账不平结果表」。<br>是否现在导入？（也可稍后再导入；不导入则该类场景将被跳过）',
       confirmText: '导入文件',
@@ -3499,7 +3502,11 @@ async function shouldPromptGatewayReconAtRun() {
   try {
     const list = await window.desktopApi.scenarios.list();
     const scenarios = (list && list.status === 'ok' && Array.isArray(list.scenarios)) ? list.scenarios : [];
-    return scenarios.some((s) => s.category === 'gateway-recon-join' && (s.enabled === 1 || s.enabled === true));
+    const hasC3Enabled = scenarios.some((s) => s.category === 'gateway-recon-join' && (s.enabled === 1 || s.enabled === true));
+    if (!hasC3Enabled) return false;
+    // v2.1.12 需求6：数据侧预检 — 启用 C3 但本次数据无候选行 → 不提示跳过
+    const cc = await window.desktopApi.bankStatement.c3CandidateCount();
+    return !!(cc && cc.status === 'ok' && cc.candidateCount > 0);
   } catch (error) {
     console.warn('shouldPromptGatewayReconAtRun failed:', error);
     return false;

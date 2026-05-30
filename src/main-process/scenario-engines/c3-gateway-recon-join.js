@@ -202,9 +202,24 @@ function runC3Scenario(scenario, bankRows, gwRows) {
   };
 }
 
+// v2.1.12 需求6：只读 helper — 统计 bankRows 中满足某 C3(gateway-recon-join) 场景「银行侧 conditions」的候选行数。
+//   语义与 runC3Scenario 的 bankRowsFiltered（本文件 :116-125）完全一致：同样提取 side==='银行' 且有 field 的 conditions，
+//   再用 evalCondition(row, c, { useC3BankValueGetter: true }) AND 过滤（支持虚拟字段「发生额绝对值」）。
+//   ⚠️ 仅只读统计，不触碰 runC3Scenario 的资金匹配逻辑（usedGwRowIdx / 1v1 单向消费 / assign 赋值均不涉及）。
+//   兜底：bankConditions 为空 → 与引擎一致视为不过滤（所有行皆候选）。供 main 进程「资金对账不平跳过提示」数据侧预检。
+function countC3BankCandidates(config, bankRows) {
+  if (!Array.isArray(bankRows) || bankRows.length === 0) return 0;
+  const cfg = config || {};
+  const conditions = Array.isArray(cfg.conditions) ? cfg.conditions : [];
+  const bankConditions = conditions.filter((c) => c && c.side === '银行' && c.field);
+  if (bankConditions.length === 0) return bankRows.length;
+  return bankRows.filter((row) => bankConditions.every((c) => evalCondition(row, c, { useC3BankValueGetter: true }))).length;
+}
+
 module.exports = {
   evalCondition, // v2.1.5 N3 新增（暴露给 smoke）
   getBankRowValueForC3,
   gwMatchesBank,
-  runC3Scenario
+  runC3Scenario,
+  countC3BankCandidates // v2.1.12 需求6：数据侧预检只读 helper
 };
