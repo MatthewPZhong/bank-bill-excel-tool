@@ -1,5 +1,6 @@
 const assert = require('node:assert');
 const fs = require('node:fs');
+const path = require('node:path');  // v2.1.12 SR-log-1：smoke 活动日志/启动失败日志改查新结构 JSON Lines 路径
 const { DatabaseSync } = require('node:sqlite');
 const XLSX = require('xlsx');
 const { AppDatabase } = require('../../src/backend/database');
@@ -617,14 +618,20 @@ function runLoggingScenario(context) {
   );
   assert.strictEqual(readBalanceSeedRecords(context.storageRoot, 'LegacyBank')[0].generationMethod, BALANCE_SEED_GENERATION_METHODS.manual);
 
-  ensureActivityLogFile(context.activityLogPath);
   appendActivityRecord(context.activityLogPath, {
     level: 'info',
     message: '执行导出',
     details: ['模板名：template']
   });
-  const activityLogContent = fs.readFileSync(context.activityLogPath, 'utf8');
-  assert(activityLogContent.includes('[INFO] 执行导出 | 模板名：template'));
+  // v2.1.12 SR-log-1：appendActivityRecord 不再写旧 txt，改查新结构 JSON Lines（<root>/logs/YYYY-MM/MM-DD/info.log）
+  const _alNow = new Date();
+  const _alInfoLog = path.join(path.dirname(context.activityLogPath), 'logs',
+    `${_alNow.getFullYear()}-${String(_alNow.getMonth() + 1).padStart(2, '0')}`,
+    `${String(_alNow.getMonth() + 1).padStart(2, '0')}-${String(_alNow.getDate()).padStart(2, '0')}`,
+    'info.log');
+  const activityLogContent = fs.readFileSync(_alInfoLog, 'utf8');
+  assert(activityLogContent.includes('执行导出'));
+  assert(!fs.existsSync(context.activityLogPath), '旧 app_activity_log.txt 不再创建');
 
   const startupError = new Error('旧数据库迁移失败');
   const dialogCalls = [];
@@ -644,8 +651,14 @@ function runLoggingScenario(context) {
   assert(dialogCalls[0].message.includes('错误摘要：旧数据库迁移失败'));
   assert.strictEqual(exitCalls.length, 1);
   assert.strictEqual(exitCalls[0], 1);
-  const startupFailureLogContent = fs.readFileSync(context.startupFailureLogPath, 'utf8');
-  assert(startupFailureLogContent.includes('[ERROR] 应用启动失败 | 错误摘要：旧数据库迁移失败'));
+  // v2.1.12 SR-log-1：启动失败日志改写新结构 JSON Lines（不再写 startup-failure.log 旧 txt）
+  const _sfNow = new Date();
+  const _sfErrorLog = path.join(path.dirname(context.startupFailureLogPath), 'logs',
+    `${_sfNow.getFullYear()}-${String(_sfNow.getMonth() + 1).padStart(2, '0')}`,
+    `${String(_sfNow.getMonth() + 1).padStart(2, '0')}-${String(_sfNow.getDate()).padStart(2, '0')}`,
+    'error.log');
+  const startupFailureLogContent = fs.readFileSync(_sfErrorLog, 'utf8');
+  assert(startupFailureLogContent.includes('应用启动失败'));
 
   const mainSource = fs.readFileSync(`${context.projectRoot}/src/main.js`, 'utf8');
   assert(

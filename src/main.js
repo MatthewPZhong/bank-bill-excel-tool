@@ -545,7 +545,9 @@ function initializeActivityLog() {
     return activityLogFilePath;
   }
 
-  activityLogFilePath = ensureActivityLogFile(getActivityLogFallbackFilePath());
+  // v2.1.12 SR-log-1：不再创建/写入 app_activity_log.txt；activityLogFilePath 仅作逻辑锚点
+  //   （appendActivityRecord 用其 dirname 推导 storageRoot），日志统一走 logs/ 新结构（JSON Lines）
+  activityLogFilePath = getActivityLogFallbackFilePath();
   // v2.1.9 SR-log-1 (T32h)：注入 storageRoot 让 backend / main-process 模块走 appendModuleLog
   setActivityLogStorageRoot(ensureStorageRoot());
   markStartupMetric(STARTUP_METRIC_MARKS.activityLogReady);

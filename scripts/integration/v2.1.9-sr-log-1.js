@@ -61,11 +61,8 @@ function caseDoubleWriteConsistency() {
     stack: 'Error: stack\n  at foo'
   });
 
-  // 旧路径
-  assertTrue(fs.existsSync(legacyPath), 'Case 1 旧 app_activity_log.txt 存在');
-  const legacyContent = fs.readFileSync(legacyPath, 'utf8');
-  assertTrue(/\[ERROR\] Case 1 双写一致性/.test(legacyContent), 'Case 1 旧 txt 格式保留 [ERROR] [message]');
-  assertTrue(legacyContent.includes('detail-A；detail-B'), 'Case 1 旧 txt details 用「；」拼接');
+  // v2.1.12 SR-log-1：旧 app_activity_log.txt 不再创建/写入（删旧双写后）
+  assertTrue(!fs.existsSync(legacyPath), 'Case 1 旧 app_activity_log.txt 不再创建');
 
   // 新路径
   const today = new Date();

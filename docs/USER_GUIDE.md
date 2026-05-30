@@ -1498,8 +1498,8 @@ WHERE raw_json != ''
 
 ```
 Documents/网银账单生成小助手/
-├── app_activity_log.txt          ← 旧路径（v2.1.8 既有）；v2.1.9 起继续保留双写
-└── logs/                         ← v2.1.9 新结构（JSON Lines）
+├── app_activity_log.txt          ← 旧路径（v2.1.8~2.1.11 历史文件）；v2.1.12 起停止写入、保留供查阅
+└── logs/                         ← 日志唯一写入路径（JSON Lines，v2.1.12 起）
     ├── 2026-05/                  ← 月级归档
     │   ├── 05-27/                ← 日级目录
     │   │   ├── error.log         ← 错误级（含 stack trace）
@@ -1512,7 +1512,7 @@ Documents/网银账单生成小助手/
 **说明**：
 - 日志按月+日两层归档，跨年自动归到下一年目录
 - 同级别日志按日累积（每行 1 个 JSON）；不滚动、不清理（永久保留）
-- 旧 `app_activity_log.txt` 文本格式保留（双写过渡）
+- 旧 `app_activity_log.txt` 自 **v2.1.12** 起停止写入；已有历史文件保留不删（可继续查阅 v2.1.11 及更早记录）
 
 ### JSON Lines 行格式
 
@@ -1567,9 +1567,9 @@ Get-ChildItem "$env:USERPROFILE\Documents\网银账单生成小助手\logs" -Rec
 
 ### 排查工作流（推荐）
 
-1. **看 `app_activity_log.txt` 总览**：按日期块倒序找最近异常
-2. **进 `logs/{YYYY-MM}/{MM-DD}/error.log`** 拿 stack trace + domain 定位代码模块
-3. **跨日检索**：`grep -r "关键字" logs/` 找历史相似问题
+1. **进 `logs/{YYYY-MM}/{MM-DD}/`** 看当日 `error.log` / `warning.log` / `info.log`（v2.1.12 起日志统一在此）
+2. **`error.log`** 拿 stack trace + domain 定位代码模块
+3. **跨日检索**：`grep -r "关键字" logs/` 找历史相似问题（v2.1.11 及更早记录可查历史 `app_activity_log.txt`）
 
 ### DB 备份恢复路径（v2.1.10 N4-cont-2 新增 / 复用 v2.1.9 SR-backup-1）
 
@@ -1843,7 +1843,7 @@ WHERE setting_key = 'acquiring_bill_idle_cleanup_minutes';
 - **格式**：JSON Lines（`{"ts","level","source","domain","message","details?","stack?"}` 单行一条）
 - **解析示例**：`cat error.log | jq -c .`（每行独立 JSON 对象）
 - **永久保留不自动清理** — 用户视磁盘空间手动删超期月份目录（如 `rm -rf logs/2025-XX`）
-- 旧 `app_activity_log.txt` 仍正常 append（v2.1.9 双写兼容，v2.1.10 评估删旧）
+- 旧 `app_activity_log.txt` 自 **v2.1.12** 起停止写入；已有历史文件保留不删（可继续查阅 v2.1.11 及更早记录）
 
 ## 六、v2.1.8 新增能力 / 升级提示（重要）
 

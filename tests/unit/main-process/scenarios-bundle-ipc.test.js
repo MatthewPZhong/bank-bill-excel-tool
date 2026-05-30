@@ -278,6 +278,39 @@ test.describe('scenarios:import-bundle handler (scan 阶段)', () => {
     assert.ok(all.some((s) => s.name === 'new-s1'));
   });
 
+  // v2.1.12 I6：旧/不完整 C2 场景 config（缺 billTypes）经 bundle 导入的端到端防御
+  //   场景 bundle 对 config 透传不校验（scenarios-bundle-io.js:36）；引擎 runC2Scenario 已对缺 billTypes 兜底
+  //   （c2-offset-bill-mark.js:112 `config.billTypes || []` + normalizeBillTypes 非数组返 []）。本 case 固化两层契约防回归。
+  test('I6 防御：旧 C2 场景 config 缺 billTypes → import 不崩、落库、config 透传完整', () => {
+    const jsonText = JSON.stringify({
+      scenarioBundleVersion: 1,
+      appVersion: '2.1.10',
+      channels: [{
+        name: '通用',
+        ownerLocation: '通用',
+        isBuiltin: 1,
+        scenarios: [{
+          category: 'offset-bill-mark',
+          name: 'i6-legacy-c2',
+          sortOrder: 1,
+          enabled: 1,
+          configJson: { conditions: [{ field: 'BizType', op: '包含', value: 'PAY' }], reconFields: [] }
+        }]
+      }]
+    });
+    const result = handlerImportBundleScan(database, jsonText);
+    assert.strictEqual(result.status, 'ok');
+    assert.strictEqual(result.importedCount, 1);
+    const meta = database.listScenarios().find((s) => s.name === 'i6-legacy-c2');
+    assert.ok(meta, '旧 C2 场景应导入落库');
+    assert.strictEqual(meta.category, 'offset-bill-mark');
+    // listScenarios 不返 config（轻量元数据，scenarios-repository.js:6），用 getScenario 读回 config（经 normalizeC2Config）
+    const detail = database.getScenario(meta.id);
+    assert.deepStrictEqual(detail.config.conditions, [{ field: 'BizType', op: '包含', value: 'PAY' }], 'conditions 透传完整');
+    // normalizeC2Config 缺 billTypes 直接 return（scenarios-repository.js:85）不补全；引擎 runC2Scenario 再兜底 `|| []`（两层兜底链不崩）
+    assert.strictEqual(detail.config.billTypes, undefined, 'billTypes 缺失原样透传，两层兜底链不崩');
+  });
+
   test('误用 bundleVersion=4 文件 → 返 failed 「文件类型不匹配」', () => {
     const jsonText = JSON.stringify({
       bundleVersion: 4,

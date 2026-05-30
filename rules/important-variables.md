@@ -799,6 +799,17 @@
   - 字段重命名扇出（10+ 处）→ 已 v2.1.7 commit a5d6eed 全量替换；新增引用必须用新名"银行对账单字段赋值"
   - 必跑：smoke c2 全套（billTypes=1 / reconFields=0 / 混合）+ 真实银行账单 C2 端到端
 
+### `config.billTypes` / `config.conditions`（C2 银行对账单字段赋值 config schema，v2.1.12 I7 升格 Risk-sensitive ⚠️ 资金红线）
+- 定义：scenario.config JSON 字段 — `billTypes`（数组，≥ 1，v2.1.7 F4 放宽）+ `conditions`（数组，可空）；序列化在 `scenarios.config_json`（`src/backend/database/scenarios-repository.js` serializeConfig/parseConfig），引擎消费 `src/main-process/scenario-engines/c2-offset-bill-mark.js:57 runC2Scenario`，弹窗读写 `src/renderer-dialogs.js` C2 dialog
+- 关联功能：C2 命中行筛选契约 — `billTypes` 决定命中哪些账单类型；`conditions` 决定附加筛选条件（配 `conditionsLogic` AND/OR）；命中行做银行对账单字段赋值（资金影响）
+- 跨文件度：4+（config schema / 引擎 runC2Scenario / dialog 校验 / bundle 旧结构升级 / scan:vars 盲区）
+- 变更 review 要点：
+  - **资金红线**：billTypes/conditions schema 改动直接影响 C2 命中行集合 → 错改/漏改银行对账单字段
+  - 改字段名/结构 → 必须同步：引擎（c2-offset-bill-mark.js）+ dialog 校验（renderer-dialogs.js C2 `>= 1` 门槛）+ bundle 旧结构升级（detectBundleType / 升级路径）+ createDefaultScenarioConfig 默认值
+  - 与 `runC2Scenario`（命中算法）+ `conditionsLogic`（AND/OR 切换契约）配套维护
+  - check:vars 历史盲区（v2.1.12 I7 升格原因）：billTypes/conditions 作为 config 字段名此前仅在 runC2Scenario 描述行内出现、无独立符号条目 → scan:vars 符号匹配扫不到
+  - 必跑：smoke c2 全套（billTypes=1 / conditions / 混合）+ bundle 旧结构 C2 导入升级 e2e（I6）+ `npm run scan:vars` 刷新
+
 ### `runC3Scenario`（v2.1.7 F2 C3 网关 1v1 引擎，升格 Risk-sensitive ⚠️ 资金红线方案 A）
 - 定义：`src/main-process/scenario-engines/c3-gateway-recon-join.js:68` `function runC3Scenario(scenario, bankRows, gwRows)`
 - 关联功能：C3 场景执行 — 网关 reconId 1v1 join；**v2.1.7 F2 方案 A**：用 Set 候选池（gwCandidatePool）严格 1v1 — 一个网关行匹配后从池移除，避免同一网关行被多个银行行重复匹配（资金红线核心修复）
