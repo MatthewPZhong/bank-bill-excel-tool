@@ -125,9 +125,11 @@ function startWorker(dbPath, selectSql, partColumns, initTimeoutMs) {
 }
 
 // 关闭一组 worker（发 close → 等 exit；超时 terminate 兜底）
+//   ⚠️ 已 exit 的 worker（crash 路径，标记 w.__exited）直接跳过 —— 否则对死 worker 等 'exit' 事件
+//      永远不触发（事件已过），白白阻塞到 timeout（crash case 的 5s 卡顿来源）
 async function closePool(workers, timeoutMs = 5000) {
   await Promise.all(workers.map((w) => new Promise((resolve) => {
-    if (!w) return resolve();
+    if (!w || w.__exited) return resolve();
     let done = false;
     const finish = () => { if (done) return; done = true; resolve(); };
     const timer = setTimeout(() => { try { w.terminate(); } catch (_e) { /* swallow */ } finish(); }, timeoutMs);
@@ -308,11 +310,20 @@ async function runWriteSplitChunks(opts) {
     workers = await Promise.all(
       Array.from({ length: effectiveWorkerCount }, () => startWorker(dbPath, selectSql, partColumns, initTimeoutMs))
     );
+    // 持久 exit 标记 —— crash 路径下 closePool 据此跳过已死 worker（不空等 'exit' 事件到 timeout）
+    for (const w of workers) {
+      w.__exited = false;
+      w.once('exit', () => { w.__exited = true; });
+    }
 
     // ── reader 阶段：worker 池领 chunk 写各自 temp db（round-robin 队列）──
     //   chunk 派发顺序无所谓（汇总按 chunkIndex 升序）；每 worker 同时只跑 1 个 chunk。
     let nextIdx = 0;
     let completedChunks = 0;
+    // 任一 chunk 失败/crash 即置 aborted —— 存活 worker loop 领新 chunk 前自停，
+    //   防 crash 后存活 worker 继续写新 temp 文件、与 finally 的 cleanup 竞争造成 temp 泄漏。
+    let aborted = false;
+    let firstError = null;
 
     // 把一个 chunk 任务包成 Promise；同时挂 worker 级 error/exit 监听 → crash 时 reject 本 chunk
     function dispatchChunkToWorker(worker, chunkSpec) {
@@ -370,10 +381,19 @@ async function runWriteSplitChunks(opts) {
 
     async function workerLoop(worker) {
       while (true) {
+        if (aborted) break; // 已有 chunk 失败 → 停止领新 chunk（不再写新 temp）
         const i = nextIdx++;
         if (i >= totalChunks) break;
         const chunkSpec = chunks[i];
-        const res = await dispatchChunkToWorker(worker, chunkSpec);
+        let res;
+        try {
+          res = await dispatchChunkToWorker(worker, chunkSpec);
+        } catch (err) {
+          // 记下首个错误 + 置 aborted；不在 loop 内 throw（用 allSettled 等所有 loop 收尾后统一 reject，
+          //   保证 finally cleanup 时没有 loop 还在写 temp 文件）
+          if (!aborted) { aborted = true; firstError = err; }
+          break;
+        }
         completedChunks++;
         if (typeof onProgress === 'function') {
           try {
@@ -388,8 +408,11 @@ async function runWriteSplitChunks(opts) {
       }
     }
 
-    // 任一 worker loop reject（chunk 失败 / crash）→ Promise.all 整体 reject（plan-b 全有或全无）
+    // 等所有 loop 收尾（allSettled — 不会因首个失败而提前继续主流程）；任一失败则统一 reject（plan-b 全有或全无）
     await Promise.all(workers.map((w) => workerLoop(w)));
+    if (aborted) {
+      throw firstError || new Error('multiworker reader 阶段失败（未知原因）');
+    }
 
     // ── writer 阶段：主进程单一 connection 串行按 chunkIndex 升序 ATTACH 汇总（🔴 顺序不变量）──
     const insertedRows = mergeTempDbsInOrder(db, {
