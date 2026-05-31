@@ -67,8 +67,10 @@ const { readPendingGuanliFile, readBankFile } = require('./backend/bank-bu-recon
 // （文件名生成在 ipc handler 内部直接 require session 调用，main.js 顶层无引用）
 const {
   createBizOpReconSession,
-  runBizOpImportAsync: runBizOpImport,
-  runFlowImportAsync: runFlowImport
+  // v2.1.12-beta β.2-T2：默认走 worker 化导入入口（流式 + 边读边插，解决百万行 OOM/卡主线程）
+  //   旧同步 runBizOpImportAsync/runFlowImportAsync 保留作 contract 基线 / 无 dbPath 兜底（worker 入口内部回退）
+  runBizOpImportViaWorker: runBizOpImport,
+  runFlowImportViaWorker: runFlowImport
 } = require('./main-process/biz-op-recon-session');
 const {
   writeSingleDateDiffWorkbook: writeBizOpSingleDateDiffWorkbook,
@@ -10525,18 +10527,26 @@ function registerNewAccountHandlers() {
 
   // 业务OP 导入（#1 双重校验 + #4 替换原子事务 + #5 整批拒绝 + #15 清空旧 runs）
   // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数（rejected/error 不计，spec D6）
-  trackedIpcHandle('bizOpRecon:import:run-biz-op', '业务OP数据核对', '导入文件', async (_event, payload = {}) => {
+  trackedIpcHandle('bizOpRecon:import:run-biz-op', '业务OP数据核对', '导入文件', async (event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
     const { date, filePath } = payload || {};
     if (!date || !filePath) return { status: 'error', message: '入参缺失（date / filePath）' };
     try {
       const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
+      // v2.1.12-beta β.2-T2：默认 worker 化（dbPath 主 DB tool-data.sqlite，与 acquiring worker 同库 WAL 并发）
+      //   进度透传 renderer（仿 pending:import:progress 范式，swallow send 失败）
+      //   readBizOpFile 仍传——worker 入口在无 dbPath 时回退旧同步路径用
       const result = await runBizOpImport(database.db, {
         date,
         filePath,
+        dbPath: database.dbPath,
         readBizOpFile,
         writeBizOpErrorReportXlsx,
-        errorReportsDir
+        errorReportsDir,
+        onProgress: (ev) => {
+          try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'bizOp' }); }
+          catch (_e) { /* swallow */ }
+        }
       });
       return result;
     } catch (err) {
@@ -10550,18 +10560,24 @@ function registerNewAccountHandlers() {
 
   // 流水对账单 导入（#3 出入方向枚举 + #5 整批拒绝）
   // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
-  trackedIpcHandle('bizOpRecon:import:run-flow', '业务OP数据核对', '导入文件', async (_event, payload = {}) => {
+  trackedIpcHandle('bizOpRecon:import:run-flow', '业务OP数据核对', '导入文件', async (event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
     const { date, filePath } = payload || {};
     if (!date || !filePath) return { status: 'error', message: '入参缺失（date / filePath）' };
     try {
       const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
+      // v2.1.12-beta β.2-T2：默认 worker 化（同 run-biz-op）；readFlowFile 传作无 dbPath 回退用
       const result = await runFlowImport(database.db, {
         date,
         filePath,
+        dbPath: database.dbPath,
         readFlowFile,
         writeFlowErrorReportXlsx,
-        errorReportsDir
+        errorReportsDir,
+        onProgress: (ev) => {
+          try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'flow' }); }
+          catch (_e) { /* swallow */ }
+        }
       });
       return result;
     } catch (err) {
