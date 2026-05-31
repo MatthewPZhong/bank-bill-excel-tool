@@ -944,6 +944,15 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 .pending-board .pending-action-pair .primary-btn,
 .bank-statement-board .pending-action-pair .primary-btn { min-width: 140px; }
 
+/* v2.1.12 需求：VCC业务OP计算 + 月度银行对账单BU回填校验 主面板沿垂直中线镜像（文字正常，用户最终确认）
+   ⚠️ 当前生效主题 = Clear（本文件 styles-gemini-extra.css）；styles.css(General)默认 disabled，同名规则在那不生效。
+   实现：容器 direction:rtl 做"逻辑镜像" —— ①grid 列(cell.left↔right) ②列宽(1fr/1.4fr 随 rtl 自动换边)
+   ③按钮对、④状态框 各用 direction:ltr 回正 —— ③导入文件(左)→开始运行(右)、④图标在左+文字在右+数字/箭头正常可读
+   （用户要求按钮对位置对调、状态框图标移回左；非 scaleX 几何镜像，文字不反向、弹窗不错位）。*/
+.layout-mirrored .control-row { direction: rtl; }
+.layout-mirrored .pending-action-pair { direction: ltr; }
+.layout-mirrored .status-box { direction: ltr; }
+
 /* v2.1.6 fix14（spec v0.15 §8.1）：收单单据币种校验主面板 — 以 bank-statement-board 为模板左右镜像
    bank-statement 原版 grid = 1fr 1.4fr（左窄右宽，pair/状态框在右）
    镜像版（acquiring-bill-currency-board）= 1.4fr 1fr（左宽右窄，pair/状态框在左）

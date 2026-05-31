@@ -10043,6 +10043,7 @@
 
       const dialog = document.createElement('div');
       dialog.className = 'modal-card pending-export-dialog';
+      dialog.style.width = 'min(100%, 627px)';   // 缩小至 modal-card 默认 940px 的 2/3
       overlay.appendChild(dialog);
 
       const title = document.createElement('div');
@@ -10059,6 +10060,7 @@
       selectLabel.style.cssText = 'font-size:13px; white-space:nowrap;';
       const select = document.createElement('select');
       select.className = 'mapping-text-input pending-reconcile-month-select';
+      select.style.cssText = 'flex: 0 0 170px;';   // 下拉框宽度缩至原(flex 占满≈510px)的约 1/3（用户要求）
       safeMonths.forEach((m, idx) => {
         const opt = document.createElement('option');
         opt.value = m;
@@ -10077,6 +10079,7 @@
 
       const actions = document.createElement('div');
       actions.className = 'dialog-actions right';   // 查看/关闭 右下角对齐（复用既有 .dialog-actions.right）
+      actions.style.marginTop = '12px';   // footer 横线(border-top)向下平移一点点（用户要求）
 
       const viewBtn = document.createElement('button');
       viewBtn.className = 'primary-btn small';

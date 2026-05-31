@@ -2686,6 +2686,14 @@ select {
 .pending-board .pending-action-pair .primary-btn,
 .bank-statement-board .pending-action-pair .primary-btn { min-width: 140px; }
 
+/* v2.1.12 需求：VCC业务OP计算 + 月度银行对账单BU回填校验 主面板沿垂直中线镜像（文字正常，用户最终确认）
+   实现：容器 direction:rtl 仅翻 ①grid 列 ②列宽；③按钮对、④状态框 各用 direction:ltr 回正
+   = ③导入文件(左)→开始运行(右)、④图标在左+文字可读（用户要求按钮对对调、状态框图标移回左）。
+   列宽 1fr/1.4fr 随 rtl 自动换边。*/
+.layout-mirrored .control-row { direction: rtl; }
+.layout-mirrored .pending-action-pair { direction: ltr; }
+.layout-mirrored .status-box { direction: ltr; }
+
 /* v2.1.1：General 风格对账单ReconID修复 主面板（同步 Clear grid 3 列布局；label/select 视觉同网银账单生成模块的 .select-label / .template-select）
    Clear 风格相同设计见 styles-gemini-extra.css:898-986
    设计思路：60px label / 220px select / 140px button 三列严格对齐；行 1 [账单类别+下拉+场景管理] 与行 2 [场景+下拉+导出文件] 垂直对齐 */
