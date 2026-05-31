@@ -1,6 +1,7 @@
 const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os'); // v2.1.12 β.1-T3：多 worker D33 OOM clamp（cpus / freemem）
 const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification } = require('electron');
@@ -11051,17 +11052,46 @@ function registerNewAccountHandlers() {
       const chunkSize = typeof database.getAcquiringBillChunkSize === 'function'
         ? database.getAcquiringBillChunkSize()
         : undefined;
+      // v2.1.12 β.1-T3 — 多 worker workerCount 注入（⚠️ 资金红线 · spec §4 D29/D33）：
+      //   1. settings 取值（getAcquiringBillWorkerCount：default 2，范围 1-8，越界回退 2）
+      //   2. D29 CPU 上限：clamp 到 max(1, cpus-2)（POC：M=4 即甜点，避免过订）
+      //   3. D33 OOM 降级：可用内存 < 2GB → 强制降到 1（worker 各 ~800MB peak，低配机兜底）
+      //   ⚠️ 纯性能/资源闸——单/多 worker 结果 byte-for-byte 一致（contract 已锁）；clamp 只影响快慢与内存。
+      //   ⚠️ 最终 workerCount<=1（如单核机 / 低内存 / settings=1）→ runCheckCore gate 自然回退单 worker，零行为变化。
+      const computeWorkerCount = () => {
+        const settingsCount = typeof database.getAcquiringBillWorkerCount === 'function'
+          ? database.getAcquiringBillWorkerCount()
+          : 1;
+        let n = Number.isInteger(settingsCount) && settingsCount > 0 ? settingsCount : 1;
+        // D29：CPU 上限
+        const cpuCap = Math.max(1, (os.cpus() ? os.cpus().length : 1) - 2);
+        n = Math.min(n, cpuCap);
+        // D33：可用内存 < 2GB → 降到单 worker（OOM 兜底）
+        const OOM_FREEMEM_FLOOR_BYTES = 2 * 1024 * 1024 * 1024;
+        try {
+          if (os.freemem() < OOM_FREEMEM_FLOOR_BYTES) n = 1;
+        } catch (_e) { /* freemem 不可用 → 保守不降级（cpuCap 已兜底） */ }
+        return Math.max(1, n);
+      };
+      const workerCount = computeWorkerCount();
+      // 多 worker temp db 目录（runWriteSplitChunks 写 part-<ci>.sqlite，跑完 finally 清文件；
+      //   空目录复用，不反复 mkdir/rm）。单 worker 路径不使用此目录。
+      const mwTempDir = path.join(storageRoot, '.mw-tmp');
+      try { fs.mkdirSync(mwTempDir, { recursive: true }); } catch (_e) { /* swallow — 多 worker gate 内会再兜底建 */ }
       // v2.1.10 A3 T10：worker pool dispatch（替代 session.runCheck 主进程直调）
       //   - __dbPath 传 database.dbPath（worker 内 new DatabaseSync(dbPath) — D24 独立 connection）
       //   - onLog：worker 内 appendModuleLog → message pipe → 主进程 appendActivityLogEntry
       //     （避免主/子进程并发写 app_activity_log.txt 的 read-modify-write race）
       // v2.1.10 A4 T18：chunkSize 透传 worker → runCheckCore → insertDiffRowsByJoinChunked
+      // v2.1.12 β.1-T3：workerCount + tempDir 透传 worker → runCheckCore → 多 worker gate
       result = await runCheckWorkerPool.dispatchRunCheck(
         {
           __dbPath: database.dbPath,
           monthKey,
           storageRoot,
           chunkSize,
+          workerCount,
+          tempDir: mwTempDir,
         },
         {
           onProgress,
