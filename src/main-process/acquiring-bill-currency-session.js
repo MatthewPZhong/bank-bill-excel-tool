@@ -180,6 +180,38 @@ function createCancelToken() {
   };
 }
 
+// v2.1.12 β.1-T2 — 多 worker 路径自适应分片（spec §4 末注 / D31）
+//   POC 实测：加速比强依赖「chunk 数 >> worker 数」。生产默认 chunkSize=100000 在 50万行只切 5 chunks，
+//   喂不饱 4+ worker（仅 1.52x）。多 worker 路径若 caller 用的是默认 chunkSize（未显式调小），
+//   按「目标 chunk 数 ≈ 4×workerCount」反推更小 chunkSize（POC：chunk=10000/50chunks 时 2.70x）。
+//
+//   ⚠️ 仅改分片粒度，不影响 byte-for-byte：LIMIT/OFFSET 仍按 b.id ASC 升序，跨 chunk 顺序不变。
+//   ⚠️ 只在「全新 run + 多 worker」路径用；resume 路径必须复用持久化 chunkSize（决策 A 已让 resume 走单 worker，
+//      故此 helper 永不参与 resume）。
+//   上下界：
+//     - 上界 = 入参 chunkSize（永不调大；调大会减少 chunk 数 → 更喂不饱，且偏离 caller settings 意图）
+//     - 下界 = 2000 行/chunk（防 chunk 过碎 → temp db 数量爆炸 / ATTACH 汇总开销 dwarfs 收益）
+//   仅当入参是「默认值 100000」时才自适应（caller 显式给了非默认 chunkSize → 尊重 caller，不覆盖）。
+const MULTIWORKER_DEFAULT_CHUNK_SIZE_TARGET_PER_WORKER = 4; // 目标 chunk 数 = k × worker 数
+const MULTIWORKER_MIN_CHUNK_SIZE = 2000;                    // 自适应下界（防 chunk 过碎）
+const MULTIWORKER_BASELINE_CHUNK_SIZE = 100000;             // 与 runCheckCore default 一致（视作「未显式调小」哨兵）
+
+function adaptiveChunkSizeForMultiWorker({ totalBillRows, workerCount, requestedChunkSize }) {
+  // caller 显式给了非默认 chunkSize → 尊重，不覆盖
+  if (requestedChunkSize !== MULTIWORKER_BASELINE_CHUNK_SIZE) {
+    return requestedChunkSize;
+  }
+  if (!Number.isInteger(totalBillRows) || totalBillRows <= 0) return requestedChunkSize;
+  const targetChunks = Math.max(1, workerCount * MULTIWORKER_DEFAULT_CHUNK_SIZE_TARGET_PER_WORKER);
+  // 反推 chunkSize（向上取整保证 chunk 数 不超过 targetChunks 太多）
+  let cs = Math.ceil(totalBillRows / targetChunks);
+  // 下界保护
+  if (cs < MULTIWORKER_MIN_CHUNK_SIZE) cs = MULTIWORKER_MIN_CHUNK_SIZE;
+  // 上界：永不调大（默认 100000 已是上界；行数少时 cs 自然 < 100000）
+  if (cs > requestedChunkSize) cs = requestedChunkSize;
+  return cs;
+}
+
 // 对账核心（⚠️ 资金红线，spec §5）
 // v0.8 fix5：跑 run 时同步产出 diff + report 到 exports/{date}/acquiring-bill-currency/(report/)
 // v2.1.7 F6：新增 onProgress 入参（守护式埋点，旧 caller 无 onProgress 时行为不变）
@@ -206,15 +238,27 @@ function createCancelToken() {
 //   - chunked 中途 cancel → 抛 CancelError（带 stage='sql-joining-chunk-N'）；caller 写 chunk_progress
 //   - T19 resume 路径：caller 传 resumeFromRun 复用 runId 跳过 stage 1-3，stage 4' 从 lastCompletedChunkIndex+1 跑
 //
+// v2.1.12 β.1-T2 — 多 worker write-splitting gate（⚠️ 资金红线 · spec §4 D29-D31 / D-β-1）：
+//   - 新增可选入参 workerCount（default 1）/ dbPath / tempDir
+//   - stage 4' 三路分流：
+//       ① isResume（resumeFromChunkIndex>0）→ 单 worker insertDiffRowsByJoinChunked（决策 A：resume 不碰多 worker）
+//       ② 全新 run + workerCount>1 + 有 dbPath → 多 worker insertDiffRowsByJoinMultiWorker（plan-b）
+//       ③ workerCount<=1 / 无 dbPath → 单 worker（D31 回退兜底；default 即此路 → 现有调用零行为变化）
+//   - 🔴 workerCount default=1：所有现有 caller（run-check-worker.js 不传 → undefined → 1）永远走单 worker，byte-for-byte 不变
+//   - 自适应分片（spec §4 末注 / D31）：多 worker 路径若 caller 没显式给小 chunkSize（即用默认 100000），
+//     按「目标 chunk 数 ≈ 4×workerCount」反推一个更小 chunkSize（POC：chunk 数 >> worker 数才喂得饱并行）；
+//     仅改分片粒度，LIMIT/OFFSET 仍按 id ASC 升序 → 跨 chunk 顺序不变 → byte-for-byte 不受影响
+//   - 多 worker 成功 → 一次性标 chunk_progress complete（多 worker 完成顺序乱，不逐 chunk 标）
+//
 // 流程：
 //   1. 清空该月历史 runs + diff_rows（避免累积）（仅全新 run；resume 跳过）
 //   2. 统计 totalBillRows / matched / mismatch / unmatched（仅全新 run；resume 复用旧 runs 行）
 //   3. 创建 runs 记录拿 runId（仅全新 run；resume 复用旧 runId）
-//   4'. chunked INSERT diff_rows BY SQL JOIN（spec §3 + §5.2）— 各 chunk 独立 BEGIN/COMMIT
+//   4'. chunked INSERT diff_rows BY SQL JOIN（spec §3 + §5.2）— 各 chunk 独立 BEGIN/COMMIT（单 / 多 worker 分流）
 //   5. 调 writer 同步生成 diff.xlsx + report.xlsx；UPDATE runs.diff_file_path/report_file_path 回填
 //   6. SET chunk_progress.status='complete' + 返回 stats + filePaths
 // 关键不变量：写盘失败不应回滚 DB 事务（数据已 COMMIT 有效）；写盘错误仅 throw 给 caller
-async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken, chunkSize, resumeFromRun }) {
+async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken, chunkSize, resumeFromRun, workerCount, dbPath, tempDir }) {
   if (!monthKey) {
     throw new Error('runCheck：monthKey 必填');
   }
@@ -225,6 +269,8 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
   let chunkedResult;
   // v2.1.10 A4 T18：chunkSize 默认 100000（spec §3.2 拍板）— caller 不传时也 chunked（小数据档 totalChunks=1 等价 single SQL）
   const effectiveChunkSize = Number.isInteger(chunkSize) && chunkSize > 0 ? chunkSize : 100000;
+  // v2.1.12 β.1-T2：worker 数 default 1（现有所有调用零行为变化 — 走单 worker）
+  const effectiveWorkerCount = Number.isInteger(workerCount) && workerCount > 0 ? workerCount : 1;
   // v2.1.10 A4 T19：resume 路径 — caller 传 resumeFromRun = { runId, lastCompletedChunkIndex } 复用旧 runId
   //   resumeFromRun.runId 必须存在 + status='partial'（caller 已验）；本函数仅按入参跳 stage 1-3
   const isResume = !!(resumeFromRun && resumeFromRun.runId && Number.isInteger(resumeFromRun.runId));
@@ -358,41 +404,112 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
     ? resumeFromRun.lastCompletedChunkIndex + 1
     : 0;
 
+  // v2.1.12 β.1-T2 — stage 4' 三路分流 gate（⚠️ 资金红线 · spec §4 D29-D31 / D-β-1）：
+  //   useMultiWorker = 全新 run（!isResume）AND workerCount>1 AND 有 dbPath
+  //     - isResume：决策 A — resume 永远走单 worker（不碰多 worker 的 idempotent/race 雷区）
+  //     - workerCount<=1：D31 回退 / default（现有调用零行为变化）
+  //     - 无 dbPath：worker 各自 open 只读 connection 必须有 dbPath；缺失 → 安全回退单 worker
+  const useMultiWorker = !isResume && effectiveWorkerCount > 1 && !!dbPath;
+
+  // 多 worker 自带 tempDir 生命周期（caller 没传则临时建，finally 清）；单 worker 不用
+  let ownedTempDir = null;
+
   try {
-    chunkedResult = runRepo.insertDiffRowsByJoinChunked(db, {
-      runId,
-      monthKey,
-      chunkSize: effectiveChunkSize,
-      cancelToken,
-      resumeFromChunkIndex,
-      onChunkDone: ({ chunkIndex, totalChunks, processedRows, insertedDiffRows: chunkInsertedDiffRows, elapsedMs }) => {
-        // 每 chunk 完成后 — 更新 chunk_progress（in-progress 直至最后一 chunk 改 complete）
-        // 失败不抛（caller catch 写 partial）；progress 回调透传 caller
-        // v2.1.10 SR-FIX-1 Round 6 H4：持续持久化 chunkSize（resume 时复用）
-        try {
-          runRepo.setRunChunkProgress(db, {
-            runId,
-            lastCompletedChunkIndex: chunkIndex,
-            totalChunks,
-            status: (chunkIndex + 1 >= totalChunks) ? 'complete' : 'in-progress',
-            chunkSize: effectiveChunkSize, // H4：每次 onChunkDone 都续写 chunkSize（防 H1 占位被覆盖时丢失）
-          });
-        } catch (_progressErr) {
-          // chunk_progress 写失败不阻断主循环（unit test 防御；生产 SQLITE_BUSY 极少）
-        }
-        if (onProgress) {
-          onProgress({
-            phase: 'run',
-            stage: 'sql-joining',
-            chunkIndex,
-            totalChunks,
-            processedRows,
-            insertedDiffRows: chunkInsertedDiffRows,
-            elapsedMs,
-          });
-        }
-      },
-    });
+    if (useMultiWorker) {
+      // ── 全新 run + 多 worker（plan-b）──
+      //   不传会写 chunk_progress 的 onChunkDone：保持 in-progress 占位 lastCompletedChunkIndex=-1，
+      //   一旦多 worker 失败 → catch 块标 partial（-1）→ 用户 resume 走单 worker 从 chunk 0 全跑（byte-for-byte 安全）。
+      //   多 worker 完成顺序乱，complete 状态在成功后一次性标（见下方）。
+      const totalBillRowsForAdaptive = db.prepare(
+        'SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE month_key = ?'
+      ).get(monthKey).c;
+      const mwChunkSize = adaptiveChunkSizeForMultiWorker({
+        totalBillRows: totalBillRowsForAdaptive,
+        workerCount: effectiveWorkerCount,
+        requestedChunkSize: effectiveChunkSize,
+      });
+
+      // tempDir：caller 提供则用；否则临时建（finally 清）
+      const mw = require('./run-check-multiworker');
+      let mwTempDir = tempDir;
+      if (!mwTempDir) {
+        mwTempDir = mw.makeTempDir(`mw-acquiring-run-${runId}-`);
+        ownedTempDir = mwTempDir;
+      }
+
+      chunkedResult = await runRepo.insertDiffRowsByJoinMultiWorker(db, {
+        runId,
+        monthKey,
+        chunkSize: mwChunkSize,
+        dbPath,
+        workerCount: effectiveWorkerCount,
+        tempDir: mwTempDir,
+        // onChunkDone 仅透传 UI progress（不写 chunk_progress —— complete 在成功后一次性标）
+        onChunkDone: ({ chunkIndex, totalChunks, processedRows, insertedDiffRows: chunkInsertedDiffRows, elapsedMs }) => {
+          if (onProgress) {
+            onProgress({
+              phase: 'run',
+              stage: 'sql-joining',
+              chunkIndex,
+              totalChunks,
+              processedRows,
+              insertedDiffRows: chunkInsertedDiffRows,
+              elapsedMs,
+            });
+          }
+        },
+      });
+
+      // 多 worker 成功 → 一次性标 chunk_progress complete（lastCompletedChunkIndex = totalChunks-1）
+      //   ⚠️ 持久化 chunkSize 用 mwChunkSize（与本次实际分片一致；但 resume 走单 worker 不读它，故仅一致性）
+      try {
+        runRepo.setRunChunkProgress(db, {
+          runId,
+          lastCompletedChunkIndex: chunkedResult.lastCompletedChunkIndex,
+          totalChunks: chunkedResult.totalChunks,
+          status: 'complete',
+          chunkSize: mwChunkSize,
+        });
+      } catch (_progressErr) {
+        // chunk_progress 写失败不阻断（数据已 COMMIT）；下方 0-chunk 边界补写逻辑也会兜
+      }
+    } else {
+      // ── 单 worker 路径（resume / workerCount<=1 / 无 dbPath）—— 行为完全不变（D31 回退兜底）──
+      chunkedResult = runRepo.insertDiffRowsByJoinChunked(db, {
+        runId,
+        monthKey,
+        chunkSize: effectiveChunkSize,
+        cancelToken,
+        resumeFromChunkIndex,
+        onChunkDone: ({ chunkIndex, totalChunks, processedRows, insertedDiffRows: chunkInsertedDiffRows, elapsedMs }) => {
+          // 每 chunk 完成后 — 更新 chunk_progress（in-progress 直至最后一 chunk 改 complete）
+          // 失败不抛（caller catch 写 partial）；progress 回调透传 caller
+          // v2.1.10 SR-FIX-1 Round 6 H4：持续持久化 chunkSize（resume 时复用）
+          try {
+            runRepo.setRunChunkProgress(db, {
+              runId,
+              lastCompletedChunkIndex: chunkIndex,
+              totalChunks,
+              status: (chunkIndex + 1 >= totalChunks) ? 'complete' : 'in-progress',
+              chunkSize: effectiveChunkSize, // H4：每次 onChunkDone 都续写 chunkSize（防 H1 占位被覆盖时丢失）
+            });
+          } catch (_progressErr) {
+            // chunk_progress 写失败不阻断主循环（unit test 防御；生产 SQLITE_BUSY 极少）
+          }
+          if (onProgress) {
+            onProgress({
+              phase: 'run',
+              stage: 'sql-joining',
+              chunkIndex,
+              totalChunks,
+              processedRows,
+              insertedDiffRows: chunkInsertedDiffRows,
+              elapsedMs,
+            });
+          }
+        },
+      });
+    }
   } catch (chunkedErr) {
     // chunked 中途异常（cancel 或 SQL 错）— 失败 chunk 已自行 ROLLBACK 本批；已 COMMIT 批保留
     //   写 chunk_progress { status:'partial' } 让 caller 决策 resume / 弃
@@ -425,6 +542,12 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
       // chunk_progress 写失败 — 不阻塞错误透传（caller 不能 resume 也只能重跑）
     }
     throw chunkedErr;
+  } finally {
+    // v2.1.12 β.1-T2：多 worker 临时 tempDir 清理（caller 未传 tempDir 时本函数建的）。
+    //   无论成功/失败/cancel 都清；runWriteSplitChunks 内部已清 part-*.sqlite，这里清外层目录。
+    if (ownedTempDir) {
+      try { require('./run-check-multiworker').cleanupDir(ownedTempDir); } catch (_e) { /* swallow */ }
+    }
   }
 
   // sanity check：mismatchRows（统计口径）与实际 INSERT 行数应一致（chunked 累计后比对）
