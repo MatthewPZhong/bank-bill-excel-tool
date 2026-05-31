@@ -283,6 +283,11 @@ async function runWriteSplitChunks(opts) {
   if (!tempDir || typeof tempDir !== 'string') {
     throw new Error('runWriteSplitChunks：tempDir 必填');
   }
+  // v2.1.12 β.1-T3：确保 tempDir 存在（recursive 幂等）。
+  //   caller 传入的 tempDir（如 main.js 的 storageRoot/.mw-tmp）可能尚未创建；
+  //   worker 写 part-<ci>.sqlite 前目录不存在会报 SQLITE "unable to open database file"。
+  //   集成测试 v2.1.12-beta-multiworker-nested 抓到此真实路径（caller 提供 tempDir 时无人 mkdir）。
+  fs.mkdirSync(tempDir, { recursive: true });
   // chunkIndex 校验：必须是 0..N-1 连续无重复（汇总按下标定位 tempPaths，缺位/越界会破坏顺序契约）
   const totalChunks = chunks.length;
   if (totalChunks === 0) {
