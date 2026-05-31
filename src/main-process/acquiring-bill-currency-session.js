@@ -443,21 +443,30 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
     totalBillRowsForGate = db.prepare(
       'SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE month_key = ?'
     ).get(monthKey).c;
-    const fallback = shouldFallbackToSingleWorker({
-      totalBillRows: totalBillRowsForGate,
-      workerCount: effectiveWorkerCount,
-      requestedChunkSize: effectiveChunkSize,
-    });
-    useMultiWorker = !fallback;
-    if (fallback && onProgress) {
-      // 透传一条诊断 progress（renderer 不消费此字段也不会崩）：记录回退原因便于排查/手测核对
-      onProgress({
-        phase: 'run',
-        stage: 'sql-joining',
-        multiWorkerFallback: true,
+    // T3 测试钩子 __forceMultiWorkerForTest：仅跳过 D31「性能闸」（行数<100w / chunk<worker），
+    //   让 contract/集成测试能在小数据上验证真·多 worker 拓扑与 byte-for-byte。
+    //   ⚠️ 仍受 eligibleForMultiWorker 硬前提约束（!isResume && workerCount>1 && dbPath）——
+    //   force 不能绕过 resume 单 worker 决策 A、也不能绕过「无 dbPath 无法 open 只读连接」的安全回退。
+    //   ⚠️ 生产链路不传此 flag（仅 session 单测 / scripts/integration 注入）；纯性能旁路，资金结果不受影响。
+    if (__forceMultiWorkerForTest === true) {
+      useMultiWorker = true;
+    } else {
+      const fallback = shouldFallbackToSingleWorker({
         totalBillRows: totalBillRowsForGate,
         workerCount: effectiveWorkerCount,
+        requestedChunkSize: effectiveChunkSize,
       });
+      useMultiWorker = !fallback;
+      if (fallback && onProgress) {
+        // 透传一条诊断 progress（renderer 不消费此字段也不会崩）：记录回退原因便于排查/手测核对
+        onProgress({
+          phase: 'run',
+          stage: 'sql-joining',
+          multiWorkerFallback: true,
+          totalBillRows: totalBillRowsForGate,
+          workerCount: effectiveWorkerCount,
+        });
+      }
     }
   }
 
