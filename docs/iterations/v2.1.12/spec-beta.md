@@ -186,5 +186,39 @@ POC 是 β 全阶段的前提——验证「多 worker write-splitting 真能 2-
 
 ### 下一步
 1. ✅ 拍板完成。
-2. （进行中）委托 dev 做 **Phase 0 POC**（§5）→ 结论回填本 spec §4 D30 + §5。
-3. POC 通过 → 委托 dev 按 §7 β.1 任务推进 → β.2 → β.3；POC 不达标 → 回到 backlog 重评性能方案。
+2. ✅ Phase 0 POC 完成（GO）→ 结论已回填 §4 D30 + §5.1。
+3. ✅ β.1 实现完成（T-b1-1/2/3，acquiring 多 worker 已激活 + byte-for-byte 锁 + 嵌套拓扑验证）；β.1-T4（500万手测 + version + docs + PR）待用户手测 + 提 PR。
+4. β.2 **重定向**（见 §9）。
+
+---
+
+## 9 β.2/β.3 重定向（2026-05-31 reverse sync · ⚠️ 推翻 v2.1.11 backlog 假设）
+
+> 触发：β.1 完成后摸 bizOpRecon / pending 代码现状，发现原 backlog「bizOpRecon + pending reconcile 复用 multi-worker」**与代码事实冲突**（CLAUDE.md 规则 2）。用户确认真实痛点 = **导入百万行 xlsx**（非 reconcile）。
+
+### 9.1 可行性事实（有出处）
+
+| 模块·操作 | 代码现状 | 是否适配 multi-worker write-splitting |
+|---|---|---|
+| acquiring·对账 | chunked `INSERT...SELECT JOIN` 500万行 | ✅ 是（β.1 已做 2.3x）|
+| **bizOpRecon·导入** | `biz-op-recon-import/reader.js:60` **SheetJS `XLSX.readFile`** 全量进内存，主线程同步；非流式非 worker | ❌ 否——导入瓶颈是**内存/阻塞**非 CPU 并行；SheetJS 撞 V8 512MB 上限静默返回空（需求1 实测）。reader 注释假设 <10万行，**实际超百万** |
+| pending·导入 | `pending-session.js:34` spawn `pending-import/worker.js` + `streaming-xlsx-reader` | ✅ 已流式 + worker 化（已解，无需动）|
+| bizOpRecon·对账 | JS 层按账户日聚合（`biz-op-recon-session.js:293`）| ❌ 否——JS 聚合非 JOIN、小规模 |
+| pending·对账 | 多轮**有状态 JS 配对**（`engine.js:96-132` 跨轮 matched Set）~500ms | ❌ 否——全局状态无法独立 chunk；并行化算错对账=资金红线事故 |
+
+**根因**：multi-worker write-splitting 解决「大计算量·算得慢」（acquiring JOIN）；导入百万 xlsx 的痛点是「大文件·内存装不下+卡主线程」，对症解是 **流式 reader + worker**（需求1 VCC / pending 已验证范式），二者是不同工具。详见对话推导。
+
+### 9.2 重定向后的 β.2（替换原「bizOpRecon/pending reconcile multi-worker」）
+
+**新 β.2 = bizOpRecon 导入流式改造**（仿 `pending-import/worker.js` 成熟范式）：
+- `readBizOpFile` / `readFlowFile` 的 SheetJS `XLSX.readFile` → 复用 `pending-import/streaming-xlsx-reader.js` 的 `readXlsxStreamed(file, (cells,rowIdx)=>{})` 逐行回调
+- 导入移入 child-process worker（仿 pending：jobMeta + 边流式读边分批 INSERT，避免百万行全堆 JS 数组 OOM）
+- 🔴 **必须保持语义不变**：表头校验（`validateBizOpHeaders`/`validateFlowHeaders`）+ 校验失败**整批拒绝** + **失败报告 xlsx** + 同 `(date,BU)` 替换原子事务 + `_rowIndex`(Excel 行号) + `isRowMeaningful` 跳过；contract test 锁旧 SheetJS reader vs 新流式 reader 同输出。
+
+### 9.3 β.3（A3-spread）— 待评估
+- bankBuRecon / bankStatement / reconIdFix：很可能同样是 JS 层/特殊算法（reconIdFix=C4 subset-sum，立项已明确不动），multi-worker 大概率不适用；**先摸形态再定**（导入是否也 SheetJS→流式候选）。本版是否做待 β.2 后定。
+
+### 9.4 β.2 任务拆分
+- **T-b2-1**：`biz-op-recon-import` 加流式 reader（复用 streaming-xlsx-reader）+ contract test 锁与 SheetJS reader byte-level 同输出（表头校验/行映射/_rowIndex/isRowMeaningful 一致）
+- **T-b2-2**：bizOpRecon 导入 worker 化（仿 pending worker：边流式边分批 INSERT + 失败报告 + (date,BU) 替换原子事务）+ session/IPC 改 spawn worker
+- **T-b2-3**：集成测试（百万行级 fixture 端到端）+ release-check 全绿 + 真实大文件手测
