@@ -514,10 +514,13 @@ test.describe('β.1-T2 多 worker contract（Group B：runCheckCore 级 gate）'
         const snapA = snapshotRun(A.db.db);
 
         // B：多 worker（workerCount=2 + dbPath + tempDir → 走 insertDiffRowsByJoinMultiWorker）
-        //   chunkSize 给默认 100000 → 触发自适应分片（目标 chunk 数 ≈ 4×2=8）
+        //   v2.1.12 β.1-T3：__forceMultiWorkerForTest 跳过 D31 行数闸（小 fixture 不足 100w 否则会回退单 worker，
+        //     GroupB 就失去多 worker 覆盖）；chunkSize:50 与 A 对齐 → billCount/50 个 chunk（≥2）真正跑 M=2 并行。
         const rb = await session.runCheckCore({
           db: B.db.db, monthKey: FIXTURE_MONTH,
+          chunkSize: 50,
           workerCount: 2, dbPath: B.dbPath, tempDir,
+          __forceMultiWorkerForTest: true,
         });
         const snapB = snapshotRun(B.db.db);
 
