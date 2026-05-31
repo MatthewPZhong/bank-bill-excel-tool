@@ -6787,7 +6787,9 @@
           conditions: [],
           reconFields: [{ seq: 1, gwField: '', bankField: '' }],
           // v2.1.8 N2：扩展 assign 数据结构（mode='direct' 兼容旧逻辑，'custom' = 自取值静态字符串）
-          assign: { gwField: '', bankField: '', mode: 'direct', customValue: '' }
+          assign: { gwField: '', bankField: '', mode: 'direct', customValue: '' },
+          // v2.1.12 需求5：extra fee 匹配 — 默认关（enabled:false + amount:0 = 与旧 C3 byte-for-byte 一致，零回归红线）
+          extraFee: { enabled: false, amount: 0 }
         };
       }
       // v2.1.0-beta.1 PR-A（task A7）：C4 类默认 config（spec §8.2）
@@ -6926,6 +6928,15 @@
         // v2.1.8 N2：mode='custom' 时 customValue 必填（dialog UI 已限制 maxlength=200）
         if (a.mode === 'custom' && (!a.customValue || String(a.customValue).trim() === '')) {
           errors.push('对账成立后赋值的"自取值"内容不能为空');
+        }
+        // v2.1.12 需求5：extra fee 校验 — 勾选后 amount 必填且为有限数（未勾选不校验；允许正负/小数/0）
+        const ef = c.extraFee || {};
+        if (ef.enabled) {
+          if (ef.amount === '' || ef.amount === undefined || ef.amount === null) {
+            errors.push('勾选「网关对账单金额与银行对账单不一致」后，extra fee 金额不能为空');
+          } else if (!Number.isFinite(Number(ef.amount))) {
+            errors.push('extra fee 金额必须是数字');
+          }
         }
         // v2.1.5 N3：conditions 柔性校验
         //   - conditions.length === 0 → 通过（视为不过滤）
@@ -7104,6 +7115,10 @@
       if (!Array.isArray(config.conditions)) {
         config.conditions = [];
       }
+      // v2.1.12 需求5：老 C3 scenario 无 extraFee 字段 → 兜底默认关（与引擎 fee=null 一致，零回归）
+      if (!config.extraFee || typeof config.extraFee !== 'object') {
+        config.extraFee = { enabled: false, amount: 0 };
+      }
 
       const overlay = createOverlay();
       const dialog = document.createElement('div');
@@ -7156,6 +7171,18 @@
                 ${renderScenarioOptions(BANK_STATEMENT_FIELDS_FOR_C3, config.assign.bankField)}
               </select>
             </div>
+          </div>
+          <div class="scenario-config-row scenario-config-row-extrafee">
+            <label class="scenario-config-extrafee-check">
+              <input type="checkbox" data-field="extrafee-enabled" ${config.extraFee.enabled ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+              网关对账单金额与银行对账单不一致
+            </label>
+            <span class="scenario-config-extrafee-formula" style="${config.extraFee.enabled ? '' : 'display:none;'}">
+              网关对账单金额 +
+              <input class="scenario-config-input scenario-config-input-fee" type="text" data-field="extrafee-amount"
+                     value="${escapeHtml(String(config.extraFee.amount ?? ''))}" ${isReadonly ? 'disabled' : ''}>
+              = 银行对账单金额
+            </span>
           </div>
         </div>
         <div class="dialog-actions right">
@@ -7281,6 +7308,16 @@
           config.assign.mode = 'direct';
           if (customInput) customInput.style.display = 'none';
         }
+      });
+      // v2.1.12 需求5：extra fee 勾选框 + 金额输入（参照 assign-custom-value 显隐套路）
+      dialog.querySelector('input[data-field="extrafee-enabled"]')?.addEventListener('change', (e) => {
+        config.extraFee.enabled = e.target.checked;
+        const formula = dialog.querySelector('.scenario-config-extrafee-formula');
+        if (formula) formula.style.display = e.target.checked ? '' : 'none';
+        // 取消勾选不清空 amount（保留用户输入，下次勾选还在）；校验时 enabled=false 不校验 amount
+      });
+      dialog.querySelector('input[data-field="extrafee-amount"]')?.addEventListener('input', (e) => {
+        config.extraFee.amount = e.target.value;
       });
       dialog.querySelector('input[data-field="assign-custom-value"]')?.addEventListener('input', (e) => {
         config.assign.customValue = e.target.value;

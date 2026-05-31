@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { runC3Scenario, countC3BankCandidates } = require('../../../../src/main-process/scenario-engines/c3-gateway-recon-join');
+const { BANK_STATEMENT_VIRTUAL_AMOUNT_ABS } = require('../../../../src/constants/bank-statement-fields');
 
 // ========================================================================
 // v2.1.8 N2 — C3「对账成立后赋值」新增"自取值"模式（assign-gw）
@@ -48,6 +49,86 @@ test.describe('countC3BankCandidates — v2.1.12 需求6 数据侧预检只读 h
     assert.equal(countC3BankCandidates({ conditions: [] }, []), 0);
     assert.equal(countC3BankCandidates(null, [{ X: 1 }]), 1);
     assert.equal(countC3BankCandidates({}, null), 0);
+  });
+});
+
+// v2.1.12 需求5：extra fee 匹配 DS1-9（spec-alpha-req5-extrafee §4.1 资金一致性 POC）
+//   金额场景：reconFields = Amount(gw) vs 发生额绝对值(bank)；A1 = fee 仅作用「发生额绝对值」字段对
+function makeC3FeeScenario(extraFee) {
+  return {
+    id: 5, name: 'req5-fee',
+    config: {
+      reconFields: [{ seq: 1, gwField: 'Amount', bankField: BANK_STATEMENT_VIRTUAL_AMOUNT_ABS }],
+      assign: { gwField: 'Reference', bankField: 'Narrative', mode: 'direct', customValue: '' },
+      ...(extraFee ? { extraFee } : {})
+    }
+  };
+}
+function feeBankRow(absAmount, narrative = '') {
+  return { 'Credit Amount': absAmount, 'Debit Amount': 0, Narrative: narrative };
+}
+function feeGwRow(amount, ref = 'GW-REF') {
+  return { Amount: amount, Reference: ref };
+}
+
+test.describe('需求5 extra fee 匹配 — DS1-9（spec-alpha-req5 §4.1 资金 POC）', () => {
+  test('DS1 零回归：默认关(无 extraFee) + 金额场景 gw=bank=100 → 命中', () => {
+    const banks = [feeBankRow(100)];
+    const r = runC3Scenario(makeC3FeeScenario(null), banks, [feeGwRow(100)]);
+    assert.equal(r.modifications.length, 1);
+    assert.equal(banks[0].Narrative, 'GW-REF');
+  });
+  test('DS2 加 fee 命中：fee=5, gw=100, bank=105', () => {
+    const banks = [feeBankRow(105)];
+    const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 5 }), banks, [feeGwRow(100)]);
+    assert.equal(r.modifications.length, 1);
+    assert.equal(banks[0].Narrative, 'GW-REF');
+  });
+  test('DS3 加 fee 不命中：fee=5, gw=100, bank=100（105≠100）', () => {
+    const banks = [feeBankRow(100)];
+    const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 5 }), banks, [feeGwRow(100)]);
+    assert.equal(r.modifications.length, 0);
+    assert.equal(banks[0].Narrative, '');
+  });
+  test('DS4 fee=0 显式勾选：gw=bank=100 → 命中（等价默认关）', () => {
+    const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 0 }), [feeBankRow(100)], [feeGwRow(100)]);
+    assert.equal(r.modifications.length, 1);
+  });
+  test('DS5 负 fee：fee=-5, gw=100, bank=95', () => {
+    const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: -5 }), [feeBankRow(95)], [feeGwRow(100)]);
+    assert.equal(r.modifications.length, 1);
+  });
+  test('DS6 小数 fee：fee=0.5, gw=100, bank=100.5', () => {
+    const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 0.5 }), [feeBankRow(100.5)], [feeGwRow(100)]);
+    assert.equal(r.modifications.length, 1);
+  });
+  test('DS7 A1：多金额字段对时 fee 仅作用「发生额绝对值」对，另一 Fee 字段对需精确相等', () => {
+    const s = {
+      id: 7, name: 'ds7',
+      config: {
+        reconFields: [
+          { seq: 1, gwField: 'Amount', bankField: BANK_STATEMENT_VIRTUAL_AMOUNT_ABS },
+          { seq: 2, gwField: 'ServiceFee', bankField: 'ServiceFee' }
+        ],
+        assign: { gwField: 'Reference', bankField: 'Narrative', mode: 'direct' },
+        extraFee: { enabled: true, amount: 5 }
+      }
+    };
+    const banks = [{ 'Credit Amount': 105, 'Debit Amount': 0, ServiceFee: 2, Narrative: '' }];
+    const r = runC3Scenario(s, banks, [{ Amount: 100, ServiceFee: 2, Reference: 'GW-REF' }]);
+    assert.equal(r.modifications.length, 1, 'Amount 对加 fee(=105) + ServiceFee 精确相等(2) → 命中');
+    const banks2 = [{ 'Credit Amount': 105, 'Debit Amount': 0, ServiceFee: 7, Narrative: '' }];
+    const r2 = runC3Scenario(s, banks2, [{ Amount: 100, ServiceFee: 2, Reference: 'X' }]);
+    assert.equal(r2.modifications.length, 0, 'ServiceFee 未加 fee（2≠7）→ 不命中（证明 A1：fee 只作用发生额绝对值对）');
+  });
+  test('DS8 1v1 消费不变：2 bank 同额 + 1 gw(加 fee 命中) → 仅 1 条命中', () => {
+    const banks = [feeBankRow(105), feeBankRow(105)];
+    const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 5 }), banks, [feeGwRow(100)]);
+    assert.equal(r.modifications.length, 1, '单 gw 严格 1v1 消费（资金红线不变）');
+  });
+  test('DS9 浮点边界：fee=0.1, gw=0.2, bank=0.3 → 归一到分命中', () => {
+    const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 0.1 }), [feeBankRow(0.3)], [feeGwRow(0.2)]);
+    assert.equal(r.modifications.length, 1, 'Math.round 归一到分防 0.1+0.2!==0.3');
   });
 });
 

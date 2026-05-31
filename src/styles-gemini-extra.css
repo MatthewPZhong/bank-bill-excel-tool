@@ -2406,6 +2406,26 @@ select.mapping-text-input {
   width: 100px;
 }
 
+/* v2.1.12 需求5：C3 extra fee 勾选框 + 金额输入（输入框 4 字符视觉宽度） */
+.scenario-config-row-extrafee {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.scenario-config-extrafee-check,
+.scenario-config-extrafee-formula {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.scenario-config-input-fee {
+  flex: 0 0 56px;
+  width: 56px;
+  text-align: right;
+}
+
 /* v2.1.5 fix1.1：C3「条件」row — grid 列宽固定，避免 side 切换"网关↔银行"时
    左二字段 select 因字段名超长被撑开（GATEWAY_RECON_FIELDS 含 30+ 字符的
    'Type(0:1对1,1:1对多,2:多对1,3:多对1（轧差合并)'）。

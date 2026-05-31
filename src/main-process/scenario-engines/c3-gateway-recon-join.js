@@ -57,10 +57,23 @@ function isNumericFieldName(fieldName) {
   return /Amount|Fee|金额|数额|发生额/.test(name);
 }
 
-function gwMatchesBank(gwRow, bankRow, reconFields) {
+function gwMatchesBank(gwRow, bankRow, reconFields, fee = null) {
+  // v2.1.12 需求5：extra fee 匹配（🔴资金红线 · spec-alpha-req5-extrafee §2.2/§2.4）
+  //   - undefined→null 归一防御：旧调用方不传 fee → 默认 null + Number.isFinite 双保险，绝不误入 fee 分支（防 NaN 大面积回归）
+  //   - effectiveFee=null（未勾选/缺字段/非有限数）→ 全字段对走原 valuesEqual，与 v2.1.11 byte-for-byte 一致（零回归）
+  //   - effectiveFee 为有限数 → 仅对「银行侧=发生额绝对值」字段对（A1）做 gw值+fee 后比 bank值；其余字段对不变
+  const effectiveFee = Number.isFinite(fee) ? fee : null;
   return reconFields.every((rf) => {
     const numeric = isNumericFieldName(rf.gwField) || isNumericFieldName(rf.bankField);
     const bankValue = getBankRowValueForC3(bankRow, rf.bankField);
+    if (effectiveFee !== null && rf.bankField === BANK_STATEMENT_VIRTUAL_AMOUNT_ABS) {
+      const gwNum = parseNumber(gwRow[rf.gwField]);
+      if (gwNum === null) return valuesEqual(gwRow[rf.gwField], bankValue, { numeric }); // gw 非数值 → 回退原逻辑
+      const bankNum = parseNumber(bankValue);
+      if (bankNum === null) return false;
+      // Q7：归一到分比较，避免浮点漂移（0.1 + 0.2 !== 0.3）
+      return Math.round((gwNum + effectiveFee) * 100) === Math.round(bankNum * 100);
+    }
     return valuesEqual(gwRow[rf.gwField], bankValue, { numeric });
   });
 }
@@ -71,6 +84,9 @@ function runC3Scenario(scenario, bankRows, gwRows) {
   const config = scenario.config || {};
   const reconFields = config.reconFields || [];
   const assign = config.assign || {};
+  // v2.1.12 需求5：extra fee（🔴资金红线）— 勾选且 amount 为有限数 → fee 参与「发生额绝对值」字段对匹配；
+  //   否则 null（gwMatchesBank 走原 valuesEqual，与 v2.1.11 byte-for-byte 一致，零回归）
+  const fee = (config.extraFee && config.extraFee.enabled === true) ? parseNumber(config.extraFee.amount) : null;
 
   if (!Array.isArray(gwRows) || gwRows.length === 0) {
     warningCollector.push({
@@ -156,7 +172,7 @@ function runC3Scenario(scenario, bankRows, gwRows) {
     //     数据质量监控视角能看到原始匹配数（不被"非空过滤"掩盖）
     const rawMatched = gwRowsFiltered
       .map((g, gIdx) => ({ row: g, gIdx }))
-      .filter((x) => !usedGwRowIdx.has(x.gIdx) && gwMatchesBank(x.row, bankRow, reconFields));
+      .filter((x) => !usedGwRowIdx.has(x.gIdx) && gwMatchesBank(x.row, bankRow, reconFields, fee));
     const matched = rawMatched.filter((x) =>
       isCustom || normalizeCellValue(x.row[assign.gwField]) !== ''
     );
