@@ -40,9 +40,14 @@ function xmlUnescape(s) {
   });
 }
 
-// 正则：匹配单个 <c ...>...</c>；r="XY123"；t="..." 可选；body 到 </c>
-// 注：xlsx 理论允许 <c .../>（无 body，自闭合空 cell），这里也兼容
-const CELL_OPEN_RE = /<c\s+r="([A-Z]+)\d+"([^>]*)\/>|<c\s+r="([A-Z]+)\d+"([^>]*)>([\s\S]*?)<\/c>/g;
+// 正则：匹配单个 <c ...>...</c> 或自闭合 <c .../>；attrs 任意顺序后再独立提取 r/t。
+// 🔴 资金红线（v2.1.12 codex review Critical 修复）：旧版写死 `<c\s+r="..."` 要求 r 是**第一个**属性，
+//   但 OOXML 不保证属性顺序——合法单元格如 `<c s="2" r="N2"><v>123.45</v></c>`（s 在 r 前）会被漏读，
+//   若漏的是「对账金额」列 → 后续按空值计 0 → 少算发生额 + 错期末 OP（不报错的静默资金事故）。
+//   改为：先匹配整个 <c> 标签取 attrs（分支1 自闭合 / 分支2 带 body），再用 CELL_R_RE/extractTypeFromAttrs
+//   从 attrs 任意位置提取 r、t，不依赖属性顺序。
+const CELL_OPEN_RE = /<c\b([^>]*?)\/>|<c\b([^>]*?)>([\s\S]*?)<\/c>/g;
+const CELL_R_RE = /\br="([A-Z]+)\d+"/;   // 从 attrs 提取列字母（r 可在任意位置）
 const T_CONTENT_RE = /<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g;
 const V_CONTENT_RE = /<v>([\s\S]*?)<\/v>/;
 
@@ -58,12 +63,14 @@ function parseRowXml(rowXml, colCount, sharedStrings) {
   CELL_OPEN_RE.lastIndex = 0;
   let m;
   while ((m = CELL_OPEN_RE.exec(rowXml))) {
-    // 两种匹配分支：自闭合 vs 带 body
+    // 两种匹配分支：自闭合 <c .../>（m[1]=attrs）vs 带 body <c ...>body</c>（m[2]=attrs, m[3]=body）
     const selfClose = m[1] !== undefined;
-    const letters = selfClose ? m[1] : m[3];
-    const attrs = selfClose ? m[2] : m[4];
-    const body = selfClose ? '' : m[5];
-    const colIdx = lettersToIndex(letters);
+    const attrs = selfClose ? m[1] : m[2];
+    const body = selfClose ? '' : m[3];
+    // 从 attrs 独立提取 r（列字母），不依赖属性顺序（🔴资金红线，见 CELL_OPEN_RE 注释）
+    const rm = attrs.match(CELL_R_RE);
+    if (!rm) continue;   // 无 r 属性（极罕见，非标准）→ 跳过
+    const colIdx = lettersToIndex(rm[1]);
     if (colIdx < 0 || colIdx >= colCount) continue;
 
     if (selfClose || body === '') {

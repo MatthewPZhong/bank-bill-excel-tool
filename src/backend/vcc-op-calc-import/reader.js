@@ -23,7 +23,7 @@ const {
 } = require('../file-service/common');
 const { FLOW_HEADERS, FLOW_DB_COLUMNS } = require('../vcc-op-calc-db/columns');
 const { validateFlowHeaders } = require('./validator');
-const { parseRowXml, readSharedStrings } = require('../pending-import/streaming-xlsx-reader');
+const { parseRowXml, readSharedStrings, lettersToIndex } = require('../pending-import/streaming-xlsx-reader');
 
 const ERROR_CODE = 'VCC_OP_CALC_FLOW_HEADER_MISMATCH';
 const TEMPLATE_LABEL = '流水对账单';
@@ -88,6 +88,17 @@ function scanSheet(sheetEntry, sharedStrings, ctx) {
         const rb = pending.indexOf('<row>');
         const rowStart = ra < 0 ? rb : (rb < 0 ? ra : Math.min(ra, rb));
         if (rowStart < 0) { if (!endFlush && pending.length > 16) pending = pending.slice(-16); break; }
+        // 先定位 <row ...> 起始标签的 '>'：判断自闭合 + 解析真实 Excel 行号 r（v2.1.12 codex Minor①）
+        const tagEnd = pending.indexOf('>', rowStart);
+        if (tagEnd < 0) { if (rowStart > 0) pending = pending.slice(rowStart); break; }  // 起始标签跨 chunk，等更多数据
+        const rowTag = pending.slice(rowStart, tagEnd + 1);
+        const rrm = rowTag.match(/\br="(\d+)"/);
+        const excelRow = rrm ? parseInt(rrm[1], 10) : null;   // 真实 Excel 行号（不依赖计数，遇省略空行也准）
+        // 自闭合 <row .../> 空行 → 明确跳过（不当数据行、不让 </row> 切分错位到下一行）
+        if (rowTag.charAt(rowTag.length - 2) === '/') {
+          pending = pending.slice(tagEnd + 1);
+          continue;
+        }
         const rowEnd = pending.indexOf('</row>', rowStart);
         if (rowEnd < 0) { if (rowStart > 0) pending = pending.slice(rowStart); break; }
         const rowXml = pending.slice(rowStart, rowEnd + 6);
@@ -98,13 +109,26 @@ function scanSheet(sheetEntry, sharedStrings, ctx) {
           headerChecked = true;
           const v = validateFlowHeaders(cells);
           if (!v.ok) { done({ matched: false, validation: v, dataRows: 0 }); return false; }
+          // Minor②（v2.1.12 codex review）：前 28 列匹配 FLOW 后，再检测表头是否有超出 28 列的尾部 cell。
+          //   流式固定 COL_COUNT=28，否则尾部多列被静默忽略，与同步 SheetJS「列数不匹配」严格性不一致 → 主动拒绝整个文件。
+          let maxColIdx = -1; let hm;
+          const headerColRe = /\br="([A-Z]+)\d+"/g;
+          while ((hm = headerColRe.exec(rowXml))) { const ci = lettersToIndex(hm[1]); if (ci > maxColIdx) maxColIdx = ci; }
+          if (maxColIdx >= COL_COUNT) {
+            fail(new FileValidationError(
+              ERROR_CODE,
+              `${TEMPLATE_LABEL} 表头列数超出模板 ${COL_COUNT} 列（前 ${COL_COUNT} 列匹配，但检测到第 ${maxColIdx + 1} 列）`,
+              { detailLines: [`模板固定 ${COL_COUNT} 列；尾部多余列可能导致列错位，请核对是否选错文件`], context: { templateLabel: TEMPLATE_LABEL, maxColumn: maxColIdx + 1 } }
+            ));
+            return false;
+          }
           matched = true;
           continue;
         }
         if (!isRowMeaningful(cells)) continue;
         const obj = {};
         for (let i = 0; i < COL_COUNT; i++) obj[FLOW_DB_COLUMNS[i]] = normalizeCell(cells[i]);
-        obj._rowIndex = rowIdx;
+        obj._rowIndex = excelRow != null ? excelRow : rowIdx;   // 真实 Excel 行号优先，缺 r 属性回退计数
         dataRows += 1;
         ctx.onDataRow(obj);
         ctx.tick();

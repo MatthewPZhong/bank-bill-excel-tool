@@ -194,4 +194,21 @@ test.describe('streamScanAndCompute（流式聚合，资金红线🔴）', () =>
       (e) => e && e.name === 'FileValidationError' && /未找到流水数据表/.test(e.message)
     );
   });
+
+  test('表头超出 28 列（尾部多余列）→ 拒绝（Minor② codex review，对齐同步 SheetJS 严格性）', async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Sheet1');
+    ws.addRow([...FLOW_HEADERS.slice(), '额外列A', '额外列B']);   // 30 列 = 前 28 FLOW + 尾部 2 多余列
+    const line = new Array(30).fill('');
+    line[COL.billDate] = '2026-05-01'; line[COL.direction] = '入'; line[COL.amount] = '10';
+    ws.addRow(line);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-over-'));
+    tmpDirs.push(dir);
+    const fp = path.join(dir, 'over.xlsx');
+    await wb.xlsx.writeFile(fp);
+    await assert.rejects(
+      () => newSession().streamScanAndCompute([fp]),
+      (e) => e && e.name === 'FileValidationError' && /列数超出模板 28 列|第 30 列/.test(e.message)
+    );
+  });
 });
