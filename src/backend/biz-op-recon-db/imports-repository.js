@@ -53,6 +53,20 @@ function insertRows(db, date, rows) {
   return count;
 }
 
+// v2.1.12-beta β.2-T2：预编译逐行 inserter（边流式读边 INSERT 用，避免百万次 db.prepare）
+// 返回 insertOne(date, row)；与 insertRows 共用 INSERT_SQL + 同列序/同 null→'' 归一（单一真理来源）。
+// 调用方负责开事务（worker 内 BEGIN…COMMIT 包裹）。
+function makeRowInserter(db) {
+  const stmt = db.prepare(INSERT_SQL);
+  return (date, row) => {
+    const params = [date, row._rowIndex ?? 0];
+    for (const col of BIZ_OP_DB_COLUMNS) {
+      params.push(row[col] == null ? '' : String(row[col]));
+    }
+    return stmt.run(...params);
+  };
+}
+
 // 按 (date, BU) 取业务 OP 行；BU 用 LOWER(TRIM(...)) 实现 normalizeBu 语义（#7 拍板 C）
 // 对账算法用，需要原值落库 + 比较时 normalize
 function getRowsByDateBu(db, date, buName) {
@@ -120,6 +134,7 @@ module.exports = {
   TABLE,
   clearByDateBu,
   insertRows,
+  makeRowInserter,
   getRowsByDateBu,
   getRowById,
   listDistinctBus,
