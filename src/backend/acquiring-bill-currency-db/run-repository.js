@@ -7,6 +7,72 @@ const DIFF_TABLE = 'acquiring_bill_currency_diff_rows';
 const FLOW_TABLE = 'acquiring_bill_currency_flow_imports';
 const BILL_TABLE = 'acquiring_bill_currency_bill_imports';
 
+// ⚠️ 资金红线 ⚠️ — v2.1.12 β.1-T2 — chunked 比对 SQL 共用片段（DRY 防漂移）
+//
+// 单 worker 路径（insertDiffRowsByJoinChunked.chunkStmt）与多 worker 路径
+// （buildSelectOnlyChunkSql → run-check-multiworker.runWriteSplitChunks）必须输出
+// **完全相同的行（内容 + 物理顺序）**。二者的区别仅在 SELECT 投影头：
+//   - 单 worker：`INSERT INTO diff_rows (...) SELECT ?, b.id, f.settle_currency, ... <BODY>`
+//   - 多 worker：`SELECT b.id AS bill_import_id, f.settle_currency AS flow_currency, ... <BODY>`
+// 其余（FROM 子查询 ORDER BY id ASC LIMIT ? OFFSET ? + INNER JOIN + WHERE）**必须一字不差**。
+// 若两处 SQL body 不同步 → byte-for-byte 立即漂移（本任务最大风险）。故 body 抽成单一常量共享。
+//
+// 占位符约定（两路径一致）：BODY 含 3 个 `?`，顺序固定为 [monthKey, limit, offset]。
+//   - 单 worker chunkStmt 在 BODY 之前还有 1 个 `?`(run_id) → 绑定顺序 [runId, monthKey, limit, offset]
+//   - 多 worker SELECT-only 无 run_id（run_id 由主进程汇总时作 prefixValues 注入）→ 绑定 [monthKey, limit, offset]
+//
+// CASE 表达式（diff_type 判定）也共用 —— 单/多 worker 各自带或不带别名，但表达式本体一致。
+const DIFF_TYPE_CASE_SQL = `CASE
+        WHEN b.settle_currency_norm IS NULL OR b.settle_currency_norm = '' THEN 'bill_currency_missing'
+        ELSE 'currency_mismatch'
+      END`;
+
+// FROM / JOIN / WHERE 尾段（含子查询 ORDER BY id ASC LIMIT ? OFFSET ?）—— 单/多 worker 共享，一字不改。
+//   注：SQLite 的 INSERT ... SELECT ... LIMIT 不支持复合 OFFSET 时 ORDER BY 跨 batch 稳定 ——
+//   改用子查询先按 b.id 排序 + LIMIT/OFFSET 限定本批 bill_id 范围，外层 JOIN flow 比对
+//   性能：b.id 是 INTEGER PRIMARY KEY AUTOINCREMENT，B-tree 索引天然有序，LIMIT/OFFSET 高效
+const DIFF_JOIN_BODY_SQL = `FROM (
+      SELECT id, month_key, recon_main_id, settle_currency_norm
+      FROM ${BILL_TABLE}
+      WHERE month_key = ?
+      ORDER BY id ASC
+      LIMIT ? OFFSET ?
+    ) b
+    INNER JOIN ${FLOW_TABLE} f
+      ON f.month_key = b.month_key AND f.recon_main_id = b.recon_main_id
+    WHERE COALESCE(b.settle_currency_norm, '') <> COALESCE(f.settle_currency_norm, '')`;
+
+// 单 worker chunked INSERT 全文（INSERT 头 + run_id 占位 + 业务列 + 共用 BODY）
+//   绑定顺序：[runId, monthKey, limit, offset]
+const CHUNK_INSERT_SELECT_SQL = `INSERT INTO ${DIFF_TABLE} (run_id, bill_import_id, flow_currency, flow_amount_abs, diff_type)
+    SELECT
+      ?,
+      b.id,
+      f.settle_currency,
+      f.settle_amount_abs,
+      ${DIFF_TYPE_CASE_SQL}
+    ${DIFF_JOIN_BODY_SQL}`;
+
+// ⚠️ 资金红线 ⚠️ — v2.1.12 β.1-T2 — 多 worker 路径的只读 SELECT（去掉 INSERT 头 + run_id 占位，列加别名）
+//   - 与 CHUNK_INSERT_SELECT_SQL **共用 DIFF_TYPE_CASE_SQL + DIFF_JOIN_BODY_SQL**（防漂移）
+//   - 输出列别名顺序 = [bill_import_id, flow_currency, flow_amount_abs, diff_type]（= partColumns）
+//   - 绑定顺序：[monthKey, limit, offset]（run_id 由主进程汇总时作 prefixValues 注入，不在此 SQL 内）
+//   - worker 端 run-check-multiworker-worker.writeChunkToTemp 用本 SQL 的输出列名取值写 temp db
+function buildSelectOnlyChunkSql() {
+  return `SELECT
+      b.id AS bill_import_id,
+      f.settle_currency AS flow_currency,
+      f.settle_amount_abs AS flow_amount_abs,
+      ${DIFF_TYPE_CASE_SQL} AS diff_type
+    ${DIFF_JOIN_BODY_SQL}`;
+}
+
+// 多 worker 路径列契约（顺序敏感 — byte-for-byte 列映射）
+//   partColumns：SELECT 输出别名顺序 = temp db 业务列顺序
+//   targetColumns：目标表列 = [run_id(prefix)] + partColumns
+const MULTIWORKER_PART_COLUMNS = ['bill_import_id', 'flow_currency', 'flow_amount_abs', 'diff_type'];
+const MULTIWORKER_TARGET_COLUMNS = ['run_id', 'bill_import_id', 'flow_currency', 'flow_amount_abs', 'diff_type'];
+
 // v0.14 fix12：显式传 ranAt（ISO 8601 带 Z 后缀），不再依赖 SQLite DEFAULT CURRENT_TIMESTAMP（返回 UTC 无 Z 后缀）
 // caller 应传 new Date().toISOString()；caller 不传时仍依赖 DEFAULT（向后兼容旧调用方但语义模糊）
 function insertRun(db, { monthKey, totalBillRows, matchedRows, mismatchRows, unmatchedRows, status = 'success', ranAt = null }) {
@@ -190,31 +256,9 @@ function insertDiffRowsByJoinChunked(db, {
   }
 
   // chunked INSERT SQL — 用 id 范围子查询 + JOIN flow 比对币种
-  //   注：SQLite 的 INSERT ... SELECT ... LIMIT 不支持复合 OFFSET 时 ORDER BY 跨 batch 稳定 ——
-  //   改用子查询先按 b.id 排序 + LIMIT/OFFSET 限定本批 bill_id 范围，外层 JOIN flow 比对
-  //   性能：b.id 是 INTEGER PRIMARY KEY AUTOINCREMENT，B-tree 索引天然有序，LIMIT/OFFSET 高效
-  const chunkStmt = db.prepare(`
-    INSERT INTO ${DIFF_TABLE} (run_id, bill_import_id, flow_currency, flow_amount_abs, diff_type)
-    SELECT
-      ?,
-      b.id,
-      f.settle_currency,
-      f.settle_amount_abs,
-      CASE
-        WHEN b.settle_currency_norm IS NULL OR b.settle_currency_norm = '' THEN 'bill_currency_missing'
-        ELSE 'currency_mismatch'
-      END
-    FROM (
-      SELECT id, month_key, recon_main_id, settle_currency_norm
-      FROM ${BILL_TABLE}
-      WHERE month_key = ?
-      ORDER BY id ASC
-      LIMIT ? OFFSET ?
-    ) b
-    INNER JOIN ${FLOW_TABLE} f
-      ON f.month_key = b.month_key AND f.recon_main_id = b.recon_main_id
-    WHERE COALESCE(b.settle_currency_norm, '') <> COALESCE(f.settle_currency_norm, '')
-  `);
+  //   v2.1.12 β.1-T2：SQL body 抽到模块级 CHUNK_INSERT_SELECT_SQL（与多 worker SELECT-only 共用
+  //   DIFF_TYPE_CASE_SQL + DIFF_JOIN_BODY_SQL 片段，防 byte-for-byte 漂移；语义/绑定顺序不变）
+  const chunkStmt = db.prepare(CHUNK_INSERT_SELECT_SQL);
 
   let totalProcessedBillRows = 0;
   let totalInsertedDiffRows = 0;
@@ -274,6 +318,145 @@ function insertDiffRowsByJoinChunked(db, {
     totalProcessedBillRows,
     totalInsertedDiffRows,
     lastCompletedChunkIndex,
+  };
+}
+
+// ⚠️ 资金红线 ⚠️ — v2.1.12 β.1-T2 — 多 worker write-splitting 入口（plan-b）
+//
+// 决策 A（spec §4 D-β-1）：**只服务全新 run**；resume run 由 caller gate 走单 worker（本函数不处理 resume）。
+//
+// 与单 worker insertDiffRowsByJoinChunked 的关系：
+//   - totalChunks 口径完全一致（COUNT(*) bill WHERE month_key / chunkSize 向上取整）
+//   - 每 chunk 的 [monthKey, limit, offset] 与单 worker chunkStmt.run(runId, monthKey, cs, offset) 一致
+//   - chunkIndex 0..N-1 升序汇总 → byte-for-byte 等价单 worker 逐 chunk INSERT...SELECT
+//   - run_id 由 prefixValues=[runId] 在主进程汇总 INSERT 时注入（SELECT-only SQL 内不含 run_id）
+//
+// 失败保守处理（任务要点 5 — 不留半套数据）：
+//   runWriteSplitChunks 是「全有或全无」：reader 阶段任一 worker 失败 → reject（汇总未执行）；
+//   但汇总阶段（mergeTempDbsInOrder）按 chunk 升序逐个独立 BEGIN/COMMIT —— 若汇总到第 K 个 chunk 失败，
+//   前 K-1 个已 COMMIT 会残留。故本函数在 catch 里**主动清掉本 run 已插入的 diff_rows**（DELETE WHERE run_id），
+//   再透传错误。caller（runCheckCore）据此标 chunk_progress 让后续走单 worker 重跑。务必不留半套数据。
+//
+// 入参：
+//   - db                  : 主进程目标 DB connection（汇总 INSERT + 失败清理；caller 持有）
+//   - { runId, monthKey } : 与单 worker 一致
+//   - chunkSize           : 单 chunk 行数（caller 自适应分片后注入；正整数）
+//   - dbPath              : 主源 sqlite 路径（worker 各自 open 只读 connection）
+//   - workerCount         : worker 数 M（caller 按 settings/行数/OOM 决策；必须 ≥1）
+//   - tempDir             : temp db 存放目录（caller 提供 run 专属目录；模块写 part-<ci>.sqlite）
+//   - onChunkDone         : 可选，每 chunk 汇总进度回调 { chunkIndex, totalChunks, processedRows?, insertedDiffRows?, elapsedMs? }
+//                           （与单 worker onChunkDone 同名，便于 caller 复用 chunk_progress 更新逻辑；
+//                            注：多 worker 的「完成」语义 = reader 完成该 chunk，processedRows 为本 chunk SELECT 命中前的 bill 行数估算）
+//
+// 返回（与单 worker insertDiffRowsByJoinChunked 同形状）：
+//   { totalChunks, totalProcessedBillRows, totalInsertedDiffRows, lastCompletedChunkIndex }
+//   - lastCompletedChunkIndex = totalChunks - 1（成功路径全跑完）；-1 表示 0 chunk
+async function insertDiffRowsByJoinMultiWorker(db, {
+  runId,
+  monthKey,
+  chunkSize,
+  dbPath,
+  workerCount,
+  tempDir,
+  onChunkDone = null,
+} = {}) {
+  if (!runId || typeof runId !== 'number') {
+    throw new Error('insertDiffRowsByJoinMultiWorker: runId 必填且为 number');
+  }
+  if (!monthKey) {
+    throw new Error('insertDiffRowsByJoinMultiWorker: monthKey 必填');
+  }
+  const cs = Number(chunkSize);
+  if (!Number.isInteger(cs) || cs < 1) {
+    throw new Error(`insertDiffRowsByJoinMultiWorker: chunkSize 必须为正整数，收到：${JSON.stringify(chunkSize)}`);
+  }
+  if (!dbPath || typeof dbPath !== 'string') {
+    throw new Error('insertDiffRowsByJoinMultiWorker: dbPath 必填（worker 各自 open 只读 connection）');
+  }
+  if (!Number.isInteger(workerCount) || workerCount < 1) {
+    throw new Error(`insertDiffRowsByJoinMultiWorker: workerCount 必须 ≥1 整数，收到：${JSON.stringify(workerCount)}`);
+  }
+  if (!tempDir || typeof tempDir !== 'string') {
+    throw new Error('insertDiffRowsByJoinMultiWorker: tempDir 必填');
+  }
+
+  // 步骤 1：totalChunks 口径与单 worker 完全一致
+  const totalBillRows = db.prepare(`
+    SELECT COUNT(*) AS c FROM ${BILL_TABLE} WHERE month_key = ?
+  `).get(monthKey).c;
+  const totalChunks = totalBillRows === 0 ? 0 : Math.ceil(totalBillRows / cs);
+
+  // 0 chunk 边界（空 bill 表）— 与单 worker 返回一致，不起 worker
+  if (totalChunks === 0) {
+    return {
+      totalChunks: 0,
+      totalProcessedBillRows: 0,
+      totalInsertedDiffRows: 0,
+      lastCompletedChunkIndex: -1,
+    };
+  }
+
+  // 步骤 2：build chunks 列表（chunkIndex 0..N-1 + [monthKey, limit, offset]，与单 worker offset 口径一致）
+  const chunks = [];
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+    chunks.push({ chunkIndex, bindParams: [monthKey, cs, chunkIndex * cs] });
+  }
+
+  // 步骤 3：调多 worker 执行器（lazy require 避免循环依赖 / 启动开销）
+  const mw = require('../../main-process/run-check-multiworker');
+  const selectSql = buildSelectOnlyChunkSql();
+
+  let result;
+  try {
+    result = await mw.runWriteSplitChunks({
+      db,
+      dbPath,
+      workerCount,
+      chunks,
+      selectSql,
+      partColumns: MULTIWORKER_PART_COLUMNS,
+      targetTable: DIFF_TABLE,
+      targetColumns: MULTIWORKER_TARGET_COLUMNS,
+      prefixValues: [runId],
+      tempDir,
+      onProgress: (ev) => {
+        // 透传到单 worker 同名 onChunkDone（caller 复用 chunk_progress 更新）
+        if (typeof onChunkDone === 'function') {
+          try {
+            onChunkDone({
+              chunkIndex: ev.chunkIndex,
+              totalChunks: ev.totalChunks,
+              processedRows: Math.min(cs, totalBillRows - ev.chunkIndex * cs),
+              insertedDiffRows: ev.rowCount,
+              elapsedMs: 0,
+            });
+          } catch (_e) { /* 回调抛错不阻塞主流程 */ }
+        }
+      },
+    });
+  } catch (mwErr) {
+    // 🔴 失败保守处理：清掉本 run 已插入的 diff_rows（防汇总半途 COMMIT 残留），再透传错误。
+    //   单独 BEGIN/COMMIT；清理失败也不掩盖原始 mwErr（清理错仅吞，原错优先抛）。
+    try {
+      db.exec('BEGIN');
+      try {
+        db.prepare(`DELETE FROM ${DIFF_TABLE} WHERE run_id = ?`).run(runId);
+        db.exec('COMMIT');
+      } catch (_delInner) {
+        try { db.exec('ROLLBACK'); } catch (_e) { /* swallow */ }
+      }
+    } catch (_delOuter) {
+      // BEGIN 都失败（事务状态异常）— 吞掉，优先抛原始 mwErr
+    }
+    throw mwErr;
+  }
+
+  // 成功路径：全部 chunk 跑完
+  return {
+    totalChunks,
+    totalProcessedBillRows: totalBillRows,
+    totalInsertedDiffRows: result.insertedRows,
+    lastCompletedChunkIndex: totalChunks - 1,
   };
 }
 
@@ -476,6 +659,11 @@ module.exports = {
   insertDiffRowsByJoin,
   // v2.1.10 A4 T18 / T19：chunked 分批 + chunk_progress
   insertDiffRowsByJoinChunked,
+  // v2.1.12 β.1-T2：多 worker write-splitting 入口（plan-b）+ SELECT-only SQL（共用 body 防漂移）
+  insertDiffRowsByJoinMultiWorker,
+  buildSelectOnlyChunkSql,
+  MULTIWORKER_PART_COLUMNS,
+  MULTIWORKER_TARGET_COLUMNS,
   setRunChunkProgress,
   getRunChunkProgress,
   // v2.1.10 SR-FIX-1 round 2 P1-5：列出某月所有 partial run（用于 resume handler）
