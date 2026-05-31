@@ -155,7 +155,7 @@ if (!isMainThread) {
   //   v2.1.10 T18：payload 新增 chunkSize（caller 从 settings 注入；spec §3.2 默认 100000）
   //   v2.1.10 T19：payload 新增 resumeFromRun = { runId, lastCompletedChunkIndex }（resume 路径）
   async function runCheckInWorker(workerDb, payload, jobId, cancelToken) {
-    const { monthKey, storageRoot, chunkSize, resumeFromRun } = payload || {};
+    const { monthKey, storageRoot, chunkSize, resumeFromRun, workerCount, tempDir, __forceMultiWorkerForTest } = payload || {};
     if (!monthKey) {
       throw new Error('runCheckInWorker：monthKey 必填');
     }
@@ -173,6 +173,8 @@ if (!isMainThread) {
     }
     // T13：cancelToken 直接透传 — runCheckCore 内 5 阶段间自己 check + ROLLBACK + throw
     // T18 / T19：chunkSize + resumeFromRun 透传（undefined 兼容旧 caller — runCheckCore 内 default 处理）
+    // v2.1.12 β.1-T3：workerCount/tempDir 透传 + dbPath=workerDbPath（多 worker nested 子 worker open 只读连接）
+    //   undefined workerCount → runCheckCore 默认单 worker（现有调用零行为变化）
     return await session.runCheckCore({
       db: workerDb,
       monthKey,
@@ -181,11 +183,16 @@ if (!isMainThread) {
       cancelToken,
       chunkSize,
       resumeFromRun,
+      workerCount,
+      dbPath: workerDbPath,
+      tempDir,
+      __forceMultiWorkerForTest,
     });
   }
 
   // ── 主消息循环 ──
   let workerDb = null;
+  let workerDbPath = null; // v2.1.12 β.1-T3：init 时存 dbPath，多 worker nested 子 worker open 只读连接复用
   let initialized = false;
   let activeJob = null; // { jobId, cancelToken }
 
@@ -205,6 +212,7 @@ if (!isMainThread) {
         }
         const { db, pragmaValues } = initWorkerDb(dbPath);
         workerDb = db;
+        workerDbPath = dbPath; // v2.1.12 β.1-T3：存 dbPath 供多 worker nested 子 worker 复用
         initialized = true;
         parentPort.postMessage({ type: 'init-done', pragmaValues });
         return;
