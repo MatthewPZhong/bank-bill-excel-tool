@@ -106,48 +106,13 @@ function ensureActivityLogFile(filePath) {
 }
 
 function appendActivityRecord(filePath, payload = {}) {
+  // v2.1.12 SR-log-1：移除 app_activity_log.txt 旧双写，仅保留新结构 JSON Lines。
+  //   - filePath 历史上是 <storageRoot>/app_activity_log.txt，现仅用于推导 storageRoot（dirname）
+  //   - 旧文件不再创建/写入；已存在的历史文件保留不动（用户可继续查阅，见 USER_GUIDE）
+  //   - 失败处理：交由 caller 兜底（appendActivityLogEntry / appendModuleLog 均有 stderr graceful）
   const now = new Date();
-  const date = formatLocalDate(now);
-  const time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-  const level = String(payload.level || 'INFO').toUpperCase();
-  const message = String(payload.message || '').trim() || '未命名操作';
-  const detailText = Array.isArray(payload.details)
-    ? payload.details.map((line) => String(line || '').trim()).filter((line) => line !== '').join('；')
-    : String(payload.details || '').trim();
-  const bodyLine = detailText ? `${message} | ${detailText}` : message;
-  const logFilePath = ensureActivityLogFile(filePath);
-  const currentContent = fs.readFileSync(logFilePath, 'utf8');
-  const dateHeader = `[${date}]`;
-  const nextLines = [];
-
-  if (!currentContent.includes(dateHeader)) {
-    if (currentContent.trim() !== '') {
-      nextLines.push('');
-    }
-
-    nextLines.push(dateHeader);
-  }
-
-  nextLines.push(`[${time}] [${level}] ${bodyLine}`);
-  fs.appendFileSync(logFilePath, `${nextLines.join('\n')}\n`, 'utf8');
-
-  // v2.1.9 SR-log-1 (T32j)：双写新结构日志（spec §15.7 D34=a 双写 1 版本）
-  //   - 旧路径（上方）保持 v2.1.8 行为，所有既有 caller 不动
-  //   - 新路径：logs/{YYYY-MM}/{MM-DD}/{level}.log JSON Lines 格式（spec §15.3）
-  //   - storageRoot 推导：旧 filePath 是 <storageRoot>/app_activity_log.txt → dirname = <storageRoot>
-  //   - 双写失败兜底：吞掉错误（不影响旧日志写入；最坏情况新结构暂时缺一条，下次正常）
-  try {
-    const storageRoot = path.dirname(filePath);
-    appendStructuredLog(storageRoot, payload, now);
-  } catch (_error) {
-    // graceful — 新日志结构写入失败不影响旧日志（caller 不感知）
-    // 最末端兜底：写 stderr（避免无限递归）
-    try {
-      process.stderr.write(`[appendStructuredLog fallback] ${_error && _error.message ? _error.message : String(_error)}\n`);
-    } catch (_e) {}
-  }
-
-  return logFilePath;
+  const storageRoot = path.dirname(filePath);
+  return appendStructuredLog(storageRoot, payload, now);
 }
 
 // v2.1.9 SR-log-1 (T32j)：新日志结构路径函数（spec §15.2 D29=a-修订）

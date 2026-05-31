@@ -1,15 +1,15 @@
 {
   "meta": {
     "version": "2.1.11",
-    "scannedAt": "2026-05-29T09:04:13.903Z",
+    "scannedAt": "2026-05-31T09:57:58.532Z",
     "root": "src",
-    "totalFiles": 98,
-    "totalTopLevelNames": 1048,
+    "totalFiles": 103,
+    "totalTopLevelNames": 1075,
     "buckets": {
-      "shared": 165,
-      "paired": 294,
-      "local": 479,
-      "crossFile": 459
+      "shared": 172,
+      "paired": 305,
+      "local": 488,
+      "crossFile": 477
     }
   },
   "A": {
@@ -36,6 +36,7 @@
           "src/backend/pending-import/removed-reader.js",
           "src/backend/pending-import/worker.js",
           "src/backend/usage-stats.js",
+          "src/backend/vcc-op-calc-import/reader.js",
           "src/constants/fund-type-enum.js",
           "src/main-process/acquiring-bill-currency-writer.js",
           "src/main-process/bank-bu-recon-session.js",
@@ -49,6 +50,7 @@
           "src/main-process/scenario-hit-rows-writer.js",
           "src/main-process/statement-generation.js",
           "src/main-process/statement-session.js",
+          "src/main-process/vcc-op-calc-session.js",
           "src/main.js"
         ],
         "refFiles": [
@@ -133,6 +135,10 @@
             "count": 4
           },
           {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          },
+          {
             "file": "src/constants/fund-type-enum.js",
             "count": 3
           },
@@ -189,6 +195,10 @@
             "count": 4
           },
           {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 2
+          },
+          {
             "file": "src/main.js",
             "count": 1
           },
@@ -197,8 +207,8 @@
             "count": 2
           }
         ],
-        "totalHits": 113,
-        "fileSpan": 36
+        "totalHits": 117,
+        "fileSpan": 38
       },
       {
         "name": "fs",
@@ -219,6 +229,7 @@
           "src/backend/pending-import/streaming-xlsx-writer.js",
           "src/backend/pending-import/worker.js",
           "src/backend/usage-stats.js",
+          "src/backend/vcc-op-calc-import/reader.js",
           "src/constants/fund-type-enum.js",
           "src/main-process/acquiring-bill-currency-session.js",
           "src/main-process/acquiring-bill-currency-writer.js",
@@ -298,6 +309,10 @@
             "count": 9
           },
           {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          },
+          {
             "file": "src/constants/fund-type-enum.js",
             "count": 2
           },
@@ -346,8 +361,8 @@
             "count": 1
           }
         ],
-        "totalHits": 80,
-        "fileSpan": 28
+        "totalHits": 82,
+        "fileSpan": 29
       },
       {
         "name": "parse",
@@ -508,6 +523,10 @@
             "count": 5
           },
           {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          },
+          {
             "file": "src/main-process/statement-generation.js",
             "count": 3
           },
@@ -520,8 +539,8 @@
             "count": 1
           }
         ],
-        "totalHits": 100,
-        "fileSpan": 15
+        "totalHits": 102,
+        "fileSpan": 16
       },
       {
         "name": "FileValidationError",
@@ -576,6 +595,10 @@
             "count": 5
           },
           {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 4
+          },
+          {
             "file": "src/main-process/bank-statement-io.js",
             "count": 7
           },
@@ -592,8 +615,8 @@
             "count": 1
           }
         ],
-        "totalHits": 68,
-        "fileSpan": 14
+        "totalHits": 72,
+        "fileSpan": 15
       },
       {
         "name": "XLSX",
@@ -722,6 +745,65 @@
           }
         ],
         "totalHits": 46,
+        "fileSpan": 11
+      },
+      {
+        "name": "FLOW_HEADERS",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/columns.js",
+          "src/backend/acquiring-bill-currency-import/reader.js",
+          "src/backend/acquiring-bill-currency-import/validator.js",
+          "src/backend/biz-op-recon-db/columns.js",
+          "src/backend/vcc-op-calc-import/reader.js",
+          "src/backend/vcc-op-calc-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/columns.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/validator.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 33,
         "fileSpan": 11
       },
       {
@@ -894,48 +976,48 @@
         "fileSpan": 9
       },
       {
-        "name": "FLOW_HEADERS",
+        "name": "insertRun",
         "defFiles": [
-          "src/backend/acquiring-bill-currency-db/columns.js",
-          "src/backend/acquiring-bill-currency-import/reader.js",
-          "src/backend/acquiring-bill-currency-import/validator.js",
-          "src/backend/biz-op-recon-db/columns.js"
+          "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "src/backend/bank-bu-recon-db/run-repository.js",
+          "src/backend/biz-op-recon-db/run-repository.js",
+          "src/backend/vcc-op-calc-db/run-repository.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/acquiring-bill-currency-db/columns.js",
-            "count": 6
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
-            "count": 6
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/validator.js",
+            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
             "count": 2
           },
           {
-            "file": "src/backend/biz-op-recon-db/columns.js",
+            "file": "src/backend/bank-bu-recon-db/run-repository.js",
             "count": 2
           },
           {
-            "file": "src/backend/biz-op-recon-import/reader.js",
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
             "count": 2
           },
           {
-            "file": "src/backend/biz-op-recon-import/validator.js",
+            "file": "src/backend/vcc-op-calc-db/run-repository.js",
             "count": 2
           },
           {
-            "file": "src/main-process/biz-op-recon-writer.js",
-            "count": 2
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 1
           }
         ],
-        "totalHits": 25,
+        "totalHits": 12,
         "fileSpan": 8
       },
       {
@@ -980,6 +1062,42 @@
         "fileSpan": 7
       },
       {
+        "name": "FLOW_DB_COLUMNS",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js",
+          "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "src/backend/vcc-op-calc-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 17,
+        "fileSpan": 6
+      },
+      {
         "name": "validateHeaders",
         "defFiles": [
           "src/backend/pending-import/validator.js",
@@ -1012,6 +1130,78 @@
           }
         ],
         "totalHits": 17,
+        "fileSpan": 6
+      },
+      {
+        "name": "isRowMeaningful",
+        "defFiles": [
+          "src/backend/file-service/common.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/common.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 16,
+        "fileSpan": 6
+      },
+      {
+        "name": "validateFlowHeaders",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader.js",
+          "src/backend/acquiring-bill-currency-import/validator.js",
+          "src/backend/biz-op-recon-import/validator.js",
+          "src/backend/vcc-op-calc-import/reader.js",
+          "src/backend/vcc-op-calc-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/validator.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 13,
         "fileSpan": 6
       },
       {
@@ -1051,42 +1241,6 @@
         "fileSpan": 6
       },
       {
-        "name": "insertRun",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "src/backend/bank-bu-recon-db/run-repository.js",
-          "src/backend/biz-op-recon-db/run-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/bank-bu-recon-db/run-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-db/run-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-session.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/biz-op-recon-session.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 6
-      },
-      {
         "name": "dialog",
         "defFiles": [
           "src/main.js"
@@ -1098,7 +1252,7 @@
           },
           {
             "file": "src/renderer-dialogs.js",
-            "count": 310
+            "count": 314
           },
           {
             "file": "src/renderer-pending.js",
@@ -1113,7 +1267,7 @@
             "count": 71
           }
         ],
-        "totalHits": 413,
+        "totalHits": 417,
         "fileSpan": 5
       },
       {
@@ -1145,6 +1299,40 @@
           }
         ],
         "totalHits": 55,
+        "fileSpan": 5
+      },
+      {
+        "name": "RUNS_TABLE",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "src/backend/bank-bu-recon-db/month-repository.js",
+          "src/backend/bank-bu-recon-db/run-repository.js",
+          "src/backend/biz-op-recon-db/run-repository.js",
+          "src/backend/vcc-op-calc-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+            "count": 15
+          },
+          {
+            "file": "src/backend/bank-bu-recon-db/month-repository.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/bank-bu-recon-db/run-repository.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 11
+          },
+          {
+            "file": "src/backend/vcc-op-calc-db/run-repository.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 42,
         "fileSpan": 5
       },
       {
@@ -1276,33 +1464,69 @@
         "fileSpan": 5
       },
       {
-        "name": "isRowMeaningful",
+        "name": "VALID_DIRECTION_IN",
         "defFiles": [
-          "src/backend/file-service/common.js"
+          "src/backend/biz-op-recon-import/validator.js",
+          "src/backend/vcc-op-calc-db/columns.js",
+          "src/backend/vcc-op-calc-import/validator.js",
+          "src/main-process/biz-op-recon-session.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/bank-bu-recon-import/reader.js",
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/vcc-op-calc-db/columns.js",
             "count": 2
           },
           {
-            "file": "src/backend/biz-op-recon-import/reader.js",
+            "file": "src/backend/vcc-op-calc-import/validator.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
             "count": 2
           },
           {
-            "file": "src/backend/file-service/common.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 6
-          },
-          {
-            "file": "src/backend/pending-import/removed-reader.js",
-            "count": 2
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 5
           }
         ],
-        "totalHits": 14,
+        "totalHits": 15,
+        "fileSpan": 5
+      },
+      {
+        "name": "VALID_DIRECTION_OUT",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/validator.js",
+          "src/backend/vcc-op-calc-db/columns.js",
+          "src/backend/vcc-op-calc-import/validator.js",
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/vcc-op-calc-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/validator.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 13,
         "fileSpan": 5
       },
       {
@@ -1601,39 +1825,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 90
+            "count": 92
           }
         ],
-        "totalHits": 138,
-        "fileSpan": 4
-      },
-      {
-        "name": "RUNS_TABLE",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "src/backend/bank-bu-recon-db/month-repository.js",
-          "src/backend/bank-bu-recon-db/run-repository.js",
-          "src/backend/biz-op-recon-db/run-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-            "count": 15
-          },
-          {
-            "file": "src/backend/bank-bu-recon-db/month-repository.js",
-            "count": 4
-          },
-          {
-            "file": "src/backend/bank-bu-recon-db/run-repository.js",
-            "count": 6
-          },
-          {
-            "file": "src/backend/biz-op-recon-db/run-repository.js",
-            "count": 11
-          }
-        ],
-        "totalHits": 36,
+        "totalHits": 140,
         "fileSpan": 4
       },
       {
@@ -1658,6 +1853,35 @@
           {
             "file": "src/main.js",
             "count": 1
+          }
+        ],
+        "totalHits": 21,
+        "fileSpan": 4
+      },
+      {
+        "name": "runRepository",
+        "defFiles": [
+          "src/main-process/bank-bu-recon-session.js",
+          "src/main-process/biz-op-recon-session.js",
+          "src/main-process/biz-op-recon-writer.js",
+          "src/main-process/vcc-op-calc-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 5
           }
         ],
         "totalHits": 21,
@@ -1714,6 +1938,35 @@
           }
         ],
         "totalHits": 17,
+        "fileSpan": 4
+      },
+      {
+        "name": "normalizeHeaderCell",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/validator.js",
+          "src/backend/bank-bu-recon-import/validator.js",
+          "src/backend/biz-op-recon-import/validator.js",
+          "src/backend/vcc-op-calc-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/validator.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/bank-bu-recon-import/validator.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/validator.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 15,
         "fileSpan": 4
       },
       {
@@ -1811,33 +2064,6 @@
           },
           {
             "file": "src/backend/biz-op-recon-db/imports-repository.js",
-            "count": 4
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/biz-op-recon-writer.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 12,
-        "fileSpan": 4
-      },
-      {
-        "name": "FLOW_DB_COLUMNS",
-        "defFiles": [
-          "src/backend/biz-op-recon-db/columns.js",
-          "src/backend/biz-op-recon-db/flow-imports-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-db/columns.js",
-            "count": 4
-          },
-          {
-            "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
             "count": 4
           },
           {
@@ -1986,6 +2212,32 @@
         "fileSpan": 4
       },
       {
+        "name": "cancel",
+        "defFiles": [
+          "src/main-process/run-check-worker-pool.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/run-check-worker-pool.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/run-check-worker.js",
+            "count": 3
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 4
+      },
+      {
         "name": "PENDING_GUANLI_DB_COLUMNS",
         "defFiles": [
           "src/backend/bank-bu-recon-db/columns.js"
@@ -2119,34 +2371,6 @@
         "fileSpan": 4
       },
       {
-        "name": "validateFlowHeaders",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js",
-          "src/backend/acquiring-bill-currency-import/validator.js",
-          "src/backend/biz-op-recon-import/validator.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/validator.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/validator.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 4
-      },
-      {
         "name": "BUSINESS_BILL_FIELDS",
         "defFiles": [
           "src/constants/recon-id-fix-fields.js",
@@ -2164,32 +2388,6 @@
           {
             "file": "src/preload.js",
             "count": 2
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 4
-      },
-      {
-        "name": "cancel",
-        "defFiles": [
-          "src/main-process/run-check-worker-pool.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/acquiring-bill-currency-session.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/run-check-worker-pool.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/run-check-worker.js",
-            "count": 3
           },
           {
             "file": "src/renderer-dialogs.js",
@@ -2274,6 +2472,33 @@
           {
             "file": "src/renderer-dialogs.js",
             "count": 2
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 4
+      },
+      {
+        "name": "listRuns",
+        "defFiles": [
+          "src/backend/bank-bu-recon-db/run-repository.js",
+          "src/backend/vcc-op-calc-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 3
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
           }
         ],
         "totalHits": 8,
@@ -3096,27 +3321,27 @@
         "fileSpan": 3
       },
       {
-        "name": "runRepository",
+        "name": "parseAmount",
         "defFiles": [
-          "src/main-process/bank-bu-recon-session.js",
-          "src/main-process/biz-op-recon-session.js",
-          "src/main-process/biz-op-recon-writer.js"
+          "src/backend/biz-op-recon-import/validator.js",
+          "src/backend/vcc-op-calc-import/validator.js",
+          "src/main-process/biz-op-recon-session.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 6
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 8
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/validator.js",
+            "count": 3
           },
           {
             "file": "src/main-process/biz-op-recon-session.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/biz-op-recon-writer.js",
             "count": 4
           }
         ],
-        "totalHits": 16,
+        "totalHits": 15,
         "fileSpan": 3
       },
       {
@@ -3212,27 +3437,26 @@
         "fileSpan": 3
       },
       {
-        "name": "normalizeHeaderCell",
+        "name": "parseNumber",
         "defFiles": [
-          "src/backend/acquiring-bill-currency-import/validator.js",
-          "src/backend/bank-bu-recon-import/validator.js",
-          "src/backend/biz-op-recon-import/validator.js"
+          "src/backend/pending-reconcile/removal-match.js",
+          "src/main-process/scenario-engines/engine-utils.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/acquiring-bill-currency-import/validator.js",
-            "count": 3
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 2
           },
           {
-            "file": "src/backend/bank-bu-recon-import/validator.js",
-            "count": 4
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 6
           },
           {
-            "file": "src/backend/biz-op-recon-import/validator.js",
+            "file": "src/main-process/scenario-engines/engine-utils.js",
             "count": 4
           }
         ],
-        "totalHits": 11,
+        "totalHits": 12,
         "fileSpan": 3
       },
       {
@@ -3253,6 +3477,30 @@
           {
             "file": "src/renderer-dialogs.js",
             "count": 5
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 3
+      },
+      {
+        "name": "BANK_STATEMENT_VIRTUAL_AMOUNT_ABS",
+        "defFiles": [
+          "src/constants/bank-statement-fields.js",
+          "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "src/preload.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/bank-statement-fields.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 3
+          },
+          {
+            "file": "src/preload.js",
+            "count": 3
           }
         ],
         "totalHits": 9,
@@ -3346,29 +3594,6 @@
           {
             "file": "src/backend/pending-db/rule-repository.js",
             "count": 3
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 3
-      },
-      {
-        "name": "parseNumber",
-        "defFiles": [
-          "src/backend/pending-reconcile/removal-match.js",
-          "src/main-process/scenario-engines/engine-utils.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-reconcile/removal-match.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/engine-utils.js",
-            "count": 4
           }
         ],
         "totalHits": 9,
@@ -3535,30 +3760,6 @@
         "fileSpan": 3
       },
       {
-        "name": "BANK_STATEMENT_VIRTUAL_AMOUNT_ABS",
-        "defFiles": [
-          "src/constants/bank-statement-fields.js",
-          "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "src/preload.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/constants/bank-statement-fields.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 2
-          },
-          {
-            "file": "src/preload.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 3
-      },
-      {
         "name": "cloneRowsWithMetadata",
         "defFiles": [
           "src/main-process/statement-session.js"
@@ -3575,6 +3776,29 @@
           {
             "file": "src/main.js",
             "count": 1
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 3
+      },
+      {
+        "name": "getRun",
+        "defFiles": [
+          "src/backend/bank-bu-recon-db/run-repository.js",
+          "src/backend/vcc-op-calc-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 4
           }
         ],
         "totalHits": 8,
@@ -3830,6 +4054,28 @@
         "fileSpan": 3
       },
       {
+        "name": "valuesEqual",
+        "defFiles": [
+          "src/main-process/scenario-engines/engine-utils.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 3
+      },
+      {
         "name": "buildDateDir",
         "defFiles": [
           "src/main-process/acquiring-bill-currency-writer.js",
@@ -3893,6 +4139,28 @@
           {
             "file": "src/main.js",
             "count": 1
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
+        "name": "flowRowToArray",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
           }
         ],
         "totalHits": 6,
@@ -4004,28 +4272,6 @@
           },
           {
             "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 3
-      },
-      {
-        "name": "listRuns",
-        "defFiles": [
-          "src/backend/bank-bu-recon-db/run-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-db/run-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 3
-          },
-          {
-            "file": "src/preload.js",
             "count": 1
           }
         ],
@@ -4191,21 +4437,22 @@
         "fileSpan": 3
       },
       {
-        "name": "valuesEqual",
+        "name": "validateFlowRow",
         "defFiles": [
-          "src/main-process/scenario-engines/engine-utils.js"
+          "src/backend/biz-op-recon-import/validator.js",
+          "src/backend/vcc-op-calc-import/validator.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "file": "src/backend/biz-op-recon-import/validator.js",
             "count": 2
           },
           {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "file": "src/backend/vcc-op-calc-import/validator.js",
             "count": 2
           },
           {
-            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "file": "src/main-process/biz-op-recon-session.js",
             "count": 2
           }
         ],
@@ -4432,6 +4679,30 @@
           {
             "file": "src/main.js",
             "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
+        "name": "JSZip",
+        "defFiles": [
+          "src/backend/pending-import/streaming-xlsx-reader.js",
+          "src/backend/pending-import/streaming-xlsx-writer.js",
+          "src/backend/vcc-op-calc-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
           }
         ],
         "totalHits": 5,
@@ -4829,10 +5100,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 20
+            "count": 22
           }
         ],
-        "totalHits": 68,
+        "totalHits": 70,
         "fileSpan": 2
       },
       {
@@ -4924,6 +5195,25 @@
           {
             "file": "src/backend/biz-op-recon-db/imports-repository.js",
             "count": 10
+          }
+        ],
+        "totalHits": 17,
+        "fileSpan": 2
+      },
+      {
+        "name": "TEMPLATE_LABEL",
+        "defFiles": [
+          "src/backend/pending-import/removed-reader.js",
+          "src/backend/vcc-op-calc-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 8
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 9
           }
         ],
         "totalHits": 17,
@@ -5115,25 +5405,6 @@
         "fileSpan": 2
       },
       {
-        "name": "parseAmount",
-        "defFiles": [
-          "src/backend/biz-op-recon-import/validator.js",
-          "src/main-process/biz-op-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-import/validator.js",
-            "count": 8
-          },
-          {
-            "file": "src/main-process/biz-op-recon-session.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 12,
-        "fileSpan": 2
-      },
-      {
         "name": "removalMatch",
         "defFiles": [
           "src/backend/pending-export/writer.js"
@@ -5164,6 +5435,25 @@
           {
             "file": "src/main-process/biz-op-recon-session.js",
             "count": 9
+          }
+        ],
+        "totalHits": 11,
+        "fileSpan": 2
+      },
+      {
+        "name": "ERROR_CODE",
+        "defFiles": [
+          "src/backend/pending-import/removed-reader.js",
+          "src/backend/vcc-op-calc-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 5
           }
         ],
         "totalHits": 11,
@@ -5535,6 +5825,24 @@
           {
             "file": "src/backend/database/backup.js",
             "count": 1
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 2
+      },
+      {
+        "name": "FLOW_COLUMN_DEFS",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 5
+          },
+          {
+            "file": "src/backend/vcc-op-calc-db/columns.js",
+            "count": 2
           }
         ],
         "totalHits": 7,
@@ -6320,6 +6628,24 @@
         "fileSpan": 2
       },
       {
+        "name": "ensureVccOpCalcTablesSupport",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
         "name": "extractMonthKey",
         "defFiles": [
           "src/backend/acquiring-bill-currency-import/reader.js",
@@ -6370,24 +6696,6 @@
           {
             "file": "src/renderer.js",
             "count": 5
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 2
-      },
-      {
-        "name": "getRun",
-        "defFiles": [
-          "src/backend/bank-bu-recon-db/run-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-db/run-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 4
           }
         ],
         "totalHits": 6,
@@ -6607,6 +6915,42 @@
           {
             "file": "src/backend/database/scenarios-repository.js",
             "count": 3
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "VCC_BILL_DATE_DB_COLUMN",
+        "defFiles": [
+          "src/backend/vcc-op-calc-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "VCC_DIRECTION_DB_COLUMN",
+        "defFiles": [
+          "src/backend/vcc-op-calc-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 4
           }
         ],
         "totalHits": 6,
@@ -7035,6 +7379,24 @@
         "fileSpan": 2
       },
       {
+        "name": "scan",
+        "defFiles": [
+          "src/main-process/vcc-op-calc-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 4
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "setExportAvailability",
         "defFiles": [
           "src/renderer.js"
@@ -7126,44 +7488,6 @@
         "fileSpan": 2
       },
       {
-        "name": "VALID_DIRECTION_IN",
-        "defFiles": [
-          "src/backend/biz-op-recon-import/validator.js",
-          "src/main-process/biz-op-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-import/validator.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/biz-op-recon-session.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
-        "name": "VALID_DIRECTION_OUT",
-        "defFiles": [
-          "src/backend/biz-op-recon-import/validator.js",
-          "src/main-process/biz-op-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-import/validator.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/biz-op-recon-session.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
         "name": "validateBillHeaders",
         "defFiles": [
           "src/backend/acquiring-bill-currency-import/reader.js",
@@ -7177,6 +7501,42 @@
           {
             "file": "src/backend/acquiring-bill-currency-import/validator.js",
             "count": 2
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "VCC_CURRENCY_DB_COLUMN",
+        "defFiles": [
+          "src/backend/vcc-op-calc-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "VCC_RECON_AMOUNT_DB_COLUMN",
+        "defFiles": [
+          "src/backend/vcc-op-calc-db/columns.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 3
           }
         ],
         "totalHits": 5,
@@ -7310,6 +7670,24 @@
         "fileSpan": 2
       },
       {
+        "name": "computeAmounts",
+        "defFiles": [
+          "src/main-process/vcc-op-calc-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 3
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "computeRowHash",
         "defFiles": [
           "src/backend/pending-import/validator.js",
@@ -7392,6 +7770,25 @@
         "refFiles": [
           {
             "file": "src/main-process/pending-session.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "createVccOpCalcSession",
+        "defFiles": [
+          "src/main-process/vcc-op-calc-session.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
             "count": 2
           },
           {
@@ -7584,7 +7981,7 @@
         "fileSpan": 2
       },
       {
-        "name": "flowRowToArray",
+        "name": "flowHeaderToDbColumn",
         "defFiles": [
           "src/backend/biz-op-recon-db/columns.js"
         ],
@@ -7594,7 +7991,7 @@
             "count": 2
           },
           {
-            "file": "src/main-process/biz-op-recon-writer.js",
+            "file": "src/backend/vcc-op-calc-db/columns.js",
             "count": 2
           }
         ],
@@ -8491,6 +8888,25 @@
         "fileSpan": 2
       },
       {
+        "name": "streamFlowFile",
+        "defFiles": [
+          "src/backend/vcc-op-calc-import/reader.js",
+          "src/main-process/vcc-op-calc-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "toggleScenarioEnabled",
         "defFiles": [
           "src/backend/database/scenarios-repository.js"
@@ -8636,24 +9052,6 @@
       },
       {
         "name": "validateBizOpRow",
-        "defFiles": [
-          "src/backend/biz-op-recon-import/validator.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-import/validator.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/biz-op-recon-session.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 2
-      },
-      {
-        "name": "validateFlowRow",
         "defFiles": [
           "src/backend/biz-op-recon-import/validator.js"
         ],
@@ -8962,6 +9360,25 @@
         "fileSpan": 2
       },
       {
+        "name": "countC3BankCandidates",
+        "defFiles": [
+          "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "countRowsInMonth",
         "defFiles": [
           "src/backend/pending-db/month-repository.js"
@@ -9142,6 +9559,24 @@
         "fileSpan": 2
       },
       {
+        "name": "getLatestRunByMonth",
+        "defFiles": [
+          "src/backend/vcc-op-calc-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "getLatestRunForMonthPair",
         "defFiles": [
           "src/backend/pending-db/diff-repository.js"
@@ -9304,19 +9739,18 @@
         "fileSpan": 2
       },
       {
-        "name": "JSZip",
+        "name": "insertRunFiles",
         "defFiles": [
-          "src/backend/pending-import/streaming-xlsx-reader.js",
-          "src/backend/pending-import/streaming-xlsx-writer.js"
+          "src/backend/vcc-op-calc-db/run-repository.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/pending-import/streaming-xlsx-reader.js",
-            "count": 1
+            "file": "src/backend/vcc-op-calc-db/run-repository.js",
+            "count": 2
           },
           {
-            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
-            "count": 2
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 1
           }
         ],
         "totalHits": 3,
@@ -9352,6 +9786,24 @@
           },
           {
             "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "listDistinctMonths",
+        "defFiles": [
+          "src/backend/vcc-op-calc-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
             "count": 1
           }
         ],
@@ -9819,6 +10271,25 @@
         "fileSpan": 2
       },
       {
+        "name": "StringDecoder",
+        "defFiles": [
+          "src/backend/pending-import/streaming-xlsx-reader.js",
+          "src/backend/vcc-op-calc-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "toBalanceRows",
         "defFiles": [
           "src/main-process/monthly-balance.js"
@@ -10192,10 +10663,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 153
+            "count": 162
           }
         ],
-        "totalHits": 153,
+        "totalHits": 162,
         "fileSpan": 1
       },
       {
@@ -10280,6 +10751,20 @@
           }
         ],
         "totalHits": 17,
+        "fileSpan": 1
+      },
+      {
+        "name": "centsToAmountString",
+        "defFiles": [
+          "src/main-process/vcc-op-calc-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 16
+          }
+        ],
+        "totalHits": 16,
         "fileSpan": 1
       },
       {
@@ -10647,20 +11132,6 @@
         "fileSpan": 1
       },
       {
-        "name": "TEMPLATE_LABEL",
-        "defFiles": [
-          "src/backend/pending-import/removed-reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-import/removed-reader.js",
-            "count": 8
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 1
-      },
-      {
         "name": "toCents",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -10682,6 +11153,20 @@
         "refFiles": [
           {
             "file": "src/backend/bank-bu-recon-db/month-repository.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
+        "name": "database",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
             "count": 7
           }
         ],
@@ -10878,20 +11363,6 @@
         "refFiles": [
           {
             "file": "src/backend/database/settings-repository.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 1
-      },
-      {
-        "name": "ERROR_CODE",
-        "defFiles": [
-          "src/backend/pending-import/removed-reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-import/removed-reader.js",
             "count": 6
           }
         ],
@@ -11165,20 +11636,6 @@
         "fileSpan": 1
       },
       {
-        "name": "database",
-        "defFiles": [
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
         "name": "DEFAULT_BACKGROUND_SETTINGS",
         "defFiles": [
           "src/renderer.js"
@@ -11235,6 +11692,20 @@
         "fileSpan": 1
       },
       {
+        "name": "evalCondition",
+        "defFiles": [
+          "src/main-process/scenario-engines/c3-gateway-recon-join.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "failureListener",
         "defFiles": [
           "src/main-process/run-check-worker-pool.js"
@@ -11256,20 +11727,6 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
-        "name": "FLOW_COLUMN_DEFS",
-        "defFiles": [
-          "src/backend/biz-op-recon-db/columns.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-db/columns.js",
             "count": 5
           }
         ],
@@ -11781,20 +12238,6 @@
         "fileSpan": 1
       },
       {
-        "name": "evalCondition",
-        "defFiles": [
-          "src/main-process/scenario-engines/c3-gateway-recon-join.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
         "name": "extractCurrencyAliases",
         "defFiles": [
           "src/backend/file-service/normalizers.js"
@@ -12061,6 +12504,20 @@
         "fileSpan": 1
       },
       {
+        "name": "parseAmountToCents",
+        "defFiles": [
+          "src/main-process/vcc-op-calc-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "pickBestByTieBreak",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -12313,6 +12770,20 @@
         "fileSpan": 1
       },
       {
+        "name": "validateAndExtractRow",
+        "defFiles": [
+          "src/main-process/vcc-op-calc-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "validateEnabled",
         "defFiles": [
           "src/backend/database/scenarios-repository.js"
@@ -12334,6 +12805,20 @@
         "refFiles": [
           {
             "file": "src/main-process/workbook-watermark.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "wrapReadError",
+        "defFiles": [
+          "src/backend/vcc-op-calc-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
             "count": 4
           }
         ],
@@ -12775,6 +13260,20 @@
         "fileSpan": 1
       },
       {
+        "name": "COL_COUNT",
+        "defFiles": [
+          "src/backend/vcc-op-calc-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "collectMatchedRows",
         "defFiles": [
           "src/backend/file-service/readers.js"
@@ -12978,6 +13477,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-dispatcher.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "extractYearMonth",
+        "defFiles": [
+          "src/main-process/vcc-op-calc-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
             "count": 3
           }
         ],
@@ -13489,6 +14002,20 @@
         "fileSpan": 1
       },
       {
+        "name": "normalizeDirection",
+        "defFiles": [
+          "src/main-process/vcc-op-calc-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "normalizeErrorMessage",
         "defFiles": [
           "src/backend/startup-failure.js"
@@ -13818,6 +14345,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/scenarios-repository.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "RUN_FILES_TABLE",
+        "defFiles": [
+          "src/backend/vcc-op-calc-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-db/run-repository.js",
             "count": 3
           }
         ],
@@ -15113,20 +15654,6 @@
         "fileSpan": 1
       },
       {
-        "name": "flowHeaderToDbColumn",
-        "defFiles": [
-          "src/backend/biz-op-recon-db/columns.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-db/columns.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "flowRowMapper",
         "defFiles": [
           "src/backend/biz-op-recon-import/reader.js"
@@ -15316,6 +15843,20 @@
         "refFiles": [
           {
             "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "getRunFiles",
+        "defFiles": [
+          "src/backend/vcc-op-calc-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-db/run-repository.js",
             "count": 2
           }
         ],
@@ -16065,6 +16606,20 @@
         "fileSpan": 1
       },
       {
+        "name": "parseRowXml",
+        "defFiles": [
+          "src/backend/vcc-op-calc-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "parseSignedAmount",
         "defFiles": [
           "src/main-process/biz-op-recon-session.js"
@@ -16233,6 +16788,20 @@
         "fileSpan": 1
       },
       {
+        "name": "PROGRESS_INTERVAL",
+        "defFiles": [
+          "src/backend/vcc-op-calc-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "Readable",
         "defFiles": [
           "src/backend/pending-import/streaming-xlsx-writer.js"
@@ -16282,6 +16851,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-import/removed-reader.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "readSharedStrings",
+        "defFiles": [
+          "src/backend/vcc-op-calc-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
             "count": 2
           }
         ],
@@ -16548,6 +17131,20 @@
         "refFiles": [
           {
             "file": "src/backend/usage-stats.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "scanSheet",
+        "defFiles": [
+          "src/backend/vcc-op-calc-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
             "count": 2
           }
         ],
@@ -16915,6 +17512,7 @@
         "src/backend/pending-import/removed-reader.js",
         "src/backend/pending-import/worker.js",
         "src/backend/usage-stats.js",
+        "src/backend/vcc-op-calc-import/reader.js",
         "src/constants/fund-type-enum.js",
         "src/main-process/acquiring-bill-currency-writer.js",
         "src/main-process/bank-bu-recon-session.js",
@@ -16928,6 +17526,7 @@
         "src/main-process/scenario-hit-rows-writer.js",
         "src/main-process/statement-generation.js",
         "src/main-process/statement-session.js",
+        "src/main-process/vcc-op-calc-session.js",
         "src/main.js"
       ],
       "refFiles": [
@@ -17012,6 +17611,10 @@
           "count": 4
         },
         {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
+        },
+        {
           "file": "src/constants/fund-type-enum.js",
           "count": 3
         },
@@ -17068,6 +17671,10 @@
           "count": 4
         },
         {
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 2
+        },
+        {
           "file": "src/main.js",
           "count": 1
         },
@@ -17076,8 +17683,8 @@
           "count": 2
         }
       ],
-      "totalHits": 113,
-      "fileSpan": 36
+      "totalHits": 117,
+      "fileSpan": 38
     },
     {
       "name": "fs",
@@ -17098,6 +17705,7 @@
         "src/backend/pending-import/streaming-xlsx-writer.js",
         "src/backend/pending-import/worker.js",
         "src/backend/usage-stats.js",
+        "src/backend/vcc-op-calc-import/reader.js",
         "src/constants/fund-type-enum.js",
         "src/main-process/acquiring-bill-currency-session.js",
         "src/main-process/acquiring-bill-currency-writer.js",
@@ -17177,6 +17785,10 @@
           "count": 9
         },
         {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
+        },
+        {
           "file": "src/constants/fund-type-enum.js",
           "count": 2
         },
@@ -17225,8 +17837,8 @@
           "count": 1
         }
       ],
-      "totalHits": 80,
-      "fileSpan": 28
+      "totalHits": 82,
+      "fileSpan": 29
     },
     {
       "name": "parse",
@@ -17387,6 +17999,10 @@
           "count": 5
         },
         {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
+        },
+        {
           "file": "src/main-process/statement-generation.js",
           "count": 3
         },
@@ -17399,8 +18015,8 @@
           "count": 1
         }
       ],
-      "totalHits": 100,
-      "fileSpan": 15
+      "totalHits": 102,
+      "fileSpan": 16
     },
     {
       "name": "FileValidationError",
@@ -17455,6 +18071,10 @@
           "count": 5
         },
         {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 4
+        },
+        {
           "file": "src/main-process/bank-statement-io.js",
           "count": 7
         },
@@ -17471,8 +18091,8 @@
           "count": 1
         }
       ],
-      "totalHits": 68,
-      "fileSpan": 14
+      "totalHits": 72,
+      "fileSpan": 15
     },
     {
       "name": "XLSX",
@@ -17601,6 +18221,65 @@
         }
       ],
       "totalHits": 46,
+      "fileSpan": 11
+    },
+    {
+      "name": "FLOW_HEADERS",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/columns.js",
+        "src/backend/acquiring-bill-currency-import/reader.js",
+        "src/backend/acquiring-bill-currency-import/validator.js",
+        "src/backend/biz-op-recon-db/columns.js",
+        "src/backend/vcc-op-calc-import/reader.js",
+        "src/backend/vcc-op-calc-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/columns.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/validator.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 33,
       "fileSpan": 11
     },
     {
@@ -17773,48 +18452,48 @@
       "fileSpan": 9
     },
     {
-      "name": "FLOW_HEADERS",
+      "name": "insertRun",
       "defFiles": [
-        "src/backend/acquiring-bill-currency-db/columns.js",
-        "src/backend/acquiring-bill-currency-import/reader.js",
-        "src/backend/acquiring-bill-currency-import/validator.js",
-        "src/backend/biz-op-recon-db/columns.js"
+        "src/backend/acquiring-bill-currency-db/run-repository.js",
+        "src/backend/bank-bu-recon-db/run-repository.js",
+        "src/backend/biz-op-recon-db/run-repository.js",
+        "src/backend/vcc-op-calc-db/run-repository.js"
       ],
       "refFiles": [
         {
-          "file": "src/backend/acquiring-bill-currency-db/columns.js",
-          "count": 6
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
-          "count": 6
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/validator.js",
+          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
           "count": 2
         },
         {
-          "file": "src/backend/biz-op-recon-db/columns.js",
+          "file": "src/backend/bank-bu-recon-db/run-repository.js",
           "count": 2
         },
         {
-          "file": "src/backend/biz-op-recon-import/reader.js",
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
           "count": 2
         },
         {
-          "file": "src/backend/biz-op-recon-import/validator.js",
+          "file": "src/backend/vcc-op-calc-db/run-repository.js",
           "count": 2
         },
         {
-          "file": "src/main-process/biz-op-recon-writer.js",
-          "count": 2
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 1
         }
       ],
-      "totalHits": 25,
+      "totalHits": 12,
       "fileSpan": 8
     },
     {
@@ -17859,6 +18538,42 @@
       "fileSpan": 7
     },
     {
+      "name": "FLOW_DB_COLUMNS",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js",
+        "src/backend/biz-op-recon-db/flow-imports-repository.js",
+        "src/backend/vcc-op-calc-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 17,
+      "fileSpan": 6
+    },
+    {
       "name": "validateHeaders",
       "defFiles": [
         "src/backend/pending-import/validator.js",
@@ -17891,6 +18606,78 @@
         }
       ],
       "totalHits": 17,
+      "fileSpan": 6
+    },
+    {
+      "name": "isRowMeaningful",
+      "defFiles": [
+        "src/backend/file-service/common.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/common.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/pending-import/removed-reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 16,
+      "fileSpan": 6
+    },
+    {
+      "name": "validateFlowHeaders",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader.js",
+        "src/backend/acquiring-bill-currency-import/validator.js",
+        "src/backend/biz-op-recon-import/validator.js",
+        "src/backend/vcc-op-calc-import/reader.js",
+        "src/backend/vcc-op-calc-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/validator.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 13,
       "fileSpan": 6
     },
     {
@@ -17930,42 +18717,6 @@
       "fileSpan": 6
     },
     {
-      "name": "insertRun",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-db/run-repository.js",
-        "src/backend/bank-bu-recon-db/run-repository.js",
-        "src/backend/biz-op-recon-db/run-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/bank-bu-recon-db/run-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-db/run-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-session.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-session.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/biz-op-recon-session.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 9,
-      "fileSpan": 6
-    },
-    {
       "name": "dialog",
       "defFiles": [
         "src/main.js"
@@ -17977,7 +18728,7 @@
         },
         {
           "file": "src/renderer-dialogs.js",
-          "count": 310
+          "count": 314
         },
         {
           "file": "src/renderer-pending.js",
@@ -17992,7 +18743,7 @@
           "count": 71
         }
       ],
-      "totalHits": 413,
+      "totalHits": 417,
       "fileSpan": 5
     },
     {
@@ -18024,6 +18775,40 @@
         }
       ],
       "totalHits": 55,
+      "fileSpan": 5
+    },
+    {
+      "name": "RUNS_TABLE",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/run-repository.js",
+        "src/backend/bank-bu-recon-db/month-repository.js",
+        "src/backend/bank-bu-recon-db/run-repository.js",
+        "src/backend/biz-op-recon-db/run-repository.js",
+        "src/backend/vcc-op-calc-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+          "count": 15
+        },
+        {
+          "file": "src/backend/bank-bu-recon-db/month-repository.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/bank-bu-recon-db/run-repository.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 11
+        },
+        {
+          "file": "src/backend/vcc-op-calc-db/run-repository.js",
+          "count": 6
+        }
+      ],
+      "totalHits": 42,
       "fileSpan": 5
     },
     {
@@ -18155,33 +18940,69 @@
       "fileSpan": 5
     },
     {
-      "name": "isRowMeaningful",
+      "name": "VALID_DIRECTION_IN",
       "defFiles": [
-        "src/backend/file-service/common.js"
+        "src/backend/biz-op-recon-import/validator.js",
+        "src/backend/vcc-op-calc-db/columns.js",
+        "src/backend/vcc-op-calc-import/validator.js",
+        "src/main-process/biz-op-recon-session.js"
       ],
       "refFiles": [
         {
-          "file": "src/backend/bank-bu-recon-import/reader.js",
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/vcc-op-calc-db/columns.js",
           "count": 2
         },
         {
-          "file": "src/backend/biz-op-recon-import/reader.js",
+          "file": "src/backend/vcc-op-calc-import/validator.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
           "count": 2
         },
         {
-          "file": "src/backend/file-service/common.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 6
-        },
-        {
-          "file": "src/backend/pending-import/removed-reader.js",
-          "count": 2
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 5
         }
       ],
-      "totalHits": 14,
+      "totalHits": 15,
+      "fileSpan": 5
+    },
+    {
+      "name": "VALID_DIRECTION_OUT",
+      "defFiles": [
+        "src/backend/biz-op-recon-import/validator.js",
+        "src/backend/vcc-op-calc-db/columns.js",
+        "src/backend/vcc-op-calc-import/validator.js",
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/vcc-op-calc-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/validator.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 13,
       "fileSpan": 5
     },
     {
@@ -18480,39 +19301,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 90
+          "count": 92
         }
       ],
-      "totalHits": 138,
-      "fileSpan": 4
-    },
-    {
-      "name": "RUNS_TABLE",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-db/run-repository.js",
-        "src/backend/bank-bu-recon-db/month-repository.js",
-        "src/backend/bank-bu-recon-db/run-repository.js",
-        "src/backend/biz-op-recon-db/run-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-          "count": 15
-        },
-        {
-          "file": "src/backend/bank-bu-recon-db/month-repository.js",
-          "count": 4
-        },
-        {
-          "file": "src/backend/bank-bu-recon-db/run-repository.js",
-          "count": 6
-        },
-        {
-          "file": "src/backend/biz-op-recon-db/run-repository.js",
-          "count": 11
-        }
-      ],
-      "totalHits": 36,
+      "totalHits": 140,
       "fileSpan": 4
     },
     {
@@ -18537,6 +19329,35 @@
         {
           "file": "src/main.js",
           "count": 1
+        }
+      ],
+      "totalHits": 21,
+      "fileSpan": 4
+    },
+    {
+      "name": "runRepository",
+      "defFiles": [
+        "src/main-process/bank-bu-recon-session.js",
+        "src/main-process/biz-op-recon-session.js",
+        "src/main-process/biz-op-recon-writer.js",
+        "src/main-process/vcc-op-calc-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 5
         }
       ],
       "totalHits": 21,
@@ -18593,6 +19414,35 @@
         }
       ],
       "totalHits": 17,
+      "fileSpan": 4
+    },
+    {
+      "name": "normalizeHeaderCell",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/validator.js",
+        "src/backend/bank-bu-recon-import/validator.js",
+        "src/backend/biz-op-recon-import/validator.js",
+        "src/backend/vcc-op-calc-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/validator.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/bank-bu-recon-import/validator.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/validator.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 15,
       "fileSpan": 4
     },
     {
@@ -18690,33 +19540,6 @@
         },
         {
           "file": "src/backend/biz-op-recon-db/imports-repository.js",
-          "count": 4
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/biz-op-recon-writer.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 12,
-      "fileSpan": 4
-    },
-    {
-      "name": "FLOW_DB_COLUMNS",
-      "defFiles": [
-        "src/backend/biz-op-recon-db/columns.js",
-        "src/backend/biz-op-recon-db/flow-imports-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-db/columns.js",
-          "count": 4
-        },
-        {
-          "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
           "count": 4
         },
         {
@@ -18865,6 +19688,32 @@
       "fileSpan": 4
     },
     {
+      "name": "cancel",
+      "defFiles": [
+        "src/main-process/run-check-worker-pool.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/run-check-worker-pool.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/run-check-worker.js",
+          "count": 3
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 10,
+      "fileSpan": 4
+    },
+    {
       "name": "PENDING_GUANLI_DB_COLUMNS",
       "defFiles": [
         "src/backend/bank-bu-recon-db/columns.js"
@@ -18998,34 +19847,6 @@
       "fileSpan": 4
     },
     {
-      "name": "validateFlowHeaders",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-import/reader.js",
-        "src/backend/acquiring-bill-currency-import/validator.js",
-        "src/backend/biz-op-recon-import/validator.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/validator.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/validator.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 9,
-      "fileSpan": 4
-    },
-    {
       "name": "BUSINESS_BILL_FIELDS",
       "defFiles": [
         "src/constants/recon-id-fix-fields.js",
@@ -19043,32 +19864,6 @@
         {
           "file": "src/preload.js",
           "count": 2
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 8,
-      "fileSpan": 4
-    },
-    {
-      "name": "cancel",
-      "defFiles": [
-        "src/main-process/run-check-worker-pool.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/acquiring-bill-currency-session.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/run-check-worker-pool.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/run-check-worker.js",
-          "count": 3
         },
         {
           "file": "src/renderer-dialogs.js",
@@ -19153,6 +19948,33 @@
         {
           "file": "src/renderer-dialogs.js",
           "count": 2
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 4
+    },
+    {
+      "name": "listRuns",
+      "defFiles": [
+        "src/backend/bank-bu-recon-db/run-repository.js",
+        "src/backend/vcc-op-calc-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 3
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
         }
       ],
       "totalHits": 8,
@@ -19975,27 +20797,27 @@
       "fileSpan": 3
     },
     {
-      "name": "runRepository",
+      "name": "parseAmount",
       "defFiles": [
-        "src/main-process/bank-bu-recon-session.js",
-        "src/main-process/biz-op-recon-session.js",
-        "src/main-process/biz-op-recon-writer.js"
+        "src/backend/biz-op-recon-import/validator.js",
+        "src/backend/vcc-op-calc-import/validator.js",
+        "src/main-process/biz-op-recon-session.js"
       ],
       "refFiles": [
         {
-          "file": "src/main-process/bank-bu-recon-session.js",
-          "count": 6
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 8
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/validator.js",
+          "count": 3
         },
         {
           "file": "src/main-process/biz-op-recon-session.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/biz-op-recon-writer.js",
           "count": 4
         }
       ],
-      "totalHits": 16,
+      "totalHits": 15,
       "fileSpan": 3
     },
     {
@@ -20091,27 +20913,26 @@
       "fileSpan": 3
     },
     {
-      "name": "normalizeHeaderCell",
+      "name": "parseNumber",
       "defFiles": [
-        "src/backend/acquiring-bill-currency-import/validator.js",
-        "src/backend/bank-bu-recon-import/validator.js",
-        "src/backend/biz-op-recon-import/validator.js"
+        "src/backend/pending-reconcile/removal-match.js",
+        "src/main-process/scenario-engines/engine-utils.js"
       ],
       "refFiles": [
         {
-          "file": "src/backend/acquiring-bill-currency-import/validator.js",
-          "count": 3
+          "file": "src/backend/pending-reconcile/removal-match.js",
+          "count": 2
         },
         {
-          "file": "src/backend/bank-bu-recon-import/validator.js",
-          "count": 4
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 6
         },
         {
-          "file": "src/backend/biz-op-recon-import/validator.js",
+          "file": "src/main-process/scenario-engines/engine-utils.js",
           "count": 4
         }
       ],
-      "totalHits": 11,
+      "totalHits": 12,
       "fileSpan": 3
     },
     {
@@ -20132,6 +20953,30 @@
         {
           "file": "src/renderer-dialogs.js",
           "count": 5
+        }
+      ],
+      "totalHits": 9,
+      "fileSpan": 3
+    },
+    {
+      "name": "BANK_STATEMENT_VIRTUAL_AMOUNT_ABS",
+      "defFiles": [
+        "src/constants/bank-statement-fields.js",
+        "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+        "src/preload.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/bank-statement-fields.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 3
+        },
+        {
+          "file": "src/preload.js",
+          "count": 3
         }
       ],
       "totalHits": 9,
@@ -20225,29 +21070,6 @@
         {
           "file": "src/backend/pending-db/rule-repository.js",
           "count": 3
-        }
-      ],
-      "totalHits": 9,
-      "fileSpan": 3
-    },
-    {
-      "name": "parseNumber",
-      "defFiles": [
-        "src/backend/pending-reconcile/removal-match.js",
-        "src/main-process/scenario-engines/engine-utils.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pending-reconcile/removal-match.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/engine-utils.js",
-          "count": 4
         }
       ],
       "totalHits": 9,
@@ -20414,30 +21236,6 @@
       "fileSpan": 3
     },
     {
-      "name": "BANK_STATEMENT_VIRTUAL_AMOUNT_ABS",
-      "defFiles": [
-        "src/constants/bank-statement-fields.js",
-        "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-        "src/preload.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/constants/bank-statement-fields.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 2
-        },
-        {
-          "file": "src/preload.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 8,
-      "fileSpan": 3
-    },
-    {
       "name": "cloneRowsWithMetadata",
       "defFiles": [
         "src/main-process/statement-session.js"
@@ -20454,6 +21252,29 @@
         {
           "file": "src/main.js",
           "count": 1
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 3
+    },
+    {
+      "name": "getRun",
+      "defFiles": [
+        "src/backend/bank-bu-recon-db/run-repository.js",
+        "src/backend/vcc-op-calc-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 4
         }
       ],
       "totalHits": 8,
@@ -20709,6 +21530,28 @@
       "fileSpan": 3
     },
     {
+      "name": "valuesEqual",
+      "defFiles": [
+        "src/main-process/scenario-engines/engine-utils.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 3
+    },
+    {
       "name": "buildDateDir",
       "defFiles": [
         "src/main-process/acquiring-bill-currency-writer.js",
@@ -20772,6 +21615,28 @@
         {
           "file": "src/main.js",
           "count": 1
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
+      "name": "flowRowToArray",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
         }
       ],
       "totalHits": 6,
@@ -20883,28 +21748,6 @@
         },
         {
           "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 3
-    },
-    {
-      "name": "listRuns",
-      "defFiles": [
-        "src/backend/bank-bu-recon-db/run-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/bank-bu-recon-db/run-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-session.js",
-          "count": 3
-        },
-        {
-          "file": "src/preload.js",
           "count": 1
         }
       ],
@@ -21070,21 +21913,22 @@
       "fileSpan": 3
     },
     {
-      "name": "valuesEqual",
+      "name": "validateFlowRow",
       "defFiles": [
-        "src/main-process/scenario-engines/engine-utils.js"
+        "src/backend/biz-op-recon-import/validator.js",
+        "src/backend/vcc-op-calc-import/validator.js"
       ],
       "refFiles": [
         {
-          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+          "file": "src/backend/biz-op-recon-import/validator.js",
           "count": 2
         },
         {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "file": "src/backend/vcc-op-calc-import/validator.js",
           "count": 2
         },
         {
-          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "file": "src/main-process/biz-op-recon-session.js",
           "count": 2
         }
       ],
@@ -21311,6 +22155,30 @@
         {
           "file": "src/main.js",
           "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
+      "name": "JSZip",
+      "defFiles": [
+        "src/backend/pending-import/streaming-xlsx-reader.js",
+        "src/backend/pending-import/streaming-xlsx-writer.js",
+        "src/backend/vcc-op-calc-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
         }
       ],
       "totalHits": 5,
@@ -21706,10 +22574,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 20
+          "count": 22
         }
       ],
-      "totalHits": 68,
+      "totalHits": 70,
       "fileSpan": 2
     },
     {
@@ -21801,6 +22669,25 @@
         {
           "file": "src/backend/biz-op-recon-db/imports-repository.js",
           "count": 10
+        }
+      ],
+      "totalHits": 17,
+      "fileSpan": 2
+    },
+    {
+      "name": "TEMPLATE_LABEL",
+      "defFiles": [
+        "src/backend/pending-import/removed-reader.js",
+        "src/backend/vcc-op-calc-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-import/removed-reader.js",
+          "count": 8
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 9
         }
       ],
       "totalHits": 17,
@@ -21992,25 +22879,6 @@
       "fileSpan": 2
     },
     {
-      "name": "parseAmount",
-      "defFiles": [
-        "src/backend/biz-op-recon-import/validator.js",
-        "src/main-process/biz-op-recon-session.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-import/validator.js",
-          "count": 8
-        },
-        {
-          "file": "src/main-process/biz-op-recon-session.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 12,
-      "fileSpan": 2
-    },
-    {
       "name": "removalMatch",
       "defFiles": [
         "src/backend/pending-export/writer.js"
@@ -22041,6 +22909,25 @@
         {
           "file": "src/main-process/biz-op-recon-session.js",
           "count": 9
+        }
+      ],
+      "totalHits": 11,
+      "fileSpan": 2
+    },
+    {
+      "name": "ERROR_CODE",
+      "defFiles": [
+        "src/backend/pending-import/removed-reader.js",
+        "src/backend/vcc-op-calc-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-import/removed-reader.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 5
         }
       ],
       "totalHits": 11,
@@ -22412,6 +23299,24 @@
         {
           "file": "src/backend/database/backup.js",
           "count": 1
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 2
+    },
+    {
+      "name": "FLOW_COLUMN_DEFS",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 5
+        },
+        {
+          "file": "src/backend/vcc-op-calc-db/columns.js",
+          "count": 2
         }
       ],
       "totalHits": 7,
@@ -23197,6 +24102,24 @@
       "fileSpan": 2
     },
     {
+      "name": "ensureVccOpCalcTablesSupport",
+      "defFiles": [
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
       "name": "extractMonthKey",
       "defFiles": [
         "src/backend/acquiring-bill-currency-import/reader.js",
@@ -23247,24 +24170,6 @@
         {
           "file": "src/renderer.js",
           "count": 5
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 2
-    },
-    {
-      "name": "getRun",
-      "defFiles": [
-        "src/backend/bank-bu-recon-db/run-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/bank-bu-recon-db/run-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-session.js",
-          "count": 4
         }
       ],
       "totalHits": 6,
@@ -23484,6 +24389,42 @@
         {
           "file": "src/backend/database/scenarios-repository.js",
           "count": 3
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "VCC_BILL_DATE_DB_COLUMN",
+      "defFiles": [
+        "src/backend/vcc-op-calc-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/vcc-op-calc-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "VCC_DIRECTION_DB_COLUMN",
+      "defFiles": [
+        "src/backend/vcc-op-calc-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/vcc-op-calc-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 4
         }
       ],
       "totalHits": 6,
@@ -23912,6 +24853,24 @@
       "fileSpan": 2
     },
     {
+      "name": "scan",
+      "defFiles": [
+        "src/main-process/vcc-op-calc-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 4
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "setExportAvailability",
       "defFiles": [
         "src/renderer.js"
@@ -24003,44 +24962,6 @@
       "fileSpan": 2
     },
     {
-      "name": "VALID_DIRECTION_IN",
-      "defFiles": [
-        "src/backend/biz-op-recon-import/validator.js",
-        "src/main-process/biz-op-recon-session.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-import/validator.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/biz-op-recon-session.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
-      "name": "VALID_DIRECTION_OUT",
-      "defFiles": [
-        "src/backend/biz-op-recon-import/validator.js",
-        "src/main-process/biz-op-recon-session.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-import/validator.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/biz-op-recon-session.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
       "name": "validateBillHeaders",
       "defFiles": [
         "src/backend/acquiring-bill-currency-import/reader.js",
@@ -24054,6 +24975,42 @@
         {
           "file": "src/backend/acquiring-bill-currency-import/validator.js",
           "count": 2
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "VCC_CURRENCY_DB_COLUMN",
+      "defFiles": [
+        "src/backend/vcc-op-calc-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/vcc-op-calc-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "VCC_RECON_AMOUNT_DB_COLUMN",
+      "defFiles": [
+        "src/backend/vcc-op-calc-db/columns.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/vcc-op-calc-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 3
         }
       ],
       "totalHits": 5,
@@ -24187,6 +25144,24 @@
       "fileSpan": 2
     },
     {
+      "name": "computeAmounts",
+      "defFiles": [
+        "src/main-process/vcc-op-calc-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 3
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "computeRowHash",
       "defFiles": [
         "src/backend/pending-import/validator.js",
@@ -24269,6 +25244,25 @@
       "refFiles": [
         {
           "file": "src/main-process/pending-session.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "createVccOpCalcSession",
+      "defFiles": [
+        "src/main-process/vcc-op-calc-session.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/vcc-op-calc-session.js",
           "count": 2
         },
         {
@@ -24461,7 +25455,7 @@
       "fileSpan": 2
     },
     {
-      "name": "flowRowToArray",
+      "name": "flowHeaderToDbColumn",
       "defFiles": [
         "src/backend/biz-op-recon-db/columns.js"
       ],
@@ -24471,7 +25465,7 @@
           "count": 2
         },
         {
-          "file": "src/main-process/biz-op-recon-writer.js",
+          "file": "src/backend/vcc-op-calc-db/columns.js",
           "count": 2
         }
       ],
@@ -25368,6 +26362,25 @@
       "fileSpan": 2
     },
     {
+      "name": "streamFlowFile",
+      "defFiles": [
+        "src/backend/vcc-op-calc-import/reader.js",
+        "src/main-process/vcc-op-calc-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "toggleScenarioEnabled",
       "defFiles": [
         "src/backend/database/scenarios-repository.js"
@@ -25513,24 +26526,6 @@
     },
     {
       "name": "validateBizOpRow",
-      "defFiles": [
-        "src/backend/biz-op-recon-import/validator.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-import/validator.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/biz-op-recon-session.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 2
-    },
-    {
-      "name": "validateFlowRow",
       "defFiles": [
         "src/backend/biz-op-recon-import/validator.js"
       ],
@@ -25839,6 +26834,25 @@
       "fileSpan": 2
     },
     {
+      "name": "countC3BankCandidates",
+      "defFiles": [
+        "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "countRowsInMonth",
       "defFiles": [
         "src/backend/pending-db/month-repository.js"
@@ -26019,6 +27033,24 @@
       "fileSpan": 2
     },
     {
+      "name": "getLatestRunByMonth",
+      "defFiles": [
+        "src/backend/vcc-op-calc-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/vcc-op-calc-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "getLatestRunForMonthPair",
       "defFiles": [
         "src/backend/pending-db/diff-repository.js"
@@ -26181,19 +27213,18 @@
       "fileSpan": 2
     },
     {
-      "name": "JSZip",
+      "name": "insertRunFiles",
       "defFiles": [
-        "src/backend/pending-import/streaming-xlsx-reader.js",
-        "src/backend/pending-import/streaming-xlsx-writer.js"
+        "src/backend/vcc-op-calc-db/run-repository.js"
       ],
       "refFiles": [
         {
-          "file": "src/backend/pending-import/streaming-xlsx-reader.js",
-          "count": 1
+          "file": "src/backend/vcc-op-calc-db/run-repository.js",
+          "count": 2
         },
         {
-          "file": "src/backend/pending-import/streaming-xlsx-writer.js",
-          "count": 2
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 1
         }
       ],
       "totalHits": 3,
@@ -26229,6 +27260,24 @@
         },
         {
           "file": "src/main-process/acquiring-bill-currency-writer.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "listDistinctMonths",
+      "defFiles": [
+        "src/backend/vcc-op-calc-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/vcc-op-calc-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/vcc-op-calc-session.js",
           "count": 1
         }
       ],
@@ -26690,6 +27739,25 @@
         {
           "file": "src/main.js",
           "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "StringDecoder",
+      "defFiles": [
+        "src/backend/pending-import/streaming-xlsx-reader.js",
+        "src/backend/vcc-op-calc-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
         }
       ],
       "totalHits": 3,

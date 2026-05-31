@@ -79,7 +79,12 @@ const {
   readBizOpFile,
   readFlowFile
 } = require('./backend/biz-op-recon-import/reader');
+// v2.1.12 需求1：VCC业务OP计算模块（仅流水文件 → 按月聚合发生额出/入 → 算期末OP，资金红线 🔴）
+const { createVccOpCalcSession } = require('./main-process/vcc-op-calc-session');
+// v2.1.12 流式改造（spec §9）：reader 改 exceljs 流式后，由 session.streamScanAndCompute 内部调用，main 不再直接 import
 const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-dispatcher');
+// v2.1.12 需求6：数据侧预检只读 helper（统计 C3 银行侧候选行，不触碰 runC3Scenario 资金逻辑）
+const { countC3BankCandidates } = require('./main-process/scenario-engines/c3-gateway-recon-join');
 // v2.1.9 N5：dispatcher 双维调度依赖 channels-repository（findByNameAndLocation + getBuiltinGeneral）
 const channelsRepository = require('./backend/database/channels-repository');
 // v2.1.9 N7：场景模板 bundle 序列化 / 解析 / 类型识别（spec §六）
@@ -213,6 +218,10 @@ const bankBuReconSession = createBankBuReconSession({
 const bizOpReconSession = createBizOpReconSession({
   getDb: () => database && database.db,
   getStorageRoot: () => ensureStorageRoot()
+});
+// v2.1.12 需求1：VCC业务OP计算 session（主 DB tool-data.sqlite，资金红线 🔴）
+const vccOpCalcSession = createVccOpCalcSession({
+  getDb: () => database && database.db
 });
 let lastGeneratedExports = {
   detail: null,
@@ -545,7 +554,9 @@ function initializeActivityLog() {
     return activityLogFilePath;
   }
 
-  activityLogFilePath = ensureActivityLogFile(getActivityLogFallbackFilePath());
+  // v2.1.12 SR-log-1：不再创建/写入 app_activity_log.txt；activityLogFilePath 仅作逻辑锚点
+  //   （appendActivityRecord 用其 dirname 推导 storageRoot），日志统一走 logs/ 新结构（JSON Lines）
+  activityLogFilePath = getActivityLogFallbackFilePath();
   // v2.1.9 SR-log-1 (T32h)：注入 storageRoot 让 backend / main-process 模块走 appendModuleLog
   setActivityLogStorageRoot(ensureStorageRoot());
   markStartupMetric(STARTUP_METRIC_MARKS.activityLogReady);
@@ -3628,6 +3639,27 @@ function registerAppHandlers() {
       hasProcessingResult: processingResult !== null,
       processingStats: processingResult ? processingResult.stats : null
     };
+  });
+
+  // v2.1.12 需求6：数据侧预检 — 统计当前导入银行对账单中满足「启用的 C3(gateway-recon-join) 场景银行条件」的候选行数
+  //   用途：让「资金对账不平跳过提示」仅在确有候选行时弹出（启用 C3 但本次数据无命中行 → 不弹、不提示跳过）
+  //   只读查询，不进 trackedIpcHandle 计数（参考 scenarios:list 范式）
+  ipcMain.handle('bank-statement:c3-candidate-count', () => {
+    try {
+      if (!bankStatementSession || !Array.isArray(bankStatementSession.rows) || bankStatementSession.rows.length === 0) {
+        return { status: 'ok', candidateCount: 0 };
+      }
+      const c3Scenarios = database.listScenarios().filter((s) => s.category === 'gateway-recon-join' && s.enabled);
+      let candidateCount = 0;
+      for (const meta of c3Scenarios) {
+        const detail = database.getScenario(meta.id);
+        candidateCount += countC3BankCandidates(detail && detail.config, bankStatementSession.rows);
+        if (candidateCount > 0) break; // 有候选即可，提前退出
+      }
+      return { status: 'ok', candidateCount };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error), candidateCount: 0 };
+    }
   });
 
   // ===== v2.1.0-beta.1 PR-B：单据对账 ReconID 修复模块 IPC（PR-A 占位 → PR-B 实装）=====
@@ -10676,6 +10708,111 @@ function registerNewAccountHandlers() {
       return runRepo.listRunsByDateBu(database.db, date, buName);
     } catch (_e) {
       return [];
+    }
+  });
+
+  // ==========================================================================
+  // v2.1.12 需求1：VCC业务OP计算 — vccOpCalc:* IPC handlers（spec §3.6，6 个）
+  // 命名空间 vccOpCalc:*；与现有 5 模块完全独立。资金红线 🔴（发生额求和 / 期末OP / 整数分精度）。
+  // 资金/运行类用 trackedIpcHandle（scan / compute-amounts / save）；只读 list/get 用普通 handle。
+  // 中间结果（scan/compute 的原始 rows + 统计）缓存在 vccOpCalcSession（仿 lastRunCache，spec Q1）。
+  // ==========================================================================
+
+  // 多选流水 xlsx（仿 bankBuRecon:import:pick-* + pending pick-files 的 multiSelections）
+  ipcMain.handle('vccOpCalc:import:pick-files', async () => {
+    const res = await dialog.showOpenDialog({
+      title: '选择流水对账单文件（可多选）',
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      properties: ['openFile', 'multiSelections']
+    });
+    if (res.canceled || !res.filePaths || res.filePaths.length === 0) {
+      return { status: 'cancelled' };
+    }
+    return { status: 'success', filePaths: res.filePaths };
+  });
+
+  // 读多文件 → 统计总条数 + 定月份（供 F1）。
+  // 整批拒绝（资金红线 🔴）：非法方向 / 非数值金额 / 空账单日期 / 多月份混杂 → status:'rejected' + errorRows。
+  trackedIpcHandle('vccOpCalc:import:scan', 'VCC业务OP计算', '导入文件', async (event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
+    const { filePaths } = payload || {};
+    if (!Array.isArray(filePaths) || filePaths.length === 0) {
+      return { status: 'error', message: '未选择文件' };
+    }
+    // 流式读取+聚合（spec §9 大文件路径，合并 scan+compute，不存全量行）；进度推送 renderer。
+    // 表头校验失败 → FileValidationError；非法行/多月份混杂 → ok:false + errorRows（整批拒绝）。
+    let result;
+    try {
+      result = await vccOpCalcSession.streamScanAndCompute(filePaths, {
+        onProgress: (rows) => {
+          if (event && event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('vccOpCalc:scan:progress', { rows });
+          }
+        }
+      });
+    } catch (err) {
+      if (err && err.name === 'FileValidationError') {
+        return {
+          status: 'error',
+          code: err.code,
+          message: err.message,
+          detailLines: err.detailLines || [],
+          context: err.context || {}
+        };
+      }
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+    if (!result.ok) {
+      return { status: 'rejected', errorRows: result.errorRows, errorCount: result.errorCount };
+    }
+    return { status: 'success', yearMonth: result.yearMonth, totalRows: result.totalRows, fileCount: filePaths.length };
+  });
+
+  // 统计发生额出/入/总额 + perFile（供 F2，不落库）。复用 scan 缓存的 rows（资金红线：同口径整批校验）。
+  trackedIpcHandle('vccOpCalc:run:compute-amounts', 'VCC业务OP计算', '开始运行', (_event, _payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
+    // 流式改造（spec §9）：scan 阶段已合并统计并缓存 lastComputeCache，这里直接返回缓存（不重读文件）
+    const cache = vccOpCalcSession.getComputeCache();
+    if (!cache) return { status: 'error', message: '无统计结果（请先导入文件）' };
+    return {
+      status: 'success',
+      yearMonth: cache.yearMonth,
+      totals: cache.totals,
+      perFile: cache.perFile
+    };
+  });
+
+  // 收 beginOp → 算 endOp = beginOp + 发生额 → 原子落表 A/B（资金红线 🔴）。返回 { runId, endOp }。
+  trackedIpcHandle('vccOpCalc:run:save', 'VCC业务OP计算', '开始运行', (_event, payload = {}) => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
+    const { beginOp } = payload || {};
+    try {
+      const saved = vccOpCalcSession.saveRun({ beginOp });
+      return { status: 'success', ...saved };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // distinct 已计算月份（供 F3 下拉）
+  ipcMain.handle('vccOpCalc:balance:list-months', () => {
+    if (!database || !database.db) return [];
+    try {
+      return vccOpCalcSession.listCalculatedMonths().map((m) => m.yearMonth);
+    } catch (_e) {
+      return [];
+    }
+  });
+
+  // 取某月最新 run 的 { beginOp, totalAmount, endOp, ... }（供 F3 查看）
+  ipcMain.handle('vccOpCalc:balance:get', (_event, payload = {}) => {
+    if (!database || !database.db) return null;
+    const { yearMonth } = payload || {};
+    if (!yearMonth) return null;
+    try {
+      return vccOpCalcSession.getMonthResult(yearMonth);
+    } catch (_e) {
+      return null;
     }
   });
 

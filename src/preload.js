@@ -159,7 +159,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     importGatewayRecon: () => ipcRenderer.invoke('gateway-recon:import'),
     run: () => ipcRenderer.invoke('bank-statement:run'),
     export: () => ipcRenderer.invoke('bank-statement:export'),
-    sessionStatus: () => ipcRenderer.invoke('bank-statement:session-status')
+    sessionStatus: () => ipcRenderer.invoke('bank-statement:session-status'),
+    // v2.1.12 需求6：数据侧预检 — 当前导入银行对账单中满足启用 C3 场景「银行条件」的候选行数
+    c3CandidateCount: () => ipcRenderer.invoke('bank-statement:c3-candidate-count')
   },
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（PR-B 实装算法/IO；本 PR 占位）
   // payload 形态见 docs/iterations/v2.1.0-beta.1/spec.md §三
@@ -307,6 +309,23 @@ contextBridge.exposeInMainWorld('desktopApi', {
     exportDate: (payload) => ipcRenderer.invoke('bizOpRecon:export:date', payload),
     exportDateRange: (payload) => ipcRenderer.invoke('bizOpRecon:export:date-range', payload),
     runHistory: (payload) => ipcRenderer.invoke('bizOpRecon:run:history', payload)
+  },
+  // v2.1.12 需求1：VCC业务OP计算（仅流水文件 → 按月聚合发生额出/入 → 算期末OP；资金红线 🔴）
+  // 流程：pickFiles → scan(F1: 月份+条数) → computeAmounts(F2: 发生额) → save(F2: 期初OP→期末OP 落库)
+  //       → listBalanceMonths / getBalance(F3: 显示余额)
+  vccOpCalc: {
+    pickFiles: () => ipcRenderer.invoke('vccOpCalc:import:pick-files'),
+    scan: (payload) => ipcRenderer.invoke('vccOpCalc:import:scan', payload),
+    computeAmounts: () => ipcRenderer.invoke('vccOpCalc:run:compute-amounts'),
+    save: (payload) => ipcRenderer.invoke('vccOpCalc:run:save', payload),
+    listBalanceMonths: () => ipcRenderer.invoke('vccOpCalc:balance:list-months'),
+    getBalance: (payload) => ipcRenderer.invoke('vccOpCalc:balance:get', payload),
+    // v2.1.12 流式改造（spec §9）：大文件读取进度订阅；返回 unsubscribe（renderer 用完 finally 退订防 listener 泄漏）
+    onScanProgress: (cb) => {
+      const listener = (_e, data) => { if (typeof cb === 'function') cb(data); };
+      ipcRenderer.on('vccOpCalc:scan:progress', listener);
+      return () => ipcRenderer.removeListener('vccOpCalc:scan:progress', listener);
+    }
   },
   // v2.1.6 Module B：收单单据币种校验
   // v2.1.7 F6：新增 onImportProgress / onRunProgress 订阅 API（spec §6.4）

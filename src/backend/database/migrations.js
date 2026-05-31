@@ -1715,6 +1715,64 @@ function ensureBankBuReconTablesSupport(db) {
   }
 }
 
+// v2.1.12 需求1 T-vcc-1 — VCC业务OP计算模块（vcc-op-calc）2 张表 + 2 索引
+// 复用 v2.1.2 bankBuRecon 范式（ensureBankBuReconTablesSupport），主 DB（tool-data.sqlite）
+//   - vcc_op_calc_runs：按月一行 = 一次计算汇总（month / 发生额出入总额 / 期初OP / 期末OP / 币种）
+//   - vcc_op_calc_run_files：每次运行的逐文件发生额明细（file_name / row_count / out / in / amount）
+// 资金红线 🔴：所有金额列一律 TEXT 存储（防 JS Number 浮点漂移；session 用整数分计算后传字符串）。
+// 幂等：CREATE TABLE / INDEX IF NOT EXISTS，多次启动 no-op。
+// 与现有 5 模块表完全隔离（零改动），调用顺序无依赖。
+function ensureVccOpCalcTablesSupport(db) {
+  db.exec('BEGIN');
+
+  try {
+    // 表 A：vcc_op_calc_runs（spec §1.2 表A）
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS vcc_op_calc_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        year_month TEXT NOT NULL,
+        run_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        file_count INTEGER NOT NULL,
+        total_amount_out TEXT NOT NULL,
+        total_amount_in TEXT NOT NULL,
+        total_amount TEXT NOT NULL,
+        begin_op TEXT NOT NULL,
+        end_op TEXT NOT NULL,
+        currency TEXT
+      );
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_vcc_runs_month
+        ON vcc_op_calc_runs(year_month, run_at DESC);
+    `);
+
+    // 表 B：vcc_op_calc_run_files（spec §1.2 表B）
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS vcc_op_calc_run_files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL,
+        file_name TEXT NOT NULL,
+        row_count INTEGER NOT NULL,
+        amount_out TEXT NOT NULL,
+        amount_in TEXT NOT NULL,
+        amount TEXT NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES vcc_op_calc_runs(id)
+      );
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_vcc_files_run
+        ON vcc_op_calc_run_files(run_id);
+    `);
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 // v2.1.6 T4 — 收单单据币种校验模块（acquiring-bill-currency）4 张表
 // 复用 v2.1.2 bankBuRecon 范式，主 DB（tool-data.sqlite）
 //   - acquiring_bill_currency_flow_imports：流水表导入（关键字段 recon_main_id / settle_amount / settle_currency）
@@ -1892,6 +1950,8 @@ module.exports = {
   ensureAcquiringBillCurrencyTablesSupport,
   ensureAmountSplitRulesSupport,
   ensureBankBuReconTablesSupport,
+  // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表 + 2 索引
+  ensureVccOpCalcTablesSupport,
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,

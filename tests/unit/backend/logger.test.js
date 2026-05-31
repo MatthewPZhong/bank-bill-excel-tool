@@ -171,20 +171,18 @@ test.describe('appendStructuredLog', () => {
 // appendActivityRecord 双写
 // ============================================================================
 
-test.describe('appendActivityRecord 双写（旧 + 新结构）', () => {
-  test('双写一致性：旧 txt + 新 JSON Lines 同时写入', () => {
+test.describe('appendActivityRecord 写入新结构 JSON Lines（v2.1.12 SR-log-1 删旧 txt 双写后）', () => {
+  test('仅写新 JSON Lines，不再创建旧 app_activity_log.txt', () => {
     const root = mkTmpRoot();
     const legacyPath = path.join(root, 'app_activity_log.txt');
     appendActivityRecord(legacyPath, {
       level: 'error',
-      message: '测试双写',
+      message: '测试写入',
       details: ['detail1', 'detail2']
     });
 
-    // 旧路径（txt 格式）
-    assert.ok(fs.existsSync(legacyPath), '旧 app_activity_log.txt 应存在');
-    const legacy = fs.readFileSync(legacyPath, 'utf8');
-    assert.match(legacy, /\[ERROR\] 测试双写 \| detail1；detail2/, '旧格式应保留');
+    // v2.1.12 SR-log-1：旧 app_activity_log.txt 不再创建/写入
+    assert.ok(!fs.existsSync(legacyPath), '旧 app_activity_log.txt 不应再被创建');
 
     // 新路径（JSON Lines）
     const today = new Date();
@@ -198,17 +196,17 @@ test.describe('appendActivityRecord 双写（旧 + 新结构）', () => {
     assert.ok(fs.existsSync(newPath), `新 JSON Lines 路径应存在: ${newPath}`);
     const newLines = readJsonLines(newPath);
     assert.strictEqual(newLines.length, 1);
-    assert.strictEqual(newLines[0].message, '测试双写');
+    assert.strictEqual(newLines[0].message, '测试写入');
     assert.strictEqual(newLines[0].level, 'error');
     assert.deepStrictEqual(newLines[0].details, ['detail1', 'detail2']);
   });
 
-  test('旧 caller 兼容：仅传 level/message/details 不带 source 也能双写', () => {
+  test('旧 caller 兼容：仅传 level/message/details 不带 source 也能写新结构', () => {
     const root = mkTmpRoot();
     const legacyPath = path.join(root, 'app_activity_log.txt');
     appendActivityRecord(legacyPath, { level: 'info', message: '兼容测试' });
-    // 旧路径正常
-    assert.ok(fs.existsSync(legacyPath));
+    // v2.1.12 SR-log-1：旧 txt 不再创建
+    assert.ok(!fs.existsSync(legacyPath), '旧 app_activity_log.txt 不应再被创建');
     // 新路径用 unknown 兜底
     const today = new Date();
     const newPath = getLogFilePath(root, 'info', today);
@@ -217,19 +215,15 @@ test.describe('appendActivityRecord 双写（旧 + 新结构）', () => {
     assert.strictEqual(lines[0].domain, 'unknown');
   });
 
-  test('双写中新结构失败不影响旧路径（graceful）', () => {
-    // 模拟新结构写失败：传入只读 root 让 mkdirSync 抛错
+  test('新结构写入失败时抛错，交由 caller 兜底（删旧 txt 后不再吞错）', () => {
+    // 制造写不进去的 storageRoot：用文件占位 logs 名字位置，appendStructuredLog 内 mkdirSync(logs/...) 抛 ENOTDIR
     const root = mkTmpRoot();
     const legacyPath = path.join(root, 'app_activity_log.txt');
-    // 制造写不进去的 storageRoot：在 darwin/linux 上 dirname=不存在的路径深层 + 用文件占位
-    // 简化做法：先建一个 file 占用 logs 名字位置
     fs.writeFileSync(path.join(root, 'logs'), 'this-is-a-file-not-a-dir');
-    // 此时 appendStructuredLog 内 mkdirSync(logs/2026-05/05-27) 会抛 ENOTDIR
-    // appendActivityRecord 内部 try-catch 应吞错 → 旧路径仍正常
-    appendActivityRecord(legacyPath, { level: 'error', message: '新结构应失败' });
-    assert.ok(fs.existsSync(legacyPath), '即使新结构失败，旧 txt 应仍写入');
-    const content = fs.readFileSync(legacyPath, 'utf8');
-    assert.match(content, /新结构应失败/);
+    // v2.1.12 SR-log-1：删旧双写后 appendActivityRecord 不再 try-catch 吞错，新结构失败直接抛
+    //   → 由 caller（appendActivityLogEntry / appendModuleLog）各自 stderr graceful 兜底
+    assert.throws(() => appendActivityRecord(legacyPath, { level: 'error', message: '新结构应失败' }));
+    assert.ok(!fs.existsSync(legacyPath), '旧 txt 不应被创建');
   });
 
   test('永久保留：多次写入 append 累积，不滚动不清理', () => {

@@ -6787,7 +6787,9 @@
           conditions: [],
           reconFields: [{ seq: 1, gwField: '', bankField: '' }],
           // v2.1.8 N2：扩展 assign 数据结构（mode='direct' 兼容旧逻辑，'custom' = 自取值静态字符串）
-          assign: { gwField: '', bankField: '', mode: 'direct', customValue: '' }
+          assign: { gwField: '', bankField: '', mode: 'direct', customValue: '' },
+          // v2.1.12 需求5：extra fee 匹配 — 默认关（enabled:false + amount:0 = 与旧 C3 byte-for-byte 一致，零回归红线）
+          extraFee: { enabled: false, amount: 0 }
         };
       }
       // v2.1.0-beta.1 PR-A（task A7）：C4 类默认 config（spec §8.2）
@@ -6926,6 +6928,15 @@
         // v2.1.8 N2：mode='custom' 时 customValue 必填（dialog UI 已限制 maxlength=200）
         if (a.mode === 'custom' && (!a.customValue || String(a.customValue).trim() === '')) {
           errors.push('对账成立后赋值的"自取值"内容不能为空');
+        }
+        // v2.1.12 需求5：extra fee 校验 — 勾选后 amount 必填且为有限数（未勾选不校验；允许正负/小数/0）
+        const ef = c.extraFee || {};
+        if (ef.enabled) {
+          if (ef.amount === '' || ef.amount === undefined || ef.amount === null) {
+            errors.push('勾选「网关对账单金额与银行对账单不一致」后，extra fee 金额不能为空');
+          } else if (!Number.isFinite(Number(ef.amount))) {
+            errors.push('extra fee 金额必须是数字');
+          }
         }
         // v2.1.5 N3：conditions 柔性校验
         //   - conditions.length === 0 → 通过（视为不过滤）
@@ -7104,6 +7115,10 @@
       if (!Array.isArray(config.conditions)) {
         config.conditions = [];
       }
+      // v2.1.12 需求5：老 C3 scenario 无 extraFee 字段 → 兜底默认关（与引擎 fee=null 一致，零回归）
+      if (!config.extraFee || typeof config.extraFee !== 'object') {
+        config.extraFee = { enabled: false, amount: 0 };
+      }
 
       const overlay = createOverlay();
       const dialog = document.createElement('div');
@@ -7156,6 +7171,18 @@
                 ${renderScenarioOptions(BANK_STATEMENT_FIELDS_FOR_C3, config.assign.bankField)}
               </select>
             </div>
+          </div>
+          <div class="scenario-config-row scenario-config-row-extrafee">
+            <label class="scenario-config-extrafee-check">
+              <input type="checkbox" data-field="extrafee-enabled" ${config.extraFee.enabled ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+              网关对账单金额与银行对账单不一致
+            </label>
+            <span class="scenario-config-extrafee-formula" style="${config.extraFee.enabled ? '' : 'display:none;'}">
+              网关对账单金额 +
+              <input class="scenario-config-input scenario-config-input-fee" type="text" data-field="extrafee-amount"
+                     value="${escapeHtml(String(config.extraFee.amount ?? ''))}" ${isReadonly ? 'disabled' : ''}>
+              = 银行对账单金额
+            </span>
           </div>
         </div>
         <div class="dialog-actions right">
@@ -7281,6 +7308,16 @@
           config.assign.mode = 'direct';
           if (customInput) customInput.style.display = 'none';
         }
+      });
+      // v2.1.12 需求5：extra fee 勾选框 + 金额输入（参照 assign-custom-value 显隐套路）
+      dialog.querySelector('input[data-field="extrafee-enabled"]')?.addEventListener('change', (e) => {
+        config.extraFee.enabled = e.target.checked;
+        const formula = dialog.querySelector('.scenario-config-extrafee-formula');
+        if (formula) formula.style.display = e.target.checked ? '' : 'none';
+        // 取消勾选不清空 amount（保留用户输入，下次勾选还在）；校验时 enabled=false 不校验 amount
+      });
+      dialog.querySelector('input[data-field="extrafee-amount"]')?.addEventListener('input', (e) => {
+        config.extraFee.amount = e.target.value;
       });
       dialog.querySelector('input[data-field="assign-custom-value"]')?.addEventListener('input', (e) => {
         config.assign.customValue = e.target.value;
@@ -9348,7 +9385,15 @@
       formatBizOpReconStatusHtml,
       getBizOpReconDefaultDate,
       // v2.1.4 T3：小助手功能收纳弹窗工厂
-      createModuleCabinetDialog
+      createModuleCabinetDialog,
+      // v2.1.12 需求1：VCC业务OP计算 dialog factory（F1 确认 / F2 计算 / F3 显示余额）
+      createVccOpCalcConfirmDialog,
+      createVccOpCalcComputeDialog,
+      createVccOpCalcShowBalanceDialog,
+      applyVccOpCalcPanelInitialPreviewState,
+      applyVccOpCalcPanelResultPreviewState,
+      applyVccOpCalcComputeDialogPreviewState,
+      applyVccOpCalcShowBalanceDialogPreviewState
     };
 
     // v2.1.2 T2 (spec v0.4 拍板)：月份选择对话框
@@ -9837,6 +9882,253 @@
     }
 
     // ============================================================
+    // v2.1.12 需求1：VCC业务OP计算 dialog factory（F1 确认 / F2 计算 / F3 显示余额）
+    // 蓝本：F1 仿 createBankBuReconFileImportPromptDialog（alert-card 纯展示）；
+    //       F2 结构仿 Reconcile（只读数值 + input + 计算）；F3 仿 Export（去 radio，月份 select + 结果区）。
+    // 资金红线🔴（spec §8.3）：F2 点「计算」= onCompute(beginOp) → renderer 调 vccOpCalc.save
+    //   （后端整数分算 endOp + 原子落库）；前端绝不自行计算 beginOp+totalAmount，仅展示后端返回的金额字符串。
+    // ============================================================
+
+    // F1 月份+条数确认框（选完文件、scan 成功后弹；用户确认 → 后台 computeAmounts）
+    function createVccOpCalcConfirmDialog({ yearMonth = '', totalRows = 0, fileCount = 0, onConfirm, onCancel } = {}) {
+      const overlay = createOverlay();
+      const card = document.createElement('div');
+      card.className = 'modal-card alert-card';
+      card.dataset.previewModal = 'vcc-op-calc-confirm';
+      card.innerHTML = `
+        <div class="alert-body">
+          <div class="alert-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28"><defs><linearGradient id="vccConfirmIconG" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="100%" stop-color="#9B72F2"/></linearGradient></defs><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6z" fill="none" stroke="url(#vccConfirmIconG)" stroke-width="2" stroke-linejoin="round"/><path d="M14 3v6h6" fill="none" stroke="url(#vccConfirmIconG)" stroke-width="2" stroke-linejoin="round"/></svg>
+          </div>
+          <div class="alert-message">
+            <div style="font-weight:600; font-size:15px; margin-bottom:6px;">确认流水信息</div>
+            <div style="font-size:13px; color:#666; line-height:1.8;">
+              流水月份：<b>${escapeHtmlSafe(String(yearMonth))}</b><br>
+              导入文件：<b>${escapeHtmlSafe(String(fileCount))}</b> 个<br>
+              总流水条数：<b>${escapeHtmlSafe(String(totalRows))}</b> 条<br>
+              <span style="color:#999;">确认后将统计发生额出/入。</span>
+            </div>
+          </div>
+        </div>
+        <div class="dialog-actions center">
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="confirm">确认</button>
+        </div>
+      `;
+      card.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+        closeModal();
+        if (typeof onCancel === 'function') onCancel();
+      });
+      card.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
+        closeModal();
+        if (typeof onConfirm === 'function') await onConfirm();
+      });
+      overlay.appendChild(card);
+      return overlay;
+    }
+
+    // F2 计算框（点「开始运行」弹）：只读发生额出/入/总额 → 输入期初OP → 点「计算」即落库
+    //   onCompute(beginOp) 返回 { status:'success', endOp } | { status:'error', message }（resolve，不抛）
+    function createVccOpCalcComputeDialog({ totals = {}, yearMonth = '', onCompute, onClose } = {}) {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.dataset.previewModal = 'vcc-op-calc-compute';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card pending-reconcile-dialog';
+      overlay.appendChild(dialog);
+
+      const title = document.createElement('div');
+      title.className = 'pending-dialog-title';
+      title.textContent = `计算期末OP（${yearMonth}）`;
+      dialog.appendChild(title);
+
+      // 只读发生额区（值为后端字符串原值，不二次运算 — 资金红线🔴）
+      const amountBox = document.createElement('div');
+      amountBox.style.cssText = 'padding:6px 2px 2px; font-size:13px; line-height:2;';
+      const cur = totals.currency ? `（${escapeHtml(String(totals.currency))}）` : '';
+      amountBox.innerHTML = `
+        <div>发生额出：<b>${escapeHtml(String(totals.totalOut == null ? '—' : totals.totalOut))}</b></div>
+        <div>发生额入：<b>${escapeHtml(String(totals.totalIn == null ? '—' : totals.totalIn))}</b></div>
+        <div>总发生额（入−出）：<b>${escapeHtml(String(totals.totalAmount == null ? '—' : totals.totalAmount))}</b> ${cur}</div>
+      `;
+      dialog.appendChild(amountBox);
+
+      // 期初OP 输入行（type=text 容忍负号/小数；金额合法性交后端 parseAmountToCents）
+      const inputWrap = document.createElement('div');
+      inputWrap.style.cssText = 'margin-top:10px; margin-bottom:14px; display:flex; align-items:center; gap:8px;';
+      const inputLabel = document.createElement('label');
+      inputLabel.textContent = '期初OP（上月OP）';
+      inputLabel.style.cssText = 'font-size:13px; white-space:nowrap;';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'mapping-text-input';
+      input.placeholder = '允许负数/小数';
+      input.style.flex = '1';
+      inputWrap.appendChild(inputLabel);
+      inputWrap.appendChild(input);
+      dialog.appendChild(inputWrap);
+
+      // 结果行（计算落库后显示期末OP）
+      const resultBox = document.createElement('div');
+      resultBox.style.cssText = 'margin-top:10px; font-size:14px; font-weight:600; color:#1a7f37; display:none;';
+      dialog.appendChild(resultBox);
+
+      // 错误行（inline，可重试）
+      const errBox = document.createElement('div');
+      errBox.style.cssText = 'margin-top:8px; font-size:12px; color:#d93025; display:none;';
+      dialog.appendChild(errBox);
+
+      const actions = document.createElement('div');
+      actions.className = 'dialog-actions center';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'secondary-btn small';
+      cancelBtn.type = 'button';
+      cancelBtn.textContent = '取消';
+      cancelBtn.addEventListener('click', () => {
+        closeModal();
+        if (typeof onClose === 'function') onClose();
+      });
+
+      const computeBtn = document.createElement('button');
+      computeBtn.className = 'primary-btn small';
+      computeBtn.type = 'button';
+      computeBtn.textContent = '计算';
+      computeBtn.disabled = true;  // 期初OP 空时禁用（基本前端校验，不解析金额）
+
+      input.addEventListener('input', () => {
+        computeBtn.disabled = input.value.trim() === '';
+        errBox.style.display = 'none';
+      });
+
+      computeBtn.addEventListener('click', async () => {
+        const beginOp = input.value.trim();
+        if (beginOp === '') return;
+        computeBtn.disabled = true;
+        input.disabled = true;
+        errBox.style.display = 'none';
+        let res = null;
+        try {
+          res = typeof onCompute === 'function' ? await onCompute(beginOp) : null;
+        } catch (e) {
+          res = { status: 'error', message: e && e.message ? e.message : String(e) };
+        }
+        if (res && res.status === 'success') {
+          resultBox.textContent = `期末OP = ${res.endOp}（已保存）`;
+          resultBox.style.display = 'block';
+          computeBtn.style.display = 'none';   // 落库完成，收起计算按钮
+          cancelBtn.textContent = '关闭';
+        } else {
+          errBox.textContent = (res && res.message) ? res.message : '计算失败';
+          errBox.style.display = 'block';
+          computeBtn.disabled = false;
+          input.disabled = false;
+        }
+      });
+
+      actions.appendChild(computeBtn);
+      actions.appendChild(cancelBtn);
+      dialog.appendChild(actions);
+
+      return overlay;
+    }
+
+    // F3 显示余额框（点「显示余额」弹）：月份单选下拉 + 查看 → 展示 输入OP/总发生额/计算OP
+    //   onView(yearMonth) 返回 { beginOp, totalAmount, endOp, currency, ... } | null（resolve，不抛）
+    function createVccOpCalcShowBalanceDialog({ months = [], onView, onClose } = {}) {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.dataset.previewModal = 'vcc-op-calc-show-balance';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card pending-export-dialog';
+      dialog.style.width = 'min(100%, 627px)';   // 缩小至 modal-card 默认 940px 的 2/3
+      overlay.appendChild(dialog);
+
+      const title = document.createElement('div');
+      title.className = 'pending-dialog-title';
+      title.textContent = '显示余额';
+      dialog.appendChild(title);
+
+      const safeMonths = Array.isArray(months) ? months : [];
+
+      const selectRow = document.createElement('div');
+      selectRow.style.cssText = 'display:flex; align-items:center; gap:8px; margin-top:4px;';
+      const selectLabel = document.createElement('label');
+      selectLabel.textContent = '选择月份';
+      selectLabel.style.cssText = 'font-size:13px; white-space:nowrap;';
+      const select = document.createElement('select');
+      select.className = 'mapping-text-input pending-reconcile-month-select';
+      select.style.cssText = 'flex: 0 0 170px;';   // 下拉框宽度缩至原(flex 占满≈510px)的约 1/3（用户要求）
+      safeMonths.forEach((m, idx) => {
+        const opt = document.createElement('option');
+        opt.value = m;
+        opt.textContent = m;
+        if (idx === 0) opt.selected = true;
+        select.appendChild(opt);
+      });
+      selectRow.appendChild(selectLabel);
+      selectRow.appendChild(select);
+      dialog.appendChild(selectRow);
+
+      // 结果区（点查看后填充；金额为后端字符串原值）
+      const resultBox = document.createElement('div');
+      resultBox.style.cssText = 'margin-top:12px; font-size:13px; line-height:2; display:none;';
+      dialog.appendChild(resultBox);
+
+      const actions = document.createElement('div');
+      actions.className = 'dialog-actions right';   // 查看/关闭 右下角对齐（复用既有 .dialog-actions.right）
+      actions.style.marginTop = '12px';   // footer 横线(border-top)向下平移一点点（用户要求）
+
+      const viewBtn = document.createElement('button');
+      viewBtn.className = 'primary-btn small';
+      viewBtn.type = 'button';
+      viewBtn.textContent = '查看';
+      viewBtn.disabled = safeMonths.length === 0;
+      viewBtn.addEventListener('click', async () => {
+        const ym = select.value;
+        if (!ym) return;
+        viewBtn.disabled = true;
+        let bal = null;
+        try {
+          bal = typeof onView === 'function' ? await onView(ym) : null;
+        } catch (_e) {
+          bal = null;
+        }
+        viewBtn.disabled = false;
+        if (!bal) {
+          resultBox.innerHTML = `<span style="color:#d93025;">未找到 ${escapeHtml(String(ym))} 的计算记录</span>`;
+          resultBox.style.display = 'block';
+          return;
+        }
+        const cur = bal.currency ? `（${escapeHtml(String(bal.currency))}）` : '';
+        resultBox.innerHTML = `
+          <div>月份：<b>${escapeHtml(String(bal.yearMonth || ym))}</b></div>
+          <div>期初OP（输入）：<b>${escapeHtml(String(bal.beginOp == null ? '—' : bal.beginOp))}</b></div>
+          <div>总发生额：<b>${escapeHtml(String(bal.totalAmount == null ? '—' : bal.totalAmount))}</b> ${cur}</div>
+          <div>期末OP（计算）：<b>${escapeHtml(String(bal.endOp == null ? '—' : bal.endOp))}</b></div>
+        `;
+        resultBox.style.display = 'block';
+      });
+
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'secondary-btn small';
+      closeBtn.type = 'button';
+      closeBtn.textContent = '关闭';
+      closeBtn.addEventListener('click', () => {
+        closeModal();
+        if (typeof onClose === 'function') onClose();
+      });
+
+      actions.appendChild(viewBtn);
+      actions.appendChild(closeBtn);
+      dialog.appendChild(actions);
+
+      return overlay;
+    }
+
+    // ============================================================
     // v2.1.3：业务OP数据核对 dialog factory（6 个）+ preview state apply（4 个）
     // OPEN ISSUE 拍板固化：#5 错误报告 / #8 年±1 月日不联动 / #9 文件名 / #11 续导确认 / #12 ready 前置 / #13 success 复用
     // ============================================================
@@ -10300,6 +10592,63 @@
         successDates,
         onConfirm: () => {},
         onCancel: () => {}
+      }));
+    }
+
+    // ============================================================
+    // v2.1.12 需求1：VCC业务OP计算 preview state apply（仿 biz-op-recon switchTo + panel + dialog）
+    // ============================================================
+    function switchToVccOpCalcPanel() {
+      ['statementModulePanel','newAccountModulePanel','pendingModulePanel','bankStatementModulePanel','reconIdFixModulePanel','bankBuReconModulePanel','bizOpReconModulePanel','acquiringBillCurrencyModulePanel'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.hidden = true;
+      });
+      const panel = document.getElementById('vccOpCalcModulePanel');
+      if (panel) panel.hidden = false;
+      const nameEl = document.getElementById('currentModuleName');
+      if (nameEl) nameEl.textContent = 'VCC业务OP计算';
+    }
+
+    function applyVccOpCalcPanelInitialPreviewState() {
+      switchToVccOpCalcPanel();
+      const importBtn = document.getElementById('vccOpCalcImportBtn');
+      if (importBtn) importBtn.disabled = false;
+      const runBtn = document.getElementById('vccOpCalcRunBtn');
+      if (runBtn) runBtn.disabled = true;
+      const showBtn = document.getElementById('vccOpCalcShowBalanceBtn');
+      if (showBtn) showBtn.disabled = true;
+      const statusBox = document.getElementById('vccOpCalcStatusBox');
+      const statusText = statusBox && statusBox.querySelector('.status-box-text');
+      if (statusText) statusText.textContent = '欢迎使用小助手';
+    }
+
+    function applyVccOpCalcPanelResultPreviewState() {
+      switchToVccOpCalcPanel();
+      ['vccOpCalcImportBtn','vccOpCalcRunBtn','vccOpCalcShowBalanceBtn'].forEach((id) => {
+        const b = document.getElementById(id);
+        if (b) b.disabled = false;
+      });
+      const statusBox = document.getElementById('vccOpCalcStatusBox');
+      const statusText = statusBox && statusBox.querySelector('.status-box-text');
+      if (statusText) statusText.textContent = '2026-04 运行完成：期初OP 1000.00 → 期末OP 3500.00（已保存）';
+    }
+
+    function applyVccOpCalcComputeDialogPreviewState() {
+      applyVccOpCalcPanelResultPreviewState();
+      openModal(createVccOpCalcComputeDialog({
+        yearMonth: '2026-04',
+        totals: { totalOut: '1500.00', totalIn: '4000.00', totalAmount: '2500.00', currency: 'CNY' },
+        onCompute: async () => ({ status: 'success', endOp: '3500.00' }),
+        onClose: () => {}
+      }));
+    }
+
+    function applyVccOpCalcShowBalanceDialogPreviewState() {
+      applyVccOpCalcPanelResultPreviewState();
+      openModal(createVccOpCalcShowBalanceDialog({
+        months: ['2026-04', '2026-03'],
+        onView: async (ym) => ({ yearMonth: ym, beginOp: '1000.00', totalAmount: '2500.00', endOp: '3500.00', currency: 'CNY' }),
+        onClose: () => {}
       }));
     }
   }
