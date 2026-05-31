@@ -247,3 +247,28 @@ bank-bu-recon 会落每行原始数据到 `*_imports` 表（`migrations.js:1586/
 ### 6.1 ⚠️ 资金红线 review 要点（CLAUDE.md 规则 7）
 - 金额求和（发生额出/入合计）+ 期末OP = 期初OP + 发生额 属**资金计算**：精度策略（Q5）、出入方向识别（Q2/Q8）、空值/非数字行处理（Q8）必须人工复核 + 测试用例覆盖。
 - 命中 `rules/important-variables.md`：本模块为全新代码，无既有 Critical 变量改动，但新增 session 计算逻辑建议提 PR 时跑 `/check-vars` 评估是否登记 `vcc-op-calc-session` 金额累加/精度常量。
+
+---
+
+## 7 后端已完成（commit d2050b0）+ 前端对接交接（2026-05-31）
+
+**后端状态**：DB 迁移（`vcc_op_calc_runs` + `vcc_op_calc_run_files` + FK + 索引）+ `vcc-op-calc-db/columns.js`（复用流水 28 列）+ `run-repository.js` + `vcc-op-calc-import/reader.js`+`validator.js` + `vcc-op-calc-session.js`（整数分精度 / 混币种全量 / 整批拒绝 / 期末OP=期初+发生额）+ main.js 6 IPC + preload —— **已 commit `d2050b0`**。session 资金红线单测 17（`tests/unit/main-process/vcc-op-calc-session.test.js`）；全量 **unit 1380** 无回归。⚠️ 后端由 dev agent 写、team-lead 补单测验证（dev socket 断未自测）。
+
+**前端对接 API**（renderer 调 `window.desktopApi.vccOpCalc.*`，已暴露 `preload.js:316-322`）：
+
+| preload 方法 | IPC channel | 返回 |
+|---|---|---|
+| `pickFiles()` | `vccOpCalc:import:pick-files` | 多选 xlsx 路径 |
+| `scan(payload)` | `vccOpCalc:import:scan` | `{ok,yearMonth,totalRows}` 或 `{ok:false,errorRows}`（整批拒绝）|
+| `computeAmounts()` | `vccOpCalc:run:compute-amounts` | `{totals:{totalOut,totalIn,totalAmount,currency},perFile}` |
+| `save({beginOp})` | `vccOpCalc:run:save` | `{runId,endOp,beginOp,yearMonth}` |
+| `listBalanceMonths()` | `vccOpCalc:balance:list-months` | `[{yearMonth,...}]`（对象数组）|
+| `getBalance({yearMonth})` | `vccOpCalc:balance:get` | `{beginOp,totalAmount,endOp,currency,...}` |
+
+**前端待做**（本 spec §2 UI 状态机 + §3.8-3.11）：
+- `renderer.js`：MODULES 注册第 6 项 `vccOpCalc{id:'vcc-op-calc',name:'VCC业务OP计算'}`（仿 :66-69）+ 面板隐藏控制（仿 :1364-1374）+ DOM 缓存 5 项（仿 :288-292）+ `vccOpCalcState` + handleImport/Run/ShowBalance（仿 bank-bu-recon :3950-4210）
+- `renderer-dialogs.js`：F1 月份确认 / F2 计算框（发生额 + 输入期初OP + 计算期末OP）/ F3 显示余额（仿 :9364-9760）
+- `index.html`：`#vccOpCalcModulePanel` 面板块 + 模块切换入口；「导出差异」位 → 「显示余额」按钮
+- previews：补 4 处入口（MEMORY `workflow_frontend_previews`）+ 截图回归
+
+**新会话启动**：读本 spec + `git log`（后端 `d2050b0`）→ 做前端 → `release-check` + preview + 手测（需求5/6/1 一起）→ T8 文档三件套（CHANGELOG/VERSION_FEATURE_HISTORY/USER_GUIDE）→ α bump `-alpha.1` + 提 PR（提 PR 前 `/check-vars`）。
