@@ -1,5 +1,54 @@
 # Changelog
 
+## 2.1.12-alpha.1 - 2026-05-31
+
+v2.1.11 之后 1 轮迭代（α 阶段 = 业务 + 收尾），**2 个用户需求 + 1 个提示修正 + 1 批收尾清债**：需求1（**新功能** 第 6 个模块「VCC业务OP计算」— 仅导入流水对账单、按月聚合发生额出/入、期末OP = 期初OP + 发生额，落库 + 显示余额，**JSZip 流式 reader 支持百万行级大文件**）+ 需求5（C3「提取ReconId-From 网关」场景新增 extra fee 额外费用匹配 — 网关金额 + fee 后比银行对账单金额）+ 需求6（资金对账不平跳过提示加"数据侧候选行预检"）+ 收尾批（SR-log-1 删 `app_activity_log.txt` 旧双写 / I6 bundle C2 防御测试 / I7 important-variables 升格）。⚠️ **2 个🔴资金红线**（需求1 发生额求和 + 期末OP 计算；需求5 改 C3 网关核销金额匹配判定）+ **1 个🔴破坏性变更**（SR-log-1 停止旧 activity log 写入，历史文件保留不删 = 删数据红线护栏）。质量门：`npm run release-check` 全绿（unit 1390 / integration 952 / smoke 0 regression）+ 需求5 真实网关+银行账单端到端人工核对核销 + 提 PR 前 `/check-vars`。
+
+### 新增
+
+- **需求1 第 6 个模块「VCC业务OP计算」**（**新功能** · `module.id = vcc-op-calc` / 🔴资金红线 / spec `spec-alpha-req1-vcc.md`）：新建独立模块，UI 复用第 4 模块「月度银行对账单BU回填校验」(`bank-bu-recon`) 的面板/按钮/状态框样式，仅把「导出差异」按钮替换为「显示余额」——
+  - **业务语义（已拍板，资金红线）**：`发生额 = 发生额入 − 发生额出`；`期末OP = 期初OP + 发生额`；期末OP 月份 = 导入流水所在月，期初OP = 用户手填的"导入流水上月"OP
+  - **输入**：仅「流水对账单」xlsx（28 列，**复用第 5 模块 `biz-op-recon-db/columns.js` 的 `FLOW_COLUMN_DEFS` 流水结构**，不重复维护表头）；按「出入方向」(`direction` 入/出) 对「对账金额」(`recon_amount`) 求和，月份取「账单日期」(`bill_date_raw`)
+  - **2 张新 DB 表 + FK**（幂等 migration，不动现有任何表）：`vcc_op_calc_runs`（按月一行汇总 = 用户说的"那张表"：`year_month` / `file_count` / `total_amount_out` / `total_amount_in` / `total_amount` / `begin_op` / `end_op` / `currency`，金额列 TEXT 存避免浮点漂移）+ `vcc_op_calc_run_files`（逐文件发生额明细 = 汇总的下钻：`run_id` FK → runs / `file_name` / `row_count` / `amount_out` / `amount_in` / `amount`）；2 索引（`idx_vcc_runs_month` / `idx_vcc_files_run`）；**不落流水原始行**（"显示余额"只展示聚合数，导入时流式累加即可，原始行无展示/导出需求）；允许同月多次运行留历史、"显示余额"取该月最新 run
+  - **6 个 IPC**（资金/运行类用 `trackedIpcHandle`）：`vccOpCalc:import:pick-files`（多选 xlsx）/ `vccOpCalc:import:scan`（流式读 + 聚合定月份与总条数）/ `vccOpCalc:run:compute-amounts`（返回缓存的发生额出/入/总额，不重读）/ `vccOpCalc:run:save`（收期初OP → 算期末OP → 原子落表A/B）/ `vccOpCalc:balance:list-months`（distinct year_month）/ `vccOpCalc:balance:get`（按月查月末 OP）；新增进度事件 `vccOpCalc:scan:progress`（每 5 万行）
+  - **JSZip 流式 reader（弃 SheetJS / exceljs）**（新建 `src/backend/vcc-op-calc-import/reader.js`）：实测真实流水文件达 **78.7 万行 / worksheet XML 811MB**，SheetJS 全量加载超 V8 单字符串 512MB 硬上限静默返回空（增大内存无用），exceljs streaming 又因部分文件用 zip **data descriptor**（流式导出 general purpose bit3 set，local header size/CRC=0）报 `invalid signature`；改用 JSZip 走 central directory（有正确 size/offset）+ SAX 扫 `<row>`（复用自研 `pending-import/streaming-xlsx-reader` 的 `parseRowXml`/`readSharedStrings`）+ 多 sheet 定位（找表头匹配的数据表）+ 损坏文件友好提示 + 进度回调；性能实测（811MB worksheet）**JSZip 7.8s / RSS 778MB** 全面优于 exceljs 16.9s / 2GB 且支持 data descriptor
+  - **session 流式聚合**（新建 `src/main-process/vcc-op-calc-session.js`）：合并 scan + compute 为一次流式读边读边聚合 `{yearMonth, totalRows, totals, perFile, errorRows}`，**不存全量行**（内存恒定）；🔴 **整数分精度**（金额乘 100 转整数分求和，最后 `centsToAmountString` 除回，规避 `0.1+0.2` 浮点漂移）；🔴 **混币种全量合并求和**（所有币种 `对账金额` 不分币种合并，发生额/期末OP 为跨币种合计数 = 不区分币种的金额合计、非货币余额，已用户确认；表A `currency` 存涉及币种列表或 `MIXED`）；🔴 **整批拒绝**（出入方向非法值 / 一文件多月份混杂 / 非数字金额行 → 整批拒绝 + 错误报告，资金不容静默跳过；`errorRows` 加上限前 100 条 + 总数）；期初OP 必填、允许正负小数、空/非数字禁用计算
+  - **前端**（`renderer.js` / `renderer-dialogs.js` / `index.html`）：MODULES 注册第 6 项 + 面板隐藏控制 + DOM 缓存 5 项 + `vccOpCalcState` + `handleVccOpCalcImport/Run/ShowBalance`；3 个 dialog 工厂——F1 月份+条数确认框 / F2 计算框（只读发生额出/入/总额 + 输入期初OP，点「计算」= 调 `save` 后端整数分算 endOp + 原子落库后展示并标「已保存」，**前端绝不自行计算 `beginOp+totalAmount`** 避免浮点 + 口径分叉）/ F3 显示余额框（按月单选下拉查月末 OP）；主面板沿中线镜像布局（`direction:rtl` 翻列位置 + 状态框 `ltr` 回正）；新增 4 处 preview 入口（`vcc-op-calc-panel-initial` / `-panel-result` / `-compute` / `-show-balance`）
+  - **后端 gap 修复**：`settings-repository.js` 的 `ALL_MODULE_IDS` 白名单补 `'vcc-op-calc'`（避免重蹈 v2.1.2/v2.1.3 漏注册致 `setCurrentModule`/`setEnabledModules` 抛 `Invalid module id`、模块无法启用/持久化/被🔄收纳弹窗勾选的历史 bug）；`DEFAULT_ENABLED_MODULES` 不改（vcc-op-calc 默认隐藏，用户经🔄收纳弹窗启用）
+  - 🔴 **资金红线护栏**：发生额求和 + 期末OP = 期初OP + 发生额属资金计算——整数分精度策略 + 出入方向识别 + 空/非数字行整批拒绝 + session 单测覆盖正/负/小数/空值（17 case）+ **真实大文件核销发生额 2,223,798.77（78.7 万行 / 9 混币种 / 0 非法方向 / 0 空金额）**；reader 只换"喂数据的方式"，session 聚合口径完全未动、核销值不变
+
+### 重大变更
+
+- **需求5 C3「提取ReconId-From 网关」场景 extra fee 额外费用匹配**（🔴资金红线 · 业务规则 · UI · 引擎 / `category=gateway-recon-join` / spec `spec-alpha-req5-extrafee.md`）：在 C3 场景新增/修改弹窗左下加勾选框「网关对账单金额与银行对账单不一致」，勾选后出现「网关对账单金额 +」`[输入框]`「= 银行对账单金额」；匹配时网关订单金额 + extra fee 后再与银行对账单金额比对——
+  - **config schema**（持久化在 `scenarios.config_json`，整对象 JSON）：C3 config 新增嵌套字段 `extraFee:{enabled:false, amount:0}`（与 v2.1.8 N2 `assign:{mode,customValue}` 成组语义一致）；`createDefaultScenarioConfig('gateway-recon-join')` 追加该默认值
+  - **🔴 引擎改点（方案 A1）**（`c3-gateway-recon-join.js` `gwMatchesBank`）：fee **仅作用于"银行侧字段 = 发生额绝对值"(`BANK_STATEMENT_VIRTUAL_AMOUNT_ABS`) 的那个字段对**（零歧义、与「= 银行对账单金额」字面一致；避免方案 A3 在多金额字段对场景把 fee 加到所有 numeric 对致错配的资金风险）；该字段对上网关值 `+fee` 后比银行值，其余 reconField 比对完全不变；`runC3Scenario` 主循环外算一次 `fee = (config.extraFee && config.extraFee.enabled) ? parseNumber(config.extraFee.amount) : null`（缺失/未勾 → null）
+  - **🔴 允许正负 + 允许小数 + 归一到分**：fee 直接代数相加 `gw + fee = bank`（用户填正 = 网关比银行少收需加、负 = 多收需减），允许货币小数；加法处 `Math.round((gwNum + fee) * 100) / 100` 归一到分，规避 `0.1+0.2 !== 0.3` 经典浮点坑；4 字符输入框仅视觉宽度（CSS ≈ 4ch），不硬 maxlength
+  - **🔴 undefined→null 双防御（byte-for-byte 零回归关键）**：`gwMatchesBank` 加第 4 参数 fee 后，旧调用方不传 → `fee===undefined`；若判定写成 `if(fee!==null)` 则 `undefined!==null` 为 true → 旧场景误入 fee 分支 → `gwNum + undefined = NaN` → 大面积金额匹配回归。防御 = `runC3Scenario` 内统一算 fee（缺失→null）只在内部调用并传入 + 引擎入口 `fee = Number.isFinite(fee) ? fee : null` 兜底；全仓唯一真实调用点是引擎内部，导出符号无外部调用方
+  - **旧场景兼容（惰性兜底，无 migration）**：引擎读 `config.extraFee?.enabled` 缺失即 false → 行为退化为旧逻辑天然兼容；弹窗加载 `if(!config.extraFee) config.extraFee={enabled:false,amount:0}`（与对 `assign`/`conditions` 兜底同款）；旧 bundle 无 `extraFee` → import 后引擎兜底为关；extra fee 不改任何既有取值路径只在 `enabled` 时额外加数，故无需 migration
+  - **校验**：勾选后 amount 必填 + 必须数字（空/非数字报错）；未勾选不校验 amount；UI checkbox `change` toggle formula `span` 显隐（取消勾选不清空 amount，保留用户输入）；view 模式 checkbox + input 均 `disabled`；新增 CSS class `.scenario-config-row-extrafee` / `.scenario-config-input-fee`
+  - **🔴 绝对不变量**：fee 未勾选 / fee=0 时 C3 匹配行为与 v2.1.11 **byte-for-byte 一致**（DS1 零回归断言）；1v1 严格消费红线（`usedGwRowIdx`）完全不动——extra fee 只改"是否匹配"判定，不改"匹配后如何消费 gw"；`parseNumber` 精确相等语义不变
+  - 🔴 **资金红线护栏**：fee 算错/方向反/默认值漂移 → 错配 → 银行账单写错 reconId（"幽灵核销"）；护栏 = 默认关 byte-for-byte 一致 + 单测 DS1-DS9（含零回归 / 加 fee 命中与不命中 / fee=0 显式勾选 / 负 fee / 小数 fee / 多金额字段对验证 A1 / 1v1 消费不变 / 浮点边界）+ smoke C3 段 extra fee 端到端 + **真实网关+银行账单（金额含手续费差）端到端人工核对核销**（合并前硬要求，不能只靠单测）
+
+- **SR-log-1 删 `app_activity_log.txt` 旧双写**（🔴破坏性变更 · 删数据红线护栏 / spec `spec-alpha-req6-cleanup.md` §2）：`logger.js` `appendActivityRecord` 移除旧 txt 写入（`ensureActivityLogFile` → `readFileSync` → 拼 `[date]/[time][level]` → `appendFileSync`），仅保留新结构 `appendStructuredLog`（`logs/{YYYY-MM}/{MM-DD}/{level}.log` JSON Lines）；返回值改新 jsonl 路径；`initializeActivityLog` 不再建/写 `app_activity_log.txt`、启动日志改走 `appendStructuredLog`；**🔴 停止新写入但保留历史文件不删**（老用户/脚本可能直接读旧 txt，删除 = 删数据事故，护栏 = 只停写不删，历史 v2.1.11 及更早记录可继续查阅）；`logger.js` storageRoot 同源资金红线注释逻辑保留
+
+### 修复
+
+- **需求6 资金对账不平跳过提示加数据侧候选行预检**（spec `spec-alpha-req6-cleanup.md` §1）：银行对账单模块两处 C3 相关提示弹窗（导入成功后 `maybePromptGatewayReconImport` / 点开始运行时 `shouldPromptGatewayReconAtRun`）现状只判断"是否启用 C3(`gateway-recon-join`) 场景"（场景维度），**即使启用了 C3 但本次导入的银行对账单数据里没有任何能命中该类场景的行时仍会弹「将跳过」提示 / 要求导入资金对账不平结果表**；修复 = 在现有"启用判断"之后追加"数据侧候选行存在性"判断——仅当（启用 C3 场景 **AND** 本次导入数据存在 ≥1 条能命中任一启用 `gateway-recon-join` 场景 `conditions` 的行）时才弹；新增只读 helper `countC3BankCandidates`（与 C3 引擎 `c3-gateway-recon-join.js` 的 conditions 匹配语义完全一致，避免预检与实际运行不符）+ 1 个 IPC（main 进程查当前 `bankStatement` session 的 C3 候选行数，避免把全部行传 renderer）+ renderer 两个 gate 双 gate；⚠️ 边界：预检"无候选行"≠"不运行 C3"，只是"不提示跳过"，实际运行仍按引擎逻辑跑（无候选行自然 0 命中），不碰资金红线、不改 C3 匹配结果
+
+### 测试
+
+- **I6 bundle 旧结构 C2 场景端到端防御测试**（spec `spec-alpha-req6-cleanup.md` §3）：补 `tests/unit/main-process/scenarios-bundle-ipc.test.js`——构造旧结构 bundle（v2/v3，含 C2 场景 `category` + `config.billTypes≥1` + `conditions` + `reconFields`）→ 导入/升级 → 断言升级后 C2 config 字段完整（billTypes/conditions/reconFields/conditionsLogic 不丢、默认值正确）+ 能正常被 `runC2Scenario` 消费（关联 v2.1.11 PR #55 C2 字段赋值增强）
+- **I7 important-variables 升格 C2 schema**（spec `spec-alpha-req6-cleanup.md` §4）：`rules/important-variables.md` 新增 `config.billTypes`（C2 场景命中筛选数组，≥1，归 Risk-sensitive ⚠️资金红线，与 `runC2Scenario` 同层）+ `config.conditions`（C2 条件数组）独立条目并与已登记的 `conditionsLogic` 交叉引用——此前 `billTypes` 仅出现在 `runC2Scenario` 描述行内、`check:vars` 符号匹配扫不到；重跑 `npm run scan:vars` 刷新 `docs/analysis/var-reference-stats.{md,json}`
+- `npm run test:unit`：**1390 case 全绿**（69 文件 / 327 suites；新增 vcc-op-calc session 资金红线 17 case + reader 流式 / c3 extra fee DS1-DS9 + 零回归 byte-for-byte / settings-repository ALL_MODULE_IDS 8→9 / bundle 旧结构 C2 防御等用例组）
+- `npm run test:integration`：**952 断言全绿**（16 脚本；scenario IPC 契约 + vcc-op-calc 导入→计算→落库→查询）
+- `npm run smoke`：0 regression（C3 extra fee 端到端 + 零回归断言；VCC 导入→计算→落库→查询）
+
+### α/β 收口
+
+- **v2.1.12 α（本版）**：需求1 VCC 模块 + 需求5 extra fee + 需求6 提示预检 + 收尾批（SR-log-1 / I6 / I7）如上
+- **不做边界（α）**：VCC 模块不导出 Excel（仅"显示余额"）、不跨月汇总；extra fee 默认范围仅 C3 不含 C4（C4 匹配渠道账单非银行账单，与「= 银行对账单金额」语义不符）；biz-op-recon 第 5 模块流式改造（百万行需保留全量行做 join、回归风险高）独立子任务评估、本版不含
+- **资金红线复核（CLAUDE.md 规则 7）**：需求1（发生额求和 + 期末OP 计算）+ 需求5（C3 extra fee 改网关核销金额匹配）均为🔴资金红线，合并前已有"真实数据端到端 + 人工核对"证据；SR-log-1 停旧 activity log 写入为🔴破坏性变更（护栏 = 保留历史文件不删）
+
 ## 2.1.11 - 2026-05-29
 
 v2.1.10 之后 1 轮迭代（β 范围），**3 个用户追加需求**（性能主线 A3-multi-worker / F5-cont 另起 spec、不在本版）：T1（单元测试运行日志 — 终端 `N/N PASS` 汇总 + 落盘带时间戳日志）+ T2（**新功能** pending 月度移除核对 — 导入「移除归档 Pending 账单」入库 + 对账后自动用对账规则把移除数据与 `missing` 行匹配 + 导出 2 张新 sheet）+ T3（C2「银行对账单字段赋值」配置页 3 项增强 — 账单类型多筛选条件 AND / FundType 严格下拉 / 对账字段可空）。⚠️ **1 个资金/对账红线护栏**（T2 missing↔移除匹配复用对账规则 matchFields + compareFields 语义 + 数值字段归一化）+ **1 个向后兼容迁移**（T3 C2 单条件→多条件惰性迁移）。质量收尾：3 路 adversarial self-review + SR-FIX round 1。
