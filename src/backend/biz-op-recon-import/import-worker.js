@@ -97,6 +97,7 @@ async function runBizOpImport(db, { date, filePath, maxRowErrors }) {
   let dataRowCount = 0;
   let insertedCount = 0;
   let firstEmptyRowIndex = 0;
+  let firstBuEmpty = false;      // 首行 bu_name 空（与旧同步语义对齐：只此一条错误，不写报告，不校验后续行）
   const errorRows = [];
   let rowErrorTotal = 0;
 
@@ -108,6 +109,7 @@ async function runBizOpImport(db, { date, filePath, maxRowErrors }) {
     await streamBizOpFile(filePath, {
       onDataRow: (row) => {
         dataRowCount += 1;
+        if (firstBuEmpty) return;   // 首行已判空：跳过后续行（旧实现首行空直接 return rejected，不校验后续）
 
         // 第一个数据行：定 firstBu + 事务内清旧数据（资金红线 ②）
         if (firstBu === null) {
@@ -115,12 +117,11 @@ async function runBizOpImport(db, { date, filePath, maxRowErrors }) {
           if (!firstBu) {
             // 首行 bu_name 空 → 整批拒绝。与旧同步语义对齐：errorReportPath=null（不写报告 xlsx），
             //   errorRows 单条无 rawRow（旧实现 { rowIndex: rows[0]._rowIndex, reason: '业务方为空' }）。
-            //   标记 firstBuEmpty 后抛 __abort 提前结束流（旧实现首行空直接 return rejected，不校验后续行）。
+            //   不抛异常（回调里 throw 会被流式 reader 的 wrapReadError 包成 FileValidationError，
+            //   误判成 header-error）——改设标志位，流结束后在外层统一处理。
+            firstBuEmpty = true;
             firstEmptyRowIndex = row._rowIndex;
-            const abort = new Error('首行业务方为空');
-            abort.__abort = true;
-            abort.__firstBuEmpty = true;
-            throw abort;
+            return;
           }
           buNormalized = normalizeBu(firstBu);
           // 资金红线 ② v2.1.3 PR #45 round 4 P1 fix：同清 (date,BU) + (D+1,BU)
@@ -156,23 +157,24 @@ async function runBizOpImport(db, { date, filePath, maxRowErrors }) {
       onProgress: (dataRows) => emit({ type: 'progress', dataRows })
     });
   } catch (err) {
-    if (err && err.__abort && err.__firstBuEmpty) {
-      // 首行 bu_name 空：整批拒绝（不入任何行）；report=false（旧语义 errorReportPath=null）
-      db.exec('ROLLBACK');
-      emit({
-        type: 'rejected',
-        report: false,
-        errorRows: [{ rowIndex: firstEmptyRowIndex, reason: '业务方为空' }],
-        rowErrorTotal: 1,
-        truncated: false,
-        firstBu: ''
-      });
-      process.exit(1);
-    }
-    // 表头 / 读取失败 → header-error（FileValidationError 带 code）
+    // 表头 / 读取失败 → header-error（FileValidationError 带 code）；其他 → fatal
     db.exec('ROLLBACK');
     emitHeaderOrFatal(err);
     return; // emitHeaderOrFatal 已 process.exit
+  }
+
+  // 首行 bu_name 空：整批拒绝（不入任何行）；report=false（旧语义 errorReportPath=null）
+  if (firstBuEmpty) {
+    db.exec('ROLLBACK');
+    emit({
+      type: 'rejected',
+      report: false,
+      errorRows: [{ rowIndex: firstEmptyRowIndex, reason: '业务方为空' }],
+      rowErrorTotal: 1,
+      truncated: false,
+      firstBu: ''
+    });
+    process.exit(1);
   }
 
   // rows.length===0：无有效数据行 → 整批拒绝（与旧同步语义一致）；report=false（errorReportPath=null）

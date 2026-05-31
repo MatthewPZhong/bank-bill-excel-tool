@@ -1,0 +1,435 @@
+'use strict';
+// v2.1.12-beta β.2-T2 contract test（🔴 资金/数据完整性红线）
+// 锁：bizOpRecon 导入 worker 路径（import-worker.js + session.runBizOpImportViaWorker/runFlowImportViaWorker）
+//   与旧同步路径（runBizOpImportAsync/runFlowImportAsync）在同一 fixture 上 **同输出**。
+//
+// 覆盖（语义零改变断言）：
+//   ① 业务OP 成功：worker vs 同步 入库行数 / firstBu / 落库行内容逐行一致 + DB 行数一致
+//   ② 业务OP 校验失败整批拒绝：errorRows(rowIndex+reason) 一致 + DB 0 行 + report=写报告(路径非空)
+//   ③ 业务OP 首行 bu_name 空：rejected + errorReportPath=null（不写报告）+ DB 0 行
+//   ④ 业务OP 空文件（仅表头）：rejected '文件无有效数据行' + errorReportPath=null
+//   ⑤ 🔴 (date,BU)+D+1 替换原子事务：worker 重导 D 后 D+1/同BU 旧 run 被清（资金红线 Q）
+//   ⑥ 🔴 bu_name 改写：worker 落库后所有行 bu_name=firstBu(trim 保大小写)
+//   ⑦ 表头不匹配：worker status='error' 同步 throw 同 errorCode（FileValidationError）
+//   ⑧ 流水成功：worker vs 同步 入库行数一致 + DB 行数一致
+//   ⑨ 流水校验失败整批拒绝：errorRows 一致 + DB 0 行
+//   ⑩ 🔴 流水重导清"该 date 跨所有 BU"旧 runs（资金红线 P）
+//
+// worker 路径在测试环境（非 Electron）走 spawnImportWorker 的 spawn(process.execPath) 分支。
+
+const { test } = require('node:test');
+const assert = require('node:assert');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const ExcelJS = require('exceljs');
+
+const { AppDatabase } = require('../../../../src/backend/database');
+const session = require('../../../../src/main-process/biz-op-recon-session');
+const writer = require('../../../../src/main-process/biz-op-recon-writer');
+const importsRepo = require('../../../../src/backend/biz-op-recon-db/imports-repository');
+const flowRepo = require('../../../../src/backend/biz-op-recon-db/flow-imports-repository');
+const runRepo = require('../../../../src/backend/biz-op-recon-db/run-repository');
+const { BIZ_OP_HEADERS, FLOW_HEADERS } = require('../../../../src/backend/biz-op-recon-db/columns');
+
+const tmpDirs = [];
+test.after(() => {
+  for (const d of tmpDirs) {
+    try { fs.rmSync(d, { recursive: true, force: true }); } catch (_e) { /* ignore */ }
+  }
+});
+
+function mkTmpDir(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tmpDirs.push(dir);
+  return dir;
+}
+
+// 新建独立主 DB（worker 子进程会 new DatabaseSync(dbPath) 打开同库 WAL 并发）
+function freshDb() {
+  const dir = mkTmpDir('bizop-worker-db-');
+  const dbPath = path.join(dir, 'tool-data.sqlite');
+  const appDb = new AppDatabase(dbPath);
+  appDb.init();
+  return { appDb, db: appDb.db, dbPath, dir };
+}
+
+// 业务OP 行（22 列；列序严格对齐 BIZ_OP_HEADERS）
+// opts: { begin, amount, end, currency, billDate }；默认满足双重校验（end=begin+amount, in/out 自动）
+function bizOpRowArray(bu, accountNo, opts = {}) {
+  const begin = opts.begin == null ? 0 : opts.begin;
+  const amount = opts.amount == null ? 0 : opts.amount;
+  const amountIn = opts.amountIn == null ? Math.max(amount, 0) : opts.amountIn;
+  const amountOut = opts.amountOut == null ? Math.max(-amount, 0) : opts.amountOut;
+  const end = opts.end == null ? (begin + amount) : opts.end;
+  // 顺序：Billdate,业务方,客户编号,主体,账户号,账户类型,币种,期初,发生额,入,出,期末,期末可用,期末冻结,
+  //   最近更新,通道,ppCardId,银行卡号,扩展信息,账户状态,BizId,清结算创建,清结算更新
+  return [
+    opts.billDate || '', bu, '', '', accountNo, '', opts.currency || 'CNY',
+    String(begin), String(amount), String(amountIn), String(amountOut), String(end),
+    '', '', '', '', '', '', '', '', '', '', ''
+  ];
+}
+
+// 流水行（28 列；列序严格对齐 FLOW_HEADERS）
+// 关键列：业务部门(7)=bu_dept, 出入方向(9)=direction, 账户编号(12)=account_no, 对账金额(14)=recon_amount
+function flowRowArray(bu, accountNo, direction, amount, opts = {}) {
+  const r = new Array(FLOW_HEADERS.length).fill('');
+  r[1] = opts.billDate || '';   // 账单日期
+  r[6] = bu;                    // 业务部门
+  r[8] = direction;             // 出入方向
+  r[11] = accountNo;            // 账户编号
+  r[13] = String(amount);       // 对账金额
+  r[14] = opts.currency || 'CNY';
+  return r;
+}
+
+async function writeXlsx(headerArr, dataRows) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Sheet1');
+  ws.addRow(headerArr.slice());
+  for (const row of dataRows) ws.addRow(row);
+  const dir = mkTmpDir('bizop-worker-fx-');
+  const fp = path.join(dir, 'fixture.xlsx');
+  await wb.xlsx.writeFile(fp);
+  return fp;
+}
+
+// 取 imports 表全部行（按 row_index 升序），仅保留可比对的列
+function dumpImports(db, date, bu) {
+  return importsRepo.getRowsByDateBu(db, date, bu).map((r) => ({
+    row_index: r.row_index, bu_name: r.bu_name, account_no: r.account_no,
+    begin_balance: r.begin_balance, amount: r.amount, end_balance: r.end_balance
+  }));
+}
+function dumpFlow(db, date) {
+  return flowRepo.getRowsByDate(db, date).map((r) => ({
+    row_index: r.row_index, account_no: r.account_no, direction: r.direction, recon_amount: r.recon_amount
+  }));
+}
+
+// ---------------- ① 业务OP 成功：worker vs 同步同输出 ----------------
+test('bizOp 成功导入：worker 路径 vs 旧同步路径 入库行数/firstBu/落库内容一致', async () => {
+  const date = '2026-06-10';
+  const rows = [
+    bizOpRowArray('BU-A', 'ACC001', { begin: 100, amount: 50, end: 150 }),
+    bizOpRowArray('BU-A', 'ACC002', { begin: 0, amount: -30, end: -30 }),
+    bizOpRowArray('BU-A', 'ACC003', { begin: 200, amount: 0, end: 200 })
+  ];
+  const fp = await writeXlsx(BIZ_OP_HEADERS, rows);
+  const { readBizOpFile } = require('../../../../src/backend/biz-op-recon-import/reader');
+
+  // 同步路径
+  const sync = freshDb();
+  const errDirSync = path.join(sync.dir, 'err');
+  const syncRes = await session.runBizOpImportAsync(sync.db, {
+    date, filePath: fp, readBizOpFile,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: errDirSync
+  });
+  const syncRows = dumpImports(sync.db, date, 'BU-A');
+  sync.db.close();
+
+  // worker 路径
+  const wk = freshDb();
+  const errDirWk = path.join(wk.dir, 'err');
+  const wkRes = await session.runBizOpImportViaWorker(wk.db, {
+    date, filePath: fp, dbPath: wk.dbPath,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: errDirWk
+  });
+  const wkRows = dumpImports(wk.db, date, 'BU-A');
+  wk.db.close();
+
+  assert.equal(wkRes.status, 'success', 'worker status=success');
+  assert.equal(syncRes.status, 'success', 'sync status=success');
+  assert.equal(wkRes.validCount, syncRes.validCount, 'validCount 一致');
+  assert.equal(wkRes.validCount, 3, 'validCount=3');
+  assert.equal(wkRes.buName, syncRes.buName, 'buName 一致');
+  assert.deepEqual(wkRows, syncRows, '落库行内容逐行一致');
+});
+
+// ---------------- ⑥ bu_name 改写（worker 落库 bu_name=firstBu trim 保大小写） ----------------
+test('bizOp worker 落库前 bu_name 改写为 firstBu（trim 保大小写，与同步一致）', async () => {
+  const date = '2026-06-11';
+  // 首行 ' BU-X '（带空格），后续 'bu-x'/'BU-X'（normalizeBu 视为同 BU）
+  const rows = [
+    bizOpRowArray(' BU-X ', 'A1', { begin: 0, amount: 10, end: 10 }),
+    bizOpRowArray('bu-x', 'A2', { begin: 0, amount: 20, end: 20 }),
+    bizOpRowArray('BU-X', 'A3', { begin: 0, amount: 30, end: 30 })
+  ];
+  const fp = await writeXlsx(BIZ_OP_HEADERS, rows);
+
+  const wk = freshDb();
+  const res = await session.runBizOpImportViaWorker(wk.db, {
+    date, filePath: fp, dbPath: wk.dbPath,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(wk.dir, 'err')
+  });
+  assert.equal(res.status, 'success');
+  assert.equal(res.buName, 'BU-X', 'firstBu trim 后 = BU-X（保大小写）');
+  // 所有行 bu_name 都被改写为 'BU-X'
+  const stored = importsRepo.getRowsByDateBu(wk.db, date, 'BU-X');
+  assert.equal(stored.length, 3);
+  for (const r of stored) assert.equal(r.bu_name, 'BU-X', '每行 bu_name=BU-X');
+  wk.db.close();
+});
+
+// ---------------- ② 业务OP 校验失败整批拒绝 ----------------
+test('bizOp 校验失败：worker vs 同步 rejected + errorRows 一致 + DB 0 行 + 写报告', async () => {
+  const date = '2026-06-12';
+  // 行2 双重校验失败（期末 != 期初+发生额）
+  const rows = [
+    bizOpRowArray('BU-A', 'ACC001', { begin: 100, amount: 50, end: 150 }),
+    bizOpRowArray('BU-A', 'ACC002', { begin: 0, amount: 50, end: 999 }) // end 错
+  ];
+  const fp = await writeXlsx(BIZ_OP_HEADERS, rows);
+  const { readBizOpFile } = require('../../../../src/backend/biz-op-recon-import/reader');
+
+  const sync = freshDb();
+  const syncRes = await session.runBizOpImportAsync(sync.db, {
+    date, filePath: fp, readBizOpFile,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(sync.dir, 'err')
+  });
+  const syncDbRows = importsRepo.getRowsByDateBu(sync.db, date, 'BU-A').length;
+  sync.db.close();
+
+  const wk = freshDb();
+  const wkRes = await session.runBizOpImportViaWorker(wk.db, {
+    date, filePath: fp, dbPath: wk.dbPath,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(wk.dir, 'err')
+  });
+  const wkDbRows = importsRepo.getRowsByDateBu(wk.db, date, 'BU-A').length;
+  wk.db.close();
+
+  assert.equal(wkRes.status, 'rejected', 'worker rejected');
+  assert.equal(syncRes.status, 'rejected', 'sync rejected');
+  assert.deepEqual(
+    wkRes.errorRows, syncRes.errorRows,
+    'errorRows(rowIndex+reason) 一致'
+  );
+  assert.equal(wkDbRows, 0, 'worker 整批拒绝 → DB 0 行');
+  assert.equal(syncDbRows, 0, 'sync 整批拒绝 → DB 0 行');
+  assert.ok(wkRes.errorReportPath, 'worker 写了失败报告');
+  assert.ok(fs.existsSync(wkRes.errorReportPath), 'worker 报告文件存在');
+});
+
+// ---------------- ③ 业务OP 首行 bu_name 空 → 不写报告 ----------------
+test('bizOp 首行业务方空：worker vs 同步 rejected + errorReportPath=null + DB 0 行', async () => {
+  const date = '2026-06-13';
+  const rows = [
+    bizOpRowArray('', 'ACC001', { begin: 0, amount: 10, end: 10 }),
+    bizOpRowArray('', 'ACC002', { begin: 0, amount: 20, end: 20 })
+  ];
+  const fp = await writeXlsx(BIZ_OP_HEADERS, rows);
+  const { readBizOpFile } = require('../../../../src/backend/biz-op-recon-import/reader');
+
+  const sync = freshDb();
+  const syncRes = await session.runBizOpImportAsync(sync.db, {
+    date, filePath: fp, readBizOpFile,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(sync.dir, 'err')
+  });
+  sync.db.close();
+
+  const wk = freshDb();
+  const wkRes = await session.runBizOpImportViaWorker(wk.db, {
+    date, filePath: fp, dbPath: wk.dbPath,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(wk.dir, 'err')
+  });
+  const wkDbRows = importsRepo.listImportedDateBuPairs(wk.db).length;
+  wk.db.close();
+
+  assert.equal(wkRes.status, 'rejected', 'worker rejected');
+  assert.equal(syncRes.status, 'rejected', 'sync rejected');
+  assert.equal(wkRes.errorReportPath, null, 'worker 首行空 → errorReportPath=null');
+  assert.equal(syncRes.errorReportPath, null, 'sync 首行空 → errorReportPath=null');
+  assert.equal(wkRes.errorRows[0].reason, '业务方为空');
+  assert.equal(syncRes.errorRows[0].reason, '业务方为空');
+  assert.equal(wkDbRows, 0, 'DB 0 行');
+});
+
+// ---------------- ④ 业务OP 空文件（仅表头） ----------------
+test('bizOp 空文件（仅表头）：worker rejected 文件无有效数据行 + errorReportPath=null', async () => {
+  const date = '2026-06-14';
+  const fp = await writeXlsx(BIZ_OP_HEADERS, []);
+  const wk = freshDb();
+  const wkRes = await session.runBizOpImportViaWorker(wk.db, {
+    date, filePath: fp, dbPath: wk.dbPath,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(wk.dir, 'err')
+  });
+  wk.db.close();
+  assert.equal(wkRes.status, 'rejected');
+  assert.equal(wkRes.errorReportPath, null);
+  assert.equal(wkRes.errorRows[0].reason, '文件无有效数据行');
+});
+
+// ---------------- ⑤ 🔴 (date,BU)+D+1 替换原子事务（资金红线 Q）----------------
+test('🔴 bizOp worker 重导 D 后清 D+1/同BU 旧 run（D+1 旧 diff 基于旧 T-2 = 资金事故防线）', async () => {
+  const dateD = '2026-06-20';
+  const dateD1 = '2026-06-21';
+  const wk = freshDb();
+  const common = {
+    dbPath: wk.dbPath,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(wk.dir, 'err')
+  };
+
+  // 先导入 D 与 D+1（同 BU），各成功
+  const fpD = await writeXlsx(BIZ_OP_HEADERS, [bizOpRowArray('BU-A', 'ACC1', { begin: 0, amount: 10, end: 10 })]);
+  const fpD1 = await writeXlsx(BIZ_OP_HEADERS, [bizOpRowArray('BU-A', 'ACC1', { begin: 10, amount: 5, end: 15 })]);
+  await session.runBizOpImportViaWorker(wk.db, { ...common, date: dateD, filePath: fpD });
+  await session.runBizOpImportViaWorker(wk.db, { ...common, date: dateD1, filePath: fpD1 });
+
+  // 手动给 D+1/BU-A 插一条 run（模拟用户已对账 D+1，run 基于旧 D 的 T-2）
+  wk.db.exec('BEGIN');
+  const oldRunId = runRepo.insertRun(wk.db, { date: dateD1, buName: 'BU-A', status: 'success', stats: {} });
+  wk.db.exec('COMMIT');
+  assert.ok(runRepo.listRunsByDateBu(wk.db, dateD1, 'BU-A').length === 1, '预置：D+1 有 1 个 run');
+
+  // 重导 D（同 BU）→ 必须同清 D+1/BU-A 的旧 run
+  const fpD2 = await writeXlsx(BIZ_OP_HEADERS, [bizOpRowArray('BU-A', 'ACC1', { begin: 0, amount: 99, end: 99 })]);
+  const res = await session.runBizOpImportViaWorker(wk.db, { ...common, date: dateD, filePath: fpD2 });
+  assert.equal(res.status, 'success');
+
+  const d1RunsAfter = runRepo.listRunsByDateBu(wk.db, dateD1, 'BU-A');
+  assert.equal(d1RunsAfter.length, 0, '🔴 重导 D 后 D+1/BU-A 旧 run 被清（防 D+1 旧 diff 基于旧 T-2）');
+  void oldRunId;
+  wk.db.close();
+});
+
+// ---------------- ⑦ 表头不匹配 ----------------
+test('bizOp 表头不匹配：worker status=error（同步抛同 errorCode FileValidationError）', async () => {
+  const date = '2026-06-15';
+  const badHeader = BIZ_OP_HEADERS.slice(0, 22); // 少一列
+  const fp = await writeXlsx(badHeader, [new Array(22).fill('x')]);
+  const { readBizOpFile } = require('../../../../src/backend/biz-op-recon-import/reader');
+
+  // 同步：reader throw FileValidationError（在 runBizOpImportAsync 内 readBizOpFile() 抛出）
+  let syncErr = null;
+  try {
+    await session.runBizOpImportAsync(freshDb().db, {
+      date, filePath: fp, readBizOpFile,
+      writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+      errorReportsDir: mkTmpDir('e-')
+    });
+  } catch (e) { syncErr = e; }
+  assert.ok(syncErr && syncErr.name === 'FileValidationError', '同步路径抛 FileValidationError');
+
+  const wk = freshDb();
+  const wkRes = await session.runBizOpImportViaWorker(wk.db, {
+    date, filePath: fp, dbPath: wk.dbPath,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(wk.dir, 'err')
+  });
+  wk.db.close();
+  assert.equal(wkRes.status, 'error', 'worker 表头不匹配 → status=error');
+  assert.ok(wkRes.message && wkRes.message.length > 0, 'worker 带错误信息');
+});
+
+// ---------------- ⑧ 流水成功 ----------------
+test('flow 成功导入：worker vs 同步 入库行数一致 + 落库内容一致', async () => {
+  const date = '2026-06-16';
+  const rows = [
+    flowRowArray('BU-A', 'ACC1', '入', 100),
+    flowRowArray('BU-A', 'ACC1', '出', 30),
+    flowRowArray('BU-B', 'ACC2', '入', 50)
+  ];
+  const fp = await writeXlsx(FLOW_HEADERS, rows);
+  const { readFlowFile } = require('../../../../src/backend/biz-op-recon-import/reader');
+
+  const sync = freshDb();
+  const syncRes = await session.runFlowImportAsync(sync.db, {
+    date, filePath: fp, readFlowFile,
+    writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
+    errorReportsDir: path.join(sync.dir, 'err')
+  });
+  const syncRows = dumpFlow(sync.db, date);
+  sync.db.close();
+
+  const wk = freshDb();
+  const wkRes = await session.runFlowImportViaWorker(wk.db, {
+    date, filePath: fp, dbPath: wk.dbPath,
+    writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
+    errorReportsDir: path.join(wk.dir, 'err')
+  });
+  const wkRows = dumpFlow(wk.db, date);
+  wk.db.close();
+
+  assert.equal(wkRes.status, 'success');
+  assert.equal(syncRes.status, 'success');
+  assert.equal(wkRes.totalCount, syncRes.totalCount, 'totalCount 一致');
+  assert.equal(wkRes.totalCount, 3);
+  assert.deepEqual(wkRows, syncRows, 'flow 落库内容逐行一致');
+});
+
+// ---------------- ⑨ 流水校验失败整批拒绝 ----------------
+test('flow 校验失败：worker vs 同步 rejected + errorRows 一致 + DB 0 行', async () => {
+  const date = '2026-06-17';
+  const rows = [
+    flowRowArray('BU-A', 'ACC1', '入', 100),
+    flowRowArray('BU-A', 'ACC2', '無效方向', 30) // 出入方向非法
+  ];
+  const fp = await writeXlsx(FLOW_HEADERS, rows);
+  const { readFlowFile } = require('../../../../src/backend/biz-op-recon-import/reader');
+
+  const sync = freshDb();
+  const syncRes = await session.runFlowImportAsync(sync.db, {
+    date, filePath: fp, readFlowFile,
+    writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
+    errorReportsDir: path.join(sync.dir, 'err')
+  });
+  const syncDbRows = flowRepo.getRowsByDate(sync.db, date).length;
+  sync.db.close();
+
+  const wk = freshDb();
+  const wkRes = await session.runFlowImportViaWorker(wk.db, {
+    date, filePath: fp, dbPath: wk.dbPath,
+    writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
+    errorReportsDir: path.join(wk.dir, 'err')
+  });
+  const wkDbRows = flowRepo.getRowsByDate(wk.db, date).length;
+  wk.db.close();
+
+  assert.equal(wkRes.status, 'rejected');
+  assert.equal(syncRes.status, 'rejected');
+  assert.deepEqual(wkRes.errorRows, syncRes.errorRows, 'errorRows 一致');
+  assert.equal(wkDbRows, 0, 'worker 整批拒绝 → DB 0 行');
+  assert.equal(syncDbRows, 0, 'sync 整批拒绝 → DB 0 行');
+  assert.ok(wkRes.errorReportPath, 'worker 写了失败报告');
+});
+
+// ---------------- ⑩ 🔴 流水重导清"该 date 跨所有 BU"旧 runs（资金红线 P）----------------
+test('🔴 flow worker 重导清该 date 跨所有 BU 旧 runs（旧 run 基于旧流水 = 资金事故防线）', async () => {
+  const date = '2026-06-18';
+  const wk = freshDb();
+  const common = {
+    dbPath: wk.dbPath,
+    writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
+    errorReportsDir: path.join(wk.dir, 'err')
+  };
+
+  const fp1 = await writeXlsx(FLOW_HEADERS, [flowRowArray('BU-A', 'ACC1', '入', 100)]);
+  await session.runFlowImportViaWorker(wk.db, { ...common, date, filePath: fp1 });
+
+  // 预置：该 date 下 BU-A 和 BU-B 各一个 run（模拟已对账，基于旧流水）
+  wk.db.exec('BEGIN');
+  runRepo.insertRun(wk.db, { date, buName: 'BU-A', status: 'success', stats: {} });
+  runRepo.insertRun(wk.db, { date, buName: 'BU-B', status: 'success', stats: {} });
+  wk.db.exec('COMMIT');
+  assert.equal(runRepo.listRunsByDateBu(wk.db, date, 'BU-A').length, 1);
+  assert.equal(runRepo.listRunsByDateBu(wk.db, date, 'BU-B').length, 1);
+
+  // 重导流水（该 date）→ 必须清该 date 跨所有 BU 的旧 runs
+  const fp2 = await writeXlsx(FLOW_HEADERS, [flowRowArray('BU-A', 'ACC1', '入', 999)]);
+  const res = await session.runFlowImportViaWorker(wk.db, { ...common, date, filePath: fp2 });
+  assert.equal(res.status, 'success');
+
+  assert.equal(runRepo.listRunsByDateBu(wk.db, date, 'BU-A').length, 0, '🔴 BU-A 旧 run 被清');
+  assert.equal(runRepo.listRunsByDateBu(wk.db, date, 'BU-B').length, 0, '🔴 BU-B 旧 run 被清（跨所有 BU）');
+  wk.db.close();
+});
