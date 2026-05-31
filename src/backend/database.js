@@ -24,6 +24,8 @@ const {
   ensureAcquiringBillIdleCleanupMinutesSetting,
   // v2.1.10 A4 T18 / T19：chunked 分批 size settings + runs.chunk_progress 列
   ensureAcquiringBillChunkSizeSetting,
+  // v2.1.12 β.1-T3：多 worker write-splitting worker 数 settings seed（D29/D33）
+  ensureAcquiringBillWorkerCountSetting,
   ensureAcquiringBillCurrencyRunsChunkProgress,
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings
   ensureAcquiringBillCurrencyRawJsonRetentionSettings,
@@ -298,6 +300,9 @@ class AppDatabase {
     // v2.1.10 A4 T18：chunked 分批 size settings（seed default=100000）
     //   同 N1-settings 范式：依赖 app_settings 表 + INSERT OR IGNORE 不覆盖用户已改
     this.ensureAcquiringBillChunkSizeSetting();
+    // v2.1.12 β.1-T3：多 worker write-splitting worker 数 settings（seed default=2 — D33 OOM 兜底）
+    //   同 A4 T18 范式：依赖 app_settings 表 + INSERT OR IGNORE 不覆盖用户已改
+    this.ensureAcquiringBillWorkerCountSetting();
     // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings（seed default=7 天）
     //   同 N1-settings + A4 T18 范式：依赖 app_settings 表 + INSERT OR IGNORE 不覆盖用户已改
     //   spec §八.3：与 N4-cont-2 顺序无关；任意顺序都不冲突（settings 与 schema 互不影响）
@@ -525,6 +530,19 @@ class AppDatabase {
 
   setAcquiringBillChunkSize(size) {
     return settingsRepository.setAcquiringBillChunkSize(this.db, size);
+  }
+
+  // v2.1.12 β.1-T3：多 worker write-splitting worker 数 — seed default=2（D33）+ 暴露 get/set
+  ensureAcquiringBillWorkerCountSetting() {
+    return ensureAcquiringBillWorkerCountSetting(this.db);
+  }
+
+  getAcquiringBillWorkerCount() {
+    return settingsRepository.getAcquiringBillWorkerCount(this.db);
+  }
+
+  setAcquiringBillWorkerCount(count) {
+    return settingsRepository.setAcquiringBillWorkerCount(this.db, count);
   }
 
   // v2.1.10 A4 T19：runs.chunk_progress 列 migration — 启动期幂等 ADD COLUMN

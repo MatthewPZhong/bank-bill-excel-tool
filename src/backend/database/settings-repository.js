@@ -308,6 +308,44 @@ function setAcquiringBillChunkSize(db, size) {
   setSetting(db, ACQUIRING_BILL_CHUNK_SIZE_KEY, String(n));
 }
 
+// v2.1.12 β.1-T3：收单单据多 worker write-splitting 的 worker 数（M）
+//   spec §4 D29（默认上限 4，settings 可调）+ D33（OOM 防御默认 2，高级可调 4）
+//   - 默认 2：D33 OOM 兜底（低配机器 M worker × ~800MB peak）；高级用户可上调到 4（POC 甜点）
+//   - 范围 [1, 8]：1 = 等价单 worker（彻底关闭多 worker）；8 = 上限（POC：M=8 几乎不再涨且 RSS 高）
+//   - main.js handler 读此值后还会再做 D29 CPU clamp（os.cpus-2）+ D33 内存降级；本 getter 只管 settings 持久值
+//   - migration `ensureAcquiringBillWorkerCountSetting` 启动期 seed 默认 2；本仓暴露 get/set
+//   - getter 范围外值 → 回退默认 2（资金红线兜底；不能让非法值 0/-1 让多 worker 路径崩或 OOM）
+//   - UI 暂不暴露（T-b1-4 评估 settings UI）；高级用户 sqlite3 直改 + 重启
+const ACQUIRING_BILL_WORKER_COUNT_KEY = 'acquiring_bill_worker_count';
+const ACQUIRING_BILL_WORKER_COUNT_DEFAULT = 2;
+const ACQUIRING_BILL_WORKER_COUNT_MIN = 1;
+const ACQUIRING_BILL_WORKER_COUNT_MAX = 8;
+
+function getAcquiringBillWorkerCount(db) {
+  const raw = getSetting(db, ACQUIRING_BILL_WORKER_COUNT_KEY);
+  if (raw == null || raw === '') return ACQUIRING_BILL_WORKER_COUNT_DEFAULT;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return ACQUIRING_BILL_WORKER_COUNT_DEFAULT;
+  // 范围外（含外部直接改 DB 写入非法值，如 0 / -1 / 99 / 'abc'）→ 不报错，回退默认（资金红线兜底）
+  if (n < ACQUIRING_BILL_WORKER_COUNT_MIN || n > ACQUIRING_BILL_WORKER_COUNT_MAX) {
+    return ACQUIRING_BILL_WORKER_COUNT_DEFAULT;
+  }
+  return n;
+}
+
+function setAcquiringBillWorkerCount(db, count) {
+  const n = Number(count);
+  if (!Number.isInteger(n)) {
+    throw new Error(`acquiring_bill_worker_count 必须是整数，收到：${JSON.stringify(count)}`);
+  }
+  if (n < ACQUIRING_BILL_WORKER_COUNT_MIN || n > ACQUIRING_BILL_WORKER_COUNT_MAX) {
+    throw new Error(
+      `acquiring_bill_worker_count 必须在 ${ACQUIRING_BILL_WORKER_COUNT_MIN}-${ACQUIRING_BILL_WORKER_COUNT_MAX} 范围内，收到：${n}`
+    );
+  }
+  setSetting(db, ACQUIRING_BILL_WORKER_COUNT_KEY, String(n));
+}
+
 // v2.1.10 N4-cont-1 T22 (Phase 4)：收单单据 raw_json idle 自动清理保留窗口（默认 7 天）
 //   spec §4.1.2 单键 + 范围 [1, 30] 天 + 范围外回退 7
 //   - 仅清「对账成功」（不在 acquiring_bill_currency_diff_rows 中）且 imported_at < N 天前的 bill_imports.raw_json
@@ -428,6 +466,13 @@ module.exports = {
   ACQUIRING_BILL_CHUNK_SIZE_DEFAULT,
   ACQUIRING_BILL_CHUNK_SIZE_MIN,
   ACQUIRING_BILL_CHUNK_SIZE_MAX,
+  // v2.1.12 β.1-T3：多 worker write-splitting worker 数（D29/D33）
+  getAcquiringBillWorkerCount,
+  setAcquiringBillWorkerCount,
+  ACQUIRING_BILL_WORKER_COUNT_KEY,
+  ACQUIRING_BILL_WORKER_COUNT_DEFAULT,
+  ACQUIRING_BILL_WORKER_COUNT_MIN,
+  ACQUIRING_BILL_WORKER_COUNT_MAX,
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口
   getAcquiringBillRawJsonRetentionDays,
   setAcquiringBillRawJsonRetentionDays,
