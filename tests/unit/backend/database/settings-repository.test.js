@@ -38,14 +38,16 @@ test.afterEach(() => {
 // ========================================================================
 
 test.describe('ALL_MODULE_IDS / DEFAULT_ENABLED_MODULES 常量', () => {
-  test('ALL_MODULE_IDS 包含 8 个模块', () => {
-    assert.equal(settingsRepo.ALL_MODULE_IDS.length, 8);
+  test('ALL_MODULE_IDS 包含 9 个模块', () => {
+    assert.equal(settingsRepo.ALL_MODULE_IDS.length, 9);
     assert.ok(Object.isFrozen(settingsRepo.ALL_MODULE_IDS));
   });
 
-  test('ALL_MODULE_IDS 包含 statement-generator / acquiring-bill-currency', () => {
+  test('ALL_MODULE_IDS 包含 statement-generator / acquiring-bill-currency / vcc-op-calc', () => {
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('statement-generator'));
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('acquiring-bill-currency'));
+    // v2.1.12 需求1：VCC业务OP计算模块注册（spec §8.1，修复 dev d2050b0 漏注册）
+    assert.ok(settingsRepo.ALL_MODULE_IDS.includes('vcc-op-calc'));
   });
 
   test('DEFAULT_ENABLED_MODULES 是 ALL_MODULE_IDS 子集', () => {
