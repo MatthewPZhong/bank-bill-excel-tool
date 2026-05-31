@@ -196,6 +196,30 @@ const MULTIWORKER_DEFAULT_CHUNK_SIZE_TARGET_PER_WORKER = 4; // 目标 chunk 数 
 const MULTIWORKER_MIN_CHUNK_SIZE = 2000;                    // 自适应下界（防 chunk 过碎）
 const MULTIWORKER_BASELINE_CHUNK_SIZE = 100000;             // 与 runCheckCore default 一致（视作「未显式调小」哨兵）
 
+// v2.1.12 β.1-T3 — D31 小数据回退阈值（spec §4 D31）
+//   🔴 POC 实锤：5 万行多 worker 仅 0.22-0.39x（worker 启动开销 dwarfs 工作量，远慢于单 worker）。
+//   达到「百万行」量级（spec §4 D31 "<100w 回退"）多 worker 才有正收益（POC 50 万行 plan-b 2.31-2.70x）。
+//   故行数 < 100w 强制回退单 worker —— 这是 D31 的「行数下界」闸（caller gate / runCheckCore gate 双判）。
+//   ⚠️ 资金红线无关（单/多 worker byte-for-byte 一致，已 contract 锁）；纯性能闸 —— 回退只影响快慢不影响结果。
+const MULTIWORKER_MIN_TOTAL_ROWS = 1000000;
+
+// v2.1.12 β.1-T3 — D31 第二闸：自适应分片后若 chunk 数 < worker 数，并行喂不饱（POC：chunk 数 << worker 数无收益）
+//   → 回退单 worker。判定函数（gate 用）：给定行数/worker 数/请求 chunkSize，返回 true=应回退单 worker。
+//   组合 D31 两闸：① 行数下界 < 100w ② 自适应后 totalChunks < workerCount（喂不饱）。
+function shouldFallbackToSingleWorker({ totalBillRows, workerCount, requestedChunkSize }) {
+  // 闸 ①：行数下界（POC 实锤小数据多 worker 净负收益）
+  if (!Number.isInteger(totalBillRows) || totalBillRows < MULTIWORKER_MIN_TOTAL_ROWS) {
+    return true;
+  }
+  // 闸 ②：自适应分片后 chunk 数 < worker 数 → 多起的 worker 无活干（spec §4 末注）
+  const cs = adaptiveChunkSizeForMultiWorker({ totalBillRows, workerCount, requestedChunkSize });
+  const totalChunks = cs > 0 ? Math.ceil(totalBillRows / cs) : 0;
+  if (totalChunks < workerCount) {
+    return true;
+  }
+  return false;
+}
+
 function adaptiveChunkSizeForMultiWorker({ totalBillRows, workerCount, requestedChunkSize }) {
   // caller 显式给了非默认 chunkSize → 尊重，不覆盖
   if (requestedChunkSize !== MULTIWORKER_BASELINE_CHUNK_SIZE) {
@@ -258,7 +282,7 @@ function adaptiveChunkSizeForMultiWorker({ totalBillRows, workerCount, requested
 //   5. 调 writer 同步生成 diff.xlsx + report.xlsx；UPDATE runs.diff_file_path/report_file_path 回填
 //   6. SET chunk_progress.status='complete' + 返回 stats + filePaths
 // 关键不变量：写盘失败不应回滚 DB 事务（数据已 COMMIT 有效）；写盘错误仅 throw 给 caller
-async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken, chunkSize, resumeFromRun, workerCount, dbPath, tempDir }) {
+async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken, chunkSize, resumeFromRun, workerCount, dbPath, tempDir, __forceMultiWorkerForTest }) {
   if (!monthKey) {
     throw new Error('runCheck：monthKey 必填');
   }
@@ -404,12 +428,38 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
     ? resumeFromRun.lastCompletedChunkIndex + 1
     : 0;
 
-  // v2.1.12 β.1-T2 — stage 4' 三路分流 gate（⚠️ 资金红线 · spec §4 D29-D31 / D-β-1）：
-  //   useMultiWorker = 全新 run（!isResume）AND workerCount>1 AND 有 dbPath
+  // v2.1.12 β.1-T2 / T3 — stage 4' 三路分流 gate（⚠️ 资金红线 · spec §4 D29-D31 / D-β-1）：
+  //   useMultiWorker = 全新 run（!isResume）AND workerCount>1 AND 有 dbPath AND 过 D31 行数/chunk 闸
   //     - isResume：决策 A — resume 永远走单 worker（不碰多 worker 的 idempotent/race 雷区）
   //     - workerCount<=1：D31 回退 / default（现有调用零行为变化）
   //     - 无 dbPath：worker 各自 open 只读 connection 必须有 dbPath；缺失 → 安全回退单 worker
-  const useMultiWorker = !isResume && effectiveWorkerCount > 1 && !!dbPath;
+  //     - T3 D31：行数 < 100w 或 自适应后 chunk 数 < worker 数 → 回退单 worker（POC 实锤小数据多 worker 净负收益）
+  //   ⚠️ 三路 gate 仅决定「跑得快慢」；单/多 worker 结果 byte-for-byte 一致（contract 已锁）→ 回退不影响资金正确性。
+  const eligibleForMultiWorker = !isResume && effectiveWorkerCount > 1 && !!dbPath;
+  // D31 行数闸只在「前置条件满足」时才查 COUNT（resume / 单 worker / 无 dbPath 路径不加无谓查询）
+  let totalBillRowsForGate = -1;
+  let useMultiWorker = false;
+  if (eligibleForMultiWorker) {
+    totalBillRowsForGate = db.prepare(
+      'SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE month_key = ?'
+    ).get(monthKey).c;
+    const fallback = shouldFallbackToSingleWorker({
+      totalBillRows: totalBillRowsForGate,
+      workerCount: effectiveWorkerCount,
+      requestedChunkSize: effectiveChunkSize,
+    });
+    useMultiWorker = !fallback;
+    if (fallback && onProgress) {
+      // 透传一条诊断 progress（renderer 不消费此字段也不会崩）：记录回退原因便于排查/手测核对
+      onProgress({
+        phase: 'run',
+        stage: 'sql-joining',
+        multiWorkerFallback: true,
+        totalBillRows: totalBillRowsForGate,
+        workerCount: effectiveWorkerCount,
+      });
+    }
+  }
 
   // 多 worker 自带 tempDir 生命周期（caller 没传则临时建，finally 清）；单 worker 不用
   let ownedTempDir = null;
@@ -420,9 +470,8 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
       //   不传会写 chunk_progress 的 onChunkDone：保持 in-progress 占位 lastCompletedChunkIndex=-1，
       //   一旦多 worker 失败 → catch 块标 partial（-1）→ 用户 resume 走单 worker 从 chunk 0 全跑（byte-for-byte 安全）。
       //   多 worker 完成顺序乱，complete 状态在成功后一次性标（见下方）。
-      const totalBillRowsForAdaptive = db.prepare(
-        'SELECT COUNT(*) AS c FROM acquiring_bill_currency_bill_imports WHERE month_key = ?'
-      ).get(monthKey).c;
+      //   T3：totalBillRows 已在 D31 gate 查过（复用，避免重复 COUNT）。
+      const totalBillRowsForAdaptive = totalBillRowsForGate;
       const mwChunkSize = adaptiveChunkSizeForMultiWorker({
         totalBillRows: totalBillRowsForAdaptive,
         workerCount: effectiveWorkerCount,
@@ -937,5 +986,9 @@ module.exports = {
   listMonths,
   // v2.1.10 A3 Phase 2 T13：cancel 工具
   CancelError,
-  createCancelToken
+  createCancelToken,
+  // v2.1.12 β.1-T2 / T3：多 worker 自适应分片 + D31 回退判定（单测直调；生产仅 runCheckCore gate 内用）
+  adaptiveChunkSizeForMultiWorker,
+  shouldFallbackToSingleWorker,
+  MULTIWORKER_MIN_TOTAL_ROWS,
 };
