@@ -222,3 +222,28 @@ POC 是 β 全阶段的前提——验证「多 worker write-splitting 真能 2-
 - **T-b2-1**：`biz-op-recon-import` 加流式 reader（复用 streaming-xlsx-reader）+ contract test 锁与 SheetJS reader byte-level 同输出（表头校验/行映射/_rowIndex/isRowMeaningful 一致）
 - **T-b2-2**：bizOpRecon 导入 worker 化（仿 pending worker：边流式边分批 INSERT + 失败报告 + (date,BU) 替换原子事务）+ session/IPC 改 spawn worker
 - **T-b2-3**：集成测试（百万行级 fixture 端到端）+ release-check 全绿 + 真实大文件手测
+
+### 9.5 T-b2-2 详细设计（2026-05-31 实现 · 仿 `pending-import/worker.js`）
+
+**链路**：`main.js IPC handler` → `biz-op-recon-session.runBizOpImportViaWorker / runFlowImportViaWorker`（spawn 方）→ child process `biz-op-recon-import/import-worker.js`（流式读 + 事务插）→ stdout JSON 行 → session 解析 → 拒绝时 session 用 worker emit 的 errorRows 调 `writeBizOpErrorReportXlsx`/`writeFlowErrorReportXlsx` 写盘。
+
+**jobMeta**：`{ dbPath, kind:'bizOp'|'flow', date, filePath, maxRowErrors }`（dbPath = `database.dbPath` 主 DB tool-data.sqlite；与 acquiring worker 同库 WAL 并发，已生产验证）。
+
+**输出协议（每行一 JSON）**：
+- `{type:'progress', dataRows:N}`（每 progressInterval 行）
+- `{type:'rejected', errorRows:[{rowIndex,reason,rawRow}], rowErrorTotal, truncated, firstBu?}`（整批拒绝；含 rawRow 供主进程写报告；ROLLBACK 已在 worker 完成）
+- `{type:'header-error', errorCode, message, detailLines}`（表头/读取失败，FileValidationError 映射；ROLLBACK）
+- `{type:'complete', status:'success', buName?/totalCount?, validCount}`（COMMIT）
+
+**退出码**：0 成功 / 1 校验失败（rejected / header-error）/ 2 系统错。
+
+**🔴 worker 内五条资金红线保住法**：
+1. **整批拒绝**：worker 内 `BEGIN` → 流式读，第一个数据行定 `firstBu`（bizOp）→ 立即在事务内执行 clear（见 §4）→ 逐行 BU 一致 + `validateBizOpRow`（bizOp）/ `validateFlowRow`（flow），累积 errorRows（上限 maxRowErrors，仅前 N 条带 rawRow，但 rowErrorTotal 计全量），通过的行才 INSERT。流完：errorRows 非空 → `ROLLBACK`（不入任何行）+ emit rejected；全通过 → COMMIT。
+2. **(date,BU)+D+1 替换原子事务**（bizOp）：首个数据行回调内（事务已 BEGIN）执行 `clearRunsAndDiffsByDateBu(date,firstBu)` + `clearRunsAndDiffsByDateBu(addOneDay(date),firstBu)` + `clearByDateBu(date,firstBu)`，与后续 INSERT 同一 BEGIN…COMMIT；任一错或 errorRows → ROLLBACK 全回滚。
+3. **bu_name 改写**：INSERT 前每行 `bu_name = firstBu`（trim 保大小写）。
+4. **失败报告 xlsx**：worker 不写盘（ExcelJS 留主进程，仿 pending）；emit rejected 的 errorRows 带 rawRow → 主进程 session 写 `writeBizOpErrorReportXlsx`，返回 errorReportPath。
+5. **flow 差异**：flow 不分 BU、无 BU 一致性校验、无 firstBu / bu_name 改写；clear = `clearRunsAndDiffsByDate(date)`（跨所有 BU）+ `clearByDate(date)`（非 ByDateBu）；空文件→rejected `rowIndex:0`。
+
+**rows.length===0**（无有效数据行）：流完 dataRows===0 → emit rejected `[{rowIndex:0,reason:'文件无有效数据行'}]`（与旧同步语义一致）。
+
+**回退**：保留旧同步 `runBizOpImportAsync`/`runFlowImportAsync`（contract 基线 + 测试 + 无 dbPath 兜底）；默认走 worker。session 暴露 `runBizOpImportViaWorker(db,{...,dbPath,onProgress})`，无 dbPath 时内部 fallback 旧同步路径。
