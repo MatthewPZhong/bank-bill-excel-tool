@@ -319,7 +319,13 @@ contextBridge.exposeInMainWorld('desktopApi', {
     computeAmounts: () => ipcRenderer.invoke('vccOpCalc:run:compute-amounts'),
     save: (payload) => ipcRenderer.invoke('vccOpCalc:run:save', payload),
     listBalanceMonths: () => ipcRenderer.invoke('vccOpCalc:balance:list-months'),
-    getBalance: (payload) => ipcRenderer.invoke('vccOpCalc:balance:get', payload)
+    getBalance: (payload) => ipcRenderer.invoke('vccOpCalc:balance:get', payload),
+    // v2.1.12 流式改造（spec §9）：大文件读取进度订阅；返回 unsubscribe（renderer 用完 finally 退订防 listener 泄漏）
+    onScanProgress: (cb) => {
+      const listener = (_e, data) => { if (typeof cb === 'function') cb(data); };
+      ipcRenderer.on('vccOpCalc:scan:progress', listener);
+      return () => ipcRenderer.removeListener('vccOpCalc:scan:progress', listener);
+    }
   },
   // v2.1.6 Module B：收单单据币种校验
   // v2.1.7 F6：新增 onImportProgress / onRunProgress 订阅 API（spec §6.4）

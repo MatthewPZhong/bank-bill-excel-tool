@@ -272,3 +272,75 @@ bank-bu-recon 会落每行原始数据到 `*_imports` 表（`migrations.js:1586/
 - previews：补 4 处入口（MEMORY `workflow_frontend_previews`）+ 截图回归
 
 **新会话启动**：读本 spec + `git log`（后端 `d2050b0`）→ 做前端 → `release-check` + preview + 手测（需求5/6/1 一起）→ T8 文档三件套（CHANGELOG/VERSION_FEATURE_HISTORY/USER_GUIDE）→ α bump `-alpha.1` + 提 PR（提 PR 前 `/check-vars`）。
+
+---
+
+## 8 前端实现期发现 + 修订（2026-05-31 本会话回写，规则3 Reverse Sync）
+
+### 8.1 🔴 后端 gap：ALL_MODULE_IDS 漏注册 vcc-op-calc（前端开工前修复）
+`src/backend/database/settings-repository.js:96-105` 的 `ALL_MODULE_IDS` 白名单遗漏 `'vcc-op-calc'`（dev agent `d2050b0` 写后端时漏，重蹈该常量注释 line 94-95 记录的 v2.1.2/v2.1.3 历史 bug）。后果：`setCurrentModule`/`setEnabledModules`（line 120/225）对该 id 抛 `Invalid module id`，模块无法启用/持久化/被🔄收纳弹窗勾选。
+- 修复：`ALL_MODULE_IDS` 追加 `'vcc-op-calc'`；单测 `settings-repository.test.js:42` 断言 `length` 8→9 + 补 `includes('vcc-op-calc')`。
+- `DEFAULT_ENABLED_MODULES`（3 个核心模块）**不改**：遵循 new-account/pending/bank-bu-recon/biz-op-recon/acquiring 等非核心模块惯例，vcc-op-calc 默认隐藏，用户经🔄收纳弹窗启用。
+- 闭环：收纳弹窗数据源 = renderer `Object.values(MODULES)`（renderer.js:5076），故 MODULES 加第 6 项 + ALL_MODULE_IDS 加白名单两边齐 = 用户可勾选启用。
+
+### 8.2 后端真实 IPC 返回契约（修订 §7 表，**以代码为准**）
+§7 表的 `{ok,...}` / `[{yearMonth,...}]` 与 dev 实际实现不符。前端按以下真实契约对接（出处 `main.js:10715-10815` + `vcc-op-calc-session.js`）：
+- `scan`/`computeAmounts`/`save` 均为 `{ status:'success'|'rejected'|'error', ... }`（**非 `ok` 布尔**）
+  - scan success：`{status,yearMonth,totalRows,fileCount}`；rejected：`{status,errorRows:[{fileName,rowIndex,reason}]}`；error：`{status,message[,code,detailLines,context]}`
+  - computeAmounts success：`{status,yearMonth,totals:{totalOut,totalIn,totalAmount,currency,...Cents},perFile:[{fileName,rowCount,amountOut,amountIn,amount,...Cents}]}`
+  - save success：`{status,runId,endOp,beginOp,yearMonth}`
+- `listBalanceMonths` 返回 **`string[]`**（main 已 `.map(m=>m.yearMonth)`），非对象数组
+- `getBalance` 返回 `{runId,yearMonth,runAt,fileCount,beginOp,totalAmount,totalAmountOut,totalAmountIn,endOp,currency}` 或 `null`
+
+### 8.3 F2 计算框语义（资金红线🔴 锁定）
+点「计算」= 调 `save({beginOp})`（后端整数分算 endOp + 原子落库），框内展示后端返回 endOp + 标「已保存」，按钮转「关闭」。**前端绝不自行计算 `beginOp+totalAmount`**（资金红线：避免浮点 + 口径分叉）。与 spec §2.2「点计算→落库」一致；§2.4 的「[保存/关闭]」按钮即此「关闭」。
+
+---
+
+## 9 流式读取改造（2026-05-31 手测实测定案，规则1/2/3 Reverse Sync）
+
+### 9.1 背景：SheetJS 读不了真实流水文件（实测铁证）
+手测真实流水 `1397997307790624768_1.xlsx`：**78.7 万行**（dimension `A1:AB787315`）/ worksheet XML **811 MB** / sharedStrings 138 MB。
+- SheetJS `XLSX.readFile` 全量加载：worksheet 811MB **> V8 单字符串上限 536,870,888 字节(512MB)**，读不成字符串、静默返回空 `Sheets` → reader（`vcc-op-calc-import/reader.js:73`）误报「sheet 内容为空（无表头）」。**增大内存无用**（字符串硬上限，非堆）。
+- 实测 `exceljs` streaming `WorkbookReader`：**16.9s** 读通 78.7 万行，发生额(入−出)=**2,223,798.77**，9 混币种，0 非法方向/0 空金额，峰值 RSS 2GB。项目已装 `exceljs@4.4.0`+`sax`+`yauzl`，**无新依赖**。
+- 用户拍板（2026-05-31）：① VCC + 第5模块一并改流式；② 流水常态**百万行级** → 加读取进度反馈。
+
+### 9.2 设计：流式读 + 边读边聚合（VCC，纯聚合 — 简单）
+- **reader**（`vcc-op-calc-import/reader.js`）：改 `exceljs` `WorkbookReader` 流式逐行，新增 `async streamFlowFile(filePath, {onRow, onProgress, signal})`；首行 `validateFlowHeaders` 校验（口径不变）。
+- **session**（`vcc-op-calc-session.js`）：合并 scan+compute 为**一次流式读**（避免读两遍 ≈34s），流式聚合 `{yearMonth, totalRows, totals, perFile, errorRows}` 缓存，**不存原始行**。
+  - 🔴 **资金红线**：helper（`parseAmountToCents`/`extractYearMonth`/`validateAndExtractRow`/`centsToAmountString`）**完全复用、口径不变**，仅数据来源 数组→流。改后**必须重跑单测 + 用真实文件核销 2,223,798.77**。
+  - 整批拒绝 `errorRows` 加上限（前 100 条 + 总数；可 fail-fast）。
+- **IPC**：scan handler 流式读+聚合并缓存；compute handler 返回缓存（不重读）；save 用缓存+beginOp。新增进度事件 `vccOpCalc:scan:progress`（每 5 万行）。
+- **preload**：新增 `onScanProgress` 订阅（仿 `acquiringBillCurrency` `onImportProgress`，返回 unsubscribe，renderer finally 退订防泄漏）。
+- **renderer**：状态框流式更新「正在读取 X / Y 万行…」。
+- **内存**：不存全量行 → 内存恒定（主要 = exceljs sharedStrings cache）；百万行级**须实测内存上限** + 评估 Electron 主进程 `max-old-space-size`。
+
+### 9.3 第5模块（biz-op-recon）流式改造 — ⚠️ 待评估细化（复杂度高于 VCC）
+biz-op-recon 是「对账」（账户匹配 + 余额比对），**大概率需保留全量行做 join**（不像 VCC 纯聚合可边读边丢）。流式下百万行不能驻留内存 → 或需**落 SQLite 临时表分块对账**，触及已上线模块核心对账逻辑，**回归风险高**。
+- 先评估 `biz-op-recon-session` run 数据流（是否需保留行），再细化方案；**可能建议分阶段**（VCC 先行，biz-op-recon 独立子任务）。
+
+### 9.4 task 拆分
+| task | 内容 | 资金红线 |
+|---|---|---|
+| S1 | vcc reader 流式（exceljs `streamFlowFile`）+ 单测 | |
+| S2 | vcc session 流式聚合（合并 scan+compute）+ 单测 + **真实文件核销 2,223,798.77** | 🔴 |
+| S3 | main IPC 流式对接 + 进度事件 + preload 订阅 | |
+| S4 | renderer 进度 UI（状态框流式更新） | |
+| S5 | biz-op-recon 评估 + 流式改造（按 §9.3 评估结果，可能分阶段） | 🔴 |
+| S6 | release-check + 真实大文件手测 + 内存评估 | |
+
+### 9.5 资金红线 review🔴
+session 流式聚合是金额求和核心改动：聚合口径必须与现有完全一致（复用 helper）；新增「真实大文件核销」测试（2,223,798.77）；提 PR 跑 `/check-vars`。
+
+### 9.6 reader 最终选型：JSZip（exceljs data descriptor 缺陷，2026-05-31 手测定案，取代 §9.2 的 exceljs 方案）
+手测真实文件 exceljs streaming 报 `invalid signature: 0x41d`。根因（实测确认）：
+- 用户部分文件用 zip **data descriptor**（流式导出：general purpose bit3 set，local file header 的 size/CRC=0，真实值在每个 entry 数据后的 descriptor）。
+- exceljs 的 `unzipper` 按 local header 流式读 → 遇 data descriptor 错位 → `invalid signature`。`yauzl`/`JSZip` 走 central directory（有正确 size/offset）→ 能读。这解释「同批文件部分能读部分报错」。
+- 另发现：部分大文件（昨天那批 250MB）是 zip 截断损坏（重新导出后恢复，149-163MB 有效）；部分文件多 sheet（透视 Sheet1 + 数据 sheet2）。
+
+**`reader.js` 重写为 JSZip**：复用自研 `pending-import/streaming-xlsx-reader` 的 `parseRowXml`/`readSharedStrings`（同一套 JSZip + SAX 扫 `<row>`）+ 多 sheet 定位（找表头匹配的数据表）+ 损坏文件友好提示 + 进度回调。
+- 性能实测（811MB worksheet）：JSZip **7.8s / RSS 778MB** vs exceljs 16.9s / 2GB —— 全面更优 + 支持 data descriptor。
+- 真实文件核销：单 sheet **2,223,798.77** ✓、data-descriptor 文件 300000 行 ✓、多 sheet 819831 行 ✓。
+- 🔴 资金红线：session 聚合口径完全未动（reader 只换「喂数据的方式」），核销值不变。
+- 副带：JSZip 走 central directory 无 exceljs 的 worksheet/model race → 移除 exceljs 时代加的全量读 fallback；单测 flaky 消除。
+- ⚠️ 长期：JSZip 当前 `loadAsync` 全量 buffer + `readSharedStrings` 全量数组（778MB）仍高于自研 pending reader（~MB）。若迁 worker pool（见 worker pool 讨论：worker ~1GB 上限 + 自研 reader 是并行前提）需进一步优化 sharedStrings 内存。

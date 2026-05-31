@@ -81,7 +81,7 @@ const {
 } = require('./backend/biz-op-recon-import/reader');
 // v2.1.12 需求1：VCC业务OP计算模块（仅流水文件 → 按月聚合发生额出/入 → 算期末OP，资金红线 🔴）
 const { createVccOpCalcSession } = require('./main-process/vcc-op-calc-session');
-const { readFlowFile: readVccFlowFile } = require('./backend/vcc-op-calc-import/reader');
+// v2.1.12 流式改造（spec §9）：reader 改 exceljs 流式后，由 session.streamScanAndCompute 内部调用，main 不再直接 import
 const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-dispatcher');
 // v2.1.12 需求6：数据侧预检只读 helper（统计 C3 银行侧候选行，不触碰 runC3Scenario 资金逻辑）
 const { countC3BankCandidates } = require('./main-process/scenario-engines/c3-gateway-recon-join');
@@ -10733,18 +10733,22 @@ function registerNewAccountHandlers() {
 
   // 读多文件 → 统计总条数 + 定月份（供 F1）。
   // 整批拒绝（资金红线 🔴）：非法方向 / 非数值金额 / 空账单日期 / 多月份混杂 → status:'rejected' + errorRows。
-  trackedIpcHandle('vccOpCalc:import:scan', 'VCC业务OP计算', '导入文件', async (_event, payload = {}) => {
+  trackedIpcHandle('vccOpCalc:import:scan', 'VCC业务OP计算', '导入文件', async (event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const { filePaths } = payload || {};
     if (!Array.isArray(filePaths) || filePaths.length === 0) {
       return { status: 'error', message: '未选择文件' };
     }
-    // 读所有文件（表头校验失败 → FileValidationError）
-    let fileResults;
+    // 流式读取+聚合（spec §9 大文件路径，合并 scan+compute，不存全量行）；进度推送 renderer。
+    // 表头校验失败 → FileValidationError；非法行/多月份混杂 → ok:false + errorRows（整批拒绝）。
+    let result;
     try {
-      fileResults = filePaths.map((fp) => {
-        const parsed = readVccFlowFile(fp);
-        return { fileName: parsed.fileName, filePath: parsed.filePath, rows: parsed.rows };
+      result = await vccOpCalcSession.streamScanAndCompute(filePaths, {
+        onProgress: (rows) => {
+          if (event && event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('vccOpCalc:scan:progress', { rows });
+          }
+        }
       });
     } catch (err) {
       if (err && err.name === 'FileValidationError') {
@@ -10758,25 +10762,23 @@ function registerNewAccountHandlers() {
       }
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
-    const result = vccOpCalcSession.scanFiles(fileResults);
     if (!result.ok) {
-      return { status: 'rejected', errorRows: result.errorRows };
+      return { status: 'rejected', errorRows: result.errorRows, errorCount: result.errorCount };
     }
-    return { status: 'success', yearMonth: result.yearMonth, totalRows: result.totalRows, fileCount: fileResults.length };
+    return { status: 'success', yearMonth: result.yearMonth, totalRows: result.totalRows, fileCount: filePaths.length };
   });
 
   // 统计发生额出/入/总额 + perFile（供 F2，不落库）。复用 scan 缓存的 rows（资金红线：同口径整批校验）。
   trackedIpcHandle('vccOpCalc:run:compute-amounts', 'VCC业务OP计算', '开始运行', (_event, _payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
-    const result = vccOpCalcSession.computeFiles();
-    if (!result.ok) {
-      return { status: 'rejected', errorRows: result.errorRows };
-    }
+    // 流式改造（spec §9）：scan 阶段已合并统计并缓存 lastComputeCache，这里直接返回缓存（不重读文件）
+    const cache = vccOpCalcSession.getComputeCache();
+    if (!cache) return { status: 'error', message: '无统计结果（请先导入文件）' };
     return {
       status: 'success',
-      yearMonth: result.yearMonth,
-      totals: result.totals,
-      perFile: result.perFile
+      yearMonth: cache.yearMonth,
+      totals: cache.totals,
+      perFile: cache.perFile
     };
   });
 

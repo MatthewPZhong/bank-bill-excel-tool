@@ -291,5 +291,7 @@ module.exports = {
   parseRowXml,
   parseCellBody,
   lettersToIndex,
-  xmlUnescape
+  xmlUnescape,
+  // v2.1.12 需求1：vcc-op-calc reader 复用（JSZip + central directory 解析，支持 data descriptor）
+  readSharedStrings
 };

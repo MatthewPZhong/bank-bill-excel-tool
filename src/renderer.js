@@ -76,6 +76,11 @@ const MODULES = Object.freeze({
   acquiringBillCurrency: {
     id: 'acquiring-bill-currency',
     name: '收单单据币种校验'
+  },
+  // v2.1.12 需求1：VCC业务OP计算（第 6 个独立模块；id 须与 settings-repository.js ALL_MODULE_IDS 一致）
+  vccOpCalc: {
+    id: 'vcc-op-calc',
+    name: 'VCC业务OP计算'
   }
 });
 const RENDERER_STARTUP_MARKS = Object.freeze({
@@ -306,6 +311,12 @@ const elements = {
   acquiringBillCurrencyRunBtn: document.getElementById('acquiringBillCurrencyRunBtn'),
   acquiringBillCurrencyExportBtn: document.getElementById('acquiringBillCurrencyExportBtn'),
   acquiringBillCurrencyStatusBox: document.getElementById('acquiringBillCurrencyStatusBox'),
+  // v2.1.12 需求1：VCC业务OP计算模块（5 项 DOM 缓存；「导出差异」位 →「显示余额」）
+  vccOpCalcModulePanel: document.getElementById('vccOpCalcModulePanel'),
+  vccOpCalcImportBtn: document.getElementById('vccOpCalcImportBtn'),
+  vccOpCalcRunBtn: document.getElementById('vccOpCalcRunBtn'),
+  vccOpCalcShowBalanceBtn: document.getElementById('vccOpCalcShowBalanceBtn'),
+  vccOpCalcStatusBox: document.getElementById('vccOpCalcStatusBox'),
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（spec §一.1 + §七 — 6 项 DOM 缓存）
   // v2.1.0-beta.3 T4：新增主面板"账单类别"下拉 + 行 2 整行 wrapper（可隐藏）
   reconIdFixModulePanel: document.getElementById('reconIdFixModulePanel'),
@@ -391,7 +402,15 @@ const {
   formatBizOpReconStatusHtml,
   getBizOpReconDefaultDate,
   // v2.1.4 T3：小助手功能收纳弹窗工厂
-  createModuleCabinetDialog
+  createModuleCabinetDialog,
+  // v2.1.12 需求1：VCC业务OP计算 dialog factory（F1 确认 / F2 计算 / F3 显示余额）
+  createVccOpCalcConfirmDialog,
+  createVccOpCalcComputeDialog,
+  createVccOpCalcShowBalanceDialog,
+  applyVccOpCalcPanelInitialPreviewState,
+  applyVccOpCalcPanelResultPreviewState,
+  applyVccOpCalcComputeDialogPreviewState,
+  applyVccOpCalcShowBalanceDialogPreviewState
 } = window.__rendererDialogs.createRendererDialogs({
   state,
   elements,
@@ -1380,6 +1399,13 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
     elements.acquiringBillCurrencyModulePanel.hidden = moduleId !== MODULES.acquiringBillCurrency.id;
     if (moduleId === MODULES.acquiringBillCurrency.id) {
       restoreAcquiringBillCurrencyPanelState();
+    }
+  }
+  // v2.1.12 需求1：VCC业务OP计算模块面板隐藏控制
+  if (elements.vccOpCalcModulePanel) {
+    elements.vccOpCalcModulePanel.hidden = moduleId !== MODULES.vccOpCalc.id;
+    if (moduleId === MODULES.vccOpCalc.id) {
+      restoreVccOpCalcPanelState();
     }
   }
 
@@ -4174,6 +4200,206 @@ function formatBbrTimestampForFilename() {
 }
 
 // ============================================================
+// v2.1.12 需求1：VCC业务OP计算 — UI 状态机 + IPC 调用（spec §2 状态机 + §8 真实契约）
+// 数据流：导入(pickFiles→scan→F1确认→computeAmounts) → 开始运行(F2 输入期初OP→save 落库) → 显示余额(F3)
+// 资金红线🔴：金额计算全在后端（整数分）；前端仅透传 beginOp + 展示后端返回的金额字符串，绝不自行算钱。
+// 会话态：scan/compute 中间结果缓存在 main 进程 vccOpCalcSession；前端 vccOpCalcState 标志位驱动按钮可用性。
+// ============================================================
+
+const vccOpCalcState = {
+  scanned: false,          // scan + computeAmounts 成功（已统计完成但未落库）→「开始运行」亮
+  balanceMonthsCount: 0,   // 已落库月份数（后端 listBalanceMonths().length）→「显示余额」亮
+  yearMonth: '',           // F1/F2 展示用
+  totalRows: 0,
+  fileCount: 0,
+  totals: null             // computeAmounts 返回的 totals（供 F2 展示）
+};
+
+function setVccOpCalcStatus(message, tone = 'info') {
+  if (!elements.vccOpCalcStatusBox) return;
+  updateStatusBox(elements.vccOpCalcStatusBox, message, tone, {
+    idleTitle: '欢迎使用小助手'
+  });
+}
+
+function applyVccOpCalcButtonState() {
+  if (elements.vccOpCalcImportBtn) elements.vccOpCalcImportBtn.disabled = false;  // 永远 enable
+  // 「开始运行」：已统计完成但未落库的当前会话才亮（spec §2.3）
+  if (elements.vccOpCalcRunBtn) elements.vccOpCalcRunBtn.disabled = !vccOpCalcState.scanned;
+  // 「显示余额」：后端至少 1 条已计算月份
+  if (elements.vccOpCalcShowBalanceBtn) elements.vccOpCalcShowBalanceBtn.disabled = vccOpCalcState.balanceMonthsCount === 0;
+}
+
+async function refreshVccOpCalcButtonAvailability() {
+  try {
+    const months = await window.desktopApi.vccOpCalc.listBalanceMonths().catch(() => []);
+    vccOpCalcState.balanceMonthsCount = Array.isArray(months) ? months.length : 0;
+  } catch (_e) {
+    vccOpCalcState.balanceMonthsCount = 0;
+  }
+  applyVccOpCalcButtonState();
+}
+
+// 切到本模块时拉后端状态 → 同步按钮可用性
+function restoreVccOpCalcPanelState() {
+  applyVccOpCalcButtonState();
+  setVccOpCalcStatus('欢迎使用小助手', 'info');
+  refreshVccOpCalcButtonAvailability();
+}
+
+// 「导入文件」：pickFiles → scan → F1 确认 → computeAmounts（统计发生额）
+async function handleVccOpCalcImport() {
+  const pickRes = await window.desktopApi.vccOpCalc.pickFiles().catch(() => null);
+  if (!pickRes || pickRes.status === 'cancelled') {
+    setVccOpCalcStatus('已取消选择文件', 'info');
+    return;
+  }
+  if (pickRes.status !== 'success' || !Array.isArray(pickRes.filePaths) || pickRes.filePaths.length === 0) {
+    setVccOpCalcStatus(pickRes.message || '选择文件失败', 'error');
+    return;
+  }
+
+  // v2.1.12 流式改造（spec §9）：大文件读取期间订阅进度事件，状态框流式更新；finally 退订防 listener 泄漏
+  setVccOpCalcStatus(`正在读取 ${pickRes.filePaths.length} 个文件...`, 'info');
+  let unsubscribeProgress = null;
+  if (typeof window.desktopApi.vccOpCalc.onScanProgress === 'function') {
+    unsubscribeProgress = window.desktopApi.vccOpCalc.onScanProgress((data) => {
+      const rows = (data && data.rows) || 0;
+      setVccOpCalcStatus(`正在读取大文件… 已处理 ${(rows / 10000).toFixed(1)} 万行`, 'info');
+    });
+  }
+  let scanRes;
+  try {
+    scanRes = await window.desktopApi.vccOpCalc
+      .scan({ filePaths: pickRes.filePaths })
+      .catch((e) => ({ status: 'error', message: e && e.message ? e.message : String(e) }));
+  } finally {
+    if (typeof unsubscribeProgress === 'function') unsubscribeProgress();
+  }
+
+  if (scanRes.status === 'rejected') {
+    vccOpCalcState.scanned = false;
+    applyVccOpCalcButtonState();
+    showVccOpCalcErrorReport(scanRes.errorRows, scanRes.errorCount);
+    setVccOpCalcStatus('导入被拒绝：数据存在异常（见错误报告）', 'error');
+    return;
+  }
+  if (scanRes.status !== 'success') {
+    vccOpCalcState.scanned = false;
+    applyVccOpCalcButtonState();
+    const detail = scanRes.detailLines && scanRes.detailLines.length > 0 ? '\n' + scanRes.detailLines.join('\n') : '';
+    setVccOpCalcStatus(`导入失败：${scanRes.message || '未知错误'}${detail}`, 'error');
+    return;
+  }
+
+  // scan 成功 → 弹 F1 确认框（展示月份 + 条数）
+  openModal(createVccOpCalcConfirmDialog({
+    yearMonth: scanRes.yearMonth,
+    totalRows: scanRes.totalRows,
+    fileCount: scanRes.fileCount,
+    onConfirm: async () => {
+      // F1 确认 → 后台统计发生额（computeAmounts，复用 main 会话缓存的 rows）
+      setVccOpCalcStatus('正在统计发生额...', 'info');
+      const compRes = await window.desktopApi.vccOpCalc
+        .computeAmounts()
+        .catch((e) => ({ status: 'error', message: e && e.message ? e.message : String(e) }));
+      if (compRes.status === 'rejected') {
+        vccOpCalcState.scanned = false;
+        applyVccOpCalcButtonState();
+        showVccOpCalcErrorReport(compRes.errorRows);
+        setVccOpCalcStatus('统计被拒绝：数据存在异常（见错误报告）', 'error');
+        return;
+      }
+      if (compRes.status !== 'success') {
+        vccOpCalcState.scanned = false;
+        applyVccOpCalcButtonState();
+        setVccOpCalcStatus(`统计失败：${compRes.message || '未知错误'}`, 'error');
+        return;
+      }
+      // 统计完成 → 缓存 totals + 亮「开始运行」
+      vccOpCalcState.scanned = true;
+      vccOpCalcState.yearMonth = compRes.yearMonth;
+      vccOpCalcState.totals = compRes.totals;
+      vccOpCalcState.fileCount = scanRes.fileCount;
+      vccOpCalcState.totalRows = scanRes.totalRows;
+      applyVccOpCalcButtonState();
+      const t = compRes.totals || {};
+      setVccOpCalcStatus(
+        `统计完成：${compRes.yearMonth}：发生额出 ${t.totalOut}：发生额入 ${t.totalIn}：总发生额 ${t.totalAmount} — 点「开始运行」输入期初OP`,
+        'success'
+      );
+    },
+    onCancel: () => {
+      setVccOpCalcStatus('已取消导入', 'info');
+    }
+  }));
+}
+
+// 「开始运行」：弹 F2（展示发生额 + 输入期初OP），点「计算」即调 save 落库（资金红线🔴 后端算 endOp）
+async function handleVccOpCalcRun() {
+  if (!vccOpCalcState.scanned || !vccOpCalcState.totals) {
+    openModal(createAlertDialog('请先用「导入文件」选择流水并完成统计。'));
+    return;
+  }
+  openModal(createVccOpCalcComputeDialog({
+    totals: vccOpCalcState.totals,
+    yearMonth: vccOpCalcState.yearMonth,
+    onCompute: async (beginOp) => {
+      // 资金红线🔴：beginOp 原样透传后端，后端整数分算 endOp = beginOp + 发生额 + 原子落库
+      const saveRes = await window.desktopApi.vccOpCalc
+        .save({ beginOp })
+        .catch((e) => ({ status: 'error', message: e && e.message ? e.message : String(e) }));
+      if (saveRes && saveRes.status === 'success') {
+        // 落库成功 → 清会话态（灭「开始运行」）+ 刷新「显示余额」
+        vccOpCalcState.scanned = false;
+        vccOpCalcState.totals = null;
+        setVccOpCalcStatus(
+          `${saveRes.yearMonth} 运行完成：期初OP ${saveRes.beginOp} → 期末OP ${saveRes.endOp}（已保存）`,
+          'success'
+        );
+        await refreshVccOpCalcButtonAvailability();
+        return { status: 'success', endOp: saveRes.endOp };
+      }
+      return { status: 'error', message: (saveRes && saveRes.message) ? saveRes.message : '保存失败' };
+    },
+    onClose: () => {}
+  }));
+}
+
+// 「显示余额」：弹 F3（月份下拉 + 查看），查看调 getBalance
+async function handleVccOpCalcShowBalance() {
+  const months = await window.desktopApi.vccOpCalc.listBalanceMonths().catch(() => []);
+  if (!Array.isArray(months) || months.length === 0) {
+    openModal(createAlertDialog('暂无已计算的月份。请先用「导入文件」+「开始运行」计算期末OP。'));
+    return;
+  }
+  openModal(createVccOpCalcShowBalanceDialog({
+    months,
+    onView: async (yearMonth) => {
+      return await window.desktopApi.vccOpCalc.getBalance({ yearMonth }).catch(() => null);
+    },
+    onClose: () => {}
+  }));
+}
+
+// 整批拒绝错误报告（资金红线🔴 不静默跳过）：errorRows = [{ fileName, rowIndex, reason }]
+// 用 createAlertDialog 多行展示（前 N 条 + 总数），与第5模块「整批拒绝」口径一致
+function showVccOpCalcErrorReport(errorRows, errorCount) {
+  const rows = Array.isArray(errorRows) ? errorRows : [];
+  // 流式改造（spec §9）：errorRows 有上限（前 100 条），errorCount 是真实总数（百万行场景）
+  const total = (typeof errorCount === 'number' && errorCount > rows.length) ? errorCount : rows.length;
+  const MAX_SHOW = 20;
+  const lines = rows.slice(0, MAX_SHOW).map((r) => {
+    const fn = r && r.fileName ? `[${r.fileName}] ` : '';
+    const ri = r && r.rowIndex ? `第 ${r.rowIndex} 行：` : '';
+    return `${fn}${ri}${(r && r.reason) || ''}`;
+  });
+  let msg = `导入被拒绝，共 ${total} 处异常（资金计算不容静默跳过）：\n\n${lines.join('\n')}`;
+  if (total > MAX_SHOW) msg += `\n\n... 其余 ${total - MAX_SHOW} 处略`;
+  openModal(createAlertDialog(msg));
+}
+
+// ============================================================
 // v2.1.3：业务OP数据核对 — UI 状态机 + IPC 调用
 // PRD §3.3 数据流：导入 (业务OP + 流水) → 选 BU → 开始运行 → 导出（单日 / 区间）
 // OPEN ISSUE 拍板固化点（PRD §6.1）：
@@ -5023,6 +5249,17 @@ async function initialize() {
     elements.bankBuReconExportBtn.addEventListener('click', handleBankBuReconExport);
   }
 
+  // v2.1.12 需求1：VCC业务OP计算模块事件绑定（导入 / 开始运行 / 显示余额）
+  if (elements.vccOpCalcImportBtn) {
+    elements.vccOpCalcImportBtn.addEventListener('click', handleVccOpCalcImport);
+  }
+  if (elements.vccOpCalcRunBtn) {
+    elements.vccOpCalcRunBtn.addEventListener('click', handleVccOpCalcRun);
+  }
+  if (elements.vccOpCalcShowBalanceBtn) {
+    elements.vccOpCalcShowBalanceBtn.addEventListener('click', handleVccOpCalcShowBalance);
+  }
+
   // v2.1.3：业务OP数据核对模块事件绑定
   if (elements.bizOpReconImportBtn) {
     elements.bizOpReconImportBtn.addEventListener('click', handleBizOpReconImport);
@@ -5427,6 +5664,14 @@ async function initialize() {
     setTimeout(() => { applyAcquiringBillCurrencyPanelImportingPreviewState(); }, 120);
   } else if (info.previewModal === 'acquiring-bill-currency-panel-result') {
     setTimeout(() => { applyAcquiringBillCurrencyPanelResultPreviewState(); }, 120);
+  } else if (info.previewModal === 'vcc-op-calc-panel-initial') {
+    setTimeout(() => { applyVccOpCalcPanelInitialPreviewState(); }, 120);
+  } else if (info.previewModal === 'vcc-op-calc-panel-result') {
+    setTimeout(() => { applyVccOpCalcPanelResultPreviewState(); }, 120);
+  } else if (info.previewModal === 'vcc-op-calc-compute') {
+    setTimeout(() => { applyVccOpCalcComputeDialogPreviewState(); }, 120);
+  } else if (info.previewModal === 'vcc-op-calc-show-balance') {
+    setTimeout(() => { applyVccOpCalcShowBalanceDialogPreviewState(); }, 120);
   } else if (info.previewModal === 'module-cabinet') {
     setTimeout(() => { applyModuleCabinetPreviewState(); }, 120);
   }

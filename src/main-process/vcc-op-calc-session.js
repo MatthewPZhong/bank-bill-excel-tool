@@ -18,6 +18,8 @@
 //          src/main-process/biz-op-recon-session.js（parseSignedAmount / 整批拒绝）
 
 const runRepository = require('../backend/vcc-op-calc-db/run-repository');
+const path = require('node:path');
+const { streamFlowFile } = require('../backend/vcc-op-calc-import/reader');
 const {
   VCC_DIRECTION_DB_COLUMN,
   VCC_RECON_AMOUNT_DB_COLUMN,
@@ -278,6 +280,109 @@ function createVccOpCalcSession({ getDb }) {
     return result;
   }
 
+  // 流式扫描+统计（spec §9，大文件路径）：一次流式读所有文件，边读边聚合（不存全量行），
+  //   合并 scan+compute（避免读两遍 ≈34s）。资金红线🔴：聚合口径完全复用 validateAndExtractRow /
+  //   centsToAmountString / VALID_DIRECTION_IN，与同步 scan/computeAmounts 完全一致。
+  //   成功 → 缓存 lastComputeCache 供 saveRun；errorRows 上限 MAX_ERRORS（百万行场景防 OOM）；多月份混杂整批拒绝。
+  //   返回 { ok, yearMonth, totalRows, totals, perFile } 或 { ok:false, errorRows, errorCount }。
+  async function streamScanAndCompute(filePaths, { onProgress } = {}) {
+    const list = Array.isArray(filePaths) ? filePaths : [];
+    const MAX_ERRORS = 100;
+    const errorRows = [];
+    let errorCount = 0;
+    const months = new Set();
+    const currencySet = new Set();
+    let totalRows = 0;
+    let totalInCents = 0;
+    let totalOutCents = 0;
+    const perFile = [];
+
+    // 新一轮流式读使旧缓存失效
+    lastScanCache = null;
+    lastComputeCache = null;
+
+    for (const fp of list) {
+      const fileName = path.basename(fp);
+      let fileInCents = 0;
+      let fileOutCents = 0;
+      let fileRowCount = 0;
+      await streamFlowFile(fp, {
+        onDataRow: (row) => {
+          totalRows += 1;
+          fileRowCount += 1;
+          const res = validateAndExtractRow(row);
+          if (!res.ok) {
+            errorCount += 1;
+            if (errorRows.length < MAX_ERRORS) {
+              errorRows.push({ fileName, rowIndex: row._rowIndex || 0, reason: res.reason });
+            }
+            return;
+          }
+          months.add(res.yearMonth);
+          if (res.direction === VALID_DIRECTION_IN) {
+            fileInCents += res.cents;
+            totalInCents += res.cents;
+          } else {
+            fileOutCents += res.cents;
+            totalOutCents += res.cents;
+          }
+          if (res.currency) currencySet.add(res.currency);
+        },
+        onProgress: () => {
+          if (typeof onProgress === 'function') onProgress(totalRows);
+        }
+      });
+      perFile.push({
+        fileName,
+        rowCount: fileRowCount,
+        amountOutCents: fileOutCents,
+        amountInCents: fileInCents,
+        amountCents: fileInCents - fileOutCents,
+        amountOut: centsToAmountString(fileOutCents),
+        amountIn: centsToAmountString(fileInCents),
+        amount: centsToAmountString(fileInCents - fileOutCents)
+      });
+    }
+
+    if (totalRows === 0) {
+      return { ok: false, errorRows: [{ fileName: '', rowIndex: 0, reason: '所选文件无有效数据行' }], errorCount: 1 };
+    }
+    // 多月份混杂（含跨文件）→ 整批拒绝（spec Q8：一次导入应为同一流水月）
+    if (months.size > 1) {
+      errorCount += 1;
+      errorRows.push({
+        fileName: '',
+        rowIndex: 0,
+        reason: `一次导入流水跨多个月份（${[...months].sort().join(', ')}），请按月分开导入`
+      });
+    }
+    if (errorRows.length > 0) {
+      return { ok: false, errorRows, errorCount };
+    }
+
+    const totalAmountCents = totalInCents - totalOutCents;
+    const currencyList = [...currencySet].filter((c) => c !== '').sort();
+    let currency = null;
+    if (currencyList.length === 1) currency = currencyList[0];
+    else if (currencyList.length > 1) currency = currencyList.join(',');
+
+    const totals = {
+      totalOutCents,
+      totalInCents,
+      totalAmountCents,
+      totalOut: centsToAmountString(totalOutCents),
+      totalIn: centsToAmountString(totalInCents),
+      totalAmount: centsToAmountString(totalAmountCents),
+      currency
+    };
+    const yearMonth = [...months][0];
+
+    // 缓存供 saveRun（只存聚合结果，不存原始行）
+    lastComputeCache = { yearMonth, totals, perFile };
+
+    return { ok: true, yearMonth, totalRows, totals, perFile };
+  }
+
   // 落库（资金红线 🔴：收 beginOp → 算 endOp = beginOp + 发生额 → 原子写表 A/B），返回 { runId, endOp }。
   // beginOp 解析走 parseAmountToCents（与发生额同口径整数分）；endOp = beginCents + totalAmountCents。
   // totals/perFile 优先用入参，缺省回退 lastComputeCache。
@@ -384,6 +489,7 @@ function createVccOpCalcSession({ getDb }) {
   return {
     scanFiles,
     computeFiles,
+    streamScanAndCompute,
     saveRun,
     listCalculatedMonths,
     getMonthResult,
