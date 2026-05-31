@@ -82,7 +82,11 @@ function scanSheet(sheetEntry, sharedStrings, ctx) {
     // 扫 pending 里完整的 <row>...</row> 块；endFlush=true 表示流已结束（不再缓冲半行）
     const drainRows = (endFlush) => {
       while (true) {
-        const rowStart = pending.indexOf('<row');
+        // 兼容有属性 <row ...> 与无属性 <row>；用精确前缀避免误匹配 <rowBreaks> 等同前缀元素
+        //   （对齐生产验证版 streaming-xlsx-reader；对真实数据零行为变化，仅排除 sheetData 外噪声）
+        const ra = pending.indexOf('<row ');
+        const rb = pending.indexOf('<row>');
+        const rowStart = ra < 0 ? rb : (rb < 0 ? ra : Math.min(ra, rb));
         if (rowStart < 0) { if (!endFlush && pending.length > 16) pending = pending.slice(-16); break; }
         const rowEnd = pending.indexOf('</row>', rowStart);
         if (rowEnd < 0) { if (rowStart > 0) pending = pending.slice(rowStart); break; }

@@ -58,44 +58,14 @@ function validateFlowHeaders(actualHeaders) {
   return { ok: true };
 }
 
-// 数值解析（容忍千分位 `,` + 首尾空白；空字符串 → NaN，由调用方区分空值/非法）
-// 与 biz-op-recon validator parseAmount 一致；独立实现避免循环依赖。
-function parseAmount(v) {
-  if (v == null || v === '') return NaN;
-  const n = Number(String(v).trim().replace(/,/g, ''));
-  return Number.isFinite(n) ? n : NaN;
-}
-
-// 流水行校验（资金红线 ⚠️，spec §0.2 / Q8）：
-//   1) 出入方向必须严格 ∈ {「入」,「出」}（trim 后比较；不做大小写归一）→ 非法 → 整批拒绝
-//   2) 对账金额：空字符串视为合法（计 0，spec Q5）；非空且非数值 → 整批拒绝
-// 注意：本模块不校验账户编号（与第 5 模块对账不同，本模块只按方向求和，不做账户匹配）。
-function validateFlowRow(row) {
-  const dirRaw = row.direction == null ? '' : row.direction;
-  const dir = String(dirRaw).trim();
-  if (dir !== VALID_DIRECTION_IN && dir !== VALID_DIRECTION_OUT) {
-    return {
-      ok: false,
-      reason: `出入方向非法：实际值 "${dirRaw}"，仅允许 "入" 或 "出"`
-    };
-  }
-
-  const amtRaw = row.recon_amount;
-  const amtTrimmed = String(amtRaw == null ? '' : amtRaw).trim();
-  if (amtTrimmed !== '') {
-    const amt = parseAmount(amtRaw);
-    if (Number.isNaN(amt)) {
-      return { ok: false, reason: `对账金额非数值：${amtRaw}` };
-    }
-  }
-
-  return { ok: true };
-}
+// 注：行级校验（出入方向 / 对账金额 / 账单日期月份 / 币种）统一在
+//   src/main-process/vcc-op-calc-session.js 的 validateAndExtractRow 实现——它额外要解析月份
+//   (extractYearMonth) 与币种、并直接产出整数分 cents（与求和同口径）。故本模块**不**单独提供
+//   行校验函数，避免「两套方向/金额校验口径」并存漂移（资金红线单一口径，v2.1.12 self-review 修正）。
+//   本模块只负责表头校验（validateFlowHeaders，被 reader 调用）。
 
 module.exports = {
   validateFlowHeaders,
-  validateFlowRow,
-  parseAmount,
   normalizeHeaderCell,
   VALID_DIRECTION_IN,
   VALID_DIRECTION_OUT
