@@ -7,6 +7,8 @@ const {
   ensureAcquiringBillCurrencyTablesSupport,
   ensureAmountSplitRulesSupport,
   ensureBankBuReconTablesSupport,
+  // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表 + 2 索引
+  ensureVccOpCalcTablesSupport,
   ensureBillSplitMergeSupport,
   ensureBillSplitTargetSeqSupport,
   ensureParentTemplateSupport,
@@ -278,6 +280,8 @@ class AppDatabase {
     // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表
     // 与其他迁移完全独立，调用顺序无依赖；放在最末尾即可
     this.ensureBankBuReconTablesSupport();
+    // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表 + 2 索引（与现有 5 模块表完全隔离，调用顺序无依赖）
+    this.ensureVccOpCalcTablesSupport();
     // v2.1.3 T1：业务OP数据核对模块 4 张表（imports / flow_imports / runs / diff_rows）
     // 与 v2.1.2 bank_bu_recon_* 完全独立，调用顺序无依赖
     this.ensureBizOpReconTablesSupport();
@@ -476,6 +480,11 @@ class AppDatabase {
   // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表（pending_imports / bank_imports / runs）
   ensureBankBuReconTablesSupport() {
     return ensureBankBuReconTablesSupport(this.db);
+  }
+
+  // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表（runs / run_files）+ 2 索引
+  ensureVccOpCalcTablesSupport() {
+    return ensureVccOpCalcTablesSupport(this.db);
   }
 
   // v2.1.3 T1：业务OP数据核对模块 4 张表（imports / flow_imports / runs / diff_rows）

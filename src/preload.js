@@ -310,6 +310,17 @@ contextBridge.exposeInMainWorld('desktopApi', {
     exportDateRange: (payload) => ipcRenderer.invoke('bizOpRecon:export:date-range', payload),
     runHistory: (payload) => ipcRenderer.invoke('bizOpRecon:run:history', payload)
   },
+  // v2.1.12 需求1：VCC业务OP计算（仅流水文件 → 按月聚合发生额出/入 → 算期末OP；资金红线 🔴）
+  // 流程：pickFiles → scan(F1: 月份+条数) → computeAmounts(F2: 发生额) → save(F2: 期初OP→期末OP 落库)
+  //       → listBalanceMonths / getBalance(F3: 显示余额)
+  vccOpCalc: {
+    pickFiles: () => ipcRenderer.invoke('vccOpCalc:import:pick-files'),
+    scan: (payload) => ipcRenderer.invoke('vccOpCalc:import:scan', payload),
+    computeAmounts: () => ipcRenderer.invoke('vccOpCalc:run:compute-amounts'),
+    save: (payload) => ipcRenderer.invoke('vccOpCalc:run:save', payload),
+    listBalanceMonths: () => ipcRenderer.invoke('vccOpCalc:balance:list-months'),
+    getBalance: (payload) => ipcRenderer.invoke('vccOpCalc:balance:get', payload)
+  },
   // v2.1.6 Module B：收单单据币种校验
   // v2.1.7 F6：新增 onImportProgress / onRunProgress 订阅 API（spec §6.4）
   //   返回 unsubscribe 函数；renderer 必须在 finally 调用避免 listener 内存泄漏
