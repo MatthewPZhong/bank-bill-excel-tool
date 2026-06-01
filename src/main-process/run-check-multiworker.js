@@ -236,6 +236,7 @@ async function runWriteSplitChunks(opts) {
     prefixValues = [],
     tempDir,
     onProgress = null,
+    cancelToken = null,
     initTimeoutMs = 10000,
     closeTimeoutMs = 5000,
   } = opts || {};
@@ -387,6 +388,19 @@ async function runWriteSplitChunks(opts) {
     async function workerLoop(worker) {
       while (true) {
         if (aborted) break; // 已有 chunk 失败 → 停止领新 chunk（不再写新 temp）
+        // PR #57 review P2：cancel 响应（与单 worker run-repository.js:279 同语义，每 chunk 之间 check）。
+        //   cancelToken.cancelled → 停止派发新 chunk + abort（reader 阶段中止 → 下方 merge 不执行 → 无 diff_rows
+        //   写入；catch 仍 clearDiffRowsByRunId 兜底）。cancel 延迟 ≤ 在飞 chunk 完成时间（受自适应分片约束）。
+        //   修 review「MW 仅在全部 worker 完成+提交后才查取消、违反手册 <5s」。
+        if (cancelToken && cancelToken.cancelled) {
+          if (!aborted) {
+            aborted = true;
+            const e = new Error('multiworker cancelled');
+            e.name = 'CancelError'; // 与 session CancelError 同名识别（跨模块不用 instanceof）
+            firstError = e;
+          }
+          break;
+        }
         const i = nextIdx++;
         if (i >= totalChunks) break;
         const chunkSpec = chunks[i];

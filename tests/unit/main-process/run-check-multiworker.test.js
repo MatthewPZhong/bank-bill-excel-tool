@@ -604,4 +604,36 @@ test.describe('run-check-multiworker（plan-b write-splitting）', () => {
       ctx.cleanup();
     }
   });
+
+  // ── P2（PR #57 review）：MW 路径接 cancelToken —— 运行中取消 → 停派发 + CancelError + 不汇总 + temp 不泄漏 ──
+  //   修 review「MW 仅在全部 worker 完成并提交后才查取消，违反手册 <5s」。与单 worker 同语义（每 chunk 间 check）。
+  test('11. P2 cancel：运行中 cancelToken 取消 → 中止(CancelError) + 不汇总(0行) + temp 不泄漏', async () => {
+    const rows = 800;
+    const chunkSize = 50; // 16 chunks — cancel 在中途生效
+    const ctx = setupDb(rows);
+    const tempDir = mw.makeTempDir();
+    let progressed = 0;
+    const cancelToken = { get cancelled() { return progressed >= 1; } }; // 首个 chunk 完成后即取消
+    try {
+      let rejectErr;
+      try {
+        await mw.runWriteSplitChunks({
+          db: ctx.db, dbPath: ctx.dbPath, workerCount: 2,
+          chunks: buildChunks(rows, chunkSize),
+          selectSql: SELECT_SQL, partColumns: PART_COLUMNS,
+          targetTable: DIFF_TABLE, targetColumns: TARGET_COLUMNS,
+          prefixValues: [2], tempDir, cancelToken,
+          onProgress: () => { progressed += 1; },
+        });
+      } catch (e) { rejectErr = e; }
+      assert.ok(rejectErr, 'cancel 应 reject');
+      assert.equal(rejectErr.name, 'CancelError', `应抛 CancelError（实际 ${rejectErr && rejectErr.name}：${rejectErr && rejectErr.message}）`);
+      // reader 阶段 abort → 汇总(merge)不执行 → 目标表 runId=2 应 0 行（全有或全无）
+      assert.equal(dumpDiffRows(ctx.db, 2).length, 0, 'cancel 时汇总不执行（runId=2 应 0 行）');
+      assert.equal(countTempParts(tempDir), 0, 'cancel 后 temp 不泄漏');
+    } finally {
+      mw.cleanupDir(tempDir);
+      ctx.cleanup();
+    }
+  });
 });

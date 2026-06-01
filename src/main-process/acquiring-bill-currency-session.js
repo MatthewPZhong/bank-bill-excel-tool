@@ -507,6 +507,7 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
         dbPath,
         workerCount: effectiveWorkerCount,
         tempDir: mwTempDir,
+        cancelToken, // PR #57 review P2：MW 路径接 cancelToken（停派发+abort，<5s 取消语义，对齐单 worker）
         // onChunkDone 仅透传 UI progress（不写 chunk_progress —— complete 在成功后一次性标）
         onChunkDone: ({ chunkIndex, totalChunks, processedRows, insertedDiffRows: chunkInsertedDiffRows, elapsedMs }) => {
           if (onProgress) {

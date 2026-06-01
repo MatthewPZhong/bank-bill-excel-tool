@@ -324,8 +324,16 @@ POC 是 β 全阶段的前提——验证「多 worker write-splitting 真能 2-
 ### 11.3 ⏸️ Defer（follow-up，非合并阻断）
 
 - **I4（🟡 并发 liveness）**：worker 写事务锁窗口横跨整个 parse+insert（BEGIN 在流式前，~10-20x 旧同步路），并发导入撞 `SQLITE_BUSY 30s`。架构性（需「校验全过再分块子事务」权衡整批拒绝单事务保证，或 biz-op 与收单 worker 串行化）→ **defer 到 β.2-T3**；中间缓解：确认 renderer 禁止并发导入。
-- **Minor**：① MW 路径不接 cancelToken（cancel 期间 no-op，且是 C2 诱因）；② MW chunk 无超时（worker exit(0)/卡死会 hang，正常流程不可达）；③ utilityProcess 分支无 `'error'` 兜底（继承 pending 既定模式）。→ 随 β.2-T3 / 后续评估。
+- **Minor**：① MW 路径不接 cancelToken（cancel 期间 no-op，且是 C2 诱因）→ **已升 P2 并修复**（reviewer 评论，见 §11.5）；② MW chunk 无超时（worker exit(0)/卡死会 hang，正常流程不可达）；③ utilityProcess 分支无 `'error'` 兜底（继承 pending 既定模式）。②③ 随 β.2-T3 / 后续评估。
 
 ### 11.4 验收
-- 全量 `release-check` exit 0：**unit 1472/1472**（+5：C1/C2 + I1/I2/I3）+ **integration 952/952** + **smoke**（biz-op 154 / acquiring 203）。
+- 全量 `release-check` exit 0：**unit 1473/1473**（+6：C1/C2 + I1/I2/I3 + MW cancel）+ **integration 952/952** + **smoke**（biz-op 154 / acquiring 203）。
 - 修复 commit：β.1 `b320fa0`、β.2 `f921439`。收单导入块 self-review clean（无 C/I）。
+
+### 11.5 PR review 评论处理（reviewer @MatthewPZhong + Codex bot · 提 PR 后）
+
+- **Codex P1**（temp 残留）= self-review C1，已 `b320fa0` 修（Codex 审 self-review 前 commit）。
+- **P2 MW 未接 cancelToken**（取消违反手册 `<5s`，原列 §11.3 Minor ① defer，reviewer 升 P2）→ ✅ **已修**：`cancelToken` 透传 session→`insertDiffRowsByJoinMultiWorker`→`runWriteSplitChunks`，workerLoop 每 chunk 间 check → 停派发 + abort(CancelError) + 不汇总 + temp 清理（与单 worker 同语义）；回归测试 `run-check-multiworker #11`。同时进一步降低 C2 触发面（cancel 走优雅 abort 而非硬 terminate）。
+- **P2 package-lock 未同步** → ✅ 修（`2.1.12-alpha.1`→`beta.1`，仅版本字段）。
+- **P3 文档 release-check 计数不一致** → ✅ 修（CHANGELOG/VFH/PR 草稿统一 unit 1473）。
+- 剩余 Defer：§11.3 的 I4（写锁窗口）+ Minor ②③（MW chunk 无超时 / utilityProcess 无 error 兜底）随 β.2-T3 / 后续。

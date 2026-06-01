@@ -368,6 +368,7 @@ async function insertDiffRowsByJoinMultiWorker(db, {
   workerCount,
   tempDir,
   onChunkDone = null,
+  cancelToken = null,
 } = {}) {
   if (!runId || typeof runId !== 'number') {
     throw new Error('insertDiffRowsByJoinMultiWorker: runId 必填且为 number');
@@ -428,6 +429,7 @@ async function insertDiffRowsByJoinMultiWorker(db, {
       targetColumns: MULTIWORKER_TARGET_COLUMNS,
       prefixValues: [runId],
       tempDir,
+      cancelToken, // PR #57 review P2：cancel 响应透传到 worker 调度（停派发+abort）
       onProgress: (ev) => {
         // 透传到单 worker 同名 onChunkDone（caller 复用 chunk_progress 更新）
         if (typeof onChunkDone === 'function') {

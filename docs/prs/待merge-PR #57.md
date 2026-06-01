@@ -13,7 +13,7 @@ v2.1.12 α（PR #56）之后的 **β 性能架构阶段**，三块互相独立�
 | **β.2 bizOp 导入流式** | 百万行 xlsx 导入不 OOM/不卡 | SheetJS 撞 512MB→流式常数内存 | 五条资金红线（整批拒绝/原子替换/失败报告/bu改写/跨BU清）worker 内全保住 |
 | **收单导入 sax→手写** | 收单导入解析提速 | **端到端 5.6x（122s→22s/50万）** | 新旧 reader 全行 **SHA1 完全一致**（含金额/币种/raw_json） |
 
-质量门：`npm run release-check` 全绿（**unit 1467 / integration 952 / smoke 全过**）。
+质量门：`npm run release-check` 全绿（**unit 1473 / integration 952 / smoke 全过**）。
 
 ---
 
@@ -74,7 +74,7 @@ v2.1.12 α（PR #56）之后的 **β 性能架构阶段**，三块互相独立�
 
 ## 5 🔴 合并门槛与手测状态
 
-- ✅ **自动化全绿**：`npm run release-check`（unit 1467 / integration 952 / smoke 全过，含 acquiring 203 / progress 34 / pragma 27）。
+- ✅ **自动化全绿**：`npm run release-check`（unit 1473 / integration 952 / smoke 全过，含 acquiring 203 / progress 34 / pragma 27）。
 - ✅ **合成数据 byte-for-byte**：β.1 contract 20 + 嵌套拓扑；β.2 reader 11 + worker 10；收单导入 contract 18 + **真实规模 SHA1（50万/100万行）完全一致**。
 - ⚠️ **真实清结算数据手测**：合成 fixture 已充分证 byte-for-byte，但真实文件可能有畸形 XML 等边角，**由用户用真实大文件把关三块**（提 PR 即用户确认触发）。reviewer 重点抽查：① 收单对账 ≥100万行多 worker 结果与单 worker 一致；② bizOp 真实大文件导入五条红线；③ 收单导入入库金额/币种抽样对原文件。
 
@@ -97,4 +97,12 @@ v2.1.12 α（PR #56）之后的 **β 性能架构阶段**，三块互相独立�
 - 🟡 **β.2 Important ×3**（commit `f921439`）：**I1** 中途 DB 写错被误判 header → 改 insertFatal 标志 + fatal；**I2** 失败报告静默截断 → rowErrorTotal/truncated 透传 + 报告标注；**I3** emit 后立即 exit 大包截断 → emitAndExit 刷盘后退 + 单发守卫。各补回归测试（import-worker-contract 13/13）。
 - ⏸️ **Defer**：I4（worker 写事务锁窗口放大→并发 SQLITE_BUSY，架构性）→ β.2-T3 + 中间确认 renderer 禁并发导入；3 个 Minor（MW 无 cancelToken / chunk 无超时 / utilityProcess 无 error 兜底）随后续。
 - 🟢 收单导入块 self-review **clean**（contract 18 + scalediff 已充分覆盖）。
-- 验收：修复后全量 `release-check` exit 0（**unit 1472/1472** + integration 952/952 + smoke biz-op154/acquiring203）。
+- 验收：修复后全量 `release-check` exit 0（**unit 1473/1473** + integration 952/952 + smoke biz-op154/acquiring203）。
+
+## 9 PR review 评论处理（reviewer @MatthewPZhong + Codex bot）
+
+- **Codex P1**（`run-check-multiworker-worker.js` clear stale temp）：= self-review C1，**已在 `b320fa0` 修**（Codex 审的是 self-review 前的 `9d1ff32`）。
+- **P2 MW 路径未接 cancelToken**（大文件 run 取消违反手册 `<5s`）：✅ 修——`cancelToken` 透传 session→`insertDiffRowsByJoinMultiWorker`→`runWriteSplitChunks`，workerLoop 每 chunk 间 check（与单 worker 同语义）→ 停派发 + abort（CancelError）→ 不汇总（无 diff_rows 写入）+ temp 清理。回归测试 `run-check-multiworker #11`（运行中取消 → CancelError + 0 行 + 不泄漏）。
+- **P2 package-lock 未同步**：✅ 修——`package-lock.json` 版本 `2.1.12-alpha.1` → `2.1.12-beta.1`（仅版本字段，无依赖变动）。
+- **P3 文档 release-check 计数不一致**：✅ 修——CHANGELOG / VERSION_FEATURE_HISTORY / 本草稿统一最终 **unit 1473**。
+- 验收：最终全量 `release-check` exit 0（**unit 1473/1473** + integration 952/952 + smoke）。
