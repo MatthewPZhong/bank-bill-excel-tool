@@ -1,5 +1,49 @@
 # Changelog
 
+## 2.1.12-beta.1 - 2026-06-01
+
+v2.1.12 α（PR #56）之后的 **β 性能架构阶段**，三块互相独立的大文件/大计算量提速，全部 **🔴 资金红线 byte-for-byte 守恒**：β.1 收单对账 multi-worker（大数据量 JOIN 对账并行）+ β.2 bizOp（业务OP数据核对）导入流式 + worker 化（百万行 xlsx 导入不 OOM）+ 收单导入解析器 sax→手写字节扫描（收单单据币种校验导入提速）。⚠️ **3 个🔴资金红线**（三块各一）：① β.1 diff_rows 多 worker 与单 worker **byte-for-byte 一致** ② β.2 worker 内五条资金红线（整批拒绝 / (date,BU)+D+1 原子替换 / bu_name 改写 / 失败报告 / flow 跨 BU 清）全保住 ③ 收单导入新旧 reader 全行 **SHA1 完全一致**（含金额/币种/raw_json，数字 cell 取原文本绝不 parseFloat）。质量门：`npm run release-check` 全绿（**unit 1473 / integration 952 / smoke 全过**）。三块均**合成数据 byte-for-byte 已充分验证，真实大文件由用户手测把关**（提 PR 即用户确认触发，是合并门槛硬要求）。提 PR 后经 self-review + reviewer 评论修复 5 个问题（β.1 资金 Critical C1 temp 残留追加 / C2 MW 崩·cancel mid-merge resume 翻倍；β.2 Important I1 误分类 / I2 报告截断 / I3 stdout 刷盘；+ MW 路径接 cancelToken），均补回归测试。
+
+### 新增
+
+- **β.1 收单对账 multi-worker write-splitting**（🔴资金红线 / spec `spec-beta.md` §5.1 + §4 决策 / POC b6f7e57·7fc0ae8）：`acquiringBillCurrency` 对账 stage 4'（`INSERT INTO diff_rows SELECT … JOIN …`）500万行单 worker 慢，多 worker 并行直跑会撞 SQLite WAL single-writer → SQLITE_BUSY。
+  - **方案 plan-b（POC 实测拍板）**：主进程按 OFFSET/LIMIT 拆 N chunk → M worker 并行 `SELECT JOIN`（只读，WAL 下并发不冲突）→ 各 worker 写**自己的 temp db** → 主进程按 **chunkIndex 升序 ATTACH 汇总 INSERT**（byte-for-byte 顺序不变量）；50万行 plan-b 实测 **2.3–2.7x**（M=4，前提 chunk 数 >> worker 数）；byte-for-byte 全档 0 差异、无 SQLITE_BUSY
+  - **决策**：D29（默认 worker 2 / 上限 4 / `cpus-2`）· D30（plan-b）· D31（**<100万行 或 chunk 数 < worker 数 → 回退单 worker**）· D32（每模块独立 pool）· D33（settings 默认 2、`freemem<2GB`→1 OOM 降级）· D34（流式进度）· D-β-1（resume 断点续跑 → 回退单 worker，只服务全新 run）
+  - **自适应分片**：多 worker 路径目标 chunk 数 ≈ 4×worker（下界 2000），喂饱 worker
+  - **settings**：新增 `acquiring_bill_worker_count`（默认 2 / 范围 1-8 / 幂等 migration seed）
+  - **测试**：byte-for-byte contract 20 例（repository 级跨 chunk 边界 / 非整除 / 单 chunk / 0diff / 空表 + 三方一致 + 🔴失败保守不留半套数据；runCheckCore 级 M=2 vs 单 worker 逐行 + 回退 + default 零变化）+ 嵌套 worker 拓扑集成测试（main→dispatch worker→nested M worker byte-for-byte）
+  - 🔴 **资金红线**：diff_rows 多 worker 与单 worker 内容/顺序完全一致；失败时仅清本 run 的 diff（不留半套数据）。**合并门槛：500万真实数据手测**
+- **β.2 bizOpRecon（业务OP数据核对）导入流式 + worker 化**（🔴资金红线 / spec `spec-beta.md` §9）：`biz-op-recon-import/reader.js` 用 SheetJS `XLSX.readFile` 全量进内存，百万行 xlsx 撞 V8 512MB 单字符串上限静默返回空。
+  - **流式 reader `reader-streamed.js`**（仿 pending/VCC 成熟范式）：JSZip + SAX 扫 `<row>`，复用 `streaming-xlsx-reader` 的 `parseRowXml`/`readSharedStrings`，镜像 SheetJS reader 语义（真实 `<row r>` 行号 / `isRowMeaningful` / 表头校验 / 列多检测）
+  - **导入移入 child-process worker `import-worker.js`**（Electron `utilityProcess.fork` / Node `spawn` fallback）：边流式读边分批 INSERT，不堆百万行数组；IPC `bizOpRecon:import:run-biz-op/run-flow` 改调 worker 化入口（传 `dbPath=database.dbPath` 与 acquiring worker 同库 WAL 并发），`onProgress` 透传 renderer `bizOpRecon:import:progress`，**无 dbPath 回退旧同步**
+  - 🔴 **worker 内五条资金红线**：① 整批拒绝（errorRows 非空 → ROLLBACK 不入任何行）② (date,BU)+D+1 替换原子事务 ③ `bu_name=firstBu` 改写 ④ 失败报告 xlsx（worker emit errorRows → 主进程写盘）⑤ flow 跨 BU 清（`clearRunsAndDiffsByDate` 全 BU）
+  - **测试**：reader contract 11 例（与 SheetJS byte-level 等价）+ worker contract 10 例（worker vs 旧同步同输出：成功行数 / firstBu / 落库内容 / 拒绝 errorRows / DB 0 行 / 🔴D+1 同清 / 🔴flow 跨 BU 清 / bu_name 改写 / 表头不匹配）。**合并门槛：真实大文件手测**
+- **收单导入解析器 sax→手写字节扫描**（🔴资金红线 / spec `spec-beta.md` §10 / commits b6e7418…0ed5ee6）：profile POC 定位收单**导入** 50万行 122s，**解析占 ~90%**（sax 库逐 cell ~7 次事件回调 ≈ 1.68 亿次），insert+raw_json 仅 ~6%（早期误判方向已纠正）。
+  - **make-or-break POC**：同一真实 fixture 上纯解析 sax→手写 **8.7x(50万)/9.1x(100万)**（A/C 同用 yauzl 解压，唯一变量 sax↔手写）；JSZip 在 100万行（~3.8GB 解压 entry）崩 `uncompressed data size mismatch`，yauzl 同文件 OK → 最优架构 = **yauzl(保留)+手写扫描**，**不引入 JSZip**
+  - **实现**：新建 `reader-handrolled.js`（yauzl 解压 + sharedStrings 走 sax 复用 + sheet 扫描换手写）；`reader.js` 纯追加导出 helper（零函数体改动，作基线 + 一行回滚）；生产路径 `acquiring-bill-currency-session.js:16` 单行 require 切换
+  - 🔴🔴 **数字 cell 取值逐字对齐 sax**：取 `<v>` 原始文本（仅实体解码），**绝不 `parseFloat→String`**（否则 `"1000.00"`→`"1000"` 丢小数改写金额）；**未复用** pending 的 `parseRowXml`（它有 parseFloat），改写专用 `parseAcquiringRowXml`
+  - **实测端到端 5.6x**：122s→22s(50万) / ~250s→45s(100万) / 500万外推 ~20min→~3.8min；内存更低
+  - 🔴 **双层资金闸**：① contract test 18 例（含 sharedStrings `t="s"` 路径 + number cell + 稀疏行 + 中文实体 + 表头列少/多/错 + peek，sax vs 手写全等）② **真实规模 scalediff**：50万/100万行**全行 SHA1 + importedCount + monthKey 完全一致**（`scripts/poc/v2.1.12-acquiring-import-parser-compare.js scalediff`）
+
+### 变更
+
+- **收单导入默认解析器** sax → 手写字节扫描：生产路径 `acquiring-bill-currency-session.js:16` 单行 require 切到 `reader-handrolled.js`；`reader.js` 保留作基线 + 一行回滚（改回 `require('.../reader')` 即恢复 sax）
+- **bizOpRecon（业务OP数据核对）导入** 默认走 worker 化入口（流式 reader + child-process worker）；无 dbPath 自动回退旧同步路径
+- **β.1 多 worker 回滚开关**：settings `acquiring_bill_worker_count=1` 即全程单 worker
+
+### 测试
+
+- `npm run test:unit`：**1473 case 全绿**（新增 β.1 byte-for-byte contract 20 + β.2 reader contract 11 + worker contract 10 + 收单导入 contract 18 + worker pool / settings worker_count + self-review/review 回归 6：C1/C2 temp·resume + I1/I2/I3 + MW cancel）
+- `npm run test:integration`：**952 断言全绿**（含 β.1 嵌套 worker 拓扑集成测试 main→dispatch worker→nested M worker byte-for-byte）
+- `npm run smoke`：全过 0 regression（acquiring 203 / progress 34 / pragma 27）
+- **合成数据 byte-for-byte**：β.1 contract 20 + 嵌套拓扑；β.2 reader 11 + worker 10；收单导入 contract 18 + 真实规模 SHA1（50万/100万行）完全一致
+
+### α/β 收口
+
+- **v2.1.12 β（本版）**：β.1 收单对账 multi-worker + β.2 bizOp 导入流式 worker 化 + 收单导入 sax→手写如上；全部**纯性能架构提速、对用户行为透明（更快、结果不变）**
+- **🔴 合并门槛（资金红线复核 · CLAUDE.md 规则 7）**：三块均为🔴资金红线，合成 fixture 已充分证 byte-for-byte，但真实文件可能有畸形 XML 等边角——**由用户用真实大文件把关三块**（① 收单对账 ≥100万行多 worker 结果与单 worker 一致 ② bizOp 真实大文件导入五条红线 ③ 收单导入入库金额/币种抽样对原文件），提 PR 即用户确认触发
+- **回滚**：收单导入 `acquiring-bill-currency-session.js:16` 一行恢复 sax；β.2 bizOp 无 dbPath 自动回退旧同步；β.1 多 worker settings 置 1 即全程单 worker
+
 ## 2.1.12-alpha.1 - 2026-05-31
 
 v2.1.11 之后 1 轮迭代（α 阶段 = 业务 + 收尾），**2 个用户需求 + 1 个提示修正 + 1 批收尾清债**：需求1（**新功能** 第 6 个模块「VCC业务OP计算」— 仅导入流水对账单、按月聚合发生额出/入、期末OP = 期初OP + 发生额，落库 + 显示余额，**JSZip 流式 reader 支持百万行级大文件**）+ 需求5（C3「提取ReconId-From 网关」场景新增 extra fee 额外费用匹配 — 网关金额 + fee 后比银行对账单金额）+ 需求6（资金对账不平跳过提示加"数据侧候选行预检"）+ 收尾批（SR-log-1 删 `app_activity_log.txt` 旧双写 / I6 bundle C2 防御测试 / I7 important-variables 升格）。⚠️ **2 个🔴资金红线**（需求1 发生额求和 + 期末OP 计算；需求5 改 C3 网关核销金额匹配判定）+ **1 个🔴破坏性变更**（SR-log-1 停止旧 activity log 写入，历史文件保留不删 = 删数据红线护栏）。质量门：`npm run release-check` 全绿（unit 1390 / integration 952 / smoke 0 regression）+ 需求5 真实网关+银行账单端到端人工核对核销 + 提 PR 前 `/check-vars`。

@@ -20,6 +20,8 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+// v2.1.12-beta β.2-T2：导入 worker 化 spawn 方（纯 Node 测试路径用；Electron 走 utilityProcess）
+const { spawn } = require('node:child_process');
 
 const importsRepository = require('../backend/biz-op-recon-db/imports-repository');
 const flowImportsRepository = require('../backend/biz-op-recon-db/flow-imports-repository');
@@ -541,6 +543,204 @@ async function runFlowImportAsync(db, params) {
   return { status: 'success', totalCount: rows.length };
 }
 
+// ---------------- worker 化导入入口（β.2-T2，资金红线 🔴） ----------------
+//
+// 仿 src/main-process/pending-session.js runImport：spawn child-process worker（流式读 + 事务内边校验
+//   边 INSERT），解析 stdout JSON 行（progress/rejected/header-error/complete），按退出码收敛。
+//   语义零改变：worker 内保住整批拒绝 / (date,BU)+D+1 替换原子事务 / bu_name 改写 / flow 跨 BU 清；
+//   失败报告 xlsx 仍在主进程写（worker emit 的 errorRows 带 rawRow）。
+//
+// 路径只拼字符串（不 require worker 模块）——worker 反向 require 本 session 取 addOneDay/normalizeBu，
+//   若此处 require worker 会造成循环依赖。
+const WORKER_SCRIPT = path.resolve(__dirname, '../backend/biz-op-recon-import/import-worker.js');
+const NODE_MAX_OLD_SPACE_MB = 8192;
+
+// Electron 下用 utilityProcess.fork（真正 Node 子进程，--max-old-space-size 生效）；
+//   纯 Node 测试下 require('electron') 抛错 → fallback spawn(process.execPath)。
+let electronUtilityProcess = null;
+try {
+  electronUtilityProcess = require('electron').utilityProcess;
+} catch (_err) {
+  // 非 Electron 运行时；保持 spawn 兜底
+}
+
+// 统一收敛 worker stdout 事件 + 退出码 → 与旧同步 runBizOpImportAsync/runFlowImportAsync 同形返回值。
+//   kind='bizOp'|'flow'；writeErrorReport({ errorRows }) → Promise<errorReportPath>（report=true 时调用）。
+function spawnImportWorker({ kind, dbPath, date, filePath, onProgress, writeErrorReport, maxRowErrors }) {
+  return new Promise((resolve) => {
+    const jobMeta = { dbPath, kind, date, filePath };
+    if (Number.isFinite(maxRowErrors) && maxRowErrors > 0) jobMeta.maxRowErrors = maxRowErrors;
+
+    let stdoutBuf = '';
+    let stderrBuf = '';
+    const events = [];
+
+    function onStdoutChunk(chunk) {
+      stdoutBuf += chunk.toString();
+      let idx;
+      while ((idx = stdoutBuf.indexOf('\n')) !== -1) {
+        const line = stdoutBuf.slice(0, idx).trim();
+        stdoutBuf = stdoutBuf.slice(idx + 1);
+        if (!line) continue;
+        let ev;
+        try { ev = JSON.parse(line); } catch (_e) { ev = { type: 'raw', line }; }
+        events.push(ev);
+        if (typeof onProgress === 'function' && ev.type === 'progress') {
+          try { onProgress(ev); } catch (_progErr) { /* swallow */ }
+        }
+      }
+    }
+
+    async function finalize(code) {
+      // flush 残余（worker exit 前最后一行可能未带 \n）
+      if (stdoutBuf.trim()) {
+        try { events.push(JSON.parse(stdoutBuf.trim())); } catch (_e) { events.push({ type: 'raw', line: stdoutBuf.trim() }); }
+        stdoutBuf = '';
+      }
+
+      if (code === 0) {
+        const complete = events.find((e) => e.type === 'complete');
+        if (complete) {
+          if (kind === 'bizOp') {
+            resolve({ status: 'success', buName: complete.buName, validCount: complete.validCount });
+          } else {
+            resolve({ status: 'success', totalCount: complete.totalCount, validCount: complete.validCount });
+          }
+          return;
+        }
+        resolve({ status: 'error', message: 'worker 正常退出但缺 complete 事件', detailLines: [] });
+        return;
+      }
+
+      // code !== 0：rejected（校验失败）/ header-error / fatal
+      const rejected = events.find((e) => e.type === 'rejected');
+      if (rejected) {
+        // I2（β.2 review fix）：worker 回传 rowErrorTotal（全量真实错误数）+ truncated（是否超 maxRowErrors 被截）。
+        //   透传给写报告逻辑（报告顶部标注截断）+ 上行到结果（renderer 可显示「共 N 条」），避免静默截断。
+        const rowErrorTotal = Number.isFinite(rejected.rowErrorTotal)
+          ? rejected.rowErrorTotal
+          : (rejected.errorRows || []).length;
+        const truncated = rejected.truncated === true;
+        let errorReportPath = null;
+        // report=true → 主进程写失败报告 xlsx（worker emit errorRows 带 rawRow）
+        if (rejected.report && typeof writeErrorReport === 'function') {
+          try {
+            errorReportPath = await writeErrorReport({
+              errorRows: rejected.errorRows,
+              firstBu: rejected.firstBu,
+              rowErrorTotal,
+              truncated
+            });
+          } catch (wErr) {
+            // 报告写失败不吞——仍返回 rejected，但记录写报告异常（不阻断拒绝结论）
+            errorReportPath = null;
+            logger.appendModuleLog({
+              level: 'warning',
+              source: 'main',
+              domain: 'biz-op-recon',
+              message: '[biz-op-recon] 失败报告写盘异常',
+              details: [`kind=${kind}`, `date=${date}`, `err=${wErr && wErr.message ? wErr.message : String(wErr)}`]
+            });
+          }
+        }
+        resolve({
+          status: 'rejected',
+          errorReportPath,
+          errorRows: (rejected.errorRows || []).map((e) => ({ rowIndex: e.rowIndex, reason: e.reason })),
+          rowErrorTotal,
+          truncated
+        });
+        return;
+      }
+
+      const headerErr = events.find((e) => e.type === 'header-error');
+      if (headerErr) {
+        // 表头/读取失败：与旧同步路径（reader throw FileValidationError → IPC catch）同形返回
+        resolve({ status: 'error', message: headerErr.message, detailLines: headerErr.detailLines || [] });
+        return;
+      }
+
+      const fatal = events.find((e) => e.type === 'fatal');
+      const msg = fatal ? fatal.message : `worker 异常退出（code=${code}）\nstderr=${stderrBuf.trim().slice(0, 800)}`;
+      resolve({ status: 'error', message: msg, detailLines: [] });
+    }
+
+    if (electronUtilityProcess) {
+      const worker = electronUtilityProcess.fork(WORKER_SCRIPT, [JSON.stringify(jobMeta)], {
+        execArgv: [`--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`],
+        env: { ...process.env, NODE_OPTIONS: `--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}` },
+        stdio: 'pipe'
+      });
+      worker.stdout.on('data', onStdoutChunk);
+      worker.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+      worker.on('exit', (code) => { finalize(code); });
+    } else {
+      const worker = spawn(process.execPath, [
+        `--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`,
+        WORKER_SCRIPT,
+        JSON.stringify(jobMeta)
+      ], { stdio: ['ignore', 'pipe', 'pipe'] });
+      worker.stdout.on('data', onStdoutChunk);
+      worker.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+      worker.on('error', (err) => {
+        resolve({ status: 'error', message: 'worker spawn 失败：' + err.message, detailLines: [] });
+      });
+      worker.on('close', (code) => { finalize(code); });
+    }
+  });
+}
+
+// 业务OP 导入（默认 worker 路径）。无 dbPath → fallback 旧同步 runBizOpImportAsync（测试 / 兜底）。
+//   params: { date, filePath, dbPath, writeBizOpErrorReportXlsx, errorReportsDir, onProgress, maxRowErrors,
+//             readBizOpFile? }（readBizOpFile 仅 fallback 用）
+async function runBizOpImportViaWorker(db, params) {
+  const {
+    date, filePath, dbPath,
+    writeBizOpErrorReportXlsx, errorReportsDir,
+    onProgress, maxRowErrors
+  } = params;
+
+  if (!dbPath) {
+    // 回退旧同步路径（保持 contract 基线 / 无 dbPath 环境可用）
+    return runBizOpImportAsync(db, params);
+  }
+
+  return spawnImportWorker({
+    kind: 'bizOp',
+    dbPath, date, filePath, onProgress, maxRowErrors,
+    writeErrorReport: async ({ errorRows, firstBu, rowErrorTotal, truncated }) => {
+      const saveDir = path.join(errorReportsDir, date);
+      const fileName = makeBizOpErrorReportFileName(firstBu, date);
+      // I2：透传 rowErrorTotal/truncated → 报告顶部标注截断
+      return writeBizOpErrorReportXlsx({ date, buName: firstBu, errorRows, saveDir, fileName, rowErrorTotal, truncated });
+    }
+  });
+}
+
+// 流水导入（默认 worker 路径）。无 dbPath → fallback 旧同步 runFlowImportAsync。
+async function runFlowImportViaWorker(db, params) {
+  const {
+    date, filePath, dbPath,
+    writeFlowErrorReportXlsx, errorReportsDir,
+    onProgress, maxRowErrors
+  } = params;
+
+  if (!dbPath) {
+    return runFlowImportAsync(db, params);
+  }
+
+  return spawnImportWorker({
+    kind: 'flow',
+    dbPath, date, filePath, onProgress, maxRowErrors,
+    writeErrorReport: async ({ errorRows, rowErrorTotal, truncated }) => {
+      const saveDir = path.join(errorReportsDir, date);
+      const fileName = makeFlowErrorReportFileName(date);
+      // I2：透传 rowErrorTotal/truncated → 报告顶部标注截断
+      return writeFlowErrorReportXlsx({ date, errorRows, saveDir, fileName, rowErrorTotal, truncated });
+    }
+  });
+}
+
 // ---------------- 文件名生成 helper ----------------
 
 // #9 拍板 A 文件名格式
@@ -656,9 +856,13 @@ module.exports = {
   diffT1AndT2Accounts,
   runReconciliation,
 
-  // 整批拒绝 + 失败报告流程
+  // 整批拒绝 + 失败报告流程（旧同步路径，作 contract 基线 / 无 dbPath 兜底）
   runBizOpImportAsync,
   runFlowImportAsync,
+
+  // worker 化导入入口（β.2-T2，默认走 worker；无 dbPath 回退旧同步）
+  runBizOpImportViaWorker,
+  runFlowImportViaWorker,
 
   // 文件名 helper
   makeBizOpErrorReportFileName,

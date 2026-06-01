@@ -39,6 +39,19 @@ function insertRows(db, date, rows) {
   return count;
 }
 
+// v2.1.12-beta β.2-T2：预编译逐行 inserter（边流式读边 INSERT 用，避免百万次 db.prepare）
+// 返回 insertOne(date, row)；与 insertRows 共用 INSERT_SQL + 同列序/同 null→'' 归一（单一真理来源）。
+function makeRowInserter(db) {
+  const stmt = db.prepare(INSERT_SQL);
+  return (date, row) => {
+    const params = [date, row._rowIndex ?? 0];
+    for (const col of FLOW_DB_COLUMNS) {
+      params.push(row[col] == null ? '' : String(row[col]));
+    }
+    return stmt.run(...params);
+  };
+}
+
 function getRowsByDate(db, date) {
   return db.prepare(`SELECT * FROM ${TABLE} WHERE data_date = ? ORDER BY row_index ASC`).all(date);
 }
@@ -68,6 +81,7 @@ module.exports = {
   TABLE,
   clearByDate,
   insertRows,
+  makeRowInserter,
   getRowsByDate,
   getRowsByDateBu,
   listImportedDates

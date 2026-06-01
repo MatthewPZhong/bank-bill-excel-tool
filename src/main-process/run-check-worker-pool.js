@@ -339,6 +339,9 @@ async function dispatchRunCheck(payload, callbacks = {}) {
   // v2.1.10 A4 T18 / T19：payload 透传 chunkSize + resumeFromRun
   //   - chunkSize：caller (main.js IPC handler) 从 settings 注入；undefined 时 runCheckCore 用 default 100000
   //   - resumeFromRun：{ runId, lastCompletedChunkIndex }；undefined 时全新 run（默认 path）
+  // v2.1.12 β.1-T3：透传 workerCount + tempDir（多 worker write-splitting；undefined→runCheckCore 默认单 worker）
+  //   - dbPath 不透传：worker init 时已存 workerDbPath，nested 子 worker 复用之（避免重复传）
+  //   - __forceMultiWorkerForTest：仅集成/单测用（强制走多 worker 跳过 D31 性能闸）；生产 caller 不传
   workerInstance.postMessage({
     type: 'run',
     jobId,
@@ -347,6 +350,9 @@ async function dispatchRunCheck(payload, callbacks = {}) {
       storageRoot: payload.storageRoot,
       chunkSize: payload.chunkSize,
       resumeFromRun: payload.resumeFromRun,
+      workerCount: payload.workerCount,
+      tempDir: payload.tempDir,
+      __forceMultiWorkerForTest: payload.__forceMultiWorkerForTest,
     },
   });
   return jobPromise;

@@ -990,6 +990,31 @@ function ensureAcquiringBillChunkSizeSetting(db) {
   return { status: 'seeded', key: ACQUIRING_BILL_CHUNK_SIZE_KEY };
 }
 
+// v2.1.12 β.1-T3：seed 收单单据多 worker write-splitting 的 worker 数默认值（2）
+//   spec §4 D33（OOM 防御默认 2，高级可调 4）+ D29（默认上限 4）；范围 [1, 8]（settings-repository.js）
+//   getter 范围外回退默认；main.js handler 还会再做 CPU/内存 clamp
+//   幂等：INSERT OR IGNORE — 用户已改值（sqlite3 直改）不被覆盖
+const ACQUIRING_BILL_WORKER_COUNT_KEY = 'acquiring_bill_worker_count';
+const ACQUIRING_BILL_WORKER_COUNT_DEFAULT = '2';
+function ensureAcquiringBillWorkerCountSetting(db) {
+  // 同 ensureAcquiringBillChunkSizeSetting：依赖 app_settings 表存在
+  try {
+    db.prepare('SELECT 1 FROM app_settings LIMIT 1').get();
+  } catch (_e) {
+    return { status: 'skipped-no-table' };
+  }
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT OR IGNORE INTO app_settings (setting_key, setting_value, updated_at)
+    VALUES (?, ?, ?)
+  `).run(
+    ACQUIRING_BILL_WORKER_COUNT_KEY,
+    ACQUIRING_BILL_WORKER_COUNT_DEFAULT,
+    now
+  );
+  return { status: 'seeded', key: ACQUIRING_BILL_WORKER_COUNT_KEY };
+}
+
 // v2.1.10 A4 T19：给 acquiring_bill_currency_runs 加 chunk_progress 列（chunked 进度 JSON 序列化）
 //   值结构：JSON `{ lastCompletedChunkIndex, totalChunks, status: 'in-progress' | 'partial' | 'complete' }`
 //   - in-progress：runCheckCore stage 4' chunked 循环刚开始（totalChunks 已算出）
@@ -1967,6 +1992,8 @@ module.exports = {
   ensureAcquiringBillIdleCleanupMinutesSetting,
   // v2.1.10 A4 T18 / T19：chunked 分批 size settings + runs.chunk_progress 列 migration
   ensureAcquiringBillChunkSizeSetting,
+  // v2.1.12 β.1-T3：多 worker write-splitting worker 数 settings seed（D29/D33）
+  ensureAcquiringBillWorkerCountSetting,
   ensureAcquiringBillCurrencyRunsChunkProgress,
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings（v0.2 单键）
   ensureAcquiringBillCurrencyRawJsonRetentionSettings,

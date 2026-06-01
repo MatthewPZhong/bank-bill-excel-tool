@@ -1,6 +1,7 @@
 const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os'); // v2.1.12 β.1-T3：多 worker D33 OOM clamp（cpus / freemem）
 const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification } = require('electron');
@@ -66,8 +67,10 @@ const { readPendingGuanliFile, readBankFile } = require('./backend/bank-bu-recon
 // （文件名生成在 ipc handler 内部直接 require session 调用，main.js 顶层无引用）
 const {
   createBizOpReconSession,
-  runBizOpImportAsync: runBizOpImport,
-  runFlowImportAsync: runFlowImport
+  // v2.1.12-beta β.2-T2：默认走 worker 化导入入口（流式 + 边读边插，解决百万行 OOM/卡主线程）
+  //   旧同步 runBizOpImportAsync/runFlowImportAsync 保留作 contract 基线 / 无 dbPath 兜底（worker 入口内部回退）
+  runBizOpImportViaWorker: runBizOpImport,
+  runFlowImportViaWorker: runFlowImport
 } = require('./main-process/biz-op-recon-session');
 const {
   writeSingleDateDiffWorkbook: writeBizOpSingleDateDiffWorkbook,
@@ -10524,18 +10527,26 @@ function registerNewAccountHandlers() {
 
   // 业务OP 导入（#1 双重校验 + #4 替换原子事务 + #5 整批拒绝 + #15 清空旧 runs）
   // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数（rejected/error 不计，spec D6）
-  trackedIpcHandle('bizOpRecon:import:run-biz-op', '业务OP数据核对', '导入文件', async (_event, payload = {}) => {
+  trackedIpcHandle('bizOpRecon:import:run-biz-op', '业务OP数据核对', '导入文件', async (event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
     const { date, filePath } = payload || {};
     if (!date || !filePath) return { status: 'error', message: '入参缺失（date / filePath）' };
     try {
       const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
+      // v2.1.12-beta β.2-T2：默认 worker 化（dbPath 主 DB tool-data.sqlite，与 acquiring worker 同库 WAL 并发）
+      //   进度透传 renderer（仿 pending:import:progress 范式，swallow send 失败）
+      //   readBizOpFile 仍传——worker 入口在无 dbPath 时回退旧同步路径用
       const result = await runBizOpImport(database.db, {
         date,
         filePath,
+        dbPath: database.dbPath,
         readBizOpFile,
         writeBizOpErrorReportXlsx,
-        errorReportsDir
+        errorReportsDir,
+        onProgress: (ev) => {
+          try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'bizOp' }); }
+          catch (_e) { /* swallow */ }
+        }
       });
       return result;
     } catch (err) {
@@ -10549,18 +10560,24 @@ function registerNewAccountHandlers() {
 
   // 流水对账单 导入（#3 出入方向枚举 + #5 整批拒绝）
   // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
-  trackedIpcHandle('bizOpRecon:import:run-flow', '业务OP数据核对', '导入文件', async (_event, payload = {}) => {
+  trackedIpcHandle('bizOpRecon:import:run-flow', '业务OP数据核对', '导入文件', async (event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
     const { date, filePath } = payload || {};
     if (!date || !filePath) return { status: 'error', message: '入参缺失（date / filePath）' };
     try {
       const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
+      // v2.1.12-beta β.2-T2：默认 worker 化（同 run-biz-op）；readFlowFile 传作无 dbPath 回退用
       const result = await runFlowImport(database.db, {
         date,
         filePath,
+        dbPath: database.dbPath,
         readFlowFile,
         writeFlowErrorReportXlsx,
-        errorReportsDir
+        errorReportsDir,
+        onProgress: (ev) => {
+          try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'flow' }); }
+          catch (_e) { /* swallow */ }
+        }
       });
       return result;
     } catch (err) {
@@ -11051,17 +11068,46 @@ function registerNewAccountHandlers() {
       const chunkSize = typeof database.getAcquiringBillChunkSize === 'function'
         ? database.getAcquiringBillChunkSize()
         : undefined;
+      // v2.1.12 β.1-T3 — 多 worker workerCount 注入（⚠️ 资金红线 · spec §4 D29/D33）：
+      //   1. settings 取值（getAcquiringBillWorkerCount：default 2，范围 1-8，越界回退 2）
+      //   2. D29 CPU 上限：clamp 到 max(1, cpus-2)（POC：M=4 即甜点，避免过订）
+      //   3. D33 OOM 降级：可用内存 < 2GB → 强制降到 1（worker 各 ~800MB peak，低配机兜底）
+      //   ⚠️ 纯性能/资源闸——单/多 worker 结果 byte-for-byte 一致（contract 已锁）；clamp 只影响快慢与内存。
+      //   ⚠️ 最终 workerCount<=1（如单核机 / 低内存 / settings=1）→ runCheckCore gate 自然回退单 worker，零行为变化。
+      const computeWorkerCount = () => {
+        const settingsCount = typeof database.getAcquiringBillWorkerCount === 'function'
+          ? database.getAcquiringBillWorkerCount()
+          : 1;
+        let n = Number.isInteger(settingsCount) && settingsCount > 0 ? settingsCount : 1;
+        // D29：CPU 上限
+        const cpuCap = Math.max(1, (os.cpus() ? os.cpus().length : 1) - 2);
+        n = Math.min(n, cpuCap);
+        // D33：可用内存 < 2GB → 降到单 worker（OOM 兜底）
+        const OOM_FREEMEM_FLOOR_BYTES = 2 * 1024 * 1024 * 1024;
+        try {
+          if (os.freemem() < OOM_FREEMEM_FLOOR_BYTES) n = 1;
+        } catch (_e) { /* freemem 不可用 → 保守不降级（cpuCap 已兜底） */ }
+        return Math.max(1, n);
+      };
+      const workerCount = computeWorkerCount();
+      // 多 worker temp db 目录（runWriteSplitChunks 写 part-<ci>.sqlite，跑完 finally 清文件；
+      //   空目录复用，不反复 mkdir/rm）。单 worker 路径不使用此目录。
+      const mwTempDir = path.join(storageRoot, '.mw-tmp');
+      try { fs.mkdirSync(mwTempDir, { recursive: true }); } catch (_e) { /* swallow — 多 worker gate 内会再兜底建 */ }
       // v2.1.10 A3 T10：worker pool dispatch（替代 session.runCheck 主进程直调）
       //   - __dbPath 传 database.dbPath（worker 内 new DatabaseSync(dbPath) — D24 独立 connection）
       //   - onLog：worker 内 appendModuleLog → message pipe → 主进程 appendActivityLogEntry
       //     （避免主/子进程并发写 app_activity_log.txt 的 read-modify-write race）
       // v2.1.10 A4 T18：chunkSize 透传 worker → runCheckCore → insertDiffRowsByJoinChunked
+      // v2.1.12 β.1-T3：workerCount + tempDir 透传 worker → runCheckCore → 多 worker gate
       result = await runCheckWorkerPool.dispatchRunCheck(
         {
           __dbPath: database.dbPath,
           monthKey,
           storageRoot,
           chunkSize,
+          workerCount,
+          tempDir: mwTempDir,
         },
         {
           onProgress,

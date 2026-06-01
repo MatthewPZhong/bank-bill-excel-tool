@@ -500,5 +500,15 @@ module.exports = {
   importFlowFile,
   importBillFile,
   peekMonthKeyFromFile,
-  ImportValidationError
+  ImportValidationError,
+  // v2.1.12-beta 收单导入提速：纯追加导出以下 helper / 常量供 reader-handrolled.js 复用，
+  //   不改本文件任何函数行为（reader.js 仍是 sax 基线 + 过渡回退）。
+  //   reader-handrolled 复用 yauzl 解压 + sharedStrings(sax) + 表头入口常量，仅把 sheet 扫描换手写。
+  openZipWithEntries,
+  loadSharedStrings,
+  SHEET_ENTRY_NAME,
+  SHARED_STRINGS_ENTRY_NAME,
+  columnLetterToIndex,
+  parseColumnFromCellRef,
+  MAX_COLLECTED_ERRORS
 };
