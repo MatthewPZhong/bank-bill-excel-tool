@@ -615,11 +615,22 @@ function spawnImportWorker({ kind, dbPath, date, filePath, onProgress, writeErro
       // code !== 0：rejected（校验失败）/ header-error / fatal
       const rejected = events.find((e) => e.type === 'rejected');
       if (rejected) {
+        // I2（β.2 review fix）：worker 回传 rowErrorTotal（全量真实错误数）+ truncated（是否超 maxRowErrors 被截）。
+        //   透传给写报告逻辑（报告顶部标注截断）+ 上行到结果（renderer 可显示「共 N 条」），避免静默截断。
+        const rowErrorTotal = Number.isFinite(rejected.rowErrorTotal)
+          ? rejected.rowErrorTotal
+          : (rejected.errorRows || []).length;
+        const truncated = rejected.truncated === true;
         let errorReportPath = null;
         // report=true → 主进程写失败报告 xlsx（worker emit errorRows 带 rawRow）
         if (rejected.report && typeof writeErrorReport === 'function') {
           try {
-            errorReportPath = await writeErrorReport({ errorRows: rejected.errorRows, firstBu: rejected.firstBu });
+            errorReportPath = await writeErrorReport({
+              errorRows: rejected.errorRows,
+              firstBu: rejected.firstBu,
+              rowErrorTotal,
+              truncated
+            });
           } catch (wErr) {
             // 报告写失败不吞——仍返回 rejected，但记录写报告异常（不阻断拒绝结论）
             errorReportPath = null;
@@ -635,7 +646,9 @@ function spawnImportWorker({ kind, dbPath, date, filePath, onProgress, writeErro
         resolve({
           status: 'rejected',
           errorReportPath,
-          errorRows: (rejected.errorRows || []).map((e) => ({ rowIndex: e.rowIndex, reason: e.reason }))
+          errorRows: (rejected.errorRows || []).map((e) => ({ rowIndex: e.rowIndex, reason: e.reason })),
+          rowErrorTotal,
+          truncated
         });
         return;
       }
@@ -695,10 +708,11 @@ async function runBizOpImportViaWorker(db, params) {
   return spawnImportWorker({
     kind: 'bizOp',
     dbPath, date, filePath, onProgress, maxRowErrors,
-    writeErrorReport: async ({ errorRows, firstBu }) => {
+    writeErrorReport: async ({ errorRows, firstBu, rowErrorTotal, truncated }) => {
       const saveDir = path.join(errorReportsDir, date);
       const fileName = makeBizOpErrorReportFileName(firstBu, date);
-      return writeBizOpErrorReportXlsx({ date, buName: firstBu, errorRows, saveDir, fileName });
+      // I2：透传 rowErrorTotal/truncated → 报告顶部标注截断
+      return writeBizOpErrorReportXlsx({ date, buName: firstBu, errorRows, saveDir, fileName, rowErrorTotal, truncated });
     }
   });
 }
@@ -718,10 +732,11 @@ async function runFlowImportViaWorker(db, params) {
   return spawnImportWorker({
     kind: 'flow',
     dbPath, date, filePath, onProgress, maxRowErrors,
-    writeErrorReport: async ({ errorRows }) => {
+    writeErrorReport: async ({ errorRows, rowErrorTotal, truncated }) => {
       const saveDir = path.join(errorReportsDir, date);
       const fileName = makeFlowErrorReportFileName(date);
-      return writeFlowErrorReportXlsx({ date, errorRows, saveDir, fileName });
+      // I2：透传 rowErrorTotal/truncated → 报告顶部标注截断
+      return writeFlowErrorReportXlsx({ date, errorRows, saveDir, fileName, rowErrorTotal, truncated });
     }
   });
 }

@@ -197,20 +197,36 @@ function listDatesInRange(startDate, endDate) {
   return result;
 }
 
+// I2（β.2 review fix）：worker 路径行级错误超 maxRowErrors（默认 1000）时只回传前 M 条带 rawRow，
+//   同时回传 rowErrorTotal（全量真实错误数）+ truncated。报告顶部加一行醒目提示，避免「静默截断」
+//   （旧同步路写全量，无上限）。仅 truncated=true 时插提示行；未截断时报告与旧实现完全一致。
+function addTruncationNote(sheet, errorRows, rowErrorTotal, truncated) {
+  if (!truncated) return;
+  const total = Number.isFinite(rowErrorTotal) ? rowErrorTotal : errorRows.length;
+  const remain = Math.max(0, total - errorRows.length);
+  const noteRow = sheet.addRow([
+    `共 ${total} 条错误行，本报告仅列出前 ${errorRows.length} 条；其余 ${remain} 条未在报告中显示，请先修正后重新导入。`
+  ]);
+  noteRow.font = { bold: true, color: { argb: 'FFCC0000' }, size: 11 };
+}
+
 // 业务 OP 失败报告（spec §6.3，#5 拍板）
-// 入参：{ date, buName, errorRows, saveDir, fileName }
-//   errorRows: [{ rowIndex, reason, rawRow }]
+// 入参：{ date, buName, errorRows, saveDir, fileName, rowErrorTotal?, truncated? }
+//   errorRows: [{ rowIndex, reason, rawRow }]；rowErrorTotal/truncated 来自 worker（I2）
 // 返回：savePath
-async function writeBizOpErrorReportXlsx({ date, buName, errorRows, saveDir, fileName }) {
+async function writeBizOpErrorReportXlsx({ date, buName, errorRows, saveDir, fileName, rowErrorTotal, truncated }) {
   await fs.promises.mkdir(saveDir, { recursive: true });
   const savePath = path.join(saveDir, fileName);
 
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet(date);
 
+  // I2：截断提示行（仅 truncated=true 时）置于表头之上
+  addTruncationNote(sheet, errorRows, rowErrorTotal, truncated);
+
   // 表头：原 23 列 + 失败行号 + 失败原因
-  sheet.addRow([...BIZ_OP_HEADERS, ...ERROR_HEADER_TAIL]);
-  sheet.getRow(1).font = { bold: true, size: 10 };
+  const headerRow = sheet.addRow([...BIZ_OP_HEADERS, ...ERROR_HEADER_TAIL]);
+  headerRow.font = { bold: true, size: 10 };
 
   for (const e of errorRows) {
     const rowArray = e.rawRow ? bizOpRowToArray(e.rawRow) : BIZ_OP_DB_COLUMNS.map(() => '');
@@ -226,18 +242,21 @@ async function writeBizOpErrorReportXlsx({ date, buName, errorRows, saveDir, fil
 }
 
 // 流水失败报告（spec §6.3）
-// 入参：{ date, errorRows, saveDir, fileName }
+// 入参：{ date, errorRows, saveDir, fileName, rowErrorTotal?, truncated? }
 //   errorRows: [{ rowIndex, reason, rawRow }]
 // 返回：savePath
-async function writeFlowErrorReportXlsx({ date, errorRows, saveDir, fileName }) {
+async function writeFlowErrorReportXlsx({ date, errorRows, saveDir, fileName, rowErrorTotal, truncated }) {
   await fs.promises.mkdir(saveDir, { recursive: true });
   const savePath = path.join(saveDir, fileName);
 
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet(date);
 
-  sheet.addRow([...FLOW_HEADERS, ...ERROR_HEADER_TAIL]);
-  sheet.getRow(1).font = { bold: true, size: 10 };
+  // I2：截断提示行（仅 truncated=true 时）置于表头之上
+  addTruncationNote(sheet, errorRows, rowErrorTotal, truncated);
+
+  const headerRow = sheet.addRow([...FLOW_HEADERS, ...ERROR_HEADER_TAIL]);
+  headerRow.font = { bold: true, size: 10 };
 
   for (const e of errorRows) {
     const rowArray = e.rawRow ? flowRowToArray(e.rawRow) : FLOW_DB_COLUMNS.map(() => '');

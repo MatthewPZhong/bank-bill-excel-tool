@@ -433,3 +433,114 @@ test('🔴 flow worker 重导清该 date 跨所有 BU 旧 runs（旧 run 基于�
   assert.equal(runRepo.listRunsByDateBu(wk.db, date, 'BU-B').length, 0, '🔴 BU-B 旧 run 被清（跨所有 BU）');
   wk.db.close();
 });
+
+// ============================================================================
+// β.2 review fix 回归（I1 / I2 / I3）
+// ============================================================================
+
+// ---------------- ⑪ I1：流式中途 INSERT 失败 → fatal（非「表头/读取失败」）+ ROLLBACK ----------------
+// 反例（修复前）：insertOne 抛错 → 冒泡到 reader-streamed → wrapReadError 重包成 header-mismatch
+//   errorCode 的 FileValidationError → 被误判成 header-error（"文件读取失败"）。
+// 修复后：worker 在 onDataRow 内单独 try insertOne，标 insertFatal → 流结束后 ROLLBACK + emit fatal(exit 2)。
+// 注入手法：在主表上建 BEFORE INSERT 触发器，遇 account_no='__FAIL__' RAISE(ABORT)（worker 独立 connection
+//   经 WAL 看到已提交的触发器；幂等迁移 CREATE TABLE IF NOT EXISTS 不会删触发器）。
+test('I1 流式中途 INSERT 失败：worker fatal（消息非表头/读取失败）+ DB 0 行（ROLLBACK）', async () => {
+  const date = '2026-07-01';
+  const wk = freshDb();
+  // 触发器：第 2 行 INSERT 时 RAISE ABORT，模拟中途 DB 写失败
+  wk.db.exec(`
+    CREATE TRIGGER force_biz_op_insert_fail
+    BEFORE INSERT ON biz_op_recon_imports
+    WHEN NEW.account_no = '__FAIL__'
+    BEGIN
+      SELECT RAISE(ABORT, 'forced insert failure for test');
+    END;
+  `);
+
+  // 行1 正常落库（触发 clear+insert），行2 命中触发器抛错（两行均通过双重校验 → 会走到 insertOne）
+  const rows = [
+    bizOpRowArray('BU-A', 'ACC_OK', { begin: 0, amount: 0, end: 0 }),
+    bizOpRowArray('BU-A', '__FAIL__', { begin: 0, amount: 0, end: 0 })
+  ];
+  const fp = await writeXlsx(BIZ_OP_HEADERS, rows);
+
+  const wkRes = await session.runBizOpImportViaWorker(wk.db, {
+    date, filePath: fp, dbPath: wk.dbPath,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(wk.dir, 'err')
+  });
+
+  assert.equal(wkRes.status, 'error', '中途 INSERT 失败 → status=error（fatal）');
+  assert.match(wkRes.message || '', /写入失败|forced insert failure/, 'message 指向写入/系统错');
+  assert.doesNotMatch(
+    wkRes.message || '',
+    /表头|文件读取失败|HEADER_MISMATCH/i,
+    'message 不再被误判成「表头/读取失败」'
+  );
+  // 🔴 ROLLBACK：行1 的 insert + clear 全部撤销 → DB 净 0 行
+  assert.equal(dumpImports(wk.db, date, 'BU-A').length, 0, '🔴 整批 ROLLBACK → DB 0 行');
+  wk.db.close();
+});
+
+// ---------------- ⑫ I2：行级错误超 maxRowErrors → truncated + 报告标注全量数 ----------------
+// 反例（修复前）：errorRows 截到 maxRowErrors，rowErrorTotal/truncated 被 session 丢弃 → 报告静默截断、
+//   用户无"还有 N 条"提示。修复后：透传到 result + 报告顶部加「共 N 条，仅列前 M 条」提示行。
+test('I2 错误超 maxRowErrors：result.truncated=true + rowErrorTotal 全量 + 报告标注', async () => {
+  const date = '2026-07-02';
+  // 5 个双重校验失败行（end != begin+amount），maxRowErrors=3 → 截到 3，rowErrorTotal=5
+  const rows = [];
+  for (let i = 0; i < 5; i++) rows.push(bizOpRowArray('BU-A', `ACC${i}`, { begin: 0, amount: 10, end: 999 }));
+  const fp = await writeXlsx(BIZ_OP_HEADERS, rows);
+
+  const wk = freshDb();
+  const wkRes = await session.runBizOpImportViaWorker(wk.db, {
+    date, filePath: fp, dbPath: wk.dbPath,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(wk.dir, 'err'),
+    maxRowErrors: 3
+  });
+
+  assert.equal(wkRes.status, 'rejected');
+  assert.equal(wkRes.rowErrorTotal, 5, 'rowErrorTotal=全量真实错误数 5');
+  assert.equal(wkRes.truncated, true, 'truncated=true（5 > 3）');
+  assert.equal(wkRes.errorRows.length, 3, 'errorRows 截到 maxRowErrors=3');
+  assert.ok(wkRes.errorReportPath && fs.existsSync(wkRes.errorReportPath), '失败报告已写');
+
+  // 报告顶部含截断提示（含全量数 5 + 截断数 3）
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(wkRes.errorReportPath);
+  const ws = wb.worksheets[0];
+  const noteCell = String(ws.getRow(1).getCell(1).value || '');
+  assert.match(noteCell, /共\s*5\s*条/, '报告首行标注全量 5 条');
+  assert.match(noteCell, /前\s*3\s*条/, '报告首行标注仅列前 3 条');
+  // 提示行下面才是表头行（业务OP第 1 列「Billdate」），数据行 = 3 条
+  assert.equal(String(ws.getRow(2).getCell(1).value || ''), BIZ_OP_HEADERS[0], '第 2 行为表头');
+  wk.db.close();
+});
+
+// ---------------- ⑬ I3：大 rejected 包（数百行 rawRow）emit→exit 刷盘后仍被完整解析 ----------------
+// 反例（修复前）：emit 后立即 process.exit 截断大 rejected 包 → session 拿不到 rejected → 误判 error。
+// 修复后：emitAndExit 在 write 回调里才退出 → 大包完整刷入管道 → session 正常解析出 rejected + 写报告。
+test('I3 大 rejected 包（800 错误行）：worker 刷盘后 session 仍解析出 rejected（不丢结论）', async () => {
+  const date = '2026-07-03';
+  const N = 800;   // 默认 maxRowErrors=1000，800 全部带 rawRow 进 rejected → 数百 KB 大包
+  const rows = [];
+  for (let i = 0; i < N; i++) rows.push(bizOpRowArray('BU-A', `ACC${i}`, { begin: 0, amount: 10, end: 999 }));
+  const fp = await writeXlsx(BIZ_OP_HEADERS, rows);
+
+  const wk = freshDb();
+  const wkRes = await session.runBizOpImportViaWorker(wk.db, {
+    date, filePath: fp, dbPath: wk.dbPath,
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(wk.dir, 'err')
+    // 不传 maxRowErrors → 默认 1000，800 全部进 errorRows（大包）
+  });
+
+  assert.equal(wkRes.status, 'rejected', '大 rejected 包未被截断 → 正确解析为 rejected（非 error）');
+  assert.equal(wkRes.rowErrorTotal, N, `rowErrorTotal=${N}`);
+  assert.equal(wkRes.truncated, false, 'truncated=false（800 < 1000）');
+  assert.equal(wkRes.errorRows.length, N, `errorRows 全量 ${N} 条（未丢）`);
+  assert.ok(wkRes.errorReportPath && fs.existsSync(wkRes.errorReportPath), '失败报告已写');
+  assert.equal(dumpImports(wk.db, date, 'BU-A').length, 0, '🔴 整批拒绝 → DB 0 行');
+  wk.db.close();
+});

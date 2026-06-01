@@ -48,6 +48,32 @@ function emit(event) {
   process.stdout.write(JSON.stringify(event) + '\n');
 }
 
+// I3（β.2 review fix）：终态事件（complete/rejected/header-error/fatal）emit 后立即 process.exit()
+//   会在 stdout 是 pipe 时截断未刷盘的数据——尤其 rejected 携带最多上千条 rawRow（数百 KB）最易被截，
+//   导致主进程 session 拿不到 rejected/complete、误判成「worker 异常退出」并丢掉正确结论 + 失败报告。
+// 改造：写入 stdout 后，在 write 回调（数据已交给 OS 管道缓冲）里才退出；外加 drain + 200ms 兜底，
+//   既保证刷盘又不会因对端不消费而挂死。模块级 _terminalEmitted 守卫保证「只发一个终态事件 + 只退出一次」
+//   （等价旧实现「每条路径恰好一次 process.exit」的不变量）。
+let _terminalEmitted = false;
+function emitAndExit(event, code) {
+  if (_terminalEmitted) return;   // 已发过终态事件：忽略后续（防双发/双退出）
+  _terminalEmitted = true;
+  const line = JSON.stringify(event) + '\n';
+  let exited = false;
+  const doExit = () => {
+    if (exited) return;
+    exited = true;
+    try { process.exit(code); } catch (_e) { /* already exiting */ }
+  };
+  try {
+    const flushed = process.stdout.write(line, doExit);   // 回调在该行刷入管道后触发
+    if (!flushed) process.stdout.once('drain', doExit);   // 内核缓冲满：等 drain 再退
+    setTimeout(doExit, 200);                              // 兜底：对端不消费也不挂死（200ms 后强制退出）
+  } catch (_e) {
+    doExit();   // EPIPE 等写失败：直接退出
+  }
+}
+
 // 诊断：启动时把 heap 限制写到 stderr，便于排查 --max-old-space-size 是否生效（仿 pending worker）
 const heapStats = v8.getHeapStatistics();
 process.stderr.write(
@@ -59,14 +85,14 @@ process.stderr.write(
 function loadJobMeta() {
   const raw = process.argv[2];
   if (!raw) {
-    emit({ type: 'fatal', message: 'missing jobMeta (argv[2])' });
-    process.exit(2);
+    emitAndExit({ type: 'fatal', message: 'missing jobMeta (argv[2])' }, 2);
+    return null;   // I3：emitAndExit 异步退出；返回 null 让 main 提前 return，不继续执行
   }
   try {
     return JSON.parse(raw);
   } catch (err) {
-    emit({ type: 'fatal', message: 'jobMeta 解析失败: ' + err.message });
-    process.exit(2);
+    emitAndExit({ type: 'fatal', message: 'jobMeta 解析失败: ' + err.message }, 2);
+    return null;
   }
 }
 
@@ -98,6 +124,7 @@ async function runBizOpImport(db, { date, filePath, maxRowErrors }) {
   let insertedCount = 0;
   let firstEmptyRowIndex = 0;
   let firstBuEmpty = false;      // 首行 bu_name 空（与旧同步语义对齐：只此一条错误，不写报告，不校验后续行）
+  let insertFatal = null;        // I1：流式中途 clear/INSERT 等事务内 DB 写失败（系统错，区别于表头/读取错）
   const errorRows = [];
   let rowErrorTotal = 0;
 
@@ -109,7 +136,7 @@ async function runBizOpImport(db, { date, filePath, maxRowErrors }) {
     await streamBizOpFile(filePath, {
       onDataRow: (row) => {
         dataRowCount += 1;
-        if (firstBuEmpty) return;   // 首行已判空：跳过后续行（旧实现首行空直接 return rejected，不校验后续）
+        if (firstBuEmpty || insertFatal) return;   // 首行已判空 / 已遇系统写错：跳过后续行
 
         // 第一个数据行：定 firstBu + 事务内清旧数据（资金红线 ②）
         if (firstBu === null) {
@@ -125,9 +152,17 @@ async function runBizOpImport(db, { date, filePath, maxRowErrors }) {
           }
           buNormalized = normalizeBu(firstBu);
           // 资金红线 ② v2.1.3 PR #45 round 4 P1 fix：同清 (date,BU) + (D+1,BU)
-          runRepository.clearRunsAndDiffsByDateBu(db, date, firstBu);
-          runRepository.clearRunsAndDiffsByDateBu(db, addOneDay(date), firstBu);
-          importsRepository.clearByDateBu(db, date, firstBu);
+          // I1（β.2 review fix）：clear 是事务内 DB 写，可能抛 SQLITE_BUSY 等系统错。单独 try 标 insertFatal，
+          //   否则异常冒泡到流式 reader 会被 wrapReadError 包成带 header-mismatch code 的 FileValidationError，
+          //   被误判成「表头/读取失败」（旧同步路是直接抛原始 DB 错）。
+          try {
+            runRepository.clearRunsAndDiffsByDateBu(db, date, firstBu);
+            runRepository.clearRunsAndDiffsByDateBu(db, addOneDay(date), firstBu);
+            importsRepository.clearByDateBu(db, date, firstBu);
+          } catch (clearErr) {
+            insertFatal = clearErr;
+            return;
+          }
           cleared = true;
         }
 
@@ -151,7 +186,13 @@ async function runBizOpImport(db, { date, filePath, maxRowErrors }) {
 
         // 资金红线 ③：落库前 bu_name 改写为 firstBu（trim 保大小写）
         row.bu_name = firstBu;
-        insertOne(date, row);
+        // I1：INSERT 是事务内 DB 写，同 clear 单独 try 标 insertFatal（避免被 wrapReadError 误判 header）
+        try {
+          insertOne(date, row);
+        } catch (insErr) {
+          insertFatal = insErr;
+          return;
+        }
         insertedCount += 1;
       },
       onProgress: (dataRows) => emit({ type: 'progress', dataRows })
@@ -160,56 +201,64 @@ async function runBizOpImport(db, { date, filePath, maxRowErrors }) {
     // 表头 / 读取失败 → header-error（FileValidationError 带 code）；其他 → fatal
     db.exec('ROLLBACK');
     emitHeaderOrFatal(err);
-    return; // emitHeaderOrFatal 已 process.exit
+    return; // emitHeaderOrFatal 已 emitAndExit（调度退出）
+  }
+
+  // I1：流式中途 clear/INSERT 系统写失败 → 整批 ROLLBACK + fatal（exit 2，非 header/读取错）
+  //   数据完整性不变：ROLLBACK 撤销本事务内已 clear 旧数据 + 已 INSERT 的行 → DB 净 0 变化。
+  if (insertFatal) {
+    try { db.exec('ROLLBACK'); } catch (_rb) { /* ignore */ }
+    return emitAndExit({
+      type: 'fatal',
+      message: '导入写入失败：' + (insertFatal && insertFatal.message ? insertFatal.message : String(insertFatal))
+    }, 2);
   }
 
   // 首行 bu_name 空：整批拒绝（不入任何行）；report=false（旧语义 errorReportPath=null）
   if (firstBuEmpty) {
     db.exec('ROLLBACK');
-    emit({
+    return emitAndExit({
       type: 'rejected',
       report: false,
       errorRows: [{ rowIndex: firstEmptyRowIndex, reason: '业务方为空' }],
       rowErrorTotal: 1,
       truncated: false,
       firstBu: ''
-    });
-    process.exit(1);
+    }, 1);
   }
 
   // rows.length===0：无有效数据行 → 整批拒绝（与旧同步语义一致）；report=false（errorReportPath=null）
   if (dataRowCount === 0) {
     db.exec('ROLLBACK');
-    emit({
+    return emitAndExit({
       type: 'rejected',
       report: false,
       errorRows: [{ rowIndex: 0, reason: '文件无有效数据行' }],
       rowErrorTotal: 1,
       truncated: false,
       firstBu: null
-    });
-    process.exit(1);
+    }, 1);
   }
 
   // 🔴 任一行校验失败 → 整批拒绝（ROLLBACK，不入任何行）；report=true（写失败报告 xlsx，含 rawRow）
+  // I2（β.2 review fix）：rowErrorTotal=全量真实错误数、truncated=是否超 maxRowErrors 被截，
+  //   随 rejected 上行，供主进程在报告里标注「共 N 条、仅列前 M 条」（errorRows 本身已截到 maxRowErrors）。
   if (errorRows.length > 0 || rowErrorTotal > 0) {
     db.exec('ROLLBACK');
-    emit({
+    return emitAndExit({
       type: 'rejected',
       report: true,
       errorRows: errorRows.map(serializeErrorRow),
       rowErrorTotal,
       truncated: rowErrorTotal > errorRows.length,
       firstBu
-    });
-    process.exit(1);
+    }, 1);
   }
 
   // 全部通过 → COMMIT（cleared 必为 true，因为 dataRowCount>0 且首行非空已 clear）
   void cleared;
   db.exec('COMMIT');
-  emit({ type: 'complete', status: 'success', buName: firstBu, validCount: insertedCount });
-  process.exit(0);
+  return emitAndExit({ type: 'complete', status: 'success', buName: firstBu, validCount: insertedCount }, 0);
 }
 
 // ---------------- 流水导入（runFlowImportAsync 语义流式镜像） ----------------
@@ -220,6 +269,7 @@ async function runFlowImport(db, { date, filePath, maxRowErrors }) {
   let dataRowCount = 0;
   let insertedCount = 0;
   let cleared = false;
+  let insertFatal = null;        // I1：流式中途 clear/INSERT 事务内 DB 写失败（系统错）
   const errorRows = [];
   let rowErrorTotal = 0;
 
@@ -230,11 +280,18 @@ async function runFlowImport(db, { date, filePath, maxRowErrors }) {
     await streamFlowFile(filePath, {
       onDataRow: (row) => {
         dataRowCount += 1;
+        if (insertFatal) return;   // 已遇系统写错：跳过后续行
 
         // 第一个数据行：事务内清旧数据（资金红线 ⑤：流水按 date 跨所有 BU 清）
         if (!cleared) {
-          runRepository.clearRunsAndDiffsByDate(db, date);
-          flowImportsRepository.clearByDate(db, date);
+          // I1（β.2 review fix）：clear 单独 try 标 insertFatal（同 bizOp，避免被 wrapReadError 误判 header）
+          try {
+            runRepository.clearRunsAndDiffsByDate(db, date);
+            flowImportsRepository.clearByDate(db, date);
+          } catch (clearErr) {
+            insertFatal = clearErr;
+            return;
+          }
           cleared = true;
         }
 
@@ -244,7 +301,13 @@ async function runFlowImport(db, { date, filePath, maxRowErrors }) {
           recordRowError(errorRows, maxRowErrors, { rowIndex: row._rowIndex, reason: result.reason, rawRow: row });
           return;
         }
-        insertOne(date, row);
+        // I1：INSERT 单独 try 标 insertFatal
+        try {
+          insertOne(date, row);
+        } catch (insErr) {
+          insertFatal = insErr;
+          return;
+        }
         insertedCount += 1;
       },
       onProgress: (dataRows) => emit({ type: 'progress', dataRows })
@@ -255,36 +318,43 @@ async function runFlowImport(db, { date, filePath, maxRowErrors }) {
     return;
   }
 
+  // I1：流式中途 clear/INSERT 系统写失败 → 整批 ROLLBACK + fatal（exit 2，非 header/读取错）
+  if (insertFatal) {
+    try { db.exec('ROLLBACK'); } catch (_rb) { /* ignore */ }
+    return emitAndExit({
+      type: 'fatal',
+      message: '导入写入失败：' + (insertFatal && insertFatal.message ? insertFatal.message : String(insertFatal))
+    }, 2);
+  }
+
   // 无有效数据行 → 整批拒绝（report=false，errorReportPath=null）
   if (dataRowCount === 0) {
     db.exec('ROLLBACK');
-    emit({
+    return emitAndExit({
       type: 'rejected',
       report: false,
       errorRows: [{ rowIndex: 0, reason: '文件无有效数据行' }],
       rowErrorTotal: 1,
       truncated: false
-    });
-    process.exit(1);
+    }, 1);
   }
 
   // 🔴 任一行校验失败 → 整批拒绝（report=true，写失败报告 xlsx，含 rawRow）
+  // I2（β.2 review fix）：rowErrorTotal/truncated 随 rejected 上行（供主进程报告标注截断），errorRows 已截到 maxRowErrors
   if (errorRows.length > 0 || rowErrorTotal > 0) {
     db.exec('ROLLBACK');
-    emit({
+    return emitAndExit({
       type: 'rejected',
       report: true,
       errorRows: errorRows.map(serializeErrorRow),
       rowErrorTotal,
       truncated: rowErrorTotal > errorRows.length
-    });
-    process.exit(1);
+    }, 1);
   }
 
   void cleared;
   db.exec('COMMIT');
-  emit({ type: 'complete', status: 'success', totalCount: insertedCount, validCount: insertedCount });
-  process.exit(0);
+  return emitAndExit({ type: 'complete', status: 'success', totalCount: insertedCount, validCount: insertedCount }, 0);
 }
 
 // ---------------- 共用 helper ----------------
@@ -301,42 +371,40 @@ function serializeErrorRow(e) {
 }
 
 // 表头 / 读取失败：FileValidationError 带 code/detailLines → header-error；其他 → fatal 系统错
+// I3：用 emitAndExit（刷盘后退出）；调用方在其后 return 结束当前函数。
 function emitHeaderOrFatal(err) {
   if (err && err.name === 'FileValidationError') {
-    emit({
+    emitAndExit({
       type: 'header-error',
       errorCode: err.code || null,
       message: err.message || String(err),
       detailLines: Array.isArray(err.detailLines) ? err.detailLines : []
-    });
-    process.exit(1);
+    }, 1);
+    return;
   }
-  emit({ type: 'fatal', message: err && err.message ? err.message : String(err) });
-  process.exit(2);
+  emitAndExit({ type: 'fatal', message: err && err.message ? err.message : String(err) }, 2);
 }
 
 async function main() {
   const job = loadJobMeta();
+  if (!job) return;   // I3：loadJobMeta 失败已 emitAndExit（调度退出），不继续
   const { dbPath, kind, date, filePath } = job;
   const maxRowErrors = Number.isFinite(job.maxRowErrors) && job.maxRowErrors > 0
     ? job.maxRowErrors
     : DEFAULT_MAX_ROW_ERRORS;
 
   if (!dbPath || !kind || !date || !filePath) {
-    emit({ type: 'fatal', message: 'jobMeta 缺字段（dbPath / kind / date / filePath）' });
-    process.exit(2);
+    return emitAndExit({ type: 'fatal', message: 'jobMeta 缺字段（dbPath / kind / date / filePath）' }, 2);
   }
   if (kind !== 'bizOp' && kind !== 'flow') {
-    emit({ type: 'fatal', message: `未知 kind: ${kind}（仅 bizOp / flow）` });
-    process.exit(2);
+    return emitAndExit({ type: 'fatal', message: `未知 kind: ${kind}（仅 bizOp / flow）` }, 2);
   }
 
   let db;
   try {
     db = openDb(dbPath);
   } catch (err) {
-    emit({ type: 'fatal', message: 'DB open 失败：' + (err && err.message ? err.message : String(err)) });
-    process.exit(2);
+    return emitAndExit({ type: 'fatal', message: 'DB open 失败：' + (err && err.message ? err.message : String(err)) }, 2);
   }
 
   try {
@@ -345,17 +413,16 @@ async function main() {
     } else {
       await runFlowImport(db, { date, filePath, maxRowErrors });
     }
+    // runXxxImport 内各路径均已 emitAndExit（调度退出）；此处自然返回，finally 关库后事件循环 drain 即退出
   } catch (err) {
-    // runXxxImport 内部分支均已 process.exit；走到这里说明 INSERT/事务阶段异常
+    // 走到这里说明 INSERT/事务阶段意外异常（理论上已被 insertFatal 捕获，这里兜底）
     try { db.exec('ROLLBACK'); } catch (_rb) { /* ignore */ }
-    emit({ type: 'fatal', message: '导入阶段失败：' + (err && err.message ? err.message : String(err)) });
-    process.exit(2);
+    emitAndExit({ type: 'fatal', message: '导入阶段失败：' + (err && err.message ? err.message : String(err)) }, 2);
   } finally {
     try { db.close(); } catch (_e) { /* ignore */ }
   }
 }
 
 main().catch((err) => {
-  emit({ type: 'fatal', message: 'worker 未捕获异常：' + (err && err.message ? err.message : String(err)) });
-  process.exit(2);
+  emitAndExit({ type: 'fatal', message: 'worker 未捕获异常：' + (err && err.message ? err.message : String(err)) }, 2);
 });
