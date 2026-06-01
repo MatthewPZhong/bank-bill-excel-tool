@@ -290,10 +290,10 @@ POC 是 β 全阶段的前提——验证「多 worker write-splitting 真能 2-
 
 换解析器后瓶颈转移：parse 12.6s(58%) / insert+raw_json 9.2s(42%) 接近均衡 → 届时**批量 INSERT 才有边际价值**（二期，省 ~2-3s），raw_json 是数据源不可删。
 
-### 10.4 拟议任务（β 新增 · 待用户 greenlight · 🔴 资金红线）
+### 10.4 任务（β 新增 · ✅ 2026-06-01 用户 greenlight「现在就做」· 🔴 资金红线）
 
-- **T-acq-import-1**：`acquiring-bill-currency-import/reader.js` 的 `streamSheetRows` 把 **sax → 手写扫描**（保留 yauzl `openZipWithEntries`/`loadSharedStrings` 不动；新建手写 sheet 扫描复用 `streaming-xlsx-reader.parseRowXml`，sharedStrings 仍走 yauzl 读）。**不引入 JSZip**。
-- **T-acq-import-2** 🔴：**byte-for-byte contract test**：旧 sax reader vs 新手写 reader 在多档真实 fixture（含 sharedStrings 路径 / number cell 已知差异 / 稀疏行 / 表头错）逐行逐列 + `_rowIndex` + monthKey + 错误 errorCode 全等。**收单导入 = 资金真理源（raw_json/对账金额/币种），换解析器必须证不算错账**。
-- **T-acq-import-3**：500万真实数据手测（合并门槛，对标 β.1-T4）+ release-check 全绿 + 进度对接。
+- ✅ **T-acq-import-1（完成 · commit 0ec2ec4/d54f766）**：新建 `acquiring-bill-currency-import/reader-handrolled.js`（yauzl 解压 + sharedStrings 走 sax 复用 + sheet 扫描换**手写**）。**未引入 JSZip**（POC 实测 JSZip 100万行崩）。⚠️ **未复用** `streaming-xlsx-reader.parseRowXml`——它对 number 做 `parseFloat→String("1000.00")→"1000"` 会丢小数改写金额；改写专用 `parseAcquiringRowXml`，数字 cell 取 `<v>` 原文本逐字对齐 sax。reader.js 纯追加导出 helper（零函数体改动，作基线+回滚）。**生产路径已切**（`acquiring-bill-currency-session.js:16` 单行 require，一行可回滚）。
+- ✅ **T-acq-import-2 🔴（完成 · commit f90bec6/e4d78e1）**：byte-for-byte 闸双层——① contract test 18 用例（含 🔴 sharedStrings `t="s"` 路径 + number cell + 稀疏行 + 中文实体 + 表头列少/多/错 + peek），sax vs 手写全等；② **真实规模 scalediff**：50万/100万行全行 SHA1+importedCount+monthKey **完全一致**（`scripts/poc/v2.1.12-acquiring-import-parser-compare.js scalediff`）。release-check 全绿（unit 1467 + integration 952 + smoke acquiring 203）。
+- ⏳ **T-acq-import-3（待用户）**：500万真实数据手测（🔴 合并门槛，对标 β.1-T4）→ 通过后 version bump `beta.2` + 文档三件套 + `/check-vars` + 提 PR（待用户「提 PR」）。
 
-> ⚠️ **未覆盖**：① fixture 全 inlineStr 无 sharedStrings；真实数据若有 t="s" 共享串列，手写需走 yauzl 读 sst（sax reader 已有 `loadSharedStrings`，复用即可，但需 contract 覆盖该路径）。② number cell 大数已知差异（同 bizOp reader-streamed 文档化）。③ 500万真实手测仍是合并前硬门槛。
+> ⚠️ **未覆盖/遗留**：① 已覆盖 sharedStrings `t="s"` 路径（contract #6，手工 yazl fixture + sax loadSharedStrings 复用 → 串表 byte-identical）。② number cell：已做到**零差异**（取原文本，非「已知差异」放行）；inlineStr 真实数据本不触发。③ **500万真实数据手测仍是合并前硬门槛**（fixture 是仿真数据，非真实清结算文件；真实文件可能有 sax/手写容错路径差异的畸形 XML——手测覆盖）。④ bill 路径（26 列）contract 已覆盖正常+表头，但 scalediff 仅测 flow（48 列）；bill 大文件手测随 500万一并验。
