@@ -1,6 +1,7 @@
 # v2.1.12 β 阶段 Spec（总纲）
 
 > 状态：draft v0.1（2026-05-31）｜阶段：β（性能架构）｜版本：`v2.1.12-beta.N` → 收敛 stable `v2.1.12`
+> ✅ **2026-06-01 已收敛 stable `2.1.12`**：β 三块（PR #57 merge `86829b1`）+ self-review/review 修复合入 main，版本号 `2.1.12-beta.1` → `2.1.12`。defer 项（§10.4/§11.3：bizOp 百万行集成测试 / bill 大文件手测 / I4 / 2 Minor）转 stable 后 follow-up。
 > 立项结论见 `backlog.md`「立项拍板结论（v0.2）」§β 阶段；决策点 D29-D36 沿用 `docs/iterations/v2.1.11/backlog.md`。
 > 起草方式：team-lead 接手起草（α 阶段经验：本环境 agent 多次中断，spec 这类基础件主线程直接写更稳）。
 > ⚠️ 本阶段 = 🔴 **资金红线**（byte-for-byte 一致性）+ 🔴 **并发红线**（SQLite WAL single-writer / SQLITE_BUSY）+ 🟡 OOM。**Phase 0 POC 是进实现的硬门槛**。

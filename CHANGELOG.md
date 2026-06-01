@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.1.12-beta.1 - 2026-06-01
+## 2.1.12 - 2026-06-01
 
 v2.1.12 α（PR #56）之后的 **β 性能架构阶段**，三块互相独立的大文件/大计算量提速，全部 **🔴 资金红线 byte-for-byte 守恒**：β.1 收单对账 multi-worker（大数据量 JOIN 对账并行）+ β.2 bizOp（业务OP数据核对）导入流式 + worker 化（百万行 xlsx 导入不 OOM）+ 收单导入解析器 sax→手写字节扫描（收单单据币种校验导入提速）。⚠️ **3 个🔴资金红线**（三块各一）：① β.1 diff_rows 多 worker 与单 worker **byte-for-byte 一致** ② β.2 worker 内五条资金红线（整批拒绝 / (date,BU)+D+1 原子替换 / bu_name 改写 / 失败报告 / flow 跨 BU 清）全保住 ③ 收单导入新旧 reader 全行 **SHA1 完全一致**（含金额/币种/raw_json，数字 cell 取原文本绝不 parseFloat）。质量门：`npm run release-check` 全绿（**unit 1473 / integration 952 / smoke 全过**）。三块均**合成数据 byte-for-byte 已充分验证，真实大文件由用户手测把关**（提 PR 即用户确认触发，是合并门槛硬要求）。提 PR 后经 self-review + reviewer 评论修复 5 个问题（β.1 资金 Critical C1 temp 残留追加 / C2 MW 崩·cancel mid-merge resume 翻倍；β.2 Important I1 误分类 / I2 报告截断 / I3 stdout 刷盘；+ MW 路径接 cancelToken），均补回归测试。
 
