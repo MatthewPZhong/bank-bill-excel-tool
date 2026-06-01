@@ -297,3 +297,35 @@ POC 是 β 全阶段的前提——验证「多 worker write-splitting 真能 2-
 - ⏳ **T-acq-import-3（待用户）**：500万真实数据手测（🔴 合并门槛，对标 β.1-T4）→ 通过后 version bump `beta.2` + 文档三件套 + `/check-vars` + 提 PR（待用户「提 PR」）。
 
 > ⚠️ **未覆盖/遗留**：① 已覆盖 sharedStrings `t="s"` 路径（contract #6，手工 yazl fixture + sax loadSharedStrings 复用 → 串表 byte-identical）。② number cell：已做到**零差异**（取原文本，非「已知差异」放行）；inlineStr 真实数据本不触发。③ **500万真实数据手测仍是合并前硬门槛**（fixture 是仿真数据，非真实清结算文件；真实文件可能有 sax/手写容错路径差异的畸形 XML——手测覆盖）。④ bill 路径（26 列）contract 已覆盖正常+表头，但 scalediff 仅测 flow（48 列）；bill 大文件手测随 500万一并验。
+
+---
+
+## 11 PR #57 self-review（2026-06-01 · 用户真实数据手测通过后 · 对抗式审查 + 验证）
+
+> 方式：2 个审查 agent 在真实 `node:sqlite` 上跑 probe 找 β.1/β.2 测试盲区，team-lead 逐处验代码确认。收单导入块经 contract 18 + scalediff 已 clean。结论分级 Critical/Important/Minor。
+
+### 11.1 🔴 Critical（β.1，均已代码验证为真 + 修复 + 回归测试 · commit b320fa0）
+
+| # | 问题 | 修复 | 回归测试 |
+|---|---|---|---|
+| **C1** | 固定 tempDir `.mw-tmp` 跨 run 复用，`writeChunkToTemp` 写前不 unlink；上个 run 在 merge 期被硬杀/OOM/断电（`finally` 未清）→ 残留 `part-N.sqlite` 被 `CREATE IF NOT EXISTS`+INSERT（seq 续涨）**追加** → merge 收走残留+新行 → **diff_rows 重复（对账多算）** | `run-check-multiworker-worker.js writeChunkToTemp` 写前 `fs.rmSync(tempDbPath{,-wal,-shm,-journal})` 使写入幂等 | `run-check-multiworker.test.js #10`（预置含垃圾行残留 part-0 → 断言不污染 byte-for-byte）|
+| **C2** | merge 逐 chunk 独立 COMMIT（非原子）；硬杀/cancel 硬 terminate/OOM **不经** `insertDiffRowsByJoinMultiWorker` 的 catch DELETE → 部分 chunk 残留 + MW 不逐 chunk 标 `chunk_progress`（恒 -1）→ resume 单 worker 从 chunk 0 全跑、`clearRunsByMonth` 仅 `!isResume` 不清 → **diff_rows 翻倍**。cancel 是正常操作（MW 不接 cancelToken → 5s 硬 terminate 命中） | `run-repository.js` 抽 `clearDiffRowsByRunId` + `session.js` resume 且 `resumeFromChunkIndex===0`（无可信已完成 chunk）时先清本 run diff_rows（顺带修单 worker「崩在首 chunk COMMIT 前」既有窄窗口）| `acquiring-multiworker-contract.test.js B4`（残留全集 + partial/-1 → resume → 断言 ==N 非 2N）|
+
+### 11.2 🟡 Important（β.2，五条资金红线本身验证为正确；以下为错误路径/报告完整性 · commit f921439）
+
+| # | 问题 | 修复 |
+|---|---|---|
+| **I1** | 流式中途 `clear`/`insertOne`（事务内 DB 写，如 SQLITE_BUSY）抛错冒泡到 reader → `wrapReadError` 误包成 header-mismatch errorCode → 误判「表头/读取失败」 | `import-worker.js` clear/insert 各单独 try 标 `insertFatal`，流末优先 ROLLBACK+fatal(exit2)；不改 reader-streamed（其 contract 11/11 零冲击）；数据完整性不变 |
+| **I2** | 失败报告静默截断到 maxRowErrors（默认 1000），`rowErrorTotal`/`truncated` 未透传 → 报告退化（旧同步路写全量）| `session.js` 透传 + `biz-op-recon-writer.js addTruncationNote` 报告顶部标「共 N 条仅列前 M 条」；**未截断时报告与旧字节一致** |
+| **I3** | `emit` 后立即 `process.exit`，大 rejected 包（≤1000×rawRow）pipe 未刷盘截断 → session 丢 rejected 结论+报告 | `emitAndExit` 在 write 回调里退出（+drain+200ms 兜底）+ `_terminalEmitted` 单发守卫；exit code 0/1/2 保留 |
+
+回归测试：`import-worker-contract.test.js` +3（I1 中途写失败→fatal 非 header / I2 截断标注 / I3 大包不丢结论）= 13/13。
+
+### 11.3 ⏸️ Defer（follow-up，非合并阻断）
+
+- **I4（🟡 并发 liveness）**：worker 写事务锁窗口横跨整个 parse+insert（BEGIN 在流式前，~10-20x 旧同步路），并发导入撞 `SQLITE_BUSY 30s`。架构性（需「校验全过再分块子事务」权衡整批拒绝单事务保证，或 biz-op 与收单 worker 串行化）→ **defer 到 β.2-T3**；中间缓解：确认 renderer 禁止并发导入。
+- **Minor**：① MW 路径不接 cancelToken（cancel 期间 no-op，且是 C2 诱因）；② MW chunk 无超时（worker exit(0)/卡死会 hang，正常流程不可达）；③ utilityProcess 分支无 `'error'` 兜底（继承 pending 既定模式）。→ 随 β.2-T3 / 后续评估。
+
+### 11.4 验收
+- 全量 `release-check` exit 0：**unit 1472/1472**（+5：C1/C2 + I1/I2/I3）+ **integration 952/952** + **smoke**（biz-op 154 / acquiring 203）。
+- 修复 commit：β.1 `b320fa0`、β.2 `f921439`。收单导入块 self-review clean（无 C/I）。

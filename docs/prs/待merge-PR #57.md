@@ -87,4 +87,14 @@ v2.1.12 α（PR #56）之后的 **β 性能架构阶段**，三块互相独立�
 ## 7 文档
 
 - `CHANGELOG.md` / `docs/VERSION_FEATURE_HISTORY.md` / `docs/USER_GUIDE.md` 同步 v2.1.12-beta.1。
-- spec：`docs/iterations/v2.1.12/spec-beta.md`（§4 决策 / §5 POC GO / §9 β.2 重定向 / §10 收单导入提速）。
+- spec：`docs/iterations/v2.1.12/spec-beta.md`（§4 决策 / §5 POC GO / §9 β.2 重定向 / §10 收单导入提速 / **§11 self-review**）。
+
+## 8 Self-review（用户真实数据手测通过后 · 对抗式审查 + 修复 · spec §11）
+
+对抗式审查（probe 找测试盲区 + 逐处验代码）发现并**已修复 + 补回归测试**：
+
+- 🔴 **β.1 Critical ×2**（commit `b320fa0`）：**C1** 固定 tempDir 跨 run 复用，崩溃残留 `part-N.sqlite` 被追加 → diff_rows 重复 → 修：writeChunkToTemp 写前 unlink。**C2** MW 崩/cancel mid-merge（不经 catch）留半套 + chunk_progress 恒 -1 → resume 单 worker 从 0 不清 → diff_rows 翻倍 → 修：resumeFromChunkIndex===0 时先 `clearDiffRowsByRunId`。各补回归测试（#10 / B4）。
+- 🟡 **β.2 Important ×3**（commit `f921439`）：**I1** 中途 DB 写错被误判 header → 改 insertFatal 标志 + fatal；**I2** 失败报告静默截断 → rowErrorTotal/truncated 透传 + 报告标注；**I3** emit 后立即 exit 大包截断 → emitAndExit 刷盘后退 + 单发守卫。各补回归测试（import-worker-contract 13/13）。
+- ⏸️ **Defer**：I4（worker 写事务锁窗口放大→并发 SQLITE_BUSY，架构性）→ β.2-T3 + 中间确认 renderer 禁并发导入；3 个 Minor（MW 无 cancelToken / chunk 无超时 / utilityProcess 无 error 兜底）随后续。
+- 🟢 收单导入块 self-review **clean**（contract 18 + scalediff 已充分覆盖）。
+- 验收：修复后全量 `release-check` exit 0（**unit 1472/1472** + integration 952/952 + smoke biz-op154/acquiring203）。
