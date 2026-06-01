@@ -13,7 +13,12 @@
 //   - 对账：spec §5.2 SQL JOIN（在 run-repository.insertDiffRowsByJoin）
 
 const fs = require('node:fs');
-const importReader = require('../backend/acquiring-bill-currency-import/reader');
+// v2.1.12-beta 收单导入提速：解析器 sax→手写字节扫描（端到端实测 5.6x，122s→22s/50万行）。
+//   reader-handrolled 与 reader（sax 基线）byte-for-byte 等价：contract test 18 用例 + 真实 50万/100万行
+//   全行 SHA1+importedCount+monthKey 完全一致（scripts/poc/v2.1.12-acquiring-import-parser-compare.js scalediff）。
+//   接口/错误类型（ImportValidationError 同一个类，复用自 reader.js）完全一致 → 此处单行切换即生效。
+//   🔴 回退：改回 require('.../reader') 一行即恢复 sax 路径（reader.js 原封保留作基线 + rollback）。
+const importReader = require('../backend/acquiring-bill-currency-import/reader-handrolled');
 const importRepo = require('../backend/acquiring-bill-currency-db/import-repository');
 const runRepo = require('../backend/acquiring-bill-currency-db/run-repository');
 // v2.1.9 SR-log-1 (T32h)：替换 console.warn/error → appendModuleLog 双写
