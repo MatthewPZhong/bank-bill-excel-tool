@@ -190,6 +190,48 @@ async function runCins() {
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_e) {}
 }
 
+// =================== scalediff：真实大文件全行 byte-for-byte（sax vs 手写，O(1) 内存滚动哈希）===================
+// contract test 用小 fixture；本模式在真实 50万/100万行上跑 reader.js(sax) vs reader-handrolled，
+// 每行把 rowIndex + values 串起来喂 SHA1，比对最终摘要 + importedCount + monthKey → 证规模下逐行逐列一致
+// （覆盖小 fixture 测不到的 stream chunk 跨行边界）。kind=flow。
+async function runScaleDiff() {
+  const crypto = require('node:crypto');
+  const importRepo = require('../../src/backend/acquiring-bill-currency-db/import-repository');
+  const saxReader = require('../../src/backend/acquiring-bill-currency-import/reader');
+  const handReader = require('../../src/backend/acquiring-bill-currency-import/reader-handrolled');
+
+  importRepo.prepareFlowInsert = () => ({ run: () => {} });
+
+  async function digestVia(reader, label) {
+    const h = crypto.createHash('sha1');
+    let rows = 0;
+    importRepo.insertFlowRow = (_stmt, { row }) => {
+      h.update(String(row.rowIndex));
+      h.update('\x1e');
+      const v = row.values;
+      for (let i = 0; i < v.length; i++) { h.update(v[i] == null ? '' : String(v[i])); h.update('\x1f'); }
+      h.update('\n');
+      rows += 1;
+    };
+    const t0 = performance.now();
+    const r = await reader.importFlowFile({ db: {}, filePath: fixture, importedAt: 'x', expectedMonthKey: '2026-03', onProgress: () => {} });
+    const ms = ((performance.now() - t0) / 1000).toFixed(1);
+    return { digest: h.digest('hex'), rows, importedCount: r.importedCount, monthKey: r.monthKey, ms };
+  }
+
+  const A = await digestVia(saxReader, 'sax');
+  const B = await digestVia(handReader, 'hand');
+  clearInterval(sampler);
+  console.log(`[scalediff] fixture=${sizeMB}MB`);
+  console.log(`  sax : digest=${A.digest}  rows=${A.rows}  importedCount=${A.importedCount}  monthKey=${A.monthKey}  (${A.ms}s)`);
+  console.log(`  hand: digest=${B.digest}  rows=${B.rows}  importedCount=${B.importedCount}  monthKey=${B.monthKey}  (${B.ms}s)`);
+  const ok = A.digest === B.digest && A.importedCount === B.importedCount && A.monthKey === B.monthKey;
+  console.log(ok
+    ? `[scalediff] ✅ ${A.rows} 行全行 SHA1 + importedCount + monthKey 完全一致 —— 真实规模 byte-for-byte 通过`
+    : `[scalediff] ❌ 不一致！digest ${A.digest === B.digest} / count ${A.importedCount}vs${B.importedCount} / mk ${A.monthKey}vs${B.monthKey}`);
+  console.log('RESULT|scalediff|equal=' + ok + '|rows=' + A.rows);
+}
+
 // =================== equal：正确性闸（前 N 行 cells 逐格比对）===================
 async function runEqual() {
   clearInterval(sampler);
@@ -249,6 +291,7 @@ async function runEqual() {
   else if (mode === 'C') await runC(false);
   else if (mode === 'Cmk') await runC(true);
   else if (mode === 'Cins') await runCins();
+  else if (mode === 'scalediff') await runScaleDiff();
   else if (mode === 'equal') await runEqual();
   else { console.error('未知 mode：' + mode); process.exit(1); }
 })().catch((e) => { console.error(e); process.exit(1); });
