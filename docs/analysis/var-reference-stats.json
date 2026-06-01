@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "2.1.12-alpha.1",
-    "scannedAt": "2026-05-31T15:37:17.970Z",
+    "version": "2.1.12-beta.1",
+    "scannedAt": "2026-06-01T05:04:08.694Z",
     "root": "src",
-    "totalFiles": 107,
-    "totalTopLevelNames": 1124,
+    "totalFiles": 108,
+    "totalTopLevelNames": 1125,
     "buckets": {
-      "shared": 189,
-      "paired": 325,
-      "local": 496,
-      "crossFile": 514
+      "shared": 194,
+      "paired": 331,
+      "local": 488,
+      "crossFile": 525
     }
   },
   "A": {
@@ -17,6 +17,7 @@
       {
         "name": "path",
         "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
           "src/backend/acquiring-bill-currency-import/reader.js",
           "src/backend/balance-adjustment-store.js",
           "src/backend/balance-seed-store.js",
@@ -56,6 +57,10 @@
           "src/main.js"
         ],
         "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
           {
             "file": "src/backend/acquiring-bill-currency-import/reader.js",
             "count": 3
@@ -217,8 +222,8 @@
             "count": 2
           }
         ],
-        "totalHits": 124,
-        "fileSpan": 40
+        "totalHits": 125,
+        "fileSpan": 41
       },
       {
         "name": "fs",
@@ -655,6 +660,74 @@
         "fileSpan": 16
       },
       {
+        "name": "FLOW_HEADERS",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/columns.js",
+          "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "src/backend/acquiring-bill-currency-import/reader.js",
+          "src/backend/acquiring-bill-currency-import/validator.js",
+          "src/backend/biz-op-recon-db/columns.js",
+          "src/backend/vcc-op-calc-import/reader.js",
+          "src/backend/vcc-op-calc-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/columns.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/validator.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 37,
+        "fileSpan": 13
+      },
+      {
         "name": "XLSX",
         "defFiles": [
           "src/backend/bank-bu-recon-import/reader.js",
@@ -721,69 +794,6 @@
           }
         ],
         "totalHits": 66,
-        "fileSpan": 12
-      },
-      {
-        "name": "FLOW_HEADERS",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/columns.js",
-          "src/backend/acquiring-bill-currency-import/reader.js",
-          "src/backend/acquiring-bill-currency-import/validator.js",
-          "src/backend/biz-op-recon-db/columns.js",
-          "src/backend/vcc-op-calc-import/reader.js",
-          "src/backend/vcc-op-calc-import/validator.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/columns.js",
-            "count": 6
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
-            "count": 6
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/validator.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-db/columns.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/validator.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-op-calc-db/columns.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-op-calc-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-op-calc-import/validator.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/biz-op-recon-writer.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 36,
         "fileSpan": 12
       },
       {
@@ -1062,6 +1072,53 @@
         "fileSpan": 8
       },
       {
+        "name": "validateFlowHeaders",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "src/backend/acquiring-bill-currency-import/reader.js",
+          "src/backend/acquiring-bill-currency-import/validator.js",
+          "src/backend/biz-op-recon-import/validator.js",
+          "src/backend/vcc-op-calc-import/reader.js",
+          "src/backend/vcc-op-calc-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/validator.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 16,
+        "fileSpan": 8
+      },
+      {
         "name": "insertRun",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/run-repository.js",
@@ -1262,48 +1319,6 @@
           }
         ],
         "totalHits": 18,
-        "fileSpan": 7
-      },
-      {
-        "name": "validateFlowHeaders",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js",
-          "src/backend/acquiring-bill-currency-import/validator.js",
-          "src/backend/biz-op-recon-import/validator.js",
-          "src/backend/vcc-op-calc-import/reader.js",
-          "src/backend/vcc-op-calc-import/validator.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/validator.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/validator.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-op-calc-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-op-calc-import/validator.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 15,
         "fileSpan": 7
       },
       {
@@ -1563,6 +1578,39 @@
           }
         ],
         "totalHits": 19,
+        "fileSpan": 5
+      },
+      {
+        "name": "BILL_HEADERS",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/columns.js",
+          "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "src/backend/acquiring-bill-currency-import/reader.js",
+          "src/backend/acquiring-bill-currency-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/columns.js",
+            "count": 7
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/validator.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 15,
         "fileSpan": 5
       },
       {
@@ -2126,34 +2174,6 @@
           {
             "file": "src/renderer.js",
             "count": 5
-          }
-        ],
-        "totalHits": 14,
-        "fileSpan": 4
-      },
-      {
-        "name": "BILL_HEADERS",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/columns.js",
-          "src/backend/acquiring-bill-currency-import/reader.js",
-          "src/backend/acquiring-bill-currency-import/validator.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/columns.js",
-            "count": 7
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/validator.js",
-            "count": 2
           }
         ],
         "totalHits": 14,
@@ -3254,6 +3274,35 @@
         "fileSpan": 4
       },
       {
+        "name": "StringDecoder",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "src/backend/biz-op-recon-import/reader-streamed.js",
+          "src/backend/pending-import/streaming-xlsx-reader.js",
+          "src/backend/vcc-op-calc-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 4
+      },
+      {
         "name": "batchDelete",
         "defFiles": [
           "src/backend/database/scenarios-repository.js"
@@ -3647,6 +3696,30 @@
           {
             "file": "src/backend/pending-reconcile/removal-match.js",
             "count": 3
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 3
+      },
+      {
+        "name": "importRepo",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "src/backend/acquiring-bill-currency-import/reader.js",
+          "src/main-process/acquiring-bill-currency-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 7
           }
         ],
         "totalHits": 13,
@@ -4228,6 +4301,30 @@
         "fileSpan": 3
       },
       {
+        "name": "extractMonthKey",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "src/backend/acquiring-bill-currency-import/reader.js",
+          "src/backend/acquiring-bill-currency-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/validator.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 3
+      },
+      {
         "name": "getRowsByDateBu",
         "defFiles": [
           "src/backend/biz-op-recon-db/flow-imports-repository.js",
@@ -4385,6 +4482,30 @@
         "fileSpan": 3
       },
       {
+        "name": "BILL_KEY_COLUMN_INDICES",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/columns.js",
+          "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "src/backend/acquiring-bill-currency-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
         "name": "buildDateDir",
         "defFiles": [
           "src/main-process/acquiring-bill-currency-writer.js",
@@ -4470,6 +4591,30 @@
           {
             "file": "src/main.js",
             "count": 1
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
+        "name": "FLOW_KEY_COLUMN_INDICES",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-db/columns.js",
+          "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "src/backend/acquiring-bill-currency-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-db/columns.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 3
           }
         ],
         "totalHits": 6,
@@ -4784,6 +4929,30 @@
           },
           {
             "file": "src/backend/file-service/readers.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
+        "name": "validateBillHeaders",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "src/backend/acquiring-bill-currency-import/reader.js",
+          "src/backend/acquiring-bill-currency-import/validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/validator.js",
             "count": 2
           }
         ],
@@ -5261,30 +5430,6 @@
         "fileSpan": 3
       },
       {
-        "name": "StringDecoder",
-        "defFiles": [
-          "src/backend/biz-op-recon-import/reader-streamed.js",
-          "src/backend/pending-import/streaming-xlsx-reader.js",
-          "src/backend/vcc-op-calc-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/pending-import/streaming-xlsx-reader.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/vcc-op-calc-import/reader.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 3
-      },
-      {
         "name": "updateRunExportPath",
         "defFiles": [
           "src/backend/bank-bu-recon-db/run-repository.js",
@@ -5708,6 +5853,24 @@
         "fileSpan": 2
       },
       {
+        "name": "ImportValidationError",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 15
+          }
+        ],
+        "totalHits": 16,
+        "fileSpan": 2
+      },
+      {
         "name": "refreshBankStatementStatus",
         "defFiles": [
           "src/renderer.js"
@@ -5867,25 +6030,6 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 7
-          }
-        ],
-        "totalHits": 12,
-        "fileSpan": 2
-      },
-      {
-        "name": "importRepo",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js",
-          "src/main-process/acquiring-bill-currency-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-session.js",
             "count": 7
           }
         ],
@@ -6524,6 +6668,24 @@
         "fileSpan": 2
       },
       {
+        "name": "MAX_COLLECTED_ERRORS",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 2
+      },
+      {
         "name": "PRAGMA_STATEMENTS",
         "defFiles": [
           "src/main-process/run-check-multiworker-worker.js",
@@ -6573,6 +6735,24 @@
           {
             "file": "src/renderer.js",
             "count": 5
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 2
+      },
+      {
+        "name": "SHEET_ENTRY_NAME",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 6
           }
         ],
         "totalHits": 7,
@@ -7266,25 +7446,6 @@
         "fileSpan": 2
       },
       {
-        "name": "extractMonthKey",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js",
-          "src/backend/acquiring-bill-currency-import/validator.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/validator.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 2
-      },
-      {
         "name": "FILENAME_MAPPING_TEMPLATE_ID",
         "defFiles": [
           "src/main.js",
@@ -7690,25 +7851,6 @@
         "fileSpan": 2
       },
       {
-        "name": "BILL_KEY_COLUMN_INDICES",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/columns.js",
-          "src/backend/acquiring-bill-currency-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/columns.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
         "name": "BIZ_OP_END_BALANCE_DB_COLUMN",
         "defFiles": [
           "src/backend/biz-op-recon-db/columns.js"
@@ -7855,25 +7997,6 @@
         "fileSpan": 2
       },
       {
-        "name": "FLOW_KEY_COLUMN_INDICES",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-db/columns.js",
-          "src/backend/acquiring-bill-currency-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-db/columns.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
         "name": "getBillSplitAmountRules",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -8000,6 +8123,24 @@
         "fileSpan": 2
       },
       {
+        "name": "loadSharedStrings",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "normalizeBillDate",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/import-repository.js",
@@ -8013,6 +8154,24 @@
           {
             "file": "src/backend/acquiring-bill-currency-import/validator.js",
             "count": 2
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "openZipWithEntries",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 4
           }
         ],
         "totalHits": 5,
@@ -8167,6 +8326,24 @@
         "fileSpan": 2
       },
       {
+        "name": "SHARED_STRINGS_ENTRY_NAME",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "statementImportSessions",
         "defFiles": [
           "src/main.js"
@@ -8235,25 +8412,6 @@
           {
             "file": "src/renderer.js",
             "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
-        "name": "validateBillHeaders",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js",
-          "src/backend/acquiring-bill-currency-import/validator.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/validator.js",
-            "count": 2
           }
         ],
         "totalHits": 5,
@@ -8417,6 +8575,24 @@
           },
           {
             "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "columnLetterToIndex",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
             "count": 3
           }
         ],
@@ -9311,6 +9487,24 @@
           {
             "file": "src/main-process/recon-id-fix-io.js",
             "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "parseColumnFromCellRef",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 3
           }
         ],
         "totalHits": 4,
@@ -11395,6 +11589,44 @@
         "fileSpan": 2
       },
       {
+        "name": "CELL_OPEN_RE",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "src/backend/pending-import/streaming-xlsx-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 2
+      },
+      {
+        "name": "CELL_R_RE",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "src/backend/pending-import/streaming-xlsx-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 2
+      },
+      {
         "name": "os",
         "defFiles": [
           "src/main-process/run-check-multiworker.js",
@@ -11521,6 +11753,25 @@
         ],
         "totalHits": 2,
         "fileSpan": 2
+      },
+      {
+        "name": "xmlUnescape",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "src/backend/pending-import/streaming-xlsx-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 2
       }
     ],
     "local": [
@@ -11634,20 +11885,6 @@
           }
         ],
         "totalHits": 16,
-        "fileSpan": 1
-      },
-      {
-        "name": "ImportValidationError",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 15
-          }
-        ],
-        "totalHits": 15,
         "fileSpan": 1
       },
       {
@@ -12673,20 +12910,6 @@
         "fileSpan": 1
       },
       {
-        "name": "MAX_COLLECTED_ERRORS",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
         "name": "MIGRATION_FLAG_KEY",
         "defFiles": [
           "src/backend/database/own-accounts-migration.js"
@@ -12876,20 +13099,6 @@
         "refFiles": [
           {
             "file": "src/backend/database/channels-repository.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
-        "name": "SHEET_ENTRY_NAME",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
             "count": 5
           }
         ],
@@ -14745,20 +14954,6 @@
         "fileSpan": 1
       },
       {
-        "name": "loadSharedStrings",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "locateFirstSheet",
         "defFiles": [
           "src/backend/biz-op-recon-import/reader-streamed.js"
@@ -15018,20 +15213,6 @@
         "refFiles": [
           {
             "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "openZipWithEntries",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
             "count": 3
           }
         ],
@@ -15438,20 +15619,6 @@
         "refFiles": [
           {
             "file": "src/backend/biz-op-recon-import/import-worker.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "SHARED_STRINGS_ENTRY_NAME",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
             "count": 3
           }
         ],
@@ -16348,20 +16515,6 @@
         "refFiles": [
           {
             "file": "src/main-process/run-check-worker-pool.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
-        "name": "columnLetterToIndex",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
             "count": 2
           }
         ],
@@ -17531,20 +17684,6 @@
         "fileSpan": 1
       },
       {
-        "name": "parseColumnFromCellRef",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "parseConfig",
         "defFiles": [
           "src/backend/database/scenarios-repository.js"
@@ -18474,6 +18613,7 @@
     {
       "name": "path",
       "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
         "src/backend/acquiring-bill-currency-import/reader.js",
         "src/backend/balance-adjustment-store.js",
         "src/backend/balance-seed-store.js",
@@ -18513,6 +18653,10 @@
         "src/main.js"
       ],
       "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
         {
           "file": "src/backend/acquiring-bill-currency-import/reader.js",
           "count": 3
@@ -18674,8 +18818,8 @@
           "count": 2
         }
       ],
-      "totalHits": 124,
-      "fileSpan": 40
+      "totalHits": 125,
+      "fileSpan": 41
     },
     {
       "name": "fs",
@@ -19112,6 +19256,74 @@
       "fileSpan": 16
     },
     {
+      "name": "FLOW_HEADERS",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/columns.js",
+        "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+        "src/backend/acquiring-bill-currency-import/reader.js",
+        "src/backend/acquiring-bill-currency-import/validator.js",
+        "src/backend/biz-op-recon-db/columns.js",
+        "src/backend/vcc-op-calc-import/reader.js",
+        "src/backend/vcc-op-calc-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/columns.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/validator.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 37,
+      "fileSpan": 13
+    },
+    {
       "name": "XLSX",
       "defFiles": [
         "src/backend/bank-bu-recon-import/reader.js",
@@ -19178,69 +19390,6 @@
         }
       ],
       "totalHits": 66,
-      "fileSpan": 12
-    },
-    {
-      "name": "FLOW_HEADERS",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-db/columns.js",
-        "src/backend/acquiring-bill-currency-import/reader.js",
-        "src/backend/acquiring-bill-currency-import/validator.js",
-        "src/backend/biz-op-recon-db/columns.js",
-        "src/backend/vcc-op-calc-import/reader.js",
-        "src/backend/vcc-op-calc-import/validator.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-db/columns.js",
-          "count": 6
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
-          "count": 6
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/validator.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-db/columns.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/validator.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-op-calc-db/columns.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-op-calc-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-op-calc-import/validator.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/biz-op-recon-writer.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 36,
       "fileSpan": 12
     },
     {
@@ -19519,6 +19668,53 @@
       "fileSpan": 8
     },
     {
+      "name": "validateFlowHeaders",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+        "src/backend/acquiring-bill-currency-import/reader.js",
+        "src/backend/acquiring-bill-currency-import/validator.js",
+        "src/backend/biz-op-recon-import/validator.js",
+        "src/backend/vcc-op-calc-import/reader.js",
+        "src/backend/vcc-op-calc-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/validator.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 16,
+      "fileSpan": 8
+    },
+    {
       "name": "insertRun",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/run-repository.js",
@@ -19719,48 +19915,6 @@
         }
       ],
       "totalHits": 18,
-      "fileSpan": 7
-    },
-    {
-      "name": "validateFlowHeaders",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-import/reader.js",
-        "src/backend/acquiring-bill-currency-import/validator.js",
-        "src/backend/biz-op-recon-import/validator.js",
-        "src/backend/vcc-op-calc-import/reader.js",
-        "src/backend/vcc-op-calc-import/validator.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/validator.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/validator.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-op-calc-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-op-calc-import/validator.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 15,
       "fileSpan": 7
     },
     {
@@ -20020,6 +20174,39 @@
         }
       ],
       "totalHits": 19,
+      "fileSpan": 5
+    },
+    {
+      "name": "BILL_HEADERS",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/columns.js",
+        "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+        "src/backend/acquiring-bill-currency-import/reader.js",
+        "src/backend/acquiring-bill-currency-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/columns.js",
+          "count": 7
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/validator.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 15,
       "fileSpan": 5
     },
     {
@@ -20583,34 +20770,6 @@
         {
           "file": "src/renderer.js",
           "count": 5
-        }
-      ],
-      "totalHits": 14,
-      "fileSpan": 4
-    },
-    {
-      "name": "BILL_HEADERS",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-db/columns.js",
-        "src/backend/acquiring-bill-currency-import/reader.js",
-        "src/backend/acquiring-bill-currency-import/validator.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-db/columns.js",
-          "count": 7
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/validator.js",
-          "count": 2
         }
       ],
       "totalHits": 14,
@@ -21711,6 +21870,35 @@
       "fileSpan": 4
     },
     {
+      "name": "StringDecoder",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+        "src/backend/biz-op-recon-import/reader-streamed.js",
+        "src/backend/pending-import/streaming-xlsx-reader.js",
+        "src/backend/vcc-op-calc-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 4
+    },
+    {
       "name": "batchDelete",
       "defFiles": [
         "src/backend/database/scenarios-repository.js"
@@ -22104,6 +22292,30 @@
         {
           "file": "src/backend/pending-reconcile/removal-match.js",
           "count": 3
+        }
+      ],
+      "totalHits": 13,
+      "fileSpan": 3
+    },
+    {
+      "name": "importRepo",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+        "src/backend/acquiring-bill-currency-import/reader.js",
+        "src/main-process/acquiring-bill-currency-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 7
         }
       ],
       "totalHits": 13,
@@ -22685,6 +22897,30 @@
       "fileSpan": 3
     },
     {
+      "name": "extractMonthKey",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+        "src/backend/acquiring-bill-currency-import/reader.js",
+        "src/backend/acquiring-bill-currency-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/validator.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 3
+    },
+    {
       "name": "getRowsByDateBu",
       "defFiles": [
         "src/backend/biz-op-recon-db/flow-imports-repository.js",
@@ -22842,6 +23078,30 @@
       "fileSpan": 3
     },
     {
+      "name": "BILL_KEY_COLUMN_INDICES",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/columns.js",
+        "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+        "src/backend/acquiring-bill-currency-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
       "name": "buildDateDir",
       "defFiles": [
         "src/main-process/acquiring-bill-currency-writer.js",
@@ -22927,6 +23187,30 @@
         {
           "file": "src/main.js",
           "count": 1
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
+      "name": "FLOW_KEY_COLUMN_INDICES",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-db/columns.js",
+        "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+        "src/backend/acquiring-bill-currency-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-db/columns.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 3
         }
       ],
       "totalHits": 6,
@@ -23241,6 +23525,30 @@
         },
         {
           "file": "src/backend/file-service/readers.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
+      "name": "validateBillHeaders",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+        "src/backend/acquiring-bill-currency-import/reader.js",
+        "src/backend/acquiring-bill-currency-import/validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/validator.js",
           "count": 2
         }
       ],
@@ -23718,30 +24026,6 @@
       "fileSpan": 3
     },
     {
-      "name": "StringDecoder",
-      "defFiles": [
-        "src/backend/biz-op-recon-import/reader-streamed.js",
-        "src/backend/pending-import/streaming-xlsx-reader.js",
-        "src/backend/vcc-op-calc-import/reader.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/pending-import/streaming-xlsx-reader.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/vcc-op-calc-import/reader.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 3
-    },
-    {
       "name": "updateRunExportPath",
       "defFiles": [
         "src/backend/bank-bu-recon-db/run-repository.js",
@@ -24163,6 +24447,24 @@
       "fileSpan": 2
     },
     {
+      "name": "ImportValidationError",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 15
+        }
+      ],
+      "totalHits": 16,
+      "fileSpan": 2
+    },
+    {
       "name": "refreshBankStatementStatus",
       "defFiles": [
         "src/renderer.js"
@@ -24322,25 +24624,6 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 7
-        }
-      ],
-      "totalHits": 12,
-      "fileSpan": 2
-    },
-    {
-      "name": "importRepo",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-import/reader.js",
-        "src/main-process/acquiring-bill-currency-session.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-session.js",
           "count": 7
         }
       ],
@@ -24979,6 +25262,24 @@
       "fileSpan": 2
     },
     {
+      "name": "MAX_COLLECTED_ERRORS",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 6
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 2
+    },
+    {
       "name": "PRAGMA_STATEMENTS",
       "defFiles": [
         "src/main-process/run-check-multiworker-worker.js",
@@ -25028,6 +25329,24 @@
         {
           "file": "src/renderer.js",
           "count": 5
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 2
+    },
+    {
+      "name": "SHEET_ENTRY_NAME",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 6
         }
       ],
       "totalHits": 7,
@@ -25721,25 +26040,6 @@
       "fileSpan": 2
     },
     {
-      "name": "extractMonthKey",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-import/reader.js",
-        "src/backend/acquiring-bill-currency-import/validator.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/validator.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 2
-    },
-    {
       "name": "FILENAME_MAPPING_TEMPLATE_ID",
       "defFiles": [
         "src/main.js",
@@ -26145,25 +26445,6 @@
       "fileSpan": 2
     },
     {
-      "name": "BILL_KEY_COLUMN_INDICES",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-db/columns.js",
-        "src/backend/acquiring-bill-currency-import/reader.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-db/columns.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
       "name": "BIZ_OP_END_BALANCE_DB_COLUMN",
       "defFiles": [
         "src/backend/biz-op-recon-db/columns.js"
@@ -26310,25 +26591,6 @@
       "fileSpan": 2
     },
     {
-      "name": "FLOW_KEY_COLUMN_INDICES",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-db/columns.js",
-        "src/backend/acquiring-bill-currency-import/reader.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-db/columns.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
       "name": "getBillSplitAmountRules",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -26455,6 +26717,24 @@
       "fileSpan": 2
     },
     {
+      "name": "loadSharedStrings",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "normalizeBillDate",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/import-repository.js",
@@ -26468,6 +26748,24 @@
         {
           "file": "src/backend/acquiring-bill-currency-import/validator.js",
           "count": 2
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "openZipWithEntries",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 4
         }
       ],
       "totalHits": 5,
@@ -26622,6 +26920,24 @@
       "fileSpan": 2
     },
     {
+      "name": "SHARED_STRINGS_ENTRY_NAME",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "statementImportSessions",
       "defFiles": [
         "src/main.js"
@@ -26690,25 +27006,6 @@
         {
           "file": "src/renderer.js",
           "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
-      "name": "validateBillHeaders",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-import/reader.js",
-        "src/backend/acquiring-bill-currency-import/validator.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/validator.js",
-          "count": 2
         }
       ],
       "totalHits": 5,
@@ -26872,6 +27169,24 @@
         },
         {
           "file": "src/renderer.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "columnLetterToIndex",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
           "count": 3
         }
       ],
@@ -27766,6 +28081,24 @@
         {
           "file": "src/main-process/recon-id-fix-io.js",
           "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "parseColumnFromCellRef",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 3
         }
       ],
       "totalHits": 4,
@@ -29850,6 +30183,44 @@
       "fileSpan": 2
     },
     {
+      "name": "CELL_OPEN_RE",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+        "src/backend/pending-import/streaming-xlsx-reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 2,
+      "fileSpan": 2
+    },
+    {
+      "name": "CELL_R_RE",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+        "src/backend/pending-import/streaming-xlsx-reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 2,
+      "fileSpan": 2
+    },
+    {
       "name": "os",
       "defFiles": [
         "src/main-process/run-check-multiworker.js",
@@ -29971,6 +30342,25 @@
         },
         {
           "file": "src/main-process/recon-id-fix-io.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 2,
+      "fileSpan": 2
+    },
+    {
+      "name": "xmlUnescape",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+        "src/backend/pending-import/streaming-xlsx-reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-import/streaming-xlsx-reader.js",
           "count": 1
         }
       ],
