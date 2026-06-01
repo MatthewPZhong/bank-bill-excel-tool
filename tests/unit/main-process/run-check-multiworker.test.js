@@ -554,4 +554,54 @@ test.describe('run-check-multiworker（plan-b write-splitting）', () => {
     assert.throws(() => mwWorker.__test_only__.buildPartTableSql([]), /非空数组/);
     assert.throws(() => mwWorker.__test_only__.buildPartTableSql(['x; DROP TABLE']), /非法列名/);
   });
+
+  // ── 🔴 C1（self-review）：固定 tempDir 跨 run 复用，残留 part-*.sqlite 必须写前清除（不追加污染）──
+  //   背景：上个 run 在 merge 期被硬杀/OOM/断电 → finally 未清 → part-<ci>.sqlite 残留；
+  //   writeChunkToTemp CREATE IF NOT EXISTS + INSERT（seq 续涨）若不先删会追加 → merge 收走残留行 → diff_rows 重复。
+  test('10. 🔴 C1：tempDir 残留 part-0.sqlite 含垃圾行 → 写前清除，不污染 merge（byte-for-byte）', async () => {
+    const rows = 300;
+    const chunkSize = 100; // 3 chunks
+    const ctx = setupDb(rows);
+    const tempDir = mw.makeTempDir();
+    try {
+      // baseline（runId=1）
+      runBaseline(ctx.db, 1, chunkSize);
+      const baseRows = dumpDiffRows(ctx.db, 1);
+      assert.ok(baseRows.length > 0, 'baseline 应有 diff 行');
+
+      // 预置「上个 run 崩溃残留」：tempDir 写一个含垃圾行的 part-0.sqlite（PART_TABLE schema，seq=1 占位）
+      const stalePath = path.join(tempDir, 'part-0.sqlite');
+      const stale = new DatabaseSync(stalePath);
+      for (const sql of PRAGMA) stale.exec(sql);
+      stale.exec(`CREATE TABLE ${mwWorker.PART_TABLE} (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT,
+        bill_import_id INTEGER, flow_currency TEXT, flow_amount_abs TEXT, diff_type TEXT
+      );`);
+      stale.prepare(`INSERT INTO ${mwWorker.PART_TABLE} (bill_import_id, flow_currency, flow_amount_abs, diff_type) VALUES (?,?,?,?)`)
+        .run(999999, 'XXX', '99999.99', 'STALE_GARBAGE');
+      stale.close();
+
+      // 多 worker（runId=2）—— C1 修复后 chunk-0 的 writeChunkToTemp 写前删残留 → 不污染
+      const res = await mw.runWriteSplitChunks({
+        db: ctx.db, dbPath: ctx.dbPath, workerCount: 2,
+        chunks: buildChunks(rows, chunkSize),
+        selectSql: SELECT_SQL, partColumns: PART_COLUMNS,
+        targetTable: DIFF_TABLE, targetColumns: TARGET_COLUMNS,
+        prefixValues: [2], tempDir,
+      });
+
+      assert.equal(res.insertedRows, baseRows.length, `插入行数应 == baseline（无残留追加；base=${baseRows.length} mw=${res.insertedRows}）`);
+      const mwRows = dumpDiffRows(ctx.db, 2);
+      assert.equal(
+        mwRows.some((r) => r.diff_type === 'STALE_GARBAGE'), false,
+        '🔴 C1：残留垃圾行不应进入 diff_rows（writeChunkToTemp 写前清除）'
+      );
+      const cmp = compareRows(baseRows, mwRows);
+      assert.equal(cmp.equal, true, `🔴 C1 byte-for-byte 失败 @${cmp.firstDiffAt}：${cmp.reason}`);
+      assert.equal(countTempParts(tempDir), 0, 'temp part 跑完清空');
+    } finally {
+      mw.cleanupDir(tempDir);
+      ctx.cleanup();
+    }
+  });
 });

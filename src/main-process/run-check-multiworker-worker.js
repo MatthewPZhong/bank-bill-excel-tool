@@ -38,6 +38,7 @@
 'use strict';
 
 const { parentPort, isMainThread } = require('node:worker_threads');
+const fs = require('node:fs');
 
 // ─────────────────────────────────────────────────────────────────
 // 模块级 helpers（unit test 在主线程 require 时只拿这部分；worker 进程内同名）
@@ -128,6 +129,14 @@ function buildPartTableSql(partColumns) {
 function writeChunkToTemp({ DatabaseSync, selectStmt, bindParams, tempDbPath, partColumnNames }) {
   const t0 = Date.now();
   const rows = selectStmt.all(...(Array.isArray(bindParams) ? bindParams : []));
+  // 🔴 v2.1.12 β.1 self-review C1（资金红线）：固定 tempDir（main.js 的 storageRoot/.mw-tmp）跨 run 复用，
+  //   若上一个 run 在 merge 期被硬杀 / OOM / 断电 → runWriteSplitChunks 的 finally 未执行 → part-<ci>.sqlite 残留。
+  //   本函数 CREATE TABLE IF NOT EXISTS + INSERT（seq AUTOINCREMENT 续涨）会**追加**到残留行 →
+  //   主进程 merge 按 seq 升序把残留+新行全收走 → diff_rows 重复（对账多算）。
+  //   写前先删 temp db 文件 + WAL/SHM/journal sidecar，使每次写入幂等（与残留无关）。
+  for (const suffix of ['', '-wal', '-shm', '-journal']) {
+    try { fs.rmSync(tempDbPath + suffix, { force: true }); } catch (_e) { /* swallow — 不存在即可 */ }
+  }
   const tdb = new DatabaseSync(tempDbPath);
   try {
     for (const sql of PRAGMA_STATEMENTS) tdb.exec(sql);

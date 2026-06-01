@@ -538,6 +538,17 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
       }
     } else {
       // ── 单 worker 路径（resume / workerCount<=1 / 无 dbPath）—— 行为完全不变（D31 回退兜底）──
+      // 🔴 v2.1.12 β.1 self-review C2（资金红线）：resume 从 chunk 0 重跑前，先清本 run 已有 diff_rows。
+      //   背景：MW run 在 merge 期被硬杀 / cancel 硬 terminate / OOM（不经 insertDiffRowsByJoinMultiWorker
+      //   的 catch DELETE）→ 部分 chunk 已 COMMIT 残留；且 MW 不逐 chunk 标 chunk_progress（恒 -1）→
+      //   resumeFromChunkIndex=0。此时单 worker 从 chunk 0 全跑，而 clearRunsByMonth 仅在 !isResume 执行
+      //   → 不清 → diff_rows 翻倍（对账多算）。
+      //   修复：resumeFromChunkIndex===0（lastCompletedChunkIndex=-1，无可信已完成 chunk）→ 先清本 run。
+      //   对单 worker「崩在首个 chunk COMMIT 前」的既有窄窗口同样安全（无可信已完成 chunk，清后从 0 重跑结果一致）；
+      //   resumeFromChunkIndex>0（onChunkDone 写过的可信 chunk）则不清，保留已 COMMIT 批从下一 chunk 续跑。
+      if (isResume && resumeFromChunkIndex === 0) {
+        runRepo.clearDiffRowsByRunId(db, runId);
+      }
       chunkedResult = runRepo.insertDiffRowsByJoinChunked(db, {
         runId,
         monthKey,

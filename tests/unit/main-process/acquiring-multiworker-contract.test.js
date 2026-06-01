@@ -549,6 +549,50 @@ test.describe('β.1-T2 多 worker contract（Group B：runCheckCore 级 gate）'
     });
   }
 
+  // 🔴 B4 C2（self-review）：resume(lastCompletedChunkIndex=-1) 从 chunk 0 重跑前清本 run 残留 diff_rows
+  //   背景：MW run 在 merge 期被硬杀/cancel-terminate/OOM（不经 insertDiffRowsByJoinMultiWorker 的 catch DELETE）
+  //   → 部分 chunk 已 COMMIT 残留 + MW 不逐 chunk 标 chunk_progress（恒 -1）→ resume 单 worker 从 0 全跑，
+  //   而 clearRunsByMonth 仅在 !isResume → 不清 → diff_rows 翻倍。C2 修复：resumeFromChunkIndex===0 时先清本 run。
+  test('B4. 🔴 C2：resume(从 chunk 0)重跑前清本 run 残留 diff_rows（MW 崩/cancel mid-merge 不致翻倍）', async () => {
+    const ctx = await setupRealDb(120);
+    try {
+      // 1) 完整单 worker run → 正确 diff 集（runId R / N 行）
+      await session.runCheckCore({ db: ctx.db.db, monthKey: FIXTURE_MONTH, chunkSize: 50 });
+      const snap1 = snapshotRun(ctx.db.db);
+      const N = snap1.rows.length;
+      const runId = snap1.runId;
+      assert.ok(N > 0, `首次 run 应有 diff（实际 ${N}）`);
+
+      // 2) 模拟「MW 崩/cancel mid-merge」残留态：本 run diff_rows 仍在（此处用全集 N = 最坏情况，不清则翻倍）
+      //    + chunk_progress 标 partial 且 lastCompletedChunkIndex=-1（MW 不逐 chunk 标，恒 -1）
+      runRepo.setRunChunkProgress(ctx.db.db, {
+        runId, lastCompletedChunkIndex: -1, totalChunks: 0, status: 'partial', chunkSize: 50,
+      });
+      assert.equal(
+        ctx.db.db.prepare(`SELECT COUNT(*) AS c FROM ${DIFF_TABLE} WHERE run_id = ?`).get(runId).c, N,
+        '残留 N 行就绪'
+      );
+
+      // 3) resume 同 runId（单 worker，lastCompletedChunkIndex=-1 → resumeFromChunkIndex=0 全重跑）
+      await session.runCheckCore({
+        db: ctx.db.db, monthKey: FIXTURE_MONTH, chunkSize: 50,
+        resumeFromRun: { runId, lastCompletedChunkIndex: -1 },
+      });
+
+      // 4) 🔴 断言：最终 diff_rows == N（C2 清残留再重插），无 C2 修复会翻倍成 2N
+      const finalCount = ctx.db.db.prepare(`SELECT COUNT(*) AS c FROM ${DIFF_TABLE} WHERE run_id = ?`).get(runId).c;
+      assert.equal(finalCount, N, `🔴 C2：resume 重跑后 diff_rows 应 == N=${N}（清残留再重插），未修复会翻倍成 ${2 * N}（实际 ${finalCount}）`);
+
+      // 内容与首次一致（byte-for-byte）
+      const snap2 = snapshotRun(ctx.db.db);
+      assert.equal(snap2.runId, runId, 'resume 复用同 runId（未新建 run）');
+      const cmp = compareRows(snap1.rows, snap2.rows);
+      assert.equal(cmp.equal, true, `🔴 C2 resume 后 diff_rows 内容应与首次一致：${cmp.reason}`);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
   // gate 回退：workerCount>1 但无 dbPath → 安全回退单 worker（不抛错，结果正确）
   test('B2. gate 回退：workerCount=4 但无 dbPath → 走单 worker（结果正确 + chunk_progress complete）', async () => {
     const ctx = await setupRealDb(120);

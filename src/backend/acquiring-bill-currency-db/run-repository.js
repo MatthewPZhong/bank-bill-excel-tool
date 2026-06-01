@@ -141,6 +141,15 @@ function clearRunsByMonth(db, monthKey) {
   db.prepare(`DELETE FROM ${RUNS_TABLE} WHERE month_key = ?`).run(monthKey);
 }
 
+// 🔴 v2.1.12 β.1 self-review C2（资金红线）：清掉某 run 已插入的 diff_rows（只清本 run，不动 runs 行 / 别的 run）。
+//   用于：① MW 汇总半途失败的 catch 兜底（见 insertDiffRowsByJoinMultiWorker）；
+//        ② resume 从 chunk 0 重跑前清残留——MW run 在 merge 期被硬杀/cancel-terminate/OOM（不经 catch）
+//           会留下部分已 COMMIT 的 chunk + chunk_progress 恒 -1 → resume 单 worker 从 0 全跑，
+//           若不先清则 diff_rows 翻倍。resumeFromChunkIndex===0（无可信已完成 chunk）时调用即安全。
+function clearDiffRowsByRunId(db, runId) {
+  db.prepare(`DELETE FROM ${DIFF_TABLE} WHERE run_id = ?`).run(runId);
+}
+
 // ⚠️ 资金红线 ⚠️ — spec §5.2 核心 SQL
 // INNER JOIN flow + bill 按 (month_key, recon_main_id)；仅当 settle_currency_norm 不一致时写入 diff_rows
 // diff_type:
@@ -440,7 +449,7 @@ async function insertDiffRowsByJoinMultiWorker(db, {
     try {
       db.exec('BEGIN');
       try {
-        db.prepare(`DELETE FROM ${DIFF_TABLE} WHERE run_id = ?`).run(runId);
+        clearDiffRowsByRunId(db, runId);
         db.exec('COMMIT');
       } catch (_delInner) {
         try { db.exec('ROLLBACK'); } catch (_e) { /* swallow */ }
@@ -656,6 +665,7 @@ module.exports = {
   updateRunPaths,
   updateRunStatus,
   clearRunsByMonth,
+  clearDiffRowsByRunId,
   insertDiffRowsByJoin,
   // v2.1.10 A4 T18 / T19：chunked 分批 + chunk_progress
   insertDiffRowsByJoinChunked,
