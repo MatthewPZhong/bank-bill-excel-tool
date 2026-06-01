@@ -247,3 +247,53 @@ POC 是 β 全阶段的前提——验证「多 worker write-splitting 真能 2-
 **rows.length===0**（无有效数据行）：流完 dataRows===0 → emit rejected `[{rowIndex:0,reason:'文件无有效数据行'}]`（与旧同步语义一致）。
 
 **回退**：保留旧同步 `runBizOpImportAsync`/`runFlowImportAsync`（contract 基线 + 测试 + 无 dbPath 兜底）；默认走 worker。session 暴露 `runBizOpImportViaWorker(db,{...,dbPath,onProgress})`，无 dbPath 时内部 fallback 旧同步路径。
+
+---
+
+## 10 收单(acquiring)导入提速 —— 新增 β 工作项（2026-06-01 POC 实测 · reverse sync）
+
+> 触发：用户实测反馈「**收单的导入**慢」。β.1 做的是收单**对账**（runCheck JOIN multi-worker），**从未碰过收单导入**。profile POC 定位瓶颈 → 解析器 make-or-break 对比 → 锁定最优架构。**这是 β 漏掉的真实痛点**。
+
+### 10.1 瓶颈定位（POC 实测，scripts/poc/v2.1.12-acquiring-import-{clean-timing,insert-bench,parser-compare}.js）
+
+收单导入现状链路：`acquiring-bill-currency-import/reader.js` = **yauzl（流式解压）+ sax（流式 XML 解析）**，逐行 `insertFlowRow`（含 `JSON.stringify(raw_json)` + SQL）。
+
+| 段 | 50万行实测 | 占比 |
+|---|---|---|
+| 完整导入（clean-timing 真实 prod 路径）| **121.82s** | 100% |
+| └ 解析（sax，A 档：真实 reader.importFlowFile + no-op insert）| **109.47s** | **~90%** 🔴 |
+| └ insert + raw_json（Cins 端到端 − C 解析 ≈ 21.86 − 12.64）| ~9.2s | ~7% |
+
+→ **瓶颈 = sax 解析（~90%）**。批量 INSERT / raw_json 精简（早期误判的方向）合计仅省 <6%，鸡肋。
+
+### 10.2 解析器对比（make-or-break · fixture 50万/100万行 × 48列 全 inlineStr，134MB/267MB，解压后 1.8GB/3.8GB）
+
+| 档 | 解压 | 解析引擎 | 500K | 100万 | 峰值RSS | 100万结局 |
+|---|---|---|---|---|---|---|
+| **A 现状** | yauzl | **sax 库** | 109.5s | 233.4s | 241/253MB | ✓ 慢 |
+| **B pending范式** | **JSZip** | 手写扫描 | 10.5s | 💥 | 292MB | **崩**`uncompressed data size mismatch` |
+| **C 最优** | **yauzl** | **手写扫描** | **12.6s** | **25.5s** | **169/237MB** | ✓ 跑通+最省内存 |
+
+**关键结论**：
+1. **解析引擎 sax→手写 = 8.7x(500K)/9.1x(100万)**（A vs C 同用 yauzl 解压，唯一变量是 sax↔手写 → 纯属解析器）。sax 慢在每 cell ~7 次 JS 事件回调（50万行×48列×7 ≈ 1.68 亿次）。
+2. **JSZip 在 100万行(~3.8GB 解压 entry)崩**（B），而 **yauzl 同文件读得好好的**（A/C 出满 100万行）→ pending 的 `streaming-xlsx-reader`（JSZip）有大 entry 上限，**收单不能照搬**。
+3. **最优 = yauzl + 手写扫描**（C）：现状两个 reader 都不是最佳——收单=yauzl+sax(慢)、pending=JSZip+手写(大文件崩)；C 各取所长，且**内存最低**（yauzl 流式无整文件 buffer）。
+4. **正确性闸**：手写 `parseRowXml` 与 sax 在真实 48 列 inlineStr 数据前 3000 行 × 48 列 **0 差异**（byte-level 一致）。
+
+### 10.3 端到端实测（Cins = C 解析 + 真实 insertFlowRow 含 raw_json+SQL，与现状同口径）
+
+| | 500K | 100万 | 500万(外推) |
+|---|---|---|---|
+| 现状(sax) | 121.82s | ~245s | ~20min |
+| **新(yauzl+手写)** | **21.86s** | **45.44s** | **~3.8min** |
+| **加速** | **5.6x(实测)** | ~5.4x | ~5.5x |
+
+换解析器后瓶颈转移：parse 12.6s(58%) / insert+raw_json 9.2s(42%) 接近均衡 → 届时**批量 INSERT 才有边际价值**（二期，省 ~2-3s），raw_json 是数据源不可删。
+
+### 10.4 拟议任务（β 新增 · 待用户 greenlight · 🔴 资金红线）
+
+- **T-acq-import-1**：`acquiring-bill-currency-import/reader.js` 的 `streamSheetRows` 把 **sax → 手写扫描**（保留 yauzl `openZipWithEntries`/`loadSharedStrings` 不动；新建手写 sheet 扫描复用 `streaming-xlsx-reader.parseRowXml`，sharedStrings 仍走 yauzl 读）。**不引入 JSZip**。
+- **T-acq-import-2** 🔴：**byte-for-byte contract test**：旧 sax reader vs 新手写 reader 在多档真实 fixture（含 sharedStrings 路径 / number cell 已知差异 / 稀疏行 / 表头错）逐行逐列 + `_rowIndex` + monthKey + 错误 errorCode 全等。**收单导入 = 资金真理源（raw_json/对账金额/币种），换解析器必须证不算错账**。
+- **T-acq-import-3**：500万真实数据手测（合并门槛，对标 β.1-T4）+ release-check 全绿 + 进度对接。
+
+> ⚠️ **未覆盖**：① fixture 全 inlineStr 无 sharedStrings；真实数据若有 t="s" 共享串列，手写需走 yauzl 读 sst（sax reader 已有 `loadSharedStrings`，复用即可，但需 contract 覆盖该路径）。② number cell 大数已知差异（同 bizOp reader-streamed 文档化）。③ 500万真实手测仍是合并前硬门槛。
