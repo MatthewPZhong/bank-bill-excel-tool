@@ -34,6 +34,18 @@
 // - serialize 输出严格 UTF-8 JSON 字符串（caller 决定是否 write 到磁盘）
 // - parse 输出 channels 数组保证存在（即使源 channels 缺失也兜底空数组）
 // - scenarios.configJson 透传原值（不做 schema 校验；scenario 内部 schema 由各 engine 自校）
+//
+// v2.1.13 PR#58 review P2-1（🔴 资金/业务红线 — 适用渠道语义）：
+//   scenario 新增**可选**字段 `applicableChannelNames`，承载「自带写死场景」(builtin-fixed) 的
+//   「适用银行渠道」列表（DB 表 scenario_applicable_channels 的内容）。
+//   - 为什么用「名字」而不是 channel_id：channel_id 跨库不稳定（不同机器/库 id 不同），导出端的
+//     id 在导入端无意义；渠道在库内由 (name, ownerLocation) **联合唯一**（channels-repository
+//     UNIQUE (name, owner_location)），故每个元素是 `{name, ownerLocation}` 对（仅用 name 会在
+//     同名不同地区时歧义）。导入端按该对 resolve 成当前库 channel_id。
+//   - 仅 builtin-fixed 有关联行 → 才输出该字段；其它场景（无关联行）= 空 → 不输出该字段
+//     （保持 bundle 体积 + 向后兼容：旧库/旧 bundle 无此字段时不调 setApplicable，维持「空=适用全部」）。
+//   - 仍是 scenarioBundleVersion=1 的**可选向后兼容字段**（旧 bundle 无此字段照常解析；新 bundle
+//     被旧应用读到时该字段被忽略），故不 bump SUPPORTED_SCENARIO_BUNDLE_VERSION。
 
 const SUPPORTED_SCENARIO_BUNDLE_VERSION = 1;
 const MIN_SCENARIO_BUNDLE_VERSION = 1;
@@ -47,6 +59,9 @@ const MIN_SCENARIO_BUNDLE_VERSION = 1;
 //                       scenario shape：{ category, name, priority?, sortOrder?, enabled, config / configJson }
 //                       本函数对 config / configJson 字段二选一兼容：优先 configJson（数据库原始 JSON 字符串），否则 JSON.stringify(config)
 //   appVersion:         string — 当前 app 版本号（写入 bundle.appVersion 做审计标记）
+//   channelIdToName:    Map<channelId, {name, ownerLocation}> 或 Record（可选）
+//                       v2.1.13 PR#58 P2-1：把场景的 _applicableChannelIds（channel_id 列表）解析成
+//                       {name, ownerLocation} 列表写进 bundle。缺省/缺映射 → 不输出 applicableChannelNames。
 //
 // 出参：JSON 字符串（含尾换行符，便于 cat / git diff 友好）
 //
@@ -54,7 +69,7 @@ const MIN_SCENARIO_BUNDLE_VERSION = 1;
 // - channels 顺序保持入参顺序（caller 决定排序：通用一般在首位，但本函数不强加约束）
 // - scenarios 内部按入参顺序 — caller 应在调用前按 (priority desc, id asc) 排好
 // - 若 channelId 不在 scenariosByChannel 中 → scenarios 数组为空（合法导出空渠道）
-function serializeScenarioBundle(channels, scenariosByChannel, appVersion) {
+function serializeScenarioBundle(channels, scenariosByChannel, appVersion, channelIdToName) {
   if (!Array.isArray(channels)) {
     throw new Error('serializeScenarioBundle: channels 必须是数组');
   }
@@ -66,12 +81,19 @@ function serializeScenarioBundle(channels, scenariosByChannel, appVersion) {
     ? (id) => scenariosByChannel.get(id) || scenariosByChannel.get(String(id)) || []
     : (id) => scenariosByChannel[id] || scenariosByChannel[String(id)] || [];
 
+  // v2.1.13 PR#58 P2-1：channelId → {name, ownerLocation} 解析器（缺省返 null = 不输出适用渠道名）
+  const nameLookup = channelIdToName instanceof Map
+    ? (id) => channelIdToName.get(id) || channelIdToName.get(Number(id)) || channelIdToName.get(String(id)) || null
+    : (channelIdToName && typeof channelIdToName === 'object')
+      ? (id) => channelIdToName[id] || channelIdToName[String(id)] || null
+      : () => null;
+
   const payload = {
     scenarioBundleVersion: SUPPORTED_SCENARIO_BUNDLE_VERSION,
     exportedAt: new Date().toISOString(),
     appVersion: String(appVersion || ''),
     channels: channels.map((ch) => {
-      const scenarios = (lookup(ch.id) || []).map((s) => normalizeScenarioForExport(s));
+      const scenarios = (lookup(ch.id) || []).map((s) => normalizeScenarioForExport(s, nameLookup));
       return {
         name: String(ch.name || ''),
         ownerLocation: String(ch.ownerLocation || ''),
@@ -84,7 +106,7 @@ function serializeScenarioBundle(channels, scenariosByChannel, appVersion) {
   return `${JSON.stringify(payload, null, 2)}\n`;
 }
 
-function normalizeScenarioForExport(scenario) {
+function normalizeScenarioForExport(scenario, nameLookup) {
   if (!scenario || typeof scenario !== 'object') {
     throw new Error('serializeScenarioBundle: scenario 必须是对象');
   }
@@ -110,13 +132,27 @@ function normalizeScenarioForExport(scenario) {
   } else {
     throw new Error(`serializeScenarioBundle: scenario "${scenario.name || '(unnamed)'}" 缺少 config / configJson`);
   }
-  return {
+  const out = {
     category: String(scenario.category || ''),
     name: String(scenario.name || ''),
     sortOrder,
     enabled: scenario.enabled === true || scenario.enabled === 1 ? 1 : 0,
     configJson
   };
+  // v2.1.13 PR#58 P2-1（🔴 资金/业务红线）：把适用渠道 channel_id 列表解析成 {name, ownerLocation} 列表。
+  //   - scenario._applicableChannelIds 由 caller（main.js export handler）对 builtin-fixed 附上（其它 null）。
+  //   - 仅当解析到 ≥1 个渠道名时才输出 applicableChannelNames（空/缺映射 → 不输出，保持「空=适用全部」+ 向后兼容）。
+  if (Array.isArray(scenario._applicableChannelIds) && scenario._applicableChannelIds.length > 0 && typeof nameLookup === 'function') {
+    const names = [];
+    for (const cid of scenario._applicableChannelIds) {
+      const ch = nameLookup(cid);
+      if (ch && ch.name) {
+        names.push({ name: String(ch.name), ownerLocation: String(ch.ownerLocation || '') });
+      }
+    }
+    if (names.length > 0) out.applicableChannelNames = names;
+  }
+  return out;
 }
 
 // ----------------------------------------------------------------------------
@@ -195,8 +231,27 @@ function normalizeScenarioForImport(rawScenario) {
     sortOrder: Number.isInteger(rawScenario.sortOrder) ? rawScenario.sortOrder : 0,
     enabled: rawScenario.enabled === 1 || rawScenario.enabled === true ? 1 : 0,
     // configJson 透传原值（可能是 object，也可能是 string）— 上层 apply 时再 serialize
-    configJson: rawScenario.configJson
+    configJson: rawScenario.configJson,
+    // v2.1.13 PR#58 P2-1：透传适用渠道名列表（仅 builtin-fixed 有；旧 bundle 无此字段 → undefined）。
+    //   归一化成 [{name, ownerLocation}]；上层 apply 按 (name, ownerLocation) resolve 成当前库 channel_id。
+    applicableChannelNames: normalizeApplicableChannelNames(rawScenario.applicableChannelNames)
   };
+}
+
+// v2.1.13 PR#58 P2-1：归一化 applicableChannelNames（容忍旧/坏数据）
+//   - 非数组（含 undefined）→ undefined（caller 据此判定「bundle 未携带适用渠道」→ 不调 setApplicable）
+//   - 数组 → 过滤出 name 非空的 {name, ownerLocation}；全被过滤掉 → 返回 []（空 = 显式「无适用渠道」）
+//   注意：undefined（旧 bundle 缺字段）与 []（新 bundle 显式空）语义不同 — 见 applyScenarioBundleImport。
+function normalizeApplicableChannelNames(raw) {
+  if (!Array.isArray(raw)) return undefined;
+  const out = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const name = String(item.name || '').trim();
+    if (!name) continue;
+    out.push({ name, ownerLocation: String(item.ownerLocation || '').trim() });
+  }
+  return out;
 }
 
 // ----------------------------------------------------------------------------

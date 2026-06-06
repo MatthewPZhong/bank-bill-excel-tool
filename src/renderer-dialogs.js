@@ -9302,16 +9302,21 @@
             //   在 dispatcher 永远不命中（v2.1.9 N5 核心功能完全失效）
             //   state.activeScenarioChannelId 由场景管理弹框（createScenariosManagerDialog）维护
             //   当前选中渠道 id；缺省兜底「通用」(id=1)，最小破坏面
-            const activeChannelId = Number(state.activeScenarioChannelId) > 0
-              ? Number(state.activeScenarioChannelId)
-              : 1;
+            // v2.1.13 PR#58 review P2-2（🔴 业务红线）：ReconID 修复模块（recon-id-fix /
+            //   gateway-recon-id-fix）按 category 隔离、无银行渠道维度（A2 compact manager 已去渠道下拉）。
+            //   新建 ReconID 场景必须固定 channel_id=1（通用），不跟随 state.activeScenarioChannelId
+            //   （否则会沿用上一个「银行对账单」manager 残留的渠道选择 → ReconID 场景落到隐藏渠道：
+            //    ① (channel_id,name) UNIQUE 下同名可重复；② 按渠道导出 bundle 漏掉它）。
+            const createChannelId = isReconIdFixCategory(draft.category)
+              ? 1
+              : (Number(state.activeScenarioChannelId) > 0 ? Number(state.activeScenarioChannelId) : 1);
             result = await desktopApi.scenarios.create({
               category: draft.category,
               name: String(draft.name || '').trim(),
               priority: Number(draft.priority),
               enabled: true,
               config: draft.config,
-              channelId: activeChannelId
+              channelId: createChannelId
             });
           } else if (draft.mode === 'edit') {
             result = await desktopApi.scenarios.update(draft.scenarioId, {

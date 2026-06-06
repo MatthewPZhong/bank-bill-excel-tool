@@ -175,13 +175,36 @@ function listScenarios(db) {
   //   - UI 渠道过滤后 visible.forEach((s, idx) => renderRow(s, idx + 1)) — 渠道内序号
   //   - 全表 displayIndex 会导致 dispatcher 命中显示 7/8/9 但 UI 显示 1/2/3 串号
   //   - 老库无 channel_id 列 → 全部归通用 → 行为退化为全表 1-based（与 v2.1.8 一致）
-  const idxByChannel = new Map();
-  return rows.map((row) => {
-    const item = rowToListItem(row);
-    const next = (idxByChannel.get(item.channelId) || 0) + 1;
-    idxByChannel.set(item.channelId, next);
-    return Object.assign(item, { displayIndex: next });
+  // v2.1.13 PR#58 review P2-3（🔴 对账场景号一致性）：displayIndex 必须把 builtin-fixed 置顶（每渠道内
+  //   排在 priority 0-3 普通场景之前），与场景管理弹窗 renderer-dialogs.js 的展示排序（builtin-fixed
+  //   sort 到首位 → 序号固定 1）完全一致。否则 builtin-fixed priority=0 在 (priority DESC, id ASC) 里排在
+  //   最后 → run 路径 displayIndex 与 manager 序号不符（状态栏 / 命中场景 sheet 的「场景序号」串号）。
+  //   做法：返回数组顺序仍保持 SQL 的 (priority DESC, id ASC)（manager 的 stable sort 依赖此前提），
+  //   仅 displayIndex 取值改为「每渠道 builtin-fixed 优先」的 1-based 排名。
+  const items = rows.map((row) => rowToListItem(row));
+  // 每渠道分组，组内按「builtin-fixed 优先，其次保持 SQL 原序(priority DESC, id ASC)」算 displayIndex
+  const byChannel = new Map();
+  items.forEach((item, originalIdx) => {
+    if (!byChannel.has(item.channelId)) byChannel.set(item.channelId, []);
+    byChannel.get(item.channelId).push({ item, originalIdx });
   });
+  const displayIndexByOriginalIdx = new Map();
+  for (const group of byChannel.values()) {
+    // stable：builtin-fixed 在前；同类保持入组顺序（即 SQL 的 priority DESC, id ASC）
+    const ordered = group
+      .map((entry, seq) => ({ ...entry, seq }))
+      .sort((a, b) => {
+        const aBf = a.item.category === 'builtin-fixed' ? 0 : 1;
+        const bBf = b.item.category === 'builtin-fixed' ? 0 : 1;
+        if (aBf !== bBf) return aBf - bBf;
+        return a.seq - b.seq;
+      });
+    ordered.forEach((entry, idx) => {
+      displayIndexByOriginalIdx.set(entry.originalIdx, idx + 1);
+    });
+  }
+  return items.map((item, originalIdx) =>
+    Object.assign(item, { displayIndex: displayIndexByOriginalIdx.get(originalIdx) }));
 }
 
 // v2.1.9 N5 (Phase 4 T17) — 双维调度 hot path API：
@@ -565,17 +588,24 @@ function setApplicableChannelIds(db, scenarioId, channelIds) {
     : [];
   db.exec('BEGIN');
   try {
-    db.prepare('DELETE FROM scenario_applicable_channels WHERE scenario_id = ?').run(numericId);
-    if (ids.length > 0) {
-      const insert = db.prepare('INSERT INTO scenario_applicable_channels (scenario_id, channel_id) VALUES (?, ?)');
-      ids.forEach((cid) => insert.run(numericId, cid));
-    }
+    applyApplicableChannelIdsInTx(db, numericId, ids);
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;
   }
   return { scenarioId: numericId, channelIds: ids };
+}
+
+// v2.1.13 PR#58 P2-1：无事务版覆盖写（DELETE + INSERT），供「已在外层事务内」的 caller 复用
+//   （SQLite 不支持嵌套事务 — bundle import 已 BEGIN，再调 setApplicableChannelIds 的 BEGIN 会抛错）。
+//   注意：本函数不做参数校验/去重，调用方需先把 ids 处理成合法正整数去重数组。
+function applyApplicableChannelIdsInTx(db, scenarioId, ids) {
+  db.prepare('DELETE FROM scenario_applicable_channels WHERE scenario_id = ?').run(scenarioId);
+  if (Array.isArray(ids) && ids.length > 0) {
+    const insert = db.prepare('INSERT INTO scenario_applicable_channels (scenario_id, channel_id) VALUES (?, ?)');
+    ids.forEach((cid) => insert.run(scenarioId, cid));
+  }
 }
 
 // v2.1.13 D-3/D-5：dispatcher hot path — 取对「指定渠道」生效的 builtin-fixed 场景（enabled=1，含 config）
@@ -640,5 +670,7 @@ module.exports = {
   // v2.1.13 D-3：自带写死场景适用银行渠道（多对多）读写 + dispatcher 按渠道取写死场景
   getApplicableChannelIds,
   setApplicableChannelIds,
+  // v2.1.13 PR#58 P2-1：无事务版覆盖写（bundle import 已在外层事务内时复用）
+  applyApplicableChannelIdsInTx,
   listBuiltinFixedForChannel
 };

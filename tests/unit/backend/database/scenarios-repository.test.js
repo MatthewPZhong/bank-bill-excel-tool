@@ -25,7 +25,9 @@ const {
   ensureScenariosChannelIdColumn,
   ensureScenariosSupport,
   // v2.1.9 SR-FIX-1 T43 R1-R3：UNIQUE 复合迁移后 D39 行为验证
-  ensureScenariosNameUniqueByChannelId
+  ensureScenariosNameUniqueByChannelId,
+  // v2.1.13 PR#58 P2-3：扩 category CHECK 含 'builtin-fixed'（否则 createScenario(builtin-fixed) 撞 CHECK）
+  ensureScenariosCategoryBuiltinFixed
 } = require('../../../../src/backend/database/migrations');
 
 let tmpDir;
@@ -44,6 +46,9 @@ function setupDb() {
   ensureScenariosSupport(db);
   ensureChannelsTable(db);
   ensureScenariosChannelIdColumn(db);
+  // 注：不在共享 setupDb 里扩 builtin-fixed CHECK —— 该迁移会顺带建复合 UNIQUE，
+  //   破坏 ensureScenariosNameUniqueByChannelId 的「首次跑 → migrated」测试。
+  //   builtin-fixed CHECK 仅在需要它的 P2-3 describe 内按需调用（幂等）。
 }
 
 // 直接 UPDATE channel_id（createScenario 不支持指定 channel_id，本测试需指定渠道）
@@ -562,6 +567,75 @@ test.describe('listScenarios displayIndex 按渠道分组 1-based（N5 防回归
     assert.strictEqual(byChannel[ch1.id][0].displayIndex, 1, 'CITI-HK 第 1 个 displayIndex=1（不是续 3 或 4）');
     assert.strictEqual(byChannel[ch2.id][0].displayIndex, 1, 'BOSH-CN 第 1 个 displayIndex=1');
     assert.strictEqual(byChannel[ch2.id][1].displayIndex, 2, 'BOSH-CN 第 2 个 displayIndex=2');
+  });
+});
+
+// v2.1.13 PR#58 review P2-3（🔴 对账场景号一致性）：listScenarios displayIndex 必须把 builtin-fixed 置顶
+//   （每渠道内排在普通 priority 0-3 场景之前 → displayIndex=1），与场景管理弹窗展示序号一致。
+//   否则 builtin-fixed priority=0 在 (priority DESC, id ASC) 里排最后 → run 路径状态栏 / 命中场景 sheet
+//   的「场景序号」与 manager 不符。
+test.describe('listScenarios displayIndex builtin-fixed 置顶（PR#58 P2-3 防回归）', () => {
+  // 直接落一个 builtin-fixed 场景到指定渠道（createScenario 已允许该 category）
+  function createBuiltinFixed(name, channelId, priority = 0) {
+    // 幂等：首次调用扩 category CHECK 含 'builtin-fixed'（依赖 channel_id 列，setupDb 已建）
+    ensureScenariosCategoryBuiltinFixed(db);
+    const r = scenariosRepo.createScenario(db, {
+      category: 'builtin-fixed',
+      name,
+      priority,
+      enabled: true,
+      config: {
+        conditions: [{ field: 'CustomerRef', op: '包含', value: 'FT' }],
+        conditionsLogic: 'OR',
+        extractByFeature: { enabled: true, searchFields: ['CustomerRef'], featureCode: 'FT', digitCount: 12, totalLength: 15 },
+        extractByOtherField: null
+      },
+      channelId
+    });
+    return r;
+  }
+
+  test('同渠道：builtin-fixed displayIndex=1，普通高优先级场景排其后', () => {
+    // 通用渠道：1 个普通 p3 场景 + 1 个 builtin-fixed（p0）
+    const normal = scenariosRepo.createScenario(db, makeC1Payload('normal-p3', 3));
+    db.prepare('UPDATE scenarios SET channel_id = 1 WHERE id = ?').run(normal.id);
+    const bf = createBuiltinFixed('写死提取', 1);
+
+    const list = scenariosRepo.listScenarios(db);
+    const bfItem = list.find((s) => s.id === bf.id);
+    const normalItem = list.find((s) => s.id === normal.id);
+    assert.strictEqual(bfItem.displayIndex, 1, 'builtin-fixed 置顶 → displayIndex=1（即便 priority=0）');
+    // 普通 p3 场景 displayIndex 应大于 builtin-fixed（排其后）
+    assert.ok(normalItem.displayIndex > bfItem.displayIndex,
+      `普通场景 displayIndex(${normalItem.displayIndex}) 应排在 builtin-fixed(${bfItem.displayIndex}) 之后`);
+  });
+
+  test('返回数组顺序仍是 (priority DESC, id ASC)（manager stable sort 前提不破）', () => {
+    // p3 普通(id 大) + builtin-fixed(p0, id 小) → 数组顺序应 普通(p3) 在前、builtin-fixed(p0) 在后
+    const normal = scenariosRepo.createScenario(db, makeC1Payload('normal-p3', 3));
+    db.prepare('UPDATE scenarios SET channel_id = 1 WHERE id = ?').run(normal.id);
+    const bf = createBuiltinFixed('写死提取', 1);
+    const list = scenariosRepo.listScenarios(db).filter((s) => s.channelId === 1);
+    const idxNormal = list.findIndex((s) => s.id === normal.id);
+    const idxBf = list.findIndex((s) => s.id === bf.id);
+    assert.ok(idxNormal < idxBf,
+      '数组顺序：priority 3 普通场景应排在 priority 0 builtin-fixed 之前（SQL 原序未变）');
+    // 但 displayIndex 取值是 builtin-fixed 优先
+    assert.ok(list[idxBf].displayIndex < list[idxNormal].displayIndex,
+      'displayIndex 取值仍是 builtin-fixed 优先（与数组顺序解耦）');
+  });
+
+  test('多 builtin-fixed 同渠道：按 id ASC 取 1,2…，普通场景接其后', () => {
+    const bf1 = createBuiltinFixed('写死A', 1);
+    const bf2 = createBuiltinFixed('写死B', 1);
+    const normal = scenariosRepo.createScenario(db, makeC1Payload('normal', 2));
+    db.prepare('UPDATE scenarios SET channel_id = 1 WHERE id = ?').run(normal.id);
+    const list = scenariosRepo.listScenarios(db).filter((s) => s.channelId === 1);
+    const di = (id) => list.find((s) => s.id === id).displayIndex;
+    // 两个 builtin-fixed 在前（id ASC → bf1 先 bf2 后），普通场景 displayIndex 更大
+    assert.ok(di(bf1.id) < di(bf2.id), 'builtin-fixed 之间按 id ASC');
+    assert.ok(di(bf2.id) < di(normal.id), '普通场景排在所有 builtin-fixed 之后');
+    assert.strictEqual(di(bf1.id), 1, '第一个 builtin-fixed displayIndex=1');
   });
 });
 

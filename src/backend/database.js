@@ -930,6 +930,15 @@ class AppDatabase {
     return scenariosRepository.setApplicableChannelIds(this.db, scenarioId, channelIds);
   }
 
+  // v2.1.13 PR#58 P2-1：无事务版覆盖写（bundle import 已在外层事务内 → 不能再 BEGIN）
+  //   caller 须保证已开启外层事务；ids 由 caller 处理成合法正整数去重数组（这里不再校验/去重）
+  setScenarioApplicableChannelsInTx(scenarioId, channelIds) {
+    const ids = Array.isArray(channelIds)
+      ? [...new Set(channelIds.map((c) => Number(c)).filter((c) => Number.isFinite(c) && c > 0))]
+      : [];
+    return scenariosRepository.applyApplicableChannelIdsInTx(this.db, Number(scenarioId), ids);
+  }
+
   // v2.1.13 D-3/D-5：dispatcher 取对指定渠道生效的 builtin-fixed 场景（含 config）
   listBuiltinFixedScenariosForChannel(channelId) {
     return scenariosRepository.listBuiltinFixedForChannel(this.db, channelId);
