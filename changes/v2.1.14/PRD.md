@@ -154,6 +154,22 @@
 
 > 由 `TASKS.md` 进度日志同步；本节为合并后回填（workflow_pr_integrate_prd）。
 
+### 交付范围
+- **A 改名**：主标题→「清结算小助手」（title/H1/启动失败弹窗 + `package.json` description/productName，appId 不动）；模块→「资金对账数据处理」（仅 name，id 不变）。
+- **B 面板**：`#bankStatementModulePanel` control-row 三行布局；真实接通 导入对账单/导出/导入不平表(`importGatewayRecon`)/开始运行/场景管理，占位（`showComingSoon`）不平校验导出/链接表导入；左侧每组按钮往两侧张开各 14px。
+- **C 链接表管理弹窗**：`createLinkedTableManagerDialog`（4 表库 + 表库名/数据日期范围/表库更新日期 + 导入占位/退出）。
+- **§七 追加 6 条 + 七-7**：撤回「开始运行」/ 左侧张开 14px / C2 FundType「自己输入」/ C2·C3 标题后缀不加粗 / C2 赋值下拉缩 160px（C3 改回原宽）/ 去 # 序号；七-7 链接表库改名（表→表库，标题/按钮保留「链接表管理」）+ 网关对账单↔中台调拨订单表库 顺序互换。
+- **assets**：7 模板入库（🚧 `外汇期权订单.xlsx` 缺失待补）。**工具**：check-vars skill glob 坑修复。
+
+### PR #59 review 修复
+- F1（P2）package-lock 版本同步；F2（P2）USER_GUIDE 改名相关（版本/模块名/链接表入口，历史 changelog 保留旧名）；F3（P3）TASKS 同步撤回「开始对账」+ 位移口径。
+
+### 验证 & 合并
+- 三层测试 smoke + unit + integration（17 脚本 952 断言）全过，release-check EXIT=0（多轮）。
+- check-vars 命中 `elements`（Runtime-state）+ `MODULES`（Important-skeleton），仅改 name/新增按钮缓存，已 review。
+- PR #59（v2.1.14 → main）合并：merge commit `a2fdbbf`（2026-06-07）。
+- 转正：`2.1.14-beta.1 → 2.1.14`（package.json + package-lock + 文档三件套 CHANGELOG/VERSION_FEATURE_HISTORY/USER_GUIDE）。
+
 ## 七、追加需求（2026-06-07 用户追加，6 条）
 
 > 性质：场景配置弹窗 C2/C3 细节 + 资金对账数据处理面板微调（纯前端）。
