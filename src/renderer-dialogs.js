@@ -17,6 +17,8 @@
       applyStatementResult,
       applyManualBalancePromptStatus,
       refreshBankStatementStatus,
+      // v2.1.14 C：占位 helper（链接表管理弹窗「导入」按钮调用，统一「后续版本开放」提示）
+      showComingSoon,
       // v2.1.0-beta.1 PR-A（task A9）：场景管理 dialog 任意 CRUD 操作完成后 reload 主面板"场景"下拉
       reloadReconIdFixScenarios
     } = deps;
@@ -118,9 +120,14 @@
     //   - currentValue：当前值
     //   - hidden：op 为 空值/非空值 时隐藏值控件（visibility:hidden 占位，保留布局）
     //   strict（D-T3-2-strict=a）：下拉首项为空选项，用户必须从枚举中选；不混入自由文本
-    function renderScenarioValueControl(dataAttr, fieldName, currentValue, { isReadonly = false, hidden = false } = {}) {
+    function renderScenarioValueControl(dataAttr, fieldName, currentValue, { isReadonly = false, hidden = false, allowCustom = false, customMode = false, extraClass = '' } = {}) {
       const hiddenStyle = hidden ? ' style="visibility:hidden"' : '';
       const disabled = isReadonly ? 'disabled' : '';
+      const clsSuffix = extraClass ? ` ${extraClass}` : '';
+      // v2.1.14 第3条：markValue 赋值区「自己输入」模式 → 直接渲染输入框（用户已从下拉选「自己输入」）
+      if (customMode) {
+        return `<input class="scenario-config-input${clsSuffix}" type="text" ${dataAttr} ${disabled} value="${escapeHtml(currentValue || '')}" placeholder="自己输入值"${hiddenStyle}>`;
+      }
       if (shouldUseFundTypeDropdown(fieldName)) {
         // 严格枚举下拉：空选项 + 枚举值。
         // I5（v2.1.11 SR-FIX Round 1）：currentValue 非空且不在枚举内（如枚举表更新后旧配置值失效）→
@@ -131,13 +138,16 @@
         const staleOption = (cur !== '' && !inEnum)
           ? `<option value="${escapeHtml(cur)}" selected>${escapeHtml(cur)}（不在枚举）</option>`
           : '';
-        return `<select class="scenario-config-input" ${dataAttr} ${disabled}${hiddenStyle}>
+        // v2.1.14 第3条：allowCustom（仅 markValue 赋值区）→ 枚举末尾加「自己输入」
+        const customOption = allowCustom ? '<option value="__CUSTOM_INPUT__">自己输入</option>' : '';
+        return `<select class="scenario-config-input${clsSuffix}" ${dataAttr} ${disabled}${hiddenStyle}>
           <option value="">请选择 FundType</option>
           ${staleOption}
           ${renderScenarioOptions(fundTypeEnumValues, currentValue)}
+          ${customOption}
         </select>`;
       }
-      return `<input class="scenario-config-input" type="text" ${dataAttr} ${disabled} value="${escapeHtml(currentValue || '')}" placeholder="值"${hiddenStyle}>`;
+      return `<input class="scenario-config-input${clsSuffix}" type="text" ${dataAttr} ${disabled} value="${escapeHtml(currentValue || '')}" placeholder="值"${hiddenStyle}>`;
     }
 
     function clearScenarioDraft() {
@@ -6074,6 +6084,62 @@
       return overlay;
     }
 
+    // v2.1.14 C：链接表管理弹窗（UI 骨架占位）
+    //   - 复用场景管理弹窗的 header/table/footer class 风格（.manager-card / .dialog-header / .table-wrapper / .dialog-actions）
+    //   - 表清单为静态常量；数据日期范围 / 表更新日期本期占位「—」，不读 DB、不持久化
+    //   - footer 右下 [导入][退出]：导入 → showComingSoon('链接表批量导入')；退出 → closeModal()
+    //   红线：不调用真实导入/持久化 IPC，不写任何数据
+    function createLinkedTableManagerDialog() {
+      const LINKED_TABLES = [
+        { key: 'gateway-bill', name: '网关对账单' },
+        { key: 'mid-allocation', name: '中台调拨订单表库' },
+        { key: 'fx-option', name: '外汇期权表库' },
+        { key: 'fx-settlement', name: '外汇交割表库' }
+      ];
+      const PLACEHOLDER = '—';
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manager-card linked-table-manager-card';
+      const rowsHtml = LINKED_TABLES.map((t) => `
+        <tr data-table-key="${escapeHtml(t.key)}">
+          <td class="linked-table-col-name">${escapeHtml(t.name)}</td>
+          <td class="linked-table-col-range">${PLACEHOLDER}</td>
+          <td class="linked-table-col-updated">${PLACEHOLDER}</td>
+        </tr>
+      `).join('');
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">链接表管理</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table linked-table-table">
+            <thead>
+              <tr>
+                <th class="linked-table-col-name" style="width: 40%; text-align: left;">表库名</th>
+                <th class="linked-table-col-range" style="width: 35%; text-align: left;">数据日期范围</th>
+                <th class="linked-table-col-updated" style="width: 25%; text-align: left;">表库更新日期</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+        <div class="dialog-actions linked-table-manager-footer">
+          <div class="linked-table-footer-spacer" style="flex: 1 1 auto;"></div>
+          <button class="primary-btn small" type="button" data-action="import">导入</button>
+          <button class="secondary-btn small" type="button" data-action="exit">退出</button>
+        </div>
+      `;
+      dialog.querySelector('.icon-close').addEventListener('click', closeModal);
+      dialog.querySelector('[data-action="exit"]').addEventListener('click', closeModal);
+      // 占位：批量导入功能后续版本开放（不弹文件框、不读取、不持久化）
+      dialog.querySelector('[data-action="import"]').addEventListener('click', () => {
+        showComingSoon('链接表库批量导入');
+      });
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     function createScenariosManagerDialog(allowedCategories = null) {
       // v2.1.0-beta.2 PR-A：白名单过滤（null = 不过滤，向后兼容）
       // 同时落 state.activeScenarioListFilter，让所有 reopen 链路（reopenScenariosManager helper）
@@ -7131,6 +7197,14 @@
       return `${modeLabel} — ${label}`;
     }
 
+    // v2.1.14 第4条：标题 HTML 版——「— 类别名」后缀不加粗（modeLabel 保持默认）；仅 C2/C3 dialog-title 用（去外层 escapeHtml）
+    function getCategoryDialogTitleHtml(category, mode) {
+      const modeLabel = mode === 'view' ? '查看场景' : (mode === 'edit' ? '修改场景' : '新增场景');
+      if (isReconIdFixCategory(category)) return escapeHtml(modeLabel);
+      const label = getCategoryLabel(category);
+      return `${escapeHtml(modeLabel)} <span class="scenario-config-title-suffix">— ${escapeHtml(label)}</span>`;
+    }
+
     // 把 draft.name / .priority 同步到 input
     function bindScenarioBasicFields(dialog, draft) {
       const nameInput = dialog.querySelector('input[data-field="name"]');
@@ -7411,7 +7485,7 @@
 
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">${escapeHtml(getCategoryDialogTitle(draft.category, mode))}</div>
+          <div class="dialog-title">${getCategoryDialogTitleHtml(draft.category, mode)}</div>
           <span class="copy-scenario-label">复制场景</span>
           <button class="secondary-btn small copy-scenario-btn" type="button" data-action="copy-scenario">选择</button>
           <button class="icon-close" type="button">×</button>
@@ -7569,7 +7643,6 @@
       function renderReconFields() {
         reconRowsContainer.innerHTML = config.reconFields.map((rf, idx) => `
           <div class="scenario-config-multi-row" data-row-index="${idx}">
-            <span class="scenario-config-multi-seq">${idx + 1}</span>
             <select class="scenario-config-input" data-multi-field="gwField" ${isReadonly ? 'disabled' : ''}>
               <option value="">请选择网关账单字段</option>
               ${renderScenarioOptions(GATEWAY_RECON_FIELDS, rf.gwField)}
@@ -8113,7 +8186,7 @@
 
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">${escapeHtml(getCategoryDialogTitle(draft.category, mode))}</div>
+          <div class="dialog-title">${getCategoryDialogTitleHtml(draft.category, mode)}</div>
           <span class="copy-scenario-label">复制场景</span>
           <button class="secondary-btn small copy-scenario-btn" type="button" data-action="copy-scenario">选择</button>
           <button class="icon-close" type="button">×</button>
@@ -8154,6 +8227,8 @@
       const billTypeContainer = dialog.querySelector('[data-multi="billTypes"]');
       const reconContainer = dialog.querySelector('[data-multi="reconFields"]');
       const markRow = dialog.querySelector('[data-mark-value-row]');
+      // v2.1.14 第3条：markValue 赋值区「自己输入」模式标志（局部变量，不落 config 避免污染后端）；枚举就绪后校正初值
+      let markValueCustom = false;
 
       // v2.1.11 T3（spec §4.4 D-T3-1b=空白行 / D-T3-1c=子序号）：账单类型按 seq 分组渲染
       //   - 每个账单类型 = 一个分组块（.scenario-config-billtype-group，data-seq）
@@ -8170,7 +8245,6 @@
           const conditions = Array.isArray(bt.conditions) ? bt.conditions : [];
           const condRowsHtml = conditions.map((cond, ci) => `
             <div class="scenario-config-multi-row" data-seq="${bt.seq}" data-cond-index="${ci}">
-              <span class="scenario-config-multi-seq">#${bt.seq}.${ci + 1}</span>
               <select class="scenario-config-input" data-multi-field="field" ${isReadonly ? 'disabled' : ''}>
                 <option value="">请选择字段</option>
                 ${renderScenarioOptions(BANK_STATEMENT_FIELDS, cond.field)}
@@ -8206,7 +8280,6 @@
         const billTypeSeqs = config.billTypes.map((b) => b.seq);
         reconContainer.innerHTML = config.reconFields.map((rf, idx) => `
           <div class="scenario-config-multi-row" data-row-index="${idx}">
-            <span class="scenario-config-multi-seq">#${idx + 1}</span>
             <select class="scenario-config-input scenario-config-input-narrow" data-multi-field="leftType" ${isReadonly ? 'disabled' : ''}>
               ${renderScenarioOptions(billTypeSeqs.map(String), String(rf.leftType))}
             </select>
@@ -8240,12 +8313,12 @@
             ${renderScenarioOptions(billTypeSeqs.map(String), String(config.markValue.type))}
           </select>
           <span class="scenario-config-vs-arrow">的</span>
-          <select class="scenario-config-input" data-mark-field="field" ${isReadonly ? 'disabled' : ''}>
+          <select class="scenario-config-input scenario-config-assign-select" data-mark-field="field" ${isReadonly ? 'disabled' : ''}>
             <option value="">请选择字段</option>
             ${renderScenarioOptions(BANK_STATEMENT_FIELDS, config.markValue.field)}
           </select>
           <span class="scenario-config-vs-arrow">写入值</span>
-          ${renderScenarioValueControl('data-mark-field="value"', config.markValue.field, config.markValue.value, { isReadonly })}
+          ${renderScenarioValueControl('data-mark-field="value"', config.markValue.field, config.markValue.value, { isReadonly, allowCustom: true, customMode: markValueCustom, extraClass: 'scenario-config-assign-select' })}
         `;
       }
       function rerender() {
@@ -8259,6 +8332,12 @@
       //   - 首帧先以「枚举未就绪」渲染（FundType 值暂为文本输入），不阻塞弹窗弹出
       //   - 枚举到位（或降级空数组）后 rerender：成功 → FundType 值变下拉；降级 → 保持文本 + 一次性提示
       ensureFundTypeEnum().then(() => {
+        // v2.1.14 第3条：枚举就绪后，编辑态若 markValue 已存自定义值（FundType 字段但值不在枚举）→ 进入「自己输入」模式，原值显示为输入框
+        if (config.markValue && config.markValue.field === 'FundType' && config.markValue.value
+            && fundTypeEnumState === 'ready'
+            && !fundTypeEnumValues.some((v) => String(v) === String(config.markValue.value))) {
+          markValueCustom = true;
+        }
         // 弹窗可能已被关闭（用户快速取消）→ 容器脱离 DOM 时跳过 rerender
         if (billTypeContainer.isConnected) rerender();
       });
@@ -8403,10 +8482,18 @@
           config.markValue.field = ctl.value;
           // 字段变化可能切换值控件类型（FundType 下拉 ↔ 文本）→ 清空旧值并重渲染赋值行
           config.markValue.value = '';
+          markValueCustom = false; // v2.1.14 第3条：切字段 → 退出自己输入模式
           renderMarkValue();
         } else if (f === 'value') {
-          // FundType 下拉的写入值走 change（select）
-          config.markValue.value = ctl.value;
+          // v2.1.14 第3条：选「自己输入」→ 切输入框；否则正常存枚举值（FundType 下拉的写入值走 change）
+          if (ctl.value === '__CUSTOM_INPUT__') {
+            markValueCustom = true;
+            config.markValue.value = '';
+            renderMarkValue();
+          } else {
+            markValueCustom = false;
+            config.markValue.value = ctl.value;
+          }
         }
       });
       markRow.addEventListener('input', (event) => {
@@ -9664,6 +9751,8 @@
       // v2.0.0-beta.3：银行对账单处理模块场景管理
       createScenariosManagerDialog,
       createScenarioCategorySelectDialog,
+      // v2.1.14 C：链接表管理弹窗（UI 骨架占位）
+      createLinkedTableManagerDialog,
       // v2.1.9 N5：银行渠道管理弹框（spec §4.2）
       createChannelManagerDialog,
       // v2.0.0-beta.3 PR #32b：4 dialog factory（C1/C2/C3 配置 + 确认场景详情）

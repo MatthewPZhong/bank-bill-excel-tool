@@ -52,7 +52,9 @@ const MODULES = Object.freeze({
   },
   bankStatementProcess: {
     id: 'bank-statement-process',
-    name: '银行对账单处理'
+    // v2.1.14 A2：显示名 '银行对账单处理' → '资金对账数据处理'（仅改 name；id 保留 'bank-statement-process'，
+    //   数十处引用 + DB module schema + settings-repository ALL_MODULE_IDS + usage-stats key 不变）
+    name: '资金对账数据处理'
   },
   // v2.1.0-beta.1 PR-A：对账单ReconID修复模块（C4 / business + gateway 两个子模式）
   // v2.1.0-beta.3 T4：模块下挂 business（单据对账单）+ gateway（网关对账单）两个子模式，按主面板「账单类别」下拉切换
@@ -290,6 +292,10 @@ const elements = {
   bankStatementRunBtn: document.getElementById('bankStatementRunBtn'),
   bankStatementExportBtn: document.getElementById('bankStatementExportBtn'),
   bankStatementStatusBox: document.getElementById('bankStatementStatusBox'),
+  // v2.1.14 B：资金对账数据处理面板新增 3 按钮（导入不平表复用真实 IPC / 不平校验导出 + 链接表管理为占位）
+  bankStatementGatewayReconImportBtn: document.getElementById('bankStatementGatewayReconImportBtn'),
+  bankStatementGatewayReconExportBtn: document.getElementById('bankStatementGatewayReconExportBtn'),
+  bankStatementLinkedTableBtn: document.getElementById('bankStatementLinkedTableBtn'),
   // v2.1.2 T2：月度银行对账单BU回填校验模块（5 项 DOM 缓存；月份选择改为对话框，无 select）
   bankBuReconModulePanel: document.getElementById('bankBuReconModulePanel'),
   bankBuReconImportBtn: document.getElementById('bankBuReconImportBtn'),
@@ -370,6 +376,8 @@ const {
   // v2.0.0-beta.3：银行对账单处理模块场景管理
   createScenariosManagerDialog,
   createScenarioCategorySelectDialog,
+  // v2.1.14 C：链接表管理弹窗（UI 骨架占位）
+  createLinkedTableManagerDialog,
   // v2.0.0-beta.3 PR #32b：4 dialog factory（C1/C2/C3 配置 + 确认场景详情）
   createScenarioConfigDialogC1,
   createScenarioConfigDialogC2,
@@ -429,6 +437,8 @@ const {
   applyStatementResult,
   applyManualBalancePromptStatus,
   refreshBankStatementStatus,
+  // v2.1.14 C：占位 helper 透传给 dialogs 闭包（链接表管理弹窗「导入」按钮调用）
+  showComingSoon,
   // v2.1.0-beta.1 PR-A（task A9）：场景管理 dialog 任意 CRUD 完成后 reload 主面板"场景"下拉
   reloadReconIdFixScenarios
 });
@@ -483,6 +493,8 @@ const {
   applyBankStatementPanelPreviewState,
   applyScenariosManagerPreviewState,
   applyScenarioCategorySelectPreviewState,
+  // v2.1.14 C：链接表管理弹窗 preview
+  applyLinkedTableManagerPreviewState,
   // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 preview（4 张）
   // v2.1.7 F1：C1 dialog 新增 AND 模式 preview
   applyScenarioConfigC1PreviewState,
@@ -3416,6 +3428,16 @@ function updateBankStatementUi() {
   if (elements.bankStatementExportBtn) elements.bankStatementExportBtn.disabled = !pr;
 }
 
+// v2.1.14：纯前端占位 helper —— 功能 UI 已就位但后端未接入，统一弹「后续版本开放」提示框。
+//   红线：严禁调用真实 run/export IPC、严禁写任何数据、严禁显示成功态。
+//   info 级提示：skipLogReport 跳过 createAlertDialog 默认的 error 级日志上报（避免污染错误日志）。
+function showComingSoon(featureName) {
+  openModal(createAlertDialog(
+    `「${featureName}」功能将在后续版本开放，敬请期待。`,
+    { skipLogReport: true }
+  ));
+}
+
 async function handleBankStatementImport() {
   try {
     const result = await window.desktopApi.bankStatement.import();
@@ -5149,6 +5171,19 @@ async function initialize() {
   elements.bankStatementImportBtn.addEventListener('click', handleBankStatementImport);
   elements.bankStatementRunBtn.addEventListener('click', handleBankStatementRun);
   elements.bankStatementExportBtn.addEventListener('click', handleBankStatementExport);
+  // v2.1.14 B：资金对账不平校验组 + 链接表管理按钮绑定
+  //   - 导入不平表 → 复用现有 handleBankStatementImportGatewayRecon（真实 importGatewayRecon IPC；内部自校验，按钮常驻 enabled）
+  //   - 不平校验导出 → 占位（暂无 gateway-recon 导出 IPC），统一 showComingSoon 提示，不写数据、不伪装成功
+  //   - 链接表管理 → 打开链接表管理弹窗（UI 骨架占位）
+  if (elements.bankStatementGatewayReconImportBtn) {
+    elements.bankStatementGatewayReconImportBtn.addEventListener('click', handleBankStatementImportGatewayRecon);
+  }
+  if (elements.bankStatementGatewayReconExportBtn) {
+    elements.bankStatementGatewayReconExportBtn.addEventListener('click', () => showComingSoon('资金对账不平校验导出'));
+  }
+  if (elements.bankStatementLinkedTableBtn) {
+    elements.bankStatementLinkedTableBtn.addEventListener('click', () => openModal(createLinkedTableManagerDialog()));
+  }
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块按钮 binding（spec §一.1 + Q4 决策）
   // v2.1.0-beta.3 T5：场景管理白名单按当前账单类别动态决定
   if (elements.reconIdFixManageScenariosBtn) {
@@ -5591,6 +5626,11 @@ async function initialize() {
   } else if (info.previewModal === 'scenarios-manager') {
     setTimeout(() => {
       applyScenariosManagerPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'linked-table-manager') {
+    // v2.1.14 C：链接表管理弹窗 preview
+    setTimeout(() => {
+      applyLinkedTableManagerPreviewState();
     }, 120);
   } else if (info.previewModal === 'scenario-category-select') {
     setTimeout(() => {

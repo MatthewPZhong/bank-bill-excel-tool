@@ -2683,8 +2683,14 @@ select {
 .bank-statement-board .cell.left .secondary-btn { min-width: 180px; }
 .pending-board .pending-action-pair,
 .bank-statement-board .pending-action-pair { display: flex; gap: 12px; justify-content: center; }
+/* v2.1.14 七-2：每组 [导入][导出] 往两侧张开——导入(first)往左 14px、导出(last)往右 14px（限定 #bankStatementModulePanel 不影响 reconIdFix） */
+#bankStatementModulePanel .pending-action-pair > button:first-child { transform: translateX(-14px); }
+#bankStatementModulePanel .pending-action-pair > button:last-child { transform: translateX(14px); }
 .pending-board .pending-action-pair .primary-btn,
 .bank-statement-board .pending-action-pair .primary-btn { min-width: 140px; }
+/* v2.1.14（用户反馈还原）— General 主题镜像：row1 cell.left primary「开始对账」与 row2/row3
+   cell.left secondary（场景管理/链接表管理）按 180px 对齐，右列三按钮等宽。 */
+.bank-statement-board .cell.left .primary-btn { min-width: 180px; }
 
 /* v2.1.12 需求：VCC业务OP计算 + 月度银行对账单BU回填校验 主面板沿垂直中线镜像（文字正常，用户最终确认）
    实现：容器 direction:rtl 仅翻 ①grid 列 ②列宽；③按钮对、④状态框 各用 direction:ltr 回正
@@ -2796,6 +2802,15 @@ select {
 
 .scenarios-manager-card {
   width: min(96vw, 1140px);
+}
+
+/* v2.1.14 C：链接表管理弹窗（3 列 / 4 行，比场景管理窄） */
+.linked-table-manager-card {
+  width: min(92vw, 680px);
+}
+.linked-table-table {
+  table-layout: fixed;
+  width: 100%;
 }
 
 .scenarios-table {
@@ -2999,6 +3014,12 @@ select {
   flex: 0 0 100px;
   width: 100px;
 }
+
+/* v2.1.14 第4条：场景配置标题「— 类别名」后缀不加粗 */
+.scenario-config-title-suffix { font-weight: normal; }
+
+/* v2.1.14 第5条：C2/C3 赋值区两个下拉缩窄至约原 80% */
+.scenario-config-assign-select { flex: 0 1 auto; width: 160px; }
 
 /* v2.1.12 需求5：C3 extra fee 勾选框 + 金额输入（输入框 4 字符视觉宽度，覆盖 .scenario-config-input 的 flex:1） */
 .scenario-config-row-extrafee {
