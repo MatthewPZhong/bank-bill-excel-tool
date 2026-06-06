@@ -1362,12 +1362,16 @@ function ensureBuiltinFixedScenarioMigration(db) {
   ).get();
   if (!tableSqlRow || !tableSqlRow.sql) return;
   if (!tableSqlRow.sql.includes("'builtin-fixed'")) return; // CHECK 未扩（前置未完成）→ 跳过
+  // v2.1.13 PR#58 review P2-B：改用 is_builtin + category + config.extractByFeature 定位，不依赖 name。
+  //   原固定名定位有两个漏洞：① 用户改过内置场景名 → 匹配不到、停在 extract-recon-id；
+  //   ② 用户新建同名场景 → 前置 ensureBuiltinFixedScenarioNameUpdate 撞 (channel_id,name) UNIQUE 留旧名 → 仍匹配不到。
+  //   内置提取场景特征唯一：is_builtin=1 + extract-recon-id + config 含 extractByFeature（D-1 后用户不可再新建 extract-recon-id）。
   db.prepare(`
     UPDATE scenarios
        SET category = 'builtin-fixed', priority = 0, channel_id = 1, updated_at = ?
      WHERE category = 'extract-recon-id'
-       AND name = '从银行对账单的信息里提取调拨订单对账ID'
        AND is_builtin = 1
+       AND config_json LIKE '%extractByFeature%'
   `).run(new Date().toISOString());
 }
 

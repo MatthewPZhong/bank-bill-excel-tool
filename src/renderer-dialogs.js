@@ -6849,6 +6849,12 @@
       dialog.querySelector('.icon-close').addEventListener('click', teardownAndReopen);
       dialog.querySelector('[data-action="back"]').addEventListener('click', teardownAndReopen);
       dialog.querySelector('[data-action="save"]').addEventListener('click', async () => {
+        // v2.1.13 PR#58 review P2-C：阻止 0 选项保存。后端定义「空数组 = 适用全部」，
+        //   若允许取消全部勾选后保存空数组，会与用户"不适用任何渠道"的直觉相反（反向变全渠道生效）。
+        if (selectedIds.size === 0) {
+          openModal(createAlertDialog('请至少选择一个适用的银行渠道'));
+          return;
+        }
         // 全选 → 存空数组（= 适用全部，新增渠道自动适用）；否则存选中 ids
         const ids = (allChannels.length > 0 && selectedIds.size === allChannels.length)
           ? []

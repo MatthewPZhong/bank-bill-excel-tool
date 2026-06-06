@@ -3006,7 +3006,9 @@ function registerAppHandlers() {
   // → 前端 refreshBankStatementStatus() 把已就绪的导出状态翻成"未运行"。反向同理。
   // round 3 self-review P3-A：显式枚举已知 category，未知值（含 undefined）双清并 warn，
   // 避免未来加新 category 时忘了同步本函数会偷偷清 processingResult。
-  const BANK_STATEMENT_CATEGORIES = new Set(['extract-recon-id', 'offset-bill-mark', 'gateway-recon-join']);
+  // v2.1.13 PR#58 review P2-A：builtin-fixed（自带写死场景）属银行对账单处理类别 → 只清 processingResult；
+  //   漏加会落 unknown 兜底双清，启停写死场景误清第 5 模块 ReconID 修复结果
+  const BANK_STATEMENT_CATEGORIES = new Set(['extract-recon-id', 'offset-bill-mark', 'gateway-recon-join', 'builtin-fixed']);
   // v2.1.0-beta.3 PR #39 Finding 2（P2）：把 ReconID 修复 category 集合化（含 business + gateway 两个子模式）
   // 之前 'gateway-recon-id-fix' 落 unknown 分支 → 双清 processingResult + reconIdFixResult → 用户改 gateway 场景误清银行对账结果
   const RECON_ID_FIX_CATEGORIES = new Set(['recon-id-fix', 'gateway-recon-id-fix']);

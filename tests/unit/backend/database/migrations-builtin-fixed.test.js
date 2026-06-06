@@ -147,6 +147,52 @@ test.describe('v2.1.13 builtin-fixed 数据层迁移', () => {
     assert.strictEqual(renamed.priority, 0);
   });
 
+  // v2.1.13 PR#58 review P2-B：迁移改用 is_builtin + config.extractByFeature 定位（不依赖 name）
+  test('用户改过名的内置提取场景 → 按 config 定位仍归入 builtin-fixed（P2-B 不依赖 name）', () => {
+    bootstrapFinalState(db, makeBackupFn());
+    // 模拟用户把内置提取场景改成自定义名（is_builtin=1 + extract-recon-id + config.extractByFeature 保持）
+    db.prepare(
+      "UPDATE scenarios SET name = '我的自定义提取场景', category = 'extract-recon-id', priority = 3 WHERE name = ?"
+    ).run(EXTRACT_NAME);
+
+    runBuiltinFixedMigrations(db);
+
+    // 按 config 定位迁移成功（即使名既非旧名也非新名）
+    const renamed = db
+      .prepare("SELECT category, priority, channel_id FROM scenarios WHERE name = '我的自定义提取场景'")
+      .get();
+    assert.ok(renamed, '改名场景应仍存在');
+    assert.strictEqual(renamed.category, 'builtin-fixed', '应按 config.extractByFeature 定位迁入 builtin-fixed');
+    assert.strictEqual(renamed.priority, 0);
+    assert.strictEqual(renamed.channel_id, 1);
+  });
+
+  test('新名已被同渠道占用（nameUpdate 撞 UNIQUE）→ migration 仍按 config 迁内置场景（P2-B + Codex）', () => {
+    bootstrapFinalState(db, makeBackupFn());
+    // 内置提取场景还原为旧名（未改名/未归类的老库）
+    db.prepare(
+      "UPDATE scenarios SET name = '从银行对账单的信息里提取对账ID', category = 'extract-recon-id', priority = 3 WHERE name = ?"
+    ).run(EXTRACT_NAME);
+    // 同 channel_id=1 用户新建一个非内置场景占用新名 → 使 nameUpdate（旧名→新名）撞 (channel_id,name) UNIQUE
+    db.prepare(
+      `INSERT INTO scenarios (category, name, priority, enabled, config_json, is_builtin, channel_id, created_at, updated_at)
+       VALUES ('offset-bill-mark', ?, 2, 1, '{}', 0, 1, ?, ?)`
+    ).run(EXTRACT_NAME, new Date().toISOString(), new Date().toISOString());
+
+    runBuiltinFixedMigrations(db);
+
+    // 内置提取场景（nameUpdate 因 UNIQUE 失败 → 名仍旧名）仍被 migration 按 config 迁入 builtin-fixed
+    const builtin = db
+      .prepare("SELECT category, priority FROM scenarios WHERE is_builtin = 1 AND config_json LIKE '%extractByFeature%'")
+      .get();
+    assert.ok(builtin, '内置提取场景应存在');
+    assert.strictEqual(builtin.category, 'builtin-fixed', 'nameUpdate UNIQUE 失败不应阻止 category 迁移');
+    assert.strictEqual(builtin.priority, 0);
+    // 用户占名场景不被误迁（config 无 extractByFeature）
+    const userScn = db.prepare('SELECT category FROM scenarios WHERE name = ? AND is_builtin = 0').get(EXTRACT_NAME);
+    assert.strictEqual(userScn.category, 'offset-bill-mark', '用户场景不应被误迁');
+  });
+
   test('CHECK 扩展：迁移前 INSERT builtin-fixed 抛错；迁移后可成功', () => {
     bootstrapFinalState(db, makeBackupFn());
     const now = new Date().toISOString();
