@@ -239,9 +239,12 @@ function normalizeScenarioForImport(rawScenario) {
 }
 
 // v2.1.13 PR#58 P2-1：归一化 applicableChannelNames（容忍旧/坏数据）
-//   - 非数组（含 undefined）→ undefined（caller 据此判定「bundle 未携带适用渠道」→ 不调 setApplicable）
-//   - 数组 → 过滤出 name 非空的 {name, ownerLocation}；全被过滤掉 → 返回 []（空 = 显式「无适用渠道」）
-//   注意：undefined（旧 bundle 缺字段）与 []（新 bundle 显式空）语义不同 — 见 applyScenarioBundleImport。
+//   - 非数组（含 undefined）→ undefined（bundle 未携带该字段）
+//   - 数组 → 过滤出 name 非空的 {name, ownerLocation}；全部元素无效 → 返回 []
+//   注意（PR#58 P3-3 修正）：applyScenarioBundleImport 对 undefined 与 [] **一视同仁**
+//     （均走 `.length > 0` 判定 → 都不还原适用渠道，保持新建场景默认「无关联=适用全部」）。
+//     这是有意为之，非遗漏：① 导出端从不写 [](仅解析到 ≥1 渠道时才输出 applicableChannelNames)；
+//     ② DB 模型「空关联=适用全部」无法表达「适用于零渠道」，故 [] 只能按「无限定」处理。
 function normalizeApplicableChannelNames(raw) {
   if (!Array.isArray(raw)) return undefined;
   const out = [];

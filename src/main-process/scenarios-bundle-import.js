@@ -21,10 +21,12 @@
 //       createScenario,                  // (payload) => { id }，必须支持 payload.channelId 入参
 //       // v2.1.13 PR#58 P2-1（可选）— builtin-fixed 适用渠道还原：
 //       findChannelByNameAndLocation,    // (name, ownerLocation) => Channel|null，等价 database.findChannelByNameAndLocation
-//       setScenarioApplicableChannels    // (scenarioId, channelIds) => ...，等价 database.setScenarioApplicableChannels
+//       setScenarioApplicableChannels,   // (scenarioId, channelIds) => ...，等价 database.setScenarioApplicableChannels
+//       // v2.1.13 PR#58 P3-2（可选）— 限定渠道全 resolve 失败时禁用场景：
+//       setScenarioEnabled               // (scenarioId, enabled) => ...，等价 database.toggleScenarioEnabled
 //     }
-//     说明：findChannelByNameAndLocation / setScenarioApplicableChannels 仅在 bundle 的某 scenario 携带
-//     applicableChannelNames 时才被调用；缺省时该场景仅记 warning 不阻断（向后兼容旧 caller / 旧 bundle）。
+//     说明：findChannelByNameAndLocation / setScenarioApplicableChannels / setScenarioEnabled 仅在 bundle 的某
+//     scenario 携带 applicableChannelNames 时才被调用；缺省时该场景仅记 warning 不阻断（向后兼容旧 caller / 旧 bundle）。
 //
 // 行为：
 //   1. 事务包裹（BEGIN ... COMMIT / ROLLBACK）
@@ -53,8 +55,9 @@
 //   - 🔴 适用渠道还原（builtin-fixed）：bundle 携带 applicableChannelNames 时，按 (name, ownerLocation)
 //     resolve 成当前库 channel_id 后调 setScenarioApplicableChannels。逐名 resolve，匹配不到记 warning。
 //     · applicableChannelNames 缺省（旧 bundle 无字段）→ 不调 set（保留新建场景默认「无关联=适用全部」，向后兼容）。
-//     · applicableChannelNames 非空但**一个都 resolve 不到** → 不调 set([])（[] 会变成「适用全部」=反向 bug），
-//       仅记强 warning（场景保持新建默认；无合法渠道可绑定时的降级，但用户可见）。
+//     · applicableChannelNames 非空但**一个都 resolve 不到** → 不调 set([])（[] 会变成「适用全部」=反向 bug）；
+//       P3-2 起进一步**禁用该场景**（setScenarioEnabled false）+ 强 warning，避免限定场景误对所有渠道生效；
+//       caller 未提供 setScenarioEnabled 时退回「仅 warning」（向后兼容）。
 function applyScenarioBundleImport(bundle, options, deps) {
   const opts = options || {};
   const confirmCreateMissingChannels = opts.confirmCreateMissingChannels === true;
@@ -70,7 +73,9 @@ function applyScenarioBundleImport(bundle, options, deps) {
     createScenario,
     // v2.1.13 PR#58 P2-1（可选）
     findChannelByNameAndLocation,
-    setScenarioApplicableChannels
+    setScenarioApplicableChannels,
+    // v2.1.13 PR#58 P3-2（可选）：限定渠道全 resolve 失败时禁用场景（避免退化为「适用全部」）
+    setScenarioEnabled
   } = deps;
   if (typeof listChannels !== 'function'
     || typeof getBuiltinGeneralChannel !== 'function'
@@ -195,7 +200,14 @@ function applyScenarioBundleImport(bundle, options, deps) {
           }
           if (resolvedIds.length > 0) {
             setScenarioApplicableChannels(job.scenarioId, resolvedIds);
+          } else if (typeof setScenarioEnabled === 'function') {
+            // v2.1.13 PR#58 P3-2（🔴 资金/业务红线）：限定渠道一个都 resolve 不到时，不写 [](空=适用全部反向 bug)，
+            //   且**禁用该场景** — builtin-fixed 限定场景在目标库无任何可绑定渠道时若保持 enabled，会对所有渠道生效，
+            //   等于把「限定」误放大成「全适用」。禁用 + warning 是安全降级：用户手动绑定渠道后再启用。
+            setScenarioEnabled(job.scenarioId, false);
+            warnings.push(`场景「${job.scenarioName}」所有适用银行渠道均无法匹配，已禁用该场景（避免误对所有渠道生效）；请手动绑定渠道后重新启用`);
           } else {
+            // 兜底：caller 未提供禁用能力时退回 warning（保持向后兼容）
             warnings.push(`场景「${job.scenarioName}」所有适用银行渠道均无法匹配，未设置适用渠道（该场景将对所有渠道生效，请手动核对）`);
           }
         }

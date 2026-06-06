@@ -42,6 +42,8 @@ function makeImportDeps(database) {
     // v2.1.13 PR#58 P2-1：builtin-fixed 适用渠道还原（与 src/main.js wrapper 同款 deps）
     findChannelByNameAndLocation: (name, ownerLocation) => database.findChannelByNameAndLocation(name, ownerLocation),
     setScenarioApplicableChannels: (scenarioId, channelIds) => database.setScenarioApplicableChannelsInTx(scenarioId, channelIds),
+    // v2.1.13 PR#58 P3-2：限定渠道全 resolve 失败时禁用场景（与 src/main.js wrapper 同款 deps）
+    setScenarioEnabled: (scenarioId, enabled) => database.toggleScenarioEnabled(scenarioId, enabled),
   };
 }
 
@@ -720,5 +722,30 @@ test.describe('P2-1 builtin-fixed 适用渠道 bundle round-trip', () => {
     assert.deepStrictEqual(database.getScenarioApplicableChannels(imported.id), []);
     assert.ok(Array.isArray(scanResult.warnings) && scanResult.warnings.length >= 1, '应有 warning');
     assert.ok(scanResult.warnings.some((w) => w.includes('工商')), 'warning 应点名工商');
+  });
+
+  test('P3-2：限定渠道全 resolve 失败 → 场景被禁用（不退化为「适用全部」）+ 禁用 warning', () => {
+    // 同「反向 bug 守卫」构造：写死场景限定一个导入端不存在的渠道，仅导出通用渠道
+    const icbc = database.createChannel({ name: '工商', ownerLocation: '上海' });
+    const bf = createBuiltinFixedFixture('写死提取', 1);
+    database.setScenarioApplicableChannels(bf.id, [icbc.id]);
+    const exportResult = handlerExportBundle(database, { channelIds: [1] });
+
+    // 拆 A → 新 B 库（无工商，且不会自动创建）
+    database.db.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scenarios-bundle-p32-'));
+    database = new AppDatabase(path.join(tmpDir, 'test.sqlite'));
+    database.init();
+
+    const scanResult = handlerImportBundleScan(database, exportResult.jsonText);
+    assert.strictEqual(scanResult.status, 'ok');
+    const imported = database.listScenarios().find((s) => s.name === '写死提取');
+    assert.ok(imported, '场景仍被创建（禁用而非删除）');
+    // P3-2 核心：未写适用渠道（仍为空，避免空=适用全部反向 bug）+ 场景被禁用
+    assert.deepStrictEqual(database.getScenarioApplicableChannels(imported.id), [], '不写 []（不退化为适用全部）');
+    assert.strictEqual(Number(imported.enabled), 0, 'P3-2：限定渠道全失配 → 场景被禁用，避免误对所有渠道生效');
+    // 禁用 warning 可见
+    assert.ok(scanResult.warnings.some((w) => w.includes('已禁用')), 'warning 应说明已禁用该场景');
   });
 });

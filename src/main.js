@@ -395,7 +395,9 @@ function applyScenarioBundleImport(bundle, options = {}) {
     createScenario: (payload) => database.createScenario(payload),
     // v2.1.13 PR#58 P2-1：builtin-fixed 适用渠道还原（事务内调无事务版 set，避免嵌套 BEGIN）
     findChannelByNameAndLocation: (name, ownerLocation) => database.findChannelByNameAndLocation(name, ownerLocation),
-    setScenarioApplicableChannels: (scenarioId, channelIds) => database.setScenarioApplicableChannelsInTx(scenarioId, channelIds)
+    setScenarioApplicableChannels: (scenarioId, channelIds) => database.setScenarioApplicableChannelsInTx(scenarioId, channelIds),
+    // v2.1.13 PR#58 P3-2：限定渠道全 resolve 失败时禁用场景（toggleScenarioEnabled 为裸 UPDATE，安全嵌在外层事务内）
+    setScenarioEnabled: (scenarioId, enabled) => database.toggleScenarioEnabled(scenarioId, enabled)
   });
 }
 

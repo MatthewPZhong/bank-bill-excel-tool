@@ -161,6 +161,12 @@ function hasChannelIdColumn(db) {
   }
 }
 
+// v2.1.13 PR#58 review P3-1：C4（ReconID 修复）类别 — 与 scenario-dispatcher.js 的 C4_CATEGORIES 同源。
+//   ⚠️ 本地副本（backend 层不宜反向依赖 main-process/scenario-dispatcher，且 renderer 侧另有同名常量）；
+//   三方必须保持一致，由 tests/unit/backend/database/scenarios-repository.test.js 漂移守卫断言锁定。
+//   仅用于 displayIndex 分区：C4 是独立流水线，displayIndex 无人消费，不与银行场景共享渠道内序号计数。
+const RECON_ID_FIX_DISPLAY_INDEX_CATEGORIES = ['recon-id-fix', 'gateway-recon-id-fix'];
+
 function listScenarios(db) {
   const hasChannel = hasChannelIdColumn(db);
   const sql = hasChannel
@@ -189,19 +195,27 @@ function listScenarios(db) {
     byChannel.get(item.channelId).push({ item, originalIdx });
   });
   const displayIndexByOriginalIdx = new Map();
-  for (const group of byChannel.values()) {
-    // stable：builtin-fixed 在前；同类保持入组顺序（即 SQL 的 priority DESC, id ASC）
-    const ordered = group
+  // 组内 1-based 排名 helper：builtin-fixed 优先 + 其余保持入组顺序（即 SQL 的 priority DESC, id ASC）
+  const rankGroup = (entries) => {
+    entries
       .map((entry, seq) => ({ ...entry, seq }))
       .sort((a, b) => {
         const aBf = a.item.category === 'builtin-fixed' ? 0 : 1;
         const bBf = b.item.category === 'builtin-fixed' ? 0 : 1;
         if (aBf !== bBf) return aBf - bBf;
         return a.seq - b.seq;
-      });
-    ordered.forEach((entry, idx) => {
-      displayIndexByOriginalIdx.set(entry.originalIdx, idx + 1);
-    });
+      })
+      .forEach((entry, idx) => displayIndexByOriginalIdx.set(entry.originalIdx, idx + 1));
+  };
+  for (const group of byChannel.values()) {
+    // v2.1.13 PR#58 review P3-1（场景号一致性收口）：C4（ReconID 修复）是独立流水线 —
+    //   不进银行 dispatcher（main.js 按 C4_CATEGORIES filter 掉）、银行场景管理弹窗不展示、
+    //   compact ReconID 弹窗用自身 idx+1 而非 displayIndex → C4 的 displayIndex 实际**无人消费**。
+    //   若让 C4 参与渠道内统一计数，channel 1 里中间优先级的 C4 会把银行场景的 displayIndex 顶偏，
+    //   导致 run 状态框/命中 sheet 的场景号与银行弹窗 idx+1 串号。故按「非C4 / C4」分区各自 1-based：
+    //   非C4 区与银行弹窗（[C1,C2,C3,builtin-fixed]∩渠道，builtin 置顶）逐项一致；C4 区自成序号（不被消费）。
+    rankGroup(group.filter((e) => !RECON_ID_FIX_DISPLAY_INDEX_CATEGORIES.includes(e.item.category)));
+    rankGroup(group.filter((e) => RECON_ID_FIX_DISPLAY_INDEX_CATEGORIES.includes(e.item.category)));
   }
   return items.map((item, originalIdx) =>
     Object.assign(item, { displayIndex: displayIndexByOriginalIdx.get(originalIdx) }));
@@ -672,5 +686,7 @@ module.exports = {
   setApplicableChannelIds,
   // v2.1.13 PR#58 P2-1：无事务版覆盖写（bundle import 已在外层事务内时复用）
   applyApplicableChannelIdsInTx,
-  listBuiltinFixedForChannel
+  listBuiltinFixedForChannel,
+  // v2.1.13 PR#58 P3-1：displayIndex 分区用的 C4 副本（导出仅供测试漂移守卫断言与 dispatcher C4_CATEGORIES 同步）
+  RECON_ID_FIX_DISPLAY_INDEX_CATEGORIES
 };

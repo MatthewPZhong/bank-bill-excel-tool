@@ -639,6 +639,60 @@ test.describe('listScenarios displayIndex builtin-fixed 置顶（PR#58 P2-3 防�
   });
 });
 
+// v2.1.13 PR#58 review P3-1（场景号一致性收口）：C4（ReconID 修复）独立流水线，displayIndex 无人消费，
+//   不得参与渠道内序号计数 —— 否则同渠道中间优先级的 C4 会顶偏银行场景 displayIndex（与银行弹窗 idx+1 串号）。
+test.describe('listScenarios displayIndex 排除 C4（PR#58 P3-1 防回归）', () => {
+  const { C4_CATEGORIES } = require('../../../../src/main-process/scenario-dispatcher');
+
+  function makeC4Payload(name, priority) {
+    return { category: 'recon-id-fix', name, priority, enabled: true, config: { note: 'c4-min' } };
+  }
+
+  // 不变量式断言（对 setup 是否 seed 默认场景免疫）：核心是「插入中间优先级 C4 不改变银行场景 displayIndex」
+  test('加入中间优先级 C4 前后：同渠道银行场景 displayIndex 不变（C4 不顶偏）', () => {
+    ensureScenariosCategoryBuiltinFixed(db); // 幂等扩 CHECK 至 6 类（允许 recon-id-fix）
+    const c1 = scenariosRepo.createScenario(db, makeC1Payload('c1-p3', 3));
+    setScenarioChannel(c1.id, 1);
+    const c2 = scenariosRepo.createScenario(db, makeC2Payload('c2-p1', 1));
+    setScenarioChannel(c2.id, 1);
+    const before = scenariosRepo.listScenarios(db);
+    const c1Before = before.find((s) => s.id === c1.id).displayIndex;
+    const c2Before = before.find((s) => s.id === c2.id).displayIndex;
+
+    // 插入 recon-id-fix(p2)，优先级介于 c1(p3) 与 c2(p1) 之间 —— 修复前会把 c2 顶偏 +1
+    const c4 = scenariosRepo.createScenario(db, makeC4Payload('reconfix-p2', 2));
+    setScenarioChannel(c4.id, 1);
+    const after = scenariosRepo.listScenarios(db);
+    assert.strictEqual(after.find((s) => s.id === c1.id).displayIndex, c1Before,
+      'C4 加入后 C1(p3) displayIndex 不变');
+    assert.strictEqual(after.find((s) => s.id === c2.id).displayIndex, c2Before,
+      'C4 加入后 C2(p1) displayIndex 不变（中间优先级 C4 不占号）');
+  });
+
+  test('C4 自身 displayIndex 有效（自成分区，1-based，不被消费但需稳定非空）', () => {
+    ensureScenariosCategoryBuiltinFixed(db); // 幂等扩 CHECK 至 6 类（允许 recon-id-fix）
+    const c4a = scenariosRepo.createScenario(db, makeC4Payload('rf-a', 3));
+    setScenarioChannel(c4a.id, 1);
+    const c4b = scenariosRepo.createScenario(db, makeC4Payload('rf-b', 1));
+    setScenarioChannel(c4b.id, 1);
+    const list = scenariosRepo.listScenarios(db);
+    const a = list.find((s) => s.id === c4a.id).displayIndex;
+    const b = list.find((s) => s.id === c4b.id).displayIndex;
+    assert.ok(Number.isFinite(a) && a >= 1, 'C4 displayIndex 有效 1-based');
+    assert.ok(Number.isFinite(b) && b >= 1, 'C4 displayIndex 有效 1-based');
+    // C4 自成分区从 1 起：两个 C4 占 1,2（与银行场景分区不互相挤号）
+    assert.deepStrictEqual([a, b].sort(), [1, 2], 'C4 分区独立 1-based（与非C4 区互不占号）');
+  });
+
+  test('漂移守卫：repository C4 副本与 scenario-dispatcher C4_CATEGORIES 一致', () => {
+    assert.deepStrictEqual(
+      [...scenariosRepo.RECON_ID_FIX_DISPLAY_INDEX_CATEGORIES].sort(),
+      [...C4_CATEGORIES].sort(),
+      'repository 本地 C4 副本必须与 dispatcher C4_CATEGORIES 同步（否则新增 C4 类别会重新顶偏银行序号）'
+    );
+  });
+});
+
 // ========================================================================
 // v2.1.9 SR-FIX-1 — spec §16.4 R1-R3 + ensureScenariosNameUniqueByChannelId migration
 // ========================================================================
