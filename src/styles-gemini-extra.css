@@ -2324,7 +2324,8 @@ select.mapping-text-input {
 }
 
 .scenario-category-select {
-  flex: 1;
+  /* v2.1.13 UI 微调：「请选择功能类别」下拉缩至约当前占满宽度的 75%（row 约 55% ≈ 占满宽度×0.75）*/
+  flex: 0 0 55%;
   padding: 8px 12px;
   border: 1px solid rgba(104, 79, 39, 0.24);
   border-radius: 6px;
@@ -2433,6 +2434,16 @@ select.mapping-text-input {
   flex: 0 0 56px;
   width: 56px;
   text-align: right;
+}
+/* v2.1.13 UI 微调：金额不一致 checkbox 文本加粗 */
+.scenario-config-extrafee-check { font-weight: 700; }
+/* v2.1.13 UI 微调：勾选后右侧说明文本（替代原公式位置）*/
+.scenario-config-extrafee-hint { font-size: 13px; color: var(--muted); }
+/* v2.1.13 UI 微调：原公式+输入框下移一行 */
+.scenario-config-row-extrafee-formula-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 /* v2.1.5 fix1.1：C3「条件」row — grid 列宽固定，避免 side 切换"网关↔银行"时
@@ -3176,4 +3187,126 @@ select.mapping-text-input {
 /* round 2 self-review I-new-1：committing 期间整个 overlay 鼠标 cursor: wait（视觉反馈"正在保存"） */
 .modal-overlay.is-committing {
   cursor: wait;
+}
+
+/* v2.1.13 D-3：自带写死场景「适用银行渠道」管理弹窗（多选下拉复用 .new-account-currency-dropdown-* 浮动面板） */
+.builtin-fixed-channel-manage-card {
+  /* v2.1.13 UI 微调：弹窗宽度缩至当前约 60%（上限 940→564；下限 420→252）*/
+  width: min(100%, 564px);
+  min-width: 252px;
+}
+.builtin-fixed-channel-body {
+  padding: 20px 24px;
+}
+.builtin-fixed-channel-row {
+  display: flex;
+  align-items: center;
+  justify-content: center; /* v2.1.13 UI 微调⑤：中间行文本+下拉居中 */
+  gap: 12px;
+}
+.builtin-fixed-channel-label {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.builtin-fixed-channel-dropdown-wrap {
+  /* v2.1.13 UI 微调：适用渠道下拉宽度 = 原 1/6 增加 50% → 约 25%（1/4）*/
+  flex: 0 0 25%;
+  min-width: 0;
+}
+/* v2.1.13（增量）：T7 银行渠道多选下拉按钮外观对齐网银账单生成「模式」下拉（.template-select 弹窗 36px 版） */
+.builtin-fixed-channel-manage-card .new-account-currency-dropdown-btn {
+  height: 36px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: #fffdf8;
+  padding: 0 32px 0 14px;
+  font-size: 13px;
+  color: var(--text);
+  width: 100%;
+  box-sizing: border-box;
+}
+/* v2.1.13（增量）：T7 下拉选项英文字体 → Courier New */
+.builtin-fixed-channel-floating-panel .new-account-currency-option-text {
+  font-family: "Courier New", ui-monospace, monospace;
+}
+
+/* v2.1.13 C：复制场景弹窗（右上角「复制场景」label + 「选择」按钮 + 渠道/场景联动下拉） */
+.copy-scenario-label {
+  margin-left: auto;
+  font-size: 13px;
+  align-self: center;
+}
+.copy-scenario-btn {
+  align-self: center;
+  margin-right: 44px; /* v2.1.13 UI 微调②：选择按钮与×之间 ≈ 一个「选择」按钮宽度（含 header gap 16，共约 60px）*/
+}
+/* v2.1.13 UI 微调②根因修复：配置弹窗 header 的×默认有 margin-left:auto，会与 copy-scenario-label 的 auto
+   平分空间，导致「复制场景 选择」被夹在标题与×中间、和×拉开大空白。此处取消×的 auto，
+   让 copy-scenario-label 的 margin-left:auto 独自把「复制场景 选择 ×」整组推到右上角紧贴。 */
+.scenario-config-card .dialog-header .icon-close {
+  margin-left: 0;
+}
+.copy-scenario-card {
+  /* v2.1.13 UI 微调：弹窗宽度缩至当前约 60%（上限 940→564；下限 460→276）*/
+  width: min(100%, 564px);
+  min-width: 276px;
+}
+.copy-scenario-body {
+  padding: 20px 24px;
+}
+.copy-scenario-row {
+  display: flex;
+  align-items: center;
+  justify-content: center; /* v2.1.13 UI 微调③：中间行文本+下拉居中 */
+  gap: 10px;
+}
+.copy-scenario-field-label {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.copy-scenario-field-label-sm {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.copy-scenario-channel-shell {
+  flex: 0 0 120px;
+}
+.copy-scenario-scenario-shell {
+  /* v2.1.13 UI 微调：ReconID 修复模式场景下拉加宽一倍（20%→40%）*/
+  flex: 0 0 40%;
+  min-width: 0;
+}
+/* v2.1.13 UI 微调：银行对账单处理复制场景弹窗——场景下拉(左数第2个)宽度=渠道下拉(左数第1个,120px)；
+   相邻兄弟特异性高于通用规则，且仅银行模式(有渠道下拉)命中，ReconID 模式(无渠道下拉)仍用上面的 40% */
+.copy-scenario-channel-shell + .copy-scenario-scenario-shell {
+  flex: 0 0 120px;
+}
+
+/* ============================================================
+ * v2.1.13 字体策略（仅 Windows + 默认 Clear 主题；mac / General 主题不受影响）
+ *   除大标题外，所有模块所有页面文本：英文/数字 → Courier New，中文 → Noto Sans SC
+ *   机制：字符级 fallback（Courier 含拉丁/数字字形；中文 Courier 无字形 → 自动 fallback 到 Noto Sans SC）
+ *   平台：仅 win32（body[data-platform="win32"]，renderer 启动注入）；非 Win 保持原字体
+ *   大标题：page-title/dialog-title（含子元素 .gemini-gradient）恢复原 Google Sans 比例字体
+ *   等宽口径：原 Roboto Mono 标识符(文件名/订单号/币种/字段名/序号/标签等)一并归入 Courier（均等宽，对齐不变）
+ *   字体定义见 src/fonts.css（本地打包 Noto Sans SC 子集）
+ * ============================================================ */
+
+/* 1) 全局：win32 下所有元素 英文数字→Courier、中文→Noto（* 覆盖一切显式 font-family，含 13 处原 Roboto Mono 标识符 + select/option）*/
+body[data-platform="win32"],
+body[data-platform="win32"] * {
+  font-family: "Courier New", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", monospace;
+}
+
+/* 2) 补足唯一高特异性(0,2,0)等宽标识符 .extract-order-row .eo-idx（> 上面 body * 的 (0,1,0)）*/
+body[data-platform="win32"] .extract-order-row .eo-idx {
+  font-family: "Courier New", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", monospace;
+}
+
+/* 3) 大标题恢复原比例字体（page-title/dialog-title 及其子元素；特异性 (0,2,0) > body * 的 (0,1,0)）*/
+body[data-platform="win32"] .page-title,
+body[data-platform="win32"] .page-title *,
+body[data-platform="win32"] .dialog-title,
+body[data-platform="win32"] .dialog-title * {
+  font-family: "Google Sans", "Google Sans Display", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
