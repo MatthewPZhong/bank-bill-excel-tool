@@ -647,7 +647,7 @@ function runLoggingScenario(context) {
     exit: (exitCode) => exitCalls.push(exitCode)
   });
   assert.strictEqual(dialogCalls.length, 1);
-  assert.strictEqual(dialogCalls[0].title, '网银账单小助手启动失败');
+  assert.strictEqual(dialogCalls[0].title, '清结算小助手启动失败');
   assert(dialogCalls[0].message.includes('错误摘要：旧数据库迁移失败'));
   assert.strictEqual(exitCalls.length, 1);
   assert.strictEqual(exitCalls[0], 1);

@@ -943,6 +943,10 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 .bank-statement-board .pending-action-pair { display: flex; gap: 12px; justify-content: center; }
 .pending-board .pending-action-pair .primary-btn,
 .bank-statement-board .pending-action-pair .primary-btn { min-width: 140px; }
+/* v2.1.14（用户反馈还原）：资金对账数据处理面板还原 layout-mirrored + control-row 后，
+   row1 cell.left 放 primary「开始对账」，与 row2/row3 cell.left secondary（场景管理/链接表管理）
+   按 180px 对齐，使右列三按钮等宽。pair 内 primary+secondary 各 flex:1 平分容器自动等宽，无需额外规则。 */
+.bank-statement-board .cell.left .primary-btn { min-width: 180px; }
 
 /* v2.1.12 需求：VCC业务OP计算 + 月度银行对账单BU回填校验 主面板沿垂直中线镜像（文字正常，用户最终确认）
    ⚠️ 当前生效主题 = Clear（本文件 styles-gemini-extra.css）；styles.css(General)默认 disabled，同名规则在那不生效。
@@ -2141,6 +2145,15 @@ select.mapping-text-input {
   width: 100%;
 }
 
+/* v2.1.14 C：链接表管理弹窗（Clear 风格）— 3 列 / 4 行，比场景管理窄 */
+.linked-table-manager-card {
+  width: min(92vw, 680px);
+}
+.linked-table-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
 /* v2.0.0-beta.3 PR #32b：方案 A — 保留"序号"列（用户精调 round 4）
  * col-id: width 1.5% + padding-left 7px → "序号" 字符右移 7px (半个"序"字符)
  *   注：col-id width 17px 不够装"序号" 28px → "序号"标题溢出到右侧（visible，与 col-category 表头不重叠）
@@ -2415,6 +2428,21 @@ select.mapping-text-input {
   flex: 0 0 100px;
   width: 100px;
 }
+
+/* v2.1.14 第4条：场景配置标题「— 类别名」后缀不加粗（modeLabel 保持） */
+.scenario-config-title-suffix {
+  font-weight: normal;
+}
+
+/* v2.1.14 第5条：C2/C3 赋值区两个下拉缩窄至约原 80% */
+.scenario-config-assign-select {
+  flex: 0 1 auto;
+  width: 160px;
+}
+
+/* v2.1.14 七-2：每组 [导入][导出] 往两侧张开——导入(first)往左 14px、导出(last)往右 14px */
+#bankStatementModulePanel .pending-action-pair > button:first-child { transform: translateX(-14px); }
+#bankStatementModulePanel .pending-action-pair > button:last-child { transform: translateX(14px); }
 
 /* v2.1.12 需求5：C3 extra fee 勾选框 + 金额输入（输入框 4 字符视觉宽度） */
 .scenario-config-row-extrafee {

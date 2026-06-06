@@ -7,7 +7,7 @@
       content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>网银账单小助手</title>
+    <title>清结算小助手</title>
     <link id="cssFonts" rel="stylesheet" href="./src/fonts.css" />
     <link id="cssGeneral" rel="stylesheet" href="./src/styles.css" disabled />
     <link id="cssClear" rel="stylesheet" href="./src/styles-gemini.css" />
@@ -27,7 +27,7 @@
       <img class="corner-gif" src="./assets/cat-meme.gif" alt="gif" />
 
       <main class="page-body">
-        <h1 class="page-title"><span class="gemini-gradient">网银账单小助手</span></h1>
+        <h1 class="page-title"><span class="gemini-gradient">清结算小助手</span></h1>
 
         <section class="workspace-shell">
           <div class="module-switcher">
@@ -269,22 +269,39 @@
             </div>
           </section>
 
-          <!-- v2.1.13 A1：银行对账单处理模块沿中线镜像对调（复用 .layout-mirrored / CSS direction:rtl，与 bankBuRecon/vccOpCalc 一致；不影响独立 panel reconIdFix） -->
+          <!-- v2.1.14 B（用户反馈还原）：资金对账数据处理模块面板还原为 v2.1.13 的 layout-mirrored + 3 个 control-row
+               （复用舒展留白 + control-row 行距；移除上一版 fund-recon-* 紧凑 grid）。
+               layout-mirrored 下 cell-left 视觉在右、cell-right 视觉在左：
+                 row1 右=[开始运行]  左=pair[导入对账单, 导出文件]
+                 row2 右=[场景管理]  左=pair[导入不平表, 导出文件]
+                 row3 右=[链接表管理] 左=[状态框（含 spark svg）]
+               8 个按钮 id（5 原 + 3 新）+ status-box 内部 spark svg/status-box-text 全保留；事件绑定/handler 不动。 -->
           <section id="bankStatementModulePanel" class="control-board module-panel bank-statement-board layout-mirrored" hidden>
+            <div class="control-row">
+              <div class="cell left">
+                <button id="bankStatementRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
+              </div>
+              <div class="cell right">
+                <div class="pending-action-pair">
+                  <button id="bankStatementImportBtn" class="primary-btn" type="button">导入对账单</button>
+                  <button id="bankStatementExportBtn" class="secondary-btn" type="button" disabled>导出文件</button>
+                </div>
+              </div>
+            </div>
             <div class="control-row">
               <div class="cell left">
                 <button id="bankStatementScenarioBtn" class="secondary-btn" type="button">场景管理</button>
               </div>
               <div class="cell right">
                 <div class="pending-action-pair">
-                  <button id="bankStatementImportBtn" class="primary-btn" type="button">导入文件</button>
-                  <button id="bankStatementRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
+                  <button id="bankStatementGatewayReconImportBtn" class="primary-btn" type="button">导入不平表</button>
+                  <button id="bankStatementGatewayReconExportBtn" class="secondary-btn" type="button">导出文件</button>
                 </div>
               </div>
             </div>
             <div class="control-row">
               <div class="cell left">
-                <button id="bankStatementExportBtn" class="secondary-btn" type="button" disabled>导出文件</button>
+                <button id="bankStatementLinkedTableBtn" class="secondary-btn" type="button">链接表管理</button>
               </div>
               <div class="cell right">
                 <div id="bankStatementStatusBox" class="status-box">

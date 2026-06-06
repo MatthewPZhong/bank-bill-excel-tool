@@ -31,7 +31,7 @@ function reportStartupFailure({
   exit = () => {}
 }) {
   const summary = normalizeErrorMessage(error);
-  const title = '网银账单小助手启动失败';
+  const title = '清结算小助手启动失败';
   const message = buildStartupFailureDialogMessage(error, logFilePath);
 
   try {

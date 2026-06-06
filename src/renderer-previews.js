@@ -809,6 +809,16 @@
       }, 120);
     }
 
+    // v2.1.14 C：链接表管理弹窗 preview（切到资金对账数据处理模块 → 点「链接表管理」按钮打开弹窗）
+    function applyLinkedTableManagerPreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      setTimeout(() => {
+        if (elements.bankStatementLinkedTableBtn) {
+          elements.bankStatementLinkedTableBtn.click();
+        }
+      }, 120);
+    }
+
     // v2.0.0-beta.3：类别选择弹窗
     function applyScenarioCategorySelectPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
@@ -1229,6 +1239,8 @@
       applyBankStatementPanelPreviewState,
       applyScenariosManagerPreviewState,
       applyScenarioCategorySelectPreviewState,
+      // v2.1.14 C：链接表管理弹窗 preview
+      applyLinkedTableManagerPreviewState,
       // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 preview（4 张）
       // v2.1.7 F1：C1 dialog 新增 AND 模式 preview（OR fallback baseline + AND 显式各 1 张）
       applyScenarioConfigC1PreviewState,

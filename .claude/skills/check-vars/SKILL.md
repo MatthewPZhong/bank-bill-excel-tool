@@ -31,12 +31,14 @@ description: 扫描当前改动是否触及 rules/important-variables.md 中的�
 优先级（由高到低）：
 
 1. 用户显式指定基准：`/check-vars --since <ref>`（例如 `--since main`）
-2. 当前分支有与目标分支 diff：`git diff <target>...HEAD -- 'src/**/*.js'`
+2. 当前分支有与目标分支 diff：`git diff <target>...HEAD -- src/`（结果筛 `.js`）
    - v1.5.x fix → 对 `main`
    - v2.0.0 开发 → 对 `v2.0.0` 上游
-3. 无 target：`git status --short` + `git diff HEAD -- 'src/**/*.js'`（未提交 + 已提交的本地改动）
+3. 无 target：`git status --short` + `git diff HEAD -- src/`（未提交 + 已提交的本地改动；结果筛 `.js`）
 
-用这一步拿到**改动的 .js 文件列表**和**改动的 diff 文本**。
+用这一步拿到**改动的 .js 文件列表**（从结果里筛 `.js` 结尾）和**改动的 diff 文本**。
+
+> ⚠️ pathspec 用 `-- src/` 而非 `'src/**/*.js'`：git 默认 `**` 不跨 `/`（被当 `src/*/*.js`），后者会**漏掉 src/ 顶层的 `renderer.js` / `main.js` / `preload.js` 等核心文件**（v2.1.14 踩坑）。
 
 ### Step 2 — 读清单
 
