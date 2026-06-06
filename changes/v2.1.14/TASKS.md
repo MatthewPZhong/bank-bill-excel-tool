@@ -11,7 +11,7 @@
 | **T0.2** | bump version `2.1.14-beta.1` | `package.json:3` | — | ✅ |
 | **T1.1** | 主标题「网银账单小助手」→「清结算小助手」| `index.html:10,30` + `startup-failure.js:34`（第三处）+ smoke 断言同步 `scenarios.js:650` | [真实] | ✅ |
 | **T1.2** | 模块名「银行对账单处理」→「资金对账数据处理」(仅 name，id 不变) | `renderer.js:57` | [真实] | ✅ |
-| **T1.3** | 按钮「开始运行」→「开始对账」| `index.html:298` | [真实] | ✅ |
+| **T1.3** | ~~按钮「开始运行」→「开始对账」~~（七-1 已撤回为「开始运行」，净效果文案不变）| `index.html` | [真实] | ✅ |
 | **T2.1** | 面板 DOM 重构（3 行布局，移除 layout-mirrored，加 `fund-recon-board`，保留 `bank-statement-board`）| `index.html:272-303` | [真实] | ✅ |
 | **T2.2** | 新布局 CSS（双主题：`styles-gemini-extra.css` + `styles.css`，`fund-recon-board` 作用域）| `styles*.css` | [真实] | ✅ |
 | **T2.3** | 新增 3 按钮 elements 缓存 + 事件绑定 + `showComingSoon` helper | `renderer.js:293-296 / 3430 / 5160` | 混合 | ✅ |
@@ -30,15 +30,15 @@
 
 - 2026-06-06：建 `v2.1.14` 分支（T0.1）；落 spec 三件套（PRD / TECH_DESIGN / TASKS）。
 - 2026-06-06：**批次 1 完成**（委托 dev agent 实现）。
-  - A 文案：主标题（含 startup-failure 第三处 + smoke 断言同步）/ 模块名 / 开始对账 按钮。
+  - A 文案：主标题（含 startup-failure 第三处 + smoke 断言同步）/ 模块名 / 开始运行 按钮（七-1 撤回「开始对账」改名）。
   - B 面板：`#bankStatementModulePanel` 重构为 3 行布局（移除 layout-mirrored → fund-recon-board，保留 bank-statement-board 复用配色），双主题 CSS。5 原 id + status-spark svg 全保留。
   - C 弹窗：`createLinkedTableManagerDialog`（4 静态表 + 三列 + 导入[占位]/退出）。
   - 占位：`showComingSoon` helper（不平校验导出 / 链接表导入）—— 不伪装成功、不写数据。
-  - 复用真实：导入对账单 / 导出文件(预加工) / 导入不平表(`importGatewayRecon`) / 开始对账 / 场景管理。
+  - 复用真实：导入对账单 / 导出文件(预加工) / 导入不平表(`importGatewayRecon`) / 开始运行 / 场景管理。
 - 2026-06-06：**收口**。bump 2.1.14-beta.1；release-check 全绿（EXIT=0）；重跑 2 张 preview 同步版本号；revert 测试 runner 自动改写的 `rules/integration-test-policy.md` 噪声。
 - 2026-06-06：team-lead 审查发现并修复：① smoke 断言依赖旧标题（同步）② 测试 noise 文件（revert）③ check-vars skill 的 `src/**/*.js` glob 坑（漏 src/ 顶层文件，已用正确 pathspec 重扫；建议单独修 SKILL.md）。
 - 2026-06-07：**第二批用户答复处理**：assets 7 模板 git add（外汇期权订单.xlsx 缺失待补）/ 品牌改名 description+productName→清结算小助手（appId 不动）/ check-vars `SKILL.md` glob 坑修复（pathspec→`-- src/`）/ 布局还原 control-row 三行（移除 fund-recon grid）。
-- 2026-06-07：**追加 6 条实现（PRD §七）**：dev agent 两次崩溃（tool call 输出成字面文本）后主线程自实现——七-1 撤回开始运行 / 七-2 左侧按钮 translateX(-8px) / 七-3 C2 FundType「自己输入」/ 七-4 C2/C3 标题后缀不加粗 / 七-5 赋值下拉 160px / 七-6 去 #序号。c2/c3/panel 三张 preview 确认 + release-check EXIT=0。
+- 2026-06-07：**追加 6 条实现（PRD §七）**：dev agent 两次崩溃（tool call 输出成字面文本）后主线程自实现——七-1 撤回开始运行 / 七-2 左侧按钮组左右张开（导入←/导出→，终态各 14px）/ 七-3 C2 FundType「自己输入」/ 七-4 C2/C3 标题后缀不加粗 / 七-5 赋值下拉 160px / 七-6 去 #序号。c2/c3/panel 三张 preview 确认 + release-check EXIT=0。
 
 ## 未决项（待用户答复，不阻塞已交付主体）
 
