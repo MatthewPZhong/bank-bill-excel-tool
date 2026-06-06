@@ -9,6 +9,30 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.13-beta.1（2026-06-06）
+
+v2.1.12 之后 1 轮迭代，围绕「银行对账单处理 / 对账单 ReconID 修复」两个场景模块的场景管理体验重构 + 跨渠道写死场景 + Win 端字体可读性：① 新增「自带写死场景」(builtin-fixed) 内置类别（前端无新建入口、仅「通用」渠道可见、序号固定 / 优先级 0 / 执行操作仅「管理」，原内置「从银行对账单的信息里提取调拨订单对账ID」归入此类，可通过「管理」弹窗多选「适用银行渠道」**跨渠道生效**，默认全选 = 全渠道）；② 新增「复制场景」（配置弹窗右上角从同类别其他场景复制配置，覆盖 config、不覆盖名称）；③ 银行对账单处理模块面板沿中线左右镜像；④ 一批文本改名；⑤ Win 端（仅 Windows + 默认 Clear 主题）页面文本英文/数字改 Courier New、中文改 Noto Sans SC（思源黑体随应用打包），大标题保留原字体，macOS 不受影响。⚠️ 资金/对账红线护栏：builtin-fixed 路由复用原 C1 提取逻辑、提取结果 byte-for-byte 不变；DB 新增 category 枚举 + 多对多关联表均为幂等迁移、老库不破坏。
+
+### 新增
+
+- **自带写死场景（builtin-fixed）类别**（业务规则 · UI · 引擎 · DB / `category=builtin-fixed`）：新增内置场景类别，前端无展示入口（不出现在「新建类别」下拉），仅在「银行对账单处理」模块的「通用」渠道可见，序号固定（置顶）、优先级 0、执行操作列仅「管理」按钮（无转移/删除）、保留启用勾选；原内置「从银行对账单的信息里提取调拨订单对账ID」由 `extract-recon-id` 归入此类；执行引擎 `runScenario` 新增 `builtin-fixed` 路由（按 config 形态复用原 C1 `extractByFeature` 提取逻辑，提取结果不变）
+- **场景适用银行渠道（多对多）**（业务规则 · UI · 引擎 · DB / `scenario_applicable_channels` 关联表）：自带写死场景可通过「管理」弹窗多选「适用银行渠道」——默认全选 = 对全部渠道生效（无任何关联行 = 适用全部）；运行某渠道时，适用列表含该渠道、或为空，则该写死场景纳入执行（跨渠道生效）；dispatcher 在通用阶段按「行 matchedChannel 是否在适用列表内」逐行过滤候选行，保持 priority 0 兜底语义不变、只缩小候选行集
+- **复制场景**（UI · 配置复用）：新增/修改场景的 C1–C4 配置弹窗右上角新增「复制场景 / 选择」入口，可从同类别其他场景复制配置——覆盖 config，不覆盖场景名称；「银行对账单处理」按「银行渠道 + 场景」两级下拉选择来源，「对账单 ReconID 修复」按「场景」单选
+
+### 变更
+
+- 银行对账单处理模块主面板沿中线左右镜像布局（与 v2.1.12 VCC 模块面板镜像同款手法）
+- 对账单 ReconID 修复模块场景管理去掉「银行渠道」下拉与「管理」（按 category 隔离、不引入渠道维度），复制场景按「场景」单选
+- 文本改名（UI 文案，DB category / 统计 key 均不变）：功能类别「提取ReconId-From 网关」→「网关对账单赋值银行对账单」（`gateway-recon-join`）；功能类别「银行对账单字段赋值」→「银行对账单赋值自身」（`offset-bill-mark`）；模块「月度 Pending 数据核对」→「月度Pending数据核对」（去空格）
+- Windows 端字体（仅 Windows + 默认 Clear 主题）：所有页面文本英文/数字改 Courier New 等宽、中文改 Noto Sans SC（思源黑体随应用打包，字体定义见 `src/fonts.css` 本地子集），大标题保留原比例字体；机制为字符级 fallback；macOS 不受影响
+- C3「网关对账单赋值银行对账单」配置弹窗微调：金额不一致勾选项文本加粗；勾选后右侧显示说明文本「输入框的差额用于网关账单与银行对账单的金额比对」，原「网关对账单金额 + 输入框 = 银行对账单金额」公式行下移
+- 多项弹窗 UI 微调：复制场景弹窗 / 适用渠道弹窗 / 类别选择下拉的宽度、居中、按钮间距等
+- 数据/技术：DB 新增 `scenarios.category` 枚举值 `builtin-fixed`（重建 CHECK 约束 5→6 值，幂等）+ 原内置提取场景迁移成 `builtin-fixed` / priority 0 / channel_id=1（config 不变）；新增 `scenario_applicable_channels` 多对多表（scenario_id × channel_id，幂等，缺表兜底全渠道生效）
+
+### 移除
+
+- 移除「提取ReconId-From Self」（`extract-recon-id`）新建类别选项：原场景已归入自带写死场景，新建场景的「类别」下拉不再列出该项
+
 ## 2.1.12（2026-06-01）
 
 v2.1.12 α（PR #56）之后的 β 性能架构阶段，三块互相独立的大文件/大计算量提速，全部 🔴 资金红线 byte-for-byte 守恒：β.1 收单对账 multi-worker（大数据量 JOIN 对账并行）+ β.2 bizOp（业务OP数据核对）导入流式 + worker 化（百万行 xlsx 导入不 OOM）+ 收单导入解析器 sax→手写字节扫描（收单单据币种校验导入提速）。⚠️ 3 个🔴资金红线（三块各一）：① β.1 diff_rows 多 worker 与单 worker byte-for-byte 一致 ② β.2 worker 内五条资金红线（整批拒绝 / D+1 原子替换 / bu_name 改写 / 失败报告 / flow 跨 BU 清）全保住 ③ 收单导入新旧 reader 全行 SHA1 完全一致。质量门：`npm run release-check` 全绿（unit 1473 / integration 952 / smoke 全过）；三块均合成数据 byte-for-byte 已充分验证，真实大文件由用户手测把关（合并门槛硬要求）。提 PR 后经 self-review + reviewer 评论修复 5 问题（β.1 资金 C1/C2 + β.2 I1/I2/I3 + MW cancelToken），均补回归测试。
