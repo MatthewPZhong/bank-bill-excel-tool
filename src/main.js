@@ -392,7 +392,12 @@ function applyScenarioBundleImport(bundle, options = {}) {
     getBuiltinGeneralChannel: () => database.getBuiltinGeneralChannel(),
     createChannel: (payload) => database.createChannel(payload),
     findScenarioByChannelAndName: (channelId, name) => database.findScenarioByChannelAndName(channelId, name),
-    createScenario: (payload) => database.createScenario(payload)
+    createScenario: (payload) => database.createScenario(payload),
+    // v2.1.13 PR#58 P2-1：builtin-fixed 适用渠道还原（事务内调无事务版 set，避免嵌套 BEGIN）
+    findChannelByNameAndLocation: (name, ownerLocation) => database.findChannelByNameAndLocation(name, ownerLocation),
+    setScenarioApplicableChannels: (scenarioId, channelIds) => database.setScenarioApplicableChannelsInTx(scenarioId, channelIds),
+    // v2.1.13 PR#58 P3-2：限定渠道全 resolve 失败时禁用场景（toggleScenarioEnabled 为裸 UPDATE，安全嵌在外层事务内）
+    setScenarioEnabled: (scenarioId, enabled) => database.toggleScenarioEnabled(scenarioId, enabled)
   });
 }
 
@@ -3006,7 +3011,9 @@ function registerAppHandlers() {
   // → 前端 refreshBankStatementStatus() 把已就绪的导出状态翻成"未运行"。反向同理。
   // round 3 self-review P3-A：显式枚举已知 category，未知值（含 undefined）双清并 warn，
   // 避免未来加新 category 时忘了同步本函数会偷偷清 processingResult。
-  const BANK_STATEMENT_CATEGORIES = new Set(['extract-recon-id', 'offset-bill-mark', 'gateway-recon-join']);
+  // v2.1.13 PR#58 review P2-A：builtin-fixed（自带写死场景）属银行对账单处理类别 → 只清 processingResult；
+  //   漏加会落 unknown 兜底双清，启停写死场景误清第 5 模块 ReconID 修复结果
+  const BANK_STATEMENT_CATEGORIES = new Set(['extract-recon-id', 'offset-bill-mark', 'gateway-recon-join', 'builtin-fixed']);
   // v2.1.0-beta.3 PR #39 Finding 2（P2）：把 ReconID 修复 category 集合化（含 business + gateway 两个子模式）
   // 之前 'gateway-recon-id-fix' 落 unknown 分支 → 双清 processingResult + reconIdFixResult → 用户改 gateway 场景误清银行对账结果
   const RECON_ID_FIX_CATEGORIES = new Set(['recon-id-fix', 'gateway-recon-id-fix']);
@@ -3109,6 +3116,27 @@ function registerAppHandlers() {
     }
   });
 
+  // v2.1.13 D-3：自带写死场景「适用银行渠道」读写
+  //   get：无副作用查询，返回 channel_id 数组（空数组 = 适用全部渠道）
+  ipcMain.handle('scenarios:get-applicable-channels', (_event, id) => {
+    try {
+      return { status: 'ok', channelIds: database.getScenarioApplicableChannels(id) };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  //   set：覆盖式写入（空数组 = 清空 = 适用全部）；改写死场景适用渠道会改变 dispatcher 执行集
+  //   （哪些渠道运行时跑该 builtin-fixed 提取场景）→ 清 processingResult 避免老结果误用
+  trackedIpcHandle('scenarios:set-applicable-channels', '银行对账单处理', '场景管理', (_event, id, channelIds) => {
+    try {
+      const result = database.setScenarioApplicableChannels(id, channelIds);
+      processingResult = null;
+      return { status: 'ok', scenarioId: result.scenarioId, channelIds: result.channelIds };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+
   // v2.1.9 N5：channels CRUD IPC（银行渠道管理）
   //   list 无副作用不进 trackedIpcHandle 计数（参考 scenarios:list 范式）
   //   create/update/delete 进 trackedIpcHandle('银行对账单处理' / '渠道管理') 计数
@@ -3196,16 +3224,28 @@ function registerAppHandlers() {
       }
 
       // 拉各渠道的全部 scenarios（含 disabled）
+      // v2.1.13 PR#58 P2-1（🔴 资金/业务红线）：builtin-fixed 场景附「适用银行渠道」id 列表，
+      //   serializeScenarioBundle 据 channelIdToName 把 id → {name, ownerLocation} 写进 bundle，
+      //   导入端再按名 resolve 回当前库 id，避免「限定渠道的写死场景导入后变成适用全部」的反向 bug。
       const scenariosByChannel = new Map();
       let totalScenarios = 0;
       for (const ch of selectedChannels) {
         const scenarios = database.listAllScenariosByChannelId(ch.id);
+        for (const s of scenarios) {
+          if (s.category === 'builtin-fixed') {
+            s._applicableChannelIds = database.getScenarioApplicableChannels(s.id);
+          }
+        }
         scenariosByChannel.set(ch.id, scenarios);
         totalScenarios += scenarios.length;
       }
+      // channelId → {name, ownerLocation} 全库映射（适用渠道可能指向未被本次导出选中的渠道，故用全集）
+      const channelIdToName = new Map(
+        allChannels.map((c) => [Number(c.id), { name: c.name, ownerLocation: c.ownerLocation }])
+      );
 
       // 序列化
-      const jsonText = serializeScenarioBundle(selectedChannels, scenariosByChannel, app.getVersion());
+      const jsonText = serializeScenarioBundle(selectedChannels, scenariosByChannel, app.getVersion(), channelIdToName);
 
       // saveDialog 默认文件名（D13=a）
       const dateStr = formatDateYYYYMMDD(new Date());
@@ -3323,7 +3363,9 @@ function registerAppHandlers() {
           `导入路径：${filePath}`,
           `新增场景数：${applyResult.importedCount}`,
           `跳过同名场景数：${applyResult.conflicts.length}`,
-          `创建渠道数：${applyResult.createdChannels.length}`
+          `创建渠道数：${applyResult.createdChannels.length}`,
+          // v2.1.13 PR#58 P2-1：适用渠道还原 warning（匹配不到的渠道）
+          ...(Array.isArray(applyResult.warnings) ? applyResult.warnings : [])
         ]
       });
       return Object.assign({ status: 'ok', filePath }, applyResult);
@@ -3350,7 +3392,9 @@ function registerAppHandlers() {
         details: [
           `新增场景数：${applyResult.importedCount}`,
           `跳过同名场景数：${applyResult.conflicts.length}`,
-          `创建渠道数：${applyResult.createdChannels.length}`
+          `创建渠道数：${applyResult.createdChannels.length}`,
+          // v2.1.13 PR#58 P2-1：适用渠道还原 warning（匹配不到的渠道）
+          ...(Array.isArray(applyResult.warnings) ? applyResult.warnings : [])
         ]
       });
       return Object.assign({ status: 'ok' }, applyResult);
@@ -3462,7 +3506,12 @@ function registerAppHandlers() {
       const detailedEnabled = enabled.map((s) => {
         const detail = database.getScenario(s.id);
         if (!detail) return null;
-        return { ...detail, displayIndex: s.displayIndex, channelId: s.channelId };
+        // v2.1.13 D-3：builtin-fixed 自带写死场景附「适用银行渠道」列表（空 = 适用全部，dispatcher 不过滤）
+        //   dispatcher runChannelBatch 据此逐行过滤候选行（仅对 matchedChannel 在列表内的行提取）
+        const applicableChannelIds = detail.category === 'builtin-fixed'
+          ? database.getScenarioApplicableChannels(s.id)
+          : null;
+        return { ...detail, displayIndex: s.displayIndex, channelId: s.channelId, _applicableChannelIds: applicableChannelIds };
       }).filter(Boolean);
       // v2.1.0-beta.1 PR-A round 2 P1（资金红线）：C4 (`recon-id-fix`) 走独立模块
       // `recon-id-fix:run`，不应进入银行对账单 dispatcher（C4 没有对应的 case，

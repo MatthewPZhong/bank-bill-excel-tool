@@ -39,6 +39,11 @@ function makeImportDeps(database) {
     createChannel: (payload) => database.createChannel(payload),
     findScenarioByChannelAndName: (channelId, name) => database.findScenarioByChannelAndName(channelId, name),
     createScenario: (payload) => database.createScenario(payload),
+    // v2.1.13 PR#58 P2-1：builtin-fixed 适用渠道还原（与 src/main.js wrapper 同款 deps）
+    findChannelByNameAndLocation: (name, ownerLocation) => database.findChannelByNameAndLocation(name, ownerLocation),
+    setScenarioApplicableChannels: (scenarioId, channelIds) => database.setScenarioApplicableChannelsInTx(scenarioId, channelIds),
+    // v2.1.13 PR#58 P3-2：限定渠道全 resolve 失败时禁用场景（与 src/main.js wrapper 同款 deps）
+    setScenarioEnabled: (scenarioId, enabled) => database.toggleScenarioEnabled(scenarioId, enabled),
   };
 }
 
@@ -68,10 +73,19 @@ function handlerExportBundle(database, payload) {
     let totalScenarios = 0;
     for (const ch of selectedChannels) {
       const scenarios = database.listAllScenariosByChannelId(ch.id);
+      // v2.1.13 PR#58 P2-1：builtin-fixed 附适用渠道 id 列表（与 src/main.js export handler 一致）
+      for (const s of scenarios) {
+        if (s.category === 'builtin-fixed') {
+          s._applicableChannelIds = database.getScenarioApplicableChannels(s.id);
+        }
+      }
       scenariosByChannel.set(ch.id, scenarios);
       totalScenarios += scenarios.length;
     }
-    const jsonText = serializeScenarioBundle(selectedChannels, scenariosByChannel, '2.1.9-test');
+    const channelIdToName = new Map(
+      allChannels.map((c) => [Number(c.id), { name: c.name, ownerLocation: c.ownerLocation }])
+    );
+    const jsonText = serializeScenarioBundle(selectedChannels, scenariosByChannel, '2.1.9-test', channelIdToName);
     return {
       status: 'ok',
       jsonText,
@@ -559,5 +573,179 @@ test.describe('export + import 端到端往返', () => {
     const all = database.listScenarios();
     assert.ok(all.some((s) => s.name === '通用s1'));
     assert.ok(all.some((s) => s.name === '工商s1'));
+  });
+});
+
+// ============================================================================
+// v2.1.13 PR#58 P2-1：builtin-fixed「适用银行渠道」bundle round-trip（🔴 资金/业务红线）
+//   防回归点：限定渠道的写死场景导出→导入后，适用渠道按名 resolve 还原，
+//   不再退化成「scenario_applicable_channels 空 = 适用全部」的反向 bug。
+// ============================================================================
+
+// 直接建一个 builtin-fixed 场景（绕过 migration；createScenario 已允许该 category）
+function createBuiltinFixedFixture(name, channelId = 1) {
+  const config = {
+    conditions: [{ field: 'CustomerRef', op: '包含', value: 'FT' }],
+    conditionsLogic: 'OR',
+    extractByFeature: { enabled: true, searchFields: ['CustomerRef'], featureCode: 'FT', digitCount: 12, totalLength: 15 },
+    extractByOtherField: null
+  };
+  const result = database.createScenario({
+    category: 'builtin-fixed',
+    name,
+    priority: 0,
+    enabled: true,
+    config,
+    channelId
+  });
+  return result;
+}
+
+test.describe('P2-1 builtin-fixed 适用渠道 bundle round-trip', () => {
+  test('serialize 携带 applicableChannelNames（{name, ownerLocation}）', () => {
+    const icbc = database.createChannel({ name: '工商', ownerLocation: '上海' });
+    const cmb = database.createChannel({ name: '招商', ownerLocation: '北京' });
+    const bf = createBuiltinFixedFixture('写死提取', 1);
+    database.setScenarioApplicableChannels(bf.id, [icbc.id, cmb.id]);
+
+    // 导出「通用」渠道（builtin-fixed 落在通用 id=1）
+    const exportResult = handlerExportBundle(database, { channelIds: [1] });
+    assert.strictEqual(exportResult.status, 'ok');
+    const parsed = JSON.parse(exportResult.jsonText);
+    const sc = parsed.channels[0].scenarios.find((s) => s.name === '写死提取');
+    assert.ok(sc, '导出应含写死场景');
+    assert.ok(Array.isArray(sc.applicableChannelNames), 'applicableChannelNames 应是数组');
+    assert.strictEqual(sc.applicableChannelNames.length, 2);
+    const labels = sc.applicableChannelNames.map((c) => `${c.name}-${c.ownerLocation}`).sort();
+    assert.deepStrictEqual(labels, ['工商-上海', '招商-北京']);
+
+    // parse 透传 applicableChannelNames（归一化成 {name, ownerLocation}）
+    const reparsed = parseScenarioBundle(exportResult.jsonText);
+    const scParsed = reparsed.channels[0].scenarios.find((s) => s.name === '写死提取');
+    assert.deepStrictEqual(
+      scParsed.applicableChannelNames.map((c) => `${c.name}-${c.ownerLocation}`).sort(),
+      ['工商-上海', '招商-北京']
+    );
+  });
+
+  test('非限定 builtin-fixed（无适用渠道）→ 不输出 applicableChannelNames', () => {
+    createBuiltinFixedFixture('写死全局', 1);
+    const exportResult = handlerExportBundle(database, { channelIds: [1] });
+    const parsed = JSON.parse(exportResult.jsonText);
+    const sc = parsed.channels[0].scenarios.find((s) => s.name === '写死全局');
+    assert.ok(sc);
+    assert.strictEqual(sc.applicableChannelNames, undefined, '无适用渠道 → 不输出该字段');
+  });
+
+  test('端到端：限定渠道导入新库 → 按名 resolve 还原 applicable channel id（非空=不退化为全部）', () => {
+    // A 库：通用 + 工商 + 招商；写死场景限定 [工商, 招商]
+    const icbc = database.createChannel({ name: '工商', ownerLocation: '上海' });
+    const cmb = database.createChannel({ name: '招商', ownerLocation: '北京' });
+    const bf = createBuiltinFixedFixture('写死提取', 1);
+    database.setScenarioApplicableChannels(bf.id, [icbc.id, cmb.id]);
+    // 导出三个渠道（含工商/招商，导入端才能 resolve）
+    const exportResult = handlerExportBundle(database, { channelIds: [1, icbc.id, cmb.id] });
+    assert.strictEqual(exportResult.status, 'ok');
+
+    // 拆 A → 新 B 库
+    database.db.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scenarios-bundle-p21-'));
+    database = new AppDatabase(path.join(tmpDir, 'test.sqlite'));
+    database.init();
+
+    // scan → needs-confirm（工商/招商缺失）→ apply confirm
+    const scanResult = handlerImportBundleScan(database, exportResult.jsonText);
+    assert.strictEqual(scanResult.status, 'needs-confirm');
+    const applyResult = handlerImportBundleApply(database, {
+      bundle: scanResult.bundle,
+      confirmCreateMissingChannels: true
+    });
+    assert.strictEqual(applyResult.status, 'ok');
+    assert.deepStrictEqual(applyResult.warnings, [], '所有渠道都能 resolve → 无 warning');
+
+    // 验证 B 库：写死场景的适用渠道 = 新库的 工商/招商 id（按名 resolve）
+    const imported = database.listScenarios().find((s) => s.name === '写死提取');
+    assert.ok(imported, '写死场景应导入');
+    const bIcbc = database.findChannelByNameAndLocation('工商', '上海');
+    const bCmb = database.findChannelByNameAndLocation('招商', '北京');
+    const applicable = database.getScenarioApplicableChannels(imported.id).sort((a, b) => a - b);
+    assert.deepStrictEqual(applicable, [bIcbc.id, bCmb.id].sort((a, b) => a - b),
+      '适用渠道按名 resolve 还原；非空 → 不退化为「适用全部」');
+  });
+
+  test('向后兼容：旧 bundle 无 applicableChannelNames → 不调 setApplicable（场景默认无关联=适用全部）', () => {
+    // 手写旧版 bundle（builtin-fixed 但无 applicableChannelNames 字段）
+    const jsonText = JSON.stringify({
+      scenarioBundleVersion: 1,
+      appVersion: '2.1.13-old',
+      channels: [{
+        name: '通用', ownerLocation: '通用', isBuiltin: 1,
+        scenarios: [{
+          category: 'builtin-fixed', name: '旧写死', sortOrder: 0, enabled: 1,
+          configJson: { conditions: [{ field: 'CustomerRef', op: '包含', value: 'FT' }], conditionsLogic: 'OR', extractByFeature: { enabled: true, searchFields: ['CustomerRef'], featureCode: 'FT', digitCount: 12, totalLength: 15 }, extractByOtherField: null }
+        }]
+      }]
+    });
+    const result = handlerImportBundleScan(database, jsonText);
+    assert.strictEqual(result.status, 'ok');
+    assert.strictEqual(result.importedCount, 1);
+    const imported = database.listScenarios().find((s) => s.name === '旧写死');
+    assert.ok(imported);
+    // 无字段 → 未调 setApplicable → 关联表空 = 适用全部（与旧行为一致）
+    assert.deepStrictEqual(database.getScenarioApplicableChannels(imported.id), []);
+  });
+
+  test('反向 bug 守卫：限定渠道但导入端一个都 resolve 不到 → 不写 [](不退化为全部) + warning', () => {
+    // 构造 bundle：写死场景限定一个导入端不存在的渠道（只导出通用渠道，限定渠道未带）
+    const icbc = database.createChannel({ name: '工商', ownerLocation: '上海' });
+    const bf = createBuiltinFixedFixture('写死提取', 1);
+    database.setScenarioApplicableChannels(bf.id, [icbc.id]);
+    // 仅导出通用渠道（工商不在 bundle.channels → 导入端不会自动创建工商）
+    const exportResult = handlerExportBundle(database, { channelIds: [1] });
+    const parsed = JSON.parse(exportResult.jsonText);
+    assert.ok(parsed.channels[0].scenarios.find((s) => s.name === '写死提取').applicableChannelNames.length === 1);
+
+    // 拆 A → 新 B 库（无工商）
+    database.db.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scenarios-bundle-p21b-'));
+    database = new AppDatabase(path.join(tmpDir, 'test.sqlite'));
+    database.init();
+
+    // 无缺失渠道（只有通用，已存在）→ 直接 apply
+    const scanResult = handlerImportBundleScan(database, exportResult.jsonText);
+    assert.strictEqual(scanResult.status, 'ok');
+    const imported = database.listScenarios().find((s) => s.name === '写死提取');
+    assert.ok(imported);
+    // 工商 resolve 不到 → 未写关联（仍为空），但有 warning 提示用户核对
+    assert.deepStrictEqual(database.getScenarioApplicableChannels(imported.id), []);
+    assert.ok(Array.isArray(scanResult.warnings) && scanResult.warnings.length >= 1, '应有 warning');
+    assert.ok(scanResult.warnings.some((w) => w.includes('工商')), 'warning 应点名工商');
+  });
+
+  test('P3-2：限定渠道全 resolve 失败 → 场景被禁用（不退化为「适用全部」）+ 禁用 warning', () => {
+    // 同「反向 bug 守卫」构造：写死场景限定一个导入端不存在的渠道，仅导出通用渠道
+    const icbc = database.createChannel({ name: '工商', ownerLocation: '上海' });
+    const bf = createBuiltinFixedFixture('写死提取', 1);
+    database.setScenarioApplicableChannels(bf.id, [icbc.id]);
+    const exportResult = handlerExportBundle(database, { channelIds: [1] });
+
+    // 拆 A → 新 B 库（无工商，且不会自动创建）
+    database.db.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scenarios-bundle-p32-'));
+    database = new AppDatabase(path.join(tmpDir, 'test.sqlite'));
+    database.init();
+
+    const scanResult = handlerImportBundleScan(database, exportResult.jsonText);
+    assert.strictEqual(scanResult.status, 'ok');
+    const imported = database.listScenarios().find((s) => s.name === '写死提取');
+    assert.ok(imported, '场景仍被创建（禁用而非删除）');
+    // P3-2 核心：未写适用渠道（仍为空，避免空=适用全部反向 bug）+ 场景被禁用
+    assert.deepStrictEqual(database.getScenarioApplicableChannels(imported.id), [], '不写 []（不退化为适用全部）');
+    assert.strictEqual(Number(imported.enabled), 0, 'P3-2：限定渠道全失配 → 场景被禁用，避免误对所有渠道生效');
+    // 禁用 warning 可见
+    assert.ok(scanResult.warnings.some((w) => w.includes('已禁用')), 'warning 应说明已禁用该场景');
   });
 });

@@ -32,6 +32,11 @@ const {
   ensureBillRawJsonV2Slim,
   ensureSchemaV2_1_9_N5,
   ensureScenariosNameUniqueByChannelId,
+  // v2.1.13 D-3/D-4：自带写死场景 builtin-fixed 数据层迁移
+  ensureScenariosCategoryBuiltinFixed,
+  ensureBuiltinFixedScenarioNameUpdate,
+  ensureBuiltinFixedScenarioMigration,
+  ensureScenarioApplicableChannelsTable,
   // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造
   ensureDiffRowsCascadeMigration_v2_1_10,
   ensureBuiltinScenarioNamesUpdate,
@@ -279,6 +284,15 @@ class AppDatabase {
         stack: uniqueErr && uniqueErr.stack ? uniqueErr.stack : undefined
       });
     }
+    // v2.1.13 D-3/D-4：自带写死场景（builtin-fixed）数据层迁移
+    //   1) 扩 category CHECK 5→6 值（含 'builtin-fixed'；重建表保留 channel_id + 复合 UNIQUE）
+    //      必须在 ensureScenariosNameUniqueByChannelId（SR-FIX-1）之后 —— 依赖最终态表结构
+    //   2) 内置提取场景归类为 builtin-fixed / priority 0（依赖 1 的 CHECK 已扩）
+    //   3) 场景-渠道多对多关联表（依赖 channels 表 + scenarios 重建已完成）
+    this.ensureScenariosCategoryBuiltinFixed();
+    this.ensureBuiltinFixedScenarioNameUpdate();
+    this.ensureBuiltinFixedScenarioMigration();
+    this.ensureScenarioApplicableChannelsTable();
     // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表
     // 与其他迁移完全独立，调用顺序无依赖；放在最末尾即可
     this.ensureBankBuReconTablesSupport();
@@ -812,6 +826,23 @@ class AppDatabase {
     return ensureScenariosCategoryGatewayReconIdFix(this.db);
   }
 
+  // v2.1.13 D-3/D-4：自带写死场景（builtin-fixed）数据层迁移
+  ensureScenariosCategoryBuiltinFixed() {
+    return ensureScenariosCategoryBuiltinFixed(this.db);
+  }
+
+  ensureBuiltinFixedScenarioNameUpdate() {
+    return ensureBuiltinFixedScenarioNameUpdate(this.db);
+  }
+
+  ensureBuiltinFixedScenarioMigration() {
+    return ensureBuiltinFixedScenarioMigration(this.db);
+  }
+
+  ensureScenarioApplicableChannelsTable() {
+    return ensureScenarioApplicableChannelsTable(this.db);
+  }
+
   migrateGatewayReconIdFixFieldPairs() {
     return migrateGatewayReconIdFixFieldPairs(this.db);
   }
@@ -887,6 +918,30 @@ class AppDatabase {
   //   - 返 null 表示该 channel 内无同名场景（可安全插入）
   findScenarioByChannelAndName(channelId, name) {
     return scenariosRepository.findByChannelAndName(this.db, channelId, name);
+  }
+
+  // v2.1.13 D-3：自带写死场景适用银行渠道（多对多）读写
+  //   get 返回 channel_id 数组（空 = 适用全部渠道）；set 覆盖式（空数组 = 清空 = 全部）
+  getScenarioApplicableChannels(scenarioId) {
+    return scenariosRepository.getApplicableChannelIds(this.db, scenarioId);
+  }
+
+  setScenarioApplicableChannels(scenarioId, channelIds) {
+    return scenariosRepository.setApplicableChannelIds(this.db, scenarioId, channelIds);
+  }
+
+  // v2.1.13 PR#58 P2-1：无事务版覆盖写（bundle import 已在外层事务内 → 不能再 BEGIN）
+  //   caller 须保证已开启外层事务；ids 由 caller 处理成合法正整数去重数组（这里不再校验/去重）
+  setScenarioApplicableChannelsInTx(scenarioId, channelIds) {
+    const ids = Array.isArray(channelIds)
+      ? [...new Set(channelIds.map((c) => Number(c)).filter((c) => Number.isFinite(c) && c > 0))]
+      : [];
+    return scenariosRepository.applyApplicableChannelIdsInTx(this.db, Number(scenarioId), ids);
+  }
+
+  // v2.1.13 D-3/D-5：dispatcher 取对指定渠道生效的 builtin-fixed 场景（含 config）
+  listBuiltinFixedScenariosForChannel(channelId) {
+    return scenariosRepository.listBuiltinFixedForChannel(this.db, channelId);
   }
 
   // v2.1.9 N5：channels CRUD（银行渠道）

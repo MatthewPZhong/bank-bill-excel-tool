@@ -5531,15 +5531,18 @@
     // 内置场景与用户场景同等地位（D14）：可删除可编辑
     const SCENARIO_CATEGORY_LABELS = {
       'extract-recon-id': '提取ReconId-From Self',
-      // v2.1.7 F4：类别展示名重命名 — '账单打标' → '银行对账单字段赋值'（DB category 不变）
-      'offset-bill-mark': '银行对账单字段赋值',
-      'gateway-recon-join': '提取ReconId-From 网关',
+      // v2.1.13 B3：'银行对账单字段赋值' → '银行对账单赋值自身'（DB category 不变）
+      'offset-bill-mark': '银行对账单赋值自身',
+      // v2.1.13 B2：'提取ReconId-From 网关' → '网关对账单赋值银行对账单'（DB category 不变）
+      'gateway-recon-join': '网关对账单赋值银行对账单',
       // v2.1.0-beta.1 PR-A（task A6）：单据对账修复
       // v2.1.0-beta.3 修订（用户反馈）：'单据对账修复' → '单据对账单修复'
       'recon-id-fix': '单据对账单修复',
       // v2.1.0-beta.3 T7：网关对账修复（C4 gateway 子模式）
       // v2.1.0-beta.3 修订（用户反馈）：'网关对账修复' → '网关对账单修复'
-      'gateway-recon-id-fix': '网关对账单修复'
+      'gateway-recon-id-fix': '网关对账单修复',
+      // v2.1.13 D-4：自带写死场景在列表「功能类别」列显示文本（仅文本，与 offset-bill-mark 改名后一致）
+      'builtin-fixed': '银行对账单赋值自身'
     };
 
     function getCategoryLabel(category) {
@@ -6103,7 +6106,7 @@
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">场景管理</div>
-          <div class="scenario-channel-filter-wrapper" style="display: inline-flex; align-items: center; gap: 8px; margin-left: 16px;">
+          <div class="scenario-channel-filter-wrapper" style="display: ${isCompactView ? 'none' : 'inline-flex'}; align-items: center; gap: 8px; margin-left: 16px;">
             <label class="select-label channel-filter-label" style="white-space: nowrap;">银行渠道</label>
             <!-- 2026-05-27 fix1-N5-UI-3：单选下拉视觉同主面板"模式"下拉（.select-shell + .template-select.small） -->
             <div class="select-shell channel-filter-shell" style="flex: 0 0 auto;">
@@ -6179,19 +6182,25 @@
         const enabledTd = isCompactView ? '' : `<td class="scenarios-col-enabled"><input type="checkbox" data-row-action="toggle-enabled" ${scenario.enabled ? 'checked' : ''} /></td>`;
         // v2.1.9 N5 Phase 5 T21：勾选列（批量模式下显示）
         const checkboxDisplay = inBatchMode ? '' : 'display: none;';
+        // v2.1.13 D-2：自带写死场景（builtin-fixed）执行操作列仅「管理」按钮（无转移/删除）；
+        //   「管理」点击分流到适用银行渠道弹窗（manage handler 按 tr.dataset.category 判定）
+        const isBuiltinFixed = scenario.category === 'builtin-fixed';
+        // v2.1.13 UI 微调：对账单 ReconID 修复模块（isCompactView=单类别入口）执行操作列去掉「转移」按钮
+        const transferBtn = isCompactView ? '' : `<button class="text-action" type="button" data-row-action="transfer">转移</button>`;
+        const actionsInner = isBuiltinFixed
+          ? `<button class="text-action" type="button" data-row-action="manage">管理</button>`
+          : `<button class="text-action" type="button" data-row-action="manage">管理</button>
+            ${transferBtn}
+            <button class="text-action danger-text" type="button" data-row-action="delete">删除</button>`;
         tr.innerHTML = `
           <td class="scenarios-col-checkbox" data-role="row-checkbox-cell" style="width: 32px; padding-left: 8px; padding-right: 0; text-align: center; ${checkboxDisplay}">
-            <input type="checkbox" data-row-action="select-row" />
+            <input type="checkbox" data-row-action="select-row" ${isBuiltinFixed ? 'disabled title="自带写死场景不可批量操作"' : ''} />
           </td>
           <td class="scenarios-col-id" style="padding-left: 0; padding-right: 0; text-align: left; white-space: nowrap;"><span style="display: inline-block; margin-left: 21px;">${escapeHtml(String(displayIndex))}</span></td>
           <td class="scenarios-col-category">${escapeHtml(getCategoryLabel(scenario.category))}</td>
           <td class="scenarios-col-name">${escapeHtml(scenario.name)}</td>
           ${priorityTd}
-          <td class="scenarios-col-actions">
-            <button class="text-action" type="button" data-row-action="manage">管理</button>
-            <button class="text-action" type="button" data-row-action="transfer">转移</button>
-            <button class="text-action danger-text" type="button" data-row-action="delete">删除</button>
-          </td>
+          <td class="scenarios-col-actions">${actionsInner}</td>
           ${enabledTd}
         `;
         return tr;
@@ -6222,6 +6231,8 @@
       function collectCheckedScenarioIds() {
         const ids = [];
         tbody.querySelectorAll('tr').forEach((tr) => {
+          // v2.1.13：builtin-fixed（自带写死场景）不可批量操作（转移/删除），双保险排除
+          if (tr.dataset.category === 'builtin-fixed') return;
           const cb = tr.querySelector('input[data-row-action="select-row"]');
           if (cb && cb.checked && tr.dataset.id) {
             ids.push(Number(tr.dataset.id));
@@ -6234,6 +6245,8 @@
       function collectCheckedScenarioNames() {
         const names = [];
         tbody.querySelectorAll('tr').forEach((tr) => {
+          // v2.1.13：builtin-fixed（自带写死场景）不可批量操作，双保险排除
+          if (tr.dataset.category === 'builtin-fixed') return;
           const cb = tr.querySelector('input[data-row-action="select-row"]');
           if (cb && cb.checked) {
             const nameTd = tr.querySelector('.scenarios-col-name');
@@ -6251,7 +6264,12 @@
         // v2.1.9 N5：再按当前选定渠道过滤（spec §4.1；activeChannelId 默认 1 = 通用）
         //   场景列表的 channelId 字段由 scenarios-repository.listScenarios 返回（N5 加列）
         //   老库未 backfill 行 channelId == null → repository rowToListItem 已兜底为 1
-        visible = visible.filter((s) => Number(s.channelId || 1) === Number(activeChannelId));
+        // v2.1.13 A2：ReconID 修复入口（compact）已去银行渠道概念 → 不按渠道过滤；银行对账单入口仍按 activeChannelId 过滤
+        if (!isCompactView) {
+          visible = visible.filter((s) => Number(s.channelId || 1) === Number(activeChannelId));
+        }
+        // v2.1.13 D-2：自带写死场景（builtin-fixed）置顶（序号固定 1）；其余保持 listScenarios 原序（stable sort）
+        visible.sort((a, b) => (a.category === 'builtin-fixed' ? 0 : 1) - (b.category === 'builtin-fixed' ? 0 : 1));
         tbody.innerHTML = '';
         // v2.1.0-beta.2 PR-A Round 2（task R2-7）：传 displayIndex（1-based 列表内顺序）给 renderRow
         visible.forEach((scenario, idx) => {
@@ -6328,6 +6346,11 @@
         const action = button.dataset.rowAction;
 
         if (action === 'manage') {
+          // v2.1.13 D-2/D-3：自带写死场景（builtin-fixed）「管理」= 适用银行渠道弹窗（非编辑配置）
+          if (tr.dataset.category === 'builtin-fixed') {
+            openModal(createBuiltinFixedChannelManageDialog(id));
+            return;
+          }
           // 直接进入 edit 模式（取消两段式锁，简化为单按钮"管理"）
           const result = await desktopApi.scenarios.get(id);
           if (!result || result.status !== 'ok' || !result.scenario) {
@@ -6409,6 +6432,8 @@
         selectAllCheckbox.addEventListener('change', () => {
           const next = selectAllCheckbox.checked;
           tbody.querySelectorAll('input[data-row-action="select-row"]').forEach((cb) => {
+            // v2.1.13：builtin-fixed（自带写死场景）select-row 为 disabled，全选跳过（不可批量操作）
+            if (cb.disabled) return;
             cb.checked = next;
           });
         });
@@ -6689,6 +6714,263 @@
       return createScenariosManagerDialog(state.activeScenarioListFilter);
     }
 
+    // v2.1.13 D-3：自带写死场景「管理」→ 适用银行渠道多选弹窗（PRD 2.2.2.1）
+    //   左上「请选择适用银行渠道」；中间多选下拉（左「银行渠道」label，枚举=channels.list，默认全选）；
+    //   下拉样式复用维护大账号「多币种」浮动面板（CSS new-account-currency-dropdown-*）；
+    //   加载 getApplicableChannels（空=全部=全选）；保存 setApplicableChannels（全选→存空=全部）；右下「保存」「返回」。
+    function createBuiltinFixedChannelManageDialog(scenarioId) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card builtin-fixed-channel-manage-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">请选择适用的银行渠道</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body builtin-fixed-channel-body">
+          <!-- v2.1.13 bug 修复：用 div 而非 label，避免点击行内文本/空白误触发内部下拉按钮 -->
+          <div class="builtin-fixed-channel-row">
+            <span class="builtin-fixed-channel-label">银行渠道</span>
+            <div class="new-account-currency-dropdown-wrap builtin-fixed-channel-dropdown-wrap">
+              <button class="new-account-currency-dropdown-btn builtin-fixed-channel-dropdown-btn" type="button" aria-expanded="false"> </button>
+            </div>
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="save">保存</button>
+          <button class="secondary-btn small" type="button" data-action="back">返回</button>
+        </div>
+      `;
+
+      const dropdownButton = dialog.querySelector('.builtin-fixed-channel-dropdown-btn');
+      const floatingPanel = document.createElement('div');
+      floatingPanel.className = 'new-account-currency-dropdown-panel builtin-fixed-channel-floating-panel';
+      floatingPanel.hidden = true;
+      overlay.appendChild(floatingPanel);
+
+      let allChannels = [];          // [{id, label}]
+      let selectedIds = new Set();   // 当前选中的 channel id
+      let panelOpen = false;
+
+      function updateLabel() {
+        if (selectedIds.size === 0) {
+          dropdownButton.textContent = ' ';
+        } else if (allChannels.length > 0 && selectedIds.size === allChannels.length) {
+          dropdownButton.textContent = '全部';
+        } else {
+          const names = allChannels.filter((c) => selectedIds.has(c.id)).map((c) => c.label);
+          dropdownButton.textContent = names.join('、') || ' ';
+        }
+        dropdownButton.title = dropdownButton.textContent;
+      }
+
+      function renderOptions() {
+        floatingPanel.replaceChildren();
+        allChannels.forEach((c) => {
+          const option = document.createElement('label');
+          option.className = 'new-account-currency-option';
+          const text = document.createElement('span');
+          text.className = 'new-account-currency-option-text';
+          text.textContent = c.label;
+          const checkbox = document.createElement('input');
+          checkbox.className = 'new-account-checkbox';
+          checkbox.type = 'checkbox';
+          checkbox.value = String(c.id);
+          checkbox.checked = selectedIds.has(c.id);
+          checkbox.addEventListener('change', () => {
+            if (checkbox.checked) selectedIds.add(c.id);
+            else selectedIds.delete(c.id);
+            updateLabel();
+          });
+          option.append(text, checkbox);
+          floatingPanel.appendChild(option);
+        });
+      }
+
+      function positionPanel() {
+        const rect = dropdownButton.getBoundingClientRect();
+        const margin = 12;
+        floatingPanel.style.position = 'fixed';
+        floatingPanel.style.minWidth = `${Math.max(rect.width, 188)}px`;
+        floatingPanel.style.maxWidth = `${Math.max(220, Math.min(260, window.innerWidth - margin * 2))}px`;
+        floatingPanel.hidden = false;
+        const panelHeight = floatingPanel.offsetHeight || 216;
+        const panelWidth = floatingPanel.offsetWidth || 200;
+        const left = Math.min(Math.max(margin, rect.left), Math.max(margin, window.innerWidth - panelWidth - margin));
+        const top = rect.bottom + 6 + panelHeight > window.innerHeight - margin
+          ? Math.max(margin, rect.top - panelHeight - 6)
+          : rect.bottom + 6;
+        floatingPanel.style.left = `${left}px`;
+        floatingPanel.style.top = `${top}px`;
+      }
+
+      function closePanel() {
+        panelOpen = false;
+        floatingPanel.hidden = true;
+        dropdownButton.classList.remove('is-open');
+        dropdownButton.setAttribute('aria-expanded', 'false');
+      }
+      function openPanel() {
+        renderOptions();
+        panelOpen = true;
+        dropdownButton.classList.add('is-open');
+        dropdownButton.setAttribute('aria-expanded', 'true');
+        positionPanel();
+      }
+      dropdownButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (panelOpen) closePanel(); else openPanel();
+      });
+
+      // 异步加载渠道列表 + 当前适用渠道（空 = 适用全部 → 默认全选）
+      (async () => {
+        try {
+          const chResult = await desktopApi.channels.list();
+          if (chResult && chResult.status === 'ok' && Array.isArray(chResult.channels)) {
+            allChannels = chResult.channels.map((c) => ({ id: Number(c.id), label: c.label || c.name }));
+          }
+          const apResult = await desktopApi.scenarios.getApplicableChannels(scenarioId);
+          const applicable = (apResult && apResult.status === 'ok' && Array.isArray(apResult.channelIds)) ? apResult.channelIds : [];
+          selectedIds = applicable.length === 0
+            ? new Set(allChannels.map((c) => c.id))   // 空 = 全部 → 全选
+            : new Set(applicable.map(Number));
+          updateLabel();
+        } catch (err) {
+          openModal(createAlertDialog(`加载适用银行渠道失败：${err && err.message ? err.message : err}`));
+        }
+      })();
+
+      function teardownAndReopen() {
+        closePanel();
+        if (floatingPanel.parentNode) floatingPanel.parentNode.removeChild(floatingPanel);
+        openModal(reopenScenariosManager());
+      }
+
+      dialog.querySelector('.icon-close').addEventListener('click', teardownAndReopen);
+      dialog.querySelector('[data-action="back"]').addEventListener('click', teardownAndReopen);
+      dialog.querySelector('[data-action="save"]').addEventListener('click', async () => {
+        // v2.1.13 PR#58 review P2-C：阻止 0 选项保存。后端定义「空数组 = 适用全部」，
+        //   若允许取消全部勾选后保存空数组，会与用户"不适用任何渠道"的直觉相反（反向变全渠道生效）。
+        if (selectedIds.size === 0) {
+          // v2.1.13 PR#58 review P3：openModal 替换当前弹窗 → 校验 alert 传 onConfirm reopen 适用渠道弹窗，
+          //   避免用户点确认后回不到配置弹窗（否则需从场景列表重新点「管理」）。先移除浮动面板避免残留。
+          if (floatingPanel.parentNode) floatingPanel.parentNode.removeChild(floatingPanel);
+          openModal(createAlertDialog('请至少选择一个适用的银行渠道', {
+            onConfirm: () => openModal(createBuiltinFixedChannelManageDialog(scenarioId))
+          }));
+          return;
+        }
+        // 全选 → 存空数组（= 适用全部，新增渠道自动适用）；否则存选中 ids
+        const ids = (allChannels.length > 0 && selectedIds.size === allChannels.length)
+          ? []
+          : Array.from(selectedIds);
+        const result = await desktopApi.scenarios.setApplicableChannels(scenarioId, ids);
+        if (result && result.status === 'ok') {
+          teardownAndReopen();
+        } else {
+          openModal(createAlertDialog(`保存失败：${result?.message || '未知错误'}`));
+        }
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // v2.1.13 C：复制场景弹窗（PRD §二 C）
+    //   银行对账单（C1/C2/C3）：左窄「银行渠道」下拉 + 右宽「场景」下拉（右框随渠道联动，默认空）
+    //   ReconID 修复（C4）：单「场景」下拉（同 category 其他场景，默认空）
+    //   选定 → scenarios.get(srcId).config 深拷贝覆盖当前 draft.config（不覆盖名称，C5）→ reopen 当前配置弹窗
+    //   可用范围：新建 + 修改均可（draft 始终存在）
+    function createCopyScenarioDialog() {
+      const draft = state.scenarioDraft;
+      if (!draft) return createAlertDialog('无当前编辑场景，无法复制');
+      const isReconIdFix = isReconIdFixCategory(draft.category);
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card copy-scenario-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">选择需要复制的场景</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body copy-scenario-body">
+          <div class="copy-scenario-row">
+            ${isReconIdFix
+              ? '<span class="copy-scenario-field-label">场景</span>'
+              : '<span class="copy-scenario-field-label-sm">银行渠道</span><div class="select-shell copy-scenario-channel-shell"><select class="template-select small" data-role="channel-select"></select></div>'}
+            <div class="select-shell copy-scenario-scenario-shell"><select class="template-select" data-role="scenario-select"><option value=""></option></select></div>
+          </div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="confirm">确定</button>
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        </div>
+      `;
+
+      const channelSelect = dialog.querySelector('[data-role="channel-select"]');
+      const scenarioSelect = dialog.querySelector('[data-role="scenario-select"]');
+      let allScenarios = [];
+
+      // 同 category 的其他场景（排除当前编辑场景自身）；银行对账单再按渠道过滤
+      function fillScenarioOptions(channelId) {
+        let candidates = allScenarios.filter((s) =>
+          s.category === draft.category && Number(s.id) !== Number(draft.scenarioId));
+        if (!isReconIdFix && channelId != null) {
+          candidates = candidates.filter((s) => Number(s.channelId || 1) === Number(channelId));
+        }
+        scenarioSelect.innerHTML = '<option value=""></option>'
+          + candidates.map((s) => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+      }
+
+      (async () => {
+        try {
+          const loaded = await loadScenariosOrAlert();
+          allScenarios = Array.isArray(loaded) ? loaded : [];
+          if (!isReconIdFix && channelSelect) {
+            const chResult = await desktopApi.channels.list();
+            const channels = (chResult && chResult.status === 'ok' && Array.isArray(chResult.channels)) ? chResult.channels : [];
+            channelSelect.innerHTML = channels.map((c) => `<option value="${c.id}">${escapeHtml(c.label || c.name)}</option>`).join('');
+            const initialChannel = channels.length > 0 ? Number(channels[0].id) : 1;
+            channelSelect.value = String(initialChannel);
+            fillScenarioOptions(initialChannel);
+            channelSelect.addEventListener('change', () => fillScenarioOptions(Number(channelSelect.value)));
+          } else {
+            fillScenarioOptions(null);
+          }
+        } catch (err) {
+          openModal(createAlertDialog(`加载场景失败：${err && err.message ? err.message : err}`));
+        }
+      })();
+
+      function backToConfig() {
+        openScenarioConfigByCategory(draft.category);
+      }
+
+      dialog.querySelector('.icon-close').addEventListener('click', backToConfig);
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', backToConfig);
+      dialog.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
+        const srcId = Number(scenarioSelect.value);
+        // v2.1.13 PR#58 review P3（同类预防）：openModal 替换当前弹窗 → 校验/失败 alert 加 onConfirm
+        //   reopen 复制场景弹窗，避免用户点确认后回不到弹窗（需重新点「复制场景」）。原生 select 无浮动面板，无需额外清理。
+        if (!srcId) {
+          openModal(createAlertDialog('请选择要复制的场景', { onConfirm: () => openModal(createCopyScenarioDialog()) }));
+          return;
+        }
+        const result = await desktopApi.scenarios.get(srcId);
+        if (!result || result.status !== 'ok' || !result.scenario) {
+          openModal(createAlertDialog(`加载源场景失败：${result?.message || '未知错误'}`, { onConfirm: () => openModal(createCopyScenarioDialog()) }));
+          return;
+        }
+        // C5：源场景 config 深拷贝覆盖当前 draft.config（不覆盖 name）
+        draft.config = JSON.parse(JSON.stringify(result.scenario.config));
+        state.scenarioDraft = draft;
+        backToConfig();
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     // v2.0.0-beta.3：新增场景流程第 1 步 — 类别选择弹窗
     // v2.1.0-beta.2 PR-A：按 allowedCategories 白名单过滤可见类别
     // v2.1.0-beta.3 T6：新增 'gateway-recon-id-fix' 类别（label "网关对账单 ReconID 修复"）
@@ -6696,9 +6978,12 @@
     //   单类别 → 跳过此弹窗直接进 C4 dialog（参考 L5573 的 add-scenario click handler）
     function createScenarioCategorySelectDialog(allowedCategories = null) {
       const ALL_CATEGORY_OPTIONS = [
-        { value: 'extract-recon-id', label: '提取ReconId-From Self' },
-        { value: 'offset-bill-mark', label: '银行对账单字段赋值' },
-        { value: 'gateway-recon-join', label: '提取ReconId-From 网关' },
+        // v2.1.13 D-1：移除 'extract-recon-id'（提取ReconId-From Self）— 用户不可再新建该类别
+        //   （原内置提取场景已归入 builtin-fixed 自带写死场景，由 migration 管理）
+        // v2.1.13 B3：label '银行对账单字段赋值' → '银行对账单赋值自身'
+        { value: 'offset-bill-mark', label: '银行对账单赋值自身' },
+        // v2.1.13 B2：label '提取ReconId-From 网关' → '网关对账单赋值银行对账单'
+        { value: 'gateway-recon-join', label: '网关对账单赋值银行对账单' },
         { value: 'recon-id-fix', label: '单据对账 ReconID 修复' },
         { value: 'gateway-recon-id-fix', label: '网关对账单 ReconID 修复' }
       ];
@@ -7127,6 +7412,8 @@
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">${escapeHtml(getCategoryDialogTitle(draft.category, mode))}</div>
+          <span class="copy-scenario-label">复制场景</span>
+          <button class="secondary-btn small copy-scenario-btn" type="button" data-action="copy-scenario">选择</button>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="dialog-body scenario-config-body">
@@ -7177,7 +7464,12 @@
               <input type="checkbox" data-field="extrafee-enabled" ${config.extraFee.enabled ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
               网关对账单金额与银行对账单不一致
             </label>
-            <span class="scenario-config-extrafee-formula" style="${config.extraFee.enabled ? '' : 'display:none;'}">
+            <span class="scenario-config-extrafee-hint" style="${config.extraFee.enabled ? '' : 'display:none;'}">
+              输入框的差额用于网关账单与银行对账单的金额比对
+            </span>
+          </div>
+          <div class="scenario-config-row scenario-config-row-extrafee-formula-row" style="${config.extraFee.enabled ? '' : 'display:none;'}">
+            <span class="scenario-config-extrafee-formula">
               网关对账单金额 +
               <input class="scenario-config-input scenario-config-input-fee" type="text" data-field="extrafee-amount"
                      value="${escapeHtml(String(config.extraFee.amount ?? ''))}" ${isReadonly ? 'disabled' : ''}>
@@ -7312,8 +7604,11 @@
       // v2.1.12 需求5：extra fee 勾选框 + 金额输入（参照 assign-custom-value 显隐套路）
       dialog.querySelector('input[data-field="extrafee-enabled"]')?.addEventListener('change', (e) => {
         config.extraFee.enabled = e.target.checked;
-        const formula = dialog.querySelector('.scenario-config-extrafee-formula');
-        if (formula) formula.style.display = e.target.checked ? '' : 'none';
+        // v2.1.13 UI 微调：勾选联动右侧说明文本 + 下移的公式行（含输入框）
+        const hint = dialog.querySelector('.scenario-config-extrafee-hint');
+        const formulaRow = dialog.querySelector('.scenario-config-row-extrafee-formula-row');
+        if (hint) hint.style.display = e.target.checked ? '' : 'none';
+        if (formulaRow) formulaRow.style.display = e.target.checked ? '' : 'none';
         // 取消勾选不清空 amount（保留用户输入，下次勾选还在）；校验时 enabled=false 不校验 amount
       });
       dialog.querySelector('input[data-field="extrafee-amount"]')?.addEventListener('input', (e) => {
@@ -7362,6 +7657,8 @@
         openModal(reopenScenariosManager());
       }
       dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
+      // v2.1.13 C：复制场景「选择」按钮（仅 C1-C4 header 含此按钮；其他 dialog ?. 短路无害）
+      dialog.querySelector('[data-action="copy-scenario"]')?.addEventListener('click', () => openModal(createCopyScenarioDialog()));
       dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', closeAndClearDraft);
       dialog.querySelector('[data-action="back"]')?.addEventListener('click', closeAndClearDraft);
       dialog.querySelector('[data-action="confirm"]')?.addEventListener('click', () => {
@@ -7433,6 +7730,8 @@
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">${escapeHtml(getCategoryDialogTitle(draft.category, mode))}</div>
+          <span class="copy-scenario-label">复制场景</span>
+          <button class="secondary-btn small copy-scenario-btn" type="button" data-action="copy-scenario">选择</button>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="dialog-body scenario-config-body">
@@ -7743,6 +8042,8 @@
         openModal(reopenScenariosManager());
       }
       dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
+      // v2.1.13 C：复制场景「选择」按钮（仅 C1-C4 header 含此按钮；其他 dialog ?. 短路无害）
+      dialog.querySelector('[data-action="copy-scenario"]')?.addEventListener('click', () => openModal(createCopyScenarioDialog()));
       dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', closeAndClearDraft);
       dialog.querySelector('[data-action="back"]')?.addEventListener('click', closeAndClearDraft);
       dialog.querySelector('[data-action="confirm"]')?.addEventListener('click', () => {
@@ -7813,6 +8114,8 @@
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">${escapeHtml(getCategoryDialogTitle(draft.category, mode))}</div>
+          <span class="copy-scenario-label">复制场景</span>
+          <button class="secondary-btn small copy-scenario-btn" type="button" data-action="copy-scenario">选择</button>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="dialog-body scenario-config-body">
@@ -8118,6 +8421,8 @@
         openModal(reopenScenariosManager());
       }
       dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
+      // v2.1.13 C：复制场景「选择」按钮（仅 C1-C4 header 含此按钮；其他 dialog ?. 短路无害）
+      dialog.querySelector('[data-action="copy-scenario"]')?.addEventListener('click', () => openModal(createCopyScenarioDialog()));
       dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', closeAndClearDraft);
       dialog.querySelector('[data-action="back"]')?.addEventListener('click', closeAndClearDraft);
       dialog.querySelector('[data-action="confirm"]')?.addEventListener('click', () => {
@@ -8266,6 +8571,8 @@
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">${escapeHtml(getCategoryDialogTitle(draft.category, mode))}</div>
+          <span class="copy-scenario-label">复制场景</span>
+          <button class="secondary-btn small copy-scenario-btn" type="button" data-action="copy-scenario">选择</button>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="dialog-body scenario-config-body">
@@ -8824,6 +9131,8 @@
         openModal(reopenScenariosManager());
       }
       dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
+      // v2.1.13 C：复制场景「选择」按钮（仅 C1-C4 header 含此按钮；其他 dialog ?. 短路无害）
+      dialog.querySelector('[data-action="copy-scenario"]')?.addEventListener('click', () => openModal(createCopyScenarioDialog()));
       dialog.querySelector('[data-action="cancel"]')?.addEventListener('click', closeAndClearDraft);
       dialog.querySelector('[data-action="back"]')?.addEventListener('click', closeAndClearDraft);
       dialog.querySelector('[data-action="confirm"]')?.addEventListener('click', () => {
@@ -8980,6 +9289,8 @@
         openModal(reopenScenariosManager());
       }
       dialog.querySelector('.icon-close').addEventListener('click', closeAndClearDraft);
+      // v2.1.13 C：复制场景「选择」按钮（仅 C1-C4 header 含此按钮；其他 dialog ?. 短路无害）
+      dialog.querySelector('[data-action="copy-scenario"]')?.addEventListener('click', () => openModal(createCopyScenarioDialog()));
       dialog.querySelector('[data-action="back"]').addEventListener('click', backToConfig);
       dialog.querySelector('[data-action="finish"]').addEventListener('click', async () => {
         try {
@@ -8991,16 +9302,21 @@
             //   在 dispatcher 永远不命中（v2.1.9 N5 核心功能完全失效）
             //   state.activeScenarioChannelId 由场景管理弹框（createScenariosManagerDialog）维护
             //   当前选中渠道 id；缺省兜底「通用」(id=1)，最小破坏面
-            const activeChannelId = Number(state.activeScenarioChannelId) > 0
-              ? Number(state.activeScenarioChannelId)
-              : 1;
+            // v2.1.13 PR#58 review P2-2（🔴 业务红线）：ReconID 修复模块（recon-id-fix /
+            //   gateway-recon-id-fix）按 category 隔离、无银行渠道维度（A2 compact manager 已去渠道下拉）。
+            //   新建 ReconID 场景必须固定 channel_id=1（通用），不跟随 state.activeScenarioChannelId
+            //   （否则会沿用上一个「银行对账单」manager 残留的渠道选择 → ReconID 场景落到隐藏渠道：
+            //    ① (channel_id,name) UNIQUE 下同名可重复；② 按渠道导出 bundle 漏掉它）。
+            const createChannelId = isReconIdFixCategory(draft.category)
+              ? 1
+              : (Number(state.activeScenarioChannelId) > 0 ? Number(state.activeScenarioChannelId) : 1);
             result = await desktopApi.scenarios.create({
               category: draft.category,
               name: String(draft.name || '').trim(),
               priority: Number(draft.priority),
               enabled: true,
               config: draft.config,
-              channelId: activeChannelId
+              channelId: createChannelId
             });
           } else if (draft.mode === 'edit') {
             result = await desktopApi.scenarios.update(draft.scenarioId, {

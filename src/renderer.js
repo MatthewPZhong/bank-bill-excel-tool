@@ -47,7 +47,8 @@ const MODULES = Object.freeze({
   },
   pendingReconciliation: {
     id: 'pending-reconciliation',
-    name: '月度 Pending 数据核对'
+    // v2.1.13 B1：'月度 Pending 数据核对' → '月度Pending数据核对'（去空格；仅显示名，统计 key 不变）
+    name: '月度Pending数据核对'
   },
   bankStatementProcess: {
     id: 'bank-statement-process',
@@ -5050,6 +5051,8 @@ async function initialize() {
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoStart);
   const info = await window.desktopApi.app.getInfo();
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoDone);
+  // v2.1.13 E2：注入平台标识，CSS 以 body[data-platform="win32"] 限定 Win 端 Noto Sans SC 字体（仅 Win 生效）
+  document.body.dataset.platform = (window.desktopApi && window.desktopApi.platform) || '';
   applyUiStyle(info.uiStyle);
   drawBackgroundSpectrum();
   resetBackgroundPickerSelection();
@@ -5138,7 +5141,9 @@ async function initialize() {
     openModal(createScenariosManagerDialog([
       'extract-recon-id',
       'offset-bill-mark',
-      'gateway-recon-join'
+      'gateway-recon-join',
+      // v2.1.13 D-2：自带写死场景（builtin-fixed）在银行对账单入口可见（仅通用渠道，置顶）
+      'builtin-fixed'
     ]));
   });
   elements.bankStatementImportBtn.addEventListener('click', handleBankStatementImport);

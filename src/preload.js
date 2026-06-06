@@ -79,6 +79,8 @@ contextBridge.exposeInMainWorld('appConstants', {
 });
 
 contextBridge.exposeInMainWorld('desktopApi', {
+  // v2.1.13 E2：暴露平台标识，供 renderer 判断是否应用 Win 端 Noto Sans SC 字体（仅 win32 生效）
+  platform: process.platform,
   app: {
     getInfo: () => ipcRenderer.invoke('app:get-info'),
     saveUserGuide: () => ipcRenderer.invoke('app:save-user-guide'),
@@ -141,7 +143,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
     // v2.1.11 T3（spec §4.5 / 决策 D-T3-2-src=xlsx）：C2 FundType 字段值枚举
     //   - main 进程读 assets/FundType枚举值.xlsx（preload 无法 require 自定义模块，故走 IPC）
     //   - 返回 { status:'ok', values: string[] }；文件缺失/读取失败 → values 为空数组（renderer 降级文本输入）
-    getFundTypeEnum: () => ipcRenderer.invoke('scenarios:fund-type-enum')
+    getFundTypeEnum: () => ipcRenderer.invoke('scenarios:fund-type-enum'),
+    // v2.1.13 D-3：自带写死场景「适用银行渠道」读写（空数组 = 适用全部渠道）
+    getApplicableChannels: (id) => ipcRenderer.invoke('scenarios:get-applicable-channels', id),
+    setApplicableChannels: (id, channelIds) => ipcRenderer.invoke('scenarios:set-applicable-channels', id, channelIds)
   },
   // v2.1.9 N5：银行渠道 CRUD（银行对账单处理 / 场景管理依赖；spec §4）
   //   list 返回所有渠道（含「通用」内置 id=1, displayIndex 1-based）

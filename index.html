@@ -8,6 +8,7 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>网银账单小助手</title>
+    <link id="cssFonts" rel="stylesheet" href="./src/fonts.css" />
     <link id="cssGeneral" rel="stylesheet" href="./src/styles.css" disabled />
     <link id="cssClear" rel="stylesheet" href="./src/styles-gemini.css" />
     <link id="cssClearExtra" rel="stylesheet" href="./src/styles-gemini-extra.css" />
@@ -268,7 +269,8 @@
             </div>
           </section>
 
-          <section id="bankStatementModulePanel" class="control-board module-panel bank-statement-board" hidden>
+          <!-- v2.1.13 A1：银行对账单处理模块沿中线镜像对调（复用 .layout-mirrored / CSS direction:rtl，与 bankBuRecon/vccOpCalc 一致；不影响独立 panel reconIdFix） -->
+          <section id="bankStatementModulePanel" class="control-board module-panel bank-statement-board layout-mirrored" hidden>
             <div class="control-row">
               <div class="cell left">
                 <button id="bankStatementScenarioBtn" class="secondary-btn" type="button">场景管理</button>

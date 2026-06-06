@@ -1,0 +1,60 @@
+/*
+ * v2.1.13 E2：本地打包字体 Noto Sans SC（思源黑体，SIL OFL 1.1，可商用打包）
+ * 来源：@fontsource/noto-sans-sc v5（chinese-simplified 常用简体字片 + latin 片，字重 400/500/600）
+ * 仅定义字体（全局可用）；是否应用由 font-family 引用控制：
+ *   - 全局正文 Noto 仅 Windows + Clear 主题（见 styles-gemini.css body[data-platform="win32"]）
+ *   - 下拉框中文 fallback 走 Noto（见 E1 下拉字体链）
+ * unicode-range 写宽区间：分片未含的生僻字将自动 fallback 到链中下一个系统字体（PingFang/雅黑）。
+ */
+
+/* ===== 中文（常用简体字片）===== */
+@font-face {
+  font-family: "Noto Sans SC";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../assets/fonts/noto-sans-sc-chinese-simplified-400-normal.woff2") format("woff2");
+  unicode-range: U+2E80-9FFF, U+3000-33FF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
+}
+@font-face {
+  font-family: "Noto Sans SC";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../assets/fonts/noto-sans-sc-chinese-simplified-500-normal.woff2") format("woff2");
+  unicode-range: U+2E80-9FFF, U+3000-33FF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
+}
+@font-face {
+  font-family: "Noto Sans SC";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../assets/fonts/noto-sans-sc-chinese-simplified-600-normal.woff2") format("woff2");
+  unicode-range: U+2E80-9FFF, U+3000-33FF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
+}
+
+/* ===== 拉丁（英文/数字基础字形）===== */
+@font-face {
+  font-family: "Noto Sans SC";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../assets/fonts/noto-sans-sc-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+2074, U+20AC, U+2122;
+}
+@font-face {
+  font-family: "Noto Sans SC";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../assets/fonts/noto-sans-sc-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+2074, U+20AC, U+2122;
+}
+@font-face {
+  font-family: "Noto Sans SC";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../assets/fonts/noto-sans-sc-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+2000-206F, U+2074, U+20AC, U+2122;
+}

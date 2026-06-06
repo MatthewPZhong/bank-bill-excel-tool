@@ -15,7 +15,9 @@ const VALID_CATEGORIES = [
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复（C4，business 子模式）
   'recon-id-fix',
   // v2.1.0-beta.3：网关对账单 ReconID 修复（C4，gateway 子模式）
-  'gateway-recon-id-fix'
+  'gateway-recon-id-fix',
+  // v2.1.13 D-3：自带写死场景（前端不可新建；仅 migration seed/归类产生）
+  'builtin-fixed'
 ];
 
 function validateCategory(category) {
@@ -159,6 +161,12 @@ function hasChannelIdColumn(db) {
   }
 }
 
+// v2.1.13 PR#58 review P3-1：C4（ReconID 修复）类别 — 与 scenario-dispatcher.js 的 C4_CATEGORIES 同源。
+//   ⚠️ 本地副本（backend 层不宜反向依赖 main-process/scenario-dispatcher，且 renderer 侧另有同名常量）；
+//   三方必须保持一致，由 tests/unit/backend/database/scenarios-repository.test.js 漂移守卫断言锁定。
+//   仅用于 displayIndex 分区：C4 是独立流水线，displayIndex 无人消费，不与银行场景共享渠道内序号计数。
+const RECON_ID_FIX_DISPLAY_INDEX_CATEGORIES = ['recon-id-fix', 'gateway-recon-id-fix'];
+
 function listScenarios(db) {
   const hasChannel = hasChannelIdColumn(db);
   const sql = hasChannel
@@ -173,13 +181,44 @@ function listScenarios(db) {
   //   - UI 渠道过滤后 visible.forEach((s, idx) => renderRow(s, idx + 1)) — 渠道内序号
   //   - 全表 displayIndex 会导致 dispatcher 命中显示 7/8/9 但 UI 显示 1/2/3 串号
   //   - 老库无 channel_id 列 → 全部归通用 → 行为退化为全表 1-based（与 v2.1.8 一致）
-  const idxByChannel = new Map();
-  return rows.map((row) => {
-    const item = rowToListItem(row);
-    const next = (idxByChannel.get(item.channelId) || 0) + 1;
-    idxByChannel.set(item.channelId, next);
-    return Object.assign(item, { displayIndex: next });
+  // v2.1.13 PR#58 review P2-3（🔴 对账场景号一致性）：displayIndex 必须把 builtin-fixed 置顶（每渠道内
+  //   排在 priority 0-3 普通场景之前），与场景管理弹窗 renderer-dialogs.js 的展示排序（builtin-fixed
+  //   sort 到首位 → 序号固定 1）完全一致。否则 builtin-fixed priority=0 在 (priority DESC, id ASC) 里排在
+  //   最后 → run 路径 displayIndex 与 manager 序号不符（状态栏 / 命中场景 sheet 的「场景序号」串号）。
+  //   做法：返回数组顺序仍保持 SQL 的 (priority DESC, id ASC)（manager 的 stable sort 依赖此前提），
+  //   仅 displayIndex 取值改为「每渠道 builtin-fixed 优先」的 1-based 排名。
+  const items = rows.map((row) => rowToListItem(row));
+  // 每渠道分组，组内按「builtin-fixed 优先，其次保持 SQL 原序(priority DESC, id ASC)」算 displayIndex
+  const byChannel = new Map();
+  items.forEach((item, originalIdx) => {
+    if (!byChannel.has(item.channelId)) byChannel.set(item.channelId, []);
+    byChannel.get(item.channelId).push({ item, originalIdx });
   });
+  const displayIndexByOriginalIdx = new Map();
+  // 组内 1-based 排名 helper：builtin-fixed 优先 + 其余保持入组顺序（即 SQL 的 priority DESC, id ASC）
+  const rankGroup = (entries) => {
+    entries
+      .map((entry, seq) => ({ ...entry, seq }))
+      .sort((a, b) => {
+        const aBf = a.item.category === 'builtin-fixed' ? 0 : 1;
+        const bBf = b.item.category === 'builtin-fixed' ? 0 : 1;
+        if (aBf !== bBf) return aBf - bBf;
+        return a.seq - b.seq;
+      })
+      .forEach((entry, idx) => displayIndexByOriginalIdx.set(entry.originalIdx, idx + 1));
+  };
+  for (const group of byChannel.values()) {
+    // v2.1.13 PR#58 review P3-1（场景号一致性收口）：C4（ReconID 修复）是独立流水线 —
+    //   不进银行 dispatcher（main.js 按 C4_CATEGORIES filter 掉）、银行场景管理弹窗不展示、
+    //   compact ReconID 弹窗用自身 idx+1 而非 displayIndex → C4 的 displayIndex 实际**无人消费**。
+    //   若让 C4 参与渠道内统一计数，channel 1 里中间优先级的 C4 会把银行场景的 displayIndex 顶偏，
+    //   导致 run 状态框/命中 sheet 的场景号与银行弹窗 idx+1 串号。故按「非C4 / C4」分区各自 1-based：
+    //   非C4 区与银行弹窗（[C1,C2,C3,builtin-fixed]∩渠道，builtin 置顶）逐项一致；C4 区自成序号（不被消费）。
+    rankGroup(group.filter((e) => !RECON_ID_FIX_DISPLAY_INDEX_CATEGORIES.includes(e.item.category)));
+    rankGroup(group.filter((e) => RECON_ID_FIX_DISPLAY_INDEX_CATEGORIES.includes(e.item.category)));
+  }
+  return items.map((item, originalIdx) =>
+    Object.assign(item, { displayIndex: displayIndexByOriginalIdx.get(originalIdx) }));
 }
 
 // v2.1.9 N5 (Phase 4 T17) — 双维调度 hot path API：
@@ -531,6 +570,95 @@ function batchDelete(db, scenarioIds) {
   }
 }
 
+// v2.1.13 D-3：读「自带写死场景」适用银行渠道 id 列表
+//   - 返回 scenario_applicable_channels 中该 scenario 的 channel_id 升序数组
+//   - 无任何关联行 = 适用「全部渠道」→ 返回 []（caller 据空数组判定全部）
+//   - 关联表不存在（migration 未跑）→ 兜底 []（= 全部，不影响现有行为）
+function getApplicableChannelIds(db, scenarioId) {
+  const numericId = Number(scenarioId);
+  if (!Number.isFinite(numericId)) {
+    throw new Error(`getApplicableChannelIds: scenarioId 必须是数字，当前为 ${scenarioId}`);
+  }
+  try {
+    const rows = db
+      .prepare('SELECT channel_id FROM scenario_applicable_channels WHERE scenario_id = ? ORDER BY channel_id ASC')
+      .all(numericId);
+    return rows.map((r) => Number(r.channel_id));
+  } catch (_) {
+    return [];
+  }
+}
+
+// v2.1.13 D-3：设「自带写死场景」适用银行渠道（覆盖式：先清后插，事务原子）
+//   - channelIds 空数组 / 非数组 → 清空关联（= 适用「全部渠道」）
+//   - 去重 + 过滤非正整数；FK 已约束 channel_id 合法性
+function setApplicableChannelIds(db, scenarioId, channelIds) {
+  const numericId = Number(scenarioId);
+  if (!Number.isFinite(numericId)) {
+    throw new Error(`setApplicableChannelIds: scenarioId 必须是数字，当前为 ${scenarioId}`);
+  }
+  const ids = Array.isArray(channelIds)
+    ? [...new Set(channelIds.map((c) => Number(c)).filter((c) => Number.isFinite(c) && c > 0))]
+    : [];
+  db.exec('BEGIN');
+  try {
+    applyApplicableChannelIdsInTx(db, numericId, ids);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  return { scenarioId: numericId, channelIds: ids };
+}
+
+// v2.1.13 PR#58 P2-1：无事务版覆盖写（DELETE + INSERT），供「已在外层事务内」的 caller 复用
+//   （SQLite 不支持嵌套事务 — bundle import 已 BEGIN，再调 setApplicableChannelIds 的 BEGIN 会抛错）。
+//   注意：本函数不做参数校验/去重，调用方需先把 ids 处理成合法正整数去重数组。
+function applyApplicableChannelIdsInTx(db, scenarioId, ids) {
+  db.prepare('DELETE FROM scenario_applicable_channels WHERE scenario_id = ?').run(scenarioId);
+  if (Array.isArray(ids) && ids.length > 0) {
+    const insert = db.prepare('INSERT INTO scenario_applicable_channels (scenario_id, channel_id) VALUES (?, ?)');
+    ids.forEach((cid) => insert.run(scenarioId, cid));
+  }
+}
+
+// v2.1.13 D-3/D-5：dispatcher hot path — 取对「指定渠道」生效的 builtin-fixed 场景（enabled=1，含 config）
+//   生效判定：该场景在 scenario_applicable_channels 含 channelId，或无任何关联行（= 适用全部）
+//   排序：priority DESC, id ASC（与 listScenarios / listByChannelIdAndCategory 一致，first-match-wins 不变量）
+//   关联表不存在（migration 未跑）→ 兜底：所有 enabled builtin-fixed 视为全渠道生效
+function listBuiltinFixedForChannel(db, channelId) {
+  const numericChannelId = Number(channelId);
+  if (!Number.isFinite(numericChannelId)) {
+    throw new Error(`listBuiltinFixedForChannel: channelId 必须是数字，当前为 ${channelId}`);
+  }
+  let rows;
+  try {
+    rows = db
+      .prepare(`
+        SELECT s.id, s.category, s.name, s.priority, s.enabled, s.is_builtin, s.channel_id,
+               s.config_json, s.created_at, s.updated_at
+        FROM scenarios s
+        WHERE s.category = 'builtin-fixed' AND s.enabled = 1
+          AND (
+            NOT EXISTS (SELECT 1 FROM scenario_applicable_channels ac WHERE ac.scenario_id = s.id)
+            OR EXISTS (SELECT 1 FROM scenario_applicable_channels ac WHERE ac.scenario_id = s.id AND ac.channel_id = ?)
+          )
+        ORDER BY s.priority DESC, s.id ASC
+      `)
+      .all(numericChannelId);
+  } catch (_) {
+    rows = db
+      .prepare(`
+        SELECT id, category, name, priority, enabled, is_builtin, channel_id, config_json, created_at, updated_at
+        FROM scenarios
+        WHERE category = 'builtin-fixed' AND enabled = 1
+        ORDER BY priority DESC, id ASC
+      `)
+      .all();
+  }
+  return rows.map((row, idx) => Object.assign(rowToDetail(row), { displayIndex: idx + 1 }));
+}
+
 module.exports = {
   VALID_CATEGORIES,
   calculateNextScenarioId,
@@ -552,5 +680,13 @@ module.exports = {
   // 测试 hook：暴露 UNIQUE 错误判定 helper（unit test 验证兼容性用）
   isScenarioNameUniqueError,
   // v2.1.11 T3：C2 老数据惰性迁移 helper（unit test 验证迁移幂等 + 写回路径复用）
-  normalizeC2Config
+  normalizeC2Config,
+  // v2.1.13 D-3：自带写死场景适用银行渠道（多对多）读写 + dispatcher 按渠道取写死场景
+  getApplicableChannelIds,
+  setApplicableChannelIds,
+  // v2.1.13 PR#58 P2-1：无事务版覆盖写（bundle import 已在外层事务内时复用）
+  applyApplicableChannelIdsInTx,
+  listBuiltinFixedForChannel,
+  // v2.1.13 PR#58 P3-1：displayIndex 分区用的 C4 副本（导出仅供测试漂移守卫断言与 dispatcher C4_CATEGORIES 同步）
+  RECON_ID_FIX_DISPLAY_INDEX_CATEGORIES
 };
