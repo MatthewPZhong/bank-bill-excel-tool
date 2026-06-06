@@ -312,8 +312,13 @@ function ensureTemplateBigAccountNatureSupport(db) {
 // 幂等：CREATE TABLE IF NOT EXISTS + seed-if-empty
 const BUILTIN_SCENARIOS = [
   {
+    // v2.1.13 D-4：内置提取场景「从银行对账单的信息里提取调拨订单对账ID」最终归入「自带写死场景」(builtin-fixed)。
+    //   seed 阶段仍以 extract-recon-id / priority 3 落库（此时表 CHECK 仅 3 值），
+    //   再由 ensureBuiltinFixedScenarioMigration（在 builtin-fixed CHECK 扩展后）统一迁移成 builtin-fixed / priority 0。
+    //   新库与老库走同一迁移路径，避免 seed 时序违反 CHECK；config（extractByFeature）保持不变。
+    //   v2.1.13（增量）：场景名「…提取对账ID」→「…提取调拨订单对账ID」（老库由 ensureBuiltinFixedScenarioNameUpdate 迁移）
     category: 'extract-recon-id',
-    name: '从银行对账单的信息里提取对账ID',
+    name: '从银行对账单的信息里提取调拨订单对账ID',
     priority: 3,
     enabled: 1,
     is_builtin: 1,
@@ -1272,6 +1277,116 @@ function writeUniqueMigratedMarker(db) {
   }
 }
 
+// v2.1.13 D-3：扩展 scenarios.category CHECK 约束，新增 'builtin-fixed'（自带写死场景）枚举值 → 6 值
+// 背景：v2.1.0-beta.3 已扩到 5 值；本迭代新增「自带写死场景」类别（PRD §二 D-2）。
+// SQLite 不支持 ALTER TABLE 改 CHECK → 必须重建表。
+// 资金红线：必须包在事务里；老库无损迁移；id / 列结构 / channel_id FK / 复合 UNIQUE / 默认值都须保留。
+// 幂等：解析 sqlite_master.sql 含 'builtin-fixed' → no-op；多次启动仅触发一次重建。
+// 调用顺序：必须在 ensureScenariosNameUniqueByChannelId（SR-FIX-1）之后 —— 依赖最终态 channel_id 列 +
+//   复合 UNIQUE(channel_id, name) 已就位。防御：channel_id 列缺失（N5 未完成）→ 跳过本次，
+//   等下次启动 N5 / SR-FIX-1 成功后再重建（避免 INSERT SELECT 引用不存在的列）。
+function ensureScenariosCategoryBuiltinFixed(db) {
+  const tableSqlRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'"
+  ).get();
+  if (!tableSqlRow || !tableSqlRow.sql) return;
+  if (tableSqlRow.sql.includes("'builtin-fixed'")) return; // 已扩，no-op
+  // 防御：N5 未完成（无 channel_id 列）→ 跳过，下次启动重试
+  if (!hasColumn(db, 'scenarios', 'channel_id')) return;
+
+  db.exec('BEGIN');
+  try {
+    db.exec('ALTER TABLE scenarios RENAME TO scenarios_old;');
+    db.exec(`
+      CREATE TABLE scenarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category TEXT NOT NULL CHECK (category IN (
+          'extract-recon-id',
+          'offset-bill-mark',
+          'gateway-recon-join',
+          'recon-id-fix',
+          'gateway-recon-id-fix',
+          'builtin-fixed'
+        )),
+        name TEXT NOT NULL,
+        priority INTEGER NOT NULL CHECK (priority BETWEEN 0 AND 3),
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        config_json TEXT NOT NULL,
+        is_builtin INTEGER NOT NULL DEFAULT 0 CHECK (is_builtin IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        channel_id INTEGER REFERENCES channels(id) ON UPDATE CASCADE,
+        UNIQUE (channel_id, name)
+      );
+    `);
+    db.exec(`
+      INSERT INTO scenarios
+        (id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at, channel_id)
+      SELECT id, category, name, priority, enabled, config_json, is_builtin, created_at, updated_at, channel_id
+      FROM scenarios_old;
+    `);
+    db.exec('DROP TABLE scenarios_old;');
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+// v2.1.13（增量）：内置提取场景重命名「从银行对账单的信息里提取对账ID」→「从银行对账单的信息里提取调拨订单对账ID」。
+//   - 不限 category（覆盖 extract-recon-id 未迁移 / builtin-fixed 已迁移 两种状态）；仅 is_builtin=1。
+//   - 幂等：再跑无旧名匹配 → no-op。
+//   - UNIQUE(channel_id, name) 冲突（同渠道已存在新名）→ try-catch 跳过保留旧名。
+//   调用顺序：在 ensureScenariosCategoryBuiltinFixed 之后、ensureBuiltinFixedScenarioMigration 之前
+//     （使 category 迁移可用新名定位）。
+function ensureBuiltinFixedScenarioNameUpdate(db) {
+  const OLD_NAME = '从银行对账单的信息里提取对账ID';
+  const NEW_NAME = '从银行对账单的信息里提取调拨订单对账ID';
+  try {
+    db.prepare('UPDATE scenarios SET name = ?, updated_at = ? WHERE name = ? AND is_builtin = 1')
+      .run(NEW_NAME, new Date().toISOString(), OLD_NAME);
+  } catch (_) {
+    // UNIQUE 冲突（同渠道已存在新名）→ 跳过保留旧名
+  }
+}
+
+// v2.1.13 D-4：把内置提取场景「从银行对账单的信息里提取调拨订单对账ID」归入「自带写死场景」(builtin-fixed)。
+//   - category: extract-recon-id → builtin-fixed；priority → 0；channel_id → 1（通用）
+//   - config（extractByFeature）保持不变 → 执行引擎对 builtin-fixed 路由复用 C1 提取逻辑（PRD D-5）
+//   - 幂等：再次运行 WHERE 无匹配 → no-op
+//   - 若用户已删除该内置场景（D14 删除终态）→ 无匹配 → 不复活
+//   调用顺序：必须在 ensureBuiltinFixedScenarioNameUpdate（用新名定位）+ ensureScenariosCategoryBuiltinFixed（CHECK 已含 'builtin-fixed'）之后
+function ensureBuiltinFixedScenarioMigration(db) {
+  const tableSqlRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'"
+  ).get();
+  if (!tableSqlRow || !tableSqlRow.sql) return;
+  if (!tableSqlRow.sql.includes("'builtin-fixed'")) return; // CHECK 未扩（前置未完成）→ 跳过
+  db.prepare(`
+    UPDATE scenarios
+       SET category = 'builtin-fixed', priority = 0, channel_id = 1, updated_at = ?
+     WHERE category = 'extract-recon-id'
+       AND name = '从银行对账单的信息里提取调拨订单对账ID'
+       AND is_builtin = 1
+  `).run(new Date().toISOString());
+}
+
+// v2.1.13 D-3：场景-渠道 多对多关联表（「自带写死场景」适用银行渠道）
+//   语义：某 scenario_id 在本表无任何行 = 适用「全部渠道」（默认全选）；有行则限定为所列渠道。
+//   ON DELETE CASCADE：场景/渠道删除时自动清理关联行（兜底一致性）。
+//   幂等：CREATE TABLE IF NOT EXISTS。
+//   调用顺序：必须在 ensureChannelsTable（N5）+ scenarios 表重建（ensureScenariosCategoryBuiltinFixed）之后，
+//     使 FK 指向最终态 scenarios 表（避免重建 scenarios 时悬空）。
+function ensureScenarioApplicableChannelsTable(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS scenario_applicable_channels (
+      scenario_id INTEGER NOT NULL REFERENCES scenarios(id) ON DELETE CASCADE,
+      channel_id  INTEGER NOT NULL REFERENCES channels(id)  ON DELETE CASCADE,
+      PRIMARY KEY (scenario_id, channel_id)
+    );
+  `);
+}
+
 // v2.1.9 N5：DB schema 总迁移函数（🔴 资金红线 + 破坏性 schema 变更，不可逆）
 //
 // 步骤：
@@ -2003,6 +2118,11 @@ module.exports = {
   ensureSchemaV2_1_9_N5,
   // v2.1.9 SR-FIX-1 (spec §16.3)：scenarios.name UNIQUE 全表 → (channel_id, name) 复合
   ensureScenariosNameUniqueByChannelId,
+  // v2.1.13 D-3/D-4：自带写死场景 builtin-fixed 数据层迁移
+  ensureScenariosCategoryBuiltinFixed,
+  ensureBuiltinFixedScenarioNameUpdate,
+  ensureBuiltinFixedScenarioMigration,
+  ensureScenarioApplicableChannelsTable,
   // v2.1.10 N4-cont-2：diff_rows 2 FK 加 ON DELETE CASCADE（🔴 资金红线 + 不可逆 DB schema）
   ensureDiffRowsCascadeMigration_v2_1_10,
   ensureBuiltinScenarioNamesUpdate,

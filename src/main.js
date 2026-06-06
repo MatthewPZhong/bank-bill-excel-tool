@@ -3109,6 +3109,27 @@ function registerAppHandlers() {
     }
   });
 
+  // v2.1.13 D-3：自带写死场景「适用银行渠道」读写
+  //   get：无副作用查询，返回 channel_id 数组（空数组 = 适用全部渠道）
+  ipcMain.handle('scenarios:get-applicable-channels', (_event, id) => {
+    try {
+      return { status: 'ok', channelIds: database.getScenarioApplicableChannels(id) };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+  //   set：覆盖式写入（空数组 = 清空 = 适用全部）；改写死场景适用渠道会改变 dispatcher 执行集
+  //   （哪些渠道运行时跑该 builtin-fixed 提取场景）→ 清 processingResult 避免老结果误用
+  trackedIpcHandle('scenarios:set-applicable-channels', '银行对账单处理', '场景管理', (_event, id, channelIds) => {
+    try {
+      const result = database.setScenarioApplicableChannels(id, channelIds);
+      processingResult = null;
+      return { status: 'ok', scenarioId: result.scenarioId, channelIds: result.channelIds };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
+  });
+
   // v2.1.9 N5：channels CRUD IPC（银行渠道管理）
   //   list 无副作用不进 trackedIpcHandle 计数（参考 scenarios:list 范式）
   //   create/update/delete 进 trackedIpcHandle('银行对账单处理' / '渠道管理') 计数
@@ -3462,7 +3483,12 @@ function registerAppHandlers() {
       const detailedEnabled = enabled.map((s) => {
         const detail = database.getScenario(s.id);
         if (!detail) return null;
-        return { ...detail, displayIndex: s.displayIndex, channelId: s.channelId };
+        // v2.1.13 D-3：builtin-fixed 自带写死场景附「适用银行渠道」列表（空 = 适用全部，dispatcher 不过滤）
+        //   dispatcher runChannelBatch 据此逐行过滤候选行（仅对 matchedChannel 在列表内的行提取）
+        const applicableChannelIds = detail.category === 'builtin-fixed'
+          ? database.getScenarioApplicableChannels(s.id)
+          : null;
+        return { ...detail, displayIndex: s.displayIndex, channelId: s.channelId, _applicableChannelIds: applicableChannelIds };
       }).filter(Boolean);
       // v2.1.0-beta.1 PR-A round 2 P1（资金红线）：C4 (`recon-id-fix`) 走独立模块
       // `recon-id-fix:run`，不应进入银行对账单 dispatcher（C4 没有对应的 case，

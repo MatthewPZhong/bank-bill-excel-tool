@@ -303,7 +303,9 @@ function runChannelBatch(args) {
     allModifications, allWarnings,
     hitScenarioIdSet, hitScenarios,
     scenarioHitCountRef,
-    hitChannelId
+    hitChannelId,
+    // v2.1.13 D-3：行→matchedChannel 映射（builtin-fixed 适用渠道逐行过滤用；阶段 A/B 都传）
+    rowMatchedChannelMap
   } = args;
 
   if (!Array.isArray(scenarios) || scenarios.length === 0) return;
@@ -314,10 +316,24 @@ function runChannelBatch(args) {
     const unlocked = bankRows.filter((r) => !rowLockSet.has(r._rowId));
     if (unlocked.length === 0) break;
 
-    // 关键：unlocked 是整组未锁定候选行（非单行）
+    // v2.1.13 D-3：自带写死场景（builtin-fixed）「适用银行渠道」限定 —
+    //   仅对「行 matchedChannel 在适用列表内」的未锁定行生效（_applicableChannelIds 空/缺 = 适用全部，不过滤）。
+    //   保持 builtin-fixed 在通用阶段（priority 0 兜底）语义不变，只缩小候选行集。
+    //   candidates 为空 → 跳过本场景（continue，非 break；后续不限定场景仍需处理剩余 unlocked 行）。
+    let candidates = unlocked;
+    if (Array.isArray(scenario._applicableChannelIds) && scenario._applicableChannelIds.length > 0) {
+      const applicable = new Set(scenario._applicableChannelIds.map(Number));
+      candidates = unlocked.filter((r) => {
+        const matched = rowMatchedChannelMap ? rowMatchedChannelMap.get(r._rowId) : null;
+        return matched && applicable.has(Number(matched.id));
+      });
+      if (candidates.length === 0) continue;
+    }
+
+    // 关键：candidates 是整组未锁定候选行（非单行）
     //   → C3 内 usedGwRowIdx 在此次 runScenario 调用 scope 内严格 1v1（spec §16.2 不变量 #1）
     //   → C2 leftRows + rightRows 都收到完整候选集 → 笛卡尔配对正常（spec §16.2 不变量 #2）
-    const result = runScenario(scenario, unlocked, gwRows);
+    const result = runScenario(scenario, candidates, gwRows);
     const { lockedRowIds, modifications, warnings } = result;
 
     if (lockedRowIds && lockedRowIds.size > 0) {
@@ -436,7 +452,8 @@ function runDualDimensionDispatch(bankRows, gwRows, filtered, deps, ctx) {
       allModifications, allWarnings,
       hitScenarioIdSet, hitScenarios,
       scenarioHitCountRef,
-      hitChannelId: channelId
+      hitChannelId: channelId,
+      rowMatchedChannelMap
     });
   }
 
@@ -455,7 +472,8 @@ function runDualDimensionDispatch(bankRows, gwRows, filtered, deps, ctx) {
         allModifications, allWarnings,
         hitScenarioIdSet, hitScenarios,
         scenarioHitCountRef,
-        hitChannelId: generalChannel.id
+        hitChannelId: generalChannel.id,
+        rowMatchedChannelMap
       });
     }
   }

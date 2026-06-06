@@ -14,6 +14,14 @@ function runScenario(scenario, bankRows, gwRows = null) {
   switch (scenario.category) {
     case 'extract-recon-id':
       return runC1Scenario(scenario, bankRows);
+    // v2.1.13 D-5：自带写死场景（builtin-fixed）— 由原 extract-recon-id 提取场景归类而来，
+    //   config 形态保持不变（extractByFeature）→ 复用 C1 提取引擎，功能与归类前一致。
+    //   未来若 builtin-fixed 容纳其他形态，按 config 字段再分流。
+    case 'builtin-fixed':
+      if (scenario.config && scenario.config.extractByFeature) {
+        return runC1Scenario(scenario, bankRows);
+      }
+      throw new Error(`runScenario: builtin-fixed 场景 "${scenario.name}" 无法识别的 config 形态（缺 extractByFeature）`);
     case 'offset-bill-mark':
       return runC2Scenario(scenario, bankRows);
     case 'gateway-recon-join':

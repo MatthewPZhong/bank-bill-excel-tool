@@ -15,7 +15,9 @@ const VALID_CATEGORIES = [
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复（C4，business 子模式）
   'recon-id-fix',
   // v2.1.0-beta.3：网关对账单 ReconID 修复（C4，gateway 子模式）
-  'gateway-recon-id-fix'
+  'gateway-recon-id-fix',
+  // v2.1.13 D-3：自带写死场景（前端不可新建；仅 migration seed/归类产生）
+  'builtin-fixed'
 ];
 
 function validateCategory(category) {
@@ -531,6 +533,88 @@ function batchDelete(db, scenarioIds) {
   }
 }
 
+// v2.1.13 D-3：读「自带写死场景」适用银行渠道 id 列表
+//   - 返回 scenario_applicable_channels 中该 scenario 的 channel_id 升序数组
+//   - 无任何关联行 = 适用「全部渠道」→ 返回 []（caller 据空数组判定全部）
+//   - 关联表不存在（migration 未跑）→ 兜底 []（= 全部，不影响现有行为）
+function getApplicableChannelIds(db, scenarioId) {
+  const numericId = Number(scenarioId);
+  if (!Number.isFinite(numericId)) {
+    throw new Error(`getApplicableChannelIds: scenarioId 必须是数字，当前为 ${scenarioId}`);
+  }
+  try {
+    const rows = db
+      .prepare('SELECT channel_id FROM scenario_applicable_channels WHERE scenario_id = ? ORDER BY channel_id ASC')
+      .all(numericId);
+    return rows.map((r) => Number(r.channel_id));
+  } catch (_) {
+    return [];
+  }
+}
+
+// v2.1.13 D-3：设「自带写死场景」适用银行渠道（覆盖式：先清后插，事务原子）
+//   - channelIds 空数组 / 非数组 → 清空关联（= 适用「全部渠道」）
+//   - 去重 + 过滤非正整数；FK 已约束 channel_id 合法性
+function setApplicableChannelIds(db, scenarioId, channelIds) {
+  const numericId = Number(scenarioId);
+  if (!Number.isFinite(numericId)) {
+    throw new Error(`setApplicableChannelIds: scenarioId 必须是数字，当前为 ${scenarioId}`);
+  }
+  const ids = Array.isArray(channelIds)
+    ? [...new Set(channelIds.map((c) => Number(c)).filter((c) => Number.isFinite(c) && c > 0))]
+    : [];
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM scenario_applicable_channels WHERE scenario_id = ?').run(numericId);
+    if (ids.length > 0) {
+      const insert = db.prepare('INSERT INTO scenario_applicable_channels (scenario_id, channel_id) VALUES (?, ?)');
+      ids.forEach((cid) => insert.run(numericId, cid));
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  return { scenarioId: numericId, channelIds: ids };
+}
+
+// v2.1.13 D-3/D-5：dispatcher hot path — 取对「指定渠道」生效的 builtin-fixed 场景（enabled=1，含 config）
+//   生效判定：该场景在 scenario_applicable_channels 含 channelId，或无任何关联行（= 适用全部）
+//   排序：priority DESC, id ASC（与 listScenarios / listByChannelIdAndCategory 一致，first-match-wins 不变量）
+//   关联表不存在（migration 未跑）→ 兜底：所有 enabled builtin-fixed 视为全渠道生效
+function listBuiltinFixedForChannel(db, channelId) {
+  const numericChannelId = Number(channelId);
+  if (!Number.isFinite(numericChannelId)) {
+    throw new Error(`listBuiltinFixedForChannel: channelId 必须是数字，当前为 ${channelId}`);
+  }
+  let rows;
+  try {
+    rows = db
+      .prepare(`
+        SELECT s.id, s.category, s.name, s.priority, s.enabled, s.is_builtin, s.channel_id,
+               s.config_json, s.created_at, s.updated_at
+        FROM scenarios s
+        WHERE s.category = 'builtin-fixed' AND s.enabled = 1
+          AND (
+            NOT EXISTS (SELECT 1 FROM scenario_applicable_channels ac WHERE ac.scenario_id = s.id)
+            OR EXISTS (SELECT 1 FROM scenario_applicable_channels ac WHERE ac.scenario_id = s.id AND ac.channel_id = ?)
+          )
+        ORDER BY s.priority DESC, s.id ASC
+      `)
+      .all(numericChannelId);
+  } catch (_) {
+    rows = db
+      .prepare(`
+        SELECT id, category, name, priority, enabled, is_builtin, channel_id, config_json, created_at, updated_at
+        FROM scenarios
+        WHERE category = 'builtin-fixed' AND enabled = 1
+        ORDER BY priority DESC, id ASC
+      `)
+      .all();
+  }
+  return rows.map((row, idx) => Object.assign(rowToDetail(row), { displayIndex: idx + 1 }));
+}
+
 module.exports = {
   VALID_CATEGORIES,
   calculateNextScenarioId,
@@ -552,5 +636,9 @@ module.exports = {
   // 测试 hook：暴露 UNIQUE 错误判定 helper（unit test 验证兼容性用）
   isScenarioNameUniqueError,
   // v2.1.11 T3：C2 老数据惰性迁移 helper（unit test 验证迁移幂等 + 写回路径复用）
-  normalizeC2Config
+  normalizeC2Config,
+  // v2.1.13 D-3：自带写死场景适用银行渠道（多对多）读写 + dispatcher 按渠道取写死场景
+  getApplicableChannelIds,
+  setApplicableChannelIds,
+  listBuiltinFixedForChannel
 };
