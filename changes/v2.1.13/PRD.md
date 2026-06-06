@@ -83,3 +83,25 @@
 - **状态机/执行引擎**：runScenario 分派 + dispatcher 按渠道选场景逻辑改动，影响银行对账单处理的实际产出，必须功能回归。
 - **对外兼容**：场景 bundle 导出/导入（scenarios:export-bundle / import-bundle）需兼容新 category 与多对多表。
 - 命中 `rules/important-variables.md` 的变量需走 `/check-vars`（提 PR / 版本 bump / 合并前）。
+
+## 六、实施记录（PR #58 闭环）
+
+> 由 `TASKS.md` 进度日志同步；本节为合并后回填（workflow_pr_integrate_prd）。
+
+### 交付范围（对应需求清单）
+- **A**：A1 银行对账单处理面板镜像（`layout-mirrored`）；A2 ReconID 修复场景管理去渠道维度（compact view）。
+- **B**：B1 月度Pending 去空格 / B2「网关对账单赋值银行对账单」/ B3「银行对账单赋值自身」/ B4 内置场景改名「…提取调拨订单对账ID」（含老库幂等迁移）。
+- **C**：复制场景（C1–C4 配置弹窗右上角「复制场景 / 选择」；覆盖 config、不覆盖名称；银行对账单按「渠道+场景」两级、ReconID 按「场景」单选）。
+- **D**：自带写死场景 `builtin-fixed`（前端无新建入口、仅通用渠道可见、序号固定置顶、优先级 0、仅「管理」按钮、保留启用）+ 适用银行渠道多对多 `scenario_applicable_channels`（跨渠道生效，默认全选=全部）+ 执行引擎 `runScenario` 加 builtin-fixed 路由（复用 C1 `extractByFeature`，提取结果不变）。
+- **字体**：Win 端（仅 win32 + 默认 Clear 主题）页面英文/数字 Courier New、中文 Noto Sans SC（`src/fonts.css` 本地子集打包），大标题保留原字体，macOS 不受影响。
+
+### review 与 self-review 收口（PR #58）
+- **首轮 review（Codex + owner）**：P2-A builtin-fixed 归入 `BANK_STATEMENT_CATEGORIES`（启停写死场景不误清 ReconID 结果）/ P2-B 迁移改用 `is_builtin + config.extractByFeature` 定位（不依赖 name）/ P2-C 适用渠道弹窗阻止 0 选项保存。
+- **self-review 第 1 轮（修 3 P2）**：P2-1 场景 bundle 按渠道名序列化/还原「适用银行渠道」（修「限定→导入后变全渠道」反向 bug，含 resolve 全失败守卫）/ P2-2 新建 ReconID 场景固定通用渠道 / P2-3 `listScenarios` displayIndex builtin-fixed 渠道内置顶。
+- **self-review 第 2 轮（修 3 P3）**：P3-1 displayIndex 排除 C4（修同渠道中间优先级 C4 顶偏银行场景序号串号，含 C4 漂移守卫单测）/ P3-2 限定渠道全 resolve 失败时禁用场景（彻底闭合 P2-1 反向 bug）/ P3-3 注释收口。
+
+### 验证 & 合并
+- 三层测试：**unit 1511/1511 + smoke PASS（N3-1 displayIndex 一致性门）+ integration 952/952**（release-check EXIT=0）。
+- check-vars 命中 `displayIndex`（Risk-sensitive），保持 repository 单源、smoke 门绿。
+- PR #58（`v2.1.13 → main`）合并：merge commit `92ff092`（2026-06-06）。
+- 转正：`2.1.13-beta.1 → 2.1.13`（package.json + 文档三件套）。
