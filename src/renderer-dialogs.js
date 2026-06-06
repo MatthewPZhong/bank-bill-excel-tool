@@ -6950,13 +6950,15 @@
       dialog.querySelector('[data-action="cancel"]').addEventListener('click', backToConfig);
       dialog.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
         const srcId = Number(scenarioSelect.value);
+        // v2.1.13 PR#58 review P3（同类预防）：openModal 替换当前弹窗 → 校验/失败 alert 加 onConfirm
+        //   reopen 复制场景弹窗，避免用户点确认后回不到弹窗（需重新点「复制场景」）。原生 select 无浮动面板，无需额外清理。
         if (!srcId) {
-          openModal(createAlertDialog('请选择要复制的场景'));
+          openModal(createAlertDialog('请选择要复制的场景', { onConfirm: () => openModal(createCopyScenarioDialog()) }));
           return;
         }
         const result = await desktopApi.scenarios.get(srcId);
         if (!result || result.status !== 'ok' || !result.scenario) {
-          openModal(createAlertDialog(`加载源场景失败：${result?.message || '未知错误'}`));
+          openModal(createAlertDialog(`加载源场景失败：${result?.message || '未知错误'}`, { onConfirm: () => openModal(createCopyScenarioDialog()) }));
           return;
         }
         // C5：源场景 config 深拷贝覆盖当前 draft.config（不覆盖 name）
