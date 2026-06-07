@@ -115,3 +115,4 @@ self-review 发现：存量 C3 场景引用旧网关字段名升级后，`valida
 - **规整**：`rerenderC3GatewayFields`（枚举到位后）把不在当前 xlsx 表头枚举内的网关字段（assign.gwField / reconFields[].gwField / conditions[].field 网关侧）置空，使「DOM=model」一致；`__CUSTOM__` 豁免；枚举空（首帧/降级）时不规整避免误清。
 - **校验**：`validateScenarioDraft` 的 gateway-recon-join 分支加「网关字段须在当前枚举内」校验（枚举可用时），保存时拦截无效字段并提示重选。
 - 验证：node --check + preview C3/C3-custom 渲染正常 + 全量单测 1531/1531；规整/校验实际行为（旧场景打开变空 + 保存拦截）需手测确认。
+- **round2 补丁**：规整加 `isReadonly` 守卫 —— view（只读查看）模式不规整 config（如实保留存储值供查看），仅编辑态规整。round2 同时复核确认：W1 asset 打包无风险（`build.files` 含 `assets/**/*` + `网关对账单.xlsx` 已跟踪 + 同 C2 fund-type 模式）；W4 `getUiStyle` 恒 'Clear' / `ensureUiStyleDefault` 幂等迁移、renderer 无 General 残留；W1 main handler 双层 try/catch + 双路径候选健壮。

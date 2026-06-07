@@ -7747,7 +7747,9 @@
         //   让「DOM 显示 = config model」一致 + 保存时非空校验能拦截存量旧字段（避免静默存无效值 / 运行时失效）。
         //   仅在枚举非空（已加载，或降级到旧硬编码）时规整 → 避免首帧空枚举误清有效字段；
         //   __CUSTOM__ 是「自取值」合法 sentinel，豁免规整；bankField 枚举（BANK_STATEMENT_FIELDS_FOR_C3）本迭代未变，无需规整。
-        const gwValidForNormalize = new Set(getGatewayReconFields());
+        //   self-review round2：view（只读查看）模式不规整 config —— view 应如实保留存储值供查看，
+        //   且 view 不能保存、无需规整；仅编辑态（新建/修改）规整以让保存校验拦截旧字段。
+        const gwValidForNormalize = isReadonly ? new Set() : new Set(getGatewayReconFields());
         if (gwValidForNormalize.size > 0) {
           if (config.assign && config.assign.gwField && config.assign.gwField !== '__CUSTOM__'
               && !gwValidForNormalize.has(config.assign.gwField)) {
