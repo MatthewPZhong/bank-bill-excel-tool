@@ -39,6 +39,8 @@ const {
   ensureScenarioApplicableChannelsTable,
   // v2.1.16-beta.2 §8：5 轮对账 R4/R5 内置场景 seed（5 R4 + 2 R5）
   ensureReconRoundBuiltinScenariosSeed,
+  // v2.1.16-beta.4 ③：中台退款订单回填场景独立补种（默认休眠 enabled=0）
+  ensureRefundBackfillScenarioSeed,
   // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'
   ensureFundTypeAchReturnConfigMigration,
   // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造
@@ -310,6 +312,11 @@ class AppDatabase {
     //   幂等：凭 is_builtin + builtin-fixed + config.subCategory 定位，已存在跳过不覆盖；
     //         marker(recon_round_builtin_scenarios_seeded) 保证删除终态不复活。
     this.ensureReconRoundBuiltinScenariosSeed();
+    // v2.1.16-beta.4 ③：中台退款订单回填场景独立补种（默认休眠 enabled=0，🔴 资金红线）
+    //   独立 marker(refund_backfill_scenario_seeded) 绕开全局 marker 短路 —— 旧库已 seed 既有 7 条且
+    //   recon_round_builtin_scenarios_seeded=true 时本函数仍能补种退款场景；新库走幂等定位为已存在跳过。
+    //   必须在 ensureReconRoundBuiltinScenariosSeed 之后（同前置：CHECK 已扩到含 'builtin-fixed'）。
+    this.ensureRefundBackfillScenarioSeed();
     // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线 — FundType 枚举值）
     //   必须在 scenarios 相关迁移之后（依赖 scenarios 表已存在、内置场景已 seed）。
     //   幂等：执行一次后 config 不再含 'Ach Ruturn'；绝大多数库无引用 → no-op（精确性防护）。
@@ -869,6 +876,11 @@ class AppDatabase {
   // v2.1.16-beta.2 §8：5 轮对账 R4/R5 内置场景 seed（5 R4 + 2 R5，🔴 资金红线）
   ensureReconRoundBuiltinScenariosSeed() {
     return ensureReconRoundBuiltinScenariosSeed(this.db);
+  }
+
+  // v2.1.16-beta.4 ③：中台退款订单回填场景独立补种（默认休眠 enabled=0，🔴 资金红线）
+  ensureRefundBackfillScenarioSeed() {
+    return ensureRefundBackfillScenarioSeed(this.db);
   }
 
   // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线）

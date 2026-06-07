@@ -8,6 +8,8 @@
 //   - R4 资金性质校验（🔴）     → matchedGwRows × 全量 bank 按 reconid 关联，改写 FundType（唯一允许二次改）
 //   - R5 场景2（FundTransfer）  → 同日/±1day 金额绝对值匹配 → 回填 ReconciliationId
 //   - R5 场景3（Inbound-VA）    → reconid 1v1 → FundType≠Inbound 生成剔除行
+//   - R5 场景4（退款订单回填）   → Ach Return（未改写）行 × 退款订单 SUBMITTED 行唯一值分组 + 4基数×4策略匹配
+//                                 → 产出独立双 sheet 回填模板（refundBackfillRows / refundUnmatchedRows，不改银行行）
 //
 // ⚠️ 跨轮状态与不变量（TECH_DESIGN §3）：
 //   - bankRows 同一组对象引用贯穿 R1→R5：各引擎原地改字段，编排器**不**克隆 bankRows。
@@ -29,6 +31,7 @@ const { runRound1ReconIdMatch } = require('./scenario-engines/r1-recon-id-match'
 const { runRound4FundNatureCheck } = require('./scenario-engines/r4-fund-nature-check');
 const { runRound5FundTransferBackfill } = require('./scenario-engines/r5-fund-transfer-backfill');
 const { runRound5PlatformInboundCleanup } = require('./scenario-engines/r5-platform-inbound-cleanup');
+const { runRound5RefundOrderBackfill } = require('./scenario-engines/r5-refund-order-backfill');
 const { runAllScenarios } = require('./scenario-dispatcher');
 
 // 重建 modifiedRows 时需嫁接 R2 命中元数据，但要排除这两个（_rowId 是行键、_modifiedColumns 由编排器跨轮合并重算）
@@ -41,18 +44,20 @@ const META_EXCLUDE_KEYS = new Set(['_rowId', '_modifiedColumns']);
  *   - builtin-fixed + funcCategory==='fund-nature-check'                       → R4
  *   - builtin-fixed + funcCategory==='platform-order' + subCategory==='fund-transfer-backfill'  → R5 场景2
  *   - builtin-fixed + funcCategory==='platform-order' + subCategory==='platform-inbound-cleanup' → R5 场景3
+ *   - builtin-fixed + funcCategory==='platform-order' + subCategory==='refund-order-backfill'    → R5 场景4
  *   - 其余（含无 funcCategory 的 builtin-fixed=现有「提取调拨ID」+ 所有 C1/C2/C3）→ R2
  *
  * 入参 scenarios 已是 caller 过滤后的「启用(enabled)」集合 → 某 bucket 为空 = 该功能未启用/未 seed → 该轮跳过（no-op）。
  *
  * @param {Array<Object>} scenarios 已 enabled 过的场景数组
- * @returns {{ r2: Array, r4: Array, r5s2: Array, r5s3: Array }}
+ * @returns {{ r2: Array, r4: Array, r5s2: Array, r5s3: Array, r5s4: Array }}
  */
 function bucketScenarios(scenarios) {
   const r2 = [];
   const r4 = [];
   const r5s2 = [];
   const r5s3 = [];
+  const r5s4 = [];
 
   const list = Array.isArray(scenarios) ? scenarios : [];
   for (const s of list) {
@@ -65,12 +70,14 @@ function bucketScenarios(scenarios) {
       r5s2.push(s);
     } else if (s.category === 'builtin-fixed' && fc === 'platform-order' && sub === 'platform-inbound-cleanup') {
       r5s3.push(s);
+    } else if (s.category === 'builtin-fixed' && fc === 'platform-order' && sub === 'refund-order-backfill') {
+      r5s4.push(s);
     } else {
       r2.push(s); // 其余（含无 funcCategory 的 builtin-fixed + 所有 C1/C2/C3）→ R2
     }
   }
 
-  return { r2, r4, r5s2, r5s3 };
+  return { r2, r4, r5s2, r5s3, r5s4 };
 }
 
 /**
@@ -136,6 +143,8 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
  * @param {Array<Object>} params.gwRows   网关对账单行（链接表读回，真实小写表头）
  * @param {Array<Object>} params.scenarios 已 enabled 过的场景集合（caller 过滤）
  * @param {Object} [params.deps] dispatcher 双维调度可选依赖（{ channelsRepo, db }）；不传 → R2 走单维 first-match-wins
+ * @param {Object} [params.refundContext] R5 场景4 退款回填引擎入参（{ refundOrderRows, depositRows }）；
+ *   本轮（Layer 1）上游恒注入空 refundOrderRows → 引擎空入参返回空，不影响 R1-R5 既有行为。
  * @returns {{
  *   modifiedRows: Array<Object>,
  *   unmatchedRows: Array<Object>,
@@ -143,15 +152,19 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
  *   errorReport: Array<Object>,
  *   stats: Object,
  *   platformCleanupRows: Array<Object>,
+ *   refundBackfillRows: Array<Object>,
+ *   refundUnmatchedRows: Array<Object>,
  *   rounds: Object
  * }}
  */
-function runReconciliation({ bankRows, gwRows, scenarios, deps } = {}) {
+function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext } = {}) {
   if (!Array.isArray(bankRows)) {
     throw new Error('runReconciliation: bankRows 必须是数组');
   }
   const safeGwRows = Array.isArray(gwRows) ? gwRows : [];
-  const { r2: r2Bucket, r4: r4Bucket, r5s2: r5s2Bucket, r5s3: r5s3Bucket } = bucketScenarios(scenarios);
+  const {
+    r2: r2Bucket, r4: r4Bucket, r5s2: r5s2Bucket, r5s3: r5s3Bucket, r5s4: r5s4Bucket
+  } = bucketScenarios(scenarios);
 
   // ===== 跨轮累积器 =====
   const modColsByRowId = new Map(); // rowId -> Set<column>（标黄来源，跨 5 轮合并）
@@ -222,6 +235,30 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps } = {}) {
     platformCleanupRows = r5b.cleanupRows || [];
   }
 
+  // ===== R5 场景4：中台退款订单回填（🔴 数据隔离 —— 只读 bankRows，不改任何字段、不产 modifications）=====
+  //   独立产出双 sheet 模板行集合（backfillRows / unmatchedRows），引擎内部维护独立的
+  //   usedBankRowId / usedRefundId（与场景2/3 不串池）；本轮不并入 modColsByRowId、不 mergeMods
+  //   → 行数守恒 modifiedRows + unmatchedRows === bankRows.length 不受影响。
+  //   isFundTypeChanged：判定某银行行 FundType 是否已被 R4 改写（✅PRD Q2，被改写的 Ach Return 不再入回填池）。
+  //     来源是跨轮累积的 modColsByRowId（R4 record('FundType') 后该行 rowId 的列集合含 'FundType'）。
+  let refundBackfillRows = [];
+  let refundUnmatchedRows = [];
+  if (r5s4Bucket.length) {
+    const isFundTypeChanged = (rowId) => {
+      const cols = modColsByRowId.get(rowId);
+      return !!(cols && cols.has('FundType'));
+    };
+    const r5d = runRound5RefundOrderBackfill(
+      bankRows,
+      (refundContext && refundContext.refundOrderRows) || [],
+      (refundContext && refundContext.depositRows) || [],
+      { isFundTypeChanged }
+    );
+    allWarnings.push(...(r5d.warnings || [])); // 不 mergeMods（场景4 不改 bankRows，modifications 恒空）
+    refundBackfillRows = r5d.backfillRows || [];
+    refundUnmatchedRows = r5d.unmatchedRows || [];
+  }
+
   // ===== 构造输出：从「当前最新 bankRows」重建（不用 dispatcher 过时浅拷贝）=====
   const { modifiedRows, unmatchedRows } = buildOutputRows(bankRows, modColsByRowId, r2HitByRowId);
 
@@ -242,9 +279,12 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps } = {}) {
       r1Matched: r1.matchedGwRows.length,
       r4ChangedCount,
       r5s2BackfilledCount,
-      r5s3CleanupCount: platformCleanupRows.length
+      r5s3CleanupCount: platformCleanupRows.length,
+      r5s4BackfilledCount: refundBackfillRows.length
     },
     platformCleanupRows,
+    refundBackfillRows,
+    refundUnmatchedRows,
     rounds: {
       r1: { matched: r1.matchedGwRows.length },
       r2: {
@@ -253,7 +293,8 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps } = {}) {
       },
       r4: { changed: r4ChangedCount },
       r5s2: { backfilled: r5s2BackfilledCount },
-      r5s3: { cleanup: platformCleanupRows.length }
+      r5s3: { cleanup: platformCleanupRows.length },
+      r5s4: { backfilled: refundBackfillRows.length }
     }
   };
 }

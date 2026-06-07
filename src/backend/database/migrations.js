@@ -1524,8 +1524,32 @@ const RECON_ROUND_BUILTIN_SCENARIOS = [
       function: '网关 Inbound-VA 与银行行按对账ID 1v1 匹配，命中且银行 FundType 不为 Inbound 时，生成 1 条中台加款单剔除行（加款单号=网关 orderid，附言含银行 FundType）。',
       involvedFiles: ['中台加款单剔除模板']
     }
+  },
+  // ===== R5 场景4 中台退款订单回填（v2.1.16-beta.4 ③；详见 r5-refund-order-backfill.js）=====
+  //   ⚠️ 本场景默认 enabled=0（Layer 1 引擎层休眠，零风险）；INSERT 参数化 enabled 时单独传 0（见下）。
+  //   ⚠️ 无 directions（非场景2 双方向 1v1，是 4 基数×4 策略矩阵）。
+  {
+    name: '中台退款订单回填',
+    priority: 0,
+    config: {
+      funcCategory: 'platform-order',
+      subCategory: 'refund-order-backfill',
+      roundPhase: 5,
+      function: '银行 FundType=Ach Return（未改写）行与中台退款订单 SUBMITTED 行按渠道大账号/金额/币种唯一值分组，按4基数×4策略(渠道流水号/附言MTX/付款人卡号虚拟卡号/金额币种日期)+JPM(HK/US)匹配回填，产出双sheet模板，不改银行行。',
+      involvedFiles: ['中台退款订单', '中台退款订单回填模板', '银行对账单入金表']
+    }
   }
 ];
+
+// v2.1.16-beta.4 ③：退款回填场景独立 seed marker。
+//   ⚠️ 为何独立：RECON_ROUND_BUILTIN_SCENARIOS_SEEDED_MARKER 是全局 marker —— 旧库（已 seed 过 R4/R5
+//   既有 7 条 + marker=true）启动时 ensureReconRoundBuiltinScenariosSeed 整体短路 return，
+//   新增的退款场景不会被补种。故退款场景额外用本独立 marker + 独立迁移函数补种，
+//   不改动现有全局 marker 语义（保留「删除终态保护 D14」）。
+const REFUND_BACKFILL_SCENARIO_SEEDED_MARKER = 'refund_backfill_scenario_seeded';
+const REFUND_BACKFILL_SCENARIO = RECON_ROUND_BUILTIN_SCENARIOS.find(
+  (s) => s.config && s.config.subCategory === 'refund-order-backfill'
+);
 
 function ensureReconRoundBuiltinScenariosSeed(db) {
   // 前置 1：scenarios 表 CHECK 必须已含 'builtin-fixed'（否则 INSERT 触发 CHECK 失败）。
@@ -1561,10 +1585,11 @@ function ensureReconRoundBuiltinScenariosSeed(db) {
         AND category = 'builtin-fixed'
         AND config_json LIKE ?`
   );
+  // enabled 参数化（v2.1.16-beta.4 ③）：退款回填场景默认休眠 enabled=0，其余既有内置场景仍 enabled=1。
   const insert = db.prepare(`
     INSERT INTO scenarios
       (category, name, priority, enabled, config_json, is_builtin, channel_id, created_at, updated_at)
-    VALUES ('builtin-fixed', ?, ?, 1, ?, 1, 1, ?, ?)
+    VALUES ('builtin-fixed', ?, ?, ?, ?, 1, 1, ?, ?)
   `);
 
   let inserted = 0;
@@ -1581,10 +1606,13 @@ function ensureReconRoundBuiltinScenariosSeed(db) {
         skippedExisting += 1;
         continue;
       }
+      // 退款回填场景默认休眠（enabled=0）；既有 R4/R5 场景仍启用（enabled=1）。
+      const enabledValue = subCategory === 'refund-order-backfill' ? 0 : 1;
       try {
         insert.run(
           scenario.name,
           scenario.priority,
+          enabledValue,
           JSON.stringify(scenario.config),
           now,
           now
@@ -1608,6 +1636,117 @@ function ensureReconRoundBuiltinScenariosSeed(db) {
       ON CONFLICT(setting_key) DO UPDATE
       SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
     `).run(RECON_ROUND_BUILTIN_SCENARIOS_SEEDED_MARKER, now);
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+
+  return { status: 'seeded', inserted, skippedExisting, skippedConflict };
+}
+
+// v2.1.16-beta.4 ③：中台退款订单回填场景独立补种（🔴 资金红线 —— 默认休眠 enabled=0）。
+//
+// 为何独立于 ensureReconRoundBuiltinScenariosSeed：
+//   后者带全局 marker（recon_round_builtin_scenarios_seeded）。旧库已 seed 既有 7 条 + marker=true，
+//   启动时整体短路 return 'already-seeded' → 新增的退款回填场景在旧库永远不会被补种。
+//   本函数用独立 marker（refund_backfill_scenario_seeded）+ 凭 subCategory 定位幂等，专门补种这 1 条，
+//   不触碰也不依赖全局 marker，因此旧库也能装上退款场景；且新库（ensureReconRoundBuiltinScenariosSeed
+//   已插过退款场景）走本函数时凭 subCategory 定位为「已存在」跳过 → 不会重复插。
+//
+// 幂等/删除终态（与 ensureReconRoundBuiltinScenariosSeed 同语义 D14）：
+//   - 凭 is_builtin=1 + category='builtin-fixed' + config_json 含 "subCategory":"refund-order-backfill" 定位，
+//     已存在 → 跳过不覆盖（保护用户对启停/改名/config 的改动）。
+//   - 独立 marker 一旦写过 → 整体不再 seed，用户删除该场景后重启不复活。
+//   - 默认 enabled=0（引擎层休眠，零风险）。
+//
+// 前置同 ensureReconRoundBuiltinScenariosSeed：scenarios 表存在 + CHECK 已含 'builtin-fixed' + app_settings 存在。
+// 返回 { status, inserted? }
+//   status:
+//     - 'skipped-no-scenarios-table'  : scenarios 表不存在
+//     - 'skipped-check-not-extended'  : CHECK 未扩到含 'builtin-fixed'
+//     - 'skipped-no-settings-table'   : app_settings 表不存在（极早期启动）
+//     - 'already-seeded'              : 独立 marker 已写
+//     - 'seeded'                      : 本次执行（inserted=0 或 1）
+function ensureRefundBackfillScenarioSeed(db) {
+  // 前置 1：scenarios 表 CHECK 必须已含 'builtin-fixed'。
+  const tableSqlRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'"
+  ).get();
+  if (!tableSqlRow || !tableSqlRow.sql) return { status: 'skipped-no-scenarios-table' };
+  if (!tableSqlRow.sql.includes("'builtin-fixed'")) {
+    return { status: 'skipped-check-not-extended' };
+  }
+
+  // 前置 2：独立 marker 已写 → 整体不再 seed（删除终态保护：用户删该场景后重启不复活）。
+  let markerRow;
+  try {
+    markerRow = db
+      .prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?')
+      .get(REFUND_BACKFILL_SCENARIO_SEEDED_MARKER);
+  } catch (_e) {
+    return { status: 'skipped-no-settings-table' };
+  }
+  if (markerRow && String(markerRow.setting_value) === 'true') {
+    return { status: 'already-seeded' };
+  }
+
+  if (!REFUND_BACKFILL_SCENARIO) {
+    // 防御：数组里找不到退款场景（不应发生）→ 不写 marker，下次重试。
+    return { status: 'skipped-no-scenario-def' };
+  }
+
+  const now = new Date().toISOString();
+  const locate = db.prepare(
+    `SELECT id FROM scenarios
+      WHERE is_builtin = 1
+        AND category = 'builtin-fixed'
+        AND config_json LIKE ?`
+  );
+  const insert = db.prepare(`
+    INSERT INTO scenarios
+      (category, name, priority, enabled, config_json, is_builtin, channel_id, created_at, updated_at)
+    VALUES ('builtin-fixed', ?, ?, 0, ?, 1, 1, ?, ?)
+  `);
+
+  let inserted = 0;
+  let skippedExisting = 0;
+  let skippedConflict = 0;
+  db.exec('BEGIN');
+  try {
+    const likePattern = '%"subCategory":"refund-order-backfill"%';
+    const existing = locate.get(likePattern);
+    if (existing) {
+      skippedExisting = 1;
+    } else {
+      try {
+        insert.run(
+          REFUND_BACKFILL_SCENARIO.name,
+          REFUND_BACKFILL_SCENARIO.priority,
+          JSON.stringify(REFUND_BACKFILL_SCENARIO.config),
+          now,
+          now
+        );
+        inserted = 1;
+      } catch (insErr) {
+        // UNIQUE(channel_id, name) 冲突（用户已有同名场景）→ 跳过保留用户场景，不中断。
+        const msg = insErr && insErr.message ? insErr.message : String(insErr);
+        if (/UNIQUE|constraint/i.test(msg)) {
+          skippedConflict = 1;
+        } else {
+          throw insErr;
+        }
+      }
+    }
+
+    // 写独立 marker（仅首次启动写一次；此后删除不复活）。
+    db.prepare(`
+      INSERT INTO app_settings (setting_key, setting_value, updated_at)
+      VALUES (?, 'true', ?)
+      ON CONFLICT(setting_key) DO UPDATE
+      SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+    `).run(REFUND_BACKFILL_SCENARIO_SEEDED_MARKER, now);
 
     db.exec('COMMIT');
   } catch (error) {
@@ -2539,6 +2678,8 @@ module.exports = {
   ensureScenarioApplicableChannelsTable,
   // v2.1.16-beta.2 §8：5 轮对账 R4/R5 内置场景 seed（5 R4 + 2 R5，🔴 资金红线）
   ensureReconRoundBuiltinScenariosSeed,
+  // v2.1.16-beta.4 ③：中台退款订单回填场景独立补种（默认休眠 enabled=0，独立 marker 绕开全局 marker 短路）
+  ensureRefundBackfillScenarioSeed,
   // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线）
   ensureFundTypeAchReturnConfigMigration,
   // v2.1.10 N4-cont-2：diff_rows 2 FK 加 ON DELETE CASCADE（🔴 资金红线 + 不可逆 DB schema）
