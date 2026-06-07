@@ -3695,12 +3695,18 @@ function registerAppHandlers() {
       //     writer 用 row._hitChannelId 反查 channels.label 渲染「匹配渠道」列
       //     通用 label='通用' / 非通用 label='name-ownerLocation'（与场景管理 UI 一致）
       let hitRowsReport = null;
-      if (processingResult.modifiedRows.length > 0) {
+      // v2.1.16-beta.2 self-review A：N5「命中场景行」报表只放 R2 命中行（带 _hitScenarioId）。
+      //   编排器的 modifiedRows 含 R4/R5-only 改写行（无 _hitScenarioId）——它们进主输出 sheet1 标黄即可，
+      //   不应进 N5 报表（否则「匹配渠道/匹配状态/命中场景」三列全空白，污染审计报表）。
+      const hitScenarioRows = processingResult.modifiedRows.filter(
+        (r) => r && r._hitScenarioId !== undefined && r._hitScenarioId !== null
+      );
+      if (hitScenarioRows.length > 0) {
         try {
           const originalFilePath = bankStatementSession.filePath;
           const channels = channelsRepository.listChannels(database.db);
           hitRowsReport = await writeScenarioHitRows(
-            processingResult.modifiedRows,
+            hitScenarioRows,
             originalFilePath,
             { exportRoot: ensureStorageRoot(), channels }
           );

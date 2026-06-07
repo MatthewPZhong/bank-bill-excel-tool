@@ -301,6 +301,11 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
       total,
       'modifiedRows + unmatchedRows === bankRows.length'
     );
+    // self-review B：stats 顶层计数反映最终 5 轮结果（非 R2 作用域）——renderer 状态框 pr.hitRowCount 据此显示
+    assert.equal(result.stats.totalRows, total, 'stats.totalRows = bankRows.length');
+    assert.equal(result.stats.hitRowCount, result.modifiedRows.length, 'stats.hitRowCount = 最终 modifiedRows.length（含 R4/R5）');
+    assert.equal(result.stats.unmatchedRowCount, result.unmatchedRows.length, 'stats.unmatchedRowCount = 最终 unmatchedRows.length');
+    assert.equal(result.stats.warningCount, result.errorReport.length, 'stats.warningCount = 全轮 warnings 总数');
     // 互斥：同一 _rowId 不可能同时出现在两个集合
     const modIds = new Set(result.modifiedRows.map((r) => r._rowId));
     for (const u of result.unmatchedRows) {
@@ -348,6 +353,8 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
     assert.ok(b2._modifiedColumns.has('ReconciliationId'), 'b2 _modifiedColumns 含 ReconciliationId');
     // b2 非 R2 命中 → 不带 R2 命中元数据（不进 N5 报表）
     assert.equal(b2._hitScenarioName, undefined, 'R4/R5 改的非 R2 命中行不带 R2 命中元数据');
+    // self-review A：R5-only 行无 _hitScenarioId → 导出端 N5 报表过滤（_hitScenarioId != null）排除它，不污染审计报表
+    assert.equal(b2._hitScenarioId, undefined, 'R5-only 行无 _hitScenarioId（A：N5 命中场景行报表据此排除）');
     assert.equal(result.stats.r5s2BackfilledCount, 1, 'R5s2 回填计数为 1');
   });
 

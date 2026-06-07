@@ -232,6 +232,13 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps } = {}) {
     errorReport: allWarnings,
     stats: {
       ...(r2.stats || {}),
+      // self-review B：用最终分区计数覆盖 r2.stats 的 R2 作用域值（hitRowCount/unmatchedRowCount/warningCount/
+      //   totalRows 原为 R2-only，不含 R4/R5）。状态框「已处理 N 行命中」(renderer pr.hitRowCount) 据此显示，
+      //   须反映全部 5 轮的最终结果，否则会少计 R4/R5 改写行、多计 unmatched。
+      totalRows: bankRows.length,
+      hitRowCount: modifiedRows.length,
+      unmatchedRowCount: unmatchedRows.length,
+      warningCount: allWarnings.length,
       r1Matched: r1.matchedGwRows.length,
       r4ChangedCount,
       r5s2BackfilledCount,
