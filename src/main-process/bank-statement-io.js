@@ -187,6 +187,23 @@ function buildMainOutputFileName(timestamp = buildTimestampMinute()) {
   return `银行对账单-${timestamp}-处理结果.xlsx`;
 }
 
+// v2.1.16-beta.2 R5 场景3：中台加款单剔除文件时间戳，精度到分钟（YYYY_MM_DD_HHMM，下划线分隔）
+//   与 buildTimestampMinute（YYYYMMDDHHmm，无分隔）独立，专供剔除文件名使用
+function buildTimestampMinuteUnderscore() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return [
+    d.getFullYear(),
+    pad(d.getMonth() + 1),
+    pad(d.getDate())
+  ].join('_') + '_' + pad(d.getHours()) + pad(d.getMinutes());
+}
+
+// v2.1.16-beta.2 R5 场景3：中台加款单剔除文件名 中台加款单剔除模板-YYYY_MM_DD_HHMM.xlsx
+function buildPlatformCleanupFileName(ts = buildTimestampMinuteUnderscore()) {
+  return `中台加款单剔除模板-${ts}.xlsx`;
+}
+
 function ensureDateDir(exportRootDir) {
   const dir = path.join(exportRootDir, buildDateDir());
   if (!fs.existsSync(dir)) {
@@ -238,6 +255,8 @@ module.exports = {
   buildMainOutputFileName,
   buildTimestamp,
   buildTimestampMinute,
+  buildTimestampMinuteUnderscore,
+  buildPlatformCleanupFileName,
   buildDateDir,
   sanitizeFileName
 };

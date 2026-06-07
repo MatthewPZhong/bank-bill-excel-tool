@@ -37,6 +37,10 @@ const {
   ensureBuiltinFixedScenarioNameUpdate,
   ensureBuiltinFixedScenarioMigration,
   ensureScenarioApplicableChannelsTable,
+  // v2.1.16-beta.2 §8：5 轮对账 R4/R5 内置场景 seed（5 R4 + 2 R5）
+  ensureReconRoundBuiltinScenariosSeed,
+  // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'
+  ensureFundTypeAchReturnConfigMigration,
   // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造
   ensureDiffRowsCascadeMigration_v2_1_10,
   // v2.1.16 阶段一 A3：链接表持久化建表
@@ -297,6 +301,15 @@ class AppDatabase {
     this.ensureBuiltinFixedScenarioNameUpdate();
     this.ensureBuiltinFixedScenarioMigration();
     this.ensureScenarioApplicableChannelsTable();
+    // v2.1.16-beta.2 §8：5 轮对账 R4/R5 内置场景 seed（5 R4 + 2 R5，🔴 资金红线）
+    //   必须在 ensureScenariosCategoryBuiltinFixed 之后（依赖 category CHECK 已扩到含 'builtin-fixed'）。
+    //   幂等：凭 is_builtin + builtin-fixed + config.subCategory 定位，已存在跳过不覆盖；
+    //         marker(recon_round_builtin_scenarios_seeded) 保证删除终态不复活。
+    this.ensureReconRoundBuiltinScenariosSeed();
+    // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线 — FundType 枚举值）
+    //   必须在 scenarios 相关迁移之后（依赖 scenarios 表已存在、内置场景已 seed）。
+    //   幂等：执行一次后 config 不再含 'Ach Ruturn'；绝大多数库无引用 → no-op（精确性防护）。
+    this.ensureFundTypeAchReturnConfigMigration();
     // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表
     // 与其他迁移完全独立，调用顺序无依赖；放在最末尾即可
     this.ensureBankBuReconTablesSupport();
@@ -847,6 +860,16 @@ class AppDatabase {
     return ensureScenarioApplicableChannelsTable(this.db);
   }
 
+  // v2.1.16-beta.2 §8：5 轮对账 R4/R5 内置场景 seed（5 R4 + 2 R5，🔴 资金红线）
+  ensureReconRoundBuiltinScenariosSeed() {
+    return ensureReconRoundBuiltinScenariosSeed(this.db);
+  }
+
+  // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线）
+  ensureFundTypeAchReturnConfigMigration() {
+    return ensureFundTypeAchReturnConfigMigration(this.db);
+  }
+
   migrateGatewayReconIdFixFieldPairs() {
     return migrateGatewayReconIdFixFieldPairs(this.db);
   }
@@ -996,6 +1019,12 @@ class AppDatabase {
   // 整表覆盖写入（rows = { [表头名]: 值 } 对象数组）；fx-option 抛「模板缺失」
   replaceLinkedTable(tableKey, rows, options) {
     return linkedTableRepository.replaceLinkedTable(this.db, tableKey, rows, options || {});
+  }
+
+  // v2.1.16-beta.2 T1：读回某 tableKey 全部整行（raw_json → 对象，字段名 = 真实表头）；
+  //   fx-option 返回 []；损坏行跳过。供 5 轮对账编排器取网关数据源（'gateway-bill'）。
+  readLinkedTableRows(tableKey) {
+    return linkedTableRepository.readLinkedTableRows(this.db, tableKey);
   }
 
   // SR-backup-1 (v2.1.9)：sqlite 安全备份 API（VACUUM INTO）

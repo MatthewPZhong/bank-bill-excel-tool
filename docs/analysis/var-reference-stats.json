@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "2.1.15",
-    "scannedAt": "2026-06-07T04:09:28.942Z",
+    "version": "2.1.16-beta.2",
+    "scannedAt": "2026-06-07T11:46:31.688Z",
     "root": "src",
-    "totalFiles": 109,
-    "totalTopLevelNames": 1145,
+    "totalFiles": 121,
+    "totalTopLevelNames": 1218,
     "buckets": {
-      "shared": 194,
-      "paired": 342,
-      "local": 498,
-      "crossFile": 536
+      "shared": 196,
+      "paired": 366,
+      "local": 542,
+      "crossFile": 562
     }
   },
   "A": {
@@ -48,6 +48,7 @@
           "src/main-process/biz-op-recon-session.js",
           "src/main-process/biz-op-recon-writer.js",
           "src/main-process/pending-session.js",
+          "src/main-process/platform-cleanup-writer.js",
           "src/main-process/recon-id-fix-io.js",
           "src/main-process/run-check-multiworker.js",
           "src/main-process/run-check-worker-pool.js",
@@ -112,7 +113,7 @@
           },
           {
             "file": "src/backend/file-service/readers.js",
-            "count": 5
+            "count": 6
           },
           {
             "file": "src/backend/file-service/writers.js",
@@ -187,6 +188,10 @@
             "count": 6
           },
           {
+            "file": "src/main-process/platform-cleanup-writer.js",
+            "count": 3
+          },
+          {
             "file": "src/main-process/recon-id-fix-io.js",
             "count": 2
           },
@@ -227,8 +232,8 @@
             "count": 2
           }
         ],
-        "totalHits": 128,
-        "fileSpan": 42
+        "totalHits": 132,
+        "fileSpan": 43
       },
       {
         "name": "fs",
@@ -261,6 +266,7 @@
           "src/main-process/biz-op-recon-session.js",
           "src/main-process/biz-op-recon-writer.js",
           "src/main-process/pending-session.js",
+          "src/main-process/platform-cleanup-writer.js",
           "src/main-process/recon-id-fix-io.js",
           "src/main-process/run-check-multiworker-worker.js",
           "src/main-process/run-check-multiworker.js",
@@ -306,7 +312,7 @@
           },
           {
             "file": "src/backend/file-service/readers.js",
-            "count": 4
+            "count": 7
           },
           {
             "file": "src/backend/file-service/writers.js",
@@ -381,6 +387,10 @@
             "count": 2
           },
           {
+            "file": "src/main-process/platform-cleanup-writer.js",
+            "count": 6
+          },
+          {
             "file": "src/main-process/recon-id-fix-io.js",
             "count": 2
           },
@@ -401,8 +411,8 @@
             "count": 1
           }
         ],
-        "totalHits": 91,
-        "fileSpan": 33
+        "totalHits": 100,
+        "fileSpan": 34
       },
       {
         "name": "parse",
@@ -424,6 +434,10 @@
           },
           {
             "file": "src/backend/biz-op-recon-import/import-worker.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 1
           },
           {
@@ -507,8 +521,8 @@
             "count": 3
           }
         ],
-        "totalHits": 40,
-        "fileSpan": 24
+        "totalHits": 41,
+        "fileSpan": 25
       },
       {
         "name": "normalizeCell",
@@ -519,7 +533,8 @@
           "src/backend/big-account-order-store.js",
           "src/backend/file-service/common.js",
           "src/backend/file-service/normalizers.js",
-          "src/backend/file-service/writers.js"
+          "src/backend/file-service/writers.js",
+          "src/main-process/table-type-detector.js"
         ],
         "refFiles": [
           {
@@ -587,12 +602,16 @@
             "count": 3
           },
           {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 4
+          },
+          {
             "file": "src/main.js",
-            "count": 1
+            "count": 2
           }
         ],
-        "totalHits": 104,
-        "fileSpan": 17
+        "totalHits": 109,
+        "fileSpan": 18
       },
       {
         "name": "FileValidationError",
@@ -603,7 +622,8 @@
           "src/backend/file-service/normalizers.js",
           "src/backend/file-service/writers.js",
           "src/main-process/bank-statement-io.js",
-          "src/main-process/recon-id-fix-io.js"
+          "src/main-process/recon-id-fix-io.js",
+          "src/main-process/table-type-detector.js"
         ],
         "refFiles": [
           {
@@ -640,7 +660,7 @@
           },
           {
             "file": "src/backend/file-service/readers.js",
-            "count": 15
+            "count": 22
           },
           {
             "file": "src/backend/file-service/writers.js",
@@ -667,12 +687,16 @@
             "count": 2
           },
           {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 2
+          },
+          {
             "file": "src/main.js",
-            "count": 1
+            "count": 2
           }
         ],
-        "totalHits": 78,
-        "fileSpan": 16
+        "totalHits": 88,
+        "fileSpan": 17
       },
       {
         "name": "XLSX",
@@ -706,7 +730,7 @@
           },
           {
             "file": "src/backend/file-service/readers.js",
-            "count": 3
+            "count": 4
           },
           {
             "file": "src/backend/file-service/writers.js",
@@ -745,7 +769,7 @@
             "count": 1
           }
         ],
-        "totalHits": 69,
+        "totalHits": 70,
         "fileSpan": 13
       },
       {
@@ -817,6 +841,75 @@
         "fileSpan": 13
       },
       {
+        "name": "applyWatermark",
+        "defFiles": [
+          "src/backend/file-service/writers.js",
+          "src/backend/pending-export/writer.js",
+          "src/main-process/acquiring-bill-currency-writer.js",
+          "src/main-process/bank-bu-recon-writer.js",
+          "src/main-process/biz-op-recon-writer.js",
+          "src/main-process/exceljs-writer.js",
+          "src/main-process/pending-session.js",
+          "src/main-process/platform-cleanup-writer.js",
+          "src/main-process/recon-id-fix-io.js",
+          "src/main-process/scenario-hit-rows-writer.js",
+          "src/main-process/workbook-watermark.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service/writers.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/platform-cleanup-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/scenario-hit-rows-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/workbook-watermark.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 29,
+        "fileSpan": 12
+      },
+      {
         "name": "appendModuleLog",
         "defFiles": [
           "src/backend/database.js",
@@ -877,70 +970,6 @@
         "fileSpan": 11
       },
       {
-        "name": "applyWatermark",
-        "defFiles": [
-          "src/backend/file-service/writers.js",
-          "src/backend/pending-export/writer.js",
-          "src/main-process/acquiring-bill-currency-writer.js",
-          "src/main-process/bank-bu-recon-writer.js",
-          "src/main-process/biz-op-recon-writer.js",
-          "src/main-process/exceljs-writer.js",
-          "src/main-process/pending-session.js",
-          "src/main-process/recon-id-fix-io.js",
-          "src/main-process/scenario-hit-rows-writer.js",
-          "src/main-process/workbook-watermark.js",
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service/writers.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/pending-export/writer.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-writer.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-writer.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/biz-op-recon-writer.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/exceljs-writer.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/pending-session.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/recon-id-fix-io.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/scenario-hit-rows-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/workbook-watermark.js",
-            "count": 2
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 27,
-        "fileSpan": 11
-      },
-      {
         "name": "pad",
         "defFiles": [
           "src/backend/logger.js",
@@ -990,6 +1019,53 @@
         ],
         "totalHits": 66,
         "fileSpan": 10
+      },
+      {
+        "name": "normalizeCellValue",
+        "defFiles": [
+          "src/main-process/scenario-engines/engine-utils.js",
+          "src/main-process/scenario-engines/r1-recon-id-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 21
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 62,
+        "fileSpan": 9
       },
       {
         "name": "PENDING_COLUMNS",
@@ -1043,6 +1119,53 @@
           }
         ],
         "totalHits": 33,
+        "fileSpan": 9
+      },
+      {
+        "name": "makeWarningCollector",
+        "defFiles": [
+          "src/main-process/scenario-engines/engine-utils.js",
+          "src/main-process/scenario-engines/r1-recon-id-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 18,
         "fileSpan": 9
       },
       {
@@ -1342,6 +1465,155 @@
         "fileSpan": 7
       },
       {
+        "name": "BANK_STATEMENT_FIELDS",
+        "defFiles": [
+          "src/constants/bank-statement-fields.js",
+          "src/constants/table-signatures.js",
+          "src/main-process/bank-statement-io.js",
+          "src/main-process/scenario-hit-rows-writer.js",
+          "src/preload.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/bank-statement-fields.js",
+            "count": 3
+          },
+          {
+            "file": "src/constants/table-signatures.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/bank-statement-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-hit-rows-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 3
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 9
+          }
+        ],
+        "totalHits": 21,
+        "fileSpan": 6
+      },
+      {
+        "name": "ExcelJS",
+        "defFiles": [
+          "src/main-process/acquiring-bill-currency-writer.js",
+          "src/main-process/bank-bu-recon-writer.js",
+          "src/main-process/biz-op-recon-writer.js",
+          "src/main-process/exceljs-writer.js",
+          "src/main-process/platform-cleanup-writer.js",
+          "src/main-process/scenario-hit-rows-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/platform-cleanup-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-hit-rows-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 17,
+        "fileSpan": 6
+      },
+      {
+        "name": "runReconciliation",
+        "defFiles": [
+          "src/backend/pending-reconcile/engine.js",
+          "src/main-process/bank-bu-recon-session.js",
+          "src/main-process/biz-op-recon-session.js",
+          "src/main-process/reconciliation-orchestrator.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/reconciliation-orchestrator.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 14,
+        "fileSpan": 6
+      },
+      {
+        "name": "makeModificationCollector",
+        "defFiles": [
+          "src/main-process/scenario-engines/engine-utils.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 6
+      },
+      {
         "name": "getRunById",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/run-repository.js",
@@ -1389,7 +1661,7 @@
           },
           {
             "file": "src/renderer-dialogs.js",
-            "count": 347
+            "count": 349
           },
           {
             "file": "src/renderer-pending.js",
@@ -1404,7 +1676,7 @@
             "count": 71
           }
         ],
-        "totalHits": 450,
+        "totalHits": 452,
         "fileSpan": 5
       },
       {
@@ -1428,14 +1700,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 48
+            "count": 49
           },
           {
             "file": "src/renderer.js",
             "count": 3
           }
         ],
-        "totalHits": 56,
+        "totalHits": 57,
         "fileSpan": 5
       },
       {
@@ -1470,36 +1742,6 @@
           }
         ],
         "totalHits": 42,
-        "fileSpan": 5
-      },
-      {
-        "name": "normalizeCellValue",
-        "defFiles": [
-          "src/main-process/scenario-engines/engine-utils.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
-            "count": 21
-          },
-          {
-            "file": "src/main-process/scenario-engines/engine-utils.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 41,
         "fileSpan": 5
       },
       {
@@ -1568,39 +1810,6 @@
         "fileSpan": 5
       },
       {
-        "name": "BANK_STATEMENT_FIELDS",
-        "defFiles": [
-          "src/constants/bank-statement-fields.js",
-          "src/main-process/bank-statement-io.js",
-          "src/main-process/scenario-hit-rows-writer.js",
-          "src/preload.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/constants/bank-statement-fields.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/bank-statement-io.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-hit-rows-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/preload.js",
-            "count": 3
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 9
-          }
-        ],
-        "totalHits": 19,
-        "fileSpan": 5
-      },
-      {
         "name": "BILL_HEADERS",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/columns.js",
@@ -1658,40 +1867,6 @@
           },
           {
             "file": "src/main-process/biz-op-recon-writer.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 15,
-        "fileSpan": 5
-      },
-      {
-        "name": "ExcelJS",
-        "defFiles": [
-          "src/main-process/acquiring-bill-currency-writer.js",
-          "src/main-process/bank-bu-recon-writer.js",
-          "src/main-process/biz-op-recon-writer.js",
-          "src/main-process/exceljs-writer.js",
-          "src/main-process/scenario-hit-rows-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/acquiring-bill-currency-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-writer.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/biz-op-recon-writer.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/exceljs-writer.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-hit-rows-writer.js",
             "count": 2
           }
         ],
@@ -1856,68 +2031,6 @@
         "fileSpan": 5
       },
       {
-        "name": "runReconciliation",
-        "defFiles": [
-          "src/backend/pending-reconcile/engine.js",
-          "src/main-process/bank-bu-recon-session.js",
-          "src/main-process/biz-op-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-reconcile/engine.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/biz-op-recon-session.js",
-            "count": 1
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          },
-          {
-            "file": "src/renderer-pending.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 11,
-        "fileSpan": 5
-      },
-      {
-        "name": "makeWarningCollector",
-        "defFiles": [
-          "src/main-process/scenario-engines/engine-utils.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/engine-utils.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 5
-      },
-      {
         "name": "formatTimestamp",
         "defFiles": [
           "src/backend/database/backup.js",
@@ -2053,14 +2166,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 29
+            "count": 33
           },
           {
             "file": "src/renderer.js",
-            "count": 90
+            "count": 96
           }
         ],
-        "totalHits": 140,
+        "totalHits": 150,
         "fileSpan": 4
       },
       {
@@ -2141,6 +2254,33 @@
           }
         ],
         "totalHits": 17,
+        "fileSpan": 4
+      },
+      {
+        "name": "parseNumber",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js",
+          "src/main-process/scenario-engines/engine-utils.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 16,
         "fileSpan": 4
       },
       {
@@ -2388,6 +2528,34 @@
         "fileSpan": 4
       },
       {
+        "name": "normalizeDateExportValue",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js",
+          "src/backend/file-service/normalizers.js",
+          "src/main-process/scenario-engines/engine-date-utils.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/file-service/normalizers.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-date-utils.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 4
+      },
+      {
         "name": "PENDING_GUANLI_DB_COLUMNS",
         "defFiles": [
           "src/backend/bank-bu-recon-db/columns.js"
@@ -2407,6 +2575,32 @@
           },
           {
             "file": "src/main-process/bank-bu-recon-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 4
+      },
+      {
+        "name": "valuesEqual",
+        "defFiles": [
+          "src/main-process/scenario-engines/engine-utils.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
             "count": 3
           }
         ],
@@ -2708,32 +2902,6 @@
         "fileSpan": 4
       },
       {
-        "name": "makeModificationCollector",
-        "defFiles": [
-          "src/main-process/scenario-engines/engine-utils.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/engine-utils.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 4
-      },
-      {
         "name": "OPPONENT_BILL_FIELDS",
         "defFiles": [
           "src/constants/recon-id-fix-fields.js",
@@ -2783,6 +2951,32 @@
           {
             "file": "src/preload.js",
             "count": 2
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 4
+      },
+      {
+        "name": "readRowsWithMetadata",
+        "defFiles": [
+          "src/backend/file-service/readers.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
           }
         ],
         "totalHits": 8,
@@ -3742,29 +3936,6 @@
         "fileSpan": 3
       },
       {
-        "name": "parseNumber",
-        "defFiles": [
-          "src/backend/pending-reconcile/removal-match.js",
-          "src/main-process/scenario-engines/engine-utils.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-reconcile/removal-match.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/scenario-engines/engine-utils.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 12,
-        "fileSpan": 3
-      },
-      {
         "name": "importsRepository",
         "defFiles": [
           "src/backend/biz-op-recon-import/import-worker.js",
@@ -4454,28 +4625,6 @@
         "fileSpan": 3
       },
       {
-        "name": "valuesEqual",
-        "defFiles": [
-          "src/main-process/scenario-engines/engine-utils.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/engine-utils.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 3
-      },
-      {
         "name": "writeBizOpErrorReportXlsx",
         "defFiles": [
           "src/main-process/biz-op-recon-writer.js"
@@ -4856,28 +5005,6 @@
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
             "count": 2
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 3
-      },
-      {
-        "name": "readRowsWithMetadata",
-        "defFiles": [
-          "src/backend/file-service/readers.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 2
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
           }
         ],
         "totalHits": 6,
@@ -5402,6 +5529,30 @@
         "fileSpan": 3
       },
       {
+        "name": "runAllScenarios",
+        "defFiles": [
+          "src/main-process/reconciliation-orchestrator.js",
+          "src/main-process/scenario-dispatcher.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/reconciliation-orchestrator.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-dispatcher.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
         "name": "setEnabledModules",
         "defFiles": [
           "src/backend/database/settings-repository.js"
@@ -5745,14 +5896,14 @@
         "refFiles": [
           {
             "file": "src/renderer-previews.js",
-            "count": 49
+            "count": 50
           },
           {
             "file": "src/renderer.js",
             "count": 22
           }
         ],
-        "totalHits": 71,
+        "totalHits": 72,
         "fileSpan": 2
       },
       {
@@ -6684,6 +6835,25 @@
         "fileSpan": 2
       },
       {
+        "name": "normalizeKey",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js",
+          "src/main-process/bank-bu-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 2
+      },
+      {
         "name": "PRAGMA_STATEMENTS",
         "defFiles": [
           "src/main-process/run-check-multiworker-worker.js",
@@ -6812,6 +6982,25 @@
         "fileSpan": 2
       },
       {
+        "name": "BANK_RECON_ID_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
         "name": "bankStatementSession",
         "defFiles": [
           "src/main.js"
@@ -6898,6 +7087,25 @@
           {
             "file": "src/backend/database/utils.js",
             "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "CLEANUP_TEMPLATE_HEADERS",
+        "defFiles": [
+          "src/constants/platform-cleanup-template-fields.js",
+          "src/main-process/platform-cleanup-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/platform-cleanup-template-fields.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/platform-cleanup-writer.js",
+            "count": 3
           }
         ],
         "totalHits": 6,
@@ -7264,7 +7472,61 @@
         "fileSpan": 2
       },
       {
+        "name": "ensureFundTypeAchReturnConfigMigration",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "ensureLinkedTableSupport",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
         "name": "ensureParentTemplateSupport",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "ensureReconRoundBuiltinScenariosSeed",
         "defFiles": [
           "src/backend/database/migrations.js"
         ],
@@ -7402,6 +7664,24 @@
           {
             "file": "src/backend/database/migrations.js",
             "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "ensureSupportedFile",
+        "defFiles": [
+          "src/backend/file-service/readers.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 4
           }
         ],
         "totalHits": 6,
@@ -7553,6 +7833,25 @@
         "fileSpan": 2
       },
       {
+        "name": "GW_RECON_ID_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
         "name": "initWorkerDb",
         "defFiles": [
           "src/main-process/run-check-multiworker-worker.js",
@@ -7657,24 +7956,6 @@
           {
             "file": "src/backend/database/migrations.js",
             "count": 2
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 2
-      },
-      {
-        "name": "normalizeDateExportValue",
-        "defFiles": [
-          "src/backend/file-service/normalizers.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/file-service/normalizers.js",
-            "count": 3
           }
         ],
         "totalHits": 6,
@@ -8050,24 +8331,6 @@
         "fileSpan": 2
       },
       {
-        "name": "ensureSupportedFile",
-        "defFiles": [
-          "src/backend/file-service/readers.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
         "name": "ERROR_HEADER_TAIL",
         "defFiles": [
           "src/backend/biz-op-recon-db/columns.js"
@@ -8151,6 +8414,24 @@
           },
           {
             "file": "src/backend/database/template-repository.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "getLinkedTableMeta",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 3
           }
         ],
@@ -8543,6 +8824,25 @@
         "fileSpan": 2
       },
       {
+        "name": "ALL_TABLE_SIGNATURES",
+        "defFiles": [
+          "src/constants/table-signatures.js",
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/table-signatures.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "applyApplicableChannelIdsInTx",
         "defFiles": [
           "src/backend/database/scenarios-repository.js"
@@ -8573,6 +8873,24 @@
           {
             "file": "src/main-process/bank-bu-recon-session.js",
             "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "BankStatementMergeError",
+        "defFiles": [
+          "src/main-process/bank-statement-merge.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/bank-statement-merge.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
           }
         ],
         "totalHits": 4,
@@ -8645,6 +8963,25 @@
           },
           {
             "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "CLEANUP_COPY_HEADERS",
+        "defFiles": [
+          "src/constants/platform-cleanup-template-fields.js",
+          "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/platform-cleanup-template-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
             "count": 2
           }
         ],
@@ -8848,6 +9185,25 @@
           },
           {
             "file": "src/backend/pending-reconcile/engine.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "dayDiffWithin",
+        "defFiles": [
+          "src/main-process/scenario-engines/engine-date-utils.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/engine-date-utils.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
             "count": 2
           }
         ],
@@ -9418,6 +9774,25 @@
         "fileSpan": 2
       },
       {
+        "name": "LINKED_TABLE_SIGNATURES",
+        "defFiles": [
+          "src/constants/table-signatures.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/table-signatures.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "listAccountMappings",
         "defFiles": [
           "src/backend/database/settings-repository.js"
@@ -9447,6 +9822,24 @@
           },
           {
             "file": "src/backend/database/template-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "listLinkedTableMeta",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 2
           }
         ],
@@ -9691,6 +10084,25 @@
         "fileSpan": 2
       },
       {
+        "name": "PREPROCESS_TABLE_SIGNATURES",
+        "defFiles": [
+          "src/constants/table-signatures.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/table-signatures.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "randomUUID",
         "defFiles": [
           "src/backend/database/migrations.js",
@@ -9703,6 +10115,24 @@
           },
           {
             "file": "src/backend/database/template-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "readLinkedTableRows",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 2
           }
         ],
@@ -9854,6 +10284,24 @@
         "fileSpan": 2
       },
       {
+        "name": "replaceLinkedTable",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "resolveCurrencyValue",
         "defFiles": [
           "src/backend/file-service/normalizers.js"
@@ -9922,6 +10370,101 @@
           {
             "file": "src/main-process/run-check-worker.js",
             "count": 1
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "runRound1ReconIdMatch",
+        "defFiles": [
+          "src/main-process/reconciliation-orchestrator.js",
+          "src/main-process/scenario-engines/r1-recon-id-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/reconciliation-orchestrator.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "runRound4FundNatureCheck",
+        "defFiles": [
+          "src/main-process/reconciliation-orchestrator.js",
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/reconciliation-orchestrator.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "runRound5FundTransferBackfill",
+        "defFiles": [
+          "src/main-process/reconciliation-orchestrator.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/reconciliation-orchestrator.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "runRound5PlatformInboundCleanup",
+        "defFiles": [
+          "src/main-process/reconciliation-orchestrator.js",
+          "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/reconciliation-orchestrator.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "sameDay",
+        "defFiles": [
+          "src/main-process/scenario-engines/engine-date-utils.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/engine-date-utils.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 2
           }
         ],
         "totalHits": 4,
@@ -10065,24 +10608,6 @@
           },
           {
             "file": "src/backend/database/settings-repository.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 2
-      },
-      {
-        "name": "showComingSoon",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 2
-          },
-          {
-            "file": "src/renderer.js",
             "count": 2
           }
         ],
@@ -10693,6 +11218,25 @@
         "fileSpan": 2
       },
       {
+        "name": "detectTableType",
+        "defFiles": [
+          "src/main-process/table-type-detector.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "findByChannelAndName",
         "defFiles": [
           "src/backend/database/scenarios-repository.js"
@@ -11125,6 +11669,24 @@
         "fileSpan": 2
       },
       {
+        "name": "listSheetNames",
+        "defFiles": [
+          "src/backend/file-service/readers.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "listSuccessDates",
         "defFiles": [
           "src/backend/biz-op-recon-db/run-repository.js"
@@ -11210,6 +11772,24 @@
           },
           {
             "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "mergeBankStatementRows",
+        "defFiles": [
+          "src/main-process/bank-statement-merge.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/bank-statement-merge.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
             "count": 1
           }
         ],
@@ -11457,25 +12037,6 @@
         "fileSpan": 2
       },
       {
-        "name": "runAllScenarios",
-        "defFiles": [
-          "src/main-process/scenario-dispatcher.js",
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-dispatcher.js",
-            "count": 2
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 2
-      },
-      {
         "name": "runOwnAccountsMigration",
         "defFiles": [
           "src/backend/database/own-accounts-migration.js",
@@ -11543,6 +12104,24 @@
           },
           {
             "file": "src/backend/database/scenarios-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "showComingSoon",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer.js",
             "count": 2
           }
         ],
@@ -11721,6 +12300,25 @@
         "refFiles": [
           {
             "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "writePlatformCleanupOutput",
+        "defFiles": [
+          "src/main-process/platform-cleanup-writer.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/platform-cleanup-writer.js",
             "count": 2
           },
           {
@@ -11999,10 +12597,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 164
+            "count": 167
           }
         ],
-        "totalHits": 164,
+        "totalHits": 167,
         "fileSpan": 1
       },
       {
@@ -12622,6 +13220,20 @@
         "fileSpan": 1
       },
       {
+        "name": "BANK_FUND_TYPE_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
         "name": "BILL_KEY_COLUMNS",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/columns.js"
@@ -12755,6 +13367,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
+        "name": "toDate",
+        "defFiles": [
+          "src/main-process/scenario-engines/engine-date-utils.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/engine-date-utils.js",
             "count": 6
           }
         ],
@@ -13140,6 +13766,20 @@
         "fileSpan": 1
       },
       {
+        "name": "linkedTableRepository",
+        "defFiles": [
+          "src/backend/database.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "mapRun",
         "defFiles": [
           "src/backend/pending-db/diff-repository.js"
@@ -13203,20 +13843,6 @@
         "refFiles": [
           {
             "file": "src/backend/file-service/normalizers.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
-        "name": "normalizeKey",
-        "defFiles": [
-          "src/main-process/bank-bu-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
             "count": 5
           }
         ],
@@ -13616,6 +14242,20 @@
         "fileSpan": 1
       },
       {
+        "name": "getDef",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "getStatementSessionKey",
         "defFiles": [
           "src/main-process/statement-session.js"
@@ -13833,6 +14473,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "readers",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
             "count": 4
           }
         ],
@@ -14204,6 +14858,34 @@
         "fileSpan": 1
       },
       {
+        "name": "ALL_TABLE_KEYS",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "amountEqual",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "ANOMALY_HEADERS_AGGREGATE",
         "defFiles": [
           "src/main-process/bank-bu-recon-writer.js"
@@ -14288,6 +14970,20 @@
         "fileSpan": 1
       },
       {
+        "name": "applyHandler",
+        "defFiles": [
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "BACKGROUND_FILE_HINT",
         "defFiles": [
           "src/renderer.js"
@@ -14316,6 +15012,62 @@
         "fileSpan": 1
       },
       {
+        "name": "BANK_STATEMENT_SIGNATURE",
+        "defFiles": [
+          "src/constants/table-signatures.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/table-signatures.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "bankAmountAbs",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "bankStatementHeadersEqual",
+        "defFiles": [
+          "src/main-process/bank-statement-merge.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/bank-statement-merge.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "bucketScenarios",
+        "defFiles": [
+          "src/main-process/reconciliation-orchestrator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/reconciliation-orchestrator.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "buildBatchInserterInTxn",
         "defFiles": [
           "src/backend/bank-bu-recon-db/month-repository.js"
@@ -14337,6 +15089,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-reconcile/engine.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildCleanupRow",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
             "count": 3
           }
         ],
@@ -14435,6 +15201,20 @@
         "refFiles": [
           {
             "file": "src/main-process/bank-bu-recon-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildOutputRows",
+        "defFiles": [
+          "src/main-process/reconciliation-orchestrator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/reconciliation-orchestrator.js",
             "count": 3
           }
         ],
@@ -14589,6 +15369,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "CLEANUP_SHEET_NAME",
+        "defFiles": [
+          "src/main-process/platform-cleanup-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/platform-cleanup-writer.js",
             "count": 3
           }
         ],
@@ -14960,6 +15754,34 @@
         "fileSpan": 1
       },
       {
+        "name": "FX_DELIVERY_SIGNATURE",
+        "defFiles": [
+          "src/constants/table-signatures.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/table-signatures.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "FX_OPTION_SIGNATURE",
+        "defFiles": [
+          "src/constants/table-signatures.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/table-signatures.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "GATEWAY_RECON_SHEET_NAME",
         "defFiles": [
           "src/main-process/bank-statement-io.js"
@@ -14967,6 +15789,20 @@
         "refFiles": [
           {
             "file": "src/main-process/bank-statement-io.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "GATEWAY_RECON_SIGNATURE",
+        "defFiles": [
+          "src/constants/table-signatures.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/table-signatures.js",
             "count": 3
           }
         ],
@@ -15128,6 +15964,34 @@
         "fileSpan": 1
       },
       {
+        "name": "GW_TRADE_TYPE_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "gwAmountAbs",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "gwMatchesBank",
         "defFiles": [
           "src/main-process/scenario-engines/c3-gateway-recon-join.js"
@@ -15212,6 +16076,34 @@
         "fileSpan": 1
       },
       {
+        "name": "INTAKE_ORIGINAL_ORDER_SIGNATURE",
+        "defFiles": [
+          "src/constants/table-signatures.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/table-signatures.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "isHeaderNotMatchedError",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "isRegularTemplate",
         "defFiles": [
           "src/main-process/monthly-balance.js"
@@ -15219,6 +16111,20 @@
         "refFiles": [
           {
             "file": "src/main-process/monthly-balance.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "L2_HEADER_SCAN_ROWS",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
             "count": 3
           }
         ],
@@ -15247,6 +16153,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "LINKED_TABLE_DEFS",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 3
           }
         ],
@@ -15674,6 +16594,20 @@
         "fileSpan": 1
       },
       {
+        "name": "RECON_ROUND_BUILTIN_SCENARIOS_SEEDED_MARKER",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "refreshReconIdFixStatus",
         "defFiles": [
           "src/renderer.js"
@@ -15996,6 +16930,20 @@
         "fileSpan": 1
       },
       {
+        "name": "SHORT_TABLE_COLUMN_THRESHOLD",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "shouldFallbackToSingleWorker",
         "defFiles": [
           "src/main-process/acquiring-bill-currency-session.js"
@@ -16087,6 +17035,20 @@
         "refFiles": [
           {
             "file": "src/backend/usage-stats.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "statusForMatchedKey",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
             "count": 3
           }
         ],
@@ -16269,6 +17231,34 @@
         "refFiles": [
           {
             "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "ZHONGTAI_DISPATCH_ORDER_SIGNATURE",
+        "defFiles": [
+          "src/constants/table-signatures.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/table-signatures.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "ZHONGTAI_REFUND_ORDER_SIGNATURE",
+        "defFiles": [
+          "src/constants/table-signatures.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/table-signatures.js",
             "count": 3
           }
         ],
@@ -16668,6 +17658,20 @@
         "fileSpan": 1
       },
       {
+        "name": "buildBatchImportSummaryHtml",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "buildRendererStartupMetrics",
         "defFiles": [
           "src/renderer.js"
@@ -16920,6 +17924,34 @@
         "fileSpan": 1
       },
       {
+        "name": "DEFAULT_DATE_TOLERANCE_DAYS",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "DEFAULT_DIRECTIONS",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "DEFAULT_MAX_ROW_ERRORS",
         "defFiles": [
           "src/backend/biz-op-recon-import/import-worker.js"
@@ -16941,6 +17973,20 @@
         "refFiles": [
           {
             "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "detectInSheet",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
             "count": 2
           }
         ],
@@ -16983,6 +18029,20 @@
         "refFiles": [
           {
             "file": "src/main-process/run-check-worker-pool.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "emptyMeta",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 2
           }
         ],
@@ -17235,6 +18295,34 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "getFirstRowColumnCount",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "getL1Anchor",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
             "count": 2
           }
         ],
@@ -17858,6 +18946,34 @@
         "fileSpan": 1
       },
       {
+        "name": "META_EXCLUDE_KEYS",
+        "defFiles": [
+          "src/main-process/reconciliation-orchestrator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/reconciliation-orchestrator.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "MS_PER_DAY",
+        "defFiles": [
+          "src/main-process/scenario-engines/engine-date-utils.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/engine-date-utils.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "MULTIWORKER_BASELINE_CHUNK_SIZE",
         "defFiles": [
           "src/main-process/acquiring-bill-currency-session.js"
@@ -17935,6 +19051,20 @@
         "refFiles": [
           {
             "file": "src/backend/scenarios-bundle-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "normalizeDateForRange",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 2
           }
         ],
@@ -18348,6 +19478,20 @@
         "fileSpan": 1
       },
       {
+        "name": "readSheetMeaningfulRows",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "readXlsxStreamed",
         "defFiles": [
           "src/backend/pending-import/worker.js"
@@ -18355,6 +19499,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-import/worker.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "RECON_ROUND_BUILTIN_SCENARIOS",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
             "count": 2
           }
         ],
@@ -18544,6 +19702,20 @@
         "fileSpan": 1
       },
       {
+        "name": "rowToMeta",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "runBizOpImportAsync",
         "defFiles": [
           "src/main-process/biz-op-recon-session.js"
@@ -18586,6 +19758,20 @@
         "fileSpan": 1
       },
       {
+        "name": "runExactLayer",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "runFlowImportAsync",
         "defFiles": [
           "src/main-process/biz-op-recon-session.js"
@@ -18593,6 +19779,20 @@
         "refFiles": [
           {
             "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "runFuzzyLayer",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
             "count": 2
           }
         ],
@@ -18789,6 +19989,20 @@
         "refFiles": [
           {
             "file": "src/backend/file-service.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "UNSUPPORTED_TABLE_KEYS",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
             "count": 2
           }
         ],
@@ -19000,6 +20214,7 @@
         "src/main-process/biz-op-recon-session.js",
         "src/main-process/biz-op-recon-writer.js",
         "src/main-process/pending-session.js",
+        "src/main-process/platform-cleanup-writer.js",
         "src/main-process/recon-id-fix-io.js",
         "src/main-process/run-check-multiworker.js",
         "src/main-process/run-check-worker-pool.js",
@@ -19064,7 +20279,7 @@
         },
         {
           "file": "src/backend/file-service/readers.js",
-          "count": 5
+          "count": 6
         },
         {
           "file": "src/backend/file-service/writers.js",
@@ -19139,6 +20354,10 @@
           "count": 6
         },
         {
+          "file": "src/main-process/platform-cleanup-writer.js",
+          "count": 3
+        },
+        {
           "file": "src/main-process/recon-id-fix-io.js",
           "count": 2
         },
@@ -19179,8 +20398,8 @@
           "count": 2
         }
       ],
-      "totalHits": 128,
-      "fileSpan": 42
+      "totalHits": 132,
+      "fileSpan": 43
     },
     {
       "name": "fs",
@@ -19213,6 +20432,7 @@
         "src/main-process/biz-op-recon-session.js",
         "src/main-process/biz-op-recon-writer.js",
         "src/main-process/pending-session.js",
+        "src/main-process/platform-cleanup-writer.js",
         "src/main-process/recon-id-fix-io.js",
         "src/main-process/run-check-multiworker-worker.js",
         "src/main-process/run-check-multiworker.js",
@@ -19258,7 +20478,7 @@
         },
         {
           "file": "src/backend/file-service/readers.js",
-          "count": 4
+          "count": 7
         },
         {
           "file": "src/backend/file-service/writers.js",
@@ -19333,6 +20553,10 @@
           "count": 2
         },
         {
+          "file": "src/main-process/platform-cleanup-writer.js",
+          "count": 6
+        },
+        {
           "file": "src/main-process/recon-id-fix-io.js",
           "count": 2
         },
@@ -19353,8 +20577,8 @@
           "count": 1
         }
       ],
-      "totalHits": 91,
-      "fileSpan": 33
+      "totalHits": 100,
+      "fileSpan": 34
     },
     {
       "name": "parse",
@@ -19376,6 +20600,10 @@
         },
         {
           "file": "src/backend/biz-op-recon-import/import-worker.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
           "count": 1
         },
         {
@@ -19459,8 +20687,8 @@
           "count": 3
         }
       ],
-      "totalHits": 40,
-      "fileSpan": 24
+      "totalHits": 41,
+      "fileSpan": 25
     },
     {
       "name": "normalizeCell",
@@ -19471,7 +20699,8 @@
         "src/backend/big-account-order-store.js",
         "src/backend/file-service/common.js",
         "src/backend/file-service/normalizers.js",
-        "src/backend/file-service/writers.js"
+        "src/backend/file-service/writers.js",
+        "src/main-process/table-type-detector.js"
       ],
       "refFiles": [
         {
@@ -19539,12 +20768,16 @@
           "count": 3
         },
         {
+          "file": "src/main-process/table-type-detector.js",
+          "count": 4
+        },
+        {
           "file": "src/main.js",
-          "count": 1
+          "count": 2
         }
       ],
-      "totalHits": 104,
-      "fileSpan": 17
+      "totalHits": 109,
+      "fileSpan": 18
     },
     {
       "name": "FileValidationError",
@@ -19555,7 +20788,8 @@
         "src/backend/file-service/normalizers.js",
         "src/backend/file-service/writers.js",
         "src/main-process/bank-statement-io.js",
-        "src/main-process/recon-id-fix-io.js"
+        "src/main-process/recon-id-fix-io.js",
+        "src/main-process/table-type-detector.js"
       ],
       "refFiles": [
         {
@@ -19592,7 +20826,7 @@
         },
         {
           "file": "src/backend/file-service/readers.js",
-          "count": 15
+          "count": 22
         },
         {
           "file": "src/backend/file-service/writers.js",
@@ -19619,12 +20853,16 @@
           "count": 2
         },
         {
+          "file": "src/main-process/table-type-detector.js",
+          "count": 2
+        },
+        {
           "file": "src/main.js",
-          "count": 1
+          "count": 2
         }
       ],
-      "totalHits": 78,
-      "fileSpan": 16
+      "totalHits": 88,
+      "fileSpan": 17
     },
     {
       "name": "XLSX",
@@ -19658,7 +20896,7 @@
         },
         {
           "file": "src/backend/file-service/readers.js",
-          "count": 3
+          "count": 4
         },
         {
           "file": "src/backend/file-service/writers.js",
@@ -19697,7 +20935,7 @@
           "count": 1
         }
       ],
-      "totalHits": 69,
+      "totalHits": 70,
       "fileSpan": 13
     },
     {
@@ -19769,6 +21007,75 @@
       "fileSpan": 13
     },
     {
+      "name": "applyWatermark",
+      "defFiles": [
+        "src/backend/file-service/writers.js",
+        "src/backend/pending-export/writer.js",
+        "src/main-process/acquiring-bill-currency-writer.js",
+        "src/main-process/bank-bu-recon-writer.js",
+        "src/main-process/biz-op-recon-writer.js",
+        "src/main-process/exceljs-writer.js",
+        "src/main-process/pending-session.js",
+        "src/main-process/platform-cleanup-writer.js",
+        "src/main-process/recon-id-fix-io.js",
+        "src/main-process/scenario-hit-rows-writer.js",
+        "src/main-process/workbook-watermark.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service/writers.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-writer.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/exceljs-writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/pending-session.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/platform-cleanup-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/scenario-hit-rows-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/workbook-watermark.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 29,
+      "fileSpan": 12
+    },
+    {
       "name": "appendModuleLog",
       "defFiles": [
         "src/backend/database.js",
@@ -19829,70 +21136,6 @@
       "fileSpan": 11
     },
     {
-      "name": "applyWatermark",
-      "defFiles": [
-        "src/backend/file-service/writers.js",
-        "src/backend/pending-export/writer.js",
-        "src/main-process/acquiring-bill-currency-writer.js",
-        "src/main-process/bank-bu-recon-writer.js",
-        "src/main-process/biz-op-recon-writer.js",
-        "src/main-process/exceljs-writer.js",
-        "src/main-process/pending-session.js",
-        "src/main-process/recon-id-fix-io.js",
-        "src/main-process/scenario-hit-rows-writer.js",
-        "src/main-process/workbook-watermark.js",
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/file-service/writers.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/pending-export/writer.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-writer.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-writer.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/biz-op-recon-writer.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/exceljs-writer.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/pending-session.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/recon-id-fix-io.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/scenario-hit-rows-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/workbook-watermark.js",
-          "count": 2
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 27,
-      "fileSpan": 11
-    },
-    {
       "name": "pad",
       "defFiles": [
         "src/backend/logger.js",
@@ -19942,6 +21185,53 @@
       ],
       "totalHits": 66,
       "fileSpan": 10
+    },
+    {
+      "name": "normalizeCellValue",
+      "defFiles": [
+        "src/main-process/scenario-engines/engine-utils.js",
+        "src/main-process/scenario-engines/r1-recon-id-match.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+          "count": 21
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
+          "count": 7
+        }
+      ],
+      "totalHits": 62,
+      "fileSpan": 9
     },
     {
       "name": "PENDING_COLUMNS",
@@ -19995,6 +21285,53 @@
         }
       ],
       "totalHits": 33,
+      "fileSpan": 9
+    },
+    {
+      "name": "makeWarningCollector",
+      "defFiles": [
+        "src/main-process/scenario-engines/engine-utils.js",
+        "src/main-process/scenario-engines/r1-recon-id-match.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 18,
       "fileSpan": 9
     },
     {
@@ -20294,6 +21631,155 @@
       "fileSpan": 7
     },
     {
+      "name": "BANK_STATEMENT_FIELDS",
+      "defFiles": [
+        "src/constants/bank-statement-fields.js",
+        "src/constants/table-signatures.js",
+        "src/main-process/bank-statement-io.js",
+        "src/main-process/scenario-hit-rows-writer.js",
+        "src/preload.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/bank-statement-fields.js",
+          "count": 3
+        },
+        {
+          "file": "src/constants/table-signatures.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/bank-statement-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-hit-rows-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 3
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 9
+        }
+      ],
+      "totalHits": 21,
+      "fileSpan": 6
+    },
+    {
+      "name": "ExcelJS",
+      "defFiles": [
+        "src/main-process/acquiring-bill-currency-writer.js",
+        "src/main-process/bank-bu-recon-writer.js",
+        "src/main-process/biz-op-recon-writer.js",
+        "src/main-process/exceljs-writer.js",
+        "src/main-process/platform-cleanup-writer.js",
+        "src/main-process/scenario-hit-rows-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/acquiring-bill-currency-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/exceljs-writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/platform-cleanup-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-hit-rows-writer.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 17,
+      "fileSpan": 6
+    },
+    {
+      "name": "runReconciliation",
+      "defFiles": [
+        "src/backend/pending-reconcile/engine.js",
+        "src/main-process/bank-bu-recon-session.js",
+        "src/main-process/biz-op-recon-session.js",
+        "src/main-process/reconciliation-orchestrator.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-reconcile/engine.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/reconciliation-orchestrator.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 14,
+      "fileSpan": 6
+    },
+    {
+      "name": "makeModificationCollector",
+      "defFiles": [
+        "src/main-process/scenario-engines/engine-utils.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 6
+    },
+    {
       "name": "getRunById",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/run-repository.js",
@@ -20341,7 +21827,7 @@
         },
         {
           "file": "src/renderer-dialogs.js",
-          "count": 347
+          "count": 349
         },
         {
           "file": "src/renderer-pending.js",
@@ -20356,7 +21842,7 @@
           "count": 71
         }
       ],
-      "totalHits": 450,
+      "totalHits": 452,
       "fileSpan": 5
     },
     {
@@ -20380,14 +21866,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 48
+          "count": 49
         },
         {
           "file": "src/renderer.js",
           "count": 3
         }
       ],
-      "totalHits": 56,
+      "totalHits": 57,
       "fileSpan": 5
     },
     {
@@ -20422,36 +21908,6 @@
         }
       ],
       "totalHits": 42,
-      "fileSpan": 5
-    },
-    {
-      "name": "normalizeCellValue",
-      "defFiles": [
-        "src/main-process/scenario-engines/engine-utils.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
-          "count": 21
-        },
-        {
-          "file": "src/main-process/scenario-engines/engine-utils.js",
-          "count": 6
-        }
-      ],
-      "totalHits": 41,
       "fileSpan": 5
     },
     {
@@ -20520,39 +21976,6 @@
       "fileSpan": 5
     },
     {
-      "name": "BANK_STATEMENT_FIELDS",
-      "defFiles": [
-        "src/constants/bank-statement-fields.js",
-        "src/main-process/bank-statement-io.js",
-        "src/main-process/scenario-hit-rows-writer.js",
-        "src/preload.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/constants/bank-statement-fields.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/bank-statement-io.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-hit-rows-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/preload.js",
-          "count": 3
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 9
-        }
-      ],
-      "totalHits": 19,
-      "fileSpan": 5
-    },
-    {
       "name": "BILL_HEADERS",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/columns.js",
@@ -20610,40 +22033,6 @@
         },
         {
           "file": "src/main-process/biz-op-recon-writer.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 15,
-      "fileSpan": 5
-    },
-    {
-      "name": "ExcelJS",
-      "defFiles": [
-        "src/main-process/acquiring-bill-currency-writer.js",
-        "src/main-process/bank-bu-recon-writer.js",
-        "src/main-process/biz-op-recon-writer.js",
-        "src/main-process/exceljs-writer.js",
-        "src/main-process/scenario-hit-rows-writer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/acquiring-bill-currency-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-writer.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/biz-op-recon-writer.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/exceljs-writer.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-hit-rows-writer.js",
           "count": 2
         }
       ],
@@ -20808,68 +22197,6 @@
       "fileSpan": 5
     },
     {
-      "name": "runReconciliation",
-      "defFiles": [
-        "src/backend/pending-reconcile/engine.js",
-        "src/main-process/bank-bu-recon-session.js",
-        "src/main-process/biz-op-recon-session.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pending-reconcile/engine.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-session.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/biz-op-recon-session.js",
-          "count": 1
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        },
-        {
-          "file": "src/renderer-pending.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 11,
-      "fileSpan": 5
-    },
-    {
-      "name": "makeWarningCollector",
-      "defFiles": [
-        "src/main-process/scenario-engines/engine-utils.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/engine-utils.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 10,
-      "fileSpan": 5
-    },
-    {
       "name": "formatTimestamp",
       "defFiles": [
         "src/backend/database/backup.js",
@@ -21005,14 +22332,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 29
+          "count": 33
         },
         {
           "file": "src/renderer.js",
-          "count": 90
+          "count": 96
         }
       ],
-      "totalHits": 140,
+      "totalHits": 150,
       "fileSpan": 4
     },
     {
@@ -21093,6 +22420,33 @@
         }
       ],
       "totalHits": 17,
+      "fileSpan": 4
+    },
+    {
+      "name": "parseNumber",
+      "defFiles": [
+        "src/backend/pending-reconcile/removal-match.js",
+        "src/main-process/scenario-engines/engine-utils.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-reconcile/removal-match.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 16,
       "fileSpan": 4
     },
     {
@@ -21340,6 +22694,34 @@
       "fileSpan": 4
     },
     {
+      "name": "normalizeDateExportValue",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js",
+        "src/backend/file-service/normalizers.js",
+        "src/main-process/scenario-engines/engine-date-utils.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/file-service/normalizers.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-date-utils.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 10,
+      "fileSpan": 4
+    },
+    {
       "name": "PENDING_GUANLI_DB_COLUMNS",
       "defFiles": [
         "src/backend/bank-bu-recon-db/columns.js"
@@ -21359,6 +22741,32 @@
         },
         {
           "file": "src/main-process/bank-bu-recon-writer.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 10,
+      "fileSpan": 4
+    },
+    {
+      "name": "valuesEqual",
+      "defFiles": [
+        "src/main-process/scenario-engines/engine-utils.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
           "count": 3
         }
       ],
@@ -21660,32 +23068,6 @@
       "fileSpan": 4
     },
     {
-      "name": "makeModificationCollector",
-      "defFiles": [
-        "src/main-process/scenario-engines/engine-utils.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/engine-utils.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 8,
-      "fileSpan": 4
-    },
-    {
       "name": "OPPONENT_BILL_FIELDS",
       "defFiles": [
         "src/constants/recon-id-fix-fields.js",
@@ -21735,6 +23117,32 @@
         {
           "file": "src/preload.js",
           "count": 2
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 4
+    },
+    {
+      "name": "readRowsWithMetadata",
+      "defFiles": [
+        "src/backend/file-service/readers.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/table-type-detector.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
         }
       ],
       "totalHits": 8,
@@ -22694,29 +24102,6 @@
       "fileSpan": 3
     },
     {
-      "name": "parseNumber",
-      "defFiles": [
-        "src/backend/pending-reconcile/removal-match.js",
-        "src/main-process/scenario-engines/engine-utils.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pending-reconcile/removal-match.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/scenario-engines/engine-utils.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 12,
-      "fileSpan": 3
-    },
-    {
       "name": "importsRepository",
       "defFiles": [
         "src/backend/biz-op-recon-import/import-worker.js",
@@ -23406,28 +24791,6 @@
       "fileSpan": 3
     },
     {
-      "name": "valuesEqual",
-      "defFiles": [
-        "src/main-process/scenario-engines/engine-utils.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/engine-utils.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 7,
-      "fileSpan": 3
-    },
-    {
       "name": "writeBizOpErrorReportXlsx",
       "defFiles": [
         "src/main-process/biz-op-recon-writer.js"
@@ -23808,28 +25171,6 @@
         {
           "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
           "count": 2
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 3
-    },
-    {
-      "name": "readRowsWithMetadata",
-      "defFiles": [
-        "src/backend/file-service/readers.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/file-service.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 2
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
         }
       ],
       "totalHits": 6,
@@ -24354,6 +25695,30 @@
       "fileSpan": 3
     },
     {
+      "name": "runAllScenarios",
+      "defFiles": [
+        "src/main-process/reconciliation-orchestrator.js",
+        "src/main-process/scenario-dispatcher.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/reconciliation-orchestrator.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-dispatcher.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
       "name": "setEnabledModules",
       "defFiles": [
         "src/backend/database/settings-repository.js"
@@ -24695,14 +26060,14 @@
       "refFiles": [
         {
           "file": "src/renderer-previews.js",
-          "count": 49
+          "count": 50
         },
         {
           "file": "src/renderer.js",
           "count": 22
         }
       ],
-      "totalHits": 71,
+      "totalHits": 72,
       "fileSpan": 2
     },
     {
@@ -25634,6 +26999,25 @@
       "fileSpan": 2
     },
     {
+      "name": "normalizeKey",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js",
+        "src/main-process/bank-bu-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 2
+    },
+    {
       "name": "PRAGMA_STATEMENTS",
       "defFiles": [
         "src/main-process/run-check-multiworker-worker.js",
@@ -25762,6 +27146,25 @@
       "fileSpan": 2
     },
     {
+      "name": "BANK_RECON_ID_FIELD",
+      "defFiles": [
+        "src/main-process/scenario-engines/r1-recon-id-match.js",
+        "src/main-process/scenario-engines/r4-fund-nature-check.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
       "name": "bankStatementSession",
       "defFiles": [
         "src/main.js"
@@ -25848,6 +27251,25 @@
         {
           "file": "src/backend/database/utils.js",
           "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "CLEANUP_TEMPLATE_HEADERS",
+      "defFiles": [
+        "src/constants/platform-cleanup-template-fields.js",
+        "src/main-process/platform-cleanup-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/platform-cleanup-template-fields.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/platform-cleanup-writer.js",
+          "count": 3
         }
       ],
       "totalHits": 6,
@@ -26214,7 +27636,61 @@
       "fileSpan": 2
     },
     {
+      "name": "ensureFundTypeAchReturnConfigMigration",
+      "defFiles": [
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "ensureLinkedTableSupport",
+      "defFiles": [
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
       "name": "ensureParentTemplateSupport",
+      "defFiles": [
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "ensureReconRoundBuiltinScenariosSeed",
       "defFiles": [
         "src/backend/database/migrations.js"
       ],
@@ -26352,6 +27828,24 @@
         {
           "file": "src/backend/database/migrations.js",
           "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "ensureSupportedFile",
+      "defFiles": [
+        "src/backend/file-service/readers.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 4
         }
       ],
       "totalHits": 6,
@@ -26503,6 +27997,25 @@
       "fileSpan": 2
     },
     {
+      "name": "GW_RECON_ID_FIELD",
+      "defFiles": [
+        "src/main-process/scenario-engines/r1-recon-id-match.js",
+        "src/main-process/scenario-engines/r4-fund-nature-check.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
       "name": "initWorkerDb",
       "defFiles": [
         "src/main-process/run-check-multiworker-worker.js",
@@ -26607,24 +28120,6 @@
         {
           "file": "src/backend/database/migrations.js",
           "count": 2
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 2
-    },
-    {
-      "name": "normalizeDateExportValue",
-      "defFiles": [
-        "src/backend/file-service/normalizers.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/file-service.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/file-service/normalizers.js",
-          "count": 3
         }
       ],
       "totalHits": 6,
@@ -27000,24 +28495,6 @@
       "fileSpan": 2
     },
     {
-      "name": "ensureSupportedFile",
-      "defFiles": [
-        "src/backend/file-service/readers.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/file-service.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
       "name": "ERROR_HEADER_TAIL",
       "defFiles": [
         "src/backend/biz-op-recon-db/columns.js"
@@ -27101,6 +28578,24 @@
         },
         {
           "file": "src/backend/database/template-repository.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "getLinkedTableMeta",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
           "count": 3
         }
       ],
@@ -27493,6 +28988,25 @@
       "fileSpan": 2
     },
     {
+      "name": "ALL_TABLE_SIGNATURES",
+      "defFiles": [
+        "src/constants/table-signatures.js",
+        "src/main-process/table-type-detector.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/table-signatures.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/table-type-detector.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "applyApplicableChannelIdsInTx",
       "defFiles": [
         "src/backend/database/scenarios-repository.js"
@@ -27523,6 +29037,24 @@
         {
           "file": "src/main-process/bank-bu-recon-session.js",
           "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "BankStatementMergeError",
+      "defFiles": [
+        "src/main-process/bank-statement-merge.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/bank-statement-merge.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
         }
       ],
       "totalHits": 4,
@@ -27595,6 +29127,25 @@
         },
         {
           "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "CLEANUP_COPY_HEADERS",
+      "defFiles": [
+        "src/constants/platform-cleanup-template-fields.js",
+        "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/platform-cleanup-template-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
           "count": 2
         }
       ],
@@ -27798,6 +29349,25 @@
         },
         {
           "file": "src/backend/pending-reconcile/engine.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "dayDiffWithin",
+      "defFiles": [
+        "src/main-process/scenario-engines/engine-date-utils.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/engine-date-utils.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
           "count": 2
         }
       ],
@@ -28368,6 +29938,25 @@
       "fileSpan": 2
     },
     {
+      "name": "LINKED_TABLE_SIGNATURES",
+      "defFiles": [
+        "src/constants/table-signatures.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/table-signatures.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "listAccountMappings",
       "defFiles": [
         "src/backend/database/settings-repository.js"
@@ -28397,6 +29986,24 @@
         },
         {
           "file": "src/backend/database/template-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "listLinkedTableMeta",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
           "count": 2
         }
       ],
@@ -28641,6 +30248,25 @@
       "fileSpan": 2
     },
     {
+      "name": "PREPROCESS_TABLE_SIGNATURES",
+      "defFiles": [
+        "src/constants/table-signatures.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/table-signatures.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "randomUUID",
       "defFiles": [
         "src/backend/database/migrations.js",
@@ -28653,6 +30279,24 @@
         },
         {
           "file": "src/backend/database/template-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "readLinkedTableRows",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
           "count": 2
         }
       ],
@@ -28804,6 +30448,24 @@
       "fileSpan": 2
     },
     {
+      "name": "replaceLinkedTable",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "resolveCurrencyValue",
       "defFiles": [
         "src/backend/file-service/normalizers.js"
@@ -28872,6 +30534,101 @@
         {
           "file": "src/main-process/run-check-worker.js",
           "count": 1
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "runRound1ReconIdMatch",
+      "defFiles": [
+        "src/main-process/reconciliation-orchestrator.js",
+        "src/main-process/scenario-engines/r1-recon-id-match.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/reconciliation-orchestrator.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "runRound4FundNatureCheck",
+      "defFiles": [
+        "src/main-process/reconciliation-orchestrator.js",
+        "src/main-process/scenario-engines/r4-fund-nature-check.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/reconciliation-orchestrator.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "runRound5FundTransferBackfill",
+      "defFiles": [
+        "src/main-process/reconciliation-orchestrator.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/reconciliation-orchestrator.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "runRound5PlatformInboundCleanup",
+      "defFiles": [
+        "src/main-process/reconciliation-orchestrator.js",
+        "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/reconciliation-orchestrator.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "sameDay",
+      "defFiles": [
+        "src/main-process/scenario-engines/engine-date-utils.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/engine-date-utils.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 2
         }
       ],
       "totalHits": 4,
@@ -29015,24 +30772,6 @@
         },
         {
           "file": "src/backend/database/settings-repository.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 2
-    },
-    {
-      "name": "showComingSoon",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 2
-        },
-        {
-          "file": "src/renderer.js",
           "count": 2
         }
       ],
@@ -29643,6 +31382,25 @@
       "fileSpan": 2
     },
     {
+      "name": "detectTableType",
+      "defFiles": [
+        "src/main-process/table-type-detector.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/table-type-detector.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "findByChannelAndName",
       "defFiles": [
         "src/backend/database/scenarios-repository.js"
@@ -30075,6 +31833,24 @@
       "fileSpan": 2
     },
     {
+      "name": "listSheetNames",
+      "defFiles": [
+        "src/backend/file-service/readers.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/table-type-detector.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "listSuccessDates",
       "defFiles": [
         "src/backend/biz-op-recon-db/run-repository.js"
@@ -30160,6 +31936,24 @@
         },
         {
           "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "mergeBankStatementRows",
+      "defFiles": [
+        "src/main-process/bank-statement-merge.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/bank-statement-merge.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
           "count": 1
         }
       ],
@@ -30407,25 +32201,6 @@
       "fileSpan": 2
     },
     {
-      "name": "runAllScenarios",
-      "defFiles": [
-        "src/main-process/scenario-dispatcher.js",
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-dispatcher.js",
-          "count": 2
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 3,
-      "fileSpan": 2
-    },
-    {
       "name": "runOwnAccountsMigration",
       "defFiles": [
         "src/backend/database/own-accounts-migration.js",
@@ -30493,6 +32268,24 @@
         },
         {
           "file": "src/backend/database/scenarios-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "showComingSoon",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer.js",
           "count": 2
         }
       ],
@@ -30671,6 +32464,25 @@
       "refFiles": [
         {
           "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "writePlatformCleanupOutput",
+      "defFiles": [
+        "src/main-process/platform-cleanup-writer.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/platform-cleanup-writer.js",
           "count": 2
         },
         {

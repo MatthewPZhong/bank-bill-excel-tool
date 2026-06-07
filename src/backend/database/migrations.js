@@ -1391,6 +1391,233 @@ function ensureScenarioApplicableChannelsTable(db) {
   `);
 }
 
+// v2.1.16-beta.2 §8：5 轮对账 R4/R5 内置场景 seed（🔴 资金红线 —— config 字段须与引擎/编排器逐字对齐）
+//   插入 7 个内置「自带写死场景」(builtin-fixed)：5 个 R4 资金性质校验 + 2 个 R5 中台订单数据处理。
+//
+// ⚠️ config 字段契约（资金红线，改值即改资金口径；偏离会让场景静默落入 R2 或 handler 不命中）：
+//   公共：funcCategory / subCategory / roundPhase / priority(∈0..3) / function(中文功能描述) / involvedFiles(数组)
+//   编排器 reconciliation-orchestrator.js bucketScenarios 分桶字面值（必须逐字一致）：
+//     - R4         : category==='builtin-fixed' && config.funcCategory==='fund-nature-check'
+//     - R5 场景2   : config.funcCategory==='platform-order' && config.subCategory==='fund-transfer-backfill'
+//     - R5 场景3   : config.funcCategory==='platform-order' && config.subCategory==='platform-inbound-cleanup'
+//   R4 handler（r4-fund-nature-check.js applyHandler 读）：gwTradeType? / requireBankFundType? / setFundType
+//   R5 场景2（r5-fund-transfer-backfill.js 读）：directions[] / dateToleranceDays
+//   R5 场景3（r5-platform-inbound-cleanup.js 读）：gwTradeType / excludeFundType
+//
+// 🔴 TradeType / FundType 真实取值（来自 PRD §八 Q1 默认值 / §五判定表）——【待用户核对真实网关取值】，
+//    已全部 config 化（改值不动代码）：AchReturn / WireReturn / HX_OUTBOUND / HX_INBOUND / Inbound-VA /
+//    FundTransfer-out / FundTransfer-in，以及目标 FundType：Ach Return / Wire Return / outbound / HX-out / HX-in。
+//
+// 幂等（仿 ensureBuiltinFixedScenarioMigration / ensureScenariosSupport seed 范式）：
+//   - 定位键：is_builtin=1 AND category='builtin-fixed' AND config_json LIKE '%"subCategory":"<X>"%'。
+//     已存在则【跳过不覆盖】（保护用户对内置场景的改动 —— priority / config / 启停 / 改名）。
+//   - 删除是终态：用户删某条 → 定位不到 → 但本函数不写 seed marker，仅凭「在场即跳过」；
+//     删除后再次启动仍定位不到该 subCategory → 会被重新插回？否：见下「删除不复活」设计。
+//     —— 采用「逐条 subCategory 定位」+ app_settings marker 双保险：marker 一旦写过 → 整体不再 seed，
+//        与 BUILTIN_SCENARIOS 的 scenarios_seeded 同语义（D14 删除终态保护），避免用户删除后复活。
+//   - 事务包裹（BEGIN/COMMIT/ROLLBACK）。
+//   - 前置：scenarios.category CHECK 必须已含 'builtin-fixed'（读 sqlite_master.scenarios.sql 判定）；
+//     未含 → return 跳过，下次启动（CHECK 扩展完成后）重试（仿 ensureScenariosCategoryBuiltinFixed 防御）。
+//   - UNIQUE(channel_id, name) 冲突（用户已有同名场景）→ try/catch 单条跳过，不中断其余。
+//   调用顺序：必须在 ensureScenariosCategoryBuiltinFixed 之后（依赖 CHECK 已扩到含 'builtin-fixed'）。
+const RECON_ROUND_BUILTIN_SCENARIOS_SEEDED_MARKER = 'recon_round_builtin_scenarios_seeded';
+const RECON_ROUND_BUILTIN_SCENARIOS = [
+  // ===== R4 资金性质校验（5 子场景，按 priority 降序执行；详见 r4-fund-nature-check.js）=====
+  {
+    name: '资金性质校验-Ach Return',
+    priority: 3,
+    config: {
+      funcCategory: 'fund-nature-check',
+      subCategory: 'ach-return',
+      roundPhase: 4,
+      // 🔴【待用户核对真实网关取值】AchReturn
+      gwTradeType: 'AchReturn',
+      setFundType: 'Ach Return',
+      function: '网关交易类型为 AchReturn 时，将关联银行行的资金性质 FundType 改写为「Ach Return」（退票）。',
+      involvedFiles: ['银行对账单']
+    }
+  },
+  {
+    name: '资金性质校验-Wire Return',
+    priority: 2,
+    config: {
+      funcCategory: 'fund-nature-check',
+      subCategory: 'wire-return',
+      roundPhase: 4,
+      // 🔴【待用户核对真实网关取值】WireReturn
+      gwTradeType: 'WireReturn',
+      setFundType: 'Wire Return',
+      function: '网关交易类型为 WireReturn 时，将关联银行行的资金性质 FundType 改写为「Wire Return」（电汇退回）。',
+      involvedFiles: ['银行对账单']
+    }
+  },
+  {
+    name: '资金性质校验-Charge转outbound',
+    priority: 1,
+    config: {
+      funcCategory: 'fund-nature-check',
+      subCategory: 'charge-outbound',
+      roundPhase: 4,
+      // Charge→outbound：仅凭「有 R1 匹配」+ 银行 FundType=Charge 即命中（不校验网关 TradeType，PRD §八 Q3）
+      requireBankFundType: 'Charge',
+      setFundType: 'outbound',
+      function: '银行行资金性质为 Charge 且与网关对账ID匹配成功时，将 FundType 改写为「outbound」（手续费归并出账）。',
+      involvedFiles: ['银行对账单']
+    }
+  },
+  {
+    name: '资金性质校验-HX-out',
+    priority: 1,
+    config: {
+      funcCategory: 'fund-nature-check',
+      subCategory: 'hx-out',
+      roundPhase: 4,
+      // 🔴【待用户核对真实网关取值】HX_OUTBOUND
+      gwTradeType: 'HX_OUTBOUND',
+      setFundType: 'HX-out',
+      function: '网关交易类型为 HX_OUTBOUND 时，将关联银行行的资金性质 FundType 改写为「HX-out」（划汇出账）。',
+      involvedFiles: ['银行对账单']
+    }
+  },
+  {
+    name: '资金性质校验-HX-in',
+    priority: 0,
+    config: {
+      funcCategory: 'fund-nature-check',
+      subCategory: 'hx-in',
+      roundPhase: 4,
+      // 🔴【待用户核对真实网关取值】HX_INBOUND
+      gwTradeType: 'HX_INBOUND',
+      setFundType: 'HX-in',
+      function: '网关交易类型为 HX_INBOUND 时，将关联银行行的资金性质 FundType 改写为「HX-in」（划汇入账）。',
+      involvedFiles: ['银行对账单']
+    }
+  },
+  // ===== R5 中台订单数据处理（2 场景；详见 r5-fund-transfer-backfill.js / r5-platform-inbound-cleanup.js）=====
+  {
+    name: '中台调拨订单对账ID回填',
+    priority: 0,
+    config: {
+      funcCategory: 'platform-order',
+      subCategory: 'fund-transfer-backfill',
+      roundPhase: 5,
+      // 🔴【待用户核对真实网关取值】FundTransfer-out / FundTransfer-in（两方向独立跑）
+      directions: [
+        { gwTradeType: 'FundTransfer-out', bankFundType: 'FundTransfer-out' },
+        { gwTradeType: 'FundTransfer-in', bankFundType: 'FundTransfer-in' }
+      ],
+      dateToleranceDays: 1,
+      function: '网关 FundTransfer-out/in 与 R4 后银行同向行按商户/币种/发生额绝对值/日期(同日优先,±1日兜底)1v1 匹配，命中后把网关 reconciliationid 回填进银行 ReconciliationId。',
+      involvedFiles: ['银行对账单']
+    }
+  },
+  {
+    name: '中台加款单脏数据处理',
+    priority: 0,
+    config: {
+      funcCategory: 'platform-order',
+      subCategory: 'platform-inbound-cleanup',
+      roundPhase: 5,
+      // 🔴【待用户核对真实网关取值】Inbound-VA；excludeFundType=Inbound（命中但 FundType=Inbound 不产剔除行）
+      gwTradeType: 'Inbound-VA',
+      excludeFundType: 'Inbound',
+      function: '网关 Inbound-VA 与银行行按对账ID 1v1 匹配，命中且银行 FundType 不为 Inbound 时，生成 1 条中台加款单剔除行（加款单号=网关 orderid，附言含银行 FundType）。',
+      involvedFiles: ['中台加款单剔除模板']
+    }
+  }
+];
+
+function ensureReconRoundBuiltinScenariosSeed(db) {
+  // 前置 1：scenarios 表 CHECK 必须已含 'builtin-fixed'（否则 INSERT 触发 CHECK 失败）。
+  //   未含 → 跳过本次，下次启动（ensureScenariosCategoryBuiltinFixed 扩 CHECK 后）重试。
+  const tableSqlRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'"
+  ).get();
+  if (!tableSqlRow || !tableSqlRow.sql) return { status: 'skipped-no-scenarios-table' };
+  if (!tableSqlRow.sql.includes("'builtin-fixed'")) {
+    return { status: 'skipped-check-not-extended' };
+  }
+
+  // 前置 2：marker 已写 → 整体不再 seed（D14 删除终态保护：用户删光这些内置场景后重启不复活）。
+  //   仿 BUILTIN_SCENARIOS 的 scenarios_seeded：删除是终态，凭 marker 不靠「在场」。
+  let markerRow;
+  try {
+    markerRow = db
+      .prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?')
+      .get(RECON_ROUND_BUILTIN_SCENARIOS_SEEDED_MARKER);
+  } catch (_e) {
+    // app_settings 表不存在（极早期启动）→ 跳过，等下次启动 schema 完整后再 seed
+    return { status: 'skipped-no-settings-table' };
+  }
+  if (markerRow && String(markerRow.setting_value) === 'true') {
+    return { status: 'already-seeded' };
+  }
+
+  const now = new Date().toISOString();
+  // 定位语句：凭 is_builtin + builtin-fixed + config_json 含特定 subCategory（已存在则跳过不覆盖用户改动）。
+  const locate = db.prepare(
+    `SELECT id FROM scenarios
+      WHERE is_builtin = 1
+        AND category = 'builtin-fixed'
+        AND config_json LIKE ?`
+  );
+  const insert = db.prepare(`
+    INSERT INTO scenarios
+      (category, name, priority, enabled, config_json, is_builtin, channel_id, created_at, updated_at)
+    VALUES ('builtin-fixed', ?, ?, 1, ?, 1, 1, ?, ?)
+  `);
+
+  let inserted = 0;
+  let skippedExisting = 0;
+  let skippedConflict = 0;
+  db.exec('BEGIN');
+  try {
+    for (const scenario of RECON_ROUND_BUILTIN_SCENARIOS) {
+      // 幂等定位：同 subCategory 的内置 builtin-fixed 场景已存在 → 跳过不覆盖
+      const subCategory = scenario.config.subCategory;
+      const likePattern = `%"subCategory":"${subCategory}"%`;
+      const existing = locate.get(likePattern);
+      if (existing) {
+        skippedExisting += 1;
+        continue;
+      }
+      try {
+        insert.run(
+          scenario.name,
+          scenario.priority,
+          JSON.stringify(scenario.config),
+          now,
+          now
+        );
+        inserted += 1;
+      } catch (insErr) {
+        // UNIQUE(channel_id, name) 冲突（用户已有同名场景，channel_id=1）→ 单条跳过保留用户场景
+        const msg = insErr && insErr.message ? insErr.message : String(insErr);
+        if (/UNIQUE|constraint/i.test(msg)) {
+          skippedConflict += 1;
+          continue;
+        }
+        throw insErr; // 其它错误（如 CHECK）→ 抛出回滚
+      }
+    }
+
+    // 写 marker（无论本次插了几条 —— 仅首次启动写一次；此后删除不复活）。
+    db.prepare(`
+      INSERT INTO app_settings (setting_key, setting_value, updated_at)
+      VALUES (?, 'true', ?)
+      ON CONFLICT(setting_key) DO UPDATE
+      SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+    `).run(RECON_ROUND_BUILTIN_SCENARIOS_SEEDED_MARKER, now);
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+
+  return { status: 'seeded', inserted, skippedExisting, skippedConflict };
+}
+
 // v2.1.9 N5：DB schema 总迁移函数（🔴 资金红线 + 破坏性 schema 变更，不可逆）
 //
 // 步骤：
@@ -1445,6 +1672,66 @@ function ensureSchemaV2_1_9_N5(db, createBackupFn) {
       backupPath,
     };
   }
+}
+
+// v2.1.16-beta.2 §FundType：一次性修存量 config 里 FundType 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线 — FundType 枚举值）
+//
+// 背景：
+//   - assets/FundType枚举值.xlsx 历史上把 'Ach Return' 误拼成 'Ach Ruturn'（见 src/constants/fund-type-enum.js）。
+//     C2 打标场景弹窗的 FundType 下拉直接来自该 xlsx（值「严格按文件原样」不纠正），
+//     故老用户若在 C2 场景里选过该值，scenarios.config_json 会持久化字面 'Ach Ruturn'。
+//   - 本版已把 xlsx 内容改正为 'Ach Return'；存量 config 里的旧错拼值不会被自动同步 → 需一次性数据迁移修正，
+//     否则旧场景的打标值与新枚举不一致（资金性质打标依赖 FundType 字面匹配）。
+//   - 注：R4/R5 内置场景（ensureReconRoundBuiltinScenariosSeed）seed 时用的就是正确拼写 'Ach Return'，本迁移不影响它们；
+//     仅修「用户手动在 config 里存过 'Ach Ruturn' 的行」（绝大多数库无引用 → no-op，属精确性防护）。
+//
+// 安全策略：
+//   - **精确字面替换**：只把 config_json 文本里出现的精确子串 'Ach Ruturn' 全部替换为 'Ach Return'，
+//     不解析 config 结构（FundType 可能出现在 markValue / setValue / 条件 value 等多处，逐字段解析易漏；
+//     字面替换覆盖全部位置）。'Ach Ruturn' 是高辨识度错拼串，误伤其它内容风险极低。
+//   - 事务包裹：BEGIN / COMMIT，失败 ROLLBACK；只对「确实含该串」的行做 UPDATE。
+//   - 幂等：执行一次后 config 里不再含 'Ach Ruturn'，再次运行 SELECT ... LIKE '%Ach Ruturn%' 命中 0 行 → no-op。
+//
+// 返回：{ status: 'no-op' | 'migrated', scanned, updated }
+function ensureFundTypeAchReturnConfigMigration(db) {
+  // scenarios 表不存在（极早期启动） → 跳过，下次启动重试
+  let rows;
+  try {
+    rows = db.prepare(
+      `SELECT id, config_json FROM scenarios WHERE config_json LIKE '%Ach Ruturn%'`
+    ).all();
+  } catch (_e) {
+    return { status: 'no-op', scanned: 0, updated: 0 };
+  }
+  if (rows.length === 0) {
+    return { status: 'no-op', scanned: 0, updated: 0 };
+  }
+
+  const update = db.prepare(
+    `UPDATE scenarios SET config_json = ?, updated_at = ? WHERE id = ?`
+  );
+  const now = new Date().toISOString();
+  let updated = 0;
+
+  db.exec('BEGIN');
+  try {
+    rows.forEach((row) => {
+      const original = row.config_json;
+      if (typeof original !== 'string' || original.indexOf('Ach Ruturn') === -1) return;
+      // 精确全局替换字面子串（不依赖 config 结构；split/join 避免正则转义风险）
+      const fixed = original.split('Ach Ruturn').join('Ach Return');
+      if (fixed !== original) {
+        update.run(fixed, now, row.id);
+        updated += 1;
+      }
+    });
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+
+  return { status: updated > 0 ? 'migrated' : 'no-op', scanned: rows.length, updated };
 }
 
 // v2.1.10 N4-cont-2：差异行 FK 加 ON DELETE CASCADE 改造（🔴 资金红线 + 不可逆 DB schema 变更）
@@ -2204,6 +2491,10 @@ module.exports = {
   ensureBuiltinFixedScenarioNameUpdate,
   ensureBuiltinFixedScenarioMigration,
   ensureScenarioApplicableChannelsTable,
+  // v2.1.16-beta.2 §8：5 轮对账 R4/R5 内置场景 seed（5 R4 + 2 R5，🔴 资金红线）
+  ensureReconRoundBuiltinScenariosSeed,
+  // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线）
+  ensureFundTypeAchReturnConfigMigration,
   // v2.1.10 N4-cont-2：diff_rows 2 FK 加 ON DELETE CASCADE（🔴 资金红线 + 不可逆 DB schema）
   ensureDiffRowsCascadeMigration_v2_1_10,
   // v2.1.16 阶段一 A3：链接表持久化（meta + 3 张数据表，期权表模板缺失暂不建）
