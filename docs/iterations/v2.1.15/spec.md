@@ -95,3 +95,16 @@
 - W2 资金红线：lock/record 解耦改对账写盘行为，单测 4 类 + 回归兜底。
 - W0 资金红线：差异表内容逐行不变，对拍兜底。
 - W4 兼容：老用户 General 平滑迁移，不可让 `setUiStyle` 抛错。
+
+---
+
+## 9 实施记录
+
+- **commit**：`9ae66e9` `[v2.1.15] release: 转正 2.1.15（...）`（30 files +2134/-834）
+- **PR**：[#60](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/60)（`v2.1.15 → main`）；归档见 `docs/prs/PR60-v2.1.15.md`
+- **验证**：`release-check` EXIT=0（unit 1531/1531 + integration 17 脚本 + smoke passed）；W0 bench 11.9x + 逐行对拍；W2 c3 单测 14 例；W1 loader 9 例；preview ×3
+- **与计划的偏差**：
+  - W0 索引（`bill_imports` 账单日期表达式索引）二级优化**未采用**——核心修复（去 OFFSET）已达 11.9x，索引在 JOIN 顺序下排序大概率用不上且拖慢导入，按 bench 预判裁决不加。
+  - W1 新增文件名定为 `gateway-recon-headers-loader.js`；IPC channel `scenarios:gateway-recon-headers`；loader 降级 fallback 到旧 `GATEWAY_RECON_FIELDS`（非返空），保证 C3 下拉不空白。
+  - W2 fee 字符串化用 `normalizeCellValue(fee)`（与 assign 写入一致）：`0→'0'` / `-5→'-5'` / `0.5→'0.5'`，归一到分不漂移。
+  - 收尾连带修 `scripts/smoke/bank-statement-io.js` 的 P1.3/P1.4 契约（preload 移除 inline `GATEWAY_RECON_FIELDS` 副本后，断言反转为「不应有 inline + 必须有 IPC 桥」）。
