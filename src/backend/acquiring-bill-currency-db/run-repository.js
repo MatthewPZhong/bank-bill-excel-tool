@@ -650,6 +650,27 @@ function listDiffRowsByDateRange(db, { runId, startDate, endDate, limit, offset 
   `).all(runId, startDate, endDate, limit, offset);
 }
 
+// v2.1.15 W0：writer 提速 — listDiffRowsByDateRange 的游标版（去掉 LIMIT/OFFSET 深分页）
+// ⚠️ 资金红线：SELECT 列 / JOIN / WHERE 日期范围 / ORDER BY 必须与 listDiffRowsByDateRange **逐字相同**，
+//   仅去掉末尾 LIMIT ? OFFSET ?，改用 stmt.iterate(...) 单次游标遍历，避免整月单 segment 时
+//   每批全排序 + OFFSET 深分页退化为 O(N²)。
+// node:sqlite DatabaseSync 已支持 prepare(...).iterate()（先例：pending-archive-worker.js:47）。
+// 返回值：可迭代游标（for...of 逐行 yield），调用方按行消费，行内容与 listDiffRowsByDateRange 完全一致。
+function iterateDiffRowsByDateRange(db, { runId, startDate, endDate }) {
+  return db.prepare(`
+    SELECT
+      b.raw_json AS bill_raw_json,
+      d.flow_currency,
+      d.flow_amount_abs
+    FROM ${DIFF_TABLE} d
+    INNER JOIN ${BILL_TABLE} b ON b.id = d.bill_import_id
+    WHERE d.run_id = ?
+      AND COALESCE(json_extract(b.raw_json, '$."账单日期"'), '') >= ?
+      AND COALESCE(json_extract(b.raw_json, '$."账单日期"'), '') <= ?
+    ORDER BY json_extract(b.raw_json, '$."账单日期"') ASC, b.source_file ASC, b.source_row_index ASC
+  `).iterate(runId, startDate, endDate);
+}
+
 // writer 用：拉某 run 涉及的所有 source_file（按用户导入的单据文件名 1 对 1 输出）
 function listSourceFilesByRun(db, { runId, monthKey }) {
   return db.prepare(`
@@ -685,6 +706,8 @@ module.exports = {
   listAllDiffRowsByRun,
   getBillDateCounts,
   listDiffRowsByDateRange,
+  // v2.1.15 W0：listDiffRowsByDateRange 的游标版（writer 提速，去 OFFSET 深分页）
+  iterateDiffRowsByDateRange,
   listSourceFilesByRun,
   // v2.1.8 N1：cleanup 延迟触发标志位 API
   markCleanupPending,

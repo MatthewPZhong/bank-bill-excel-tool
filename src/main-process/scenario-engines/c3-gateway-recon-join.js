@@ -189,25 +189,41 @@ function runC3Scenario(scenario, bankRows, gwRows) {
     }
     const chosen = matched[0];
 
+    // ===== v2.1.15 W2 ⚠️ 资金红线：assign 赋值 + Extra Fee 写盘解耦（spec §4 W2）=====
+    //   重构前（≤v2.1.14）：assign 在 oldValue===newValue 时提前 return，会**跳过** Extra Fee 写入。
+    //   重构后：chosen 确定后拆成两段独立判断（assign / Extra Fee 各自 old!==new 才 record→标黄），
+    //   最后**统一收尾** lock + 消费 gw。1v1 红线语义不变（匹配成功必锁定 + 单向消费 gw）。
+
+    // ---- 段 1：assign 赋值（仅当原值 !== 新值才写入 + record；相同则不写不标黄）----
     // v2.1.8 N2：mode='custom' → newValue 来自 customValue；mode='direct' / 缺失 → 走原逻辑
     const newValue = isCustom
       ? String(assign.customValue || '')
       : normalizeCellValue(chosen.row[assign.gwField]);
-
     const oldValue = normalizeCellValue(bankRow[assign.bankField]);
-    if (oldValue === newValue) {
-      // v2.1.7 round 9 F2 fix（PR #51 reviewer round 3 Finding 1）方案 B：
-      //   bank 已经等于 gw 的值（无需 record 修改），但**仍要 lock + 消费 gw**：
-      //   - lock 防其它场景误改这条 bank（first-match-wins 红线）
-      //   - 消费 gw 让后续 bank 不再选中同一条 gw（严格 1v1 红线）
-      modCollector.lock(rowId);
-      usedGwRowIdx.add(chosen.gIdx);
-      return;
+    if (oldValue !== newValue) {
+      bankRow[assign.bankField] = newValue;
+      modCollector.record(rowId, assign.bankField, oldValue, newValue);
+    }
+    // 注：去掉了原 oldValue===newValue 的 early-return —— 即使 assign 无需改值，
+    //   Extra Fee 段仍要执行，且收尾的 lock + 消费 gw 必须照常发生。
+
+    // ---- 段 2：Extra Fee 写盘（仅当勾选「金额不一致」且 amount 为有限数，即 fee !== null）----
+    //   公式：网关金额 + 差额(fee) = 银行金额，差额作为单独成本写入银行行 'Extra Fee' 列并标黄。
+    //   格式与 assign 写入银行字段一致（normalizeCellValue：number → String，如 5→'5' / -5→'-5' / 0.5→'0.5'）。
+    //   原值已等于差额（oldFee === newFee）→ 只锁定不标黄（与 assign 同值行为一致）。
+    if (fee !== null) {
+      const oldFee = normalizeCellValue(bankRow['Extra Fee']);
+      const newFee = normalizeCellValue(fee);
+      if (oldFee !== newFee) {
+        bankRow['Extra Fee'] = newFee;
+        modCollector.record(rowId, 'Extra Fee', oldFee, newFee);
+      }
     }
 
-    bankRow[assign.bankField] = newValue;
-    modCollector.record(rowId, assign.bankField, oldValue, newValue);
-    // gw 标记已用（round 7 fix：在确认能写值 + record 之后；round 9 fix：oldValue==newValue 分支已上方提前 add）
+    // ---- 收尾：无论上面 assign / Extra Fee 是否 record，匹配成功就 lock + 消费 gw（1v1 红线不变）----
+    //   - lock 防其它场景误改这条 bank（first-match-wins 红线）；record 内部已自动 lock，此处兜底同值/未改场景
+    //   - 消费 gw 让后续 bank 不再选中同一条 gw（严格 1v1 单向消费红线）
+    modCollector.lock(rowId);
     usedGwRowIdx.add(chosen.gIdx);
   });
 

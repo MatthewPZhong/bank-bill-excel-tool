@@ -123,37 +123,45 @@ test.describe('getBackgroundConfig / setBackgroundConfig', () => {
 // UI Style
 // ========================================================================
 
-test.describe('UI Style', () => {
-  test('未 set → null', () => {
-    assert.equal(settingsRepo.getUiStyle(db), null);
-  });
-
-  test('setUiStyle Clear / General', () => {
-    settingsRepo.setUiStyle(db, 'Clear');
+// v2.1.15 W4：弃用 General 风格，UI 风格恒为 'Clear'。
+//   - setUiStyle 写链路已移除（不再有任何路径写入 'General'）。
+//   - getUiStyle 对任何历史/非法值无声兜底为 'Clear'；ensureUiStyleDefault 就地迁移老库 'General'→'Clear'。
+test.describe('UI Style（W4：恒 Clear + General 迁移）', () => {
+  test('未 set → getUiStyle 兜底返回 Clear（不再返回 null）', () => {
     assert.equal(settingsRepo.getUiStyle(db), 'Clear');
-    settingsRepo.setUiStyle(db, 'General');
-    assert.equal(settingsRepo.getUiStyle(db), 'General');
   });
 
-  test('非法 style 抛错', () => {
-    assert.throws(() => settingsRepo.setUiStyle(db, 'Invalid'), /Invalid ui_style/);
+  test('老库 ui_style=General → getUiStyle 无声归一为 Clear', () => {
+    settingsRepo.setSetting(db, 'ui_style', 'General');
+    assert.equal(settingsRepo.getUiStyle(db), 'Clear');
+  });
+
+  test('DB 内任意非法值 → getUiStyle 返回 Clear（不抛错）', () => {
+    settingsRepo.setSetting(db, 'ui_style', 'NotValid');
+    assert.equal(settingsRepo.getUiStyle(db), 'Clear');
+  });
+
+  test('ui_style=Clear → getUiStyle 原样返回 Clear', () => {
+    settingsRepo.setSetting(db, 'ui_style', 'Clear');
+    assert.equal(settingsRepo.getUiStyle(db), 'Clear');
   });
 
   test('ensureUiStyleDefault：首次启动 seed Clear', () => {
     const r = settingsRepo.ensureUiStyleDefault(db);
     assert.equal(r, 'Clear');
-    assert.equal(settingsRepo.getUiStyle(db), 'Clear');
+    assert.equal(settingsRepo.getSetting(db, 'ui_style'), 'Clear');
   });
 
-  test('ensureUiStyleDefault：已 set → 不覆盖', () => {
-    settingsRepo.setUiStyle(db, 'General');
+  test('ensureUiStyleDefault：老库 General → 就地迁移为 Clear（落盘值被改写）', () => {
+    settingsRepo.setSetting(db, 'ui_style', 'General');
     const r = settingsRepo.ensureUiStyleDefault(db);
-    assert.equal(r, 'General');
+    assert.equal(r, 'Clear');
+    // 关键：底层落盘值被迁移为 'Clear'，老用户启动后不再残留 'General'
+    assert.equal(settingsRepo.getSetting(db, 'ui_style'), 'Clear');
   });
 
-  test('DB 内非法值 → getUiStyle 返回 null', () => {
-    settingsRepo.setSetting(db, 'ui_style', 'NotValid');
-    assert.equal(settingsRepo.getUiStyle(db), null);
+  test('setUiStyle 写链路已移除（不再导出）', () => {
+    assert.equal(typeof settingsRepo.setUiStyle, 'undefined');
   });
 });
 

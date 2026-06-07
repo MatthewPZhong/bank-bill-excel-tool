@@ -766,10 +766,6 @@ class AppDatabase {
     return settingsRepository.getUiStyle(this.db);
   }
 
-  setUiStyle(style) {
-    return settingsRepository.setUiStyle(this.db, style);
-  }
-
   ensureUiStyleDefault() {
     return settingsRepository.ensureUiStyleDefault(this.db);
   }
