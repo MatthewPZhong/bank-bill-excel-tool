@@ -1,0 +1,688 @@
+// v2.1.16-beta.4 ③ R5 场景4「中台退款订单回填」引擎单测（🔴 资金红线）
+// PRD-中台退款订单回填-v2.1.16-beta.3 §5.1~§5.5 + §九（决策矩阵 16 格 = 验收基线）
+// TECH §3.3
+//
+// 覆盖：
+//   ① 数据筛选：非 SUBMITTED 剔除 / 非 Ach Return 剔除 / isFundTypeChanged 剔除
+//   ② 16 格矩阵逐格（基数1~4 × S1~S4，命中/报错/提示三态）
+//   ③ JPM-HK（清洗 // → 提 T54SWIC → 单字段等值「银行打款流水号」）
+//   ④ JPM-US（二跳 OR ReconId/ChannelOrderNo → CustomerRef 比对 + 入金表两句式详情）
+//   ⑤ 1v1 双向消费（bank/refund 各只用一次）
+//   ⑥ 命中详情两句式文案
+//   ⑦ 空入参防御
+//   ⑧ 回填行结构（E 列详情 + F~N 9 字段、含 Debit 不含 Credit）
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const E = require('../../../../src/main-process/scenario-engines/r5-refund-order-backfill');
+const {
+  runRound5RefundOrderBackfill,
+  classifyCardinality,
+  bankAmountAbs,
+  extractFeature,
+  matchS1,
+  matchS3,
+  resolveHits,
+  RESULT_ERROR,
+  RESULT_NOTICE
+} = E;
+const { MTX_FEATURE, T54SWIC_FEATURE } = require('../../../../src/constants/refund-backfill-fields');
+const { buildFeatureRegex } = require('../../../../src/main-process/scenario-engines/c1-extract-recon-id');
+
+const MTX_RE = buildFeatureRegex(MTX_FEATURE);
+const T54SWIC_RE = buildFeatureRegex(T54SWIC_FEATURE);
+
+// ---- 夹具 --------------------------------------------------------------
+
+// 银行行（驼峰）。默认值令唯一值键 = M1||USD||10000 分；Debit 100。
+let bankSeq = 0;
+function bank(overrides = {}) {
+  return {
+    _rowId: overrides._rowId || `b${bankSeq++}`,
+    FundType: 'Ach Return',
+    MerchantId: 'M1',
+    Currency: 'USD',
+    'Credit Amount': 0,
+    'Debit Amount': 100,
+    Channel: 'CH',
+    '地区': 'HK',
+    BillDate: '2026-06-01',
+    ReconciliationId: 'RECON-1',
+    ChannelOrderNo: '',
+    CustomerRef: '',
+    'Extra Information': '',
+    'Payment Detail': '',
+    'Drawee Name': '',
+    'Drawee CardNo': '',
+    'Payee CardNo': '',
+    ...overrides
+  };
+}
+
+// refund order 行（中文）。默认令唯一值键 = M1||USD||10000 分（退款金额 100）。
+function refund(overrides = {}) {
+  return {
+    '流水号': 'SN-1',
+    '状态': 'SUBMITTED',
+    '银行大账号': 'M1',
+    '币种': 'USD',
+    '退款金额': 100,
+    '银行打款流水号': '',
+    '附言': '',
+    '付款人名称': '',
+    '付款卡号': '',
+    '虚拟卡号': '',
+    'valueDate': '2026-06-01',
+    ...overrides
+  };
+}
+
+// 入金表行（驼峰，JPM-US）
+function deposit(overrides = {}) {
+  return {
+    ReconciliationId: '',
+    ChannelOrderNo: '',
+    CustomerRef: '',
+    ...overrides
+  };
+}
+
+function run(bankRows, refundRows, depositRows, options) {
+  return runRound5RefundOrderBackfill(bankRows, refundRows, depositRows || [], options || {});
+}
+
+// ======================================================================
+// ① 数据筛选
+// ======================================================================
+test.describe('① 数据筛选', () => {
+  test('refund 非 SUBMITTED 被剔除（不进池 → 无对账）', () => {
+    const b = [bank({ _rowId: 'b1', ChannelOrderNo: 'C1' })];
+    const r = [refund({ '状态': 'SUCCESS', '银行打款流水号': 'C1' })];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 0);
+    // bank 侧无任何 refund 候选 → 不入分组（refundGroup 为空，该组 continue）
+    assert.equal(res.unmatchedRows.length, 0);
+  });
+
+  test('bank 非 Ach Return 被剔除', () => {
+    const b = [bank({ _rowId: 'b1', FundType: 'Charge', ChannelOrderNo: 'C1' })];
+    const r = [refund({ '银行打款流水号': 'C1' })];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 0);
+  });
+
+  test('isFundTypeChanged 命中的行被剔除（FundType 被 R4 改写）', () => {
+    const b = [bank({ _rowId: 'b1', ChannelOrderNo: 'C1' })];
+    const r = [refund({ '银行打款流水号': 'C1' })];
+    const res = run(b, r, [], { isFundTypeChanged: (id) => id === 'b1' });
+    assert.equal(res.backfillRows.length, 0);
+  });
+
+  test('未被改写的 Ach Return 行正常参与', () => {
+    const b = [bank({ _rowId: 'b1', ChannelOrderNo: 'C1' })];
+    const r = [refund({ '银行打款流水号': 'C1' })];
+    const res = run(b, r, [], { isFundTypeChanged: (id) => id === 'bX' });
+    assert.equal(res.backfillRows.length, 1);
+  });
+});
+
+// ======================================================================
+// ② 16 格矩阵：基数1（1:1）× S1~S4
+// ======================================================================
+test.describe('② 基数1（1:1）', () => {
+  test('S1 命中 ChannelOrderNo → 回填', () => {
+    const res = run([bank({ _rowId: 'b1', ChannelOrderNo: 'PAY1' })], [refund({ '银行打款流水号': 'PAY1' })]);
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.unmatchedRows.length, 0);
+  });
+
+  test('S1 命中 CustomerRef → 回填（被查第二字段）', () => {
+    const res = run([bank({ _rowId: 'b1', CustomerRef: 'PAY1' })], [refund({ '银行打款流水号': 'PAY1' })]);
+    assert.equal(res.backfillRows.length, 1);
+  });
+
+  test('S2 命中（MTX 附言包含）→ 回填，S1 不命中时进 S2', () => {
+    const mtx = 'MTX1234567890123456789';
+    const res = run(
+      [bank({ _rowId: 'b1', Channel: 'CH', 'Extra Information': `付款 ${mtx} 备注` })],
+      [refund({ '附言': `本笔 ${mtx} 退款` })]
+    );
+    assert.equal(res.backfillRows.length, 1);
+    assert.match(res.backfillRows[0]['匹配命中详情'], /Extra Information.*附言/);
+  });
+
+  test('S3 命中（付款人名称↔Drawee Name 按位）→ 回填', () => {
+    const res = run(
+      [bank({ _rowId: 'b1', 'Drawee Name': '张三' })],
+      [refund({ '付款人名称': '张三' })]
+    );
+    assert.equal(res.backfillRows.length, 1);
+    assert.match(res.backfillRows[0]['匹配命中详情'], /Drawee Name.*付款人名称/);
+  });
+
+  test('S4 命中（日期 ≤10 天）→ 回填（无任何 S1~S3 关联兜底）', () => {
+    const res = run(
+      [bank({ _rowId: 'b1', BillDate: '2026-06-01' })],
+      [refund({ 'valueDate': '2026-06-05' })] // 差 4 天
+    );
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.unmatchedRows.length, 0);
+  });
+
+  test('S4 日期 >10 天 → 报错人工介入', () => {
+    const res = run(
+      [bank({ _rowId: 'b1', BillDate: '2026-06-01' })],
+      [refund({ 'valueDate': '2026-06-20' })] // 差 19 天
+    );
+    assert.equal(res.backfillRows.length, 0);
+    const err = res.unmatchedRows.find((x) => x['结果类型'] === RESULT_ERROR);
+    assert.ok(err, '应有报错-人工介入行');
+  });
+});
+
+// ======================================================================
+// ② 16 格矩阵：基数2（1:N）银行 1 + refund N
+// ======================================================================
+test.describe('② 基数2（1:N）', () => {
+  test('S1 银行打款流水号只一笔命中 → 回填', () => {
+    const b = [bank({ _rowId: 'b1', ChannelOrderNo: 'PAY1' })];
+    const r = [
+      refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY1' }),
+      refund({ '流水号': 'SN-B', '银行打款流水号': 'OTHER' })
+    ];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-A');
+    // SN-B 未关联 → 收尾提示
+    const notice = res.unmatchedRows.find((x) => x['结果类型'] === RESULT_NOTICE && x['退款单号'] === 'SN-B');
+    assert.ok(notice, 'SN-B 应落未匹配-提示');
+  });
+
+  test('S1 多笔 refund 同时命中同一 bank → 报错人工介入（关联到多笔）', () => {
+    const b = [bank({ _rowId: 'b1', ChannelOrderNo: 'PAY1' })];
+    const r = [
+      refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY1' }),
+      refund({ '流水号': 'SN-B', '银行打款流水号': 'PAY1' })
+    ];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 0);
+    const err = res.unmatchedRows.find((x) => x['结果类型'] === RESULT_ERROR);
+    assert.ok(err, '关联到 2 笔 → 报错');
+  });
+
+  test('S3 多笔 refund 命中 → 报错（✅Q9：多笔报错、一笔回填）', () => {
+    const b = [bank({ _rowId: 'b1', 'Drawee Name': '张三' })];
+    const r = [
+      refund({ '流水号': 'SN-A', '付款人名称': '张三' }),
+      refund({ '流水号': 'SN-B', '付款人名称': '张三' })
+    ];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 0);
+    assert.ok(res.unmatchedRows.some((x) => x['结果类型'] === RESULT_ERROR));
+  });
+});
+
+// ======================================================================
+// ② 16 格矩阵：基数3（N:1）银行 N + refund 1
+// ======================================================================
+test.describe('② 基数3（N:1）', () => {
+  test('S1 仅一条银行行关联到 → 回填，另一条银行行提示', () => {
+    const b = [
+      bank({ _rowId: 'b1', ChannelOrderNo: 'PAY1' }),
+      bank({ _rowId: 'b2', ChannelOrderNo: 'NOPE' })
+    ];
+    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY1' })];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-A');
+    // b2 关联不到 → 提示
+    assert.ok(res.unmatchedRows.some((x) => x['结果类型'] === RESULT_NOTICE));
+  });
+
+  test('S4 N:1 按 BillDate 早→晚取最近回填，多出银行行提示', () => {
+    const b = [
+      bank({ _rowId: 'bLate', BillDate: '2026-06-10' }),
+      bank({ _rowId: 'bEarly', BillDate: '2026-06-02' })
+    ];
+    const r = [refund({ '流水号': 'SN-A', 'valueDate': '2026-06-01' })]; // 离 bEarly 1 天、离 bLate 9 天
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 1);
+    // 早→晚：bEarly（差1天）先匹配并消费 refund；bLate 无 refund 可用 → 提示
+    assert.match(res.backfillRows[0]['渠道流水号'], /RECON/);
+    assert.ok(res.unmatchedRows.length >= 1);
+  });
+});
+
+// ======================================================================
+// ② 16 格矩阵：基数4（N:N）银行 N + refund N
+// ======================================================================
+test.describe('② 基数4（N:N）', () => {
+  test('S1 各自唯一命中 → 两条回填（banks 1v1）', () => {
+    const b = [
+      bank({ _rowId: 'b1', ChannelOrderNo: 'PAY1' }),
+      bank({ _rowId: 'b2', ChannelOrderNo: 'PAY2' })
+    ];
+    const r = [
+      refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY1' }),
+      refund({ '流水号': 'SN-B', '银行打款流水号': 'PAY2' })
+    ];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 2);
+    const sn = res.backfillRows.map((x) => x['退款单号']).sort();
+    assert.deepEqual(sn, ['SN-A', 'SN-B']);
+  });
+
+  test('S1 一条 bank 命中多笔 refund → 报错（关联到多笔）', () => {
+    const b = [
+      bank({ _rowId: 'b1', ChannelOrderNo: 'PAY1' }),
+      bank({ _rowId: 'b2', ChannelOrderNo: 'PAY2' })
+    ];
+    const r = [
+      refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY1' }),
+      refund({ '流水号': 'SN-B', '银行打款流水号': 'PAY1' })
+    ];
+    const res = run(b, r);
+    // b1 关联到 SN-A/SN-B 两笔 → 报错；b2 的 PAY2 关联不到
+    assert.ok(res.unmatchedRows.some((x) => x['结果类型'] === RESULT_ERROR));
+  });
+
+  test('S4 N:N 条数相等按 BillDate 早→晚 1v1（✅Q10）', () => {
+    const b = [
+      bank({ _rowId: 'bLate', BillDate: '2026-06-10' }),
+      bank({ _rowId: 'bEarly', BillDate: '2026-06-01' })
+    ];
+    const r = [
+      refund({ '流水号': 'SN-early', 'valueDate': '2026-06-02' }),
+      refund({ '流水号': 'SN-late', 'valueDate': '2026-06-11' })
+    ];
+    const res = run(b, r);
+    // 早→晚：bEarly 先取最近（SN-early 差1天 vs SN-late 差10天）→ SN-early；bLate 取 SN-late
+    assert.equal(res.backfillRows.length, 2);
+    const byRecon = {};
+    for (const row of res.backfillRows) byRecon[row['BillDate']] = row['退款单号'];
+    assert.equal(byRecon['2026-06-01'], 'SN-early');
+    assert.equal(byRecon['2026-06-10'], 'SN-late');
+  });
+});
+
+// ======================================================================
+// ③ JPM-HK
+// ======================================================================
+test.describe('③ JPM-HK', () => {
+  test('清洗 // → 提 T54SWIC → 单字段等值「银行打款流水号」→ 回填', () => {
+    const b = [bank({
+      _rowId: 'b1', Channel: 'JPM', '地区': 'HK',
+      'Extra Information': '//T54SWIC494447//ABC'
+    })];
+    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'T54SWIC494447' })];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-A');
+    assert.match(res.backfillRows[0]['匹配命中详情'], /银行打款流水号/);
+  });
+
+  test('JPM-HK 脏形态 // 切断流水号清洗后拼回命中（T54SWI//C494447）', () => {
+    const b = [bank({
+      _rowId: 'b1', Channel: 'JPM', '地区': 'HK',
+      'Payment Detail': 'T54SWI//C494447 trailing'
+    })];
+    const r = [refund({ '银行打款流水号': 'T54SWIC494447' })];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 1);
+  });
+
+  test('JPM-HK 未命中 → 回落常规 MTX（同 bank 行 Extra 含 MTX）', () => {
+    const mtx = 'MTX1234567890123456789';
+    const b = [bank({
+      _rowId: 'b1', Channel: 'JPM', '地区': 'HK',
+      'Extra Information': `${mtx} 无 swic`
+    })];
+    const r = [refund({ '附言': `含 ${mtx}` })]; // 银行打款流水号空 → JPM-HK 不命中，回落 MTX
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 1);
+  });
+});
+
+// ======================================================================
+// ④ JPM-US
+// ======================================================================
+test.describe('④ JPM-US', () => {
+  test('二跳 OR（入金表 ReconciliationId==payNo）→ CustomerRef 比对 → 回填 + 入金表两句式详情', () => {
+    const b = [bank({
+      _rowId: 'b1', Channel: 'JPM', '地区': 'US', CustomerRef: 'CR-999'
+    })];
+    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAYNO-1' })];
+    const dep = [deposit({ ReconciliationId: 'PAYNO-1', CustomerRef: 'CR-999' })];
+    const res = run(b, r, dep);
+    assert.equal(res.backfillRows.length, 1);
+    assert.match(res.backfillRows[0]['匹配命中详情'], /银行对账单入金表/);
+    assert.match(res.backfillRows[0]['匹配命中详情'], /CustomerRef/);
+  });
+
+  test('二跳 OR（入金表 ChannelOrderNo==payNo）→ 回填（OR 第二支）', () => {
+    const b = [bank({ _rowId: 'b1', Channel: 'JPM', '地区': 'US', CustomerRef: 'CR-2' })];
+    const r = [refund({ '银行打款流水号': 'PAYNO-2' })];
+    const dep = [deposit({ ChannelOrderNo: 'PAYNO-2', CustomerRef: 'CR-2' })];
+    const res = run(b, r, dep);
+    assert.equal(res.backfillRows.length, 1);
+  });
+
+  test('JPM-US CustomerRef 不等 → 不命中（回落 MTX，本例 MTX 也无 → 落 sheet2）', () => {
+    const b = [bank({ _rowId: 'b1', Channel: 'JPM', '地区': 'US', CustomerRef: 'CR-X' })];
+    const r = [refund({ '银行打款流水号': 'PAYNO-3', 'valueDate': '2030-01-01' })];
+    const dep = [deposit({ ReconciliationId: 'PAYNO-3', CustomerRef: 'CR-DIFF' })];
+    const res = run(b, r, dep);
+    assert.equal(res.backfillRows.length, 0);
+  });
+
+  test('JPM-US 入金表无命中（payNo 找不到）→ 不命中', () => {
+    const b = [bank({ _rowId: 'b1', Channel: 'JPM', '地区': 'US', CustomerRef: 'CR-4' })];
+    const r = [refund({ '银行打款流水号': 'PAYNO-4', 'valueDate': '2030-01-01' })];
+    const dep = [deposit({ ReconciliationId: 'OTHER', CustomerRef: 'CR-4' })];
+    const res = run(b, r, dep);
+    assert.equal(res.backfillRows.length, 0);
+  });
+});
+
+// ======================================================================
+// ⑤ 1v1 双向消费
+// ======================================================================
+test.describe('⑤ 1v1 双向消费', () => {
+  test('一条 refund 只回填一次（各 bank 唯一互配 → 两条独立 refund 各回填一次）', () => {
+    const b = [
+      bank({ _rowId: 'b1', ChannelOrderNo: 'PAY1' }),
+      bank({ _rowId: 'b2', ChannelOrderNo: 'PAY2' })
+    ];
+    const r = [
+      refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY1' }),
+      refund({ '流水号': 'SN-B', '银行打款流水号': 'PAY2' })
+    ];
+    // 严格 1↔1 互配：b1↔SN-A、b2↔SN-B 各回填一次，无重复
+    const res = run(b, r);
+    assert.equal(res.backfillRows.filter((x) => x['退款单号'] === 'SN-A').length, 1);
+    assert.equal(res.backfillRows.filter((x) => x['退款单号'] === 'SN-B').length, 1);
+  });
+
+  test('一条 bank 只被回填一次（命中即停，后续策略不再处理已消费 bank）', () => {
+    // bank 同时满足 S1(ChannelOrderNo) 与 S3(Drawee Name)，命中 S1 即停，不应产生 2 行
+    const res = run(
+      [bank({ _rowId: 'b1', ChannelOrderNo: 'PAY1', 'Drawee Name': '张三' })],
+      [refund({ '银行打款流水号': 'PAY1', '付款人名称': '张三' })]
+    );
+    assert.equal(res.backfillRows.length, 1);
+  });
+});
+
+// ======================================================================
+// ⑥ 命中详情两句式文案
+// ======================================================================
+test.describe('⑥ 命中详情两句式文案', () => {
+  test('bank↔refund 句式精确', () => {
+    const res = run([bank({ _rowId: 'b1', ChannelOrderNo: 'PAY1' })], [refund({ '银行打款流水号': 'PAY1' })]);
+    assert.equal(
+      res.backfillRows[0]['匹配命中详情'],
+      '匹配成功:"银行对账单ChannelOrderNo里的PAY1"匹配上了"refund order银行打款流水号的PAY1"'
+    );
+  });
+
+  test('bank↔入金表（JPM-US）句式精确', () => {
+    const b = [bank({ _rowId: 'b1', Channel: 'JPM', '地区': 'US', CustomerRef: 'CR-9' })];
+    const r = [refund({ '银行打款流水号': 'PAYNO-9' })];
+    const dep = [deposit({ ReconciliationId: 'PAYNO-9', CustomerRef: 'CR-9' })];
+    const res = run(b, r, dep);
+    assert.equal(
+      res.backfillRows[0]['匹配命中详情'],
+      '匹配成功:"银行对账单CustomerRef里的CR-9"匹配上了"银行对账单入金表CustomerRef的CR-9"'
+    );
+  });
+});
+
+// ======================================================================
+// ⑦ 空入参 / 边界
+// ======================================================================
+test.describe('⑦ 空入参 / 边界', () => {
+  test('refundOrderRows 空 → 空 backfill 不抛', () => {
+    const res = run([bank({ _rowId: 'b1' })], []);
+    assert.deepEqual(res.backfillRows, []);
+    assert.deepEqual(res.unmatchedRows, []);
+    assert.deepEqual(res.modifications, []);
+  });
+
+  test('无 Ach Return 银行行 → 空 backfill 不抛', () => {
+    const res = run([bank({ _rowId: 'b1', FundType: 'Charge' })], [refund()]);
+    assert.deepEqual(res.backfillRows, []);
+  });
+
+  test('全 undefined 入参 → 空结果不抛', () => {
+    const res = runRound5RefundOrderBackfill(undefined, undefined, undefined);
+    assert.deepEqual(res.backfillRows, []);
+    assert.deepEqual(res.unmatchedRows, []);
+    assert.deepEqual(res.modifications, []);
+    assert.ok(Array.isArray(res.warnings));
+  });
+
+  test('refund 退款金额非数值 → 不入组、不误命中', () => {
+    const b = [bank({ _rowId: 'b1', ChannelOrderNo: 'PAY1' })];
+    const r = [refund({ '退款金额': 'abc', '银行打款流水号': 'PAY1' })];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 0);
+  });
+});
+
+// ======================================================================
+// ⑧ 回填行结构
+// ======================================================================
+test.describe('⑧ 回填行结构', () => {
+  test('回填行含 A~E + F~N 9 字段，含 Debit Amount 不含 Credit Amount', () => {
+    const res = run(
+      [bank({ _rowId: 'b1', ChannelOrderNo: 'PAY1', 'Debit Amount': 100, 'Credit Amount': 0 })],
+      [refund({ '银行打款流水号': 'PAY1' })]
+    );
+    const row = res.backfillRows[0];
+    // A~E
+    assert.equal(row['退款单号'], 'SN-1');
+    assert.equal(row['状态'], 'SUCCESS');
+    assert.equal(row['渠道流水号'], 'RECON-1');
+    assert.equal(row['渠道退款时间'], '2026-06-01');
+    assert.ok(row['匹配命中详情']);
+    // F~N
+    assert.equal(row['BillDate'], '2026-06-01');
+    assert.equal(row['MerchantId'], 'M1');
+    assert.equal(row['Currency'], 'USD');
+    assert.equal(row['Debit Amount'], 100);
+    assert.ok(!('Credit Amount' in row), '🔴 回填行不得含 Credit Amount');
+  });
+});
+
+// ======================================================================
+// 子函数单测
+// ======================================================================
+test.describe('子函数', () => {
+  test('classifyCardinality 四态', () => {
+    assert.equal(classifyCardinality(1, 1), '1:1');
+    assert.equal(classifyCardinality(1, 3), '1:N');
+    assert.equal(classifyCardinality(3, 1), 'N:1');
+    assert.equal(classifyCardinality(2, 2), 'N:N');
+  });
+
+  test('bankAmountAbs = |credit - debit|，非数值按 0', () => {
+    assert.equal(bankAmountAbs({ 'Credit Amount': 0, 'Debit Amount': 100 }), 100);
+    assert.equal(bankAmountAbs({ 'Credit Amount': 50, 'Debit Amount': 0 }), 50);
+    assert.equal(bankAmountAbs({ 'Credit Amount': 'x', 'Debit Amount': 100 }), 100);
+  });
+
+  test('extractFeature 去重 + lastIndex 安全（连续两次结果一致）', () => {
+    const txt = 'MTX1234567890123456789 / MTX1234567890123456789';
+    assert.deepEqual(extractFeature(txt, MTX_RE), ['MTX1234567890123456789']);
+    // 再调一次确认 regex 模板未被 lastIndex 污染
+    assert.deepEqual(extractFeature(txt, MTX_RE), ['MTX1234567890123456789']);
+  });
+
+  test('extractFeature T54SWIC 含 // 直接命中', () => {
+    assert.deepEqual(extractFeature('//T54SWIC494447//ABC', T54SWIC_RE), ['T54SWIC494447']);
+  });
+
+  test('resolveHits：0→continue / 1→backfill / >1→error-manual', () => {
+    assert.equal(resolveHits([]), 'continue');
+    assert.equal(resolveHits([{}]), 'backfill');
+    assert.equal(resolveHits([{}, {}]), 'error-manual');
+  });
+
+  test('matchS1 空字段不误命中（payNo 与 bankVal 皆空不匹配）', () => {
+    const hits = matchS1(bank({ ChannelOrderNo: '', CustomerRef: '' }), [refund({ '银行打款流水号': '' })]);
+    assert.equal(hits.length, 0);
+  });
+
+  test('matchS3 按位：付款卡号 ↔ Drawee CardNo（不与 Drawee Name 交叉）', () => {
+    // refund 付款卡号='C9'，bank Drawee Name='C9' 但 Drawee CardNo 空 → 不命中（无交叉）
+    const hits = matchS3(bank({ 'Drawee Name': 'C9', 'Drawee CardNo': '' }), [refund({ '付款卡号': 'C9' })]);
+    assert.equal(hits.length, 0);
+    // bank Drawee CardNo='C9' → 命中
+    const hits2 = matchS3(bank({ 'Drawee CardNo': 'C9' }), [refund({ '付款卡号': 'C9' })]);
+    assert.equal(hits2.length, 1);
+  });
+});
+
+// ======================================================================
+// ⑨ SPEC §7 引擎修复（Q13/Q14/Q15）—— 批量解析双向冲突 + S4 冻结快照
+// ======================================================================
+test.describe('⑨ 反向多笔（Q14）：N bank 命中同 1 refund → 全部报错-人工介入、不回填、refund 不被 S4 复用', () => {
+  test('S1 反向多笔：b1/b2 同 ChannelOrderNo → 全报错、backfill=0、SN-A 不在回填', () => {
+    const b = [
+      bank({ _rowId: 'b1', ChannelOrderNo: 'PAY-SAME', BillDate: '2026-12-10' }),
+      bank({ _rowId: 'b2', ChannelOrderNo: 'PAY-SAME', BillDate: '2026-12-10' })
+    ];
+    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY-SAME', 'valueDate': '2026-12-10' })];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 0, '反向多笔不得回填');
+    const errs = res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR);
+    assert.equal(errs.length, 2, 'b1/b2 各一行报错-人工介入');
+    assert.ok(!res.backfillRows.some((x) => x['退款单号'] === 'SN-A'), 'SN-A 不得出现在回填');
+    // Q15：被卷入报错的 refund 锁定，不应被 S4 复用（即使日期容差内也不回填）
+    assert.ok(!res.backfillRows.some((x) => x['退款单号'] === 'SN-A'));
+  });
+
+  test('S2 反向多笔（MTX）：b1/b2 提同一 MTX 命中同 1 refund 附言 → 全报错、backfill=0', () => {
+    const mtx = 'MTX1234567890123456789';
+    const b = [
+      bank({ _rowId: 'b1', Channel: 'CH', 'Extra Information': `付款 ${mtx}`, BillDate: '2026-12-10' }),
+      bank({ _rowId: 'b2', Channel: 'CH', 'Extra Information': `退款 ${mtx}`, BillDate: '2026-12-10' })
+    ];
+    const r = [refund({ '流水号': 'SN-A', '附言': `本笔 ${mtx} 退款`, 'valueDate': '2026-12-10' })];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 0);
+    assert.equal(res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR).length, 2);
+  });
+
+  test('S3 反向多笔：b1/b2 同 Drawee Name 命中同 1 refund 付款人名称 → 全报错、backfill=0', () => {
+    const b = [
+      bank({ _rowId: 'b1', 'Drawee Name': '张三', BillDate: '2026-12-10' }),
+      bank({ _rowId: 'b2', 'Drawee Name': '张三', BillDate: '2026-12-10' })
+    ];
+    const r = [refund({ '流水号': 'SN-A', '付款人名称': '张三', 'valueDate': '2026-12-10' })];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 0);
+    assert.equal(res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR).length, 2);
+  });
+
+  test('S1 反向多笔卷入的 refund 不被 S4 复用（Q15）：另有 bank 日期容差内仍不回填', () => {
+    // b1/b2 反向多笔报错卷入 SN-A；b3 无 S1~S3 关联，valueDate 在容差内本可 S4 命中 SN-A，但 SN-A 已锁定
+    const b = [
+      bank({ _rowId: 'b1', ChannelOrderNo: 'PAY-SAME', BillDate: '2026-12-10' }),
+      bank({ _rowId: 'b2', ChannelOrderNo: 'PAY-SAME', BillDate: '2026-12-10' }),
+      bank({ _rowId: 'b3', BillDate: '2026-12-11' })
+    ];
+    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY-SAME', 'valueDate': '2026-12-11' })];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 0, '锁定的 SN-A 不被 b3 经 S4 复用');
+    assert.ok(!res.backfillRows.some((x) => x['退款单号'] === 'SN-A'));
+  });
+});
+
+test.describe('⑨ S4 顺序无关（Q13）：判据按冻结候选集 + minDayDiff，不随输入顺序变', () => {
+  // refund.valueDate=12-10；b1=12-10(命中)、b2=12-22、b3=12-25（差 >10 天）
+  function makeS4OrderCase(order) {
+    const all = {
+      b1: bank({ _rowId: 'b1', BillDate: '2026-12-10' }),
+      b2: bank({ _rowId: 'b2', BillDate: '2026-12-22' }),
+      b3: bank({ _rowId: 'b3', BillDate: '2026-12-25' })
+    };
+    const b = order.map((k) => all[k]);
+    const r = [refund({ '流水号': 'SN-A', 'valueDate': '2026-12-10' })];
+    return run(b, r);
+  }
+
+  test('原序 [b1,b2,b3]：b1 回填、b2/b3 各一行报错（非提示）', () => {
+    const res = makeS4OrderCase(['b1', 'b2', 'b3']);
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.backfillRows[0]['BillDate'], '2026-12-10');
+    const errs = res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR);
+    assert.equal(errs.length, 2, 'b2/b3 超容差 → 报错');
+    assert.deepEqual(errs.map((x) => x['BillDate']).sort(), ['2026-12-22', '2026-12-25']);
+  });
+
+  test('打乱序 [b3,b1,b2]：结论一致（b1 回填、b2/b3 报错）', () => {
+    const res = makeS4OrderCase(['b3', 'b1', 'b2']);
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.backfillRows[0]['BillDate'], '2026-12-10');
+    const errs = res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR);
+    assert.equal(errs.length, 2);
+    assert.deepEqual(errs.map((x) => x['BillDate']).sort(), ['2026-12-22', '2026-12-25']);
+  });
+
+  test('再打乱 [b2,b3,b1]：结论仍一致', () => {
+    const res = makeS4OrderCase(['b2', 'b3', 'b1']);
+    assert.equal(res.backfillRows.length, 1);
+    const errs = res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR);
+    assert.equal(errs.length, 2);
+  });
+});
+
+test.describe('⑨ S4「在容差但被抢光→提示」vs「超容差→报错」', () => {
+  test('5 bank 全在容差 + 1 refund → 1 回填 + 4 提示（非报错）', () => {
+    const b = [
+      bank({ _rowId: 'b1', BillDate: '2026-12-10' }),
+      bank({ _rowId: 'b2', BillDate: '2026-12-11' }),
+      bank({ _rowId: 'b3', BillDate: '2026-12-12' }),
+      bank({ _rowId: 'b4', BillDate: '2026-12-13' }),
+      bank({ _rowId: 'b5', BillDate: '2026-12-14' })
+    ];
+    const r = [refund({ '流水号': 'SN-A', 'valueDate': '2026-12-10' })];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 1, '仅最近 1 条回填');
+    const notices = res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_NOTICE);
+    const errs = res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR);
+    assert.equal(errs.length, 0, '被抢光的 bank 不应报错');
+    // 4 个抢不到的 bank → 提示（均在容差内，全集 minDayDiff ≤10）
+    const bankNotices = notices.filter((x) => 'BillDate' in x);
+    assert.equal(bankNotices.length, 4, '4 个被抢光 bank → 未匹配-提示');
+  });
+
+  test('超容差 bank → 报错（与被抢光提示区分）：2 bank（1 在容差 1 超容差）+ 1 refund', () => {
+    const b = [
+      bank({ _rowId: 'b1', BillDate: '2026-12-10' }),  // 容差内 → 回填
+      bank({ _rowId: 'b2', BillDate: '2026-12-30' })   // 差 20 天 → 报错
+    ];
+    const r = [refund({ '流水号': 'SN-A', 'valueDate': '2026-12-10' })];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 1);
+    const errs = res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR);
+    assert.equal(errs.length, 1, 'b2 超容差 → 报错');
+    assert.equal(errs[0]['BillDate'], '2026-12-30');
+  });
+});
+
+test.describe('⑨ JPM 反向多笔（Q14 同源）：多 bank 提同一 T54SWIC + 1 refund → 全报错', () => {
+  test('JPM-HK 反向多笔：b1/b2 同 T54SWIC 命中同 1 refund 银行打款流水号 → 全报错、backfill=0', () => {
+    const b = [
+      bank({ _rowId: 'b1', Channel: 'JPM', '地区': 'HK', 'Extra Information': '//T54SWIC494447//', BillDate: '2026-12-10' }),
+      bank({ _rowId: 'b2', Channel: 'JPM', '地区': 'HK', 'Payment Detail': 'T54SWIC494447 xx', BillDate: '2026-12-10' })
+    ];
+    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'T54SWIC494447', 'valueDate': '2026-12-10' })];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 0, 'JPM 反向多笔不得回填');
+    assert.equal(res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR).length, 2);
+    assert.ok(!res.backfillRows.some((x) => x['退款单号'] === 'SN-A'));
+  });
+});
