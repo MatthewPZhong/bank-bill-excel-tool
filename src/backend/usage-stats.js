@@ -38,6 +38,9 @@ const FUNCTION_REGISTRY = Object.freeze({
   '业务OP数据核对': ['导入文件', '开始运行', '导出差异'],
   // v2.1.6：收单单据币种校验（与 main.js trackedIpcHandle 第 3 参严格一致；listMonths / sessionStatus / clearMonth 走 plain ipcMain.handle 不计）
   '收单单据币种校验': ['导入流水表', '导入单据表', '开始运行', '导出差异'],
+  // v2.1.16 PR#61 F1：链接表管理（main.js trackedIpcHandle('linked-table:import', '链接表管理', '导入', ...)
+  //   此前未注册 → incrementFunction 静默丢弃 → 链接表导入成功不计入 .usage-stats.txt。
+  '链接表管理': ['导入'],
   '切换页面风格': ['切换']
 });
 

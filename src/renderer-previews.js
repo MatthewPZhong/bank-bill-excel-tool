@@ -809,6 +809,23 @@
       }, 120);
     }
 
+    // v2.1.16 A1：自带写死场景「管理」弹窗 preview（含优先级输入框）。
+    //   切到资金对账模块 → 打开场景管理 → 点 builtin-fixed 行的「管理」按钮 → 打开适用银行渠道 + 优先级弹窗。
+    //   依赖：迁移 seed 的 builtin-fixed 场景（migrations.js 启动幂等 seed），preview 临时库也会有该行。
+    function applyBuiltinFixedChannelManagePreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      setTimeout(() => {
+        if (!elements.bankStatementScenarioBtn) return;
+        elements.bankStatementScenarioBtn.click();
+        setTimeout(() => {
+          const manageBtn = elements.modalRoot
+            ? elements.modalRoot.querySelector('tr[data-category="builtin-fixed"] [data-row-action="manage"]')
+            : null;
+          if (manageBtn) manageBtn.click();
+        }, 240);
+      }, 120);
+    }
+
     // v2.1.14 C：链接表管理弹窗 preview（切到资金对账数据处理模块 → 点「链接表管理」按钮打开弹窗）
     function applyLinkedTableManagerPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
@@ -1238,6 +1255,8 @@
       // v2.0.0-beta.3：银行对账单处理模块 preview（3 张）
       applyBankStatementPanelPreviewState,
       applyScenariosManagerPreviewState,
+      // v2.1.16 A1：自带写死场景「管理」弹窗（含优先级输入框）preview
+      applyBuiltinFixedChannelManagePreviewState,
       applyScenarioCategorySelectPreviewState,
       // v2.1.14 C：链接表管理弹窗 preview
       applyLinkedTableManagerPreviewState,

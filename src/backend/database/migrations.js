@@ -2088,6 +2088,83 @@ function ensureAcquiringBillCurrencyFix4ColumnsRename(db) {
   }
 }
 
+// v2.1.16 阶段一 A3 — 链接表持久化（资金对账数据处理 / 链接表管理弹窗后端）
+// 混合存储：每张数据表 = 少数「提取键列」（join 键）+ 日期列（建索引）+ raw_json（整行 JSON）+ imported_at
+//   meta 表 linked_table_meta：按 table_key 记录数据日期范围 / 行数 / 来源文件 / 更新时间（前端弹窗渲染用）。
+// tableKey 与前端 createLinkedTableManagerDialog LINKED_TABLES 一一对应：
+//   gateway-bill（网关对账单）/ mid-allocation（中台调拨订单）/ fx-settlement（外汇交割表）
+//   fx-option（外汇期权）模板缺失（PRD v2.1.14 §D ❌ 缺失待补）→ 本批次不建数据表；
+//     CREATE TABLE IF NOT EXISTS 范式保证未来期权模板到位后增量加表零返工。
+// 各表键列 / 日期列来源（已读 assets 模板表头确认，详见 linked-table-repository.js LINKED_TABLE_DEFS）：
+//   linked_gateway_bill   : 键 reconciliation_id(reconciliationid) / 日期 bill_date(Billdate)
+//   linked_mid_allocation : 键 allocation_no(调拨单号)             / 日期 transaction_date(列名已对齐「交易时间」idx 4——业务日期空值率高，数据日期范围用交易时间)
+//   linked_fx_settlement  : 键 transaction_no(交易编号)           / 日期 transaction_date(交易日期)
+// 幂等：CREATE TABLE / INDEX IF NOT EXISTS，多次启动 no-op；纯新增无破坏性（不需备份 / 标志位）。
+// 与现有模块表完全隔离，调用顺序无依赖。
+function ensureLinkedTableSupport(db) {
+  db.exec('BEGIN');
+
+  try {
+    // 元数据表：每 tableKey 一行（前端弹窗「数据日期范围 / 表库更新日期」数据源）
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS linked_table_meta (
+        table_key TEXT PRIMARY KEY,
+        data_date_min TEXT,
+        data_date_max TEXT,
+        row_count INTEGER NOT NULL DEFAULT 0,
+        source_file_name TEXT,
+        updated_at TEXT
+      );
+    `);
+
+    // 数据表 1：网关对账单（键 reconciliation_id / 日期 bill_date）
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS linked_gateway_bill (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reconciliation_id TEXT,
+        bill_date TEXT,
+        raw_json TEXT NOT NULL,
+        imported_at TEXT NOT NULL
+      );
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_gateway_bill_recon ON linked_gateway_bill(reconciliation_id);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_gateway_bill_date ON linked_gateway_bill(bill_date);');
+
+    // 数据表 2：中台调拨订单（键 allocation_no / 日期 transaction_date，列名已对齐「交易时间」）
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS linked_mid_allocation (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        allocation_no TEXT,
+        transaction_date TEXT,
+        raw_json TEXT NOT NULL,
+        imported_at TEXT NOT NULL
+      );
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_mid_allocation_no ON linked_mid_allocation(allocation_no);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_mid_allocation_date ON linked_mid_allocation(transaction_date);');
+
+    // 数据表 3：外汇交割表（键 transaction_no / 日期 transaction_date）
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS linked_fx_settlement (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        transaction_no TEXT,
+        transaction_date TEXT,
+        raw_json TEXT NOT NULL,
+        imported_at TEXT NOT NULL
+      );
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_fx_settlement_no ON linked_fx_settlement(transaction_no);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_fx_settlement_date ON linked_fx_settlement(transaction_date);');
+
+    // 注：linked_fx_option（外汇期权）模板缺失，本批次不建表；待模板到位后在此处增量补一张表。
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
@@ -2129,6 +2206,8 @@ module.exports = {
   ensureScenarioApplicableChannelsTable,
   // v2.1.10 N4-cont-2：diff_rows 2 FK 加 ON DELETE CASCADE（🔴 资金红线 + 不可逆 DB schema）
   ensureDiffRowsCascadeMigration_v2_1_10,
+  // v2.1.16 阶段一 A3：链接表持久化（meta + 3 张数据表，期权表模板缺失暂不建）
+  ensureLinkedTableSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,

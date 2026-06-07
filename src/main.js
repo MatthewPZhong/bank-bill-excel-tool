@@ -59,6 +59,16 @@ const { loadFundTypeEnum, FUND_TYPE_ENUM_FILE_NAME } = require('./constants/fund
 //   assets/网关对账单.xlsx 表头行（main 进程 require；经 IPC scenarios:gateway-recon-headers 暴露给 renderer）
 //   preload 无法 require 自定义模块（Electron sandbox），故走 IPC 而非 inline 副本
 const { loadGatewayReconHeaders, GATEWAY_RECON_HEADERS_FILE_NAME } = require('./constants/gateway-recon-headers-loader');
+// v2.1.16 阶段一 A4：链接表导入（识别 → 读行 → 落库）
+//   - detectTableType：A2 按表头自动识别表类型
+//   - LINKED_TABLE_SIGNATURES：仅 scope='linked' 的候选签名子集（网关/调拨/交割；期权 TODO 不在内）
+//   - linkedTableReaders.readRowsWithMetadata：读全部有意义行（交割表表头在第 2 行，滑窗自动定位）
+const { detectTableType } = require('./main-process/table-type-detector');
+// v2.1.16 阶段一 A5：批量导入（按表头识别）按 scope='preprocess' 过滤候选
+//   PREPROCESS_TABLE_SIGNATURES：银行对账单 / 中台退款订单 / 入账原始订单（期权 TODO 不在内）
+const { LINKED_TABLE_SIGNATURES, PREPROCESS_TABLE_SIGNATURES } = require('./constants/table-signatures');
+const linkedTableReaders = require('./backend/file-service/readers');
+const { normalizeCell: normalizeLinkedCell, FileValidationError: LinkedFileValidationError } = require('./backend/file-service/common');
 // v2.1.2 T2：月度银行对账单BU回填校验模块
 const { createBankBuReconSession, runReconciliation: runBankBuRecon } = require('./main-process/bank-bu-recon-session');
 const {
@@ -114,6 +124,12 @@ const {
   writeErrorReportOutput,
   buildMainOutputFileName
 } = require('./main-process/bank-statement-io');
+// v2.1.16 阶段一 A5：银行对账单批量导入合并对账核心纯函数（🔴 资金红线，抽离便于单测）
+//   mergeBankStatementRows：合并多份银行对账单 rows + 全局重编号 _rowId（唯一不变量）；headers 不一致抛 BankStatementMergeError
+const {
+  mergeBankStatementRows,
+  BankStatementMergeError
+} = require('./main-process/bank-statement-merge');
 // v2.1.9 N5 T26（spec §5.4 🔴 对外契约破坏性变更）：场景命中行独立报表 writer
 //   v2.1.8 主输出 Sheet 3 撤除 → 改 error-reports/{date}/命中场景行-{basename}-{ts}.xlsx
 //   失败 graceful：不阻塞主对账流程，仅 log 警告（spec §5.4）
@@ -3705,6 +3721,10 @@ function registerAppHandlers() {
       hasBankStatement: bankStatementSession !== null,
       bankStatementFileName: bankStatementSession ? bankStatementSession.fileName : null,
       bankStatementRowCount: bankStatementSession ? bankStatementSession.rows.length : 0,
+      // v2.1.16 A5：合并来源文件数（批量合并导入多文件时 > 1；单文件/单选导入兜底 1）
+      bankStatementSourceFileCount: bankStatementSession
+        ? (Array.isArray(bankStatementSession.sourceFiles) ? bankStatementSession.sourceFiles.length : 1)
+        : 0,
       hasGatewayRecon: gatewayReconSession !== null,
       gatewayReconFileName: gatewayReconSession ? gatewayReconSession.fileName : null,
       gatewayReconRowCount: gatewayReconSession ? gatewayReconSession.gwRows.length : 0,
@@ -10900,6 +10920,383 @@ function registerNewAccountHandlers() {
     } catch (_e) {
       return null;
     }
+  });
+
+  // ==========================================================================
+  // v2.1.16 阶段一 A4：链接表管理 — linked-table:* IPC handlers（2 个）
+  //   list   ：只读，返回 4 个 tableKey 的元数据（前端弹窗渲染 4 行）
+  //   import ：多选 Excel → 逐文件识别（仅 scope='linked' 候选）→ 命中且支持 → 读行落库
+  //            ⚠️ 数据红线：整表覆盖写入（replaceLinkedTable 内 DELETE+INSERT 事务）。
+  //            不整批回滚：不同表互不影响，逐文件汇总 results（成功/失败 + 原因）。
+  // ==========================================================================
+
+  // A2 detector tableKey → A3 repository tableKey 映射（两层各自独立命名，桥接对齐）。
+  //   detector: gateway-recon / zhongtai-dispatch-order / fx-delivery / fx-option
+  //   repo    : gateway-bill  / mid-allocation          / fx-settlement / fx-option
+  const LINKED_DETECTOR_TO_REPO_KEY = {
+    'gateway-recon': 'gateway-bill',
+    'zhongtai-dispatch-order': 'mid-allocation',
+    'fx-delivery': 'fx-settlement',
+    'fx-option': 'fx-option'
+  };
+
+  // 按 detector tableKey 取对应 linked 签名（拿 expectedHeaders 做列映射）。
+  function getLinkedSignatureByKey(detectorTableKey) {
+    return LINKED_TABLE_SIGNATURES.find((s) => s.tableKey === detectorTableKey) || null;
+  }
+
+  // 把单个 linked 文件读成 { 表头名: 值 } 对象数组（喂 replaceLinkedTable）。
+  //   做法（对三张表统一）：
+  //     1) readRowsWithMetadata(fp, []) 取全部有意义行（数组；中间空列保留、尾部空列已 trim）；
+  //     2) 用 signature.expectedHeaders 做「整段位置全等」定位表头行 + 起始列偏移
+  //        （交割表首行是标题、表头在第 2 行；expectedHeaders 含中间空列 '' 与物理行位置精确对齐）；
+  //     3) 表头行之后逐行 zip：obj[expectedHeaders[i]] = normalizeCell(row[colOffset+i])，
+  //        跳过空表头名（交割表 idx 9 的 '' 占位列不入对象）；数据行尾部被 trim 时缺失列回退 ''。
+  function readLinkedRowsAsObjects(filePath, signature) {
+    const expected = Array.isArray(signature.expectedHeaders) ? signature.expectedHeaders : [];
+    if (expected.length === 0) {
+      return [];
+    }
+    const result = linkedTableReaders.readRowsWithMetadata(filePath, []);
+    const rows = Array.isArray(result.rows) ? result.rows : [];
+
+    // 定位表头行 + 起始列偏移（首个「连续位置全等 expectedHeaders」的行）
+    let headerRowIdx = -1;
+    let colOffset = -1;
+    for (let ri = 0; ri < rows.length && headerRowIdx < 0; ri += 1) {
+      const row = Array.isArray(rows[ri]) ? rows[ri] : [];
+      const maxStart = row.length - expected.length;
+      for (let cs = 0; cs <= maxStart; cs += 1) {
+        let matched = true;
+        for (let i = 0; i < expected.length; i += 1) {
+          const want = normalizeLinkedCell(expected[i]);
+          const got = normalizeLinkedCell(row[cs + i]);
+          if (want !== got) { matched = false; break; }
+        }
+        if (matched) {
+          headerRowIdx = ri;
+          colOffset = cs;
+          break;
+        }
+      }
+    }
+    if (headerRowIdx < 0) {
+      // 理论不应发生（detector 已 matched），守卫：当作未匹配抛出，由调用方记 write-error 明细
+      throw new LinkedFileValidationError('FILE_READ', '当前导入文件未匹配到该链接表的表头');
+    }
+
+    const objects = [];
+    for (let ri = headerRowIdx + 1; ri < rows.length; ri += 1) {
+      const row = Array.isArray(rows[ri]) ? rows[ri] : [];
+      const obj = {};
+      for (let i = 0; i < expected.length; i += 1) {
+        const headerName = normalizeLinkedCell(expected[i]);
+        if (headerName === '') continue; // 跳过中间空列占位（不入对象）
+        const cell = row[colOffset + i];
+        obj[headerName] = normalizeLinkedCell(cell === undefined ? '' : cell);
+      }
+      objects.push(obj);
+    }
+    return objects;
+  }
+
+  // list：4 个 tableKey 元数据（期权恒空 meta）。只读，普通 handle。
+  ipcMain.handle('linked-table:list', () => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
+    try {
+      const tables = database.listLinkedTableMeta();
+      return { status: 'ok', tables };
+    } catch (err) {
+      return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // import：多选 Excel → 逐文件识别 → 命中且支持 → 读行落库 → 汇总 per-file 明细。
+  //   数据红线 🔴：replaceLinkedTable 整表覆盖（一张表重导 = 旧数据全删）；不整批回滚。
+  trackedIpcHandle('linked-table:import', '链接表管理', '导入', async () => {
+    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
+    const res = await dialog.showOpenDialog({
+      title: '选择链接表文件（可多选）',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
+    });
+    if (res.canceled || !Array.isArray(res.filePaths) || res.filePaths.length === 0) {
+      return { status: 'cancelled' };
+    }
+
+    const results = [];
+    for (const filePath of res.filePaths) {
+      const fileName = path.basename(filePath);
+      // 识别：仅 scope='linked' 候选签名子集（detector 默认含全部，这里收窄）
+      let detected;
+      try {
+        detected = detectTableType(filePath, LINKED_TABLE_SIGNATURES);
+      } catch (err) {
+        results.push({ fileName, status: 'read-error', message: err && err.message ? err.message : String(err) });
+        continue;
+      }
+
+      if (detected.status === 'ambiguous') {
+        results.push({ fileName, status: 'ambiguous', message: '表头同时命中多张链接表，无法唯一判定' });
+        continue;
+      }
+      if (detected.status === 'unrecognized') {
+        results.push({ fileName, status: 'unrecognized', message: '未识别为任何链接表' });
+        continue;
+      }
+      if (detected.status === 'read-error') {
+        results.push({ fileName, status: 'read-error', message: '文件为空或不可读' });
+        continue;
+      }
+      // v2.1.16 PR#61 F3：detector 识别到「已入库但本阶段不接入落库」的表（外汇期权表）→ unsupported。
+      //   模板已入库 → 识别得出来，但不建 DB 表、不持久化（阶段二接入）；提示用户已入库待接入。
+      if (detected.status === 'unsupported') {
+        results.push({
+          fileName,
+          tableKey: detected.tableKey,
+          status: 'unsupported',
+          message: '外汇期权表已入库，待阶段二接入'
+        });
+        continue;
+      }
+
+      // matched：映射到 repo tableKey。
+      //   双保险：理论上 fx-option 已在上方 unsupported 分支拦截，此处仍守卫缺失映射/签名。
+      const detectorKey = detected.tableKey;
+      const repoKey = LINKED_DETECTOR_TO_REPO_KEY[detectorKey];
+      const signature = getLinkedSignatureByKey(detectorKey);
+      if (detectorKey === 'fx-option' || !repoKey || !signature) {
+        results.push({
+          fileName,
+          tableKey: detectorKey,
+          status: 'unsupported',
+          message: '外汇期权表已入库，待阶段二接入'
+        });
+        continue;
+      }
+
+      // 读行 → 对象数组 → 整表覆盖落库
+      try {
+        const rows = readLinkedRowsAsObjects(filePath, signature);
+        const ret = database.replaceLinkedTable(repoKey, rows, { sourceFileName: fileName });
+        results.push({
+          fileName,
+          tableKey: repoKey,
+          status: 'ok',
+          rowCount: ret.rowCount,
+          dataDateMin: ret.dataDateMin,
+          dataDateMax: ret.dataDateMax
+        });
+      } catch (err) {
+        results.push({
+          fileName,
+          tableKey: repoKey,
+          status: 'write-error',
+          message: err && err.message ? err.message : String(err)
+        });
+      }
+    }
+
+    return { status: 'ok', results };
+  });
+
+  // ==========================================================================
+  // v2.1.16 阶段一 A5：银行对账单预加工「批量导入（按表头识别）」
+  //   一次多选 Excel → 逐文件 detectTableType（仅 scope='preprocess' 候选）→ 路由：
+  //     - bank-statement     → 复用 readBankStatement 读行，写/合并入 bankStatementSession。
+  //                            🔴 多个银行对账单 = 合并对账（不覆盖）：追加 rows 到同一 session，统一对账。
+  //     - zhongtai-refund-order / intake-original-order → 本阶段功能开关默认关 → status='disabled'（跳过，不读不写）
+  //     - ambiguous / unrecognized / read-error → 逐条记明细
+  //   返回 per-file results（参考 A4 linked-table:import 范式）；不整批回滚（一文件失败不影响其余）。
+  //
+  //   🔴 资金红线（合并语义，2026 用户反馈拍板：合并不覆盖）：
+  //     1) 第一个银行对账单建 session（含 sourceFiles）；后续银行对账单先校验 headers 与 session 完全一致
+  //        （44 列同结构同顺序），一致才 **追加** rows，不一致该文件标 invalid 不合并（防异构表混入污染对账）。
+  //     2) _rowId 全局唯一：readBankStatement 注入的 row_0..row_N 是「文件内」编号，多文件合并会重复；
+  //        合并后必须对 session.rows **统一重编号** _rowId='row_'+全局index（0-based 跨文件唯一），
+  //        否则 dispatcher 的 rowLockSet（以 _rowId 为键的 first-match-wins 锁）会把不同文件的同序号行
+  //        当成同一行 → 漏对 / 误锁（scenario-dispatcher.js modifiedRows/unmatchedRows filter 全依赖 _rowId）。
+  //     3) processingResult / gatewayReconSession 整批只清一次（有任一银行对账单成功时），不每文件清。
+  //   ⚠️ Runtime-state 红线：bankStatementSession / processingResult / gatewayReconSession 三者皆运行时状态，
+  //     合并后的 session 结构（rows 含全局唯一 _rowId、headers 不变、新增 sourceFiles）须与 run/export 读取契约兼容。
+  // ==========================================================================
+
+  // 本阶段功能开关：中台退款回填 / 入账原始反回填批量导入通路默认关（仅银行对账单通路启用）。
+  //   后续阶段实装这两条通路时改为 true 并补对应读取/落库逻辑。
+  const ZHONGTAI_REFUND_BATCH_ENABLED = false;
+  const INTAKE_ORIGINAL_BATCH_ENABLED = false;
+
+  // headers 一致校验 + rows 合并 + _rowId 全局重编号 已抽到 src/main-process/bank-statement-merge.js
+  //   （mergeBankStatementRows / BankStatementMergeError，🔴 资金红线，便于单测；见顶部 require）。
+
+  // v2.1.16 PR#61 F1：统计口径与单选 bank-statement:import 一致用「导入文件」
+  //   （usage-stats FUNCTION_REGISTRY 无「批量导入」function → 原口径 incrementFunction 静默丢弃 →
+  //    「导入对账单」成功不再计入 .usage-stats.txt；改用已注册的「导入文件」使统计连续）。
+  trackedIpcHandle('bank-statement:batch-import', '银行对账单处理', '导入文件', async () => {
+    const choice = await dialog.showOpenDialog(mainWindow, {
+      title: '选择要批量导入的文件（可多选）',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
+    });
+    if (choice.canceled || !Array.isArray(choice.filePaths) || choice.filePaths.length === 0) {
+      return { status: 'cancelled' };
+    }
+
+    const results = [];
+    // 本批是否已建立/合并过银行对账单 session（用于：① 第一个建 vs 后续合并的分支；
+    //   ② processingResult / gatewayReconSession 整批只清一次）。
+    let bankStatementMerged = false;
+
+    for (const filePath of choice.filePaths) {
+      const fileName = path.basename(filePath);
+
+      // 识别：仅 scope='preprocess' 候选（银行对账单 / 中台退款订单 / 入账原始订单）
+      let detected;
+      try {
+        detected = detectTableType(filePath, PREPROCESS_TABLE_SIGNATURES);
+      } catch (err) {
+        results.push({ fileName, status: 'read-error', message: err && err.message ? err.message : String(err) });
+        continue;
+      }
+
+      if (detected.status === 'ambiguous') {
+        results.push({ fileName, status: 'ambiguous', message: '表头同时命中多张预处理表，无法唯一判定' });
+        continue;
+      }
+      if (detected.status === 'unrecognized') {
+        results.push({ fileName, status: 'unrecognized', message: '未识别为银行对账单 / 中台退款订单 / 入账原始订单' });
+        continue;
+      }
+      if (detected.status === 'read-error') {
+        results.push({ fileName, status: 'read-error', message: '文件为空或不可读' });
+        continue;
+      }
+      // v2.1.16 PR#61 F3：守卫「已入库待阶段二接入」表（PREPROCESS 候选当前不含期权表，
+      //   理论不会走到；仍兜底，避免误落入下方 matched 路由的「理论不可达」分支）。
+      if (detected.status === 'unsupported') {
+        results.push({
+          fileName,
+          tableKey: detected.tableKey,
+          status: 'unsupported',
+          message: '该表已入库，待阶段二接入'
+        });
+        continue;
+      }
+
+      // matched：按 tableKey 路由
+      const tableKey = detected.tableKey;
+
+      if (tableKey === 'bank-statement') {
+        // 🔴 合并语义：第一个建 session；后续校验 headers 一致后追加 rows（不覆盖）。
+        //   headers 校验 + rows 合并 + _rowId 全局重编号统一交给 mergeBankStatementRows（资金红线纯函数）。
+        try {
+          const result = readBankStatement(filePath);
+          const isAppend = bankStatementMerged; // false=本批首个银行对账单（建 session）；true=追加合并
+
+          // 合并 + 全局重编号（首个文件 existing 传 null → 不做 headers 校验；追加时 headers 不一致抛 BankStatementMergeError）。
+          //   先算出 merged，再写 session：追加失败（headers 不一致）时 session 完全不被改动（不污染对账数据集）。
+          const merged = mergeBankStatementRows(
+            isAppend ? bankStatementSession.rows : null,
+            result.rows,
+            isAppend ? bankStatementSession.headers : null,
+            result.headers
+          );
+
+          if (!isAppend) {
+            // 本批第一个银行对账单：建 session
+            bankStatementSession = {
+              filePath: result.filePath,
+              fileName: result.fileName,
+              rows: merged.rows,
+              headers: merged.headers,
+              importedAt: Date.now(),
+              // 合并来源文件清单（首个文件入列；后续合并的文件 push 进来）
+              sourceFiles: [result.fileName]
+            };
+            // 整批只清一次：首个银行对账单成功 → 清空运行结果 + 资金对账文件（与单选导入一致）
+            processingResult = null;
+            gatewayReconSession = null;
+            bankStatementMerged = true;
+          } else {
+            // 追加合并成功（headers 已校验一致）→ 回写合并后 rows + 记来源文件
+            bankStatementSession.rows = merged.rows;
+            bankStatementSession.sourceFiles.push(result.fileName);
+          }
+
+          results.push({
+            fileName,
+            tableKey,
+            status: 'ok',
+            rowCount: result.rowCount,            // 本文件行数
+            merged: isAppend,                     // 是否为追加合并（true=合并到已有 session）
+            mergedRowCount: bankStatementSession.rows.length, // 合并后 session 当前总行数
+            sourceFileCount: bankStatementSession.sourceFiles.length // 合并来源文件数
+          });
+        } catch (error) {
+          if (error instanceof BankStatementMergeError) {
+            // headers 与已导入银行对账单不一致：不合并，session 未被污染（merge 在写 session 前抛出）
+            results.push({
+              fileName,
+              tableKey,
+              status: 'invalid',
+              message: error.message
+            });
+          } else if (error && error.name === 'FileValidationError') {
+            results.push({
+              fileName,
+              tableKey,
+              status: 'invalid',
+              code: error.code,
+              message: error.message,
+              detailLines: error.detailLines || []
+            });
+          } else {
+            results.push({
+              fileName,
+              tableKey,
+              status: 'read-error',
+              message: String(error && error.message ? error.message : error)
+            });
+          }
+        }
+        continue;
+      }
+
+      if (tableKey === 'zhongtai-refund-order') {
+        if (!ZHONGTAI_REFUND_BATCH_ENABLED) {
+          results.push({
+            fileName,
+            tableKey,
+            status: 'disabled',
+            message: '中台退款回填功能未启用，已跳过'
+          });
+          continue;
+        }
+        // 占位：功能开关开启后在此实装中台退款订单读取/落库（本阶段不会走到）
+        results.push({ fileName, tableKey, status: 'disabled', message: '中台退款回填功能未启用，已跳过' });
+        continue;
+      }
+
+      if (tableKey === 'intake-original-order') {
+        if (!INTAKE_ORIGINAL_BATCH_ENABLED) {
+          results.push({
+            fileName,
+            tableKey,
+            status: 'disabled',
+            message: '入账原始反回填功能未启用，已跳过'
+          });
+          continue;
+        }
+        // 占位：功能开关开启后在此实装入账原始订单读取/落库（本阶段不会走到）
+        results.push({ fileName, tableKey, status: 'disabled', message: '入账原始反回填功能未启用，已跳过' });
+        continue;
+      }
+
+      // 理论不可达（PREPROCESS_TABLE_SIGNATURES 仅含上述 3 个 tableKey）；守卫记明细
+      results.push({ fileName, tableKey, status: 'unrecognized', message: `未知表类型：${tableKey}` });
+    }
+
+    return { status: 'ok', results };
   });
 
   // ============================================================

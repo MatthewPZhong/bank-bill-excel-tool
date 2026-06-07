@@ -9,8 +9,8 @@
 
 | 字段 | 值 |
 |---|---|
-| 清单版本 | v12（对应 app v2.1.10-beta.1 — 2026-05-28 Phase 6 T33 升格 5 条 v2.1.10 4 主线变量：Critical 4 条（`runCheckCore` — A3 worker/main 共用 / `clearStaleSuccessfulRawJson` — N4-cont-1 NOT IN 子查询资金红线 / `ensureDiffRowsCascadeMigration_v2_1_10` — N4-cont-2 DB 不可逆 8-status / `acquiring_bill_currency_diff_rows` FK CASCADE schema — N4-cont-2 spec §九 拍板）+ Important-skeleton 1 条（`serializeError` / `deserializeError` — A3 跨进程错误回传契约）+ 更新 1 条（`bill_imports.raw_json` 内容契约扩 v2.1.10 N4-cont-1 sentinel `''` 语义 + 差异行永不清空契约）；触发：用户 2026-05-28 Phase 6 T33 版本 bump 前必跑 check-vars 节点；v11 = 2026-05-26 N1' + N4 升格 7 条；v10 = 2026-05-22 Phase 0 T02 升格 11 条；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
-| 上次人工 review | 2026-05-28（v2.1.10 Phase 6 T33 升格 5 条 — A3 + N4-cont-1 + N4-cont-2 / spec §九 评估）|
+| 清单版本 | v13（对应 app v2.1.16-beta.1 — 2026-06-07 阶段一 A0 收尾升格 3 条 Runtime-state：`bankStatementSession`（资金对账数据处理银行对账单进程级 session + v2.1.16 A5 多文件合并对账语义 + 🔴 `_rowId` 全局唯一不变量）/ `gatewayReconSession`（C3 网关账单数据源 + 导入银行对账单时清空）/ `processingResult`（5 轮对账运行结果缓存 + scenarios 变更/重导入时清空）；触发：v2.1.16 阶段一提 PR 前 check-vars 节点；v12 = 2026-05-28 Phase 6 T33 升格 5 条 v2.1.10 4 主线变量（Critical 4：`runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1：`serializeError`/`deserializeError` + 更新 `bill_imports.raw_json` 内容契约）；v11 = 2026-05-26 N1' + N4 升格 7 条；v10 = 2026-05-22 Phase 0 T02 升格 11 条；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
+| 上次人工 review | 2026-06-07（v2.1.16 阶段一 A0 收尾升格 3 条 Runtime-state — bankStatementSession / gatewayReconSession / processingResult）|
 | 基线数据 | `docs/analysis/var-reference-stats.md`（94 个 JS 文件 / 1000 顶层声明 — v2.1.10-beta.1 T33 重跑后；A-share 159 / A-pair 290 / A-local 444 / B 449） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
@@ -558,6 +558,35 @@
   - 改 `options` 参数 schema → 6+ 调用方需同步
   - **半角 `:`** 不在 R3 规则范围（仅中文「：」）；改规则覆盖半角需评估 acquiring 模块时间戳文案影响
   - 必跑：smoke 19 suite（含 R3 全局回归）+ 6+ 模块状态栏手测（每模块写入一次状态后检查换行 + tone 颜色生效）+ B5 wiring 防回归（直写 `box.textContent` 引入 → smoke 应拒绝）
+
+### `bankStatementSession`（v2.1.16 阶段一 A5 升格 Runtime-state ⚠️ 资金对账数据处理进程级 session）
+- 定义：`src/main.js:266` `let bankStatementSession = null;`（进程级，重启不持久化，与 `lastFileImportContext` 一致）
+- 结构：`{ filePath, fileName, rows, headers, importedAt, sourceFiles }`（`sourceFiles` 为 v2.1.16 A5 批量合并导入新增——合并来源文件名清单；单选导入入口 `src/main.js:3449` 不带该字段，读取方按 `Array.isArray` 兜底）
+- 关联功能：「资金对账数据处理」模块（`module.id='bank-statement-process'`）银行对账单数据源；被 `bank-statement:run`（clone rows 跑 dispatcher）/ `bank-statement:export`（headers + modifiedRows/unmatchedRows 写盘）/ `bank-statement:session-status`（L3712）/ `bank-statement:c3-candidate-count`（L3733）读取
+- 变更 review 要点：
+  - **v2.1.16 合并语义**（🔴 资金红线，2026 用户拍板「合并不覆盖」）：批量导入多份银行对账单 = **追加 rows 到同一 session 统一对账**（`src/main.js:11163` 起）；第一个建 session（含 `sourceFiles`），后续银行对账单先校验 `headers` 与 session **完全一致**（44 列同结构同顺序，`bankStatementHeadersEqual`）才追加，不一致该文件标 `invalid` 不合并（防异构表混入污染对账）
+  - 🔴 **`_rowId` 全局唯一不变量**：`readBankStatement` 注入的 `row_0..row_N` 是「文件内」编号，多文件合并会重复；合并后**必须对 `session.rows` 统一重编号** `_rowId='row_'+全局index`（0-based 跨文件唯一，`src/main.js:11204`），否则 dispatcher 的 `rowLockSet`（以 `_rowId` 为键的 first-match-wins 锁）会把不同文件的同序号行当成同一行 → **漏对 / 误锁**（`scenario-dispatcher.js` modifiedRows / unmatchedRows filter 全依赖 `_rowId`，见 Critical 层 `runAllScenarios` / `unmatchedRows` 条目）
+  - 改 `headers` 一致校验逻辑 → 异构表可能混入合并 → 对账数据集污染
+  - 重导入（单选 / 批量首个）时同步清空 `processingResult` + `gatewayReconSession`，否则老结果 / 老网关行误用到新数据
+  - 必跑：单选导入 + 批量合并多文件导入后跑 run/export，核对 `_rowId` 全局唯一 + modifiedRows + unmatchedRows.length === rows.length
+
+### `gatewayReconSession`（v2.1.16 阶段一 A5 升格 Runtime-state ⚠️ 资金对账数据处理进程级 session）
+- 定义：`src/main.js:267` `let gatewayReconSession = null;`（进程级，重启不持久化）
+- 结构：`{ filePath, fileName, gwRows, importedAt }`
+- 关联功能：C3「网关对账单赋值银行对账单」（`gateway-recon-join`）的网关账单数据源（资金对账不平结果表）；导入入口 `src/main.js:3490`；被 run / `c3-candidate-count` / `session-status` 读取
+- 变更 review 要点：
+  - **导入银行对账单时被清空**（`src/main.js:3459` 单选 / `src/main.js:11182` 批量首个）——避免把上一批 `gwRows` 误用到新银行对账单（Codex F2 P1 修复语义）
+  - 改 `gwRows` 字段名 / 结构 → C3 join 比对取数失败
+  - 必跑：导入网关 → 导入新银行对账单 → 确认 `gatewayReconSession` 已清空（session-status `hasGatewayRecon=false`）
+
+### `processingResult`（v2.1.16 阶段一 A5 升格 Runtime-state ⚠️ 资金对账数据处理进程级 session）
+- 定义：`src/main.js:268` `let processingResult = null;`（进程级，重启不持久化）
+- 结构：`{ modifiedRows, modifications, errorReport, stats, ranAt }`
+- 关联功能：「资金对账数据处理」5 轮对账（C1–C4 dispatcher）运行结果缓存；run 写入、export 读取、`session-status` 透出 `stats`
+- 变更 review 要点：
+  - **scenarios 变更 / 重导入银行对账单 / 重导入网关时主动清空**（`src/main.js:3458` / `3496` / `11181`）——避免老运行结果被新数据 / 新场景配置误用导出（资金红线：导出的命中行必须对应当前 session + 当前场景快照）
+  - 改 `modifiedRows` / `stats` 结构 → export 写盘 + 状态框统计取数错位
+  - 必跑：跑出结果后改场景 / 重导入 → 确认 `processingResult` 已清空（不残留老 stats / 老命中行）
 
 ---
 

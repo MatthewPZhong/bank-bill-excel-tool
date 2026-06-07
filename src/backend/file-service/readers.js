@@ -75,7 +75,10 @@ function parseCsvText(content, { blankrows = false } = {}) {
   return rows.filter((row) => isRowMeaningful(row));
 }
 
-function readWorkbookRows(filePath, { blankrows = false } = {}) {
+// v2.1.16 PR#61 F4：可选 sheetName —— 缺省 = 第一个 sheet（行为与历史完全一致）。
+//   传入 sheetName 时读指定 sheet（detector 多 sheet 扫描用）；sheet 不存在抛 FILE_READ。
+//   ⚠️ CSV 无 sheet 概念：传 sheetName 也忽略，仍解析整份 CSV（detector 对 CSV 走单次默认读取）。
+function readWorkbookRows(filePath, { blankrows = false, sheetName } = {}) {
   ensureSupportedFile(filePath);
 
   if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
@@ -110,13 +113,20 @@ function readWorkbookRows(filePath, { blankrows = false } = {}) {
       dense: true,
       raw: false
     });
-    const firstSheetName = workbook.SheetNames[0];
+    // 缺省读第一个 sheet（历史行为）；指定 sheetName 时读该 sheet（detector 多 sheet 扫描）。
+    const targetSheetName = sheetName != null && sheetName !== ''
+      ? sheetName
+      : workbook.SheetNames[0];
 
-    if (!firstSheetName) {
+    if (!targetSheetName) {
       throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
     }
 
-    const sheet = workbook.Sheets[firstSheetName];
+    const sheet = workbook.Sheets[targetSheetName];
+    if (!sheet) {
+      // 指定 sheet 不存在（理论上 detector 只用 listSheetNames 返回的名字，不应发生）
+      throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
+    }
     return XLSX.utils.sheet_to_json(sheet, {
       header: 1,
       blankrows,
@@ -199,8 +209,9 @@ function collectMatchedRows({
   };
 }
 
-function readRowsWithMetadata(filePath, expectedHeaders = []) {
-  const rawRows = readWorkbookRows(filePath, { blankrows: true });
+// v2.1.16 PR#61 F4：可选第三参 { sheetName } 透传给 readWorkbookRows（缺省读第一个 sheet，行为不变）。
+function readRowsWithMetadata(filePath, expectedHeaders = [], { sheetName } = {}) {
+  const rawRows = readWorkbookRows(filePath, { blankrows: true, sheetName });
   const normalizedExpectedHeaders = Array.isArray(expectedHeaders)
     ? expectedHeaders.map((header) => normalizeCell(header)).filter((header) => header !== '')
     : [];
@@ -322,11 +333,57 @@ function extractEnumValuesFromImportedFile(filePath) {
   return values;
 }
 
+// v2.1.16 PR#61 F4：列出工作簿全部 sheet 名（detector 多 sheet 扫描用）。
+//   - .xlsx / .xls：返回 workbook.SheetNames（原始顺序）。
+//   - .csv：无 sheet 概念 → 返回 [null]（detector 据此对 CSV 走单次默认读取，sheetName=null）。
+//   - 文件不存在 / 空 / 类型不支持：抛 FileValidationError（与 readWorkbookRows 一致），由调用方转 read-error。
+function listSheetNames(filePath) {
+  ensureSupportedFile(filePath);
+
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
+    throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
+  }
+
+  // .csv 真·纯文本（非伪装的 Excel 二进制）→ 单一逻辑表，无 sheet 维度。
+  if (path.extname(filePath).toLowerCase() === '.csv') {
+    try {
+      const raw = fs.readFileSync(filePath);
+      const isOLE2 = raw.length >= 4 && raw[0] === 0xD0 && raw[1] === 0xCF && raw[2] === 0x11 && raw[3] === 0xE0;
+      const isZIP = raw.length >= 4 && raw[0] === 0x50 && raw[1] === 0x4B && raw[2] === 0x03 && raw[3] === 0x04;
+      if (!isOLE2 && !isZIP) {
+        return [null];
+      }
+      // 否则是伪装成 .csv 的 Excel 二进制 → fall through 走 XLSX 解析 sheet 列表
+    } catch (error) {
+      if (error instanceof FileValidationError) {
+        throw error;
+      }
+      throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
+    }
+  }
+
+  try {
+    // bookSheets:true 仅解析 sheet 目录，不解析单元格 → 比全量 readFile 轻量。
+    const workbook = XLSX.readFile(filePath, { bookSheets: true });
+    const names = Array.isArray(workbook.SheetNames) ? workbook.SheetNames : [];
+    if (names.length === 0) {
+      throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
+    }
+    return names;
+  } catch (error) {
+    if (error instanceof FileValidationError) {
+      throw error;
+    }
+    throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
+  }
+}
+
 module.exports = {
   collectMatchedRows,
   ensureSupportedFile,
   extractEnumValuesFromImportedFile,
   extractHeaders,
+  listSheetNames,
   loadEnumValues,
   readRows,
   readRowsWithMetadata
