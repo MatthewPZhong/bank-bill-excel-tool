@@ -1,17 +1,28 @@
 // v2.1.16 阶段一 A2：按表头自动识别 Excel 表类型
 //
 // detectTableType(filePath, candidateSignatures) → { tableKey, score, status }
-//   status: 'matched' | 'ambiguous' | 'unrecognized' | 'read-error'
+//   status: 'matched' | 'ambiguous' | 'unrecognized' | 'unsupported' | 'read-error'
 //
 // 两层识别策略（先精确、后模糊）：
-//   L1 精确层：对每个候选签名调 readers.readRowsWithMetadata(filePath, 锚点表头)。
+//   L1 精确层：对每个候选签名调 readers.readRowsWithMetadata(filePath, 锚点表头, { sheetName })。
 //             readRowsWithMetadata 内部做「连续子序列全等」匹配，命中即说明该表头存在 → score=1.0。
 //             - 单签名命中 → matched
 //             - 多签名同时命中 → ambiguous（无法唯一判定）
 //             - 含中间空列的表（如外汇交割表）用签名的 l1MatchHeaders 作锚点，否则用 expectedHeaders。
-//   L2 模糊层：L1 全部未命中时，用 readRowsWithMetadata(filePath, []) 取全部有意义行，
+//   L2 模糊层：L1 全部未命中时，用 readRowsWithMetadata(filePath, [], { sheetName }) 取全部有意义行，
 //             扫描前 N 行，对每签名计算 signatureHeaders 命中率（命中数 / signatureHeaders 数），
 //             取命中率最高者；≥ 该签名 minScore 才判 matched，否则 unrecognized。
+//
+// v2.1.16 PR#61 F4：多 sheet 扫描（真回归修复）——
+//   底层 readWorkbookRows 历史上只读 SheetNames[0]；若银行对账单文件有封面/汇总 sheet 排在
+//   「渠道对账单」之前，detector 只看第一个 sheet 会误判 unrecognized（单选 readBankStatement 按
+//   sheet 名「渠道对账单」读不受影响）。现改为：listSheetNames 取全部 sheet，逐 sheet 跑 L1；
+//   任一 sheet 命中即返回（短路，不再扫后续 sheet → 大文件多 sheet 也只多解析到命中那张为止）；
+//   全部 sheet L1 未命中再逐 sheet 跑 L2 取全局最佳。CSV 无 sheet 概念 → 单次默认读取（sheetName=null）。
+//
+// v2.1.16 PR#61 F3：外汇期权表模板已入库（assets/外汇期权订单.xlsx）——
+//   签名已纳入候选并按实测表头识别；但本阶段不接入落库，detector 识别到 fx-option 时返回
+//   status='unsupported'（区别于 unrecognized），handler 据此提示「已入库待阶段二接入」。
 //
 // 防子集误判（4 列回填模板 vs 长订单表）：
 //   L1 对「短表」额外加列数守卫——要求文件首个有意义行的有效列数与签名 expectedHeaders 列数精确相等，
@@ -71,15 +82,16 @@ function getFirstRowColumnCount(meaningfulRows) {
   return maxCount;
 }
 
-// L1 精确层：返回所有「精确命中」的签名 tableKey 列表（命中即 score=1.0）。
-// 同时返回 readError 标记：若任一签名调用抛出「真·读错」（非未匹配），上抛给主流程判 read-error。
-function runExactLayer(filePath, candidateSignatures, firstRowColumnCount) {
+// L1 精确层：返回某个 sheet 上所有「精确命中」的签名 tableKey 列表（命中即 score=1.0）。
+// sheetName=null 表示读默认（第一个）sheet 或 CSV 整表；否则读指定 sheet（F4 多 sheet 扫描）。
+// 若调用抛出「真·读错」（非未匹配），上抛给主流程判 read-error。
+function runExactLayer(filePath, candidateSignatures, firstRowColumnCount, sheetName = null) {
   const matchedKeys = [];
 
   for (const signature of candidateSignatures) {
     const anchor = getL1Anchor(signature);
     if (anchor.length === 0) {
-      // 占位/空签名（如期权 TODO）跳过，不参与匹配
+      // 占位/空签名（如未实测的模板）跳过，不参与匹配
       continue;
     }
 
@@ -96,7 +108,7 @@ function runExactLayer(filePath, candidateSignatures, firstRowColumnCount) {
     }
 
     try {
-      readers.readRowsWithMetadata(filePath, anchor);
+      readers.readRowsWithMetadata(filePath, anchor, { sheetName });
       matchedKeys.push(signature.tableKey);
     } catch (error) {
       if (isHeaderNotMatchedError(error)) {
@@ -146,47 +158,108 @@ function runFuzzyLayer(meaningfulRows, candidateSignatures) {
   return best;
 }
 
-// 主入口：识别单个文件的表类型。
-// candidateSignatures 缺省 = ALL_TABLE_SIGNATURES（不含期权 TODO 占位）。
+// tableKey 命中后归一为对外 status：fx-option（外汇期权表）本阶段已入库但不接入落库 → 'unsupported'；
+// 其余正常表 → 'matched'。F3：让 handler 能区分「已入库待阶段二」与「未识别」。
+const UNSUPPORTED_TABLE_KEYS = new Set(['fx-option']);
+
+function statusForMatchedKey(tableKey) {
+  return UNSUPPORTED_TABLE_KEYS.has(tableKey) ? 'unsupported' : 'matched';
+}
+
+// 读取单个 sheet 的「全部有意义行」（用于短表列数守卫 + L2）；读不出（未匹配/空 sheet）返回 null。
+// sheetName=null → 默认 sheet / CSV 整表。
+function readSheetMeaningfulRows(filePath, sheetName) {
+  try {
+    const result = readers.readRowsWithMetadata(filePath, [], { sheetName });
+    return Array.isArray(result.rows) ? result.rows : [];
+  } catch (error) {
+    if (isHeaderNotMatchedError(error)) {
+      // expectedHeaders=[] 不会触发「未匹配」，但 sheet 本身无有意义行会抛 FILE_READ；
+      // 这里把「空 sheet」视为该 sheet 无内容（返回 null 跳过），不让某张空封面 sheet 误判整个文件 read-error。
+      return null;
+    }
+    // 其余 FILE_READ（如该 sheet 解析失败）也按「该 sheet 跳过」处理；真·文件级读错由
+    // detectTableType 顶层的 listSheetNames 提前拦截。
+    return null;
+  }
+}
+
+// 在单个 sheet 上跑 L1，返回 { matchedKeys, meaningfulRows }；meaningfulRows=null 表示该 sheet 无内容。
+function detectInSheet(filePath, signatures, sheetName) {
+  const meaningfulRows = readSheetMeaningfulRows(filePath, sheetName);
+  if (meaningfulRows === null || meaningfulRows.length === 0) {
+    return { matchedKeys: [], meaningfulRows: null };
+  }
+  const firstRowColumnCount = getFirstRowColumnCount(meaningfulRows);
+  const matchedKeys = runExactLayer(filePath, signatures, firstRowColumnCount, sheetName);
+  return { matchedKeys, meaningfulRows };
+}
+
+// 主入口：识别单个文件的表类型（v2.1.16 F4：扫所有 sheet，任一命中即返回，短路余下 sheet）。
+// candidateSignatures 缺省 = ALL_TABLE_SIGNATURES。
 function detectTableType(filePath, candidateSignatures = ALL_TABLE_SIGNATURES) {
   const signatures = Array.isArray(candidateSignatures) ? candidateSignatures : [];
 
-  // 先取一次「全部有意义行」：既用于短表列数守卫，又用于 L2；同时承担「文件能否读」的探测。
-  let meaningfulRows;
+  // 文件级可读性探测 + 取 sheet 列表（CSV → [null]）。失败 → read-error。
+  let sheetNames;
   try {
-    const result = readers.readRowsWithMetadata(filePath, []);
-    meaningfulRows = Array.isArray(result.rows) ? result.rows : [];
+    sheetNames = readers.listSheetNames(filePath);
   } catch (error) {
-    // 文件为空 / 不可读 / 类型不支持 → read-error
     return { tableKey: null, score: 0, status: 'read-error' };
   }
 
-  const firstRowColumnCount = getFirstRowColumnCount(meaningfulRows);
+  // —— L1 精确层（逐 sheet，短路）——
+  // 收集每个 sheet 的 meaningfulRows 供 L1 全落空后的 L2 复用（避免二次读盘）。
+  const sheetRowsCache = [];
+  let anySheetReadable = false;
+  for (const sheetName of sheetNames) {
+    let perSheet;
+    try {
+      perSheet = detectInSheet(filePath, signatures, sheetName);
+    } catch (error) {
+      // L1 内部抛出的「真·读错」（非未匹配）→ 整个文件判 read-error
+      return { tableKey: null, score: 0, status: 'read-error' };
+    }
 
-  // —— L1 精确层 ——
-  let exactMatchedKeys;
-  try {
-    exactMatchedKeys = runExactLayer(filePath, signatures, firstRowColumnCount);
-  } catch (error) {
-    // L1 内部抛出的「真·读错」
+    if (perSheet.meaningfulRows !== null) {
+      anySheetReadable = true;
+      sheetRowsCache.push(perSheet.meaningfulRows);
+    }
+
+    if (perSheet.matchedKeys.length === 1) {
+      // 任一 sheet 单命中 → 立即返回（短路，不再扫后续 sheet）
+      const tableKey = perSheet.matchedKeys[0];
+      return { tableKey, score: 1, status: statusForMatchedKey(tableKey) };
+    }
+    if (perSheet.matchedKeys.length > 1) {
+      // 同一 sheet 多签名精确命中，无法唯一判定
+      return { tableKey: null, score: 1, status: 'ambiguous', matchedKeys: perSheet.matchedKeys };
+    }
+  }
+
+  // 所有 sheet 都无有意义内容 → read-error（与历史「空文件 read-error」语义一致）
+  if (!anySheetReadable) {
     return { tableKey: null, score: 0, status: 'read-error' };
   }
 
-  if (exactMatchedKeys.length === 1) {
-    return { tableKey: exactMatchedKeys[0], score: 1, status: 'matched' };
-  }
-  if (exactMatchedKeys.length > 1) {
-    // 多签名精确命中，无法唯一判定
-    return { tableKey: null, score: 1, status: 'ambiguous', matchedKeys: exactMatchedKeys };
-  }
-
-  // —— L2 模糊层 ——
-  const best = runFuzzyLayer(meaningfulRows, signatures);
-  if (best.tableKey && best.score >= best.minScore) {
-    return { tableKey: best.tableKey, score: best.score, status: 'matched' };
+  // —— L2 模糊层（逐 sheet 取全局最佳）——
+  let globalBest = { tableKey: null, score: 0, minScore: 1 };
+  for (const rows of sheetRowsCache) {
+    const best = runFuzzyLayer(rows, signatures);
+    if (best.tableKey && best.score > globalBest.score) {
+      globalBest = best;
+    }
   }
 
-  return { tableKey: null, score: best.score, status: 'unrecognized' };
+  if (globalBest.tableKey && globalBest.score >= globalBest.minScore) {
+    return {
+      tableKey: globalBest.tableKey,
+      score: globalBest.score,
+      status: statusForMatchedKey(globalBest.tableKey)
+    };
+  }
+
+  return { tableKey: null, score: globalBest.score, status: 'unrecognized' };
 }
 
 module.exports = {

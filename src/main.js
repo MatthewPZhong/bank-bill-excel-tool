@@ -11048,8 +11048,20 @@ function registerNewAccountHandlers() {
         results.push({ fileName, status: 'read-error', message: '文件为空或不可读' });
         continue;
       }
+      // v2.1.16 PR#61 F3：detector 识别到「已入库但本阶段不接入落库」的表（外汇期权表）→ unsupported。
+      //   模板已入库 → 识别得出来，但不建 DB 表、不持久化（阶段二接入）；提示用户已入库待接入。
+      if (detected.status === 'unsupported') {
+        results.push({
+          fileName,
+          tableKey: detected.tableKey,
+          status: 'unsupported',
+          message: '外汇期权表已入库，待阶段二接入'
+        });
+        continue;
+      }
 
-      // matched：映射到 repo tableKey；fx-option（期权）不支持，记明细不写库（双保险）
+      // matched：映射到 repo tableKey。
+      //   双保险：理论上 fx-option 已在上方 unsupported 分支拦截，此处仍守卫缺失映射/签名。
       const detectorKey = detected.tableKey;
       const repoKey = LINKED_DETECTOR_TO_REPO_KEY[detectorKey];
       const signature = getLinkedSignatureByKey(detectorKey);
@@ -11058,7 +11070,7 @@ function registerNewAccountHandlers() {
           fileName,
           tableKey: detectorKey,
           status: 'unsupported',
-          message: '外汇期权表模板缺失，暂未支持'
+          message: '外汇期权表已入库，待阶段二接入'
         });
         continue;
       }
@@ -11117,7 +11129,10 @@ function registerNewAccountHandlers() {
   // headers 一致校验 + rows 合并 + _rowId 全局重编号 已抽到 src/main-process/bank-statement-merge.js
   //   （mergeBankStatementRows / BankStatementMergeError，🔴 资金红线，便于单测；见顶部 require）。
 
-  trackedIpcHandle('bank-statement:batch-import', '银行对账单处理', '批量导入', async () => {
+  // v2.1.16 PR#61 F1：统计口径与单选 bank-statement:import 一致用「导入文件」
+  //   （usage-stats FUNCTION_REGISTRY 无「批量导入」function → 原口径 incrementFunction 静默丢弃 →
+  //    「导入对账单」成功不再计入 .usage-stats.txt；改用已注册的「导入文件」使统计连续）。
+  trackedIpcHandle('bank-statement:batch-import', '银行对账单处理', '导入文件', async () => {
     const choice = await dialog.showOpenDialog(mainWindow, {
       title: '选择要批量导入的文件（可多选）',
       properties: ['openFile', 'multiSelections'],
@@ -11154,6 +11169,17 @@ function registerNewAccountHandlers() {
       }
       if (detected.status === 'read-error') {
         results.push({ fileName, status: 'read-error', message: '文件为空或不可读' });
+        continue;
+      }
+      // v2.1.16 PR#61 F3：守卫「已入库待阶段二接入」表（PREPROCESS 候选当前不含期权表，
+      //   理论不会走到；仍兜底，避免误落入下方 matched 路由的「理论不可达」分支）。
+      if (detected.status === 'unsupported') {
+        results.push({
+          fileName,
+          tableKey: detected.tableKey,
+          status: 'unsupported',
+          message: '该表已入库，待阶段二接入'
+        });
         continue;
       }
 

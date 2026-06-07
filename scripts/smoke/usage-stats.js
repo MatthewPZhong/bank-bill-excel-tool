@@ -261,6 +261,45 @@ function runUsageStatsSmokeTests() {
       }
     }
 
+    // U16（v2.1.16 PR#61 F1）：链接表管理「导入」已注册（main.js trackedIpcHandle('linked-table:import', '链接表管理', '导入', ...)）
+    //   背景：v2.1.16 阶段一新增链接表导入用 moduleKey='链接表管理' / functionKey='导入'，
+    //   但 FUNCTION_REGISTRY 未注册 → incrementFunction 静默丢弃 → 导入成功不计入 .usage-stats.txt（真回归）。
+    {
+      check('U16.module', '链接表管理' in FUNCTION_REGISTRY, '链接表管理 模块必须在 FUNCTION_REGISTRY 注册');
+      const fns = FUNCTION_REGISTRY['链接表管理'] || [];
+      check('U16.fn', fns.includes('导入'), '“导入” 必须在 链接表管理 模块的 FUNCTION_REGISTRY');
+      // 实际计数 + round-trip：用新 key 能真正写入并读回
+      const linkedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-stats-linked-'));
+      try {
+        const s = defaultStats();
+        incrementFunction(s, '链接表管理', '导入');
+        incrementFunction(s, '链接表管理', '导入');
+        check('U16.count', s.modules['链接表管理']['导入'] === 2, 'incrementFunction 必须真正写入链接表管理/导入 计数');
+        saveStats(linkedDir, s);
+        const reloaded = loadStats(linkedDir);
+        check('U16.roundtrip', reloaded.modules['链接表管理']['导入'] === 2, 'round-trip 后链接表管理/导入 计数必须 = 2');
+        check('U16.section', serialize(reloaded).includes('[链接表管理]'), '.usage-stats.txt 必须包含 [链接表管理] section');
+      } finally {
+        fs.rmSync(linkedDir, { recursive: true, force: true });
+      }
+    }
+
+    // U17（v2.1.16 PR#61 F1）：批量导入口径回归——「批量导入」function 未注册（静默丢弃），
+    //   银行对账单批量导入应改用已注册的「导入文件」（与单选一致）使统计连续。
+    {
+      const bankFns = FUNCTION_REGISTRY['银行对账单处理'] || [];
+      check('U17.has-import', bankFns.includes('导入文件'), '银行对账单处理 必须有“导入文件”（批量导入复用此口径）');
+      check('U17.no-batch', !bankFns.includes('批量导入'), '“批量导入” 不应作为独立 function（会静默丢弃）');
+      const s = defaultStats();
+      // 旧口径（批量导入）静默丢弃
+      const before = JSON.stringify(s);
+      incrementFunction(s, '银行对账单处理', '批量导入');
+      check('U17.batch-silent', JSON.stringify(s) === before, '旧口径“批量导入”应静默丢弃（未注册）');
+      // 新口径（导入文件）真正计数
+      incrementFunction(s, '银行对账单处理', '导入文件');
+      check('U17.import-count', s.modules['银行对账单处理']['导入文件'] === 1, '新口径“导入文件”应真正写入计数');
+    }
+
     console.log(`  usage-stats: ${count}/${count} PASS`);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

@@ -29,8 +29,10 @@ const {
 const {
   ALL_TABLE_SIGNATURES,
   BANK_STATEMENT_SIGNATURE,
-  GATEWAY_RECON_SIGNATURE
+  GATEWAY_RECON_SIGNATURE,
+  FX_OPTION_SIGNATURE
 } = require('../../../src/constants/table-signatures');
+const { BANK_STATEMENT_FIELDS } = require('../../../src/constants/bank-statement-fields');
 
 const ASSETS = path.join(__dirname, '..', '..', '..', 'assets');
 
@@ -38,6 +40,17 @@ const ASSETS = path.join(__dirname, '..', '..', '..', 'assets');
 function writeTempXlsx(dir, name, aoa, sheetName = 'Sheet1') {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), sheetName);
+  const fp = path.join(dir, name);
+  XLSX.writeFile(wb, fp);
+  return fp;
+}
+
+// 把多张 sheet（[{ name, aoa }]）写成临时 xlsx（保持顺序），返回文件路径。
+function writeTempMultiSheetXlsx(dir, name, sheets) {
+  const wb = XLSX.utils.book_new();
+  for (const { name: sheetName, aoa } of sheets) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), sheetName);
+  }
   const fp = path.join(dir, name);
   XLSX.writeFile(wb, fp);
   return fp;
@@ -221,6 +234,127 @@ test.describe('detectTableType — ambiguous / unrecognized / read-error', () =>
   test('空候选签名集 → 任何文件都 unrecognized（无候选可命中）', () => {
     const result = detectTableType(path.join(ASSETS, '银行对账单.xlsx'), []);
     assert.equal(result.status, 'unrecognized');
+  });
+});
+
+test.describe('detectTableType — 多 sheet 扫描（v2.1.16 PR#61 F4 真回归）', () => {
+  // 回归点：底层 readWorkbookRows 历史只读 SheetNames[0]；若银行对账单文件把封面/汇总 sheet
+  //   排在「渠道对账单」之前，detector 只看第一个 sheet 会误判 unrecognized。现改为扫所有 sheet。
+  const BANK_HEADER = [...BANK_STATEMENT_FIELDS];
+  const COVER_SHEET = {
+    name: '汇总',
+    aoa: [['对账汇总'], ['总笔数', 100], ['总金额', 99999]]
+  };
+  const BANK_SHEET = {
+    name: '渠道对账单',
+    aoa: [BANK_HEADER, BANK_HEADER.map(() => 'v')]
+  };
+
+  test('封面 sheet 在前的银行对账单 → 仍命中 bank-statement（不再误判 unrecognized）', () => {
+    const fp = writeTempMultiSheetXlsx(tmpDir, 'bank-cover-first.xlsx', [COVER_SHEET, BANK_SHEET]);
+    const result = detectTableType(fp);
+    assert.equal(result.status, 'matched', '封面在前时仍应识别出银行对账单（多 sheet 扫描）');
+    assert.equal(result.tableKey, 'bank-statement');
+    assert.equal(result.score, 1, 'L1 精确命中 score=1');
+  });
+
+  test('多张封面/说明 sheet 在前、数据 sheet 在最后 → 仍命中', () => {
+    const note = { name: '说明', aoa: [['本表为对账结果'], ['制表人', '张三']] };
+    const fp = writeTempMultiSheetXlsx(tmpDir, 'bank-multi-cover.xlsx', [COVER_SHEET, note, BANK_SHEET]);
+    const result = detectTableType(fp);
+    assert.equal(result.status, 'matched');
+    assert.equal(result.tableKey, 'bank-statement');
+  });
+
+  test('数据 sheet 在第一个（历史常见摆放）→ 仍命中（短路即返回，行为不退化）', () => {
+    const fp = writeTempMultiSheetXlsx(tmpDir, 'bank-data-first.xlsx', [BANK_SHEET, COVER_SHEET]);
+    const result = detectTableType(fp);
+    assert.equal(result.status, 'matched');
+    assert.equal(result.tableKey, 'bank-statement');
+  });
+
+  test('多 sheet 但全部都不是任何签名表 → unrecognized', () => {
+    const fp = writeTempMultiSheetXlsx(tmpDir, 'no-match-multi.xlsx', [
+      COVER_SHEET,
+      { name: '其它', aoa: [['列甲', '列乙', '列丙'], ['a', 'b', 'c']] }
+    ]);
+    const result = detectTableType(fp);
+    assert.equal(result.status, 'unrecognized');
+    assert.equal(result.tableKey, null);
+  });
+
+  test('封面 sheet 在前的网关对账单（大小写敏感仍生效）→ 命中 gateway-recon', () => {
+    const gwHeader = [...GATEWAY_RECON_SIGNATURE.expectedHeaders];
+    const fp = writeTempMultiSheetXlsx(tmpDir, 'gw-cover-first.xlsx', [
+      COVER_SHEET,
+      { name: '1409155847565936642', aoa: [gwHeader, gwHeader.map(() => 'v')] }
+    ]);
+    const result = detectTableType(fp, [BANK_STATEMENT_SIGNATURE, GATEWAY_RECON_SIGNATURE]);
+    assert.equal(result.status, 'matched');
+    assert.equal(result.tableKey, 'gateway-recon');
+  });
+
+  test('两张数据 sheet 各命中不同表（同文件不同 sheet 分别命中银行/网关）→ 取先出现者 bank-statement（短路）', () => {
+    const gwHeader = [...GATEWAY_RECON_SIGNATURE.expectedHeaders];
+    const fp = writeTempMultiSheetXlsx(tmpDir, 'bank-then-gw.xlsx', [
+      BANK_SHEET,
+      { name: 'gw', aoa: [gwHeader, gwHeader.map(() => 'v')] }
+    ]);
+    const result = detectTableType(fp, [BANK_STATEMENT_SIGNATURE, GATEWAY_RECON_SIGNATURE]);
+    // 跨 sheet 不判 ambiguous（ambiguous 仅同一 sheet 多签名命中）；按 sheet 顺序短路取第一个命中。
+    assert.equal(result.status, 'matched');
+    assert.equal(result.tableKey, 'bank-statement', '不同 sheet 各命中一张表时按 sheet 顺序短路（非 ambiguous）');
+  });
+
+  test('同一 sheet 内拼接两表表头 → 仍判 ambiguous（多 sheet 改造不破坏 ambiguous 语义）', () => {
+    const combined = [
+      ...BANK_STATEMENT_SIGNATURE.expectedHeaders,
+      ...GATEWAY_RECON_SIGNATURE.expectedHeaders
+    ];
+    const fp = writeTempMultiSheetXlsx(tmpDir, 'ambiguous-multi.xlsx', [
+      { name: '封面', aoa: [['x']] },
+      { name: '混合', aoa: [combined, combined.map(() => 'v')] }
+    ]);
+    const result = detectTableType(fp, [BANK_STATEMENT_SIGNATURE, GATEWAY_RECON_SIGNATURE]);
+    assert.equal(result.status, 'ambiguous');
+    assert.ok(Array.isArray(result.matchedKeys));
+  });
+});
+
+test.describe('detectTableType — 外汇期权表 unsupported（v2.1.16 PR#61 F3）', () => {
+  // 模板已入库 assets/外汇期权订单.xlsx（sheet「交易数据」，标题第 0 行、表头第 1 行）。
+  // 期望：识别得出 fx-option，但 detector 返回 status='unsupported'（区别 unrecognized），不接入落库。
+  test('期权表（真实模板）→ status=unsupported + tableKey=fx-option（已入库未接入）', () => {
+    const result = detectTableType(path.join(ASSETS, '外汇期权订单.xlsx'));
+    assert.equal(result.status, 'unsupported', '期权表已入库 → unsupported（非 unrecognized）');
+    assert.equal(result.tableKey, 'fx-option');
+    assert.equal(result.score, 1, 'L1 精确命中 score=1');
+  });
+
+  test('FX_OPTION_SIGNATURE 已纳入 ALL_TABLE_SIGNATURES 候选', () => {
+    const keys = ALL_TABLE_SIGNATURES.map((s) => s.tableKey);
+    assert.ok(keys.includes('fx-option'), 'fx-option 必须在候选集（识别更友好）');
+    assert.ok(Array.isArray(FX_OPTION_SIGNATURE.expectedHeaders) && FX_OPTION_SIGNATURE.expectedHeaders.length === 24, '期权表实测 24 列');
+  });
+
+  test('封面 sheet 在前的期权表（headerRowOffset=1 + 多 sheet）→ 仍 unsupported', () => {
+    const optHeader = [...FX_OPTION_SIGNATURE.expectedHeaders];
+    const fp = writeTempMultiSheetXlsx(tmpDir, 'opt-cover-first.xlsx', [
+      { name: '封面', aoa: [['说明']] },
+      // 还原真实模板结构：第 0 行标题、第 1 行表头
+      { name: '交易数据', aoa: [['期权交易数据'], optHeader, optHeader.map(() => 'v')] }
+    ]);
+    const result = detectTableType(fp);
+    assert.equal(result.status, 'unsupported');
+    assert.equal(result.tableKey, 'fx-option');
+  });
+
+  test('期权表不被其它表误判、其它表也不被期权误判（互斥）', () => {
+    const opt = detectTableType(path.join(ASSETS, '外汇期权订单.xlsx'));
+    const fxDelivery = detectTableType(path.join(ASSETS, '外汇交割表.xls'));
+    assert.equal(opt.tableKey, 'fx-option');
+    assert.equal(fxDelivery.tableKey, 'fx-delivery');
+    assert.notEqual(opt.tableKey, fxDelivery.tableKey, '期权表 / 交割表互不串台');
   });
 });
 

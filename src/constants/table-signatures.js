@@ -154,20 +154,26 @@ const FX_DELIVERY_SIGNATURE = Object.freeze({
   headerRowOffset: 1
 });
 
-// 外汇期权表 — ⚠️ TODO（A2 待补）：assets/ 中**当前无外汇期权模板文件**（grep 外汇/期权/option 仅得外汇交割表.xls）。
-//   未取得真实模板表头前，不凭空捏造列名（违反「实测再写」原则）。
-//   待业务方提供期权模板后，按上述字段约定补全 expectedHeaders / signatureHeaders / dateColumn / headerRowOffset。
-//   现以占位常量导出 + isPlaceholder 标记，detector 默认不纳入候选（见 PREPROCESS/LINKED 列表注释）。
-const FX_OPTION_SIGNATURE_TODO = Object.freeze({
+// 外汇期权订单.xlsx — sheet「交易数据」，24 列。
+// ⚠️ 第 0 行是标题「期权交易数据」，**真实表头在第 1 行**（headerRowOffset=1）；无中间空列。
+//   （v2.1.16 PR#61 F3：模板已入库 assets/外汇期权订单.xlsx，表头已实测，纳入 detector 候选。
+//    但本阶段「已入库待阶段二接入」—— detector 识别到 fx-option 返回 status='unsupported'，
+//    不建 DB 表、不持久化；阶段二再接入读取/落库。见 table-type-detector.js UNSUPPORTED_TABLE_KEYS。）
+const FX_OPTION_SIGNATURE = Object.freeze({
   tableKey: 'fx-option',
   label: '外汇期权表',
   scope: 'linked',
-  isPlaceholder: true, // TODO：模板缺失，表头未实测；补全后移除此标记并纳入候选列表
-  expectedHeaders: [],
-  signatureHeaders: [],
-  dateColumn: null,
+  expectedHeaders: [
+    '货币对/ID', 'Delta', 'CCY1名义本金', 'CCY2名义本金', 'Book', '本方', '对手方', 'Company',
+    'Client ID', '客户名称', '行权价', '方向', '价格', '到期日', '交割日', '交易日',
+    '开仓期权费交割日', '平仓期权费交割日', '交割方式', '平仓价', '市场价', '损益', '行权设置', '状态'
+  ],
+  // 指纹依据：货币对/ID、Delta、CCY1名义本金、CCY2名义本金、行权价 为期权表独有
+  //   （Delta / 名义本金 / 行权价 / 期权费交割日 等期权术语在其余表均无）。
+  signatureHeaders: ['货币对/ID', 'Delta', 'CCY1名义本金', 'CCY2名义本金', '行权价'],
+  dateColumn: '交易日',
   minScore: 0.6,
-  headerRowOffset: 0
+  headerRowOffset: 1
 });
 
 // —— 已就绪（非占位）签名 ——
@@ -180,11 +186,13 @@ const PREPROCESS_TABLE_SIGNATURES = Object.freeze([
 const LINKED_TABLE_SIGNATURES = Object.freeze([
   ZHONGTAI_DISPATCH_ORDER_SIGNATURE,
   GATEWAY_RECON_SIGNATURE,
-  FX_DELIVERY_SIGNATURE
-  // FX_OPTION_SIGNATURE_TODO 暂不纳入（模板缺失，见上方 TODO）
+  FX_DELIVERY_SIGNATURE,
+  // v2.1.16 PR#61 F3：期权表已入库并纳入候选（识别更友好）；但 detector 标 status='unsupported'，
+  //   本阶段不落库（见 table-type-detector.js UNSUPPORTED_TABLE_KEYS / linked-table:import handler）。
+  FX_OPTION_SIGNATURE
 ]);
 
-// 全部已就绪签名（detector 默认候选集）。占位签名 FX_OPTION_SIGNATURE_TODO 不在其中。
+// 全部已就绪签名（detector 默认候选集）。
 const ALL_TABLE_SIGNATURES = Object.freeze([
   ...PREPROCESS_TABLE_SIGNATURES,
   ...LINKED_TABLE_SIGNATURES
@@ -197,7 +205,7 @@ module.exports = {
   ZHONGTAI_DISPATCH_ORDER_SIGNATURE,
   GATEWAY_RECON_SIGNATURE,
   FX_DELIVERY_SIGNATURE,
-  FX_OPTION_SIGNATURE_TODO,
+  FX_OPTION_SIGNATURE,
   PREPROCESS_TABLE_SIGNATURES,
   LINKED_TABLE_SIGNATURES,
   ALL_TABLE_SIGNATURES

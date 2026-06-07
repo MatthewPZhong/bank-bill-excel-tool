@@ -6238,7 +6238,7 @@
           'unrecognized': '未识别为任何链接表',
           'read-error': '文件读取失败',
           'write-error': '写入失败',
-          'unsupported': '外汇期权表暂未支持'
+          'unsupported': '外汇期权表已入库，待阶段二接入'
         };
         const lines = [];
         lines.push(`成功导入 <b>${ok.length}</b> 张，失败 <b>${failed.length}</b> 张`);
