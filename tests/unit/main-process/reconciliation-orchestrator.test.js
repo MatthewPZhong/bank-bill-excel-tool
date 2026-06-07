@@ -45,6 +45,8 @@ function makeBankRow(overrides = {}) {
     'Transaction Description': overrides['Transaction Description'] ?? '',
     // C2 命中用的标记字段
     BillTag: overrides.BillTag ?? '',
+    // C2 reconFields≥1 配对键（PR#62 P1 fixture 用；默认空不影响其它用例配对）
+    PairKey: overrides.PairKey ?? '',
     // 剔除模板 C~O 拷贝校验用（给几个非空值便于断言拷贝）
     ValueDate: overrides.ValueDate ?? '2026-06-02',
     Channel: overrides.Channel ?? '工商',
@@ -83,6 +85,33 @@ function makeR2OffsetScenario({ id = 200 } = {}) {
       billTypes: [{ seq: 1, conditions: [{ field: 'BillTag', op: '包含', value: 'OFFSET' }] }],
       reconFields: [], // 衍生方案 A：无条件赋值
       markValue: { type: 1, field: 'Transaction Description', value: '已对账' }
+    }
+  };
+}
+
+// R2：C2 配对（reconFields≥1）「锁定双方但不改值」场景 —— 🔴 PR#62 P1 fixture
+//   leftType=1（BillTag 含 'L'）× rightType=2（BillTag 含 'R'），配对键 PairKey 相等。
+//   markValue 写 rightType 行的 'Transaction Description'='已对账'。
+//   当 rightRow 的该字段**已等于** '已对账' 时：c2 引擎配对成功后无条件 lock 双方
+//   （c2-offset-bill-mark.js:221-222），但 oldValue===newValue → 不 record（同文件 :238）。
+//   → 两行进 dispatcher.modifiedRows（锁定 + 带 _hitScenario* 元数据 + _modifiedColumns 空 Set），
+//     但 modifications 为空 → 编排器 modColsByRowId 收不到它们（验「锁定未改值」分区判定）。
+function makeR2PairLockNoChangeScenario({ id = 210 } = {}) {
+  return {
+    id,
+    name: 'R2-配对锁定不改值',
+    category: 'offset-bill-mark',
+    priority: 5,
+    enabled: true,
+    displayIndex: 1,
+    config: {
+      billTypes: [
+        { seq: 1, conditions: [{ field: 'BillTag', op: '包含', value: 'L' }] },
+        { seq: 2, conditions: [{ field: 'BillTag', op: '包含', value: 'R' }] }
+      ],
+      // reconFields≥1 → 走笛卡尔配对路径（非衍生方案 A），配对成功即锁定双方
+      reconFields: [{ seq: 1, leftType: 1, leftField: 'PairKey', rightType: 2, rightField: 'PairKey' }],
+      markValue: { type: 2, field: 'Transaction Description', value: '已对账' }
     }
   };
 }
@@ -356,6 +385,68 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
     assert.ok(b1);
     assert.equal(b1.FundType, 'HX-out', '高优先级 HX-out 先跑改成 HX-out，charge 不再满足 Charge 条件');
     assert.ok(b1._modifiedColumns.has('FundType'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 🔴 PR#62 P1：保留 R2 锁定但未改值的命中行
+//   先用 dispatcher 直证 fixture「锁定双方但 modifications 为空」，再断编排器把它们留在 modifiedRows。
+// ---------------------------------------------------------------------------
+test.describe('R2 锁定但未改值的命中行（PR#62 P1）', () => {
+  // 银行行：一对配对行（L1/R1），R1 的 Transaction Description 已等于目标值 '已对账'
+  //   + 一行完全不命中（b0）做行数守恒对照。
+  const mkRows = () => [
+    // 对照行：BillTag 用中文 '普通'，绝不含字母 L/R（'包含' 匹配大小写敏感、按子串）→ 不入 type1/type2
+    makeBankRow({ _rowId: 'b0', BillTag: '普通' }),                   // 不含 L/R → 不命中
+    makeBankRow({ _rowId: 'L1', BillTag: 'L', PairKey: 'K1', 'Transaction Description': '' }),
+    // R1 的标记字段已等于 markValue.value → 配对锁定但不 record
+    makeBankRow({ _rowId: 'R1', BillTag: 'R', PairKey: 'K1', 'Transaction Description': '已对账' })
+  ];
+
+  test('前置：dispatcher 确认 L1/R1 被锁定进 modifiedRows 但 modifications 为空（_modifiedColumns 空 Set）', () => {
+    const result = runAllScenarios(mkRows(), [], [makeR2PairLockNoChangeScenario()], undefined);
+    // modifications 为空（rightRow 已等于目标值 → 不 record）
+    assert.equal(result.modifications.length, 0, 'markValue 已等于现值 → 无 modification 记录');
+    // 但 L1/R1 都被锁定 → 进 dispatcher.modifiedRows，且 _modifiedColumns 为空 Set
+    const hitIds = result.modifiedRows.map((r) => r._rowId).sort();
+    assert.deepEqual(hitIds, ['L1', 'R1'], 'L1/R1 配对成功被锁定 → 在 dispatcher.modifiedRows');
+    for (const r of result.modifiedRows) {
+      assert.ok(r._modifiedColumns instanceof Set);
+      assert.equal(r._modifiedColumns.size, 0, '锁定未改值行 _modifiedColumns 为空 Set');
+      assert.equal(r._hitScenarioId, 210, '带 R2 命中元数据');
+    }
+  });
+
+  test('编排器：R2 锁定未改值行进 modifiedRows（带 R2 元数据 + 空 Set）、不在 unmatchedRows、行数守恒', () => {
+    const bankRows = mkRows();
+    const total = bankRows.length;
+    const result = runReconciliation({ bankRows, gwRows: [], scenarios: [makeR2PairLockNoChangeScenario()] });
+
+    const modIds = result.modifiedRows.map((r) => r._rowId).sort();
+    // ① L1/R1 在 modifiedRows（旧逻辑只看 modColsByRowId.has 会漏掉它们 → 掉进 unmatched）
+    assert.deepEqual(modIds, ['L1', 'R1'], 'R2 锁定未改值的 L1/R1 应保留在 modifiedRows');
+
+    for (const id of ['L1', 'R1']) {
+      const row = result.modifiedRows.find((r) => r._rowId === id);
+      assert.ok(row, `${id} 应在 modifiedRows`);
+      // 带 R2 命中元数据（命中场景行报表依赖）
+      assert.equal(row._hitScenarioId, 210, `${id} 应保留 R2 命中场景 id`);
+      assert.equal(row._hitScenarioName, 'R2-配对锁定不改值', `${id} 应保留 R2 命中场景名`);
+      // _modifiedColumns 是空 Set（不标黄，但仍为命中）
+      assert.ok(row._modifiedColumns instanceof Set, `${id} _modifiedColumns 必须是 Set`);
+      assert.equal(row._modifiedColumns.size, 0, `${id} 锁定未改值 → _modifiedColumns 为空 Set（不标黄）`);
+    }
+
+    // ② 不在 unmatchedRows（只剩完全不命中的 b0）
+    const unmatchedIds = result.unmatchedRows.map((r) => r._rowId).sort();
+    assert.deepEqual(unmatchedIds, ['b0'], 'L1/R1 不应在 unmatchedRows（已被 R2 消费），仅 b0 未命中');
+
+    // ③ 行数守恒
+    assert.equal(
+      result.modifiedRows.length + result.unmatchedRows.length,
+      total,
+      'modifiedRows + unmatchedRows === bankRows.length'
+    );
   });
 });
 

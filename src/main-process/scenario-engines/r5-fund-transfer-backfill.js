@@ -47,7 +47,9 @@ const {
   valuesEqual
 } = require('./engine-utils');
 
-const { sameDay, dayDiffWithin } = require('./engine-date-utils');
+const { sameDay, dayDiffWithin, toDate } = require('./engine-date-utils');
+
+const MS_PER_DAY = 86400000;
 
 // 默认双方向（config 化，TECH_DESIGN §5.3 / options.directions）
 const DEFAULT_DIRECTIONS = [
@@ -157,7 +159,14 @@ function runRound5FundTransferBackfill(gwRows, bankRows, options = {}) {
 
   // 每个 direction 独立跑：独立 gwPool / bankPool / usedBankRowId（两方向不串池）
   for (const dir of directions) {
-    const gwPool = safeGwRows.filter((g) => normalizeCellValue(g && g.TradeType) === dir.gwTradeType);
+    // F1（🔴 P1）：仅保留 reconciliationid 非空的网关行 —— 空 reconid 无可回填，
+    //   若放进 gwPool 会在 backfill 里先 usedBankRowId.add 消费掉银行行（「不写但占用」），
+    //   挡住后续有效网关行回填。空 reconid 不进池 → 不参与匹配、不消费 usedBankRowId。
+    const gwPool = safeGwRows.filter(
+      (g) =>
+        normalizeCellValue(g && g.TradeType) === dir.gwTradeType &&
+        normalizeCellValue(g && g.reconciliationid) !== ''
+    );
     const bankPool = safeBankRows.filter((b) => normalizeCellValue(b && b.FundType) === dir.bankFundType);
     const usedBankRowId = new Set();
 
@@ -183,6 +192,16 @@ function runRound5FundTransferBackfill(gwRows, bankRows, options = {}) {
           fieldEq(gw, b) &&
           dayDiffWithin(gw && gw.Billdate, b.BillDate, dateToleranceDays)
       );
+      // F2（P2）：dateToleranceDays>1 时，按「与网关 Billdate 的绝对天数差」升序稳定排序，
+      //   让差 1 天的优先于差 2 天（JS Array.sort 对相等键稳定 → 同天数差保持 bankPool 原序）。
+      //   Phase1 严格同日不受影响。
+      const gwDate = toDate(gw && gw.Billdate);
+      const dayDiffAbs = (b) => {
+        const bd = toDate(b && b.BillDate);
+        if (!gwDate || !bd) return Number.POSITIVE_INFINITY;
+        return Math.abs(Math.round((gwDate.getTime() - bd.getTime()) / MS_PER_DAY));
+      };
+      cand.sort((a, b) => dayDiffAbs(a) - dayDiffAbs(b));
       backfill(gw, cand, `±${dateToleranceDays}day`, usedBankRowId);
     }
   }

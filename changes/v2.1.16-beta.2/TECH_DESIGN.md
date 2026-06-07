@@ -111,7 +111,8 @@
 - **5 个可插拔 handler**，按 `priority` 顺序跑（判定条件全部 config 化，存 seed config_json，**复用 `evaluateCondition`**）。
 - **允许同一银行行被多次改 FundType**（叠加链如 Charge→outbound 后再 →HX-out）；每步改写 `record` 进 `modifiedColumnsByRowId`（标黄 `FundType` 列）。
 - 判定表见 §10（与 PRD §五同步）。**TradeType 真实取值 / priority 顺序待用户核对，已 config 化可调**。
-- 单测须含：单 / 多 handler 顺序、二次改值链、枚举外值 warn。
+- 单测须含：单 / 多 handler 顺序、二次改值链、no-op 守卫、priority 顺序。
+- R4 **不做运行时 FundType 枚举校验**：`setFundType` 来自受控 seed config（builtin-fixed config 不可经 UI 编辑、枚举已含全部目标值），非法值仅可能来自直接改库，本期不防护（PR#62 Codex F3：文档对齐真实行为）。
 
 ### 5.3 R5 场景2 — `r5-fund-transfer-backfill.js`（回填 ReconciliationId）
 
@@ -170,7 +171,7 @@
 
 | 层 | 范围 |
 |---|---|
-| **引擎 unit**（`tests/unit/main-process/scenario-engines/`） | R1（1v1 / 多匹配 / 空键 / 不产 modification）；R4（单 / 多 handler 顺序 / 二次改值链 / 枚举外值 warn）；R5场景2（同日 / ±1day / 方向 / 1v1 / 绝对值归分 / 覆盖 warn / tie-break）；R5场景3（命中产剔除行 A/B/C-O 正确、FundType=Inbound 不产、附言用 R4 后值） |
+| **引擎 unit**（`tests/unit/main-process/scenario-engines/`） | R1（1v1 / 多匹配 / 空键 / 不产 modification）；R4（单 / 多 handler 顺序 / 二次改值链 / no-op 守卫 / priority 顺序）；R5场景2（同日 / ±1day / 方向 / 1v1 / 绝对值归分 / 覆盖 warn / tie-break）；R5场景3（命中产剔除行 A/B/C-O 正确、FundType=Inbound 不产、附言用 R4 后值） |
 | **编排器 integration**（`tests/integration/`） | 全链路 R1→R5；R2 零回归；R4 改 R2 命中行；标黄跨轮合并；`modifiedRows+unmatchedRows=bankRows`；stats 分项 |
 | **仓储 / writer / migration** | `readLinkedTableRows` 还原 / 损坏 / 顺序；`writePlatformCleanupOutput` 15 列 + 命名；migration 幂等 |
 | **漂移守卫** | `CLEANUP_TEMPLATE_HEADERS` vs assets 真实表头一致；C~O ⊆ `BANK_STATEMENT_FIELDS` |

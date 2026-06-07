@@ -226,6 +226,45 @@ test.describe('R5场景2 — ④ 严格 1v1 单向消费', () => {
   });
 });
 
+// ---- F1 空 reconid 网关行不得占用银行候选 -----------------------------
+
+test.describe('R5场景2 — F1 空 reconciliationid 网关行不占用银行候选', () => {
+  test('空 reconid gw 不消费银行行 → 后续有效 reconid gw 仍能回填该行', () => {
+    // 两条同 direction 网关行：第 1 条 reconid 空、第 2 条有效；均同字段/同日匹配同一条银行行
+    const gws = [
+      gwRow({ reconId: '', billdate: '2026-06-07', amount: 100 }),
+      gwRow({ reconId: 'GW-VALID', billdate: '2026-06-07', amount: 100 })
+    ];
+    const banks = [bankRow({ rowId: 'b1', debit: 100, billDate: '2026-06-07', reconId: '' })];
+
+    const { modifications } = runRound5FundTransferBackfill(gws, banks);
+    // 空 reconid 行不进 gwPool、不占用 b1 → 有效行成功回填 b1
+    assert.equal(modifications.length, 1, '空 reconid 行不应占用银行行，有效行应回填');
+    assert.equal(modifications[0].rowId, 'b1');
+    assert.equal(modifications[0].newValue, 'GW-VALID');
+    assert.equal(banks[0].ReconciliationId, 'GW-VALID', '银行行被有效 reconid 回填');
+  });
+});
+
+// ---- F2 Phase2 多候选按 |Δday| 最小优先 --------------------------------
+
+test.describe('R5场景2 — F2 Phase2 多候选按绝对天数差最小优先', () => {
+  test('tolerance=2、bankPool 中差 2 天候选排在差 1 天前面 → 选中差 1 天那条', () => {
+    const gws = [gwRow({ reconId: 'GW-1', billdate: '2026-06-07' })];
+    // 都非同日（Phase1 不命中）、字段/金额都匹配；原序故意把差 2 天放前面
+    const banks = [
+      bankRow({ rowId: 'b_diff2', debit: 100, billDate: '2026-06-09', reconId: '' }), // 差 2 天，排前
+      bankRow({ rowId: 'b_diff1', debit: 100, billDate: '2026-06-08', reconId: '' })  // 差 1 天，排后
+    ];
+
+    const { modifications } = runRound5FundTransferBackfill(gws, banks, { dateToleranceDays: 2 });
+    assert.equal(modifications.length, 1);
+    assert.equal(modifications[0].rowId, 'b_diff1', 'Phase2 应优先选绝对天数差最小（差 1 天）的候选');
+    assert.equal(banks[1].ReconciliationId, 'GW-1');
+    assert.equal(banks[0].ReconciliationId, '', '差 2 天候选未被消费');
+  });
+});
+
 // ---- ⑤ 金额发生额绝对值精确到分（端到端）-----------------------------
 
 test.describe('R5场景2 — ⑤ 金额精确到分匹配（端到端）', () => {
