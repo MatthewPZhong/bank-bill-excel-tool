@@ -62,32 +62,26 @@ function setBackgroundConfig(db, backgroundConfig) {
   setSetting(db, 'background_config', JSON.stringify(backgroundConfig));
 }
 
+// v2.1.15 W4：弃用 General 风格，UI 风格恒为 'Clear'。
+//   - 移除「切换页面风格」入口与 setUiStyle 写链路（不再有任何路径写入 'General'）。
+//   - 持久化兼容：老库 ui_style 可能存了 'General'（或其它历史/非法值），
+//     getUiStyle 一律无声归一为 'Clear'，不抛错，不让老用户报错。
 const UI_STYLE_KEY = 'ui_style';
-const UI_STYLE_VALID = ['Clear', 'General'];
 const UI_STYLE_DEFAULT = 'Clear';
 
 function getUiStyle(db) {
+  // 历史上 ui_style 可能为 'General' / 非法值；W4 起一律视为 'Clear'（无声兜底）。
   const value = getSetting(db, UI_STYLE_KEY);
-  if (value && UI_STYLE_VALID.includes(value)) {
-    return value;
-  }
-  return null;
-}
-
-function setUiStyle(db, style) {
-  if (!UI_STYLE_VALID.includes(style)) {
-    throw new Error(`Invalid ui_style: ${style}, must be one of ${UI_STYLE_VALID.join(' | ')}`);
-  }
-  setSetting(db, UI_STYLE_KEY, style);
+  return value === 'Clear' ? 'Clear' : UI_STYLE_DEFAULT;
 }
 
 function ensureUiStyleDefault(db) {
-  const current = getUiStyle(db);
-  if (!current) {
+  // 始终把 ui_style 收敛为 'Clear'：未写则 seed；老库存了 'General'/非法值则就地迁移为 'Clear'。
+  const stored = getSetting(db, UI_STYLE_KEY);
+  if (stored !== UI_STYLE_DEFAULT) {
     setSetting(db, UI_STYLE_KEY, UI_STYLE_DEFAULT);
-    return UI_STYLE_DEFAULT;
   }
-  return current;
+  return UI_STYLE_DEFAULT;
 }
 
 // v2.1.4：9 个主模块的 ID 全集（renderer 端 MODULES 常量必须与此一致；新增模块时两边都要加）
@@ -451,7 +445,6 @@ module.exports = {
   setEnumConfig,
   setReconIdFixBillCategory,
   setSetting,
-  setUiStyle,
   // v2.1.9 N1-settings (T32b)：idle cleanup 阈值
   getAcquiringBillIdleCleanupMinutes,
   setAcquiringBillIdleCleanupMinutes,

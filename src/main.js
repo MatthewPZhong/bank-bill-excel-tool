@@ -55,6 +55,10 @@ try { buildInfo = require('./build-info'); } catch (_) { /* dev 期 src/build-in
 //   运行时读 assets/FundType枚举值.xlsx（main 进程 require；经 IPC scenarios:fund-type-enum 暴露给 renderer）
 //   preload 无法 require 自定义模块（Electron sandbox），故走 IPC 而非 inline 副本
 const { loadFundTypeEnum, FUND_TYPE_ENUM_FILE_NAME } = require('./constants/fund-type-enum');
+// v2.1.15 W1（spec §3 / 决策 xlsx 为准、旧硬编码作废）：C3「网关账单字段」枚举改读
+//   assets/网关对账单.xlsx 表头行（main 进程 require；经 IPC scenarios:gateway-recon-headers 暴露给 renderer）
+//   preload 无法 require 自定义模块（Electron sandbox），故走 IPC 而非 inline 副本
+const { loadGatewayReconHeaders, GATEWAY_RECON_HEADERS_FILE_NAME } = require('./constants/gateway-recon-headers-loader');
 // v2.1.2 T2：月度银行对账单BU回填校验模块
 const { createBankBuReconSession, runReconciliation: runBankBuRecon } = require('./main-process/bank-bu-recon-session');
 const {
@@ -2902,7 +2906,7 @@ function registerAppHandlers() {
       currencyOptions: getAvailableCurrencyCodes(),
       backgroundConfig: buildBackgroundPayload(),
       previewModal: process.env.APP_PREVIEW_MODAL || '',
-      // v2.0.0-beta.2 F1：UI 风格（'Clear' | 'General'）；renderer 启动时立即应用
+      // v2.0.0-beta.2 F1 / v2.1.15 W4：UI 风格恒为 'Clear'（General 已弃用）；renderer 启动时立即应用
       uiStyle: database.getUiStyle() || 'Clear',
       // 上次使用模块；renderer 启动时恢复
       currentModule: database.getCurrentModule() || 'statement-generator',
@@ -2914,16 +2918,10 @@ function registerAppHandlers() {
       ownAccountsMigrationError: lastOwnAccountsMigrationError
     };
   });
+  // v2.1.15 W4：弃用 General 风格。settings:set-ui-style 写链路已移除；
+  //   getUiStyle 兜底后恒返回 'Clear'，renderer 启动 applyUiStyle 仍可用。
   ipcMain.handle('settings:get-ui-style', () => {
     return database.getUiStyle() || 'Clear';
-  });
-  trackedIpcHandle('settings:set-ui-style', '切换页面风格', '切换', (_event, style) => {
-    try {
-      database.setUiStyle(style);
-      return { status: 'ok', uiStyle: style };
-    } catch (error) {
-      return { status: 'failed', message: String(error && error.message ? error.message : error) };
-    }
   });
   ipcMain.handle('settings:set-current-module', (_event, moduleId) => {
     try {
@@ -3001,6 +2999,28 @@ function registerAppHandlers() {
     } catch (error) {
       // 防御：任何异常也降级为空数组（renderer 据此回退文本输入），不阻塞弹窗
       return { status: 'ok', values: [] };
+    }
+  });
+  // v2.1.15 W1（spec §3 / 决策 xlsx 为准、旧硬编码作废、存量不迁移）：C3「网关账单字段」枚举
+  //   - renderer 打开 C3 配置弹窗时拉取，对账字段/条件行/赋值行的「网关账单字段」下拉用本枚举渲染
+  //   - 路径解析：打包后用 app.getAppPath() 拼 assets（与 fund-type-enum handler 同范式）；
+  //     dev 期候选含 <repo>/assets/
+  //   - 降级（文件缺失/读取失败/表头为空）：loadGatewayReconHeaders 内 fallback 到旧硬编码 GATEWAY_RECON_FIELDS（不抛错）
+  //   - 🔴 资金红线：loader 已剔除表头中的 __CUSTOM__ sentinel（避免 C3 自取值 mode 误判）
+  //   - 模块级缓存（按解析路径）：重复调用不反复读盘
+  ipcMain.handle('scenarios:gateway-recon-headers', () => {
+    try {
+      const candidates = [
+        path.join(app.getAppPath(), 'assets', GATEWAY_RECON_HEADERS_FILE_NAME),
+        path.join(__dirname, '..', 'assets', GATEWAY_RECON_HEADERS_FILE_NAME)
+      ];
+      const found = candidates.find((p) => fs.existsSync(p));
+      // found 存在 → 显式传入（打包/dev 都命中）；都不存在 → 传第一个候选，loader 内降级 fallback
+      const values = loadGatewayReconHeaders(found || candidates[0]);
+      return { status: 'ok', values };
+    } catch (error) {
+      // 防御：任何异常也走 loader 默认路径（其内部再 fallback），保证 renderer 拿到可用枚举
+      return { status: 'ok', values: loadGatewayReconHeaders() };
     }
   });
   // PR #35 Codex round 3 P2（资金红线分流）：4 个 scenarios:* 入口
@@ -11476,15 +11496,9 @@ app.whenReady()
     database.init();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
 
-    // v2.0.0-beta.2 F4：ui_style 升级迁移（D4）—— 若不存在则写 'Clear'
+    // v2.0.0-beta.2 F4 / v2.1.15 W4：ui_style 收敛迁移 —— 老库存了 'General'/非法值就地迁移为 'Clear'，未写则 seed 'Clear'。
+    //   General 风格已弃用，setUiStyle 写链路移除，APP_PREVIEW_STYLE 强制风格随之去除（风格恒 Clear）。
     database.ensureUiStyleDefault();
-
-    // v2.0.0-beta.2 阶段 6：preview 模式通过 env APP_PREVIEW_STYLE=clear|general 强制风格
-    if (process.env.APP_PREVIEW_STYLE) {
-      const v = String(process.env.APP_PREVIEW_STYLE).trim().toLowerCase();
-      if (v === 'clear') database.setUiStyle('Clear');
-      else if (v === 'general') database.setUiStyle('General');
-    }
 
     // v2.0.0-beta.2 D16：风格-背景色联动（仅魔法值场景）
     ensureBackgroundColorMatchesStyle();

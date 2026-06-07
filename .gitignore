@@ -22,3 +22,6 @@ tmp
 # v2.1.6 Module A T3：构建时由 scripts/gen-build-info.js 生成，含 git SHA，不入 git
 src/build-info.js
 .claude/scheduled_tasks.lock
+
+# v2.1.15：测试 / 运行时 AppDatabase migration 备份目录（pre-N4/N5/scenarios-unique 等备份产物，不入 git）
+backups/

@@ -218,11 +218,17 @@ async function runBankStatementIoSmokeTests() {
     assert(bankMatch, 'P1.1 preload.js 缺 BANK_STATEMENT_FIELDS inline 副本');
     const preloadBankCols = bankMatch[1].match(/'([^']+)'/g).map((s) => s.slice(1, -1));
     assert.deepStrictEqual(preloadBankCols, BANK_STATEMENT_FIELDS, 'P1.2 BANK_STATEMENT_FIELDS preload 与 src/constants 不同步');
-    // 提取 GATEWAY_RECON_FIELDS（31 列）
-    const gwMatch = preloadSrc.match(/const GATEWAY_RECON_FIELDS = Object\.freeze\(\[([\s\S]*?)\]\);/);
-    assert(gwMatch, 'P1.3 preload.js 缺 GATEWAY_RECON_FIELDS inline 副本');
-    const preloadGwCols = gwMatch[1].match(/'([^']+)'/g).map((s) => s.slice(1, -1));
-    assert.deepStrictEqual(preloadGwCols, GATEWAY_RECON_FIELDS, 'P1.4 GATEWAY_RECON_FIELDS preload 与 src/constants 不同步');
+    // v2.1.15 W1：GATEWAY_RECON_FIELDS 不再 inline 于 preload —— C3 网关账单字段改读 assets/网关对账单.xlsx 表头，
+    //   经 IPC scenarios:gateway-recon-headers 暴露（main 进程 require loader）。契约反转：
+    //   P1.3 preload 必须【不含】GATEWAY_RECON_FIELDS inline 副本；P1.4 必须暴露 getGatewayReconHeaders IPC 桥。
+    assert(
+      !/const GATEWAY_RECON_FIELDS = Object\.freeze\(/.test(preloadSrc),
+      'P1.3 preload.js 不应再有 GATEWAY_RECON_FIELDS inline 副本（W1 已改走 IPC scenarios:gateway-recon-headers）'
+    );
+    assert(
+      preloadSrc.includes('getGatewayReconHeaders') && preloadSrc.includes('scenarios:gateway-recon-headers'),
+      'P1.4 preload.js 必须暴露 getGatewayReconHeaders（invoke scenarios:gateway-recon-headers）'
+    );
     // 虚拟字段
     assert(preloadSrc.includes("const BANK_STATEMENT_VIRTUAL_AMOUNT_ABS = '发生额绝对值'"), 'P1.5 BANK_STATEMENT_VIRTUAL_AMOUNT_ABS preload 不同步');
   }

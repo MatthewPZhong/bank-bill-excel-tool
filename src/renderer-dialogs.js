@@ -26,7 +26,11 @@
     // v2.0.0-beta.3 PR #32b：银行对账单处理模块字段常量（preload 暴露 → window.appConstants → deps）
     const BANK_STATEMENT_FIELDS = (appConstants && appConstants.bankStatementFields) || [];
     const BANK_STATEMENT_FIELDS_FOR_C3 = (appConstants && appConstants.bankStatementFieldsForC3) || BANK_STATEMENT_FIELDS;
-    const GATEWAY_RECON_FIELDS = (appConstants && appConstants.gatewayReconFields) || [];
+    // v2.1.15 W1（spec §3 / 决策 xlsx 为准、旧硬编码作废）：C3「网关账单字段」枚举改异步加载。
+    //   旧实现取同步常量 appConstants.gatewayReconFields（preload inline 副本）；W1 起改为经
+    //   IPC scenarios:gateway-recon-headers 从 main 读 assets/网关对账单.xlsx 表头行，缓存于
+    //   gatewayReconHeadersValues。C3 弹窗渲染/校验改调 getGatewayReconFields() 读缓存（见 ensureGatewayReconHeaders）。
+    let gatewayReconHeadersValues = [];
     // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块字段常量（spec §四，business 子模式）
     const BUSINESS_BILL_FIELDS = (appConstants && appConstants.businessBillFields) || [];
     const OPPONENT_BILL_FIELDS = (appConstants && appConstants.opponentBillFields) || [];
@@ -148,6 +152,53 @@
         </select>`;
       }
       return `<input class="scenario-config-input${clsSuffix}" type="text" ${dataAttr} ${disabled} value="${escapeHtml(currentValue || '')}" placeholder="值"${hiddenStyle}>`;
+    }
+
+    // v2.1.15 W1（spec §3 / 决策 xlsx 为准、旧硬编码作废）：C3「网关账单字段」枚举（异步加载）
+    //   - 经 IPC scenarios:gateway-recon-headers 从 main 进程读 assets/网关对账单.xlsx 表头行（preload 无法 require 自定义模块）
+    //   - 模块级缓存：首次加载后复用，避免每次打开 C3 弹窗重复 IPC
+    //   - 状态：'unloaded'（未拉取）/ 'loading'（拉取中）/ 'ready'（成功，main 端已 fallback，正常非空）
+    //   - main 端 loader 在文件缺失/读取失败时已 fallback 到旧硬编码 GATEWAY_RECON_FIELDS，故 renderer 正常拿到可用枚举；
+    //     仅当 IPC 本身不可用（旧 preload / preview 兜底）才得空数组。
+    let gatewayReconHeadersState = 'unloaded';
+    let gatewayReconHeadersPromise = null;
+
+    // 拉取网关账单表头枚举（带缓存）。返回 Promise<string[]>（resolve 后 gatewayReconHeadersValues 已就绪）。
+    //   - 已 ready → 直接 resolve 缓存
+    //   - loading 中 → 复用同一 Promise（去抖）
+    //   - 失败 → 降级为空数组（不 reject，保证调用方 .then 链不断）
+    function ensureGatewayReconHeaders() {
+      if (gatewayReconHeadersState === 'ready') return Promise.resolve(gatewayReconHeadersValues);
+      if (gatewayReconHeadersState === 'loading' && gatewayReconHeadersPromise) return gatewayReconHeadersPromise;
+      gatewayReconHeadersState = 'loading';
+      const api = desktopApi && desktopApi.scenarios && desktopApi.scenarios.getGatewayReconHeaders;
+      if (typeof api !== 'function') {
+        // 旧 preload / preview 兜底：无该 IPC → 直接降级空数组
+        gatewayReconHeadersValues = [];
+        gatewayReconHeadersState = 'ready';
+        return Promise.resolve(gatewayReconHeadersValues);
+      }
+      gatewayReconHeadersPromise = Promise.resolve()
+        .then(() => api())
+        .then((result) => {
+          const values = result && Array.isArray(result.values) ? result.values : [];
+          // 🔴 资金红线双保险：renderer 端再剔除 __CUSTOM__ sentinel（main loader 已剔除，此处兜底防回流）
+          gatewayReconHeadersValues = values.filter((v) => String(v) !== '__CUSTOM__');
+          gatewayReconHeadersState = 'ready';
+          return gatewayReconHeadersValues;
+        })
+        .catch(() => {
+          // IPC 异常 → 降级空数组（不抛，调用方据空数组渲染空下拉）
+          gatewayReconHeadersValues = [];
+          gatewayReconHeadersState = 'ready';
+          return gatewayReconHeadersValues;
+        });
+      return gatewayReconHeadersPromise;
+    }
+
+    // C3 弹窗渲染/校验统一读当前缓存（首帧可能为空 → 弹窗 ensureGatewayReconHeaders().then 后重渲染填充）
+    function getGatewayReconFields() {
+      return gatewayReconHeadersValues;
     }
 
     function clearScenarioDraft() {
@@ -6157,6 +6208,9 @@
       const categoryWidth = isCompactView ? '28%' : '22%';
       const nameWidth = isCompactView ? '40%' : '30.94%';
       const actionsWidth = isCompactView ? '26%' : '19.06%';
+      // v2.1.15 W3：仅资金对账模块入口（filter 含 'gateway-recon-join'、非单类别 compact）显示「网关对账单修复-管理」入口；
+      //   ReconID 修复模块自身入口（compact，filter=['gateway-recon-id-fix']）随 wrapper 隐藏，避免重复/自指。
+      const showGatewayReconIdFixEntry = !isCompactView && Array.isArray(filter) && filter.includes('gateway-recon-join');
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card manager-card scenarios-manager-card';
@@ -6179,6 +6233,11 @@
               <select id="scenario-channel-filter" class="template-select small" data-role="channel-filter" data-channel-id="1" style="min-width: 160px;"></select>
             </div>
             <button class="secondary-btn small" type="button" data-action="manage-channels">管理</button>
+            <!-- v2.1.15 W3：「网关对账单修复」入口（仅资金对账模块入口显示）→ 打开 ReconID 修复模块的网关对账单场景管理 -->
+            <span class="gateway-recon-id-fix-entry" style="display: ${showGatewayReconIdFixEntry ? 'inline-flex' : 'none'}; align-items: center; gap: 8px; margin-left: 8px;">
+              <label class="select-label" style="white-space: nowrap;">网关对账单修复</label>
+              <button class="secondary-btn small" type="button" data-action="manage-gateway-recon-id-fix">管理</button>
+            </span>
           </div>
           <button class="icon-close" type="button">×</button>
         </div>
@@ -6399,6 +6458,16 @@
               openModal(reopenScenariosManager());
             }
           }));
+        });
+      }
+
+      // v2.1.15 W3：「网关对账单修复-管理」→ 打开对账单 ReconID 修复模块的网关对账单场景管理
+      //   复用同一工厂：单类别白名单 ['gateway-recon-id-fix'] → compact 视图（与从 ReconID 模块主面板「场景管理」打开一致）
+      //   仅资金对账模块入口（showGatewayReconIdFixEntry=true）渲染该按钮；点击替换当前弹窗，关闭后回主界面（行为同 ReconID 入口）
+      const manageGatewayReconIdFixBtn = dialog.querySelector('[data-action="manage-gateway-recon-id-fix"]');
+      if (manageGatewayReconIdFixBtn) {
+        manageGatewayReconIdFixBtn.addEventListener('click', () => {
+          openModal(createScenariosManagerDialog(['gateway-recon-id-fix']));
         });
       }
 
@@ -7284,6 +7353,17 @@
         else if (c.reconFields.some((r) => !r.gwField || !r.bankField)) errors.push('对账字段每行两端都不能为空');
         const a = c.assign || {};
         if (!a.gwField || !a.bankField) errors.push('对账成立后赋值的两端都不能为空');
+        // v2.1.15 W1 补强（self-review Important）：网关账单字段须在当前 assets/网关对账单.xlsx 表头枚举内，
+        //   防存量场景引用旧字段名「打开不动直接保存」存入无效字段 → 运行时静默失效。
+        //   仅枚举可用时校验（降级空时跳过，不误拦）；__CUSTOM__ 为「自取值」合法 sentinel，豁免。
+        {
+          const gwValid = new Set(getGatewayReconFields());
+          if (gwValid.size > 0) {
+            if (a.gwField && a.gwField !== '__CUSTOM__' && !gwValid.has(a.gwField)) errors.push('赋值的网关账单字段已不在当前网关对账单模板表头中，请重新选择');
+            if ((c.reconFields || []).some((r) => r.gwField && !gwValid.has(r.gwField))) errors.push('对账字段中存在已不在当前网关对账单模板表头的网关字段，请重新选择');
+            if ((c.conditions || []).some((cd) => cd && cd.side === '网关' && cd.field && !gwValid.has(cd.field))) errors.push('条件中存在已不在当前网关对账单模板表头的网关字段，请重新选择');
+          }
+        }
         // v2.1.8 N2：mode='custom' 时 customValue 必填（dialog UI 已限制 maxlength=200）
         if (a.mode === 'custom' && (!a.customValue || String(a.customValue).trim() === '')) {
           errors.push('对账成立后赋值的"自取值"内容不能为空');
@@ -7313,7 +7393,7 @@
               return;
             }
             // side 与 field 一致性（防御左一切换未清空 + 手改 DB）
-            const validFields = cd.side === '网关' ? GATEWAY_RECON_FIELDS : BANK_STATEMENT_FIELDS_FOR_C3;
+            const validFields = cd.side === '网关' ? getGatewayReconFields() : BANK_STATEMENT_FIELDS_FOR_C3;
             if (!validFields.includes(cd.field)) {
               errors.push(`${rowLabel} 的"字段" ${cd.field} 不在 ${cd.side} 字段列表中`);
               return;
@@ -7519,7 +7599,7 @@
               <select class="scenario-config-input" data-field="assign-gw" ${isReadonly ? 'disabled' : ''}>
                 <option value="">请选择网关账单字段</option>
                 <option value="__CUSTOM__"${config.assign.gwField === '__CUSTOM__' ? ' selected' : ''}>自取值</option>
-                ${renderScenarioOptions(GATEWAY_RECON_FIELDS, config.assign.gwField)}
+                ${renderScenarioOptions(getGatewayReconFields(), config.assign.gwField)}
               </select>
               <input class="scenario-config-input" type="text" data-field="assign-custom-value"
                      maxlength="200" placeholder="请填写自取值"
@@ -7562,10 +7642,10 @@
       // ===== v2.1.5 N3：「条件」栏渲染 + 数据流 =====
       // v2.1.5 fix1.1：用 scenario-config-c3-cond-row 专属 class（grid 布局列宽固定）
       //   - 不复用 .scenario-config-multi-row（避免影响 reconFields 行的 flex 布局）
-      //   - 左二字段 select 固定 240px，超长字段名（如 GATEWAY_RECON_FIELDS 的 'Type(0:1对1...)'）
-      //     由浏览器原生 ellipsis 截断；下拉打开时 option 完整可见
+      //   - 左二字段 select 固定 240px，超长字段名由浏览器原生 ellipsis 截断；下拉打开时 option 完整可见
+      //   - v2.1.15 W1：网关侧字段来自 getGatewayReconFields()（xlsx 表头缓存），首帧可能空 → then 后重渲染
       function renderC3ConditionRow(cd, idx) {
-        const fields = cd.side === '银行' ? BANK_STATEMENT_FIELDS_FOR_C3 : GATEWAY_RECON_FIELDS;
+        const fields = cd.side === '银行' ? BANK_STATEMENT_FIELDS_FOR_C3 : getGatewayReconFields();
         const valueHidden = !opNeedsValue(cd.op);
         return `
           <div class="scenario-config-c3-cond-row" data-c3-cond-row="${idx}">
@@ -7645,7 +7725,7 @@
           <div class="scenario-config-multi-row" data-row-index="${idx}">
             <select class="scenario-config-input" data-multi-field="gwField" ${isReadonly ? 'disabled' : ''}>
               <option value="">请选择网关账单字段</option>
-              ${renderScenarioOptions(GATEWAY_RECON_FIELDS, rf.gwField)}
+              ${renderScenarioOptions(getGatewayReconFields(), rf.gwField)}
             </select>
             <span class="scenario-config-vs-arrow">vs</span>
             <select class="scenario-config-input" data-multi-field="bankField" ${isReadonly ? 'disabled' : ''}>
@@ -7657,6 +7737,47 @@
         `).join('');
       }
       renderReconFields();
+
+      // v2.1.15 W1（spec §3）：网关账单字段下拉枚举异步加载。
+      //   - 首帧已用当前缓存（gatewayReconHeadersValues，可能为空）同步渲染上面三处下拉，不阻塞弹窗弹出
+      //   - 枚举到位后重渲染三处：① assign-gw 下拉（主 HTML 内，重建 options；保留首项 + 自取值 + 当前选中）
+      //     ② 条件行网关字段 ③ 对账字段网关字段。重建 options 时不替换 select 元素本身，事件监听不丢失。
+      function rerenderC3GatewayFields() {
+        // v2.1.15 W1 补强（self-review Important）：枚举到位后，把不在当前网关表头枚举内的网关字段规整为空，
+        //   让「DOM 显示 = config model」一致 + 保存时非空校验能拦截存量旧字段（避免静默存无效值 / 运行时失效）。
+        //   仅在枚举非空（已加载，或降级到旧硬编码）时规整 → 避免首帧空枚举误清有效字段；
+        //   __CUSTOM__ 是「自取值」合法 sentinel，豁免规整；bankField 枚举（BANK_STATEMENT_FIELDS_FOR_C3）本迭代未变，无需规整。
+        //   self-review round2：view（只读查看）模式不规整 config —— view 应如实保留存储值供查看，
+        //   且 view 不能保存、无需规整；仅编辑态（新建/修改）规整以让保存校验拦截旧字段。
+        const gwValidForNormalize = isReadonly ? new Set() : new Set(getGatewayReconFields());
+        if (gwValidForNormalize.size > 0) {
+          if (config.assign && config.assign.gwField && config.assign.gwField !== '__CUSTOM__'
+              && !gwValidForNormalize.has(config.assign.gwField)) {
+            config.assign.gwField = '';
+            if (config.assign.mode !== 'custom') config.assign.mode = 'direct';
+          }
+          if (Array.isArray(config.reconFields)) {
+            for (const rf of config.reconFields) { if (rf.gwField && !gwValidForNormalize.has(rf.gwField)) rf.gwField = ''; }
+          }
+          if (Array.isArray(config.conditions)) {
+            for (const cd of config.conditions) { if (cd.side === '网关' && cd.field && !gwValidForNormalize.has(cd.field)) cd.field = ''; }
+          }
+        }
+        const assignGwSelect = dialog.querySelector('select[data-field="assign-gw"]');
+        if (assignGwSelect) {
+          assignGwSelect.innerHTML = `
+            <option value="">请选择网关账单字段</option>
+            <option value="__CUSTOM__"${config.assign.gwField === '__CUSTOM__' ? ' selected' : ''}>自取值</option>
+            ${renderScenarioOptions(getGatewayReconFields(), config.assign.gwField)}
+          `;
+        }
+        renderC3Conditions();
+        renderReconFields();
+      }
+      // 弹窗可能已被关闭（用户快速取消）→ 容器脱离 DOM 时跳过 rerender（照搬 C2 isConnected 守卫）
+      ensureGatewayReconHeaders().then(() => {
+        if (dialog.isConnected) rerenderC3GatewayFields();
+      });
 
       bindScenarioBasicFields(dialog, draft);
 

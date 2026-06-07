@@ -2,9 +2,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 // v2.0.0-beta.3 PR #32b：暴露银行对账单处理模块的字段常量到 renderer
 // 注：Electron sandbox 限制 preload require 自定义模块，不能 require '../constants/*'。
-// 此处 inline 常量副本，必须与 src/constants/bank-statement-fields.js / gateway-recon-fields.js 同步：
-//   - 任意修改 BANK_STATEMENT_FIELDS / GATEWAY_RECON_FIELDS / BANK_STATEMENT_VIRTUAL_AMOUNT_ABS，
-//     必须同时改这里和 src/constants/。
+// 此处 inline 常量副本，必须与 src/constants/bank-statement-fields.js 同步：
+//   - 任意修改 BANK_STATEMENT_FIELDS / BANK_STATEMENT_VIRTUAL_AMOUNT_ABS，必须同时改这里和 src/constants/。
+//   - v2.1.15 W1：GATEWAY_RECON_FIELDS 不再 inline（C3 改读 xlsx 表头，走 IPC scenarios:gateway-recon-headers）。
 const BANK_STATEMENT_FIELDS = Object.freeze([
   '账户主体', '账户BU', 'BizId', 'BillDate', 'ValueDate', 'Channel', '地区', 'MerchantId',
   'Currency', 'Credit Amount', 'Debit Amount', 'ReconciliationId', 'ChannelOrderNo',
@@ -20,13 +20,9 @@ const BANK_STATEMENT_FIELDS_FOR_C3 = Object.freeze([
   ...BANK_STATEMENT_FIELDS,
   BANK_STATEMENT_VIRTUAL_AMOUNT_ABS
 ]);
-const GATEWAY_RECON_FIELDS = Object.freeze([
-  'BillDate', 'Bank', 'MerchantId', 'OrderId', 'DataSource', 'OppBu', 'OriginBillSource',
-  'BillType', 'Type(0:1对1,1:1对多,2:多对1,3:多对1（轧差合并)', 'Reference', 'Currency',
-  'Amount', 'OriginBillBizId', 'ReconBillBizId', 'reconciliationId', 'tradeType',
-  'clientId', 'name', 'cardNo', '真实渠道', '清算网络', '对账批次号', 'createTime',
-  'finishTime', 'LOriginalId', 'remark1', 'remark2', 'bookdate', 'valuedate', 'fileId', 'AccountRef'
-]);
+// v2.1.15 W1：C3「网关账单字段」枚举改为运行时读 assets/网关对账单.xlsx 表头（经 IPC
+//   scenarios:gateway-recon-headers）。旧 inline GATEWAY_RECON_FIELDS 同步副本已移除，
+//   appConstants.gatewayReconFields 随之下线（renderer 改异步加载缓存，见 renderer-dialogs.js）。
 
 // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块字段常量（spec §四）
 // 注：与 src/constants/recon-id-fix-fields.js 同步——任意修改两端都要改
@@ -46,7 +42,8 @@ const OPPONENT_BILL_FIELDS = Object.freeze([
 
 // v2.1.0-beta.3：网关对账单 ReconID 修复（gateway 子模式）字段常量
 // 与 src/constants/gateway-bill-recon-fields.js 同步——任意修改两端都要改
-// ⚠️ GATEWAY_BILL_FIELDS 与上方 GATEWAY_RECON_FIELDS 列名相同但分属两个模块（C3 / C4-gateway），不要相互引用
+// ⚠️ GATEWAY_BILL_FIELDS（C4-gateway，写死常量）与 C3 网关账单字段分属两个模块，不要相互引用。
+//    v2.1.15 W1 起 C3 字段改读 xlsx 表头（IPC），本常量仍为 C4-gateway 的写死字段，不受影响。
 const GATEWAY_BILL_FIELDS = Object.freeze([
   'BillDate', 'Bank', 'MerchantId', 'OrderId', 'DataSource', 'OppBu', 'OriginBillSource',
   'BillType', 'Type(0:1对1,1:1对多,2:多对1,3:多对1（轧差合并)', 'Reference', 'Currency', 'Amount',
@@ -68,7 +65,7 @@ contextBridge.exposeInMainWorld('appConstants', {
   bankStatementFields: BANK_STATEMENT_FIELDS,
   bankStatementFieldsForC3: BANK_STATEMENT_FIELDS_FOR_C3,
   bankStatementVirtualAmountAbs: BANK_STATEMENT_VIRTUAL_AMOUNT_ABS,
-  gatewayReconFields: GATEWAY_RECON_FIELDS,
+  // v2.1.15 W1：gatewayReconFields 已下线 —— C3「网关账单字段」改读 xlsx 表头（IPC scenarios:gateway-recon-headers）
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块的两 sheet 表头
   businessBillFields: BUSINESS_BILL_FIELDS,
   opponentBillFields: OPPONENT_BILL_FIELDS,
@@ -106,8 +103,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     reset: () => ipcRenderer.invoke('background:reset')
   },
   settings: {
+    // v2.1.15 W4：弃用 General 风格，移除「切换页面风格」入口。setUiStyle 写链路已删；
+    //   getUiStyle 保留兜底（main 端恒返回 'Clear'），renderer 启动 applyUiStyle 仍可用。
     getUiStyle: () => ipcRenderer.invoke('settings:get-ui-style'),
-    setUiStyle: (style) => ipcRenderer.invoke('settings:set-ui-style', style),
     setCurrentModule: (moduleId) => ipcRenderer.invoke('settings:set-current-module', moduleId),
     // v2.1.0-beta.3 T4：对账单ReconID修复模块「账单类别」持久化（business | gateway | null）
     setReconIdFixBillCategory: (category) => ipcRenderer.invoke('settings:set-recon-id-fix-bill-category', category),
@@ -144,6 +142,11 @@ contextBridge.exposeInMainWorld('desktopApi', {
     //   - main 进程读 assets/FundType枚举值.xlsx（preload 无法 require 自定义模块，故走 IPC）
     //   - 返回 { status:'ok', values: string[] }；文件缺失/读取失败 → values 为空数组（renderer 降级文本输入）
     getFundTypeEnum: () => ipcRenderer.invoke('scenarios:fund-type-enum'),
+    // v2.1.15 W1（spec §3 / 决策 xlsx 为准、旧硬编码作废）：C3「网关账单字段」枚举
+    //   - main 进程读 assets/网关对账单.xlsx 表头行（preload 无法 require 自定义模块，故走 IPC）
+    //   - 返回 { status:'ok', values: string[] }；文件缺失/读取失败 → values 为 loader fallback（旧硬编码兜底）
+    //   - 取代旧 appConstants.gatewayReconFields 同步常量（已移除 inline 副本）
+    getGatewayReconHeaders: () => ipcRenderer.invoke('scenarios:gateway-recon-headers'),
     // v2.1.13 D-3：自带写死场景「适用银行渠道」读写（空数组 = 适用全部渠道）
     getApplicableChannels: (id) => ipcRenderer.invoke('scenarios:get-applicable-channels', id),
     setApplicableChannels: (id, channelIds) => ipcRenderer.invoke('scenarios:set-applicable-channels', id, channelIds)

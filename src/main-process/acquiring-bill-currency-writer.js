@@ -142,7 +142,9 @@ async function writeDiffWorkbook({ db, runId, monthKey, savePath, runElapsedMs =
   // ============================================================
   // Pass 2：按 segment 顺序写差异 sheet
   // ============================================================
-  const BATCH = 5000;
+  // v2.1.15 W0：旧实现用 LIMIT 5000 OFFSET k 深分页拉数据，整月单 segment 时
+  //   每批全排序 + 深 OFFSET 退化 O(N²)；改为单次游标遍历（iterateDiffRowsByDateRange），
+  //   循环体逐行处理逻辑保持不变。⚠️ 资金红线：差异表输出必须逐行逐列不变（对拍兜底）。
   const segmentStats = [];
   const diffWriteT0 = Date.now();
   let totalWritten = 0;
@@ -159,49 +161,41 @@ async function writeDiffWorkbook({ db, runId, monthKey, savePath, runElapsedMs =
 
     let segWritten = 0;
     if (seg.rowCount > 0) {
-      let offset = 0;
-      while (true) {
-        const rows = runRepo.listDiffRowsByDateRange(db, {
-          runId,
-          startDate: seg.startDate,
-          endDate: seg.endDate,
-          limit: BATCH,
-          offset
-        });
-        if (rows.length === 0) break;
-        for (const d of rows) {
-          // 当前 sub-sheet 满 MAX → commit + 开新 sub-sheet
-          if (curSubSheetRowCount >= MAX_DATA_ROWS_PER_SHEET) {
-            await sheet.commit();
-            segmentStats.push({ sheetName: curSubSheetName, startDate: seg.startDate, endDate: seg.endDate, rowCount: curSubSheetRowCount });
-            subSheetIndex++;
-            const subName = sanitizeSheetName(`${sheetBaseName}(${subSheetIndex})`);
-            sheet = writer.addWorksheet(subName);
-            sheet.addRow(WRITER_OUTPUT_HEADERS_V2.slice()).commit();
-            curSubSheetName = subName;
-            curSubSheetRowCount = 0;
-          }
-          const rawObj = JSON.parse(d.bill_raw_json);
-          // v2.1.8 N4：12 列输出（spec §三.1）
-          //   1-9 模版字段 / 10 单据_对账币种副本 / 11-12 流水侧 diff_rows 字段
-          const row = new Array(WRITER_OUTPUT_HEADERS_V2.length);
-          for (let i = 0; i < TEMPLATE_BILL_HEADERS.length; i++) {
-            const v = rawObj[TEMPLATE_BILL_HEADERS[i]];
-            row[i] = v === undefined || v === null ? '' : v;
-          }
-          // 第 10 列：单据_对账币种（bill raw_json['对账币种'] 副本，D2=b 保留）
-          row[TEMPLATE_BILL_HEADERS.length] =
-            rawObj['对账币种'] === undefined || rawObj['对账币种'] === null ? '' : rawObj['对账币种'];
-          // 第 11 列：流水_通道清算币种
-          row[TEMPLATE_BILL_HEADERS.length + 1] = d.flow_currency === null ? '' : d.flow_currency;
-          // 第 12 列：流水_通道清算金额
-          row[TEMPLATE_BILL_HEADERS.length + 2] = d.flow_amount_abs === null ? '' : d.flow_amount_abs;
-          sheet.addRow(row).commit();
-          curSubSheetRowCount++;
+      // v2.1.15 W0：单次游标遍历替代 LIMIT/OFFSET 深分页（行内容与 listDiffRowsByDateRange 完全一致）
+      for (const d of runRepo.iterateDiffRowsByDateRange(db, {
+        runId,
+        startDate: seg.startDate,
+        endDate: seg.endDate
+      })) {
+        // 当前 sub-sheet 满 MAX → commit + 开新 sub-sheet
+        if (curSubSheetRowCount >= MAX_DATA_ROWS_PER_SHEET) {
+          await sheet.commit();
+          segmentStats.push({ sheetName: curSubSheetName, startDate: seg.startDate, endDate: seg.endDate, rowCount: curSubSheetRowCount });
+          subSheetIndex++;
+          const subName = sanitizeSheetName(`${sheetBaseName}(${subSheetIndex})`);
+          sheet = writer.addWorksheet(subName);
+          sheet.addRow(WRITER_OUTPUT_HEADERS_V2.slice()).commit();
+          curSubSheetName = subName;
+          curSubSheetRowCount = 0;
         }
-        segWritten += rows.length;
-        offset += rows.length;
-        if (rows.length < BATCH) break;
+        const rawObj = JSON.parse(d.bill_raw_json);
+        // v2.1.8 N4：12 列输出（spec §三.1）
+        //   1-9 模版字段 / 10 单据_对账币种副本 / 11-12 流水侧 diff_rows 字段
+        const row = new Array(WRITER_OUTPUT_HEADERS_V2.length);
+        for (let i = 0; i < TEMPLATE_BILL_HEADERS.length; i++) {
+          const v = rawObj[TEMPLATE_BILL_HEADERS[i]];
+          row[i] = v === undefined || v === null ? '' : v;
+        }
+        // 第 10 列：单据_对账币种（bill raw_json['对账币种'] 副本，D2=b 保留）
+        row[TEMPLATE_BILL_HEADERS.length] =
+          rawObj['对账币种'] === undefined || rawObj['对账币种'] === null ? '' : rawObj['对账币种'];
+        // 第 11 列：流水_通道清算币种
+        row[TEMPLATE_BILL_HEADERS.length + 1] = d.flow_currency === null ? '' : d.flow_currency;
+        // 第 12 列：流水_通道清算金额
+        row[TEMPLATE_BILL_HEADERS.length + 2] = d.flow_amount_abs === null ? '' : d.flow_amount_abs;
+        sheet.addRow(row).commit();
+        curSubSheetRowCount++;
+        segWritten++;
       }
     }
     await sheet.commit();

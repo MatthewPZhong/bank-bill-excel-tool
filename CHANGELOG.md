@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.1.15 - 2026-06-07
+
+v2.1.14 之后 1 轮迭代，5 个工作项（性能 + 网关对账单赋值增强 + 入口整合 + 主题精简）：① 收单单据币种校验「写差异文件」提速（OFFSET 深分页 → 游标遍历，50 万差异行实测 ~61.6s→5.2s ≈ 11.9x，输出 byte-for-byte 不变）；② C3「网关对账单赋值银行对账单」的「网关账单字段」枚举改读 `assets/网关对账单.xlsx` 表头（⚠️ **破坏性**：旧硬编码作废，存量 C3 场景引用旧字段名需重新配置）；③ C3 勾选「网关对账单金额与银行对账单不一致」匹配成功后，差额写入对应银行行 `Extra Fee` 并标黄；④「资金对账数据处理」模块「场景管理」弹窗内新增「网关对账单修复」入口（打开对账单 ReconID 修复模块的网关场景管理）；⑤ 去掉调色盘「切换页面风格」+ 弃用 General 风格（老库 `ui_style='General'` 启动迁移 Clear）。⚠️ ①②③ 资金红线。
+
+### 新增
+
+- **网关账单字段运行时读 xlsx 表头**（🔴 资金红线 + **破坏性** · `gateway-recon-headers-loader.js` + IPC `scenarios:gateway-recon-headers`）：C3「网关对账单赋值银行对账单」场景配置的「网关账单字段」下拉枚举，从硬编码 `GATEWAY_RECON_FIELDS`（31 列）改为运行时读 `assets/网关对账单.xlsx` 第一个 sheet 的表头行（复用 C2 FundType 已上线的「main 读 + IPC 暴露 + renderer 异步缓存」模式）；文件缺失 / 读取失败 / 表头为空时降级回旧硬编码兜底（不崩）；剔除 `__CUSTOM__` sentinel 防 C3「自取值」mode 误判。**破坏性影响**：新 xlsx 表头与旧硬编码 31 列几乎全不一致（大小写 / 字段名 / 增删均变），升级后**存量 C3 场景里引用旧字段名的「对账字段 / 条件 / 赋值」配置会失效，需用户重新配置**
+- **C3「对账成立后」差额写入 `Extra Fee` + 标黄**（🔴 资金红线 · `c3-gateway-recon-join.js`）：C3 勾选「网关对账单金额与银行对账单不一致」并填差额后，对账匹配成功时——除原有 assign 赋值外——把公式差额（`extraFee.amount`）写入对应银行对账单行的 `Extra Fee` 字段并标黄；原值已等于该差额则只锁定不标黄（与 assign 赋值行为一致）；assign 与 Extra Fee 两段写盘解耦（各自 old≠new 才记录/标黄，最后统一锁定 + 单向消费网关行，1v1 红线不变）
+- **「网关对账单修复」入口**（`renderer-dialogs.js`）：「资金对账数据处理」模块「场景管理」弹窗顶部「银行渠道 [管理]」右侧新增「网关对账单修复 [管理]」入口，点击打开对账单 ReconID 修复模块的网关对账单场景管理（复用 `createScenariosManagerDialog(['gateway-recon-id-fix'])` 单类别紧凑视图）；仅在资金对账模块入口显示，ReconID 修复模块自身入口不重复出现
+
+### 变更
+
+- **收单「写差异文件」提速**（🔴 资金红线 · 输出 byte-for-byte 不变 · `acquiring-bill-currency-writer.js` + `run-repository.js`）：`writeDiffWorkbook` 由「每 segment 内 `LIMIT 5000 OFFSET k` 深分页拉取」改为「单次游标遍历」（新增 `iterateDiffRowsByDateRange` —— SQL body 与 `listDiffRowsByDateRange` 逐字相同，仅去 `LIMIT/OFFSET`、改 `stmt.iterate`）；消除整月差异行通常落在单一 segment 时 OFFSET 深分页 + 无索引 `json_extract` 排序导致的 O(N²) 退化；50 万差异行实测 ~61.6s→5.2s（≈ 11.9x），新旧差异表 xlsx 逐 sheet 逐行逐列对拍一致（行序 / sheet 结构 / 列内容不变）
+
+### 移除
+
+- **调色盘「切换页面风格」+ 弃用 General 风格**（`index.html` / `renderer.js` / `preload.js` / `main.js` / `settings-repository.js` / `database.js`）：删除左下角背景调色盘的「切换页面风格」下拉与「应用」按钮；弃用 General 风格（仅保留 Clear）；移除 `settings:set-ui-style` 写链路（preload / main handler / facade）；持久化兼容——老库 `ui_style='General'` 在 `getUiStyle` 读时无声兜底为 `Clear` + `ensureUiStyleDefault` 启动时就地迁移落盘值，`setUiStyle` 全链路移除后无任何路径再写入 `'General'`；`src/styles.css`（General 样式表）文件保留不物理删除，仅移除其加载与切换入口
+
 ## 2.1.14 - 2026-06-07
 
 v2.1.13 之后 1 轮**纯前端迭代**（不涉及后端），围绕「应用 / 模块改名 + 资金对账数据处理面板重构 + 链接表管理 + 场景配置弹窗微调」：① 应用主标题「网银账单小助手」→「清结算小助手」（含标题栏 / 启动失败弹窗 / 安装包 `productName`）；② 模块「银行对账单处理」→「资金对账数据处理」（仅显示名，`module.id` 及全部引用不变）；③ 该模块面板改 control-row 三行布局，新增「导入不平表」按钮（复用现有资金对账不平结果表导入）与「链接表管理」入口；④ 新增「链接表管理」弹窗（4 表库骨架，UI 占位不持久化）；⑤ 场景配置弹窗微调（C2 赋值 FundType 值加「自己输入」→ 切输入框 / C2·C3 标题后缀不加粗 / C2 赋值下拉缩窄 / 去 # 序号）；⑥ assets 模板入库。**纯前端，无业务逻辑变更**。

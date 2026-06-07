@@ -1,10 +1,13 @@
 // v2.0.0-beta.3：资金对账导出不平.xlsx 「网关账单」sheet 31 列固定字段
 // 顺序与样例文件表头一致
-// C3 场景的"网关账单字段下拉"枚举值来自本表
 //
-// ⚠️ 同步提醒：Electron sandbox 限制 preload require 自定义模块，
-//   src/preload.js 顶部 inline 了一份副本（GATEWAY_RECON_FIELDS）。
-//   本文件改动必须同步更新 preload.js。
+// ⚠️ v2.1.15 W1 起本常量的两个用途：
+//   1. main-process/bank-statement-io.js:114 readGatewayRecon —— 网关账单 reader 表头映射（sheetToObjects），仍在用，不可删。
+//   2. constants/gateway-recon-headers-loader.js —— C3「网关账单字段」枚举的 **fallback 兜底**
+//      （xlsx 文件缺失/读取失败/表头为空时回落到本常量，防崩）。
+//   注意：C3 弹窗下拉枚举正常路径已改读 assets/网关对账单.xlsx 表头（决策 xlsx 为准、旧硬编码作废、存量不迁移），
+//   本常量列名与 xlsx 表头几乎全不一致 —— 这是预期，本常量仅作上述两用途，不再直接驱动 C3 下拉。
+//   preload.js 顶部旧 inline 副本（GATEWAY_RECON_FIELDS）已于 W1 移除。
 //
 // ⚠️ v2.1.8 N2 sentinel 保留字（self-review SR4 警告）：
 //   `__CUSTOM__` 在 C3 dialog「对账成立后赋值-右侧下拉」中作为

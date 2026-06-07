@@ -9,7 +9,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>清结算小助手</title>
     <link id="cssFonts" rel="stylesheet" href="./src/fonts.css" />
-    <link id="cssGeneral" rel="stylesheet" href="./src/styles.css" disabled />
     <link id="cssClear" rel="stylesheet" href="./src/styles-gemini.css" />
     <link id="cssClearExtra" rel="stylesheet" href="./src/styles-gemini-extra.css" />
   </head>
@@ -429,16 +428,6 @@
         </div>
 
         <section id="backgroundPalettePanel" class="palette-panel" hidden aria-label="背景设置">
-          <div class="palette-panel-style-row">
-            <label class="palette-style-label" for="paletteStyleSelect">切换页面风格</label>
-            <div class="palette-style-control">
-              <select id="paletteStyleSelect" class="palette-style-select">
-                <option value="Clear" selected>Clear</option>
-                <option value="General">General</option>
-              </select>
-              <button id="paletteStyleConfirmBtn" class="palette-action solid" type="button">应用</button>
-            </div>
-          </div>
           <div class="palette-panel-body">
             <div id="backgroundSpectrumArea" class="palette-spectrum-shell" aria-label="全色谱选色板">
               <canvas
