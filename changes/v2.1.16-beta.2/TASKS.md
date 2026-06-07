@@ -120,6 +120,9 @@
 
    > 提 PR 时须只 add 本版交付相关文件（src/ 引擎 + migration + 三件套 + spec 三件套 + PR 草稿 + 重跑的 `docs/previews/scenarios-manager.png`），**不要 `git add -A`**，避免把上述污染一并提交。最终如何处置（保留 / 归档到对应分支 / 丢弃）由用户拍板。
 
+7. **（self-review Minor）R4 同一 reconciliationid 多条网关行（脏数据）叠加改 FundType**：R4 按 reconid 关联，若同 reconid 有多条 matchedGwRows（R1 已发 multi-gateway warning），它们的 handler 会对同组银行行**依次叠加**改 FundType（末次胜）。干净数据（reconid 唯一）无影响；脏数据下结果取决于网关行顺序。下版用真实数据确认 reconid 唯一性假设是否成立。
+8. **（self-review Minor）网关链接表为空时静默 no-op**：用户若未先在「链接表管理」导入网关对账单，`readLinkedTableRows('gateway-bill')` 返空 → R1/R4/R5 全部静默不命中（不报错、无提示）。下版考虑加「未导入网关对账单」运行前提示，避免用户误以为对账逻辑没生效。
+
 ## 实施记录（合并后回填）
 
 > 本节为合并后回填（workflow_pr_integrate_prd）。
