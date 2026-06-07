@@ -53,6 +53,12 @@
 > 全交付 7 维度初审 + 真跑核实：核心修复（Q13/Q14/Q15）+ 字段映射 + 双 sheet 契约 + 数据隔离 + 行数守恒 + seed enabled=0 + main.js no-op 全部通过；另有 7 条初审疑点经核实推翻为误判。以下 2 条 Minor 不阻塞合并：
 
 - [ ] **D1 🔴 Layer2 必解：`refundOrderSession` 清空对称**：三处导入 handler（`main.js:3485` 单选 / `:11344` 批量 / `:3537` 网关导入）清空了 `processingResult`/`gatewayReconSession` 但未清 `refundOrderSession`。Layer1 恒 null 不可触发；**Layer2 实装退款导入后**跨批次会残留过期退款单 → 数据污染。实装 session 时按其生命周期补对称清空 + 「多批次导入后 refundOrderSession 正确清空」集成测试。
+
+  > **决策记录（team-lead 2026-06-08，为何不在 beta.4 当场补这 3 行）**：
+  > 1. **不可触发**：Layer1 `refundOrderSession` 恒 null（门控 `ZHONGTAI_REFUND_BATCH_ENABLED=false`），缺口在本版无任何运行期影响，非合并阻塞。
+  > 2. **现在补属猜测**：「该在哪几处、按什么语义清空」依赖 Layer2 退款 session 的生命周期设计（例：导入网关时该不该清退款 session、批量导入首文件 vs 后续文件如何处理）——session 写入逻辑尚未实装，此刻硬塞 `refundOrderSession = null` 是对未定语义的猜测，猜错反埋新坑。
+  > 3. **正确做法 = 连同 session 写入一起做**：Layer2 实装退款导入读取/落库（写 `refundOrderSession`）时，清空点与写入点天然成对设计、同一上下文落地最稳，并补「多批次导入后正确清空」集成测试守护。
+  > 结论：作为 Layer2 必解项记此，不在 beta.4 投机修复。用户 2026-06-08 认可此决策。
 - [ ] **D2（增强）空 MerchantId/Currency 分组守卫**：唯一值分组键 `账号||币种||金额分` 在空 MerchantId/Currency 时可能误并组。前置筛选（SUBMITTED + Ach Return）已大幅降概率，PRD 未要求。可选：分组前加非空守卫，空值行直接入 RESULT_NOTICE。非阻塞。
 - [ ] **D3 🔴 Layer2 端到端 + 真实样本回归**：翻 enabled=1 前，对「反向多笔报错粒度 / S4 超容差 10 天边界 / 锁定 refund 不复用 / JPM-US 二跳」补端到端集成测试，并用**真实 JPM 报文样本**（`//` 切断脏形态、T54SWIC/CustomerRef 提取）回归一次（当前仅标准形态单测覆盖）。
 
