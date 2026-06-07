@@ -204,6 +204,12 @@ function buildPlatformCleanupFileName(ts = buildTimestampMinuteUnderscore()) {
   return `中台加款单剔除模板-${ts}.xlsx`;
 }
 
+// v2.1.16-beta.4 R5 场景4：中台退款订单回填文件名 中台退款订单回填-YYYY_MM_DD_HHMM.xlsx
+//   复用 buildTimestampMinuteUnderscore（YYYY_MM_DD_HHMM，下划线分隔），仿 buildPlatformCleanupFileName
+function buildRefundBackfillFileName(ts = buildTimestampMinuteUnderscore()) {
+  return `中台退款订单回填-${ts}.xlsx`;
+}
+
 function ensureDateDir(exportRootDir) {
   const dir = path.join(exportRootDir, buildDateDir());
   if (!fs.existsSync(dir)) {
@@ -257,6 +263,7 @@ module.exports = {
   buildTimestampMinute,
   buildTimestampMinuteUnderscore,
   buildPlatformCleanupFileName,
+  buildRefundBackfillFileName,
   buildDateDir,
   sanitizeFileName
 };
