@@ -208,10 +208,32 @@ function replaceLinkedTable(db, tableKey, rows, options = {}) {
   };
 }
 
+// v2.1.16-beta.2 T1：读回某 tableKey 全部整行（raw_json 还原为对象，字段名 = 真实表头）。
+//   - getDef 校验 tableKey；fx-option（模板缺失，supported=false）直接返回 []（不查表，避免 no such table）。
+//   - ORDER BY id ASC：还原导入原序（与 5 轮对账引擎按行顺序处理一致）。
+//   - 损坏行（raw_json JSON 解析失败 / 解析结果非对象）跳过，不中断整批（与 replaceLinkedTable 容错一致）。
+//   - 供编排器经 database.readLinkedTableRows('gateway-bill') 取网关数据源（structuredClone 后传入）。
+function readLinkedTableRows(db, tableKey) {
+  const def = getDef(tableKey);
+  if (!def.supported) return [];
+  const rows = db.prepare(`SELECT raw_json FROM ${def.table} ORDER BY id ASC`).all();
+  const out = [];
+  for (const r of rows) {
+    try {
+      const o = JSON.parse(r.raw_json);
+      if (o && typeof o === 'object') out.push(o);
+    } catch (_e) {
+      /* 损坏行跳过，不抛错 */
+    }
+  }
+  return out;
+}
+
 module.exports = {
   LINKED_TABLE_DEFS,
   ALL_TABLE_KEYS,
   listLinkedTableMeta,
   getLinkedTableMeta,
-  replaceLinkedTable
+  replaceLinkedTable,
+  readLinkedTableRows
 };

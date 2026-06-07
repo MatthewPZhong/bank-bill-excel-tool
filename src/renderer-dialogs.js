@@ -5610,6 +5610,26 @@
       return SCENARIO_CATEGORY_LABELS[category] || category;
     }
 
+    // v2.1.16 需求1：builtin-fixed 自带写死场景「功能类别」列按 config.funcCategory 映射业务分组显示。
+    //   T10 落地的 RECON_ROUND_BUILTIN_SCENARIOS（migrations.js）config 含 funcCategory：
+    //     - 'fund-nature-check'  → 资金性质校验
+    //     - 'platform-order'     → 中台订单数据处理（旧称「中台订单校验」更名后的值）
+    //   无 funcCategory 的既有 builtin-fixed 场景（如「从银行对账单提取调拨订单对账ID」）
+    //   不在此表 → 回退 getCategoryLabel(category)（= '银行对账单赋值自身'），保证既有显示不回归。
+    const FUNC_CATEGORY_LABELS = {
+      'fund-nature-check': '资金性质校验',
+      'platform-order': '中台订单数据处理'
+    };
+
+    // builtin-fixed 行「功能类别」取值：优先 config.funcCategory 映射，映射不到回退既有 category 标签。
+    function getScenarioCategoryDisplay(scenario) {
+      const funcCategory = scenario && scenario.config && scenario.config.funcCategory;
+      if (funcCategory && FUNC_CATEGORY_LABELS[funcCategory]) {
+        return FUNC_CATEGORY_LABELS[funcCategory];
+      }
+      return getCategoryLabel(scenario ? scenario.category : '');
+    }
+
     async function loadScenariosOrAlert() {
       const result = await desktopApi.scenarios.list();
       if (result && result.status === 'ok') {
@@ -6312,12 +6332,12 @@
       // v2.1.0-beta.2 PR-A Round 2（task R2-8）：单类别入口（filter.length === 1）隐藏 优先级 + 是否启动 两列
       // 单类别没有"跨场景调度"语义，优先级和是否启动失去意义；同时让其余列宽度按比例放大填满。
       const isCompactView = Array.isArray(filter) && filter.length === 1;
-      const priorityTh = isCompactView ? '' : '<th class="scenarios-col-priority" style="width: 10%; text-align: center;">优先级</th>';
-      const enabledTh = isCompactView ? '' : '<th class="scenarios-col-enabled" style="width: 13%;">是否启动</th>';
+      const priorityTh = isCompactView ? '' : '<th class="scenarios-col-priority" style="width: 7%; text-align: center;">优先级</th>';
+      const enabledTh = isCompactView ? '' : '<th class="scenarios-col-enabled" style="width: 10%;">是否启动</th>';
       const idWidth = isCompactView ? '6%' : '5%';
-      const categoryWidth = isCompactView ? '28%' : '22%';
-      const nameWidth = isCompactView ? '40%' : '30.94%';
-      const actionsWidth = isCompactView ? '26%' : '19.06%';
+      const categoryWidth = isCompactView ? '28%' : '13%';
+      const nameWidth = isCompactView ? '40%' : '18%';
+      const actionsWidth = isCompactView ? '26%' : '13%';
       // v2.1.15 W3：仅资金对账模块入口（filter 含 'gateway-recon-join'、非单类别 compact）显示「网关对账单修复-管理」入口；
       //   ReconID 修复模块自身入口（compact，filter=['gateway-recon-id-fix']）随 wrapper 隐藏，避免重复/自指。
       const showGatewayReconIdFixEntry = !isCompactView && Array.isArray(filter) && filter.includes('gateway-recon-join');
@@ -6432,7 +6452,7 @@
             <input type="checkbox" data-row-action="select-row" ${isBuiltinFixed ? 'disabled title="自带写死场景不可批量操作"' : ''} />
           </td>
           <td class="scenarios-col-id" style="padding-left: 0; padding-right: 0; text-align: left; white-space: nowrap;"><span style="display: inline-block; margin-left: 21px;">${escapeHtml(String(displayIndex))}</span></td>
-          <td class="scenarios-col-category">${escapeHtml(getCategoryLabel(scenario.category))}</td>
+          <td class="scenarios-col-category">${escapeHtml(getScenarioCategoryDisplay(scenario))}</td>
           <td class="scenarios-col-name">${escapeHtml(scenario.name)}</td>
           ${priorityTd}
           <td class="scenarios-col-actions">${actionsInner}</td>
@@ -6494,6 +6514,18 @@
       async function refreshTable() {
         const scenarios = await loadScenariosOrAlert();
         if (scenarios === null) return;
+        // v2.1.16 需求1：listScenarios 不返 config → 为 builtin-fixed 行补 config，
+        //   使「功能类别」列能按 config.funcCategory 显示业务分组（资金性质校验 / 中台订单数据处理）。
+        await Promise.all(
+          scenarios
+            .filter((s) => s.category === 'builtin-fixed')
+            .map(async (s) => {
+              try {
+                const detail = await desktopApi.scenarios.get(s.id);
+                if (detail && detail.status === 'ok' && detail.scenario) s.config = detail.scenario.config;
+              } catch (_) { /* 失败则回退 category 标签 */ }
+            })
+        );
         // v2.1.0-beta.2 PR-A：按白名单过滤
         let visible = filter ? scenarios.filter((s) => filter.includes(s.category)) : scenarios;
         // v2.1.9 N5：再按当前选定渠道过滤（spec §4.1；activeChannelId 默认 1 = 通用）

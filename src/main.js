@@ -100,6 +100,8 @@ const {
 const { createVccOpCalcSession } = require('./main-process/vcc-op-calc-session');
 // v2.1.12 流式改造（spec §9）：reader 改 exceljs 流式后，由 session.streamScanAndCompute 内部调用，main 不再直接 import
 const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-dispatcher');
+// v2.1.16-beta.2 T1：5 轮对账编排器（R1→R5；bank-statement:run 接入，dispatcher 仅作 R2）
+const { runReconciliation } = require('./main-process/reconciliation-orchestrator');
 // v2.1.12 需求6：数据侧预检只读 helper（统计 C3 银行侧候选行，不触碰 runC3Scenario 资金逻辑）
 const { countC3BankCandidates } = require('./main-process/scenario-engines/c3-gateway-recon-join');
 // v2.1.9 N5：dispatcher 双维调度依赖 channels-repository（findByNameAndLocation + getBuiltinGeneral）
@@ -122,7 +124,9 @@ const {
   readGatewayRecon,
   writeBankStatementMainOutput,
   writeErrorReportOutput,
-  buildMainOutputFileName
+  buildMainOutputFileName,
+  // v2.1.16-beta.2 R5 场景3：中台加款单剔除文件名 formatter（YYYY_MM_DD_HHMM）
+  buildPlatformCleanupFileName
 } = require('./main-process/bank-statement-io');
 // v2.1.16 阶段一 A5：银行对账单批量导入合并对账核心纯函数（🔴 资金红线，抽离便于单测）
 //   mergeBankStatementRows：合并多份银行对账单 rows + 全局重编号 _rowId（唯一不变量）；headers 不一致抛 BankStatementMergeError
@@ -134,6 +138,10 @@ const {
 //   v2.1.8 主输出 Sheet 3 撤除 → 改 error-reports/{date}/命中场景行-{basename}-{ts}.xlsx
 //   失败 graceful：不阻塞主对账流程，仅 log 警告（spec §5.4）
 const { writeScenarioHitRows } = require('./main-process/scenario-hit-rows-writer');
+// v2.1.16-beta.2 R5 场景3：中台加款单剔除文件 writer（仿 scenario-hit-rows-writer）
+//   导出阶段：R5 场景3 有剔除行产出时，落主输出同目录（主输出为空则落 exportRootDir 日期目录）
+//   失败 graceful：不阻塞主对账流程，仅 log 警告
+const { writePlatformCleanupOutput } = require('./main-process/platform-cleanup-writer');
 // v2.1.0-beta.1 PR-B：单据对账 ReconID 修复模块 IO + 引擎
 //   Round 3 增加 writeUnmatchedReport / buildUnmatchedReportFileName / buildTimestampMinute（双文件 export）
 const {
@@ -3559,23 +3567,30 @@ function registerAppHandlers() {
       // （Codex F1 P1 修复：算法层会原地修改字段，不 clone 会让连续运行的 oldValue 漂移
       //  → first-match-wins 失效，低优先级场景可能覆盖高优先级写入的字段）
       const workingBankRows = structuredClone(bankStatementSession.rows);
-      const workingGwRows = gatewayReconSession ? structuredClone(gatewayReconSession.gwRows) : null;
-      // v2.1.9 N5：双维 first-match-wins（spec §2.1）— deps 提供激活双维；缺省走 legacy 单维
-      //   channelsRepo.findByNameAndLocation/getBuiltinGeneral 用于行的渠道匹配（专属 + 通用兜底）
-      //   保留 first-match-wins 不变量：同一行最多命中 1 个场景（spec §2.4）
-      const result = runAllScenarios(workingBankRows, workingGwRows, dispatchScenarios, {
-        channelsRepo: channelsRepository,
-        db: database.db,
+      // v2.1.16-beta.2 T1：网关行数据源从「资金对账不平 gatewayReconSession」切到链接表 linked_gateway_bill。
+      //   readLinkedTableRows('gateway-bill') 无数据时返回 []（下游各轮自然 no-op）；
+      //   structuredClone 防止各引擎原地改字段污染 DB 还原对象（gatewayReconSession 本身定义/它在资金对账不平校验模块的使用不动）。
+      const workingGwRows = structuredClone(database.readLinkedTableRows('gateway-bill'));
+      // v2.1.16-beta.2 T1：改走 5 轮编排器 runReconciliation（R2 内部仍调 dispatcher，双维 first-match-wins 不变）。
+      //   deps 字段名照搬原 dispatcher 调用处：channelsRepo=channelsRepository（findByNameAndLocation/getBuiltinGeneral）、db=database.db。
+      //   编排器返回 modifiedRows/unmatchedRows 由「当前最新 bankRows」重建（资金红线：两者互斥且全覆盖 workingBankRows）。
+      const result = runReconciliation({
+        bankRows: workingBankRows,
+        gwRows: workingGwRows,
+        scenarios: dispatchScenarios,
+        deps: { channelsRepo: channelsRepository, db: database.db }
       });
       processingResult = {
         modifiedRows: result.modifiedRows,
-        // v2.1.7 round 3 F8 (spec §9.8.5)：保留 dispatcher 返回的 unmatchedRows（导出阶段写第 2 sheet 用）
-        //   保留原始 bankRows 顺序 + 原始字段（dispatcher 反向 filter 未做 .map 转换）
+        // v2.1.7 round 3 F8 (spec §9.8.5)：保留编排器返回的 unmatchedRows（导出阶段写第 2 sheet 用）
+        //   保留原始 bankRows 顺序 + 原始字段（buildOutputRows 反向 filter 未做转换）
         //   ⚠️ 资金红线：modifiedRows + unmatchedRows = workingBankRows（无遗漏 + 互斥）
         unmatchedRows: result.unmatchedRows,
         modifications: result.modifications,
         errorReport: result.errorReport,
         stats: result.stats,
+        // v2.1.16-beta.2 T1：R5 场景3（平台 Inbound-VA 剔除行）产出 → 透传给导出阶段（缺省 []）
+        platformCleanupRows: result.platformCleanupRows || [],
         scenariosSnapshot: buildScenariosSnapshot(dispatchScenarios),
         ranAt: Date.now()
       };
@@ -3680,12 +3695,18 @@ function registerAppHandlers() {
       //     writer 用 row._hitChannelId 反查 channels.label 渲染「匹配渠道」列
       //     通用 label='通用' / 非通用 label='name-ownerLocation'（与场景管理 UI 一致）
       let hitRowsReport = null;
-      if (processingResult.modifiedRows.length > 0) {
+      // v2.1.16-beta.2 self-review A：N5「命中场景行」报表只放 R2 命中行（带 _hitScenarioId）。
+      //   编排器的 modifiedRows 含 R4/R5-only 改写行（无 _hitScenarioId）——它们进主输出 sheet1 标黄即可，
+      //   不应进 N5 报表（否则「匹配渠道/匹配状态/命中场景」三列全空白，污染审计报表）。
+      const hitScenarioRows = processingResult.modifiedRows.filter(
+        (r) => r && r._hitScenarioId !== undefined && r._hitScenarioId !== null
+      );
+      if (hitScenarioRows.length > 0) {
         try {
           const originalFilePath = bankStatementSession.filePath;
           const channels = channelsRepository.listChannels(database.db);
           hitRowsReport = await writeScenarioHitRows(
-            processingResult.modifiedRows,
+            hitScenarioRows,
             originalFilePath,
             { exportRoot: ensureStorageRoot(), channels }
           );
@@ -3700,6 +3721,25 @@ function registerAppHandlers() {
         }
       }
 
+      // v2.1.16-beta.2 R5 场景3：中台加款单剔除文件（独立于主输出）
+      //   落位：主输出同目录（mainFilePath 必非空，因上方 empty 分支已 return）；兜底 exportRootDir
+      //   失败 graceful：仅 log + 主流程照常返回（与命中场景行报表范式一致，不阻塞主对账流程）
+      let platformCleanupReport = null;
+      if (Array.isArray(processingResult.platformCleanupRows) && processingResult.platformCleanupRows.length > 0) {
+        try {
+          const cleanupDir = mainFilePath ? path.dirname(mainFilePath) : exportRootDir;
+          const cleanupPath = path.join(cleanupDir, buildPlatformCleanupFileName());
+          platformCleanupReport = await writePlatformCleanupOutput(processingResult.platformCleanupRows, cleanupPath);
+        } catch (e) {
+          appendActivityLogEntry({
+            level: 'warning',
+            message: '[banking-statement-process] 中台加款单剔除文件生成失败',
+            details: [e && e.message ? e.message : String(e)]
+          });
+          platformCleanupReport = null;
+        }
+      }
+
       return {
         status: 'ok',
         mainFilePath: main.filePath,
@@ -3708,7 +3748,10 @@ function registerAppHandlers() {
         errorReportName: errorReport ? errorReport.fileName : null,
         // v2.1.9 N5 T26：renderer 用于状态框提示「命中场景行报表已生成：{path}」（详 USER_GUIDE v2.1.9）
         hitRowsReportPath: hitRowsReport ? hitRowsReport.filePath : null,
-        hitRowsReportName: hitRowsReport ? hitRowsReport.fileName : null
+        hitRowsReportName: hitRowsReport ? hitRowsReport.fileName : null,
+        // v2.1.16-beta.2 R5 场景3：renderer 用于状态框提示「中台加款单剔除文件已生成：{path}」
+        platformCleanupPath: platformCleanupReport ? platformCleanupReport.filePath : null,
+        platformCleanupName: platformCleanupReport ? platformCleanupReport.fileName : null
       };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };

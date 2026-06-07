@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.1.16-beta.2 - 2026-06-07
+
+v2.1.16 迭代「资金对账数据处理」能力扩建的**阶段二·5 轮对账核心引擎**（beta.1 地基层已随 PR#61 合并 main）。在「资金对账数据处理」模块的预加工流程里，对导入的银行对账单跑 **5 轮对账**（R1 对账ID 1v1 匹配 → R2 复用现有 first-match-wins dispatcher → R3 占位透传 → R4 资金性质校验 → R5 中台订单数据处理），逐轮演化行状态，产出改写后的银行对账单 + 中台加款单剔除文件。网关数据源从链接表 `linked_gateway_bill` 读回（用户须先在「链接表管理」导入网关对账单）。⚠️ **多处资金红线**：R4 改写 `FundType`（唯一允许二次改值轮次）、R5 场景2 发生额绝对值 + ±1day 回填 `ReconciliationId`、R5 场景3 剔除行、FundType 枚举改错拼（详见下）。质量门：`npm run release-check` 全绿（**unit 1731 / integration 952 / smoke 全过**）。⚠️ **本版用户仅手测「场景管理列表 UI」，5 轮对账端到端 + Q1 网关 TradeType 真实取值核对等留待下版一起测**（见 `changes/v2.1.16-beta.2/TASKS.md` 下版待测清单）。
+
+### 新增
+
+- **5 轮对账编排器**（🔴 资金红线 · `reconciliation-orchestrator.js`）：新建 `runReconciliation({bankRows, gwRows, scenarios, deps})` 串联 R1→R2→R3→R4→R5；按 `funcCategory`/`subCategory` 把内置场景分桶到各轮；自持 `modifiedColumnsByRowId: Map<rowId, Set<col>>` 跨 5 轮累积标黄列；返回 `{modifiedRows, unmatchedRows, modifications, errorReport, stats, platformCleanupRows, rounds}`，行数守恒不变量 `modifiedRows + unmatchedRows = bankRows`。**不改 `scenario-dispatcher.js`**（R2 仍复用其 first-match-wins 作为编排器内部一步，dispatcher 行为零改动）
+- **R1 对账ID匹配引擎**（`scenario-engines/r1-recon-id-match.js`）：按 `reconciliationid === ReconciliationId`（大小写敏感，沿用 `normalizeCellValue` trim）做网关↔银行 1v1 匹配，产出 `matchedGwRows`/`pairs` 供 R4 用；**不改任何字段、不产 modification、不标黄**；一键多匹配取第一条 + warning；空键跳过
+- **R4 资金性质校验引擎**（🔴 资金红线 · `scenario-engines/r4-fund-nature-check.js`）：第四轮，对「R1 匹配成功的网关行 × R3 全量银行行」按 `reconciliationid===ReconciliationId` 关联；**5 个可插拔 handler** 按 `priority` 顺序跑（判定条件全部 config 化、存 seed `config_json`、复用 `evaluateCondition`），改写银行 `FundType`：Ach Return（`AchReturn`→`Ach Return`）/ Wire Return（`WireReturn`→`Wire Return`）/ Charge→outbound（有 R1 匹配 + `FundType=Charge`→`outbound`）/ HX-out（`HX_OUTBOUND`→`HX-out`）/ HX-in（`HX_INBOUND`→`HX-in`）。**R4 是唯一允许同一银行行被多次改 FundType 的轮次**（叠加链如 Charge→outbound 后再 →HX-out）；被改写行进主输出 sheet1 标黄、不进 N5「命中场景行」报表。⚠️ **网关 TradeType 真实取值字符串 / priority 顺序待用户核对，已 config 化可调**
+- **R5 场景2「中台调拨订单对账ID回填」**（🔴 资金红线 · `scenario-engines/r5-fund-transfer-backfill.js`）：网关 `TradeType=FundTransfer-out` ↔ R4 后银行 `FundType=FundTransfer-out` 回填 `ReconciliationId`，`FundTransfer-in` 同逻辑（两方向独立跑）。对账字段 `merchantid↔MerchantId`/`currency↔Currency` + **发生额绝对值 `|Credit Amount − Debit Amount|` vs `|网关 amount|` 精确到分（容差 0）** + 日期两阶段（Phase1 严格同日，Phase2 剩余用银行 `BillDate` ±1day）；严格 1v1（`usedBankRowId` 单向消费），多候选 tie-break = 同日优先 → `|Δday|` 小 → 银行原序最前 + warning；原值非空被覆盖发 warning 但仍写（与 C1/C3 一致），标黄 `ReconciliationId` 列。日期解析复用 `normalizeDateExportValue`（经新建 `engine-date-utils.js` 的 `sameDay`/`dayDiffWithin`，不自写解析）
+- **R5 场景3「中台加款单脏数据处理」**（🔴 资金红线 · `scenario-engines/r5-platform-inbound-cleanup.js` + `constants/platform-cleanup-template-fields.js`）：网关 `TradeType=Inbound-VA` ↔ R4 后银行行按 `reconciliationid===ReconciliationId` 严格 1v1 命中、且银行 `FundType != 'Inbound'` 时，生成 1 条剔除行（一般不改银行行）——加款单号 = 网关 `orderid`、附言 = `<对应银行行 R4 后 FundType>，中台加款单已关闭。`、C~O 13 列（表头与银行对账单同名）= 直接拷贝银行行字段；`FundType=='Inbound'` 不产剔除行。15 列剔除模板表头存 `platform-cleanup-template-fields.js`（单一真相）+ 漂移守卫断言 C~O ⊆ `BANK_STATEMENT_FIELDS`
+- **中台加款单剔除文件导出**（🔴 资金红线 · `platform-cleanup-writer.js` + `bank-statement-io.js`）：启用场景3 且有剔除行时，与银行对账单**同目录**输出 `中台加款单剔除模板-YYYY_MM_DD_HHMM.xlsx`（新增 `buildTimestampMinuteUnderscore`/`buildPlatformCleanupFileName`）；主输出为空时落 `exportRootDir`；writer 仿 `scenario-hit-rows-writer.js`（15 列表头加粗 + watermark）；**剔除文件写入失败 graceful 不阻塞主流程**，return 带剔除路径供 renderer 提示；无剔除行不生成文件
+- **网关数据源 `readLinkedTableRows`**（`linked-table-repository.js` + `database.js` facade）：新增 `readLinkedTableRows(db, tableKey)` 从链接表读回整行（解析 `raw_json` 还原真实表头字段名，`ORDER BY id ASC`，损坏行跳过不中断）；编排器网关行从 `structuredClone(database.readLinkedTableRows('gateway-bill'))` 取——**R2/C3 网关源由 `gatewayReconSession` 切到链接表**；`fx-option` 返空（外汇期权本迭代不涉及）
+- **5 轮对账内置场景 seed migration**（`migrations.js` + `database.js` 迁移序列接入）：新增 `ensureReconRoundBuiltinScenariosSeed` 插入 5 个 R4 + 2 个 R5 内置 `builtin-fixed` 场景，config 带 `funcCategory`/`subCategory`/`roundPhase`/`priority`(∈0..3)/`involvedFiles`；幂等定位键 `is_builtin=1 AND category='builtin-fixed' AND config_json LIKE '%"subCategory":"X"%'`，已存在跳过不覆盖用户改动；排在 `ensureScenariosCategoryBuiltinFixed` 之后
+
+### 变更
+
+- **场景管理列表「功能类别」按业务分组显示**（前端 · `renderer-dialogs.js`）：自带写死场景（builtin-fixed）列表的「功能类别」列改为按 `config.funcCategory` 映射业务分组——`fund-nature-check`→「资金性质校验」、`platform-order`→「中台订单数据处理」（旧称「中台订单校验」更名）；无 `funcCategory` 的既有 builtin-fixed 场景（如「从银行对账单提取调拨订单对账ID」）回退既有 category 标签（`'银行对账单赋值自身'`），既有显示不回归。实际展示列保持 6 列：序号 / 功能类别 / 场景名称 / 优先级 / 执行操作 / 是否启动
+- **FundType 枚举补值 + 修错拼**（🔴 资金红线 · `assets/FundType枚举值.xlsx` + 一次性 migration）：补 `Ach Return` / `HX-in` / `HX-out` 三个枚举值（供 R4 子场景改写后的目标值落地）；修错拼 `Ach Ruturn → Ach Return`（一次性 migration 把存量 config 旧值迁移，已评估引用面低风险）；`InternelFundTransfer → Internal` 本版**不改**（见下版待测）；`loadFundTypeEnum` 读出新增枚举值，存量场景 config 不被破坏
+
+> **阶段二·beta.2 收口**：5 轮对账核心引擎 + R4 资金性质校验 + R5 中台订单数据处理 + 中台加款单剔除导出。⚠️ **本版未做端到端手测**（用户 2026-06-07 拍板：本版仅测场景管理 UI，5 轮对账运行/导出全链路 + Q1 网关 TradeType 真实取值核对 + C3 网关源切链接表后 config 字段大小写回归等留待下版一起测，清单见 `changes/v2.1.16-beta.2/TASKS.md`）。
+
 ## 2.1.16-beta.1 - 2026-06-07
 
 v2.1.15 之后的「资金对账数据处理」能力扩建——**阶段一·地基层**（表头自动识别 + 链接表持久化 + 批量导入合并对账 + 自带写死场景优先级）。本阶段仅落地基与数据通路，**资金性质校验 + 5 轮对账引擎 + 网关 reader 留待阶段二**。⚠️ 批量导入「多银行对账单合并对账」涉及对账数据集合并（资金红线，见下）。
