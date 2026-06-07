@@ -164,6 +164,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
   // v2.0.0-beta.3 PR #32a：银行对账单处理模块 — IO + 调度
   bankStatement: {
     import: () => ipcRenderer.invoke('bank-statement:import'),
+    // v2.1.16 阶段一 A5：批量导入（按表头识别）— 多选 Excel → main 逐文件识别路由 → 返回 per-file 批量明细
+    batchImport: () => ipcRenderer.invoke('bank-statement:batch-import'),
     importGatewayRecon: () => ipcRenderer.invoke('gateway-recon:import'),
     run: () => ipcRenderer.invoke('bank-statement:run'),
     export: () => ipcRenderer.invoke('bank-statement:export'),
@@ -371,5 +373,12 @@ contextBridge.exposeInMainWorld('desktopApi', {
       ipcRenderer.on('acquiringBillCurrency:cleanup-background:toast', wrapped);
       return () => ipcRenderer.removeListener('acquiringBillCurrency:cleanup-background:toast', wrapped);
     }
+  },
+  // v2.1.16 阶段一 A4：链接表管理（资金对账数据处理模块「链接表管理」弹窗）
+  //   list   ：读 4 个 tableKey 元数据（渲染弹窗 4 行的日期范围 / 更新日期）
+  //   import ：多选 Excel → main 识别 + 落库 → 返回 per-file 批量明细（成功/失败 + 原因）
+  linkedTable: {
+    list: () => ipcRenderer.invoke('linked-table:list'),
+    import: () => ipcRenderer.invoke('linked-table:import')
   }
 });

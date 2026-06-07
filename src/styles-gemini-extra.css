@@ -3258,6 +3258,28 @@ select.mapping-text-input {
   font-family: "Courier New", ui-monospace, monospace;
 }
 
+/* v2.1.16 A1：自带写死场景管理弹窗 —「银行渠道」与「优先级」并列居中，两组间保持间距。
+   row 沿用 .builtin-fixed-channel-row（flex + justify-content:center），此处加大组间 gap；
+   每组内部 label + 控件用小 gap 紧凑成组，整体两组在弹窗内居中。 */
+.builtin-fixed-priority-row {
+  gap: 48px;
+}
+.builtin-fixed-channel-group,
+.builtin-fixed-priority-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+/* 渠道组里下拉给一个固定基准宽度（脱离原 row 后用组宽，避免被压扁） */
+.builtin-fixed-channel-group .builtin-fixed-channel-dropdown-wrap {
+  flex: 0 0 168px;
+}
+/* 优先级输入沿用 C3 窄输入框尺寸（scenario-config-input-narrow = 100px），并列时再收窄一点更协调 */
+.builtin-fixed-priority-input {
+  flex: 0 0 72px;
+  width: 72px;
+}
+
 /* v2.1.13 C：复制场景弹窗（右上角「复制场景」label + 「选择」按钮 + 渠道/场景联动下拉） */
 .copy-scenario-label {
   margin-left: auto;

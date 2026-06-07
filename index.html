@@ -281,6 +281,8 @@
                 <button id="bankStatementRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
               </div>
               <div class="cell right">
+                <!-- v2.1.16 A5：「导入对账单」改为批量入口（多选 + 按表头识别路由，spec 2.3.1 两按钮布局 + 2.4.2 导入即批量）。
+                     单选 1 个文件是批量的子集，行为等同原单选导入。布局保持 v2.1.14 两按钮（导入对账单 / 导出文件）。 -->
                 <div class="pending-action-pair">
                   <button id="bankStatementImportBtn" class="primary-btn" type="button">导入对账单</button>
                   <button id="bankStatementExportBtn" class="secondary-btn" type="button" disabled>导出文件</button>

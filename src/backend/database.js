@@ -39,6 +39,8 @@ const {
   ensureScenarioApplicableChannelsTable,
   // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造
   ensureDiffRowsCascadeMigration_v2_1_10,
+  // v2.1.16 阶段一 A3：链接表持久化建表
+  ensureLinkedTableSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
@@ -52,6 +54,8 @@ const scenariosRepository = require('./database/scenarios-repository');
 const settingsRepository = require('./database/settings-repository');
 const templateRepository = require('./database/template-repository');
 const channelsRepository = require('./database/channels-repository');
+// v2.1.16 阶段一 A3：链接表持久化仓储
+const linkedTableRepository = require('./database/linked-table-repository');
 const { createBackup: createBackupImpl } = require('./database/backup');
 // v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
 const { appendModuleLog } = require('./logger');
@@ -441,6 +445,10 @@ class AppDatabase {
         stack: n4Cont2Err && n4Cont2Err.stack ? n4Cont2Err.stack : undefined
       });
     }
+    // v2.1.16 阶段一 A3：链接表持久化（meta + 3 张数据表；期权表模板缺失暂不建）
+    //   与其他 ensure*TablesSupport 并列，无依赖，放最后（ANALYZE 之前）
+    //   幂等：CREATE TABLE / INDEX IF NOT EXISTS，纯新增无破坏性
+    this.ensureLinkedTableSupport();
     // v2.1.7 F7-A2：启动期 ANALYZE — 让规划器统计所有索引（含 idx_acquiring_bill_currency_bill_source_file）
     //   必须在所有 ensure*Support / migrate* 之后（否则统计的是旧 schema）
     //   ANALYZE 幂等可重复；用户 DB 体量下开销 < 100ms（spec §7.9）
@@ -969,6 +977,25 @@ class AppDatabase {
 
   deleteChannel(id) {
     return channelsRepository.deleteChannel(this.db, id);
+  }
+
+  // v2.1.16 阶段一 A3：链接表持久化 facade
+  ensureLinkedTableSupport() {
+    return ensureLinkedTableSupport(this.db);
+  }
+
+  // 读全部 4 个 tableKey 元数据（前端弹窗渲染 4 行；期权表恒返回空 meta）
+  listLinkedTableMeta() {
+    return linkedTableRepository.listLinkedTableMeta(this.db);
+  }
+
+  getLinkedTableMeta(tableKey) {
+    return linkedTableRepository.getLinkedTableMeta(this.db, tableKey);
+  }
+
+  // 整表覆盖写入（rows = { [表头名]: 值 } 对象数组）；fx-option 抛「模板缺失」
+  replaceLinkedTable(tableKey, rows, options) {
+    return linkedTableRepository.replaceLinkedTable(this.db, tableKey, rows, options || {});
   }
 
   // SR-backup-1 (v2.1.9)：sqlite 安全备份 API（VACUUM INTO）

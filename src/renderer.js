@@ -288,6 +288,7 @@ const elements = {
   pendingStatusBox: document.getElementById('pendingStatusBox'),
   bankStatementModulePanel: document.getElementById('bankStatementModulePanel'),
   bankStatementScenarioBtn: document.getElementById('bankStatementScenarioBtn'),
+  // v2.1.16 A5：「导入对账单」按钮即批量入口（多选 + 按表头识别路由），无独立批量按钮
   bankStatementImportBtn: document.getElementById('bankStatementImportBtn'),
   bankStatementRunBtn: document.getElementById('bankStatementRunBtn'),
   bankStatementExportBtn: document.getElementById('bankStatementExportBtn'),
@@ -490,6 +491,8 @@ const {
   // v2.0.0-beta.3：银行对账单处理模块 preview（3 张）
   applyBankStatementPanelPreviewState,
   applyScenariosManagerPreviewState,
+  // v2.1.16 A1：自带写死场景「管理」弹窗（含优先级输入框）preview
+  applyBuiltinFixedChannelManagePreviewState,
   applyScenarioCategorySelectPreviewState,
   // v2.1.14 C：链接表管理弹窗 preview
   applyLinkedTableManagerPreviewState,
@@ -3319,7 +3322,12 @@ async function refreshBankStatementStatus() {
       state.processingResult = null;
     } else {
       state.bankStatementSession = status.hasBankStatement
-        ? { fileName: status.bankStatementFileName, rowCount: status.bankStatementRowCount }
+        ? {
+          fileName: status.bankStatementFileName,
+          rowCount: status.bankStatementRowCount,
+          // v2.1.16 A5：合并来源文件数（> 1 时状态框显示「N 个文件合并」）
+          sourceFileCount: Number(status.bankStatementSourceFileCount) || 1
+        }
         : null;
       state.gatewayReconSession = status.hasGatewayRecon
         ? { fileName: status.gatewayReconFileName, rowCount: status.gatewayReconRowCount }
@@ -3376,7 +3384,11 @@ function updateBankStatementUi() {
     tone = pr.warningCount > 0 ? 'error' : 'success';
   } else {
     // v2.1.9 N6 (T31, D18=a)：删冒号后冗余 \n（同上）；`\n不平账结果表：` 是行间换行保留
-    text = `已导入：${bs.fileName}（${bs.rowCount} 行）`;
+    // v2.1.16 A5：批量合并多文件 → 显示「N 个文件合并 M 行」；单文件沿用「文件名（M 行）」
+    const fileCount = Number(bs.sourceFileCount) || 1;
+    text = fileCount > 1
+      ? `已导入：${fileCount} 个文件合并（${bs.rowCount} 行）`
+      : `已导入：${bs.fileName}（${bs.rowCount} 行）`;
     if (gw) text += `\n不平账结果表：${gw.fileName}（${gw.rowCount} 行）`;
     tone = 'info';
   }
@@ -3401,28 +3413,109 @@ function showComingSoon(featureName) {
   ));
 }
 
-async function handleBankStatementImport() {
+// v2.1.16 A5：原单选 handler handleBankStatementImport 已被批量入口 handleBankStatementBatchImport 取代
+//   （「导入对账单」按钮改调批量逻辑；单选 1 个银行对账单是批量子集，行为等同）。
+//   单选 IPC `bank-statement:import` 仍在 main.js / preload 保留（无其它调用方，避免破坏潜在引用）。
+
+// v2.1.16 A5：批量导入（按表头识别）—— 多选文件 → main 逐文件识别路由 → 批量结果明细弹窗。
+//   银行对账单通路：多文件 = 合并对账（main 追加 rows + 全局唯一 _rowId）；明细体现「N 个文件合并 M 行」。
+//   中台退款/入账原始本阶段功能开关默认关 → main 返回 status='disabled'（标「未启用跳过」）。
+function buildBatchImportSummaryHtml(results) {
+  const list = Array.isArray(results) ? results : [];
+  // 预处理表 tableKey → 中文名（与 main detector tableKey 对齐）
+  const TABLE_LABELS = {
+    'bank-statement': '银行对账单',
+    'zhongtai-refund-order': '中台退款订单',
+    'intake-original-order': '入账原始订单'
+  };
+  const ok = list.filter((r) => r.status === 'ok');
+  const skipped = list.filter((r) => r.status === 'disabled');
+  const failed = list.filter((r) => r.status !== 'ok' && r.status !== 'disabled');
+  const statusLabel = {
+    'ambiguous': '表头命中多张表，无法判定',
+    'unrecognized': '未识别为预处理表',
+    'read-error': '文件读取失败',
+    'invalid': '文件校验失败'
+  };
+  const lines = [];
+  lines.push(`成功导入 <b>${ok.length}</b> 个文件，跳过 <b>${skipped.length}</b> 个，失败 <b>${failed.length}</b> 个`);
+  if (ok.length > 0) {
+    const bankOk = ok.filter((r) => r.tableKey === 'bank-statement');
+    const otherOk = ok.filter((r) => r.tableKey !== 'bank-statement');
+    const blocks = [];
+    // 银行对账单：多文件合并 → 汇总「N 个文件合并 M 行」+ 逐文件行数；单文件 → 直接显示行数
+    if (bankOk.length > 0) {
+      // 合并后总行数取最后一条 ok 的 mergedRowCount（main 每文件回填合并后当前总数）；兜底用逐文件求和
+      const last = bankOk[bankOk.length - 1];
+      const mergedTotal = Number(last.mergedRowCount) || bankOk.reduce((s, r) => s + (Number(r.rowCount) || 0), 0);
+      const perFile = bankOk.map((r) => `　- ${escapeHtml(r.fileName)}（${Number(r.rowCount) || 0} 行）`).join('<br/>');
+      if (bankOk.length > 1) {
+        blocks.push(`• 银行对账单：${bankOk.length} 个文件合并 ${mergedTotal} 行<br/>${perFile}`);
+      } else {
+        blocks.push(`• ${escapeHtml(bankOk[0].fileName)} → 银行对账单（${mergedTotal} 行）`);
+      }
+    }
+    // 其余预处理表（本阶段无 ok 通路，保留通用渲染）
+    for (const r of otherOk) {
+      const name = TABLE_LABELS[r.tableKey] || r.tableKey || '';
+      blocks.push(`• ${escapeHtml(r.fileName)} → ${escapeHtml(name)}（${Number(r.rowCount) || 0} 行）`);
+    }
+    lines.push(`成功：<br/>${blocks.join('<br/>')}`);
+  }
+  if (skipped.length > 0) {
+    const skipList = skipped.map((r) => {
+      const reason = r.message || '功能未启用，已跳过';
+      return `• ${escapeHtml(r.fileName)}：${escapeHtml(reason)}`;
+    }).join('<br/>');
+    lines.push(`跳过：<br/>${skipList}`);
+  }
+  if (failed.length > 0) {
+    const failList = failed.map((r) => {
+      const reason = r.message || statusLabel[r.status] || r.status || '未知原因';
+      // invalid 携带 detailLines 时附前几行
+      const detail = Array.isArray(r.detailLines) && r.detailLines.length > 0
+        ? `<br/>　${r.detailLines.slice(0, 3).map((l) => escapeHtml(l)).join('<br/>　')}`
+        : '';
+      return `• ${escapeHtml(r.fileName)}：${escapeHtml(reason)}${detail}`;
+    }).join('<br/>');
+    lines.push(`失败：<br/>${failList}`);
+  }
+  return lines.join('<br/><br/>');
+}
+
+async function handleBankStatementBatchImport() {
+  // 「导入对账单」按钮即批量入口；导入期间禁用防重复触发。
+  if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = true;
+  let result;
   try {
-    const result = await window.desktopApi.bankStatement.import();
-    if (!result) return;
-    if (result.status === 'cancelled') return;
-    if (result.status === 'invalid') {
-      const detail = (result.detailLines || []).map((l) => `• ${l}`).join('<br>');
-      openModal(createAlertDialog(`${result.message || '文件校验失败'}<br>${detail}`));
-      return;
-    }
-    if (result.status !== 'ok') {
-      openModal(createAlertDialog(`导入失败：${result.message || '未知错误'}`));
-      return;
-    }
-    state.bankStatementExport = null;  // 重新导入 → 清掉「已导出」缓存
-    await refreshBankStatementStatus();
-    // v2.0.0-beta.3 PR #32b：导入银行对账单成功后，若启用了 C3 类场景且未导入资金对账文件 → 立即弹提示
-    await maybePromptGatewayReconImport();
+    result = await window.desktopApi.bankStatement.batchImport();
   } catch (error) {
     console.error(error);
+    if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = false;
     openModal(createAlertDialog(`导入失败：${error.message || error}`));
+    return;
   }
+  if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = false;
+  if (!result || result.status === 'cancelled') return; // 用户取消文件选择 → 不弹明细
+  if (result.status !== 'ok') {
+    openModal(createAlertDialog(`导入失败：${result.message || '未知错误'}`));
+    return;
+  }
+  const results = Array.isArray(result.results) ? result.results : [];
+  // 若本批有银行对账单成功导入 → 清「已导出」缓存 + 刷新状态框（与单选导入一致）
+  const hasBankStatementOk = results.some((r) => r.status === 'ok' && r.tableKey === 'bank-statement');
+  if (hasBankStatementOk) {
+    state.bankStatementExport = null;
+    await refreshBankStatementStatus();
+  }
+  // 弹批量明细；确认后若导入了银行对账单，沿用单选导入的 C3 提示逻辑
+  //   （createAlertDialog 点「确认」时已内部 closeModal，onConfirm 内无需再关）
+  openModal(createAlertDialog(buildBatchImportSummaryHtml(results), {
+    skipLogReport: true,
+    onConfirm: hasBankStatementOk
+      ? () => { maybePromptGatewayReconImport(); }
+      : undefined
+  }));
 }
 
 async function maybePromptGatewayReconImport() {
@@ -5094,7 +5187,9 @@ async function initialize() {
       'builtin-fixed'
     ]));
   });
-  elements.bankStatementImportBtn.addEventListener('click', handleBankStatementImport);
+  // v2.1.16 A5：「导入对账单」按钮即批量入口（多选 + 按表头识别路由）。
+  //   单选 1 个银行对账单是批量子集，行为等同原单选导入（识别 bank-statement → readBankStatement → 写 session）。
+  elements.bankStatementImportBtn.addEventListener('click', handleBankStatementBatchImport);
   elements.bankStatementRunBtn.addEventListener('click', handleBankStatementRun);
   elements.bankStatementExportBtn.addEventListener('click', handleBankStatementExport);
   // v2.1.14 B：资金对账不平校验组 + 链接表管理按钮绑定
@@ -5549,6 +5644,11 @@ async function initialize() {
   } else if (info.previewModal === 'scenarios-manager') {
     setTimeout(() => {
       applyScenariosManagerPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'builtin-fixed-channel-manage') {
+    // v2.1.16 A1：自带写死场景「管理」弹窗（含优先级输入框）preview
+    setTimeout(() => {
+      applyBuiltinFixedChannelManagePreviewState();
     }, 120);
   } else if (info.previewModal === 'linked-table-manager') {
     // v2.1.14 C：链接表管理弹窗 preview

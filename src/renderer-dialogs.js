@@ -6135,29 +6135,24 @@
       return overlay;
     }
 
-    // v2.1.14 C：链接表管理弹窗（UI 骨架占位）
+    // v2.1.16 A4：链接表管理弹窗（导入 + 列表渲染，前后端联调）
     //   - 复用场景管理弹窗的 header/table/footer class 风格（.manager-card / .dialog-header / .table-wrapper / .dialog-actions）
-    //   - 表清单为静态常量；数据日期范围 / 表更新日期本期占位「—」，不读 DB、不持久化
-    //   - footer 右下 [导入][退出]：导入 → showComingSoon('链接表批量导入')；退出 → closeModal()
-    //   红线：不调用真实导入/持久化 IPC，不写任何数据
+    //   - 打开后调 desktopApi.linkedTable.list() 渲染 4 行：「数据日期范围」(min~max) + 「表库更新日期」(updatedAt)；空显示「—」
+    //   - footer 右下 [导入][退出]：导入 → desktopApi.linkedTable.import() → 批量明细弹窗 → 刷新列表；退出 → closeModal()
+    //   - tableKey 用 A3 repository 口径（gateway-bill / mid-allocation / fx-settlement / fx-option）；
+    //     展示顺序与 list() 返回顺序一致（A3 ALL_TABLE_KEYS）。
     function createLinkedTableManagerDialog() {
-      const LINKED_TABLES = [
-        { key: 'gateway-bill', name: '网关对账单' },
-        { key: 'mid-allocation', name: '中台调拨订单表库' },
-        { key: 'fx-option', name: '外汇期权表库' },
-        { key: 'fx-settlement', name: '外汇交割表库' }
-      ];
+      // tableKey（repository 口径）→ 中文表库名
+      const LINKED_TABLE_LABELS = {
+        'gateway-bill': '网关对账单表库',
+        'mid-allocation': '中台调拨订单表库',
+        'fx-settlement': '外汇交割表库',
+        'fx-option': '外汇期权表库'
+      };
       const PLACEHOLDER = '—';
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card manager-card linked-table-manager-card';
-      const rowsHtml = LINKED_TABLES.map((t) => `
-        <tr data-table-key="${escapeHtml(t.key)}">
-          <td class="linked-table-col-name">${escapeHtml(t.name)}</td>
-          <td class="linked-table-col-range">${PLACEHOLDER}</td>
-          <td class="linked-table-col-updated">${PLACEHOLDER}</td>
-        </tr>
-      `).join('');
       dialog.innerHTML = `
         <div class="dialog-header">
           <div class="dialog-title">链接表管理</div>
@@ -6172,7 +6167,7 @@
                 <th class="linked-table-col-updated" style="width: 25%; text-align: left;">表库更新日期</th>
               </tr>
             </thead>
-            <tbody>${rowsHtml}</tbody>
+            <tbody></tbody>
           </table>
         </div>
         <div class="dialog-actions linked-table-manager-footer">
@@ -6181,12 +6176,127 @@
           <button class="secondary-btn small" type="button" data-action="exit">退出</button>
         </div>
       `;
+      const tbody = dialog.querySelector('tbody');
+      const importBtn = dialog.querySelector('[data-action="import"]');
+
+      // 单行渲染：数据日期范围（min~max，缺一侧或全空显示「—」）+ 表库更新日期（updatedAt 取日期部分）
+      function formatDateRange(meta) {
+        const min = meta && meta.dataDateMin ? String(meta.dataDateMin) : '';
+        const max = meta && meta.dataDateMax ? String(meta.dataDateMax) : '';
+        if (!min && !max) return PLACEHOLDER;
+        return `${min || PLACEHOLDER} ~ ${max || PLACEHOLDER}`;
+      }
+      function formatUpdatedAt(meta) {
+        if (!meta || !meta.updatedAt) return PLACEHOLDER;
+        // updatedAt 为 ISO 字符串（如 2026-06-07T03:21:00.000Z）→ 仅取日期部分展示
+        const s = String(meta.updatedAt);
+        const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+        return m ? m[1] : s;
+      }
+
+      function renderRows(tables) {
+        const list = Array.isArray(tables) ? tables : [];
+        tbody.innerHTML = list.map((meta) => {
+          const key = meta && meta.tableKey ? String(meta.tableKey) : '';
+          const name = LINKED_TABLE_LABELS[key] || key || '';
+          return `
+            <tr data-table-key="${escapeHtml(key)}">
+              <td class="linked-table-col-name">${escapeHtml(name)}</td>
+              <td class="linked-table-col-range">${escapeHtml(formatDateRange(meta))}</td>
+              <td class="linked-table-col-updated">${escapeHtml(formatUpdatedAt(meta))}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      // 占位 4 行（list 未到 / 失败时填充，保证弹窗结构完整、不阻塞使用）
+      function renderPlaceholderRows() {
+        renderRows(Object.keys(LINKED_TABLE_LABELS).map((k) => ({ tableKey: k })));
+      }
+
+      // 拉取并渲染列表；失败仅渲染占位 4 行（不弹阻塞告警，避免初次打开陷入「确认→重开→再失败」循环）
+      async function refreshList() {
+        try {
+          const result = await desktopApi.linkedTable.list();
+          if (result && result.status === 'ok' && Array.isArray(result.tables)) {
+            renderRows(result.tables);
+            return;
+          }
+          renderPlaceholderRows();
+        } catch (_err) {
+          renderPlaceholderRows();
+        }
+      }
+
+      // 导入结果批量明细：成功 N 张 / 失败 M 张 + 每文件原因
+      function buildImportSummaryHtml(results) {
+        const list = Array.isArray(results) ? results : [];
+        const ok = list.filter((r) => r.status === 'ok');
+        const failed = list.filter((r) => r.status !== 'ok');
+        const statusLabel = {
+          'ambiguous': '表头命中多张表，无法判定',
+          'unrecognized': '未识别为任何链接表',
+          'read-error': '文件读取失败',
+          'write-error': '写入失败',
+          'unsupported': '外汇期权表暂未支持'
+        };
+        const lines = [];
+        lines.push(`成功导入 <b>${ok.length}</b> 张，失败 <b>${failed.length}</b> 张`);
+        if (ok.length > 0) {
+          const okList = ok.map((r) => {
+            const name = LINKED_TABLE_LABELS[r.tableKey] || r.tableKey || '';
+            const cnt = Number(r.rowCount) || 0;
+            return `• ${escapeHtml(r.fileName)} → ${escapeHtml(name)}（${cnt} 行）`;
+          }).join('<br/>');
+          lines.push(`成功：<br/>${okList}`);
+        }
+        if (failed.length > 0) {
+          const failList = failed.map((r) => {
+            const reason = r.message || statusLabel[r.status] || r.status || '未知原因';
+            return `• ${escapeHtml(r.fileName)}：${escapeHtml(reason)}`;
+          }).join('<br/>');
+          lines.push(`失败：<br/>${failList}`);
+        }
+        return lines.join('<br/><br/>');
+      }
+
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
       dialog.querySelector('[data-action="exit"]').addEventListener('click', closeModal);
-      // 占位：批量导入功能后续版本开放（不弹文件框、不读取、不持久化）
-      dialog.querySelector('[data-action="import"]').addEventListener('click', () => {
-        showComingSoon('链接表库批量导入');
+
+      // 导入：多选 Excel → main 识别 + 落库 → 批量明细弹窗 → 刷新列表
+      //   导入期间禁用按钮防重复触发；cancelled（用户取消文件框）静默不弹明细。
+      importBtn.addEventListener('click', async () => {
+        importBtn.disabled = true;
+        let result;
+        try {
+          result = await desktopApi.linkedTable.import();
+        } catch (err) {
+          importBtn.disabled = false;
+          openModal(createAlertDialog(`导入失败：${err?.message || '未知错误'}`, {
+            onConfirm: () => openModal(createLinkedTableManagerDialog())
+          }));
+          return;
+        }
+        importBtn.disabled = false;
+        if (!result || result.status === 'cancelled') {
+          return; // 用户取消文件选择 → 不弹明细
+        }
+        if (result.status !== 'ok') {
+          openModal(createAlertDialog(`导入失败：${result.message || '未知错误'}`, {
+            onConfirm: () => openModal(createLinkedTableManagerDialog())
+          }));
+          return;
+        }
+        // 弹批量明细；确认后重开链接表管理弹窗（重开内部会重新拉 list → 反映新日期范围 / 更新日期）
+        openModal(createAlertDialog(buildImportSummaryHtml(result.results), {
+          skipLogReport: true,
+          onConfirm: () => openModal(createLinkedTableManagerDialog())
+        }));
       });
+
+      // 打开即异步拉取列表（先挂 overlay 返回，列表随后填充）
+      refreshList();
+
       overlay.appendChild(dialog);
       return overlay;
     }
@@ -6864,10 +6974,17 @@
         </div>
         <div class="dialog-body builtin-fixed-channel-body">
           <!-- v2.1.13 bug 修复：用 div 而非 label，避免点击行内文本/空白误触发内部下拉按钮 -->
-          <div class="builtin-fixed-channel-row">
-            <span class="builtin-fixed-channel-label">银行渠道</span>
-            <div class="new-account-currency-dropdown-wrap builtin-fixed-channel-dropdown-wrap">
-              <button class="new-account-currency-dropdown-btn builtin-fixed-channel-dropdown-btn" type="button" aria-expanded="false"> </button>
+          <!-- v2.1.16 A1：「银行渠道」与「优先级」并列居中显示，两组之间保持间距（builtin-fixed-priority-row flex 容器） -->
+          <div class="builtin-fixed-channel-row builtin-fixed-priority-row">
+            <div class="builtin-fixed-channel-group">
+              <span class="builtin-fixed-channel-label">银行渠道</span>
+              <div class="new-account-currency-dropdown-wrap builtin-fixed-channel-dropdown-wrap">
+                <button class="new-account-currency-dropdown-btn builtin-fixed-channel-dropdown-btn" type="button" aria-expanded="false"> </button>
+              </div>
+            </div>
+            <div class="builtin-fixed-priority-group">
+              <span class="builtin-fixed-channel-label">优先级 <span class="scenario-config-tooltip" title="3 = 最高，0 = 最低">ⓘ</span></span>
+              <input class="scenario-config-input scenario-config-input-narrow builtin-fixed-priority-input" type="number" min="0" max="3" data-field="priority" value="0">
             </div>
           </div>
         </div>
@@ -6878,6 +6995,8 @@
       `;
 
       const dropdownButton = dialog.querySelector('.builtin-fixed-channel-dropdown-btn');
+      // v2.1.16 A1：优先级输入框（0-3 整数；回填当前场景 priority，保存时随适用渠道一并 update）
+      const priorityInput = dialog.querySelector('input[data-field="priority"]');
       const floatingPanel = document.createElement('div');
       floatingPanel.className = 'new-account-currency-dropdown-panel builtin-fixed-channel-floating-panel';
       floatingPanel.hidden = true;
@@ -6970,6 +7089,11 @@
             ? new Set(allChannels.map((c) => c.id))   // 空 = 全部 → 全选
             : new Set(applicable.map(Number));
           updateLabel();
+          // v2.1.16 A1：回填当前场景优先级（getScenario 返回 scenario.priority，0-3）
+          const scResult = await desktopApi.scenarios.get(scenarioId);
+          if (priorityInput && scResult && scResult.status === 'ok' && scResult.scenario) {
+            priorityInput.value = String(scResult.scenario.priority ?? 0);
+          }
         } catch (err) {
           openModal(createAlertDialog(`加载适用银行渠道失败：${err && err.message ? err.message : err}`));
         }
@@ -6984,6 +7108,17 @@
       dialog.querySelector('.icon-close').addEventListener('click', teardownAndReopen);
       dialog.querySelector('[data-action="back"]').addEventListener('click', teardownAndReopen);
       dialog.querySelector('[data-action="save"]').addEventListener('click', async () => {
+        // v2.1.16 A1：先校验优先级（0-3 整数）。失败走与「0 渠道」一致的 alert + reopen 模式，
+        //   避免用户点确认后回不到本弹窗（reopen 会从 DB 回填上次有效 priority）。
+        const priorityRaw = priorityInput ? priorityInput.value : '0';
+        const priorityNum = Number(priorityRaw);
+        if (!Number.isInteger(priorityNum) || priorityNum < 0 || priorityNum > 3) {
+          if (floatingPanel.parentNode) floatingPanel.parentNode.removeChild(floatingPanel);
+          openModal(createAlertDialog('优先级必须是 0-3 之间的整数', {
+            onConfirm: () => openModal(createBuiltinFixedChannelManageDialog(scenarioId))
+          }));
+          return;
+        }
         // v2.1.13 PR#58 review P2-C：阻止 0 选项保存。后端定义「空数组 = 适用全部」，
         //   若允许取消全部勾选后保存空数组，会与用户"不适用任何渠道"的直觉相反（反向变全渠道生效）。
         if (selectedIds.size === 0) {
@@ -7000,11 +7135,17 @@
           ? []
           : Array.from(selectedIds);
         const result = await desktopApi.scenarios.setApplicableChannels(scenarioId, ids);
-        if (result && result.status === 'ok') {
-          teardownAndReopen();
-        } else {
+        if (!result || result.status !== 'ok') {
           openModal(createAlertDialog(`保存失败：${result?.message || '未知错误'}`));
+          return;
         }
+        // v2.1.16 A1：适用渠道保存成功后，追加更新场景优先级（updateScenario 仅改 priority，不动 category/is_builtin）
+        const priorityResult = await desktopApi.scenarios.update(scenarioId, { priority: priorityNum });
+        if (!priorityResult || priorityResult.status !== 'ok') {
+          openModal(createAlertDialog(`优先级保存失败：${priorityResult?.message || '未知错误'}`));
+          return;
+        }
+        teardownAndReopen();
       });
 
       overlay.appendChild(dialog);
