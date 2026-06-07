@@ -176,6 +176,22 @@ const FX_OPTION_SIGNATURE = Object.freeze({
   headerRowOffset: 1
 });
 
+// v2.1.16-beta.3 ②：银行对账单入金表 — 模板=银行对账单.xlsx，44 列与 BANK_STATEMENT_SIGNATURE 同构。
+// ⚠️ tableKey 与主表区分（'bank-deposit'），scope='linked'；
+//    指纹列与主表完全相同（同一份模板）→ 绝不能与主表同进 ALL_TABLE_SIGNATURES（缺省候选 ambiguous）。
+//    仅经 LINKED_IMPORT_SIGNATURES 暴露给链接表「导入」按钮候选集；ALL_TABLE_SIGNATURES 维持原样不含它。
+const BANK_DEPOSIT_SIGNATURE = Object.freeze({
+  tableKey: 'bank-deposit',
+  label: '银行对账单入金表',
+  scope: 'linked',
+  expectedHeaders: [...BANK_STATEMENT_FIELDS],
+  // 指纹列与 BANK_STATEMENT_SIGNATURE 完全一致（同一份 44 列模板）。
+  signatureHeaders: ['ReconciliationId', 'Credit Amount', 'Debit Amount', '拆分信息', '关联大账号'],
+  dateColumn: 'BillDate',
+  minScore: 0.6,
+  headerRowOffset: 0
+});
+
 // —— 已就绪（非占位）签名 ——
 const PREPROCESS_TABLE_SIGNATURES = Object.freeze([
   BANK_STATEMENT_SIGNATURE,
@@ -193,9 +209,20 @@ const LINKED_TABLE_SIGNATURES = Object.freeze([
 ]);
 
 // 全部已就绪签名（detector 默认候选集）。
+// 🔴 v2.1.16-beta.3 ②：BANK_DEPOSIT_SIGNATURE 必须不在此集合内——它与主表 BANK_STATEMENT_SIGNATURE
+//   同构 44 列、指纹完全相同，两者同进缺省候选集会令任何缺省 detectTableType 调用 ambiguous。
+//   守护见 tests/unit/main-process/table-type-detector.test.js UT-D1。
 const ALL_TABLE_SIGNATURES = Object.freeze([
   ...PREPROCESS_TABLE_SIGNATURES,
   ...LINKED_TABLE_SIGNATURES
+]);
+
+// v2.1.16-beta.3 ②：链接表「导入按钮」候选集 = 现有 4 张 linked 签名 + 入金表签名。
+//   🔴 仅此集合含 BANK_DEPOSIT_SIGNATURE；ALL_TABLE_SIGNATURES 维持原样不含它。
+//   该集合内入金表是唯一 44 列同构签名（主表在 PREPROCESS_TABLE_SIGNATURES，不在此），故唯一命中、不 ambiguous。
+const LINKED_IMPORT_SIGNATURES = Object.freeze([
+  ...LINKED_TABLE_SIGNATURES,
+  BANK_DEPOSIT_SIGNATURE
 ]);
 
 module.exports = {
@@ -206,7 +233,10 @@ module.exports = {
   GATEWAY_RECON_SIGNATURE,
   FX_DELIVERY_SIGNATURE,
   FX_OPTION_SIGNATURE,
+  // v2.1.16-beta.3 ②：入金表签名 + 链接表导入候选集
+  BANK_DEPOSIT_SIGNATURE,
   PREPROCESS_TABLE_SIGNATURES,
   LINKED_TABLE_SIGNATURES,
+  LINKED_IMPORT_SIGNATURES,
   ALL_TABLE_SIGNATURES
 };

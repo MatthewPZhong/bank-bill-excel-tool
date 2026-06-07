@@ -61,12 +61,15 @@ const { loadFundTypeEnum, FUND_TYPE_ENUM_FILE_NAME } = require('./constants/fund
 const { loadGatewayReconHeaders, GATEWAY_RECON_HEADERS_FILE_NAME } = require('./constants/gateway-recon-headers-loader');
 // v2.1.16 阶段一 A4：链接表导入（识别 → 读行 → 落库）
 //   - detectTableType：A2 按表头自动识别表类型
-//   - LINKED_TABLE_SIGNATURES：仅 scope='linked' 的候选签名子集（网关/调拨/交割；期权 TODO 不在内）
+//   - LINKED_IMPORT_SIGNATURES：链接表「导入」按钮候选集 = 4 张 linked 签名 + 入金表签名（v2.1.16-beta.3 ②）
 //   - linkedTableReaders.readRowsWithMetadata：读全部有意义行（交割表表头在第 2 行，滑窗自动定位）
 const { detectTableType } = require('./main-process/table-type-detector');
 // v2.1.16 阶段一 A5：批量导入（按表头识别）按 scope='preprocess' 过滤候选
 //   PREPROCESS_TABLE_SIGNATURES：银行对账单 / 中台退款订单 / 入账原始订单（期权 TODO 不在内）
-const { LINKED_TABLE_SIGNATURES, PREPROCESS_TABLE_SIGNATURES } = require('./constants/table-signatures');
+//   LINKED_IMPORT_SIGNATURES：链接表导入候选集（含入金表；ALL_TABLE_SIGNATURES 不含入金表，详见 table-signatures.js）
+const { LINKED_IMPORT_SIGNATURES, PREPROCESS_TABLE_SIGNATURES } = require('./constants/table-signatures');
+// v2.1.16-beta.3 ②：入金表 13 字段裁列纯函数（按字段名 pick，非索引切片）
+const { pickBankDepositFields } = require('./backend/database/linked-table-repository');
 const linkedTableReaders = require('./backend/file-service/readers');
 const { normalizeCell: normalizeLinkedCell, FileValidationError: LinkedFileValidationError } = require('./backend/file-service/common');
 // v2.1.2 T2：月度银行对账单BU回填校验模块
@@ -3471,6 +3474,20 @@ function registerAppHandlers() {
       // （Codex F2 P1 修复：避免把上一批 gwRows 误用到新文件）
       processingResult = null;
       gatewayReconSession = null;
+      // v2.1.16-beta.3 ①：导入成功后沉淀 Channel/Channel-地区 枚举（纯审计沉淀，失败不阻断导入）
+      //   SR-log-1：src/main.js 0 console 调用 → 走 appendActivityLogEntry 上报（warning 级，不 rethrow）
+      try {
+        database.recordChannelEnumFromBankStatement(result.rows);
+      } catch (enumErr) {
+        appendActivityLogEntry({
+          level: 'warning',
+          source: 'main',
+          domain: 'channel-enum',
+          message: '[channel-enum] 单选导入枚举沉淀失败（已忽略，不影响导入）',
+          details: [enumErr && enumErr.message ? enumErr.message : String(enumErr)],
+          stack: enumErr && enumErr.stack ? enumErr.stack : undefined
+        });
+      }
       return {
         status: 'ok',
         fileName: result.fileName,
@@ -10974,18 +10991,21 @@ function registerNewAccountHandlers() {
   // ==========================================================================
 
   // A2 detector tableKey → A3 repository tableKey 映射（两层各自独立命名，桥接对齐）。
-  //   detector: gateway-recon / zhongtai-dispatch-order / fx-delivery / fx-option
-  //   repo    : gateway-bill  / mid-allocation          / fx-settlement / fx-option
+  //   detector: gateway-recon / zhongtai-dispatch-order / fx-delivery / fx-option / bank-deposit
+  //   repo    : gateway-bill  / mid-allocation          / fx-settlement / fx-option / bank-deposit
   const LINKED_DETECTOR_TO_REPO_KEY = {
     'gateway-recon': 'gateway-bill',
     'zhongtai-dispatch-order': 'mid-allocation',
     'fx-delivery': 'fx-settlement',
-    'fx-option': 'fx-option'
+    'fx-option': 'fx-option',
+    // v2.1.16-beta.3 ②：入金表 detector 与 repo 同名
+    'bank-deposit': 'bank-deposit'
   };
 
   // 按 detector tableKey 取对应 linked 签名（拿 expectedHeaders 做列映射）。
+  //   v2.1.16-beta.3 ②：用 LINKED_IMPORT_SIGNATURES（含入金表签名），否则查不到 bank-deposit 签名走兜底。
   function getLinkedSignatureByKey(detectorTableKey) {
-    return LINKED_TABLE_SIGNATURES.find((s) => s.tableKey === detectorTableKey) || null;
+    return LINKED_IMPORT_SIGNATURES.find((s) => s.tableKey === detectorTableKey) || null;
   }
 
   // 把单个 linked 文件读成 { 表头名: 值 } 对象数组（喂 replaceLinkedTable）。
@@ -11070,10 +11090,11 @@ function registerNewAccountHandlers() {
     const results = [];
     for (const filePath of res.filePaths) {
       const fileName = path.basename(filePath);
-      // 识别：仅 scope='linked' 候选签名子集（detector 默认含全部，这里收窄）
+      // 识别：链接表导入候选集（4 张 linked 签名 + 入金表签名；detector 默认含全部，这里收窄）。
+      //   v2.1.16-beta.3 ②：入金表与主表同构 44 列，但主表签名不在此集合 → 入金表唯一命中、不 ambiguous。
       let detected;
       try {
-        detected = detectTableType(filePath, LINKED_TABLE_SIGNATURES);
+        detected = detectTableType(filePath, LINKED_IMPORT_SIGNATURES);
       } catch (err) {
         results.push({ fileName, status: 'read-error', message: err && err.message ? err.message : String(err) });
         continue;
@@ -11120,8 +11141,15 @@ function registerNewAccountHandlers() {
 
       // 读行 → 对象数组 → 整表覆盖落库
       try {
+        // 🔴 v2.1.16-beta.3 ②：裁列必须在 44 列校验之后。readLinkedRowsAsObjects 内部走
+        //   detector L1/L2 + expectedHeaders zip 校验，异构文件读不出 44 列对象（前面 detector 已拦截）。
         const rows = readLinkedRowsAsObjects(filePath, signature);
-        const ret = database.replaceLinkedTable(repoKey, rows, { sourceFileName: fileName });
+        //   入金表（bank-deposit）：按 13 字段名 pick 裁列（pickBankDepositFields，非索引切片）；
+        //   其余链接表不裁列（rowsToWrite = rows）。raw_json 天然只存裁后字段。
+        const rowsToWrite = repoKey === 'bank-deposit'
+          ? rows.map((r) => pickBankDepositFields(r))
+          : rows;
+        const ret = database.replaceLinkedTable(repoKey, rowsToWrite, { sourceFileName: fileName });
         results.push({
           fileName,
           tableKey: repoKey,
@@ -11275,6 +11303,21 @@ function registerNewAccountHandlers() {
             mergedRowCount: bankStatementSession.rows.length, // 合并后 session 当前总行数
             sourceFileCount: bankStatementSession.sourceFiles.length // 合并来源文件数
           });
+          // v2.1.16-beta.3 ①：本文件识别为 bank-statement 且导入成功 → 沉淀枚举（失败不阻断）。
+          //   🔴 用 result.rows（本文件行）而非 merged.rows（累积行），避免追加合并重复沉淀虚增 seen_count。
+          //   SR-log-1：src/main.js 0 console 调用 → 走 appendActivityLogEntry 上报（warning 级，不 rethrow）
+          try {
+            database.recordChannelEnumFromBankStatement(result.rows);
+          } catch (enumErr) {
+            appendActivityLogEntry({
+              level: 'warning',
+              source: 'main',
+              domain: 'channel-enum',
+              message: '[channel-enum] 批量导入枚举沉淀失败（已忽略，不影响导入）',
+              details: [enumErr && enumErr.message ? enumErr.message : String(enumErr)],
+              stack: enumErr && enumErr.stack ? enumErr.stack : undefined
+            });
+          }
         } catch (error) {
           if (error instanceof BankStatementMergeError) {
             // headers 与已导入银行对账单不一致：不合并，session 未被污染（merge 在写 session 前抛出）
