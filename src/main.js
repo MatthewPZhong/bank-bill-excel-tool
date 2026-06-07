@@ -129,7 +129,9 @@ const {
   writeErrorReportOutput,
   buildMainOutputFileName,
   // v2.1.16-beta.2 R5 场景3：中台加款单剔除文件名 formatter（YYYY_MM_DD_HHMM）
-  buildPlatformCleanupFileName
+  buildPlatformCleanupFileName,
+  // v2.1.16-beta.4 R5 场景4：中台退款订单回填文件名 formatter（YYYY_MM_DD_HHMM）
+  buildRefundBackfillFileName
 } = require('./main-process/bank-statement-io');
 // v2.1.16 阶段一 A5：银行对账单批量导入合并对账核心纯函数（🔴 资金红线，抽离便于单测）
 //   mergeBankStatementRows：合并多份银行对账单 rows + 全局重编号 _rowId（唯一不变量）；headers 不一致抛 BankStatementMergeError
@@ -145,6 +147,10 @@ const { writeScenarioHitRows } = require('./main-process/scenario-hit-rows-write
 //   导出阶段：R5 场景3 有剔除行产出时，落主输出同目录（主输出为空则落 exportRootDir 日期目录）
 //   失败 graceful：不阻塞主对账流程，仅 log 警告
 const { writePlatformCleanupOutput } = require('./main-process/platform-cleanup-writer');
+// v2.1.16-beta.4 R5 场景4：中台退款订单回填双 sheet writer（仿 platform-cleanup-writer）
+//   导出阶段：R5 场景4 有回填行产出时，落主输出同目录（主输出为空则落 exportRootDir 日期目录）
+//   失败 graceful：不阻塞主对账流程，仅 log 警告
+const { writeRefundBackfillOutput } = require('./main-process/refund-backfill-writer');
 // v2.1.0-beta.1 PR-B：单据对账 ReconID 修复模块 IO + 引擎
 //   Round 3 增加 writeUnmatchedReport / buildUnmatchedReportFileName / buildTimestampMinute（双文件 export）
 const {
@@ -281,6 +287,10 @@ let nextStatementFileEntryId = 1;
 // v2.0.0-beta.3 PR #32a：银行对账单处理模块的进程级 session
 // 进程重启不持久化（与 lastFileImportContext 一致）
 let bankStatementSession = null;     // { filePath, fileName, rows, headers, importedAt }
+// v2.1.16-beta.4 R5 场景4：中台退款订单预加工 session（非链接表）。
+//   Layer2 实装；本轮恒 null（退款导入未实装，门控 ZHONGTAI_REFUND_BATCH_ENABLED=false 关闭）。
+//   仅用于安全引用：run 阶段注入 refundContext.refundOrderRows 时若为 null 注入 []，端到端 no-op。
+let refundOrderSession = null;
 let gatewayReconSession = null;      // { filePath, fileName, gwRows, importedAt }
 let processingResult = null;         // { modifiedRows, modifications, errorReport, stats, ranAt }
 // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块的进程级 session（PR-B 才实装数据 IO，PR-A 仅占位）
@@ -3588,6 +3598,12 @@ function registerAppHandlers() {
       //   readLinkedTableRows('gateway-bill') 无数据时返回 []（下游各轮自然 no-op）；
       //   structuredClone 防止各引擎原地改字段污染 DB 还原对象（gatewayReconSession 本身定义/它在资金对账不平校验模块的使用不动）。
       const workingGwRows = structuredClone(database.readLinkedTableRows('gateway-bill'));
+      // v2.1.16-beta.4 R5 场景4（中台退款订单回填）安全接线：
+      //   入金表（链接表 tableKey='bank-deposit'，beta.3② 合法 tableKey）—— JPM-US 子链路用；无数据返回 []。
+      //   refund order —— 本轮 refundOrderSession 恒 null（退款导入未实装、门控关闭）→ 注入 []，引擎入参空 → 端到端 no-op。
+      //   structuredClone 防止引擎原地改字段污染 DB 还原对象（与 workingGwRows 同口径）。
+      const workingDepositRows = structuredClone(database.readLinkedTableRows('bank-deposit') || []);
+      const workingRefundOrderRows = refundOrderSession ? structuredClone(refundOrderSession.rows) : []; // 本轮恒 []
       // v2.1.16-beta.2 T1：改走 5 轮编排器 runReconciliation（R2 内部仍调 dispatcher，双维 first-match-wins 不变）。
       //   deps 字段名照搬原 dispatcher 调用处：channelsRepo=channelsRepository（findByNameAndLocation/getBuiltinGeneral）、db=database.db。
       //   编排器返回 modifiedRows/unmatchedRows 由「当前最新 bankRows」重建（资金红线：两者互斥且全覆盖 workingBankRows）。
@@ -3595,7 +3611,9 @@ function registerAppHandlers() {
         bankRows: workingBankRows,
         gwRows: workingGwRows,
         scenarios: dispatchScenarios,
-        deps: { channelsRepo: channelsRepository, db: database.db }
+        deps: { channelsRepo: channelsRepository, db: database.db },
+        // v2.1.16-beta.4 R5 场景4：退款回填引擎入参（本轮 refundOrderRows 恒 []，引擎休眠 → 不产出）
+        refundContext: { refundOrderRows: workingRefundOrderRows, depositRows: workingDepositRows }
       });
       processingResult = {
         modifiedRows: result.modifiedRows,
@@ -3608,6 +3626,9 @@ function registerAppHandlers() {
         stats: result.stats,
         // v2.1.16-beta.2 T1：R5 场景3（平台 Inbound-VA 剔除行）产出 → 透传给导出阶段（缺省 []）
         platformCleanupRows: result.platformCleanupRows || [],
+        // v2.1.16-beta.4 R5 场景4（中台退款订单回填）产出 → 透传给导出阶段（本轮引擎休眠恒 []）
+        refundBackfillRows: result.refundBackfillRows || [],
+        refundUnmatchedRows: result.refundUnmatchedRows || [],
         scenariosSnapshot: buildScenariosSnapshot(dispatchScenarios),
         ranAt: Date.now()
       };
@@ -3757,6 +3778,30 @@ function registerAppHandlers() {
         }
       }
 
+      // v2.1.16-beta.4 R5 场景4：中台退款订单回填双 sheet 文件（独立于主输出，仿场景3 范式）
+      //   落位：主输出同目录（mainFilePath 必非空，因上方 empty 分支已 return）；兜底 exportRootDir
+      //   失败 graceful：仅 log + 主流程照常返回（不阻塞主对账流程）
+      //   本轮引擎休眠：refundBackfillRows 恒 []（refundOrderRows 注入 []）→ 此 block 不进入，无副作用
+      let refundBackfillReport = null;
+      if (Array.isArray(processingResult.refundBackfillRows) && processingResult.refundBackfillRows.length > 0) {
+        try {
+          const refundDir = mainFilePath ? path.dirname(mainFilePath) : exportRootDir;
+          const refundPath = path.join(refundDir, buildRefundBackfillFileName());
+          refundBackfillReport = await writeRefundBackfillOutput(
+            processingResult.refundBackfillRows,
+            Array.isArray(processingResult.refundUnmatchedRows) ? processingResult.refundUnmatchedRows : [],
+            refundPath
+          );
+        } catch (e) {
+          appendActivityLogEntry({
+            level: 'warning',
+            message: '[banking-statement-process] 中台退款订单回填文件生成失败',
+            details: [e && e.message ? e.message : String(e)]
+          });
+          refundBackfillReport = null;
+        }
+      }
+
       return {
         status: 'ok',
         mainFilePath: main.filePath,
@@ -3768,7 +3813,10 @@ function registerAppHandlers() {
         hitRowsReportName: hitRowsReport ? hitRowsReport.fileName : null,
         // v2.1.16-beta.2 R5 场景3：renderer 用于状态框提示「中台加款单剔除文件已生成：{path}」
         platformCleanupPath: platformCleanupReport ? platformCleanupReport.filePath : null,
-        platformCleanupName: platformCleanupReport ? platformCleanupReport.fileName : null
+        platformCleanupName: platformCleanupReport ? platformCleanupReport.fileName : null,
+        // v2.1.16-beta.4 R5 场景4：renderer 用于状态框提示「中台退款订单回填文件已生成：{path}」（本轮恒 null）
+        refundBackfillPath: refundBackfillReport ? refundBackfillReport.filePath : null,
+        refundBackfillName: refundBackfillReport ? refundBackfillReport.fileName : null
       };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
