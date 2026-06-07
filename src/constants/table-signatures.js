@@ -182,7 +182,8 @@ const FX_OPTION_SIGNATURE = Object.freeze({
 //    仅经 LINKED_IMPORT_SIGNATURES 暴露给链接表「导入」按钮候选集；ALL_TABLE_SIGNATURES 维持原样不含它。
 const BANK_DEPOSIT_SIGNATURE = Object.freeze({
   tableKey: 'bank-deposit',
-  label: '银行对账单入金表',
+  // v2.1.16-beta.5 需求2 改名：导入识别 label 与 UI 表库名统一为「银行对账单表」
+  label: '银行对账单表',
   scope: 'linked',
   expectedHeaders: [...BANK_STATEMENT_FIELDS],
   // 指纹列与 BANK_STATEMENT_SIGNATURE 完全一致（同一份 44 列模板）。
