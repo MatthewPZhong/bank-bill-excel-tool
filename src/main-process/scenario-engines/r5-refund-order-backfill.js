@@ -345,9 +345,19 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
   };
 
   // 3) 对每个唯一值分组：基数分类 → S1→S4 命中即停（✅Q3）
+  //   🔴 审计完整性不变量（PR#64 Finding 1）：每条筛后 SUBMITTED refund + 每条筛后 Ach Return（未改写）银行行
+  //   都必须落 backfill / error / notice 三者之一，绝不静默消失。
   for (const [key, bankGroup] of bankGroups) {
     const refundGroup = refundGroups.get(key) || [];
-    if (refundGroup.length === 0) continue; // 一侧为空 → 该组无可对账
+
+    // bank-only 组：有银行 Ach Return 行但该唯一值下无 SUBMITTED refund
+    //   → 每条银行行产「未匹配-提示」（PRD §5.1.5 sheet2 放未匹配上的银行对账单数据），不再静默 continue
+    if (refundGroup.length === 0) {
+      for (const bankRow of bankGroup) {
+        unmatchedRows.push(buildUnmatchedBankRow(bankRow, RESULT_NOTICE, '未能关联到任何退款订单'));
+      }
+      continue;
+    }
 
     const cardinality = classifyCardinality(bankGroup.length, refundGroup.length);
 
@@ -363,6 +373,21 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
       unmatchedRows,
       warn
     });
+  }
+
+  // 4) refund-only 组收尾（PR#64 Finding 1）：某唯一值下有 SUBMITTED refund 但无银行 Ach Return 行
+  //   → 该组从未进入主循环（无对应 bankGroup），其 refund 需在此补「未匹配-提示」。
+  //   ⚠️ 只补「从未进入主循环」的 key（!bankGroups.has(key)）；已进入主循环的组里未消费 refund
+  //   由 runStrategiesForGroup 内的 per-group 收尾负责，避免重复产行。
+  for (const [key, refundGroup] of refundGroups) {
+    if (bankGroups.has(key)) continue; // 已由主循环（含其 per-group 收尾）处理
+    for (const ro of refundGroup) {
+      unmatchedRows.push({
+        '结果类型': RESULT_NOTICE,
+        '退款单号': normalizeCellValue(ro[M.backfill.fromRoSerialNo]),
+        '报错/提示信息': '该退款订单未关联到银行对账单数据，不更新并提示'
+      });
+    }
   }
 
   return { backfillRows, unmatchedRows, modifications: [], warnings: warn.list() };

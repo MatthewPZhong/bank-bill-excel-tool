@@ -3782,14 +3782,19 @@ function registerAppHandlers() {
       //   落位：主输出同目录（mainFilePath 必非空，因上方 empty 分支已 return）；兜底 exportRootDir
       //   失败 graceful：仅 log + 主流程照常返回（不阻塞主对账流程）
       //   本轮引擎休眠：refundBackfillRows 恒 []（refundOrderRows 注入 []）→ 此 block 不进入，无副作用
+      //   PR#64 Finding 2：sheet2（报错/未匹配）也需落盘——全报错/无成功回填时唯一需人工处理的 sheet2 不能被跳过。
+      const refundBackfillRowsForExport = Array.isArray(processingResult.refundBackfillRows)
+        ? processingResult.refundBackfillRows : [];
+      const refundUnmatchedRowsForExport = Array.isArray(processingResult.refundUnmatchedRows)
+        ? processingResult.refundUnmatchedRows : [];
       let refundBackfillReport = null;
-      if (Array.isArray(processingResult.refundBackfillRows) && processingResult.refundBackfillRows.length > 0) {
+      if (refundBackfillRowsForExport.length > 0 || refundUnmatchedRowsForExport.length > 0) {
         try {
           const refundDir = mainFilePath ? path.dirname(mainFilePath) : exportRootDir;
           const refundPath = path.join(refundDir, buildRefundBackfillFileName());
           refundBackfillReport = await writeRefundBackfillOutput(
-            processingResult.refundBackfillRows,
-            Array.isArray(processingResult.refundUnmatchedRows) ? processingResult.refundUnmatchedRows : [],
+            refundBackfillRowsForExport,
+            refundUnmatchedRowsForExport,
             refundPath
           );
         } catch (e) {

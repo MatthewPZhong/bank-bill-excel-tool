@@ -686,3 +686,105 @@ test.describe('⑨ JPM 反向多笔（Q14 同源）：多 bank 提同一 T54SWIC
     assert.ok(!res.backfillRows.some((x) => x['退款单号'] === 'SN-A'));
   });
 });
+
+// ======================================================================
+// ⑩ PR#64 Finding 1：单侧唯一值组不得静默丢弃（审计完整性不变量）
+// ======================================================================
+// 工具：判断一条 unmatched 行属于 bank 侧（含 REFUND_BANK_COLUMNS 字段）还是 refund 侧（仅退款单号）
+const isBankUnmatched = (x) => Object.prototype.hasOwnProperty.call(x, 'MerchantId');
+const isRefundUnmatched = (x) => !isBankUnmatched(x) && Object.prototype.hasOwnProperty.call(x, '退款单号');
+
+test.describe('⑩ Finding 1：单侧唯一值组收尾', () => {
+  test('复现输入：bank 仅 M1/USD/100 + refund 仅 M2/USD/100（无交集）→ 1 bank 提示 + 1 refund 提示', () => {
+    const b = [bank({ _rowId: 'b1', MerchantId: 'M1' })];
+    const r = [refund({ '流水号': 'SN-A', '银行大账号': 'M2' })];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 0);
+    // bank-only 组（M1）→ 银行行未匹配-提示
+    const bankNotice = res.unmatchedRows.filter((x) => isBankUnmatched(x) && x['MerchantId'] === 'M1');
+    assert.equal(bankNotice.length, 1, 'M1 银行行应落未匹配-提示');
+    assert.equal(bankNotice[0]['结果类型'], RESULT_NOTICE);
+    assert.equal(bankNotice[0]['报错/提示信息'], '未能关联到任何退款订单');
+    // refund-only 组（M2）→ refund 未匹配-提示
+    const refNotice = res.unmatchedRows.filter((x) => isRefundUnmatched(x) && x['退款单号'] === 'SN-A');
+    assert.equal(refNotice.length, 1, 'SN-A 退款订单应落未匹配-提示');
+    assert.equal(refNotice[0]['结果类型'], RESULT_NOTICE);
+    assert.equal(refNotice[0]['报错/提示信息'], '该退款订单未关联到银行对账单数据，不更新并提示');
+    // 两条总计，无静默丢弃
+    assert.equal(res.unmatchedRows.length, 2);
+  });
+
+  test('bank-only 多行：3 条银行行无对应 refund → 各产 1 条提示，无丢失', () => {
+    const b = [
+      bank({ _rowId: 'b1', MerchantId: 'M1' }),
+      bank({ _rowId: 'b2', MerchantId: 'M1' }),
+      bank({ _rowId: 'b3', MerchantId: 'M1' })
+    ];
+    const r = [refund({ '银行大账号': 'OTHER' })]; // 不同大账号 → 不与 bank 同组
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 0);
+    const bankNotices = res.unmatchedRows.filter(isBankUnmatched);
+    assert.equal(bankNotices.length, 3, '3 条银行行各 1 提示');
+    assert.ok(bankNotices.every((x) => x['结果类型'] === RESULT_NOTICE));
+  });
+
+  test('refund-only 多行：2 条 refund 无对应 bank → 各产 1 条提示，无丢失', () => {
+    const b = [bank({ _rowId: 'b1', MerchantId: 'OTHER' })];
+    const r = [
+      refund({ '流水号': 'SN-A', '银行大账号': 'M9' }),
+      refund({ '流水号': 'SN-B', '银行大账号': 'M9' })
+    ];
+    const res = run(b, r);
+    const refNotices = res.unmatchedRows.filter(isRefundUnmatched);
+    assert.deepEqual(refNotices.map((x) => x['退款单号']).sort(), ['SN-A', 'SN-B']);
+    assert.ok(refNotices.every((x) => x['结果类型'] === RESULT_NOTICE));
+  });
+
+  test('refund-only 收尾不与 per-group 收尾重复：同组内未消费 refund 只产 1 条提示', () => {
+    // 同唯一值组 M1/USD/100：bank b1 经 S1 命中 SN-A 回填；SN-B 同组未消费
+    //   SN-B 应由 per-group 收尾产 1 条提示，refund-only 收尾（!bankGroups.has(key)）跳过该组 → 不重复
+    const b = [bank({ _rowId: 'b1', MerchantId: 'M1', ChannelOrderNo: 'PAY1' })];
+    const r = [
+      refund({ '流水号': 'SN-A', '银行大账号': 'M1', '银行打款流水号': 'PAY1' }),
+      refund({ '流水号': 'SN-B', '银行大账号': 'M1' })
+    ];
+    const res = run(b, r);
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-A');
+    const snbNotices = res.unmatchedRows.filter((x) => x['退款单号'] === 'SN-B');
+    assert.equal(snbNotices.length, 1, 'SN-B 只产 1 条提示，不重复');
+  });
+
+  test('完整性不变量：混合数据下每条筛后 refund + bank 都恰出现在输出一次（无丢失无重复）', () => {
+    // 构造覆盖 backfill / error / notice 三类去向 + bank-only + refund-only：
+    const b = [
+      // 组 G1 (M1/USD/100)：b1 S1 命中 SN-A → backfill；b2 反向多笔同 PAY-X → error
+      bank({ _rowId: 'b1', MerchantId: 'M1', ChannelOrderNo: 'PAYA' }),
+      bank({ _rowId: 'b2', MerchantId: 'M1', ChannelOrderNo: 'PAY-X' }),
+      bank({ _rowId: 'b3', MerchantId: 'M1', ChannelOrderNo: 'PAY-X' }),
+      // bank-only 组 G2 (M7/USD/100)：b4 无对应 refund → notice
+      bank({ _rowId: 'b4', MerchantId: 'M7' })
+    ];
+    const r = [
+      refund({ '流水号': 'SN-A', '银行大账号': 'M1', '银行打款流水号': 'PAYA' }), // → backfill
+      refund({ '流水号': 'SN-X', '银行大账号': 'M1', '银行打款流水号': 'PAY-X' }), // → 反向多笔锁定（error 行体现，不产 notice）
+      refund({ '流水号': 'SN-R', '银行大账号': 'M9' })                            // refund-only → notice
+    ];
+    const res = run(b, r);
+
+    // 4 条银行行去向并集 = backfill 用到的 bank（b1）+ error/notice 的 bank（b2/b3/b4）
+    const bankInBackfill = res.backfillRows.length; // b1
+    const bankInUnmatched = res.unmatchedRows.filter(isBankUnmatched).length; // b2/b3/b4
+    assert.equal(bankInBackfill + bankInUnmatched, 4, '4 条银行行恰各出现一次（无丢失无重复）');
+
+    // 3 条 refund 去向：SN-A→backfill、SN-X→error 锁定（不产收尾 notice）、SN-R→notice
+    const refundInBackfill = res.backfillRows.map((x) => x['退款单号']); // [SN-A]
+    const refundInNotice = res.unmatchedRows.filter(isRefundUnmatched).map((x) => x['退款单号']); // [SN-R]
+    assert.deepEqual(refundInBackfill.sort(), ['SN-A']);
+    assert.deepEqual(refundInNotice.sort(), ['SN-R']);
+    // SN-X 被锁定（卷入 b2/b3 反向多笔 error 行），不重复产 notice
+    assert.ok(!refundInNotice.includes('SN-X'), 'SN-X 锁定后不产重复 notice');
+    // 全部 refund 去向恰好覆盖一次（backfill 1 + notice 1 + 锁定 1 = 3）
+    assert.equal(refundInBackfill.length + refundInNotice.length + 1, 3);
+  });
+});
