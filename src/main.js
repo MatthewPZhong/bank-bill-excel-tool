@@ -11015,12 +11015,15 @@ function registerNewAccountHandlers() {
   //        （交割表首行是标题、表头在第 2 行；expectedHeaders 含中间空列 '' 与物理行位置精确对齐）；
   //     3) 表头行之后逐行 zip：obj[expectedHeaders[i]] = normalizeCell(row[colOffset+i])，
   //        跳过空表头名（交割表 idx 9 的 '' 占位列不入对象）；数据行尾部被 trim 时缺失列回退 ''。
-  function readLinkedRowsAsObjects(filePath, signature) {
+  // v2.1.16-beta.3 Codex#1：加 sheetName 参数 —— 用 detector 命中的那个 sheet 读表头/数据
+  //   （封面/说明 sheet 在前、数据 sheet 在后时，数据 sheet 非首个）；sheetName=null/undefined 时
+  //   readRowsWithMetadata 缺省读首个 sheet，其它链接表行为零回归。
+  function readLinkedRowsAsObjects(filePath, signature, sheetName = null) {
     const expected = Array.isArray(signature.expectedHeaders) ? signature.expectedHeaders : [];
     if (expected.length === 0) {
       return [];
     }
-    const result = linkedTableReaders.readRowsWithMetadata(filePath, []);
+    const result = linkedTableReaders.readRowsWithMetadata(filePath, [], { sheetName });
     const rows = Array.isArray(result.rows) ? result.rows : [];
 
     // 定位表头行 + 起始列偏移（首个「连续位置全等 expectedHeaders」的行）
@@ -11143,7 +11146,7 @@ function registerNewAccountHandlers() {
       try {
         // 🔴 v2.1.16-beta.3 ②：裁列必须在 44 列校验之后。readLinkedRowsAsObjects 内部走
         //   detector L1/L2 + expectedHeaders zip 校验，异构文件读不出 44 列对象（前面 detector 已拦截）。
-        const rows = readLinkedRowsAsObjects(filePath, signature);
+        const rows = readLinkedRowsAsObjects(filePath, signature, detected.sheetName);
         //   入金表（bank-deposit）：按 13 字段名 pick 裁列（pickBankDepositFields，非索引切片）；
         //   其余链接表不裁列（rowsToWrite = rows）。raw_json 天然只存裁后字段。
         const rowsToWrite = repoKey === 'bank-deposit'

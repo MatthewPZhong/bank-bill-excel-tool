@@ -99,6 +99,31 @@ test.describe('detectTableType — L1 精确命中 assets 真实模板', () => {
   });
 });
 
+test.describe('detectTableType — Codex#1：返回命中 sheetName（封面 sheet 在前回归）', () => {
+  test('单 sheet 命中 → 返回 sheetName 指向该 sheet', () => {
+    const header = [...BANK_STATEMENT_FIELDS];
+    const fp = writeTempXlsx(tmpDir, 'sheetname-single.xlsx', [header, header.map(() => 'v')], '渠道对账单');
+    const result = detectTableType(fp, [BANK_DEPOSIT_SIGNATURE]);
+    assert.equal(result.status, 'matched');
+    assert.equal(result.tableKey, 'bank-deposit');
+    assert.equal(result.sheetName, '渠道对账单', 'L1 命中应返回命中 sheet 名');
+  });
+
+  test('🔴 封面 sheet 在前 + 数据 sheet 在后 → 命中数据 sheet 且 sheetName 指向数据 sheet', () => {
+    // Codex#1 回归：detector 逐 sheet 扫描命中数据 sheet，返回值须带回该 sheet 名，
+    //   否则 linked import 的 readLinkedRowsAsObjects 缺省读首个（封面）sheet → write-error。
+    const header = [...BANK_STATEMENT_FIELDS];
+    const fp = writeTempMultiSheetXlsx(tmpDir, 'sheetname-cover-first.xlsx', [
+      { name: '封面说明', aoa: [['本表为银行对账单说明'], ['制表人：测试']] },
+      { name: '渠道对账单', aoa: [header, header.map(() => 'v')] }
+    ]);
+    const result = detectTableType(fp, [BANK_DEPOSIT_SIGNATURE]);
+    assert.equal(result.status, 'matched', '封面 sheet 在前仍应命中后面的数据 sheet');
+    assert.equal(result.tableKey, 'bank-deposit');
+    assert.equal(result.sheetName, '渠道对账单', '返回数据 sheet 名（非封面 sheet），供 reader 从正确 sheet 读表头落库');
+  });
+});
+
 test.describe('detectTableType — L2 模糊打分', () => {
   test('仅命中部分指纹列、命中率 ≥ minScore → matched（走 L2）', () => {
     // 构造一张「非完整银行表头」的文件：故意打乱列顺序 + 删掉一些列，使 L1（连续子序列全等）必失败，
