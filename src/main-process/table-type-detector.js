@@ -223,13 +223,15 @@ function detectTableType(filePath, candidateSignatures = ALL_TABLE_SIGNATURES) {
 
     if (perSheet.meaningfulRows !== null) {
       anySheetReadable = true;
-      sheetRowsCache.push(perSheet.meaningfulRows);
+      // 缓存时保留 sheetName 关联，供 L2 命中后带回（CSV 时 sheetName=null，透传）。
+      sheetRowsCache.push({ sheetName, rows: perSheet.meaningfulRows });
     }
 
     if (perSheet.matchedKeys.length === 1) {
       // 任一 sheet 单命中 → 立即返回（短路，不再扫后续 sheet）
+      // 带回命中的 sheetName（CSV 时为 null，透传），供链接表导入据此从正确 sheet 读表头落库。
       const tableKey = perSheet.matchedKeys[0];
-      return { tableKey, score: 1, status: statusForMatchedKey(tableKey) };
+      return { tableKey, score: 1, status: statusForMatchedKey(tableKey), sheetName };
     }
     if (perSheet.matchedKeys.length > 1) {
       // 同一 sheet 多签名精确命中，无法唯一判定
@@ -243,11 +245,11 @@ function detectTableType(filePath, candidateSignatures = ALL_TABLE_SIGNATURES) {
   }
 
   // —— L2 模糊层（逐 sheet 取全局最佳）——
-  let globalBest = { tableKey: null, score: 0, minScore: 1 };
-  for (const rows of sheetRowsCache) {
+  let globalBest = { tableKey: null, score: 0, minScore: 1, sheetName: null };
+  for (const { sheetName, rows } of sheetRowsCache) {
     const best = runFuzzyLayer(rows, signatures);
     if (best.tableKey && best.score > globalBest.score) {
-      globalBest = best;
+      globalBest = { ...best, sheetName };
     }
   }
 
@@ -255,7 +257,8 @@ function detectTableType(filePath, candidateSignatures = ALL_TABLE_SIGNATURES) {
     return {
       tableKey: globalBest.tableKey,
       score: globalBest.score,
-      status: statusForMatchedKey(globalBest.tableKey)
+      status: statusForMatchedKey(globalBest.tableKey),
+      sheetName: globalBest.sheetName
     };
   }
 

@@ -30,7 +30,11 @@ const {
   ALL_TABLE_SIGNATURES,
   BANK_STATEMENT_SIGNATURE,
   GATEWAY_RECON_SIGNATURE,
-  FX_OPTION_SIGNATURE
+  FX_OPTION_SIGNATURE,
+  // v2.1.16-beta.3 ②：入金表签名 + 链接表导入候选集 + 预加工候选集
+  BANK_DEPOSIT_SIGNATURE,
+  LINKED_IMPORT_SIGNATURES,
+  PREPROCESS_TABLE_SIGNATURES
 } = require('../../../src/constants/table-signatures');
 const { BANK_STATEMENT_FIELDS } = require('../../../src/constants/bank-statement-fields');
 
@@ -92,6 +96,31 @@ test.describe('detectTableType — L1 精确命中 assets 真实模板', () => {
     const result = detectTableType(path.join(ASSETS, '外汇交割表.xls'));
     assert.equal(result.status, 'matched');
     assert.equal(result.tableKey, 'fx-delivery');
+  });
+});
+
+test.describe('detectTableType — Codex#1：返回命中 sheetName（封面 sheet 在前回归）', () => {
+  test('单 sheet 命中 → 返回 sheetName 指向该 sheet', () => {
+    const header = [...BANK_STATEMENT_FIELDS];
+    const fp = writeTempXlsx(tmpDir, 'sheetname-single.xlsx', [header, header.map(() => 'v')], '渠道对账单');
+    const result = detectTableType(fp, [BANK_DEPOSIT_SIGNATURE]);
+    assert.equal(result.status, 'matched');
+    assert.equal(result.tableKey, 'bank-deposit');
+    assert.equal(result.sheetName, '渠道对账单', 'L1 命中应返回命中 sheet 名');
+  });
+
+  test('🔴 封面 sheet 在前 + 数据 sheet 在后 → 命中数据 sheet 且 sheetName 指向数据 sheet', () => {
+    // Codex#1 回归：detector 逐 sheet 扫描命中数据 sheet，返回值须带回该 sheet 名，
+    //   否则 linked import 的 readLinkedRowsAsObjects 缺省读首个（封面）sheet → write-error。
+    const header = [...BANK_STATEMENT_FIELDS];
+    const fp = writeTempMultiSheetXlsx(tmpDir, 'sheetname-cover-first.xlsx', [
+      { name: '封面说明', aoa: [['本表为银行对账单说明'], ['制表人：测试']] },
+      { name: '渠道对账单', aoa: [header, header.map(() => 'v')] }
+    ]);
+    const result = detectTableType(fp, [BANK_DEPOSIT_SIGNATURE]);
+    assert.equal(result.status, 'matched', '封面 sheet 在前仍应命中后面的数据 sheet');
+    assert.equal(result.tableKey, 'bank-deposit');
+    assert.equal(result.sheetName, '渠道对账单', '返回数据 sheet 名（非封面 sheet），供 reader 从正确 sheet 读表头落库');
   });
 });
 
@@ -355,6 +384,55 @@ test.describe('detectTableType — 外汇期权表 unsupported（v2.1.16 PR#61 F
     assert.equal(opt.tableKey, 'fx-option');
     assert.equal(fxDelivery.tableKey, 'fx-delivery');
     assert.notEqual(opt.tableKey, fxDelivery.tableKey, '期权表 / 交割表互不串台');
+  });
+});
+
+test.describe('detectTableType — 银行对账单入金表 bank-deposit 候选集隔离（v2.1.16-beta.3 ②）', () => {
+  // UT-D1：🔴 ALL_TABLE_SIGNATURES 不含入金表（防回归不变量；入金表与主表同构 44 列，进 ALL 会致缺省 ambiguous）
+  test('UT-D1：ALL_TABLE_SIGNATURES 不含 bank-deposit（隔离不变量）', () => {
+    assert.equal(
+      ALL_TABLE_SIGNATURES.some((s) => s.tableKey === 'bank-deposit'),
+      false,
+      '🔴 ALL_TABLE_SIGNATURES 绝不能含 bank-deposit（与主表同构 → 缺省候选 ambiguous）'
+    );
+  });
+
+  // UT-D2：LINKED_IMPORT_SIGNATURES 含入金表
+  test('UT-D2：LINKED_IMPORT_SIGNATURES 含 bank-deposit', () => {
+    assert.equal(
+      LINKED_IMPORT_SIGNATURES.some((s) => s.tableKey === 'bank-deposit'),
+      true,
+      'LINKED_IMPORT_SIGNATURES 必须含 bank-deposit'
+    );
+    assert.equal(BANK_DEPOSIT_SIGNATURE.tableKey, 'bank-deposit');
+    assert.equal(BANK_DEPOSIT_SIGNATURE.scope, 'linked');
+    assert.equal(
+      BANK_DEPOSIT_SIGNATURE.expectedHeaders.length,
+      BANK_STATEMENT_FIELDS.length,
+      '入金表 expectedHeaders 与主表同为 44 列'
+    );
+  });
+
+  // UT-D3：链接候选集内入金表唯一命中（非 ambiguous）。主表签名不在 LINKED_IMPORT_SIGNATURES → 唯一同构匹配。
+  test('UT-D3：银行对账单.xlsx 在 LINKED_IMPORT_SIGNATURES 内唯一命中 bank-deposit（非 ambiguous）', () => {
+    const result = detectTableType(path.join(ASSETS, '银行对账单.xlsx'), LINKED_IMPORT_SIGNATURES);
+    assert.equal(result.status, 'matched', '入金表是该候选集内唯一同构签名 → matched，不 ambiguous');
+    assert.equal(result.tableKey, 'bank-deposit');
+    assert.equal(result.score, 1, 'L1 精确命中 score=1');
+  });
+
+  // UT-D4：预加工候选集仍识别为主表（不串）
+  test('UT-D4：银行对账单.xlsx 在 PREPROCESS_TABLE_SIGNATURES 内识别为 bank-statement（不串）', () => {
+    const result = detectTableType(path.join(ASSETS, '银行对账单.xlsx'), PREPROCESS_TABLE_SIGNATURES);
+    assert.equal(result.status, 'matched');
+    assert.equal(result.tableKey, 'bank-statement', '同一文件走预加工候选仍为主表，不被入金表抢走');
+  });
+
+  // UT-D5：非入金表链接文件不被入金表干扰
+  test('UT-D5：网关对账单.xlsx 在 LINKED_IMPORT_SIGNATURES 内仍命中 gateway-recon', () => {
+    const result = detectTableType(path.join(ASSETS, '网关对账单.xlsx'), LINKED_IMPORT_SIGNATURES);
+    assert.equal(result.status, 'matched');
+    assert.equal(result.tableKey, 'gateway-recon', '入金表签名不干扰网关对账单识别');
   });
 });
 

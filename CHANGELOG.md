@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.1.16-beta.3 - 2026-06-07
+
+v2.1.16「资金对账数据处理」能力扩建的**阶段三·中台退款回填前置基础设施 + 引擎设计**。本版交付两块可用功能（①Channel 枚举沉淀、②银行对账单入金表链接库）+ 一份大型对账引擎设计文档（③中台退款订单回填，**仅设计不实现代码**）。①② 是 ③ 的前置依赖（JPM-US 分支查入金表、JPM 分支判 Channel/地区）。质量门 `npm run release-check` 全绿（**unit 1768 / integration 952 / smoke 全过**，比 beta.2 +37 单测）；team-lead 端到端自测 21/21 + 用户手测入金表导入通过。
+
+### 新增
+
+- **银行对账单入金表（链接表库）**（②· 🔴 数据红线 · `table-signatures.js` / `migrations.js` / `linked-table-repository.js` / `main.js` / `renderer-dialogs.js`）：「链接表管理」新增第 5 个表库「银行对账单入金表」，模板取 `银行对账单.xlsx`，导入存 C~N 列 + FundType 共 **13 字段**（`linked_bank_deposit`，键 `reconciliation_id`/日期 `bill_date`，整表覆盖）。**复用现有「导入」按钮**——新增 `BANK_DEPOSIT_SIGNATURE`（44 列同主表）仅进新导出的 `LINKED_IMPORT_SIGNATURES`，🔴 `ALL_TABLE_SIGNATURES` 维持不含它（与预加工主表 `bank-statement` 同构 44 列，隔离防 detector ambiguous，UT-D1 守护；生产两个 detect 调用点分别用 `LINKED_IMPORT_SIGNATURES`/`PREPROCESS_TABLE_SIGNATURES` 互不串）；导入 handler 对 `bank-deposit` 按 13 字段名 `pickBankDepositFields` 裁列（🔴 裁列在 44 列校验之后；模块加载期 assert 13 字段 ⊆ `BANK_STATEMENT_FIELDS` 防列序漂移）
+- **Channel 枚举沉淀**（①· `channel-enum-repository.js` 新建 / `migrations.js` / `database.js` / `main.js`）：每次导入银行对账单后去重沉淀两类值——`Channel` 值、`<Channel>-<地区>` 拼接值（`channel_enum_values`，`UNIQUE(value_type,enum_value)` 去重 + `seen_count` 累加 + first/last_seen_at）。供后续 ③ JPM 分支读库 + 业务审计；**纯数据沉淀无 UI**。🔴 边界：地区空只落 `channel` 不生成 `JPM-` 脏值、Channel 空跳过整行；沉淀失败走 `appendActivityLogEntry` warning **不阻断导入**（单选 + 批量两处钩子，批量用本文件 `result.rows` 防 `seen_count` 虚增）
+- **③ 中台退款订单回填引擎设计文档**（仅设计·`docs/iterations/v2.1.16-beta.3/PRD-中台退款订单回填-*.md` + `TECH_DESIGN-中台退款订单回填-*.md`）：PRD + TECH 定稿——4 基数（1:1/1:N/N:1/N:N）× 4 关联策略（渠道流水号/附言 MTX/付款人卡号/金额币种日期）决策矩阵 + JPM-HK（清洗 `//` + 提 `T54SWIC+6位数`）/JPM-US（银行打款流水号→入金表→CustomerRef 二跳）双分支 + 数据筛选（SUBMITTED 参与 / Ach Return 未变更）/ 统一回填动作 / 匹配命中详情 / 双 sheet 导出。集成方式 = R5 新增场景4。**12 条语义歧义经用户逐条确认**（大账号=`MerchantId`、金额=`退款金额`、JPM-HK 仅等值匹配「银行打款流水号」、JPM-US `OR`、基数2-S3 多笔报错一笔回填、回填模板 F 起 9 字段、场景4 默认禁用等）。本版不落地代码，作为后续实现版本契约
+
+> **阶段三·beta.3 收口**：①Channel 枚举 + ②银行对账单入金表（前置基础设施）落地并测通过，③中台退款回填引擎完成详细设计待后续实现版本。
+
 ## 2.1.16-beta.2 - 2026-06-07
 
 v2.1.16 迭代「资金对账数据处理」能力扩建的**阶段二·5 轮对账核心引擎**（beta.1 地基层已随 PR#61 合并 main）。在「资金对账数据处理」模块的预加工流程里，对导入的银行对账单跑 **5 轮对账**（R1 对账ID 1v1 匹配 → R2 复用现有 first-match-wins dispatcher → R3 占位透传 → R4 资金性质校验 → R5 中台订单数据处理），逐轮演化行状态，产出改写后的银行对账单 + 中台加款单剔除文件。网关数据源从链接表 `linked_gateway_bill` 读回（用户须先在「链接表管理」导入网关对账单）。⚠️ **多处资金红线**：R4 改写 `FundType`（唯一允许二次改值轮次）、R5 场景2 发生额绝对值 + ±1day 回填 `ReconciliationId`、R5 场景3 剔除行、FundType 枚举改错拼（详见下）。质量门：`npm run release-check` 全绿（**unit 1731 / integration 952 / smoke 全过**）。⚠️ **本版用户仅手测「场景管理列表 UI」，5 轮对账端到端 + Q1 网关 TradeType 真实取值核对等留待下版一起测**（见 `changes/v2.1.16-beta.2/TASKS.md` 下版待测清单）。

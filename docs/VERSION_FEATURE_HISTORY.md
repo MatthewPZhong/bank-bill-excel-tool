@@ -9,6 +9,18 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## 2.1.16-beta.3（2026-06-07）
+
+v2.1.16「资金对账数据处理」**阶段三·中台退款回填前置基础设施 + 引擎设计**。交付 ①Channel 枚举沉淀、②银行对账单入金表链接库两块可用功能 + ③中台退款订单回填引擎设计文档（仅设计不实现）。①② 是 ③ 的前置依赖。质量门 `npm run release-check` 全绿（unit 1768 / integration 952 / smoke 全过）+ team-lead 端到端自测 21/21 + 用户手测入金表导入通过。
+
+### 新增
+
+- 银行对账单入金表链接库（②· 🔴 数据红线）：「链接表管理」新增第 5 个表库「银行对账单入金表」，模板取 `银行对账单.xlsx`，存 C~N+FundType 共 13 字段（`linked_bank_deposit`，整表覆盖）；复用现有「导入」按钮，新增 `BANK_DEPOSIT_SIGNATURE` 仅进 `LINKED_IMPORT_SIGNATURES`、`ALL_TABLE_SIGNATURES` 不含它（与主表同构 44 列隔离防 ambiguous）；导入按 13 字段名裁列（裁列在 44 列校验后 + 加载期 assert ⊆ `BANK_STATEMENT_FIELDS`）
+- Channel 枚举沉淀（①）：导入银行对账单后去重沉淀 `Channel` / `<Channel>-<地区>` 两类值（`channel_enum_values`，UNIQUE 去重 + seen_count 累加），供后续 ③ JPM 分支 + 审计，纯沉淀无 UI；地区空只落 channel 不生成脏值、Channel 空跳过、沉淀失败 `appendActivityLogEntry` warning 不阻断导入
+- ③ 中台退款订单回填引擎设计文档（仅设计）：4 基数×4 策略决策矩阵 + JPM-HK/US 双分支 + 数据筛选/统一回填/命中详情/双 sheet 导出，集成 = R5 场景4，12 条歧义经用户确认；本版不实现代码，作后续实现蓝本
+
+> 阶段三·beta.3 收口：①② 前置基础设施落地测通过，③ 引擎完成详细设计待实现。
+
 ## 2.1.16-beta.2（2026-06-07）
 
 v2.1.16「资金对账数据处理」能力扩建的**阶段二·5 轮对账核心引擎**（beta.1 地基层已随 PR#61 合并 main）。在「资金对账数据处理」预加工流程里对银行对账单跑 **5 轮对账**（R1 对账ID 1v1 匹配 → R2 复用现有 first-match-wins dispatcher → R3 占位透传 → R4 资金性质校验 → R5 中台订单数据处理），产出改写后银行对账单 + 中台加款单剔除文件；网关数据从链接表 `linked_gateway_bill` 读回。⚠️ 多处资金红线（R4 改 `FundType`、R5 场景2 回填 `ReconciliationId`、R5 场景3 剔除行、FundType 枚举改错拼）。质量门 `npm run release-check` 全绿（unit 1731 / integration 952 / smoke 全过）。⚠️ 本版用户仅手测「场景管理列表 UI」，5 轮端到端 + Q1 网关 TradeType 真实取值核对等留待下版一起测（清单见 `changes/v2.1.16-beta.2/TASKS.md`）。

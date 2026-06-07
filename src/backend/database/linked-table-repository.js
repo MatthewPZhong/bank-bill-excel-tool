@@ -22,6 +22,34 @@
 //       与 `-` 格式混用会让字符串比较错乱）。解析失败 / 空值跳过，不参与 min/max。
 
 const { normalizeDateExportValue } = require('../file-service/normalizers');
+const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields');
+
+// v2.1.16-beta.3 ②：银行对账单入金表 13 字段白名单（C~N 列索引 2~13 + FundType 索引 25）。
+//   🔴 裁列必须按字段名 pick（非 slice 索引切片），防 BANK_STATEMENT_FIELDS 列顺序变动裁错列。
+const BANK_DEPOSIT_FIELDS = Object.freeze([
+  'BizId', 'BillDate', 'ValueDate', 'Channel', '地区', 'MerchantId', 'Currency',
+  'Credit Amount', 'Debit Amount', 'ReconciliationId', 'ChannelOrderNo', 'CustomerRef', 'FundType'
+]);
+
+// 模块加载期断言：13 字段全部 ∈ BANK_STATEMENT_FIELDS（防常量漂移；红线 §六-4）。
+const __missingDepositFields = BANK_DEPOSIT_FIELDS.filter((f) => !BANK_STATEMENT_FIELDS.includes(f));
+if (__missingDepositFields.length > 0) {
+  throw new Error(
+    `[linked-table-repository] BANK_DEPOSIT_FIELDS 含不在 BANK_STATEMENT_FIELDS 的字段：${__missingDepositFields.join(', ')}`
+  );
+}
+
+// v2.1.16-beta.3 ②：按字段名 pick 出入金表 13 字段（裁列纯函数，便于单测 UT-H1/H3）。
+//   入参为 44 字段对象（readLinkedRowsAsObjects 产物，已过 detector L1/L2 + zip 校验）；
+//   输出仅含 13 字段，缺失字段取 undefined（不补默认值，保持与源行一致）。
+function pickBankDepositFields(row) {
+  const src = row && typeof row === 'object' ? row : {};
+  const picked = {};
+  for (const f of BANK_DEPOSIT_FIELDS) {
+    picked[f] = src[f];
+  }
+  return picked;
+}
 
 // 各表自包含定义（tableKey → { table, keyColumn, keyHeader, dateColumn, dateHeader, supported }）
 //   keyHeader / dateHeader = rows 对象里的表头 key（中文/英文，按模板原表头）
@@ -63,11 +91,23 @@ const LINKED_TABLE_DEFS = {
     dateColumn: null,
     dateHeader: null,
     supported: false
+  },
+  // v2.1.16-beta.3 ②：银行对账单入金表（模板=银行对账单.xlsx，存 C~N+FundType 13 字段 raw_json）。
+  //   keyHeader='ReconciliationId'（驼峰，BANK_STATEMENT_FIELDS 索引 11，与网关全小写 reconciliationid 区分）。
+  //   dateHeader='BillDate'（BANK_STATEMENT_FIELDS 索引 3，与 BANK_DEPOSIT_SIGNATURE.dateColumn 对齐）。
+  'bank-deposit': {
+    table: 'linked_bank_deposit',
+    keyColumn: 'reconciliation_id',
+    keyHeader: 'ReconciliationId',
+    dateColumn: 'bill_date',
+    dateHeader: 'BillDate',
+    supported: true
   }
 };
 
-// 前端弹窗渲染顺序的全部 4 个 tableKey（listLinkedTableMeta 必须覆盖全部）
-const ALL_TABLE_KEYS = ['gateway-bill', 'mid-allocation', 'fx-settlement', 'fx-option'];
+// 前端弹窗渲染顺序的全部 tableKey（listLinkedTableMeta 必须覆盖全部）。
+//   v2.1.16-beta.3 ②：入金表排末位 → 链接表弹窗渲染第 5 行（与 PRD UI Mockup 一致）。
+const ALL_TABLE_KEYS = ['gateway-bill', 'mid-allocation', 'fx-settlement', 'fx-option', 'bank-deposit'];
 
 function getDef(tableKey) {
   const def = LINKED_TABLE_DEFS[tableKey];
@@ -232,6 +272,9 @@ function readLinkedTableRows(db, tableKey) {
 module.exports = {
   LINKED_TABLE_DEFS,
   ALL_TABLE_KEYS,
+  // v2.1.16-beta.3 ②：入金表 13 字段白名单 + 裁列纯函数
+  BANK_DEPOSIT_FIELDS,
+  pickBankDepositFields,
   listLinkedTableMeta,
   getLinkedTableMeta,
   replaceLinkedTable,

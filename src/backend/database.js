@@ -43,8 +43,10 @@ const {
   ensureFundTypeAchReturnConfigMigration,
   // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造
   ensureDiffRowsCascadeMigration_v2_1_10,
-  // v2.1.16 阶段一 A3：链接表持久化建表
+  // v2.1.16 阶段一 A3：链接表持久化建表（v2.1.16-beta.3 ②：含入金表 linked_bank_deposit）
   ensureLinkedTableSupport,
+  // v2.1.16-beta.3 ①：Channel 枚举字典表建表
+  ensureChannelEnumSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
@@ -60,6 +62,8 @@ const templateRepository = require('./database/template-repository');
 const channelsRepository = require('./database/channels-repository');
 // v2.1.16 阶段一 A3：链接表持久化仓储
 const linkedTableRepository = require('./database/linked-table-repository');
+// v2.1.16-beta.3 ①：Channel 枚举字典仓储
+const channelEnumRepository = require('./database/channel-enum-repository');
 const { createBackup: createBackupImpl } = require('./database/backup');
 // v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
 const { appendModuleLog } = require('./logger');
@@ -462,6 +466,8 @@ class AppDatabase {
     //   与其他 ensure*TablesSupport 并列，无依赖，放最后（ANALYZE 之前）
     //   幂等：CREATE TABLE / INDEX IF NOT EXISTS，纯新增无破坏性
     this.ensureLinkedTableSupport();
+    // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀；幂等 CREATE IF NOT EXISTS，无依赖）
+    this.ensureChannelEnumSupport();
     // v2.1.7 F7-A2：启动期 ANALYZE — 让规划器统计所有索引（含 idx_acquiring_bill_currency_bill_source_file）
     //   必须在所有 ensure*Support / migrate* 之后（否则统计的是旧 schema）
     //   ANALYZE 幂等可重复；用户 DB 体量下开销 < 100ms（spec §7.9）
@@ -1025,6 +1031,22 @@ class AppDatabase {
   //   fx-option 返回 []；损坏行跳过。供 5 轮对账编排器取网关数据源（'gateway-bill'）。
   readLinkedTableRows(tableKey) {
     return linkedTableRepository.readLinkedTableRows(this.db, tableKey);
+  }
+
+  // v2.1.16-beta.3 ①：Channel 枚举字典 facade（纯审计沉淀，不删/不改对账数据）
+  ensureChannelEnumSupport() {
+    return ensureChannelEnumSupport(this.db);
+  }
+
+  // 导入银行对账单成功后沉淀 Channel / Channel-地区 枚举（去重 upsert）。
+  //   内部已有事务；调用方（main.js handler）应再包一层 try-catch 防沉淀失败阻断导入。
+  recordChannelEnumFromBankStatement(rows) {
+    return channelEnumRepository.recordFromBankStatementRows(this.db, rows);
+  }
+
+  // 按 value_type（'channel' / 'channel-region'）列出枚举值（供后续引擎读库 + 审计）。
+  listChannelEnumValues(valueType) {
+    return channelEnumRepository.listChannelEnumValues(this.db, valueType);
   }
 
   // SR-backup-1 (v2.1.9)：sqlite 安全备份 API（VACUUM INTO）

@@ -2386,6 +2386,7 @@ function ensureAcquiringBillCurrencyFix4ColumnsRename(db) {
 //   linked_gateway_bill   : 键 reconciliation_id(reconciliationid) / 日期 bill_date(Billdate)
 //   linked_mid_allocation : 键 allocation_no(调拨单号)             / 日期 transaction_date(列名已对齐「交易时间」idx 4——业务日期空值率高，数据日期范围用交易时间)
 //   linked_fx_settlement  : 键 transaction_no(交易编号)           / 日期 transaction_date(交易日期)
+//   linked_bank_deposit   : 键 reconciliation_id(ReconciliationId) / 日期 bill_date(BillDate)（v2.1.16-beta.3 ②）
 // 幂等：CREATE TABLE / INDEX IF NOT EXISTS，多次启动 no-op；纯新增无破坏性（不需备份 / 标志位）。
 // 与现有模块表完全隔离，调用顺序无依赖。
 function ensureLinkedTableSupport(db) {
@@ -2445,6 +2446,51 @@ function ensureLinkedTableSupport(db) {
 
     // 注：linked_fx_option（外汇期权）模板缺失，本批次不建表；待模板到位后在此处增量补一张表。
 
+    // 数据表 4：银行对账单入金表（v2.1.16-beta.3 ②；键 reconciliation_id / 日期 bill_date）
+    //   存银行对账单 C~N 列 + FundType 共 13 字段 raw_json（裁列在 main.js handler 完成；本表与现有 3 张同构）。
+    //   ChannelOrderNo 不单独建索引（PRD §2.3：下游 JPM-US 匹配量小走内存，索引留待 ③ 引擎评估）。
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS linked_bank_deposit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reconciliation_id TEXT,
+        bill_date TEXT,
+        raw_json TEXT NOT NULL,
+        imported_at TEXT NOT NULL
+      );
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_bank_deposit_recon ON linked_bank_deposit(reconciliation_id);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_bank_deposit_date ON linked_bank_deposit(bill_date);');
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+// v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀，无 UI）。
+//   每次导入银行对账单后去重 upsert 两类枚举值：value_type='channel'（Channel 值）/
+//   'channel-region'（<Channel>-<地区> 拼接值）。供后续 ③ 中台退款回填引擎读库 + 业务审计。
+//   🔴 资金/数据红线说明：纯新增审计字典表，无破坏性 DDL；只 INSERT/UPDATE 枚举字典，
+//      不删除/不改写任何对账数据，非资金红线、属审计辅助。
+//   value_type CHECK + (value_type, enum_value) UNIQUE 是去重 upsert 的基础，不可省。
+//   幂等：CREATE TABLE / INDEX IF NOT EXISTS，多次启动 no-op；与其它模块表完全隔离、无调用顺序依赖。
+function ensureChannelEnumSupport(db) {
+  db.exec('BEGIN');
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS channel_enum_values (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        value_type    TEXT NOT NULL CHECK (value_type IN ('channel', 'channel-region')),
+        enum_value    TEXT NOT NULL,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at  TEXT NOT NULL,
+        seen_count    INTEGER NOT NULL DEFAULT 1,
+        UNIQUE (value_type, enum_value)
+      );
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_channel_enum_type ON channel_enum_values(value_type);');
+
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');
@@ -2498,7 +2544,10 @@ module.exports = {
   // v2.1.10 N4-cont-2：diff_rows 2 FK 加 ON DELETE CASCADE（🔴 资金红线 + 不可逆 DB schema）
   ensureDiffRowsCascadeMigration_v2_1_10,
   // v2.1.16 阶段一 A3：链接表持久化（meta + 3 张数据表，期权表模板缺失暂不建）
+  //   v2.1.16-beta.3 ②：事务内追加 linked_bank_deposit（入金表）+ recon/date 两索引
   ensureLinkedTableSupport,
+  // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀，独立迁移函数）
+  ensureChannelEnumSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,

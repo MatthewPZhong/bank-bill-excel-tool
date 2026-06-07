@@ -6167,7 +6167,9 @@
         'gateway-bill': '网关对账单表库',
         'mid-allocation': '中台调拨订单表库',
         'fx-settlement': '外汇交割表库',
-        'fx-option': '外汇期权表库'
+        'fx-option': '外汇期权表库',
+        // v2.1.16-beta.3 ②：链接表管理新增第 5 行「银行对账单入金表」
+        'bank-deposit': '银行对账单入金表'
       };
       const PLACEHOLDER = '—';
       const overlay = createOverlay();
@@ -6229,7 +6231,8 @@
         }).join('');
       }
 
-      // 占位 4 行（list 未到 / 失败时填充，保证弹窗结构完整、不阻塞使用）
+      // 占位行（list 未到 / 失败时填充，保证弹窗结构完整、不阻塞使用）。
+      //   v2.1.16-beta.3 ②：LINKED_TABLE_LABELS 现 5 项（含入金表），占位渲染 5 行。
       function renderPlaceholderRows() {
         renderRows(Object.keys(LINKED_TABLE_LABELS).map((k) => ({ tableKey: k })));
       }
