@@ -108,3 +108,10 @@
   - W1 新增文件名定为 `gateway-recon-headers-loader.js`；IPC channel `scenarios:gateway-recon-headers`；loader 降级 fallback 到旧 `GATEWAY_RECON_FIELDS`（非返空），保证 C3 下拉不空白。
   - W2 fee 字符串化用 `normalizeCellValue(fee)`（与 assign 写入一致）：`0→'0'` / `-5→'-5'` / `0.5→'0.5'`，归一到分不漂移。
   - 收尾连带修 `scripts/smoke/bank-statement-io.js` 的 P1.3/P1.4 契约（preload 移除 inline `GATEWAY_RECON_FIELDS` 副本后，断言反转为「不应有 inline + 必须有 IPC 桥」）。
+
+### self-review 补强（W1 · Important）
+
+self-review 发现：存量 C3 场景引用旧网关字段名升级后，`validateScenarioDraft` 只校验非空、不校验在枚举内（C2 有规整 `8398`、C3 无），用户「打开旧场景不动直接保存」会存入无效字段 → 运行时静默失效。已补强（`renderer-dialogs.js`）：
+- **规整**：`rerenderC3GatewayFields`（枚举到位后）把不在当前 xlsx 表头枚举内的网关字段（assign.gwField / reconFields[].gwField / conditions[].field 网关侧）置空，使「DOM=model」一致；`__CUSTOM__` 豁免；枚举空（首帧/降级）时不规整避免误清。
+- **校验**：`validateScenarioDraft` 的 gateway-recon-join 分支加「网关字段须在当前枚举内」校验（枚举可用时），保存时拦截无效字段并提示重选。
+- 验证：node --check + preview C3/C3-custom 渲染正常 + 全量单测 1531/1531；规整/校验实际行为（旧场景打开变空 + 保存拦截）需手测确认。

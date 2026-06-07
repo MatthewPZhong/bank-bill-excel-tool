@@ -7353,6 +7353,17 @@
         else if (c.reconFields.some((r) => !r.gwField || !r.bankField)) errors.push('对账字段每行两端都不能为空');
         const a = c.assign || {};
         if (!a.gwField || !a.bankField) errors.push('对账成立后赋值的两端都不能为空');
+        // v2.1.15 W1 补强（self-review Important）：网关账单字段须在当前 assets/网关对账单.xlsx 表头枚举内，
+        //   防存量场景引用旧字段名「打开不动直接保存」存入无效字段 → 运行时静默失效。
+        //   仅枚举可用时校验（降级空时跳过，不误拦）；__CUSTOM__ 为「自取值」合法 sentinel，豁免。
+        {
+          const gwValid = new Set(getGatewayReconFields());
+          if (gwValid.size > 0) {
+            if (a.gwField && a.gwField !== '__CUSTOM__' && !gwValid.has(a.gwField)) errors.push('赋值的网关账单字段已不在当前网关对账单模板表头中，请重新选择');
+            if ((c.reconFields || []).some((r) => r.gwField && !gwValid.has(r.gwField))) errors.push('对账字段中存在已不在当前网关对账单模板表头的网关字段，请重新选择');
+            if ((c.conditions || []).some((cd) => cd && cd.side === '网关' && cd.field && !gwValid.has(cd.field))) errors.push('条件中存在已不在当前网关对账单模板表头的网关字段，请重新选择');
+          }
+        }
         // v2.1.8 N2：mode='custom' 时 customValue 必填（dialog UI 已限制 maxlength=200）
         if (a.mode === 'custom' && (!a.customValue || String(a.customValue).trim() === '')) {
           errors.push('对账成立后赋值的"自取值"内容不能为空');
@@ -7732,6 +7743,24 @@
       //   - 枚举到位后重渲染三处：① assign-gw 下拉（主 HTML 内，重建 options；保留首项 + 自取值 + 当前选中）
       //     ② 条件行网关字段 ③ 对账字段网关字段。重建 options 时不替换 select 元素本身，事件监听不丢失。
       function rerenderC3GatewayFields() {
+        // v2.1.15 W1 补强（self-review Important）：枚举到位后，把不在当前网关表头枚举内的网关字段规整为空，
+        //   让「DOM 显示 = config model」一致 + 保存时非空校验能拦截存量旧字段（避免静默存无效值 / 运行时失效）。
+        //   仅在枚举非空（已加载，或降级到旧硬编码）时规整 → 避免首帧空枚举误清有效字段；
+        //   __CUSTOM__ 是「自取值」合法 sentinel，豁免规整；bankField 枚举（BANK_STATEMENT_FIELDS_FOR_C3）本迭代未变，无需规整。
+        const gwValidForNormalize = new Set(getGatewayReconFields());
+        if (gwValidForNormalize.size > 0) {
+          if (config.assign && config.assign.gwField && config.assign.gwField !== '__CUSTOM__'
+              && !gwValidForNormalize.has(config.assign.gwField)) {
+            config.assign.gwField = '';
+            if (config.assign.mode !== 'custom') config.assign.mode = 'direct';
+          }
+          if (Array.isArray(config.reconFields)) {
+            for (const rf of config.reconFields) { if (rf.gwField && !gwValidForNormalize.has(rf.gwField)) rf.gwField = ''; }
+          }
+          if (Array.isArray(config.conditions)) {
+            for (const cd of config.conditions) { if (cd.side === '网关' && cd.field && !gwValidForNormalize.has(cd.field)) cd.field = ''; }
+          }
+        }
         const assignGwSelect = dialog.querySelector('select[data-field="assign-gw"]');
         if (assignGwSelect) {
           assignGwSelect.innerHTML = `
