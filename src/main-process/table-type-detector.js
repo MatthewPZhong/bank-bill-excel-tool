@@ -2,6 +2,9 @@
 //
 // detectTableType(filePath, candidateSignatures) → { tableKey, score, status }
 //   status: 'matched' | 'ambiguous' | 'unrecognized' | 'unsupported' | 'read-error'
+//   v3.0.0 块 B / PR-2：matched / unsupported 返回额外带 streamingEligible（= 本文件是否物理单 sheet 的 .xlsx，
+//     即 detector 头部识别走的流式判据）。供链接表导入 handler 据此决定落库走「流式整表覆盖」还是「数组整表覆盖」
+//     （流式引擎硬编码只读 sheet1.xml，仅单 sheet .xlsx 安全；多 sheet/.xls/CSV 必须维持数组路径，否则读错 sheet）。
 //
 // 两层识别策略（先精确、后模糊）：
 //   L1 精确层：对每个候选签名调 readers.readRowsWithMetadata(filePath, 锚点表头, { sheetName })。
@@ -332,8 +335,9 @@ async function detectTableType(filePath, candidateSignatures = ALL_TABLE_SIGNATU
     if (perSheet.matchedKeys.length === 1) {
       // 任一 sheet 单命中 → 立即返回（短路，不再扫后续 sheet）
       // 带回命中的 sheetName（CSV 时为 null，透传），供链接表导入据此从正确 sheet 读表头落库。
+      // v3.0.0 块 B / PR-2：带回 streamingEligible（落库是否可走流式整表覆盖；见顶部签名注释）。
       const tableKey = perSheet.matchedKeys[0];
-      return { tableKey, score: 1, status: statusForMatchedKey(tableKey), sheetName };
+      return { tableKey, score: 1, status: statusForMatchedKey(tableKey), sheetName, streamingEligible: useStreaming };
     }
     if (perSheet.matchedKeys.length > 1) {
       // 同一 sheet 多签名精确命中，无法唯一判定
@@ -361,7 +365,9 @@ async function detectTableType(filePath, candidateSignatures = ALL_TABLE_SIGNATU
       tableKey: globalBest.tableKey,
       score: globalBest.score,
       status: statusForMatchedKey(globalBest.tableKey),
-      sheetName: globalBest.sheetName
+      sheetName: globalBest.sheetName,
+      // v3.0.0 块 B / PR-2：带回 streamingEligible（落库是否可走流式整表覆盖；见顶部签名注释）。
+      streamingEligible: useStreaming
     };
   }
 

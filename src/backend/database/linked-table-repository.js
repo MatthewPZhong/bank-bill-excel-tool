@@ -180,26 +180,43 @@ function listLinkedTableMeta(db) {
   return ALL_TABLE_KEYS.map((tableKey) => getLinkedTableMeta(db, tableKey));
 }
 
-// 整表覆盖写入：事务内 DELETE 全表 + 单事务批量 INSERT（prepared）+ 算日期范围 + upsert meta
-//   rows = `{ [表头名]: 值 }` 对象数组（整行）
-//   options.sourceFileName = 来源文件名（落 meta）
-//   caller 不需持有事务；本函数自带 BEGIN/COMMIT/ROLLBACK（与 import-repository.clearMonth 范式一致）
-function replaceLinkedTable(db, tableKey, rows, options = {}) {
-  const def = getDef(tableKey);
-  if (!def.supported) {
-    // fx-option 模板缺失：明确拒绝（A4 也不会产出 fx-option，双保险）
-    throw new Error('外汇期权表模板缺失，暂未支持');
-  }
-  const safeRows = Array.isArray(rows) ? rows : [];
-  const sourceFileName = options.sourceFileName === undefined || options.sourceFileName === null
-    ? null
-    : String(options.sourceFileName);
-  const importedAt = new Date().toISOString();
-
+// v3.0.0 块 B / PR-2：抽出的「整表覆盖落库共享内核」——replaceLinkedTable（数组，同步）与
+//   replaceLinkedTableStreaming（流式喂行，async）共用同一份 INSERT 单行逻辑 + SQL 文本 + 日期范围累计，
+//   保证两条路径值口径与 meta 计算字节一致（防大文件流式落库口径漂移 = 静默资金/数据事故）。
+//   设计取舍（team-lead 拍板）：BEGIN/DELETE/COMMIT/ROLLBACK 这层不共用到一个 async 骨架里——
+//     · 数组路径必须保持「同步函数同步返回」契约（所有既有调用方同步调用 replaceLinkedTable）；
+//     · 流式路径必须 async（要 await readXlsxStreamed 整条流），事务跨 await 全程开启。
+//     若强塞进同一个 async 骨架，数组路径就被迫返回 Promise → 破坏既有同步调用方。
+//     故仅把「会漂移的部分」（INSERT 一行 + 算 key/date/min/max + SQL 文本 + meta 计算）抽进 createInsertContext，
+//     两个公开函数各自写自己的 BEGIN/.../COMMIT（结构相同、各 6 行，重复极小、可读性更高）。
+//   insertOne(rowObj)：把单行对象 INSERT 进 def.table（normalizeKey + normalizeDateForRange + raw_json），
+//     累计实际写入行数与日期范围 min/max（边插边算，与原 replaceLinkedTable 逐行算法逐字节一致）。
+function createInsertContext(db, def, importedAt) {
   const insertSql = `
     INSERT INTO ${def.table} (${def.keyColumn}, ${def.dateColumn}, raw_json, imported_at)
     VALUES (?, ?, ?, ?)
   `;
+  const insertStmt = db.prepare(insertSql);
+  const state = { dataDateMin: null, dataDateMax: null, rowCount: 0 };
+
+  const insertOne = (row) => {
+    const obj = row && typeof row === 'object' ? row : {};
+    const keyValue = normalizeKey(obj[def.keyHeader]);
+    const dateIso = normalizeDateForRange(obj[def.dateHeader]); // null = 不参与范围
+    const rawJson = JSON.stringify(obj);
+    insertStmt.run(keyValue, dateIso, rawJson, importedAt);
+    if (dateIso) {
+      if (state.dataDateMin === null || dateIso < state.dataDateMin) state.dataDateMin = dateIso;
+      if (state.dataDateMax === null || dateIso > state.dataDateMax) state.dataDateMax = dateIso;
+    }
+    state.rowCount += 1;
+  };
+
+  return { insertOne, state };
+}
+
+// upsert linked_table_meta（两条路径共用同一 SQL；row_count = 实际写入行数）
+function upsertLinkedTableMeta(db, tableKey, state, sourceFileName, importedAt) {
   const upsertMetaSql = `
     INSERT INTO linked_table_meta
       (table_key, data_date_min, data_date_max, row_count, source_file_name, updated_at)
@@ -211,39 +228,45 @@ function replaceLinkedTable(db, tableKey, rows, options = {}) {
       source_file_name = excluded.source_file_name,
       updated_at = excluded.updated_at
   `;
+  db.prepare(upsertMetaSql).run(
+    tableKey,
+    state.dataDateMin,
+    state.dataDateMax,
+    state.rowCount,
+    sourceFileName,
+    importedAt
+  );
+}
 
-  let dataDateMin = null;
-  let dataDateMax = null;
+function normalizeSourceFileName(options) {
+  return options.sourceFileName === undefined || options.sourceFileName === null
+    ? null
+    : String(options.sourceFileName);
+}
+
+// 整表覆盖写入：事务内 DELETE 全表 + 单事务批量 INSERT（prepared）+ 算日期范围 + upsert meta
+//   rows = `{ [表头名]: 值 }` 对象数组（整行）
+//   options.sourceFileName = 来源文件名（落 meta）
+//   caller 不需持有事务；本函数自带 BEGIN/COMMIT/ROLLBACK（与 import-repository.clearMonth 范式一致）
+//   v3.0.0 块 B / PR-2：INSERT 单行逻辑 / SQL / meta 计算抽进 createInsertContext + upsertLinkedTableMeta（与流式路径共用）；
+//     本函数保持「同步函数同步返回」契约不变，事务骨架 6 行同步直写，对外行为字节不变
+//     （gateway-bill / mid-allocation / fx-settlement / bank-deposit 均用它；row_count = 喂入次数 = safeRows.length）。
+function replaceLinkedTable(db, tableKey, rows, options = {}) {
+  const def = getDef(tableKey);
+  if (!def.supported) {
+    // fx-option 模板缺失：明确拒绝（A4 也不会产出 fx-option，双保险）
+    throw new Error('外汇期权表模板缺失，暂未支持');
+  }
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const sourceFileName = normalizeSourceFileName(options);
+  const importedAt = new Date().toISOString();
+  const { insertOne, state } = createInsertContext(db, def, importedAt);
 
   db.exec('BEGIN');
   try {
-    // 1) 清该表全部旧数据
     db.prepare(`DELETE FROM ${def.table}`).run();
-
-    // 2) 批量 INSERT + 边插边算日期范围（字符串 min/max，均已归一成 YYYY-MM-DD）
-    const insertStmt = db.prepare(insertSql);
-    for (const row of safeRows) {
-      const obj = row && typeof row === 'object' ? row : {};
-      const keyValue = normalizeKey(obj[def.keyHeader]);
-      const dateIso = normalizeDateForRange(obj[def.dateHeader]); // null = 不参与范围
-      const rawJson = JSON.stringify(obj);
-      insertStmt.run(keyValue, dateIso, rawJson, importedAt);
-      if (dateIso) {
-        if (dataDateMin === null || dateIso < dataDateMin) dataDateMin = dateIso;
-        if (dataDateMax === null || dateIso > dataDateMax) dataDateMax = dateIso;
-      }
-    }
-
-    // 3) upsert meta（row_count = 实际写入行数）
-    db.prepare(upsertMetaSql).run(
-      tableKey,
-      dataDateMin,
-      dataDateMax,
-      safeRows.length,
-      sourceFileName,
-      importedAt
-    );
-
+    for (const row of safeRows) insertOne(row);
+    upsertLinkedTableMeta(db, tableKey, state, sourceFileName, importedAt);
     db.exec('COMMIT');
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch (_e) { /* no active txn */ }
@@ -252,9 +275,51 @@ function replaceLinkedTable(db, tableKey, rows, options = {}) {
 
   return {
     tableKey,
-    rowCount: safeRows.length,
-    dataDateMin,
-    dataDateMax,
+    rowCount: state.rowCount,
+    dataDateMin: state.dataDateMin,
+    dataDateMax: state.dataDateMax,
+    updatedAt: importedAt
+  };
+}
+
+// v3.0.0 块 B / PR-2：整表覆盖**流式**写入——caller 通过 feedRows(insertOne) 在事务开启期间逐行喂入
+//   （大文件链接表：上层用 readXlsxStreamed 边解压边喂，内存恒定，不把 65 万行先攒成数组）。
+//   🔴🔴 数据红线：整表覆盖（DELETE 全表 + 单事务）；feedRows 中途任意 throw → ROLLBACK，
+//     旧数据完好（表不留半空，已实测 657,757 行单事务回滚）。
+//   🔴 事务跨 await：node:sqlite DatabaseSync 是同一进程单连接同步 API，BEGIN 开启的事务在
+//     `await feedRows(...)` 期间（event loop 让出读盘/解压 stream）依然保持开启（无其它连接、连接未关）；
+//     readXlsxStreamed 的 onRow 是同步回调，每行的 insertOne(INSERT) 都在 onRow 内同步执行。
+//   值口径与 meta 计算与 replaceLinkedTable 共用 createInsertContext / upsertLinkedTableMeta → 字节一致。
+//   行为契约对齐 replaceLinkedTable：返回 { tableKey, rowCount, dataDateMin, dataDateMax, updatedAt }，
+//     row_count = 实际喂入 insertOne 的次数。
+async function replaceLinkedTableStreaming(db, tableKey, feedRows, options = {}) {
+  const def = getDef(tableKey);
+  if (!def.supported) {
+    throw new Error('外汇期权表模板缺失，暂未支持');
+  }
+  if (typeof feedRows !== 'function') {
+    throw new Error('[linked-table-repository] replaceLinkedTableStreaming 需要 feedRows 回调');
+  }
+  const sourceFileName = normalizeSourceFileName(options);
+  const importedAt = new Date().toISOString();
+  const { insertOne, state } = createInsertContext(db, def, importedAt);
+
+  db.exec('BEGIN');
+  try {
+    db.prepare(`DELETE FROM ${def.table}`).run();
+    await feedRows(insertOne); // 事务全程开启；caller 边流式读 xlsx 边逐行 insertOne
+    upsertLinkedTableMeta(db, tableKey, state, sourceFileName, importedAt);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_e) { /* no active txn */ }
+    throw error;
+  }
+
+  return {
+    tableKey,
+    rowCount: state.rowCount,
+    dataDateMin: state.dataDateMin,
+    dataDateMax: state.dataDateMax,
     updatedAt: importedAt
   };
 }
@@ -397,6 +462,8 @@ module.exports = {
   listLinkedTableMeta,
   getLinkedTableMeta,
   replaceLinkedTable,
+  // v3.0.0 块 B / PR-2：大文件链接表流式整表覆盖（事务跨 await 逐行喂入，内存恒定）
+  replaceLinkedTableStreaming,
   readLinkedTableRows,
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表专用仓储（6 列 INSERT / 整批幂等重写）
   replaceAdmBankDeposit,

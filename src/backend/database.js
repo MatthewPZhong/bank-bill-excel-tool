@@ -1054,6 +1054,12 @@ class AppDatabase {
     return linkedTableRepository.replaceLinkedTable(this.db, tableKey, rows, options || {});
   }
 
+  // v3.0.0 块 B / PR-2：大文件链接表流式整表覆盖（async；caller 经 feedRows(insertOne) 在事务内逐行喂入，内存恒定）。
+  //   🔴🔴 数据红线：整表覆盖（DELETE 全表 + 单事务跨 await）；feedRows 中途 throw → ROLLBACK 旧数据完好。
+  replaceLinkedTableStreaming(tableKey, feedRows, options) {
+    return linkedTableRepository.replaceLinkedTableStreaming(this.db, tableKey, feedRows, options || {});
+  }
+
   // v2.1.16-beta.2 T1：读回某 tableKey 全部整行（raw_json → 对象，字段名 = 真实表头）；
   //   fx-option 返回 []；损坏行跳过。供 5 轮对账编排器取网关数据源（'gateway-bill'）。
   readLinkedTableRows(tableKey) {
