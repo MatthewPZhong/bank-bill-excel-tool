@@ -145,9 +145,10 @@ async function runBankStatementIoSmokeTests() {
     // 读回校验标黄
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(result.filePath);
-    const sheet = wb.getWorksheet('渠道对账单');
+    // v2.1.16-beta.6 需求B：命中行在「命中场景」sheet；原数据列右移1（命中明细占第1列）
+    const sheet = wb.getWorksheet('命中场景');
     const reconColIdx = BANK_STATEMENT_FIELDS.indexOf('ReconciliationId') + 1;
-    const reconCell = sheet.getCell(2, reconColIdx);
+    const reconCell = sheet.getCell(2, reconColIdx + 1);
     assert.strictEqual(reconCell.value, 'AFT123456789012', 'W1 ReconciliationId 写入');
     assert(
       reconCell.fill && reconCell.fill.fgColor && reconCell.fill.fgColor.argb === 'FFFFFF00',

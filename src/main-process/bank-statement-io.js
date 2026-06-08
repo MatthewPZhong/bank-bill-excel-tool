@@ -224,7 +224,9 @@ function ensureDateDir(exportRootDir) {
 // v2.1.9 N5 T25（spec §5.4 🔴 对外契约破坏性变更）：
 //   v2.1.8 N3-2 引入的 Sheet 3「命中场景行」已撤除 — 改独立报表
 //   独立报表 caller：main.js bank-statement:export handler → writeScenarioHitRows（scenario-hit-rows-writer.js）
-async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePath, unmatchedRows = null }) {
+// v2.1.16-beta.6 需求 B（🔴 资金红线）：双 sheet 重构「未命中场景 / 命中场景」。
+//   新增 modifications 透传 → 命中场景 sheet「命中明细」列数据源（D9）。
+async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePath, unmatchedRows = null, modifications = null }) {
   if (!Array.isArray(modifiedRows)) {
     throw new Error('writeBankStatementMainOutput: modifiedRows 必须是数组');
   }
@@ -235,8 +237,8 @@ async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePat
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  // v2.1.7 round 3 F8：透传 unmatchedRows 给 writeBankStatementOutput
-  const result = await writeBankStatementOutput(modifiedRows, headers, mainFilePath, unmatchedRows);
+  // v2.1.7 round 3 F8：透传 unmatchedRows；v2.1.16-beta.6 需求 B：透传 modifications（命中明细列）
+  const result = await writeBankStatementOutput(modifiedRows, headers, mainFilePath, unmatchedRows, modifications);
   return { ...result, fileName: path.basename(mainFilePath) };
 }
 

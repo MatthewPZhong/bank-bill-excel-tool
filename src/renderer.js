@@ -3409,7 +3409,7 @@ function updateBankStatementUi() {
   // 按钮 disabled 控制
   if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = false;
   updateBankStatementRunBtnDisabled();
-  if (elements.bankStatementExportBtn) elements.bankStatementExportBtn.disabled = !pr;
+  updateBankStatementExportButtonsDisabled();
 }
 
 // v2.1.16-beta.5 需求1（PR-4 修订）🔴 资金红线：row1《开始运行》(bankStatementRunBtn) disabled 重算。
@@ -3423,6 +3423,20 @@ function updateBankStatementRunBtnDisabled() {
     ? !!state.reconIdFixSession
     : !!state.bankStatementSession;
   elements.bankStatementRunBtn.disabled = !ready;
+}
+
+// v2.1.16-beta.6 需求A 🔴 资金红线：两个《导出文件》按钮按面板模式互斥（与 row1 路由 mode 一致）。
+//   抽成 helper，使「导入对账单成功」(updateBankStatementUi) 与「导入不平表成功」(:4109 路径) 都能刷新。
+function updateBankStatementExportButtonsDisabled() {
+  const isGateway = state.bankStatementProcessRunMode === 'gateway';
+  // 预加工组导出：仅 bank 模式 + 已有处理结果可点
+  if (elements.bankStatementExportBtn) {
+    elements.bankStatementExportBtn.disabled = isGateway || !state.processingResult;
+  }
+  // 不平表组导出：仅 gateway 模式 + reconIdFixSession 就位可点
+  if (elements.bankStatementGatewayReconExportBtn) {
+    elements.bankStatementGatewayReconExportBtn.disabled = !isGateway || !state.reconIdFixSession;
+  }
 }
 
 // v2.1.14：纯前端占位 helper —— 功能 UI 已就位但后端未接入，统一弹「后续版本开放」提示框。
@@ -3442,6 +3456,18 @@ function showComingSoon(featureName) {
 // v2.1.16 A5：批量导入（按表头识别）—— 多选文件 → main 逐文件识别路由 → 批量结果明细弹窗。
 //   银行对账单通路：多文件 = 合并对账（main 追加 rows + 全局唯一 _rowId）；明细体现「N 个文件合并 M 行」。
 //   中台退款/入账原始本阶段功能开关默认关 → main 返回 status='disabled'（标「未启用跳过」）。
+// v2.1.16-beta.6 修复（根因）：renderer.js 顶层 16 处引用 escapeHtml，但它只定义在 renderer-dialogs.js
+//   的 IIFE 内（renderer.js 作用域访问不到）→ buildBatchImportSummaryHtml 等运行到时 ReferenceError
+//   （表现：批量导入对账单后「批量明细框」弹不出来，退款提醒也无从触发）。
+//   在本文件顶层补一份同实现（function 声明 hoist，覆盖本文件全部 escapeHtml 引用）。
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
 function buildBatchImportSummaryHtml(results) {
   const list = Array.isArray(results) ? results : [];
   // 预处理表 tableKey → 中文名（与 main detector tableKey 对齐）
@@ -3532,14 +3558,24 @@ async function handleBankStatementBatchImport() {
     //   row1《开始运行》此后走 R1-R5 核心（handleBankStatementRun）。仅本批确实含 bank-statement 时才改，
     //   本批无 bank-statement（如失败/全是其它表）则保持原 mode（不误覆盖刚导入不平表的 'gateway'）。
     state.bankStatementProcessRunMode = 'bank';
-    await refreshBankStatementStatus();
+    // v2.1.16-beta.6 防御：状态刷新抛错不应阻断「批量明细框」弹出（明细框是导入反馈，必须显示）
+    try {
+      await refreshBankStatementStatus();
+    } catch (refreshErr) {
+      console.error('[导入对账单] 状态刷新失败（已兜底，不阻断明细框）:', refreshErr);
+    }
   }
   // 弹批量明细；确认后若导入了银行对账单，沿用单选导入的 C3 提示逻辑
   //   （createAlertDialog 点「确认」时已内部 closeModal，onConfirm 内无需再关）
   openModal(createAlertDialog(buildBatchImportSummaryHtml(results), {
     skipLogReport: true,
     onConfirm: hasBankStatementOk
-      ? () => { maybePromptGatewayReconImport(); }
+      ? async () => {
+          // v2.1.16-beta.6 需求C P0-4：先查退款订单导入提醒（与 C3 提醒互斥，退款优先；
+          //   C3 在运行点 shouldPromptGatewayReconAtRun 还有兜底提醒，不会漏）。
+          const refundPrompted = await maybePromptRefundOrderImport(results);
+          if (!refundPrompted) maybePromptGatewayReconImport();
+        }
       : undefined
   }));
 }
@@ -3565,6 +3601,31 @@ async function maybePromptGatewayReconImport() {
     }));
   } catch (error) {
     console.warn('maybePromptGatewayReconImport failed:', error);
+  }
+}
+
+// v2.1.16-beta.6 需求C P0-4（规则一）：启用「中台退款订单回填」场景、但本批未导入退款订单表 → 弹提醒。
+//   返回 true=弹了提醒（调用方据此与 C3 提醒互斥）。
+//   场景启用判断依赖 name（listScenarios 不返 config_json → 无 subCategory）；name 是 builtin seed
+//   写死常量 REFUND_BACKFILL_SCENARIO.name='中台退款订单回填'，稳定；误判仅影响 UX 提示、不碰资金。
+async function maybePromptRefundOrderImport(results) {
+  try {
+    const list = await window.desktopApi.scenarios.list();
+    const scenarios = (list && list.status === 'ok' && Array.isArray(list.scenarios)) ? list.scenarios : [];
+    const enabled = scenarios.some((s) =>
+      s.name === '中台退款订单回填' && (s.enabled === 1 || s.enabled === true));
+    if (!enabled) return false;
+    // 本批已识别到退款订单表（落 session）→ 不提醒（规则一「带该表则不弹」）
+    const hasRefundOk = (results || []).some((r) => r.tableKey === 'zhongtai-refund-order' && r.status === 'ok');
+    if (hasRefundOk) return false;
+    openModal(createAlertDialog(
+      '已启用「中台退款订单回填」场景，但本次未导入「中台退款订单表」。<br>请补充导入「中台退款订单」文件后再运行。',
+      { logLevel: 'info', skipLogReport: true }
+    ));
+    return true;
+  } catch (error) {
+    console.warn('maybePromptRefundOrderImport failed:', error);
+    return false;
   }
 }
 
@@ -4107,6 +4168,7 @@ async function handleBankStatementGatewayReconImport() {
     //   不依赖 session 探测。随后重算 row1 按钮 disabled —— 此时 reconIdFixSession 已就绪 → 按钮 enable。
     state.bankStatementProcessRunMode = 'gateway';
     updateBankStatementRunBtnDisabled();
+    updateBankStatementExportButtonsDisabled();  // v2.1.16-beta.6 需求A：mode→gateway 后刷新两个导出按钮互斥状态（本路径不走 updateBankStatementUi）
     // 不写 bankStatementStatusBox（该状态框语义归银行对账单主流程，避免被 updateBankStatementUi 覆盖/冲突）；
     //   用弹框反馈，与导出提示风格一致。
     const counts = result.sheetCounts || {};

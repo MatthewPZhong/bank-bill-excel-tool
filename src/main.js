@@ -3602,7 +3602,7 @@ function registerAppHandlers() {
       const workingGwRows = structuredClone(database.readLinkedTableRows('gateway-bill'));
       // v2.1.16-beta.4 R5 场景4（中台退款订单回填）安全接线：
       //   入金表（链接表 tableKey='bank-deposit'，beta.3② 合法 tableKey）—— JPM-US 子链路用；无数据返回 []。
-      //   refund order —— 本轮 refundOrderSession 恒 null（退款导入未实装、门控关闭）→ 注入 []，引擎入参空 → 端到端 no-op。
+      //   refund order —— v2.1.16-beta.6 需求C 退款导入已开通：refundOrderSession 非 null 时注入真实退款行；未导入退款表时注入 []（引擎 no-op）。
       //   structuredClone 防止引擎原地改字段污染 DB 还原对象（与 workingGwRows 同口径）。
       const workingDepositRows = structuredClone(database.readLinkedTableRows('bank-deposit') || []);
       const workingRefundOrderRows = refundOrderSession ? structuredClone(refundOrderSession.rows) : []; // 本轮恒 []
@@ -3723,7 +3723,9 @@ function registerAppHandlers() {
         modifiedRows: processingResult.modifiedRows,
         headers: bankStatementSession.headers,
         mainFilePath,
-        unmatchedRows: Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows : []
+        unmatchedRows: Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows : [],
+        // v2.1.16-beta.6 需求 B：透传 modifications → 命中场景 sheet「命中明细」列数据源（D9）
+        modifications: processingResult.modifications
       });
 
       // v2.1.9 N5 T26（spec §5.1-5.4 🔴 对外契约破坏性变更）：场景命中行独立报表
@@ -11300,9 +11302,8 @@ function registerNewAccountHandlers() {
   //     合并后的 session 结构（rows 含全局唯一 _rowId、headers 不变、新增 sourceFiles）须与 run/export 读取契约兼容。
   // ==========================================================================
 
-  // 本阶段功能开关：中台退款回填 / 入账原始反回填批量导入通路默认关（仅银行对账单通路启用）。
-  //   后续阶段实装这两条通路时改为 true 并补对应读取/落库逻辑。
-  const ZHONGTAI_REFUND_BATCH_ENABLED = false;
+  // v2.1.16-beta.6 需求C：中台退款回填通路已开通（退款分支实装读取 → 落 refundOrderSession）；
+  //   入账原始反回填通路仍默认关（待后续阶段实装时改为 true 并补读取/落库）。
   const INTAKE_ORIGINAL_BATCH_ENABLED = false;
 
   // headers 一致校验 + rows 合并 + _rowId 全局重编号 已抽到 src/main-process/bank-statement-merge.js
@@ -11457,17 +11458,22 @@ function registerNewAccountHandlers() {
       }
 
       if (tableKey === 'zhongtai-refund-order') {
-        if (!ZHONGTAI_REFUND_BATCH_ENABLED) {
+        // v2.1.16-beta.6 需求C P0-1/P0-2：开通退款订单导入通路 → 读 25 列对象数组落 refundOrderSession。
+        //   🔴 资金红线：refundOrderSession 是退款回填引擎入参源（run 阶段 main.js 注入）；重导整体覆盖。
+        //   读取复用 readLinkedRowsAsObjects（按 signature.expectedHeaders zip，退款签名 25 列）。
+        try {
+          const refundSignature = PREPROCESS_TABLE_SIGNATURES.find((s) => s.tableKey === 'zhongtai-refund-order');
+          const refundRows = readLinkedRowsAsObjects(filePath, refundSignature, detected.sheetName);
+          refundOrderSession = { fileName, rows: refundRows, importedAt: Date.now() };
+          results.push({ fileName, tableKey, status: 'ok', rowCount: refundRows.length });
+        } catch (refundErr) {
           results.push({
             fileName,
             tableKey,
-            status: 'disabled',
-            message: '中台退款回填功能未启用，已跳过'
+            status: 'read-error',
+            message: refundErr && refundErr.message ? refundErr.message : String(refundErr)
           });
-          continue;
         }
-        // 占位：功能开关开启后在此实装中台退款订单读取/落库（本阶段不会走到）
-        results.push({ fileName, tableKey, status: 'disabled', message: '中台退款回填功能未启用，已跳过' });
         continue;
       }
 

@@ -130,9 +130,9 @@ async function run() {
     const sheetNames = wb.worksheets.map((s) => s.name);
     console.log('  主输出 sheets:', sheetNames);
     assertEq(wb.worksheets.length, 2, 'Step5.主输出仅 2 sheet（T25 Sheet 3 已撤除）');
-    assertTrue(sheetNames.includes('渠道对账单'), 'Step5.Sheet 1「渠道对账单」存在');
-    assertTrue(sheetNames.includes('未命中场景行'), 'Step5.Sheet 2「未命中场景行」存在');
-    assertTrue(!sheetNames.includes('命中场景行'), 'Step5.Sheet 3「命中场景行」已撤除');
+    assertTrue(sheetNames.includes('命中场景'), 'Step5.「命中场景」sheet 存在');
+    assertTrue(sheetNames.includes('未命中场景'), 'Step5.「未命中场景」sheet 存在');
+    assertTrue(!sheetNames.includes('命中场景行'), 'Step5.旧独立报表名「命中场景行」不在主输出');
 
     // ============================================================
     // Step 6：调独立报表 writer（v2.1.9 N5 T24）

@@ -538,17 +538,19 @@ async function runExceljsWriterSmokeTests() {
 
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(out);
-    const sheet = wb.getWorksheet('渠道对账单');
-    assert.strictEqual(sheet.getCell(1, 1).value, 'col1', 'I1 表头 col1');
-    assert.strictEqual(sheet.getCell(2, 2).value, 'b', 'I1 数据 r1.col2');
-    // r1.col2 被标黄
-    const r1c2Fill = sheet.getCell(2, 2).fill;
+    // v2.1.16-beta.6 需求B：命中行在「命中场景」sheet；第1列「命中明细」，原数据列右移1（colIdx+2）
+    const sheet = wb.getWorksheet('命中场景');
+    assert.strictEqual(sheet.getCell(1, 1).value, '命中明细', 'I1 表头第1列=命中明细');
+    assert.strictEqual(sheet.getCell(1, 2).value, 'col1', 'I1 表头 col1（右移1）');
+    assert.strictEqual(sheet.getCell(2, 3).value, 'b', 'I1 数据 r1.col2（右移1）');
+    // r1.col2 被标黄（col2 在第3列）
+    const r1c2Fill = sheet.getCell(2, 3).fill;
     assert(r1c2Fill && r1c2Fill.fgColor && r1c2Fill.fgColor.argb === 'FFFFFF00', 'I1 r1.col2 应黄底');
-    // r1.col1 未标黄
-    const r1c1Fill = sheet.getCell(2, 1).fill;
+    // r1.col1 未标黄（col1 在第2列）
+    const r1c1Fill = sheet.getCell(2, 2).fill;
     assert(!r1c1Fill || !r1c1Fill.fgColor, 'I1 r1.col1 不应黄底');
-    // r2.col1 被标黄
-    const r2c1Fill = sheet.getCell(3, 1).fill;
+    // r2.col1 被标黄（col1 在第2列）
+    const r2c1Fill = sheet.getCell(3, 2).fill;
     assert(r2c1Fill && r2c1Fill.fgColor && r2c1Fill.fgColor.argb === 'FFFFFF00', 'I1 r2.col1 应黄底');
   }
 
@@ -583,27 +585,29 @@ async function runExceljsWriterSmokeTests() {
 
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(out);
-    const sheet = wb.getWorksheet('渠道对账单');
-    assert.strictEqual(sheet.getCell(1, 1).value, 'col1', 'I3 表头 col1');
+    // v2.1.16-beta.6 需求B：空 modifiedRows → 「命中场景」sheet 仅表头（命中明细 + 原列）
+    const sheet = wb.getWorksheet('命中场景');
+    assert.strictEqual(sheet.getCell(1, 1).value, '命中明细', 'I3 表头第1列=命中明细');
+    assert.strictEqual(sheet.getCell(1, 2).value, 'col1', 'I3 表头 col1（右移1）');
     assert.strictEqual(sheet.actualRowCount, 1, 'I3 仅表头 1 行');
   }
 
-  // ===== v2.1.7 round 3 F8 (spec §9.8.7)：第 2 sheet "未命中场景行" =====
+  // ===== v2.1.16-beta.6 需求B：双 sheet「未命中场景 / 命中场景」（替换旧「渠道对账单 / 未命中场景行」）=====
 
-  // F8-W1：caller 不传 unmatchedRows → 仅 1 sheet（向下兼容旧 caller）
+  // F8-W1：caller 不传 unmatchedRows → 仅「命中场景」1 sheet
   {
     const headers = ['col1', 'col2'];
     const rows = [{ col1: 'a', col2: 'b', _rowId: 'r1', _modifiedColumns: new Set() }];
     const out = path.join(tmpDir, 'f8-w1.xlsx');
     await writeBankStatementOutput(rows, headers, out);
-    // 不传 unmatchedRows → 仅"渠道对账单" 1 sheet
+    // 不传 unmatchedRows → 仅「命中场景」1 sheet
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(out);
-    assert.strictEqual(wb.worksheets.length, 1, 'F8-W1 旧 caller (无 unmatchedRows) 仅 1 sheet');
-    assert.strictEqual(wb.worksheets[0].name, '渠道对账单', 'F8-W1 sheet 1 = "渠道对账单"');
+    assert.strictEqual(wb.worksheets.length, 1, 'F8-W1 不传 unmatchedRows 仅 1 sheet');
+    assert.strictEqual(wb.worksheets[0].name, '命中场景', 'F8-W1 sheet 1 = "命中场景"');
   }
 
-  // F8-W2：传 unmatchedRows = [] → 2 sheet，第 2 sheet 仅表头
+  // F8-W2：传 unmatchedRows = [] → 2 sheet（sheet1 未命中场景、sheet2 命中场景）
   {
     const headers = ['col1', 'col2'];
     const rows = [{ col1: 'a', col2: 'b', _rowId: 'r1', _modifiedColumns: new Set() }];
@@ -612,13 +616,17 @@ async function runExceljsWriterSmokeTests() {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(out);
     assert.strictEqual(wb.worksheets.length, 2, 'F8-W2 传 unmatchedRows 即使空也 2 sheet');
-    assert.strictEqual(wb.worksheets[1].name, '未命中场景行', 'F8-W2 sheet 2 = "未命中场景行"');
-    assert.strictEqual(wb.worksheets[1].actualRowCount, 1, 'F8-W2 空 unmatched 仅表头 1 行');
-    assert.strictEqual(wb.worksheets[1].getCell(1, 1).value, 'col1', 'F8-W2 sheet 2 表头 col1');
-    assert.strictEqual(wb.worksheets[1].getCell(1, 2).value, 'col2', 'F8-W2 sheet 2 表头 col2');
+    // sheet 顺序对调：sheet1 未命中场景、sheet2 命中场景
+    assert.strictEqual(wb.worksheets[0].name, '未命中场景', 'F8-W2 sheet 1 = "未命中场景"');
+    assert.strictEqual(wb.worksheets[1].name, '命中场景', 'F8-W2 sheet 2 = "命中场景"');
+    // 未命中场景：第1行 A1 提示、第2行表头（空数据）
+    const s1 = wb.worksheets[0];
+    assert.strictEqual(s1.getCell(1, 1).value, '请检查，导入前请删除该sheet', 'F8-W2 未命中场景 A1 提示');
+    assert.strictEqual(s1.getCell(2, 1).value, 'col1', 'F8-W2 未命中场景第2行表头 col1');
+    assert.strictEqual(s1.getCell(2, 2).value, 'col2', 'F8-W2 未命中场景第2行表头 col2');
   }
 
-  // F8-W3：传 unmatchedRows = N 行 → 第 2 sheet 含 N 行数据（不含内部 _ 前缀字段；headers 投影）
+  // F8-W3：传 unmatchedRows = N 行 → 未命中场景 sheet 含 A1 + 表头 + N 行数据
   {
     const headers = ['col1', 'col2', 'col3'];
     const rows = [{ col1: 'mod1', col2: 'mod2', col3: 'mod3', _rowId: 'r-mod', _modifiedColumns: new Set(['col1']) }];
@@ -631,22 +639,22 @@ async function runExceljsWriterSmokeTests() {
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(out);
     assert.strictEqual(wb.worksheets.length, 2, 'F8-W3 2 sheet');
-    const sheet2 = wb.worksheets[1];
-    assert.strictEqual(sheet2.name, '未命中场景行', 'F8-W3 sheet 2 名');
-    assert.strictEqual(sheet2.actualRowCount, 3, 'F8-W3 sheet 2 行数 = 1 表头 + 2 数据');
-    // 表头按 headers 顺序
-    assert.strictEqual(sheet2.getCell(1, 1).value, 'col1', 'F8-W3 表头 col1');
-    assert.strictEqual(sheet2.getCell(1, 2).value, 'col2', 'F8-W3 表头 col2');
-    assert.strictEqual(sheet2.getCell(1, 3).value, 'col3', 'F8-W3 表头 col3');
-    // 第 1 数据行
-    assert.strictEqual(sheet2.getCell(2, 1).value, 'um1-a', 'F8-W3 r1.col1 = um1-a');
-    assert.strictEqual(sheet2.getCell(2, 3).value, 'um1-c', 'F8-W3 r1.col3 = um1-c');
-    // 第 2 数据行
-    assert.strictEqual(sheet2.getCell(3, 1).value, 'um2-a', 'F8-W3 r2.col1 = um2-a');
-    // 防泄漏：表头不含 _ 前缀字段（headers=['col1','col2','col3'] 投影自动过滤）
+    const s1 = wb.worksheets[0];  // 未命中场景（sheet1）
+    assert.strictEqual(s1.name, '未命中场景', 'F8-W3 sheet 1 名');
+    // A1 提示(第1行) + 表头(第2行) + 2 数据行(第3-4行) = 4 行
+    assert.strictEqual(s1.actualRowCount, 4, 'F8-W3 未命中场景行数 = A1 + 表头 + 2 数据');
+    // 表头在第 2 行
+    assert.strictEqual(s1.getCell(2, 1).value, 'col1', 'F8-W3 表头 col1');
+    assert.strictEqual(s1.getCell(2, 2).value, 'col2', 'F8-W3 表头 col2');
+    assert.strictEqual(s1.getCell(2, 3).value, 'col3', 'F8-W3 表头 col3');
+    // 数据从第 3 行起
+    assert.strictEqual(s1.getCell(3, 1).value, 'um1-a', 'F8-W3 r1.col1 = um1-a');
+    assert.strictEqual(s1.getCell(3, 3).value, 'um1-c', 'F8-W3 r1.col3 = um1-c');
+    assert.strictEqual(s1.getCell(4, 1).value, 'um2-a', 'F8-W3 r2.col1 = um2-a');
+    // 防泄漏：表头（第2行）不含 _ 前缀字段（headers 投影自动过滤）
     for (let c = 1; c <= 3; c++) {
-      const cellHeader = String(sheet2.getCell(1, c).value || '');
-      assert.ok(!cellHeader.startsWith('_'), `F8-W3 sheet 2 表头不含 _ 前缀字段（实际 ${cellHeader}）`);
+      const cellHeader = String(s1.getCell(2, c).value || '');
+      assert.ok(!cellHeader.startsWith('_'), `F8-W3 未命中场景表头不含 _ 前缀字段（实际 ${cellHeader}）`);
     }
   }
 

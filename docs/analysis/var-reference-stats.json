@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "2.1.16-beta.5",
-    "scannedAt": "2026-06-08T00:28:53.840Z",
+    "version": "2.1.16-beta.6",
+    "scannedAt": "2026-06-08T04:56:18.061Z",
     "root": "src",
     "totalFiles": 128,
-    "totalTopLevelNames": 1298,
+    "totalTopLevelNames": 1308,
     "buckets": {
-      "shared": 201,
+      "shared": 202,
       "paired": 391,
-      "local": 591,
-      "crossFile": 592
+      "local": 599,
+      "crossFile": 593
     }
   },
   "A": {
@@ -2302,10 +2302,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 144
+            "count": 147
           }
         ],
-        "totalHits": 270,
+        "totalHits": 273,
         "fileSpan": 4
       },
       {
@@ -2328,10 +2328,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 96
+            "count": 98
           }
         ],
-        "totalHits": 150,
+        "totalHits": 152,
         "fileSpan": 4
       },
       {
@@ -3647,6 +3647,28 @@
         ],
         "totalHits": 4,
         "fileSpan": 4
+      },
+      {
+        "name": "escapeHtml",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 140
+          },
+          {
+            "file": "src/renderer-previews.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 27
+          }
+        ],
+        "totalHits": 168,
+        "fileSpan": 3
       },
       {
         "name": "normalizeText",
@@ -7108,6 +7130,24 @@
         "fileSpan": 2
       },
       {
+        "name": "processingResult",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 2
+      },
+      {
         "name": "roundAmount",
         "defFiles": [
           "src/backend/file-service/normalizers.js"
@@ -8326,7 +8366,7 @@
         "fileSpan": 2
       },
       {
-        "name": "processingResult",
+        "name": "reconIdFixSession",
         "defFiles": [
           "src/main.js"
         ],
@@ -8906,24 +8946,6 @@
           {
             "file": "src/renderer.js",
             "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
-        "name": "reconIdFixSession",
-        "defFiles": [
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main.js",
-            "count": 1
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 4
           }
         ],
         "totalHits": 5,
@@ -13765,6 +13787,20 @@
         "fileSpan": 1
       },
       {
+        "name": "cellToString",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
         "name": "COL_COUNT",
         "defFiles": [
           "src/backend/vcc-op-calc-import/reader.js"
@@ -15109,6 +15145,20 @@
         "fileSpan": 1
       },
       {
+        "name": "MARK_WITHOUT_RESULT",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "MAX_CAUSE_DEPTH",
         "defFiles": [
           "src/main-process/serialize-error.js"
@@ -16103,6 +16153,20 @@
         "fileSpan": 1
       },
       {
+        "name": "buildHitDetail",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "buildHitScenarioLabel",
         "defFiles": [
           "src/main-process/scenario-hit-rows-writer.js"
@@ -16194,20 +16258,6 @@
         "refFiles": [
           {
             "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "buildSheetData",
-        "defFiles": [
-          "src/main-process/exceljs-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/exceljs-writer.js",
             "count": 3
           }
         ],
@@ -17034,6 +17084,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "HIT_DETAIL_HEADER",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
             "count": 3
           }
         ],
@@ -18168,6 +18232,48 @@
         "refFiles": [
           {
             "file": "src/backend/pending-export/writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "SHEET1_A1_NOTICE",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "SHEET1_UNMATCHED_NAME",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "SHEET2_HIT_NAME",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
             "count": 3
           }
         ],
@@ -20233,6 +20339,20 @@
         "fileSpan": 1
       },
       {
+        "name": "maybePromptRefundOrderImport",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "META_EXCLUDE_KEYS",
         "defFiles": [
           "src/main-process/reconciliation-orchestrator.js"
@@ -21326,6 +21446,20 @@
       },
       {
         "name": "updateBackgroundControls",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "updateBankStatementExportButtonsDisabled",
         "defFiles": [
           "src/renderer.js"
         ],
@@ -23811,10 +23945,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 144
+          "count": 147
         }
       ],
-      "totalHits": 270,
+      "totalHits": 273,
       "fileSpan": 4
     },
     {
@@ -23837,10 +23971,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 96
+          "count": 98
         }
       ],
-      "totalHits": 150,
+      "totalHits": 152,
       "fileSpan": 4
     },
     {
@@ -25156,6 +25290,28 @@
       ],
       "totalHits": 4,
       "fileSpan": 4
+    },
+    {
+      "name": "escapeHtml",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 140
+        },
+        {
+          "file": "src/renderer-previews.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 27
+        }
+      ],
+      "totalHits": 168,
+      "fileSpan": 3
     },
     {
       "name": "normalizeText",
@@ -28615,6 +28771,24 @@
       "fileSpan": 2
     },
     {
+      "name": "processingResult",
+      "defFiles": [
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 6
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 2
+    },
+    {
       "name": "roundAmount",
       "defFiles": [
         "src/backend/file-service/normalizers.js"
@@ -29833,7 +30007,7 @@
       "fileSpan": 2
     },
     {
-      "name": "processingResult",
+      "name": "reconIdFixSession",
       "defFiles": [
         "src/main.js"
       ],
@@ -30413,24 +30587,6 @@
         {
           "file": "src/renderer.js",
           "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
-      "name": "reconIdFixSession",
-      "defFiles": [
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main.js",
-          "count": 1
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 4
         }
       ],
       "totalHits": 5,
