@@ -290,8 +290,8 @@ let nextStatementFileEntryId = 1;
 // 进程重启不持久化（与 lastFileImportContext 一致）
 let bankStatementSession = null;     // { filePath, fileName, rows, headers, importedAt }
 // v2.1.16-beta.4 R5 场景4：中台退款订单预加工 session（非链接表）。
-//   Layer2 实装；本轮恒 null（退款导入未实装，门控 ZHONGTAI_REFUND_BATCH_ENABLED=false 关闭）。
-//   仅用于安全引用：run 阶段注入 refundContext.refundOrderRows 时若为 null 注入 []，端到端 no-op。
+//   v2.1.16-beta.6 需求C 已开通：批量导入识别到「中台退款订单表」时落本 session（readLinkedRowsAsObjects 25 列对象数组）。
+//   run 阶段注入 refundContext.refundOrderRows；为 null（本批未导退款表）时注入 []，引擎退款路径 no-op。
 let refundOrderSession = null;
 let gatewayReconSession = null;      // { filePath, fileName, gwRows, importedAt }
 let processingResult = null;         // { modifiedRows, modifications, errorReport, stats, ranAt }
@@ -3605,7 +3605,7 @@ function registerAppHandlers() {
       //   refund order —— v2.1.16-beta.6 需求C 退款导入已开通：refundOrderSession 非 null 时注入真实退款行；未导入退款表时注入 []（引擎 no-op）。
       //   structuredClone 防止引擎原地改字段污染 DB 还原对象（与 workingGwRows 同口径）。
       const workingDepositRows = structuredClone(database.readLinkedTableRows('bank-deposit') || []);
-      const workingRefundOrderRows = refundOrderSession ? structuredClone(refundOrderSession.rows) : []; // 本轮恒 []
+      const workingRefundOrderRows = refundOrderSession ? structuredClone(refundOrderSession.rows) : []; // 已导退款表→真实行；未导→[]
       // v2.1.16-beta.2 T1：改走 5 轮编排器 runReconciliation（R2 内部仍调 dispatcher，双维 first-match-wins 不变）。
       //   deps 字段名照搬原 dispatcher 调用处：channelsRepo=channelsRepository（findByNameAndLocation/getBuiltinGeneral）、db=database.db。
       //   编排器返回 modifiedRows/unmatchedRows 由「当前最新 bankRows」重建（资金红线：两者互斥且全覆盖 workingBankRows）。
@@ -3614,7 +3614,7 @@ function registerAppHandlers() {
         gwRows: workingGwRows,
         scenarios: dispatchScenarios,
         deps: { channelsRepo: channelsRepository, db: database.db },
-        // v2.1.16-beta.4 R5 场景4：退款回填引擎入参（本轮 refundOrderRows 恒 []，引擎休眠 → 不产出）
+        // v2.1.16-beta.4 R5 场景4：退款回填引擎入参（refundOrderRows 非空时引擎产出回填/未匹配行；空则该路径 no-op）
         refundContext: { refundOrderRows: workingRefundOrderRows, depositRows: workingDepositRows }
       });
       processingResult = {
@@ -3628,7 +3628,7 @@ function registerAppHandlers() {
         stats: result.stats,
         // v2.1.16-beta.2 T1：R5 场景3（平台 Inbound-VA 剔除行）产出 → 透传给导出阶段（缺省 []）
         platformCleanupRows: result.platformCleanupRows || [],
-        // v2.1.16-beta.4 R5 场景4（中台退款订单回填）产出 → 透传给导出阶段（本轮引擎休眠恒 []）
+        // v2.1.16-beta.4 R5 场景4（中台退款订单回填）产出 → 透传给导出阶段（未导退款表时为 []）
         refundBackfillRows: result.refundBackfillRows || [],
         refundUnmatchedRows: result.refundUnmatchedRows || [],
         scenariosSnapshot: buildScenariosSnapshot(dispatchScenarios),
@@ -3785,7 +3785,7 @@ function registerAppHandlers() {
       // v2.1.16-beta.4 R5 场景4：中台退款订单回填双 sheet 文件（独立于主输出，仿场景3 范式）
       //   落位：主输出同目录（mainFilePath 必非空，因上方 empty 分支已 return）；兜底 exportRootDir
       //   失败 graceful：仅 log + 主流程照常返回（不阻塞主对账流程）
-      //   本轮引擎休眠：refundBackfillRows 恒 []（refundOrderRows 注入 []）→ 此 block 不进入，无副作用
+      //   v2.1.16-beta.6 需求C 已开通：导入退款表并运行后 refundBackfillRows/refundUnmatchedRows 可非空 → 进入本 block 落退款回填双 sheet 文件
       //   PR#64 Finding 2：sheet2（报错/未匹配）也需落盘——全报错/无成功回填时唯一需人工处理的 sheet2 不能被跳过。
       const refundBackfillRowsForExport = Array.isArray(processingResult.refundBackfillRows)
         ? processingResult.refundBackfillRows : [];
@@ -3823,7 +3823,7 @@ function registerAppHandlers() {
         // v2.1.16-beta.2 R5 场景3：renderer 用于状态框提示「中台加款单剔除文件已生成：{path}」
         platformCleanupPath: platformCleanupReport ? platformCleanupReport.filePath : null,
         platformCleanupName: platformCleanupReport ? platformCleanupReport.fileName : null,
-        // v2.1.16-beta.4 R5 场景4：renderer 用于状态框提示「中台退款订单回填文件已生成：{path}」（本轮恒 null）
+        // v2.1.16-beta.4 R5 场景4：renderer 用于状态框提示「中台退款订单回填文件已生成：{path}」（未生成时为 null）
         refundBackfillPath: refundBackfillReport ? refundBackfillReport.filePath : null,
         refundBackfillName: refundBackfillReport ? refundBackfillReport.fileName : null
       };
