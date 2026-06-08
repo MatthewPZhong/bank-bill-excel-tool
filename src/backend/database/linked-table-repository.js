@@ -102,6 +102,17 @@ const LINKED_TABLE_DEFS = {
     dateColumn: 'bill_date',
     dateHeader: 'BillDate',
     supported: true
+  },
+  // v2.1.16-beta.5 需求3：ADM 银行对账单链接表（隐藏表，由 bank-deposit Channel=ADM 行派生）。
+  //   🔴 入 LINKED_TABLE_DEFS 供专用仓储读写，但绝不进 ALL_TABLE_KEYS（前端 listLinkedTableMeta 不可见）。
+  //   表结构含 batch_no / channel_order_no 两列（replaceLinkedTable 4 列硬编码不适用 → 走 replaceAdmBankDeposit）。
+  'adm-bank-deposit': {
+    table: 'linked_adm_bank_deposit',
+    keyColumn: 'reconciliation_id',
+    keyHeader: 'ReconciliationId',
+    dateColumn: 'bill_date',
+    dateHeader: 'BillDate',
+    supported: true
   }
 };
 
@@ -269,6 +280,114 @@ function readLinkedTableRows(db, tableKey) {
   return out;
 }
 
+// ============================================================================
+// v2.1.16-beta.5 需求3：ADM 银行对账单链接表（linked_adm_bank_deposit）专用仓储
+//   🔴 不能复用 replaceLinkedTable（其 INSERT 硬编码 4 列：keyColumn/dateColumn/raw_json/imported_at）。
+//      ADM 表多 batch_no / channel_order_no 两列，故新写 replaceAdmBankDeposit（6 列 INSERT）。
+//   隐藏表：不进 ALL_TABLE_KEYS / 不进 linked_table_meta（前端弹窗不可见），故不写 meta。
+//   字段对应（raw_json 字段 → DB 列）：
+//     ReconciliationId → reconciliation_id（银行字段，整表覆盖时落列；恒有值）
+//     BillDate         → bill_date（normalizeDateForRange 归一 YYYY-MM-DD）
+//     批次号           → batch_no（派生阶段生成，可空）
+//     ChannelOrderNo   → channel_order_no（归批索引）
+//     整行 13+6 字段   → raw_json（数据真相）
+// ============================================================================
+
+const ADM_TABLE = 'linked_adm_bank_deposit';
+
+// 整表覆盖写入 ADM 行：事务内 DELETE 全表 + 批量 INSERT 6 列（prepared）。
+//   rows = ADM 行对象数组（13 银行字段 + 6 新字段，buildAdmRows 产物；PR-1 仓储不关心字段语义，整行存 raw_json）。
+//   caller 不需持有事务；本函数自带 BEGIN/COMMIT/ROLLBACK（与 replaceLinkedTable 范式一致）。
+//   🔴 重导银行对账单表 = ADM 重建 = 已有匹配标志归零（整表覆盖语义，UI 须提示 — 见 PRD §5.3.7 / R-7）。
+function replaceAdmBankDeposit(db, rows, options = {}) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const importedAt = new Date().toISOString();
+
+  const insertSql = `
+    INSERT INTO ${ADM_TABLE} (reconciliation_id, bill_date, batch_no, channel_order_no, raw_json, imported_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `;
+
+  db.exec('BEGIN');
+  try {
+    db.prepare(`DELETE FROM ${ADM_TABLE}`).run();
+
+    const insertStmt = db.prepare(insertSql);
+    for (const row of safeRows) {
+      const obj = row && typeof row === 'object' ? row : {};
+      const reconId = normalizeKey(obj.ReconciliationId);
+      const billDate = normalizeDateForRange(obj.BillDate); // null = 不可解析（仍落库，仅日期列为 null）
+      const batchNo = normalizeKey(obj['批次号']);
+      const channelOrderNo = normalizeKey(obj.ChannelOrderNo);
+      const rawJson = JSON.stringify(obj);
+      insertStmt.run(reconId, billDate, batchNo, channelOrderNo, rawJson, importedAt);
+    }
+
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_e) { /* no active txn */ }
+    throw error;
+  }
+
+  return {
+    tableKey: 'adm-bank-deposit',
+    rowCount: safeRows.length,
+    updatedAt: importedAt
+  };
+}
+
+// 读回 ADM 表全部整行（raw_json 还原为对象，字段名 = 真实表头）。
+//   ORDER BY id ASC：还原派生原序（与 readLinkedTableRows 同范式）；损坏行跳过不中断。
+//   供 JPM 引擎（PR-3）经 database.readAdmBankDepositRows() 取 ADM 数据源做三段匹配。
+function readAdmBankDepositRows(db) {
+  const rows = db.prepare(`SELECT raw_json FROM ${ADM_TABLE} ORDER BY id ASC`).all();
+  const out = [];
+  for (const r of rows) {
+    try {
+      const o = JSON.parse(r.raw_json);
+      if (o && typeof o === 'object') out.push(o);
+    } catch (_e) {
+      /* 损坏行跳过，不抛错 */
+    }
+  }
+  return out;
+}
+
+// JPM run 阶段整批幂等重写 ADM 行匹配标志 / 资金对账ID（供 PR-3 引擎回写）。
+//   admRows = 「读 → 算 → 写回」的完整 ADM 行数组（基于 readAdmBankDepositRows 读出的同一批行计算后回传）。
+//   定位策略（整批幂等重写）：取 DB 全部 id（ORDER BY id ASC）与 admRows 按下标严格配对逐行 UPDATE raw_json。
+//     readAdmBankDepositRows 用 ORDER BY id ASC，读出顺序 = DB id 顺序 = 回传顺序 → 下标即对应 DB 行。
+//   🔴 资金对账状态机：仅整批重写 raw_json（资金对账ID / 是否与渠道账单匹配 / 是否与网关账单匹配 等新字段）；
+//      幂等可重入（基于「原始行 + 本次计算」整批重算，非增量累加）。
+//   行数保护：DB 行数 ≠ admRows 行数 → 抛错（说明 ADM 表已被 replaceAdmBankDeposit 并发重建，按位置写回会错位污染资金数据）。
+//   reconciliation_id / batch_no / channel_order_no 列保持不变（仅 raw_json 整行重写；这三列由派生阶段写定）。
+function writeAdmMatchFlags(db, admRows) {
+  const safeRows = Array.isArray(admRows) ? admRows : [];
+  const updateSql = `UPDATE ${ADM_TABLE} SET raw_json = ? WHERE id = ?`;
+
+  db.exec('BEGIN');
+  try {
+    const ids = db.prepare(`SELECT id FROM ${ADM_TABLE} ORDER BY id ASC`).all().map((r) => r.id);
+    if (ids.length !== safeRows.length) {
+      throw new Error(
+        `[linked-table-repository] writeAdmMatchFlags 行数不一致：DB ${ids.length} 行 vs 入参 ${safeRows.length} 行（ADM 表疑似被并发重建）`
+      );
+    }
+    const updateStmt = db.prepare(updateSql);
+    for (let i = 0; i < ids.length; i += 1) {
+      const obj = safeRows[i] && typeof safeRows[i] === 'object' ? safeRows[i] : {};
+      updateStmt.run(JSON.stringify(obj), ids[i]);
+    }
+
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_e) { /* no active txn */ }
+    throw error;
+  }
+
+  return { tableKey: 'adm-bank-deposit', rowCount: safeRows.length };
+}
+
 module.exports = {
   LINKED_TABLE_DEFS,
   ALL_TABLE_KEYS,
@@ -278,5 +397,9 @@ module.exports = {
   listLinkedTableMeta,
   getLinkedTableMeta,
   replaceLinkedTable,
-  readLinkedTableRows
+  readLinkedTableRows,
+  // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表专用仓储（6 列 INSERT / 整批幂等重写）
+  replaceAdmBankDeposit,
+  readAdmBankDepositRows,
+  writeAdmMatchFlags
 };

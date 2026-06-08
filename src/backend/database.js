@@ -41,12 +41,16 @@ const {
   ensureReconRoundBuiltinScenariosSeed,
   // v2.1.16-beta.4 ③：中台退款订单回填场景独立补种（默认休眠 enabled=0）
   ensureRefundBackfillScenarioSeed,
+  // v2.1.16-beta.5 需求4：JPM 调拨订单修复写死场景独立补种（默认休眠 enabled=0，category=gateway-recon-id-fix）
+  ensureJpmDispatchOrderScenarioSeed,
   // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'
   ensureFundTypeAchReturnConfigMigration,
   // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造
   ensureDiffRowsCascadeMigration_v2_1_10,
   // v2.1.16 阶段一 A3：链接表持久化建表（v2.1.16-beta.3 ②：含入金表 linked_bank_deposit）
   ensureLinkedTableSupport,
+  // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表建表（独立幂等迁移）
+  ensureAdmBankDepositSupport,
   // v2.1.16-beta.3 ①：Channel 枚举字典表建表
   ensureChannelEnumSupport,
   ensureBuiltinScenarioNamesUpdate,
@@ -317,6 +321,10 @@ class AppDatabase {
     //   recon_round_builtin_scenarios_seeded=true 时本函数仍能补种退款场景；新库走幂等定位为已存在跳过。
     //   必须在 ensureReconRoundBuiltinScenariosSeed 之后（同前置：CHECK 已扩到含 'builtin-fixed'）。
     this.ensureRefundBackfillScenarioSeed();
+    // v2.1.16-beta.5 需求4：JPM 调拨订单修复写死场景独立补种（默认休眠 enabled=0，🔴 资金红线）
+    //   前置：scenarios CHECK 已含 'gateway-recon-id-fix'（ensureScenariosCategoryGatewayReconIdFix 早已扩枚举）。
+    //   独立 marker(jpm_dispatch_order_scenario_seeded) 绕开全局 marker 短路 —— 旧库也能补种。
+    this.ensureJpmDispatchOrderScenarioSeed();
     // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线 — FundType 枚举值）
     //   必须在 scenarios 相关迁移之后（依赖 scenarios 表已存在、内置场景已 seed）。
     //   幂等：执行一次后 config 不再含 'Ach Ruturn'；绝大多数库无引用 → no-op（精确性防护）。
@@ -473,6 +481,8 @@ class AppDatabase {
     //   与其他 ensure*TablesSupport 并列，无依赖，放最后（ANALYZE 之前）
     //   幂等：CREATE TABLE / INDEX IF NOT EXISTS，纯新增无破坏性
     this.ensureLinkedTableSupport();
+    // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表（紧随 linked 表；幂等 CREATE IF NOT EXISTS，无依赖、不进 ALL_TABLE_KEYS）
+    this.ensureAdmBankDepositSupport();
     // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀；幂等 CREATE IF NOT EXISTS，无依赖）
     this.ensureChannelEnumSupport();
     // v2.1.7 F7-A2：启动期 ANALYZE — 让规划器统计所有索引（含 idx_acquiring_bill_currency_bill_source_file）
@@ -883,6 +893,11 @@ class AppDatabase {
     return ensureRefundBackfillScenarioSeed(this.db);
   }
 
+  // v2.1.16-beta.5 需求4：JPM 调拨订单修复写死场景独立补种（默认休眠 enabled=0，🔴 资金红线）
+  ensureJpmDispatchOrderScenarioSeed() {
+    return ensureJpmDispatchOrderScenarioSeed(this.db);
+  }
+
   // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线）
   ensureFundTypeAchReturnConfigMigration() {
     return ensureFundTypeAchReturnConfigMigration(this.db);
@@ -1043,6 +1058,26 @@ class AppDatabase {
   //   fx-option 返回 []；损坏行跳过。供 5 轮对账编排器取网关数据源（'gateway-bill'）。
   readLinkedTableRows(tableKey) {
     return linkedTableRepository.readLinkedTableRows(this.db, tableKey);
+  }
+
+  // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表 facade（建表 + 仓储三函数转发）
+  ensureAdmBankDepositSupport() {
+    return ensureAdmBankDepositSupport(this.db);
+  }
+
+  // ADM 表整表覆盖写入（rows = 13+6 字段对象数组）；6 列 INSERT，整表重建 = 匹配标志归零
+  replaceAdmBankDeposit(rows, options) {
+    return linkedTableRepository.replaceAdmBankDeposit(this.db, rows, options || {});
+  }
+
+  // 读回 ADM 表全部整行（raw_json → 对象）；供 JPM 引擎三段匹配；损坏行跳过
+  readAdmBankDepositRows() {
+    return linkedTableRepository.readAdmBankDepositRows(this.db);
+  }
+
+  // JPM run 阶段整批幂等重写 ADM 行匹配标志 / 资金对账ID（可重入）
+  writeAdmMatchFlags(admRows) {
+    return linkedTableRepository.writeAdmMatchFlags(this.db, admRows);
   }
 
   // v2.1.16-beta.3 ①：Channel 枚举字典 facade（纯审计沉淀，不删/不改对账数据）

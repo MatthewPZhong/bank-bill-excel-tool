@@ -1,6 +1,6 @@
 {
   "name": "bank-bill-excel-tool",
-  "version": "2.1.16-beta.4",
+  "version": "2.1.16-beta.5",
   "description": "清结算小助手",
   "main": "src/main.js",
   "author": {

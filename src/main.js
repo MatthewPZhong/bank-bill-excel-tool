@@ -70,6 +70,8 @@ const { detectTableType } = require('./main-process/table-type-detector');
 const { LINKED_IMPORT_SIGNATURES, PREPROCESS_TABLE_SIGNATURES } = require('./constants/table-signatures');
 // v2.1.16-beta.3 ②：入金表 13 字段裁列纯函数（按字段名 pick，非索引切片）
 const { pickBankDepositFields } = require('./backend/database/linked-table-repository');
+// v2.1.16-beta.5 需求3：ADM 银行对账单链接表派生纯函数（Channel=ADM 行 → ADM 表 + 中台调拨匹配回填）
+const { buildAdmRows } = require('./main-process/adm-bank-deposit-builder');
 const linkedTableReaders = require('./backend/file-service/readers');
 const { normalizeCell: normalizeLinkedCell, FileValidationError: LinkedFileValidationError } = require('./backend/file-service/common');
 // v2.1.2 T2：月度银行对账单BU回填校验模块
@@ -3987,7 +3989,17 @@ function registerAppHandlers() {
         opponentBills: structuredClone(reconIdFixSession.sheets.opponentBills),
         fixTemplate: reconIdFixSession.sheets.fixTemplate
       };
-      const result = runReconIdFix(scenario, clonedSheets);
+      // v2.1.16-beta.5 需求5：JPM 调拨订单修复分流 —— 注入 ADM 隐藏表行做三段匹配回写（🔴 资金红线）。
+      //   仅 JPM 场景读 ADM 表（普通 gateway/business 场景不查 ADM，零影响）。
+      //   引擎原地改 admRows（资金对账ID / 两个匹配标志）后经 result.admUpdates 原样返回，
+      //   run 成功后整批幂等重写回 ADM 表（writeAdmMatchFlags 按 DB id ASC ↔ 下标配对，行数不一致抛错保护）。
+      const isJpmScenario = scenario.config && scenario.config.subCategory === 'jpm-dispatch-order-fix';
+      const runOpts = isJpmScenario ? { admRows: database.readAdmBankDepositRows() } : {};
+      const result = runReconIdFix(scenario, clonedSheets, runOpts);
+      if (isJpmScenario && result && Array.isArray(result.admUpdates)) {
+        // 整批幂等重写 ADM 表匹配标志 / 资金对账ID（与 C4「run 无副作用」不同 —— TECH §4.5 标注）。
+        database.writeAdmMatchFlags(result.admUpdates);
+      }
       reconIdFixResult = {
         scenarioId: scenario.id,
         scenarioName: scenario.name,
@@ -3999,7 +4011,9 @@ function registerAppHandlers() {
       };
       return {
         status: 'ok',
-        stats: result.stats
+        stats: result.stats,
+        // v2.1.16-beta.5 需求1（PR-4）：透传 warnings 供资金对账面板「开始运行」显示警告数（stats 无 warningCount）
+        warnings: result.warnings
       };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -11206,14 +11220,52 @@ function registerNewAccountHandlers() {
           ? rows.map((r) => pickBankDepositFields(r))
           : rows;
         const ret = database.replaceLinkedTable(repoKey, rowsToWrite, { sourceFileName: fileName });
-        results.push({
+        const okResult = {
           fileName,
           tableKey: repoKey,
           status: 'ok',
           rowCount: ret.rowCount,
           dataDateMin: ret.dataDateMin,
           dataDateMax: ret.dataDateMax
-        });
+        };
+        // v2.1.16-beta.5 需求3（逻辑A）：银行对账单表落库成功后，派生隐藏的 ADM 银行对账单链接表。
+        //   🔴 资金对账敏感：仅 repoKey==='bank-deposit' 触发，不影响其余链接表导入（gateway-bill/mid-allocation/...）。
+        //   读中台调拨订单（mid-allocation）+ 刚落库的 bank-deposit 整行 → buildAdmRows 筛 Channel=ADM ∧ FundType
+        //   ∧ 批次号 ∧ 中台唯一匹配回填调拨号/Fundtransfer-in金额 → replaceAdmBankDeposit 整表覆盖（部分成功仍建表）。
+        //   ⚠️ 重导银行对账单表 = ADM 重建 = 已有 JPM 匹配标志归零（整表覆盖语义，前端弹框提示 — PRD §5.3.7 / R-7）。
+        //   ADM 派生信息挂在本文件 result 的 admDerive 子字段（不独立 push 一条，避免污染 buildImportSummaryHtml 的
+        //   成功/失败计数与渲染）；前端据 admDerive 弹「ADM 创建成功」或「部分成功未匹配」报错框（PRD Mockup B/C）。
+        if (repoKey === 'bank-deposit') {
+          try {
+            const midRows = database.readLinkedTableRows('mid-allocation');
+            const bankRows = database.readLinkedTableRows('bank-deposit');
+            const { admRows, unmatched, midEmpty } = buildAdmRows(bankRows, midRows);
+            database.replaceAdmBankDeposit(admRows);
+            okResult.admDerive = {
+              created: true,
+              total: admRows.length,
+              matched: admRows.length - unmatched.length,
+              // 仅回传弹框所需字段（批次号/CustomerRef/BillDate/ChannelOrderNo + 错误码 + 冲突明细），
+              //   不回传整行（避免 IPC payload 携带 13+6 字段全行；报错框只列定位字段）。
+              unmatched: unmatched.map((u) => ({
+                code: u.code,
+                batchNo: u.row ? u.row['批次号'] : '',
+                customerRef: u.row ? u.row.CustomerRef : '',
+                billDate: u.row ? u.row.BillDate : '',
+                channelOrderNo: u.row ? u.row.ChannelOrderNo : '',
+                conflict: Array.isArray(u.conflict) ? u.conflict : undefined
+              })),
+              midEmpty
+            };
+          } catch (admErr) {
+            // ADM 派生失败不阻断银行对账单表导入本身（已落库成功）；记 admDerive.error 供前端提示。
+            okResult.admDerive = {
+              created: false,
+              error: admErr && admErr.message ? admErr.message : String(admErr)
+            };
+          }
+        }
+        results.push(okResult);
       } catch (err) {
         results.push({
           fileName,

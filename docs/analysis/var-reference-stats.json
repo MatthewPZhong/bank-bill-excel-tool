@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "2.1.16-beta.4",
-    "scannedAt": "2026-06-07T17:02:50.512Z",
+    "version": "2.1.16-beta.5",
+    "scannedAt": "2026-06-08T00:28:53.840Z",
     "root": "src",
-    "totalFiles": 125,
-    "totalTopLevelNames": 1270,
+    "totalFiles": 128,
+    "totalTopLevelNames": 1298,
     "buckets": {
-      "shared": 200,
-      "paired": 378,
-      "local": 577,
-      "crossFile": 578
+      "shared": 201,
+      "paired": 391,
+      "local": 591,
+      "crossFile": 592
     }
   },
   "A": {
@@ -448,7 +448,7 @@
           },
           {
             "file": "src/backend/database/linked-table-repository.js",
-            "count": 1
+            "count": 2
           },
           {
             "file": "src/backend/database/migrations.js",
@@ -531,7 +531,7 @@
             "count": 3
           }
         ],
-        "totalHits": 41,
+        "totalHits": 42,
         "fileSpan": 25
       },
       {
@@ -925,6 +925,67 @@
         "fileSpan": 13
       },
       {
+        "name": "normalizeCellValue",
+        "defFiles": [
+          "src/main-process/adm-bank-deposit-builder.js",
+          "src/main-process/scenario-engines/engine-utils.js",
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "src/main-process/scenario-engines/r1-recon-id-match.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/adm-bank-deposit-builder.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 21
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 14
+          },
+          {
+            "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
+            "count": 7
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 29
+          }
+        ],
+        "totalHits": 109,
+        "fileSpan": 12
+      },
+      {
         "name": "appendModuleLog",
         "defFiles": [
           "src/backend/database.js",
@@ -985,55 +1046,60 @@
         "fileSpan": 11
       },
       {
-        "name": "normalizeCellValue",
+        "name": "makeWarningCollector",
         "defFiles": [
           "src/main-process/scenario-engines/engine-utils.js",
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
           "src/main-process/scenario-engines/r1-recon-id-match.js"
         ],
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
-            "count": 4
+            "count": 2
           },
           {
             "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-            "count": 4
+            "count": 2
           },
           {
             "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 6
+            "count": 2
           },
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
-            "count": 21
+            "count": 2
           },
           {
             "file": "src/main-process/scenario-engines/engine-utils.js",
-            "count": 6
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 2
           },
           {
             "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
-            "count": 3
+            "count": 2
           },
           {
             "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-            "count": 6
+            "count": 2
           },
           {
             "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-            "count": 6
+            "count": 2
           },
           {
             "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
-            "count": 7
+            "count": 2
           },
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 28
+            "count": 2
           }
         ],
-        "totalHits": 91,
-        "fileSpan": 10
+        "totalHits": 22,
+        "fileSpan": 11
       },
       {
         "name": "pad",
@@ -1084,57 +1150,6 @@
           }
         ],
         "totalHits": 66,
-        "fileSpan": 10
-      },
-      {
-        "name": "makeWarningCollector",
-        "defFiles": [
-          "src/main-process/scenario-engines/engine-utils.js",
-          "src/main-process/scenario-engines/r1-recon-id-match.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/engine-utils.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 20,
         "fileSpan": 10
       },
       {
@@ -1580,6 +1595,42 @@
         "fileSpan": 7
       },
       {
+        "name": "parseNumber",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js",
+          "src/main-process/scenario-engines/engine-utils.js",
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 23,
+        "fileSpan": 6
+      },
+      {
         "name": "runReconciliation",
         "defFiles": [
           "src/backend/pending-reconcile/engine.js",
@@ -1615,6 +1666,43 @@
           }
         ],
         "totalHits": 14,
+        "fileSpan": 6
+      },
+      {
+        "name": "GATEWAY_BILL_FIELDS",
+        "defFiles": [
+          "src/constants/adm-bank-deposit-fields.js",
+          "src/constants/gateway-bill-recon-fields.js",
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "src/preload.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/adm-bank-deposit-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/constants/gateway-bill-recon-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 12,
         "fileSpan": 6
       },
       {
@@ -1699,7 +1787,7 @@
           },
           {
             "file": "src/renderer-dialogs.js",
-            "count": 349
+            "count": 356
           },
           {
             "file": "src/renderer-pending.js",
@@ -1714,7 +1802,7 @@
             "count": 71
           }
         ],
-        "totalHits": 452,
+        "totalHits": 459,
         "fileSpan": 5
       },
       {
@@ -1848,37 +1936,6 @@
         "fileSpan": 5
       },
       {
-        "name": "parseNumber",
-        "defFiles": [
-          "src/backend/pending-reconcile/removal-match.js",
-          "src/main-process/scenario-engines/engine-utils.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-reconcile/removal-match.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/scenario-engines/engine-utils.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 20,
-        "fileSpan": 5
-      },
-      {
         "name": "BILL_HEADERS",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/columns.js",
@@ -2003,6 +2060,38 @@
           }
         ],
         "totalHits": 13,
+        "fileSpan": 5
+      },
+      {
+        "name": "normalizeDateExportValue",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js",
+          "src/backend/file-service/normalizers.js",
+          "src/main-process/scenario-engines/engine-date-utils.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/file-service/normalizers.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/adm-bank-deposit-builder.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-date-utils.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 12,
         "fileSpan": 5
       },
       {
@@ -2213,10 +2302,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 139
+            "count": 144
           }
         ],
-        "totalHits": 265,
+        "totalHits": 270,
         "fileSpan": 4
       },
       {
@@ -2270,6 +2359,35 @@
           }
         ],
         "totalHits": 21,
+        "fileSpan": 4
+      },
+      {
+        "name": "toDate",
+        "defFiles": [
+          "src/main-process/scenario-engines/engine-date-utils.js",
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/engine-date-utils.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 18,
         "fileSpan": 4
       },
       {
@@ -2570,34 +2688,6 @@
         "fileSpan": 4
       },
       {
-        "name": "normalizeDateExportValue",
-        "defFiles": [
-          "src/backend/database/linked-table-repository.js",
-          "src/backend/file-service/normalizers.js",
-          "src/main-process/scenario-engines/engine-date-utils.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/linked-table-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/file-service/normalizers.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/engine-date-utils.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 4
-      },
-      {
         "name": "PENDING_GUANLI_DB_COLUMNS",
         "defFiles": [
           "src/backend/bank-bu-recon-db/columns.js"
@@ -2857,33 +2947,6 @@
           },
           {
             "file": "src/main-process/scenario-engines/engine-utils.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 4
-      },
-      {
-        "name": "GATEWAY_BILL_FIELDS",
-        "defFiles": [
-          "src/constants/gateway-bill-recon-fields.js",
-          "src/preload.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/constants/gateway-bill-recon-fields.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/recon-id-fix-io.js",
-            "count": 2
-          },
-          {
-            "file": "src/preload.js",
-            "count": 2
-          },
-          {
-            "file": "src/renderer-dialogs.js",
             "count": 2
           }
         ],
@@ -3631,6 +3694,29 @@
         "fileSpan": 3
       },
       {
+        "name": "FIELD_MAP",
+        "defFiles": [
+          "src/constants/adm-bank-deposit-fields.js",
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/adm-bank-deposit-fields.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/adm-bank-deposit-builder.js",
+            "count": 14
+          },
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 25
+          }
+        ],
+        "totalHits": 43,
+        "fileSpan": 3
+      },
+      {
         "name": "runRepo",
         "defFiles": [
           "src/main-process/acquiring-bill-currency-session.js",
@@ -3878,30 +3964,6 @@
           {
             "file": "src/main-process/serialize-error.js",
             "count": 3
-          }
-        ],
-        "totalHits": 16,
-        "fileSpan": 3
-      },
-      {
-        "name": "toDate",
-        "defFiles": [
-          "src/main-process/scenario-engines/engine-date-utils.js",
-          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/engine-date-utils.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 7
           }
         ],
         "totalHits": 16,
@@ -6099,6 +6161,25 @@
         "fileSpan": 2
       },
       {
+        "name": "buildOutputRow",
+        "defFiles": [
+          "src/main-process/scenario-engines/c4-recon-id-fix.js",
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 17
+          },
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 19,
+        "fileSpan": 2
+      },
+      {
         "name": "TEMPLATE_LABEL",
         "defFiles": [
           "src/backend/pending-import/removed-reader.js",
@@ -6463,6 +6544,25 @@
           {
             "file": "src/main-process/pending-session.js",
             "count": 6
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 2
+      },
+      {
+        "name": "normalizeKey",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js",
+          "src/main-process/bank-bu-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 5
           }
         ],
         "totalHits": 10,
@@ -6843,6 +6943,24 @@
         "fileSpan": 2
       },
       {
+        "name": "bankStatementSession",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 2
+      },
+      {
         "name": "createBackup",
         "defFiles": [
           "src/backend/database/backup.js"
@@ -6965,25 +7083,6 @@
           {
             "file": "src/backend/acquiring-bill-currency-import/reader.js",
             "count": 6
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 2
-      },
-      {
-        "name": "normalizeKey",
-        "defFiles": [
-          "src/backend/database/linked-table-repository.js",
-          "src/main-process/bank-bu-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/linked-table-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 5
           }
         ],
         "totalHits": 7,
@@ -7150,24 +7249,6 @@
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 3
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 2
-      },
-      {
-        "name": "bankStatementSession",
-        "defFiles": [
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main.js",
-            "count": 1
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 5
           }
         ],
         "totalHits": 6,
@@ -7448,6 +7529,24 @@
         "fileSpan": 2
       },
       {
+        "name": "ensureAdmBankDepositSupport",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
         "name": "ensureAmountSplitRulesSupport",
         "defFiles": [
           "src/backend/database/migrations.js"
@@ -7665,6 +7764,24 @@
       },
       {
         "name": "ensureFundTypeAchReturnConfigMigration",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "ensureJpmDispatchOrderScenarioSeed",
         "defFiles": [
           "src/backend/database/migrations.js"
         ],
@@ -8703,6 +8820,25 @@
         "fileSpan": 2
       },
       {
+        "name": "groupBy",
+        "defFiles": [
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "loadSharedStrings",
         "defFiles": [
           "src/backend/acquiring-bill-currency-import/reader.js"
@@ -8770,6 +8906,24 @@
           {
             "file": "src/renderer.js",
             "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "reconIdFixSession",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 4
           }
         ],
         "totalHits": 5,
@@ -9052,6 +9206,61 @@
         "fileSpan": 2
       },
       {
+        "name": "ADM_EXTRA_FIELDS",
+        "defFiles": [
+          "src/constants/adm-bank-deposit-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/adm-bank-deposit-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/adm-bank-deposit-builder.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "ADM_FUND_TYPES",
+        "defFiles": [
+          "src/constants/adm-bank-deposit-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/adm-bank-deposit-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/adm-bank-deposit-builder.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "ADM_MERCHANT_ID",
+        "defFiles": [
+          "src/backend/database/migrations.js",
+          "src/constants/adm-bank-deposit-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          },
+          {
+            "file": "src/constants/adm-bank-deposit-fields.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "ALL_TABLE_SIGNATURES",
         "defFiles": [
           "src/constants/table-signatures.js",
@@ -9191,6 +9400,24 @@
           },
           {
             "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "CHANNEL_VALUE",
+        "defFiles": [
+          "src/constants/adm-bank-deposit-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/adm-bank-deposit-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/adm-bank-deposit-builder.js",
             "count": 2
           }
         ],
@@ -10348,6 +10575,24 @@
         "fileSpan": 2
       },
       {
+        "name": "readAdmBankDepositRows",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "readLinkedTableRows",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -10474,24 +10719,6 @@
         "fileSpan": 2
       },
       {
-        "name": "reconIdFixSession",
-        "defFiles": [
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main.js",
-            "count": 1
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 2
-      },
-      {
         "name": "renameTemplate",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -10503,6 +10730,24 @@
           },
           {
             "file": "src/backend/database/template-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "replaceAdmBankDeposit",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 2
           }
         ],
@@ -10596,6 +10841,25 @@
           {
             "file": "src/main-process/run-check-worker.js",
             "count": 1
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "runJpmDispatchOrderFix",
+        "defFiles": [
+          "src/main-process/recon-id-fix-engine.js",
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/recon-id-fix-engine.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 2
           }
         ],
         "totalHits": 4,
@@ -11098,6 +11362,24 @@
         "fileSpan": 2
       },
       {
+        "name": "writeAdmMatchFlags",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "writeStreamedXlsx",
         "defFiles": [
           "src/backend/pending-import/streaming-xlsx-writer.js",
@@ -11220,6 +11502,25 @@
           },
           {
             "file": "src/main-process/biz-op-recon-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "buildAdmRows",
+        "defFiles": [
+          "src/main-process/adm-bank-deposit-builder.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/adm-bank-deposit-builder.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
             "count": 1
           }
         ],
@@ -13044,20 +13345,6 @@
         "fileSpan": 1
       },
       {
-        "name": "buildOutputRow",
-        "defFiles": [
-          "src/main-process/scenario-engines/c4-recon-id-fix.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
-            "count": 17
-          }
-        ],
-        "totalHits": 17,
-        "fileSpan": 1
-      },
-      {
         "name": "centsToAmountString",
         "defFiles": [
           "src/main-process/vcc-op-calc-session.js"
@@ -13366,6 +13653,20 @@
         "fileSpan": 1
       },
       {
+        "name": "linkedTableRepository",
+        "defFiles": [
+          "src/backend/database.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 8
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 1
+      },
+      {
         "name": "lookupReconId",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -13373,6 +13674,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 8
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 1
+      },
+      {
+        "name": "normCell",
+        "defFiles": [
+          "src/main-process/adm-bank-deposit-builder.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/adm-bank-deposit-builder.js",
             "count": 8
           }
         ],
@@ -13576,6 +13891,20 @@
         "fileSpan": 1
       },
       {
+        "name": "ADM_TABLE",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
         "name": "ALL_MODULE_IDS",
         "defFiles": [
           "src/backend/database/settings-repository.js"
@@ -13723,6 +14052,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
+        "name": "RESULT_NOTICE",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 6
           }
         ],
@@ -13926,6 +14269,20 @@
         "fileSpan": 1
       },
       {
+        "name": "buildUnmatchedBankRow",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "computeCommonId",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -14115,20 +14472,6 @@
         "refFiles": [
           {
             "file": "src/backend/database/scenarios-repository.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
-        "name": "linkedTableRepository",
-        "defFiles": [
-          "src/backend/database.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
             "count": 5
           }
         ],
@@ -14388,6 +14731,20 @@
         "fileSpan": 1
       },
       {
+        "name": "__gwTypeCol",
+        "defFiles": [
+          "src/constants/adm-bank-deposit-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/adm-bank-deposit-fields.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "adaptiveChunkSizeForMultiWorker",
         "defFiles": [
           "src/main-process/acquiring-bill-currency-session.js"
@@ -14500,20 +14857,6 @@
         "fileSpan": 1
       },
       {
-        "name": "buildUnmatchedBankRow",
-        "defFiles": [
-          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
         "name": "calcModuleSubtotal",
         "defFiles": [
           "src/backend/usage-stats.js"
@@ -14591,6 +14934,20 @@
         "refFiles": [
           {
             "file": "src/main-process/bank-bu-recon-writer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "extractBillDate",
+        "defFiles": [
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
             "count": 4
           }
         ],
@@ -14696,6 +15053,20 @@
         "fileSpan": 1
       },
       {
+        "name": "GW_TYPE_COL",
+        "defFiles": [
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "handleWorkerFailure",
         "defFiles": [
           "src/main-process/run-check-worker-pool.js"
@@ -14703,6 +15074,20 @@
         "refFiles": [
           {
             "file": "src/main-process/run-check-worker-pool.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "JPM_DISPATCH_ORDER_SCENARIO",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
             "count": 4
           }
         ],
@@ -14857,6 +15242,20 @@
         "refFiles": [
           {
             "file": "src/backend/acquiring-bill-currency-db/import-repository.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "normKey",
+        "defFiles": [
+          "src/main-process/adm-bank-deposit-builder.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/adm-bank-deposit-builder.js",
             "count": 4
           }
         ],
@@ -15032,20 +15431,6 @@
         "fileSpan": 1
       },
       {
-        "name": "RESULT_NOTICE",
-        "defFiles": [
-          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
         "name": "RULE_GLOBAL_ID",
         "defFiles": [
           "src/backend/pending-db/rule-repository.js"
@@ -15109,6 +15494,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "toIsoDate",
+        "defFiles": [
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
             "count": 4
           }
         ],
@@ -15501,6 +15900,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "assignBatchNo",
+        "defFiles": [
+          "src/main-process/adm-bank-deposit-builder.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/adm-bank-deposit-builder.js",
             "count": 3
           }
         ],
@@ -16138,6 +16551,20 @@
         "fileSpan": 1
       },
       {
+        "name": "DATE_IN_ADDITION",
+        "defFiles": [
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "DEFAULT_REPORT_SUBDIR",
         "defFiles": [
           "src/main-process/scenario-hit-rows-writer.js"
@@ -16530,20 +16957,6 @@
         "fileSpan": 1
       },
       {
-        "name": "groupBy",
-        "defFiles": [
-          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "groupReconFields",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -16726,6 +17139,20 @@
         "fileSpan": 1
       },
       {
+        "name": "JPM_DISPATCH_ORDER_SCENARIO_SEEDED_MARKER",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "L2_HEADER_SCAN_ROWS",
         "defFiles": [
           "src/main-process/table-type-detector.js"
@@ -16859,6 +17286,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-import/removed-reader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "matchAdmToMidAllocation",
+        "defFiles": [
+          "src/main-process/adm-bank-deposit-builder.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/adm-bank-deposit-builder.js",
             "count": 3
           }
         ],
@@ -17048,6 +17489,20 @@
         "fileSpan": 1
       },
       {
+        "name": "normalizeBillDateIso",
+        "defFiles": [
+          "src/main-process/adm-bank-deposit-builder.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/adm-bank-deposit-builder.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "normalizeBillDateValue",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -17097,6 +17552,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-hit-rows-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "normalizeDateForRange",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 3
           }
         ],
@@ -17881,6 +18350,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-hit-rows-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "sumEqualsReceive",
+        "defFiles": [
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
             "count": 3
           }
         ],
@@ -19260,6 +19743,20 @@
         "fileSpan": 1
       },
       {
+        "name": "handleBankStatementRun",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "handleOpenAccountMappings",
         "defFiles": [
           "src/renderer.js"
@@ -19855,20 +20352,6 @@
         "refFiles": [
           {
             "file": "src/backend/scenarios-bundle-io.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
-        "name": "normalizeDateForRange",
-        "defFiles": [
-          "src/backend/database/linked-table-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/linked-table-repository.js",
             "count": 2
           }
         ],
@@ -20856,6 +21339,20 @@
         "fileSpan": 1
       },
       {
+        "name": "updateBankStatementRunBtnDisabled",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "updateTemplateSelect",
         "defFiles": [
           "src/renderer.js"
@@ -21460,7 +21957,7 @@
         },
         {
           "file": "src/backend/database/linked-table-repository.js",
-          "count": 1
+          "count": 2
         },
         {
           "file": "src/backend/database/migrations.js",
@@ -21543,7 +22040,7 @@
           "count": 3
         }
       ],
-      "totalHits": 41,
+      "totalHits": 42,
       "fileSpan": 25
     },
     {
@@ -21937,6 +22434,67 @@
       "fileSpan": 13
     },
     {
+      "name": "normalizeCellValue",
+      "defFiles": [
+        "src/main-process/adm-bank-deposit-builder.js",
+        "src/main-process/scenario-engines/engine-utils.js",
+        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+        "src/main-process/scenario-engines/r1-recon-id-match.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/adm-bank-deposit-builder.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+          "count": 21
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "count": 14
+        },
+        {
+          "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
+          "count": 7
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 29
+        }
+      ],
+      "totalHits": 109,
+      "fileSpan": 12
+    },
+    {
       "name": "appendModuleLog",
       "defFiles": [
         "src/backend/database.js",
@@ -21997,55 +22555,60 @@
       "fileSpan": 11
     },
     {
-      "name": "normalizeCellValue",
+      "name": "makeWarningCollector",
       "defFiles": [
         "src/main-process/scenario-engines/engine-utils.js",
+        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
         "src/main-process/scenario-engines/r1-recon-id-match.js"
       ],
       "refFiles": [
         {
           "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
-          "count": 4
+          "count": 2
         },
         {
           "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-          "count": 4
+          "count": 2
         },
         {
           "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 6
+          "count": 2
         },
         {
           "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
-          "count": 21
+          "count": 2
         },
         {
           "file": "src/main-process/scenario-engines/engine-utils.js",
-          "count": 6
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "count": 2
         },
         {
           "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
-          "count": 3
+          "count": 2
         },
         {
           "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-          "count": 6
+          "count": 2
         },
         {
           "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "count": 6
+          "count": 2
         },
         {
           "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
-          "count": 7
+          "count": 2
         },
         {
           "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 28
+          "count": 2
         }
       ],
-      "totalHits": 91,
-      "fileSpan": 10
+      "totalHits": 22,
+      "fileSpan": 11
     },
     {
       "name": "pad",
@@ -22096,57 +22659,6 @@
         }
       ],
       "totalHits": 66,
-      "fileSpan": 10
-    },
-    {
-      "name": "makeWarningCollector",
-      "defFiles": [
-        "src/main-process/scenario-engines/engine-utils.js",
-        "src/main-process/scenario-engines/r1-recon-id-match.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/engine-utils.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 20,
       "fileSpan": 10
     },
     {
@@ -22592,6 +23104,42 @@
       "fileSpan": 7
     },
     {
+      "name": "parseNumber",
+      "defFiles": [
+        "src/backend/pending-reconcile/removal-match.js",
+        "src/main-process/scenario-engines/engine-utils.js",
+        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-reconcile/removal-match.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 23,
+      "fileSpan": 6
+    },
+    {
       "name": "runReconciliation",
       "defFiles": [
         "src/backend/pending-reconcile/engine.js",
@@ -22627,6 +23175,43 @@
         }
       ],
       "totalHits": 14,
+      "fileSpan": 6
+    },
+    {
+      "name": "GATEWAY_BILL_FIELDS",
+      "defFiles": [
+        "src/constants/adm-bank-deposit-fields.js",
+        "src/constants/gateway-bill-recon-fields.js",
+        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+        "src/preload.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/adm-bank-deposit-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/constants/gateway-bill-recon-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 12,
       "fileSpan": 6
     },
     {
@@ -22711,7 +23296,7 @@
         },
         {
           "file": "src/renderer-dialogs.js",
-          "count": 349
+          "count": 356
         },
         {
           "file": "src/renderer-pending.js",
@@ -22726,7 +23311,7 @@
           "count": 71
         }
       ],
-      "totalHits": 452,
+      "totalHits": 459,
       "fileSpan": 5
     },
     {
@@ -22860,37 +23445,6 @@
       "fileSpan": 5
     },
     {
-      "name": "parseNumber",
-      "defFiles": [
-        "src/backend/pending-reconcile/removal-match.js",
-        "src/main-process/scenario-engines/engine-utils.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pending-reconcile/removal-match.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/scenario-engines/engine-utils.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 20,
-      "fileSpan": 5
-    },
-    {
       "name": "BILL_HEADERS",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/columns.js",
@@ -23015,6 +23569,38 @@
         }
       ],
       "totalHits": 13,
+      "fileSpan": 5
+    },
+    {
+      "name": "normalizeDateExportValue",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js",
+        "src/backend/file-service/normalizers.js",
+        "src/main-process/scenario-engines/engine-date-utils.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/file-service/normalizers.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/adm-bank-deposit-builder.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-date-utils.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 12,
       "fileSpan": 5
     },
     {
@@ -23225,10 +23811,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 139
+          "count": 144
         }
       ],
-      "totalHits": 265,
+      "totalHits": 270,
       "fileSpan": 4
     },
     {
@@ -23282,6 +23868,35 @@
         }
       ],
       "totalHits": 21,
+      "fileSpan": 4
+    },
+    {
+      "name": "toDate",
+      "defFiles": [
+        "src/main-process/scenario-engines/engine-date-utils.js",
+        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+        "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/engine-date-utils.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 7
+        }
+      ],
+      "totalHits": 18,
       "fileSpan": 4
     },
     {
@@ -23582,34 +24197,6 @@
       "fileSpan": 4
     },
     {
-      "name": "normalizeDateExportValue",
-      "defFiles": [
-        "src/backend/database/linked-table-repository.js",
-        "src/backend/file-service/normalizers.js",
-        "src/main-process/scenario-engines/engine-date-utils.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database/linked-table-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/file-service/normalizers.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/engine-date-utils.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 10,
-      "fileSpan": 4
-    },
-    {
       "name": "PENDING_GUANLI_DB_COLUMNS",
       "defFiles": [
         "src/backend/bank-bu-recon-db/columns.js"
@@ -23869,33 +24456,6 @@
         },
         {
           "file": "src/main-process/scenario-engines/engine-utils.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 8,
-      "fileSpan": 4
-    },
-    {
-      "name": "GATEWAY_BILL_FIELDS",
-      "defFiles": [
-        "src/constants/gateway-bill-recon-fields.js",
-        "src/preload.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/constants/gateway-bill-recon-fields.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/recon-id-fix-io.js",
-          "count": 2
-        },
-        {
-          "file": "src/preload.js",
-          "count": 2
-        },
-        {
-          "file": "src/renderer-dialogs.js",
           "count": 2
         }
       ],
@@ -24643,6 +25203,29 @@
       "fileSpan": 3
     },
     {
+      "name": "FIELD_MAP",
+      "defFiles": [
+        "src/constants/adm-bank-deposit-fields.js",
+        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/adm-bank-deposit-fields.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/adm-bank-deposit-builder.js",
+          "count": 14
+        },
+        {
+          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "count": 25
+        }
+      ],
+      "totalHits": 43,
+      "fileSpan": 3
+    },
+    {
       "name": "runRepo",
       "defFiles": [
         "src/main-process/acquiring-bill-currency-session.js",
@@ -24890,30 +25473,6 @@
         {
           "file": "src/main-process/serialize-error.js",
           "count": 3
-        }
-      ],
-      "totalHits": 16,
-      "fileSpan": 3
-    },
-    {
-      "name": "toDate",
-      "defFiles": [
-        "src/main-process/scenario-engines/engine-date-utils.js",
-        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-        "src/main-process/scenario-engines/r5-refund-order-backfill.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/engine-date-utils.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 7
         }
       ],
       "totalHits": 16,
@@ -27109,6 +27668,25 @@
       "fileSpan": 2
     },
     {
+      "name": "buildOutputRow",
+      "defFiles": [
+        "src/main-process/scenario-engines/c4-recon-id-fix.js",
+        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+          "count": 17
+        },
+        {
+          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 19,
+      "fileSpan": 2
+    },
+    {
       "name": "TEMPLATE_LABEL",
       "defFiles": [
         "src/backend/pending-import/removed-reader.js",
@@ -27473,6 +28051,25 @@
         {
           "file": "src/main-process/pending-session.js",
           "count": 6
+        }
+      ],
+      "totalHits": 10,
+      "fileSpan": 2
+    },
+    {
+      "name": "normalizeKey",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js",
+        "src/main-process/bank-bu-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 5
         }
       ],
       "totalHits": 10,
@@ -27853,6 +28450,24 @@
       "fileSpan": 2
     },
     {
+      "name": "bankStatementSession",
+      "defFiles": [
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 6
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 2
+    },
+    {
       "name": "createBackup",
       "defFiles": [
         "src/backend/database/backup.js"
@@ -27975,25 +28590,6 @@
         {
           "file": "src/backend/acquiring-bill-currency-import/reader.js",
           "count": 6
-        }
-      ],
-      "totalHits": 7,
-      "fileSpan": 2
-    },
-    {
-      "name": "normalizeKey",
-      "defFiles": [
-        "src/backend/database/linked-table-repository.js",
-        "src/main-process/bank-bu-recon-session.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database/linked-table-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-session.js",
-          "count": 5
         }
       ],
       "totalHits": 7,
@@ -28160,24 +28756,6 @@
         {
           "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
           "count": 3
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 2
-    },
-    {
-      "name": "bankStatementSession",
-      "defFiles": [
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main.js",
-          "count": 1
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 5
         }
       ],
       "totalHits": 6,
@@ -28458,6 +29036,24 @@
       "fileSpan": 2
     },
     {
+      "name": "ensureAdmBankDepositSupport",
+      "defFiles": [
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
       "name": "ensureAmountSplitRulesSupport",
       "defFiles": [
         "src/backend/database/migrations.js"
@@ -28675,6 +29271,24 @@
     },
     {
       "name": "ensureFundTypeAchReturnConfigMigration",
+      "defFiles": [
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "ensureJpmDispatchOrderScenarioSeed",
       "defFiles": [
         "src/backend/database/migrations.js"
       ],
@@ -29713,6 +30327,25 @@
       "fileSpan": 2
     },
     {
+      "name": "groupBy",
+      "defFiles": [
+        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+        "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "loadSharedStrings",
       "defFiles": [
         "src/backend/acquiring-bill-currency-import/reader.js"
@@ -29780,6 +30413,24 @@
         {
           "file": "src/renderer.js",
           "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "reconIdFixSession",
+      "defFiles": [
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 4
         }
       ],
       "totalHits": 5,
@@ -30062,6 +30713,61 @@
       "fileSpan": 2
     },
     {
+      "name": "ADM_EXTRA_FIELDS",
+      "defFiles": [
+        "src/constants/adm-bank-deposit-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/adm-bank-deposit-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/adm-bank-deposit-builder.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "ADM_FUND_TYPES",
+      "defFiles": [
+        "src/constants/adm-bank-deposit-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/adm-bank-deposit-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/adm-bank-deposit-builder.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "ADM_MERCHANT_ID",
+      "defFiles": [
+        "src/backend/database/migrations.js",
+        "src/constants/adm-bank-deposit-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        },
+        {
+          "file": "src/constants/adm-bank-deposit-fields.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "ALL_TABLE_SIGNATURES",
       "defFiles": [
         "src/constants/table-signatures.js",
@@ -30201,6 +30907,24 @@
         },
         {
           "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "CHANNEL_VALUE",
+      "defFiles": [
+        "src/constants/adm-bank-deposit-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/adm-bank-deposit-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/adm-bank-deposit-builder.js",
           "count": 2
         }
       ],
@@ -31358,6 +32082,24 @@
       "fileSpan": 2
     },
     {
+      "name": "readAdmBankDepositRows",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "readLinkedTableRows",
       "defFiles": [
         "src/backend/database/linked-table-repository.js"
@@ -31484,24 +32226,6 @@
       "fileSpan": 2
     },
     {
-      "name": "reconIdFixSession",
-      "defFiles": [
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main.js",
-          "count": 1
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 2
-    },
-    {
       "name": "renameTemplate",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -31513,6 +32237,24 @@
         },
         {
           "file": "src/backend/database/template-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "replaceAdmBankDeposit",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
           "count": 2
         }
       ],
@@ -31606,6 +32348,25 @@
         {
           "file": "src/main-process/run-check-worker.js",
           "count": 1
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "runJpmDispatchOrderFix",
+      "defFiles": [
+        "src/main-process/recon-id-fix-engine.js",
+        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/recon-id-fix-engine.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "count": 2
         }
       ],
       "totalHits": 4,
@@ -32108,6 +32869,24 @@
       "fileSpan": 2
     },
     {
+      "name": "writeAdmMatchFlags",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "writeStreamedXlsx",
       "defFiles": [
         "src/backend/pending-import/streaming-xlsx-writer.js",
@@ -32230,6 +33009,25 @@
         },
         {
           "file": "src/main-process/biz-op-recon-session.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "buildAdmRows",
+      "defFiles": [
+        "src/main-process/adm-bank-deposit-builder.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/adm-bank-deposit-builder.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
           "count": 1
         }
       ],
