@@ -2682,6 +2682,13 @@ function ensureLinkedTableSupport(db) {
     db.exec('CREATE INDEX IF NOT EXISTS idx_linked_gateway_bill_recon ON linked_gateway_bill(reconciliation_id);');
     db.exec('CREATE INDEX IF NOT EXISTS idx_linked_gateway_bill_date ON linked_gateway_bill(bill_date);');
 
+    // 残留旧列名迁移：中间 beta 构建曾用 business_date，已改名 transaction_date；
+    //   CREATE TABLE IF NOT EXISTS 不迁移已存在表 → 显式 RENAME（幂等：仅旧列在 ∧ 新列不在时执行）。
+    if (hasColumn(db, 'linked_mid_allocation', 'business_date')
+        && !hasColumn(db, 'linked_mid_allocation', 'transaction_date')) {
+      db.exec('ALTER TABLE linked_mid_allocation RENAME COLUMN business_date TO transaction_date;');
+    }
+
     // 数据表 2：中台调拨订单（键 allocation_no / 日期 transaction_date，列名已对齐「交易时间」）
     db.exec(`
       CREATE TABLE IF NOT EXISTS linked_mid_allocation (
