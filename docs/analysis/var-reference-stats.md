@@ -5,7 +5,7 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v2.1.16-beta.6 |
-| 扫描时间 | 2026-6-8 12:56:18 |
+| 扫描时间 | 2026-6-8 16:11:52 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 128 |
 | 顶层声明总数 | 1308 |
@@ -118,7 +118,7 @@
 | `escapeHtml` | 3 | 168 | 1 | src/renderer.js |
 | `normalizeText` | 3 | 70 | 2 | src/backend/database/migrations.js |
 | `setStatus` | 3 | 69 | 1 | src/renderer.js |
-| `FIELD_MAP` | 3 | 43 | 2 | src/constants/adm-bank-deposit-fields.js |
+| `FIELD_MAP` | 3 | 46 | 2 | src/constants/adm-bank-deposit-fields.js |
 | `runRepo` | 3 | 26 | 3 | src/main-process/acquiring-bill-currency-session.js |
 | `hasColumn` | 3 | 24 | 2 | src/backend/biz-op-recon-db/migrations.js |
 | `lastGeneratedExports` | 3 | 24 | 1 | src/main.js |
@@ -1504,7 +1504,7 @@
 | `escapeHtml` | 3 | 168 | 1 | src/renderer-dialogs.js(140), src/renderer.js(27), src/renderer-previews.js(1) |
 | `normalizeText` | 3 | 70 | 2 | src/backend/database/template-repository.js(57), src/backend/database/utils.js(10), src/backend/database/migrations.js(3) |
 | `setStatus` | 3 | 69 | 1 | src/renderer.js(36), src/renderer-dialogs.js(32), src/renderer-previews.js(1) |
-| `FIELD_MAP` | 3 | 43 | 2 | src/main-process/scenario-engines/jpm-dispatch-order-fix.js(25), src/main-process/adm-bank-deposit-builder.js(14), src/constants/adm-bank-deposit-fields.js(4) |
+| `FIELD_MAP` | 3 | 46 | 2 | src/main-process/scenario-engines/jpm-dispatch-order-fix.js(28), src/main-process/adm-bank-deposit-builder.js(14), src/constants/adm-bank-deposit-fields.js(4) |
 | `runRepo` | 3 | 26 | 3 | src/main-process/acquiring-bill-currency-session.js(21), src/main-process/acquiring-bill-currency-writer.js(4), src/main.js(1) |
 | `hasColumn` | 3 | 24 | 2 | src/backend/database/migrations.js(19), src/backend/database.js(3), src/backend/biz-op-recon-db/migrations.js(2) |
 | `lastGeneratedExports` | 3 | 24 | 1 | src/main-process/statement-generation.js(17), src/main-process/statement-session.js(6), src/main.js(1) |

@@ -1,7 +1,7 @@
 {
   "meta": {
     "version": "2.1.16-beta.6",
-    "scannedAt": "2026-06-08T04:56:18.061Z",
+    "scannedAt": "2026-06-08T08:11:52.976Z",
     "root": "src",
     "totalFiles": 128,
     "totalTopLevelNames": 1308,
@@ -3732,10 +3732,10 @@
           },
           {
             "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
-            "count": 25
+            "count": 28
           }
         ],
-        "totalHits": 43,
+        "totalHits": 46,
         "fileSpan": 3
       },
       {
@@ -25375,10 +25375,10 @@
         },
         {
           "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
-          "count": 25
+          "count": 28
         }
       ],
-      "totalHits": 43,
+      "totalHits": 46,
       "fileSpan": 3
     },
     {
