@@ -63,52 +63,107 @@ function stripInternalFields(row) {
   return cleaned;
 }
 
-// rows: Array<{ ...原列, _rowId, _modifiedColumns: Set<columnName>, _hitScenarioId, _hitScenarioDisplayIndex, _hitScenarioName }>
+// v2.1.16-beta.6 需求 B（PRD §三 / TECH §需求B 🔴 资金红线：对账主产物破坏性格式变更）：
+//   预加工导出由旧「渠道对账单 + 未命中场景行」双 sheet 重构为「未命中场景 + 命中场景」双 sheet。
+//
+// rows（= modifiedRows）: Array<{ ...原列, _rowId, _modifiedColumns: Set<columnName>, _hitScenarioId, _hitScenarioDisplayIndex, _hitScenarioName }>
 // headers: Array<string>（44 列原表头）
 // savePath: 绝对路径（含 .xlsx）
-// unmatchedRows: Array<{...原列}> | null（v2.1.7 F8 round 3 可选；spec §9.8.4 第 2 sheet "未命中场景行"）
+// unmatchedRows: Array<{...原列}> | null（未命中行；null → 不输出 sheet1，仅命中 sheet）
+// modifications: Array<{ rowId, column, oldValue, newValue, scenarioId, scenarioName }> | null
+//   命中明细列数据源（D9）。rowId === modifiedRows 行的 _rowId（已核实，见 PR 报告）：
+//   engine-utils.js record(rowId,...) → rowId 来自 ensureRowId(row)=row._rowId；
+//   bank-statement-io.js readBankStatement 注入 row._rowId='row_idx'。
 //
-// v2.1.9 N5 T25（spec §5.4 🔴 对外契约破坏性变更）：
-//   v2.1.8 N3-2 引入的 Sheet 3「命中场景行」写入分支已撤除 — 改独立报表
-//   独立报表 writer：src/main-process/scenario-hit-rows-writer.js（writeScenarioHitRows）
-//   旧 includeHitScenarioSheet 参数同步移除（caller 已同步在 main.js bank-statement:export
-//   handler 改调 writeScenarioHitRows；集成测试 bank-statement-hit-scenario-sheet.js 也已改名 + 改测试目标）
-async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null) {
+// sheet1「未命中场景」：A1 加粗提示 + 第 2 行表头 + 第 3 行起 unmatchedRows
+//   （FundType==='Mark without result' 数据值的行排前，其余随后 — D8）
+// sheet2「命中场景」：第一列「命中明细」+ 原 headers；命中行保留标黄（D5）；命中明细多条以 \n 拼接（B-Q2）
+const MARK_WITHOUT_RESULT = 'Mark without result';
+const SHEET1_UNMATCHED_NAME = '未命中场景';
+const SHEET2_HIT_NAME = '命中场景';
+const SHEET1_A1_NOTICE = '请检查，导入前请删除该sheet';
+const HIT_DETAIL_HEADER = '命中明细';
+
+// 单元格值规整为字符串（用于 FundType 排序判等 + 命中明细拼接）
+//   null/undefined → ''；其它原样 String()（数据值精确匹配，不 trim 不改大小写）
+function cellToString(value) {
+  if (value === null || value === undefined) return '';
+  return String(value);
+}
+
+// 把一行的 modifications（多条字段级变更）拼成命中明细文本：
+//   每条 `<命中场景:"场景名";"字段名";变更前:"旧值";变更后:"新值">`，多条用换行分隔（B-Q2）
+function buildHitDetail(mods) {
+  if (!Array.isArray(mods) || mods.length === 0) return '';
+  return mods
+    .map((m) => `<命中场景:"${cellToString(m.scenarioName)}";"${cellToString(m.column)}";`
+      + `变更前:"${cellToString(m.oldValue)}";变更后:"${cellToString(m.newValue)}">`)
+    .join('\n');
+}
+
+async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null, modifications = null) {
   const workbook = new ExcelJS.Workbook();
-  // sheet 名沿用样例文件 / PRD §7.5 约定：'渠道对账单'
-  const sheet = workbook.addWorksheet('渠道对账单');
 
-  const sheetData = buildSheetData(rows, headers);
-  sheetData.forEach((rowValues) => sheet.addRow(rowValues));
-
-  // 表头加粗 + 字号 10（v2.0.0 GA：所有导出表头统一 size 10）
-  const headerRow = sheet.getRow(1);
-  headerRow.font = { bold: true, size: 10 };
-
-  // 标黄：rows 中每行的 _modifiedColumns 对应的单元格
-  rows.forEach((row, rowIdx) => {
-    const modifiedColumns = row._modifiedColumns;
-    if (!modifiedColumns || modifiedColumns.size === 0) return;
-    headers.forEach((header, colIdx) => {
-      if (!modifiedColumns.has(header)) return;
-      // sheet 行号从 1 起，第 1 行是表头，数据从第 2 行起
-      const cell = sheet.getCell(rowIdx + 2, colIdx + 1);
-      cell.fill = YELLOW_FILL;
-    });
-  });
-
-  // v2.1.7 round 3 F8 (spec §9.8.4)：可选第 2 sheet "未命中场景行"
-  //   - 仅当 caller 显式传 unmatchedRows（Array）时输出（向下兼容旧 caller 不传 → 单 sheet 不变）
-  //   - 即使 0 行也输出含表头 sheet（与 v2.1.6 acquiring-bill-currency 差异表"0 差异行仍输出"一致）
-  //   - 用 headers 投影（与第 1 sheet 同 44 列），自动过滤内部 _ 前缀字段
-  //   - 不标黄（未命中行无 _modifiedColumns 数据）
+  // ===== sheet1「未命中场景」=====
+  //   仅当 caller 显式传 unmatchedRows（Array）时输出（向下兼容旧 caller 不传 → 仅命中 sheet）。
+  //   即使 0 行也输出含 A1 提示 + 表头的空 sheet（AC B-5）。
   if (Array.isArray(unmatchedRows)) {
-    const unmatchedSheet = workbook.addWorksheet('未命中场景行');
-    const unmatchedSheetData = buildSheetData(unmatchedRows, headers);
-    unmatchedSheetData.forEach((rowValues) => unmatchedSheet.addRow(rowValues));
-    const unmatchedHeaderRow = unmatchedSheet.getRow(1);
-    unmatchedHeaderRow.font = { bold: true, size: 10 };
+    const s1 = workbook.addWorksheet(SHEET1_UNMATCHED_NAME);
+    // 第 1 行 A1：加粗提示（B-1）
+    const a1 = s1.getCell('A1');
+    a1.value = SHEET1_A1_NOTICE;
+    a1.font = { bold: true };
+
+    // 排序：FundType 数据值 === 'Mark without result' 的行排前，其余随后（D8 / B-2）
+    //   稳定排序：filter 两段拼接保留各段原始相对顺序
+    const markFirst = unmatchedRows.filter((r) => cellToString(r && r['FundType']) === MARK_WITHOUT_RESULT);
+    const others = unmatchedRows.filter((r) => cellToString(r && r['FundType']) !== MARK_WITHOUT_RESULT);
+    const sortedUnmatched = [...markFirst, ...others];
+
+    // 第 2 行表头（B-Q1 已定：加表头），第 3 行起数据（headers 投影自动过滤 _ 前缀诊断列）
+    const headerRow2 = s1.getRow(2);
+    headers.forEach((h, idx) => { headerRow2.getCell(idx + 1).value = h; });
+    headerRow2.font = { bold: true, size: 10 };
+    sortedUnmatched.forEach((row, rowIdx) => {
+      const r = s1.getRow(rowIdx + 3);
+      headers.forEach((h, colIdx) => { r.getCell(colIdx + 1).value = row[h]; });
+    });
   }
+
+  // ===== sheet2「命中场景」=====
+  //   第一列「命中明细」+ 原 headers；命中行保留标黄（D5）。
+  //   空数组（全未命中）仍输出含表头的空 sheet（AC B-5）。
+  const s2 = workbook.addWorksheet(SHEET2_HIT_NAME);
+  const hitHeaders = [HIT_DETAIL_HEADER, ...headers];
+  s2.addRow(hitHeaders);
+  s2.getRow(1).font = { bold: true, size: 10 };
+
+  // 按 rowId group modifications（rowId === row._rowId，已核实）
+  const modsByRowId = new Map();
+  if (Array.isArray(modifications)) {
+    modifications.forEach((m) => {
+      if (!m || m.rowId === undefined || m.rowId === null) return;
+      if (!modsByRowId.has(m.rowId)) modsByRowId.set(m.rowId, []);
+      modsByRowId.get(m.rowId).push(m);
+    });
+  }
+
+  rows.forEach((row, rowIdx) => {
+    const mods = modsByRowId.get(row._rowId) || [];
+    const detail = buildHitDetail(mods);
+    const cells = [detail, ...headers.map((h) => row[h])];
+    const r = s2.addRow(cells);
+    // 命中明细列多行换行显示（B-Q2）
+    r.getCell(1).alignment = { wrapText: true, vertical: 'top' };
+    // 保留原标黄（D5）：_modifiedColumns 对应单元格黄底；命中明细列后移 1 → colIdx + 2
+    const modifiedColumns = row._modifiedColumns;
+    if (modifiedColumns && modifiedColumns.size > 0) {
+      headers.forEach((header, colIdx) => {
+        if (!modifiedColumns.has(header)) return;
+        r.getCell(colIdx + 2).fill = YELLOW_FILL;
+      });
+    }
+  });
 
   applyWatermark(workbook);
   await workbook.xlsx.writeFile(savePath);
@@ -147,5 +202,12 @@ module.exports = {
   writeErrorReport,
   stripInternalFields,     // v2.1.7 round 3 F8 (spec §9.8.4)
   YELLOW_FILL,
-  INTERNAL_FIELDS
+  INTERNAL_FIELDS,
+  // v2.1.16-beta.6 需求 B：双 sheet 重构（单测 + caller 引用）
+  buildHitDetail,
+  SHEET1_UNMATCHED_NAME,
+  SHEET2_HIT_NAME,
+  SHEET1_A1_NOTICE,
+  HIT_DETAIL_HEADER,
+  MARK_WITHOUT_RESULT
 };

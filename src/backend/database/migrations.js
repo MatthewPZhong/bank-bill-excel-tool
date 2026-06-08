@@ -4,6 +4,8 @@ const path = require('node:path');
 const { normalizeText } = require('./utils');
 // v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
 const { appendModuleLog } = require('../logger');
+// v2.1.16-beta.5 需求4：JPM 调拨订单修复写死场景默认商户号（与引擎从 scenario.config.merchantId 读同源）。
+const { ADM_MERCHANT_ID } = require('../../constants/adm-bank-deposit-fields');
 
 function hasColumn(db, tableName, columnName) {
   const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
@@ -1621,7 +1623,7 @@ function ensureReconRoundBuiltinScenariosSeed(db) {
       } catch (insErr) {
         // UNIQUE(channel_id, name) 冲突（用户已有同名场景，channel_id=1）→ 单条跳过保留用户场景
         const msg = insErr && insErr.message ? insErr.message : String(insErr);
-        if (/UNIQUE|constraint/i.test(msg)) {
+        if (/UNIQUE constraint failed/i.test(msg)) {
           skippedConflict += 1;
           continue;
         }
@@ -1732,7 +1734,7 @@ function ensureRefundBackfillScenarioSeed(db) {
       } catch (insErr) {
         // UNIQUE(channel_id, name) 冲突（用户已有同名场景）→ 跳过保留用户场景，不中断。
         const msg = insErr && insErr.message ? insErr.message : String(insErr);
-        if (/UNIQUE|constraint/i.test(msg)) {
+        if (/UNIQUE constraint failed/i.test(msg)) {
           skippedConflict = 1;
         } else {
           throw insErr;
@@ -1747,6 +1749,129 @@ function ensureRefundBackfillScenarioSeed(db) {
       ON CONFLICT(setting_key) DO UPDATE
       SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
     `).run(REFUND_BACKFILL_SCENARIO_SEEDED_MARKER, now);
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+
+  return { status: 'seeded', inserted, skippedExisting, skippedConflict };
+}
+
+// v2.1.16-beta.5 需求4：JPM 调拨订单修复写死场景（🔴 资金红线 —— 默认休眠 enabled=0）。
+//
+// 与既有 builtin-fixed seed 的差异：
+//   - category='gateway-recon-id-fix'（不是 'builtin-fixed'）—— 该 category 已在 scenarios CHECK 内
+//     （ensureScenariosCategoryGatewayReconIdFix，v2.1.0-beta.3 引入），无需扩枚举。
+//   - config 不带 funcCategory → 「功能类别」显示由 getScenarioCategoryDisplay 回退到
+//     SCENARIO_CATEGORY_LABELS['gateway-recon-id-fix']=「网关对账单修复」（前端零改动）。
+//   - config.subCategory='jpm-dispatch-order-fix' 是引擎分流键（runReconIdFix 据此走 JPM 引擎）。
+//   - merchantId 收进 config（引擎从 scenario.config.merchantId 读，不散落硬编码；R-10）。
+const JPM_DISPATCH_ORDER_SCENARIO = {
+  category: 'gateway-recon-id-fix',
+  name: 'JPM调拨订单修复',
+  priority: 3, // 兜底值；is_builtin 置顶机制保证 compact 单类别视图序号稳定
+  config: {
+    subCategory: 'jpm-dispatch-order-fix',
+    merchantId: ADM_MERCHANT_ID // '6300156616'
+  }
+};
+
+// v2.1.16-beta.5 需求4：JPM 场景独立 seed marker（绕开全局 marker 短路，仿 ensureRefundBackfillScenarioSeed）。
+const JPM_DISPATCH_ORDER_SCENARIO_SEEDED_MARKER = 'jpm_dispatch_order_scenario_seeded';
+
+// v2.1.16-beta.5 需求4：JPM 调拨订单修复写死场景独立补种（🔴 资金红线 —— 默认休眠 enabled=0）。
+//
+// 幂等/删除终态（与 ensureRefundBackfillScenarioSeed 同语义）：
+//   - 凭 is_builtin=1 + category='gateway-recon-id-fix' + config_json 含
+//     "subCategory":"jpm-dispatch-order-fix" 定位，已存在 → 跳过不覆盖（保护用户对启停/改名/config 的改动）。
+//   - 独立 marker(jpm_dispatch_order_scenario_seeded) 一旦写过 → 整体不再 seed，用户删除后重启不复活。
+//   - 默认 enabled=0（Layer 1 引擎层休眠，零风险）。
+//
+// 前置：scenarios 表存在 + CHECK 已含 'gateway-recon-id-fix'（否则 INSERT 触发 CHECK 失败）+ app_settings 存在。
+// 返回 { status, inserted?, skippedExisting?, skippedConflict? }
+//   status:
+//     - 'skipped-no-scenarios-table'  : scenarios 表不存在
+//     - 'skipped-check-not-extended'  : CHECK 未扩到含 'gateway-recon-id-fix'
+//     - 'skipped-no-settings-table'   : app_settings 表不存在（极早期启动）
+//     - 'already-seeded'              : 独立 marker 已写
+//     - 'seeded'                      : 本次执行（inserted=0 或 1）
+function ensureJpmDispatchOrderScenarioSeed(db) {
+  // 前置 1：scenarios 表 CHECK 必须已含 'gateway-recon-id-fix'。
+  const tableSqlRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'"
+  ).get();
+  if (!tableSqlRow || !tableSqlRow.sql) return { status: 'skipped-no-scenarios-table' };
+  if (!tableSqlRow.sql.includes("'gateway-recon-id-fix'")) {
+    return { status: 'skipped-check-not-extended' };
+  }
+
+  // 前置 2：独立 marker 已写 → 整体不再 seed（删除终态保护：用户删该场景后重启不复活）。
+  let markerRow;
+  try {
+    markerRow = db
+      .prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?')
+      .get(JPM_DISPATCH_ORDER_SCENARIO_SEEDED_MARKER);
+  } catch (_e) {
+    return { status: 'skipped-no-settings-table' };
+  }
+  if (markerRow && String(markerRow.setting_value) === 'true') {
+    return { status: 'already-seeded' };
+  }
+
+  const now = new Date().toISOString();
+  // 定位：凭 is_builtin + gateway-recon-id-fix + config_json 含特定 subCategory（已存在则跳过不覆盖用户改动）。
+  const locate = db.prepare(
+    `SELECT id FROM scenarios
+      WHERE is_builtin = 1
+        AND category = 'gateway-recon-id-fix'
+        AND config_json LIKE ?`
+  );
+  // enabled 硬编码 0（决策10：默认休眠）；category 硬编码 'gateway-recon-id-fix'。
+  const insert = db.prepare(`
+    INSERT INTO scenarios
+      (category, name, priority, enabled, config_json, is_builtin, channel_id, created_at, updated_at)
+    VALUES ('gateway-recon-id-fix', ?, ?, 0, ?, 1, 1, ?, ?)
+  `);
+
+  let inserted = 0;
+  let skippedExisting = 0;
+  let skippedConflict = 0;
+  db.exec('BEGIN');
+  try {
+    const likePattern = '%"subCategory":"jpm-dispatch-order-fix"%';
+    const existing = locate.get(likePattern);
+    if (existing) {
+      skippedExisting = 1;
+    } else {
+      try {
+        insert.run(
+          JPM_DISPATCH_ORDER_SCENARIO.name,
+          JPM_DISPATCH_ORDER_SCENARIO.priority,
+          JSON.stringify(JPM_DISPATCH_ORDER_SCENARIO.config),
+          now,
+          now
+        );
+        inserted = 1;
+      } catch (insErr) {
+        // UNIQUE(channel_id, name) 冲突（用户已有同名场景）→ 跳过保留用户场景，不中断。
+        const msg = insErr && insErr.message ? insErr.message : String(insErr);
+        if (/UNIQUE constraint failed/i.test(msg)) {
+          skippedConflict = 1;
+        } else {
+          throw insErr;
+        }
+      }
+    }
+
+    // 写独立 marker（仅首次启动写一次；此后删除不复活）。
+    db.prepare(`
+      INSERT INTO app_settings (setting_key, setting_value, updated_at)
+      VALUES (?, 'true', ?)
+      ON CONFLICT(setting_key) DO UPDATE
+      SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+    `).run(JPM_DISPATCH_ORDER_SCENARIO_SEEDED_MARKER, now);
 
     db.exec('COMMIT');
   } catch (error) {
@@ -2607,6 +2732,36 @@ function ensureLinkedTableSupport(db) {
   }
 }
 
+// v2.1.16-beta.5 需求3：ADM 银行对账单链接表（隐藏表 linked_adm_bank_deposit）。
+//   由银行对账单表 Channel=ADM 行派生（13 银行字段 + 6 新字段，全进 raw_json），与中台调拨订单匹配。
+//   🔴 资金/数据红线说明：纯新增隐藏表，无破坏性 DDL（CREATE TABLE / INDEX IF NOT EXISTS 幂等）；
+//      与现有 4 张链接表完全隔离、无调用顺序依赖；整表覆盖语义由 replaceAdmBankDeposit 仓储函数实现。
+//   raw_json 存整行（与现有链接表同范式）；batch_no / channel_order_no 同时落列供 JPM 引擎按批 GROUP / 索引。
+//   独立于 ensureLinkedTableSupport（不进 ALL_TABLE_KEYS，前端弹窗不可见）；在 database.js 初始化序列里紧随其后调用。
+function ensureAdmBankDepositSupport(db) {
+  db.exec('BEGIN');
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS linked_adm_bank_deposit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reconciliation_id TEXT,
+        bill_date TEXT,
+        batch_no TEXT,
+        channel_order_no TEXT,
+        raw_json TEXT NOT NULL,
+        imported_at TEXT NOT NULL
+      );
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_adm_bank_deposit_batch ON linked_adm_bank_deposit(batch_no);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_adm_bank_deposit_date ON linked_adm_bank_deposit(bill_date);');
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀，无 UI）。
 //   每次导入银行对账单后去重 upsert 两类枚举值：value_type='channel'（Channel 值）/
 //   'channel-region'（<Channel>-<地区> 拼接值）。供后续 ③ 中台退款回填引擎读库 + 业务审计。
@@ -2680,6 +2835,8 @@ module.exports = {
   ensureReconRoundBuiltinScenariosSeed,
   // v2.1.16-beta.4 ③：中台退款订单回填场景独立补种（默认休眠 enabled=0，独立 marker 绕开全局 marker 短路）
   ensureRefundBackfillScenarioSeed,
+  // v2.1.16-beta.5 需求4：JPM 调拨订单修复写死场景独立补种（默认休眠 enabled=0，独立 marker；category=gateway-recon-id-fix）
+  ensureJpmDispatchOrderScenarioSeed,
   // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线）
   ensureFundTypeAchReturnConfigMigration,
   // v2.1.10 N4-cont-2：diff_rows 2 FK 加 ON DELETE CASCADE（🔴 资金红线 + 不可逆 DB schema）
@@ -2687,6 +2844,8 @@ module.exports = {
   // v2.1.16 阶段一 A3：链接表持久化（meta + 3 张数据表，期权表模板缺失暂不建）
   //   v2.1.16-beta.3 ②：事务内追加 linked_bank_deposit（入金表）+ recon/date 两索引
   ensureLinkedTableSupport,
+  // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表（紧随 linked 表，独立幂等迁移函数）
+  ensureAdmBankDepositSupport,
   // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀，独立迁移函数）
   ensureChannelEnumSupport,
   ensureBuiltinScenarioNamesUpdate,

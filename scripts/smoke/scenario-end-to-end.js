@@ -155,8 +155,9 @@ async function runScenarioEndToEndSmokeTests() {
       // 读回校验：r1 ReconciliationId = 'AFT123456789012' + 标黄
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.readFile(writeOut.filePath);
-      const sheet = wb.getWorksheet('渠道对账单');
-      const reconColIdx = BANK_STATEMENT_FIELDS.indexOf('ReconciliationId') + 1;
+      // v2.1.16-beta.6 需求B：命中行在「命中场景」sheet；原数据列右移1（命中明细占第1列）
+      const sheet = wb.getWorksheet('命中场景');
+      const reconColIdx = BANK_STATEMENT_FIELDS.indexOf('ReconciliationId') + 2;  // +1 转1基 +1 命中明细列右移
       // 行序对应 modifiedRows 顺序：r1, r2, r3, r4（按 bankRows.filter 顺序）
       // sheet 第 1 行是 header，第 2 行 = r1
       const r1Cell = sheet.getCell(2, reconColIdx);
@@ -175,7 +176,7 @@ async function runScenarioEndToEndSmokeTests() {
         'r4 ReconciliationId 应黄底'
       );
       // r3 FundType = outbound Fail（C2 打标）
-      const fundTypeColIdx = BANK_STATEMENT_FIELDS.indexOf('FundType') + 1;
+      const fundTypeColIdx = BANK_STATEMENT_FIELDS.indexOf('FundType') + 2;  // +1 转1基 +1 命中明细列右移
       const r3Cell = sheet.getCell(4, fundTypeColIdx);
       check('E1.13', r3Cell.value === 'outbound Fail', `r3 FundType 应被打标 outbound Fail，实 ${r3Cell.value}`);
       check(

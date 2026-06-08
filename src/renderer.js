@@ -166,6 +166,11 @@ const state = {
   gatewayReconSession: null,     // { fileName, rowCount, importedAt } | null
   processingResult: null,        // { hitRowCount, scenarioHitCount, warningCount, ranAt } | null
   bankStatementExport: null,     // { mainFileName, errorReportName } | null（仅 renderer-side 缓存）
+  // v2.1.16-beta.5 需求1（PR-4 修订）🔴 资金红线：资金对账面板 row1《开始运行》的智能路由模式。
+  //   'bank'（默认/最近一次导入对账单成功）→ bankStatementRunBtn 走 handleBankStatementRun()（R1-R5 核心引擎）；
+  //   'gateway'（最近一次导入不平表成功）   → bankStatementRunBtn 走 handleBankStatementGatewayReconRun()（网关场景）。
+  //   仅用此显式字段判路由，绝不用 session 探测（reconIdFixSession 与 ReconID 修复模块共享，易误判串引擎）。
+  bankStatementProcessRunMode: 'bank',
   // 4 弹窗共享的临时配置（"返回" 保留，"完成/取消/关闭" 清空）
   scenarioDraft: null,           // { mode, category, scenarioId, name, priority, config } | null
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块 — renderer 侧 UI 缓存（spec §七）
@@ -293,7 +298,9 @@ const elements = {
   bankStatementRunBtn: document.getElementById('bankStatementRunBtn'),
   bankStatementExportBtn: document.getElementById('bankStatementExportBtn'),
   bankStatementStatusBox: document.getElementById('bankStatementStatusBox'),
-  // v2.1.14 B：资金对账数据处理面板新增 3 按钮（导入不平表复用真实 IPC / 不平校验导出 + 链接表管理为占位）
+  // v2.1.14 B：资金对账数据处理面板新增按钮（导入不平表 / 导出文件 + 链接表管理）
+  // v2.1.16-beta.5 需求1（PR-4 修订）：row2 删除独立《开始运行》——网关场景运行改由 row1《开始运行》
+  //   (bankStatementRunBtn) 按面板模式智能路由（见 state.bankStatementProcessRunMode）。本行只剩 导入不平表 / 导出文件。
   bankStatementGatewayReconImportBtn: document.getElementById('bankStatementGatewayReconImportBtn'),
   bankStatementGatewayReconExportBtn: document.getElementById('bankStatementGatewayReconExportBtn'),
   bankStatementLinkedTableBtn: document.getElementById('bankStatementLinkedTableBtn'),
@@ -354,6 +361,8 @@ const elements = {
 const {
   closeModal,
   openModal,
+  // v2.1.16-beta.5 需求1（PR-4）：资金对账面板「开始运行」多场景单选对话框
+  createGatewayReconScenarioPickerDialog,
   createAlertDialog,
   createConfirmDialog,
   createExportScopeDialog,
@@ -3399,8 +3408,35 @@ function updateBankStatementUi() {
 
   // 按钮 disabled 控制
   if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = false;
-  if (elements.bankStatementRunBtn) elements.bankStatementRunBtn.disabled = !bs;
-  if (elements.bankStatementExportBtn) elements.bankStatementExportBtn.disabled = !pr;
+  updateBankStatementRunBtnDisabled();
+  updateBankStatementExportButtonsDisabled();
+}
+
+// v2.1.16-beta.5 需求1（PR-4 修订）🔴 资金红线：row1《开始运行》(bankStatementRunBtn) disabled 重算。
+//   抽成独立 helper，使「导入不平表」成功路径也能让按钮 enable（该路径不走 updateBankStatementUi，避免覆盖状态框）。
+//   F3c 修复（self-review）：enable 判据与路由 mode 对齐，消除「按钮亮起却点击 abort」的状态不自洽。
+//   mode='gateway'（最近导入不平表）→ 按网关 recon session 判定可点；mode='bank'（默认/最近导入对账单）→ 按银行对账单 session 判定。
+//   实际跑哪个引擎由 state.bankStatementProcessRunMode 决定（见 bankStatementRunBtn click handler）——enable 与路由现一致。
+function updateBankStatementRunBtnDisabled() {
+  if (!elements.bankStatementRunBtn) return;
+  const ready = state.bankStatementProcessRunMode === 'gateway'
+    ? !!state.reconIdFixSession
+    : !!state.bankStatementSession;
+  elements.bankStatementRunBtn.disabled = !ready;
+}
+
+// v2.1.16-beta.6 需求A 🔴 资金红线：两个《导出文件》按钮按面板模式互斥（与 row1 路由 mode 一致）。
+//   抽成 helper，使「导入对账单成功」(updateBankStatementUi) 与「导入不平表成功」(:4109 路径) 都能刷新。
+function updateBankStatementExportButtonsDisabled() {
+  const isGateway = state.bankStatementProcessRunMode === 'gateway';
+  // 预加工组导出：仅 bank 模式 + 已有处理结果可点
+  if (elements.bankStatementExportBtn) {
+    elements.bankStatementExportBtn.disabled = isGateway || !state.processingResult;
+  }
+  // 不平表组导出：仅 gateway 模式 + reconIdFixSession 就位可点
+  if (elements.bankStatementGatewayReconExportBtn) {
+    elements.bankStatementGatewayReconExportBtn.disabled = !isGateway || !state.reconIdFixSession;
+  }
 }
 
 // v2.1.14：纯前端占位 helper —— 功能 UI 已就位但后端未接入，统一弹「后续版本开放」提示框。
@@ -3420,6 +3456,18 @@ function showComingSoon(featureName) {
 // v2.1.16 A5：批量导入（按表头识别）—— 多选文件 → main 逐文件识别路由 → 批量结果明细弹窗。
 //   银行对账单通路：多文件 = 合并对账（main 追加 rows + 全局唯一 _rowId）；明细体现「N 个文件合并 M 行」。
 //   中台退款/入账原始本阶段功能开关默认关 → main 返回 status='disabled'（标「未启用跳过」）。
+// v2.1.16-beta.6 修复（根因）：renderer.js 顶层 16 处引用 escapeHtml，但它只定义在 renderer-dialogs.js
+//   的 IIFE 内（renderer.js 作用域访问不到）→ buildBatchImportSummaryHtml 等运行到时 ReferenceError
+//   （表现：批量导入对账单后「批量明细框」弹不出来，退款提醒也无从触发）。
+//   在本文件顶层补一份同实现（function 声明 hoist，覆盖本文件全部 escapeHtml 引用）。
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
 function buildBatchImportSummaryHtml(results) {
   const list = Array.isArray(results) ? results : [];
   // 预处理表 tableKey → 中文名（与 main detector tableKey 对齐）
@@ -3506,14 +3554,28 @@ async function handleBankStatementBatchImport() {
   const hasBankStatementOk = results.some((r) => r.status === 'ok' && r.tableKey === 'bank-statement');
   if (hasBankStatementOk) {
     state.bankStatementExport = null;
-    await refreshBankStatementStatus();
+    // v2.1.16-beta.5 需求1（PR-4 修订）🔴 资金红线：导入对账单成功 → 面板运行模式置 'bank'，
+    //   row1《开始运行》此后走 R1-R5 核心（handleBankStatementRun）。仅本批确实含 bank-statement 时才改，
+    //   本批无 bank-statement（如失败/全是其它表）则保持原 mode（不误覆盖刚导入不平表的 'gateway'）。
+    state.bankStatementProcessRunMode = 'bank';
+    // v2.1.16-beta.6 防御：状态刷新抛错不应阻断「批量明细框」弹出（明细框是导入反馈，必须显示）
+    try {
+      await refreshBankStatementStatus();
+    } catch (refreshErr) {
+      console.error('[导入对账单] 状态刷新失败（已兜底，不阻断明细框）:', refreshErr);
+    }
   }
   // 弹批量明细；确认后若导入了银行对账单，沿用单选导入的 C3 提示逻辑
   //   （createAlertDialog 点「确认」时已内部 closeModal，onConfirm 内无需再关）
   openModal(createAlertDialog(buildBatchImportSummaryHtml(results), {
     skipLogReport: true,
     onConfirm: hasBankStatementOk
-      ? () => { maybePromptGatewayReconImport(); }
+      ? async () => {
+          // v2.1.16-beta.6 需求C P0-4：先查退款订单导入提醒（与 C3 提醒互斥，退款优先；
+          //   C3 在运行点 shouldPromptGatewayReconAtRun 还有兜底提醒，不会漏）。
+          const refundPrompted = await maybePromptRefundOrderImport(results);
+          if (!refundPrompted) maybePromptGatewayReconImport();
+        }
       : undefined
   }));
 }
@@ -3542,6 +3604,31 @@ async function maybePromptGatewayReconImport() {
   }
 }
 
+// v2.1.16-beta.6 需求C P0-4（规则一）：启用「中台退款订单回填」场景、但本批未导入退款订单表 → 弹提醒。
+//   返回 true=弹了提醒（调用方据此与 C3 提醒互斥）。
+//   场景启用判断依赖 name（listScenarios 不返 config_json → 无 subCategory）；name 是 builtin seed
+//   写死常量 REFUND_BACKFILL_SCENARIO.name='中台退款订单回填'，稳定；误判仅影响 UX 提示、不碰资金。
+async function maybePromptRefundOrderImport(results) {
+  try {
+    const list = await window.desktopApi.scenarios.list();
+    const scenarios = (list && list.status === 'ok' && Array.isArray(list.scenarios)) ? list.scenarios : [];
+    const enabled = scenarios.some((s) =>
+      s.name === '中台退款订单回填' && (s.enabled === 1 || s.enabled === true));
+    if (!enabled) return false;
+    // 本批已识别到退款订单表（落 session）→ 不提醒（规则一「带该表则不弹」）
+    const hasRefundOk = (results || []).some((r) => r.tableKey === 'zhongtai-refund-order' && r.status === 'ok');
+    if (hasRefundOk) return false;
+    openModal(createAlertDialog(
+      '已启用「中台退款订单回填」场景，但本次未导入「中台退款订单表」。<br>请补充导入「中台退款订单」文件后再运行。',
+      { logLevel: 'info', skipLogReport: true }
+    ));
+    return true;
+  } catch (error) {
+    console.warn('maybePromptRefundOrderImport failed:', error);
+    return false;
+  }
+}
+
 async function handleBankStatementImportGatewayRecon() {
   try {
     const result = await window.desktopApi.bankStatement.importGatewayRecon();
@@ -3563,6 +3650,25 @@ async function handleBankStatementImportGatewayRecon() {
     console.error(error);
     openModal(createAlertDialog(`导入资金对账文件失败：${error.message || error}`));
     return false;
+  }
+}
+
+// v2.1.16-beta.5 需求1（PR-4 修订）🔴🔴 资金红线（智能路由）：
+//   资金对账面板 row1《开始运行》(bankStatementRunBtn) 的唯一入口。按面板模式 state.bankStatementProcessRunMode 分流：
+//     - 'gateway'（最近一次导入不平表成功）→ handleBankStatementGatewayReconRun()（运行已启用 gateway-recon-id-fix 场景，含 JPM）
+//     - 否则（'bank' / 默认 / 任何非 'gateway' 值）→ handleBankStatementRun()（R1-R5 银行对账单核心引擎）
+//   保守默认：仅显式 === 'gateway' 才走网关；任何意外值（undefined/null/未知）一律 fallthrough 到 R1-R5 核心，绝不误入网关引擎。
+//   两个被调函数体本次零改动，仅在此处分流；各自首行已自带 session 前置校验，路由层不重复校验。
+async function handleBankStatementRunRouted() {
+  try {
+    if (state.bankStatementProcessRunMode === 'gateway') {
+      await handleBankStatementGatewayReconRun();
+    } else {
+      await handleBankStatementRun();
+    }
+  } catch (error) {
+    // 被调函数内部已 try/catch 所有路径，这里仅作最终防御（理论不可达）
+    console.error('handleBankStatementRunRouted failed:', error);
   }
 }
 
@@ -4018,6 +4124,132 @@ async function handleReconIdFixExport() {
     updateReconIdFixUi();
   } catch (error) {
     openModal(createAlertDialog(`导出失败：${error && error.message ? error.message : error}`));
+  }
+}
+
+// ============================================================
+// v2.1.16-beta.5 需求1（PR-4 修订）：资金对账「不平校验」组接到网关 ReconID 修复链路
+//   - 与「对账单 ReconID 修复」网关子模式共用 main 进程 reconIdFixSession（决策1）：
+//     资金对账面板「导入不平表」固定走 subMode='gateway'；run/export 复用同一 session/引擎/导出。
+//   - 修订后 row2 仅两按钮：导入不平表 → handleBankStatementGatewayReconImport；导出文件 → handleReconIdFixExport（reconIdFix.export()）。
+//   - 网关场景运行：删除了 row2 独立《开始运行》，改由 row1《开始运行》(bankStatementRunBtn) 按 mode 智能路由
+//     （handleBankStatementRunRouted → mode='gateway' 时调 handleBankStatementGatewayReconRun()）。本函数仍保留并被复用。
+//   - ⚠️ 共用 session 语义：资金对账面板导入会覆盖 ReconID 修复面板已导入的 gateway/business 文件；
+//     run 时 main 端按 session.subMode vs scenario.category 兜底校验（不一致提示重新导入），不会误跑。
+// ============================================================
+
+// 导入不平表：固定 subMode='gateway'（资金对账面板语义固定网关，不读 state.reconIdFixBillCategory）。
+//   成功后 refreshReconIdFixStatus() 同步 main session → renderer state（让 ReconID 修复面板状态一致），
+//   并把结果反馈到资金对账状态框。
+async function handleBankStatementGatewayReconImport() {
+  try {
+    const result = await window.desktopApi.reconIdFix.import({ subMode: 'gateway' });
+    if (!result || result.status === 'cancelled') {
+      return; // 用户取消，状态保持
+    }
+    if (result.status === 'invalid') {
+      const detail = Array.isArray(result.detailLines) && result.detailLines.length > 0
+        ? `<br>${result.detailLines.slice(0, 5).map((l) => `• ${l}`).join('<br>')}`
+        : '';
+      openModal(createAlertDialog(`导入失败：${result.message || '文件校验未通过'}${detail}`));
+      return;
+    }
+    if (result.status !== 'ok') {
+      openModal(createAlertDialog(`导入失败：${result.message || '未知错误'}`));
+      return;
+    }
+    // 资金红线：导入新文件后清旧导出文案；刷新 main 端 session-status 同步 ReconID 修复面板 state
+    state.reconIdFixExport = null;
+    if (typeof refreshReconIdFixStatus === 'function') {
+      await refreshReconIdFixStatus();  // 写 state.reconIdFixSession（gateway recon session 镜像）= 就绪
+    }
+    // v2.1.16-beta.5 需求1（PR-4 修订）🔴 资金红线：导入不平表成功 → 面板运行模式置 'gateway'，
+    //   row1《开始运行》此后路由到 handleBankStatementGatewayReconRun()（网关场景）。基于「导入不平表成功」动作事实判定，
+    //   不依赖 session 探测。随后重算 row1 按钮 disabled —— 此时 reconIdFixSession 已就绪 → 按钮 enable。
+    state.bankStatementProcessRunMode = 'gateway';
+    updateBankStatementRunBtnDisabled();
+    updateBankStatementExportButtonsDisabled();  // v2.1.16-beta.6 需求A：mode→gateway 后刷新两个导出按钮互斥状态（本路径不走 updateBankStatementUi）
+    // 不写 bankStatementStatusBox（该状态框语义归银行对账单主流程，避免被 updateBankStatementUi 覆盖/冲突）；
+    //   用弹框反馈，与导出提示风格一致。
+    const counts = result.sheetCounts || {};
+    openModal(createAlertDialog(
+      `已导入不平表 ${result.fileName}（${counts.business || 0} 行网关账单 / ${counts.opp || 0} 行渠道账单）。<br>请点击"开始运行"运行已启用的网关对账单修复场景。`,
+      { logLevel: 'info', skipLogReport: true }
+    ));
+  } catch (error) {
+    openModal(createAlertDialog(`导入失败：${error && error.message ? error.message : error}`));
+  }
+}
+
+// 开始运行：取场景管理里「已启用」的 gateway-recon-id-fix 场景（含 JPM 调拨订单修复场景）运行。
+//   - 0 个启用 → 提示去场景管理启用；1 个 → 直接跑；≥2 个 → 弹场景选择对话框让用户挑一个（决策2/3）。
+//   - 前提：先导入不平表（main 端 reconIdFixSession 就位）。session 的 subMode 是否为 gateway 由 main 端 run 兜底校验。
+//   - JPM 场景前提（渠道账单含 merchantId=6300156616）由引擎层 PR-3 处理：空结果 + 提示，前端透传 stats。
+async function handleBankStatementGatewayReconRun() {
+  try {
+    // 1. 检查 main 端 session 是否就位（不依赖 renderer 侧 state.reconIdFixSession —— 资金对账面板不维护它）
+    const sessionStatus = await window.desktopApi.reconIdFix.sessionStatus();
+    if (!sessionStatus || sessionStatus.status !== 'ok' || !sessionStatus.hasFile) {
+      openModal(createAlertDialog('请先点击"导入不平表"导入资金对账不平结果表'));
+      return;
+    }
+    // 2. 取「已启用」的 gateway-recon-id-fix 场景
+    const list = await window.desktopApi.scenarios.list();
+    const scenarios = (list && list.status === 'ok' && Array.isArray(list.scenarios)) ? list.scenarios : [];
+    const enabled = scenarios.filter((s) =>
+      s.category === 'gateway-recon-id-fix' && (s.enabled === 1 || s.enabled === true));
+    if (enabled.length === 0) {
+      openModal(createAlertDialog('请先在网关对账单修复-场景管理启用场景'));
+      return;
+    }
+    // 3. 0/1/≥2 分流
+    if (enabled.length === 1) {
+      await runGatewayReconScenario(enabled[0].id);
+      return;
+    }
+    // ≥2 个：弹场景选择对话框让用户挑一个（资金对账面板无场景下拉，复用单选对话框范式）
+    openModal(createGatewayReconScenarioPickerDialog({
+      scenarios: enabled,
+      onPick: async (scenarioId) => {
+        closeModal();
+        await runGatewayReconScenario(scenarioId);
+      }
+    }));
+  } catch (error) {
+    openModal(createAlertDialog(`运行失败：${error && error.message ? error.message : error}`));
+  }
+}
+
+// 实际调 reconIdFix.run（与 handleReconIdFixRun 同一 IPC，共用 session/引擎）。
+//   成功后 refreshReconIdFixStatus() 同步 result → renderer state（导出按钮亮 + 状态框反馈）。
+async function runGatewayReconScenario(scenarioId) {
+  try {
+    const result = await window.desktopApi.reconIdFix.run({ scenarioId });
+    if (!result || result.status !== 'ok') {
+      openModal(createAlertDialog(`运行失败：${(result && result.message) || '未知错误'}`));
+      // run 失败可能清了 main 端 result（stale 等），同步一次状态
+      if (typeof refreshReconIdFixStatus === 'function') {
+        await refreshReconIdFixStatus();
+      }
+      return;
+    }
+    // 运行成功：清旧导出文案 + 刷新 session-status 同步 result（让"导出文件"按钮可用）
+    state.reconIdFixExport = null;
+    if (typeof refreshReconIdFixStatus === 'function') {
+      await refreshReconIdFixStatus();
+    }
+    const stats = result.stats || {};
+    const fixedCount = Number(stats.fixedRowCount || 0);
+    // v2.1.16-beta.5 需求1（PR-4）：警告数取 result.warnings 数组长度（run 返回 stats 无 warningCount，warnings 单独透传）
+    const warningCount = Array.isArray(result.warnings) ? result.warnings.length : 0;
+    // 用弹框反馈（不写 bankStatementStatusBox，理由同导入）。
+    const baseMsg = fixedCount > 0
+      ? `运行完成，命中 ${fixedCount} 行网关修复。<br>请点击"导出文件"导出网关对账单修复文件。`
+      : '运行完成，本次无网关修复行。<br>（渠道账单可能无 merchantId=6300156616，或三段匹配未命中。）';
+    const warnMsg = warningCount > 0 ? `<br>另有 ${warningCount} 条警告。` : '';
+    openModal(createAlertDialog(`${baseMsg}${warnMsg}`, { logLevel: 'info', skipLogReport: true }));
+  } catch (error) {
+    openModal(createAlertDialog(`运行失败：${error && error.message ? error.message : error}`));
   }
 }
 
@@ -5190,17 +5422,27 @@ async function initialize() {
   // v2.1.16 A5：「导入对账单」按钮即批量入口（多选 + 按表头识别路由）。
   //   单选 1 个银行对账单是批量子集，行为等同原单选导入（识别 bank-statement → readBankStatement → 写 session）。
   elements.bankStatementImportBtn.addEventListener('click', handleBankStatementBatchImport);
-  elements.bankStatementRunBtn.addEventListener('click', handleBankStatementRun);
+  // v2.1.16-beta.5 需求1（PR-4 修订）🔴 资金红线：row1《开始运行》改智能路由（按面板模式分流，不直接绑 handleBankStatementRun）。
+  elements.bankStatementRunBtn.addEventListener('click', handleBankStatementRunRouted);
   elements.bankStatementExportBtn.addEventListener('click', handleBankStatementExport);
-  // v2.1.14 B：资金对账不平校验组 + 链接表管理按钮绑定
-  //   - 导入不平表 → 复用现有 handleBankStatementImportGatewayRecon（真实 importGatewayRecon IPC；内部自校验，按钮常驻 enabled）
-  //   - 不平校验导出 → 占位（暂无 gateway-recon 导出 IPC），统一 showComingSoon 提示，不写数据、不伪装成功
-  //   - 链接表管理 → 打开链接表管理弹窗（UI 骨架占位）
+  // v2.1.14 B / v2.1.16-beta.5 需求1（PR-4 修订）：资金对账不平校验组 + 链接表管理按钮绑定
+  //   - 导入不平表 → reconIdFix.import({subMode:'gateway'})，与「对账单 ReconID 修复」网关子模式共用 reconIdFixSession（后端零改动）
+  //   - 导出文件 → reconIdFix.export()，复用 handleReconIdFixExport（导出网关对账单修复文件）
+  //   - 网关场景运行：已删除本行独立《开始运行》，改由 row1《开始运行》(bankStatementRunBtn) 按 mode 路由（见 handleBankStatementRunRouted）
+  //   - 链接表管理 → 打开链接表管理弹窗
   if (elements.bankStatementGatewayReconImportBtn) {
-    elements.bankStatementGatewayReconImportBtn.addEventListener('click', handleBankStatementImportGatewayRecon);
+    elements.bankStatementGatewayReconImportBtn.addEventListener('click', () => {
+      handleBankStatementGatewayReconImport().catch((error) => {
+        console.error('handleBankStatementGatewayReconImport failed:', error);
+      });
+    });
   }
   if (elements.bankStatementGatewayReconExportBtn) {
-    elements.bankStatementGatewayReconExportBtn.addEventListener('click', () => showComingSoon('资金对账不平校验导出'));
+    elements.bankStatementGatewayReconExportBtn.addEventListener('click', () => {
+      handleReconIdFixExport().catch((error) => {
+        console.error('handleReconIdFixExport (gateway recon export) failed:', error);
+      });
+    });
   }
   if (elements.bankStatementLinkedTableBtn) {
     elements.bankStatementLinkedTableBtn.addEventListener('click', () => openModal(createLinkedTableManagerDialog()));

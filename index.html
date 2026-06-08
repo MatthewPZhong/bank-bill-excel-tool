@@ -274,7 +274,14 @@
                  row1 右=[开始运行]  左=pair[导入对账单, 导出文件]
                  row2 右=[场景管理]  左=pair[导入不平表, 导出文件]
                  row3 右=[链接表管理] 左=[状态框（含 spark svg）]
-               8 个按钮 id（5 原 + 3 新）+ status-box 内部 spark svg/status-box-text 全保留；事件绑定/handler 不动。 -->
+               status-box 内部 spark svg/status-box-text 全保留。
+               v2.1.16-beta.5 需求1（PR-4 修订）：row2 右 cell 接到网关 ReconID 修复链路 ——
+                 导入不平表 → reconIdFix.import({subMode:'gateway'})；
+                 导出文件   → reconIdFix.export()（导出网关对账单修复文件）。
+               🔴 资金红线：row2 不再有独立《开始运行》；改由 row1《开始运行》(bankStatementRunBtn) 按面板模式
+                 (state.bankStatementProcessRunMode) 智能路由：'gateway'(最近一次导入不平表) → handleBankStatementGatewayReconRun()；
+                 否则('bank'/默认，最近一次导入对账单) → handleBankStatementRun()（R1-R5 核心，绝不串引擎）。
+               与「对账单 ReconID 修复」网关子模式共用同一 reconIdFixSession（后端零改动）。 -->
           <section id="bankStatementModulePanel" class="control-board module-panel bank-statement-board layout-mirrored" hidden>
             <div class="control-row">
               <div class="cell left">
@@ -296,6 +303,8 @@
               <div class="cell right">
                 <div class="pending-action-pair">
                   <button id="bankStatementGatewayReconImportBtn" class="primary-btn" type="button">导入不平表</button>
+                  <!-- v2.1.16-beta.5 需求1（PR-4 修订）：删除 row2 独立《开始运行》——改由 row1《开始运行》(bankStatementRunBtn) 按面板模式智能路由到网关场景；
+                       本行导出文案「不平校验导出」→「导出文件」（绑定保持 handleReconIdFixExport 不变）。 -->
                   <button id="bankStatementGatewayReconExportBtn" class="secondary-btn" type="button">导出文件</button>
                 </div>
               </div>

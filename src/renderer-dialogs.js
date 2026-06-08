@@ -6168,8 +6168,8 @@
         'mid-allocation': '中台调拨订单表库',
         'fx-settlement': '外汇交割表库',
         'fx-option': '外汇期权表库',
-        // v2.1.16-beta.3 ②：链接表管理新增第 5 行「银行对账单入金表」
-        'bank-deposit': '银行对账单入金表'
+        // v2.1.16-beta.3 ②：链接表管理新增第 5 行；v2.1.16-beta.5 需求2 改名「银行对账单入金表」→「银行对账单表」
+        'bank-deposit': '银行对账单表'
       };
       const PLACEHOLDER = '—';
       const overlay = createOverlay();
@@ -6283,6 +6283,67 @@
         return lines.join('<br/><br/>');
       }
 
+      // v2.1.16-beta.5 需求3（PRD §5.3.6 / Mockup B/C）：从批量导入 results 取 ADM 派生信息（main.js 挂在
+      //   bank-deposit 或 mid-allocation 文件 result 的 admDerive 子字段；PR#65 新 Finding1 起两源任一变更都重建）。
+      //   🔴 取「最后一个」有 admDerive 者：一次多选可能 bank-deposit + mid-allocation 都触发重建，handler 按文件
+      //   顺序逐次 replaceAdmBankDeposit（整表覆盖）→ 最后一次 = DB 最终态，弹框须用最后一次的 stats（取首个会显示旧态）。
+      function findAdmDerive(results) {
+        const list = Array.isArray(results) ? results : [];
+        let hit = null;
+        for (const r of list) { if (r && r.admDerive) hit = r; }
+        return hit ? hit.admDerive : null;
+      }
+
+      // ADM 派生未匹配错误码 → 中文说明（PRD §5.3.6）。
+      const ADM_UNMATCHED_CODE_LABELS = {
+        'no-mid-match': '中台无对应渠道流水号',
+        'mid-duplicate': '中台侧渠道流水号重复',
+        'adm-duplicate': 'ADM 侧 CustomerRef 重复',
+        'empty-customerref': 'ADM 行 CustomerRef 为空'
+      };
+      // 报错框最多列前 N 条未匹配明细，防 DOM 过载（PRD §5.3.6 / 决策4）。
+      const ADM_UNMATCHED_DISPLAY_LIMIT = 50;
+
+      // 构造 ADM 派生结果弹框 HTML（四态：派生失败 / 全匹配成功 / 部分成功未匹配 / 中台空）。
+      //   返回 null = 无需弹 ADM 框（admDerive 缺失）。
+      function buildAdmDeriveHtml(admDerive) {
+        if (!admDerive) return null;
+        // 派生失败（异常）：直接提示错误（银行对账单表本身已导入成功，仅 ADM 派生失败）。
+        if (!admDerive.created) {
+          const err = admDerive.error ? String(admDerive.error) : '未知错误';
+          return `<b>ADM 银行对账单链接表派生失败</b><br/><br/>${escapeHtml(err)}`;
+        }
+        const unmatched = Array.isArray(admDerive.unmatched) ? admDerive.unmatched : [];
+        // 全匹配成功（无未匹配）→ Mockup B：「ADM银行对账单链接表已创建」。
+        if (unmatched.length === 0) {
+          return 'ADM银行对账单链接表已创建。';
+        }
+        // 部分成功 → Mockup C：列未匹配行（批次号/CustomerRef/BillDate/ChannelOrderNo + 错误码中文说明）。
+        const head = [];
+        if (admDerive.midEmpty) {
+          // 中台表为空 → 顶部额外提示「请先导入中台调拨订单表」（PRD §5.3.6）。
+          head.push('<b style="color:#d93025;">请先导入中台调拨订单表。</b>');
+        }
+        head.push('<b>ADM 银行对账单链接表已创建（部分行未匹配中台调拨订单）</b>');
+        head.push(`以下 <b>${unmatched.length}</b> 行未匹配，调拨号 / 调拨入金金额留空：`);
+
+        const shown = unmatched.slice(0, ADM_UNMATCHED_DISPLAY_LIMIT);
+        const items = shown.map((u) => {
+          const codeLabel = ADM_UNMATCHED_CODE_LABELS[u.code] || u.code || '未知原因';
+          const batchNo = u.batchNo === undefined || u.batchNo === null ? '' : String(u.batchNo);
+          const customerRef = u.customerRef === undefined || u.customerRef === null ? '' : String(u.customerRef);
+          const billDate = u.billDate === undefined || u.billDate === null ? '' : String(u.billDate);
+          const channelOrderNo = u.channelOrderNo === undefined || u.channelOrderNo === null ? '' : String(u.channelOrderNo);
+          return `• 批次号 ${escapeHtml(batchNo || '—')} ｜ CustomerRef=${escapeHtml(customerRef || '—')} ｜ `
+            + `BillDate=${escapeHtml(billDate || '—')} ｜ ChannelOrderNo=${escapeHtml(channelOrderNo || '—')}`
+            + `<br/>&nbsp;&nbsp;&nbsp;&nbsp;→ ${escapeHtml(codeLabel)}（${escapeHtml(u.code || '')}）`;
+        }).join('<br/>');
+        const truncatedNote = unmatched.length > ADM_UNMATCHED_DISPLAY_LIMIT
+          ? `<br/><br/>……仅显示前 ${ADM_UNMATCHED_DISPLAY_LIMIT} 行（共 ${unmatched.length} 行未匹配）`
+          : '';
+        return `${head.join('<br/><br/>')}<br/><br/>${items}${truncatedNote}`;
+      }
+
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
       dialog.querySelector('[data-action="exit"]').addEventListener('click', closeModal);
 
@@ -6310,10 +6371,25 @@
           }));
           return;
         }
-        // 弹批量明细；确认后重开链接表管理弹窗（重开内部会重新拉 list → 反映新日期范围 / 更新日期）
+        // 弹批量明细；确认后：若本次含银行对账单表（admDerive）→ 链式弹 ADM 派生结果框（PRD Mockup B/C），
+        //   再重开链接表管理弹窗；否则直接重开（重开内部会重新拉 list → 反映新日期范围 / 更新日期）。
+        const admDerive = findAdmDerive(result.results);
+        const admHtml = buildAdmDeriveHtml(admDerive);
         openModal(createAlertDialog(buildImportSummaryHtml(result.results), {
           skipLogReport: true,
-          onConfirm: () => openModal(createLinkedTableManagerDialog())
+          onConfirm: () => {
+            if (admHtml) {
+              // ADM 派生结果框（成功提示 / 部分成功报错；skipLogReport=false 让部分成功未匹配按 error 级上报）。
+              const admIsError = admDerive && (!admDerive.created
+                || (Array.isArray(admDerive.unmatched) && admDerive.unmatched.length > 0));
+              openModal(createAlertDialog(admHtml, {
+                skipLogReport: !admIsError,
+                onConfirm: () => openModal(createLinkedTableManagerDialog())
+              }));
+              return;
+            }
+            openModal(createLinkedTableManagerDialog());
+          }
         }));
       });
 
@@ -6335,11 +6411,22 @@
       // v2.1.0-beta.2 PR-A Round 2（task R2-8）：单类别入口（filter.length === 1）隐藏 优先级 + 是否启动 两列
       // 单类别没有"跨场景调度"语义，优先级和是否启动失去意义；同时让其余列宽度按比例放大填满。
       const isCompactView = Array.isArray(filter) && filter.length === 1;
+      // v2.1.16-beta.5 F1 修复：网关对账单修复-场景管理（compact，filter=['gateway-recon-id-fix']）必须显示「是否启动」列。
+      //   原因：需求1 决策2 让资金对账《开始运行》运行「已启用」的 gateway-recon-id-fix 场景（renderer.js
+      //   handleBankStatementGatewayReconRun → scenarios.list 过滤 enabled），而 JPM 写死场景默认 enabled=0；
+      //   compact 视图若不渲启用框，用户无处勾选启用 → 死锁（《开始运行》永远 0 个启用场景）。
+      //   收窄到 gateway-recon-id-fix：业务 ReconID 修复 compact（filter=['recon-id-fix']）靠场景下拉选场景运行、
+      //   不读 enabled（renderer.js handleReconIdFixRun 用 state.reconIdFixSelectedScenarioId），保持原样无该列。
+      const isGatewayReconIdFixCompact = isCompactView && filter[0] === 'gateway-recon-id-fix';
+      const showEnabledCol = !isCompactView || isGatewayReconIdFixCompact;
       const priorityTh = isCompactView ? '' : '<th class="scenarios-col-priority" style="width: 7%; text-align: center;">优先级</th>';
-      const enabledTh = isCompactView ? '' : '<th class="scenarios-col-enabled" style="width: 10%;">是否启动</th>';
+      const enabledTh = showEnabledCol ? '<th class="scenarios-col-enabled" style="width: 10%;">是否启动</th>' : '';
+      // 列宽分三套：非 compact（含优先级+启用）/ 网关 compact（无优先级、有启用）/ 业务 compact（无优先级、无启用）。
+      //   名称列被 styles-gemini-extra.css 的 .scenarios-col-name{width:30.94% !important} 强制锁定（inline 无效），
+      //   故网关 compact 只在 id/category/actions/enabled 间分配剩余约 69%（id6+cat24+actions26+enabled13≈69%）。
       const idWidth = isCompactView ? '6%' : '5%';
-      const categoryWidth = isCompactView ? '28%' : '13%';
-      const nameWidth = isCompactView ? '40%' : '18%';
+      const categoryWidth = isGatewayReconIdFixCompact ? '24%' : (isCompactView ? '28%' : '13%');
+      const nameWidth = isGatewayReconIdFixCompact ? '30.94%' : (isCompactView ? '40%' : '18%');
       const actionsWidth = isCompactView ? '26%' : '13%';
       // v2.1.15 W3：仅资金对账模块入口（filter 含 'gateway-recon-join'、非单类别 compact）显示「网关对账单修复-管理」入口；
       //   ReconID 修复模块自身入口（compact，filter=['gateway-recon-id-fix']）随 wrapper 隐藏，避免重复/自指。
@@ -6433,26 +6520,45 @@
         const tr = document.createElement('tr');
         tr.dataset.id = String(scenario.id);
         tr.dataset.category = scenario.category;
+        // v2.1.16-beta.5 需求2（PR-4 修订）：标记 is_builtin → 批量收集（collectChecked*）据此双保险排除内置写死场景。
+        tr.dataset.builtin = scenario.isBuiltin === true ? '1' : '0';
         // v2.1.0-beta.2 PR-A Round 2：
         // - task R2-7：序号 = 列表内 1-based 顺序号（不再用真实 scenarios.id；dataset.id 仍是真实 id 用于 IPC）
         // - task R2-8：compact 模式（单类别入口）隐藏 优先级 + 是否启动 td
         const priorityTd = isCompactView ? '' : `<td class="scenarios-col-priority">${escapeHtml(String(scenario.priority))}</td>`;
-        const enabledTd = isCompactView ? '' : `<td class="scenarios-col-enabled"><input type="checkbox" data-row-action="toggle-enabled" ${scenario.enabled ? 'checked' : ''} /></td>`;
+        // v2.1.16-beta.5 F1 修复：启用框随 showEnabledCol 渲染（网关 compact 也显示）。
+        //   JPM(is_builtin) 的启用框不 disabled —— 启停与操作列只读保护（CRUD）正交：
+        //   操作列禁编辑/删除/转移（isBuiltinGatewayScenario），但「是否启动」必须可点，否则需求5 死锁。
+        //   toggle-enabled change handler（本 dialog 内）对 is_builtin 无限制，gateway 类走 reloadReconIdFixScenarios 刷新。
+        const enabledTd = showEnabledCol ? `<td class="scenarios-col-enabled"><input type="checkbox" data-row-action="toggle-enabled" ${scenario.enabled ? 'checked' : ''} /></td>` : '';
         // v2.1.9 N5 Phase 5 T21：勾选列（批量模式下显示）
         const checkboxDisplay = inBatchMode ? '' : 'display: none;';
         // v2.1.13 D-2：自带写死场景（builtin-fixed）执行操作列仅「管理」按钮（无转移/删除）；
         //   「管理」点击分流到适用银行渠道弹窗（manage handler 按 tr.dataset.category 判定）
         const isBuiltinFixed = scenario.category === 'builtin-fixed';
+        // v2.1.16-beta.5 需求2（PR-4 修订）：网关对账单修复-场景管理列表里的内置场景（如「JPM调拨订单修复」，is_builtin=1
+        //   且 category='gateway-recon-id-fix'）= 写死场景，不可编辑/删除/转移 → 执行操作列去掉全部文字按钮，渲只读提示。
+        //   收窄到 category='gateway-recon-id-fix' 是为零回归：is_builtin=1 的 C2(offset-bill-mark)/C3(gateway-recon-join)/
+        //   builtin-fixed 只出现在银行对账单主面板（其 filter 不含 gateway-recon-id-fix），不受此分支影响，操作列保持现状。
+        const isBuiltinGatewayScenario = scenario.isBuiltin === true && scenario.category === 'gateway-recon-id-fix';
         // v2.1.13 UI 微调：对账单 ReconID 修复模块（isCompactView=单类别入口）执行操作列去掉「转移」按钮
         const transferBtn = isCompactView ? '' : `<button class="text-action" type="button" data-row-action="transfer">转移</button>`;
-        const actionsInner = isBuiltinFixed
-          ? `<button class="text-action" type="button" data-row-action="manage">管理</button>`
-          : `<button class="text-action" type="button" data-row-action="manage">管理</button>
+        let actionsInner;
+        if (isBuiltinGatewayScenario) {
+          // 写死场景：操作列只读，无任何可点按钮（参照渠道管理 is_builtin 保护范式）
+          actionsInner = '<span class="text-action" style="opacity: 0.55; cursor: default;" title="系统内置场景，不可编辑 / 删除 / 转移">（内置场景）</span>';
+        } else if (isBuiltinFixed) {
+          actionsInner = '<button class="text-action" type="button" data-row-action="manage">管理</button>';
+        } else {
+          actionsInner = `<button class="text-action" type="button" data-row-action="manage">管理</button>
             ${transferBtn}
             <button class="text-action danger-text" type="button" data-row-action="delete">删除</button>`;
+        }
+        // 批量勾选列：builtin-fixed 与网关写死场景均不可批量操作 → checkbox disabled
+        const selectRowDisabled = isBuiltinFixed || isBuiltinGatewayScenario;
         tr.innerHTML = `
           <td class="scenarios-col-checkbox" data-role="row-checkbox-cell" style="width: 32px; padding-left: 8px; padding-right: 0; text-align: center; ${checkboxDisplay}">
-            <input type="checkbox" data-row-action="select-row" ${isBuiltinFixed ? 'disabled title="自带写死场景不可批量操作"' : ''} />
+            <input type="checkbox" data-row-action="select-row" ${selectRowDisabled ? 'disabled title="内置写死场景不可批量操作"' : ''} />
           </td>
           <td class="scenarios-col-id" style="padding-left: 0; padding-right: 0; text-align: left; white-space: nowrap;"><span style="display: inline-block; margin-left: 21px;">${escapeHtml(String(displayIndex))}</span></td>
           <td class="scenarios-col-category">${escapeHtml(getScenarioCategoryDisplay(scenario))}</td>
@@ -6490,7 +6596,11 @@
         const ids = [];
         tbody.querySelectorAll('tr').forEach((tr) => {
           // v2.1.13：builtin-fixed（自带写死场景）不可批量操作（转移/删除），双保险排除
-          if (tr.dataset.category === 'builtin-fixed') return;
+          // v2.1.16-beta.5 需求2（修订）：仅额外排除网关写死场景「JPM调拨订单修复」(gateway-recon-id-fix + builtin)；
+          //   C2/C3(offset-bill-mark/gateway-recon-join，is_builtin=1)保持可批量删 —— 与 selectRowDisabled
+          //   (isBuiltinFixed || isBuiltinGatewayScenario) 条件一致，避免 checkbox 可勾却删不掉的不一致回归。
+          if (tr.dataset.category === 'builtin-fixed'
+            || (tr.dataset.builtin === '1' && tr.dataset.category === 'gateway-recon-id-fix')) return;
           const cb = tr.querySelector('input[data-row-action="select-row"]');
           if (cb && cb.checked && tr.dataset.id) {
             ids.push(Number(tr.dataset.id));
@@ -6504,7 +6614,10 @@
         const names = [];
         tbody.querySelectorAll('tr').forEach((tr) => {
           // v2.1.13：builtin-fixed（自带写死场景）不可批量操作，双保险排除
-          if (tr.dataset.category === 'builtin-fixed') return;
+          // v2.1.16-beta.5 需求2（修订）：仅额外排除网关写死场景「JPM调拨订单修复」；C2/C3 保持可批量删
+          //   （与 collectCheckedScenarioIds / selectRowDisabled 一致，零回归）。
+          if (tr.dataset.category === 'builtin-fixed'
+            || (tr.dataset.builtin === '1' && tr.dataset.category === 'gateway-recon-id-fix')) return;
           const cb = tr.querySelector('input[data-row-action="select-row"]');
           if (cb && cb.checked) {
             const nameTd = tr.querySelector('.scenarios-col-name');
@@ -10017,10 +10130,45 @@
       return overlay;
     }
 
+    // v2.1.16-beta.5 需求1（PR-4）：资金对账面板「开始运行」检测到 ≥2 个已启用 gateway-recon-id-fix 场景时，
+    //   弹单选对话框让用户挑一个运行。入参 { scenarios:[{id,name}], onPick(scenarioId) }；onPick 自行 closeModal。
+    function createGatewayReconScenarioPickerDialog({ scenarios = [], onPick = null } = {}) {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card alert-card';
+      const list = Array.isArray(scenarios) ? scenarios : [];
+      const radioName = `gateway-recon-scenario-pick-${list.length}`;
+      const items = list.map((s, i) => `
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 4px;cursor:pointer;">
+          <input type="radio" name="${radioName}" value="${escapeHtml(String(s.id))}" ${i === 0 ? 'checked' : ''} />
+          <span>${escapeHtml(s.name || `场景 ${s.id}`)}</span>
+        </label>
+      `).join('');
+      dialog.innerHTML = `
+        <div class="dialog-header"><div class="dialog-title">选择要运行的网关对账单修复场景</div></div>
+        <div class="alert-message" style="text-align:left;">检测到多个已启用场景，请选择一个运行：</div>
+        <div style="text-align:left;margin:8px 0;max-height:220px;overflow:auto;">${items}</div>
+        <div class="dialog-actions center">
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="confirm">运行</button>
+        </div>
+      `;
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => closeModal());
+      dialog.querySelector('[data-action="confirm"]').addEventListener('click', () => {
+        const checked = dialog.querySelector(`input[name="${radioName}"]:checked`);
+        if (!checked) return;
+        const parsed = Number.parseInt(checked.value, 10);
+        onPick?.(Number.isFinite(parsed) ? parsed : checked.value);
+      });
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     return {
       closeModal,
       openModal,
       createOverlay,
+      createGatewayReconScenarioPickerDialog,
       createAlertDialog,
       createConfirmDialog,
       createExportScopeDialog,

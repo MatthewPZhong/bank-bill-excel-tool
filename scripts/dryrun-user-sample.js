@@ -88,19 +88,21 @@ function divider(title) {
 async function verifyMainOutputYellow(filePath, modifications) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(filePath);
-  const sheet = wb.getWorksheet('渠道对账单');
+  // v2.1.16-beta.6 需求B：命中行在「命中场景」sheet；原数据列右移1（命中明细占第1列）
+  const sheet = wb.getWorksheet('命中场景');
   if (!sheet) {
-    console.log('  ⚠️ 主输出 sheet「渠道对账单」未找到');
+    console.log('  ⚠️ 主输出 sheet「命中场景」未找到');
     return false;
   }
   // 抽样验证：第一条 modification 的 cell 应黄底
   if (modifications.length === 0) return true;
   const m = modifications[0];
-  const colIdx = BANK_STATEMENT_FIELDS.indexOf(m.column) + 1;
-  if (colIdx <= 0) {
+  const rawIdx = BANK_STATEMENT_FIELDS.indexOf(m.column);
+  if (rawIdx < 0) {
     console.log(`  ⚠️ 列 ${m.column} 不在 BANK_STATEMENT_FIELDS（应是虚拟字段，跳过验证）`);
     return true;
   }
+  const colIdx = rawIdx + 2;  // +1 转1基 +1 命中明细列右移
   // 找到 modifiedRows 中 m.rowId 的索引（注意 sheet row = idx + 2）
   // 简化：扫所有数据行，找 ReconciliationId / FundType 列任意带黄底的 cell 即可
   let yellowCount = 0;
