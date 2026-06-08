@@ -11326,6 +11326,9 @@ function registerNewAccountHandlers() {
     // 本批是否已建立/合并过银行对账单 session（用于：① 第一个建 vs 后续合并的分支；
     //   ② processingResult / gatewayReconSession 整批只清一次）。
     let bankStatementMerged = false;
+    // v2.1.16-beta.6 PR#65 Finding1：本批是否已导退款订单 —— 避免同批「退款订单先于银行对账单处理」时
+    //   被银行对账单分支的「清旧退款」误清掉本批刚导入的退款 session（filePaths 顺序不可控）。
+    let refundImportedThisBatch = false;
 
     for (const filePath of choice.filePaths) {
       const fileName = path.basename(filePath);
@@ -11396,6 +11399,10 @@ function registerNewAccountHandlers() {
             // 整批只清一次：首个银行对账单成功 → 清空运行结果 + 资金对账文件（与单选导入一致）
             processingResult = null;
             gatewayReconSession = null;
+            // v2.1.16-beta.6 PR#65 Finding1（🔴 资金红线）：导入新银行对账单批次必须清旧退款 session，
+            //   否则 bank-statement:run 会把上一批退款订单注入新批次 → 跨批错误回填。
+            //   仅当本批尚未导退款订单时清（防同批「退款订单先处理」被误清）。
+            if (!refundImportedThisBatch) refundOrderSession = null;
             bankStatementMerged = true;
           } else {
             // 追加合并成功（headers 已校验一致）→ 回写合并后 rows + 记来源文件
@@ -11465,6 +11472,10 @@ function registerNewAccountHandlers() {
           const refundSignature = PREPROCESS_TABLE_SIGNATURES.find((s) => s.tableKey === 'zhongtai-refund-order');
           const refundRows = readLinkedRowsAsObjects(filePath, refundSignature, detected.sheetName);
           refundOrderSession = { fileName, rows: refundRows, importedAt: Date.now() };
+          // v2.1.16-beta.6 PR#65 Finding1（🔴 资金红线）：导入/覆盖退款订单后清运行结果，强制重新运行，
+          //   否则导出仍用上一轮旧的 refundBackfillRows/refundUnmatchedRows（跨批复用）。
+          processingResult = null;
+          refundImportedThisBatch = true; // 标记本批已导退款 → 银行对账单分支不再清它
           results.push({ fileName, tableKey, status: 'ok', rowCount: refundRows.length });
         } catch (refundErr) {
           results.push({

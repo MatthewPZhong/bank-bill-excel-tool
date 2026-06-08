@@ -48,6 +48,9 @@
 ### C-5 不串/隔离
 - [ ] **C-5a** 退款回填不影响 R1-R5 主对账（modifiedRows 不含退款回填行）
 - [ ] **C-5b** 重导退款订单表 → refundOrderSession 整体覆盖（不追加）
+- [ ] **C-5c** 🔴 跨批不复用（PR#65 Finding1）：batch1（银行对账单A + 退款X）运行后 → batch2 只导银行对账单B → run **不应**注入旧退款 X
+- [ ] **C-5d** 🔴 运行后补导退款（PR#65 Finding1）：运行一次后再导退款订单表 → processingResult 清空、导出强制重新运行，**不用**旧 refundBackfill
+- [ ] **C-5e** 同批顺序无关（PR#65 Finding1）：一次多选「退款订单 + 银行对账单」，**无论文件顺序**，退款 session 都是本批的（不被银行对账单分支误清）
 
 ---
 
