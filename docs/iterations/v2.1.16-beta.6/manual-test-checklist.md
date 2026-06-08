@@ -51,6 +51,7 @@
 - [ ] **C-5c** 🔴 跨批不复用（PR#65 Finding1）：batch1（银行对账单A + 退款X）运行后 → batch2 只导银行对账单B → run **不应**注入旧退款 X
 - [ ] **C-5d** 🔴 运行后补导退款（PR#65 Finding1）：运行一次后再导退款订单表 → processingResult 清空、导出强制重新运行，**不用**旧 refundBackfill
 - [ ] **C-5e** 同批顺序无关（PR#65 Finding1）：一次多选「退款订单 + 银行对账单」，**无论文件顺序**，退款 session 都是本批的（不被银行对账单分支误清）
+- [ ] **C-5f** 🔴 ADM 重建清 JPM 结果（PR#65 Codex FindingB）：run JPM 后经链接表管理重导银行对账单表（ADM 重建）→ export 强制重新 run，**不用**旧 ADM 内容的 stale gateway fixes
 
 ---
 

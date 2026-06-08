@@ -11243,6 +11243,9 @@ function registerNewAccountHandlers() {
             const bankRows = database.readLinkedTableRows('bank-deposit');
             const { admRows, unmatched, midEmpty } = buildAdmRows(bankRows, midRows);
             database.replaceAdmBankDeposit(admRows);
+            // v2.1.16-beta.6 PR#65 Codex FindingB（🔴 资金红线）：重导银行对账单表 = ADM 表重建 = JPM 场景源表变化，
+            //   旧 reconIdFixResult（基于旧 ADM 的 JPM 修复结果）失效 → 清空，强制重新运行 JPM 后才能导出（防导出 stale fixes）。
+            reconIdFixResult = null;
             okResult.admDerive = {
               created: true,
               total: admRows.length,
