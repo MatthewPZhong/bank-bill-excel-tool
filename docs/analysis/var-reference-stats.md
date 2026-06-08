@@ -5,7 +5,7 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v2.1.16-beta.5 |
-| 扫描时间 | 2026-6-8 07:14:50 |
+| 扫描时间 | 2026-6-8 08:28:53 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 128 |
 | 顶层声明总数 | 1298 |
@@ -64,7 +64,7 @@
 | `formatTimestamp` | 5 | 9 | 5 | src/backend/database/backup.js |
 | `saveMappings` | 5 | 9 | 1 | src/backend/database/template-repository.js |
 | `deleteTemplate` | 5 | 7 | 1 | src/backend/database/template-repository.js |
-| `state` | 4 | 269 | 1 | src/renderer.js |
+| `state` | 4 | 270 | 1 | src/renderer.js |
 | `elements` | 4 | 150 | 1 | src/renderer.js |
 | `FIXED_FIELD_VALUE_PREFIX` | 4 | 21 | 2 | src/backend/database/utils.js |
 | `toDate` | 4 | 18 | 4 | src/main-process/scenario-engines/engine-date-utils.js |
@@ -117,7 +117,7 @@
 | `sanitizeFileName` | 4 | 4 | 4 | src/backend/balance-seed-store.js |
 | `normalizeText` | 3 | 70 | 2 | src/backend/database/migrations.js |
 | `setStatus` | 3 | 69 | 1 | src/renderer.js |
-| `FIELD_MAP` | 3 | 42 | 2 | src/constants/adm-bank-deposit-fields.js |
+| `FIELD_MAP` | 3 | 43 | 2 | src/constants/adm-bank-deposit-fields.js |
 | `runRepo` | 3 | 26 | 3 | src/main-process/acquiring-bill-currency-session.js |
 | `hasColumn` | 3 | 24 | 2 | src/backend/biz-op-recon-db/migrations.js |
 | `lastGeneratedExports` | 3 | 24 | 1 | src/main.js |
@@ -1233,10 +1233,10 @@
 
 | 名字 | 总次数 |
 |---|---:|
+| `extractBillDate` | 4 |
 | `GW_TYPE_COL` | 4 |
 | `toIsoDate` | 4 |
 | `DATE_IN_ADDITION` | 3 |
-| `extractBillDate` | 3 |
 | `sumEqualsReceive` | 3 |
 
 ### `src/main-process/scenario-engines/r4-fund-nature-check.js`
@@ -1443,7 +1443,7 @@
 | `formatTimestamp` | 5 | 9 | 5 | src/backend/database/backup.js(2), src/main-process/bank-bu-recon-session.js(2), src/main-process/bank-bu-recon-writer.js(2) |
 | `saveMappings` | 5 | 9 | 1 | src/renderer-dialogs.js(3), src/backend/database.js(2), src/backend/database/template-repository.js(2) |
 | `deleteTemplate` | 5 | 7 | 1 | src/backend/database.js(2), src/backend/database/template-repository.js(2), src/preload.js(1) |
-| `state` | 4 | 269 | 1 | src/renderer.js(143), src/renderer-pending.js(55), src/renderer-previews.js(41) |
+| `state` | 4 | 270 | 1 | src/renderer.js(144), src/renderer-pending.js(55), src/renderer-previews.js(41) |
 | `elements` | 4 | 150 | 1 | src/renderer.js(96), src/renderer-previews.js(33), src/renderer-pending.js(17) |
 | `FIXED_FIELD_VALUE_PREFIX` | 4 | 21 | 2 | src/backend/file-service.js(13), src/backend/database/utils.js(5), src/backend/file-service/common.js(2) |
 | `toDate` | 4 | 18 | 4 | src/main-process/scenario-engines/r5-refund-order-backfill.js(7), src/main-process/scenario-engines/engine-date-utils.js(6), src/main-process/scenario-engines/r5-fund-transfer-backfill.js(3) |
@@ -1496,7 +1496,7 @@
 | `sanitizeFileName` | 4 | 4 | 4 | src/backend/balance-seed-store.js(1), src/main-process/bank-statement-io.js(1), src/main-process/recon-id-fix-io.js(1) |
 | `normalizeText` | 3 | 70 | 2 | src/backend/database/template-repository.js(57), src/backend/database/utils.js(10), src/backend/database/migrations.js(3) |
 | `setStatus` | 3 | 69 | 1 | src/renderer.js(36), src/renderer-dialogs.js(32), src/renderer-previews.js(1) |
-| `FIELD_MAP` | 3 | 42 | 2 | src/main-process/scenario-engines/jpm-dispatch-order-fix.js(24), src/main-process/adm-bank-deposit-builder.js(14), src/constants/adm-bank-deposit-fields.js(4) |
+| `FIELD_MAP` | 3 | 43 | 2 | src/main-process/scenario-engines/jpm-dispatch-order-fix.js(25), src/main-process/adm-bank-deposit-builder.js(14), src/constants/adm-bank-deposit-fields.js(4) |
 | `runRepo` | 3 | 26 | 3 | src/main-process/acquiring-bill-currency-session.js(21), src/main-process/acquiring-bill-currency-writer.js(4), src/main.js(1) |
 | `hasColumn` | 3 | 24 | 2 | src/backend/database/migrations.js(19), src/backend/database.js(3), src/backend/biz-op-recon-db/migrations.js(2) |
 | `lastGeneratedExports` | 3 | 24 | 1 | src/main-process/statement-generation.js(17), src/main-process/statement-session.js(6), src/main.js(1) |

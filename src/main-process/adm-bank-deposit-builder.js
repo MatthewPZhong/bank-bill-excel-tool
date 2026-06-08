@@ -59,7 +59,10 @@ function assignBatchNo(admRows) {
   for (const a of admRows) {
     const con = normCell(a[FIELD_CHANNEL_ORDER_NO]);
     if (con === '' || groupDate.has(con)) continue;
-    groupDate.set(con, normalizeBillDateIso(a[FIELD_BILL_DATE]));
+    // F3a 修复（self-review）：取首个「可解析」BillDate（非空 ISO）才定批次日期段；解析失败则跳过、留待后续行，
+    //   避免首行脏数据致整组批次号日期段误留空（注释原称"首个可解析"，实现曾误为"首个出现"无条件 set）。
+    const iso = normalizeBillDateIso(a[FIELD_BILL_DATE]);
+    if (iso !== '') groupDate.set(con, iso);
   }
 
   for (const a of admRows) {

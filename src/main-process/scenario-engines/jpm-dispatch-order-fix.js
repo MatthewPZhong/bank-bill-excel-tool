@@ -113,6 +113,15 @@ function runJpmDispatchOrderFix({ sheets, admRows, scenario }) {
     return { fixedRows: [], admUpdates: rows, warnings: warn.list(), stats };
   }
 
+  // F3b 修复（self-review）：先统计每个出账日期命中的渠道账单笔数（设计假设「一个出账日期对一笔渠道账单」）。
+  //   同一出账日期若有多笔渠道账单，步骤4 整组求和必不平、静默不命中且易误导排查 → 显式 channel-date-collision warn（每日期一次）。
+  const billDateChannelCount = new Map();
+  for (const c of channels) {
+    const bd = extractBillDate(c[FIELD_MAP.chAdditionInfo]);
+    if (bd) billDateChannelCount.set(bd, (billDateChannelCount.get(bd) || 0) + 1);
+  }
+  const warnedDateCollision = new Set();
+
   // —— 阶段1：渠道账单匹配（步骤2~5）——
   const usedChannel = new Set(); // 渠道账单行 1v1 消费（命中后不再被其他出账日期复用）
   for (const c of channels) {
@@ -122,6 +131,10 @@ function runJpmDispatchOrderFix({ sheets, admRows, scenario }) {
     if (!billDate) {
       warn.push({ code: 'addition-date-not-found', reconId: normalizeCellValue(c[FIELD_MAP.chReconId]) });
       continue;
+    }
+    if ((billDateChannelCount.get(billDate) || 0) > 1 && !warnedDateCollision.has(billDate)) {
+      warn.push({ code: 'channel-date-collision', billDate, count: billDateChannelCount.get(billDate) });
+      warnedDateCollision.add(billDate);
     }
 
     // 步骤3：候选 ADM 行 = BillDate==出账日期（规范化后比，与出账日期同 toIsoDate 口径）∧ 是否与渠道账单匹配==0。
@@ -162,8 +175,8 @@ function runJpmDispatchOrderFix({ sheets, admRows, scenario }) {
   // —— 阶段3：网关账单匹配（步骤6/7）——
   const gwUsed = new Set(); // 网关账单行 1v1 消费
   for (const [bn, batchRows] of readyBatches) {
-    // 组内同值：资金对账ID（步骤5 已对全组赋同一渠道 reconId）。
-    const reconFundId = normalizeCellValue(batchRows[0][FIELD_MAP.admReconFundId]);
+    // F2 修复（self-review）：同一批次号可跨多个出账日期，步骤5 对各出账日期组分别赋「该日期渠道账单 reconId」，
+    //   故同批次内「资金对账ID」未必同值 → Reference 改按行级 a[admReconFundId] 取（见下方循环内），不用批级 batchRows[0]。
     // 决策8：Type 按该批次号行数 >1→2、=1→0（Type=2 仅标记「该批次号属多行聚合」，非传统多对1聚合）。
     const type = batchRows.length > 1 ? 2 : 0;
     for (const a of batchRows) {
@@ -183,7 +196,7 @@ function runJpmDispatchOrderFix({ sheets, admRows, scenario }) {
         warn.push({ code: 'gw-multi-match', batch: bn, allocationNo: alloc, count: cand.length });
       }
       const g = cand[0];
-      g[FIELD_MAP.gwReference] = reconFundId; // 'Reference' = 该批次号资金对账ID（组内同值）
+      g[FIELD_MAP.gwReference] = normalizeCellValue(a[FIELD_MAP.admReconFundId]); // 'Reference' = 该 ADM 行资金对账ID（行级，F2 修复）
       g[GW_TYPE_COL] = type; // Type 超长缺括号列（常量引用）
       gwUsed.add(g);
       a[FIELD_MAP.admGatewayMatched] = 1; // '是否与网关账单匹配'

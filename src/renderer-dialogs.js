@@ -6408,11 +6408,22 @@
       // v2.1.0-beta.2 PR-A Round 2（task R2-8）：单类别入口（filter.length === 1）隐藏 优先级 + 是否启动 两列
       // 单类别没有"跨场景调度"语义，优先级和是否启动失去意义；同时让其余列宽度按比例放大填满。
       const isCompactView = Array.isArray(filter) && filter.length === 1;
+      // v2.1.16-beta.5 F1 修复：网关对账单修复-场景管理（compact，filter=['gateway-recon-id-fix']）必须显示「是否启动」列。
+      //   原因：需求1 决策2 让资金对账《开始运行》运行「已启用」的 gateway-recon-id-fix 场景（renderer.js
+      //   handleBankStatementGatewayReconRun → scenarios.list 过滤 enabled），而 JPM 写死场景默认 enabled=0；
+      //   compact 视图若不渲启用框，用户无处勾选启用 → 死锁（《开始运行》永远 0 个启用场景）。
+      //   收窄到 gateway-recon-id-fix：业务 ReconID 修复 compact（filter=['recon-id-fix']）靠场景下拉选场景运行、
+      //   不读 enabled（renderer.js handleReconIdFixRun 用 state.reconIdFixSelectedScenarioId），保持原样无该列。
+      const isGatewayReconIdFixCompact = isCompactView && filter[0] === 'gateway-recon-id-fix';
+      const showEnabledCol = !isCompactView || isGatewayReconIdFixCompact;
       const priorityTh = isCompactView ? '' : '<th class="scenarios-col-priority" style="width: 7%; text-align: center;">优先级</th>';
-      const enabledTh = isCompactView ? '' : '<th class="scenarios-col-enabled" style="width: 10%;">是否启动</th>';
+      const enabledTh = showEnabledCol ? '<th class="scenarios-col-enabled" style="width: 10%;">是否启动</th>' : '';
+      // 列宽分三套：非 compact（含优先级+启用）/ 网关 compact（无优先级、有启用）/ 业务 compact（无优先级、无启用）。
+      //   名称列被 styles-gemini-extra.css 的 .scenarios-col-name{width:30.94% !important} 强制锁定（inline 无效），
+      //   故网关 compact 只在 id/category/actions/enabled 间分配剩余约 69%（id6+cat24+actions26+enabled13≈69%）。
       const idWidth = isCompactView ? '6%' : '5%';
-      const categoryWidth = isCompactView ? '28%' : '13%';
-      const nameWidth = isCompactView ? '40%' : '18%';
+      const categoryWidth = isGatewayReconIdFixCompact ? '24%' : (isCompactView ? '28%' : '13%');
+      const nameWidth = isGatewayReconIdFixCompact ? '30.94%' : (isCompactView ? '40%' : '18%');
       const actionsWidth = isCompactView ? '26%' : '13%';
       // v2.1.15 W3：仅资金对账模块入口（filter 含 'gateway-recon-join'、非单类别 compact）显示「网关对账单修复-管理」入口；
       //   ReconID 修复模块自身入口（compact，filter=['gateway-recon-id-fix']）随 wrapper 隐藏，避免重复/自指。
@@ -6512,7 +6523,11 @@
         // - task R2-7：序号 = 列表内 1-based 顺序号（不再用真实 scenarios.id；dataset.id 仍是真实 id 用于 IPC）
         // - task R2-8：compact 模式（单类别入口）隐藏 优先级 + 是否启动 td
         const priorityTd = isCompactView ? '' : `<td class="scenarios-col-priority">${escapeHtml(String(scenario.priority))}</td>`;
-        const enabledTd = isCompactView ? '' : `<td class="scenarios-col-enabled"><input type="checkbox" data-row-action="toggle-enabled" ${scenario.enabled ? 'checked' : ''} /></td>`;
+        // v2.1.16-beta.5 F1 修复：启用框随 showEnabledCol 渲染（网关 compact 也显示）。
+        //   JPM(is_builtin) 的启用框不 disabled —— 启停与操作列只读保护（CRUD）正交：
+        //   操作列禁编辑/删除/转移（isBuiltinGatewayScenario），但「是否启动」必须可点，否则需求5 死锁。
+        //   toggle-enabled change handler（本 dialog 内）对 is_builtin 无限制，gateway 类走 reloadReconIdFixScenarios 刷新。
+        const enabledTd = showEnabledCol ? `<td class="scenarios-col-enabled"><input type="checkbox" data-row-action="toggle-enabled" ${scenario.enabled ? 'checked' : ''} /></td>` : '';
         // v2.1.9 N5 Phase 5 T21：勾选列（批量模式下显示）
         const checkboxDisplay = inBatchMode ? '' : 'display: none;';
         // v2.1.13 D-2：自带写死场景（builtin-fixed）执行操作列仅「管理」按钮（无转移/删除）；

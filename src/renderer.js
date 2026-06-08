@@ -3414,15 +3414,15 @@ function updateBankStatementUi() {
 
 // v2.1.16-beta.5 需求1（PR-4 修订）🔴 资金红线：row1《开始运行》(bankStatementRunBtn) disabled 重算。
 //   抽成独立 helper，使「导入不平表」成功路径也能让按钮 enable（该路径不走 updateBankStatementUi，避免覆盖状态框）。
-//   enable 条件：bank session 就绪（mode='bank' 时跑 R1-R5）或 gateway recon session 就绪（mode='gateway' 时跑网关场景）。
-//   注：enable 仅控制是否可点；实际跑哪个引擎由 state.bankStatementProcessRunMode 决定（见 bankStatementRunBtn click handler），两者解耦。
-//   reconIdFixSession 是 ReconID 修复模块共享镜像，仅作 enable 判据安全：若仅它非空而 bank session 空且 mode 仍为默认 'bank'，
-//   点击走 handleBankStatementRun() 会被其首行「请先导入银行对账单」拦截，不误跑引擎。
+//   F3c 修复（self-review）：enable 判据与路由 mode 对齐，消除「按钮亮起却点击 abort」的状态不自洽。
+//   mode='gateway'（最近导入不平表）→ 按网关 recon session 判定可点；mode='bank'（默认/最近导入对账单）→ 按银行对账单 session 判定。
+//   实际跑哪个引擎由 state.bankStatementProcessRunMode 决定（见 bankStatementRunBtn click handler）——enable 与路由现一致。
 function updateBankStatementRunBtnDisabled() {
   if (!elements.bankStatementRunBtn) return;
-  const bankReady = !!state.bankStatementSession;
-  const gatewayReconReady = !!state.reconIdFixSession;
-  elements.bankStatementRunBtn.disabled = !(bankReady || gatewayReconReady);
+  const ready = state.bankStatementProcessRunMode === 'gateway'
+    ? !!state.reconIdFixSession
+    : !!state.bankStatementSession;
+  elements.bankStatementRunBtn.disabled = !ready;
 }
 
 // v2.1.14：纯前端占位 helper —— 功能 UI 已就位但后端未接入，统一弹「后续版本开放」提示框。

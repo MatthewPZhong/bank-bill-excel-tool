@@ -176,9 +176,9 @@ test.describe('assignBatchNo / normalizeBillDateIso - 批次号', () => {
       { ChannelOrderNo: 'CO1', BillDate: '2026-05-04', 批次号: '' }
     ];
     assignBatchNo(rows);
-    // 首个被 set 的是 garbage（解析为 ''），一旦 set 不再覆盖 → 该组日期段空
-    assert.equal(rows[0]['批次号'], '-CO1');
-    assert.equal(rows[1]['批次号'], '-CO1');
+    // F3a 修复（self-review）：首行 garbage 解析失败被跳过，取首个可解析的 2026-05-04 作批次日期段（与用例名一致）。
+    assert.equal(rows[0]['批次号'], '2026-05-04-CO1');
+    assert.equal(rows[1]['批次号'], '2026-05-04-CO1');
   });
 
   test('ChannelOrderNo 空 → 批次号空（不阻断）', () => {

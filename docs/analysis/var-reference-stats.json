@@ -1,7 +1,7 @@
 {
   "meta": {
     "version": "2.1.16-beta.5",
-    "scannedAt": "2026-06-07T23:14:50.286Z",
+    "scannedAt": "2026-06-08T00:28:53.840Z",
     "root": "src",
     "totalFiles": 128,
     "totalTopLevelNames": 1298,
@@ -2302,10 +2302,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 143
+            "count": 144
           }
         ],
-        "totalHits": 269,
+        "totalHits": 270,
         "fileSpan": 4
       },
       {
@@ -3710,10 +3710,10 @@
           },
           {
             "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
-            "count": 24
+            "count": 25
           }
         ],
-        "totalHits": 42,
+        "totalHits": 43,
         "fileSpan": 3
       },
       {
@@ -14941,6 +14941,20 @@
         "fileSpan": 1
       },
       {
+        "name": "extractBillDate",
+        "defFiles": [
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "extractCurrencyAliases",
         "defFiles": [
           "src/backend/file-service/normalizers.js"
@@ -16670,20 +16684,6 @@
         "refFiles": [
           {
             "file": "src/backend/database/migrations.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "extractBillDate",
-        "defFiles": [
-          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
             "count": 3
           }
         ],
@@ -23811,10 +23811,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 143
+          "count": 144
         }
       ],
-      "totalHits": 269,
+      "totalHits": 270,
       "fileSpan": 4
     },
     {
@@ -25219,10 +25219,10 @@
         },
         {
           "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
-          "count": 24
+          "count": 25
         }
       ],
-      "totalHits": 42,
+      "totalHits": 43,
       "fileSpan": 3
     },
     {

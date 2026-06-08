@@ -222,6 +222,51 @@ test.describe('完整链路 — 单批次单调拨号（Type=0）', () => {
   });
 });
 
+// F2 修复（self-review）：同批次号可跨多个出账日期，各日期赋不同渠道 reconId → Reference 必须行级取
+test.describe('F2 修复 — 同批次跨多出账日期不同 reconId → Reference 行级', () => {
+  test('批次 CO1 跨 05-04(RC1)/05-05(RC2)：网关 A2→Reference=RC2（行级，非批级首行 RC1）', () => {
+    const adm = [
+      admRow({ billDate: '2026-05-04', batchNo: '2026-05-04-CO1', orderNo: 'CO1', alloc: 'A1', fundInAmt: 100 }),
+      admRow({ billDate: '2026-05-05', batchNo: '2026-05-04-CO1', orderNo: 'CO1', alloc: 'A2', fundInAmt: 200 })
+    ];
+    const sheets = {
+      opponentBills: [
+        channelRow({ reconId: 'RC1', receiveAmount: 100, additionInfo: 'ATS OF 26/05/04 ' }),
+        channelRow({ reconId: 'RC2', receiveAmount: 200, additionInfo: 'ATS OF 26/05/05 ' })
+      ],
+      businessBills: [gwRow({ orderId: 'A1' }), gwRow({ orderId: 'A2' })]
+    };
+    const res = run(sheets, adm);
+    // 渠道段：各出账日期组各自命中、赋不同 reconId（组内非同值，正是 F2 的前提）
+    assert.strictEqual(adm[0]['资金对账ID'], 'RC1');
+    assert.strictEqual(adm[1]['资金对账ID'], 'RC2');
+    const byOrder = Object.fromEntries(res.fixedRows.map((r) => [r.OrderId, r]));
+    assert.strictEqual(byOrder['A1'].Reference, 'RC1');
+    // 🔴 F2 核心：A2 的 Reference 必须行级取 ADM[1] 的 RC2；旧实现批级 batchRows[0] 会错写 RC1
+    assert.strictEqual(byOrder['A2'].Reference, 'RC2', 'F2: Reference 行级取对应 ADM 行，非批级首行');
+    assert.strictEqual(byOrder['A1'].Type, 2);
+    assert.strictEqual(byOrder['A2'].Type, 2);
+  });
+});
+
+// F3b 修复（self-review）：同出账日期多笔渠道账单 → 显式 collision warn（每日期一次）
+test.describe('F3b 修复 — 同出账日期多笔渠道账单 → channel-date-collision warn', () => {
+  test('两笔渠道账单同出账日期 → 恰一条 channel-date-collision warn', () => {
+    const adm = [admRow({ billDate: '2026-05-04', batchNo: '2026-05-04-CO1', orderNo: 'CO1', alloc: 'A1', fundInAmt: 100 })];
+    const sheets = {
+      opponentBills: [
+        channelRow({ reconId: 'RC1', receiveAmount: 100, additionInfo: 'ATS OF 26/05/04 ' }),
+        channelRow({ reconId: 'RC2', receiveAmount: 200, additionInfo: 'ATS OF 26/05/04 ' })
+      ],
+      businessBills: [gwRow({ orderId: 'A1' })]
+    };
+    const res = run(sheets, adm);
+    const collisions = res.warnings.filter((w) => w.code === 'channel-date-collision');
+    assert.strictEqual(collisions.length, 1, '同出账日期多笔渠道账单 → 每日期一条 collision warn');
+    assert.strictEqual(collisions[0].billDate, '2026-05-04');
+  });
+});
+
 test.describe('步骤4 不命中 — 金额不平不写标志', () => {
   test('整组汇总 ≠ receiveAmount → 不命中、不进网关、warn', () => {
     const adm = [admRow({ recon: 'R1', batchNo: '2026-05-04-CO1', alloc: 'A1', fundInAmt: 15000 })];

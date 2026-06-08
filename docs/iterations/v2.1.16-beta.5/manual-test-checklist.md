@@ -143,3 +143,19 @@
   - 网关 OrderId↔调拨号 匹配基数（决策8：每调拨号各匹配一网关行，Type=2 仅标记多行聚合）—— 用真实数据验证匹配关系符合预期。
   - 性能：ADM 派生/JPM 匹配走内存，数据量预期与现有网关对账同量级，未列性能 case。
 - 发现问题 → 记录到本表 + 反馈 team-lead 修复后回归。
+
+---
+
+## 九、self-review 已修 finding + 遗留 F4（2026-06-08）
+
+team-lead self-review + 2 个 Claude review agent 对抗审查（codex 网络失败改用），已修复**全部 F3 级以上 finding**，release-check 三层全绿（unit 1955 + integration 952 + smoke）。**已修**：
+- **F1** JPM 无启用框（用户发现，功能不可用）→ gateway compact 加「是否启动」列，JPM 可勾选启用
+- **F2** 同批次跨多出账日期时网关 Reference 取批级首行 reconId 写错（资金红线）→ 改行级 `a[资金对账ID]` + 补回归单测
+- **F3a** assignBatchNo 取首个可解析 BillDate（防首行脏数据致日期段空）
+- **F3b** 同出账日期多笔渠道账单 → channel-date-collision warn（防静默不平误导）
+- **F3c** 资金对账《开始运行》enable 判据对齐路由 mode（消除「亮起却 abort」）
+- **F-1** collectChecked 批量删除排除收窄至 builtin-fixed+JPM（C2/C3 零回归）
+
+**遗留 F4（beta 不修，下版评估 / 手测留意）**：
+- [ ] M9.1 JPM 二次运行（不重导入金表）warnings/stats 失真（导出 fixedRows / 资金对账ID **仍正确**，仅反馈"0 命中+N 警告"失真）；建议 run 成功后禁用《开始运行》直至重导，或引擎入口重置标志真幂等
+- [ ] M9.2 JPM seed 冲突识别正则 `/UNIQUE|constraint/i` 过宽（当前 CHECK 前置校验 + 唯一现实约束 UNIQUE(channel_id,name)，风险低）；可收窄为 `/UNIQUE constraint failed/i`
