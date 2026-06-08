@@ -11105,6 +11105,25 @@ function registerNewAccountHandlers() {
     return LINKED_IMPORT_SIGNATURES.find((s) => s.tableKey === detectorTableKey) || null;
   }
 
+  // v3.0.0 块 B / O-6：detector read-error 文案细分。历史一律「文件为空或不可读」，
+  //   对「明明文件不空（仅大文件读取阶段失败）」是误导（spec O-6 缘起）。据 detector 透出的 reason 区分：
+  //     'empty'      → 文件可读但无任何有意义行 = 真·空表/无数据。
+  //     'unreadable' → 文件不存在 / 类型不符 / 损坏 / 无法解析（listSheetNames 阶段失败）。
+  //     'read-failed'→ 读取阶段抛异常（非空文件）；带回原始原因。
+  //   detected 为 detectTableType 的返回对象（含可选 reason / message）。
+  function formatDetectorReadErrorMessage(detected) {
+    const reason = detected && detected.reason;
+    const detail = detected && detected.message ? `（${detected.message}）` : '';
+    if (reason === 'empty') {
+      return '文件无有效数据（表头/内容为空），请确认文件是否选错或内容是否完整';
+    }
+    if (reason === 'read-failed') {
+      return `文件读取失败，请确认文件是否完整、未被占用后重试${detail}`;
+    }
+    // 'unreadable' 及未知/缺省：文件不存在 / 格式不符 / 损坏。
+    return `文件无法读取，可能已损坏、格式不符或文件不存在，请确认后重新选择${detail}`;
+  }
+
   // 把单个 linked 文件读成 { 表头名: 值 } 对象数组（喂 replaceLinkedTable）。
   //   做法（对三张表统一）：
   //     1) readRowsWithMetadata(fp, []) 取全部有意义行（数组；中间空列保留、尾部空列已 trim）；
@@ -11208,7 +11227,7 @@ function registerNewAccountHandlers() {
       //   v2.1.16-beta.3 ②：入金表与主表同构 44 列，但主表签名不在此集合 → 入金表唯一命中、不 ambiguous。
       let detected;
       try {
-        detected = detectTableType(filePath, LINKED_IMPORT_SIGNATURES);
+        detected = await detectTableType(filePath, LINKED_IMPORT_SIGNATURES);
       } catch (err) {
         results.push({ fileName, status: 'read-error', message: err && err.message ? err.message : String(err) });
         continue;
@@ -11223,7 +11242,7 @@ function registerNewAccountHandlers() {
         continue;
       }
       if (detected.status === 'read-error') {
-        results.push({ fileName, status: 'read-error', message: '文件为空或不可读' });
+        results.push({ fileName, status: 'read-error', message: formatDetectorReadErrorMessage(detected) });
         continue;
       }
       // v2.1.16 PR#61 F3：detector 识别到「已入库但本阶段不接入落库」的表（外汇期权表）→ unsupported。
@@ -11391,7 +11410,7 @@ function registerNewAccountHandlers() {
       // 识别：仅 scope='preprocess' 候选（银行对账单 / 中台退款订单 / 入账原始订单）
       let detected;
       try {
-        detected = detectTableType(filePath, PREPROCESS_TABLE_SIGNATURES);
+        detected = await detectTableType(filePath, PREPROCESS_TABLE_SIGNATURES);
       } catch (err) {
         results.push({ fileName, status: 'read-error', message: err && err.message ? err.message : String(err) });
         continue;
@@ -11406,7 +11425,7 @@ function registerNewAccountHandlers() {
         continue;
       }
       if (detected.status === 'read-error') {
-        results.push({ fileName, status: 'read-error', message: '文件为空或不可读' });
+        results.push({ fileName, status: 'read-error', message: formatDetectorReadErrorMessage(detected) });
         continue;
       }
       // v2.1.16 PR#61 F3：守卫「已入库待阶段二接入」表（PREPROCESS 候选当前不含期权表，

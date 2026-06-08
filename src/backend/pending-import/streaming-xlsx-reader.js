@@ -203,7 +203,12 @@ function siInnerToText(inner) {
 // 主入口：流式读取 xlsx 的 sheet1.xml，逐行回调
 // onRow(cells: string[31], rowIdx: 1-based): void
 // 返回 { rowCount }（含表头）
-async function readXlsxStreamed(filePath, onRow, { colCount = 31 } = {}) {
+// 选项扩展（向后兼容）：
+//   maxRows  可选「读够即停」上限——读到第 maxRows 行后立即 destroy stream 并 resolve，
+//            用于「只需文件头部前 N 行」的场景（如 detector 表头识别），内存/耗时只取决于前 N 行。
+//            缺省（undefined/0/负数）= 不设上限，全量扫描（既有调用方行为 100% 不变）。
+//   返回值新增 truncated：true 表示因 maxRows 提前终止（文件可能还有更多行），全量读时为 false。
+async function readXlsxStreamed(filePath, onRow, { colCount = 31, maxRows = 0 } = {}) {
   const buffer = await fs.promises.readFile(filePath);
   const zip = await JSZip.loadAsync(buffer);
   const sheetEntry = zip.file('xl/worksheets/sheet1.xml');
@@ -212,6 +217,9 @@ async function readXlsxStreamed(filePath, onRow, { colCount = 31 } = {}) {
   // 先载入 sharedStrings（可能几 MB - 几百 MB；对 t="s" 类型 cell 必需）
   const sharedStrings = await readSharedStrings(zip);
 
+  // maxRows ≤ 0 视为不限制（保持既有「全量扫描」语义）
+  const hasLimit = Number.isInteger(maxRows) && maxRows > 0;
+
   return new Promise((resolve, reject) => {
     const stream = sheetEntry.nodeStream();
     // StringDecoder 缓存跨 chunk 的 UTF-8 多字节序列，防止中文被截断成 \ufffd
@@ -219,8 +227,19 @@ async function readXlsxStreamed(filePath, onRow, { colCount = 31 } = {}) {
     let pending = '';
     let rowIdx = 0;
     let inSheetData = false;
+    // 早停幂等收尾标志：destroy 后仍可能有一个 in-flight 的 data/end 事件，用它防重复 resolve/reject。
+    let settled = false;
+
+    // 读够 maxRows 时干净终止：destroy stream + resolve（truncated=true 标记文件可能还有更多行）。
+    const finishTruncated = () => {
+      if (settled) return;
+      settled = true;
+      try { stream.destroy(); } catch (_e) { /* ignore */ }
+      resolve({ rowCount: rowIdx, truncated: true });
+    };
 
     stream.on('data', (chunk) => {
+      if (settled) return;
       try {
         pending += typeof chunk === 'string' ? chunk : decoder.write(chunk);
         // 找到 <sheetData> 起始后才扫行（避免扫到 <col> 等其它 XML）
@@ -254,6 +273,7 @@ async function readXlsxStreamed(filePath, onRow, { colCount = 31 } = {}) {
             pending = pending.slice(rowEnd2 + 6);
             rowIdx += 1;
             onRow(parseRowXml(rowXml2, colCount, sharedStrings), rowIdx);
+            if (hasLimit && rowIdx >= maxRows) { finishTruncated(); return; }
             continue;
           }
           const rowEnd = pending.indexOf('</row>', rowStart);
@@ -266,14 +286,16 @@ async function readXlsxStreamed(filePath, onRow, { colCount = 31 } = {}) {
           pending = pending.slice(rowEnd + 6);
           rowIdx += 1;
           onRow(parseRowXml(rowXml, colCount, sharedStrings), rowIdx);
+          if (hasLimit && rowIdx >= maxRows) { finishTruncated(); return; }
         }
       } catch (err) {
         try { stream.destroy(); } catch (_e) { /* ignore */ }
-        reject(err);
+        if (!settled) { settled = true; reject(err); }
       }
     });
 
     stream.on('end', () => {
+      if (settled) return;
       // flush decoder 剩余字节（通常为空）
       pending += decoder.end();
       // 处理 end 后还有可能剩半个 <row>
@@ -286,10 +308,12 @@ async function readXlsxStreamed(filePath, onRow, { colCount = 31 } = {}) {
         pending = pending.slice(rowEnd + 6);
         rowIdx += 1;
         onRow(parseRowXml(rowXml, colCount, sharedStrings), rowIdx);
+        if (hasLimit && rowIdx >= maxRows) { settled = true; resolve({ rowCount: rowIdx, truncated: true }); return; }
       }
-      resolve({ rowCount: rowIdx });
+      settled = true;
+      resolve({ rowCount: rowIdx, truncated: false });
     });
-    stream.on('error', reject);
+    stream.on('error', (err) => { if (!settled) { settled = true; reject(err); } });
   });
 }
 
