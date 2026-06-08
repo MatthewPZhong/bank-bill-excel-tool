@@ -156,6 +156,6 @@ team-lead self-review + 2 个 Claude review agent 对抗审查（codex 网络失
 - **F3c** 资金对账《开始运行》enable 判据对齐路由 mode（消除「亮起却 abort」）
 - **F-1** collectChecked 批量删除排除收窄至 builtin-fixed+JPM（C2/C3 零回归）
 
-**遗留 F4（beta 不修，下版评估 / 手测留意）**：
-- [ ] M9.1 JPM 二次运行（不重导入金表）warnings/stats 失真（导出 fixedRows / 资金对账ID **仍正确**，仅反馈"0 命中+N 警告"失真）；建议 run 成功后禁用《开始运行》直至重导，或引擎入口重置标志真幂等
-- [ ] M9.2 JPM seed 冲突识别正则 `/UNIQUE|constraint/i` 过宽（当前 CHECK 前置校验 + 唯一现实约束 UNIQUE(channel_id,name)，风险低）；可收窄为 `/UNIQUE constraint failed/i`
+**遗留 F4（beta.5 当时不修；均已在 v2.1.16-beta.6 PR#65 self-review 闭环）**：
+- [x] M9.1 JPM 二次运行（不重导入金表）warnings/stats 失真（导出 fixedRows / 资金对账ID **仍正确**，仅反馈"0 命中+N 警告"失真）→ ✅ **v2.1.16-beta.6 修复**：采「引擎入口重置标志真幂等」，`jpm-dispatch-order-fix.js` 在 channels>0 后整批重置三标志再全量重算 + 2 个幂等单测（非「禁用《开始运行》」——该按钮 bank/gateway 共用会误伤连跑）
+- [x] M9.2 JPM seed 冲突识别正则 `/UNIQUE|constraint/i` 过宽 → ✅ **v2.1.16-beta.6 修复**：`migrations.js` 3 处收窄为 `/UNIQUE constraint failed/i`（防 FK/CHECK/NOT NULL 真实错误被误当"已 seed"静默吞掉；:1626 注释本就写「其它错误如 CHECK→抛出」，过宽正则恰好打败本意）

@@ -455,6 +455,51 @@ test.describe('admUpdates 契约 — 同一数组、行数顺序不变', () => {
 });
 
 // ========================================================================
+// M9.1 修复（self-review）：引擎真幂等 —— 二次运行（ADM 标志残留）stats 不失真
+// ========================================================================
+test.describe('M9.1 修复 — 入口重置标志 → 二次运行幂等', () => {
+  // 模拟生产：run 之间 sheets 是 fresh clone（main.js 传 clonedSheets），仅 ADM 行经 DB 持久化残留标志。
+  function freshSheets() {
+    return {
+      opponentBills: [channelRow({ reconId: 'RECON-X', receiveAmount: 21000, additionInfo: 'ATS OF 26/05/04' })],
+      businessBills: [gwRow({ orderId: 'A1', amount: 15000 }), gwRow({ orderId: 'A2', amount: 6000 })]
+    };
+  }
+
+  test('同一 ADM 数组连跑两次（run1 已置标志1）→ run2 stats/fixedRows 与 run1 完全一致', () => {
+    const adm = [
+      admRow({ recon: 'R1', batchNo: '2026-05-04-CO1', orderNo: 'CO1', alloc: 'A1', fundInAmt: 15000 }),
+      admRow({ recon: 'R2', batchNo: '2026-05-04-CO1', orderNo: 'CO1', alloc: 'A2', fundInAmt: 6000 })
+    ];
+    // run1：把 adm 标志原地置 1（模拟 writeAdmMatchFlags 持久化回 ADM 表）
+    const res1 = run(freshSheets(), adm);
+    assert.strictEqual(adm[0]['是否与渠道账单匹配'], 1, 'run1 后标志残留=1');
+    assert.strictEqual(res1.stats.channelHit, 1);
+    assert.strictEqual(res1.fixedRows.length, 2);
+    // run2：复用 run1 改过的同一 adm（未重建）→ 入口重置后结果应与 run1 一致
+    const res2 = run(freshSheets(), adm);
+    assert.deepStrictEqual(res2.stats, res1.stats, 'M9.1：二次运行 stats 与首次一致（修复前 channelHit 失真为 0）');
+    assert.strictEqual(res2.stats.channelHit, 1, '修复前此处为 0（候选 ADM 行被残留标志筛空）');
+    assert.strictEqual(res2.stats.admChannelMatched, 2);
+    assert.strictEqual(res2.stats.gwHit, 2);
+    assert.strictEqual(res2.fixedRows.length, 2);
+    // 重置→重算→重新置1：二次运行后 ADM 仍为命中态
+    assert.strictEqual(adm[0]['是否与渠道账单匹配'], 1);
+    assert.strictEqual(adm[0]['资金对账ID'], 'RECON-X');
+  });
+
+  test('no-op run（merchantId 不命中，channels=0）不清掉上一轮已持久化的标志', () => {
+    const adm = [admRow({ recon: 'R1', batchNo: '2026-05-04-CO1', orderNo: 'CO1', alloc: 'A1', fundInAmt: 21000, channelMatched: 1, gatewayMatched: 1 })];
+    adm[0]['资金对账ID'] = 'RECON-PERSIST';
+    // 商户号对不上 → channels=0 早返回（在重置块之前）→ 不应动标志
+    const sheets = { opponentBills: [channelRow({ merchantId: '999', receiveAmount: 21000, additionInfo: 'ATS OF 26/05/04' })], businessBills: [] };
+    run(sheets, adm);
+    assert.strictEqual(adm[0]['是否与渠道账单匹配'], 1, 'no-op run 不重置已持久化标志');
+    assert.strictEqual(adm[0]['资金对账ID'], 'RECON-PERSIST');
+  });
+});
+
+// ========================================================================
 // 空入参鲁棒性
 // ========================================================================
 test.describe('鲁棒性 — 空入参不抛异常', () => {

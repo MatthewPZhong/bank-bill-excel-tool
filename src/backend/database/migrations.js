@@ -1623,7 +1623,7 @@ function ensureReconRoundBuiltinScenariosSeed(db) {
       } catch (insErr) {
         // UNIQUE(channel_id, name) 冲突（用户已有同名场景，channel_id=1）→ 单条跳过保留用户场景
         const msg = insErr && insErr.message ? insErr.message : String(insErr);
-        if (/UNIQUE|constraint/i.test(msg)) {
+        if (/UNIQUE constraint failed/i.test(msg)) {
           skippedConflict += 1;
           continue;
         }
@@ -1734,7 +1734,7 @@ function ensureRefundBackfillScenarioSeed(db) {
       } catch (insErr) {
         // UNIQUE(channel_id, name) 冲突（用户已有同名场景）→ 跳过保留用户场景，不中断。
         const msg = insErr && insErr.message ? insErr.message : String(insErr);
-        if (/UNIQUE|constraint/i.test(msg)) {
+        if (/UNIQUE constraint failed/i.test(msg)) {
           skippedConflict = 1;
         } else {
           throw insErr;
@@ -1857,7 +1857,7 @@ function ensureJpmDispatchOrderScenarioSeed(db) {
       } catch (insErr) {
         // UNIQUE(channel_id, name) 冲突（用户已有同名场景）→ 跳过保留用户场景，不中断。
         const msg = insErr && insErr.message ? insErr.message : String(insErr);
-        if (/UNIQUE|constraint/i.test(msg)) {
+        if (/UNIQUE constraint failed/i.test(msg)) {
           skippedConflict = 1;
         } else {
           throw insErr;

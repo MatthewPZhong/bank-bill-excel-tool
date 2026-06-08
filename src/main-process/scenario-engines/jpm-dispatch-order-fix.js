@@ -113,6 +113,18 @@ function runJpmDispatchOrderFix({ sheets, admRows, scenario }) {
     return { fixedRows: [], admUpdates: rows, warnings: warn.list(), stats };
   }
 
+  // M9.1 修复（v2.1.16-beta.6 self-review · 🔴 资金红线 · 真幂等可重入）：
+  //   入口整批重置 ADM 行三个可写标志为初始态（与 buildAdmRows 初值一致：资金对账ID='' / 两标志数值 0），再全量重算。
+  //   根因：步骤3 按「是否与渠道账单匹配==0」筛候选 ADM 行，命中后置 1 + 写资金对账ID，经 main.js writeAdmMatchFlags
+  //   持久化回 DB；二次运行（未重导入金表 → ADM 表未重建）时旧标志残留 → 候选被筛空 → stats.channelHit 失真为 0
+  //   （导出 fixedRows / 资金对账ID 仍正确，因 readyBatches 仍读到全 1）。重置后每次 run 从干净态全量重算 → stats 准确。
+  //   放在 channels.length===0 早返回之后：无商户匹配的 no-op run 不应清掉上一轮已持久化的匹配态。
+  for (const a of rows) {
+    a[FIELD_MAP.admReconFundId] = '';
+    a[FIELD_MAP.admChannelMatched] = 0;
+    a[FIELD_MAP.admGatewayMatched] = 0;
+  }
+
   // F3b 修复（self-review）：先统计每个出账日期命中的渠道账单笔数（设计假设「一个出账日期对一笔渠道账单」）。
   //   同一出账日期若有多笔渠道账单，步骤4 整组求和必不平、静默不命中且易误导排查 → 显式 channel-date-collision warn（每日期一次）。
   const billDateChannelCount = new Map();
