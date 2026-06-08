@@ -1380,6 +1380,10 @@ select {
 .alert-card {
   width: min(100%, 420px);
   padding: 34px 28px 28px;
+  /* PR-5（spec② 方案A）：有界 flex 列，根治长内容弹框把确认按钮挤出视口 */
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 56px); /* overlay 上下各 28px padding */
 }
 
 .manual-balance-card {
@@ -1644,11 +1648,16 @@ select {
   font-size: 18px;
   line-height: 1.6;
   margin-bottom: 24px;
+  /* PR-5（spec② 方案A）：消息区内部滚动；min-height:0 是 flex 子项可收缩、出现滚动条的关键 */
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .dialog-actions {
   display: flex;
   gap: 12px;
+  /* PR-5（spec② 方案A）：作为 .alert-card flex column 子项时永不被压缩/挤出视口（非 flex 父容器下惰性） */
+  flex-shrink: 0;
 }
 
 .dialog-actions.center {
@@ -2856,7 +2865,8 @@ select {
 }
 
 .scenarios-table .scenarios-col-name {
-  width: 30.94% !important;
+  /* v3.0.0 PR-7：移除 width !important —— 名称列宽改由 th 内联 nameWidth 按视图模式控制（单一口径，
+   *   消除"th 内联失效、被 30.94% !important 钉死"的历史包袱）。仅保留省略/对齐精调。 */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
