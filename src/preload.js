@@ -171,7 +171,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
     export: () => ipcRenderer.invoke('bank-statement:export'),
     sessionStatus: () => ipcRenderer.invoke('bank-statement:session-status'),
     // v2.1.12 需求6：数据侧预检 — 当前导入银行对账单中满足启用 C3 场景「银行条件」的候选行数
-    c3CandidateCount: () => ipcRenderer.invoke('bank-statement:c3-candidate-count')
+    c3CandidateCount: () => ipcRenderer.invoke('bank-statement:c3-candidate-count'),
+    // v3.0.0 需求3：退款候选预检 — 当前导入银行对账单中 FundType=Ach Return 的候选行数
+    refundCandidateCount: () => ipcRenderer.invoke('bank-statement:refund-candidate-count')
   },
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（PR-B 实装算法/IO；本 PR 占位）
   // payload 形态见 docs/iterations/v2.1.0-beta.1/spec.md §三
@@ -375,10 +377,12 @@ contextBridge.exposeInMainWorld('desktopApi', {
     }
   },
   // v2.1.16 阶段一 A4：链接表管理（资金对账数据处理模块「链接表管理」弹窗）
-  //   list   ：读 4 个 tableKey 元数据（渲染弹窗 4 行的日期范围 / 更新日期）
-  //   import ：多选 Excel → main 识别 + 落库 → 返回 per-file 批量明细（成功/失败 + 原因）
+  //   list     ：读 4 个 tableKey 元数据（渲染弹窗 4 行的日期范围 / 更新日期）
+  //   import   ：多选 Excel → main 识别 + 落库 → 返回 per-file 批量明细（成功/失败 + 原因）
+  //   rowCount ：v3.0.0 需求2b — 单个链接表行数（轻量查 meta，不读全表）；C3 提醒就绪判据
   linkedTable: {
     list: () => ipcRenderer.invoke('linked-table:list'),
-    import: () => ipcRenderer.invoke('linked-table:import')
+    import: () => ipcRenderer.invoke('linked-table:import'),
+    rowCount: (tableKey) => ipcRenderer.invoke('linked-table:row-count', tableKey)
   }
 });

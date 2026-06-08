@@ -9,8 +9,8 @@
 
 | 字段 | 值 |
 |---|---|
-| 清单版本 | v13（对应 app v2.1.16-beta.1 — 2026-06-07 阶段一 A0 收尾升格 3 条 Runtime-state：`bankStatementSession`（资金对账数据处理银行对账单进程级 session + v2.1.16 A5 多文件合并对账语义 + 🔴 `_rowId` 全局唯一不变量）/ `gatewayReconSession`（C3 网关账单数据源 + 导入银行对账单时清空）/ `processingResult`（5 轮对账运行结果缓存 + scenarios 变更/重导入时清空）；触发：v2.1.16 阶段一提 PR 前 check-vars 节点；v12 = 2026-05-28 Phase 6 T33 升格 5 条 v2.1.10 4 主线变量（Critical 4：`runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1：`serializeError`/`deserializeError` + 更新 `bill_imports.raw_json` 内容契约）；v11 = 2026-05-26 N1' + N4 升格 7 条；v10 = 2026-05-22 Phase 0 T02 升格 11 条；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
-| 上次人工 review | 2026-06-07（v2.1.16 阶段一 A0 收尾升格 3 条 Runtime-state — bankStatementSession / gatewayReconSession / processingResult）|
+| 清单版本 | v14（对应 app v3.0.0 — 2026-06-08 PR-4 升格 1 条 Runtime-state：`refundOrderSession`（R5 中台退款订单回填引擎入参源 + run 阶段注入 + 🔴 PR#65 收紧生命周期：单文件导入清 main.js:3494 / batch 本批未导退款表清 :11460 严格绑定「本批有效导入」；v3.0.0 需求3 经 session-status 透出 hasRefundOrder 供运行点 shouldPromptRefundAtRun 判就绪，本迭代只读不改写入/清空时机）；触发：v3.0.0 PR-4（退款提醒对齐 C3 + 候选预检 + 运行点编排）提 PR 前 check-vars 节点；v13（对应 app v2.1.16-beta.1）= 2026-06-07 阶段一 A0 收尾升格 3 条 Runtime-state：`bankStatementSession`（资金对账数据处理银行对账单进程级 session + v2.1.16 A5 多文件合并对账语义 + 🔴 `_rowId` 全局唯一不变量）/ `gatewayReconSession`（C3 网关账单数据源 + 导入银行对账单时清空）/ `processingResult`（5 轮对账运行结果缓存 + scenarios 变更/重导入时清空）；触发：v2.1.16 阶段一提 PR 前 check-vars 节点；v12 = 2026-05-28 Phase 6 T33 升格 5 条 v2.1.10 4 主线变量（Critical 4：`runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1：`serializeError`/`deserializeError` + 更新 `bill_imports.raw_json` 内容契约）；v11 = 2026-05-26 N1' + N4 升格 7 条；v10 = 2026-05-22 Phase 0 T02 升格 11 条；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
+| 上次人工 review | 2026-06-08（v3.0.0 PR-4 升格 1 条 Runtime-state — refundOrderSession）；2026-06-07（v2.1.16 阶段一 A0 收尾升格 3 条 Runtime-state — bankStatementSession / gatewayReconSession / processingResult）|
 | 基线数据 | `docs/analysis/var-reference-stats.md`（94 个 JS 文件 / 1000 顶层声明 — v2.1.10-beta.1 T33 重跑后；A-share 159 / A-pair 290 / A-local 444 / B 449） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
@@ -587,6 +587,16 @@
   - **scenarios 变更 / 重导入银行对账单 / 重导入网关时主动清空**（`src/main.js:3458` / `3496` / `11181`）——避免老运行结果被新数据 / 新场景配置误用导出（资金红线：导出的命中行必须对应当前 session + 当前场景快照）
   - 改 `modifiedRows` / `stats` 结构 → export 写盘 + 状态框统计取数错位
   - 必跑：跑出结果后改场景 / 重导入 → 确认 `processingResult` 已清空（不残留老 stats / 老命中行）
+
+### `refundOrderSession`（v3.0.0 PR-4 升格 Runtime-state ⚠️ 资金对账数据处理进程级 session — 退款回填引擎入参源）
+- 定义：`src/main.js:297` `let refundOrderSession = null;`（进程级，重启不持久化；beta.6 需求C 开通真实退款数据流）
+- 结构：`{ fileName, rows, importedAt }`（`rows` = 中台退款订单 25 列对象数组）
+- 关联功能：R5 场景4「中台退款订单回填」（`scenario-engines/r5-refund-order-backfill.js`，🔴 资金红线）的退款订单数据源；run 阶段 main.js 注入（`src/main.js:3612` `workingRefundOrderRows = refundOrderSession ? structuredClone(refundOrderSession.rows) : []`，未导入退款表时注入 `[]` 引擎 no-op）；v3.0.0 需求3 经 `session-status` 透出 `hasRefundOrder`（`refundOrderSession !== null`）供前端运行点 `shouldPromptRefundAtRun` 判就绪
+- 变更 review 要点：
+  - 🔴 **生命周期 PR#65 已收紧**（单文件导入无条件清 `src/main.js:3494`；批量导入「本批未识别到退款表」时清 `src/main.js:11460` `if (!refundImportedThisBatch) refundOrderSession = null;`）——严格绑定「本批有效导入退款表」；否则旧 refundOrderSession 残留 → 下次 run 把上一批退款订单注入新银行单 = **跨批错回填**（资金事故）
+  - 🔴 **就绪判据写反 = 漏跑退款**：v3.0.0 需求3 `hasRefundOrder = refundOrderSession !== null`；前端 `shouldPromptRefundAtRun` / `maybePromptRefundOrderImport` 据此 + 退款候选预检（`countRefundBankCandidates` = FundType=Ach Return 计数）门控提醒；本迭代**只读不改其写入/清空时机**
+  - 落 session 入口（`src/main.js:11529` `refundOrderSession = { fileName, rows: refundRows, importedAt }`）整体覆盖；改 `rows` 字段名/结构 → 退款回填引擎跨表字段映射（`refund-backfill-fields.js`）取数失败 = 写错回填
+  - 必跑：批量导入退款表 → 跑 run（确认回填命中）→ 重导无退款表的批次 → 确认 `refundOrderSession` 已清空（session-status `hasRefundOrder=false`、run 注入 `[]` no-op，不跨批回填）
 
 ---
 

@@ -100,6 +100,30 @@ function recordFromBankStatementRows(db, rows) {
 }
 
 /**
+ * v3.0.0 需求1：从一批银行对账单行抽取唯一「渠道-地区」组合（供状态框前缀展示）。
+ *   纯函数（不依赖 db），复用 recordFromBankStatementRows 的拼接口径，保证与枚举沉淀同口径：
+ *     - Channel（trim 后）为空 → 跳过整行（不产出任何组合）。
+ *     - 地区（trim 后）为空 → 只产出 `Channel`（不生成 'JPM-' 这种带短横的脏值）。
+ *     - 地区非空 → 产出 `Channel-地区`。
+ *   结果去重（Set）+ `sort()` 稳定排序（默认字典序），便于前端拼前缀与单测断言。
+ * @param {Array<{Channel?:*, 地区?:*}>} rows readBankStatement 产物（对象数组）
+ * @returns {string[]} 去重 + 排序后的「渠道」/「渠道-地区」组合
+ */
+function extractChannelRegionCombos(rows) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const set = new Set();
+  for (const row of safeRows) {
+    const obj = row && typeof row === 'object' ? row : {};
+    const ch = obj.Channel === null || obj.Channel === undefined ? '' : String(obj.Channel).trim();
+    if (ch === '') continue; // Channel 空 → 跳过整行
+    const region = obj['地区'] === null || obj['地区'] === undefined ? '' : String(obj['地区']).trim();
+    // 🔴 地区非空才拼接 channel-region；地区空只产出 channel（不生成 'JPM-' 脏值）
+    set.add(region !== '' ? `${ch}-${region}` : ch);
+  }
+  return Array.from(set).sort();
+}
+
+/**
  * 按 value_type 过滤列出枚举值（供后续引擎读库 + 审计）。
  * @param {*} db
  * @param {'channel'|'channel-region'} valueType
@@ -127,5 +151,7 @@ module.exports = {
   VALUE_TYPE_CHANNEL_REGION,
   recordValue,
   recordFromBankStatementRows,
+  // v3.0.0 需求1：状态框渠道-地区前缀（纯函数，与枚举沉淀同拼接口径）
+  extractChannelRegionCombos,
   listChannelEnumValues
 };

@@ -109,6 +109,8 @@ const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-disp
 const { runReconciliation } = require('./main-process/reconciliation-orchestrator');
 // v2.1.12 需求6：数据侧预检只读 helper（统计 C3 银行侧候选行，不触碰 runC3Scenario 资金逻辑）
 const { countC3BankCandidates } = require('./main-process/scenario-engines/c3-gateway-recon-join');
+// v3.0.0 需求3：退款候选预检只读 helper（统计银行侧 FundType=Ach Return 候选行，与 countC3BankCandidates 对称）
+const { countRefundBankCandidates } = require('./main-process/scenario-engines/r5-refund-order-backfill');
 // v2.1.9 N5：dispatcher 双维调度依赖 channels-repository（findByNameAndLocation + getBuiltinGeneral）
 const channelsRepository = require('./backend/database/channels-repository');
 // v2.1.9 N7：场景模板 bundle 序列化 / 解析 / 类型识别（spec §六）
@@ -3846,9 +3848,17 @@ function registerAppHandlers() {
       bankStatementSourceFileCount: bankStatementSession
         ? (Array.isArray(bankStatementSession.sourceFiles) ? bankStatementSession.sourceFiles.length : 1)
         : 0,
+      // v3.0.0 需求1：状态框「渠道-地区」前缀数据源 —— 从合并全集 rows 抽唯一组合（去重 + 排序）
+      //   无 session 兜底 []；前端按长度拼前缀（0 个无前缀 / 1 个 CITI-HK: / 多个 CITI-HK、JPM-US:）
+      bankStatementChannelRegions: bankStatementSession
+        ? database.extractChannelRegionCombos(bankStatementSession.rows)
+        : [],
       hasGatewayRecon: gatewayReconSession !== null,
       gatewayReconFileName: gatewayReconSession ? gatewayReconSession.fileName : null,
       gatewayReconRowCount: gatewayReconSession ? gatewayReconSession.gwRows.length : 0,
+      // v3.0.0 需求3 🔴 资金红线：退款 session 就绪信号（前端运行点 shouldPromptRefundAtRun 据此判「本批是否已导退款表」）。
+      //   refundOrderSession 生命周期已由 PR#65 收紧（单文件导入清 :3494、batch 本批未导退款表清 :11460）→ !==null 严格绑定「本批有效导入退款表」。
+      hasRefundOrder: refundOrderSession !== null,
       hasProcessingResult: processingResult !== null,
       processingStats: processingResult ? processingResult.stats : null
     };
@@ -3870,6 +3880,20 @@ function registerAppHandlers() {
         if (candidateCount > 0) break; // 有候选即可，提前退出
       }
       return { status: 'ok', candidateCount };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error), candidateCount: 0 };
+    }
+  });
+
+  // v3.0.0 需求3：退款回填「候选预检」只读 IPC（仿 bank-statement:c3-candidate-count）。
+  //   统计当前导入银行对账单中 FundType=Ach Return 的候选行数；前端导入后 / 运行点提醒据此门控（本批无候选则不弹）。
+  //   纯只读查询，无副作用 → 不进 trackedIpcHandle 计数（与 c3-candidate-count 范式一致）。
+  ipcMain.handle('bank-statement:refund-candidate-count', () => {
+    try {
+      if (!bankStatementSession || !Array.isArray(bankStatementSession.rows) || bankStatementSession.rows.length === 0) {
+        return { status: 'ok', candidateCount: 0 };
+      }
+      return { status: 'ok', candidateCount: countRefundBankCandidates(bankStatementSession.rows) };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error), candidateCount: 0 };
     }
@@ -11147,6 +11171,20 @@ function registerNewAccountHandlers() {
       return { status: 'ok', tables };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // v3.0.0 需求2b：单个链接表行数（轻量查 linked_table_meta 单行 meta，不读全表）。
+  //   用途：C3 提醒「数据就绪判据」改向链接表 gateway-bill rowCount（替代 gatewayReconSession 门控）。
+  //   🔴 资金红线：前端判据严格 rowCount>0 才算就绪；本 handle 任何异常（数据库未初始化 / tableKey 非法 / 查询失败）
+  //     一律返回非 ok（{status:'failed'}），由前端按「未就绪」保守处理（仍提醒，防静默漏对账）。只读，普通 handle。
+  ipcMain.handle('linked-table:row-count', (_event, tableKey) => {
+    if (!database || !database.db) return { status: 'failed', message: '数据库未初始化' };
+    try {
+      const meta = database.getLinkedTableMeta(tableKey);
+      return { status: 'ok', rowCount: (meta && Number.isFinite(meta.rowCount)) ? meta.rowCount : 0 };
+    } catch (err) {
+      return { status: 'failed', message: err && err.message ? err.message : String(err) };
     }
   });
 

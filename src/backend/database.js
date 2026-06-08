@@ -1096,6 +1096,12 @@ class AppDatabase {
     return channelEnumRepository.listChannelEnumValues(this.db, valueType);
   }
 
+  // v3.0.0 需求1：从银行对账单行抽取唯一「渠道-地区」组合（纯函数，供 session-status 透出状态框前缀）。
+  //   不依赖 db；与枚举沉淀同拼接口径（Channel 空跳过 / 地区空只产 channel / 去重 + 排序）。
+  extractChannelRegionCombos(rows) {
+    return channelEnumRepository.extractChannelRegionCombos(rows);
+  }
+
   // SR-backup-1 (v2.1.9)：sqlite 安全备份 API（VACUUM INTO）
   // 用法：const backupPath = appDb.createBackup('pre-N5');
   //   - label：仅支持 [A-Za-z0-9_-]（用于文件名 + 防 SQL 注入）
