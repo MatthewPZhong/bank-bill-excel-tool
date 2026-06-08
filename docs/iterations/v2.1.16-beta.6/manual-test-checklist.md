@@ -52,6 +52,9 @@
 - [ ] **C-5d** 🔴 运行后补导退款（PR#65 Finding1）：运行一次后再导退款订单表 → processingResult 清空、导出强制重新运行，**不用**旧 refundBackfill
 - [ ] **C-5e** 同批顺序无关（PR#65 Finding1）：一次多选「退款订单 + 银行对账单」，**无论文件顺序**，退款 session 都是本批的（不被银行对账单分支误清）
 - [ ] **C-5f** 🔴 ADM 重建清 JPM 结果（PR#65 Codex FindingB）：run JPM 后经链接表管理重导银行对账单表（ADM 重建）→ export 强制重新 run，**不用**旧 ADM 内容的 stale gateway fixes
+- [ ] **C-5g** 🔴 mid-allocation 触发 ADM 重建（PR#65 新Finding1）：先导银行对账单表、后导（或重导）中台调拨订单表 → ADM 调拨号/金额刷新为新值 + 弹 ADM 派生框 + 清 JPM 结果；随后 run JPM 读到新 ADM（非 stale）
+- [ ] **C-5h** mid-allocation 边界（PR#65 新Finding1）：① 未导银行对账单表时导中台调拨订单表 → **不**重建 ADM、不清 reconIdFixResult（无 bank 源）；② 一次多选「银行对账单表 + 中台调拨订单表」→ ADM 派生弹框 stats = 最后一次重建（与 DB 最终态一致，非首个文件旧态）
+- [ ] **C-5i** 单文件 import 清退款 session（PR#65 新Finding2）：经 `bankStatement.import()` 单文件入口导银行对账单（非批量）→ 旧 refundOrderSession 被清；随后 run 不注入上一批退款订单（注：当前 UI 走 batchImport，此为 legacy IPC 防御）
 
 ---
 

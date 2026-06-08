@@ -6284,10 +6284,13 @@
       }
 
       // v2.1.16-beta.5 需求3（PRD §5.3.6 / Mockup B/C）：从批量导入 results 取 ADM 派生信息（main.js 挂在
-      //   bank-deposit 文件 result 的 admDerive 子字段）。可能多个文件但银行对账单表唯一识别 → 取首个有 admDerive 者。
+      //   bank-deposit 或 mid-allocation 文件 result 的 admDerive 子字段；PR#65 新 Finding1 起两源任一变更都重建）。
+      //   🔴 取「最后一个」有 admDerive 者：一次多选可能 bank-deposit + mid-allocation 都触发重建，handler 按文件
+      //   顺序逐次 replaceAdmBankDeposit（整表覆盖）→ 最后一次 = DB 最终态，弹框须用最后一次的 stats（取首个会显示旧态）。
       function findAdmDerive(results) {
         const list = Array.isArray(results) ? results : [];
-        const hit = list.find((r) => r && r.admDerive);
+        let hit = null;
+        for (const r of list) { if (r && r.admDerive) hit = r; }
         return hit ? hit.admDerive : null;
       }
 

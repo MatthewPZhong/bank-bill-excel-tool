@@ -3486,6 +3486,10 @@ function registerAppHandlers() {
       // （Codex F2 P1 修复：避免把上一批 gwRows 误用到新文件）
       processingResult = null;
       gatewayReconSession = null;
+      // v2.1.16-beta.6 PR#65 新 Finding2（🔴 资金红线）：单文件导入也须清旧退款 session（与批量路径一致）——
+      //   否则旧 refundOrderSession 残留 → 下次 bank-statement:run 把上一批退款订单注入新银行单 → 跨批错回填。
+      //   单文件 = 单个银行对账单，无「同批退款」并存问题 → 无条件清（不需批量路径的 refundImportedThisBatch 判定）。
+      refundOrderSession = null;
       // v2.1.16-beta.3 ①：导入成功后沉淀 Channel/Channel-地区 枚举（纯审计沉淀，失败不阻断导入）
       //   SR-log-1：src/main.js 0 console 调用 → 走 appendActivityLogEntry 上报（warning 级，不 rethrow）
       try {
@@ -11230,14 +11234,24 @@ function registerNewAccountHandlers() {
           dataDateMin: ret.dataDateMin,
           dataDateMax: ret.dataDateMax
         };
-        // v2.1.16-beta.5 需求3（逻辑A）：银行对账单表落库成功后，派生隐藏的 ADM 银行对账单链接表。
-        //   🔴 资金对账敏感：仅 repoKey==='bank-deposit' 触发，不影响其余链接表导入（gateway-bill/mid-allocation/...）。
+        // v2.1.16-beta.5 需求3（逻辑A）：银行对账单表 / 中台调拨订单表落库成功后，派生隐藏的 ADM 银行对账单链接表。
+        //   🔴 资金对账敏感：bank-deposit 或 mid-allocation 任一变更都触发重建（PR#65 新 Finding1：两源任一 stale → JPM 读错）。
         //   读中台调拨订单（mid-allocation）+ 刚落库的 bank-deposit 整行 → buildAdmRows 筛 Channel=ADM ∧ FundType
         //   ∧ 批次号 ∧ 中台唯一匹配回填调拨号/Fundtransfer-in金额 → replaceAdmBankDeposit 整表覆盖（部分成功仍建表）。
         //   ⚠️ 重导银行对账单表 = ADM 重建 = 已有 JPM 匹配标志归零（整表覆盖语义，前端弹框提示 — PRD §5.3.7 / R-7）。
         //   ADM 派生信息挂在本文件 result 的 admDerive 子字段（不独立 push 一条，避免污染 buildImportSummaryHtml 的
         //   成功/失败计数与渲染）；前端据 admDerive 弹「ADM 创建成功」或「部分成功未匹配」报错框（PRD Mockup B/C）。
-        if (repoKey === 'bank-deposit') {
+        // PR#65 新 Finding1（🔴 资金红线）：bank-deposit 或 mid-allocation 任一变更都须重建 ADM——
+        //   否则「先导银行对账单表、后导/重导中台调拨订单表」时 ADM 调拨号/金额保持旧值 → JPM 场景读 stale ADM 匹配错。
+        //   mid-allocation 入口仅当已有 bank-deposit 数据才重建（无 bank → 无 Channel=ADM 源行，重建只得空表 + 无谓清 reconIdFixResult）。
+        //   异常安全：mid-allocation 入口探测 bank-deposit 是否有数据时，读失败按「无」处理，
+        //   绝不让该探测异常误判 mid-allocation 导入本身为 write-error（import 已落库成功，与 bank-deposit 分支同口径隔离）。
+        let bankExistsForAdm = repoKey === 'bank-deposit';
+        if (repoKey === 'mid-allocation') {
+          try { bankExistsForAdm = database.readLinkedTableRows('bank-deposit').length > 0; }
+          catch (probeErr) { bankExistsForAdm = false; }
+        }
+        if (bankExistsForAdm) {
           try {
             const midRows = database.readLinkedTableRows('mid-allocation');
             const bankRows = database.readLinkedTableRows('bank-deposit');
