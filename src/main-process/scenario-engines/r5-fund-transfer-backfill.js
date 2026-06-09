@@ -93,7 +93,7 @@ function amountEqual(gwRow, bankRow) {
  * @param {number} [options.dateToleranceDays] Phase2 日期容差天数（默认 1）
  * @returns {{ modifications: Array, warnings: Array }}
  *   modifications：实际改写 ReconciliationId 的行（{ rowId, column:'ReconciliationId', oldValue, newValue }），用于标黄
- *   warnings：multi-bank-match-backfill / reconid-overwrite-backfill
+ *   warnings：multi-bank-match-backfill
  */
 function runRound5FundTransferBackfill(gwRows, bankRows, options = {}) {
   const warningCollector = makeWarningCollector('r5-fund-transfer-backfill', '中台调拨订单对账ID回填');
@@ -142,15 +142,7 @@ function runRound5FundTransferBackfill(gwRows, bankRows, options = {}) {
     const nv = normalizeCellValue(gw && gw.reconciliationid);
     const old = normalizeCellValue(chosen.ReconciliationId);
     if (nv !== '' && old !== nv) {
-      if (old !== '') {
-        // 原值非空被覆盖 —— 与 C1/C3 一致：发 warning 但仍执行覆盖
-        warningCollector.push({
-          rowId: chosen._rowId,
-          code: 'reconid-overwrite-backfill',
-          phase,
-          message: `银行行 ReconciliationId 原值「${old}」非空，被网关回填值「${nv}」覆盖（${phase}）`
-        });
-      }
+      // 命中即覆盖（含非空原值）；按需求移除 reconid-overwrite-backfill 告警，覆盖行为不变。
       chosen.ReconciliationId = nv;
       modCollector.record(chosen._rowId, 'ReconciliationId', old, nv);
     }
