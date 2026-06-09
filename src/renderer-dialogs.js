@@ -6194,12 +6194,15 @@
         </div>
         <div class="dialog-actions linked-table-manager-footer">
           <div class="linked-table-footer-spacer" style="flex: 1 1 auto;"></div>
+          <button class="secondary-btn small" type="button" data-action="delete-range">删除</button>
           <button class="primary-btn small" type="button" data-action="import">导入</button>
           <button class="secondary-btn small" type="button" data-action="exit">退出</button>
         </div>
       `;
       const tbody = dialog.querySelector('tbody');
       const importBtn = dialog.querySelector('[data-action="import"]');
+      // v3.0.1 需求1（D4）：删除入口 → 关闭管理弹窗、打开「按日期范围删除」弹框（仅网关，🔴 不可逆）。
+      const deleteBtn = dialog.querySelector('[data-action="delete-range"]');
 
       // 单行渲染：数据日期范围（min~max，缺一侧或全空显示「—」）+ 表库更新日期（updatedAt 取日期部分）
       function formatDateRange(meta) {
@@ -6280,6 +6283,16 @@
           }).join('<br/>');
           lines.push(`失败：<br/>${failList}`);
         }
+        // v3.0.1 需求1（D3）：网关对账单为「跨次幂等累加」导入（按 ReconBillBizId）。聚合本次覆盖/拒入计数，>0 才提醒。
+        const gwResults = list.filter((r) => r && r.tableKey === 'gateway-bill' && r.status === 'ok');
+        const overwriteTotal = gwResults.reduce((s, r) => s + (Number(r.overwriteCount) || 0), 0);
+        const rejectedEmptyTotal = gwResults.reduce((s, r) => s + (Number(r.rejectedEmptyCount) || 0), 0);
+        if (overwriteTotal > 0 || rejectedEmptyTotal > 0) {
+          const tips = ['<b>网关对账单累加导入提醒</b>（按 ReconBillBizId 幂等，非整表替换）：'];
+          if (overwriteTotal > 0) tips.push(`• 有 <b>${overwriteTotal}</b> 条因 ReconBillBizId 已存在被覆盖更新`);
+          if (rejectedEmptyTotal > 0) tips.push(`• 有 <b>${rejectedEmptyTotal}</b> 条因 ReconBillBizId 为空被拒绝入库`);
+          lines.push(tips.join('<br/>'));
+        }
         return lines.join('<br/><br/>');
       }
 
@@ -6316,6 +6329,8 @@
         const unmatched = Array.isArray(admDerive.unmatched) ? admDerive.unmatched : [];
         // 全匹配成功（无未匹配）→ Mockup B：「ADM银行对账单链接表已创建」。
         if (unmatched.length === 0) {
+          // v3.0.1 需求4：本次未派生出任何 ADM 行（银行表无 Channel='ADM' 调拨行）→ 表为空，不弹「已创建」成功提示（返回 null → 调用链跳过 ADM 框）。
+          if (!admDerive.total) return null;
           return 'ADM银行对账单链接表已创建。';
         }
         // 部分成功 → Mockup C：列未匹配行（批次号/CustomerRef/BillDate/ChannelOrderNo + 错误码中文说明）。
@@ -6346,6 +6361,11 @@
 
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
       dialog.querySelector('[data-action="exit"]').addEventListener('click', closeModal);
+
+      // 删除：打开「按日期范围删除」弹框（openModal 替换当前 overlay，无需显式 closeModal，与 importBtn 链式弹窗同范式）
+      deleteBtn.addEventListener('click', () => {
+        openModal(createLinkedTableDeleteRangeDialog());
+      });
 
       // 导入：多选 Excel → main 识别 + 落库 → 批量明细弹窗 → 刷新列表
       //   导入期间禁用按钮防重复触发；cancelled（用户取消文件框）静默不弹明细。
@@ -6395,6 +6415,117 @@
 
       // 打开即异步拉取列表（先挂 overlay 返回，列表随后填充）
       refreshList();
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
+    // v3.0.1 需求1（D4 / OPEN-6 用户拍板）：🔴 资金红线 — 按日期范围删除网关对账单数据。
+    //   仅支持网关对账单表；闭区间（含起止两端）；直接删、无二次确认 → 本弹框即唯一一道确认，警告须做足。
+    //   实时计数：两端日期填齐 ∧ start<=end → countByDateRange 预览将删行数，否则禁用「删除」。
+    //   删除走 deleteByDateRange（不可逆）；成功后重开管理弹窗自动刷新列表反映新日期范围。
+    function createLinkedTableDeleteRangeDialog() {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card linked-table-delete-range-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">删除网关对账单数据</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body" style="padding: 4px 28px 8px;">
+          <div style="display: flex; gap: 16px; margin-bottom: 14px;">
+            <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px;">
+              起始日期
+              <input type="date" data-role="start" />
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px;">
+              结束日期
+              <input type="date" data-role="end" />
+            </label>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <div style="flex: 1 1 auto;"></div>
+          <button class="danger-btn small" type="button" data-action="confirm-delete" disabled>删除</button>
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        </div>
+      `;
+      const startInput = dialog.querySelector('[data-role="start"]');
+      const endInput = dialog.querySelector('[data-role="end"]');
+      const confirmBtn = dialog.querySelector('[data-action="confirm-delete"]');
+
+      // 当前输入是否构成有效闭区间（两端非空 ∧ start<=end）。
+      function rangeValid() {
+        const s = startInput.value;
+        const e = endInput.value;
+        return Boolean(s) && Boolean(e) && s <= e;
+      }
+
+      // 标记最近一次有效计数请求，避免快速改日期时旧请求回填覆盖新值。
+      let countToken = 0;
+
+      // v3.0.1（用户调整）：红色警告框 + 「将删约 N 行」计数显示已按用户要求去掉；
+      //   仍后台跑 countByDateRange，仅用于「计数成功才允许删除」的防误删门控（不再在 UI 显示行数）。
+      // 重新评估输入：无效 → 禁用删除；有效 → 拉取计数，成功才启用删除（count 失败则保守禁用，避免未知行数下误删）。
+      async function refreshState() {
+        if (!rangeValid()) {
+          confirmBtn.disabled = true;
+          return;
+        }
+        const token = ++countToken;
+        const s = startInput.value;
+        const e = endInput.value;
+        try {
+          const ret = await desktopApi.linkedTable.countByDateRange(s, e);
+          if (token !== countToken) return; // 已被更晚的输入覆盖，丢弃本次回填
+          confirmBtn.disabled = !(ret && ret.status === 'ok');
+        } catch (_err) {
+          if (token !== countToken) return;
+          confirmBtn.disabled = true;
+        }
+      }
+
+      startInput.addEventListener('change', refreshState);
+      startInput.addEventListener('input', refreshState);
+      endInput.addEventListener('change', refreshState);
+      endInput.addEventListener('input', refreshState);
+
+      dialog.querySelector('.icon-close').addEventListener('click', () => {
+        openModal(createLinkedTableManagerDialog());
+      });
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+        openModal(createLinkedTableManagerDialog());
+      });
+
+      // 删除：disable 防重复 → deleteByDateRange（🔴 不可逆）→ 成功重开管理弹窗 / 失败重开本删除弹框。
+      confirmBtn.addEventListener('click', async () => {
+        if (!rangeValid()) return;
+        confirmBtn.disabled = true;
+        const s = startInput.value;
+        const e = endInput.value;
+        let ret;
+        try {
+          ret = await desktopApi.linkedTable.deleteByDateRange(s, e);
+        } catch (err) {
+          openModal(createAlertDialog(`删除失败：${err?.message || '未知错误'}`, {
+            onConfirm: () => openModal(createLinkedTableDeleteRangeDialog())
+          }));
+          return;
+        }
+        if (ret && ret.status === 'ok') {
+          const deleted = Number(ret.deleted) || 0;
+          openModal(createAlertDialog(`已删除 ${deleted} 行网关对账单数据。`, {
+            skipLogReport: true,
+            onConfirm: () => openModal(createLinkedTableManagerDialog())
+          }));
+          return;
+        }
+        const msg = ret && ret.message ? ret.message : '未知错误';
+        openModal(createAlertDialog(`删除失败：${msg}`, {
+          onConfirm: () => openModal(createLinkedTableDeleteRangeDialog())
+        }));
+      });
 
       overlay.appendChild(dialog);
       return overlay;
@@ -6462,7 +6593,7 @@
             </div>
             <button class="secondary-btn small" type="button" data-action="manage-channels">管理</button>
             <!-- v2.1.15 W3：「网关对账单修复」入口（仅资金对账模块入口显示）→ 打开 ReconID 修复模块的网关对账单场景管理 -->
-            <span class="gateway-recon-id-fix-entry" style="display: ${showGatewayReconIdFixEntry ? 'inline-flex' : 'none'}; align-items: center; gap: 8px; margin-left: 8px;">
+            <span class="gateway-recon-id-fix-entry" style="display: ${showGatewayReconIdFixEntry ? 'inline-flex' : 'none'}; align-items: center; gap: 8px; margin-left: 8px; transform: translateX(400px);">
               <label class="select-label" style="white-space: nowrap;">网关对账单修复</label>
               <button class="secondary-btn small" type="button" data-action="manage-gateway-recon-id-fix">管理</button>
             </span>
@@ -6564,13 +6695,16 @@
         }
         // 批量勾选列：builtin-fixed 与网关写死场景均不可批量操作 → checkbox disabled
         const selectRowDisabled = isBuiltinFixed || isBuiltinGatewayScenario;
+        // v3.0.1（用户要求）：场景管理「场景名称」列去掉冗余前缀「资金性质校验-」（与「功能类别」列已显示的「资金性质校验」重复）。
+        //   仅显示层 strip，不改 DB seed 名字；对账引擎按 config/category 匹配、不引用 name 字符串（后端 grep 零引用），故安全。
+        const scenarioDisplayName = String(scenario.name || '').split('资金性质校验-').join('');
         tr.innerHTML = `
           <td class="scenarios-col-checkbox" data-role="row-checkbox-cell" style="width: 3%; padding-left: 8px; padding-right: 0; text-align: center; ${checkboxDisplay}">
             <input type="checkbox" data-row-action="select-row" ${selectRowDisabled ? 'disabled title="内置写死场景不可批量操作"' : ''} />
           </td>
           <td class="scenarios-col-id" style="padding-left: 0; padding-right: 0; text-align: left; white-space: nowrap;"><span style="display: inline-block; margin-left: 21px;">${escapeHtml(String(displayIndex))}</span></td>
           <td class="scenarios-col-category">${escapeHtml(getScenarioCategoryDisplay(scenario))}</td>
-          <td class="scenarios-col-name">${escapeHtml(scenario.name)}</td>
+          <td class="scenarios-col-name">${escapeHtml(scenarioDisplayName)}</td>
           ${priorityTd}
           <td class="scenarios-col-actions">${actionsInner}</td>
           ${enabledTd}
@@ -10143,19 +10277,21 @@
     function createGatewayReconScenarioPickerDialog({ scenarios = [], onPick = null } = {}) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
-      dialog.className = 'modal-card alert-card';
+      dialog.className = 'modal-card gateway-recon-picker-card';
       const list = Array.isArray(scenarios) ? scenarios : [];
       const radioName = `gateway-recon-scenario-pick-${list.length}`;
       const items = list.map((s, i) => `
-        <label style="display:flex;align-items:center;gap:8px;padding:6px 4px;cursor:pointer;">
+        <label class="gateway-recon-picker-item">
           <input type="radio" name="${radioName}" value="${escapeHtml(String(s.id))}" ${i === 0 ? 'checked' : ''} />
           <span>${escapeHtml(s.name || `场景 ${s.id}`)}</span>
         </label>
       `).join('');
       dialog.innerHTML = `
         <div class="dialog-header"><div class="dialog-title">选择要运行的网关对账单修复场景</div></div>
-        <div class="alert-message" style="text-align:left;">检测到多个已启用场景，请选择一个运行：</div>
-        <div style="text-align:left;margin:8px 0;max-height:220px;overflow:auto;">${items}</div>
+        <div class="gateway-recon-picker-body">
+          <div class="gateway-recon-picker-hint">检测到多个已启用场景，请选择一个运行：</div>
+          <div class="gateway-recon-picker-list">${items}</div>
+        </div>
         <div class="dialog-actions center">
           <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
           <button class="primary-btn small" type="button" data-action="confirm">运行</button>
@@ -10206,6 +10342,8 @@
       createScenarioCategorySelectDialog,
       // v2.1.14 C：链接表管理弹窗（UI 骨架占位）
       createLinkedTableManagerDialog,
+      // v3.0.1 需求1（D4）：按日期范围删除网关对账单数据弹框（🔴 资金红线，供 preview 调用）
+      createLinkedTableDeleteRangeDialog,
       // v2.1.9 N5：银行渠道管理弹框（spec §4.2）
       createChannelManagerDialog,
       // v2.0.0-beta.3 PR #32b：4 dialog factory（C1/C2/C3 配置 + 确认场景详情）

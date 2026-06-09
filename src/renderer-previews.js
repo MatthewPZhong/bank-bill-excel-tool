@@ -55,7 +55,11 @@
       // v2.1.0-beta.1 PR-A（task A7）：C4 类配置弹窗
       createScenarioConfigDialogC4,
       // v2.1.4 T3：小助手功能收纳弹窗工厂
-      createModuleCabinetDialog
+      createModuleCabinetDialog,
+      // v3.0.1 需求1（D4）：删除网关对账单弹框（🔴 资金红线）preview 直接调用
+      createLinkedTableDeleteRangeDialog,
+      // v3.0.1 需求3：网关对账单修复场景单选框 preview 直接调用
+      createGatewayReconScenarioPickerDialog
     } = deps;
 
     function applyNewAccountPreviewState() {
@@ -836,6 +840,44 @@
       }, 120);
     }
 
+    // v3.0.1 需求1（D4）：删除网关对账单弹框 preview（🔴 资金红线）。
+    //   直接 openModal 删除弹框，填入示例日期范围并直接注入示例计数 + 启用「删除」，
+    //   让截图体现「已填日期 → 红色警告区显示将删行数 → 删除可点」的完整交互态。
+    //   注：preview 临时库为空、且 contextBridge 暴露的 desktopApi 已冻结无法 mock 计数接口，
+    //   故 preview 直接写 DOM 还原目标态（与其它直接注入 state 的 preview 同思路）。
+    function applyLinkedTableDeleteRangePreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      setTimeout(() => {
+        openModal(createLinkedTableDeleteRangeDialog());
+        setTimeout(() => {
+          const root = elements.modalRoot;
+          if (!root) return;
+          const startInput = root.querySelector('[data-role="start"]');
+          const endInput = root.querySelector('[data-role="end"]');
+          const confirmBtn = root.querySelector('[data-action="confirm-delete"]');
+          if (startInput) startInput.value = '2026-05-01';
+          if (endInput) endInput.value = '2026-05-31';
+          // v3.0.1（用户调整）：红框 + 「将删约 N 行」计数已去掉，preview 直接置删除按钮可用态。
+          if (confirmBtn) confirmBtn.disabled = false;
+        }, 120);
+      }, 120);
+    }
+
+    // v3.0.1 需求3：网关对账单修复场景单选框 preview（多场景示例，便于截图体现单选样式）。
+    function applyGatewayReconScenarioPickerPreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      setTimeout(() => {
+        openModal(createGatewayReconScenarioPickerDialog({
+          scenarios: [
+            { id: 1, name: '场景示例 A' },
+            { id: 2, name: '场景示例 B' },
+            { id: 3, name: '场景示例 C' }
+          ],
+          onPick: () => {}
+        }));
+      }, 120);
+    }
+
     // v2.0.0-beta.3：类别选择弹窗
     function applyScenarioCategorySelectPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
@@ -1260,6 +1302,10 @@
       applyScenarioCategorySelectPreviewState,
       // v2.1.14 C：链接表管理弹窗 preview
       applyLinkedTableManagerPreviewState,
+      // v3.0.1 需求1（D4）：删除网关对账单弹框 preview
+      applyLinkedTableDeleteRangePreviewState,
+      // v3.0.1 需求3：网关对账单修复场景单选框 preview
+      applyGatewayReconScenarioPickerPreviewState,
       // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 preview（4 张）
       // v2.1.7 F1：C1 dialog 新增 AND 模式 preview（OR fallback baseline + AND 显式各 1 张）
       applyScenarioConfigC1PreviewState,
