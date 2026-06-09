@@ -1,15 +1,15 @@
 {
   "meta": {
     "version": "2.1.16-beta.6",
-    "scannedAt": "2026-06-08T08:11:52.976Z",
+    "scannedAt": "2026-06-09T00:57:48.712Z",
     "root": "src",
     "totalFiles": 128,
-    "totalTopLevelNames": 1308,
+    "totalTopLevelNames": 1322,
     "buckets": {
       "shared": 202,
-      "paired": 391,
-      "local": 599,
-      "crossFile": 593
+      "paired": 397,
+      "local": 607,
+      "crossFile": 599
     }
   },
   "A": {
@@ -56,6 +56,7 @@
           "src/main-process/scenario-hit-rows-writer.js",
           "src/main-process/statement-generation.js",
           "src/main-process/statement-session.js",
+          "src/main-process/table-type-detector.js",
           "src/main-process/vcc-op-calc-session.js",
           "src/main.js"
         ],
@@ -114,7 +115,7 @@
           },
           {
             "file": "src/backend/file-service/readers.js",
-            "count": 6
+            "count": 3
           },
           {
             "file": "src/backend/file-service/writers.js",
@@ -225,6 +226,10 @@
             "count": 4
           },
           {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 2
+          },
+          {
             "file": "src/main-process/vcc-op-calc-session.js",
             "count": 2
           },
@@ -237,8 +242,8 @@
             "count": 2
           }
         ],
-        "totalHits": 135,
-        "fileSpan": 44
+        "totalHits": 134,
+        "fileSpan": 45
       },
       {
         "name": "fs",
@@ -448,7 +453,7 @@
           },
           {
             "file": "src/backend/database/linked-table-repository.js",
-            "count": 2
+            "count": 3
           },
           {
             "file": "src/backend/database/migrations.js",
@@ -531,7 +536,7 @@
             "count": 3
           }
         ],
-        "totalHits": 42,
+        "totalHits": 43,
         "fileSpan": 25
       },
       {
@@ -589,7 +594,7 @@
           },
           {
             "file": "src/backend/file-service/readers.js",
-            "count": 12
+            "count": 7
           },
           {
             "file": "src/backend/file-service/writers.js",
@@ -613,14 +618,14 @@
           },
           {
             "file": "src/main-process/table-type-detector.js",
-            "count": 4
+            "count": 5
           },
           {
             "file": "src/main.js",
             "count": 2
           }
         ],
-        "totalHits": 109,
+        "totalHits": 105,
         "fileSpan": 18
       },
       {
@@ -670,7 +675,7 @@
           },
           {
             "file": "src/backend/file-service/readers.js",
-            "count": 22
+            "count": 14
           },
           {
             "file": "src/backend/file-service/writers.js",
@@ -705,7 +710,7 @@
             "count": 2
           }
         ],
-        "totalHits": 88,
+        "totalHits": 80,
         "fileSpan": 17
       },
       {
@@ -740,7 +745,7 @@
           },
           {
             "file": "src/backend/file-service/readers.js",
-            "count": 4
+            "count": 3
           },
           {
             "file": "src/backend/file-service/writers.js",
@@ -779,7 +784,7 @@
             "count": 1
           }
         ],
-        "totalHits": 70,
+        "totalHits": 69,
         "fileSpan": 13
       },
       {
@@ -979,10 +984,10 @@
           },
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 29
+            "count": 30
           }
         ],
-        "totalHits": 109,
+        "totalHits": 110,
         "fileSpan": 12
       },
       {
@@ -1393,6 +1398,46 @@
         "fileSpan": 8
       },
       {
+        "name": "parseNumber",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js",
+          "src/main-process/scenario-engines/engine-utils.js",
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 25,
+        "fileSpan": 7
+      },
+      {
         "name": "validateHeaders",
         "defFiles": [
           "src/backend/pending-import/validator.js",
@@ -1595,42 +1640,6 @@
         "fileSpan": 7
       },
       {
-        "name": "parseNumber",
-        "defFiles": [
-          "src/backend/pending-reconcile/removal-match.js",
-          "src/main-process/scenario-engines/engine-utils.js",
-          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-reconcile/removal-match.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/scenario-engines/engine-utils.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 23,
-        "fileSpan": 6
-      },
-      {
         "name": "runReconciliation",
         "defFiles": [
           "src/backend/pending-reconcile/engine.js",
@@ -1803,6 +1812,36 @@
           }
         ],
         "totalHits": 459,
+        "fileSpan": 5
+      },
+      {
+        "name": "state",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 23
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 30
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 55
+          },
+          {
+            "file": "src/renderer-previews.js",
+            "count": 41
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 154
+          }
+        ],
+        "totalHits": 303,
         "fileSpan": 5
       },
       {
@@ -2095,37 +2134,6 @@
         "fileSpan": 5
       },
       {
-        "name": "readRows",
-        "defFiles": [
-          "src/backend/bank-account-import.js",
-          "src/backend/file-service/readers.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-account-import.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/file-service/normalizers.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 4
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 12,
-        "fileSpan": 5
-      },
-      {
         "name": "VALID_DIRECTION_OUT",
         "defFiles": [
           "src/backend/biz-op-recon-import/validator.js",
@@ -2223,6 +2231,71 @@
         "fileSpan": 5
       },
       {
+        "name": "JSZip",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/reader-streamed.js",
+          "src/backend/file-service/readers.js",
+          "src/backend/pending-import/streaming-xlsx-reader.js",
+          "src/backend/pending-import/streaming-xlsx-writer.js",
+          "src/backend/vcc-op-calc-import/reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 5
+      },
+      {
+        "name": "readRows",
+        "defFiles": [
+          "src/backend/bank-account-import.js",
+          "src/backend/file-service/readers.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-account-import.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/file-service/normalizers.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 1
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 5
+      },
+      {
         "name": "saveMappings",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -2281,32 +2354,6 @@
         ],
         "totalHits": 7,
         "fileSpan": 5
-      },
-      {
-        "name": "state",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 30
-          },
-          {
-            "file": "src/renderer-pending.js",
-            "count": 55
-          },
-          {
-            "file": "src/renderer-previews.js",
-            "count": 41
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 147
-          }
-        ],
-        "totalHits": 273,
-        "fileSpan": 4
       },
       {
         "name": "elements",
@@ -3062,32 +3109,6 @@
         "fileSpan": 4
       },
       {
-        "name": "readRowsWithMetadata",
-        "defFiles": [
-          "src/backend/file-service/readers.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/table-type-detector.js",
-            "count": 2
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 4
-      },
-      {
         "name": "saveBillSplitAmountRules",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -3196,35 +3217,6 @@
         "fileSpan": 4
       },
       {
-        "name": "JSZip",
-        "defFiles": [
-          "src/backend/biz-op-recon-import/reader-streamed.js",
-          "src/backend/pending-import/streaming-xlsx-reader.js",
-          "src/backend/pending-import/streaming-xlsx-writer.js",
-          "src/backend/vcc-op-calc-import/reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/pending-import/streaming-xlsx-reader.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/pending-import/streaming-xlsx-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-op-calc-import/reader.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 4
-      },
-      {
         "name": "listAllRuns",
         "defFiles": [
           "src/backend/pending-db/diff-repository.js"
@@ -3245,6 +3237,32 @@
           {
             "file": "src/renderer-pending.js",
             "count": 3
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 4
+      },
+      {
+        "name": "readRowsWithMetadata",
+        "defFiles": [
+          "src/backend/file-service/readers.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
           }
         ],
         "totalHits": 7,
@@ -3349,32 +3367,6 @@
           },
           {
             "file": "src/renderer-dialogs.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 4
-      },
-      {
-        "name": "extractHeaders",
-        "defFiles": [
-          "src/backend/file-service/readers.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/statement-generation.js",
-            "count": 1
-          },
-          {
-            "file": "src/main.js",
             "count": 1
           }
         ],
@@ -3739,6 +3731,29 @@
         "fileSpan": 3
       },
       {
+        "name": "hasColumn",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/migrations.js",
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/migrations.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 21
+          }
+        ],
+        "totalHits": 26,
+        "fileSpan": 3
+      },
+      {
         "name": "runRepo",
         "defFiles": [
           "src/main-process/acquiring-bill-currency-session.js",
@@ -3760,29 +3775,6 @@
           }
         ],
         "totalHits": 26,
-        "fileSpan": 3
-      },
-      {
-        "name": "hasColumn",
-        "defFiles": [
-          "src/backend/biz-op-recon-db/migrations.js",
-          "src/backend/database/migrations.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-db/migrations.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/database/migrations.js",
-            "count": 19
-          }
-        ],
-        "totalHits": 24,
         "fileSpan": 3
       },
       {
@@ -4913,6 +4905,29 @@
         "fileSpan": 3
       },
       {
+        "name": "CHANNEL_VALUE",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js",
+          "src/constants/adm-bank-deposit-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/constants/adm-bank-deposit-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/adm-bank-deposit-builder.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
         "name": "clearMonth",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/import-repository.js",
@@ -5153,28 +5168,6 @@
           {
             "file": "src/backend/file-service/normalizers.js",
             "count": 2
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 3
-      },
-      {
-        "name": "loadEnumValues",
-        "defFiles": [
-          "src/backend/file-service/readers.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 3
           },
           {
             "file": "src/main.js",
@@ -5749,6 +5742,30 @@
         "fileSpan": 3
       },
       {
+        "name": "readXlsxStreamed",
+        "defFiles": [
+          "src/backend/file-service/readers.js",
+          "src/backend/pending-import/worker.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
         "name": "runAllScenarios",
         "defFiles": [
           "src/main-process/reconciliation-orchestrator.js",
@@ -6221,6 +6238,24 @@
         "fileSpan": 2
       },
       {
+        "name": "refreshBankStatementStatus",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 9
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 9
+          }
+        ],
+        "totalHits": 18,
+        "fileSpan": 2
+      },
+      {
         "name": "parentPort",
         "defFiles": [
           "src/main-process/run-check-multiworker-worker.js",
@@ -6290,24 +6325,6 @@
           {
             "file": "src/backend/acquiring-bill-currency-import/reader.js",
             "count": 15
-          }
-        ],
-        "totalHits": 16,
-        "fileSpan": 2
-      },
-      {
-        "name": "refreshBankStatementStatus",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 9
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 7
           }
         ],
         "totalHits": 16,
@@ -7051,24 +7068,6 @@
           {
             "file": "src/main-process/biz-op-recon-session.js",
             "count": 4
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 2
-      },
-      {
-        "name": "gatewayReconSession",
-        "defFiles": [
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main.js",
-            "count": 1
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 6
           }
         ],
         "totalHits": 7,
@@ -8037,24 +8036,6 @@
         "fileSpan": 2
       },
       {
-        "name": "ensureSupportedFile",
-        "defFiles": [
-          "src/backend/file-service/readers.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 2
-      },
-      {
         "name": "ensureTemplateBigAccountNatureSupport",
         "defFiles": [
           "src/backend/database/migrations.js"
@@ -8698,6 +8679,24 @@
         "fileSpan": 2
       },
       {
+        "name": "ensureSupportedFile",
+        "defFiles": [
+          "src/backend/file-service/readers.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "ERROR_HEADER_TAIL",
         "defFiles": [
           "src/backend/biz-op-recon-db/columns.js"
@@ -8710,6 +8709,24 @@
           {
             "file": "src/main-process/biz-op-recon-writer.js",
             "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "gatewayReconSession",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 4
           }
         ],
         "totalHits": 5,
@@ -9155,6 +9172,24 @@
         "fileSpan": 2
       },
       {
+        "name": "trimTrailingEmptyCells",
+        "defFiles": [
+          "src/backend/file-service/common.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service/common.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "updateNewAccountGenerateAvailability",
         "defFiles": [
           "src/renderer.js"
@@ -9422,24 +9457,6 @@
           },
           {
             "file": "src/main-process/recon-id-fix-io.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 2
-      },
-      {
-        "name": "CHANNEL_VALUE",
-        "defFiles": [
-          "src/constants/adm-bank-deposit-fields.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/constants/adm-bank-deposit-fields.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/adm-bank-deposit-builder.js",
             "count": 2
           }
         ],
@@ -9723,17 +9740,36 @@
         "fileSpan": 2
       },
       {
-        "name": "extractEnumValuesFromImportedFile",
+        "name": "extractChannelRegionCombos",
         "defFiles": [
-          "src/backend/file-service/readers.js"
+          "src/backend/database/channel-enum-repository.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/file-service.js",
+            "file": "src/backend/database.js",
             "count": 2
           },
           {
+            "file": "src/backend/database/channel-enum-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "findHeaderMatchPosition",
+        "defFiles": [
+          "src/backend/file-service/readers.js",
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
             "file": "src/backend/file-service/readers.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/table-type-detector.js",
             "count": 2
           }
         ],
@@ -10132,6 +10168,24 @@
           },
           {
             "file": "src/backend/database/template-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "hasLinkedTableRows",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 2
           }
         ],
@@ -10615,6 +10669,24 @@
         "fileSpan": 2
       },
       {
+        "name": "readBankDepositAdmCandidates",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "readLinkedTableRows",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -10741,6 +10813,24 @@
         "fileSpan": 2
       },
       {
+        "name": "refundOrderSession",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "renameTemplate",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -10778,6 +10868,24 @@
       },
       {
         "name": "replaceLinkedTable",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "replaceLinkedTableStreaming",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
         ],
@@ -11219,24 +11327,6 @@
         "fileSpan": 2
       },
       {
-        "name": "trimTrailingEmptyCells",
-        "defFiles": [
-          "src/backend/file-service/common.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service/common.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 2
-      },
-      {
         "name": "updateChannel",
         "defFiles": [
           "src/backend/database/channels-repository.js"
@@ -11667,6 +11757,25 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "countRefundBankCandidates",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 2
           },
           {
@@ -12267,24 +12376,6 @@
           },
           {
             "file": "src/preload.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 2
-      },
-      {
-        "name": "listSheetNames",
-        "defFiles": [
-          "src/backend/file-service/readers.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/table-type-detector.js",
             "count": 1
           }
         ],
@@ -13175,6 +13266,24 @@
         "fileSpan": 2
       },
       {
+        "name": "readMeaningfulRowsHead",
+        "defFiles": [
+          "src/backend/file-service/readers.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 2
+      },
+      {
         "name": "readReconIdFixFile",
         "defFiles": [
           "src/main-process/recon-id-fix-io.js"
@@ -13186,6 +13295,24 @@
           },
           {
             "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 2
+      },
+      {
+        "name": "readXlsxSheetMetaLite",
+        "defFiles": [
+          "src/backend/file-service/readers.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/table-type-detector.js",
             "count": 1
           }
         ],
@@ -13276,10 +13403,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 167
+            "count": 169
           }
         ],
-        "totalHits": 167,
+        "totalHits": 169,
         "fileSpan": 1
       },
       {
@@ -13465,6 +13592,20 @@
         "fileSpan": 1
       },
       {
+        "name": "linkedTableRepository",
+        "defFiles": [
+          "src/backend/database.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 11
+          }
+        ],
+        "totalHits": 11,
+        "fileSpan": 1
+      },
+      {
         "name": "RENDERER_STARTUP_MARKS",
         "defFiles": [
           "src/renderer.js"
@@ -13605,6 +13746,20 @@
         "fileSpan": 1
       },
       {
+        "name": "readers",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 9
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 1
+      },
+      {
         "name": "appendMigrationLog",
         "defFiles": [
           "src/backend/database/own-accounts-migration.js"
@@ -13668,20 +13823,6 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
-            "count": 8
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 1
-      },
-      {
-        "name": "linkedTableRepository",
-        "defFiles": [
-          "src/backend/database.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
             "count": 8
           }
         ],
@@ -13850,6 +13991,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-export/writer.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
+        "name": "getDef",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 7
           }
         ],
@@ -14753,6 +14908,20 @@
         "fileSpan": 1
       },
       {
+        "name": "updateBankStatementUi",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "VALUE_TYPE_CHANNEL",
         "defFiles": [
           "src/backend/database/channel-enum-repository.js"
@@ -14907,6 +15076,20 @@
         "fileSpan": 1
       },
       {
+        "name": "channelEnumRepository",
+        "defFiles": [
+          "src/backend/database.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "classifyRows",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -15054,20 +15237,6 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "getDef",
-        "defFiles": [
-          "src/backend/database/linked-table-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/linked-table-repository.js",
             "count": 4
           }
         ],
@@ -15369,20 +15538,6 @@
         "fileSpan": 1
       },
       {
-        "name": "readers",
-        "defFiles": [
-          "src/main-process/table-type-detector.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/table-type-detector.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
         "name": "readRemovedFieldRaw",
         "defFiles": [
           "src/backend/pending-reconcile/removal-match.js"
@@ -15488,20 +15643,6 @@
         "refFiles": [
           {
             "file": "src/backend/pending-db/rule-repository.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "runBankStatementInternal",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer.js",
             "count": 4
           }
         ],
@@ -15628,20 +15769,6 @@
         "refFiles": [
           {
             "file": "src/main-process/refund-backfill-writer.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "updateBankStatementUi",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer.js",
             "count": 4
           }
         ],
@@ -16363,20 +16490,6 @@
         "fileSpan": 1
       },
       {
-        "name": "channelEnumRepository",
-        "defFiles": [
-          "src/backend/database.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "classifyCardinality",
         "defFiles": [
           "src/main-process/scenario-engines/r5-refund-order-backfill.js"
@@ -16475,20 +16588,6 @@
         "fileSpan": 1
       },
       {
-        "name": "collectMatchedRows",
-        "defFiles": [
-          "src/backend/file-service/readers.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "collectUnmatchedRows",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -16552,6 +16651,20 @@
         "refFiles": [
           {
             "file": "src/preload.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "createInsertContext",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 3
           }
         ],
@@ -17077,7 +17190,7 @@
         "fileSpan": 1
       },
       {
-        "name": "handleBankStatementImportGatewayRecon",
+        "name": "handleBankStatementBatchImport",
         "defFiles": [
           "src/renderer.js"
         ],
@@ -17168,6 +17281,20 @@
         "refFiles": [
           {
             "file": "src/constants/table-signatures.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "isGatewayBillReady",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
             "count": 3
           }
         ],
@@ -17679,6 +17806,20 @@
         "fileSpan": 1
       },
       {
+        "name": "normalizeSourceFileName",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "normalizeWorksheetTarget",
         "defFiles": [
           "src/backend/biz-op-recon-import/reader-streamed.js"
@@ -17742,6 +17883,20 @@
         "refFiles": [
           {
             "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "proceedToGwCheck",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
             "count": 3
           }
         ],
@@ -18078,6 +18233,20 @@
         "refFiles": [
           {
             "file": "src/backend/vcc-op-calc-db/run-repository.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "runBankStatementInternal",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
             "count": 3
           }
         ],
@@ -18512,6 +18681,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "upsertLinkedTableMeta",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 3
           }
         ],
@@ -19037,7 +19220,7 @@
         "fileSpan": 1
       },
       {
-        "name": "buildBatchImportSummaryHtml",
+        "name": "buildImportIssuesSummary",
         "defFiles": [
           "src/renderer.js"
         ],
@@ -19198,6 +19381,20 @@
         "refFiles": [
           {
             "file": "src/main-process/run-check-worker-pool.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "collectMatchedRows",
+        "defFiles": [
+          "src/backend/file-service/readers.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service/readers.js",
             "count": 2
           }
         ],
@@ -19905,6 +20102,34 @@
         "fileSpan": 1
       },
       {
+        "name": "HEAD_STREAM_MAX_COL_COUNT",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "HEAD_STREAM_PHYSICAL_ROWS",
+        "defFiles": [
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "hslToRgb",
         "defFiles": [
           "src/renderer.js"
@@ -20088,6 +20313,20 @@
       },
       {
         "name": "isNewAccountFormComplete",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "isRefundOrderReady",
         "defFiles": [
           "src/renderer.js"
         ],
@@ -20899,20 +21138,6 @@
         "fileSpan": 1
       },
       {
-        "name": "readXlsxStreamed",
-        "defFiles": [
-          "src/backend/pending-import/worker.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-import/worker.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "recordSessionEnd",
         "defFiles": [
           "src/backend/usage-stats.js"
@@ -21347,6 +21572,20 @@
         "fileSpan": 1
       },
       {
+        "name": "shouldPromptRefundAtRun",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "STARTUP_METRIC_MARKS",
         "defFiles": [
           "src/main.js"
@@ -21699,6 +21938,7 @@
         "src/main-process/scenario-hit-rows-writer.js",
         "src/main-process/statement-generation.js",
         "src/main-process/statement-session.js",
+        "src/main-process/table-type-detector.js",
         "src/main-process/vcc-op-calc-session.js",
         "src/main.js"
       ],
@@ -21757,7 +21997,7 @@
         },
         {
           "file": "src/backend/file-service/readers.js",
-          "count": 6
+          "count": 3
         },
         {
           "file": "src/backend/file-service/writers.js",
@@ -21868,6 +22108,10 @@
           "count": 4
         },
         {
+          "file": "src/main-process/table-type-detector.js",
+          "count": 2
+        },
+        {
           "file": "src/main-process/vcc-op-calc-session.js",
           "count": 2
         },
@@ -21880,8 +22124,8 @@
           "count": 2
         }
       ],
-      "totalHits": 135,
-      "fileSpan": 44
+      "totalHits": 134,
+      "fileSpan": 45
     },
     {
       "name": "fs",
@@ -22091,7 +22335,7 @@
         },
         {
           "file": "src/backend/database/linked-table-repository.js",
-          "count": 2
+          "count": 3
         },
         {
           "file": "src/backend/database/migrations.js",
@@ -22174,7 +22418,7 @@
           "count": 3
         }
       ],
-      "totalHits": 42,
+      "totalHits": 43,
       "fileSpan": 25
     },
     {
@@ -22232,7 +22476,7 @@
         },
         {
           "file": "src/backend/file-service/readers.js",
-          "count": 12
+          "count": 7
         },
         {
           "file": "src/backend/file-service/writers.js",
@@ -22256,14 +22500,14 @@
         },
         {
           "file": "src/main-process/table-type-detector.js",
-          "count": 4
+          "count": 5
         },
         {
           "file": "src/main.js",
           "count": 2
         }
       ],
-      "totalHits": 109,
+      "totalHits": 105,
       "fileSpan": 18
     },
     {
@@ -22313,7 +22557,7 @@
         },
         {
           "file": "src/backend/file-service/readers.js",
-          "count": 22
+          "count": 14
         },
         {
           "file": "src/backend/file-service/writers.js",
@@ -22348,7 +22592,7 @@
           "count": 2
         }
       ],
-      "totalHits": 88,
+      "totalHits": 80,
       "fileSpan": 17
     },
     {
@@ -22383,7 +22627,7 @@
         },
         {
           "file": "src/backend/file-service/readers.js",
-          "count": 4
+          "count": 3
         },
         {
           "file": "src/backend/file-service/writers.js",
@@ -22422,7 +22666,7 @@
           "count": 1
         }
       ],
-      "totalHits": 70,
+      "totalHits": 69,
       "fileSpan": 13
     },
     {
@@ -22622,10 +22866,10 @@
         },
         {
           "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 29
+          "count": 30
         }
       ],
-      "totalHits": 109,
+      "totalHits": 110,
       "fileSpan": 12
     },
     {
@@ -23036,6 +23280,46 @@
       "fileSpan": 8
     },
     {
+      "name": "parseNumber",
+      "defFiles": [
+        "src/backend/pending-reconcile/removal-match.js",
+        "src/main-process/scenario-engines/engine-utils.js",
+        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-reconcile/removal-match.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 25,
+      "fileSpan": 7
+    },
+    {
       "name": "validateHeaders",
       "defFiles": [
         "src/backend/pending-import/validator.js",
@@ -23238,42 +23522,6 @@
       "fileSpan": 7
     },
     {
-      "name": "parseNumber",
-      "defFiles": [
-        "src/backend/pending-reconcile/removal-match.js",
-        "src/main-process/scenario-engines/engine-utils.js",
-        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pending-reconcile/removal-match.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/scenario-engines/engine-utils.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 23,
-      "fileSpan": 6
-    },
-    {
       "name": "runReconciliation",
       "defFiles": [
         "src/backend/pending-reconcile/engine.js",
@@ -23446,6 +23694,36 @@
         }
       ],
       "totalHits": 459,
+      "fileSpan": 5
+    },
+    {
+      "name": "state",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 23
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 30
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 55
+        },
+        {
+          "file": "src/renderer-previews.js",
+          "count": 41
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 154
+        }
+      ],
+      "totalHits": 303,
       "fileSpan": 5
     },
     {
@@ -23738,37 +24016,6 @@
       "fileSpan": 5
     },
     {
-      "name": "readRows",
-      "defFiles": [
-        "src/backend/bank-account-import.js",
-        "src/backend/file-service/readers.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/bank-account-import.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/file-service/normalizers.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 4
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 12,
-      "fileSpan": 5
-    },
-    {
       "name": "VALID_DIRECTION_OUT",
       "defFiles": [
         "src/backend/biz-op-recon-import/validator.js",
@@ -23866,6 +24113,71 @@
       "fileSpan": 5
     },
     {
+      "name": "JSZip",
+      "defFiles": [
+        "src/backend/biz-op-recon-import/reader-streamed.js",
+        "src/backend/file-service/readers.js",
+        "src/backend/pending-import/streaming-xlsx-reader.js",
+        "src/backend/pending-import/streaming-xlsx-writer.js",
+        "src/backend/vcc-op-calc-import/reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/streaming-xlsx-reader.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-import/streaming-xlsx-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 9,
+      "fileSpan": 5
+    },
+    {
+      "name": "readRows",
+      "defFiles": [
+        "src/backend/bank-account-import.js",
+        "src/backend/file-service/readers.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-account-import.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/file-service/normalizers.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 1
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 9,
+      "fileSpan": 5
+    },
+    {
       "name": "saveMappings",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -23924,32 +24236,6 @@
       ],
       "totalHits": 7,
       "fileSpan": 5
-    },
-    {
-      "name": "state",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 30
-        },
-        {
-          "file": "src/renderer-pending.js",
-          "count": 55
-        },
-        {
-          "file": "src/renderer-previews.js",
-          "count": 41
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 147
-        }
-      ],
-      "totalHits": 273,
-      "fileSpan": 4
     },
     {
       "name": "elements",
@@ -24705,32 +24991,6 @@
       "fileSpan": 4
     },
     {
-      "name": "readRowsWithMetadata",
-      "defFiles": [
-        "src/backend/file-service/readers.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/file-service.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/table-type-detector.js",
-          "count": 2
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 8,
-      "fileSpan": 4
-    },
-    {
       "name": "saveBillSplitAmountRules",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -24839,35 +25099,6 @@
       "fileSpan": 4
     },
     {
-      "name": "JSZip",
-      "defFiles": [
-        "src/backend/biz-op-recon-import/reader-streamed.js",
-        "src/backend/pending-import/streaming-xlsx-reader.js",
-        "src/backend/pending-import/streaming-xlsx-writer.js",
-        "src/backend/vcc-op-calc-import/reader.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/pending-import/streaming-xlsx-reader.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/pending-import/streaming-xlsx-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-op-calc-import/reader.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 7,
-      "fileSpan": 4
-    },
-    {
       "name": "listAllRuns",
       "defFiles": [
         "src/backend/pending-db/diff-repository.js"
@@ -24888,6 +25119,32 @@
         {
           "file": "src/renderer-pending.js",
           "count": 3
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 4
+    },
+    {
+      "name": "readRowsWithMetadata",
+      "defFiles": [
+        "src/backend/file-service/readers.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/table-type-detector.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
         }
       ],
       "totalHits": 7,
@@ -24992,32 +25249,6 @@
         },
         {
           "file": "src/renderer-dialogs.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 4
-    },
-    {
-      "name": "extractHeaders",
-      "defFiles": [
-        "src/backend/file-service/readers.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/file-service.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/statement-generation.js",
-          "count": 1
-        },
-        {
-          "file": "src/main.js",
           "count": 1
         }
       ],
@@ -25382,6 +25613,29 @@
       "fileSpan": 3
     },
     {
+      "name": "hasColumn",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/migrations.js",
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/migrations.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 21
+        }
+      ],
+      "totalHits": 26,
+      "fileSpan": 3
+    },
+    {
       "name": "runRepo",
       "defFiles": [
         "src/main-process/acquiring-bill-currency-session.js",
@@ -25403,29 +25657,6 @@
         }
       ],
       "totalHits": 26,
-      "fileSpan": 3
-    },
-    {
-      "name": "hasColumn",
-      "defFiles": [
-        "src/backend/biz-op-recon-db/migrations.js",
-        "src/backend/database/migrations.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-db/migrations.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/database/migrations.js",
-          "count": 19
-        }
-      ],
-      "totalHits": 24,
       "fileSpan": 3
     },
     {
@@ -26556,6 +26787,29 @@
       "fileSpan": 3
     },
     {
+      "name": "CHANNEL_VALUE",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js",
+        "src/constants/adm-bank-deposit-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/constants/adm-bank-deposit-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/adm-bank-deposit-builder.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
       "name": "clearMonth",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/import-repository.js",
@@ -26796,28 +27050,6 @@
         {
           "file": "src/backend/file-service/normalizers.js",
           "count": 2
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 3
-    },
-    {
-      "name": "loadEnumValues",
-      "defFiles": [
-        "src/backend/file-service/readers.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/file-service.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 3
         },
         {
           "file": "src/main.js",
@@ -27392,6 +27624,30 @@
       "fileSpan": 3
     },
     {
+      "name": "readXlsxStreamed",
+      "defFiles": [
+        "src/backend/file-service/readers.js",
+        "src/backend/pending-import/worker.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
       "name": "runAllScenarios",
       "defFiles": [
         "src/main-process/reconciliation-orchestrator.js",
@@ -27862,6 +28118,24 @@
       "fileSpan": 2
     },
     {
+      "name": "refreshBankStatementStatus",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 9
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 9
+        }
+      ],
+      "totalHits": 18,
+      "fileSpan": 2
+    },
+    {
       "name": "parentPort",
       "defFiles": [
         "src/main-process/run-check-multiworker-worker.js",
@@ -27931,24 +28205,6 @@
         {
           "file": "src/backend/acquiring-bill-currency-import/reader.js",
           "count": 15
-        }
-      ],
-      "totalHits": 16,
-      "fileSpan": 2
-    },
-    {
-      "name": "refreshBankStatementStatus",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 9
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 7
         }
       ],
       "totalHits": 16,
@@ -28692,24 +28948,6 @@
         {
           "file": "src/main-process/biz-op-recon-session.js",
           "count": 4
-        }
-      ],
-      "totalHits": 7,
-      "fileSpan": 2
-    },
-    {
-      "name": "gatewayReconSession",
-      "defFiles": [
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main.js",
-          "count": 1
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 6
         }
       ],
       "totalHits": 7,
@@ -29678,24 +29916,6 @@
       "fileSpan": 2
     },
     {
-      "name": "ensureSupportedFile",
-      "defFiles": [
-        "src/backend/file-service/readers.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/file-service.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 2
-    },
-    {
       "name": "ensureTemplateBigAccountNatureSupport",
       "defFiles": [
         "src/backend/database/migrations.js"
@@ -30339,6 +30559,24 @@
       "fileSpan": 2
     },
     {
+      "name": "ensureSupportedFile",
+      "defFiles": [
+        "src/backend/file-service/readers.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "ERROR_HEADER_TAIL",
       "defFiles": [
         "src/backend/biz-op-recon-db/columns.js"
@@ -30351,6 +30589,24 @@
         {
           "file": "src/main-process/biz-op-recon-writer.js",
           "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "gatewayReconSession",
+      "defFiles": [
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 4
         }
       ],
       "totalHits": 5,
@@ -30796,6 +31052,24 @@
       "fileSpan": 2
     },
     {
+      "name": "trimTrailingEmptyCells",
+      "defFiles": [
+        "src/backend/file-service/common.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service/common.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "updateNewAccountGenerateAvailability",
       "defFiles": [
         "src/renderer.js"
@@ -31063,24 +31337,6 @@
         },
         {
           "file": "src/main-process/recon-id-fix-io.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 2
-    },
-    {
-      "name": "CHANNEL_VALUE",
-      "defFiles": [
-        "src/constants/adm-bank-deposit-fields.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/constants/adm-bank-deposit-fields.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/adm-bank-deposit-builder.js",
           "count": 2
         }
       ],
@@ -31364,17 +31620,36 @@
       "fileSpan": 2
     },
     {
-      "name": "extractEnumValuesFromImportedFile",
+      "name": "extractChannelRegionCombos",
       "defFiles": [
-        "src/backend/file-service/readers.js"
+        "src/backend/database/channel-enum-repository.js"
       ],
       "refFiles": [
         {
-          "file": "src/backend/file-service.js",
+          "file": "src/backend/database.js",
           "count": 2
         },
         {
+          "file": "src/backend/database/channel-enum-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "findHeaderMatchPosition",
+      "defFiles": [
+        "src/backend/file-service/readers.js",
+        "src/main-process/table-type-detector.js"
+      ],
+      "refFiles": [
+        {
           "file": "src/backend/file-service/readers.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/table-type-detector.js",
           "count": 2
         }
       ],
@@ -31773,6 +32048,24 @@
         },
         {
           "file": "src/backend/database/template-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "hasLinkedTableRows",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
           "count": 2
         }
       ],
@@ -32256,6 +32549,24 @@
       "fileSpan": 2
     },
     {
+      "name": "readBankDepositAdmCandidates",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "readLinkedTableRows",
       "defFiles": [
         "src/backend/database/linked-table-repository.js"
@@ -32382,6 +32693,24 @@
       "fileSpan": 2
     },
     {
+      "name": "refundOrderSession",
+      "defFiles": [
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "renameTemplate",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -32419,6 +32748,24 @@
     },
     {
       "name": "replaceLinkedTable",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "replaceLinkedTableStreaming",
       "defFiles": [
         "src/backend/database/linked-table-repository.js"
       ],
@@ -32860,24 +33207,6 @@
       "fileSpan": 2
     },
     {
-      "name": "trimTrailingEmptyCells",
-      "defFiles": [
-        "src/backend/file-service/common.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/file-service/common.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 2
-    },
-    {
       "name": "updateChannel",
       "defFiles": [
         "src/backend/database/channels-repository.js"
@@ -33308,6 +33637,25 @@
       "refFiles": [
         {
           "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "countRefundBankCandidates",
+      "defFiles": [
+        "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
           "count": 2
         },
         {
@@ -33908,24 +34256,6 @@
         },
         {
           "file": "src/preload.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 3,
-      "fileSpan": 2
-    },
-    {
-      "name": "listSheetNames",
-      "defFiles": [
-        "src/backend/file-service/readers.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/table-type-detector.js",
           "count": 1
         }
       ],
@@ -34816,6 +35146,24 @@
       "fileSpan": 2
     },
     {
+      "name": "readMeaningfulRowsHead",
+      "defFiles": [
+        "src/backend/file-service/readers.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/table-type-detector.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 2,
+      "fileSpan": 2
+    },
+    {
       "name": "readReconIdFixFile",
       "defFiles": [
         "src/main-process/recon-id-fix-io.js"
@@ -34827,6 +35175,24 @@
         },
         {
           "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 2,
+      "fileSpan": 2
+    },
+    {
+      "name": "readXlsxSheetMetaLite",
+      "defFiles": [
+        "src/backend/file-service/readers.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/table-type-detector.js",
           "count": 1
         }
       ],
