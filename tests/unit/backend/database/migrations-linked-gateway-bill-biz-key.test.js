@@ -83,6 +83,33 @@ function buildLegacyGatewayDb(database) {
   ins.run('R5', '2026-01-05', JSON.stringify({ ReconBillBizId: '  BIZ-2  ', reconciliationid: 'R5' }), '2026-01-05T00:00:00.000Z');
 }
 
+// v3.0.1 PR#68 Finding2：旧库已有 linked_table_meta 的 gateway-bill 旧 meta 行（旧行数 / 旧日期范围）。
+//   迁移清洗删除后须重算该 meta 行（否则 row-count/日期范围/C3 就绪判断读旧值）。
+function seedLegacyGatewayMeta(database) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS linked_table_meta (
+      table_key TEXT PRIMARY KEY,
+      data_date_min TEXT,
+      data_date_max TEXT,
+      row_count INTEGER NOT NULL DEFAULT 0,
+      source_file_name TEXT,
+      updated_at TEXT
+    );
+  `);
+  // 旧 meta：row_count=5（清洗前），旧日期范围 2026-01-01 ~ 2026-01-05（含将被删的空/缺键行日期）
+  database
+    .prepare(
+      'INSERT INTO linked_table_meta (table_key, data_date_min, data_date_max, row_count, source_file_name, updated_at) VALUES (?,?,?,?,?,?)'
+    )
+    .run('gateway-bill', '2026-01-01', '2026-01-05', 5, '旧网关对账单.xlsx', '2026-01-05T00:00:00.000Z');
+}
+
+function gatewayMeta(database) {
+  return database
+    .prepare("SELECT row_count, data_date_min, data_date_max, source_file_name FROM linked_table_meta WHERE table_key = 'gateway-bill'")
+    .get();
+}
+
 test.describe('migrations — linked_gateway_bill recon_bill_biz_id 幂等键 + UNIQUE 迁移（v3.0.1 task1）', () => {
   // UT-GW-BIZ-1：全新 DB → 建表 + 加列 + UNIQUE 索引，空表 UNIQUE 无冲突
   test('UT-GW-BIZ-1：全新 DB → 跑迁移不报错、含 recon_bill_biz_id 列 + UNIQUE 索引、空表', () => {
@@ -97,8 +124,11 @@ test.describe('migrations — linked_gateway_bill recon_bill_biz_id 幂等键 + 
   // UT-GW-BIZ-2：旧库含空/重复键 → 迁移不抛错（AC1-6）+ 回填 TRIM + 清洗 + UNIQUE 强制
   test('UT-GW-BIZ-2：旧库（空/缺/重复/带空格键）→ 迁移不抛错、回填 TRIM、清洗、UNIQUE 强制（AC1-6）', () => {
     buildLegacyGatewayDb(db);
+    // v3.0.1 PR#68 Finding2：种入旧 gateway-bill meta（row_count=5、旧日期范围）→ 迁移后须重算
+    seedLegacyGatewayMeta(db);
     assert.ok(!colNames(db).includes('recon_bill_biz_id'), '前置：旧表无 recon_bill_biz_id');
     assert.equal(rowCount(db), 5, '前置 5 行');
+    assert.equal(gatewayMeta(db).row_count, 5, '前置 meta row_count=5（旧值）');
 
     // 🔴 AC1-6 核心：含空键 + 重复键的旧库跑迁移不抛错（否则资金模块启动失败）
     assert.doesNotThrow(() => ensureLinkedTableSupport(db), '含空/重复键旧库迁移不抛错（AC1-6）');
@@ -131,6 +161,14 @@ test.describe('migrations — linked_gateway_bill recon_bill_biz_id 幂等键 + 
       /UNIQUE|constraint/i,
       '🔴 UNIQUE 约束生效：重复 recon_bill_biz_id 插入被拒'
     );
+
+    // v3.0.1 PR#68 Finding2：清洗删除后 meta 已重算（口径对齐 recomputeGatewayMeta）。
+    //   保留行 = id=2（BIZ-1，bill_date 2026-01-02）+ id=5（BIZ-2，bill_date 2026-01-05）。
+    //   注：上面已多插了一条 BIZ-1（被 UNIQUE 拒），故表内仍是清洗后的 2 行。
+    const meta = gatewayMeta(db);
+    assert.equal(meta.row_count, 2, 'meta row_count 重算为清洗后剩余 2 行（非旧值 5）');
+    assert.equal(meta.data_date_min, '2026-01-02', 'meta 日期下界重算 = 保留行最早 bill_date（2026-01-02）');
+    assert.equal(meta.data_date_max, '2026-01-05', 'meta 日期上界重算 = 保留行最晚 bill_date（2026-01-05）');
   });
 
   // UT-GW-BIZ-3：旧库连调 2 次 ensure 幂等（第二次列已存在 → 守卫跳过，不再删数据）

@@ -11235,6 +11235,10 @@ function registerNewAccountHandlers() {
     if (!start || !end || start > end) return { status: 'failed', message: '日期范围非法（起止必填且起≤止）' };
     try {
       const ret = database.deleteGatewayBillByDateRange(start, end);
+      // v3.0.1 PR#68 Finding1（🔴 资金红线）：gateway-bill 数据变更（按日期删除）后清银行对账缓存。
+      //   C3/R5 对账以 gateway-bill 为数据源；旧 processingResult 基于旧网关数据 →
+      //   不清则「先跑银行对账、再删网关对账单」仍能导出 stale 结果，强制用户重跑后才能导出。
+      processingResult = null;
       return { status: 'ok', deleted: ret.deleted, rowCount: ret.rowCount, dataDateMin: ret.dataDateMin, dataDateMax: ret.dataDateMax };
     } catch (err) {
       return { status: 'failed', message: err && err.message ? err.message : String(err) };
@@ -11355,6 +11359,10 @@ function registerNewAccountHandlers() {
           // v3.0.1 需求1（D3）：本次幂等覆盖数 / 空键拒入数回传 → 前端导入完成框提醒
           okResult.overwriteCount = ret.overwriteCount;
           okResult.rejectedEmptyCount = ret.rejectedEmptyCount;
+          // v3.0.1 PR#68 Finding1（🔴 资金红线）：gateway-bill 数据变更（upsert 导入）后清银行对账缓存。
+          //   C3/R5 对账以 gateway-bill 为数据源；旧 processingResult 基于旧网关数据 →
+          //   不清则「先跑银行对账、再导入/覆盖网关对账单」仍能导出 stale 结果，强制用户重跑后才能导出。
+          processingResult = null;
         }
         // v2.1.16-beta.5 需求3（逻辑A）：银行对账单表 / 中台调拨订单表落库成功后，派生隐藏的 ADM 银行对账单链接表。
         //   🔴 资金对账敏感：bank-deposit 或 mid-allocation 任一变更都触发重建（PR#65 新 Finding1：两源任一 stale → JPM 读错）。

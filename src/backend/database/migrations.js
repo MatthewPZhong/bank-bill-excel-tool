@@ -2705,6 +2705,13 @@ function ensureLinkedTableSupport(db) {
           message: '[migration v3.0.1] linked_gateway_bill 幂等键迁移：建 UNIQUE 前清洗存量（资金数据不可逆删除）',
           details: [`删除空键行 ${delEmpty} 条`, `删除重复键旧行 ${delDup} 条`]
         });
+        // v3.0.1 PR#68 Finding2 修复：清洗删除后同步 linked_table_meta（否则 row-count/日期范围/C3 就绪判断读旧 meta）。
+        //   口径对齐仓储 recomputeGatewayMeta：rowCount=COUNT(*) 全表（含 null 日期行）；日期范围=MIN/MAX(bill_date) 排除 null/空串。
+        //   不 import linked-table-repository（避免 migrations.js 耦合），用内联 SQL。UPDATE 对「无 gateway-bill meta 行」是 no-op，安全。
+        const gwRowCount = Number(db.prepare('SELECT COUNT(*) AS c FROM linked_gateway_bill').get().c) || 0;
+        const gwRange = db.prepare("SELECT MIN(bill_date) AS mn, MAX(bill_date) AS mx FROM linked_gateway_bill WHERE bill_date IS NOT NULL AND bill_date != ''").get();
+        db.prepare("UPDATE linked_table_meta SET row_count = ?, data_date_min = ?, data_date_max = ? WHERE table_key = 'gateway-bill'")
+          .run(gwRowCount, gwRange && gwRange.mn != null ? gwRange.mn : null, gwRange && gwRange.mx != null ? gwRange.mx : null);
       }
     }
 
