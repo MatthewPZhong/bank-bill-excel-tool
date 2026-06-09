@@ -11375,14 +11375,18 @@ function registerNewAccountHandlers() {
         //   绝不让该探测异常误判 mid-allocation 导入本身为 write-error（import 已落库成功，与 bank-deposit 分支同口径隔离）。
         let bankExistsForAdm = repoKey === 'bank-deposit';
         if (repoKey === 'mid-allocation') {
-          try { bankExistsForAdm = database.readLinkedTableRows('bank-deposit').length > 0; }
+          // v3.0.0 块 B / PR-3：轻量存在性探测（EXISTS），不为判「是否有数据」把 65 万行读回内存。
+          try { bankExistsForAdm = database.hasLinkedTableRows('bank-deposit'); }
           catch (probeErr) { bankExistsForAdm = false; }
         }
         if (bankExistsForAdm) {
           try {
             const midRows = database.readLinkedTableRows('mid-allocation');
-            const bankRows = database.readLinkedTableRows('bank-deposit');
-            const { admRows, unmatched, midEmpty } = buildAdmRows(bankRows, midRows);
+            // v3.0.0 块 B / PR-3（R-3/O-3）：只读 Channel=ADM 候选子集（json_extract 下推过滤），
+            //   不把整表 65 万行读回内存（实测现状尖峰 ~1.2GB）。buildAdmRows 内部 Channel∧FundType
+            //   过滤仍为最终权威（SQL 仅过滤 Channel='ADM' 超集，绝不更窄 → 不漏 ADM 行）。
+            const bankAdmCandidates = database.readBankDepositAdmCandidates();
+            const { admRows, unmatched, midEmpty } = buildAdmRows(bankAdmCandidates, midRows);
             database.replaceAdmBankDeposit(admRows);
             // v2.1.16-beta.6 PR#65 Codex FindingB（🔴 资金红线）：重导银行对账单表 = ADM 表重建 = JPM 场景源表变化，
             //   旧 reconIdFixResult（基于旧 ADM 的 JPM 修复结果）失效 → 清空，强制重新运行 JPM 后才能导出（防导出 stale fixes）。

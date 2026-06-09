@@ -23,6 +23,8 @@
 
 const { normalizeDateExportValue } = require('../file-service/normalizers');
 const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields');
+// v3.0.0 块 B / PR-3：ADM 派生只需 Channel=ADM 子集 → 下推 SQL 过滤的取值常量（单一真相）。
+const { CHANNEL_VALUE } = require('../../constants/adm-bank-deposit-fields');
 
 // v2.1.16-beta.3 ②：银行对账单入金表 13 字段白名单（C~N 列索引 2~13 + FundType 索引 25）。
 //   🔴 裁列必须按字段名 pick（非 slice 索引切片），防 BANK_STATEMENT_FIELDS 列顺序变动裁错列。
@@ -345,6 +347,41 @@ function readLinkedTableRows(db, tableKey) {
   return out;
 }
 
+// v3.0.0 块 B / PR-3（R-3/O-3）：ADM 派生只需 bank-deposit 里 Channel=ADM 的候选子集。
+//   现状 readLinkedTableRows('bank-deposit') 把整表（实测 65.7 万行 → ~1.2GB RSS 尖峰）全量读回内存，
+//   仅为筛出极小的 Channel=ADM 子集（实测真实样本该子集=0 行）。本函数把 Channel='ADM' 过滤下推到 SQL
+//   （json_extract），只物化候选子集，消除尖峰。
+//   🔴 资金红线安全：SQL 仅过滤高选择性的 Channel='ADM'（buildAdmRows 完整 Channel∧FundType 条件的**超集**，
+//     绝不比 JS 过滤更窄 → 不漏任何 ADM 行）；FundType 由 buildAdmRows 内部过滤把关（最终权威）。
+//   值与 buildAdmRows 的 normCell(Channel)==='ADM' 等价：落库时已 normalizeCell（String().trim()），
+//     raw_json 内 Channel 为已 trim 字符串，json_extract 精确等于 'ADM' 与之一致。
+function readBankDepositAdmCandidates(db) {
+  const def = getDef('bank-deposit');
+  if (!def.supported) return [];
+  const rows = db.prepare(
+    `SELECT raw_json FROM ${def.table} WHERE json_extract(raw_json, '$.Channel') = ? ORDER BY id ASC`
+  ).all(CHANNEL_VALUE);
+  const out = [];
+  for (const r of rows) {
+    try {
+      const o = JSON.parse(r.raw_json);
+      if (o && typeof o === 'object') out.push(o);
+    } catch (_e) {
+      /* 损坏行跳过，不抛错（与 readLinkedTableRows 容错一致） */
+    }
+  }
+  return out;
+}
+
+// v3.0.0 块 B / PR-3：轻量探测某链接表是否有任意数据行（EXISTS，命中首行即停，不物化整表）。
+//   替代「readLinkedTableRows(tableKey).length > 0」——后者为判存在性把整表读回内存（大文件同样撞尖峰）。
+function hasLinkedTableRows(db, tableKey) {
+  const def = getDef(tableKey);
+  if (!def.supported) return false;
+  const r = db.prepare(`SELECT EXISTS(SELECT 1 FROM ${def.table}) AS e`).get();
+  return !!(r && r.e);
+}
+
 // ============================================================================
 // v2.1.16-beta.5 需求3：ADM 银行对账单链接表（linked_adm_bank_deposit）专用仓储
 //   🔴 不能复用 replaceLinkedTable（其 INSERT 硬编码 4 列：keyColumn/dateColumn/raw_json/imported_at）。
@@ -465,6 +502,9 @@ module.exports = {
   // v3.0.0 块 B / PR-2：大文件链接表流式整表覆盖（事务跨 await 逐行喂入，内存恒定）
   replaceLinkedTableStreaming,
   readLinkedTableRows,
+  // v3.0.0 块 B / PR-3：ADM 派生内存优化（Channel=ADM 下推过滤 + 轻量存在性探测）
+  readBankDepositAdmCandidates,
+  hasLinkedTableRows,
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表专用仓储（6 列 INSERT / 整批幂等重写）
   replaceAdmBankDeposit,
   readAdmBankDepositRows,

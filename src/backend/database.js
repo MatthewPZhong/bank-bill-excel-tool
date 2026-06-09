@@ -1066,6 +1066,15 @@ class AppDatabase {
     return linkedTableRepository.readLinkedTableRows(this.db, tableKey);
   }
 
+  // v3.0.0 块 B / PR-3：ADM 派生内存优化 facade（Channel=ADM 下推过滤 / 轻量存在性探测）
+  readBankDepositAdmCandidates() {
+    return linkedTableRepository.readBankDepositAdmCandidates(this.db);
+  }
+
+  hasLinkedTableRows(tableKey) {
+    return linkedTableRepository.hasLinkedTableRows(this.db, tableKey);
+  }
+
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表 facade（建表 + 仓储三函数转发）
   ensureAdmBankDepositSupport() {
     return ensureAdmBankDepositSupport(this.db);
