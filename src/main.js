@@ -11085,7 +11085,8 @@ function registerNewAccountHandlers() {
   // v2.1.16 阶段一 A4：链接表管理 — linked-table:* IPC handlers（2 个）
   //   list   ：只读，返回 4 个 tableKey 的元数据（前端弹窗渲染 4 行）
   //   import ：多选 Excel → 逐文件识别（仅 scope='linked' 候选）→ 命中且支持 → 读行落库
-  //            ⚠️ 数据红线：整表覆盖写入（replaceLinkedTable 内 DELETE+INSERT 事务）。
+  //            ⚠️ 数据红线：gateway-bill 走按 ReconBillBizId 幂等累加 upsert（重导不清空、相同 bizId 覆盖、空 bizId 拒入，v3.0.1）；
+  //              其余 3 张表整表覆盖写入（replaceLinkedTable 内 DELETE+INSERT 事务，一张表重导 = 旧数据全删）。
   //            不整批回滚：不同表互不影响，逐文件汇总 results（成功/失败 + 原因）。
   // ==========================================================================
 
@@ -11219,6 +11220,11 @@ function registerNewAccountHandlers() {
     const start = payload && payload.start != null ? String(payload.start).trim() : '';
     const end = payload && payload.end != null ? String(payload.end).trim() : '';
     if (!start || !end || start > end) return { status: 'failed', message: '日期范围非法' };
+    // v3.0.1 PR#68 self-review #2：ISO 日期格式守卫。非 ISO 串（'2026/01/01'/'abc'）能过非空/字典序校验，
+    //   但 BETWEEN 匹配不到行 → 统计/删除静默 0 行（误导用户）；这里硬拦，强制 YYYY-MM-DD。
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+      return { status: 'failed', message: '日期格式非法（需 YYYY-MM-DD）' };
+    }
     try {
       return { status: 'ok', count: database.countGatewayBillByDateRange(start, end) };
     } catch (err) {
@@ -11233,11 +11239,17 @@ function registerNewAccountHandlers() {
     const start = payload && payload.start != null ? String(payload.start).trim() : '';
     const end = payload && payload.end != null ? String(payload.end).trim() : '';
     if (!start || !end || start > end) return { status: 'failed', message: '日期范围非法（起止必填且起≤止）' };
+    // v3.0.1 PR#68 self-review #2（🔴 删除不可逆）：ISO 日期格式守卫。非 ISO 串（'2026/01/01'/'abc'）能过非空/字典序校验，
+    //   但 BETWEEN 匹配不到行 → 静默删 0 行（误导用户「以为删了」）；这里硬拦，强制 YYYY-MM-DD。
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+      return { status: 'failed', message: '日期格式非法（需 YYYY-MM-DD）' };
+    }
     try {
       const ret = database.deleteGatewayBillByDateRange(start, end);
       // v3.0.1 PR#68 Finding1（🔴 资金红线）：gateway-bill 数据变更（按日期删除）后清银行对账缓存。
-      //   C3/R5 对账以 gateway-bill 为数据源；旧 processingResult 基于旧网关数据 →
-      //   不清则「先跑银行对账、再删网关对账单」仍能导出 stale 结果，强制用户重跑后才能导出。
+      //   银行对账 run 数据源含 gateway-bill（C3 网关核销 / R5）+ bank-deposit（R5 场景4 中台退款回填）——
+      //   gateway-bill 或 bank-deposit 任一变更都使 processingResult 失效（bank-deposit 侧清空见 linked-table:import handler）。
+      //   旧 processingResult 基于旧网关数据 → 不清则「先跑银行对账、再删网关对账单」仍能导出 stale 结果，强制用户重跑后才能导出。
       processingResult = null;
       return { status: 'ok', deleted: ret.deleted, rowCount: ret.rowCount, dataDateMin: ret.dataDateMin, dataDateMax: ret.dataDateMax };
     } catch (err) {
@@ -11246,7 +11258,8 @@ function registerNewAccountHandlers() {
   });
 
   // import：多选 Excel → 逐文件识别 → 命中且支持 → 读行落库 → 汇总 per-file 明细。
-  //   数据红线 🔴：replaceLinkedTable 整表覆盖（一张表重导 = 旧数据全删）；不整批回滚。
+  //   数据红线 🔴：gateway-bill 走按 ReconBillBizId 幂等累加 upsert（重导不清空、相同 bizId 覆盖、空 bizId 拒入，v3.0.1，见下方 inline 注释）；
+  //     其余 3 张表 replaceLinkedTable 整表覆盖（一张表重导 = 旧数据全删）。不整批回滚。
   trackedIpcHandle('linked-table:import', '链接表管理', '导入', async () => {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const res = await dialog.showOpenDialog({
@@ -11360,8 +11373,9 @@ function registerNewAccountHandlers() {
           okResult.overwriteCount = ret.overwriteCount;
           okResult.rejectedEmptyCount = ret.rejectedEmptyCount;
           // v3.0.1 PR#68 Finding1（🔴 资金红线）：gateway-bill 数据变更（upsert 导入）后清银行对账缓存。
-          //   C3/R5 对账以 gateway-bill 为数据源；旧 processingResult 基于旧网关数据 →
-          //   不清则「先跑银行对账、再导入/覆盖网关对账单」仍能导出 stale 结果，强制用户重跑后才能导出。
+          //   银行对账 run 数据源含 gateway-bill（C3 网关核销 / R5）+ bank-deposit（R5 场景4 中台退款回填）——
+          //   gateway-bill 或 bank-deposit 任一变更都使 processingResult 失效（bank-deposit 侧清空见本 handler 下方 push 前守卫）。
+          //   旧 processingResult 基于旧网关数据 → 不清则「先跑银行对账、再导入/覆盖网关对账单」仍能导出 stale 结果，强制用户重跑后才能导出。
           processingResult = null;
         }
         // v2.1.16-beta.5 需求3（逻辑A）：银行对账单表 / 中台调拨订单表落库成功后，派生隐藏的 ADM 银行对账单链接表。
@@ -11417,6 +11431,15 @@ function registerNewAccountHandlers() {
               error: admErr && admErr.message ? admErr.message : String(admErr)
             };
           }
+        }
+        // v3.0.1 PR#68 self-review Finding1 同源缺口（🔴 资金红线）：bank-deposit 是 R5 场景4（中台退款回填）数据源
+        //   —— bank-statement:run 读 readLinkedTableRows('bank-deposit') 喂场景4 产出 refundBackfillRows 写进 processingResult。
+        //   bank-deposit 数据变更（重导/改） → 旧银行对账 run 结果（基于旧 bank-deposit 的 refundBackfillRows）失效；
+        //   不清则「先跑银行对账、再重导 bank-deposit、直接导出」会导出 stale refundBackfillRows，强制用户重跑后才能导出。
+        //   ⚠️ 守卫严格 repoKey === 'bank-deposit'，且独立于上方 ADM 派生块（bankExistsForAdm）——
+        //     mid-allocation 入口只喂 ADM→reconIdFixResult、不喂 run，不应清 processingResult；放进 ADM 块会误清。
+        if (repoKey === 'bank-deposit') {
+          processingResult = null;
         }
         results.push(okResult);
       } catch (err) {

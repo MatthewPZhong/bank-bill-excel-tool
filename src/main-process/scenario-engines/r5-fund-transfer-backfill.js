@@ -123,7 +123,7 @@ function runRound5FundTransferBackfill(gwRows, bankRows, options = {}) {
     valuesEqual(gw && gw.currency, bank && bank.Currency) &&
     amountEqual(gw, bank);
 
-  // 命中回填：把网关 reconciliationid 写入银行 ReconciliationId（原值非空被覆盖发 warning 但仍写）
+  // 命中回填：把网关 reconciliationid 写入银行 ReconciliationId（命中即覆盖，含非空原值；reconid-overwrite-backfill 告警已移除，覆盖行为不变）
   //   cand 已保证非空且按 bankPool 顺序；tie-break 取 cand[0]（原序最前）
   const backfill = (gw, cand, phase, usedBankRowId) => {
     if (cand.length === 0) return; // 未命中，静默（编排器层面再统计未命中）

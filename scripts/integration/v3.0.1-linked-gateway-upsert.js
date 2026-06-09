@@ -10,6 +10,12 @@
 //   注：handler 是 IPC+dialog 绑定无法直接调；本测试镜像其 feed 循环 / 数组 zip（与 v3.0.0 流式测试镜像 feed 同范式），
 //     detector / streamLinkedRowsToInsert / readRowsWithMetadata / 仓储 facade 均调真实实现。
 //
+//   ⚠️ 未覆盖（PR#68 self-review #5，🔴 资金红线，靠人工回归）：linked-table:import handler 内
+//     「gateway-bill upsert 导入 / bank-deposit 导入 / deleteByDateRange 删除成功后 processingResult = null」
+//     是 main.js 模块级运行时状态的局部副作用，未抽成独立可测函数（不同于已抽到 bank-statement-merge.js 的批量清空），
+//     在不拉起 Electron 的前提下无法直接断言。人工回归路径：先跑银行对账 → 重导/删 网关对账单 或 重导 bank-deposit
+//     → 必须重跑对账才能导出（导出端不再拿旧 refundBackfillRows / 网关核销结果）。
+//
 // 用法：node scripts/integration/v3.0.1-linked-gateway-upsert.js
 
 const fs = require('node:fs');

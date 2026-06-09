@@ -841,10 +841,9 @@
     }
 
     // v3.0.1 需求1（D4）：删除网关对账单弹框 preview（🔴 资金红线）。
-    //   直接 openModal 删除弹框，填入示例日期范围并直接注入示例计数 + 启用「删除」，
-    //   让截图体现「已填日期 → 红色警告区显示将删行数 → 删除可点」的完整交互态。
-    //   注：preview 临时库为空、且 contextBridge 暴露的 desktopApi 已冻结无法 mock 计数接口，
-    //   故 preview 直接写 DOM 还原目标态（与其它直接注入 state 的 preview 同思路）。
+    //   直接 openModal 删除弹框，填入示例日期范围并启用「删除」，截图体现「已填日期 → 删除可点」交互态。
+    //   注：弹框的红色警告框 + 「将删约 N 行」计数显示已按用户 UI 迭代去掉（见 createLinkedTableDeleteRangeDialog），
+    //   preview 直接写 DOM 置删除按钮可用态（contextBridge 暴露的 desktopApi 已冻结，无法 mock 计数接口）。
     function applyLinkedTableDeleteRangePreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
       setTimeout(() => {
