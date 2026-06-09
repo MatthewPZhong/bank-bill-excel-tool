@@ -2682,6 +2682,32 @@ function ensureLinkedTableSupport(db) {
     db.exec('CREATE INDEX IF NOT EXISTS idx_linked_gateway_bill_recon ON linked_gateway_bill(reconciliation_id);');
     db.exec('CREATE INDEX IF NOT EXISTS idx_linked_gateway_bill_date ON linked_gateway_bill(bill_date);');
 
+    // v3.0.1 需求1：网关对账单批量导入「按 ReconBillBizId 幂等累加」——新增幂等键列 recon_bill_biz_id + UNIQUE 索引。
+    //   幂等：仅 recon_bill_biz_id 列不存在时执行整块（ALTER + 回填 + 存量清洗 + 建 UNIQUE）；升级后 / 新建库首启一次，
+    //     后续启动列已存在即跳过（与本函数其它 hasColumn 守卫范式一致，如 line ~2687 business_date RENAME）。
+    //   🔴 资金红线（spec R-2）：建 UNIQUE 前必须清洗存量，否则 CREATE UNIQUE INDEX 在存量空键/重复键上抛错
+    //     → 整个 ensureLinkedTableSupport 事务 ROLLBACK → 资金模块启动失败。清洗策略 OPEN-8 用户 2026-06-09 拍板：
+    //     空键行直接删（与新导入空键拒入同口径）；重复键保留最大 id（最新导入）。资金数据不可逆删除 → appendModuleLog（warning）记录删除行数
+    //     （禁直接 console.*：架构守护 v2.1.9-sr-log-1 Case 6 要求 src 全树零 console.error/warn，统一走日志上报，与本文件 N4 备份失败范式一致）。
+    //   口径：回填用 TRIM(json_extract(...)) 与 linked-table-repository.normalizeKey（String().trim()）字节一致，
+    //     防存量行键与后续 upsert 键漂移（精确大小写 ReconBillBizId，见 table-signatures.js GATEWAY_RECON_SIGNATURE idx 13）。
+    if (!hasColumn(db, 'linked_gateway_bill', 'recon_bill_biz_id')) {
+      db.exec('ALTER TABLE linked_gateway_bill ADD COLUMN recon_bill_biz_id TEXT;');
+      db.exec("UPDATE linked_gateway_bill SET recon_bill_biz_id = TRIM(json_extract(raw_json, '$.ReconBillBizId'));");
+      const delEmpty = db.prepare("DELETE FROM linked_gateway_bill WHERE recon_bill_biz_id IS NULL OR recon_bill_biz_id = ''").run().changes;
+      const delDup = db.prepare('DELETE FROM linked_gateway_bill WHERE id NOT IN (SELECT MAX(id) FROM linked_gateway_bill GROUP BY recon_bill_biz_id)').run().changes;
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_linked_gateway_bill_biz ON linked_gateway_bill(recon_bill_biz_id);');
+      if (delEmpty || delDup) {
+        appendModuleLog({
+          level: 'warning',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration v3.0.1] linked_gateway_bill 幂等键迁移：建 UNIQUE 前清洗存量（资金数据不可逆删除）',
+          details: [`删除空键行 ${delEmpty} 条`, `删除重复键旧行 ${delDup} 条`]
+        });
+      }
+    }
+
     // 残留旧列名迁移：中间 beta 构建曾用 business_date，已改名 transaction_date；
     //   CREATE TABLE IF NOT EXISTS 不迁移已存在表 → 显式 RENAME（幂等：仅旧列在 ∧ 新列不在时执行）。
     if (hasColumn(db, 'linked_mid_allocation', 'business_date')

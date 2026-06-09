@@ -11213,6 +11213,34 @@ function registerNewAccountHandlers() {
     }
   });
 
+  // v3.0.1 需求1（D4）：按数据日期范围统计将删行数（只读，前端删除弹框预览）。任何异常返回 failed，前端保守处理。
+  ipcMain.handle('linked-table:count-by-date-range', (_event, payload) => {
+    if (!database || !database.db) return { status: 'failed', message: '数据库未初始化' };
+    const start = payload && payload.start != null ? String(payload.start).trim() : '';
+    const end = payload && payload.end != null ? String(payload.end).trim() : '';
+    if (!start || !end || start > end) return { status: 'failed', message: '日期范围非法' };
+    try {
+      return { status: 'ok', count: database.countGatewayBillByDateRange(start, end) };
+    } catch (err) {
+      return { status: 'failed', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // v3.0.1 需求1（D4）🔴 资金红线：按数据日期范围删除网关对账单链接表行（不可逆，闭区间，直接删）。
+  //   mutating → trackedIpcHandle 记活动日志；入参校验（起止非空 + 起≤止）；返回删除行数 + 重算后 meta。
+  trackedIpcHandle('linked-table:delete-by-date-range', '链接表管理', '删除', (_event, payload) => {
+    if (!database || !database.db) return { status: 'failed', message: '数据库未初始化' };
+    const start = payload && payload.start != null ? String(payload.start).trim() : '';
+    const end = payload && payload.end != null ? String(payload.end).trim() : '';
+    if (!start || !end || start > end) return { status: 'failed', message: '日期范围非法（起止必填且起≤止）' };
+    try {
+      const ret = database.deleteGatewayBillByDateRange(start, end);
+      return { status: 'ok', deleted: ret.deleted, rowCount: ret.rowCount, dataDateMin: ret.dataDateMin, dataDateMax: ret.dataDateMax };
+    } catch (err) {
+      return { status: 'failed', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
   // import：多选 Excel → 逐文件识别 → 命中且支持 → 读行落库 → 汇总 per-file 明细。
   //   数据红线 🔴：replaceLinkedTable 整表覆盖（一张表重导 = 旧数据全删）；不整批回滚。
   trackedIpcHandle('linked-table:import', '链接表管理', '导入', async () => {
@@ -11290,22 +11318,30 @@ function registerNewAccountHandlers() {
         //   · 其余（多 sheet / .xls / .csv）：维持「全量读成数组 → replaceLinkedTable」（流式引擎只读 sheet1.xml，
         //     多 sheet 会读错 sheet；.xls/.csv 流式引擎不支持，且不撞 OOM）。
         const transform = repoKey === 'bank-deposit' ? pickBankDepositFields : (x) => x;
+        // v3.0.1 需求1（task3/D2）：网关对账单一张表改「跨次幂等累加 upsert」（按 ReconBillBizId）；
+        //   其余 3 张表维持整表覆盖 replace（语义不变，含 bank-deposit→ADM 派生连锁）。
+        const isGatewayBill = repoKey === 'gateway-bill';
         let ret;
         if (detected.streamingEligible) {
-          ret = await database.replaceLinkedTableStreaming(repoKey, async (insertOne) => {
-            const { matched } = await streamLinkedRowsToInsert(filePath, signature, insertOne, transform);
+          const feedRows = async (writeOne) => {
+            const { matched } = await streamLinkedRowsToInsert(filePath, signature, writeOne, transform);
             if (!matched) {
               // 理论不应发生（detector 已 matched）；守卫：表头未定位（含 colOffset>0 被 colCount 截断的 PR-2 已知限制）
-              //   → 抛错走 replaceLinkedTableStreaming 的 ROLLBACK（旧数据完好），由 caller 记 write-error。
+              //   → 抛错走流式版 ROLLBACK（旧数据完好），由 caller 记 write-error。
               throw new LinkedFileValidationError('FILE_READ', '当前导入文件未匹配到该链接表的表头');
             }
-          }, { sourceFileName: fileName });
+          };
+          ret = isGatewayBill
+            ? await database.upsertLinkedGatewayBillStreaming(feedRows, { sourceFileName: fileName })
+            : await database.replaceLinkedTableStreaming(repoKey, feedRows, { sourceFileName: fileName });
         } else {
           const rows = readLinkedRowsAsObjects(filePath, signature, detected.sheetName);
           const rowsToWrite = repoKey === 'bank-deposit'
             ? rows.map((r) => pickBankDepositFields(r))
             : rows;
-          ret = database.replaceLinkedTable(repoKey, rowsToWrite, { sourceFileName: fileName });
+          ret = isGatewayBill
+            ? database.upsertLinkedGatewayBill(rowsToWrite, { sourceFileName: fileName })
+            : database.replaceLinkedTable(repoKey, rowsToWrite, { sourceFileName: fileName });
         }
         const okResult = {
           fileName,
@@ -11315,6 +11351,11 @@ function registerNewAccountHandlers() {
           dataDateMin: ret.dataDateMin,
           dataDateMax: ret.dataDateMax
         };
+        if (isGatewayBill) {
+          // v3.0.1 需求1（D3）：本次幂等覆盖数 / 空键拒入数回传 → 前端导入完成框提醒
+          okResult.overwriteCount = ret.overwriteCount;
+          okResult.rejectedEmptyCount = ret.rejectedEmptyCount;
+        }
         // v2.1.16-beta.5 需求3（逻辑A）：银行对账单表 / 中台调拨订单表落库成功后，派生隐藏的 ADM 银行对账单链接表。
         //   🔴 资金对账敏感：bank-deposit 或 mid-allocation 任一变更都触发重建（PR#65 新 Finding1：两源任一 stale → JPM 读错）。
         //   读中台调拨订单（mid-allocation）+ 刚落库的 bank-deposit 整行 → buildAdmRows 筛 Channel=ADM ∧ FundType
