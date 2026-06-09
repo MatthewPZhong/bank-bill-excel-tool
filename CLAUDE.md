@@ -8,8 +8,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Tech stack: Electron 36 + vanilla JS (no frontend framework) + SQLite (`node:sqlite` DatabaseSync) + SheetJS (XLSX).
 
-> v2.1.1 起移除 PDF 导入支持（破坏性变更），同时卸下 pdfjs-dist + tesseract.js OCR 依赖与 `src/backend/file-service/pdf-worker.js` 子进程。
-
 ## Commands
 
 ```bash
@@ -44,10 +42,10 @@ Main Process (src/main.js) — ipcMain.handle() handlers + orchestration
     └── src/backend/*-store.js         — balance seeds, adjustments, account order/mode
 ```
 
-**Key files by size/importance:**
-- `src/main.js` (~7500 lines) — all IPC handlers, business logic orchestration, global session state
-- `src/renderer-dialogs.js` (~5000 lines) — all modal dialog factories (mapping, import, account selection)
-- `src/renderer.js` (~3500 lines) — renderer state management, DOM event binding, UI updates
+**Key files by size/importance (largest first):**
+- `src/main.js` — all IPC handlers, business logic orchestration, global session state
+- `src/renderer-dialogs.js` — all modal dialog factories (mapping, import, account selection)
+- `src/renderer.js` — renderer state management, DOM event binding, UI updates
 
 ### Data Flow
 
@@ -83,15 +81,9 @@ Main Process (src/main.js) — ipcMain.handle() handlers + orchestration
 
 ## Branch Structure
 
-| Branch | Purpose | Version |
-|--------|---------|---------|
-| `main` | 线上正式版，始终可发布 | 2.0.0 |
-| `v1.5.x` | 1.5.x 维护分支（线上 bug 修复） | 1.5.x |
-| `v2.0.0` | 2.0.0 开发分支（已合并 main） | 2.0.0 |
-| `v2.1.0` | 2.1.0 开发分支（单据对账 ReconID 修复模块） | 2.1.0-beta.1 |
-| `v3.0.0` | 3.0.0 开发分支 | 3.0.0-beta.1 |
-
-PR 方向：v1.5.x fix → `v1.5.x → main`；v2.0.0/v2.1.0/v3.0.0 发布 → 对应分支 → `main`。
+- `main` 始终可发布；`v1.5.x` 为线上维护分支；`vX.Y.Z` 为对应版本开发分支。
+- 当前版本号以 `package.json.version` 为准，分支清单以 `git branch` 为准（不在此处维护快照）。
+- PR 方向：v1.5.x fix → `v1.5.x → main`；vX.Y.Z 开发分支 → 对应分支 → `main`。
 
 ## Docs to Keep Updated on Version Iterations
 
@@ -113,37 +105,8 @@ Per README convention, these three files must be updated together on each releas
 
 ## 重要变量变动 check
 
-项目有一张**重要变量清单** `rules/important-variables.md`，涵盖 5 层（Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor），每条附关联功能与变更 review 要点。
+项目维护一张重要变量清单 `rules/important-variables.md`（5 层：Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor）；完整的软约束、硬节点、数据刷新流程见 `.claude/skills/check-vars/SKILL.md`。要点：
 
-### 软约束（每次 agent 改 src/ 时）
-
-每次对 `src/**/*.js` 做 `Edit` / `Write`，agent 完成修改后必须：
-1. 回看本次改动涉及的符号名，对照 `rules/important-variables.md`
-2. 若命中 Critical / Important-skeleton / Runtime-state / Risk-sensitive 任一层：
-   - 在给用户的结尾汇报里专门列一个「**⚠️ 关联功能 review**」段落
-   - 列出命中的变量名 + 层级 + 该条目的"变更 review 要点"
-3. Minor 层可仅做"知会"提示，不强制列出
-
-### 硬节点（必须调用 `/check-vars` skill）
-
-以下场景**必须**调用 `/check-vars` skill（详见 `.claude/skills/check-vars/SKILL.md`）：
-
-1. **team-lead 提 PR 前**（memory `workflow_no_tester_no_auto_pr` 定义节点）
-2. **`package.json.version` bump** 时
-3. **合并到 `main` 或 `v1.5.x`** 前
-4. 用户显式输入 `/check-vars`
-
-skill 会输出可粘贴到 PR body 的「⚠️ 关联功能 review」段落。
-
-### 数据刷新
-
-- 自动统计报告：`docs/analysis/var-reference-stats.md`（由 `npm run scan:vars` 生成，不要手改）
-- 刷新时机：版本号 bump / 合并到受保护分支前，必须重跑 `npm run scan:vars`
-- 升格评估：若 scan-vars 新发现的 A-share（跨 ≥ 3 文件）条目不在 `rules/important-variables.md`，人工评估是否升格入表
-
-### 命令速查
-
-```bash
-npm run scan:vars     # 重新生成自动统计报告（docs/analysis/var-reference-stats.{md,json}）
-npm run check:vars    # 手动触发 check-vars skill（等同 /check-vars）
-```
+- **软约束**：每次改 `src/**/*.js` 后对照清单，命中 Minor 以上层级要在结尾汇报里列「⚠️ 关联功能 review」段落。
+- **硬节点（必须跑 `/check-vars`）**：提 PR 前 / `package.json.version` bump 时 / 合并到 `main` 或 `v1.5.x` 前 / 用户显式调用。
+- **命令**：`npm run scan:vars` 刷新统计报告（版本 bump / 合并受保护分支前必跑）；`npm run check:vars` 等同 `/check-vars`。
