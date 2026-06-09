@@ -81,8 +81,8 @@
 | # | 风险 | 说明 | 缓解 |
 |---|------|------|------|
 | R-1 | **值口径一致性**（最高） | 流式 `parseCellBody` 解析的单元格值必须与 SheetJS 现状逐格一致。⚠️ 原担心"日期序列号 / numFmt 格式化数字 / 长 ID 精度"分叉——**实测均不成立**（见下方实测结论） | ✅ **已验证（2026-06-09）**：harness 全量比对，真实文件 657,757 行逐列同质、值口径一致 |
-| R-2 | **整表覆盖原子性**（数据红线） | `replaceLinkedTable` 先 DELETE 全表；流式落库中途失败 → 表已清空只插一半 = 数据损坏 | 全程单事务，失败整体回滚；确认 65 万行单事务的 WAL/内存/锁可行性（见 O-4） |
-| R-3 | **bank-deposit 派生 ADM 次生 OOM** | 落库后 `readLinkedTableRows('bank-deposit')`（`main.js:11242`）从 DB **全量读回 65 万行** + `buildAdmRows` 全内存计算 → 又一处 OOM | 评估 buildAdmRows 流式化/分批，或另案（见 O-3） |
+| R-2 | **整表覆盖原子性**（数据红线） | `replaceLinkedTable` 先 DELETE 全表；流式落库中途失败 → 表已清空只插一半 = 数据损坏 | ✅ **已验证（O-4 + PR-2）**：单事务 DELETE+流式 INSERT，中途 throw 整体 ROLLBACK，实测旧 657,757 行完好、表不留半空 |
+| R-3 | **bank-deposit 派生 ADM 次生 OOM** | 落库后 ADM 派生 `readLinkedTableRows('bank-deposit')` 从 DB **全量读回 65 万行**（实测 +1.2GB RSS）→ 又一处 OOM | ✅ **已修（PR-3，approach 变更）**：实测 buildAdmRows 只处理 filter 后小子集、**无需流式化**；内存点是"为筛 Channel=ADM 子集而全量物化"。改 `readBankDepositAdmCandidates`（json_extract 下推 Channel=ADM 过滤）+ `hasLinkedTableRows`（EXISTS 探测）；尖峰 +1170MB→+256MB；parity 单测锁定结果一致 |
 | R-4 | reconIdFixResult 清空 / JPM 失效 | bank-deposit 重导触发 `reconIdFixResult=null`（`main.js:11248`）—— 行为不变，但大文件下要确保派生链路整体不崩 | 回归验证 |
 
 > **R-1 实测结论（2026-06-09，推翻原假设）**：
@@ -116,8 +116,8 @@
 |------|------|------------------------|
 | O-1 | 统一流式 vs 大文件阈值分支 | **统一流式**（值口径验证通过后），免双路径维护。 |
 | O-2 | 值口径一致性验证策略 | ✅ **已验证（2026-06-09，闸门已清）**：harness（probe / diff / `--deep`）真实文件全量比对通过。因 SheetJS 读不动大文件无法"中等文件双跑"，改用四层证据：styles 证明全 General + 全量类型同质 + 生产引擎全读 + safe-fixture diff=0。 |
-| O-3 | ADM 派生的 65 万行内存（R-3） | **ADM 派生内存评估**，覆盖 **bank-deposit + mid-allocation 双触发**（PR#65 后 `main.js:11244-11259` 改为两源任一变更都全量重建 ADM）。单列评估、可能拆另案。 |
-| O-4 | 65 万行单事务 INSERT vs 分批（与整表覆盖原子性冲突） | **单事务** + **确认 SQLite 承受力**（WAL/内存/锁）。 |
+| O-3 | ADM 派生的 65 万行内存（R-3） | ✅ **已实施（PR-3，未拆另案）**：评估发现 buildAdmRows 无需流式化（只处理 filter 后小子集），内存点在全量读回。改 SQL 下推 Channel=ADM 过滤（`readBankDepositAdmCandidates`）+ EXISTS 存在性探测（`hasLinkedTableRows`，替代 mid-allocation 入口 `.length>0` 全量读）。残留：mid-allocation 全量读（join 需全量索引，通常远小于 65 万）。 |
+| O-4 | 65 万行单事务 INSERT vs 分批（与整表覆盖原子性冲突） | ✅ **已验证（PR-2 前置压测）**：单事务 657,757 行 INSERT 6.86s / RSS ~195MB（WAL+synchronous NORMAL），中途回滚原子安全 → 采用单事务。 |
 | O-5 | detector 多 sheet vs 流式引擎单 sheet | **确认链接表单 sheet 约定**；若非单 sheet 则**补多 sheet 支持**（`readXlsxStreamed` 现硬编码只读 sheet1.xml）。旁证：真实样本 deep scan 确认**单 sheet**（仅 sheet1.xml），但仍需确认是否所有链接表导出都保证单 sheet。 |
 | O-6 | 顺带修误导报错文案（read-error 细分） | **顺带修「文件为空」误报文案**（区分"真空文件"与"OOM/读失败"）。 |
 
@@ -128,8 +128,28 @@
 1. [x] 用户定 O-1 ~ O-6（2026-06-08 **按推荐采纳**，见 §五 OPEN 定稿）
 2. [x] 确认目标版本号：v3.0.0（块 B，PR-7+）；前置 spec① 列名迁移方案已定
 3. [x] R-1/O-2 值口径验证（2026-06-09 真实文件全量通过；harness：`scripts/test-v3.0.0-linked-streaming-parity.js --deep`）
-4. [ ] 拆 PR（前置 spec① 列名迁移 → detector → 落库/repository → ADM，至少分 3-4 PR）
-5. [ ] 实施 → 单测 → `/check-vars` → 大文件手测 → PR
+4. [x] 拆 PR + 实施：PR-1 detector 流式化（`7bdc6bf`）→ PR-2 落库流式 replace（`bcc96df`）→ PR-3 ADM SQL 下推过滤（`e9eee5a`）；前置 spec① 列名迁移已先行（`412b983`）
+5. [ ] 提 PR 前清单：集成测试（流式 import 路由）+ `/check-vars` + 大文件手测 + 文档三件套 + 版本号 bump → 提 PR（详见 §七 实施记录）
+
+---
+
+## 七、实施记录（2026-06-09 完成，待提 PR）
+
+块 B 拆 3 个 PR，均在 v3.0.0 分支提交并各自 headless 验收（real-file 脚本 + release-check）：
+
+| PR | commit | 内容 | 关键验证 |
+|----|--------|------|---------|
+| PR-1 | `7bdc6bf` | detector 流式头部识别（单 sheet .xlsx 走 `readXlsxStreamed` 读头部 + `readXlsxSheetMetaLite` 判 sheet 数，替代 `listSheetNames` 对大文件的 ~3.9GB OOM）+ O-6 误报文案细分（empty/unreadable/read-failed） | 真实文件 detector matched/bank-deposit/395MB（512M 上限不 OOM）；unit/integration/smoke 全过 |
+| PR-2 | `bcc96df` | 落库流式 replace（`replaceLinkedTableStreaming` 事务跨 await 逐行喂入 + `createInsertContext` 两路共用保口径字节一致）；detector 带回 `streamingEligible` 驱动分支；多 sheet/.xls/.csv 维持数组路径 | 真实文件落库 COUNT=657,757 / 489MB / 跨 await 事务 + 中途失败回滚原子；5 单测 |
+| PR-3 | `e9eee5a` | ADM 派生只读 Channel=ADM 子集（`readBankDepositAdmCandidates` json_extract 下推过滤）+ `hasLinkedTableRows` EXISTS 探测 | ADM 读回尖峰 +1170MB→+256MB（有界 mmap，非行物化）；parity 单测（预过滤 vs 全量 buildAdmRows 一致）；4 单测 |
+
+**三个 OOM 卡点全部消除**：detector（PR-1）→ 落库（PR-2）→ ADM 读回（PR-3）。真实 148MB / 65.7 万行文件端到端 headless 验证不再 OOM。
+
+**approach 变更**：O-3/R-3 原计划"流式化/分批 buildAdmRows 或另案"，实测发现 buildAdmRows 只处理 filter 后小子集、本身无需流式化，真正内存点是 `readLinkedTableRows` 全量读回 → 改为 SQL 下推 Channel=ADM 过滤（更小、更安全、未拆另案）。
+
+**提 PR 前剩余**（详见任务 #6）：① 流式 import 路由集成测试；② `/check-vars`（replaceLinkedTable 数据红线）+ `npm run scan:vars`；③ 🔴 真实大文件 Electron app 端到端手测（headless 验不了 UI/主进程）记 manual-test-checklist；④ 文档三件套 + `package.json` 版本号 bump 3.0.0；⑤ PRD 实施记录（`docs/iterations/v3.0.0/`）。
+
+**残留风险**（非块 B 范围，记录在案）：`readLinkedTableRows('mid-allocation')`（buildAdmRows join 需全量 mid 索引）+ `main.js` 对账引擎读 bank-deposit 全量——若各自达百万级是后续话题。
 
 ---
 
