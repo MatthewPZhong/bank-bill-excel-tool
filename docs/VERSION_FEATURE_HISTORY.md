@@ -9,6 +9,27 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.0.0（2026-06-09）
+
+v2.1.16-beta.6 转正 v3.0.0。四大块 7 项需求：块 A 资金对账模块弹框/状态框治理、块 B 链接表大文件流式导入、块 C R5 场景3 Credit/Debit 方向匹配、块 D 场景管理批量 CSS 偏移修复。质量门 `npm run release-check` 全绿（unit 2061 / integration 18 脚本 / smoke 全过）。
+
+### 新增
+
+- **链接表大文件流式导入**（块 B · 🔴🔴 资金+数据红线）：65.7 万行 / 147MB 渠道账单原报"文件为空或不可读"（SheetJS 全量读 OOM），改用流式引擎 `readXlsxStreamed` 全链路改造——detector 表头识别流式化（+ `readXlsxSheetMetaLite` 替代 listSheetNames 的 ~3.9GB OOM）、落库 `replaceLinkedTableStreaming`（单事务整表覆盖逐行喂入）、ADM 派生 `readBankDepositAdmCandidates`（Channel=ADM SQL 下推过滤，消 ~1.2GB 读回尖峰）。实测落库 657,757 行、内存有界不 OOM、值口径与现状逐格一致。
+- **状态框「渠道-地区」前缀**（块 A 需求 1）：导入银行对账单后状态框文件名前加 `渠道-地区` 前缀（唯一 `CITI-HK:文件名` / 多组合全列出）。
+
+### 变更
+
+- **去导入明细确认框**（块 A 需求 2a）：删与状态框重合的明细框，失败/跳过信息并入常驻状态框。
+- **C3 提醒改向链接表网关对账单**（块 A 需求 2b · 🔴 防静默漏对账）：C3「数据就绪判据」从 `gatewayReconSession` 改向链接表 `gateway-bill` 行数（严格 >0）+「导入文件」改调链接表导入。
+- **退款回填提醒对齐 C3**（块 A 需求 3）：导入/运行点提醒统一 C3 框结构 + 候选预检（无 `Ach Return` 不提醒）+ 运行点链式编排。
+- **R5 场景3 Credit/Debit 方向匹配**（块 C · 🔴 防剔除清单错位）：同 ReconciliationId 多候选改取 `Credit Amount` 有值行；0 或 ≥2 行跳过 + 警告不阻断。
+
+### 修复
+
+- **场景管理批量勾选列表格偏移**（块 D · 纯前端）：勾选列百分比化 + 其余列按比例补偿（总和=100%）+ 清重复 CSS。
+- **链接表/预加工导入 read-error 误报文案**（块 B / O-6）：区分真空文件 / 不可读 / OOM-读失败。
+
 ## 2.1.16-beta.3（2026-06-07）
 
 v2.1.16「资金对账数据处理」**阶段三·中台退款回填前置基础设施 + 引擎设计**。交付 ①Channel 枚举沉淀、②银行对账单入金表链接库两块可用功能 + ③中台退款订单回填引擎设计文档（仅设计不实现）。①② 是 ③ 的前置依赖。质量门 `npm run release-check` 全绿（unit 1768 / integration 952 / smoke 全过）+ team-lead 端到端自测 21/21 + 用户手测入金表导入通过。
