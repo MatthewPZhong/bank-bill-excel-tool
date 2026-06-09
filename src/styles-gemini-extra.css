@@ -3357,3 +3357,23 @@ body[data-platform="win32"] .dialog-title,
 body[data-platform="win32"] .dialog-title * {
   font-family: "Google Sans", "Google Sans Display", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
+
+/* v3.0.1 需求3：网关对账单修复场景单选框样式（卡片 / 列表项 / 操作区） */
+.gateway-recon-picker-card{width:min(100%,460px)}
+.gateway-recon-picker-card .dialog-header{padding:22px 28px 6px;border-bottom:none}
+.gateway-recon-picker-card .dialog-title{font-size:16px;font-weight:600;letter-spacing:0}
+.gateway-recon-picker-body{padding:4px 28px 4px}
+.gateway-recon-picker-hint{font-size:14px;color:var(--muted);text-align:left;margin-bottom:10px}
+.gateway-recon-picker-list{display:flex;flex-direction:column;gap:2px;max-height:220px;overflow:auto}
+.gateway-recon-picker-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;cursor:pointer;font-size:14px;color:var(--text)}
+.gateway-recon-picker-item:hover{background:var(--bg-soft)}
+.gateway-recon-picker-item input{accent-color:var(--primary)}
+.gateway-recon-picker-card .dialog-actions{border-top:none;background:transparent;padding:8px 28px 22px;gap:10px}
+
+/* v3.0.1 需求2：业务OP数据核对左列（BU 下拉 + 导出差异按钮）整体右移 = D/2 + 12px（D=导出差异按钮右缘↔状态框左缘，preview 实测 D=147.0px） */
+#bizOpReconModulePanel .cell.left > * {
+  transform: translateX(85.5px);
+}
+
+/* v3.0.1（用户调整）：删除网关对账单数据弹框宽度减半（原 .modal-card 默认 940px → 470px），内容稀疏更紧凑 */
+.linked-table-delete-range-card { width: min(100%, 470px); }

@@ -1060,6 +1060,28 @@ class AppDatabase {
     return linkedTableRepository.replaceLinkedTableStreaming(this.db, tableKey, feedRows, options || {});
   }
 
+  // v3.0.1 需求1 / task2：网关对账单「按 ReconBillBizId 幂等 upsert」（数组版，同步）——累加不整表覆盖。
+  //   返回 { upserted, overwriteCount, rejectedEmptyCount, rowCount, dataDateMin, dataDateMax, updatedAt }。
+  upsertLinkedGatewayBill(rows, options) {
+    return linkedTableRepository.upsertLinkedGatewayBill(this.db, rows, options || {});
+  }
+
+  // v3.0.1 需求1 / task2：网关对账单「按 ReconBillBizId 幂等 upsert」（流式版，async）。
+  //   🔴🔴 资金红线（R-4）：单事务跨 await；feedRows 中途 throw → ROLLBACK，表保持调用前状态。
+  upsertLinkedGatewayBillStreaming(feedRows, options) {
+    return linkedTableRepository.upsertLinkedGatewayBillStreaming(this.db, feedRows, options || {});
+  }
+
+  // v3.0.1 需求1 / task4：按数据日期范围统计将删行数（只读，前端删除弹框预览「将删约 N 行」）。
+  countGatewayBillByDateRange(startDate, endDate) {
+    return linkedTableRepository.countGatewayBillByDateRange(this.db, startDate, endDate);
+  }
+
+  // v3.0.1 需求1 / task4：🔴 资金红线——按数据日期闭区间删除网关对账单行（不可逆，单事务，删后 meta 全表重算）。
+  deleteGatewayBillByDateRange(startDate, endDate, options) {
+    return linkedTableRepository.deleteGatewayBillByDateRange(this.db, startDate, endDate, options || {});
+  }
+
   // v2.1.16-beta.2 T1：读回某 tableKey 全部整行（raw_json → 对象，字段名 = 真实表头）；
   //   fx-option 返回 []；损坏行跳过。供 5 轮对账编排器取网关数据源（'gateway-bill'）。
   readLinkedTableRows(tableKey) {

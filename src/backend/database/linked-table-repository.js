@@ -326,6 +326,179 @@ async function replaceLinkedTableStreaming(db, tableKey, feedRows, options = {})
   };
 }
 
+// ============================================================================
+// v3.0.1 需求1 / task2：网关对账单链接表「按 ReconBillBizId 幂等 upsert」专用仓储
+//   🔴🔴 资金对账红线：不复用 replaceLinkedTable/replaceLinkedTableStreaming（那俩是「整表覆盖」
+//      DELETE 全表语义，被 4 张表共用，绝不能破坏）。本组函数走「幂等累加」语义：
+//      按 recon_bill_biz_id（UNIQUE，task1 迁移建）ON CONFLICT DO UPDATE，旧 bizId 行保留、
+//      重复 bizId 行覆盖为最新值——多次导入不重复、不丢历史。
+//   幂等键口径（必须与 migration 回填字节一致）：bizId = normalizeKey(obj.ReconBillBizId)
+//      （精确大小写 ReconBillBizId；migration 回填用 TRIM(json_extract(...,'$.ReconBillBizId'))；
+//       normalizeKey = String().trim() → 与 TRIM 字节一致）。空键拒入（与 migration 删空键同口径）。
+//   meta 累加语义关键：累加后 rowCount / 日期范围不能用「单批增量」算，必须全表重算
+//      （recomputeGatewayMeta：COUNT(*) 全表 + MIN/MAX(bill_date) 全表）。
+//   数组版（同步）与流式版（async）共用内部 buildGatewayUpsertContext（upsertOne + counters + SQL），
+//      避免两份 upsert 逻辑漂移（设计意图同 createInsertContext）。
+
+// 构造网关 upsert 内核：返回 { upsertOne, counters }（数组版 / 流式版共用，防口径漂移）。
+//   upsertOne(row) 逐行：取 ReconBillBizId 幂等键 → 空键拒入 → ON CONFLICT DO UPDATE 覆盖。
+//   counters.overwriteCount：本批命中已存在 bizId（被覆盖）的次数；upsert 前用 existsStmt 判定
+//     （.changes 区分不了 INSERT/UPDATE，故必须先 SELECT 1 判存在）。
+function buildGatewayUpsertContext(db, importedAt) {
+  const def = getDef('gateway-bill');
+  // 🔴 DO UPDATE 不写 recon_bill_biz_id 本身（它是 ON CONFLICT 的判定键，不变）。
+  const upsertSql = `
+    INSERT INTO ${def.table} (recon_bill_biz_id, ${def.keyColumn}, ${def.dateColumn}, raw_json, imported_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(recon_bill_biz_id) DO UPDATE SET
+      ${def.keyColumn} = excluded.${def.keyColumn},
+      ${def.dateColumn} = excluded.${def.dateColumn},
+      raw_json = excluded.raw_json,
+      imported_at = excluded.imported_at
+  `;
+  const upsertStmt = db.prepare(upsertSql);
+  const existsStmt = db.prepare(`SELECT 1 FROM ${def.table} WHERE recon_bill_biz_id = ? LIMIT 1`);
+  const counters = { upserted: 0, overwriteCount: 0, rejectedEmptyCount: 0 };
+
+  const upsertOne = (row) => {
+    const obj = row && typeof row === 'object' ? row : {};
+    const bizId = normalizeKey(obj.ReconBillBizId); // 幂等键（精确大小写）
+    if (bizId === '') {
+      counters.rejectedEmptyCount += 1; // 空键拒入（与 migration 删空键同口径）
+      return;
+    }
+    const keyValue = normalizeKey(obj[def.keyHeader]); // reconciliationid → reconciliation_id
+    const dateIso = normalizeDateForRange(obj[def.dateHeader]); // Billdate → YYYY-MM-DD / null
+    const rawJson = JSON.stringify(obj);
+    const existed = existsStmt.get(bizId) !== undefined; // upsert 前先判（区分 INSERT/UPDATE）
+    upsertStmt.run(bizId, keyValue, dateIso, rawJson, importedAt);
+    if (existed) counters.overwriteCount += 1;
+    counters.upserted += 1;
+  };
+
+  return { upsertOne, counters };
+}
+
+// meta 全表重算（🔴 累加语义关键）：rowCount / 日期范围必须全表重算，不能用单批增量。
+//   rowCount = COUNT(*) 全表（含 bill_date 为 null 的行）；
+//   日期范围 = MIN/MAX(bill_date) 全表（排除 null / 空串）。
+function recomputeGatewayMeta(db, sourceFileName, importedAt) {
+  const def = getDef('gateway-bill');
+  const rowCount = Number(db.prepare(`SELECT COUNT(*) AS c FROM ${def.table}`).get().c) || 0;
+  const range = db.prepare(
+    `SELECT MIN(${def.dateColumn}) AS mn, MAX(${def.dateColumn}) AS mx FROM ${def.table} WHERE ${def.dateColumn} IS NOT NULL AND ${def.dateColumn} != ''`
+  ).get();
+  const state = {
+    rowCount,
+    dataDateMin: range && range.mn != null ? range.mn : null,
+    dataDateMax: range && range.mx != null ? range.mx : null
+  };
+  upsertLinkedTableMeta(db, 'gateway-bill', state, sourceFileName, importedAt);
+  return state;
+}
+
+// v3.0.1 需求1（D4）：按 bill_date 闭区间统计将删行数（只读，前端删除弹框预览「将删约 N 行」）。
+//   闭区间 [start,end]（SQLite BETWEEN 含端点）；bill_date 为 null 的行无日期、不计入（也删不到）。
+function countGatewayBillByDateRange(db, startDate, endDate) {
+  const def = getDef('gateway-bill');
+  const row = db.prepare(
+    `SELECT COUNT(*) AS c FROM ${def.table} WHERE ${def.dateColumn} BETWEEN ? AND ?`
+  ).get(String(startDate), String(endDate));
+  return Number(row && row.c) || 0;
+}
+
+// v3.0.1 需求1（D4）🔴 资金红线：按 bill_date 闭区间删除网关对账单行（不可逆）。
+//   单事务 BEGIN/COMMIT/ROLLBACK；删后 recomputeGatewayMeta 全表重算 rowCount/日期范围；
+//   保留既有 source_file_name（删除非导入，不改来源名）。bill_date=null 行不被范围匹配（删不到）。
+function deleteGatewayBillByDateRange(db, startDate, endDate, options = {}) {
+  const def = getDef('gateway-bill');
+  const existingMeta = getLinkedTableMeta(db, 'gateway-bill');
+  const sourceFileName = existingMeta && existingMeta.sourceFileName != null ? existingMeta.sourceFileName : null; // 沿用既有来源名（rowToMeta 字段：sourceFileName）
+  const importedAt = new Date().toISOString();
+  db.exec('BEGIN');
+  let deleted = 0;
+  let metaState;
+  try {
+    deleted = db.prepare(`DELETE FROM ${def.table} WHERE ${def.dateColumn} BETWEEN ? AND ?`)
+      .run(String(startDate), String(endDate)).changes;
+    metaState = recomputeGatewayMeta(db, sourceFileName, importedAt);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_e) { /* no active txn */ }
+    throw error;
+  }
+  return { deleted, rowCount: metaState.rowCount, dataDateMin: metaState.dataDateMin, dataDateMax: metaState.dataDateMax, updatedAt: importedAt };
+}
+
+// 网关对账单幂等 upsert（数组路径，同步）：按 ReconBillBizId 累加，不整表覆盖。
+//   rows = `{ [表头名]: 值 }` 对象数组；options.sourceFileName = 来源文件名（落 meta）。
+//   自带 BEGIN/COMMIT/ROLLBACK；返回计数 + 全表重算 meta。
+//   🔴 调用方须先 ensureLinkedTableSupport（含 recon_bill_biz_id + UNIQUE）；否则 ON CONFLICT 无目标列。
+function upsertLinkedGatewayBill(db, rows, options = {}) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const sourceFileName = normalizeSourceFileName(options);
+  const importedAt = new Date().toISOString();
+  const { upsertOne, counters } = buildGatewayUpsertContext(db, importedAt);
+
+  db.exec('BEGIN');
+  let metaState;
+  try {
+    for (const row of safeRows) upsertOne(row);
+    metaState = recomputeGatewayMeta(db, sourceFileName, importedAt);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_e) { /* no active txn */ }
+    throw error;
+  }
+
+  return {
+    tableKey: 'gateway-bill',
+    upserted: counters.upserted,
+    overwriteCount: counters.overwriteCount,
+    rejectedEmptyCount: counters.rejectedEmptyCount,
+    rowCount: metaState.rowCount,
+    dataDateMin: metaState.dataDateMin,
+    dataDateMax: metaState.dataDateMax,
+    updatedAt: importedAt
+  };
+}
+
+// 网关对账单幂等 upsert（流式，async）：caller 经 feedRows(upsertOne) 在事务内逐行喂入，内存恒定。
+//   🔴🔴 资金红线（R-4）：单事务跨 await 全程开启；feedRows 中途任意 throw → ROLLBACK，
+//     表保持调用前状态（已成功的本批 upsert 也回滚，旧累加数据完好）。
+//   结构照抄 replaceLinkedTableStreaming（line 297）：去掉 DELETE、insertOne→upsertOne、meta 换全表重算。
+//   feedRows 不是函数即守卫抛错（与 replace 流式版一致）。
+async function upsertLinkedGatewayBillStreaming(db, feedRows, options = {}) {
+  if (typeof feedRows !== 'function') {
+    throw new Error('[linked-table-repository] upsertLinkedGatewayBillStreaming 需要 feedRows 回调');
+  }
+  const sourceFileName = normalizeSourceFileName(options);
+  const importedAt = new Date().toISOString();
+  const { upsertOne, counters } = buildGatewayUpsertContext(db, importedAt);
+
+  db.exec('BEGIN');
+  let metaState;
+  try {
+    await feedRows(upsertOne); // 事务全程开启；caller 边流式读 xlsx 边逐行 upsertOne
+    metaState = recomputeGatewayMeta(db, sourceFileName, importedAt);
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_e) { /* no active txn */ }
+    throw error;
+  }
+
+  return {
+    tableKey: 'gateway-bill',
+    upserted: counters.upserted,
+    overwriteCount: counters.overwriteCount,
+    rejectedEmptyCount: counters.rejectedEmptyCount,
+    rowCount: metaState.rowCount,
+    dataDateMin: metaState.dataDateMin,
+    dataDateMax: metaState.dataDateMax,
+    updatedAt: importedAt
+  };
+}
+
 // v2.1.16-beta.2 T1：读回某 tableKey 全部整行（raw_json 还原为对象，字段名 = 真实表头）。
 //   - getDef 校验 tableKey；fx-option（模板缺失，supported=false）直接返回 []（不查表，避免 no such table）。
 //   - ORDER BY id ASC：还原导入原序（与 5 轮对账引擎按行顺序处理一致）。
@@ -501,6 +674,12 @@ module.exports = {
   replaceLinkedTable,
   // v3.0.0 块 B / PR-2：大文件链接表流式整表覆盖（事务跨 await 逐行喂入，内存恒定）
   replaceLinkedTableStreaming,
+  // v3.0.1 需求1 / task2：网关对账单「按 ReconBillBizId 幂等 upsert」（累加不整表覆盖；数组版 + 流式版）
+  upsertLinkedGatewayBill,
+  upsertLinkedGatewayBillStreaming,
+  // v3.0.1 需求1 / task4：网关对账单「按数据日期范围统计 / 删除」（只读计数 + 闭区间删除 + meta 全表重算）
+  countGatewayBillByDateRange,
+  deleteGatewayBillByDateRange,
   readLinkedTableRows,
   // v3.0.0 块 B / PR-3：ADM 派生内存优化（Channel=ADM 下推过滤 + 轻量存在性探测）
   readBankDepositAdmCandidates,

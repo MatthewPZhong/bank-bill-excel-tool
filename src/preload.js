@@ -383,6 +383,9 @@ contextBridge.exposeInMainWorld('desktopApi', {
   linkedTable: {
     list: () => ipcRenderer.invoke('linked-table:list'),
     import: () => ipcRenderer.invoke('linked-table:import'),
-    rowCount: (tableKey) => ipcRenderer.invoke('linked-table:row-count', tableKey)
+    rowCount: (tableKey) => ipcRenderer.invoke('linked-table:row-count', tableKey),
+    // v3.0.1 需求1（D4）：网关对账单按数据日期范围统计 / 删除（前端删除弹框预览 + 直接删）
+    countByDateRange: (start, end) => ipcRenderer.invoke('linked-table:count-by-date-range', { start, end }),
+    deleteByDateRange: (start, end) => ipcRenderer.invoke('linked-table:delete-by-date-range', { start, end })
   }
 });

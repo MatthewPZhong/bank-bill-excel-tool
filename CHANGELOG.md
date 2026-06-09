@@ -1,5 +1,30 @@
 # Changelog
 
+## 3.0.1 - 2026-06-09
+
+v3.0.1 迭代（资金对账数据处理模块的 1 项资金红线增强 + 3 项 UI 修复）。质量门 `npm run release-check` 全绿（**unit 2075 / integration 19 脚本 / smoke 全过**）。⚠️ 资金红线：需求1 网关对账单链接表落库语义从「整表覆盖」改为「按 `ReconBillBizId` 跨次幂等累加」+ 新增「按日期范围删除」（不可逆）。
+> 本迭代由两条工作流并行落地：需求1-4（本线）+ 需求5「R5-2 覆盖非空原值告警移除」（另一资金对账工作流，🔴 资金红线引擎；见 `docs/iterations/v3.0.1/PRD-v3.0.1.md` §十一/§十二，本 CHANGELOG 仅占位引用，由该线最终定稿）。
+
+### 新增
+
+- **网关对账单链接表「批量导入 + 跨次幂等累加」**（需求1 · 🔴 资金红线 · `migrations.js` / `linked-table-repository.js` / `database.js` / `main.js` / `renderer-dialogs.js`）：原一次多选 3 个同类型网关对账单只剩最后 1 个（前 2 个被整表覆盖静默丢弃）。改造为按幂等键 `ReconBillBizId` 跨次累加：
+  - **Schema 迁移**：`linked_gateway_bill` 加 `recon_bill_biz_id` 列（回填 `TRIM(json_extract(raw_json,'$.ReconBillBizId'))`，与仓储 `normalizeKey` 字节一致）+ `UNIQUE` 索引；建 UNIQUE 前清洗存量（空键行直接删 + 重复键保留最大 id），🔴 不可逆删除经 `appendModuleLog(warning)` 记录删除行数。
+  - **落库 upsert**：新增网关专用 `upsertLinkedGatewayBill`（数组 + 流式两版，`ON CONFLICT(recon_bill_biz_id) DO UPDATE`），不复用 4 表共用的整表覆盖 `replaceLinkedTable`；流式版保留单事务跨 await + 中途 throw 全 ROLLBACK（资金红线）；meta（rowCount / 日期范围）改全表重算。
+  - **导入完成框提醒**：本次命中已存在 `ReconBillBizId` 被覆盖 N 条、空 `ReconBillBizId` 被拒入 M 条，`>0` 才提醒（「累加导入，非整表替换」）。
+  - **《删除》按钮**：链接表管理弹窗新增《删除》→ 弹框选数据日期范围（闭区间）→ 直接删除网关对账单行 + meta 全表重算（无二次确认框；后台 count 成功才允许点「删除」，防未知行数误删）。注：弹框「不可恢复 + 将删约 N 行」红色警告框经用户 UI 迭代去掉（原 OPEN-6/Q3 拍板的显著提示已撤，详见 PRD §十一）。
+  - ⚠️ 已知限制（用户接受）：对账读取维持现状全表，累加多期 + `reconciliationid` 跨期复用时 R1/R5 1v1「先到先得」漏匹配作为已知限制接受，本期不规避（PRD §十 Q7=A）。
+
+### 变更
+
+- **ADM 银行对账单链接表派生提醒仅在派生出数据时弹**（需求4 · 资金对账派生链路 · `renderer-dialogs.js`）：导入不含 `Channel='ADM'` 行的银行对账单表时，原仍弹「ADM银行对账单链接表已创建」（实际派生 0 行）。`buildAdmDeriveHtml` 成功分支加 `total` 守卫——派生 0 行时静默不弹（后端重建/清 `reconIdFixResult` 行为不变）。
+- **业务OP数据核对模块左列两元素整体右移**（需求2 · 纯 UI · `styles-gemini-extra.css`）：BU 下拉 + 导出差异按钮整体右移 `D/2 + 12 = 85.5px`（D=导出差异按钮右缘↔状态框左缘，preview 实测 147px）。专属 `#bizOpReconModulePanel` 选择器 + `transform: translateX`，不挤右列、不殃及另 3 个共用 `.pending-board` 的模块（像素级隔离验证）。
+
+### 修复
+
+- **网关对账单修复「场景选择弹框」样式错乱**（需求3 · 纯 UI · `renderer-dialogs.js` / `styles-gemini-extra.css`）：弹框混用 dialog + alert 两套范式（22px 标题塞 420px 窄框、文本贴边）。对齐项目窄弹框范式，DOM 换专属 `gateway-recon-picker-card` class + 专属 CSS（标题 16px、body 左右 padding、选项 hover），交互逻辑零改动。
+
+> **v3.0.1 收口**：需求1（资金红线累加导入）+ 需求2/3/4（UI）经 team-lead 拆分委托 dev 逐 task 实施、逐 task `release-check` 验收全绿；新增集成脚本 `v3.0.1-linked-gateway-upsert`（40 断言）+ 单测 `migrations-linked-gateway-bill-biz-key` / `linked-gateway-bill-upsert` / `linked-gateway-bill-delete-by-range`。详见 `docs/iterations/v3.0.1/` PRD/TechDoc + `changes/` 各 spec。
+
 ## 3.0.0 - 2026-06-09
 
 v3.0.0 正式版（从 v2.1.16-beta.6 转正，含 beta.4~6 中台退款回填引擎等全部内容）。本版四大块、7 项需求，围绕「资金对账数据处理」模块的弹框/状态框治理 + 链接表大文件导入 + 两处资金红线修复。质量门 `npm run release-check` 全绿（**unit 2061 / integration 18 脚本 / smoke 全过**）。⚠️ 多处资金/数据红线：块 B 链接表整表覆盖流式落库 + ADM 派生；块 A-2b C3「数据就绪」判据防静默漏对账；块 C R5 场景3 剔除清单方向。

@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "2.1.16-beta.6",
-    "scannedAt": "2026-06-09T00:57:48.712Z",
+    "version": "3.0.1",
+    "scannedAt": "2026-06-09T11:11:04.408Z",
     "root": "src",
-    "totalFiles": 128,
-    "totalTopLevelNames": 1322,
+    "totalFiles": 129,
+    "totalTopLevelNames": 1329,
     "buckets": {
       "shared": 202,
-      "paired": 397,
-      "local": 607,
-      "crossFile": 599
+      "paired": 402,
+      "local": 609,
+      "crossFile": 604
     }
   },
   "A": {
@@ -549,6 +549,7 @@
           "src/backend/file-service/common.js",
           "src/backend/file-service/normalizers.js",
           "src/backend/file-service/writers.js",
+          "src/main-process/linked-table-stream-source.js",
           "src/main-process/table-type-detector.js"
         ],
         "refFiles": [
@@ -609,6 +610,10 @@
             "count": 2
           },
           {
+            "file": "src/main-process/linked-table-stream-source.js",
+            "count": 5
+          },
+          {
             "file": "src/main-process/statement-generation.js",
             "count": 3
           },
@@ -625,8 +630,8 @@
             "count": 2
           }
         ],
-        "totalHits": 105,
-        "fileSpan": 18
+        "totalHits": 110,
+        "fileSpan": 19
       },
       {
         "name": "FileValidationError",
@@ -1008,7 +1013,7 @@
           },
           {
             "file": "src/backend/database/migrations.js",
-            "count": 3
+            "count": 4
           },
           {
             "file": "src/backend/database/settings-repository.js",
@@ -1047,7 +1052,7 @@
             "count": 1
           }
         ],
-        "totalHits": 47,
+        "totalHits": 48,
         "fileSpan": 11
       },
       {
@@ -1257,6 +1262,49 @@
           }
         ],
         "totalHits": 26,
+        "fileSpan": 8
+      },
+      {
+        "name": "isRowMeaningful",
+        "defFiles": [
+          "src/backend/file-service/common.js",
+          "src/main-process/linked-table-stream-source.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/common.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/linked-table-stream-source.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 20,
         "fileSpan": 8
       },
       {
@@ -1561,44 +1609,6 @@
         "fileSpan": 7
       },
       {
-        "name": "isRowMeaningful",
-        "defFiles": [
-          "src/backend/file-service/common.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/common.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 6
-          },
-          {
-            "file": "src/backend/pending-import/removed-reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-op-calc-import/reader.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 18,
-        "fileSpan": 7
-      },
-      {
         "name": "listMonths",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/import-repository.js",
@@ -1796,7 +1806,7 @@
           },
           {
             "file": "src/renderer-dialogs.js",
-            "count": 356
+            "count": 366
           },
           {
             "file": "src/renderer-pending.js",
@@ -1811,7 +1821,7 @@
             "count": 71
           }
         ],
-        "totalHits": 459,
+        "totalHits": 469,
         "fileSpan": 5
       },
       {
@@ -1822,7 +1832,7 @@
         "refFiles": [
           {
             "file": "src/backend/database/linked-table-repository.js",
-            "count": 23
+            "count": 26
           },
           {
             "file": "src/renderer-dialogs.js",
@@ -1841,7 +1851,7 @@
             "count": 154
           }
         ],
-        "totalHits": 303,
+        "totalHits": 306,
         "fileSpan": 5
       },
       {
@@ -1865,14 +1875,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 49
+            "count": 51
           },
           {
             "file": "src/renderer.js",
             "count": 3
           }
         ],
-        "totalHits": 57,
+        "totalHits": 59,
         "fileSpan": 5
       },
       {
@@ -2371,14 +2381,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 33
+            "count": 34
           },
           {
             "file": "src/renderer.js",
             "count": 98
           }
         ],
-        "totalHits": 152,
+        "totalHits": 153,
         "fileSpan": 4
       },
       {
@@ -3747,10 +3757,10 @@
           },
           {
             "file": "src/backend/database/migrations.js",
-            "count": 21
+            "count": 22
           }
         ],
-        "totalHits": 26,
+        "totalHits": 27,
         "fileSpan": 3
       },
       {
@@ -5224,6 +5234,30 @@
         "fileSpan": 3
       },
       {
+        "name": "readXlsxStreamed",
+        "defFiles": [
+          "src/backend/file-service/readers.js",
+          "src/backend/pending-import/worker.js",
+          "src/main-process/linked-table-stream-source.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/linked-table-stream-source.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
         "name": "resolveSinglePreparedFieldValue",
         "defFiles": [
           "src/main-process/statement-session.js"
@@ -5742,30 +5776,6 @@
         "fileSpan": 3
       },
       {
-        "name": "readXlsxStreamed",
-        "defFiles": [
-          "src/backend/file-service/readers.js",
-          "src/backend/pending-import/worker.js",
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/pending-import/worker.js",
-            "count": 2
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 3
-      },
-      {
         "name": "runAllScenarios",
         "defFiles": [
           "src/main-process/reconciliation-orchestrator.js",
@@ -6133,14 +6143,14 @@
         "refFiles": [
           {
             "file": "src/renderer-previews.js",
-            "count": 50
+            "count": 52
           },
           {
             "file": "src/renderer.js",
             "count": 22
           }
         ],
-        "totalHits": 72,
+        "totalHits": 74,
         "fileSpan": 2
       },
       {
@@ -6460,6 +6470,25 @@
         "fileSpan": 2
       },
       {
+        "name": "normalizeKey",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js",
+          "src/main-process/bank-bu-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 7
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 2
+      },
+      {
         "name": "parseAmount",
         "defFiles": [
           "src/backend/biz-op-recon-import/validator.js",
@@ -6583,25 +6612,6 @@
           {
             "file": "src/main-process/pending-session.js",
             "count": 6
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 2
-      },
-      {
-        "name": "normalizeKey",
-        "defFiles": [
-          "src/backend/database/linked-table-repository.js",
-          "src/main-process/bank-bu-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/linked-table-repository.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 5
           }
         ],
         "totalHits": 10,
@@ -8181,6 +8191,24 @@
         "fileSpan": 2
       },
       {
+        "name": "getLinkedTableMeta",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
         "name": "GW_RECON_ID_FIELD",
         "defFiles": [
           "src/main-process/scenario-engines/r1-recon-id-match.js",
@@ -8798,24 +8826,6 @@
           },
           {
             "file": "src/backend/database/template-repository.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
-        "name": "getLinkedTableMeta",
-        "defFiles": [
-          "src/backend/database/linked-table-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database/linked-table-repository.js",
             "count": 3
           }
         ],
@@ -9592,6 +9602,24 @@
         "fileSpan": 2
       },
       {
+        "name": "countGatewayBillByDateRange",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "createBankBuReconSession",
         "defFiles": [
           "src/main-process/bank-bu-recon-session.js",
@@ -9697,6 +9725,24 @@
           },
           {
             "file": "src/backend/database/channels-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "deleteGatewayBillByDateRange",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 2
           }
         ],
@@ -11363,6 +11409,42 @@
         "fileSpan": 2
       },
       {
+        "name": "upsertLinkedGatewayBill",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "upsertLinkedGatewayBillStreaming",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "upsertTemplate",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -12880,6 +12962,25 @@
         "fileSpan": 2
       },
       {
+        "name": "streamLinkedRowsToInsert",
+        "defFiles": [
+          "src/main-process/linked-table-stream-source.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/linked-table-stream-source.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "toBalanceRows",
         "defFiles": [
           "src/main-process/monthly-balance.js"
@@ -13403,10 +13504,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 169
+            "count": 171
           }
         ],
-        "totalHits": 169,
+        "totalHits": 171,
         "fileSpan": 1
       },
       {
@@ -13508,6 +13609,20 @@
         "fileSpan": 1
       },
       {
+        "name": "linkedTableRepository",
+        "defFiles": [
+          "src/backend/database.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 15
+          }
+        ],
+        "totalHits": 15,
+        "fileSpan": 1
+      },
+      {
         "name": "scenariosRepository",
         "defFiles": [
           "src/backend/database.js"
@@ -13592,13 +13707,13 @@
         "fileSpan": 1
       },
       {
-        "name": "linkedTableRepository",
+        "name": "getDef",
         "defFiles": [
-          "src/backend/database.js"
+          "src/backend/database/linked-table-repository.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/database.js",
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 11
           }
         ],
@@ -13991,20 +14106,6 @@
         "refFiles": [
           {
             "file": "src/backend/pending-export/writer.js",
-            "count": 7
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 1
-      },
-      {
-        "name": "getDef",
-        "defFiles": [
-          "src/backend/database/linked-table-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/linked-table-repository.js",
             "count": 7
           }
         ],
@@ -14740,6 +14841,20 @@
         "fileSpan": 1
       },
       {
+        "name": "normalizeSourceFileName",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "parseRowIdxNum",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -15468,6 +15583,20 @@
         "fileSpan": 1
       },
       {
+        "name": "normalizeDateForRange",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "normKey",
         "defFiles": [
           "src/main-process/adm-bank-deposit-builder.js"
@@ -15545,6 +15674,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "recomputeGatewayMeta",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 4
           }
         ],
@@ -15797,6 +15940,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "upsertLinkedTableMeta",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 4
           }
         ],
@@ -16259,6 +16416,20 @@
         "refFiles": [
           {
             "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildGatewayUpsertContext",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 3
           }
         ],
@@ -17750,20 +17921,6 @@
         "fileSpan": 1
       },
       {
-        "name": "normalizeDateForRange",
-        "defFiles": [
-          "src/backend/database/linked-table-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/linked-table-repository.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "normalizeDateToISO",
         "defFiles": [
           "src/main-process/biz-op-recon-writer.js"
@@ -17799,20 +17956,6 @@
         "refFiles": [
           {
             "file": "src/backend/startup-failure.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "normalizeSourceFileName",
-        "defFiles": [
-          "src/backend/database/linked-table-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/linked-table-repository.js",
             "count": 3
           }
         ],
@@ -18681,20 +18824,6 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "upsertLinkedTableMeta",
-        "defFiles": [
-          "src/backend/database/linked-table-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/linked-table-repository.js",
             "count": 3
           }
         ],
@@ -22431,6 +22560,7 @@
         "src/backend/file-service/common.js",
         "src/backend/file-service/normalizers.js",
         "src/backend/file-service/writers.js",
+        "src/main-process/linked-table-stream-source.js",
         "src/main-process/table-type-detector.js"
       ],
       "refFiles": [
@@ -22491,6 +22621,10 @@
           "count": 2
         },
         {
+          "file": "src/main-process/linked-table-stream-source.js",
+          "count": 5
+        },
+        {
           "file": "src/main-process/statement-generation.js",
           "count": 3
         },
@@ -22507,8 +22641,8 @@
           "count": 2
         }
       ],
-      "totalHits": 105,
-      "fileSpan": 18
+      "totalHits": 110,
+      "fileSpan": 19
     },
     {
       "name": "FileValidationError",
@@ -22890,7 +23024,7 @@
         },
         {
           "file": "src/backend/database/migrations.js",
-          "count": 3
+          "count": 4
         },
         {
           "file": "src/backend/database/settings-repository.js",
@@ -22929,7 +23063,7 @@
           "count": 1
         }
       ],
-      "totalHits": 47,
+      "totalHits": 48,
       "fileSpan": 11
     },
     {
@@ -23139,6 +23273,49 @@
         }
       ],
       "totalHits": 26,
+      "fileSpan": 8
+    },
+    {
+      "name": "isRowMeaningful",
+      "defFiles": [
+        "src/backend/file-service/common.js",
+        "src/main-process/linked-table-stream-source.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/common.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/pending-import/removed-reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/linked-table-stream-source.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 20,
       "fileSpan": 8
     },
     {
@@ -23443,44 +23620,6 @@
       "fileSpan": 7
     },
     {
-      "name": "isRowMeaningful",
-      "defFiles": [
-        "src/backend/file-service/common.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/bank-bu-recon-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/common.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 6
-        },
-        {
-          "file": "src/backend/pending-import/removed-reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-op-calc-import/reader.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 18,
-      "fileSpan": 7
-    },
-    {
       "name": "listMonths",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/import-repository.js",
@@ -23678,7 +23817,7 @@
         },
         {
           "file": "src/renderer-dialogs.js",
-          "count": 356
+          "count": 366
         },
         {
           "file": "src/renderer-pending.js",
@@ -23693,7 +23832,7 @@
           "count": 71
         }
       ],
-      "totalHits": 459,
+      "totalHits": 469,
       "fileSpan": 5
     },
     {
@@ -23704,7 +23843,7 @@
       "refFiles": [
         {
           "file": "src/backend/database/linked-table-repository.js",
-          "count": 23
+          "count": 26
         },
         {
           "file": "src/renderer-dialogs.js",
@@ -23723,7 +23862,7 @@
           "count": 154
         }
       ],
-      "totalHits": 303,
+      "totalHits": 306,
       "fileSpan": 5
     },
     {
@@ -23747,14 +23886,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 49
+          "count": 51
         },
         {
           "file": "src/renderer.js",
           "count": 3
         }
       ],
-      "totalHits": 57,
+      "totalHits": 59,
       "fileSpan": 5
     },
     {
@@ -24253,14 +24392,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 33
+          "count": 34
         },
         {
           "file": "src/renderer.js",
           "count": 98
         }
       ],
-      "totalHits": 152,
+      "totalHits": 153,
       "fileSpan": 4
     },
     {
@@ -25629,10 +25768,10 @@
         },
         {
           "file": "src/backend/database/migrations.js",
-          "count": 21
+          "count": 22
         }
       ],
-      "totalHits": 26,
+      "totalHits": 27,
       "fileSpan": 3
     },
     {
@@ -27106,6 +27245,30 @@
       "fileSpan": 3
     },
     {
+      "name": "readXlsxStreamed",
+      "defFiles": [
+        "src/backend/file-service/readers.js",
+        "src/backend/pending-import/worker.js",
+        "src/main-process/linked-table-stream-source.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/linked-table-stream-source.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
       "name": "resolveSinglePreparedFieldValue",
       "defFiles": [
         "src/main-process/statement-session.js"
@@ -27624,30 +27787,6 @@
       "fileSpan": 3
     },
     {
-      "name": "readXlsxStreamed",
-      "defFiles": [
-        "src/backend/file-service/readers.js",
-        "src/backend/pending-import/worker.js",
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/pending-import/worker.js",
-          "count": 2
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 3
-    },
-    {
       "name": "runAllScenarios",
       "defFiles": [
         "src/main-process/reconciliation-orchestrator.js",
@@ -28013,14 +28152,14 @@
       "refFiles": [
         {
           "file": "src/renderer-previews.js",
-          "count": 50
+          "count": 52
         },
         {
           "file": "src/renderer.js",
           "count": 22
         }
       ],
-      "totalHits": 72,
+      "totalHits": 74,
       "fileSpan": 2
     },
     {
@@ -28340,6 +28479,25 @@
       "fileSpan": 2
     },
     {
+      "name": "normalizeKey",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js",
+        "src/main-process/bank-bu-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 7
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 2
+    },
+    {
       "name": "parseAmount",
       "defFiles": [
         "src/backend/biz-op-recon-import/validator.js",
@@ -28463,25 +28621,6 @@
         {
           "file": "src/main-process/pending-session.js",
           "count": 6
-        }
-      ],
-      "totalHits": 10,
-      "fileSpan": 2
-    },
-    {
-      "name": "normalizeKey",
-      "defFiles": [
-        "src/backend/database/linked-table-repository.js",
-        "src/main-process/bank-bu-recon-session.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database/linked-table-repository.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-session.js",
-          "count": 5
         }
       ],
       "totalHits": 10,
@@ -30061,6 +30200,24 @@
       "fileSpan": 2
     },
     {
+      "name": "getLinkedTableMeta",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
       "name": "GW_RECON_ID_FIELD",
       "defFiles": [
         "src/main-process/scenario-engines/r1-recon-id-match.js",
@@ -30678,24 +30835,6 @@
         },
         {
           "file": "src/backend/database/template-repository.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
-      "name": "getLinkedTableMeta",
-      "defFiles": [
-        "src/backend/database/linked-table-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database/linked-table-repository.js",
           "count": 3
         }
       ],
@@ -31472,6 +31611,24 @@
       "fileSpan": 2
     },
     {
+      "name": "countGatewayBillByDateRange",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "createBankBuReconSession",
       "defFiles": [
         "src/main-process/bank-bu-recon-session.js",
@@ -31577,6 +31734,24 @@
         },
         {
           "file": "src/backend/database/channels-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "deleteGatewayBillByDateRange",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
           "count": 2
         }
       ],
@@ -33243,6 +33418,42 @@
       "fileSpan": 2
     },
     {
+      "name": "upsertLinkedGatewayBill",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "upsertLinkedGatewayBillStreaming",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "upsertTemplate",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -34754,6 +34965,25 @@
         {
           "file": "src/renderer.js",
           "count": 2
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "streamLinkedRowsToInsert",
+      "defFiles": [
+        "src/main-process/linked-table-stream-source.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/linked-table-stream-source.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
         }
       ],
       "totalHits": 3,

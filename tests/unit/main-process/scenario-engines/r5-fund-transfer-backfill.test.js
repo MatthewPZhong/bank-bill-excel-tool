@@ -8,7 +8,7 @@
 //   ④ 严格 1v1（两条 gw 抢一条 bank → 第二条不命中）
 //   ⑤ 金额发生额绝对值精确到分：相差 1 分（0.01）不命中、相等命中
 //   ⑥ 借贷方向：FundTransfer-out 用 Debit 侧、FundTransfer-in 用 Credit 侧的行通过 |credit-debit| 命中（双方向造数据）
-//   ⑦ ReconciliationId 原值非空被覆盖 → reconid-overwrite-backfill warning 但仍写
+//   ⑦ ReconciliationId 原值非空被覆盖 → 不发 warning 但仍写入（reconid-overwrite-backfill 已移除）
 //   ⑧ 多候选 tie-break 取 bankPool 原序最前 + multi-bank-match-backfill warning
 //
 // 日期一律用纯字符串（与 engine-date-utils.test.js 同口径，复用 normalizeDateExportValue 解析）。
@@ -346,7 +346,7 @@ test.describe('R5场景2 — ⑥ 借贷方向：out 用 Debit 侧、in 用 Credi
 // ---- ⑦ 原值非空被覆盖 -------------------------------------------------
 
 test.describe('R5场景2 — ⑦ ReconciliationId 原值非空被覆盖', () => {
-  test('银行 ReconciliationId 原值非空 → 发 reconid-overwrite-backfill warning 但仍写入', () => {
+  test('银行 ReconciliationId 原值非空 → 不发 overwrite warning 但仍写入', () => {
     const gws = [gwRow({ reconId: 'GW-NEW' })];
     const banks = [bankRow({ rowId: 'b1', debit: 100, reconId: 'OLD-RECON' })];
 
@@ -360,10 +360,9 @@ test.describe('R5场景2 — ⑦ ReconciliationId 原值非空被覆盖', () => 
       oldValue: 'OLD-RECON',
       newValue: 'GW-NEW'
     });
-    // 发覆盖 warning
+    // 该告警已移除：覆盖非空原值不再产生 reconid-overwrite-backfill warning
     const overwriteWarn = warnings.find((w) => w.code === 'reconid-overwrite-backfill');
-    assert.ok(overwriteWarn, '原值非空被覆盖应发 reconid-overwrite-backfill warning');
-    assert.equal(overwriteWarn.rowId, 'b1');
+    assert.ok(!overwriteWarn, '覆盖非空原值不应再发 reconid-overwrite-backfill warning');
   });
 
   test('原值已等于网关 reconid → 不重复写、不发 overwrite warning（同值不标黄）', () => {

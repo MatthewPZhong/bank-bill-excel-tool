@@ -393,6 +393,8 @@ const {
   createScenarioCategorySelectDialog,
   // v2.1.14 C：链接表管理弹窗（UI 骨架占位）
   createLinkedTableManagerDialog,
+  // v3.0.1 需求1（D4）：按日期范围删除网关对账单弹框（preview 直接调用）
+  createLinkedTableDeleteRangeDialog,
   // v2.0.0-beta.3 PR #32b：4 dialog factory（C1/C2/C3 配置 + 确认场景详情）
   createScenarioConfigDialogC1,
   createScenarioConfigDialogC2,
@@ -512,6 +514,10 @@ const {
   applyScenarioCategorySelectPreviewState,
   // v2.1.14 C：链接表管理弹窗 preview
   applyLinkedTableManagerPreviewState,
+  // v3.0.1 需求1（D4）：删除网关对账单弹框 preview
+  applyLinkedTableDeleteRangePreviewState,
+  // v3.0.1 需求3：网关对账单修复场景单选框 preview
+  applyGatewayReconScenarioPickerPreviewState,
   // v2.0.0-beta.3 PR #32b：4 类配置弹窗 + 确认详情 preview（4 张）
   // v2.1.7 F1：C1 dialog 新增 AND 模式 preview
   applyScenarioConfigC1PreviewState,
@@ -585,7 +591,11 @@ const {
   // v2.1.0-beta.1 PR-A（task A7）：C4 配置弹窗 preview 所需
   createScenarioConfigDialogC4,
   // v2.1.4 T3：小助手功能收纳弹窗工厂
-  createModuleCabinetDialog
+  createModuleCabinetDialog,
+  // v3.0.1 需求1（D4）：删除网关对账单弹框 preview 直接调用
+  createLinkedTableDeleteRangeDialog,
+  // v3.0.1 需求3：网关对账单修复场景单选框 preview 直接调用
+  createGatewayReconScenarioPickerDialog
 });
 
 function updateStatusBox(box, message, tone = 'info', options = {}) {
@@ -6088,6 +6098,14 @@ async function initialize() {
     setTimeout(() => {
       applyLinkedTableManagerPreviewState();
     }, 120);
+  } else if (info.previewModal === 'linked-table-delete-range') {
+    // v3.0.1 需求1（D4）：删除网关对账单弹框 preview
+    setTimeout(() => {
+      applyLinkedTableDeleteRangePreviewState();
+    }, 120);
+  } else if (info.previewModal === 'gateway-recon-scenario-picker') {
+    // v3.0.1 需求3：网关对账单修复场景单选框 preview
+    setTimeout(() => applyGatewayReconScenarioPickerPreviewState(), 120);
   } else if (info.previewModal === 'scenario-category-select') {
     setTimeout(() => {
       applyScenarioCategorySelectPreviewState();

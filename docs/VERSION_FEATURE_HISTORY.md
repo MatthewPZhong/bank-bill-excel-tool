@@ -9,6 +9,23 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.0.1（2026-06-09）
+
+v3.0.1 迭代：资金对账数据处理模块 1 项资金红线增强（需求1）+ 3 项 UI 修复（需求2/3/4）。质量门 `npm run release-check` 全绿（unit 2075 / integration 19 脚本 / smoke 全过）。本迭代与另一资金对账工作流（需求5「R5-2 覆盖非空原值告警移除」）并行落地，需求5 由该线定稿（见 PRD §十一/§十二）。
+
+### 新增
+
+- **网关对账单链接表批量导入 + 跨次幂等累加**（需求1 · 🔴 资金红线）：网关对账单落库从「整表覆盖」改为按幂等键 `ReconBillBizId` 跨次累加（一次多选多个文件不再互相覆盖丢数据）。含 schema 迁移（`recon_bill_biz_id` 列 + UNIQUE 索引 + 存量空键/重复键清洗）、网关专用 `upsertLinkedGatewayBill`（数组 + 流式，单事务全 ROLLBACK 红线保留）、导入完成框「覆盖 N / 拒入 M」提醒、链接表管理新增《删除》按钮（按数据日期范围闭区间删除，直接删、无二次确认，后台计数门控防误删；红色警告框经用户 UI 迭代去掉）。⚠️ 已知限制：对账维持读全表，累加多期 + reconid 跨期复用的 R1/R5 漏匹配作为已知限制被接受（PRD §十 Q7=A）。
+
+### 变更
+
+- **ADM 派生提醒仅在派生出数据时弹**（需求4）：导入不含 `Channel='ADM'` 行的银行对账单表时不再误弹「ADM银行对账单链接表已创建」（`buildAdmDeriveHtml` 加 `total` 守卫，后端不动）。
+- **业务OP数据核对左列右移**（需求2 · 纯 UI）：BU 下拉 + 导出差异按钮整体右移 D/2+12=85.5px（专属 `#bizOpReconModulePanel` 选择器，右列与另 3 个 `.pending-board` 模块不受影响）。
+
+### 修复
+
+- **网关对账单修复「场景选择弹框」样式错乱**（需求3 · 纯 UI）：对齐窄弹框范式，专属 `gateway-recon-picker-card` class + CSS（标题 16px、加内边距），逻辑零改。
+
 ## v3.0.0（2026-06-09）
 
 v2.1.16-beta.6 转正 v3.0.0。四大块 7 项需求：块 A 资金对账模块弹框/状态框治理、块 B 链接表大文件流式导入、块 C R5 场景3 Credit/Debit 方向匹配、块 D 场景管理批量 CSS 偏移修复。质量门 `npm run release-check` 全绿（unit 2061 / integration 18 脚本 / smoke 全过）。
