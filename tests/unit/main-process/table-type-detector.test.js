@@ -83,33 +83,33 @@ test.describe('detectTableType — L1 精确命中 assets 真实模板', () => {
   ];
 
   for (const [file, expectKey] of L1_CASES) {
-    test(`${file} → ${expectKey}（status=matched, score=1）`, () => {
-      const result = detectTableType(path.join(ASSETS, file));
+    test(`${file} → ${expectKey}（status=matched, score=1）`, async () => {
+      const result = await detectTableType(path.join(ASSETS, file));
       assert.equal(result.status, 'matched', `${file} 应识别为 matched`);
       assert.equal(result.tableKey, expectKey);
       assert.equal(result.score, 1, 'L1 精确命中 score=1');
     });
   }
 
-  test('外汇交割表（含中间空列，L1 用 l1MatchHeaders 锚点）命中 fx-delivery', () => {
+  test('外汇交割表（含中间空列，L1 用 l1MatchHeaders 锚点）命中 fx-delivery', async () => {
     // 交割表真实表头第 10 列为空列；签名以 l1MatchHeaders（空列前连续 9 列）作 L1 锚点。
-    const result = detectTableType(path.join(ASSETS, '外汇交割表.xls'));
+    const result = await detectTableType(path.join(ASSETS, '外汇交割表.xls'));
     assert.equal(result.status, 'matched');
     assert.equal(result.tableKey, 'fx-delivery');
   });
 });
 
 test.describe('detectTableType — Codex#1：返回命中 sheetName（封面 sheet 在前回归）', () => {
-  test('单 sheet 命中 → 返回 sheetName 指向该 sheet', () => {
+  test('单 sheet 命中 → 返回 sheetName 指向该 sheet', async () => {
     const header = [...BANK_STATEMENT_FIELDS];
     const fp = writeTempXlsx(tmpDir, 'sheetname-single.xlsx', [header, header.map(() => 'v')], '渠道对账单');
-    const result = detectTableType(fp, [BANK_DEPOSIT_SIGNATURE]);
+    const result = await detectTableType(fp, [BANK_DEPOSIT_SIGNATURE]);
     assert.equal(result.status, 'matched');
     assert.equal(result.tableKey, 'bank-deposit');
     assert.equal(result.sheetName, '渠道对账单', 'L1 命中应返回命中 sheet 名');
   });
 
-  test('🔴 封面 sheet 在前 + 数据 sheet 在后 → 命中数据 sheet 且 sheetName 指向数据 sheet', () => {
+  test('🔴 封面 sheet 在前 + 数据 sheet 在后 → 命中数据 sheet 且 sheetName 指向数据 sheet', async () => {
     // Codex#1 回归：detector 逐 sheet 扫描命中数据 sheet，返回值须带回该 sheet 名，
     //   否则 linked import 的 readLinkedRowsAsObjects 缺省读首个（封面）sheet → write-error。
     const header = [...BANK_STATEMENT_FIELDS];
@@ -117,7 +117,7 @@ test.describe('detectTableType — Codex#1：返回命中 sheetName（封面 she
       { name: '封面说明', aoa: [['本表为银行对账单说明'], ['制表人：测试']] },
       { name: '渠道对账单', aoa: [header, header.map(() => 'v')] }
     ]);
-    const result = detectTableType(fp, [BANK_DEPOSIT_SIGNATURE]);
+    const result = await detectTableType(fp, [BANK_DEPOSIT_SIGNATURE]);
     assert.equal(result.status, 'matched', '封面 sheet 在前仍应命中后面的数据 sheet');
     assert.equal(result.tableKey, 'bank-deposit');
     assert.equal(result.sheetName, '渠道对账单', '返回数据 sheet 名（非封面 sheet），供 reader 从正确 sheet 读表头落库');
@@ -125,7 +125,7 @@ test.describe('detectTableType — Codex#1：返回命中 sheetName（封面 she
 });
 
 test.describe('detectTableType — L2 模糊打分', () => {
-  test('仅命中部分指纹列、命中率 ≥ minScore → matched（走 L2）', () => {
+  test('仅命中部分指纹列、命中率 ≥ minScore → matched（走 L2）', async () => {
     // 构造一张「非完整银行表头」的文件：故意打乱列顺序 + 删掉一些列，使 L1（连续子序列全等）必失败，
     // 但保留 ≥ minScore(0.6) 比例的 signatureHeaders 指纹 → L2 命中 bank-statement。
     // 银行指纹 5 个：ReconciliationId / Credit Amount / Debit Amount / 拆分信息 / 关联大账号。
@@ -136,18 +136,18 @@ test.describe('detectTableType — L2 模糊打分', () => {
     ];
     const fp = writeTempXlsx(tmpDir, 'fuzzy-bank.xlsx', [header, header.map(() => 'v')]);
     // 仅以银行签名为候选，排除其它表干扰，专测 L2 打分。
-    const result = detectTableType(fp, [BANK_STATEMENT_SIGNATURE]);
+    const result = await detectTableType(fp, [BANK_STATEMENT_SIGNATURE]);
     assert.equal(result.status, 'matched', 'L2 命中率 ≥ minScore → matched');
     assert.equal(result.tableKey, 'bank-statement');
     assert.ok(result.score >= BANK_STATEMENT_SIGNATURE.minScore, `score(${result.score}) ≥ minScore(${BANK_STATEMENT_SIGNATURE.minScore})`);
     assert.ok(result.score < 1, 'L2 命中 score < 1（区别于 L1 精确）');
   });
 
-  test('命中率 < minScore → unrecognized', () => {
+  test('命中率 < minScore → unrecognized', async () => {
     // 仅命中 1 个银行指纹（1/5=0.2 < 0.6）→ 不达标。
     const header = ['无关列A', 'ReconciliationId', '无关列B', '无关列C'];
     const fp = writeTempXlsx(tmpDir, 'fuzzy-low.xlsx', [header, header.map(() => 'v')]);
-    const result = detectTableType(fp, [BANK_STATEMENT_SIGNATURE]);
+    const result = await detectTableType(fp, [BANK_STATEMENT_SIGNATURE]);
     assert.equal(result.status, 'unrecognized', '命中率不足 minScore → unrecognized');
     assert.ok(result.score < BANK_STATEMENT_SIGNATURE.minScore);
   });
@@ -166,48 +166,48 @@ test.describe('detectTableType — 短表防子集误判（4 列回填模板 vs 
     headerRowOffset: 0
   });
 
-  test('短表阈值常量 = 8（回填模板 4 列 ≤ 8，触发列数守卫）', () => {
+  test('短表阈值常量 = 8（回填模板 4 列 ≤ 8，触发列数守卫）', async () => {
     assert.equal(SHORT_TABLE_COLUMN_THRESHOLD, 8);
     assert.ok(REFUND_TEMPLATE_SIG.expectedHeaders.length <= SHORT_TABLE_COLUMN_THRESHOLD);
   });
 
-  test('回填模板文件 vs ALL_TABLE_SIGNATURES → unrecognized（不被 25 列退款订单误判）', () => {
-    const result = detectTableType(path.join(ASSETS, '中台退款订单回填模板.xlsx'));
+  test('回填模板文件 vs ALL_TABLE_SIGNATURES → unrecognized（不被 25 列退款订单误判）', async () => {
+    const result = await detectTableType(path.join(ASSETS, '中台退款订单回填模板.xlsx'));
     assert.equal(result.status, 'unrecognized', '4 列回填模板不应被长退款订单表误命中');
     assert.equal(result.tableKey, null);
   });
 
-  test('把回填模板签名加入候选：回填模板文件命中自己', () => {
+  test('把回填模板签名加入候选：回填模板文件命中自己', async () => {
     const withTemplate = [...ALL_TABLE_SIGNATURES, REFUND_TEMPLATE_SIG];
-    const result = detectTableType(path.join(ASSETS, '中台退款订单回填模板.xlsx'), withTemplate);
+    const result = await detectTableType(path.join(ASSETS, '中台退款订单回填模板.xlsx'), withTemplate);
     assert.equal(result.status, 'matched');
     assert.equal(result.tableKey, 'zhongtai-refund-template');
   });
 
-  test('把回填模板签名加入候选：退款订单文件仍命中退款订单（不被 4 列模板抢走）', () => {
+  test('把回填模板签名加入候选：退款订单文件仍命中退款订单（不被 4 列模板抢走）', async () => {
     const withTemplate = [...ALL_TABLE_SIGNATURES, REFUND_TEMPLATE_SIG];
-    const result = detectTableType(path.join(ASSETS, '中台退款订单.xls'), withTemplate);
+    const result = await detectTableType(path.join(ASSETS, '中台退款订单.xls'), withTemplate);
     assert.equal(result.status, 'matched');
     assert.equal(result.tableKey, 'zhongtai-refund-order', '25 列退款订单不被 4 列回填模板（子集）抢占');
   });
 });
 
 test.describe('detectTableType — 大小写敏感（网关全小写 vs 银行驼峰）', () => {
-  test('网关对账单（全小写 reconciliationid / merchantid）命中 gateway-recon', () => {
-    const result = detectTableType(path.join(ASSETS, '网关对账单.xlsx'));
+  test('网关对账单（全小写 reconciliationid / merchantid）命中 gateway-recon', async () => {
+    const result = await detectTableType(path.join(ASSETS, '网关对账单.xlsx'));
     assert.equal(result.status, 'matched');
     assert.equal(result.tableKey, 'gateway-recon');
   });
 
-  test('银行对账单（驼峰 ReconciliationId）命中 bank-statement，二者互不串台', () => {
-    const bank = detectTableType(path.join(ASSETS, '银行对账单.xlsx'));
-    const gateway = detectTableType(path.join(ASSETS, '网关对账单.xlsx'));
+  test('银行对账单（驼峰 ReconciliationId）命中 bank-statement，二者互不串台', async () => {
+    const bank = await detectTableType(path.join(ASSETS, '银行对账单.xlsx'));
+    const gateway = await detectTableType(path.join(ASSETS, '网关对账单.xlsx'));
     assert.equal(bank.tableKey, 'bank-statement');
     assert.equal(gateway.tableKey, 'gateway-recon');
     assert.notEqual(bank.tableKey, gateway.tableKey, '银行（驼峰）/ 网关（全小写）靠大小写区分，不互相误判');
   });
 
-  test('把网关指纹列改成驼峰（ReconciliationId/MerchantId）→ 不再精确命中 gateway（L1 落空）', () => {
+  test('把网关指纹列改成驼峰（ReconciliationId/MerchantId）→ 不再精确命中 gateway（L1 落空）', async () => {
     // 验证大小写敏感：L1 锚点（全 31 列表头）含全小写指纹列；改成驼峰后 L1 连续子序列全等失败。
     // L2 仍可能凭其余 3 个未改的指纹（originBillBizId/Merchant_status/账单状态）命中——
     // 故这里只断言「不再是 L1 精确命中（score<1）」，证明大小写参与了 L1 锚点匹配。
@@ -217,20 +217,20 @@ test.describe('detectTableType — 大小写敏感（网关全小写 vs 银行�
       return h;
     });
     const fp = writeTempXlsx(tmpDir, 'gw-camel.xlsx', [gwHeaders, gwHeaders.map(() => 'v')]);
-    const result = detectTableType(fp, [GATEWAY_RECON_SIGNATURE]);
+    const result = await detectTableType(fp, [GATEWAY_RECON_SIGNATURE]);
     assert.notEqual(result.score, 1, '改驼峰后 L1 精确锚点失配 → 不再 score=1（证明大小写敏感）');
   });
 });
 
 test.describe('detectTableType — ambiguous / unrecognized / read-error', () => {
-  test('表头同时精确命中两张表 → status=ambiguous + matchedKeys', () => {
+  test('表头同时精确命中两张表 → status=ambiguous + matchedKeys', async () => {
     // 同一行拼接银行 44 列 + 网关 31 列：两个 L1 锚点都能在该行找到连续子序列 → 双命中。
     const combined = [
       ...BANK_STATEMENT_SIGNATURE.expectedHeaders,
       ...GATEWAY_RECON_SIGNATURE.expectedHeaders
     ];
     const fp = writeTempXlsx(tmpDir, 'ambiguous.xlsx', [combined, combined.map(() => 'v')]);
-    const result = detectTableType(fp, [BANK_STATEMENT_SIGNATURE, GATEWAY_RECON_SIGNATURE]);
+    const result = await detectTableType(fp, [BANK_STATEMENT_SIGNATURE, GATEWAY_RECON_SIGNATURE]);
     assert.equal(result.status, 'ambiguous');
     assert.equal(result.tableKey, null);
     assert.ok(Array.isArray(result.matchedKeys), 'ambiguous 返回 matchedKeys');
@@ -241,27 +241,27 @@ test.describe('detectTableType — ambiguous / unrecognized / read-error', () =>
     );
   });
 
-  test('垃圾文件（非 Excel 内容，可被 SheetJS 勉强解析）→ unrecognized', () => {
+  test('垃圾文件（非 Excel 内容，可被 SheetJS 勉强解析）→ unrecognized', async () => {
     const fp = path.join(tmpDir, 'garbage.xlsx');
     fs.writeFileSync(fp, 'this is not a valid excel file at all');
-    const result = detectTableType(fp);
+    const result = await detectTableType(fp);
     assert.equal(result.status, 'unrecognized', '无任何签名命中 → unrecognized');
   });
 
-  test('文件不存在 → read-error', () => {
-    const result = detectTableType(path.join(tmpDir, 'does-not-exist.xlsx'));
+  test('文件不存在 → read-error', async () => {
+    const result = await detectTableType(path.join(tmpDir, 'does-not-exist.xlsx'));
     assert.equal(result.status, 'read-error');
     assert.equal(result.tableKey, null);
   });
 
-  test('空 xlsx（无任何有意义行）→ read-error', () => {
+  test('空 xlsx（无任何有意义行）→ read-error', async () => {
     const fp = writeTempXlsx(tmpDir, 'empty.xlsx', []);
-    const result = detectTableType(fp);
+    const result = await detectTableType(fp);
     assert.equal(result.status, 'read-error', '空文件 readRowsWithMetadata 抛 FILE_READ → read-error');
   });
 
-  test('空候选签名集 → 任何文件都 unrecognized（无候选可命中）', () => {
-    const result = detectTableType(path.join(ASSETS, '银行对账单.xlsx'), []);
+  test('空候选签名集 → 任何文件都 unrecognized（无候选可命中）', async () => {
+    const result = await detectTableType(path.join(ASSETS, '银行对账单.xlsx'), []);
     assert.equal(result.status, 'unrecognized');
   });
 });
@@ -279,63 +279,63 @@ test.describe('detectTableType — 多 sheet 扫描（v2.1.16 PR#61 F4 真回归
     aoa: [BANK_HEADER, BANK_HEADER.map(() => 'v')]
   };
 
-  test('封面 sheet 在前的银行对账单 → 仍命中 bank-statement（不再误判 unrecognized）', () => {
+  test('封面 sheet 在前的银行对账单 → 仍命中 bank-statement（不再误判 unrecognized）', async () => {
     const fp = writeTempMultiSheetXlsx(tmpDir, 'bank-cover-first.xlsx', [COVER_SHEET, BANK_SHEET]);
-    const result = detectTableType(fp);
+    const result = await detectTableType(fp);
     assert.equal(result.status, 'matched', '封面在前时仍应识别出银行对账单（多 sheet 扫描）');
     assert.equal(result.tableKey, 'bank-statement');
     assert.equal(result.score, 1, 'L1 精确命中 score=1');
   });
 
-  test('多张封面/说明 sheet 在前、数据 sheet 在最后 → 仍命中', () => {
+  test('多张封面/说明 sheet 在前、数据 sheet 在最后 → 仍命中', async () => {
     const note = { name: '说明', aoa: [['本表为对账结果'], ['制表人', '张三']] };
     const fp = writeTempMultiSheetXlsx(tmpDir, 'bank-multi-cover.xlsx', [COVER_SHEET, note, BANK_SHEET]);
-    const result = detectTableType(fp);
+    const result = await detectTableType(fp);
     assert.equal(result.status, 'matched');
     assert.equal(result.tableKey, 'bank-statement');
   });
 
-  test('数据 sheet 在第一个（历史常见摆放）→ 仍命中（短路即返回，行为不退化）', () => {
+  test('数据 sheet 在第一个（历史常见摆放）→ 仍命中（短路即返回，行为不退化）', async () => {
     const fp = writeTempMultiSheetXlsx(tmpDir, 'bank-data-first.xlsx', [BANK_SHEET, COVER_SHEET]);
-    const result = detectTableType(fp);
+    const result = await detectTableType(fp);
     assert.equal(result.status, 'matched');
     assert.equal(result.tableKey, 'bank-statement');
   });
 
-  test('多 sheet 但全部都不是任何签名表 → unrecognized', () => {
+  test('多 sheet 但全部都不是任何签名表 → unrecognized', async () => {
     const fp = writeTempMultiSheetXlsx(tmpDir, 'no-match-multi.xlsx', [
       COVER_SHEET,
       { name: '其它', aoa: [['列甲', '列乙', '列丙'], ['a', 'b', 'c']] }
     ]);
-    const result = detectTableType(fp);
+    const result = await detectTableType(fp);
     assert.equal(result.status, 'unrecognized');
     assert.equal(result.tableKey, null);
   });
 
-  test('封面 sheet 在前的网关对账单（大小写敏感仍生效）→ 命中 gateway-recon', () => {
+  test('封面 sheet 在前的网关对账单（大小写敏感仍生效）→ 命中 gateway-recon', async () => {
     const gwHeader = [...GATEWAY_RECON_SIGNATURE.expectedHeaders];
     const fp = writeTempMultiSheetXlsx(tmpDir, 'gw-cover-first.xlsx', [
       COVER_SHEET,
       { name: '1409155847565936642', aoa: [gwHeader, gwHeader.map(() => 'v')] }
     ]);
-    const result = detectTableType(fp, [BANK_STATEMENT_SIGNATURE, GATEWAY_RECON_SIGNATURE]);
+    const result = await detectTableType(fp, [BANK_STATEMENT_SIGNATURE, GATEWAY_RECON_SIGNATURE]);
     assert.equal(result.status, 'matched');
     assert.equal(result.tableKey, 'gateway-recon');
   });
 
-  test('两张数据 sheet 各命中不同表（同文件不同 sheet 分别命中银行/网关）→ 取先出现者 bank-statement（短路）', () => {
+  test('两张数据 sheet 各命中不同表（同文件不同 sheet 分别命中银行/网关）→ 取先出现者 bank-statement（短路）', async () => {
     const gwHeader = [...GATEWAY_RECON_SIGNATURE.expectedHeaders];
     const fp = writeTempMultiSheetXlsx(tmpDir, 'bank-then-gw.xlsx', [
       BANK_SHEET,
       { name: 'gw', aoa: [gwHeader, gwHeader.map(() => 'v')] }
     ]);
-    const result = detectTableType(fp, [BANK_STATEMENT_SIGNATURE, GATEWAY_RECON_SIGNATURE]);
+    const result = await detectTableType(fp, [BANK_STATEMENT_SIGNATURE, GATEWAY_RECON_SIGNATURE]);
     // 跨 sheet 不判 ambiguous（ambiguous 仅同一 sheet 多签名命中）；按 sheet 顺序短路取第一个命中。
     assert.equal(result.status, 'matched');
     assert.equal(result.tableKey, 'bank-statement', '不同 sheet 各命中一张表时按 sheet 顺序短路（非 ambiguous）');
   });
 
-  test('同一 sheet 内拼接两表表头 → 仍判 ambiguous（多 sheet 改造不破坏 ambiguous 语义）', () => {
+  test('同一 sheet 内拼接两表表头 → 仍判 ambiguous（多 sheet 改造不破坏 ambiguous 语义）', async () => {
     const combined = [
       ...BANK_STATEMENT_SIGNATURE.expectedHeaders,
       ...GATEWAY_RECON_SIGNATURE.expectedHeaders
@@ -344,7 +344,7 @@ test.describe('detectTableType — 多 sheet 扫描（v2.1.16 PR#61 F4 真回归
       { name: '封面', aoa: [['x']] },
       { name: '混合', aoa: [combined, combined.map(() => 'v')] }
     ]);
-    const result = detectTableType(fp, [BANK_STATEMENT_SIGNATURE, GATEWAY_RECON_SIGNATURE]);
+    const result = await detectTableType(fp, [BANK_STATEMENT_SIGNATURE, GATEWAY_RECON_SIGNATURE]);
     assert.equal(result.status, 'ambiguous');
     assert.ok(Array.isArray(result.matchedKeys));
   });
@@ -353,34 +353,34 @@ test.describe('detectTableType — 多 sheet 扫描（v2.1.16 PR#61 F4 真回归
 test.describe('detectTableType — 外汇期权表 unsupported（v2.1.16 PR#61 F3）', () => {
   // 模板已入库 assets/外汇期权订单.xlsx（sheet「交易数据」，标题第 0 行、表头第 1 行）。
   // 期望：识别得出 fx-option，但 detector 返回 status='unsupported'（区别 unrecognized），不接入落库。
-  test('期权表（真实模板）→ status=unsupported + tableKey=fx-option（已入库未接入）', () => {
-    const result = detectTableType(path.join(ASSETS, '外汇期权订单.xlsx'));
+  test('期权表（真实模板）→ status=unsupported + tableKey=fx-option（已入库未接入）', async () => {
+    const result = await detectTableType(path.join(ASSETS, '外汇期权订单.xlsx'));
     assert.equal(result.status, 'unsupported', '期权表已入库 → unsupported（非 unrecognized）');
     assert.equal(result.tableKey, 'fx-option');
     assert.equal(result.score, 1, 'L1 精确命中 score=1');
   });
 
-  test('FX_OPTION_SIGNATURE 已纳入 ALL_TABLE_SIGNATURES 候选', () => {
+  test('FX_OPTION_SIGNATURE 已纳入 ALL_TABLE_SIGNATURES 候选', async () => {
     const keys = ALL_TABLE_SIGNATURES.map((s) => s.tableKey);
     assert.ok(keys.includes('fx-option'), 'fx-option 必须在候选集（识别更友好）');
     assert.ok(Array.isArray(FX_OPTION_SIGNATURE.expectedHeaders) && FX_OPTION_SIGNATURE.expectedHeaders.length === 24, '期权表实测 24 列');
   });
 
-  test('封面 sheet 在前的期权表（headerRowOffset=1 + 多 sheet）→ 仍 unsupported', () => {
+  test('封面 sheet 在前的期权表（headerRowOffset=1 + 多 sheet）→ 仍 unsupported', async () => {
     const optHeader = [...FX_OPTION_SIGNATURE.expectedHeaders];
     const fp = writeTempMultiSheetXlsx(tmpDir, 'opt-cover-first.xlsx', [
       { name: '封面', aoa: [['说明']] },
       // 还原真实模板结构：第 0 行标题、第 1 行表头
       { name: '交易数据', aoa: [['期权交易数据'], optHeader, optHeader.map(() => 'v')] }
     ]);
-    const result = detectTableType(fp);
+    const result = await detectTableType(fp);
     assert.equal(result.status, 'unsupported');
     assert.equal(result.tableKey, 'fx-option');
   });
 
-  test('期权表不被其它表误判、其它表也不被期权误判（互斥）', () => {
-    const opt = detectTableType(path.join(ASSETS, '外汇期权订单.xlsx'));
-    const fxDelivery = detectTableType(path.join(ASSETS, '外汇交割表.xls'));
+  test('期权表不被其它表误判、其它表也不被期权误判（互斥）', async () => {
+    const opt = await detectTableType(path.join(ASSETS, '外汇期权订单.xlsx'));
+    const fxDelivery = await detectTableType(path.join(ASSETS, '外汇交割表.xls'));
     assert.equal(opt.tableKey, 'fx-option');
     assert.equal(fxDelivery.tableKey, 'fx-delivery');
     assert.notEqual(opt.tableKey, fxDelivery.tableKey, '期权表 / 交割表互不串台');
@@ -389,7 +389,7 @@ test.describe('detectTableType — 外汇期权表 unsupported（v2.1.16 PR#61 F
 
 test.describe('detectTableType — 银行对账单入金表 bank-deposit 候选集隔离（v2.1.16-beta.3 ②）', () => {
   // UT-D1：🔴 ALL_TABLE_SIGNATURES 不含入金表（防回归不变量；入金表与主表同构 44 列，进 ALL 会致缺省 ambiguous）
-  test('UT-D1：ALL_TABLE_SIGNATURES 不含 bank-deposit（隔离不变量）', () => {
+  test('UT-D1：ALL_TABLE_SIGNATURES 不含 bank-deposit（隔离不变量）', async () => {
     assert.equal(
       ALL_TABLE_SIGNATURES.some((s) => s.tableKey === 'bank-deposit'),
       false,
@@ -398,7 +398,7 @@ test.describe('detectTableType — 银行对账单入金表 bank-deposit 候选�
   });
 
   // UT-D2：LINKED_IMPORT_SIGNATURES 含入金表
-  test('UT-D2：LINKED_IMPORT_SIGNATURES 含 bank-deposit', () => {
+  test('UT-D2：LINKED_IMPORT_SIGNATURES 含 bank-deposit', async () => {
     assert.equal(
       LINKED_IMPORT_SIGNATURES.some((s) => s.tableKey === 'bank-deposit'),
       true,
@@ -414,30 +414,30 @@ test.describe('detectTableType — 银行对账单入金表 bank-deposit 候选�
   });
 
   // UT-D3：链接候选集内入金表唯一命中（非 ambiguous）。主表签名不在 LINKED_IMPORT_SIGNATURES → 唯一同构匹配。
-  test('UT-D3：银行对账单.xlsx 在 LINKED_IMPORT_SIGNATURES 内唯一命中 bank-deposit（非 ambiguous）', () => {
-    const result = detectTableType(path.join(ASSETS, '银行对账单.xlsx'), LINKED_IMPORT_SIGNATURES);
+  test('UT-D3：银行对账单.xlsx 在 LINKED_IMPORT_SIGNATURES 内唯一命中 bank-deposit（非 ambiguous）', async () => {
+    const result = await detectTableType(path.join(ASSETS, '银行对账单.xlsx'), LINKED_IMPORT_SIGNATURES);
     assert.equal(result.status, 'matched', '入金表是该候选集内唯一同构签名 → matched，不 ambiguous');
     assert.equal(result.tableKey, 'bank-deposit');
     assert.equal(result.score, 1, 'L1 精确命中 score=1');
   });
 
   // UT-D4：预加工候选集仍识别为主表（不串）
-  test('UT-D4：银行对账单.xlsx 在 PREPROCESS_TABLE_SIGNATURES 内识别为 bank-statement（不串）', () => {
-    const result = detectTableType(path.join(ASSETS, '银行对账单.xlsx'), PREPROCESS_TABLE_SIGNATURES);
+  test('UT-D4：银行对账单.xlsx 在 PREPROCESS_TABLE_SIGNATURES 内识别为 bank-statement（不串）', async () => {
+    const result = await detectTableType(path.join(ASSETS, '银行对账单.xlsx'), PREPROCESS_TABLE_SIGNATURES);
     assert.equal(result.status, 'matched');
     assert.equal(result.tableKey, 'bank-statement', '同一文件走预加工候选仍为主表，不被入金表抢走');
   });
 
   // UT-D5：非入金表链接文件不被入金表干扰
-  test('UT-D5：网关对账单.xlsx 在 LINKED_IMPORT_SIGNATURES 内仍命中 gateway-recon', () => {
-    const result = detectTableType(path.join(ASSETS, '网关对账单.xlsx'), LINKED_IMPORT_SIGNATURES);
+  test('UT-D5：网关对账单.xlsx 在 LINKED_IMPORT_SIGNATURES 内仍命中 gateway-recon', async () => {
+    const result = await detectTableType(path.join(ASSETS, '网关对账单.xlsx'), LINKED_IMPORT_SIGNATURES);
     assert.equal(result.status, 'matched');
     assert.equal(result.tableKey, 'gateway-recon', '入金表签名不干扰网关对账单识别');
   });
 });
 
 test.describe('detectTableType — 导出常量自检', () => {
-  test('L2_HEADER_SCAN_ROWS 为正整数', () => {
+  test('L2_HEADER_SCAN_ROWS 为正整数', async () => {
     assert.equal(typeof L2_HEADER_SCAN_ROWS, 'number');
     assert.ok(L2_HEADER_SCAN_ROWS > 0);
   });

@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const XLSX = require('xlsx');
+const JSZip = require('jszip');
 const {
   FileValidationError,
   SUPPORTED_EXTENSIONS,
@@ -8,6 +9,9 @@ const {
   normalizeCell,
   trimTrailingEmptyCells
 } = require('./common');
+// 自研流式 xlsx 读取器（JSZip + nodeStream 增量解码，内存恒定）。
+//   仅用于 readMeaningfulRowsHead 的「只读文件头部前 N 行」场景，规避 SheetJS 全量读大文件 OOM。
+const { readXlsxStreamed } = require('../pending-import/streaming-xlsx-reader');
 
 function ensureSupportedFile(filePath) {
   const extension = path.extname(filePath).toLowerCase();
@@ -209,6 +213,42 @@ function collectMatchedRows({
   };
 }
 
+// 在「有意义行」二维数组里定位表头：找首个「连续子序列全等 normalizedExpectedHeaders」的行 + 起始列偏移。
+//   rowsCells：每行为一个 cell 数组（调用方负责已 trimTrailingEmptyCells + 过滤全空行）。
+//   normalizedExpectedHeaders：已 normalizeCell + 去空的锚点表头段。
+//   返回 { matchedRowIndex, matchedColumnIndex }；未命中均为 -1。
+// 这是表类型识别 / 表头定位的「连续子序列全等」匹配核心算法（大小写敏感，由 normalizeCell 仅 trim 保证）。
+//   readRowsWithMetadata 与 table-type-detector 的 L1 共用此函数 → 二者识别语义同源、零漂移；改动须同步回归两侧单测。
+function findHeaderMatchPosition(rowsCells, normalizedExpectedHeaders) {
+  const expectedHeaderCount = normalizedExpectedHeaders.length;
+  let matchedRowIndex = -1;
+  let matchedColumnIndex = -1;
+  if (expectedHeaderCount === 0) {
+    return { matchedRowIndex, matchedColumnIndex };
+  }
+
+  rowsCells.some((cells, rowIndex) => {
+    const row = Array.isArray(cells) ? cells : [];
+    const maximumStartIndex = row.length - expectedHeaderCount;
+
+    for (let startIndex = 0; startIndex <= maximumStartIndex; startIndex += 1) {
+      const candidateHeaders = row
+        .slice(startIndex, startIndex + expectedHeaderCount)
+        .map((cell) => normalizeCell(cell));
+
+      if (candidateHeaders.every((cell, index) => cell === normalizedExpectedHeaders[index])) {
+        matchedRowIndex = rowIndex;
+        matchedColumnIndex = startIndex;
+        return true;
+      }
+    }
+
+    return false;
+  });
+
+  return { matchedRowIndex, matchedColumnIndex };
+}
+
 // v2.1.16 PR#61 F4：可选第三参 { sheetName } 透传给 readWorkbookRows（缺省读第一个 sheet，行为不变）。
 function readRowsWithMetadata(filePath, expectedHeaders = [], { sheetName } = {}) {
   const rawRows = readWorkbookRows(filePath, { blankrows: true, sheetName });
@@ -233,27 +273,10 @@ function readRowsWithMetadata(filePath, expectedHeaders = [], { sheetName } = {}
     };
   }
 
-  const expectedHeaderCount = normalizedExpectedHeaders.length;
-  let matchedRowIndex = -1;
-  let matchedColumnIndex = -1;
-
-  meaningfulRows.some((row, rowIndex) => {
-    const maximumStartIndex = row.cells.length - expectedHeaderCount;
-
-    for (let startIndex = 0; startIndex <= maximumStartIndex; startIndex += 1) {
-      const candidateHeaders = row.cells
-        .slice(startIndex, startIndex + expectedHeaderCount)
-        .map((cell) => normalizeCell(cell));
-
-      if (candidateHeaders.every((cell, index) => cell === normalizedExpectedHeaders[index])) {
-        matchedRowIndex = rowIndex;
-        matchedColumnIndex = startIndex;
-        return true;
-      }
-    }
-
-    return false;
-  });
+  const { matchedRowIndex, matchedColumnIndex } = findHeaderMatchPosition(
+    meaningfulRows.map((row) => row.cells),
+    normalizedExpectedHeaders
+  );
 
   if (matchedRowIndex < 0 || matchedColumnIndex < 0) {
     throw new FileValidationError(
@@ -268,6 +291,74 @@ function readRowsWithMetadata(filePath, expectedHeaders = [], { sheetName } = {}
     matchedColumnIndex,
     normalizedExpectedHeaders
   });
+}
+
+// 流式读取「文件头部前 N 个有意义行」——用于 detector 表头识别（表头/列宽守卫只需前几十行）。
+//   规避 SheetJS 全量读大文件 OOM：内部用 readXlsxStreamed 边解压边扫，读够 maxRows 即 destroy stream。
+//   ⚠️ 仅适用于 .xlsx（流式引擎读 xl/worksheets/sheet1.xml）；.csv/.xls 不在此路径（detector 仍走全量读，
+//      纯文本 CSV 与 OLE2 二进制 xls 不撞 OOM，且流式引擎不支持二者）。
+//   返回值与 readRowsWithMetadata(filePath, []) 的 rows 同构：每行经 trimTrailingEmptyCells、过滤全空行，
+//   故 detector 的 L1（连续子序列全等）/ L2（指纹命中率）/ 列宽守卫逻辑可直接复用、识别语义不变。
+//   maxColCount：流式解析每行的固定列宽上界（须 ≥ 任何候选表头可能的列数，避免宽表头被截断；detector 传足够大值）。
+//   返回 { rows, truncated }：rows 为前 N 个有意义行的 cell 数组；truncated 表示文件还有更多行（已达 maxRows 上限）。
+async function readMeaningfulRowsHead(filePath, maxRows, { maxColCount = 256 } = {}) {
+  ensureSupportedFile(filePath);
+
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
+    throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
+  }
+
+  const rows = [];
+  // readXlsxStreamed 缺 sheet1.xml 时会 throw（如极罕见的非 sheet1 物理名/真损坏）；由调用方捕获回退/转 read-error。
+  const { truncated } = await readXlsxStreamed(
+    filePath,
+    (cells) => {
+      const trimmed = trimTrailingEmptyCells(cells);
+      if (isRowMeaningful(trimmed)) {
+        rows.push(trimmed);
+      }
+    },
+    { colCount: maxColCount, maxRows }
+  );
+
+  return { rows, truncated: !!truncated };
+}
+
+// 轻量读取 .xlsx 的 sheet 元信息（仅解析 xl/workbook.xml 取 sheet 名顺序 + 数物理 worksheet entry）。
+//   ⚠️ 仅 .xlsx：用于 detector 在「不全量解压」前提下判定单/多 sheet（SheetJS listSheetNames 的
+//      bookSheets:true 对 65 万行大文件仍会全量解压 → 撞 ~4GB RSS；本函数 JSZip 只读 workbook.xml 小 entry，
+//      峰值与 readMeaningfulRowsHead 同量级，不 OOM）。
+//   返回 { sheetNames, worksheetEntryCount }：sheetNames 顺序与 SheetJS SheetNames 一致（同读 workbook.xml）。
+//   解析失败（非 zip / 缺 workbook.xml / 损坏）抛错，由调用方回退 SheetJS listSheetNames。
+async function readXlsxSheetMetaLite(filePath) {
+  const buffer = await fs.promises.readFile(filePath);
+  const zip = await JSZip.loadAsync(buffer);
+  const wbEntry = zip.file('xl/workbook.xml');
+  if (!wbEntry) {
+    throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
+  }
+  const wbXml = await wbEntry.async('string');
+  const sheetNames = [];
+  // <sheet name="..." sheetId=".." r:id="..">（顺序即 workbook 定义顺序，与 SheetJS SheetNames 一致）
+  const re = /<sheet\b[^>]*?\bname="([^"]*)"/g;
+  let m;
+  while ((m = re.exec(wbXml))) {
+    sheetNames.push(xmlUnescapeName(m[1]));
+  }
+  const worksheetEntryCount = Object.keys(zip.files)
+    .filter((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).length;
+  return { sheetNames, worksheetEntryCount };
+}
+
+// workbook.xml 内 sheet name 的最小 XML 实体反转义（名字里可能含 & < > 等被转义字符）。
+function xmlUnescapeName(s) {
+  if (typeof s !== 'string' || s.indexOf('&') < 0) return s;
+  return s
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
 }
 
 function extractHeaders(filePath) {
@@ -383,8 +474,11 @@ module.exports = {
   ensureSupportedFile,
   extractEnumValuesFromImportedFile,
   extractHeaders,
+  findHeaderMatchPosition,
   listSheetNames,
   loadEnumValues,
+  readMeaningfulRowsHead,
   readRows,
-  readRowsWithMetadata
+  readRowsWithMetadata,
+  readXlsxSheetMetaLite
 };

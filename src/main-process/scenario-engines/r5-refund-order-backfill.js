@@ -573,8 +573,22 @@ function consumeAndBackfill(bankRow, hit, ctx) {
   backfillRows.push(buildBackfillRow(hit.refundRow, bankRow, hit.detail));
 }
 
+// v3.0.0 需求3：退款回填「候选预检」只读 helper（与 c3-gateway-recon-join.js 的 countC3BankCandidates 对称）。
+//   候选条件 = 银行对账单 FundType 归一化后 === 'Ach Return'（见本文件 §业务语义 / 第6行：退款参与对账的银行侧条件）。
+//   纯计数、不读 DB/session（由 main.js 注入 rows）；供运行点 / 导入后提醒做「本批是否有退款候选」门控。
+//   本批无候选 → 提醒不弹（避免无退款数据时误打扰）。
+function countRefundBankCandidates(bankRows) {
+  let n = 0;
+  for (const r of bankRows || []) {
+    if (normalizeCellValue(r && r['FundType']) === 'Ach Return') n++;
+  }
+  return n;
+}
+
 module.exports = {
   runRound5RefundOrderBackfill,
+  // v3.0.0 需求3：退款候选预检只读 helper（main.js refund-candidate-count IPC 调用 + 单测覆盖）
+  countRefundBankCandidates,
   // 内部子函数导出便于单测精确覆盖
   bankAmountAbs,
   extractFeature,

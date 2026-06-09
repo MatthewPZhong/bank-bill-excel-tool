@@ -31,8 +31,20 @@ describe('updateBankStatementUi — N6 状态框换行修复 (v2.1.9 T31)', () =
   test('外层文案仍含「已导出：」「已导入：」字符串（仅删 \\n，不删字面）', () => {
     assert.ok(source.includes('已导出：${ex.mainFileName}'),
       '源文件应保留 `已导出：${ex.mainFileName}` 模板字面');
-    assert.ok(source.includes('已导入：${bs.fileName}'),
-      '源文件应保留 `已导入：${bs.fileName}` 模板字面');
+    // v3.0.0 需求1：「已导入：」后注入半角冒号的「渠道-地区」前缀 channelRegionPrefix（前缀为空时兜底原文案）。
+    //   字面随之变为 `已导入：${channelRegionPrefix}${bs.fileName}`；下方仍校验「已导入：」+ 文件名变量未被删。
+    assert.ok(source.includes('已导入：${channelRegionPrefix}${bs.fileName}'),
+      '源文件应保留 `已导入：${channelRegionPrefix}${bs.fileName}` 模板字面（v3.0.0 需求1 前缀注入）');
+  });
+
+  // v3.0.0 需求1 护栏：前缀分隔必须用半角 ':'、组合间顿号 '、'，绝不用全角「：」
+  //   （updateStatusBox 对全角「：」自动补 \n 会把前缀与文件名打断到两行）。
+  test('渠道-地区前缀使用半角冒号（channelRegionPrefix 用 `:` 不用全角「：」）', () => {
+    assert.ok(source.includes("`${combos.join('、')}:`"),
+      "前缀拼接应为 `${combos.join('、')}:`（半角冒号 + 顿号），避免全角「：」触发自动换行");
+    // 前缀字面中不得出现全角「：」（否则 updateStatusBox 会在前缀后强制换行）
+    assert.ok(!source.includes("${combos.join('、')}："),
+      '前缀拼接不得使用全角「：」（会被 updateStatusBox 自动换行打断「前缀+文件名同行」）');
   });
 
   test('行间换行 `\\nerror-report：` 与 `\\n不平账结果表：` 保留（非冒号后冗余）', () => {

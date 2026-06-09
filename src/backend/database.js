@@ -1054,10 +1054,25 @@ class AppDatabase {
     return linkedTableRepository.replaceLinkedTable(this.db, tableKey, rows, options || {});
   }
 
+  // v3.0.0 块 B / PR-2：大文件链接表流式整表覆盖（async；caller 经 feedRows(insertOne) 在事务内逐行喂入，内存恒定）。
+  //   🔴🔴 数据红线：整表覆盖（DELETE 全表 + 单事务跨 await）；feedRows 中途 throw → ROLLBACK 旧数据完好。
+  replaceLinkedTableStreaming(tableKey, feedRows, options) {
+    return linkedTableRepository.replaceLinkedTableStreaming(this.db, tableKey, feedRows, options || {});
+  }
+
   // v2.1.16-beta.2 T1：读回某 tableKey 全部整行（raw_json → 对象，字段名 = 真实表头）；
   //   fx-option 返回 []；损坏行跳过。供 5 轮对账编排器取网关数据源（'gateway-bill'）。
   readLinkedTableRows(tableKey) {
     return linkedTableRepository.readLinkedTableRows(this.db, tableKey);
+  }
+
+  // v3.0.0 块 B / PR-3：ADM 派生内存优化 facade（Channel=ADM 下推过滤 / 轻量存在性探测）
+  readBankDepositAdmCandidates() {
+    return linkedTableRepository.readBankDepositAdmCandidates(this.db);
+  }
+
+  hasLinkedTableRows(tableKey) {
+    return linkedTableRepository.hasLinkedTableRows(this.db, tableKey);
   }
 
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表 facade（建表 + 仓储三函数转发）
@@ -1094,6 +1109,12 @@ class AppDatabase {
   // 按 value_type（'channel' / 'channel-region'）列出枚举值（供后续引擎读库 + 审计）。
   listChannelEnumValues(valueType) {
     return channelEnumRepository.listChannelEnumValues(this.db, valueType);
+  }
+
+  // v3.0.0 需求1：从银行对账单行抽取唯一「渠道-地区」组合（纯函数，供 session-status 透出状态框前缀）。
+  //   不依赖 db；与枚举沉淀同拼接口径（Channel 空跳过 / 地区空只产 channel / 去重 + 排序）。
+  extractChannelRegionCombos(rows) {
+    return channelEnumRepository.extractChannelRegionCombos(rows);
   }
 
   // SR-backup-1 (v2.1.9)：sqlite 安全备份 API（VACUUM INTO）

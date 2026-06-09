@@ -2248,10 +2248,6 @@ select.mapping-text-input {
   margin-left: 21px;
 }
 
-.scenarios-table .scenarios-col-name {
-  width: 30.94% !important;
-}
-
 .scenarios-table .scenarios-col-category {
   width: 22%;
   overflow: hidden;
@@ -2262,8 +2258,9 @@ select.mapping-text-input {
   padding-right: 4px;
 }
 
+/* v3.0.0 PR-7：合并此前重复且取值冲突的两处 .scenarios-col-name（30.94% !important / 27.96%）为单一定义，
+ *   并移除 width —— 名称列宽统一由 renderer-dialogs.js 的 th 内联 nameWidth 按视图模式控制。仅保留省略/对齐精调。 */
 .scenarios-table .scenarios-col-name {
-  width: 27.96%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

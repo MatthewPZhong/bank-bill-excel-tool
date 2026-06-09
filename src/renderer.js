@@ -164,8 +164,15 @@ const state = {
   // 数据真在 main 进程；模块切换/启动时调 desktopApi.bankStatement.sessionStatus 同步
   bankStatementSession: null,    // { fileName, rowCount, importedAt } | null
   gatewayReconSession: null,     // { fileName, rowCount, importedAt } | null
+  // v3.0.0 需求3：退款 session 就绪标志（来自 session-status hasRefundOrder）。
+  //   { ready: boolean } —— 仅承载「本批是否已导退款表」就绪信号，供运行点 shouldPromptRefundAtRun 判据。
+  refundOrderSession: null,      // { ready: true } | null
   processingResult: null,        // { hitRowCount, scenarioHitCount, warningCount, ranAt } | null
   bankStatementExport: null,     // { mainFileName, errorReportName } | null（仅 renderer-side 缓存）
+  // v3.0.0 需求2a：去导入明细框后，失败/跳过摘要并入状态框。
+  //   { text: string, hasFailed: boolean } | null —— text 为纯文本（状态框 textContent，不可 HTML）。
+  //   进入新动作（再次导入/run/export/导网关）时清空，避免上一批摘要残留。
+  bankStatementImportIssues: null,
   // v2.1.16-beta.5 需求1（PR-4 修订）🔴 资金红线：资金对账面板 row1《开始运行》的智能路由模式。
   //   'bank'（默认/最近一次导入对账单成功）→ bankStatementRunBtn 走 handleBankStatementRun()（R1-R5 核心引擎）；
   //   'gateway'（最近一次导入不平表成功）   → bankStatementRunBtn 走 handleBankStatementGatewayReconRun()（网关场景）。
@@ -3328,6 +3335,7 @@ async function refreshBankStatementStatus() {
     if (!status || status.status !== 'ok') {
       state.bankStatementSession = null;
       state.gatewayReconSession = null;
+      state.refundOrderSession = null;
       state.processingResult = null;
     } else {
       state.bankStatementSession = status.hasBankStatement
@@ -3335,12 +3343,18 @@ async function refreshBankStatementStatus() {
           fileName: status.bankStatementFileName,
           rowCount: status.bankStatementRowCount,
           // v2.1.16 A5：合并来源文件数（> 1 时状态框显示「N 个文件合并」）
-          sourceFileCount: Number(status.bankStatementSourceFileCount) || 1
+          sourceFileCount: Number(status.bankStatementSourceFileCount) || 1,
+          // v3.0.0 需求1：唯一「渠道-地区」组合（缺省/老 main 兜底 []），供状态框前缀
+          channelRegions: Array.isArray(status.bankStatementChannelRegions)
+            ? status.bankStatementChannelRegions
+            : []
         }
         : null;
       state.gatewayReconSession = status.hasGatewayRecon
         ? { fileName: status.gatewayReconFileName, rowCount: status.gatewayReconRowCount }
         : null;
+      // v3.0.0 需求3：退款 session 就绪信号（缺省/老 main 兜底 null），供运行点 shouldPromptRefundAtRun 判据。
+      state.refundOrderSession = status.hasRefundOrder ? { ready: true } : null;
       state.processingResult = status.hasProcessingResult
         ? {
           hitRowCount: status.processingStats?.hitRowCount ?? 0,
@@ -3395,11 +3409,27 @@ function updateBankStatementUi() {
     // v2.1.9 N6 (T31, D18=a)：删冒号后冗余 \n（同上）；`\n不平账结果表：` 是行间换行保留
     // v2.1.16 A5：批量合并多文件 → 显示「N 个文件合并 M 行」；单文件沿用「文件名（M 行）」
     const fileCount = Number(bs.sourceFileCount) || 1;
+    // v3.0.0 需求1：状态框「渠道-地区」前缀。
+    //   🔴 换行陷阱（renderer.js:596 updateStatusBox 对全角「：」自动补 \n）：
+    //      前缀分隔必须用半角 ':'、组合间用顿号 '、'，绝不用全角「：」，否则前缀被换行打断。
+    //   组合数：0 个 → 无前缀（兜底原文案）；1 个 → `CITI-HK:`；多个 → `CITI-HK、JPM-US:`（全列出、已去重+排序）。
+    const combos = Array.isArray(bs.channelRegions) ? bs.channelRegions : [];
+    const channelRegionPrefix = combos.length === 0 ? '' : `${combos.join('、')}:`;
     text = fileCount > 1
-      ? `已导入：${fileCount} 个文件合并（${bs.rowCount} 行）`
-      : `已导入：${bs.fileName}（${bs.rowCount} 行）`;
+      ? `已导入：${channelRegionPrefix}${fileCount} 个文件合并（${bs.rowCount} 行）`
+      : `已导入：${channelRegionPrefix}${bs.fileName}（${bs.rowCount} 行）`;
     if (gw) text += `\n不平账结果表：${gw.fileName}（${gw.rowCount} 行）`;
     tone = 'info';
+  }
+  // v3.0.0 需求2a：导入失败/跳过摘要并入状态框（去明细确认框后的信息落点）。
+  //   追加在「主文案算完之后、updateStatusBox 之前」，对全部分支统一生效——
+  //   尤其纯失败批次（无 bank ok，bs 为 null 走「欢迎使用」分支）也能渲染 issues。
+  //   摘要为纯文本（buildImportIssuesSummary，半角冒号防换行打断），用 \n 接在主文案下方；
+  //   含失败时 tone 升 'error'（覆盖原 tone，触发 updateStatusBox 的 error 视觉 + 日志上报）。
+  const issues = state.bankStatementImportIssues;
+  if (issues && issues.text) {
+    text = `${text}\n${issues.text}`;
+    if (issues.hasFailed) tone = 'error';
   }
   // v2.1.7 round 3 B5：走 updateStatusBox 入口（R3 wiring — 自动获中文「：」换行 + null 兜底）
   //   原现状：直写 textEl.textContent = text + dataset.tone = tone（漏 R3 replace 处理）
@@ -3531,9 +3561,49 @@ function buildBatchImportSummaryHtml(results) {
   return lines.join('<br/><br/>');
 }
 
+// v3.0.0 需求2a：去导入明细框后，把失败/跳过信息提炼成「纯文本」摘要并入状态框。
+//   🔴 纯文本（非 HTML）：状态框走 updateStatusBox → textContent，HTML 标签会被原样显示。
+//   口径与 buildBatchImportSummaryHtml 一致：跳过 = status==='disabled'；
+//   失败 = 非 ok 非 disabled（ambiguous/unrecognized/read-error/invalid…）。
+//   失败行复用同款 statusLabel/message 取文案口径（与明细框保持一致），但用半角字符拼接：
+//   - 文件间分隔用顿号 '、'，跳过/失败两段间用 '\n'（CSS white-space: pre-wrap 渲染换行）；
+//   - 🔴 半角冒号避坑：updateStatusBox 会对全角「：」后强制换行（renderer.js:596），
+//     故每文件「文件名: 原因」一律用半角 ':'，避免被打断。
+//   返回 { text, hasFailed }：text 空串表示无 issues；hasFailed 供调用方决定状态框 tone 是否升 error。
+function buildImportIssuesSummary(results) {
+  const list = Array.isArray(results) ? results : [];
+  // 与 buildBatchImportSummaryHtml 完全一致的失败原因口径
+  const statusLabel = {
+    'ambiguous': '表头命中多张表，无法判定',
+    'unrecognized': '未识别为预处理表',
+    'read-error': '文件读取失败',
+    'invalid': '文件校验失败'
+  };
+  const skipped = list.filter((r) => r && r.status === 'disabled');
+  const failed = list.filter((r) => r && r.status !== 'ok' && r.status !== 'disabled');
+  const parts = [];
+  if (skipped.length > 0) {
+    const names = skipped.map((r) => String(r.fileName || '')).join('、');
+    parts.push(`跳过 ${skipped.length} 个: ${names}`);
+  }
+  if (failed.length > 0) {
+    // 每文件「文件名: 失败原因」（半角冒号），原因取 message > statusLabel > status
+    const items = failed.map((r) => {
+      const reason = r.message || statusLabel[r.status] || r.status || '未知原因';
+      return `${String(r.fileName || '')}: ${reason}`;
+    }).join('、');
+    parts.push(`失败 ${failed.length} 个: ${items}`);
+  }
+  // 跳过/失败两段各占一行（\n，CSS white-space: pre-wrap 渲染）；
+  // 段内一律半角冒号，避开 updateStatusBox 对全角「：」的强制换行。
+  return { text: parts.join('\n'), hasFailed: failed.length > 0 };
+}
+
 async function handleBankStatementBatchImport() {
   // 「导入对账单」按钮即批量入口；导入期间禁用防重复触发。
   if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = true;
+  // v3.0.0 需求2a：进入新一轮导入 → 先清上一批失败/跳过摘要，避免残留串到本批状态框。
+  state.bankStatementImportIssues = null;
   let result;
   try {
     result = await window.desktopApi.bankStatement.batchImport();
@@ -3544,12 +3614,15 @@ async function handleBankStatementBatchImport() {
     return;
   }
   if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = false;
-  if (!result || result.status === 'cancelled') return; // 用户取消文件选择 → 不弹明细
+  if (!result || result.status === 'cancelled') return; // 用户取消文件选择 → 不刷状态框
   if (result.status !== 'ok') {
+    // IPC 层整体失败（非 per-file 明细），沿用弹框；不入状态框 issues（issues 只承载 per-file 明细）
     openModal(createAlertDialog(`导入失败：${result.message || '未知错误'}`));
     return;
   }
   const results = Array.isArray(result.results) ? result.results : [];
+  // v3.0.0 需求2a：去明细确认框，改把 per-file 失败/跳过摘要并入状态框（纯文本，半角冒号防换行）。
+  state.bankStatementImportIssues = buildImportIssuesSummary(results);
   // 若本批有银行对账单成功导入 → 清「已导出」缓存 + 刷新状态框（与单选导入一致）
   const hasBankStatementOk = results.some((r) => r.status === 'ok' && r.tableKey === 'bank-statement');
   if (hasBankStatementOk) {
@@ -3558,26 +3631,60 @@ async function handleBankStatementBatchImport() {
     //   row1《开始运行》此后走 R1-R5 核心（handleBankStatementRun）。仅本批确实含 bank-statement 时才改，
     //   本批无 bank-statement（如失败/全是其它表）则保持原 mode（不误覆盖刚导入不平表的 'gateway'）。
     state.bankStatementProcessRunMode = 'bank';
-    // v2.1.16-beta.6 防御：状态刷新抛错不应阻断「批量明细框」弹出（明细框是导入反馈，必须显示）
+    // v2.1.16-beta.6 防御：状态刷新抛错不应阻断后续提醒（导入反馈仍要落地）。
+    //   refreshBankStatementStatus 内部会调 updateBankStatementUi，带上 issues 摘要一并渲染。
     try {
       await refreshBankStatementStatus();
     } catch (refreshErr) {
-      console.error('[导入对账单] 状态刷新失败（已兜底，不阻断明细框）:', refreshErr);
+      console.error('[导入对账单] 状态刷新失败（已兜底，不阻断提醒）:', refreshErr);
     }
+  } else {
+    // v3.0.0 需求2a 🔴 纯失败/无 bank ok 批次：原路径不刷状态框 → 去明细框后会丢失失败/跳过信息。
+    //   新增分支让其也渲染 issues。仅刷 UI（不调 refreshBankStatementStatus IPC）：
+    //   不改 mode（不误覆盖刚导入不平表的 'gateway'）、不清 export（无有效新数据）。
+    updateBankStatementUi();
   }
-  // 弹批量明细；确认后若导入了银行对账单，沿用单选导入的 C3 提示逻辑
-  //   （createAlertDialog 点「确认」时已内部 closeModal，onConfirm 内无需再关）
-  openModal(createAlertDialog(buildBatchImportSummaryHtml(results), {
-    skipLogReport: true,
-    onConfirm: hasBankStatementOk
-      ? async () => {
-          // v2.1.16-beta.6 需求C P0-4：先查退款订单导入提醒（与 C3 提醒互斥，退款优先；
-          //   C3 在运行点 shouldPromptGatewayReconAtRun 还有兜底提醒，不会漏）。
-          const refundPrompted = await maybePromptRefundOrderImport(results);
-          if (!refundPrompted) maybePromptGatewayReconImport();
-        }
-      : undefined
-  }));
+  // v3.0.0 需求2a：原明细框 onConfirm 里的「退款优先互斥提醒」副作用迁移至此
+  //   （成功路径末尾、状态框刷新之后再弹）。去框后若不迁移，退款/C3 提醒将永不触发（R-5）。
+  //   仅本批确实含银行对账单成功时才触发（与原 onConfirm 条件一致）。
+  if (hasBankStatementOk) {
+    // v2.1.16-beta.6 需求C P0-4：先查退款订单导入提醒（与 C3 提醒互斥，退款优先；
+    //   C3 在运行点 shouldPromptGatewayReconAtRun 还有兜底提醒，不会漏）。
+    const refundPrompted = await maybePromptRefundOrderImport(results);
+    if (!refundPrompted) maybePromptGatewayReconImport();
+  }
+}
+
+// v3.0.0 需求2b 🔴🔴 资金红线：C3 网关行数据源 v2.1.16-beta.2 已切到链接表 gateway-bill，
+//   故「数据就绪判据」从旧 gatewayReconSession（死路径，引擎不消费）改向链接表 gateway-bill rowCount。
+//   判据严格 rowCount>0 才算就绪（链接表空 = 未就绪 = 仍提醒）；任何异常（IPC reject / 返回非 ok）
+//   一律按「未就绪」处理 → 返回 false → 调用方继续弹提醒（保守多提醒，绝不静默漏对账）。
+async function isGatewayBillReady() {
+  try {
+    const r = await window.desktopApi.linkedTable.rowCount('gateway-bill');
+    // 严格 >0：仅当 IPC 明确 ok 且 rowCount 严格大于 0 才算「就绪」。
+    return !!(r && r.status === 'ok' && Number.isFinite(r.rowCount) && r.rowCount > 0);
+  } catch (error) {
+    // 🔴 异常按「未就绪」→ 仍提醒（保守防漏对账）。
+    console.warn('isGatewayBillReady (gateway-bill rowCount) failed:', error);
+    return false;
+  }
+}
+
+// v3.0.0 需求3（PR-4 bug 修订）🔴 资金红线：退款 session「就绪判据」从前端缓存 state.refundOrderSession
+//   改为实时查 main 端 session-status 的 hasRefundOrder。原缓存仅在 refreshBankStatementStatus 刷新，
+//   纯退款表批次（hasBankStatementOk=false）不调该 IPC → 缓存滞后 → 运行点误判重复弹退款提醒。
+//   与 isGatewayBillReady 同款保守写法：仅当 status==='ok' 且 hasRefundOrder 为真才算就绪；
+//   任何异常（IPC reject / 返回非 ok）一律按「未就绪」→ 返回 false → 调用方继续提醒（保守防漏回填）。
+async function isRefundOrderReady() {
+  try {
+    const status = await window.desktopApi.bankStatement.sessionStatus();
+    return !!(status && status.status === 'ok' && status.hasRefundOrder);
+  } catch (error) {
+    // 🔴 异常按「未就绪」→ 仍提醒（保守）。
+    console.warn('isRefundOrderReady (session-status hasRefundOrder) failed:', error);
+    return false;
+  }
 }
 
 async function maybePromptGatewayReconImport() {
@@ -3586,17 +3693,21 @@ async function maybePromptGatewayReconImport() {
     const scenarios = (list && list.status === 'ok' && Array.isArray(list.scenarios)) ? list.scenarios : [];
     const hasC3Enabled = scenarios.some((s) => s.category === 'gateway-recon-join' && (s.enabled === 1 || s.enabled === true));
     if (!hasC3Enabled) return;
-    if (state.gatewayReconSession) return;
+    // v3.0.0 需求2b：改向链接表 gateway-bill —— 有数据（rowCount>0）才不提醒；空/异常则继续提醒。
+    if (await isGatewayBillReady()) return;
     // v2.1.12 需求6：数据侧预检 — 启用 C3 但本次导入数据无候选行（无满足银行条件的行）→ 不弹提示
     const cc = await window.desktopApi.bankStatement.c3CandidateCount();
     if (!cc || cc.status !== 'ok' || !(cc.candidateCount > 0)) return;
     openModal(createConfirmDialog({
-      message: '已启用「资金对账不平」类场景，需要导入「资金对账不平结果表」。<br>是否现在导入？（也可稍后再导入；不导入则该类场景将被跳过）',
+      message: '已启用「资金对账不平」类场景，C3 需要网关对账单。<br>请在「链接表管理」导入网关对账单。',
       confirmText: '导入文件',
       cancelText: '稍后再说',
       onConfirm: async () => {
         closeModal();
-        await handleBankStatementImportGatewayRecon();
+        // v3.0.0 需求2b：改调链接表导入对话框（不再调死链 handleBankStatementImportGatewayRecon）。
+        //   与原死链行为一致：导入后刷新状态框（refreshBankStatementStatus）。
+        await window.desktopApi.linkedTable.import();
+        await refreshBankStatementStatus();
       }
     }));
   } catch (error) {
@@ -3618,10 +3729,23 @@ async function maybePromptRefundOrderImport(results) {
     // 本批已识别到退款订单表（落 session）→ 不提醒（规则一「带该表则不弹」）
     const hasRefundOk = (results || []).some((r) => r.tableKey === 'zhongtai-refund-order' && r.status === 'ok');
     if (hasRefundOk) return false;
-    openModal(createAlertDialog(
-      '已启用「中台退款订单回填」场景，但本次未导入「中台退款订单表」。<br>请补充导入「中台退款订单」文件后再运行。',
-      { logLevel: 'info', skipLogReport: true }
-    ));
+    // v3.0.0 需求3：候选预检门控（对齐 C3 c3CandidateCount 范式）——
+    //   本批银行对账单无 FundType=Ach Return 候选行 → 退款回填无对象 → 不弹（避免无退款数据时误打扰）。
+    //   IPC 异常/返回非 ok → candidateCount 视为 0 → 不弹（退款提醒非资金红线，无候选不弹是合理保守）。
+    const rc = await window.desktopApi.bankStatement.refundCandidateCount();
+    if (!rc || rc.status !== 'ok' || !(rc.candidateCount > 0)) return false;
+    // v3.0.0 需求3：样式对齐 C3 —— createAlertDialog 单按钮 → createConfirmDialog 两按钮（导入文件 / 稍后再说）。
+    //   「导入文件」→ closeModal + handleBankStatementBatchImport（调起《导入对账单》批量导入，不续跑，让用户导完再运行）。
+    openModal(createConfirmDialog({
+      message: '已启用「中台退款订单回填」场景，但本次未导入「中台退款订单表」。<br>继续运行将跳过退款回填。',
+      confirmText: '导入文件',
+      cancelText: '稍后再说',
+      onConfirm: async () => {
+        closeModal();
+        await handleBankStatementBatchImport();
+      }
+      // onCancel 默认仅 closeModal（不续跑）
+    }));
     return true;
   } catch (error) {
     console.warn('maybePromptRefundOrderImport failed:', error);
@@ -3644,6 +3768,8 @@ async function handleBankStatementImportGatewayRecon() {
       return false;
     }
     state.bankStatementExport = null;  // 重新导入 gw → 清掉「已导出」缓存
+    // v3.0.0 需求2a：进入「导入网关」动作成功 → 清旧导入失败/跳过摘要。
+    state.bankStatementImportIssues = null;
     await refreshBankStatementStatus();
     return true;
   } catch (error) {
@@ -3672,45 +3798,104 @@ async function handleBankStatementRunRouted() {
   }
 }
 
+// v3.0.0 需求3 🔴🔴 资金红线（运行点链式编排）：退款先于 C3、但「互不吞」。
+//   编排链：handleBankStatementRun → [退款运行点提醒] → proceedToGwCheck → [C3 运行点提醒] → runBankStatementInternal。
+//   关键不变量：退款「直接运行」走 proceedToGwCheck()（★只跳退款、C3 仍单独提醒），绝不直接 runBankStatementInternal
+//     —— 否则 C3 缺数据会被静默跳过 = 漏对账（TechDoc §6.4 + AC3-5）。
 async function handleBankStatementRun() {
   if (!state.bankStatementSession) {
     openModal(createAlertDialog('请先导入银行对账单'));
     return;
   }
-  // PR #33 Codex Finding 1：保留 import 后 dialog#1（maybePromptGatewayReconImport）+
-  // 运行点新增 dialog#2 三选一（防止 dialog#1 选"稍后再说"后 C3 被静默跳过）
   try {
-    const needGwReminder = await shouldPromptGatewayReconAtRun();
-    if (needGwReminder) {
+    // —— 退款运行点（先于 C3，但互不吞）——
+    if (await shouldPromptRefundAtRun()) {
       openModal(createConfirmDialog({
-        message: '已启用「资金对账不平」类场景但未导入「资金对账不平结果表」。<br>继续运行将跳过该类场景。',
+        message: '已启用「中台退款订单回填」场景但未导入「中台退款订单表」。<br>继续运行将跳过退款回填。',
         confirmText: '导入文件',
         middleText: '直接运行',
         cancelText: '取消',
         onConfirm: async () => {
           closeModal();
-          const ok = await handleBankStatementImportGatewayRecon();
-          if (ok) await runBankStatementInternal();
+          // 导入文件 → 调起《导入对账单》批量导入，不续跑（与导入框「导入文件」语义一致）。
+          await handleBankStatementBatchImport();
         },
         onMiddle: async () => {
           closeModal();
-          await runBankStatementInternal();
+          // ★ 只跳退款、继续查 C3（不是 runBankStatementInternal）——C3 缺数据仍会单独提醒。
+          await proceedToGwCheck();
         }
         // onCancel 默认仅 closeModal，不运行
       }));
       return;
     }
-    await runBankStatementInternal();
+    // 无退款提醒 → 直接进入 C3 检查段。
+    await proceedToGwCheck();
   } catch (error) {
     console.error(error);
     openModal(createAlertDialog(`运行失败：${error.message || error}`));
   }
 }
 
-async function shouldPromptGatewayReconAtRun() {
-  // C3 启用 + 未导入 gw 文件 → 运行点弹 dialog#2 三选一
-  if (state.gatewayReconSession) return false;
+// v3.0.0 需求3：抽出「C3 运行点检查段」（承载原 PR #33 dialog#2 + PR-3 改向链接表逻辑）。
+//   被 handleBankStatementRun 直接调用（无退款提醒时）或退款「直接运行」回调调用（跳退款后继续查 C3）。
+async function proceedToGwCheck() {
+  // PR #33 Codex Finding 1：运行点 dialog#2 三选一（防止 import 后 dialog#1 选"稍后再说"后 C3 被静默跳过）
+  const needGwReminder = await shouldPromptGatewayReconAtRun();
+  if (needGwReminder) {
+    openModal(createConfirmDialog({
+      // v3.0.0 需求2b：文案改向链接表网关对账单（C3 取数已切链接表 gateway-bill）。
+      message: '已启用「资金对账不平」类场景但未导入网关对账单（链接表）。<br>继续运行将跳过该类场景。',
+      confirmText: '导入文件',
+      middleText: '直接运行',
+      cancelText: '取消',
+      onConfirm: async () => {
+        closeModal();
+        // v3.0.0 需求2b：改调链接表导入对话框（不再调死链 handleBankStatementImportGatewayRecon），
+        //   导入后刷新状态框、不自动续跑（与导入框「导入文件」语义一致，让用户导完再决定运行）。
+        await window.desktopApi.linkedTable.import();
+        await refreshBankStatementStatus();
+      },
+      onMiddle: async () => {
+        closeModal();
+        await runBankStatementInternal();
+      }
+      // onCancel 默认仅 closeModal，不运行
+    }));
+    return;
+  }
+  await runBankStatementInternal();
+}
+
+// v3.0.0 需求3：退款运行点提醒判据（仿 shouldPromptGatewayReconAtRun）。
+//   退款场景 enabled（按 name='中台退款订单回填'）+ 本批未导退款表（!isRefundOrderReady()）+ 退款候选>0 → 运行点弹三选一。
+//   就绪判据（PR-4 bug 修订）：原读前端缓存 state.refundOrderSession，纯退款表批次缓存滞后误判重复提醒；
+//   改为 isRefundOrderReady() 实时查 main 端 session-status hasRefundOrder（与 C3 isGatewayBillReady 一致）。
+//   候选预检与导入后提醒一致（FundType=Ach Return 计数）；任何异常按「不提醒」（退款非资金红线，保守不打扰）。
+async function shouldPromptRefundAtRun() {
   try {
+    // 本批已导退款表（main 端 session 就绪）→ 不提醒。实时查，不读可能滞后的前端缓存。
+    if (await isRefundOrderReady()) return false;
+    const list = await window.desktopApi.scenarios.list();
+    const scenarios = (list && list.status === 'ok' && Array.isArray(list.scenarios)) ? list.scenarios : [];
+    const enabled = scenarios.some((s) =>
+      s.name === '中台退款订单回填' && (s.enabled === 1 || s.enabled === true));
+    if (!enabled) return false;
+    // 退款候选预检 — 本批无 FundType=Ach Return 候选行 → 不提示跳过。
+    const rc = await window.desktopApi.bankStatement.refundCandidateCount();
+    return !!(rc && rc.status === 'ok' && rc.candidateCount > 0);
+  } catch (error) {
+    console.warn('shouldPromptRefundAtRun failed:', error);
+    return false;
+  }
+}
+
+async function shouldPromptGatewayReconAtRun() {
+  // C3 启用 + 网关对账单（链接表）未就绪 → 运行点弹 dialog#2 三选一
+  // v3.0.0 需求2b 🔴 资金红线：判据从旧 gatewayReconSession（死路径）改向链接表 gateway-bill rowCount。
+  //   gateway-bill 有数据（rowCount>0，严格）→ return false（不提醒）；空/异常 → 不 return，继续判 c3 候选后提醒。
+  try {
+    if (await isGatewayBillReady()) return false;
     const list = await window.desktopApi.scenarios.list();
     const scenarios = (list && list.status === 'ok' && Array.isArray(list.scenarios)) ? list.scenarios : [];
     const hasC3Enabled = scenarios.some((s) => s.category === 'gateway-recon-join' && (s.enabled === 1 || s.enabled === true));
@@ -3732,6 +3917,8 @@ async function runBankStatementInternal() {
       return;
     }
     state.bankStatementExport = null;  // 重新运行 → 清掉「已导出」缓存
+    // v3.0.0 需求2a：进入「已处理」动作 → 清旧导入失败/跳过摘要（已过时，避免和处理结果文案叠加）。
+    state.bankStatementImportIssues = null;
     // 运行成功不再弹 alert，处理结果（命中场景 ids / 警告数 / skippedC3）由 updateBankStatementUi
     // 通过 refreshBankStatementStatus 拉到的 stats 一并展示在状态框
     await refreshBankStatementStatus();
@@ -3760,6 +3947,8 @@ async function handleBankStatementExport() {
         mainFileName: result.message || '无修改记录，未生成主输出文件',
         errorReportName: result.errorReportName || null
       };
+      // v3.0.0 需求2a：进入「导出」动作 → 清旧导入失败/跳过摘要（已过时）。
+      state.bankStatementImportIssues = null;
       updateBankStatementUi();
       return;
     }
@@ -3768,6 +3957,8 @@ async function handleBankStatementExport() {
         mainFileName: result.mainFileName || result.mainFilePath,
         errorReportName: result.errorReportName || null
       };
+      // v3.0.0 需求2a：进入「导出」动作 → 清旧导入失败/跳过摘要（已过时）。
+      state.bankStatementImportIssues = null;
       updateBankStatementUi();
       return;
     }

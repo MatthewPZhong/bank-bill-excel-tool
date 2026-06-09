@@ -6419,15 +6419,23 @@
       //   不读 enabled（renderer.js handleReconIdFixRun 用 state.reconIdFixSelectedScenarioId），保持原样无该列。
       const isGatewayReconIdFixCompact = isCompactView && filter[0] === 'gateway-recon-id-fix';
       const showEnabledCol = !isCompactView || isGatewayReconIdFixCompact;
-      const priorityTh = isCompactView ? '' : '<th class="scenarios-col-priority" style="width: 7%; text-align: center;">优先级</th>';
-      const enabledTh = showEnabledCol ? '<th class="scenarios-col-enabled" style="width: 10%;">是否启动</th>' : '';
-      // 列宽分三套：非 compact（含优先级+启用）/ 网关 compact（无优先级、有启用）/ 业务 compact（无优先级、无启用）。
-      //   名称列被 styles-gemini-extra.css 的 .scenarios-col-name{width:30.94% !important} 强制锁定（inline 无效），
-      //   故网关 compact 只在 id/category/actions/enabled 间分配剩余约 69%（id6+cat24+actions26+enabled13≈69%）。
-      const idWidth = isCompactView ? '6%' : '5%';
-      const categoryWidth = isGatewayReconIdFixCompact ? '24%' : (isCompactView ? '28%' : '13%');
-      const nameWidth = isGatewayReconIdFixCompact ? '30.94%' : (isCompactView ? '40%' : '18%');
-      const actionsWidth = isCompactView ? '26%' : '13%';
+      // v3.0.0 PR-7（批量勾选列致表格偏移修复）：列宽口径统一重做。
+      //   背景：批量模式左侧勾选列原为「固定 32px」，但表格 table-layout:fixed + 其余列百分比，
+      //     px+% 混用在 1140px 最大宽下溢出 ≈2.8% → 批量模式整表集体左移/错位（changes/scenario-batch-css-offset/spec.md）。
+      //   修复：① 勾选列 32px → 3%（与百分比列同口径，见 th/td 内联）；
+      //         ② 移除 styles*.css 中 .scenarios-col-name 的 width !important + 重复定义，让 th 内联 nameWidth 真正生效（单一口径）；
+      //         ③ 三套视图模式「其余列指定宽度总和 = 97%」，使「批量(勾选列3% + 其余97%) = 100% 不溢出」，
+      //            「非批量(勾选列 display:none) 浏览器把 3% 按比例分摊回各列 → 视觉与修复前实际渲染比例一致（零回归）」。
+      //   各列指定宽度 = 修复前 fixed 布局实际渲染比例 × 0.97（详见 spec / dev 核算）。
+      const priorityWidth = '8.6%';
+      const enabledWidth = isGatewayReconIdFixCompact ? '10.01%' : '12.29%';
+      const priorityTh = isCompactView ? '' : `<th class="scenarios-col-priority" style="width: ${priorityWidth}; text-align: center;">优先级</th>`;
+      const enabledTh = showEnabledCol ? `<th class="scenarios-col-enabled" style="width: ${enabledWidth};">是否启动</th>` : '';
+      // 三套：非 compact（含优先级+启用）/ 网关 compact（无优先级、有启用）/ 业务 compact（无优先级、无启用）。每套其余列和 = 97%。
+      const idWidth = isGatewayReconIdFixCompact ? '6%' : (isCompactView ? '6.4%' : '6.14%');
+      const categoryWidth = isGatewayReconIdFixCompact ? '24.01%' : (isCompactView ? '29.87%' : '15.97%');
+      const nameWidth = isGatewayReconIdFixCompact ? '30.96%' : (isCompactView ? '33%' : '38.03%');
+      const actionsWidth = isGatewayReconIdFixCompact ? '26.02%' : (isCompactView ? '27.73%' : '15.97%');
       // v2.1.15 W3：仅资金对账模块入口（filter 含 'gateway-recon-join'、非单类别 compact）显示「网关对账单修复-管理」入口；
       //   ReconID 修复模块自身入口（compact，filter=['gateway-recon-id-fix']）随 wrapper 隐藏，避免重复/自指。
       const showGatewayReconIdFixEntry = !isCompactView && Array.isArray(filter) && filter.includes('gateway-recon-join');
@@ -6465,7 +6473,7 @@
           <table class="data-table scenarios-table">
             <thead>
               <tr>
-                <th class="scenarios-col-checkbox" data-role="checkbox-col" style="width: 32px; padding-left: 8px; padding-right: 0; text-align: center; display: none;">
+                <th class="scenarios-col-checkbox" data-role="checkbox-col" style="width: 3%; padding-left: 8px; padding-right: 0; text-align: center; display: none;">
                   <input type="checkbox" data-role="select-all" title="全选 / 取消全选" />
                 </th>
                 <th class="scenarios-col-id" style="width: ${idWidth}; padding-left: 0; padding-right: 0; text-align: left; white-space: nowrap;"><span style="display: inline-block; margin-left: 21px;">序号</span></th>
@@ -6557,7 +6565,7 @@
         // 批量勾选列：builtin-fixed 与网关写死场景均不可批量操作 → checkbox disabled
         const selectRowDisabled = isBuiltinFixed || isBuiltinGatewayScenario;
         tr.innerHTML = `
-          <td class="scenarios-col-checkbox" data-role="row-checkbox-cell" style="width: 32px; padding-left: 8px; padding-right: 0; text-align: center; ${checkboxDisplay}">
+          <td class="scenarios-col-checkbox" data-role="row-checkbox-cell" style="width: 3%; padding-left: 8px; padding-right: 0; text-align: center; ${checkboxDisplay}">
             <input type="checkbox" data-row-action="select-row" ${selectRowDisabled ? 'disabled title="内置写死场景不可批量操作"' : ''} />
           </td>
           <td class="scenarios-col-id" style="padding-left: 0; padding-right: 0; text-align: left; white-space: nowrap;"><span style="display: inline-block; margin-left: 21px;">${escapeHtml(String(displayIndex))}</span></td>

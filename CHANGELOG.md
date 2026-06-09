@@ -1,5 +1,32 @@
 # Changelog
 
+## 3.0.0 - 2026-06-09
+
+v3.0.0 正式版（从 v2.1.16-beta.6 转正，含 beta.4~6 中台退款回填引擎等全部内容）。本版四大块、7 项需求，围绕「资金对账数据处理」模块的弹框/状态框治理 + 链接表大文件导入 + 两处资金红线修复。质量门 `npm run release-check` 全绿（**unit 2061 / integration 18 脚本 / smoke 全过**）。⚠️ 多处资金/数据红线：块 B 链接表整表覆盖流式落库 + ADM 派生；块 A-2b C3「数据就绪」判据防静默漏对账；块 C R5 场景3 剔除清单方向。
+
+### 新增
+
+- **块 B：链接表大文件流式导入**（🔴🔴 资金红线 + 数据红线 · `table-type-detector.js` / `main-process/linked-table-stream-source.js`(新) / `linked-table-repository.js` / `pending-import/streaming-xlsx-reader.js` / `main.js`）：65.7 万行 / 147MB 渠道账单原报"文件为空或不可读"（SheetJS 全量读 OOM 被误 catch 成 read-error）。复用流式引擎 `readXlsxStreamed` 改造三处 OOM 卡点：
+  - **detector 表头识别流式化**：物理单 sheet .xlsx 走流式读头部（命中表头即终止）+ `readXlsxSheetMetaLite`（JSZip 读 workbook.xml 轻量判 sheet 数，替代 `listSheetNames` 对大文件的 ~3.9GB OOM）；多 sheet/.xls/.csv 维持全量、识别判定语义不变。
+  - **落库流式整表覆盖**：新增 `replaceLinkedTableStreaming`（事务跨 await 逐行喂入，单事务 DELETE+INSERT，中途失败整体回滚）；与数组路径 `replaceLinkedTable` 共用 `createInsertContext` 保值口径/meta 字节一致；detector 带回 `streamingEligible` 驱动落库分支。
+  - **ADM 派生只读 Channel=ADM 子集**：`readBankDepositAdmCandidates`（json_extract 下推过滤）+ `hasLinkedTableRows`（EXISTS 探测），消除 ADM 重建为筛子集而全量读回 65 万行的 ~1.2GB 内存尖峰。
+  - 实测：真实文件落库 657,757 行 / 流式 ~12-17s / 内存有界不 OOM；O-2 值口径 harness 全量验证流式 vs 现状逐格一致。
+- **块 A 需求 1：状态框「渠道-地区」前缀** —— 导入银行对账单后状态框文件名前加「渠道-地区」前缀（唯一组合 `CITI-HK:文件名`；多组合 `CITI-HK、JPM-US:文件名`），快速识别对账单数据归属。
+
+### 变更
+
+- **块 A 需求 2a：去明细确认框** —— 删除导入后与状态框信息重合的明细确认框，失败/跳过信息以纯文本并入常驻状态框（纯失败批次也渲染）。
+- **块 A 需求 2b：C3 提醒改向链接表网关对账单**（🔴 资金红线·防静默漏对账）—— C3 网关取数已切链接表 `gateway-bill`，但提醒仍引导导入"资金不平结果表"（死数据）→ 用户照做后链接表空、C3 join 静默 no-op = 以为对了账实际没做。改为「数据就绪判据」从 `gatewayReconSession` 改向链接表 `gateway-bill` 行数（严格 >0，IPC 异常按未就绪保守处理）+「导入文件」改调链接表导入对话框。
+- **块 A 需求 3：退款回填提醒对齐 C3 + 候选预检 + 运行点编排** —— 退款导入/运行点提醒统一为 C3 框结构（导入框两按钮 / 运行点三选一）+ 新增退款候选预检（本批无 `FundType=Ach Return` 不提醒）+ 运行点链式编排（退款先于 C3 但互不吞）。
+- **块 C：R5 场景3 中台加款单按 Credit/Debit 方向匹配**（🔴 资金红线·剔除清单错位 · `scenario-engines/r5-platform-inbound-cleanup.js`）—— 同 ReconciliationId 多候选时原无脑取 `cand[0]` 不看金额方向 → 一 Credit 一 Debit 时选错行致剔除清单错位。改为多候选取 `Credit Amount` 有值的行；0 或 ≥2 行 Credit 有值则跳过 + 收集警告（不阻断导出）。
+
+### 修复
+
+- **块 D：场景管理批量操作勾选列致表格大面积偏移**（纯前端 UX · `styles*.css`）—— `table-layout:fixed` + 其余列百分比≈100% 时新增勾选列用固定 32px，px+% 叠加溢出容器 → 全列等比压缩错位。修复=勾选列百分比化（~3%）+ 其余列按比例补偿保持总和=100% + 清理重复 `.scenarios-col-name` 定义。
+- **块 B / O-6：read-error 误报文案** —— 链接表导入 + 预加工导入两处「文件为空或不可读」硬编码改为按 reason 分文案（区分真空文件 / 不可读 / OOM-读失败）。
+
+> **v3.0.0 转正**：四大块（A 弹框治理 / B 大文件流式 / C R5-S3 方向 / D 批量 CSS）落地。块 B 经 O-2/O-4 实施前置验证 + self-review 修 2 个 P2（流式空行过滤分叉、detector 守护测试漏 await 假通过）。详见 `docs/iterations/v3.0.0/` PRD/TechDoc + `changes/` 各 spec。
+
 ## 2.1.16-beta.3 - 2026-06-07
 
 v2.1.16「资金对账数据处理」能力扩建的**阶段三·中台退款回填前置基础设施 + 引擎设计**。本版交付两块可用功能（①Channel 枚举沉淀、②银行对账单入金表链接库）+ 一份大型对账引擎设计文档（③中台退款订单回填，**仅设计不实现代码**）。①② 是 ③ 的前置依赖（JPM-US 分支查入金表、JPM 分支判 Channel/地区）。质量门 `npm run release-check` 全绿（**unit 1768 / integration 952 / smoke 全过**，比 beta.2 +37 单测）；team-lead 端到端自测 21/21 + 用户手测入金表导入通过。

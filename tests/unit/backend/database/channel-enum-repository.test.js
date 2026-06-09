@@ -194,4 +194,123 @@ test.describe('channel-enum-repository（v2.1.16-beta.3 ①）', () => {
     assert.ok(calls.includes('ROLLBACK'), '异常后 ROLLBACK（不残留半截事务）');
     assert.ok(!calls.includes('COMMIT'), '未 COMMIT');
   });
+
+  // ===== v3.0.0 需求1：extractChannelRegionCombos（纯函数，状态框「渠道-地区」前缀数据源）=====
+  // 覆盖：空 rows / Channel 空跳过 / 地区空只产 channel / 去重 + 排序 / CITI-HK·JPM-US 混合 /
+  //       与 recordFromBankStatementRows 同拼接口径 / facade 透传。
+  test.describe('extractChannelRegionCombos（v3.0.0 需求1）', () => {
+    // UT-E1：空 / 非数组 rows → []
+    test('UT-E1：空数组 / null / undefined → []', () => {
+      assert.deepEqual(channelEnumRepo.extractChannelRegionCombos([]), []);
+      assert.deepEqual(channelEnumRepo.extractChannelRegionCombos(null), []);
+      assert.deepEqual(channelEnumRepo.extractChannelRegionCombos(undefined), []);
+    });
+
+    // UT-E2：Channel 空（含纯空格 / null）→ 跳过整行（不产出组合）
+    test('UT-E2：Channel 空（含空格/null）跳过整行 → []', () => {
+      assert.deepEqual(
+        channelEnumRepo.extractChannelRegionCombos([
+          { Channel: '', 地区: 'HK' },
+          { Channel: '   ', 地区: 'US' },
+          { Channel: null, 地区: 'JP' },
+          { Channel: undefined, 地区: 'SG' }
+        ]),
+        []
+      );
+    });
+
+    // UT-E3：🔴 地区空（含纯空格 / null）→ 只产出 Channel（无 'CITI-' 脏值）
+    test('UT-E3：地区空只产出 Channel，不生成带短横脏值', () => {
+      assert.deepEqual(
+        channelEnumRepo.extractChannelRegionCombos([
+          { Channel: 'CITI', 地区: '' },
+          { Channel: 'JPM', 地区: '   ' },
+          { Channel: 'ACI', 地区: null }
+        ]),
+        ['ACI', 'CITI', 'JPM'] // 仅 Channel，去重 + 排序；无 'CITI-' / 'JPM-' / 'ACI-'
+      );
+    });
+
+    // UT-E4：地区非空 → 产出 Channel-地区
+    test('UT-E4：Channel+地区均非空 → 产出 Channel-地区', () => {
+      assert.deepEqual(
+        channelEnumRepo.extractChannelRegionCombos([{ Channel: 'CITI', 地区: 'HK' }]),
+        ['CITI-HK']
+      );
+    });
+
+    // UT-E5：多组合去重 + 稳定排序（CITI-HK / JPM-US 混合，重复行折叠）
+    test('UT-E5：多组合去重 + 排序（CITI-HK、JPM-US 混合）', () => {
+      const combos = channelEnumRepo.extractChannelRegionCombos([
+        { Channel: 'JPM', 地区: 'US' },
+        { Channel: 'CITI', 地区: 'HK' },
+        { Channel: 'JPM', 地区: 'US' }, // 重复 → 折叠
+        { Channel: 'CITI', 地区: 'HK' }  // 重复 → 折叠
+      ]);
+      assert.deepEqual(combos, ['CITI-HK', 'JPM-US'], '去重后两组合，字典序稳定排序');
+    });
+
+    // UT-E6：同 Channel 多地区 + 同地区多 Channel 混合，去重排序
+    test('UT-E6：同 Channel 多地区 + 地区空行混合', () => {
+      const combos = channelEnumRepo.extractChannelRegionCombos([
+        { Channel: 'JPM', 地区: 'HK' },
+        { Channel: 'JPM', 地区: 'US' },
+        { Channel: 'JPM', 地区: '' },   // 地区空 → 产出 'JPM'
+        { Channel: 'CITI', 地区: 'HK' }
+      ]);
+      assert.deepEqual(combos, ['CITI-HK', 'JPM', 'JPM-HK', 'JPM-US']);
+    });
+
+    // UT-E7：Channel / 地区前后空格 trim 后参与拼接（与 recordFromBankStatementRows 同口径）
+    test('UT-E7：Channel/地区前后空格 trim 后拼接', () => {
+      assert.deepEqual(
+        channelEnumRepo.extractChannelRegionCombos([{ Channel: '  CITI  ', 地区: '  HK  ' }]),
+        ['CITI-HK']
+      );
+    });
+
+    // UT-E8：🔴 与 recordFromBankStatementRows 拼接口径一致（channel-region 集合 ∪ 地区空行的 channel）
+    //   对账：组合集合 = 落库 channel-region 全集 + 「仅出现在地区空行」的 channel
+    test('UT-E8：与 recordFromBankStatementRows 落库 channel-region 口径一致', () => {
+      const rows = [
+        { Channel: 'CITI', 地区: 'HK' },
+        { Channel: 'JPM', 地区: 'US' },
+        { Channel: 'ACI', 地区: '' } // 地区空 → 组合只产 'ACI'，落库 channel=ACI 但无 channel-region
+      ];
+      channelEnumRepo.recordFromBankStatementRows(db, rows);
+      const dbCr = channelEnumRepo
+        .listChannelEnumValues(db, 'channel-region')
+        .map((r) => r.enumValue); // ['CITI-HK', 'JPM-US']
+      const combos = channelEnumRepo.extractChannelRegionCombos(rows);
+      // 组合集合应包含全部落库 channel-region
+      for (const cr of dbCr) assert.ok(combos.includes(cr), `组合应含落库 channel-region ${cr}`);
+      // 地区空行的 channel（ACI）以 channel 形态出现在组合里，但不在 channel-region 落库里
+      assert.ok(combos.includes('ACI'), '地区空行产出纯 channel 组合 ACI');
+      assert.ok(!dbCr.includes('ACI'), '地区空行不落 channel-region（无脏值）');
+      assert.deepEqual(combos, ['ACI', 'CITI-HK', 'JPM-US']);
+    });
+
+    // UT-E9：非对象行（null / 字符串 / 数字）安全跳过，不抛
+    test('UT-E9：rows 含非对象元素安全跳过', () => {
+      assert.deepEqual(
+        channelEnumRepo.extractChannelRegionCombos([
+          null,
+          'not-an-object',
+          42,
+          { Channel: 'CITI', 地区: 'HK' }
+        ]),
+        ['CITI-HK']
+      );
+    });
+
+    // facade 透传：database.extractChannelRegionCombos
+    test('facade：appDb.extractChannelRegionCombos 透传一致', () => {
+      const rows = [
+        { Channel: 'JPM', 地区: 'US' },
+        { Channel: 'CITI', 地区: 'HK' }
+      ];
+      assert.deepEqual(appDb.extractChannelRegionCombos(rows), ['CITI-HK', 'JPM-US']);
+      assert.deepEqual(appDb.extractChannelRegionCombos([]), []);
+    });
+  });
 });

@@ -75,21 +75,21 @@ test.describe('bank-deposit 裁列（v2.1.16-beta.3 ②）', () => {
   // UT-H2：🔴 异构/缺指纹列文件 → detector 不命中 bank-deposit（不进裁列落库）。
   //   删掉关键指纹列（Debit Amount / 拆分信息 / 关联大账号）使 L2 命中率 < 0.6；
   //   列残缺也破坏 L1 的 44 列连续锚点 → 整体 unrecognized。
-  test('UT-H2：缺指纹列文件 → detector 不命中 bank-deposit（不会裁列落库脏数据）', () => {
+  test('UT-H2：缺指纹列文件 → detector 不命中 bank-deposit（不会裁列落库脏数据）', async () => {
     const broken = BANK_STATEMENT_FIELDS.filter(
       (h) => h !== 'Debit Amount' && h !== '拆分信息' && h !== '关联大账号'
     ); // 仅剩 ReconciliationId / Credit Amount 两个指纹 → 2/5=0.4 < 0.6
     const fp = writeTempXlsx('broken.xlsx', [broken, broken.map((h) => `x_${h}`)]);
-    const detected = detectTableType(fp, LINKED_IMPORT_SIGNATURES);
+    const detected = await detectTableType(fp, LINKED_IMPORT_SIGNATURES);
     assert.notEqual(detected.tableKey, 'bank-deposit', '缺指纹列文件不应命中 bank-deposit');
     assert.notEqual(detected.status, 'matched', '缺指纹列文件不应 matched（不进裁列落库）');
   });
 
-  test('UT-H2b：列错位（打散）文件 → detector 不唯一命中 bank-deposit', () => {
+  test('UT-H2b：列错位（打散）文件 → detector 不唯一命中 bank-deposit', async () => {
     // 打散列顺序：L1 连续子序列全等必失败；只保留 2 个指纹列（2/5=0.4 < 0.6）→ L2 也不达标
     const scrambled = ['ReconciliationId', '随机A', 'Credit Amount', '随机B', '随机C', '随机D'];
     const fp = writeTempXlsx('scrambled.xlsx', [scrambled, scrambled.map(() => 'v')]);
-    const detected = detectTableType(fp, LINKED_IMPORT_SIGNATURES);
+    const detected = await detectTableType(fp, LINKED_IMPORT_SIGNATURES);
     assert.notEqual(detected.tableKey, 'bank-deposit', '列错位文件不应命中 bank-deposit');
   });
 
@@ -97,11 +97,11 @@ test.describe('bank-deposit 裁列（v2.1.16-beta.3 ②）', () => {
   //   即便 detector L2 宽松命中，handler 内 readLinkedRowsAsObjects 按 44 列精确 zip，
   //   截断文件没有 44 列连续表头行 → 抛 FileValidationError（write-error），永不进 replaceLinkedTable 落脏数据。
   //   这里断言「截断文件仍含 ≥0.6 指纹但列数 != 44」，作为对第二道防线前提的守护。
-  test('UT-H2c：截断文件 L2 可能 matched，但列数 != 44（handler 44 列 zip 为第二道防线）', () => {
+  test('UT-H2c：截断文件 L2 可能 matched，但列数 != 44（handler 44 列 zip 为第二道防线）', async () => {
     const truncated = BANK_STATEMENT_FIELDS.slice(0, 34); // 保留 4/5 指纹（含 关联大账号 idx30）
     assert.notEqual(truncated.length, BANK_STATEMENT_FIELDS.length, '截断文件列数 != 44');
     const fp = writeTempXlsx('truncated.xlsx', [truncated, truncated.map((h) => `x_${h}`)]);
-    const detected = detectTableType(fp, LINKED_IMPORT_SIGNATURES);
+    const detected = await detectTableType(fp, LINKED_IMPORT_SIGNATURES);
     // 不强断言 matched/unrecognized（L2 阈值行为）；仅说明：若 matched，handler 44 列 zip 会再次拦截。
     if (detected.status === 'matched') {
       assert.equal(detected.tableKey, 'bank-deposit', '若命中只能是 bank-deposit（同候选集唯一 44 列签名）');

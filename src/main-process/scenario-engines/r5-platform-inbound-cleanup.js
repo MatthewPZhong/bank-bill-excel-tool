@@ -22,7 +22,8 @@
 
 const {
   makeWarningCollector,
-  normalizeCellValue
+  normalizeCellValue,
+  parseNumber
 } = require('./engine-utils');
 
 const { CLEANUP_COPY_HEADERS } = require('../../constants/platform-cleanup-template-fields');
@@ -88,15 +89,41 @@ function runRound5PlatformInboundCleanup(gwRows, bankRows, options = {}) {
     const cand = (bankByReconId.get(key) || []).filter((b) => !usedBankRowId.has(b._rowId));
     if (cand.length === 0) continue; // 无可用候选（含已被前面 gw 抢空）
 
-    if (cand.length > 1) {
-      warningCollector.push({
-        rowId: null,
-        code: 'multi-bank-match-inbound',
-        message: `网关 reconciliationid=${key} 在银行对账单中匹配到 ${cand.length} 行可用，取第一条（数据脏）`
+    // 候选选择（PR-6 / spec §三定稿，🔴 资金红线）：
+    //   单候选维持现状取它（O-4：不强制 Credit 筛选，Debit 行也取）；
+    //   多候选按 Credit Amount 方向消歧 —— 取唯一 Credit 有值的那一行（R-1）。
+    let bankRow;
+    if (cand.length === 1) {
+      bankRow = cand[0]; // O-4：单候选维持现状，不强制 Credit 筛选
+    } else {
+      // 多候选 → 方向消歧（O-1：「Credit 有值」= parseNumber 可解析且 ≠ 0）
+      const creditCand = cand.filter((b) => {
+        const v = parseNumber(b['Credit Amount']);
+        return v !== null && v !== 0; // ← O-1 定稿口径：空 / 0 / 0.00 / 不可解析 一律视为无值
       });
+      if (creditCand.length === 1) {
+        bankRow = creditCand[0]; // R-1：唯一 Credit 行
+      } else if (creditCand.length === 0) {
+        // O-2/O-3：0 行 Credit 有值（全 Debit / Credit 全空）→ 跳过该 reconid + 仅警告，绝不阻断导出
+        warningCollector.push({
+          rowId: null,
+          code: 'no-credit-match',
+          severity: 'warning',
+          message: `网关 reconciliationid=${key} 的 ${cand.length} 行候选均无 Credit Amount，跳过剔除（数据异常）`
+        });
+        continue;
+      } else {
+        // R-2/O-3：≥2 行 Credit 有值 → 无法唯一定位 → 跳过该 reconid + 仅警告，绝不阻断导出
+        warningCollector.push({
+          rowId: null,
+          code: 'multi-credit-match',
+          severity: 'warning',
+          message: `网关 reconciliationid=${key} 命中 ${creditCand.length} 行 Credit Amount 有值，无法唯一定位，跳过剔除（数据异常）`
+        });
+        continue;
+      }
     }
 
-    const bankRow = cand[0];
     usedBankRowId.add(bankRow._rowId); // 严格 1v1 单向消费
 
     // 触发条件：银行 FundType != excludeFundType（默认 != 'Inbound'）才生成剔除行

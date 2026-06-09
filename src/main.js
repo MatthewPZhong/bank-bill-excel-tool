@@ -64,6 +64,7 @@ const { loadGatewayReconHeaders, GATEWAY_RECON_HEADERS_FILE_NAME } = require('./
 //   - LINKED_IMPORT_SIGNATURES：链接表「导入」按钮候选集 = 4 张 linked 签名 + 入金表签名（v2.1.16-beta.3 ②）
 //   - linkedTableReaders.readRowsWithMetadata：读全部有意义行（交割表表头在第 2 行，滑窗自动定位）
 const { detectTableType } = require('./main-process/table-type-detector');
+// v3.0.0 块 B / PR-2：大文件链接表流式落库——单 sheet .xlsx 边解压边逐行喂入仓储事务（内存恒定，不全量读进内存）
 // v2.1.16 阶段一 A5：批量导入（按表头识别）按 scope='preprocess' 过滤候选
 //   PREPROCESS_TABLE_SIGNATURES：银行对账单 / 中台退款订单 / 入账原始订单（期权 TODO 不在内）
 //   LINKED_IMPORT_SIGNATURES：链接表导入候选集（含入金表；ALL_TABLE_SIGNATURES 不含入金表，详见 table-signatures.js）
@@ -72,6 +73,7 @@ const { LINKED_IMPORT_SIGNATURES, PREPROCESS_TABLE_SIGNATURES } = require('./con
 const { pickBankDepositFields } = require('./backend/database/linked-table-repository');
 // v2.1.16-beta.5 需求3：ADM 银行对账单链接表派生纯函数（Channel=ADM 行 → ADM 表 + 中台调拨匹配回填）
 const { buildAdmRows } = require('./main-process/adm-bank-deposit-builder');
+const { streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
 const linkedTableReaders = require('./backend/file-service/readers');
 const { normalizeCell: normalizeLinkedCell, FileValidationError: LinkedFileValidationError } = require('./backend/file-service/common');
 // v2.1.2 T2：月度银行对账单BU回填校验模块
@@ -109,6 +111,8 @@ const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-disp
 const { runReconciliation } = require('./main-process/reconciliation-orchestrator');
 // v2.1.12 需求6：数据侧预检只读 helper（统计 C3 银行侧候选行，不触碰 runC3Scenario 资金逻辑）
 const { countC3BankCandidates } = require('./main-process/scenario-engines/c3-gateway-recon-join');
+// v3.0.0 需求3：退款候选预检只读 helper（统计银行侧 FundType=Ach Return 候选行，与 countC3BankCandidates 对称）
+const { countRefundBankCandidates } = require('./main-process/scenario-engines/r5-refund-order-backfill');
 // v2.1.9 N5：dispatcher 双维调度依赖 channels-repository（findByNameAndLocation + getBuiltinGeneral）
 const channelsRepository = require('./backend/database/channels-repository');
 // v2.1.9 N7：场景模板 bundle 序列化 / 解析 / 类型识别（spec §六）
@@ -3846,9 +3850,17 @@ function registerAppHandlers() {
       bankStatementSourceFileCount: bankStatementSession
         ? (Array.isArray(bankStatementSession.sourceFiles) ? bankStatementSession.sourceFiles.length : 1)
         : 0,
+      // v3.0.0 需求1：状态框「渠道-地区」前缀数据源 —— 从合并全集 rows 抽唯一组合（去重 + 排序）
+      //   无 session 兜底 []；前端按长度拼前缀（0 个无前缀 / 1 个 CITI-HK: / 多个 CITI-HK、JPM-US:）
+      bankStatementChannelRegions: bankStatementSession
+        ? database.extractChannelRegionCombos(bankStatementSession.rows)
+        : [],
       hasGatewayRecon: gatewayReconSession !== null,
       gatewayReconFileName: gatewayReconSession ? gatewayReconSession.fileName : null,
       gatewayReconRowCount: gatewayReconSession ? gatewayReconSession.gwRows.length : 0,
+      // v3.0.0 需求3 🔴 资金红线：退款 session 就绪信号（前端运行点 shouldPromptRefundAtRun 据此判「本批是否已导退款表」）。
+      //   refundOrderSession 生命周期已由 PR#65 收紧（单文件导入清 :3494、batch 本批未导退款表清 :11460）→ !==null 严格绑定「本批有效导入退款表」。
+      hasRefundOrder: refundOrderSession !== null,
       hasProcessingResult: processingResult !== null,
       processingStats: processingResult ? processingResult.stats : null
     };
@@ -3870,6 +3882,20 @@ function registerAppHandlers() {
         if (candidateCount > 0) break; // 有候选即可，提前退出
       }
       return { status: 'ok', candidateCount };
+    } catch (error) {
+      return { status: 'failed', message: String(error && error.message ? error.message : error), candidateCount: 0 };
+    }
+  });
+
+  // v3.0.0 需求3：退款回填「候选预检」只读 IPC（仿 bank-statement:c3-candidate-count）。
+  //   统计当前导入银行对账单中 FundType=Ach Return 的候选行数；前端导入后 / 运行点提醒据此门控（本批无候选则不弹）。
+  //   纯只读查询，无副作用 → 不进 trackedIpcHandle 计数（与 c3-candidate-count 范式一致）。
+  ipcMain.handle('bank-statement:refund-candidate-count', () => {
+    try {
+      if (!bankStatementSession || !Array.isArray(bankStatementSession.rows) || bankStatementSession.rows.length === 0) {
+        return { status: 'ok', candidateCount: 0 };
+      }
+      return { status: 'ok', candidateCount: countRefundBankCandidates(bankStatementSession.rows) };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error), candidateCount: 0 };
     }
@@ -11081,6 +11107,25 @@ function registerNewAccountHandlers() {
     return LINKED_IMPORT_SIGNATURES.find((s) => s.tableKey === detectorTableKey) || null;
   }
 
+  // v3.0.0 块 B / O-6：detector read-error 文案细分。历史一律「文件为空或不可读」，
+  //   对「明明文件不空（仅大文件读取阶段失败）」是误导（spec O-6 缘起）。据 detector 透出的 reason 区分：
+  //     'empty'      → 文件可读但无任何有意义行 = 真·空表/无数据。
+  //     'unreadable' → 文件不存在 / 类型不符 / 损坏 / 无法解析（listSheetNames 阶段失败）。
+  //     'read-failed'→ 读取阶段抛异常（非空文件）；带回原始原因。
+  //   detected 为 detectTableType 的返回对象（含可选 reason / message）。
+  function formatDetectorReadErrorMessage(detected) {
+    const reason = detected && detected.reason;
+    const detail = detected && detected.message ? `（${detected.message}）` : '';
+    if (reason === 'empty') {
+      return '文件无有效数据（表头/内容为空），请确认文件是否选错或内容是否完整';
+    }
+    if (reason === 'read-failed') {
+      return `文件读取失败，请确认文件是否完整、未被占用后重试${detail}`;
+    }
+    // 'unreadable' 及未知/缺省：文件不存在 / 格式不符 / 损坏。
+    return `文件无法读取，可能已损坏、格式不符或文件不存在，请确认后重新选择${detail}`;
+  }
+
   // 把单个 linked 文件读成 { 表头名: 值 } 对象数组（喂 replaceLinkedTable）。
   //   做法（对三张表统一）：
   //     1) readRowsWithMetadata(fp, []) 取全部有意义行（数组；中间空列保留、尾部空列已 trim）；
@@ -11139,6 +11184,10 @@ function registerNewAccountHandlers() {
     return objects;
   }
 
+  // v3.0.0 块 B / PR-2：streamLinkedRowsToInsert（流式行源 = replaceLinkedTableStreaming 的 feedRows 实现体）
+  //   已抽到 src/main-process/linked-table-stream-source.js（见顶部 require），便于集成测试调真实实现。
+  //   含 🔴 全空行过滤（isRowMeaningful，对齐数组路径 readRowsWithMetadata）。
+
   // list：4 个 tableKey 元数据（期权恒空 meta）。只读，普通 handle。
   ipcMain.handle('linked-table:list', () => {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
@@ -11147,6 +11196,20 @@ function registerNewAccountHandlers() {
       return { status: 'ok', tables };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
+  });
+
+  // v3.0.0 需求2b：单个链接表行数（轻量查 linked_table_meta 单行 meta，不读全表）。
+  //   用途：C3 提醒「数据就绪判据」改向链接表 gateway-bill rowCount（替代 gatewayReconSession 门控）。
+  //   🔴 资金红线：前端判据严格 rowCount>0 才算就绪；本 handle 任何异常（数据库未初始化 / tableKey 非法 / 查询失败）
+  //     一律返回非 ok（{status:'failed'}），由前端按「未就绪」保守处理（仍提醒，防静默漏对账）。只读，普通 handle。
+  ipcMain.handle('linked-table:row-count', (_event, tableKey) => {
+    if (!database || !database.db) return { status: 'failed', message: '数据库未初始化' };
+    try {
+      const meta = database.getLinkedTableMeta(tableKey);
+      return { status: 'ok', rowCount: (meta && Number.isFinite(meta.rowCount)) ? meta.rowCount : 0 };
+    } catch (err) {
+      return { status: 'failed', message: err && err.message ? err.message : String(err) };
     }
   });
 
@@ -11170,7 +11233,7 @@ function registerNewAccountHandlers() {
       //   v2.1.16-beta.3 ②：入金表与主表同构 44 列，但主表签名不在此集合 → 入金表唯一命中、不 ambiguous。
       let detected;
       try {
-        detected = detectTableType(filePath, LINKED_IMPORT_SIGNATURES);
+        detected = await detectTableType(filePath, LINKED_IMPORT_SIGNATURES);
       } catch (err) {
         results.push({ fileName, status: 'read-error', message: err && err.message ? err.message : String(err) });
         continue;
@@ -11185,7 +11248,7 @@ function registerNewAccountHandlers() {
         continue;
       }
       if (detected.status === 'read-error') {
-        results.push({ fileName, status: 'read-error', message: '文件为空或不可读' });
+        results.push({ fileName, status: 'read-error', message: formatDetectorReadErrorMessage(detected) });
         continue;
       }
       // v2.1.16 PR#61 F3：detector 识别到「已入库但本阶段不接入落库」的表（外汇期权表）→ unsupported。
@@ -11219,13 +11282,31 @@ function registerNewAccountHandlers() {
       try {
         // 🔴 v2.1.16-beta.3 ②：裁列必须在 44 列校验之后。readLinkedRowsAsObjects 内部走
         //   detector L1/L2 + expectedHeaders zip 校验，异构文件读不出 44 列对象（前面 detector 已拦截）。
-        const rows = readLinkedRowsAsObjects(filePath, signature, detected.sheetName);
         //   入金表（bank-deposit）：按 13 字段名 pick 裁列（pickBankDepositFields，非索引切片）；
-        //   其余链接表不裁列（rowsToWrite = rows）。raw_json 天然只存裁后字段。
-        const rowsToWrite = repoKey === 'bank-deposit'
-          ? rows.map((r) => pickBankDepositFields(r))
-          : rows;
-        const ret = database.replaceLinkedTable(repoKey, rowsToWrite, { sourceFileName: fileName });
+        //   其余链接表不裁列。raw_json 天然只存裁后字段。
+        // v3.0.0 块 B / PR-2：落库分两路（值口径/裁列/事务语义两路一致，见 streamLinkedRowsToInsert 注释）：
+        //   · streaming-eligible（detector 判定的物理单 sheet .xlsx）：流式整表覆盖——边解压边逐行喂入仓储事务，
+        //     内存恒定，规避 65 万行大文件全量读 OOM（PR-2 主目标）。
+        //   · 其余（多 sheet / .xls / .csv）：维持「全量读成数组 → replaceLinkedTable」（流式引擎只读 sheet1.xml，
+        //     多 sheet 会读错 sheet；.xls/.csv 流式引擎不支持，且不撞 OOM）。
+        const transform = repoKey === 'bank-deposit' ? pickBankDepositFields : (x) => x;
+        let ret;
+        if (detected.streamingEligible) {
+          ret = await database.replaceLinkedTableStreaming(repoKey, async (insertOne) => {
+            const { matched } = await streamLinkedRowsToInsert(filePath, signature, insertOne, transform);
+            if (!matched) {
+              // 理论不应发生（detector 已 matched）；守卫：表头未定位（含 colOffset>0 被 colCount 截断的 PR-2 已知限制）
+              //   → 抛错走 replaceLinkedTableStreaming 的 ROLLBACK（旧数据完好），由 caller 记 write-error。
+              throw new LinkedFileValidationError('FILE_READ', '当前导入文件未匹配到该链接表的表头');
+            }
+          }, { sourceFileName: fileName });
+        } else {
+          const rows = readLinkedRowsAsObjects(filePath, signature, detected.sheetName);
+          const rowsToWrite = repoKey === 'bank-deposit'
+            ? rows.map((r) => pickBankDepositFields(r))
+            : rows;
+          ret = database.replaceLinkedTable(repoKey, rowsToWrite, { sourceFileName: fileName });
+        }
         const okResult = {
           fileName,
           tableKey: repoKey,
@@ -11248,14 +11329,18 @@ function registerNewAccountHandlers() {
         //   绝不让该探测异常误判 mid-allocation 导入本身为 write-error（import 已落库成功，与 bank-deposit 分支同口径隔离）。
         let bankExistsForAdm = repoKey === 'bank-deposit';
         if (repoKey === 'mid-allocation') {
-          try { bankExistsForAdm = database.readLinkedTableRows('bank-deposit').length > 0; }
+          // v3.0.0 块 B / PR-3：轻量存在性探测（EXISTS），不为判「是否有数据」把 65 万行读回内存。
+          try { bankExistsForAdm = database.hasLinkedTableRows('bank-deposit'); }
           catch (probeErr) { bankExistsForAdm = false; }
         }
         if (bankExistsForAdm) {
           try {
             const midRows = database.readLinkedTableRows('mid-allocation');
-            const bankRows = database.readLinkedTableRows('bank-deposit');
-            const { admRows, unmatched, midEmpty } = buildAdmRows(bankRows, midRows);
+            // v3.0.0 块 B / PR-3（R-3/O-3）：只读 Channel=ADM 候选子集（json_extract 下推过滤），
+            //   不把整表 65 万行读回内存（实测现状尖峰 ~1.2GB）。buildAdmRows 内部 Channel∧FundType
+            //   过滤仍为最终权威（SQL 仅过滤 Channel='ADM' 超集，绝不更窄 → 不漏 ADM 行）。
+            const bankAdmCandidates = database.readBankDepositAdmCandidates();
+            const { admRows, unmatched, midEmpty } = buildAdmRows(bankAdmCandidates, midRows);
             database.replaceAdmBankDeposit(admRows);
             // v2.1.16-beta.6 PR#65 Codex FindingB（🔴 资金红线）：重导银行对账单表 = ADM 表重建 = JPM 场景源表变化，
             //   旧 reconIdFixResult（基于旧 ADM 的 JPM 修复结果）失效 → 清空，强制重新运行 JPM 后才能导出（防导出 stale fixes）。
@@ -11353,7 +11438,7 @@ function registerNewAccountHandlers() {
       // 识别：仅 scope='preprocess' 候选（银行对账单 / 中台退款订单 / 入账原始订单）
       let detected;
       try {
-        detected = detectTableType(filePath, PREPROCESS_TABLE_SIGNATURES);
+        detected = await detectTableType(filePath, PREPROCESS_TABLE_SIGNATURES);
       } catch (err) {
         results.push({ fileName, status: 'read-error', message: err && err.message ? err.message : String(err) });
         continue;
@@ -11368,7 +11453,7 @@ function registerNewAccountHandlers() {
         continue;
       }
       if (detected.status === 'read-error') {
-        results.push({ fileName, status: 'read-error', message: '文件为空或不可读' });
+        results.push({ fileName, status: 'read-error', message: formatDetectorReadErrorMessage(detected) });
         continue;
       }
       // v2.1.16 PR#61 F3：守卫「已入库待阶段二接入」表（PREPROCESS 候选当前不含期权表，
