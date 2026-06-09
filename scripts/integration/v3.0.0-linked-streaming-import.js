@@ -17,8 +17,7 @@ const { detectTableType } = require('../../src/main-process/table-type-detector'
 const { LINKED_IMPORT_SIGNATURES } = require('../../src/constants/table-signatures');
 const { AppDatabase } = require('../../src/backend/database');
 const linkedRepo = require('../../src/backend/database/linked-table-repository');
-const { readXlsxStreamed } = require('../../src/backend/pending-import/streaming-xlsx-reader');
-const { normalizeCell } = require('../../src/backend/file-service/common');
+const { streamLinkedRowsToInsert } = require('../../src/main-process/linked-table-stream-source');
 const { CHANNEL_VALUE, ADM_FUND_TYPES } = require('../../src/constants/adm-bank-deposit-fields');
 
 let passed = 0;
@@ -71,30 +70,14 @@ function writeMultiSheet(filePath) {
   XLSX.writeFile(wb, filePath, { bookSST: true });
 }
 
-// 镜像 main.js streamLinkedRowsToInsert（PR-2，闭包未导出）：流内定位表头 + 逐格 normalizeCell 建对象 + transform
-async function feedXlsx(filePath, signature, insertOne, transform) {
-  const expected = signature.expectedHeaders;
-  const xform = typeof transform === 'function' ? transform : (x) => x;
-  let colOffset = -1;
-  await readXlsxStreamed(filePath, (cells) => {
-    const row = Array.isArray(cells) ? cells : [];
-    if (colOffset < 0) {
-      const maxStart = row.length - expected.length;
-      for (let cs = 0; cs <= maxStart; cs += 1) {
-        let ok = true;
-        for (let i = 0; i < expected.length; i += 1) { if (normalizeCell(expected[i]) !== normalizeCell(row[cs + i])) { ok = false; break; } }
-        if (ok) { colOffset = cs; break; }
-      }
-      return;
-    }
-    const obj = {};
-    for (let i = 0; i < expected.length; i += 1) {
-      const h = normalizeCell(expected[i]); if (h === '') continue;
-      obj[h] = normalizeCell(row[colOffset + i] === undefined ? '' : row[colOffset + i]);
-    }
-    insertOne(xform(obj));
-  }, { colCount: expected.length });
-  return { matched: colOffset >= 0 };
+// 单 sheet + 中间一行全空（测 streamLinkedRowsToInsert 的 isRowMeaningful 空行过滤 = 对齐数组路径）
+function writeSingleSheetWithBlankRow(filePath) {
+  const rows = DATA.map(rowAoa);
+  rows.splice(2, 0, HEADERS.map(() => '')); // 第 3 行插一整行空（44 列全空字符串）
+  const aoa = [HEADERS, ...rows];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), '渠道对账单');
+  XLSX.writeFile(wb, filePath, { bookSST: true });
 }
 
 async function run() {
@@ -102,6 +85,7 @@ async function run() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'v3-stream-import-'));
   const singleFile = path.join(tmpDir, 'single.xlsx');
   const multiFile = path.join(tmpDir, 'multi.xlsx');
+  const blankRowFile = path.join(tmpDir, 'single-blank.xlsx');
   const dbPath = path.join(tmpDir, 'test.sqlite');
   let appDb = null;
   try {
@@ -125,7 +109,7 @@ async function run() {
     appDb.init();
     const { pickBankDepositFields } = linkedRepo;
     const ret = await appDb.replaceLinkedTableStreaming('bank-deposit', async (insertOne) => {
-      const { matched } = await feedXlsx(singleFile, SIG, insertOne, pickBankDepositFields);
+      const { matched } = await streamLinkedRowsToInsert(singleFile, SIG, insertOne, pickBankDepositFields);
       assertTrue(matched, 'Step3.流内定位到表头');
     }, { sourceFileName: 'single.xlsx' });
     assertEq(ret.rowCount, 5, 'Step3.流式落库 rowCount=5');
@@ -144,6 +128,15 @@ async function run() {
     assertEq(cands.length, 2, 'Step5.readBankDepositAdmCandidates=2（仅 Channel=ADM）');
     assertEq(cands.map((r) => r.ReconciliationId).sort(), ['R-ADM-1', 'R-ADM-2'], 'Step5.候选=R-ADM-1/2');
     assertEq(linkedRepo.hasLinkedTableRows(appDb.db, 'bank-deposit'), true, 'Step5.hasLinkedTableRows=true');
+
+    // Step6：🔴 全空行过滤（Finding-1 回归）——含 1 行全空的单 sheet 流式落库，空行被 isRowMeaningful 跳过（对齐数组路径，防空 key 垃圾行 + row_count 虚高）
+    writeSingleSheetWithBlankRow(blankRowFile);
+    const retBlank = await appDb.replaceLinkedTableStreaming('bank-deposit', async (insertOne) => {
+      const { matched } = await streamLinkedRowsToInsert(blankRowFile, SIG, insertOne, pickBankDepositFields);
+      assertTrue(matched, 'Step6.流内定位到表头');
+    }, { sourceFileName: 'single-blank.xlsx' });
+    assertEq(retBlank.rowCount, 5, 'Step6.含1空行文件流式落库 rowCount=5（空行被跳过，非 6）');
+    assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit').length, 5, 'Step6.DB 实际 5 行（无空 key 垃圾行）');
   } finally {
     try { if (appDb && appDb.close) appDb.close(); } catch (_e) { /* ignore */ }
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { /* ignore */ }

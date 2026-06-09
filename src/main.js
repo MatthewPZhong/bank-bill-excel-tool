@@ -65,7 +65,6 @@ const { loadGatewayReconHeaders, GATEWAY_RECON_HEADERS_FILE_NAME } = require('./
 //   - linkedTableReaders.readRowsWithMetadata：读全部有意义行（交割表表头在第 2 行，滑窗自动定位）
 const { detectTableType } = require('./main-process/table-type-detector');
 // v3.0.0 块 B / PR-2：大文件链接表流式落库——单 sheet .xlsx 边解压边逐行喂入仓储事务（内存恒定，不全量读进内存）
-const { readXlsxStreamed } = require('./backend/pending-import/streaming-xlsx-reader');
 // v2.1.16 阶段一 A5：批量导入（按表头识别）按 scope='preprocess' 过滤候选
 //   PREPROCESS_TABLE_SIGNATURES：银行对账单 / 中台退款订单 / 入账原始订单（期权 TODO 不在内）
 //   LINKED_IMPORT_SIGNATURES：链接表导入候选集（含入金表；ALL_TABLE_SIGNATURES 不含入金表，详见 table-signatures.js）
@@ -74,6 +73,7 @@ const { LINKED_IMPORT_SIGNATURES, PREPROCESS_TABLE_SIGNATURES } = require('./con
 const { pickBankDepositFields } = require('./backend/database/linked-table-repository');
 // v2.1.16-beta.5 需求3：ADM 银行对账单链接表派生纯函数（Channel=ADM 行 → ADM 表 + 中台调拨匹配回填）
 const { buildAdmRows } = require('./main-process/adm-bank-deposit-builder');
+const { streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
 const linkedTableReaders = require('./backend/file-service/readers');
 const { normalizeCell: normalizeLinkedCell, FileValidationError: LinkedFileValidationError } = require('./backend/file-service/common');
 // v2.1.2 T2：月度银行对账单BU回填校验模块
@@ -11184,55 +11184,9 @@ function registerNewAccountHandlers() {
     return objects;
   }
 
-  // v3.0.0 块 B / PR-2：把单个 linked .xlsx 文件「流式」读成行对象逐行喂给仓储事务（feedRows 实现体）。
-  //   仅用于 streaming-eligible（物理单 sheet 的 .xlsx）：流式引擎硬编码只读 xl/worksheets/sheet1.xml。
-  //   与 readLinkedRowsAsObjects 完全同口径（防大文件流式落库口径漂移 = 静默资金/数据事故）：
-  //     1) 值口径：每格过 normalizeLinkedCell（= file-service/common.normalizeCell = String(v).trim()）；
-  //     2) 表头定位语义：逐行「连续位置全等 expectedHeaders」找表头行 + 起始列偏移 colOffset，跳过空表头名占位；
-  //     3) bank-deposit 裁列：transform = pickBankDepositFields（与数组路径一致）。
-  //   ⚠️ colCount 取 expectedHeaders.length（bank-deposit=44，A1 锚定）。readXlsxStreamed 每行返回**定长
-  //     colCount** 数组（cells.length === expected.length），故 colOffset 实际只能命中 0（表头在 A 列）——
-  //     这正是真实大文件 bank-deposit 的形态（A1 锚定 44 列）。若某 streaming-eligible 文件表头不在 A 列
-  //     （colOffset>0），前 expected.length 列被截断 → 流内定位不到表头 → 返回 matched:false，caller 抛
-  //     「未匹配表头」错（安全失败，绝不静默错位落库；该边界为 PR-2 已知限制，见汇报）。
-  //   返回 { matched }：matched=false = 整条流读完未定位到表头行（由 caller 记 write-error）。
-  async function streamLinkedRowsToInsert(filePath, signature, insertOne, transform) {
-    const expected = Array.isArray(signature.expectedHeaders) ? signature.expectedHeaders : [];
-    if (expected.length === 0) {
-      return { matched: false };
-    }
-    const xform = typeof transform === 'function' ? transform : (x) => x;
-    let colOffset = -1;
-
-    await readXlsxStreamed(filePath, (cells, _rowIdx) => {
-      const row = Array.isArray(cells) ? cells : [];
-      if (colOffset < 0) {
-        // 流内定位表头行 + 起始列偏移（镜像 readLinkedRowsAsObjects：首个「连续位置全等」起点）。
-        const maxStart = row.length - expected.length;
-        for (let cs = 0; cs <= maxStart; cs += 1) {
-          let matched = true;
-          for (let i = 0; i < expected.length; i += 1) {
-            const want = normalizeLinkedCell(expected[i]);
-            const got = normalizeLinkedCell(row[cs + i]);
-            if (want !== got) { matched = false; break; }
-          }
-          if (matched) { colOffset = cs; break; }
-        }
-        return; // 表头行（及其之前的行）不入库
-      }
-      // 表头行之后逐行 zip：obj[expectedHeaders[i]] = normalizeCell(cells[colOffset+i])；跳过空表头名占位。
-      const obj = {};
-      for (let i = 0; i < expected.length; i += 1) {
-        const headerName = normalizeLinkedCell(expected[i]);
-        if (headerName === '') continue; // 跳过中间空列占位（不入对象，与数组路径一致）
-        const cell = row[colOffset + i];
-        obj[headerName] = normalizeLinkedCell(cell === undefined ? '' : cell);
-      }
-      insertOne(xform(obj));
-    }, { colCount: expected.length });
-
-    return { matched: colOffset >= 0 };
-  }
+  // v3.0.0 块 B / PR-2：streamLinkedRowsToInsert（流式行源 = replaceLinkedTableStreaming 的 feedRows 实现体）
+  //   已抽到 src/main-process/linked-table-stream-source.js（见顶部 require），便于集成测试调真实实现。
+  //   含 🔴 全空行过滤（isRowMeaningful，对齐数组路径 readRowsWithMetadata）。
 
   // list：4 个 tableKey 元数据（期权恒空 meta）。只读，普通 handle。
   ipcMain.handle('linked-table:list', () => {
