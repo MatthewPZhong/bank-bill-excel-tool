@@ -148,7 +148,8 @@ const {
   BankStatementMergeError
 } = require('./main-process/bank-statement-merge');
 // v2.1.9 N5 T26（spec §5.4 🔴 对外契约破坏性变更）：场景命中行独立报表 writer
-//   v2.1.8 主输出 Sheet 3 撤除 → 改 error-reports/{date}/命中场景行-{basename}-{ts}.xlsx
+//   v2.1.8 主输出 Sheet 3 撤除 → 改独立报表 命中场景行-{basename}-{ts}.xlsx
+//   v3.0.4 F2：落位由 error-reports/{date}/ 改为 bank-statement-process/{date}/（与错误报告目录互换）
 //   失败 graceful：不阻塞主对账流程，仅 log 警告（spec §5.4）
 const { writeScenarioHitRows } = require('./main-process/scenario-hit-rows-writer');
 // v2.1.16-beta.2 R5 场景3：中台加款单剔除文件 writer（仿 scenario-hit-rows-writer）
@@ -3673,6 +3674,9 @@ function registerAppHandlers() {
         return { status: 'failed', message: '场景已变更，请重新点击"开始运行"再导出' };
       }
       const exportRootDir = path.join(ensureStorageRoot(), 'bank-statement-process');
+      // v3.0.4 F2：错误报告改落 error-reports/{date}/（与生成网银账单 .txt、业务OP失败报告共目录）。
+      //   ⚠️ exportRootDir 本体绝不能改——R5 场景3/4 落位兜底依赖它（下方 cleanupDir/refundDir）。
+      const errorReportRootDir = path.join(ensureStorageRoot(), 'error-reports');
 
       // v2.1.7 round 8 F8 fix（PR #51 reviewer round 2 Finding 1）：
       //   保存框触发条件必须涵盖 unmatchedRows，否则全未命中时 mainFilePath=null →
@@ -3692,7 +3696,15 @@ function registerAppHandlers() {
       if (processingResult.errorReport.length > 0) {
         errorReport = await writeErrorReportOutput({
           warnings: processingResult.errorReport,
-          exportRootDir
+          // v3.0.4 F2：错误报告落 error-reports/{date}/（命中场景行报表则改落 bank-statement-process/）。
+          exportRootDir: errorReportRootDir,
+          // v3.0.4 F3：传全量银行行（modifiedRows + unmatchedRows，F8 行数守恒契约全覆盖）→
+          //   io 层按 _rowId → ReconciliationId enrich，error-report 第 3 列显示对账ID 而非内部 row_N。
+          //   ⚠️ unmatchedRows 必含：R5s4 warning 行多在 unmatchedRows（不产 modifications），缺则覆盖不全。
+          bankRows: [
+            ...processingResult.modifiedRows,
+            ...(Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows : [])
+          ]
         });
       }
 
@@ -3707,7 +3719,9 @@ function registerAppHandlers() {
           filters: [{ name: 'Excel', extensions: ['xlsx'] }]
         });
         if (saveResult.canceled || !saveResult.filePath) {
-          // M-2：cancel 时仍 return，但 errorReport 已写入（上方提前），renderer 显示 errorReport 路径
+          // M-2：cancel 时仍 return，但 errorReport 已落盘（上方提前）。
+          //   注（v3.0.4 F2 修正陈旧注释）：renderer cancelled 分支直接 return，UI 不显示任何 error-report 路径——
+          //   错误报告落 error-reports/{date}/，验收只能查文件系统。
           return { status: 'cancelled', errorReport };
         }
         mainFilePath = saveResult.filePath;
@@ -3739,7 +3753,8 @@ function registerAppHandlers() {
       });
 
       // v2.1.9 N5 T26（spec §5.1-5.4 🔴 对外契约破坏性变更）：场景命中行独立报表
-      //   v2.1.8 主输出 Sheet 3「命中场景行」撤除 → 改 error-reports/{date}/命中场景行-{basename}-{ts}.xlsx
+      //   v2.1.8 主输出 Sheet 3「命中场景行」撤除 → 改独立报表 命中场景行-{basename}-{ts}.xlsx
+      //   v3.0.4 F2：落位由 error-reports/{date}/ 改为 bank-statement-process/{date}/（与错误报告目录互换）
       //   失败 graceful：不阻塞主对账流程，仅 log + return 主流程（spec §5.4）
       //   仅当 modifiedRows.length > 0 时输出（含表头但 0 行的报表对用户审计无价值）
       //
@@ -3827,7 +3842,8 @@ function registerAppHandlers() {
         mainFileName: main.fileName,
         errorReportPath: errorReport ? errorReport.filePath : null,
         errorReportName: errorReport ? errorReport.fileName : null,
-        // v2.1.9 N5 T26：renderer 用于状态框提示「命中场景行报表已生成：{path}」（详 USER_GUIDE v2.1.9）
+        // v2.1.9 N5 T26：命中场景行报表路径（落 bank-statement-process/{date}/，v3.0.4 F2 与错误报告互换）
+        //   注（v3.0.4 F2 修正陈旧注释）：renderer 当前零消费 hitRowsReportPath/Name，状态框提示从未实现。
         hitRowsReportPath: hitRowsReport ? hitRowsReport.filePath : null,
         hitRowsReportName: hitRowsReport ? hitRowsReport.fileName : null,
         // v2.1.16-beta.2 R5 场景3：renderer 用于状态框提示「中台加款单剔除文件已生成：{path}」

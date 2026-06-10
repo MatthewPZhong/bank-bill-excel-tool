@@ -6,7 +6,9 @@
 //
 // 核心能力：
 //   - writeBankStatementOutput：仅修改行 + 单元格黄底 + 表头
-//   - writeErrorReport：5 列（时间戳 / 场景名 / 行号 / 原因 / 可能原因）
+//   - writeErrorReport：5 列（时间戳 / 场景名 / 对账ID / 原因 / 可能原因）
+//     v3.0.4 F3：第 3 列由内部 _rowId（row_N，多文件合并后全局重编号，对用户无意义）
+//     改为银行行 ReconciliationId；取值三级回退 reconciliationId → reconId（R1 专用）→ rowId → ''
 //
 // 标黄约定：
 //   cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } }
@@ -170,13 +172,31 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
   return { filePath: savePath };
 }
 
-// warnings: Array<{ scenarioId, scenarioName, rowId, code, message }>
+// v3.0.4 F3：error-report 第 3 列「对账ID」取值——三级回退链。
+//   ReconciliationId 可能是 number（bank-statement-io readBankStatement raw 读入），
+//   判空须 String(v).trim()；空串 / null / undefined 视为未命中继续回退。
+function resolveReconIdCell(w) {
+  const candidates = [w.reconciliationId, w.reconId, w.rowId];
+  for (const v of candidates) {
+    if (v === null || v === undefined) continue;
+    const s = String(v).trim();
+    if (s !== '') return s;
+  }
+  return '';
+}
+
+// warnings: Array<{ scenarioId, scenarioName, rowId, code, message, reconciliationId?, reconId? }>
+//   v3.0.4 F3：第 3 列「对账ID」取值三级回退——
+//     reconciliationId（caller enrich 注入的银行行 ReconciliationId，String+trim 非空）
+//       → reconId（R1 'multi-bank-match-r1' warning 自带专用字段，rowId=null 时兜底）
+//       → rowId（旧 shape 调用方未传 bankRows 时回退 _rowId，向后兼容）→ ''
+//   注：引擎 warning 其余透传字段（fields/matchedRowIds/phase/severity 等）不写盘。
 // savePath: 绝对路径（含 .xlsx）
 async function writeErrorReport(warnings, savePath) {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('error-report');
 
-  const headers = ['时间戳', '场景名', '行号', '原因', '可能原因'];
+  const headers = ['时间戳', '场景名', '对账ID', '原因', '可能原因'];
   sheet.addRow(headers);
   // 表头加粗 + 字号 10（v2.0.0 GA：所有导出表头统一 size 10）
   sheet.getRow(1).font = { bold: true, size: 10 };
@@ -186,7 +206,7 @@ async function writeErrorReport(warnings, savePath) {
     sheet.addRow([
       timestamp,
       w.scenarioName ?? `场景 #${w.scenarioId}`,
-      w.rowId ?? '',
+      resolveReconIdCell(w),
       w.message ?? w.code ?? '',
       errorCodeToCause(w.code)
     ]);
@@ -200,6 +220,7 @@ async function writeErrorReport(warnings, savePath) {
 module.exports = {
   writeBankStatementOutput,
   writeErrorReport,
+  resolveReconIdCell,      // v3.0.4 F3：error-report 第 3 列「对账ID」三级回退（unit 直测）
   stripInternalFields,     // v2.1.7 round 3 F8 (spec §9.8.4)
   YELLOW_FILL,
   INTERNAL_FIELDS,

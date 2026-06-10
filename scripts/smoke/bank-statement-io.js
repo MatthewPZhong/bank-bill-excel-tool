@@ -174,19 +174,52 @@ async function runBankStatementIoSmokeTests() {
     assert.strictEqual(result.fileName, '银行对账单-202604290001-处理结果.xlsx', 'W2 多场景仍用统一格式');
   }
 
-  // ===== W3: writeErrorReportOutput 4 列 =====
+  // ===== W3: writeErrorReportOutput 5 列 + bankRows enrich（v3.0.4 F3）=====
+  //   传 bankRows → 第 3 列「对账ID」按 _rowId → ReconciliationId enrich 后显示银行行对账ID。
   {
     const exportRootDir = path.join(tmpDir, 'export-root');
     const warnings = [
       { scenarioId: 1, scenarioName: 'C1 提取', rowId: 'row_5', code: 'inconsistent-recon-id-values', message: '多字段值不一致' }
     ];
+    const bankRows = [
+      { _rowId: 'row_5', ReconciliationId: 'AFT123456789012' },
+      { _rowId: 'row_6', ReconciliationId: 'OTHER' }
+    ];
     const result = await writeErrorReportOutput({
       warnings,
       exportRootDir,
-      timestamp: '20260429000002'
+      timestamp: '20260429000002',
+      bankRows
     });
     assert(result && fs.existsSync(result.filePath), 'W3 error-report 应被创建');
     assert(result.fileName.endsWith('-error-report.xlsx'), 'W3 文件名格式');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(result.filePath);
+    const sheet = wb.getWorksheet('error-report');
+    assert.strictEqual(sheet.getCell(1, 3).value, '对账ID', 'W3 表头第 3 列 = 对账ID');
+    assert.strictEqual(sheet.getCell(2, 3).value, 'AFT123456789012', 'W3 第 3 列 = enrich 后银行行 ReconciliationId');
+  }
+
+  // ===== W3b: writeErrorReportOutput 回退（缺省 bankRows / 空 ReconciliationId → 回退 rowId）=====
+  {
+    const exportRootDir = path.join(tmpDir, 'export-root');
+    const warnings = [
+      // rowId=row_9 但既不传 bankRows，也无 reconciliationId → 第 3 列回退 row_9
+      { scenarioId: 1, scenarioName: 'C2 打标', rowId: 'row_9', code: 'one-to-many', message: '一对多匹配' }
+    ];
+    // bankRows 含 row_9 但 ReconciliationId 为空 → enrich 跳过 → 仍回退 rowId
+    const bankRows = [{ _rowId: 'row_9', ReconciliationId: '' }];
+    const result = await writeErrorReportOutput({
+      warnings,
+      exportRootDir,
+      timestamp: '20260429000003',
+      bankRows
+    });
+    assert(result && fs.existsSync(result.filePath), 'W3b error-report 应被创建');
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(result.filePath);
+    const sheet = wb.getWorksheet('error-report');
+    assert.strictEqual(sheet.getCell(2, 3).value, 'row_9', 'W3b 空 ReconciliationId → 第 3 列回退 rowId');
   }
 
   // ===== W4: writeErrorReportOutput 空数组 → null =====

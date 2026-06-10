@@ -3,11 +3,12 @@
 // 🔴 对外契约破坏性变更：
 //   v2.1.8 PR #52 N3-2 将命中场景行写入主输出 xlsx 的 Sheet 3「命中场景行」
 //   v2.1.9 撤除 Sheet 3，改独立报表（spec §5.4），落位 error-reports/{date}/
+//   v3.0.4 F2：落位由 error-reports/{date}/ 改为 bank-statement-process/{date}/（与错误报告目录互换）
 //   详 CHANGELOG / USER_GUIDE v2.1.9（Phase 9 收尾更新）
 //
 // 职责：
 //   writeScenarioHitRows(modifiedRows, originalFilePath, opts)
-//     → 落位 Documents/网银账单生成小助手/error-reports/{date}/
+//     → 落位 Documents/网银账单生成小助手/bank-statement-process/{date}/（v3.0.4 F2）
 //     → 命名 `命中场景行-{原文件 basename}-{timestamp}.xlsx`（D15=a）
 //     → 列结构（D17=b）：原 44 列银行账单 headers + 末尾 3 列
 //        「匹配渠道」 = 命中场景所属渠道 label（D16=b，2026-05-27 用户拍板）
@@ -40,7 +41,9 @@ const SUFFIX_HEADERS = ['匹配渠道', '匹配状态', '命中场景'];
 const REPORT_SHEET_NAME = '命中场景行';
 
 // 缺省落位子目录（spec §5.1 + D14=a）
-const DEFAULT_REPORT_SUBDIR = 'error-reports';
+//   v3.0.4 F2：'error-reports' → 'bank-statement-process'（与错误报告目录互换；
+//   unit/integration 以本 symbol 引用，改值自动跟随）
+const DEFAULT_REPORT_SUBDIR = 'bank-statement-process';
 
 function buildDateDir(date = new Date()) {
   const pad = (n) => String(n).padStart(2, '0');
@@ -125,7 +128,7 @@ function buildOriginalBaseName(originalFilePath) {
 //     originalFilePath: string（原银行对账单文件绝对路径，用于派生 basename）
 //     opts: {
 //       exportRoot?: string                              — 替代 Documents/网银账单生成小助手 根目录（测试注入）
-//       reportDir?: string                               — 直接指定报表目录（绕过 exportRoot/error-reports/{date} 拼接，测试用）
+//       reportDir?: string                               — 直接指定报表目录（绕过 exportRoot/bank-statement-process/{date} 拼接，测试用）
 //       timestamp?: string                               — 替代 buildTimestamp() 输出（测试用，确保文件名稳定）
 //       headers?: string[]                               — 替代 BANK_STATEMENT_FIELDS（测试用，避免 44 列冗余）
 //       channels?: Array<channel>|Map<id, channel|label> — v2.1.9 D16=b：渠道列表

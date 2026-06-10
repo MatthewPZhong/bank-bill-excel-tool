@@ -3,7 +3,7 @@
 // 🔴 对外契约破坏性变更（spec §5.4）：
 //   v2.1.8 PR #52 N3-2 引入主输出 xlsx Sheet 3「命中场景行」
 //   v2.1.9 撤除 Sheet 3 → 改独立报表 writer（scenario-hit-rows-writer.js）
-//   落位 error-reports/{date}/命中场景行-{basename}-{ts}.xlsx
+//   v3.0.4 F2：落位 bank-statement-process/{date}/命中场景行-{basename}-{ts}.xlsx（与错误报告目录互换）
 //   列结构原 N 列 headers + 末尾 3 列「匹配渠道 / 匹配状态 / 命中场景」（D17=b 序）
 //
 // 覆盖：
@@ -23,7 +23,7 @@ const ExcelJS = require('exceljs');
 
 const { runAllScenarios } = require('../../src/main-process/scenario-dispatcher');
 const { writeBankStatementOutput } = require('../../src/main-process/exceljs-writer');
-const { writeScenarioHitRows, REPORT_SHEET_NAME, SUFFIX_HEADERS } = require('../../src/main-process/scenario-hit-rows-writer');
+const { writeScenarioHitRows, REPORT_SHEET_NAME, SUFFIX_HEADERS, DEFAULT_REPORT_SUBDIR } = require('../../src/main-process/scenario-hit-rows-writer');
 
 let passed = 0;
 let failed = 0;
@@ -151,6 +151,9 @@ async function run() {
     assertEq(reportResult.rowCount, 3, 'Step6.writer rowCount=3');
     assertEq(reportResult.fileName, '命中场景行-工商-上海-2026-04-20260427T143022.xlsx', 'Step6.文件名 spec §5.1 D15=a 规范');
     assertTrue(fs.existsSync(reportResult.filePath), 'Step6.独立报表 xlsx 写入成功');
+    // v3.0.4 F2：落位子目录由 error-reports 互换为 bank-statement-process
+    assertEq(DEFAULT_REPORT_SUBDIR, 'bank-statement-process', 'Step6.F2 落位子目录 = bank-statement-process');
+    assertTrue(reportResult.filePath.includes(`${path.sep}bank-statement-process${path.sep}`), 'Step6.F2 报表落位含 bank-statement-process 子目录');
 
     // ============================================================
     // Step 7：readback 独立报表 — 验证列结构（spec §5.2 D17=b 列序）

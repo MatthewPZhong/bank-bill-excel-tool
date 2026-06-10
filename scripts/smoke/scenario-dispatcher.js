@@ -554,10 +554,12 @@ async function runExceljsWriterSmokeTests() {
     assert(r2c1Fill && r2c1Fill.fgColor && r2c1Fill.fgColor.argb === 'FFFFFF00', 'I1 r2.col1 应黄底');
   }
 
-  // I2: error-report 4 列
+  // I2: error-report 5 列（v3.0.4 F3：第 3 列「行号」→「对账ID」+ 三级回退）
   {
     const warnings = [
-      { scenarioId: 1, scenarioName: 'C1 提取', rowId: 'r5', code: 'inconsistent-recon-id-values', message: '多字段值不一致' },
+      // 第 1 条：enrich 注入 reconciliationId → 第 3 列显示对账ID（非 rowId）
+      { scenarioId: 1, scenarioName: 'C1 提取', rowId: 'r5', reconciliationId: 'AFT123456789012', code: 'inconsistent-recon-id-values', message: '多字段值不一致' },
+      // 第 2 条：无 reconciliationId/reconId → 回退 rowId（旧 shape 兼容）
       { scenarioId: 2, scenarioName: 'C2 打标', rowId: 'r10', code: 'one-to-many', message: '一对多匹配' }
     ];
     const out = path.join(tmpDir, 'error-report.xlsx');
@@ -569,11 +571,12 @@ async function runExceljsWriterSmokeTests() {
     const sheet = wb.getWorksheet('error-report');
     assert.strictEqual(sheet.getCell(1, 1).value, '时间戳', 'I2 表头 1');
     assert.strictEqual(sheet.getCell(1, 2).value, '场景名', 'I2 表头 2');
-    assert.strictEqual(sheet.getCell(1, 3).value, '行号', 'I2 表头 3');
+    assert.strictEqual(sheet.getCell(1, 3).value, '对账ID', 'I2 表头 3（F3：行号→对账ID）');
     assert.strictEqual(sheet.getCell(1, 4).value, '原因', 'I2 表头 4');
     assert.strictEqual(sheet.getCell(2, 2).value, 'C1 提取', 'I2 r2 场景名');
-    assert.strictEqual(sheet.getCell(2, 3).value, 'r5', 'I2 r2 行号');
+    assert.strictEqual(sheet.getCell(2, 3).value, 'AFT123456789012', 'I2 r2 对账ID（reconciliationId 非空优先）');
     assert.strictEqual(sheet.getCell(2, 4).value, '多字段值不一致', 'I2 r2 原因');
+    assert.strictEqual(sheet.getCell(3, 3).value, 'r10', 'I2 r3 对账ID（无 reconid → 回退 rowId）');
   }
 
   // I3: 空 modifiedRows 也能写表头
