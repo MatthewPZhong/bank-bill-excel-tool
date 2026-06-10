@@ -830,6 +830,48 @@
       }, 120);
     }
 
+    // v3.0.4 块 F · F1：「Payment线下调拨订单回填处理」展开态 preview。
+    //   切到资金对账模块 → 打开场景管理 → 定位「中台调拨订单对账ID回填」（subCategory=fund-transfer-backfill）行
+    //   的「管理」按钮 → 打开适用银行渠道弹窗（gating 显示 payment 勾选行）→ 勾选并填三输入框 → 截图展开态。
+    //   依赖：migrations.js seed 的 R5s2 builtin-fixed 场景（preview 临时库幂等 seed 也会有该行）。
+    function applyBuiltinFixedChannelManagePaymentPreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      setTimeout(() => {
+        if (!elements.bankStatementScenarioBtn) return;
+        elements.bankStatementScenarioBtn.click();
+        setTimeout(() => {
+          const root = elements.modalRoot;
+          if (!root) return;
+          // 按场景名称列定位「中台调拨订单对账ID回填」行（builtin-fixed + fund-transfer-backfill）
+          let targetManageBtn = null;
+          root.querySelectorAll('tr[data-category="builtin-fixed"]').forEach((tr) => {
+            const nameCell = tr.querySelector('.scenarios-col-name');
+            if (nameCell && nameCell.textContent.includes('中台调拨订单对账ID回填')) {
+              targetManageBtn = tr.querySelector('[data-row-action="manage"]');
+            }
+          });
+          if (!targetManageBtn) return;
+          targetManageBtn.click();
+          // 弹窗加载 config 是异步（scenarios.get）→ 等加载完成（payment 行 gating 显示）后再勾选 + 填值
+          setTimeout(() => {
+            const dialogRoot = elements.modalRoot;
+            if (!dialogRoot) return;
+            const check = dialogRoot.querySelector('input[data-field="payment-offline-enabled"]');
+            if (check && !check.checked) {
+              check.checked = true;
+              check.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            const bankInput = dialogRoot.querySelector('input[data-field="payment-bank-channel"]');
+            const regionInput = dialogRoot.querySelector('input[data-field="payment-region"]');
+            const bigAccountInput = dialogRoot.querySelector('input[data-field="payment-big-account"]');
+            if (bankInput) bankInput.value = 'BGL';
+            if (regionInput) regionInput.value = 'CN';
+            if (bigAccountInput) bigAccountInput.value = '202782001';
+          }, 360);
+        }, 280);
+      }, 120);
+    }
+
     // v2.1.14 C：链接表管理弹窗 preview（切到资金对账数据处理模块 → 点「链接表管理」按钮打开弹窗）
     function applyLinkedTableManagerPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
@@ -1298,6 +1340,8 @@
       applyScenariosManagerPreviewState,
       // v2.1.16 A1：自带写死场景「管理」弹窗（含优先级输入框）preview
       applyBuiltinFixedChannelManagePreviewState,
+      // v3.0.4 块 F · F1：Payment 线下调拨订单回填处理展开态 preview
+      applyBuiltinFixedChannelManagePaymentPreviewState,
       applyScenarioCategorySelectPreviewState,
       // v2.1.14 C：链接表管理弹窗 preview
       applyLinkedTableManagerPreviewState,

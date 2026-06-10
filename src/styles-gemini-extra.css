@@ -3277,6 +3277,61 @@ select.mapping-text-input {
   width: 72px;
 }
 
+/* v3.0.4 块 F · F1：Payment 线下调拨订单回填处理 —— 勾选行 + 三输入框展开区。
+   弹窗宽 min(100%,564px) 单行放不下三组 label+input，故展开区用独立多行布局（每组占一行）。
+   [hidden] 属性控制条件渲染（非 fund-transfer-backfill 场景）与展开收起（未勾选）。 */
+.builtin-fixed-payment-row {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+}
+.builtin-fixed-payment-row[hidden] {
+  display: none;
+}
+.builtin-fixed-payment-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.builtin-fixed-payment-fields {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid var(--line-strong, #e0d9c8);
+  border-radius: 12px;
+  background: #fffdf8;
+}
+.builtin-fixed-payment-fields[hidden] {
+  display: none;
+}
+.builtin-fixed-payment-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+/* label 固定宽度让三行输入框左缘对齐 */
+.builtin-fixed-payment-field .builtin-fixed-channel-label {
+  flex: 0 0 64px;
+  text-align: right;
+}
+.builtin-fixed-payment-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.builtin-fixed-payment-error {
+  color: var(--danger, #c0392b);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.builtin-fixed-payment-error[hidden] {
+  display: none;
+}
+
 /* v2.1.13 C：复制场景弹窗（右上角「复制场景」label + 「选择」按钮 + 渠道/场景联动下拉） */
 .copy-scenario-label {
   margin-left: auto;

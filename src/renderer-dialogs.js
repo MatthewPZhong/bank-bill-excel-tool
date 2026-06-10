@@ -7370,6 +7370,30 @@
               <input class="scenario-config-input scenario-config-input-narrow builtin-fixed-priority-input" type="number" min="0" max="3" data-field="priority" value="0">
             </div>
           </div>
+          <!-- v3.0.4 块 F · F1：「Payment线下调拨订单回填处理」勾选行 + 条件展开区。
+               仅 config.subCategory==='fund-transfer-backfill' 场景显示（加载 IIFE gating 控制 hidden）；
+               展开区默认隐藏，勾选后显示（照 C3 extraFee 范式，取消勾选保留输入值）。 -->
+          <div class="builtin-fixed-payment-row" data-role="payment-row" hidden>
+            <label class="builtin-fixed-payment-check">
+              <input type="checkbox" data-field="payment-offline-enabled">
+              Payment线下调拨订单回填处理
+            </label>
+          </div>
+          <div class="builtin-fixed-payment-fields" data-role="payment-fields" hidden>
+            <div class="builtin-fixed-payment-field">
+              <span class="builtin-fixed-channel-label">银行渠道</span>
+              <input class="scenario-config-input builtin-fixed-payment-input" type="text" data-field="payment-bank-channel" placeholder="如 BGL">
+            </div>
+            <div class="builtin-fixed-payment-field">
+              <span class="builtin-fixed-channel-label">地区</span>
+              <input class="scenario-config-input builtin-fixed-payment-input" type="text" data-field="payment-region" placeholder="如 CN">
+            </div>
+            <div class="builtin-fixed-payment-field">
+              <span class="builtin-fixed-channel-label">大账号</span>
+              <input class="scenario-config-input builtin-fixed-payment-input" type="text" data-field="payment-big-account" placeholder="如 202782001">
+            </div>
+            <div class="builtin-fixed-payment-error" data-role="payment-error" hidden></div>
+          </div>
         </div>
         <div class="dialog-actions right">
           <button class="primary-btn small" type="button" data-action="save">保存</button>
@@ -7380,6 +7404,15 @@
       const dropdownButton = dialog.querySelector('.builtin-fixed-channel-dropdown-btn');
       // v2.1.16 A1：优先级输入框（0-3 整数；回填当前场景 priority，保存时随适用渠道一并 update）
       const priorityInput = dialog.querySelector('input[data-field="priority"]');
+      // v3.0.4 块 F · F1：Payment 线下调拨订单回填处理 —— 勾选行 + 三输入框展开区（条件渲染 + 显隐联动）
+      const paymentRow = dialog.querySelector('[data-role="payment-row"]');
+      const paymentFields = dialog.querySelector('[data-role="payment-fields"]');
+      const paymentCheck = dialog.querySelector('input[data-field="payment-offline-enabled"]');
+      const paymentBankChannelInput = dialog.querySelector('input[data-field="payment-bank-channel"]');
+      const paymentRegionInput = dialog.querySelector('input[data-field="payment-region"]');
+      const paymentBigAccountInput = dialog.querySelector('input[data-field="payment-big-account"]');
+      const paymentError = dialog.querySelector('[data-role="payment-error"]');
+      const saveButton = dialog.querySelector('[data-action="save"]');
       const floatingPanel = document.createElement('div');
       floatingPanel.className = 'new-account-currency-dropdown-panel builtin-fixed-channel-floating-panel';
       floatingPanel.hidden = true;
@@ -7388,6 +7421,22 @@
       let allChannels = [];          // [{id, label}]
       let selectedIds = new Set();   // 当前选中的 channel id
       let panelOpen = false;
+      // v3.0.4 块 F · F2：缓存当前场景完整 config（供保存时读-改-写浅合并；加载完成前禁用保存防竞态写空）
+      let cachedConfig = null;       // scenarios.get 返回的 config（已 JSON.parse）
+      let isPaymentScenario = false; // config.subCategory==='fund-transfer-backfill' 才显示 payment 控件
+      let configLoaded = false;      // 加载 IIFE 完成标记；未完成禁用保存
+
+      // F1：勾选/取消勾选 → 展开区显隐（取消勾选保留输入值，照 C3 extraFee 范式）
+      function syncPaymentFieldsVisibility() {
+        if (!paymentFields || !paymentCheck) return;
+        paymentFields.hidden = !paymentCheck.checked;
+        if (!paymentCheck.checked && paymentError) {
+          paymentError.hidden = true; // 取消勾选时清掉 inline 校验提示
+        }
+      }
+      if (paymentCheck) {
+        paymentCheck.addEventListener('change', syncPaymentFieldsVisibility);
+      }
 
       function updateLabel() {
         if (selectedIds.size === 0) {
@@ -7460,6 +7509,8 @@
       });
 
       // 异步加载渠道列表 + 当前适用渠道（空 = 适用全部 → 默认全选）
+      // v3.0.4 块 F · F2：加载完成前禁用保存（防 config 未就绪时点保存 → 浅合并基底 null 写空 config）
+      if (saveButton) saveButton.disabled = true;
       (async () => {
         try {
           const chResult = await desktopApi.channels.list();
@@ -7474,9 +7525,31 @@
           updateLabel();
           // v2.1.16 A1：回填当前场景优先级（getScenario 返回 scenario.priority，0-3）
           const scResult = await desktopApi.scenarios.get(scenarioId);
-          if (priorityInput && scResult && scResult.status === 'ok' && scResult.scenario) {
-            priorityInput.value = String(scResult.scenario.priority ?? 0);
+          if (scResult && scResult.status === 'ok' && scResult.scenario) {
+            if (priorityInput) {
+              priorityInput.value = String(scResult.scenario.priority ?? 0);
+            }
+            // v3.0.4 块 F · F2：缓存完整 config 供保存浅合并；按 subCategory gating 显示 payment 控件
+            cachedConfig = (scResult.scenario.config && typeof scResult.scenario.config === 'object')
+              ? scResult.scenario.config
+              : {};
+            isPaymentScenario = cachedConfig.subCategory === 'fund-transfer-backfill';
+            if (isPaymentScenario && paymentRow) {
+              paymentRow.hidden = false;
+              // 回填已存配置（老库无字段 fallback enabled=false；输入框不预填生产值，仅回填用户已存值）
+              const backfill = (cachedConfig.paymentOfflineBackfill && typeof cachedConfig.paymentOfflineBackfill === 'object')
+                ? cachedConfig.paymentOfflineBackfill
+                : {};
+              if (paymentCheck) paymentCheck.checked = backfill.enabled === true;
+              if (paymentBankChannelInput) paymentBankChannelInput.value = String(backfill.bankChannel ?? '');
+              if (paymentRegionInput) paymentRegionInput.value = String(backfill.region ?? '');
+              if (paymentBigAccountInput) paymentBigAccountInput.value = String(backfill.bigAccount ?? '');
+              syncPaymentFieldsVisibility();
+            }
           }
+          // 加载完成 → 允许保存
+          configLoaded = true;
+          if (saveButton) saveButton.disabled = false;
         } catch (err) {
           openModal(createAlertDialog(`加载适用银行渠道失败：${err && err.message ? err.message : err}`));
         }
@@ -7491,6 +7564,9 @@
       dialog.querySelector('.icon-close').addEventListener('click', teardownAndReopen);
       dialog.querySelector('[data-action="back"]').addEventListener('click', teardownAndReopen);
       dialog.querySelector('[data-action="save"]').addEventListener('click', async () => {
+        // v3.0.4 块 F · F2：config 未加载完成不允许保存（双保险，saveButton 已 disabled）。
+        //   防止 cachedConfig 仍为 null 时浅合并基底为空 → 写空 config 丢 seed 字段（资金红线）。
+        if (!configLoaded) return;
         // v2.1.16 A1：先校验优先级（0-3 整数）。失败走与「0 渠道」一致的 alert + reopen 模式，
         //   避免用户点确认后回不到本弹窗（reopen 会从 DB 回填上次有效 priority）。
         const priorityRaw = priorityInput ? priorityInput.value : '0';
@@ -7513,6 +7589,24 @@
           }));
           return;
         }
+        // v3.0.4 块 F · F1：Payment 线下调拨订单回填处理 —— 勾选时银行渠道/地区/大账号三项全必填（Q1 拍板）。
+        //   inline 校验：在弹窗内展开区显示错误提示，不关弹窗、不 reopen（保留用户已填草稿）。
+        let paymentOfflineBackfill = null;
+        if (isPaymentScenario && paymentCheck) {
+          const enabled = paymentCheck.checked === true;
+          const bankChannel = paymentBankChannelInput ? paymentBankChannelInput.value.trim() : '';
+          const region = paymentRegionInput ? paymentRegionInput.value.trim() : '';
+          const bigAccount = paymentBigAccountInput ? paymentBigAccountInput.value.trim() : '';
+          if (enabled && (!bankChannel || !region || !bigAccount)) {
+            if (paymentError) {
+              paymentError.textContent = '勾选「Payment线下调拨订单回填处理」后，银行渠道、地区、大账号三项均必填';
+              paymentError.hidden = false;
+            }
+            return; // inline 校验失败：不关弹窗、不调任何保存 IPC
+          }
+          if (paymentError) paymentError.hidden = true;
+          paymentOfflineBackfill = { enabled, bankChannel, region, bigAccount };
+        }
         // 全选 → 存空数组（= 适用全部，新增渠道自动适用）；否则存选中 ids
         const ids = (allChannels.length > 0 && selectedIds.size === allChannels.length)
           ? []
@@ -7522,10 +7616,18 @@
           openModal(createAlertDialog(`保存失败：${result?.message || '未知错误'}`));
           return;
         }
-        // v2.1.16 A1：适用渠道保存成功后，追加更新场景优先级（updateScenario 仅改 priority，不动 category/is_builtin）
-        const priorityResult = await desktopApi.scenarios.update(scenarioId, { priority: priorityNum });
+        // v2.1.16 A1：适用渠道保存成功后，追加更新场景优先级（updateScenario 仅改 priority，不动 category/is_builtin）。
+        // v3.0.4 块 F · F2（🔴 资金红线）：payment 场景额外携带 config 浅合并 ——
+        //   读-改-写：以 cachedConfig（加载时缓存的完整 config）为基底展开，仅覆盖 paymentOfflineBackfill 子对象，
+        //   funcCategory/subCategory/roundPhase/directions/dateToleranceDays 等 seed 契约字段原样保留（不可丢，否则掉桶/引擎漂移）。
+        //   非 payment 场景维持原行为：仅 update priority，不携带 config（不引入无谓 config 写入）。
+        const updateFields = { priority: priorityNum };
+        if (isPaymentScenario && paymentOfflineBackfill) {
+          updateFields.config = { ...(cachedConfig || {}), paymentOfflineBackfill };
+        }
+        const priorityResult = await desktopApi.scenarios.update(scenarioId, updateFields);
         if (!priorityResult || priorityResult.status !== 'ok') {
-          openModal(createAlertDialog(`优先级保存失败：${priorityResult?.message || '未知错误'}`));
+          openModal(createAlertDialog(`保存失败：${priorityResult?.message || '未知错误'}`));
           return;
         }
         teardownAndReopen();

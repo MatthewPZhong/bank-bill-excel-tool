@@ -511,6 +511,8 @@ const {
   applyScenariosManagerPreviewState,
   // v2.1.16 A1：自带写死场景「管理」弹窗（含优先级输入框）preview
   applyBuiltinFixedChannelManagePreviewState,
+  // v3.0.4 块 F · F1：Payment 线下调拨订单回填处理展开态 preview
+  applyBuiltinFixedChannelManagePaymentPreviewState,
   applyScenarioCategorySelectPreviewState,
   // v2.1.14 C：链接表管理弹窗 preview
   applyLinkedTableManagerPreviewState,
@@ -6164,6 +6166,11 @@ async function initialize() {
     // v2.1.16 A1：自带写死场景「管理」弹窗（含优先级输入框）preview
     setTimeout(() => {
       applyBuiltinFixedChannelManagePreviewState();
+    }, 120);
+  } else if (info.previewModal === 'builtin-fixed-channel-manage-payment') {
+    // v3.0.4 块 F · F1：Payment 线下调拨订单回填处理展开态 preview
+    setTimeout(() => {
+      applyBuiltinFixedChannelManagePaymentPreviewState();
     }, 120);
   } else if (info.previewModal === 'linked-table-manager') {
     // v2.1.14 C：链接表管理弹窗 preview
