@@ -208,12 +208,15 @@ function runC3Scenario(scenario, bankRows, gwRows) {
     //   Extra Fee 段仍要执行，且收尾的 lock + 消费 gw 必须照常发生。
 
     // ---- 段 2：Extra Fee 写盘（仅当勾选「金额不一致」且 amount 为有限数，即 fee !== null）----
-    //   公式：网关金额 + 差额(fee) = 银行金额，差额作为单独成本写入银行行 'Extra Fee' 列并标黄。
-    //   格式与 assign 写入银行字段一致（normalizeCellValue：number → String，如 5→'5' / -5→'-5' / 0.5→'0.5'）。
-    //   原值已等于差额（oldFee === newFee）→ 只锁定不标黄（与 assign 同值行为一致）。
+    // v3.0.4 F1 🔴 资金红线（spec bank-recon-output-fixes §4 F1）：写盘取输入框的【相反数】。
+    //   匹配语义【完全不变】：匹配仍用原值 fee（见 gwMatchesBank :60-79，网关金额+fee 比银行金额）；
+    //     仅在写入银行行 'Extra Fee' 列时取相反数（normalizeCellValue(-fee)）并标黄，写盘与匹配解耦。
+    //   取值示例：输入 5 → 写 '-5'；输入 -3 → 写 '3'（负输入对称取反，无特判）；输入 0.5 → 写 '-0.5'。
+    //   -0 边界：fee=0 时 -fee 为 -0，但 String(-0)==='0'（normalizeCellValue 走 String）→ 写 '0'，绝不出现 '-0'。
+    //   原值已等于写盘相反数（oldFee === newFee）→ 只锁定不标黄（与 assign 同值行为一致）。
     if (fee !== null) {
       const oldFee = normalizeCellValue(bankRow['Extra Fee']);
-      const newFee = normalizeCellValue(fee);
+      const newFee = normalizeCellValue(-fee);
       if (oldFee !== newFee) {
         bankRow['Extra Fee'] = newFee;
         modCollector.record(rowId, 'Extra Fee', oldFee, newFee);
