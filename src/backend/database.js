@@ -45,6 +45,8 @@ const {
   ensureRefundBackfillScenarioSeed,
   // v2.1.16-beta.5 需求4：JPM 调拨订单修复写死场景独立补种（默认休眠 enabled=0，category=gateway-recon-id-fix）
   ensureJpmDispatchOrderScenarioSeed,
+  // v3.0.4 块 E 需求1：BOC 调拨订单修复写死场景独立补种（默认休眠 enabled=0，category=gateway-recon-id-fix）
+  ensureBocDispatchOrderScenarioSeed,
   // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'
   ensureFundTypeAchReturnConfigMigration,
   // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造
@@ -330,6 +332,11 @@ class AppDatabase {
     //   前置：scenarios CHECK 已含 'gateway-recon-id-fix'（ensureScenariosCategoryGatewayReconIdFix 早已扩枚举）。
     //   独立 marker(jpm_dispatch_order_scenario_seeded) 绕开全局 marker 短路 —— 旧库也能补种。
     this.ensureJpmDispatchOrderScenarioSeed();
+    // v3.0.4 块 E 需求1：BOC 调拨订单修复写死场景独立补种（默认休眠 enabled=0，🔴 资金红线）
+    //   必须在 ensureJpmDispatchOrderScenarioSeed() 之后 —— 新库 id 紧随 JPM，
+    //   `priority DESC, id ASC` 下 BOC 排在 JPM 之后（场景管理网关 compact 序号自然 = 2）。
+    //   独立 marker(boc_dispatch_order_scenario_seeded) 绕开全局 marker 短路 —— 旧库也能补种。
+    this.ensureBocDispatchOrderScenarioSeed();
     // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线 — FundType 枚举值）
     //   必须在 scenarios 相关迁移之后（依赖 scenarios 表已存在、内置场景已 seed）。
     //   幂等：执行一次后 config 不再含 'Ach Ruturn'；绝大多数库无引用 → no-op（精确性防护）。
@@ -921,6 +928,11 @@ class AppDatabase {
   // v2.1.16-beta.5 需求4：JPM 调拨订单修复写死场景独立补种（默认休眠 enabled=0，🔴 资金红线）
   ensureJpmDispatchOrderScenarioSeed() {
     return ensureJpmDispatchOrderScenarioSeed(this.db);
+  }
+
+  // v3.0.4 块 E 需求1：BOC 调拨订单修复写死场景独立补种（默认休眠 enabled=0，🔴 资金红线）
+  ensureBocDispatchOrderScenarioSeed() {
+    return ensureBocDispatchOrderScenarioSeed(this.db);
   }
 
   // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线）
