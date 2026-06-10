@@ -63,7 +63,7 @@ const MODULES = Object.freeze({
   //      网关子模式 scenario.category = 'gateway-recon-id-fix'。
   reconIdFix: {
     id: 'recon-id-fix',
-    name: '对账单 ReconID 修复'
+    name: '对账单修复'
   },
   // v2.1.2 T2：月度银行对账单BU回填校验
   bankBuRecon: {
@@ -5377,6 +5377,7 @@ async function importFlowStage() {
       // v2.1.3-fix2.5：默认值 = 系统今天 - 1 天（与业务OP日期 dialog 同源 helper）
       defaultDate: getBizOpReconDefaultDate(),
       onConfirm: async (date) => {
+        // v3.0.2 需求1b：流水表支持批量多选，全部合并导入到同一日期（单进程单事务，会替换该日期已有流水）。
         const pickRes = await window.desktopApi.bizOpRecon.pickFlowFile({ date });
         if (!pickRes || pickRes.status === 'cancelled') {
           setBizOpReconStatus(`${date}：已取消选择流水对账单文件`, 'info');
@@ -5388,10 +5389,23 @@ async function importFlowStage() {
           resolve();
           return;
         }
-        setBizOpReconStatus(`正在导入流水对账单 ${date} 数据...`, 'info');
+        // 取 filePaths（多文件数组）；兼容旧返回的 filePath（单数）。
+        const flowFiles = Array.isArray(pickRes.filePaths) && pickRes.filePaths.length > 0
+          ? pickRes.filePaths
+          : (pickRes.filePath ? [pickRes.filePath] : []);
+        if (flowFiles.length === 0) {
+          setBizOpReconStatus(`${date}：未选择流水对账单文件`, 'info');
+          resolve();
+          return;
+        }
+        const fileCount = flowFiles.length;
+        setBizOpReconStatus(
+          `正在导入流水对账单 ${date} 数据（${fileCount} 个文件，将替换该日期已有流水）...`,
+          'info'
+        );
         const impResult = await window.desktopApi.bizOpRecon.runFlowImport({
           date,
-          filePath: pickRes.filePath
+          filePaths: flowFiles
         });
         if (impResult.status === 'error') {
           const detail = impResult.detailLines && impResult.detailLines.length > 0
@@ -5403,6 +5417,7 @@ async function importFlowStage() {
         }
         if (impResult.status === 'rejected') {
           // v2.1.3-fix1.5：校验失败 → 不再弹错误报告对话框，状态框显示行数 + 失败报告路径
+          // v3.0.2 需求1b：多文件任一行失败 → 整批拒绝（所有文件都不入库），错误报告聚合并标注来源文件名
           const pathPart = impResult.errorReportPath
             ? `；失败报告：${impResult.errorReportPath}`
             : '';
@@ -5413,8 +5428,9 @@ async function importFlowStage() {
           resolve();
           return;
         }
+        // v3.0.2 需求1b：成功文案标注 N 个文件共 M 行（单文件时仍读得通：「1 个文件共 M 行」）。
         setBizOpReconStatus(
-          `流水对账单（${date}）已导入 ${impResult.totalCount} 行`,
+          `流水对账单（${date}）已导入 ${fileCount} 个文件共 ${impResult.totalCount} 行`,
           'success'
         );
         await refreshBizOpReconButtonAvailability();

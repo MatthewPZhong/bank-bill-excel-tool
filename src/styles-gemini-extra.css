@@ -3370,10 +3370,5 @@ body[data-platform="win32"] .dialog-title * {
 .gateway-recon-picker-item input{accent-color:var(--primary)}
 .gateway-recon-picker-card .dialog-actions{border-top:none;background:transparent;padding:8px 28px 22px;gap:10px}
 
-/* v3.0.1 需求2：业务OP数据核对左列（BU 下拉 + 导出差异按钮）整体右移 = D/2 + 12px（D=导出差异按钮右缘↔状态框左缘，preview 实测 D=147.0px） */
-#bizOpReconModulePanel .cell.left > * {
-  transform: translateX(85.5px);
-}
-
 /* v3.0.1（用户调整）：删除网关对账单数据弹框宽度减半（原 .modal-card 默认 940px → 470px），内容稀疏更紧凑 */
 .linked-table-delete-range-card { width: min(100%, 470px); }

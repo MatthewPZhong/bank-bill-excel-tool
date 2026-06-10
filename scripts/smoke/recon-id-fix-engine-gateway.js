@@ -446,6 +446,177 @@ function runCase11_BillDateRange_N1() {
   console.log('PASS  Case 11：BillDate ±N 勾选 days=1 + 跨 3 天 不命中');
 }
 
+// ===== v3.0.2 需求3：idEnabled 开关 + fieldValue 修复订单字段取值 =====
+
+// Case 12：idEnabled=false → Reference 取网关账单原值（不取 reconciliationId、不清空）
+function runCase12_IdDisabled_RefOriginal() {
+  const main = [
+    makeGatewayRow({ BillDate: '2026-04-09', Amount: 100, BillType: 'gw', Reference: 'ORIG-GW-REF', reconciliationId: 'GW-RECON-012' })
+  ];
+  const opp = [
+    makeChannelRow({ createTime: '2026-04-09', receiveAmount: 100, channelName: 'ch', reconciliationId: 'CH-RECON-012' })
+  ];
+  const cfg = makeCfg({
+    matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+    output: { mode: 'main', idEnabled: false, commonId: { source: 'main', suffix: '' } }
+  });
+  const result = runReconIdFix(makeScenario('Case12-IdDisabled', cfg), {
+    reconResult: [], businessBills: main, opponentBills: opp
+  });
+  assert.strictEqual(result.fixedRows.length, 1, 'Case12 输出 1 行');
+  assert.strictEqual(result.fixedRows[0].Reference, 'ORIG-GW-REF',
+    'Case12 idEnabled=false → Reference 取网关账单原值（不取 reconciliationId、不清空）');
+  console.log('PASS  Case 12：idEnabled=false → Reference 保网关账单原值');
+}
+
+// Case 13：fieldValue 1v1 — 主边 OrderId 取从边 channelOrderNo（idEnabled 默认启用，两功能独立）
+function runCase13_FieldValue_1v1() {
+  const main = [
+    makeGatewayRow({ BillDate: '2026-04-09', Amount: 100, BillType: 'gw', OrderId: 'GW-ORIG', reconciliationId: 'GW-RECON-013' })
+  ];
+  const opp = [
+    makeChannelRow({ createTime: '2026-04-09', receiveAmount: 100, channelName: 'ch', channelOrderNo: 'CH-ORDER-013', reconciliationId: 'CH-RECON-013' })
+  ];
+  const cfg = makeCfg({
+    matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+    output: { mode: 'main', commonId: { source: 'main', suffix: '' } }
+  });
+  cfg.fieldValue = { enabled: true, rules: [{ mainTypeSeq: 1, mainField: 'OrderId', oppTypeSeq: 2, oppField: 'channelOrderNo' }] };
+  const result = runReconIdFix(makeScenario('Case13-FieldValue-1v1', cfg), {
+    reconResult: [], businessBills: main, opponentBills: opp
+  });
+  assert.strictEqual(result.fixedRows.length, 1, 'Case13 输出 1 行');
+  assert.strictEqual(result.fixedRows[0].OrderId, 'CH-ORDER-013',
+    'Case13 fieldValue 1v1：主边 OrderId 取从边 channelOrderNo');
+  assert.strictEqual(result.fixedRows[0].Reference, 'GW-RECON-013',
+    'Case13 idEnabled 默认启用 → Reference 仍取网关 reconciliationId（两功能独立）');
+  console.log('PASS  Case 13：fieldValue 1v1 — 主边 OrderId 取从边 channelOrderNo');
+}
+
+// Case 14：1v多 模式 fieldValue 不生效（限定 1v1）— 入口 gate 强制关闭，OrderId 保网关原值
+function runCase14_FieldValue_1vN_Disabled() {
+  const main = [
+    makeGatewayRow({ BillDate: '2026-04-09', Amount: 300, BillType: 'gw', OrderId: 'GW-ORIG', reconciliationId: 'GW-RECON-014' })
+  ];
+  const opp = [
+    makeChannelRow({ createTime: '2026-04-09', receiveAmount: 100, channelName: 'ch', channelOrderNo: 'CO-A', reconciliationId: 'CH-A' }),
+    makeChannelRow({ createTime: '2026-04-09', receiveAmount: 100, channelName: 'ch', channelOrderNo: 'CO-B', reconciliationId: 'CH-B' }),
+    makeChannelRow({ createTime: '2026-04-09', receiveAmount: 100, channelName: 'ch', channelOrderNo: 'CO-C', reconciliationId: 'CH-C' })
+  ];
+  const cfg = makeCfg({
+    matchRules: { oneToOne: false, oneToMany: true, manyToOne: false },
+    output: { mode: 'opp', commonId: { source: 'main', suffix: '' } }
+  });
+  cfg.fieldValue = { enabled: true, rules: [{ mainTypeSeq: 1, mainField: 'OrderId', oppTypeSeq: 2, oppField: 'channelOrderNo' }] };
+  const result = runReconIdFix(makeScenario('Case14-1vN-FvDisabled', cfg), {
+    reconResult: [], businessBills: main, opponentBills: opp
+  });
+  assert.strictEqual(result.fixedRows.length, 3, 'Case14 拆 3 笔');
+  result.fixedRows.forEach((row, idx) => {
+    assert.strictEqual(row.OrderId, 'GW-ORIG',
+      `Case14 第${idx + 1}笔 OrderId 保网关原值（1v多 限定：fieldValue 入口 gate 强制关闭）`);
+  });
+  console.log('PASS  Case 14：1v多 模式 fieldValue 不生效（限定 1v1）');
+}
+
+// Case 15：多v1 模式 fieldValue 不生效（限定 1v1）— MerchantId 保网关原值
+function runCase15_FieldValue_Nv1_Disabled() {
+  const main = [
+    makeGatewayRow({ BillDate: '2026-04-09', Amount: 100, BillType: 'gw', OrderId: 'GW-A', MerchantId: 'M-ORIG' }),
+    makeGatewayRow({ BillDate: '2026-04-09', Amount: 100, BillType: 'gw', OrderId: 'GW-B', MerchantId: 'M-ORIG' }),
+    makeGatewayRow({ BillDate: '2026-04-09', Amount: 100, BillType: 'gw', OrderId: 'GW-C', MerchantId: 'M-ORIG' })
+  ];
+  const opp = [
+    makeChannelRow({ createTime: '2026-04-09', receiveAmount: 300, channelName: 'ch', merchantId: 'M-SHARED', reconciliationId: 'CH-015' })
+  ];
+  const cfg = makeCfg({
+    matchRules: { oneToOne: false, oneToMany: false, manyToOne: true },
+    output: { mode: 'opp', commonId: { source: 'main', suffix: '' } }
+  });
+  cfg.fieldValue = { enabled: true, rules: [{ mainTypeSeq: 1, mainField: 'MerchantId', oppTypeSeq: 2, oppField: 'merchantId' }] };
+  const result = runReconIdFix(makeScenario('Case15-Nv1-FvDisabled', cfg), {
+    reconResult: [], businessBills: main, opponentBills: opp
+  });
+  assert.strictEqual(result.fixedRows.length, 3, 'Case15 输出 3 笔');
+  result.fixedRows.forEach((row, idx) => {
+    assert.strictEqual(row.MerchantId, 'M-ORIG',
+      `Case15 第${idx + 1}笔 MerchantId 保网关原值（多v1 限定：fieldValue 入口 gate 强制关闭）`);
+  });
+  console.log('PASS  Case 15：多v1 模式 fieldValue 不生效（限定 1v1）');
+}
+
+// Case 16：fieldValue 目标列超 14 列模板 → 不体现于导出且不报错
+function runCase16_FieldValue_BeyondTemplate() {
+  const main = [
+    makeGatewayRow({ BillDate: '2026-04-09', Amount: 100, BillType: 'gw', reconciliationId: 'GW-RECON-016' })
+  ];
+  const opp = [
+    makeChannelRow({ createTime: '2026-04-09', receiveAmount: 100, channelName: 'ch', channelOrderNo: 'CO-16', reconciliationId: 'CH-016' })
+  ];
+  const cfg = makeCfg({
+    matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+    output: { mode: 'main', commonId: { source: 'main', suffix: '' } }
+  });
+  // mainField=reconciliationId 不在 14 列 ORDER_REPAIR_FIELDS_GATEWAY → 赋值不体现于导出
+  cfg.fieldValue = { enabled: true, rules: [{ mainTypeSeq: 1, mainField: 'reconciliationId', oppTypeSeq: 2, oppField: 'channelOrderNo' }] };
+  const result = runReconIdFix(makeScenario('Case16-BeyondTemplate', cfg), {
+    reconResult: [], businessBills: main, opponentBills: opp
+  });
+  assert.strictEqual(result.fixedRows.length, 1, 'Case16 输出 1 行（不报错）');
+  assert.ok(!('reconciliationId' in result.fixedRows[0]),
+    'Case16 目标列超 14 列模板 → 不体现于导出行（buildOutputRow 仅 14 列）');
+  console.log('PASS  Case 16：fieldValue 目标列超 14 列模板 → 不体现且不报错');
+}
+
+// Case 17：idEnabled=false + fieldValue 启用 — 两功能独立同时生效
+function runCase17_IdDisabled_FieldValueEnabled() {
+  const main = [
+    makeGatewayRow({ BillDate: '2026-04-09', Amount: 100, BillType: 'gw', OrderId: 'GW-ORIG', Reference: 'ORIG-REF', reconciliationId: 'GW-REC-017' })
+  ];
+  const opp = [
+    makeChannelRow({ createTime: '2026-04-09', receiveAmount: 100, channelName: 'ch', channelOrderNo: 'CO-17', reconciliationId: 'CH-017' })
+  ];
+  const cfg = makeCfg({
+    matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+    output: { mode: 'main', idEnabled: false, commonId: { source: 'main', suffix: '' } }
+  });
+  cfg.fieldValue = { enabled: true, rules: [{ mainTypeSeq: 1, mainField: 'OrderId', oppTypeSeq: 2, oppField: 'channelOrderNo' }] };
+  const result = runReconIdFix(makeScenario('Case17-IdOff-FvOn', cfg), {
+    reconResult: [], businessBills: main, opponentBills: opp
+  });
+  assert.strictEqual(result.fixedRows.length, 1, 'Case17 输出 1 行');
+  assert.strictEqual(result.fixedRows[0].Reference, 'ORIG-REF',
+    'Case17 idEnabled=false → Reference 保原值');
+  assert.strictEqual(result.fixedRows[0].OrderId, 'CO-17',
+    'Case17 fieldValue 启用 → OrderId 取从边（两功能独立同时生效）');
+  console.log('PASS  Case 17：idEnabled=false + fieldValue 启用 — 两功能独立同时生效');
+}
+
+// Case 18：旧配置无 idEnabled/fieldValue 字段 → 兼容（零回归）
+function runCase18_LegacyConfigCompat() {
+  const main = [
+    makeGatewayRow({ BillDate: '2026-04-09', Amount: 100, BillType: 'gw', OrderId: 'GW-018', reconciliationId: 'GW-RECON-018' })
+  ];
+  const opp = [
+    makeChannelRow({ createTime: '2026-04-09', receiveAmount: 100, channelName: 'ch', channelOrderNo: 'CO-18', reconciliationId: 'CH-018' })
+  ];
+  const cfg = makeCfg({
+    matchRules: { oneToOne: true, oneToMany: false, manyToOne: false },
+    output: { mode: 'main', commonId: { source: 'main', suffix: '' } }
+  });
+  assert.ok(!('idEnabled' in cfg.output), 'Case18 前置：output 无 idEnabled 字段');
+  assert.ok(!('fieldValue' in cfg), 'Case18 前置：config 无 fieldValue 字段');
+  const result = runReconIdFix(makeScenario('Case18-Legacy', cfg), {
+    reconResult: [], businessBills: main, opponentBills: opp
+  });
+  assert.strictEqual(result.fixedRows.length, 1, 'Case18 输出 1 行');
+  assert.strictEqual(result.fixedRows[0].Reference, 'GW-RECON-018',
+    'Case18 旧配置无新字段 → idEnabled 视为启用、Reference 正常取网关 reconciliationId');
+  assert.strictEqual(result.fixedRows[0].OrderId, 'GW-018',
+    'Case18 无 fieldValue → OrderId 保网关原值（无赋值）');
+  console.log('PASS  Case 18：旧配置无 idEnabled/fieldValue → 兼容（零回归）');
+}
+
 // ===== 主入口 =====
 function runReconIdFixEngineGatewaySmokeTests() {
   runConstantsSmoke();
@@ -462,7 +633,15 @@ function runReconIdFixEngineGatewaySmokeTests() {
   runCase9_BillDateRange_Default();
   runCase10_BillDateRange_N5();
   runCase11_BillDateRange_N1();
-  console.log('  recon-id-fix-engine-gateway smoke: 13 / 13 PASS');
+  // v3.0.2 需求3：idEnabled 开关 + fieldValue 修复订单字段取值（7 case）
+  runCase12_IdDisabled_RefOriginal();
+  runCase13_FieldValue_1v1();
+  runCase14_FieldValue_1vN_Disabled();
+  runCase15_FieldValue_Nv1_Disabled();
+  runCase16_FieldValue_BeyondTemplate();
+  runCase17_IdDisabled_FieldValueEnabled();
+  runCase18_LegacyConfigCompat();
+  console.log('  recon-id-fix-engine-gateway smoke: 20 / 20 PASS');
 }
 
 module.exports = { runReconIdFixEngineGatewaySmokeTests };
@@ -471,5 +650,5 @@ module.exports = { runReconIdFixEngineGatewaySmokeTests };
 if (require.main === module) {
   console.log('====== gateway recon-id-fix smoke (T10) ======');
   runReconIdFixEngineGatewaySmokeTests();
-  console.log('====== ALL 13 CASES PASS ======');
+  console.log('====== ALL 20 CASES PASS ======');
 }

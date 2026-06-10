@@ -6,7 +6,8 @@ const {
   parseBillDateMs,
   findBestAmountSubset,
   sortRightRowsForManyToOne,
-  currencyMatches
+  currencyMatches,
+  applyFieldValueOverrides
 } = require('../../../../src/main-process/scenario-engines/c4-recon-id-fix');
 
 // 测试 helper：构造 candidates 数组，每个元素 cents 由参数控制
@@ -482,5 +483,93 @@ test.describe('sortRightRowsForManyToOne + currencyMatches 集成（T10 + T11 �
     // 同金额同 count → 输入顺序保持
     assert.equal(sorted[0]._rowIdx, 'opp_0');
     assert.equal(sorted[1]._rowIdx, 'opp_1');
+  });
+});
+
+// ========================================================================
+// v3.0.2 需求3 — applyFieldValueOverrides（修复订单字段取值）
+//   🔴 资金红线：只产出新 overrides、不污染行对象；seq Number 归一；空值→''；分组过滤
+// ========================================================================
+
+// helper：构造带 _types(Set<Number>) 的行
+function fvRow(typesArr, fields) {
+  return Object.assign({ _types: new Set(typesArr) }, fields);
+}
+
+test.describe('applyFieldValueOverrides — 修复订单字段取值（v3.0.2 需求3）', () => {
+  const oneRule = (overrides = {}) => ({
+    fieldValue: {
+      enabled: true,
+      rules: [Object.assign({ mainTypeSeq: 1, mainField: 'OrderId', oppTypeSeq: 2, oppField: 'channelOrderNo' }, overrides)]
+    }
+  });
+
+  test('fieldValue 缺失 / 未启用 → 返回空 overrides', () => {
+    const main = fvRow([1], { OrderId: 'GW' });
+    const opp = fvRow([2], { channelOrderNo: 'CH' });
+    assert.deepEqual(applyFieldValueOverrides(main, opp, {}), {});
+    assert.deepEqual(applyFieldValueOverrides(main, opp, { fieldValue: { enabled: false, rules: [{ mainTypeSeq: 1, mainField: 'OrderId', oppTypeSeq: 2, oppField: 'channelOrderNo' }] } }), {});
+  });
+
+  test('启用 + 单规则命中 → overrides[mainField] = oppRow[oppField]', () => {
+    const main = fvRow([1], { OrderId: 'GW-ORIG' });
+    const opp = fvRow([2], { channelOrderNo: 'CH-123' });
+    assert.deepEqual(applyFieldValueOverrides(main, opp, oneRule()), { OrderId: 'CH-123' });
+  });
+
+  test('🔴 不污染源行对象（调用后 mainRow/oppRow 原字段未变）', () => {
+    const main = fvRow([1], { OrderId: 'GW-ORIG' });
+    const opp = fvRow([2], { channelOrderNo: 'CH-123' });
+    applyFieldValueOverrides(main, opp, oneRule());
+    assert.equal(main.OrderId, 'GW-ORIG', 'mainRow.OrderId 未被改写');
+    assert.equal(opp.channelOrderNo, 'CH-123', 'oppRow.channelOrderNo 未被改写');
+  });
+
+  test('🔴 seq 以字符串传入（"1"/"2"）经 Number 归一仍命中', () => {
+    const main = fvRow([1], { OrderId: 'GW' });
+    const opp = fvRow([2], { channelOrderNo: 'CH-123' });
+    assert.deepEqual(applyFieldValueOverrides(main, opp, oneRule({ mainTypeSeq: '1', oppTypeSeq: '2' })), { OrderId: 'CH-123' });
+  });
+
+  test('分组过滤：mainRow._types 不含 mainTypeSeq → 跳过', () => {
+    const main = fvRow([1], { OrderId: 'GW' });
+    const opp = fvRow([2], { channelOrderNo: 'CH-123' });
+    assert.deepEqual(applyFieldValueOverrides(main, opp, oneRule({ mainTypeSeq: 9 })), {});
+  });
+
+  test('分组过滤：oppRow._types 不含 oppTypeSeq → 跳过', () => {
+    const main = fvRow([1], { OrderId: 'GW' });
+    const opp = fvRow([2], { channelOrderNo: 'CH-123' });
+    assert.deepEqual(applyFieldValueOverrides(main, opp, oneRule({ oppTypeSeq: 9 })), {});
+  });
+
+  test('源字段为 null/undefined → 赋空字符串（不阻断）', () => {
+    const main = fvRow([1], { OrderId: 'GW' });
+    const opp = fvRow([2], { channelOrderNo: null });
+    assert.deepEqual(applyFieldValueOverrides(main, opp, oneRule()), { OrderId: '' });
+  });
+
+  test('mainField / oppField 任一空 → 跳过该规则（不抛错）', () => {
+    const main = fvRow([1], { OrderId: 'GW' });
+    const opp = fvRow([2], { channelOrderNo: 'CH' });
+    const cfg = { fieldValue: { enabled: true, rules: [
+      { mainTypeSeq: 1, mainField: '', oppTypeSeq: 2, oppField: 'channelOrderNo' },
+      { mainTypeSeq: 1, mainField: 'OrderId', oppTypeSeq: 2, oppField: '' }
+    ] } };
+    assert.deepEqual(applyFieldValueOverrides(main, opp, cfg), {});
+  });
+
+  test('多规则部分命中：只写命中的规则', () => {
+    const main = fvRow([1], { OrderId: 'GW', MerchantId: 'M0' });
+    const opp = fvRow([2], { channelOrderNo: 'CH-1', merchantId: 'M-CH' });
+    const cfg = { fieldValue: { enabled: true, rules: [
+      { mainTypeSeq: 1, mainField: 'OrderId', oppTypeSeq: 2, oppField: 'channelOrderNo' },
+      { mainTypeSeq: 9, mainField: 'MerchantId', oppTypeSeq: 2, oppField: 'merchantId' }
+    ] } };
+    assert.deepEqual(applyFieldValueOverrides(main, opp, cfg), { OrderId: 'CH-1' });
+  });
+
+  test('行缺 _types → 返回空 overrides（防御）', () => {
+    assert.deepEqual(applyFieldValueOverrides({ OrderId: 'x' }, { channelOrderNo: 'y' }, oneRule()), {});
   });
 });

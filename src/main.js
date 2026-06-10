@@ -10756,18 +10756,21 @@ function registerNewAccountHandlers() {
   });
 
   // 流水对账单 文件选择
+  // v3.0.2 需求1b：支持批量多选（multiSelections），返回 filePaths 数组（全部合并导入到同一日期）。
+  //   ⚠️ pick-biz-op-file 不动（业务OP 仍单文件）。
   ipcMain.handle('bizOpRecon:import:pick-flow-file', async (_event, payload = {}) => {
     const { date } = payload || {};
     try {
       const result = await dialog.showOpenDialog({
-        title: `选择流水对账单 文件（日期 ${date || ''}）`,
-        properties: ['openFile'],
+        title: `选择流水对账单 文件（日期 ${date || ''}，可多选）`,
+        properties: ['openFile', 'multiSelections'],
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
       if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
         return { status: 'cancelled' };
       }
-      return { status: 'ok', filePath: result.filePaths[0] };
+      // 返回 filePaths 数组（前端按数组处理）；保留 filePath=首个以兼容潜在旧调用。
+      return { status: 'ok', filePaths: result.filePaths, filePath: result.filePaths[0] };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
@@ -10810,14 +10813,20 @@ function registerNewAccountHandlers() {
   // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
   trackedIpcHandle('bizOpRecon:import:run-flow', '业务OP数据核对', '导入文件', async (event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
-    const { date, filePath } = payload || {};
-    if (!date || !filePath) return { status: 'error', message: '入参缺失（date / filePath）' };
+    // v3.0.2 需求1b：接收 filePaths 数组（多文件合并到同一日期）。
+    //   兼容旧入参 filePath（单数）→ 归一为 [filePath]。校验：date 必填 + 至少一个文件。
+    const { date, filePaths, filePath } = payload || {};
+    const files = Array.isArray(filePaths) && filePaths.length > 0
+      ? filePaths
+      : (filePath ? [filePath] : []);
+    if (!date || files.length === 0) return { status: 'error', message: '入参缺失（date / filePaths）' };
     try {
       const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
       // v2.1.12-beta β.2-T2：默认 worker 化（同 run-biz-op）；readFlowFile 传作无 dbPath 回退用
+      // v3.0.2 需求1b：filePaths 透传 worker（单进程单事务合并、单次 clearByDate，禁止循环调用 runFlowImport）
       const result = await runFlowImport(database.db, {
         date,
-        filePath,
+        filePaths: files,
         dbPath: database.dbPath,
         readFlowFile,
         writeFlowErrorReportXlsx,
