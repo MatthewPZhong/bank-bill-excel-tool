@@ -9,6 +9,20 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.0.3（2026-06-10）
+
+v3.0.3 迭代：四个块、10 个 PR，分属三个领域——① 块 A 收单单据模块导入/对账性能批次；② 块 B 资金对账数据处理模块状态框「渠道:场景序号」明细；③ 块 C USER_GUIDE 重点补缺 6 章节 + 口语化；④ 块 D 通用大表导入引擎（导入侧）抽取 + 收单首迁（W4 达成）。质量门 `npm run release-check` 全绿（unit 2179 / integration 22 脚本（1086 断言）/ smoke 全模块 PASS）。⚠️ 多处资金红线：块 A 收单导入是金额/币种入库真理源 + 对账 SQL（以同 fixture 全流程 byte-for-byte 为放行闸）；块 D 导入链路整体换引擎（四方 harness + 全链 34 断言 byte-for-byte + 单行回退开关三重放行闸）；块 B 改资金对账处理模块展示层 + hitScenarios 统计结构（带 fallback 兼容旧落库数据）。
+
+### 新增
+
+- **通用大表导入引擎（导入侧）+ 收单首迁**（块 D · 🔴 资金红线 · PR-G1/G2/H）：把收单 yauzl + 手写字节扫描解析、rels 正解 sheet 定位、prepared INSERT 管道、大事务/整批拒绝/peek 预检/覆盖导入/checkpoint 等机械部分抽成带契约参数的共享库（`src/backend/big-table-import/`），收单作为首个迁移用户。PR-G1 引擎核心：zip-reader rels 正解定位唯一 sheet（多 sheet 显式报错）+ 🔴 row-scanner 单遍字节状态机（Buffer 扫 `<row` + 白名单 ref 串直接定位 + 仅取值局部解码）+ contract 三层防护，50w 解析段 4.26s vs P1b 9.87s = 2.32x、四方 harness（sax≡手写全列≡P1b≡引擎）全等。PR-G2 管道 + worker 化：多文件并行解析 → 按文件序单写 INSERT（rowid 序=串行 byte-for-byte）、4-worker 3.06x、cancel<5s、PRAGMA 第 5 处契约、内存闸。PR-H 收单迁移接线：契约模块 contract-flow（白名单 `{0,6,28,29}`）/contract-bill（全列）、session dispatch 引擎 worker（接口对 `main.js` 不变）、🔴 单行回退开关 `USE_BIG_TABLE_IMPORT_ENGINE`、新旧全链对比集成脚本 34 断言（六场景逐行含 rowid + 报错逐字符 byte-for-byte）、50w 端到端 11.2s→7.3s（1.53x）、导入全程主进程零阻塞（W4 达成）。
+- **资金对账数据处理模块状态框「渠道:场景序号」明细**（块 B · 🟡 展示层 + hitScenarios 统计结构 · PR-E）：状态框原 `场景 1、3` 在多渠道下有歧义。hitScenarios 增加 `channelId`/`channelName`（双维派发路径），去重键改 `` `${channelId}:${scenario.id}` ``（场景×渠道多对多不再吞并，`scenarioHitCount` 原语义不变）；状态框汇总行括号内按渠道分组换行（`已处理：45 行命中（场景\nJPM:1、3\nCITI:2），3 警告`），旧数据无 `channelName` 回退旧格式；🔴 legacy 单维路径结构不变（21+ 测试 0 regression）；防爆框护栏 `#bankStatementStatusBox` 加 `max-height: 140px` + 滚动，preview 已回归。
+- **USER_GUIDE 重点补缺 6 章节 + 口语化**（块 C · 🟢 纯文档 · PR-F）：新增「数据备份与恢复 / 设置参数指南 / 错误排查与日志 / 链接表管理详解 / 场景管理通用指南 / Windows 性能建议」6 章；§1.4 术语段口语化改写（保留 ⭐/🔴 标记惯例）。
+
+### 变更
+
+- **收单单据模块导入/对账性能批次**（块 A · 🔴 资金红线 · PR-A~D + PR-P1）：PR-A flow 表 `raw_json` 永久停写（O-1 决议，列保留恒写 `''`、无 migration、存量行不动）+ bill 模板键列下标预计算 → 50w 行 flow 导入段实测 6.36x。PR-B 收单索引瘦身 v2 迁移（DROP 4 冗余索引 + 建 2 covering 索引）→ 对账统计段实测 5.2x（3 次 JOIN 合 1 + COALESCE 空集守卫）。PR-C PRAGMA 契约补齐 `temp_store=MEMORY`（两处 worker）+ 收单导入 COMMIT 后 `wal_checkpoint(TRUNCATE)`（Windows 写放大 W2）+ 对账多 worker 启用阈值 30w 行（O-2 决议直接合入）。PR-D Windows OneDrive 存储检测提示（一次性提醒，W5/O-3 决议：检测提示 + 文档）。PR-P1 解析列白名单裁剪 + 直接定位（flow 4/48 列），解析段 1.20x 收口（O-5 五次修订：实测天花板 ~1.4x，性能债务转引擎 PR-G 字节层）。
+
 ## v3.0.2（2026-06-10）
 
 v3.0.2 迭代：3 项需求分属三个模块——① 业务OP数据核对「导入流水表」批量多选导入 + 回滚 v3.0.1 左列右移；② 「对账单 ReconID 修复」改名「对账单修复」（纯 UI 文案）；③ 网关对账单修复场景配置新增「修复订单字段取值」+「修复订单ID取值」启用开关（含用户修订：字段取值限定「网关1v1渠道」模式 + 两功能 row 改垂直布局）。质量门 `npm run release-check` 全绿（unit 2085 / integration 19 脚本（1011 断言）/ smoke 全过）。⚠️ 两处资金红线：需求1b 流水批量导入单事务合并、单次 clearByDate；需求3 字段取值赋值不污染原始行 + 分组 seq 全程 Number + idEnabled=false 保留原值。

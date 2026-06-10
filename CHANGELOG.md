@@ -1,5 +1,32 @@
 # Changelog
 
+## 3.0.3 - 2026-06-10
+
+v3.0.3 迭代（四个块、10 个 PR，分属三个领域）：① 块 A 收单单据模块导入/对账性能批次（flow 停写 raw_json + 预计算 + 索引瘦身 + 单遍 JOIN stats + PRAGMA/checkpoint/闸值 + OneDrive 提示 + 解析列裁剪）；② 块 B 资金对账数据处理模块状态框「渠道:场景序号」明细；③ 块 C USER_GUIDE 重点补缺 6 章节 + 口语化；④ 块 D 通用大表导入引擎（导入侧）抽取 + 收单首迁（W4 达成）。质量门 `npm run release-check` 全绿（**unit 2179 / integration 22 脚本（1086 断言）/ smoke 全模块 PASS**）。⚠️ 多处资金红线：块 A 收单导入是金额/币种入库真理源 + 对账 SQL（P0-1 停写 raw_json / P0-4 单遍 JOIN / P0-3 covering 均以同 fixture 全流程 byte-for-byte 为放行闸）；块 D 导入链路整体换引擎（四方 harness + 全链 34 断言 byte-for-byte + 单行回退开关三重放行闸）；块 B 改资金对账处理模块展示层 + hitScenarios 统计结构（带 fallback 兼容旧落库数据）。
+
+### 新增
+
+- **块 D：通用大表导入引擎（导入侧）+ 收单首迁**（🔴 资金红线 · `src/backend/big-table-import/` 新增 · PR-G1/G2/H）：把收单现有 yauzl + 手写字节扫描解析、rels 正解 sheet 定位、prepared INSERT 管道、大事务/整批拒绝/peek 预检/覆盖导入/checkpoint 等机械部分抽成带契约参数的共享库，收单作为首个迁移用户。
+  - **PR-G1 引擎核心**（`zip-reader.js` / `row-scanner.js` / `contract.js`）：zip-reader 做 rels 正解定位唯一 sheet（发现多 sheet 显式报错，杜绝收单现状硬编码 sheet1 的静默丢数据模式）；🔴 row-scanner 为**单遍字节状态机**——Buffer 上扫 `<row` 边界 + 白名单 ref 串预编码直接定位 + 仅对取值局部解码（不再全量转 JS 字符串）；contract 三层防护（静态推导校验拒绝带病启动 + byte-for-byte harness + 默认全列安全）。**50w 解析段 4.26s vs PR-P1b 9.87s = 2.32x**（偿清 P1 转入债务）；四方 harness（sax 基线 ≡ 手写全列 ≡ P1b 手写白名单 ≡ 引擎字节层）逐行逐列值/monthKey/importedCount/错误信息全等。
+  - **PR-G2 管道 + worker 化**（`engine.js` / `pipeline.js` / `import-worker.js` / `engine-worker-entry.js`）：多文件并行解析 → 按文件序单写 INSERT（rowid 序 = 串行导入 byte-for-byte），**4-worker 3.06x**、cancel<5s、PRAGMA 第 5 处契约成员（继 database.js / run-check-worker / run-check-multiworker-worker / biz-op import-worker）、内存闸（freemem<2GB 降并行度）。
+  - **PR-H 收单迁移接线**（`acquiring-bill-currency-import/contract-flow.js` / `contract-bill.js` / `acquiring-bill-currency-session.js`）：flow 契约白名单 `{0,6,28,29}`、bill 全列；session dispatch 引擎 worker（接口对 `main.js` 不变）；🔴 **单行回退开关 `USE_BIG_TABLE_IMPORT_ENGINE`**（出问题一行回退直调 reader-handrolled）；新旧全链对比集成脚本 **34 断言**（成功 / UNIQUE 冲突 / 跨月 / 坏表头 / overwrite / bill raw_json 六场景逐行含 rowid + 报错逐字符 byte-for-byte）；**50w 端到端 11.2s→7.3s（1.53x）**，导入全程主进程零阻塞（W4 体验目标达成）。
+- **块 B：资金对账数据处理模块状态框「渠道:场景序号」明细**（🟡 展示层 + hitScenarios 统计结构 · `scenario-dispatcher.js` / `renderer.js` / `styles-gemini-extra.css` · PR-E）：状态框原显示 `已处理：45 行命中（场景 1、3），3 警告`，其中场景序号是「每渠道内 1-based 序号」，多渠道下「场景 1」有歧义。
+  - **hitScenarios 增加 `channelId`/`channelName`**（双维派发路径从当前批次 channel 上下文取），**去重键** `scenario.id` → `` `${channelId}:${scenario.id}` ``：场景×渠道是多对多（`scenario_applicable_channels` 表），同一场景在第二个渠道命中不再被去重吞掉；`scenarioHitCount` 原语义不变。
+  - **状态框汇总行**括号内按渠道分组换行：`已处理：45 行命中（场景\nJPM:1、3\nCITI:2），3 警告`；🔴 旧 `processingResult` 持久化数据（无 `channelName`）回退旧格式 `场景 1、3`（兼容历史落库数据）。
+  - 🔴 **legacy 单维路径结构保持不变**（21+ 测试 0 regression）：渠道字段/新去重键只加在双维路径。
+  - **防爆框护栏**：`#bankStatementStatusBox` 加 `max-height: 140px` + 滚动；preview 已回归。
+
+### 变更
+
+- **块 A：收单单据模块导入/对账性能批次**（🔴 资金红线 · 收单 import-repository / run-repository / migrations / database / 各 worker / session · PR-A~D + PR-P1）：
+  - **PR-A**（`import-repository.js` / `run-repository.js`）：flow 表 `raw_json` 永久停写（O-1 决议，列保留恒写 `''`、`NOT NULL` 满足、无 migration、存量行不动）+ bill 模板键列下标预计算（消 per-row `require` + 9×`indexOf`）→ **50w 行 flow 导入段实测 6.36x**；`computeRunStats` 两 JOIN 合并为一遍 + 空集 `COALESCE` 守卫。
+  - **PR-B**（`migrations.js`）：收单索引瘦身 v2 迁移（DROP 4 个冗余索引 + 建 2 个 covering 索引 `(month_key, recon_main_id, settle_currency_norm)`）→ **对账统计段实测 5.2x**（3 次 JOIN 合 1 + COALESCE 空集守卫）；EXPLAIN QUERY PLAN 验证无全表扫描回归。
+  - **PR-C**（`run-check-multiworker-worker.js` / biz-op `import-worker.js` / 收单 session）：PRAGMA 契约补齐 `temp_store=MEMORY`（两处 worker）+ 收单导入 COMMIT 后 `wal_checkpoint(TRUNCATE)`（Windows 写放大链 W2 收编，失败仅记日志）+ 对账多 worker 启用阈值下调至 30w 行（O-2 决议直接合入）。
+  - **PR-D**（`main.js` / settings 防重 key）：Windows OneDrive 存储检测提示（win32 且导出目录含 OneDrive 时启动一次性提醒，W5/O-3 决议：检测提示 + 文档）。
+  - **PR-P1**（`reader-handrolled.js`）：解析列白名单裁剪 + 直接定位（flow 仅取 4/48 列），解析段 **1.20x** 收口（O-5 五次修订：实测证明当前行切块架构下天花板 ~1.4x，剩余性能债务转入块 D PR-G 字节层 row-scanner，harness 供 PR-G/H 复用）。
+
+> **v3.0.3 收口**：四个块、10 个 PR 经 team-lead 拆分委托 dev 逐 PR 实施、逐 PR `release-check` 验收全绿。块 D 偿清块 A PR-P1 转入的解析性能债务（字节层 row-scanner 单文件解析 2.32x、4-worker 并行 3.06x、收单端到端 1.53x，导入全程主进程零阻塞 = W4 达成）。测试扩建：新旧全链对比集成脚本（34 断言 byte-for-byte）、四方解析 harness 全等、收单 contract-flow/bill 白名单三层防护。⚠️ 已知限制（用户接受）：① 100w 解析 1.96x 略低于 2x（结构性约束，50w 基准达标）；② perFileStats 占位（renderer 不消费）；③ 金额/币种解析函数在 contract-flow/bill 与 import-repository 双副本，改任一侧须同步（集成脚本 + `rules/important-variables.md` 已锁）。详见 `docs/iterations/v3.0.3/` PRD + `changes/v3.0.3/` `acquiring-import-recon-perf/` `big-table-import-engine/` 各 spec。
+
 ## 3.0.2 - 2026-06-10
 
 v3.0.2 迭代（3 项需求，分属三个模块）：① 业务OP数据核对「导入流水表」改批量多选导入 + 回滚 v3.0.1 左列右移；② 「对账单 ReconID 修复」模块改名「对账单修复」（纯 UI 文案，内部标识全不动）；③ 网关对账单修复场景配置新增「修复订单字段取值」+「修复订单ID取值」启用开关（含用户修订：字段取值限定「网关1v1渠道」模式 + 两功能 row 改垂直布局）。质量门 `npm run release-check` 全绿（**unit 2085 / integration 19 脚本（1011 断言）/ smoke 全过**）。⚠️ 两处资金红线：需求1b 流水批量导入**单进程单事务合并、单次 `clearByDate`**（禁循环致互相覆盖）；需求3 字段取值赋值**不污染原始行 + 分组 seq 全程 Number + idEnabled=false 保留原值**。
