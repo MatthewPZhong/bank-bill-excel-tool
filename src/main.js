@@ -64,6 +64,8 @@ const { loadGatewayReconHeaders, GATEWAY_RECON_HEADERS_FILE_NAME } = require('./
 //   - LINKED_IMPORT_SIGNATURES：链接表「导入」按钮候选集 = 4 张 linked 签名 + 入金表签名（v2.1.16-beta.3 ②）
 //   - linkedTableReaders.readRowsWithMetadata：读全部有意义行（交割表表头在第 2 行，滑窗自动定位）
 const { detectTableType } = require('./main-process/table-type-detector');
+// v3.0.3 PR-D（W5）：检测工作目录是否落在 OneDrive 同步路径（纯函数，启动后单次 toast 用）
+const { isStorageRootOnOneDrive } = require('./main-process/onedrive-detector');
 // v3.0.0 块 B / PR-2：大文件链接表流式落库——单 sheet .xlsx 边解压边逐行喂入仓储事务（内存恒定，不全量读进内存）
 // v2.1.16 阶段一 A5：批量导入（按表头识别）按 scope='preprocess' 过滤候选
 //   PREPROCESS_TABLE_SIGNATURES：银行对账单 / 中台退款订单 / 入账原始订单（期权 TODO 不在内）
@@ -12418,6 +12420,13 @@ app.whenReady()
       });
     }
 
+    // v3.0.3 PR-D（W5）：OneDrive 导出目录提示（启动后单次 toast）
+    //   spec acquiring-import-recon-perf §9.4 — 仅 Windows + 工作目录命中 OneDrive 同步路径 + 未提示过 → 弹 Notification。
+    //   setImmediate 异步不阻塞窗口 ready（与上面 fix10 startup cleanup 同风格）；失败仅静默兜底。
+    setImmediate(() => {
+      notifyOneDriveStorageIfNeeded();
+    });
+
     // v2.1.10 A3 Phase 2 T14：注册 worker pool failure listener
     //   - worker exit (code≠0) / error 事件 → pool 自动 reject activeJob + 调本回调
     //   - 主进程职责：① 释放 op lock；② Notification 通知用户；③ activity log；④ 下次 dispatch cold-start（pool 自动 — workerInstance=null）
@@ -12596,6 +12605,42 @@ function triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded() {
       }
     });
   });
+}
+
+// v3.0.3 PR-D（W5）：OneDrive 导出目录提示（spec acquiring-import-recon-perf §9.4 / §二-W5）
+//   触发链路：app.whenReady → createWindow 后 setImmediate 调用本函数（主窗口已可用）。
+//   触发条件全 AND：
+//     (1) 平台 win32 且 ensureStorageRoot() 路径命中 OneDrive（isStorageRootOnOneDrive 内含平台门控）
+//     (2) 未提示过（防重 key win_onedrive_storage_notice_shown != '1'）
+//   命中 → 弹 Electron Notification（OneDrive 同步会拖慢大文件导出/导入）→ 置防重 key（只提示一次）。
+//   ⚠️ Notification 直接构造：notifyAcquiringBillCurrencyResult 是 IPC handler 闭包内局部函数，模块顶层访问不到；
+//      沿用其同款 Notification.isSupported() 兜底（无 GUI 的 CI / SSH 头环境不弹）。
+//   失败容忍：全程 try/catch，任何异常仅记日志，不影响启动；防重 key 仅在成功 show 后置位。
+function notifyOneDriveStorageIfNeeded() {
+  try {
+    if (!database || !database.db) return;
+    const storageRoot = ensureStorageRoot();
+    if (!isStorageRootOnOneDrive(storageRoot)) return;
+    if (database.hasShownWinOneDriveStorageNotice()) return;
+    if (!Notification || typeof Notification.isSupported !== 'function' || !Notification.isSupported()) return;
+    new Notification({
+      title: '导出目录位于 OneDrive 同步路径',
+      body: '大文件导出可能变慢，建议在 OneDrive 设置中排除该目录'
+    }).show();
+    // 提示成功后才置防重 key（show 失败则下次启动可重试）
+    database.markWinOneDriveStorageNoticeShown();
+  } catch (err) {
+    try {
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'storage',
+        message: '[storage] OneDrive 目录提示失败（不影响启动）',
+        details: [err && err.message ? err.message : String(err)],
+        stack: err && err.stack ? err.stack : undefined
+      });
+    } catch (_logErr) { /* swallow */ }
+  }
 }
 
 // v2.1.8 N1' (v0.7)：idle 30min 自动 cleanup 计时器（spec §3.2.2）

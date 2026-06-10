@@ -1122,9 +1122,12 @@ async function caseF2_billDateNormalize() {
     await session.importBillFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'bill.xlsx')] });
 
     // 断言：raw_json 「账单日期」字段是归一化后的 YYYY-MM-DD
+    // P0-1（acquiring-import-recon-perf · O-1 2026-06-10）：flow raw_json 永久停写为 ''，
+    //   flow 侧 normalizeBillDate 调用随 rawObj 一并删除（原 flow 断言改为断言 ''）；
+    //   bill 侧 raw_json 仍写 9 模版字段，「账单日期」归一断言保留。
     const flowJson = db.db.prepare("SELECT raw_json FROM acquiring_bill_currency_flow_imports WHERE recon_main_id = 'F2_1'").get().raw_json;
     const billJson = db.db.prepare("SELECT raw_json FROM acquiring_bill_currency_bill_imports WHERE recon_main_id = 'F2_1'").get().raw_json;
-    assertEq(JSON.parse(flowJson)['账单日期'], '2026-03-10', 'F2.flow raw_json 账单日期归一化');
+    assertEq(flowJson, '', 'F2.flow raw_json 停写为空字符串（P0-1）');
     assertEq(JSON.parse(billJson)['账单日期'], '2026-03-10', 'F2.bill raw_json 账单日期归一化');
 
     // 集成：跑 run + 输出 diff xlsx，sheet 名不含 `/`

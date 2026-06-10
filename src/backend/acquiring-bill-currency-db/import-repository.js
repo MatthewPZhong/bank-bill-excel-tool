@@ -24,6 +24,17 @@ const BILL_INSERT_SQL = `
 
 const { normalizeBillDate } = require('../acquiring-bill-currency-import/validator');
 
+// P0-2（acquiring-import-recon-perf）：模块顶部一次性 require columns + 预计算字段下标映射，
+//   替换原 insertBillRow 内每行 `require('./columns')` + 9×`BILL_HEADERS.indexOf()`（per-row 开销）。
+//   通用模式（spec §8.3 留缝）：「headers 契约 → 下标映射」的纯数据，不内联业务专名，便于 O-7 引擎复用。
+//   注：P0-1 落地后 flow 侧已不再构造 raw_json，故不再需要 FLOW_HEADERS（此处只用 BILL 侧 2 个常量）。
+const { BILL_HEADERS, TEMPLATE_BILL_HEADERS } = require('./columns');
+
+// TEMPLATE 9 字段 → BILL_HEADERS 下标（模块加载时一次性算出；过滤掉不在 BILL_HEADERS 的字段做防御）
+const TEMPLATE_BILL_KEY_INDICES = TEMPLATE_BILL_HEADERS
+  .map((key) => [key, BILL_HEADERS.indexOf(key)])
+  .filter(([, idx]) => idx >= 0);
+
 function normalizeCurrency(value) {
   if (value === null || value === undefined) return '';
   return String(value).trim().toLowerCase();
@@ -56,18 +67,14 @@ function insertFlowRow(stmt, { monthKey, sourceFile, row, importedAt }) {
   const settleAmountAbs = settleAmount === '' ? '' : parseAmountAbs(settleAmountRaw, '通道清算金额');
   const settleCurrency = String(values[29] /* 通道清算币种（v0.7 fix4 从 values[13] 切换） */ || '').trim();
   const settleCurrencyNorm = normalizeCurrency(values[29]);
-  // raw_json：用 FLOW_HEADERS 作为 key 序列化（writer 还原原 xlsx 时按 key 取值）
-  const rawObj = {};
-  const FLOW_HEADERS = require('./columns').FLOW_HEADERS;
-  for (let i = 0; i < FLOW_HEADERS.length; i++) {
-    rawObj[FLOW_HEADERS[i]] = values[i] === undefined ? '' : String(values[i]);
-  }
-  // PR #50 reviewer finding F2：raw_json 写入前归一化「账单日期」为 YYYY-MM-DD
-  // 原值可能是 `2026/3/10` / `2026-03-10 03:45:56` 等格式，writer 的 fmtSheetName 仅识别 YYYY-MM-DD
-  // 且 SQL `GROUP BY json_extract($."账单日期")` 按归一化后日期分组（避免格式差异拆成两组）
-  rawObj[FLOW_HEADERS[0]] = normalizeBillDate(rawObj[FLOW_HEADERS[0]]);
-  const rawJson = JSON.stringify(rawObj);
-  stmt.run(monthKey, sourceFile, rowIndex, reconMainId, settleAmount, settleAmountAbs, settleCurrency, settleCurrencyNorm, rawJson, importedAt);
+  // P0-1 决议（acquiring-import-recon-perf · O-1 已决 2026-06-10）：flow raw_json 永久停写，写 ''。
+  //   依据：全代码库零消费实证 —— writer 仅读 bill_raw_json（writer.js）；对账 SQL 只取
+  //   settle_currency_norm / settle_amount 单列；差异表「流水侧」字段来自 diff_rows.flow_currency /
+  //   flow_amount_abs 快照列（run-repository.insertDiffRowsByJoin 写入），不依赖 flow_imports.raw_json。
+  //   schema `raw_json TEXT NOT NULL` 由 '' 满足（无需 migration；存量行不动）。
+  //   连带：随 rawObj 删除原「账单日期」normalizeBillDate 调用（它只服务 raw_json 内容；
+  //   month_key 来自 reader 层 extractMonthKey，不受影响）。bill 侧的 normalizeBillDate 调用保留。
+  stmt.run(monthKey, sourceFile, rowIndex, reconMainId, settleAmount, settleAmountAbs, settleCurrency, settleCurrencyNorm, '', importedAt);
 }
 
 // v0.7 fix4：单据侧列号不变（仍 values[19] 即「对账币种」），仅 DB 字段名同步为 settle_currency
@@ -86,11 +93,10 @@ function insertBillRow(stmt, { monthKey, sourceFile, row, importedAt }) {
   //     - 新写：本函数按 TEMPLATE_BILL_HEADERS 投影（本 commit）
   //   下游消费方仅 writer.js + run-repository 4 处 SQL json_extract '$."账单日期"'
   //   都在 9 字段内，无 break
-  const { BILL_HEADERS, TEMPLATE_BILL_HEADERS } = require('./columns');
+  // P0-2（acquiring-import-recon-perf）：原每行 `require('./columns')` + 9×`indexOf` 改用
+  //   模块顶部预计算的 TEMPLATE_BILL_KEY_INDICES（纯等价重构，行为零变化）。
   const rawObj = {};
-  for (const key of TEMPLATE_BILL_HEADERS) {
-    const idx = BILL_HEADERS.indexOf(key);
-    if (idx < 0) continue; // 防御：模版字段不在 BILL_HEADERS 中（不会发生，留作未来扩展兜底）
+  for (const [key, idx] of TEMPLATE_BILL_KEY_INDICES) {
     rawObj[key] = values[idx] === undefined ? '' : String(values[idx]);
   }
   // PR #50 reviewer finding F2：raw_json 写入前归一化「账单日期」为 YYYY-MM-DD（writer fmtSheetName / SQL GROUP BY 依赖）

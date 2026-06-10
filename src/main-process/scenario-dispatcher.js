@@ -27,6 +27,13 @@
 //   - 行元数据扩展：_hitChannelKey / _matchStatus / _matchedChannelId / _fallbackChannelId
 //   - v2.1.8 N3-1 hitScenarios displayIndex 输出格式不变（renderer.js:3345 状态框依赖）
 //
+// v3.0.3 PR-E（状态框「银行渠道枚举值:场景序号」换行明细）：
+//   - 仅双维路径：hitScenarios 元素附带 channelId（number）+ channelName（string，channels.name；通用渠道为「通用」）
+//     → renderer 状态框按 channelName 分组展示「渠道名:序号」（legacy 路径无此二字段，状态框回退原格式）
+//   - 仅双维路径：去重键由 scenario.id 改为模板串 `${channelId}:${scenario.id}`
+//     （场景与渠道多对多 → 同场景在多个渠道各命中应各记一条 hitScenarios）
+//   - legacy 单维路径完全不动（结构 {id, displayIndex, name} + 去重键 = scenario.id 保持现状）
+//
 // v2.1.9 SR-FIX-1 (spec §16.2 🔴 资金红线 / PR #53 self-review SR1 #1/#2 修复)：
 //   - 删除原 dispatchSingleRow / firstMatchWinsForRow（per-row 路径打破 C3 1v1 不变量 + 让 C2 笛卡尔配对失效）
 //   - 新增 runChannelBatch helper（per-channel 子作用域 first-match-wins 批量调度，等同 v2.1.8 legacy 单维行为）
@@ -130,6 +137,9 @@ function groupScenariosByChannelId(scenarios) {
 //     errorReport: Array<{ scenarioId, scenarioName, rowId, code, message }>,
 //     stats: { totalRows, hitRowCount, unmatchedRowCount, scenarioHitCount, hitScenarios, warningCount, skippedC3Count, skippedC4Count }
 //     hitScenarios: v2.1.8 N3-1 — Array<{id, displayIndex, name}>（按命中顺序，priority desc + id asc）
+//       v3.0.3 PR-E：双维路径每元素附带 channelId（number）+ channelName（string）；
+//         去重键 = `${channelId}:${scenario.id}`（同场景跨渠道命中各记一条）。
+//         legacy 单维路径不附带此二字段，去重键仍为 scenario.id。
 //   }
 function runAllScenarios(bankRows, gwRows, scenarios, deps) {
   if (!Array.isArray(bankRows)) {
@@ -293,8 +303,12 @@ function runLegacySingleDimensionDispatch(bankRows, gwRows, filtered, ctx) {
 //   rowMeta: 跨 channel 共享的行 metadata Map（in/out）
 //   allModifications / allWarnings: 跨 channel 共享的输出累加器
 //   hitScenarioIdSet / hitScenarios: 跨 channel 共享的 hitScenarios 去重 + 列表
+//     v3.0.3 PR-E：去重键 = `${hitChannelId}:${scenario.id}`（场景与渠道多对多 →
+//       同场景在不同 channel 批次各命中应各记一条 hitScenarios）
 //   scenarioHitCountRef: { value }（ref 包装；同步回外层 totals）
-//   hitChannelId: 本批属于哪个 channel id（写入命中行 metadata）
+//   hitChannelId: 本批属于哪个 channel id（写入命中行 metadata + hitScenarios.channelId）
+//   hitChannelName: v3.0.3 PR-E — 本批 channel 的 name（channels.name；通用渠道为「通用」），
+//     写入 hitScenarios.channelName 供 renderer 状态框按渠道分组展示
 //   matchedChannelMap: rowId → matchedChannel（用于命中行 metadata，但 channel 阶段判定由外层完成）
 function runChannelBatch(args) {
   const {
@@ -304,6 +318,8 @@ function runChannelBatch(args) {
     hitScenarioIdSet, hitScenarios,
     scenarioHitCountRef,
     hitChannelId,
+    // v3.0.3 PR-E：本批 channel 的 name（写入 hitScenarios.channelName）
+    hitChannelName,
     // v2.1.13 D-3：行→matchedChannel 映射（builtin-fixed 适用渠道逐行过滤用；阶段 A/B 都传）
     rowMatchedChannelMap
   } = args;
@@ -338,12 +354,18 @@ function runChannelBatch(args) {
 
     if (lockedRowIds && lockedRowIds.size > 0) {
       scenarioHitCountRef.value += 1;
-      if (!hitScenarioIdSet.has(scenario.id)) {
-        hitScenarioIdSet.add(scenario.id);
+      // v3.0.3 PR-E：去重键由 scenario.id → `${hitChannelId}:${scenario.id}`。
+      //   场景与渠道多对多 — 同一场景在多个 channel 批次命中应各记一条（状态框按渠道分组展示需要）。
+      const hitKey = `${hitChannelId}:${scenario.id}`;
+      if (!hitScenarioIdSet.has(hitKey)) {
+        hitScenarioIdSet.add(hitKey);
         hitScenarios.push({
           id: scenario.id,
           displayIndex: Number.isFinite(scenario.displayIndex) ? scenario.displayIndex : scenario.id,
-          name: scenario.name
+          name: scenario.name,
+          // v3.0.3 PR-E：附带命中渠道 id/name（renderer 状态框按 channelName 分组「渠道名:序号」）
+          channelId: hitChannelId,
+          channelName: hitChannelName
         });
       }
       lockedRowIds.forEach((rowId) => {
@@ -444,6 +466,11 @@ function runDualDimensionDispatch(bankRows, gwRows, filtered, deps, ctx) {
     );
     if (candidateRows.length === 0) continue;
 
+    // v3.0.3 PR-E：解析专属 channel name（hitScenarios.channelName 用；仅有候选行时查 1 次）。
+    //   场景子集已属同一 channelId，channel 缺失（理论不应发生）兜底空串 → renderer 回退原格式。
+    const channelRow = channelsRepo.getChannelById(db, channelId);
+    const channelName = channelRow ? channelRow.name : '';
+
     runChannelBatch({
       scenarios: channelScenarios,
       bankRows: candidateRows,
@@ -453,6 +480,7 @@ function runDualDimensionDispatch(bankRows, gwRows, filtered, deps, ctx) {
       hitScenarioIdSet, hitScenarios,
       scenarioHitCountRef,
       hitChannelId: channelId,
+      hitChannelName: channelName,
       rowMatchedChannelMap
     });
   }
@@ -473,6 +501,8 @@ function runDualDimensionDispatch(bankRows, gwRows, filtered, deps, ctx) {
         hitScenarioIdSet, hitScenarios,
         scenarioHitCountRef,
         hitChannelId: generalChannel.id,
+        // v3.0.3 PR-E：通用渠道 name（channels-repository GENERAL_NAME = '通用'）
+        hitChannelName: generalChannel.name,
         rowMatchedChannelMap
       });
     }

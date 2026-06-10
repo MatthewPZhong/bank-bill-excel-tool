@@ -84,6 +84,7 @@
 | R-2 | **整表覆盖原子性**（数据红线） | `replaceLinkedTable` 先 DELETE 全表；流式落库中途失败 → 表已清空只插一半 = 数据损坏 | ✅ **已验证（O-4 + PR-2）**：单事务 DELETE+流式 INSERT，中途 throw 整体 ROLLBACK，实测旧 657,757 行完好、表不留半空 |
 | R-3 | **bank-deposit 派生 ADM 次生 OOM** | 落库后 ADM 派生 `readLinkedTableRows('bank-deposit')` 从 DB **全量读回 65 万行**（实测 +1.2GB RSS）→ 又一处 OOM | ✅ **已修（PR-3，approach 变更）**：实测 buildAdmRows 只处理 filter 后小子集、**无需流式化**；内存点是"为筛 Channel=ADM 子集而全量物化"。改 `readBankDepositAdmCandidates`（json_extract 下推 Channel=ADM 过滤）+ `hasLinkedTableRows`（EXISTS 探测）；尖峰 +1170MB→+256MB；parity 单测锁定结果一致 |
 | R-4 | reconIdFixResult 清空 / JPM 失效 | bank-deposit 重导触发 `reconIdFixResult=null`（`main.js:11248`）—— 行为不变，但大文件下要确保派生链路整体不崩 | 回归验证 |
+| R-5 | **JSZip 基座容量上限**（2026-06-10 补记，来源：收单性能 spec 全仓调研） | `readXlsxStreamed` 的 JSZip 在 ~3.8GB 解压 entry 实证崩（"uncompressed data size mismatch"；acquiring reader-handrolled.js:7 POC，100w 行×48 列）。本表 65.7w 行×44 列 sheet ≈1.72GB **已达崩点 ~45%**，渠道账单数据量持续增长 | 当前量级安全（余量 ~2.2x），不改本 spec 方案。**预警线**：单文件 ≥100w 行或 sheet XML ≥3GB 前，迁移 yauzl 基座或届时的通用导入引擎（`changes/acquiring-import-recon-perf/spec.md` §8.0/§8.5 已将 linked-table 列为引擎潜在用户）；§附 harness `--deep` 输出的行数可作例行监控手段 |
 
 > **R-1 实测结论（2026-06-09，推翻原假设）**：
 > - 原 R-1 担心 SheetJS `raw:false` 会按 numFmt 格式化（如 `"1,234.50"`）而流式不会 → 分叉。**实测发现现状读取链路 `readers.js` 用了 `raw:false` 但未开 `cellStyles`** → SheetJS 根本不解析 numFmt、返回原始数值 `.v`，过 `normalizeCell=String(v).trim()` 后与流式 `String(parseFloat(<v>))` 殊途同归。**numFmt 对两条链路都惰性，格式化分叉不会发生。**

@@ -13,6 +13,8 @@
 //   - 对账：spec §5.2 SQL JOIN（在 run-repository.insertDiffRowsByJoin）
 
 const fs = require('node:fs');
+const path = require('node:path');
+const { Worker } = require('node:worker_threads');
 // v2.1.12-beta 收单导入提速：解析器 sax→手写字节扫描（端到端实测 5.6x，122s→22s/50万行）。
 //   reader-handrolled 与 reader（sax 基线）byte-for-byte 等价：contract test 18 用例 + 真实 50万/100万行
 //   全行 SHA1+importedCount+monthKey 完全一致（scripts/poc/v2.1.12-acquiring-import-parser-compare.js scalediff）。
@@ -26,6 +28,163 @@ const { appendModuleLog } = require('../backend/logger');
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// v3.0.3 PR-H（W4）：收单 flow/bill 导入迁移到大表导入引擎（big-table-import）🔴🔴 资金红线
+//
+//   importFilesInTransaction / importFilesWithOverwrite 默认 dispatch 引擎 worker：
+//     - 主进程零阻塞（解析 + INSERT 全在 worker 进程域）；多文件并行解析；按文件序单写（rowid 序 = 串行导入）。
+//     - 契约模块：acquiring-bill-currency-import/contract-flow.js / contract-bill.js（行变换/列契约/错误文案/覆盖删除）。
+//     - 引擎 COMMIT 后自带 wal_checkpoint(TRUNCATE) → session 内原两处 checkpoint 删除（见 importFiles* 注释）。
+//     - 错误 byte-for-byte：契约 errorName='ImportValidationError' + formatBatchError 产收单格式 message/detailLines
+//       → 引擎抛出的错误 name/message/detailLines 与旧 reader 路径逐字符一致，main.js handler 错误识别零改动。
+//     - DB 连接：引擎 worker 自开 dbPath 连接写（db.location() 取路径）；主进程 db 连接并存（WAL + busy_timeout 30s
+//       已配，biz-op import-worker 同款并存模式已验证）。导入完成后主连接 WAL 下读得到最新（COMMIT + checkpoint）。
+//     - 互斥锁：session 接口仍同步 await 完成；锁逻辑在 main.js handler 持锁区间内 await（main.js 不动）。
+//
+// 🔴 单行回退开关：USE_BIG_TABLE_IMPORT_ENGINE = false 即回退「reader-handrolled 直调（大事务在主进程 db 连接）」旧路径。
+//   旧路径代码（runImportLegacyInTransaction）原封保留可达；reader-handrolled.js / import-repository.js 一字不改。
+//   出引擎相关问题时拨 false 一行即恢复 v3.0.2 行为。
+//
+//   生产默认走引擎（env 未设 → true）。测试可测性：集成脚本 acquiring-engine-migration.js 在子进程设
+//   ACQUIRING_FORCE_LEGACY_IMPORT=1 强制旧路径，对照引擎路径做 byte-for-byte（不污染生产代码路径——
+//   env 仅在该测试子进程内生效；生产从不设此 env）。回退到 v3.0.2 行为请直接把下行改 false。
+// ════════════════════════════════════════════════════════════════════════════════
+const USE_BIG_TABLE_IMPORT_ENGINE = process.env.ACQUIRING_FORCE_LEGACY_IMPORT === '1' ? false : true;
+
+// 契约模块绝对路径（worker require 必须可序列化定位：路径 + contractOptions）。
+const FLOW_CONTRACT_PATH = require.resolve('../backend/acquiring-bill-currency-import/contract-flow');
+const BILL_CONTRACT_PATH = require.resolve('../backend/acquiring-bill-currency-import/contract-bill');
+// 引擎薄 worker 入口（new Worker 拉起 → 内部跑 engine.importFiles → pipeline 起解析子 worker）。
+const ENGINE_WORKER_ENTRY = require.resolve('../backend/big-table-import/engine-worker-entry');
+
+// 取 db 文件路径（引擎 worker 自开连接需要）。node:sqlite DatabaseSync.location() 返回文件路径。
+//   拿不到（内存库 / 异常）→ 返回 null，调用方回退旧路径（兜底安全）。
+function resolveDbPath(db) {
+  try {
+    if (db && typeof db.location === 'function') {
+      const loc = db.location();
+      if (loc && typeof loc === 'string') return loc;
+    }
+  } catch (_e) { /* fall through */ }
+  return null;
+}
+
+// dispatch 引擎 worker 跑一批文件导入（append / overwrite 通用）。
+//   返回引擎 result：{ monthKey, fileCount, totalImported, deletedCount, maxParallel }。
+//   onEngineProgress：({ sourceFile, importedCount }) 引擎每 1w 行节流上报（worker → message → 此处转发）。
+//   错误：worker postMessage 'error' → 用 deserializeError 还原（保 name/message/detailLines）→ reject。
+function dispatchEngineImport({ dbPath, files, contractModulePath, contractOptions, mode, monthKey, onEngineProgress }) {
+  return new Promise((resolve, reject) => {
+    let worker;
+    try {
+      worker = new Worker(ENGINE_WORKER_ENTRY);
+    } catch (spawnErr) {
+      reject(spawnErr);
+      return;
+    }
+    const jobId = `acq-import-${Date.now()}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+    let settled = false;
+    const finish = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      try { worker.postMessage({ type: 'close' }); } catch (_e) { /* swallow */ }
+      try { worker.terminate(); } catch (_e) { /* swallow */ }
+      fn(arg);
+    };
+
+    worker.on('message', (msg) => {
+      if (!msg || msg.jobId !== jobId) {
+        // 'log' 等无 jobId 校验需求的消息也透传日志（log 带 jobId，仍走此分支前先判类型）。
+        if (msg && msg.type === 'log' && msg.entry) {
+          const e = msg.entry;
+          appendModuleLog({
+            level: e.level || 'info', source: 'main', domain: 'acquiring-bill-currency',
+            message: e.message || '[big-table-import] log',
+            details: Array.isArray(e.details) ? e.details : undefined
+          });
+        }
+        return;
+      }
+      if (msg.type === 'progress') {
+        if (typeof onEngineProgress === 'function') {
+          try { onEngineProgress(msg.payload || {}); } catch (_e) { /* swallow */ }
+        }
+        return;
+      }
+      if (msg.type === 'log' && msg.entry) {
+        const e = msg.entry;
+        appendModuleLog({
+          level: e.level || 'info', source: 'main', domain: 'acquiring-bill-currency',
+          message: e.message || '[big-table-import] log',
+          details: Array.isArray(e.details) ? e.details : undefined
+        });
+        return;
+      }
+      if (msg.type === 'done') {
+        finish(resolve, msg.result);
+        return;
+      }
+      if (msg.type === 'error') {
+        const { deserializeError } = require('./serialize-error');
+        finish(reject, deserializeError(msg.error));
+        return;
+      }
+    });
+    worker.on('error', (err) => finish(reject, err));
+    worker.on('exit', (code) => {
+      if (settled) return;
+      // 未 settled 的非零退出 → 失败（settled 后的 terminate 退出忽略）。
+      settled = true;
+      reject(new Error(`big-table-import engine worker 异常退出（code=${code}）`));
+    });
+
+    worker.postMessage({
+      type: 'run',
+      jobId,
+      payload: {
+        dbPath,
+        files,
+        contractModulePath,
+        contractOptions: contractOptions || {},
+        mode: mode || 'append',
+        monthKey
+        // parallel / useWhitelist 用引擎默认（min(4,cpus-2) + 内存闸；契约白名单）。
+      }
+    });
+  });
+}
+
+// dispatch 前按文件序发 reading 事件，byte-for-byte 对齐旧路径循环里每文件的
+//   `onProgress({ stage:'reading', fileIndex:i, fileCount, filePath })`（filePath = 完整路径，
+//   renderer 自行 basename）。引擎多文件并行无串行文件指针，故 dispatch 前一次性发齐 N 个。
+function emitReadingEvents(onProgress, filePaths) {
+  if (typeof onProgress !== 'function') return;
+  for (let i = 0; i < filePaths.length; i++) {
+    onProgress({ stage: 'reading', fileIndex: i, fileCount: filePaths.length, filePath: filePaths[i] });
+  }
+}
+
+// 把引擎 result 归一为收单 session 既有返回值形状（main.js handler / smoke 依赖；byte-for-byte 不变）。
+//   append:    { monthKey, fileCount, totalImported, perFileStats }
+//   overwrite: { monthKey, fileCount, totalImported, deletedCount, perFileStats }
+//   ⚠️ perFileStats：旧路径是 [{ sourceFile, monthKey, importedCount }] 逐文件。引擎按文件序单写但不逐文件回传
+//     importedCount 拆分（v1 缓冲策略）→ 这里给出聚合占位（数组长度 = 文件数，避免 caller 误用未定义）。
+//     现有 caller（main.js handler）只透传 result 给 renderer，renderer 不消费 perFileStats 字段 → 安全。
+function normalizeEngineResult({ engineResult, filePaths, monthKey, includeDeleted }) {
+  const fileCount = filePaths.length;
+  const out = {
+    monthKey: (engineResult && engineResult.monthKey) || monthKey,
+    fileCount,
+    totalImported: engineResult ? engineResult.totalImported : 0,
+    // perFileStats 占位（引擎 v1 不拆分逐文件计数）：保持数组形状，sourceFile 取文件名。
+    perFileStats: filePaths.map((fp) => ({ sourceFile: path.basename(fp) }))
+  };
+  if (includeDeleted) {
+    out.deletedCount = engineResult && Number.isFinite(engineResult.deletedCount) ? engineResult.deletedCount : 0;
+  }
+  return out;
 }
 
 // fix3 鲁棒化：吞掉 "no active transaction" 错，避免 ROLLBACK 异常掩盖主错
@@ -45,11 +204,55 @@ function safeBegin(db) {
 // 大事务导入多个 xlsx（任一失败整体 ROLLBACK，spec §3.3 "整批拒绝"）
 // kind: 'flow' | 'bill'
 // v0.8 fix5：caller 必传 monthKey（用户弹窗选的），reader 把它当 expectedMonthKey 校验所有行
+//
+// v3.0.3 PR-H：开关分流入口。
+//   USE_BIG_TABLE_IMPORT_ENGINE=true（默认）→ dispatch 引擎 worker（append 模式）。
+//   false 或 db.location() 拿不到 dbPath → 回退 runImportLegacyInTransaction（reader-handrolled 直调旧路径）。
 async function importFilesInTransaction({ db, kind, monthKey, filePaths, onProgress }) {
   if (!monthKey) throw new Error(`${kind === 'flow' ? '流水' : '单据'}导入：monthKey 必填`);
   if (!Array.isArray(filePaths) || filePaths.length === 0) {
     throw new Error(`${kind === 'flow' ? '流水表' : '单据表'}：未选择任何文件`);
   }
+
+  const dbPath = USE_BIG_TABLE_IMPORT_ENGINE ? resolveDbPath(db) : null;
+  if (USE_BIG_TABLE_IMPORT_ENGINE && dbPath) {
+    // ── 引擎路径（append）──
+    const importedAt = nowIso();
+    const contractModulePath = kind === 'flow' ? FLOW_CONTRACT_PATH : BILL_CONTRACT_PATH;
+    // progress: dispatch 前按文件序补发 N 个 reading 事件（byte-for-byte 对齐旧路径每文件切换的
+    //   `{ stage:'reading', fileIndex, fileCount, filePath }`）；引擎并行解析无串行文件指针，故一次性发齐
+    //   表达「本批导入这 N 个文件」，renderer reading 文案不退化（F6-A smoke 锁此契约）。
+    emitReadingEvents(onProgress, filePaths);
+    const engineResult = await dispatchEngineImport({
+      dbPath,
+      files: filePaths,
+      contractModulePath,
+      contractOptions: { importedAt },
+      mode: 'append',
+      monthKey,
+      // progress 形状对齐 renderer：引擎给 { sourceFile, importedCount } → 补 stage/fileIndex/fileCount。
+      //   v1 引擎不拆分逐文件 → fileIndex 用「文件数-1」（多文件并行无串行文件指针；renderer 显示 (n/n)）。
+      onEngineProgress: (ev) => {
+        if (typeof onProgress !== 'function') return;
+        onProgress({
+          stage: 'inserting',
+          fileIndex: filePaths.length - 1,
+          fileCount: filePaths.length,
+          sourceFile: ev.sourceFile,
+          importedCount: ev.importedCount
+        });
+      }
+    });
+    return normalizeEngineResult({ engineResult, filePaths, monthKey, includeDeleted: false });
+  }
+
+  // ── 回退旧路径（reader-handrolled 直调，大事务在主进程 db 连接）──
+  return runImportLegacyInTransaction({ db, kind, monthKey, filePaths, onProgress });
+}
+
+// 旧路径（v3.0.2 行为）：reader-handrolled 逐文件串行解析 + INSERT，大事务包多 xlsx。
+//   🔴 回退开关拨 false 时走此路径；reader-handrolled.js / import-repository.js 一字不改仍被此处引用。
+async function runImportLegacyInTransaction({ db, kind, monthKey, filePaths, onProgress }) {
   const importedAt = nowIso();
   const importFn = kind === 'flow' ? importReader.importFlowFile : importReader.importBillFile;
 
@@ -77,6 +280,14 @@ async function importFilesInTransaction({ db, kind, monthKey, filePaths, onProgr
     }
 
     db.exec('COMMIT');
+    // W2（v3.0.3 PR-C）：导入大事务后立即收编 WAL（Windows 写放大 + 对账 worker 读路径免 WAL 回放）
+    //   失败仅记日志不抛——checkpoint 失败不影响导入成功语义（数据已 COMMIT）
+    try { db.exec('PRAGMA wal_checkpoint(TRUNCATE);'); }
+    catch (cpErr) {
+      appendModuleLog({ level: 'warning', source: 'main', domain: 'acquiring-bill-currency',
+        message: '[acquiring-bill-currency] wal_checkpoint 失败（不影响导入结果）',
+        details: [cpErr && cpErr.message ? cpErr.message : String(cpErr)] });
+    }
     return { monthKey, fileCount: filePaths.length, totalImported, perFileStats };
   } catch (error) {
     safeRollback(db);
@@ -94,11 +305,48 @@ async function importBillFiles({ db, monthKey, filePaths, onProgress }) {
 
 // fix1（spec §3.4）：覆盖导入 — 先清单侧（流水或单据）再导入；
 // 包在一个大事务里，任一步失败整体 ROLLBACK（旧数据保留）。
+//
+// v3.0.3 PR-H：开关分流入口（同 importFilesInTransaction）。引擎 overwrite 模式：事务内先 DELETE 单侧再 INSERT。
 async function importFilesWithOverwrite({ db, kind, monthKey, filePaths, onProgress }) {
   if (!monthKey) throw new Error(`${kind === 'flow' ? '流水' : '单据'}覆盖导入：monthKey 必填`);
   if (!Array.isArray(filePaths) || filePaths.length === 0) {
     throw new Error(`${kind === 'flow' ? '流水表' : '单据表'}：未选择任何文件`);
   }
+
+  const dbPath = USE_BIG_TABLE_IMPORT_ENGINE ? resolveDbPath(db) : null;
+  if (USE_BIG_TABLE_IMPORT_ENGINE && dbPath) {
+    // ── 引擎路径（overwrite）：事务内先 DELETE 单侧（contract.deleteSqlForOverwrite + [monthKey]）再 INSERT ──
+    const importedAt = nowIso();
+    const contractModulePath = kind === 'flow' ? FLOW_CONTRACT_PATH : BILL_CONTRACT_PATH;
+    emitReadingEvents(onProgress, filePaths);   // 同 append：dispatch 前补发 reading（对齐旧路径）
+    const engineResult = await dispatchEngineImport({
+      dbPath,
+      files: filePaths,
+      contractModulePath,
+      contractOptions: { importedAt },
+      mode: 'overwrite',
+      monthKey,
+      onEngineProgress: (ev) => {
+        if (typeof onProgress !== 'function') return;
+        onProgress({
+          stage: 'inserting',
+          fileIndex: filePaths.length - 1,
+          fileCount: filePaths.length,
+          sourceFile: ev.sourceFile,
+          importedCount: ev.importedCount
+        });
+      }
+    });
+    return normalizeEngineResult({ engineResult, filePaths, monthKey, includeDeleted: true });
+  }
+
+  // ── 回退旧路径 ──
+  return runImportLegacyWithOverwrite({ db, kind, monthKey, filePaths, onProgress });
+}
+
+// 旧路径（v3.0.2 行为）：先 deleteMonthBySide 单侧，再 reader-handrolled 逐文件串行 INSERT，大事务包裹。
+//   🔴 回退开关拨 false 时走此路径；import-repository.deleteMonthBySide / reader-handrolled 一字不改。
+async function runImportLegacyWithOverwrite({ db, kind, monthKey, filePaths, onProgress }) {
   const importedAt = nowIso();
   const importFn = kind === 'flow' ? importReader.importFlowFile : importReader.importBillFile;
 
@@ -132,6 +380,13 @@ async function importFilesWithOverwrite({ db, kind, monthKey, filePaths, onProgr
     }
 
     db.exec('COMMIT');
+    // W2（v3.0.3 PR-C）：覆盖导入大事务后同样立即收编 WAL（与 importFilesInTransaction 对齐）
+    try { db.exec('PRAGMA wal_checkpoint(TRUNCATE);'); }
+    catch (cpErr) {
+      appendModuleLog({ level: 'warning', source: 'main', domain: 'acquiring-bill-currency',
+        message: '[acquiring-bill-currency] wal_checkpoint 失败（不影响覆盖导入结果）',
+        details: [cpErr && cpErr.message ? cpErr.message : String(cpErr)] });
+    }
     return { monthKey: detectedMonthKey, fileCount: filePaths.length, totalImported, deletedCount, perFileStats };
   } catch (error) {
     safeRollback(db);
@@ -149,11 +404,28 @@ async function importBillFilesWithOverwrite({ db, monthKey, filePaths, onProgres
 
 // fix1（spec §3.4）+ fix2（spec §3.5）：peek + 已有行预检（不进事务，async）
 // 返回：{ monthKey, existingCount, kind }
+//
+// v3.0.3 PR-H review 修复：引擎开关 true 时 peek 改走引擎 zip-reader（rels 正解定位唯一 sheet）——
+//   否则唯一 sheet 非 sheet1.xml 命名的合法文件在预检即被旧 reader 拒绝（「未找到 xl/worksheets/sheet1.xml」），
+//   引擎的 rels 定位 + 多 sheet 显式报错防御项在主 UI 流程不可达（main.js handler 先 peek 后 import）。
+//   表头校验 + 首数据行月份提取语义与旧 peekMonthKeyFromFile 一致（engine.peekFirstFile 平移；
+//   表头错 message 带 `${sourceFile}：` 前缀 byte-for-byte，main.js catch 只透传 message/detailLines）。
+//   peek 仅读到首个有效数据行即早退（row-scanner __stopParsing 协议），主进程轻量无 W4 顾虑。
 async function peekImportTarget({ db, kind, filePaths }) {
   if (!Array.isArray(filePaths) || filePaths.length === 0) {
     throw new Error(`${kind === 'flow' ? '流水表' : '单据表'}：未选择任何文件`);
   }
-  const { monthKey } = await importReader.peekMonthKeyFromFile({ kind, filePath: filePaths[0] });
+  let monthKey;
+  if (USE_BIG_TABLE_IMPORT_ENGINE) {
+    const engine = require('../backend/big-table-import/engine');
+    const contractMod = require(kind === 'flow' ? FLOW_CONTRACT_PATH : BILL_CONTRACT_PATH);
+    ({ monthKey } = await engine.peekFirstFile({
+      filePath: filePaths[0],
+      contract: contractMod.createContract({})
+    }));
+  } else {
+    ({ monthKey } = await importReader.peekMonthKeyFromFile({ kind, filePath: filePaths[0] }));
+  }
   const readiness = importRepo.getMonthReadiness(db, monthKey);
   const existingCount = kind === 'flow' ? readiness.flowCount : readiness.billCount;
   return { monthKey, existingCount, kind };
@@ -206,7 +478,11 @@ const MULTIWORKER_BASELINE_CHUNK_SIZE = 100000;             // 与 runCheckCore 
 //   达到「百万行」量级（spec §4 D31 "<100w 回退"）多 worker 才有正收益（POC 50 万行 plan-b 2.31-2.70x）。
 //   故行数 < 100w 强制回退单 worker —— 这是 D31 的「行数下界」闸（caller gate / runCheckCore gate 双判）。
 //   ⚠️ 资金红线无关（单/多 worker byte-for-byte 一致，已 contract 锁）；纯性能闸 —— 回退只影响快慢不影响结果。
-const MULTIWORKER_MIN_TOTAL_ROWS = 1000000;
+// W3（v3.0.3 PR-C / O-2 决议 2026-06-10 本批合入）：行数闸 100w → 30w。
+//   依据：上方注释自记 POC 50w 行 plan-b 2.31-2.70x 正收益；用户环境 Windows SSD 多核，CPU 是瓶颈。
+//   三层兜底：① D33 内存闸（<2GB 强制单 worker）② D29 CPU clamp ③ settings workerCount=1 可手动关闭并行。
+//   ⚠️ 纯性能闸（单/多 worker byte-for-byte contract 已锁）；若实测负收益，回滚 = 改回 1000000。
+const MULTIWORKER_MIN_TOTAL_ROWS = 300000;
 
 // v2.1.12 β.1-T3 — D31 第二闸：自适应分片后若 chunk 数 < worker 数，并行喂不饱（POC：chunk 数 << worker 数无收益）
 //   → 回退单 worker。判定函数（gate 用）：给定行数/worker 数/请求 chunkSize，返回 true=应回退单 worker。

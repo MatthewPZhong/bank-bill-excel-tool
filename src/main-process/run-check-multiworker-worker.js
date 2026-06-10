@@ -51,16 +51,18 @@ const PRAGMA_STATEMENTS = [
   'PRAGMA synchronous = NORMAL;',
   'PRAGMA cache_size = -65536;',     // 64MB
   'PRAGMA mmap_size = 268435456;',   // 256MB
+  'PRAGMA temp_store = MEMORY;',     // v3.0.3 PR-C（W1）：临时表/排序驻内存（与主进程同步）
   'PRAGMA busy_timeout = 30000;',    // 30s（防主进程 DB 写冲突 SQLITE_BUSY）
 ];
 
-// PRAGMA verify 预期值（与 run-check-worker.js:58-65 一致；synchronous=int 1 / journal_mode='wal' 小写）
+// PRAGMA verify 预期值（与 run-check-worker.js:58-65 一致；synchronous=int 1 / journal_mode='wal' 小写；temp_store=MEMORY 查询返回整数 2）
 const PRAGMA_EXPECTED = {
   foreign_keys: 1,
   journal_mode: 'wal',
   synchronous: 1,
   cache_size: -65536,
   mmap_size: 268435456,
+  temp_store: 2,
   busy_timeout: 30000,
 };
 

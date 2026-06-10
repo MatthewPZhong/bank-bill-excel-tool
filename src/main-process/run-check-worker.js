@@ -44,23 +44,26 @@ const { parentPort, isMainThread } = require('node:worker_threads');
 // 模块级 helpers（unit test 在主线程 require 时只拿这部分；worker 进程内同名）
 // ─────────────────────────────────────────────────────────────────
 
-// PRAGMA 强制清单（spec §2.5 — 与主进程 database.js:42 完全一致 + busy_timeout 30s）
+// PRAGMA 强制清单（spec §2.5 — 与主进程 database.js 完全一致 + busy_timeout 30s）
+//   主进程清单 6 条（foreign_keys → WAL → synchronous → cache_size → mmap_size → temp_store）+ worker 追加 busy_timeout。
 const PRAGMA_STATEMENTS = [
   'PRAGMA foreign_keys = ON;',
   'PRAGMA journal_mode = WAL;',
   'PRAGMA synchronous = NORMAL;',
   'PRAGMA cache_size = -65536;',     // 64MB
   'PRAGMA mmap_size = 268435456;',   // 256MB
+  'PRAGMA temp_store = MEMORY;',     // v3.0.3 PR-C（W1）：临时表/排序驻内存（与主进程同步）
   'PRAGMA busy_timeout = 30000;',    // 30s（A3 新增 — 防主进程 DB 写冲突 SQLITE_BUSY）
 ];
 
-// PRAGMA verify 预期值（POC surprise #5：synchronous=int 1 / journal_mode='wal' 小写）
+// PRAGMA verify 预期值（POC surprise #5：synchronous=int 1 / journal_mode='wal' 小写；temp_store=MEMORY 查询返回整数 2）
 const PRAGMA_EXPECTED = {
   foreign_keys: 1,
   journal_mode: 'wal',
   synchronous: 1,
   cache_size: -65536,
   mmap_size: 268435456,
+  temp_store: 2,
   busy_timeout: 30000,
 };
 

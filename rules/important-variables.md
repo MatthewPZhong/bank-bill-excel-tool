@@ -138,23 +138,23 @@
   - 必跑：smoke biz-op-recon Case A（核心对账）+ Case M（C1 大小写归一）+ Case N（I2 BU trim 归一）+ Case Q（业务OP 重导清下一日 runs）+ 真实数据手测（同 BU 跨 ≥ 3 日业务OP + 跑 D 与 D+1 两 run，重导 D 业务OP 后两 run 「导出差异」success 日期均消失）
 
 ### `acquiring_bill_currency_flow_imports.settle_amount_abs`（v2.1.6 收单流水通道清算金额绝对值入库列，v0.7 fix4 重命名自 recon_amount_abs）
-- 定义：`src/backend/database/migrations.js` 中 `ensureAcquiringBillCurrencyTablesSupport` DDL；写入路径在 `src/backend/acquiring-bill-currency-db/import-repository.js` 的 `parseAmountAbs` + `insertFlowRow`
+- 定义：`src/backend/database/migrations.js` 中 `ensureAcquiringBillCurrencyTablesSupport` DDL；写入路径**v3.0.3 PR-H 起默认经引擎契约** `src/backend/acquiring-bill-currency-import/contract-flow.js` 的 `mapRow`（含 `parseAmountAbs`，byte-for-byte 平移 import-repository.insertFlowRow）；`import-repository.parseAmountAbs + insertFlowRow` 仅回退路径（session `USE_BIG_TABLE_IMPORT_ENGINE=false`）使用
 - 关联功能：收单单据币种校验 — 流水侧**通道清算金额**绝对值入库列；差异表 `流水_通道清算金额` 直接取该列值（无二次 ABS）
 - v0.7 fix4 变更：取值列从 Excel 第 13 列「对账金额」(values[12]) 切换为第 29 列「通道清算金额」(values[28])
 - 变更 review 要点：
-  - **资金红线**：`parseAmountAbs` 改实现（含 `Number(...)` 解析方式 / `Math.abs` / `toString` 精度） → 差异表金额值漂移
+  - **资金红线**：`parseAmountAbs` 改实现（含 `Number(...)` 解析方式 / `Math.abs` / `toString` 精度） → 差异表金额值漂移；**v3.0.3 PR-H 后须同步改 contract-flow.js 的 parseAmountAbs（它是 insertFlowRow 的 byte-for-byte 平移副本，两路必须一致 — acquiring-engine-migration.js 集成脚本锁死）**
   - 修改 DDL 列类型（TEXT → REAL 等） → 必须同步 reader 入库 + writer 输出格式
-  - 改取值列号（values[28]） → 必须同步 spec §3.1 ★ 标列 + smoke fixture
-  - 必跑：smoke acquiring-bill-currency Case A / J（通道清算金额入库 + 输出值精度）+ 真实数据手测（含负数金额行）
+  - 改取值列号（values[28]） → 必须同步 spec §3.1 ★ 标列 + smoke fixture + contract-flow.js（白名单 FLOW_VALUE_WHITELIST 派生自 FLOW_KEY_COLUMN_INDICES，自动跟随）
+  - 必跑：smoke acquiring-bill-currency Case A / J（通道清算金额入库 + 输出值精度）+ 集成 acquiring-engine-migration.js（新旧两路 byte-for-byte）+ 真实数据手测（含负数金额行）
 
 ### `acquiring_bill_currency_*.settle_currency` / `settle_currency_norm`（v2.1.6 收单流水/单据通道清算币种入库列，v0.7 fix4 对账核心字段）
-- 定义：`src/backend/database/migrations.js` DDL；写入路径在 `src/backend/acquiring-bill-currency-db/import-repository.js` 的 `insertFlowRow`（流水侧取 values[29]「通道清算币种」）/ `insertBillRow`（单据侧取 values[19]「对账币种」）+ `normalizeCurrency`
+- 定义：`src/backend/database/migrations.js` DDL；写入路径**v3.0.3 PR-H 起默认经引擎契约** `contract-flow.js`（流水侧 values[29]）/ `contract-bill.js`（单据侧 values[19]）的 `mapRow` + `normalizeCurrency`（byte-for-byte 平移 import-repository.insertFlowRow/insertBillRow）；`import-repository.insertFlowRow/insertBillRow + normalizeCurrency` 仅回退路径使用
 - 关联功能：收单单据币种校验 — **对账核心比对字段**，SQL JOIN 时与对侧 settle_currency_norm 比较判定是否差异
 - v0.7 fix4 关键决策：流水侧取值列从 Excel 第 14 列「币种」(values[13]) 切换为第 30 列「通道清算币种」(values[29])；单据侧列号 values[19] 保持（语义本就是清算视角，仅 DB 字段重命名）。原因 = 单据「对账币种」是清算视角，订单视角的「币种」对账必然 100% match 是字段语义错位
 - 变更 review 要点：
   - **资金红线**：流水侧取值列号改动 → 完全改变对账结果（v0.6 = 100% match / v0.7 ≈ 56% mismatch）
-  - `normalizeCurrency`（LOWER+TRIM）改实现 → 大小写/空格差异被误判为不一致
-  - 必跑：smoke acquiring-bill-currency Case J/K/L 全套（matching / mismatch / 流水侧空） + 真实数据手测（混合多币种）
+  - `normalizeCurrency`（LOWER+TRIM）改实现 → 大小写/空格差异被误判为不一致；**v3.0.3 PR-H 后 contract-flow.js / contract-bill.js 各自有 normalizeCurrency 副本，须与 import-repository 同步（acquiring-engine-migration.js 锁死两路一致）**
+  - 必跑：smoke acquiring-bill-currency Case J/K/L 全套（matching / mismatch / 流水侧空）+ 集成 acquiring-engine-migration.js + 真实数据手测（混合多币种）
 
 ### `acquiring_bill_currency_diff_rows.flow_currency` / `flow_amount_abs`（v2.1.6 差异表输出关键 2 列）
 - 定义：`src/backend/database/migrations.js` DDL；写入路径在 `src/backend/acquiring-bill-currency-db/run-repository.js` 的 `insertDiffRowsByJoin`（核心 SQL JOIN）
@@ -166,6 +166,20 @@
   - 改 SQL `settle_currency_norm` 比较 → 必须同步 import-repository 入库归一函数 `normalizeCurrency`
   - 改输出列名常量 `WRITER_OUTPUT_FLOW_CURRENCY_HEADER` / `_FLOW_AMOUNT_ABS_HEADER` → 必须同步 spec §6.2 + smoke Case A 末列表头断言
   - 必跑：smoke acquiring-bill-currency Case A/C/E/J/K/L 全套 + writer 输出 xlsx 末 3 列值断言
+
+### `USE_BIG_TABLE_IMPORT_ENGINE` + 收单导入引擎契约（v3.0.3 PR-H 升格 Critical ⚠️ 资金红线 — 收单导入链路换引擎 + 单行回退开关）
+- 定义：`src/main-process/acquiring-bill-currency-session.js` 模块顶部 `const USE_BIG_TABLE_IMPORT_ENGINE = process.env.ACQUIRING_FORCE_LEGACY_IMPORT === '1' ? false : true`（生产默认 true=引擎）；契约模块 `src/backend/acquiring-bill-currency-import/contract-flow.js` / `contract-bill.js`（引擎 `mapRow`/`insertSql`/`validateHeaders`/`monthKeyOf`/`formatBatchError`/`deleteSqlForOverwrite`）
+- 关联功能：收单 flow/bill 导入（`importFilesInTransaction` / `importFilesWithOverwrite`）默认 dispatch 大表导入引擎（`big-table-import/engine-worker-entry.js` worker，主进程零阻塞 + 多文件并行 + 字节层 row-scanner）；开关拨 false / `db.location()` 拿不到 dbPath → 回退 `runImportLegacyInTransaction` / `runImportLegacyWithOverwrite`（reader-handrolled 直调，v3.0.2 行为）
+- 跨文件度：A-pair（session 定义 dispatch + 契约模块 + 引擎 import-worker 给 mapRow 注入 ctx.sourceFile + engine formatBatchError/errorName 接线）
+- 关联引擎改动（v3.0.3 PR-H 对 PR-G1/G2 untracked 引擎文件的最小改动）：
+  1. `big-table-import/import-worker.js`：`mapRow({rowR,values,ctx})` 传 ctx（sourceFile 逐文件动态，不能走 contractOptions）；batch 元素带 `rowR`；表头错 message 加 `${sourceFile}：` 前缀
+  2. `big-table-import/engine.js`：INSERT 失败/跨月行级错误行号用真实 `rowR`（非 batch 索引）；整批拒绝调契约 `formatBatchError` 生成 message/detailLines/name；peek/表头错经契约 `errorName` 改名
+- 变更 review 要点：
+  - **🔴🔴 资金红线（放行闸）**：收单导入是对账金额/币种入库真理源。改 contract-flow/bill 的 mapRow 取值/归一/列序、改引擎 writeBatch 错误行号/formatBatchError → 必须重跑 `acquiring-engine-migration.js`（新旧两路 byte-for-byte：含 rowid 逐行 + 对账统计 + 错误 message/detailLines/name 逐字符）
+  - 错误对外契约：契约 `errorName='ImportValidationError'` + `formatBatchError` 保证引擎抛错的 name/message/detailLines 与旧 reader byte-for-byte → main.js handler 错误识别（status='error' + detailLines 透传）+ smoke caseB/F/H3/M 零改动
+  - **回退完整性**：reader.js / reader-handrolled.js / import-repository.js 一字不改且仍被回退路径引用；拨 false 即恢复 v3.0.2（含旧路径自带 wal_checkpoint）
+  - DB 连接：引擎 worker 自开 `dbPath`（`db.location()`）连接写；主进程 db 连接并存（WAL + busy_timeout 30s）；COMMIT 后引擎自带 `wal_checkpoint(TRUNCATE)`（session 引擎分支不再 checkpoint，回退分支保留）
+  - 必跑：集成 `acquiring-engine-migration.js`（34 断言）+ `big-table-import-engine.js`（19 断言，引擎改动不回归）+ smoke acquiring-bill-currency（203）+ acquiring-bill-currency-progress（34，reading 事件契约）+ acquiring-bill-currency-pragma（27）+ 真实数据手测（W4 UI 流畅 / 取消 / 覆盖导入）
 
 ### `runAllScenarios` / scenario-dispatcher（v2.1.7 F8 升格 Critical ⚠️ 资金红线契约锚点）
 - 定义：`src/main-process/scenario-dispatcher.js:66` `function runAllScenarios(bankRows, gwRows, scenarios)`
@@ -900,17 +914,26 @@
 
 GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-share 跨度）。
 
-### `hitScenarios`（v2.1.8 N3-1 新增 Risk-sensitive ⚠️ IPC 字段重命名 + 结构变更）
+### `hitScenarios`（v2.1.8 N3-1 新增 Risk-sensitive ⚠️ IPC 字段重命名 + 结构变更；v3.0.3 PR-E 双维路径再扩展）
 - 定义：scenario-dispatcher.js stats.hitScenarios 数组元素 `{id, displayIndex, name}` —— **取代 v2.1.7 的 hitScenarioIds (number[])**
+  - **v3.0.3 PR-E**：**双维路径**（deps 提供）元素再附带 `channelId`（number）+ `channelName`（string，channels.name；通用渠道为「通用」）；
+    去重键由 `scenario.id` → `${channelId}:${scenario.id}`（场景与渠道多对多 → 同场景跨渠道命中各记一条）。
+    **legacy 单维路径不变**：元素仍 `{id, displayIndex, name}`，去重靠单维顺序（无 channelId/channelName）。
 - 关联功能：
   - 推送：`src/main-process/scenario-dispatcher.js:99` `hitScenarios.push({id, displayIndex, name})`
+    （v3.0.3 PR-E：双维 runChannelBatch push 再加 `channelId/channelName`；去重键 `hitKey=${hitChannelId}:${scenario.id}`）
   - IPC：`src/main.js:3045` 返回 `stats.hitScenarios`
   - 状态框：`src/renderer.js:3319` 显示 `displayIndex` 替代 DB id
+    （v3.0.3 PR-E：updateBankStatementUi 在新数据「每条均有非空 channelName」时按 channelName 分组换行展示「渠道名:序号」，半角冒号；旧持久化/legacy 数据回退原 `（场景 1、3）` 格式）
 - 变更 review 要点：
   - **IPC 字段重命名**：`hitScenarioIds` → `hitScenarios`，必须 grep 全部调用方同步
   - 结构变更（number[] → object[]）：消费方读取方式从 `ids.join('、')` 改 `arr.map(s => s.displayIndex).join('、')`
+  - **v3.0.3 PR-E 结构再扩展（向后兼容）**：双维路径加 `channelId/channelName` 属字段追加（消费方读特定字段不受影响）；
+    改去重键 `${channelId}:${scenario.id}` 仅影响双维 hitScenarios 去重粒度（同场景跨渠道由 1 条变多条），legacy 路径与所有行级资金红线不变量不受影响；
+    renderer 分组展示必须用半角 `:`（全角「：」会被 updateStatusBox 自动补 \n 打断「渠道名:序号」同行）。
   - 不变量护栏（v2.1.7 F8 已有）：`modifiedRows + unmatchedRows = inputRows` 不变
   - 必跑：smoke N3-1（状态框序号 = 场景管理 UI 序号 + grep `hitScenarioIds` 零命中）+ smoke F8（modifiedRows + unmatchedRows 守恒）
+    + v3.0.3 PR-E：unit `scenario-dispatcher.test.js` 双维 channelId/channelName + 同场景双渠道两条 + legacy 无新字段；preview 状态框多行可滚 + 单行居中
 
 ### `displayIndex`（v2.1.8 N3-1 新增 Risk-sensitive ⚠️ 跨多层一致性）
 - 定义：scenarios 实体新增计算字段 `displayIndex`（1-based 按 sort_order + id 顺序），在 `src/backend/database/scenarios-repository.js.listScenarios` 返回时统一附加

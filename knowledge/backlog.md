@@ -11,6 +11,46 @@
 
 ## 未实施
 
+### B8（P2）链接表 bank-deposit 等四表多选多文件互相覆盖丢数据（v3.0.3 候选）
+
+- **来源**：2026-06-10 链接表导入排查（v3.0.2 会话，用户问"bank-deposit 支持批量导入吗"）
+- **影响**：链接表统一导入入口 `linked-table:import`（`src/main.js:11274` 附近）文件对话框带 `multiSelections`，逐文件按表头识别归属表；但 bank-deposit 等四张表落库仍是「整表覆盖」（`replaceLinkedTable` = DELETE 全表 + INSERT，`src/backend/database/linked-table-repository.js:249`）。一次多选 N 个同表文件 → 依次整表覆盖 → **只有最后一个文件的数据留存，前 N-1 个静默丢失**。五张表里仅 gateway-bill 在 v3.0.1（需求1）改成按 ReconBillBizId 幂等累加，其余四张（含银行对账单入金表，资金相关）未改。多选的设计意图是"一次导多张不同的表"，不是"一张表多个文件合并"，但 UI 不阻止也不提示
+- **推荐**（按改动量从小到大）：
+  - A. **最小止血（推荐先做）**：导入前按表头归类，若同一张表命中 ≥2 个文件 → 弹确认提示「该表为整表覆盖语义，多文件将只保留最后一个，是否继续？」或直接拒绝该组合
+  - B. 多选同表文件时在内存合并后一次覆盖（语义变更小，但需定义跨文件去重/排序规则）
+  - C. 对齐 gateway-bill 的幂等累加（彻底，但四张表各需定义业务主键，属大改，需单独 spec）
+- **风险**：资金相关数据（银行对账单入金表）丢失场景 —— 实施任一方案均需人工复核
+- **触发实施**：v3.0.3 收尾窗口带上方案 A；方案 B/C 待用户确认业务主键后单独 spec
+
+### B7（P1）主库膨胀治理（run 级数据出主库）+ 启动窗口先行
+
+- **spec 已落**：`changes/db-bloat-governance-startup-first/spec.md`（2026-06-10，status: propose，8 个拍板点待用户确认）
+- **来源**：2026-06-10 性能/体积调研（v3.0.2 会话，用户报告"打包后体积越来越大、点击后页面显示越来越慢"）；即「change B」
+- **影响**：本机实测 `tool-data.sqlite` **15GB**，`PRAGMA freelist_count` = 240 万页 ≈ **9.9GB（61%）为删除后未回收空洞**；`acquiring_bill_currency_bill_imports` 历史累计写入 1846 万行、`diff_rows` 2077 万行 —— run 级原始数据写主库、run 后 DELETE，但**全代码无任何 VACUUM/auto_vacuum 机制**。一次性迁移前 `VACUUM INTO` 全量备份 15GB → 升级后首启实测 **28530ms / 38126ms**（activity log 实证）；`backups/` 已积 31GB + 一份 15GB `.bak`，无清理策略，本机合计 ~62GB。启动链：`src/main.js` whenReady 在 `createWindow()` **之前**同步做 activity log / usage-stats / `database.init()`（106 条 DDL）/ pendingDb（1.5GB）/ own-accounts 迁移 / 模板库同步 → 基线 1.2~1.5s；渲染层初始化仅 ~50ms、建窗到可见 ~110ms（前端不是瓶颈）
+- **推荐**：
+  1. run 级大表挪 **per-run 独立 SQLite 文件**，run 结束直接删文件（结构性根治：零碎片、零 VACUUM、主库恒小）；**范围必须覆盖全部 run-scoped 表**——acquiring_bill_currency + biz_op_recon（imports 已 166 万行）+ bank_bu_recon，只做 acquiring 会从其他模块缓慢复发
+  2. `backups/` 保留最近 2 份 + 启动后台清理
+  3. `createWindow()` 提前到 `database.init()` 之前（先出窗口 + loading 态）→ 显示速度与 DB 大小**永久解耦**
+  4. 防复发守卫：落 `rules/` 约定「新对账模块 run 级批量数据禁止写主库，必须走 per-run 侧库」
+  5. 未来对百万行级持久表（`linked_bank_deposit` 已 131 万行）的迁移避免全表 rebuild，备份按保留策略走
+- **临时止血**（用户侧/本机均适用，应用未运行时）：删旧 `.bak` 与 `backups/` 旧份 + 手动 `VACUUM`（15GB→约 6GB），立即恢复启动速度
+- **风险**：资金对账数据删除、迁移时序、状态机 —— 必须完整 spec + PRD，分阶段 PR，人工复核
+- **触发实施**：单独大 change（建议下个 minor 版本），PM PRD → spec → dev 流程
+
+### B6（P2）打包体积瘦身：files 白名单 + canvas 移 devDeps + 体积断言守卫
+
+- **spec 已落**：`changes/dist-size-slim/spec.md`（2026-06-10，status: propose，3 个拍板点待用户确认）
+- **来源**：同 B7 调研；即「change A」
+- **影响**：安装包 135MB，`app.asar` **101MB**（同类应用正常 ~15MB）。构成：`docs/**/*` 42MB（`docs/previews/` 截图 36MB；运行时只有 `docs/USER_GUIDE.md` 被 `src/main.js:4212` 帮助页读取）+ 生产依赖 ~47MB（**`@napi-rs/canvas` 25MB 在 dependencies 但 src/ 零引用**，仅 preview 脚本用；`xlsx` 7.2MB 与 `xlsx-js-style` 9.5MB 双份 SheetJS 并存、各带一份 codepage ~5.9MB）+ `scripts/**/*` 2MB（纯测试/预览脚本）+ `assets/app-icon-source.png` 1.3MB（无运行时引用）
+- **推荐**：
+  1. `package.json` build.files 改**白名单**（src / index.html / 必要 assets / `docs/USER_GUIDE.md` / COMMON枚举.xlsx），不要黑名单——黑名单下次新增大文件仍会静默进包
+  2. `@napi-rs/canvas` → devDependencies
+  3. 防复发守卫：dist 后加体积断言脚本（asar 超阈值如 25MB、或包内出现 `docs/previews`/`scripts/` 即 FAIL），挂进打包流程
+  4. （独立后续 PR）xlsx 统一到 xlsx-js-style，再 −13MB 原始体积；涉及 8 个 src 文件需回归
+- **预期收益**：安装包 135MB → ~85-90MB
+- **风险/回归点**：帮助页（USER_GUIDE.md 运行时读取）、win 打包冒烟、preview 脚本仍可用（devDeps 在开发机不受影响）
+- **触发实施**：下个发版窗口单独 PR（纯配置改动，低风险）
+
 ### B5（P3）`buildScenariosSnapshot`（银行对账单模块）JSON.stringify key 顺序依赖
 
 - **来源**：PR #36 self-review（commit `42e0588`），dev 顺手发现

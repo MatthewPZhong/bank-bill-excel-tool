@@ -34,9 +34,31 @@ const saxReader = require('../../../../src/backend/acquiring-bill-currency-impor
 const handReader = require('../../../../src/backend/acquiring-bill-currency-import/reader-handrolled');
 const {
   parseAcquiringRowXml,
-  cellValueFromBody
+  cellValueFromBody,
+  cellHasText,
+  FLOW_VALUE_COLUMN_WHITELIST,
+  streamSheetRowsHandRolled
 } = require('../../../../src/backend/acquiring-bill-currency-import/reader-handrolled');
-const { FLOW_HEADERS, BILL_HEADERS } = require('../../../../src/backend/acquiring-bill-currency-db/columns');
+const { FLOW_HEADERS, BILL_HEADERS, FLOW_KEY_COLUMN_INDICES } = require('../../../../src/backend/acquiring-bill-currency-db/columns');
+const { extractMonthKey, validateFlowHeaders } = require('../../../../src/backend/acquiring-bill-currency-import/validator');
+// reader.js 内部 helper（contract 三方对比的「手写全列」B 路径直接驱动 streamSheetRowsHandRolled 需要）
+const {
+  openZipWithEntries,
+  loadSharedStrings,
+  SHEET_ENTRY_NAME,
+  SHARED_STRINGS_ENTRY_NAME
+} = require('../../../../src/backend/acquiring-bill-currency-import/reader');
+
+// v3.0.3 PR-P1 文件头说明（追加，不改既有头注释意图）：
+//   本 contract 升级为「三方 byte-for-byte 对比」——证收单 flow 解析列裁剪等价：
+//     A = sax importFlowFile（全列基线）
+//     B = 手写解析器「全列模式」（streamSheetRowsHandRolled + valueColumnWhitelist=null，复刻 onRow 逻辑捕获每行）
+//     C = 手写解析器「白名单模式」= 真实 importFlowFile（已注入 FLOW_VALUE_COLUMN_WHITELIST，仅解码 4/48 列）
+//   断言闭环：
+//     A≡B（全 48 列 + monthKey + importedCount + rowIndex）  —— 证手写算法 == sax（与裁剪无关）
+//     B≡C（白名单内列全等 + 白名单外列 C 恒空 + hasAnyCellText 逐行全等 + 行集合全等）—— 证裁剪等价
+//     A≡C（importedCount + monthKey + 白名单内列；白名单外列下游不消费故不比）—— 证端到端 DB 维度安全
+//   bill 路径仍走既有「A=sax vs C=手写」二方（bill 本 PR 传 null 不裁剪，全列必须全等）。
 
 const tmpDirs = [];
 test.after(() => {
@@ -160,9 +182,18 @@ async function runImportBoth(kind, fp) {
   return { sax: { cap: saxCap, result: saxResult }, hand: { cap: handCap, result: handResult } };
 }
 
-// 🔴 核心断言：两 reader 捕获逐行逐列 + monthKey + importedCount 全等
+// 🔴 核心断言（A≡C，端到端 DB 消费维度）：sax importFlowFile vs 真实 importFlowFile（hand 已裁剪）
+//   逐行 rowIndex + monthKey + importedCount 全等。
+//   v3.0.3 PR-P1：flow 路径 hand 已裁剪 → 白名单外列在 hand cap 恒 ''（下游 insertFlowRow 不消费），
+//     故 flow 仅比对「白名单内列 0/6/28/29」（DB 实际取值列）；bill 不裁剪，全 26 列对比。
+//   全列正确性由三方对比的 A≡B（assertThreeWayFlow）单独锁死，不在此函数。
 function assertByteForByte(label, both, expectedLen, expectedSaxRows) {
   const { sax, hand } = both;
+  const isFlow = expectedLen === 48;
+  // flow：只比白名单内列；bill：比全列。
+  const compareCols = isFlow
+    ? [...FLOW_VALUE_COLUMN_WHITELIST].sort((a, b) => a - b)
+    : Array.from({ length: expectedLen }, (_, i) => i);
   if (typeof expectedSaxRows === 'number') {
     assert.equal(sax.cap.length, expectedSaxRows, `${label}: sax 基线应捕获 ${expectedSaxRows} 数据行（实际 ${sax.cap.length}）`);
   }
@@ -174,10 +205,114 @@ function assertByteForByte(label, both, expectedLen, expectedSaxRows) {
     const b = hand.cap[i];
     assert.equal(b.rowIndex, a.rowIndex, `${label}: 行 ${i} rowIndex 一致（${a.rowIndex} vs ${b.rowIndex}）`);
     assert.equal(b.monthKey, a.monthKey, `${label}: 行 ${i} monthKey 一致`);
-    for (let c = 0; c < expectedLen; c++) {
+    for (const c of compareCols) {
       const av = a.values[c] == null ? '' : String(a.values[c]);
       const bv = b.values[c] == null ? '' : String(b.values[c]);
-      assert.equal(bv, av, `${label}: 行 ${i}(rowIndex=${a.rowIndex}) 列 ${c}(${expectedLen === 48 ? FLOW_HEADERS[c] : BILL_HEADERS[c]}) 值一致（sax="${av}" hand="${bv}"）`);
+      assert.equal(bv, av, `${label}: 行 ${i}(rowIndex=${a.rowIndex}) 列 ${c}(${isFlow ? FLOW_HEADERS[c] : BILL_HEADERS[c]}) 值一致（sax="${av}" hand="${bv}"）`);
+    }
+    // flow：额外锁白名单外列在 hand（裁剪路径）恒空（证「不取值即 ''」契约，且下游不读这些列）
+    if (isFlow) {
+      for (let c = 0; c < expectedLen; c++) {
+        if (FLOW_VALUE_COLUMN_WHITELIST.has(c)) continue;
+        const bv = b.values[c] == null ? '' : String(b.values[c]);
+        assert.equal(bv, '', `${label}: 行 ${i} 白名单外列 ${c}(${FLOW_HEADERS[c]}) 裁剪后恒空（实际 hand="${bv}"）`);
+      }
+    }
+  }
+}
+
+// ---- v3.0.3 PR-P1 三方对比：手写「全列模式」B 路径驱动器 ----
+// 直接用导出的 streamSheetRowsHandRolled（valueColumnWhitelist=null → 全列解码），复刻 importFlowFile 的
+//   onRow 逻辑（表头校验 + allEmpty=!hasAnyCellText + extractMonthKey + 跨月/月份错误累积），捕获每条
+//   「被 import 的数据行」的 { rowIndex, monthKey, values(全列), hasAnyCellText }。
+//   仅 flow 用（B 路径）；与真实 importFlowFile（C，裁剪）逐行对比证裁剪等价。
+async function runHandWholeColumnFlow(fp) {
+  const sourceFile = require('node:path').basename(fp);
+  const keyIndices = FLOW_KEY_COLUMN_INDICES;
+  const { zip, entries } = await openZipWithEntries(sourceFile, fp);
+  const captured = [];
+  let detectedMonthKey = null;
+  let headerValidated = false;
+  try {
+    const sheetEntry = entries.get(SHEET_ENTRY_NAME);
+    const sstEntry = entries.get(SHARED_STRINGS_ENTRY_NAME);
+    let sharedStrings = [];
+    try { sharedStrings = await loadSharedStrings(zip, sstEntry); } catch (_e) { sharedStrings = []; }
+    await streamSheetRowsHandRolled({
+      zip,
+      sheetEntry,
+      expectedHeaders: FLOW_HEADERS,
+      sharedStrings,
+      valueColumnWhitelist: null,          // 🔴 B 路径：全列解码（手写解析器无裁剪基线）
+      onRow: ({ rowR, values, hasAnyCellText }) => {
+        if (rowR === 1) {
+          const headerResult = validateFlowHeaders(values.map((v) => v == null ? '' : String(v)));
+          if (!headerResult.ok) { const e = new Error('hdr'); e.__stopParsing = true; throw e; }
+          headerValidated = true;
+          return;
+        }
+        if (!headerValidated) return;
+        if (!hasAnyCellText) return;        // allEmpty 等价判定（与 prod 同）
+        const monthKey = extractMonthKey(values[keyIndices.billDate]);
+        if (!monthKey) return;              // 月份不可解析行：prod 累积错误，这里 B 只捕成功 import 行 → 跳过
+        if (!detectedMonthKey) detectedMonthKey = monthKey;
+        else if (monthKey !== detectedMonthKey) return;  // 跨月行：prod 累积错误 → 这里跳过（只捕成功 import 行）
+        captured.push({ rowIndex: rowR, monthKey, values: values.slice(), hasAnyCellText });
+      }
+    });
+  } finally {
+    try { zip.close(); } catch (_e) {}
+  }
+  return captured;
+}
+
+// 三方 A≡B≡C 完整断言（flow 专用）。expectedSaxRows 为期望成功 import 行数。
+async function assertThreeWayFlow(label, fp, expectedSaxRows) {
+  // A = sax importFlowFile（全列基线）
+  const saxCap = installCapture('flow');
+  const saxResult = await saxReader.importFlowFile({ db: {}, filePath: fp, importedAt: 'T', expectedMonthKey: null, onProgress: () => {} });
+  // C = 真实 importFlowFile（hand，已裁剪）
+  const handCap = installCapture('flow');
+  const handResult = await handReader.importFlowFile({ db: {}, filePath: fp, importedAt: 'T', expectedMonthKey: null, onProgress: () => {} });
+  // B = 手写全列模式（streamSheetRowsHandRolled + null 白名单）
+  const wholeCap = await runHandWholeColumnFlow(fp);
+
+  if (typeof expectedSaxRows === 'number') {
+    assert.equal(saxCap.length, expectedSaxRows, `${label}: A(sax) 应 import ${expectedSaxRows} 行（实际 ${saxCap.length}）`);
+  }
+  // 行数三方一致
+  assert.equal(handCap.length, saxCap.length, `${label}: A vs C import 行数一致（sax=${saxCap.length} hand=${handCap.length}）`);
+  assert.equal(wholeCap.length, saxCap.length, `${label}: A vs B import 行数一致（sax=${saxCap.length} 手写全列=${wholeCap.length}）`);
+  assert.equal(handResult.importedCount, saxResult.importedCount, `${label}: importedCount A≡C（sax=${saxResult.importedCount} hand=${handResult.importedCount}）`);
+  assert.equal(handResult.monthKey, saxResult.monthKey, `${label}: monthKey A≡C（sax=${saxResult.monthKey} hand=${handResult.monthKey}）`);
+
+  const wlSorted = [...FLOW_VALUE_COLUMN_WHITELIST].sort((a, b) => a - b);
+  for (let i = 0; i < saxCap.length; i++) {
+    const a = saxCap[i];   // sax 全列
+    const b = wholeCap[i]; // 手写全列
+    const c = handCap[i];  // 手写白名单（裁剪）
+    // rowIndex / monthKey 三方一致
+    assert.equal(b.rowIndex, a.rowIndex, `${label}: 行 ${i} rowIndex A≡B（${a.rowIndex} vs ${b.rowIndex}）`);
+    assert.equal(c.rowIndex, a.rowIndex, `${label}: 行 ${i} rowIndex A≡C（${a.rowIndex} vs ${c.rowIndex}）`);
+    assert.equal(b.monthKey, a.monthKey, `${label}: 行 ${i} monthKey A≡B`);
+    assert.equal(c.monthKey, a.monthKey, `${label}: 行 ${i} monthKey A≡C`);
+    // A≡B：全 48 列逐列相等（证手写解析器 == sax，与裁剪无关）
+    for (let col = 0; col < 48; col++) {
+      const av = a.values[col] == null ? '' : String(a.values[col]);
+      const bv = b.values[col] == null ? '' : String(b.values[col]);
+      assert.equal(bv, av, `${label}: 行 ${i}(r=${a.rowIndex}) 列 ${col}(${FLOW_HEADERS[col]}) A≡B（sax="${av}" 手写全列="${bv}"）`);
+    }
+    // B≡C：白名单内列相等
+    for (const col of wlSorted) {
+      const bv = b.values[col] == null ? '' : String(b.values[col]);
+      const cv = c.values[col] == null ? '' : String(c.values[col]);
+      assert.equal(cv, bv, `${label}: 行 ${i} 白名单内列 ${col}(${FLOW_HEADERS[col]}) B≡C（全列="${bv}" 白名单="${cv}"）`);
+    }
+    // B≡C：白名单外列在 C（裁剪）恒空
+    for (let col = 0; col < 48; col++) {
+      if (FLOW_VALUE_COLUMN_WHITELIST.has(col)) continue;
+      const cv = c.values[col] == null ? '' : String(c.values[col]);
+      assert.equal(cv, '', `${label}: 行 ${i} 白名单外列 ${col}(${FLOW_HEADERS[col]}) C(裁剪)恒空（实际="${cv}"）`);
     }
   }
 }
@@ -213,6 +348,8 @@ test.describe('v2.1.12-beta reader-handrolled contract（🔴🔴 与 sax reader
     });
     const both = await runImportBoth('flow', fp);
     assertByteForByte('#1 flow正常', both, 48, 3);
+    // v3.0.3 PR-P1：三方 A≡B≡C（全列正确性 + 裁剪等价 + 白名单外列恒空）
+    await assertThreeWayFlow('#1 flow正常三方', fp, 3);
   });
 
   // ---------- #2 bill 正常多行 ----------
@@ -331,9 +468,13 @@ test.describe('v2.1.12-beta reader-handrolled contract（🔴🔴 与 sax reader
     const both = await runImportBoth('flow', fp);
     assertByteForByte('#7 number cell', both, 48, 1);
     // 显式锁：number cell 两 reader 取值完全相同（若手写用了 parseFloat 会与 sax 发散 → 这里失败）
-    assert.equal(both.hand.cap[0].values[28], both.sax.cap[0].values[28], '#7: number 金额取值一致');
-    assert.equal(both.hand.cap[0].values[47], both.sax.cap[0].values[47], '#7: number 负小数取值一致');
-    assert.equal(both.hand.cap[0].values[48], both.sax.cap[0].values[48], '#7: number 大数取值一致');
+    //   v3.0.3 PR-P1 适配：该锁由白名单内的金额列（index 28，number 小数）承担；
+    //   col47/col48（index 46/47）是白名单外列——hand 路径按裁剪语义恒 ''（不解码），sax 基线保留原值。
+    //   「number 取 <v> 原文本、绝不 parseFloat」的全形态锁定见 #7b 单元级用例（不受白名单影响）。
+    assert.equal(both.hand.cap[0].values[28], both.sax.cap[0].values[28], '#7: number 金额取值一致（白名单内）');
+    assert.equal(both.sax.cap[0].values[46], '-30.25', '#7: sax 基线白名单外负小数保留原值');
+    assert.equal(both.hand.cap[0].values[46], '', '#7: 白名单外 number 列 hand 路径裁剪为空');
+    assert.equal(both.hand.cap[0].values[47], '', '#7: 白名单外大数列 hand 路径裁剪为空');
   });
 
   // ---------- #7b 🔴🔴 单元级锁：parseAcquiringRowXml 数字分支取原文本（直接喂手工 number XML）----------
@@ -353,7 +494,8 @@ test.describe('v2.1.12-beta reader-handrolled contract（🔴🔴 与 sax reader
       + '<c r="G2" t="s"><v>0</v></c>'                   // 6: 共享串 → "共享串0"
       + '<c r="H2" t="inlineStr"><is><t>P</t><t>Q</t></is></c>' // 7: inlineStr 多 t → "Q"（取最后，非拼接 "PQ"）
       + '</row>';
-    const values = parseAcquiringRowXml(rowXml, 48, ss, false);
+    // v3.0.3 PR-P1：返回形状改 { values, hasAnyCellText }；此处全列（whitelist 省略 → null）。
+    const { values, hasAnyCellText } = parseAcquiringRowXml(rowXml, 48, ss, false);
     assert.equal(values[0], '1000.00', '#7b: 数字带尾零保留小数（非 parseFloat→"1000"）');
     assert.equal(values[1], '1.5e3', '#7b: 科学计数保留原文（非转 1500）');
     assert.equal(values[2], '1398765432109876543', '#7b: 大数保留原文');
@@ -362,6 +504,16 @@ test.describe('v2.1.12-beta reader-handrolled contract（🔴🔴 与 sax reader
     assert.equal(values[5], '123.45', '#7b: 公式 cell 忽略 <f> 取 <v>');
     assert.equal(values[6], '共享串0', '#7b: 共享串查表');
     assert.equal(values[7], 'Q', '#7b: inlineStr 多 <t> 取最后一个（对齐 sax，非拼接）');
+    assert.equal(hasAnyCellText, true, '#7b: 行内有非空 cell → hasAnyCellText=true');
+
+    // v3.0.3 PR-P1：同一行喂白名单 {0,6} → 仅列 0/6 取值，列 1-5/7 跳过解码恒 ''；hasAnyCellText 不变。
+    const wl = parseAcquiringRowXml(rowXml, 48, ss, false, new Set([0, 6]));
+    assert.equal(wl.values[0], '1000.00', '#7b 白名单: 列 0 在白名单内 → 取值');
+    assert.equal(wl.values[6], '共享串0', '#7b 白名单: 列 6 在白名单内 → 查共享串');
+    assert.equal(wl.values[1], '', '#7b 白名单: 列 1 不在白名单 → 跳过解码恒空');
+    assert.equal(wl.values[3], '', '#7b 白名单: 列 3 不在白名单 → 跳过解码恒空');
+    assert.equal(wl.values[7], '', '#7b 白名单: 列 7 不在白名单 → 跳过解码恒空');
+    assert.equal(wl.hasAnyCellText, true, '#7b 白名单: hasAnyCellText 与全列一致（探测覆盖白名单外列）');
   });
 
   // ---------- #8 表头错误（列少 / 列多 / 内容错）→ 两 reader 抛同 message ----------
@@ -472,5 +624,158 @@ test.describe('v2.1.12-beta reader-handrolled contract（🔴🔴 与 sax reader
     assert.equal(cellValueFromBody('', 'n', ss), '', 'extra: 空 body number → 空');
     assert.equal(cellValueFromBody('<is><t></t></is>', 'inlineStr', ss), '', 'extra: inlineStr 空 t → 空');
     assert.equal(cellValueFromBody('<v>amp&amp;lt&lt;gt&gt;</v>', 'n', ss), 'amp&lt<gt>', 'extra: 数字位实体解码');
+  });
+
+  // ==================== v3.0.3 PR-P1 列裁剪等价性专项 ====================
+
+  // ---------- #10 🔴 仅白名单外列有值的行（不得被误判空行）----------
+  // 核心反例：裁剪后白名单外列恒 ''，若仍用 values.every(==='') 判空 → 该行被误判空行静默跳过（漂移）。
+  //   改用 hasAnyCellText 后：该行 hasAnyCellText=true → 不跳过 → 进 extractMonthKey；因账单日期(列0)空 →
+  //   月份不可解析 → 三方都累积「账单日期无法解析」错误（而非静默跳过）。这正是 allEmpty 等价的存在理由。
+  test('#10 仅白名单外列有值的行 → 不被误判空行（三方都报月份不可解析，非静默跳过）', async () => {
+    // 列 24（操作人，白名单外）有值；白名单内列 0/6/28/29 全空 → 该行非空但账单日期缺失。
+    const fp = await writeRawSheetXlsx({
+      sheetRows: [
+        { r: 1, cells: FLOW_HEADERS.slice() },
+        { r: 2, cells: row(48, { 24: '张三' }) }   // 仅白名单外列有值
+      ]
+    });
+    // A(sax) vs C(hand 裁剪) 抛同 ImportValidationError（账单日期无法解析为月份）——证不被当空行跳过（端到端）。
+    //   单元级锁见 #11c（仅白名单外列有真实值 → 三方 hasAnyCellText=true）。
+    await assertSameImportError('#10 仅白名单外列有值', 'flow', fp);
+  });
+
+  // ---------- #10b 白名单外列有值 + 账单日期合法 → 三方正常 import（该行 hasAnyCellText 由白名单内列触发也可）----------
+  // 与 #10 互补：白名单内列(账单日期/对账主Id/金额/币种)齐全 + 白名单外列也有值 → 正常 import，
+  //   三方白名单内列全等、白名单外列在裁剪路径恒空、import 行数一致。
+  test('#10b 白名单内外列都有值 → 三方 import 一致（白名单外列裁剪路径恒空）', async () => {
+    const fp = await writeRawSheetXlsx({
+      sheetRows: [
+        { r: 1, cells: FLOW_HEADERS.slice() },
+        // 白名单内 0/6/28/29 齐 + 白名单外 7/24/47 也有值
+        { r: 2, cells: row(48, { 0: '2026-03-10', 6: 'RM-A', 7: '收入', 24: '李四', 28: '500.00', 29: 'USD', 47: '9999.99' }) },
+        { r: 3, cells: row(48, { 0: '2026-03-11', 6: 'RM-B', 28: '600.00', 29: 'CNY' }) }   // 仅白名单内
+      ]
+    });
+    const both = await runImportBoth('flow', fp);
+    assertByteForByte('#10b', both, 48, 2);
+    await assertThreeWayFlow('#10b 三方', fp, 2);
+  });
+
+  // ---------- #11 🔴 SST 索引指向空串（ExcelJS / 真实 Excel 全空 cell 形态）→ cellHasText 必须查表判空 ----------
+  // 这是 contract #3 暴露的真实坑：ExcelJS 把空字符串 cell 存成 <c t="s"><v>K</v></c>，K 指向 SST 空串。
+  //   若 cellHasText 只看 <v> body 文本（"K" 非空）会误判该 cell 非空 → 全空行不被跳过 → 漂移。
+  //   本用例锁定：一行所有 cell 都是「SST 索引指向空串」→ hasAnyCellText=false → 该行被当空行跳过（三方一致）。
+  test('#11 SST 索引指向空串（ExcelJS 空 cell 形态）→ cellHasText 查表判空、该行作空行跳过', async () => {
+    // SST: 索引 0 = 空串（模拟 ExcelJS 把 "" 存为指向空 si 的 t="s"）；索引 1..48 = 表头。
+    const strings = [''].concat(FLOW_HEADERS.slice());   // 0='' , 1..48=表头
+    const sst = buildSst(strings);
+    // 表头行：A1..AV1 引用 1..48
+    let headerCells = '';
+    for (let i = 0; i < 48; i++) headerCells += `<c r="${colLetter(i)}1" t="s"><v>${i + 1}</v></c>`;
+    // 数据行 r=2：所有 48 列都 t="s" 指向索引 0（空串）→ 全空行
+    let emptyDataCells = '';
+    for (let i = 0; i < 48; i++) emptyDataCells += `<c r="${colLetter(i)}2" t="s"><v>0</v></c>`;
+    // 数据行 r=3：正常一行（inlineStr）→ 应正常 import
+    const goodCells = rowToInlineStrCells(row(48, { 0: '2026-03-10', 6: 'RM-1', 28: '100.00', 29: 'USD' }), 3);
+    const fp = await writeRawSheetXlsx({
+      sheetRows: [{ r: 1, raw: headerCells }, { r: 2, raw: emptyDataCells }, { r: 3, raw: goodCells }],
+      sst
+    });
+
+    // 单元级锁：cellHasText 对「SST 索引指向空串」必须判 false（查表，非看 body 文本）。
+    assert.equal(cellHasText('<v>0</v>', 's', ['']), false, '#11: SST 索引指向空串 → cellHasText=false（查表判空）');
+    assert.equal(cellHasText('<v>0</v>', 's', ['有内容']), true, '#11: SST 索引指向非空串 → cellHasText=true');
+
+    // 单元级锁：全空行（全 SST 空串）parseAcquiringRowXml → hasAnyCellText=false（全列 & 白名单路径一致）
+    const emptyRowXml = '<row r="2">' + emptyDataCells + '</row>';
+    assert.equal(parseAcquiringRowXml(emptyRowXml, 48, [''], false, null).hasAnyCellText, false, '#11: 全空行(SST空串) 全列路径 hasAnyCellText=false');
+    assert.equal(parseAcquiringRowXml(emptyRowXml, 48, [''], false, FLOW_VALUE_COLUMN_WHITELIST).hasAnyCellText, false, '#11: 全空行(SST空串) 白名单路径 hasAnyCellText=false');
+
+    // 端到端三方：r=2 全空行三方都跳过；r=3 正常 import → importedCount=1，三方全等。
+    const both = await runImportBoth('flow', fp);
+    assertByteForByte('#11 SST空串', both, 48, 1);
+    await assertThreeWayFlow('#11 SST空串 三方', fp, 1);
+  });
+
+  // ---------- #11b 畸形 SST 索引（NaN/越界）→ cellHasText 与 cellValueFromBody 同判空（连畸形都不再是差异）----------
+  // 形态：t="s" 但 <v>bad</v>（idx NaN）或越界。cellValueFromBody 取值 ''；cellHasText 查表同样判 false。
+  //   故畸形 SST 在「全列 vs 白名单」两路径下 hasAnyCellText 一致（都不因畸形 SST 误判非空）。
+  test('#11b 畸形 SST 索引（NaN/越界）→ cellHasText 与取值同判空（不误判非空）', () => {
+    // cellHasText 与 cellValueFromBody 判空严格对齐
+    assert.equal(cellHasText('<v>bad</v>', 's', ['x']), false, '#11b: NaN 索引 → cellHasText=false（同取值空）');
+    assert.equal(cellValueFromBody('<v>bad</v>', 's', ['x']), '', '#11b: NaN 索引 → 取值空');
+    assert.equal(cellHasText('<v>99</v>', 's', ['x']), false, '#11b: 越界索引 → cellHasText=false（同取值空）');
+    assert.equal(cellValueFromBody('<v>99</v>', 's', ['x']), '', '#11b: 越界索引 → 取值空');
+
+    // 行级：一行仅含畸形 SST cell（无其它有值列）→ hasAnyCellText=false → 该行将被当空行跳过（不漂移）
+    const rowXml = '<row r="2"><c r="Y2" t="s"><v>bad</v></c></row>';   // 列 24（白名单外）畸形 SST，别无有值列
+    const whole = parseAcquiringRowXml(rowXml, 48, ['x'], false, null);
+    const wl = parseAcquiringRowXml(rowXml, 48, ['x'], false, FLOW_VALUE_COLUMN_WHITELIST);
+    assert.equal(whole.hasAnyCellText, false, '#11b: 全列路径 仅畸形SST → hasAnyCellText=false');
+    assert.equal(wl.hasAnyCellText, false, '#11b: 白名单路径 仅畸形SST → hasAnyCellText=false（一致，不漂移）');
+  });
+
+  // ---------- #11c 🔴 仅白名单外列「有真实值」的行（不被误判空行；区别于 SST 空串）----------
+  // 与 #11 互补：白名单外列 24 有真实 inlineStr 值（非 SST 空串）→ hasAnyCellText=true → 不跳过。
+  //   裁剪路径列 24 不解码（取值 ''），但 cellHasText 探测到其非空 → 行不被误判空。证「裁剪不丢空行判定」。
+  test('#11c 仅白名单外列有真实值 → 不被误判空行（裁剪路径 cellHasText 探测覆盖白名单外列）', () => {
+    const rowXml = '<row r="2">' + rowToInlineStrCells(row(48, { 24: '张三' }), 2) + '</row>';
+    const whole = parseAcquiringRowXml(rowXml, 48, [], false, null);
+    const wl = parseAcquiringRowXml(rowXml, 48, [], false, FLOW_VALUE_COLUMN_WHITELIST);
+    assert.equal(whole.values[24], '张三', '#11c: 全列路径列24 取值');
+    assert.equal(wl.values[24], '', '#11c: 白名单路径列24 跳过解码恒空');
+    assert.equal(whole.hasAnyCellText, true, '#11c: 全列路径 hasAnyCellText=true');
+    assert.equal(wl.hasAnyCellText, true, '#11c: 白名单路径 hasAnyCellText=true（探测覆盖白名单外列 → 不误判空）');
+    assert.equal(wl.values.every((v) => v === ''), true, '#11c: 白名单路径 values 全空（故必须用 hasAnyCellText 判空而非 values.every）');
+  });
+
+  // ---------- #12 自闭合 row（<row r=N/>）→ 三方都跳过 ----------
+  test('#12 自闭合空 row（<row r=3/>）→ 三方跳过、byte-for-byte', async () => {
+    const fp = await writeRawSheetXlsx({
+      sheetRows: [
+        { r: 1, cells: FLOW_HEADERS.slice() },
+        { r: 2, cells: row(48, { 0: '2026-03-10', 6: 'RM-1', 28: '100', 29: 'USD' }) },
+        { r: 3, selfClose: true },                                  // 自闭合空行 → 跳过
+        { r: 4, cells: row(48, { 0: '2026-03-11', 6: 'RM-2', 28: '200', 29: 'CNY' }) }
+      ]
+    });
+    const both = await runImportBoth('flow', fp);
+    assertByteForByte('#12 自闭合row', both, 48, 2);
+    await assertThreeWayFlow('#12 自闭合row 三方', fp, 2);
+    // 锁：自闭合 row 不进 import（rowIndex 2/4，跳过 r3）
+    assert.equal(both.hand.cap[0].rowIndex, 2, '#12: 首行 r=2');
+    assert.equal(both.hand.cap[1].rowIndex, 4, '#12: 次行 r=4（跳过自闭合 r=3）');
+  });
+
+  // ---------- #13 cellHasText 语义单测（🔴 与 cellValueFromBody 判空严格一致）----------
+  // cellHasText ≡ (cellValueFromBody(...) !== '')，对所有 cell 形态成立。逐形态既测 cellHasText 又对照取值。
+  test('#13 cellHasText：与 cellValueFromBody 判空严格一致（含 s 查表 / 末尾空 run / 公式）', () => {
+    const ss = ['有内容', '', 'USD'];   // idx0 非空 / idx1 空串 / idx2 非空
+    const cases = [
+      ['<is><t>X</t></is>', 'inlineStr'],
+      ['<v>123</v>', 'n'],
+      ['<is><t></t></is>', 'inlineStr'],
+      ['<v></v>', 'n'],
+      ['', 'n'],
+      ['<f>SUM(A:A)</f>', 'n'],
+      ['<f>SUM(A:A)</f><v>5</v>', 'n'],
+      ['<v>&amp;</v>', 'n'],
+      ['<v>0</v>', 's'],                // s 索引0 → 非空串 → 取值非空
+      ['<v>1</v>', 's'],                // 🔴 s 索引1 → 空串 → 取值空（body "1" 文本非空但取值 ''）
+      ['<v>2</v>', 's'],                // s 索引2 → USD
+      ['<v>bad</v>', 's'],              // 畸形索引 → 取值空
+      ['<v>99</v>', 's'],              // 越界索引 → 取值空
+      ['<is><t>P</t><t></t></is>', 'inlineStr']  // 🔴 末尾空 run → 取值取最后='' → 探测也须判空
+    ];
+    for (const [body, type] of cases) {
+      const v = cellValueFromBody(body, type, ss);
+      const has = cellHasText(body, type, ss);
+      assert.equal(has, v !== '', `#13: cellHasText 与取值判空一致（type=${type} body="${body}" 取值="${v}" has=${has}）`);
+    }
+    // 显式钉死反直觉关键点
+    assert.equal(cellHasText('<v>1</v>', 's', ss), false, '#13: s 索引指向空串 → cellHasText=false（ExcelJS 空 cell 形态）');
+    assert.equal(cellHasText('<is><t>P</t><t></t></is>', 'inlineStr', ss), false, '#13: inlineStr 末尾空 run → cellHasText=false（取最后空 run，与取值一致）');
+    assert.equal(cellHasText('<v>0</v>', 's', ss), true, '#13: s 索引指向非空串 → cellHasText=true');
   });
 });

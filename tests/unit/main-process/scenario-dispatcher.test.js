@@ -539,10 +539,13 @@ test.describe('v2.1.8 输出契约：hitScenarios / displayIndex / stats', () =>
     const result = runAllScenarios(rows, null, scenarios, makeDeps());
 
     assert.strictEqual(result.stats.hitScenarios.length, 1);
+    // v3.0.3 PR-E：双维路径 hitScenarios 在 {id, displayIndex, name} 基础上附带 channelId/channelName。
     assert.deepStrictEqual(result.stats.hitScenarios[0], {
       id: 10,
       displayIndex: 3,
-      name: 'C1-10'
+      name: 'C1-10',
+      channelId: channels.icbc_sh.id,
+      channelName: '工商'
     });
   });
 
@@ -1132,5 +1135,96 @@ test.describe('v2.1.9 SR-FIX-1 spec §16.4 — 混合 case 11-15', () => {
     assert.strictEqual(row._hitChannelId, channels.general.id, '兜底命中通用');
     assert.strictEqual(row._fallbackChannelId, null, '兜底场景：fallback=null（仅在 matched 专属命中通用时才记录）');
     assert.strictEqual(row._hitChannelKey, '浦发-深圳', '_hitChannelKey 保留原始审计 key');
+  });
+});
+
+// ========================================================================
+// v3.0.3 PR-E：hitScenarios 附带 channelId/channelName + 去重键含 channelId
+// ========================================================================
+//
+// 设计（PR-E）：
+//   - 仅双维路径：hitScenarios 元素附带 channelId（number）+ channelName（channels.name；通用为「通用」）
+//   - 仅双维路径：去重键由 scenario.id → `${channelId}:${scenario.id}`
+//       → 同一 scenario.id 在不同 channel 批次命中各记一条（场景与渠道多对多）
+//   - legacy 单维路径不动：结构仍 {id, displayIndex, name}（无 channelId/channelName），去重键仍 scenario.id
+
+test.describe('v3.0.3 PR-E：hitScenarios channelId/channelName + 去重键含 channelId', () => {
+  test('双维专属命中 → hitScenarios 附带 channelId/channelName（专属渠道）', () => {
+    const scenarios = [
+      makeC1Scenario({ id: 10, name: '工商专属', channelId: channels.icbc_sh.id })
+    ];
+    const rows = [
+      makeBankRow({ rowId: 'r1', channel: '工商', location: '上海', customerRef: 'AFT123456789012' })
+    ];
+    const result = runAllScenarios(rows, null, scenarios, makeDeps());
+
+    assert.strictEqual(result.stats.hitScenarios.length, 1);
+    const hit = result.stats.hitScenarios[0];
+    assert.strictEqual(hit.id, 10);
+    assert.strictEqual(hit.channelId, channels.icbc_sh.id, 'channelId = 专属渠道 id');
+    assert.strictEqual(hit.channelName, '工商', 'channelName = channels.name（专属渠道名）');
+  });
+
+  test('双维通用兜底命中 → channelName = 「通用」', () => {
+    const scenarios = [
+      makeC1Scenario({ id: 11, name: '通用', channelId: channels.general.id })
+    ];
+    const rows = [
+      // 浦发-深圳 未匹配渠道 → 阶段 B 通用兜底命中
+      makeBankRow({ rowId: 'r1', channel: '浦发', location: '深圳', customerRef: 'AFT123456789012' })
+    ];
+    const result = runAllScenarios(rows, null, scenarios, makeDeps());
+
+    assert.strictEqual(result.stats.hitScenarios.length, 1);
+    const hit = result.stats.hitScenarios[0];
+    assert.strictEqual(hit.channelId, channels.general.id);
+    assert.strictEqual(hit.channelName, '通用', '通用渠道 channelName = 「通用」');
+  });
+
+  test('同一 scenario.id 在两个渠道各命中 → 去重键含 channelId → 产生两条 hitScenarios', () => {
+    // scenarioA / scenarioB 共享 id=10 + displayIndex=3，但 channelId 不同（专属 / 通用）。
+    // r1 匹配工商-上海 → 阶段 A 命中 scenarioA（专属）；
+    // r2 浦发-深圳 未匹配渠道 → 阶段 B 命中 scenarioB（通用兜底）。
+    // 去重键 `${channelId}:10` 不同 → 两条都进 hitScenarios（验证 PR-E 多对多去重语义）。
+    const scenarioA = makeC1Scenario({ id: 10, name: '对账场景', channelId: channels.icbc_sh.id });
+    scenarioA.displayIndex = 3;
+    const scenarioB = makeC1Scenario({ id: 10, name: '对账场景', channelId: channels.general.id });
+    scenarioB.displayIndex = 3;
+    const rows = [
+      makeBankRow({ rowId: 'r1', channel: '工商', location: '上海', customerRef: 'AFT111111111111' }),
+      makeBankRow({ rowId: 'r2', channel: '浦发', location: '深圳', customerRef: 'AFT222222222222' })
+    ];
+    const result = runAllScenarios(rows, null, [scenarioA, scenarioB], makeDeps());
+
+    assert.strictEqual(result.modifiedRows.length, 2, '两行各被一个渠道命中');
+    assert.strictEqual(result.stats.hitScenarios.length, 2,
+      '同 scenario.id 双渠道命中 → 去重键含 channelId → 两条');
+    // 两条 id 均为 10，displayIndex 均保持 3
+    assert.deepStrictEqual(result.stats.hitScenarios.map((h) => h.id), [10, 10]);
+    assert.deepStrictEqual(result.stats.hitScenarios.map((h) => h.displayIndex), [3, 3],
+      'displayIndex 保持原值（不被 channelId 改键影响）');
+    // 渠道名分别为「工商」（专属，阶段 A 先）/「通用」（阶段 B 后）
+    const names = result.stats.hitScenarios.map((h) => h.channelName);
+    assert.ok(names.includes('工商') && names.includes('通用'),
+      `两条 channelName 应含「工商」+「通用」，实际 ${JSON.stringify(names)}`);
+  });
+
+  test('legacy 单维路径：hitScenarios 仍为 {id, displayIndex, name}（无 channelId/channelName）+ 去重键不变', () => {
+    // deps 缺省 → legacy 路径。同 scenario 命中多行只记一条（去重键 = scenario.id）。
+    const scenarios = [makeC1Scenario({ id: 10, name: 'legacy-C1' })];
+    scenarios[0].displayIndex = 5;
+    const rows = [
+      makeBankRow({ rowId: 'r1', channel: '工商', location: '上海', customerRef: 'AFT111111111111' }),
+      makeBankRow({ rowId: 'r2', channel: '招商', location: '北京', customerRef: 'AFT222222222222' })
+    ];
+    const result = runAllScenarios(rows, null, scenarios); // 无 deps
+
+    assert.strictEqual(result.modifiedRows.length, 2);
+    assert.strictEqual(result.stats.hitScenarios.length, 1, 'legacy 去重键 = scenario.id → 同场景多行一条');
+    const hit = result.stats.hitScenarios[0];
+    assert.deepStrictEqual(hit, { id: 10, displayIndex: 5, name: 'legacy-C1' },
+      'legacy 结构保持 {id, displayIndex, name}（无 channelId/channelName）');
+    assert.strictEqual('channelId' in hit, false, 'legacy 无 channelId 字段');
+    assert.strictEqual('channelName' in hit, false, 'legacy 无 channelName 字段');
   });
 });

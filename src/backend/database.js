@@ -5,6 +5,8 @@ const {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
   ensureAcquiringBillCurrencyTablesSupport,
+  // v3.0.3 PR-B（acquiring-import-recon-perf P0-3）：收单两表索引瘦身 + covering 升级（老库迁移）
+  ensureAcquiringBillCurrencyIndexSlimV2,
   ensureAmountSplitRulesSupport,
   ensureBankBuReconTablesSupport,
   // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表 + 2 索引
@@ -85,13 +87,14 @@ class AppDatabase {
     this.db = new DatabaseSync(this.dbPath);
     this.db.exec('PRAGMA foreign_keys = ON;');
     // v2.1.7 F7-A1：全局 SQL 调优（影响 bank-bu-recon / biz-op-recon / acquiring-bill-currency 三套业务引擎）
-    //   PRAGMA 顺序固定：foreign_keys → journal_mode(WAL) → synchronous(NORMAL) → cache_size → mmap_size
+    //   PRAGMA 顺序固定：foreign_keys → journal_mode(WAL) → synchronous(NORMAL) → cache_size → mmap_size → temp_store
     //   ⚠️ synchronous=NORMAL 必须在 WAL 之后（DELETE/FULL 模式下 NORMAL 不安全；spec §7.3 关键不变量）
     //   journal_mode=WAL 持久化在 DB 元数据，首次启动后即生效；产生 *.sqlite-wal + *.sqlite-shm 旁文件（用户备份提示见 USER_GUIDE §DB 备份）
     this.db.exec('PRAGMA journal_mode = WAL;');        // 读写并发更好；崩溃恢复保留
     this.db.exec('PRAGMA synchronous = NORMAL;');      // WAL 下安全 + 性能 2-3 倍
     this.db.exec('PRAGMA cache_size = -65536;');       // 64MB 页缓存（负数 = KB；-65536 = 64MB）
     this.db.exec('PRAGMA mmap_size = 268435456;');     // 256MB 内存映射（64-bit 环境）
+    this.db.exec('PRAGMA temp_store = MEMORY;');       // v3.0.3 PR-C（W1）：临时表/排序驻内存，避开 Windows %TEMP% 落盘 + Defender 过滤链（4 处 PRAGMA 同步，加在 mmap_size 之后）
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS templates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -340,6 +343,9 @@ class AppDatabase {
     // v2.1.6 T4：收单单据币种校验模块 4 张表（flow_imports / bill_imports / runs / diff_rows）
     // 与 v2.1.2/v2.1.3 完全独立，调用顺序无依赖
     this.ensureAcquiringBillCurrencyTablesSupport();
+    // v3.0.3 PR-B（P0-3）：收单两表旧 4 索引 → 2 covering（老库就地迁移；新库建表段已直接建 v2，
+    //   本函数幂等 no-op）。必须在 ensureAcquiringBillCurrencyTablesSupport 之后（依赖两表已存在）。
+    this.ensureAcquiringBillCurrencyIndexSlimV2();
     // v2.1.8 N1：给 acquiring_bill_currency_runs 加 cleanup_pending 列（β 方案：cleanup 移出对账链路）
     //   必须在 ensureAcquiringBillCurrencyTablesSupport 之后（依赖 runs 表已存在）
     this.ensureAcquiringBillCurrencyRunsCleanupPending();
@@ -560,6 +566,11 @@ class AppDatabase {
     return ensureAcquiringBillCurrencyTablesSupport(this.db);
   }
 
+  // v3.0.3 PR-B（P0-3）：收单两表旧 4 索引 → 2 covering（老库就地迁移，幂等）
+  ensureAcquiringBillCurrencyIndexSlimV2() {
+    return ensureAcquiringBillCurrencyIndexSlimV2(this.db);
+  }
+
   ensureAcquiringBillCurrencyRunsCleanupPending() {
     return ensureAcquiringBillCurrencyRunsCleanupPending(this.db);
   }
@@ -619,6 +630,16 @@ class AppDatabase {
 
   setAcquiringBillRawJsonRetentionDays(days) {
     return settingsRepository.setAcquiringBillRawJsonRetentionDays(this.db, days);
+  }
+
+  // v3.0.3 PR-D（W5）：OneDrive 导出目录提示防重标记 facade
+  //   工作目录落在 OneDrive 同步路径时启动后单次提示；'1' = 已提示过。
+  hasShownWinOneDriveStorageNotice() {
+    return settingsRepository.hasShownWinOneDriveStorageNotice(this.db);
+  }
+
+  markWinOneDriveStorageNoticeShown() {
+    return settingsRepository.markWinOneDriveStorageNoticeShown(this.db);
   }
 
   // v2.1.8 N4 → v2.1.9 N4 重构 (T32e, D22=a)：差异表瘦身 migration
