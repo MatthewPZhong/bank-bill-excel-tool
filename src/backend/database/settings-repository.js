@@ -376,6 +376,21 @@ function setAcquiringBillRawJsonRetentionDays(db, days) {
   setSetting(db, ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_KEY, String(n));
 }
 
+// v3.0.3 PR-D（W5）：OneDrive 导出目录提示防重标记
+//   spec acquiring-import-recon-perf §9.4 — 工作目录落在 OneDrive 同步路径时启动后单次 toast 提示，
+//   提示后置 '1' 防止每次启动重复打扰；用户在 OneDrive 设置中排除目录后本标记不影响（仅控制提示次数）。
+//   值语义：'1' = 已提示过；null / 其它 = 未提示（hasShownWinOneDriveStorageNotice 仅判 === '1'）。
+//   范式沿用本仓既有单键 get/set（不走 settings UI；无范围校验，仅布尔语义）。
+const WIN_ONEDRIVE_STORAGE_NOTICE_SHOWN_KEY = 'win_onedrive_storage_notice_shown';
+
+function hasShownWinOneDriveStorageNotice(db) {
+  return getSetting(db, WIN_ONEDRIVE_STORAGE_NOTICE_SHOWN_KEY) === '1';
+}
+
+function markWinOneDriveStorageNoticeShown(db) {
+  setSetting(db, WIN_ONEDRIVE_STORAGE_NOTICE_SHOWN_KEY, '1');
+}
+
 function listAccountMappings(db, templateId) {
   return db
     .prepare(`
@@ -473,4 +488,8 @@ module.exports = {
   ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_DEFAULT,
   ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MIN,
   ACQUIRING_BILL_RAW_JSON_RETENTION_DAYS_MAX,
+  // v3.0.3 PR-D（W5）：OneDrive 导出目录提示防重标记
+  hasShownWinOneDriveStorageNotice,
+  markWinOneDriveStorageNoticeShown,
+  WIN_ONEDRIVE_STORAGE_NOTICE_SHOWN_KEY,
 };
