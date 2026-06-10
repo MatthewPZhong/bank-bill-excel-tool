@@ -145,7 +145,11 @@ test.describe('insertFlowRow', () => {
     );
   });
 
-  test('账单日期 YYYY/MM/DD → 归一为 YYYY-MM-DD（raw_json 内）', () => {
+  // P0-1（acquiring-import-recon-perf · O-1 2026-06-10）：flow raw_json 永久停写（写 ''）。
+  //   原断言「账单日期归一进 raw_json」已不适用（flow 侧 normalizeBillDate 调用随 rawObj 一并删除）；
+  //   改为断言 raw_json === ''（schema NOT NULL 由 '' 满足）。日期归一对 flow 对账无影响：
+  //   month_key 来自 reader 层 extractMonthKey，对账 SQL 只比 settle_currency_norm / settle_amount。
+  test('flow raw_json 永久停写为 \'\'（P0-1：原账单日期归一进 raw_json 已停用）', () => {
     const stmt = importRepo.prepareFlowInsert(db);
     importRepo.insertFlowRow(stmt, {
       monthKey: '2026-03',
@@ -154,8 +158,7 @@ test.describe('insertFlowRow', () => {
       importedAt: new Date().toISOString()
     });
     const row = db.prepare(`SELECT * FROM acquiring_bill_currency_flow_imports`).get();
-    const raw = JSON.parse(row.raw_json);
-    assert.equal(raw['账单日期'], '2026-03-10');
+    assert.equal(row.raw_json, '', 'flow raw_json 应为空字符串（P0-1 停写）');
   });
 });
 

@@ -27,10 +27,19 @@ const DIFF_TYPE_CASE_SQL = `CASE
         ELSE 'currency_mismatch'
       END`;
 
+// ⚠️ 资金红线 ⚠️ — acquiring-import-recon-perf P0-4 — 「币种不等」谓词单一来源（DRY 防漂移）
+//   抽自 DIFF_JOIN_BODY_SQL 原 WHERE 子句，供 ① 单/多 worker chunked INSERT 的 JOIN body
+//   ② computeRunStats 合并 SQL 的 mismatch CASE 共同引用 —— 防止两处统计/筛选口径漂移
+//   （沿用 v2.1.12 β.1-T2 的 DRY 手法）。改此谓词 → diff_rows 行选择 + run 统计同步变化，属资金红线。
+//   🔴 byte-for-byte 红线：DIFF_JOIN_BODY_SQL 必须用本常量拼出与改造前**逐字节相同**的 WHERE 文本，
+//   保证单/多 worker 共用 SQL 不变（见本文件头部红线说明 + buildSelectOnlyChunkSql 契约）。
+const CURRENCY_MISMATCH_PREDICATE_SQL = `COALESCE(b.settle_currency_norm, '') <> COALESCE(f.settle_currency_norm, '')`;
+
 // FROM / JOIN / WHERE 尾段（含子查询 ORDER BY id ASC LIMIT ? OFFSET ?）—— 单/多 worker 共享，一字不改。
 //   注：SQLite 的 INSERT ... SELECT ... LIMIT 不支持复合 OFFSET 时 ORDER BY 跨 batch 稳定 ——
 //   改用子查询先按 b.id 排序 + LIMIT/OFFSET 限定本批 bill_id 范围，外层 JOIN flow 比对
 //   性能：b.id 是 INTEGER PRIMARY KEY AUTOINCREMENT，B-tree 索引天然有序，LIMIT/OFFSET 高效
+//   P0-4：WHERE 谓词改引用 CURRENCY_MISMATCH_PREDICATE_SQL（拼接结果与改造前字节级一致）。
 const DIFF_JOIN_BODY_SQL = `FROM (
       SELECT id, month_key, recon_main_id, settle_currency_norm
       FROM ${BILL_TABLE}
@@ -40,7 +49,7 @@ const DIFF_JOIN_BODY_SQL = `FROM (
     ) b
     INNER JOIN ${FLOW_TABLE} f
       ON f.month_key = b.month_key AND f.recon_main_id = b.recon_main_id
-    WHERE COALESCE(b.settle_currency_norm, '') <> COALESCE(f.settle_currency_norm, '')`;
+    WHERE ${CURRENCY_MISMATCH_PREDICATE_SQL}`;
 
 // 单 worker chunked INSERT 全文（INSERT 头 + run_id 占位 + 业务列 + 共用 BODY）
 //   绑定顺序：[runId, monthKey, limit, offset]
@@ -558,26 +567,30 @@ function listPartialRuns(db, monthKey) {
 }
 
 // 月内统计：单据总数 / matched（JOIN 上的） / mismatch / unmatched（单据有 ID 但流水无）
+// ⚠️ 资金红线 ⚠️ — acquiring-import-recon-perf P0-4 — matched/mismatch 合并为单遍 JOIN
+//   改造前为 3 条 SQL（total COUNT + matched JOIN COUNT + mismatch JOIN COUNT，同一大 JOIN 跑 2 遍）；
+//   合并后 totalBillRows 仍单独 COUNT，matched/mismatch 由一条 JOIN 的 COUNT(*) + SUM(CASE) 同时得出。
+//   通用模式（spec §8.3 留缝）：matched/mismatch 单遍 JOIN 的 SUM(CASE WHEN <比对谓词> THEN 1 ELSE 0 END) 范式。
+//   🔴 两处硬约束：
+//     ① 空集陷阱：SUM() 对 0 行返回 NULL（非 0）→ 必须 COALESCE(SUM(...), 0)，否则 mismatchRows=NULL。
+//     ② mismatch 的 CASE WHEN 比较表达式引用共享常量 CURRENCY_MISMATCH_PREDICATE_SQL —— 与
+//        DIFF_JOIN_BODY_SQL（chunked INSERT WHERE）同源，防两处统计口径漂移。
+//   返回形状不变：{ totalBillRows, matchedRows, mismatchRows, unmatchedRows }（unmatched = total − matched）。
 function computeRunStats(db, { monthKey }) {
   const totalBillRows = db.prepare(`SELECT COUNT(*) AS c FROM ${BILL_TABLE} WHERE month_key = ?`).get(monthKey).c;
 
-  const matchedRows = db.prepare(`
-    SELECT COUNT(*) AS c
+  const agg = db.prepare(`
+    SELECT
+      COUNT(*) AS matched,
+      COALESCE(SUM(CASE WHEN ${CURRENCY_MISMATCH_PREDICATE_SQL} THEN 1 ELSE 0 END), 0) AS mismatch
     FROM ${BILL_TABLE} b
     INNER JOIN ${FLOW_TABLE} f
       ON f.month_key = b.month_key AND f.recon_main_id = b.recon_main_id
     WHERE b.month_key = ?
-  `).get(monthKey).c;
+  `).get(monthKey);
 
-  const mismatchRows = db.prepare(`
-    SELECT COUNT(*) AS c
-    FROM ${BILL_TABLE} b
-    INNER JOIN ${FLOW_TABLE} f
-      ON f.month_key = b.month_key AND f.recon_main_id = b.recon_main_id
-    WHERE b.month_key = ?
-      AND COALESCE(b.settle_currency_norm, '') <> COALESCE(f.settle_currency_norm, '')
-  `).get(monthKey).c;
-
+  const matchedRows = agg.matched;
+  const mismatchRows = agg.mismatch;
   const unmatchedRows = totalBillRows - matchedRows;
 
   return { totalBillRows, matchedRows, mismatchRows, unmatchedRows };

@@ -2498,13 +2498,13 @@ function ensureAcquiringBillCurrencyTablesSupport(db) {
         UNIQUE (month_key, recon_main_id)
       );
     `);
+    // v3.0.3 PR-B（acquiring-import-recon-perf P0-3）：新库一步到位建 covering 索引（不再建旧 _month / _join）
+    //   决策依据：UNIQUE(month_key, recon_main_id) 自带唯一索引 → 旧 idx_*_month（左前缀）与 idx_*_join（全键）冗余；
+    //   covering 加 settle_currency_norm 让对账 JOIN 探测 index-only 不回表（通用模式：分区键+业务键+比对键）。
+    //   老库的旧 4 索引由 ensureAcquiringBillCurrencyIndexSlimV2 迁移（DROP 旧 4 + CREATE v2）。
     db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_flow_month
-        ON acquiring_bill_currency_flow_imports(month_key);
-    `);
-    db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_flow_join
-        ON acquiring_bill_currency_flow_imports(month_key, recon_main_id);
+      CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_flow_join_v2
+        ON acquiring_bill_currency_flow_imports(month_key, recon_main_id, settle_currency_norm);
     `);
 
     // 表 2：单据表导入（spec §3.2 + §4.2，v0.7 字段名）
@@ -2522,13 +2522,10 @@ function ensureAcquiringBillCurrencyTablesSupport(db) {
         UNIQUE (month_key, recon_main_id)
       );
     `);
+    // v3.0.3 PR-B（acquiring-import-recon-perf P0-3）：bill 侧同 flow，新库直接建 covering 索引（详见上方 flow 侧注释）
     db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_bill_month
-        ON acquiring_bill_currency_bill_imports(month_key);
-    `);
-    db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_bill_join
-        ON acquiring_bill_currency_bill_imports(month_key, recon_main_id);
+      CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_bill_join_v2
+        ON acquiring_bill_currency_bill_imports(month_key, recon_main_id, settle_currency_norm);
     `);
     // v2.1.7 F7-A2：writer 阶段高频查询用 source_file 索引（spec §7.4.1）
     //   覆盖 run-repository.js: listDiffRowsBySourceFile (WHERE source_file=?)
@@ -2636,6 +2633,34 @@ function ensureAcquiringBillCurrencyFix4ColumnsRename(db) {
   } catch (error) {
     db.exec('ROLLBACK');
     throw error;
+  }
+}
+
+// v3.0.3 PR-B（acquiring-import-recon-perf P0-3）：收单两表索引瘦身 + covering 升级（老库迁移）
+//   决策依据：UNIQUE(month_key, recon_main_id) 已自带唯一索引 → 旧 idx_*_month（左前缀）+ idx_*_join（全键）
+//     与之完全冗余，每行 INSERT 多维护 2 个 B-tree；删冗余后导入每行少维护 1 个 B-tree。
+//   covering 升级：join 索引加第三列 settle_currency_norm → 对账 JOIN 探测列 = (分区键 month_key, 业务键
+//     recon_main_id, 比对键 settle_currency_norm) 全在索引内，index-only 不回表读宽行（含 raw_json）。
+//   通用模式（big-table-import-engine §8.3 留缝）：对账 covering 索引 = (分区键, 业务键, 比对键)。
+//   新库由 ensureAcquiringBillCurrencyTablesSupport 直接建 v2；本函数仅服务老库（已建旧 4 索引）的就地迁移。
+//   幂等：DROP INDEX IF EXISTS（旧索引不存在则 no-op）+ CREATE INDEX IF NOT EXISTS（v2 已存在则 no-op）；
+//     事务包裹保证 DROP+CREATE 原子（中途失败 ROLLBACK，下次启动重试）。
+//   idx_acquiring_bill_currency_bill_source_file（writer 高频查询用）不在本函数范围，保留不动。
+function ensureAcquiringBillCurrencyIndexSlimV2(db) {
+  db.exec('BEGIN');
+  try {
+    db.exec('DROP INDEX IF EXISTS idx_acquiring_bill_currency_flow_month');
+    db.exec('DROP INDEX IF EXISTS idx_acquiring_bill_currency_flow_join');
+    db.exec('DROP INDEX IF EXISTS idx_acquiring_bill_currency_bill_month');
+    db.exec('DROP INDEX IF EXISTS idx_acquiring_bill_currency_bill_join');
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_flow_join_v2
+      ON acquiring_bill_currency_flow_imports(month_key, recon_main_id, settle_currency_norm)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_acquiring_bill_currency_bill_join_v2
+      ON acquiring_bill_currency_bill_imports(month_key, recon_main_id, settle_currency_norm)`);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
   }
 }
 
@@ -2836,6 +2861,8 @@ module.exports = {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
   ensureAcquiringBillCurrencyTablesSupport,
+  // v3.0.3 PR-B（acquiring-import-recon-perf P0-3）：收单两表索引瘦身 + covering 升级（老库迁移；新库由建表段直接建 v2）
+  ensureAcquiringBillCurrencyIndexSlimV2,
   ensureAmountSplitRulesSupport,
   ensureBankBuReconTablesSupport,
   // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表 + 2 索引

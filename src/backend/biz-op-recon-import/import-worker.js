@@ -105,6 +105,7 @@ function openDb(dbPath) {
   db.exec('PRAGMA synchronous = NORMAL;');
   db.exec('PRAGMA cache_size = -65536;');
   db.exec('PRAGMA mmap_size = 268435456;');
+  db.exec('PRAGMA temp_store = MEMORY;');    // v3.0.3 PR-C（W1）：临时表/排序驻内存（与主进程 PRAGMA 清单同步）
   db.exec('PRAGMA busy_timeout = 30000;');   // 30s —— 与主进程同库并发写时防 SQLITE_BUSY
   // 幂等迁移（主进程启动时已建表，此处仅防御性保证 worker 独立 connection 下表存在）
   ensureBizOpReconTablesSupport(db);
