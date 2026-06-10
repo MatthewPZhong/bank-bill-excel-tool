@@ -386,3 +386,11 @@
 1. 100w 单文件解析 1.96x，略低于 2x 目标（差 1.6%，单遍扫描需过全部 48 cell 结构的运行时约束；50w 验收基准 2.32x 达标；多文件并行 3.06x 叠加后对 500w 端到端目标无影响）
 2. 引擎 v1 不拆分逐文件 importedCount，session 返回的 perFileStats 为占位数组（现有 renderer 不消费该字段，安全）
 3. 🔴 金额/币种解析函数（`parseAmountAbs`/`normalizeCurrency`）在 contract-flow/bill 与 import-repository 为双副本：**改任一侧必须同步另一侧**——`acquiring-engine-migration.js` 集成脚本（新旧两路 byte-for-byte）+ `rules/important-variables.md` Critical 条目已锁
+
+**Review 修复（commit 54d8107，PR #70 合并前 codex+自查双轮）**：
+1. 契约 mapRow 前置账单日期校验——坏日期行原报「跨月份混杂：期望 X，实际 null」，修复后与旧 reader 逐字符一致（「账单日期无法解析为月份："bad"」，校验顺序对齐旧 reader：日期最先）
+2. peekImportTarget 引擎开关 true 时走 `engine.peekFirstFile`（rels 正解）——修复前唯一 sheet 非 sheet1.xml 命名的合法文件在预检即被旧 reader 拒绝，引擎 rels 防御项主 UI 流程不可达
+3. peekFirstFile API 防呆：白名单数组自动归一 Set + errorName 改名下沉（修复中暴露的两个隐藏 bug，分别被迁移脚本场景⑧与 smoke H3 抓住）
+4. 迁移对比集成脚本 34 → **45 断言**（新增场景⑦中途行坏日期两路逐字符相等、场景⑧ sheet2.xml 命名文件引擎可达）
+
+> PR #70 已于 2026-06-10 合并进 main（merge commit）；PR body 归档于 `docs/prs/PR70-v3.0.3.md`（integrated: true）。
