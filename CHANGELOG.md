@@ -1,5 +1,27 @@
 # Changelog
 
+## 3.0.2 - 2026-06-10
+
+v3.0.2 迭代（3 项需求，分属三个模块）：① 业务OP数据核对「导入流水表」改批量多选导入 + 回滚 v3.0.1 左列右移；② 「对账单 ReconID 修复」模块改名「对账单修复」（纯 UI 文案，内部标识全不动）；③ 网关对账单修复场景配置新增「修复订单字段取值」+「修复订单ID取值」启用开关（含用户修订：字段取值限定「网关1v1渠道」模式 + 两功能 row 改垂直布局）。质量门 `npm run release-check` 全绿（**unit 2085 / integration 19 脚本（1011 断言）/ smoke 全过**）。⚠️ 两处资金红线：需求1b 流水批量导入**单进程单事务合并、单次 `clearByDate`**（禁循环致互相覆盖）；需求3 字段取值赋值**不污染原始行 + 分组 seq 全程 Number + idEnabled=false 保留原值**。
+
+### 新增
+
+- **业务OP数据核对「导入流水表」批量多选导入**（需求1b · 🔴 资金红线 · `import-worker.js` / `biz-op-recon-session.js` / `main.js` / `renderer.js`）：原「导入流水表」只能单文件导入，改为「先选一个日期 → 一次多选多个流水表文件 → 全部合并入库到该日期」（多文件 = 该日期完整流水快照，与「重导替换该日期」语义一致）。🔴 资金红线：worker / 同步 fallback **两条路径均为单进程单事务合并、单次 `clearByDate`**（首个数据行触发只清一次，之后各文件累加 INSERT；**绝不循环调用 `runFlowImport`**——否则第 2 个文件的 `clearByDate` 会清掉第 1 个文件刚插入的行，只剩最后一个文件 = 静默丢数据）；任一文件任一行校验失败 → **整批拒绝**（全 ROLLBACK 不留半批，聚合错误报告按来源文件名标注）；**单文件场景行为零回归**。导入完成框报「导入 N 个文件共 M 行」+ 明示「批量导入会替换该日期已有流水」。IPC `bizOpRecon.pickFlowFile` 返回 `filePaths`（数组）、`runFlowImport` 入参 `filePaths`（数组）；业务OP 文件（`kind='bizOp'`）不在范围、不动。
+- **网关对账单修复「修复订单字段取值」**（需求3 · 🔴 资金红线 · `c4-recon-id-fix.js` / `renderer-dialogs.js`）：在网关子模式新增/修改场景对话框新增「修复订单字段取值」功能（独立开关 `config.fieldValue.enabled`，默认关，可与「修复订单ID取值」同时启用）。多行规则 = 下拉1（主边/网关账单分组）+ 下拉2（网关账单字段 `GATEWAY_BILL_FIELDS`）+「取」+ 下拉3（从边/渠道账单分组）+ 下拉4（渠道账单字段 `CHANNEL_BILL_FIELDS`）+「新增」。语义：对账匹配成功后，把「匹配成功的从边渠道字段值」赋给「主边网关字段」，叠加进现有订单修复导出（14 列 `ORDER_REPAIR_FIELDS_GATEWAY` 模板，目标列落在 14 列内才体现于导出）。🔴 资金红线：新 helper `applyFieldValueOverrides` 只写新建 `overrides` 对象、**绝不污染** `mainRow`/`oppRow`；分组 seq **全程 Number**（`_types` 是 `Set<Number>`，存字符串会让 `has` 恒 false → 规则静默失效，最隐蔽资金 bug；UI 存盘归一 + 引擎 `Number()` + 校验三道防线）。config_json 自由 JSON 承载新字段，**无需 DB migration、不 bump bundleVersion**（旧场景缺省 `idEnabled=启用` / `fieldValue=关`，零回归）。
+  - **（用户修订）限定「网关1v1渠道」模式**：勾选「网关1v多渠道」或「网关多v1渠道」时，「修复订单字段取值」不可用——UI 开关自动禁用 + 灰显 + 显示「仅"网关1v1渠道"模式可用」提示 + 自动取消启用；校验拦截；引擎入口 gate 强制 `fieldValue.enabled=false`，`apply1vN`/`applyNv1` 不做字段取值（双重防御）。
+  - **（用户修订）UI 垂直布局**：「修复订单ID取值」「修复订单字段取值」两个 gateway row 改为垂直布局——标题行（label + tooltip +「启用该功能」开关）在上，内容（三选一 radio / 4 下拉规则行）在下方。
+
+### 变更
+
+- **「对账单 ReconID 修复」模块改名「对账单修复」**（需求2 · 🟢 纯前端文案 · `renderer.js` / `renderer-dialogs.js`）：模块显示名「对账单 ReconID 修复」→「对账单修复」（`renderer.js`）；用户可见的两个场景类别 label「单据对账 ReconID 修复」→「单据对账修复」、「网关对账单 ReconID 修复」→「网关对账单修复」（`renderer-dialogs.js`）。内部 id（`recon-id-fix` / `gateway-recon-id-fix`）/ IPC 模块标识 / usage-stats 统计 key（`FUNCTION_REGISTRY` 的 `'对账单 ReconID 修复'` 与 `main.js` `trackedIpcHandle` 第二参 3 处配对）/ scenario category / DB schema CHECK 约束**全部不变**（沿用 v2.1.14「银行对账单处理→资金对账数据处理」先例，零风险、历史统计连续）。
+- **网关对账单修复「订单修复ID取值」改名「修复订单ID取值」+ 新增启用开关**（需求3 · 🔴 资金红线 · `renderer-dialogs.js` / `c4-recon-id-fix.js`）：原「订单修复ID取值」行改名「修复订单ID取值」，并新增「启用该功能」开关（`config.output.idEnabled`，默认启用 = 保持现有必填）。取消勾选则跳过 Reference（ReconID）赋值与校验（三选一 radio + commonId 子行灰显 disabled），导出保留网关账单原 Reference 值——🔴 不把 Reference 放进 overrides → `buildOutputRow` 取 srcRow 原值（网关账单 Reference 列，14 列模板成员），比清空更安全。
+
+### 修复
+
+- **业务OP数据核对模块左列「整体右移」回滚**（需求1a · 🟢 纯 UI · `styles-gemini-extra.css`）：删除 v3.0.1 需求2 给该模块左列加的 `#bizOpReconModulePanel .cell.left > * { transform: translateX(85.5px); }` 平移规则，左列两元素（BU 下拉 + 导出差异按钮）回到 v3.0.1 之前位置；保留同段其它 v3.0.1 样式（`.gateway-recon-picker-card` / `.linked-table-delete-range-card`）不动。
+
+> **v3.0.2 收口**：3 项需求经 team-lead 拆分委托 dev 逐 task 实施、逐 task `release-check` 验收全绿。测试扩建：`scripts/smoke/recon-id-fix-engine-gateway.js` 扩到 20 case（含 idEnabled 开关 / fieldValue 1v1 生效 / 1v多·多v1 限定不生效 / 超 14 列不体现 / 旧场景兼容）、`tests/unit` 新增 `applyFieldValueOverrides` 单测（不污染行 / seq 归一 / 分组过滤 / 空值）、`scripts/smoke/biz-op-recon.js` 扩多文件合并 / 整批拒绝 / 单文件回归。需求3「限定网关1v1渠道」+「UI 垂直布局」为本轮用户修订（PRD/TechDoc 需求3 章节同步）。详见 `docs/iterations/v3.0.2/` PRD/TechDoc + `changes/v3.0.2/spec.md`。
+
 ## 3.0.1 - 2026-06-09
 
 v3.0.1 迭代（资金对账数据处理模块的 1 项资金红线增强 + 3 项 UI 修复）。质量门 `npm run release-check` 全绿（**unit 2075 / integration 19 脚本 / smoke 全过**）。⚠️ 资金红线：需求1 网关对账单链接表落库语义从「整表覆盖」改为「按 `ReconBillBizId` 跨次幂等累加」+ 新增「按日期范围删除」（不可逆）。

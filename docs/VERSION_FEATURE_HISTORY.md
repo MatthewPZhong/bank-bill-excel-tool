@@ -9,6 +9,24 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.0.2（2026-06-10）
+
+v3.0.2 迭代：3 项需求分属三个模块——① 业务OP数据核对「导入流水表」批量多选导入 + 回滚 v3.0.1 左列右移；② 「对账单 ReconID 修复」改名「对账单修复」（纯 UI 文案）；③ 网关对账单修复场景配置新增「修复订单字段取值」+「修复订单ID取值」启用开关（含用户修订：字段取值限定「网关1v1渠道」模式 + 两功能 row 改垂直布局）。质量门 `npm run release-check` 全绿（unit 2085 / integration 19 脚本（1011 断言）/ smoke 全过）。⚠️ 两处资金红线：需求1b 流水批量导入单事务合并、单次 clearByDate；需求3 字段取值赋值不污染原始行 + 分组 seq 全程 Number + idEnabled=false 保留原值。
+
+### 新增
+
+- **业务OP数据核对「导入流水表」批量多选导入**（需求1b · 🔴 资金红线）：「导入流水表」从单文件改为「先选日期 → 一次多选多个流水表 → 合并入库到该日期」（多文件 = 该日期完整流水快照，与「重导替换该日期」一致）。🔴 worker / 同步 fallback 两条路径均**单进程单事务合并、单次 `clearByDate`**（首个数据行触发只清一次、各文件累加 INSERT，绝不循环调用 `runFlowImport` 致互相覆盖丢数据）；任一文件任一行校验失败整批拒绝（全 ROLLBACK，聚合错误报告标注来源文件名）；单文件行为零回归；完成框报「导入 N 个文件共 M 行」+「会替换该日期已有流水」。IPC `pickFlowFile`/`runFlowImport` 改 `filePaths`（数组）；业务OP 文件（`kind='bizOp'`）不在范围、不动。
+- **网关对账单修复「修复订单字段取值」**（需求3 · 🔴 资金红线）：网关子模式新增/修改场景对话框新增「修复订单字段取值」（独立开关 `config.fieldValue.enabled`，默认关，可与「修复订单ID取值」同时启用）。多行规则 = 主分组 + 网关字段「取」从分组 + 渠道字段；对账匹配成功后把从边渠道字段值赋给主边网关字段，叠加进订单修复导出（14 列 `ORDER_REPAIR_FIELDS_GATEWAY` 模板，目标列落 14 列内才体现）。🔴 helper `applyFieldValueOverrides` 只写新建 overrides 不污染 `mainRow`/`oppRow`；分组 seq 全程 Number（`Set<Number>.has` 误存字符串会静默失效，UI 归一 + 引擎 `Number()` + 校验三道防线）。config_json 自由 JSON 承载，无需 DB migration、不 bump bundleVersion（旧场景缺省零回归）。**（用户修订）限定「网关1v1渠道」模式**：勾选 1v多 / 多v1 时字段取值不可用（UI 开关自动禁用 + 灰显 + 「仅"网关1v1渠道"模式可用」提示 + 自动取消启用；校验拦截；引擎入口 gate 强制 `fieldValue.enabled=false`，`apply1vN`/`applyNv1` 不做字段取值，双重防御）。**（用户修订）UI 垂直布局**：两个 gateway row 改垂直布局——标题行（label + tooltip + 启用开关）在上、内容（radio / 规则行）在下。
+
+### 变更
+
+- **「对账单 ReconID 修复」改名「对账单修复」**（需求2 · 🟢 纯前端文案）：模块显示名 +「单据对账修复」「网关对账单修复」两个场景类别 label 去「ReconID」字样；内部 id（`recon-id-fix`/`gateway-recon-id-fix`）/ IPC 模块标识 / usage-stats 统计 key（`FUNCTION_REGISTRY` `'对账单 ReconID 修复'` 与 `trackedIpcHandle` 第二参 3 处配对）/ scenario category / DB schema CHECK 全部不动（沿用 v2.1.14 先例，零风险、统计连续）。
+- **网关「订单修复ID取值」改名「修复订单ID取值」+ 启用开关**（需求3 · 🔴 资金红线）：原「订单修复ID取值」行改名 +「启用该功能」开关（`config.output.idEnabled`，默认启用=保持现有必填）；取消勾选跳过 Reference 赋值与校验、三选一 radio + commonId 灰显，导出保留网关账单原 Reference 值（不把 Reference 放进 overrides → `buildOutputRow` 取 srcRow 原值，比清空安全）。
+
+### 移除
+
+- **业务OP数据核对左列「整体右移」回滚**（需求1a · 🟢 纯 UI）：删除 v3.0.1 需求2 给该模块左列加的 `#bizOpReconModulePanel .cell.left > * { transform: translateX(85.5px) }` 平移规则，左列两元素回到平移前位置；保留同段其它 v3.0.1 样式（`.gateway-recon-picker-card`/`.linked-table-delete-range-card`）不动。
+
 ## v3.0.1（2026-06-09）
 
 v3.0.1 迭代：资金对账数据处理模块 1 项资金红线增强（需求1）+ 3 项 UI 修复（需求2/3/4）。质量门 `npm run release-check` 全绿（unit 2075 / integration 19 脚本 / smoke 全过）。本迭代与另一资金对账工作流（需求5「R5-2 覆盖非空原值告警移除」）并行落地，需求5 由该线定稿（见 PRD §十一/§十二）。
