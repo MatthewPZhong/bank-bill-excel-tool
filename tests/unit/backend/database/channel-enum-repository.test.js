@@ -86,12 +86,13 @@ test.describe('channel-enum-repository（v2.1.16-beta.3 ①）', () => {
     assert.ok(after.last_seen_at >= before.last_seen_at, 'last_seen_at 刷新（>=）');
   });
 
-  // UT-C5：🔴 13 字段常量 ∈ BANK_STATEMENT_FIELDS（防漂移）
+  // UT-C5：🔴 字段常量 ∈ BANK_STATEMENT_FIELDS（防漂移）
+  //   v3.0.4 块 E（需求2）：13→14（新增 Payment Detail，BOC 银行单交易编号提取源）。
   test('UT-C5：BANK_DEPOSIT_FIELDS 全部 ∈ BANK_STATEMENT_FIELDS（防常量漂移）', () => {
-    assert.equal(BANK_DEPOSIT_FIELDS.length, 13);
+    assert.equal(BANK_DEPOSIT_FIELDS.length, 14);
     assert.ok(
       BANK_DEPOSIT_FIELDS.every((f) => BANK_STATEMENT_FIELDS.includes(f)),
-      '13 字段必须全部存在于 BANK_STATEMENT_FIELDS'
+      '14 字段必须全部存在于 BANK_STATEMENT_FIELDS'
     );
   });
 

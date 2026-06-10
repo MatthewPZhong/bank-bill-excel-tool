@@ -53,6 +53,8 @@ const {
   ensureLinkedTableSupport,
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表建表（独立幂等迁移）
   ensureAdmBankDepositSupport,
+  // v3.0.4 块 E 需求2：BOC 链接表两张隐藏表建表（独立幂等迁移；不进 ALL_TABLE_KEYS）
+  ensureBocFxLinkSupport,
   // v2.1.16-beta.3 ①：Channel 枚举字典表建表
   ensureChannelEnumSupport,
   ensureBuiltinScenarioNamesUpdate,
@@ -489,6 +491,8 @@ class AppDatabase {
     this.ensureLinkedTableSupport();
     // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表（紧随 linked 表；幂等 CREATE IF NOT EXISTS，无依赖、不进 ALL_TABLE_KEYS）
     this.ensureAdmBankDepositSupport();
+    // v3.0.4 块 E 需求2：BOC 链接表两张隐藏表（紧随 ADM 表；幂等 CREATE IF NOT EXISTS，无依赖、不进 ALL_TABLE_KEYS）
+    this.ensureBocFxLinkSupport();
     // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀；幂等 CREATE IF NOT EXISTS，无依赖）
     this.ensureChannelEnumSupport();
     // v2.1.7 F7-A2：启动期 ANALYZE — 让规划器统计所有索引（含 idx_acquiring_bill_currency_bill_source_file）
@@ -1136,6 +1140,46 @@ class AppDatabase {
   // JPM run 阶段整批幂等重写 ADM 行匹配标志 / 资金对账ID（可重入）
   writeAdmMatchFlags(admRows) {
     return linkedTableRepository.writeAdmMatchFlags(this.db, admRows);
+  }
+
+  // v3.0.4 块 E 需求2：BOC 链接表两张隐藏表 facade（建表 + 仓储函数转发）
+  ensureBocFxLinkSupport() {
+    return ensureBocFxLinkSupport(this.db);
+  }
+
+  // 银行对账单 Channel=BOC 候选子集（json_extract 下推，仅物化候选；地区/币种/金额终审在 builder）
+  readBankDepositBocCandidates() {
+    return linkedTableRepository.readBankDepositBocCandidates(this.db);
+  }
+
+  // BOC链接表整表覆盖写入（8 列 INSERT，热列从内部辅助键取，raw_json 剥辅助键）
+  replaceBocFxLink(rows) {
+    return linkedTableRepository.replaceBocFxLink(this.db, rows);
+  }
+
+  // 读回 BOC链接表业务行（raw_json → 对象，按 id ASC）；供 BOC 引擎数据源
+  readBocFxLinkRows() {
+    return linkedTableRepository.readBocFxLinkRows(this.db);
+  }
+
+  // 读回 BOC链接表行（携带 DB id）：[{ id, row }]；供 2.5 backfill 按 id 回写
+  readBocFxLinkRowsWithIds() {
+    return linkedTableRepository.readBocFxLinkRowsWithIds(this.db);
+  }
+
+  // 2.5 回填：按 id UPDATE raw_json + recon_link_id 列（幂等全量重算，无位置错位）
+  writeBocFxLinkReconIds(rowsWithIds) {
+    return linkedTableRepository.writeBocFxLinkReconIds(this.db, rowsWithIds);
+  }
+
+  // BOC调拨银行对账单表整表覆盖写入（5 列 INSERT，整行存 raw_json）
+  replaceBocBankDeposit(rows) {
+    return linkedTableRepository.replaceBocBankDeposit(this.db, rows);
+  }
+
+  // 读回 BOC调拨银行对账单表全部行（raw_json → 对象，按 id ASC）
+  readBocBankDepositRows() {
+    return linkedTableRepository.readBocBankDepositRows(this.db);
   }
 
   // v2.1.16-beta.3 ①：Channel 枚举字典 facade（纯审计沉淀，不删/不改对账数据）

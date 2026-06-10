@@ -30,7 +30,8 @@ test.afterEach(() => {
   if (tmpDir) { fs.rmSync(tmpDir, { recursive: true, force: true }); tmpDir = null; }
 });
 
-// 构造一条「已裁列」的入金表 13 字段行（与 main.js handler 裁列后形态一致）。
+// 构造一条「已裁列」的入金表 14 字段行（与 main.js handler 裁列后形态一致）。
+//   v3.0.4 块 E（需求2）：13→14，补 Payment Detail（顺序按 BANK_DEPOSIT_FIELDS：CustomerRef 后、FundType 前）。
 function depositRow(overrides = {}) {
   const base = {
     BizId: 'B001',
@@ -45,6 +46,7 @@ function depositRow(overrides = {}) {
     ReconciliationId: 'R001',
     ChannelOrderNo: 'CO001',
     CustomerRef: 'CR001',
+    'Payment Detail': 'PD001',
     FundType: 'Deposit'
   };
   return { ...base, ...overrides };
@@ -122,13 +124,13 @@ test.describe('linked-table-repository — bank-deposit 入金表（v2.1.16-beta
     assert.equal(meta.dataDateMax, '2026-05-20', 'max = 最晚 BillDate');
   });
 
-  // UT-L4：raw_json 仅 13 字段（传入 13 字段对象 → 读回恰好 13 键）
-  test('UT-L4：raw_json 恰好 13 键，无多余列', () => {
+  // UT-L4：raw_json 仅 14 字段（传入 14 字段对象 → 读回恰好 14 键；v3.0.4 块 E：13→14）
+  test('UT-L4：raw_json 恰好 14 键，无多余列', () => {
     linkedRepo.replaceLinkedTable(db, 'bank-deposit', [depositRow()], {});
     const raw = db.prepare('SELECT raw_json FROM linked_bank_deposit ORDER BY id ASC').get().raw_json;
     const obj = JSON.parse(raw);
     const keys = Object.keys(obj).sort();
-    assert.equal(keys.length, 13, 'raw_json 恰好 13 字段');
+    assert.equal(keys.length, 14, 'raw_json 恰好 14 字段');
     assert.deepEqual(keys, [...linkedRepo.BANK_DEPOSIT_FIELDS].sort(), '字段集合 = BANK_DEPOSIT_FIELDS');
     // 不含主表其余列（抽查几个不在 13 字段内的列）
     assert.ok(!('账户主体' in obj), '不含账户主体');
@@ -136,8 +138,8 @@ test.describe('linked-table-repository — bank-deposit 入金表（v2.1.16-beta
     assert.ok(!('拆分信息' in obj), '不含拆分信息');
   });
 
-  // UT-L8：readLinkedTableRows 还原（13 字段对象数组，按 id ASC 保序）
-  test('UT-L8：readLinkedTableRows 还原 13 字段对象数组并按 id ASC 保序', () => {
+  // UT-L8：readLinkedTableRows 还原（14 字段对象数组，按 id ASC 保序；v3.0.4 块 E：13→14）
+  test('UT-L8：readLinkedTableRows 还原 14 字段对象数组并按 id ASC 保序', () => {
     linkedRepo.replaceLinkedTable(db, 'bank-deposit', [
       depositRow({ ReconciliationId: 'S1' }),
       depositRow({ ReconciliationId: 'S2' }),
@@ -146,15 +148,15 @@ test.describe('linked-table-repository — bank-deposit 入金表（v2.1.16-beta
     const rows = linkedRepo.readLinkedTableRows(db, 'bank-deposit');
     assert.equal(rows.length, 3);
     assert.deepEqual(rows.map((r) => r.ReconciliationId), ['S1', 'S2', 'S3'], '按 id ASC 保序');
-    assert.equal(Object.keys(rows[0]).length, 13, '每行 13 字段');
+    assert.equal(Object.keys(rows[0]).length, 14, '每行 14 字段');
   });
 
-  // 辅助断言：13 字段全部 ∈ BANK_STATEMENT_FIELDS（与 UT-C5 同口径，防漂移；本文件就近守护）
+  // 辅助断言：14 字段全部 ∈ BANK_STATEMENT_FIELDS（与 UT-C5 同口径，防漂移；本文件就近守护）
   test('BANK_DEPOSIT_FIELDS 全部 ∈ BANK_STATEMENT_FIELDS（防常量漂移）', () => {
-    assert.equal(linkedRepo.BANK_DEPOSIT_FIELDS.length, 13);
+    assert.equal(linkedRepo.BANK_DEPOSIT_FIELDS.length, 14);
     assert.ok(
       linkedRepo.BANK_DEPOSIT_FIELDS.every((f) => BANK_STATEMENT_FIELDS.includes(f)),
-      '13 字段必须全部存在于 BANK_STATEMENT_FIELDS'
+      '14 字段必须全部存在于 BANK_STATEMENT_FIELDS'
     );
   });
 });

@@ -2827,6 +2827,52 @@ function ensureAdmBankDepositSupport(db) {
   }
 }
 
+// v3.0.4 块 E（需求2）：BOC 链接表派生两张隐藏表（linked_boc_fx_settlement + linked_boc_bank_deposit）。
+//   linked_boc_fx_settlement：外汇交割表导入后按物理行序分组派生（33+3 字段进 raw_json，热列单列）。
+//   linked_boc_bank_deposit：银行对账单 Channel=BOC 行派生（提取「银行单交易编号」），供 2.5 回填。
+//   🔴 资金/数据红线说明：纯新增隐藏表，无破坏性 DDL（CREATE TABLE / INDEX IF NOT EXISTS 幂等）；
+//      与现有链接表完全隔离、无调用顺序依赖；整表覆盖语义由 replaceBocFxLink / replaceBocBankDeposit 仓储函数实现。
+//   🔴 两表均绝不进 ALL_TABLE_KEYS / 不写 linked_table_meta（前端弹窗不可见，与 ADM 隐藏表同范式）。
+//   raw_json 存整行（数据真相）；transaction_no / group_no / maturity_date / bank_txn_no 落列供索引与匹配热路径。
+//   独立于 ensureLinkedTableSupport，在 database.js 初始化序列里紧随 ensureAdmBankDepositSupport 调用。
+function ensureBocFxLinkSupport(db) {
+  db.exec('BEGIN');
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS linked_boc_fx_settlement (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        transaction_no TEXT,
+        group_no TEXT,
+        allocation_no TEXT,
+        recon_link_id TEXT,
+        maturity_date TEXT,
+        source_row INTEGER,
+        raw_json TEXT NOT NULL,
+        imported_at TEXT NOT NULL
+      );
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_boc_fx_settlement_txn ON linked_boc_fx_settlement(transaction_no);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_boc_fx_settlement_group ON linked_boc_fx_settlement(group_no);');
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS linked_boc_bank_deposit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bank_txn_no TEXT,
+        reconciliation_id TEXT,
+        bill_date TEXT,
+        raw_json TEXT NOT NULL,
+        imported_at TEXT NOT NULL
+      );
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_boc_bank_deposit_txn ON linked_boc_bank_deposit(bank_txn_no);');
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀，无 UI）。
 //   每次导入银行对账单后去重 upsert 两类枚举值：value_type='channel'（Channel 值）/
 //   'channel-region'（<Channel>-<地区> 拼接值）。供后续 ③ 中台退款回填引擎读库 + 业务审计。
@@ -2913,6 +2959,8 @@ module.exports = {
   ensureLinkedTableSupport,
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表（紧随 linked 表，独立幂等迁移函数）
   ensureAdmBankDepositSupport,
+  // v3.0.4 块 E 需求2：BOC 链接表两张隐藏表（紧随 ADM 表，独立幂等迁移；不进 ALL_TABLE_KEYS）
+  ensureBocFxLinkSupport,
   // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀，独立迁移函数）
   ensureChannelEnumSupport,
   ensureBuiltinScenarioNamesUpdate,

@@ -43,16 +43,17 @@ function fullRow44() {
 }
 
 test.describe('bank-deposit 裁列（v2.1.16-beta.3 ②）', () => {
-  // UT-H1：裁 13 字段
-  test('UT-H1：pickBankDepositFields 输出恰好 13 键 = BANK_DEPOSIT_FIELDS', () => {
+  // UT-H1：裁字段（v3.0.4 块 E：13→14，含 Payment Detail）
+  test('UT-H1：pickBankDepositFields 输出恰好 14 键 = BANK_DEPOSIT_FIELDS', () => {
     const picked = pickBankDepositFields(fullRow44());
     const keys = Object.keys(picked).sort();
-    assert.equal(keys.length, 13, '裁后恰好 13 字段');
+    assert.equal(keys.length, 14, '裁后恰好 14 字段');
     assert.deepEqual(keys, [...BANK_DEPOSIT_FIELDS].sort(), '字段集合 = BANK_DEPOSIT_FIELDS');
     // 值按字段名 pick（非索引切片）：抽查保真
     assert.equal(picked.ReconciliationId, 'v_ReconciliationId');
     assert.equal(picked.FundType, 'v_FundType');
     assert.equal(picked['Credit Amount'], 'v_Credit Amount');
+    assert.equal(picked['Payment Detail'], 'v_Payment Detail', 'v3.0.4 新增 Payment Detail');
     // 不含主表其余列
     assert.ok(!('账户主体' in picked), '不含账户主体');
     assert.ok(!('Recon Amount' in picked), '不含 Recon Amount');
@@ -65,10 +66,10 @@ test.describe('bank-deposit 裁列（v2.1.16-beta.3 ②）', () => {
     assert.ok('BillDate' in picked, '保留日期字段 BillDate');
   });
 
-  // 边界：非对象入参 → 返回 13 字段全 undefined（不抛错）
-  test('pickBankDepositFields 非对象入参容错（返回 13 字段全 undefined）', () => {
+  // 边界：非对象入参 → 返回 14 字段全 undefined（不抛错）
+  test('pickBankDepositFields 非对象入参容错（返回 14 字段全 undefined）', () => {
     const picked = pickBankDepositFields(null);
-    assert.equal(Object.keys(picked).length, 13);
+    assert.equal(Object.keys(picked).length, 14);
     assert.ok(BANK_DEPOSIT_FIELDS.every((f) => picked[f] === undefined));
   });
 
