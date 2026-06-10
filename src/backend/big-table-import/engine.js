@@ -82,7 +82,27 @@ function openDbWithPragma(dbPath) {
 // peek 预检（不进事务，async）：打开首文件，扫到表头行 validateHeaders + 首个数据行 monthKeyOf 提月份后早退。
 //   语义平移收单 peekMonthKeyFromFile + 表头校验：表头不合法 → 抛 BigTableImportError；
 //   返回 { monthKey }（首个数据行的 monthKeyOf 结果；用于跨月预检/覆盖删除条件）。
-async function peekFirstFile({ filePath, contract }) {
+//   ⚠️ 防呆归一（review 修复）：本函数是导出 API，外部调用方（如收单 session peekImportTarget）可能传
+//     原始契约（valueColumnWhitelist 为数组）——row-scanner 要求 Set，未归一直接崩 `.has is not a function`。
+//     importFiles 内部路径传入的已是 validateContract 归一产物（Set），instanceof 守卫下跳过、零重复开销。
+async function peekFirstFile({ filePath, contract: rawContract }) {
+  const wl = rawContract && rawContract.valueColumnWhitelist;
+  const contract = (wl && !(wl instanceof Set)) ? validateContract(rawContract) : rawContract;
+  try {
+    return await peekFirstFileInner({ filePath, contract });
+  } catch (err) {
+    // errorName 下沉（review 修复）：本函数是导出 API，单独调用（收单 session peekImportTarget）时
+    //   错误 name 也须与收单 reader peek 一致（契约 errorName='ImportValidationError'，smoke H3 锁 name 契约）；
+    //   importFiles 调用路径外层的同款改名幂等不冲突。CancelError 不改名（取消语义独立）。
+    if (err && err.name !== 'CancelError'
+      && rawContract && rawContract.errorName && typeof rawContract.errorName === 'string') {
+      err.name = rawContract.errorName;
+    }
+    throw err;
+  }
+}
+
+async function peekFirstFileInner({ filePath, contract }) {
   const wb = await zipReader.openWorkbook(filePath);
   let headerError = null;
   let peekedMonthKey = null;

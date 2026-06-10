@@ -37,6 +37,12 @@ async function runChild(opJsonPath, dbPath) {
   const out = { ok: true, results: [], error: null, dump: null, stats: null };
   try {
     for (const o of op.ops) {
+      // peek 预检（review 修复回归用）：返回 { peekMonthKey }（main.js handler 调 peekImportTarget 的等价路径）。
+      if (o.method === 'peek') {
+        const p = await session.peekImportTarget({ db: db.db, kind: o.kind || 'flow', filePaths: o.filePaths });
+        out.results.push({ peekMonthKey: p.monthKey, existingCount: p.existingCount });
+        continue;
+      }
       const fn = {
         importFlow: session.importFlowFiles,
         importBill: session.importBillFiles,
@@ -299,6 +305,80 @@ async function main() {
       assertTrue(r.legacy.ok && r.engine.ok, '⑥ bill 多文件两路成功', JSON.stringify([r.legacy.error, r.engine.error]));
       assertEq(r.engine.dump.bill, r.legacy.dump.bill, '🔴 ⑥ bill 两库逐行含 rowid + raw_json byte-for-byte 相等');
       assertEq(r.engine.dump.bill.map((x) => x.recon_main_id), ['BX1', 'BX2', 'BY1'], '⑥ bill rowid 序 = 文件序');
+    }
+
+    // ════════════ ⑦ 中途行坏日期（首行合法）→ 整批拒绝，报错逐字符相等（review 修复回归）════════════
+    //   修复前：engine 路径坏日期行 monthKeyOf=null 流进跨月分支 → 「跨月份混杂：期望 2026-03，实际 null」；
+    //   修复后：契约 mapRow 开头先验日期（平移 reader 行级校验顺序）→ 「账单日期无法解析为月份："bad"」两路一致。
+    {
+      const flowBadDate = path.join(tmpdir, 'flowBadDate.xlsx');
+      await writeXlsx(flowBadDate, FLOW_HEADERS, [
+        makeFlow('BD1', '2026-03-01', '10', 'USD'),   // 首行合法（peek 预检通过）
+        makeFlow('BD2', 'bad', '20', 'EUR')           // 中途行坏日期 → 行级错误
+      ]);
+      const r = runBothPaths({
+        tmpdir, monthKey: '2026-03', tag: 'case7', dumpAfter: true,
+        ops: [{ method: 'importFlow', filePaths: [flowBadDate] }]
+      });
+      assertTrue(!r.legacy.ok, '⑦ legacy 坏日期整批拒绝');
+      assertTrue(!r.engine.ok, '⑦ engine 坏日期整批拒绝');
+      assertEq(r.engine.error.message, r.legacy.error.message, '🔴 ⑦ 坏日期错误 message 逐字符相等');
+      assertEq(r.engine.error.detailLines, r.legacy.error.detailLines, '🔴 ⑦ 坏日期错误 detailLines 逐字符相等（账单日期无法解析为月份，非「实际 null」）');
+      assertTrue(
+        JSON.stringify(r.engine.error.detailLines).includes('账单日期无法解析为月份'),
+        '⑦ engine 文案为日期解析错误', JSON.stringify(r.engine.error.detailLines)
+      );
+      assertEq(r.engine.dump.flow.length, 0, '🔴 ⑦ engine ROLLBACK 表空');
+    }
+
+    // ════════════ ⑧ 唯一 sheet 非 sheet1.xml 命名 → 引擎 peek+导入可达（review 修复：rels 正解接入 peek）════════════
+    //   ⚠️ 本场景两路行为「有意不同」（修复目的）：engine 路径 rels 正解定位 sheet2.xml 正常导入；
+    //   legacy 路径旧 reader 硬编码 sheet1.xml → peek 即报「未找到 xl/worksheets/sheet1.xml」（v3.0.2 既有行为，回退后仍如此）。
+    {
+      const fx = require('../../tests/unit/backend/big-table-import/_fixtures');
+      const dir = fs.mkdtempSync(path.join(tmpdir, 'sheet2-'));
+      const fp = path.join(dir, 'flowSheet2.xlsx');
+      const yazl = require('yazl');
+      const headerRow = `<row r="1">${fx.rowToInlineStrCells(FLOW_HEADERS, 1)}</row>`;
+      const dataCells = new Array(48).fill('');
+      dataCells[0] = '2026-03-01'; dataCells[6] = 'S2R1'; dataCells[28] = '15'; dataCells[29] = 'USD';
+      const dataRow = `<row r="2">${fx.rowToInlineStrCells(dataCells, 2)}</row>`;
+      const sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+        + headerRow + dataRow + '</sheetData></worksheet>';
+      const wbXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+        + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        + '<sheets><sheet name="数据" sheetId="1" r:id="rId1"/></sheets></workbook>';
+      const relsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>'
+        + '</Relationships>';
+      await new Promise((resolve, reject) => {
+        const zf = new yazl.ZipFile();
+        zf.addBuffer(Buffer.from(wbXml, 'utf8'), 'xl/workbook.xml');
+        zf.addBuffer(Buffer.from(relsXml, 'utf8'), 'xl/_rels/workbook.xml.rels');
+        zf.addBuffer(Buffer.from(sheetXml, 'utf8'), 'xl/worksheets/sheet2.xml');
+        zf.outputStream.pipe(fs.createWriteStream(fp)).on('close', resolve).on('error', reject);
+        zf.end();
+      });
+      const r = runBothPaths({
+        tmpdir, monthKey: '2026-03', tag: 'case8', dumpAfter: true,
+        ops: [
+          { method: 'peek', kind: 'flow', filePaths: [fp] },
+          { method: 'importFlow', filePaths: [fp] }
+        ]
+      });
+      // engine 路径：peek + 导入全可达（rels 正解）
+      assertTrue(r.engine.ok, '⑧ engine sheet2.xml 命名文件 peek+导入成功', JSON.stringify(r.engine.error));
+      assertEq(r.engine.results[0].peekMonthKey, '2026-03', '⑧ engine peek rels 正解提取月份');
+      assertEq(r.engine.dump.flow.map((x) => x.recon_main_id), ['S2R1'], '⑧ engine 数据行入库');
+      // legacy 路径：旧 reader 硬编码 sheet1.xml → peek 即拒（预期行为差异：v3.0.2 既有行为，非本修复回归）
+      assertTrue(!r.legacy.ok, '⑧ legacy sheet2.xml 命名文件按既有行为拒绝');
+      assertTrue(
+        (r.legacy.error.message || '').includes('未找到 xl/worksheets/sheet1.xml'),
+        '⑧ legacy 报错为既有「未找到 sheet1.xml」', r.legacy.error.message
+      );
     }
 
     console.log(`acquiring-engine-migration: ${passed}/${passed + failed} PASS`);

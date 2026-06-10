@@ -89,6 +89,14 @@ function createContract(options = {}) {
     //   rowIndex 用源 xlsx 真实行号 rowR（与收单 reader 行级错误 `第 ${rowIndex} 行` 一致）。
     mapRow({ rowR, values, ctx }) {
       const sourceFile = (ctx && ctx.sourceFile) ? ctx.sourceFile : '';
+      // 账单日期（列 0）可解析校验 —— 平移 reader 行级校验顺序：日期最先、错则跳行不再做后续校验
+      //   （reader.js 数据行第一道检查；文案 byte-for-byte：原始值入引号）。
+      //   同时杜绝坏日期行进 engine 跨月分支产出「跨月份混杂：期望 X，实际 null」的误导文案（review 修复）。
+      const billDateRaw = values[FLOW_KEY_COLUMN_INDICES.billDate];
+      const monthKey = extractMonthKey(billDateRaw);
+      if (!monthKey) {
+        return { error: { rowIndex: rowR, reason: `账单日期无法解析为月份："${billDateRaw}"` } };
+      }
       // 对账主Id（列 6）非空校验 —— 平移 insertFlowRow：空 → 抛「第 N 行：对账主Id 为空」。
       const reconMainId = String(values[6] || '').trim();
       if (!reconMainId) {
@@ -106,8 +114,7 @@ function createContract(options = {}) {
       }
       const settleCurrency = String(values[29] || '').trim();
       const settleCurrencyNorm = normalizeCurrency(values[29]);
-      // monthKey 入库值 = 账单日期列 0 提取（与 engine 跨月校验基准同源；engine 已保证只有同月行入库）。
-      const monthKey = extractMonthKey(values[FLOW_KEY_COLUMN_INDICES.billDate]);
+      // monthKey 入库值 = 开头校验时已提取（与 engine 跨月校验基准同源；engine 已保证只有同月行入库）。
       // 列序严格对齐 FLOW_INSERT_SQL：month_key, source_file, source_row_index, recon_main_id,
       //   settle_amount, settle_amount_abs, settle_currency, settle_currency_norm, raw_json(''), imported_at。
       return {

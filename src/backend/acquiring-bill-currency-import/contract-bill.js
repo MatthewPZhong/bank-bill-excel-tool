@@ -74,6 +74,13 @@ function createContract(options = {}) {
     // 行变换：逐字平移 import-repository.insertBillRow。
     mapRow({ rowR, values, ctx }) {
       const sourceFile = (ctx && ctx.sourceFile) ? ctx.sourceFile : '';
+      // 账单日期（列 0）可解析校验 —— 平移 reader 行级校验顺序：日期最先、错则跳行不再做后续校验
+      //   （文案 byte-for-byte：原始值入引号）；杜绝坏日期行进 engine 跨月分支产「实际 null」误导文案（review 修复）。
+      const billDateRaw = values[BILL_KEY_COLUMN_INDICES.billDate];
+      const monthKey = extractMonthKey(billDateRaw);
+      if (!monthKey) {
+        return { error: { rowIndex: rowR, reason: `账单日期无法解析为月份："${billDateRaw}"` } };
+      }
       // 主对账Id（列 14）非空校验 —— 平移 insertBillRow：空 → 「第 N 行：主对账Id 为空」。
       const reconMainId = String(values[14] || '').trim();
       if (!reconMainId) {
@@ -88,7 +95,7 @@ function createContract(options = {}) {
       }
       rawObj['账单日期'] = normalizeBillDate(rawObj['账单日期']);
       const rawJson = JSON.stringify(rawObj);
-      const monthKey = extractMonthKey(values[BILL_KEY_COLUMN_INDICES.billDate]);
+      // monthKey：开头校验时已提取。
       // 列序严格对齐 BILL_INSERT_SQL：month_key, source_file, source_row_index, recon_main_id,
       //   settle_currency, settle_currency_norm, raw_json, imported_at。
       return {

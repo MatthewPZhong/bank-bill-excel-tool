@@ -404,11 +404,28 @@ async function importBillFilesWithOverwrite({ db, monthKey, filePaths, onProgres
 
 // fix1（spec §3.4）+ fix2（spec §3.5）：peek + 已有行预检（不进事务，async）
 // 返回：{ monthKey, existingCount, kind }
+//
+// v3.0.3 PR-H review 修复：引擎开关 true 时 peek 改走引擎 zip-reader（rels 正解定位唯一 sheet）——
+//   否则唯一 sheet 非 sheet1.xml 命名的合法文件在预检即被旧 reader 拒绝（「未找到 xl/worksheets/sheet1.xml」），
+//   引擎的 rels 定位 + 多 sheet 显式报错防御项在主 UI 流程不可达（main.js handler 先 peek 后 import）。
+//   表头校验 + 首数据行月份提取语义与旧 peekMonthKeyFromFile 一致（engine.peekFirstFile 平移；
+//   表头错 message 带 `${sourceFile}：` 前缀 byte-for-byte，main.js catch 只透传 message/detailLines）。
+//   peek 仅读到首个有效数据行即早退（row-scanner __stopParsing 协议），主进程轻量无 W4 顾虑。
 async function peekImportTarget({ db, kind, filePaths }) {
   if (!Array.isArray(filePaths) || filePaths.length === 0) {
     throw new Error(`${kind === 'flow' ? '流水表' : '单据表'}：未选择任何文件`);
   }
-  const { monthKey } = await importReader.peekMonthKeyFromFile({ kind, filePath: filePaths[0] });
+  let monthKey;
+  if (USE_BIG_TABLE_IMPORT_ENGINE) {
+    const engine = require('../backend/big-table-import/engine');
+    const contractMod = require(kind === 'flow' ? FLOW_CONTRACT_PATH : BILL_CONTRACT_PATH);
+    ({ monthKey } = await engine.peekFirstFile({
+      filePath: filePaths[0],
+      contract: contractMod.createContract({})
+    }));
+  } else {
+    ({ monthKey } = await importReader.peekMonthKeyFromFile({ kind, filePath: filePaths[0] }));
+  }
   const readiness = importRepo.getMonthReadiness(db, monthKey);
   const existingCount = kind === 'flow' ? readiness.flowCount : readiness.billCount;
   return { monthKey, existingCount, kind };
