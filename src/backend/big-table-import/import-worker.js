@@ -37,18 +37,20 @@ const zipReader = require('./zip-reader');
 const rowScanner = require('./row-scanner');
 const { validateContract } = require('./contract');
 
-// 错误累积上限（spec §2.3）：与收单 reader-handrolled / biz-op worker 同口径，防百万级行级错误撑爆消息体。
+// 错误累积上限默认值（spec §2.3）：与收单 reader-handrolled / biz-op worker 同口径，防百万级行级错误撑爆消息体。
+//   v3.0.4 PR-B E4：契约可声明 maxCollectedErrors 覆盖该默认值（如 pending/biz-op 用 1000）。
 const MAX_COLLECTED_ERRORS = 100;
 
 // 单文件解析（纯函数，便于单测在主线程直接驱动，不必起 worker）。
 //   入参：
 //     filePath              — xlsx 绝对路径
 //     contract              — 已 validateContract 归一化的契约（{ expectedHeaders, valueColumnWhitelist(Set|null),
-//                              requiredColumns, validateHeaders, mapRow, insertSql, monthKeyOf, ... }）
+//                              requiredColumns, validateHeaders, mapRow, insertSql, monthKeyOf,
+//                              + E4 maxCollectedErrors/captureRowValues + E5 dedupeKeyOf, ... }）
 //     useWhitelist          — false 时强制全列解码（whitelist=null，byte-for-byte 对照组用）；true 用契约白名单
 //     onProgress            — ({ importedCount }) 每 1w 有效行回调（节流由本函数做）
-//   返回 { batch:[{params}], errors:[{rowIndex,reason}], importedCount, rowErrorTotal, truncated,
-//          monthKeys:[...], headerError:null|{message,detailLines} }
+//   返回 { batch:[{params,rowR[,dedupeKey]}], errors:[{rowIndex,reason[,cells]}], importedCount, rowErrorTotal,
+//          truncated, monthKeys:[...], headerError:null|{message,detailLines} }
 //
 //   语义平移自收单 streamImportOneFile（逐项对齐，见各分支注释）：
 //     ① 表头行（rowR===1）：全列收集后 validateHeaders；不 ok → headerError（engine 据此整批拒绝），停止解析。
@@ -57,6 +59,9 @@ const MAX_COLLECTED_ERRORS = 100;
 //     ④ 数据行：contract.mapRow({ rowR, values, ctx }) → { params } 入 batch + monthKeyOf 入 monthKeys；
 //        { skip:true } 跳过；{ error } 累积（达上限早退）。
 //     ⑤ monthKey 提取由 contract.monthKeyOf 做；跨月一致性「不在此」判（engine 做全局判定）。
+//   v3.0.4 PR-B 扩展（🔴 契约不声明 ⇒ 行为零变化）：
+//     E4 maxCollectedErrors：错误样本截断上限（契约覆盖默认 100）；captureRowValues：错误记录附 cells（仅错误行 values.slice() 复制）。
+//     E5 dedupeKeyOf：每入 batch 数据行算去重 key 随 batch 项传递（Set 判重由 engine 写侧做，保按文件序确定性）。
 async function parseFile({ filePath, contract, useWhitelist, onProgress }) {
   const sourceFile = path.basename(filePath);
   // 逐行行变换上下文（spec §2.3 ctx）：本文件固定的 sourceFile（mapRow 据此填 INSERT source_file 列）。
@@ -64,6 +69,11 @@ async function parseFile({ filePath, contract, useWhitelist, onProgress }) {
   const ctx = { sourceFile };
   const expectedHeaders = contract.expectedHeaders;
   const valueColumnWhitelist = useWhitelist ? (contract.valueColumnWhitelist || null) : null;
+  // E4：错误上限（契约声明则覆盖默认 100）；captureRowValues：错误记录是否附 cells。E5：去重 key 计算函数。
+  const maxErrors = (contract.maxCollectedErrors && contract.maxCollectedErrors > 0)
+    ? contract.maxCollectedErrors : MAX_COLLECTED_ERRORS;
+  const captureRowValues = contract.captureRowValues === true;
+  const dedupeKeyOf = typeof contract.dedupeKeyOf === 'function' ? contract.dedupeKeyOf : null;
 
   const batch = [];
   const errors = [];
@@ -128,31 +138,35 @@ async function parseFile({ filePath, contract, useWhitelist, onProgress }) {
             // ④ 数据行：契约行变换。
             //   ctx（spec §2.3）：逐文件动态上下文（sourceFile 逐文件不同，不能走 contractOptions）。
             //   收单契约 mapRow 用 ctx.sourceFile 填 INSERT 的 source_file 列（byte-for-byte 对齐 insertFlowRow/insertBillRow）。
+            // E4 captureRowValues：错误记录附本行原始 cells（仅错误行 values.slice() 浅拷贝，内存可控）。
+            //   未声明（captureRowValues=false）⇒ 不带 cells，错误记录形态与现状完全一致。
+            const rowCells = captureRowValues ? values.slice() : undefined;
             let mapped;
             try {
               mapped = contract.mapRow({ rowR, values, ctx });
             } catch (mapErr) {
               rowErrorTotal += 1;
-              recordError(errors, { rowIndex: rowR, reason: mapErr && mapErr.message ? mapErr.message : String(mapErr) });
-              if (errors.length >= MAX_COLLECTED_ERRORS) throwErrorsLimit();
+              recordError(errors, makeErrEntry({ rowIndex: rowR, reason: mapErr && mapErr.message ? mapErr.message : String(mapErr), cells: rowCells }), maxErrors);
+              if (errors.length >= maxErrors) throwErrorsLimit();
               return;
             }
             if (mapped && mapped.skip) return;
             if (mapped && mapped.error) {
               rowErrorTotal += 1;
               const e = mapped.error;
-              recordError(errors, {
+              recordError(errors, makeErrEntry({
                 rowIndex: Number.isFinite(e.rowIndex) ? e.rowIndex : rowR,
-                reason: e.reason || '行校验失败'
-              });
-              if (errors.length >= MAX_COLLECTED_ERRORS) throwErrorsLimit();
+                reason: e.reason || '行校验失败',
+                cells: rowCells
+              }), maxErrors);
+              if (errors.length >= maxErrors) throwErrorsLimit();
               return;
             }
             if (!mapped || !Array.isArray(mapped.params)) {
               // 契约 mapRow 返回非法形态（既非 skip/error 也无 params）→ 当行级错误（防静默丢数据）。
               rowErrorTotal += 1;
-              recordError(errors, { rowIndex: rowR, reason: 'mapRow 返回值非法（缺 params/skip/error）' });
-              if (errors.length >= MAX_COLLECTED_ERRORS) throwErrorsLimit();
+              recordError(errors, makeErrEntry({ rowIndex: rowR, reason: 'mapRow 返回值非法（缺 params/skip/error）', cells: rowCells }), maxErrors);
+              if (errors.length >= maxErrors) throwErrorsLimit();
               return;
             }
 
@@ -160,7 +174,14 @@ async function parseFile({ filePath, contract, useWhitelist, onProgress }) {
             const monthKey = contract.monthKeyOf({ values });
             // batch 带源 xlsx 真实行号 rowR：engine 写入侧 INSERT 失败 / 跨月校验的行级错误行号据此对齐
             //   收单 reader `第 ${rowR} 行` 语义（不能用 batch 内 0-based 索引）。
-            batch.push({ params: mapped.params, rowR });
+            //   E5 dedupeKey：契约声明 dedupeKeyOf ⇒ 解析侧算 key 随 batch 项传递（Set 判重由 engine 写侧做）；
+            //     未声明 ⇒ 不带该字段，batch 项形态与现状一致。
+            const batchItem = { params: mapped.params, rowR };
+            if (dedupeKeyOf) {
+              const k = dedupeKeyOf({ values });
+              batchItem.dedupeKey = k == null ? null : String(k);
+            }
+            batch.push(batchItem);
             monthKeys.push(monthKey == null ? null : String(monthKey));
             importedCount += 1;
             if (onProgress && importedCount % 10000 === 0) {
@@ -185,9 +206,18 @@ async function parseFile({ filePath, contract, useWhitelist, onProgress }) {
   };
 }
 
-// 累积行级错误：只保留前 MAX_COLLECTED_ERRORS 条（rowErrorTotal 仍计全量）。
-function recordError(errors, entry) {
-  if (errors.length < MAX_COLLECTED_ERRORS) errors.push(entry);
+// 累积行级错误：只保留前 maxErrors 条（rowErrorTotal 仍计全量）。
+//   v3.0.4 PR-B E4：上限改由调用方传（契约 maxCollectedErrors 覆盖默认 100），缺省回退默认值。
+function recordError(errors, entry, maxErrors = MAX_COLLECTED_ERRORS) {
+  if (errors.length < maxErrors) errors.push(entry);
+}
+
+// 构造错误记录：E4 captureRowValues=false（cells===undefined）⇒ 不挂 cells 字段，记录形态与现状 byte-for-byte 一致；
+//   声明 captureRowValues=true ⇒ 挂本行原始 cells（仅错误行复制）。
+function makeErrEntry({ rowIndex, reason, cells }) {
+  const e = { rowIndex, reason };
+  if (cells !== undefined) e.cells = cells;
+  return e;
 }
 
 // 达错误上限 → 抛 __stopParsing 早退（scanSheetRows 停 stream + resolve）。
