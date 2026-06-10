@@ -3116,6 +3116,22 @@ function registerAppHandlers() {
       // round 3 P2：先查老 row 的 category（spec §三 IPC：update 不允许改 category，可信任 DB 现值）
       // 查不到 → updateScenario 自身也会抛 "场景 id=X 不存在"，此处保持 try 链一致
       const existing = database.getScenario(id);
+      // v3.0.4 块 F · F2（🔴 资金红线契约守卫）：builtin-fixed 场景若本次更新带 config（UI 整包替换 config_json），
+      //   必须仍含 funcCategory + subCategory —— 这两个字段是编排器 bucketScenarios 分桶依据（seed 契约）。
+      //   丢任一字段会让场景静默掉出 R4/R5 桶或走错轮次（资金红线偏离）。UI 浅合并理应保留，此处兜底拦截。
+      //   非 builtin-fixed / 不带 config 的更新（如仅改 priority/enabled）不受影响。
+      if (
+        existing && existing.category === 'builtin-fixed'
+        && fields && Object.prototype.hasOwnProperty.call(fields, 'config')
+      ) {
+        const cfg = fields.config;
+        if (!cfg || typeof cfg !== 'object' || !cfg.funcCategory || !cfg.subCategory) {
+          return {
+            status: 'failed',
+            message: 'builtin-fixed 场景 config 更新必须保留 funcCategory + subCategory（场景分桶契约字段，不可丢失）'
+          };
+        }
+      }
       database.updateScenario(id, fields);
       clearResultCacheForCategory(existing && existing.category);
       return { status: 'ok', id };
@@ -3617,6 +3633,21 @@ function registerAppHandlers() {
       //   structuredClone 防止引擎原地改字段污染 DB 还原对象（与 workingGwRows 同口径）。
       const workingDepositRows = structuredClone(database.readLinkedTableRows('bank-deposit') || []);
       const workingRefundOrderRows = refundOrderSession ? structuredClone(refundOrderSession.rows) : []; // 已导退款表→真实行；未导→[]
+      // v3.0.4 块 F（🔴 资金红线）：Payment线下调拨订单回填（R5s2b）数据源 = 中台调拨订单链接表 mid-allocation。
+      //   gating 防整表无谓载入（bank-deposit 65.7 万行 ~1.2GB 尖峰先例）——仅当 R5s2 场景 enabled
+      //   且 config.paymentOfflineBackfill.enabled===true 时才 structuredClone 读全表；否则注入 []（引擎 no-op）。
+      //   dispatchScenarios 已是 enabled 过滤后集合，无须再判 enabled；按 funcCategory/subCategory 定位 R5s2 场景。
+      const r5s2Scenario = dispatchScenarios.find(
+        (s) => s.config && s.config.funcCategory === 'platform-order' && s.config.subCategory === 'fund-transfer-backfill'
+      );
+      const paymentOfflineEnabled = !!(
+        r5s2Scenario && r5s2Scenario.config
+        && r5s2Scenario.config.paymentOfflineBackfill
+        && r5s2Scenario.config.paymentOfflineBackfill.enabled === true
+      );
+      const workingMidRows = paymentOfflineEnabled
+        ? structuredClone(database.readLinkedTableRows('mid-allocation') || [])
+        : [];
       // v2.1.16-beta.2 T1：改走 5 轮编排器 runReconciliation（R2 内部仍调 dispatcher，双维 first-match-wins 不变）。
       //   deps 字段名照搬原 dispatcher 调用处：channelsRepo=channelsRepository（findByNameAndLocation/getBuiltinGeneral）、db=database.db。
       //   编排器返回 modifiedRows/unmatchedRows 由「当前最新 bankRows」重建（资金红线：两者互斥且全覆盖 workingBankRows）。
@@ -3626,7 +3657,9 @@ function registerAppHandlers() {
         scenarios: dispatchScenarios,
         deps: { channelsRepo: channelsRepository, db: database.db },
         // v2.1.16-beta.4 R5 场景4：退款回填引擎入参（refundOrderRows 非空时引擎产出回填/未匹配行；空则该路径 no-op）
-        refundContext: { refundOrderRows: workingRefundOrderRows, depositRows: workingDepositRows }
+        refundContext: { refundOrderRows: workingRefundOrderRows, depositRows: workingDepositRows },
+        // v3.0.4 块 F R5 场景2b：Payment线下调拨回填引擎入参（gating 命中时 workingMidRows 非空；否则 [] → 引擎 no-op）
+        midAllocationContext: { midAllocationRows: workingMidRows }
       });
       processingResult = {
         modifiedRows: result.modifiedRows,
@@ -11463,9 +11496,12 @@ function registerNewAccountHandlers() {
         //   —— bank-statement:run 读 readLinkedTableRows('bank-deposit') 喂场景4 产出 refundBackfillRows 写进 processingResult。
         //   bank-deposit 数据变更（重导/改） → 旧银行对账 run 结果（基于旧 bank-deposit 的 refundBackfillRows）失效；
         //   不清则「先跑银行对账、再重导 bank-deposit、直接导出」会导出 stale refundBackfillRows，强制用户重跑后才能导出。
-        //   ⚠️ 守卫严格 repoKey === 'bank-deposit'，且独立于上方 ADM 派生块（bankExistsForAdm）——
-        //     mid-allocation 入口只喂 ADM→reconIdFixResult、不喂 run，不应清 processingResult；放进 ADM 块会误清。
-        if (repoKey === 'bank-deposit') {
+        // v3.0.4 块 F · F4（🔴 资金红线）：mid-allocation 也成了银行对账 run 数据源——
+        //   bank-statement:run 在勾选 gating 命中时读 readLinkedTableRows('mid-allocation') 喂 R5 场景2b（Payment线下调拨回填）
+        //   产出回填行写进 processingResult。故 mid-allocation 重导后旧 run 结果失效，同样必须清 processingResult。
+        //   ⚠️ 本清缓存独立于上方 ADM 派生块（bankExistsForAdm/try）——ADM 抛错时上块 catch 不影响这里，mid-allocation 仍清。
+        //   （此前注释「mid-allocation 不喂 run 不应清」的前提已被块 F 改变。）
+        if (repoKey === 'bank-deposit' || repoKey === 'mid-allocation') {
           processingResult = null;
         }
         results.push(okResult);
