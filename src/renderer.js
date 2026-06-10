@@ -3409,7 +3409,26 @@ function updateBankStatementUi() {
   } else if (pr) {
     // v2.1.8 N3-1：hitScenarios.displayIndex 与场景管理 UI 列表序号统一（spec.md §五 N3-D1）
     const arr = Array.isArray(pr.hitScenarios) ? pr.hitScenarios : [];
-    const idsText = arr.length > 0 ? `（场景 ${arr.map((s) => s.displayIndex).join('、')}）` : '';
+    // v3.0.3 PR-E：状态框命中明细按「银行渠道枚举值:场景序号」分组换行展示。
+    //   新数据（双维路径）每条 hitScenarios 带非空 channelName → 按 channelName 分组（保持首次出现顺序），
+    //     每组一行 `渠道名:序号1、序号2`，组间 \n，包进括号：`（场景\nJPM:1、3\nCITI:2）`。
+    //   🔴 换行陷阱（updateStatusBox 对全角「：」自动补 \n）：分组分隔必须用半角 ':'，绝不用全角「：」。
+    //   fallback：旧 processingResult 持久化数据 / legacy 单维路径无 channelName → 保持原格式 `（场景 1、3）` 零变化。
+    let idsText = '';
+    if (arr.length > 0 && arr.every((s) => s.channelName)) {
+      const groups = new Map(); // channelName → [displayIndex...]（保持首次出现顺序）
+      arr.forEach((s) => {
+        if (!groups.has(s.channelName)) groups.set(s.channelName, []);
+        groups.get(s.channelName).push(s.displayIndex);
+      });
+      const lines = [];
+      groups.forEach((indexes, channelName) => {
+        lines.push(`${channelName}:${indexes.join('、')}`);
+      });
+      idsText = `（场景\n${lines.join('\n')}）`;
+    } else if (arr.length > 0) {
+      idsText = `（场景 ${arr.map((s) => s.displayIndex).join('、')}）`;
+    }
     text = `已处理：${pr.hitRowCount} 行命中${idsText}，${pr.warningCount} 警告`;
     if (pr.skippedC3Count > 0) {
       text += ` · 跳过 ${pr.skippedC3Count} 个对账不平场景`;

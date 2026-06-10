@@ -3372,3 +3372,21 @@ body[data-platform="win32"] .dialog-title * {
 
 /* v3.0.1（用户调整）：删除网关对账单数据弹框宽度减半（原 .modal-card 默认 940px → 470px），内容稀疏更紧凑 */
 .linked-table-delete-range-card { width: min(100%, 470px); }
+
+/* v3.0.3 PR-E：资金对账数据处理状态框「渠道名:场景序号」多行明细可滚动。
+ *   命中多渠道时 hitScenarios 按渠道分组换行（renderer.js updateBankStatementUi）→ 内容可能超出状态框，
+ *   加 max-height + overflow-y 让超高时滚动，不撑破布局。
+ *   坑：.status-box 基础类（styles-gemini.css:285）为 flex + align-items:center，
+ *     滚动容器内 center 对齐会把顶部内容顶到可视区外滚不到 → 这里覆盖 align-items: flex-start；
+ *     再给两个 flex 子项（角标 + 文案）加垂直 margin:auto，使单行/短文案在 min-height:110px 下仍垂直居中观感，
+ *     内容超 max-height 时 margin:auto 塌缩为 0、从顶部起算 → 多行可滚到顶（两全）。 */
+#bankStatementStatusBox {
+  max-height: 140px;
+  overflow-y: auto;
+  align-items: flex-start;
+}
+#bankStatementStatusBox .status-spark,
+#bankStatementStatusBox .status-box-text {
+  margin-top: auto;
+  margin-bottom: auto;
+}
