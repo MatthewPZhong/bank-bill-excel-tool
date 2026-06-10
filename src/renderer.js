@@ -4488,9 +4488,23 @@ async function runGatewayReconScenario(scenarioId) {
     // 用弹框反馈（不写 bankStatementStatusBox，理由同导入）。
     const baseMsg = fixedCount > 0
       ? `运行完成，命中 ${fixedCount} 行网关修复。<br>请点击"导出文件"导出网关对账单修复文件。`
-      : '运行完成，本次无网关修复行。<br>（渠道账单可能无 merchantId=6300156616，或三段匹配未命中。）';
-    const warnMsg = warningCount > 0 ? `<br>另有 ${warningCount} 条警告。` : '';
-    openModal(createAlertDialog(`${baseMsg}${warnMsg}`, { logLevel: 'info', skipLogReport: true }));
+      // v3.0.4 块 E 需求3：0 命中兜底文案去 JPM merchantId 硬编码（BOC/JPM 通用，场景无关）。
+      : '运行完成，本次无网关修复行。<br>（请核对场景渠道行与链接表/网关账单是否匹配，详见下方警告或操作日志。）';
+    // v3.0.4 块 E 需求3（O2 拍板 / R7）：逐条显示前 5 条 warning 中文 message（手工 escape 后拼 <br>，防 innerHTML 注入——警告含表格数据值）。
+    //   超 5 条尾缀「等 N 条，详见操作日志」；warnings 为 BOC 引擎产物时带 message，JPM 仅 code 时回退 code。
+    let warnMsg = '';
+    if (warningCount > 0) {
+      const warns = Array.isArray(result.warnings) ? result.warnings : [];
+      const shown = warns.slice(0, 5);
+      const lines = shown.map((w) => `• ${escapeHtml((w && (w.message || w.code)) || '')}`);
+      const tail = warningCount > 5 ? `<br>等 ${warningCount} 条，详见操作日志` : '';
+      warnMsg = `<br><br>另有 ${warningCount} 条警告：<br>${lines.join('<br>')}${tail}`;
+    }
+    // 有警告 → 弹框按 warning 级上报（去 skipLogReport）；无警告维持 info 静默。
+    const alertOpts = warningCount > 0
+      ? { logLevel: 'warning', logDomain: 'gateway-recon-id-fix' }
+      : { logLevel: 'info', skipLogReport: true };
+    openModal(createAlertDialog(`${baseMsg}${warnMsg}`, alertOpts));
   } catch (error) {
     openModal(createAlertDialog(`运行失败：${error && error.message ? error.message : error}`));
   }

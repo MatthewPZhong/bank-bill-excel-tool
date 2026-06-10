@@ -6359,6 +6359,60 @@
         return `${head.join('<br/><br/>')}<br/><br/>${items}${truncatedNote}`;
       }
 
+      // v3.0.4 块 E 需求2（spec §4 F2.6）：BOC 链接表派生弹框链（仿 findAdmDerive，接在 ADM 链之后）。
+      //   外汇交割表导入触发 fx 派生（result.bocDerive）；银行对账单表导入触发 bank 补回填（result.bocBankDerive）。
+      //   🔴 取「最后一个」有 bocDerive 者：一次多选 fx + bank 文件时 handler 逐次重建 → 最后一次 = DB 最终态。
+      function findBocDerive(results) {
+        const list = Array.isArray(results) ? results : [];
+        let hit = null;
+        for (const r of list) { if (r && r.bocDerive) hit = r; }
+        return hit ? hit.bocDerive : null;
+      }
+      function findBocBankDerive(results) {
+        const list = Array.isArray(results) ? results : [];
+        let hit = null;
+        for (const r of list) { if (r && r.bocBankDerive) hit = r; }
+        return hit ? hit.bocBankDerive : null;
+      }
+
+      // 构造 BOC fx 派生结果弹框规格（F2.6 表格五分支前四分支 + bank 失败收敛）。
+      //   返回 null = 无需弹框（静默）；否则 { type:'alert'|'confirm', html, isError, missingReason }。
+      //   needBankImport 分支用 confirm 框引导导入（复用链接表管理导入流程），其余用 alert。
+      function buildBocDeriveSpec(bocDerive) {
+        if (!bocDerive) return null;
+        // 派生失败（异常）→ 错误弹框（交割表本身已导入成功，仅 BOC 派生失败）。
+        if (!bocDerive.created) {
+          const err = bocDerive.error ? String(bocDerive.error) : '未知错误';
+          return { type: 'alert', isError: true, html: `<b>BOC链接表派生失败</b><br/><br/>${escapeHtml(err)}` };
+        }
+        // total===0（空交割表 / 仅标题表头）→ 静默（仿 ADM 0 行拍板）。
+        if (!bocDerive.total) return null;
+        // needBankImport（U2 拍板）→ confirm 引导导入 BOC 银行对账单。
+        if (bocDerive.needBankImport) {
+          const missingReason = bocDerive.bankMissingReason || '';
+          // missing-payment-detail：库内有 BOC 银行行但缺 Payment Detail（旧白名单时代导入）→ 提示重新导入。
+          const extraHint = missingReason === 'missing-payment-detail'
+            ? '<br/><br/><b style="color:#d93025;">检测到链接表库中已有 BOC 银行对账单数据但缺少「Payment Detail」字段（早期版本导入），无法提取银行单交易编号，请重新导入 BOC 银行对账单表。</b>'
+            : '';
+          const html = 'BOC链接表已生成分组与调拨单号，但链接表库无可用的 BOC 银行对账单数据，无法回填资金对账不平表链接ID。'
+            + extraHint
+            + '<br/><br/>是否现在导入 BOC 银行对账单？';
+          return { type: 'confirm', isError: false, html, missingReason };
+        }
+        // 成功（created && total>0 && !needBankImport）→ 成功提示（skipLogReport）。
+        return { type: 'alert', isError: false, html: 'BOC链接表已生成。' };
+      }
+
+      // 构造 BOC bank 补回填弹框规格：O1 拍板——成功静默（返回 null），仅失败弹错误框。
+      function buildBocBankDeriveSpec(bocBankDerive) {
+        if (!bocBankDerive) return null;
+        if (!bocBankDerive.created) {
+          const err = bocBankDerive.error ? String(bocBankDerive.error) : '未知错误';
+          return { type: 'alert', isError: true, html: `<b>BOC调拨银行对账单表派生失败</b><br/><br/>${escapeHtml(err)}` };
+        }
+        return null; // O1：补回填成功静默
+      }
+
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
       dialog.querySelector('[data-action="exit"]').addEventListener('click', closeModal);
 
@@ -6391,25 +6445,63 @@
           }));
           return;
         }
-        // 弹批量明细；确认后：若本次含银行对账单表（admDerive）→ 链式弹 ADM 派生结果框（PRD Mockup B/C），
-        //   再重开链接表管理弹窗；否则直接重开（重开内部会重新拉 list → 反映新日期范围 / 更新日期）。
+        // 弹批量明细；确认后链式弹后置派生结果框，再重开链接表管理弹窗（重开内部重新拉 list → 反映新日期/范围）。
+        //   链顺序：导入明细 → ADM 派生框（含）→ BOC fx 派生框（含）→ BOC bank 补回填错误框（含）→ 重开管理弹窗。
         const admDerive = findAdmDerive(result.results);
         const admHtml = buildAdmDeriveHtml(admDerive);
+        const bocDerive = findBocDerive(result.results);
+        const bocSpec = buildBocDeriveSpec(bocDerive);
+        const bocBankDerive = findBocBankDerive(result.results);
+        const bocBankSpec = buildBocBankDeriveSpec(bocBankDerive);
+
+        // 重开链接表管理弹窗 = 链尾终点。
+        const reopenManager = () => openModal(createLinkedTableManagerDialog());
+
+        // BOC bank 补回填错误框（O1：仅失败弹；成功静默 → bocBankSpec 为 null 时直接 reopenManager）。
+        const showBocBankStep = (next) => {
+          if (!bocBankSpec) { next(); return; }
+          openModal(createAlertDialog(bocBankSpec.html, {
+            skipLogReport: !bocBankSpec.isError, // 失败按 error 级上报
+            onConfirm: next
+          }));
+        };
+
+        // BOC fx 派生框（成功 alert / needBankImport confirm 引导导入 / 失败 error）。
+        const showBocFxStep = (next) => {
+          if (!bocSpec) { next(); return; }
+          if (bocSpec.type === 'confirm') {
+            // U2：缺 BOC 银行数据 → 确认即复用链接表管理导入流程（再次走 importBtn 同款 import()），取消则继续链。
+            openModal(createConfirmDialog({
+              message: bocSpec.html,
+              confirmText: '现在导入',
+              cancelText: '稍后',
+              onConfirm: () => { reopenManager(); },
+              onCancel: () => { next(); }
+            }));
+            return;
+          }
+          openModal(createAlertDialog(bocSpec.html, {
+            skipLogReport: !bocSpec.isError, // 成功提示 info 级不上报；失败 error 上报
+            onConfirm: next
+          }));
+        };
+
+        // ADM 派生框（成功提示 / 部分成功报错）。
+        const showAdmStep = (next) => {
+          if (!admHtml) { next(); return; }
+          const admIsError = admDerive && (!admDerive.created
+            || (Array.isArray(admDerive.unmatched) && admDerive.unmatched.length > 0));
+          openModal(createAlertDialog(admHtml, {
+            skipLogReport: !admIsError,
+            onConfirm: next
+          }));
+        };
+
         openModal(createAlertDialog(buildImportSummaryHtml(result.results), {
           // v3.0.4 块 A · A2 #2：保留 skipLogReport（日志由 main 侧 linked-table:import handler 权威落盘，避免双写）。
           skipLogReport: true,
           onConfirm: () => {
-            if (admHtml) {
-              // ADM 派生结果框（成功提示 / 部分成功报错；skipLogReport=false 让部分成功未匹配按 error 级上报）。
-              const admIsError = admDerive && (!admDerive.created
-                || (Array.isArray(admDerive.unmatched) && admDerive.unmatched.length > 0));
-              openModal(createAlertDialog(admHtml, {
-                skipLogReport: !admIsError,
-                onConfirm: () => openModal(createLinkedTableManagerDialog())
-              }));
-              return;
-            }
-            openModal(createLinkedTableManagerDialog());
+            showAdmStep(() => showBocFxStep(() => showBocBankStep(reopenManager)));
           }
         }));
       });

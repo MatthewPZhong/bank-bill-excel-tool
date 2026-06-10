@@ -75,6 +75,13 @@ const { LINKED_IMPORT_SIGNATURES, PREPROCESS_TABLE_SIGNATURES } = require('./con
 const { pickBankDepositFields } = require('./backend/database/linked-table-repository');
 // v2.1.16-beta.5 需求3：ADM 银行对账单链接表派生纯函数（Channel=ADM 行 → ADM 表 + 中台调拨匹配回填）
 const { buildAdmRows } = require('./main-process/adm-bank-deposit-builder');
+// v3.0.4 块 E 需求2：BOC 链接表派生纯函数（外汇交割表 → BOC链接表 + BOC调拨银行对账单表，logs 上抛 main.js 统一写日志）。
+const {
+  scanFxGroups,
+  matchBocToMidAllocation,
+  buildBocBankRows,
+  backfillBocReconLinkIds
+} = require('./main-process/boc-fx-link-builder');
 const { streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
 const linkedTableReaders = require('./backend/file-service/readers');
 const { normalizeCell: normalizeLinkedCell, FileValidationError: LinkedFileValidationError } = require('./backend/file-service/common');
@@ -4077,11 +4084,29 @@ function registerAppHandlers() {
       //   引擎原地改 admRows（资金对账ID / 两个匹配标志）后经 result.admUpdates 原样返回，
       //   run 成功后整批幂等重写回 ADM 表（writeAdmMatchFlags 按 DB id ASC ↔ 下标配对，行数不一致抛错保护）。
       const isJpmScenario = scenario.config && scenario.config.subCategory === 'jpm-dispatch-order-fix';
-      const runOpts = isJpmScenario ? { admRows: database.readAdmBankDepositRows() } : {};
+      // v3.0.4 块 E 需求3：BOC 调拨订单修复分流 —— 注入 BOC链接表行（只读，引擎不回写，区别于 JPM admUpdates）。
+      //   仅 BOC 场景读 readBocFxLinkRows（普通 gateway/business/JPM 场景不查 BOC 表，零影响）。
+      const isBocScenario = scenario.category === 'gateway-recon-id-fix'
+        && scenario.config && scenario.config.subCategory === 'boc-dispatch-order-fix';
+      const runOpts = isJpmScenario
+        ? { admRows: database.readAdmBankDepositRows() }
+        : (isBocScenario ? { bocLinkRows: database.readBocFxLinkRows() } : {});
       const result = runReconIdFix(scenario, clonedSheets, runOpts);
       if (isJpmScenario && result && Array.isArray(result.admUpdates)) {
         // 整批幂等重写 ADM 表匹配标志 / 资金对账ID（与 C4「run 无副作用」不同 —— TECH §4.5 标注）。
         database.writeAdmMatchFlags(result.admUpdates);
+      }
+      // v3.0.4 块 E 需求3（O2 拍板）：BOC 修复运行后若有警告 → 写 activity log（warning 级，含逐条明细）。
+      //   不写 bankStatementStatusBox（renderer.js:4392/:4465 既有禁写决策保留）；前端逐条文案落运行结果弹框。
+      if (isBocScenario && result && Array.isArray(result.warnings) && result.warnings.length > 0) {
+        const st = (result && result.stats) || {};
+        appendActivityLogEntry({
+          level: 'warning',
+          source: 'main',
+          domain: 'boc-dispatch-order-fix',
+          message: `[BOC调拨订单修复] 成功 ${st.groupMatched || 0} 组/失败 ${st.groupFailed || 0} 组，${result.warnings.length} 条警告`,
+          details: result.warnings.map((w) => (w && (w.message || w.code)) || '')
+        });
       }
       reconIdFixResult = {
         scenarioId: scenario.id,
@@ -11197,13 +11222,19 @@ function registerNewAccountHandlers() {
   // v2.1.16-beta.3 Codex#1：加 sheetName 参数 —— 用 detector 命中的那个 sheet 读表头/数据
   //   （封面/说明 sheet 在前、数据 sheet 在后时，数据 sheet 非首个）；sheetName=null/undefined 时
   //   readRowsWithMetadata 缺省读首个 sheet，其它链接表行为零回归。
-  function readLinkedRowsAsObjects(filePath, signature, sheetName = null) {
+  // v3.0.4 块 E 需求2：拆出 WithMeta 变体，同时返回 objects 与对齐的物理行号 rowNumbers（供 BOC 分组扫描）。
+  //   既有 readLinkedRowsAsObjects 退化为只取 objects 的薄封装 → 所有旧调用方零行为变化。
+  //   🔴 rowNumbers[i] = objects[i] 所在的原文件物理行号（1-based）；空行被 readRowsWithMetadata 过滤造成的
+  //      行号断档（前后差 > 1）是 BOC 分组分隔符的唯一可还原依据（流式路径不透传行号，见 §2.5）。
+  function readLinkedRowsAsObjectsWithMeta(filePath, signature, sheetName = null) {
     const expected = Array.isArray(signature.expectedHeaders) ? signature.expectedHeaders : [];
     if (expected.length === 0) {
-      return [];
+      return { objects: [], rowNumbers: [] };
     }
     const result = linkedTableReaders.readRowsWithMetadata(filePath, [], { sheetName });
     const rows = Array.isArray(result.rows) ? result.rows : [];
+    // rowNumbers 与 rows 同下标对齐（readRowsWithMetadata 过滤全空行后 map 物理行号），缺失则退化为下标+1。
+    const allRowNumbers = Array.isArray(result.rowNumbers) ? result.rowNumbers : [];
 
     // 定位表头行 + 起始列偏移（首个「连续位置全等 expectedHeaders」的行）
     let headerRowIdx = -1;
@@ -11231,6 +11262,7 @@ function registerNewAccountHandlers() {
     }
 
     const objects = [];
+    const rowNumbers = [];
     for (let ri = headerRowIdx + 1; ri < rows.length; ri += 1) {
       const row = Array.isArray(rows[ri]) ? rows[ri] : [];
       const obj = {};
@@ -11241,8 +11273,16 @@ function registerNewAccountHandlers() {
         obj[headerName] = normalizeLinkedCell(cell === undefined ? '' : cell);
       }
       objects.push(obj);
+      // 物理行号：allRowNumbers 同下标取；缺失退化为 ri+1（与 readRowsWithMetadata 无表头分支口径一致）。
+      const rn = allRowNumbers[ri];
+      rowNumbers.push(rn === undefined || rn === null ? ri + 1 : rn);
     }
-    return objects;
+    return { objects, rowNumbers };
+  }
+
+  // 既有调用方接口：仅取对象数组（行为与重构前完全一致）。
+  function readLinkedRowsAsObjects(filePath, signature, sheetName = null) {
+    return readLinkedRowsAsObjectsWithMeta(filePath, signature, sheetName).objects;
   }
 
   // v3.0.0 块 B / PR-2：streamLinkedRowsToInsert（流式行源 = replaceLinkedTableStreaming 的 feedRows 实现体）
@@ -11398,8 +11438,16 @@ function registerNewAccountHandlers() {
         // v3.0.1 需求1（task3/D2）：网关对账单一张表改「跨次幂等累加 upsert」（按 ReconBillBizId）；
         //   其余 3 张表维持整表覆盖 replace（语义不变，含 bank-deposit→ADM 派生连锁）。
         const isGatewayBill = repoKey === 'gateway-bill';
+        // v3.0.4 块 E 需求2（🔴 守卫）：外汇交割表（fx-settlement）强制走数组路径，绝不走流式。
+        //   原因：BOC 分组依赖物理行号断档（被过滤的全空行作为分隔符），而流式 feed 跳过空行且 onRow 的
+        //   rowIdx 不透传（linked-table-stream-source.js / §2.5），流式落库后 DB 也不存空行/行号 → 分组无法事后重建。
+        //   交割表体量小（远小于 65 万行网关账单），数组路径全量读无 OOM 风险。
+        const useStreamingPath = detected.streamingEligible && repoKey !== 'fx-settlement';
         let ret;
-        if (detected.streamingEligible) {
+        // fx-settlement 数组路径产物缓存（供下方 BOC 派生块按物理行序扫描分组）。
+        let fxObjects = null;
+        let fxRowNumbers = null;
+        if (useStreamingPath) {
           const feedRows = async (writeOne) => {
             const { matched } = await streamLinkedRowsToInsert(filePath, signature, writeOne, transform);
             if (!matched) {
@@ -11412,7 +11460,13 @@ function registerNewAccountHandlers() {
             ? await database.upsertLinkedGatewayBillStreaming(feedRows, { sourceFileName: fileName })
             : await database.replaceLinkedTableStreaming(repoKey, feedRows, { sourceFileName: fileName });
         } else {
-          const rows = readLinkedRowsAsObjects(filePath, signature, detected.sheetName);
+          // 数组路径：fx-settlement 用 WithMeta 同时取物理行号（BOC 分组扫描热依赖）；其余表零行为变化。
+          const meta = readLinkedRowsAsObjectsWithMeta(filePath, signature, detected.sheetName);
+          const rows = meta.objects;
+          if (repoKey === 'fx-settlement') {
+            fxObjects = meta.objects;
+            fxRowNumbers = meta.rowNumbers;
+          }
           const rowsToWrite = repoKey === 'bank-deposit'
             ? rows.map((r) => pickBankDepositFields(r))
             : rows;
@@ -11437,6 +11491,90 @@ function registerNewAccountHandlers() {
           //   gateway-bill 或 bank-deposit 任一变更都使 processingResult 失效（bank-deposit 侧清空见本 handler 下方 push 前守卫）。
           //   旧 processingResult 基于旧网关数据 → 不清则「先跑银行对账、再导入/覆盖网关对账单」仍能导出 stale 结果，强制用户重跑后才能导出。
           processingResult = null;
+        }
+        // v3.0.4 块 E 需求2（🔴 资金对账敏感）：外汇交割表落库成功后，全量重建 BOC链接表（U4 拍板：交割表导入触发 2.2~2.5 全跑）。
+        //   独立 try/catch —— 派生任一步抛错不阻断交割表导入本身（已落库成功），仅 okResult.bocDerive 记 created:false + error。
+        //   流程：scanFxGroups（物理行序分组）→ matchBocToMidAllocation（中台 BOC 一对一消耗回填调拨单号；无中台数据则跳过 2.2/2.3 记 info）
+        //        → replaceBocFxLink（整表覆盖）→ readBankDepositBocCandidates → buildBocBankRows（availability 三态）
+        //        → replaceBocBankDeposit（无可用数据也重建空表防 stale）→ readBocFxLinkRowsWithIds → backfillBocReconLinkIds
+        //        → writeBocFxLinkReconIds（按 id 回写资金对账不平表链接ID）。
+        //   builder 返回的所有 logs（info/warning，含 unlinked 明细）统一 appendActivityLogEntry；unlinked 明细前端不显示（需求 2.5 末句）。
+        if (repoKey === 'fx-settlement') {
+          try {
+            const allLogs = [];
+            const scan = scanFxGroups({ objects: fxObjects || [], rowNumbers: fxRowNumbers || [] });
+            if (Array.isArray(scan.logs)) allLogs.push(...scan.logs);
+
+            // 2.2/2.3：中台 BOC 行匹配（无中台数据 → 跳过，info log；分组/调拨单号留空，2.4/2.5 照跑）。
+            let midRows = [];
+            try { midRows = database.readLinkedTableRows('mid-allocation'); }
+            catch (midErr) { midRows = []; }
+            if (Array.isArray(midRows) && midRows.length > 0) {
+              const matchRet = matchBocToMidAllocation(scan.rows, midRows);
+              if (matchRet && Array.isArray(matchRet.logs)) allLogs.push(...matchRet.logs);
+            } else {
+              allLogs.push({ level: 'info', message: '[BOC链接表] 链接表库无中台调拨订单数据，跳过 2.2/2.3 调拨单号匹配（调拨单号留空）' });
+            }
+
+            // 整表覆盖落库 BOC链接表（热列从内部辅助键取，raw_json 剥辅助键）。
+            const fxRet = database.replaceBocFxLink(scan.rows);
+
+            // 2.4：派生 BOC调拨银行对账单表（用库内已有 bank-deposit 的 BOC 候选；无可用数据也重建空表防 stale）。
+            const bankCandidates = database.readBankDepositBocCandidates();
+            const bankBuild = buildBocBankRows(bankCandidates);
+            if (Array.isArray(bankBuild.logs)) allLogs.push(...bankBuild.logs);
+            database.replaceBocBankDeposit(bankBuild.rows);
+
+            // 2.5：尽力回填资金对账不平表链接ID（按 id 精确回写；旧值幂等覆盖）。
+            const linkWithIds = database.readBocFxLinkRowsWithIds();
+            const backfill = backfillBocReconLinkIds(linkWithIds, bankBuild.rows);
+            if (Array.isArray(backfill.logs)) allLogs.push(...backfill.logs);
+            database.writeBocFxLinkReconIds(backfill.rows);
+
+            // 统一写 activity log（info / warning；warning 含明细——前端不显示）。
+            for (const lg of allLogs) {
+              appendActivityLogEntry({
+                level: lg.level || 'info',
+                source: 'main',
+                domain: 'boc-dispatch-order-fix',
+                message: lg.message || '',
+                details: Array.isArray(lg.details) ? lg.details : undefined
+              });
+            }
+
+            // 统计派生指标（scan.rows 已被 matchBocToMidAllocation 原地改：2.2 清空命中行「分组」、2.3 回填「调拨单号」）。
+            //   step22Removed = 被 2.2 单行剔除（分组清空）的行数；
+            //   step23MatchedGroups / UnmatchedGroups = 2.3 后「分组非空」的剩余组中已回填/未回填调拨单号的组数。
+            let step22Removed = 0;
+            const remainingGroups = new Set(); // 2.3 后仍「分组非空」的组号
+            const matchedGroups = new Set(); // 其中已回填调拨单号的组号
+            for (const r of scan.rows) {
+              if (!r || typeof r !== 'object') continue;
+              const g = r['分组'];
+              if (g === undefined || g === null || g === '') { step22Removed += 1; continue; }
+              remainingGroups.add(g);
+              const alloc = r['调拨单号'];
+              if (alloc !== undefined && alloc !== null && alloc !== '') matchedGroups.add(g);
+            }
+            okResult.bocDerive = {
+              created: true,
+              total: fxRet.rowCount,
+              groupCount: scan.groupCount,
+              step22Removed,
+              step23MatchedGroups: matchedGroups.size,
+              step23UnmatchedGroups: remainingGroups.size - matchedGroups.size,
+              backfilled: backfill.backfilled,
+              unlinkedCount: backfill.unlinkedCount,
+              needBankImport: bankBuild.availability !== 'ok',
+              bankMissingReason: bankBuild.availability !== 'ok' ? bankBuild.availability : null
+            };
+          } catch (bocErr) {
+            // 派生失败不阻断交割表导入本身（已落库成功）；记 created:false 供前端弹错误框。
+            okResult.bocDerive = {
+              created: false,
+              error: bocErr && bocErr.message ? bocErr.message : String(bocErr)
+            };
+          }
         }
         // v2.1.16-beta.5 需求3（逻辑A）：银行对账单表 / 中台调拨订单表落库成功后，派生隐藏的 ADM 银行对账单链接表。
         //   🔴 资金对账敏感：bank-deposit 或 mid-allocation 任一变更都触发重建（PR#65 新 Finding1：两源任一 stale → JPM 读错）。
@@ -11489,6 +11627,50 @@ function registerNewAccountHandlers() {
             okResult.admDerive = {
               created: false,
               error: admErr && admErr.message ? admErr.message : String(admErr)
+            };
+          }
+        }
+        // v3.0.4 块 E 需求2（🔴 资金对账敏感，U4 拍板）：银行对账单表落库成功后，重派生 BOC调拨银行对账单表，
+        //   并对现有 BOC链接表补做 2.5 全量回填资金对账不平表链接ID（交割表导入触发全跑，银行表导入只补 2.4+2.5）。
+        //   独立 try/catch —— 派生失败不阻断银行对账单表导入本身（已落库成功）。O1 拍板：补回填成功静默（前端不弹提示），失败才弹错误框。
+        if (repoKey === 'bank-deposit') {
+          try {
+            const bankCandidates = database.readBankDepositBocCandidates();
+            const bankBuild = buildBocBankRows(bankCandidates);
+            database.replaceBocBankDeposit(bankBuild.rows);
+
+            let backfilledCount = 0;
+            let unlinkedCount = 0;
+            const allLogs = [];
+            if (Array.isArray(bankBuild.logs)) allLogs.push(...bankBuild.logs);
+            // 仅当 BOC链接表已有行时补做 2.5 回填（无交割表数据 → 无链接行，跳过回填）。
+            const linkWithIds = database.readBocFxLinkRowsWithIds();
+            if (Array.isArray(linkWithIds) && linkWithIds.length > 0) {
+              const backfill = backfillBocReconLinkIds(linkWithIds, bankBuild.rows);
+              if (Array.isArray(backfill.logs)) allLogs.push(...backfill.logs);
+              database.writeBocFxLinkReconIds(backfill.rows);
+              backfilledCount = backfill.backfilled;
+              unlinkedCount = backfill.unlinkedCount;
+            }
+            for (const lg of allLogs) {
+              appendActivityLogEntry({
+                level: lg.level || 'info',
+                source: 'main',
+                domain: 'boc-dispatch-order-fix',
+                message: lg.message || '',
+                details: Array.isArray(lg.details) ? lg.details : undefined
+              });
+            }
+            okResult.bocBankDerive = {
+              created: true,
+              bankRowCount: bankBuild.rows.length,
+              backfilled: backfilledCount,
+              unlinkedCount
+            };
+          } catch (bocBankErr) {
+            okResult.bocBankDerive = {
+              created: false,
+              error: bocBankErr && bocBankErr.message ? bocBankErr.message : String(bocBankErr)
             };
           }
         }
