@@ -488,16 +488,42 @@ async function runBizOpImportAsync(db, params) {
   return { status: 'success', buName: firstBu, validCount: rows.length };
 }
 
+// 流水导入同步 fallback（无 dbPath 兜底路径 / contract 基线）。
+// 🔴 v3.0.2 需求1b（资金红线 R-1 / R-7）：支持 filePaths 多文件**合并到同一 date、单事务、单次 clear**，
+//   语义必须与 worker 路径（import-worker.js runFlowImport）一致：
+//   先把所有文件流式读出合并成 rows（边读边累加，记来源文件名）→ 全部读完后判 rows 为空 / 校验聚合
+//   errorRows → 全通过才在**一个事务内** clearByDate 一次 + insert 合并后的全量行（整批拒绝语义保持）。
+//   兼容旧入参：仅传 filePath（单数）时归一为 [filePath]，单文件 byte 级等价旧行为（错误报告/行数一致）。
 async function runFlowImportAsync(db, params) {
   const {
     date,
     filePath,
+    filePaths,
     readFlowFile,
     writeFlowErrorReportXlsx,
     errorReportsDir
   } = params;
 
-  const { rows } = readFlowFile(filePath);
+  // 入参归一：优先 filePaths（多文件）；否则回退单数 filePath（旧 contract / 兜底）。
+  const files = Array.isArray(filePaths) && filePaths.length > 0
+    ? filePaths
+    : (filePath ? [filePath] : []);
+  if (files.length === 0) {
+    return { status: 'rejected', errorReportPath: null, errorRows: [{ rowIndex: 0, reason: '未选择文件' }] };
+  }
+  const multiFile = files.length > 1;   // 多文件才在错误原因标注来源文件名（单文件保回归）
+
+  // 逐文件读出并合并（来源文件名随行携带，供多文件错误定位）。读取失败（表头/损坏）直接抛，
+  //   与旧单文件同形（IPC catch → status:error），此时未进事务、DB 无任何改动。
+  const rows = [];
+  for (const fp of files) {
+    const res = readFlowFile(fp);
+    const fileName = (res && res.fileName) || path.basename(fp);
+    for (const r of (res.rows || [])) {
+      r._sourceFile = fileName;   // 标注来源（多文件错误报告/原因用；单文件不体现于 reason）
+      rows.push(r);
+    }
+  }
 
   if (rows.length === 0) {
     return { status: 'rejected', errorReportPath: null, errorRows: [{ rowIndex: 0, reason: '文件无有效数据行' }] };
@@ -507,7 +533,9 @@ async function runFlowImportAsync(db, params) {
   for (const r of rows) {
     const result = validateFlowRow(r);
     if (!result.ok) {
-      errorRows.push({ rowIndex: r._rowIndex, reason: result.reason, rawRow: r });
+      // 多文件：原因前缀标注来源文件名，便于定位「哪个文件第几行错」；单文件保持原 reason（回归一致）。
+      const reason = multiFile && r._sourceFile ? `[${r._sourceFile}] ${result.reason}` : result.reason;
+      errorRows.push({ rowIndex: r._rowIndex, reason, rawRow: r });
     }
   }
 
@@ -529,6 +557,8 @@ async function runFlowImportAsync(db, params) {
   //   （旧 run 的对账结果是基于旧流水算出的，源换了但 diff_rows 仍是旧流水算的 → 资金事故）
   //   - 业务OP 重导走 clearRunsAndDiffsByDateBu（按 (date, BU) 粒度）— 不变
   //   - 流水重导走 clearRunsAndDiffsByDate（按 date 粒度，跨所有 BU）— 本 fix 新增
+  // 🔴 v3.0.2 需求1b：clearByDate 在事务内**只调用一次**（合并后整批 insert），与 worker 单次 clear 同语义；
+  //   绝不循环「clear+insert」（否则后导文件清掉先导文件已插入行）。
   db.exec('BEGIN');
   try {
     runRepository.clearRunsAndDiffsByDate(db, date);
@@ -566,9 +596,15 @@ try {
 
 // 统一收敛 worker stdout 事件 + 退出码 → 与旧同步 runBizOpImportAsync/runFlowImportAsync 同形返回值。
 //   kind='bizOp'|'flow'；writeErrorReport({ errorRows }) → Promise<errorReportPath>（report=true 时调用）。
-function spawnImportWorker({ kind, dbPath, date, filePath, onProgress, writeErrorReport, maxRowErrors }) {
+//   bizOp 传 filePath（单数，不变）；flow 传 filePaths（v3.0.2 需求1b 多文件合并，单进程单事务单次 clear）。
+function spawnImportWorker({ kind, dbPath, date, filePath, filePaths, onProgress, writeErrorReport, maxRowErrors }) {
   return new Promise((resolve) => {
-    const jobMeta = { dbPath, kind, date, filePath };
+    const jobMeta = { dbPath, kind, date };
+    if (Array.isArray(filePaths) && filePaths.length > 0) {
+      jobMeta.filePaths = filePaths;     // flow：多文件数组
+    } else if (filePath) {
+      jobMeta.filePath = filePath;       // bizOp：单文件（不变）
+    }
     if (Number.isFinite(maxRowErrors) && maxRowErrors > 0) jobMeta.maxRowErrors = maxRowErrors;
 
     let stdoutBuf = '';
@@ -718,20 +754,28 @@ async function runBizOpImportViaWorker(db, params) {
 }
 
 // 流水导入（默认 worker 路径）。无 dbPath → fallback 旧同步 runFlowImportAsync。
+// 🔴 v3.0.2 需求1b：接收 filePaths（多文件数组）透传 worker（单进程单事务合并到 date、单次 clear）。
+//   兼容旧入参：仅 filePath（单数）时归一为 [filePath]；同步 fallback 也接收 filePaths（params 整体透传）。
 async function runFlowImportViaWorker(db, params) {
   const {
-    date, filePath, dbPath,
+    date, filePath, filePaths, dbPath,
     writeFlowErrorReportXlsx, errorReportsDir,
     onProgress, maxRowErrors
   } = params;
 
+  // 入参归一：优先 filePaths（多文件）；否则回退单数 filePath。
+  const files = Array.isArray(filePaths) && filePaths.length > 0
+    ? filePaths
+    : (filePath ? [filePath] : []);
+
   if (!dbPath) {
-    return runFlowImportAsync(db, params);
+    // 同步 fallback：透传 filePaths（runFlowImportAsync 内部已支持多文件合并）。
+    return runFlowImportAsync(db, { ...params, filePaths: files });
   }
 
   return spawnImportWorker({
     kind: 'flow',
-    dbPath, date, filePath, onProgress, maxRowErrors,
+    dbPath, date, filePaths: files, onProgress, maxRowErrors,
     writeErrorReport: async ({ errorRows, rowErrorTotal, truncated }) => {
       const saveDir = path.join(errorReportsDir, date);
       const fileName = makeFlowErrorReportFileName(date);

@@ -29,6 +29,7 @@
 // 退出码：0 成功 / 1 校验失败（rejected / header-error）/ 2 系统错误
 
 const v8 = require('node:v8');
+const path = require('node:path');   // v3.0.2 需求1b：多文件流水导入取来源文件名（basename）
 const { DatabaseSync } = require('node:sqlite');
 
 const { ensureBizOpReconTablesSupport } = require('../biz-op-recon-db/migrations');
@@ -265,11 +266,24 @@ async function runBizOpImport(db, { date, filePath, maxRowErrors }) {
 //
 // flow 差异（资金红线 ⑤）：不分 BU、无 BU 一致性、无 firstBu / bu_name 改写；
 //   clear = clearRunsAndDiffsByDate(date)（跨所有 BU）+ clearByDate(date)（非 ByDateBu）。
-async function runFlowImport(db, { date, filePath, maxRowErrors }) {
+//
+// 🔴 v3.0.2 需求1b（资金红线 R-1）：支持 filePaths 多文件**单进程单事务合并**到同一 date。
+//   语义 = 多文件合并为该 date 的完整流水快照（与「重导替换该 date」一致）。
+//   关键：`cleared` 标志在**函数级**（跨所有文件共享）—— 首个含数据行的文件的首个数据行触发
+//   clearByDate **只清一次**，后续文件不再 clear。dataRowCount / errorRows / insertedCount 跨文件累加。
+//   若循环调用本函数（每文件各跑一次 BEGIN+clear+COMMIT），第 2 个文件的 clearByDate 会清掉第 1 个
+//   文件已插入的行 → 静默丢数据（资金事故）。故必须单事务遍历所有文件。
+//   单文件场景（filePaths 长度 1）byte-for-byte 等价旧单文件行为（clear 一次、行数一致、错误报告一致）。
+async function runFlowImport(db, { date, filePaths, maxRowErrors }) {
+  // 兼容防御：仅传 filePath（旧单数）时归一为单元素数组（不应发生，入口已校验 filePaths）。
+  const files = Array.isArray(filePaths) ? filePaths : [];
+  const multiFile = files.length > 1;   // 多文件才在错误原因里标注来源文件名（单文件保回归）
+
   let dataRowCount = 0;
   let insertedCount = 0;
-  let cleared = false;
+  let cleared = false;           // 🔴 函数级：跨所有文件只 clear 一次（首个数据行触发）
   let insertFatal = null;        // I1：流式中途 clear/INSERT 事务内 DB 写失败（系统错）
+  let progressBase = 0;          // 已读完文件的累计数据行数（多文件进度全局累加，避免切文件时倒退）
   const errorRows = [];
   let rowErrorTotal = 0;
 
@@ -277,41 +291,51 @@ async function runFlowImport(db, { date, filePath, maxRowErrors }) {
 
   db.exec('BEGIN');
   try {
-    await streamFlowFile(filePath, {
-      onDataRow: (row) => {
-        dataRowCount += 1;
-        if (insertFatal) return;   // 已遇系统写错：跳过后续行
+    for (const filePath of files) {
+      const sourceName = path.basename(filePath);   // 来源文件名（多文件错误定位用）
+      const fileMeta = await streamFlowFile(filePath, {
+        onDataRow: (row) => {
+          dataRowCount += 1;
+          if (insertFatal) return;   // 已遇系统写错：跳过后续行
 
-        // 第一个数据行：事务内清旧数据（资金红线 ⑤：流水按 date 跨所有 BU 清）
-        if (!cleared) {
-          // I1（β.2 review fix）：clear 单独 try 标 insertFatal（同 bizOp，避免被 wrapReadError 误判 header）
-          try {
-            runRepository.clearRunsAndDiffsByDate(db, date);
-            flowImportsRepository.clearByDate(db, date);
-          } catch (clearErr) {
-            insertFatal = clearErr;
+          // 第一个数据行：事务内清旧数据（资金红线 ⑤：流水按 date 跨所有 BU 清）。
+          // 🔴 cleared 函数级 → 多文件合并时仅首个数据行清一次，后续文件不再清（防互相覆盖丢数据）。
+          if (!cleared) {
+            // I1（β.2 review fix）：clear 单独 try 标 insertFatal（同 bizOp，避免被 wrapReadError 误判 header）
+            try {
+              runRepository.clearRunsAndDiffsByDate(db, date);
+              flowImportsRepository.clearByDate(db, date);
+            } catch (clearErr) {
+              insertFatal = clearErr;
+              return;
+            }
+            cleared = true;
+          }
+
+          const result = validateFlowRow(row);
+          if (!result.ok) {
+            rowErrorTotal += 1;
+            // 多文件：原因前缀标注来源文件名，便于用户定位「哪个文件第几行错」（OPEN-T2）。
+            //   单文件保持原 reason（byte 级回归一致）。rawRow 也带 _sourceFile 供报告 writer 可选用。
+            const reason = multiFile ? `[${sourceName}] ${result.reason}` : result.reason;
+            recordRowError(errorRows, maxRowErrors, { rowIndex: row._rowIndex, reason, rawRow: row });
             return;
           }
-          cleared = true;
-        }
-
-        const result = validateFlowRow(row);
-        if (!result.ok) {
-          rowErrorTotal += 1;
-          recordRowError(errorRows, maxRowErrors, { rowIndex: row._rowIndex, reason: result.reason, rawRow: row });
-          return;
-        }
-        // I1：INSERT 单独 try 标 insertFatal
-        try {
-          insertOne(date, row);
-        } catch (insErr) {
-          insertFatal = insErr;
-          return;
-        }
-        insertedCount += 1;
-      },
-      onProgress: (dataRows) => emit({ type: 'progress', dataRows })
-    });
+          // I1：INSERT 单独 try 标 insertFatal
+          try {
+            insertOne(date, row);
+          } catch (insErr) {
+            insertFatal = insErr;
+            return;
+          }
+          insertedCount += 1;
+        },
+        // 多文件全局累加进度：每文件 onProgress 的 dataRows 是该文件内计数，叠加已读完文件的 base。
+        onProgress: (dataRows) => emit({ type: 'progress', dataRows: progressBase + dataRows })
+      });
+      // 该文件读完：把其数据行数并入 base，供下个文件进度续接（streamFlowFile 返回 { dataRows }）。
+      progressBase += (fileMeta && Number.isFinite(fileMeta.dataRows)) ? fileMeta.dataRows : 0;
+    }
   } catch (err) {
     db.exec('ROLLBACK');
     emitHeaderOrFatal(err);
@@ -388,16 +412,25 @@ function emitHeaderOrFatal(err) {
 async function main() {
   const job = loadJobMeta();
   if (!job) return;   // I3：loadJobMeta 失败已 emitAndExit（调度退出），不继续
+  // bizOp 走 filePath（单数，不变）；flow 走 filePaths（v3.0.2 需求1b 多文件合并）。
   const { dbPath, kind, date, filePath } = job;
+  const filePaths = Array.isArray(job.filePaths) ? job.filePaths : null;
   const maxRowErrors = Number.isFinite(job.maxRowErrors) && job.maxRowErrors > 0
     ? job.maxRowErrors
     : DEFAULT_MAX_ROW_ERRORS;
 
-  if (!dbPath || !kind || !date || !filePath) {
-    return emitAndExit({ type: 'fatal', message: 'jobMeta 缺字段（dbPath / kind / date / filePath）' }, 2);
+  if (!dbPath || !kind || !date) {
+    return emitAndExit({ type: 'fatal', message: 'jobMeta 缺字段（dbPath / kind / date）' }, 2);
   }
   if (kind !== 'bizOp' && kind !== 'flow') {
     return emitAndExit({ type: 'fatal', message: `未知 kind: ${kind}（仅 bizOp / flow）` }, 2);
+  }
+  // bizOp：filePath 单数必填（不动）；flow：filePaths 非空数组必填（v3.0.2 需求1b）。
+  if (kind === 'bizOp' && !filePath) {
+    return emitAndExit({ type: 'fatal', message: 'jobMeta 缺字段（bizOp 需 filePath）' }, 2);
+  }
+  if (kind === 'flow' && (!filePaths || filePaths.length === 0)) {
+    return emitAndExit({ type: 'fatal', message: 'jobMeta 缺字段（flow 需非空 filePaths 数组）' }, 2);
   }
 
   let db;
@@ -411,7 +444,7 @@ async function main() {
     if (kind === 'bizOp') {
       await runBizOpImport(db, { date, filePath, maxRowErrors });
     } else {
-      await runFlowImport(db, { date, filePath, maxRowErrors });
+      await runFlowImport(db, { date, filePaths, maxRowErrors });
     }
     // runXxxImport 内各路径均已 emitAndExit（调度退出）；此处自然返回，finally 关库后事件循环 drain 即退出
   } catch (err) {

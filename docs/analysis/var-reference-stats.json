@@ -1,14 +1,14 @@
 {
   "meta": {
-    "version": "3.0.1",
-    "scannedAt": "2026-06-09T11:11:04.408Z",
+    "version": "3.0.2",
+    "scannedAt": "2026-06-09T23:57:51.191Z",
     "root": "src",
     "totalFiles": 129,
-    "totalTopLevelNames": 1329,
+    "totalTopLevelNames": 1330,
     "buckets": {
-      "shared": 202,
-      "paired": 402,
-      "local": 609,
+      "shared": 203,
+      "paired": 401,
+      "local": 610,
       "crossFile": 604
     }
   },
@@ -24,6 +24,7 @@
           "src/backend/bank-bu-recon-import/reader.js",
           "src/backend/big-account-mode-store.js",
           "src/backend/big-account-order-store.js",
+          "src/backend/biz-op-recon-import/import-worker.js",
           "src/backend/biz-op-recon-import/reader-streamed.js",
           "src/backend/biz-op-recon-import/reader.js",
           "src/backend/database.js",
@@ -88,6 +89,10 @@
           {
             "file": "src/backend/big-account-order-store.js",
             "count": 3
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/import-worker.js",
+            "count": 2
           },
           {
             "file": "src/backend/biz-op-recon-import/reader-streamed.js",
@@ -179,7 +184,7 @@
           },
           {
             "file": "src/main-process/biz-op-recon-session.js",
-            "count": 6
+            "count": 7
           },
           {
             "file": "src/main-process/biz-op-recon-writer.js",
@@ -242,8 +247,8 @@
             "count": 2
           }
         ],
-        "totalHits": 134,
-        "fileSpan": 45
+        "totalHits": 137,
+        "fileSpan": 46
       },
       {
         "name": "fs",
@@ -1650,6 +1655,43 @@
         "fileSpan": 7
       },
       {
+        "name": "GATEWAY_BILL_FIELDS",
+        "defFiles": [
+          "src/constants/adm-bank-deposit-fields.js",
+          "src/constants/gateway-bill-recon-fields.js",
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "src/preload.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/adm-bank-deposit-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/constants/gateway-bill-recon-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 14,
+        "fileSpan": 6
+      },
+      {
         "name": "runReconciliation",
         "defFiles": [
           "src/backend/pending-reconcile/engine.js",
@@ -1685,43 +1727,6 @@
           }
         ],
         "totalHits": 14,
-        "fileSpan": 6
-      },
-      {
-        "name": "GATEWAY_BILL_FIELDS",
-        "defFiles": [
-          "src/constants/adm-bank-deposit-fields.js",
-          "src/constants/gateway-bill-recon-fields.js",
-          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
-          "src/preload.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/constants/adm-bank-deposit-fields.js",
-            "count": 2
-          },
-          {
-            "file": "src/constants/gateway-bill-recon-fields.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/recon-id-fix-io.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
-            "count": 2
-          },
-          {
-            "file": "src/preload.js",
-            "count": 2
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 12,
         "fileSpan": 6
       },
       {
@@ -1806,7 +1811,7 @@
           },
           {
             "file": "src/renderer-dialogs.js",
-            "count": 366
+            "count": 372
           },
           {
             "file": "src/renderer-pending.js",
@@ -1821,7 +1826,7 @@
             "count": 71
           }
         ],
-        "totalHits": 469,
+        "totalHits": 475,
         "fileSpan": 5
       },
       {
@@ -2689,6 +2694,33 @@
         "fileSpan": 4
       },
       {
+        "name": "CHANNEL_BILL_FIELDS",
+        "defFiles": [
+          "src/constants/gateway-bill-recon-fields.js",
+          "src/preload.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/gateway-bill-recon-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 4
+      },
+      {
         "name": "logger",
         "defFiles": [
           "src/main-process/biz-op-recon-session.js",
@@ -2939,33 +2971,6 @@
         "refFiles": [
           {
             "file": "src/constants/recon-id-fix-fields.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/recon-id-fix-io.js",
-            "count": 2
-          },
-          {
-            "file": "src/preload.js",
-            "count": 2
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 4
-      },
-      {
-        "name": "CHANNEL_BILL_FIELDS",
-        "defFiles": [
-          "src/constants/gateway-bill-recon-fields.js",
-          "src/preload.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/constants/gateway-bill-recon-fields.js",
             "count": 2
           },
           {
@@ -6015,6 +6020,29 @@
           {
             "file": "src/backend/pending-reconcile/removal-match.js",
             "count": 1
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 3
+      },
+      {
+        "name": "os",
+        "defFiles": [
+          "src/main-process/run-check-multiworker.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/run-check-multiworker.js",
+            "count": 1
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 2
           }
         ],
         "totalHits": 4,
@@ -13312,25 +13340,6 @@
         "fileSpan": 2
       },
       {
-        "name": "os",
-        "defFiles": [
-          "src/main-process/run-check-multiworker.js",
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/run-check-multiworker.js",
-            "count": 1
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 2
-      },
-      {
         "name": "readBankStatement",
         "defFiles": [
           "src/main-process/bank-statement-io.js"
@@ -13546,10 +13555,10 @@
         "refFiles": [
           {
             "file": "src/backend/biz-op-recon-import/import-worker.js",
-            "count": 19
+            "count": 21
           }
         ],
-        "totalHits": 19,
+        "totalHits": 21,
         "fileSpan": 1
       },
       {
@@ -16220,6 +16229,20 @@
         "refFiles": [
           {
             "file": "src/backend/file-service/writers.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "applyFieldValueOverrides",
+        "defFiles": [
+          "src/main-process/scenario-engines/c4-recon-id-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
             "count": 3
           }
         ],
@@ -22035,6 +22058,7 @@
         "src/backend/bank-bu-recon-import/reader.js",
         "src/backend/big-account-mode-store.js",
         "src/backend/big-account-order-store.js",
+        "src/backend/biz-op-recon-import/import-worker.js",
         "src/backend/biz-op-recon-import/reader-streamed.js",
         "src/backend/biz-op-recon-import/reader.js",
         "src/backend/database.js",
@@ -22099,6 +22123,10 @@
         {
           "file": "src/backend/big-account-order-store.js",
           "count": 3
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/import-worker.js",
+          "count": 2
         },
         {
           "file": "src/backend/biz-op-recon-import/reader-streamed.js",
@@ -22190,7 +22218,7 @@
         },
         {
           "file": "src/main-process/biz-op-recon-session.js",
-          "count": 6
+          "count": 7
         },
         {
           "file": "src/main-process/biz-op-recon-writer.js",
@@ -22253,8 +22281,8 @@
           "count": 2
         }
       ],
-      "totalHits": 134,
-      "fileSpan": 45
+      "totalHits": 137,
+      "fileSpan": 46
     },
     {
       "name": "fs",
@@ -23661,6 +23689,43 @@
       "fileSpan": 7
     },
     {
+      "name": "GATEWAY_BILL_FIELDS",
+      "defFiles": [
+        "src/constants/adm-bank-deposit-fields.js",
+        "src/constants/gateway-bill-recon-fields.js",
+        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+        "src/preload.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/adm-bank-deposit-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/constants/gateway-bill-recon-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 14,
+      "fileSpan": 6
+    },
+    {
       "name": "runReconciliation",
       "defFiles": [
         "src/backend/pending-reconcile/engine.js",
@@ -23696,43 +23761,6 @@
         }
       ],
       "totalHits": 14,
-      "fileSpan": 6
-    },
-    {
-      "name": "GATEWAY_BILL_FIELDS",
-      "defFiles": [
-        "src/constants/adm-bank-deposit-fields.js",
-        "src/constants/gateway-bill-recon-fields.js",
-        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
-        "src/preload.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/constants/adm-bank-deposit-fields.js",
-          "count": 2
-        },
-        {
-          "file": "src/constants/gateway-bill-recon-fields.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/recon-id-fix-io.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
-          "count": 2
-        },
-        {
-          "file": "src/preload.js",
-          "count": 2
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 12,
       "fileSpan": 6
     },
     {
@@ -23817,7 +23845,7 @@
         },
         {
           "file": "src/renderer-dialogs.js",
-          "count": 366
+          "count": 372
         },
         {
           "file": "src/renderer-pending.js",
@@ -23832,7 +23860,7 @@
           "count": 71
         }
       ],
-      "totalHits": 469,
+      "totalHits": 475,
       "fileSpan": 5
     },
     {
@@ -24700,6 +24728,33 @@
       "fileSpan": 4
     },
     {
+      "name": "CHANNEL_BILL_FIELDS",
+      "defFiles": [
+        "src/constants/gateway-bill-recon-fields.js",
+        "src/preload.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/gateway-bill-recon-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 10,
+      "fileSpan": 4
+    },
+    {
       "name": "logger",
       "defFiles": [
         "src/main-process/biz-op-recon-session.js",
@@ -24950,33 +25005,6 @@
       "refFiles": [
         {
           "file": "src/constants/recon-id-fix-fields.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/recon-id-fix-io.js",
-          "count": 2
-        },
-        {
-          "file": "src/preload.js",
-          "count": 2
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 8,
-      "fileSpan": 4
-    },
-    {
-      "name": "CHANNEL_BILL_FIELDS",
-      "defFiles": [
-        "src/constants/gateway-bill-recon-fields.js",
-        "src/preload.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/constants/gateway-bill-recon-fields.js",
           "count": 2
         },
         {
@@ -28026,6 +28054,29 @@
         {
           "file": "src/backend/pending-reconcile/removal-match.js",
           "count": 1
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 3
+    },
+    {
+      "name": "os",
+      "defFiles": [
+        "src/main-process/run-check-multiworker.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/run-check-multiworker.js",
+          "count": 1
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 2
         }
       ],
       "totalHits": 4,
@@ -35314,25 +35365,6 @@
         },
         {
           "file": "src/backend/pending-import/streaming-xlsx-reader.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 2,
-      "fileSpan": 2
-    },
-    {
-      "name": "os",
-      "defFiles": [
-        "src/main-process/run-check-multiworker.js",
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/run-check-multiworker.js",
-          "count": 1
-        },
-        {
-          "file": "src/main.js",
           "count": 1
         }
       ],

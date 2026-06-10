@@ -7550,8 +7550,8 @@
         { value: 'offset-bill-mark', label: '银行对账单赋值自身' },
         // v2.1.13 B2：label '提取ReconId-From 网关' → '网关对账单赋值银行对账单'
         { value: 'gateway-recon-join', label: '网关对账单赋值银行对账单' },
-        { value: 'recon-id-fix', label: '单据对账 ReconID 修复' },
-        { value: 'gateway-recon-id-fix', label: '网关对账单 ReconID 修复' }
+        { value: 'recon-id-fix', label: '单据对账修复' },
+        { value: 'gateway-recon-id-fix', label: '网关对账单修复' }
       ];
       const visibleOptions = Array.isArray(allowedCategories) && allowedCategories.length > 0
         ? ALL_CATEGORY_OPTIONS.filter((c) => allowedCategories.includes(c.value))
@@ -7669,11 +7669,18 @@
           ],
           output: {
             mode: 'main', // 'main' | 'opp' | 'both'
+            // v3.0.2 需求3：网关「修复订单ID取值」启用开关，默认 true（保持现有必填，零回归）
+            //   取消勾选 → 跳过 Reference 赋值与校验（引擎取网关账单 Reference 原值）
+            idEnabled: true,
             commonId: { source: 'main', suffix: '' },
             subBizType: { mode: 'auto', mainValue: '', oppValue: '' } // 'auto' | 'manualMain' | 'manualOpp' | 'manualBoth'
           },
           // v2.1.1 T2-2：BillDate ±N 默认 enabled=false（引擎走 ±1day 缺省，零回归）；days=3（勾选后首次展示值）
-          billDateRange: { enabled: false, days: 3 }
+          billDateRange: { enabled: false, days: 3 },
+          // v3.0.2 需求3：网关「修复订单字段取值」独立开关 + 多行规则（默认关，零回归）
+          //   rules[i] = { mainTypeSeq:Number, mainField:'', oppTypeSeq:Number, oppField:'' }
+          //   🔴 mainTypeSeq/oppTypeSeq 必须存 Number（引擎用 Set<Number>.has，存字符串会静默失效）
+          fieldValue: { enabled: false, rules: [] }
         };
       }
       return {};
@@ -7924,29 +7931,80 @@
         // v2.1.0-beta.3 T7：errors 文案按 subMode 切换；SubBizType 校验在 gateway 模式整段跳过
         const subMode = reconIdFixModeFromCategory(draft.category);
         const isGwSubMode = subMode === 'gateway';
-        if (!out.mode || (out.mode !== 'main' && out.mode !== 'opp' && out.mode !== 'both')) {
-          errors.push(isGwSubMode
-            ? '订单修复ID取值必填（网关账单 / 渠道账单 / 自取值）'
-            : '修复结果输出方向必填（主边 / 从边 / 主从都修复）');
-        }
-        // gateway 模式：勾选 1v多/多v1 时禁止 output.mode='main'
-        if (isGwSubMode && out.mode === 'main' && (c.matchRules.oneToMany || c.matchRules.manyToOne)) {
-          errors.push('网关 1v多 / 多v1 模式下不能选择"网关账单"作为订单修复ID取值');
-        }
-        if (out.mode === 'both') {
-          const ci = out.commonId || {};
-          // v2.1.0-beta.3 修订（用户反馈）：取值来源新增空值选项 ''（用户主动选）；
-          //   选择空值时 suffix "加上"输入框必须非空
-          if (ci.source !== 'main' && ci.source !== 'opp' && ci.source !== '') {
+        // v3.0.2 需求3：gateway「修复订单ID取值」未勾选（idEnabled===false）→ 跳过 output.mode 必填 /
+        //   1v多禁main / both commonId 校验（引擎取网关账单 Reference 原值）。business 模式恒视为启用，不跳过。
+        const idEnabled = !isGwSubMode || out.idEnabled !== false;
+        if (idEnabled) {
+          if (!out.mode || (out.mode !== 'main' && out.mode !== 'opp' && out.mode !== 'both')) {
             errors.push(isGwSubMode
-              ? '"自取值"取值来源选项无效'
-              : '"主从都修复"取值来源选项无效');
+              ? '修复订单ID取值必填（网关账单 / 渠道账单 / 自取值）'
+              : '修复结果输出方向必填（主边 / 从边 / 主从都修复）');
           }
-          if (ci.source === '' && (!ci.suffix || String(ci.suffix).trim() === '')) {
-            errors.push(isGwSubMode
-              ? '"自取值"取值来源选择空值时，右侧"加上"输入框必须填写内容'
-              : '"主从都修复"取值来源选择空值时，右侧"加上"输入框必须填写内容');
+          // gateway 模式：勾选 1v多/多v1 时禁止 output.mode='main'
+          if (isGwSubMode && out.mode === 'main' && (c.matchRules.oneToMany || c.matchRules.manyToOne)) {
+            errors.push('网关 1v多 / 多v1 模式下不能选择"网关账单"作为修复订单ID取值');
           }
+          if (out.mode === 'both') {
+            const ci = out.commonId || {};
+            // v2.1.0-beta.3 修订（用户反馈）：取值来源新增空值选项 ''（用户主动选）；
+            //   选择空值时 suffix "加上"输入框必须非空
+            if (ci.source !== 'main' && ci.source !== 'opp' && ci.source !== '') {
+              errors.push(isGwSubMode
+                ? '"自取值"取值来源选项无效'
+                : '"主从都修复"取值来源选项无效');
+            }
+            if (ci.source === '' && (!ci.suffix || String(ci.suffix).trim() === '')) {
+              errors.push(isGwSubMode
+                ? '"自取值"取值来源选择空值时，右侧"加上"输入框必须填写内容'
+                : '"主从都修复"取值来源选择空值时，右侧"加上"输入框必须填写内容');
+            }
+          }
+        }
+        // v3.0.2 需求3：gateway「修复订单字段取值」启用时校验规则（至少 1 条 / 四字段非空 / 字段∈枚举 / seq 指向正确 side）
+        //   🔴 mainTypeSeq 必须指向 side==='main'、oppTypeSeq 指向 side==='opp'（仿上方 reconGroups sideBySeq 校验）
+        if (isGwSubMode && c.fieldValue && c.fieldValue.enabled === true) {
+          // v3.0.2 需求3（用户修订）：限定「网关1v1渠道」—— 勾选 1v多/多v1 时不允许启用字段取值（防御旧配置/导入绕过 UI）
+          if (c.matchRules && (c.matchRules.oneToMany || c.matchRules.manyToOne)) {
+            errors.push('「修复订单字段取值」仅支持"网关1v1渠道"匹配模式（请取消勾选 网关1v多 / 多v1）');
+          }
+          const fvRules = Array.isArray(c.fieldValue.rules) ? c.fieldValue.rules : [];
+          if (fvRules.length === 0) {
+            errors.push('「修复订单字段取值」已启用，至少需要 1 条规则');
+          }
+          const sideBySeqFv = new Map(billTypesArr.map((bt) => [Number(bt.seq), bt.side]));
+          fvRules.forEach((rule, rIdx) => {
+            const ruleLabel = `修复订单字段取值规则 #${rIdx + 1}`;
+            if (!rule || typeof rule !== 'object') {
+              errors.push(`${ruleLabel} 结构错误`);
+              return;
+            }
+            // 网关字段（mainField）：空值只报"不能为空"，非空才查枚举
+            if (!rule.mainField) {
+              errors.push(`${ruleLabel} 的网关字段不能为空`);
+            } else if (!GATEWAY_BILL_FIELDS.includes(rule.mainField)) {
+              errors.push(`${ruleLabel} 的网关字段 ${rule.mainField} 不在网关账单字段列表中`);
+            }
+            // 渠道字段（oppField）
+            if (!rule.oppField) {
+              errors.push(`${ruleLabel} 的渠道字段不能为空`);
+            } else if (!CHANNEL_BILL_FIELDS.includes(rule.oppField)) {
+              errors.push(`${ruleLabel} 的渠道字段 ${rule.oppField} 不在渠道账单字段列表中`);
+            }
+            // 主分组 seq → 必须指向 side==='main'
+            const mainSeq = Number(rule.mainTypeSeq);
+            if (!sideBySeqFv.has(mainSeq)) {
+              errors.push(`${ruleLabel} 的网关分组序号 #${rule.mainTypeSeq} 不在对账字段列表中`);
+            } else if (sideBySeqFv.get(mainSeq) !== 'main') {
+              errors.push(`${ruleLabel} 的网关分组必须指向"主边"对账字段`);
+            }
+            // 从分组 seq → 必须指向 side==='opp'
+            const oppSeq = Number(rule.oppTypeSeq);
+            if (!sideBySeqFv.has(oppSeq)) {
+              errors.push(`${ruleLabel} 的渠道分组序号 #${rule.oppTypeSeq} 不在对账字段列表中`);
+            } else if (sideBySeqFv.get(oppSeq) !== 'opp') {
+              errors.push(`${ruleLabel} 的渠道分组必须指向"从边"对账字段`);
+            }
+          });
         }
         // gateway 模式：SubBizType 整段跳过（dialog 内已不渲染该区块）
         if (!isGwSubMode) {
@@ -9202,6 +9260,18 @@
       }
       if (!config.output.commonId) config.output.commonId = { source: 'main', suffix: '' };
       if (!config.output.subBizType) config.output.subBizType = { mode: 'auto', mainValue: '', oppValue: '' };
+      // v3.0.2 需求3：网关「修复订单ID取值」/「修复订单字段取值」兜底默认（旧场景无字段=ID取值启用 / 字段取值关）
+      //   🔴 逐条 Number() 归一 mainTypeSeq/oppTypeSeq（引擎用 Set<Number>.has，存字符串会静默失效）
+      if (typeof config.output.idEnabled !== 'boolean') config.output.idEnabled = true; // 老场景无字段=启用
+      if (!config.fieldValue || typeof config.fieldValue !== 'object') config.fieldValue = { enabled: false, rules: [] };
+      if (typeof config.fieldValue.enabled !== 'boolean') config.fieldValue.enabled = false;
+      if (!Array.isArray(config.fieldValue.rules)) config.fieldValue.rules = [];
+      config.fieldValue.rules.forEach((r) => {
+        r.mainTypeSeq = Number(r.mainTypeSeq) || (config.billTypes.find((b) => b.side === 'main')?.seq ?? 1);
+        r.oppTypeSeq = Number(r.oppTypeSeq) || (config.billTypes.find((b) => b.side === 'opp')?.seq ?? 1);
+        if (typeof r.mainField !== 'string') r.mainField = '';
+        if (typeof r.oppField !== 'string') r.oppField = '';
+      });
 
       const overlay = createOverlay();
       const dialog = document.createElement('div');
@@ -9264,10 +9334,26 @@
               ${isReadonly ? '' : '<button class="text-action small" type="button" data-c4-action="add-recon-group">+ 新增对账内容分组</button>'}
             </div>
           </div>
-          <div class="scenario-config-row scenario-config-row-mutex">
-            <span class="scenario-config-label" style="width:auto; white-space:nowrap;">${isGatewayMode ? '订单修复ID取值' : '修复结果输出'} <span class="scenario-config-tooltip" title="${isGatewayMode ? '指定订单修复 ID 取值：取自网关 ReconID / 取自渠道 ReconID / 自取值（自定义来源 + 拼接&quot;加上&quot;输入框文本）。' : '指定修复结果写到哪一侧：主边修复 / 从边修复 / 主从都修复。选&quot;主从都修复&quot;会展开取值来源选项，决定共同 ReconID 从哪一侧取。'}">ⓘ</span></span>
+          <div class="scenario-config-row scenario-config-row-mutex"${isGatewayMode ? ' style="display:block;"' : ''}>
+            ${isGatewayMode ? `
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+              <span class="scenario-config-label" style="width:auto; white-space:nowrap; margin:0;">修复订单ID取值 <span class="scenario-config-tooltip" title="指定修复订单 ID 取值：取自网关 ReconID / 取自渠道 ReconID / 自取值（自定义来源 + 拼接&quot;加上&quot;输入框文本）。">ⓘ</span></span>
+              <label class="scenario-config-c4-checkbox-item" style="white-space:nowrap;"><input type="checkbox" data-c4-id-enabled ${config.output.idEnabled ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}><span>启用该功能</span></label>
+            </div>
+            ` : `
+            <span class="scenario-config-label">修复结果输出 <span class="scenario-config-tooltip" title="指定修复结果写到哪一侧：主边修复 / 从边修复 / 主从都修复。选&quot;主从都修复&quot;会展开取值来源选项，决定共同 ReconID 从哪一侧取。">ⓘ</span></span>
+            `}
             <div class="scenario-config-c4-output" data-c4-output></div>
           </div>
+          ${isGatewayMode ? `
+          <div class="scenario-config-row" style="display:block;">
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
+              <span class="scenario-config-label" style="width:auto; white-space:nowrap; margin:0;">修复订单字段取值 <span class="scenario-config-tooltip" title="对账匹配成功后，按规则把'匹配成功的从边[渠道分组].[渠道字段]'值赋给'匹配成功的主边[网关分组].[网关字段]'，叠加进订单修复导出行（仅落在14列订单修复模板内的目标字段体现于导出；目标列为Amount/Reference时会覆盖默认拆账/对账号取值）。仅&quot;网关1v1渠道&quot;模式可用。">ⓘ</span></span>
+              <label class="scenario-config-c4-checkbox-item" style="white-space:nowrap;"><input type="checkbox" data-c4-fv-enabled ${config.fieldValue.enabled ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}><span>启用该功能</span></label>
+              <span data-c4-fv-hint style="display:none; font-size:13px; color:var(--muted); white-space:nowrap;">仅"网关1v1渠道"模式可用</span>
+            </div>
+            <div class="scenario-config-multi-rows" data-c4-field-value></div>
+          </div>` : ''}
         </div>
         <div class="dialog-actions">
           ${buildScenarioActionsHtml(mode)}
@@ -9400,6 +9486,9 @@
         const out = config.output;
         const sub = out.subBizType;
         const isBoth = out.mode === 'both';
+        // v3.0.2 需求3：gateway「修复订单ID取值」未勾选 → 三选一 radio + commonId 子行 disabled + 容器灰显
+        //   （business 模式无此开关，恒视为启用）
+        const idEnabled = !isGatewayMode || config.output.idEnabled;
         // v2.1.0-beta.3 T7：gateway 子模式文案映射
         //   主边单据 → 网关账单 / 从边单据 → 渠道账单 / 主从边都修复 → 自取值
         //   "主边单据 reconId" → "网关账单ReconID" / "从边单据 reconId" → "渠道账单ReconID"
@@ -9412,26 +9501,26 @@
         const labelCommonIdSuffix = isGatewayMode ? '作为修复 ID' : '作为主从边共同的修复 ID';
         // gateway：勾选 1v多 或 多v1 时"网关账单"radio 禁用（参考 PRD §3.4 / spec §2.4.2）
         const lockMainOption = isGatewayMode && (config.matchRules.oneToMany || config.matchRules.manyToOne);
-        const mainDisabled = isReadonly || lockMainOption;
+        const mainDisabled = isReadonly || !idEnabled || lockMainOption;
         outputEl.innerHTML = `
-          <div class="scenario-config-c4-output-modes">
+          <div class="scenario-config-c4-output-modes${idEnabled ? '' : ' is-disabled'}">
             <label class="scenario-config-c4-checkbox-item${lockMainOption ? ' is-disabled' : ''}">
               <input type="radio" name="c4-output-mode" value="main" ${out.mode === 'main' ? 'checked' : ''} ${mainDisabled ? 'disabled' : ''}>
               <span>${labelMain}</span>
             </label>
             <label class="scenario-config-c4-checkbox-item">
-              <input type="radio" name="c4-output-mode" value="opp" ${out.mode === 'opp' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+              <input type="radio" name="c4-output-mode" value="opp" ${out.mode === 'opp' ? 'checked' : ''} ${(isReadonly || !idEnabled) ? 'disabled' : ''}>
               <span>${labelOpp}</span>
             </label>
             <label class="scenario-config-c4-checkbox-item">
-              <input type="radio" name="c4-output-mode" value="both" ${out.mode === 'both' ? 'checked' : ''} ${isReadonly ? 'disabled' : ''}>
+              <input type="radio" name="c4-output-mode" value="both" ${out.mode === 'both' ? 'checked' : ''} ${(isReadonly || !idEnabled) ? 'disabled' : ''}>
               <span>${labelBoth}</span>
             </label>
           </div>
           ${isBoth ? `
             <div class="scenario-config-c4-common-id">
               <span>取</span>
-              <select class="scenario-config-input" data-c4-common-id="source" ${isReadonly ? 'disabled' : ''}>
+              <select class="scenario-config-input" data-c4-common-id="source" ${(isReadonly || !idEnabled) ? 'disabled' : ''}>
                 <!-- v2.1.0-beta.3 修订（用户反馈）：新增空值 option（人眼看为空白行），选取后右侧"加上"输入框必须有值（校验时强制） -->
                 <option value=""${(!out.commonId.source) ? ' selected' : ''}></option>
                 <option value="main"${out.commonId.source === 'main' ? ' selected' : ''}>${labelCommonIdMain}</option>
@@ -9439,7 +9528,7 @@
               </select>
               <!-- v2.1.0-beta.3 修订（用户反馈）：gateway 模式也加 suffix 输入框（功能同 business 的"加上"输入框） -->
               <span>加上</span>
-              <input class="scenario-config-input scenario-config-input-narrow" type="text" data-c4-common-id="suffix" ${isReadonly ? 'disabled' : ''} value="${escapeHtml(out.commonId.suffix || '')}" placeholder="后缀">
+              <input class="scenario-config-input scenario-config-input-narrow" type="text" data-c4-common-id="suffix" ${(isReadonly || !idEnabled) ? 'disabled' : ''} value="${escapeHtml(out.commonId.suffix || '')}" placeholder="后缀">
               <span>${labelCommonIdSuffix}</span>
             </div>
           ` : ''}
@@ -9469,10 +9558,48 @@
         `;
       }
 
+      // v3.0.2 需求3：网关「修复订单字段取值」多行规则渲染（仅 gateway）
+      //   每行 = 下拉1(主分组seq) + 下拉2(网关字段) + 文本"取" + 下拉3(从分组seq) + 下拉4(渠道字段)
+      //   下拉1/3 枚举来自 config.billTypes 的 side==='main'/'opp' 序号；下拉2/4 用 GATEWAY/CHANNEL_BILL_FIELDS
+      //   🔴 seq 存盘必须 Number（引擎 Set<Number>.has），事件里 Number(ctl.value)
+      function renderFieldValue() {
+        if (!isGatewayMode) return;
+        const fvEl = dialog.querySelector('[data-c4-field-value]');
+        if (!fvEl) return;
+        // v3.0.2 需求3（用户修订）：限定「网关1v1渠道」—— 勾选 1v多/多v1 时禁用开关 + 强制关闭 + 显示提示
+        const fvLocked = !!(config.matchRules.oneToMany || config.matchRules.manyToOne);
+        if (fvLocked && config.fieldValue.enabled) config.fieldValue.enabled = false;
+        const fvToggle = dialog.querySelector('input[data-c4-fv-enabled]');
+        if (fvToggle) {
+          fvToggle.disabled = isReadonly || fvLocked;
+          fvToggle.checked = config.fieldValue.enabled;
+        }
+        const fvHint = dialog.querySelector('[data-c4-fv-hint]');
+        if (fvHint) fvHint.style.display = fvLocked ? '' : 'none';
+        const enabled = config.fieldValue.enabled;
+        const mainSeqs = config.billTypes.filter((b) => b.side === 'main').map((b) => b.seq);
+        const oppSeqs = config.billTypes.filter((b) => b.side === 'opp').map((b) => b.seq);
+        const rules = config.fieldValue.rules;
+        // 勾选启用但无规则 → 自动补 1 行（首个 main / opp 分组）
+        if (enabled && rules.length === 0) rules.push({ mainTypeSeq: mainSeqs[0] ?? 1, mainField: '', oppTypeSeq: oppSeqs[0] ?? 1, oppField: '' });
+        const disabled = isReadonly || !enabled;
+        fvEl.innerHTML = rules.map((rule, idx) => `
+          <div class="scenario-config-c4-fv-row" data-c4-fv-row="${idx}">
+            <select class="scenario-config-input scenario-config-input-narrow" data-c4-fv-field="mainTypeSeq" ${disabled ? 'disabled' : ''}>${renderScenarioOptions(mainSeqs.map(String), String(rule.mainTypeSeq))}</select>
+            <select class="scenario-config-input" data-c4-fv-field="mainField" ${disabled ? 'disabled' : ''}><option value="">请选择网关字段</option>${renderScenarioOptions(GATEWAY_BILL_FIELDS, rule.mainField)}</select>
+            <span class="scenario-config-vs-arrow">取</span>
+            <select class="scenario-config-input scenario-config-input-narrow" data-c4-fv-field="oppTypeSeq" ${disabled ? 'disabled' : ''}>${renderScenarioOptions(oppSeqs.map(String), String(rule.oppTypeSeq))}</select>
+            <select class="scenario-config-input" data-c4-fv-field="oppField" ${disabled ? 'disabled' : ''}><option value="">请选择渠道字段</option>${renderScenarioOptions(CHANNEL_BILL_FIELDS, rule.oppField)}</select>
+            ${isReadonly || !enabled || rules.length <= 1 ? '' : '<button class="icon-close-small" type="button" data-c4-fv-action="remove" title="删除规则">×</button>'}
+            ${isReadonly || !enabled ? '' : '<button class="text-action small" type="button" data-c4-fv-action="add" title="新增规则">新增</button>'}
+          </div>`).join('');
+      }
+
       function rerenderAll() {
         renderBillTypes();
         renderReconGroups();
         renderOutput();
+        renderFieldValue();
       }
       rerenderAll();
 
@@ -9502,6 +9629,8 @@
           }
           // 重渲染 output（更新 lockMainOption 视觉态 + radio 选中态）
           renderOutput();
+          // v3.0.2 需求3（用户修订）：联动「修复订单字段取值」1v1 限定（勾 1v多/多v1 → 禁用开关 + 清状态 + 提示）
+          renderFieldValue();
         });
       });
 
@@ -9533,8 +9662,18 @@
             config.billTypes[idx].side = sideSel.value === 'opp' ? 'opp' : 'main';
             // 切 side → 字段下拉枚举改变 → 清空 conditions[].field
             (config.billTypes[idx].conditions || []).forEach((cd) => { cd.field = ''; });
+            // v3.0.2 需求3：切 side 后校正「修复订单字段取值」失效 seq（main/opp 归属变了）+ 刷新下拉
+            //   🔴 回退值保持 Number；某侧无 billType 时兜底 1，业务正确性由保存校验兜底
+            const firstMainSeq = (config.billTypes.find((b) => b.side === 'main')?.seq) ?? 1;
+            const firstOppSeq = (config.billTypes.find((b) => b.side === 'opp')?.seq) ?? 1;
+            const sideBySeqFv = new Map(config.billTypes.map((b) => [b.seq, b.side]));
+            (config.fieldValue?.rules || []).forEach((r) => {
+              if (sideBySeqFv.get(Number(r.mainTypeSeq)) !== 'main') r.mainTypeSeq = firstMainSeq;
+              if (sideBySeqFv.get(Number(r.oppTypeSeq)) !== 'opp') r.oppTypeSeq = firstOppSeq;
+            });
             renderBillTypes();
             renderReconGroups(); // 联动行 4 字段下拉
+            renderFieldValue(); // 联动「修复订单字段取值」分组下拉
           }
           return;
         }
@@ -9582,6 +9721,15 @@
               if (!validSeqs.includes(Number(grp.leftTypeSeq))) grp.leftTypeSeq = validSeqs[0] || 1;
               if (!validSeqs.includes(Number(grp.rightTypeSeq))) grp.rightTypeSeq = validSeqs[0] || 1;
             });
+            // v3.0.2 需求3：校正「修复订单字段取值」规则失效 seq（mainTypeSeq→首个 main、oppTypeSeq→首个 opp）
+            //   🔴 回退值保持 Number（引擎 Set<Number>.has）；某侧无 billType 时兜底 1，业务正确性由保存校验兜底
+            const firstMainSeq = (config.billTypes.find((b) => b.side === 'main')?.seq) ?? 1;
+            const firstOppSeq = (config.billTypes.find((b) => b.side === 'opp')?.seq) ?? 1;
+            const sideBySeqFv = new Map(config.billTypes.map((b) => [b.seq, b.side]));
+            (config.fieldValue?.rules || []).forEach((r) => {
+              if (sideBySeqFv.get(Number(r.mainTypeSeq)) !== 'main') r.mainTypeSeq = firstMainSeq;
+              if (sideBySeqFv.get(Number(r.oppTypeSeq)) !== 'opp') r.oppTypeSeq = firstOppSeq;
+            });
             rerenderAll();
           }
           return;
@@ -9619,6 +9767,7 @@
         config.billTypes.push({ seq: nextSeq, side: newSide, conditions: [{ field: '', op: '等于', value: '' }] });
         renderBillTypes();
         renderReconGroups();
+        renderFieldValue(); // v3.0.2 需求3：联动「修复订单字段取值」分组下拉（新 seq 进可选项）
       });
 
       // 行 4：对账内容（reconGroups[] — 每个 group 内 AND；多个 group OR；内部变量名 reconGroups 保留）
@@ -9758,6 +9907,52 @@
         }
       });
 
+      // v3.0.2 需求3：gateway「修复订单ID取值」启用开关（绑 dialog 级 — 勾选框在 label span 内、非 outputEl 内）
+      dialog.querySelector('input[data-c4-id-enabled]')?.addEventListener('change', (e) => {
+        if (isReadonly) return;
+        config.output.idEnabled = e.target.checked;
+        renderOutput();
+      });
+
+      // v3.0.2 需求3：gateway「修复订单字段取值」开关 + 多行规则事件（绑 dialog 级委托）
+      //   🔴 seq（mainTypeSeq/oppTypeSeq）存盘必须 Number（引擎 Set<Number>.has，存字符串会静默失效）
+      dialog.querySelector('input[data-c4-fv-enabled]')?.addEventListener('change', (e) => {
+        if (isReadonly) return;
+        config.fieldValue.enabled = e.target.checked;
+        renderFieldValue();
+      });
+      const fvElBind = dialog.querySelector('[data-c4-field-value]');
+      if (fvElBind) {
+        fvElBind.addEventListener('change', (event) => {
+          if (isReadonly) return;
+          const ctl = event.target.closest('[data-c4-fv-field]');
+          if (!ctl) return;
+          const row = ctl.closest('[data-c4-fv-row]');
+          const idx = Number(row?.dataset.c4FvRow);
+          const f = ctl.dataset.c4FvField;
+          if (!Number.isFinite(idx) || !config.fieldValue.rules[idx]) return;
+          config.fieldValue.rules[idx][f] = (f === 'mainTypeSeq' || f === 'oppTypeSeq') ? Number(ctl.value) : ctl.value; // 🔴 seq 存 Number
+        });
+        fvElBind.addEventListener('click', (event) => {
+          if (isReadonly) return;
+          if (event.target.closest('button[data-c4-fv-action="add"]')) {
+            const ms = config.billTypes.filter((b) => b.side === 'main').map((b) => b.seq);
+            const os = config.billTypes.filter((b) => b.side === 'opp').map((b) => b.seq);
+            config.fieldValue.rules.push({ mainTypeSeq: ms[0] ?? 1, mainField: '', oppTypeSeq: os[0] ?? 1, oppField: '' });
+            renderFieldValue();
+            return;
+          }
+          const rm = event.target.closest('button[data-c4-fv-action="remove"]');
+          if (rm) {
+            const idx = Number(rm.closest('[data-c4-fv-row]')?.dataset.c4FvRow);
+            if (Number.isFinite(idx) && config.fieldValue.rules.length > 1) {
+              config.fieldValue.rules.splice(idx, 1);
+              renderFieldValue();
+            }
+          }
+        });
+      }
+
       // 识读规律按钮（PR-A 占位 disabled，PR-C 实装）
       dialog.querySelector('[data-c4-action="infer-rules"]')?.addEventListener('click', () => {
         // PR-A 仅占位提示
@@ -9869,7 +10064,7 @@
         const modeLabel = isGwSubMode
           ? (out.mode === 'main' ? '网关账单' : (out.mode === 'opp' ? '渠道账单' : '自取值'))
           : (out.mode === 'main' ? '主边' : (out.mode === 'opp' ? '从边' : '主从都修复'));
-        const labelTitle = isGwSubMode ? '订单修复ID取值' : '修复方向';
+        const labelTitle = isGwSubMode ? '修复订单ID取值' : '修复方向';
         html += `<div class="scenario-confirm-detail-section"><span class="scenario-confirm-detail-label">${labelTitle}：</span>${escapeHtml(modeLabel)}</div>`;
         if (out.mode === 'both') {
           // v2.1.0-beta.1 PR-B（Q2=a 决策，2026-04-30）：commonId 取 reconId 不是 OrderId

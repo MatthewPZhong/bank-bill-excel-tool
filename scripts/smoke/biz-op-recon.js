@@ -1260,6 +1260,168 @@ async function runBizOpReconSmokeTests() {
   flowRepo.clearByDate(db, '2026-07-10');
   runRepo.clearRunsAndDiffsByDate(db, '2026-07-10');
 
+  // ========================================================================
+  // Case R：流水表批量多文件导入（v3.0.2 需求1b，🔴 资金红线 R-1）
+  //
+  // 背景：用户需一次导入同一天的多个流水表文件 → 单进程单事务合并到该 date、单次 clearByDate。
+  //   🔴 绝不能循环调用 runFlowImport（每文件各 clear+insert）——否则第 2 个文件的 clearByDate
+  //   清掉第 1 个文件已插入行，只剩最后一个文件 = 静默丢数据（资金事故）。
+  //
+  // 覆盖（对应 plan §需求1b 测试要求）：
+  //   R1 多文件合并到同一 date：导入 2 文件 → 该 date 行数 = 两文件之和（验证单次 clear 不互相覆盖）
+  //   R2 多文件任一文件含非法行 → 整批拒绝（两文件都不入库），聚合错误报告 + reason 标注来源文件名
+  //   R3 单文件回归：filePaths 长度 1 → 与改造前行为一致（成功 / 行数对 / reason 不带文件名前缀）
+  //
+  // 走同步 fallback runFlowImportAsync（无 dbPath，与 Case P 同范式）；该路径与 worker 路径同语义
+  //   （都「合并所有文件 → 单次 clear → 整批 insert / 任一行失败整批拒绝」），R-7 一致性由代码对齐保证。
+  // ========================================================================
+  {
+    const XLSX = require('xlsx');
+    const { FLOW_HEADERS } = require('../../src/backend/biz-op-recon-db/columns');
+    const { readFlowFile } = require('../../src/backend/biz-op-recon-import/reader');
+    const RDATE = '2026-08-15';
+
+    // 构造一个流水 xlsx fixture：dataRows = [{ bizId, bu, acc, dir, amt }]，写到 tmpRoot/fileName。
+    function writeFlowFixtureR(fileName, dataRows) {
+      function flowRowArr(d) {
+        const obj = {};
+        FLOW_HEADERS.forEach(h => { obj[h] = ''; });
+        obj['BizId'] = d.bizId;
+        obj['业务部门'] = d.bu;
+        obj['出入方向'] = d.dir;
+        obj['账户编号'] = d.acc;
+        obj['对账金额'] = d.amt;
+        obj['币种'] = 'CNY';
+        return FLOW_HEADERS.map(h => obj[h]);
+      }
+      const aoa = [FLOW_HEADERS, ...dataRows.map(flowRowArr)];
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      XLSX.utils.book_append_sheet(wb, ws, 'sheet');
+      const fp = path.join(tmpRoot, fileName);
+      XLSX.writeFile(wb, fp);
+      return fp;
+    }
+
+    // ---- R1：两个合法文件合并到同一 date，行数累加（单次 clear 不互相覆盖）----
+    const rFileA = writeFlowFixtureR('case-R-A.xlsx', [
+      { bizId: 'RA1', bu: 'BU-R1', acc: 'R101', dir: '入', amt: '100' },
+      { bizId: 'RA2', bu: 'BU-R1', acc: 'R102', dir: '入', amt: '200' }
+    ]);
+    const rFileB = writeFlowFixtureR('case-R-B.xlsx', [
+      { bizId: 'RB1', bu: 'BU-R2', acc: 'R201', dir: '出', amt: '50' },
+      { bizId: 'RB2', bu: 'BU-R2', acc: 'R202', dir: '入', amt: '70' },
+      { bizId: 'RB3', bu: 'BU-R2', acc: 'R203', dir: '入', amt: '30' }
+    ]);
+
+    const resR_multi = await session.runFlowImportAsync(db, {
+      date: RDATE,
+      filePaths: [rFileA, rFileB],
+      readFlowFile,
+      writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
+      errorReportsDir: path.join(tmpRoot, 'error-reports')
+    });
+    check('R1 多文件合并 import success', resR_multi.status === 'success');
+    // 🔴 核心：总行数 = 2 + 3 = 5（若循环 clear 互相覆盖，只会剩最后一个文件的 3 行）
+    check('R1 totalCount = 两文件之和(5)', resR_multi.totalCount === 5,
+      `资金红线 R-1：多文件未单次 clear 合并 → 互相覆盖丢数据（实际 totalCount=${resR_multi.totalCount}）`);
+    // 🔴 直接查 DB 落库行数 = 5（最硬证据：两文件都在库，证明单次 clear 没把先导文件清掉）
+    const rCountInDb = flowRepo.getRowsByDate(db, RDATE).length;
+    check('R1 DB 实际落库行数 = 5（两文件都在库）', rCountInDb === 5,
+      `资金红线 R-1：DB 落库行数=${rCountInDb}，应为两文件之和 5（互相覆盖会只剩最后一个文件 3 行）`);
+    // 进一步：两文件的 BizId 都能在库里查到（BU-R1 来自文件A，BU-R2 来自文件B）
+    const rBizIdsInDb = new Set(flowRepo.getRowsByDate(db, RDATE).map(r => r.biz_id));
+    check('R1 文件A 的行在库（RA1）', rBizIdsInDb.has('RA1'),
+      '资金红线 R-1：文件A 已插入行被文件B 的 clear 清掉（互相覆盖）');
+    check('R1 文件B 的行在库（RB3）', rBizIdsInDb.has('RB3'));
+
+    // ---- R2：两文件其中一个含非法行 → 整批拒绝（两文件都不入库），聚合错误报告 ----
+    // 先确认 R1 已落 5 行；R2 拒绝后这 5 行应原样保留（整批拒绝不动已有数据，因为根本没进 clear/insert 事务）。
+    const rFileC = writeFlowFixtureR('case-R-C.xlsx', [
+      { bizId: 'RC1', bu: 'BU-R3', acc: 'R301', dir: '入', amt: '11' },
+      { bizId: 'RC2', bu: 'BU-R3', acc: 'R302', dir: '入', amt: '22' }
+    ]);
+    // D 文件含一条非法行（出入方向 'DEBIT' → validateFlowRow 失败）
+    const rFileD = writeFlowFixtureR('case-R-D.xlsx', [
+      { bizId: 'RD1', bu: 'BU-R3', acc: 'R401', dir: '入', amt: '33' },
+      { bizId: 'RD2-BAD', bu: 'BU-R3', acc: 'R402', dir: 'DEBIT', amt: '44' }
+    ]);
+    const RDATE2 = '2026-08-16';
+    const resR_reject = await session.runFlowImportAsync(db, {
+      date: RDATE2,
+      filePaths: [rFileC, rFileD],
+      readFlowFile,
+      writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
+      errorReportsDir: path.join(tmpRoot, 'error-reports')
+    });
+    check('R2 任一文件含非法行 → 整批拒绝', resR_reject.status === 'rejected',
+      `资金红线 R-1：多文件含非法行未整批拒绝（status=${resR_reject.status}）`);
+    check('R2 errorRows 含失败行（≥1）', Array.isArray(resR_reject.errorRows) && resR_reject.errorRows.length >= 1);
+    check('R2 生成聚合错误报告 xlsx', !!resR_reject.errorReportPath && fs.existsSync(resR_reject.errorReportPath));
+    // 🔴 R2 两文件都不入库：RDATE2 在库行数应为 0（C 文件合法 2 行也因 D 文件非法被整批 ROLLBACK）
+    const rCount2 = flowRepo.getRowsByDate(db, RDATE2).length;
+    check('R2 整批拒绝 → RDATE2 在库 0 行（两文件都不入）', rCount2 === 0,
+      `资金红线 R-1：整批拒绝后仍有 ${rCount2} 行入库（应 0，C 文件合法行也不能入）`);
+    // R2 多文件 reason 标注来源文件名（[case-R-D.xlsx] 前缀），便于定位
+    const rBadReason = (resR_reject.errorRows || []).map(e => e.reason).join(' | ');
+    check('R2 错误原因标注来源文件名（多文件定位）', rBadReason.includes('case-R-D.xlsx'),
+      `多文件错误未标注来源文件名，reason=${rBadReason}`);
+    // R1 的 5 行不受 R2 拒绝影响（不同 date 互不干扰）
+    const rCount1AfterReject = flowRepo.getRowsByDate(db, RDATE).length;
+    check('R2 不影响 RDATE 已落库的 5 行', rCount1AfterReject === 5);
+
+    // ---- R3：单文件回归（filePaths 长度 1）→ 与改造前一致：成功 + 行数对 ----
+    const rFileE = writeFlowFixtureR('case-R-E.xlsx', [
+      { bizId: 'RE1', bu: 'BU-R4', acc: 'R501', dir: '入', amt: '5' },
+      { bizId: 'RE2', bu: 'BU-R4', acc: 'R502', dir: '出', amt: '6' }
+    ]);
+    const RDATE3 = '2026-08-17';
+    const resR_single = await session.runFlowImportAsync(db, {
+      date: RDATE3,
+      filePaths: [rFileE],
+      readFlowFile,
+      writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
+      errorReportsDir: path.join(tmpRoot, 'error-reports')
+    });
+    check('R3 单文件(filePaths 长度1) import success', resR_single.status === 'success');
+    check('R3 单文件 totalCount = 2', resR_single.totalCount === 2);
+
+    // R3b：单文件含非法行 → reason 不带文件名前缀（回归：单文件错误报告与现状一致）
+    const rFileF = writeFlowFixtureR('case-R-F.xlsx', [
+      { bizId: 'RF1-BAD', bu: 'BU-R5', acc: 'R601', dir: 'CREDIT', amt: '9' }
+    ]);
+    const resR_singleBad = await session.runFlowImportAsync(db, {
+      date: '2026-08-18',
+      filePaths: [rFileF],
+      readFlowFile,
+      writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
+      errorReportsDir: path.join(tmpRoot, 'error-reports')
+    });
+    check('R3b 单文件非法 → rejected', resR_singleBad.status === 'rejected');
+    const rSingleReason = (resR_singleBad.errorRows || []).map(e => e.reason).join(' | ');
+    check('R3b 单文件 reason 不带 [文件名] 前缀（回归一致）',
+      !rSingleReason.includes('case-R-F.xlsx') && rSingleReason.includes('出入方向非法'),
+      `单文件 reason 不应带来源文件名前缀，reason=${rSingleReason}`);
+
+    // R4：兼容旧单数入参 filePath（不传 filePaths）→ 仍按单文件走（向后兼容）
+    const resR_legacy = await session.runFlowImportAsync(db, {
+      date: '2026-08-19',
+      filePath: rFileE,   // 旧单数入参
+      readFlowFile,
+      writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
+      errorReportsDir: path.join(tmpRoot, 'error-reports')
+    });
+    check('R4 兼容旧单数 filePath 入参 import success', resR_legacy.status === 'success');
+    check('R4 兼容旧单数 filePath totalCount = 2', resR_legacy.totalCount === 2);
+
+    // 清理 R 用例
+    flowRepo.clearByDate(db, RDATE);
+    flowRepo.clearByDate(db, RDATE2);
+    flowRepo.clearByDate(db, RDATE3);
+    flowRepo.clearByDate(db, '2026-08-18');
+    flowRepo.clearByDate(db, '2026-08-19');
+  }
+
   // 清理
   if (db && typeof db.close === 'function') db.close();
   fs.unlinkSync(tmpDb);

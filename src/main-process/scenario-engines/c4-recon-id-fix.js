@@ -636,6 +636,37 @@ function computeReferenceGateway(mainRow, oppRow, cfg) {
   return baseReconId + suffix;
 }
 
+// v3.0.2 需求3：网关子模式「修复订单字段取值」— 按 _types 分组过滤把"从边渠道字段值"赋给"主边网关字段"
+//
+// 🔴 资金红线（spec §六.2 / TechDoc R-2/R-3/D3）：
+//   1. 只产出新建 overrides 对象，**绝不写 mainRow / oppRow**（classifyRows 浅克隆仍引用原值字段，
+//      若直接写行对象会污染分类后的行 → 单测断言调用后行对象字段未变）。
+//   2. mainTypeSeq / oppTypeSeq 全程 Number 归一（_types 是 Set<Number>，存字符串 / 误判类型会
+//      导致 Set.has 恒 false → 规则静默失效，最隐蔽的资金 bug）。此处用 Number() 双保险，
+//      与 UI 存盘归一 + 校验拦截构成三道防线。
+//   3. 命中规则取值为 null/undefined → 赋 ''（空值不阻断，与 buildOutputRow 空值处理一致）。
+//
+// 返回 overrides（{} 或 { [mainField]: value, ... }）；调用方负责 Object.assign 合并到现有 overrides。
+// idEnabled 与本 helper 正交：idEnabled 决定是否把 Reference 放进 overrides，本 helper 只处理 fieldValue 列。
+function applyFieldValueOverrides(mainRow, oppRow, cfg) {
+  const overrides = {};
+  const fv = cfg && cfg.fieldValue;
+  if (!fv || fv.enabled !== true || !Array.isArray(fv.rules)) return overrides;
+  if (!mainRow || !oppRow || !mainRow._types || !oppRow._types) return overrides;
+  for (const rule of fv.rules) {
+    if (!rule) continue;
+    // mainField / oppField 任一空 → 跳过（不抛错，容忍用户半填规则）
+    if (!rule.mainField || !rule.oppField) continue;
+    const mainSeq = Number(rule.mainTypeSeq); // 🔴 Number 归一，防 Set<Number>.has 恒 false
+    const oppSeq = Number(rule.oppTypeSeq);
+    if (!mainRow._types.has(mainSeq)) continue; // 主行不属于规则指定的主分组 → 跳过
+    if (!oppRow._types.has(oppSeq)) continue;   // 从行不属于规则指定的从分组 → 跳过
+    const v = oppRow[rule.oppField];
+    overrides[rule.mainField] = (v === null || v === undefined) ? '' : v; // 空值→''，不阻断
+  }
+  return overrides;
+}
+
 // ===== Round 3 算法主路径 =====
 //
 // Round 5 微调（2026-05-09，Q1=a 决策）：Step 2（billDateMode='±1day'）多候选时改 tie-break 挑 1 个 1v1 命中
@@ -911,12 +942,15 @@ function apply1v1Assignment(leftRow, rightRow, scenario, cfg, reconResult, fixed
   //   Reference 按"订单修复ID取值"决定（main=网关 / opp=渠道 / both=自取值）；
   //   不消费 reconResult / SubBizType（gateway 输出列已无 SubBizType）
   if (cfg._subMode === 'gateway') {
-    const reference = computeReferenceGateway(leftRow, rightRow, cfg);
-    fixedRows.push(buildOutputRow(leftRow, {
-      Type: 0,
-      Reference: reference,
-      _sourceSide: 'main'
-    }, 'gateway'));
+    // v3.0.2 需求3：先 Type/Reference，再叠加 fieldValue overrides（1v1：oppRow=rightRow）
+    const overrides = { Type: 0, _sourceSide: 'main' };
+    // idEnabled !== false（兼容老配置无字段=启用）→ 写 Reference；
+    // idEnabled === false → 不写 Reference，buildOutputRow 自动取 srcRow(网关账单) 原 Reference 值（不清空，资金 R-4）
+    if ((cfg.output || {}).idEnabled !== false) {
+      overrides.Reference = computeReferenceGateway(leftRow, rightRow, cfg);
+    }
+    Object.assign(overrides, applyFieldValueOverrides(leftRow, rightRow, cfg));
+    fixedRows.push(buildOutputRow(leftRow, overrides, 'gateway'));
     return;
   }
   const subCfg = (cfg.output || {}).subBizType || { mode: 'auto' };
@@ -971,14 +1005,21 @@ function apply1vNAssignment(leftRow, matches, scenario, cfg, reconResult, fixedR
   if (cfg._subMode === 'gateway') {
     for (let i = 0; i < matches.length; i++) {
       const channelRow = matches[i];
-      const reference = computeReferenceGateway(leftRow, channelRow, cfg);
-      fixedRows.push(buildOutputRow(leftRow, {
+      // v3.0.2 需求3：每笔逐笔取对应 channelRow 的字段值（oppRow=matches[i]，逐笔不同）
+      //   顺序：先 Type/Amount/Reference，再叠加 fieldValue overrides
+      //   ⚠️ R-5：若用户把 fieldValue 目标列配成 Amount，会覆盖上面拆出的 channelRow.receiveAmount
+      //          （用户显式配置语义，tooltip 标注；Object.assign 在设 Amount 之后保证以 fieldValue 为准）
+      const overrides = {
         Type: 1,
-        Reference: reference,
         Amount: channelRow.receiveAmount === null || channelRow.receiveAmount === undefined
           ? '' : channelRow.receiveAmount,
         _sourceSide: 'main'
-      }, 'gateway'));
+      };
+      if ((cfg.output || {}).idEnabled !== false) {
+        overrides.Reference = computeReferenceGateway(leftRow, channelRow, cfg);
+      }
+      // v3.0.2 需求3（用户修订）：「修复订单字段取值」限定 1v1，1v多 不做字段取值（入口已强制 enabled=false）
+      fixedRows.push(buildOutputRow(leftRow, overrides, 'gateway'));
     }
     // 注：原 leftRow 不入 fixedRows（拆出的 n 笔已覆盖该网关账单的修复语义，原行丢弃）
     return;
@@ -1036,12 +1077,13 @@ function applyNv1Assignment(matches, rightRow, scenario, cfg, reconResult, fixed
   //   每笔基于对应 matches[i]（网关 mainRow）数据 + 覆盖 Type=2 / Reference 按选项 / Amount 保持原值
   if (cfg._subMode === 'gateway') {
     for (const mainRow of matches) {
-      const reference = computeReferenceGateway(mainRow, rightRow, cfg);
-      fixedRows.push(buildOutputRow(mainRow, {
-        Type: 2,
-        Reference: reference,
-        _sourceSide: 'main'
-      }, 'gateway'));
+      // v3.0.2 需求3：逐笔 mainRow（matches[i]）+ 共同 rightRow 取值；先 Type/Reference，再叠加 fieldValue
+      const overrides = { Type: 2, _sourceSide: 'main' };
+      if ((cfg.output || {}).idEnabled !== false) {
+        overrides.Reference = computeReferenceGateway(mainRow, rightRow, cfg);
+      }
+      // v3.0.2 需求3（用户修订）：「修复订单字段取值」限定 1v1，多v1 不做字段取值（入口已强制 enabled=false）
+      fixedRows.push(buildOutputRow(mainRow, overrides, 'gateway'));
     }
     return;
   }
@@ -1192,6 +1234,12 @@ function runC4Scenario(scenario, sheets, subMode) {
     _billDateDays: billDateDays
   });
   const matchRules = cfg.matchRules || {};
+  // v3.0.2 需求3（用户修订）：「修复订单字段取值」限定「网关1v1渠道」模式 —— 勾选 1v多/多v1 时禁用字段取值。
+  //   防御：旧配置/导入配置即使 fieldValue.enabled=true，只要含池子模式（oneToMany/manyToOne）就强制关闭，
+  //   与 UI 约束（勾 1v多/多v1 时禁用并清开关）一致；apply1vN/applyNv1 也已不调用 applyFieldValueOverrides。
+  if (cfg.fieldValue && cfg.fieldValue.enabled === true && (matchRules.oneToMany || matchRules.manyToOne)) {
+    cfg.fieldValue = Object.assign({}, cfg.fieldValue, { enabled: false });
+  }
   const reconResult = (sheets && sheets.reconResult) || [];
   const businessBills = (sheets && sheets.businessBills) || [];
   let opponentBills = (sheets && sheets.opponentBills) || [];
@@ -1324,5 +1372,6 @@ module.exports = {
   tryOneToManyPool,
   tryManyToOnePool,
   sortRightRowsForManyToOne, // v2.1.8 F5 T10 暴露给 unit case
-  currencyMatches // v2.1.8 F5 T11 暴露给 unit case
+  currencyMatches, // v2.1.8 F5 T11 暴露给 unit case
+  applyFieldValueOverrides // v3.0.2 需求3：暴露给 unit case（修复订单字段取值）
 };
