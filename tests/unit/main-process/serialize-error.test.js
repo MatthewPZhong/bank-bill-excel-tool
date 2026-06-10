@@ -190,4 +190,38 @@ test.describe('serialize-error', () => {
     assert.equal(__test_only__.MAX_CAUSE_DEPTH, 10);
     assert.equal(typeof __test_only__.safeCloneContext, 'function');
   });
+
+  test('12. structuredImportErrors 透传 round-trip（v3.0.4 PR-C：pending 跨 worker 还原报错 xlsx）', () => {
+    const err = new Error('导入失败：2 行存在错误，整批未导入');
+    err.name = 'PendingImportValidationError';
+    err.structuredImportErrors = {
+      collectedErrors: [
+        { sourceFile: 'a.xlsx', rowIndex: 2, reason: '发现重复行（hash abcd1234...）', cells: ['p-A1', '', '100'] },
+        { sourceFile: 'a.xlsx', rowIndex: 3, reason: 'UNIQUE 冲突', cells: ['p-A2', '', '200'] }
+      ],
+      rowErrorTotal: 2,
+      rowErrorTruncated: false
+    };
+    const s = serializeError(err);
+    assert.ok(s.structuredImportErrors, '序列化保留 structuredImportErrors');
+    assert.equal(s.structuredImportErrors.collectedErrors.length, 2);
+    assert.deepEqual(s.structuredImportErrors.collectedErrors[0].cells, ['p-A1', '', '100']);
+
+    const r = deserializeError(s);
+    assert.equal(r.name, 'PendingImportValidationError');
+    assert.ok(r.structuredImportErrors, '反序列化恢复 structuredImportErrors');
+    assert.equal(r.structuredImportErrors.rowErrorTotal, 2);
+    assert.equal(r.structuredImportErrors.rowErrorTruncated, false);
+    assert.deepEqual(
+      r.structuredImportErrors.collectedErrors[1].cells, ['p-A2', '', '200'],
+      '🔴 重复行 cells 跨进程边界完整还原（报错 xlsx 命门）'
+    );
+  });
+
+  test('13. 无 structuredImportErrors 的普通错误 → 字段为 null（不影响现状）', () => {
+    const s = serializeError(new Error('plain'));
+    assert.equal(s.structuredImportErrors, null);
+    const r = deserializeError(s);
+    assert.equal(r.structuredImportErrors, undefined, '普通错误反序列化不挂该字段');
+  });
 });

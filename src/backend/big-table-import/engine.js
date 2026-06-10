@@ -263,6 +263,22 @@ async function importFiles({
     // E5：写侧跨文件去重 Set（契约声明 dedupeKeyOf 时维护；命中 → 行级错误不 INSERT）。
     const hasDedupe = typeof contractMod.dedupeKeyOf === 'function';
     const seenDedupeKeys = hasDedupe ? new Set() : null;
+    // E5 cells 缺口补丁：写侧行级错误（去重命中 / INSERT 失败）从 batch 项 params 逆推 cells，
+    //   让 captureRowValues 时写侧行级错误也带原始整行 cells（pending 重复行报错 xlsx 需要，对齐旧链路 worker.js:127）。
+    //   仅 captureRowValues 开启 + 契约声明 cellsOf 时启用；未声明 ⇒ 写侧行级错误不带 cells（行为零变化）。
+    const captureRowValuesWrite = contract.captureRowValues === true;
+    const cellsOfFn = (captureRowValuesWrite && typeof contractMod.cellsOf === 'function')
+      ? contractMod.cellsOf : null;
+    // 从 batch 项安全逆推 cells（cellsOf 抛错不应中断导入；失败 → 不带 cells，退化为现状）。
+    const deriveCellsFromParams = (params) => {
+      if (!cellsOfFn) return undefined;
+      try {
+        const c = cellsOfFn({ params });
+        return Array.isArray(c) ? c : undefined;
+      } catch (_e) {
+        return undefined;
+      }
+    };
 
     let totalErrorTotal = 0;          // 全量行级错误数（跨文件累加，含截断前总数）
     const collectedErrors = [];       // 截断到 maxErrors 的错误样本
@@ -393,7 +409,8 @@ async function importFiles({
             const msg = typeof contractMod.formatDuplicateError === 'function'
               ? contractMod.formatDuplicateError({ key: k })
               : `发现重复行（key ${k}）`;
-            recordRowError(parsed.sourceFile, srcRowR, msg);
+            // E5 cells 缺口：captureRowValues + cellsOf 时附整行 cells（pending 报错 xlsx 需要）。
+            recordRowError(parsed.sourceFile, srcRowR, msg, deriveCellsFromParams(batch[r].params));
             continue;   // 重复行不入库
           }
           if (k != null) seenDedupeKeys.add(k);
@@ -402,7 +419,12 @@ async function importFiles({
           insertStmt.run(...batch[r].params);
         } catch (insErr) {
           // INSERT 失败（如 UNIQUE 冲突）→ 行级错误累积（语义平移收单 streamImportOneFile catch）。
-          recordRowError(parsed.sourceFile, srcRowR, insErr && insErr.message ? insErr.message : String(insErr));
+          // E5 cells 缺口：captureRowValues + cellsOf 时附整行 cells（pending 报错 xlsx 需要）。
+          recordRowError(
+            parsed.sourceFile, srcRowR,
+            insErr && insErr.message ? insErr.message : String(insErr),
+            deriveCellsFromParams(batch[r].params)
+          );
           continue;
         }
         writtenTotal += 1;
@@ -446,13 +468,28 @@ async function importFiles({
     // 整批拒绝（表头错 / 行级错累计 / 跨月 / E3 空文件）→ ROLLBACK + 报错（不入任何行）。
     if (aborted || collectedErrors.length > 0 || totalErrorTotal > 0 || emptyFileError) {
       safeRollback(db);
+      // 结构化错误元数据（附到抛出的 error 上，供消费方按需还原行级错误形态）：
+      //   v3.0.4 PR-C：pending session 需把引擎错误还原为现行 lastImportErrors 形态（severity/file/sheetRow/message/cells
+      //   + rowErrorTotal/rowErrorTruncated）以驱动报错 xlsx 导出。引擎在此把样本截断后的 collectedErrors（可带 cells）
+      //   + 真实总数 + 截断标志统一挂到 error.structuredImportErrors，纯附加字段——不读取者（如收单）完全无感。
+      const rowErrorTruncated = totalErrorTotal > collectedErrors.length;
+      const attachStructured = (err) => {
+        try {
+          err.structuredImportErrors = {
+            collectedErrors: collectedErrors.slice(),
+            rowErrorTotal: totalErrorTotal,
+            rowErrorTruncated
+          };
+        } catch (_e) { /* swallow */ }
+        return err;
+      };
       if (abortError) {
         // 表头错优先抛原始 BigTableImportError（带 detailLines）；契约声明 errorName 时改 name
         //   （收单契约 errorName='ImportValidationError'，让 session/handler 既有错误识别零改动 + byte-for-byte）。
         if (contractMod.errorName && typeof contractMod.errorName === 'string') {
           abortError.name = contractMod.errorName;
         }
-        throw abortError;
+        throw attachStructured(abortError);
       }
       // E3 空文件批级错误（无行级错误时优先抛——空文件本身就是整批拒绝原因）。
       if (emptyFileError) {
@@ -461,7 +498,7 @@ async function importFiles({
           Array.isArray(emptyFileError.detailLines) ? emptyFileError.detailLines : []
         );
         if (contractMod.errorName && typeof contractMod.errorName === 'string') err.name = contractMod.errorName;
-        throw err;
+        throw attachStructured(err);
       }
       // 契约声明 formatBatchError → 由业务契约决定错误文案（message/detailLines/name），引擎保持通用不内联业务文案。
       //   收单契约据此产出 `${sourceFile}：导入失败 N 行（...）` + `第 N 行：reason`，byte-for-byte 平移 reader。
@@ -472,7 +509,7 @@ async function importFiles({
           formatted && Array.isArray(formatted.detailLines) ? formatted.detailLines : []
         );
         if (formatted && formatted.name) err.name = formatted.name;
-        throw err;
+        throw attachStructured(err);
       }
       // 引擎默认格式（无 formatBatchError 的契约，如集成测试契约）。
       const truncated = totalErrorTotal > collectedErrors.length;
@@ -480,10 +517,10 @@ async function importFiles({
         .slice(0, maxErrors)
         .map((e) => `[${e.sourceFile}] 第 ${e.rowIndex} 行：${e.reason}`);
       if (truncated) detailLines.push(`共 ${totalErrorTotal} 条错误，仅列前 ${collectedErrors.length} 条`);
-      throw new zipReader.BigTableImportError(
+      throw attachStructured(new zipReader.BigTableImportError(
         `导入失败：${totalErrorTotal} 行存在错误，整批未导入`,
         detailLines
-      );
+      ));
     }
 
     // ── E2 事务内收尾（COMMIT 前）：契约声明 finalizeForCommit 时，在大事务内执行收尾语句（与行 INSERT 原子）。

@@ -116,6 +116,12 @@ function writeContract(dir, opts = {}) {
     lines.push("  dedupeKeyOf({ values }) { return [values[0], values[1], values[2]].join('|'); },");
     lines.push("  formatDuplicateError({ key }) { return '发现重复行（key ' + key + '）'; }");
   }
+  // E5 cells 缺口补丁：cellsOf 从 params 逆推 cells（写侧去重/INSERT 错误带 cells）。
+  //   本测试契约 mapRow 的 params = [values[0], values[1], values[2]]（即 d/k/a 三列），cellsOf 直接返回 params。
+  if (opts.cellsOf) {
+    lines[lines.length - 1] += ',';
+    lines.push('  cellsOf({ params }) { return Array.isArray(params) ? params.slice() : []; }');
+  }
 
   lines.push('};');
   fs.writeFileSync(p, lines.join('\n') + '\n', 'utf8');
@@ -402,5 +408,111 @@ test.describe('E5 写侧跨文件去重 dedupeKeyOf', () => {
     const res = await engine.importFiles({ dbPath, files: [fA, fB], contractModulePath: cm, contractOptions: {}, mode: 'append', monthKey: '2026-03' });
     assert.equal(res.totalImported, 2, '🔴 无 dedupeKeyOf ⇒ 重复行不拦截（现状）');
     assert.equal(countRows(dbPath), 2);
+  });
+});
+
+// ─────────────── E5 cells 缺口补丁：写侧行级错误（去重命中 / INSERT 失败）从 params 逆推 cells ───────────────
+//   team-lead 预检发现：引擎写侧 dedupe/INSERT 错误的 batch 项只有 params/rowR/dedupeKey，拿不到原始 cells
+//   （mapRow 阶段错误已带 cells，但写侧错误本来不带）。补 cellsOf({params})=>cells hook：captureRowValues +
+//   cellsOf 声明时，写侧行级错误也附整行 cells（pending 重复行报错 xlsx 需要，对齐旧链路 worker.js:127）。
+//   🔴 铁律：不声明 cellsOf ⇒ 写侧行级错误不带 cells（行为零变化，收单契约未声明仍 byte-for-byte）。
+test.describe('E5 cells 缺口补丁 cellsOf（写侧去重/INSERT 错误附 cells）', () => {
+  test.after(() => fx.cleanupTmpDirs());
+
+  // 用带 formatBatchError + cellsOf 的契约把写侧去重错误的 cells 透出到 detailLines 验证。
+  function writeDedupeCellsContract(dir, withCellsOf) {
+    const p = path.join(dir, `contract-dedupe-cells-${withCellsOf ? 'on' : 'off'}-${Math.random().toString(36).slice(2, 8)}.js`);
+    const cellsOfLine = withCellsOf
+      ? '  cellsOf({ params }) { return Array.isArray(params) ? params.slice() : []; },'
+      : '';
+    fs.writeFileSync(p, `'use strict';
+module.exports = {
+  expectedHeaders: ['日期', '主键', '金额'],
+  valueColumnWhitelist: null,
+  validateHeaders(cells) { return (cells[0]==='日期'&&cells[1]==='主键'&&cells[2]==='金额') ? {ok:true} : {ok:false,error:'表头不匹配'}; },
+  mapRow({ values }) { return {params:[values[0],values[1],values[2]]}; },
+  insertSql: 'INSERT INTO t (d, k, a) VALUES (?, ?, ?)',
+  requiredColumns: [0,1,2],
+  monthKeyOf({ values }) { const m=String(values[0]||'').match(/^(\\d{4})[-/](\\d{1,2})/); return m? m[1]+'-'+String(m[2]).padStart(2,'0') : null; },
+  captureRowValues: true,
+  dedupeKeyOf({ values }) { return [values[0],values[1],values[2]].join('|'); },
+  formatDuplicateError({ key }) { return '发现重复行（key ' + key + '）'; },
+${cellsOfLine}
+  formatBatchError({ collectedErrors }) {
+    const lines = collectedErrors.map((e) => '行' + e.rowIndex + ' hasCells=' + (e.cells !== undefined) + ' cells=' + JSON.stringify(e.cells === undefined ? null : e.cells));
+    return { message: '导入失败（写侧cells）', detailLines: lines };
+  }
+};
+`, 'utf8');
+    return p;
+  }
+
+  test('声明 cellsOf + 写侧去重命中 → 重复行错误附整行 cells（从 params 逆推）', async () => {
+    const dir = mkDir();
+    const dbPath = mkDb(dir);
+    const cm = writeDedupeCellsContract(dir, true);
+    const fA = await fx.writeFixtureExcelJS({ rows: [['日期', '主键', '金额'], ['2026-03-01', 'K1', '10']] });
+    const fB = await fx.writeFixtureExcelJS({ rows: [['日期', '主键', '金额'], ['2026-03-01', 'K1', '10']] });
+    let err = null;
+    try {
+      await engine.importFiles({ dbPath, files: [fA, fB], contractModulePath: cm, contractOptions: {}, mode: 'append', monthKey: '2026-03' });
+    } catch (e) { err = e; }
+    assert.ok(err && err.name === 'BigTableImportError', '跨文件重复整批拒绝');
+    const cellsLine = err.detailLines.find((l) => /hasCells=true/.test(l));
+    assert.ok(cellsLine, '🔴 写侧去重错误附 cells（hasCells=true）');
+    assert.match(cellsLine, /2026-03-01/, '🔴 cells 含本行原始日期值');
+    assert.match(cellsLine, /"K1"/, 'cells 含本行原始主键值');
+    assert.match(cellsLine, /"10"/, 'cells 含本行原始金额值');
+    // 同时 structuredImportErrors 也带 cells（pending session 还原路径走此字段）。
+    assert.ok(err.structuredImportErrors, 'error 挂 structuredImportErrors');
+    const dup = (err.structuredImportErrors.collectedErrors || []).find((e) => /发现重复行/.test(e.reason));
+    assert.ok(dup && Array.isArray(dup.cells) && dup.cells.length === 3, '🔴 structuredImportErrors 重复行带 3 列 cells');
+  });
+
+  test('不声明 cellsOf + 写侧去重命中 → 重复行错误不带 cells（现状回归，铁律）', async () => {
+    const dir = mkDir();
+    const dbPath = mkDb(dir);
+    const cm = writeDedupeCellsContract(dir, false);
+    const fA = await fx.writeFixtureExcelJS({ rows: [['日期', '主键', '金额'], ['2026-03-01', 'K1', '10']] });
+    const fB = await fx.writeFixtureExcelJS({ rows: [['日期', '主键', '金额'], ['2026-03-01', 'K1', '10']] });
+    let err = null;
+    try {
+      await engine.importFiles({ dbPath, files: [fA, fB], contractModulePath: cm, contractOptions: {}, mode: 'append', monthKey: '2026-03' });
+    } catch (e) { err = e; }
+    assert.ok(err && err.name === 'BigTableImportError');
+    assert.ok(err.detailLines.some((l) => /hasCells=false/.test(l)), '🔴 不声明 cellsOf ⇒ 写侧去重错误无 cells（行为零变化）');
+  });
+
+  test('声明 cellsOf 但不声明 captureRowValues → 写侧错误仍不带 cells（cellsOf 仅在 captureRowValues 时生效）', async () => {
+    const dir = mkDir();
+    const dbPath = mkDb(dir);
+    // 契约声明 cellsOf 但不声明 captureRowValues：引擎 captureRowValuesWrite=false ⇒ cellsOfFn=null。
+    const p = path.join(dir, `contract-cellsonly-${Math.random().toString(36).slice(2, 8)}.js`);
+    fs.writeFileSync(p, `'use strict';
+module.exports = {
+  expectedHeaders: ['日期', '主键', '金额'],
+  valueColumnWhitelist: null,
+  validateHeaders(cells) { return (cells[0]==='日期'&&cells[1]==='主键'&&cells[2]==='金额') ? {ok:true} : {ok:false,error:'表头不匹配'}; },
+  mapRow({ values }) { return {params:[values[0],values[1],values[2]]}; },
+  insertSql: 'INSERT INTO t (d, k, a) VALUES (?, ?, ?)',
+  requiredColumns: [0,1,2],
+  monthKeyOf({ values }) { const m=String(values[0]||'').match(/^(\\d{4})[-/](\\d{1,2})/); return m? m[1]+'-'+String(m[2]).padStart(2,'0') : null; },
+  dedupeKeyOf({ values }) { return [values[0],values[1],values[2]].join('|'); },
+  formatDuplicateError({ key }) { return '发现重复行（key ' + key + '）'; },
+  cellsOf({ params }) { return Array.isArray(params) ? params.slice() : []; },
+  formatBatchError({ collectedErrors }) {
+    const lines = collectedErrors.map((e) => 'hasCells=' + (e.cells !== undefined));
+    return { message: '导入失败', detailLines: lines };
+  }
+};
+`, 'utf8');
+    const fA = await fx.writeFixtureExcelJS({ rows: [['日期', '主键', '金额'], ['2026-03-01', 'K1', '10']] });
+    const fB = await fx.writeFixtureExcelJS({ rows: [['日期', '主键', '金额'], ['2026-03-01', 'K1', '10']] });
+    let err = null;
+    try {
+      await engine.importFiles({ dbPath, files: [fA, fB], contractModulePath: p, contractOptions: {}, mode: 'append', monthKey: '2026-03' });
+    } catch (e) { err = e; }
+    assert.ok(err && err.name === 'BigTableImportError');
+    assert.ok(err.detailLines.every((l) => /hasCells=false/.test(l)), '🔴 cellsOf 仅在 captureRowValues 开启时生效（防御无关联性）');
   });
 });

@@ -76,6 +76,14 @@ function validateExtensionFields(contract) {
   if (contract.formatDuplicateError !== undefined && typeof contract.formatDuplicateError !== 'function') {
     throw new ContractValidationError('契约无效：formatDuplicateError 必须是函数（{key}）=>string', []);
   }
+  // E5 cells 缺口补丁（v3.0.4 PR-C team-lead 预检发现）：写侧行级错误（去重命中 / INSERT 失败）的 batch 项
+  //   只有 params/rowR/dedupeKey，拿不到原始 cells——captureRowValues 时这些错误记录会缺 cells（pending 重复行
+  //   报错 xlsx 需整行 cells，worker.js:127 旧链路是带的）。契约可声明 cellsOf({ params })=>cells，引擎在
+  //   captureRowValues 开启 + 该 hook 声明时，从 batch 项 params 逆推 cells 附到写侧行级错误。
+  //   🔴 不声明 ⇒ 写侧行级错误不带 cells（行为零变化，收单契约未声明仍 byte-for-byte）。
+  if (contract.cellsOf !== undefined && typeof contract.cellsOf !== 'function') {
+    throw new ContractValidationError('契约无效：cellsOf 必须是函数（{params}）=>Array', []);
+  }
 }
 
 // 校验契约模块 schema + 三层防护第 1 层（静态推导）。
@@ -180,7 +188,8 @@ function validateContract(contract) {
     maxCollectedErrors: contract.maxCollectedErrors,        // E4 错误上限（缺省由引擎用 100）
     captureRowValues: contract.captureRowValues === true,   // E4 错误记录附带 cells（缺省 false）
     dedupeKeyOf: contract.dedupeKeyOf,                       // E5 写侧跨文件去重 key
-    formatDuplicateError: contract.formatDuplicateError      // E5 重复行错误文案
+    formatDuplicateError: contract.formatDuplicateError,     // E5 重复行错误文案
+    cellsOf: contract.cellsOf                                // E5 cells 缺口：写侧行级错误从 params 逆推 cells（captureRowValues 时生效）
   };
 }
 
