@@ -24,6 +24,8 @@ const {
 const { FLOW_HEADERS, FLOW_DB_COLUMNS } = require('../vcc-op-calc-db/columns');
 const { validateFlowHeaders } = require('./validator');
 const { parseRowXml, readSharedStrings, lettersToIndex } = require('../pending-import/streaming-xlsx-reader');
+// v3.0.4 块 A · A1：JSZip loadAsync 前的入口尺寸预检（≥2^31 抛明确中文错误，预检自身失败 fail-open）。
+const { assertXlsxEntriesUnderLimit } = require('../pending-import/xlsx-size-preflight');
 
 const ERROR_CODE = 'VCC_OP_CALC_FLOW_HEADER_MISMATCH';
 const TEMPLATE_LABEL = '流水对账单';
@@ -176,6 +178,10 @@ function scanSheet(sheetEntry, sharedStrings, ctx) {
 //   返回 { fileName, filePath, dataRows }。损坏/无 sheet/未找到数据表 → 抛 FileValidationError。
 async function streamFlowFile(filePath, { onDataRow, onProgress } = {}) {
   const fileName = path.basename(filePath);
+
+  // v3.0.4 块 A · A1：在 JSZip.loadAsync 之前预检 entry 解压尺寸（≥2^31 → 抛明确中文错误）。
+  //   预检抛 FileValidationError（wrapReadError 原样透传，errorCode 对齐本 reader）；预检自身失败 fail-open。
+  await assertXlsxEntriesUnderLimit(filePath, { errorCode: ERROR_CODE });
 
   let zip;
   try {

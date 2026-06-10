@@ -11463,6 +11463,22 @@ function registerNewAccountHandlers() {
       }
     }
 
+    // v3.0.4 块 A · A2 #1（修「链接表报错全链路零落盘」）：循环结束后若存在失败项 → 落 activity log（error 级）。
+    //   失败状态集 = read-error / write-error / ambiguous / unrecognized（unsupported=外汇期权表待接入，属正常态，不计失败）。
+    //   message 含 N/M 失败计数；details 逐文件列 fileName + status + message，供日志查证。
+    //   本 handler 为权威落盘点；UI 弹窗按 spec §2.2 #2/#3 走 skipLogReport 避免双写。
+    const FAILED_STATUSES = new Set(['read-error', 'write-error', 'ambiguous', 'unrecognized']);
+    const failedResults = results.filter((r) => FAILED_STATUSES.has(r.status));
+    if (failedResults.length > 0) {
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: '链接表管理',
+        message: `链接表导入：${failedResults.length}/${results.length} 个文件失败`,
+        details: failedResults.map((r) => `${r.fileName}｜${r.status}｜${r.message || ''}`)
+      });
+    }
+
     return { status: 'ok', results };
   });
 

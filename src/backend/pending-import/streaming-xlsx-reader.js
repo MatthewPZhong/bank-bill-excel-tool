@@ -15,6 +15,8 @@
 const fs = require('node:fs');
 const { StringDecoder } = require('node:string_decoder');
 const JSZip = require('jszip');
+// v3.0.4 块 A · A1：JSZip loadAsync 前的入口尺寸预检（≥2^31 抛明确中文错误，预检自身失败 fail-open）。
+const { assertXlsxEntriesUnderLimit } = require('./xlsx-size-preflight');
 
 function lettersToIndex(letters) {
   let n = 0;
@@ -209,6 +211,9 @@ function siInnerToText(inner) {
 //            缺省（undefined/0/负数）= 不设上限，全量扫描（既有调用方行为 100% 不变）。
 //   返回值新增 truncated：true 表示因 maxRows 提前终止（文件可能还有更多行），全量读时为 false。
 async function readXlsxStreamed(filePath, onRow, { colCount = 31, maxRows = 0 } = {}) {
+  // v3.0.4 块 A · A1：在 JSZip.loadAsync 之前预检 entry 解压尺寸（≥2^31 → 抛明确中文错误，
+  //   不再让 JSZip 抛 `uncompressed data size mismatch` 天书）；预检自身失败时 fail-open 放行。
+  await assertXlsxEntriesUnderLimit(filePath);
   const buffer = await fs.promises.readFile(filePath);
   const zip = await JSZip.loadAsync(buffer);
   const sheetEntry = zip.file('xl/worksheets/sheet1.xml');

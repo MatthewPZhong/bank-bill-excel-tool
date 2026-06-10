@@ -53,6 +53,8 @@ const {
   readSharedStrings,
   lettersToIndex
 } = require('../pending-import/streaming-xlsx-reader');
+// v3.0.4 块 A · A1：JSZip loadAsync 前的入口尺寸预检（≥2^31 抛明确中文错误，预检自身失败 fail-open）。
+const { assertXlsxEntriesUnderLimit } = require('../pending-import/xlsx-size-preflight');
 
 function xmlAttrUnescape(s) {
   if (s.indexOf('&') < 0) return s;
@@ -287,6 +289,10 @@ function buildStreamReader({
 }) {
   return async function streamFile(filePath, { onDataRow, onProgress } = {}) {
     const fileName = path.basename(filePath);
+
+    // v3.0.4 块 A · A1：在 JSZip.loadAsync 之前预检 entry 解压尺寸（≥2^31 → 抛明确中文错误）。
+    //   预检抛 FileValidationError（wrapReadError 原样透传，errorCode 对齐本 reader）；预检自身失败 fail-open。
+    await assertXlsxEntriesUnderLimit(filePath, { errorCode });
 
     let zip;
     try {

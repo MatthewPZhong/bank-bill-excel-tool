@@ -3716,6 +3716,25 @@ async function isRefundOrderReady() {
   }
 }
 
+// v3.0.4 块 A · A2 #3（修「链接表报错全链路零落盘」）：C3/运行前提醒两个入口调 linkedTable.import() 后
+//   返回值原被直接丢弃，用户对失败完全无感。本 helper 消费返回值：存在失败项 → 弹 alert 列 per-file 失败明细。
+//   失败状态集与 main 侧 handler 一致（read-error / write-error / ambiguous / unrecognized）。
+//   日志依赖 main 侧 handler 权威落盘（#1），故 alert 走 skipLogReport:true 避免双写。
+//   result 为空 / cancelled / status!=='ok' / 无失败项 → 不弹（沿用既有静默语义）。
+function notifyLinkedTableImportFailures(result) {
+  if (!result || result.status !== 'ok' || !Array.isArray(result.results)) return;
+  const FAILED_STATUSES = new Set(['read-error', 'write-error', 'ambiguous', 'unrecognized']);
+  const failed = result.results.filter((r) => FAILED_STATUSES.has(r.status));
+  if (failed.length === 0) return;
+  const lines = failed
+    .map((r) => `${escapeHtml(r.fileName || '')}：${escapeHtml(r.message || r.status || '')}`)
+    .join('<br>');
+  openModal(createAlertDialog(
+    `链接表导入有 ${failed.length}/${result.results.length} 个文件失败：<br>${lines}`,
+    { skipLogReport: true }
+  ));
+}
+
 async function maybePromptGatewayReconImport() {
   try {
     const list = await window.desktopApi.scenarios.list();
@@ -3735,7 +3754,9 @@ async function maybePromptGatewayReconImport() {
         closeModal();
         // v3.0.0 需求2b：改调链接表导入对话框（不再调死链 handleBankStatementImportGatewayRecon）。
         //   与原死链行为一致：导入后刷新状态框（refreshBankStatementStatus）。
-        await window.desktopApi.linkedTable.import();
+        // v3.0.4 块 A · A2 #3：消费导入返回值，存在失败项 → 弹 per-file 失败明细（日志依赖 main 侧 handler）。
+        const importResult = await window.desktopApi.linkedTable.import();
+        notifyLinkedTableImportFailures(importResult);
         await refreshBankStatementStatus();
       }
     }));
@@ -3882,7 +3903,9 @@ async function proceedToGwCheck() {
         closeModal();
         // v3.0.0 需求2b：改调链接表导入对话框（不再调死链 handleBankStatementImportGatewayRecon），
         //   导入后刷新状态框、不自动续跑（与导入框「导入文件」语义一致，让用户导完再决定运行）。
-        await window.desktopApi.linkedTable.import();
+        // v3.0.4 块 A · A2 #3：消费导入返回值，存在失败项 → 弹 per-file 失败明细（日志依赖 main 侧 handler）。
+        const importResult = await window.desktopApi.linkedTable.import();
+        notifyLinkedTableImportFailures(importResult);
         await refreshBankStatementStatus();
       },
       onMiddle: async () => {

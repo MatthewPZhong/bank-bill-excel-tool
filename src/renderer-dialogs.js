@@ -6396,6 +6396,7 @@
         const admDerive = findAdmDerive(result.results);
         const admHtml = buildAdmDeriveHtml(admDerive);
         openModal(createAlertDialog(buildImportSummaryHtml(result.results), {
+          // v3.0.4 块 A · A2 #2：保留 skipLogReport（日志由 main 侧 linked-table:import handler 权威落盘，避免双写）。
           skipLogReport: true,
           onConfirm: () => {
             if (admHtml) {
