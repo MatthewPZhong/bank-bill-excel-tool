@@ -133,13 +133,13 @@ function applyFieldValueOverrides(mainRow, oppRow, cfg) {
 // 需 module.exports 导出（已暴露引擎内部工具给 smoke + unit，见 module.exports 1301）
 ```
 
-**三 apply 函数 gateway 分支合并 overrides**（顺序：先 Type/Amount/Reference，再 `Object.assign` fieldValue）：
+**三 apply 函数 gateway 分支合并 overrides**（顺序：先 Type/Amount/Reference，再 `Object.assign` fieldValue）。🔴**（用户修订）字段取值限定 1v1**：仅 `apply1v1Assignment` 合并 fieldValue overrides；`apply1vNAssignment`/`applyNv1Assignment` **不做字段取值**（入口 gate 已强制非 1v1 时 `fieldValue.enabled=false`），下表 oppRow 对 1v多/多v1 仅用于 Reference/Amount 取值：
 
-| 匹配 | 函数:行 | mainRow(输出基行) | oppRow(取值源) |
-|------|---------|------------------|----------------|
-| 1v1 | `apply1v1Assignment`(908，赋值点约 913-921) | leftRow | rightRow |
-| 1v多 | `apply1vNAssignment`(965，赋值点约 971-984) | leftRow（每笔同） | **每笔对应的 `matches[i]`（channelRow，逐笔不同）** |
-| 多v1 | `applyNv1Assignment`(1033，赋值点约 1037-1046) | matches[i]（逐笔） | rightRow（共同） |
+| 匹配 | 函数:行 | mainRow(输出基行) | oppRow(取值源) | fieldValue |
+|------|---------|------------------|----------------|-----------|
+| 1v1 | `apply1v1Assignment`(908，赋值点约 913-921) | leftRow | rightRow | ✅ 合并 |
+| 1v多 | `apply1vNAssignment`(965，赋值点约 971-984) | leftRow（每笔同） | **每笔对应的 `matches[i]`（channelRow，逐笔不同）** | ❌ 不做（限定 1v1） |
+| 多v1 | `applyNv1Assignment`(1033，赋值点约 1037-1046) | matches[i]（逐笔） | rightRow（共同） | ❌ 不做（限定 1v1） |
 
 **D4 — idEnabled=false**：不把 `Reference` 放进 overrides → `buildOutputRow`(588) 取 srcRow 原值（网关账单 `Reference` 列，14 列模板成员）。语义 = 「保留原始对账号，不赋值」，比清空更安全（资金 R-4）。
 
@@ -352,7 +352,7 @@ async function runFlowImport(db, { date, filePaths, maxRowErrors }) {
 
 - 回归基线（默认 idEnabled=true / fieldValue 关，现有 cases 全绿）
 - idEnabled=false → Reference 取网关账单原值（非空串）
-- fieldValue 1v1 / 1v多（逐笔 channelRow）/ 多v1（共同 rightRow）赋值正确
+- fieldValue 1v1 赋值正确；🔴（用户修订）1v多 / 多v1 限定不生效（引擎入口 gate 强制关闭，主边字段保网关原值）
 - 目标列超 14 列模板 → 导出不体现且不报错
 - 规则按 `_types` 分组过滤
 - idEnabled=false + fieldValue 同时启用（独立开关）
