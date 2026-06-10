@@ -200,4 +200,52 @@ test.describe('runReconciliation R5s2b — excludeBankRowIds 互斥（Q3）', ()
     // 行数守恒
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
+
+  test('🔴 R5s2「同值消费但未写」行不被 R5s2b 触碰（窄缺口闭合·端到端）', () => {
+    // 构造：银行行 ReconciliationId 原值 === 网关回填值（GW-RECON）。
+    //   R5s2 命中该行但 old===nv → 不 record（modifications 取不到该行），但 usedBankRowId 已消费它。
+    //   若编排器只用 R5s2 modifications 收集排除集 → 该行不在排除集 → R5s2b 可二次匹配并覆盖为 CH-OFFLINE。
+    //   修复后：R5s2 引擎返回 usedBankRowIds（含同值未写行），编排器 union 后 R5s2b 银行池剔除该行 → 不触碰。
+    const bankRows = [makeBankRow({
+      _rowId: 'b1',
+      FundType: 'FundTransfer-in',
+      MerchantId: '202782001',
+      Currency: 'USD',
+      'Credit Amount': 100, 'Debit Amount': 0,
+      BillDate: '2026-06-09',
+      ReconciliationId: 'GW-RECON' // 原值已等于网关回填值 → R5s2 同值消费不写
+    })];
+    // 网关行：同字段同日同金额 + reconid === 银行原值 → R5s2 命中但 old===nv 不 record。
+    const gwRows = [{
+      TradeType: 'FundTransfer-in',
+      merchantid: '202782001',
+      currency: 'USD',
+      amount: 100,
+      Billdate: '2026-06-09',
+      reconciliationid: 'GW-RECON'
+    }];
+    // 中台订单：也能匹配 b1（若该行未被排除会覆盖成 CH-OFFLINE）。
+    const midRows = [makeMidRow({ 渠道流水号: 'CH-OFFLINE' })];
+
+    const result = runReconciliation({
+      bankRows,
+      gwRows,
+      scenarios: [makeR5s2Scenario({ paymentOfflineBackfill: POB_ON })],
+      midAllocationContext: { midAllocationRows: midRows }
+    });
+
+    // R5s2 同值消费（modifications 取不到，stats=0），但该行已被排除 → R5s2b 不覆盖。
+    assert.equal(result.stats.r5s2BackfilledCount, 0, 'R5s2 同值未写 → modifications 为空（计数 0）');
+    assert.equal(
+      bankRows[0].ReconciliationId,
+      'GW-RECON',
+      '🔴 同值消费行不被 R5s2b 覆盖（窄缺口闭合：usedBankRowIds 含同值未写行）'
+    );
+    assert.equal(result.stats.r5s2bBackfilledCount, 0, 'R5s2b 不触碰被 R5s2 消费的同值行 → 0 命中');
+    // R5s2b 也不应对该行产生任何 modification
+    const r5s2bMod = result.modifications.find((m) => m._round === 'R5s2b' && m.rowId === 'b1');
+    assert.ok(!r5s2bMod, 'R5s2b 不应对被 R5s2 消费的行产 modification');
+    // 行数守恒
+    assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
+  });
 });
