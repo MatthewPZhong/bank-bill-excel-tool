@@ -19,8 +19,15 @@ const { FileValidationError } = require('../file-service/common');
 // 上限 = 2^31 整（2147483648）。spec OPEN-3 拍板：精确对应 JSZip 崩点。
 const SIZE_LIMIT_BYTES = 2147483648;
 
-// 预检关注的 entry：sharedStrings + 所有 worksheet（vcc/biz-op 的目标 sheet 在解析后才确定，
-//   这里覆盖全部 worksheet，命中任一 ≥ 上限即拦截，确保 loadAsync 不会先撞崩）。
+// 预检关注的 entry：sharedStrings（恒检——三个调用方都会 inflate 它）+ worksheet。
+//   worksheet 检查范围由调用方按「实际 inflate 哪些 sheet」精确指定（见 assertXlsxEntriesUnderLimit
+//   的 sheetEntryNames 参数）：
+//   - streaming-xlsx-reader 硬编码只读 xl/worksheets/sheet1.xml → 只检 sheet1；
+//   - vcc-op-calc-import/reader 逐 sheet inflate 直到表头匹配 → 缺省检全部 worksheet；
+//   - biz-op-recon-import/reader-streamed 只 inflate locateFirstSheet 定位出的目标 sheet → 检该 sheet。
+//   ⚠️ PR#71 二轮 codex review（P2，2026-06-11）修复：旧版对**全部** worksheet 检查，但 biz-op /
+//     streaming 实际只 inflate 部分 sheet → 多 sheet 工作簿「目标 sheet 小 + 未用 tab 超限」会被误拒
+//     （功能回归，旧链路本可正常导入）。改为调用方指定被检 sheet 集合，消除误伤。
 const SHARED_STRINGS_ENTRY_NAME = 'xl/sharedStrings.xml';
 const WORKSHEET_ENTRY_RE = /^xl\/worksheets\/sheet\d+\.xml$/;
 
@@ -31,9 +38,10 @@ function bytesToGb(bytes) {
   return (bytes / (1024 * 1024 * 1024)).toFixed(2);
 }
 
-// 仅用 yauzl 读中央目录，收集需要校验的 entry 的 uncompressedSize。
+// 仅用 yauzl 读中央目录，收集 sharedStrings + 全部 worksheet 的 uncompressedSize。
 //   不开启 lazyEntries（一次性枚举全部 entry 头），不 openReadStream（不解压、不读文件体）。
-//   返回 Map<fileName, uncompressedSize>；任何失败由 caller 转 fail-open。
+//   返回 Map<fileName, uncompressedSize>（收集全部候选 entry，由调用方按 sheetEntryNames 二次过滤要检的子集）；
+//   任何失败由 caller 转 fail-open。
 function collectEntrySizes(filePath) {
   return new Promise((resolve, reject) => {
     yauzl.open(filePath, { lazyEntries: false, autoClose: true }, (err, zip) => {
@@ -64,11 +72,19 @@ function collectEntrySizes(filePath) {
   });
 }
 
-// 入口尺寸预检：在 JSZip.loadAsync 之前调用。
-//   - 任一关注 entry 的 uncompressedSize ≥ SIZE_LIMIT_BYTES → 抛 FileValidationError（中文指引）。
+// 入口尺寸预检：在「inflate 目标 entry」之前调用（多数调用方在 JSZip.loadAsync 前，
+//   biz-op 在 locateFirstSheet 定位出目标 sheet 后、scanWorksheet inflate 前）。
+//   - 被检集合内任一 entry 的 uncompressedSize ≥ SIZE_LIMIT_BYTES → 抛 FileValidationError（中文指引）。
 //   - 预检自身异常（zip 打不开 / 无 entry / yauzl 报错）→ 静默吞掉，return（fail-open 放行原链路）。
-//   filePath：待导入 xlsx 的绝对路径。errorCode：可选，覆盖默认错误码以对齐各调用方既有 errorCode。
-async function assertXlsxEntriesUnderLimit(filePath, { errorCode = ENTRY_ERROR_CODE } = {}) {
+//   参数：
+//     filePath        待导入 xlsx 的绝对路径。
+//     errorCode       可选，覆盖默认错误码以对齐各调用方既有 errorCode。
+//     sheetEntryNames 可选，要检的 worksheet entry 名集合（数组）。
+//                     - 缺省（undefined/null）= 检中央目录里全部 worksheet（向后兼容，vcc 逐 sheet inflate 用此）；
+//                     - 传数组 = 只检该集合内的 worksheet entry（streaming/biz-op 只 inflate 部分 sheet 用此）；
+//                       不在集合内的 worksheet 即便超限也放行（它们不会被 inflate，不会撞 JSZip 崩点）。
+//                     无论哪种模式，xl/sharedStrings.xml 恒检（三个调用方都会 inflate 它）。
+async function assertXlsxEntriesUnderLimit(filePath, { errorCode = ENTRY_ERROR_CODE, sheetEntryNames = null } = {}) {
   let sizes;
   try {
     sizes = await collectEntrySizes(filePath);
@@ -77,19 +93,29 @@ async function assertXlsxEntriesUnderLimit(filePath, { errorCode = ENTRY_ERROR_C
     return;
   }
 
+  // 确定被检 entry 集合：sharedStrings 恒检 + 调用方指定的 worksheet 子集（缺省 = 全部 worksheet）。
+  const sheetWhitelist = Array.isArray(sheetEntryNames) ? new Set(sheetEntryNames) : null;
+  const shouldCheck = (name) => {
+    if (name === SHARED_STRINGS_ENTRY_NAME) return true;           // sharedStrings 恒检
+    if (!WORKSHEET_ENTRY_RE.test(name)) return false;              // 非 worksheet（且非 sst）→ 不检
+    return sheetWhitelist ? sheetWhitelist.has(name) : true;       // 有白名单按白名单，否则检全部 worksheet
+  };
+
   // 找出超限 entry（取最大的一个作为报错主体，文案展示其解压尺寸）。
   let offending = null;
   for (const [name, size] of sizes) {
+    if (!shouldCheck(name)) continue;
     if (typeof size === 'number' && Number.isFinite(size) && size >= SIZE_LIMIT_BYTES) {
       if (!offending || size > offending.size) offending = { name, size };
     }
   }
-  if (!offending) return; // 全部在限内 → 放行
+  if (!offending) return; // 被检集合全部在限内 → 放行
 
   const gb = bytesToGb(offending.size);
-  // detailLines 带 entry 名与字节数，供日志/排查；所有超限 entry 都列出（便于定位 sheet 还是 sst）。
+  // detailLines 带 entry 名与字节数，供日志/排查；所有被检且超限的 entry 都列出（便于定位 sheet 还是 sst）。
   const detailLines = [`文件：${filePath}`];
   for (const [name, size] of sizes) {
+    if (!shouldCheck(name)) continue;
     if (typeof size === 'number' && size >= SIZE_LIMIT_BYTES) {
       detailLines.push(`超限内容：${name}（解压后 ${size} 字节，约 ${bytesToGb(size)} GB）`);
     }

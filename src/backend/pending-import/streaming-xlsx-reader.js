@@ -213,7 +213,10 @@ function siInnerToText(inner) {
 async function readXlsxStreamed(filePath, onRow, { colCount = 31, maxRows = 0 } = {}) {
   // v3.0.4 块 A · A1：在 JSZip.loadAsync 之前预检 entry 解压尺寸（≥2^31 → 抛明确中文错误，
   //   不再让 JSZip 抛 `uncompressed data size mismatch` 天书）；预检自身失败时 fail-open 放行。
-  await assertXlsxEntriesUnderLimit(filePath);
+  //   PR#71 二轮 codex review（P2）：本 reader 硬编码只 inflate xl/worksheets/sheet1.xml（下方第一句）
+  //   + xl/sharedStrings.xml（readSharedStrings），故只检这两者；其他未使用的 worksheet 即便超限也不会被
+  //   inflate，不应误拒（sharedStrings 由预检恒检）。
+  await assertXlsxEntriesUnderLimit(filePath, { sheetEntryNames: ['xl/worksheets/sheet1.xml'] });
   const buffer = await fs.promises.readFile(filePath);
   const zip = await JSZip.loadAsync(buffer);
   const sheetEntry = zip.file('xl/worksheets/sheet1.xml');

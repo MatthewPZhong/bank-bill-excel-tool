@@ -56,6 +56,22 @@ function buildMinXlsx({ forceZip64 = false } = {}) {
   });
 }
 
+// yazl 生成多 sheet xlsx（sheetCount 个 worksheet + sharedStrings），用于 sheetEntryNames 白名单测试。
+function buildMultiSheetXlsx({ sheetCount = 3 } = {}) {
+  const fp = path.join(mkTmpDir(), 'multi.xlsx');
+  return new Promise((resolve, reject) => {
+    const zf = new yazl.ZipFile();
+    for (let i = 1; i <= sheetCount; i++) {
+      zf.addBuffer(Buffer.from(MIN_SHEET_XML, 'utf8'), `xl/worksheets/sheet${i}.xml`);
+    }
+    zf.addBuffer(Buffer.from(MIN_SST_XML, 'utf8'), 'xl/sharedStrings.xml');
+    zf.outputStream.pipe(fs.createWriteStream(fp))
+      .on('close', () => resolve(fp))
+      .on('error', reject);
+    zf.end();
+  });
+}
+
 // 中央目录记录签名 0x02014b50（小端 50 4b 01 02）。返回该签名在 buffer 中的所有起始偏移。
 function findCentralDirRecords(buf) {
   const offsets = [];
@@ -159,6 +175,83 @@ test('zip64：32 位字段 0xffffffff + zip64 extra field 真值 ≥2^31 → 抛
     (err) => {
       assert.strictEqual(err.name, 'FileValidationError');
       assert.match(err.message, /文件数据量过大/);
+      return true;
+    }
+  );
+});
+
+// PR#71 二轮 codex review（P2）回归用例：sheetEntryNames 白名单只检调用方实际 inflate 的 sheet。
+//   背景：旧版对全部 worksheet 检查，多 sheet 工作簿「目标 sheet 小 + 未用 tab 超限」被误拒（功能回归）。
+
+test('多 sheet：目标 sheet 小 + 其他 sheet 超限 + sheetEntryNames 只含目标 sheet → 放行（不误伤）', async () => {
+  const fp = await buildMultiSheetXlsx({ sheetCount: 3 });
+  const buf = fs.readFileSync(fp);
+  // 把 sheet3.xml（非目标，调用方不会 inflate）的中央目录 uncompressedSize 改成超限；sheet1（目标）保持小。
+  const patched = patchCentralDir(buf, 'xl/worksheets/sheet3.xml', (b, off) => {
+    b.writeUInt32LE(SIZE_LIMIT_BYTES >>> 0, off + 24);
+  });
+  assert.ok(patched, '应能在中央目录定位 sheet3.xml 记录');
+  fs.writeFileSync(fp, buf);
+
+  // 先确认 collectEntrySizes 确实读到 sheet3 超限（证明 fixture 构造有效，放行靠白名单过滤而非读不到）。
+  const sizes = await collectEntrySizes(fp);
+  assert.ok(sizes.get('xl/worksheets/sheet3.xml') >= SIZE_LIMIT_BYTES, 'sheet3 应被构造成超限');
+  assert.ok(sizes.get('xl/worksheets/sheet1.xml') < SIZE_LIMIT_BYTES, 'sheet1（目标）应在限内');
+
+  // 白名单只含 sheet1（模拟 streaming/biz-op 只 inflate 目标 sheet）→ sheet3 超限不应拦截。
+  await assert.doesNotReject(
+    () => assertXlsxEntriesUnderLimit(fp, { sheetEntryNames: ['xl/worksheets/sheet1.xml'] }),
+    '目标 sheet 小、仅未使用的 sheet3 超限 → 应放行（不误伤旧链路可正常导入的文件）'
+  );
+
+  // 对照：缺省（不传 sheetEntryNames = 检全部 worksheet，模拟 vcc 逐 sheet inflate）→ sheet3 超限仍应拦。
+  await assert.rejects(
+    () => assertXlsxEntriesUnderLimit(fp),
+    (err) => {
+      assert.strictEqual(err.name, 'FileValidationError');
+      assert.ok(err.detailLines.some((l) => /sheet3\.xml/.test(l)), '缺省模式应报出 sheet3');
+      return true;
+    }
+  );
+});
+
+test('多 sheet：目标 sheet 本身超限 + sheetEntryNames 含目标 sheet → 仍拦', async () => {
+  const fp = await buildMultiSheetXlsx({ sheetCount: 3 });
+  const buf = fs.readFileSync(fp);
+  // 把目标 sheet1.xml 本身改成超限。
+  const patched = patchCentralDir(buf, 'xl/worksheets/sheet1.xml', (b, off) => {
+    b.writeUInt32LE(SIZE_LIMIT_BYTES >>> 0, off + 24);
+  });
+  assert.ok(patched, '应能在中央目录定位 sheet1.xml 记录');
+  fs.writeFileSync(fp, buf);
+
+  await assert.rejects(
+    () => assertXlsxEntriesUnderLimit(fp, { sheetEntryNames: ['xl/worksheets/sheet1.xml'] }),
+    (err) => {
+      assert.strictEqual(err.name, 'FileValidationError');
+      assert.match(err.message, /文件数据量过大/);
+      assert.ok(err.detailLines.some((l) => /sheet1\.xml/.test(l)), 'detailLines 带目标 sheet 名');
+      assert.strictEqual(err.context.limitBytes, SIZE_LIMIT_BYTES);
+      return true;
+    }
+  );
+});
+
+test('sharedStrings 恒检：sst 超限 + sheetEntryNames 只含某 sheet → 仍拦（三个调用方都 inflate sst）', async () => {
+  const fp = await buildMultiSheetXlsx({ sheetCount: 2 });
+  const buf = fs.readFileSync(fp);
+  // sharedStrings 超限，所有 worksheet 都小；白名单只含 sheet1。sst 不在白名单语义内但应恒检。
+  const patched = patchCentralDir(buf, 'xl/sharedStrings.xml', (b, off) => {
+    b.writeUInt32LE(SIZE_LIMIT_BYTES >>> 0, off + 24);
+  });
+  assert.ok(patched, '应能在中央目录定位 sharedStrings.xml 记录');
+  fs.writeFileSync(fp, buf);
+
+  await assert.rejects(
+    () => assertXlsxEntriesUnderLimit(fp, { sheetEntryNames: ['xl/worksheets/sheet1.xml'] }),
+    (err) => {
+      assert.strictEqual(err.name, 'FileValidationError');
+      assert.ok(err.detailLines.some((l) => /sharedStrings\.xml/.test(l)), 'sst 恒检：应报出 sharedStrings');
       return true;
     }
   );

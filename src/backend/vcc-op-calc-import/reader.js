@@ -181,6 +181,10 @@ async function streamFlowFile(filePath, { onDataRow, onProgress } = {}) {
 
   // v3.0.4 块 A · A1：在 JSZip.loadAsync 之前预检 entry 解压尺寸（≥2^31 → 抛明确中文错误）。
   //   预检抛 FileValidationError（wrapReadError 原样透传，errorCode 对齐本 reader）；预检自身失败 fail-open。
+  //   PR#71 二轮 codex review（P2）：本 reader 多 sheet 顺序定位——下方 for(sheetNames) 循环逐个
+  //   scanSheet(zip.file(sheetName)) inflate 每个 worksheet 直到表头匹配才 break（最坏 inflate 全部 sheet）。
+  //   因此**必须检全部 worksheet**：用缺省 sheetEntryNames（不传 = 检中央目录里全部 worksheet + sharedStrings），
+  //   任一 sheet 超限都会在扫描时撞 JSZip 崩点，必须前置拦截。
   await assertXlsxEntriesUnderLimit(filePath, { errorCode: ERROR_CODE });
 
   let zip;
