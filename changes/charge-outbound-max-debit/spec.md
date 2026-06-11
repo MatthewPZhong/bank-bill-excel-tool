@@ -1,6 +1,6 @@
 # Spec — charge-outbound-max-debit Charge转outbound 多行取 Debit Amount 最大行（R4 子场景行为变更）
 
-> status: confirmed（2026-06-11 用户拍板并入 v3.0.4，为迭代块 G；迭代入口 `changes/v3.0.4/spec.md`）
+> status: implemented（v3.0.4 分支，2026-06-11，commit 9387655；r4 单测 26→35 全绿 + 全量 2390/2390；CHANGELOG 对外契约变更第 ⑦ 条 + 手测清单块 G 已落）
 > owner: pzhong
 > created: 2026-06-11
 > updated: 2026-06-11

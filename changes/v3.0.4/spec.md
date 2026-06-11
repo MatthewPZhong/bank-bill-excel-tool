@@ -1,12 +1,13 @@
-# Spec — v3.0.4 迭代入口（六块：JSZip 止血 / 引擎第二波迁移 pending+biz-op / 银行对账输出三修复 / BOC调拨订单修复 / Payment线下调拨回填）
+# Spec — v3.0.4 迭代入口（七块：JSZip 止血 / 引擎第二波迁移 pending+biz-op / 银行对账输出三修复 / BOC调拨订单修复 / Payment线下调拨回填 / Charge转outbound 多行收紧）
 
-> 状态：**implemented（v3.0.4 分支，2026-06-11，commit 934148f..a3d7658）** —— 六块（A JSZip 止血 / B pending 引擎 / C biz-op flow 引擎 / D 银行对账输出三修复 / E BOC调拨订单修复 / F Payment线下调拨回填）全部入库，版本 bump 3.0.4 + 文档三件套 + manual-test-checklist + important-variables + backlog 收尾批已落 ｜ 来源分支：`main`（PR #70 已合并）→ 开发分支 `v3.0.4`（已切出） ｜ 目标版本：**3.0.4**
+> 状态：**implemented（v3.0.4 分支，2026-06-11，commit 934148f..9387655）** —— 七块（A JSZip 止血 / B pending 引擎 / C biz-op flow 引擎 / D 银行对账输出三修复 / E BOC调拨订单修复 / F Payment线下调拨回填 / G Charge转outbound 多行收紧）全部入库，版本 bump 3.0.4 + 文档三件套 + manual-test-checklist + important-variables + backlog 收尾批已落 ｜ 来源分支：`main`（PR #70 已合并）→ 开发分支 `v3.0.4`（已切出） ｜ 目标版本：**3.0.4**
 > 性质：🔴🔴 资金敏感区（挂账 pending_rows / 业务OP biz-op 流水均为入库真理源；覆盖删除链触及对账数据污染红线 Codex PR #55 Finding 1；导入链路换引擎必须 byte-for-byte 锁）。
 > 上游输入：`knowledge/backlog.md` B9（JSZip 2^31 根因，2026-06-10 实证）+ `changes/acquiring-import-recon-perf/spec.md` §8.5 适配清单 + `changes/big-table-import-engine/spec.md` §1.2（"后续迭代按崩点压力排期——pending 优先"）+ 2026-06-10/11 全链路调研（本 spec §一.1 引用结论）。
-> **本 spec 为 v3.0.4 迭代变更目录入口**，统筹**六块**需求：原三块（用户 2026-06-11 圈定：B9 方案 A + 调研排序 ①pending + ③biz-op，本 spec §二~§五详设）+ 用户 2026-06-11 拍板合并进迭代的三个子 change（本 spec 只管编排，详设见各子 spec）：
+> **本 spec 为 v3.0.4 迭代变更目录入口**，统筹**七块**需求：原三块（用户 2026-06-11 圈定：B9 方案 A + 调研排序 ①pending + ③biz-op，本 spec §二~§五详设）+ 用户 2026-06-11 拍板合并进迭代的三个子 change（本 spec 只管编排，详设见各子 spec）：
 >   块 D = `changes/bank-recon-output-fixes/spec.md`（银行对账输出三点修复，先行——块 F 依赖其 error-report 终态）
 >   块 E = `changes/boc-dispatch-order-fix/spec.md`（BOC调拨订单修复：内置场景 + BOC链接表派生 + 修复引擎）
 >   块 F = `changes/payment-offline-allocation-backfill/spec.md`（Payment线下调拨订单回填：R5s2b 引擎 + UI/配置）
+>   块 G = `changes/charge-outbound-max-debit/spec.md`（Charge转outbound 多行取 Debit Amount 最大行，用户 2026-06-11 追加并入——「干完后新增…并入3.0.4里做」）
 
 ---
 
@@ -20,6 +21,7 @@
 | D | 银行对账输出三点修复 | Extra Fee 取反 / error-report 与命中场景行目录互换 / 行号列换对账ID | 🔴 资金红线（输出金额符号翻转）+ 对外路径/列契约变更 | `changes/bank-recon-output-fixes/spec.md` |
 | E | BOC调拨订单修复 | 内置写死场景 + 两张隐藏链接表派生（外汇交割分组/中台匹配/银行单回填）+ 整组匹配修复引擎 | 🔴 资金红线（修复行生成 + bank-deposit 白名单 13→14） | `changes/boc-dispatch-order-fix/spec.md` |
 | F | Payment线下调拨订单回填 | R5s2 config 子开关 + ISO 周数匹配引擎 R5s2b（网关回填优先互斥）+ 弹窗三输入框 | 🔴 资金红线（向 ReconciliationId 写值） | `changes/payment-offline-allocation-backfill/spec.md` |
+| G | Charge转outbound 多行行为收紧 | R4 charge-outbound 子场景同桶多条 Charge 行仅转 Debit Amount 最大行（其余四子场景维持全转） | 🔴 资金红线（FundType 改写语义收紧，下游 HX-out 链随动） | `changes/charge-outbound-max-debit/spec.md` |
 
 **依赖关系**：
 
@@ -202,3 +204,4 @@ B9 已查实的三处丢失点与对策：
 
 - 2026-06-11 立项草拟（来源：用户圈定"A + ①pending + ③biz-op 一起写 spec"；版本归属 v3.0.4 经确认）。
 - 2026-06-11 用户拍板：①三 spec 合并为 v3.0.4 迭代（本 spec 升格六块入口，新增块 D/E/F 引用三子 spec）；②OPEN-1/2/3 按建议收口；③payment Q1-Q6 与 BOC O1-O4 全部拍板（回写各子 spec）；④流程 = PRD/TechDoc → dev agent coding（team-lead 不亲码）→ 单 PR → self-review → codex review → self-review → 无 P3+ finding 即 merge。
+- 2026-06-11 用户追加需求并拍板并入本迭代：块 G Charge转outbound 多行取 Debit Amount 最大行（spec `changes/charge-outbound-max-debit/spec.md`，commit 9387655）——本 spec 升格七块入口。

@@ -2,11 +2,11 @@
 
 ## 3.0.4 - 2026-06-11
 
-v3.0.4 迭代（六块，单 PR 合入 main）：① 块 A JSZip 崩点止血 + 链接表报错可见性；② 块 B 挂账 pending 导入迁移大表引擎；③ 块 C 业务OP对账 biz-op 流水侧导入迁移引擎；④ 块 D 银行对账输出三点修复（Extra Fee 取反 / 两类产物目录互换 / 错误报告行号列换对账ID）；⑤ 块 E BOC调拨订单修复（内置场景 + 两张隐藏链接表派生 + 整组匹配修复引擎）；⑥ 块 F Payment线下调拨订单回填（R5s2 config 子开关 + ISO 周数匹配引擎 R5s2b）。质量门 `npm run release-check` 全绿（**unit 2380 / integration（含 BOC `v3.0.4-boc-dispatch-order-fix` + parity `pending-engine-migration` 45 断言 / `bizop-flow-engine-migration` 47 断言 + 收单回归锁 45 断言）/ smoke 全模块 PASS**）。⚠️ **多处资金红线**：块 B pending_rows / 块 C biz-op flow 流水均为入库真理源 + pending 6 表覆盖删除链（Codex PR #55 Finding 1 红线）；块 D F1 输出金额符号翻转；块 E 修复行生成 + bank-deposit 白名单 13→14；块 F 向银行对账单 ReconciliationId 写值。
+v3.0.4 迭代（七块，单 PR 合入 main）：① 块 A JSZip 崩点止血 + 链接表报错可见性；② 块 B 挂账 pending 导入迁移大表引擎；③ 块 C 业务OP对账 biz-op 流水侧导入迁移引擎；④ 块 D 银行对账输出三点修复（Extra Fee 取反 / 两类产物目录互换 / 错误报告行号列换对账ID）；⑤ 块 E BOC调拨订单修复（内置场景 + 两张隐藏链接表派生 + 整组匹配修复引擎）；⑥ 块 F Payment线下调拨订单回填（R5s2 config 子开关 + ISO 周数匹配引擎 R5s2b）；⑦ 块 G Charge转outbound 多行行为收紧（同 ReconciliationId 多条 Charge 行仅转 Debit Amount 最大行）。质量门 `npm run release-check` 全绿（**unit 2390 / integration（含 BOC `v3.0.4-boc-dispatch-order-fix` + parity `pending-engine-migration` 45 断言 / `bizop-flow-engine-migration` 47 断言 + 收单回归锁 45 断言）/ smoke 全模块 PASS**）。⚠️ **多处资金红线**：块 B pending_rows / 块 C biz-op flow 流水均为入库真理源 + pending 6 表覆盖删除链（Codex PR #55 Finding 1 红线）；块 D F1 输出金额符号翻转；块 E 修复行生成 + bank-deposit 白名单 13→14；块 F 向银行对账单 ReconciliationId 写值；块 G R4 FundType 改写语义收紧。
 
 ### 🔴 对外契约变更（合并适配提示 · 升级必读）
 
-本版有 6 处对外可见的契约 / 行为变更，**外部脚本或存量数据可能需要适配**，合并成一段集中说明：
+本版有 7 处对外可见的契约 / 行为变更，**外部脚本或存量数据可能需要适配**，合并成一段集中说明：
 
 1. **C3 Extra Fee 列数值符号翻转**（块 D F1 · 🔴 资金红线）：「网关对账单金额不一致」差额写入银行对账单 `Extra Fee` 列时，由「写原值」改为「写**相反数**」（匹配语义不变）。**存量已配置 extraFee 的 C3 场景升级后，同一输入框差额会产出符号相反的 `Extra Fee` 值**（输入 `5` 由写 `"5"` 改为写 `"-5"`，输入 `-3` 写 `"3"`，`0` 仍写 `"0"`）。该取反值同时出现在**三个出口**：主输出文件、命中明细文本、命中场景行报表——任何读取这三处 Extra Fee 的脚本/对账需重新核对符号。
 2. **错误报告与命中场景行报表目录互换 + 错误报告第 3 列改名**（块 D F2+F3 · 对外路径/列契约变更）：① 资金对账数据处理的**错误报告** `{ts}-error-report.xlsx` 由 `bank-statement-process/{date}/` 改落 `error-reports/{date}/`；**命中场景行报表** `命中场景行-*.xlsx` 由 `error-reports/{date}/` 改落 `bank-statement-process/{date}/`（两者互换）——**外部 VBA / Power Query / pandas 脚本按旧路径读取需适配**。② 错误报告第 3 列由「**行号**」（内部 `row_N`，对用户无意义）改为「**对账ID**」（银行行 ReconciliationId，空值回退 `row_N`）——**按列名解析的脚本需适配**。
@@ -14,6 +14,7 @@ v3.0.4 迭代（六块，单 PR 合入 main）：① 块 A JSZip 崩点止血 + 
 4. **BOC链接表调拨单号 stale**（块 E · U4 拍板）：**中台调拨订单表重新导入后，BOC链接表的「调拨单号」不会自动重算**（避免误触发大重建）——更新中台数据后请**重新导入外汇交割表**才会全量重建 BOC链接表。
 5. **pending / biz-op flow 导入换引擎**（块 B / 块 C · 🔴🔴 资金红线）：月度 Pending 导入与业务OP流水表导入换用大表导入引擎（yauzl 基座）。可见行为变化：① 单行回退开关 `USE_BIG_TABLE_IMPORT_ENGINE_PENDING`（env `PENDING_FORCE_LEGACY_IMPORT=1` 回退）/ `USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW`（env `BIZOP_FLOW_FORCE_LEGACY_IMPORT=1` 回退）；② **多 sheet 文件由「静默读第一个 sheet」改为「明确报错」**（防静默读错表，方向收紧）；③ **错误超 1000 条的截断计数语义随引擎口径变化**。覆盖删除/去重/整批拒绝等业务规则零改动（parity 脚本逐字节锁定）。
 6. **≥2GB 单 entry 文件导入改为明确中文报错**（块 A · OPEN-3）：所有 JSZip 基座导入入口（链接表 / pending / biz-op / vcc）对解压后 ≥2^31（2147483648 字节，≈2GB，约 80 万行）的单 entry 文件，由旧版抛 JSZip 天书错误 `uncompressed data size mismatch` 改为弹**明确中文错误**（提示拆分为约 80 万行以内/文件）；预检自身失败 fail-open 放行不误伤正常文件。
+7. **Charge转outbound 多行行为收紧**（块 G · 🔴 资金红线）：R4 资金性质校验的 charge-outbound 子场景，同一银行单 ReconciliationId 关联多条 `FundType='Charge'` 行时，由「**逐条全转** outbound（全部标黄）」改为「**仅转 Debit Amount 值最大的那一行**」（转分精度比较；并列取文件原序首行；单行桶行为不变；其余四个资金性质子场景仍逐条全转）。**存量多行场景升级后主输出 FundType 改写行数减少**，下游 outbound→HX-out 链式改写行数随之减少——依赖「全转」行为的对账口径需重新核对。
 
 ### 新增
 
@@ -26,6 +27,7 @@ v3.0.4 迭代（六块，单 PR 合入 main）：① 块 A JSZip 崩点止血 + 
 ### 变更
 
 - **引擎扩展包 E1-E5**（块 B/C 共同前置 · `src/backend/big-table-import/` · PR-B）：契约可选扩展（不声明 = 引擎行为与 v3.0.3 完全一致，收单契约一字不改）——E1 多语句覆盖删除（函数式 `deleteForOverwrite`，changes 求和）/ E2 COMMIT 前事务内收尾 `finalizeForCommit`（不暴露 db 句柄）/ E3 空文件整批拒绝 / E4 错误上限契约覆盖（`maxCollectedErrors:1000`）+ cells 捕获 / E5 写侧跨文件去重 Set（按文件序确定性）。引擎单测 81，收单回归锁 `acquiring-engine-migration.js` 45 断言 + `big-table-import-engine.js` 19 断言全绿（合并门）。
+- **块 G：Charge转outbound 多行取 Debit Amount 最大行**（🔴 资金红线 · `scenario-engines/r4-fund-nature-check.js`）：charge-outbound 子场景同 ReconciliationId 桶内多条 Charge 行时仅转 Debit Amount 最大行（候选集限 `FundType='Charge'` / `parseNumber` fallback 0 + 转分比较 / 并列取原序首行 / 单行桶行为不变 / 其余四子场景维持逐条全转）；桶级 target 基于改写前初始快照一次性预选（防同桶被多网关行命中时按改写后状态重算误转次大行）。r4 单测 26→35 全绿，既有①③⑤⑥⑦用例零改动。详见对外契约变更 ⑦ 与 `changes/charge-outbound-max-debit/spec.md`。
 
 ### 修复
 
@@ -33,7 +35,7 @@ v3.0.4 迭代（六块，单 PR 合入 main）：① 块 A JSZip 崩点止血 + 
 - **块 D F2：两类产物目录互换**（对外路径契约变更 · `scenario-hit-rows-writer.js` 常量 + `main.js` 新增 errorReportRootDir）：错误报告 → `error-reports/`、命中场景行 → `bank-statement-process/`（`exportRootDir` 本体未动，R5 场景3/4 落位兜底不受影响）。详见对外契约变更 ②。
 - **块 D F3：错误报告第 3 列「行号」→「对账ID」**（对外列契约变更 · `exceljs-writer.js` 表头 + `bank-statement-io.js` 按 `_rowId` enrich）：三级回退 reconciliationId → reconId → rowId → ''；io 层 enrich 覆盖 modifiedRows + unmatchedRows 全集。详见对外契约变更 ②。
 
-> **v3.0.4 收口**：六块经 team-lead 拆分委托 dev 逐块/逐 PR 实施、逐 PR `release-check` 验收全绿，单 PR 合入 main（沿 v3.0.3 PR #70 模式）。🔴 资金红线放行闸：块 B/C 引擎迁移以 parity 脚本逐字节 + 错误路径逐字段为放行闸（多 sheet 报错 / 1000 截断为 intentional divergence）；块 D F1 以 c3 单测取反矩阵 + DS1-DS9 语义不变为闸；块 E/F 以引擎从严失败语义 + 双引擎互斥断言 + 真实样本人工核对为闸。⚠️ 已知限制（用户接受）：① 链接表 / vcc 仍留 JSZip 基座，由块 A 护栏明确报错兜底（链接表迁移引擎留独立迭代，backlog B9）；② BOC 序号 2 靠 priority=3 + id 序成立，老库存在用户自建 gateway 场景 priority=3 时可能插队（已知限制）；③ payment Q6「同日算晚于」与需求例孤立解读相反，用户知悉选定。详见 `docs/iterations/v3.0.4/` PRD + TECHDOC + `manual-test-checklist.md` + `changes/v3.0.4/` `bank-recon-output-fixes/` `boc-dispatch-order-fix/` `payment-offline-allocation-backfill/` 各 spec。
+> **v3.0.4 收口**：七块经 team-lead 拆分委托 dev 逐块/逐 PR 实施、逐 PR `release-check` 验收全绿，单 PR 合入 main（沿 v3.0.3 PR #70 模式）。块 G 以 G1-G7 决策矩阵单测（35 案）+ 真实样本人工核对为闸。🔴 资金红线放行闸：块 B/C 引擎迁移以 parity 脚本逐字节 + 错误路径逐字段为放行闸（多 sheet 报错 / 1000 截断为 intentional divergence）；块 D F1 以 c3 单测取反矩阵 + DS1-DS9 语义不变为闸；块 E/F 以引擎从严失败语义 + 双引擎互斥断言 + 真实样本人工核对为闸。⚠️ 已知限制（用户接受）：① 链接表 / vcc 仍留 JSZip 基座，由块 A 护栏明确报错兜底（链接表迁移引擎留独立迭代，backlog B9）；② BOC 序号 2 靠 priority=3 + id 序成立，老库存在用户自建 gateway 场景 priority=3 时可能插队（已知限制）；③ payment Q6「同日算晚于」与需求例孤立解读相反，用户知悉选定。详见 `docs/iterations/v3.0.4/` PRD + TECHDOC + `manual-test-checklist.md` + `changes/v3.0.4/` `bank-recon-output-fixes/` `boc-dispatch-order-fix/` `payment-offline-allocation-backfill/` 各 spec。
 
 ## 3.0.3 - 2026-06-10
 

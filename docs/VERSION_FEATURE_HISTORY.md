@@ -11,7 +11,7 @@
 
 ## v3.0.4（2026-06-11）
 
-v3.0.4 迭代：六块、单 PR 合入 main——① 块 A JSZip 崩点止血 + 链接表报错可见性；② 块 B 挂账 pending 导入迁移大表引擎；③ 块 C 业务OP biz-op 流水侧导入迁移引擎；④ 块 D 银行对账输出三点修复；⑤ 块 E BOC调拨订单修复；⑥ 块 F Payment线下调拨订单回填。质量门 `npm run release-check` 全绿（unit 2380 / integration 含 BOC 集成 + parity pending 45 / biz-op flow 47 + 收单回归锁 45 / smoke 全模块 PASS）。⚠️ 多处资金红线：块 B/C 入库真理源 + pending 6 表覆盖删除链；块 D F1 输出金额符号翻转；块 E 修复行生成 + bank-deposit 白名单 13→14；块 F 向 ReconciliationId 写值。
+v3.0.4 迭代：七块、单 PR 合入 main——① 块 A JSZip 崩点止血 + 链接表报错可见性；② 块 B 挂账 pending 导入迁移大表引擎；③ 块 C 业务OP biz-op 流水侧导入迁移引擎；④ 块 D 银行对账输出三点修复；⑤ 块 E BOC调拨订单修复；⑥ 块 F Payment线下调拨订单回填；⑦ 块 G Charge转outbound 多行行为收紧。质量门 `npm run release-check` 全绿（unit 2390 / integration 含 BOC 集成 + parity pending 45 / biz-op flow 47 + 收单回归锁 45 / smoke 全模块 PASS）。⚠️ 多处资金红线：块 B/C 入库真理源 + pending 6 表覆盖删除链；块 D F1 输出金额符号翻转；块 E 修复行生成 + bank-deposit 白名单 13→14；块 F 向 ReconciliationId 写值；块 G R4 FundType 改写语义收紧。
 
 ### 🔴 对外契约变更（升级必读，详见 CHANGELOG v3.0.4「对外契约变更」段）
 
@@ -21,6 +21,7 @@ v3.0.4 迭代：六块、单 PR 合入 main——① 块 A JSZip 崩点止血 + 
 - ④ BOC链接表调拨单号 stale（块 E）：中台调拨订单表重导后调拨单号不自动重算，需重导外汇交割表。
 - ⑤ pending / biz-op flow 导入换引擎（块 B/C）：回退开关 `USE_BIG_TABLE_IMPORT_ENGINE_PENDING` / `USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW`；多 sheet 文件由静默读第一个改为明确报错；错误超 1000 截断计数语义随引擎变化。
 - ⑥ ≥2GB 单 entry 文件导入改为明确中文报错（块 A）：上限 2147483648，不再抛 JSZip 天书错误。
+- ⑦ Charge转outbound 多行行为收紧（块 G）：同 ReconciliationId 多条 Charge 行由逐条全转改为仅转 Debit Amount 最大行（并列取原序首行）——存量多行场景 FundType 改写行数减少，下游 HX-out 链随之减少。
 
 ### 新增
 
@@ -36,6 +37,7 @@ v3.0.4 迭代：六块、单 PR 合入 main——① 块 A JSZip 崩点止血 + 
 - **块 D F1 C3 Extra Fee 写盘取相反数**（🔴 资金红线）：差额写入银行行 `Extra Fee` 取相反数（匹配语义不变，DS1-DS9 零改动全过）。
 - **块 D F2 两类产物目录互换**：错误报告 → `error-reports/`、命中场景行 → `bank-statement-process/`（`exportRootDir` 本体未动）。
 - **块 D F3 错误报告第 3 列「行号」→「对账ID」**：三级回退 reconciliationId → reconId → rowId → ''，io 层按 `_rowId` enrich 覆盖 modifiedRows + unmatchedRows 全集。
+- **块 G Charge转outbound 多行取 Debit Amount 最大行**（🔴 资金红线）：R4 charge-outbound 子场景同桶多条 Charge 行仅转 Debit Amount 最大行（转分比较 / 并列取原序首行 / 单行桶不变 / 其余四子场景维持全转 / 桶级 target 初始快照预选防双网关行误转次大行）。
 
 ## v3.0.3（2026-06-10）
 

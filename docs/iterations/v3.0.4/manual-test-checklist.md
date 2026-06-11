@@ -65,6 +65,16 @@
 
 ---
 
+## 块 G — Charge转outbound 多行取 Debit Amount 最大行 🔴
+
+- [ ] 🔴 **多行桶只转最大行**：构造/选取同一 ReconciliationId 关联多条 `FundType='Charge'` 行（Debit Amount 不同）的真实样本 → 运行资金对账处理 → 主输出中**仅 Debit Amount 最大那行** FundType 改为 outbound 并标黄，其余 Charge 行保持原值不标黄
+- [ ] **单行桶行为不变**：同 reconid 仅一条 Charge 行 → 照常转 outbound（与 v3.0.3 一致）
+- [ ] **并列最大取首行**：两行 Debit Amount 相同 → 文件原序靠前那行转，靠后不转
+- [ ] **其余子场景不受影响**：ach-return / hx-out 等同桶多行仍逐条全转（抽一例核对）
+- [ ] **链式联动**：被选中行可继续 outbound→HX-out；未选中 Charge 行不进 HX-out 链（对照升级前后 HX-out 行数变化与预期一致）
+
+---
+
 ## 收口守卫（非手测，留档对照）
 
 - [ ] `npm run release-check` 全绿（smoke + unit + integration 三层）
