@@ -3682,6 +3682,8 @@ function registerAppHandlers() {
         // v2.1.16-beta.4 R5 场景4（中台退款订单回填）产出 → 透传给导出阶段（未导退款表时为 []）
         refundBackfillRows: result.refundBackfillRows || [],
         refundUnmatchedRows: result.refundUnmatchedRows || [],
+        // v3.0.4 块 F 修订 R2 Q14：Payment线下调拨匹配对 → 导出阶段追加 3 核对 sheet（未勾选/无命中时为 []）
+        paymentOfflineMatchedPairs: result.paymentOfflineMatchedPairs || [],
         scenariosSnapshot: buildScenariosSnapshot(dispatchScenarios),
         ranAt: Date.now()
       };
@@ -3789,7 +3791,9 @@ function registerAppHandlers() {
         mainFilePath,
         unmatchedRows: Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows : [],
         // v2.1.16-beta.6 需求 B：透传 modifications → 命中场景 sheet「命中明细」列数据源（D9）
-        modifications: processingResult.modifications
+        modifications: processingResult.modifications,
+        // v3.0.4 块 F 修订 R2 Q14：Payment线下调拨匹配对 → 主文件追加 3 核对 sheet（空/null 时不加 sheet）
+        paymentOfflinePairs: processingResult.paymentOfflineMatchedPairs
       });
 
       // v2.1.9 N5 T26（spec §5.1-5.4 🔴 对外契约破坏性变更）：场景命中行独立报表

@@ -16,6 +16,10 @@
 const ExcelJS = require('exceljs');
 const { errorCodeToCause } = require('../backend/file-service/error-causes');
 const { applyWatermark } = require('./workbook-watermark');
+// v3.0.4 块 F 修订 R2 Q14：Payment线下调拨核对 sheet 用——银行 44 列契约列序 + 中台 26 列签名列序。
+const { BANK_STATEMENT_FIELDS } = require('../constants/bank-statement-fields');
+const { ZHONGTAI_DISPATCH_ORDER_SIGNATURE } = require('../constants/table-signatures');
+const { PAYMENT_OFFLINE_FIELD_MAP: POF } = require('../constants/payment-offline-allocation-fields');
 
 const YELLOW_FILL = {
   type: 'pattern',
@@ -103,7 +107,107 @@ function buildHitDetail(mods) {
     .join('\n');
 }
 
-async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null, modifications = null) {
+// ===== v3.0.4 块 F 修订 R2 Q14：Payment线下调拨核对 3 sheet =====
+//   pairs 项 = { bankRow, orderRow, round, oldReconciliationId, dayDiff }（引擎产出，见
+//   r5-payment-offline-allocation-backfill.js 返回值）。pairs 为 null/空数组 → 完全不加 sheet（主文件形态零变化）。
+const PAYMENT_OFFLINE_SHEET = Object.freeze({
+  match: '匹配对照',
+  bankRaw: '银行行-原始',
+  orderRaw: '订单行-原始'
+});
+// 匹配轮次内部值 → 中文展示
+const PAYMENT_OFFLINE_ROUND_LABEL = Object.freeze({
+  main: '主轮',
+  'date-tolerance': '容差轮',
+  'relaxed-week': '兜底轮'
+});
+// 「匹配对照」sheet 表头（15 + 配对序号；列序见 spec §R2.3 导出）
+const PAYMENT_OFFLINE_MATCH_HEADERS = Object.freeze([
+  '配对序号', '匹配轮次', 'BillDate', 'Credit Amount', 'Currency', '原ReconciliationId',
+  '回填值(渠道流水号)', '调拨单号', '交易时间', '收款金额', '收款币种', '付款渠道', '收款渠道',
+  '银行周', '订单周', '天数差'
+]);
+
+// 在 workbook 追加 3 核对 sheet（仅 pairs 非空数组时调用）。
+//   bankHeaders：银行 44 列契约列序（BANK_STATEMENT_FIELDS）；orderHeaders：中台 26 列签名列序。
+function appendPaymentOfflineSheets(workbook, pairs) {
+  const { weekTag, parseFtaDate } = require('./scenario-engines/engine-week-utils');
+  // 真实 app 链路中 mid 行来自链接表 raw_json：「交易时间」是字符串 Excel 序列号（如 '46179'）、
+  //   「收款金额」是字符串数字（如 '7587133'）。引擎匹配走 toDate/parseNumber 不受影响，但「匹配对照」sheet
+  //   若原样写入会显示无法阅读的 46179 → 仅本 shet 的 4 个值列规整展示形态（两张「-原始」sheet 保持忠实 dump）。
+  const { toDate } = require('./scenario-engines/engine-date-utils');
+  const { parseNumber } = require('./scenario-engines/engine-utils');
+  // 日期列：toDate 解析后取【本地时区】年月日 'YYYY-MM-DD'（⚠️ 禁 toISOString——UTC 转换会差一天）；失败回退原值。
+  const fmtDate = (value) => {
+    const d = toDate(value);
+    if (!d) return value;
+    const yy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yy}-${mm}-${dd}`;
+  };
+  // 金额列：parseNumber 解析为数字写入；失败（null）回退原值。
+  const fmtNumber = (value) => {
+    const n = parseNumber(value);
+    return n === null ? value : n;
+  };
+  // ① 匹配对照
+  const sm = workbook.addWorksheet(PAYMENT_OFFLINE_SHEET.match);
+  sm.addRow([...PAYMENT_OFFLINE_MATCH_HEADERS]);
+  sm.getRow(1).font = { bold: true, size: 10 };
+  pairs.forEach((p, idx) => {
+    const b = p.bankRow || {};
+    const o = p.orderRow || {};
+    const billDate = b[POF.bank.billDate];
+    const txTime = o[POF.mid.txTime];
+    sm.addRow([
+      idx + 1,
+      PAYMENT_OFFLINE_ROUND_LABEL[p.round] || cellToString(p.round),
+      // BillDate / 交易时间：规整为 'YYYY-MM-DD'（序列号/多格式字符串 → 可读日期）
+      fmtDate(billDate),
+      // Credit Amount / 收款金额：规整为数字（字符串数字 → number）
+      fmtNumber(b[POF.bank.creditAmount]),
+      b[POF.bank.currency],
+      // 原值：引擎覆盖前捕获的 oldReconciliationId（非银行行当前最新值）
+      cellToString(p.oldReconciliationId),
+      o[POF.mid.channelSerialNo],
+      o[POF.mid.dispatchNo],
+      fmtDate(txTime),
+      fmtNumber(o[POF.mid.payeeAmount]),
+      o[POF.mid.payeeCurrency],
+      // 付款渠道：26 列签名 idx22（出款行，仅核对展示，非引擎筛选列）
+      o['付款渠道'],
+      o[POF.mid.receiveChannel],
+      // 银行周 = weekTag(BillDate)（银行行【自身】周数，非 join 桶键）；订单周 = weekTag(调拨单号 FTA 日期）。
+      //   两列肉眼可见「订单周 = 银行周 + 1」的关系（如银行周 2619 / 订单周 2620），对齐用户已核对的桌面模拟文件。
+      weekTag(billDate),
+      weekTag(parseFtaDate(o[POF.mid.dispatchNo])),
+      p.dayDiff
+    ]);
+  });
+
+  // ② 银行行-原始：配对序号 + 44 列契约列（复用 stripInternalFields 剥 _ 内部字段）
+  const sb = workbook.addWorksheet(PAYMENT_OFFLINE_SHEET.bankRaw);
+  sb.addRow(['配对序号', ...BANK_STATEMENT_FIELDS]);
+  sb.getRow(1).font = { bold: true, size: 10 };
+  pairs.forEach((p, idx) => {
+    const cleaned = stripInternalFields(p.bankRow || {});
+    sb.addRow([idx + 1, ...BANK_STATEMENT_FIELDS.map((h) => cleaned[h])]);
+  });
+
+  // ③ 订单行-原始：配对序号 + 中台 26 列签名列序
+  const orderHeaders = ZHONGTAI_DISPATCH_ORDER_SIGNATURE.expectedHeaders;
+  const so = workbook.addWorksheet(PAYMENT_OFFLINE_SHEET.orderRaw);
+  so.addRow(['配对序号', ...orderHeaders]);
+  so.getRow(1).font = { bold: true, size: 10 };
+  pairs.forEach((p, idx) => {
+    const o = p.orderRow || {};
+    so.addRow([idx + 1, ...orderHeaders.map((h) => o[h])]);
+  });
+}
+
+// v3.0.4 块 F 修订 R2 Q14：paymentOfflinePairs 非空时在既有 2 sheet 后追加 3 核对 sheet；null/空 → 主文件形态零变化。
+async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null, modifications = null, paymentOfflinePairs = null) {
   const workbook = new ExcelJS.Workbook();
 
   // ===== sheet1「未命中场景」=====
@@ -166,6 +270,12 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
       });
     }
   });
+
+  // ===== v3.0.4 块 F 修订 R2 Q14：追加 Payment线下调拨核对 3 sheet =====
+  //   pairs 为 null / 非数组 / 空数组 → 完全不加 sheet（未勾选/无命中时主文件形态零变化）。
+  if (Array.isArray(paymentOfflinePairs) && paymentOfflinePairs.length > 0) {
+    appendPaymentOfflineSheets(workbook, paymentOfflinePairs);
+  }
 
   applyWatermark(workbook);
   await workbook.xlsx.writeFile(savePath);

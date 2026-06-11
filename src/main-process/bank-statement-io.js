@@ -226,7 +226,8 @@ function ensureDateDir(exportRootDir) {
 //   独立报表 caller：main.js bank-statement:export handler → writeScenarioHitRows（scenario-hit-rows-writer.js）
 // v2.1.16-beta.6 需求 B（🔴 资金红线）：双 sheet 重构「未命中场景 / 命中场景」。
 //   新增 modifications 透传 → 命中场景 sheet「命中明细」列数据源（D9）。
-async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePath, unmatchedRows = null, modifications = null }) {
+// v3.0.4 块 F 修订 R2 Q14：可选 paymentOfflinePairs（Payment线下调拨匹配对）——非空时 writer 追加 3 核对 sheet。
+async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePath, unmatchedRows = null, modifications = null, paymentOfflinePairs = null }) {
   if (!Array.isArray(modifiedRows)) {
     throw new Error('writeBankStatementMainOutput: modifiedRows 必须是数组');
   }
@@ -237,8 +238,9 @@ async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePat
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  // v2.1.7 round 3 F8：透传 unmatchedRows；v2.1.16-beta.6 需求 B：透传 modifications（命中明细列）
-  const result = await writeBankStatementOutput(modifiedRows, headers, mainFilePath, unmatchedRows, modifications);
+  // v2.1.7 round 3 F8：透传 unmatchedRows；v2.1.16-beta.6 需求 B：透传 modifications（命中明细列）；
+  //   v3.0.4 块 F 修订 R2 Q14：透传 paymentOfflinePairs（追加匹配对照/银行行-原始/订单行-原始 3 sheet）。
+  const result = await writeBankStatementOutput(modifiedRows, headers, mainFilePath, unmatchedRows, modifications, paymentOfflinePairs);
   return { ...result, fileName: path.basename(mainFilePath) };
 }
 

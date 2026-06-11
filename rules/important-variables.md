@@ -915,8 +915,9 @@
   - **stale 风险（U4 拍板）**：中台调拨订单表重导后 BOC链接表调拨单号不自动重算，须重导交割表（CHANGELOG/USER_GUIDE 已注）
   - 必跑：`boc-fx-link-builder.test.js` / `linked-table-boc.test.js` / `boc-dispatch-order-fix.test.js` / `migrations-boc-dispatch-order-seed.test.js` + 集成 `v3.0.4-boc-dispatch-order-fix.js` + 真实样本人工核对 14 列/Type=2/Reference/Amount
 
-### R5s2b Payment线下调拨订单回填（v3.0.4 块 F 新增 Risk-sensitive ⚠️🔴 资金红线 — 向 ReconciliationId 写值 + 网关回填优先互斥）
-- 定义：引擎 `src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js`（纯函数 `(bankRows, midAllocationRows, options) → {modifications, warnings}`）；周数工具 `src/main-process/scenario-engines/engine-week-utils.js:75` `weekTag(value)`（ISO 8601 + ISO week-year）/ `weekTagPlusOne`（日期语义 +7 天所在周，禁 YYWW 数字加法）；字段常量 `src/constants/payment-offline-allocation-fields.js`；config schema `config.paymentOfflineBackfill = {enabled, bankChannel, region, bigAccount}`（R5s2 场景的 config 子开关）
+### R5s2b Payment线下调拨订单回填（v3.0.4 块 F 新增 Risk-sensitive ⚠️🔴 资金红线 — 向 ReconciliationId 写值 + 网关回填优先互斥；修订 R2 方向翻转）
+- 定义：引擎 `src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js`（纯函数 `(bankRows, midAllocationRows, options) → {modifications, warnings, matchedPairs}`，修订 R2 返回值扩展——matchedPairs 项 `{bankRow, orderRow, round, oldReconciliationId, dayDiff(带符号)}` 供导出 3 核对 sheet）；周数工具 `src/main-process/scenario-engines/engine-week-utils.js:75` `weekTag(value)`（ISO 8601 + ISO week-year）/ `weekTagPlusOne`（日期语义 +7 天所在周，禁 YYWW 数字加法）；字段常量 `src/constants/payment-offline-allocation-fields.js`（修订 R2：删 payChannel，+payMethod/receiveChannel/OFFLINE_PAY_METHOD/`MATCH_RULES`{txLagToleranceDays:2, relaxedWindowDays:7}）；config schema `config.paymentOfflineBackfill = {enabled, bankChannel, region, bigAccount}`（R5s2 场景的 config 子开关）
+- ⚠️ **修订 R2（2026-06-12，spec §R2）已取代初版匹配规则**：① join 方向翻转「银行周 + 1 = 订单周」（线下钱先动单后补，weekTagPlusOne 在银行侧）；② 订单池三条件 = 收款账户（卡号）∧ 付款方式==='线下' ∧ **收款渠道**===bankChannel（初版「付款渠道」筛选废弃）；③ 三轮阶梯 R1 main / R2 date-tolerance(回看2天) / R3 relaxed-week(不限周±7天) 取代「主轮+差错池」（billDateEarlier/errorPool 已删）；④ 导出链 `paymentOfflineMatchedPairs` 经 orchestrator→processingResult→`writeBankStatementOutput` 第 6 参追加 3 核对 sheet（匹配对照/银行行-原始/订单行-原始；pairs 空时主文件形态零变化）
 - 关联功能：编排器 R5s2b 步骤（`reconciliation-orchestrator.js:247` gating = r5s2Bucket 非空 ∧ `config.paymentOfflineBackfill.enabled===true` ∧ midRows 非空）；run 时按 gating 读 `database.readLinkedTableRows('mid-allocation')` 全表注入 `midAllocationContext`；UI 在「请选择适用的银行渠道」弹窗按 `subCategory==='fund-transfer-backfill'` 条件渲染勾选行 + 三输入框
 - 变更 review 要点：
   - 🔴 **双引擎互斥（Q3 网关回填优先）**：R5s2 先跑，已消费/已回填 bank `_rowId` 经 `options.excludeBankRowIds` 剔除出本引擎银行池（编排器 `excludeBankRowIds` = union(modifications rowId ∪ R5s2 引擎返回 `usedBankRowIds`)，`reconciliation-orchestrator.js:218-239`）——零互相覆盖，单测含互斥断言
@@ -924,7 +925,7 @@
   - **周数口径**：weekTag 订单侧/银行侧共用同一实现；基准四元组写死断言 2026-06-02→2623 / 2026-01-01→2601 / 2025-12-29→2601 / 2027-01-01→2653
   - **stale 资金数据**：mid-allocation 导入补清 `processingResult`（本功能改变「mid 不喂 run 不清」前提）
   - **既有疑点（记 backlog）**：`ADM_FUND_TYPES` 'Fundtransfer-out' 小写 t 与资产表 `FundType枚举值.xlsx` 不一致；本功能取大写 T 不顺手改 ADM
-  - 必跑：引擎单测（FTA/周数/双引擎互斥/Q6 同日算晚于）+ orchestrator 行数守恒 + config 合并不掉桶 + renderer-dialogs 源码字符串断言 + 手测 /verify（勾选→导两表→run→标黄/差错池/error-report 三出口 + stale 拒导出）
+  - 必跑：引擎单测（FTA/周数/双引擎互斥/Q6 同日算晚于/三轮阶梯/matchedPairs 形状）+ writer 3 核对 sheet 单测 + orchestrator 行数守恒与 matchedPairs 透传 + config 合并不掉桶 + renderer-dialogs 源码字符串断言 + 真实数据回放基准（spec §R2.4：100 对 R1=87/R2=7/R3=6、唯一未消费订单 FTA202606021000465）+ 手测 /verify（勾选→导两表→run→标黄/3 核对 sheet/未匹配报告 + stale 拒导出）
 
 ### `cleanup_pending`（v2.1.8 N1 新增 Risk-sensitive — DB 新列，cleanup 延后触发标志）
 - 定义：`acquiring_bill_currency_runs.cleanup_pending INTEGER DEFAULT 0`（v2.1.8 N1 新增列，migration 在 `src/backend/database/migrations.js`）

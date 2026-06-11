@@ -457,6 +457,64 @@ stats：`channelTotal/channelBocTotal/channelEmptyReconId/channelUnlinked/linkRo
 
 锁死中台列名（**收款账户（卡号）idx6 全角括号**、付款渠道、调拨单号、交易时间、收款金额、收款币种、渠道流水号）与银行列名（MerchantId/FundType='FundTransfer-in' 大写 T/BillDate/'Credit Amount'/Currency/ReconciliationId）；禁止引擎手敲。
 
+### 10.7 块 F 修订 R2（2026-06-12）— 匹配方向翻转 + 三轮阶梯 + 核对 sheet 透传
+
+> 来源：`changes/payment-offline-allocation-backfill/spec.md` 文件头「修订 R2（2026-06-12）」段（R2.3 终态匹配规则 / R2.4 真实数据验收基准）+ §F5 头部修订标注。
+> 本小节为 §10.4 块 F 初版引擎实现的增量修订；凡与初版冲突处逐条标注「修订 R2 取代」，初版描述保留作历史记录。
+
+#### 10.7.1 引擎规则变更点（`r5-payment-offline-allocation-backfill.js`）
+
+1. **join 翻转**：`weekTagPlusOne` 由「银行侧查订单周+1 桶」翻转为**订单侧不动、银行侧 +1 对齐**——订单按 `weekTag(ftaDate)` 分桶，银行行用 `weekTagPlusOne(BillDate)` 查桶（即「银行周 + 1 = 订单周」）；日期语义实现不变（+7 天所在周，禁 YYWW 数字加法）。**（修订 R2 取代 §10.4 步骤 ③「银行行查订单周+1 桶」的方向）**
+2. **三轮阶梯共享 usedSet**：主轮 + 差错池两阶段（§10.4 步骤 ④⑤）整体替换为**三轮阶梯**，三轮共享同一 `usedBankRowId/usedOrderSet`，每轮银行行按 BillDate 升序消费、候选按天数差升序稳定排序贪心（tie=原序，口径沿初版）：
+
+| phase 值 | 轮次 | 范围 | 匹配条件 |
+|----------|------|------|---------|
+| `'main'` | R1 主轮 | 周桶 | 金额币种相等 ∧ BillDate ≥ 交易时间（日粒度，同日算晚于，Q6 不变） |
+| `'date-tolerance'` | R2 容差轮 | 周桶 | 金额币种相等 ∧ BillDate ≥ 交易时间 − `txLagToleranceDays`(2) |
+| `'relaxed-week'` | R3 兜底轮 | **全部未消费订单（不限周）** | 金额币种相等 ∧ \|BillDate − 交易时间\| ≤ `relaxedWindowDays`(7) 就近 |
+
+3. **差错池删除**：初版「金额币种相等但严格早于 → 入差错池数组 → 二轮放宽周数」的差错池数据结构与逻辑整体移除，由三轮阶梯覆盖。**（修订 R2 取代 §10.4 步骤 ⑤ 差错池）**
+4. **MATCH_RULES 常量收口**：容差/窗口常量（`txLagToleranceDays=2`、`relaxedWindowDays=7`）收口到 `payment-offline-allocation-fields.js` 的 `MATCH_RULES`，**不做 UI 配置项**。
+5. **三态不变量**：三轮后仍未消费的银行池行 → `payment-offline-no-order-match` warning（**code 不新增**，phase 字段标轮次）。回填语义不变（渠道流水号 → ReconciliationId，命中即覆盖，nv 空/同值不写不标黄但仍消费）。
+
+#### 10.7.2 返回值扩展与导出链透传（Q14）
+
+引擎返回值由 `{ modifications, warnings }` 扩展为 **`{ modifications, warnings, matchedPairs }`**。`matchedPairs` 项结构：
+
+```
+{ bankRow, orderRow, round, oldReconciliationId, dayDiff }
+```
+
+（`oldReconciliationId` 于回填覆盖**前**捕获，`round` ∈ {main, date-tolerance, relaxed-week}）。
+
+导出链透传路径（pairs 空时主文件形态零变化）：
+
+```
+引擎 matchedPairs
+  → 编排器 reconciliation-orchestrator.js: paymentOfflineMatchedPairs（R5s2b 块收集）
+  → processingResult（随主结果回传 main.js）
+  → writeBankStatementOutput 追加 3 个核对 sheet：
+       · 匹配对照（15+1 列，含匹配轮次 round）
+       · 银行行-原始（44 列，剥内部字段，带配对序号）
+       · 订单行-原始（26 列，签名列序，带配对序号）
+```
+
+三个 sheet 经配对序号互查（同序号 = 同一笔配对）。
+
+#### 10.7.3 字段映射变更（`payment-offline-allocation-fields.js`）
+
+- **删除** `payChannel`（付款渠道，初版订单池筛选键）。
+- **新增** `payMethod`（付款方式，取值 = `OFFLINE_PAY_METHOD` 常量「线下」）+ `receiveChannel`（收款渠道，= 银行渠道输入值）。
+- 订单池筛选条件相应改为：收款账户（卡号）=== bigAccount ∧ payMethod === 线下 ∧ receiveChannel === bankChannel。**（修订 R2 取代 §10.4 步骤 ① 与 §10.6 中「付款渠道===bankChannel」的订单池筛选）**
+
+#### 10.7.4 UI 变更
+
+`renderer-dialogs.js` 银行渠道输入框 placeholder「如 BGL」→「如 CITI」（输入语义 = 账单所属渠道 / 收款渠道，填写语义不变，仅纠正示例值）。**（修订 R2 取代 §二「块 F · payment」文件清单与 §10 中沿用初版 PRD 的「如 BGL」示例）**
+
+#### 10.7.5 真实数据验收基准（回放断言）
+
+两份真实文件直跑引擎：`matchedPairs` = **100**（R1=87 / R2=7 / R3=6）、`modifications` = **100**、银行侧 `no-order-match` = **51**（49 行线上已有 ReconciliationId + 05-22 一笔 3M + 05-04 一笔 4.5M）、唯一未消费订单 = **FTA202606021000465**（4.5M EUR，交易时间 05-29，全池最近同额行差 25 天，属真实数据缺口，强配必错——维持 warning）。
+
 ---
 
 ## 十一、关键数据结构汇总

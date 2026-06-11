@@ -248,6 +248,8 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
   //   须在编排器显式拣出，与 R5s2 拣 directions/dateToleranceDays 同范式）。
   //   excludeBankRowIds = R5s2 已回填 bank _rowId 集合 → 引擎构银行池时剔除（网关回填优先不变量）。
   let r5s2bBackfilledCount = 0;
+  // v3.0.4 块 F 修订 R2 Q14：引擎匹配对（导出 3 核对 sheet 数据源），缺省 []（仿 platformCleanupRows 范式）。
+  let paymentOfflineMatchedPairs = [];
   if (r5s2Bucket.length) {
     const opt = r5s2Bucket[0].config || {};
     const pob = opt.paymentOfflineBackfill;
@@ -263,6 +265,8 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
       allWarnings.push(...(r5ab.warnings || []));
       for (const m of r5ab.modifications || []) allMods.push({ ...m, _round: 'R5s2b' });
       r5s2bBackfilledCount = (r5ab.modifications || []).length;
+      // 修订 R2 Q14：透传匹配对供导出阶段追加 3 核对 sheet（缺省 []）。
+      paymentOfflineMatchedPairs = r5ab.matchedPairs || [];
     }
   }
 
@@ -332,6 +336,8 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
     platformCleanupRows,
     refundBackfillRows,
     refundUnmatchedRows,
+    // v3.0.4 块 F 修订 R2 Q14：Payment线下调拨匹配对（导出 3 核对 sheet 数据源；未勾选/无命中时 []）
+    paymentOfflineMatchedPairs,
     rounds: {
       r1: { matched: r1.matchedGwRows.length },
       r2: {

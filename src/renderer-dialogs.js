@@ -7382,7 +7382,7 @@
           <div class="builtin-fixed-payment-fields" data-role="payment-fields" hidden>
             <div class="builtin-fixed-payment-field">
               <span class="builtin-fixed-channel-label">银行渠道</span>
-              <input class="scenario-config-input builtin-fixed-payment-input" type="text" data-field="payment-bank-channel" placeholder="如 BGL">
+              <input class="scenario-config-input builtin-fixed-payment-input" type="text" data-field="payment-bank-channel" placeholder="如 CITI">
             </div>
             <div class="builtin-fixed-payment-field">
               <span class="builtin-fixed-channel-label">地区</span>
