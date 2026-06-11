@@ -215,12 +215,14 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
   // ===== R5 场景2：回填 ReconciliationId =====
   let r5s2BackfilledCount = 0;
   // v3.0.4 块 F（🔴 Q3 网关回填优先）：收集 R5s2 已消费 bank _rowId 集合，供 R5s2b 剔除（两引擎零互相覆盖）。
-  //   取径 = union（modifications rowId ∪ 引擎返回的 usedBankRowIds）：
-  //     · modifications rowId = 实写过 ReconciliationId 的行；
-  //     · usedBankRowIds = 引擎内 1v1 消费的完整集合，**含「消费但未写（nv 空/同值不 record）」行**。
+  //   取径 = 引擎返回的 usedBankRowIds（引擎内 1v1 消费的完整集合，**含「消费但未写（nv 空/同值不 record）」行**）。
+  //   为何 usedBankRowIds 即超集、无需再叠 modifications rowId：
+  //     引擎 backfill 对命中行先无条件 usedBankRowId.add（占用 1v1），再判 nv 非空且异值才 record 进 modifications；
+  //     每 direction 跑完把整份 usedBankRowId union 进返回集 —— 故凡进 modifications 的 rowId 必已在 usedBankRowIds 内，
+  //     且引擎两个 return 出口（空入参早退 / 正常）均携带该字段。modifications 收集路是 usedBankRowIds 的真子集，纯冗余。
   //   闭合说明：旧实现仅取 modifications，「消费但未写」行取不到、可能被 R5s2b 二次匹配并覆盖网关已确认值；
-  //   引擎新增 additive 字段 usedBankRowIds 后该窄缺口已闭合 —— 凡被 R5s2 消费（无论是否实写）的银行行
-  //   一律不进 R5s2b 银行池，「网关回填优先」语义完整覆盖（不改 R5s2 既有匹配/写值逻辑）。
+  //   改取 usedBankRowIds 后该窄缺口闭合 —— 凡被 R5s2 消费（无论是否实写）的银行行一律不进 R5s2b 银行池，
+  //   「网关回填优先」语义完整覆盖（不改 R5s2 既有匹配/写值逻辑）。
   const r5s2ConsumedBankRowIds = new Set();
   if (r5s2Bucket.length) {
     const opt = r5s2Bucket[0].config || {};
@@ -230,11 +232,8 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
     });
     mergeMods(r5a.modifications);
     allWarnings.push(...(r5a.warnings || []));
-    for (const m of r5a.modifications || []) {
-      allMods.push({ ...m, _round: 'R5s2' });
-      if (m && m.rowId !== undefined && m.rowId !== null) r5s2ConsumedBankRowIds.add(m.rowId);
-    }
-    // union：并入引擎完整消费集（含同值未写行）—— 闭合「消费但未写」窄缺口（资金红线）。
+    for (const m of r5a.modifications || []) allMods.push({ ...m, _round: 'R5s2' });
+    // 引擎完整消费集（含同值未写行，已是 modifications rowId 的超集）—— 闭合「消费但未写」窄缺口（资金红线）。
     if (r5a.usedBankRowIds) {
       for (const rid of r5a.usedBankRowIds) {
         if (rid !== undefined && rid !== null) r5s2ConsumedBankRowIds.add(rid);

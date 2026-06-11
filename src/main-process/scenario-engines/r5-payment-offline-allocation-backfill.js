@@ -151,7 +151,9 @@ function runRound5PaymentOfflineAllocationBackfill(bankRows, midAllocationRows, 
       });
       continue;
     }
-    orderPool.push({ row: mid, orderWeekNum: weekTagToNumber(orderWeek) });
+    // 存已解析的 ftaDate（步骤③ weekTagPlusOne 直接复用，免二次 parseFtaDate）；
+    //   orderWeek 仅用于上面的合规 gating，订单周数号本身后续无消费方，故不入池。
+    orderPool.push({ row: mid, ftaDate });
   }
 
   // ===== ② 银行池：MerchantId===bigAccount ∧ FundType===FundTransfer-in ∧ 地区===region =====
@@ -174,7 +176,7 @@ function runRound5PaymentOfflineAllocationBackfill(bankRows, midAllocationRows, 
   //   订单分桶用「订单周+1 后的 number」做 key（= 银行应落桶），等价于银行直接用 bankWeekNum 命中。
   const ordersByPlusOneWeek = new Map();
   for (const ord of orderPool) {
-    const plusOne = weekTagPlusOne(parseFtaDate(ord.row[F.mid.dispatchNo]));
+    const plusOne = weekTagPlusOne(ord.ftaDate); // 复用步骤① 已解析的 ftaDate（不再二次 parseFtaDate）
     const key = weekTagToNumber(plusOne);
     if (key === null) continue;
     if (!ordersByPlusOneWeek.has(key)) ordersByPlusOneWeek.set(key, []);
