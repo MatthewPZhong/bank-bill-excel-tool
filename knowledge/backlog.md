@@ -11,6 +11,21 @@
 
 ## 未实施
 
+### B16（P4）xlsx-size-preflight 复用 zip-reader 的 openZipWithEntries
+
+- **来源**：2026-06-11 v3.0.4 PR #71 self-review（R-reuse 角度 CONFIRMED）
+- **影响**：`src/backend/pending-import/xlsx-size-preflight.js` 自写一套 yauzl open + entry 枚举；`src/backend/big-table-import/zip-reader.js` 已导出 `openZipWithEntries`（entries Map 自带 uncompressedSize），可复用后取 size 再 close
+- **现状**：v3.0.4 不改（块 A 已带 4 态单测全绿，重构收益小于回归风险）
+- **触发实施**：下次动 preflight 或 zip-reader 时一并收敛
+
+### B15（P4）toIsoDate「normalizeDateExportValue→本地分量 YYYY-MM-DD」三份拷贝收敛
+
+- **来源**：2026-06-11 v3.0.4 PR #71 self-review（R-reuse 角度 CONFIRMED）
+- **影响**：`jpm-dispatch-order-fix.js:42 toIsoDate`、`adm-bank-deposit-builder.js:38 normalizeBillDateIso`、`boc-fx-link-builder.js:53 toIsoDate` 三份同口径实现（注释互引「同口径」），未抽进共享模块
+- **现状**：v3.0.4 不改（JPM/ADM 属冻结链路，抽取需三链路回归；各自单测已锁口径）
+- **推荐**：抽到 engine-date-utils 或新建 date-iso 工具 + 三处替换 + 加载期断言
+- **触发实施**：下次动这三个 builder 任一时一并收敛
+
 ### B14（P3）`ADM_FUND_TYPES` 'Fundtransfer-out' 小写 t 与资产表不一致疑点
 
 - **来源**：2026-06-11 v3.0.4 块 F（Payment线下调拨订单回填）spec §2.3 实读核验
