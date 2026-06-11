@@ -1,9 +1,56 @@
 # Spec — payment-offline-allocation-backfill 「Payment线下调拨订单回填处理」（中台调拨订单对账ID回填扩展）
 
-> status: implemented（v3.0.4 分支，2026-06-11，commit 934148f..a3d7658；块 F F1-F7 全部入库——UI 三输入框/config 持久化/weekTag+FTA 地基/R5s2b 引擎/run 接线/输出收口，收尾文档批已落三件套/important-variables/backlog）
+> status: implemented + 修订 R2 implemented（v3.0.4 分支；初版 2026-06-11 commit 934148f..a3d7658；修订 R2 见下）
 > owner: pzhong
 > created: 2026-06-11
-> updated: 2026-06-11（六项阻塞性澄清全部拍板回写）
+> updated: 2026-06-12（修订 R2：匹配方向翻转 + 三轮阶梯 + 核对 sheet，Q9-Q14 拍板回写）
+
+---
+
+## 修订 R2（2026-06-12）— 匹配方向翻转 + 阶梯式放宽 + 核对 sheet（🔴 资金红线）
+
+### R2.1 实证背景（真实数据 0 命中根因）
+
+用真实文件复盘（调拨单 Fund_transfer_apply 5618 行 / CITILU渠道账单 159 行，配置 bigAccount=202782001 / bankChannel=CITI / region=LU），初版规则仅命中 1 行。逐级诊断确认两处方向性错误：
+
+1. **周数 join 方向反了**：初版「银行周 = 订单周 + 1」（§1.4 需求原文口径）与线下业务相反。线下调拨是**钱先动、单后补**——81/101 笔订单的「交易时间」与银行 BillDate 同日，FTA 单号日期在其后约一周（后台周二批量补录）→ 正确方向为「**银行周 + 1 = 订单周**」。
+2. **订单池渠道筛选列错**：线下订单的「付款渠道」=出款行（如 BGL），「收款渠道」才是账单所属渠道（CITI）。初版筛「付款渠道」===bankChannel 在线下场景得 0 行（命中的 59 笔全是线上 CFT 单，归 R5s2 网关回填管辖）。
+
+修正方向后主轮匹配 87/101；叠加两轮阶梯放宽（R2.2 ③④）达 **100/101**；最后 1 笔（FTA202606021000465，4.5M EUR，交易时间 05-29）全池最近可用同额行差 25 天，属真实数据缺口（对应银行行不在本期账单），强配必错——落未匹配 warning（Q13）。
+
+### R2.2 拍板表（2026-06-12，全部用户确认）
+
+| # | 决策 | 结论 |
+|---|---|---|
+| Q9 | 周数 join 方向 | **银行周 + 1 = 订单周**（weekTagPlusOne 挪到银行侧；日期语义不变，禁 YYWW 数字加法） |
+| Q10 | 订单池筛选 | 收款账户（卡号）===bigAccount ∧ **付款方式==='线下'** ∧ **收款渠道===bankChannel**（UI 配置仍填账单渠道如 CITI；初版「付款渠道」筛选废弃） |
+| Q11 | R2 日期容差轮 | 同周桶内，BillDate ≥ 交易时间 − **2 天**（实测录单滞后：晚 1 天 9 笔、晚 2 天 1 笔） |
+| Q12 | R3 周数放宽兜底轮 | 不限周，\|BillDate − 交易时间\| ≤ **7 天** 就近（救跨周界错位 6 笔） |
+| Q13 | 数据缺口 | 不为凑 100% 继续放宽窗口；未匹配行维持三态 warning（接受 100/101） |
+| Q14 | 核对产物 | 勾选本功能且有命中时，**导出主处理文件追加 3 个核对 sheet**：匹配对照 / 银行行-原始 / 订单行-原始（带配对序号互查） |
+| — | 初版 Q5 差错池 | **作废**——「金额币种相等但严格早于」入差错池+二轮放宽周数的设计被三轮阶梯（R1 主轮 / R2 容差轮 / R3 兜底轮）整体取代 |
+
+### R2.3 终态匹配规则（取代 §F5 步骤 3-5）
+
+- **订单池**：收款账户（卡号）===bigAccount ∧ 付款方式==='线下'（OFFLINE_PAY_METHOD 常量）∧ 收款渠道===bankChannel；FTA 不合规筛中行 warning 不变（D4）。
+- **银行池**：不变（MerchantId/FundType='FundTransfer-in'/地区，excludeBankRowIds 先剔除）。
+- **join**：订单按 weekTag(ftaDate) 分桶；银行行用 weekTagPlusOne(BillDate) 查桶。
+- **三轮阶梯**（共享 usedBankRowId/usedOrderSet；每轮银行行按 BillDate 升序消费、候选按天数差升序稳定排序贪心 tie=原序，口径沿初版）：
+  - R1 主轮（phase 'main'）：周桶 ∧ 金额币种相等 ∧ BillDate ≥ 交易时间（Q6 同日算晚于、日粒度不变）；
+  - R2 容差轮（phase 'date-tolerance'）：周桶 ∧ 金额币种相等 ∧ BillDate ≥ 交易时间 − txLagToleranceDays(2)；
+  - R3 兜底轮（phase 'relaxed-week'）：全部未消费订单（不限周）∧ 金额币种相等 ∧ |BillDate − 交易时间| ≤ relaxedWindowDays(7)。
+  - 容差/窗口常量收口 `payment-offline-allocation-fields.js` MATCH_RULES（不做 UI 配置项）。
+- **三态不变量**：三轮后仍未消费的银行池行 → payment-offline-no-order-match warning（code 不新增，phase 标轮次）。
+- **回填**：不变（渠道流水号 → ReconciliationId，命中即覆盖，nv 空/同值不写不标黄但仍消费）。
+- **引擎返回值**：扩展为 `{ modifications, warnings, matchedPairs }`；matchedPairs 项 = `{ bankRow, orderRow, round, oldReconciliationId, dayDiff }`（oldReconciliationId 于覆盖前捕获）。
+- **导出**（Q14）：编排器透传 paymentOfflineMatchedPairs → processingResult → writeBankStatementOutput 追加 3 sheet（匹配对照 15+1 列含匹配轮次 / 银行行-原始 44 列剥内部字段 / 订单行-原始 26 列签名列序）；pairs 空时主文件形态零变化。
+- **UI**：placeholder「如 BGL」→「如 CITI」（renderer-dialogs.js，银行渠道输入语义=账单所属渠道/收款渠道）。
+
+### R2.4 真实数据验收基准（回放断言）
+
+两真实文件直跑引擎：matchedPairs=100（R1=87 / R2=7 / R3=6）、modifications=100、银行侧 no-order-match=51（49 线上已有 ReconciliationId + 05-22 3M + 05-04 4.5M）、唯一未消费订单=FTA202606021000465。
+
+---
 > 目标版本：**v3.0.4**（2026-06-11 用户拍板：并入 v3.0.4 迭代，作为其块 F；迭代入口 `changes/v3.0.4/spec.md`；`bank-recon-output-fixes` 同迭代先行落地）
 > 性质：🔴 **资金红线**（新引擎向银行对账单 ReconciliationId 写值）+ 新匹配引擎 + UI/配置 + run 数据源扩展。
 > ✅ **实施门禁已解除：§10.1 六项阻塞性澄清已全部拍板（2026-06-11），F5 引擎可进入实现**。
@@ -109,6 +156,8 @@
 - 「订单对账周数号 / 银行对账周数号」均 **run 时现算不持久化**（订单侧引擎内由调拨单号派生；银行侧引擎内局部 `Map<_rowId, weekTag>`，不写行对象不碰 INTERNAL_FIELDS）——需求原文「导入完成时」按数据就绪语义解释（Q7 向用户确认）。✅ Q4 已拍板纯内部中间值——备选 B1（导入时 transform 注入 raw_json）/ B2（落 DB 列 + migration）**废弃不启用**。
 
 ### F5 — 匹配引擎 `r5-payment-offline-allocation-backfill.js`（🔴 资金红线核心）
+
+> ⚠️ **修订 R2（2026-06-12）已取代本节步骤 1（订单池条件）、3（join 方向）、4-5（主轮+差错池 → 三轮阶梯）**——终态规则以文件头「修订 R2」§R2.3 为准；下文保留作初版历史记录。
 
 纯函数 `(bankRows, midAllocationRows, options) → { modifications, warnings }`，骨架照搬 `r5-fund-transfer-backfill.js:98-205`：
 

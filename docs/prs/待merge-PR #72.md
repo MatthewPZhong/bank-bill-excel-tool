@@ -1,0 +1,50 @@
+---
+pr: 72
+version: v3.0.4
+merged:
+integrated: false
+---
+
+## 概览
+
+v3.0.4 块 F「Payment线下调拨订单回填处理」修订 R2：真实 CITI-LU 数据实证初版规则几乎零命中（159 行账单仅 1 命中），定位两处方向性错误并修正——**匹配方向翻转 + 三轮阶梯放宽 + 导出 3 个核对 sheet**。
+
+Spec：`changes/payment-offline-allocation-backfill/spec.md` §修订 R2（Q9-Q14 拍板）｜ PRD：`docs/iterations/v3.0.4/PRD.md` §5.6.4 ｜ TECHDOC：`docs/iterations/v3.0.4/TECHDOC.md` §10.7
+
+## 根因与修正（Q9-Q14 拍板）
+
+| # | 问题/决策 | 修正 |
+|---|---|---|
+| Q9 | join 方向反了：线下调拨「钱先动、单后补」（81/101 笔交易时间与 BillDate 同日，FTA 单一周后补录） | 「银行周 + 1 = 订单周」（weekTagPlusOne 挪到银行侧，日期语义不变） |
+| Q10 | 订单池渠道列错：「付款渠道」=出款行 BGL，「收款渠道」才是账单渠道 CITI | 三条件 = 收款账户（卡号）∧ 付款方式==='线下' ∧ 收款渠道===bankChannel |
+| Q11/Q12 | 录单滞后（晚 1-2 天 10 笔）与跨周界错位（6 笔） | 三轮阶梯：R1 主轮 / R2 容差轮（回看 2 天）/ R3 兜底轮（不限周 ±7 天就近）；取代初版「主轮+差错池」（Q5 作废） |
+| Q13 | 规则上限 100/101，最后 1 笔（FTA202606021000465）最近同额行差 25 天=真实数据缺口 | 不强配，落未匹配 warning（三态不变量） |
+| Q14 | 人工核对需求 | 引擎返回值扩展 matchedPairs → 导出主处理文件追加 3 核对 sheet（匹配对照/银行行-原始/订单行-原始；pairs 空时主文件形态零变化） |
+
+## 交付
+
+- **引擎**（`r5-payment-offline-allocation-backfill.js`）：join 翻转、订单池三条件、三轮共享 usedSet 阶梯贪心、删 errorPool/billDateEarlier、matchedPairs（含带符号 dayDiff、覆盖前 oldReconciliationId）
+- **常量**（`payment-offline-allocation-fields.js`）：删 payChannel，+payMethod/receiveChannel/OFFLINE_PAY_METHOD/MATCH_RULES{2,7}
+- **导出链**：orchestrator `paymentOfflineMatchedPairs` → processingResult → `writeBankStatementOutput` 第 6 参（默认 null 向后兼容）→ `appendPaymentOfflineSheets`（匹配对照 16 列规整日期/金额显示；两张原始 sheet 忠实 dump + 内部字段剥离）
+- **UI**：银行渠道 placeholder「如 BGL」→「如 CITI」（preview 已回归）
+- **文档**：spec §R2、PRD §5.6.4、TECHDOC §10.7、CHANGELOG、important-variables R5s2b 条目更新
+
+## 验收
+
+- `npm run release-check` 全绿：unit **2414/2414**（+16 案）｜ integration **25 脚本 1252/1252** ｜ smoke 全模块 PASS
+- 🔴 真实数据回放基准（spec §R2.4，team-lead 独立复跑）：matchedPairs=**100**（R1=87/R2=7/R3=6）、modifications=100、唯一未消费订单=FTA202606021000465、R2 倒挂方向 dayDiff∈{-1,-2}
+- 用户 app 内实测：159 行账单 → 157 命中（100 线下 + 49 网关 + 8 其他）+ 2 行未命中（5/22 3M 缺单尾差 + 5/4 4.5M 错位尾差，均为真实数据缺口，预期行为）
+
+## ⚠️ 关联功能 review（check-vars）
+
+本次改动触及以下重要变量，请针对性验证：
+
+- **Critical**: `writeBankStatementOutput`（签名 5→6 参，新参默认 null 向后兼容有单测；sheet1/sheet2 契约零改动）、`unmatchedRows`（仅透传行出现，反向 filter 契约 modifiedRows+unmatchedRows=bankRows 零改动）、`_rowId`（新核对 sheet 经 stripInternalFields 剥离，有断言）
+- **Runtime-state**: `processingResult`（结构 +paymentOfflineMatchedPairs；清空语义不变，无 stale 残留路径）
+- **Risk-sensitive**: R5s2b 引擎（匹配规则整体改写，清单条目已随本 PR 更新）、`weekTagPlusOne`（调用侧从订单挪到银行，函数本体与基准四元组断言零改动）、`excludeBankRowIds`（互斥语义不变，单测保留）
+
+**必跑**（均已完成）：
+- [x] `npm run smoke`
+- [x] 全量单测 + 集成（release-check exit 0）
+- [x] 真实数据回放基准
+- [x] 用户 app 内手测（标黄/3 核对 sheet/未命中 2 行核对）

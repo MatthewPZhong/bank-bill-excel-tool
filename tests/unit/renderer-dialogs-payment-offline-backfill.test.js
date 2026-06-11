@@ -40,8 +40,9 @@ describe('F1：Payment 勾选行 + 条件展开三输入框', () => {
     assert.ok(dialogBody.includes('data-field="payment-big-account"'), '应有大账号输入框');
   });
 
-  test('输入框不预填生产值，仅 placeholder 示例（如 BGL / 如 CN / 如 202782001）', () => {
-    assert.ok(dialogBody.includes('placeholder="如 BGL"'), '银行渠道 placeholder 示例');
+  test('输入框不预填生产值，仅 placeholder 示例（如 CITI / 如 CN / 如 202782001）', () => {
+    // 修订 R2：银行渠道语义 = 账单所属渠道 = 收款渠道，placeholder「如 BGL」→「如 CITI」（renderer-dialogs.js:7385）
+    assert.ok(dialogBody.includes('placeholder="如 CITI"'), '银行渠道 placeholder 示例（修订 R2：账单所属渠道）');
     assert.ok(dialogBody.includes('placeholder="如 CN"'), '地区 placeholder 示例');
     assert.ok(dialogBody.includes('placeholder="如 202782001"'), '大账号 placeholder 示例');
   });

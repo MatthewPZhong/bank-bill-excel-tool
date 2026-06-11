@@ -2,14 +2,18 @@
 // changes/payment-offline-allocation-backfill/spec.md §F3 / §F5
 //
 // 🔴 跨表字段（显式映射，绝不假设同名 —— 仿 refund-backfill-fields.js / r5-fund-transfer-backfill.js 文件头风格）：
+//   ⚠️ 修订 R2（2026-06-12）：订单池渠道筛选列翻转——线下调拨「付款渠道」=出款行（如 BGL），
+//     「收款渠道」才是账单所属渠道（如 CITI）。订单池改筛「付款方式==='线下' ∧ 收款渠道===bankChannel」，
+//     原「付款渠道」筛选废弃（删 payChannel，新增 payMethod / receiveChannel）。详 spec §R2.2 Q10。
 //   中台调拨订单（mid-allocation，中文，ZHONGTAI_DISPATCH_ORDER_SIGNATURE 26 列，table-signatures.js:98-103）：
 //     mid['调拨单号']               idx0  —— FTA+8位日期，派生「订单对账周数号」来源
+//     mid['付款方式']               idx2  —— 订单池筛选 === OFFLINE_PAY_METHOD（'线下'；过滤线上 CFT 单）
 //     mid['渠道流水号']             idx3  —— 命中后回填进 bank.ReconciliationId 的来源值
 //     mid['交易时间']               idx4  —— 与 bank.BillDate 比对（Q6 同日算晚于，日粒度）
 //     mid['收款账户（卡号）']        idx6  —— ⚠️【全角括号】订单池筛选 === bigAccount；勿与 idx23「收款账号」混拿
 //     mid['收款金额']               idx9  —— 与 bank['Credit Amount'] 比对（Math.round(*100) 分级精度）
 //     mid['收款币种']               idx10 —— 与 bank.Currency 比对（valuesEqual）
-//     mid['付款渠道']               idx22 —— 订单池筛选 === bankChannel
+//     mid['收款渠道']               idx25 —— ⚠️【26 列签名最后一列】订单池筛选 === bankChannel（账单所属渠道）
 //   银行对账单（bank statement，驼峰，BANK_STATEMENT_FIELDS 44 列）：
 //     bank.MerchantId               商户 ID —— 银行池筛选 === bigAccount
 //     bank.FundType                 资金性质 —— 银行池筛选 === 'FundTransfer-in'（⚠️【大写 T】，资产表实证）
@@ -28,12 +32,13 @@ const PAYMENT_OFFLINE_FIELD_MAP = Object.freeze({
   // —— 中台调拨订单侧（mid-allocation）——
   mid: Object.freeze({
     dispatchNo: '调拨单号',          // FTA+8位日期 → 订单对账周数号
+    payMethod: '付款方式',           // 订单池 === OFFLINE_PAY_METHOD（'线下'；过滤线上 CFT 单）—— 修订 R2
     channelSerialNo: '渠道流水号',   // → 回填 bank.ReconciliationId 的来源
     txTime: '交易时间',              // 与 bank.BillDate 比对
     payeeAccountCard: '收款账户（卡号）', // ⚠️ 全角括号；订单池 === bigAccount（勿与「收款账号」混）
     payeeAmount: '收款金额',         // 与 bank['Credit Amount'] 比对
     payeeCurrency: '收款币种',       // 与 bank.Currency 比对
-    payChannel: '付款渠道'           // 订单池 === bankChannel
+    receiveChannel: '收款渠道'       // 订单池 === bankChannel（账单所属渠道，非「付款渠道」出款行）—— 修订 R2
   }),
   // —— 银行对账单侧（bank statement）——
   bank: Object.freeze({
@@ -46,7 +51,12 @@ const PAYMENT_OFFLINE_FIELD_MAP = Object.freeze({
     reconciliationId: 'ReconciliationId' // 回填目标
   }),
   // —— 银行池筛选固定值（资产表 FundType枚举值.xlsx 实证大写 T）——
-  FUND_TYPE_IN: 'FundTransfer-in'
+  FUND_TYPE_IN: 'FundTransfer-in',
+  // —— 订单池付款方式固定值（修订 R2 Q10：仅线下单参与本引擎，线上 CFT 单归 R5s2 网关回填）——
+  OFFLINE_PAY_METHOD: '线下',
+  // —— 匹配阶梯参数（修订 R2 Q11/Q12；仿 FTA_FEATURE 范式 Object.freeze，禁引擎手敲魔数）——
+  //   txLagToleranceDays：R2 容差轮回看天数（救录单滞后）；relaxedWindowDays：R3 兜底轮就近窗口（救跨周界）。
+  MATCH_RULES: Object.freeze({ txLagToleranceDays: 2, relaxedWindowDays: 7 })
 });
 
 // 启动期断言①：bank 侧映射列全部 ∈ BANK_STATEMENT_FIELDS（防银行列名漂移 → 静默回填错列）

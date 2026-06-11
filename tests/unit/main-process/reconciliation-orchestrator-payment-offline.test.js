@@ -24,30 +24,34 @@ const {
 // ---- 合成数据 ----------------------------------------------------------
 
 // 银行行（含 R5s2 / R5s2b 所需列）
+//   修订 R2 方向：银行 +1 周 = 订单周。默认订单 FTA 06-02（订单周 2623）；银行 BillDate 05-26
+//   → weekTagPlusOne(05-26)=2623=订单周，且 05-26 = 订单交易时间（同日晚于）→ R5s2b 主轮命中。
 function makeBankRow(o = {}) {
   return {
     _rowId: o._rowId,
     ReconciliationId: o.ReconciliationId ?? '',
     FundType: o.FundType ?? 'FundTransfer-in',
     MerchantId: o.MerchantId ?? '202782001',
-    地区: o['地区'] ?? 'CN',
+    地区: o['地区'] ?? 'LU',
     Currency: o.Currency ?? 'USD',
     'Credit Amount': o['Credit Amount'] ?? '',
     'Debit Amount': o['Debit Amount'] ?? '',
-    BillDate: o.BillDate ?? '2026-06-09'
+    BillDate: o.BillDate ?? '2026-05-26'
   };
 }
 
-// 中台调拨订单行
+// 中台调拨订单行（修订 R2：付款方式=线下 / 收款渠道=CITI 参与筛选；付款渠道=出款行不参与）
 function makeMidRow(o = {}) {
   return {
-    调拨单号: o.调拨单号 ?? 'FTA202606021000477', // → 2026-06-02 → 2623
+    调拨单号: o.调拨单号 ?? 'FTA202606021000477', // → 2026-06-02 → 订单周 2623
+    付款方式: o.付款方式 ?? '线下',
     渠道流水号: o.渠道流水号 ?? 'CH-1',
-    交易时间: o.交易时间 ?? '2026-06-02',
+    交易时间: o.交易时间 ?? '2026-05-26',
     '收款账户（卡号）': o['收款账户（卡号）'] ?? '202782001',
     收款金额: o.收款金额 ?? 100,
     收款币种: o.收款币种 ?? 'USD',
-    付款渠道: o.付款渠道 ?? 'BGL'
+    付款渠道: o.付款渠道 ?? 'BGL',
+    收款渠道: o.收款渠道 ?? 'CITI'
   };
 }
 
@@ -67,7 +71,7 @@ function makeR5s2Scenario({ paymentOfflineBackfill } = {}) {
   return { id: 502, name: '中台调拨订单对账ID回填', category: 'builtin-fixed', priority: 0, enabled: true, config };
 }
 
-const POB_ON = { enabled: true, bigAccount: '202782001', bankChannel: 'BGL', region: 'CN' };
+const POB_ON = { enabled: true, bigAccount: '202782001', bankChannel: 'CITI', region: 'LU' };
 
 // ---- 1. config 合并不掉桶 ----------------------------------------------
 
@@ -88,7 +92,7 @@ test.describe('bucketScenarios：注入 paymentOfflineBackfill 后 R5s2 分桶�
 
 test.describe('runReconciliation R5s2b 集成', () => {
   test('midAllocationContext 注入 → R5s2b 回填流出（modifiedRows + stats + rounds）', () => {
-    const bankRows = [makeBankRow({ _rowId: 'b1', BillDate: '2026-06-09', 'Credit Amount': 100 })];
+    const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })]; // BillDate 默认 05-26（+1 周=订单周 2623）
     const result = runReconciliation({
       bankRows,
       gwRows: [],
@@ -105,6 +109,12 @@ test.describe('runReconciliation R5s2b 集成', () => {
     const mod = result.modifications.find((m) => m._round === 'R5s2b');
     assert.ok(mod, '应产 R5s2b modification');
     assert.equal(mod.column, 'ReconciliationId');
+    // 修订 R2 Q14：paymentOfflineMatchedPairs 透传出编排器（仿 refundBackfillRows/platformCleanupRows 范式）
+    assert.ok(Array.isArray(result.paymentOfflineMatchedPairs), 'paymentOfflineMatchedPairs 为数组');
+    assert.equal(result.paymentOfflineMatchedPairs.length, 1, '1 个匹配对透传');
+    assert.equal(result.paymentOfflineMatchedPairs[0].round, 'main');
+    assert.equal(result.paymentOfflineMatchedPairs[0].bankRow._rowId, 'b1');
+    assert.equal(result.paymentOfflineMatchedPairs[0].orderRow['渠道流水号'], 'CH-OK');
     // 行数守恒
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
@@ -171,7 +181,7 @@ test.describe('runReconciliation R5s2b — excludeBankRowIds 互斥（Q3）', ()
       MerchantId: '202782001',
       Currency: 'USD',
       'Credit Amount': 100, 'Debit Amount': 0,
-      BillDate: '2026-06-09',
+      BillDate: '2026-05-26',
       ReconciliationId: ''
     })];
     // 网关行（小写表头）：同 merchantid/currency/金额/同日 → R5s2 命中
@@ -180,7 +190,7 @@ test.describe('runReconciliation R5s2b — excludeBankRowIds 互斥（Q3）', ()
       merchantid: '202782001',
       currency: 'USD',
       amount: 100,
-      Billdate: '2026-06-09',
+      Billdate: '2026-05-26',
       reconciliationid: 'GW-RECON'
     }];
     // 中台订单：也能匹配 b1（若未被排除会覆盖成 CH-OFFLINE）
@@ -212,7 +222,7 @@ test.describe('runReconciliation R5s2b — excludeBankRowIds 互斥（Q3）', ()
       MerchantId: '202782001',
       Currency: 'USD',
       'Credit Amount': 100, 'Debit Amount': 0,
-      BillDate: '2026-06-09',
+      BillDate: '2026-05-26',
       ReconciliationId: 'GW-RECON' // 原值已等于网关回填值 → R5s2 同值消费不写
     })];
     // 网关行：同字段同日同金额 + reconid === 银行原值 → R5s2 命中但 old===nv 不 record。
@@ -221,7 +231,7 @@ test.describe('runReconciliation R5s2b — excludeBankRowIds 互斥（Q3）', ()
       merchantid: '202782001',
       currency: 'USD',
       amount: 100,
-      Billdate: '2026-06-09',
+      Billdate: '2026-05-26',
       reconciliationid: 'GW-RECON'
     }];
     // 中台订单：也能匹配 b1（若该行未被排除会覆盖成 CH-OFFLINE）。
