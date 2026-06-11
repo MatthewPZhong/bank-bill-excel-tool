@@ -620,3 +620,17 @@ error report（错误报告）第 3 列：
 ## 十三、实施记录
 
 > 由 PR merged + 归档后追加，PM 不需要手动填写。
+
+### PR #72（2026-06-12 merged）— 块 F 修订 R2：Payment线下调拨回填方向翻转 + 三轮阶梯 + 3 核对 sheet
+
+归档：`docs/prs/PR72-v3.0.4.md` ｜ Spec：`changes/payment-offline-allocation-backfill/spec.md` §修订 R2（Q9-Q14 拍板）｜ 本文档 §5.6.4 / TECHDOC §10.7
+
+改动清单（20 files +2006/−1013）：
+
+- **引擎** `r5-payment-offline-allocation-backfill.js`：join 翻转「银行周+1=订单周」、订单池三条件（收款账户∧付款方式=线下∧收款渠道）、三轮阶梯 R1 main/R2 date-tolerance(2天)/R3 relaxed-week(±7天) 取代主轮+差错池（删 errorPool/billDateEarlier）、返回值扩展 matchedPairs（带符号 dayDiff + 覆盖前 oldReconciliationId）
+- **常量** `payment-offline-allocation-fields.js`：删 payChannel；+payMethod/receiveChannel/OFFLINE_PAY_METHOD/MATCH_RULES{txLagToleranceDays:2, relaxedWindowDays:7}
+- **导出链**：`reconciliation-orchestrator.js` 透传 paymentOfflineMatchedPairs → `main.js` processingResult → `bank-statement-io.js` → `exceljs-writer.js` writeBankStatementOutput 第 6 参 + appendPaymentOfflineSheets（匹配对照 16 列规整显示 / 银行行-原始 44 列剥内部字段 / 订单行-原始 26 列签名列序；pairs 空时主文件零变化）
+- **UI** `renderer-dialogs.js`：银行渠道 placeholder「如 BGL」→「如 CITI」
+- **测试**：引擎单测重写（③④⑧ 等 14 块）+ 新建 writer 3 sheet 单测 + 编排器透传断言 + placeholder 守卫同步；全量 2414/2414 + 集成 1252/1252 + smoke 绿
+- **验收**：真实数据回放 100 对（R1=87/R2=7/R3=6），唯一未消费订单 FTA202606021000465（真实数据缺口落 warning）；用户 app 实测 159 行 → 157 命中 + 2 行未命中（5/22 3M 缺单尾差 + 5/4 4.5M 错位尾差，预期）
+- **规则**：`rules/important-variables.md` R5s2b 条目随修订 R2 更新
