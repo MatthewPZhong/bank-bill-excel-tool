@@ -9,8 +9,8 @@
 
 | 字段 | 值 |
 |---|---|
-| 清单版本 | v14（对应 app v3.0.0 — 2026-06-08 PR-4 升格 1 条 Runtime-state：`refundOrderSession`（R5 中台退款订单回填引擎入参源 + run 阶段注入 + 🔴 PR#65 收紧生命周期：单文件导入清 main.js:3494 / batch 本批未导退款表清 :11460 严格绑定「本批有效导入」；v3.0.0 需求3 经 session-status 透出 hasRefundOrder 供运行点 shouldPromptRefundAtRun 判就绪，本迭代只读不改写入/清空时机）；触发：v3.0.0 PR-4（退款提醒对齐 C3 + 候选预检 + 运行点编排）提 PR 前 check-vars 节点；v13（对应 app v2.1.16-beta.1）= 2026-06-07 阶段一 A0 收尾升格 3 条 Runtime-state：`bankStatementSession`（资金对账数据处理银行对账单进程级 session + v2.1.16 A5 多文件合并对账语义 + 🔴 `_rowId` 全局唯一不变量）/ `gatewayReconSession`（C3 网关账单数据源 + 导入银行对账单时清空）/ `processingResult`（5 轮对账运行结果缓存 + scenarios 变更/重导入时清空）；触发：v2.1.16 阶段一提 PR 前 check-vars 节点；v12 = 2026-05-28 Phase 6 T33 升格 5 条 v2.1.10 4 主线变量（Critical 4：`runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1：`serializeError`/`deserializeError` + 更新 `bill_imports.raw_json` 内容契约）；v11 = 2026-05-26 N1' + N4 升格 7 条；v10 = 2026-05-22 Phase 0 T02 升格 11 条；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
-| 上次人工 review | 2026-06-08（v3.0.0 PR-4 升格 1 条 Runtime-state — refundOrderSession）；2026-06-07（v2.1.16 阶段一 A0 收尾升格 3 条 Runtime-state — bankStatementSession / gatewayReconSession / processingResult）|
+| 清单版本 | v15（对应 app v3.0.4 — 2026-06-11 收尾文档批升格 5 条 Critical/Risk-sensitive：`USE_BIG_TABLE_IMPORT_ENGINE_PENDING`/`USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW` + 共享 dispatch（Critical 🔴🔴 pending/biz-op flow 换引擎）/ `BANK_DEPOSIT_FIELDS` 13→14（Risk-sensitive 🔴）/ BOC调拨订单修复链（Risk-sensitive 🔴）/ R5s2b Payment线下调拨回填（Risk-sensitive 🔴 + weekTag/excludeBankRowIds）；顺带修陈旧行号（`runC3Scenario`:81 / `writeBankStatementOutput`:106 5 参 / `processingResult`:311 结构补 unmatchedRows 等）+ `acquiring-engine-migration` 34→45 断言；触发：v3.0.4 收尾 check-vars 硬节点；v14（对应 app v3.0.0 — 2026-06-08 PR-4 升格 1 条 Runtime-state：`refundOrderSession`（R5 中台退款订单回填引擎入参源 + run 阶段注入 + 🔴 PR#65 收紧生命周期：单文件导入清 main.js:3494 / batch 本批未导退款表清 :11460 严格绑定「本批有效导入」；v3.0.0 需求3 经 session-status 透出 hasRefundOrder 供运行点 shouldPromptRefundAtRun 判就绪，本迭代只读不改写入/清空时机）；触发：v3.0.0 PR-4（退款提醒对齐 C3 + 候选预检 + 运行点编排）提 PR 前 check-vars 节点；v13（对应 app v2.1.16-beta.1）= 2026-06-07 阶段一 A0 收尾升格 3 条 Runtime-state：`bankStatementSession`（资金对账数据处理银行对账单进程级 session + v2.1.16 A5 多文件合并对账语义 + 🔴 `_rowId` 全局唯一不变量）/ `gatewayReconSession`（C3 网关账单数据源 + 导入银行对账单时清空）/ `processingResult`（5 轮对账运行结果缓存 + scenarios 变更/重导入时清空）；触发：v2.1.16 阶段一提 PR 前 check-vars 节点；v12 = 2026-05-28 Phase 6 T33 升格 5 条 v2.1.10 4 主线变量（Critical 4：`runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1：`serializeError`/`deserializeError` + 更新 `bill_imports.raw_json` 内容契约）；v11 = 2026-05-26 N1' + N4 升格 7 条；v10 = 2026-05-22 Phase 0 T02 升格 11 条；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
+| 上次人工 review | 2026-06-11（v3.0.4 收尾文档批升格 5 条 + 修陈旧行号）；2026-06-08（v3.0.0 PR-4 升格 1 条 Runtime-state — refundOrderSession）；2026-06-07（v2.1.16 阶段一 A0 收尾升格 3 条 Runtime-state — bankStatementSession / gatewayReconSession / processingResult）|
 | 基线数据 | `docs/analysis/var-reference-stats.md`（94 个 JS 文件 / 1000 顶层声明 — v2.1.10-beta.1 T33 重跑后；A-share 159 / A-pair 290 / A-local 444 / B 449） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
@@ -179,7 +179,17 @@
   - 错误对外契约：契约 `errorName='ImportValidationError'` + `formatBatchError` 保证引擎抛错的 name/message/detailLines 与旧 reader byte-for-byte → main.js handler 错误识别（status='error' + detailLines 透传）+ smoke caseB/F/H3/M 零改动
   - **回退完整性**：reader.js / reader-handrolled.js / import-repository.js 一字不改且仍被回退路径引用；拨 false 即恢复 v3.0.2（含旧路径自带 wal_checkpoint）
   - DB 连接：引擎 worker 自开 `dbPath`（`db.location()`）连接写；主进程 db 连接并存（WAL + busy_timeout 30s）；COMMIT 后引擎自带 `wal_checkpoint(TRUNCATE)`（session 引擎分支不再 checkpoint，回退分支保留）
-  - 必跑：集成 `acquiring-engine-migration.js`（34 断言）+ `big-table-import-engine.js`（19 断言，引擎改动不回归）+ smoke acquiring-bill-currency（203）+ acquiring-bill-currency-progress（34，reading 事件契约）+ acquiring-bill-currency-pragma（27）+ 真实数据手测（W4 UI 流畅 / 取消 / 覆盖导入）
+  - 必跑：集成 `acquiring-engine-migration.js`（45 断言；v3.0.4 块 D PR-D biz-op flow 引擎迁移扩到 45）+ `big-table-import-engine.js`（19 断言，引擎改动不回归）+ smoke acquiring-bill-currency（203）+ acquiring-bill-currency-progress（34，reading 事件契约）+ acquiring-bill-currency-pragma（27）+ 真实数据手测（W4 UI 流畅 / 取消 / 覆盖导入）
+
+### `USE_BIG_TABLE_IMPORT_ENGINE_PENDING` / `USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW` + 共享 dispatch（v3.0.4 块 B/C 升格 Critical ⚠️🔴🔴 资金红线 — pending/biz-op flow 导入链路换引擎 + 单行回退开关）
+- 定义：`src/main-process/pending-session.js:49` `const USE_BIG_TABLE_IMPORT_ENGINE_PENDING = process.env.PENDING_FORCE_LEGACY_IMPORT === '1' ? false : true`；`src/main-process/biz-op-recon-session.js:598` `const USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW = process.env.BIZOP_FLOW_FORCE_LEGACY_IMPORT === '1' ? false : true`（均生产默认 true=引擎）；共享 dispatch `src/main-process/big-table-import-dispatch.js`（`dispatchEngineImport`，平移收单 `dispatchEngineImport` 范式 + `resourceLimits.maxOldGenerationSizeMb=4096`，pending/biz-op flow 复用、OPEN-2 不收编收单）
+- 关联功能：pending 挂账导入（契约 `src/backend/pending-import/contract-pending.js`）/ biz-op flow 流水导入（契约 `src/backend/biz-op-recon-import/contract-flow.js`）默认走大表导入引擎（yauzl 基座、worker 拓扑统一、多文件并行）；开关拨 false / 拿不到 dbPath → 回退原 utilityProcess + `worker.js`（pending）/ `import-worker.js`（biz-op flow）全旧链路（旧 reader/repository 一字不改保留可达）
+- 关联引擎扩展（PR-B E1-E5 契约可选项，不声明=行为零变化）：E1 多语句覆盖删除（pending deleteMonth 6 表顺序敏感 🔴 Codex PR #55 Finding 1 / biz-op flow 2 条 clear）；E2 事务内 finalizeForCommit（pending upsertMonthMeta COMMIT 前原子）；E3 空文件整批拒绝；E4 `maxCollectedErrors:1000` + `captureRowValues:true`（错误报告 xlsx 需整行 cells）；E5 写侧跨文件 sha 去重 Set
+- 变更 review 要点：
+  - **🔴🔴 资金红线（放行闸）**：pending_rows / biz-op flow 流水为入库真理源 + pending 6 表覆盖删除链（removed_pending_rows 残留→reconcile 用陈旧归档错标）。改契约 mapRow/insertSql/deleteForOverwrite/dedupeKeyOf → 必跑 parity 脚本 `pending-engine-migration.js`（45 断言）/ `bizop-flow-engine-migration.js`（47 断言，legacy vs 引擎 byte-for-byte：全表 dump + 错误路径文案/计数/cells/截断标志逐字段）
+  - **行为收紧 divergence（intentional）**：旧 pending 硬编码 `sheet1.xml`（多 sheet 静默读第一个）→ 引擎 rels 正解多 sheet **报错**（防静默读错表）；错误超 1000 截断计数语义随引擎口径
+  - **回退完整性**：旧链路文件全保留；env `PENDING_FORCE_LEGACY_IMPORT=1` / `BIZOP_FLOW_FORCE_LEGACY_IMPORT=1` 即恢复 v3.0.3 行为
+  - **资源**：worker_threads 堆 vs 旧 child 8GB；dedupe Set 300w≈360MB + 写批缓冲，`resourceLimits.maxOldGenerationSizeMb=4096` 显式设置
 
 ### `runAllScenarios` / scenario-dispatcher（v2.1.7 F8 升格 Critical ⚠️ 资金红线契约锚点）
 - 定义：`src/main-process/scenario-dispatcher.js:66` `function runAllScenarios(bankRows, gwRows, scenarios)`
@@ -594,8 +604,8 @@
   - 必跑：导入网关 → 导入新银行对账单 → 确认 `gatewayReconSession` 已清空（session-status `hasGatewayRecon=false`）
 
 ### `processingResult`（v2.1.16 阶段一 A5 升格 Runtime-state ⚠️ 资金对账数据处理进程级 session）
-- 定义：`src/main.js:268` `let processingResult = null;`（进程级，重启不持久化）
-- 结构：`{ modifiedRows, modifications, errorReport, stats, ranAt }`
+- 定义：`src/main.js:311` `let processingResult = null;`（进程级，重启不持久化；行号以代码实际为准，旧注 :268 已陈旧）
+- 结构（实际赋值见 `src/main.js:3671`）：`{ modifiedRows, unmatchedRows, modifications, errorReport, stats, platformCleanupRows, refundBackfillRows, refundUnmatchedRows, scenariosSnapshot, ranAt }`（F8 反向 filter 契约：`modifiedRows + unmatchedRows = workingBankRows`，互斥无遗漏；`unmatchedRows` 为 bank-recon-output-fixes F3「对账ID列」enrich 全覆盖 Map 的依赖之一——R5s4 warning 行多落 unmatchedRows）
 - 关联功能：「资金对账数据处理」5 轮对账（C1–C4 dispatcher）运行结果缓存；run 写入、export 读取、`session-status` 透出 `stats`
 - 变更 review 要点：
   - **scenarios 变更 / 重导入银行对账单 / 重导入网关时主动清空**（`src/main.js:3458` / `3496` / `11181`）——避免老运行结果被新数据 / 新场景配置误用导出（资金红线：导出的命中行必须对应当前 session + 当前场景快照）
@@ -864,7 +874,8 @@
   - 必跑：smoke c2 全套（billTypes=1 / conditions / 混合）+ bundle 旧结构 C2 导入升级 e2e（I6）+ `npm run scan:vars` 刷新
 
 ### `runC3Scenario`（v2.1.7 F2 C3 网关 1v1 引擎，升格 Risk-sensitive ⚠️ 资金红线方案 A）
-- 定义：`src/main-process/scenario-engines/c3-gateway-recon-join.js:68` `function runC3Scenario(scenario, bankRows, gwRows)`
+- 定义：`src/main-process/scenario-engines/c3-gateway-recon-join.js:81` `function runC3Scenario(scenario, bankRows, gwRows)`（行号以代码实际为准，旧注 :68 已陈旧）
+- ⚠️ v3.0.4 块 D F1：C3 Extra Fee 写盘取相反数（匹配语义不变，写盘点 `normalizeCellValue(-fee)`）——存量已配置 extraFee 的场景升级后同输入产出相反符号，取反值同时出现于主输出 / 命中明细文本 / 命中场景行报表三个出口（资金红线，详见 `changes/bank-recon-output-fixes/spec.md` F1）
 - 关联功能：C3 场景执行 — 网关 reconId 1v1 join；**v2.1.7 F2 方案 A**：用 Set 候选池（gwCandidatePool）严格 1v1 — 一个网关行匹配后从池移除，避免同一网关行被多个银行行重复匹配（资金红线核心修复）
 - 跨文件度：2+（自身定义 + `src/main-process/scenario-dispatcher.js` runAllScenarios 调用 + smoke c3 5 case）
 - 变更 review 要点：
@@ -875,7 +886,7 @@
   - 必跑：smoke c3 5 case（包含 1v1 / 1v多反例 / 候选池耗尽 / 空 gw）+ 真实银行账单 + 网关账单端到端
 
 ### `writeBankStatementOutput`（v2.1.7 F8 升格 Risk-sensitive ⚠️ 资金红线 + F8 第 2 sheet 契约）
-- 定义：`src/main-process/exceljs-writer.js:53` `async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null)`
+- 定义：`src/main-process/exceljs-writer.js:106` `async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null, modifications = null)`（行号与签名以代码实际为准，旧注 :53 与 4 参签名已陈旧）
 - 关联功能：银行账单导出唯一 writer — 仅修改行 + 单元格黄底 + 表头；**v2.1.7 F8 新增第 4 参数 `unmatchedRows`**：非 null 时输出第 2 sheet "未命中场景行"；命名 sheet 1 = "渠道对账单"（exceljs-writer.js:56 SHEET_NAME 常量真实值，self-review I-10 修正）、sheet 2 = "未命中场景行"
 - 跨文件度：2+（自身定义 + `src/main-process/bank-statement-io.js:20/212-213` 桥接调用）
 - 变更 review 要点：
@@ -886,6 +897,34 @@
   - 改黄底单元格判定逻辑 → 全模块视觉变化
   - **ExcelJS vs SheetJS**：v2.1.7 dev 路径已用 ExcelJS（commit d289779）；spec §9.8.4 PM sketch 当初按 SheetJS 起草已反向同步双版本说明；改 writer 库需评估 cellStyle / sheet 命名 / 性能
   - 必跑：smoke `npm run smoke` 全 19 suite（含 F8 第 2 sheet 行数断言）+ 真实银行账单端到端（带未命中场景）+ baseline modifiedRows 防回归
+
+### `BANK_DEPOSIT_FIELDS`（链接表 bank-deposit 落库白名单，v3.0.4 块 E 升格 Risk-sensitive ⚠️🔴 13→14）
+- 定义：`src/backend/database/linked-table-repository.js:37`（v3.0.4 在 CustomerRef 与 FundType 之间插入 `'Payment Detail'`，13→14）
+- 关联功能：链接表「银行对账单入金表」落库裁列白名单；BOC调拨银行对账单表派生（`buildBocBankRows`）的「银行单交易编号」提取完全依赖 `Payment Detail` 字段
+- 变更 review 要点：
+  - 🔴 **存量已导入 bank-deposit 行 raw_json 无 `Payment Detail`、无法 migration 补**——只能识别后引导**重新导入银行对账单表**才支持 BOC 回填（availability 三态 `missing-payment-detail`）；对外契约变更（CHANGELOG 已注）
+  - ADM 派生行 `{...r}` 浅拷贝连带多带该字段（JPM 引擎全程 FIELD_MAP pick，已核无副作用）；`boc-fx-link-fields.js` / `adm-bank-deposit-fields.js` 模块加载期断言防白名单回退漂移
+  - 必跑：`linked-table-boc.test.js`（BANK_DEPOSIT_FIELDS=14 断言）+ 既有 bank-deposit-import 13→14 断言同步
+
+### BOC调拨订单修复链（v3.0.4 块 E 新增 Risk-sensitive ⚠️🔴 资金红线 — 两张隐藏表 + 派生 builder + 整组匹配引擎）
+- 定义：隐藏表 `linked_boc_fx_settlement` / `linked_boc_bank_deposit`（DDL `migrations.js:2947` `ensureBocFxLinkSupport`，**不进 `ALL_TABLE_KEYS` / 不写 `linked_table_meta`** 隐藏红线）；派生纯函数 `src/main-process/boc-fx-link-builder.js`（scanFxGroups / matchBocToMidAllocation / buildBocBankRows / backfillBocReconLinkIds）；修复引擎 `src/main-process/scenario-engines/boc-dispatch-order-fix.js:34` `runBocDispatchOrderFix({sheets, bocLinkRows, scenario})`（纯函数、入参只读、链接表只读不回写）；常量 `src/constants/boc-fx-link-fields.js` / `boc-dispatch-order-fields.js`
+- 关联功能：外汇交割表导入→全量重建 BOC链接表（分组/中台匹配/调拨单号回填）；银行对账单表导入→重派生 BOC调拨银行对账单表 + 对现有链接表补做 2.5 回填（按 id UPDATE）；内置场景「BOC调拨订单修复」（`migrations.js` `ensureBocDispatchOrderScenarioSeed`，priority=3 / enabled=0 / config.subCategory='boc-dispatch-order-fix'）；run 注入 `runOpts.bocLinkRows = database.readBocFxLinkRows()`
+- 变更 review 要点：
+  - 🔴 **修复行生成属资金对账输出**：D1-D11 全从严（组级校验任一失败→整组不产出不消耗；OrderId 唯一命中才生成；Type=2 number / Reference=链接ID / Amount=货币1金额原值透传）；引擎头注释防后人「对齐 JPM 取第一」误改
+  - 🔴 **交割表强制数组路径**：`useStreamingPath = ... && repoKey !== 'fx-settlement'`（流式 feed 过滤空行且不透传 rowIdx，分组依赖物理行号断档）——守卫即契约，勿删
+  - **stale 风险（U4 拍板）**：中台调拨订单表重导后 BOC链接表调拨单号不自动重算，须重导交割表（CHANGELOG/USER_GUIDE 已注）
+  - 必跑：`boc-fx-link-builder.test.js` / `linked-table-boc.test.js` / `boc-dispatch-order-fix.test.js` / `migrations-boc-dispatch-order-seed.test.js` + 集成 `v3.0.4-boc-dispatch-order-fix.js` + 真实样本人工核对 14 列/Type=2/Reference/Amount
+
+### R5s2b Payment线下调拨订单回填（v3.0.4 块 F 新增 Risk-sensitive ⚠️🔴 资金红线 — 向 ReconciliationId 写值 + 网关回填优先互斥）
+- 定义：引擎 `src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js`（纯函数 `(bankRows, midAllocationRows, options) → {modifications, warnings}`）；周数工具 `src/main-process/scenario-engines/engine-week-utils.js:75` `weekTag(value)`（ISO 8601 + ISO week-year）/ `weekTagPlusOne`（日期语义 +7 天所在周，禁 YYWW 数字加法）；字段常量 `src/constants/payment-offline-allocation-fields.js`；config schema `config.paymentOfflineBackfill = {enabled, bankChannel, region, bigAccount}`（R5s2 场景的 config 子开关）
+- 关联功能：编排器 R5s2b 步骤（`reconciliation-orchestrator.js:247` gating = r5s2Bucket 非空 ∧ `config.paymentOfflineBackfill.enabled===true` ∧ midRows 非空）；run 时按 gating 读 `database.readLinkedTableRows('mid-allocation')` 全表注入 `midAllocationContext`；UI 在「请选择适用的银行渠道」弹窗按 `subCategory==='fund-transfer-backfill'` 条件渲染勾选行 + 三输入框
+- 变更 review 要点：
+  - 🔴 **双引擎互斥（Q3 网关回填优先）**：R5s2 先跑，已消费/已回填 bank `_rowId` 经 `options.excludeBankRowIds` 剔除出本引擎银行池（编排器 `excludeBankRowIds` = union(modifications rowId ∪ R5s2 引擎返回 `usedBankRowIds`)，`reconciliation-orchestrator.js:218-239`）——零互相覆盖，单测含互斥断言
+  - 🔴 **config 整包覆盖红线**：UI 保存浅合并严禁丢 funcCategory/subCategory/roundPhase/directions/dateToleranceDays（丢任一字段场景静默掉 r5s2 桶或引擎漂移）；main 进程 builtin-fixed config 更新最小校验 + bucketScenarios 不掉桶单测
+  - **周数口径**：weekTag 订单侧/银行侧共用同一实现；基准四元组写死断言 2026-06-02→2623 / 2026-01-01→2601 / 2025-12-29→2601 / 2027-01-01→2653
+  - **stale 资金数据**：mid-allocation 导入补清 `processingResult`（本功能改变「mid 不喂 run 不清」前提）
+  - **既有疑点（记 backlog）**：`ADM_FUND_TYPES` 'Fundtransfer-out' 小写 t 与资产表 `FundType枚举值.xlsx` 不一致；本功能取大写 T 不顺手改 ADM
+  - 必跑：引擎单测（FTA/周数/双引擎互斥/Q6 同日算晚于）+ orchestrator 行数守恒 + config 合并不掉桶 + renderer-dialogs 源码字符串断言 + 手测 /verify（勾选→导两表→run→标黄/差错池/error-report 三出口 + stale 拒导出）
 
 ### `cleanup_pending`（v2.1.8 N1 新增 Risk-sensitive — DB 新列，cleanup 延后触发标志）
 - 定义：`acquiring_bill_currency_runs.cleanup_pending INTEGER DEFAULT 0`（v2.1.8 N1 新增列，migration 在 `src/backend/database/migrations.js`）

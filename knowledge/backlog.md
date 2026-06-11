@@ -11,6 +11,62 @@
 
 ## 未实施
 
+### B14（P3）`ADM_FUND_TYPES` 'Fundtransfer-out' 小写 t 与资产表不一致疑点
+
+- **来源**：2026-06-11 v3.0.4 块 F（Payment线下调拨订单回填）spec §2.3 实读核验
+- **影响**：`src/main-process/scenario-engines/adm-bank-deposit-fields.js:24-26` `ADM_FUND_TYPES` 含 `'Fundtransfer-out'`（小写 t）变体，而资产表 `assets/FundType枚举值.xlsx` 实测含 `'FundTransfer-in'`（大写 T），未见小写 t 变体——既有疑点，可能导致 ADM 派生对 out 方向枚举匹配漂移
+- **现状**：v3.0.4 块 F 取大写 T（资产表实证），**不顺手改 ADM**（避免 ADM/JPM 链路连带回归）；R5s2 既有 seed（`migrations.js:1508-1509`）与 R5s2b 新引擎均用大写 T
+- **推荐**：抽样核对真实导入数据中 ADM out 方向行的 FundType 实际拼写 → 确认是否需统一为大写 T + 对应 migration / 加载期断言
+- **风险**：资金对账 ADM 派生匹配 —— 改动需 byte-identical parity 验证 + 人工复核
+- **触发实施**：用户反馈 ADM out 方向派生漏匹配 / 下次动 adm-bank-deposit-fields.js 时一并核
+
+### B13（P3）C3 extraFee smoke 端到端真实账单用例
+
+- **来源**：2026-06-11 v3.0.4 块 D（bank-recon-output-fixes）spec §9.5 第 3 条
+- **影响**：块 D F1（C3 Extra Fee 写盘取相反数，🔴 资金红线）当前由 `c3-gateway-recon-join.test.js` 单测矩阵（取反/负输入对称/-0 边界/迁移边界）+ DS1-DS9 语义不变回归覆盖；缺一条用真实账单 + 网关账单跑完整 C3 流程、断言主输出 Extra Fee 列取反值的 smoke 端到端用例
+- **现状**：F1 改动点单一（写盘点 `normalizeCellValue(-fee)`），单测覆盖充分；端到端只靠手测（spec §9.3）人工核对一份样本三出口符号
+- **推荐**：在 `scripts/smoke/` 加 C3 extraFee 真实账单端到端用例，断言主输出/命中明细文本/命中场景行报表三出口符号一致取反
+- **触发实施**：下次动 C3 引擎 / 块 D 后续迭代时一并补
+
+### B12（P3）命中场景行报表路径的状态框展示
+
+- **来源**：2026-06-11 v3.0.4 块 D（bank-recon-output-fixes）spec §9.5 第 2 条
+- **影响**：块 D F2 目录互换后，命中场景行报表落 `bank-statement-process/{date}/`，但 `writeScenarioHitRows` 返回的 `hitRowsReportPath/Name` renderer 零消费（`main.js` 状态框提示从未实现，原 `:3830` stale 注释已在 F2 改写）——用户在 UI 看不到命中场景行报表生成位置
+- **现状**：报表正常生成，仅状态框不展示路径；与错误报告 cancel 路径同属「UI 无提示，只能查文件系统」
+- **推荐**：状态框「已导出」行追加命中场景行报表文件名展示（对照 hitScenarios 契约）
+- **触发实施**：用户反馈「找不到命中场景行报表」/ 下次动资金对账状态框时一并加
+
+### B11（P2）`error-causes.js` CAUSE_MAP 缺 R1/R5/C3 新 code → 「可能原因」列显示「未知错误」
+
+- **来源**：2026-06-11 v3.0.4 块 D（bank-recon-output-fixes）spec §9.5 第 1 条（与既有 B3「CAUSE_MAP 新增 code 自动 smoke 校验」互补：B3 是守卫机制，本条是具体未映射 code 清单）
+- **影响**：`src/backend/file-service/error-causes.js:48-49` 的 `CAUSE_MAP` 缺 R1（multi-bank-match-r1）/ R5（R5s2/R5s4 各 code）/ C3（部分）等 warning code 的「可能原因」中文映射 → error-report「可能原因」列回退显示「未知错误」，对用户无指导价值。v3.0.4 块 F（payment）F6 已补 R5s2b 全部新 code，块 E（BOC）F3.4 引擎 warnings 带中文 message 直显前端（不走 CAUSE_MAP），但 R1/R5s2/R5s4 既有 code 仍缺
+- **现状**：error-report 第 3 列已在块 D F3 换为「对账ID」；「可能原因」列对未映射 code 仍兜底「未知错误」
+- **推荐**：补全 R1/R5s2/R5s4/C3 各 warning code 的 CAUSE_MAP 条目；配合 B3 的自动 smoke 校验一并落地（扫 `code: '...'` 与 CAUSE_MAP keys 比对，未映射报告）
+- **触发实施**：与 B3 同窗口 / 下次新增场景算法时一并补
+
+### B10（P2）vcc-op-calc 导入主进程同步卡 UI（78.7w 行实测 7.8s）→ 挪 worker 独立小迭代
+
+- **来源**：2026-06-11 通用引擎适用模块调研（结论沉淀于 `changes/v3.0.4/spec.md` §一.1/§一.2）
+- **现状**：`vcc-op-calc-session.js` `streamScanAndCompute` 在主进程同步流式聚合（无 worker、无 cancel），实测 78.7w 行 / 811MB 解压 跑 7.8s 整段卡 UI（`vcc-op-calc-import/reader.js:8-9` 注释实测）
+- **裁定（调研结论）**：**不上 big-table 引擎** —— vcc 本质是聚合器（只落 runs/run_files 汇总、不存原始行，`vcc-op-calc-session.js:380`），且依赖"遍历多 sheet 找表头匹配"（`reader.js:195-202`），与引擎"行级 INSERT + rels 正解唯一 sheet"范式双重冲突。优化方向 = 独立小迭代挪 worker（W4 式），顺带补 cancel
+- **关联**：JSZip 2^31 崩点暴露由 v3.0.4 PR-A 入口预检兜底（见 B9）；vcc 当前实证 811MB ≈ 阈值 38%，量级暂安全
+- **触发实施**：用户反馈 vcc 导入卡顿 / 量级接近 1.5GB 时立项
+
+### B9（P1）JSZip 流式基座 2^31 解压上限：链接表 ≥82w 行 xlsx 导入必崩 "uncompressed data size mismatch"（→ v3.0.4 部分立项）
+
+- **来源**：2026-06-10 用户实证（98 万行 xlsx 链接表导入报错含 mismatch）+ 同日多 agent 根因诊断（4 线调查 + 交叉验证，confidence: high）
+- **根因**：JSZip 3.10.1 int32 符号溢出 —— `jszip/lib/reader/DataReader.js:64` `readInt` 用 `(result << 8) + byte` 有符号累加，sheet1.xml 解压体积 ≥2^31 字节（2.147GB）时 uncompressedSize 读成负数，解压结束在 `jszip/lib/compressedObject.js:38` 与实测长度比对必不等 → 抛 `Bug : uncompressed data size mismatch`。zip64 救不了（readInt(8) 同样溢出）。**真实阈值 2.147GB，POC 注释的 ~3.8GB 只是样本点**；65.7w 行（1.72GB）通过 / 98w 行（≈2.56GB）崩、临界 ≈82w 行（本表密度 ~2.6KB/行），全部自洽
+- **触发链路**：`linked-table:import`（`src/main.js:11274`）→ detector 判单 sheet xlsx 走流式（头部 200 行早停不触雷）→ `streaming-xlsx-reader.js:213` JSZip 全量解压 sheet1.xml → 解压完最后一刻抛错 → 事务 ROLLBACK（旧数据无损）→ per-file `write-error`
+- **影响面**：链接表 4 张可导入表全部命中；`pending-import`（`worker.js:21`）、`biz-op-recon-import`（`reader-streamed.js:35`）、`vcc-op-calc-import`（`reader.js:18`）共用同一 JSZip 基座，同等暴露。收单（reader-handrolled，yauzl）与 big-table-import 新引擎（zip-reader.js，yauzl）免疫
+- **伴生问题（报错信息丢失）**：该失败全链路零落盘——handler 不写日志，链接表管理弹窗显式 `skipLogReport:true`（`renderer-dialogs.js:6399`）绕开 alert 默认 error 日志，C3/运行前提醒两个入口（`renderer.js:3738/3885`）直接丢弃返回值完全静默；用户关掉弹窗后报错文本永久丢失、任何日志找不回
+- **修复方案**（按推荐顺序）：
+  - A. **短期止血（半天）**：导入入口用无符号读取预检 sheet1.xml/sharedStrings.xml 解压尺寸，≥2^31 直接报明确中文错误（「文件约 X 行过大，请拆分为 80 万行以内分批导入」）；同时去掉 `skipLogReport` 或 handler 补 error 日志，解决报错丢失
+  - B. **根治（1-2 天）**：`streaming-xlsx-reader.js` zip 层 JSZip → yauzl（上层行扫描逻辑不动），项目已有两个先例（`reader-handrolled.js`、`big-table-import/zip-reader.js`）；一处改、链接表/pending/biz-op 共同受益
+  - C. **长线**：链接表接入 big-table-import 引擎（acquiring spec §8.5 已列为潜在用户），需独立迭代完整 spec
+- **风险**：🔴 资金红线 —— 链接表整表覆盖落库是 bank-deposit→ADM 派生链 / gateway-bill C3 的入库真理源，方案 B/C 必须 byte-identical parity 验证（`scripts/test-v3.0.0-linked-streaming-parity.js --deep` 现成）+ 人工复核
+- **spec 已同步**：`changes/linked-table-large-file-streaming/spec.md` R-5 阈值已由 ~3.8GB 修正为 2^31（原预警线 ≥100w 行已失效）
+- **触发实施**：→ **v3.0.4 已立项**（`changes/v3.0.4/spec.md`，2026-06-11）：方案 A = PR-A（预检 + 报错可见性）；方案 B **不实施**（被 pending/biz-op 直接迁引擎 + PR-A 护栏组合替代，链接表/vcc 留 JSZip 基座由护栏兜底）；方案 C **部分推进**（pending = PR-C、biz-op flow = PR-D 本轮迁引擎；linked-table 迁移仍留本条待独立迭代——缺口为引擎表头扫描模式 + 多表混选分组 dispatch + B8 合并语义）
+
 ### B8（P2）链接表 bank-deposit 等四表多选多文件互相覆盖丢数据（v3.0.3 候选）
 
 - **来源**：2026-06-10 链接表导入排查（v3.0.2 会话，用户问"bank-deposit 支持批量导入吗"）
@@ -24,7 +80,7 @@
 
 ### B7（P1）主库膨胀治理（run 级数据出主库）+ 启动窗口先行
 
-- **spec 已落**：`changes/db-bloat-governance-startup-first/spec.md`（2026-06-10，status: propose，8 个拍板点待用户确认）
+- **spec 已落**：`changes/size-startup-optimization/spec.md` Part B（2026-06-10 落档、2026-06-11 与 B6 合并为单一 change，status: propose，8 个拍板点 B-D1~D8 待用户确认；原 `changes/db-bloat-governance-startup-first/` 已并入删除）
 - **来源**：2026-06-10 性能/体积调研（v3.0.2 会话，用户报告"打包后体积越来越大、点击后页面显示越来越慢"）；即「change B」
 - **影响**：本机实测 `tool-data.sqlite` **15GB**，`PRAGMA freelist_count` = 240 万页 ≈ **9.9GB（61%）为删除后未回收空洞**；`acquiring_bill_currency_bill_imports` 历史累计写入 1846 万行、`diff_rows` 2077 万行 —— run 级原始数据写主库、run 后 DELETE，但**全代码无任何 VACUUM/auto_vacuum 机制**。一次性迁移前 `VACUUM INTO` 全量备份 15GB → 升级后首启实测 **28530ms / 38126ms**（activity log 实证）；`backups/` 已积 31GB + 一份 15GB `.bak`，无清理策略，本机合计 ~62GB。启动链：`src/main.js` whenReady 在 `createWindow()` **之前**同步做 activity log / usage-stats / `database.init()`（106 条 DDL）/ pendingDb（1.5GB）/ own-accounts 迁移 / 模板库同步 → 基线 1.2~1.5s；渲染层初始化仅 ~50ms、建窗到可见 ~110ms（前端不是瓶颈）
 - **推荐**：
@@ -39,7 +95,7 @@
 
 ### B6（P2）打包体积瘦身：files 白名单 + canvas 移 devDeps + 体积断言守卫
 
-- **spec 已落**：`changes/dist-size-slim/spec.md`（2026-06-10，status: propose，3 个拍板点待用户确认）
+- **spec 已落**：`changes/size-startup-optimization/spec.md` Part A（2026-06-10 落档、2026-06-11 与 B7 合并为单一 change，status: propose，3 个拍板点 A-D1~D3 待用户确认；原 `changes/dist-size-slim/` 已并入删除）
 - **来源**：同 B7 调研；即「change A」
 - **影响**：安装包 135MB，`app.asar` **101MB**（同类应用正常 ~15MB）。构成：`docs/**/*` 42MB（`docs/previews/` 截图 36MB；运行时只有 `docs/USER_GUIDE.md` 被 `src/main.js:4212` 帮助页读取）+ 生产依赖 ~47MB（**`@napi-rs/canvas` 25MB 在 dependencies 但 src/ 零引用**，仅 preview 脚本用；`xlsx` 7.2MB 与 `xlsx-js-style` 9.5MB 双份 SheetJS 并存、各带一份 codepage ~5.9MB）+ `scripts/**/*` 2MB（纯测试/预览脚本）+ `assets/app-icon-source.png` 1.3MB（无运行时引用）
 - **推荐**：
