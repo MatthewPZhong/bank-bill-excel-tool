@@ -94,6 +94,37 @@ function runBocDispatchOrderFix({ sheets, bocLinkRows, scenario }) {
     }
   }
 
+  // —— 消耗/占用集合 ——（提前到 D7 eager 预扫前声明，预扫直接写 processedGroups）
+  const usedChannel = new Set(); // 渠道 BOC 行 1v1 消耗（命中组提交后置入；失败组不消耗）
+  const usedAllocation = new Set(); // 已被成功组占用的调拨单号（D8：两组共享 → 第二组失败）
+  const processedGroups = new Set(); // 已处理（成功或失败）的组号（避免一组被多渠道行重复处理）
+  const fixedRows = [];
+
+  // —— D7 eager 预扫（资金红线·确定性）：任何链接ID 跨多组（size>1）→ 涉及的全部组立即整组判失败 ——
+  //   背景（PR #71 self-review CONFIRMED finding）：原惰性检测（仅在步骤3 按渠道行序碰到歧义 ID 时才标记）
+  //   依赖渠道行遍历顺序——组1=[链接ID L,M]、组2 含同一 L 时，渠道行序 [M,L] 会让组1 先经 M 提交成功
+  //   （产出含歧义 Reference=L 的修复行），随后才发现 L 歧义、只把组2 记失败；行序 [L,M] 则两组都不产出。
+  //   同数据换行序产出不同资金修复结果，违反文件头「跨多组一律整组失败：不产出、不消耗」契约。
+  //   修法：建完 linkByReconId 后立即对全部歧义 ID 预扫，把涉及的全部组先标记失败（进 processedGroups +
+  //   groupTouched/groupFailed 计数 + warn 一次性列出涉及组号），步骤3 不再对这些组做任何提交。
+  //   ⇒ ①确定性：同数据任意渠道行序产出完全一致；②歧义 ID 涉及的组绝不产出修复行；③stats 与 warn 文案一致。
+  for (const [rid, groupSet] of linkByReconId.entries()) {
+    if (groupSet.size <= 1) continue;
+    const groupList = [...groupSet].sort();
+    for (const gNo of groupList) {
+      if (processedGroups.has(gNo)) continue; // 同一组可能被多个歧义 ID 涉及，去重避免重复计数
+      processedGroups.add(gNo);
+      stats.groupTouched += 1;
+      stats.groupFailed += 1;
+    }
+    warn.push({
+      code: 'link-id-ambiguous',
+      reconLinkId: rid,
+      groups: groupList,
+      message: `链接ID「${rid}」跨多个分组（${groupList.join('、')}），数据异常，相关分组全部不修复`
+    });
+  }
+
   // channelByReconId：渠道 BOC 行按 reconciliationId 聚合（步骤5 的 1v1 消耗候选池）。
   const channelByReconId = new Map();
   for (const c of bocChannels) {
@@ -102,12 +133,6 @@ function runBocDispatchOrderFix({ sheets, bocLinkRows, scenario }) {
     if (!channelByReconId.has(rid)) channelByReconId.set(rid, []);
     channelByReconId.get(rid).push(c);
   }
-
-  // —— 消耗/占用集合 ——
-  const usedChannel = new Set(); // 渠道 BOC 行 1v1 消耗（命中组提交后置入；失败组不消耗）
-  const usedAllocation = new Set(); // 已被成功组占用的调拨单号（D8：两组共享 → 第二组失败）
-  const processedGroups = new Set(); // 已处理（成功或失败）的组号（避免一组被多渠道行重复处理）
-  const fixedRows = [];
 
   // —— 步骤3：按渠道 BOC 行原序遍历，定位待处理组 ——
   for (const c of bocChannels) {
@@ -121,23 +146,9 @@ function runBocDispatchOrderFix({ sheets, bocLinkRows, scenario }) {
       stats.channelUnlinked += 1; // 未命中链接表 → 只计数不告警（D6，避免无关行刷屏）
       continue;
     }
-    // D7：同一链接ID 跨多组 → 数据异常，相关组全部判失败（各组单独计入 groupFailed）。
-    if (groupSet.size > 1) {
-      const groupList = [...groupSet].sort();
-      for (const gNo of groupList) {
-        if (processedGroups.has(gNo)) continue;
-        processedGroups.add(gNo);
-        stats.groupTouched += 1;
-        stats.groupFailed += 1;
-      }
-      warn.push({
-        code: 'link-id-ambiguous',
-        reconLinkId: rid,
-        groups: groupList,
-        message: `链接ID「${rid}」跨多个分组（${groupList.join('、')}），数据异常，相关分组全部不修复`
-      });
-      continue;
-    }
+    // D7 防御兜底（理论不可达）：歧义 ID 跨多组的全部组已在步骤2 后的 eager 预扫整组判失败并进
+    //   processedGroups，故此处 size>1 不应再出现。保留此分支仅为防御——直接跳过、绝不提交（不产出、不消耗）。
+    if (groupSet.size > 1) continue;
 
     const groupNo = [...groupSet][0];
     if (processedGroups.has(groupNo)) continue; // 该组已处理（成功/失败）→ 跳过

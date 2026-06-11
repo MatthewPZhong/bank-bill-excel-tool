@@ -276,7 +276,7 @@ test.describe('1v1 消耗 — 同链接ID 出现 k 次须有 k 条渠道行', ()
 });
 
 // ========================================================================
-// 8. 跨组同链接ID —— D7 相关组全失败
+// 8. 跨组同链接ID —— D7 相关组全失败（eager 预扫·确定性，资金红线）
 // ========================================================================
 test.describe('跨组同链接ID — D7 相关组全失败', () => {
   test('同一链接ID 出现在两个分组 → link-id-ambiguous、两组都失败、fixedRows=0', () => {
@@ -295,6 +295,54 @@ test.describe('跨组同链接ID — D7 相关组全失败', () => {
     assert.deepStrictEqual(w.groups.sort(), ['1', '2']);
     assert.strictEqual(res.stats.groupFailed, 2, '两组都判失败');
     assert.strictEqual(res.stats.groupTouched, 2);
+  });
+
+  // 🔴 资金红线·确定性回归（PR #71 self-review CONFIRMED finding 复现）：
+  //   组1=[链接ID L, M]（L 跨组1/组2）、组2=[链接ID L]。原惰性检测按渠道行序惰性触发：
+  //   行序 [M,L] 会让组1 先经 M 提交成功（产出含歧义 Reference=L 的修复行），随后才发现 L 歧义、只记组2 失败；
+  //   行序 [L,M] 则两组都不产出。eager 预扫修法后：同数据任意渠道行序产出完全一致、歧义 ID 涉及组绝不产出修复行。
+  test('链接ID 跨多组 + 同组另有干净链接ID — 两种渠道行序产出完全一致、fixedRows=0、两组皆失败', () => {
+    // L=RID-L 跨组1/组2（歧义）；M=RID-M 仅组1（干净）。组1 含 L+M，组2 含 L。
+    const buildLinks = () => [
+      linkRow({ group: '1', alloc: 'ALC-1', reconLinkId: 'RID-L', ccy1Amount: 100 }),
+      linkRow({ group: '1', alloc: 'ALC-1', reconLinkId: 'RID-M', ccy1Amount: 200 }),
+      linkRow({ group: '2', alloc: 'ALC-2', reconLinkId: 'RID-L', ccy1Amount: 300 })
+    ];
+    const gw = () => [gwRow({ orderId: 'ALC-1' }), gwRow({ orderId: 'ALC-2' })];
+    // 行序 [M,L,L]：渠道行先 M（旧逻辑会让组1 先经 M 提交成功）后 L
+    const resML = run(
+      { opponentBills: [channelRow({ reconId: 'RID-M' }), channelRow({ reconId: 'RID-L' }), channelRow({ reconId: 'RID-L' })], businessBills: gw() },
+      buildLinks()
+    );
+    // 行序 [L,L,M]：渠道行先 L（碰歧义）后 M
+    const resLM = run(
+      { opponentBills: [channelRow({ reconId: 'RID-L' }), channelRow({ reconId: 'RID-L' }), channelRow({ reconId: 'RID-M' })], businessBills: gw() },
+      buildLinks()
+    );
+    // ① 两序均不产出任何修复行（歧义 ID 涉及组绝不产出）
+    assert.strictEqual(resML.fixedRows.length, 0, '行序 [M,L] 不得产出含歧义 Reference 的修复行');
+    assert.strictEqual(resLM.fixedRows.length, 0, '行序 [L,M] 不得产出修复行');
+    // ② 确定性：两序输出 fixedRows 完全一致（均为空数组）
+    assert.deepStrictEqual(resML.fixedRows, resLM.fixedRows, '两渠道行序 fixedRows 必须完全一致');
+    // ③ 两序 stats 口径完全一致：组1（含歧义 ID）与组2 均判失败
+    assert.strictEqual(resML.stats.groupMatched, 0);
+    assert.strictEqual(resLM.stats.groupMatched, 0);
+    assert.strictEqual(resML.stats.groupFailed, 2, '组1 组2 均失败');
+    assert.strictEqual(resLM.stats.groupFailed, 2, '组1 组2 均失败');
+    assert.strictEqual(resML.stats.groupTouched, 2);
+    assert.strictEqual(resLM.stats.groupTouched, 2);
+    assert.deepStrictEqual(
+      { matched: resML.stats.groupMatched, failed: resML.stats.groupFailed, touched: resML.stats.groupTouched },
+      { matched: resLM.stats.groupMatched, failed: resLM.stats.groupFailed, touched: resLM.stats.groupTouched },
+      '两渠道行序 stats 口径必须完全一致'
+    );
+    // ④ warn 与 stats 一致：歧义 ID 一次性列出涉及全部组号（组1、组2），warn 文案口径与失败计数对齐
+    const wML = resML.warnings.find((x) => x.code === 'link-id-ambiguous');
+    const wLM = resLM.warnings.find((x) => x.code === 'link-id-ambiguous');
+    assert.ok(wML && wLM);
+    assert.deepStrictEqual([...wML.groups].sort(), ['1', '2'], 'warn 列全歧义 ID 涉及组号');
+    assert.deepStrictEqual([...wLM.groups].sort(), ['1', '2']);
+    assert.strictEqual(wML.reconLinkId, 'RID-L');
   });
 });
 
