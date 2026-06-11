@@ -53,6 +53,8 @@ const {
   readSharedStrings,
   lettersToIndex
 } = require('../pending-import/streaming-xlsx-reader');
+// v3.0.4 块 A · A1：JSZip loadAsync 前的入口尺寸预检（≥2^31 抛明确中文错误，预检自身失败 fail-open）。
+const { assertXlsxEntriesUnderLimit } = require('../pending-import/xlsx-size-preflight');
 
 function xmlAttrUnescape(s) {
   if (s.indexOf('&') < 0) return s;
@@ -315,6 +317,15 @@ function buildStreamReader({
         }
       );
     }
+
+    // v3.0.4 块 A · A1：预检 entry 解压尺寸（≥2^31 → 抛明确中文错误）；预检自身失败 fail-open。
+    //   PR#71 二轮 codex review（P2）：本 reader 只 inflate locateFirstSheet 定位出的**第一个** sheet
+    //   （下方 scanWorksheet(zip.file(entryPath))）+ xl/sharedStrings.xml（上方 readSharedStrings），
+    //   不遍历其他 worksheet。目标 sheet 名要在 locateFirstSheet 解析 workbook.xml/rels 后才确定，故把预检
+    //   挪到这里、只检该目标 sheet（sheetEntryNames=[entryPath]）+ sharedStrings——其他未 inflate 的 sheet
+    //   即便超限也不应误拒。预检仍走独立 yauzl 读中央目录、且在 inflate 目标 sheet 前，不会让 JSZip 撞崩点。
+    //   注：JSZip.loadAsync 与 locateFirstSheet（仅解压极小的 workbook.xml/rels）不会触发大 entry 的 inflate。
+    await assertXlsxEntriesUnderLimit(filePath, { errorCode, sheetEntryNames: [entryPath] });
 
     let dataRows = 0;
     const tick = () => {

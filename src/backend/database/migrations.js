@@ -1882,6 +1882,123 @@ function ensureJpmDispatchOrderScenarioSeed(db) {
   return { status: 'seeded', inserted, skippedExisting, skippedConflict };
 }
 
+// v3.0.4 块 E 需求1：BOC 调拨订单修复写死场景（🔴 资金红线 —— 默认休眠 enabled=0）。
+//
+// 与 JPM 种子（JPM_DISPATCH_ORDER_SCENARIO，上方）byte-for-byte 同范式：
+//   - category='gateway-recon-id-fix'（CHECK 已含，无需扩枚举）。
+//   - config 不带 funcCategory → 「功能类别」回退 SCENARIO_CATEGORY_LABELS['gateway-recon-id-fix']=「网关对账单修复」。
+//   - config.subCategory='boc-dispatch-order-fix' 是引擎分流键（runReconIdFix 据此走 BOC 引擎）。
+//   - channelName 收进 config（引擎从 scenario.config.channelName 读、常量兜底；R-10）；JPM 收 merchantId，BOC 收 channelName。
+//   - priority=3 同 JPM；database.js init 链在 ensureJpmDispatchOrderScenarioSeed() 之后调用本函数 → 新库 id 紧随 JPM →
+//     `priority DESC, id ASC` 下 BOC 排在 JPM 之后（场景管理网关 compact 序号自然 = 2）。
+const BOC_DISPATCH_ORDER_SCENARIO = {
+  category: 'gateway-recon-id-fix',
+  name: 'BOC调拨订单修复',
+  priority: 3, // 兜底值；与 JPM 同 priority，靠 id ASC 排在 JPM 之后
+  config: {
+    subCategory: 'boc-dispatch-order-fix',
+    channelName: 'BOC' // 引擎读 config.channelName，常量兜底（boc-dispatch-order-fields.BOC_CHANNEL_NAME）
+  }
+};
+
+// v3.0.4 块 E 需求1：BOC 场景独立 seed marker（绕开全局 marker 短路，仿 JPM）。
+const BOC_DISPATCH_ORDER_SCENARIO_SEEDED_MARKER = 'boc_dispatch_order_scenario_seeded';
+
+// v3.0.4 块 E 需求1：BOC 调拨订单修复写死场景独立补种（🔴 资金红线 —— 默认休眠 enabled=0）。
+//
+// 幂等/删除终态（与 ensureJpmDispatchOrderScenarioSeed byte-for-byte 同语义）：
+//   - 凭 is_builtin=1 + category='gateway-recon-id-fix' + config_json 含
+//     "subCategory":"boc-dispatch-order-fix" 定位，已存在 → 跳过不覆盖（保护用户对启停/改名/config 的改动）。
+//   - 独立 marker(boc_dispatch_order_scenario_seeded) 一旦写过 → 整体不再 seed，用户删除后重启不复活。
+//   - 默认 enabled=0（Layer 1 引擎层休眠，零风险）。
+//
+// 前置：scenarios 表存在 + CHECK 已含 'gateway-recon-id-fix' + app_settings 存在。
+// 返回 { status, inserted?, skippedExisting?, skippedConflict? }（status 取值同 JPM 种子）。
+function ensureBocDispatchOrderScenarioSeed(db) {
+  // 前置 1：scenarios 表 CHECK 必须已含 'gateway-recon-id-fix'。
+  const tableSqlRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'"
+  ).get();
+  if (!tableSqlRow || !tableSqlRow.sql) return { status: 'skipped-no-scenarios-table' };
+  if (!tableSqlRow.sql.includes("'gateway-recon-id-fix'")) {
+    return { status: 'skipped-check-not-extended' };
+  }
+
+  // 前置 2：独立 marker 已写 → 整体不再 seed（删除终态保护：用户删该场景后重启不复活）。
+  let markerRow;
+  try {
+    markerRow = db
+      .prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?')
+      .get(BOC_DISPATCH_ORDER_SCENARIO_SEEDED_MARKER);
+  } catch (_e) {
+    return { status: 'skipped-no-settings-table' };
+  }
+  if (markerRow && String(markerRow.setting_value) === 'true') {
+    return { status: 'already-seeded' };
+  }
+
+  const now = new Date().toISOString();
+  // 定位：凭 is_builtin + gateway-recon-id-fix + config_json 含特定 subCategory（已存在则跳过不覆盖用户改动）。
+  const locate = db.prepare(
+    `SELECT id FROM scenarios
+      WHERE is_builtin = 1
+        AND category = 'gateway-recon-id-fix'
+        AND config_json LIKE ?`
+  );
+  // enabled 硬编码 0（默认休眠）；category 硬编码 'gateway-recon-id-fix'；channel_id 硬编码 1。
+  const insert = db.prepare(`
+    INSERT INTO scenarios
+      (category, name, priority, enabled, config_json, is_builtin, channel_id, created_at, updated_at)
+    VALUES ('gateway-recon-id-fix', ?, ?, 0, ?, 1, 1, ?, ?)
+  `);
+
+  let inserted = 0;
+  let skippedExisting = 0;
+  let skippedConflict = 0;
+  db.exec('BEGIN');
+  try {
+    const likePattern = '%"subCategory":"boc-dispatch-order-fix"%';
+    const existing = locate.get(likePattern);
+    if (existing) {
+      skippedExisting = 1;
+    } else {
+      try {
+        insert.run(
+          BOC_DISPATCH_ORDER_SCENARIO.name,
+          BOC_DISPATCH_ORDER_SCENARIO.priority,
+          JSON.stringify(BOC_DISPATCH_ORDER_SCENARIO.config),
+          now,
+          now
+        );
+        inserted = 1;
+      } catch (insErr) {
+        // UNIQUE(channel_id, name) 冲突（用户已有同名场景）→ 跳过保留用户场景，不中断。
+        const msg = insErr && insErr.message ? insErr.message : String(insErr);
+        if (/UNIQUE constraint failed/i.test(msg)) {
+          skippedConflict = 1;
+        } else {
+          throw insErr;
+        }
+      }
+    }
+
+    // 写独立 marker（仅首次启动写一次；此后删除不复活）。
+    db.prepare(`
+      INSERT INTO app_settings (setting_key, setting_value, updated_at)
+      VALUES (?, 'true', ?)
+      ON CONFLICT(setting_key) DO UPDATE
+      SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+    `).run(BOC_DISPATCH_ORDER_SCENARIO_SEEDED_MARKER, now);
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+
+  return { status: 'seeded', inserted, skippedExisting, skippedConflict };
+}
+
 // v2.1.9 N5：DB schema 总迁移函数（🔴 资金红线 + 破坏性 schema 变更，不可逆）
 //
 // 步骤：
@@ -2827,6 +2944,52 @@ function ensureAdmBankDepositSupport(db) {
   }
 }
 
+// v3.0.4 块 E（需求2）：BOC 链接表派生两张隐藏表（linked_boc_fx_settlement + linked_boc_bank_deposit）。
+//   linked_boc_fx_settlement：外汇交割表导入后按物理行序分组派生（33+3 字段进 raw_json，热列单列）。
+//   linked_boc_bank_deposit：银行对账单 Channel=BOC 行派生（提取「银行单交易编号」），供 2.5 回填。
+//   🔴 资金/数据红线说明：纯新增隐藏表，无破坏性 DDL（CREATE TABLE / INDEX IF NOT EXISTS 幂等）；
+//      与现有链接表完全隔离、无调用顺序依赖；整表覆盖语义由 replaceBocFxLink / replaceBocBankDeposit 仓储函数实现。
+//   🔴 两表均绝不进 ALL_TABLE_KEYS / 不写 linked_table_meta（前端弹窗不可见，与 ADM 隐藏表同范式）。
+//   raw_json 存整行（数据真相）；transaction_no / group_no / maturity_date / bank_txn_no 落列供索引与匹配热路径。
+//   独立于 ensureLinkedTableSupport，在 database.js 初始化序列里紧随 ensureAdmBankDepositSupport 调用。
+function ensureBocFxLinkSupport(db) {
+  db.exec('BEGIN');
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS linked_boc_fx_settlement (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        transaction_no TEXT,
+        group_no TEXT,
+        allocation_no TEXT,
+        recon_link_id TEXT,
+        maturity_date TEXT,
+        source_row INTEGER,
+        raw_json TEXT NOT NULL,
+        imported_at TEXT NOT NULL
+      );
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_boc_fx_settlement_txn ON linked_boc_fx_settlement(transaction_no);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_boc_fx_settlement_group ON linked_boc_fx_settlement(group_no);');
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS linked_boc_bank_deposit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bank_txn_no TEXT,
+        reconciliation_id TEXT,
+        bill_date TEXT,
+        raw_json TEXT NOT NULL,
+        imported_at TEXT NOT NULL
+      );
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_linked_boc_bank_deposit_txn ON linked_boc_bank_deposit(bank_txn_no);');
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀，无 UI）。
 //   每次导入银行对账单后去重 upsert 两类枚举值：value_type='channel'（Channel 值）/
 //   'channel-region'（<Channel>-<地区> 拼接值）。供后续 ③ 中台退款回填引擎读库 + 业务审计。
@@ -2904,6 +3067,8 @@ module.exports = {
   ensureRefundBackfillScenarioSeed,
   // v2.1.16-beta.5 需求4：JPM 调拨订单修复写死场景独立补种（默认休眠 enabled=0，独立 marker；category=gateway-recon-id-fix）
   ensureJpmDispatchOrderScenarioSeed,
+  // v3.0.4 块 E 需求1：BOC 调拨订单修复写死场景独立补种（默认休眠 enabled=0，独立 marker；category=gateway-recon-id-fix）
+  ensureBocDispatchOrderScenarioSeed,
   // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线）
   ensureFundTypeAchReturnConfigMigration,
   // v2.1.10 N4-cont-2：diff_rows 2 FK 加 ON DELETE CASCADE（🔴 资金红线 + 不可逆 DB schema）
@@ -2913,6 +3078,8 @@ module.exports = {
   ensureLinkedTableSupport,
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表（紧随 linked 表，独立幂等迁移函数）
   ensureAdmBankDepositSupport,
+  // v3.0.4 块 E 需求2：BOC 链接表两张隐藏表（紧随 ADM 表，独立幂等迁移；不进 ALL_TABLE_KEYS）
+  ensureBocFxLinkSupport,
   // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀，独立迁移函数）
   ensureChannelEnumSupport,
   ensureBuiltinScenarioNamesUpdate,

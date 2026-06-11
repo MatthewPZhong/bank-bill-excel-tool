@@ -384,6 +384,64 @@ test.describe('R5场景2 — ⑦ ReconciliationId 原值非空被覆盖', () => 
   });
 });
 
+// ---- usedBankRowIds 返回字段（🔴 v3.0.4 块 F：含同值未写行）---------------
+
+test.describe('R5场景2 — usedBankRowIds 完整消费集（含同值未写行）', () => {
+  test('实写命中行 → usedBankRowIds 含该 _rowId（与 modification 一致）', () => {
+    const gws = [gwRow({ reconId: 'GW-1', amount: 100, billdate: '2026-06-07' })];
+    const banks = [bankRow({ rowId: 'b1', debit: 100, billDate: '2026-06-07', reconId: '' })];
+
+    const { modifications, usedBankRowIds } = runRound5FundTransferBackfill(gws, banks);
+    assert.equal(modifications.length, 1);
+    assert.ok(usedBankRowIds instanceof Set, 'usedBankRowIds 应为 Set');
+    assert.ok(usedBankRowIds.has('b1'), '实写命中行进消费集');
+    assert.equal(usedBankRowIds.size, 1);
+  });
+
+  test('🔴 同值未写命中行 → 不产 modification 但 usedBankRowIds 仍含该 _rowId（窄缺口闭合核心断言）', () => {
+    // 银行原值已等于网关 reconid → backfill 内 old===nv 不 record（modifications 空），
+    //   但 usedBankRowId.add(chosen._rowId) 已消费 → 必须出现在 usedBankRowIds。
+    const gws = [gwRow({ reconId: 'SAME-RECON', billdate: '2026-06-07' })];
+    const banks = [bankRow({ rowId: 'b_same', debit: 100, billDate: '2026-06-07', reconId: 'SAME-RECON' })];
+
+    const { modifications, usedBankRowIds } = runRound5FundTransferBackfill(gws, banks);
+    assert.equal(modifications.length, 0, '同值不产 modification');
+    assert.ok(usedBankRowIds instanceof Set);
+    assert.ok(
+      usedBankRowIds.has('b_same'),
+      '同值未写行虽不在 modifications，但已被 1v1 消费 → 必须出现在 usedBankRowIds（供 R5s2b 剔除）'
+    );
+    assert.equal(usedBankRowIds.size, 1);
+  });
+
+  test('双方向各消费一行 → usedBankRowIds 聚合两方向（跨 direction union）', () => {
+    const gws = [
+      gwRow({ tradeType: 'FundTransfer-out', amount: 500, reconId: 'GW-OUT' }),
+      gwRow({ tradeType: 'FundTransfer-in', amount: 600, reconId: 'GW-IN' })
+    ];
+    const banks = [
+      bankRow({ rowId: 'bo', fundType: 'FundTransfer-out', credit: 0, debit: 500, reconId: '' }),
+      bankRow({ rowId: 'bi', fundType: 'FundTransfer-in', credit: 600, debit: 0, reconId: '' })
+    ];
+    const { usedBankRowIds } = runRound5FundTransferBackfill(gws, banks);
+    assert.ok(usedBankRowIds.has('bo') && usedBankRowIds.has('bi'), '两方向消费行都进聚合集');
+    assert.equal(usedBankRowIds.size, 2);
+  });
+
+  test('未命中 / 空入参 → usedBankRowIds 为空 Set（不为 undefined）', () => {
+    // 字段不等 → 不消费
+    const r1 = runRound5FundTransferBackfill(
+      [gwRow({ merchantId: 'M001', reconId: 'GW-1' })],
+      [bankRow({ rowId: 'b1', merchantId: 'M999', debit: 100 })]
+    );
+    assert.ok(r1.usedBankRowIds instanceof Set && r1.usedBankRowIds.size === 0, '未命中 → 空 Set');
+    // 空入参
+    assert.ok(runRound5FundTransferBackfill([], []).usedBankRowIds instanceof Set);
+    assert.equal(runRound5FundTransferBackfill([], []).usedBankRowIds.size, 0);
+    assert.ok(runRound5FundTransferBackfill(null, null).usedBankRowIds instanceof Set);
+  });
+});
+
 // ---- ⑧ 多候选 tie-break -----------------------------------------------
 
 test.describe('R5场景2 — ⑧ 多候选 tie-break 取 bankPool 原序最前', () => {

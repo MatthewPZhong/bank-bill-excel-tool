@@ -21,6 +21,7 @@
 
 'use strict';
 
+const path = require('node:path');
 const { validateContract, ContractValidationError } = require('./contract');
 const zipReader = require('./zip-reader');
 const rowScanner = require('./row-scanner');
@@ -28,7 +29,8 @@ const pipeline = require('./pipeline');
 
 const { CancelError, PipelineError } = pipeline;
 
-// 错误累积上限（spec §2.3）：与 import-worker / 收单同口径。
+// 错误累积上限默认值（spec §2.3）：与 import-worker / 收单同口径。
+//   v3.0.4 PR-B E4：契约可声明 maxCollectedErrors 覆盖该默认值（如 pending/biz-op 用 1000）。
 const MAX_COLLECTED_ERRORS = 100;
 
 // ─────────────────────────────────────────────────────────────────
@@ -206,11 +208,15 @@ async function importFiles({
   }
   const contract = validateContract(contractMod);   // throw ContractValidationError 即拒绝启动
 
-  // overwrite 模式必须声明删除语句（防误删全表）。
-  if (mode === 'overwrite' && (!contractMod.deleteSqlForOverwrite || typeof contractMod.deleteSqlForOverwrite !== 'string')) {
+  // overwrite 模式必须声明删除范围（防误删全表）。
+  //   v3.0.4 PR-B E1：多语句覆盖删除 deleteForOverwrite（函数）与单串 deleteSqlForOverwrite（string）互斥共存、
+  //     函数式优先；两者皆缺才拒绝启动。
+  const hasMultiDelete = typeof contractMod.deleteForOverwrite === 'function';
+  const hasSingleDelete = typeof contractMod.deleteSqlForOverwrite === 'string' && contractMod.deleteSqlForOverwrite.length > 0;
+  if (mode === 'overwrite' && !hasMultiDelete && !hasSingleDelete) {
     throw new ContractValidationError(
-      "契约无效：mode='overwrite' 要求契约声明 deleteSqlForOverwrite（覆盖删除语句）",
-      ['覆盖导入需明确删除范围，缺 deleteSqlForOverwrite 拒绝启动（防误删全表）']
+      "契约无效：mode='overwrite' 要求契约声明 deleteForOverwrite（多语句）或 deleteSqlForOverwrite（单串）",
+      ['覆盖导入需明确删除范围，二者皆缺拒绝启动（防误删全表）']
     );
   }
 
@@ -249,19 +255,65 @@ async function importFiles({
     const baseMonthKey = monthKey || peekedMonthKey || null;
 
     // ── 大事务 ──
+    // E4：错误样本上限（契约声明 maxCollectedErrors 覆盖默认 100；与 worker 侧同口径）。
+    const maxErrors = (contract.maxCollectedErrors && contract.maxCollectedErrors > 0)
+      ? contract.maxCollectedErrors : MAX_COLLECTED_ERRORS;
+    // E3：空文件整批拒绝开关（worker parsed.importedCount===0 = 「文件为空或只有表头行」 ⇒ 批级错误）。
+    //   ⚠️ per-file 语义：任一文件无数据行即拒（pending 旧链路 worker.js:148-151 逐文件判）。
+    const rejectEmptyFiles = contract.rejectEmptyFiles === true;
+    // F1（v3.0.4 PR #71 SR）：批级空数据整批拒绝开关（写循环结束后 totalImported===0 ⇒ 批级错误）。
+    //   ⚠️ 与 E3 rejectEmptyFiles（per-file）语义区分：rejectEmptyBatch 是「批级全空才拒」（部分文件空不拒），
+    //     对齐 flow 旧链路 import-worker.js:356-365「dataRowCount===0（跨所有文件总和）→ ROLLBACK」。
+    //   🔴 必须由引擎在 COMMIT 前判：overwrite 模式事务头已 DELETE，若 session 事后判空文件返回 rejected，
+    //     则删除已 COMMIT 而无新数据净入 = 数据丢失回归（biz-op flow 全空 overwrite 导入）。引擎置批级错误
+    //     走既有整批 ROLLBACK 路径，DELETE 与 INSERT 在同一事务原子撤销，与 flow 旧链路数据净零变化 byte-for-byte。
+    //   不声明 ⇒ 行为零变化（收单/pending 不声明）。
+    const rejectEmptyBatch = contract.rejectEmptyBatch === true;
+    // E5：写侧跨文件去重 Set（契约声明 dedupeKeyOf 时维护；命中 → 行级错误不 INSERT）。
+    const hasDedupe = typeof contractMod.dedupeKeyOf === 'function';
+    const seenDedupeKeys = hasDedupe ? new Set() : null;
+    // E5 cells 缺口补丁：写侧行级错误（去重命中 / INSERT 失败）从 batch 项 params 逆推 cells，
+    //   让 captureRowValues 时写侧行级错误也带原始整行 cells（pending 重复行报错 xlsx 需要，对齐旧链路 worker.js:127）。
+    //   仅 captureRowValues 开启 + 契约声明 cellsOf 时启用；未声明 ⇒ 写侧行级错误不带 cells（行为零变化）。
+    const captureRowValuesWrite = contract.captureRowValues === true;
+    const cellsOfFn = (captureRowValuesWrite && typeof contractMod.cellsOf === 'function')
+      ? contractMod.cellsOf : null;
+    // 从 batch 项安全逆推 cells（cellsOf 抛错不应中断导入；失败 → 不带 cells，退化为现状）。
+    const deriveCellsFromParams = (params) => {
+      if (!cellsOfFn) return undefined;
+      try {
+        const c = cellsOfFn({ params });
+        return Array.isArray(c) ? c : undefined;
+      } catch (_e) {
+        return undefined;
+      }
+    };
+
     let totalErrorTotal = 0;          // 全量行级错误数（跨文件累加，含截断前总数）
-    const collectedErrors = [];       // 截断到 MAX_COLLECTED_ERRORS 的错误样本
+    const collectedErrors = [];       // 截断到 maxErrors 的错误样本
     const perFileErrorTotals = new Map(); // sourceFile → 行级错误总数（供契约 formatBatchError 精确计数，不受样本截断影响）
-    let aborted = false;              // 整批拒绝标志（表头错 / 行级错 / 跨月）
+    let aborted = false;              // 整批拒绝标志（表头错 / 行级错 / 跨月 / 空文件 / 空批）
     let abortError = null;            // 整批拒绝时的首要错误（表头错优先抛原始 BigTableImportError）
+    let emptyFileError = null;        // E3：空文件批级错误（{message, detailLines}），整批 ROLLBACK
+    // F2（v3.0.4 PR #71 SR）：空文件 fatal 错误清单（收集**全部**空文件，非仅首个）。
+    //   旧链路 pending worker.js:148-151 逐文件 push `{ severity:'fatal', file, message }` 与行级错误并列；
+    //   引擎在此把每个空文件累积为 { file, message }，最终挂到 error.structuredImportErrors.fatalErrors，
+    //   session restore 还原为旧形态 `{ severity:'fatal', file, message }` 条目与行级错误并列。
+    //   ⚠️ rejectEmptyFiles 下，空文件不再短路 aborted（继续扫后续文件收集行级错误 + 其余空文件），
+    //     整批拒绝由「fatalErrors 非空 || 行级错误」在写循环后统一判定。
+    const fatalErrors = [];           // [{ file, message }]（空文件 / 系统错），整批 ROLLBACK
+    let emptyBatchError = null;       // F1：批级空数据错误（{message, detailLines}），整批 ROLLBACK
     let deletedCount = 0;
 
     // 记一条行级错误：累加跨文件总数 + 按文件计数 + 截断样本（统一入口，保证 perFileErrorTotals 与 totalErrorTotal 同步）。
-    const recordRowError = (sourceFile, rowIndex, reason) => {
+    //   E4：可附 cells（捕获增强；不传时记录形态与现状一致）。
+    const recordRowError = (sourceFile, rowIndex, reason, cells) => {
       totalErrorTotal += 1;
       perFileErrorTotals.set(sourceFile, (perFileErrorTotals.get(sourceFile) || 0) + 1);
-      if (collectedErrors.length < MAX_COLLECTED_ERRORS) {
-        collectedErrors.push({ sourceFile, rowIndex, reason });
+      if (collectedErrors.length < maxErrors) {
+        const e = { sourceFile, rowIndex, reason };
+        if (cells !== undefined) e.cells = cells;
+        collectedErrors.push(e);
       }
     };
 
@@ -269,16 +321,32 @@ async function importFiles({
     // prepared INSERT（contract.insertSql；列即存储契约）。事务内一次 prepare，百万次复用。
     const insertStmt = db.prepare(contract.insertSql);
 
-    // overwrite：事务内先 DELETE（contract.deleteSqlForOverwrite + 引擎参数）。
-    //   删除参数约定：[baseMonthKey]（覆盖删除按月份；契约 deleteSqlForOverwrite 用 ? 占位 month_key）。
-    //   契约可声明 deleteParamsFromMonthKey(monthKey)=>[...] 自定义参数；缺省用 [baseMonthKey]。
+    // overwrite：事务内先 DELETE。
+    //   v3.0.4 PR-B E1：函数式 deleteForOverwrite(deleteKey)=>Array<{sql,params}> 优先（多语句、顺序敏感，
+    //     如 pending 6 表覆盖删除链）——引擎大事务内按返回顺序逐条 prepare+run，deletedCount=各语句 changes 之和；
+    //     否则回退既有单串 deleteSqlForOverwrite + deleteParamsFromMonthKey（缺省参数 [baseMonthKey]），行为一字不变。
     if (mode === 'overwrite') {
       try {
-        const delParams = typeof contractMod.deleteParamsFromMonthKey === 'function'
-          ? contractMod.deleteParamsFromMonthKey(baseMonthKey)
-          : [baseMonthKey];
-        const delResult = db.prepare(contractMod.deleteSqlForOverwrite).run(...delParams);
-        deletedCount = delResult && Number.isFinite(delResult.changes) ? delResult.changes : 0;
+        if (typeof contractMod.deleteForOverwrite === 'function') {
+          const stmts = contractMod.deleteForOverwrite(baseMonthKey);
+          if (!Array.isArray(stmts)) {
+            throw new Error('deleteForOverwrite 必须返回 Array<{sql,params}>');
+          }
+          for (const s of stmts) {
+            if (!s || typeof s.sql !== 'string' || !s.sql) {
+              throw new Error('deleteForOverwrite 返回项缺 sql 字符串');
+            }
+            const params = Array.isArray(s.params) ? s.params : [];
+            const r = db.prepare(s.sql).run(...params);
+            deletedCount += (r && Number.isFinite(r.changes)) ? r.changes : 0;
+          }
+        } else {
+          const delParams = typeof contractMod.deleteParamsFromMonthKey === 'function'
+            ? contractMod.deleteParamsFromMonthKey(baseMonthKey)
+            : [baseMonthKey];
+          const delResult = db.prepare(contractMod.deleteSqlForOverwrite).run(...delParams);
+          deletedCount = delResult && Number.isFinite(delResult.changes) ? delResult.changes : 0;
+        }
       } catch (delErr) {
         safeRollback(db);
         throw new PipelineError(`覆盖导入：DELETE 失败 — ${delErr && delErr.message ? delErr.message : String(delErr)}`, []);
@@ -307,7 +375,24 @@ async function importFiles({
         return;
       }
 
-      // 累积本文件 mapRow 阶段行级错误（worker 内已截断样本到 100，rowErrorTotal 是全量真实数）。
+      // E3 空文件整批拒绝：表头合法但本文件无数据行（worker parsed.importedCount===0 = 「文件为空或只有表头行」，
+      //   语义平移 pending worker.js:148-151）。契约声明 rejectEmptyFiles 时 → 批级错误（整批 ROLLBACK）。
+      //   ⚠️ 必须用 parsed.importedCount（解析侧 mapRow 通过的数据行数），不能用「写入后行数」——
+      //     后者会把「行全被去重/跨月拒绝」误判为空文件（那是行级错误路径，非空文件）。
+      //   F2（PR #71 SR）：收集**全部**空文件（不短路 aborted）——旧链路 worker.js:148-151 逐文件 push fatal
+      //     与行级错误并列；多个空文件应各出一条。本文件记一条空文件 fatal 后继续 return（无数据行无须再走 INSERT），
+      //     后续文件继续扫描收集其余空文件 + 行级错误。整批拒绝由写循环后「fatalErrors 非空 || 行级错」统一判。
+      if (rejectEmptyFiles && (parsed.importedCount || 0) === 0) {
+        const msg = typeof contractMod.formatEmptyFileError === 'function'
+          ? contractMod.formatEmptyFileError(parsed.sourceFile)
+          : `${parsed.sourceFile}：文件为空或只有表头行`;
+        fatalErrors.push({ file: parsed.sourceFile, message: msg });
+        // 兼容既有抛错路径：emptyFileError 仍保留「首个空文件」消息（无行级错误时作主消息）。
+        if (!emptyFileError) emptyFileError = { message: msg, detailLines: [] };
+        return;
+      }
+
+      // 累积本文件 mapRow 阶段行级错误（worker 内已截断样本到 maxErrors，rowErrorTotal 是全量真实数）。
       //   ⚠️ perFileErrorTotals 加 rowErrorTotal（全量），样本仅前若干条 —— 否则 formatBatchError 的「N 行」会少算。
       if (parsed.rowErrorTotal > 0) {
         totalErrorTotal += parsed.rowErrorTotal;
@@ -316,13 +401,16 @@ async function importFiles({
           (perFileErrorTotals.get(parsed.sourceFile) || 0) + parsed.rowErrorTotal
         );
         for (const e of (parsed.errors || [])) {
-          if (collectedErrors.length < MAX_COLLECTED_ERRORS) {
-            collectedErrors.push({ sourceFile: parsed.sourceFile, rowIndex: e.rowIndex, reason: e.reason });
+          if (collectedErrors.length < maxErrors) {
+            // E4：worker 错误记录带 cells 时透传（captureRowValues 声明），否则形态与现状一致。
+            const ce = { sourceFile: parsed.sourceFile, rowIndex: e.rowIndex, reason: e.reason };
+            if (e.cells !== undefined) ce.cells = e.cells;
+            collectedErrors.push(ce);
           }
         }
       }
 
-      // 跨月校验（每行 monthKeyOf ≠ baseMonthKey → 行级错误）+ 按文件序 INSERT。
+      // 跨月校验（每行 monthKeyOf ≠ baseMonthKey → 行级错误）+ E5 写侧去重 + 按文件序 INSERT。
       const batch = parsed.batch || [];
       const monthKeys = parsed.monthKeys || [];
       for (let r = 0; r < batch.length; r++) {
@@ -334,11 +422,30 @@ async function importFiles({
           recordRowError(parsed.sourceFile, srcRowR, `跨月份混杂：期望 ${baseMonthKey}，实际 ${mk}`);
           continue;   // 跨月行不入库
         }
+        // E5 写侧跨文件去重（契约声明 dedupeKeyOf 时）：key 命中 Set → 行级错误不 INSERT；
+        //   未命中 → add 后 INSERT。按文件序单写 ⇒ 与旧串行去重结果确定性一致。
+        if (seenDedupeKeys) {
+          const k = batch[r].dedupeKey;
+          if (k != null && seenDedupeKeys.has(k)) {
+            const msg = typeof contractMod.formatDuplicateError === 'function'
+              ? contractMod.formatDuplicateError({ key: k })
+              : `发现重复行（key ${k}）`;
+            // E5 cells 缺口：captureRowValues + cellsOf 时附整行 cells（pending 报错 xlsx 需要）。
+            recordRowError(parsed.sourceFile, srcRowR, msg, deriveCellsFromParams(batch[r].params));
+            continue;   // 重复行不入库
+          }
+          if (k != null) seenDedupeKeys.add(k);
+        }
         try {
           insertStmt.run(...batch[r].params);
         } catch (insErr) {
           // INSERT 失败（如 UNIQUE 冲突）→ 行级错误累积（语义平移收单 streamImportOneFile catch）。
-          recordRowError(parsed.sourceFile, srcRowR, insErr && insErr.message ? insErr.message : String(insErr));
+          // E5 cells 缺口：captureRowValues + cellsOf 时附整行 cells（pending 报错 xlsx 需要）。
+          recordRowError(
+            parsed.sourceFile, srcRowR,
+            insErr && insErr.message ? insErr.message : String(insErr),
+            deriveCellsFromParams(batch[r].params)
+          );
           continue;
         }
         writtenTotal += 1;
@@ -352,8 +459,8 @@ async function importFiles({
         }
       }
 
-      // 错误累积达上限 → 提前置整批拒绝（与收单 MAX_COLLECTED_ERRORS 早退等价；DB 写已发生的部分由 ROLLBACK 撤销）。
-      if (collectedErrors.length >= MAX_COLLECTED_ERRORS) {
+      // 错误累积达上限 → 提前置整批拒绝（与收单 maxErrors 早退等价；DB 写已发生的部分由 ROLLBACK 撤销）。
+      if (collectedErrors.length >= maxErrors) {
         aborted = true;
       }
     };
@@ -379,16 +486,75 @@ async function importFiles({
       throw pipeErr;
     }
 
-    // 整批拒绝（表头错 / 行级错累计 / 跨月）→ ROLLBACK + 报错（不入任何行）。
-    if (aborted || collectedErrors.length > 0 || totalErrorTotal > 0) {
+    // F1（PR #71 SR）批级空数据整批拒绝：契约声明 rejectEmptyBatch 且写入总行数==0 → 批级错误（整批 ROLLBACK）。
+    //   🔴 必须在 COMMIT 前判（此处仍在大事务内）：overwrite 模式事务头已 DELETE，若漏判则 DELETE 随空批 COMMIT
+    //     = 数据丢失（flow 全空 overwrite 导入回归）。置 emptyBatchError 走下方既有整批 ROLLBACK 路径，
+    //     DELETE 与（零行）INSERT 同事务原子撤销 = flow 旧链路 dataRowCount===0 → ROLLBACK 的数据净零变化。
+    //   ⚠️ 仅当无其它整批拒绝原因（表头错/空文件/行级错）时才独立成因——若有行级错等更具体原因，按既有优先级抛。
+    //   writtenTotal===0 含「全文件空」与「有数据行但全被跨月/去重拒绝（已计行级错走 formatBatchError）」两态；
+    //     后者 totalErrorTotal>0 会优先走行级错误分支，emptyBatchError 仅在纯空批（无任何行级错）时生效。
+    if (rejectEmptyBatch && writtenTotal === 0
+      && !abortError && fatalErrors.length === 0 && totalErrorTotal === 0 && !emptyFileError) {
+      const msg = typeof contractMod.formatEmptyBatchError === 'function'
+        ? contractMod.formatEmptyBatchError()
+        : '文件无有效数据行';
+      emptyBatchError = { message: msg, detailLines: [] };
+    }
+
+    // 整批拒绝（表头错 / 行级错累计 / 跨月 / E3 空文件 / F2 fatalErrors / F1 空批）→ ROLLBACK + 报错（不入任何行）。
+    if (aborted || collectedErrors.length > 0 || totalErrorTotal > 0
+      || emptyFileError || fatalErrors.length > 0 || emptyBatchError) {
       safeRollback(db);
+      // 结构化错误元数据（附到抛出的 error 上，供消费方按需还原行级错误形态）：
+      //   v3.0.4 PR-C：pending session 需把引擎错误还原为现行 lastImportErrors 形态（severity/file/sheetRow/message/cells
+      //   + rowErrorTotal/rowErrorTruncated）以驱动报错 xlsx 导出。引擎在此把样本截断后的 collectedErrors（可带 cells）
+      //   + 真实总数 + 截断标志统一挂到 error.structuredImportErrors，纯附加字段——不读取者（如收单）完全无感。
+      const rowErrorTruncated = totalErrorTotal > collectedErrors.length;
+      // kind（PR #71 SR F2）：整批拒绝的**主要成因类别**，供 session restore 精确分流（不靠 collectedErrors 是否非空猜）。
+      //   'header'（表头错） / 'emptyBatch'（F1 批级空） / 'emptyFile'（E3 空文件） / 'row'（行级错误）。
+      //   多文件混批（一文件表头错 + 另一文件行级错）时：abortError 优先抛但 collectedErrors 非空，
+      //   session 据 kind==='header' 保旧 status:'error'+detailLines 形态（不被行级 rejected 分支误降级）。
+      const attachStructured = (err, kind) => {
+        try {
+          err.structuredImportErrors = {
+            collectedErrors: collectedErrors.slice(),
+            rowErrorTotal: totalErrorTotal,
+            rowErrorTruncated,
+            // F2（PR #71 SR）：空文件 / 系统级 fatal 错误清单（{file, message}），与行级错误并列还原。
+            //   旧链路 pending worker.js:148-151 逐文件 fatal 与行级错误同 errors[] 数组；session restore 据此
+            //   把 fatalErrors 还原为 `{severity:'fatal', file, message}` 条目与 row 级条目并列，不丢空文件信息。
+            //   纯附加字段——不读取者（如收单/flow rejected 行级路径）完全无感。
+            fatalErrors: fatalErrors.slice(),
+            kind: kind || 'row'
+          };
+        } catch (_e) { /* swallow */ }
+        return err;
+      };
       if (abortError) {
         // 表头错优先抛原始 BigTableImportError（带 detailLines）；契约声明 errorName 时改 name
         //   （收单契约 errorName='ImportValidationError'，让 session/handler 既有错误识别零改动 + byte-for-byte）。
         if (contractMod.errorName && typeof contractMod.errorName === 'string') {
           abortError.name = contractMod.errorName;
         }
-        throw abortError;
+        throw attachStructured(abortError, 'header');
+      }
+      // F1（PR #71 SR）批级空数据错误（无表头错/空文件/行级错时——纯空批是整批拒绝原因；flow 全空 overwrite 路径）。
+      if (emptyBatchError) {
+        const err = new zipReader.BigTableImportError(
+          emptyBatchError.message,
+          Array.isArray(emptyBatchError.detailLines) ? emptyBatchError.detailLines : []
+        );
+        if (contractMod.errorName && typeof contractMod.errorName === 'string') err.name = contractMod.errorName;
+        throw attachStructured(err, 'emptyBatch');
+      }
+      // E3 空文件批级错误（无行级错误时优先抛——空文件本身就是整批拒绝原因）。
+      if (emptyFileError) {
+        const err = new zipReader.BigTableImportError(
+          emptyFileError.message,
+          Array.isArray(emptyFileError.detailLines) ? emptyFileError.detailLines : []
+        );
+        if (contractMod.errorName && typeof contractMod.errorName === 'string') err.name = contractMod.errorName;
+        throw attachStructured(err, 'emptyFile');
       }
       // 契约声明 formatBatchError → 由业务契约决定错误文案（message/detailLines/name），引擎保持通用不内联业务文案。
       //   收单契约据此产出 `${sourceFile}：导入失败 N 行（...）` + `第 N 行：reason`，byte-for-byte 平移 reader。
@@ -399,18 +565,41 @@ async function importFiles({
           formatted && Array.isArray(formatted.detailLines) ? formatted.detailLines : []
         );
         if (formatted && formatted.name) err.name = formatted.name;
-        throw err;
+        throw attachStructured(err);
       }
       // 引擎默认格式（无 formatBatchError 的契约，如集成测试契约）。
       const truncated = totalErrorTotal > collectedErrors.length;
       const detailLines = collectedErrors
-        .slice(0, MAX_COLLECTED_ERRORS)
+        .slice(0, maxErrors)
         .map((e) => `[${e.sourceFile}] 第 ${e.rowIndex} 行：${e.reason}`);
       if (truncated) detailLines.push(`共 ${totalErrorTotal} 条错误，仅列前 ${collectedErrors.length} 条`);
-      throw new zipReader.BigTableImportError(
+      throw attachStructured(new zipReader.BigTableImportError(
         `导入失败：${totalErrorTotal} 行存在错误，整批未导入`,
         detailLines
-      );
+      ));
+    }
+
+    // ── E2 事务内收尾（COMMIT 前）：契约声明 finalizeForCommit 时，在大事务内执行收尾语句（与行 INSERT 原子）。
+    //   不暴露 db 句柄给契约——契约只返回 Array<{sql,params}>，引擎逐条 prepare+run。
+    //   收尾失败 → ROLLBACK 整批（资金敏感：避免有行无月元数据中间态，spec R-3）。
+    if (typeof contractMod.finalizeForCommit === 'function') {
+      try {
+        const sourceFiles = files.map((f) => path.basename(f));
+        const stmts = contractMod.finalizeForCommit({ totalImported: writtenTotal, sourceFiles });
+        if (!Array.isArray(stmts)) {
+          throw new Error('finalizeForCommit 必须返回 Array<{sql,params}>');
+        }
+        for (const s of stmts) {
+          if (!s || typeof s.sql !== 'string' || !s.sql) {
+            throw new Error('finalizeForCommit 返回项缺 sql 字符串');
+          }
+          const params = Array.isArray(s.params) ? s.params : [];
+          db.prepare(s.sql).run(...params);
+        }
+      } catch (finErr) {
+        safeRollback(db);
+        throw new PipelineError(`事务内收尾失败 — ${finErr && finErr.message ? finErr.message : String(finErr)}`, []);
+      }
     }
 
     // ── COMMIT ──

@@ -66,8 +66,22 @@ function serializeError(err, depth = 0) {
     context: err.context && typeof err.context === 'object'
       ? safeCloneContext(err.context)
       : null,
+    // 大表导入引擎整批拒绝错误专属（v3.0.4 PR-C）：结构化行级错误样本 + 总数 + 截断标志，
+    //   供 pending session 跨 worker 边界还原报错 xlsx（collectedErrors 含 cells）。JSON 安全（一层 clone 兜底）。
+    structuredImportErrors: err.structuredImportErrors && typeof err.structuredImportErrors === 'object'
+      ? safeCloneStructuredImportErrors(err.structuredImportErrors)
+      : null,
   };
   return out;
+}
+
+// 安全 clone structuredImportErrors（JSON.parse(JSON.stringify) 兜底；失败 → null，不阻断错误传递）。
+function safeCloneStructuredImportErrors(value) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (_e) {
+    return null;
+  }
 }
 
 // 安全 clone context（仅保留 JSON-safe primitive；函数 / Symbol / 循环引用直接丢弃）
@@ -128,6 +142,9 @@ function deserializeError(serialized) {
   }
   if (serialized.context && typeof serialized.context === 'object') {
     err.context = { ...serialized.context };
+  }
+  if (serialized.structuredImportErrors && typeof serialized.structuredImportErrors === 'object') {
+    err.structuredImportErrors = serialized.structuredImportErrors;
   }
   if (serialized.__truncated__) {
     err.__truncated__ = true;

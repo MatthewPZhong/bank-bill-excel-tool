@@ -24,6 +24,8 @@ const {
 const { FLOW_HEADERS, FLOW_DB_COLUMNS } = require('../vcc-op-calc-db/columns');
 const { validateFlowHeaders } = require('./validator');
 const { parseRowXml, readSharedStrings, lettersToIndex } = require('../pending-import/streaming-xlsx-reader');
+// v3.0.4 块 A · A1：JSZip loadAsync 前的入口尺寸预检（≥2^31 抛明确中文错误，预检自身失败 fail-open）。
+const { assertXlsxEntriesUnderLimit } = require('../pending-import/xlsx-size-preflight');
 
 const ERROR_CODE = 'VCC_OP_CALC_FLOW_HEADER_MISMATCH';
 const TEMPLATE_LABEL = '流水对账单';
@@ -176,6 +178,14 @@ function scanSheet(sheetEntry, sharedStrings, ctx) {
 //   返回 { fileName, filePath, dataRows }。损坏/无 sheet/未找到数据表 → 抛 FileValidationError。
 async function streamFlowFile(filePath, { onDataRow, onProgress } = {}) {
   const fileName = path.basename(filePath);
+
+  // v3.0.4 块 A · A1：在 JSZip.loadAsync 之前预检 entry 解压尺寸（≥2^31 → 抛明确中文错误）。
+  //   预检抛 FileValidationError（wrapReadError 原样透传，errorCode 对齐本 reader）；预检自身失败 fail-open。
+  //   PR#71 二轮 codex review（P2）：本 reader 多 sheet 顺序定位——下方 for(sheetNames) 循环逐个
+  //   scanSheet(zip.file(sheetName)) inflate 每个 worksheet 直到表头匹配才 break（最坏 inflate 全部 sheet）。
+  //   因此**必须检全部 worksheet**：用缺省 sheetEntryNames（不传 = 检中央目录里全部 worksheet + sharedStrings），
+  //   任一 sheet 超限都会在扫描时撞 JSZip 崩点，必须前置拦截。
+  await assertXlsxEntriesUnderLimit(filePath, { errorCode: ERROR_CODE });
 
   let zip;
   try {

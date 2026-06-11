@@ -149,38 +149,42 @@ test.describe('需求5 extra fee 匹配 — DS1-9（spec-alpha-req5 §4.1 资金
 // ========================================================================
 // v2.1.15 W2 — C3 匹配成功后把差额写入银行行 'Extra Fee' 并标黄（🔴 资金红线）
 // spec §4 W2：fee !== null（勾选且 amount 有限数）时，匹配成功除 assign 赋值外，
-//   还把差额(fee)写入银行行 'Extra Fee'；原值已等于差额则只锁定不标黄。
+//   还把差额(fee)写入银行行 'Extra Fee'；原值已等于写盘值则只锁定不标黄。
 //   assign 与 Extra Fee 写盘解耦：各自 old!==new 才 record（标黄），最后统一 lock + 消费 gw。
+// v3.0.4 F1 🔴（spec bank-recon-output-fixes §4 F1）：写盘取输入框值的【相反数】
+//   （normalizeCellValue(-fee)）。匹配语义不变，仅写盘值取反 → 故下列 Extra Fee 写盘断言
+//   期望 = 输入框值的相反数：fee=5 → '-5'；fee=-5 → '5'；fee=0 → '0'（不出 '-0'）；fee=0.5 → '-0.5'。
 // ========================================================================
-test.describe('runC3Scenario — W2 Extra Fee 写盘（v2.1.15 资金红线）', () => {
-  // 用例 1：fee 启用 + 匹配成功 + Extra Fee 原值空 → 写入差额且进 modifications（会标黄）
-  test('W2-1 fee 启用 + 命中 + Extra Fee 原值空 → 写入差额并标黄', () => {
+test.describe('runC3Scenario — W2 Extra Fee 写盘（v2.1.15 资金红线 / v3.0.4 F1 取反）', () => {
+  // 用例 1：fee 启用 + 匹配成功 + Extra Fee 原值空 → 写入差额相反数且进 modifications（会标黄）
+  test('W2-1 fee 启用 + 命中 + Extra Fee 原值空 → 写入差额相反数并标黄', () => {
     const banks = [feeBankRow(105)]; // feeBankRow 不含 'Extra Fee' 字段 → 原值空
     const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 5 }), banks, [feeGwRow(100)]);
     // assign 命中
     assert.equal(narrativeMods(r), 1);
     assert.equal(banks[0].Narrative, 'GW-REF');
-    // Extra Fee 写入差额 '5'（normalizeCellValue(5)），写回到 bankRow，且进 modifications（标黄）
-    assert.equal(banks[0]['Extra Fee'], '5');
+    // v3.0.4 F1：Extra Fee 写入差额相反数 '-5'（normalizeCellValue(-5)），写回 bankRow，且进 modifications（标黄）
+    assert.equal(banks[0]['Extra Fee'], '-5');
     const ef = extraFeeMod(r);
     assert.ok(ef, 'Extra Fee 应进 modifications（会标黄）');
     assert.equal(ef.oldValue, '');
-    assert.equal(ef.newValue, '5');
+    assert.equal(ef.newValue, '-5');
     // 行 lock + gw 被消费（1v1 红线）
     assert.equal(r.lockedRowIds.size, 1);
   });
 
-  // 用例 2：fee 启用 + 匹配成功 + Extra Fee 原值已等于差额 → 不进 modifications（不标黄），但行仍 lock + gw 被消费
-  test('W2-2 fee 启用 + 命中 + Extra Fee 原值=差额 → 不 record 不标黄，但 lock + gw 消费', () => {
-    // 银行行 Extra Fee 原值已是 '5'；assign 也让 Narrative 已等于 gw 值 → 两段都不 record，但仍命中锁定
-    const banks = [{ 'Credit Amount': 105, 'Debit Amount': 0, Narrative: 'GW-REF', 'Extra Fee': '5' }];
+  // 用例 2：fee 启用 + 匹配成功 + Extra Fee 原值已等于写盘值（取反后） → 不进 modifications（不标黄），但行仍 lock + gw 被消费
+  test('W2-2 fee 启用 + 命中 + Extra Fee 原值=写盘相反数 → 不 record 不标黄，但 lock + gw 消费', () => {
+    // v3.0.4 F1：fee=5 写盘值为 '-5'；银行行 Extra Fee 原值已是 '-5'（同值平移）；assign 也让 Narrative 已等于 gw 值
+    //   → 两段都不 record，但仍命中锁定
+    const banks = [{ 'Credit Amount': 105, 'Debit Amount': 0, Narrative: 'GW-REF', 'Extra Fee': '-5' }];
     const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 5 }), banks, [feeGwRow(100)]);
     assert.equal(r.modifications.length, 0, 'assign 同值 + Extra Fee 同值 → 零 record（不标黄）');
-    assert.equal(banks[0]['Extra Fee'], '5', '原值保持不变');
+    assert.equal(banks[0]['Extra Fee'], '-5', '原值保持不变');
     assert.equal(r.lockedRowIds.size, 1, '仍 lock（first-match-wins 红线）');
     // gw 被消费验证：再放一条同额 bank，应找不到候选（gw 已用尽）
     const banks2 = [
-      { 'Credit Amount': 105, 'Debit Amount': 0, Narrative: 'GW-REF', 'Extra Fee': '5' },
+      { 'Credit Amount': 105, 'Debit Amount': 0, Narrative: 'GW-REF', 'Extra Fee': '-5' },
       feeBankRow(105)
     ];
     const r2 = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 5 }), banks2, [feeGwRow(100)]);
@@ -225,12 +229,12 @@ test.describe('runC3Scenario — W2 Extra Fee 写盘（v2.1.15 资金红线）',
     const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 5 }), banks, [feeGwRow(100)]);
     // assign 不 record（同值）
     assert.equal(narrativeMods(r), 0, 'assign 同值 → 不 record（去掉 early-return 后不再跳过 Extra Fee）');
-    // Extra Fee 正确 record
+    // Extra Fee 正确 record（v3.0.4 F1：fee=5 写盘相反数 '-5'）
     const ef = extraFeeMod(r);
     assert.ok(ef, 'Extra Fee 应正确 record（解耦后不被 assign 同值跳过）');
     assert.equal(ef.oldValue, '');
-    assert.equal(ef.newValue, '5');
-    assert.equal(banks[0]['Extra Fee'], '5');
+    assert.equal(ef.newValue, '-5');
+    assert.equal(banks[0]['Extra Fee'], '-5');
     // 总 modifications 只有 Extra Fee 这 1 条
     assert.equal(r.modifications.length, 1);
     // 行 lock + gw 消费正确（1v1 红线）：再加一条同额 bank 应无候选
@@ -260,8 +264,8 @@ test.describe('runC3Scenario — W2 Extra Fee 写盘（v2.1.15 资金红线）',
     assert.equal(narrativeMods(r), 1);
     const ef = extraFeeMod(r);
     assert.ok(ef, 'custom 模式下 Extra Fee 段照常执行（只看 fee）');
-    assert.equal(ef.newValue, '5');
-    assert.equal(banks[0]['Extra Fee'], '5');
+    assert.equal(ef.newValue, '-5', 'v3.0.4 F1：fee=5 写盘相反数 -5（与 mode 无关，只看 fee）');
+    assert.equal(banks[0]['Extra Fee'], '-5');
   });
 });
 
@@ -425,48 +429,92 @@ test.describe('runC3Scenario — mode=custom + customValue 类型边界', () => 
 // ========================================================================
 // v2.1.15 W2 补强（team-lead 审查补充）：Extra Fee 写入【值】的资金正确性
 //   现有 W2-1~5 / DS1-9 覆盖「是否写 / 是否标黄 / 解耦 / 1v1 消费 / 匹配命中」；
-//   但差额值几乎都用 fee=5。本块集中验证不同差额（0 / 负 / 小数 / 浮点 / 覆盖非空原值）的
-//   写入值正确——金额值写错是资金红线最该防的。normalizeCellValue 实测：0→'0' / -5→'-5' / 0.5→'0.5'（非空、不漂移）。
+//   但差额值几乎都用 fee=5。本块集中验证不同差额（0 / 负 / 小数 / 浮点 / 覆盖非空原值）的写入值正确。
+// v3.0.4 F1 🔴（spec bank-recon-output-fixes §4 F1）：写盘取输入框值的【相反数】（normalizeCellValue(-fee)）。
+//   匹配语义不变（gwMatchesBank 仍用原值 fee），仅写盘值取反。本块逐条锁定取反后的写盘值：
+//   fee=0 → '0'（-0 边界：String(-0)==='0'，不出 '-0'）；fee=-5 → '5'（负输入对称取反核心）；
+//   fee=0.5 → '-0.5'；fee=0.1 → '-0.1'（写配置原值取反，非浮点漂移）；fee=5 覆盖原值 → '-5'。
 // ========================================================================
-test.describe('runC3Scenario — W2 Extra Fee 写入值资金正确性（v2.1.15 资金红线补强）', () => {
-  test('W2-V1 fee=0：差额 0 → Extra Fee 写 "0"（非空、不跳过，财务可见 0 成本）', () => {
+test.describe('runC3Scenario — W2 Extra Fee 写入值资金正确性（v2.1.15 补强 / v3.0.4 F1 取反）', () => {
+  test('W2-V1 fee=0：写盘相反数 -0 → Extra Fee 写 "0"（-0 边界 String(-0)==="0"，绝不出 "-0"）', () => {
     const banks = [feeBankRow(100)]; // gw100 + 0 = bank100 命中
     const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 0 }), banks, [feeGwRow(100)]);
     assert.equal(narrativeMods(r), 1, 'gw=bank=100 命中');
-    assert.equal(banks[0]['Extra Fee'], '0', 'fee=0 写入字符串 "0"（normalizeCellValue(0)="0"，非空、不跳过）');
+    // v3.0.4 F1 -0 显式锁定：normalizeCellValue(-0) 走 String(-0)==='0' → 写 '0'，不出现 '-0'
+    assert.equal(banks[0]['Extra Fee'], '0', 'fee=0 取反为 -0，但写入字符串 "0"（绝不出现 "-0"）');
     const ef = extraFeeMod(r);
     assert.ok(ef && ef.oldValue === '' && ef.newValue === '0', 'Extra Fee modification "" → "0"（会标黄）');
   });
 
-  test('W2-V2 负 fee=-5：gw100 + (-5) = bank95 → Extra Fee 写 "-5"', () => {
+  test('W2-V2 负 fee=-5（负输入对称取反核心）：gw100 + (-5) = bank95 命中 → Extra Fee 写 "5"', () => {
     const banks = [feeBankRow(95)];
     const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: -5 }), banks, [feeGwRow(100)]);
-    assert.equal(narrativeMods(r), 1, 'gw100 + (-5) = 95 命中');
-    assert.equal(banks[0]['Extra Fee'], '-5', '负差额原样写入');
-    assert.equal(extraFeeMod(r).newValue, '-5');
+    assert.equal(narrativeMods(r), 1, 'gw100 + (-5) = 95 命中（匹配用原值 -5，语义不变）');
+    // v3.0.4 F1：负输入对称取反 —— 输入 -5 → -(-5)=5 → 写 '5'
+    assert.equal(banks[0]['Extra Fee'], '5', '负输入对称取反：输入 -5 写盘 5');
+    assert.equal(extraFeeMod(r).newValue, '5');
   });
 
-  test('W2-V3 小数 fee=0.5：gw100 + 0.5 = bank100.5 → Extra Fee 写 "0.5"', () => {
+  test('W2-V3 小数 fee=0.5：gw100 + 0.5 = bank100.5 命中 → Extra Fee 写 "-0.5"', () => {
     const banks = [feeBankRow(100.5)];
     const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 0.5 }), banks, [feeGwRow(100)]);
     assert.equal(narrativeMods(r), 1);
-    assert.equal(banks[0]['Extra Fee'], '0.5', '小数差额原样写入');
+    // v3.0.4 F1：小数差额取反写入
+    assert.equal(banks[0]['Extra Fee'], '-0.5', '小数差额取反写入：输入 0.5 写盘 -0.5');
   });
 
-  test('W2-V4 浮点边界 fee=0.1（gw0.2+0.1=bank0.3 归一到分命中）→ Extra Fee 写配置原值 "0.1"（非浮点漂移）', () => {
+  test('W2-V4 浮点边界 fee=0.1（gw0.2+0.1=bank0.3 归一到分命中）→ Extra Fee 写配置原值取反 "-0.1"（非浮点漂移）', () => {
     const banks = [feeBankRow(0.3)];
     const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 0.1 }), banks, [feeGwRow(0.2)]);
     assert.equal(narrativeMods(r), 1, '0.2+0.1=0.3 归一到分命中');
-    assert.equal(banks[0]['Extra Fee'], '0.1', '写入的是配置差额 0.1 本身，不是 0.1 的浮点运算残值');
+    // v3.0.4 F1：写入的是配置差额 0.1 取反（-0.1）本身，不是浮点运算残值
+    assert.equal(banks[0]['Extra Fee'], '-0.1', '写入配置差额取反 -0.1 本身，非 0.1 的浮点运算残值');
   });
 
-  test('W2-V5 覆盖既有非空 Extra Fee：原值 "9" ≠ 差额 "5" → 覆盖为 "5" 并标黄（oldValue 记原值）', () => {
+  test('W2-V5 覆盖既有非空 Extra Fee：原值 "9" ≠ 写盘相反数 "-5" → 覆盖为 "-5" 并标黄（oldValue 记原值）', () => {
     const banks = [{ 'Credit Amount': 105, 'Debit Amount': 0, Narrative: '', 'Extra Fee': '9' }];
     const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 5 }), banks, [feeGwRow(100)]);
     const ef = extraFeeMod(r);
-    assert.ok(ef, '原值≠差额 → record（标黄）');
+    assert.ok(ef, '原值≠写盘相反数 → record（标黄）');
     assert.equal(ef.oldValue, '9', 'oldValue 记录被覆盖的原值（审计可追溯）');
-    assert.equal(ef.newValue, '5');
-    assert.equal(banks[0]['Extra Fee'], '5', '覆盖为新差额');
+    assert.equal(ef.newValue, '-5');
+    assert.equal(banks[0]['Extra Fee'], '-5', '覆盖为新差额取反值');
+  });
+});
+
+// ========================================================================
+// v3.0.4 F1 迁移边界（spec bank-recon-output-fixes §4 F1 / §9.1）：
+//   写盘取反落地后，「存量已配 extraFee 场景」同一输入产出符号相反的迁移行为锁定。
+//   包含 spec §9.1 矩阵的 fee=-3→'3' 精确点 + 2 条迁移边界用例（存量正值被覆盖取反 / 取反终态仅 lock 不 record）。
+// ========================================================================
+test.describe('runC3Scenario — F1 取反迁移边界（v3.0.4 资金红线）', () => {
+  test('F1-M0 fee=-3（spec §9.1 精确矩阵点）：负输入对称取反 → Extra Fee 写 "3"', () => {
+    // gw100 + (-3) = bank97 命中（匹配用原值 -3）；写盘取反 -(-3)=3 → '3'
+    const banks = [feeBankRow(97)];
+    const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: -3 }), banks, [feeGwRow(100)]);
+    assert.equal(narrativeMods(r), 1, 'gw100 + (-3) = 97 命中（匹配语义不变）');
+    assert.equal(banks[0]['Extra Fee'], '3', '负输入 -3 对称取反写盘 3');
+    assert.equal(extraFeeMod(r).newValue, '3');
+  });
+
+  test('F1-M1 存量旧正值被覆盖取反：原 Extra Fee="5"（旧版正符号存量）+ fee=5 → 新写 "-5" 标黄', () => {
+    // 旧版（≤v3.0.3）写盘不取反，存量 Extra Fee 为正值 '5'；升级后 fee=5 写盘相反数 '-5' ≠ 旧 '5'
+    //   → record 标黄，证明存量同输入产出符号相反（迁移翻符号，资金红线声明项）。
+    const banks = [{ 'Credit Amount': 105, 'Debit Amount': 0, Narrative: '', 'Extra Fee': '5' }];
+    const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 5 }), banks, [feeGwRow(100)]);
+    const ef = extraFeeMod(r);
+    assert.ok(ef, '旧正值 "5" ≠ 新取反值 "-5" → record（标黄）');
+    assert.equal(ef.oldValue, '5', 'oldValue 记录被覆盖的旧正值（审计可追溯迁移翻符号）');
+    assert.equal(ef.newValue, '-5');
+    assert.equal(banks[0]['Extra Fee'], '-5', '存量正值被覆盖为取反终态');
+  });
+
+  test('F1-M2 取反终态原值幂等：原 Extra Fee="-5"（已是取反终态）+ fee=5 → newFee="-5" 同值仅 lock 不 record', () => {
+    // 已迁移过的行（Extra Fee 已是 '-5'）再次运行：newFee=normalizeCellValue(-5)='-5' === old → 不 record（不标黄），仅 lock
+    const banks = [{ 'Credit Amount': 105, 'Debit Amount': 0, Narrative: 'GW-REF', 'Extra Fee': '-5' }];
+    const r = runC3Scenario(makeC3FeeScenario({ enabled: true, amount: 5 }), banks, [feeGwRow(100)]);
+    assert.ok(!extraFeeMod(r), '取反终态原值=写盘值 → 不 record（不重复标黄，幂等）');
+    assert.equal(banks[0]['Extra Fee'], '-5', '原取反终态值保持不变');
+    assert.equal(r.lockedRowIds.size, 1, '仍 lock（first-match-wins 红线，匹配成功必锁定）');
   });
 });

@@ -115,13 +115,19 @@ async function run() {
     assertEq(ret.rowCount, 5, 'Step3.流式落库 rowCount=5');
     assertEq(linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit').length, 5, 'Step3.DB 实际 5 行');
 
-    // Step4：值口径 —— 读回首行校验关键字段（裁列到 13 字段 + 值正确）
+    // Step4：值口径 —— 读回首行校验关键字段（裁列到 14 字段 + 值正确）
+    //   v3.0.4 块 E（需求2）：bank-deposit 白名单 13→14（新增 Payment Detail）。
     const back = linkedRepo.readLinkedTableRows(appDb.db, 'bank-deposit');
     const r1 = back.find((r) => r.ReconciliationId === 'R-ADM-1');
     assertTrue(!!r1, 'Step4.读回 R-ADM-1');
     assertEq(r1 && r1.Channel, CHANNEL_VALUE, 'Step4.R-ADM-1 Channel=ADM');
     assertEq(r1 && r1['Credit Amount'], '1.2', 'Step4.R-ADM-1 Credit Amount=1.2（数字 String(parseFloat) 口径）');
-    assertEq(r1 && Object.keys(r1).length, 13, 'Step4.bank-deposit 裁列后 13 字段');
+    // 裁后字段集合恒 = BANK_DEPOSIT_FIELDS（pickBankDepositFields 按字段名 pick；空值列也保留键）。
+    assertEq(
+      JSON.stringify(Object.keys(r1).sort()),
+      JSON.stringify([...linkedRepo.BANK_DEPOSIT_FIELDS].sort()),
+      'Step4.bank-deposit 裁列后字段集合 = BANK_DEPOSIT_FIELDS（14 字段）'
+    );
 
     // Step5：ADM 候选下推过滤（PR-3）→ 只 Channel=ADM 的 2 行
     const cands = linkedRepo.readBankDepositAdmCandidates(appDb.db);

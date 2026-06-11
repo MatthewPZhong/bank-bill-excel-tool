@@ -38,9 +38,64 @@ function isIndexArray(v) {
   return Array.isArray(v) && v.every((x) => Number.isInteger(x) && x >= 0);
 }
 
+// ── v3.0.4 PR-B 引擎扩展包（E1-E5）契约可选字段 schema（🔴 铁律：契约不声明 ⇒ 引擎行为零变化）──
+//   声明了但类型非法 ⇒ 拒绝启动（绝不带病运行）；未声明（undefined）⇒ 放行（不影响现状，收单契约零改动仍通过）。
+//   E1 deleteForOverwrite(deleteKey)=>Array<{sql,params}>  多语句覆盖删除（与单串 deleteSqlForOverwrite 互斥共存、函数式优先）
+//   E2 finalizeForCommit({totalImported,sourceFiles})=>Array<{sql,params}>  COMMIT 前事务内收尾
+//   E3 rejectEmptyFiles:boolean + formatEmptyFileError(sourceFile)=>string  空文件整批拒绝
+//   E4 maxCollectedErrors:number（>0，覆盖默认 100）+ captureRowValues:boolean  错误捕获增强
+//   E5 dedupeKeyOf({values})=>string + formatDuplicateError({key})=>string  写侧跨文件去重
+function validateExtensionFields(contract) {
+  // E1
+  if (contract.deleteForOverwrite !== undefined && typeof contract.deleteForOverwrite !== 'function') {
+    throw new ContractValidationError('契约无效：deleteForOverwrite 必须是函数（deleteKey）=>Array<{sql,params}>', []);
+  }
+  // E2
+  if (contract.finalizeForCommit !== undefined && typeof contract.finalizeForCommit !== 'function') {
+    throw new ContractValidationError('契约无效：finalizeForCommit 必须是函数（{totalImported,sourceFiles}）=>Array<{sql,params}>', []);
+  }
+  // E3
+  if (contract.rejectEmptyFiles !== undefined && typeof contract.rejectEmptyFiles !== 'boolean') {
+    throw new ContractValidationError('契约无效：rejectEmptyFiles 必须是布尔值', []);
+  }
+  if (contract.formatEmptyFileError !== undefined && typeof contract.formatEmptyFileError !== 'function') {
+    throw new ContractValidationError('契约无效：formatEmptyFileError 必须是函数（sourceFile）=>string', []);
+  }
+  // F1（PR #71 SR）批级空数据整批拒绝
+  if (contract.rejectEmptyBatch !== undefined && typeof contract.rejectEmptyBatch !== 'boolean') {
+    throw new ContractValidationError('契约无效：rejectEmptyBatch 必须是布尔值', []);
+  }
+  if (contract.formatEmptyBatchError !== undefined && typeof contract.formatEmptyBatchError !== 'function') {
+    throw new ContractValidationError('契约无效：formatEmptyBatchError 必须是函数（）=>string', []);
+  }
+  // E4
+  if (contract.maxCollectedErrors !== undefined
+    && (!Number.isInteger(contract.maxCollectedErrors) || contract.maxCollectedErrors <= 0)) {
+    throw new ContractValidationError('契约无效：maxCollectedErrors 必须是正整数（覆盖默认 100）', []);
+  }
+  if (contract.captureRowValues !== undefined && typeof contract.captureRowValues !== 'boolean') {
+    throw new ContractValidationError('契约无效：captureRowValues 必须是布尔值', []);
+  }
+  // E5
+  if (contract.dedupeKeyOf !== undefined && typeof contract.dedupeKeyOf !== 'function') {
+    throw new ContractValidationError('契约无效：dedupeKeyOf 必须是函数（{values}）=>string', []);
+  }
+  if (contract.formatDuplicateError !== undefined && typeof contract.formatDuplicateError !== 'function') {
+    throw new ContractValidationError('契约无效：formatDuplicateError 必须是函数（{key}）=>string', []);
+  }
+  // E5 cells 缺口补丁（v3.0.4 PR-C team-lead 预检发现）：写侧行级错误（去重命中 / INSERT 失败）的 batch 项
+  //   只有 params/rowR/dedupeKey，拿不到原始 cells——captureRowValues 时这些错误记录会缺 cells（pending 重复行
+  //   报错 xlsx 需整行 cells，worker.js:127 旧链路是带的）。契约可声明 cellsOf({ params })=>cells，引擎在
+  //   captureRowValues 开启 + 该 hook 声明时，从 batch 项 params 逆推 cells 附到写侧行级错误。
+  //   🔴 不声明 ⇒ 写侧行级错误不带 cells（行为零变化，收单契约未声明仍 byte-for-byte）。
+  if (contract.cellsOf !== undefined && typeof contract.cellsOf !== 'function') {
+    throw new ContractValidationError('契约无效：cellsOf 必须是函数（{params}）=>Array', []);
+  }
+}
+
 // 校验契约模块 schema + 三层防护第 1 层（静态推导）。
 //   通过 → 返回归一化后的 { expectedHeaders, valueColumnWhitelist(Set|null), requiredColumns(已去重升序),
-//          validateHeaders, mapRow, insertSql, monthKeyOf }；
+//          validateHeaders, mapRow, insertSql, monthKeyOf + E1-E5 可选扩展字段（声明时透传，未声明为 undefined）}；
 //   不通过 → throw ContractValidationError。
 function validateContract(contract) {
   if (!contract || typeof contract !== 'object') {
@@ -117,6 +172,9 @@ function validateContract(contract) {
     }
   }
 
+  // ── v3.0.4 PR-B：E1-E5 可选扩展字段类型校验（声明了才校验，未声明放行）──
+  validateExtensionFields(contract);
+
   // 归一化：requiredColumns 去重升序；whitelist 转 Set（null 保持 null）。
   const requiredColumns = Array.from(new Set(contract.requiredColumns)).sort((a, b) => a - b);
   const valueColumnWhitelist = whitelistArr === null ? null : new Set(whitelistArr);
@@ -128,7 +186,20 @@ function validateContract(contract) {
     validateHeaders: contract.validateHeaders,
     mapRow: contract.mapRow,
     insertSql: contract.insertSql,
-    monthKeyOf: contract.monthKeyOf
+    monthKeyOf: contract.monthKeyOf,
+    // ── v3.0.4 PR-B 引擎扩展包 E1-E5（透传，未声明为 undefined，引擎按存在性分支）──
+    deleteForOverwrite: contract.deleteForOverwrite,        // E1 多语句覆盖删除
+    finalizeForCommit: contract.finalizeForCommit,          // E2 事务内收尾
+    rejectEmptyFiles: contract.rejectEmptyFiles === true,   // E3 空文件整批拒绝（缺省 false）
+    formatEmptyFileError: contract.formatEmptyFileError,    // E3 空文件错误文案
+    // F1（PR #71 SR）批级空数据整批拒绝（缺省 false；与 E3 per-file 区分，批级全空才拒）。
+    rejectEmptyBatch: contract.rejectEmptyBatch === true,
+    formatEmptyBatchError: contract.formatEmptyBatchError,  // F1 批级空数据错误文案
+    maxCollectedErrors: contract.maxCollectedErrors,        // E4 错误上限（缺省由引擎用 100）
+    captureRowValues: contract.captureRowValues === true,   // E4 错误记录附带 cells（缺省 false）
+    dedupeKeyOf: contract.dedupeKeyOf,                       // E5 写侧跨文件去重 key
+    formatDuplicateError: contract.formatDuplicateError,     // E5 重复行错误文案
+    cellsOf: contract.cellsOf                                // E5 cells 缺口：写侧行级错误从 params 逆推 cells（captureRowValues 时生效）
   };
 }
 

@@ -8,6 +8,7 @@
 
 const { runC4Scenario } = require('./scenario-engines/c4-recon-id-fix');
 const { runJpmDispatchOrderFix } = require('./scenario-engines/jpm-dispatch-order-fix');
+const { runBocDispatchOrderFix } = require('./scenario-engines/boc-dispatch-order-fix');
 
 const VALID_CATEGORIES = ['recon-id-fix', 'gateway-recon-id-fix'];
 
@@ -30,6 +31,16 @@ function runReconIdFix(scenario, sheets, opts = {}) {
     return runJpmDispatchOrderFix({
       sheets,
       admRows: Array.isArray(opts.admRows) ? opts.admRows : [],
+      scenario
+    });
+  }
+  // v3.0.4 块 E 需求3：BOC 调拨订单修复分流（仅 gateway category ∧ config.subCategory 命中时走 BOC 引擎）。
+  //   🔴 bocLinkRows 由 main.js recon-id-fix:run 注入 database.readBocFxLinkRows()；BOC 引擎只读不回写。
+  if (scenario.category === 'gateway-recon-id-fix'
+      && scenario.config && scenario.config.subCategory === 'boc-dispatch-order-fix') {
+    return runBocDispatchOrderFix({
+      sheets,
+      bocLinkRows: Array.isArray(opts.bocLinkRows) ? opts.bocLinkRows : [],
       scenario
     });
   }

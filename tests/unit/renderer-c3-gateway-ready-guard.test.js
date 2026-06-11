@@ -196,13 +196,19 @@ describe('C3 导入动作改调链接表（v3.0.0 需求2b：onConfirm 链路）
   // v3.0.0 需求3：运行点 C3 逻辑已抽到 proceedToGwCheck（详见上方文案断言块说明）。
   const runHandlerFn = extractFunctionSource(source, 'proceedToGwCheck');
 
-  test('⑧ 两处 onConfirm 均调 linkedTable.import() 且其后 await refreshBankStatementStatus()', () => {
+  test('⑧ 两处 onConfirm 均调 linkedTable.import()、消费返回值并其后 await refreshBankStatementStatus()', () => {
+    // v3.0.4 块 A · A2 #3：onConfirm 不再丢弃 import() 返回值——
+    //   存返回值 → notifyLinkedTableImportFailures(消费失败明细) → await refreshBankStatementStatus()。
     for (const [label, fnSrc] of [['import 提醒', importFn], ['运行点提醒', runHandlerFn]]) {
       const idxImport = fnSrc.indexOf('window.desktopApi.linkedTable.import()');
       assert.ok(idxImport !== -1, `${label} onConfirm 应调 window.desktopApi.linkedTable.import()`);
       const after = fnSrc.slice(idxImport);
-      assert.ok(/linkedTable\.import\(\);\s*await\s+refreshBankStatementStatus\(\);/.test(after),
-        `${label}：linkedTable.import() 之后应紧跟 await refreshBankStatementStatus()`);
+      // import() 返回值被存入变量并交给 notifyLinkedTableImportFailures 消费（A2 #3）。
+      assert.ok(/linkedTable\.import\(\);\s*notifyLinkedTableImportFailures\(/.test(after),
+        `${label}：linkedTable.import() 返回值应交给 notifyLinkedTableImportFailures 消费`);
+      // 失败明细消费后仍 await refreshBankStatementStatus()（刷新状态框语义不变）。
+      assert.ok(/notifyLinkedTableImportFailures\([^)]*\);\s*await\s+refreshBankStatementStatus\(\);/.test(after),
+        `${label}：消费失败明细后应紧跟 await refreshBankStatementStatus()`);
     }
   });
 

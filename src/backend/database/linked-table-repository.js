@@ -26,14 +26,18 @@ const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields
 // v3.0.0 块 B / PR-3：ADM 派生只需 Channel=ADM 子集 → 下推 SQL 过滤的取值常量（单一真相）。
 const { CHANNEL_VALUE } = require('../../constants/adm-bank-deposit-fields');
 
-// v2.1.16-beta.3 ②：银行对账单入金表 13 字段白名单（C~N 列索引 2~13 + FundType 索引 25）。
+// v2.1.16-beta.3 ②：银行对账单入金表落库字段白名单（按字段名 pick）。
 //   🔴 裁列必须按字段名 pick（非 slice 索引切片），防 BANK_STATEMENT_FIELDS 列顺序变动裁错列。
+//   v3.0.4 块 E（需求2）：13→14 —— 在 CustomerRef 与 FundType 之间插入 'Payment Detail'
+//     （44 列契约第 17 列，紧随 CustomerRef）。BOC 派生「银行单交易编号」从该字段提取，缺它则永远无法回填资金对账链接ID。
+//     🔴 存量已导入的 bank-deposit 行 raw_json 无此字段、无法 migration 补 → 由 buildBocBankRows 识别为
+//        missing-payment-detail 引导重导（见 boc-fx-link-builder.js / spec §2.4）。顺序保持与 BANK_STATEMENT_FIELDS 一致。
 const BANK_DEPOSIT_FIELDS = Object.freeze([
   'BizId', 'BillDate', 'ValueDate', 'Channel', '地区', 'MerchantId', 'Currency',
-  'Credit Amount', 'Debit Amount', 'ReconciliationId', 'ChannelOrderNo', 'CustomerRef', 'FundType'
+  'Credit Amount', 'Debit Amount', 'ReconciliationId', 'ChannelOrderNo', 'CustomerRef', 'Payment Detail', 'FundType'
 ]);
 
-// 模块加载期断言：13 字段全部 ∈ BANK_STATEMENT_FIELDS（防常量漂移；红线 §六-4）。
+// 模块加载期断言：全部字段 ∈ BANK_STATEMENT_FIELDS（防常量漂移；红线 §六-4）。
 const __missingDepositFields = BANK_DEPOSIT_FIELDS.filter((f) => !BANK_STATEMENT_FIELDS.includes(f));
 if (__missingDepositFields.length > 0) {
   throw new Error(
@@ -114,6 +118,23 @@ const LINKED_TABLE_DEFS = {
     keyHeader: 'ReconciliationId',
     dateColumn: 'bill_date',
     dateHeader: 'BillDate',
+    supported: true
+  },
+  // v3.0.4 块 E（需求2）：BOC 链接表（隐藏表，由外汇交割表导入后物理行序分组派生）。
+  //   🔴 入 LINKED_TABLE_DEFS 供专用仓储读写，但绝不进 ALL_TABLE_KEYS（前端 listLinkedTableMeta 不可见）。
+  //   不走 replaceLinkedTable（其 INSERT 硬编码 4 列）；专用 replaceBocFxLink 走 8 列 INSERT，不写 linked_table_meta。
+  'boc-fx-settlement': {
+    table: 'linked_boc_fx_settlement',
+    keyColumn: 'transaction_no',
+    dateColumn: 'maturity_date',
+    supported: true
+  },
+  // v3.0.4 块 E（需求2）：BOC 调拨银行对账单表（隐藏表，由银行对账单 Channel=BOC 行派生）。
+  //   🔴 绝不进 ALL_TABLE_KEYS；专用 replaceBocBankDeposit 走 4 列 INSERT，不写 linked_table_meta。
+  'boc-bank-deposit': {
+    table: 'linked_boc_bank_deposit',
+    keyColumn: 'bank_txn_no',
+    dateColumn: 'bill_date',
     supported: true
   }
 };
@@ -663,6 +684,207 @@ function writeAdmMatchFlags(db, admRows) {
   return { tableKey: 'adm-bank-deposit', rowCount: safeRows.length };
 }
 
+// ============================================================================
+// v3.0.4 块 E（需求2）：BOC 链接表两张隐藏表（linked_boc_fx_settlement / linked_boc_bank_deposit）专用仓储
+//   🔴 不复用 replaceLinkedTable（其 INSERT 硬编码 4 列）；两表列数不同，各写专用 replace。
+//   隐藏表：不进 ALL_TABLE_KEYS / 不写 linked_table_meta（前端弹窗不可见，与 ADM 同范式）。
+//   🔴 避免循环依赖：本仓储不 require boc-fx-link-builder / boc-fx-link-fields（后者 require 本文件），
+//      内部辅助键名以字面量定义（须与 boc-fx-link-builder.js 的 KEY_TXN_NO 等保持一致）。
+// ============================================================================
+
+const BOC_FX_TABLE = 'linked_boc_fx_settlement';
+const BOC_BANK_TABLE = 'linked_boc_bank_deposit';
+
+// 与 boc-fx-link-builder.js 一致的内部辅助键名（落库前从 raw_json 业务行剥到热列）。
+const BOC_KEY_TXN_NO = '__txnNo';
+const BOC_KEY_MATURITY_ISO = '__maturityIso';
+const BOC_KEY_SOURCE_ROW = '__sourceRow';
+// BOC 链接表 3 新字段 / 银行字段名（与 boc-fx-link-fields.FIELD_MAP 一致，本文件就地内联防循环依赖）。
+const BOC_FIELD_GROUP = '分组';
+const BOC_FIELD_ALLOCATION_NO = '调拨单号';
+const BOC_FIELD_RECON_LINK_ID = '资金对账不平表链接ID';
+const BOC_FIELD_TXN_NO = '交易编号';
+const BOC_FIELD_BANK_TXN_NO = '银行单交易编号';
+const BOC_FIELD_RECON_ID = 'ReconciliationId';
+const BOC_FIELD_BILL_DATE = 'BillDate';
+
+// 银行对账单 Channel=BOC 候选子集（json_extract 下推，仅物化候选；地区/币种/金额终审在 builder）。
+//   与 readBankDepositAdmCandidates 同范式：SQL 仅过滤高选择性 Channel='BOC'（builder 完整条件的超集），不漏行。
+function readBankDepositBocCandidates(db) {
+  const def = getDef('bank-deposit');
+  if (!def.supported) return [];
+  const rows = db.prepare(
+    `SELECT raw_json FROM ${def.table} WHERE json_extract(raw_json, '$.Channel') = ? ORDER BY id ASC`
+  ).all('BOC');
+  const out = [];
+  for (const r of rows) {
+    try {
+      const o = JSON.parse(r.raw_json);
+      if (o && typeof o === 'object') out.push(o);
+    } catch (_e) {
+      /* 损坏行跳过，不抛错（与 readLinkedTableRows 容错一致） */
+    }
+  }
+  return out;
+}
+
+// 整表覆盖写入 BOC链接表行：事务内 DELETE 全表 + 批量 INSERT 8 列（prepared）。
+//   rows = scanFxGroups/matchBocToMidAllocation 后的链接行（33 命名字段 + 3 新字段 + 内部辅助键）。
+//   热列从内部辅助键 / 3 新字段取；raw_json 存「剥掉辅助键」后的纯业务行（33+3 字段，数据真相）。
+//   caller 不需持有事务；本函数自带 BEGIN/COMMIT/ROLLBACK（与 replaceAdmBankDeposit 范式一致）。
+function replaceBocFxLink(db, rows) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const importedAt = new Date().toISOString();
+
+  const insertSql = `
+    INSERT INTO ${BOC_FX_TABLE}
+      (transaction_no, group_no, allocation_no, recon_link_id, maturity_date, source_row, raw_json, imported_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  db.exec('BEGIN');
+  try {
+    db.prepare(`DELETE FROM ${BOC_FX_TABLE}`).run();
+
+    const insertStmt = db.prepare(insertSql);
+    for (const row of safeRows) {
+      const obj = row && typeof row === 'object' ? row : {};
+      // 热列取值：交易编号优先用辅助键（已归一化纯数字），缺失回退原字段归一
+      const txnNo = normalizeKey(obj[BOC_KEY_TXN_NO] !== undefined ? obj[BOC_KEY_TXN_NO] : obj[BOC_FIELD_TXN_NO]);
+      const groupNo = normalizeKey(obj[BOC_FIELD_GROUP]);
+      const allocationNo = normalizeKey(obj[BOC_FIELD_ALLOCATION_NO]);
+      const reconLinkId = normalizeKey(obj[BOC_FIELD_RECON_LINK_ID]);
+      const maturityIso = obj[BOC_KEY_MATURITY_ISO] !== undefined
+        ? normalizeKey(obj[BOC_KEY_MATURITY_ISO])
+        : normalizeDateForRange(obj['到期日']);
+      const sourceRowRaw = obj[BOC_KEY_SOURCE_ROW];
+      const sourceRow = (sourceRowRaw === undefined || sourceRowRaw === null || sourceRowRaw === '')
+        ? null
+        : Number(sourceRowRaw);
+      // raw_json 剥掉内部辅助键（仅存纯业务字段）
+      const business = { ...obj };
+      delete business[BOC_KEY_TXN_NO];
+      delete business[BOC_KEY_MATURITY_ISO];
+      delete business[BOC_KEY_SOURCE_ROW];
+      const rawJson = JSON.stringify(business);
+      insertStmt.run(txnNo, groupNo, allocationNo, reconLinkId, maturityIso || null, sourceRow, rawJson, importedAt);
+    }
+
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_e) { /* no active txn */ }
+    throw error;
+  }
+
+  return { tableKey: 'boc-fx-settlement', rowCount: safeRows.length, updatedAt: importedAt };
+}
+
+// 读回 BOC链接表全部业务行（raw_json → 对象，字段名 = 真实表头 + 3 新字段）。ORDER BY id ASC 保派生原序。
+//   供 BOC 修复引擎（后续）经 database.readBocFxLinkRows() 取数据源。损坏行跳过不中断。
+function readBocFxLinkRows(db) {
+  const rows = db.prepare(`SELECT raw_json FROM ${BOC_FX_TABLE} ORDER BY id ASC`).all();
+  const out = [];
+  for (const r of rows) {
+    try {
+      const o = JSON.parse(r.raw_json);
+      if (o && typeof o === 'object') out.push(o);
+    } catch (_e) {
+      /* 损坏行跳过，不抛错 */
+    }
+  }
+  return out;
+}
+
+// 读回 BOC链接表全部行（携带 DB id）：[{ id, row }]（供 2.5 backfill 按 id 精确回写，避免位置配对错位）。
+function readBocFxLinkRowsWithIds(db) {
+  const rows = db.prepare(`SELECT id, raw_json FROM ${BOC_FX_TABLE} ORDER BY id ASC`).all();
+  const out = [];
+  for (const r of rows) {
+    try {
+      const o = JSON.parse(r.raw_json);
+      if (o && typeof o === 'object') out.push({ id: r.id, row: o });
+    } catch (_e) {
+      /* 损坏行跳过，不抛错 */
+    }
+  }
+  return out;
+}
+
+// 2.5 回填：按 id UPDATE raw_json + recon_link_id 列（比 ADM 位置配对更稳，无并发重建错位风险）。
+//   rowsWithIds = backfillBocReconLinkIds 产物 [{ id, row }]（row 已回填「资金对账不平表链接ID」）。
+//   🔴 资金红线：仅整批幂等重写命中行的 raw_json + recon_link_id 热列（id 缺失的行跳过，不误写）。
+function writeBocFxLinkReconIds(db, rowsWithIds) {
+  const list = Array.isArray(rowsWithIds) ? rowsWithIds : [];
+  const updateSql = `UPDATE ${BOC_FX_TABLE} SET raw_json = ?, recon_link_id = ? WHERE id = ?`;
+
+  db.exec('BEGIN');
+  try {
+    const updateStmt = db.prepare(updateSql);
+    for (const item of list) {
+      if (!item || item.id === undefined || item.id === null) continue;
+      const obj = item.row && typeof item.row === 'object' ? item.row : {};
+      const reconLinkId = normalizeKey(obj[BOC_FIELD_RECON_LINK_ID]);
+      updateStmt.run(JSON.stringify(obj), reconLinkId, item.id);
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_e) { /* no active txn */ }
+    throw error;
+  }
+
+  return { tableKey: 'boc-fx-settlement', rowCount: list.length };
+}
+
+// 整表覆盖写入 BOC调拨银行对账单行：事务内 DELETE 全表 + 批量 INSERT 5 列（prepared）。
+//   rows = buildBocBankRows 产物（银行字段 + 「银行单交易编号」）。raw_json 存整行（数据真相）。
+//   caller 不需持有事务；自带 BEGIN/COMMIT/ROLLBACK。无可用数据时也应被 caller 调用以重建空表防 stale。
+function replaceBocBankDeposit(db, rows) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const importedAt = new Date().toISOString();
+
+  const insertSql = `
+    INSERT INTO ${BOC_BANK_TABLE} (bank_txn_no, reconciliation_id, bill_date, raw_json, imported_at)
+    VALUES (?, ?, ?, ?, ?)
+  `;
+
+  db.exec('BEGIN');
+  try {
+    db.prepare(`DELETE FROM ${BOC_BANK_TABLE}`).run();
+
+    const insertStmt = db.prepare(insertSql);
+    for (const row of safeRows) {
+      const obj = row && typeof row === 'object' ? row : {};
+      const bankTxnNo = normalizeKey(obj[BOC_FIELD_BANK_TXN_NO]);
+      const reconId = normalizeKey(obj[BOC_FIELD_RECON_ID]);
+      const billDate = normalizeDateForRange(obj[BOC_FIELD_BILL_DATE]); // null = 不可解析（仍落库）
+      const rawJson = JSON.stringify(obj);
+      insertStmt.run(bankTxnNo, reconId, billDate, rawJson, importedAt);
+    }
+
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_e) { /* no active txn */ }
+    throw error;
+  }
+
+  return { tableKey: 'boc-bank-deposit', rowCount: safeRows.length, updatedAt: importedAt };
+}
+
+// 读回 BOC调拨银行对账单表全部行（raw_json → 对象）。ORDER BY id ASC；损坏行跳过。
+function readBocBankDepositRows(db) {
+  const rows = db.prepare(`SELECT raw_json FROM ${BOC_BANK_TABLE} ORDER BY id ASC`).all();
+  const out = [];
+  for (const r of rows) {
+    try {
+      const o = JSON.parse(r.raw_json);
+      if (o && typeof o === 'object') out.push(o);
+    } catch (_e) {
+      /* 损坏行跳过，不抛错 */
+    }
+  }
+  return out;
+}
+
 module.exports = {
   LINKED_TABLE_DEFS,
   ALL_TABLE_KEYS,
@@ -687,5 +909,13 @@ module.exports = {
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表专用仓储（6 列 INSERT / 整批幂等重写）
   replaceAdmBankDeposit,
   readAdmBankDepositRows,
-  writeAdmMatchFlags
+  writeAdmMatchFlags,
+  // v3.0.4 块 E 需求2：BOC 链接表两张隐藏表专用仓储（Channel=BOC 下推 / 8 列 + 5 列 INSERT / 按 id 回写）
+  readBankDepositBocCandidates,
+  replaceBocFxLink,
+  readBocFxLinkRows,
+  readBocFxLinkRowsWithIds,
+  writeBocFxLinkReconIds,
+  replaceBocBankDeposit,
+  readBocBankDepositRows
 };

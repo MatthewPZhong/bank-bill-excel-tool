@@ -164,6 +164,14 @@ test.describe('SUFFIX_HEADERS 常量（spec §5.2 D17=b 列序）', () => {
   });
 });
 
+// v3.0.4 F2：命中场景行报表落位子目录由 error-reports 互换为 bank-statement-process。
+//   常量保护断言——防互换被无意回退（落位断言以本 symbol 引用，不会自动暴露回退）。
+test.describe('DEFAULT_REPORT_SUBDIR 常量（v3.0.4 F2 目录互换）', () => {
+  test('落位子目录 = bank-statement-process（与错误报告目录互换后）', () => {
+    assert.strictEqual(DEFAULT_REPORT_SUBDIR, 'bank-statement-process');
+  });
+});
+
 // v2.1.9 D16=b 新增：normalizeChannelsToLabelMap unit
 test.describe('normalizeChannelsToLabelMap (D16=b)', () => {
   test('null / undefined → null（writer 触发回退）', () => {

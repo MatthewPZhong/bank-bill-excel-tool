@@ -9,6 +9,36 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.0.4（2026-06-11）
+
+v3.0.4 迭代：七块、单 PR 合入 main——① 块 A JSZip 崩点止血 + 链接表报错可见性；② 块 B 挂账 pending 导入迁移大表引擎；③ 块 C 业务OP biz-op 流水侧导入迁移引擎；④ 块 D 银行对账输出三点修复；⑤ 块 E BOC调拨订单修复；⑥ 块 F Payment线下调拨订单回填；⑦ 块 G Charge转outbound 多行行为收紧。质量门 `npm run release-check` 全绿（unit 2390 / integration 含 BOC 集成 + parity pending 45 / biz-op flow 47 + 收单回归锁 45 / smoke 全模块 PASS）。⚠️ 多处资金红线：块 B/C 入库真理源 + pending 6 表覆盖删除链；块 D F1 输出金额符号翻转；块 E 修复行生成 + bank-deposit 白名单 13→14；块 F 向 ReconciliationId 写值；块 G R4 FundType 改写语义收紧。
+
+### 🔴 对外契约变更（升级必读，详见 CHANGELOG v3.0.4「对外契约变更」段）
+
+- ① C3 Extra Fee 列数值符号翻转（块 D F1）：差额由写原值改为写相反数，三出口（主输出/命中明细/命中场景行报表）同步——存量 C3 场景升级后同输入产出相反符号。
+- ② 错误报告与命中场景行报表目录互换 + 错误报告第 3 列「行号」→「对账ID」（块 D F2+F3）：错误报告改落 `error-reports/{date}/`、命中场景行改落 `bank-statement-process/{date}/`；按旧路径读取 / 按列名解析的外部脚本需适配。
+- ③ 银行对账单表（链接表）落库字段 13→14（块 E）：新增 `Payment Detail`，存量数据需重新导入银行对账单表才支持 BOC 回填。
+- ④ BOC链接表调拨单号 stale（块 E）：中台调拨订单表重导后调拨单号不自动重算，需重导外汇交割表。
+- ⑤ pending / biz-op flow 导入换引擎（块 B/C）：回退开关 `USE_BIG_TABLE_IMPORT_ENGINE_PENDING` / `USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW`；多 sheet 文件由静默读第一个改为明确报错；错误超 1000 截断计数语义随引擎变化。
+- ⑥ ≥2GB 单 entry 文件导入改为明确中文报错（块 A）：上限 2147483648，不再抛 JSZip 天书错误。
+- ⑦ Charge转outbound 多行行为收紧（块 G）：同 ReconciliationId 多条 Charge 行由逐条全转改为仅转 Debit Amount 最大行（并列取原序首行）——存量多行场景 FundType 改写行数减少，下游 HX-out 链随之减少。
+
+### 新增
+
+- **块 A JSZip 崩点止血 + 报错可见性**（🟡 防御护栏）：入口尺寸预检（yauzl 读中央目录无符号 entry 尺寸，3 落点，≥2^31 弹明确中文错误，fail-open 不误伤）+ 链接表导入失败落 error 级 activity log + C3/运行前两入口消费返回值弹 per-file 失败明细。
+- **块 B pending 挂账导入迁移大表引擎**（🔴🔴 资金红线）：契约模块（31 列全列 / 6 表覆盖删除链逐字平移 / 月元数据 COMMIT 前原子 / sha 去重 / 1000 上限）+ 共享 dispatch（`resourceLimits` 4096）+ 回退开关 `USE_BIG_TABLE_IMPORT_ENGINE_PENDING` + parity 45 断言（legacy vs 引擎 byte-for-byte）。
+- **块 C biz-op flow 流水侧导入迁移引擎**（🔴 资金红线）：flow 契约（28 列全列 / 3 条 date 级覆盖删除 / validateFlowRow 三态）+ 回退开关 `USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW`（业务OP 侧 OPEN-1 不迁）+ parity 47 断言。
+- **块 E BOC调拨订单修复**（🔴 资金红线）：F1 内置写死场景「BOC调拨订单修复」（序号 2 / 默认休眠 / 独立 marker）；F2 两张隐藏链接表（外汇交割表分组 → 中台调拨匹配调拨单号 → 银行单 Channel=BOC 派生「银行单交易编号」→ 按 id 幂等回填对账ID；🔴 BANK_DEPOSIT_FIELDS 13→14；交割表强制数组路径防丢物理行号）；F3 整组匹配修复引擎 `runBocDispatchOrderFix`（D1-D11 全从严 / 整组失败不产出 / Type=2 / Reference+Amount 行级 override）。
+- **块 F Payment线下调拨订单回填处理**（🔴 资金红线）：R5s2 弹窗按 subCategory 条件渲染勾选行 + 三输入框（银行渠道/地区/大账号，inline 校验不关弹窗 / placeholder 不预填 / 加载完成前禁保存）；config 浅合并保留 seed 五字段；ISO 8601 周数 + FTA 解析（四元组锁口径）；R5s2b 引擎（三条件银行池 / 周+1 日期语义 join / Q6 同日算晚于 / 差错池二轮放宽周数）；🔴 网关回填优先互斥（`usedBankRowIds` + `excludeBankRowIds` union）；mid-allocation 导入清 processingResult 防 stale。
+
+### 变更
+
+- **引擎扩展包 E1-E5**（块 B/C 共同前置 · PR-B）：契约可选扩展（不声明 = 引擎行为与 v3.0.3 完全一致，收单契约一字不改）——E1 多语句覆盖删除 / E2 COMMIT 前事务内收尾 / E3 空文件整批拒绝 / E4 错误上限 1000 + cells 捕获 / E5 写侧跨文件去重 Set；收单回归锁 45 + 19 断言全绿（合并门）。
+- **块 D F1 C3 Extra Fee 写盘取相反数**（🔴 资金红线）：差额写入银行行 `Extra Fee` 取相反数（匹配语义不变，DS1-DS9 零改动全过）。
+- **块 D F2 两类产物目录互换**：错误报告 → `error-reports/`、命中场景行 → `bank-statement-process/`（`exportRootDir` 本体未动）。
+- **块 D F3 错误报告第 3 列「行号」→「对账ID」**：三级回退 reconciliationId → reconId → rowId → ''，io 层按 `_rowId` enrich 覆盖 modifiedRows + unmatchedRows 全集。
+- **块 G Charge转outbound 多行取 Debit Amount 最大行**（🔴 资金红线）：R4 charge-outbound 子场景同桶多条 Charge 行仅转 Debit Amount 最大行（转分比较 / 并列取原序首行 / 单行桶不变 / 其余四子场景维持全转 / 桶级 target 初始快照预选防双网关行误转次大行）。
+
 ## v3.0.3（2026-06-10）
 
 v3.0.3 迭代：四个块、10 个 PR，分属三个领域——① 块 A 收单单据模块导入/对账性能批次；② 块 B 资金对账数据处理模块状态框「渠道:场景序号」明细；③ 块 C USER_GUIDE 重点补缺 6 章节 + 口语化；④ 块 D 通用大表导入引擎（导入侧）抽取 + 收单首迁（W4 达成）。质量门 `npm run release-check` 全绿（unit 2179 / integration 22 脚本（1086 断言）/ smoke 全模块 PASS）。⚠️ 多处资金红线：块 A 收单导入是金额/币种入库真理源 + 对账 SQL（以同 fixture 全流程 byte-for-byte 为放行闸）；块 D 导入链路整体换引擎（四方 harness + 全链 34 断言 byte-for-byte + 单行回退开关三重放行闸）；块 B 改资金对账处理模块展示层 + hitScenarios 统计结构（带 fallback 兼容旧落库数据）。

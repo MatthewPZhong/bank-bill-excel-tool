@@ -243,13 +243,35 @@ async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePat
 }
 
 // ===== writeErrorReportOutput =====
-async function writeErrorReportOutput({ warnings, exportRootDir, timestamp }) {
+// v3.0.4 F3：可选 bankRows（全量银行行 = modifiedRows + unmatchedRows，F8 行数守恒契约保证全覆盖）。
+//   传入时按 _rowId → ReconciliationId 建 Map，对 rowId 命中的 warning enrich 出 reconciliationId 字段，
+//   writer 第 3 列「对账ID」即可显示银行行对账ID 而非内部 row_N（缺省/未命中则 writer 自动回退 reconId/rowId）。
+//   enrich 落 io 层（纯函数，可被 unit/smoke 直接覆盖；main.js IPC handler 难单测）。
+async function writeErrorReportOutput({ warnings, exportRootDir, timestamp, bankRows }) {
   if (!Array.isArray(warnings) || warnings.length === 0) return null;
+  let enrichedWarnings = warnings;
+  if (Array.isArray(bankRows) && bankRows.length > 0) {
+    // _rowId → ReconciliationId（判空 String(v).trim()：ReconciliationId 可能是 number）
+    const reconIdByRowId = new Map();
+    for (const r of bankRows) {
+      if (!r || r._rowId === undefined || r._rowId === null) continue;
+      const v = r.ReconciliationId;
+      if (v === undefined || v === null) continue;
+      if (String(v).trim() === '') continue;
+      reconIdByRowId.set(r._rowId, v);
+    }
+    enrichedWarnings = warnings.map((w) => {
+      if (!w || w.rowId === undefined || w.rowId === null) return w;
+      const reconciliationId = reconIdByRowId.get(w.rowId);
+      if (reconciliationId === undefined) return w;
+      return { ...w, reconciliationId };
+    });
+  }
   const ts = timestamp ?? buildTimestamp();
   const dir = ensureDateDir(exportRootDir);
   const fileName = `${ts}-error-report.xlsx`;
   const savePath = path.join(dir, fileName);
-  const result = await writeErrorReport(warnings, savePath);
+  const result = await writeErrorReport(enrichedWarnings, savePath);
   return { ...result, fileName };
 }
 

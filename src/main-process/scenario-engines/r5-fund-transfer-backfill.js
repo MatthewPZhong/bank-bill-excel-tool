@@ -91,13 +91,19 @@ function amountEqual(gwRow, bankRow) {
  * @param {Object} [options]
  * @param {Array<{gwTradeType:string,bankFundType:string}>} [options.directions] 双方向定义（默认 out/in）
  * @param {number} [options.dateToleranceDays] Phase2 日期容差天数（默认 1）
- * @returns {{ modifications: Array, warnings: Array }}
+ * @returns {{ modifications: Array, warnings: Array, usedBankRowIds: Set }}
  *   modifications：实际改写 ReconciliationId 的行（{ rowId, column:'ReconciliationId', oldValue, newValue }），用于标黄
  *   warnings：multi-bank-match-backfill
+ *   usedBankRowIds：引擎内 1v1 消费的全部 bank _rowId 集合（🔴 v3.0.4 块 F 新增 additive 字段）——
+ *     **含「消费但未写」行**（nv 空 / 与原值相同 → 不 record 不标黄，但仍 usedBankRowId.add 占用）。
+ *     用于编排器把已被 R5s2 消费的银行行经 excludeBankRowIds 传 R5s2b 剔除（网关回填优先互斥）。
+ *     与 modifications 的区别：modifications 仅「实写过」行（同值未写行取不到），usedBankRowIds 是完整消费集。
  */
 function runRound5FundTransferBackfill(gwRows, bankRows, options = {}) {
   const warningCollector = makeWarningCollector('r5-fund-transfer-backfill', '中台调拨订单对账ID回填');
   const modCollector = makeModificationCollector();
+  // 🔴 v3.0.4 块 F：跨 direction 聚合的消费集合（含同值未写行），作为新返回字段供 R5s2b 剔除。
+  const consumedBankRowIds = new Set();
 
   const safeGwRows = Array.isArray(gwRows) ? gwRows : [];
   const safeBankRows = Array.isArray(bankRows) ? bankRows : [];
@@ -113,7 +119,8 @@ function runRound5FundTransferBackfill(gwRows, bankRows, options = {}) {
   if (safeGwRows.length === 0 || safeBankRows.length === 0) {
     return {
       modifications: modCollector.listModifications(),
-      warnings: warningCollector.list()
+      warnings: warningCollector.list(),
+      usedBankRowIds: consumedBankRowIds
     };
   }
 
@@ -196,11 +203,16 @@ function runRound5FundTransferBackfill(gwRows, bankRows, options = {}) {
       cand.sort((a, b) => dayDiffAbs(a) - dayDiffAbs(b));
       backfill(gw, cand, `±${dateToleranceDays}day`, usedBankRowId);
     }
+
+    // 🔴 v3.0.4 块 F：把本 direction 消费的银行行（含同值未写行，1v1 单向消费集）并入跨方向聚合集。
+    //   不改既有匹配/写值逻辑：仅在 direction 跑完后追加一次 union，纯 additive 收集。
+    for (const consumedRowId of usedBankRowId) consumedBankRowIds.add(consumedRowId);
   }
 
   return {
     modifications: modCollector.listModifications(),
-    warnings: warningCollector.list()
+    warnings: warningCollector.list(),
+    usedBankRowIds: consumedBankRowIds
   };
 }
 

@@ -251,14 +251,24 @@ async function runScenarioEndToEndSmokeTests() {
       const result = runAllScenarios(bankRows, null, [c1MultiSearch]);
       check('E4.1', result.modifiedRows.length === 0, '多值不一致不应写入');
       check('E4.2', result.errorReport.length > 0, 'error-report 应有内容');
-      // 写 error-report
+      // 写 error-report（v3.0.4 F3：传 bankRows enrich 对账ID 列）
+      //   本样本 C1 多值不一致 → ReconciliationId 始终为空（不写入）→ 第 3 列端到端回退 rowId
       const exportRootDir = path.join(tmpDir, 'export-root');
       const er = await writeErrorReportOutput({
         warnings: result.errorReport,
         exportRootDir,
-        timestamp: '20260429000099'
+        timestamp: '20260429000099',
+        bankRows: [...result.modifiedRows, ...result.unmatchedRows]
       });
       check('E4.3', er && fs.existsSync(er.filePath), 'error-report 文件应存在');
+      // E4.4：空 reconid 回退链路端到端——第 3 列回退到 _rowId（rW）
+      {
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.readFile(er.filePath);
+        const sheet = wb.getWorksheet('error-report');
+        check('E4.4', sheet.getCell(1, 3).value === '对账ID', 'error-report 第 3 列表头 = 对账ID');
+        check('E4.5', sheet.getCell(2, 3).value === 'rW', '空 reconid → 第 3 列回退 _rowId（rW）');
+      }
     }
 
     console.log(`  scenario-end-to-end: ${count}/${count} PASS`);

@@ -23,6 +23,11 @@ const CAUSE_MAP = Object.freeze({
   'overwrite-existing-recon-id': '原值非空被覆盖',
   'overwrite-existing-value': '原值非空被覆盖',
 
+  // v3.0.4 块 F：Payment线下调拨订单回填（R5 场景2b）—— 新引擎 warning code
+  'payment-offline-invalid-fta': '调拨单号不是合法的 FTA+8位日期，算不出订单周数，已跳过',
+  'payment-offline-multi-candidate': '一条银行行匹配到多条调拨订单候选，已按就近取最近一条',
+  'payment-offline-no-order-match': '银行行未匹配到金额币种相符且晚于交易时间的调拨订单',
+
   // 主模块（FileValidationError code 粗粒度）
   'FILE_READ': '文件读取失败，可能损坏或格式不对',
   'FILE_TYPE': '文件类型不支持',

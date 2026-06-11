@@ -511,6 +511,8 @@ const {
   applyScenariosManagerPreviewState,
   // v2.1.16 A1：自带写死场景「管理」弹窗（含优先级输入框）preview
   applyBuiltinFixedChannelManagePreviewState,
+  // v3.0.4 块 F · F1：Payment 线下调拨订单回填处理展开态 preview
+  applyBuiltinFixedChannelManagePaymentPreviewState,
   applyScenarioCategorySelectPreviewState,
   // v2.1.14 C：链接表管理弹窗 preview
   applyLinkedTableManagerPreviewState,
@@ -3716,6 +3718,25 @@ async function isRefundOrderReady() {
   }
 }
 
+// v3.0.4 块 A · A2 #3（修「链接表报错全链路零落盘」）：C3/运行前提醒两个入口调 linkedTable.import() 后
+//   返回值原被直接丢弃，用户对失败完全无感。本 helper 消费返回值：存在失败项 → 弹 alert 列 per-file 失败明细。
+//   失败状态集与 main 侧 handler 一致（read-error / write-error / ambiguous / unrecognized）。
+//   日志依赖 main 侧 handler 权威落盘（#1），故 alert 走 skipLogReport:true 避免双写。
+//   result 为空 / cancelled / status!=='ok' / 无失败项 → 不弹（沿用既有静默语义）。
+function notifyLinkedTableImportFailures(result) {
+  if (!result || result.status !== 'ok' || !Array.isArray(result.results)) return;
+  const FAILED_STATUSES = new Set(['read-error', 'write-error', 'ambiguous', 'unrecognized']);
+  const failed = result.results.filter((r) => FAILED_STATUSES.has(r.status));
+  if (failed.length === 0) return;
+  const lines = failed
+    .map((r) => `${escapeHtml(r.fileName || '')}：${escapeHtml(r.message || r.status || '')}`)
+    .join('<br>');
+  openModal(createAlertDialog(
+    `链接表导入有 ${failed.length}/${result.results.length} 个文件失败：<br>${lines}`,
+    { skipLogReport: true }
+  ));
+}
+
 async function maybePromptGatewayReconImport() {
   try {
     const list = await window.desktopApi.scenarios.list();
@@ -3735,7 +3756,9 @@ async function maybePromptGatewayReconImport() {
         closeModal();
         // v3.0.0 需求2b：改调链接表导入对话框（不再调死链 handleBankStatementImportGatewayRecon）。
         //   与原死链行为一致：导入后刷新状态框（refreshBankStatementStatus）。
-        await window.desktopApi.linkedTable.import();
+        // v3.0.4 块 A · A2 #3：消费导入返回值，存在失败项 → 弹 per-file 失败明细（日志依赖 main 侧 handler）。
+        const importResult = await window.desktopApi.linkedTable.import();
+        notifyLinkedTableImportFailures(importResult);
         await refreshBankStatementStatus();
       }
     }));
@@ -3882,7 +3905,9 @@ async function proceedToGwCheck() {
         closeModal();
         // v3.0.0 需求2b：改调链接表导入对话框（不再调死链 handleBankStatementImportGatewayRecon），
         //   导入后刷新状态框、不自动续跑（与导入框「导入文件」语义一致，让用户导完再决定运行）。
-        await window.desktopApi.linkedTable.import();
+        // v3.0.4 块 A · A2 #3：消费导入返回值，存在失败项 → 弹 per-file 失败明细（日志依赖 main 侧 handler）。
+        const importResult = await window.desktopApi.linkedTable.import();
+        notifyLinkedTableImportFailures(importResult);
         await refreshBankStatementStatus();
       },
       onMiddle: async () => {
@@ -4465,9 +4490,23 @@ async function runGatewayReconScenario(scenarioId) {
     // 用弹框反馈（不写 bankStatementStatusBox，理由同导入）。
     const baseMsg = fixedCount > 0
       ? `运行完成，命中 ${fixedCount} 行网关修复。<br>请点击"导出文件"导出网关对账单修复文件。`
-      : '运行完成，本次无网关修复行。<br>（渠道账单可能无 merchantId=6300156616，或三段匹配未命中。）';
-    const warnMsg = warningCount > 0 ? `<br>另有 ${warningCount} 条警告。` : '';
-    openModal(createAlertDialog(`${baseMsg}${warnMsg}`, { logLevel: 'info', skipLogReport: true }));
+      // v3.0.4 块 E 需求3：0 命中兜底文案去 JPM merchantId 硬编码（BOC/JPM 通用，场景无关）。
+      : '运行完成，本次无网关修复行。<br>（请核对场景渠道行与链接表/网关账单是否匹配，详见下方警告或操作日志。）';
+    // v3.0.4 块 E 需求3（O2 拍板 / R7）：逐条显示前 5 条 warning 中文 message（手工 escape 后拼 <br>，防 innerHTML 注入——警告含表格数据值）。
+    //   超 5 条尾缀「等 N 条，详见操作日志」；warnings 为 BOC 引擎产物时带 message，JPM 仅 code 时回退 code。
+    let warnMsg = '';
+    if (warningCount > 0) {
+      const warns = Array.isArray(result.warnings) ? result.warnings : [];
+      const shown = warns.slice(0, 5);
+      const lines = shown.map((w) => `• ${escapeHtml((w && (w.message || w.code)) || '')}`);
+      const tail = warningCount > 5 ? `<br>等 ${warningCount} 条，详见操作日志` : '';
+      warnMsg = `<br><br>另有 ${warningCount} 条警告：<br>${lines.join('<br>')}${tail}`;
+    }
+    // 有警告 → 弹框按 warning 级上报（去 skipLogReport）；无警告维持 info 静默。
+    const alertOpts = warningCount > 0
+      ? { logLevel: 'warning', logDomain: 'gateway-recon-id-fix' }
+      : { logLevel: 'info', skipLogReport: true };
+    openModal(createAlertDialog(`${baseMsg}${warnMsg}`, alertOpts));
   } catch (error) {
     openModal(createAlertDialog(`运行失败：${error && error.message ? error.message : error}`));
   }
@@ -6127,6 +6166,11 @@ async function initialize() {
     // v2.1.16 A1：自带写死场景「管理」弹窗（含优先级输入框）preview
     setTimeout(() => {
       applyBuiltinFixedChannelManagePreviewState();
+    }, 120);
+  } else if (info.previewModal === 'builtin-fixed-channel-manage-payment') {
+    // v3.0.4 块 F · F1：Payment 线下调拨订单回填处理展开态 preview
+    setTimeout(() => {
+      applyBuiltinFixedChannelManagePaymentPreviewState();
     }, 120);
   } else if (info.previewModal === 'linked-table-manager') {
     // v2.1.14 C：链接表管理弹窗 preview
