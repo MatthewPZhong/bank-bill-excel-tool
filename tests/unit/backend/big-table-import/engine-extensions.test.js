@@ -101,6 +101,12 @@ function writeContract(dir, opts = {}) {
     lines.push('  rejectEmptyFiles: true,');
     lines.push("  formatEmptyFileError(sourceFile) { return sourceFile + '：文件为空或只有表头行'; }");
   }
+  // F1（PR #71 SR）批级空数据整批拒绝（写循环结束 totalImported===0 → 批级错误，区别于 E3 per-file）。
+  if (opts.rejectEmptyBatch) {
+    lines[lines.length - 1] += ',';
+    lines.push('  rejectEmptyBatch: true,');
+    lines.push("  formatEmptyBatchError() { return '文件无有效数据行'; }");
+  }
   // E4 错误上限覆盖 + 捕获 cells。
   if (opts.maxErrors) {
     lines[lines.length - 1] += ',';
@@ -262,6 +268,59 @@ test.describe('E3 空文件整批拒绝 rejectEmptyFiles', () => {
     const fB = await fx.writeFixtureExcelJS({ rows: [['日期', '主键', '金额']] });
     const res = await engine.importFiles({ dbPath, files: [fB], contractModulePath: cm, contractOptions: {}, mode: 'append', monthKey: '2026-03' });
     assert.equal(res.totalImported, 0, '空文件不声明 ⇒ 成功 0 行（现状）');
+    assert.equal(countRows(dbPath), 0);
+  });
+});
+
+// ───────────────────────────── F1 批级空数据整批拒绝（PR #71 SR · 🔴 数据丢失回归修复）─────────────────────────────
+test.describe('F1 批级空数据整批拒绝 rejectEmptyBatch', () => {
+  test.after(() => fx.cleanupTmpDirs());
+
+  test('🔴 overwrite 模式 + 全空批 → DELETE 随空批 ROLLBACK，已有数据完好（数据丢失回归）', async () => {
+    const dir = mkDir();
+    const dbPath = mkDb(dir);
+    // 多语句覆盖删除 + 批级空拒绝（仿 flow：date 级删 + rejectEmptyBatch）。
+    const cm = writeContract(dir, { multiDelete: true, rejectEmptyBatch: true });
+
+    // 预置：t 2 行（2026-03）——模拟「该 date 已有数据」。
+    const db = new DatabaseSync(dbPath);
+    db.exec("INSERT INTO t (d, k, a) VALUES ('2026-03-01','OLD1','1'),('2026-03-02','OLD2','2')");
+    db.close();
+
+    // overwrite 导入「仅表头空文件」→ 引擎事务头 DELETE 旧 2 行，但写循环 totalImported===0 → 批级拒绝 ROLLBACK。
+    const fEmpty = await fx.writeFixtureExcelJS({ rows: [['日期', '主键', '金额']] });
+    let err = null;
+    try {
+      await engine.importFiles({ dbPath, files: [fEmpty], contractModulePath: cm, contractOptions: {}, mode: 'overwrite', monthKey: '2026-03' });
+    } catch (e) { err = e; }
+    assert.ok(err && err.name === 'BigTableImportError', '全空批应整批拒绝');
+    assert.match(err.message, /文件无有效数据行/, '文案来自 formatEmptyBatchError');
+    assert.equal(err.structuredImportErrors.kind, 'emptyBatch', '🔴 kind=emptyBatch（session 据此还原旧 rejected 形态）');
+    // 🔴 数据丢失回归核心：DELETE 与零行 INSERT 同事务 ROLLBACK 撤销，旧 2 行完好。
+    assert.equal(countRows(dbPath), 2, '🔴 overwrite 全空批 ROLLBACK：已有数据完好（DELETE 撤销）');
+    const ks = queryAll(dbPath, 'SELECT k FROM t ORDER BY id').map((r) => r.k);
+    assert.deepEqual(ks, ['OLD1', 'OLD2'], '🔴 原数据逐行完好（OLD1/OLD2 未丢）');
+  });
+
+  test('多文件部分空不拒（rejectEmptyBatch 批级语义）：[空文件, 有数据文件] → 成功导入有数据文件', async () => {
+    const dir = mkDir();
+    const dbPath = mkDb(dir);
+    const cm = writeContract(dir, { rejectEmptyBatch: true });
+    // 文件 A 空（仅表头），文件 B 有数据 → 批级总和 > 0 → 不拒（与 E3 per-file 区分：rejectEmptyFiles 会拒）。
+    const fA = await fx.writeFixtureExcelJS({ rows: [['日期', '主键', '金额']] });
+    const fB = await fx.writeFixtureExcelJS({ rows: [['日期', '主键', '金额'], ['2026-03-01', 'K1', '1']] });
+    const res = await engine.importFiles({ dbPath, files: [fA, fB], contractModulePath: cm, contractOptions: {}, mode: 'append', monthKey: '2026-03' });
+    assert.equal(res.totalImported, 1, '🔴 批级语义：部分文件空不拒，有数据文件正常导入');
+    assert.equal(countRows(dbPath), 1, 'B 的 1 行入库');
+  });
+
+  test('不声明 rejectEmptyBatch + 全空批 → 成功导入 0 行（现状回归，行为零变化）', async () => {
+    const dir = mkDir();
+    const dbPath = mkDb(dir);
+    const cm = writeContract(dir, {});   // 不声明 rejectEmptyBatch / rejectEmptyFiles
+    const fEmpty = await fx.writeFixtureExcelJS({ rows: [['日期', '主键', '金额']] });
+    const res = await engine.importFiles({ dbPath, files: [fEmpty], contractModulePath: cm, contractOptions: {}, mode: 'append', monthKey: '2026-03' });
+    assert.equal(res.totalImported, 0, '不声明 ⇒ 全空批成功 0 行（现状）');
     assert.equal(countRows(dbPath), 0);
   });
 });

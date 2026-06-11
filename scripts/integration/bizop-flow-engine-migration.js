@@ -9,7 +9,16 @@
 //     ④ 整批拒绝（全空文件，仅表头）→ rejected + 表空 + 文案「文件无有效数据行」
 //     ⑤ 覆盖重导（date 级 clear 跨所有 BU）：重导前先种 runs/diff_rows，重导后断言关联表清空（byte-for-byte）
 //     ⑥ 错误超 1000 条截断：rowErrorTotal 真实总数 + 截断标志一致 + 样本上限 1000
+//     ⑧ 🔴 F1 数据丢失回归（PR #71 SR）：已有数据 date 上 overwrite 全空文件 → 数据完好 + rejected 形态与 legacy 一致
+//     ⑨ F2 多文件混批（行级错 + 表头错）：表头错保 status:error（kind=header 不被行级 rejected 降级）
+//     ⑩ F2 多文件行级错归属前缀（`[文件名] ` reason）+ 报告 rawRow normalizeCell 归一对齐
 //   R-6（intentional divergence，不要求 parity）：多 sheet 文件——引擎 rels 正解报错；只验证引擎报错文案可读。
+//
+//   F4（PR #71 SR 裁定·文档化处理）表头物理 rowR===1 分歧：引擎按物理 r 属性识别表头（rowR===1），
+//     旧 flow reader（reader-streamed.js）按「首个出现的 <row> 块」识别表头（headerChecked 标志，忽略 r 属性）。
+//     分歧仅在**稀疏 xlsx 物理上无 <row r="1">、首个 <row> 为 r="2"（真表头）**时触发：旧链路接受、引擎报「缺表头行」。
+//     裁定：该形态需手工删首行/特殊工具产生，正常 Excel/ExcelJS 导出恒从 r="1" 起；新行为是 loud error（不静默丢数据），
+//       属安全方向。维持引擎现状，不在契约层对齐——本 divergence 文档化（不写 parity 用例）。
 //
 // 开关可测性：用子进程（spawnSync）跑导入——子进程 env 注入 BIZOP_FLOW_FORCE_LEGACY_IMPORT=1 走旧链路，不设则走引擎。
 //   生产代码路径不被污染（env 仅本测试子进程内生效）。导入到两个独立 DB 文件后主进程对比。
@@ -400,6 +409,93 @@ async function main() {
       assertTrue(
         engine.results[0].message && /sheet|工作表|多个/i.test(engine.results[0].message),
         '⑦ engine 多 sheet 报错文案可读（含 sheet 口径）', JSON.stringify(engine.results[0].message)
+      );
+    }
+
+    // ════════════ ⑧ 🔴 F1 数据丢失回归（PR #71 SR）：已有数据的 date 上 overwrite 导入全空文件 ════════════
+    //   旧 bug：引擎 overwrite 事务头已 DELETE 该 date，全空文件无错误 → COMMIT，删除落盘但无新数据净入 = 数据丢失。
+    //   修复：contract-flow rejectEmptyBatch → 引擎事务内 totalImported===0 → ROLLBACK，DELETE 与零行 INSERT 原子撤销。
+    //   断言：①重导全空后**原数据完好**（O1/O2 仍在）②rejected 形态与 legacy 一致（report=false，文件无有效数据行）。
+    {
+      const fInit = path.join(tmpdir, 'flowF1Init.xlsx');
+      const fEmpty = path.join(tmpdir, 'flowF1Empty.xlsx');
+      await writeXlsx(fInit, FLOW_HEADERS, [makeFlowRow('F1a'), makeFlowRow('F1b')]);
+      await writeXlsx(fEmpty, FLOW_HEADERS, []);   // 只有表头，无数据行
+      const r = runBothPaths({
+        tmpdir, date: '2026-06-12', tag: 'case8', dumpAfter: true,
+        ops: [
+          { files: [fInit] },     // 先导 2 行
+          { files: [fEmpty] }     // 再 overwrite 导入全空文件 → 应拒绝且不丢已有数据
+        ]
+      });
+      assertEq(r.engine.results[1].status, 'rejected', '⑧ engine 全空 overwrite 拒绝');
+      assertEq(r.legacy.results[1].status, 'rejected', '⑧ legacy 全空 overwrite 拒绝');
+      // 🔴 数据丢失回归核心断言：重导全空后原 2 行完好（biz-F1a/biz-F1b 仍在，未被 DELETE 落盘）。
+      assertEq(
+        r.engine.dump.flow_rows.map((x) => x.biz_id),
+        ['biz-F1a', 'biz-F1b'],
+        '🔴 ⑧ engine 全空 overwrite 不丢已有数据（DELETE 随空批 ROLLBACK 撤销）'
+      );
+      assertEq(r.engine.dump.flow_rows, r.legacy.dump.flow_rows, '🔴 ⑧ 全空 overwrite 后 flow_rows 两路 byte-for-byte 相等（数据完好）');
+      // rejected 形态与 legacy 一致（report=false，errorRows 固定一条）。
+      assertEq(r.engine.results[1].errorRows, r.legacy.results[1].errorRows, '🔴 ⑧ 全空 overwrite rejected errorRows byte-for-byte 相等');
+      assertEq(r.engine.results[1].hasReport, false, '⑧ engine 全空 overwrite 不写报告（report=false）');
+      assertTrue(
+        r.engine.results[1].errorRows.some((e) => e.reason === '文件无有效数据行'),
+        '⑧ engine 全空 overwrite 文案逐字（文件无有效数据行）', JSON.stringify(r.engine.results[1].errorRows)
+      );
+    }
+
+    // ════════════ ⑨ F2（PR #71 SR）多文件混批：一文件行级错 + 一文件表头错 ════════════
+    //   验证表头错不被行级 rejected 误降级（引擎 kind='header' → session 保 status:'error'+表头文案）。
+    {
+      const fRowErr = path.join(tmpdir, 'flowMixRow.xlsx');
+      const fHdrErr = path.join(tmpdir, 'flowMixHdr.xlsx');
+      await writeXlsx(fRowErr, FLOW_HEADERS, [makeFlowRow('M1', { direction: 'X' })]);   // 行级错
+      await writeXlsx(fHdrErr, FLOW_HEADERS.slice(0, 27), [new Array(27).fill('x')]);    // 表头错（少 1 列）
+      const r = runBothPaths({
+        tmpdir, date: '2026-06-10', tag: 'case9', dumpAfter: true,
+        ops: [{ files: [fRowErr, fHdrErr] }]
+      });
+      // 表头错优先：两路均整批拒绝且表空。引擎 kind='header' → status:'error'（不被行级 rejected 降级）。
+      assertTrue(r.engine.results[0].status === 'error' || r.engine.results[0].status === 'rejected', '⑨ engine 混批整批拒绝', r.engine.results[0].status);
+      assertEq(r.engine.dump.flow_rows.length, 0, '🔴 ⑨ engine 混批 ROLLBACK 表空');
+      assertEq(r.legacy.dump.flow_rows.length, 0, '⑨ legacy 混批 ROLLBACK 表空');
+      // 表头错走 status:'error' 且文案可读（含表头/列数）——验证 kind='header' 分流未被行级 collectedErrors 短路降级。
+      assertEq(r.engine.results[0].status, 'error', '🔴 ⑨ engine 混批表头错保 status:error（kind=header 不被行级降级）');
+      assertTrue(
+        r.engine.results[0].message && /表头|列数/.test(r.engine.results[0].message),
+        '⑨ engine 混批表头错文案可读', JSON.stringify(r.engine.results[0].message)
+      );
+    }
+
+    // ════════════ ⑩ F2（PR #71 SR）多文件行级错误归属前缀 + rawRow 归一对齐 ════════════
+    //   多文件各有行级错 → reason 带 `[文件名] ` 前缀（对齐旧链路 multiFile）；报告 rawRow 经 normalizeCell 归一。
+    {
+      const fM1 = path.join(tmpdir, 'flowPrefixM1.xlsx');
+      const fM2 = path.join(tmpdir, 'flowPrefixM2.xlsx');
+      // 行级错带前后空格的字段值，验证 rawRow normalizeCell（trim）归一对齐旧链路。
+      await writeXlsx(fM1, FLOW_HEADERS, [makeFlowRow('P1', { direction: 'X', biz_id: '  biz-P1  ' })]);
+      await writeXlsx(fM2, FLOW_HEADERS, [makeFlowRow('P2', { account_no: '' })]);
+      const r = runBothPaths({
+        tmpdir, date: '2026-06-10', tag: 'case10', dumpAfter: true,
+        ops: [{ files: [fM1, fM2] }]
+      });
+      assertEq(r.engine.results[0].status, 'rejected', '⑩ engine 多文件行级错整批拒绝');
+      assertEq(r.legacy.results[0].status, 'rejected', '⑩ legacy 多文件行级错整批拒绝');
+      // 🔴 行级错误 reason 带 `[文件名] ` 前缀（多文件归属）byte-for-byte 与 legacy 一致。
+      assertEq(r.engine.results[0].errorRows, r.legacy.results[0].errorRows, '🔴 ⑩ 多文件 errorRows（含 [文件名] 前缀）byte-for-byte 相等');
+      assertTrue(
+        r.engine.results[0].errorRows.some((e) => /^\[flowPrefixM1\.xlsx\] /.test(e.reason)),
+        '⑩ engine 行级错带来源文件前缀 [flowPrefixM1.xlsx]', JSON.stringify(r.engine.results[0].errorRows)
+      );
+      // 🔴 报告 rawRow 归一对齐：biz_id 前后空格被 normalizeCell trim（与旧链路 reader-streamed normalizeCell 一致）。
+      assertEq(r.engine.results[0].reportRows, r.legacy.results[0].reportRows, '🔴 ⑩ 报告 rawRow（normalizeCell 归一）byte-for-byte 相等');
+      const m1Report = (r.engine.results[0].reportRows || []).find((x) => /biz-P1/.test(JSON.stringify(x.cells)));
+      const bizIdx = FLOW_DB_COLUMNS.indexOf('biz_id');
+      assertTrue(
+        m1Report && m1Report.cells[bizIdx] === 'biz-P1',
+        '🔴 ⑩ rawRow biz_id 前后空格被归一（"  biz-P1  "→"biz-P1"）', m1Report ? JSON.stringify(m1Report.cells[bizIdx]) : 'no-report-row'
       );
     }
 

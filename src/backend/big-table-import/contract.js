@@ -61,6 +61,13 @@ function validateExtensionFields(contract) {
   if (contract.formatEmptyFileError !== undefined && typeof contract.formatEmptyFileError !== 'function') {
     throw new ContractValidationError('契约无效：formatEmptyFileError 必须是函数（sourceFile）=>string', []);
   }
+  // F1（PR #71 SR）批级空数据整批拒绝
+  if (contract.rejectEmptyBatch !== undefined && typeof contract.rejectEmptyBatch !== 'boolean') {
+    throw new ContractValidationError('契约无效：rejectEmptyBatch 必须是布尔值', []);
+  }
+  if (contract.formatEmptyBatchError !== undefined && typeof contract.formatEmptyBatchError !== 'function') {
+    throw new ContractValidationError('契约无效：formatEmptyBatchError 必须是函数（）=>string', []);
+  }
   // E4
   if (contract.maxCollectedErrors !== undefined
     && (!Number.isInteger(contract.maxCollectedErrors) || contract.maxCollectedErrors <= 0)) {
@@ -185,6 +192,9 @@ function validateContract(contract) {
     finalizeForCommit: contract.finalizeForCommit,          // E2 事务内收尾
     rejectEmptyFiles: contract.rejectEmptyFiles === true,   // E3 空文件整批拒绝（缺省 false）
     formatEmptyFileError: contract.formatEmptyFileError,    // E3 空文件错误文案
+    // F1（PR #71 SR）批级空数据整批拒绝（缺省 false；与 E3 per-file 区分，批级全空才拒）。
+    rejectEmptyBatch: contract.rejectEmptyBatch === true,
+    formatEmptyBatchError: contract.formatEmptyBatchError,  // F1 批级空数据错误文案
     maxCollectedErrors: contract.maxCollectedErrors,        // E4 错误上限（缺省由引擎用 100）
     captureRowValues: contract.captureRowValues === true,   // E4 错误记录附带 cells（缺省 false）
     dedupeKeyOf: contract.dedupeKeyOf,                       // E5 写侧跨文件去重 key

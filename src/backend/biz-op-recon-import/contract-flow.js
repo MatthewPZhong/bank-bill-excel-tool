@@ -159,6 +159,18 @@ function createContract(options = {}) {
       ];
     },
 
+    // ── F1（PR #71 SR）批级空数据整批拒绝（🔴 数据丢失回归修复）──
+    //   声明 rejectEmptyBatch：引擎写循环结束后 totalImported===0 → 批级错误走整批 ROLLBACK（DELETE 与零行 INSERT
+    //   同事务原子撤销），与 flow 旧链路 import-worker.js:356-365「dataRowCount===0（跨所有文件总和）→ ROLLBACK」
+    //   byte-for-byte 等价（数据净零变化）。⚠️ 不声明 rejectEmptyFiles（per-file）：flow 旧语义是「批级全空才拒」，
+    //     部分文件空不拒（多文件 [空, 有数据] 应导入有数据文件，不拒）；rejectEmptyBatch 正是批级判，语义吻合。
+    //   formatEmptyBatchError 返回的 message 仅供引擎兜底；session restore 据 structuredImportErrors.kind==='emptyBatch'
+    //     还原为旧链路特殊形态 { status:'rejected', report:false, errorRows:[{rowIndex:0, reason:'文件无有效数据行'}] }。
+    rejectEmptyBatch: true,
+    formatEmptyBatchError() {
+      return '文件无有效数据行';
+    },
+
     // ── E4 行级错误捕获增强 ──
     maxCollectedErrors: FLOW_MAX_COLLECTED_ERRORS,   // 1000（旧链路同口径）
     captureRowValues: true,                          // 错误记录附整行 cells（失败报告 xlsx 需要 rawRow）

@@ -65,18 +65,34 @@ try {
 
 // ── 引擎错误对象 → 还原现行 lastImportErrors 形态（severity/file/sheetRow/message/cells）──
 //   引擎整批拒绝抛 BigTableImportError，message 含 `${sourceFile}：` 前缀，并挂 structuredImportErrors
-//   = { collectedErrors:[{sourceFile,rowIndex,reason[,cells]}], rowErrorTotal, rowErrorTruncated }（见 engine.js）。
+//   = { collectedErrors:[{sourceFile,rowIndex,reason[,cells]}], rowErrorTotal, rowErrorTruncated, fatalErrors }（见 engine.js）。
 //   还原规则（byte-for-byte 对齐旧 worker.js 错误协议 + pending-session exportErrorReport 消费形态）：
-//     - 有 structuredImportErrors.collectedErrors（行级错误：跨文件重复行 / INSERT 失败）→ 每条还原为
+//     - structuredImportErrors.fatalErrors（空文件 fatal：每个空文件一条 { file, message }）→ 还原为
+//       { severity:'fatal', file, message } 条目（旧链路 worker.js:148-151 逐文件 fatal，**与行级错误并列**，多条）。
+//     - structuredImportErrors.collectedErrors（行级错误：跨文件重复行 / INSERT 失败）→ 每条还原为
 //       { severity:'row', file:sourceFile, sheetRow:rowIndex, message:reason, cells }（旧链路 worker.js:121-128 形态）。
-//     - 无行级错误（表头错 / 空文件 / 系统错）→ 单条 { severity:'fatal', message }（旧链路 fatal 形态；
-//       message 已含 sourceFile 前缀，与旧链路 `{ file, message }` 语义等价——exportErrorReport 的 file 列由
-//       此分支留空，message 含文件名，对用户信息完整）。
+//     - F2（PR #71 SR）修复：fatal 与 row 条目**合并并列**（不再因 collectedErrors 非空吞掉空文件 fatal）；
+//       fatal 在前、row 在后（与旧链路逐文件先 push fatal / 行内先到先 push 的总体顺序无强约束，先 fatal 后 row 直观）。
+//     - 两者皆空（表头错 / 系统错——结构化缺失或 collectedErrors+fatalErrors 均空）→ 单条
+//       { severity:'fatal', message }（旧链路表头错 fatal 形态；message 已含 sourceFile 前缀）。
 //   返回 { errors:[...], rowErrorTotal, rowErrorTruncated }。
 function restoreEngineErrors(err) {
   const structured = err && err.structuredImportErrors;
-  if (structured && Array.isArray(structured.collectedErrors) && structured.collectedErrors.length > 0) {
-    const errors = structured.collectedErrors.map((e) => {
+  const fatalSrc = (structured && Array.isArray(structured.fatalErrors)) ? structured.fatalErrors : [];
+  const rowSrc = (structured && Array.isArray(structured.collectedErrors)) ? structured.collectedErrors : [];
+
+  if (fatalSrc.length > 0 || rowSrc.length > 0) {
+    const errors = [];
+    // ① 空文件 fatal（逐文件一条，带 file 字段）——旧链路 worker.js:148-151 与行级错误并列。
+    for (const f of fatalSrc) {
+      errors.push({
+        severity: 'fatal',
+        file: f && f.file != null ? f.file : '',
+        message: f && f.message != null ? f.message : ''
+      });
+    }
+    // ② 行级错误（重复行 / INSERT 失败，带 cells）——旧链路 worker.js:121-128 形态。
+    for (const e of rowSrc) {
       const out = {
         severity: 'row',
         file: e.sourceFile != null ? e.sourceFile : '',
@@ -84,15 +100,15 @@ function restoreEngineErrors(err) {
         message: e.reason != null ? e.reason : ''
       };
       if (Array.isArray(e.cells)) out.cells = e.cells;
-      return out;
-    });
+      errors.push(out);
+    }
     return {
       errors,
-      rowErrorTotal: Number.isFinite(structured.rowErrorTotal) ? structured.rowErrorTotal : errors.length,
+      rowErrorTotal: Number.isFinite(structured.rowErrorTotal) ? structured.rowErrorTotal : rowSrc.length,
       rowErrorTruncated: structured.rowErrorTruncated === true
     };
   }
-  // fatal 单条（表头错 / 空文件 / 系统错）。
+  // fatal 单条（表头错 / 系统错——结构化缺失或 fatalErrors/collectedErrors 均空）。
   const message = (err && err.message) ? err.message : '导入失败';
   const errors = [{ severity: 'fatal', message }];
   // detailLines（表头错带）并入 message 下方（与旧链路 fatal 仅 message 一致：旧链路表头错只有 message，

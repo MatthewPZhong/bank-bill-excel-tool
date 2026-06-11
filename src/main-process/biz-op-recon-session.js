@@ -604,6 +604,9 @@ const { dispatchEngineImport } = require('./big-table-import-dispatch');
 const BIZOP_FLOW_CONTRACT_PATH = require.resolve('../backend/biz-op-recon-import/contract-flow');
 // 流水 DB 列（引擎错误 cells（表头序 28 列）→ rawRow（snake_case key）重建用）。
 const { FLOW_DB_COLUMNS: BIZOP_FLOW_DB_COLUMNS } = require('../backend/biz-op-recon-db/columns');
+// F2（PR #71 SR）：引擎捕获的 cells 是 row-scanner 未归一原始值；restore 重建 rawRow 时逐格 normalizeCell（trim）
+//   对齐旧链路 reader-streamed.js:220 `obj[dbColumns[i]] = normalizeCell(cells[i])`（byte-for-byte rawRow 命门）。
+const { normalizeCell: normalizeFlowCell } = require('../backend/file-service/common');
 // 引擎 worker_threads 堆上限（R-5）：替代旧 utilityProcess 8GB child（与 pending 同口径）。
 const BIZOP_FLOW_ENGINE_RESOURCE_LIMITS = { maxOldGenerationSizeMb: 4096 };
 
@@ -627,21 +630,49 @@ try {
 //     - 无行级错误（表头错 / 空文件 / 系统错）→ { status:'error', message, detailLines }
 //       （对齐旧链路 header-error / fatal → spawnImportWorker { status:'error', message, detailLines }）。
 //   返回与 spawnImportWorker 同形的 result 对象。
-function restoreFlowEngineError(err, { writeErrorReport }) {
+function restoreFlowEngineError(err, { writeErrorReport, multiFile = false }) {
   const structured = err && err.structuredImportErrors;
+  const kind = structured && structured.kind;
+
+  // F1（PR #71 SR）批级空数据 → 旧链路特殊 rejected 形态（report=false，errorRows 固定一条）。
+  //   引擎 contract-flow rejectEmptyBatch 在事务内拒绝抛 BigTableImportError(kind='emptyBatch')；此处还原
+  //   import-worker.js:356-365 形态 { status:'rejected', report:false, errorRows:[{rowIndex:0, reason:'文件无有效数据行'}] }。
+  if (kind === 'emptyBatch') {
+    return {
+      status: 'rejected',
+      report: false,
+      errorRows: [{ rowIndex: 0, reason: '文件无有效数据行' }],
+      rowErrorTotal: 1,
+      truncated: false
+    };
+  }
+
+  // F2 第 2 点（PR #71 SR）表头错 → 必须保旧 header-error 的 { status:'error', message, detailLines } 形态，
+  //   不能因 collectedErrors 非空（多文件混批：一文件表头错 + 一文件行级错时 collectedErrors 已含行级错）被
+  //   下方行级 rejected 分支误降级。据 kind==='header' 精确分流（引擎对表头错挂 kind='header'）。
+  if (kind === 'header') {
+    const message = (err && err.message) ? err.message : '流水导入失败';
+    const detailLines = (err && Array.isArray(err.detailLines)) ? err.detailLines : [];
+    return { status: 'error', message, detailLines };
+  }
+
   if (structured && Array.isArray(structured.collectedErrors) && structured.collectedErrors.length > 0) {
     // 行级校验错（整批拒绝，report=true）。
     const errorRows = structured.collectedErrors.map((e) => {
       const rowIndex = e.rowIndex != null ? e.rowIndex : '';
-      const reason = e.reason != null ? e.reason : '';
-      // cells（引擎 captureRowValues 取的表头序 28 列原始值）→ rawRow（snake_case key + _rowIndex）。
-      //   旧链路 reader 输出的 rawRow 即 { <DB列>: normalizeCell(cell), _rowIndex }；引擎契约 mapRow 已对 values
-      //   逐格 normalizeCell（contract-flow.buildFlowDbRow），故 cells 已是归一值，此处仅按列名配对重建，byte-for-byte 等价。
+      // F2 第 4 点（PR #71 SR）行级错误来源文件归属：多文件时 reason 加 `[文件名] ` 前缀，
+      //   逐字对齐旧链路 import-worker.js:319-321 `multiFile ? `[${sourceName}] ${result.reason}` : result.reason`
+      //   （sourceName = path.basename，引擎 collectedErrors.sourceFile 已是 basename）。单文件不加前缀（保回归）。
+      const baseReason = e.reason != null ? e.reason : '';
+      const reason = (multiFile && e.sourceFile) ? `[${e.sourceFile}] ${baseReason}` : baseReason;
+      // F2 第 3 点（PR #71 SR）cells 归一修正：引擎 captureRowValues 取的是 row-scanner **未归一**原始值
+      //   （import-worker.js:143 values.slice() 不 trim）；旧链路 rawRow 是 normalizeCell(cell)（reader-streamed.js:220
+      //   逐格 trim）。故此处对每格 normalizeCell 再建 rawRow，byte-for-byte 对齐旧链路 rawRow（修正旧注释写反）。
       let rawRow;
       if (Array.isArray(e.cells)) {
         rawRow = {};
         for (let i = 0; i < BIZOP_FLOW_DB_COLUMNS.length; i++) {
-          rawRow[BIZOP_FLOW_DB_COLUMNS[i]] = e.cells[i] == null ? '' : String(e.cells[i]);
+          rawRow[BIZOP_FLOW_DB_COLUMNS[i]] = normalizeFlowCell(e.cells[i]);
         }
         rawRow._rowIndex = rowIndex;
       }
@@ -656,7 +687,7 @@ function restoreFlowEngineError(err, { writeErrorReport }) {
       writeErrorReport
     };
   }
-  // 表头错 / 空文件 / 系统错 → { status:'error', message, detailLines }（对齐旧 header-error/fatal）。
+  // 空文件 / 系统错（无 kind 或 kind 非上述）→ { status:'error', message, detailLines }（对齐旧 header-error/fatal）。
   const message = (err && err.message) ? err.message : '流水导入失败';
   const detailLines = (err && Array.isArray(err.detailLines)) ? err.detailLines : [];
   return { status: 'error', message, detailLines };
@@ -696,24 +727,18 @@ async function runFlowImportViaEngine({ dbPath, date, filePaths, onProgress, wri
       }
     });
     // 成功：还原旧链路 flow complete 形态（totalCount/validCount = 引擎写入总行数）。
+    //   🔴 F1（PR #71 SR）数据丢失回归修复：空批整批拒绝改由引擎在事务内处理（contract-flow rejectEmptyBatch）。
+    //     原 session 事后判 validCount===0 返回 rejected 的写法有数据丢失 bug——overwrite 模式引擎事务头已 DELETE
+    //     且无错误 COMMIT 后，session 才事后判空，删除已落盘而无新数据净入。现引擎在 COMMIT 前判 totalImported===0
+    //     → 抛 BigTableImportError（kind='emptyBatch'）走整批 ROLLBACK，DELETE 与零行 INSERT 同事务原子撤销，
+    //     由下方 catch → restoreFlowEngineError（kind==='emptyBatch' 分支）还原旧 rejected 形态。
+    //     故成功路径不再出现 totalImported===0（空批已在引擎侧拒绝抛错）。
     const validCount = engineResult ? engineResult.totalImported : 0;
-    // 🔴 空文件整批拒绝 parity（旧链路 import-worker runFlowImport：dataRowCount===0（跨所有文件总和）→ rejected，
-    //   report=false，errorRows=[{rowIndex:0, reason:'文件无有效数据行'}]）。
-    //   ⚠️ 不在契约声明 rejectEmptyFiles：引擎 rejectEmptyFiles 是「逐文件 importedCount===0」即拒，会让
-    //     多文件 [空文件, 有数据文件] 误拒（旧链路按总和判，不拒）；故改在 session 侧按「引擎写入总行数==0」判，
-    //     与旧链路「总 dataRowCount==0」byte-for-byte 等价（多文件部分空不拒、全空才拒）。
-    if (validCount === 0) {
-      return {
-        status: 'rejected',
-        errorReportPath: null,   // report=false：不写失败报告 xlsx（旧链路同）
-        errorRows: [{ rowIndex: 0, reason: '文件无有效数据行' }],
-        rowErrorTotal: 1,
-        truncated: false
-      };
-    }
     return { status: 'success', totalCount: validCount, validCount };
   } catch (err) {
-    const restored = restoreFlowEngineError(err, { writeErrorReport });
+    // F2 第 4 点（PR #71 SR）：多文件时行级错误 reason 加 `[文件名] ` 前缀（对齐旧链路 import-worker multiFile）。
+    const multiFile = Array.isArray(filePaths) && filePaths.length > 1;
+    const restored = restoreFlowEngineError(err, { writeErrorReport, multiFile });
     if (restored.status === 'rejected') {
       // report=true → 主进程写失败报告 xlsx（cells 重建的 rawRow），与 spawnImportWorker rejected 分支同路。
       let errorReportPath = null;

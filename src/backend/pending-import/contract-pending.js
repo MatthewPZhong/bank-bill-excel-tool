@@ -77,8 +77,19 @@ function createContract(options = {}) {
     // 表头校验：复用 pending validator.validateHeaders（纯函数，返回 { ok } | { ok:false, error }）。
     //   引擎 import-worker 把 message 加 `${sourceFile}：` 前缀（与旧链路 worker.js 表头错文案
     //   `{ file: fileName, message: hdr.error }` 在 session 适配层还原对齐——见 pending-session 适配）。
+    //
+    //   F3（PR #71 SR）尾随多列截断对齐：引擎 row-scanner 表头行**全列收集不截断**（row-scanner.js:15/32），
+    //     而旧链路 pending reader（streaming-xlsx-reader.parseRowXml）固定 `colCount=31`，colIdx>=31 的列被丢弃
+    //     （streaming-xlsx-reader.js:64/76）——即「表头带尾随多列（如 33 列：31 正确 + 2 尾随空列，Excel 常见）」
+    //     的文件，旧链路只见前 31 列 → validateHeaders 通过；新引擎全列传入 → validator.js:18 `length !== 31` 拒绝。
+    //     这是「旧过新拒」回归。修法：契约包装层按 expectedHeaders.length（31）截断 cells 再交核心 validator——
+    //     语义 = 旧 reader 的列丢弃，core 校验函数本体不动（validator.js 仍严格 31 列，被本包装层喂入恰好 31 列）。
+    //   ⚠️ 仅 pending 同病同修：flow 旧 reader（reader-streamed.js:195-214）**不截断**、反而显式检测尾部多列并
+    //     拒绝（「表头列数超出模板」）——故 contract-flow 不加截断（加了反破坏 flow 旧语义 byte-for-byte）。
     validateHeaders(cells) {
-      return validateHeaders(cells);
+      const arr = Array.isArray(cells) ? cells : [];
+      const truncated = arr.length > PENDING_COLUMNS.length ? arr.slice(0, PENDING_COLUMNS.length) : arr;
+      return validateHeaders(truncated);
     },
 
     // monthKey：pending 行内无月份列，单月由 yearMonth 入参；引擎跨月校验旁路（monthKeyOf 返回 null

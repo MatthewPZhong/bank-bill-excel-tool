@@ -259,7 +259,16 @@ async function importFiles({
     const maxErrors = (contract.maxCollectedErrors && contract.maxCollectedErrors > 0)
       ? contract.maxCollectedErrors : MAX_COLLECTED_ERRORS;
     // E3：空文件整批拒绝开关（worker parsed.importedCount===0 = 「文件为空或只有表头行」 ⇒ 批级错误）。
+    //   ⚠️ per-file 语义：任一文件无数据行即拒（pending 旧链路 worker.js:148-151 逐文件判）。
     const rejectEmptyFiles = contract.rejectEmptyFiles === true;
+    // F1（v3.0.4 PR #71 SR）：批级空数据整批拒绝开关（写循环结束后 totalImported===0 ⇒ 批级错误）。
+    //   ⚠️ 与 E3 rejectEmptyFiles（per-file）语义区分：rejectEmptyBatch 是「批级全空才拒」（部分文件空不拒），
+    //     对齐 flow 旧链路 import-worker.js:356-365「dataRowCount===0（跨所有文件总和）→ ROLLBACK」。
+    //   🔴 必须由引擎在 COMMIT 前判：overwrite 模式事务头已 DELETE，若 session 事后判空文件返回 rejected，
+    //     则删除已 COMMIT 而无新数据净入 = 数据丢失回归（biz-op flow 全空 overwrite 导入）。引擎置批级错误
+    //     走既有整批 ROLLBACK 路径，DELETE 与 INSERT 在同一事务原子撤销，与 flow 旧链路数据净零变化 byte-for-byte。
+    //   不声明 ⇒ 行为零变化（收单/pending 不声明）。
+    const rejectEmptyBatch = contract.rejectEmptyBatch === true;
     // E5：写侧跨文件去重 Set（契约声明 dedupeKeyOf 时维护；命中 → 行级错误不 INSERT）。
     const hasDedupe = typeof contractMod.dedupeKeyOf === 'function';
     const seenDedupeKeys = hasDedupe ? new Set() : null;
@@ -283,9 +292,17 @@ async function importFiles({
     let totalErrorTotal = 0;          // 全量行级错误数（跨文件累加，含截断前总数）
     const collectedErrors = [];       // 截断到 maxErrors 的错误样本
     const perFileErrorTotals = new Map(); // sourceFile → 行级错误总数（供契约 formatBatchError 精确计数，不受样本截断影响）
-    let aborted = false;              // 整批拒绝标志（表头错 / 行级错 / 跨月 / 空文件）
+    let aborted = false;              // 整批拒绝标志（表头错 / 行级错 / 跨月 / 空文件 / 空批）
     let abortError = null;            // 整批拒绝时的首要错误（表头错优先抛原始 BigTableImportError）
     let emptyFileError = null;        // E3：空文件批级错误（{message, detailLines}），整批 ROLLBACK
+    // F2（v3.0.4 PR #71 SR）：空文件 fatal 错误清单（收集**全部**空文件，非仅首个）。
+    //   旧链路 pending worker.js:148-151 逐文件 push `{ severity:'fatal', file, message }` 与行级错误并列；
+    //   引擎在此把每个空文件累积为 { file, message }，最终挂到 error.structuredImportErrors.fatalErrors，
+    //   session restore 还原为旧形态 `{ severity:'fatal', file, message }` 条目与行级错误并列。
+    //   ⚠️ rejectEmptyFiles 下，空文件不再短路 aborted（继续扫后续文件收集行级错误 + 其余空文件），
+    //     整批拒绝由「fatalErrors 非空 || 行级错误」在写循环后统一判定。
+    const fatalErrors = [];           // [{ file, message }]（空文件 / 系统错），整批 ROLLBACK
+    let emptyBatchError = null;       // F1：批级空数据错误（{message, detailLines}），整批 ROLLBACK
     let deletedCount = 0;
 
     // 记一条行级错误：累加跨文件总数 + 按文件计数 + 截断样本（统一入口，保证 perFileErrorTotals 与 totalErrorTotal 同步）。
@@ -362,12 +379,16 @@ async function importFiles({
       //   语义平移 pending worker.js:148-151）。契约声明 rejectEmptyFiles 时 → 批级错误（整批 ROLLBACK）。
       //   ⚠️ 必须用 parsed.importedCount（解析侧 mapRow 通过的数据行数），不能用「写入后行数」——
       //     后者会把「行全被去重/跨月拒绝」误判为空文件（那是行级错误路径，非空文件）。
-      if (rejectEmptyFiles && !emptyFileError && (parsed.importedCount || 0) === 0) {
-        aborted = true;
+      //   F2（PR #71 SR）：收集**全部**空文件（不短路 aborted）——旧链路 worker.js:148-151 逐文件 push fatal
+      //     与行级错误并列；多个空文件应各出一条。本文件记一条空文件 fatal 后继续 return（无数据行无须再走 INSERT），
+      //     后续文件继续扫描收集其余空文件 + 行级错误。整批拒绝由写循环后「fatalErrors 非空 || 行级错」统一判。
+      if (rejectEmptyFiles && (parsed.importedCount || 0) === 0) {
         const msg = typeof contractMod.formatEmptyFileError === 'function'
           ? contractMod.formatEmptyFileError(parsed.sourceFile)
           : `${parsed.sourceFile}：文件为空或只有表头行`;
-        emptyFileError = { message: msg, detailLines: [] };
+        fatalErrors.push({ file: parsed.sourceFile, message: msg });
+        // 兼容既有抛错路径：emptyFileError 仍保留「首个空文件」消息（无行级错误时作主消息）。
+        if (!emptyFileError) emptyFileError = { message: msg, detailLines: [] };
         return;
       }
 
@@ -465,20 +486,46 @@ async function importFiles({
       throw pipeErr;
     }
 
-    // 整批拒绝（表头错 / 行级错累计 / 跨月 / E3 空文件）→ ROLLBACK + 报错（不入任何行）。
-    if (aborted || collectedErrors.length > 0 || totalErrorTotal > 0 || emptyFileError) {
+    // F1（PR #71 SR）批级空数据整批拒绝：契约声明 rejectEmptyBatch 且写入总行数==0 → 批级错误（整批 ROLLBACK）。
+    //   🔴 必须在 COMMIT 前判（此处仍在大事务内）：overwrite 模式事务头已 DELETE，若漏判则 DELETE 随空批 COMMIT
+    //     = 数据丢失（flow 全空 overwrite 导入回归）。置 emptyBatchError 走下方既有整批 ROLLBACK 路径，
+    //     DELETE 与（零行）INSERT 同事务原子撤销 = flow 旧链路 dataRowCount===0 → ROLLBACK 的数据净零变化。
+    //   ⚠️ 仅当无其它整批拒绝原因（表头错/空文件/行级错）时才独立成因——若有行级错等更具体原因，按既有优先级抛。
+    //   writtenTotal===0 含「全文件空」与「有数据行但全被跨月/去重拒绝（已计行级错走 formatBatchError）」两态；
+    //     后者 totalErrorTotal>0 会优先走行级错误分支，emptyBatchError 仅在纯空批（无任何行级错）时生效。
+    if (rejectEmptyBatch && writtenTotal === 0
+      && !abortError && fatalErrors.length === 0 && totalErrorTotal === 0 && !emptyFileError) {
+      const msg = typeof contractMod.formatEmptyBatchError === 'function'
+        ? contractMod.formatEmptyBatchError()
+        : '文件无有效数据行';
+      emptyBatchError = { message: msg, detailLines: [] };
+    }
+
+    // 整批拒绝（表头错 / 行级错累计 / 跨月 / E3 空文件 / F2 fatalErrors / F1 空批）→ ROLLBACK + 报错（不入任何行）。
+    if (aborted || collectedErrors.length > 0 || totalErrorTotal > 0
+      || emptyFileError || fatalErrors.length > 0 || emptyBatchError) {
       safeRollback(db);
       // 结构化错误元数据（附到抛出的 error 上，供消费方按需还原行级错误形态）：
       //   v3.0.4 PR-C：pending session 需把引擎错误还原为现行 lastImportErrors 形态（severity/file/sheetRow/message/cells
       //   + rowErrorTotal/rowErrorTruncated）以驱动报错 xlsx 导出。引擎在此把样本截断后的 collectedErrors（可带 cells）
       //   + 真实总数 + 截断标志统一挂到 error.structuredImportErrors，纯附加字段——不读取者（如收单）完全无感。
       const rowErrorTruncated = totalErrorTotal > collectedErrors.length;
-      const attachStructured = (err) => {
+      // kind（PR #71 SR F2）：整批拒绝的**主要成因类别**，供 session restore 精确分流（不靠 collectedErrors 是否非空猜）。
+      //   'header'（表头错） / 'emptyBatch'（F1 批级空） / 'emptyFile'（E3 空文件） / 'row'（行级错误）。
+      //   多文件混批（一文件表头错 + 另一文件行级错）时：abortError 优先抛但 collectedErrors 非空，
+      //   session 据 kind==='header' 保旧 status:'error'+detailLines 形态（不被行级 rejected 分支误降级）。
+      const attachStructured = (err, kind) => {
         try {
           err.structuredImportErrors = {
             collectedErrors: collectedErrors.slice(),
             rowErrorTotal: totalErrorTotal,
-            rowErrorTruncated
+            rowErrorTruncated,
+            // F2（PR #71 SR）：空文件 / 系统级 fatal 错误清单（{file, message}），与行级错误并列还原。
+            //   旧链路 pending worker.js:148-151 逐文件 fatal 与行级错误同 errors[] 数组；session restore 据此
+            //   把 fatalErrors 还原为 `{severity:'fatal', file, message}` 条目与 row 级条目并列，不丢空文件信息。
+            //   纯附加字段——不读取者（如收单/flow rejected 行级路径）完全无感。
+            fatalErrors: fatalErrors.slice(),
+            kind: kind || 'row'
           };
         } catch (_e) { /* swallow */ }
         return err;
@@ -489,7 +536,16 @@ async function importFiles({
         if (contractMod.errorName && typeof contractMod.errorName === 'string') {
           abortError.name = contractMod.errorName;
         }
-        throw attachStructured(abortError);
+        throw attachStructured(abortError, 'header');
+      }
+      // F1（PR #71 SR）批级空数据错误（无表头错/空文件/行级错时——纯空批是整批拒绝原因；flow 全空 overwrite 路径）。
+      if (emptyBatchError) {
+        const err = new zipReader.BigTableImportError(
+          emptyBatchError.message,
+          Array.isArray(emptyBatchError.detailLines) ? emptyBatchError.detailLines : []
+        );
+        if (contractMod.errorName && typeof contractMod.errorName === 'string') err.name = contractMod.errorName;
+        throw attachStructured(err, 'emptyBatch');
       }
       // E3 空文件批级错误（无行级错误时优先抛——空文件本身就是整批拒绝原因）。
       if (emptyFileError) {
@@ -498,7 +554,7 @@ async function importFiles({
           Array.isArray(emptyFileError.detailLines) ? emptyFileError.detailLines : []
         );
         if (contractMod.errorName && typeof contractMod.errorName === 'string') err.name = contractMod.errorName;
-        throw attachStructured(err);
+        throw attachStructured(err, 'emptyFile');
       }
       // 契约声明 formatBatchError → 由业务契约决定错误文案（message/detailLines/name），引擎保持通用不内联业务文案。
       //   收单契约据此产出 `${sourceFile}：导入失败 N 行（...）` + `第 N 行：reason`，byte-for-byte 平移 reader。

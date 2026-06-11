@@ -218,6 +218,39 @@ test.describe('serialize-error', () => {
     );
   });
 
+  test('12b. structuredImportErrors fatalErrors + kind 透传 round-trip（PR #71 SR F2：空文件 fatal 与 kind 分流）', () => {
+    const err = new Error('mixEmpty.xlsx：文件为空或只有表头行');
+    err.name = 'PendingImportValidationError';
+    err.structuredImportErrors = {
+      collectedErrors: [
+        { sourceFile: 'mixDup.xlsx', rowIndex: 2, reason: '发现重复行（hash abcd1234...）', cells: ['p-X1', '', '100'] }
+      ],
+      rowErrorTotal: 1,
+      rowErrorTruncated: false,
+      // F2：空文件 fatal 清单（收集全部空文件，每条带 file）+ kind 主成因类别。
+      fatalErrors: [
+        { file: 'mixEmpty.xlsx', message: 'mixEmpty.xlsx：文件为空或只有表头行' },
+        { file: 'mixEmpty2.xlsx', message: 'mixEmpty2.xlsx：文件为空或只有表头行' }
+      ],
+      kind: 'row'
+    };
+    const s = serializeError(err);
+    assert.ok(Array.isArray(s.structuredImportErrors.fatalErrors), '序列化保留 fatalErrors 数组');
+    assert.equal(s.structuredImportErrors.fatalErrors.length, 2, '🔴 收集全部空文件 fatal（非仅首个）');
+    assert.equal(s.structuredImportErrors.kind, 'row', '序列化保留 kind');
+
+    const r = deserializeError(s);
+    assert.ok(Array.isArray(r.structuredImportErrors.fatalErrors), '反序列化恢复 fatalErrors');
+    assert.deepEqual(
+      r.structuredImportErrors.fatalErrors[0], { file: 'mixEmpty.xlsx', message: 'mixEmpty.xlsx：文件为空或只有表头行' },
+      '🔴 空文件 fatal 带 file 字段跨进程边界完整还原（与行级错误并列）'
+    );
+    assert.equal(r.structuredImportErrors.fatalErrors[1].file, 'mixEmpty2.xlsx', '第 2 个空文件 fatal 也还原');
+    assert.equal(r.structuredImportErrors.kind, 'row', '🔴 kind 跨进程边界还原（session restore 据此分流 header/emptyBatch/row）');
+    // 行级错误 + fatal 并存时两者均在
+    assert.equal(r.structuredImportErrors.collectedErrors.length, 1, '行级错误未被空文件吞掉');
+  });
+
   test('13. 无 structuredImportErrors 的普通错误 → 字段为 null（不影响现状）', () => {
     const s = serializeError(new Error('plain'));
     assert.equal(s.structuredImportErrors, null);

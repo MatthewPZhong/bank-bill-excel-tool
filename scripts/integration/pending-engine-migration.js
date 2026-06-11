@@ -10,7 +10,16 @@
 //     ⑥ 错误超 1000 条截断：rowErrorTotal 真实总数 + 截断标志一致 + 样本上限 1000
 //     ⑦ 覆盖重导（R-1 红线）：6 表覆盖删除链——重导前先种 diff_runs/diff_rows/removed_pending_rows/pending_removal_matches，
 //        重导后断言关联表清空（byte-for-byte 表空对比）
+//     ⑨ F2（PR #71 SR）重复行文件 + 空文件并存：错误清单两条都在（row 级重复行 + fatal 级空文件带 file 字段）
+//     ⑩ F3（PR #71 SR）表头 33 列（31 正确 + 2 尾随空列）：旧 reader 截断到 31 列过 → 修复后引擎契约层截断也过
 //   R-6（intentional divergence，不要求 parity）：多 sheet 文件——引擎 rels 正解报错；只验证引擎报错文案可读。
+//
+//   F4（PR #71 SR 裁定·文档化处理）表头物理 rowR===1 分歧：引擎按物理 r 属性识别表头（rowR===1），
+//     旧 pending reader（streaming-xlsx-reader.js）按「第 N 个出现的 <row> 块」计数识别表头（rowIdx，忽略 r 属性）。
+//     分歧仅在**稀疏 xlsx 物理上无 <row r="1">、首个 <row> 为 r="2"（真表头）**时触发：旧链路接受、引擎报「缺表头行」。
+//     裁定：该形态需手工删首行/特殊工具产生，正常 Excel/ExcelJS 导出恒从 r="1" 起；首行为空行时旧链路也因
+//       「第一个 <row> 块（空行）当表头校验 → 列名不匹配」拒绝（与引擎结论一致）。真正分歧（首个 row=r="2"）罕见，
+//       且新行为是 loud error（不静默丢数据），属安全方向。维持引擎现状，不在契约层对齐——本 divergence 文档化。
 //
 // 开关可测性：用子进程（spawnSync）跑导入——子进程 env 注入 PENDING_FORCE_LEGACY_IMPORT=1 走旧链路，不设则走引擎。
 //   生产代码路径不被污染（env 仅本测试子进程内生效）。导入到两个独立 pending DB 文件后主进程对比。
@@ -418,6 +427,71 @@ async function main() {
       );
     }
 
+    // ════════════ ⑨ F2（PR #71 SR）重复行文件 + 空文件并存 → 错误清单两条都在（fatal 带 file）════════════
+    //   旧 bug：引擎 collectedErrors 非空时空文件 fatal 被整体吞掉（只剩 row 级），且 fatal 单条丢 file 字段。
+    //   修复：引擎附 fatalErrors:[{file,message}]（收集全部空文件）；session restore 把 fatal 与 row 并列还原。
+    //   断言：错误报告同时含 row 级重复行（带 cells）+ fatal 级空文件（带 file）两条。
+    {
+      const fData = path.join(tmpdir, 'mixData.xlsx');
+      const fDup = path.join(tmpdir, 'mixDup.xlsx');
+      const fEmpty = path.join(tmpdir, 'mixEmpty.xlsx');
+      await writeXlsx(fData, PENDING_COLUMNS, [makeRow('X1')]);
+      await writeXlsx(fDup, PENDING_COLUMNS, [makeRow('X1')]);    // 跨文件重复 X1 → row 级错误
+      await writeXlsx(fEmpty, PENDING_COLUMNS, []);               // 空文件 → fatal 级错误
+      const r = runBothPaths({
+        tmpdir, yearMonth: '2026-06', tag: 'case9', dumpAfter: true,
+        ops: [{ files: [fData, fDup, fEmpty], overwriteConfirmed: false }]
+      });
+      assertEq(r.engine.results[0].status, 'error', '⑨ engine 重复行+空文件并存整批拒绝');
+      assertEq(r.legacy.results[0].status, 'error', '⑨ legacy 重复行+空文件并存整批拒绝');
+      assertEq(r.engine.dump.pending_rows.length, 0, '🔴 ⑨ engine 整批 ROLLBACK 表空');
+      const eRows = (r.engine.lastError && r.engine.lastError.rows) || [];
+      // 🔴 F2：错误清单两条都在——row 级重复行（带 31 列 cells）+ fatal 级空文件（带 file 字段）。
+      const dupRow = eRows.find((x) => x.severity === 'row' && /发现重复行/.test(x.message));
+      const emptyFatal = eRows.find((x) => x.severity === 'fatal' && /文件为空或只有表头行/.test(x.message));
+      assertTrue(!!dupRow, '🔴 ⑨ engine 错误清单含 row 级重复行（未被空文件吞掉）', JSON.stringify(eRows));
+      assertTrue(!!emptyFatal, '🔴 ⑨ engine 错误清单含 fatal 级空文件（未被行级吞掉）', JSON.stringify(eRows));
+      assertTrue(emptyFatal && emptyFatal.file === 'mixEmpty.xlsx', '🔴 ⑨ engine 空文件 fatal 带 file 字段（mixEmpty.xlsx）', emptyFatal ? JSON.stringify(emptyFatal.file) : 'no-fatal');
+      assertTrue(dupRow && dupRow.cells && dupRow.cells.length === 31, '⑨ engine 重复行 fatal 带 31 列 cells', dupRow ? String(dupRow.cells.length) : 'no-row');
+      // legacy 同样两条都在（旧链路逐文件 push fatal 与行级并列）——存在性 parity（不锁顺序：引擎并行解析交织序与旧串行不同）。
+      const lRows = (r.legacy.lastError && r.legacy.lastError.rows) || [];
+      assertTrue(
+        lRows.some((x) => x.severity === 'row' && /发现重复行/.test(x.message))
+        && lRows.some((x) => x.severity === 'fatal' && /文件为空或只有表头行/.test(x.message) && x.file === 'mixEmpty.xlsx'),
+        '⑨ legacy 错误清单同含 row + fatal（带 file）两条', JSON.stringify(lRows)
+      );
+    }
+
+    // ════════════ ⑩ F3（PR #71 SR）表头 33 列（31 列正确 + 2 尾随空列）→ 旧过新也过 ════════════
+    //   旧 pending reader 固定 colCount=31，尾随列被丢弃 → 见 31 列表头 → 通过；引擎 row-scanner 全列收集见 33 列。
+    //   修复前引擎 validateHeaders 收 33 列 → length!==31 拒绝（旧过新拒回归）；修复后契约层截断到 31 列再校验 → 通过。
+    {
+      // 表头 33 列：前 31 = PENDING_COLUMNS，后 2 = 尾随物理空列（自闭合空 cell）。
+      const header33 = [...PENDING_COLUMNS, '', ''];
+      // 数据行同样 33 列（前 31 有效 + 尾随 2 空列），引擎数据行按 expectedLen=31 截断（与旧 reader 一致）。
+      const dataA = [...makeRow('TR1'), '', ''];
+      const dataB = [...makeRow('TR2'), '', ''];
+      const fp = await writePendingXlsxWithTrailingCols(tmpdir, 'trailingCols.xlsx', header33, [dataA, dataB]);
+      const opJson = path.join(tmpdir, 'op-case10.json');
+      const runOne = (forceLegacy) => {
+        fs.writeFileSync(opJson, JSON.stringify({ tmpdir, yearMonth: '2026-07', dumpAfter: true, ops: [{ files: [fp], overwriteConfirmed: false }] }), 'utf8');
+        const dbPath = path.join(tmpdir, `db-case10-${forceLegacy ? 'legacy' : 'engine'}.sqlite`);
+        const env = { ...process.env };
+        if (forceLegacy) env.PENDING_FORCE_LEGACY_IMPORT = '1'; else delete env.PENDING_FORCE_LEGACY_IMPORT;
+        const res = spawnSync('node', [THIS, '--child', opJson, dbPath], { encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'pipe'] });
+        const text = (res.stdout || '').trim();
+        return JSON.parse(text.slice(text.indexOf('{')));
+      };
+      const engine = runOne(false);
+      const legacy = runOne(true);
+      // 🔴 F3：表头带尾随空列 → 旧链路过、修复后引擎也过（不再「旧过新拒」）。
+      assertEq(legacy.results[0].status, 'success', '⑩ legacy 表头尾随空列导入成功（旧 reader 截断到 31 列）');
+      assertEq(engine.results[0].status, 'success', '🔴 ⑩ engine 表头尾随空列导入成功（契约 validateHeaders 截断到 31 列）');
+      assertEq(engine.results[0].rowCount, 2, '⑩ engine 导入 2 行（尾随空列不影响数据）');
+      // 数据行尾随空列被截断 → pending_rows byte-for-byte 与 legacy 相等（前 31 列入库）。
+      assertEq(engine.dump.pending_rows, legacy.dump.pending_rows, '🔴 ⑩ 表头尾随空列 pending_rows byte-for-byte 相等（数据行截断到 31 列）');
+    }
+
     console.log(`pending-engine-migration: ${passed}/${passed + failed} PASS`);
     if (failed > 0) {
       for (const f of failures) console.error(`  FAIL ${f.label}: ${f.detail}`);
@@ -426,6 +500,52 @@ async function main() {
   } finally {
     try { fs.rmSync(tmpdir, { recursive: true, force: true }); } catch (_e) { /* swallow */ }
   }
+}
+
+// 工具：列索引（0-based）→ Excel 列字母（A/B/.../AA/AB...）。
+function colLetterOf(i) {
+  let s = ''; let n = i + 1;
+  while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+// F3（PR #71 SR）：构造「表头带尾随物理空列」的单 sheet pending xlsx（手写 XML 精确控制 cell 数）。
+//   headerCells：表头行各列值（含尾随空串——空串写自闭合 <c r=".."/> 物理空 cell，引擎全列收集得 >31 列）；
+//   dataRows：数据行二维数组（按 headerCells 列数；尾随空列同样写物理空 cell）。
+//   旧 pending reader 固定 colCount=31，colIdx>=31 丢弃 → 只见前 31 列；引擎 row-scanner 表头全列收集见全部列。
+//   F3 修复后契约 validateHeaders 截断到 31 列再校验 → 两路均「前 31 列匹配则通过」。
+function writePendingXlsxWithTrailingCols(tmpdir, fileName, headerCells, dataRows) {
+  const dir = fs.mkdtempSync(path.join(tmpdir, 'trail-'));
+  const fp = path.join(dir, fileName);
+  const escXml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // 每格：空串 → 自闭合物理空 cell（占列位，引擎据 r 属性 ensureIndex）；非空 → inlineStr。
+  const rowXml = (cells, rowNum) => cells.map((v, i) => {
+    const ref = `${colLetterOf(i)}${rowNum}`;
+    return (v === '' || v == null)
+      ? `<c r="${ref}"/>`
+      : `<c r="${ref}" t="inlineStr"><is><t>${escXml(v)}</t></is></c>`;
+  }).join('');
+  const rows = [`<row r="1">${rowXml(headerCells, 1)}</row>`];
+  dataRows.forEach((dr, idx) => { rows.push(`<row r="${idx + 2}">${rowXml(dr, idx + 2)}</row>`); });
+  const sheet1 = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+    + rows.join('') + '</sheetData></worksheet>';
+  const wbXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+    + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
+    + '<sheet name="数据" sheetId="1" r:id="rId1"/></sheets></workbook>';
+  const relsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+    + '</Relationships>';
+  return new Promise((resolve, reject) => {
+    const zf = new yazl.ZipFile();
+    zf.addBuffer(Buffer.from(wbXml, 'utf8'), 'xl/workbook.xml');
+    zf.addBuffer(Buffer.from(relsXml, 'utf8'), 'xl/_rels/workbook.xml.rels');
+    zf.addBuffer(Buffer.from(sheet1, 'utf8'), 'xl/worksheets/sheet1.xml');
+    zf.outputStream.pipe(fs.createWriteStream(fp)).on('close', () => resolve(fp)).on('error', reject);
+    zf.end();
+  });
 }
 
 // 构造多 sheet pending xlsx（R-6：两个 sheet，第一个表头 + 1 数据行）。
