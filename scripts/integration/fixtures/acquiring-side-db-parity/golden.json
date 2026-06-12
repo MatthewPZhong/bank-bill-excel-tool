@@ -1,0 +1,115 @@
+{
+  "case1": {
+    "runsSummary": {
+      "totalBillRows": 5,
+      "matchedRows": 5,
+      "mismatchRows": 2,
+      "unmatchedRows": 0,
+      "status": "success"
+    },
+    "diffRows": [
+      {
+        "bill_raw_json": "{\"账单日期\":\"2026-03-01\",\"originBillBizId\":\"\",\"单据类型\":\"\",\"主对账Id\":\"M2\",\"业务订单号\":\"\",\"对账金额\":\"20\",\"对账币种\":\"EUR\",\"valueDate\":\"\",\"channel\":\"\"}",
+        "bill_source_file": "c1-billA.xlsx",
+        "bill_source_row_index": 3,
+        "flow_currency": "usd",
+        "flow_amount_abs": "20",
+        "diff_type": "currency_mismatch"
+      },
+      {
+        "bill_raw_json": "{\"账单日期\":\"2026-03-01\",\"originBillBizId\":\"\",\"单据类型\":\"\",\"主对账Id\":\"M4\",\"业务订单号\":\"\",\"对账金额\":\"10\",\"对账币种\":\"CNY\",\"valueDate\":\"\",\"channel\":\"\"}",
+        "bill_source_file": "c1-billA.xlsx",
+        "bill_source_row_index": 5,
+        "flow_currency": "",
+        "flow_amount_abs": "",
+        "diff_type": "currency_mismatch"
+      }
+    ],
+    "diffRowCount": 2,
+    "diffSheetData": [
+      {
+        "name": "2026-03-01~03-01",
+        "rows": [
+          [
+            "账单日期",
+            "originBillBizId",
+            "单据类型",
+            "主对账Id",
+            "业务订单号",
+            "对账金额",
+            "对账币种",
+            "valueDate",
+            "channel",
+            "单据_对账币种",
+            "流水_通道清算币种",
+            "流水_通道清算金额"
+          ],
+          [
+            "2026-03-01",
+            "",
+            "",
+            "M2",
+            "",
+            "20",
+            "EUR",
+            "",
+            "",
+            "EUR",
+            "usd",
+            "20"
+          ],
+          [
+            "2026-03-01",
+            "",
+            "",
+            "M4",
+            "",
+            "10",
+            "CNY",
+            "",
+            "",
+            "CNY"
+          ]
+        ]
+      }
+    ]
+  },
+  "case2": {
+    "runsSummary": {
+      "totalBillRows": 2,
+      "matchedRows": 2,
+      "mismatchRows": 0,
+      "unmatchedRows": 0,
+      "status": "success"
+    },
+    "diffRows": [],
+    "diffRowCount": 0,
+    "diffSheetData": [
+      {
+        "name": "差异",
+        "rows": [
+          [
+            "账单日期",
+            "originBillBizId",
+            "单据类型",
+            "主对账Id",
+            "业务订单号",
+            "对账金额",
+            "对账币种",
+            "valueDate",
+            "channel",
+            "单据_对账币种",
+            "流水_通道清算币种",
+            "流水_通道清算金额"
+          ]
+        ]
+      }
+    ]
+  },
+  "case3": {
+    "runError": "2026-03：流水表尚未导入",
+    "runsSummary": null,
+    "diffRows": [],
+    "diffRowCount": 0
+  }
+}

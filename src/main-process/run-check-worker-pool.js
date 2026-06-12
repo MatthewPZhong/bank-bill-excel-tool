@@ -324,6 +324,16 @@ async function dispatchRunCheck(payload, callbacks = {}) {
     throw new Error('worker 正忙（业务侧已有 op lock 防御 — 此处理应不可达）');
   }
 
+  // v3.0.5 PR-3（Part B Phase 1）：per-月侧库 dbPath 切换 —— worker init 时绑定单一 dbPath；
+  //   若本次 dispatch 的目标侧库 dbPath 与已 init 的 worker dbPath 不同（用户切月 / 不同月对账），
+  //   必须先关掉旧 worker，让 ensureInitialized 重新 cold-start 绑定新侧库（侧库 init 仅 ~11ms+PRAGMA，
+  //   开销可忽略；不复用旧连接，避免在错误的侧库文件上跑 runCheck — 资金红线）。
+  //   ⚠️ 主库时代 dbPath 恒为主库路径，此分支永不触发（workerDbPath===dbPath）→ 零行为变化。
+  if (workerInstance && workerDbPath && workerDbPath !== dbPath) {
+    await shutdown(5000);
+    // shutdown 已清 workerInstance / workerInitPromise / workerDbPath；ensureInitialized 触发 cold-start
+  }
+
   await ensureInitialized(dbPath);
 
   const jobId = generateJobId();

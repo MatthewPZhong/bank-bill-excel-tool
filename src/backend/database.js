@@ -29,6 +29,7 @@ const {
   // v2.1.12 β.1-T3：多 worker write-splitting worker 数 settings seed（D29/D33）
   ensureAcquiringBillWorkerCountSetting,
   ensureAcquiringBillCurrencyRunsChunkProgress,
+  ensureAcquiringBillCurrencyRunsSideDbPath,
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings
   ensureAcquiringBillCurrencyRawJsonRetentionSettings,
   ensureBillRawJsonV2Slim,
@@ -397,6 +398,9 @@ class AppDatabase {
     //   必须在 ensureAcquiringBillCurrencyRunsCleanupPending 之后（依赖 runs 表 + 列扩展顺序）
     //   幂等：hasColumn 检查避免重复 ADD COLUMN
     this.ensureAcquiringBillCurrencyRunsChunkProgress();
+    // v3.0.5 PR-3（Part B Phase 1）：runs.side_db_rel_path 列（per-月侧库元数据；NULL=历史主库 run 双源过渡）
+    //   必须在 ensureAcquiringBillCurrencyTablesSupport 之后（依赖 runs 表已存在）；轻量加列幂等
+    this.ensureAcquiringBillCurrencyRunsSideDbPath();
     // v2.1.8 N4：差异表瘦身 — bill_imports.raw_json 一次性 rewrite 仅保留 9 模版字段
     //   🔴 资金红线 + 破坏性 migration；首次启动自动备份 DB 到 <dbDir>/backups/
     //   幂等：app_settings.acquiring_bill_raw_json_v2_migrated = 'true' 跳过
@@ -706,6 +710,11 @@ class AppDatabase {
   // v2.1.10 A4 T19：runs.chunk_progress 列 migration — 启动期幂等 ADD COLUMN
   ensureAcquiringBillCurrencyRunsChunkProgress() {
     return ensureAcquiringBillCurrencyRunsChunkProgress(this.db);
+  }
+
+  // v3.0.5 PR-3（Part B Phase 1）：runs.side_db_rel_path 列 migration — 启动期幂等 ADD COLUMN（per-月侧库元数据）
+  ensureAcquiringBillCurrencyRunsSideDbPath() {
+    return ensureAcquiringBillCurrencyRunsSideDbPath(this.db);
   }
 
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings — seed default=7 + 暴露 get/set

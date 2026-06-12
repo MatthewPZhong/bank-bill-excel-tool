@@ -29,6 +29,9 @@ const runRepo = require('./backend/acquiring-bill-currency-db/run-repository');
 //   - isBusy：N1' idle cleanup 协调用（Phase 2 T12）
 //   - shutdown：app.before-quit 时清理（Phase 2 T15）
 const runCheckWorkerPool = require('./main-process/run-check-worker-pool');
+// v3.0.5 PR-3（Part B Phase 1）：收单 per-月侧库编排层（import/run/status/listMonths/孤儿/retention 路由侧库）
+const acquiringRunData = require('./main-process/acquiring-bill-currency-run-data');
+const runDataStore = require('./backend/run-data-store');
 // v2.1.10 N4-cont-1 T23 (Phase 4)：raw_json idle 自动清理函数
 //   - 复用 v2.1.9 N1' idle 30min cleanup 计时器（spec §4.3.1）
 //   - 仅清「对账成功」（不在 diff_rows）且 imported_at < retentionDays 天前的 bill_imports.raw_json
@@ -11961,14 +11964,22 @@ function registerNewAccountHandlers() {
     // v2.1.8 N1：进入模块兜底 — listMonths 是用户切到收单单据币种校验模块的第 1 个 IPC 调用
     //   spec §三 N1-D3 兜底触发点；检测 cleanup_pending → setImmediate 后台清（不阻塞 listMonths）+ toast
     triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
-    try { return acquiringBillCurrencySession.listMonths({ db: database.db }); } catch (_e) { return []; }
+    // v3.0.5 PR-3：双源 listMonths（侧库目录 month + 主库旧表 month 合并；历史 run 零变化）
+    try {
+      return acquiringRunData.listMonthsDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
+    } catch (_e) { return []; }
   });
 
   ipcMain.handle('acquiringBillCurrency:sessionStatus', (_event, payload = {}) => {
     if (!database || !database.db) return { monthKey: null, flowReady: false, billReady: false };
     const { monthKey } = payload || {};
     try {
-      return acquiringBillCurrencySession.getSessionStatus({ db: database.db, monthKey });
+      // v3.0.5 PR-3：双源 sessionStatus（侧库存在 → 读侧库 readiness + 主库 runs 镜像；否则读主库旧表）
+      return acquiringRunData.getSessionStatusDualSource({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        monthKey
+      });
     } catch (_e) {
       return { monthKey: monthKey || null, flowReady: false, billReady: false };
     }
@@ -12052,12 +12063,9 @@ function registerNewAccountHandlers() {
   // v2.1.7 F6：event 透传 → onProgress forwarder
   async function doHandleImportFlowOrBill(kind, payload, event) {
     const isFlow = kind === 'flow';
-    const sessionImport = isFlow
-      ? acquiringBillCurrencySession.importFlowFiles
-      : acquiringBillCurrencySession.importBillFiles;
-    const sessionOverwrite = isFlow
-      ? acquiringBillCurrencySession.importFlowFilesWithOverwrite
-      : acquiringBillCurrencySession.importBillFilesWithOverwrite;
+    // v3.0.5 PR-3：写路径切换——import 全部落 per-月侧库（acquiringRunData.importFiles 内部 open 侧库，
+    //   传侧库 db/dbPath 给既有 session import；引擎/回退两路都落侧库；行变换/列契约/错误文案零改动）。
+    const userDataDir = path.dirname(database.dbPath);
 
     const monthKey = payload && payload.monthKey;
     if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
@@ -12072,11 +12080,13 @@ function registerNewAccountHandlers() {
     if (payload.confirmOverwrite === true && Array.isArray(payload.filePaths) && payload.filePaths.length > 0) {
       try {
         const onProgress = createImportProgressForwarder(event);
-        const result = await sessionOverwrite({
-          db: database.db,
+        const result = await acquiringRunData.importFiles({
+          userDataDir,
+          kind,
           monthKey,
           filePaths: payload.filePaths,
-          onProgress
+          onProgress,
+          overwrite: true
         });
         return { status: 'success', overwritten: true, ...result };
       } catch (err) {
@@ -12098,11 +12108,11 @@ function registerNewAccountHandlers() {
       return { status: 'cancelled' };
     }
 
-    // peek：读首文件 → 表头校验 + 解析首条数据行 monthKey → 与用户选月份比对
+    // peek：读首文件 → 表头校验 + 解析首条数据行 monthKey → 与用户选月份比对（existingCount 查侧库）
     let peeked;
     try {
-      peeked = await acquiringBillCurrencySession.peekImportTarget({
-        db: database.db,
+      peeked = await acquiringRunData.peekImportTarget({
+        userDataDir,
         kind,
         filePaths: res.filePaths
       });
@@ -12135,11 +12145,13 @@ function registerNewAccountHandlers() {
 
     try {
       const onProgress = createImportProgressForwarder(event);
-      const result = await sessionImport({
-        db: database.db,
+      const result = await acquiringRunData.importFiles({
+        userDataDir,
+        kind,
         monthKey,
         filePaths: res.filePaths,
-        onProgress
+        onProgress,
+        overwrite: false
       });
       return { status: 'success', ...result };
     } catch (err) {
@@ -12212,30 +12224,31 @@ function registerNewAccountHandlers() {
       //   空目录复用，不反复 mkdir/rm）。单 worker 路径不使用此目录。
       const mwTempDir = path.join(storageRoot, '.mw-tmp');
       try { fs.mkdirSync(mwTempDir, { recursive: true }); } catch (_e) { /* swallow — 多 worker gate 内会再兜底建 */ }
-      // v2.1.10 A3 T10：worker pool dispatch（替代 session.runCheck 主进程直调）
-      //   - __dbPath 传 database.dbPath（worker 内 new DatabaseSync(dbPath) — D24 独立 connection）
+      // v3.0.5 PR-3（Part B Phase 1）：worker pool dispatch __dbPath 改为「该月侧库路径」
+      //   - acquiringRunData.runCheckViaSideDb 内：__dbPath = run-data/{module}/month-{monthKey}.sqlite
+      //     → worker 自开侧库连接跑 runCheckCore（5 阶段/JOIN/epsilon 零改动，三表同库自洽）
+      //     → 成功后把 summary + 路径 + side_db_rel_path 镜像写主库 runs（UI/导出读主库镜像）
+      //   - dbPath 切月：worker pool dispatchRunCheck 内检测 workerDbPath≠新侧库 → 重启 worker 重 init
       //   - onLog：worker 内 appendModuleLog → message pipe → 主进程 appendActivityLogEntry
-      //     （避免主/子进程并发写 app_activity_log.txt 的 read-modify-write race）
-      // v2.1.10 A4 T18：chunkSize 透传 worker → runCheckCore → insertDiffRowsByJoinChunked
-      // v2.1.12 β.1-T3：workerCount + tempDir 透传 worker → runCheckCore → 多 worker gate
-      result = await runCheckWorkerPool.dispatchRunCheck(
-        {
-          __dbPath: database.dbPath,
-          monthKey,
-          storageRoot,
-          chunkSize,
-          workerCount,
-          tempDir: mwTempDir,
-        },
-        {
+      //   - chunkSize / workerCount / tempDir 透传不变（多 worker 子 worker 也用侧库 dbPath）
+      result = await acquiringRunData.runCheckViaSideDb({
+        userDataDir: path.dirname(database.dbPath),
+        monthKey,
+        storageRoot,
+        chunkSize,
+        workerCount,
+        tempDir: mwTempDir,
+        mainDb: database.db,
+        dispatchFn: runCheckWorkerPool.dispatchRunCheck,
+        dispatchCallbacks: {
           onProgress,
           onLog: (entry) => {
             try {
               appendActivityLogEntry(entry || {});
             } catch (_e) { /* swallow — log forwarder 失败不阻塞业务 */ }
           },
-        }
-      );
+        },
+      });
     } catch (err) {
       releaseOpLock();
       // v2.1.10 SR-FIX-1 round 2 P1-4：CancelError 走 cancelled 路径（spec §2.4 设计契约）
@@ -12455,7 +12468,14 @@ function registerNewAccountHandlers() {
       return { status: 'error', message: 'monthKey 格式错误' };
     }
     try {
-      acquiringBillCurrencySession.clearMonth({ db: database.db, monthKey });
+      // v3.0.5 PR-3：clearMonth 双源——侧库存在 → 删整月侧库文件 + 主库镜像行（文件级回收）；
+      //   否则走主库旧表行级清（历史 run 零变化，双源过渡）。
+      const userDataDir = path.dirname(database.dbPath);
+      if (runDataStore.sideDbExists(userDataDir, acquiringRunData.MODULE, monthKey)) {
+        acquiringRunData.deleteMonthSideDb({ userDataDir, mainDb: database.db, monthKey });
+      } else {
+        acquiringBillCurrencySession.clearMonth({ db: database.db, monthKey });
+      }
       return { status: 'success' };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
@@ -12652,6 +12672,46 @@ app.whenReady()
           appendActivityLogEntry({
             level: 'error',
             message: '[acquiring-bill-currency] 启动期 cleanup 失败（fix10）',
+            details: [String(err && err.stack ? err.stack : err)]
+          });
+        } catch (_logErr) { /* swallow */ }
+      } finally {
+        releaseAcquiringBillCurrencyOpLock();
+      }
+    });
+
+    // v3.0.5 PR-3（Part B Phase 1 / B.6）：侧库孤儿双向兜底（启动扫描 run-data/{module}/ vs 主库 runs 元数据）
+    //   ① 有文件无元数据 → 删文件 + log；② 有元数据无文件 → 标记 run 失效（UI 降级「数据已清理」不崩溃）。
+    //   一致性原则：以侧库文件存在性为准（spec §B.6）。与上面主库孤儿清理（既有行级，双源过渡保留）并存。
+    //   后台 setImmediate，不阻塞窗口 ready；持同一把 op lock 避免与用户首次 import/run 并发。
+    setImmediate(() => {
+      if (!database || !database.db) return;
+      const lock = tryAcquireAcquiringBillCurrencyOpLock('cleanup', null);
+      if (!lock.acquired) return;
+      try {
+        const stats = acquiringRunData.reconcileOrphans({
+          userDataDir: path.dirname(database.dbPath),
+          mainDb: database.db
+        });
+        if (stats && (stats.deletedOrphanFiles.length > 0 || stats.invalidatedRuns.length > 0)) {
+          appendActivityLogEntry({
+            level: 'info',
+            source: 'main',
+            domain: 'acquiring-bill-currency',
+            message: '[acquiring-bill-currency] 启动期侧库孤儿双向兜底完成（PR-3）',
+            details: [
+              `删孤儿文件: ${stats.deletedOrphanFiles.length} (${stats.deletedOrphanFiles.join(', ')})`,
+              `标记失效 run: ${stats.invalidatedRuns.length} (${stats.invalidatedRuns.join(', ')})`
+            ]
+          });
+        }
+      } catch (err) {
+        try {
+          appendActivityLogEntry({
+            level: 'error',
+            source: 'main',
+            domain: 'acquiring-bill-currency',
+            message: '[acquiring-bill-currency] 启动期侧库孤儿兜底失败（PR-3）',
             details: [String(err && err.stack ? err.stack : err)]
           });
         } catch (_logErr) { /* swallow */ }

@@ -1035,6 +1035,16 @@ function ensureAcquiringBillCurrencyRunsChunkProgress(db) {
   db.exec(`ALTER TABLE acquiring_bill_currency_runs ADD COLUMN chunk_progress TEXT`);
 }
 
+// v3.0.5 PR-3（Part B Phase 1）：给 acquiring_bill_currency_runs 加 side_db_rel_path 列（per-月侧库元数据）
+//   值：侧库文件相对路径（run-data/acquiring-bill-currency/month-{monthKey}.sqlite），NULL = 历史主库 run（双源过渡）。
+//   读路径双源判定（B-D2）：runs.side_db_rel_path 非空 → 读侧库；NULL → 读主库旧表（旧 run 行为零变化）。
+//   轻量加列（不搬历史数据、不需 8-status 重迁移范式）；幂等 hasColumn 检查避免重复 ADD COLUMN。
+//   必须在 ensureAcquiringBillCurrencyTablesSupport 之后（依赖 runs 表已存在）。
+function ensureAcquiringBillCurrencyRunsSideDbPath(db) {
+  if (hasColumn(db, 'acquiring_bill_currency_runs', 'side_db_rel_path')) return;
+  db.exec(`ALTER TABLE acquiring_bill_currency_runs ADD COLUMN side_db_rel_path TEXT`);
+}
+
 // v2.1.10 N4-cont-1 T22 (Phase 4)：seed 收单单据 raw_json idle 自动清理保留窗口（默认 7 天）
 //   spec §4.1.1 单键策略（v0.2 reverse sync 后从 v0.1 双键降为单键）
 //   - 仅清「对账成功」（不在 acquiring_bill_currency_diff_rows 中）且 imported_at < N 天前的 bill_imports.raw_json
@@ -3048,6 +3058,7 @@ module.exports = {
   // v2.1.12 β.1-T3：多 worker write-splitting worker 数 settings seed（D29/D33）
   ensureAcquiringBillWorkerCountSetting,
   ensureAcquiringBillCurrencyRunsChunkProgress,
+  ensureAcquiringBillCurrencyRunsSideDbPath,
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings（v0.2 单键）
   ensureAcquiringBillCurrencyRawJsonRetentionSettings,
   ensureBillRawJsonV2Slim,

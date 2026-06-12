@@ -206,6 +206,7 @@
 - worker：`run-check-worker.js` 直接打开侧库文件（沿用现有独立连接 + PRAGMA 清单；跨库需 ATTACH 主库只读取 runs 元数据或经参数传入，T 阶段定）。
 - 历史数据处置（B-D2，推荐 b）：a) 一次性迁移到侧库；**b) 旧数据原地保留、新 run 走侧库，读路径双源（先侧库后主库），下个版本移除双源并二次 VACUUM**；c) 提示用户后清空（❌ 差异表历史重导出是真实功能，不可默认清）。
 - **parity 锁定**：同一输入 fixture 在改造前后差异表 xlsx **byte-for-byte 一致**（复用 v2.1.10 A3 contract-test 思路）。
+- 实施注记（2026-06-12 PR-3 落地）：① `runCheckCore` 本体 **git diff 为空**（侧库三表同库自洽，仅调用方传侧库 db/dbPath），parity 集成脚本 19 断言（runsSummary / diff_rows 逐行 / diff.xlsx 逐 cell / 主库三表恒 0 行）+ 改造前冻结 golden；② runs 主库镜像月级覆盖（事务内 DELETE+INSERT，含 `side_db_rel_path`）；③ **已知简化**——按 age 的文件级 retention 自动触发未接入 idle 计时器（二态函数 `deleteMonthSideDb`/`trimMonthSideDbKeepDiff` 已实现+单测+接入 clearMonth；新 run 不再令主库膨胀的核心目标已达，自动 age 触发随双源移除一并收口下版本）。
 
 ### Phase 2 — biz-op-recon + bank-bu-recon 推广同模式
 
