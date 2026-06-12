@@ -180,6 +180,8 @@ const {
 const { runReconIdFix } = require('./main-process/recon-id-fix-engine');
 const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
 const { groupBigAccountRows } = require('./backend/database/utils');
+// v3.0.5 PR-2（Part B Phase 0 / B-D8）：备份保留策略（保留最近 2 份，旧备份启动后台清理）
+const backupRetention = require('./backend/database/backup-retention');
 const {
   BALANCE_SEED_GENERATION_METHODS,
   findPreviousBalanceSeed,
@@ -12655,6 +12657,59 @@ app.whenReady()
         } catch (_logErr) { /* swallow */ }
       } finally {
         releaseAcquiringBillCurrencyOpLock();
+      }
+    });
+
+    // v3.0.5 PR-2（Part B Phase 0 / B-D8）：旧备份保留策略 —— 合并 backups/ + 根目录旧格式为一个池子，
+    //   mtime 降序保留最近 2 份，其余删除。启动后台异步（setImmediate，与上面 fix10 cleanup 同风格），
+    //   不阻塞窗口 ready；逐个被删文件写一条 activity log（含文件名/大小/mtime），单文件删除失败不中断、记 error 级。
+    //   ⚠️ 删用户数据动作（R-1）：白名单基于实际命名（tool-data-bak-*.sqlite / tool-data.sqlite.bak-*），
+    //   绝不触碰主库本体（tool-data.sqlite / tool-data-pending.sqlite）及 -wal/-shm 旁文件，未知文件一律不动。
+    setImmediate(() => {
+      try {
+        const userDataDir = app.getPath('userData');
+        const backupsDir = path.join(userDataDir, 'backups');
+        const entries = backupRetention.collectManagedBackupEntries({
+          backupsDir,
+          rootDir: userDataDir
+        });
+        const toDelete = backupRetention.selectBackupsToDelete(entries, { keep: 2 });
+        if (toDelete.length === 0) return;
+
+        for (const entry of toDelete) {
+          try {
+            fs.unlinkSync(entry.filePath);
+            appendActivityLogEntry({
+              level: 'info',
+              source: 'main',
+              domain: 'backup-retention',
+              message: `清理旧备份：${entry.fileName}（保留最近 2 份策略）`,
+              details: [
+                `大小: ${(entry.size / (1024 * 1024)).toFixed(2)} MB`,
+                `修改时间: ${new Date(entry.mtimeMs).toISOString()}`
+              ]
+            });
+          } catch (delErr) {
+            // 单文件删除失败不中断后续删除，记 error 级
+            appendActivityLogEntry({
+              level: 'error',
+              source: 'main',
+              domain: 'backup-retention',
+              message: `清理旧备份失败：${entry.fileName}`,
+              details: [String(delErr && delErr.message ? delErr.message : delErr)],
+              stack: delErr && delErr.stack ? delErr.stack : undefined
+            });
+          }
+        }
+      } catch (err) {
+        // 扫描/选取阶段异常仅记日志，不阻塞应用使用
+        appendActivityLogEntry({
+          level: 'error',
+          source: 'main',
+          domain: 'backup-retention',
+          message: '旧备份保留策略执行失败',
+          details: [String(err && err.stack ? err.stack : err)]
+        });
       }
     });
 

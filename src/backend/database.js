@@ -80,6 +80,27 @@ const { createBackup: createBackupImpl } = require('./database/backup');
 // v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
 const { appendModuleLog } = require('./logger');
 
+// v3.0.5 PR-2（Part B Phase 0 / B-D6）：一次性 VACUUM 主库标志位 + 磁盘安全余量比例
+//   标志位沿用 settings-repository 单键布尔范式（值 '1' = 已执行；缺失 = 未执行）。
+const ONE_TIME_VACUUM_FLAG_KEY = 'db_one_time_vacuum_v3_0_5_done';
+//   安全前置：VACUUM 临时需约 DB 文件大小的双倍峰值，要求剩余磁盘 ≥ DB 大小 × 1.2 才执行。
+const VACUUM_DISK_HEADROOM_RATIO = 1.2;
+
+// 字节数转人类可读字符串（仅用于 activity log 可读性，非精确换算）
+function formatBytesForLog(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return String(bytes);
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = n / 1024;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
+  }
+  return `${value.toFixed(2)} ${units[i]}`;
+}
+
 class AppDatabase {
   constructor(dbPath) {
     this.dbPath = dbPath;
@@ -502,6 +523,63 @@ class AppDatabase {
     this.ensureBocFxLinkSupport();
     // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀；幂等 CREATE IF NOT EXISTS，无依赖）
     this.ensureChannelEnumSupport();
+    // v3.0.5 PR-2（Part B Phase 0 / B-D6）：一次性 VACUUM 主库（止血回收历史删除空洞）
+    //   必须在所有 ensure*Support / migrate* 之后（VACUUM 重建文件，之后再 ANALYZE 重统计）
+    //   迁移式幂等：标志位已写则跳过；成功才写标志、磁盘不足/失败不写标志 → 下次重试。
+    //   ⚠️ 同步阻塞，15GB 预期分钟级；本阶段无用户可见进度框（窗口在 init 完成后才建，Phase 3 未做）。
+    try {
+      const vacuumResult = this.runOneTimeVacuumIfNeeded();
+      if (vacuumResult && vacuumResult.status === 'vacuumed') {
+        appendModuleLog({
+          level: 'info',
+          source: 'main',
+          domain: 'migration',
+          message: '[Phase0 VACUUM] 主库一次性优化完成（首次升级止血）',
+          details: [
+            `优化前体积: ${formatBytesForLog(vacuumResult.sizeBefore)}`,
+            `优化后体积: ${formatBytesForLog(vacuumResult.sizeAfter)}`,
+            `耗时: ${(vacuumResult.durationMs / 1000).toFixed(1)}s`
+          ]
+        });
+      } else if (vacuumResult && vacuumResult.status === 'insufficient-disk') {
+        appendModuleLog({
+          level: 'warning',
+          source: 'main',
+          domain: 'migration',
+          message: '[Phase0 VACUUM] 磁盘剩余空间不足，跳过本次优化（不写标志位，下次启动重试）',
+          details: [
+            `当前主库体积: ${formatBytesForLog(vacuumResult.sizeBefore)}`,
+            `所需剩余空间(×1.2): ${formatBytesForLog(vacuumResult.requiredFree)}`,
+            `实际剩余空间: ${formatBytesForLog(vacuumResult.freeBytes)}`
+          ]
+        });
+      } else if (vacuumResult && vacuumResult.status === 'failed') {
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: '[Phase0 VACUUM] 优化失败（不写标志位，下次启动重试）',
+          details: [
+            vacuumResult.error && vacuumResult.error.message
+              ? vacuumResult.error.message
+              : String(vacuumResult.error)
+          ],
+          stack: vacuumResult.error && vacuumResult.error.stack ? vacuumResult.error.stack : undefined
+        });
+      }
+      // already-done：稳态正常路径（每次启动重复触达）→ 静默，不打 log 防噪音
+    } catch (vacuumErr) {
+      // 防御：runOneTimeVacuumIfNeeded 自身异常也不阻塞启动，下次重试
+      appendModuleLog({
+        level: 'error',
+        source: 'main',
+        domain: 'migration',
+        message: '[Phase0 VACUUM] unexpected failure (启动不阻塞，下次启动重试)',
+        details: [vacuumErr && vacuumErr.message ? vacuumErr.message : String(vacuumErr)],
+        stack: vacuumErr && vacuumErr.stack ? vacuumErr.stack : undefined
+      });
+    }
+
     // v2.1.7 F7-A2：启动期 ANALYZE — 让规划器统计所有索引（含 idx_acquiring_bill_currency_bill_source_file）
     //   必须在所有 ensure*Support / migrate* 之后（否则统计的是旧 schema）
     //   ANALYZE 幂等可重复；用户 DB 体量下开销 < 100ms（spec §7.9）
@@ -1225,8 +1303,109 @@ class AppDatabase {
     const backupDir = path.join(path.dirname(this.dbPath), 'backups');
     return createBackupImpl(this.db, label, backupDir);
   }
+
+  // v3.0.5 PR-2（Part B Phase 0 / B-D6）：一次性 VACUUM 主库（止血，回收历史删除空洞）
+  //
+  // 背景（spec size-startup-optimization §B.1）：本机主库 15GB，freelist_count 2,407,169 页
+  //   ≈ 9.86GB（61%）为删除后未回收空洞；全代码无空间回收机制（VACUUM 仅出现在备份 VACUUM INTO）。
+  //   注意：这只是「止血」——结构性解法是 run 级数据出主库（Phase 1/2），第二次 VACUUM 顺延下一版本收口到 MB 级。
+  //
+  // 迁移式幂等（B-D6）：app_settings 单键标志位 db_one_time_vacuum_v3_0_5_done = '1'，
+  //   沿用 settings-repository 既有单键布尔范式（hasShownWinOneDriveStorageNotice / markWinOneDriveStorageNoticeShown）。
+  //   - 已写标志位 → 永久跳过（status='already-done'）。
+  //   - 成功执行后才写标志位；任何失败路径都不写 → 下次启动重试。
+  //
+  // 安全前置（fail-open，新增项）：VACUUM 需要约「当前 DB 文件大小」的临时双倍峰值空间，
+  //   这里要求剩余磁盘 ≥ 当前 DB 文件大小 × 1.2，不足则跳过（status='insufficient-disk'）+ **不写标志位**（下次重试）。
+  //
+  // ⚠️ VACUUM 不能在事务内执行；DatabaseSync 是同步 API → 本调用会阻塞主进程（15GB 预期分钟级）。
+  //   本阶段窗口在 init 完成后才创建（Phase 3 未做），无用户可见进度框 —— 沿用 N5/N4-cont-2 既有「无提示、
+  //   窗口延后出现」的升级首启口径（详见 PR 汇报「UI 提示落点」说明）。
+  //
+  // 入参（均可注入，便于单测）：
+  //   - diskCheck()：返回剩余可用磁盘字节数；默认用 fs.statfsSync(dbDir)。抛错则视为「无法判断」→ fail-open 放行。
+  //   - flagKey：标志位 key（默认 ONE_TIME_VACUUM_FLAG_KEY）。
+  // 返回：{ status, ... }，由调用方据此写 activity log。
+  runOneTimeVacuumIfNeeded(options = {}) {
+    if (!this.db) throw new Error('AppDatabase.runOneTimeVacuumIfNeeded: db 未初始化');
+    const flagKey = options.flagKey || ONE_TIME_VACUUM_FLAG_KEY;
+
+    // 幂等：标志位已写 → 永久跳过
+    if (settingsRepository.getSetting(this.db, flagKey) === '1') {
+      return { status: 'already-done' };
+    }
+
+    // 当前 DB 文件大小（VACUUM 前）
+    let sizeBefore = 0;
+    try {
+      sizeBefore = fs.statSync(this.dbPath).size;
+    } catch (_e) {
+      sizeBefore = 0; // 取不到（极少数）→ 后续磁盘检查放行
+    }
+
+    // 安全前置：剩余磁盘 ≥ DB 文件大小 × 1.2，不足则跳过且不写标志（fail-open：检查本身失败也放行）
+    const requiredFree = Math.ceil(sizeBefore * VACUUM_DISK_HEADROOM_RATIO);
+    let freeBytes = null;
+    try {
+      const diskCheck =
+        typeof options.diskCheck === 'function'
+          ? options.diskCheck
+          : () => {
+              const stat = fs.statfsSync(path.dirname(this.dbPath));
+              return stat.bavail * stat.bsize;
+            };
+      freeBytes = diskCheck();
+    } catch (_e) {
+      freeBytes = null; // 无法判断磁盘 → fail-open 放行
+    }
+    if (freeBytes != null && Number.isFinite(freeBytes) && freeBytes < requiredFree) {
+      return {
+        status: 'insufficient-disk',
+        sizeBefore,
+        requiredFree,
+        freeBytes,
+      };
+    }
+
+    // 执行 VACUUM（不能在事务内；同步阻塞）
+    const startedAt = Date.now();
+    try {
+      this.db.exec('VACUUM;');
+      // WAL 模式下 VACUUM 写入 WAL，主库文件大小要等 checkpoint 才回收。
+      // 主动 wal_checkpoint(TRUNCATE) 让磁盘空间「即时减负」（PRD §5.2 止血目标）；
+      // TRUNCATE 失败不影响正确性（下次自然 checkpoint），仅吞掉不让其打断成功路径。
+      try {
+        this.db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+      } catch (_ckptErr) { /* swallow：checkpoint 失败不影响 VACUUM 正确性 */ }
+    } catch (vacuumErr) {
+      // 失败不写标志 → 下次启动重试
+      return { status: 'failed', sizeBefore, error: vacuumErr };
+    }
+    const durationMs = Date.now() - startedAt;
+
+    let sizeAfter = sizeBefore;
+    try {
+      sizeAfter = fs.statSync(this.dbPath).size;
+    } catch (_e) {
+      sizeAfter = sizeBefore;
+    }
+
+    // 成功 → 写标志位（永久跳过后续启动）
+    settingsRepository.setSetting(this.db, flagKey, '1');
+
+    return {
+      status: 'vacuumed',
+      sizeBefore,
+      sizeAfter,
+      durationMs,
+      freeBytes,
+      requiredFree,
+    };
+  }
 }
 
 module.exports = {
-  AppDatabase
+  AppDatabase,
+  // v3.0.5 PR-2（Part B Phase 0 / B-D6）：一次性 VACUUM 标志位 key（单测 + main.js 可引用）
+  ONE_TIME_VACUUM_FLAG_KEY
 };
