@@ -23,7 +23,7 @@
 
 1. **PR-1 · Part A 打包瘦身** —— `build.files` 改白名单（防复发核心）+ `@napi-rs/canvas` 移 devDependencies + 新增 `check-dist-size.js` 守卫（asar ≤25MB）+ CHANGELOG/README 排除出包。纯打包配置，零业务代码改动、零运行时行为变化。
 2. **PR-2 · Part B Phase 0 备份治理 + 一次性 VACUUM** —— `backups/` 保留最近 2 份（旧格式 `bak-*` 纳入同策略，启动后台清理逐文件记 activity log）+ 一次性 VACUUM 主库（迁移式 app_settings 标志位幂等 + UI 状态框提示「正在优化数据库」）。⚠️ 删用户数据动作。
-3. **PR-3 · Part B Phase 1 acquiring run 级数据迁出侧库** —— acquiring run 级三表迁出 per-run 侧库 `{userData}/run-data/acquiring-bill-currency/run-{id}.sqlite`（B-D1/B-D3）；历史数据双源过渡（B-D2）；retention 文件级二态（B-D4）；差异表 xlsx byte-for-byte parity 锁定。
+3. **PR-3 · Part B Phase 1 acquiring run 级数据迁出侧库** —— acquiring 批量三表迁出 per-month 侧库 `{userData}/run-data/acquiring-bill-currency/month-{YYYY-MM}.sqlite`（B-D1/B-D3，2026-06-12 实施期由 per-run 修正为 per-month）；历史数据双源过渡（B-D2）；retention 文件级二态（B-D4）；差异表 xlsx byte-for-byte parity 锁定。
 4. **PR-4 · Part B Phase 2 推广同模式** —— biz-op-recon + bank-bu-recon 套用 Phase 1 样板迁出侧库（防主库从其余模块缓慢复发）。
 5. **PR-5 · Part B Phase 3 启动窗口先行 + Phase 4 守卫固化** —— `whenReady` 立即建窗 + loading 态 + init-done 门控 + 回退开关（B-D5）；新增 `rules/run-scoped-data-policy.md` + important-variables 升格 + 发版 checklist 启动指标项。
 
@@ -42,7 +42,7 @@
 |----|-----------|----------------|----------|
 | PR-1 (Part A) | v3.0.0 安装包实测 **135MB**（`dist/清结算小助手-3.0.0-setup.exe`）；Electron 运行时固定约 70MB，剩余膨胀全部来自 **app.asar = 101MB**（同类应用正常 ~15MB）。根因：`build.files` 宽 glob 把开发文档/测试脚本打进包 + 开发工具依赖误入 `dependencies`。 | 安装包/asar 显著瘦身；白名单封死复发通道，新增文件默认不进包。 | `docs/**/*` 42MB（仅 USER_GUIDE 172KB 需要）+ `@napi-rs/canvas` 25MB（src 零引用）+ `scripts/**/*` 2MB 测试脚本被全量打包。 |
 | PR-2 (Phase 0) | 备份失控：`backups/` **31GB** + 根目录 `tool-data.sqlite.bak-20260608` **15GB**，无保留策略；主库 15GB 中 **9.86GB（61%）为删除后未回收空洞**（`freelist_count`=2,407,169 页）。全代码无空间回收机制（VACUUM 仅出现在备份 `VACUUM INTO`）。 | backups 有界；一次性回收旧空洞（预期 15GB→~6GB），磁盘即时减负。 | 备份无数量上限；主库永不收缩。 |
-| PR-3 (Phase 1) | 三对账模块把 run 级批量数据写主库 → run 后 DELETE → 文件永不收缩。acquiring 是最大头：`acquiring_bill_currency_diff_rows` 历史写入 **20,769,352** 行、`acquiring_bill_currency_bill_imports` **18,462,096** 行。 | acquiring run 数据迁出主库，删 run = 删文件（原子、零碎片、无 VACUUM、不再有百万行 DELETE 阻塞主进程）。 | 启动期孤儿清理曾单次删 **4,615,524 行**（activity log 16:42 段）；DatabaseSync 同步 API 使批量 DELETE 阻塞所有 IPC。 |
+| PR-3 (Phase 1) | 三对账模块把 run 级批量数据写主库 → run 后 DELETE → 文件永不收缩。acquiring 是最大头：`acquiring_bill_currency_diff_rows` 历史写入 **20,769,352** 行、`acquiring_bill_currency_bill_imports` **18,462,096** 行。 | acquiring 批量数据迁出主库，删整月 = 删文件（原子、零碎片、无 VACUUM、不再有百万行 DELETE 阻塞主进程）、删单 run = 文件内 diff 行级。 | 启动期孤儿清理曾单次删 **4,615,524 行**（activity log 16:42 段）；DatabaseSync 同步 API 使批量 DELETE 阻塞所有 IPC。 |
 | PR-4 (Phase 2) | 只做 acquiring 不够——主库会从其余模块缓慢复发（`biz_op_recon_imports` 已 1,667,366 行，`linked_bank_deposit` 1,315,783 行）。 | biz-op-recon + bank-bu-recon 同步迁出，根除复发通道。 | 其余两模块仍写主库。 |
 | PR-5 (Phase 3+4) | 进程启动到可见基线 **1.2~1.5s**，版本升级首启 **28530ms**（v2.1.8 N5 迁移）/ **38126ms**（N4-cont-2 迁移 2,596,169 行+备份），全部消耗在 `createWindow()` **之前**；渲染层初始化 ~50ms、建窗到可见 ~110ms → **前端不是瓶颈**。 | 窗口显示与 DB init 解耦，点击到窗口可见 ≤300ms（loading 态）；防复发约定固化进 `rules/`。 | 窗口被压在初始化队尾；无任何防复发护栏。 |
 
@@ -54,7 +54,7 @@
   3. 新增 `scripts/check-dist-size.js`（asar ≤25MB + 禁止/必须路径断言），挂进 `dist:win*` 链尾；
   4. 排除 `assets/app-icon-source.png`、`CHANGELOG.md`、`README.md` 出包。
 - **PR-2 (Phase 0)**：`backups/` 保留最近 2 份（mtime 排序，旧格式 `bak-*` 纳入同策略，启动后台清理逐文件记 activity log）+ 一次性 VACUUM 主库（迁移式 app_settings 标志位幂等 + UI 状态框提示「正在优化数据库，首次约 X 分钟」）。
-- **PR-3 (Phase 1)**：acquiring run 级三表（`bill_imports`/`flow_imports`/`diff_rows`）迁出 per-run 侧库；`runs` 元数据留主库；历史数据双源过渡（读路径先侧库后主库）；retention 文件级二态；差异表 xlsx byte-for-byte parity 锁定。
+- **PR-3 (Phase 1)**：acquiring 批量三表（`bill_imports`/`flow_imports`/`diff_rows`）迁出 per-month 侧库（生命周期键 = month，2026-06-12 实施期修正）；`runs` 元数据留主库；历史数据双源过渡（读路径先侧库后主库）；retention 文件级二态；差异表 xlsx byte-for-byte parity 锁定。
 - **PR-4 (Phase 2)**：biz-op-recon（`biz_op_recon_{imports,flow_imports,diff_rows,runs}`）+ bank-bu-recon（`bank_bu_recon_{bank_imports,pending_imports,runs}`）套用 Phase 1 样板。
 - **PR-5 (Phase 3+4)**：`whenReady` 立即建窗 + loading 态 + `app:init-done` 门控 + 回退开关；新增 `rules/run-scoped-data-policy.md` + important-variables 升格 + 发版 checklist 增启动指标确认项。
 - **收尾**：版本 bump 3.0.5 + 文档三件套（CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE）+ `npm run scan:vars` + `/check-vars` 硬节点 + `npm run release-check` 全绿。
@@ -92,7 +92,8 @@
 | asar | electron-builder 打包后 app 资源归档文件（`dist/win-unpacked/resources/app.asar`）；本迭代瘦身核心对象。 |
 | build.files 白名单 | `package.json` build.files 改为只列允许进包的路径（含 `!` 排除项），新增文件默认不进包；与黑名单（`!docs/previews`）相对，封死复发通道。 |
 | check-dist-size 守卫 | 新增脚本 `scripts/check-dist-size.js`，用 `@electron/asar` listPackage 断言 asar 体积 ≤25MB + 禁止/必须路径，任一失败 exit 1，挂 dist 链尾。 |
-| per-run 侧库 | run 级批量数据从主库迁出到独立文件 `{userData}/run-data/{module}/run-{id}.sqlite`；删 run = 删文件（B-D1 拍板 a 方案）。 |
+| per-month 侧库（acquiring） | acquiring 批量数据从主库迁出到独立文件 `{userData}/run-data/acquiring-bill-currency/month-{YYYY-MM}.sqlite`（B-D1 拍板 a 方案 + 2026-06-12 实施期修正：侧库文件键 = month）；删整月 = 删文件，删单 run = 文件内 diff 行级。 |
+| 侧库生命周期键（通则） | 侧库文件键 = 该模块批量数据的**生命周期键**（acquiring = month；Phase 2 各模块按各自生命周期键裁定）；原「per-run / run-{id}」命名废弃。 |
 | 双源过渡（B-D2） | 旧 run 历史数据原地保留主库、新 run 走侧库；读路径先侧库后主库；双源移除 + 二次 VACUUM 收口顺延下一版本。 |
 | retention 文件级二态（B-D4） | 成功 run 超保留期 → 直接删侧库文件 / 仅保留 diff 表（差异表历史重导出不丢）；替代原行级 retention 清理。 |
 | 迁移式 VACUUM（B-D6） | 一次性 VACUUM 主库，升级首启执行，app_settings 标志位幂等，UI 状态框提示「正在优化数据库，首次约 X 分钟」。 |
@@ -174,16 +175,17 @@
 
 ---
 
-### 5.3 PR-3 · Part B Phase 1 acquiring run 级数据 → per-run 侧库 🔴🔴
+### 5.3 PR-3 · Part B Phase 1 acquiring run 级数据 → per-month 侧库 🔴🔴
 
 > 最大头，建立样板。资金红线（parity 锁）+ DB 迁移，本项目最高风险等级。
 
 #### 5.3.1 说明
 
-- **文件布局（✅ B-D3）**：`{userData}/run-data/acquiring-bill-currency/run-{runId}.sqlite`；`bill_imports` / `flow_imports` / `diff_rows` 三表迁出；`runs` 元数据留主库（轻量，含侧库文件相对路径 + 状态）。
-- **侧库方案（✅ B-D1：a per-run 独立文件）**：删 run（用户删除 / 孤儿清理 / cleanup）= **删侧库文件**——原子、零碎片、零 VACUUM、不再有百万行 DELETE 阻塞主进程。
+- **文件布局（✅ B-D3，2026-06-12 实施期由 per-run 修正为 per-month）**：`{userData}/run-data/acquiring-bill-currency/month-{YYYY-MM}.sqlite`，内含 `bill_imports` / `flow_imports` / `diff_rows` 三表；`runs` 元数据留主库（轻量，含侧库文件相对路径 + 状态）。
+  - **修正依据**（dev 调研实证 + team-lead 复核 + 用户拍板 A）：imports 表 `UNIQUE(month_key, recon_main_id)` 按月持久化（`migrations.js:2594`）、import 与 run 是独立 IPC handler（`main.js:12155/12159/12173`）、一次导入被多次 run 复用且每次 run `clearRunsByMonth` 按月清旧（`run-repository.js:148-150`）、对账 JOIN 要求 flow+bill+diff 同库——原「per-run 文件」字面在 acquiring 数据模型下不自洽（强行实现需每 run 重拷百万行 imports 并破坏导入/运行解耦）。**通则改述：侧库文件键 = 该模块批量数据的生命周期键**（acquiring = month；Phase 2 各模块按各自生命周期键裁定）。
+- **侧库方案（✅ B-D1：a 独立侧库文件，文件键 = 生命周期键）**：删整月数据（用户覆盖删除 / 孤儿清理 / cleanup）= **删侧库文件**——原子、零碎片、零 VACUUM、不再有百万行 DELETE 阻塞主进程；删单 run = 文件内按 run_id 删 diff 行（与现状 `clearRunsByMonth` 同语义，量级小）。
 - **机制简化映射**：
-  - FK CASCADE（run→diff_rows）：侧库内同库保留 bill↔diff FK；run 级联 = 删文件；
+  - FK CASCADE（run→diff_rows）：侧库内同库保留 bill↔diff FK；删整月 = 删文件、删单 run = 文件内按 run_id 删 diff 行；
   - `clearStaleSuccessfulRawJson` / idle cleanup / `cleanupAfterRunBackground`：行级清理降级为文件级（成功 run 超 retention → 直接删侧库文件或仅保留 diff 表，✅ B-D4）；
   - `cleanupOrphanData`：启动扫描 `run-data/` 目录 vs 主库 runs 元数据，孤儿文件直接删（替代 461 万行批量 DELETE）。
 - **worker**：`run-check-worker.js` 直接打开侧库文件（沿用现有独立连接 + PRAGMA 清单；跨库需 ATTACH 主库只读取 runs 元数据或经参数传入，T 阶段定）。
@@ -216,7 +218,7 @@
 
 #### 5.4.2 影响范围
 
-- 后端：`biz-op-recon-db/*`、`bank_bu_recon_*` 表相关 repository / session / worker；复用 Phase 1 侧库管理器（`run-data/{module}/run-{id}.sqlite`，module = `biz-op-recon` / `bank-bu-recon`）。
+- 后端：`biz-op-recon-db/*`、`bank_bu_recon_*` 表相关 repository / session / worker；复用 Phase 1 侧库管理器（`run-data/{module}/{生命周期键}.sqlite`，module = `biz-op-recon` / `bank-bu-recon`，各模块按各自生命周期键裁定）。
 - 数据（🔴 人工复核区）：两模块 run 数据存储位置变更；双源过渡同 Phase 1。
 - 回滚：同 Phase 1（侧库目录可整体删除回退）。
 
@@ -240,7 +242,7 @@
 
 **Phase 4 — 守卫固化（防复发）**
 
-- 新增 `rules/run-scoped-data-policy.md`：「对账类模块的 run 级批量数据**禁止写主库**，必须走 per-run 侧库」+ 侧库管理器使用约定。
+- 新增 `rules/run-scoped-data-policy.md`：「对账类模块的 run 级批量数据**禁止写主库**，必须走侧库（侧库文件键 = 该模块批量数据的生命周期键，acquiring = month）」+ 侧库管理器使用约定。
 - `rules/important-variables.md` 升格本次新符号（侧库管理器、路径常量、孤儿扫描入口等），更新受影响旧条目（§B.5.3 预命中清单）。
 - 发版 checklist 增加启动指标确认项（activity log「启动耗时」基线对比）。
 
@@ -289,7 +291,7 @@
 | AC 编号 | 验收条件 |
 |---------|---------|
 | AC3-1 | **parity（资金红线核心）**：固定 fixture（含多币种/差异行/空流水边界）改造前后差异表 xlsx **byte-for-byte 一致**；diff_rows 行数与 summary 全等 |
-| AC3-2 | 跑一次 **400 万行级 run** → **主库增量 < 10MB**；删 run → `run-data/acquiring-bill-currency/` 文件消失、磁盘即时回收 |
+| AC3-2 | 跑一次 **400 万行级 run** → **主库增量 < 10MB**；删整月 → `run-data/acquiring-bill-currency/month-{YYYY-MM}.sqlite` 文件消失、磁盘即时回收；删单 run → 文件内 diff 行级清理 |
 | AC3-3 | 双源过渡：新 run 走侧库、旧 run 历史数据原地保留主库；读路径先侧库后主库，UI 列表合并正确 |
 | AC3-4 | retention 文件级二态（B-D4）：成功 run 超保留期 → 删侧库文件 / 仅保留 diff 表（差异表历史重导出不丢） |
 | AC3-5 | 兜底：run 中途 kill 进程 → 重启孤儿扫描清理侧库文件 + 元数据一致；用户手删侧库文件 → run 降级显示「数据已清理」不崩溃 |
@@ -299,7 +301,7 @@
 
 | AC 编号 | 验收条件 |
 |---------|---------|
-| AC4-1 | biz-op-recon parity：改造前后差异表 byte-for-byte 一致；run 数据迁出 `run-data/biz-op-recon/`，删 run = 删文件 |
+| AC4-1 | biz-op-recon parity：改造前后差异表 byte-for-byte 一致；批量数据迁出 `run-data/biz-op-recon/{生命周期键}.sqlite`，删整批生命周期 = 删文件 |
 | AC4-2 | bank-bu-recon parity：改造前后输出一致；run 数据迁出 `run-data/bank-bu-recon/` |
 | AC4-3 | 三模块均迁侧库后，跑各模块 run → 主库增量 < 10MB；防复发通道根除（主库不再因对账 run 膨胀） |
 | AC4-4 | 复用 Phase 1 侧库管理器与孤儿扫描；两模块对账语义零改动，`npm run release-check` 全绿 |
@@ -325,7 +327,7 @@
 | Part A 打包版功能 | win-unpacked 直接运行 | PR-1 已落地 | 帮助页/图标/网银导入导出/币种下拉/三模块模板加载全正常；asar ≤15MB 实测、安装包 ≤90MB |
 | Phase 0 备份清理 | 现存多份备份 + 根目录 .bak | PR-2 已落地 | 仅保留最近 2 份，逐文件记 activity log；首启状态框提示「正在优化数据库」，二启不再 VACUUM |
 | Phase 1 acquiring parity | 真实多币种/差异行 fixture | PR-3 已落地、场景启用 | 改造前后差异表 xlsx byte-for-byte 一致（资金红线，人工核对一份真实样本） |
-| Phase 1 体积/回收 | 400 万行级 run | PR-3 已落地 | 主库增量 <10MB；删 run → 侧库文件消失、磁盘即时回收 |
+| Phase 1 体积/回收 | 400 万行级 run | PR-3 已落地 | 主库增量 <10MB；删整月 → 侧库文件消失、磁盘即时回收；删单 run → 文件内 diff 行级清理 |
 | Phase 2 三模块回放 | biz-op-recon + bank-bu-recon 真实数据 | PR-4 已落地 | 两模块输出与改造前一致；run 数据落各自 `run-data/{module}/` |
 | Phase 3 启动指标 | 升级首启 + 日常启动 | PR-5 已落地 | 建窗 ≤300ms、升级首启 ≤3s、日常 ≤1.5s（activity log 留档）；功能在 init-done 后放开 |
 
@@ -352,7 +354,7 @@
 
 | 类别 | 说明 |
 |------|------|
-| 数据结构变更 | Phase 1/2：run 级表（acquiring `bill_imports`/`flow_imports`/`diff_rows`、biz-op-recon/bank-bu-recon 对应表集合）从主库迁出至 per-run 侧库 `{userData}/run-data/{module}/run-{id}.sqlite`；`runs` 元数据留主库（含侧库文件相对路径 + 状态）。Part A：无 DB 变更。Phase 0：无 schema 变更（仅 VACUUM + 删备份）。 |
+| 数据结构变更 | Phase 1/2：批量表（acquiring `bill_imports`/`flow_imports`/`diff_rows`、biz-op-recon/bank-bu-recon 对应表集合）从主库迁出至侧库 `{userData}/run-data/{module}/{生命周期键}.sqlite`（acquiring = `month-{YYYY-MM}.sqlite`，2026-06-12 实施期由 per-run 修正为 per-month；各模块按各自生命周期键裁定）；`runs` 元数据留主库（含侧库文件相对路径 + 状态）。Part A：无 DB 变更。Phase 0：无 schema 变更（仅 VACUUM + 删备份）。 |
 | 状态流转变更 | Phase 0/1/2 迁移沿用 8-status state machine + `createBackupFn` 注入 + app_settings 标志位幂等（v2.1.10 N4-cont-2 范式）。Phase 3：`whenReady` 启动时序由「init 完成后建窗」改为「立即建窗 + init-done 门控放开功能」。run 级联清理由行级 DELETE 降级为文件级删除（B-D4）。 |
 | 权限 / 安全 | 无新增外部接口；侧库文件继承 `{userData}` 目录权限。 |
 | 回滚策略 | Part A：单 commit revert `package.json` + 删守卫脚本，无残留。Phase 0/1/2：迁移失败 ROLLBACK + 前置备份保留；标志位不写 → 下次重试；侧库目录可整体删除回到「无历史 run」状态，不影响主库模板/设置/联动表。Phase 3：回退开关切回旧时序（B-D5）。 |
@@ -364,7 +366,7 @@
 | 类别 | 要求 |
 |------|------|
 | 向下兼容 | Part A：NSIS artifactName / 安装升级路径不变；`CHANGELOG.md`/`README.md` 排除出包（无运行时读取，CHANGELOG 标注）。Part B：不改任何对账算法语义（`runCheckCore` 5 阶段 / diff JOIN / epsilon / 清算字段零改动），parity byte-for-byte 锁定为合并门；双源过渡期旧 run 历史数据可读不丢。 |
-| 性能 | 主库稳态体积 ≤ 50MB（run 级数据不再落主库）；400 万行 run 主库增量 < 10MB；删 run = 删文件（原子、零碎片、无 VACUUM、不阻塞主进程 IPC）；版本升级首启 ≤ 3s、日常启动基线 ≤ 1.5s 不退化；建窗（点击到可见）≤ 300ms；asar ≤ 15MB 实测（25MB 阈值守卫）、安装包 ≤ 90MB。 |
+| 性能 | 主库稳态体积 ≤ 50MB（批量数据不再落主库）；400 万行 run 主库增量 < 10MB；删整月 = 删侧库文件（原子、零碎片、无 VACUUM、不阻塞主进程 IPC）、删单 run = 文件内 diff 行级；版本升级首启 ≤ 3s、日常启动基线 ≤ 1.5s 不退化；建窗（点击到可见）≤ 300ms；asar ≤ 15MB 实测（25MB 阈值守卫）、安装包 ≤ 90MB。 |
 | 鲁棒性 | Part A：check-dist-size 反向「必须存在」断言防白名单漏列。Phase 0：删备份前保留 2 份 + 逐文件日志 + VACUUM 标志位幂等可重试。Phase 1/2：双库一致性以侧库文件存在性为准，启动孤儿扫描双向兜底；run 中途 kill / 用户手删侧库文件均不崩溃。Phase 3：回退开关稳定一版后移除。 |
 
 ---
@@ -373,7 +375,7 @@
 
 - 本迭代决策点**全部已拍板**（11 个，2026-06-12），无未决问题：
   - Part A：✅ A-D1（v3.0.5 独立小 PR）/ A-D2（asar 阈值 25MB）/ A-D3（CHANGELOG/README 排除出包）。
-  - Part B：✅ B-D1（per-run 独立文件）/ B-D2（双源过渡，移除收口顺延下版本）/ B-D3（`run-data/{module}/run-{id}.sqlite`）/ B-D4（retention 文件级二态）/ B-D5（Phase 3 加回退开关）/ B-D6（迁移式 VACUUM + 状态框提示）/ B-D7（四 Phase 全落 v3.0.5、5 PR 串行）/ B-D8（备份保留最近 2 份）。
+  - Part B：✅ B-D1（独立侧库文件，2026-06-12 修正：文件键 = 模块数据生命周期键，acquiring 为 per-month）/ B-D2（双源过渡，移除收口顺延下版本）/ B-D3（`run-data/{module}/{生命周期键}.sqlite`，acquiring = `month-{YYYY-MM}.sqlite`；原 `run-{id}` 命名废弃）/ B-D4（retention 文件级二态）/ B-D5（Phase 3 加回退开关）/ B-D6（迁移式 VACUUM + 状态框提示）/ B-D7（四 Phase 全落 v3.0.5、5 PR 串行）/ B-D8（备份保留最近 2 份）。
 - 实施期待核（非决策）项（留 Part B 实施前 TechDoc 细化）：
   - Phase 1 worker 跨库访问 PRAGMA/锁行为差异（ATTACH 主库只读取 runs 元数据 或 参数传入，T 阶段定）；
   - Phase 3 handlers 注册时序方案二选一（register*Handlers 提前 vs 统一早期 gate，需逐组核实闭包引用 database 是否在注册时解引用）；
@@ -406,6 +408,7 @@
 | 日期 | 变更内容 |
 |------|---------|
 | 2026-06-12 | 初稿（基于 `changes/size-startup-optimization/spec.md` status=approved，11 个拍板点全部拍板收口；Part A 3 个 §A.9 + Part B 8 个 §B.9 结论原样转述；5 PR 串行：Part A + Phase 0-4） |
+| 2026-06-12 | 侧库粒度修正（同步 spec §B.4 Phase 1 + §B.9 B-D1/B-D3 终态）：acquiring 侧库键由 per-run 改为 **per-month**（`month-{YYYY-MM}.sqlite`），通则改述为「侧库文件键 = 该模块批量数据的生命周期键」。依据：imports 按月持久化 `UNIQUE(month_key,...)`、import/run 独立 handler、一次导入多次 run 复用、JOIN 要求三表同库——原 per-run 字面与 acquiring 数据模型不自洽（dev 调研实证 + team-lead 复核 + 用户拍板 A）。「删 run=删文件」改述为「删整月=删文件、删单 run=文件内 diff 行级」。 |
 
 ---
 

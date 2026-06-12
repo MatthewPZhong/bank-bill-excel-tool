@@ -196,8 +196,9 @@
 
 ### Phase 1 — acquiring run 级数据 → per-run 侧库（最大头，建立样板）
 
-- 文件布局（B-D3）：`{userData}/run-data/acquiring-bill-currency/run-{runId}.sqlite`；`bill_imports` / `flow_imports` / `diff_rows` 三表迁出；`runs` 元数据留主库（轻量，含侧库文件相对路径 + 状态）。
-- 生命周期：删 run（用户删除 / 孤儿清理 / cleanup）= **删侧库文件**——原子、零碎片、零 VACUUM、不再有百万行 DELETE 阻塞主进程。
+- 文件布局（B-D3 · **2026-06-12 实施期修正：acquiring 侧库键 = month 而非 run**）：`{userData}/run-data/acquiring-bill-currency/month-{YYYY-MM}.sqlite`，内含 `bill_imports` / `flow_imports` / `diff_rows` 三表；`runs` 元数据留主库（轻量，含侧库文件相对路径 + 状态）。
+  - 修正依据（dev 调研实证 + team-lead 复核 + 用户拍板 A）：imports 表 `UNIQUE(month_key, recon_main_id)` 按月持久化（`migrations.js:2594`）、import 与 run 是独立 IPC handler（`main.js:12155/12159/12173`）、一次导入被多次 run 复用且每次 run `clearRunsByMonth` 按月清旧（`run-repository.js:148-150`）、对账 JOIN 要求 flow+bill+diff 同库——原「per-run 文件」字面在 acquiring 数据模型下不自洽（强行实现需每 run 重拷百万行 imports 并破坏导入/运行解耦）。**通则改述：侧库文件键 = 该模块批量数据的生命周期键**（acquiring=month；Phase 2 各模块按各自生命周期键裁定）。
+- 生命周期：删除整月数据（用户覆盖删除 / 孤儿清理 / cleanup）= **删侧库文件**——原子、零碎片、零 VACUUM、不再有百万行 DELETE 阻塞主进程；删单 run = 文件内按 run_id 删 diff 行（与现状 `clearRunsByMonth` 同语义，量级小）。
 - 机制简化映射：
   - FK CASCADE（run→diff_rows）：侧库内同库保留 bill↔diff FK；run 级联 = 删文件；
   - `clearStaleSuccessfulRawJson` / idle cleanup / `cleanupAfterRunBackground`：行级清理降级为文件级（成功 run 超 retention → 直接删侧库文件或仅保留 diff 表，B-D4）；
@@ -269,9 +270,9 @@
 
 ## B.9 拍板清单（✅ 全部拍板，2026-06-12）
 
-- [x] **B-D1** 侧库方案：✅ **a：per-run 独立文件**（删 run = 删文件，零碎片零 VACUUM）
+- [x] **B-D1** 侧库方案：✅ **a：独立侧库文件**（删文件回收，零碎片零 VACUUM；2026-06-12 修正：文件键 = 模块数据生命周期键，acquiring 为 per-month——见 §B.4 Phase 1 修正依据，用户拍板 A）
 - [x] **B-D2** 历史 run 数据处置：✅ **b：双源过渡**（旧数据原地保留、新 run 走侧库、读路径先侧库后主库；双源移除 + 二次 VACUUM 收口顺延至 v3.0.5 之后的下一个版本）
-- [x] **B-D3** 侧库路径/命名：✅ 按建议 `{userData}/run-data/{module}/run-{id}.sqlite`
+- [x] **B-D3** 侧库路径/命名：✅ `{userData}/run-data/{module}/{生命周期键}.sqlite`（acquiring = `month-{YYYY-MM}.sqlite`；2026-06-12 随 B-D1 修正，原 `run-{id}` 命名废弃）
 - [x] **B-D4** retention 归属：✅ **文件级二态**（成功 run 超保留期 → 直接删侧库文件 / 仅保留 diff 表，差异表历史重导出不丢）
 - [x] **B-D5** Phase 3 回退开关：✅ **加**（setting/env 控新旧启动时序，稳定一版后移除）
 - [x] **B-D6** 一次性 VACUUM：✅ **迁移式 + 状态框提示**（升级首启执行，app_settings 标志位幂等，UI 提示「正在优化数据库，首次约 X 分钟」）
