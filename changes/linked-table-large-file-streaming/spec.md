@@ -1,6 +1,7 @@
 # Spec — 链接表导入复用流式引擎（支持 65 万行级大文件）
 
-> 状态：**已确认（待实施）** ｜ 来源分支：`v2.1.16-beta.6` ｜ 目标版本：v3.0.0（块 B，PR-7+）
+> 状态：**已实施（v3.0.0 块B，已发版）** ｜ 来源分支：`v2.1.16-beta.6` ｜ 目标版本：v3.0.0（块 B，PR-7+）
+> ✅ 回写 2026-06-15：原「待实施」状态行已 stale（§七实施记录已记 commit 7bdc6bf/bcc96df/e9eee5a）。实证落地 `linked-table-repository.js:318 replaceLinkedTableStreaming` + `src/main-process/linked-table-stream-source.js` + CHANGELOG v3.0.0 块B。
 > 性质：🔴 **资金红线 + 数据红线**（链接表整表覆盖落库 / bank-deposit 派生 ADM）
 > 缘起：用户导入 `渠道账单_2026-06-08_319151.xlsx`（147MB / 65.7 万行）报"成功 0 失败 1：文件为空或不可读"。
 > 决策：用户 2026-06-08 已就 O-1 ~ O-6 **按推荐采纳**（见 §五 OPEN 表），spec 定稿可进入实施；前置 spec①（列名迁移）方案已定，详见 `changes/linked-mid-allocation-date-column-migration/spec.md`。

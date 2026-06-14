@@ -1,6 +1,7 @@
 # Spec — linked_mid_allocation 日期列名残留迁移（business_date → transaction_date）
 
-> 状态：**待确认（未实施）** ｜ 来源分支：`v2.1.16-beta.6` ｜ 目标版本：待定
+> 状态：**已实施（v3.0.0，块B前置，已发版）** ｜ 来源分支：`v2.1.16-beta.6` ｜ 目标版本：v3.0.0（块B前置）
+> ✅ 回写 2026-06-15：原「待确认（未实施）」状态行已 stale。实证落地 commit 412b983 / `migrations.js:2870`（双条件门控 `business_date → transaction_date`）+ PRD v3.0.0 §5.5.4 + 专属单测 `migrations-linked-mid-allocation-date-rename.test.js`。
 > 性质：🔴 资金对账链接表 schema 迁移（喂给 JPM/ADM 三段匹配的数据源表）—— 改动本身是一条幂等列重命名，不碰对账计算
 > 缘起：用户导入「中台调拨订单表」用例文件报错 `table linked_mid_allocation has no column named transaction_date`，成功 0 失败 1
 
