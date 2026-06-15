@@ -5594,11 +5594,50 @@ async function handleBizOpReconExport() {
   }));
 }
 
+// v3.0.5 PR-5（Part B Phase 3）：启动窗口先行——两段式初始化。
+//   initialize() = 入口：getInfo 若返回 initPending（main init 链未完，窗口已 loading 态显示）→ 渲染轻量骨架
+//     （平台标识/UI 风格默认/版本号/「正在初始化…」状态）+ 订阅 app:init-done → 收到后重新 getInfo 拿全量
+//     → applyFullInfo(info) 完成数据填充。若 getInfo 已全量（旧时序 / init 已完）→ 直接 applyFullInfo。
+//   ⚠️ applyFullInfo 幂等性要求：onInitDone 只触发一次（main 只发一次），且收到时 init 已完 → getInfo 必全量。
 async function initialize() {
   markRendererStartup(RENDERER_STARTUP_MARKS.initializeStart);
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoStart);
   const info = await window.desktopApi.app.getInfo();
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoDone);
+
+  if (info && info.initPending) {
+    // 轻量骨架（init 前）：平台标识 + UI 风格默认 + 版本号 + loading 状态文案。
+    document.body.dataset.platform = (window.desktopApi && window.desktopApi.platform) || '';
+    applyUiStyle();
+    if (elements.appVersion) elements.appVersion.textContent = info.version || '';
+    setStatus('正在初始化，请稍候…', 'info', { errorReportReady: false });
+    // VACUUM 等阶段文案（B-D6）：升级首启优化数据库时显示「正在优化数据库…」。
+    if (window.desktopApi.app.onInitProgress) {
+      window.desktopApi.app.onInitProgress((payload) => {
+        if (payload && payload.text) setStatus(payload.text, 'info', { errorReportReady: false });
+      });
+    }
+    // init-done 后重新 getInfo 拿全量 → 完成数据填充（解绑一次性监听）。
+    let off = null;
+    const onDone = async () => {
+      if (off) { try { off(); } catch (_e) { /* swallow */ } off = null; }
+      try {
+        const fullInfo = await window.desktopApi.app.getInfo();
+        await applyFullInfo(fullInfo);
+      } catch (err) {
+        setStatus('初始化失败，请重启程序', 'error', { errorReportReady: false });
+        console.error('applyFullInfo after init-done failed:', err);
+      }
+    };
+    off = window.desktopApi.app.onInitDone(onDone);
+    return;
+  }
+
+  // 旧时序 / init 已完：直接全量填充。
+  await applyFullInfo(info);
+}
+
+async function applyFullInfo(info) {
   // v2.1.13 E2：注入平台标识，CSS 以 body[data-platform="win32"] 限定 Win 端 Noto Sans SC 字体（仅 Win 生效）
   document.body.dataset.platform = (window.desktopApi && window.desktopApi.platform) || '';
   applyUiStyle();

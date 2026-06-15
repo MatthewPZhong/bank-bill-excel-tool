@@ -2972,8 +2972,15 @@ function registerWindowHandlers() {
 
 function registerAppHandlers() {
   ipcMain.handle('app:get-info', () => {
+    // v3.0.5 PR-5（Part B Phase 3）：两段式——init 未完（新时序窗口先行，database 尚未 init）→ 返回 loading 骨架。
+    //   renderer 渲染「正在初始化…」状态 + appVersion；收到 app:init-done 后重新 getInfo 拿全量字段。
+    //   ⚠️ 必须用 appInitDone（而非仅判 database 非空）：database init 链中途访问 getCurrentModule 等也可能未就绪。
+    if (!appInitDone || !database || !database.db) {
+      return { initPending: true, version: app.getVersion() };
+    }
     const enumConfig = getEnumConfig();
     return {
+      initPending: false,
       version: app.getVersion(),
       storageRoot: ensureStorageRoot(),
       hasEnum: Boolean(enumConfig),
@@ -12682,32 +12689,85 @@ function flushUsageStats() {
   }
 }
 
-app.whenReady()
-  .then(() => {
-    markStartupMetric(STARTUP_METRIC_MARKS.appReady);
-    initializeActivityLog();
+// v3.0.5 PR-5（Part B Phase 3）：启动窗口先行 —— 回退开关 B-D5（仿 USE_BIG_TABLE_IMPORT_ENGINE 范式，一行切回旧时序）。
+//   新时序（默认）：whenReady → 轻量(activity-log/usage-stats) → 立即 createWindow(loading 态) + register*Handlers
+//     → 后台 init 链（database.init / pendingDb / 迁移 / syncTemplateLibrary + 各 setImmediate 后台清理）
+//     → 完成后 mainWindow.webContents.send('app:init-done') 放开功能。
+//   旧时序（DEFERRED_WINDOW_STARTUP=0）：init 链全跑完 → register*Handlers → createWindow（v3.0.4 及之前行为）。
+//   ⚠️ 方案①前提（已核实）：register*Handlers 的 handler 体惰性引用 database（闭包 () => database && database.db），
+//     注册时不解引用 → 可在 database.init 前注册；首个 IPC（app:get-info）init 未完返回 {initPending:true,version}。
+//   稳定一版后移除回退分支（与 USE_BIG_TABLE_IMPORT_ENGINE 同退役路径）。
+const DEFERRED_WINDOW_STARTUP = process.env.DEFERRED_WINDOW_STARTUP === '0' ? false : true;
 
-    // v2.0.0-beta.4：加载 usage-stats + 记录 sessionStart + 启动定时 flush
-    try {
-      usageStats = usageStatsModule.loadStats(ensureStorageRoot());
-      usageStatsModule.recordSessionStart(usageStats);
-      usageStatsDirty = true;
-      flushUsageStats();
-      usageStatsAutoFlushTimer = setInterval(flushUsageStats, USAGE_STATS_FLUSH_INTERVAL_MS);
-    } catch (err) {
-      // v2.1.9 SR-log-1：替换 console.warn → 日志上报；usage-stats init 失败 → 默认值兜底
-      appendActivityLogEntry({
-        level: 'warning',
-        source: 'main',
-        domain: 'usage-stats',
-        message: '[usage-stats] init failed',
-        details: [err && err.message ? err.message : String(err)],
-        stack: err && err.stack ? err.stack : undefined
-      });
-      usageStats = usageStatsModule.defaultStats();
+// init 链是否完成（app:get-info 两段式判定：未完返回 loading 骨架；renderer 收 app:init-done 后重 getInfo 拿全量）。
+let appInitDone = false;
+
+// v3.0.5 PR-5（B-D6）：升级首启一次性 VACUUM 阻塞前，给 loading 窗口发状态文案。
+//   轻量只读 peek 标志位（key 与 database.js ONE_TIME_VACUUM_FLAG_KEY 一致）+ 文件大小判定，决定发哪条文案。
+//   全程 try/swallow——peek 失败一律发通用「正在初始化…」，绝不阻断 init。
+const ONE_TIME_VACUUM_FLAG_KEY_MIRROR = 'db_one_time_vacuum_v3_0_5_done';
+const VACUUM_NOTICE_MIN_DB_BYTES = 500 * 1024 * 1024; // >500MB 才提示「优化数据库（分钟级）」，小库走通用文案
+function sendInitProgress(payload) {
+  try {
+    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('app:init-progress', payload);
     }
+  } catch (_e) { /* swallow */ }
+}
+function maybeSendVacuumLoadingNotice(dbPath) {
+  let vacuumPending = false;
+  try {
+    if (fs.existsSync(dbPath)) {
+      const size = fs.statSync(dbPath).size;
+      if (size >= VACUUM_NOTICE_MIN_DB_BYTES) {
+        // 只读 peek 标志位（throwaway 连接，立即 close；不影响后续 init 的主连接）。
+        const { DatabaseSync } = require('node:sqlite');
+        let peekDb = null;
+        try {
+          peekDb = new DatabaseSync(dbPath, { readOnly: true });
+          const row = peekDb.prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?').get(ONE_TIME_VACUUM_FLAG_KEY_MIRROR);
+          vacuumPending = !(row && row.setting_value === '1');
+        } catch (_e) {
+          vacuumPending = false; // app_settings 不存在（全新库）等 → 无历史膨胀，不发 VACUUM 文案
+        } finally {
+          if (peekDb) { try { peekDb.close(); } catch (_e2) { /* swallow */ } }
+        }
+      }
+    }
+  } catch (_e) { vacuumPending = false; }
+  if (vacuumPending) {
+    sendInitProgress({ phase: 'vacuum', text: '正在优化数据库，首次升级约需几分钟，请勿关闭程序…' });
+  } else {
+    sendInitProgress({ phase: 'init', text: '正在初始化…' });
+  }
+}
 
+// 10 组 IPC handler 注册（提取为函数，新/旧时序都调一次；handler 体惰性引用 database/pendingDb，注册时不解引用）。
+function registerAllIpcHandlers() {
+  registerWindowHandlers();
+  registerAppHandlers();
+  registerErrorHandlers();
+  registerBackgroundHandlers();
+  registerAccountMappingHandlers();
+  registerTemplateHandlers();
+  registerBigAccountHandlers();
+  registerBigAccountOrderHandlers();
+  registerFileHandlers();
+  registerNewAccountHandlers();
+  markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);
+}
+
+// 后台 init 链 + 所有 post-setup（database/pendingDb/迁移/模板库 + 孤儿清理/备份保留/idle 计时器/failure listener）。
+//   新时序：createWindow 后调用；完成后 markAppInitDone() → send('app:init-done')。
+//   旧时序：register/createWindow 前调用（同步完成）。
+//   本函数内所有 setImmediate 后台块 guard `if (!database || !database.db) return`——新时序下 database 已在本函数体内 init，
+//   setImmediate 回调晚于本函数同步体执行，database 已就绪。
+function runBackgroundInitChain() {
     const dataPath = path.join(app.getPath('userData'), 'tool-data.sqlite');
+    // v3.0.5 PR-5（B-D6）：升级首启一次性 VACUUM 会同步阻塞主进程（大库分钟级）——新时序下窗口已显示 loading 态，
+    //   故在 database.init()（内含 VACUUM）之前发一次状态文案，让 loading 态显示「正在优化数据库…请勿关闭程序」。
+    //   仅当 VACUUM 待执行（标志位未写）且库文件较大（>500MB，确实膨胀值得多分钟提示）时发；否则发通用「正在初始化…」。
+    maybeSendVacuumLoadingNotice(dataPath);
     database = new AppDatabase(dataPath);
     database.init();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
@@ -12764,19 +12824,76 @@ app.whenReady()
     syncTemplateLibraryFile();
     markStartupMetric(STARTUP_METRIC_MARKS.templateLibrarySynced);
 
-    registerWindowHandlers();
-    registerAppHandlers();
-    registerErrorHandlers();
-    registerBackgroundHandlers();
-    registerAccountMappingHandlers();
-    registerTemplateHandlers();
-    registerBigAccountHandlers();
-    registerBigAccountOrderHandlers();
-    registerFileHandlers();
-    registerNewAccountHandlers();
-    markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);
-    createWindow();
+    runStartupPostSetup();
+}
 
+// init 完成标记 + 通知 renderer 放开功能（loading → 全量）。新时序专用；旧时序窗口建好时 init 已完，渲染层首次 getInfo 即全量。
+function markAppInitDone() {
+  appInitDone = true;
+  try {
+    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('app:init-done');
+    }
+  } catch (_e) { /* swallow — 窗口已销毁等 */ }
+}
+
+app.whenReady()
+  .then(() => {
+    markStartupMetric(STARTUP_METRIC_MARKS.appReady);
+    initializeActivityLog();
+
+    // v2.0.0-beta.4：加载 usage-stats + 记录 sessionStart + 启动定时 flush
+    try {
+      usageStats = usageStatsModule.loadStats(ensureStorageRoot());
+      usageStatsModule.recordSessionStart(usageStats);
+      usageStatsDirty = true;
+      flushUsageStats();
+      usageStatsAutoFlushTimer = setInterval(flushUsageStats, USAGE_STATS_FLUSH_INTERVAL_MS);
+    } catch (err) {
+      // v2.1.9 SR-log-1：替换 console.warn → 日志上报；usage-stats init 失败 → 默认值兜底
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'usage-stats',
+        message: '[usage-stats] init failed',
+        details: [err && err.message ? err.message : String(err)],
+        stack: err && err.stack ? err.stack : undefined
+      });
+      usageStats = usageStatsModule.defaultStats();
+    }
+
+    // v3.0.5 PR-5（Part B Phase 3）：启动窗口先行（回退开关 DEFERRED_WINDOW_STARTUP，默认新时序）。
+    if (DEFERRED_WINDOW_STARTUP) {
+      // 新时序：先注册 handler（惰性引用 database） + 立即建窗（loading 态）→ 后台 init 链 → init-done 放开功能。
+      registerAllIpcHandlers();
+      createWindow();
+      // 后台 init 链：放进 setImmediate 让窗口先渲染（loading 骨架），init 完成后 send('app:init-done')。
+      //   init 链本身同步（database.init 是 DatabaseSync 同步 API），但放 setImmediate 让 createWindow 的
+      //   loadFile/ready-to-show 事件循环先跑一拍——窗口 loading 态先可见，再开始压主线程 init。
+      setImmediate(() => {
+        try {
+          runBackgroundInitChain();
+        } catch (initErr) {
+          handleStartupFailure(initErr);
+          return;
+        }
+        markAppInitDone();
+      });
+    } else {
+      // 旧时序（DEFERRED_WINDOW_STARTUP=0）：init 链全跑完 → register → createWindow（v3.0.4 及之前行为）。
+      runBackgroundInitChain();
+      registerAllIpcHandlers();
+      createWindow();
+      markAppInitDone(); // 旧时序窗口建好时 init 已完；置标记保 getInfo 全量（窗口 onInitDone 监听冗余无害）
+    }
+  })
+  .catch((error) => {
+    handleStartupFailure(error);
+  });
+
+// v3.0.5 PR-5：启动期后台 post-setup（孤儿清理 / 备份保留 / idle 计时器 / failure listener / OneDrive 提示）。
+//   由 runBackgroundInitChain 末尾调用（database 已 init）。所有块 setImmediate 异步，不阻塞窗口。
+function runStartupPostSetup() {
     // v2.1.6 fix10：启动期孤儿数据 cleanup（后台异步，不阻塞窗口 ready）
     // 触发场景：上一次 run 中途 OOM 闪退 / 异常退出 / 用户 force quit，导致 DB 残留 diff_rows + flow/bill imports
     // 检测口径：runs.status != 'success' OR diff/report 文件丢失（spec §5.4）
@@ -13090,10 +13207,7 @@ app.whenReady()
         stack: err && err.stack ? err.stack : undefined
       });
     }
-  })
-  .catch((error) => {
-    handleStartupFailure(error);
-  });
+}
 
 // v2.1.8 N1：进入模块兜底 cleanup
 //   spec §三 N1-D3 / D4：listMonths 入口检测 cleanup_pending → 后台串行清 + toast 通知
