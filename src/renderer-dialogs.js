@@ -6155,6 +6155,130 @@
       return overlay;
     }
 
+    // v3.0.5 OPEN-4（T6c）：删除弹框「目标表」下拉用——tableKey → 删除文案/标题用中文「表名」。
+    //   ⚠️ 与管理弹窗 LINKED_TABLE_LABELS（带「库」，如「网关对账单表库」）不同：删除文案是「删除X数据」/「已删除N行X数据」，
+    //   带「库」读着别扭，且 gateway 既有文案为「网关对账单数据」（硬约束行为不变）→ 此处用不带「库」的表名。
+    //   仅含三张可删表（与后端 LINKED_DELETE_ALLOWED_TABLES 同口径）；默认 gateway-bill。
+    const LINKED_DELETE_TABLE_LABELS = {
+      'gateway-bill': '网关对账单',
+      'fx-settlement': '外汇交割表',
+      'bank-deposit': '银行对账单表'
+    };
+
+    // ── v3.0.5 OPEN-4（T6c）：以下派生提取/构造纯函数由「链接表管理导入完成框」与「删除联动结果框」共用 ──
+    //   提升到 createRendererDialogs 顶层作用域（原在 createLinkedTableManagerDialog 内部，纯函数无副作用，提升零行为变化）；
+    //   删除联动重建返回的 admDerive/bocDerive/bocBankDerive 与导入完全同结构（main.js 复用同一 rebuild 函数）→ 复用同一套渲染，禁复制防口径漂移。
+
+    // 从批量导入 results 取「最后一个」有 admDerive/bocDerive/bocBankDerive 者（多选逐次重建 → 最后一次=DB 最终态）。
+    function findAdmDerive(results) {
+      const list = Array.isArray(results) ? results : [];
+      let hit = null;
+      for (const r of list) { if (r && r.admDerive) hit = r; }
+      return hit ? hit.admDerive : null;
+    }
+    function findBocDerive(results) {
+      const list = Array.isArray(results) ? results : [];
+      let hit = null;
+      for (const r of list) { if (r && r.bocDerive) hit = r; }
+      return hit ? hit.bocDerive : null;
+    }
+    function findBocBankDerive(results) {
+      const list = Array.isArray(results) ? results : [];
+      let hit = null;
+      for (const r of list) { if (r && r.bocBankDerive) hit = r; }
+      return hit ? hit.bocBankDerive : null;
+    }
+
+    // ADM 派生未匹配错误码 → 中文说明（PRD §5.3.6）。
+    const ADM_UNMATCHED_CODE_LABELS = {
+      'no-mid-match': '中台无对应渠道流水号',
+      'mid-duplicate': '中台侧渠道流水号重复',
+      'adm-duplicate': 'ADM 侧 CustomerRef 重复',
+      'empty-customerref': 'ADM 行 CustomerRef 为空'
+    };
+    // 报错框最多列前 N 条未匹配明细，防 DOM 过载（PRD §5.3.6 / 决策4）。
+    const ADM_UNMATCHED_DISPLAY_LIMIT = 50;
+
+    // 构造 ADM 派生结果弹框 HTML（四态：派生失败 / 全匹配成功 / 部分成功未匹配 / 中台空）。
+    //   返回 null = 无需弹 ADM 框（admDerive 缺失）。
+    function buildAdmDeriveHtml(admDerive) {
+      if (!admDerive) return null;
+      // 派生失败（异常）：直接提示错误（银行对账单表本身已导入成功，仅 ADM 派生失败）。
+      if (!admDerive.created) {
+        const err = admDerive.error ? String(admDerive.error) : '未知错误';
+        return `<b>ADM 银行对账单链接表派生失败</b><br/><br/>${escapeHtml(err)}`;
+      }
+      const unmatched = Array.isArray(admDerive.unmatched) ? admDerive.unmatched : [];
+      // 全匹配成功（无未匹配）→ Mockup B：「ADM银行对账单链接表已创建」。
+      if (unmatched.length === 0) {
+        // v3.0.1 需求4：本次未派生出任何 ADM 行（银行表无 Channel='ADM' 调拨行）→ 表为空，不弹「已创建」成功提示（返回 null → 调用链跳过 ADM 框）。
+        if (!admDerive.total) return null;
+        return 'ADM银行对账单链接表已创建。';
+      }
+      // 部分成功 → Mockup C：列未匹配行（批次号/CustomerRef/BillDate/ChannelOrderNo + 错误码中文说明）。
+      const head = [];
+      if (admDerive.midEmpty) {
+        // 中台表为空 → 顶部额外提示「请先导入中台调拨订单表」（PRD §5.3.6）。
+        head.push('<b style="color:#d93025;">请先导入中台调拨订单表。</b>');
+      }
+      head.push('<b>ADM 银行对账单链接表已创建（部分行未匹配中台调拨订单）</b>');
+      head.push(`以下 <b>${unmatched.length}</b> 行未匹配，调拨号 / 调拨入金金额留空：`);
+
+      const shown = unmatched.slice(0, ADM_UNMATCHED_DISPLAY_LIMIT);
+      const items = shown.map((u) => {
+        const codeLabel = ADM_UNMATCHED_CODE_LABELS[u.code] || u.code || '未知原因';
+        const batchNo = u.batchNo === undefined || u.batchNo === null ? '' : String(u.batchNo);
+        const customerRef = u.customerRef === undefined || u.customerRef === null ? '' : String(u.customerRef);
+        const billDate = u.billDate === undefined || u.billDate === null ? '' : String(u.billDate);
+        const channelOrderNo = u.channelOrderNo === undefined || u.channelOrderNo === null ? '' : String(u.channelOrderNo);
+        return `• 批次号 ${escapeHtml(batchNo || '—')} ｜ CustomerRef=${escapeHtml(customerRef || '—')} ｜ `
+          + `BillDate=${escapeHtml(billDate || '—')} ｜ ChannelOrderNo=${escapeHtml(channelOrderNo || '—')}`
+          + `<br/>&nbsp;&nbsp;&nbsp;&nbsp;→ ${escapeHtml(codeLabel)}（${escapeHtml(u.code || '')}）`;
+      }).join('<br/>');
+      const truncatedNote = unmatched.length > ADM_UNMATCHED_DISPLAY_LIMIT
+        ? `<br/><br/>……仅显示前 ${ADM_UNMATCHED_DISPLAY_LIMIT} 行（共 ${unmatched.length} 行未匹配）`
+        : '';
+      return `${head.join('<br/><br/>')}<br/><br/>${items}${truncatedNote}`;
+    }
+
+    // 构造 BOC fx 派生结果弹框规格（F2.6 表格五分支前四分支 + bank 失败收敛）。
+    //   返回 null = 无需弹框（静默）；否则 { type:'alert'|'confirm', html, isError, missingReason }。
+    //   needBankImport 分支用 confirm 框引导导入（复用链接表管理导入流程），其余用 alert。
+    function buildBocDeriveSpec(bocDerive) {
+      if (!bocDerive) return null;
+      // 派生失败（异常）→ 错误弹框（交割表本身已导入成功，仅 BOC 派生失败）。
+      if (!bocDerive.created) {
+        const err = bocDerive.error ? String(bocDerive.error) : '未知错误';
+        return { type: 'alert', isError: true, html: `<b>BOC链接表派生失败</b><br/><br/>${escapeHtml(err)}` };
+      }
+      // total===0（空交割表 / 仅标题表头）→ 静默（仿 ADM 0 行拍板）。
+      if (!bocDerive.total) return null;
+      // needBankImport（U2 拍板）→ confirm 引导导入 BOC 银行对账单。
+      if (bocDerive.needBankImport) {
+        const missingReason = bocDerive.bankMissingReason || '';
+        // missing-payment-detail：库内有 BOC 银行行但缺 Payment Detail（旧白名单时代导入）→ 提示重新导入。
+        const extraHint = missingReason === 'missing-payment-detail'
+          ? '<br/><br/><b style="color:#d93025;">检测到链接表库中已有 BOC 银行对账单数据但缺少「Payment Detail」字段（早期版本导入），无法提取银行单交易编号，请重新导入 BOC 银行对账单表。</b>'
+          : '';
+        const html = 'BOC链接表已生成分组与调拨单号，但链接表库无可用的 BOC 银行对账单数据，无法回填资金对账不平表链接ID。'
+          + extraHint
+          + '<br/><br/>是否现在导入 BOC 银行对账单？';
+        return { type: 'confirm', isError: false, html, missingReason };
+      }
+      // 成功（created && total>0 && !needBankImport）→ 成功提示（skipLogReport）。
+      return { type: 'alert', isError: false, html: 'BOC链接表已生成。' };
+    }
+
+    // 构造 BOC bank 补回填弹框规格：O1 拍板——成功静默（返回 null），仅失败弹错误框。
+    function buildBocBankDeriveSpec(bocBankDerive) {
+      if (!bocBankDerive) return null;
+      if (!bocBankDerive.created) {
+        const err = bocBankDerive.error ? String(bocBankDerive.error) : '未知错误';
+        return { type: 'alert', isError: true, html: `<b>BOC调拨银行对账单表派生失败</b><br/><br/>${escapeHtml(err)}` };
+      }
+      return null; // O1：补回填成功静默
+    }
+
     // v2.1.16 A4：链接表管理弹窗（导入 + 列表渲染，前后端联调）
     //   - 复用场景管理弹窗的 header/table/footer class 风格（.manager-card / .dialog-header / .table-wrapper / .dialog-actions）
     //   - 打开后调 desktopApi.linkedTable.list() 渲染 4 行：「数据日期范围」(min~max) + 「表库更新日期」(updatedAt)；空显示「—」
@@ -6304,122 +6428,9 @@
         return lines.join('<br/><br/>');
       }
 
-      // v2.1.16-beta.5 需求3（PRD §5.3.6 / Mockup B/C）：从批量导入 results 取 ADM 派生信息（main.js 挂在
-      //   bank-deposit 或 mid-allocation 文件 result 的 admDerive 子字段；PR#65 新 Finding1 起两源任一变更都重建）。
-      //   🔴 取「最后一个」有 admDerive 者：一次多选可能 bank-deposit + mid-allocation 都触发重建，handler 按文件
-      //   顺序逐次 replaceAdmBankDeposit（整表覆盖）→ 最后一次 = DB 最终态，弹框须用最后一次的 stats（取首个会显示旧态）。
-      function findAdmDerive(results) {
-        const list = Array.isArray(results) ? results : [];
-        let hit = null;
-        for (const r of list) { if (r && r.admDerive) hit = r; }
-        return hit ? hit.admDerive : null;
-      }
-
-      // ADM 派生未匹配错误码 → 中文说明（PRD §5.3.6）。
-      const ADM_UNMATCHED_CODE_LABELS = {
-        'no-mid-match': '中台无对应渠道流水号',
-        'mid-duplicate': '中台侧渠道流水号重复',
-        'adm-duplicate': 'ADM 侧 CustomerRef 重复',
-        'empty-customerref': 'ADM 行 CustomerRef 为空'
-      };
-      // 报错框最多列前 N 条未匹配明细，防 DOM 过载（PRD §5.3.6 / 决策4）。
-      const ADM_UNMATCHED_DISPLAY_LIMIT = 50;
-
-      // 构造 ADM 派生结果弹框 HTML（四态：派生失败 / 全匹配成功 / 部分成功未匹配 / 中台空）。
-      //   返回 null = 无需弹 ADM 框（admDerive 缺失）。
-      function buildAdmDeriveHtml(admDerive) {
-        if (!admDerive) return null;
-        // 派生失败（异常）：直接提示错误（银行对账单表本身已导入成功，仅 ADM 派生失败）。
-        if (!admDerive.created) {
-          const err = admDerive.error ? String(admDerive.error) : '未知错误';
-          return `<b>ADM 银行对账单链接表派生失败</b><br/><br/>${escapeHtml(err)}`;
-        }
-        const unmatched = Array.isArray(admDerive.unmatched) ? admDerive.unmatched : [];
-        // 全匹配成功（无未匹配）→ Mockup B：「ADM银行对账单链接表已创建」。
-        if (unmatched.length === 0) {
-          // v3.0.1 需求4：本次未派生出任何 ADM 行（银行表无 Channel='ADM' 调拨行）→ 表为空，不弹「已创建」成功提示（返回 null → 调用链跳过 ADM 框）。
-          if (!admDerive.total) return null;
-          return 'ADM银行对账单链接表已创建。';
-        }
-        // 部分成功 → Mockup C：列未匹配行（批次号/CustomerRef/BillDate/ChannelOrderNo + 错误码中文说明）。
-        const head = [];
-        if (admDerive.midEmpty) {
-          // 中台表为空 → 顶部额外提示「请先导入中台调拨订单表」（PRD §5.3.6）。
-          head.push('<b style="color:#d93025;">请先导入中台调拨订单表。</b>');
-        }
-        head.push('<b>ADM 银行对账单链接表已创建（部分行未匹配中台调拨订单）</b>');
-        head.push(`以下 <b>${unmatched.length}</b> 行未匹配，调拨号 / 调拨入金金额留空：`);
-
-        const shown = unmatched.slice(0, ADM_UNMATCHED_DISPLAY_LIMIT);
-        const items = shown.map((u) => {
-          const codeLabel = ADM_UNMATCHED_CODE_LABELS[u.code] || u.code || '未知原因';
-          const batchNo = u.batchNo === undefined || u.batchNo === null ? '' : String(u.batchNo);
-          const customerRef = u.customerRef === undefined || u.customerRef === null ? '' : String(u.customerRef);
-          const billDate = u.billDate === undefined || u.billDate === null ? '' : String(u.billDate);
-          const channelOrderNo = u.channelOrderNo === undefined || u.channelOrderNo === null ? '' : String(u.channelOrderNo);
-          return `• 批次号 ${escapeHtml(batchNo || '—')} ｜ CustomerRef=${escapeHtml(customerRef || '—')} ｜ `
-            + `BillDate=${escapeHtml(billDate || '—')} ｜ ChannelOrderNo=${escapeHtml(channelOrderNo || '—')}`
-            + `<br/>&nbsp;&nbsp;&nbsp;&nbsp;→ ${escapeHtml(codeLabel)}（${escapeHtml(u.code || '')}）`;
-        }).join('<br/>');
-        const truncatedNote = unmatched.length > ADM_UNMATCHED_DISPLAY_LIMIT
-          ? `<br/><br/>……仅显示前 ${ADM_UNMATCHED_DISPLAY_LIMIT} 行（共 ${unmatched.length} 行未匹配）`
-          : '';
-        return `${head.join('<br/><br/>')}<br/><br/>${items}${truncatedNote}`;
-      }
-
-      // v3.0.4 块 E 需求2（spec §4 F2.6）：BOC 链接表派生弹框链（仿 findAdmDerive，接在 ADM 链之后）。
-      //   外汇交割表导入触发 fx 派生（result.bocDerive）；银行对账单表导入触发 bank 补回填（result.bocBankDerive）。
-      //   🔴 取「最后一个」有 bocDerive 者：一次多选 fx + bank 文件时 handler 逐次重建 → 最后一次 = DB 最终态。
-      function findBocDerive(results) {
-        const list = Array.isArray(results) ? results : [];
-        let hit = null;
-        for (const r of list) { if (r && r.bocDerive) hit = r; }
-        return hit ? hit.bocDerive : null;
-      }
-      function findBocBankDerive(results) {
-        const list = Array.isArray(results) ? results : [];
-        let hit = null;
-        for (const r of list) { if (r && r.bocBankDerive) hit = r; }
-        return hit ? hit.bocBankDerive : null;
-      }
-
-      // 构造 BOC fx 派生结果弹框规格（F2.6 表格五分支前四分支 + bank 失败收敛）。
-      //   返回 null = 无需弹框（静默）；否则 { type:'alert'|'confirm', html, isError, missingReason }。
-      //   needBankImport 分支用 confirm 框引导导入（复用链接表管理导入流程），其余用 alert。
-      function buildBocDeriveSpec(bocDerive) {
-        if (!bocDerive) return null;
-        // 派生失败（异常）→ 错误弹框（交割表本身已导入成功，仅 BOC 派生失败）。
-        if (!bocDerive.created) {
-          const err = bocDerive.error ? String(bocDerive.error) : '未知错误';
-          return { type: 'alert', isError: true, html: `<b>BOC链接表派生失败</b><br/><br/>${escapeHtml(err)}` };
-        }
-        // total===0（空交割表 / 仅标题表头）→ 静默（仿 ADM 0 行拍板）。
-        if (!bocDerive.total) return null;
-        // needBankImport（U2 拍板）→ confirm 引导导入 BOC 银行对账单。
-        if (bocDerive.needBankImport) {
-          const missingReason = bocDerive.bankMissingReason || '';
-          // missing-payment-detail：库内有 BOC 银行行但缺 Payment Detail（旧白名单时代导入）→ 提示重新导入。
-          const extraHint = missingReason === 'missing-payment-detail'
-            ? '<br/><br/><b style="color:#d93025;">检测到链接表库中已有 BOC 银行对账单数据但缺少「Payment Detail」字段（早期版本导入），无法提取银行单交易编号，请重新导入 BOC 银行对账单表。</b>'
-            : '';
-          const html = 'BOC链接表已生成分组与调拨单号，但链接表库无可用的 BOC 银行对账单数据，无法回填资金对账不平表链接ID。'
-            + extraHint
-            + '<br/><br/>是否现在导入 BOC 银行对账单？';
-          return { type: 'confirm', isError: false, html, missingReason };
-        }
-        // 成功（created && total>0 && !needBankImport）→ 成功提示（skipLogReport）。
-        return { type: 'alert', isError: false, html: 'BOC链接表已生成。' };
-      }
-
-      // 构造 BOC bank 补回填弹框规格：O1 拍板——成功静默（返回 null），仅失败弹错误框。
-      function buildBocBankDeriveSpec(bocBankDerive) {
-        if (!bocBankDerive) return null;
-        if (!bocBankDerive.created) {
-          const err = bocBankDerive.error ? String(bocBankDerive.error) : '未知错误';
-          return { type: 'alert', isError: true, html: `<b>BOC调拨银行对账单表派生失败</b><br/><br/>${escapeHtml(err)}` };
-        }
-        return null; // O1：补回填成功静默
-      }
+      // v3.0.5 OPEN-4（T6c）：findAdmDerive/findBocDerive/findBocBankDerive 与 buildAdmDeriveHtml/buildBocDeriveSpec/
+      //   buildBocBankDeriveSpec + ADM_UNMATCHED_* 常量已提升至 createRendererDialogs 顶层作用域（与删除联动结果框共用，
+      //   纯函数提升零行为变化）；本弹窗下方导入完成链直接引用顶层版本。
 
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
       dialog.querySelector('[data-action="exit"]').addEventListener('click', closeModal);
@@ -6521,20 +6532,37 @@
       return overlay;
     }
 
-    // v3.0.1 需求1（D4 / OPEN-6 用户拍板）：🔴 资金红线 — 按日期范围删除网关对账单数据。
-    //   仅支持网关对账单表；闭区间（含起止两端）；直接删、无二次确认 → 本弹框即唯一一道确认，警告须做足。
+    // v3.0.1 需求1（D4 / OPEN-6 用户拍板）：🔴 资金红线 — 按日期范围删除链接表数据。
+    //   v3.0.5 OPEN-4（T6c）：加「目标表」下拉（三表：网关对账单/外汇交割表/银行对账单表），默认网关；标题随选择切换。
+    //     count/delete 调用带 tableKey；切表后 🔴 必须重新 count 成功才启用删除（防拿旧表 count 删新表）。
+    //     删除成功文案随表名；fx/bank-deposit 删除联动重建派生（bocDerive/admDerive/bocBankDerive），结果框复用导入完成框范式。
+    //   闭区间（含起止两端）；直接删、无二次确认 → 本弹框即唯一一道确认，警告须做足。
     //   实时计数：两端日期填齐 ∧ start<=end → countByDateRange 预览将删行数，否则禁用「删除」。
     //   删除走 deleteByDateRange（不可逆）；成功后重开管理弹窗自动刷新列表反映新日期范围。
-    function createLinkedTableDeleteRangeDialog() {
+    // @param {string} [initialTableKey] reopen 链（失败重开本框）传入当前选中表，保持目标表选择不丢；缺省 gateway-bill。
+    function createLinkedTableDeleteRangeDialog(initialTableKey) {
+      // 仅三张可删表（与后端 LINKED_DELETE_ALLOWED_TABLES 同口径）；非法入参回退 gateway-bill（向后兼容 + 防呆）。
+      const defaultTableKey = Object.prototype.hasOwnProperty.call(LINKED_DELETE_TABLE_LABELS, initialTableKey)
+        ? initialTableKey
+        : 'gateway-bill';
       const overlay = createOverlay();
       const dialog = document.createElement('div');
       dialog.className = 'modal-card linked-table-delete-range-card';
+      // 目标表下拉选项：保持「网关→fx→bank-deposit」顺序（网关默认在首位）。
+      const tableOptionsHtml = ['gateway-bill', 'fx-settlement', 'bank-deposit'].map((k) => {
+        const selected = k === defaultTableKey ? ' selected' : '';
+        return `<option value="${k}"${selected}>${escapeHtml(LINKED_DELETE_TABLE_LABELS[k])}</option>`;
+      }).join('');
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">删除网关对账单数据</div>
+          <div class="dialog-title" data-role="title">删除${escapeHtml(LINKED_DELETE_TABLE_LABELS[defaultTableKey])}数据</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="dialog-body" style="padding: 4px 28px 8px;">
+          <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; margin-bottom: 14px;">
+            目标表
+            <select data-role="table-key">${tableOptionsHtml}</select>
+          </label>
           <div style="display: flex; gap: 16px; margin-bottom: 14px;">
             <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px;">
               起始日期
@@ -6552,9 +6580,20 @@
           <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
         </div>
       `;
+      const tableSelect = dialog.querySelector('[data-role="table-key"]');
+      const titleEl = dialog.querySelector('[data-role="title"]');
       const startInput = dialog.querySelector('[data-role="start"]');
       const endInput = dialog.querySelector('[data-role="end"]');
       const confirmBtn = dialog.querySelector('[data-action="confirm-delete"]');
+
+      // 当前选中目标表 tableKey（始终是三白名单之一）。
+      function currentTableKey() {
+        return tableSelect.value || 'gateway-bill';
+      }
+      // 当前目标表中文名（删除文案用）。
+      function currentLabel() {
+        return LINKED_DELETE_TABLE_LABELS[currentTableKey()] || currentTableKey();
+      }
 
       // 当前输入是否构成有效闭区间（两端非空 ∧ start<=end）。
       function rangeValid() {
@@ -6563,12 +6602,13 @@
         return Boolean(s) && Boolean(e) && s <= e;
       }
 
-      // 标记最近一次有效计数请求，避免快速改日期时旧请求回填覆盖新值。
+      // 标记最近一次有效计数请求，避免快速改日期 / 切表时旧请求回填覆盖新值（含切表竞态）。
       let countToken = 0;
 
       // v3.0.1（用户调整）：红色警告框 + 「将删约 N 行」计数显示已按用户要求去掉；
       //   仍后台跑 countByDateRange，仅用于「计数成功才允许删除」的防误删门控（不再在 UI 显示行数）。
       // 重新评估输入：无效 → 禁用删除；有效 → 拉取计数，成功才启用删除（count 失败则保守禁用，避免未知行数下误删）。
+      //   🔴 count 带当前选中 tableKey：切表时本函数被重新调用 → 对新表重新计数，成功才解禁，杜绝拿旧表 count 删新表。
       async function refreshState() {
         if (!rangeValid()) {
           confirmBtn.disabled = true;
@@ -6577,15 +6617,24 @@
         const token = ++countToken;
         const s = startInput.value;
         const e = endInput.value;
+        const tableKey = currentTableKey();
         try {
-          const ret = await desktopApi.linkedTable.countByDateRange(s, e);
-          if (token !== countToken) return; // 已被更晚的输入覆盖，丢弃本次回填
+          const ret = await desktopApi.linkedTable.countByDateRange(s, e, tableKey);
+          if (token !== countToken) return; // 已被更晚的输入 / 切表覆盖，丢弃本次回填
           confirmBtn.disabled = !(ret && ret.status === 'ok');
         } catch (_err) {
           if (token !== countToken) return;
           confirmBtn.disabled = true;
         }
       }
+
+      // 切表：① 标题随表名切换；② 🔴 立即禁用删除（防切表瞬间用旧表 count 结果删新表）；③ 重新对新表 count（成功才解禁）。
+      tableSelect.addEventListener('change', () => {
+        titleEl.textContent = `删除${currentLabel()}数据`;
+        confirmBtn.disabled = true; // 先禁用：refreshState 异步 count 期间保持禁用，count 成功回填才解禁
+        countToken += 1; // 作废可能在途的旧表 count 回填
+        refreshState();
+      });
 
       startInput.addEventListener('change', refreshState);
       startInput.addEventListener('input', refreshState);
@@ -6599,32 +6648,79 @@
         openModal(createLinkedTableManagerDialog());
       });
 
-      // 删除：disable 防重复 → deleteByDateRange（🔴 不可逆）→ 成功重开管理弹窗 / 失败重开本删除弹框。
+      // 删除成功后链式弹「派生重建结果」框，再重开管理弹窗（仿导入完成框的派生弹框链，复用顶层 build 函数）。
+      //   gateway：无派生 → 直接重开管理弹窗。
+      //   fx：bocDerive（删后全量重算）→ 复用 buildBocDeriveSpec（needBankImport 在删除场景降级为 alert 提示，不引导导入打断删除流）。
+      //   bank-deposit：admDerive + bocBankDerive（删后 ADM/BOC bank 重建）→ 复用 buildAdmDeriveHtml / buildBocBankDeriveSpec。
+      function showDeriveChainThenReopen(tableKey, ret) {
+        const reopenManager = () => openModal(createLinkedTableManagerDialog());
+
+        if (tableKey === 'fx-settlement') {
+          const spec = buildBocDeriveSpec(ret && ret.bocDerive);
+          if (!spec) { reopenManager(); return; }
+          // 删除场景：needBankImport 仅作状态告知（库内无 BOC 银行数据），用 alert 展示，不走 confirm「现在导入」分支。
+          openModal(createAlertDialog(spec.html, {
+            skipLogReport: !spec.isError,
+            onConfirm: reopenManager
+          }));
+          return;
+        }
+
+        if (tableKey === 'bank-deposit') {
+          const admHtml = buildAdmDeriveHtml(ret && ret.admDerive);
+          const bocBankSpec = buildBocBankDeriveSpec(ret && ret.bocBankDerive);
+          // BOC bank 步（O1：成功静默，仅失败弹）。
+          const showBocBankStep = (next) => {
+            if (!bocBankSpec) { next(); return; }
+            openModal(createAlertDialog(bocBankSpec.html, {
+              skipLogReport: !bocBankSpec.isError,
+              onConfirm: next
+            }));
+          };
+          // ADM 步（成功提示 / 部分成功或失败报错）。
+          if (!admHtml) { showBocBankStep(reopenManager); return; }
+          const admDerive = ret && ret.admDerive;
+          const admIsError = admDerive && (!admDerive.created
+            || (Array.isArray(admDerive.unmatched) && admDerive.unmatched.length > 0));
+          openModal(createAlertDialog(admHtml, {
+            skipLogReport: !admIsError,
+            onConfirm: () => showBocBankStep(reopenManager)
+          }));
+          return;
+        }
+
+        // gateway-bill（缺省）：无派生联动。
+        reopenManager();
+      }
+
+      // 删除：disable 防重复 → deleteByDateRange(带 tableKey)（🔴 不可逆）→ 成功弹文案 + 派生链 / 失败重开本删除弹框（保留选中表）。
       confirmBtn.addEventListener('click', async () => {
         if (!rangeValid()) return;
         confirmBtn.disabled = true;
         const s = startInput.value;
         const e = endInput.value;
+        const tableKey = currentTableKey();
+        const label = currentLabel();
         let ret;
         try {
-          ret = await desktopApi.linkedTable.deleteByDateRange(s, e);
+          ret = await desktopApi.linkedTable.deleteByDateRange(s, e, tableKey);
         } catch (err) {
           openModal(createAlertDialog(`删除失败：${err?.message || '未知错误'}`, {
-            onConfirm: () => openModal(createLinkedTableDeleteRangeDialog())
+            onConfirm: () => openModal(createLinkedTableDeleteRangeDialog(tableKey))
           }));
           return;
         }
         if (ret && ret.status === 'ok') {
           const deleted = Number(ret.deleted) || 0;
-          openModal(createAlertDialog(`已删除 ${deleted} 行网关对账单数据。`, {
+          openModal(createAlertDialog(`已删除 ${deleted} 行${label}数据。`, {
             skipLogReport: true,
-            onConfirm: () => openModal(createLinkedTableManagerDialog())
+            onConfirm: () => showDeriveChainThenReopen(tableKey, ret)
           }));
           return;
         }
         const msg = ret && ret.message ? ret.message : '未知错误';
         openModal(createAlertDialog(`删除失败：${msg}`, {
-          onConfirm: () => openModal(createLinkedTableDeleteRangeDialog())
+          onConfirm: () => openModal(createLinkedTableDeleteRangeDialog(tableKey))
         }));
       });
 
