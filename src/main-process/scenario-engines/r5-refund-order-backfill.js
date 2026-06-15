@@ -237,6 +237,24 @@ function matchCustomerRefTwoHop(bankRow, refundCands, depositRows, depIndex) {
   return hits;
 }
 
+// F-PERF：入金表双 Map 索引（一次性构建，4 条二跳路径复用；入金表可达 65 万行，O(n) find → O(1) 查）。
+//   byReconId/byChannelOrderNo：normalizeCellValue(dep[key]) → dep[]（同键多值，保留插入序，与线性 find「首条命中」对齐）。
+//   空键（归一后 ''）不入索引（线性 find 也要求 dv !== ''）→ 行为字节级一致。
+function buildDepIndex(deps) {
+  const byReconId = new Map();
+  const byChannelOrderNo = new Map();
+  const addTo = (map, key, dep) => {
+    if (key === '') return;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(dep);
+  };
+  for (const dep of (Array.isArray(deps) ? deps : [])) {
+    addTo(byReconId, normalizeCellValue(dep.ReconciliationId), dep);
+    addTo(byChannelOrderNo, normalizeCellValue(dep.ChannelOrderNo), dep);
+  }
+  return { byReconId, byChannelOrderNo };
+}
+
 // 入金行双键 OR 查找（ReconId / ChannelOrderNo == payNo）。
 //   depIndex 存在 → byReconId/byChannelOrderNo 两 Map 并集首条；否则 depositRows 线性扫（结果一致）。
 function lookupDepositByKeys(payNo, deps, depIndex) {
@@ -503,6 +521,8 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
   const safeBankRows = Array.isArray(bankRows) ? bankRows : [];
   const safeRefundRows = Array.isArray(refundOrderRows) ? refundOrderRows : [];
   const safeDepositRows = Array.isArray(depositRows) ? depositRows : [];
+  // F-PERF：入金表双 Map 索引一次性构建（4 条二跳路径复用；入金表可达 65 万行）。
+  const depIndex = buildDepIndex(safeDepositRows);
   const isFundTypeChanged = typeof options.isFundTypeChanged === 'function'
     ? options.isFundTypeChanged
     : () => false;
@@ -579,6 +599,7 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
       bankGroup,
       refundGroup,
       depositRows: safeDepositRows,
+      depIndex, // F-PERF：双 Map 索引（二跳路径复用）
       usedBankRowId,
       usedRefundIdx,
       refundIdOf,
@@ -832,6 +853,8 @@ module.exports = {
   // R3：CustomerRef 二跳共享函数 + 入金行双键查找（单测精确覆盖）
   matchCustomerRefTwoHop,
   lookupDepositByKeys,
+  // F-PERF：入金表双 Map 索引（单测「索引版与线性版一致」覆盖）
+  buildDepIndex,
   // R2：S2b 附言包含入金 CustomerRef（单测精确覆盖）
   matchMemoContainsDepositRef,
   matchS3,

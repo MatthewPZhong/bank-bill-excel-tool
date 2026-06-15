@@ -708,6 +708,67 @@ test.describe('R6：S3c DTD+FOR+币种 二跳（模糊）', () => {
 });
 
 // ======================================================================
+// F-PERF depIndex：入金表双 Map 索引与线性版结果一致
+// ======================================================================
+test.describe('F-PERF：depIndex 双 Map 索引 vs 线性扫一致', () => {
+  test('buildDepIndex：双键索引、空键不入、同键多值保留插入序', () => {
+    const deps = [
+      deposit({ BizId: 'D1', ReconciliationId: 'R1', ChannelOrderNo: 'C1' }),
+      deposit({ BizId: 'D2', ReconciliationId: 'R1', ChannelOrderNo: '' }), // 同 ReconId R1（多值）；ChannelOrderNo 空（不入）
+      deposit({ BizId: 'D3', ReconciliationId: '', ChannelOrderNo: 'C3' })  // ReconId 空（不入）
+    ];
+    const idx = E.buildDepIndex(deps);
+    assert.equal(idx.byReconId.get('R1').length, 2, 'R1 同键两值');
+    assert.equal(idx.byReconId.get('R1')[0].BizId, 'D1', '保留插入序');
+    assert.equal(idx.byReconId.has(''), false, '空 ReconId 不入索引');
+    assert.equal(idx.byChannelOrderNo.has(''), false, '空 ChannelOrderNo 不入索引');
+    assert.equal(idx.byChannelOrderNo.get('C3')[0].BizId, 'D3');
+  });
+
+  test('lookupDepositByKeys：索引版 == 线性版（ReconId 命中 / ChannelOrderNo 命中 / 未命中）', () => {
+    const deps = [
+      deposit({ BizId: 'D1', ReconciliationId: 'R1', CustomerRef: 'X' }),
+      deposit({ BizId: 'D2', ChannelOrderNo: 'C2', CustomerRef: 'Y' })
+    ];
+    const idx = E.buildDepIndex(deps);
+    for (const key of ['R1', 'C2', 'NOPE']) {
+      const lin = E.lookupDepositByKeys(key, deps, undefined);
+      const indexed = E.lookupDepositByKeys(key, deps, idx);
+      assert.deepEqual(indexed, lin, `key=${key} 索引版与线性版应一致`);
+    }
+  });
+
+  test('matchCustomerRefTwoHop：索引版 hits == 线性版 hits（byte 级）', () => {
+    const b = bank({ _rowId: 'b1', Channel: 'JPM', '地区': 'US', CustomerRef: 'CR-1' });
+    const ros = [
+      refund({ '流水号': 'SN-A', '银行打款流水号': 'PAYNO-1' }),
+      refund({ '流水号': 'SN-B', '银行打款流水号': 'PAYNO-2' })
+    ];
+    const deps = [
+      deposit({ BizId: 'D1', ReconciliationId: 'PAYNO-1', CustomerRef: 'CR-1' }),
+      deposit({ BizId: 'D2', ChannelOrderNo: 'PAYNO-2', CustomerRef: 'CR-1' })
+    ];
+    const lin = E.matchCustomerRefTwoHop(b, ros, deps, undefined);
+    const indexed = E.matchCustomerRefTwoHop(b, ros, deps, E.buildDepIndex(deps));
+    assert.deepEqual(indexed, lin);
+    assert.equal(indexed.length, 2);
+  });
+
+  test('全链路：索引（引擎默认）命中结果与显式线性二跳一致（JPM-US 回填）', () => {
+    const b = [bank({ _rowId: 'b1', Channel: 'JPM', '地区': 'US', CustomerRef: 'CR-9' })];
+    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAYNO-9' })];
+    const dep = [deposit({ BizId: 'BIZ-9', ReconciliationId: 'PAYNO-9', CustomerRef: 'CR-9' })];
+    const res = run(b, r, dep); // 引擎内部已用 depIndex
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.hitDepositBizIds[0], 'BIZ-9');
+    // 线性二跳子函数对照
+    const lin = E.matchCustomerRefTwoHop(b[0], r, dep, undefined);
+    assert.equal(lin.length, 1);
+    assert.equal(lin[0]._depositBizId, 'BIZ-9');
+  });
+});
+
+// ======================================================================
 // ⑤ 1v1 双向消费
 // ======================================================================
 test.describe('⑤ 1v1 双向消费', () => {
