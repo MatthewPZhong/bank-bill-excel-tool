@@ -354,11 +354,12 @@ test('⑧ writer 能消费引擎真实产出（backfillRows + unmatchedRows 异�
   const s1 = wb.getWorksheet('回填模板');
   const s2 = wb.getWorksheet('未匹配报错');
 
-  // sheet1 第 1 条回填行：退款单号 = SERIAL_MATCH、状态 = SUCCESS、F 命中详情非空
-  //   （命中类型列由 O1/commit② 引擎填充，端到端值断言见 r5 引擎单测 O1 段）
+  // sheet1 第 1 条回填行：退款单号 = SERIAL_MATCH、状态 = SUCCESS、E 命中类型 + F 命中详情非空
   assert.strictEqual(s1.getRow(2).getCell(1).value, 'SERIAL_MATCH', 'sheet1 退款单号应为命中 refund 流水号');
   assert.strictEqual(s1.getRow(2).getCell(2).value, 'SUCCESS', 'sheet1 状态应回填 SUCCESS');
+  const hitTypeColIdx = REFUND_TEMPLATE_HEADERS.indexOf('命中类型') + 1;
   const detailColIdx = REFUND_TEMPLATE_HEADERS.indexOf('匹配命中详情') + 1;
+  assert.strictEqual(s1.getRow(2).getCell(hitTypeColIdx).value, '精准命中', 'sheet1 E 列命中类型（S1 → 精准命中）');
   assert.ok(s1.getRow(2).getCell(detailColIdx).value, 'sheet1 F 列命中详情应非空');
 
   // sheet2 收尾提示行（②形状）：结果类型 = 未匹配-提示、退款单号 = SERIAL_NOHIT

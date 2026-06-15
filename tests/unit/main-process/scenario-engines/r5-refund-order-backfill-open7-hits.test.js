@@ -163,7 +163,8 @@ test.describe('② hitDepositBizIds 收集', () => {
     const r = [refund({ 'valueDate': '2026-06-02' })]; // 容差内、S1~S3 全不命中 → 落 S4
     const res = run(b, r);
     assert.equal(res.backfillRows.length, 1);
-    assert.match(res.backfillRows[0]['匹配命中详情'], /valueDate/); // 确认走 S4
+    // refund-backfill-rules-v2 O2：S4 命中详情改固定串「命中唯一值:退款提交日期+...」（确认走 S4）
+    assert.match(res.backfillRows[0]['匹配命中详情'], /命中唯一值:退款提交日期/); // 确认走 S4
     assert.deepEqual(res.hitDepositBizIds, []);
   });
 

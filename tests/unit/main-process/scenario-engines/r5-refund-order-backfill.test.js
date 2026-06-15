@@ -25,7 +25,10 @@ const {
   matchS3,
   resolveHits,
   RESULT_ERROR,
-  RESULT_NOTICE
+  RESULT_NOTICE,
+  HIT_TYPE_PRECISE,
+  HIT_TYPE_FUZZY,
+  S4_DETAIL_TEXT
 } = E;
 const { MTX_FEATURE, T54SWIC_FEATURE } = require('../../../../src/constants/refund-backfill-fields');
 const { buildFeatureRegex } = require('../../../../src/main-process/scenario-engines/c1-extract-recon-id');
@@ -418,23 +421,80 @@ test.describe('⑤ 1v1 双向消费', () => {
 // ⑥ 命中详情两句式文案
 // ======================================================================
 test.describe('⑥ 命中详情两句式文案', () => {
-  test('bank↔refund 句式精确', () => {
+  test('bank↔refund 句式精确（O2：无「匹配成功:」前缀）', () => {
     const res = run([bank({ _rowId: 'b1', ChannelOrderNo: 'PAY1' })], [refund({ '银行打款流水号': 'PAY1' })]);
     assert.equal(
       res.backfillRows[0]['匹配命中详情'],
-      '匹配成功:"银行对账单ChannelOrderNo里的PAY1"匹配上了"refund order银行打款流水号的PAY1"'
+      '"银行对账单ChannelOrderNo里的PAY1"匹配上了"refund order银行打款流水号的PAY1"'
     );
   });
 
-  test('bank↔入金表（JPM-US）句式精确', () => {
+  test('bank↔入金表（JPM-US）句式精确（O2：无「匹配成功:」前缀）', () => {
     const b = [bank({ _rowId: 'b1', Channel: 'JPM', '地区': 'US', CustomerRef: 'CR-9' })];
     const r = [refund({ '银行打款流水号': 'PAYNO-9' })];
     const dep = [deposit({ ReconciliationId: 'PAYNO-9', CustomerRef: 'CR-9' })];
     const res = run(b, r, dep);
     assert.equal(
       res.backfillRows[0]['匹配命中详情'],
-      '匹配成功:"银行对账单CustomerRef里的CR-9"匹配上了"银行对账单入金表CustomerRef的CR-9"'
+      '"银行对账单CustomerRef里的CR-9"匹配上了"银行对账单入金表CustomerRef的CR-9"'
     );
+  });
+});
+
+// ======================================================================
+// O1/O2 命中类型 + 文案（refund-backfill-rules-v2）
+// ======================================================================
+test.describe('O1 命中类型：精准层（S1/S2/S3）= 精准命中、S4 = 模糊命中', () => {
+  test('S1 命中 → 命中类型 = 精准命中', () => {
+    const res = run([bank({ _rowId: 'b1', ChannelOrderNo: 'PAY1' })], [refund({ '银行打款流水号': 'PAY1' })]);
+    assert.equal(res.backfillRows[0]['命中类型'], HIT_TYPE_PRECISE);
+  });
+
+  test('S2（MTX 附言包含）命中 → 命中类型 = 精准命中', () => {
+    const mtx = 'MTX1234567890123456789';
+    const res = run(
+      [bank({ _rowId: 'b1', Channel: 'CH', 'Extra Information': `付款 ${mtx}` })],
+      [refund({ '附言': `本笔 ${mtx} 退款` })]
+    );
+    assert.equal(res.backfillRows[0]['命中类型'], HIT_TYPE_PRECISE);
+  });
+
+  test('S3（按位）命中 → 命中类型 = 精准命中', () => {
+    const res = run([bank({ _rowId: 'b1', 'Drawee Name': '张三' })], [refund({ '付款人名称': '张三' })]);
+    assert.equal(res.backfillRows[0]['命中类型'], HIT_TYPE_PRECISE);
+  });
+
+  test('JPM-US 二跳命中 → 命中类型 = 精准命中', () => {
+    const b = [bank({ _rowId: 'b1', Channel: 'JPM', '地区': 'US', CustomerRef: 'CR-9' })];
+    const r = [refund({ '银行打款流水号': 'PAYNO-9' })];
+    const dep = [deposit({ ReconciliationId: 'PAYNO-9', CustomerRef: 'CR-9' })];
+    const res = run(b, r, dep);
+    assert.equal(res.backfillRows[0]['命中类型'], HIT_TYPE_PRECISE);
+  });
+
+  test('S4（日期容差）命中 → 命中类型 = 模糊命中', () => {
+    const res = run(
+      [bank({ _rowId: 'b1', BillDate: '2026-06-01' })],
+      [refund({ 'valueDate': '2026-06-05' })] // 差 4 天 → S4
+    );
+    assert.equal(res.backfillRows[0]['命中类型'], HIT_TYPE_FUZZY);
+  });
+});
+
+test.describe('O2 命中详情文案：去前缀 + S4 固定串', () => {
+  test('S1 命中详情无「匹配成功:」前缀', () => {
+    const res = run([bank({ _rowId: 'b1', ChannelOrderNo: 'PAY1' })], [refund({ '银行打款流水号': 'PAY1' })]);
+    assert.ok(!res.backfillRows[0]['匹配命中详情'].startsWith('匹配成功:'), '不应含「匹配成功:」前缀');
+    assert.ok(res.backfillRows[0]['匹配命中详情'].startsWith('"银行对账单'), '应以引号开头');
+  });
+
+  test('S4 命中详情 == 固定串「命中唯一值:退款提交日期+大账号+金额+币种」', () => {
+    const res = run(
+      [bank({ _rowId: 'b1', BillDate: '2026-06-01' })],
+      [refund({ 'valueDate': '2026-06-05' })]
+    );
+    assert.equal(res.backfillRows[0]['匹配命中详情'], S4_DETAIL_TEXT);
+    assert.equal(res.backfillRows[0]['匹配命中详情'], '命中唯一值:退款提交日期+大账号+金额+币种');
   });
 });
 

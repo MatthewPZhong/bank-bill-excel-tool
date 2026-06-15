@@ -44,6 +44,14 @@ const T54SWIC_RE = buildFeatureRegex(T54SWIC_FEATURE);  // /T54SWIC\d{6}/g
 const RESULT_ERROR = '报错-人工介入';
 const RESULT_NOTICE = '未匹配-提示';
 
+// 命中类型（O1：sheet1「命中类型」列两种值；= 策略层属性，精准层全在模糊层前由层序保证「精准优先」）。
+//   L1~L5（S1/S2/S2b/S3/S3b）= 精准命中；L6（S3c）/ S4 = 模糊命中。
+const HIT_TYPE_PRECISE = '精准命中';
+const HIT_TYPE_FUZZY = '模糊命中';
+
+// S4 命中详情固定文案（O2：✅ 2026-06-15 用户拍板；底层比对字段仍为 ro.valueDate，文案为业务展示叫法「退款提交日期」）。
+const S4_DETAIL_TEXT = '命中唯一值:退款提交日期+大账号+金额+币种';
+
 // 银行发生额绝对值 = |（Credit Amount || 0） − （Debit Amount || 0）|（与场景2 口径一致）
 //   任一非数值按 0；两者皆非数值 → 返回 0（非 null）
 function bankAmountAbs(bankRow) {
@@ -79,12 +87,12 @@ function groupBy(rows, keyFn) {
   return map;
 }
 
-// —— 命中详情两句式（§5.1.4，✅Q12 文案）——
+// —— 命中详情两句式（§5.1.4；O2：删「匹配成功:」前缀）——
 function detailBankToRo(bankField, bankVal, roField, roVal) {
-  return `匹配成功:"银行对账单${bankField}里的${normalizeCellValue(bankVal)}"匹配上了"refund order${roField}的${normalizeCellValue(roVal)}"`;
+  return `"银行对账单${bankField}里的${normalizeCellValue(bankVal)}"匹配上了"refund order${roField}的${normalizeCellValue(roVal)}"`;
 }
 function detailBankToDeposit(bankField, bankVal, depField, depVal) {
-  return `匹配成功:"银行对账单${bankField}里的${normalizeCellValue(bankVal)}"匹配上了"银行对账单入金表${depField}的${normalizeCellValue(depVal)}"`;
+  return `"银行对账单${bankField}里的${normalizeCellValue(bankVal)}"匹配上了"银行对账单入金表${depField}的${normalizeCellValue(depVal)}"`;
 }
 
 // —— OPEN-7（T5b-1）跨期重复命中：BizId 归一 + 提醒文案 + 跨期判定纯函数（与 detailBankToDeposit 同文件，文案/口径单一真相）——
@@ -121,15 +129,18 @@ function pickStaleHits(hitBizIds, markerMap, runId) {
   return out;
 }
 
-// —— 回填动作（§5.1.3）：1 条命中 refund order + 配对银行行 → 1 行回填模板（含 E 列详情 + F~N 银行 9 字段）——
+// —— 回填动作（§5.1.3）：1 条命中 refund order + 配对银行行 → 1 行回填模板（固定 6 列 + 银行 10 字段 + 中台 15 字段）——
+//   hitType：O1 命中类型（精准/模糊命中），= 命中所在策略层属性，经 consumeAndBackfill 透传（写「命中类型」列）。
 //   bridgeDepositBizId：OPEN-7（T5b-1）该回填行来源的桥接入金表 BizId（matchJpmUs 命中时非空，其他策略层为 undefined）。
 //     产物挂内部字段 `_bridgeDepositBizId`（下划线前缀；T5b-2 据此精确定位该回填行注入跨期命中提醒；不进对外回填模板列）。
-function buildBackfillRow(refundRow, bankRow, detailText, bridgeDepositBizId) {
+//   🔴 hitType 参数位置在 bridgeDepositBizId 之前（O1 新增；不破坏 OPEN-7 测试对 `_bridgeDepositBizId` 的断言）。
+function buildBackfillRow(refundRow, bankRow, detailText, hitType, bridgeDepositBizId) {
   const row = {
     '退款单号': normalizeCellValue(refundRow[M.backfill.fromRoSerialNo]),
     '状态': M.backfill.statusSuccess,
     '渠道流水号': normalizeCellValue(bankRow[M.backfill.fromBankReconId]),
     '渠道退款时间': bankRow[M.backfill.fromBankBillDate],
+    '命中类型': hitType, // O1：精准命中 / 模糊命中
     '匹配命中详情': detailText
   };
   // 银行段：配对银行行 10 字段原数据（按 REFUND_BANK_COLUMNS 顺序；保留原始值不 normalize，与导出口径一致）
@@ -306,7 +317,7 @@ function matchS4(bankRow, refundCands) {
       hits.push({
         refundRow: ro,
         dayDiff,
-        detail: detailBankToRo(M.s4.bankDate, bankRow[M.s4.bankDate], M.s4.roDate, ro[M.s4.roDate])
+        detail: S4_DETAIL_TEXT // O2：S4 命中详情固定文案（底层比对仍 ro.valueDate）
       });
     }
   }
@@ -484,13 +495,15 @@ function runStrategiesForGroup(ctx) {
   };
 
   // —— S1~S3：每个策略批量解析（SPEC §7.2）——
+  //   O1：每层带 hitType（精准/模糊命中）；S1~S3 均为精准命中（L1/L2/L4，精准层在模糊层前）。
   const strategyChain = [
-    (bankRow, cands) => matchS1(bankRow, cands),
-    (bankRow, cands) => matchS2(bankRow, cands, depositRows),
-    (bankRow, cands) => matchS3(bankRow, cands)
+    { run: (bankRow, cands) => matchS1(bankRow, cands), hitType: HIT_TYPE_PRECISE },
+    { run: (bankRow, cands) => matchS2(bankRow, cands, depositRows), hitType: HIT_TYPE_PRECISE },
+    { run: (bankRow, cands) => matchS3(bankRow, cands), hitType: HIT_TYPE_PRECISE }
   ];
 
-  for (const strat of strategyChain) {
+  for (const layer of strategyChain) {
+    const strat = layer.run;
     // 未 settle 的 bank（保持 BillDate 升序）。
     const unsettledBanks = orderedBank.filter((b) => !settledBankRowId.has(b._rowId));
     if (unsettledBanks.length === 0) break;
@@ -549,7 +562,7 @@ function runStrategiesForGroup(ctx) {
       }
 
       // 严格 1↔1 互配（bank 唯一命中 r 且 r 也仅被该 bank 命中）→ 回填，双向消费。
-      consumeAndBackfill(bankRow, hits[0], { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows, hitDepositBizIdSet });
+      consumeAndBackfill(bankRow, hits[0], layer.hitType, { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows, hitDepositBizIdSet });
       settledBankRowId.add(bankRow._rowId);
     }
 
@@ -567,7 +580,8 @@ function runStrategiesForGroup(ctx) {
     const inTol = matchS4(bankRow, refundsForS4.filter((ro) => isRefundAvailable(ro)));
     if (inTol.length > 0) {
       // S4 命中的 hit 无 _depositBizId（非入金表来源）→ consumeAndBackfill 内自然不收集，不污染集合。
-      consumeAndBackfill(bankRow, inTol[0], { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows, hitDepositBizIdSet });
+      //   O1：S4 = 模糊命中（HIT_TYPE_FUZZY）。
+      consumeAndBackfill(bankRow, inTol[0], HIT_TYPE_FUZZY, { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows, hitDepositBizIdSet });
       continue;
     }
 
@@ -626,10 +640,11 @@ function minDayDiffToSet(bankRow, refundSet) {
 }
 
 // 消费 + 产回填行（严格 1v1 双向消费）
+//   hitType（O1）：命中所在策略层属性（精准/模糊命中），透传给 buildBackfillRow 写「命中类型」列。
 //   OPEN-7（T5b-1）：若 hit 带 `_depositBizId`（仅 matchJpmUs 命中入金表行时有，且非空）→ 收集进
 //     ctx.hitDepositBizIdSet（去重 Set，runRound5 维护）+ 透传给 buildBackfillRow 标记该回填行来源桥接 BizId。
 //     其他策略层(S1/S4 等)的 hit 无 `_depositBizId` → 跳过 undefined/空，不污染集合（资金红线：来源口径精确）。
-function consumeAndBackfill(bankRow, hit, ctx) {
+function consumeAndBackfill(bankRow, hit, hitType, ctx) {
   const { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows, hitDepositBizIdSet } = ctx;
   usedBankRowId.add(bankRow._rowId);
   usedRefundIdx.add(refundIdOf(hit.refundRow));
@@ -637,7 +652,7 @@ function consumeAndBackfill(bankRow, hit, ctx) {
   if (hitDepositBizIdSet && bridgeBizId !== undefined && bridgeBizId !== null && bridgeBizId !== '') {
     hitDepositBizIdSet.add(bridgeBizId);
   }
-  backfillRows.push(buildBackfillRow(hit.refundRow, bankRow, hit.detail, bridgeBizId));
+  backfillRows.push(buildBackfillRow(hit.refundRow, bankRow, hit.detail, hitType, bridgeBizId));
 }
 
 // v3.0.0 需求3：退款回填「候选预检」只读 helper（与 c3-gateway-recon-join.js 的 countC3BankCandidates 对称）。
@@ -676,5 +691,9 @@ module.exports = {
   buildStaleHitReminder,
   pickStaleHits,
   RESULT_ERROR,
-  RESULT_NOTICE
+  RESULT_NOTICE,
+  // O1/O2：命中类型常量 + S4 固定详情文案（单测精确断言）
+  HIT_TYPE_PRECISE,
+  HIT_TYPE_FUZZY,
+  S4_DETAIL_TEXT
 };
