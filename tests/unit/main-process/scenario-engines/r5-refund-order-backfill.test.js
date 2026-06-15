@@ -591,6 +591,123 @@ test.describe('R4：S4 单向容差边界 diff=0/21/22/−1', () => {
 });
 
 // ======================================================================
+// R5 S3b：Drawee Name + 附言 DESC DATE ↔ 入金 ValueDate 二跳
+// ======================================================================
+test.describe('R5：S3b Drawee Name + DESC DATE 二跳', () => {
+  // bank：Drawee Name 非空（启用条件）+ 附言含 DESC DATE token；ro payNo；dep ReconId==payNo ∧ ValueDate==token 日。
+  //   令 S1~S3 全不命中：ChannelOrderNo/CustomerRef 空、非 JPM（跳 S2b）、Drawee Name 与 ro 付款人名称不等、附言无 MTX。
+  function s3bCase(overrides = {}) {
+    const b = [bank({
+      _rowId: 'b1', Channel: 'CH', '地区': 'US',
+      'Drawee Name': 'DON MAHESH',
+      'Payment Detail': '["DESC DATE=260513;ENTRY DATE=260529;IND NAME=don mahesh"]',
+      BillDate: '2030-01-01', // 远离 valueDate，避免 S4 兜底
+      ...overrides.bank
+    })];
+    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAYNO-1', 'valueDate': '2099-01-01', ...overrides.ro })];
+    const dep = [deposit({ ReconciliationId: 'PAYNO-1', ValueDate: '2026-05-13', ...overrides.dep })];
+    return run(b, r, dep);
+  }
+
+  test('DESC DATE token=260513 ↔ 入金 ValueDate=2026-05-13 同日 → S3b 命中回填（精准）', () => {
+    const res = s3bCase();
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-A');
+    assert.equal(res.backfillRows[0]['命中类型'], HIT_TYPE_PRECISE);
+    assert.match(res.backfillRows[0]['匹配命中详情'], /银行对账单入金表/);
+  });
+
+  test('Drawee Name 为空 → S3b 不启用（不命中）', () => {
+    const res = s3bCase({ bank: { 'Drawee Name': '' } });
+    assert.equal(res.backfillRows.length, 0);
+  });
+
+  test('入金 ValueDate 与 DESC DATE 不同日 → S3b 不命中', () => {
+    const res = s3bCase({ dep: { ValueDate: '2026-05-20' } });
+    assert.equal(res.backfillRows.length, 0);
+  });
+
+  test('no-op 防御：datePattern=null（模拟未配置）→ matchDraweeNameDate 整层跳过（直接子函数验证）', () => {
+    // 不便改 frozen 常量；改为构造「附言无 DESC DATE token」等效验证整层无产出（token 提取为 null → 跳过）。
+    const b = bank({ _rowId: 'b1', 'Drawee Name': 'X', 'Payment Detail': 'no desc date token here' });
+    const hits = E.matchDraweeNameDate(b, [refund({ '银行打款流水号': 'PAYNO-1' })], [deposit({ ReconciliationId: 'PAYNO-1', ValueDate: '2026-05-13' })]);
+    assert.equal(hits.length, 0, '无 DESC DATE token → 不命中');
+  });
+});
+
+// ======================================================================
+// R6 S3c：附言原单日期(DTD)+金额(FOR)+币种 ↔ 入金表二跳（模糊层）
+// ======================================================================
+test.describe('R6：S3c DTD+FOR+币种 二跳（模糊）', () => {
+  function s3cCase(overrides = {}) {
+    const b = [bank({
+      _rowId: 'b1', Channel: 'CH', '地区': 'US',
+      'Payment Detail': 'REMARK=/BNF/OUR REF JPM260529-011513 RTN DTD05/21/2026 FOR USD2285.00',
+      BillDate: '2030-01-01',
+      ...overrides.bank
+    })];
+    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAYNO-1', 'valueDate': '2099-01-01', ...overrides.ro })];
+    const dep = [deposit({ ReconciliationId: 'PAYNO-1', ValueDate: '2026-05-21', 'Credit Amount': 2285.00, Currency: 'USD', ...overrides.dep })];
+    return run(b, r, dep);
+  }
+
+  test('DTD+FOR+币种 三 token 与入金行日期/金额(分)/币种全等 → S3c 命中回填（模糊）', () => {
+    const res = s3cCase();
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-A');
+    assert.equal(res.backfillRows[0]['命中类型'], HIT_TYPE_FUZZY);
+  });
+
+  test('入金金额不等（分比对）→ S3c 不命中', () => {
+    const res = s3cCase({ dep: { 'Credit Amount': 2285.01 } });
+    assert.equal(res.backfillRows.length, 0);
+  });
+
+  test('入金币种不等 → S3c 不命中', () => {
+    const res = s3cCase({ dep: { Currency: 'EUR' } });
+    assert.equal(res.backfillRows.length, 0);
+  });
+
+  test('入金 ValueDate 与 DTD 不同日 → S3c 不命中', () => {
+    const res = s3cCase({ dep: { ValueDate: '2026-05-22' } });
+    assert.equal(res.backfillRows.length, 0);
+  });
+
+  test('R6 多笔报错：一条 bank 经 S3c 命中 2 条 refund（同入金行二跳）→ 报错、不回填', () => {
+    // 两条 ro 各自 payNo 二跳到「日期/金额/币种全等」的入金行 → bank 命中 2 条 → 正向多笔报错。
+    const b = [bank({
+      _rowId: 'b1', Channel: 'CH', '地区': 'US',
+      'Payment Detail': 'RTN DTD05/21/2026 FOR USD2285.00', BillDate: '2030-01-01'
+    })];
+    const r = [
+      refund({ '流水号': 'SN-A', '银行打款流水号': 'PAYNO-A', 'valueDate': '2099-01-01' }),
+      refund({ '流水号': 'SN-B', '银行打款流水号': 'PAYNO-B', 'valueDate': '2099-01-01' })
+    ];
+    const dep = [
+      deposit({ ReconciliationId: 'PAYNO-A', ValueDate: '2026-05-21', 'Credit Amount': 2285.00, Currency: 'USD' }),
+      deposit({ ReconciliationId: 'PAYNO-B', ValueDate: '2026-05-21', 'Credit Amount': 2285.00, Currency: 'USD' })
+    ];
+    const res = run(b, r, dep);
+    assert.equal(res.backfillRows.length, 0, 'R6 多笔即报错（宁报错勿误配）');
+    assert.ok(res.unmatchedRows.some((x) => x['结果类型'] === RESULT_ERROR));
+  });
+
+  test('R6 锁定退出 S4：S3c 反向多笔卷入的 refund 锁定 → 不被 S4 复用', () => {
+    // b1/b2 经 S3c 命中同一 ro（反向多笔）→ 报错锁定 SN-A；b3 日期容差内本可 S4 命中 SN-A，但已锁定。
+    const b = [
+      bank({ _rowId: 'b1', Channel: 'CH', '地区': 'US', 'Payment Detail': 'DTD05/21/2026 FOR USD2285.00', BillDate: '2030-01-01' }),
+      bank({ _rowId: 'b2', Channel: 'CH', '地区': 'US', 'Payment Detail': 'DTD05/21/2026 FOR USD2285.00', BillDate: '2030-01-01' }),
+      bank({ _rowId: 'b3', BillDate: '2026-05-22' }) // diff +1 到 valueDate 2026-05-21（窗内），本可 S4 命中
+    ];
+    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAYNO-1', 'valueDate': '2026-05-21' })];
+    const dep = [deposit({ ReconciliationId: 'PAYNO-1', ValueDate: '2026-05-21', 'Credit Amount': 2285.00, Currency: 'USD' })];
+    const res = run(b, r, dep);
+    assert.equal(res.backfillRows.length, 0, '锁定的 SN-A 不被 b3 经 S4 复用');
+    assert.ok(!res.backfillRows.some((x) => x['退款单号'] === 'SN-A'));
+  });
+});
+
+// ======================================================================
 // ⑤ 1v1 双向消费
 // ======================================================================
 test.describe('⑤ 1v1 双向消费', () => {

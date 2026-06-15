@@ -75,6 +75,27 @@ const REFUND_BACKFILL_FIELD_MAP = Object.freeze({
     Object.freeze({ roKey: '付款卡号', bankField: 'Drawee CardNo' }),
     Object.freeze({ roKey: '虚拟卡号', bankField: 'Payee CardNo' })
   ]),
+  // —— S3b（R5 新层，L5 精准）：Drawee Name + 附言 DESC DATE token ↔ 入金 ValueDate 二跳（D1/D2/D3 定稿）——
+  //   D1：DESC DATE（非 ENTRY DATE），YYMMDD，世纪固定 20YY；D2：Drawee Name 仅作启用条件；D3：入金侧取 dep.ValueDate。
+  //   datePattern=null → 整层 no-op（防御保留）。
+  s3b: Object.freeze({
+    draweeNameField: 'Drawee Name',                          // 启用条件字段（非空才进 S3b）
+    memoFields: Object.freeze(['Payment Detail', 'Extra Information']), // 附言来源（提 DESC DATE）
+    datePattern: /DESC\s*DATE\s*=\s*(\d{6})/,                // YYMMDD（取 DESC DATE）
+    depositDateField: 'ValueDate'                            // 入金侧日期列（sameDay 比对）
+  }),
+  // —— S3c（R6 新层，L6 模糊）：附言 原单日期+金额+币种 三 token ↔ 入金表二跳（D4/D3/D5 定稿）——
+  //   D4：原单日期 DTD dd/mm/yyyy、金额 FOR USD|AMT 数值、币种 USD；D5：不硬 gate dep.CustomerRef==NOTPROVIDED。
+  //   任一 pattern=null → 整层 no-op（防御保留）。金额一律分比对（Math.round(amt*100)）。
+  s3c: Object.freeze({
+    memoFields: Object.freeze(['Payment Detail', 'Extra Information']),
+    datePattern: /DTD\s*(\d{2}\/\d{2}\/\d{4})/,              // dd/mm/yyyy
+    amountPattern: /FOR\s*(?:USD|AMT)\s*([\d.]+)/,           // 金额（FOR USD#### / FOR AMT####）
+    currency: 'USD',                                          // 币种（实测 USD）
+    depositDateField: 'ValueDate',
+    depositAmountField: 'Credit Amount',                     // 入金行金额列（分比对）
+    depositCurrencyField: 'Currency'
+  }),
   // —— S4 金额币种日期（R4：单向 0≤bank.BillDate−ro.valueDate≤21；文案口径=退款提交日期（=底层 valueDate））——
   s4: Object.freeze({ bankDate: 'BillDate', roDate: 'valueDate', toleranceDays: 21 }),
   // —— JPM（§5.5）——

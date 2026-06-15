@@ -182,6 +182,26 @@ test.describe('REFUND_BACKFILL_FIELD_MAP — 跨表映射单一真相', () => {
     assert.equal(REFUND_BACKFILL_FIELD_MAP.s4.toleranceDays, 21);
   });
 
+  test('S3b（R5）：draweeNameField / DESC DATE 正则 / depositDateField=ValueDate', () => {
+    const s3b = REFUND_BACKFILL_FIELD_MAP.s3b;
+    assert.equal(s3b.draweeNameField, 'Drawee Name');
+    assert.deepEqual([...s3b.memoFields], ['Payment Detail', 'Extra Information']);
+    assert.equal(s3b.datePattern.source, 'DESC\\s*DATE\\s*=\\s*(\\d{6})');
+    assert.equal(s3b.depositDateField, 'ValueDate');
+    assert.ok(Object.isFrozen(s3b));
+  });
+
+  test('S3c（R6）：DTD/FOR 正则 + currency=USD + 入金日期/金额/币种列', () => {
+    const s3c = REFUND_BACKFILL_FIELD_MAP.s3c;
+    assert.equal(s3c.datePattern.source, 'DTD\\s*(\\d{2}\\/\\d{2}\\/\\d{4})');
+    assert.equal(s3c.amountPattern.source, 'FOR\\s*(?:USD|AMT)\\s*([\\d.]+)');
+    assert.equal(s3c.currency, 'USD');
+    assert.equal(s3c.depositDateField, 'ValueDate');
+    assert.equal(s3c.depositAmountField, 'Credit Amount');
+    assert.equal(s3c.depositCurrencyField, 'Currency');
+    assert.ok(Object.isFrozen(s3c));
+  });
+
   test('JPM 映射（✅Q7/Q8 + D8 中性命名）：HK 单字段=银行打款流水号 / 二跳键 OR + CustomerRef', () => {
     const jpm = REFUND_BACKFILL_FIELD_MAP.jpm;
     assert.equal(jpm.channelValue, 'JPM');

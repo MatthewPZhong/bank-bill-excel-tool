@@ -24,7 +24,7 @@ const {
   normalizeCellValue,
   parseNumber
 } = require('./engine-utils');
-const { toDate, signedDayDiff } = require('./engine-date-utils');
+const { toDate, sameDay, signedDayDiff } = require('./engine-date-utils');
 const { buildFeatureRegex } = require('./c1-extract-recon-id');
 const {
   REFUND_BACKFILL_FIELD_MAP: M,
@@ -370,6 +370,90 @@ function matchS3(bankRow, refundCands) {
   return hits;
 }
 
+// 从 bank 多个附言字段里按 pattern 提第一个捕获组（capture group 1）；无 → null。
+//   pattern 非 global（带捕获组），每次 new RegExp(source) 重建避免 lastIndex 副作用。
+function extractFirstCapture(bankRow, memoFields, pattern) {
+  if (!pattern) return null;
+  for (const field of memoFields) {
+    const s = normalizeCellValue(bankRow[field]);
+    if (!s) continue;
+    const m = s.match(new RegExp(pattern.source, pattern.flags.replace('g', '')));
+    if (m && m[1]) return m[1];
+  }
+  return null;
+}
+
+// 6 位 YYMMDD → 'YYYY-MM-DD'（世纪固定 20YY，D1）；非 6 位数字 → null。
+function yymmddToDateStr(token) {
+  if (!/^\d{6}$/.test(token)) return null;
+  return `20${token.slice(0, 2)}-${token.slice(2, 4)}-${token.slice(4, 6)}`;
+}
+
+// S3b（R5 新层，L5 精准）：Drawee Name 非空 ∧ 附言 DESC DATE token（YYMMDD）↔ 入金 ValueDate sameDay 二跳（D1/D2/D3）。
+//   硬锚点：payNo 二跳等值（lookupDepositByKeys）+ DESC DATE ↔ dep.ValueDate 等日双重收口（精准）。
+//   no-op 防御：datePattern 为 null → 整层跳过。OPEN-7：命中桥接入金行 → hit 附 _depositBizId。
+function matchDraweeNameDate(bankRow, refundCands, depositRows, depIndex) {
+  const cfg = M.s3b;
+  if (!cfg || !cfg.datePattern) return []; // no-op 防御
+  // D2：Drawee Name 仅作启用条件（非空才进 S3b）。
+  if (normalizeCellValue(bankRow[cfg.draweeNameField]) === '') return [];
+  const token = extractFirstCapture(bankRow, cfg.memoFields, cfg.datePattern);
+  if (!token) return [];
+  const tokenDateStr = yymmddToDateStr(token);
+  if (!tokenDateStr) return [];
+  const deps = Array.isArray(depositRows) ? depositRows : [];
+  const hits = [];
+  for (const ro of refundCands) {
+    const payNo = normalizeCellValue(ro[M.jpm.usRoKey]);
+    if (payNo === '') continue;
+    const dep = lookupDepositByKeys(payNo, deps, depIndex);
+    if (!dep) continue;
+    if (sameDay(dep[cfg.depositDateField], tokenDateStr)) {
+      hits.push({
+        refundRow: ro,
+        detail: detailBankToDeposit(cfg.draweeNameField + '+DESC DATE', tokenDateStr, cfg.depositDateField, normalizeCellValue(dep[cfg.depositDateField])),
+        _depositBizId: normalizeBizIdKey(dep.BizId)
+      });
+    }
+  }
+  return hits;
+}
+
+// S3c（R6 新层，L6 模糊）：附言 原单日期(DTD)+金额(FOR)+币种 三 token ↔ 入金表二跳（D4/D3/D5）。
+//   收口：payNo 二跳 → 入金行日期 sameDay(DTD) ∧ 入金行金额(分比对)==FOR ∧ dep.Currency==币种（模糊）。
+//   no-op 防御：datePattern/amountPattern 任一为 null → 整层跳过。金额分比对（Math.round(amt*100)）。
+function matchMemoDateAmount(bankRow, refundCands, depositRows, depIndex) {
+  const cfg = M.s3c;
+  if (!cfg || !cfg.datePattern || !cfg.amountPattern) return []; // no-op 防御
+  const dtdToken = extractFirstCapture(bankRow, cfg.memoFields, cfg.datePattern);
+  const amtToken = extractFirstCapture(bankRow, cfg.memoFields, cfg.amountPattern);
+  if (!dtdToken || !amtToken) return [];
+  const amtCents = (() => {
+    const n = parseNumber(amtToken);
+    return n === null || !Number.isFinite(n) ? null : Math.round(n * 100);
+  })();
+  if (amtCents === null) return [];
+  const deps = Array.isArray(depositRows) ? depositRows : [];
+  const hits = [];
+  for (const ro of refundCands) {
+    const payNo = normalizeCellValue(ro[M.jpm.usRoKey]);
+    if (payNo === '') continue;
+    const dep = lookupDepositByKeys(payNo, deps, depIndex);
+    if (!dep) continue;
+    // 三重收口：日期 sameDay ∧ 金额分相等 ∧ 币种相等。
+    if (!sameDay(dep[cfg.depositDateField], dtdToken)) continue;
+    const depAmt = parseNumber(dep[cfg.depositAmountField]);
+    if (depAmt === null || !Number.isFinite(depAmt) || Math.round(depAmt * 100) !== amtCents) continue;
+    if (normalizeCellValue(dep[cfg.depositCurrencyField]) !== cfg.currency) continue;
+    hits.push({
+      refundRow: ro,
+      detail: detailBankToDeposit('DTD+FOR', `${dtdToken}/${amtToken}/${cfg.currency}`, cfg.depositDateField, normalizeCellValue(dep[cfg.depositDateField])),
+      _depositBizId: normalizeBizIdKey(dep.BizId)
+    });
+  }
+  return hits;
+}
+
 // S4：bank BillDate vs refund valueDate（R4：单向容差 0 ≤ bank.BillDate − ro.valueDate ≤ toleranceDays）。
 //   命中 = 该 bank 行在候选 refund 里找到「窗内（diff∈[0,21]）」最近的一条（按 diff 升序；窗外不算命中）。
 //   返回 { refundRow, detail, dayDiff } 数组（窗内全部候选，按天数差升序；空=无任何窗内候选）。
@@ -561,11 +645,14 @@ function runStrategiesForGroup(ctx) {
 
   // —— S1~S3：每个策略批量解析（SPEC §7.2）——
   //   O1：每层带 hitType（精准/模糊命中）；S1~S3 均为精准命中（L1/L2/L4，精准层在模糊层前）。
+  //   O1：精准层（L1~L5）全排在模糊层（L6）之前 → 「精准优先」由层序天然保证（命中即停）。
   const strategyChain = [
-    { run: (bankRow, cands) => matchS1(bankRow, cands), hitType: HIT_TYPE_PRECISE },                                  // L1
-    { run: (bankRow, cands) => matchS2(bankRow, cands, depositRows, depIndex), hitType: HIT_TYPE_PRECISE },           // L2（含 R1/R3）
-    { run: (bankRow, cands) => matchMemoContainsDepositRef(bankRow, cands, depositRows, depIndex), hitType: HIT_TYPE_PRECISE }, // L3 = S2b（R2）
-    { run: (bankRow, cands) => matchS3(bankRow, cands), hitType: HIT_TYPE_PRECISE }                                   // L4
+    { run: (bankRow, cands) => matchS1(bankRow, cands), hitType: HIT_TYPE_PRECISE },                                  // L1 S1
+    { run: (bankRow, cands) => matchS2(bankRow, cands, depositRows, depIndex), hitType: HIT_TYPE_PRECISE },           // L2 S2（含 R1/R3）
+    { run: (bankRow, cands) => matchMemoContainsDepositRef(bankRow, cands, depositRows, depIndex), hitType: HIT_TYPE_PRECISE }, // L3 S2b（R2）
+    { run: (bankRow, cands) => matchS3(bankRow, cands), hitType: HIT_TYPE_PRECISE },                                  // L4 S3
+    { run: (bankRow, cands) => matchDraweeNameDate(bankRow, cands, depositRows, depIndex), hitType: HIT_TYPE_PRECISE }, // L5 S3b（R5）
+    { run: (bankRow, cands) => matchMemoDateAmount(bankRow, cands, depositRows, depIndex), hitType: HIT_TYPE_FUZZY }    // L6 S3c（R6，模糊）
   ];
 
   for (const layer of strategyChain) {
@@ -748,6 +835,11 @@ module.exports = {
   // R2：S2b 附言包含入金 CustomerRef（单测精确覆盖）
   matchMemoContainsDepositRef,
   matchS3,
+  // R5/R6：S3b/S3c 二跳匹配器 + 附言提取 helper（单测精确覆盖）
+  matchDraweeNameDate,
+  matchMemoDateAmount,
+  extractFirstCapture,
+  yymmddToDateStr,
   matchS4,
   resolveHits,
   detailBankToRo,
