@@ -75,8 +75,8 @@ const REFUND_BACKFILL_FIELD_MAP = Object.freeze({
     Object.freeze({ roKey: '付款卡号', bankField: 'Drawee CardNo' }),
     Object.freeze({ roKey: '虚拟卡号', bankField: 'Payee CardNo' })
   ]),
-  // —— S4 金额币种日期 ——
-  s4: Object.freeze({ bankDate: 'BillDate', roDate: 'valueDate', toleranceDays: 10 }),
+  // —— S4 金额币种日期（R4：单向 0≤bank.BillDate−ro.valueDate≤21；文案口径=退款提交日期（=底层 valueDate））——
+  s4: Object.freeze({ bankDate: 'BillDate', roDate: 'valueDate', toleranceDays: 21 }),
   // —— JPM（§5.5）——
   //   refund-backfill-rules-v2 D8：CustomerRef 二跳键/取值/比对字段改中性名（HK R3 复用同一套二跳，us 前缀名不副实）。
   jpm: Object.freeze({

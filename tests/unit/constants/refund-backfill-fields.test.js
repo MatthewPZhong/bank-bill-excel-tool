@@ -176,10 +176,10 @@ test.describe('REFUND_BACKFILL_FIELD_MAP — 跨表映射单一真相', () => {
     );
   });
 
-  test('S4：bankDate=BillDate / roDate=valueDate / toleranceDays=10', () => {
+  test('S4（R4）：bankDate=BillDate / roDate=valueDate / toleranceDays=21', () => {
     assert.equal(REFUND_BACKFILL_FIELD_MAP.s4.bankDate, 'BillDate');
     assert.equal(REFUND_BACKFILL_FIELD_MAP.s4.roDate, 'valueDate');
-    assert.equal(REFUND_BACKFILL_FIELD_MAP.s4.toleranceDays, 10);
+    assert.equal(REFUND_BACKFILL_FIELD_MAP.s4.toleranceDays, 21);
   });
 
   test('JPM 映射（✅Q7/Q8 + D8 中性命名）：HK 单字段=银行打款流水号 / 二跳键 OR + CustomerRef', () => {

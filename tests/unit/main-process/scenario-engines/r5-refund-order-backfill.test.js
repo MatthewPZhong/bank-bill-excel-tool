@@ -164,19 +164,19 @@ test.describe('② 基数1（1:1）', () => {
     assert.match(res.backfillRows[0]['匹配命中详情'], /Drawee Name.*付款人名称/);
   });
 
-  test('S4 命中（日期 ≤10 天）→ 回填（无任何 S1~S3 关联兜底）', () => {
+  test('S4 命中（R4 单向窗内：0≤BillDate−valueDate≤21）→ 回填（无任何 S1~S3 关联兜底）', () => {
     const res = run(
-      [bank({ _rowId: 'b1', BillDate: '2026-06-01' })],
-      [refund({ 'valueDate': '2026-06-05' })] // 差 4 天
+      [bank({ _rowId: 'b1', BillDate: '2026-06-05' })],
+      [refund({ 'valueDate': '2026-06-01' })] // diff +4 天（bank 晚于 valueDate）
     );
     assert.equal(res.backfillRows.length, 1);
     assert.equal(res.unmatchedRows.length, 0);
   });
 
-  test('S4 日期 >10 天 → 报错人工介入', () => {
+  test('S4 差 >21 天 → 报错人工介入（R4 容差 21）', () => {
     const res = run(
-      [bank({ _rowId: 'b1', BillDate: '2026-06-01' })],
-      [refund({ 'valueDate': '2026-06-20' })] // 差 19 天
+      [bank({ _rowId: 'b1', BillDate: '2026-06-25' })],
+      [refund({ 'valueDate': '2026-06-01' })] // diff +24 天 >21
     );
     assert.equal(res.backfillRows.length, 0);
     const err = res.unmatchedRows.find((x) => x['结果类型'] === RESULT_ERROR);
@@ -290,22 +290,22 @@ test.describe('② 基数4（N:N）', () => {
     assert.ok(res.unmatchedRows.some((x) => x['结果类型'] === RESULT_ERROR));
   });
 
-  test('S4 N:N 条数相等按 BillDate 早→晚 1v1（✅Q10）', () => {
+  test('S4 N:N 条数相等按 BillDate 早→晚 1v1（✅Q10；R4 单向：bank 均晚于各自 valueDate）', () => {
     const b = [
-      bank({ _rowId: 'bLate', BillDate: '2026-06-10' }),
-      bank({ _rowId: 'bEarly', BillDate: '2026-06-01' })
+      bank({ _rowId: 'bLate', BillDate: '2026-06-11' }),
+      bank({ _rowId: 'bEarly', BillDate: '2026-06-02' })
     ];
     const r = [
-      refund({ '流水号': 'SN-early', 'valueDate': '2026-06-02' }),
-      refund({ '流水号': 'SN-late', 'valueDate': '2026-06-11' })
+      refund({ '流水号': 'SN-early', 'valueDate': '2026-06-01' }), // bEarly diff +1（窗内）；bLate diff +10
+      refund({ '流水号': 'SN-late', 'valueDate': '2026-06-10' })   // bEarly diff -8（窗外）；bLate diff +1
     ];
     const res = run(b, r);
-    // 早→晚：bEarly 先取最近（SN-early 差1天 vs SN-late 差10天）→ SN-early；bLate 取 SN-late
+    // 早→晚：bEarly 先取窗内最近（仅 SN-early 窗内）→ SN-early；bLate 取剩余 SN-late（diff+1）
     assert.equal(res.backfillRows.length, 2);
     const byRecon = {};
     for (const row of res.backfillRows) byRecon[row['BillDate']] = row['退款单号'];
-    assert.equal(byRecon['2026-06-01'], 'SN-early');
-    assert.equal(byRecon['2026-06-10'], 'SN-late');
+    assert.equal(byRecon['2026-06-02'], 'SN-early');
+    assert.equal(byRecon['2026-06-11'], 'SN-late');
   });
 });
 
@@ -550,6 +550,47 @@ test.describe('R2：S2b 附言包含入金 CustomerRef', () => {
 });
 
 // ======================================================================
+// R4 S4 单向容差边界：0 ≤ bank.BillDate − ro.valueDate ≤ 21
+// ======================================================================
+test.describe('R4：S4 单向容差边界 diff=0/21/22/−1', () => {
+  test('diff=0（同日）→ 命中回填', () => {
+    const res = run([bank({ _rowId: 'b1', BillDate: '2026-06-10' })], [refund({ 'valueDate': '2026-06-10' })]);
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.backfillRows[0]['命中类型'], HIT_TYPE_FUZZY);
+  });
+
+  test('diff=21（上界）→ 命中回填', () => {
+    const res = run([bank({ _rowId: 'b1', BillDate: '2026-07-01' })], [refund({ 'valueDate': '2026-06-10' })]); // +21
+    assert.equal(res.backfillRows.length, 1);
+  });
+
+  test('diff=22（越界）→ 报错（>21）', () => {
+    const res = run([bank({ _rowId: 'b1', BillDate: '2026-07-02' })], [refund({ 'valueDate': '2026-06-10' })]); // +22
+    assert.equal(res.backfillRows.length, 0);
+    const errs = res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR);
+    assert.equal(errs.length, 1, 'diff=22 超容差 → 报错');
+  });
+
+  test('diff=−1（bank 早于 valueDate，方向收紧）→ 报错（时序矛盾，旧 ±abs 会误命中）', () => {
+    const res = run([bank({ _rowId: 'b1', BillDate: '2026-06-09' })], [refund({ 'valueDate': '2026-06-10' })]); // −1
+    assert.equal(res.backfillRows.length, 0, 'bank 早于 valueDate 不得命中');
+    const errs = res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR);
+    assert.equal(errs.length, 1, 'diff=−1 时序矛盾 → 报错');
+  });
+
+  test('matchS4 子函数：窗内升序、窗外/负 diff 不入', () => {
+    const b = bank({ _rowId: 'b1', BillDate: '2026-06-10' });
+    const hits = E.matchS4(b, [
+      refund({ '流水号': 'r0', 'valueDate': '2026-06-10' }),  // diff 0（窗内）
+      refund({ '流水号': 'r5', 'valueDate': '2026-06-05' }),  // diff +5（窗内）
+      refund({ '流水号': 'rNeg', 'valueDate': '2026-06-12' }), // diff −2（窗外，方向收紧）
+      refund({ '流水号': 'rFar', 'valueDate': '2026-05-01' })  // diff +40（窗外）
+    ]);
+    assert.deepEqual(hits.map((h) => h.refundRow['流水号']), ['r0', 'r5'], '仅窗内、升序');
+  });
+});
+
+// ======================================================================
 // ⑤ 1v1 双向消费
 // ======================================================================
 test.describe('⑤ 1v1 双向消费', () => {
@@ -635,8 +676,8 @@ test.describe('O1 命中类型：精准层（S1/S2/S3）= 精准命中、S4 = �
 
   test('S4（日期容差）命中 → 命中类型 = 模糊命中', () => {
     const res = run(
-      [bank({ _rowId: 'b1', BillDate: '2026-06-01' })],
-      [refund({ 'valueDate': '2026-06-05' })] // 差 4 天 → S4
+      [bank({ _rowId: 'b1', BillDate: '2026-06-05' })],
+      [refund({ 'valueDate': '2026-06-01' })] // diff +4 天 → S4
     );
     assert.equal(res.backfillRows[0]['命中类型'], HIT_TYPE_FUZZY);
   });
@@ -651,8 +692,8 @@ test.describe('O2 命中详情文案：去前缀 + S4 固定串', () => {
 
   test('S4 命中详情 == 固定串「命中唯一值:退款提交日期+大账号+金额+币种」', () => {
     const res = run(
-      [bank({ _rowId: 'b1', BillDate: '2026-06-01' })],
-      [refund({ 'valueDate': '2026-06-05' })]
+      [bank({ _rowId: 'b1', BillDate: '2026-06-05' })],
+      [refund({ 'valueDate': '2026-06-01' })]
     );
     assert.equal(res.backfillRows[0]['匹配命中详情'], S4_DETAIL_TEXT);
     assert.equal(res.backfillRows[0]['匹配命中详情'], '命中唯一值:退款提交日期+大账号+金额+币种');
@@ -827,13 +868,13 @@ test.describe('⑨ 反向多笔（Q14）：N bank 命中同 1 refund → 全部�
   });
 });
 
-test.describe('⑨ S4 顺序无关（Q13）：判据按冻结候选集 + minDayDiff，不随输入顺序变', () => {
-  // refund.valueDate=12-10；b1=12-10(命中)、b2=12-22、b3=12-25（差 >10 天）
+test.describe('⑨ S4 顺序无关（Q13；R4 单向窗判据）：判据按冻结候选集 + 窗内候选，不随输入顺序变', () => {
+  // refund.valueDate=12-10；b1=12-10(diff0命中)、b2=2027-01-05(diff+26>21)、b3=2027-01-10(diff+31>21)
   function makeS4OrderCase(order) {
     const all = {
       b1: bank({ _rowId: 'b1', BillDate: '2026-12-10' }),
-      b2: bank({ _rowId: 'b2', BillDate: '2026-12-22' }),
-      b3: bank({ _rowId: 'b3', BillDate: '2026-12-25' })
+      b2: bank({ _rowId: 'b2', BillDate: '2027-01-05' }),
+      b3: bank({ _rowId: 'b3', BillDate: '2027-01-10' })
     };
     const b = order.map((k) => all[k]);
     const r = [refund({ '流水号': 'SN-A', 'valueDate': '2026-12-10' })];
@@ -845,8 +886,8 @@ test.describe('⑨ S4 顺序无关（Q13）：判据按冻结候选集 + minDayD
     assert.equal(res.backfillRows.length, 1);
     assert.equal(res.backfillRows[0]['BillDate'], '2026-12-10');
     const errs = res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR);
-    assert.equal(errs.length, 2, 'b2/b3 超容差 → 报错');
-    assert.deepEqual(errs.map((x) => x['BillDate']).sort(), ['2026-12-22', '2026-12-25']);
+    assert.equal(errs.length, 2, 'b2/b3 超 21 天容差 → 报错');
+    assert.deepEqual(errs.map((x) => x['BillDate']).sort(), ['2027-01-05', '2027-01-10']);
   });
 
   test('打乱序 [b3,b1,b2]：结论一致（b1 回填、b2/b3 报错）', () => {
@@ -855,7 +896,7 @@ test.describe('⑨ S4 顺序无关（Q13）：判据按冻结候选集 + minDayD
     assert.equal(res.backfillRows[0]['BillDate'], '2026-12-10');
     const errs = res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR);
     assert.equal(errs.length, 2);
-    assert.deepEqual(errs.map((x) => x['BillDate']).sort(), ['2026-12-22', '2026-12-25']);
+    assert.deepEqual(errs.map((x) => x['BillDate']).sort(), ['2027-01-05', '2027-01-10']);
   });
 
   test('再打乱 [b2,b3,b1]：结论仍一致', () => {
@@ -881,22 +922,22 @@ test.describe('⑨ S4「在容差但被抢光→提示」vs「超容差→报错
     const notices = res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_NOTICE);
     const errs = res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR);
     assert.equal(errs.length, 0, '被抢光的 bank 不应报错');
-    // 4 个抢不到的 bank → 提示（均在容差内，全集 minDayDiff ≤10）
+    // 4 个抢不到的 bank → 提示（均在窗内 0≤diff≤21，被抢光非脏数据）
     const bankNotices = notices.filter((x) => 'BillDate' in x);
     assert.equal(bankNotices.length, 4, '4 个被抢光 bank → 未匹配-提示');
   });
 
   test('超容差 bank → 报错（与被抢光提示区分）：2 bank（1 在容差 1 超容差）+ 1 refund', () => {
     const b = [
-      bank({ _rowId: 'b1', BillDate: '2026-12-10' }),  // 容差内 → 回填
-      bank({ _rowId: 'b2', BillDate: '2026-12-30' })   // 差 20 天 → 报错
+      bank({ _rowId: 'b1', BillDate: '2026-12-10' }),    // diff 0 容差内 → 回填
+      bank({ _rowId: 'b2', BillDate: '2027-01-05' })     // diff +26 >21 → 报错
     ];
     const r = [refund({ '流水号': 'SN-A', 'valueDate': '2026-12-10' })];
     const res = run(b, r);
     assert.equal(res.backfillRows.length, 1);
     const errs = res.unmatchedRows.filter((x) => x['结果类型'] === RESULT_ERROR);
-    assert.equal(errs.length, 1, 'b2 超容差 → 报错');
-    assert.equal(errs[0]['BillDate'], '2026-12-30');
+    assert.equal(errs.length, 1, 'b2 超 21 天容差 → 报错');
+    assert.equal(errs[0]['BillDate'], '2027-01-05');
   });
 });
 

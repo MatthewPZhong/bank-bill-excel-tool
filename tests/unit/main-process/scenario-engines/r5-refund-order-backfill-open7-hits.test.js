@@ -159,8 +159,9 @@ test.describe('② hitDepositBizIds 收集', () => {
 
   test('S4 模糊（日期容差）命中不污染集合 → hitDepositBizIds = []', () => {
     // S4 命中的 hit 无 _depositBizId（非入金表来源）。
-    const b = [bank({ _rowId: 'b1', BillDate: '2026-06-01' })];
-    const r = [refund({ 'valueDate': '2026-06-02' })]; // 容差内、S1~S3 全不命中 → 落 S4
+    // refund-backfill-rules-v2 R4：S4 改单向 0≤BillDate−valueDate≤21 → bank 须晚于 valueDate（方向重造）。
+    const b = [bank({ _rowId: 'b1', BillDate: '2026-06-03' })];
+    const r = [refund({ 'valueDate': '2026-06-02' })]; // diff +1（窗内）、S1~S3 全不命中 → 落 S4
     const res = run(b, r);
     assert.equal(res.backfillRows.length, 1);
     // refund-backfill-rules-v2 O2：S4 命中详情改固定串「命中唯一值:退款提交日期+...」（确认走 S4）

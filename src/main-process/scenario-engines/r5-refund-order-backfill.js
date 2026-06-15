@@ -24,7 +24,7 @@ const {
   normalizeCellValue,
   parseNumber
 } = require('./engine-utils');
-const { dayDiffWithin, toDate } = require('./engine-date-utils');
+const { toDate, signedDayDiff } = require('./engine-date-utils');
 const { buildFeatureRegex } = require('./c1-extract-recon-id');
 const {
   REFUND_BACKFILL_FIELD_MAP: M,
@@ -33,8 +33,6 @@ const {
   MTX_FEATURE,
   T54_REFUND_RE
 } = require('../../constants/refund-backfill-fields');
-
-const MS_PER_DAY = 86400000;
 
 // 提取 regex 模板（仅当模板用，每次提取前 new RegExp(source,'g') 重建，避免 lastIndex 副作用 —— 同 C1）
 const MTX_RE = buildFeatureRegex(MTX_FEATURE);          // /MTX\d{19}/g
@@ -372,21 +370,18 @@ function matchS3(bankRow, refundCands) {
   return hits;
 }
 
-// S4：bank BillDate vs refund valueDate，dayDiffWithin ≤ toleranceDays。
-//   命中 = 该 bank 行在候选 refund 里找到日期容差内最近的一条（>容差不算命中）。
-//   返回 { refundRow, detail, dayDiff } 数组（≤容差的全部候选，按天数差升序；空=无任何日期≤容差）。
+// S4：bank BillDate vs refund valueDate（R4：单向容差 0 ≤ bank.BillDate − ro.valueDate ≤ toleranceDays）。
+//   命中 = 该 bank 行在候选 refund 里找到「窗内（diff∈[0,21]）」最近的一条（按 diff 升序；窗外不算命中）。
+//   返回 { refundRow, detail, dayDiff } 数组（窗内全部候选，按天数差升序；空=无任何窗内候选）。
+//   ⚠️ R4 方向收紧：bank.BillDate 早于 ro.valueDate（diff<0）= 时序矛盾，不算命中（旧 ±abs 会误命中）。
 function matchS4(bankRow, refundCands) {
-  const bankDate = toDate(bankRow[M.s4.bankDate]);
   const hits = [];
   for (const ro of refundCands) {
-    if (dayDiffWithin(bankRow[M.s4.bankDate], ro[M.s4.roDate], M.s4.toleranceDays)) {
-      const roDate = toDate(ro[M.s4.roDate]);
-      const dayDiff = (bankDate && roDate)
-        ? Math.abs(Math.round((bankDate.getTime() - roDate.getTime()) / MS_PER_DAY))
-        : Number.POSITIVE_INFINITY;
+    const diff = signedDayDiff(bankRow[M.s4.bankDate], ro[M.s4.roDate]);
+    if (diff !== null && diff >= 0 && diff <= M.s4.toleranceDays) {
       hits.push({
         refundRow: ro,
-        dayDiff,
+        dayDiff: diff,
         detail: S4_DETAIL_TEXT // O2：S4 命中详情固定文案（底层比对仍 ro.valueDate）
       });
     }
@@ -641,13 +636,13 @@ function runStrategiesForGroup(ctx) {
     for (const [rid] of toLockRefunds) lockedRefundIdx.add(rid);
   }
 
-  // —— S4：金额币种日期兜底（SPEC §7.3：冻结快照 + minDayDiff 判据，去顺序依赖）——
+  // —— S4：金额币种日期兜底（SPEC §7.3 + R4：冻结快照 + 单向窗判据，去顺序依赖）——
   //   入口冻结快照：本组未消费且未锁定的 refund。
   const refundsForS4 = refundGroup.filter((ro) => isRefundAvailable(ro));
   const s4OrderedBank = orderedBank.filter((b) => !settledBankRowId.has(b._rowId));
   // 本轮 S4 已被消费的 refund（在冻结快照内做 1v1，按 BillDate 早→晚取最近）。
   for (const bankRow of s4OrderedBank) {
-    // 仍未被本轮 S4 消费且在容差内的 refund（dayDiff 升序取最近）。
+    // 仍未被本轮 S4 消费且在窗内（0≤diff≤21）的 refund（dayDiff 升序取最近）。
     const inTol = matchS4(bankRow, refundsForS4.filter((ro) => isRefundAvailable(ro)));
     if (inTol.length > 0) {
       // S4 命中的 hit 无 _depositBizId（非入金表来源）→ consumeAndBackfill 内自然不收集，不污染集合。
@@ -656,20 +651,19 @@ function runStrategiesForGroup(ctx) {
       continue;
     }
 
-    // 容差内无 refund：判据 = 该 bank 到【冻结全集 refundsForS4】的 minDayDiff 是否 >10。
-    //   - 冻结全集空 → 提示（关联不到，非脏数据）
-    //   - minDayDiff >10 → 报错（日期超容差，Q13；不依赖被抢光顺序）
-    //   - minDayDiff ≤10 但已被抢光 → 提示（多出 bank 抢不到，非脏数据）
-    const minDiff = minDayDiffToSet(bankRow, refundsForS4);
-    if (refundsForS4.length > 0 && Number.isFinite(minDiff) && minDiff > M.s4.toleranceDays) {
+    // 窗内无可用 refund：判据 = 该 bank 到【冻结全集 refundsForS4】是否存在窗内候选（0≤diff≤21）。
+    //   - 冻结全集空 / 无可解析日期对 → 提示（关联不到，非脏数据）
+    //   - 无窗内候选（含 bank 早于全部退款的负 diff = 时序矛盾脏数据）→ 报错（不依赖被抢光顺序）
+    //   - 有窗内候选但被抢光 → 提示（多出 bank 抢不到，非脏数据）
+    if (refundsForS4.length > 0 && !hasInWindowCandidate(bankRow, refundsForS4)) {
       unmatchedRows.push(buildUnmatchedBankRow(
         bankRow, RESULT_ERROR,
-        `S4 金额币种已关联但 BillDate 与 valueDate 差异 >${M.s4.toleranceDays} 天，请人工介入`
+        `S4 金额币种已关联但银行账单日期早于退款提交日期或差异 >${M.s4.toleranceDays} 天，请人工介入`
       ));
       warn.push({
         rowId: bankRow._rowId,
         code: 'refund-backfill-date-over-tolerance',
-        message: `银行行（${bankRow._rowId}）S4 日期超 ${M.s4.toleranceDays} 天容差，报错人工介入`
+        message: `银行行（${bankRow._rowId}）S4 日期早于退款提交日期或超 ${M.s4.toleranceDays} 天容差，报错人工介入`
       });
     } else {
       unmatchedRows.push(buildUnmatchedBankRow(
@@ -696,18 +690,15 @@ function pushBankError(bankRow, unmatchedRows, warn, code, info, warnMessage) {
   warn.push({ rowId: bankRow._rowId, code, message: warnMessage });
 }
 
-// bank 到 refund 集合的最小日期差（天）；集合空 / 无法解析 → Infinity
-function minDayDiffToSet(bankRow, refundSet) {
-  const bankDate = toDate(bankRow[M.s4.bankDate]);
-  if (!bankDate) return Number.POSITIVE_INFINITY;
-  let min = Number.POSITIVE_INFINITY;
+// R4：bank 到 refund 集合是否存在「窗内候选」（单向 0 ≤ bank.BillDate − ro.valueDate ≤ toleranceDays）。
+//   去顺序依赖（对冻结全集判定，不随被抢光顺序变）。任一无法解析的日期对跳过；无窗内候选 → false。
+//   ⚠️ bank.BillDate 早于全部退款（diff 全为负）→ false（= 时序矛盾脏数据，走报错），与旧 minDayDiff（abs）方向不同。
+function hasInWindowCandidate(bankRow, refundSet) {
   for (const ro of refundSet) {
-    const roDate = toDate(ro[M.s4.roDate]);
-    if (!roDate) continue;
-    const diff = Math.abs(Math.round((bankDate.getTime() - roDate.getTime()) / MS_PER_DAY));
-    if (diff < min) min = diff;
+    const diff = signedDayDiff(bankRow[M.s4.bankDate], ro[M.s4.roDate]);
+    if (diff !== null && diff >= 0 && diff <= M.s4.toleranceDays) return true;
   }
-  return min;
+  return false;
 }
 
 // 消费 + 产回填行（严格 1v1 双向消费）
