@@ -1,0 +1,4744 @@
+{
+  "m1": {
+    "yearMonth": "2026-03",
+    "recon": {
+      "status": "success",
+      "runSummary": {
+        "pendingTotal": 7,
+        "bankTotal": 7,
+        "matchedCount": 10,
+        "buDiffCount": 4,
+        "pendingUnmatched": 0,
+        "bankUnmatched": 0,
+        "nmAnomalyCount": 1
+      },
+      "matchedPendingKeys": [
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "R4"
+      ],
+      "matchedBankKeys": [
+        "R1",
+        "R2",
+        "R3",
+        "R3",
+        "R4"
+      ],
+      "buDiffPendingKeys": [
+        "R2",
+        "R4"
+      ],
+      "buDiffBankKeys": [
+        "R2",
+        "R3"
+      ],
+      "nmAnomalies": [
+        {
+          "key": "R5",
+          "pendingCount": 2,
+          "bankCount": 2,
+          "pendingRowIndices": [
+            7,
+            8
+          ],
+          "bankRowIndices": [
+            7,
+            8
+          ]
+        }
+      ]
+    },
+    "diffSheetData": [
+      {
+        "name": "Pending",
+        "rows": [
+          [
+            {
+              "v": "PendingBizId",
+              "hl": false
+            },
+            {
+              "v": "账单日期",
+              "hl": false
+            },
+            {
+              "v": "pending类型",
+              "hl": false
+            },
+            {
+              "v": "资金类型",
+              "hl": false
+            },
+            {
+              "v": "主体",
+              "hl": false
+            },
+            {
+              "v": "财务BU",
+              "hl": false
+            },
+            {
+              "v": "业务部门",
+              "hl": false
+            },
+            {
+              "v": "对手部门",
+              "hl": false
+            },
+            {
+              "v": "主对账单号",
+              "hl": false
+            },
+            {
+              "v": "渠道",
+              "hl": false
+            },
+            {
+              "v": "大账号",
+              "hl": false
+            },
+            {
+              "v": "金额",
+              "hl": false
+            },
+            {
+              "v": "币种",
+              "hl": false
+            },
+            {
+              "v": "银行账期",
+              "hl": false
+            },
+            {
+              "v": "平账账期",
+              "hl": false
+            },
+            {
+              "v": "备注",
+              "hl": false
+            },
+            {
+              "v": "状态",
+              "hl": false
+            },
+            {
+              "v": "更新时间",
+              "hl": false
+            },
+            {
+              "v": "操作人",
+              "hl": false
+            },
+            {
+              "v": "财务BU修复标记",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "BU-A",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "R1",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "100",
+              "hl": false
+            },
+            {
+              "v": "USD",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "BU-A",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "R2",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "200",
+              "hl": true
+            },
+            {
+              "v": "USD",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            }
+          ],
+          [
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "BU-A",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "R3",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "300",
+              "hl": false
+            },
+            {
+              "v": "EUR",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "BU-X",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "R4",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "400",
+              "hl": false
+            },
+            {
+              "v": "CNY",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "BU-Y",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "R4",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "401",
+              "hl": true
+            },
+            {
+              "v": "CNY",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            }
+          ]
+        ]
+      },
+      {
+        "name": "银行对账单",
+        "rows": [
+          [
+            {
+              "v": "账户主体",
+              "hl": false
+            },
+            {
+              "v": "账户BU",
+              "hl": false
+            },
+            {
+              "v": "BizId",
+              "hl": false
+            },
+            {
+              "v": "BillDate",
+              "hl": false
+            },
+            {
+              "v": "ValueDate",
+              "hl": false
+            },
+            {
+              "v": "Channel",
+              "hl": false
+            },
+            {
+              "v": "地区",
+              "hl": false
+            },
+            {
+              "v": "MerchantId",
+              "hl": false
+            },
+            {
+              "v": "Currency",
+              "hl": false
+            },
+            {
+              "v": "Credit Amount",
+              "hl": false
+            },
+            {
+              "v": "Debit Amount",
+              "hl": false
+            },
+            {
+              "v": "ReconciliationId",
+              "hl": false
+            },
+            {
+              "v": "ChannelOrderNo",
+              "hl": false
+            },
+            {
+              "v": "CustomerRef",
+              "hl": false
+            },
+            {
+              "v": "Account Reference",
+              "hl": false
+            },
+            {
+              "v": "Transaction Description",
+              "hl": false
+            },
+            {
+              "v": "Extra Information",
+              "hl": false
+            },
+            {
+              "v": "Payment Detail",
+              "hl": false
+            },
+            {
+              "v": "Payee Name",
+              "hl": false
+            },
+            {
+              "v": "Payee CardNo",
+              "hl": false
+            },
+            {
+              "v": "Drawee Name",
+              "hl": false
+            },
+            {
+              "v": "Drawee CardNo",
+              "hl": false
+            },
+            {
+              "v": "By Order Of/Beneficiary",
+              "hl": false
+            },
+            {
+              "v": "Extra Fee",
+              "hl": false
+            },
+            {
+              "v": "tradeChannel",
+              "hl": false
+            },
+            {
+              "v": "FundType",
+              "hl": false
+            },
+            {
+              "v": "Remark-description",
+              "hl": false
+            },
+            {
+              "v": "Datasource",
+              "hl": false
+            },
+            {
+              "v": "Remark-BU",
+              "hl": false
+            },
+            {
+              "v": "回填方式",
+              "hl": false
+            },
+            {
+              "v": "关联大账号",
+              "hl": false
+            },
+            {
+              "v": "自动分类规则",
+              "hl": false
+            },
+            {
+              "v": "分类人",
+              "hl": false
+            },
+            {
+              "v": "清算网络",
+              "hl": false
+            },
+            {
+              "v": "最近修改时间",
+              "hl": false
+            },
+            {
+              "v": "Recon Amount",
+              "hl": false
+            },
+            {
+              "v": "OriginBillId",
+              "hl": false
+            },
+            {
+              "v": "fxChannel",
+              "hl": false
+            },
+            {
+              "v": "fxReconId",
+              "hl": false
+            },
+            {
+              "v": "buyCurrency",
+              "hl": false
+            },
+            {
+              "v": "buyAmount",
+              "hl": false
+            },
+            {
+              "v": "sellCurrency",
+              "hl": false
+            },
+            {
+              "v": "sellAmount",
+              "hl": false
+            },
+            {
+              "v": "拆分信息",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "100",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "R1",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "bu-a",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "200",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "R2",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "BU-B",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            }
+          ],
+          [
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "150",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "R3",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "BU-A",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "150",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "R3",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "BU-Z",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            }
+          ],
+          [
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "400",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "R4",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "BU-X",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ]
+        ]
+      },
+      {
+        "name": "异常",
+        "rows": [
+          [
+            {
+              "v": "对账单号",
+              "hl": false
+            },
+            {
+              "v": "Pending 匹配数量",
+              "hl": false
+            },
+            {
+              "v": "银行匹配数量",
+              "hl": false
+            },
+            {
+              "v": "Pending 行号",
+              "hl": false
+            },
+            {
+              "v": "银行对账单行号",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "R5",
+              "hl": false
+            },
+            {
+              "v": "2",
+              "hl": false
+            },
+            {
+              "v": "2",
+              "hl": false
+            },
+            {
+              "v": "7, 8",
+              "hl": false
+            },
+            {
+              "v": "7, 8",
+              "hl": false
+            }
+          ]
+        ]
+      }
+    ]
+  },
+  "m2": {
+    "yearMonth": "2026-04",
+    "recon": {
+      "status": "success",
+      "runSummary": {
+        "pendingTotal": 2,
+        "bankTotal": 2,
+        "matchedCount": 4,
+        "buDiffCount": 2,
+        "pendingUnmatched": 0,
+        "bankUnmatched": 0,
+        "nmAnomalyCount": 0
+      },
+      "matchedPendingKeys": [
+        "S1",
+        "S2"
+      ],
+      "matchedBankKeys": [
+        "S1",
+        "S2"
+      ],
+      "buDiffPendingKeys": [
+        "S2"
+      ],
+      "buDiffBankKeys": [
+        "S2"
+      ],
+      "nmAnomalies": []
+    },
+    "diffSheetData": [
+      {
+        "name": "Pending",
+        "rows": [
+          [
+            {
+              "v": "PendingBizId",
+              "hl": false
+            },
+            {
+              "v": "账单日期",
+              "hl": false
+            },
+            {
+              "v": "pending类型",
+              "hl": false
+            },
+            {
+              "v": "资金类型",
+              "hl": false
+            },
+            {
+              "v": "主体",
+              "hl": false
+            },
+            {
+              "v": "财务BU",
+              "hl": false
+            },
+            {
+              "v": "业务部门",
+              "hl": false
+            },
+            {
+              "v": "对手部门",
+              "hl": false
+            },
+            {
+              "v": "主对账单号",
+              "hl": false
+            },
+            {
+              "v": "渠道",
+              "hl": false
+            },
+            {
+              "v": "大账号",
+              "hl": false
+            },
+            {
+              "v": "金额",
+              "hl": false
+            },
+            {
+              "v": "币种",
+              "hl": false
+            },
+            {
+              "v": "银行账期",
+              "hl": false
+            },
+            {
+              "v": "平账账期",
+              "hl": false
+            },
+            {
+              "v": "备注",
+              "hl": false
+            },
+            {
+              "v": "状态",
+              "hl": false
+            },
+            {
+              "v": "更新时间",
+              "hl": false
+            },
+            {
+              "v": "操作人",
+              "hl": false
+            },
+            {
+              "v": "财务BU修复标记",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "BU-M",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "S1",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "10",
+              "hl": false
+            },
+            {
+              "v": "USD",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "BU-M",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "S2",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "20",
+              "hl": true
+            },
+            {
+              "v": "USD",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            }
+          ]
+        ]
+      },
+      {
+        "name": "银行对账单",
+        "rows": [
+          [
+            {
+              "v": "账户主体",
+              "hl": false
+            },
+            {
+              "v": "账户BU",
+              "hl": false
+            },
+            {
+              "v": "BizId",
+              "hl": false
+            },
+            {
+              "v": "BillDate",
+              "hl": false
+            },
+            {
+              "v": "ValueDate",
+              "hl": false
+            },
+            {
+              "v": "Channel",
+              "hl": false
+            },
+            {
+              "v": "地区",
+              "hl": false
+            },
+            {
+              "v": "MerchantId",
+              "hl": false
+            },
+            {
+              "v": "Currency",
+              "hl": false
+            },
+            {
+              "v": "Credit Amount",
+              "hl": false
+            },
+            {
+              "v": "Debit Amount",
+              "hl": false
+            },
+            {
+              "v": "ReconciliationId",
+              "hl": false
+            },
+            {
+              "v": "ChannelOrderNo",
+              "hl": false
+            },
+            {
+              "v": "CustomerRef",
+              "hl": false
+            },
+            {
+              "v": "Account Reference",
+              "hl": false
+            },
+            {
+              "v": "Transaction Description",
+              "hl": false
+            },
+            {
+              "v": "Extra Information",
+              "hl": false
+            },
+            {
+              "v": "Payment Detail",
+              "hl": false
+            },
+            {
+              "v": "Payee Name",
+              "hl": false
+            },
+            {
+              "v": "Payee CardNo",
+              "hl": false
+            },
+            {
+              "v": "Drawee Name",
+              "hl": false
+            },
+            {
+              "v": "Drawee CardNo",
+              "hl": false
+            },
+            {
+              "v": "By Order Of/Beneficiary",
+              "hl": false
+            },
+            {
+              "v": "Extra Fee",
+              "hl": false
+            },
+            {
+              "v": "tradeChannel",
+              "hl": false
+            },
+            {
+              "v": "FundType",
+              "hl": false
+            },
+            {
+              "v": "Remark-description",
+              "hl": false
+            },
+            {
+              "v": "Datasource",
+              "hl": false
+            },
+            {
+              "v": "Remark-BU",
+              "hl": false
+            },
+            {
+              "v": "回填方式",
+              "hl": false
+            },
+            {
+              "v": "关联大账号",
+              "hl": false
+            },
+            {
+              "v": "自动分类规则",
+              "hl": false
+            },
+            {
+              "v": "分类人",
+              "hl": false
+            },
+            {
+              "v": "清算网络",
+              "hl": false
+            },
+            {
+              "v": "最近修改时间",
+              "hl": false
+            },
+            {
+              "v": "Recon Amount",
+              "hl": false
+            },
+            {
+              "v": "OriginBillId",
+              "hl": false
+            },
+            {
+              "v": "fxChannel",
+              "hl": false
+            },
+            {
+              "v": "fxReconId",
+              "hl": false
+            },
+            {
+              "v": "buyCurrency",
+              "hl": false
+            },
+            {
+              "v": "buyAmount",
+              "hl": false
+            },
+            {
+              "v": "sellCurrency",
+              "hl": false
+            },
+            {
+              "v": "sellAmount",
+              "hl": false
+            },
+            {
+              "v": "拆分信息",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "10",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "S1",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "BU-M",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "20",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "S2",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "BU-N",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            }
+          ]
+        ]
+      },
+      {
+        "name": "异常",
+        "rows": [
+          [
+            {
+              "v": "对账单号",
+              "hl": false
+            },
+            {
+              "v": "Pending 匹配数量",
+              "hl": false
+            },
+            {
+              "v": "银行匹配数量",
+              "hl": false
+            },
+            {
+              "v": "Pending 行号",
+              "hl": false
+            },
+            {
+              "v": "银行对账单行号",
+              "hl": false
+            }
+          ]
+        ]
+      }
+    ]
+  },
+  "aggregate": {
+    "includedMonths": [
+      "2026-03",
+      "2026-04"
+    ],
+    "skippedMonths": [],
+    "diffSheetData": [
+      {
+        "name": "Pending",
+        "rows": [
+          [
+            {
+              "v": "对账月份",
+              "hl": false
+            },
+            {
+              "v": "PendingBizId",
+              "hl": false
+            },
+            {
+              "v": "账单日期",
+              "hl": false
+            },
+            {
+              "v": "pending类型",
+              "hl": false
+            },
+            {
+              "v": "资金类型",
+              "hl": false
+            },
+            {
+              "v": "主体",
+              "hl": false
+            },
+            {
+              "v": "财务BU",
+              "hl": false
+            },
+            {
+              "v": "业务部门",
+              "hl": false
+            },
+            {
+              "v": "对手部门",
+              "hl": false
+            },
+            {
+              "v": "主对账单号",
+              "hl": false
+            },
+            {
+              "v": "渠道",
+              "hl": false
+            },
+            {
+              "v": "大账号",
+              "hl": false
+            },
+            {
+              "v": "金额",
+              "hl": false
+            },
+            {
+              "v": "币种",
+              "hl": false
+            },
+            {
+              "v": "银行账期",
+              "hl": false
+            },
+            {
+              "v": "平账账期",
+              "hl": false
+            },
+            {
+              "v": "备注",
+              "hl": false
+            },
+            {
+              "v": "状态",
+              "hl": false
+            },
+            {
+              "v": "更新时间",
+              "hl": false
+            },
+            {
+              "v": "操作人",
+              "hl": false
+            },
+            {
+              "v": "财务BU修复标记",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "2026-03",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "BU-A",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "R1",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "100",
+              "hl": false
+            },
+            {
+              "v": "USD",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "2026-03",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "BU-A",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "R2",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "200",
+              "hl": true
+            },
+            {
+              "v": "USD",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            }
+          ],
+          [
+            {
+              "v": "2026-03",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "BU-A",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "R3",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "300",
+              "hl": false
+            },
+            {
+              "v": "EUR",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "2026-03",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "BU-X",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "R4",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "400",
+              "hl": false
+            },
+            {
+              "v": "CNY",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "2026-03",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "BU-Y",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "R4",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "401",
+              "hl": true
+            },
+            {
+              "v": "CNY",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            }
+          ],
+          [
+            {
+              "v": "2026-04",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "BU-M",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "S1",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "10",
+              "hl": false
+            },
+            {
+              "v": "USD",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "2026-04",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "BU-M",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "S2",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "20",
+              "hl": true
+            },
+            {
+              "v": "USD",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            }
+          ]
+        ]
+      },
+      {
+        "name": "银行对账单",
+        "rows": [
+          [
+            {
+              "v": "对账月份",
+              "hl": false
+            },
+            {
+              "v": "账户主体",
+              "hl": false
+            },
+            {
+              "v": "账户BU",
+              "hl": false
+            },
+            {
+              "v": "BizId",
+              "hl": false
+            },
+            {
+              "v": "BillDate",
+              "hl": false
+            },
+            {
+              "v": "ValueDate",
+              "hl": false
+            },
+            {
+              "v": "Channel",
+              "hl": false
+            },
+            {
+              "v": "地区",
+              "hl": false
+            },
+            {
+              "v": "MerchantId",
+              "hl": false
+            },
+            {
+              "v": "Currency",
+              "hl": false
+            },
+            {
+              "v": "Credit Amount",
+              "hl": false
+            },
+            {
+              "v": "Debit Amount",
+              "hl": false
+            },
+            {
+              "v": "ReconciliationId",
+              "hl": false
+            },
+            {
+              "v": "ChannelOrderNo",
+              "hl": false
+            },
+            {
+              "v": "CustomerRef",
+              "hl": false
+            },
+            {
+              "v": "Account Reference",
+              "hl": false
+            },
+            {
+              "v": "Transaction Description",
+              "hl": false
+            },
+            {
+              "v": "Extra Information",
+              "hl": false
+            },
+            {
+              "v": "Payment Detail",
+              "hl": false
+            },
+            {
+              "v": "Payee Name",
+              "hl": false
+            },
+            {
+              "v": "Payee CardNo",
+              "hl": false
+            },
+            {
+              "v": "Drawee Name",
+              "hl": false
+            },
+            {
+              "v": "Drawee CardNo",
+              "hl": false
+            },
+            {
+              "v": "By Order Of/Beneficiary",
+              "hl": false
+            },
+            {
+              "v": "Extra Fee",
+              "hl": false
+            },
+            {
+              "v": "tradeChannel",
+              "hl": false
+            },
+            {
+              "v": "FundType",
+              "hl": false
+            },
+            {
+              "v": "Remark-description",
+              "hl": false
+            },
+            {
+              "v": "Datasource",
+              "hl": false
+            },
+            {
+              "v": "Remark-BU",
+              "hl": false
+            },
+            {
+              "v": "回填方式",
+              "hl": false
+            },
+            {
+              "v": "关联大账号",
+              "hl": false
+            },
+            {
+              "v": "自动分类规则",
+              "hl": false
+            },
+            {
+              "v": "分类人",
+              "hl": false
+            },
+            {
+              "v": "清算网络",
+              "hl": false
+            },
+            {
+              "v": "最近修改时间",
+              "hl": false
+            },
+            {
+              "v": "Recon Amount",
+              "hl": false
+            },
+            {
+              "v": "OriginBillId",
+              "hl": false
+            },
+            {
+              "v": "fxChannel",
+              "hl": false
+            },
+            {
+              "v": "fxReconId",
+              "hl": false
+            },
+            {
+              "v": "buyCurrency",
+              "hl": false
+            },
+            {
+              "v": "buyAmount",
+              "hl": false
+            },
+            {
+              "v": "sellCurrency",
+              "hl": false
+            },
+            {
+              "v": "sellAmount",
+              "hl": false
+            },
+            {
+              "v": "拆分信息",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "2026-03",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "100",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "R1",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "bu-a",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "2026-03",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "200",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "R2",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "BU-B",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            }
+          ],
+          [
+            {
+              "v": "2026-03",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "150",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "R3",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "BU-A",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "2026-03",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "150",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "R3",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "BU-Z",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            }
+          ],
+          [
+            {
+              "v": "2026-03",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "400",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "R4",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "BU-X",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "2026-04",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "10",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "S1",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "BU-M",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            },
+            {
+              "v": "",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "2026-04",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "20",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "S2",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "BU-N",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            },
+            {
+              "v": "",
+              "hl": true
+            }
+          ]
+        ]
+      },
+      {
+        "name": "异常",
+        "rows": [
+          [
+            {
+              "v": "对账月份",
+              "hl": false
+            },
+            {
+              "v": "对账单号",
+              "hl": false
+            },
+            {
+              "v": "Pending 匹配数量",
+              "hl": false
+            },
+            {
+              "v": "银行匹配数量",
+              "hl": false
+            },
+            {
+              "v": "Pending 行号",
+              "hl": false
+            },
+            {
+              "v": "银行对账单行号",
+              "hl": false
+            }
+          ],
+          [
+            {
+              "v": "2026-03",
+              "hl": false
+            },
+            {
+              "v": "R5",
+              "hl": false
+            },
+            {
+              "v": "2",
+              "hl": false
+            },
+            {
+              "v": "2",
+              "hl": false
+            },
+            {
+              "v": "7, 8",
+              "hl": false
+            },
+            {
+              "v": "7, 8",
+              "hl": false
+            }
+          ]
+        ]
+      }
+    ]
+  }
+}

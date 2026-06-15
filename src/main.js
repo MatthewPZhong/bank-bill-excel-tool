@@ -32,6 +32,9 @@ const runCheckWorkerPool = require('./main-process/run-check-worker-pool');
 // v3.0.5 PR-3（Part B Phase 1）：收单 per-月侧库编排层（import/run/status/listMonths/孤儿/retention 路由侧库）
 const acquiringRunData = require('./main-process/acquiring-bill-currency-run-data');
 const runDataStore = require('./backend/run-data-store');
+// v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu per-月侧库编排层（import/run/status/导出/孤儿 路由侧库）
+const bizOpReconRunData = require('./main-process/biz-op-recon-run-data');
+const bankBuReconRunData = require('./main-process/bank-bu-recon-run-data');
 // v2.1.10 N4-cont-1 T23 (Phase 4)：raw_json idle 自动清理函数
 //   - 复用 v2.1.9 N1' idle 30min cleanup 计时器（spec §4.3.1）
 //   - 仅清「对账成功」（不在 diff_rows）且 imported_at < retentionDays 天前的 bill_imports.raw_json
@@ -10686,19 +10689,25 @@ function registerNewAccountHandlers() {
   // PRD §三 / spec §3.5：10 个 handler；资金红线模块（OPEN ISSUE #10 v0.8 修订：1:1/1:N/N:1 视为对账成功，N:M 异常 sheet）
   // ============================================================
 
+  // v3.0.5 PR-4：双源 listMonths（侧库目录 month + 主库旧表 month 合并；历史 run 零变化）
   ipcMain.handle('bankBuRecon:months:list', () => {
     if (!database || !database.db) return [];
-    try { return bankBuReconSession.listMonths(); } catch (_e) { return []; }
+    try {
+      return bankBuReconRunData.listMonthsDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
+    } catch (_e) { return []; }
   });
 
+  // v3.0.5 PR-4：双源 status（侧库存在 → 读侧库 meta + 主库镜像 latestRun；否则读主库旧表）
   ipcMain.handle('bankBuRecon:status', (_event, payload = {}) => {
     if (!database || !database.db) return null;
     const { yearMonth } = payload || {};
     if (!yearMonth) return null;
     try {
-      const meta = bankBuReconSession.getMonthMeta(yearMonth);
-      const latestRun = bankBuReconSession.listRuns(yearMonth)[0] || null;
-      return { meta, latestRun };
+      return bankBuReconRunData.getStatusDualSource({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        yearMonth
+      });
     } catch (_e) {
       return null;
     }
@@ -10755,7 +10764,13 @@ function registerNewAccountHandlers() {
     try {
       const pendingResult = readPendingGuanliFile(pendingPath);
       const bankResult = readBankFile(bankPath);
-      const counts = bankBuReconSession.importMonth(yearMonth, pendingResult.rows, bankResult.rows);
+      // v3.0.5 PR-4：导入落 per-月侧库（importMonthAtomic 在侧库 db 上运行 = 主库上运行，原子覆盖语义不变）
+      const counts = bankBuReconRunData.importMonth({
+        userDataDir: path.dirname(database.dbPath),
+        yearMonth,
+        pendingRows: pendingResult.rows,
+        bankRows: bankResult.rows
+      });
       return { status: 'success', yearMonth, ...counts };
     } catch (err) {
       if (err && err.name === 'FileValidationError') {
@@ -10778,7 +10793,12 @@ function registerNewAccountHandlers() {
       return { status: 'error', message: 'yearMonth 格式错误' };
     }
     try {
-      const result = bankBuReconSession.run(yearMonth);
+      // v3.0.5 PR-4：inline 侧库直跑（runReconciliation 在侧库 db 上跑，算法零改动）+ 主库 runs 镜像。
+      const result = bankBuReconRunData.runViaSideDb({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        yearMonth
+      });
       return { status: 'success', ...result };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
@@ -10806,13 +10826,15 @@ function registerNewAccountHandlers() {
       return { status: 'error', message: 'runId 无效' };
     }
     if (!savePath) return { status: 'error', message: '保存路径未指定' };
-    const run = bankBuReconSession.getRun(runIdNum);
+    // v3.0.5 PR-4：run 校验 + 导出数据均走主库镜像 + 侧库重跑（lastRunCache 侧库化失效 → 重跑路径）。
+    const userDataDir = path.dirname(database.dbPath);
+    const run = bankBuReconRunData.getMirrorRun({ mainDb: database.db, runId: runIdNum });
     if (!run) return { status: 'error', message: '运行记录不存在' };
     if (run.status !== 'success') {
       return { status: 'error', message: '运行未成功（status=' + run.status + '），无法导出差异表' };
     }
     try {
-      const lastResult = bankBuReconSession.loadRunResultByRunId(runIdNum);
+      const lastResult = bankBuReconRunData.loadExportDataByRun({ userDataDir, mainDb: database.db, runId: runIdNum });
       if (!lastResult) {
         return { status: 'error', message: '加载 run 数据失败（可能源数据已变）' };
       }
@@ -10827,7 +10849,7 @@ function registerNewAccountHandlers() {
         // v0.5：用 savePath 直接写到用户指定路径，不走 buildOutputPath
         overrideSavePath: savePath
       });
-      bankBuReconSession.recordExportPath(runIdNum, exp.filePath);
+      bankBuReconRunData.recordExportPath({ mainDb: database.db, runId: runIdNum, exportPath: exp.filePath });
       return { status: 'success', filePath: exp.filePath };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
@@ -10840,7 +10862,11 @@ function registerNewAccountHandlers() {
     const { savePath } = payload || {};
     if (!savePath) return { status: 'error', message: '保存路径未指定' };
     try {
-      const { months, skippedMonths } = bankBuReconSession.aggregateLatestSuccessRuns();
+      // v3.0.5 PR-4：跨月汇总逐月 open 侧库重跑（侧库 + 历史主库 run 双源）。
+      const { months, skippedMonths } = bankBuReconRunData.aggregateExportData({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db
+      });
       if (months.length === 0) {
         return { status: 'error', message: '无可汇总的成功运行记录', skippedMonths };
       }
@@ -10854,28 +10880,30 @@ function registerNewAccountHandlers() {
     }
   });
 
+  // v3.0.5 PR-4：run:history 走主库镜像（侧库 run 镜像 + 历史主库 run 都在主库 runs 表）。
   ipcMain.handle('bankBuRecon:run:history', (_event, payload = {}) => {
     if (!database || !database.db) return [];
     const { yearMonth } = payload || {};
     if (!yearMonth) return [];
-    try { return bankBuReconSession.listRuns(yearMonth); } catch (_e) { return []; }
+    try { return bankBuReconRunData.listRunsDualSource({ mainDb: database.db, yearMonth }); } catch (_e) { return []; }
   });
 
   // v0.5: 列出"两侧都已导入"的月份（用于「开始运行」弹窗）
+  // v3.0.5 PR-4：双源（侧库目录 + 主库旧表）。
   ipcMain.handle('bankBuRecon:run:list-ready-months', () => {
     if (!database || !database.db) return [];
     try {
-      const list = bankBuReconSession.listReadyMonths();
-      return list.map((m) => m.yearMonth);
+      return bankBuReconRunData.listReadyMonthsDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
     } catch (_e) {
       return [];
     }
   });
 
   // v0.5: 列出"有 status=success run"的月份（用于「导出差异」弹窗）
+  // v3.0.5 PR-4：主库镜像 GROUP BY（侧库 run 镜像 + 历史主库 run）。
   ipcMain.handle('bankBuRecon:run:list-success-months', () => {
     if (!database || !database.db) return [];
-    try { return bankBuReconSession.listSuccessMonths(); } catch (_e) { return []; }
+    try { return bankBuReconRunData.listSuccessMonthsDualSource({ mainDb: database.db }); } catch (_e) { return []; }
   });
 
   // ==========================================================================
@@ -10884,20 +10912,22 @@ function registerNewAccountHandlers() {
   // ==========================================================================
 
   // 模块状态查询
+  // v3.0.5 PR-4：双源（遍历侧库目录所有月 + 主库旧表，去重月末冗余副本）。
   ipcMain.handle('bizOpRecon:status', () => {
     if (!database || !database.db) return { importedDateBuPairs: [], buList: [], flowImportedDates: [] };
     try {
-      return bizOpReconSession.getStatus();
+      return bizOpReconRunData.getStatusDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
     } catch (_e) {
       return { importedDateBuPairs: [], buList: [], flowImportedDates: [] };
     }
   });
 
   // BU 下拉框枚举（保留原值不 normalize；#A 拍板）
+  // v3.0.5 PR-4：双源去重。
   ipcMain.handle('bizOpRecon:bu:list', () => {
     if (!database || !database.db) return [];
     try {
-      return bizOpReconSession.listBu();
+      return bizOpReconRunData.listBuDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
     } catch (_e) {
       return [];
     }
@@ -10950,19 +10980,22 @@ function registerNewAccountHandlers() {
     if (!date || !filePath) return { status: 'error', message: '入参缺失（date / filePath）' };
     try {
       const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
-      // v2.1.12-beta β.2-T2：默认 worker 化（dbPath 主 DB tool-data.sqlite，与 acquiring worker 同库 WAL 并发）
-      //   进度透传 renderer（仿 pending:import:progress 范式，swallow send 失败）
-      //   readBizOpFile 仍传——worker 入口在无 dbPath 时回退旧同步路径用
-      const result = await runBizOpImport(database.db, {
-        date,
-        filePath,
-        dbPath: database.dbPath,
-        readBizOpFile,
-        writeBizOpErrorReportXlsx,
-        errorReportsDir,
-        onProgress: (ev) => {
-          try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'bizOp' }); }
-          catch (_e) { /* swallow */ }
+      // v3.0.5 PR-4：导入落 per-月侧库（编排层把 worker dbPath 覆盖为 month(date) 侧库路径；
+      //   worker 自开侧库连接 + 幂等建表；月末跨月由编排层补清下月侧库 + 写 T-2 冗余副本，详见 biz-op-recon-run-data.js）。
+      //   进度透传 renderer（仿 pending:import:progress 范式，swallow send 失败）。
+      const result = await bizOpReconRunData.runBizOpImport({
+        userDataDir: path.dirname(database.dbPath),
+        runBizOpImportViaWorker: runBizOpImport,
+        params: {
+          date,
+          filePath,
+          readBizOpFile,
+          writeBizOpErrorReportXlsx,
+          errorReportsDir,
+          onProgress: (ev) => {
+            try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'bizOp' }); }
+            catch (_e) { /* swallow */ }
+          }
         }
       });
       return result;
@@ -10988,18 +11021,22 @@ function registerNewAccountHandlers() {
     if (!date || files.length === 0) return { status: 'error', message: '入参缺失（date / filePaths）' };
     try {
       const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
-      // v2.1.12-beta β.2-T2：默认 worker 化（同 run-biz-op）；readFlowFile 传作无 dbPath 回退用
+      // v3.0.5 PR-4：导入落 per-月侧库（编排层把 worker dbPath 覆盖为 month(date) 侧库路径）。
+      //   flow 按 date 清（不跨 BU 不跨日）→ 无跨月问题（flow 落 month(date) 侧库，与对账 date 同库）。
       // v3.0.2 需求1b：filePaths 透传 worker（单进程单事务合并、单次 clearByDate，禁止循环调用 runFlowImport）
-      const result = await runFlowImport(database.db, {
-        date,
-        filePaths: files,
-        dbPath: database.dbPath,
-        readFlowFile,
-        writeFlowErrorReportXlsx,
-        errorReportsDir,
-        onProgress: (ev) => {
-          try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'flow' }); }
-          catch (_e) { /* swallow */ }
+      const result = await bizOpReconRunData.runFlowImport({
+        userDataDir: path.dirname(database.dbPath),
+        runFlowImportViaWorker: runFlowImport,
+        params: {
+          date,
+          filePaths: files,
+          readFlowFile,
+          writeFlowErrorReportXlsx,
+          errorReportsDir,
+          onProgress: (ev) => {
+            try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'flow' }); }
+            catch (_e) { /* swallow */ }
+          }
         }
       });
       return result;
@@ -11026,24 +11063,26 @@ function registerNewAccountHandlers() {
   });
 
   // 检查"库里仅有一日数据"（#11 拍板 B）
+  // v3.0.5 PR-4：双源（遍历侧库所有月 + 主库旧表所有 date，去重）。
   ipcMain.handle('bizOpRecon:import:check-single-day', (_event, payload = {}) => {
     if (!database || !database.db) return { onlyOneDay: false, count: 0 };
     const { buName } = payload || {};
     if (!buName) return { onlyOneDay: false, count: 0 };
     try {
-      return bizOpReconSession.checkSingleDay(buName);
+      return bizOpReconRunData.checkSingleDayDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db, buName });
     } catch (_e) {
       return { onlyOneDay: false, count: 0 };
     }
   });
 
   // 列 ready 日期（#12 + #13 拍板 A）
+  // v3.0.5 PR-4：双源（逐月侧库各跑 listReadyDates，每库 T-1/T-2 含月末冗余副本自洽，合并）。
   ipcMain.handle('bizOpRecon:run:list-ready-dates', (_event, payload = {}) => {
     if (!database || !database.db) return [];
     const { buName } = payload || {};
     if (!buName) return [];
     try {
-      return bizOpReconSession.listReadyDates(buName);
+      return bizOpReconRunData.listReadyDatesDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db, buName });
     } catch (_e) {
       return [];
     }
@@ -11056,7 +11095,14 @@ function registerNewAccountHandlers() {
     const { date, buName } = payload || {};
     if (!date || !buName) return { status: 'error', message: '入参缺失（date / buName）' };
     try {
-      const { runId, stats } = bizOpReconSession.run({ date, buName });
+      // v3.0.5 PR-4：inline 侧库直跑（runReconciliation 在 month(date) 侧库 db 上跑，算法零改动；
+      //   月初 T-2 由月末导入写入的冗余副本保证在库 → 单库自洽）+ 主库 runs 镜像。
+      const { runId, stats } = bizOpReconRunData.runViaSideDb({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        date,
+        buName
+      });
       return { runId, status: 'success', stats };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
@@ -11064,12 +11110,13 @@ function registerNewAccountHandlers() {
   });
 
   // 列 success 日期（#13 拍板 A，导出指定日期下拉来源）
+  // v3.0.5 PR-4：主库镜像（侧库 run 镜像 + 历史主库 run 都在主库 runs 表）。
   ipcMain.handle('bizOpRecon:export:list-success-dates', (_event, payload = {}) => {
     if (!database || !database.db) return [];
     const { buName } = payload || {};
     if (!buName) return [];
     try {
-      return bizOpReconSession.listSuccessDates(buName);
+      return bizOpReconRunData.listSuccessDatesDualSource({ mainDb: database.db, buName });
     } catch (_e) {
       return [];
     }
@@ -11097,20 +11144,26 @@ function registerNewAccountHandlers() {
     if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
     const { runId, savePath } = payload || {};
     if (!runId || !savePath) return { status: 'error', message: '入参缺失（runId / savePath）' };
+    // v3.0.5 PR-4：导出走侧库——主库镜像拿 (date,BU)+side_db_rel_path → open 该月侧库给 writer
+    //   （writer 读 diff_rows + getRowById(imports) 全在侧库；月初跨月 T-2 行由冗余副本在库 → byte-for-byte）。
+    const userDataDir = path.dirname(database.dbPath);
+    const ctx = bizOpReconRunData.openExportContextByRun({ userDataDir, mainDb: database.db, runId });
+    if (!ctx || !ctx.run) return { status: 'error', message: `run #${runId} 不存在` };
     try {
-      const run = bizOpReconSession.getRun(runId);
-      if (!run) return { status: 'error', message: `run #${runId} 不存在` };
       const result = await writeBizOpSingleDateDiffWorkbook({
-        db: database.db,
-        date: run.data_date,
-        buName: run.bu_name,
-        runId,
+        db: ctx.db,
+        date: ctx.run.data_date,
+        buName: ctx.run.bu_name,
+        // v3.0.5 PR-4：writer getDiffRowsByRun 用侧库内 run id（ctx.exportRunId），非主库镜像 id。
+        runId: ctx.exportRunId,
         savePath
       });
-      bizOpReconSession.recordExportPath(runId, result.filePath);
+      bizOpReconRunData.recordExportPath({ mainDb: database.db, runId, exportPath: result.filePath });
       return { status: 'success', filePath: result.filePath, rowCount: result.rowCount };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    } finally {
+      if (ctx && ctx.sideDb) { try { ctx.sideDb.close(); } catch (_e) { /* swallow */ } }
     }
   });
 
@@ -11122,9 +11175,17 @@ function registerNewAccountHandlers() {
     if (!buName || !startDate || !endDate || !savePath) {
       return { status: 'error', message: '入参缺失（buName / startDate / endDate / savePath）' };
     }
+    // v3.0.5 PR-4：区间导出跨多日多月——构造临时内存合并 db（把区间内 success run 的 runs/diff_rows/imports
+    //   从各月侧库 + 主库历史合并进内存 db，保 id/source_row_id 映射），writer 在合并 db 上跑（writer 零改动）。
+    let memDb = null;
     try {
+      memDb = bizOpReconRunData.buildRangeExportDb({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        buName, startDate, endDate
+      });
       const result = await writeBizOpDateRangeDiffWorkbook({
-        db: database.db,
+        db: memDb,
         buName, startDate, endDate, savePath
       });
       return {
@@ -11135,17 +11196,19 @@ function registerNewAccountHandlers() {
       };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    } finally {
+      if (memDb) { try { memDb.close(); } catch (_e) { /* swallow */ } }
     }
   });
 
   // 运行历史（debug 用，可选）
+  // v3.0.5 PR-4：主库镜像（侧库 run 镜像 + 历史主库 run 都在主库 runs 表）。
   ipcMain.handle('bizOpRecon:run:history', (_event, payload = {}) => {
     if (!database || !database.db) return [];
     const { date, buName } = payload || {};
     if (!date || !buName) return [];
     try {
-      const runRepo = require('./backend/biz-op-recon-db/run-repository');
-      return runRepo.listRunsByDateBu(database.db, date, buName);
+      return bizOpReconRunData.listRunsDualSource({ mainDb: database.db, date, buName });
     } catch (_e) {
       return [];
     }
@@ -12801,6 +12864,41 @@ app.whenReady()
         } catch (_logErr) { /* swallow */ }
       } finally {
         releaseAcquiringBillCurrencyOpLock();
+      }
+    });
+
+    // v3.0.5 PR-4（Part B Phase 2 / B.6）：biz-op + bank-bu 侧库孤儿双向兜底（启动扫描各自 run-data/{module}/）。
+    //   ① 有文件无 imports/镜像（空壳/损坏）→ 删文件；② 有镜像无文件 → 标记 run 失效（UI 降级，不崩溃）。
+    //   两模块无 op lock（导入/对账非长任务、无 cleanup 计时器）→ 直接跑；后台 setImmediate 不阻塞窗口。
+    setImmediate(() => {
+      if (!database || !database.db) return;
+      const userDataDir = path.dirname(database.dbPath);
+      for (const [domain, runData] of [['biz-op-recon', bizOpReconRunData], ['bank-bu-recon', bankBuReconRunData]]) {
+        try {
+          const stats = runData.reconcileOrphans({ userDataDir, mainDb: database.db });
+          if (stats && (stats.deletedOrphanFiles.length > 0 || stats.invalidatedRuns.length > 0)) {
+            appendActivityLogEntry({
+              level: 'info',
+              source: 'main',
+              domain,
+              message: `[${domain}] 启动期侧库孤儿双向兜底完成（PR-4）`,
+              details: [
+                `删孤儿文件: ${stats.deletedOrphanFiles.length} (${stats.deletedOrphanFiles.join(', ')})`,
+                `标记失效 run: ${stats.invalidatedRuns.length} (${stats.invalidatedRuns.join(', ')})`
+              ]
+            });
+          }
+        } catch (err) {
+          try {
+            appendActivityLogEntry({
+              level: 'error',
+              source: 'main',
+              domain,
+              message: `[${domain}] 启动期侧库孤儿兜底失败（PR-4）`,
+              details: [String(err && err.stack ? err.stack : err)]
+            });
+          } catch (_logErr) { /* swallow */ }
+        }
       }
     });
 

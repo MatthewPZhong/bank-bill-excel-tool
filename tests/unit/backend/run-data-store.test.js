@@ -151,3 +151,67 @@ test.describe('孤儿扫描列表', () => {
     assert.deepEqual(months, ['2026-03', '2026-04'], '仅列出合法侧库文件');
   });
 });
+
+// v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu 两模块侧库 DDL + KNOWN_MODULES 扩展。
+test.describe('PR-4 biz-op / bank-bu 模块侧库', () => {
+  test('KNOWN_MODULES 含三模块', () => {
+    assert.deepEqual([...rds.KNOWN_MODULES].sort(), ['acquiring-bill-currency', 'bank-bu-recon', 'biz-op-recon']);
+    assert.equal(rds.MODULE_BIZ_OP, 'biz-op-recon');
+    assert.equal(rds.MODULE_BANK_BU, 'bank-bu-recon');
+  });
+
+  test('biz-op 侧库 DDL 建 4 表（imports/flow_imports/runs/diff_rows）', () => {
+    const db = rds.openSideDb(tmpdir, rds.MODULE_BIZ_OP, '2026-03');
+    try {
+      const tables = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'biz_op_recon_%' ORDER BY name"
+      ).all().map((r) => r.name);
+      assert.deepEqual(tables, [
+        'biz_op_recon_diff_rows',
+        'biz_op_recon_flow_imports',
+        'biz_op_recon_imports',
+        'biz_op_recon_runs',
+      ]);
+      // runs 含 t2_anomaly_account_count（新库建表即含）。
+      const cols = db.prepare("PRAGMA table_info(biz_op_recon_runs)").all().map((c) => c.name);
+      assert.ok(cols.includes('t2_anomaly_account_count'), 'runs 含 t2_anomaly_account_count');
+      // diff_rows FK 引用 runs（无 CASCADE，与主库一致）。
+      const fks = db.prepare("PRAGMA foreign_key_list('biz_op_recon_diff_rows')").all();
+      assert.equal(fks.length, 1, 'diff_rows 1 个 FK（runs）');
+      assert.equal(fks[0].table, 'biz_op_recon_runs');
+      assert.equal(fks[0].on_delete, 'NO ACTION', 'biz-op diff_rows FK 无 CASCADE（与主库 byte-for-byte）');
+    } finally {
+      db.close();
+    }
+  });
+
+  test('bank-bu 侧库 DDL 建 3 表（pending_imports/bank_imports/runs，无 diff_rows）', () => {
+    const db = rds.openSideDb(tmpdir, rds.MODULE_BANK_BU, '2026-03');
+    try {
+      const tables = db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'bank_bu_recon_%' ORDER BY name"
+      ).all().map((r) => r.name);
+      assert.deepEqual(tables, [
+        'bank_bu_recon_bank_imports',
+        'bank_bu_recon_pending_imports',
+        'bank_bu_recon_runs',
+      ]);
+      // bank_imports 列数（44 数据 + id/year_month/row_index/imported_at = 48）。
+      const bankCols = db.prepare("PRAGMA table_info(bank_bu_recon_bank_imports)").all().length;
+      assert.equal(bankCols, 48, 'bank_imports 列数（44 数据 + id/year_month/row_index/imported_at = 48）');
+    } finally {
+      db.close();
+    }
+  });
+
+  test('biz-op / bank-bu 侧库文件命名 + 路径', () => {
+    assert.equal(
+      rds.sideDbRelPath(rds.MODULE_BIZ_OP, '2026-03'),
+      path.join('run-data', 'biz-op-recon', 'month-2026-03.sqlite')
+    );
+    assert.equal(
+      rds.sideDbRelPath(rds.MODULE_BANK_BU, '2026-03'),
+      path.join('run-data', 'bank-bu-recon', 'month-2026-03.sqlite')
+    );
+  });
+});

@@ -30,6 +30,9 @@ const {
   ensureAcquiringBillWorkerCountSetting,
   ensureAcquiringBillCurrencyRunsChunkProgress,
   ensureAcquiringBillCurrencyRunsSideDbPath,
+  // v3.0.5 PR-4（Part B Phase 2）：bank-bu / biz-op runs 表加 side_db_rel_path 列（侧库镜像）
+  ensureBankBuReconRunsSideDbPath,
+  ensureBizOpReconRunsSideDbPath,
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings
   ensureAcquiringBillCurrencyRawJsonRetentionSettings,
   ensureBillRawJsonV2Slim,
@@ -366,11 +369,17 @@ class AppDatabase {
     // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表
     // 与其他迁移完全独立，调用顺序无依赖；放在最末尾即可
     this.ensureBankBuReconTablesSupport();
+    // v3.0.5 PR-4（Part B Phase 2）：bank_bu_recon_runs 加 side_db_rel_path 列（侧库镜像；NULL=历史主库 run）
+    //   必须在 ensureBankBuReconTablesSupport 之后（依赖 runs 表已存在）；轻量加列幂等
+    this.ensureBankBuReconRunsSideDbPath();
     // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表 + 2 索引（与现有 5 模块表完全隔离，调用顺序无依赖）
     this.ensureVccOpCalcTablesSupport();
     // v2.1.3 T1：业务OP数据核对模块 4 张表（imports / flow_imports / runs / diff_rows）
     // 与 v2.1.2 bank_bu_recon_* 完全独立，调用顺序无依赖
     this.ensureBizOpReconTablesSupport();
+    // v3.0.5 PR-4（Part B Phase 2）：biz_op_recon_runs 加 side_db_rel_path 列（侧库镜像；NULL=历史主库 run）
+    //   必须在 ensureBizOpReconTablesSupport 之后（依赖 runs 表已存在）；轻量加列幂等
+    this.ensureBizOpReconRunsSideDbPath();
     // v2.1.6 T4：收单单据币种校验模块 4 张表（flow_imports / bill_imports / runs / diff_rows）
     // 与 v2.1.2/v2.1.3 完全独立，调用顺序无依赖
     this.ensureAcquiringBillCurrencyTablesSupport();
@@ -644,6 +653,11 @@ class AppDatabase {
     return ensureBankBuReconTablesSupport(this.db);
   }
 
+  // v3.0.5 PR-4（Part B Phase 2）：bank_bu_recon_runs 加 side_db_rel_path 列（侧库镜像）
+  ensureBankBuReconRunsSideDbPath() {
+    return ensureBankBuReconRunsSideDbPath(this.db);
+  }
+
   // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表（runs / run_files）+ 2 索引
   ensureVccOpCalcTablesSupport() {
     return ensureVccOpCalcTablesSupport(this.db);
@@ -652,6 +666,11 @@ class AppDatabase {
   // v2.1.3 T1：业务OP数据核对模块 4 张表（imports / flow_imports / runs / diff_rows）
   ensureBizOpReconTablesSupport() {
     return ensureBizOpReconTablesSupport(this.db);
+  }
+
+  // v3.0.5 PR-4（Part B Phase 2）：biz_op_recon_runs 加 side_db_rel_path 列（侧库镜像）
+  ensureBizOpReconRunsSideDbPath() {
+    return ensureBizOpReconRunsSideDbPath(this.db);
   }
 
   // v2.1.6 T4：收单单据币种校验模块 4 张表（flow_imports / bill_imports / runs / diff_rows）

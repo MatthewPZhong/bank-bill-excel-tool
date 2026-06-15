@@ -1048,6 +1048,24 @@ function ensureAcquiringBillCurrencyRunsSideDbPath(db) {
   db.exec(`ALTER TABLE acquiring_bill_currency_runs ADD COLUMN side_db_rel_path TEXT`);
 }
 
+// v3.0.5 PR-4（Part B Phase 2）：给 bank_bu_recon_runs 加 side_db_rel_path 列（per-月侧库元数据镜像）。
+//   值：侧库文件相对路径（run-data/bank-bu-recon/month-{yearMonth}.sqlite），NULL = 历史主库 run（双源过渡）。
+//   读路径双源判定（B-D2）：runs.side_db_rel_path 非空 → 读侧库；NULL → 读主库旧表。
+//   轻量加列幂等；必须在 ensureBankBuReconTablesSupport 之后（依赖 runs 表已存在）。
+function ensureBankBuReconRunsSideDbPath(db) {
+  if (hasColumn(db, 'bank_bu_recon_runs', 'side_db_rel_path')) return;
+  db.exec(`ALTER TABLE bank_bu_recon_runs ADD COLUMN side_db_rel_path TEXT`);
+}
+
+// v3.0.5 PR-4（Part B Phase 2）：给 biz_op_recon_runs 加 side_db_rel_path 列（per-月侧库元数据镜像）。
+//   值：侧库文件相对路径（run-data/biz-op-recon/month-{month(date)}.sqlite），NULL = 历史主库 run（双源过渡）。
+//   biz-op run 粒度 = (data_date, bu_name)，但侧库按对账归属月 month(date) 分片，故 rel_path 指向月侧库。
+//   轻量加列幂等；必须在 ensureBizOpReconTablesSupport 之后（依赖 runs 表已存在）。
+function ensureBizOpReconRunsSideDbPath(db) {
+  if (hasColumn(db, 'biz_op_recon_runs', 'side_db_rel_path')) return;
+  db.exec(`ALTER TABLE biz_op_recon_runs ADD COLUMN side_db_rel_path TEXT`);
+}
+
 // v2.1.10 N4-cont-1 T22 (Phase 4)：seed 收单单据 raw_json idle 自动清理保留窗口（默认 7 天）
 //   spec §4.1.1 单键策略（v0.2 reverse sync 后从 v0.1 双键降为单键）
 //   - 仅清「对账成功」（不在 acquiring_bill_currency_diff_rows 中）且 imported_at < N 天前的 bill_imports.raw_json
@@ -3213,6 +3231,9 @@ module.exports = {
   ensureAcquiringBillWorkerCountSetting,
   ensureAcquiringBillCurrencyRunsChunkProgress,
   ensureAcquiringBillCurrencyRunsSideDbPath,
+  // v3.0.5 PR-4（Part B Phase 2）：bank-bu / biz-op runs 表加 side_db_rel_path 列（侧库镜像）
+  ensureBankBuReconRunsSideDbPath,
+  ensureBizOpReconRunsSideDbPath,
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings（v0.2 单键）
   ensureAcquiringBillCurrencyRawJsonRetentionSettings,
   ensureBillRawJsonV2Slim,

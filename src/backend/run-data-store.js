@@ -40,9 +40,15 @@ const SIDE_DB_PRAGMA_STATEMENTS = Object.freeze([
   'PRAGMA busy_timeout = 30000;',
 ]);
 
-// 已接入侧库的模块白名单（PR-3 仅 acquiring；PR-4 扩 biz-op-recon / bank-bu-recon）。
+// 已接入侧库的模块白名单（PR-3 acquiring；PR-4 扩 biz-op-recon / bank-bu-recon）。
 const MODULE_ACQUIRING = 'acquiring-bill-currency';
-const KNOWN_MODULES = Object.freeze([MODULE_ACQUIRING]);
+// v3.0.5 PR-4（Part B Phase 2）：业务OP数据核对 / 月度银行对账单BU回填校验 两模块侧库化。
+//   两者生命周期键均 = per-month（month-{YYYY-MM}.sqlite）：
+//     - bank-bu：天然按 year_month（importMonthAtomic 原子覆盖），与 acquiring 同构。
+//     - biz-op：imports 按 date 分片但数据量小，按「对账归属月」= month(date) 单库自洽（免 ATTACH）。
+const MODULE_BIZ_OP = 'biz-op-recon';
+const MODULE_BANK_BU = 'bank-bu-recon';
+const KNOWN_MODULES = Object.freeze([MODULE_ACQUIRING, MODULE_BIZ_OP, MODULE_BANK_BU]);
 
 // run-data 根目录名（{userData}/run-data/）。
 const RUN_DATA_DIRNAME = 'run-data';
@@ -182,8 +188,246 @@ const SIDE_DB_DDL_ACQUIRING = `
     ON acquiring_bill_currency_diff_rows(run_id);
 `;
 
+// ── biz-op 4 表 DDL（byte-for-byte 平移自 biz-op-recon-db/migrations.js ensureBizOpReconTablesSupport）──
+//   差异点（侧库专属）：
+//     1. runs.t2_anomaly_account_count 在新库建表即含该列（主库走 hasColumn+ALTER 幂等加列分支，
+//        侧库新建即终态，直接含列；schema 等价）。
+//     2. diff_rows FK 引用 runs(id)（主库无 ON DELETE CASCADE，侧库也不加——byte-for-byte；
+//        删整月 = 删文件，无需级联；删单 (date,BU) 由 clearRunsAndDiffsByDateBu 按 FK 顺序手删）。
+//   ⚠️ worker（import-worker.js openDb）打开侧库时也会 ensureBizOpReconTablesSupport(db) 防御性建表，
+//     必须与本 DDL 同 schema（CREATE TABLE/INDEX IF NOT EXISTS 幂等，先到先建，schema 一致即无冲突）。
+const SIDE_DB_DDL_BIZ_OP = `
+  CREATE TABLE IF NOT EXISTS biz_op_recon_imports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    data_date TEXT NOT NULL,
+    bu_name TEXT NOT NULL,
+    row_index INTEGER NOT NULL,
+    bill_date_raw TEXT,
+    customer_no TEXT,
+    entity TEXT,
+    account_no TEXT NOT NULL,
+    account_type TEXT,
+    currency TEXT,
+    begin_balance TEXT,
+    amount TEXT,
+    amount_in TEXT,
+    amount_out TEXT,
+    end_balance TEXT,
+    end_available_balance TEXT,
+    end_frozen_balance TEXT,
+    last_updated TEXT,
+    channel TEXT,
+    pp_card_id TEXT,
+    bank_card_no TEXT,
+    extra_info TEXT,
+    account_status TEXT,
+    biz_id TEXT,
+    sys_created_at TEXT,
+    sys_updated_at TEXT,
+    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_biz_op_imports_date_bu
+    ON biz_op_recon_imports(data_date, bu_name);
+  CREATE INDEX IF NOT EXISTS idx_biz_op_imports_account
+    ON biz_op_recon_imports(data_date, bu_name, account_no);
+  CREATE INDEX IF NOT EXISTS idx_biz_op_imports_bu
+    ON biz_op_recon_imports(bu_name);
+
+  CREATE TABLE IF NOT EXISTS biz_op_recon_flow_imports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    data_date TEXT NOT NULL,
+    row_index INTEGER NOT NULL,
+    biz_id TEXT,
+    bill_date_raw TEXT,
+    origin_biz_id TEXT,
+    main_account TEXT,
+    company_entity TEXT,
+    flow_type TEXT,
+    bu_dept TEXT,
+    recon_main_id TEXT,
+    direction TEXT NOT NULL,
+    flow_no TEXT,
+    user_no TEXT,
+    account_no TEXT NOT NULL,
+    split_type TEXT,
+    recon_amount TEXT NOT NULL,
+    currency TEXT,
+    account_type TEXT,
+    flow_start_at TEXT,
+    flow_end_at TEXT,
+    channel TEXT,
+    merchant_id TEXT,
+    value_date TEXT,
+    bank_ref TEXT,
+    pending_flag TEXT,
+    flow_biz_id TEXT,
+    trace_id TEXT,
+    operator TEXT,
+    sys_created_at TEXT,
+    sys_updated_at TEXT,
+    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_biz_op_flow_imports_date
+    ON biz_op_recon_flow_imports(data_date);
+  CREATE INDEX IF NOT EXISTS idx_biz_op_flow_imports_date_bu
+    ON biz_op_recon_flow_imports(data_date, bu_dept);
+  CREATE INDEX IF NOT EXISTS idx_biz_op_flow_imports_account
+    ON biz_op_recon_flow_imports(data_date, account_no);
+
+  CREATE TABLE IF NOT EXISTS biz_op_recon_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    data_date TEXT NOT NULL,
+    bu_name TEXT NOT NULL,
+    run_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status TEXT NOT NULL,
+    t1_op_total INTEGER NOT NULL DEFAULT 0,
+    t2_op_total INTEGER NOT NULL DEFAULT 0,
+    flow_total INTEGER NOT NULL DEFAULT 0,
+    amount_diff_count INTEGER NOT NULL DEFAULT 0,
+    multi_op_account_count INTEGER NOT NULL DEFAULT 0,
+    t2_anomaly_account_count INTEGER NOT NULL DEFAULT 0,
+    t1_not_t2_count INTEGER NOT NULL DEFAULT 0,
+    t2_not_t1_count INTEGER NOT NULL DEFAULT 0,
+    export_path TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_biz_op_runs_date_bu
+    ON biz_op_recon_runs(data_date, bu_name, run_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_biz_op_runs_status
+    ON biz_op_recon_runs(status, data_date);
+
+  CREATE TABLE IF NOT EXISTS biz_op_recon_diff_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    data_date TEXT NOT NULL,
+    bu_name TEXT NOT NULL,
+    source_table TEXT NOT NULL,
+    source_row_id INTEGER NOT NULL,
+    cmp_t2 TEXT NOT NULL DEFAULT '',
+    multi_op_flag TEXT NOT NULL,
+    cmp_amount TEXT NOT NULL DEFAULT '',
+    amount_diff TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (run_id) REFERENCES biz_op_recon_runs(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_biz_op_diff_run
+    ON biz_op_recon_diff_rows(run_id);
+  CREATE INDEX IF NOT EXISTS idx_biz_op_diff_date_bu
+    ON biz_op_recon_diff_rows(data_date, bu_name);
+`;
+
+// ── bank-bu 3 表 DDL（byte-for-byte 平移自 database/migrations.js ensureBankBuReconTablesSupport，2410-2529）──
+//   bank-bu 无 diff_rows 表（差异由 session.runReconciliation 实时算，不落库）；侧库只含
+//   pending_imports / bank_imports / runs 三表 + 5 索引。runs 业务真值在侧库（insertRun），
+//   主库另存镜像行（side_db_rel_path + summary + status，供 UI/导出读）。
+const SIDE_DB_DDL_BANK_BU = `
+  CREATE TABLE IF NOT EXISTS bank_bu_recon_pending_imports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    year_month TEXT NOT NULL,
+    row_index INTEGER NOT NULL,
+    pending_biz_id TEXT,
+    bill_date TEXT,
+    pending_type TEXT,
+    fund_type TEXT,
+    entity TEXT,
+    finance_bu TEXT,
+    biz_dept TEXT,
+    counter_dept TEXT,
+    recon_id TEXT,
+    channel TEXT,
+    account_no TEXT,
+    amount TEXT,
+    currency TEXT,
+    bank_period TEXT,
+    balance_period TEXT,
+    remark TEXT,
+    status TEXT,
+    update_time TEXT,
+    operator TEXT,
+    bu_fix_flag TEXT,
+    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_bbr_pending_month
+    ON bank_bu_recon_pending_imports(year_month);
+  CREATE INDEX IF NOT EXISTS idx_bbr_pending_reconid
+    ON bank_bu_recon_pending_imports(year_month, recon_id);
+
+  CREATE TABLE IF NOT EXISTS bank_bu_recon_bank_imports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    year_month TEXT NOT NULL,
+    row_index INTEGER NOT NULL,
+    account_entity TEXT,
+    account_bu TEXT,
+    biz_id TEXT,
+    bill_date TEXT,
+    value_date TEXT,
+    channel TEXT,
+    region TEXT,
+    merchant_id TEXT,
+    currency TEXT,
+    credit_amount TEXT,
+    debit_amount TEXT,
+    reconciliation_id TEXT,
+    channel_order_no TEXT,
+    customer_ref TEXT,
+    account_reference TEXT,
+    transaction_description TEXT,
+    extra_information TEXT,
+    payment_detail TEXT,
+    payee_name TEXT,
+    payee_card_no TEXT,
+    drawee_name TEXT,
+    drawee_card_no TEXT,
+    by_order_of_beneficiary TEXT,
+    extra_fee TEXT,
+    trade_channel TEXT,
+    fund_type TEXT,
+    remark_description TEXT,
+    datasource TEXT,
+    remark_bu TEXT,
+    fill_method TEXT,
+    related_account TEXT,
+    auto_category_rule TEXT,
+    categorized_by TEXT,
+    clearing_network TEXT,
+    last_modified_time TEXT,
+    recon_amount TEXT,
+    origin_bill_id TEXT,
+    fx_channel TEXT,
+    fx_recon_id TEXT,
+    buy_currency TEXT,
+    buy_amount TEXT,
+    sell_currency TEXT,
+    sell_amount TEXT,
+    split_info TEXT,
+    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_bbr_bank_month
+    ON bank_bu_recon_bank_imports(year_month);
+  CREATE INDEX IF NOT EXISTS idx_bbr_bank_reconid
+    ON bank_bu_recon_bank_imports(year_month, reconciliation_id);
+
+  CREATE TABLE IF NOT EXISTS bank_bu_recon_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    year_month TEXT NOT NULL,
+    run_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status TEXT NOT NULL,
+    pending_total INTEGER NOT NULL,
+    bank_total INTEGER NOT NULL,
+    matched_count INTEGER NOT NULL,
+    bu_diff_count INTEGER NOT NULL,
+    pending_unmatched INTEGER NOT NULL,
+    bank_unmatched INTEGER NOT NULL,
+    anomaly_count INTEGER NOT NULL DEFAULT 0,
+    anomaly_report_path TEXT,
+    export_path TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_bbr_runs_month
+    ON bank_bu_recon_runs(year_month, run_at DESC);
+`;
+
 const MODULE_DDL = Object.freeze({
   [MODULE_ACQUIRING]: SIDE_DB_DDL_ACQUIRING,
+  [MODULE_BIZ_OP]: SIDE_DB_DDL_BIZ_OP,
+  [MODULE_BANK_BU]: SIDE_DB_DDL_BANK_BU,
 });
 
 // 打开（必要时建库）侧库连接。
@@ -270,6 +514,8 @@ function listSideDbFiles(userDataDir, module) {
 
 module.exports = {
   MODULE_ACQUIRING,
+  MODULE_BIZ_OP,
+  MODULE_BANK_BU,
   KNOWN_MODULES,
   RUN_DATA_DIRNAME,
   SIDE_DB_PRAGMA_STATEMENTS,
