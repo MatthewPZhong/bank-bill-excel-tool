@@ -12946,7 +12946,9 @@ function runStartupPostSetup() {
     });
 
     // v3.0.5 PR-3（Part B Phase 1 / B.6）：侧库孤儿双向兜底（启动扫描 run-data/{module}/ vs 主库 runs 元数据）
-    //   ① 有文件无元数据 → 删文件 + log；② 有元数据无文件 → 标记 run 失效（UI 降级「数据已清理」不崩溃）。
+    //   ① 有文件无元数据「且空壳（侧库无 flow/bill imports）」→ 删文件 + log；
+    //     🔴 codex PR#73 P1：import-only（已导入未对账，有数据无 mirror）= 有效中间态，保留不删（防丢导入数据，对齐 biz-op/bank-bu）；
+    //   ② 有元数据无文件 → 标记 run 失效（UI 降级「数据已清理」不崩溃）。
     //   一致性原则：以侧库文件存在性为准（spec §B.6）。与上面主库孤儿清理（既有行级，双源过渡保留）并存。
     //   后台 setImmediate，不阻塞窗口 ready；持同一把 op lock 避免与用户首次 import/run 并发。
     setImmediate(() => {
