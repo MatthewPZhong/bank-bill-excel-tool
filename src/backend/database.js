@@ -1196,6 +1196,39 @@ class AppDatabase {
     return linkedTableRepository.upsertLinkedGatewayBillStreaming(this.db, feedRows, options || {});
   }
 
+  // v3.0.5 需求1：银行对账单入金表「按 BizId 幂等 upsert」（数组版，同步）——累加不整表覆盖。
+  //   返回 { upserted, overwriteCount, rejectedEmptyCount, rowCount, dataDateMin, dataDateMax, updatedAt }。
+  upsertLinkedBankDeposit(rows, options) {
+    return linkedTableRepository.upsertLinkedBankDeposit(this.db, rows, options || {});
+  }
+
+  // v3.0.5 需求1：银行对账单入金表「按 BizId 幂等 upsert」（流式版，async）。
+  //   🔴🔴 资金红线（R-6）：65.7 万行单事务跨 await；feedRows 中途 throw → ROLLBACK，表保持调用前状态。
+  upsertLinkedBankDepositStreaming(feedRows, options) {
+    return linkedTableRepository.upsertLinkedBankDepositStreaming(this.db, feedRows, options || {});
+  }
+
+  // v3.0.5 需求2：外汇交割表「按交易编号幂等 upsert」（仅数组版，同步；fx 永不流式）——累加不整表覆盖。
+  //   返回 { upserted, overwriteCount, rejectedEmptyCount, rowCount, dataDateMin, dataDateMax, updatedAt }。
+  upsertLinkedFx(rows, options) {
+    return linkedTableRepository.upsertLinkedFx(this.db, rows, options || {});
+  }
+
+  // v3.0.5 需求（OPEN-7 / T5a）：银行对账单入金表「跨期重复命中提醒」命中标记读（bizIds → Map<bizId,{last_hit_run,last_hit_at}>）。
+  readBankDepositHitMarkers(bizIds) {
+    return linkedTableRepository.readBankDepositHitMarkers(this.db, bizIds);
+  }
+
+  // v3.0.5 需求（OPEN-7 / T5a）：命中标记写（bizIds 批量 UPDATE last_hit_run/last_hit_at，仅已存在行；返回 { marked }）。
+  markBankDepositHits(bizIds, runId, atIso) {
+    return linkedTableRepository.markBankDepositHits(this.db, bizIds, runId, atIso);
+  }
+
+  // v3.0.5 需求（OPEN-7 / T5a）：命中标记清（bizIds 批量置 NULL；本批不接线，OPEN-4 删除联动批次4 接入；返回 { cleared }）。
+  clearBankDepositHitMarkersByBizIds(bizIds) {
+    return linkedTableRepository.clearBankDepositHitMarkersByBizIds(this.db, bizIds);
+  }
+
   // v3.0.1 需求1 / task4：按数据日期范围统计将删行数（只读，前端删除弹框预览「将删约 N 行」）。
   countGatewayBillByDateRange(startDate, endDate) {
     return linkedTableRepository.countGatewayBillByDateRange(this.db, startDate, endDate);
@@ -1204,6 +1237,28 @@ class AppDatabase {
   // v3.0.1 需求1 / task4：🔴 资金红线——按数据日期闭区间删除网关对账单行（不可逆，单事务，删后 meta 全表重算）。
   deleteGatewayBillByDateRange(startDate, endDate, options) {
     return linkedTableRepository.deleteGatewayBillByDateRange(this.db, startDate, endDate, options || {});
+  }
+
+  // v3.0.5 OPEN-4（T6a）：按 transaction_date 闭区间统计 fx 将删行数（只读预览，前端删除弹框「将删约 N 行」）。
+  countFxByDateRange(startDate, endDate) {
+    return linkedTableRepository.countFxByDateRange(this.db, startDate, endDate);
+  }
+
+  // v3.0.5 OPEN-4（T6a）：按 bill_date 闭区间统计 bank-deposit 将删行数（只读预览）。
+  countBankDepositByDateRange(startDate, endDate) {
+    return linkedTableRepository.countBankDepositByDateRange(this.db, startDate, endDate);
+  }
+
+  // v3.0.5 OPEN-4（T6a）：🔴🔴 资金红线——按 transaction_date 闭区间删除外汇交割表行（不可逆，单事务）+ 联动删 BOC 派生表
+  //   （按 transaction_no IN 被删行的交易编号，绝不按 maturity_date/日期）。返回含 deletedTxnNos / bocDeleted（T6b 派生重建用）。
+  deleteFxByDateRange(startDate, endDate, options) {
+    return linkedTableRepository.deleteFxByDateRange(this.db, startDate, endDate, options || {});
+  }
+
+  // v3.0.5 OPEN-4（T6a）：🔴 资金红线——按 bill_date 闭区间删除银行对账单入金表行（不可逆，单事务，删后 meta 全表重算）。
+  //   返回含 deletedBizIds（T6b 用于清 OPEN-7 命中标记 / ADM·BOC bank 派生重建）。
+  deleteBankDepositByDateRange(startDate, endDate, options) {
+    return linkedTableRepository.deleteBankDepositByDateRange(this.db, startDate, endDate, options || {});
   }
 
   // v2.1.16-beta.2 T1：读回某 tableKey 全部整行（raw_json → 对象，字段名 = 真实表头）；
@@ -1254,6 +1309,26 @@ class AppDatabase {
   // BOC链接表整表覆盖写入（8 列 INSERT，热列从内部辅助键取，raw_json 剥辅助键）
   replaceBocFxLink(rows) {
     return linkedTableRepository.replaceBocFxLink(this.db, rows);
+  }
+
+  // v3.0.5 批次2b：BOC链接表幂等 upsert（按 transaction_no，同键覆盖 id 不变，含 orig_group_no）
+  upsertBocFxLink(rows) {
+    return linkedTableRepository.upsertBocFxLink(this.db, rows);
+  }
+
+  // v3.0.5 批次2b：取现有最大 orig_group_no（scan offset 续编用）
+  getMaxBocFxOrigGroupNo() {
+    return linkedTableRepository.getMaxBocFxOrigGroupNo(this.db);
+  }
+
+  // v3.0.5 批次2b：读全库 BOC 行供全量重匹配（[{ id, row }]，row 注入 __origGroup 辅助键，按 id ASC）
+  readBocFxLinkRowsForRematch() {
+    return linkedTableRepository.readBocFxLinkRowsForRematch(this.db);
+  }
+
+  // v3.0.5 批次2b：全量重匹配后按 id 回写 group_no/allocation_no + raw_json（不碰 recon_link_id/orig_group_no）
+  writeBocFxLinkGroupRematch(rowsWithIds) {
+    return linkedTableRepository.writeBocFxLinkGroupRematch(this.db, rowsWithIds);
   }
 
   // 读回 BOC链接表业务行（raw_json → 对象，按 id ASC）；供 BOC 引擎数据源

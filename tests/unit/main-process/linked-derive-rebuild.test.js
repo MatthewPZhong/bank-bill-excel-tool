@@ -1,0 +1,427 @@
+// v3.0.5 批次4（T6b-1）：链接表派生重建共享编排函数单测（🔴🔴 资金红线 parity）。
+//
+// 验证目标：三个抽出的纯编排函数（rebuildAdmDerivation / rebuildBankDepositBocDerivation / rebuildFxBocDerivation）
+//   产物结构与旧内联（src/main.js 导入 handler）字节一致——这是「导入行为字节不变」的 parity 锁之一。
+//
+// 测试策略：
+//   · rebuildAdmDerivation / rebuildBankDepositBocDerivation：mock database + mock builder（验证编排骨架与产物字段，
+//     builder 自身逻辑由 boc-fx-link-builder.test.js / adm-bank-deposit-builder 单测各自锁定）。
+//   · rebuildFxBocDerivation：用【真实】rematchAllBocGroups / buildBocBankRows / backfillBocReconLinkIds（复用 builder 夹具），
+//     仅 mock database 读写——验证重匹配重编号 + 2.4 + 2.5 + 统计的端到端编排正确。
+//
+// 🔴 不变量：reconIdFixResult=null / processingResult=null 不在共享函数内（留 caller）——函数内绝不出现这两个赋值
+//   （本测试通过「函数无副作用泄漏到外部全局」隐式保证：deps 不含这两个变量，函数无法触及）。
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const {
+  rebuildAdmDerivation,
+  rebuildBankDepositBocDerivation,
+  rebuildFxBocDerivation
+} = require('../../../src/main-process/linked-derive-rebuild');
+
+// 真实 builder（rebuildFxBocDerivation 端到端用）
+const {
+  rematchAllBocGroups,
+  buildBocBankRows,
+  backfillBocReconLinkIds,
+  KEY_ORIG_GROUP
+} = require('../../../src/main-process/boc-fx-link-builder');
+
+// —— 工具：收集 appendActivityLogEntry 调用 ——
+function makeLogSink() {
+  const calls = [];
+  const fn = (entry) => calls.push(entry);
+  fn.calls = calls;
+  return fn;
+}
+
+// ============================================================================
+// 1) rebuildAdmDerivation
+// ============================================================================
+test.describe('rebuildAdmDerivation —— ADM 派生编排', () => {
+  test('成功：admDerive 结构与旧内联字节一致（total/matched/unmatched 映射/midEmpty）', () => {
+    const replaced = [];
+    const database = {
+      readLinkedTableRows: (key) => { assert.equal(key, 'mid-allocation'); return [{ '调拨单号': 'M1' }]; },
+      readBankDepositAdmCandidates: () => [{ Channel: 'ADM', BizId: 'B1' }, { Channel: 'ADM', BizId: 'B2' }],
+      replaceAdmBankDeposit: (rows) => { replaced.push(...rows); }
+    };
+    // mock buildAdmRows：2 行，其中 1 行 unmatched（含 conflict）。
+    const buildAdmRows = (bankCands, midRows) => {
+      assert.equal(bankCands.length, 2, '收到 ADM 候选');
+      assert.equal(midRows.length, 1, '收到中台行');
+      return {
+        admRows: [{ '批次号': 'BN1' }, { '批次号': 'BN2' }],
+        unmatched: [{
+          code: 'NO_MATCH',
+          row: { '批次号': 'BN2', CustomerRef: 'CR2', BillDate: '2026-05-04', ChannelOrderNo: 'CO2' },
+          conflict: ['x', 'y']
+        }],
+        midEmpty: false
+      };
+    };
+
+    const { admDerive } = rebuildAdmDerivation({ database, buildAdmRows });
+    assert.equal(replaced.length, 2, 'replaceAdmBankDeposit 收到 admRows');
+    assert.deepEqual(admDerive, {
+      created: true,
+      total: 2,
+      matched: 1,
+      unmatched: [{
+        code: 'NO_MATCH',
+        batchNo: 'BN2',
+        customerRef: 'CR2',
+        billDate: '2026-05-04',
+        channelOrderNo: 'CO2',
+        conflict: ['x', 'y']
+      }],
+      midEmpty: false
+    }, '🔴 admDerive 字节一致');
+  });
+
+  test('unmatched 无 conflict → conflict 字段 undefined（与旧内联一致）', () => {
+    const database = {
+      readLinkedTableRows: () => [],
+      readBankDepositAdmCandidates: () => [],
+      replaceAdmBankDeposit: () => {}
+    };
+    const buildAdmRows = () => ({
+      admRows: [{ '批次号': 'BN1' }],
+      unmatched: [{ code: 'NO_MATCH', row: { '批次号': 'BN1', CustomerRef: '', BillDate: '', ChannelOrderNo: '' } }],
+      midEmpty: true
+    });
+    const { admDerive } = rebuildAdmDerivation({ database, buildAdmRows });
+    assert.equal(admDerive.unmatched[0].conflict, undefined, '无 conflict → undefined');
+    assert.equal(admDerive.midEmpty, true);
+  });
+
+  test('候选空 → 重建空表不抛，admDerive.created:true total=0', () => {
+    let replacedRows = null;
+    const database = {
+      readLinkedTableRows: () => [],
+      readBankDepositAdmCandidates: () => [],
+      replaceAdmBankDeposit: (rows) => { replacedRows = rows; }
+    };
+    const buildAdmRows = () => ({ admRows: [], unmatched: [], midEmpty: true });
+    let ret;
+    assert.doesNotThrow(() => { ret = rebuildAdmDerivation({ database, buildAdmRows }); });
+    assert.deepEqual(replacedRows, [], '空候选 → replaceAdmBankDeposit([]) 重建空表');
+    assert.equal(ret.admDerive.created, true);
+    assert.equal(ret.admDerive.total, 0);
+    assert.equal(ret.admDerive.matched, 0);
+  });
+
+  test('buildAdmRows 抛错 → created:false + error（不向外抛）', () => {
+    const database = {
+      readLinkedTableRows: () => [],
+      readBankDepositAdmCandidates: () => [],
+      replaceAdmBankDeposit: () => {}
+    };
+    const buildAdmRows = () => { throw new Error('boom-adm'); };
+    let ret;
+    assert.doesNotThrow(() => { ret = rebuildAdmDerivation({ database, buildAdmRows }); });
+    assert.deepEqual(ret.admDerive, { created: false, error: 'boom-adm' });
+  });
+
+  test('replaceAdmBankDeposit 抛错 → created:false（写库失败也隔离）', () => {
+    const database = {
+      readLinkedTableRows: () => [],
+      readBankDepositAdmCandidates: () => [{ Channel: 'ADM' }],
+      replaceAdmBankDeposit: () => { throw new Error('db-write-fail'); }
+    };
+    const buildAdmRows = () => ({ admRows: [{ '批次号': 'BN1' }], unmatched: [], midEmpty: false });
+    const { admDerive } = rebuildAdmDerivation({ database, buildAdmRows });
+    assert.equal(admDerive.created, false);
+    assert.equal(admDerive.error, 'db-write-fail');
+  });
+});
+
+// ============================================================================
+// 2) rebuildBankDepositBocDerivation
+// ============================================================================
+test.describe('rebuildBankDepositBocDerivation —— BOC bank 派生（2.4）+ 2.5 回填', () => {
+  test('成功（有链接行）：bocBankDerive 结构与旧内联一致 + 2.5 回填 + 日志写入', () => {
+    const log = makeLogSink();
+    let replacedBank = null;
+    let writtenReconIds = null;
+    const database = {
+      readBankDepositBocCandidates: () => [{ Channel: 'BOC' }],
+      replaceBocBankDeposit: (rows) => { replacedBank = rows; },
+      readBocFxLinkRowsWithIds: () => [{ id: 1, row: { '交易编号': '100' } }],
+      writeBocFxLinkReconIds: (rows) => { writtenReconIds = rows; }
+    };
+    const buildBocBankRows = (cands) => {
+      assert.equal(cands.length, 1);
+      return { availability: 'ok', rows: [{ '银行单交易编号': '100' }, { '银行单交易编号': '200' }], logs: [{ level: 'info', message: 'bank-log' }] };
+    };
+    const backfillBocReconLinkIds = (linkRows, bankRows) => {
+      assert.equal(linkRows.length, 1);
+      assert.equal(bankRows.length, 2);
+      return { rows: [{ id: 1, row: {} }], backfilled: 1, unlinkedCount: 0, logs: [{ level: 'warning', message: 'bf-log' }] };
+    };
+
+    const { bocBankDerive } = rebuildBankDepositBocDerivation({
+      database, buildBocBankRows, backfillBocReconLinkIds, appendActivityLogEntry: log
+    });
+    assert.equal(replacedBank.length, 2, 'replaceBocBankDeposit 收到 bank rows');
+    assert.deepEqual(writtenReconIds, [{ id: 1, row: {} }], '2.5 回填写回');
+    assert.deepEqual(bocBankDerive, {
+      created: true,
+      bankRowCount: 2,
+      backfilled: 1,
+      unlinkedCount: 0
+    }, '🔴 bocBankDerive 字节一致');
+    // 日志：bank-log + bf-log 各写一条，domain=boc-dispatch-order-fix
+    assert.equal(log.calls.length, 2);
+    assert.equal(log.calls[0].message, 'bank-log');
+    assert.equal(log.calls[0].domain, 'boc-dispatch-order-fix');
+    assert.equal(log.calls[1].message, 'bf-log');
+    assert.equal(log.calls[1].level, 'warning');
+  });
+
+  test('无链接行（BOC链接表空）→ 跳过 2.5 回填，backfilled/unlinkedCount=0', () => {
+    const log = makeLogSink();
+    let writeReconCalled = false;
+    const database = {
+      readBankDepositBocCandidates: () => [{ Channel: 'BOC' }],
+      replaceBocBankDeposit: () => {},
+      readBocFxLinkRowsWithIds: () => [], // 空 → 跳过 2.5
+      writeBocFxLinkReconIds: () => { writeReconCalled = true; }
+    };
+    const buildBocBankRows = () => ({ availability: 'ok', rows: [{ x: 1 }], logs: [] });
+    const backfillBocReconLinkIds = () => { throw new Error('should-not-call-backfill'); };
+
+    const { bocBankDerive } = rebuildBankDepositBocDerivation({
+      database, buildBocBankRows, backfillBocReconLinkIds, appendActivityLogEntry: log
+    });
+    assert.equal(writeReconCalled, false, '🔴 无链接行不调 writeBocFxLinkReconIds');
+    assert.deepEqual(bocBankDerive, { created: true, bankRowCount: 1, backfilled: 0, unlinkedCount: 0 });
+  });
+
+  test('候选空（no-boc-rows）→ 重建空表不抛，bankRowCount=0', () => {
+    const log = makeLogSink();
+    let replaced = null;
+    const database = {
+      readBankDepositBocCandidates: () => [],
+      replaceBocBankDeposit: (rows) => { replaced = rows; },
+      readBocFxLinkRowsWithIds: () => [],
+      writeBocFxLinkReconIds: () => {}
+    };
+    const buildBocBankRows = () => ({ availability: 'no-boc-rows', rows: [], logs: [] });
+    const backfillBocReconLinkIds = () => { throw new Error('nope'); };
+    let ret;
+    assert.doesNotThrow(() => {
+      ret = rebuildBankDepositBocDerivation({ database, buildBocBankRows, backfillBocReconLinkIds, appendActivityLogEntry: log });
+    });
+    assert.deepEqual(replaced, [], '空候选 → replaceBocBankDeposit([]) 重建空表');
+    assert.deepEqual(ret.bocBankDerive, { created: true, bankRowCount: 0, backfilled: 0, unlinkedCount: 0 });
+  });
+
+  test('replaceBocBankDeposit 抛错 → created:false + error（隔离）', () => {
+    const log = makeLogSink();
+    const database = {
+      readBankDepositBocCandidates: () => [{ Channel: 'BOC' }],
+      replaceBocBankDeposit: () => { throw new Error('boc-bank-write-fail'); },
+      readBocFxLinkRowsWithIds: () => [],
+      writeBocFxLinkReconIds: () => {}
+    };
+    const buildBocBankRows = () => ({ availability: 'ok', rows: [{ x: 1 }], logs: [] });
+    const backfillBocReconLinkIds = () => ({ rows: [], backfilled: 0, unlinkedCount: 0, logs: [] });
+    const { bocBankDerive } = rebuildBankDepositBocDerivation({
+      database, buildBocBankRows, backfillBocReconLinkIds, appendActivityLogEntry: log
+    });
+    assert.equal(bocBankDerive.created, false);
+    assert.equal(bocBankDerive.error, 'boc-bank-write-fail');
+  });
+});
+
+// ============================================================================
+// 3) rebuildFxBocDerivation（真实 builder 端到端）
+// ============================================================================
+test.describe('rebuildFxBocDerivation —— fx 全量重匹配重编号 + 2.4 + 2.5 + 统计', () => {
+  // 造 readBocFxLinkRowsForRematch 产物项（[{ id, row }]，row 含 orig_group_no + 业务字段）。
+  function fxItem(id, { txnNo, origGroup, ccy2, maturity }) {
+    const row = {
+      '交易编号': txnNo,
+      '货币2金额': ccy2 === undefined ? '' : ccy2,
+      '到期日': maturity === undefined ? '' : maturity,
+      __maturityIso: maturity === undefined ? '' : maturity,
+      '分组': String(origGroup),
+      '调拨单号': '',
+      '资金对账不平表链接ID': ''
+    };
+    row[KEY_ORIG_GROUP] = String(origGroup);
+    return { id, row };
+  }
+  function midRow(o = {}) {
+    return Object.assign({ '调拨单号': '', '付款渠道': '', '收款金额': '', '交易时间': '' }, o);
+  }
+
+  // 组装一套 mock database（真实 builder 用）。
+  function makeFxDb({ allRows, midRows = [], bankCandidates = [], linkWithIds = null }) {
+    const captured = { written: null, replacedBank: null, reconWritten: null };
+    const database = {
+      readLinkedTableRows: (key) => { assert.equal(key, 'mid-allocation'); return midRows; },
+      readBocFxLinkRowsForRematch: () => allRows, // rematch 原地改 allRows[].row
+      writeBocFxLinkGroupRematch: (rows) => { captured.written = rows; },
+      readBankDepositBocCandidates: () => bankCandidates,
+      replaceBocBankDeposit: (rows) => { captured.replacedBank = rows; },
+      // 2.5：readBocFxLinkRowsWithIds 默认复用 allRows（id+row），caller 用 linkWithIds 覆盖
+      readBocFxLinkRowsWithIds: () => (linkWithIds !== null ? linkWithIds : allRows.map((it) => ({ id: it.id, row: it.row }))),
+      writeBocFxLinkReconIds: (rows) => { captured.reconWritten = rows; }
+    };
+    return { database, captured };
+  }
+
+  const realDeps = (database, log) => ({
+    database,
+    rematchAllBocGroups,
+    buildBocBankRows,
+    backfillBocReconLinkIds,
+    appendActivityLogEntry: log
+  });
+
+  test('重匹配重编号正确：orig_group_no 有空洞(5/9/3) → 分组重编号 1/2/3 写回 + 统计 total/groupCount/overwriteCount', () => {
+    const log = makeLogSink();
+    const allRows = [
+      fxItem(10, { txnNo: '100', origGroup: 5, ccy2: '10', maturity: '2026-05-04' }),
+      fxItem(11, { txnNo: '101', origGroup: 9, ccy2: '20', maturity: '2026-05-05' }),
+      fxItem(12, { txnNo: '102', origGroup: 3, ccy2: '30', maturity: '2026-05-06' })
+    ];
+    const { database, captured } = makeFxDb({ allRows, midRows: [], bankCandidates: [], linkWithIds: [] });
+
+    const { bocDerive } = rebuildFxBocDerivation(realDeps(database, log), {
+      scanLogs: [{ level: 'info', message: 'scan-log' }],
+      groupCount: 3,
+      overwriteCount: 1
+    });
+
+    // 重编号写回（writeBocFxLinkGroupRematch 收到 rematch 后 allRows）
+    assert.deepEqual(captured.written.map((it) => it.row['分组']), ['1', '2', '3'], '🔴 分组重编号 1..N 写回');
+    assert.deepEqual(captured.written.map((it) => it.row[KEY_ORIG_GROUP]), ['5', '9', '3'], '🔴 orig_group_no 不改写');
+    // 统计字段（caller 传入 groupCount/overwriteCount 透传；无 bank 候选 → needBankImport=true）
+    assert.equal(bocDerive.created, true);
+    assert.equal(bocDerive.total, 3, 'total = 全库行数');
+    assert.equal(bocDerive.groupCount, 3, 'groupCount 来自 caller 透传');
+    assert.equal(bocDerive.overwriteCount, 1, 'overwriteCount 来自 caller 透传');
+    assert.equal(bocDerive.step22Removed, 0, '无 2.2 剔除');
+    assert.equal(bocDerive.step23MatchedGroups, 0, '无中台 → 无回填');
+    assert.equal(bocDerive.step23UnmatchedGroups, 3, '3 组均未回填');
+    assert.equal(bocDerive.needBankImport, true, '无 bank 候选 → 需导入');
+    assert.equal(bocDerive.bankMissingReason, 'no-boc-rows');
+    // 日志：scan-log 在最前（caller 传入），随后 rematch / 无中台 info / bank build logs
+    assert.equal(log.calls[0].message, 'scan-log', '🔴 scanLogs 在 allLogs 最前');
+    assert.ok(log.calls.some((c) => c.message.indexOf('无中台调拨订单数据') >= 0), '无中台 info log 写入');
+  });
+
+  test('2.2 单行剔除 + 2.3 组汇总命中 → step22Removed/step23Matched 统计正确', () => {
+    const log = makeLogSink();
+    // org1=[100,101]（10+20=30）2.3 命中；org2=[200]（50）2.2 单行剔除（分组清空）。
+    const allRows = [
+      fxItem(1, { txnNo: '100', origGroup: 1, ccy2: '10', maturity: '2026-05-04' }),
+      fxItem(2, { txnNo: '101', origGroup: 1, ccy2: '20', maturity: '2026-05-04' }),
+      fxItem(3, { txnNo: '200', origGroup: 2, ccy2: '50', maturity: '2026-05-04' })
+    ];
+    const midRows = [
+      midRow({ '调拨单号': 'G30', '付款渠道': 'BOC', '收款金额': '30', '交易时间': '2026-05-04' }),
+      midRow({ '调拨单号': 'KILL', '付款渠道': 'BOC', '收款金额': '50', '交易时间': '2026-05-04' })
+    ];
+    const { database, captured } = makeFxDb({ allRows, midRows, bankCandidates: [], linkWithIds: [] });
+
+    const { bocDerive } = rebuildFxBocDerivation(realDeps(database, log), {
+      scanLogs: [], groupCount: 2, overwriteCount: 0
+    });
+
+    // org2 单行被 2.2 清空分组 → step22Removed=1；org1 命中调拨单号 → step23MatchedGroups=1。
+    assert.equal(bocDerive.step22Removed, 1, '🔴 2.2 单行剔除计数');
+    assert.equal(bocDerive.step23MatchedGroups, 1, '🔴 2.3 命中组数');
+    assert.equal(bocDerive.step23UnmatchedGroups, 0, '剩余组均已回填');
+    assert.equal(bocDerive.total, 3);
+    // 写回的 org1 两行调拨单号 = G30
+    assert.equal(captured.written[0].row['调拨单号'], 'G30', 'org1 回填调拨单号');
+    assert.equal(captured.written[2].row['分组'], '', 'org2 分组清空');
+  });
+
+  test('2.4 有 BOC 银行候选 + 2.5 回填命中 → needBankImport=false + backfilled 计数', () => {
+    const log = makeLogSink();
+    const allRows = [
+      fxItem(1, { txnNo: '100', origGroup: 1, ccy2: '10', maturity: '2026-05-04' })
+    ];
+    // BOC 银行候选：地区=CN ∧ Currency=USD ∧ Credit=0，Payment Detail 含关键词「无折存款借记交易」+ 数字串 100 → 银行单交易编号 100。
+    const bankCandidates = [{
+      Channel: 'BOC', '地区': 'CN', Currency: 'USD', 'Credit Amount': '0',
+      ReconciliationId: 'RECON-100', 'Payment Detail': '无折存款借记交易 100', BillDate: '2026-05-04'
+    }];
+    const { database, captured } = makeFxDb({ allRows, midRows: [], bankCandidates, linkWithIds: null });
+
+    const { bocDerive } = rebuildFxBocDerivation(realDeps(database, log), {
+      scanLogs: [], groupCount: 1, overwriteCount: 0
+    });
+
+    assert.equal(bocDerive.needBankImport, false, '🔴 有可用 BOC 候选 → 不需导入');
+    assert.equal(bocDerive.bankMissingReason, null);
+    assert.equal(captured.replacedBank.length, 1, 'BOC 银行表派生 1 行');
+    // 2.5：交易编号 100 命中银行单交易编号 100 → 资金对账不平表链接ID = RECON-100。
+    assert.equal(bocDerive.backfilled, 1, '🔴 2.5 命中回填 1 行');
+    assert.equal(bocDerive.unlinkedCount, 0);
+    assert.equal(captured.reconWritten[0].row['资金对账不平表链接ID'], 'RECON-100', '链接ID 回填');
+  });
+
+  test('全空（无库行/无中台/无候选）→ 重建空表不抛 + needBankImport=true + total=0', () => {
+    const log = makeLogSink();
+    const { database, captured } = makeFxDb({ allRows: [], midRows: [], bankCandidates: [], linkWithIds: [] });
+    let ret;
+    assert.doesNotThrow(() => {
+      ret = rebuildFxBocDerivation(realDeps(database, log), { scanLogs: [], groupCount: 0, overwriteCount: 0 });
+    });
+    assert.deepEqual(captured.replacedBank, [], '空候选 → 重建空 BOC 银行表');
+    assert.equal(ret.bocDerive.created, true);
+    assert.equal(ret.bocDerive.total, 0);
+    assert.equal(ret.bocDerive.needBankImport, true);
+    assert.equal(ret.bocDerive.bankMissingReason, 'no-boc-rows');
+    // 无中台 info log 仍写
+    assert.ok(log.calls.some((c) => c.message.indexOf('无中台调拨订单数据') >= 0));
+  });
+
+  test('readBocFxLinkRowsForRematch 抛错 → bocDerive.created:false + error（隔离，不向外抛）', () => {
+    const log = makeLogSink();
+    const database = {
+      readLinkedTableRows: () => [],
+      readBocFxLinkRowsForRematch: () => { throw new Error('rematch-read-fail'); },
+      writeBocFxLinkGroupRematch: () => {},
+      readBankDepositBocCandidates: () => [],
+      replaceBocBankDeposit: () => {},
+      readBocFxLinkRowsWithIds: () => [],
+      writeBocFxLinkReconIds: () => {}
+    };
+    let ret;
+    assert.doesNotThrow(() => {
+      ret = rebuildFxBocDerivation(realDeps(database, log), { scanLogs: [], groupCount: 0, overwriteCount: 0 });
+    });
+    assert.equal(ret.bocDerive.created, false);
+    assert.equal(ret.bocDerive.error, 'rematch-read-fail');
+  });
+
+  test('readLinkedTableRows(mid) 抛错 → 按无中台处理（不抛 + 跳 2.2/2.3）', () => {
+    const log = makeLogSink();
+    const allRows = [fxItem(1, { txnNo: '100', origGroup: 1, ccy2: '10', maturity: '2026-05-04' })];
+    const database = {
+      readLinkedTableRows: () => { throw new Error('mid-read-fail'); },
+      readBocFxLinkRowsForRematch: () => allRows,
+      writeBocFxLinkGroupRematch: () => {},
+      readBankDepositBocCandidates: () => [],
+      replaceBocBankDeposit: () => {},
+      readBocFxLinkRowsWithIds: () => [],
+      writeBocFxLinkReconIds: () => {}
+    };
+    let ret;
+    assert.doesNotThrow(() => {
+      ret = rebuildFxBocDerivation(realDeps(database, log), { scanLogs: [], groupCount: 1, overwriteCount: 0 });
+    });
+    assert.equal(ret.bocDerive.created, true, '🔴 mid 读失败按无中台处理，不阻断');
+    assert.equal(ret.bocDerive.step23MatchedGroups, 0);
+    assert.ok(log.calls.some((c) => c.message.indexOf('无中台调拨订单数据') >= 0), '走无中台分支 info log');
+  });
+});

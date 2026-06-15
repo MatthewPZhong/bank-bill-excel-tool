@@ -6,6 +6,9 @@ const { normalizeText } = require('./utils');
 const { appendModuleLog } = require('../logger');
 // v2.1.16-beta.5 需求4：JPM 调拨订单修复写死场景默认商户号（与引擎从 scenario.config.merchantId 读同源）。
 const { ADM_MERCHANT_ID } = require('../../constants/adm-bank-deposit-fields');
+// v3.0.5 需求2：fx 主表幂等键回填用「交易编号归一」单一真相（与仓储 upsert / builder 派生同口径，防漂移）。
+//   ⚠️ engine-utils 是无依赖纯 JS 工具（零 require），不引入循环依赖。
+const { normalizeTransactionNo } = require('../../main-process/scenario-engines/engine-utils');
 
 function hasColumn(db, tableName, columnName) {
   const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
@@ -2900,6 +2903,50 @@ function ensureLinkedTableSupport(db) {
     db.exec('CREATE INDEX IF NOT EXISTS idx_linked_fx_settlement_no ON linked_fx_settlement(transaction_no);');
     db.exec('CREATE INDEX IF NOT EXISTS idx_linked_fx_settlement_date ON linked_fx_settlement(transaction_date);');
 
+    // v3.0.5 需求2：外汇交割表「按交易编号幂等累加」——回填幂等键列 transaction_no + UNIQUE 索引（仿 v3.0.1 网关 / 需求1 bank-deposit 段）。
+    //   🔴🔴 资金红线（spec R-7 / TechDoc A-2）：交易编号唯一性仅单文件单日（20260513）证实；建 UNIQUE 前必须清洗存量
+    //     （删空键 + 去重保留 id 最大），否则 CREATE UNIQUE INDEX 在存量空键/重复键上抛错 → 整个 ensureLinkedTableSupport 事务
+    //     ROLLBACK → 资金模块启动失败。去重保留 id 最大 = 同键真撞则保留最新；delDup>0 即异常信号（需人工核对是否合法重复交易编号）。
+    //   ⚠️ 现状 transaction_no 列本就存在（建表即有，:2894），不能用 hasColumn 守卫；用「UNIQUE 索引是否已存在」作幂等守卫
+    //     （PRAGMA index_list 查 idx_linked_fx_settlement_txn_uniq）——仅首次（无 UNIQUE 索引）执行回填+清洗+建 UNIQUE，二次启动跳过。
+    //   ⚠️ 与 bank-deposit（SQL TRIM(json_extract)）不同：fx「交易编号」是 number 类型（9 位纯数字），SQL json_extract 取数有量纲歧义
+    //     （TechDoc 决策5）→ fx 体量小（spec §1.6 单文件覆盖产物），走 JS 层全表读 + normalizeTransactionNo 归一回填更稳；
+    //     与仓储 upsert 幂等键 normalizeTransactionNo(交易编号) / builder 派生分组同口径（单一真相 engine-utils，防漂移）。
+    //   ⚠️ 新建 UNIQUE 索引须用不同名（idx_linked_fx_settlement_txn_uniq）——现状已有普通索引 idx_linked_fx_settlement_no（:2900），
+    //     不复用旧名（CREATE UNIQUE INDEX IF NOT EXISTS 对已存在同名普通索引 no-op，不会升级为 UNIQUE）。
+    const fxUniqueExists = db.prepare("PRAGMA index_list('linked_fx_settlement')")
+      .all()
+      .some((i) => i.name === 'idx_linked_fx_settlement_txn_uniq');
+    if (!fxUniqueExists) {
+      // JS 层全表读重算键列：交易编号 number 须经 normalizeTransactionNo（String 化 + 纯数字判定，归一为空覆盖合计/页脚行）。
+      const fxAll = db.prepare('SELECT id, raw_json FROM linked_fx_settlement ORDER BY id ASC').all();
+      const fxUpd = db.prepare('UPDATE linked_fx_settlement SET transaction_no = ? WHERE id = ?');
+      for (const r of fxAll) {
+        let key = '';
+        try { const o = JSON.parse(r.raw_json); key = normalizeTransactionNo(o && o['交易编号']); } catch (_e) { key = ''; }
+        fxUpd.run(key, r.id);
+      }
+      // 删空键（归一为空 = 合计/页脚/非数字行，与新导入空键拒入同口径）→ 去重保留 id 最大（最新）。
+      const fxDelEmpty = db.prepare("DELETE FROM linked_fx_settlement WHERE transaction_no IS NULL OR transaction_no = ''").run().changes;
+      const fxDelDup = db.prepare('DELETE FROM linked_fx_settlement WHERE id NOT IN (SELECT MAX(id) FROM linked_fx_settlement GROUP BY transaction_no)').run().changes;
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_linked_fx_settlement_txn_uniq ON linked_fx_settlement(transaction_no);');
+      if (fxDelEmpty || fxDelDup) {
+        appendModuleLog({
+          level: 'warning',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration v3.0.5] linked_fx_settlement 幂等键迁移：建 UNIQUE 前清洗存量（资金数据不可逆删除）',
+          details: [`删除空键行 ${fxDelEmpty} 条`, `删除重复键旧行 ${fxDelDup} 条`]
+        });
+        // 清洗删除后同步 linked_table_meta（口径对齐仓储 recomputeLinkedMeta：rowCount=COUNT(*) 全表；日期范围 MIN/MAX(transaction_date) 排除 null/空串）。
+        //   不 import linked-table-repository（避免 migrations.js 耦合），用内联 SQL。UPDATE 对「无 fx-settlement meta 行」是 no-op，安全。
+        const fxRowCount = Number(db.prepare('SELECT COUNT(*) AS c FROM linked_fx_settlement').get().c) || 0;
+        const fxRange = db.prepare("SELECT MIN(transaction_date) AS mn, MAX(transaction_date) AS mx FROM linked_fx_settlement WHERE transaction_date IS NOT NULL AND transaction_date != ''").get();
+        db.prepare("UPDATE linked_table_meta SET row_count = ?, data_date_min = ?, data_date_max = ? WHERE table_key = 'fx-settlement'")
+          .run(fxRowCount, fxRange && fxRange.mn != null ? fxRange.mn : null, fxRange && fxRange.mx != null ? fxRange.mx : null);
+      }
+    }
+
     // 注：linked_fx_option（外汇期权）模板缺失，本批次不建表；待模板到位后在此处增量补一张表。
 
     // 数据表 4：银行对账单入金表（v2.1.16-beta.3 ②；键 reconciliation_id / 日期 bill_date）
@@ -2916,6 +2963,58 @@ function ensureLinkedTableSupport(db) {
     `);
     db.exec('CREATE INDEX IF NOT EXISTS idx_linked_bank_deposit_recon ON linked_bank_deposit(reconciliation_id);');
     db.exec('CREATE INDEX IF NOT EXISTS idx_linked_bank_deposit_date ON linked_bank_deposit(bill_date);');
+
+    // v3.0.5 需求1：银行对账单入金表「按 BizId 幂等累加」——新增幂等键列 biz_id + UNIQUE 索引（仿 v3.0.1 网关段）。
+    //   幂等：仅 biz_id 列不存在时执行整块（ALTER + 回填 + 存量清洗 + 建 UNIQUE）；升级后 / 新建库首启一次，
+    //     后续启动列已存在即跳过（与上方 gateway recon_bill_biz_id 守卫范式一致）。
+    //   🔴🔴 资金红线（spec R-1/R-6）：65.7 万行存量表，全程 SQL 侧（不可 JS 全表读 OOM）；建 UNIQUE 前必须清洗存量，
+    //     否则 CREATE UNIQUE INDEX 在存量空键/重复键上抛错 → 整个 ensureLinkedTableSupport 事务 ROLLBACK → 资金模块启动失败。
+    //     清洗策略（OPEN-1 同 gateway 口径）：空键行直接删（与新导入空键拒入同口径）；重复键保留最大 id（最新导入）。
+    //     资金数据不可逆删除 → appendModuleLog（warning）记录删除行数（禁直接 console.*：架构守护 v2.1.9-sr-log-1 Case 6）。
+    //   口径：回填用 TRIM(json_extract(...,'$.BizId')) 与 linked-table-repository.normalizeKey（String().trim()）字节一致，
+    //     防存量行键与后续 upsert 键漂移（精确大小写 BizId = BANK_DEPOSIT_FIELDS[0]，自 13 字段时代即在白名单）。
+    //   ⚠️ 新建 UNIQUE 索引须用不同名（idx_linked_bank_deposit_biz）——现状已有普通索引 idx_linked_bank_deposit_recon（reconciliation_id），
+    //     不复用旧名（CREATE UNIQUE INDEX IF NOT EXISTS 对已存在同名普通索引 no-op，不会升级为 UNIQUE）。
+    if (!hasColumn(db, 'linked_bank_deposit', 'biz_id')) {
+      db.exec('ALTER TABLE linked_bank_deposit ADD COLUMN biz_id TEXT;');
+      db.exec("UPDATE linked_bank_deposit SET biz_id = TRIM(json_extract(raw_json, '$.BizId'));");
+      const delEmpty = db.prepare("DELETE FROM linked_bank_deposit WHERE biz_id IS NULL OR biz_id = ''").run().changes;
+      const delDup = db.prepare('DELETE FROM linked_bank_deposit WHERE id NOT IN (SELECT MAX(id) FROM linked_bank_deposit GROUP BY biz_id)').run().changes;
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_linked_bank_deposit_biz ON linked_bank_deposit(biz_id);');
+      if (delEmpty || delDup) {
+        appendModuleLog({
+          level: 'warning',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration v3.0.5] linked_bank_deposit 幂等键迁移：建 UNIQUE 前清洗存量（资金数据不可逆删除）',
+          details: [`删除空键行 ${delEmpty} 条`, `删除重复键旧行 ${delDup} 条`]
+        });
+        // 清洗删除后同步 linked_table_meta（否则 row-count/日期范围读旧 meta）。
+        //   口径对齐仓储 recomputeLinkedMeta：rowCount=COUNT(*) 全表（含 null 日期行）；日期范围=MIN/MAX(bill_date) 排除 null/空串。
+        //   不 import linked-table-repository（避免 migrations.js 耦合），用内联 SQL。UPDATE 对「无 bank-deposit meta 行」是 no-op，安全。
+        const bdRowCount = Number(db.prepare('SELECT COUNT(*) AS c FROM linked_bank_deposit').get().c) || 0;
+        const bdRange = db.prepare("SELECT MIN(bill_date) AS mn, MAX(bill_date) AS mx FROM linked_bank_deposit WHERE bill_date IS NOT NULL AND bill_date != ''").get();
+        db.prepare("UPDATE linked_table_meta SET row_count = ?, data_date_min = ?, data_date_max = ? WHERE table_key = 'bank-deposit'")
+          .run(bdRowCount, bdRange && bdRange.mn != null ? bdRange.mn : null, bdRange && bdRange.mx != null ? bdRange.mx : null);
+      }
+    }
+
+    // v3.0.5 需求（OPEN-7 / T5a）：银行对账单入金表「跨期重复命中提醒」载体——加两列 last_hit_run / last_hit_at。
+    //   语义（spec §3.6）：累加表残留的历史月份行仍参与对账，被某次对账「成功使用」（以入金表为命中来源，如 R5 场景4
+    //     matchJpmUs 桥接 / refund R3/R5/R6 二跳）即记一次命中；export 成功后回写 last_hit_run（当期运行标识）+ last_hit_at（命中时间）。
+    //     再次命中时若 last_hit_run 非空且 ≠ 当前运行标识 → 判「跨期重复命中」→ 提醒用户疑似历史残留漏删。
+    //   键 = biz_id（OPEN-1 幂等键 = BANK_DEPOSIT_FIELDS[0]，上方已建 UNIQUE）；本批仅加列 + 读写仓储，命中回写/提醒注入在 T5b。
+    //   🔴🔴 资金红线（spec 硬约束）：这两列绝不进任何 UNIQUE 索引（仅按 biz_id 单查，biz_id 已有 UNIQUE，不需为标记列额外建索引）；
+    //     绝不动 raw_json（65.7 万行不可逐行重写 raw_json，标记走专用列）；upsert ON CONFLICT SET 不碰这两列
+    //     （buildLinkedUpsertContext 硬编码 4 列 SET：keyColumn/dateColumn/raw_json/imported_at）→ 重导覆盖同 BizId 时 last_hit 保留不被洗。
+    //   范式照抄上方 BOC orig_group_no 加列（hasColumn 守卫 + ALTER TABLE ADD COLUMN）：幂等可重入，连跑 2 次只加一次；
+    //     升级后 / 新建库首启加列，二次启动列已存在即跳过；旧库升级后列存在且默认 NULL（SQLite ADD COLUMN 无默认值 → NULL）。
+    if (!hasColumn(db, 'linked_bank_deposit', 'last_hit_run')) {
+      db.exec('ALTER TABLE linked_bank_deposit ADD COLUMN last_hit_run TEXT;');
+    }
+    if (!hasColumn(db, 'linked_bank_deposit', 'last_hit_at')) {
+      db.exec('ALTER TABLE linked_bank_deposit ADD COLUMN last_hit_at TEXT;');
+    }
 
     db.exec('COMMIT');
   } catch (error) {
@@ -2992,6 +3091,61 @@ function ensureBocFxLinkSupport(db) {
       );
     `);
     db.exec('CREATE INDEX IF NOT EXISTS idx_linked_boc_bank_deposit_txn ON linked_boc_bank_deposit(bank_txn_no);');
+
+    // v3.0.5 需求2（批次2b）：BOC 链接表「单文件内存派生 + 整表覆盖」→「增量进组 + DB 全量重匹配 + 重编号」升级。
+    //   🔴🔴 资金红线（spec §3.2.2 / OPEN-3 / OPEN-5）：本块三件事——
+    //     ① linked_boc_fx_settlement 加 orig_group_no 列（scan 时刻组归属，永不被 2.2/2.3 改写——
+    //        现状 matchBocToMidAllocation 2.2 命中清空「分组」(boc-fx-link-builder.js:191) → 原始组号不可从现库恢复，
+    //        无 orig_group_no 则全量重匹配/重编号无法把行复原到正确组）；
+    //     ② transaction_no 建 UNIQUE 索引（新名，现状普通索引 idx_linked_boc_fx_settlement_txn 不复用——
+    //        upsertBocFxLink 同键覆盖的 ON CONFLICT 判定列）；
+    //     ③ OPEN-3：清空两张 BOC 派生表（linked_boc_fx_settlement + linked_boc_bank_deposit）——
+    //        存量原始组号不可恢复（v3.0.4 新表存量极少），首启后引导用户重导外汇交割表全量恢复。
+    //   🔴🔴 I3 修复（codex review）：三件事各用「独立幂等守卫」，不可把 UNIQUE 建在 hasColumn(orig_group_no) 守卫内——
+    //     否则半迁移态（已有 orig_group_no 列但缺 UNIQUE 索引，如上次启动加列+清空成功但建 UNIQUE 前崩）下，
+    //     hasColumn 判 true 跳过整块 → UNIQUE 永不补建 → upsertBocFxLink 的 ON CONFLICT(transaction_no) 运行时报错
+    //     → fx 主表已导入但 BOC 派生失败。改为：列添加+OPEN-3清空 绑 hasColumn；UNIQUE 用 PRAGMA index_list 独立检测补建（自愈）。
+    //   ⚠️ 两事务非原子（本函数自有 BEGIN/COMMIT，与 ensureLinkedTableSupport 不同事务）：任何半迁移态靠下方各独立守卫续跑兜底（spec §五 TechDoc）。
+
+    // —— 守卫①+③：列添加 + OPEN-3 清空（绑 hasColumn——OPEN-3「加 orig_group_no 时存量原始组号不可恢复」语义即首次加列才清）——
+    if (!hasColumn(db, 'linked_boc_fx_settlement', 'orig_group_no')) {
+      db.exec('ALTER TABLE linked_boc_fx_settlement ADD COLUMN orig_group_no TEXT;');
+      // OPEN-3：清空两张派生表（存量原始组号不可恢复，引导重导交割表全量恢复）。
+      const bocFxCleared = db.prepare('DELETE FROM linked_boc_fx_settlement').run().changes;
+      const bocBankCleared = db.prepare('DELETE FROM linked_boc_bank_deposit').run().changes;
+      // orig_group_no 索引（全量重匹配按 orig_group_no 聚合的热列）；CREATE INDEX IF NOT EXISTS 本就幂等。
+      db.exec('CREATE INDEX IF NOT EXISTS idx_linked_boc_fx_settlement_orig_group ON linked_boc_fx_settlement(orig_group_no);');
+      appendModuleLog({
+        level: 'warning',
+        source: 'main',
+        domain: 'migration',
+        message: '[migration v3.0.5] BOC 派生表清空（orig_group_no 升级）：存量原始组号不可恢复，首启后请重导外汇交割表全量恢复',
+        details: [`清空 linked_boc_fx_settlement ${bocFxCleared} 行`, `清空 linked_boc_bank_deposit ${bocBankCleared} 行`]
+      });
+    }
+
+    // —— 守卫②：transaction_no UNIQUE 索引（🔴 独立守卫，半迁移态自愈）——
+    //   用 PRAGMA index_list 检测 idx_linked_boc_fx_settlement_txn_uniq 是否已存在；缺则补建。
+    //   不复用普通索引名 idx_linked_boc_fx_settlement_txn（CREATE UNIQUE IF NOT EXISTS 对已存在同名普通索引 no-op，不升级为 UNIQUE）。
+    //   建 UNIQUE 前若存量已含重复 transaction_no（理论不应——OPEN-3 已清空 + upsertBocFxLink 幂等键），去重保留 id 最大兜底防建索引抛错。
+    const bocFxUniqueExists = db.prepare("PRAGMA index_list('linked_boc_fx_settlement')")
+      .all()
+      .some((i) => i.name === 'idx_linked_boc_fx_settlement_txn_uniq');
+    if (!bocFxUniqueExists) {
+      const bocFxDelDup = db.prepare(
+        'DELETE FROM linked_boc_fx_settlement WHERE id NOT IN (SELECT MAX(id) FROM linked_boc_fx_settlement GROUP BY transaction_no)'
+      ).run().changes;
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_linked_boc_fx_settlement_txn_uniq ON linked_boc_fx_settlement(transaction_no);');
+      if (bocFxDelDup) {
+        appendModuleLog({
+          level: 'warning',
+          source: 'main',
+          domain: 'migration',
+          message: '[migration v3.0.5] linked_boc_fx_settlement 建 transaction_no UNIQUE 前去重保留 id 最大（半迁移态自愈）',
+          details: [`删除重复键旧行 ${bocFxDelDup} 条`]
+        });
+      }
+    }
 
     db.exec('COMMIT');
   } catch (error) {

@@ -86,8 +86,44 @@ function detailBankToDeposit(bankField, bankVal, depField, depVal) {
   return `匹配成功:"银行对账单${bankField}里的${normalizeCellValue(bankVal)}"匹配上了"银行对账单入金表${depField}的${normalizeCellValue(depVal)}"`;
 }
 
+// —— OPEN-7（T5b-1）跨期重复命中：BizId 归一 + 提醒文案 + 跨期判定纯函数（与 detailBankToDeposit 同文件，文案/口径单一真相）——
+//   引擎严守纯函数：绝不 require DB/仓储；归一口径 = String().trim()，与 linked-table-repository.js normalizeKey 字节一致。
+// 归一 BizId（入金表 BANK_DEPOSIT_FIELDS[0]）：非空 → 去空白；null/undefined/空 → ''。
+function normalizeBizIdKey(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+// 跨期重复命中提醒文案（spec §3.6-5；T5b-2 注入回填行「匹配命中详情」）。
+function buildStaleHitReminder(bizId, lastHitAt) {
+  return `⚠️ 桥接入金表行 BizId=${bizId} 此前于 [${lastHitAt}] 已被命中，疑似历史残留`;
+}
+
+// 从本批命中 BizId 集合中挑出「跨期重复命中」需提醒项（spec §3.6-3）。
+//   入参 markerMap：调用方（main.js）传入的 bizId → { last_hit_run, last_hit_at }（引擎自身不读库，保持纯函数）。
+//   判定（runId 比较用字符串）：
+//     · marker.last_hit_run 非空 且 String(last_hit_run) ≠ String(runId) → 跨期命中 → 入选 { bizId, lastHitAt }
+//     · == runId → 同批，不入（同批 run/export 不误报）
+//     · 空 last_hit_run / markerMap 未命中该 bizId → 首次命中，不入
+function pickStaleHits(hitBizIds, markerMap, runId) {
+  const out = [];
+  if (!Array.isArray(hitBizIds) || !markerMap || typeof markerMap.get !== 'function') return out;
+  const runKey = String(runId);
+  for (const bizId of hitBizIds) {
+    const marker = markerMap.get(bizId);
+    if (!marker) continue; // 未命中标记 = 首次命中
+    const lastRun = marker.last_hit_run;
+    if (lastRun === null || lastRun === undefined || lastRun === '') continue; // 空 = 首次命中
+    if (String(lastRun) === runKey) continue; // 同批，不误报
+    out.push({ bizId, lastHitAt: marker.last_hit_at });
+  }
+  return out;
+}
+
 // —— 回填动作（§5.1.3）：1 条命中 refund order + 配对银行行 → 1 行回填模板（含 E 列详情 + F~N 银行 9 字段）——
-function buildBackfillRow(refundRow, bankRow, detailText) {
+//   bridgeDepositBizId：OPEN-7（T5b-1）该回填行来源的桥接入金表 BizId（matchJpmUs 命中时非空，其他策略层为 undefined）。
+//     产物挂内部字段 `_bridgeDepositBizId`（下划线前缀；T5b-2 据此精确定位该回填行注入跨期命中提醒；不进对外回填模板列）。
+function buildBackfillRow(refundRow, bankRow, detailText, bridgeDepositBizId) {
   const row = {
     '退款单号': normalizeCellValue(refundRow[M.backfill.fromRoSerialNo]),
     '状态': M.backfill.statusSuccess,
@@ -98,6 +134,10 @@ function buildBackfillRow(refundRow, bankRow, detailText) {
   // F~N：配对银行行 9 字段原数据（按 REFUND_BANK_COLUMNS 顺序；保留原始值不 normalize，与导出口径一致）
   for (const col of REFUND_BANK_COLUMNS) {
     row[col] = bankRow[col];
+  }
+  // OPEN-7 内部字段（仅非空时挂，避免给非桥接回填行塞 undefined 列）。
+  if (bridgeDepositBizId !== undefined && bridgeDepositBizId !== null && bridgeDepositBizId !== '') {
+    row._bridgeDepositBizId = bridgeDepositBizId;
   }
   return row;
 }
@@ -197,9 +237,13 @@ function matchJpmUs(bankRow, refundCands, depositRows) {
     const depRef = normalizeCellValue(dep[M.jpm.usDepositTake]);
     if (depRef !== '' && depRef === bankRef) {
       // 命中详情：银行 CustomerRef ↔ 入金表 CustomerRef（两句式·入金表版）
+      // OPEN-7（T5b-1）：附被命中入金表行的 BizId（BANK_DEPOSIT_FIELDS[0]，下划线内部字段，不进对外回填模板列）。
+      //   归一 = String().trim()（与仓储 normalizeKey 字节一致；引擎保持纯函数不 require 仓储取常量/键口径）。
+      //   仅 matchJpmUs 的 hit 带此字段 → consumeAndBackfill 收集时其他策略层(S1/S4 等)的 hit 无此字段，天然不污染。
       hits.push({
         refundRow: ro,
-        detail: detailBankToDeposit(M.jpm.usBankCompare, bankRef, M.jpm.usDepositTake, depRef)
+        detail: detailBankToDeposit(M.jpm.usBankCompare, bankRef, M.jpm.usDepositTake, depRef),
+        _depositBizId: normalizeBizIdKey(dep.BizId)
       });
     }
   }
@@ -286,6 +330,9 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
   const warn = makeWarningCollector('r5-refund-order-backfill', '中台退款订单回填');
   const backfillRows = [];
   const unmatchedRows = [];
+  // OPEN-7（T5b-1）：本批「以入金表为来源、回填成功」的命中 BizId 集合（仅 matchJpmUs 桥接收集，去重）。
+  //   纯函数：只从入参 depositRows 命中收集 BizId，不查库。两条 return 路径均返回去重数组（早退路径 → []）。
+  const hitDepositBizIdSet = new Set();
 
   const safeBankRows = Array.isArray(bankRows) ? bankRows : [];
   const safeRefundRows = Array.isArray(refundOrderRows) ? refundOrderRows : [];
@@ -306,7 +353,7 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
 
   // 空入参防御：任一侧空 → 无可对账，返回空（不抛）
   if (refundPool.length === 0 || bankPool.length === 0) {
-    return { backfillRows, unmatchedRows, modifications: [], warnings: warn.list() };
+    return { backfillRows, unmatchedRows, modifications: [], warnings: warn.list(), hitDepositBizIds: [] };
   }
 
   // 2) 唯一值分组（✅Q1）：键 = 大账号||币种||金额分（金额 NaN → 不入组）
@@ -371,7 +418,8 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
       refundIdOf,
       backfillRows,
       unmatchedRows,
-      warn
+      warn,
+      hitDepositBizIdSet // OPEN-7（T5b-1）：透传命中 BizId 收集集合（consumeAndBackfill 收集桥接 BizId）
     });
   }
 
@@ -390,7 +438,11 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
     }
   }
 
-  return { backfillRows, unmatchedRows, modifications: [], warnings: warn.list() };
+  // OPEN-7（T5b-1）：去重数组冒泡给 orchestrator → T5b-2 在 export 阶段查标记/注入提醒。
+  return {
+    backfillRows, unmatchedRows, modifications: [], warnings: warn.list(),
+    hitDepositBizIds: [...hitDepositBizIdSet]
+  };
 }
 
 // 对单个唯一值分组跑 S1→S4。
@@ -401,7 +453,8 @@ function runStrategiesForGroup(ctx) {
   const {
     bankGroup, refundGroup, depositRows,
     usedBankRowId, usedRefundIdx, refundIdOf,
-    backfillRows, unmatchedRows, warn
+    backfillRows, unmatchedRows, warn,
+    hitDepositBizIdSet // OPEN-7（T5b-1）：命中 BizId 收集集合，透传给 consumeAndBackfill
   } = ctx;
 
   // bank 行按 BillDate 升序（早→晚；无法解析日期排最后，保持原序稳定）。
@@ -490,7 +543,7 @@ function runStrategiesForGroup(ctx) {
       }
 
       // 严格 1↔1 互配（bank 唯一命中 r 且 r 也仅被该 bank 命中）→ 回填，双向消费。
-      consumeAndBackfill(bankRow, hits[0], { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows });
+      consumeAndBackfill(bankRow, hits[0], { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows, hitDepositBizIdSet });
       settledBankRowId.add(bankRow._rowId);
     }
 
@@ -507,7 +560,8 @@ function runStrategiesForGroup(ctx) {
     // 仍未被本轮 S4 消费且在容差内的 refund（dayDiff 升序取最近）。
     const inTol = matchS4(bankRow, refundsForS4.filter((ro) => isRefundAvailable(ro)));
     if (inTol.length > 0) {
-      consumeAndBackfill(bankRow, inTol[0], { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows });
+      // S4 命中的 hit 无 _depositBizId（非入金表来源）→ consumeAndBackfill 内自然不收集，不污染集合。
+      consumeAndBackfill(bankRow, inTol[0], { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows, hitDepositBizIdSet });
       continue;
     }
 
@@ -566,11 +620,18 @@ function minDayDiffToSet(bankRow, refundSet) {
 }
 
 // 消费 + 产回填行（严格 1v1 双向消费）
+//   OPEN-7（T5b-1）：若 hit 带 `_depositBizId`（仅 matchJpmUs 命中入金表行时有，且非空）→ 收集进
+//     ctx.hitDepositBizIdSet（去重 Set，runRound5 维护）+ 透传给 buildBackfillRow 标记该回填行来源桥接 BizId。
+//     其他策略层(S1/S4 等)的 hit 无 `_depositBizId` → 跳过 undefined/空，不污染集合（资金红线：来源口径精确）。
 function consumeAndBackfill(bankRow, hit, ctx) {
-  const { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows } = ctx;
+  const { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows, hitDepositBizIdSet } = ctx;
   usedBankRowId.add(bankRow._rowId);
   usedRefundIdx.add(refundIdOf(hit.refundRow));
-  backfillRows.push(buildBackfillRow(hit.refundRow, bankRow, hit.detail));
+  const bridgeBizId = hit && hit._depositBizId;
+  if (hitDepositBizIdSet && bridgeBizId !== undefined && bridgeBizId !== null && bridgeBizId !== '') {
+    hitDepositBizIdSet.add(bridgeBizId);
+  }
+  backfillRows.push(buildBackfillRow(hit.refundRow, bankRow, hit.detail, bridgeBizId));
 }
 
 // v3.0.0 需求3：退款回填「候选预检」只读 helper（与 c3-gateway-recon-join.js 的 countC3BankCandidates 对称）。
@@ -604,6 +665,10 @@ module.exports = {
   detailBankToRo,
   detailBankToDeposit,
   buildBackfillRow,
+  // OPEN-7（T5b-1）：跨期重复命中 helper（T5b-2 在 main.js export 阶段 require；纯函数，引擎不读库）
+  normalizeBizIdKey,
+  buildStaleHitReminder,
+  pickStaleHits,
   RESULT_ERROR,
   RESULT_NOTICE
 };

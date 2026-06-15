@@ -11,6 +11,22 @@
 
 ## 未实施
 
+### B18（P3）导入 fx 交割表 rematch BOC 链接表后未清 reconIdFixResult（BOC 修复结果可能 stale）
+
+- **来源**：2026-06-15 v3.0.5 OPEN-4 删除扩展设计调研发现
+- **影响**：导入 fx（`main.js:11612` 派生块）会 `rematchAllBocGroups` 重算 `linked_boc_fx_settlement`（调拨单号/分组/链接ID），但**不清 `reconIdFixResult`**。若用户先跑 BOC 修复（`reconIdFixResult` = `gateway-recon-id-fix` 场景，数据源含 `readBocFxLinkRows()`，`main.js:4175`）、再导入 fx → `reconIdFixResult` 基于旧 BOC 链接表已 stale。export reconIdFix 的 snapshot 校验（`main.js:4229`）只校 **scenarios 快照**、不校 BOC 链接表 → 导入 fx 不改 scenarios → 不被动清 → 可能导出 stale BOC 修复结果
+- **现状**：OPEN-4 删除 fx 已做对（联动后清 `reconIdFixResult`）；**导入 fx 既有缺口未修**（边缘场景：BOC 修复 + fx 导入交错）
+- **推荐**：导入 fx 派生块成功后清 `reconIdFixResult`（与删除 fx 对齐）；或更精确——仅当 `reconIdFixResult` 是 BOC 场景时清
+- **触发实施**：下次动导入 fx 派生 / BOC 修复链路时；或用户报「导入交割表后 BOC 修复结果没更新」
+
+### B17（P2）buildLinkedUpsertContext fx 幂等键复用泛化内核拼出重复列名（依赖 node:sqlite 未文档化行为）
+
+- **来源**：2026-06-15 v3.0.5 OPEN-7 codex 对抗审查顺带发现 + 实测验证
+- **影响**：fx-settlement 幂等键列 = 展示键列 = `transaction_no`（`LINKED_TABLE_DEFS['fx-settlement'].keyColumn` 与 `upsertLinkedFx` 传入 `idKeyColumn` 同为 `transaction_no`）；`buildLinkedUpsertContext`（`linked-table-repository.js:377`）无条件拼 `INSERT (idKeyColumn, keyColumn, dateColumn, raw_json, imported_at)` → fx 得到 `INSERT (transaction_no, transaction_no, ...)` **重复列名**（gateway/bank-deposit 因 idColumn≠keyColumn 不触发）
+- **现状**：实测 node:sqlite（DatabaseSync）**容忍**重复列名，prepare/run 均成功，且**第 1 个占位符（idKey=`normalizeTransactionNo` 归一值）生效**写入列，与 ON CONFLICT 判定 / existsStmt 查询口径一致 → fx 幂等当前**正确**（2547 单测 + 端到端真过）。但依赖两个**未文档化**实现细节：① node:sqlite 容忍重复列名；② INSERT 重复列取第 1 个值。node:sqlite 仍是 experimental API，未来版本变更可能 break fx 幂等键（🔴 资金红线：幂等失效 = 静默重复插入 / 键漂移）
+- **推荐**：`buildLinkedUpsertContext` 对 `idKeyColumn === keyColumn` 去重（只拼一次列名 + 一个占位符），或 fx def 区分 idColumn 与展示 keyColumn；全回归 gateway/bank-deposit/fx 三表 upsert 单测（资金红线核心，parity 锁）
+- **触发实施**：下次动 `buildLinkedUpsertContext` / fx upsert 时一并收敛；或 node:sqlite 升级后 fx 幂等单测报错时优先
+
 ### B16（P4）xlsx-size-preflight 复用 zip-reader 的 openZipWithEntries
 
 - **来源**：2026-06-11 v3.0.4 PR #71 self-review（R-reuse 角度 CONFIRMED）

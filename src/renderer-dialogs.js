@@ -6283,15 +6283,23 @@
           }).join('<br/>');
           lines.push(`失败：<br/>${failList}`);
         }
-        // v3.0.1 需求1（D3）：网关对账单为「跨次幂等累加」导入（按 ReconBillBizId）。聚合本次覆盖/拒入计数，>0 才提醒。
-        const gwResults = list.filter((r) => r && r.tableKey === 'gateway-bill' && r.status === 'ok');
-        const overwriteTotal = gwResults.reduce((s, r) => s + (Number(r.overwriteCount) || 0), 0);
-        const rejectedEmptyTotal = gwResults.reduce((s, r) => s + (Number(r.rejectedEmptyCount) || 0), 0);
-        if (overwriteTotal > 0 || rejectedEmptyTotal > 0) {
-          const tips = ['<b>网关对账单累加导入提醒</b>（按 ReconBillBizId 幂等，非整表替换）：'];
-          if (overwriteTotal > 0) tips.push(`• 有 <b>${overwriteTotal}</b> 条因 ReconBillBizId 已存在被覆盖更新`);
-          if (rejectedEmptyTotal > 0) tips.push(`• 有 <b>${rejectedEmptyTotal}</b> 条因 ReconBillBizId 为空被拒绝入库`);
-          lines.push(tips.join('<br/>'));
+        // v3.0.1 需求1（D3）/ v3.0.5 linked-fx T6：网关 + 银行对账单入金表 + 外汇交割表均为「跨次幂等累加」导入。
+        //   逐表聚合本次覆盖/拒入计数，>0 才各自提醒（文案、键名、行为与 gateway v3.0.1 先例一致）。
+        const IDEMPOTENT_IMPORT_TIPS = [
+          { tableKey: 'gateway-bill', label: '网关对账单累加导入提醒', keyName: 'ReconBillBizId' },
+          { tableKey: 'bank-deposit', label: '银行对账单入金表累加导入提醒', keyName: 'BizId' },
+          { tableKey: 'fx-settlement', label: '外汇交割表累加导入提醒', keyName: '交易编号' }
+        ];
+        for (const { tableKey, label, keyName } of IDEMPOTENT_IMPORT_TIPS) {
+          const hits = list.filter((r) => r && r.tableKey === tableKey && r.status === 'ok');
+          const overwriteTotal = hits.reduce((s, r) => s + (Number(r.overwriteCount) || 0), 0);
+          const rejectedEmptyTotal = hits.reduce((s, r) => s + (Number(r.rejectedEmptyCount) || 0), 0);
+          if (overwriteTotal > 0 || rejectedEmptyTotal > 0) {
+            const tips = [`<b>${label}</b>（按 ${keyName} 幂等，非整表替换）：`];
+            if (overwriteTotal > 0) tips.push(`• 有 <b>${overwriteTotal}</b> 条因 ${keyName} 已存在被覆盖更新`);
+            if (rejectedEmptyTotal > 0) tips.push(`• 有 <b>${rejectedEmptyTotal}</b> 条因 ${keyName} 为空被拒绝入库`);
+            lines.push(tips.join('<br/>'));
+          }
         }
         return lines.join('<br/><br/>');
       }

@@ -230,15 +230,17 @@ test.describe('migrations — ensureBocFxLinkSupport 幂等', () => {
     const fpBank2 = schemaFingerprint(mDb, 'linked_boc_bank_deposit');
     assert.deepEqual(fpFx2, fpFx1, '交割链接表幂等');
     assert.deepEqual(fpBank2, fpBank1, '银行表幂等');
-    // 列完整性（含 imported_at）
-    assert.equal(fpFx1.cols.length, 9, 'linked_boc_fx_settlement 9 列');
+    // 列完整性（含 imported_at）；v3.0.5 批次2b：fx 表 9→10 列（新增 orig_group_no）。
+    assert.equal(fpFx1.cols.length, 10, 'linked_boc_fx_settlement 10 列（含 orig_group_no）');
     assert.equal(fpBank1.cols.length, 6, 'linked_boc_bank_deposit 6 列');
-    for (const expected of ['id', 'transaction_no', 'group_no', 'allocation_no', 'recon_link_id', 'maturity_date', 'source_row', 'raw_json']) {
+    for (const expected of ['id', 'transaction_no', 'group_no', 'allocation_no', 'recon_link_id', 'maturity_date', 'source_row', 'orig_group_no', 'raw_json']) {
       assert.ok(mDb.prepare("PRAGMA table_info('linked_boc_fx_settlement')").all().map((c) => c.name).includes(expected), `fx 表应含列 ${expected}`);
     }
-    // 索引完整性
+    // 索引完整性；v3.0.5 批次2b：新增 transaction_no UNIQUE + orig_group_no 普通索引。
     assert.ok(fpFx1.idx.includes('idx_linked_boc_fx_settlement_txn'), 'fx txn 索引');
     assert.ok(fpFx1.idx.includes('idx_linked_boc_fx_settlement_group'), 'fx group 索引');
+    assert.ok(fpFx1.idx.includes('idx_linked_boc_fx_settlement_txn_uniq'), 'fx txn UNIQUE 索引（v3.0.5 批次2b）');
+    assert.ok(fpFx1.idx.includes('idx_linked_boc_fx_settlement_orig_group'), 'fx orig_group_no 索引（v3.0.5 批次2b）');
     assert.ok(fpBank1.idx.includes('idx_linked_boc_bank_deposit_txn'), 'bank txn 索引');
   });
 

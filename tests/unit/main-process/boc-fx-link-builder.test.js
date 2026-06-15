@@ -17,11 +17,13 @@ const assert = require('node:assert/strict');
 const {
   scanFxGroups,
   matchBocToMidAllocation,
+  rematchAllBocGroups,
   buildBocBankRows,
   backfillBocReconLinkIds,
   normalizeTransactionNo,
   toCents,
-  extractLongestDigitRun
+  extractLongestDigitRun,
+  KEY_ORIG_GROUP
 } = require('../../../src/main-process/boc-fx-link-builder');
 
 // —— 工具：交割表行 / 中台行 / 银行候选行工厂 ——
@@ -390,5 +392,168 @@ test.describe('boc-fx-link-builder — backfillBocReconLinkIds（按 id 幂等�
     // 再跑一次无银行数据 → 全量重算清空
     const second = backfillBocReconLinkIds(rows, []);
     assert.equal(second.rows[0].row['资金对账不平表链接ID'], '', '幂等：无数据时清空旧链接ID');
+  });
+});
+
+// ============================================================================
+// v3.0.5 批次2b：scanFxGroups 组号偏移续编（offset）
+// ============================================================================
+test.describe('boc-fx-link-builder — scanFxGroups offset 续编（v3.0.5 批次2b）', () => {
+  test('offset=0（缺省）行为字节不变：组号从 1 起 + orig_group_no=分组', () => {
+    const objs = [fxRow({ '交易编号': '100' }), fxRow({ '交易编号': '合计' }), fxRow({ '交易编号': '200' })];
+    const { rows, groupCount } = scanFxGroups({ objects: objs, rowNumbers: [3, 4, 5] });
+    assert.equal(groupCount, 2);
+    assert.deepEqual(rows.map((r) => r['分组']), ['1', '2'], 'offset=0 组号从 1');
+    assert.deepEqual(rows.map((r) => r[KEY_ORIG_GROUP]), ['1', '2'], 'scan 时刻 orig_group_no = 分组');
+  });
+
+  test('offset=5：本文件组号 = 文件内组号 + 5（分组与 orig_group_no 同步续编）', () => {
+    const objs = [fxRow({ '交易编号': '100' }), fxRow({ '交易编号': '合计' }), fxRow({ '交易编号': '200' })];
+    const { rows, groupCount } = scanFxGroups({ objects: objs, rowNumbers: [3, 4, 5], offset: 5 });
+    assert.equal(groupCount, 2, 'groupCount 仍为本文件成组数（不含 offset）');
+    assert.deepEqual(rows.map((r) => r['分组']), ['6', '7'], '分组续编 = 文件内组号 + offset');
+    assert.deepEqual(rows.map((r) => r[KEY_ORIG_GROUP]), ['6', '7'], 'orig_group_no 同步续编');
+  });
+
+  test('offset 非法（NaN / 负数）→ 按 0 处理', () => {
+    const objs = [fxRow({ '交易编号': '100' })];
+    assert.deepEqual(scanFxGroups({ objects: objs, rowNumbers: [3], offset: NaN }).rows.map((r) => r['分组']), ['1'], 'NaN → 0');
+    assert.deepEqual(scanFxGroups({ objects: objs, rowNumbers: [3], offset: -3 }).rows.map((r) => r['分组']), ['1'], '负数 → 0');
+  });
+});
+
+// ============================================================================
+// v3.0.5 批次2b：rematchAllBocGroups —— 全库重置-重匹配-重编号纯函数（🔴 资金红线）
+// ============================================================================
+test.describe('boc-fx-link-builder — rematchAllBocGroups（全量重匹配 + 重编号）', () => {
+  // 造 [{ id, row }] 项（row 含 orig_group_no 辅助键 + 业务字段）。
+  function item(id, { txnNo, origGroup, ccy2, maturity, group, allocationNo }) {
+    const row = {
+      '交易编号': txnNo,
+      '货币2金额': ccy2 === undefined ? '' : ccy2,
+      '到期日': maturity === undefined ? '' : maturity,
+      __maturityIso: maturity === undefined ? '' : maturity,
+      '分组': group === undefined ? String(origGroup) : group,
+      '调拨单号': allocationNo === undefined ? '' : allocationNo,
+      '资金对账不平表链接ID': ''
+    };
+    row[KEY_ORIG_GROUP] = String(origGroup);
+    return { id, row };
+  }
+
+  test('重编号 1..N：orig_group_no 有空洞（5/9/3）→ 按 id ASC 首现序重编号为 1/2/3', () => {
+    const list = [
+      item(10, { txnNo: '100', origGroup: 5, ccy2: '10', maturity: '2026-05-04' }),
+      item(11, { txnNo: '101', origGroup: 9, ccy2: '20', maturity: '2026-05-05' }),
+      item(12, { txnNo: '102', origGroup: 3, ccy2: '30', maturity: '2026-05-06' })
+    ];
+    rematchAllBocGroups(list, []);
+    assert.deepEqual(list.map((it) => it.row['分组']), ['1', '2', '3'], '按 id ASC 首现序重编号 1..N 无空洞');
+    // orig_group_no 不被改写
+    assert.deepEqual(list.map((it) => it.row[KEY_ORIG_GROUP]), ['5', '9', '3'], '🔴 orig_group_no 永不被改写');
+  });
+
+  test('同 orig_group_no 多行 → 重编号到同一新组号', () => {
+    const list = [
+      item(1, { txnNo: '100', origGroup: 7, ccy2: '10', maturity: '2026-05-04' }),
+      item(2, { txnNo: '101', origGroup: 7, ccy2: '20', maturity: '2026-05-04' }),
+      item(3, { txnNo: '200', origGroup: 8, ccy2: '5', maturity: '2026-05-05' })
+    ];
+    rematchAllBocGroups(list, []);
+    assert.equal(list[0].row['分组'], '1');
+    assert.equal(list[1].row['分组'], '1', '同 orig_group_no 行重编号到同组');
+    assert.equal(list[2].row['分组'], '2');
+  });
+
+  test('🔴 orig_group_no 不被 2.2 改写：2.2 命中行「分组」清空但 orig_group_no 保留', () => {
+    // 单行组（金额 10）被 2.2 单行剔除 → 分组清空，但 orig_group_no 保留原值。
+    const list = [item(1, { txnNo: '100', origGroup: 4, ccy2: '10', maturity: '2026-05-04' })];
+    const mids = [midRow({ '调拨单号': 'A1', '付款渠道': 'BOC', '收款金额': '10', '交易时间': '2026-05-04' })];
+    rematchAllBocGroups(list, mids);
+    assert.equal(list[0].row['分组'], '', '2.2 命中清空分组');
+    assert.equal(list[0].row[KEY_ORIG_GROUP], '4', '🔴 2.2 不改 orig_group_no');
+  });
+
+  test('「重置-重匹配」两次幂等：同输入跑两次结果一致', () => {
+    const build = () => [
+      item(1, { txnNo: '100', origGroup: 1, ccy2: '10', maturity: '2026-05-04' }),
+      item(2, { txnNo: '101', origGroup: 1, ccy2: '20', maturity: '2026-05-04' }),
+      item(3, { txnNo: '200', origGroup: 2, ccy2: '50', maturity: '2026-05-05' })
+    ];
+    const mids = [
+      midRow({ '调拨单号': 'GRP', '付款渠道': 'BOC', '收款金额': '30', '交易时间': '2026-05-04' }), // 2.3 组1（10+20）
+      midRow({ '调拨单号': 'SINGLE', '付款渠道': 'BOC', '收款金额': '50', '交易时间': '2026-05-05' }) // 2.2 组2 单行
+    ];
+    const a = build(); rematchAllBocGroups(a, mids);
+    const b = build(); rematchAllBocGroups(b, mids);
+    const snap = (list) => list.map((it) => ({ 分组: it.row['分组'], 调拨单号: it.row['调拨单号'], orig: it.row[KEY_ORIG_GROUP] }));
+    assert.deepEqual(snap(a), snap(b), '🔴 同输入两次结果字节一致（幂等）');
+    // 再对已重匹配的 a 重跑一次（模拟二次 fx 导入无新数据）→ 仍一致
+    const aSnap = snap(a);
+    rematchAllBocGroups(a, mids);
+    assert.deepEqual(snap(a), aSnap, '🔴 对已匹配结果重跑仍幂等（调拨单号不重复消耗错乱）');
+  });
+
+  test('同日同金额一对一消耗不重复：2 个同日同额组只消耗 1 个中台候选', () => {
+    // 组1（汇总30）/ 组2（汇总30）同日；仅 1 个中台 30 候选 → 行序优先组1命中、组2留空。
+    const list = [
+      item(1, { txnNo: '100', origGroup: 1, ccy2: '10', maturity: '2026-05-04' }),
+      item(2, { txnNo: '101', origGroup: 1, ccy2: '20', maturity: '2026-05-04' }),
+      item(3, { txnNo: '200', origGroup: 2, ccy2: '10', maturity: '2026-05-04' }),
+      item(4, { txnNo: '201', origGroup: 2, ccy2: '20', maturity: '2026-05-04' })
+    ];
+    const mids = [midRow({ '调拨单号': 'ONCE', '付款渠道': 'BOC', '收款金额': '30', '交易时间': '2026-05-04' })];
+    rematchAllBocGroups(list, mids);
+    const g1 = list.filter((it) => it.row['分组'] === '1');
+    const g2 = list.filter((it) => it.row['分组'] === '2');
+    assert.equal(g1[0].row['调拨单号'], 'ONCE', '组1命中');
+    assert.equal(g2[0].row['调拨单号'], '', '🔴 组2无候选留空（一对一消耗，不重复回填）');
+  });
+
+  test('🔴 M4：2.2 清空中间组后剩余「分组非空」组号 compact 连续 1..N（无空洞）', () => {
+    // 3 个单行组（orig 1/2/3）：org2（金额50）被 2.2 单行剔除清空分组；org1（10）/org3（20）无候选 → 2.3 留空、分组保留。
+    //   未 compact 时剩余组号会是 [1,3]（org2 的临时组号 2 被清空留洞）；M4 compact 后应连续 [1,2]。
+    const list = [
+      item(1, { txnNo: '100', origGroup: 1, ccy2: '10', maturity: '2026-05-04' }),
+      item(2, { txnNo: '101', origGroup: 2, ccy2: '50', maturity: '2026-05-04' }),
+      item(3, { txnNo: '102', origGroup: 3, ccy2: '20', maturity: '2026-05-04' })
+    ];
+    const mids = [midRow({ '调拨单号': 'KILL', '付款渠道': 'BOC', '收款金额': '50', '交易时间': '2026-05-04' })];
+    rematchAllBocGroups(list, mids);
+    assert.equal(list[1].row['分组'], '', 'org2 被 2.2 单行剔除清空分组');
+    // 剩余非空分组连续 1..2（org1→1、org3→2），不留 org2 的洞
+    const nonEmpty = list.filter((it) => it.row['分组'] !== '').map((it) => it.row['分组']);
+    assert.deepEqual(nonEmpty, ['1', '2'], '🔴 2.2 清空后剩余组号 compact 连续 1..N（非 [1,3]）');
+    // orig_group_no 不被 compact 改写
+    assert.deepEqual(list.map((it) => it.row[KEY_ORIG_GROUP]), ['1', '2', '3'], '🔴 compact 不碰 orig_group_no');
+  });
+
+  test('🔴 M4：多行组 + 单行剔除混合 compact 连续（同组行 compact 后组号一致）', () => {
+    // org1=[100,101]（10+20=30）2.3 组汇总命中；org2=[200]（50）2.2 单行剔除清空；org3=[300,301]（5+5=10）无候选留空。
+    const list = [
+      item(1, { txnNo: '100', origGroup: 1, ccy2: '10', maturity: '2026-05-04' }),
+      item(2, { txnNo: '101', origGroup: 1, ccy2: '20', maturity: '2026-05-04' }),
+      item(3, { txnNo: '200', origGroup: 2, ccy2: '50', maturity: '2026-05-04' }),
+      item(4, { txnNo: '300', origGroup: 3, ccy2: '5', maturity: '2026-05-04' }),
+      item(5, { txnNo: '301', origGroup: 3, ccy2: '5', maturity: '2026-05-04' })
+    ];
+    const mids = [
+      midRow({ '调拨单号': 'G30', '付款渠道': 'BOC', '收款金额': '30', '交易时间': '2026-05-04' }),
+      midRow({ '调拨单号': 'KILL', '付款渠道': 'BOC', '收款金额': '50', '交易时间': '2026-05-04' })
+    ];
+    rematchAllBocGroups(list, mids);
+    assert.equal(list[2].row['分组'], '', 'org2 单行剔除清空');
+    // org1 两行同组号；org3 两行同组号；连续 1..2
+    assert.equal(list[0].row['分组'], list[1].row['分组'], 'org1 两行 compact 后同组号');
+    assert.equal(list[3].row['分组'], list[4].row['分组'], 'org3 两行 compact 后同组号');
+    const distinct = [...new Set(list.filter((it) => it.row['分组'] !== '').map((it) => it.row['分组']))].sort();
+    assert.deepEqual(distinct, ['1', '2'], '🔴 剩余 2 组 compact 连续 1..2');
+    assert.equal(list[0].row['调拨单号'], 'G30', 'org1 调拨单号回填不受 compact 影响');
+  });
+
+  test('空入参 / 非数组安全', () => {
+    assert.doesNotThrow(() => rematchAllBocGroups([], []));
+    assert.doesNotThrow(() => rematchAllBocGroups(null, null));
+    assert.deepEqual(rematchAllBocGroups([], []).rows, []);
   });
 });

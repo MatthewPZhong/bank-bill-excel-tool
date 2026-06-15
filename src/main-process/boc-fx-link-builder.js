@@ -13,33 +13,24 @@
 // 🔴 转分精确：金额匹配走 toCents（去千分位 → ×100 四舍五入），容差 0；非数值剔候选 / 整组放弃，绝不静默错配。
 
 const { normalizeDateExportValue } = require('../backend/file-service/normalizers');
-const { normalizeCellValue, parseNumber } = require('./scenario-engines/engine-utils');
+// v3.0.5 决策9：normalizeTransactionNo 下沉到 engine-utils（单一真相，builder/仓储/migration 共用），本文件 re-export 保持既有单测口径。
+const { normalizeCellValue, parseNumber, normalizeTransactionNo } = require('./scenario-engines/engine-utils');
 const { FIELD_MAP, BOC_CHANNEL_VALUE, BOC_BANK_FILTER, BOC_PAYMENT_DETAIL_KEYWORD } = require('../constants/boc-fx-link-fields');
 
 // 内部辅助键（落库前由仓储剥到热列，不进 raw_json 业务字段）。
 const KEY_TXN_NO = '__txnNo';
 const KEY_MATURITY_ISO = '__maturityIso';
 const KEY_SOURCE_ROW = '__sourceRow';
+// v3.0.5 批次2b：原始组号辅助键（scan 时刻组归属，落库剥到 orig_group_no 热列）。
+//   🔴 资金红线（spec §3.2.2）：orig_group_no 一旦 scan 写入「永不被 2.2/2.3 改写」——展示用「分组」(linkGroup)
+//      每次全量重匹配时按 orig_group_no 聚合 + 重编号 1..N；rematchAllBocGroups 只改 linkGroup/调拨单号，绝不碰本键。
+const KEY_ORIG_GROUP = '__origGroup';
 
 // ============================================================================
 // 工具函数
 // ============================================================================
 
-// 交易编号归一化为纯数字串：
-//   纯数字原样（'123'→'123'）；带尾零小数（'123.0' / '926181062.0'）去尾零取整数部分；
-//   空 / 含非数字字符（含字母 / 分隔符）/ 科学计数法（'1.2e3'）→ ''。
-//   number 入参（如交割表「交易编号」926181062）经 normalizeCellValue 转 String 后同口径处理。
-function normalizeTransactionNo(value) {
-  const s = normalizeCellValue(value);
-  if (s === '') return '';
-  // 纯整数
-  if (/^\d+$/.test(s)) return s;
-  // 带小数点但小数部分全为 0（去尾零）：123.0 / 123.00 → 123；123.5 不接受
-  const m = s.match(/^(\d+)\.0+$/);
-  if (m) return m[1];
-  // 其余（含字母 / 科学计数 / 非零小数 / 千分位）一律视为非交易编号
-  return '';
-}
+// normalizeTransactionNo 已下沉至 engine-utils（v3.0.5 决策9，单一真相）；本文件经上方 require 引入并在 module.exports re-export。
 
 // 金额转分：parseNumber 去千分位 → ×100 四舍五入（容差 0）；非数值 → null。
 function toCents(value) {
@@ -78,20 +69,25 @@ function extractLongestDigitRun(value) {
 // Step1：物理行序扫描分组（spec §4.1）
 // ============================================================================
 
-// scanFxGroups({ objects, rowNumbers })：按物理行序遍历交割表对象行。
+// scanFxGroups({ objects, rowNumbers, offset })：按物理行序遍历交割表对象行。
 //   · 「交易编号」归一化为空（合计 / 页脚 / 非数字行）→ 关当前组，该行不入表；
 //   · rowNumbers 断档（前后物理行号差 > 1，即中间有被过滤的全空行）→ 关组；
 //   · 连续纯数字段成组，组号 1,2,3… 仅在非空段递增（连续多个分隔不产空组号）。
+//   v3.0.5 批次2b：组号偏移续编（offset）——增量进组语义下，本文件组号 = 文件内组号 + offset
+//     （offset = SELECT MAX(orig_group_no) 现有最大组号），保证多文件累加时跨文件组号全局不冲突；
+//     offset 缺省 0（单文件 / 单测口径，行为字节不变）。组号续编后同时写入「分组」(展示) 与 KEY_ORIG_GROUP（原始组号）。
 //   产出行 = 交割表原命名字段（33 个，空表头列已在对象化阶段跳过）+ 分组(组号字符串) +
-//            调拨单号='' + 资金对账不平表链接ID='' + 内部辅助键(__txnNo/__maturityIso/__sourceRow)。
-//   返回 { rows, groupCount, logs }。
-function scanFxGroups({ objects, rowNumbers } = {}) {
+//            调拨单号='' + 资金对账不平表链接ID='' + 内部辅助键(__txnNo/__maturityIso/__sourceRow/__origGroup)。
+//   返回 { rows, groupCount, logs }（groupCount = 本文件成组数，不含 offset）。
+function scanFxGroups({ objects, rowNumbers, offset } = {}) {
   const objs = Array.isArray(objects) ? objects : [];
   const rowNums = Array.isArray(rowNumbers) ? rowNumbers : [];
+  // 偏移量归一：非有限非负整数一律按 0 处理（防 NaN/负数污染组号）。
+  const groupOffset = Number.isFinite(offset) && offset > 0 ? Math.floor(offset) : 0;
   const rows = [];
   const logs = [];
 
-  let currentGroup = 0; // 0 = 当前无开放组
+  let currentGroup = 0; // 0 = 当前无开放组（文件内组号，不含 offset）
   let groupCount = 0;
   let prevRowNum = null;
 
@@ -118,19 +114,22 @@ function scanFxGroups({ objects, rowNumbers } = {}) {
       currentGroup = groupCount;
     }
 
+    // 全局组号 = 文件内组号 + offset（多文件累加不冲突；单文件 offset=0 → 文件内组号原值）。
+    const globalGroup = String(currentGroup + groupOffset);
     const row = { ...obj };
-    row[FIELD_MAP.linkGroup] = String(currentGroup);
+    row[FIELD_MAP.linkGroup] = globalGroup;
     row[FIELD_MAP.linkAllocationNo] = '';
     row[FIELD_MAP.linkReconLinkId] = '';
     row[KEY_TXN_NO] = txnNo;
     row[KEY_MATURITY_ISO] = toIsoDate(obj[FIELD_MAP.fxMaturityDate]);
     row[KEY_SOURCE_ROW] = physicalRow;
+    row[KEY_ORIG_GROUP] = globalGroup; // 原始组号 = scan 时刻续编后组号（永不被 2.2/2.3 改写）
     rows.push(row);
 
     prevRowNum = physicalRow;
   }
 
-  logs.push({ level: 'info', message: `[BOC链接表] 物理行序扫描完成：${rows.length} 行成组，共 ${groupCount} 组` });
+  logs.push({ level: 'info', message: `[BOC链接表] 物理行序扫描完成：${rows.length} 行成组，共 ${groupCount} 组（偏移 ${groupOffset}）` });
   return { rows, groupCount, logs };
 }
 
@@ -246,6 +245,66 @@ function matchBocToMidAllocation(bocRows, midRows) {
   }
 
   return { logs };
+}
+
+// ============================================================================
+// v3.0.5 批次2b：全库 BOC 行「重置-重匹配-重编号」纯函数（spec §3.2.2 第3步 / OPEN-5）
+// ============================================================================
+
+// rematchAllBocGroups(allRows, midRows)：全量重匹配 + 组号重编号（纯函数，不读 DB / 不碰 FS）。
+//   入参 allRows = readBocFxLinkRowsForRematch 产物 [{ id, row }]，🔴 caller 必须按 id ASC 喂入
+//     （= upsert 累加顺序：同键覆盖 id 不变保稳、新键 AUTOINCREMENT 递增；与现状单文件物理行序口径一致）。
+//     每行 row 须含 KEY_ORIG_GROUP（原始组号，readBocFxLinkRowsForRematch 从 orig_group_no 热列注入）。
+//   算法（spec §3.2.2 / TechDoc §4.2，逐行原地改 row）：
+//     1) 按 KEY_ORIG_GROUP 全局重编号：以「组首次出现序（id ASC）」赋临时组号 → 消除 orig_group_no 本身的空洞。
+//        🔴 orig_group_no（KEY_ORIG_GROUP）只读不改写——这是「永不被 2.2/2.3 改写」红线。
+//     2) 重置：「分组」(linkGroup) = 重编号后组号；「调拨单号」(linkAllocationNo) = ''（重匹配前清空，幂等前提）。
+//     3) 重跑 matchBocToMidAllocation（2.2 单行剔除 + 2.3 组汇总，逻辑字节不变）——输入从「单文件行」变「全库行」，
+//        候选 consumed 状态仅存在本次运行内存 → 同输入两次结果一致（幂等）；同日同金额一对一消耗（跨文件组也只消耗一次）。
+//     4) 🔴 M4 调和（codex review）：2.2 会清空命中单行组的「分组」→ 留组号空洞（如组1全清→最终从组2起）。
+//        在 2.2/2.3 跑完后对「分组非空」行再 compact 一次（按 id ASC 首现序重映射 1..M）→ 最终展示组号也连续 1..M 无空洞。
+//        只改「分组」展示值（不碰 orig_group_no / 调拨单号 / matchBocToMidAllocation 逻辑；同组一致映射，下游聚合不破坏）。
+//   返回 { rows: allRows, logs }（allRows 内每项 row 已被原地改：分组 compact 后连续 + 2.2 命中清空 + 2.3 回填调拨单号）。
+//   ⚠️ orig_group_no 始终保留续编后原值（落库不改）。下游 boc-dispatch-order-fix 按「分组」聚合 → 组号仅组内一致标识
+//      （无跨表业务含义，spec §1.3-6），compact 连续化不破坏其逻辑。
+function rematchAllBocGroups(allRows, midRows) {
+  const list = Array.isArray(allRows) ? allRows : [];
+
+  // 1) 按 orig_group_no 行序（id ASC）重编号（组首次出现序 = 临时组号；消除 orig_group_no 空洞）。
+  const origToNew = new Map();
+  let nextNo = 0;
+  const rows = []; // 仅 row 视图，供 matchBocToMidAllocation 原地改
+  for (const it of list) {
+    const row = it && it.row && typeof it.row === 'object' ? it.row : {};
+    const og = normalizeCellValue(row[KEY_ORIG_GROUP]);
+    if (!origToNew.has(og)) {
+      nextNo += 1;
+      origToNew.set(og, String(nextNo));
+    }
+    // 2) 重置：分组 = 重编号后组号；调拨单号清空（重匹配前）。资金对账不平表链接ID 不在此处动（2.5 全量回填负责）。
+    row[FIELD_MAP.linkGroup] = origToNew.get(og);
+    row[FIELD_MAP.linkAllocationNo] = '';
+    rows.push(row);
+  }
+
+  // 3) 重跑 2.2 + 2.3（逻辑零改动，输入 = 全库行 + 全量中台候选）。
+  const matchRet = matchBocToMidAllocation(rows, midRows);
+
+  // 4) M4 compact：2.2 清空单行组的「分组」后，对剩余「分组非空」行按 id ASC 首现序重映射 1..M（消除空洞，展示组号连续）。
+  //    只读/改 linkGroup（不碰 orig_group_no / 调拨单号）；空分组（2.2 剔除行）保持空。
+  const compactMap = new Map();
+  let compactNo = 0;
+  for (const row of rows) {
+    const g = normalizeCellValue(row[FIELD_MAP.linkGroup]);
+    if (g === '') continue; // 2.2 剔除行：分组空，不参与 compact
+    if (!compactMap.has(g)) {
+      compactNo += 1;
+      compactMap.set(g, String(compactNo));
+    }
+    row[FIELD_MAP.linkGroup] = compactMap.get(g);
+  }
+
+  return { rows: list, logs: Array.isArray(matchRet.logs) ? matchRet.logs : [] };
 }
 
 // ============================================================================
@@ -370,6 +429,8 @@ function backfillBocReconLinkIds(rowsWithIds, bankRows) {
 module.exports = {
   scanFxGroups,
   matchBocToMidAllocation,
+  // v3.0.5 批次2b：全库重置-重匹配-重编号纯函数（builder 编排调用 + 单测幂等/合并等价断言）
+  rematchAllBocGroups,
   buildBocBankRows,
   backfillBocReconLinkIds,
   // 工具导出供单测细粒度断言
@@ -380,5 +441,7 @@ module.exports = {
   // 内部辅助键名（仓储落库剥列时引用）
   KEY_TXN_NO,
   KEY_MATURITY_ISO,
-  KEY_SOURCE_ROW
+  KEY_SOURCE_ROW,
+  // v3.0.5 批次2b：原始组号辅助键（落库剥到 orig_group_no 热列）
+  KEY_ORIG_GROUP
 };
