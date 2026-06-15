@@ -309,6 +309,51 @@ function matchS2(bankRow, refundCands, depositRows, depIndex) {
   return matchS2Mtx(bankRow, refundCands);
 }
 
+// S2b（R2 新层）：附言包含入金 CustomerRef。限 Channel=JPM；插在 S2（等值层）之后、S3 之前（L3）。
+//   逻辑：对每条候选 ro，payNo → 入金行（双键 OR）→ dep.CustomerRef → 守卫（非空 + 不在黑名单 + 长度≥阈值）
+//         → bank 附言字段（memoFields）任一 .includes(ref) → 命中（精准）；详情用 detailBankToDeposit。
+//   🔴 设计依据（§8 决策 1）：必须独立成层、放在等值层之后 —— 若并入 matchJpmUs 内部回落，
+//      等值命中与包含命中进同一冻结命中图会触发同层反向多笔，把 165 行等值主流拖进报错。
+//   🔴 守卫为必选（占位短串会大面积假命中）；读银行主表附言（44 列恒有，不踩入金行 Payment Detail 存量缺字段坑）。
+//   OPEN-7：命中桥接入金表行 → hit 附 _depositBizId（接 OPEN-7b）。
+function matchMemoContainsDepositRef(bankRow, refundCands, depositRows, depIndex) {
+  if (normalizeCellValue(bankRow.Channel) !== M.jpm.channelValue) return []; // D7：限 Channel=JPM
+  const cfg = M.s2b;
+  // 预取 bank 附言字段值（非空者）。
+  const memos = [];
+  for (const field of cfg.memoFields) {
+    const v = normalizeCellValue(bankRow[field]);
+    if (v !== '') memos.push(v);
+  }
+  if (memos.length === 0) return [];
+  const deps = Array.isArray(depositRows) ? depositRows : [];
+  const blacklist = new Set(cfg.blacklist);
+  const hits = [];
+  for (const ro of refundCands) {
+    const payNo = normalizeCellValue(ro[M.jpm.usRoKey]);
+    if (payNo === '') continue;
+    const dep = lookupDepositByKeys(payNo, deps, depIndex);
+    if (!dep) continue;
+    const depRef = normalizeCellValue(dep[M.jpm.depositTake]);
+    // 守卫：非空 + 不在黑名单（大写归一比对）+ 长度≥阈值。
+    if (depRef === '') continue;
+    if (blacklist.has(depRef.toUpperCase())) continue;
+    if (depRef.length < cfg.minRefLength) continue;
+    const hitMemoField = cfg.memoFields.find((field) => {
+      const v = normalizeCellValue(bankRow[field]);
+      return v !== '' && v.includes(depRef);
+    });
+    if (hitMemoField) {
+      hits.push({
+        refundRow: ro,
+        detail: detailBankToDeposit(hitMemoField, depRef, M.jpm.depositTake, depRef),
+        _depositBizId: normalizeBizIdKey(dep.BizId)
+      });
+    }
+  }
+  return hits;
+}
+
 // S3：按位（付款人名称↔Drawee Name / 付款卡号↔Drawee CardNo / 虚拟卡号↔Payee CardNo），✅Q8b
 //   对每条候选 refund，其三 ID 之一与 bank 对应位字段等值 → 命中
 function matchS3(bankRow, refundCands) {
@@ -522,9 +567,10 @@ function runStrategiesForGroup(ctx) {
   // —— S1~S3：每个策略批量解析（SPEC §7.2）——
   //   O1：每层带 hitType（精准/模糊命中）；S1~S3 均为精准命中（L1/L2/L4，精准层在模糊层前）。
   const strategyChain = [
-    { run: (bankRow, cands) => matchS1(bankRow, cands), hitType: HIT_TYPE_PRECISE },
-    { run: (bankRow, cands) => matchS2(bankRow, cands, depositRows, depIndex), hitType: HIT_TYPE_PRECISE },
-    { run: (bankRow, cands) => matchS3(bankRow, cands), hitType: HIT_TYPE_PRECISE }
+    { run: (bankRow, cands) => matchS1(bankRow, cands), hitType: HIT_TYPE_PRECISE },                                  // L1
+    { run: (bankRow, cands) => matchS2(bankRow, cands, depositRows, depIndex), hitType: HIT_TYPE_PRECISE },           // L2（含 R1/R3）
+    { run: (bankRow, cands) => matchMemoContainsDepositRef(bankRow, cands, depositRows, depIndex), hitType: HIT_TYPE_PRECISE }, // L3 = S2b（R2）
+    { run: (bankRow, cands) => matchS3(bankRow, cands), hitType: HIT_TYPE_PRECISE }                                   // L4
   ];
 
   for (const layer of strategyChain) {
@@ -708,6 +754,8 @@ module.exports = {
   // R3：CustomerRef 二跳共享函数 + 入金行双键查找（单测精确覆盖）
   matchCustomerRefTwoHop,
   lookupDepositByKeys,
+  // R2：S2b 附言包含入金 CustomerRef（单测精确覆盖）
+  matchMemoContainsDepositRef,
   matchS3,
   matchS4,
   resolveHits,

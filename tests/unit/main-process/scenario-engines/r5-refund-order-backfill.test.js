@@ -469,6 +469,87 @@ test.describe('R3：HK 分支 CustomerRef 二跳回落', () => {
 });
 
 // ======================================================================
+// R2 S2b：附言包含入金 CustomerRef（限 JPM，等值层之后）
+// ======================================================================
+test.describe('R2：S2b 附言包含入金 CustomerRef', () => {
+  test('US 11 例同构：bank Payment Detail 含入金 CustomerRef（非等值）→ S2b 命中回填', () => {
+    const b = [bank({
+      _rowId: 'b1', Channel: 'JPM', '地区': 'US',
+      CustomerRef: 'OTHER-REF',                 // 等值层（CustomerRef==dep.CustomerRef）不命中
+      'Payment Detail': 'memo ... CR-INBOUND-9 ... tail' // 但附言含入金 CustomerRef
+    })];
+    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAYNO-1' })];
+    const dep = [deposit({ ReconciliationId: 'PAYNO-1', CustomerRef: 'CR-INBOUND-9' })];
+    const res = run(b, r, dep);
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-A');
+    assert.equal(res.backfillRows[0]['命中类型'], HIT_TYPE_PRECISE);
+    assert.match(res.backfillRows[0]['匹配命中详情'], /银行对账单入金表/);
+  });
+
+  test('HK 1 例同构：Extra Information 含入金 CustomerRef → S2b 命中', () => {
+    const b = [bank({
+      _rowId: 'b1', Channel: 'JPM', '地区': 'HK',
+      CustomerRef: 'NOPE', 'Extra Information': 'xx CR-HK-INBOUND yy'
+    })];
+    const r = [refund({ '银行打款流水号': 'PAYNO-HK' })];
+    const dep = [deposit({ ReconciliationId: 'PAYNO-HK', CustomerRef: 'CR-HK-INBOUND' })];
+    const res = run(b, r, dep);
+    assert.equal(res.backfillRows.length, 1);
+  });
+
+  test('黑名单守卫：入金 CustomerRef=NOTPROVIDED → S2b 不触发（即使附言含该串）', () => {
+    const b = [bank({
+      _rowId: 'b1', Channel: 'JPM', '地区': 'US',
+      CustomerRef: 'X', 'Payment Detail': 'has NOTPROVIDED inside', 'valueDate': undefined
+    })];
+    const r = [refund({ '银行打款流水号': 'PAYNO-1', 'valueDate': '2030-01-01' })];
+    const dep = [deposit({ ReconciliationId: 'PAYNO-1', CustomerRef: 'NOTPROVIDED' })];
+    const res = run(b, r, dep);
+    assert.equal(res.backfillRows.length, 0, 'NOTPROVIDED 占位不应命中');
+  });
+
+  test('短 ref 守卫：入金 CustomerRef 长度 <6 → S2b 不触发', () => {
+    const b = [bank({
+      _rowId: 'b1', Channel: 'JPM', '地区': 'US',
+      CustomerRef: 'X', 'Payment Detail': 'contains AB12 short'
+    })];
+    const r = [refund({ '银行打款流水号': 'PAYNO-1', 'valueDate': '2030-01-01' })];
+    const dep = [deposit({ ReconciliationId: 'PAYNO-1', CustomerRef: 'AB12' })]; // 4 < 6
+    const res = run(b, r, dep);
+    assert.equal(res.backfillRows.length, 0, '短 ref 不应命中');
+  });
+
+  test('限 Channel=JPM：非 JPM 渠道附言含入金 ref → S2b 不触发', () => {
+    const hits = E.matchMemoContainsDepositRef(
+      bank({ Channel: 'CITI', 'Payment Detail': 'has CR-INBOUND-9' }),
+      [refund({ '银行打款流水号': 'PAYNO-1' })],
+      [deposit({ ReconciliationId: 'PAYNO-1', CustomerRef: 'CR-INBOUND-9' })]
+    );
+    assert.equal(hits.length, 0);
+  });
+
+  test('🔴 分层保护：bankA 等值命中 X、bankB 附言含同 ref → bankA 回填、bankB 不在 S2b 复抢 X', () => {
+    // bankA：CustomerRef==dep.CustomerRef 等值（L2 命中 X）；bankB：附言含同一 dep.CustomerRef（本可 S2b 命中 X）。
+    //   等值层先结清消费 X → S2b 层 X 已不可用，bankB 抢不到 → 落 S4/提示，绝不复抢已被等值消费的 X。
+    const b = [
+      bank({ _rowId: 'bA', Channel: 'JPM', '地区': 'US', CustomerRef: 'CR-INBOUND-9', BillDate: '2026-06-01' }),
+      bank({ _rowId: 'bB', Channel: 'JPM', '地区': 'US', CustomerRef: 'NOMATCH',
+        'Payment Detail': 'memo CR-INBOUND-9 tail', BillDate: '2026-06-02', 'valueDate': undefined })
+    ];
+    const r = [refund({ '流水号': 'SN-X', '银行打款流水号': 'PAYNO-1', 'valueDate': '2030-01-01' })];
+    const dep = [deposit({ ReconciliationId: 'PAYNO-1', CustomerRef: 'CR-INBOUND-9' })];
+    const res = run(b, r, dep);
+    // 仅 1 条回填（X 被 bankA 等值层消费），且是 bankA
+    assert.equal(res.backfillRows.length, 1, 'X 只被等值层 bankA 消费一次');
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-X');
+    assert.equal(res.backfillRows[0]['渠道退款时间'], '2026-06-01', '回填来自 bankA（等值层）');
+    // bankB 抢不到 X（S4 日期超容差）→ 落报错/提示，绝不复抢
+    assert.ok(!res.backfillRows.some((x) => x['渠道退款时间'] === '2026-06-02'), 'bankB 不得复抢已消费的 X');
+  });
+});
+
+// ======================================================================
 // ⑤ 1v1 双向消费
 // ======================================================================
 test.describe('⑤ 1v1 双向消费', () => {

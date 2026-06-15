@@ -61,6 +61,14 @@ const REFUND_BACKFILL_FIELD_MAP = Object.freeze({
   s1: Object.freeze({ roKey: '银行打款流水号', bankFields: Object.freeze(['ChannelOrderNo', 'CustomerRef']) }),
   // —— S2 附言 MTX ——
   s2: Object.freeze({ bankExtract: 'Extra Information', roField: '附言' }),
+  // —— S2b 附言包含入金 CustomerRef（R2 新层，限 Channel=JPM；D6/D7 定稿）——
+  //   二跳：ro 银行打款流水号 → 入金行(双键 OR) → dep.CustomerRef → 守卫 → bank 附言字段 .includes(ref)。
+  //   守卫（必选，防占位短串大面积假命中）：非空 + 不在黑名单 + 长度 ≥ minRefLength。
+  s2b: Object.freeze({
+    memoFields: Object.freeze(['Payment Detail', 'Extra Information']), // bank 侧附言字段集（包含匹配）
+    blacklist: Object.freeze(['NOTPROVIDED', 'NONREF']),                // D6：仅这两个占位词（用户确认无其他）
+    minRefLength: 6                                                     // D6：最小长度阈值（双保险）
+  }),
   // —— S3 付款人/卡号/虚拟卡号（✅Q8b：按位对应，无交叉匹配）——
   s3: Object.freeze([
     Object.freeze({ roKey: '付款人名称', bankField: 'Drawee Name' }),

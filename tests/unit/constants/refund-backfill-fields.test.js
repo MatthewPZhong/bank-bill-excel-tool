@@ -121,12 +121,13 @@ test.describe('REFUND_TEMPLATE_HEADERS — sheet1 31 列（O1/O3/O4：14→31）
 });
 
 test.describe('REFUND_BACKFILL_FIELD_MAP — 跨表映射单一真相', () => {
-  test('Object.freeze 锁死（含嵌套 uniqueKey/backfill/s1/s2/s4/jpm/filter）', () => {
+  test('Object.freeze 锁死（含嵌套 uniqueKey/backfill/s1/s2/s2b/s3/s4/jpm/filter）', () => {
     assert.ok(Object.isFrozen(REFUND_BACKFILL_FIELD_MAP));
     assert.ok(Object.isFrozen(REFUND_BACKFILL_FIELD_MAP.uniqueKey));
     assert.ok(Object.isFrozen(REFUND_BACKFILL_FIELD_MAP.backfill));
     assert.ok(Object.isFrozen(REFUND_BACKFILL_FIELD_MAP.s1));
     assert.ok(Object.isFrozen(REFUND_BACKFILL_FIELD_MAP.s2));
+    assert.ok(Object.isFrozen(REFUND_BACKFILL_FIELD_MAP.s2b));
     assert.ok(Object.isFrozen(REFUND_BACKFILL_FIELD_MAP.s3));
     assert.ok(Object.isFrozen(REFUND_BACKFILL_FIELD_MAP.s4));
     assert.ok(Object.isFrozen(REFUND_BACKFILL_FIELD_MAP.jpm));
@@ -156,6 +157,16 @@ test.describe('REFUND_BACKFILL_FIELD_MAP — 跨表映射单一真相', () => {
   test('S2：bankExtract=Extra Information，roField=附言', () => {
     assert.equal(REFUND_BACKFILL_FIELD_MAP.s2.bankExtract, 'Extra Information');
     assert.equal(REFUND_BACKFILL_FIELD_MAP.s2.roField, '附言');
+  });
+
+  test('S2b（R2 守卫，D6/D7）：memoFields / blacklist / minRefLength', () => {
+    const s2b = REFUND_BACKFILL_FIELD_MAP.s2b;
+    assert.deepEqual([...s2b.memoFields], ['Payment Detail', 'Extra Information']);
+    assert.deepEqual([...s2b.blacklist], ['NOTPROVIDED', 'NONREF']);
+    assert.equal(s2b.minRefLength, 6);
+    assert.ok(Object.isFrozen(s2b));
+    assert.ok(Object.isFrozen(s2b.memoFields));
+    assert.ok(Object.isFrozen(s2b.blacklist));
   });
 
   test('S3 按位映射（✅Q8b）：付款人名称↔Drawee Name / 付款卡号↔Drawee CardNo / 虚拟卡号↔Payee CardNo', () => {
