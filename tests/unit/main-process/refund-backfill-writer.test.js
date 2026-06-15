@@ -29,7 +29,8 @@ const {
 } = require('../../../src/main-process/refund-backfill-writer');
 const {
   REFUND_TEMPLATE_HEADERS,
-  REFUND_BANK_COLUMNS
+  REFUND_BANK_COLUMNS,
+  REFUND_RO_COLUMNS
 } = require('../../../src/constants/refund-backfill-fields');
 const {
   RESULT_ERROR,
@@ -38,16 +39,17 @@ const {
 
 // ---------- Fixtures ----------
 
-// 造一条回填模板行（含 REFUND_TEMPLATE_HEADERS 全 14 键），仿引擎 buildBackfillRow 形状
+// 造一条回填模板行（含 REFUND_TEMPLATE_HEADERS 全 31 键），仿引擎 buildBackfillRow 形状
 function makeBackfillRow(idx) {
   const row = {
     '退款单号': `RO_${idx}`,
     '状态': 'SUCCESS',
     '渠道流水号': `RECON_${idx}`,
     '渠道退款时间': '2026-06-01',
-    '匹配命中详情': `匹配成功:"银行对账单ChannelOrderNo里的CO${idx}"匹配上了"refund order银行打款流水号的CO${idx}"`
+    '命中类型': '精准命中',
+    '匹配命中详情': `"银行对账单ChannelOrderNo里的CO${idx}"匹配上了"refund order银行打款流水号的CO${idx}"`
   };
-  // F~N：银行 9 字段原数据（按 REFUND_BANK_COLUMNS 顺序）
+  // 银行 10 字段原数据（按 REFUND_BANK_COLUMNS 顺序，O3 含 Payment Detail）
   row['BillDate'] = '2026-06-01';
   row['Channel'] = 'JPM';
   row['地区'] = 'HK';
@@ -57,10 +59,27 @@ function makeBackfillRow(idx) {
   row['ReconciliationId'] = `RECON_${idx}`;
   row['ChannelOrderNo'] = `CO${idx}`;
   row['CustomerRef'] = `REF_${idx}`;
+  row['Payment Detail'] = `PD_${idx}`;
+  // 中台 15 字段原数据（按 REFUND_RO_COLUMNS 顺序，O4）；'流水号' 与「退款单号」同值（用户要求双列）
+  row['流水号'] = `RO_${idx}`;
+  row['加款单号'] = `ADD_${idx}`;
+  row['渠道名称'] = 'JPMorgan';
+  row['银行大账号'] = `M00${idx}`;
+  row['虚拟卡号'] = `VC_${idx}`;
+  row['原加款金额'] = idx * 100;
+  row['退款金额'] = idx * 100;
+  row['币种'] = 'USD';
+  row['付款人名称'] = `NAME_${idx}`;
+  row['付款卡号'] = `CARD_${idx}`;
+  row['附言'] = `MEMO_${idx}`;
+  row['客户号'] = `CUST_${idx}`;
+  row['账户号'] = `ACCT_${idx}`;
+  row['银行打款流水号'] = `CO${idx}`;
+  row['valueDate'] = '2026-06-01';
   return row;
 }
 
-// ①银行未匹配行（含 REFUND_BANK_COLUMNS 9 列 + 结果类型 + 报错/提示信息），仿引擎 buildUnmatchedBankRow
+// ①银行未匹配行（含 REFUND_BANK_COLUMNS 10 列 + 结果类型 + 报错/提示信息），仿引擎 buildUnmatchedBankRow
 function makeUnmatchedBankRow(idx, resultType, info) {
   const row = { '结果类型': resultType };
   row['BillDate'] = '2026-06-02';
@@ -72,6 +91,7 @@ function makeUnmatchedBankRow(idx, resultType, info) {
   row['ReconciliationId'] = `RX_${idx}`;
   row['ChannelOrderNo'] = `CX${idx}`;
   row['CustomerRef'] = `RFX_${idx}`;
+  row['Payment Detail'] = `PDX_${idx}`;
   row['报错/提示信息'] = info;
   return row;
 }
@@ -114,10 +134,10 @@ test('① workbook 含「回填模板」+「未匹配报错」两个 sheet', asy
 });
 
 // ========================================================================
-// 2) sheet1 表头 14 列且顺序 = REFUND_TEMPLATE_HEADERS；
-//    E 列 = 匹配命中详情；F 起 9 列含 Debit 不含 Credit
+// 2) sheet1 表头 31 列且顺序 = REFUND_TEMPLATE_HEADERS；
+//    E 列 = 命中类型；F 列 = 匹配命中详情；银行 10 列含 Debit 不含 Credit；中台 15 列；流水号双列
 // ========================================================================
-test('② sheet1 表头 14 列顺序正确；E=匹配命中详情；F 起 9 列含 Debit Amount 不含 Credit Amount', async () => {
+test('② sheet1 表头 31 列顺序正确；E=命中类型 F=匹配命中详情；银行 10 列含 Debit 不含 Credit；中台 15 列', async () => {
   const savePath = path.join(tmpDir, 'h.xlsx');
   await writeRefundBackfillOutput([makeBackfillRow(1)], [], savePath);
 
@@ -126,22 +146,29 @@ test('② sheet1 表头 14 列顺序正确；E=匹配命中详情；F 起 9 列�
   const sheet = wb.getWorksheet('回填模板');
   const headerRow = sheet.getRow(1);
 
-  assert.strictEqual(REFUND_TEMPLATE_HEADERS.length, 14, 'REFUND_TEMPLATE_HEADERS 应为 14 列');
+  assert.strictEqual(REFUND_TEMPLATE_HEADERS.length, 31, 'REFUND_TEMPLATE_HEADERS 应为 31 列');
   const actualHeaders = REFUND_TEMPLATE_HEADERS.map((_, i) => headerRow.getCell(i + 1).value);
   assert.deepStrictEqual(actualHeaders, REFUND_TEMPLATE_HEADERS.slice(), 'sheet1 表头顺序应严格等于 REFUND_TEMPLATE_HEADERS');
 
-  // E 列（第 5 列）= 匹配命中详情
-  assert.strictEqual(actualHeaders[4], '匹配命中详情', 'E 列应为「匹配命中详情」');
+  // E 列（第 5 列）= 命中类型；F 列（第 6 列）= 匹配命中详情
+  assert.strictEqual(actualHeaders[4], '命中类型', 'E 列应为「命中类型」');
+  assert.strictEqual(actualHeaders[5], '匹配命中详情', 'F 列应为「匹配命中详情」');
 
-  // F 起 9 列 = REFUND_BANK_COLUMNS
-  const bankCols = actualHeaders.slice(5);
-  assert.strictEqual(bankCols.length, 9, 'F 起应为 9 列银行字段');
-  assert.deepStrictEqual(bankCols, REFUND_BANK_COLUMNS.slice(), 'F 起 9 列应严格等于 REFUND_BANK_COLUMNS');
+  // 第 7 列起 10 列 = REFUND_BANK_COLUMNS
+  const bankCols = actualHeaders.slice(6, 16);
+  assert.strictEqual(bankCols.length, 10, '银行段应为 10 列');
+  assert.deepStrictEqual(bankCols, REFUND_BANK_COLUMNS.slice(), '银行段应严格等于 REFUND_BANK_COLUMNS');
 
-  // 🔴 含 Debit Amount，绝不含 Credit Amount
-  assert.ok(bankCols.includes('Debit Amount'), 'F 起 9 列应含 Debit Amount');
-  assert.ok(!bankCols.includes('Credit Amount'), 'F 起 9 列绝不应含 Credit Amount');
+  // 🔴 含 Debit Amount，绝不含 Credit Amount；含 Payment Detail
+  assert.ok(bankCols.includes('Debit Amount'), '银行段应含 Debit Amount');
+  assert.ok(bankCols.includes('Payment Detail'), 'O3：银行段应含 Payment Detail');
+  assert.ok(!bankCols.includes('Credit Amount'), '银行段绝不应含 Credit Amount');
   assert.ok(!actualHeaders.includes('Credit Amount'), 'sheet1 全表头绝不应含 Credit Amount');
+
+  // 第 17 列起 15 列 = REFUND_RO_COLUMNS
+  const roCols = actualHeaders.slice(16);
+  assert.strictEqual(roCols.length, 15, '中台段应为 15 列');
+  assert.deepStrictEqual(roCols, REFUND_RO_COLUMNS.slice(), '中台段应严格等于 REFUND_RO_COLUMNS');
 });
 
 // ========================================================================
@@ -168,10 +195,21 @@ test('③ sheet1 数据行值按表头投影正确（E 命中详情 + F~N 银行
     });
   });
 
-  // 显式断言 E 列命中详情 + Debit Amount 列
-  assert.strictEqual(sheet.getRow(2).getCell(5).value, row1['匹配命中详情'], 'E 列应为命中详情');
+  // 显式断言 E 列命中类型 + F 列命中详情 + Debit Amount 列 + Payment Detail 列 + 流水号/退款单号同值双列
+  const hitTypeColIdx = REFUND_TEMPLATE_HEADERS.indexOf('命中类型');
+  assert.strictEqual(sheet.getRow(2).getCell(hitTypeColIdx + 1).value, row1['命中类型'], 'E 列应为命中类型');
+  const detailColIdx = REFUND_TEMPLATE_HEADERS.indexOf('匹配命中详情');
+  assert.strictEqual(sheet.getRow(2).getCell(detailColIdx + 1).value, row1['匹配命中详情'], 'F 列应为命中详情');
   const debitColIdx = REFUND_TEMPLATE_HEADERS.indexOf('Debit Amount');
   assert.strictEqual(sheet.getRow(2).getCell(debitColIdx + 1).value, row1['Debit Amount'], 'Debit Amount 列值应正确');
+  const pdColIdx = REFUND_TEMPLATE_HEADERS.indexOf('Payment Detail');
+  assert.strictEqual(sheet.getRow(2).getCell(pdColIdx + 1).value, row1['Payment Detail'], 'O3：Payment Detail 列值应正确');
+  // O4：「流水号」与「退款单号」同值但分两列
+  const serialColIdx = REFUND_TEMPLATE_HEADERS.indexOf('流水号');
+  const refundNoColIdx = REFUND_TEMPLATE_HEADERS.indexOf('退款单号');
+  assert.notStrictEqual(serialColIdx, refundNoColIdx, '流水号 与 退款单号 应为两列');
+  assert.strictEqual(sheet.getRow(2).getCell(serialColIdx + 1).value, row1['流水号'], '流水号 列值应正确');
+  assert.strictEqual(sheet.getRow(2).getCell(serialColIdx + 1).value, sheet.getRow(2).getCell(refundNoColIdx + 1).value, '流水号 与 退款单号 同值');
 });
 
 // ========================================================================
@@ -316,10 +354,12 @@ test('⑧ writer 能消费引擎真实产出（backfillRows + unmatchedRows 异�
   const s1 = wb.getWorksheet('回填模板');
   const s2 = wb.getWorksheet('未匹配报错');
 
-  // sheet1 第 1 条回填行：退款单号 = SERIAL_MATCH、状态 = SUCCESS、E 命中详情非空
+  // sheet1 第 1 条回填行：退款单号 = SERIAL_MATCH、状态 = SUCCESS、F 命中详情非空
+  //   （命中类型列由 O1/commit② 引擎填充，端到端值断言见 r5 引擎单测 O1 段）
   assert.strictEqual(s1.getRow(2).getCell(1).value, 'SERIAL_MATCH', 'sheet1 退款单号应为命中 refund 流水号');
   assert.strictEqual(s1.getRow(2).getCell(2).value, 'SUCCESS', 'sheet1 状态应回填 SUCCESS');
-  assert.ok(s1.getRow(2).getCell(5).value, 'sheet1 E 列命中详情应非空');
+  const detailColIdx = REFUND_TEMPLATE_HEADERS.indexOf('匹配命中详情') + 1;
+  assert.ok(s1.getRow(2).getCell(detailColIdx).value, 'sheet1 F 列命中详情应非空');
 
   // sheet2 收尾提示行（②形状）：结果类型 = 未匹配-提示、退款单号 = SERIAL_NOHIT
   const resultTypeColIdx = UNMATCHED_HEADERS.indexOf('结果类型') + 1;

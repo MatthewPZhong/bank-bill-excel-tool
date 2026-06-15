@@ -32,7 +32,7 @@ const { CHANNEL_VALUE } = require('../../constants/adm-bank-deposit-fields');
 // v2.1.16-beta.3 ②：银行对账单入金表落库字段白名单（按字段名 pick）。
 //   🔴 裁列必须按字段名 pick（非 slice 索引切片），防 BANK_STATEMENT_FIELDS 列顺序变动裁错列。
 //   v3.0.4 块 E（需求2）：13→14 —— 在 CustomerRef 与 FundType 之间插入 'Payment Detail'
-//     （44 列契约第 17 列，紧随 CustomerRef）。BOC 派生「银行单交易编号」从该字段提取，缺它则永远无法回填资金对账链接ID。
+//     （44 列契约 1-based 第 18 列 / 0-based idx 17，紧随 CustomerRef）。BOC 派生「银行单交易编号」从该字段提取，缺它则永远无法回填资金对账链接ID。
 //     🔴 存量已导入的 bank-deposit 行 raw_json 无此字段、无法 migration 补 → 由 buildBocBankRows 识别为
 //        missing-payment-detail 引导重导（见 boc-fx-link-builder.js / spec §2.4）。顺序保持与 BANK_STATEMENT_FIELDS 一致。
 const BANK_DEPOSIT_FIELDS = Object.freeze([

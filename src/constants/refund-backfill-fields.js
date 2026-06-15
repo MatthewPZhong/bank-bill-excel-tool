@@ -37,6 +37,8 @@
 //     dep.CustomerRef                            二跳取值（→ 与 bank.CustomerRef 比对）
 
 const { BANK_STATEMENT_FIELDS } = require('./bank-statement-fields');
+// O4：REFUND_RO_COLUMNS ⊆ 中台退款订单 25 列签名 启动断言用（依赖无环：table-signatures 仅 require bank-statement-fields）。
+const { ZHONGTAI_REFUND_ORDER_SIGNATURE } = require('./table-signatures');
 
 const REFUND_BACKFILL_FIELD_MAP = Object.freeze({
   // —— 唯一值三元组（✅Q1，详见 PRD §九）——
@@ -83,25 +85,37 @@ const REFUND_BACKFILL_FIELD_MAP = Object.freeze({
   })
 });
 
-// 回填模板 F 起银行字段（✅Q4：只放这 9 列、按此顺序；非 44 列全列；金额列只有 Debit Amount、无 Credit Amount）
+// 回填模板银行字段段（✅Q4；refund-backfill-rules-v2 O3：9→10，CustomerRef 右侧加 'Payment Detail'）
+//   金额列只有 Debit Amount、无 Credit Amount（资金红线）；'Payment Detail' 读银行退款行主表（44 列恒有，非入金行）。
 const REFUND_BANK_COLUMNS = Object.freeze([
   'BillDate', 'Channel', '地区', 'MerchantId', 'Currency',
   'Debit Amount',          // ⚠️ 只放 Debit Amount，不放 Credit Amount
-  'ReconciliationId', 'ChannelOrderNo', 'CustomerRef'
+  'ReconciliationId', 'ChannelOrderNo', 'CustomerRef',
+  'Payment Detail'         // O3 新增（第 10 列；R2/JPM-HK 提取源，配对银行行原值）
 ]);
 
-// 回填模板列（✅Q4；现模板实测仅 A~D 4 列，E + F 起 9 字段为需求新增）
+// 回填模板中台退款订单字段段（refund-backfill-rules-v2 O4：新增 15 列，按用户列序，取配对 ro 原值）。
+//   ⚠️ 全部 ∈ 中台退款订单 25 列签名（ZHONGTAI_REFUND_ORDER_SIGNATURE）；'流水号' 与表头 A「退款单号」同值但分列（用户明确要求）。
+const REFUND_RO_COLUMNS = Object.freeze([
+  '流水号', '加款单号', '渠道名称', '银行大账号', '虚拟卡号',
+  '原加款金额', '退款金额', '币种', '付款人名称', '付款卡号',
+  '附言', '客户号', '账户号', '银行打款流水号', 'valueDate'
+]);
+
+// 回填模板列（refund-backfill-rules-v2 O1/O3/O4：14→31 列 = 固定 6 列 + 银行 10 列 + 中台 15 列）。
+//   A~F 固定：退款单号/状态/渠道流水号/渠道退款时间/命中类型/匹配命中详情（O1 新增「命中类型」列）。
 const REFUND_TEMPLATE_HEADERS = Object.freeze([
-  '退款单号', '状态', '渠道流水号', '渠道退款时间', '匹配命中详情', // A~E
-  ...REFUND_BANK_COLUMNS   // F~N：银行 9 字段原数据（按序，非全列）
+  '退款单号', '状态', '渠道流水号', '渠道退款时间', '命中类型', '匹配命中详情', // 固定 6 列
+  ...REFUND_BANK_COLUMNS,  // 银行 10 字段原数据（按序，非全列）
+  ...REFUND_RO_COLUMNS     // 中台退款订单 15 字段原数据（取配对 ro 原值）
 ]);
 
 // 提取参数（复用 C1 buildFeatureRegex；实测见 TECH §五）
 const MTX_FEATURE = Object.freeze({ featureCode: 'MTX', digitCount: 19, totalLength: 22 });       // → /MTX\d{19}/
 const T54SWIC_FEATURE = Object.freeze({ featureCode: 'T54SWIC', digitCount: 6, totalLength: 13 }); // → /T54SWIC\d{6}/
 
-// 启动期断言：REFUND_BANK_COLUMNS 9 字段全部 ∈ BANK_STATEMENT_FIELDS（防常量漂移，故仍 require 全集）。
-//   任一漂移（重命名银行列 / 误把不存在的列放进 F 起）→ 立刻 throw，避免静默回填错列。
+// 启动期断言①：REFUND_BANK_COLUMNS 10 字段全部 ∈ BANK_STATEMENT_FIELDS（防常量漂移，故仍 require 全集）。
+//   任一漂移（重命名银行列 / 误把不存在的列放进银行段）→ 立刻 throw，避免静默回填错列。
 const __missingBankColumns = REFUND_BANK_COLUMNS.filter((f) => !BANK_STATEMENT_FIELDS.includes(f));
 if (__missingBankColumns.length > 0) {
   throw new Error(
@@ -109,9 +123,19 @@ if (__missingBankColumns.length > 0) {
   );
 }
 
+// 启动期断言②（O4）：REFUND_RO_COLUMNS 15 字段全部 ∈ 中台退款订单 25 列签名（防常量漂移 / 误把不存在的退款列放进 ro 段）。
+const __roSignature = new Set(ZHONGTAI_REFUND_ORDER_SIGNATURE.expectedHeaders);
+const __missingRoColumns = REFUND_RO_COLUMNS.filter((f) => !__roSignature.has(f));
+if (__missingRoColumns.length > 0) {
+  throw new Error(
+    `[refund-backfill-fields] REFUND_RO_COLUMNS 含非 ZHONGTAI_REFUND_ORDER_SIGNATURE 字段（常量漂移）：${__missingRoColumns.join(', ')}`
+  );
+}
+
 module.exports = {
   REFUND_BACKFILL_FIELD_MAP,
   REFUND_BANK_COLUMNS,
+  REFUND_RO_COLUMNS,
   REFUND_TEMPLATE_HEADERS,
   MTX_FEATURE,
   T54SWIC_FEATURE

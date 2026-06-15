@@ -29,6 +29,7 @@ const { buildFeatureRegex } = require('./c1-extract-recon-id');
 const {
   REFUND_BACKFILL_FIELD_MAP: M,
   REFUND_BANK_COLUMNS,
+  REFUND_RO_COLUMNS,
   MTX_FEATURE,
   T54SWIC_FEATURE
 } = require('../../constants/refund-backfill-fields');
@@ -131,9 +132,14 @@ function buildBackfillRow(refundRow, bankRow, detailText, bridgeDepositBizId) {
     '渠道退款时间': bankRow[M.backfill.fromBankBillDate],
     '匹配命中详情': detailText
   };
-  // F~N：配对银行行 9 字段原数据（按 REFUND_BANK_COLUMNS 顺序；保留原始值不 normalize，与导出口径一致）
+  // 银行段：配对银行行 10 字段原数据（按 REFUND_BANK_COLUMNS 顺序；保留原始值不 normalize，与导出口径一致）
   for (const col of REFUND_BANK_COLUMNS) {
     row[col] = bankRow[col];
+  }
+  // O4 中台段：配对 refund order 15 字段原数据（按 REFUND_RO_COLUMNS 顺序；保留原始值不 normalize）。
+  //   '流水号' 与表头 A「退款单号」同值但分列（用户明确要求，照做）。
+  for (const col of REFUND_RO_COLUMNS) {
+    row[col] = refundRow[col];
   }
   // OPEN-7 内部字段（仅非空时挂，避免给非桥接回填行塞 undefined 列）。
   if (bridgeDepositBizId !== undefined && bridgeDepositBizId !== null && bridgeDepositBizId !== '') {
