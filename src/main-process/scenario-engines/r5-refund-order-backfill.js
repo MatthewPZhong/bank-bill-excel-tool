@@ -250,30 +250,51 @@ function matchCustomerRefTwoHop(bankRow, refundCands, depositRows, depIndex) {
 // F-PERF：入金表双 Map 索引（一次性构建，4 条二跳路径复用；入金表可达 65 万行，O(n) find → O(1) 查）。
 //   byReconId/byChannelOrderNo：normalizeCellValue(dep[key]) → dep[]（同键多值，保留插入序，与线性 find「首条命中」对齐）。
 //   空键（归一后 ''）不入索引（线性 find 也要求 dv !== ''）→ 行为字节级一致。
+//   🔴 Fix#1（codex 资金红线）：额外记录每个 dep 的全局行序 ordOf（= deps 中的下标），供 lookupDepositByKeys
+//     按「入金行顺序首条命中」收敛——交叉键冲突（dep[i].ChannelOrderNo == dep[j].ReconciliationId == payNo）时
+//     索引版若「键优先」会取 dep[j]、线性版「行优先」取 dep[i]，两者取不同入金行 CustomerRef → 误命中。
+//     用 ordOf 让索引版与线性版严格一致（行序最小者）。byReconId/byChannelOrderNo 的 value 仍存 dep 对象数组
+//     （不改 value 结构 → 既有 F-PERF 单测对 .get(k)[0].BizId 的断言零破坏；ord 单独挂 ordOf Map）。
 function buildDepIndex(deps) {
   const byReconId = new Map();
   const byChannelOrderNo = new Map();
+  const ordOf = new Map(); // dep 对象引用 → 全局行序（deps 下标）；Fix#1 行序首条命中用
   const addTo = (map, key, dep) => {
     if (key === '') return;
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(dep);
   };
-  for (const dep of (Array.isArray(deps) ? deps : [])) {
+  const list = Array.isArray(deps) ? deps : [];
+  for (let i = 0; i < list.length; i++) {
+    const dep = list[i];
+    if (!ordOf.has(dep)) ordOf.set(dep, i); // 同一 dep 两键命中时 ord 相同，天然去重
     addTo(byReconId, normalizeCellValue(dep.ReconciliationId), dep);
     addTo(byChannelOrderNo, normalizeCellValue(dep.ChannelOrderNo), dep);
   }
-  return { byReconId, byChannelOrderNo };
+  return { byReconId, byChannelOrderNo, ordOf };
 }
 
 // 入金行双键 OR 查找（ReconId / ChannelOrderNo == payNo）。
-//   depIndex 存在 → byReconId/byChannelOrderNo 两 Map 并集首条；否则 depositRows 线性扫（结果一致）。
+//   depIndex 存在 → byReconId/byChannelOrderNo 两 Map 候选并集中「全局行序最小者」（Fix#1：与线性版 deps.find 行优先一致）；
+//   否则 depositRows 线性扫（结果一致）。
+//   🔴 Fix#1：旧实现「先查 byReconId 命中即返回、再查 byChannelOrderNo」是键优先，交叉键冲突时与线性版（行优先）
+//     取不同入金行 → 取不同 CustomerRef → 误命中。改为合并两键候选、按 ordOf 取 ord 最小者的 dep，与线性 find 严格一致。
 function lookupDepositByKeys(payNo, deps, depIndex) {
   if (depIndex && depIndex.byReconId && depIndex.byChannelOrderNo) {
-    const byRecon = depIndex.byReconId.get(payNo);
-    if (byRecon && byRecon.length > 0) return byRecon[0];
-    const byCh = depIndex.byChannelOrderNo.get(payNo);
-    if (byCh && byCh.length > 0) return byCh[0];
-    return null;
+    const ordOf = depIndex.ordOf;
+    const byRecon = depIndex.byReconId.get(payNo) || [];
+    const byCh = depIndex.byChannelOrderNo.get(payNo) || [];
+    let best = null;
+    let bestOrd = Infinity;
+    for (const dep of byRecon) {
+      const ord = ordOf && ordOf.has(dep) ? ordOf.get(dep) : Infinity;
+      if (ord < bestOrd) { bestOrd = ord; best = dep; }
+    }
+    for (const dep of byCh) {
+      const ord = ordOf && ordOf.has(dep) ? ordOf.get(dep) : Infinity;
+      if (ord < bestOrd) { bestOrd = ord; best = dep; }
+    }
+    return best;
   }
   return deps.find((d) =>
     M.jpm.depositKeys.some((k) => {
@@ -342,6 +363,14 @@ function matchS2(bankRow, refundCands, depositRows, depIndex) {
 //      等值命中与包含命中进同一冻结命中图会触发同层反向多笔，把 165 行等值主流拖进报错。
 //   🔴 守卫为必选（占位短串会大面积假命中）；读银行主表附言（44 列恒有，不踩入金行 Payment Detail 存量缺字段坑）。
 //   OPEN-7：命中桥接入金表行 → hit 附 _depositBizId（接 OPEN-7b）。
+// Fix#2（codex 复审）：正则元字符转义（depRef 来自数据，构造边界正则前必须转义，防注入/误判）。
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+// Fix#2：占位符黑名单归一（去空格/连字符 + 大写）——拦 'NOT PROVIDED' / 'NON-REF' 等变体。
+function normalizeForBlacklist(s) {
+  return String(s).toUpperCase().replace(/[\s\-]/g, '');
+}
 function matchMemoContainsDepositRef(bankRow, refundCands, depositRows, depIndex) {
   if (normalizeCellValue(bankRow.Channel) !== M.jpm.channelValue) return []; // D7：限 Channel=JPM
   const cfg = M.s2b;
@@ -353,7 +382,7 @@ function matchMemoContainsDepositRef(bankRow, refundCands, depositRows, depIndex
   }
   if (memos.length === 0) return [];
   const deps = Array.isArray(depositRows) ? depositRows : [];
-  const blacklist = new Set(cfg.blacklist);
+  const blacklist = new Set((cfg.blacklist || []).map(normalizeForBlacklist)); // Fix#2：黑名单去空格/连字符归一
   const hits = [];
   for (const ro of refundCands) {
     const payNo = normalizeCellValue(ro[M.jpm.usRoKey]);
@@ -361,13 +390,15 @@ function matchMemoContainsDepositRef(bankRow, refundCands, depositRows, depIndex
     const dep = lookupDepositByKeys(payNo, deps, depIndex);
     if (!dep) continue;
     const depRef = normalizeCellValue(dep[M.jpm.depositTake]);
-    // 守卫：非空 + 不在黑名单（大写归一比对）+ 长度≥阈值。
+    // 守卫：非空 + 不在黑名单（去空格/连字符归一比对）+ 长度≥阈值。
     if (depRef === '') continue;
-    if (blacklist.has(depRef.toUpperCase())) continue;
+    if (blacklist.has(normalizeForBlacklist(depRef))) continue;
     if (depRef.length < cfg.minRefLength) continue;
+    // Fix#2：token 边界匹配（非字母数字边界），防短 ref 作为更长无关串子串误命中（ABC123 ≠ XABC1234Y）。
+    const refRe = new RegExp('(^|[^A-Za-z0-9])' + escapeRegExp(depRef) + '([^A-Za-z0-9]|$)');
     const hitMemoField = cfg.memoFields.find((field) => {
       const v = normalizeCellValue(bankRow[field]);
-      return v !== '' && v.includes(depRef);
+      return v !== '' && refRe.test(v);
     });
     if (hitMemoField) {
       hits.push({
@@ -447,6 +478,19 @@ function matchDraweeNameDate(bankRow, refundCands, depositRows, depIndex) {
   return hits;
 }
 
+// R6（Fix#4 codex 复审）：DTD token 按真实样例的美式 mm/dd/yyyy（MDY）明确解析为 ISO YYYY-MM-DD，消除通用 auto 的 M/D 歧义。
+//   依据：真实原件 DTD05/21/2026（21 只能为「日」→ 月在前 = MDY）+ JPM US 美式日期惯例；故 DTD05/06/2026 → 2026-05-06。
+//   ⚠️ 资金红线：日期格式判定错误 = 系统性误配，本判定基于现有样例 + codex「美式格式」，建议用户用真实退款单最终确认。
+//   非法（mm∉[1,12] / dd∉[1,31] / 格式不符）→ null（该层整体不命中，宁漏勿误配）。
+function parseDtdDateToken(token) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(normalizeCellValue(token));
+  if (!m) return null;
+  const mm = Number(m[1]);
+  const dd = Number(m[2]);
+  if (!(mm >= 1 && mm <= 12) || !(dd >= 1 && dd <= 31)) return null;
+  return `${m[3]}-${m[1]}-${m[2]}`; // MDY（美式 mm/dd/yyyy）→ ISO YYYY-MM-DD（sameDay 解析 ISO 无歧义）
+}
+
 // S3c（R6 新层，L6 模糊）：附言 原单日期(DTD)+金额(FOR)+币种 三 token ↔ 入金表二跳（D4/D3/D5）。
 //   收口：payNo 二跳 → 入金行日期 sameDay(DTD) ∧ 入金行金额(分比对)==FOR ∧ dep.Currency==币种（模糊）。
 //   no-op 防御：datePattern/amountPattern 任一为 null → 整层跳过。金额分比对（Math.round(amt*100)）。
@@ -456,8 +500,10 @@ function matchMemoDateAmount(bankRow, refundCands, depositRows, depIndex) {
   const dtdToken = extractFirstCapture(bankRow, cfg.memoFields, cfg.datePattern);
   const amtToken = extractFirstCapture(bankRow, cfg.memoFields, cfg.amountPattern);
   if (!dtdToken || !amtToken) return [];
+  const dtdIso = parseDtdDateToken(dtdToken); // Fix#4：DTD 按 DMY 明确解析为 ISO；非法 → 整层不命中
+  if (!dtdIso) return [];
   const amtCents = (() => {
-    const n = parseNumber(amtToken);
+    const n = parseNumber(String(amtToken).replace(/,/g, '')); // Fix#3：去千分位逗号再解析（FOR USD5,043.00 → 5043.00）
     return n === null || !Number.isFinite(n) ? null : Math.round(n * 100);
   })();
   if (amtCents === null) return [];
@@ -468,8 +514,8 @@ function matchMemoDateAmount(bankRow, refundCands, depositRows, depIndex) {
     if (payNo === '') continue;
     const dep = lookupDepositByKeys(payNo, deps, depIndex);
     if (!dep) continue;
-    // 三重收口：日期 sameDay ∧ 金额分相等 ∧ 币种相等。
-    if (!sameDay(dep[cfg.depositDateField], dtdToken)) continue;
+    // 三重收口：日期 sameDay（Fix#4：用 DMY 明确解析的 ISO，消歧义）∧ 金额分相等 ∧ 币种相等。
+    if (!sameDay(dep[cfg.depositDateField], dtdIso)) continue;
     const depAmt = parseNumber(dep[cfg.depositAmountField]);
     if (depAmt === null || !Number.isFinite(depAmt) || Math.round(depAmt * 100) !== amtCents) continue;
     if (normalizeCellValue(dep[cfg.depositCurrencyField]) !== cfg.currency) continue;
@@ -531,8 +577,6 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
   const safeBankRows = Array.isArray(bankRows) ? bankRows : [];
   const safeRefundRows = Array.isArray(refundOrderRows) ? refundOrderRows : [];
   const safeDepositRows = Array.isArray(depositRows) ? depositRows : [];
-  // F-PERF：入金表双 Map 索引一次性构建（4 条二跳路径复用；入金表可达 65 万行）。
-  const depIndex = buildDepIndex(safeDepositRows);
   const isFundTypeChanged = typeof options.isFundTypeChanged === 'function'
     ? options.isFundTypeChanged
     : () => false;
@@ -551,6 +595,9 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
   if (refundPool.length === 0 || bankPool.length === 0) {
     return { backfillRows, unmatchedRows, modifications: [], warnings: warn.list(), hitDepositBizIds: [] };
   }
+
+  // F-PERF（Fix#6 codex 复审）：入金表双 Map 索引在空批早退之后构建——任一侧空时无需给 65 万入金行建索引。
+  const depIndex = buildDepIndex(safeDepositRows);
 
   // 2) 唯一值分组（✅Q1）：键 = 大账号||币种||金额分（金额 NaN → 不入组）
   const keyOf = (account, currency, amountCents) => `${account}||${currency}||${amountCents}`;
@@ -773,7 +820,9 @@ function runStrategiesForGroup(ctx) {
     //   - 冻结全集空 / 无可解析日期对 → 提示（关联不到，非脏数据）
     //   - 无窗内候选（含 bank 早于全部退款的负 diff = 时序矛盾脏数据）→ 报错（不依赖被抢光顺序）
     //   - 有窗内候选但被抢光 → 提示（多出 bank 抢不到，非脏数据）
-    if (refundsForS4.length > 0 && !hasInWindowCandidate(bankRow, refundsForS4)) {
+    const s4win = classifyS4Window(bankRow, refundsForS4);
+    if (refundsForS4.length > 0 && s4win.hasComparablePair && !s4win.hasInWindowCandidate) {
+      // 真·时序矛盾/超容差：有可比较日期对但无窗内候选（含 bank 早于全部退款的负 diff）→ 报错人工介入。
       unmatchedRows.push(buildUnmatchedBankRow(
         bankRow, RESULT_ERROR,
         `S4 金额币种已关联但银行账单日期早于退款提交日期或差异 >${M.s4.toleranceDays} 天，请人工介入`
@@ -783,7 +832,14 @@ function runStrategiesForGroup(ctx) {
         code: 'refund-backfill-date-over-tolerance',
         message: `银行行（${bankRow._rowId}）S4 日期早于退款提交日期或超 ${M.s4.toleranceDays} 天容差，报错人工介入`
       });
+    } else if (refundsForS4.length > 0 && !s4win.hasComparablePair) {
+      // Fix#5：全无可比较日期对（bank/ro 日期均不可解析）→ 提示而非报错（非脏数据时序矛盾，避免误导文案）。
+      unmatchedRows.push(buildUnmatchedBankRow(
+        bankRow, RESULT_NOTICE,
+        'S4 金额币种已关联但银行账单或退款日期不可解析，未能判定容差，请人工核对'
+      ));
     } else {
+      // 被抢光（有窗内候选但已被其他 bank 消费）/ 冻结全集空 → 提示。
       unmatchedRows.push(buildUnmatchedBankRow(
         bankRow, RESULT_NOTICE, '未能关联到任何退款订单'
       ));
@@ -817,6 +873,22 @@ function hasInWindowCandidate(bankRow, refundSet) {
     if (diff !== null && diff >= 0 && diff <= M.s4.toleranceDays) return true;
   }
   return false;
+}
+
+// R4（Fix#5 codex 复审）：S4 窗判定三态——区分「有可比较日期对但无窗内候选」(真·时序矛盾/超容差→报错)
+//   与「全无可比较日期对」(bank/ro 日期均不可解析→提示，非脏数据时序，不误报「日期早于退款提交日期」)。
+//   hasComparablePair：存在 ≥1 对 signedDayDiff !== null 的 (bank, ro)；
+//   hasInWindowCandidate：存在 diff ∈ [0, toleranceDays] 的候选。
+function classifyS4Window(bankRow, refundSet) {
+  let hasComparablePair = false;
+  let inWindow = false;
+  for (const ro of refundSet) {
+    const diff = signedDayDiff(bankRow[M.s4.bankDate], ro[M.s4.roDate]);
+    if (diff === null) continue;
+    hasComparablePair = true;
+    if (diff >= 0 && diff <= M.s4.toleranceDays) { inWindow = true; break; }
+  }
+  return { hasComparablePair, hasInWindowCandidate: inWindow };
 }
 
 // 消费 + 产回填行（严格 1v1 双向消费）
@@ -874,6 +946,9 @@ module.exports = {
   extractFirstCapture,
   yymmddToDateStr,
   matchS4,
+  // Fix#4/#5（codex 复审）：DTD DMY 明确解析 + S4 窗三态判定（单测精确覆盖）
+  parseDtdDateToken,
+  classifyS4Window,
   resolveHits,
   detailBankToRo,
   detailBankToDeposit,

@@ -319,3 +319,24 @@ S4（链后，结构不变）：单向 0 ≤ bank.BillDate − ro.valueDate ≤ 
 **⚠️ R4/O2 联动的既有测试同步说明（非回归）**：S4 改单向后，`r5-refund-order-backfill.test.js` 与 `r5-refund-order-backfill-open7-hits.test.js` 中「bank 早于 ro.valueDate」的 S4 日期夹具按 spec §F-R4「方向重造」改为 bank 晚于 valueDate；OPEN-7 hits 测试中确认走 S4 的 detail proxy 因 O2 改固定串由 `/valueDate/` 同步为 `/命中唯一值:退款提交日期/`——均为规则面变更的夹具适配，OPEN-7 的 BizId 收集/桥接断言一行未改。
 
 **开放问题收口**：R5/R6 正则（D1/D4）已据真实原件定稿（`DESC DATE`/`DTD`+`FOR`），本期完整实现（非框架）；no-op 防御仍保留（正则常量为 null 即整层跳过），便于未来如发现新附言形态时安全关停。samples 资产化（D11）/ sheet2 扩 ro 字段（D10）/ S2b 放开非 JPM（D7）等记 backlog，本期不做。
+
+---
+
+## 11. codex 资金红线复审修复（2026-06-15）
+
+> 来源：合并到 v3.0.5 后跑 `codex exec` 对抗审查（资金红线命中规则），发现 **1 Critical + 4 Important + 1 Minor**，team-lead 逐条独立核验（git diff + 读码）**全部属实**后修复。新增专项单测 `r5-refund-order-backfill-codex-fixes.test.js`（17 案）；基线 2656 → 终态 2673 用例，`npm run release-check` 全绿。
+
+| Fix | 级别 | 问题 | 修复 |
+|---|---|---|---|
+| #1 | 🔴Critical | `lookupDepositByKeys` 索引版「键优先」(先 byReconId 后 byChannelOrderNo) 与线性版「行优先」在交叉键冲突（dep[i].ChannelOrderNo==dep[j].ReconciliationId==payNo）时取不同入金行 → 误命中（default 走索引版） | `buildDepIndex` 记录每 dep 全局行序 `ordOf`；索引版合并两键候选取 ord 最小者，与线性 `deps.find` 行优先严格一致 |
+| #2 | 🟠Important | R2 `includes(depRef)` 无 token 边界（`ABC123` 误命中 `XABC1234Y`）；占位符黑名单变体（`NOT PROVIDED`/`NON-REF`）漏拦 | `escapeRegExp` + 非字母数字边界正则；`normalizeForBlacklist`（去空格/连字符+大写）归一黑名单 |
+| #3 | 🟠Important | R6 金额正则 `([\d.]+)` 遇千分位逗号截断（`FOR USD5,043.00` → 仅捕获 5 → 按 5.00 误配） | 正则改 `([0-9][0-9,]*(?:\.\d+)?)(?![\d,.])` 捕获完整金额；比对前去逗号 |
+| #4 | 🟠Important | R6 DTD 日期走通用 `sameDay` auto 解析，M/D 歧义 | 新增 `parseDtdDateToken` 按**美式 MDY（mm/dd/yyyy）**明确解析为 ISO（见下 ⚠️ 格式更正） |
+| #5 | 🟠Important | R4 `hasInWindowCandidate` 单 boolean，日期不可解析时被误报「时序矛盾/超容差」错误 | 新增 `classifyS4Window` 三态：全不可解析→提示（RESULT_NOTICE），真·超容差/时序矛盾→报错（RESULT_ERROR） |
+| #6 | 🟢Minor | `buildDepIndex` 在空批早退前执行（空批仍给 65 万行建索引） | 移到 refundPool/bankPool 空检查之后 |
+
+**⚠️🔴 R6 DTD 日期格式更正（资金红线，请用户最终确认）**：§10 ⑥ 与 cfg 原注释写「DTD dd/mm/yyyy（DMY）」**有误**。codex 复审 + 现有测试夹具 `DTD05/21/2026`（21 只能为「日」→ 月必在前）+ JPM US 美式日期惯例 共同证明真实格式为**美式 mm/dd/yyyy（MDY）**。已据此实现 `parseDtdDateToken`（`05/06/2026`→`2026-05-06`）并更正 cfg 注释。**日期格式判定错误 = 系统性误配**，建议用真实退款单核验 R6 命中正确性。
+
+**codex 已核查无问题（与 team-lead 核验一致）**：R1 多 token（多 ro 命中走多笔报错非静默）、R5 非法 YYMMDD（解析失败不误命中）、OPEN-7 BizId 口径（空 BizId 过滤、S1/S4 不污染）、扩列内部字段（`_depositBizId`/`_bridgeDepositBizId`）不泄漏 export。
+
+**实施期插曲**：首次委托 dev agent 仅完成 Fix#1（`ordOf` 方案正确，已保留）即 tool-call parse 崩溃留半成品；team-lead 接手补完 Fix#2-6 + 全部单测（资金红线宁可亲为）。

@@ -194,7 +194,7 @@ test.describe('REFUND_BACKFILL_FIELD_MAP — 跨表映射单一真相', () => {
   test('S3c（R6）：DTD/FOR 正则 + currency=USD + 入金日期/金额/币种列', () => {
     const s3c = REFUND_BACKFILL_FIELD_MAP.s3c;
     assert.equal(s3c.datePattern.source, 'DTD\\s*(\\d{2}\\/\\d{2}\\/\\d{4})');
-    assert.equal(s3c.amountPattern.source, 'FOR\\s*(?:USD|AMT)\\s*([\\d.]+)');
+    assert.equal(s3c.amountPattern.source, 'FOR\\s*(?:USD|AMT)\\s*([0-9][0-9,]*(?:\\.\\d+)?)(?![\\d,.])'); // Fix#3 codex: 捕获千分位逗号金额
     assert.equal(s3c.currency, 'USD');
     assert.equal(s3c.depositDateField, 'ValueDate');
     assert.equal(s3c.depositAmountField, 'Credit Amount');
