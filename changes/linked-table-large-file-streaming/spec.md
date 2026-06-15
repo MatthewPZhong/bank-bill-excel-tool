@@ -1,6 +1,7 @@
 # Spec — 链接表导入复用流式引擎（支持 65 万行级大文件）
 
-> 状态：**已确认（待实施）** ｜ 来源分支：`v2.1.16-beta.6` ｜ 目标版本：v3.0.0（块 B，PR-7+）
+> 状态：**已实施（v3.0.0 块B，已发版）** ｜ 来源分支：`v2.1.16-beta.6` ｜ 目标版本：v3.0.0（块 B，PR-7+）
+> ✅ 回写 2026-06-15：原「待实施」状态行已 stale（§七实施记录已记 commit 7bdc6bf/bcc96df/e9eee5a）。实证落地 `linked-table-repository.js:318 replaceLinkedTableStreaming` + `src/main-process/linked-table-stream-source.js` + CHANGELOG v3.0.0 块B。
 > 性质：🔴 **资金红线 + 数据红线**（链接表整表覆盖落库 / bank-deposit 派生 ADM）
 > 缘起：用户导入 `渠道账单_2026-06-08_319151.xlsx`（147MB / 65.7 万行）报"成功 0 失败 1：文件为空或不可读"。
 > 决策：用户 2026-06-08 已就 O-1 ~ O-6 **按推荐采纳**（见 §五 OPEN 表），spec 定稿可进入实施；前置 spec①（列名迁移）方案已定，详见 `changes/linked-mid-allocation-date-column-migration/spec.md`。
@@ -84,7 +85,7 @@
 | R-2 | **整表覆盖原子性**（数据红线） | `replaceLinkedTable` 先 DELETE 全表；流式落库中途失败 → 表已清空只插一半 = 数据损坏 | ✅ **已验证（O-4 + PR-2）**：单事务 DELETE+流式 INSERT，中途 throw 整体 ROLLBACK，实测旧 657,757 行完好、表不留半空 |
 | R-3 | **bank-deposit 派生 ADM 次生 OOM** | 落库后 ADM 派生 `readLinkedTableRows('bank-deposit')` 从 DB **全量读回 65 万行**（实测 +1.2GB RSS）→ 又一处 OOM | ✅ **已修（PR-3，approach 变更）**：实测 buildAdmRows 只处理 filter 后小子集、**无需流式化**；内存点是"为筛 Channel=ADM 子集而全量物化"。改 `readBankDepositAdmCandidates`（json_extract 下推 Channel=ADM 过滤）+ `hasLinkedTableRows`（EXISTS 探测）；尖峰 +1170MB→+256MB；parity 单测锁定结果一致 |
 | R-4 | reconIdFixResult 清空 / JPM 失效 | bank-deposit 重导触发 `reconIdFixResult=null`（`main.js:11248`）—— 行为不变，但大文件下要确保派生链路整体不崩 | 回归验证 |
-| R-5 | **JSZip 基座容量上限**（2026-06-10 补记，来源：收单性能 spec 全仓调研） | `readXlsxStreamed` 的 JSZip 在 ~3.8GB 解压 entry 实证崩（"uncompressed data size mismatch"；acquiring reader-handrolled.js:7 POC，100w 行×48 列）。本表 65.7w 行×44 列 sheet ≈1.72GB **已达崩点 ~45%**，渠道账单数据量持续增长 | 当前量级安全（余量 ~2.2x），不改本 spec 方案。**预警线**：单文件 ≥100w 行或 sheet XML ≥3GB 前，迁移 yauzl 基座或届时的通用导入引擎（`changes/acquiring-import-recon-perf/spec.md` §8.0/§8.5 已将 linked-table 列为引擎潜在用户）；§附 harness `--deep` 输出的行数可作例行监控手段 |
+| R-5 | **JSZip 基座容量上限**（2026-06-10 补记；同日因用户 98w 行实证撞崩而修正阈值） | `readXlsxStreamed` 的 JSZip 解压 entry 真实上限是 **2^31 = 2.147GB，不是 POC 的 ~3.8GB**（那只是实证样本点）：`jszip/lib/reader/DataReader.js:64` `readInt` 用 `(result << 8) + byte` 有符号累加，中央目录 4 字节 uncompressedSize ≥2^31 被读成负数 → `compressedObject.js:38` end 尺寸校验与实测解压长度必不等 → 抛 "Bug : uncompressed data size mismatch"（zip64 救不了：`zipEntry.js:173` readInt(8) 同样溢出）。本表 65.7w 行×44 列 sheet ≈1.72GB **已达崩点 80%（余量仅 ~1.25x）**；2026-06-10 用户 98w 行文件（按 2,615B/行折算 ≈2.56GB）实证撞崩，事务 ROLLBACK 旧数据无损 | **原预警线（≥100w 行或 sheet XML ≥3GB）已失效**——98w（<100w）即触发。按本表行密度临界点 **≈82w 行**。修复方案与排期见 `knowledge/backlog.md` B9（yauzl 基座迁移 / 接入 big-table-import 引擎 / 入口尺寸预检止血）；§附 harness `--deep` 输出的行数可作例行监控手段 |
 
 > **R-1 实测结论（2026-06-09，推翻原假设）**：
 > - 原 R-1 担心 SheetJS `raw:false` 会按 numFmt 格式化（如 `"1,234.50"`）而流式不会 → 分叉。**实测发现现状读取链路 `readers.js` 用了 `raw:false` 但未开 `cellStyles`** → SheetJS 根本不解析 numFmt、返回原始数值 `.v`，过 `normalizeCell=String(v).trim()` 后与流式 `String(parseFloat(<v>))` 殊途同归。**numFmt 对两条链路都惰性，格式化分叉不会发生。**

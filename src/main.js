@@ -29,6 +29,12 @@ const runRepo = require('./backend/acquiring-bill-currency-db/run-repository');
 //   - isBusy：N1' idle cleanup 协调用（Phase 2 T12）
 //   - shutdown：app.before-quit 时清理（Phase 2 T15）
 const runCheckWorkerPool = require('./main-process/run-check-worker-pool');
+// v3.0.5 PR-3（Part B Phase 1）：收单 per-月侧库编排层（import/run/status/listMonths/孤儿/retention 路由侧库）
+const acquiringRunData = require('./main-process/acquiring-bill-currency-run-data');
+const runDataStore = require('./backend/run-data-store');
+// v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu per-月侧库编排层（import/run/status/导出/孤儿 路由侧库）
+const bizOpReconRunData = require('./main-process/biz-op-recon-run-data');
+const bankBuReconRunData = require('./main-process/bank-bu-recon-run-data');
 // v2.1.10 N4-cont-1 T23 (Phase 4)：raw_json idle 自动清理函数
 //   - 复用 v2.1.9 N1' idle 30min cleanup 计时器（spec §4.3.1）
 //   - 仅清「对账成功」（不在 diff_rows）且 imported_at < retentionDays 天前的 bill_imports.raw_json
@@ -76,12 +82,22 @@ const { pickBankDepositFields } = require('./backend/database/linked-table-repos
 // v2.1.16-beta.5 需求3：ADM 银行对账单链接表派生纯函数（Channel=ADM 行 → ADM 表 + 中台调拨匹配回填）
 const { buildAdmRows } = require('./main-process/adm-bank-deposit-builder');
 // v3.0.4 块 E 需求2：BOC 链接表派生纯函数（外汇交割表 → BOC链接表 + BOC调拨银行对账单表，logs 上抛 main.js 统一写日志）。
+//   v3.0.5 批次2b：fx 派生改「增量进组 + DB 全量重匹配 + 重编号」——matchBocToMidAllocation 不再由 main.js 直调
+//     （并入 rematchAllBocGroups 内对全库行重跑 2.2/2.3）；新增 rematchAllBocGroups 纯函数编排。
 const {
   scanFxGroups,
-  matchBocToMidAllocation,
+  rematchAllBocGroups,
   buildBocBankRows,
   backfillBocReconLinkIds
 } = require('./main-process/boc-fx-link-builder');
+// v3.0.5 批次4（T6b-1）：链接表派生重建共享编排函数（🔴🔴 资金红线）。导入侧内联派生逻辑抽出此处，
+//   供导入/删除共用（spec §3.3 禁复制 = R-5）。T6b-1 接导入侧（行为字节不变 parity）；
+//   T6b-2 接删除侧（linked-table:delete-by-date-range handler 三表化：fx 删→重匹配 / bank-deposit 删→ADM+BOC bank 重建）。
+const {
+  rebuildAdmDerivation,
+  rebuildBankDepositBocDerivation,
+  rebuildFxBocDerivation
+} = require('./main-process/linked-derive-rebuild');
 const { streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
 const linkedTableReaders = require('./backend/file-service/readers');
 const { normalizeCell: normalizeLinkedCell, FileValidationError: LinkedFileValidationError } = require('./backend/file-service/common');
@@ -122,6 +138,12 @@ const { runReconciliation } = require('./main-process/reconciliation-orchestrato
 const { countC3BankCandidates } = require('./main-process/scenario-engines/c3-gateway-recon-join');
 // v3.0.0 需求3：退款候选预检只读 helper（统计银行侧 FundType=Ach Return 候选行，与 countC3BankCandidates 对称）
 const { countRefundBankCandidates } = require('./main-process/scenario-engines/r5-refund-order-backfill');
+// v3.0.5 OPEN-7（T5b-2）：跨期重复命中提醒纯函数（export 阶段判定 + 注入回填行「匹配命中详情」；引擎不读库，库读在 main 侧）
+//   独立 require 语句（与上行单标识符 require 分开，保留既有「main.js 接线 countRefundBankCandidates」断言正则不破）。
+const {
+  pickStaleHits,
+  buildStaleHitReminder
+} = require('./main-process/scenario-engines/r5-refund-order-backfill');
 // v2.1.9 N5：dispatcher 双维调度依赖 channels-repository（findByNameAndLocation + getBuiltinGeneral）
 const channelsRepository = require('./backend/database/channels-repository');
 // v2.1.9 N7：场景模板 bundle 序列化 / 解析 / 类型识别（spec §六）
@@ -180,6 +202,8 @@ const {
 const { runReconIdFix } = require('./main-process/recon-id-fix-engine');
 const { runOwnAccountsMigration } = require('./backend/database/own-accounts-migration');
 const { groupBigAccountRows } = require('./backend/database/utils');
+// v3.0.5 PR-2（Part B Phase 0 / B-D8）：备份保留策略（保留最近 2 份，旧备份启动后台清理）
+const backupRetention = require('./backend/database/backup-retention');
 const {
   BALANCE_SEED_GENERATION_METHODS,
   findPreviousBalanceSeed,
@@ -2948,8 +2972,15 @@ function registerWindowHandlers() {
 
 function registerAppHandlers() {
   ipcMain.handle('app:get-info', () => {
+    // v3.0.5 PR-5（Part B Phase 3）：两段式——init 未完（新时序窗口先行，database 尚未 init）→ 返回 loading 骨架。
+    //   renderer 渲染「正在初始化…」状态 + appVersion；收到 app:init-done 后重新 getInfo 拿全量字段。
+    //   ⚠️ 必须用 appInitDone（而非仅判 database 非空）：database init 链中途访问 getCurrentModule 等也可能未就绪。
+    if (!appInitDone || !database || !database.db) {
+      return { initPending: true, version: app.getVersion() };
+    }
     const enumConfig = getEnumConfig();
     return {
+      initPending: false,
       version: app.getVersion(),
       storageRoot: ensureStorageRoot(),
       hasEnum: Boolean(enumConfig),
@@ -3682,6 +3713,10 @@ function registerAppHandlers() {
         // v2.1.16-beta.4 R5 场景4（中台退款订单回填）产出 → 透传给导出阶段（未导退款表时为 []）
         refundBackfillRows: result.refundBackfillRows || [],
         refundUnmatchedRows: result.refundUnmatchedRows || [],
+        // v3.0.5 OPEN-7（T5b-2）：本批「以入金表为来源、回填成功」的命中 BizId（orchestrator 已透传）+ runId。
+        //   runId = bankStatementSession.importedAt（同批 run/export 全程稳定；export 阶段据此判跨期、回写标记）。
+        refundHitDepositBizIds: result.refundHitDepositBizIds || [],
+        runId: bankStatementSession.importedAt,
         // v3.0.4 块 F 修订 R2 Q14：Payment线下调拨匹配对 → 导出阶段追加 3 核对 sheet（未勾选/无命中时为 []）
         paymentOfflineMatchedPairs: result.paymentOfflineMatchedPairs || [],
         scenariosSnapshot: buildScenariosSnapshot(dispatchScenarios),
@@ -3856,10 +3891,51 @@ function registerAppHandlers() {
       //   失败 graceful：仅 log + 主流程照常返回（不阻塞主对账流程）
       //   v2.1.16-beta.6 需求C 已开通：导入退款表并运行后 refundBackfillRows/refundUnmatchedRows 可非空 → 进入本 block 落退款回填双 sheet 文件
       //   PR#64 Finding 2：sheet2（报错/未匹配）也需落盘——全报错/无成功回填时唯一需人工处理的 sheet2 不能被跳过。
+      // v3.0.5 OPEN-7（T5c · Minor）：导出退款回填行先浅拷贝再注入跨期提醒，绝不 mutate processingResult.refundBackfillRows 缓存行。
+      //   原因：注入直接改缓存行 → 若本轮 mark 失败、用户再次 export，同一旧 marker 仍判跨期 → 再次 append 同一行 → 重复提醒文本（append 非幂等）。
+      //   浅拷贝（{...r}）即可：注入只改顶层「匹配命中详情」字符串字段；下游写盘（:3904 length / :3908 写盘参数）全部指向此拷贝版。
+      //   refundUnmatchedRows 只读不注入 → 无需拷贝（保持引用，省内存）。
       const refundBackfillRowsForExport = Array.isArray(processingResult.refundBackfillRows)
-        ? processingResult.refundBackfillRows : [];
+        ? processingResult.refundBackfillRows.map((r) => ({ ...r })) : [];
       const refundUnmatchedRowsForExport = Array.isArray(processingResult.refundUnmatchedRows)
         ? processingResult.refundUnmatchedRows : [];
+
+      // v3.0.5 OPEN-7（T5b-2 / T5c · Important）：写盘前读「旧」命中标记 → 判定跨期 → 注入提醒到回填行「匹配命中详情」。
+      //   🔴🔴 严格三步时序：判定+注入（用写盘前的旧 marker）→ 写盘 → 回写（写盘后）。
+      //   🔴 必须用写盘前的旧 marker 判定（回写在写盘后），否则同批自标为跨期，误报历史残留。
+      //   open7HitBizIds 提到写盘 block 外层（同一 try 作用域），供下方写盘后回写复用，避免重复取值。
+      //   🔴 T5c Important：marker 读取/判定/注入整块局部 try/catch——marker 是观测增强（非资金数据），绝不能让其抛错落到 export 外层 catch
+      //     使整个导出 status:'failed'、退款文件不落盘（违反 R-8）。失败 → warning + open7Markable=false（本轮不回写，下次 export 重试仍能判跨期）。
+      //   open7Markable 串联「判定+注入成功」与下方「写成功」：两者皆真才回写标记（见步骤③）。
+      const open7HitBizIds = Array.isArray(processingResult.refundHitDepositBizIds)
+        ? processingResult.refundHitDepositBizIds : [];
+      let open7Markable = false;
+      if (open7HitBizIds.length > 0) {
+        try {
+          const markerMap = database.readBankDepositHitMarkers(open7HitBizIds); // 仓储内部已 chunk 分批，规避 SQLite IN 参数上限
+          const staleHits = pickStaleHits(open7HitBizIds, markerMap, processingResult.runId);
+          if (staleHits.length > 0) {
+            const staleByBizId = new Map(staleHits.map((s) => [s.bizId, s.lastHitAt]));
+            for (const row of refundBackfillRowsForExport) {
+              const bizId = row && row._bridgeDepositBizId;
+              if (bizId && staleByBizId.has(bizId)) {
+                const reminder = buildStaleHitReminder(bizId, staleByBizId.get(bizId));
+                // 🔴 append 不覆盖：保留原「匹配命中详情」（与 refund-backfill spec O1/O2 后续叠加兼容）。
+                row['匹配命中详情'] = (row['匹配命中详情'] ? row['匹配命中详情'] + '\n' : '') + reminder;
+              }
+            }
+          }
+          open7Markable = true; // 判定 + 注入全程无异常 → 允许（在写成功的前提下）回写标记
+        } catch (e) {
+          appendActivityLogEntry({
+            level: 'warning',
+            message: '[OPEN-7] 命中标记读取/注入失败（不影响导出产物，本轮不回写标记）',
+            details: [e && e.message ? e.message : String(e)]
+          });
+          open7Markable = false;
+        }
+      }
+
       let refundBackfillReport = null;
       if (refundBackfillRowsForExport.length > 0 || refundUnmatchedRowsForExport.length > 0) {
         try {
@@ -3878,6 +3954,26 @@ function registerAppHandlers() {
           });
           refundBackfillReport = null;
         }
+      }
+
+      // v3.0.5 OPEN-7（T5b-2 · 7a / T5c · Critical）：export 成功后回写命中标记（产物均已落盘，return 'ok' 在即）。
+      //   🔴 写失败仅 warning，绝不抛错、绝不阻断产物落地（R-8：标记是观测增强，非资金数据）。
+      //   markBankDepositHits 内部自开 BEGIN/COMMIT（linked-table-repository.js）——此处无外层事务包裹，不嵌套。
+      //   open7HitBizIds 在写盘前已声明（同一 try 作用域），此处复用（用「旧 marker」判跨期，此刻回写为「新 run」标识）。
+      //   🔴🔴 T5c Critical：仅「判定+注入成功（open7Markable）」且「退款回填产物成功落盘（refundBackfillReport 非 null）」才推进 runId。
+      //     反例（修复前 bug）：writeRefundBackfillOutput 失败被上方 catch 吞掉（refundBackfillReport=null），但仍 markBankDepositHits 推进 runId
+      //       → 用户同批重 run→export 时 marker 已=当前 runId，pickStaleHits 不再报，跨期提醒永久丢失。
+      //     修复后：写失败 → 保留旧 marker、不推进 runId（下次 export 重试仍能判跨期，提醒不丢）。
+      try {
+        if (open7Markable && refundBackfillReport && open7HitBizIds.length > 0) {
+          database.markBankDepositHits(open7HitBizIds, String(processingResult.runId), new Date().toISOString());
+        }
+      } catch (e) {
+        appendActivityLogEntry({
+          level: 'warning',
+          message: '[OPEN-7] 命中标记回写失败（不影响导出产物）',
+          details: [e && e.message ? e.message : String(e)]
+        });
       }
 
       return {
@@ -10600,19 +10696,25 @@ function registerNewAccountHandlers() {
   // PRD §三 / spec §3.5：10 个 handler；资金红线模块（OPEN ISSUE #10 v0.8 修订：1:1/1:N/N:1 视为对账成功，N:M 异常 sheet）
   // ============================================================
 
+  // v3.0.5 PR-4：双源 listMonths（侧库目录 month + 主库旧表 month 合并；历史 run 零变化）
   ipcMain.handle('bankBuRecon:months:list', () => {
     if (!database || !database.db) return [];
-    try { return bankBuReconSession.listMonths(); } catch (_e) { return []; }
+    try {
+      return bankBuReconRunData.listMonthsDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
+    } catch (_e) { return []; }
   });
 
+  // v3.0.5 PR-4：双源 status（侧库存在 → 读侧库 meta + 主库镜像 latestRun；否则读主库旧表）
   ipcMain.handle('bankBuRecon:status', (_event, payload = {}) => {
     if (!database || !database.db) return null;
     const { yearMonth } = payload || {};
     if (!yearMonth) return null;
     try {
-      const meta = bankBuReconSession.getMonthMeta(yearMonth);
-      const latestRun = bankBuReconSession.listRuns(yearMonth)[0] || null;
-      return { meta, latestRun };
+      return bankBuReconRunData.getStatusDualSource({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        yearMonth
+      });
     } catch (_e) {
       return null;
     }
@@ -10669,7 +10771,13 @@ function registerNewAccountHandlers() {
     try {
       const pendingResult = readPendingGuanliFile(pendingPath);
       const bankResult = readBankFile(bankPath);
-      const counts = bankBuReconSession.importMonth(yearMonth, pendingResult.rows, bankResult.rows);
+      // v3.0.5 PR-4：导入落 per-月侧库（importMonthAtomic 在侧库 db 上运行 = 主库上运行，原子覆盖语义不变）
+      const counts = bankBuReconRunData.importMonth({
+        userDataDir: path.dirname(database.dbPath),
+        yearMonth,
+        pendingRows: pendingResult.rows,
+        bankRows: bankResult.rows
+      });
       return { status: 'success', yearMonth, ...counts };
     } catch (err) {
       if (err && err.name === 'FileValidationError') {
@@ -10692,7 +10800,12 @@ function registerNewAccountHandlers() {
       return { status: 'error', message: 'yearMonth 格式错误' };
     }
     try {
-      const result = bankBuReconSession.run(yearMonth);
+      // v3.0.5 PR-4：inline 侧库直跑（runReconciliation 在侧库 db 上跑，算法零改动）+ 主库 runs 镜像。
+      const result = bankBuReconRunData.runViaSideDb({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        yearMonth
+      });
       return { status: 'success', ...result };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
@@ -10720,13 +10833,15 @@ function registerNewAccountHandlers() {
       return { status: 'error', message: 'runId 无效' };
     }
     if (!savePath) return { status: 'error', message: '保存路径未指定' };
-    const run = bankBuReconSession.getRun(runIdNum);
+    // v3.0.5 PR-4：run 校验 + 导出数据均走主库镜像 + 侧库重跑（lastRunCache 侧库化失效 → 重跑路径）。
+    const userDataDir = path.dirname(database.dbPath);
+    const run = bankBuReconRunData.getMirrorRun({ mainDb: database.db, runId: runIdNum });
     if (!run) return { status: 'error', message: '运行记录不存在' };
     if (run.status !== 'success') {
       return { status: 'error', message: '运行未成功（status=' + run.status + '），无法导出差异表' };
     }
     try {
-      const lastResult = bankBuReconSession.loadRunResultByRunId(runIdNum);
+      const lastResult = bankBuReconRunData.loadExportDataByRun({ userDataDir, mainDb: database.db, runId: runIdNum });
       if (!lastResult) {
         return { status: 'error', message: '加载 run 数据失败（可能源数据已变）' };
       }
@@ -10741,7 +10856,7 @@ function registerNewAccountHandlers() {
         // v0.5：用 savePath 直接写到用户指定路径，不走 buildOutputPath
         overrideSavePath: savePath
       });
-      bankBuReconSession.recordExportPath(runIdNum, exp.filePath);
+      bankBuReconRunData.recordExportPath({ mainDb: database.db, runId: runIdNum, exportPath: exp.filePath });
       return { status: 'success', filePath: exp.filePath };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
@@ -10754,7 +10869,11 @@ function registerNewAccountHandlers() {
     const { savePath } = payload || {};
     if (!savePath) return { status: 'error', message: '保存路径未指定' };
     try {
-      const { months, skippedMonths } = bankBuReconSession.aggregateLatestSuccessRuns();
+      // v3.0.5 PR-4：跨月汇总逐月 open 侧库重跑（侧库 + 历史主库 run 双源）。
+      const { months, skippedMonths } = bankBuReconRunData.aggregateExportData({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db
+      });
       if (months.length === 0) {
         return { status: 'error', message: '无可汇总的成功运行记录', skippedMonths };
       }
@@ -10768,28 +10887,30 @@ function registerNewAccountHandlers() {
     }
   });
 
+  // v3.0.5 PR-4：run:history 走主库镜像（侧库 run 镜像 + 历史主库 run 都在主库 runs 表）。
   ipcMain.handle('bankBuRecon:run:history', (_event, payload = {}) => {
     if (!database || !database.db) return [];
     const { yearMonth } = payload || {};
     if (!yearMonth) return [];
-    try { return bankBuReconSession.listRuns(yearMonth); } catch (_e) { return []; }
+    try { return bankBuReconRunData.listRunsDualSource({ mainDb: database.db, yearMonth }); } catch (_e) { return []; }
   });
 
   // v0.5: 列出"两侧都已导入"的月份（用于「开始运行」弹窗）
+  // v3.0.5 PR-4：双源（侧库目录 + 主库旧表）。
   ipcMain.handle('bankBuRecon:run:list-ready-months', () => {
     if (!database || !database.db) return [];
     try {
-      const list = bankBuReconSession.listReadyMonths();
-      return list.map((m) => m.yearMonth);
+      return bankBuReconRunData.listReadyMonthsDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
     } catch (_e) {
       return [];
     }
   });
 
   // v0.5: 列出"有 status=success run"的月份（用于「导出差异」弹窗）
+  // v3.0.5 PR-4：主库镜像 GROUP BY（侧库 run 镜像 + 历史主库 run）。
   ipcMain.handle('bankBuRecon:run:list-success-months', () => {
     if (!database || !database.db) return [];
-    try { return bankBuReconSession.listSuccessMonths(); } catch (_e) { return []; }
+    try { return bankBuReconRunData.listSuccessMonthsDualSource({ mainDb: database.db }); } catch (_e) { return []; }
   });
 
   // ==========================================================================
@@ -10798,20 +10919,22 @@ function registerNewAccountHandlers() {
   // ==========================================================================
 
   // 模块状态查询
+  // v3.0.5 PR-4：双源（遍历侧库目录所有月 + 主库旧表，去重月末冗余副本）。
   ipcMain.handle('bizOpRecon:status', () => {
     if (!database || !database.db) return { importedDateBuPairs: [], buList: [], flowImportedDates: [] };
     try {
-      return bizOpReconSession.getStatus();
+      return bizOpReconRunData.getStatusDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
     } catch (_e) {
       return { importedDateBuPairs: [], buList: [], flowImportedDates: [] };
     }
   });
 
   // BU 下拉框枚举（保留原值不 normalize；#A 拍板）
+  // v3.0.5 PR-4：双源去重。
   ipcMain.handle('bizOpRecon:bu:list', () => {
     if (!database || !database.db) return [];
     try {
-      return bizOpReconSession.listBu();
+      return bizOpReconRunData.listBuDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
     } catch (_e) {
       return [];
     }
@@ -10864,19 +10987,22 @@ function registerNewAccountHandlers() {
     if (!date || !filePath) return { status: 'error', message: '入参缺失（date / filePath）' };
     try {
       const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
-      // v2.1.12-beta β.2-T2：默认 worker 化（dbPath 主 DB tool-data.sqlite，与 acquiring worker 同库 WAL 并发）
-      //   进度透传 renderer（仿 pending:import:progress 范式，swallow send 失败）
-      //   readBizOpFile 仍传——worker 入口在无 dbPath 时回退旧同步路径用
-      const result = await runBizOpImport(database.db, {
-        date,
-        filePath,
-        dbPath: database.dbPath,
-        readBizOpFile,
-        writeBizOpErrorReportXlsx,
-        errorReportsDir,
-        onProgress: (ev) => {
-          try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'bizOp' }); }
-          catch (_e) { /* swallow */ }
+      // v3.0.5 PR-4：导入落 per-月侧库（编排层把 worker dbPath 覆盖为 month(date) 侧库路径；
+      //   worker 自开侧库连接 + 幂等建表；月末跨月由编排层补清下月侧库 + 写 T-2 冗余副本，详见 biz-op-recon-run-data.js）。
+      //   进度透传 renderer（仿 pending:import:progress 范式，swallow send 失败）。
+      const result = await bizOpReconRunData.runBizOpImport({
+        userDataDir: path.dirname(database.dbPath),
+        runBizOpImportViaWorker: runBizOpImport,
+        params: {
+          date,
+          filePath,
+          readBizOpFile,
+          writeBizOpErrorReportXlsx,
+          errorReportsDir,
+          onProgress: (ev) => {
+            try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'bizOp' }); }
+            catch (_e) { /* swallow */ }
+          }
         }
       });
       return result;
@@ -10902,18 +11028,22 @@ function registerNewAccountHandlers() {
     if (!date || files.length === 0) return { status: 'error', message: '入参缺失（date / filePaths）' };
     try {
       const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
-      // v2.1.12-beta β.2-T2：默认 worker 化（同 run-biz-op）；readFlowFile 传作无 dbPath 回退用
+      // v3.0.5 PR-4：导入落 per-月侧库（编排层把 worker dbPath 覆盖为 month(date) 侧库路径）。
+      //   flow 按 date 清（不跨 BU 不跨日）→ 无跨月问题（flow 落 month(date) 侧库，与对账 date 同库）。
       // v3.0.2 需求1b：filePaths 透传 worker（单进程单事务合并、单次 clearByDate，禁止循环调用 runFlowImport）
-      const result = await runFlowImport(database.db, {
-        date,
-        filePaths: files,
-        dbPath: database.dbPath,
-        readFlowFile,
-        writeFlowErrorReportXlsx,
-        errorReportsDir,
-        onProgress: (ev) => {
-          try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'flow' }); }
-          catch (_e) { /* swallow */ }
+      const result = await bizOpReconRunData.runFlowImport({
+        userDataDir: path.dirname(database.dbPath),
+        runFlowImportViaWorker: runFlowImport,
+        params: {
+          date,
+          filePaths: files,
+          readFlowFile,
+          writeFlowErrorReportXlsx,
+          errorReportsDir,
+          onProgress: (ev) => {
+            try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'flow' }); }
+            catch (_e) { /* swallow */ }
+          }
         }
       });
       return result;
@@ -10940,24 +11070,26 @@ function registerNewAccountHandlers() {
   });
 
   // 检查"库里仅有一日数据"（#11 拍板 B）
+  // v3.0.5 PR-4：双源（遍历侧库所有月 + 主库旧表所有 date，去重）。
   ipcMain.handle('bizOpRecon:import:check-single-day', (_event, payload = {}) => {
     if (!database || !database.db) return { onlyOneDay: false, count: 0 };
     const { buName } = payload || {};
     if (!buName) return { onlyOneDay: false, count: 0 };
     try {
-      return bizOpReconSession.checkSingleDay(buName);
+      return bizOpReconRunData.checkSingleDayDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db, buName });
     } catch (_e) {
       return { onlyOneDay: false, count: 0 };
     }
   });
 
   // 列 ready 日期（#12 + #13 拍板 A）
+  // v3.0.5 PR-4：双源（逐月侧库各跑 listReadyDates，每库 T-1/T-2 含月末冗余副本自洽，合并）。
   ipcMain.handle('bizOpRecon:run:list-ready-dates', (_event, payload = {}) => {
     if (!database || !database.db) return [];
     const { buName } = payload || {};
     if (!buName) return [];
     try {
-      return bizOpReconSession.listReadyDates(buName);
+      return bizOpReconRunData.listReadyDatesDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db, buName });
     } catch (_e) {
       return [];
     }
@@ -10970,7 +11102,14 @@ function registerNewAccountHandlers() {
     const { date, buName } = payload || {};
     if (!date || !buName) return { status: 'error', message: '入参缺失（date / buName）' };
     try {
-      const { runId, stats } = bizOpReconSession.run({ date, buName });
+      // v3.0.5 PR-4：inline 侧库直跑（runReconciliation 在 month(date) 侧库 db 上跑，算法零改动；
+      //   月初 T-2 由月末导入写入的冗余副本保证在库 → 单库自洽）+ 主库 runs 镜像。
+      const { runId, stats } = bizOpReconRunData.runViaSideDb({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        date,
+        buName
+      });
       return { runId, status: 'success', stats };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
@@ -10978,12 +11117,13 @@ function registerNewAccountHandlers() {
   });
 
   // 列 success 日期（#13 拍板 A，导出指定日期下拉来源）
+  // v3.0.5 PR-4：主库镜像（侧库 run 镜像 + 历史主库 run 都在主库 runs 表）。
   ipcMain.handle('bizOpRecon:export:list-success-dates', (_event, payload = {}) => {
     if (!database || !database.db) return [];
     const { buName } = payload || {};
     if (!buName) return [];
     try {
-      return bizOpReconSession.listSuccessDates(buName);
+      return bizOpReconRunData.listSuccessDatesDualSource({ mainDb: database.db, buName });
     } catch (_e) {
       return [];
     }
@@ -11011,20 +11151,26 @@ function registerNewAccountHandlers() {
     if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
     const { runId, savePath } = payload || {};
     if (!runId || !savePath) return { status: 'error', message: '入参缺失（runId / savePath）' };
+    // v3.0.5 PR-4：导出走侧库——主库镜像拿 (date,BU)+side_db_rel_path → open 该月侧库给 writer
+    //   （writer 读 diff_rows + getRowById(imports) 全在侧库；月初跨月 T-2 行由冗余副本在库 → byte-for-byte）。
+    const userDataDir = path.dirname(database.dbPath);
+    const ctx = bizOpReconRunData.openExportContextByRun({ userDataDir, mainDb: database.db, runId });
+    if (!ctx || !ctx.run) return { status: 'error', message: `run #${runId} 不存在` };
     try {
-      const run = bizOpReconSession.getRun(runId);
-      if (!run) return { status: 'error', message: `run #${runId} 不存在` };
       const result = await writeBizOpSingleDateDiffWorkbook({
-        db: database.db,
-        date: run.data_date,
-        buName: run.bu_name,
-        runId,
+        db: ctx.db,
+        date: ctx.run.data_date,
+        buName: ctx.run.bu_name,
+        // v3.0.5 PR-4：writer getDiffRowsByRun 用侧库内 run id（ctx.exportRunId），非主库镜像 id。
+        runId: ctx.exportRunId,
         savePath
       });
-      bizOpReconSession.recordExportPath(runId, result.filePath);
+      bizOpReconRunData.recordExportPath({ mainDb: database.db, runId, exportPath: result.filePath });
       return { status: 'success', filePath: result.filePath, rowCount: result.rowCount };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    } finally {
+      if (ctx && ctx.sideDb) { try { ctx.sideDb.close(); } catch (_e) { /* swallow */ } }
     }
   });
 
@@ -11036,9 +11182,17 @@ function registerNewAccountHandlers() {
     if (!buName || !startDate || !endDate || !savePath) {
       return { status: 'error', message: '入参缺失（buName / startDate / endDate / savePath）' };
     }
+    // v3.0.5 PR-4：区间导出跨多日多月——构造临时内存合并 db（把区间内 success run 的 runs/diff_rows/imports
+    //   从各月侧库 + 主库历史合并进内存 db，保 id/source_row_id 映射），writer 在合并 db 上跑（writer 零改动）。
+    let memDb = null;
     try {
+      memDb = bizOpReconRunData.buildRangeExportDb({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        buName, startDate, endDate
+      });
       const result = await writeBizOpDateRangeDiffWorkbook({
-        db: database.db,
+        db: memDb,
         buName, startDate, endDate, savePath
       });
       return {
@@ -11049,17 +11203,19 @@ function registerNewAccountHandlers() {
       };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    } finally {
+      if (memDb) { try { memDb.close(); } catch (_e) { /* swallow */ } }
     }
   });
 
   // 运行历史（debug 用，可选）
+  // v3.0.5 PR-4：主库镜像（侧库 run 镜像 + 历史主库 run 都在主库 runs 表）。
   ipcMain.handle('bizOpRecon:run:history', (_event, payload = {}) => {
     if (!database || !database.db) return [];
     const { date, buName } = payload || {};
     if (!date || !buName) return [];
     try {
-      const runRepo = require('./backend/biz-op-recon-db/run-repository');
-      return runRepo.listRunsByDateBu(database.db, date, buName);
+      return bizOpReconRunData.listRunsDualSource({ mainDb: database.db, date, buName });
     } catch (_e) {
       return [];
     }
@@ -11318,7 +11474,16 @@ function registerNewAccountHandlers() {
     }
   });
 
+  // v3.0.5 OPEN-4（T6b-2）🔴🔴 资金红线：按日期范围 count/delete 的「目标表」正向白名单。
+  //   仅三张前端可管理的主表（gateway-bill / fx-settlement / bank-deposit）；其余（含隐藏派生表
+  //   adm-bank-deposit / boc-fx-settlement / boc-bank-deposit / mid-allocation / fx-option）一律拒绝——
+  //   删除不可逆 + 派生联动，绝不允许通过 tableKey 触达隐藏派生表（防误删/绕过派生重建链）。
+  const LINKED_DELETE_ALLOWED_TABLES = new Set(['gateway-bill', 'fx-settlement', 'bank-deposit']);
+
   // v3.0.1 需求1（D4）：按数据日期范围统计将删行数（只读，前端删除弹框预览）。任何异常返回 failed，前端保守处理。
+  //   v3.0.5 OPEN-4（T6b-2）🔴 资金红线：三表化 —— 加 tableKey 正向白名单路由（缺省 gateway-bill 向后兼容）。
+  //   🔴 绝不用 LINKED_TABLE_DEFS 兜底放行隐藏派生表（adm/boc-*/mid/fx-option）：非白名单直接 failed
+  //     （删除红线防线，count 与 delete 同口径白名单——预览与实删目标表必须一致，防「预览主表、删隐藏表」错位）。
   ipcMain.handle('linked-table:count-by-date-range', (_event, payload) => {
     if (!database || !database.db) return { status: 'failed', message: '数据库未初始化' };
     const start = payload && payload.start != null ? String(payload.start).trim() : '';
@@ -11329,15 +11494,32 @@ function registerNewAccountHandlers() {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
       return { status: 'failed', message: '日期格式非法（需 YYYY-MM-DD）' };
     }
+    // 🔴 正向白名单：仅三张可管理主表；缺省 gateway-bill（前端未传 tableKey 时 = v3.0.1 行为）。
+    const tableKey = payload && payload.tableKey != null ? String(payload.tableKey).trim() : 'gateway-bill';
+    if (!LINKED_DELETE_ALLOWED_TABLES.has(tableKey)) {
+      return { status: 'failed', message: '不支持的删除目标表' };
+    }
     try {
-      return { status: 'ok', count: database.countGatewayBillByDateRange(start, end) };
+      let count;
+      if (tableKey === 'fx-settlement') count = database.countFxByDateRange(start, end);
+      else if (tableKey === 'bank-deposit') count = database.countBankDepositByDateRange(start, end);
+      else count = database.countGatewayBillByDateRange(start, end);
+      return { status: 'ok', count };
     } catch (err) {
       return { status: 'failed', message: err && err.message ? err.message : String(err) };
     }
   });
 
-  // v3.0.1 需求1（D4）🔴 资金红线：按数据日期范围删除网关对账单链接表行（不可逆，闭区间，直接删）。
+  // v3.0.1 需求1（D4）🔴 资金红线：按数据日期范围删除链接表行（不可逆，闭区间，直接删）。
   //   mutating → trackedIpcHandle 记活动日志；入参校验（起止非空 + 起≤止）；返回删除行数 + 重算后 meta。
+  //   v3.0.5 OPEN-4（T6b-2）🔴🔴 资金红线：三表化 —— tableKey 正向白名单路由（缺省 gateway-bill 向后兼容）+ 删除派生联动：
+  //     · gateway-bill → 删 + 清 processingResult（v3.0.1 行为字节不变）。
+  //     · fx-settlement → 删 fx 主表（T6a 单事务已联动删 BOC 行）→ rebuildFxBocDerivation 全量重匹配重编号（无进组步，传空 ctx）→ 清 reconIdFixResult。
+  //     · bank-deposit  → 删 bank 主表（T6a 返回 deletedBizIds）→ rebuildAdmDerivation + rebuildBankDepositBocDerivation 派生重建
+  //                      → 清 processingResult + reconIdFixResult + clearBankDepositHitMarkersByBizIds（OPEN-7 标记防悬挂）。
+  //   🔴 事务边界：T6a 删除函数各自单事务（BEGIN/COMMIT/ROLLBACK）删完即返回；rebuild* / clearBankDepositHitMarkersByBizIds
+  //     各自开独立事务——本处调用点【不在】任何外层 DB 事务内（删除事务已提交），无嵌套事务问题。
+  //   🔴 派生重建沿用导入侧语义：rebuild* 内部各自 try/catch 隔离，派生任一步抛错记 created:false 不向外抛、不阻断删除本身（行已删）。
   trackedIpcHandle('linked-table:delete-by-date-range', '链接表管理', '删除', (_event, payload) => {
     if (!database || !database.db) return { status: 'failed', message: '数据库未初始化' };
     const start = payload && payload.start != null ? String(payload.start).trim() : '';
@@ -11348,11 +11530,65 @@ function registerNewAccountHandlers() {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
       return { status: 'failed', message: '日期格式非法（需 YYYY-MM-DD）' };
     }
+    // 🔴 正向白名单（与 count 同口径）：仅三张主表；非白名单（含隐藏派生表）一律拒绝——绝不用 LINKED_TABLE_DEFS 兜底放行。
+    const tableKey = payload && payload.tableKey != null ? String(payload.tableKey).trim() : 'gateway-bill';
+    if (!LINKED_DELETE_ALLOWED_TABLES.has(tableKey)) {
+      return { status: 'failed', message: '不支持的删除目标表' };
+    }
     try {
+      if (tableKey === 'fx-settlement') {
+        // 🔴🔴 资金红线：删外汇交割表（T6a 单事务已按 transaction_no 联动删 BOC 行，返回 bocDeleted/deletedTxnNos）。
+        const ret = database.deleteFxByDateRange(start, end);
+        // 🔴 删除场景【无进组步】（被删 BOC 行已由 T6a 联动删，无新行进组）→ 传空 ctx（scanLogs:[]/groupCount:0/overwriteCount:0），
+        //   rebuildFxBocDerivation 从「读全库 BOC 行重匹配」起：readBocFxLinkRowsForRematch → rematchAllBocGroups（重编号 1..N）
+        //   → 2.4 replaceBocBankDeposit → 2.5 全量回填 → 对删后全库行重算（复用 T6b-1 抽取函数，禁复制 = R-5）。
+        const { bocDerive } = rebuildFxBocDerivation(
+          { database, rematchAllBocGroups, buildBocBankRows, backfillBocReconLinkIds, appendActivityLogEntry },
+          { scanLogs: [], groupCount: 0, overwriteCount: 0 }
+        );
+        // 🔴 删 fx → BOC 派生重算 → 旧 reconIdFixResult（基于旧 BOC 调拨数据的修复结果）失效 → 清空（spec §3.3）。
+        reconIdFixResult = null;
+        return {
+          status: 'ok',
+          deleted: ret.deleted,
+          rowCount: ret.rowCount,
+          dataDateMin: ret.dataDateMin,
+          dataDateMax: ret.dataDateMax,
+          bocDeleted: ret.bocDeleted,
+          bocDerive
+        };
+      }
+      if (tableKey === 'bank-deposit') {
+        // 🔴 资金红线：删银行对账单入金表（T6a 单事务删 + 返回 deletedBizIds 供清标记/派生重建）。
+        const ret = database.deleteBankDepositByDateRange(start, end);
+        // 派生重建（复用 T6b-1 抽取函数，禁复制 = R-5）：ADM（全库 Channel=ADM 候选重建）+ BOC bank（2.4 + 2.5 全量回填）。
+        const { admDerive } = rebuildAdmDerivation({ database, buildAdmRows });
+        const { bocBankDerive } = rebuildBankDepositBocDerivation(
+          { database, buildBocBankRows, backfillBocReconLinkIds, appendActivityLogEntry }
+        );
+        // 🔴 删 bank-deposit → 清 processingResult（R5 场景4 中台退款回填 + 场景2b 数据源失效）
+        //   + reconIdFixResult（ADM 表重建 = JPM 修复结果失效）。
+        processingResult = null;
+        reconIdFixResult = null;
+        // 🔴 OPEN-7（spec §3.3）：清被删 BizId 的命中标记防悬挂。
+        //   注：当前载体（last_hit_run/last_hit_at 在 linked_bank_deposit 行上）下 DELETE 已隐式清掉被删行的标记，
+        //   此调用为 spec §3.3 要求的防御性双保险（口径与 T6a deletedBizIds 字节同源：normalizeKey 去空去重）。
+        database.clearBankDepositHitMarkersByBizIds(ret.deletedBizIds);
+        return {
+          status: 'ok',
+          deleted: ret.deleted,
+          rowCount: ret.rowCount,
+          dataDateMin: ret.dataDateMin,
+          dataDateMax: ret.dataDateMax,
+          admDerive,
+          bocBankDerive
+        };
+      }
+      // gateway-bill（缺省）：v3.0.1 行为字节不变。
       const ret = database.deleteGatewayBillByDateRange(start, end);
       // v3.0.1 PR#68 Finding1（🔴 资金红线）：gateway-bill 数据变更（按日期删除）后清银行对账缓存。
       //   银行对账 run 数据源含 gateway-bill（C3 网关核销 / R5）+ bank-deposit（R5 场景4 中台退款回填）——
-      //   gateway-bill 或 bank-deposit 任一变更都使 processingResult 失效（bank-deposit 侧清空见 linked-table:import handler）。
+      //   gateway-bill 或 bank-deposit 任一变更都使 processingResult 失效（bank-deposit 侧清空见上方分支 + linked-table:import handler）。
       //   旧 processingResult 基于旧网关数据 → 不清则「先跑银行对账、再删网关对账单」仍能导出 stale 结果，强制用户重跑后才能导出。
       processingResult = null;
       return { status: 'ok', deleted: ret.deleted, rowCount: ret.rowCount, dataDateMin: ret.dataDateMin, dataDateMax: ret.dataDateMax };
@@ -11439,9 +11675,16 @@ function registerNewAccountHandlers() {
         //   · 其余（多 sheet / .xls / .csv）：维持「全量读成数组 → replaceLinkedTable」（流式引擎只读 sheet1.xml，
         //     多 sheet 会读错 sheet；.xls/.csv 流式引擎不支持，且不撞 OOM）。
         const transform = repoKey === 'bank-deposit' ? pickBankDepositFields : (x) => x;
-        // v3.0.1 需求1（task3/D2）：网关对账单一张表改「跨次幂等累加 upsert」（按 ReconBillBizId）；
-        //   其余 3 张表维持整表覆盖 replace（语义不变，含 bank-deposit→ADM 派生连锁）。
+        // v3.0.1 需求1（task3/D2）：网关对账单改「跨次幂等累加 upsert」（按 ReconBillBizId）。
+        // v3.0.5 需求1：银行对账单入金表（bank-deposit）同改「跨次幂等累加 upsert」（按 BizId）；
+        //   v3.0.5 需求2：fx-settlement 主表改幂等累加 upsert（仅数组版，下方分支）；mid-allocation 维持整表覆盖 replace。
+        //   ⚠️ bank-deposit 既有 ADM / BOC bank 派生触发与缓存清理（下方 :11606/:11645/:11695）零改动——
+        //     累加后这些派生自动以「全库行」为输入重建，语义正确（spec §1.4-2）。
+        //   v3.0.5 批次2b：fx 主表 BOC 派生块（下方 fx-settlement 分支）已改「增量进组 + DB 全量重匹配 + 重编号」
+        //     （scanFxGroups offset 续编 → upsertBocFxLink → 全库 rematchAllBocGroups → 按 id 回写；spec §3.2.2 / OPEN-5）。
         const isGatewayBill = repoKey === 'gateway-bill';
+        const isBankDeposit = repoKey === 'bank-deposit';
+        const isFxSettlement = repoKey === 'fx-settlement';
         // v3.0.4 块 E 需求2（🔴 守卫）：外汇交割表（fx-settlement）强制走数组路径，绝不走流式。
         //   原因：BOC 分组依赖物理行号断档（被过滤的全空行作为分隔符），而流式 feed 跳过空行且 onRow 的
         //   rowIdx 不透传（linked-table-stream-source.js / §2.5），流式落库后 DB 也不存空行/行号 → 分组无法事后重建。
@@ -11460,9 +11703,15 @@ function registerNewAccountHandlers() {
               throw new LinkedFileValidationError('FILE_READ', '当前导入文件未匹配到该链接表的表头');
             }
           };
-          ret = isGatewayBill
-            ? await database.upsertLinkedGatewayBillStreaming(feedRows, { sourceFileName: fileName })
-            : await database.replaceLinkedTableStreaming(repoKey, feedRows, { sourceFileName: fileName });
+          // v3.0.5：gateway / bank-deposit 走幂等累加 upsert 流式版（裁列已在 transform=pickBankDepositFields 完成）；
+          //   其余表（含 mid-allocation 物理单 sheet .xlsx 场景）维持整表覆盖流式 replace。
+          if (isGatewayBill) {
+            ret = await database.upsertLinkedGatewayBillStreaming(feedRows, { sourceFileName: fileName });
+          } else if (isBankDeposit) {
+            ret = await database.upsertLinkedBankDepositStreaming(feedRows, { sourceFileName: fileName });
+          } else {
+            ret = await database.replaceLinkedTableStreaming(repoKey, feedRows, { sourceFileName: fileName });
+          }
         } else {
           // 数组路径：fx-settlement 用 WithMeta 同时取物理行号（BOC 分组扫描热依赖）；其余表零行为变化。
           const meta = readLinkedRowsAsObjectsWithMeta(filePath, signature, detected.sheetName);
@@ -11474,9 +11723,17 @@ function registerNewAccountHandlers() {
           const rowsToWrite = repoKey === 'bank-deposit'
             ? rows.map((r) => pickBankDepositFields(r))
             : rows;
-          ret = isGatewayBill
-            ? database.upsertLinkedGatewayBill(rowsToWrite, { sourceFileName: fileName })
-            : database.replaceLinkedTable(repoKey, rowsToWrite, { sourceFileName: fileName });
+          // v3.0.5：gateway / bank-deposit / fx-settlement 走幂等累加 upsert 数组版；mid-allocation 维持整表覆盖 replace。
+          if (isGatewayBill) {
+            ret = database.upsertLinkedGatewayBill(rowsToWrite, { sourceFileName: fileName });
+          } else if (isBankDeposit) {
+            ret = database.upsertLinkedBankDeposit(rowsToWrite, { sourceFileName: fileName });
+          } else if (isFxSettlement) {
+            // fx 主表幂等累加（按交易编号）；rowsToWrite=meta.objects 整行（未裁列），与 BOC 派生块共用同一批 fxObjects。
+            ret = database.upsertLinkedFx(rowsToWrite, { sourceFileName: fileName });
+          } else {
+            ret = database.replaceLinkedTable(repoKey, rowsToWrite, { sourceFileName: fileName });
+          }
         }
         const okResult = {
           fileName,
@@ -11486,94 +11743,52 @@ function registerNewAccountHandlers() {
           dataDateMin: ret.dataDateMin,
           dataDateMax: ret.dataDateMax
         };
-        if (isGatewayBill) {
-          // v3.0.1 需求1（D3）：本次幂等覆盖数 / 空键拒入数回传 → 前端导入完成框提醒
+        // v3.0.1 需求1（D3）/ v3.0.5：网关 + 入金表 + 外汇交割表 upsert 回传本次幂等覆盖数 / 空键拒入数 → 前端导入完成框提醒。
+        //   （mid-allocation 走整表覆盖 replace，ret 无此两字段，不回传。）
+        if (isGatewayBill || isBankDeposit || isFxSettlement) {
           okResult.overwriteCount = ret.overwriteCount;
           okResult.rejectedEmptyCount = ret.rejectedEmptyCount;
+        }
+        if (isGatewayBill) {
           // v3.0.1 PR#68 Finding1（🔴 资金红线）：gateway-bill 数据变更（upsert 导入）后清银行对账缓存。
           //   银行对账 run 数据源含 gateway-bill（C3 网关核销 / R5）+ bank-deposit（R5 场景4 中台退款回填）——
           //   gateway-bill 或 bank-deposit 任一变更都使 processingResult 失效（bank-deposit 侧清空见本 handler 下方 push 前守卫）。
           //   旧 processingResult 基于旧网关数据 → 不清则「先跑银行对账、再导入/覆盖网关对账单」仍能导出 stale 结果，强制用户重跑后才能导出。
           processingResult = null;
         }
-        // v3.0.4 块 E 需求2（🔴 资金对账敏感）：外汇交割表落库成功后，全量重建 BOC链接表（U4 拍板：交割表导入触发 2.2~2.5 全跑）。
+        // v3.0.4 块 E 需求2（🔴 资金对账敏感）：外汇交割表落库成功后，重建 BOC链接表（U4 拍板：交割表导入触发 2.2~2.5 全跑）。
+        //   v3.0.5 批次2b（🔴🔴 资金红线 spec §3.2.2 / OPEN-3 / OPEN-5）：从「单文件 scan + replaceBocFxLink 整表覆盖」
+        //     改为「增量进组 + DB 全量重匹配 + 重编号」——
+        //     流程：getMaxBocFxOrigGroupNo（offset）→ scanFxGroups(本文件, offset 续编)→ upsertBocFxLink（按 transaction_no 幂等进库，
+        //          同键覆盖 id 不变 / 新键追加，含 orig_group_no）→ readBocFxLinkRowsForRematch（全库, id ASC, 注入 __origGroup）
+        //          → rematchAllBocGroups（按 orig_group_no 全局重编号 1..N + 重跑 2.2/2.3，逻辑零改动）→ writeBocFxLinkGroupRematch（按 id 回写）
+        //          → readBankDepositBocCandidates → buildBocBankRows（availability 三态）→ replaceBocBankDeposit（无数据也重建空表防 stale）
+        //          → readBocFxLinkRowsWithIds → backfillBocReconLinkIds → writeBocFxLinkReconIds（2.5 全量回填，照旧）。
+        //   🔴 语义变化（OPEN-5 已接受）：任意一次 fx 导入全量重算所有组（含历史组）的调拨单号；组号每次重编号 1..N。
         //   独立 try/catch —— 派生任一步抛错不阻断交割表导入本身（已落库成功），仅 okResult.bocDerive 记 created:false + error。
-        //   流程：scanFxGroups（物理行序分组）→ matchBocToMidAllocation（中台 BOC 一对一消耗回填调拨单号；无中台数据则跳过 2.2/2.3 记 info）
-        //        → replaceBocFxLink（整表覆盖）→ readBankDepositBocCandidates → buildBocBankRows（availability 三态）
-        //        → replaceBocBankDeposit（无可用数据也重建空表防 stale）→ readBocFxLinkRowsWithIds → backfillBocReconLinkIds
-        //        → writeBocFxLinkReconIds（按 id 回写资金对账不平表链接ID）。
         //   builder 返回的所有 logs（info/warning，含 unlinked 明细）统一 appendActivityLogEntry；unlinked 明细前端不显示（需求 2.5 末句）。
         if (repoKey === 'fx-settlement') {
+          // —— 进组步（导入专属，留 caller；spec §3.2.2 / OPEN-5）——
+          //   组号偏移续编 + scan + 幂等 upsert 进库。其产物（scan.logs/groupCount + upsertRet.overwriteCount）
+          //   传入共享函数 rebuildFxBocDerivation 供 logs 拼接与 bocDerive 统计字节一致。
+          //   v3.0.5 批次4（T6b-1）：「readBocFxLinkRowsForRematch 之后的全量重匹配重编号 + 2.4 + 2.5 + 统计」
+          //     已抽至 src/main-process/linked-derive-rebuild.js（删除侧 T6b-2 复用，禁复制 = R-5）。
+          //   🔴 parity：进组步与重匹配链共处同一 try/catch（与原内联一致）——任一步抛错均记
+          //     bocDerive.created:false（不阻断交割表导入本身，已落库成功），绝不向外层 per-file try 抛成 write-error。
           try {
-            const allLogs = [];
-            const scan = scanFxGroups({ objects: fxObjects || [], rowNumbers: fxRowNumbers || [] });
-            if (Array.isArray(scan.logs)) allLogs.push(...scan.logs);
+            const groupOffset = database.getMaxBocFxOrigGroupNo();
+            const scan = scanFxGroups({ objects: fxObjects || [], rowNumbers: fxRowNumbers || [], offset: groupOffset });
+            // 增量进组：scan 产物按 transaction_no 幂等 upsert 进 BOC 表（同键覆盖 id 不变 → 行序稳定；新键追加）。
+            const upsertRet = database.upsertBocFxLink(scan.rows);
 
-            // 2.2/2.3：中台 BOC 行匹配（无中台数据 → 跳过，info log；分组/调拨单号留空，2.4/2.5 照跑）。
-            let midRows = [];
-            try { midRows = database.readLinkedTableRows('mid-allocation'); }
-            catch (midErr) { midRows = []; }
-            if (Array.isArray(midRows) && midRows.length > 0) {
-              const matchRet = matchBocToMidAllocation(scan.rows, midRows);
-              if (matchRet && Array.isArray(matchRet.logs)) allLogs.push(...matchRet.logs);
-            } else {
-              allLogs.push({ level: 'info', message: '[BOC链接表] 链接表库无中台调拨订单数据，跳过 2.2/2.3 调拨单号匹配（调拨单号留空）' });
-            }
-
-            // 整表覆盖落库 BOC链接表（热列从内部辅助键取，raw_json 剥辅助键）。
-            const fxRet = database.replaceBocFxLink(scan.rows);
-
-            // 2.4：派生 BOC调拨银行对账单表（用库内已有 bank-deposit 的 BOC 候选；无可用数据也重建空表防 stale）。
-            const bankCandidates = database.readBankDepositBocCandidates();
-            const bankBuild = buildBocBankRows(bankCandidates);
-            if (Array.isArray(bankBuild.logs)) allLogs.push(...bankBuild.logs);
-            database.replaceBocBankDeposit(bankBuild.rows);
-
-            // 2.5：尽力回填资金对账不平表链接ID（按 id 精确回写；旧值幂等覆盖）。
-            const linkWithIds = database.readBocFxLinkRowsWithIds();
-            const backfill = backfillBocReconLinkIds(linkWithIds, bankBuild.rows);
-            if (Array.isArray(backfill.logs)) allLogs.push(...backfill.logs);
-            database.writeBocFxLinkReconIds(backfill.rows);
-
-            // 统一写 activity log（info / warning；warning 含明细——前端不显示）。
-            for (const lg of allLogs) {
-              appendActivityLogEntry({
-                level: lg.level || 'info',
-                source: 'main',
-                domain: 'boc-dispatch-order-fix',
-                message: lg.message || '',
-                details: Array.isArray(lg.details) ? lg.details : undefined
-              });
-            }
-
-            // 统计派生指标（scan.rows 已被 matchBocToMidAllocation 原地改：2.2 清空命中行「分组」、2.3 回填「调拨单号」）。
-            //   step22Removed = 被 2.2 单行剔除（分组清空）的行数；
-            //   step23MatchedGroups / UnmatchedGroups = 2.3 后「分组非空」的剩余组中已回填/未回填调拨单号的组数。
-            let step22Removed = 0;
-            const remainingGroups = new Set(); // 2.3 后仍「分组非空」的组号
-            const matchedGroups = new Set(); // 其中已回填调拨单号的组号
-            for (const r of scan.rows) {
-              if (!r || typeof r !== 'object') continue;
-              const g = r['分组'];
-              if (g === undefined || g === null || g === '') { step22Removed += 1; continue; }
-              remainingGroups.add(g);
-              const alloc = r['调拨单号'];
-              if (alloc !== undefined && alloc !== null && alloc !== '') matchedGroups.add(g);
-            }
-            okResult.bocDerive = {
-              created: true,
-              total: fxRet.rowCount,
-              groupCount: scan.groupCount,
-              step22Removed,
-              step23MatchedGroups: matchedGroups.size,
-              step23UnmatchedGroups: remainingGroups.size - matchedGroups.size,
-              backfilled: backfill.backfilled,
-              unlinkedCount: backfill.unlinkedCount,
-              needBankImport: bankBuild.availability !== 'ok',
-              bankMissingReason: bankBuild.availability !== 'ok' ? bankBuild.availability : null
-            };
+            const fxDeriveRet = rebuildFxBocDerivation(
+              { database, rematchAllBocGroups, buildBocBankRows, backfillBocReconLinkIds, appendActivityLogEntry },
+              { scanLogs: scan.logs, groupCount: scan.groupCount, overwriteCount: upsertRet.overwriteCount }
+            );
+            okResult.bocDerive = fxDeriveRet.bocDerive;
           } catch (bocErr) {
-            // 派生失败不阻断交割表导入本身（已落库成功）；记 created:false 供前端弹错误框。
+            // 进组步（getMaxBocFxOrigGroupNo / scanFxGroups / upsertBocFxLink）抛错 → 记 created:false 供前端弹错误框。
+            //   （重匹配链抛错由 rebuildFxBocDerivation 内部 catch 兜住，不会到这里。）
             okResult.bocDerive = {
               created: false,
               error: bocErr && bocErr.message ? bocErr.message : String(bocErr)
@@ -11599,84 +11814,28 @@ function registerNewAccountHandlers() {
           catch (probeErr) { bankExistsForAdm = false; }
         }
         if (bankExistsForAdm) {
-          try {
-            const midRows = database.readLinkedTableRows('mid-allocation');
-            // v3.0.0 块 B / PR-3（R-3/O-3）：只读 Channel=ADM 候选子集（json_extract 下推过滤），
-            //   不把整表 65 万行读回内存（实测现状尖峰 ~1.2GB）。buildAdmRows 内部 Channel∧FundType
-            //   过滤仍为最终权威（SQL 仅过滤 Channel='ADM' 超集，绝不更窄 → 不漏 ADM 行）。
-            const bankAdmCandidates = database.readBankDepositAdmCandidates();
-            const { admRows, unmatched, midEmpty } = buildAdmRows(bankAdmCandidates, midRows);
-            database.replaceAdmBankDeposit(admRows);
-            // v2.1.16-beta.6 PR#65 Codex FindingB（🔴 资金红线）：重导银行对账单表 = ADM 表重建 = JPM 场景源表变化，
-            //   旧 reconIdFixResult（基于旧 ADM 的 JPM 修复结果）失效 → 清空，强制重新运行 JPM 后才能导出（防导出 stale fixes）。
+          // v3.0.5 批次4（T6b-1）：ADM 派生编排抽至 src/main-process/linked-derive-rebuild.js（删除侧 T6b-2 复用，禁复制 = R-5）。
+          //   函数内部保留 try/catch 隔离：派生抛错记 admDerive.created:false（不阻断导入）。
+          const { admDerive } = rebuildAdmDerivation({ database, buildAdmRows });
+          okResult.admDerive = admDerive;
+          // v2.1.16-beta.6 PR#65 Codex FindingB（🔴 资金红线）：重导银行对账单表 = ADM 表重建 = JPM 场景源表变化，
+          //   旧 reconIdFixResult（基于旧 ADM 的 JPM 修复结果）失效 → 清空，强制重新运行 JPM 后才能导出（防导出 stale fixes）。
+          //   🔴 parity：仅 ADM 成功（created）才清——保持原内联语义（ADM 抛错时不清，清空在旧 try 成功路径内）；
+          //     reconIdFixResult=null 留 caller（不进共享函数，删除侧清缓存口径可能不同）。
+          if (admDerive && admDerive.created) {
             reconIdFixResult = null;
-            okResult.admDerive = {
-              created: true,
-              total: admRows.length,
-              matched: admRows.length - unmatched.length,
-              // 仅回传弹框所需字段（批次号/CustomerRef/BillDate/ChannelOrderNo + 错误码 + 冲突明细），
-              //   不回传整行（避免 IPC payload 携带 13+6 字段全行；报错框只列定位字段）。
-              unmatched: unmatched.map((u) => ({
-                code: u.code,
-                batchNo: u.row ? u.row['批次号'] : '',
-                customerRef: u.row ? u.row.CustomerRef : '',
-                billDate: u.row ? u.row.BillDate : '',
-                channelOrderNo: u.row ? u.row.ChannelOrderNo : '',
-                conflict: Array.isArray(u.conflict) ? u.conflict : undefined
-              })),
-              midEmpty
-            };
-          } catch (admErr) {
-            // ADM 派生失败不阻断银行对账单表导入本身（已落库成功）；记 admDerive.error 供前端提示。
-            okResult.admDerive = {
-              created: false,
-              error: admErr && admErr.message ? admErr.message : String(admErr)
-            };
           }
         }
         // v3.0.4 块 E 需求2（🔴 资金对账敏感，U4 拍板）：银行对账单表落库成功后，重派生 BOC调拨银行对账单表，
         //   并对现有 BOC链接表补做 2.5 全量回填资金对账不平表链接ID（交割表导入触发全跑，银行表导入只补 2.4+2.5）。
         //   独立 try/catch —— 派生失败不阻断银行对账单表导入本身（已落库成功）。O1 拍板：补回填成功静默（前端不弹提示），失败才弹错误框。
         if (repoKey === 'bank-deposit') {
-          try {
-            const bankCandidates = database.readBankDepositBocCandidates();
-            const bankBuild = buildBocBankRows(bankCandidates);
-            database.replaceBocBankDeposit(bankBuild.rows);
-
-            let backfilledCount = 0;
-            let unlinkedCount = 0;
-            const allLogs = [];
-            if (Array.isArray(bankBuild.logs)) allLogs.push(...bankBuild.logs);
-            // 仅当 BOC链接表已有行时补做 2.5 回填（无交割表数据 → 无链接行，跳过回填）。
-            const linkWithIds = database.readBocFxLinkRowsWithIds();
-            if (Array.isArray(linkWithIds) && linkWithIds.length > 0) {
-              const backfill = backfillBocReconLinkIds(linkWithIds, bankBuild.rows);
-              if (Array.isArray(backfill.logs)) allLogs.push(...backfill.logs);
-              database.writeBocFxLinkReconIds(backfill.rows);
-              backfilledCount = backfill.backfilled;
-              unlinkedCount = backfill.unlinkedCount;
-            }
-            for (const lg of allLogs) {
-              appendActivityLogEntry({
-                level: lg.level || 'info',
-                source: 'main',
-                domain: 'boc-dispatch-order-fix',
-                message: lg.message || '',
-                details: Array.isArray(lg.details) ? lg.details : undefined
-              });
-            }
-            okResult.bocBankDerive = {
-              created: true,
-              bankRowCount: bankBuild.rows.length,
-              backfilled: backfilledCount,
-              unlinkedCount
-            };
-          } catch (bocBankErr) {
-            okResult.bocBankDerive = {
-              created: false,
-              error: bocBankErr && bocBankErr.message ? bocBankErr.message : String(bocBankErr)
-            };
-          }
+          // v3.0.5 批次4（T6b-1）：BOC bank 派生（2.4）+ 2.5 全量回填编排抽至 src/main-process/linked-derive-rebuild.js
+          //   （删除侧 T6b-2 复用，禁复制 = R-5）。函数内部保留 try/catch 隔离：派生抛错记 bocBankDerive.created:false（不阻断导入）。
+          const { bocBankDerive } = rebuildBankDepositBocDerivation(
+            { database, buildBocBankRows, backfillBocReconLinkIds, appendActivityLogEntry }
+          );
+          okResult.bocBankDerive = bocBankDerive;
         }
         // v3.0.1 PR#68 self-review Finding1 同源缺口（🔴 资金红线）：bank-deposit 是 R5 场景4（中台退款回填）数据源
         //   —— bank-statement:run 读 readLinkedTableRows('bank-deposit') 喂场景4 产出 refundBackfillRows 写进 processingResult。
@@ -11959,14 +12118,22 @@ function registerNewAccountHandlers() {
     // v2.1.8 N1：进入模块兜底 — listMonths 是用户切到收单单据币种校验模块的第 1 个 IPC 调用
     //   spec §三 N1-D3 兜底触发点；检测 cleanup_pending → setImmediate 后台清（不阻塞 listMonths）+ toast
     triggerAcquiringBillCurrencyBackgroundCleanupIfNeeded();
-    try { return acquiringBillCurrencySession.listMonths({ db: database.db }); } catch (_e) { return []; }
+    // v3.0.5 PR-3：双源 listMonths（侧库目录 month + 主库旧表 month 合并；历史 run 零变化）
+    try {
+      return acquiringRunData.listMonthsDualSource({ userDataDir: path.dirname(database.dbPath), mainDb: database.db });
+    } catch (_e) { return []; }
   });
 
   ipcMain.handle('acquiringBillCurrency:sessionStatus', (_event, payload = {}) => {
     if (!database || !database.db) return { monthKey: null, flowReady: false, billReady: false };
     const { monthKey } = payload || {};
     try {
-      return acquiringBillCurrencySession.getSessionStatus({ db: database.db, monthKey });
+      // v3.0.5 PR-3：双源 sessionStatus（侧库存在 → 读侧库 readiness + 主库 runs 镜像；否则读主库旧表）
+      return acquiringRunData.getSessionStatusDualSource({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        monthKey
+      });
     } catch (_e) {
       return { monthKey: monthKey || null, flowReady: false, billReady: false };
     }
@@ -12050,12 +12217,9 @@ function registerNewAccountHandlers() {
   // v2.1.7 F6：event 透传 → onProgress forwarder
   async function doHandleImportFlowOrBill(kind, payload, event) {
     const isFlow = kind === 'flow';
-    const sessionImport = isFlow
-      ? acquiringBillCurrencySession.importFlowFiles
-      : acquiringBillCurrencySession.importBillFiles;
-    const sessionOverwrite = isFlow
-      ? acquiringBillCurrencySession.importFlowFilesWithOverwrite
-      : acquiringBillCurrencySession.importBillFilesWithOverwrite;
+    // v3.0.5 PR-3：写路径切换——import 全部落 per-月侧库（acquiringRunData.importFiles 内部 open 侧库，
+    //   传侧库 db/dbPath 给既有 session import；引擎/回退两路都落侧库；行变换/列契约/错误文案零改动）。
+    const userDataDir = path.dirname(database.dbPath);
 
     const monthKey = payload && payload.monthKey;
     if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
@@ -12070,11 +12234,13 @@ function registerNewAccountHandlers() {
     if (payload.confirmOverwrite === true && Array.isArray(payload.filePaths) && payload.filePaths.length > 0) {
       try {
         const onProgress = createImportProgressForwarder(event);
-        const result = await sessionOverwrite({
-          db: database.db,
+        const result = await acquiringRunData.importFiles({
+          userDataDir,
+          kind,
           monthKey,
           filePaths: payload.filePaths,
-          onProgress
+          onProgress,
+          overwrite: true
         });
         return { status: 'success', overwritten: true, ...result };
       } catch (err) {
@@ -12096,11 +12262,11 @@ function registerNewAccountHandlers() {
       return { status: 'cancelled' };
     }
 
-    // peek：读首文件 → 表头校验 + 解析首条数据行 monthKey → 与用户选月份比对
+    // peek：读首文件 → 表头校验 + 解析首条数据行 monthKey → 与用户选月份比对（existingCount 查侧库）
     let peeked;
     try {
-      peeked = await acquiringBillCurrencySession.peekImportTarget({
-        db: database.db,
+      peeked = await acquiringRunData.peekImportTarget({
+        userDataDir,
         kind,
         filePaths: res.filePaths
       });
@@ -12133,11 +12299,13 @@ function registerNewAccountHandlers() {
 
     try {
       const onProgress = createImportProgressForwarder(event);
-      const result = await sessionImport({
-        db: database.db,
+      const result = await acquiringRunData.importFiles({
+        userDataDir,
+        kind,
         monthKey,
         filePaths: res.filePaths,
-        onProgress
+        onProgress,
+        overwrite: false
       });
       return { status: 'success', ...result };
     } catch (err) {
@@ -12210,30 +12378,31 @@ function registerNewAccountHandlers() {
       //   空目录复用，不反复 mkdir/rm）。单 worker 路径不使用此目录。
       const mwTempDir = path.join(storageRoot, '.mw-tmp');
       try { fs.mkdirSync(mwTempDir, { recursive: true }); } catch (_e) { /* swallow — 多 worker gate 内会再兜底建 */ }
-      // v2.1.10 A3 T10：worker pool dispatch（替代 session.runCheck 主进程直调）
-      //   - __dbPath 传 database.dbPath（worker 内 new DatabaseSync(dbPath) — D24 独立 connection）
+      // v3.0.5 PR-3（Part B Phase 1）：worker pool dispatch __dbPath 改为「该月侧库路径」
+      //   - acquiringRunData.runCheckViaSideDb 内：__dbPath = run-data/{module}/month-{monthKey}.sqlite
+      //     → worker 自开侧库连接跑 runCheckCore（5 阶段/JOIN/epsilon 零改动，三表同库自洽）
+      //     → 成功后把 summary + 路径 + side_db_rel_path 镜像写主库 runs（UI/导出读主库镜像）
+      //   - dbPath 切月：worker pool dispatchRunCheck 内检测 workerDbPath≠新侧库 → 重启 worker 重 init
       //   - onLog：worker 内 appendModuleLog → message pipe → 主进程 appendActivityLogEntry
-      //     （避免主/子进程并发写 app_activity_log.txt 的 read-modify-write race）
-      // v2.1.10 A4 T18：chunkSize 透传 worker → runCheckCore → insertDiffRowsByJoinChunked
-      // v2.1.12 β.1-T3：workerCount + tempDir 透传 worker → runCheckCore → 多 worker gate
-      result = await runCheckWorkerPool.dispatchRunCheck(
-        {
-          __dbPath: database.dbPath,
-          monthKey,
-          storageRoot,
-          chunkSize,
-          workerCount,
-          tempDir: mwTempDir,
-        },
-        {
+      //   - chunkSize / workerCount / tempDir 透传不变（多 worker 子 worker 也用侧库 dbPath）
+      result = await acquiringRunData.runCheckViaSideDb({
+        userDataDir: path.dirname(database.dbPath),
+        monthKey,
+        storageRoot,
+        chunkSize,
+        workerCount,
+        tempDir: mwTempDir,
+        mainDb: database.db,
+        dispatchFn: runCheckWorkerPool.dispatchRunCheck,
+        dispatchCallbacks: {
           onProgress,
           onLog: (entry) => {
             try {
               appendActivityLogEntry(entry || {});
             } catch (_e) { /* swallow — log forwarder 失败不阻塞业务 */ }
           },
-        }
-      );
+        },
+      });
     } catch (err) {
       releaseOpLock();
       // v2.1.10 SR-FIX-1 round 2 P1-4：CancelError 走 cancelled 路径（spec §2.4 设计契约）
@@ -12453,6 +12622,14 @@ function registerNewAccountHandlers() {
       return { status: 'error', message: 'monthKey 格式错误' };
     }
     try {
+      // v3.0.5 PR-3：clearMonth 双源——侧库存在 → 删整月侧库文件 + 主库镜像行（文件级回收）。
+      //   codex PR#73 复审修复 P3：升级过渡库同月可能主库仍有 legacy imports 行；只删侧库后
+      //   listMonthsDualSource 会回退主库 legacy 致该月 stale 重现 → 无论侧库是否存在都一并清主库
+      //   legacy（acquiringBillCurrencySession.clearMonth 幂等，无 legacy 则删 0 行）。
+      const userDataDir = path.dirname(database.dbPath);
+      if (runDataStore.sideDbExists(userDataDir, acquiringRunData.MODULE, monthKey)) {
+        acquiringRunData.deleteMonthSideDb({ userDataDir, mainDb: database.db, monthKey });
+      }
       acquiringBillCurrencySession.clearMonth({ db: database.db, monthKey });
       return { status: 'success' };
     } catch (err) {
@@ -12513,32 +12690,85 @@ function flushUsageStats() {
   }
 }
 
-app.whenReady()
-  .then(() => {
-    markStartupMetric(STARTUP_METRIC_MARKS.appReady);
-    initializeActivityLog();
+// v3.0.5 PR-5（Part B Phase 3）：启动窗口先行 —— 回退开关 B-D5（仿 USE_BIG_TABLE_IMPORT_ENGINE 范式，一行切回旧时序）。
+//   新时序（默认）：whenReady → 轻量(activity-log/usage-stats) → 立即 createWindow(loading 态) + register*Handlers
+//     → 后台 init 链（database.init / pendingDb / 迁移 / syncTemplateLibrary + 各 setImmediate 后台清理）
+//     → 完成后 mainWindow.webContents.send('app:init-done') 放开功能。
+//   旧时序（DEFERRED_WINDOW_STARTUP=0）：init 链全跑完 → register*Handlers → createWindow（v3.0.4 及之前行为）。
+//   ⚠️ 方案①前提（已核实）：register*Handlers 的 handler 体惰性引用 database（闭包 () => database && database.db），
+//     注册时不解引用 → 可在 database.init 前注册；首个 IPC（app:get-info）init 未完返回 {initPending:true,version}。
+//   稳定一版后移除回退分支（与 USE_BIG_TABLE_IMPORT_ENGINE 同退役路径）。
+const DEFERRED_WINDOW_STARTUP = process.env.DEFERRED_WINDOW_STARTUP === '0' ? false : true;
 
-    // v2.0.0-beta.4：加载 usage-stats + 记录 sessionStart + 启动定时 flush
-    try {
-      usageStats = usageStatsModule.loadStats(ensureStorageRoot());
-      usageStatsModule.recordSessionStart(usageStats);
-      usageStatsDirty = true;
-      flushUsageStats();
-      usageStatsAutoFlushTimer = setInterval(flushUsageStats, USAGE_STATS_FLUSH_INTERVAL_MS);
-    } catch (err) {
-      // v2.1.9 SR-log-1：替换 console.warn → 日志上报；usage-stats init 失败 → 默认值兜底
-      appendActivityLogEntry({
-        level: 'warning',
-        source: 'main',
-        domain: 'usage-stats',
-        message: '[usage-stats] init failed',
-        details: [err && err.message ? err.message : String(err)],
-        stack: err && err.stack ? err.stack : undefined
-      });
-      usageStats = usageStatsModule.defaultStats();
+// init 链是否完成（app:get-info 两段式判定：未完返回 loading 骨架；renderer 收 app:init-done 后重 getInfo 拿全量）。
+let appInitDone = false;
+
+// v3.0.5 PR-5（B-D6）：升级首启一次性 VACUUM 阻塞前，给 loading 窗口发状态文案。
+//   轻量只读 peek 标志位（key 与 database.js ONE_TIME_VACUUM_FLAG_KEY 一致）+ 文件大小判定，决定发哪条文案。
+//   全程 try/swallow——peek 失败一律发通用「正在初始化…」，绝不阻断 init。
+const ONE_TIME_VACUUM_FLAG_KEY_MIRROR = 'db_one_time_vacuum_v3_0_5_done';
+const VACUUM_NOTICE_MIN_DB_BYTES = 500 * 1024 * 1024; // >500MB 才提示「优化数据库（分钟级）」，小库走通用文案
+function sendInitProgress(payload) {
+  try {
+    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('app:init-progress', payload);
     }
+  } catch (_e) { /* swallow */ }
+}
+function maybeSendVacuumLoadingNotice(dbPath) {
+  let vacuumPending = false;
+  try {
+    if (fs.existsSync(dbPath)) {
+      const size = fs.statSync(dbPath).size;
+      if (size >= VACUUM_NOTICE_MIN_DB_BYTES) {
+        // 只读 peek 标志位（throwaway 连接，立即 close；不影响后续 init 的主连接）。
+        const { DatabaseSync } = require('node:sqlite');
+        let peekDb = null;
+        try {
+          peekDb = new DatabaseSync(dbPath, { readOnly: true });
+          const row = peekDb.prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?').get(ONE_TIME_VACUUM_FLAG_KEY_MIRROR);
+          vacuumPending = !(row && row.setting_value === '1');
+        } catch (_e) {
+          vacuumPending = false; // app_settings 不存在（全新库）等 → 无历史膨胀，不发 VACUUM 文案
+        } finally {
+          if (peekDb) { try { peekDb.close(); } catch (_e2) { /* swallow */ } }
+        }
+      }
+    }
+  } catch (_e) { vacuumPending = false; }
+  if (vacuumPending) {
+    sendInitProgress({ phase: 'vacuum', text: '正在优化数据库，首次升级约需几分钟，请勿关闭程序…' });
+  } else {
+    sendInitProgress({ phase: 'init', text: '正在初始化…' });
+  }
+}
 
+// 10 组 IPC handler 注册（提取为函数，新/旧时序都调一次；handler 体惰性引用 database/pendingDb，注册时不解引用）。
+function registerAllIpcHandlers() {
+  registerWindowHandlers();
+  registerAppHandlers();
+  registerErrorHandlers();
+  registerBackgroundHandlers();
+  registerAccountMappingHandlers();
+  registerTemplateHandlers();
+  registerBigAccountHandlers();
+  registerBigAccountOrderHandlers();
+  registerFileHandlers();
+  registerNewAccountHandlers();
+  markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);
+}
+
+// 后台 init 链 + 所有 post-setup（database/pendingDb/迁移/模板库 + 孤儿清理/备份保留/idle 计时器/failure listener）。
+//   新时序：createWindow 后调用；完成后 markAppInitDone() → send('app:init-done')。
+//   旧时序：register/createWindow 前调用（同步完成）。
+//   本函数内所有 setImmediate 后台块 guard `if (!database || !database.db) return`——新时序下 database 已在本函数体内 init，
+//   setImmediate 回调晚于本函数同步体执行，database 已就绪。
+function runBackgroundInitChain() {
     const dataPath = path.join(app.getPath('userData'), 'tool-data.sqlite');
+    // v3.0.5 PR-5（B-D6）：升级首启一次性 VACUUM 会同步阻塞主进程（大库分钟级）——新时序下窗口已显示 loading 态，
+    //   故在 database.init()（内含 VACUUM）之前发一次状态文案，让 loading 态显示「正在优化数据库…请勿关闭程序」。
+    //   仅当 VACUUM 待执行（标志位未写）且库文件较大（>500MB，确实膨胀值得多分钟提示）时发；否则发通用「正在初始化…」。
+    maybeSendVacuumLoadingNotice(dataPath);
     database = new AppDatabase(dataPath);
     database.init();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
@@ -12595,19 +12825,76 @@ app.whenReady()
     syncTemplateLibraryFile();
     markStartupMetric(STARTUP_METRIC_MARKS.templateLibrarySynced);
 
-    registerWindowHandlers();
-    registerAppHandlers();
-    registerErrorHandlers();
-    registerBackgroundHandlers();
-    registerAccountMappingHandlers();
-    registerTemplateHandlers();
-    registerBigAccountHandlers();
-    registerBigAccountOrderHandlers();
-    registerFileHandlers();
-    registerNewAccountHandlers();
-    markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);
-    createWindow();
+    runStartupPostSetup();
+}
 
+// init 完成标记 + 通知 renderer 放开功能（loading → 全量）。新时序专用；旧时序窗口建好时 init 已完，渲染层首次 getInfo 即全量。
+function markAppInitDone() {
+  appInitDone = true;
+  try {
+    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('app:init-done');
+    }
+  } catch (_e) { /* swallow — 窗口已销毁等 */ }
+}
+
+app.whenReady()
+  .then(() => {
+    markStartupMetric(STARTUP_METRIC_MARKS.appReady);
+    initializeActivityLog();
+
+    // v2.0.0-beta.4：加载 usage-stats + 记录 sessionStart + 启动定时 flush
+    try {
+      usageStats = usageStatsModule.loadStats(ensureStorageRoot());
+      usageStatsModule.recordSessionStart(usageStats);
+      usageStatsDirty = true;
+      flushUsageStats();
+      usageStatsAutoFlushTimer = setInterval(flushUsageStats, USAGE_STATS_FLUSH_INTERVAL_MS);
+    } catch (err) {
+      // v2.1.9 SR-log-1：替换 console.warn → 日志上报；usage-stats init 失败 → 默认值兜底
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'usage-stats',
+        message: '[usage-stats] init failed',
+        details: [err && err.message ? err.message : String(err)],
+        stack: err && err.stack ? err.stack : undefined
+      });
+      usageStats = usageStatsModule.defaultStats();
+    }
+
+    // v3.0.5 PR-5（Part B Phase 3）：启动窗口先行（回退开关 DEFERRED_WINDOW_STARTUP，默认新时序）。
+    if (DEFERRED_WINDOW_STARTUP) {
+      // 新时序：先注册 handler（惰性引用 database） + 立即建窗（loading 态）→ 后台 init 链 → init-done 放开功能。
+      registerAllIpcHandlers();
+      createWindow();
+      // 后台 init 链：放进 setImmediate 让窗口先渲染（loading 骨架），init 完成后 send('app:init-done')。
+      //   init 链本身同步（database.init 是 DatabaseSync 同步 API），但放 setImmediate 让 createWindow 的
+      //   loadFile/ready-to-show 事件循环先跑一拍——窗口 loading 态先可见，再开始压主线程 init。
+      setImmediate(() => {
+        try {
+          runBackgroundInitChain();
+        } catch (initErr) {
+          handleStartupFailure(initErr);
+          return;
+        }
+        markAppInitDone();
+      });
+    } else {
+      // 旧时序（DEFERRED_WINDOW_STARTUP=0）：init 链全跑完 → register → createWindow（v3.0.4 及之前行为）。
+      runBackgroundInitChain();
+      registerAllIpcHandlers();
+      createWindow();
+      markAppInitDone(); // 旧时序窗口建好时 init 已完；置标记保 getInfo 全量（窗口 onInitDone 监听冗余无害）
+    }
+  })
+  .catch((error) => {
+    handleStartupFailure(error);
+  });
+
+// v3.0.5 PR-5：启动期后台 post-setup（孤儿清理 / 备份保留 / idle 计时器 / failure listener / OneDrive 提示）。
+//   由 runBackgroundInitChain 末尾调用（database 已 init）。所有块 setImmediate 异步，不阻塞窗口。
+function runStartupPostSetup() {
     // v2.1.6 fix10：启动期孤儿数据 cleanup（后台异步，不阻塞窗口 ready）
     // 触发场景：上一次 run 中途 OOM 闪退 / 异常退出 / 用户 force quit，导致 DB 残留 diff_rows + flow/bill imports
     // 检测口径：runs.status != 'success' OR diff/report 文件丢失（spec §5.4）
@@ -12655,6 +12942,136 @@ app.whenReady()
         } catch (_logErr) { /* swallow */ }
       } finally {
         releaseAcquiringBillCurrencyOpLock();
+      }
+    });
+
+    // v3.0.5 PR-3（Part B Phase 1 / B.6）：侧库孤儿双向兜底（启动扫描 run-data/{module}/ vs 主库 runs 元数据）
+    //   ① 有文件无元数据「且空壳（侧库无 flow/bill imports）」→ 删文件 + log；
+    //     🔴 codex PR#73 P1：import-only（已导入未对账，有数据无 mirror）= 有效中间态，保留不删（防丢导入数据，对齐 biz-op/bank-bu）；
+    //   ② 有元数据无文件 → 标记 run 失效（UI 降级「数据已清理」不崩溃）。
+    //   一致性原则：以侧库文件存在性为准（spec §B.6）。与上面主库孤儿清理（既有行级，双源过渡保留）并存。
+    //   后台 setImmediate，不阻塞窗口 ready；持同一把 op lock 避免与用户首次 import/run 并发。
+    setImmediate(() => {
+      if (!database || !database.db) return;
+      const lock = tryAcquireAcquiringBillCurrencyOpLock('cleanup', null);
+      if (!lock.acquired) return;
+      try {
+        const stats = acquiringRunData.reconcileOrphans({
+          userDataDir: path.dirname(database.dbPath),
+          mainDb: database.db
+        });
+        if (stats && (stats.deletedOrphanFiles.length > 0 || stats.invalidatedRuns.length > 0)) {
+          appendActivityLogEntry({
+            level: 'info',
+            source: 'main',
+            domain: 'acquiring-bill-currency',
+            message: '[acquiring-bill-currency] 启动期侧库孤儿双向兜底完成（PR-3）',
+            details: [
+              `删孤儿文件: ${stats.deletedOrphanFiles.length} (${stats.deletedOrphanFiles.join(', ')})`,
+              `标记失效 run: ${stats.invalidatedRuns.length} (${stats.invalidatedRuns.join(', ')})`
+            ]
+          });
+        }
+      } catch (err) {
+        try {
+          appendActivityLogEntry({
+            level: 'error',
+            source: 'main',
+            domain: 'acquiring-bill-currency',
+            message: '[acquiring-bill-currency] 启动期侧库孤儿兜底失败（PR-3）',
+            details: [String(err && err.stack ? err.stack : err)]
+          });
+        } catch (_logErr) { /* swallow */ }
+      } finally {
+        releaseAcquiringBillCurrencyOpLock();
+      }
+    });
+
+    // v3.0.5 PR-4（Part B Phase 2 / B.6）：biz-op + bank-bu 侧库孤儿双向兜底（启动扫描各自 run-data/{module}/）。
+    //   ① 有文件无 imports/镜像（空壳/损坏）→ 删文件；② 有镜像无文件 → 标记 run 失效（UI 降级，不崩溃）。
+    //   两模块无 op lock（导入/对账非长任务、无 cleanup 计时器）→ 直接跑；后台 setImmediate 不阻塞窗口。
+    setImmediate(() => {
+      if (!database || !database.db) return;
+      const userDataDir = path.dirname(database.dbPath);
+      for (const [domain, runData] of [['biz-op-recon', bizOpReconRunData], ['bank-bu-recon', bankBuReconRunData]]) {
+        try {
+          const stats = runData.reconcileOrphans({ userDataDir, mainDb: database.db });
+          if (stats && (stats.deletedOrphanFiles.length > 0 || stats.invalidatedRuns.length > 0)) {
+            appendActivityLogEntry({
+              level: 'info',
+              source: 'main',
+              domain,
+              message: `[${domain}] 启动期侧库孤儿双向兜底完成（PR-4）`,
+              details: [
+                `删孤儿文件: ${stats.deletedOrphanFiles.length} (${stats.deletedOrphanFiles.join(', ')})`,
+                `标记失效 run: ${stats.invalidatedRuns.length} (${stats.invalidatedRuns.join(', ')})`
+              ]
+            });
+          }
+        } catch (err) {
+          try {
+            appendActivityLogEntry({
+              level: 'error',
+              source: 'main',
+              domain,
+              message: `[${domain}] 启动期侧库孤儿兜底失败（PR-4）`,
+              details: [String(err && err.stack ? err.stack : err)]
+            });
+          } catch (_logErr) { /* swallow */ }
+        }
+      }
+    });
+
+    // v3.0.5 PR-2（Part B Phase 0 / B-D8）：旧备份保留策略 —— 合并 backups/ + 根目录旧格式为一个池子，
+    //   mtime 降序保留最近 2 份，其余删除。启动后台异步（setImmediate，与上面 fix10 cleanup 同风格），
+    //   不阻塞窗口 ready；逐个被删文件写一条 activity log（含文件名/大小/mtime），单文件删除失败不中断、记 error 级。
+    //   ⚠️ 删用户数据动作（R-1）：白名单基于实际命名（tool-data-bak-*.sqlite / tool-data.sqlite.bak-*），
+    //   绝不触碰主库本体（tool-data.sqlite / tool-data-pending.sqlite）及 -wal/-shm 旁文件，未知文件一律不动。
+    setImmediate(() => {
+      try {
+        const userDataDir = app.getPath('userData');
+        const backupsDir = path.join(userDataDir, 'backups');
+        const entries = backupRetention.collectManagedBackupEntries({
+          backupsDir,
+          rootDir: userDataDir
+        });
+        const toDelete = backupRetention.selectBackupsToDelete(entries, { keep: 2 });
+        if (toDelete.length === 0) return;
+
+        for (const entry of toDelete) {
+          try {
+            fs.unlinkSync(entry.filePath);
+            appendActivityLogEntry({
+              level: 'info',
+              source: 'main',
+              domain: 'backup-retention',
+              message: `清理旧备份：${entry.fileName}（保留最近 2 份策略）`,
+              details: [
+                `大小: ${(entry.size / (1024 * 1024)).toFixed(2)} MB`,
+                `修改时间: ${new Date(entry.mtimeMs).toISOString()}`
+              ]
+            });
+          } catch (delErr) {
+            // 单文件删除失败不中断后续删除，记 error 级
+            appendActivityLogEntry({
+              level: 'error',
+              source: 'main',
+              domain: 'backup-retention',
+              message: `清理旧备份失败：${entry.fileName}`,
+              details: [String(delErr && delErr.message ? delErr.message : delErr)],
+              stack: delErr && delErr.stack ? delErr.stack : undefined
+            });
+          }
+        }
+      } catch (err) {
+        // 扫描/选取阶段异常仅记日志，不阻塞应用使用
+        appendActivityLogEntry({
+          level: 'error',
+          source: 'main',
+          domain: 'backup-retention',
+          message: '旧备份保留策略执行失败',
+          details: [String(err && err.stack ? err.stack : err)]
+        });
       }
     });
 
@@ -12793,10 +13210,7 @@ app.whenReady()
         stack: err && err.stack ? err.stack : undefined
       });
     }
-  })
-  .catch((error) => {
-    handleStartupFailure(error);
-  });
+}
 
 // v2.1.8 N1：进入模块兜底 cleanup
 //   spec §三 N1-D3 / D4：listMonths 入口检测 cleanup_pending → 后台串行清 + toast 通知

@@ -45,4 +45,15 @@ function dayDiffWithin(a, b, n) {
   return diffDays <= n;
 }
 
-module.exports = { toDate, sameDay, dayDiffWithin };
+// 有符号日期差（天）= round((a − b) / 天毫秒)；任一无法解析 → null。
+//   refund-backfill-rules-v2 R4 专用（单向容差判据：0 ≤ bank.BillDate − ro.valueDate ≤ 21）。
+//   ⚠️ 与 dayDiffWithin 区别：本函数不取 Math.abs，保留方向（正=a 晚于 b，负=a 早于 b）。
+//   不改 dayDiffWithin 双向语义（r5-fund-transfer-backfill 等共用）。
+function signedDayDiff(a, b) {
+  const da = toDate(a);
+  const db = toDate(b);
+  if (!da || !db) return null;
+  return Math.round((da.getTime() - db.getTime()) / MS_PER_DAY);
+}
+
+module.exports = { toDate, sameDay, dayDiffWithin, signedDayDiff };

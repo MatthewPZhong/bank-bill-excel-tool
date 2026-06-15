@@ -1,6 +1,6 @@
 {
   "name": "bank-bill-excel-tool",
-  "version": "3.0.4",
+  "version": "3.0.5",
   "description": "清结算小助手",
   "main": "src/main.js",
   "author": {
@@ -12,9 +12,10 @@
     "start": "electron .",
     "icon:sync": "node scripts/sync-app-icon.js",
     "prebuild:meta": "node scripts/gen-build-info.js",
-    "dist:win": "npm run prebuild:meta && electron-builder --win",
-    "dist:win:setup": "npm run prebuild:meta && electron-builder --win nsis",
-    "dist:win:portable": "npm run prebuild:meta && electron-builder --win portable",
+    "dist:win": "npm run prebuild:meta && electron-builder --win && node scripts/check-dist-size.js",
+    "dist:win:setup": "npm run prebuild:meta && electron-builder --win nsis && node scripts/check-dist-size.js",
+    "dist:win:portable": "npm run prebuild:meta && electron-builder --win portable && node scripts/check-dist-size.js",
+    "check:dist": "node scripts/check-dist-size.js",
     "preview": "node scripts/render-preview.js",
     "preview:account": "node scripts/render-account-mapping-preview.js",
     "preview:template-manager": "node scripts/render-template-manager-preview.js",
@@ -117,15 +118,13 @@
       "buildResources": "build"
     },
     "files": [
-      "assets/**/*",
-      "COMMON枚举.xlsx",
       "index.html",
+      "package.json",
+      "COMMON枚举.xlsx",
       "src/**/*",
-      "scripts/**/*",
-      "CHANGELOG.md",
-      "README.md",
-      "docs/**/*",
-      "package.json"
+      "assets/**/*",
+      "!assets/app-icon-source.png",
+      "docs/USER_GUIDE.md"
     ],
     "win": {
       "icon": "build/icon.ico",
@@ -152,7 +151,6 @@
     }
   },
   "dependencies": {
-    "@napi-rs/canvas": "^0.1.97",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "marked": "^18.0.0",
@@ -162,6 +160,8 @@
     "yauzl": "^3.3.0"
   },
   "devDependencies": {
+    "@electron/asar": "^3.4.1",
+    "@napi-rs/canvas": "^0.1.97",
     "electron": "^36.0.0",
     "electron-builder": "^26.0.12",
     "yazl": "^3.3.1"

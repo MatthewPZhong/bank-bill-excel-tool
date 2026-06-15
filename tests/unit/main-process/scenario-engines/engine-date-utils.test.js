@@ -11,7 +11,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { toDate, sameDay, dayDiffWithin } = require('../../../../src/main-process/scenario-engines/engine-date-utils');
+const { toDate, sameDay, dayDiffWithin, signedDayDiff } = require('../../../../src/main-process/scenario-engines/engine-date-utils');
 
 // 取本地年-月-日（与 toDate 的本地午夜口径一致）
 function localYmd(d) {
@@ -105,5 +105,26 @@ test.describe('engine-date-utils.dayDiffWithin(., ., 1)', () => {
   test('n=0 时仅同日为 true（边界）', () => {
     assert.equal(dayDiffWithin('2026-03-10', '2026-03-10', 0), true);
     assert.equal(dayDiffWithin('2026-03-10', '2026-03-11', 0), false);
+  });
+});
+
+test.describe('engine-date-utils.signedDayDiff（R4：保留方向，不取 abs）', () => {
+  test('a 晚于 b → 正数', () => {
+    assert.equal(signedDayDiff('2026-03-15', '2026-03-10'), 5);
+  });
+  test('a 早于 b → 负数（与 dayDiffWithin 的 abs 不同）', () => {
+    assert.equal(signedDayDiff('2026-03-10', '2026-03-15'), -5);
+  });
+  test('同日 → 0', () => {
+    assert.equal(signedDayDiff('2026-03-10', '2026-03-10'), 0);
+  });
+  test('跨格式 / Excel 序列号方向正确', () => {
+    assert.equal(signedDayDiff('2026/03/15', '2026-03-10'), 5);
+    assert.equal(signedDayDiff(46156, 46155), 1);
+  });
+  test('任一无法解析 → null', () => {
+    assert.equal(signedDayDiff(null, '2026-03-10'), null);
+    assert.equal(signedDayDiff('2026-03-10', ''), null);
+    assert.equal(signedDayDiff('not-a-date', '2026-03-10'), null);
   });
 });

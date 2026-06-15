@@ -29,6 +29,10 @@ const {
   // v2.1.12 β.1-T3：多 worker write-splitting worker 数 settings seed（D29/D33）
   ensureAcquiringBillWorkerCountSetting,
   ensureAcquiringBillCurrencyRunsChunkProgress,
+  ensureAcquiringBillCurrencyRunsSideDbPath,
+  // v3.0.5 PR-4（Part B Phase 2）：bank-bu / biz-op runs 表加 side_db_rel_path 列（侧库镜像）
+  ensureBankBuReconRunsSideDbPath,
+  ensureBizOpReconRunsSideDbPath,
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings
   ensureAcquiringBillCurrencyRawJsonRetentionSettings,
   ensureBillRawJsonV2Slim,
@@ -79,6 +83,27 @@ const channelEnumRepository = require('./database/channel-enum-repository');
 const { createBackup: createBackupImpl } = require('./database/backup');
 // v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
 const { appendModuleLog } = require('./logger');
+
+// v3.0.5 PR-2（Part B Phase 0 / B-D6）：一次性 VACUUM 主库标志位 + 磁盘安全余量比例
+//   标志位沿用 settings-repository 单键布尔范式（值 '1' = 已执行；缺失 = 未执行）。
+const ONE_TIME_VACUUM_FLAG_KEY = 'db_one_time_vacuum_v3_0_5_done';
+//   安全前置：VACUUM 临时需约 DB 文件大小的双倍峰值，要求剩余磁盘 ≥ DB 大小 × 1.2 才执行。
+const VACUUM_DISK_HEADROOM_RATIO = 1.2;
+
+// 字节数转人类可读字符串（仅用于 activity log 可读性，非精确换算）
+function formatBytesForLog(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return String(bytes);
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = n / 1024;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
+  }
+  return `${value.toFixed(2)} ${units[i]}`;
+}
 
 class AppDatabase {
   constructor(dbPath) {
@@ -344,11 +369,17 @@ class AppDatabase {
     // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表
     // 与其他迁移完全独立，调用顺序无依赖；放在最末尾即可
     this.ensureBankBuReconTablesSupport();
+    // v3.0.5 PR-4（Part B Phase 2）：bank_bu_recon_runs 加 side_db_rel_path 列（侧库镜像；NULL=历史主库 run）
+    //   必须在 ensureBankBuReconTablesSupport 之后（依赖 runs 表已存在）；轻量加列幂等
+    this.ensureBankBuReconRunsSideDbPath();
     // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表 + 2 索引（与现有 5 模块表完全隔离，调用顺序无依赖）
     this.ensureVccOpCalcTablesSupport();
     // v2.1.3 T1：业务OP数据核对模块 4 张表（imports / flow_imports / runs / diff_rows）
     // 与 v2.1.2 bank_bu_recon_* 完全独立，调用顺序无依赖
     this.ensureBizOpReconTablesSupport();
+    // v3.0.5 PR-4（Part B Phase 2）：biz_op_recon_runs 加 side_db_rel_path 列（侧库镜像；NULL=历史主库 run）
+    //   必须在 ensureBizOpReconTablesSupport 之后（依赖 runs 表已存在）；轻量加列幂等
+    this.ensureBizOpReconRunsSideDbPath();
     // v2.1.6 T4：收单单据币种校验模块 4 张表（flow_imports / bill_imports / runs / diff_rows）
     // 与 v2.1.2/v2.1.3 完全独立，调用顺序无依赖
     this.ensureAcquiringBillCurrencyTablesSupport();
@@ -376,6 +407,9 @@ class AppDatabase {
     //   必须在 ensureAcquiringBillCurrencyRunsCleanupPending 之后（依赖 runs 表 + 列扩展顺序）
     //   幂等：hasColumn 检查避免重复 ADD COLUMN
     this.ensureAcquiringBillCurrencyRunsChunkProgress();
+    // v3.0.5 PR-3（Part B Phase 1）：runs.side_db_rel_path 列（per-月侧库元数据；NULL=历史主库 run 双源过渡）
+    //   必须在 ensureAcquiringBillCurrencyTablesSupport 之后（依赖 runs 表已存在）；轻量加列幂等
+    this.ensureAcquiringBillCurrencyRunsSideDbPath();
     // v2.1.8 N4：差异表瘦身 — bill_imports.raw_json 一次性 rewrite 仅保留 9 模版字段
     //   🔴 资金红线 + 破坏性 migration；首次启动自动备份 DB 到 <dbDir>/backups/
     //   幂等：app_settings.acquiring_bill_raw_json_v2_migrated = 'true' 跳过
@@ -502,6 +536,63 @@ class AppDatabase {
     this.ensureBocFxLinkSupport();
     // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀；幂等 CREATE IF NOT EXISTS，无依赖）
     this.ensureChannelEnumSupport();
+    // v3.0.5 PR-2（Part B Phase 0 / B-D6）：一次性 VACUUM 主库（止血回收历史删除空洞）
+    //   必须在所有 ensure*Support / migrate* 之后（VACUUM 重建文件，之后再 ANALYZE 重统计）
+    //   迁移式幂等：标志位已写则跳过；成功才写标志、磁盘不足/失败不写标志 → 下次重试。
+    //   ⚠️ 同步阻塞，15GB 预期分钟级；本阶段无用户可见进度框（窗口在 init 完成后才建，Phase 3 未做）。
+    try {
+      const vacuumResult = this.runOneTimeVacuumIfNeeded();
+      if (vacuumResult && vacuumResult.status === 'vacuumed') {
+        appendModuleLog({
+          level: 'info',
+          source: 'main',
+          domain: 'migration',
+          message: '[Phase0 VACUUM] 主库一次性优化完成（首次升级止血）',
+          details: [
+            `优化前体积: ${formatBytesForLog(vacuumResult.sizeBefore)}`,
+            `优化后体积: ${formatBytesForLog(vacuumResult.sizeAfter)}`,
+            `耗时: ${(vacuumResult.durationMs / 1000).toFixed(1)}s`
+          ]
+        });
+      } else if (vacuumResult && vacuumResult.status === 'insufficient-disk') {
+        appendModuleLog({
+          level: 'warning',
+          source: 'main',
+          domain: 'migration',
+          message: '[Phase0 VACUUM] 磁盘剩余空间不足，跳过本次优化（不写标志位，下次启动重试）',
+          details: [
+            `当前主库体积: ${formatBytesForLog(vacuumResult.sizeBefore)}`,
+            `所需剩余空间(×1.2): ${formatBytesForLog(vacuumResult.requiredFree)}`,
+            `实际剩余空间: ${formatBytesForLog(vacuumResult.freeBytes)}`
+          ]
+        });
+      } else if (vacuumResult && vacuumResult.status === 'failed') {
+        appendModuleLog({
+          level: 'error',
+          source: 'main',
+          domain: 'migration',
+          message: '[Phase0 VACUUM] 优化失败（不写标志位，下次启动重试）',
+          details: [
+            vacuumResult.error && vacuumResult.error.message
+              ? vacuumResult.error.message
+              : String(vacuumResult.error)
+          ],
+          stack: vacuumResult.error && vacuumResult.error.stack ? vacuumResult.error.stack : undefined
+        });
+      }
+      // already-done：稳态正常路径（每次启动重复触达）→ 静默，不打 log 防噪音
+    } catch (vacuumErr) {
+      // 防御：runOneTimeVacuumIfNeeded 自身异常也不阻塞启动，下次重试
+      appendModuleLog({
+        level: 'error',
+        source: 'main',
+        domain: 'migration',
+        message: '[Phase0 VACUUM] unexpected failure (启动不阻塞，下次启动重试)',
+        details: [vacuumErr && vacuumErr.message ? vacuumErr.message : String(vacuumErr)],
+        stack: vacuumErr && vacuumErr.stack ? vacuumErr.stack : undefined
+      });
+    }
+
     // v2.1.7 F7-A2：启动期 ANALYZE — 让规划器统计所有索引（含 idx_acquiring_bill_currency_bill_source_file）
     //   必须在所有 ensure*Support / migrate* 之后（否则统计的是旧 schema）
     //   ANALYZE 幂等可重复；用户 DB 体量下开销 < 100ms（spec §7.9）
@@ -562,6 +653,11 @@ class AppDatabase {
     return ensureBankBuReconTablesSupport(this.db);
   }
 
+  // v3.0.5 PR-4（Part B Phase 2）：bank_bu_recon_runs 加 side_db_rel_path 列（侧库镜像）
+  ensureBankBuReconRunsSideDbPath() {
+    return ensureBankBuReconRunsSideDbPath(this.db);
+  }
+
   // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表（runs / run_files）+ 2 索引
   ensureVccOpCalcTablesSupport() {
     return ensureVccOpCalcTablesSupport(this.db);
@@ -570,6 +666,11 @@ class AppDatabase {
   // v2.1.3 T1：业务OP数据核对模块 4 张表（imports / flow_imports / runs / diff_rows）
   ensureBizOpReconTablesSupport() {
     return ensureBizOpReconTablesSupport(this.db);
+  }
+
+  // v3.0.5 PR-4（Part B Phase 2）：biz_op_recon_runs 加 side_db_rel_path 列（侧库镜像）
+  ensureBizOpReconRunsSideDbPath() {
+    return ensureBizOpReconRunsSideDbPath(this.db);
   }
 
   // v2.1.6 T4：收单单据币种校验模块 4 张表（flow_imports / bill_imports / runs / diff_rows）
@@ -628,6 +729,11 @@ class AppDatabase {
   // v2.1.10 A4 T19：runs.chunk_progress 列 migration — 启动期幂等 ADD COLUMN
   ensureAcquiringBillCurrencyRunsChunkProgress() {
     return ensureAcquiringBillCurrencyRunsChunkProgress(this.db);
+  }
+
+  // v3.0.5 PR-3（Part B Phase 1）：runs.side_db_rel_path 列 migration — 启动期幂等 ADD COLUMN（per-月侧库元数据）
+  ensureAcquiringBillCurrencyRunsSideDbPath() {
+    return ensureAcquiringBillCurrencyRunsSideDbPath(this.db);
   }
 
   // v2.1.10 N4-cont-1 T22 (Phase 4)：raw_json idle 自动清理保留窗口 settings — seed default=7 + 暴露 get/set
@@ -1109,6 +1215,39 @@ class AppDatabase {
     return linkedTableRepository.upsertLinkedGatewayBillStreaming(this.db, feedRows, options || {});
   }
 
+  // v3.0.5 需求1：银行对账单入金表「按 BizId 幂等 upsert」（数组版，同步）——累加不整表覆盖。
+  //   返回 { upserted, overwriteCount, rejectedEmptyCount, rowCount, dataDateMin, dataDateMax, updatedAt }。
+  upsertLinkedBankDeposit(rows, options) {
+    return linkedTableRepository.upsertLinkedBankDeposit(this.db, rows, options || {});
+  }
+
+  // v3.0.5 需求1：银行对账单入金表「按 BizId 幂等 upsert」（流式版，async）。
+  //   🔴🔴 资金红线（R-6）：65.7 万行单事务跨 await；feedRows 中途 throw → ROLLBACK，表保持调用前状态。
+  upsertLinkedBankDepositStreaming(feedRows, options) {
+    return linkedTableRepository.upsertLinkedBankDepositStreaming(this.db, feedRows, options || {});
+  }
+
+  // v3.0.5 需求2：外汇交割表「按交易编号幂等 upsert」（仅数组版，同步；fx 永不流式）——累加不整表覆盖。
+  //   返回 { upserted, overwriteCount, rejectedEmptyCount, rowCount, dataDateMin, dataDateMax, updatedAt }。
+  upsertLinkedFx(rows, options) {
+    return linkedTableRepository.upsertLinkedFx(this.db, rows, options || {});
+  }
+
+  // v3.0.5 需求（OPEN-7 / T5a）：银行对账单入金表「跨期重复命中提醒」命中标记读（bizIds → Map<bizId,{last_hit_run,last_hit_at}>）。
+  readBankDepositHitMarkers(bizIds) {
+    return linkedTableRepository.readBankDepositHitMarkers(this.db, bizIds);
+  }
+
+  // v3.0.5 需求（OPEN-7 / T5a）：命中标记写（bizIds 批量 UPDATE last_hit_run/last_hit_at，仅已存在行；返回 { marked }）。
+  markBankDepositHits(bizIds, runId, atIso) {
+    return linkedTableRepository.markBankDepositHits(this.db, bizIds, runId, atIso);
+  }
+
+  // v3.0.5 需求（OPEN-7 / T5a）：命中标记清（bizIds 批量置 NULL；本批不接线，OPEN-4 删除联动批次4 接入；返回 { cleared }）。
+  clearBankDepositHitMarkersByBizIds(bizIds) {
+    return linkedTableRepository.clearBankDepositHitMarkersByBizIds(this.db, bizIds);
+  }
+
   // v3.0.1 需求1 / task4：按数据日期范围统计将删行数（只读，前端删除弹框预览「将删约 N 行」）。
   countGatewayBillByDateRange(startDate, endDate) {
     return linkedTableRepository.countGatewayBillByDateRange(this.db, startDate, endDate);
@@ -1117,6 +1256,28 @@ class AppDatabase {
   // v3.0.1 需求1 / task4：🔴 资金红线——按数据日期闭区间删除网关对账单行（不可逆，单事务，删后 meta 全表重算）。
   deleteGatewayBillByDateRange(startDate, endDate, options) {
     return linkedTableRepository.deleteGatewayBillByDateRange(this.db, startDate, endDate, options || {});
+  }
+
+  // v3.0.5 OPEN-4（T6a）：按 transaction_date 闭区间统计 fx 将删行数（只读预览，前端删除弹框「将删约 N 行」）。
+  countFxByDateRange(startDate, endDate) {
+    return linkedTableRepository.countFxByDateRange(this.db, startDate, endDate);
+  }
+
+  // v3.0.5 OPEN-4（T6a）：按 bill_date 闭区间统计 bank-deposit 将删行数（只读预览）。
+  countBankDepositByDateRange(startDate, endDate) {
+    return linkedTableRepository.countBankDepositByDateRange(this.db, startDate, endDate);
+  }
+
+  // v3.0.5 OPEN-4（T6a）：🔴🔴 资金红线——按 transaction_date 闭区间删除外汇交割表行（不可逆，单事务）+ 联动删 BOC 派生表
+  //   （按 transaction_no IN 被删行的交易编号，绝不按 maturity_date/日期）。返回含 deletedTxnNos / bocDeleted（T6b 派生重建用）。
+  deleteFxByDateRange(startDate, endDate, options) {
+    return linkedTableRepository.deleteFxByDateRange(this.db, startDate, endDate, options || {});
+  }
+
+  // v3.0.5 OPEN-4（T6a）：🔴 资金红线——按 bill_date 闭区间删除银行对账单入金表行（不可逆，单事务，删后 meta 全表重算）。
+  //   返回含 deletedBizIds（T6b 用于清 OPEN-7 命中标记 / ADM·BOC bank 派生重建）。
+  deleteBankDepositByDateRange(startDate, endDate, options) {
+    return linkedTableRepository.deleteBankDepositByDateRange(this.db, startDate, endDate, options || {});
   }
 
   // v2.1.16-beta.2 T1：读回某 tableKey 全部整行（raw_json → 对象，字段名 = 真实表头）；
@@ -1167,6 +1328,26 @@ class AppDatabase {
   // BOC链接表整表覆盖写入（8 列 INSERT，热列从内部辅助键取，raw_json 剥辅助键）
   replaceBocFxLink(rows) {
     return linkedTableRepository.replaceBocFxLink(this.db, rows);
+  }
+
+  // v3.0.5 批次2b：BOC链接表幂等 upsert（按 transaction_no，同键覆盖 id 不变，含 orig_group_no）
+  upsertBocFxLink(rows) {
+    return linkedTableRepository.upsertBocFxLink(this.db, rows);
+  }
+
+  // v3.0.5 批次2b：取现有最大 orig_group_no（scan offset 续编用）
+  getMaxBocFxOrigGroupNo() {
+    return linkedTableRepository.getMaxBocFxOrigGroupNo(this.db);
+  }
+
+  // v3.0.5 批次2b：读全库 BOC 行供全量重匹配（[{ id, row }]，row 注入 __origGroup 辅助键，按 id ASC）
+  readBocFxLinkRowsForRematch() {
+    return linkedTableRepository.readBocFxLinkRowsForRematch(this.db);
+  }
+
+  // v3.0.5 批次2b：全量重匹配后按 id 回写 group_no/allocation_no + raw_json（不碰 recon_link_id/orig_group_no）
+  writeBocFxLinkGroupRematch(rowsWithIds) {
+    return linkedTableRepository.writeBocFxLinkGroupRematch(this.db, rowsWithIds);
   }
 
   // 读回 BOC链接表业务行（raw_json → 对象，按 id ASC）；供 BOC 引擎数据源
@@ -1225,8 +1406,109 @@ class AppDatabase {
     const backupDir = path.join(path.dirname(this.dbPath), 'backups');
     return createBackupImpl(this.db, label, backupDir);
   }
+
+  // v3.0.5 PR-2（Part B Phase 0 / B-D6）：一次性 VACUUM 主库（止血，回收历史删除空洞）
+  //
+  // 背景（spec size-startup-optimization §B.1）：本机主库 15GB，freelist_count 2,407,169 页
+  //   ≈ 9.86GB（61%）为删除后未回收空洞；全代码无空间回收机制（VACUUM 仅出现在备份 VACUUM INTO）。
+  //   注意：这只是「止血」——结构性解法是 run 级数据出主库（Phase 1/2），第二次 VACUUM 顺延下一版本收口到 MB 级。
+  //
+  // 迁移式幂等（B-D6）：app_settings 单键标志位 db_one_time_vacuum_v3_0_5_done = '1'，
+  //   沿用 settings-repository 既有单键布尔范式（hasShownWinOneDriveStorageNotice / markWinOneDriveStorageNoticeShown）。
+  //   - 已写标志位 → 永久跳过（status='already-done'）。
+  //   - 成功执行后才写标志位；任何失败路径都不写 → 下次启动重试。
+  //
+  // 安全前置（fail-open，新增项）：VACUUM 需要约「当前 DB 文件大小」的临时双倍峰值空间，
+  //   这里要求剩余磁盘 ≥ 当前 DB 文件大小 × 1.2，不足则跳过（status='insufficient-disk'）+ **不写标志位**（下次重试）。
+  //
+  // ⚠️ VACUUM 不能在事务内执行；DatabaseSync 是同步 API → 本调用会阻塞主进程（15GB 预期分钟级）。
+  //   本阶段窗口在 init 完成后才创建（Phase 3 未做），无用户可见进度框 —— 沿用 N5/N4-cont-2 既有「无提示、
+  //   窗口延后出现」的升级首启口径（详见 PR 汇报「UI 提示落点」说明）。
+  //
+  // 入参（均可注入，便于单测）：
+  //   - diskCheck()：返回剩余可用磁盘字节数；默认用 fs.statfsSync(dbDir)。抛错则视为「无法判断」→ fail-open 放行。
+  //   - flagKey：标志位 key（默认 ONE_TIME_VACUUM_FLAG_KEY）。
+  // 返回：{ status, ... }，由调用方据此写 activity log。
+  runOneTimeVacuumIfNeeded(options = {}) {
+    if (!this.db) throw new Error('AppDatabase.runOneTimeVacuumIfNeeded: db 未初始化');
+    const flagKey = options.flagKey || ONE_TIME_VACUUM_FLAG_KEY;
+
+    // 幂等：标志位已写 → 永久跳过
+    if (settingsRepository.getSetting(this.db, flagKey) === '1') {
+      return { status: 'already-done' };
+    }
+
+    // 当前 DB 文件大小（VACUUM 前）
+    let sizeBefore = 0;
+    try {
+      sizeBefore = fs.statSync(this.dbPath).size;
+    } catch (_e) {
+      sizeBefore = 0; // 取不到（极少数）→ 后续磁盘检查放行
+    }
+
+    // 安全前置：剩余磁盘 ≥ DB 文件大小 × 1.2，不足则跳过且不写标志（fail-open：检查本身失败也放行）
+    const requiredFree = Math.ceil(sizeBefore * VACUUM_DISK_HEADROOM_RATIO);
+    let freeBytes = null;
+    try {
+      const diskCheck =
+        typeof options.diskCheck === 'function'
+          ? options.diskCheck
+          : () => {
+              const stat = fs.statfsSync(path.dirname(this.dbPath));
+              return stat.bavail * stat.bsize;
+            };
+      freeBytes = diskCheck();
+    } catch (_e) {
+      freeBytes = null; // 无法判断磁盘 → fail-open 放行
+    }
+    if (freeBytes != null && Number.isFinite(freeBytes) && freeBytes < requiredFree) {
+      return {
+        status: 'insufficient-disk',
+        sizeBefore,
+        requiredFree,
+        freeBytes,
+      };
+    }
+
+    // 执行 VACUUM（不能在事务内；同步阻塞）
+    const startedAt = Date.now();
+    try {
+      this.db.exec('VACUUM;');
+      // WAL 模式下 VACUUM 写入 WAL，主库文件大小要等 checkpoint 才回收。
+      // 主动 wal_checkpoint(TRUNCATE) 让磁盘空间「即时减负」（PRD §5.2 止血目标）；
+      // TRUNCATE 失败不影响正确性（下次自然 checkpoint），仅吞掉不让其打断成功路径。
+      try {
+        this.db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+      } catch (_ckptErr) { /* swallow：checkpoint 失败不影响 VACUUM 正确性 */ }
+    } catch (vacuumErr) {
+      // 失败不写标志 → 下次启动重试
+      return { status: 'failed', sizeBefore, error: vacuumErr };
+    }
+    const durationMs = Date.now() - startedAt;
+
+    let sizeAfter = sizeBefore;
+    try {
+      sizeAfter = fs.statSync(this.dbPath).size;
+    } catch (_e) {
+      sizeAfter = sizeBefore;
+    }
+
+    // 成功 → 写标志位（永久跳过后续启动）
+    settingsRepository.setSetting(this.db, flagKey, '1');
+
+    return {
+      status: 'vacuumed',
+      sizeBefore,
+      sizeAfter,
+      durationMs,
+      freeBytes,
+      requiredFree,
+    };
+  }
 }
 
 module.exports = {
-  AppDatabase
+  AppDatabase,
+  // v3.0.5 PR-2（Part B Phase 0 / B-D6）：一次性 VACUUM 标志位 key（单测 + main.js 可引用）
+  ONE_TIME_VACUUM_FLAG_KEY
 };

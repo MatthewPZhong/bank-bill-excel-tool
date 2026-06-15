@@ -28,6 +28,24 @@ function parseNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+// 交易编号归一化为纯数字串（v3.0.5 决策9：单一真相，下沉自 boc-fx-link-builder.js）。
+//   纯数字原样（'123'→'123'）；带尾零小数（'123.0' / '926181062.0'）去尾零取整数部分；
+//   空 / 含非数字字符（含字母 / 分隔符）/ 科学计数法（'1.2e3'）/ 非零小数（'123.5'）→ ''。
+//   number 入参（如交割表「交易编号」926181062）经 normalizeCellValue 转 String 后同口径处理（9 位纯数字无科学计数风险）。
+//   🔴 三处共用单一真相（builder 派生分组 / 仓储 fx upsert 幂等键 / migration 键列回填）——禁内联第二份（防口径漂移）。
+//     boc-fx-link-builder 仍 re-export 本函数（既有单测从 builder import，行为字节不变）。
+function normalizeTransactionNo(value) {
+  const s = normalizeCellValue(value);
+  if (s === '') return '';
+  // 纯整数
+  if (/^\d+$/.test(s)) return s;
+  // 带小数点但小数部分全为 0（去尾零）：123.0 / 123.00 → 123；123.5 不接受
+  const m = s.match(/^(\d+)\.0+$/);
+  if (m) return m[1];
+  // 其余（含字母 / 科学计数 / 非零小数 / 千分位）一律视为非交易编号
+  return '';
+}
+
 // 条件判定（C1 conditions / C2 billTypes 共用）
 // op ∈ '等于' / '不等于' / '包含' / '不包含' / '空值' / '非空值' / '开头为'
 function evaluateCondition(row, condition) {
@@ -121,6 +139,7 @@ module.exports = {
   makeModificationCollector,
   makeWarningCollector,
   normalizeCellValue,
+  normalizeTransactionNo,
   parseNumber,
   valuesEqual
 };

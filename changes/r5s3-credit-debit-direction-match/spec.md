@@ -1,6 +1,7 @@
 # Spec — R5 场景3「中台加款单脏数据处理」按 Credit Amount 方向匹配
 
-> 状态：**已确认（待实施）** ｜ 来源分支：`v2.1.16-beta.6` ｜ 目标版本：v3.0.0（PR-6）
+> 状态：**已实施（v3.0.0 块C，已发版）** ｜ 来源分支：`v2.1.16-beta.6` ｜ 目标版本：v3.0.0（PR-6）
+> ✅ 回写 2026-06-15：原「待实施」状态行已 stale。实证落地 commit d901375 / `src/main-process/scenario-engines/r5-platform-inbound-cleanup.js`（Credit 方向消歧、`no-credit-match`/`multi-credit-match` 警告）+ CHANGELOG v3.0.0 块C。
 > 性质：🔴 **资金红线**（剔除清单错位 = 导出错误的财务清单）
 > 缘起：用户提问「同 ReconciliationId 一行 Credit 一行 Debit，会匹配哪一行？」→ 查实现状为"无脑取 cand[0]，不看方向" → 决定补方向判据。
 > 决策：用户 2026-06-08 已逐条拍板 O-1 ~ O-6（见 §二），spec 定稿可进入实施。

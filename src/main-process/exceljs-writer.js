@@ -207,7 +207,11 @@ function appendPaymentOfflineSheets(workbook, pairs) {
 }
 
 // v3.0.4 块 F 修订 R2 Q14：paymentOfflinePairs 非空时在既有 2 sheet 后追加 3 核对 sheet；null/空 → 主文件形态零变化。
-async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null, modifications = null, paymentOfflinePairs = null) {
+// v3.0.5 OPEN-7（T5b-2 出口②预留）：staleHitNotesByRowId（Map<rowId, 提醒串> | null，默认 null）——
+//   主对账链命中明细行追加「跨期重复命中」提醒（同 §3.6-5 出口①口径，append 不覆盖原命中明细）。
+//   🔴 传空/不传时（本批 main 即不传，主对账链无入金表来源命中——depositRows 唯一消费者是 R5 场景4）
+//      完全不进注入分支 → 命中明细 golden 字节不变（parity 锁定，留 refund-backfill 阶段接入实际注入）。
+async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null, modifications = null, paymentOfflinePairs = null, staleHitNotesByRowId = null) {
   const workbook = new ExcelJS.Workbook();
 
   // ===== sheet1「未命中场景」=====
@@ -256,7 +260,13 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
 
   rows.forEach((row, rowIdx) => {
     const mods = modsByRowId.get(row._rowId) || [];
-    const detail = buildHitDetail(mods);
+    let detail = buildHitDetail(mods);
+    // v3.0.5 OPEN-7（出口②）：若该行有跨期重复命中提醒 → append 到命中明细（不覆盖原 detail）。
+    //   🔴 staleHitNotesByRowId 为 null/无该 rowId 时不进分支 → detail 字节不变（parity）。
+    if (staleHitNotesByRowId && typeof staleHitNotesByRowId.get === 'function') {
+      const note = staleHitNotesByRowId.get(row._rowId);
+      if (note) detail = detail ? detail + '\n' + note : note;
+    }
     const cells = [detail, ...headers.map((h) => row[h])];
     const r = s2.addRow(cells);
     // 命中明细列多行换行显示（B-Q2）

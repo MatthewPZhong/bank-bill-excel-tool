@@ -292,6 +292,8 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
   //     来源是跨轮累积的 modColsByRowId（R4 record('FundType') 后该行 rowId 的列集合含 'FundType'）。
   let refundBackfillRows = [];
   let refundUnmatchedRows = [];
+  // OPEN-7（T5b-1）：R5 退款引擎冒泡的「以入金表为来源、回填成功」命中 BizId 去重数组（T5b-2 export 阶段消费）。
+  let refundHitDepositBizIds = [];
   if (r5s4Bucket.length) {
     const isFundTypeChanged = (rowId) => {
       const cols = modColsByRowId.get(rowId);
@@ -306,6 +308,7 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
     allWarnings.push(...(r5d.warnings || [])); // 不 mergeMods（场景4 不改 bankRows，modifications 恒空）
     refundBackfillRows = r5d.backfillRows || [];
     refundUnmatchedRows = r5d.unmatchedRows || [];
+    refundHitDepositBizIds = r5d.hitDepositBizIds || []; // OPEN-7（T5b-1）透传
   }
 
   // ===== 构造输出：从「当前最新 bankRows」重建（不用 dispatcher 过时浅拷贝）=====
@@ -336,6 +339,8 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
     platformCleanupRows,
     refundBackfillRows,
     refundUnmatchedRows,
+    // OPEN-7（T5b-1）：退款回填命中 BizId 去重数组（T5b-2 在 main.js export 阶段查命中标记 + 注入跨期提醒；无 R5s4 / 无桥接命中 → []）
+    refundHitDepositBizIds,
     // v3.0.4 块 F 修订 R2 Q14：Payment线下调拨匹配对（导出 3 核对 sheet 数据源；未勾选/无命中时 []）
     paymentOfflineMatchedPairs,
     rounds: {

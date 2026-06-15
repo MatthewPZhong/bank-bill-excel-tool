@@ -1,47 +1,65 @@
 // v2.1.16-beta.4 ③ R5 场景4「中台退款订单回填」引擎（🔴 资金红线）
 // PRD-中台退款订单回填-v2.1.16-beta.3 §5.1~§5.5 + §九（12 条已确认决议）
 // TECH_DESIGN-中台退款订单回填-v2.1.16-beta.3 §3.2/§3.3
+// refund-backfill-rules-v2（v3.0.5）：R1~R6 命中规则增强 + O1~O4 输出扩列（详见 changes/refund-backfill-rules-v2/spec.md）。
 //
 // 业务语义：
 //   银行 FundType=Ach Return（且 FundType 未被 R4 改写）行 ↔ 中台退款订单 状态=SUBMITTED 行，
 //   按「渠道大账号(MerchantId↔银行大账号) + 金额(|Credit-Debit|↔退款金额) + 币种」三元组唯一值分组；
-//   同一唯一值下按 4 基数 × 4 策略矩阵（S1 渠道流水号 → S2 附言 MTX → S3 付款人/卡号/虚拟卡号 → S4 金额币种日期）
-//   命中即停回填，产出独立的回填模板行集合 + 未匹配/报错行集合（不改 bankRows）。
+//   同一唯一值下按策略链批量解析（命中即停，精准层 L1~L5 全排在模糊层 L6/S4 之前 → 精准优先由层序保证）：
+//     L1 S1   渠道流水号等值                                              [精准]
+//     L2 S2   附言层：JPM-HK T54[A-Z]{4} 宽正则(R1) ↔ 打款流水号等值 / 未中→CustomerRef 二跳(R3)；
+//             JPM-US CustomerRef 二跳；JPM 链空/非 JPM → 常规 MTX 包含             [精准]
+//     L3 S2b  附言包含入金 CustomerRef（限 JPM，等值层后）(R2)             [精准]
+//     L4 S3   付款人/卡号/虚拟卡号按位等值                                  [精准]
+//     L5 S3b  Drawee Name + 附言 DESC DATE ↔ 入金 ValueDate 二跳(R5)        [精准]
+//     L6 S3c  附言原单日期(DTD)+金额(FOR)+币种 ↔ 入金表二跳(R6)             [模糊]
+//   S4（链后）：单向 0 ≤ bank.BillDate − ro.valueDate ≤ 21(R4)             [模糊]
+//   产出独立的回填模板行集合 + 未匹配/报错行集合（不改 bankRows）。
 //
-// 跨表字段映射全部走 refund-backfill-fields.js（显式映射，绝不假设同名）。
+// 跨表字段映射全部走 refund-backfill-fields.js（显式映射，绝不假设同名）。4 条二跳路径共用入金表双 Map 索引(depIndex)。
 //
 // 纯函数：入参 rows 数组，不读 DB/session（由 main.js 注入）；与场景2/3 独立 usedBankRowId，不串池。
 //   签名 runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, options={})
-//   返回 { backfillRows, unmatchedRows, modifications:[], warnings }
-//     backfillRows  —— sheet1 回填模板行（A~N，含 E 列命中详情 + F~N 银行 9 字段）
+//   返回 { backfillRows, unmatchedRows, modifications:[], warnings, hitDepositBizIds }
+//     backfillRows  —— sheet1 回填模板行（O1/O3/O4：31 列 = 固定 6 列含「命中类型」+ 银行 10 字段 + 中台 15 字段）
 //     unmatchedRows —— sheet2 行（含「结果类型」= 报错-人工介入 / 未匹配-提示 + 信息列）
 //     modifications —— 恒 []（本引擎不改 bankRows，保留与场景2/3 返回对称性）
+//     hitDepositBizIds —— OPEN-7：本批以入金表为来源回填成功的桥接 BizId 去重数组（含 R3/R5/R6 二跳命中）
 //
-// ⚠️ 资金红线：列名映射 / 基数判定 / 多笔报错-提示区分 任一错位都会写错回填。
+// ⚠️ 资金红线：列名映射 / 命中规则 / 命中类型 / 多笔报错-提示区分 任一错位都会写错回填（误改退款单状态 SUCCESS）。
 
 const {
   makeWarningCollector,
   normalizeCellValue,
   parseNumber
 } = require('./engine-utils');
-const { dayDiffWithin, toDate } = require('./engine-date-utils');
+const { toDate, sameDay, signedDayDiff } = require('./engine-date-utils');
 const { buildFeatureRegex } = require('./c1-extract-recon-id');
 const {
   REFUND_BACKFILL_FIELD_MAP: M,
   REFUND_BANK_COLUMNS,
+  REFUND_RO_COLUMNS,
   MTX_FEATURE,
-  T54SWIC_FEATURE
+  T54_REFUND_RE
 } = require('../../constants/refund-backfill-fields');
-
-const MS_PER_DAY = 86400000;
 
 // 提取 regex 模板（仅当模板用，每次提取前 new RegExp(source,'g') 重建，避免 lastIndex 副作用 —— 同 C1）
 const MTX_RE = buildFeatureRegex(MTX_FEATURE);          // /MTX\d{19}/g
-const T54SWIC_RE = buildFeatureRegex(T54SWIC_FEATURE);  // /T54SWIC\d{6}/g
+// R1：JPM-HK 提取正则（T54+4字母+6数字；直写常量，extractFeature 仅用 .source 重建天然兼容）
+const T54_RE = T54_REFUND_RE;                           // /T54[A-Z]{4}\d{6}/g
 
 // 结果类型（sheet2「结果类型」列两种值；两类输出禁混）
 const RESULT_ERROR = '报错-人工介入';
 const RESULT_NOTICE = '未匹配-提示';
+
+// 命中类型（O1：sheet1「命中类型」列两种值；= 策略层属性，精准层全在模糊层前由层序保证「精准优先」）。
+//   L1~L5（S1/S2/S2b/S3/S3b）= 精准命中；L6（S3c）/ S4 = 模糊命中。
+const HIT_TYPE_PRECISE = '精准命中';
+const HIT_TYPE_FUZZY = '模糊命中';
+
+// S4 命中详情固定文案（O2：✅ 2026-06-15 用户拍板；底层比对字段仍为 ro.valueDate，文案为业务展示叫法「退款提交日期」）。
+const S4_DETAIL_TEXT = '命中唯一值:退款提交日期+大账号+金额+币种';
 
 // 银行发生额绝对值 = |（Credit Amount || 0） − （Debit Amount || 0）|（与场景2 口径一致）
 //   任一非数值按 0；两者皆非数值 → 返回 0（非 null）
@@ -78,26 +96,74 @@ function groupBy(rows, keyFn) {
   return map;
 }
 
-// —— 命中详情两句式（§5.1.4，✅Q12 文案）——
+// —— 命中详情两句式（§5.1.4；O2：删「匹配成功:」前缀）——
 function detailBankToRo(bankField, bankVal, roField, roVal) {
-  return `匹配成功:"银行对账单${bankField}里的${normalizeCellValue(bankVal)}"匹配上了"refund order${roField}的${normalizeCellValue(roVal)}"`;
+  return `"银行对账单${bankField}里的${normalizeCellValue(bankVal)}"匹配上了"refund order${roField}的${normalizeCellValue(roVal)}"`;
 }
 function detailBankToDeposit(bankField, bankVal, depField, depVal) {
-  return `匹配成功:"银行对账单${bankField}里的${normalizeCellValue(bankVal)}"匹配上了"银行对账单入金表${depField}的${normalizeCellValue(depVal)}"`;
+  return `"银行对账单${bankField}里的${normalizeCellValue(bankVal)}"匹配上了"银行对账单入金表${depField}的${normalizeCellValue(depVal)}"`;
 }
 
-// —— 回填动作（§5.1.3）：1 条命中 refund order + 配对银行行 → 1 行回填模板（含 E 列详情 + F~N 银行 9 字段）——
-function buildBackfillRow(refundRow, bankRow, detailText) {
+// —— OPEN-7（T5b-1）跨期重复命中：BizId 归一 + 提醒文案 + 跨期判定纯函数（与 detailBankToDeposit 同文件，文案/口径单一真相）——
+//   引擎严守纯函数：绝不 require DB/仓储；归一口径 = String().trim()，与 linked-table-repository.js normalizeKey 字节一致。
+// 归一 BizId（入金表 BANK_DEPOSIT_FIELDS[0]）：非空 → 去空白；null/undefined/空 → ''。
+function normalizeBizIdKey(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+// 跨期重复命中提醒文案（spec §3.6-5；T5b-2 注入回填行「匹配命中详情」）。
+function buildStaleHitReminder(bizId, lastHitAt) {
+  return `⚠️ 桥接入金表行 BizId=${bizId} 此前于 [${lastHitAt}] 已被命中，疑似历史残留`;
+}
+
+// 从本批命中 BizId 集合中挑出「跨期重复命中」需提醒项（spec §3.6-3）。
+//   入参 markerMap：调用方（main.js）传入的 bizId → { last_hit_run, last_hit_at }（引擎自身不读库，保持纯函数）。
+//   判定（runId 比较用字符串）：
+//     · marker.last_hit_run 非空 且 String(last_hit_run) ≠ String(runId) → 跨期命中 → 入选 { bizId, lastHitAt }
+//     · == runId → 同批，不入（同批 run/export 不误报）
+//     · 空 last_hit_run / markerMap 未命中该 bizId → 首次命中，不入
+function pickStaleHits(hitBizIds, markerMap, runId) {
+  const out = [];
+  if (!Array.isArray(hitBizIds) || !markerMap || typeof markerMap.get !== 'function') return out;
+  const runKey = String(runId);
+  for (const bizId of hitBizIds) {
+    const marker = markerMap.get(bizId);
+    if (!marker) continue; // 未命中标记 = 首次命中
+    const lastRun = marker.last_hit_run;
+    if (lastRun === null || lastRun === undefined || lastRun === '') continue; // 空 = 首次命中
+    if (String(lastRun) === runKey) continue; // 同批，不误报
+    out.push({ bizId, lastHitAt: marker.last_hit_at });
+  }
+  return out;
+}
+
+// —— 回填动作（§5.1.3）：1 条命中 refund order + 配对银行行 → 1 行回填模板（固定 6 列 + 银行 10 字段 + 中台 15 字段）——
+//   hitType：O1 命中类型（精准/模糊命中），= 命中所在策略层属性，经 consumeAndBackfill 透传（写「命中类型」列）。
+//   bridgeDepositBizId：OPEN-7（T5b-1）该回填行来源的桥接入金表 BizId（matchJpmUs 命中时非空，其他策略层为 undefined）。
+//     产物挂内部字段 `_bridgeDepositBizId`（下划线前缀；T5b-2 据此精确定位该回填行注入跨期命中提醒；不进对外回填模板列）。
+//   🔴 hitType 参数位置在 bridgeDepositBizId 之前（O1 新增；不破坏 OPEN-7 测试对 `_bridgeDepositBizId` 的断言）。
+function buildBackfillRow(refundRow, bankRow, detailText, hitType, bridgeDepositBizId) {
   const row = {
     '退款单号': normalizeCellValue(refundRow[M.backfill.fromRoSerialNo]),
     '状态': M.backfill.statusSuccess,
     '渠道流水号': normalizeCellValue(bankRow[M.backfill.fromBankReconId]),
     '渠道退款时间': bankRow[M.backfill.fromBankBillDate],
+    '命中类型': hitType, // O1：精准命中 / 模糊命中
     '匹配命中详情': detailText
   };
-  // F~N：配对银行行 9 字段原数据（按 REFUND_BANK_COLUMNS 顺序；保留原始值不 normalize，与导出口径一致）
+  // 银行段：配对银行行 10 字段原数据（按 REFUND_BANK_COLUMNS 顺序；保留原始值不 normalize，与导出口径一致）
   for (const col of REFUND_BANK_COLUMNS) {
     row[col] = bankRow[col];
+  }
+  // O4 中台段：配对 refund order 15 字段原数据（按 REFUND_RO_COLUMNS 顺序；保留原始值不 normalize）。
+  //   '流水号' 与表头 A「退款单号」同值但分列（用户明确要求，照做）。
+  for (const col of REFUND_RO_COLUMNS) {
+    row[col] = refundRow[col];
+  }
+  // OPEN-7 内部字段（仅非空时挂，避免给非桥接回填行塞 undefined 列）。
+  if (bridgeDepositBizId !== undefined && bridgeDepositBizId !== null && bridgeDepositBizId !== '') {
+    row._bridgeDepositBizId = bridgeDepositBizId;
   }
   return row;
 }
@@ -153,74 +219,196 @@ function matchS2Mtx(bankRow, refundCands) {
   return hits;
 }
 
-// S2 JPM-HK：清洗 // → 提 T54SWIC → 仅与 refund「银行打款流水号」单字段等值（✅Q7）
-function matchJpmHk(bankRow, refundCands) {
-  const clean = (v) => normalizeCellValue(v).split('//').join('');
-  const swicList = [];
-  for (const field of M.jpm.hkCleanFields) {
-    for (const swic of extractFeature(clean(bankRow[field]), T54SWIC_RE)) {
-      if (!swicList.includes(swic)) swicList.push(swic);
-    }
-  }
-  if (swicList.length === 0) return [];
-  const hits = [];
-  for (const ro of refundCands) {
-    const payNo = normalizeCellValue(ro[M.jpm.hkRoKey]);
-    if (payNo === '') continue;
-    const hitSwic = swicList.find((swic) => swic === payNo);
-    if (hitSwic) {
-      // 命中详情：银行 Extra Information/Payment Detail 提取值 ↔ refund order 银行打款流水号
-      hits.push({
-        refundRow: ro,
-        detail: detailBankToRo(M.jpm.hkCleanFields.join('/'), hitSwic, M.jpm.hkRoKey, payNo)
-      });
-    }
-  }
-  return hits;
-}
-
-// S2 JPM-US：refund「银行打款流水号」=payNo → 入金表(ReconId OR ChannelOrderNo)==payNo → 取 CustomerRef → 比对 bank CustomerRef（✅Q8）
-function matchJpmUs(bankRow, refundCands, depositRows) {
-  const bankRef = normalizeCellValue(bankRow[M.jpm.usBankCompare]);
+// R3 共享二跳：refund「银行打款流水号」=payNo → 入金表行(ReconId OR ChannelOrderNo == payNo) → 取 dep.CustomerRef
+//   → 与 bank.CustomerRef 严格等值（✅Q8）。US 与 HK 回落复用同一套（D8 中性命名）。
+//   命中详情用 detailBankToDeposit（两句式·入金表版）；OPEN-7：hit 附被命中入金表行的 BizId（_depositBizId 内部字段）。
+//   ⚠️ 资金红线：收口仍是「dep 行 ↔ ro 打款流水号等值 ∧ dep.CustomerRef ↔ bank.CustomerRef 等值」，无放松。
+//   depIndex（commit ⑦ 注入）：若传 depIndex 则 O(1) Map 查双键并集；否则回落 depositRows 线性扫（行为一致）。
+function matchCustomerRefTwoHop(bankRow, refundCands, depositRows, depIndex) {
+  const bankRef = normalizeCellValue(bankRow[M.jpm.bankCompare]);
   if (bankRef === '') return [];
   const deps = Array.isArray(depositRows) ? depositRows : [];
   const hits = [];
   for (const ro of refundCands) {
     const payNo = normalizeCellValue(ro[M.jpm.usRoKey]);
     if (payNo === '') continue;
-    const dep = deps.find((d) =>
-      M.jpm.usDepositKeys.some((k) => {
-        const dv = normalizeCellValue(d[k]);
-        return dv !== '' && dv === payNo;
-      }));
+    const dep = lookupDepositByKeys(payNo, deps, depIndex);
     if (!dep) continue;
-    const depRef = normalizeCellValue(dep[M.jpm.usDepositTake]);
+    const depRef = normalizeCellValue(dep[M.jpm.depositTake]);
     if (depRef !== '' && depRef === bankRef) {
-      // 命中详情：银行 CustomerRef ↔ 入金表 CustomerRef（两句式·入金表版）
       hits.push({
         refundRow: ro,
-        detail: detailBankToDeposit(M.jpm.usBankCompare, bankRef, M.jpm.usDepositTake, depRef)
+        detail: detailBankToDeposit(M.jpm.bankCompare, bankRef, M.jpm.depositTake, depRef),
+        // OPEN-7（T5b-1）：归一 = String().trim()（与仓储 normalizeKey 字节一致；引擎纯函数不 require 仓储）。
+        _depositBizId: normalizeBizIdKey(dep.BizId)
       });
     }
   }
   return hits;
 }
 
-// S2 综合：Channel=JPM 时先跑 JPM 链（HK/US 按地区），未命中回落常规 MTX；非 JPM 直接常规 MTX
-function matchS2(bankRow, refundCands, depositRows) {
+// F-PERF：入金表双 Map 索引（一次性构建，4 条二跳路径复用；入金表可达 65 万行，O(n) find → O(1) 查）。
+//   byReconId/byChannelOrderNo：normalizeCellValue(dep[key]) → dep[]（同键多值，保留插入序，与线性 find「首条命中」对齐）。
+//   空键（归一后 ''）不入索引（线性 find 也要求 dv !== ''）→ 行为字节级一致。
+//   🔴 Fix#1（codex 资金红线）：额外记录每个 dep 的全局行序 ordOf（= deps 中的下标），供 lookupDepositByKeys
+//     按「入金行顺序首条命中」收敛——交叉键冲突（dep[i].ChannelOrderNo == dep[j].ReconciliationId == payNo）时
+//     索引版若「键优先」会取 dep[j]、线性版「行优先」取 dep[i]，两者取不同入金行 CustomerRef → 误命中。
+//     用 ordOf 让索引版与线性版严格一致（行序最小者）。byReconId/byChannelOrderNo 的 value 仍存 dep 对象数组
+//     （不改 value 结构 → 既有 F-PERF 单测对 .get(k)[0].BizId 的断言零破坏；ord 单独挂 ordOf Map）。
+function buildDepIndex(deps) {
+  const byReconId = new Map();
+  const byChannelOrderNo = new Map();
+  const ordOf = new Map(); // dep 对象引用 → 全局行序（deps 下标）；Fix#1 行序首条命中用
+  const addTo = (map, key, dep) => {
+    if (key === '') return;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(dep);
+  };
+  const list = Array.isArray(deps) ? deps : [];
+  for (let i = 0; i < list.length; i++) {
+    const dep = list[i];
+    if (!ordOf.has(dep)) ordOf.set(dep, i); // 同一 dep 两键命中时 ord 相同，天然去重
+    addTo(byReconId, normalizeCellValue(dep.ReconciliationId), dep);
+    addTo(byChannelOrderNo, normalizeCellValue(dep.ChannelOrderNo), dep);
+  }
+  return { byReconId, byChannelOrderNo, ordOf };
+}
+
+// 入金行双键 OR 查找（ReconId / ChannelOrderNo == payNo）。
+//   depIndex 存在 → byReconId/byChannelOrderNo 两 Map 候选并集中「全局行序最小者」（Fix#1：与线性版 deps.find 行优先一致）；
+//   否则 depositRows 线性扫（结果一致）。
+//   🔴 Fix#1：旧实现「先查 byReconId 命中即返回、再查 byChannelOrderNo」是键优先，交叉键冲突时与线性版（行优先）
+//     取不同入金行 → 取不同 CustomerRef → 误命中。改为合并两键候选、按 ordOf 取 ord 最小者的 dep，与线性 find 严格一致。
+function lookupDepositByKeys(payNo, deps, depIndex) {
+  if (depIndex && depIndex.byReconId && depIndex.byChannelOrderNo) {
+    const ordOf = depIndex.ordOf;
+    const byRecon = depIndex.byReconId.get(payNo) || [];
+    const byCh = depIndex.byChannelOrderNo.get(payNo) || [];
+    let best = null;
+    let bestOrd = Infinity;
+    for (const dep of byRecon) {
+      const ord = ordOf && ordOf.has(dep) ? ordOf.get(dep) : Infinity;
+      if (ord < bestOrd) { bestOrd = ord; best = dep; }
+    }
+    for (const dep of byCh) {
+      const ord = ordOf && ordOf.has(dep) ? ordOf.get(dep) : Infinity;
+      if (ord < bestOrd) { bestOrd = ord; best = dep; }
+    }
+    return best;
+  }
+  return deps.find((d) =>
+    M.jpm.depositKeys.some((k) => {
+      const dv = normalizeCellValue(d[k]);
+      return dv !== '' && dv === payNo;
+    })) || null;
+}
+
+// S2 JPM-HK：清洗 // → 提 T54[A-Z]{4}（R1 放宽）→ 与 refund「银行打款流水号」单字段等值（✅Q7）；
+//   未提到 / 未等值 → R3 回落 CustomerRef 二跳（同层内，仍属 L2）。
+function matchJpmHk(bankRow, refundCands, depositRows, depIndex) {
+  const clean = (v) => normalizeCellValue(v).split('//').join('');
+  const swicList = [];
+  for (const field of M.jpm.hkCleanFields) {
+    for (const swic of extractFeature(clean(bankRow[field]), T54_RE)) {
+      if (!swicList.includes(swic)) swicList.push(swic);
+    }
+  }
+  if (swicList.length > 0) {
+    const hits = [];
+    for (const ro of refundCands) {
+      const payNo = normalizeCellValue(ro[M.jpm.hkRoKey]);
+      if (payNo === '') continue;
+      const hitSwic = swicList.find((swic) => swic === payNo);
+      if (hitSwic) {
+        // 命中详情：银行 Extra Information/Payment Detail 提取值 ↔ refund order 银行打款流水号
+        hits.push({
+          refundRow: ro,
+          detail: detailBankToRo(M.jpm.hkCleanFields.join('/'), hitSwic, M.jpm.hkRoKey, payNo)
+        });
+      }
+    }
+    if (hits.length > 0) return hits;
+    // T54 提到但无等值 → 继续 R3 二跳回落（不直接返回空）。
+  }
+  // R3：HK 分支 T54 未中 → CustomerRef 二跳回落（复用 US 二跳逻辑）。
+  return matchCustomerRefTwoHop(bankRow, refundCands, depositRows, depIndex);
+}
+
+// S2 JPM-US：CustomerRef 二跳（薄壳，复用 matchCustomerRefTwoHop）。
+function matchJpmUs(bankRow, refundCands, depositRows, depIndex) {
+  return matchCustomerRefTwoHop(bankRow, refundCands, depositRows, depIndex);
+}
+
+// S2 综合：Channel=JPM 时先跑 JPM 链（HK/US 按地区，含 R3 二跳回落），未命中回落常规 MTX；非 JPM 直接常规 MTX
+function matchS2(bankRow, refundCands, depositRows, depIndex) {
   const isJpm = normalizeCellValue(bankRow.Channel) === M.jpm.channelValue;
   if (isJpm) {
     const region = normalizeCellValue(bankRow[M.jpm.regionField]);
     let jpmHits = [];
     if (region === M.jpm.hkRegion) {
-      jpmHits = matchJpmHk(bankRow, refundCands);
+      jpmHits = matchJpmHk(bankRow, refundCands, depositRows, depIndex);
     } else if (region === M.jpm.usRegion) {
-      jpmHits = matchJpmUs(bankRow, refundCands, depositRows);
+      jpmHits = matchJpmUs(bankRow, refundCands, depositRows, depIndex);
     }
     if (jpmHits.length > 0) return jpmHits;
     // JPM 链未命中 → 回落常规 MTX 包含匹配
   }
   return matchS2Mtx(bankRow, refundCands);
+}
+
+// S2b（R2 新层）：附言包含入金 CustomerRef。限 Channel=JPM；插在 S2（等值层）之后、S3 之前（L3）。
+//   逻辑：对每条候选 ro，payNo → 入金行（双键 OR）→ dep.CustomerRef → 守卫（非空 + 不在黑名单 + 长度≥阈值）
+//         → bank 附言字段（memoFields）任一 .includes(ref) → 命中（精准）；详情用 detailBankToDeposit。
+//   🔴 设计依据（§8 决策 1）：必须独立成层、放在等值层之后 —— 若并入 matchJpmUs 内部回落，
+//      等值命中与包含命中进同一冻结命中图会触发同层反向多笔，把 165 行等值主流拖进报错。
+//   🔴 守卫为必选（占位短串会大面积假命中）；读银行主表附言（44 列恒有，不踩入金行 Payment Detail 存量缺字段坑）。
+//   OPEN-7：命中桥接入金表行 → hit 附 _depositBizId（接 OPEN-7b）。
+// Fix#2（codex 复审）：正则元字符转义（depRef 来自数据，构造边界正则前必须转义，防注入/误判）。
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+// Fix#2：占位符黑名单归一（去空格/连字符 + 大写）——拦 'NOT PROVIDED' / 'NON-REF' 等变体。
+function normalizeForBlacklist(s) {
+  return String(s).toUpperCase().replace(/[\s\-]/g, '');
+}
+function matchMemoContainsDepositRef(bankRow, refundCands, depositRows, depIndex) {
+  if (normalizeCellValue(bankRow.Channel) !== M.jpm.channelValue) return []; // D7：限 Channel=JPM
+  const cfg = M.s2b;
+  // 预取 bank 附言字段值（非空者）。
+  const memos = [];
+  for (const field of cfg.memoFields) {
+    const v = normalizeCellValue(bankRow[field]);
+    if (v !== '') memos.push(v);
+  }
+  if (memos.length === 0) return [];
+  const deps = Array.isArray(depositRows) ? depositRows : [];
+  const blacklist = new Set((cfg.blacklist || []).map(normalizeForBlacklist)); // Fix#2：黑名单去空格/连字符归一
+  const hits = [];
+  for (const ro of refundCands) {
+    const payNo = normalizeCellValue(ro[M.jpm.usRoKey]);
+    if (payNo === '') continue;
+    const dep = lookupDepositByKeys(payNo, deps, depIndex);
+    if (!dep) continue;
+    const depRef = normalizeCellValue(dep[M.jpm.depositTake]);
+    // 守卫：非空 + 不在黑名单（去空格/连字符归一比对）+ 长度≥阈值。
+    if (depRef === '') continue;
+    if (blacklist.has(normalizeForBlacklist(depRef))) continue;
+    if (depRef.length < cfg.minRefLength) continue;
+    // Fix#2：token 边界匹配（非字母数字边界），防短 ref 作为更长无关串子串误命中（ABC123 ≠ XABC1234Y）。
+    const refRe = new RegExp('(^|[^A-Za-z0-9])' + escapeRegExp(depRef) + '([^A-Za-z0-9]|$)');
+    const hitMemoField = cfg.memoFields.find((field) => {
+      const v = normalizeCellValue(bankRow[field]);
+      return v !== '' && refRe.test(v);
+    });
+    if (hitMemoField) {
+      hits.push({
+        refundRow: ro,
+        detail: detailBankToDeposit(hitMemoField, depRef, M.jpm.depositTake, depRef),
+        _depositBizId: normalizeBizIdKey(dep.BizId)
+      });
+    }
+  }
+  return hits;
 }
 
 // S3：按位（付款人名称↔Drawee Name / 付款卡号↔Drawee CardNo / 虚拟卡号↔Payee CardNo），✅Q8b
@@ -241,22 +429,118 @@ function matchS3(bankRow, refundCands) {
   return hits;
 }
 
-// S4：bank BillDate vs refund valueDate，dayDiffWithin ≤ toleranceDays。
-//   命中 = 该 bank 行在候选 refund 里找到日期容差内最近的一条（>容差不算命中）。
-//   返回 { refundRow, detail, dayDiff } 数组（≤容差的全部候选，按天数差升序；空=无任何日期≤容差）。
-function matchS4(bankRow, refundCands) {
-  const bankDate = toDate(bankRow[M.s4.bankDate]);
+// 从 bank 多个附言字段里按 pattern 提第一个捕获组（capture group 1）；无 → null。
+//   pattern 非 global（带捕获组），每次 new RegExp(source) 重建避免 lastIndex 副作用。
+function extractFirstCapture(bankRow, memoFields, pattern) {
+  if (!pattern) return null;
+  for (const field of memoFields) {
+    const s = normalizeCellValue(bankRow[field]);
+    if (!s) continue;
+    const m = s.match(new RegExp(pattern.source, pattern.flags.replace('g', '')));
+    if (m && m[1]) return m[1];
+  }
+  return null;
+}
+
+// 6 位 YYMMDD → 'YYYY-MM-DD'（世纪固定 20YY，D1）；非 6 位数字 → null。
+function yymmddToDateStr(token) {
+  if (!/^\d{6}$/.test(token)) return null;
+  return `20${token.slice(0, 2)}-${token.slice(2, 4)}-${token.slice(4, 6)}`;
+}
+
+// S3b（R5 新层，L5 精准）：Drawee Name 非空 ∧ 附言 DESC DATE token（YYMMDD）↔ 入金 ValueDate sameDay 二跳（D1/D2/D3）。
+//   硬锚点：payNo 二跳等值（lookupDepositByKeys）+ DESC DATE ↔ dep.ValueDate 等日双重收口（精准）。
+//   no-op 防御：datePattern 为 null → 整层跳过。OPEN-7：命中桥接入金行 → hit 附 _depositBizId。
+function matchDraweeNameDate(bankRow, refundCands, depositRows, depIndex) {
+  const cfg = M.s3b;
+  if (!cfg || !cfg.datePattern) return []; // no-op 防御
+  // D2：Drawee Name 仅作启用条件（非空才进 S3b）。
+  if (normalizeCellValue(bankRow[cfg.draweeNameField]) === '') return [];
+  const token = extractFirstCapture(bankRow, cfg.memoFields, cfg.datePattern);
+  if (!token) return [];
+  const tokenDateStr = yymmddToDateStr(token);
+  if (!tokenDateStr) return [];
+  const deps = Array.isArray(depositRows) ? depositRows : [];
   const hits = [];
   for (const ro of refundCands) {
-    if (dayDiffWithin(bankRow[M.s4.bankDate], ro[M.s4.roDate], M.s4.toleranceDays)) {
-      const roDate = toDate(ro[M.s4.roDate]);
-      const dayDiff = (bankDate && roDate)
-        ? Math.abs(Math.round((bankDate.getTime() - roDate.getTime()) / MS_PER_DAY))
-        : Number.POSITIVE_INFINITY;
+    const payNo = normalizeCellValue(ro[M.jpm.usRoKey]);
+    if (payNo === '') continue;
+    const dep = lookupDepositByKeys(payNo, deps, depIndex);
+    if (!dep) continue;
+    if (sameDay(dep[cfg.depositDateField], tokenDateStr)) {
       hits.push({
         refundRow: ro,
-        dayDiff,
-        detail: detailBankToRo(M.s4.bankDate, bankRow[M.s4.bankDate], M.s4.roDate, ro[M.s4.roDate])
+        detail: detailBankToDeposit(cfg.draweeNameField + '+DESC DATE', tokenDateStr, cfg.depositDateField, normalizeCellValue(dep[cfg.depositDateField])),
+        _depositBizId: normalizeBizIdKey(dep.BizId)
+      });
+    }
+  }
+  return hits;
+}
+
+// R6（Fix#4 codex 复审）：DTD token 按真实样例的美式 mm/dd/yyyy（MDY）明确解析为 ISO YYYY-MM-DD，消除通用 auto 的 M/D 歧义。
+//   依据：真实原件 DTD05/21/2026（21 只能为「日」→ 月在前 = MDY）+ JPM US 美式日期惯例；故 DTD05/06/2026 → 2026-05-06。
+//   ⚠️ 资金红线：日期格式判定错误 = 系统性误配，本判定基于现有样例 + codex「美式格式」，建议用户用真实退款单最终确认。
+//   非法（mm∉[1,12] / dd∉[1,31] / 格式不符）→ null（该层整体不命中，宁漏勿误配）。
+function parseDtdDateToken(token) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(normalizeCellValue(token));
+  if (!m) return null;
+  const mm = Number(m[1]);
+  const dd = Number(m[2]);
+  if (!(mm >= 1 && mm <= 12) || !(dd >= 1 && dd <= 31)) return null;
+  return `${m[3]}-${m[1]}-${m[2]}`; // MDY（美式 mm/dd/yyyy）→ ISO YYYY-MM-DD（sameDay 解析 ISO 无歧义）
+}
+
+// S3c（R6 新层，L6 模糊）：附言 原单日期(DTD)+金额(FOR)+币种 三 token ↔ 入金表二跳（D4/D3/D5）。
+//   收口：payNo 二跳 → 入金行日期 sameDay(DTD) ∧ 入金行金额(分比对)==FOR ∧ dep.Currency==币种（模糊）。
+//   no-op 防御：datePattern/amountPattern 任一为 null → 整层跳过。金额分比对（Math.round(amt*100)）。
+function matchMemoDateAmount(bankRow, refundCands, depositRows, depIndex) {
+  const cfg = M.s3c;
+  if (!cfg || !cfg.datePattern || !cfg.amountPattern) return []; // no-op 防御
+  const dtdToken = extractFirstCapture(bankRow, cfg.memoFields, cfg.datePattern);
+  const amtToken = extractFirstCapture(bankRow, cfg.memoFields, cfg.amountPattern);
+  if (!dtdToken || !amtToken) return [];
+  const dtdIso = parseDtdDateToken(dtdToken); // Fix#4：DTD 按 DMY 明确解析为 ISO；非法 → 整层不命中
+  if (!dtdIso) return [];
+  const amtCents = (() => {
+    const n = parseNumber(String(amtToken).replace(/,/g, '')); // Fix#3：去千分位逗号再解析（FOR USD5,043.00 → 5043.00）
+    return n === null || !Number.isFinite(n) ? null : Math.round(n * 100);
+  })();
+  if (amtCents === null) return [];
+  const deps = Array.isArray(depositRows) ? depositRows : [];
+  const hits = [];
+  for (const ro of refundCands) {
+    const payNo = normalizeCellValue(ro[M.jpm.usRoKey]);
+    if (payNo === '') continue;
+    const dep = lookupDepositByKeys(payNo, deps, depIndex);
+    if (!dep) continue;
+    // 三重收口：日期 sameDay（Fix#4：用 DMY 明确解析的 ISO，消歧义）∧ 金额分相等 ∧ 币种相等。
+    if (!sameDay(dep[cfg.depositDateField], dtdIso)) continue;
+    const depAmt = parseNumber(dep[cfg.depositAmountField]);
+    if (depAmt === null || !Number.isFinite(depAmt) || Math.round(depAmt * 100) !== amtCents) continue;
+    if (normalizeCellValue(dep[cfg.depositCurrencyField]) !== cfg.currency) continue;
+    hits.push({
+      refundRow: ro,
+      detail: detailBankToDeposit('DTD+FOR', `${dtdToken}/${amtToken}/${cfg.currency}`, cfg.depositDateField, normalizeCellValue(dep[cfg.depositDateField])),
+      _depositBizId: normalizeBizIdKey(dep.BizId)
+    });
+  }
+  return hits;
+}
+
+// S4：bank BillDate vs refund valueDate（R4：单向容差 0 ≤ bank.BillDate − ro.valueDate ≤ toleranceDays）。
+//   命中 = 该 bank 行在候选 refund 里找到「窗内（diff∈[0,21]）」最近的一条（按 diff 升序；窗外不算命中）。
+//   返回 { refundRow, detail, dayDiff } 数组（窗内全部候选，按天数差升序；空=无任何窗内候选）。
+//   ⚠️ R4 方向收紧：bank.BillDate 早于 ro.valueDate（diff<0）= 时序矛盾，不算命中（旧 ±abs 会误命中）。
+function matchS4(bankRow, refundCands) {
+  const hits = [];
+  for (const ro of refundCands) {
+    const diff = signedDayDiff(bankRow[M.s4.bankDate], ro[M.s4.roDate]);
+    if (diff !== null && diff >= 0 && diff <= M.s4.toleranceDays) {
+      hits.push({
+        refundRow: ro,
+        dayDiff: diff,
+        detail: S4_DETAIL_TEXT // O2：S4 命中详情固定文案（底层比对仍 ro.valueDate）
       });
     }
   }
@@ -286,6 +570,9 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
   const warn = makeWarningCollector('r5-refund-order-backfill', '中台退款订单回填');
   const backfillRows = [];
   const unmatchedRows = [];
+  // OPEN-7（T5b-1）：本批「以入金表为来源、回填成功」的命中 BizId 集合（仅 matchJpmUs 桥接收集，去重）。
+  //   纯函数：只从入参 depositRows 命中收集 BizId，不查库。两条 return 路径均返回去重数组（早退路径 → []）。
+  const hitDepositBizIdSet = new Set();
 
   const safeBankRows = Array.isArray(bankRows) ? bankRows : [];
   const safeRefundRows = Array.isArray(refundOrderRows) ? refundOrderRows : [];
@@ -306,8 +593,11 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
 
   // 空入参防御：任一侧空 → 无可对账，返回空（不抛）
   if (refundPool.length === 0 || bankPool.length === 0) {
-    return { backfillRows, unmatchedRows, modifications: [], warnings: warn.list() };
+    return { backfillRows, unmatchedRows, modifications: [], warnings: warn.list(), hitDepositBizIds: [] };
   }
+
+  // F-PERF（Fix#6 codex 复审）：入金表双 Map 索引在空批早退之后构建——任一侧空时无需给 65 万入金行建索引。
+  const depIndex = buildDepIndex(safeDepositRows);
 
   // 2) 唯一值分组（✅Q1）：键 = 大账号||币种||金额分（金额 NaN → 不入组）
   const keyOf = (account, currency, amountCents) => `${account}||${currency}||${amountCents}`;
@@ -366,12 +656,14 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
       bankGroup,
       refundGroup,
       depositRows: safeDepositRows,
+      depIndex, // F-PERF：双 Map 索引（二跳路径复用）
       usedBankRowId,
       usedRefundIdx,
       refundIdOf,
       backfillRows,
       unmatchedRows,
-      warn
+      warn,
+      hitDepositBizIdSet // OPEN-7（T5b-1）：透传命中 BizId 收集集合（consumeAndBackfill 收集桥接 BizId）
     });
   }
 
@@ -390,7 +682,11 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
     }
   }
 
-  return { backfillRows, unmatchedRows, modifications: [], warnings: warn.list() };
+  // OPEN-7（T5b-1）：去重数组冒泡给 orchestrator → T5b-2 在 export 阶段查标记/注入提醒。
+  return {
+    backfillRows, unmatchedRows, modifications: [], warnings: warn.list(),
+    hitDepositBizIds: [...hitDepositBizIdSet]
+  };
 }
 
 // 对单个唯一值分组跑 S1→S4。
@@ -399,9 +695,10 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
 //   - 任一方向多笔 → 涉事 bank 报错-人工介入、不回填，相关 refund 锁定（Q14 反向多笔 / Q15 锁定退出 S4）。
 function runStrategiesForGroup(ctx) {
   const {
-    bankGroup, refundGroup, depositRows,
+    bankGroup, refundGroup, depositRows, depIndex,
     usedBankRowId, usedRefundIdx, refundIdOf,
-    backfillRows, unmatchedRows, warn
+    backfillRows, unmatchedRows, warn,
+    hitDepositBizIdSet // OPEN-7（T5b-1）：命中 BizId 收集集合，透传给 consumeAndBackfill
   } = ctx;
 
   // bank 行按 BillDate 升序（早→晚；无法解析日期排最后，保持原序稳定）。
@@ -425,13 +722,19 @@ function runStrategiesForGroup(ctx) {
   };
 
   // —— S1~S3：每个策略批量解析（SPEC §7.2）——
+  //   O1：每层带 hitType（精准/模糊命中）；S1~S3 均为精准命中（L1/L2/L4，精准层在模糊层前）。
+  //   O1：精准层（L1~L5）全排在模糊层（L6）之前 → 「精准优先」由层序天然保证（命中即停）。
   const strategyChain = [
-    (bankRow, cands) => matchS1(bankRow, cands),
-    (bankRow, cands) => matchS2(bankRow, cands, depositRows),
-    (bankRow, cands) => matchS3(bankRow, cands)
+    { run: (bankRow, cands) => matchS1(bankRow, cands), hitType: HIT_TYPE_PRECISE },                                  // L1 S1
+    { run: (bankRow, cands) => matchS2(bankRow, cands, depositRows, depIndex), hitType: HIT_TYPE_PRECISE },           // L2 S2（含 R1/R3）
+    { run: (bankRow, cands) => matchMemoContainsDepositRef(bankRow, cands, depositRows, depIndex), hitType: HIT_TYPE_PRECISE }, // L3 S2b（R2）
+    { run: (bankRow, cands) => matchS3(bankRow, cands), hitType: HIT_TYPE_PRECISE },                                  // L4 S3
+    { run: (bankRow, cands) => matchDraweeNameDate(bankRow, cands, depositRows, depIndex), hitType: HIT_TYPE_PRECISE }, // L5 S3b（R5）
+    { run: (bankRow, cands) => matchMemoDateAmount(bankRow, cands, depositRows, depIndex), hitType: HIT_TYPE_FUZZY }    // L6 S3c（R6，模糊）
   ];
 
-  for (const strat of strategyChain) {
+  for (const layer of strategyChain) {
+    const strat = layer.run;
     // 未 settle 的 bank（保持 BillDate 升序）。
     const unsettledBanks = orderedBank.filter((b) => !settledBankRowId.has(b._rowId));
     if (unsettledBanks.length === 0) break;
@@ -490,7 +793,7 @@ function runStrategiesForGroup(ctx) {
       }
 
       // 严格 1↔1 互配（bank 唯一命中 r 且 r 也仅被该 bank 命中）→ 回填，双向消费。
-      consumeAndBackfill(bankRow, hits[0], { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows });
+      consumeAndBackfill(bankRow, hits[0], layer.hitType, { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows, hitDepositBizIdSet });
       settledBankRowId.add(bankRow._rowId);
     }
 
@@ -498,35 +801,45 @@ function runStrategiesForGroup(ctx) {
     for (const [rid] of toLockRefunds) lockedRefundIdx.add(rid);
   }
 
-  // —— S4：金额币种日期兜底（SPEC §7.3：冻结快照 + minDayDiff 判据，去顺序依赖）——
+  // —— S4：金额币种日期兜底（SPEC §7.3 + R4：冻结快照 + 单向窗判据，去顺序依赖）——
   //   入口冻结快照：本组未消费且未锁定的 refund。
   const refundsForS4 = refundGroup.filter((ro) => isRefundAvailable(ro));
   const s4OrderedBank = orderedBank.filter((b) => !settledBankRowId.has(b._rowId));
   // 本轮 S4 已被消费的 refund（在冻结快照内做 1v1，按 BillDate 早→晚取最近）。
   for (const bankRow of s4OrderedBank) {
-    // 仍未被本轮 S4 消费且在容差内的 refund（dayDiff 升序取最近）。
+    // 仍未被本轮 S4 消费且在窗内（0≤diff≤21）的 refund（dayDiff 升序取最近）。
     const inTol = matchS4(bankRow, refundsForS4.filter((ro) => isRefundAvailable(ro)));
     if (inTol.length > 0) {
-      consumeAndBackfill(bankRow, inTol[0], { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows });
+      // S4 命中的 hit 无 _depositBizId（非入金表来源）→ consumeAndBackfill 内自然不收集，不污染集合。
+      //   O1：S4 = 模糊命中（HIT_TYPE_FUZZY）。
+      consumeAndBackfill(bankRow, inTol[0], HIT_TYPE_FUZZY, { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows, hitDepositBizIdSet });
       continue;
     }
 
-    // 容差内无 refund：判据 = 该 bank 到【冻结全集 refundsForS4】的 minDayDiff 是否 >10。
-    //   - 冻结全集空 → 提示（关联不到，非脏数据）
-    //   - minDayDiff >10 → 报错（日期超容差，Q13；不依赖被抢光顺序）
-    //   - minDayDiff ≤10 但已被抢光 → 提示（多出 bank 抢不到，非脏数据）
-    const minDiff = minDayDiffToSet(bankRow, refundsForS4);
-    if (refundsForS4.length > 0 && Number.isFinite(minDiff) && minDiff > M.s4.toleranceDays) {
+    // 窗内无可用 refund：判据 = 该 bank 到【冻结全集 refundsForS4】是否存在窗内候选（0≤diff≤21）。
+    //   - 冻结全集空 / 无可解析日期对 → 提示（关联不到，非脏数据）
+    //   - 无窗内候选（含 bank 早于全部退款的负 diff = 时序矛盾脏数据）→ 报错（不依赖被抢光顺序）
+    //   - 有窗内候选但被抢光 → 提示（多出 bank 抢不到，非脏数据）
+    const s4win = classifyS4Window(bankRow, refundsForS4);
+    if (refundsForS4.length > 0 && s4win.hasComparablePair && !s4win.hasInWindowCandidate) {
+      // 真·时序矛盾/超容差：有可比较日期对但无窗内候选（含 bank 早于全部退款的负 diff）→ 报错人工介入。
       unmatchedRows.push(buildUnmatchedBankRow(
         bankRow, RESULT_ERROR,
-        `S4 金额币种已关联但 BillDate 与 valueDate 差异 >${M.s4.toleranceDays} 天，请人工介入`
+        `S4 金额币种已关联但银行账单日期早于退款提交日期或差异 >${M.s4.toleranceDays} 天，请人工介入`
       ));
       warn.push({
         rowId: bankRow._rowId,
         code: 'refund-backfill-date-over-tolerance',
-        message: `银行行（${bankRow._rowId}）S4 日期超 ${M.s4.toleranceDays} 天容差，报错人工介入`
+        message: `银行行（${bankRow._rowId}）S4 日期早于退款提交日期或超 ${M.s4.toleranceDays} 天容差，报错人工介入`
       });
+    } else if (refundsForS4.length > 0 && !s4win.hasComparablePair) {
+      // Fix#5：全无可比较日期对（bank/ro 日期均不可解析）→ 提示而非报错（非脏数据时序矛盾，避免误导文案）。
+      unmatchedRows.push(buildUnmatchedBankRow(
+        bankRow, RESULT_NOTICE,
+        'S4 金额币种已关联但银行账单或退款日期不可解析，未能判定容差，请人工核对'
+      ));
     } else {
+      // 被抢光（有窗内候选但已被其他 bank 消费）/ 冻结全集空 → 提示。
       unmatchedRows.push(buildUnmatchedBankRow(
         bankRow, RESULT_NOTICE, '未能关联到任何退款订单'
       ));
@@ -551,26 +864,47 @@ function pushBankError(bankRow, unmatchedRows, warn, code, info, warnMessage) {
   warn.push({ rowId: bankRow._rowId, code, message: warnMessage });
 }
 
-// bank 到 refund 集合的最小日期差（天）；集合空 / 无法解析 → Infinity
-function minDayDiffToSet(bankRow, refundSet) {
-  const bankDate = toDate(bankRow[M.s4.bankDate]);
-  if (!bankDate) return Number.POSITIVE_INFINITY;
-  let min = Number.POSITIVE_INFINITY;
+// R4：bank 到 refund 集合是否存在「窗内候选」（单向 0 ≤ bank.BillDate − ro.valueDate ≤ toleranceDays）。
+//   去顺序依赖（对冻结全集判定，不随被抢光顺序变）。任一无法解析的日期对跳过；无窗内候选 → false。
+//   ⚠️ bank.BillDate 早于全部退款（diff 全为负）→ false（= 时序矛盾脏数据，走报错），与旧 minDayDiff（abs）方向不同。
+function hasInWindowCandidate(bankRow, refundSet) {
   for (const ro of refundSet) {
-    const roDate = toDate(ro[M.s4.roDate]);
-    if (!roDate) continue;
-    const diff = Math.abs(Math.round((bankDate.getTime() - roDate.getTime()) / MS_PER_DAY));
-    if (diff < min) min = diff;
+    const diff = signedDayDiff(bankRow[M.s4.bankDate], ro[M.s4.roDate]);
+    if (diff !== null && diff >= 0 && diff <= M.s4.toleranceDays) return true;
   }
-  return min;
+  return false;
+}
+
+// R4（Fix#5 codex 复审）：S4 窗判定三态——区分「有可比较日期对但无窗内候选」(真·时序矛盾/超容差→报错)
+//   与「全无可比较日期对」(bank/ro 日期均不可解析→提示，非脏数据时序，不误报「日期早于退款提交日期」)。
+//   hasComparablePair：存在 ≥1 对 signedDayDiff !== null 的 (bank, ro)；
+//   hasInWindowCandidate：存在 diff ∈ [0, toleranceDays] 的候选。
+function classifyS4Window(bankRow, refundSet) {
+  let hasComparablePair = false;
+  let inWindow = false;
+  for (const ro of refundSet) {
+    const diff = signedDayDiff(bankRow[M.s4.bankDate], ro[M.s4.roDate]);
+    if (diff === null) continue;
+    hasComparablePair = true;
+    if (diff >= 0 && diff <= M.s4.toleranceDays) { inWindow = true; break; }
+  }
+  return { hasComparablePair, hasInWindowCandidate: inWindow };
 }
 
 // 消费 + 产回填行（严格 1v1 双向消费）
-function consumeAndBackfill(bankRow, hit, ctx) {
-  const { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows } = ctx;
+//   hitType（O1）：命中所在策略层属性（精准/模糊命中），透传给 buildBackfillRow 写「命中类型」列。
+//   OPEN-7（T5b-1）：若 hit 带 `_depositBizId`（仅 matchJpmUs 命中入金表行时有，且非空）→ 收集进
+//     ctx.hitDepositBizIdSet（去重 Set，runRound5 维护）+ 透传给 buildBackfillRow 标记该回填行来源桥接 BizId。
+//     其他策略层(S1/S4 等)的 hit 无 `_depositBizId` → 跳过 undefined/空，不污染集合（资金红线：来源口径精确）。
+function consumeAndBackfill(bankRow, hit, hitType, ctx) {
+  const { usedBankRowId, usedRefundIdx, refundIdOf, backfillRows, hitDepositBizIdSet } = ctx;
   usedBankRowId.add(bankRow._rowId);
   usedRefundIdx.add(refundIdOf(hit.refundRow));
-  backfillRows.push(buildBackfillRow(hit.refundRow, bankRow, hit.detail));
+  const bridgeBizId = hit && hit._depositBizId;
+  if (hitDepositBizIdSet && bridgeBizId !== undefined && bridgeBizId !== null && bridgeBizId !== '') {
+    hitDepositBizIdSet.add(bridgeBizId);
+  }
+  backfillRows.push(buildBackfillRow(hit.refundRow, bankRow, hit.detail, hitType, bridgeBizId));
 }
 
 // v3.0.0 需求3：退款回填「候选预检」只读 helper（与 c3-gateway-recon-join.js 的 countC3BankCandidates 对称）。
@@ -598,12 +932,35 @@ module.exports = {
   matchS2Mtx,
   matchJpmHk,
   matchJpmUs,
+  // R3：CustomerRef 二跳共享函数 + 入金行双键查找（单测精确覆盖）
+  matchCustomerRefTwoHop,
+  lookupDepositByKeys,
+  // F-PERF：入金表双 Map 索引（单测「索引版与线性版一致」覆盖）
+  buildDepIndex,
+  // R2：S2b 附言包含入金 CustomerRef（单测精确覆盖）
+  matchMemoContainsDepositRef,
   matchS3,
+  // R5/R6：S3b/S3c 二跳匹配器 + 附言提取 helper（单测精确覆盖）
+  matchDraweeNameDate,
+  matchMemoDateAmount,
+  extractFirstCapture,
+  yymmddToDateStr,
   matchS4,
+  // Fix#4/#5（codex 复审）：DTD DMY 明确解析 + S4 窗三态判定（单测精确覆盖）
+  parseDtdDateToken,
+  classifyS4Window,
   resolveHits,
   detailBankToRo,
   detailBankToDeposit,
   buildBackfillRow,
+  // OPEN-7（T5b-1）：跨期重复命中 helper（T5b-2 在 main.js export 阶段 require；纯函数，引擎不读库）
+  normalizeBizIdKey,
+  buildStaleHitReminder,
+  pickStaleHits,
   RESULT_ERROR,
-  RESULT_NOTICE
+  RESULT_NOTICE,
+  // O1/O2：命中类型常量 + S4 固定详情文案（单测精确断言）
+  HIT_TYPE_PRECISE,
+  HIT_TYPE_FUZZY,
+  S4_DETAIL_TEXT
 };
