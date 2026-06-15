@@ -9,6 +9,29 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.0.5（2026-06-15）
+
+v3.0.5 迭代：三大块、约 5 个 PR 串行合入——① 体积 / DB 治理 + 启动优化（Part A 打包瘦身 + Part B Phase0~4：备份治理 + 主库一次性 VACUUM 止血 + acquiring / biz-op / bank-bu 对账 run 级数据迁 per-月侧库 + 启动窗口先行 + 守卫固化）；② 外汇交割表 + 银行入金表「整表覆盖 → 幂等累加」合并导入 + 跨期重复命中提醒（🔴🔴 资金红线）；③ 中台退款订单回填规则增强 R1~R6 + 输出模板扩列 O1~O4（🔴 资金红线）。质量门 `npm run release-check` 全绿（unit 2673 / integration 30 脚本（含 OPEN-7 跨期命中 e2e + acquiring / biz-op / bank-bu 三套侧库 parity byte-for-byte + linked-fx 合并等价性 + refund codex 修复专项）/ smoke 全模块 PASS）。⚠️ 多处资金红线：块 ② 入金表 / 外汇交割表落库由覆盖改累加 + BOC 调拨单号全量重算 + export 新增回写命中标记写路径 + 删除扩展三表（不可逆）；块 ③ R1~R6 匹配规则面扩张 + S4 容差方向收紧 + R6 DTD 美式 MDY 解析 + 模板列契约 14→31；块 ① 三模块对账 run 级数据存储位置变更 + 主库一次性 VACUUM（升级首启执行）。
+
+### 🔴 对外契约变更（升级必读，详见 CHANGELOG v3.0.5「对外契约变更」段）
+
+- ① 外汇交割表 / 银行对账单入金表导入「整表覆盖 → 幂等累加」（块 ②）：外汇交割表（键=交易编号）/ 入金表（键=`BizId`）由每次清空全表改为按幂等键跨次累加（同键覆盖 / 新键追加 / 空键拒入计数）；一次多选 N 文件不再只剩最后一个；不再随导入清空，只保留某批数据须改用「按日期范围删除」；导入完成框显示「覆盖 N / 拒入 N」。🔴 `BizId` 行级唯一性以覆盖计数为观测口径。
+- ② 外汇交割表导入全量重算所有组（含历史组）BOC 调拨单号 + 组号每次重编号（块 ②）：累加语义下任意外汇交割表导入基于全库重算分组 / 调拨单号 / 链接ID 并重编号 1..N；中台调拨订单表两次导入间变动则历史组调拨单号随下次外汇交割表导入刷新；升级首启清空两张 BOC 派生表并引导重导外汇交割表恢复。
+- ③ 「按日期范围删除」由仅网关扩展到三表（块 ②）：删除弹框加「目标表」下拉（网关 / 外汇交割表 / 入金表）；删除后联动重建派生 + 清理悬挂命中标记；不可逆，沿用网关防误删门控。
+- ④ 跨期重复命中提醒（OPEN-7）+ 入金表新增 `last_hit_run` / `last_hit_at` 标记列（块 ②）：累加后历史残留入金行被对账再次命中时输出端追加「疑似历史残留」提醒（口径=所有以入金表为来源的命中：matchJpmUs + R3 / R5 / R6）；🔴 资金对账数据处理导出成功后新增回写入金表命中标记的写路径，写入失败仅 warning 不阻断产物，同批反复运行 / 导出不误报。
+- ⑤ 中台退款订单回填输出模板 14→31 列 + 新增「命中类型」列 + 命中详情文案变化（块 ③）：sheet1 14→31（固定 6 + 银行 10 + 中台 15，银行侧加 `Payment Detail`），sheet2 12→13；新增「命中类型」列（精准 / 模糊）；删「匹配成功:」前缀；S4 改固定文案「命中唯一值:退款提交日期+大账号+金额+币种」——按列序 / 列名解析的外部脚本需适配。
+- ⑥ 中台退款订单回填 S4 容差 10→21 天 + 改单向 + R6 原单日期按美式 MDY 解析（块 ③）：S4 由 ±10 双向改单向 `0 ≤ BillDate − valueDate ≤ 21`（银行早于退款提交日期不再命中、走报错）；R1 正则 `T54SWIC` → `T54[A-Z]{4}`（命中仍严格等值）；新增 R2 / R3 / R5 / R6 四条二跳命中路径。🔴 R6 原单日期 token（`DTD05/21/2026`）按美式 `mm/dd/yyyy`（MDY）解析，建议用真实退款单核验。
+- ⑦ acquiring / biz-op / bank-bu 对账 run 级数据落 per-月侧库（存储位置变化）+ 打包瘦身 build.files 白名单（块 ①）：三模块 run 级批量数据由主库改写各模块侧库 `{userData}/run-data/{模块}/month-{YYYY-MM}.sqlite`，主库只留 run 元数据，对账算法 / 差异表 byte-for-byte 零改动；升级首启执行一次性主库 VACUUM 止血（迁移式幂等、磁盘×1.2 前置检查）。打包 `build.files` 改白名单（仅留 `docs/USER_GUIDE.md`，排除 previews / iterations / analysis / prs / scripts / CHANGELOG / README / app-icon-source）+ `@napi-rs/canvas` 移 devDependencies + `check-dist-size.js` 守卫。
+
+### 新增
+
+- **块 ② 外汇交割表 + 银行对账单入金表「覆盖 → 幂等累加」合并导入**（🔴🔴 资金红线）：bank-deposit 累加全仿 v3.0.1 网关先例（migration `biz_id` 列回填 + 去重 + UNIQUE，65 万行全 SQL 侧幂等可重入；`upsertLinkedBankDeposit` 数组 + 流式内存恒定双路；ADM / BOC bank 派生触发与缓存清理零改动）；fx-settlement 累加（交易编号单键，合计行非数字文本归一为空拒入）+ BOC 派生改 DB 全量重算（新增 `orig_group_no`；per-file scan + offset 续编 = 文件边界=组边界 → 全库 upsert → `orig_group_no` 聚合全局重编号 → 重跑 `matchBocToMidAllocation` 逻辑零改动 → 2.2 后 compact 展示组号连续）；跨期重复命中提醒（入金表新增 `last_hit_run` / `last_hit_at`，export 成功后三步时序回写、失败仅 warning）；删除三表化（IPC 加 `tableKey` 缺省网关、白名单三表各走日期列、删后联动重建 + 清悬挂标记）；前端导入完成框「覆盖 N / 拒入 N」+ 删除弹框「目标表」下拉。
+- **块 ③ 中台退款订单回填规则增强 R1~R6 + 输出扩列 O1~O4**（🔴 资金红线）：基于 387 行真实样本（HK 196 / US 191）。R1 JPM-HK 提取正则 `T54SWIC` → `/T54[A-Z]{4}\d{6}/`（前缀 SWIC / LCIC / CCBT，仍严格等值）；R2 新层 S2b（限 JPM，payNo 二跳取入金 CustomerRef + 守卫黑名单归一 + 长度≥6 + token 边界后与 bank 附言包含匹配，独立成层防拖垮 165 主流）；R3 JPM-HK CustomerRef 二跳回落（`matchCustomerRefTwoHop` 共享）；R4 S4 单向 `0≤BillDate−valueDate≤21`（`signedDayDiff` + 三态 `classifyS4Window`，不动 `dayDiffWithin`）；R5 新层 S3b（Drawee Name + 附言 DESC DATE ↔ 入金 ValueDate sameDay）；R6 新层 S3c（附言 DTD 美式 MDY + FOR 金额含千分位 + 币种 ↔ 入金二跳，抢 S4 前）；O1 新增「命中类型」列（层属性透传）；O2 删「匹配成功:」前缀 + S4 固定文案；O3+O4 `REFUND_BANK_COLUMNS` 9→10 + 新增 `REFUND_RO_COLUMNS` 15 → 模板 14→31 / sheet2 12→13 + 启动断言；depIndex 双 Map 索引（`ordOf` 行优先一致，4 条二跳 O(n)→O(1)）。codex 资金红线复审修复 6 项（depIndex 行序 / R2 token 边界 + 黑名单归一 / R6 金额千分位 / R6 DTD 美式 MDY / R4 三态报错 / depIndex 空批早退）。
+
+### 变更
+
+- **块 ① 体积与启动性能优化（Part A 打包瘦身 + Part B 主库治理 + 启动窗口先行）**（🔴 资金红线 / DB 迁移 / 启动时序）：PR-1 Part A 打包瘦身（`build.files` 白名单封堵宽 glob 复发 + `@napi-rs/canvas` 移 devDependencies + `check-dist-size.js` 守卫 asar≤25MB / 禁止路径 / 必需文件反向保护 + CI 显式 step，安装包 135MB→≤90MB）；PR-2 Phase0 备份治理（保留最近 2 份 + PROTECTED 双保险）+ 主库一次性 VACUUM 止血（迁移式幂等 / 磁盘×1.2 前置检查 / VACUUM 后 `wal_checkpoint(TRUNCATE)`）；PR-3 Phase1 acquiring 三表迁 per-月侧库（新增 `run-data-store.js`，三表 DDL byte-for-byte 平移 + monthKey 正则防注入 + 孤儿扫描，`runCheckCore` git diff 空、parity 19/19）；Phase2 biz-op + bank-bu 推广侧库（防主库从其余模块复发膨胀，算法零改动 parity bank-bu 17/17 + biz-op 16/16，biz-op 月初 T-2 跨月用「月末 D 冗余副本」方案）；Phase3 启动窗口先行（`whenReady` 立即建窗 loading 态 + register*Handlers 上移，点击到可见 ≤300ms 实测建窗 ~90ms / 总 ~713ms，回退开关 `DEFERRED_WINDOW_STARTUP=0`）；Phase4 守卫固化（新增 `rules/run-scoped-data-policy.md` 对账 run 级数据禁写主库规则 + important-variables 升格侧库符号）。
+
 ## v3.0.4（2026-06-11）
 
 v3.0.4 迭代：七块、单 PR 合入 main——① 块 A JSZip 崩点止血 + 链接表报错可见性；② 块 B 挂账 pending 导入迁移大表引擎；③ 块 C 业务OP biz-op 流水侧导入迁移引擎；④ 块 D 银行对账输出三点修复；⑤ 块 E BOC调拨订单修复；⑥ 块 F Payment线下调拨订单回填；⑦ 块 G Charge转outbound 多行行为收紧。质量门 `npm run release-check` 全绿（unit 2390 / integration 含 BOC 集成 + parity pending 45 / biz-op flow 47 + 收单回归锁 45 / smoke 全模块 PASS）。⚠️ 多处资金红线：块 B/C 入库真理源 + pending 6 表覆盖删除链；块 D F1 输出金额符号翻转；块 E 修复行生成 + bank-deposit 白名单 13→14；块 F 向 ReconciliationId 写值；块 G R4 FundType 改写语义收紧。
