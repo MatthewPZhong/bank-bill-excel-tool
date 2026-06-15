@@ -1,8 +1,9 @@
 # Spec — refund-backfill-rules-v2 中台退款订单回填规则增强与模板扩列（R1~R6 / O1~O4）
 
-> status: propose
+> status: implemented
 > owner: pzhong
 > created: 2026-06-15
+> implemented: 2026-06-15（8 commit 全落地：①常量+O3/O4 ②O1/O2 ③R1+R3 ④R2 ⑤R4 ⑥R5/R6 ⑦depIndex ⑧docs；engine/fields/writer/date-utils 改造 + 单测同步；unit 全绿。详见 §10 实施记录）
 > 目标版本：**v3.0.5**（✅ 用户 2026-06-15 拍板：与 `size-startup-optimization`（剩 Phase 2/3/4）+ `linked-fx-bank-deposit-merge-import` 统一并入在产的 v3.0.5 一起发版）。⚠️ 连带项：linked-fx spec 内 OPEN-6 原拍板 3.0.7，本决策**覆盖**为 3.0.5，需同步改其 spec 版本号。
 > **前置依赖**：先完成 `changes/linked-fx-bank-deposit-merge-import`（同 v3.0.5 内排在本 spec 之前），本 spec 在其改造后的入金表 + 命中详情之上施工（见 §2.8）。
 > ⚠️ **版本载荷提醒**：v3.0.5 现集 3 大块——size/DB 治理（迁移+VACUUM，🔴 最高风险）+ linked-fx（🔴🔴 资金红线，OPEN-1~6 已定、OPEN-7a/7b/7c 待拍）+ 本 spec（🔴 资金红线）。代码顺序 = linked-fx → 本 spec（§2.8 前置）。单版本 review 面与回归面很重，发版前 `/check-vars` + `release-check` 必跑全量。
@@ -295,3 +296,26 @@ S4（链后，结构不变）：单向 0 ≤ bank.BillDate − ro.valueDate ≤ 
 - [x] **D10 sheet2 是否扩 ro 字段**：✅ 采纳**不扩**（报错行 1:N 无法承载多笔 ro；team-lead 按推荐默认）；backlog 记「报错行追加候选退款单号列表列」。
 - [x] **D11 387 行样本资产化**：✅ 用户拍板**脱敏子集进 `tests/fixtures/`** 作回放基线（HK 196 / US 191 按规则分桶取代表行；脱敏=对账号/流水号/客户号做保形替换，保留命中关系）。
 - [x] **D12 OPEN-7 命中口径协调（与 linked-fx 联动）**：✅ 已决（2026-06-15）——用户拍板 linked-fx **OPEN-7b = 所有以入金表为来源的命中**（含本 spec R3/R5/R6），即**方案①（口径单一真相在 linked-fx 侧）**。落地契约：linked-fx 建 OPEN-7 提醒机制（last_hit 专用列 + export 后写）；本 spec 落地 R3/R5/R6 时把其命中点**接入 linked-fx 的提醒机制**（命中即写 last_hit，载体对齐 linked-fx OPEN-7c 专用列，不双写）。详见 linked-fx spec §3.6 / 本 spec §2.8-3。
+
+---
+
+## 10. 实施记录（2026-06-15，8 commit；基于含 linked-fx OPEN-7 全改动的 commit bb036eb）
+
+> 全程 `npm run test:unit` 全绿；既有 OPEN-7 hits 测试的 BizId 收集/桥接逻辑一行未改全过（仅 R4 方向重造的 S4 日期夹具 + O2 改文案后的 S4 详情 proxy 同步，属规则面联动，非回归）。基线 2576 → 终态 2635 用例。
+
+| commit | 内容 | 关键文件 |
+|---|---|---|
+| ① 常量+O3/O4 | `REFUND_BANK_COLUMNS` 9→10（+`Payment Detail`）；新增 `REFUND_RO_COLUMNS`(15)；`REFUND_TEMPLATE_HEADERS` 14→31（固定6+银行10+中台15）；启动断言 `REFUND_RO_COLUMNS ⊆ ZHONGTAI_REFUND_ORDER_SIGNATURE`；`buildBackfillRow` 加 ro 段循环；writer 注释同步（功能码零改）；`linked-table-repository.js` stale 注释修正（1-based 第 18 列） | fields/engine/writer/linked-table-repository + 2 测试 |
+| ② O1/O2 | `HIT_TYPE_PRECISE/FUZZY` 常量；`strategyChain` 裸函数→`{run,hitType}`；`consumeAndBackfill`/`buildBackfillRow` 透传 hitType（写「命中类型」列，参数插在 `bridgeDepositBizId` 之前不破坏 OPEN-7 断言）；删 detail「匹配成功:」前缀；`S4_DETAIL_TEXT` 固定文案（底层仍 valueDate） | engine + 3 测试 |
+| ③ R1+R3 | `T54SWIC_FEATURE`→`T54_REFUND_RE=/T54[A-Z]{4}\d{6}/g`（实测前缀 SWIC/LCIC/CCBT）；抽 `matchCustomerRefTwoHop` 共享二跳（`matchJpmUs` 薄壳）；`matchJpmHk` T54 未中→二跳回落（R3，同层 L2）；`lookupDepositByKeys` 双键 OR；jpm 键中性命名（`usDepositKeys`→`depositKeys` 等，D8） | fields/engine + 2 测试 |
+| ④ R2 | 新层 S2b（`matchMemoContainsDepositRef`，L3，限 JPM）：payNo 二跳取入金 CustomerRef + 守卫（黑名单 `NOTPROVIDED/NONREF` 大写归一 + 长度≥6）后与 bank 附言（`Payment Detail`+`Extra Information`）包含匹配；独立成层（等值层先结清，防同层反向多笔拖垮 165 主流）；含分层保护断言 | fields/engine + 2 测试 |
+| ⑤ R4 | `engine-date-utils` 新增 `signedDayDiff`（保留方向，不动 `dayDiffWithin`/fund-transfer 共用）；`matchS4` 改单向 `0≤BillDate−valueDate≤21`（去 abs，diff 升序）；`toleranceDays` 10→21；`minDayDiffToSet`→`hasInWindowCandidate`（无窗内候选含负 diff→报错，被抢光→提示）；报错文案改「早于退款提交日期或差异>21天」；S4 既有夹具方向重造 + 边界 diff=0/21/22/−1 | fields/engine/date-utils + 3 测试 |
+| ⑥ R5/R6 | S3b（`matchDraweeNameDate`，L5 精准）= Drawee Name 启用 + 附言 DESC DATE(YYMMDD→20YY)↔入金 ValueDate sameDay 二跳；S3c（`matchMemoDateAmount`，L6 模糊）= 附言 DTD(dd/mm/yyyy)+FOR(USD\|AMT 金额)+币种 USD 三 token↔入金日期/金额(分比对)/币种二跳；`extractFirstCapture`/`yymmddToDateStr` helper；正则常量挂 `M.s3b`/`M.s3c`（null 即整层 no-op 防御）；正则按真实原件 D1/D4 定稿 | fields/engine + 2 测试 |
+| ⑦ depIndex | `buildDepIndex` 入金表双 Map 索引（`byReconId`/`byChannelOrderNo`，归一键，空键不入，同键多值保留插入序）入口一次性构建经 ctx 透传 4 条二跳路径复用 → O(n)find 降 O(1)（入金表 65 万行）；`lookupDepositByKeys` 索引/线性双路径 byte 级一致 + 断言 | engine + 1 测试 |
+| ⑧ docs | spec status propose→implemented + 引擎文件头注释更新（R1~R6 链路图 / O1~O4 / hitDepositBizIds 返回） | spec/engine |
+
+**🔴 资金红线复核要点（实施期已守）**：① 所有二跳/包含命中收口仍为等值/精准（提取只扩候选集，命中靠等值/分比对/日期等日拦截，误提≠误配）；② S4 方向收紧后 bank 早于 valueDate（负 diff）一律不命中、走报错（旧 ±abs 会误命中）；③ O2 改文案/O1 加列不动底层比对字段（S4 仍比 ro.valueDate）；④ buildBackfillRow hitType 参数插在 bridgeDepositBizId 之前，OPEN-7 `_bridgeDepositBizId` 内部字段与 `hitDepositBizIds` 收集逻辑零改动。
+
+**⚠️ R4/O2 联动的既有测试同步说明（非回归）**：S4 改单向后，`r5-refund-order-backfill.test.js` 与 `r5-refund-order-backfill-open7-hits.test.js` 中「bank 早于 ro.valueDate」的 S4 日期夹具按 spec §F-R4「方向重造」改为 bank 晚于 valueDate；OPEN-7 hits 测试中确认走 S4 的 detail proxy 因 O2 改固定串由 `/valueDate/` 同步为 `/命中唯一值:退款提交日期/`——均为规则面变更的夹具适配，OPEN-7 的 BizId 收集/桥接断言一行未改。
+
+**开放问题收口**：R5/R6 正则（D1/D4）已据真实原件定稿（`DESC DATE`/`DTD`+`FOR`），本期完整实现（非框架）；no-op 防御仍保留（正则常量为 null 即整层跳过），便于未来如发现新附言形态时安全关停。samples 资产化（D11）/ sheet2 扩 ro 字段（D10）/ S2b 放开非 JPM（D7）等记 backlog，本期不做。

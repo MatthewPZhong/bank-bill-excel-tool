@@ -1,23 +1,33 @@
 // v2.1.16-beta.4 ③ R5 场景4「中台退款订单回填」引擎（🔴 资金红线）
 // PRD-中台退款订单回填-v2.1.16-beta.3 §5.1~§5.5 + §九（12 条已确认决议）
 // TECH_DESIGN-中台退款订单回填-v2.1.16-beta.3 §3.2/§3.3
+// refund-backfill-rules-v2（v3.0.5）：R1~R6 命中规则增强 + O1~O4 输出扩列（详见 changes/refund-backfill-rules-v2/spec.md）。
 //
 // 业务语义：
 //   银行 FundType=Ach Return（且 FundType 未被 R4 改写）行 ↔ 中台退款订单 状态=SUBMITTED 行，
 //   按「渠道大账号(MerchantId↔银行大账号) + 金额(|Credit-Debit|↔退款金额) + 币种」三元组唯一值分组；
-//   同一唯一值下按 4 基数 × 4 策略矩阵（S1 渠道流水号 → S2 附言 MTX → S3 付款人/卡号/虚拟卡号 → S4 金额币种日期）
-//   命中即停回填，产出独立的回填模板行集合 + 未匹配/报错行集合（不改 bankRows）。
+//   同一唯一值下按策略链批量解析（命中即停，精准层 L1~L5 全排在模糊层 L6/S4 之前 → 精准优先由层序保证）：
+//     L1 S1   渠道流水号等值                                              [精准]
+//     L2 S2   附言层：JPM-HK T54[A-Z]{4} 宽正则(R1) ↔ 打款流水号等值 / 未中→CustomerRef 二跳(R3)；
+//             JPM-US CustomerRef 二跳；JPM 链空/非 JPM → 常规 MTX 包含             [精准]
+//     L3 S2b  附言包含入金 CustomerRef（限 JPM，等值层后）(R2)             [精准]
+//     L4 S3   付款人/卡号/虚拟卡号按位等值                                  [精准]
+//     L5 S3b  Drawee Name + 附言 DESC DATE ↔ 入金 ValueDate 二跳(R5)        [精准]
+//     L6 S3c  附言原单日期(DTD)+金额(FOR)+币种 ↔ 入金表二跳(R6)             [模糊]
+//   S4（链后）：单向 0 ≤ bank.BillDate − ro.valueDate ≤ 21(R4)             [模糊]
+//   产出独立的回填模板行集合 + 未匹配/报错行集合（不改 bankRows）。
 //
-// 跨表字段映射全部走 refund-backfill-fields.js（显式映射，绝不假设同名）。
+// 跨表字段映射全部走 refund-backfill-fields.js（显式映射，绝不假设同名）。4 条二跳路径共用入金表双 Map 索引(depIndex)。
 //
 // 纯函数：入参 rows 数组，不读 DB/session（由 main.js 注入）；与场景2/3 独立 usedBankRowId，不串池。
 //   签名 runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, options={})
-//   返回 { backfillRows, unmatchedRows, modifications:[], warnings }
-//     backfillRows  —— sheet1 回填模板行（A~N，含 E 列命中详情 + F~N 银行 9 字段）
+//   返回 { backfillRows, unmatchedRows, modifications:[], warnings, hitDepositBizIds }
+//     backfillRows  —— sheet1 回填模板行（O1/O3/O4：31 列 = 固定 6 列含「命中类型」+ 银行 10 字段 + 中台 15 字段）
 //     unmatchedRows —— sheet2 行（含「结果类型」= 报错-人工介入 / 未匹配-提示 + 信息列）
 //     modifications —— 恒 []（本引擎不改 bankRows，保留与场景2/3 返回对称性）
+//     hitDepositBizIds —— OPEN-7：本批以入金表为来源回填成功的桥接 BizId 去重数组（含 R3/R5/R6 二跳命中）
 //
-// ⚠️ 资金红线：列名映射 / 基数判定 / 多笔报错-提示区分 任一错位都会写错回填。
+// ⚠️ 资金红线：列名映射 / 命中规则 / 命中类型 / 多笔报错-提示区分 任一错位都会写错回填（误改退款单状态 SUCCESS）。
 
 const {
   makeWarningCollector,
