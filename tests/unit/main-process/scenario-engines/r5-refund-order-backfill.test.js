@@ -30,11 +30,11 @@ const {
   HIT_TYPE_FUZZY,
   S4_DETAIL_TEXT
 } = E;
-const { MTX_FEATURE, T54SWIC_FEATURE } = require('../../../../src/constants/refund-backfill-fields');
+const { MTX_FEATURE, T54_REFUND_RE } = require('../../../../src/constants/refund-backfill-fields');
 const { buildFeatureRegex } = require('../../../../src/main-process/scenario-engines/c1-extract-recon-id');
 
 const MTX_RE = buildFeatureRegex(MTX_FEATURE);
-const T54SWIC_RE = buildFeatureRegex(T54SWIC_FEATURE);
+const T54_RE = T54_REFUND_RE; // R1：直写正则常量（替代旧 buildFeatureRegex(T54SWIC_FEATURE)）
 
 // ---- 夹具 --------------------------------------------------------------
 
@@ -389,6 +389,86 @@ test.describe('④ JPM-US', () => {
 });
 
 // ======================================================================
+// R1 JPM-HK 提取正则放宽（T54SWIC → T54[A-Z]{4}）
+// ======================================================================
+test.describe('R1：JPM-HK 三前缀 T54SWIC/T54LCIC/T54CCBT 各回放命中 + 旧值回归 + 收口', () => {
+  function hkBank(extra) {
+    return bank({ _rowId: 'b1', Channel: 'JPM', '地区': 'HK', 'Extra Information': extra });
+  }
+  test('T54SWIC（旧前缀，回归）→ 命中', () => {
+    const res = run([hkBank('//T54SWIC494447//')], [refund({ '银行打款流水号': 'T54SWIC494447' })]);
+    assert.equal(res.backfillRows.length, 1);
+  });
+  test('T54LCIC（新前缀 LC）→ 命中（原 T54SWIC 锁死时会漏）', () => {
+    const res = run([hkBank('//T54LCIC222333//')], [refund({ '银行打款流水号': 'T54LCIC222333' })]);
+    assert.equal(res.backfillRows.length, 1);
+  });
+  test('T54CCBT（新前缀 CC）→ 命中', () => {
+    const res = run([hkBank('//T54CCBT444555//')], [refund({ '银行打款流水号': 'T54CCBT444555' })]);
+    assert.equal(res.backfillRows.length, 1);
+  });
+  test('提取到 T54LCIC 但 ro 无等值 → 不命中（等值收口；本例无 S4 日期容差兜底）', () => {
+    const res = run(
+      [hkBank('//T54LCIC222333//')],
+      [refund({ '银行打款流水号': 'T54LCIC999999', 'valueDate': '2030-01-01' })] // 日期超容差 + 流水号不等
+    );
+    assert.equal(res.backfillRows.length, 0);
+  });
+});
+
+// ======================================================================
+// R3 JPM-HK CustomerRef 二跳回落（T54 未中 → 复用 US 二跳）
+// ======================================================================
+test.describe('R3：HK 分支 CustomerRef 二跳回落', () => {
+  test('HK FPS 形态：T54 未提到 → CustomerRef 二跳（dep.ReconId==ro 打款流水号 ∧ dep.CustomerRef==bank.CustomerRef）→ 回填', () => {
+    const b = [bank({
+      _rowId: 'b1', Channel: 'JPM', '地区': 'HK',
+      CustomerRef: 'J-CR-1', 'Extra Information': 'no t54 token here'
+    })];
+    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAYNO-HK1' })];
+    const dep = [deposit({ ReconciliationId: 'PAYNO-HK1', CustomerRef: 'J-CR-1' })];
+    const res = run(b, r, dep);
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-A');
+    assert.match(res.backfillRows[0]['匹配命中详情'], /银行对账单入金表/);
+  });
+
+  test('HK 二跳 ChannelOrderNo 第二键（OR 第二支）→ 回填', () => {
+    const b = [bank({ _rowId: 'b1', Channel: 'JPM', '地区': 'HK', CustomerRef: 'J-CR-2' })];
+    const r = [refund({ '银行打款流水号': 'PAYNO-HK2' })];
+    const dep = [deposit({ ChannelOrderNo: 'PAYNO-HK2', CustomerRef: 'J-CR-2' })];
+    const res = run(b, r, dep);
+    assert.equal(res.backfillRows.length, 1);
+  });
+
+  test('HK 链顺序：T54 命中优先于二跳（同 bank 既有 T54 又能二跳命中不同 ro → 走 T54）', () => {
+    // bank 提取到 T54SWIC494447 → 命中 ro-A（银行打款流水号=T54SWIC494447）；
+    //   同时 CustomerRef 二跳本可命中 ro-B，但 T54 等值优先 → 命中 ro-A。
+    const b = [bank({
+      _rowId: 'b1', Channel: 'JPM', '地区': 'HK',
+      CustomerRef: 'J-CR-3', 'Extra Information': '//T54SWIC494447//'
+    })];
+    const r = [
+      refund({ '流水号': 'SN-T54', '银行打款流水号': 'T54SWIC494447' }),
+      refund({ '流水号': 'SN-2HOP', '银行打款流水号': 'PAYNO-HK3' })
+    ];
+    const dep = [deposit({ ReconciliationId: 'PAYNO-HK3', CustomerRef: 'J-CR-3' })];
+    const res = run(b, r, dep);
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-T54', 'T54 等值优先于 CustomerRef 二跳');
+  });
+
+  test('matchCustomerRefTwoHop 子函数：直接调用命中 + _depositBizId 携带', () => {
+    const b = bank({ _rowId: 'b1', Channel: 'JPM', '地区': 'HK', CustomerRef: 'CR-Z' });
+    const r = refund({ '银行打款流水号': 'PAYNO-Z' });
+    const dep = [deposit({ BizId: 'BIZ-Z', ReconciliationId: 'PAYNO-Z', CustomerRef: 'CR-Z' })];
+    const hits = E.matchCustomerRefTwoHop(b, [r], dep);
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0]._depositBizId, 'BIZ-Z');
+  });
+});
+
+// ======================================================================
 // ⑤ 1v1 双向消费
 // ======================================================================
 test.describe('⑤ 1v1 双向消费', () => {
@@ -579,8 +659,14 @@ test.describe('子函数', () => {
     assert.deepEqual(extractFeature(txt, MTX_RE), ['MTX1234567890123456789']);
   });
 
-  test('extractFeature T54SWIC 含 // 直接命中', () => {
-    assert.deepEqual(extractFeature('//T54SWIC494447//ABC', T54SWIC_RE), ['T54SWIC494447']);
+  test('extractFeature T54SWIC 含 // 直接命中（R1 宽正则）', () => {
+    assert.deepEqual(extractFeature('//T54SWIC494447//ABC', T54_RE), ['T54SWIC494447']);
+  });
+
+  test('extractFeature R1 三前缀 T54SWIC/T54LCIC/T54CCBT 均命中', () => {
+    assert.deepEqual(extractFeature('T54SWIC494447', T54_RE), ['T54SWIC494447']);
+    assert.deepEqual(extractFeature('//T54LCIC100200//', T54_RE), ['T54LCIC100200']);
+    assert.deepEqual(extractFeature('x T54CCBT300400 y', T54_RE), ['T54CCBT300400']);
   });
 
   test('resolveHits：0→continue / 1→backfill / >1→error-manual', () => {

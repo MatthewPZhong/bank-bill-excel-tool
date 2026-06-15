@@ -18,7 +18,7 @@ const {
   REFUND_RO_COLUMNS,
   REFUND_TEMPLATE_HEADERS,
   MTX_FEATURE,
-  T54SWIC_FEATURE
+  T54_REFUND_RE
 } = require('../../../src/constants/refund-backfill-fields');
 const { BANK_STATEMENT_FIELDS } = require('../../../src/constants/bank-statement-fields');
 const { ZHONGTAI_REFUND_ORDER_SIGNATURE } = require('../../../src/constants/table-signatures');
@@ -171,7 +171,7 @@ test.describe('REFUND_BACKFILL_FIELD_MAP — 跨表映射单一真相', () => {
     assert.equal(REFUND_BACKFILL_FIELD_MAP.s4.toleranceDays, 10);
   });
 
-  test('JPM 映射（✅Q7/Q8）：HK 单字段=银行打款流水号 / US 二跳键 OR + CustomerRef', () => {
+  test('JPM 映射（✅Q7/Q8 + D8 中性命名）：HK 单字段=银行打款流水号 / 二跳键 OR + CustomerRef', () => {
     const jpm = REFUND_BACKFILL_FIELD_MAP.jpm;
     assert.equal(jpm.channelValue, 'JPM');
     assert.equal(jpm.regionField, '地区');
@@ -180,9 +180,14 @@ test.describe('REFUND_BACKFILL_FIELD_MAP — 跨表映射单一真相', () => {
     assert.deepEqual([...jpm.hkCleanFields], ['Extra Information', 'Payment Detail']);
     assert.equal(jpm.hkRoKey, '银行打款流水号');
     assert.equal(jpm.usRoKey, '银行打款流水号');
-    assert.deepEqual([...jpm.usDepositKeys], ['ReconciliationId', 'ChannelOrderNo']);
-    assert.equal(jpm.usDepositTake, 'CustomerRef');
-    assert.equal(jpm.usBankCompare, 'CustomerRef');
+    // D8：us 前缀名改中性名（HK R3 复用同一套二跳）
+    assert.deepEqual([...jpm.depositKeys], ['ReconciliationId', 'ChannelOrderNo']);
+    assert.equal(jpm.depositTake, 'CustomerRef');
+    assert.equal(jpm.bankCompare, 'CustomerRef');
+    // 旧名应已移除
+    assert.equal(jpm.usDepositKeys, undefined);
+    assert.equal(jpm.usDepositTake, undefined);
+    assert.equal(jpm.usBankCompare, undefined);
   });
 
   test('筛选映射（§5.1.2）：SUBMITTED / Ach Return', () => {
@@ -199,8 +204,25 @@ test.describe('提取参数', () => {
     assert.ok(Object.isFrozen(MTX_FEATURE));
   });
 
-  test('T54SWIC_FEATURE = {T54SWIC, 6, 13} → /T54SWIC\\d{6}/', () => {
-    assert.deepEqual({ ...T54SWIC_FEATURE }, { featureCode: 'T54SWIC', digitCount: 6, totalLength: 13 });
-    assert.ok(Object.isFrozen(T54SWIC_FEATURE));
+  test('R1：T54_REFUND_RE 形态 = /T54[A-Z]{4}\\d{6}/g（替代旧 T54SWIC_FEATURE）', () => {
+    assert.equal(T54_REFUND_RE.source, 'T54[A-Z]{4}\\d{6}');
+    assert.ok(T54_REFUND_RE.global, '应为 global 正则（matchAll 用）');
+  });
+
+  test('R1：旧值 T54SWIC494867 仍被新正则匹配（存量零漏配 / 真子集）', () => {
+    const re = new RegExp(T54_REFUND_RE.source, 'g');
+    assert.deepEqual('xx T54SWIC494867 yy'.match(re), ['T54SWIC494867']);
+  });
+
+  test('R1：T54LCIC/T54CCBT 新前缀也命中（实测三前缀 SW/LC/CC）', () => {
+    const re1 = new RegExp(T54_REFUND_RE.source, 'g');
+    assert.deepEqual('//T54LCIC123456//'.match(re1), ['T54LCIC123456']);
+    const re2 = new RegExp(T54_REFUND_RE.source, 'g');
+    assert.deepEqual('T54CCBT654321 tail'.match(re2), ['T54CCBT654321']);
+  });
+
+  test('R1：T54 + 3 字母（位数不足）不匹配（形态严格 4 字母 6 数字）', () => {
+    const re = new RegExp(T54_REFUND_RE.source, 'g');
+    assert.equal('T54SWI494867'.match(re), null); // SWI = 3 字母 → 不命中
   });
 });

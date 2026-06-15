@@ -70,13 +70,15 @@ const REFUND_BACKFILL_FIELD_MAP = Object.freeze({
   // —— S4 金额币种日期 ——
   s4: Object.freeze({ bankDate: 'BillDate', roDate: 'valueDate', toleranceDays: 10 }),
   // —— JPM（§5.5）——
+  //   refund-backfill-rules-v2 D8：CustomerRef 二跳键/取值/比对字段改中性名（HK R3 复用同一套二跳，us 前缀名不副实）。
   jpm: Object.freeze({
     channelValue: 'JPM', regionField: '地区', hkRegion: 'HK', usRegion: 'US',
     hkCleanFields: Object.freeze(['Extra Information', 'Payment Detail']),
-    hkRoKey: '银行打款流水号',                                  // ✅Q7：HK 提取 T54SWIC 后仅与此单字段等值匹配
-    usRoKey: '银行打款流水号',
-    usDepositKeys: Object.freeze(['ReconciliationId', 'ChannelOrderNo']), // ✅Q8：OR（任一字段 == payNo 即命中）
-    usDepositTake: 'CustomerRef', usBankCompare: 'CustomerRef'
+    hkRoKey: '银行打款流水号',                                  // ✅Q7：HK 提取 T54[A-Z]{4} 后仅与此单字段等值匹配
+    usRoKey: '银行打款流水号',                                  // JPM-US 二跳起点（= 银行打款流水号）
+    // 二跳共用（matchCustomerRefTwoHop：US + R3 HK 回落）：入金行键 OR + 取 CustomerRef + 与 bank CustomerRef 比对。
+    depositKeys: Object.freeze(['ReconciliationId', 'ChannelOrderNo']), // ✅Q8：OR（任一字段 == payNo 即命中）
+    depositTake: 'CustomerRef', bankCompare: 'CustomerRef'
   }),
   // —— 筛选（§5.1.2）——
   filter: Object.freeze({
@@ -110,9 +112,14 @@ const REFUND_TEMPLATE_HEADERS = Object.freeze([
   ...REFUND_RO_COLUMNS     // 中台退款订单 15 字段原数据（取配对 ro 原值）
 ]);
 
-// 提取参数（复用 C1 buildFeatureRegex；实测见 TECH §五）
+// 提取参数（MTX 仍复用 C1 buildFeatureRegex；实测见 TECH §五）
 const MTX_FEATURE = Object.freeze({ featureCode: 'MTX', digitCount: 19, totalLength: 22 });       // → /MTX\d{19}/
-const T54SWIC_FEATURE = Object.freeze({ featureCode: 'T54SWIC', digitCount: 6, totalLength: 13 }); // → /T54SWIC\d{6}/
+
+// refund-backfill-rules-v2 R1：JPM-HK「银行打款流水号」提取正则放宽（T54SWIC → T54+4字母+6数字）。
+//   形态 = T54 + 4 字母 + 6 数字，总长 13；2026-06-15 真实数据实测前缀 T54SWIC/T54LCIC/T54CCBT（中段 SW/LC/CC，尾段 IC/BT）。
+//   ⚠️ buildFeatureRegex 只能生成「[A-Z]{n} 前缀 + 特征码 + 数字」形态，表达不了「T54 + 任意 4 字母」→ 直写正则常量（不走 builder）。
+//   旧 /T54SWIC\d{6}/ 是本正则真子集 → 存量零漏配；放宽只扩提取候选集，命中仍严格等值收口（matchJpmHk 不变）。
+const T54_REFUND_RE = /T54[A-Z]{4}\d{6}/g;
 
 // 启动期断言①：REFUND_BANK_COLUMNS 10 字段全部 ∈ BANK_STATEMENT_FIELDS（防常量漂移，故仍 require 全集）。
 //   任一漂移（重命名银行列 / 误把不存在的列放进银行段）→ 立刻 throw，避免静默回填错列。
@@ -138,5 +145,6 @@ module.exports = {
   REFUND_RO_COLUMNS,
   REFUND_TEMPLATE_HEADERS,
   MTX_FEATURE,
-  T54SWIC_FEATURE
+  // R1：JPM-HK 提取正则常量（直写，替代旧 T54SWIC_FEATURE）
+  T54_REFUND_RE
 };

@@ -31,14 +31,15 @@ const {
   REFUND_BANK_COLUMNS,
   REFUND_RO_COLUMNS,
   MTX_FEATURE,
-  T54SWIC_FEATURE
+  T54_REFUND_RE
 } = require('../../constants/refund-backfill-fields');
 
 const MS_PER_DAY = 86400000;
 
 // 提取 regex 模板（仅当模板用，每次提取前 new RegExp(source,'g') 重建，避免 lastIndex 副作用 —— 同 C1）
 const MTX_RE = buildFeatureRegex(MTX_FEATURE);          // /MTX\d{19}/g
-const T54SWIC_RE = buildFeatureRegex(T54SWIC_FEATURE);  // /T54SWIC\d{6}/g
+// R1：JPM-HK 提取正则（T54+4字母+6数字；直写常量，extractFeature 仅用 .source 重建天然兼容）
+const T54_RE = T54_REFUND_RE;                           // /T54[A-Z]{4}\d{6}/g
 
 // 结果类型（sheet2「结果类型」列两种值；两类输出禁混）
 const RESULT_ERROR = '报错-人工介入';
@@ -210,56 +211,27 @@ function matchS2Mtx(bankRow, refundCands) {
   return hits;
 }
 
-// S2 JPM-HK：清洗 // → 提 T54SWIC → 仅与 refund「银行打款流水号」单字段等值（✅Q7）
-function matchJpmHk(bankRow, refundCands) {
-  const clean = (v) => normalizeCellValue(v).split('//').join('');
-  const swicList = [];
-  for (const field of M.jpm.hkCleanFields) {
-    for (const swic of extractFeature(clean(bankRow[field]), T54SWIC_RE)) {
-      if (!swicList.includes(swic)) swicList.push(swic);
-    }
-  }
-  if (swicList.length === 0) return [];
-  const hits = [];
-  for (const ro of refundCands) {
-    const payNo = normalizeCellValue(ro[M.jpm.hkRoKey]);
-    if (payNo === '') continue;
-    const hitSwic = swicList.find((swic) => swic === payNo);
-    if (hitSwic) {
-      // 命中详情：银行 Extra Information/Payment Detail 提取值 ↔ refund order 银行打款流水号
-      hits.push({
-        refundRow: ro,
-        detail: detailBankToRo(M.jpm.hkCleanFields.join('/'), hitSwic, M.jpm.hkRoKey, payNo)
-      });
-    }
-  }
-  return hits;
-}
-
-// S2 JPM-US：refund「银行打款流水号」=payNo → 入金表(ReconId OR ChannelOrderNo)==payNo → 取 CustomerRef → 比对 bank CustomerRef（✅Q8）
-function matchJpmUs(bankRow, refundCands, depositRows) {
-  const bankRef = normalizeCellValue(bankRow[M.jpm.usBankCompare]);
+// R3 共享二跳：refund「银行打款流水号」=payNo → 入金表行(ReconId OR ChannelOrderNo == payNo) → 取 dep.CustomerRef
+//   → 与 bank.CustomerRef 严格等值（✅Q8）。US 与 HK 回落复用同一套（D8 中性命名）。
+//   命中详情用 detailBankToDeposit（两句式·入金表版）；OPEN-7：hit 附被命中入金表行的 BizId（_depositBizId 内部字段）。
+//   ⚠️ 资金红线：收口仍是「dep 行 ↔ ro 打款流水号等值 ∧ dep.CustomerRef ↔ bank.CustomerRef 等值」，无放松。
+//   depIndex（commit ⑦ 注入）：若传 depIndex 则 O(1) Map 查双键并集；否则回落 depositRows 线性扫（行为一致）。
+function matchCustomerRefTwoHop(bankRow, refundCands, depositRows, depIndex) {
+  const bankRef = normalizeCellValue(bankRow[M.jpm.bankCompare]);
   if (bankRef === '') return [];
   const deps = Array.isArray(depositRows) ? depositRows : [];
   const hits = [];
   for (const ro of refundCands) {
     const payNo = normalizeCellValue(ro[M.jpm.usRoKey]);
     if (payNo === '') continue;
-    const dep = deps.find((d) =>
-      M.jpm.usDepositKeys.some((k) => {
-        const dv = normalizeCellValue(d[k]);
-        return dv !== '' && dv === payNo;
-      }));
+    const dep = lookupDepositByKeys(payNo, deps, depIndex);
     if (!dep) continue;
-    const depRef = normalizeCellValue(dep[M.jpm.usDepositTake]);
+    const depRef = normalizeCellValue(dep[M.jpm.depositTake]);
     if (depRef !== '' && depRef === bankRef) {
-      // 命中详情：银行 CustomerRef ↔ 入金表 CustomerRef（两句式·入金表版）
-      // OPEN-7（T5b-1）：附被命中入金表行的 BizId（BANK_DEPOSIT_FIELDS[0]，下划线内部字段，不进对外回填模板列）。
-      //   归一 = String().trim()（与仓储 normalizeKey 字节一致；引擎保持纯函数不 require 仓储取常量/键口径）。
-      //   仅 matchJpmUs 的 hit 带此字段 → consumeAndBackfill 收集时其他策略层(S1/S4 等)的 hit 无此字段，天然不污染。
       hits.push({
         refundRow: ro,
-        detail: detailBankToDeposit(M.jpm.usBankCompare, bankRef, M.jpm.usDepositTake, depRef),
+        detail: detailBankToDeposit(M.jpm.bankCompare, bankRef, M.jpm.depositTake, depRef),
+        // OPEN-7（T5b-1）：归一 = String().trim()（与仓储 normalizeKey 字节一致；引擎纯函数不 require 仓储）。
         _depositBizId: normalizeBizIdKey(dep.BizId)
       });
     }
@@ -267,16 +239,69 @@ function matchJpmUs(bankRow, refundCands, depositRows) {
   return hits;
 }
 
-// S2 综合：Channel=JPM 时先跑 JPM 链（HK/US 按地区），未命中回落常规 MTX；非 JPM 直接常规 MTX
-function matchS2(bankRow, refundCands, depositRows) {
+// 入金行双键 OR 查找（ReconId / ChannelOrderNo == payNo）。
+//   depIndex 存在 → byReconId/byChannelOrderNo 两 Map 并集首条；否则 depositRows 线性扫（结果一致）。
+function lookupDepositByKeys(payNo, deps, depIndex) {
+  if (depIndex && depIndex.byReconId && depIndex.byChannelOrderNo) {
+    const byRecon = depIndex.byReconId.get(payNo);
+    if (byRecon && byRecon.length > 0) return byRecon[0];
+    const byCh = depIndex.byChannelOrderNo.get(payNo);
+    if (byCh && byCh.length > 0) return byCh[0];
+    return null;
+  }
+  return deps.find((d) =>
+    M.jpm.depositKeys.some((k) => {
+      const dv = normalizeCellValue(d[k]);
+      return dv !== '' && dv === payNo;
+    })) || null;
+}
+
+// S2 JPM-HK：清洗 // → 提 T54[A-Z]{4}（R1 放宽）→ 与 refund「银行打款流水号」单字段等值（✅Q7）；
+//   未提到 / 未等值 → R3 回落 CustomerRef 二跳（同层内，仍属 L2）。
+function matchJpmHk(bankRow, refundCands, depositRows, depIndex) {
+  const clean = (v) => normalizeCellValue(v).split('//').join('');
+  const swicList = [];
+  for (const field of M.jpm.hkCleanFields) {
+    for (const swic of extractFeature(clean(bankRow[field]), T54_RE)) {
+      if (!swicList.includes(swic)) swicList.push(swic);
+    }
+  }
+  if (swicList.length > 0) {
+    const hits = [];
+    for (const ro of refundCands) {
+      const payNo = normalizeCellValue(ro[M.jpm.hkRoKey]);
+      if (payNo === '') continue;
+      const hitSwic = swicList.find((swic) => swic === payNo);
+      if (hitSwic) {
+        // 命中详情：银行 Extra Information/Payment Detail 提取值 ↔ refund order 银行打款流水号
+        hits.push({
+          refundRow: ro,
+          detail: detailBankToRo(M.jpm.hkCleanFields.join('/'), hitSwic, M.jpm.hkRoKey, payNo)
+        });
+      }
+    }
+    if (hits.length > 0) return hits;
+    // T54 提到但无等值 → 继续 R3 二跳回落（不直接返回空）。
+  }
+  // R3：HK 分支 T54 未中 → CustomerRef 二跳回落（复用 US 二跳逻辑）。
+  return matchCustomerRefTwoHop(bankRow, refundCands, depositRows, depIndex);
+}
+
+// S2 JPM-US：CustomerRef 二跳（薄壳，复用 matchCustomerRefTwoHop）。
+function matchJpmUs(bankRow, refundCands, depositRows, depIndex) {
+  return matchCustomerRefTwoHop(bankRow, refundCands, depositRows, depIndex);
+}
+
+// S2 综合：Channel=JPM 时先跑 JPM 链（HK/US 按地区，含 R3 二跳回落），未命中回落常规 MTX；非 JPM 直接常规 MTX
+function matchS2(bankRow, refundCands, depositRows, depIndex) {
   const isJpm = normalizeCellValue(bankRow.Channel) === M.jpm.channelValue;
   if (isJpm) {
     const region = normalizeCellValue(bankRow[M.jpm.regionField]);
     let jpmHits = [];
     if (region === M.jpm.hkRegion) {
-      jpmHits = matchJpmHk(bankRow, refundCands);
+      jpmHits = matchJpmHk(bankRow, refundCands, depositRows, depIndex);
     } else if (region === M.jpm.usRegion) {
-      jpmHits = matchJpmUs(bankRow, refundCands, depositRows);
+      jpmHits = matchJpmUs(bankRow, refundCands, depositRows, depIndex);
     }
     if (jpmHits.length > 0) return jpmHits;
     // JPM 链未命中 → 回落常规 MTX 包含匹配
@@ -468,7 +493,7 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
 //   - 任一方向多笔 → 涉事 bank 报错-人工介入、不回填，相关 refund 锁定（Q14 反向多笔 / Q15 锁定退出 S4）。
 function runStrategiesForGroup(ctx) {
   const {
-    bankGroup, refundGroup, depositRows,
+    bankGroup, refundGroup, depositRows, depIndex,
     usedBankRowId, usedRefundIdx, refundIdOf,
     backfillRows, unmatchedRows, warn,
     hitDepositBizIdSet // OPEN-7（T5b-1）：命中 BizId 收集集合，透传给 consumeAndBackfill
@@ -498,7 +523,7 @@ function runStrategiesForGroup(ctx) {
   //   O1：每层带 hitType（精准/模糊命中）；S1~S3 均为精准命中（L1/L2/L4，精准层在模糊层前）。
   const strategyChain = [
     { run: (bankRow, cands) => matchS1(bankRow, cands), hitType: HIT_TYPE_PRECISE },
-    { run: (bankRow, cands) => matchS2(bankRow, cands, depositRows), hitType: HIT_TYPE_PRECISE },
+    { run: (bankRow, cands) => matchS2(bankRow, cands, depositRows, depIndex), hitType: HIT_TYPE_PRECISE },
     { run: (bankRow, cands) => matchS3(bankRow, cands), hitType: HIT_TYPE_PRECISE }
   ];
 
@@ -680,6 +705,9 @@ module.exports = {
   matchS2Mtx,
   matchJpmHk,
   matchJpmUs,
+  // R3：CustomerRef 二跳共享函数 + 入金行双键查找（单测精确覆盖）
+  matchCustomerRefTwoHop,
+  lookupDepositByKeys,
   matchS3,
   matchS4,
   resolveHits,
