@@ -12622,14 +12622,15 @@ function registerNewAccountHandlers() {
       return { status: 'error', message: 'monthKey 格式错误' };
     }
     try {
-      // v3.0.5 PR-3：clearMonth 双源——侧库存在 → 删整月侧库文件 + 主库镜像行（文件级回收）；
-      //   否则走主库旧表行级清（历史 run 零变化，双源过渡）。
+      // v3.0.5 PR-3：clearMonth 双源——侧库存在 → 删整月侧库文件 + 主库镜像行（文件级回收）。
+      //   codex PR#73 复审修复 P3：升级过渡库同月可能主库仍有 legacy imports 行；只删侧库后
+      //   listMonthsDualSource 会回退主库 legacy 致该月 stale 重现 → 无论侧库是否存在都一并清主库
+      //   legacy（acquiringBillCurrencySession.clearMonth 幂等，无 legacy 则删 0 行）。
       const userDataDir = path.dirname(database.dbPath);
       if (runDataStore.sideDbExists(userDataDir, acquiringRunData.MODULE, monthKey)) {
         acquiringRunData.deleteMonthSideDb({ userDataDir, mainDb: database.db, monthKey });
-      } else {
-        acquiringBillCurrencySession.clearMonth({ db: database.db, monthKey });
       }
+      acquiringBillCurrencySession.clearMonth({ db: database.db, monthKey });
       return { status: 'success' };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };

@@ -532,4 +532,9 @@ module.exports = {
   deleteSideDb,
   deleteSideDbByPath,
   listSideDbFiles,
+  // P2（codex PR#73 复审修复）：暴露侧库 schema DDL，供 date-range 导出在 :memory: 库重建表结构
+  //   （biz-op buildRangeExportDb 用 SIDE_DB_DDL_BIZ_OP；此前未导出 → undefined → exec 抛错）。
+  SIDE_DB_DDL_ACQUIRING,
+  SIDE_DB_DDL_BIZ_OP,
+  SIDE_DB_DDL_BANK_BU,
 };

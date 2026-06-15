@@ -89,6 +89,31 @@ test('导出 openExportContextByRun：主库镜像 runId → 侧库内 run id �
   }
 });
 
+test('🔴 codex P2：buildRangeExportDb date-range 跨月导出不抛（SIDE_DB_DDL_BIZ_OP 已导出）+ 4 表建表 + 跨月合并', () => {
+  const fx3 = shared.buildSingleDayFixture('2026-03-15', '2026-03-14', 'BU-A');
+  const fx5 = shared.buildSingleDayFixture('2026-05-15', '2026-05-14', 'BU-A');
+  seedSide('2026-03', fx3);
+  seedSide('2026-05', fx5);
+  bizOpReconRunData.runViaSideDb({ userDataDir, mainDb, date: '2026-03-15', buName: 'BU-A' });
+  bizOpReconRunData.runViaSideDb({ userDataDir, mainDb, date: '2026-05-15', buName: 'BU-A' });
+  // 修复前：memDb.exec(runDataStore.SIDE_DB_DDL_BIZ_OP) 中常量未导出 = undefined → exec 抛错。
+  let memDb;
+  assert.doesNotThrow(() => {
+    memDb = bizOpReconRunData.buildRangeExportDb({
+      userDataDir, mainDb, buName: 'BU-A', startDate: '2026-03-01', endDate: '2026-05-31'
+    });
+  }, 'date-range 导出不应抛（SIDE_DB_DDL_BIZ_OP undefined 回归）');
+  try {
+    assert.doesNotThrow(() => memDb.prepare('SELECT * FROM biz_op_recon_runs').all(), 'runs 表建表成功');
+    assert.doesNotThrow(() => memDb.prepare('SELECT * FROM biz_op_recon_diff_rows').all(), 'diff_rows 表建表成功');
+    assert.doesNotThrow(() => memDb.prepare('SELECT * FROM biz_op_recon_imports').all(), 'imports 表建表成功');
+    const runCount = memDb.prepare('SELECT COUNT(*) c FROM biz_op_recon_runs').get().c;
+    assert.equal(runCount, 2, '跨月 2 个 run（3月+5月）合并进内存导出库');
+  } finally {
+    if (memDb) memDb.close();
+  }
+});
+
 test('月末跨月：runBizOpImport（mock worker success）→ 下月侧库写 T-2 冗余副本', async () => {
   const D = '2026-06-30';
   const monthKey = '2026-06';

@@ -34,16 +34,22 @@ test.afterEach(() => {
 });
 
 // 建一个该月侧库（含 imports + 一个 run + diff 行）+ 主库镜像行。
-function seedSideMonth(monthKey, { withMirror = true, withFlow = true } = {}) {
+function seedSideMonth(monthKey, { withMirror = true, withFlow = true, withBill = true } = {}) {
   const sideDb = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
   sideDb.prepare(`INSERT INTO acquiring_bill_currency_runs (month_key, total_bill_rows, matched_rows, mismatch_rows, unmatched_rows, status) VALUES (?,1,1,1,0,'success')`).run(monthKey);
   const runId = sideDb.prepare('SELECT last_insert_rowid() AS id').get().id;
-  sideDb.prepare(`INSERT INTO acquiring_bill_currency_bill_imports (month_key, source_file, source_row_index, recon_main_id, settle_currency, settle_currency_norm, raw_json) VALUES (?, 'b.xlsx', 2, 'M1', 'EUR', 'eur', '{}')`).run(monthKey);
-  const billId = sideDb.prepare('SELECT last_insert_rowid() AS id').get().id;
+  // withBill:false + withFlow:false → 空壳（仅 runs 影子行，无 flow/bill imports；模拟崩溃残留）。
+  let billId = null;
+  if (withBill) {
+    sideDb.prepare(`INSERT INTO acquiring_bill_currency_bill_imports (month_key, source_file, source_row_index, recon_main_id, settle_currency, settle_currency_norm, raw_json) VALUES (?, 'b.xlsx', 2, 'M1', 'EUR', 'eur', '{}')`).run(monthKey);
+    billId = sideDb.prepare('SELECT last_insert_rowid() AS id').get().id;
+  }
   if (withFlow) {
     sideDb.prepare(`INSERT INTO acquiring_bill_currency_flow_imports (month_key, source_file, source_row_index, recon_main_id, settle_amount, settle_amount_abs, settle_currency, settle_currency_norm, raw_json) VALUES (?, 'f.xlsx', 2, 'M1', '10', '10', 'usd', 'usd', '')`).run(monthKey);
   }
-  sideDb.prepare(`INSERT INTO acquiring_bill_currency_diff_rows (run_id, bill_import_id, flow_currency, flow_amount_abs, diff_type) VALUES (?,?,'usd','10','currency_mismatch')`).run(runId, billId);
+  if (withBill) {
+    sideDb.prepare(`INSERT INTO acquiring_bill_currency_diff_rows (run_id, bill_import_id, flow_currency, flow_amount_abs, diff_type) VALUES (?,?,'usd','10','currency_mismatch')`).run(runId, billId);
+  }
   sideDb.close();
   if (withMirror) {
     acquiringRunData.upsertMainRunMirror(mainDb, {
@@ -67,12 +73,20 @@ test.describe('孤儿双向兜底（reconcileOrphans，spec §B.6）', () => {
     assert.equal(runDataStore.sideDbExists(userDataDir, MODULE, '2026-03'), true, '文件保留');
   });
 
-  test('有文件无元数据 → 删文件', () => {
-    seedSideMonth('2026-03', { withMirror: false }); // 只有侧库文件，无主库镜像
+  test('有文件无元数据 + 空壳（无 flow/bill imports）→ 删文件', () => {
+    seedSideMonth('2026-03', { withMirror: false, withFlow: false, withBill: false }); // 崩溃残留空壳
     assert.equal(runDataStore.sideDbExists(userDataDir, MODULE, '2026-03'), true);
     const stats = acquiringRunData.reconcileOrphans({ userDataDir, mainDb });
-    assert.deepEqual(stats.deletedOrphanFiles, ['2026-03'], '孤儿文件被删');
+    assert.deepEqual(stats.deletedOrphanFiles, ['2026-03'], '空壳孤儿文件被删');
     assert.equal(runDataStore.sideDbExists(userDataDir, MODULE, '2026-03'), false, '文件已删');
+  });
+
+  test('🔴 codex P1：有文件无元数据 + import-only（有 flow/bill 数据）→ 不删（防丢导入数据）', () => {
+    seedSideMonth('2026-03', { withMirror: false }); // 默认有 flow+bill = 已导入未对账的有效中间态
+    assert.equal(runDataStore.sideDbExists(userDataDir, MODULE, '2026-03'), true);
+    const stats = acquiringRunData.reconcileOrphans({ userDataDir, mainDb });
+    assert.deepEqual(stats.deletedOrphanFiles, [], 'import-only 不被当孤儿删（修复前会误删）');
+    assert.equal(runDataStore.sideDbExists(userDataDir, MODULE, '2026-03'), true, '文件保留，重启不丢导入数据');
   });
 
   test('有元数据无文件 → 标记 run 失效（status=side-db-missing，不崩溃）', () => {
@@ -103,8 +117,8 @@ test.describe('孤儿双向兜底（reconcileOrphans，spec §B.6）', () => {
     assert.deepEqual(stats2.invalidatedRuns, [], '二次不重复标记（已 side-db-missing）');
   });
 
-  test('双向并存：A 文件无元数据 + B 元数据无文件 → 同时处理', () => {
-    seedSideMonth('2026-03', { withMirror: false }); // 文件无元数据
+  test('双向并存：A 空壳文件无元数据 + B 元数据无文件 → 同时处理', () => {
+    seedSideMonth('2026-03', { withMirror: false, withFlow: false, withBill: false }); // 空壳文件无元数据
     acquiringRunData.upsertMainRunMirror(mainDb, {  // 元数据无文件
       monthKey: '2026-06',
       relPath: runDataStore.sideDbRelPath(MODULE, '2026-06'),

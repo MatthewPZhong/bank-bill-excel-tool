@@ -294,15 +294,30 @@ function reconcileOrphans({ userDataDir, mainDb }) {
   const files = runDataStore.listSideDbFiles(userDataDir, MODULE);
   const fileMonths = new Set(files.map((f) => f.monthKey));
 
-  // ① 有文件无元数据 → 删文件
+  // ① 有文件无元数据 → 仅删空壳（codex PR#73 复审修复 P1，对齐 bank-bu/biz-op）
+  //   import-only（已导入未跑对账，侧库有 flow/bill 数据但无 mirror）= 有效中间态，删它会丢导入数据 → 保留；
+  //   仅删「侧库内 flow/bill imports 皆空」的崩溃残留空壳 / open 失败的损坏文件。
   for (const f of files) {
     if (!mirrorByMonth.has(f.monthKey)) {
+      let isEmptyShell = false;
+      try {
+        const sideDb = runDataStore.openSideDb(userDataDir, MODULE, f.monthKey);
+        try {
+          const readiness = importRepo.getMonthReadiness(sideDb, f.monthKey);
+          isEmptyShell = (readiness.flowCount === 0 && readiness.billCount === 0);
+        } finally {
+          try { sideDb.close(); } catch (_e) { /* swallow */ }
+        }
+      } catch (_e) {
+        isEmptyShell = true; // 文件损坏 → 删
+      }
+      if (!isEmptyShell) continue; // import-only 有效导入数据 → 保留（防丢数据）
       const r = runDataStore.deleteSideDbByPath(f.path);
       if (r.deleted) {
         stats.deletedOrphanFiles.push(f.monthKey);
         appendModuleLog({
           level: 'info', source: 'main', domain: 'acquiring-bill-currency',
-          message: '[acquiring-bill-currency] 孤儿侧库文件清理（有文件无元数据）',
+          message: '[acquiring-bill-currency] 孤儿侧库文件清理（空壳/损坏，无 imports 无镜像）',
           details: [`monthKey=${f.monthKey}`, `path=${f.path}`],
         });
       }
