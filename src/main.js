@@ -3689,6 +3689,20 @@ function registerAppHandlers() {
       const workingMidRows = paymentOfflineEnabled
         ? structuredClone(database.readLinkedTableRows('mid-allocation') || [])
         : [];
+      // v3.0.6 需求2（🔴 资金红线）：R5s2「对账数据来源」二选一 —— 勾选「中台调拨单表」时改走调拨对账单回填。
+      //   gating 仿 workingMidRows：默认勾选（config.reconSourceMid !== false，缺省/老库无字段视为勾选，决策 D4）；
+      //   仅勾选路才 structuredClone 读隐藏派生表 linked_fund_transfer_recon，否则注入 []（取消路不读本 context）。
+      //   structuredClone 防引擎原地改字段污染 DB 还原对象（与 workingMidRows 同口径）。
+      // v3.0.6 codex-pr74-fix P2（细化）：本判定上移到重派生之前先算一次，给「run 入口重派生」与下方读取共用（去重）。
+      const reconSourceMidEnabled = !!(
+        r5s2Scenario && r5s2Scenario.config && r5s2Scenario.config.reconSourceMid !== false
+      );
+      // v3.0.6 codex-pr74-fix P2（细化，🔴 资金红线）：需求3 DBS-Charge 资金校验（R3.5）是否启用 ——
+      //   dispatchScenarios 已是 enabled 过滤后集合（见上方注释「无须再判 enabled」），存在 funcCategory='dbs-charge-fund-check'
+      //   场景即下游会消费调拨对账单派生表（DBS-Charge seed 默认 enabled）。供重派生门控 + workingDispatchReconRows 门控共用。
+      const dbsChargeScenarioEnabled = dispatchScenarios.some(
+        (s) => s && s.config && s.config.funcCategory === 'dbs-charge-fund-check'
+      );
       // v3.0.6 codex-pr74-fix P2（🔴 资金红线）：读调拨对账单（readFundTransferReconRows）前，从当前 mid-allocation 实时重派生刷新持久表。
       //   背景：建表迁移 ensureFundTransferReconSupport 仅 CREATE TABLE linked_fund_transfer_recon，不从既有 mid-allocation 回填；
       //   且派生 rebuildFundTransferReconDerivation 原仅在「导入 mid-allocation」时触发。两者叠加 → v3.0.5 升级用户
@@ -3696,42 +3710,44 @@ function registerAppHandlers() {
       //   故在此 run 入口、读取之前实时重派生覆盖持久表，再往下读：升级用户无需重导、永不读空/陈旧表、链接表管理显示同步。
       //   范式照搬导入侧（src/main.js mid-allocation 落库后调用 + 函数内部 try/catch 隔离记 created:false）；
       //   此处再加一层 try/catch + warn 日志，派生失败时降级继续（绝不阻断 run）。
-      try {
-        const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({ database, buildFundTransferReconRows });
-        if (fundTransferReconDerive && fundTransferReconDerive.created === false) {
+      //   ⚠️ 消费方门控（仿上方 paymentOfflineEnabled「防整表无谓载入」范式）：仅当下游真会读派生表
+      //   （需求2 勾选 reconSourceMidEnabled，或 需求3 dbsChargeScenarioEnabled）时才重派生；两者皆否 = 无消费方 → 跳过重派生，
+      //   不为大 mid-allocation 表白付全量读 + 2× 写。两门控默认均 true（R5s2 默认勾选 + DBS-Charge seed 默认 enabled），
+      //   故默认仍重派生 —— 升级回归修复不被削弱。
+      if (reconSourceMidEnabled || dbsChargeScenarioEnabled) {
+        try {
+          const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({ database, buildFundTransferReconRows });
+          if (fundTransferReconDerive && fundTransferReconDerive.created === false) {
+            appendActivityLogEntry({
+              level: 'warning',
+              source: 'main',
+              domain: 'fund-transfer-recon-derive',
+              message: '[调拨对账单] run 入口实时重派生失败，降级继续（读现有持久表）',
+              details: [String(fundTransferReconDerive.error || '')]
+            });
+          }
+        } catch (ftrRunErr) {
           appendActivityLogEntry({
             level: 'warning',
             source: 'main',
             domain: 'fund-transfer-recon-derive',
-            message: '[调拨对账单] run 入口实时重派生失败，降级继续（读现有持久表）',
-            details: [String(fundTransferReconDerive.error || '')]
+            message: '[调拨对账单] run 入口实时重派生异常，降级继续（读现有持久表）',
+            details: [ftrRunErr && ftrRunErr.message ? ftrRunErr.message : String(ftrRunErr)]
           });
         }
-      } catch (ftrRunErr) {
-        appendActivityLogEntry({
-          level: 'warning',
-          source: 'main',
-          domain: 'fund-transfer-recon-derive',
-          message: '[调拨对账单] run 入口实时重派生异常，降级继续（读现有持久表）',
-          details: [ftrRunErr && ftrRunErr.message ? ftrRunErr.message : String(ftrRunErr)]
-        });
       }
-      // v3.0.6 需求2（🔴 资金红线）：R5s2「对账数据来源」二选一 —— 勾选「中台调拨单表」时改走调拨对账单回填。
-      //   gating 仿 workingMidRows：默认勾选（config.reconSourceMid !== false，缺省/老库无字段视为勾选，决策 D4）；
-      //   仅勾选路才 structuredClone 读隐藏派生表 linked_fund_transfer_recon，否则注入 []（取消路不读本 context）。
-      //   structuredClone 防引擎原地改字段污染 DB 还原对象（与 workingMidRows 同口径）。
-      const reconSourceMidEnabled = !!(
-        r5s2Scenario && r5s2Scenario.config && r5s2Scenario.config.reconSourceMid !== false
-      );
       const workingReconRows = reconSourceMidEnabled
         ? structuredClone(database.readFundTransferReconRows() || [])
         : [];
       // v3.0.6 需求3（🔴 资金红线）：DBS-Charge 资金校验（R3.5）的调拨对账单入参。
       //   数据源同为隐藏派生表 linked_fund_transfer_recon，但语义独立于需求2 —— DBS-Charge 总需调拨对账单，
-      //   **不受** reconSourceMid 二选一开关控制；故无条件单独 structuredClone 注入（与 workingReconRows 并列、互不影响）。
-      //   R3.5 实际 gating 在编排器：dbsChargeFundCheck 桶非空（DBS-Charge 场景 enabled）才跑；本批未 seed → 桶空 → no-op。
-      //   structuredClone 防引擎原地改字段污染 DB 还原对象（与 workingReconRows / workingMidRows 同口径）。
-      const workingDispatchReconRows = structuredClone(database.readFundTransferReconRows() || []);
+      //   **不受** reconSourceMid 二选一开关控制；故单独注入（与 workingReconRows 并列、互不影响）。
+      // v3.0.6 codex-pr74-fix P2（细化）：门控成 dbsChargeScenarioEnabled，与 workingReconRows 受 reconSourceMidEnabled 门控对称
+      //   （仿 paymentOfflineEnabled 防整表无谓载入）。安全性：DBS-Charge 禁用时编排器 R3.5 本就不跑（dbsChargeFundCheck 桶空），
+      //   注入 [] 无行为变化。structuredClone 防引擎原地改字段污染 DB 还原对象（与 workingReconRows / workingMidRows 同口径）。
+      const workingDispatchReconRows = dbsChargeScenarioEnabled
+        ? structuredClone(database.readFundTransferReconRows() || [])
+        : [];
       // v2.1.16-beta.2 T1：改走 5 轮编排器 runReconciliation（R2 内部仍调 dispatcher，双维 first-match-wins 不变）。
       //   deps 字段名照搬原 dispatcher 调用处：channelsRepo=channelsRepository（findByNameAndLocation/getBuiltinGeneral）、db=database.db。
       //   编排器返回 modifiedRows/unmatchedRows 由「当前最新 bankRows」重建（资金红线：两者互斥且全覆盖 workingBankRows）。
