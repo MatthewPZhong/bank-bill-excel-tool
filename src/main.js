@@ -3662,8 +3662,12 @@ function registerAppHandlers() {
       if (!bankStatementSession) {
         return { status: 'failed', message: '请先导入银行对账单' };
       }
-      // v3.0.8 需求3：run 进度转发器（仿 createRunProgressForwarder）。事件只读不写 processingResult。
-      const onProgress = createBankStatementRunProgressForwarder(event);
+      // v3.0.8 需求3：run 进度转发器（内联，仿 createRunProgressForwarder）。事件只读不写 processingResult。
+      //   🔴 必须内联：本 handler 与收单模块 register 函数不在同一作用域，不能引用其内定义的 forwarder（否则运行时 not defined）。
+      const onProgress = (!event || !event.sender) ? null : (ev) => {
+        try { event.sender.send('bank-statement:run:progress', { ...ev, phase: 'run' }); }
+        catch (_e) { /* swallow — 窗口已销毁等不影响 run */ }
+      };
       // 让出事件循环 + 可选进度上报的小工具（与编排器 yieldTick 同范式；onProgress 异常吞掉，绝不影响对账）。
       const yieldRun = async (stage) => {
         if (typeof onProgress === 'function') {
@@ -12361,16 +12365,8 @@ function registerNewAccountHandlers() {
     };
   }
 
-  // v3.0.8 需求3（运行不阻塞）：资金对账银行对账单 run 进度转发器（仿 createRunProgressForwarder）。
-  //   主进程在「数据准备阶段边界」+ 编排器「轮次边界」向渲染进程单向推送进度文案（通道 bank-statement:run:progress）。
-  //   🔴 只读不写 processingResult；try/catch swallow（窗口已销毁等不影响 run）。事件无节流（每 run 仅个位数轮次事件）。
-  function createBankStatementRunProgressForwarder(event) {
-    if (!event || !event.sender) return null;
-    return (ev) => {
-      try { event.sender.send('bank-statement:run:progress', { ...ev, phase: 'run' }); }
-      catch (_e) { /* swallow — 窗口已销毁等 */ }
-    };
-  }
+  // v3.0.8 需求3：bank-statement run 进度转发器已内联到 bank-statement:run handler（main.js:3665 附近）——
+  //   该 handler 与本收单模块 register 函数不在同一作用域，故不在此处定义命名 helper（避免跨作用域 not defined）。
 
   // v2.1.7 F7-B1：runCheck 完成/失败弹系统通知（spec §7.5.2 / PRD §十一-B1）
   //   success：「收单单据币种校验」{monthKey} 对账完成（共 N 行差异）
