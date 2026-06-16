@@ -10812,6 +10812,277 @@
       return overlay;
     }
 
+    // v3.0.8 需求1：工具箱🧰 主弹框（合表 / 拆表）。脱离主对账流程的轻量 Excel 行级搬运小工具。
+    //   复用 modal-overlay/modal-card/dialog-* + openModal/closeModal（参考 createModuleCabinetDialog）。
+    //   IPC 契约（preload desktopApi.toolbox → main.js trackedIpcHandle）：
+    //     merge()       → {status:'success',filePath} / {status:'cancelled'} / {status:'failed',message,detailLines}
+    //     splitRead()   → {status:'success',sourceFilePath,headers,valuesByField} / {status:'cancelled'} / {status:'failed',message,detailLines}
+    //     splitExport({sourceFilePath,field,values}) → {status:'success',filePath} / {status:'cancelled'} / {status:'failed',message,detailLines}
+    //   合表「导入文件」一气呵成（多选 → 校验 → 合并 → 另存为，无独立导出）；拆表两步（导入选字段 → 导出文件）。
+    function createToolboxDialog() {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.dataset.previewModal = 'toolbox';
+
+      const card = document.createElement('div');
+      card.className = 'modal-card toolbox-card';
+      card.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">工具箱</div>
+          <button class="icon-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="dialog-body toolbox-body">
+          <div class="toolbox-row">
+            <span class="toolbox-row-label">合并表格</span>
+            <div class="toolbox-row-actions">
+              <button class="primary-btn small" type="button" data-action="merge-import">导入文件</button>
+            </div>
+          </div>
+          <div class="toolbox-row">
+            <span class="toolbox-row-label">拆分表格</span>
+            <div class="toolbox-row-actions toolbox-row-actions-stacked">
+              <button class="primary-btn small" type="button" data-action="split-import">导入文件</button>
+              <button class="primary-btn small" type="button" data-action="split-export" disabled>导出文件</button>
+            </div>
+          </div>
+        </div>
+      `;
+      overlay.appendChild(card);
+
+      const closeBtn = card.querySelector('.icon-close');
+      const mergeImportBtn = card.querySelector('[data-action="merge-import"]');
+      const splitImportBtn = card.querySelector('[data-action="split-import"]');
+      const splitExportBtn = card.querySelector('[data-action="split-export"]');
+
+      // 拆表已选状态：splitRead 成功后存源文件路径，选字段弹框「完成」后存 field/values。
+      //   导出文件需三者齐备；任一缺失 → alert 提示先导入并选字段（不调 IPC）。
+      let splitSourceFilePath = null;
+      let splitSelectedField = null;
+      let splitSelectedValues = [];
+      let mergeInFlight = false;
+      let splitImportInFlight = false;
+      let splitExportInFlight = false;
+
+      closeBtn.addEventListener('click', () => closeModal());
+      overlay.addEventListener('click', (ev) => {
+        if (ev.target === overlay) closeModal();
+      });
+
+      // 合表：一气呵成。点「导入文件」→ merge()（main 内多选 + 校验 + 合并 + 另存为）→ success 弹保存路径 / failed 弹差异。
+      //   detailLines（表头不一致）逐行拼进 alert；cancelled 静默。
+      mergeImportBtn.addEventListener('click', async () => {
+        if (mergeInFlight) return;
+        mergeInFlight = true;
+        mergeImportBtn.disabled = true;
+        try {
+          const result = await desktopApi.toolbox.merge();
+          if (!result || result.status === 'cancelled') return;
+          if (result.status === 'success') {
+            window.alert(`合并完成，已保存到：\n${result.filePath}`);
+            return;
+          }
+          const lines = [result.message || '合并失败'];
+          if (Array.isArray(result.detailLines) && result.detailLines.length > 0) {
+            lines.push('', ...result.detailLines);
+          }
+          window.alert(lines.join('\n'));
+        } catch (error) {
+          window.alert(`合并失败：${(error && error.message) || '未知错误'}`);
+        } finally {
+          mergeInFlight = false;
+          mergeImportBtn.disabled = false;
+        }
+      });
+
+      // 拆表第一步：点「导入文件」→ splitRead()（main 内单选 + 读表头 + 算各字段去重值）→ 成功弹选字段弹框。
+      //   选字段弹框「完成」回传 {field,values} → 存状态 + 启用「导出文件」；「取消」回到工具箱主弹框、不改已选状态。
+      splitImportBtn.addEventListener('click', async () => {
+        if (splitImportInFlight) return;
+        splitImportInFlight = true;
+        splitImportBtn.disabled = true;
+        try {
+          const result = await desktopApi.toolbox.splitRead();
+          if (!result || result.status === 'cancelled') return;
+          if (result.status !== 'success') {
+            window.alert(result.message || '读取文件失败');
+            return;
+          }
+          const headers = Array.isArray(result.headers) ? result.headers : [];
+          const valuesByField = (result.valuesByField && typeof result.valuesByField === 'object')
+            ? result.valuesByField
+            : {};
+          openModal(createSplitFieldPickerDialog({
+            headers,
+            valuesByField,
+            onComplete: ({ field, values }) => {
+              splitSourceFilePath = result.sourceFilePath;
+              splitSelectedField = field;
+              splitSelectedValues = Array.isArray(values) ? values : [];
+              splitExportBtn.disabled = false;
+              openModal(overlay);
+            },
+            onCancel: () => {
+              // 取消选字段：回到工具箱主弹框，保留上一次已选状态（若有）。
+              openModal(overlay);
+            }
+          }));
+        } catch (error) {
+          window.alert(`读取文件失败：${(error && error.message) || '未知错误'}`);
+        } finally {
+          splitImportInFlight = false;
+          splitImportBtn.disabled = false;
+        }
+      });
+
+      // 拆表第二步：点「导出文件」→ 用已选 field/values 调 splitExport → 过滤命中行另存为。
+      //   未先导入 + 选字段（缺源文件 / 字段 / 值）→ alert 提示先导入并选字段，不调 IPC。
+      splitExportBtn.addEventListener('click', async () => {
+        if (splitExportInFlight) return;
+        if (!splitSourceFilePath || !splitSelectedField || splitSelectedValues.length === 0) {
+          window.alert('请先点「导入文件」选择表格并选定拆分字段与值');
+          return;
+        }
+        splitExportInFlight = true;
+        splitExportBtn.disabled = true;
+        try {
+          const result = await desktopApi.toolbox.splitExport({
+            sourceFilePath: splitSourceFilePath,
+            field: splitSelectedField,
+            values: splitSelectedValues
+          });
+          if (!result || result.status === 'cancelled') return;
+          if (result.status === 'success') {
+            window.alert(`拆分完成，已保存到：\n${result.filePath}`);
+            return;
+          }
+          const lines = [result.message || '拆分失败'];
+          if (Array.isArray(result.detailLines) && result.detailLines.length > 0) {
+            lines.push('', ...result.detailLines);
+          }
+          window.alert(lines.join('\n'));
+        } catch (error) {
+          window.alert(`拆分失败：${(error && error.message) || '未知错误'}`);
+        } finally {
+          splitExportInFlight = false;
+          splitExportBtn.disabled = false;
+        }
+      });
+
+      return overlay;
+    }
+
+    // v3.0.8 需求1：拆表选字段弹框。单选字段下拉（= 表头列名）+ 多选值下拉（= 该字段去重值，随字段切换刷新）+ [完成][取消]。
+    //   入参 { headers:string[], valuesByField:{[field]:string[]}, onComplete({field,values[]}), onCancel() }。
+    //   边界：① 某字段无去重值（valuesByField[f] 空）→ 多选框为空且 disabled；
+    //         ② 未选任何值（values=[]）→ [完成] 禁用（不允许空选导出，否则过滤命中 0 行产空 sheet）。
+    function createSplitFieldPickerDialog({ headers = [], valuesByField = {}, onComplete = null, onCancel = null } = {}) {
+      const safeHeaders = Array.isArray(headers) ? headers : [];
+      const safeValuesByField = (valuesByField && typeof valuesByField === 'object') ? valuesByField : {};
+
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.dataset.previewModal = 'toolbox-split-field-picker';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card toolbox-split-picker-card';
+
+      const fieldOptionsHtml = safeHeaders
+        .map((h, idx) => `<option value="${idx}">${escapeHtml(h)}</option>`)
+        .join('');
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">选择拆分字段</div>
+          <button class="icon-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="dialog-body toolbox-split-picker-body">
+          <label class="toolbox-split-picker-row">
+            <span class="toolbox-split-picker-label">字段</span>
+            <select class="toolbox-split-picker-field">${fieldOptionsHtml}</select>
+          </label>
+          <label class="toolbox-split-picker-row toolbox-split-picker-row-values">
+            <span class="toolbox-split-picker-label">值</span>
+            <select class="toolbox-split-picker-values" multiple size="8"></select>
+          </label>
+          <div class="toolbox-split-picker-hint"></div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="complete" disabled>完成</button>
+        </div>
+      `;
+      overlay.appendChild(dialog);
+
+      const closeBtn = dialog.querySelector('.icon-close');
+      const fieldSelect = dialog.querySelector('.toolbox-split-picker-field');
+      const valuesSelect = dialog.querySelector('.toolbox-split-picker-values');
+      const hintEl = dialog.querySelector('.toolbox-split-picker-hint');
+      const cancelBtn = dialog.querySelector('[data-action="cancel"]');
+      const completeBtn = dialog.querySelector('[data-action="complete"]');
+
+      // 按当前选中字段刷新值多选框：用 fieldSelect.value（= headers 索引）取 headers[idx] 再查 valuesByField。
+      //   用索引而非列名取值，避免重名表头 / 含特殊字符表头作为对象键时歧义（与 main 过滤按列名一致：列名唯一时等价）。
+      function currentFieldName() {
+        const idx = Number.parseInt(fieldSelect.value, 10);
+        return Number.isFinite(idx) && idx >= 0 && idx < safeHeaders.length ? safeHeaders[idx] : '';
+      }
+
+      function refreshValues() {
+        const fieldName = currentFieldName();
+        const values = Array.isArray(safeValuesByField[fieldName]) ? safeValuesByField[fieldName] : [];
+        valuesSelect.innerHTML = values
+          .map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`)
+          .join('');
+        // 边界①：字段无去重值 → 多选框空且不可选。
+        valuesSelect.disabled = values.length === 0;
+        if (values.length === 0) {
+          hintEl.textContent = '该字段无可选值（该列为空），请改选其他字段';
+        } else {
+          hintEl.textContent = '';
+        }
+        updateCompleteState();
+      }
+
+      // 边界②：选中值数为 0 → [完成] 禁用（不允许空选导出）。
+      function getSelectedValues() {
+        return Array.from(valuesSelect.selectedOptions || []).map((opt) => opt.value);
+      }
+      function updateCompleteState() {
+        completeBtn.disabled = getSelectedValues().length === 0;
+      }
+
+      fieldSelect.addEventListener('change', refreshValues);
+      valuesSelect.addEventListener('change', updateCompleteState);
+
+      function cancelAndClose() {
+        if (typeof onCancel === 'function') {
+          onCancel();
+        } else {
+          closeModal();
+        }
+      }
+      closeBtn.addEventListener('click', cancelAndClose);
+      cancelBtn.addEventListener('click', cancelAndClose);
+      overlay.addEventListener('click', (ev) => {
+        if (ev.target === overlay) cancelAndClose();
+      });
+
+      completeBtn.addEventListener('click', () => {
+        const values = getSelectedValues();
+        if (values.length === 0) {
+          hintEl.textContent = '请至少选择一个值';
+          return;
+        }
+        if (typeof onComplete === 'function') {
+          onComplete({ field: currentFieldName(), values });
+        }
+      });
+
+      // 初始渲染：默认选中首个字段并刷新其值列表。
+      refreshValues();
+      return overlay;
+    }
+
     // v2.1.16-beta.5 需求1（PR-4）：资金对账面板「开始运行」检测到 ≥2 个已启用 gateway-recon-id-fix 场景时，
     //   弹单选对话框让用户挑一个运行。入参 { scenarios:[{id,name}], onPick(scenarioId) }；onPick 自行 closeModal。
     function createGatewayReconScenarioPickerDialog({ scenarios = [], onPick = null } = {}) {
@@ -10922,6 +11193,9 @@
       getBizOpReconDefaultDate,
       // v2.1.4 T3：小助手功能收纳弹窗工厂
       createModuleCabinetDialog,
+      // v3.0.8 需求1：工具箱🧰（合表 / 拆表）主弹框 + 拆表选字段弹框
+      createToolboxDialog,
+      createSplitFieldPickerDialog,
       // v2.1.12 需求1：VCC业务OP计算 dialog factory（F1 确认 / F2 计算 / F3 显示余额）
       createVccOpCalcConfirmDialog,
       createVccOpCalcComputeDialog,

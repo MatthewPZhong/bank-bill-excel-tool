@@ -186,6 +186,18 @@ const {
   mergeBankStatementRows,
   BankStatementMergeError
 } = require('./main-process/bank-statement-merge');
+// v3.0.8 需求1：工具箱🧰（合表 / 拆表）核心纯逻辑（脱离主对账流程的轻量 Excel 行级搬运）
+//   合表表头一致性校验 / 多文件 aoa 合并 / 字段去重值计算 / 按字段值过滤 / 文件名模板（YYYYMMDDHHmm 时间戳）
+//   IPC handler（toolbox:merge / toolbox:split:read / toolbox:split:export）做 dialog + file-service IO，纯变换委托本模块
+const {
+  ToolboxHeaderMismatchError,
+  assertHeadersIdentical: toolboxAssertHeadersIdentical,
+  mergeAoaRows: toolboxMergeAoaRows,
+  computeValuesByField: toolboxComputeValuesByField,
+  filterRowsByFieldValues: toolboxFilterRowsByFieldValues,
+  buildMergeFileName: toolboxBuildMergeFileName,
+  buildSplitFileName: toolboxBuildSplitFileName
+} = require('./main-process/toolbox');
 // v2.1.9 N5 T26（spec §5.4 🔴 对外契约破坏性变更）：场景命中行独立报表 writer
 //   v2.1.8 主输出 Sheet 3 撤除 → 改独立报表 命中场景行-{basename}-{ts}.xlsx
 //   v3.0.4 F2：落位由 error-reports/{date}/ 改为 bank-statement-process/{date}/（与错误报告目录互换）
@@ -12822,6 +12834,152 @@ function registerNewAccountHandlers() {
   });
 }
 
+// v3.0.8 需求1：工具箱🧰（合表 / 拆表）3 个 IPC handler。
+//   纯数据变换委托 src/main-process/toolbox.js；本处只做 dialog（show{Open,Save}Dialog）+ file-service IO
+//   （extractHeaders / readRows / writeWorkbookRows）+ copyFileSync 落盘。
+//
+//   返回口径（前端对接契约，与现有 monthly-balance:export / bank-statement:import 范式一致）：
+//     成功     { status:'success', filePath }
+//     取消另存为 { status:'cancelled' }
+//     失败     { status:'failed', message, detailLines }（表头不一致 / 空文件 / 字段缺失 / 运行错误）
+//   trackedIpcHandle 仅在 status∈{ok,success} 时计 usage（取消/失败不计）。
+//
+// 工具箱临时产物先写 OS 临时目录，再 showSaveDialog → copyFileSync 到用户选定位置（取消则不落用户目录，temp 文件由 OS 回收）。
+function writeToolboxTempWorkbook(rows, sheetName = 'COMMON') {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'));
+  const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
+  writeWorkbookRows({ rows, outputFilePath: tempPath, sheetName });
+  return tempPath;
+}
+
+// 把 catch 到的异常归一为 {status:'failed', message, detailLines}（FileValidationError / ToolboxHeaderMismatchError 带 detailLines）。
+function toolboxFailureResult(error) {
+  const message = error && error.message ? String(error.message) : String(error);
+  const detailLines = error && Array.isArray(error.detailLines) ? error.detailLines : [];
+  return { status: 'failed', message, detailLines };
+}
+
+function registerToolboxHandlers() {
+  // IPC 1 —— 合表：多选 → 各文件 extractHeaders 校验全相同 → readRows 合并（首表头 + 各文件数据行）→ 写临时 → 另存为
+  trackedIpcHandle('toolbox:merge', '工具箱', '合并表格', async () => {
+    try {
+      const choice = await dialog.showOpenDialog(mainWindow, {
+        title: '选择要合并的表格（多选，表头需完全一致）',
+        properties: ['openFile', 'multiSelections'],
+        filters: statementFileDialogFilters()
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      const filePaths = choice.filePaths;
+      const fileNames = filePaths.map((p) => path.basename(p));
+
+      // 各文件表头（extractHeaders 已 trim）→ 校验全部完全一致（列名 + 列序，大小写敏感）
+      const headersList = filePaths.map((p) => extractHeaders(p));
+      toolboxAssertHeadersIdentical(headersList, fileNames);
+
+      // 各文件 readRows（aoa，含表头行）→ 合并 = [首文件表头, ...各文件数据行（切掉各自表头行）]
+      const aoaList = filePaths.map((p) => readRows(p));
+      const mergedRows = toolboxMergeAoaRows(aoaList);
+
+      const tempPath = writeToolboxTempWorkbook(mergedRows);
+      const saveResult = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: toolboxBuildMergeFileName(),
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { status: 'cancelled' };
+      }
+      fs.copyFileSync(tempPath, saveResult.filePath);
+      appendActivityLogEntry({
+        level: 'info',
+        source: 'main',
+        domain: 'toolbox',
+        message: '工具箱合并表格成功',
+        details: [
+          `合并文件数：${filePaths.length}`,
+          `数据行数：${Math.max(mergedRows.length - 1, 0)}`,
+          `导出路径：${saveResult.filePath}`
+        ]
+      });
+      return { status: 'success', filePath: saveResult.filePath };
+    } catch (error) {
+      return toolboxFailureResult(error);
+    }
+  });
+
+  // IPC 2 —— 拆表第一步：单选 → extractHeaders + readRows → 算各字段去重值 → 回传给前端选字段弹框
+  trackedIpcHandle('toolbox:split:read', '工具箱', '拆分表格', async () => {
+    try {
+      const choice = await dialog.showOpenDialog(mainWindow, {
+        title: '选择要拆分的表格',
+        properties: ['openFile'],
+        filters: statementFileDialogFilters()
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      const sourceFilePath = choice.filePaths[0];
+      const headers = extractHeaders(sourceFilePath);
+      const aoa = readRows(sourceFilePath);
+      const valuesByField = toolboxComputeValuesByField(headers, aoa);
+      return { status: 'success', sourceFilePath, headers, valuesByField };
+    } catch (error) {
+      return toolboxFailureResult(error);
+    }
+  });
+
+  // IPC 3 —— 拆表第二步：{sourceFilePath, field, values[]} → readRows 过滤 row[field]∈values（多选值→单文件）→ 写临时 → 另存为
+  trackedIpcHandle('toolbox:split:export', '工具箱', '拆分表格', async (_event, payload = {}) => {
+    try {
+      const { sourceFilePath, field, values } = payload || {};
+      if (!sourceFilePath || !fs.existsSync(sourceFilePath)) {
+        return { status: 'failed', message: '源文件不存在或已被移动，请重新导入', detailLines: [] };
+      }
+      if (!field) {
+        return { status: 'failed', message: '未选择拆分字段', detailLines: [] };
+      }
+      if (!Array.isArray(values) || values.length === 0) {
+        return { status: 'failed', message: '请至少选择一个值', detailLines: [] };
+      }
+
+      const aoa = readRows(sourceFilePath);
+      const filtered = toolboxFilterRowsByFieldValues(aoa, field, values);
+      if (!filtered.fieldFound) {
+        return { status: 'failed', message: `源文件中找不到字段「${field}」`, detailLines: [] };
+      }
+      if (filtered.matchedCount === 0) {
+        return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
+      }
+
+      const tempPath = writeToolboxTempWorkbook(filtered.rows);
+      const saveResult = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: toolboxBuildSplitFileName(values, sanitizeFileName),
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { status: 'cancelled' };
+      }
+      fs.copyFileSync(tempPath, saveResult.filePath);
+      appendActivityLogEntry({
+        level: 'info',
+        source: 'main',
+        domain: 'toolbox',
+        message: '工具箱拆分表格成功',
+        details: [
+          `拆分字段：${field}`,
+          `选中值数：${values.length}`,
+          `命中行数：${filtered.matchedCount}`,
+          `导出路径：${saveResult.filePath}`
+        ]
+      });
+      return { status: 'success', filePath: saveResult.filePath };
+    } catch (error) {
+      return toolboxFailureResult(error);
+    }
+  });
+}
+
 // v2.0.0-beta.4：usage-stats 模块（隐藏 .usage-stats.txt）
 const usageStatsModule = require('./backend/usage-stats');
 let usageStats = null;
@@ -12939,6 +13097,7 @@ function registerAllIpcHandlers() {
   registerBigAccountOrderHandlers();
   registerFileHandlers();
   registerNewAccountHandlers();
+  registerToolboxHandlers();
   markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);
 }
 

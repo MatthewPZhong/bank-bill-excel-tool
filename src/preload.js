@@ -195,6 +195,15 @@ contextBridge.exposeInMainWorld('desktopApi', {
       return () => ipcRenderer.removeListener('bank-statement:run:progress', wrapped);
     }
   },
+  // v3.0.8 需求1：工具箱🧰（合表 / 拆表）—— 脱离主对账流程的轻量 Excel 行级搬运小工具
+  //   merge()       合表：main 内多选 → 表头校验 → 合并 → 另存为；返回 {status:'success',filePath} / {status:'cancelled'} / {status:'failed',message,detailLines}
+  //   splitRead()   拆表第一步：main 内单选 → 读表头 + 各字段去重值；返回 {status:'success',sourceFilePath,headers,valuesByField} / {status:'cancelled'} / {status:'failed',message}
+  //   splitExport(payload) 拆表第二步：{sourceFilePath,field,values[]} → 过滤 → 另存为；返回 {status:'success',filePath} / {status:'cancelled'} / {status:'failed',message}
+  toolbox: {
+    merge: () => ipcRenderer.invoke('toolbox:merge'),
+    splitRead: () => ipcRenderer.invoke('toolbox:split:read'),
+    splitExport: (payload) => ipcRenderer.invoke('toolbox:split:export', payload)
+  },
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（PR-B 实装算法/IO；本 PR 占位）
   // payload 形态见 docs/iterations/v2.1.0-beta.1/spec.md §三
   reconIdFix: {

@@ -3233,6 +3233,91 @@ select.mapping-text-input {
   cursor: wait;
 }
 
+/* === v3.0.8 需求1：工具箱🧰（合表 / 拆表）主弹框 + 拆表选字段弹框（Clear 风格副本，复用 dialog 基础样式）=== */
+.toolbox-card {
+  width: min(94vw, 460px);
+}
+.toolbox-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px 28px 12px;
+}
+.toolbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+}
+.toolbox-row-label {
+  flex: 0 0 72px;
+  font-weight: 500;
+  color: var(--text, #1c1f29);
+  /* 与 primary-btn small 文本基线大致对齐（按钮 padding-top ≈ 8px） */
+  padding-top: 8px;
+}
+.toolbox-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+/* 拆分表格行：[导出文件] 在 [导入文件] 正下方（PRD 5.1.4 mockup） */
+.toolbox-row-actions-stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+.toolbox-row-actions-stacked .primary-btn {
+  min-width: 96px;
+}
+
+/* 拆表选字段弹框 */
+.toolbox-split-picker-card {
+  width: min(94vw, 440px);
+}
+.toolbox-split-picker-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px 24px 8px;
+}
+.toolbox-split-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+/* 值多选框较高 → 标签顶部对齐 */
+.toolbox-split-picker-row-values {
+  align-items: flex-start;
+}
+.toolbox-split-picker-label {
+  flex: 0 0 40px;
+  font-weight: 500;
+  color: var(--text, #1c1f29);
+}
+.toolbox-split-picker-field,
+.toolbox-split-picker-values {
+  flex: 1 1 auto;
+  padding: 8px 12px;
+  border: 1px solid rgba(104, 79, 39, 0.24);
+  border-radius: 6px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 14px;
+}
+.toolbox-split-picker-values {
+  min-height: 160px;
+}
+.toolbox-split-picker-values:disabled {
+  background: #f4f6fb;
+  color: #94a0b8;
+  cursor: not-allowed;
+}
+.toolbox-split-picker-hint {
+  min-height: 18px;
+  font-size: 12px;
+  color: #d32f2f;
+  line-height: 1.4;
+}
+
 /* v2.1.13 D-3：自带写死场景「适用银行渠道」管理弹窗（多选下拉复用 .new-account-currency-dropdown-* 浮动面板） */
 .builtin-fixed-channel-manage-card {
   /* v2.1.13 UI 微调：弹窗宽度缩至当前约 60%（上限 940→564；下限 420→252）*/
