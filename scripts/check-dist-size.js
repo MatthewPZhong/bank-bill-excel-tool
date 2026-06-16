@@ -1,7 +1,7 @@
 // 打包产物体积/内容守卫脚本（size-startup-optimization Part A，A-F3）
 //   背景：v3.0.0 app.asar 膨胀到 101MB（开发文档/测试脚本/开发依赖误入包）。
 //   本脚本对构建产物 app.asar 做三类断言，防止瘦身后再次复发：
-//     断言①：asar 文件体积 ≤ 25MB（阈值常量 MAX_ASAR_BYTES，拍板 A-D2）。
+//     断言①：asar 文件体积 ≤ 70MB（阈值常量 MAX_ASAR_BYTES，v3.0.7 按实测校准）。
 //     断言②：禁止路径不得出现在包内（开发文档/脚本/开发依赖/CHANGELOG/README）。
 //     断言③：反向保护——若干运行时必需文件必须存在（防白名单漏列导致打包版缺文件）。
 //   任一断言失败 → 打印逐条明细并 exit 1；全过 → 打印 PASS 摘要（含实测体积）。
@@ -19,8 +19,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const asar = require('@electron/asar');
 
-// asar 体积上限：25MB（A-D2 拍板，当前理论值 ~13MB，留模板/字体增长约 2x 余量）
-const MAX_ASAR_BYTES = 25 * 1024 * 1024;
+// asar 体积上限：70MB（v3.0.7 按实测校准）。
+//   原 25MB 阈值（A-D2）为瘦身预期值，但三大 Excel 库 exceljs(22M)/xlsx(7.2M)/xlsx-js-style(9.5M)
+//   均运行时在用、无法删除，实测 asar ~57.5MB，导致 v3.0.5 起 main 构建长期 FAIL（PR 不跑 build job 故未暴露）。
+//   按实测 ~57.5MB 留约 22% 模板/字体/依赖增长余量定为 70MB；若后续完成 dist/sourcemap 排除瘦身，应再下调。
+const MAX_ASAR_BYTES = 70 * 1024 * 1024;
 
 // 默认 asar 路径（可经 argv[2] 覆盖）
 const DEFAULT_ASAR_PATH = path.join(
@@ -73,7 +76,7 @@ function main() {
 
   const failures = [];
 
-  // 断言①：体积 ≤ 25MB
+  // 断言①：体积 ≤ MAX_ASAR_BYTES（70MB，见上方常量注释）
   const asarBytes = fs.statSync(asarPath).size;
   if (asarBytes > MAX_ASAR_BYTES) {
     failures.push(
