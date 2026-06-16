@@ -558,6 +558,55 @@ test.describe('rebuildFundTransferReconDerivation —— 调拨对账单派生�
       assert.equal(back[1][R.currency], 'HKD', 'out 行币种取付款币种');
     });
 
+    // v3.0.6 codex-pr74-fix P2（🔴 资金红线）：升级/空表场景回归锁。
+    //   背景：建表迁移仅 CREATE TABLE linked_fund_transfer_recon 不回填；派生原仅在「导入 mid-allocation」时触发。
+    //   叠加 → 已有 mid-allocation 但未重导的升级用户隐藏表恒空 → run 勾选路读空表静默不回填（真实回归）。
+    //   修复：run 入口读取前实时重派生刷新持久表。本用例直接锁派生层契约 ——
+    //   「mid-allocation 有数据 ∧ linked_fund_transfer_recon 为空（模拟升级建表后未派生）→ 调用后被正确回填（行数=mid×2）」。
+    test('升级场景：mid 有数据但 recon 表为空 → 重派生后回填（行数 = mid×2）', () => {
+      // 模拟升级用户：mid-allocation 已有数据（旧库既有），但 linked_fund_transfer_recon 仅被建表迁移创建、从未派生 → 空。
+      appDb.replaceLinkedTable('mid-allocation', [
+        midRow({ [M.allocationNo]: 'UP1' }),
+        midRow({ [M.allocationNo]: 'UP2' })
+      ]);
+      // 前置断言：隐藏表当前为空（建表迁移只建表不回填 → 升级用户初始空）。
+      assert.equal(appDb.readFundTransferReconRows().length, 0, '前置：升级用户 recon 隐藏表初始为空');
+
+      // run 入口实时重派生（与 main.js bank-statement:run 入口同款调用）。
+      const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({
+        database: appDb, buildFundTransferReconRows
+      });
+
+      const back = appDb.readFundTransferReconRows();
+      assert.equal(back.length, 4, '🔴 升级回归修复：2 行 mid → 4 行调拨对账单（不再读空表）');
+      assert.equal(fundTransferReconDerive.created, true);
+      assert.equal(fundTransferReconDerive.total, 4, 'total = mid 行数×2');
+      // 回填内容正确（in/out 两行均落库）。
+      assert.equal(back[0][R.allocationNo], 'UP1');
+      assert.equal(back[0][R.fundType], FT_RECON_FIELD_MAP.FUND_TYPE_IN);
+      assert.equal(back[1][R.fundType], FT_RECON_FIELD_MAP.FUND_TYPE_OUT);
+    });
+
+    // v3.0.6 codex-pr74-fix P2：run 每次入口都重派生 → 必须幂等刷新（替换而非追加），否则连续 run 会行数翻倍污染对手方数据源。
+    test('幂等刷新：mid 不变时重复重派生 → 行数恒为 mid×2（替换非追加）', () => {
+      appDb.replaceLinkedTable('mid-allocation', [
+        midRow({ [M.allocationNo]: 'IDEM1' }),
+        midRow({ [M.allocationNo]: 'IDEM2' })
+      ]);
+
+      // 第一次重派生（首次 run）。
+      const r1 = rebuildFundTransferReconDerivation({ database: appDb, buildFundTransferReconRows });
+      assert.equal(appDb.readFundTransferReconRows().length, 4, '首次重派生 → 4 行');
+      assert.equal(r1.fundTransferReconDerive.total, 4);
+
+      // 第二、三次重派生（连续 run，mid 不变）→ 行数恒为 4，不累加。
+      rebuildFundTransferReconDerivation({ database: appDb, buildFundTransferReconRows });
+      const r3 = rebuildFundTransferReconDerivation({ database: appDb, buildFundTransferReconRows });
+      const back = appDb.readFundTransferReconRows();
+      assert.equal(back.length, 4, '🔴 幂等：重复重派生整表覆盖，行数不翻倍');
+      assert.equal(r3.fundTransferReconDerive.total, 4, 'total 恒为 mid×2');
+    });
+
     test('整表覆盖：第二次派生（mid 减少）后调拨对账单仅含第二批，不累加', () => {
       appDb.replaceLinkedTable('mid-allocation', [midRow({ [M.allocationNo]: 'OLD1' }), midRow({ [M.allocationNo]: 'OLD2' })]);
       rebuildFundTransferReconDerivation({ database: appDb, buildFundTransferReconRows });

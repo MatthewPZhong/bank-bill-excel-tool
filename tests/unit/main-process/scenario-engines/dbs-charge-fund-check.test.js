@@ -78,8 +78,11 @@ function gwRow({ reconId = 'RC-1', amount = 100, currency = 'USD' } = {}) {
 
 // 调拨对账单行（字段经 FT_RECON_FIELD_MAP.recon.* 构造，绝不手敲）。
 //   big_account 已按方向固化（in=收款卡号 / out=付款卡号）；本引擎零方向分支，仅比 big_account。
-//   fundType 默认空（''）—— 仅在显式传 FT_IN/FT_OUT 的用例验证「步骤1 命中行标 FundTransfer-in/out」新语义；
-//     不传时引擎对命中行 FundType 不写（newFundType===''→跳过），保持原值，便于隔离验证 ReconciliationId/归并逻辑。
+//   🔴 v3.0.6 codex-pr74-fix P1（方向感知门控）：fund_type 默认 FT_IN（必须有有效方向才进 dispRows）；
+//     默认 in 行只判 收款渠道===DBS（receiveChannel 默认 'DBS'），payChannel 由 builder 留空（这里默认 'DBS'
+//     不参与 in 行判定，仅为兼容旧夹具显式传 payChannel 的少数用例）。隔离验证「不写 FundType」的用例已不复存在
+//     —— 匹配必带方向，命中行必被标 FundTransfer-in/out；需隔离 FundType 的用例改用与目标方向相同的初始 FundType
+//     使其 no-op（old===new 不 record）。out 方向用例显式传 fundType: FT_OUT。
 function dispRow({
   payChannel = 'DBS',
   receiveChannel = 'DBS',
@@ -87,7 +90,7 @@ function dispRow({
   currency = 'USD',
   amount = 100,
   reconId = 'RC-1',
-  fundType = ''
+  fundType = FT_IN
 } = {}) {
   return {
     [R.payChannel]: payChannel,
@@ -226,14 +229,16 @@ test.describe('DBS-Charge — 步骤1 命中行标 FundTransfer-in/out', () => {
     assert.ok(findMod(modifications, 'b1', 'ReconciliationId'));
   });
 
-  test('③ 调拨 fund_type 为空 → 命中行 FundType 不写（保持原值；隔离验证）', () => {
+  test('③ 调拨 fund_type 为空（未知方向）→ 不进 dispRows、不匹配、不赋值（方向感知门控）', () => {
+    // 🔴 v3.0.6 codex-pr74-fix P1：方向感知门控下空 fund_type=未知方向 → 既不判收款也不判付款渠道 →
+    //   该调拨行不进 dispRows，零改动（原「空 fund_type 仍匹配但不写 FundType」的隔离语义已不复存在）。
     const bank = bankRow({ rowId: 'b1', merchantId: 'CARD-IN-001', credit: 100, debit: 0, fundType: 'Inbound', reconId: '' });
     const disp = dispRow({ bigAccount: 'CARD-IN-001', amount: 100, reconId: 'RC-IN', fundType: '' });
     const { modifications } = runDbsChargeFundCheck([], [bank], [disp], OPTIONS);
 
-    assert.equal(findMod(modifications, 'b1', 'FundType'), undefined, '空 fund_type → 命中行 FundType 不写');
-    assert.equal(bank.FundType, 'Inbound', '保持原值');
-    assert.ok(findMod(modifications, 'b1', 'ReconciliationId'), 'ReconciliationId 仍赋值');
+    assert.equal(modifications.length, 0, '空 fund_type 调拨行不参与 → 零改动');
+    assert.equal(bank.FundType, 'Inbound', '银行行 FundType 不动');
+    assert.equal(bank.ReconciliationId, '', '银行行 ReconciliationId 未被赋值');
   });
 });
 
@@ -283,9 +288,10 @@ test.describe('DBS-Charge — 步骤1 in/out 同 ReconID 交互（两阶段防�
 // ========================================================================
 
 test.describe('DBS-Charge — 步骤1 阶段B 归并 Charge', () => {
-  test("③'' 同 reconId 非命中行 Inbound → Charge；命中行不动（fund_type 空时保持原值）；已 Charge no-op", () => {
-    // 命中行 chosen：MerchantId=C1，将赋 ReconciliationId=RC-1。
-    const chosen = bankRow({ rowId: 'chosen', merchantId: 'C1', credit: 0, debit: 100, fundType: 'Outbound', reconId: '' });
+  test("③'' 同 reconId 非命中行 Inbound → Charge；命中行不动（初始 FundType=目标方向时 no-op）；已 Charge no-op", () => {
+    // 🔴 方向感知门控：disp 须带方向。chosen 为 out 腿（debit），用 out 调拨行（fund_type=FT_OUT）匹配；
+    //   chosen 初始 FundType 预置为 FT_OUT，使命中行标记 old===new → no-op（隔离验证 ReconciliationId/归并，不掺 FundType record）。
+    const chosen = bankRow({ rowId: 'chosen', merchantId: 'C1', credit: 0, debit: 100, fundType: FT_OUT, reconId: '' });
     // sibling1：预置 ReconciliationId=RC-1（同 reconId），FundType=Inbound → 应被置 Charge。
     const sib1 = bankRow({ rowId: 'sib1', merchantId: 'OTHER', fundType: 'Inbound', reconId: 'RC-1' });
     // sibling2：同 reconId 但已是 Charge → no-op（不 record）。
@@ -293,13 +299,13 @@ test.describe('DBS-Charge — 步骤1 阶段B 归并 Charge', () => {
     // 无关行：reconId 不同 → 不动。
     const other = bankRow({ rowId: 'other', merchantId: 'OTHER', fundType: 'Inbound', reconId: 'RC-9' });
 
-    const disp = dispRow({ bigAccount: 'C1', amount: 100, reconId: 'RC-1' });
+    const disp = dispRow({ payChannel: 'DBS', receiveChannel: '', bigAccount: 'C1', amount: 100, reconId: 'RC-1', fundType: FT_OUT });
     const { modifications } = runDbsChargeFundCheck([], [chosen, sib1, sib2, other], [disp], OPTIONS);
 
     // chosen 赋 ReconciliationId（原空→RC-1）。
     assert.ok(findMod(modifications, 'chosen', 'ReconciliationId'));
-    // 命中行 chosen 自身 FundType 不动（仍 Outbound），无 FundType modification。
-    assert.equal(chosen.FundType, 'Outbound');
+    // 命中行 chosen 自身 FundType 不动（初始即 FT_OUT，标记 no-op），无 FundType modification。
+    assert.equal(chosen.FundType, FT_OUT);
     assert.equal(findMod(modifications, 'chosen', 'FundType'), undefined);
     // sib1 被置 Charge + record。
     const sib1Mod = findMod(modifications, 'sib1', 'FundType');
@@ -396,12 +402,12 @@ test.describe('DBS-Charge — 步骤1 ReconciliationId 覆盖 + 1v1', () => {
 
 test.describe('DBS-Charge — 步骤2 命中→outbound / 未命中→Charge', () => {
   test('⑤ Charge 行：网关 amount+currency 命中 → 转 outbound', () => {
-    // 步骤1：调拨给 b1 赋 ReconciliationId=RC-1；b1 FundType 初始 Charge。
-    const bank = bankRow({ rowId: 'b1', merchantId: 'C1', currency: 'USD', credit: 0, debit: 100, fundType: 'Charge', reconId: '' });
-    const disp = dispRow({ bigAccount: 'C1', currency: 'USD', amount: 100, reconId: 'RC-1' });
-    // 网关：reconciliationid=RC-1（步骤1 赋的新值）+ amount 100 + currency USD → 命中。
+    // 🔴 方向感知门控：被调拨命中的行会标 FundTransfer-in/out（→ 不入步骤2 候选）。本用例验证步骤2 候选转 outbound，
+    //   故预置 b1 reconId=RC-1 + 初始 Charge、不传调拨行（步骤1 no-op），隔离验证步骤2 桶逻辑（与 ⑥ 系列同范式）。
+    const bank = bankRow({ rowId: 'b1', merchantId: 'C1', currency: 'USD', credit: 0, debit: 100, fundType: 'Charge', reconId: 'RC-1' });
+    // 网关：reconciliationid=RC-1 + amount 100 + currency USD → 命中。
     const gw = gwRow({ reconId: 'RC-1', amount: 100, currency: 'USD' });
-    const { modifications } = runDbsChargeFundCheck([gw], [bank], [disp], OPTIONS);
+    const { modifications } = runDbsChargeFundCheck([gw], [bank], [], OPTIONS);
 
     const ftMod = findMod(modifications, 'b1', 'FundType');
     assert.ok(ftMod, '应转 outbound');
@@ -411,10 +417,9 @@ test.describe('DBS-Charge — 步骤2 命中→outbound / 未命中→Charge', (
   });
 
   test('⑤ 网关币种不等 → 未命中 → Charge（候选已是 Charge，no-op 不 record）', () => {
-    const bank = bankRow({ rowId: 'b1', merchantId: 'C1', currency: 'USD', credit: 0, debit: 100, fundType: 'Charge', reconId: '' });
-    const disp = dispRow({ bigAccount: 'C1', currency: 'USD', amount: 100, reconId: 'RC-1' });
+    const bank = bankRow({ rowId: 'b1', merchantId: 'C1', currency: 'USD', credit: 0, debit: 100, fundType: 'Charge', reconId: 'RC-1' });
     const gw = gwRow({ reconId: 'RC-1', amount: 100, currency: 'HKD' }); // 币种不等
-    const { modifications } = runDbsChargeFundCheck([gw], [bank], [disp], OPTIONS);
+    const { modifications } = runDbsChargeFundCheck([gw], [bank], [], OPTIONS);
 
     // 未命中 → 置 Charge；候选已是 Charge → no-op（不 record）。
     assert.equal(findMod(modifications, 'b1', 'FundType'), undefined);
@@ -422,10 +427,9 @@ test.describe('DBS-Charge — 步骤2 命中→outbound / 未命中→Charge', (
   });
 
   test('⑤ 网关金额差 1 分 → 未命中 → Charge（候选已是 Charge，no-op）', () => {
-    const bank = bankRow({ rowId: 'b1', merchantId: 'C1', currency: 'USD', credit: 0, debit: 100, fundType: 'Charge', reconId: '' });
-    const disp = dispRow({ bigAccount: 'C1', currency: 'USD', amount: 100, reconId: 'RC-1' });
+    const bank = bankRow({ rowId: 'b1', merchantId: 'C1', currency: 'USD', credit: 0, debit: 100, fundType: 'Charge', reconId: 'RC-1' });
     const gw = gwRow({ reconId: 'RC-1', amount: 100.01, currency: 'USD' });
-    const { modifications } = runDbsChargeFundCheck([gw], [bank], [disp], OPTIONS);
+    const { modifications } = runDbsChargeFundCheck([gw], [bank], [], OPTIONS);
     assert.equal(findMod(modifications, 'b1', 'FundType'), undefined);
     assert.equal(bank.FundType, 'Charge');
   });
@@ -503,22 +507,28 @@ test.describe('DBS-Charge — 步骤2 命中→outbound / 未命中→Charge', (
   });
 
   test('⑦ 步骤2 用步骤1改后的【新 ReconciliationId】匹配网关（非银行原 reconId）', () => {
-    // 银行行原 ReconciliationId=OLD；步骤1 调拨覆盖为 RC-NEW；网关只认 RC-NEW。
-    const bank = bankRow({ rowId: 'b1', merchantId: 'C1', currency: 'USD', credit: 0, debit: 100, fundType: 'Charge', reconId: 'OLD' });
-    const disp = dispRow({ bigAccount: 'C1', currency: 'USD', amount: 100, reconId: 'RC-NEW' });
-    // 网关 reconciliationid=RC-NEW（步骤1 改后的新值）→ 命中转 outbound。
-    const gwNew = gwRow({ reconId: 'RC-NEW', amount: 100, currency: 'USD' });
-    // 干扰：网关 reconciliationid=OLD（银行原值）amount 也对，但桶用新 reconId 不应被它命中。
-    const gwOld = gwRow({ reconId: 'OLD', amount: 100, currency: 'USD' });
-    const { modifications } = runDbsChargeFundCheck([gwOld, gwNew], [bank], [disp], OPTIONS);
+    // 🔴 方向感知门控：被调拨命中的行标 FundTransfer-out（不入步骤2 候选），故拆两行验证「步骤2 用新 reconId」：
+    //   bankFt：原 ReconciliationId=OLD，被 out 调拨行覆盖为 RC-NEW（标 FundTransfer-out）—— 证明步骤1 写新值。
+    //   bankChg：同桶另一行，预置 reconId=RC-NEW + Charge（候选）—— 步骤2 用 RC-NEW 关联 gwNew → 转 outbound；
+    //     干扰 gwOld(reconId=OLD) 即便 amount 对，因桶键=RC-NEW 不应命中，证明步骤2 keyed on 新值非 OLD。
+    const bankFt = bankRow({ rowId: 'bFt', merchantId: 'C1', currency: 'USD', credit: 0, debit: 100, fundType: 'Charge', reconId: 'OLD' });
+    const bankChg = bankRow({ rowId: 'bChg', merchantId: 'M-OTHER', currency: 'USD', credit: 0, debit: 200, fundType: 'Charge', reconId: 'RC-NEW' });
+    // out 调拨行：付款渠道=DBS、收款渠道留空（builder D1 单向固化口径），big_account=C1、金额 100、覆盖 reconId=RC-NEW。
+    const disp = dispRow({ payChannel: 'DBS', receiveChannel: '', bigAccount: 'C1', currency: 'USD', amount: 100, reconId: 'RC-NEW', fundType: FT_OUT });
+    // 网关 reconciliationid=RC-NEW（步骤1 改后的新值）amount=200 → 命中 bankChg 转 outbound。
+    const gwNew = gwRow({ reconId: 'RC-NEW', amount: 200, currency: 'USD' });
+    // 干扰：网关 reconciliationid=OLD（bankFt 原值）amount=200 也对，但桶用新 reconId 不应被它命中。
+    const gwOld = gwRow({ reconId: 'OLD', amount: 200, currency: 'USD' });
+    const { modifications } = runDbsChargeFundCheck([gwOld, gwNew], [bankFt, bankChg], [disp], OPTIONS);
 
-    // ReconciliationId 已覆盖为 RC-NEW。
-    assert.equal(bank.ReconciliationId, 'RC-NEW');
-    // 步骤2 用 RC-NEW 关联到 gwNew → 转 outbound。
-    const ftMod = findMod(modifications, 'b1', 'FundType');
+    // bankFt：ReconciliationId 已覆盖为 RC-NEW，标 FundTransfer-out（步骤1 命中行，不入步骤2）。
+    assert.equal(bankFt.ReconciliationId, 'RC-NEW');
+    assert.equal(bankFt.FundType, FT_OUT, '步骤1 命中行标 FundTransfer-out，步骤2 不碰');
+    // bankChg：步骤2 用 RC-NEW（步骤1 写的新值）关联到 gwNew → 转 outbound（gwOld 用 OLD 键不命中）。
+    const ftMod = findMod(modifications, 'bChg', 'FundType');
     assert.ok(ftMod, '应用新 ReconciliationId 命中网关并转 outbound');
     assert.equal(ftMod.newValue, 'outbound');
-    assert.equal(bank.FundType, 'outbound');
+    assert.equal(bankChg.FundType, 'outbound');
   });
 
   test('步骤2：reconId 桶网关侧无行 → 整桶不动（保持步骤1 的 FundType；不触发未命中→Charge）', () => {
@@ -617,11 +627,12 @@ test.describe('DBS-Charge — 步骤1 空 big_account 调拨行不赋值/不归�
 
 test.describe('DBS-Charge — 跨渠道置 Charge 单向性（步骤2 不恢复）', () => {
   test('非 DBS 同 reconId 行步骤1 被置 Charge 后，步骤2 不恢复（非 dbsBankRows 不进步骤2 桶，即便网关金额匹配）', () => {
-    // chosen：DBS、命中调拨 → 赋 ReconciliationId=RC-1。
-    const chosen = bankRow({ rowId: 'chosen', channel: 'DBS', merchantId: 'C1', credit: 0, debit: 100, fundType: 'Outbound', reconId: '' });
+    // chosen：DBS、out 腿（debit）、命中 out 调拨行 → 赋 ReconciliationId=RC-1、标 FundTransfer-out。
+    //   初始 FundType 预置 FT_OUT 使标记 no-op（隔离验证跨渠道归并单向性，不掺 chosen 的 FundType record）。
+    const chosen = bankRow({ rowId: 'chosen', channel: 'DBS', merchantId: 'C1', credit: 0, debit: 100, fundType: FT_OUT, reconId: '' });
     // nonDbs：CITI、同 reconId、Inbound → 步骤1末批量置 Charge（显式 scope='all' 全量银行单，构造步骤2 前置）。
     const nonDbs = bankRow({ rowId: 'nonDbs', channel: 'CITI', merchantId: 'X', credit: 0, debit: 100, fundType: 'Inbound', reconId: 'RC-1' });
-    const disp = dispRow({ bigAccount: 'C1', amount: 100, reconId: 'RC-1' });
+    const disp = dispRow({ payChannel: 'DBS', receiveChannel: '', bigAccount: 'C1', amount: 100, reconId: 'RC-1', fundType: FT_OUT });
     // 网关 amount=100 命中 nonDbs 金额；但 nonDbs 非 DBS → 不进步骤2 桶 → 不会被恢复/改写。
     const gw = gwRow({ reconId: 'RC-1', amount: 100, currency: 'USD' });
     // 默认已改 'dbs-only'；本用例要让 nonDbs 在步骤1 被置 Charge 作前置，须显式 scope='all'。
@@ -637,8 +648,9 @@ test.describe('DBS-Charge — 跨渠道置 Charge 单向性（步骤2 不恢复�
     // 仅一条 FundType modification（nonDbs 那条）；nonDbs 不应再产生第二条（无转 outbound）。
     const nonDbsFtMods = modifications.filter((m) => m.rowId === 'nonDbs' && m.column === 'FundType');
     assert.equal(nonDbsFtMods.length, 1, '非 DBS 行 FundType 只被改一次（步骤1），步骤2 不二次改写');
-    // chosen 自身 FundType 不动。
-    assert.equal(chosen.FundType, 'Outbound');
+    // chosen 自身 FundType 不动（初始即 FT_OUT，命中标记 no-op）。
+    assert.equal(chosen.FundType, FT_OUT);
+    assert.equal(findMod(modifications, 'chosen', 'FundType'), undefined, 'chosen 标记 no-op，无 FundType record');
   });
 
   test("chargeSiblingsScope='dbs-only'：非 DBS 同 reconId 行不被置 Charge；DBS 同 reconId 行仍被置 Charge", () => {
@@ -686,16 +698,18 @@ test.describe('DBS-Charge — 零额行当前行为固化（不改零额逻辑�
   test('零额调拨行（金额 0）匹配零额 DBS 银行行（|credit-debit|=0）→ 当前行为：0===0 视为相等并赋 ReconciliationId', () => {
     // ⚠️ 固化「当前行为」：dispatchBankAmountEqual 对 0 与 0 → Math.round(0)===Math.round(0) → true。
     //   故零额调拨行会命中零额银行行（big_account/币种相等且 big_account 非空时）。本测试仅记录现状，不改零额逻辑。
-    const bank = bankRow({ rowId: 'bz', merchantId: 'C1', currency: 'USD', credit: 0, debit: 0, fundType: 'Inbound', reconId: '' });
-    const disp = dispRow({ bigAccount: 'C1', currency: 'USD', amount: 0, reconId: 'RC-Z' });
+    // 🔴 方向感知门控：disp 须带方向（默认 in 行判收款渠道=DBS）；bank 初始 FundType 预置 FT_IN 使命中标记 no-op，
+    //   隔离验证零额匹配行为（命中行 FundType 不掺二次改动）。
+    const bank = bankRow({ rowId: 'bz', merchantId: 'C1', currency: 'USD', credit: 0, debit: 0, fundType: FT_IN, reconId: '' });
+    const disp = dispRow({ bigAccount: 'C1', currency: 'USD', amount: 0, reconId: 'RC-Z', fundType: FT_IN });
     const { modifications } = runDbsChargeFundCheck([], [bank], [disp], OPTIONS);
 
     const mod = findMod(modifications, 'bz', 'ReconciliationId');
     assert.ok(mod, '当前行为：零额↔零额视为金额相等 → 命中赋值（固化现状）');
     assert.equal(mod.newValue, 'RC-Z');
     assert.equal(bank.ReconciliationId, 'RC-Z');
-    // 命中行自身 FundType 不动（chosen 不参与步骤1末归并）。
-    assert.equal(bank.FundType, 'Inbound');
+    // 命中行自身 FundType 不动（初始即 FT_IN，标记 no-op）。
+    assert.equal(bank.FundType, FT_IN);
   });
 
   test('零额调拨行 不命中 非零额银行行（0 ≠ 100，金额精确到分仍生效）', () => {
@@ -734,11 +748,51 @@ test.describe('DBS-Charge — Channel 门控 + 空入参', () => {
     assert.deepEqual(runDbsChargeFundCheck([], [bank], [], OPTIONS).modifications, []);
   });
 
-  test('dispatchChannelValue 门控：付款渠道或收款渠道非 DBS → 该调拨行不参与步骤1', () => {
+  test('dispatchChannelValue 方向感知门控：fund_type 空（未知方向）→ 该调拨行不参与步骤1', () => {
     const bank = bankRow({ rowId: 'b1', merchantId: 'C1', credit: 0, debit: 100, reconId: '' });
-    // 付款渠道=DBS 但收款渠道=CITI → 不满足「付款=收款=DBS」。
-    const dispMixed = dispRow({ payChannel: 'DBS', receiveChannel: 'CITI', bigAccount: 'C1', amount: 100, reconId: 'RC-1' });
-    const { modifications } = runDbsChargeFundCheck([], [bank], [dispMixed], OPTIONS);
+    // fund_type 空 → 未知方向 → 既不判收款渠道也不判付款渠道 → 不进 dispRows（哪怕渠道列填了 DBS）。
+    const dispNoDir = dispRow({ payChannel: 'DBS', receiveChannel: 'DBS', bigAccount: 'C1', amount: 100, reconId: 'RC-1', fundType: '' });
+    const { modifications } = runDbsChargeFundCheck([], [bank], [dispNoDir], OPTIONS);
+    assert.equal(modifications.length, 0);
+    assert.equal(bank.ReconciliationId, '');
+  });
+
+  test('方向感知门控：in 行判收款渠道===DBS（付款渠道留空也命中，builder D1 单向固化口径）', () => {
+    const bank = bankRow({ rowId: 'b1', merchantId: 'C1', credit: 100, debit: 0, fundType: 'Inbound', reconId: '' });
+    // in 行：付款渠道留空（builder 实际输出）、收款渠道=DBS → 命中通道。
+    const dispIn = dispRow({ payChannel: '', receiveChannel: 'DBS', bigAccount: 'C1', amount: 100, reconId: 'RC-IN', fundType: FT_IN });
+    const { modifications } = runDbsChargeFundCheck([], [bank], [dispIn], OPTIONS);
+    const mod = findMod(modifications, 'b1', 'ReconciliationId');
+    assert.ok(mod, 'in 行收款渠道=DBS（付款渠道空）应命中通道');
+    assert.equal(mod.newValue, 'RC-IN');
+    assert.equal(bank.ReconciliationId, 'RC-IN');
+  });
+
+  test('方向感知门控：in 行收款渠道≠DBS → 跳过（即便付款渠道恰为 DBS 也不判付款列）', () => {
+    const bank = bankRow({ rowId: 'b1', merchantId: 'C1', credit: 100, debit: 0, fundType: 'Inbound', reconId: '' });
+    // in 行只判收款渠道：收款=CITI → 不进 dispRows（付款列=DBS 对 in 行无意义、不参与判定）。
+    const dispIn = dispRow({ payChannel: 'DBS', receiveChannel: 'CITI', bigAccount: 'C1', amount: 100, reconId: 'RC-IN', fundType: FT_IN });
+    const { modifications } = runDbsChargeFundCheck([], [bank], [dispIn], OPTIONS);
+    assert.equal(modifications.length, 0);
+    assert.equal(bank.ReconciliationId, '');
+  });
+
+  test('方向感知门控：out 行判付款渠道===DBS（收款渠道留空也命中，builder D1 单向固化口径）', () => {
+    const bank = bankRow({ rowId: 'b1', merchantId: 'C1', credit: 0, debit: 50, fundType: 'Outbound', reconId: '' });
+    // out 行：收款渠道留空（builder 实际输出）、付款渠道=DBS → 命中通道。
+    const dispOut = dispRow({ payChannel: 'DBS', receiveChannel: '', bigAccount: 'C1', amount: 50, reconId: 'RC-OUT', fundType: FT_OUT });
+    const { modifications } = runDbsChargeFundCheck([], [bank], [dispOut], OPTIONS);
+    const mod = findMod(modifications, 'b1', 'ReconciliationId');
+    assert.ok(mod, 'out 行付款渠道=DBS（收款渠道空）应命中通道');
+    assert.equal(mod.newValue, 'RC-OUT');
+    assert.equal(bank.ReconciliationId, 'RC-OUT');
+  });
+
+  test('方向感知门控：out 行付款渠道≠DBS → 跳过（即便收款渠道恰为 DBS 也不判收款列）', () => {
+    const bank = bankRow({ rowId: 'b1', merchantId: 'C1', credit: 0, debit: 50, fundType: 'Outbound', reconId: '' });
+    // out 行只判付款渠道：付款=CITI → 不进 dispRows（收款列=DBS 对 out 行无意义、不参与判定）。
+    const dispOut = dispRow({ payChannel: 'CITI', receiveChannel: 'DBS', bigAccount: 'C1', amount: 50, reconId: 'RC-OUT', fundType: FT_OUT });
+    const { modifications } = runDbsChargeFundCheck([], [bank], [dispOut], OPTIONS);
     assert.equal(modifications.length, 0);
     assert.equal(bank.ReconciliationId, '');
   });

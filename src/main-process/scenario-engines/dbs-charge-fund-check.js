@@ -25,7 +25,10 @@
 //   🔴 两阶段化（防覆盖关键交互）：一笔调拨单的 in 行和 out 行【ReconID 相同】（都=渠道流水号）。若边匹配边归并，
 //      out 行的归并会把 in 行刚标的 FundTransfer-in 命中行覆盖成 Charge。故拆两阶段：
 //   dbsBankRows = bankRows.filter(Channel===DBS)            // 门控+范围；空 → 整体 no-op 返回空
-//   dispRows = dispatchReconRows.filter(付款渠道===DBS && 收款渠道===DBS && big_account 非空)
+//   dispRows = dispatchReconRows.filter(方向感知门控 && big_account 非空)
+//     方向感知门控（v3.0.6 codex-pr74-fix P1）：builder 按 D1 单向渠道固化（in 行只填收款渠道、out 行只填付款渠道，
+//       另一列留空），故按 fund_type 判方向通道 —— in 判 收款渠道===DBS、out 判 付款渠道===DBS（另一列留空不判）。
+//       语义：捕获任何含 DBS 腿的调拨腿（DBS→DBS 两腿都纳入 / DBS→外部仅出腿 / 外部→DBS 仅入腿）。
 //   ── 阶段A（先匹配 + 标记，不归并）：用 Set 收集所有命中行（对象引用）──
 //   for d in dispRows:                                       // 按 big_account+金额+币种 严格 1v1
 //     cand = dbsBankRows.filter(!used && valuesEqual(MerchantId,d.big_account)
@@ -106,7 +109,7 @@ const DISP_FUND_TYPE_FIELD = DISP.fundType;         // 'fund_type'（值=FundTra
 
 // 默认 config（全 config 化；plan「需求3」步骤1/2）。
 //   bankChannel          银行 Channel 门控值（仅该渠道行参与）
-//   dispatchChannelValue 调拨对账单付款渠道 + 收款渠道均须等于此值
+//   dispatchChannelValue 调拨对账单方向通道门控值（方向感知：in 判收款渠道===此值、out 判付款渠道===此值）
 //   setFundTypeCharge    步骤1末归并目标 FundType（同 reconId 非 Charge 行置为该值）
 //   setFundTypeOutbound  步骤2 命中目标 FundType
 //   chargeSiblingsScope  步骤1末批量置 Charge 的波及范围（'all' | 'dbs-only'）：
@@ -186,16 +189,27 @@ function runDbsChargeFundCheck(gwRows, bankRows, dispatchReconRows, options = {}
   // ============================================================
   // 步骤1（对称模型）：调拨对账单 ↔ DBS 银行行严格 1v1 —— 命中行标 FundTransfer-in/out + 赋 ReconciliationId + 归并 Charge
   // ============================================================
-  //   dispRows：付款渠道 === 收款渠道 === dispatchChannelValue（原文「付款渠道和收款渠道=DBS」）
-  //     且 big_account 非空（🔴 资金红线护栏：valuesEqual('','')===true，空 big_account 的调拨行会误命中
-  //     MerchantId 也为空的银行行并写错 ReconciliationId / 误触发归并；与 r5-fund-transfer-recon line162
-  //     口径一致，空 big_account 不进 dispRows → 不匹配、不赋 ReconciliationId、不触发归并 Charge）。
-  const dispRows = safeDispRows.filter(
-    (d) =>
-      valuesEqual(d && d[DISP_PAY_CHANNEL_FIELD], dispatchChannelValue) &&
-      valuesEqual(d && d[DISP_RECEIVE_CHANNEL_FIELD], dispatchChannelValue) &&
-      normalizeCellValue(d && d[DISP_BIG_ACCOUNT_FIELD]) !== ''
-  );
+  //   dispRows：方向感知门控（v3.0.6 codex-pr74-fix P1，见下方块注释）—— in 判收款渠道、out 判付款渠道，
+  //     另一列由 builder 按 D1 留空、不参与判定；且 big_account 非空（🔴 资金红线护栏：valuesEqual('','')===true，
+  //     空 big_account 的调拨行会误命中 MerchantId 也为空的银行行并写错 ReconciliationId / 误触发归并；与
+  //     r5-fund-transfer-recon line162 口径一致，空 big_account 不进 dispRows → 不匹配、不赋 ReconciliationId、不触发归并 Charge）。
+  // v3.0.6 codex-pr74-fix P1（🔴 资金红线）：方向感知门控（用户决策）。
+  //   builder 按 D1 单向渠道固化（in 行只填收款渠道、out 行只填付款渠道，另一列留空）；
+  //   原 both=DBS 门控对派生行恒不成立 → 需求3 整体失效。改为按 fund_type 判方向通道：
+  //     FundTransfer-in  → 收款渠道 === dispatchChannelValue（付款渠道留空不判）
+  //     FundTransfer-out → 付款渠道 === dispatchChannelValue（收款渠道留空不判）
+  //   空 big_account 护栏不变。语义：捕获任何含 DBS 腿的调拨腿。
+  const dispRows = safeDispRows.filter((d) => {
+    if (normalizeCellValue(d && d[DISP_BIG_ACCOUNT_FIELD]) === '') return false;
+    const ft = normalizeCellValue(d && d[DISP_FUND_TYPE_FIELD]);
+    if (ft === FT_RECON_FIELD_MAP.FUND_TYPE_IN) {
+      return valuesEqual(d && d[DISP_RECEIVE_CHANNEL_FIELD], dispatchChannelValue);
+    }
+    if (ft === FT_RECON_FIELD_MAP.FUND_TYPE_OUT) {
+      return valuesEqual(d && d[DISP_PAY_CHANNEL_FIELD], dispatchChannelValue);
+    }
+    return false; // 未知/空方向 → 不参与
+  });
 
   // 严格 1v1：一条 DBS 银行行最多被一条调拨行赋值（防一行被多调拨行重复覆盖）。
   //   用 Set 存已被消费银行行的对象引用（_rowId 可能未注入时退化为对象引用，仍 1v1）。

@@ -3689,6 +3689,33 @@ function registerAppHandlers() {
       const workingMidRows = paymentOfflineEnabled
         ? structuredClone(database.readLinkedTableRows('mid-allocation') || [])
         : [];
+      // v3.0.6 codex-pr74-fix P2（🔴 资金红线）：读调拨对账单（readFundTransferReconRows）前，从当前 mid-allocation 实时重派生刷新持久表。
+      //   背景：建表迁移 ensureFundTransferReconSupport 仅 CREATE TABLE linked_fund_transfer_recon，不从既有 mid-allocation 回填；
+      //   且派生 rebuildFundTransferReconDerivation 原仅在「导入 mid-allocation」时触发。两者叠加 → v3.0.5 升级用户
+      //   （已有 mid-allocation 但未重导）隐藏表恒空 → R5s2 勾选路读空表 → 静默不回填（真实回归）。
+      //   故在此 run 入口、读取之前实时重派生覆盖持久表，再往下读：升级用户无需重导、永不读空/陈旧表、链接表管理显示同步。
+      //   范式照搬导入侧（src/main.js mid-allocation 落库后调用 + 函数内部 try/catch 隔离记 created:false）；
+      //   此处再加一层 try/catch + warn 日志，派生失败时降级继续（绝不阻断 run）。
+      try {
+        const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({ database, buildFundTransferReconRows });
+        if (fundTransferReconDerive && fundTransferReconDerive.created === false) {
+          appendActivityLogEntry({
+            level: 'warning',
+            source: 'main',
+            domain: 'fund-transfer-recon-derive',
+            message: '[调拨对账单] run 入口实时重派生失败，降级继续（读现有持久表）',
+            details: [String(fundTransferReconDerive.error || '')]
+          });
+        }
+      } catch (ftrRunErr) {
+        appendActivityLogEntry({
+          level: 'warning',
+          source: 'main',
+          domain: 'fund-transfer-recon-derive',
+          message: '[调拨对账单] run 入口实时重派生异常，降级继续（读现有持久表）',
+          details: [ftrRunErr && ftrRunErr.message ? ftrRunErr.message : String(ftrRunErr)]
+        });
+      }
       // v3.0.6 需求2（🔴 资金红线）：R5s2「对账数据来源」二选一 —— 勾选「中台调拨单表」时改走调拨对账单回填。
       //   gating 仿 workingMidRows：默认勾选（config.reconSourceMid !== false，缺省/老库无字段视为勾选，决策 D4）；
       //   仅勾选路才 structuredClone 读隐藏派生表 linked_fund_transfer_recon，否则注入 []（取消路不读本 context）。
