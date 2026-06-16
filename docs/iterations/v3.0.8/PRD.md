@@ -23,7 +23,7 @@
 v3.0.8 集中处理 **7 项**需求 —— 5 项新反馈 + 2 份用户已定稿的 v3.0.7 资金红线修复 spec（并入本迭代一起发）：
 
 1. **工具箱🧰（合表 / 拆表）** —— 脱离主对账流程的轻量 Excel 小工具。左下角新增🧰按钮 → 弹框：合并多个表头一致的表格为一张；按某字段的某些值拆分一张表为子集表。
-2. **场景管理体验** —— 退役自带场景 C3（`gateway-recon-join`，退役隐藏、保留后端）+ 两大功能分组（「资金性质校验」「中台订单数据处理」）三角折叠、默认收纳。
+2. **场景管理体验** —— 退役自带场景 C3（`gateway-recon-join`，**纯前端过滤退役**：列表 `refreshTable` 过滤不显示，`migrations.js` 完全不动、引擎/约束/seed/已有库记录全保留）+ 两大功能分组（「资金性质校验」「中台订单数据处理」）三角折叠、默认收纳。
 3. **资金对账「开始运行」不阻塞** —— 主进程异步化 + 进度事件转发，消除运行期窗口「未响应」（不上 worker）。🔴 资金红线（对账 run 路径）。
 4. **银行未命中场景 sheet 布局** —— 提醒独占 A1，表头 / 数据整体右移到 B 列起。🔴 输出口径。
 5. **BOC 调拨修复行 Type 改值** —— 修复模板输出列 `Type` 由 `2 → 1`。🔴 资金红线。
@@ -51,7 +51,7 @@ v3.0.8 集中处理 **7 项**需求 —— 5 项新反馈 + 2 份用户已定稿
 ### 2.2 目标（必做）
 
 - **需求 1**：左下角🧰入口 → 工具箱弹框；合并表格（导入多文件即一气呵成另存为）+ 拆分表格（导入文件 → 选字段/值 → 导出子集）两条链路；文件名模板带时间戳；合表表头一致性校验。
-- **需求 2**：场景管理弹框过滤 C3 不显示（后端引擎/约束/已有库记录不动，可回滚）+ 新库不再 seed C3；两大功能分组折叠收纳，默认 collapsed。
+- **需求 2**：场景管理弹框**纯前端过滤** C3 不显示（`refreshTable` 过滤 `category==='gateway-recon-join'`；后端引擎/约束/seed/已有库记录全不动，`migrations.js` 一行不改 → 更可回滚、零 migration 风险）；两大功能分组折叠收纳，默认 collapsed。
 - **需求 3**：`bank-statement:run` handler 改 async + 阶段边界让出事件循环；编排器在轮次边界插 yield + 进度上报，实际边界 R1→R2(dispatcher)→R3.5→R4→R5（R5 内细分 s2@359 / s2b@404 / s3@423 / s4@448 子轮，R2 在 R1 与 R3.5 之间）（轮次顺序/引擎入参/数据逻辑零改动）；新增 `bank-statement:run:progress` 进度通道，前端订阅更新状态框。
 - **需求 4**：未命中场景 sheet1 表头 / 数据列号整体 +1（右移 B 列起），A1 提醒不变；仅 sheet1，golden 回归更新。
 - **需求 5**：`boc-dispatch-order-fix.js` Type `2 → 1` + 同步注释 + 单测断言 + golden；需用户最终确认 Type=1 业务语义。
@@ -62,7 +62,7 @@ v3.0.8 集中处理 **7 项**需求 —— 5 项新反馈 + 2 份用户已定稿
 ### 2.3 明确不做（非目标）
 
 - **需求 1**：合表不做表头「相似即对齐」（要求全相同，不同即报错停止）；拆表暂只支持单字段筛选（单选字段 + 多选值），不做多字段组合筛选；多选值产物为单文件（含全部选中值的行），不做「每个值一个文件」。不复用主对账模板 / 列映射 / 币种归一化（纯行级搬运）。
-- **需求 2**：不删 C3 引擎（`c3-gateway-recon-join.js`）/ dispatcher case / CHECK 约束（`migrations.js:409`）/ 已有库记录（仅 UI 隐藏 + 新库不 seed，保证可回滚）；不改 R1 强制匹配（C3 是 R2 可选场景，与 R1 无关）。
+- **需求 2**：不删 C3 引擎（`c3-gateway-recon-join.js`）/ dispatcher case / CHECK 约束（`migrations.js:409`）/ seed（`migrations.js:378`）/ 已有库记录（**纯前端 UI 过滤隐藏，`migrations.js` 完全不动**，保证可回滚）；不改 R1 强制匹配（C3 是 R2 可选场景，与 R1 无关）。**新建场景下拉仍可建 C3**（实施期取舍，见 §十二 OPEN-2）。
 - **需求 3**：不上 worker_threads（仅主进程 async + setImmediate 让出）；不改轮次顺序、引擎入参、任何数据匹配逻辑；进度只做状态框文案更新，不做百分比进度条精算。
 - **需求 4**：仅改 sheet1「未命中场景」列布局；不动 sheet2「命中场景」（首列是「命中明细」，不涉及）；不改 A1 提醒文案、不改行号（仅右移列）。
 - **需求 5**：不在 src/ 内增删任何按 `Type==值` 过滤的逻辑（Type 仅落输出 Excel 给下游，src/ 内无消费分支）；仅改写值 + 注释 + 测试断言。
@@ -183,21 +183,22 @@ v3.0.8 集中处理 **7 项**需求 —— 5 项新反馈 + 2 份用户已定稿
 
 - **输入**：用户打开「场景管理」弹框（`renderer.js:5825` 调用点 → `createScenariosManagerDialog`，弹框定义在 `renderer-dialogs.js:6746`）。
 - **输出**：列表不再出现 C3；其余场景按两大功能分组归类，组标题带三角，默认收纳。
-- **边界条件**：C3 仅 UI 隐藏 + 新库不 seed，引擎/dispatcher/CHECK 约束/已有库记录全不动（可回滚）；折叠状态为前端临时状态（不持久化）。
+- **边界条件**：C3 **纯前端 UI 过滤隐藏**（`migrations.js` 完全不动，引擎/dispatcher/CHECK 约束/seed/已有库记录全保留，可回滚、零 migration 风险）；折叠状态为前端临时状态（不持久化）。
 
 #### 5.2.2 影响范围
 
-- 前端：`src/renderer-dialogs.js`（`refreshTable`/`renderRow` 过滤 C3 + 分组折叠渲染）、`src/styles-gemini-extra.css`（`.scenario-group-header`/`.scenario-group-toggle`/`.collapsed`）、preview 入口（回归）。
-- 后端：`src/backend/database/migrations.js`（`ensureScenariosSupport` seed 对新库不再插入 C3）。
+- 前端：`src/renderer-dialogs.js`（`refreshTable` 过滤 C3 + 分组折叠渲染）、`src/styles-gemini-extra.css`（`.scenario-group-header`/`.scenario-group-toggle`/`.collapsed`）、preview 入口（回归）。
+- 后端：**无**（实施期决策改为纯前端过滤退役，`migrations.js` 一行不改）。
 - 对外接口影响：无。
-- 兼容性影响：旧库已有 C3 记录保留（隐藏不删，可回滚）；C3 引擎/约束零改动。
+- 兼容性影响：旧库 + 新库 C3 记录均保留（前端隐藏不删、seed 照常，可回滚）；C3 引擎/约束/seed 零改动。
 
 #### 5.2.3 交互与规则
 
-**A. 退役 C3**（`gateway-recon-join`，`migrations.js:378` seed，默认 enabled=0，R2 可选场景，与 R1 强制匹配无关）：
-- 前端 `createScenariosManagerDialog`（renderer-dialogs.js:6746+，`refreshTable`/`renderRow`）过滤 `category==='gateway-recon-join'` 不显示；
-- 后端 seed `ensureScenariosSupport`（migrations.js:405 附近）对新库不再插入 C3；
-- **不动**：c3 引擎（`c3-gateway-recon-join.js`）/ dispatcher case / CHECK 约束（`migrations.js:409`）/ 已有库记录（保留可回滚）。
+**A. 退役 C3**（`gateway-recon-join`，`migrations.js:378` seed，默认 enabled=0，R2 可选场景，与 R1 强制匹配无关）—— **纯前端过滤退役**（实施期决策，见 §十二实施记录）：
+- 前端 `createScenariosManagerDialog`（renderer-dialogs.js:6746+，`refreshTable`）过滤 `category==='gateway-recon-join'` 不显示（实现落在 renderer-dialogs.js:7045 `scenariosRaw.filter`）；
+- **后端 `migrations.js` 完全不动**（决策原因：纯前端过滤更可回滚、零 migration 风险；seed/CHECK/case 全保留，回滚只需撤一行前端 filter）；
+- **不动**：c3 引擎（`c3-gateway-recon-join.js`）/ dispatcher case / CHECK 约束（`migrations.js:409`）/ seed（`migrations.js:378`，新库照常 seed C3，仅前端隐藏）/ 已有库记录（保留可回滚）。
+- **已知取舍**：新建场景下拉（renderer-dialogs.js:8005）仍含 C3 选项、`createScenarioConfigDialogC3()`（renderer-dialogs.js:238）仍可达 —— 本迭代仅退役「列表展示」，不封「新建入口」（OPEN-2）。
 
 **B. 分组折叠**（现状扁平表格 → 分组）：
 - 改 `refreshTable` 按 `config.funcCategory` 分组：`fund-nature-check` + `dbs-charge-fund-check` → 「资金性质校验」；`platform-order` → 「中台订单数据处理」（中文映射见 `renderer-dialogs.js:5621` `FUNC_CATEGORY_LABELS`）；
@@ -399,7 +400,7 @@ v3.0.8 集中处理 **7 项**需求 —— 5 项新反馈 + 2 份用户已定稿
 | AC2-1 | 场景管理列表不再出现 C3「与网关对账单根据金额币种一对一匹配对账ID」 |
 | AC2-2 | 列表按「资金性质校验」「中台订单数据处理」两组分组，组标题带 ▶/▼ 三角 |
 | AC2-3 | 两组默认 collapsed（收纳）；点三角可展开/折叠对应组子场景 |
-| AC2-4 | 新库（全新安装）seed 不插入 C3；旧库已有 C3 记录保留不删（引擎/约束零改动，可回滚） |
+| AC2-4 | 纯前端过滤退役：新库 + 旧库 C3 记录均保留（seed 照常、不删），仅 `refreshTable` 过滤不显示（`migrations.js` 零改动，引擎/约束/seed 全保留，可回滚） |
 | AC2-5 | 场景管理 preview 截图无布局回归 |
 
 ### 6.3 需求 3：运行不阻塞 AC
@@ -494,7 +495,7 @@ v3.0.8 集中处理 **7 项**需求 —— 5 项新反馈 + 2 份用户已定稿
 | 状态流转变更 | 需求3：`bank-statement:run` handler 由同步改 async + 新增进度通道 `bank-statement:run:progress`（单向 main→renderer）；轮次顺序/状态机零变化。需求2：场景管理新增前端临时折叠态（不持久化）。 |
 | 权限 / 安全 | 无鉴权变更。需求1 工具箱 IPC 复用既有 file-service 读写，文件名经 `sanitizeFileName`；合表表头校验防误合不同结构表。 |
 | 🔴 资金红线 | 需求 3/4/5/6/7 均涉对账 run 路径或输出口径：①需求6 改 run 入口数据准备（bank-deposit 门控谓词须逐字镜像 r5s4 条件；gateway 过滤读须等价测试背书）；②需求3 改 orchestrator 控制流（结果须 golden 一致）；③需求4 改未命中 sheet 列布局（golden）；④需求5 改 BOC 修复行 Type 值（用户确认语义 + golden/单测）；⑤需求7 改剔除清单匹配/触发（fallback 误命中 / 触发方向写反 / 1v1 重复消费三大风险，D-1a/D-1b/D-3 + 新增用例守护）。 |
-| 回滚策略 | 需求2：C3 仅 UI 隐藏 + 新库不 seed，引擎/约束/已有库记录全保留 → 回滚 = 撤前端过滤 + 恢复 seed，旧库数据无损。需求1/3：纯新增（工具箱）/控制流（async + 进度），回滚 = revert commit。需求4/5：单点值/列位改，回滚 = revert + 还 golden。需求6：门控 + 过滤读，回滚 = 恢复无条件全表读 + structuredClone。需求7：引擎三处改动，回滚 = revert 引擎 + 还单测。两份 spec 实施后归档 `changes/` 对应目录。 |
+| 回滚策略 | 需求2：C3 **纯前端 UI 过滤**（`migrations.js` 零改动，引擎/约束/seed/已有库记录全保留）→ 回滚 = 撤一行前端 filter 即可，无 migration 需回退、新旧库数据全无损。需求1/3：纯新增（工具箱）/控制流（async + 进度），回滚 = revert commit。需求4/5：单点值/列位改，回滚 = revert + 还 golden。需求6：门控 + 过滤读，回滚 = 恢复无条件全表读 + structuredClone。需求7：引擎三处改动，回滚 = revert 引擎 + 还单测。两份 spec 实施后归档 `changes/` 对应目录。 |
 
 ---
 
@@ -502,7 +503,7 @@ v3.0.8 集中处理 **7 项**需求 —— 5 项新反馈 + 2 份用户已定稿
 
 | 类别 | 要求 |
 |------|------|
-| 向下兼容 | 需求2 旧库 C3 记录保留可回滚；需求6 门控/过滤读对启用退款场景/正常网关数据零行为变化；需求7 子串变更对现有 12 值 FundType 枚举零行为变化（仅 `'Inbound'` 含 "Inbound" 子串）；需求1 纯新增不影响既有链路。 |
+| 向下兼容 | 需求2 新旧库 C3 记录均保留（纯前端过滤、`migrations.js` 零改动，可回滚）；需求6 门控/过滤读对启用退款场景/正常网关数据零行为变化；需求7 子串变更对现有 12 值 FundType 枚举零行为变化（仅 `'Inbound'` 含 "Inbound" 子串）；需求1 纯新增不影响既有链路。 |
 | 性能 | 需求6：关退款场景时省 ~1.2GB bank-deposit 无谓载入；gateway 由全量读（可达数百万行）降为 Channel 子集读 + 删深拷 → 峰值内存大幅下降。需求3：运行期让出事件循环，UI 不阻塞（不增加总运行时长，仅消除假死）。 |
 | 鲁棒性 | 需求1 合表表头校验防误合；拆表空集/取消路径安全。需求6 三个陷阱（空/缺 Channel、归一化口径、跨轮无越界 Channel）处理到位，否则漏匹配。需求7 一级消歧失败不 fallback、严格 1v1 跨两级共享、空配置兜底。 |
 
@@ -522,12 +523,36 @@ v3.0.8 集中处理 **7 项**需求 —— 5 项新反馈 + 2 份用户已定稿
 |------|---------|
 | 2026-06-16 | 初稿：依据已批准 plan + spec A（运行内存尖峰修复）+ spec B（R5s3 规则变更）撰写 v3.0.8 PRD，覆盖 7 需求（12 章范式，37 条 AC），资金红线标注需求 3/4/5/6/7，发版文档三件套待 bump 时统一更新。 |
 | 2026-06-16 | team-lead 审查订正 7 处 file:line 出处/边界（FUNC_CATEGORY_LABELS、createScenariosManagerDialog、writeWorkbookRows facade、yield 轮次、门控谓词锚、拆表空值边界、AC 计数）。 |
+| 2026-06-16 | Reverse Sync 订正与回填（PM）：①需求2 退役方式由「migrations 不 seed」改为**纯前端过滤退役**（`migrations.js` 零改动，更可回滚、零 migration 风险），订正 §一/§2.2/§2.3/§5.2/§6.2/§八/§九相关条目；②回填 §十二实施记录（7 commit 清单 + 4 项实施期取舍/增强：C3 退役边界 OPEN-2 / json_valid 守卫 / displayIndex 序号红线 / R5s3 全角括号）。 |
 
 ---
 
 ## 十二、实施记录
 
-> 由 PR merged + 归档后追加。当前为空。
+> 由 dev 分 W1~W6 工作流实施，team-lead `git diff`+`release-check`+`/check-vars` 核实。7 个 commit（`git log 28dab32..HEAD`，按提交逆序列出，倒序即实施顺序 bump→W1→…→W6）。
+
+### 12.1 Commit 清单（逐条 hash + 标题）
+
+| # | Hash | 标题 | 需求 |
+|---|------|------|------|
+| 1 | `4afd20f` | `[v3.0.8] bump 3.0.8 + PRD/TechDoc + 纳入 2 份资金红线 spec（运行内存尖峰 / R5s3 规则）` | 收尾（切分支/bump/纳 spec A/B/scan:vars） |
+| 2 | `faf05b3` | `[v3.0.8] 需求5 BOC 调拨修复行 Type 2→1` | 5 |
+| 3 | `0d64d03` | `[v3.0.8] 需求4 银行未命中 sheet 数据右移到 B 列` | 4 |
+| 4 | `94a5170` | `[v3.0.8] 需求7 R5s3 两级 fallback（ReconId 主+ChannelOrderNo 兜底）+ FundType 子串判定` | 7 |
+| 5 | `fdf5635` | `[v3.0.8] 需求6+3 开始运行卡顿根治：bank-deposit 消费方门控 + gateway 按 Channel 过滤读（删深拷）+ 资金对账异步化（轮次 yield + 进度事件，golden 字节不变）` | 6+3（W4 合并工作流，先 6 后 3） |
+| 6 | `304c90a` | `[v3.0.8] 需求1 工具箱🧰 合表/拆表（3 IPC + 工具箱/选字段弹框 + 端到端测试 + preview）` | 1 |
+| 7 | `9e67b56` | `[v3.0.8] 需求2 场景管理：退役 C3（前端隐藏，后端保留可回滚）+ 资金性质校验/中台订单两组三角折叠默认收纳` | 2 |
+
+> 落地与 TECHDOC §二「W1 需求5 / W2 需求4 / W3 需求7 / W4 需求6+3 / W5 需求1 / W6 需求2」分工一致。需求6+3 按计划合并到单 commit（fdf5635）实施，先 6 减载入、后 3 异步化。
+
+### 12.2 实施期取舍 / 增强（spec 外）
+
+| 项 | 内容 | 性质 |
+|----|------|------|
+| ① C3 退役边界 | 需求2 退役方式由「migrations 不 seed」改为**纯前端过滤**（`renderer-dialogs.js:7045` `scenariosRaw.filter(s => s.category!=='gateway-recon-join')`，`migrations.js` 完全不动）。但退役仅作用于「场景管理列表展示」——**新建场景下拉仍含 C3 选项**（renderer-dialogs.js:8005）、`createScenarioConfigDialogC3()`（renderer-dialogs.js:238）仍可达，用户仍能新建 C3 场景。 | 已知取舍（OPEN-2），本迭代只退役展示、不封新建入口 |
+| ② 需求6 加 `json_valid` 守卫 | 新仓储 `readGatewayBillRowsByChannels` 的 SQL 在 `json_extract` 求值前先 `json_valid(raw_json) AND (...)` 短路（linked-table-repository.js:992-995），把坏 JSON 行排除在 `json_extract` 之外，防单条坏行的 `json_extract` 报错崩整轮对账 run。原 TECHDOC §6.3a SQL 未含此守卫。 | spec 外防御性增强（防坏 JSON 崩 run） |
+| ③ W6 displayIndex 序号红线修复 | 需求2 分组折叠重排列表时，序号列严格用 `scenario.displayIndex`（派发口径）而非分组后的列表位次（renderer-dialogs.js:7071-7079 标注 N3-1 一致性红线，`displayIndex` 缺失才回退位次）→ **分组不串号**（同一场景在分组前后序号显示值不变）。 | 红线修复（命中 `rules/important-variables.md` displayIndex 软约束） |
+| ④ R5s3 二级标记用全角括号 | 需求7 二级（ChannelOrderNo）匹配的消歧警告 message 后缀，实现用**全角括号**「（按 ChannelOrderNo 匹配）」（r5-platform-inbound-cleanup.js:127），与 TECHDOC §11.3 草案的半角 `(按 ChannelOrderNo 匹配)` 不同（统一中文文案全角风格）。 | 文案细节订正 |
 
 ---
 

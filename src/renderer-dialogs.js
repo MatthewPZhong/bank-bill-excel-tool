@@ -7038,7 +7038,9 @@
         const scenariosRaw = await loadScenariosOrAlert();
         if (scenariosRaw === null) return;
         // v3.0.8 需求2（W6）：退役自带场景 C3「与网关对账单根据金额币种一对一匹配对账ID」（category='gateway-recon-join'）
-        //   —— 仅前端过滤隐藏（用户看不到、无法启用），最大可回滚、零 migration 风险。
+        //   —— 仅前端过滤隐藏：自带 C3 列表项在场景管理列表看不到、不可在表内启停，最大可回滚、零 migration 风险。
+        //   注意：本过滤只隐藏列表项，不是全链路屏蔽——新建场景下拉（约 8003 行）仍可建 C3，
+        //   已有库中手动启用的 C3 因后端保留仍会运行（向后兼容，属 TECHDOC OPEN-2 已知取舍）。
         //   后端引擎 / dispatcher case / CHECK 约束 / 已有库记录 / 新库 seed 全不动；新库 seed 的 enabled=0 C3 被此过滤等效退役。
         const scenarios = scenariosRaw.filter((s) => s.category !== 'gateway-recon-join');
         // v2.1.16 需求1：listScenarios 不返 config → 为 builtin-fixed 行补 config，

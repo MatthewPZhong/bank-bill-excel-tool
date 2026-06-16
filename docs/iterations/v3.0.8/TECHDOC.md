@@ -27,7 +27,7 @@
 | PRD 要点 | Dev 评审 |
 |---------|---------|
 | §5.1 需求1 工具箱（合表/拆表） | 全新轻量工具，脱离对账流程；复用既有 `extractHeaders`/`readRows`/`writeWorkbookRows`（file-service）+ `openModal/closeModal`（renderer-dialogs）+ `createModuleCabinetDialog` 弹框范式；3 个新 IPC 走 `trackedIpcHandle`，对现有链路零侵入，可行 |
-| §5.2 需求2 场景管理（退役 C3 + 分组折叠） | C3 退役为「仅 UI 隐藏 + 新库不 seed」，引擎/dispatcher case/CHECK 约束/已有库记录全保留 → 可回滚；分组折叠是 `refreshTable` 纯前端重排，零后端改动，可行 |
+| §5.2 需求2 场景管理（退役 C3 + 分组折叠） | C3 退役为「**纯前端过滤**」（实施期决策；`migrations.js` 零改动，引擎/dispatcher case/CHECK 约束/seed/已有库记录全保留 → 更可回滚、零 migration 风险）；分组折叠是 `refreshTable` 纯前端重排，零后端改动，可行 |
 | §5.3 需求3 运行不阻塞 | handler 改 async + 阶段边界 `await setImmediate` 让出 + 进度事件，仿 `createRunProgressForwarder`（main.js:12302）已验证范式；**轮次顺序/引擎入参/数据逻辑零改动**，golden 字节一致，可行 |
 | §5.4 需求4 未命中 sheet 布局 | `exceljs-writer.js` sheet1 仅列右移（`idx+1→idx+2`、`colIdx+1→colIdx+2`），A1 提醒不变；最小改动、仅 sheet1，可行 |
 | §5.5 需求5 BOC 调拨 Type | `boc-dispatch-order-fix.js:238` 单值 `2→1`；src/ 内无按 `Type==2` 过滤逻辑（Type 仅落输出 Excel 给下游），可行（**须用户确认 Type=1 业务语义**） |
@@ -77,12 +77,12 @@
 
 | 文件 | 改动类型 | 概要 |
 |------|---------|------|
-| `src/renderer-dialogs.js` | 修改 | `createScenariosManagerDialog` 的 `refreshTable`/`renderRow`（6746+）：① 过滤 `category==='gateway-recon-join'` 不显示；② 按 `config.funcCategory` 分组渲染分组标题行 + ▶/▼ 三角，两组默认 collapsed |
-| `src/backend/database/migrations.js` | 修改 | `ensureScenariosSupport` seed（405 附近）对新库不再插入 C3（`category:'gateway-recon-join'`，378-379） |
+| `src/renderer-dialogs.js` | 修改 | `createScenariosManagerDialog` 的 `refreshTable`（6746+）：① 过滤 `category==='gateway-recon-join'` 不显示（实现 7045 `scenariosRaw.filter`）；② 按 `config.funcCategory` 分组渲染分组标题行 + ▶/▼ 三角，两组默认 collapsed；③ 序号列严格用 `scenario.displayIndex`（7071-7079，N3-1 红线，分组不串号） |
+| ~~`src/backend/database/migrations.js`~~ | **不改**（实施期决策） | **退役方式改为纯前端过滤**：`migrations.js` 一行不改，新库照常 seed C3（378-379），仅前端隐藏。决策原因：更可回滚、零 migration 风险。 |
 | `src/styles-gemini-extra.css` | 修改 | `.scenario-group-header` / `.scenario-group-toggle` / `.collapsed` |
-| `renderer-previews.js` | 修改 | 场景管理 preview 重跑（折叠态 + C3 消失） |
-| `tests/unit/...` | 修改/新增 | migrations 新库不 seed C3 断言；保留 case/CHECK/已有库记录不动断言 |
-| **不动** | — | c3 引擎 `c3-gateway-recon-join.js` / dispatcher case / CHECK 约束（migrations.js:409/518/571）/ 已有库 C3 记录（可回滚红线） |
+| `renderer-previews.js` / `docs/previews/scenarios-manager.png` | 修改 | 场景管理 preview 重跑（折叠态 + C3 消失） |
+| `tests/unit/renderer-dialogs-scenario-group-collapse.test.js` | 新增 | 分组折叠 + C3 过滤 + displayIndex 序号断言（实测 commit 9e67b56 新建此测，182 行） |
+| **不动** | — | c3 引擎 `c3-gateway-recon-join.js` / dispatcher case / CHECK 约束（migrations.js:409/518/571）/ **seed（migrations.js:378，新库照常 seed）** / 已有库 C3 记录（可回滚红线） |
 
 ### 需求 3：运行不阻塞（W4，与需求6 合并）
 
@@ -164,8 +164,8 @@ Main Process（src/main.js）— 🔴 NUL 二进制（grep -a / git diff --text�
         │     └── file-service/{readers,writers}.js
         ├── src/backend/database.js（facade，需求6 加 readGatewayBillRowsByChannels）
         │     └── database/
-        │         ├─[需求6] linked-table-repository.js: readGatewayBillRowsByChannels
-        │         └─[需求2] migrations.js: ensureScenariosSupport 新库不 seed C3
+        │         └─[需求6] linked-table-repository.js: readGatewayBillRowsByChannels（+json_valid 守卫）
+        │         （需求2 不再改 migrations.js —— 纯前端过滤退役，C3 seed 保留）
         └── src/main-process/
             ├─[需求3] reconciliation-orchestrator.js: runReconciliation async + onProgress
             ├─[需求4] exceljs-writer.js: writeBankStatementOutput sheet1 列右移
@@ -182,7 +182,7 @@ Main Process（src/main.js）— 🔴 NUL 二进制（grep -a / git diff --text�
 |----|------|
 | 入参 | 无（handler 内 `dialog.showOpenDialog` 多选） |
 | 流程 | `showOpenDialog`(多选 xlsx/csv) → 各文件 `extractHeaders`（readers.js:364，返回 trim 后表头数组）→ 校验全相同（`JSON.stringify(headers)` 全等，顺序+大小写敏感）→ 不同则抛 `FileValidationError`（前端 alert 停止）→ 各文件 `readRows`（readers.js:148，返回 aoa 含表头行）→ 合并 aoa = `[首文件表头行, ...各文件数据行(切掉各自表头行)]` → `writeWorkbookRows({rows: aoa, outputFilePath, sheetName})`（经 file-service facade `file-service.js:810` 调用——main.js 实际 require 入口，facade 内部再补 formatters 转调 writers.js:223 实现，工具箱不直接 require writers.js）→ `showSaveDialog`(默认名 `合并-{YYYYMMDDHHmm}.xlsx`) |
-| 返回 | `{ status: 'ok', filePath }` / `{ status: 'cancelled' }` / `{ status: 'failed', message, detailLines }` |
+| 返回 | `{ status: 'success', filePath }` / `{ status: 'cancelled' }` / `{ status: 'failed', message, detailLines }`（实现按 house 约定用 `'success'/'cancelled'/'failed'` 三态，**非** `'ok'`；见 main.js:12907/12886/12858） |
 | 前端 | `createToolboxDialog` 合并行 = 单 `[导入文件]` 按钮 → invoke → 成功 toast/alert 路径、失败 alert detailLines |
 
 **IPC 2 — `toolbox:split:read`（拆表第一步：读源 + 算去重值）**
@@ -191,7 +191,7 @@ Main Process（src/main.js）— 🔴 NUL 二进制（grep -a / git diff --text�
 |----|------|
 | 入参 | 无（handler 内 `showOpenDialog` 单选） |
 | 流程 | `showOpenDialog`(单选) → `extractHeaders` + `readRows` → 按列算各字段去重值 `valuesByField`（`{ [header]: string[] }`，值 normalize + 去重 + 保留首现序） |
-| 返回 | `{ status:'ok', sourceFilePath, headers: string[], valuesByField }` / `{ status:'cancelled' }` / `{ status:'failed', message }` |
+| 返回 | `{ status:'success', sourceFilePath, headers: string[], valuesByField }` / `{ status:'cancelled' }` / `{ status:'failed', message }`（三态字面量同上，成功态为 `'success'`） |
 | 前端 | 拆表行 `[导入文件]` → invoke split:read → 成功则 `openModal(createSplitFieldPickerDialog({headers, valuesByField, onComplete, onCancel}))` |
 
 **IPC 3 — `toolbox:split:export`（拆表第二步：过滤 + 写）**
@@ -200,7 +200,7 @@ Main Process（src/main.js）— 🔴 NUL 二进制（grep -a / git diff --text�
 |----|------|
 | 入参 | `{ sourceFilePath, field, values: string[] }` |
 | 流程 | `readRows(sourceFilePath)` → 定位 `field` 列索引 → 过滤数据行 `normalizeCell(row[colIdx]) ∈ values`（**多选值 → 单文件**，含所有选中值的行）→ `writeWorkbookRows`（aoa = `[表头行, ...命中行]`）→ `showSaveDialog`(默认名 `拆分-{values 分隔符拼接 sanitizeFileName}-{YYYYMMDDHHmm}.xlsx`) |
-| 返回 | `{ status:'ok', filePath }` / `{ status:'cancelled' }` / `{ status:'failed', message }` |
+| 返回 | `{ status:'success', filePath }` / `{ status:'cancelled' }` / `{ status:'failed', message, detailLines }`（三态字面量同上，成功态为 `'success'`；split:export 失败态也带 `detailLines`） |
 | 前端 | `createSplitFieldPickerDialog` 单选下拉（=表头）+ 多选下拉（=该字段去重值，随单选刷新）+ `[完成][取消]`；完成 → invoke split:export |
 
 **接缝陷阱**：
@@ -215,31 +215,33 @@ Main Process（src/main.js）— 🔴 NUL 二进制（grep -a / git diff --text�
 
 ### 4.1 实现方案
 
-- **退役 C3（`gateway-recon-join`）= 仅隐藏 + 不 seed，保留后端**（可回滚红线）：
-  - 前端：`createScenariosManagerDialog` 的 `refreshTable`/`renderRow`（renderer-dialogs.js:6746+）过滤 `category==='gateway-recon-join'` 不渲染。
-  - 后端：`ensureScenariosSupport`（migrations.js:405 附近）对新库不再插入 C3 seed（现 378-379 `category:'gateway-recon-join'`）。
-  - **不动**：c3 引擎、dispatcher case、CHECK 约束（migrations.js:409/518/571 含 `'gateway-recon-join'` 枚举）、已有库 C3 记录（enabled=0，R2 可选场景，与 R1 强制匹配无关）。
+- **退役 C3（`gateway-recon-join`）= 纯前端过滤隐藏，后端完全不动**（实施期决策；可回滚红线）：
+  - 前端：`createScenariosManagerDialog` 的 `refreshTable`（renderer-dialogs.js:6746+）过滤 `category==='gateway-recon-join'` 不渲染（实现落 renderer-dialogs.js:7045 `const scenarios = scenariosRaw.filter((s) => s.category !== 'gateway-recon-join')`）。
+  - **后端 `migrations.js` 一行不改**（原 TechDoc 草案的「新库不 seed C3」未采用）。**决策原因**：纯前端过滤更可回滚（回滚只撤一行 filter）、零 migration 风险（不动 seed/不引入 migration 顺序依赖）；新库照常 seed C3，仅前端隐藏。
+  - **不动**：c3 引擎、dispatcher case、CHECK 约束（migrations.js:409/518/571 含 `'gateway-recon-join'` 枚举）、**seed（migrations.js:378，新库照常 seed C3）**、已有库 C3 记录（enabled=0，R2 可选场景，与 R1 强制匹配无关）。
+  - **已知取舍（OPEN-2）**：退役仅作用于「场景管理列表展示」；新建场景下拉（renderer-dialogs.js:8005 `{ value: 'gateway-recon-join', ... }`）仍含 C3、`createScenarioConfigDialogC3()`（renderer-dialogs.js:238）仍可达 → 用户仍能新建 C3 场景。本迭代不封新建入口。
 - **分组折叠**：现状扁平表格，改 `refreshTable` 按 `config.funcCategory` 分组：
   - 「资金性质校验」组 = `funcCategory ∈ {fund-nature-check, dbs-charge-fund-check}`；
   - 「中台订单数据处理」组 = `funcCategory === 'platform-order'`；
   - 映射见 `renderer-dialogs.js:5621` `FUNC_CATEGORY_LABELS`（已存在，复用作组名；renderer.js:5621 是无关的 setBizOpReconStatus 代码）。
   - 插分组标题行（含 ▶/▼ 三角 + 组名）+ 子场景行按折叠态显隐；两组**默认 collapsed**。
-- **为什么不用其他方案**：C3 物理删除会破坏 CHECK 枚举与已有库记录、不可回滚，且 R2 dispatcher case 仍引用；仅 UI 隐藏 + 不 seed 是最小可回滚改动。
+- **为什么不用其他方案**：C3 物理删除会破坏 CHECK 枚举与已有库记录、不可回滚，且 R2 dispatcher case 仍引用。原草案「UI 隐藏 + migrations 不 seed」需改 `migrations.js`（引入 migration 改动 + 新库与旧库行为分叉）；实施期收窄为**纯前端 UI 过滤**（`migrations.js` 零改动）—— 回滚面更小、零 migration 风险、新旧库一致，是最小可回滚改动。
 
 ### 4.2 改动点
 
 | 文件 | 行号 | 改动内容 |
 |------|------|---------|
-| `renderer-dialogs.js` | 6746+ `refreshTable`/`renderRow` | 过滤 C3 + 按 funcCategory 分组渲染（分组标题行 + 三角 + 折叠态显隐，默认 collapsed） |
-| `migrations.js` | 405 附近 `ensureScenariosSupport` | 新库 seed 不再插入 `category:'gateway-recon-join'` 条目 |
+| `renderer-dialogs.js` | 7045 `refreshTable` | 过滤 C3（`scenariosRaw.filter(s => s.category!=='gateway-recon-join')`）+ 按 funcCategory 分组渲染（分组标题行 + 三角 + 折叠态显隐，默认 collapsed）+ 序号列用 `displayIndex`（7071-7079，分组不串号） |
+| ~~`migrations.js`~~ | — | **不改**（实施期决策：纯前端过滤退役，seed 保留、零 migration 风险） |
 | `styles-gemini-extra.css` | 新增 | `.scenario-group-header` / `.scenario-group-toggle` / `.collapsed` |
 
 ### 4.3 注意事项
 
-- 退役只过滤显示，**老库已 enabled 的 C3 不强制禁用**（理论上老库 C3 默认 enabled=0；如有手动开启的，运行时 dispatcher case 仍在 → 行为不变，仅 UI 不可见）。如需更强收纳可后续讨论；本迭代按 plan「隐藏隐藏保留后端」最小实现。
+- 退役只过滤显示，**老库已 enabled 的 C3 不强制禁用**（理论上老库 C3 默认 enabled=0；如有手动开启的，运行时 dispatcher case 仍在 → 行为不变，仅 UI 不可见）。新库照常 seed C3（migrations.js:378 不动），同样仅前端隐藏。如需更强收纳可后续讨论；本迭代按「纯前端过滤、后端零改动」最小实现。
+- 🔴 **序号红线（displayIndex）**：分组折叠重排列表时序号列必须用 `scenario.displayIndex`（派发口径，renderer-dialogs.js:7071-7079 标注 N3-1 一致性红线），不能用分组后的列表位次，否则同一场景在分组前后序号会串号；`displayIndex` 缺失才回退位次（兜底）。命中 `rules/important-variables.md` displayIndex 软约束。
 - 分组组名复用 `FUNC_CATEGORY_LABELS`，避免硬编码漂移。
 - 折叠态是前端临时状态（不持久化），每次打开弹框默认 collapsed。
-- preview 回归：场景管理新增折叠态 + C3 消失，重跑对应 `npm run preview:*`。
+- preview 回归：场景管理新增折叠态 + C3 消失，重跑对应 `npm run preview:*`（commit 9e67b56 已更新 `docs/previews/scenarios-manager.png`）。
 
 ---
 
@@ -318,6 +320,8 @@ const workingDepositRows = refundBackfillEnabled
 // v3.0.8：按 Channel 集合下推过滤读网关账单表（防 300 万行全量载入尖峰）。
 //   业务不变量：对账永远同 Channel → 只需 Channel∈channels 的网关行。
 //   channels 含空值时一并匹配「Channel=空串」与「缺 Channel 字段（json_extract→NULL）」两种网关行。
+//   🔴 实施期增强（spec 外防御）：WHERE 先 json_valid(raw_json) 短路守卫，把坏 JSON 行排除在
+//      json_extract 求值之外，防单条坏行的 json_extract 报错崩整轮对账 run（linked-table-repository.js:992-995）。
 function readGatewayBillRowsByChannels(db, channels) {
   const def = getDef('gateway-bill');
   if (!def.supported) return [];
@@ -329,7 +333,8 @@ function readGatewayBillRowsByChannels(db, channels) {
   const params = [];
   if (nonBlank.length) { conds.push(`json_extract(raw_json,'$.Channel') IN (${nonBlank.map(() => '?').join(',')})`); params.push(...nonBlank); }
   if (hasBlank) { conds.push(`json_extract(raw_json,'$.Channel') IS NULL`); conds.push(`json_extract(raw_json,'$.Channel') = ''`); }
-  const rows = db.prepare(`SELECT raw_json FROM ${def.table} WHERE ${conds.join(' OR ')} ORDER BY id ASC`).all(...params);
+  // json_valid 守卫先短路，坏 JSON 行不进 json_extract（实现：WHERE json_valid(raw_json) AND (<conds>)）
+  const rows = db.prepare(`SELECT raw_json FROM ${def.table} WHERE json_valid(raw_json) AND (${conds.join(' OR ')}) ORDER BY id ASC`).all(...params);
   const out = [];
   for (const r of rows) { try { const o = JSON.parse(r.raw_json); if (o && typeof o === 'object') out.push(o); } catch (_e) { /* 损坏行跳过 */ } }
   return out;
@@ -561,7 +566,7 @@ for (const gw of gwPool) {
     const resC = pickFromCandidates(candC);
     if (resC.row) { bankRow = resC.row; }
     else if (resC.skip === 'no-credit' || resC.skip === 'multi-credit') {
-      pushDisambigWarning(resC.skip, key, candC, 'ChannelOrderNo'); continue; // D-1b 复用同名 code + 来源标记
+      pushDisambigWarning(resC.skip, key, candC, 'ChannelOrderNo'); continue; // D-1b 复用同名 code + 来源标记（全角「（按 ChannelOrderNo 匹配）」）
     } else { continue; } // 两级都 empty → 静默跳过（现状一致）
   } else {
     pushDisambigWarning(resR.skip, key, candR, 'ReconciliationId'); continue; // 一级消歧失败不 fallback（D-3）
@@ -572,7 +577,7 @@ for (const gw of gwPool) {
 }
 ```
 
-`pushDisambigWarning(skip, key, cand, via)` 封装现两条 warning，code = `no-credit-match`/`multi-credit-match`、severity `warning`、message 末按 `via==='ChannelOrderNo'` 追加「(按 ChannelOrderNo 匹配)」（`via==='ReconciliationId'` 不加，保持原文案）。
+`pushDisambigWarning(skip, key, cand, via)` 封装现两条 warning，code = `no-credit-match`/`multi-credit-match`、severity `warning`、message 末按 `via==='ChannelOrderNo'` 追加**全角**「（按 ChannelOrderNo 匹配）」（实现 r5-platform-inbound-cleanup.js:127 用全角括号，统一中文文案风格；`via==='ReconciliationId'` 不加，保持原文案）。
 
 **不重复消费不变量**：只有一级 `empty`（candR 过滤后 0 条）才走二级；二级 candC 也过滤 usedBankRowId。某行两列都=key 且未消费 → candR 必非空 → resR 不会 empty → 不进二级；已消费则二级 filter 也排除。
 
@@ -628,7 +633,7 @@ fixture `bankRow(...)`（:40-63）加可选 `channelOrderNo` 入参（默认不�
 | 4 | 改未命中 sheet 列布局 | golden 更新，确认仅 sheet1 |
 | 5 | 改 BOC 修复行 Type 值 | 用户确认语义 + golden/单测更新 |
 | 7 | fallback 误命中 / 触发方向写反 / 1v1 重复消费 | D-1a/D-1b/D-3 压误命中；新增用例 1/2 防方向反；用例 6/7 守 1v1 与不 fallback |
-| 2 | 退役 C3 | 仅 UI 隐藏 + 新库不 seed，引擎/数据/约束不动，可回滚 |
+| 2 | 退役 C3 | **纯前端 UI 过滤**（`migrations.js` 零改动，引擎/数据/约束/seed 全保留），可回滚、零 migration 风险 |
 
 ### 12.2 GUI 手测（IPC 自动化盲点，必补）
 
@@ -666,7 +671,7 @@ fixture `bankRow(...)`（:40-63）加可选 `channelOrderNo` 入参（默认不�
 | 12 | W5 | 需求1 main 3 IPC + file-service 复用 + 时间戳 helper | `main.js` / `preload.js` | 集成 `toolbox-roundtrip.js` | todo |
 | 13 | W5 | 需求1 弹框 createToolboxDialog + createSplitFieldPickerDialog | `renderer-dialogs.js` / `renderer.js` / `index.html` | preview:toolbox + GUI 手测 ① | todo |
 | 14 | W5 | 需求1 CSS + preview 入口（4 处） | `styles-gemini-extra.css` / `renderer-previews.js` / `package.json` | preview 截图 | todo |
-| 15 | W6 | 需求2 退役 C3（前端过滤 + migrations 不 seed） | `renderer-dialogs.js` / `migrations.js` | migrations 断言 + preview | todo |
+| 15 | W6 | 需求2 退役 C3（**纯前端过滤**，migrations.js 不动） | `renderer-dialogs.js`（7045 filter） | 折叠/过滤/displayIndex 单测 + preview | done（9e67b56） |
 | 16 | W6 | 需求2 分组折叠 + CSS | `renderer-dialogs.js` / `styles-gemini-extra.css` | preview（折叠态） | todo |
 | 17 | — | 文档三件套 + PRD/TechDoc 实施记录 + spec 归档 | `CHANGELOG.md` / `VERSION_FEATURE_HISTORY.md` / `USER_GUIDE.md` / `changes/` | — | todo |
 | 18 | — | `npm run release-check` 全绿 + `npm run check:vars` | — | PASS/FAIL 源 | todo |
@@ -716,6 +721,23 @@ fixture `bankRow(...)`（:40-63）加可选 `channelOrderNo` 入参（默认不�
   - v3.0.8 沿用最新单主题约定：`docs/iterations/v3.0.8/` 裸文件名 PRD.md + TECHDOC.md（与 v3.0.4/v3.0.6 一致；v3.0.6 PRD 引用 TECHDOC 但实际无该文件，本迭代补齐）。
   - 工具箱 file-service 走 facade 复用（extractHeaders/readRows/writeWorkbookRows），不新建 reader/writer。
 
+### 2026-06-16（实施完成 — 回填实施日志，PM Reverse Sync）
+
+- **Commit 清单**（`git log 28dab32..HEAD`，7 条，逆序列出 / 倒序即实施顺序）：
+  1. `4afd20f` `[v3.0.8] bump 3.0.8 + PRD/TechDoc + 纳入 2 份资金红线 spec（运行内存尖峰 / R5s3 规则）` —— 切分支 / bump version / 纳 spec A·B / scan:vars。
+  2. `faf05b3` `[v3.0.8] 需求5 BOC 调拨修复行 Type 2→1`（W1）。
+  3. `0d64d03` `[v3.0.8] 需求4 银行未命中 sheet 数据右移到 B 列`（W2）。
+  4. `94a5170` `[v3.0.8] 需求7 R5s3 两级 fallback（ReconId 主+ChannelOrderNo 兜底）+ FundType 子串判定`（W3）。
+  5. `fdf5635` `[v3.0.8] 需求6+3 开始运行卡顿根治：bank-deposit 消费方门控 + gateway 按 Channel 过滤读（删深拷）+ 资金对账异步化（轮次 yield + 进度事件，golden 字节不变）`（W4 合并工作流，先 6 后 3，单 commit）。
+  6. `304c90a` `[v3.0.8] 需求1 工具箱🧰 合表/拆表（3 IPC + 工具箱/选字段弹框 + 端到端测试 + preview）`（W5；落地新增 `src/main-process/toolbox.js` 模块承载纯变换，handler 仅做 dialog+IO）。
+  7. `9e67b56` `[v3.0.8] 需求2 场景管理：退役 C3（前端隐藏，后端保留可回滚）+ 资金性质校验/中台订单两组三角折叠默认收纳`（W6）。
+- **实施期取舍 / 增强（spec 外，4 项）**：
+  1. **C3 退役边界（OPEN-2）**：退役方式由本 TechDoc 草案「migrations 不 seed」改为**纯前端过滤**（renderer-dialogs.js:7045，`migrations.js` 零改动）。退役仅作用于场景管理列表展示 —— 新建场景下拉（renderer-dialogs.js:8005）+ `createScenarioConfigDialogC3()`（:238）仍可达，**用户仍能新建 C3**（已知取舍，本迭代不封新建入口）。决策原因：纯前端过滤更可回滚、零 migration 风险。
+  2. **需求6 加 `json_valid` 守卫（防御性增强）**：`readGatewayBillRowsByChannels` 的 SQL 在 `json_extract` 求值前 `json_valid(raw_json) AND (...)` 短路（linked-table-repository.js:992-995），防单条坏 JSON 行的 `json_extract` 报错崩整轮对账 run。原 §6.3a 草案未含此守卫。
+  3. **W6 displayIndex 序号红线修复**：分组折叠重排列表时序号列严格用 `scenario.displayIndex`（派发口径，renderer-dialogs.js:7071-7079，N3-1 红线），分组不串号；命中 `rules/important-variables.md` displayIndex 软约束。
+  4. **R5s3 二级标记用全角括号**：需求7 二级（ChannelOrderNo）消歧警告 message 后缀用全角「（按 ChannelOrderNo 匹配）」（r5-platform-inbound-cleanup.js:127），与本 TechDoc §11.3 草案的半角不同，统一中文文案全角风格。
+- **测试落地**：commit 9e67b56 新建 `tests/unit/renderer-dialogs-scenario-group-collapse.test.js`（182 行）；304c90a 新建 `tests/unit/main-process/toolbox.test.js` + `tests/unit/renderer-dialogs-toolbox.test.js` + `scripts/integration/toolbox-roundtrip.js`；fdf5635 新建 `tests/unit/backend/database/gateway-channel-filter.test.js` + `scripts/integration/gateway-channel-filter-equivalence.js`。
+
 ### 可沉淀知识
 
 - [ ] 需求3+6 同 handler 协同顺序「先减载入后异步化」可沉淀为 `knowledge/`「同函数体多需求实施顺序」经验（稳定同步上下文先做精确行替换，再做整体控制流重构）。
@@ -728,6 +750,6 @@ fixture `bankRow(...)`（:40-63）加可选 `channelOrderNo` 入参（默认不�
 | # | 问题 | 处理 |
 |---|------|------|
 | OPEN-1 | 需求5 BOC 修复行 Type=1 的下游业务语义 | 🔴 **须用户最终确认**（plan 明确标注）；确认前不改单测断言/golden |
-| OPEN-2 | 需求2 退役 C3 后，老库中手动 enabled=1 的 C3 是否需强制禁用 | 本迭代按 plan 仅「UI 隐藏 + 新库不 seed」最小实现；老库已开启的运行时仍生效（dispatcher case 保留）。如需强制禁用可后续讨论，不在本迭代范围 |
+| OPEN-2 | 需求2 退役 C3 后：①老库中手动 enabled=1 的 C3 是否需强制禁用；②新建场景下拉仍可建 C3 是否需封 | **实施期取舍（已落地）**：本迭代退役收窄为「纯前端列表过滤」（`migrations.js` 零改动，新库照常 seed C3）；①老库已开启的运行时仍生效（dispatcher case 保留）；②新建场景下拉（renderer-dialogs.js:8005）+ `createScenarioConfigDialogC3()`（:238）仍可达，用户仍能新建 C3。即本迭代仅退役「列表展示」，不封「新建入口」/不强制禁用。如需更强收纳可后续讨论，不在本迭代范围 |
 | OPEN-3 | 需求1 工具箱合表的文件格式：是否支持 csv 与 xlsx 混合合并 | `readRows`/`extractHeaders` 底层支持 xlsx/csv；合表表头相同校验对两者统一适用；实施时确认 `showOpenDialog` filters 包含 csv，混合时以首文件格式输出 xlsx |
 | OPEN-4 | 需求3 进度事件文案粒度（轮次名 vs 百分比） | 轮次边界上报 `{round}`，renderer 展示「正在处理 R1/R2/...」；不做百分比（轮次内无细粒度进度）。实施时定文案 |
