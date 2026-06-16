@@ -4,7 +4,7 @@
 //   调拨单号不一致或缺失 / 链接ID 为空 —— 一律整组失败（不产出、不消耗）。
 //
 // 覆盖（spec §9.1 第三组 ~17 案）：
-//   组全配（Type===2 number / Reference/Amount 行级 / 11 列同源 / stats）；组半配（不消耗渠道行）；
+//   组全配（Type===1 number / Reference/Amount 行级 / 11 列同源 / stats）；组半配（不消耗渠道行）；
 //   无调拨单号 / 不一致；OrderId 0 命中 / 多命中；链接ID 空；渠道无 BOC 行 / 链接表空早返回；
 //   1v1 消耗（k 行同链接ID 需 k 条渠道行）；跨组同链接ID；两组共享调拨单号；channelName trim 与大小写；
 //   分组空行忽略；入参不可变深快照；分流四路回归；stats 完整性。
@@ -70,7 +70,7 @@ function run(sheets, links, scenario = SCENARIO) {
 // 1. 组全配 —— 整组成功
 // ========================================================================
 test.describe('组全配 — 整组匹配成功', () => {
-  test('单组 2 行 → 复制网关命中行 2 份、Type===2(number)、Reference/Amount 行级、11 列同源、stats', () => {
+  test('单组 2 行 → 复制网关命中行 2 份、Type===1(number)、Reference/Amount 行级、11 列同源、stats', () => {
     const links = [
       linkRow({ group: '1', alloc: 'ALC-1', reconLinkId: 'RID-A', ccy1Amount: 15000 }),
       linkRow({ group: '1', alloc: 'ALC-1', reconLinkId: 'RID-B', ccy1Amount: 6000 })
@@ -81,10 +81,10 @@ test.describe('组全配 — 整组匹配成功', () => {
     };
     const res = run(sheets, links);
     assert.strictEqual(res.fixedRows.length, 2, '组行数 2 → 复制 2 份');
-    // Type === number 2
+    // Type === number 1（v3.0.8 需求5：BOC 修复行 Type 由 2 → 1）
     for (const fr of res.fixedRows) {
-      assert.strictEqual(fr.Type, 2);
-      assert.strictEqual(typeof fr.Type, 'number', 'Type 必须是 number 2');
+      assert.strictEqual(fr.Type, 1);
+      assert.strictEqual(typeof fr.Type, 'number', 'Type 必须是 number 1');
     }
     // Reference / Amount 行级注入（按链接表行顺序）
     assert.strictEqual(res.fixedRows[0].Reference, 'RID-A');
