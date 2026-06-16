@@ -5,14 +5,14 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.0.7 |
-| 扫描时间 | 2026-6-16 16:38:14 |
+| 扫描时间 | 2026-6-16 19:45:36 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 160 |
-| 顶层声明总数 | 1673 |
-| ≥2 次引用 | 1549 |
+| 顶层声明总数 | 1674 |
+| ≥2 次引用 | 1550 |
 | 跨 ≥3 文件 (A-share) | 282 |
 | 跨 2 文件 (A-pair) | 464 |
-| 单文件 (A-local) | 803 |
+| 单文件 (A-local) | 804 |
 | 跨文件合计 (B) | 746 |
 
 ---
@@ -54,7 +54,7 @@
 | `createContract` | 7 | 13 | 4 | src/backend/acquiring-bill-currency-import/contract-bill.js |
 | `getRunById` | 7 | 12 | 3 | src/backend/acquiring-bill-currency-db/run-repository.js |
 | `mapRow` | 7 | 10 | 1 | src/backend/pending-import/removed-reader.js |
-| `state` | 6 | 309 | 1 | src/renderer.js |
+| `state` | 6 | 310 | 1 | src/renderer.js |
 | `session` | 6 | 60 | 3 | src/main-process/acquiring-bill-currency-run-data.js |
 | `MAX_COLLECTED_ERRORS` | 6 | 21 | 5 | src/backend/acquiring-bill-currency-import/contract-bill.js |
 | `BILL_HEADERS` | 6 | 18 | 6 | src/backend/acquiring-bill-currency-db/columns.js |
@@ -316,8 +316,8 @@
 | `database` | 27 | src/main.js |
 | `ContractValidationError` | 25 | src/backend/big-table-import/contract.js |
 | `BANK_FUND_TYPE_FIELD` | 19 | src/main-process/scenario-engines/dbs-charge-fund-check.js |
+| `refreshBankStatementStatus` | 19 | src/renderer.js |
 | `TEMPLATE_LABEL` | 19 | src/backend/pending-import/removed-reader.js |
-| `refreshBankStatementStatus` | 18 | src/renderer.js |
 | `PipelineError` | 17 | src/backend/big-table-import/engine.js |
 | `TABLE` | 17 | src/backend/biz-op-recon-db/flow-imports-repository.js |
 | `DIFF_TABLE` | 16 | src/backend/acquiring-bill-currency-db/run-repository.js |
@@ -1760,13 +1760,13 @@
 | `closeNewAccountCurrencyDropdown` | 6 |
 | `mixColor` | 6 |
 | `STATEMENT_MODES` | 6 |
+| `updateBankStatementUi` | 6 |
 | `updateNewAccountCurrencyDropdownLabel` | 6 |
 | `DEFAULT_BACKGROUND_SETTINGS` | 5 |
 | `DEFAULT_SPECTRUM_PICK_COLOR` | 5 |
 | `hexToRgb` | 5 |
 | `renderNewAccountCurrencyOptions` | 5 |
 | `syncNewAccountRowActionButtons` | 5 |
-| `updateBankStatementUi` | 5 |
 | `mixRgb` | 4 |
 | `newAccountRowStateMap` | 4 |
 | `normalizeColorHex` | 4 |
@@ -1826,7 +1826,7 @@
 | `createContract` | 7 | 13 | 4 | src/backend/acquiring-bill-currency-import/contract-bill.js(2), src/backend/acquiring-bill-currency-import/contract-flow.js(2), src/backend/big-table-import/engine.js(2) |
 | `getRunById` | 7 | 12 | 3 | src/backend/acquiring-bill-currency-db/run-repository.js(2), src/backend/biz-op-recon-db/run-repository.js(2), src/backend/pending-db/diff-repository.js(2) |
 | `mapRow` | 7 | 10 | 1 | src/backend/pending-import/removed-reader.js(3), src/backend/big-table-import/contract.js(2), src/backend/acquiring-bill-currency-import/contract-bill.js(1) |
-| `state` | 6 | 309 | 1 | src/renderer.js(153), src/renderer-pending.js(55), src/renderer-previews.js(41) |
+| `state` | 6 | 310 | 1 | src/renderer.js(154), src/renderer-pending.js(55), src/renderer-previews.js(41) |
 | `session` | 6 | 60 | 3 | src/main-process/statement-session.js(28), src/main-process/statement-generation.js(10), src/main-process/acquiring-bill-currency-run-data.js(7) |
 | `MAX_COLLECTED_ERRORS` | 6 | 21 | 5 | src/backend/acquiring-bill-currency-import/reader.js(6), src/backend/big-table-import/import-worker.js(4), src/backend/acquiring-bill-currency-import/contract-bill.js(3) |
 | `BILL_HEADERS` | 6 | 18 | 6 | src/backend/acquiring-bill-currency-db/columns.js(7), src/backend/acquiring-bill-currency-import/contract-bill.js(3), src/backend/acquiring-bill-currency-import/reader.js(3) |
@@ -2083,8 +2083,8 @@
 | `database` | 2 | 27 | 1 | src/main-process/linked-derive-rebuild.js(20), src/main.js(7) |
 | `ContractValidationError` | 2 | 25 | 2 | src/backend/big-table-import/contract.js(22), src/backend/big-table-import/engine.js(3) |
 | `BANK_FUND_TYPE_FIELD` | 2 | 19 | 2 | src/main-process/scenario-engines/dbs-charge-fund-check.js(13), src/main-process/scenario-engines/r4-fund-nature-check.js(6) |
+| `refreshBankStatementStatus` | 2 | 19 | 1 | src/renderer.js(10), src/renderer-dialogs.js(9) |
 | `TEMPLATE_LABEL` | 2 | 19 | 2 | src/backend/vcc-op-calc-import/reader.js(11), src/backend/pending-import/removed-reader.js(8) |
-| `refreshBankStatementStatus` | 2 | 18 | 1 | src/renderer-dialogs.js(9), src/renderer.js(9) |
 | `PipelineError` | 2 | 17 | 2 | src/backend/big-table-import/pipeline.js(9), src/backend/big-table-import/engine.js(8) |
 | `TABLE` | 2 | 17 | 2 | src/backend/biz-op-recon-db/imports-repository.js(10), src/backend/biz-op-recon-db/flow-imports-repository.js(7) |
 | `DIFF_TABLE` | 2 | 16 | 2 | src/backend/acquiring-bill-currency-db/run-repository.js(11), src/backend/biz-op-recon-db/run-repository.js(5) |

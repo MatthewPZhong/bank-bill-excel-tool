@@ -1,14 +1,14 @@
 {
   "meta": {
     "version": "3.0.7",
-    "scannedAt": "2026-06-16T08:38:14.085Z",
+    "scannedAt": "2026-06-16T11:45:36.091Z",
     "root": "src",
     "totalFiles": 160,
-    "totalTopLevelNames": 1673,
+    "totalTopLevelNames": 1674,
     "buckets": {
       "shared": 282,
       "paired": 464,
-      "local": 803,
+      "local": 804,
       "crossFile": 746
     }
   },
@@ -2381,10 +2381,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 153
+            "count": 154
           }
         ],
-        "totalHits": 309,
+        "totalHits": 310,
         "fileSpan": 6
       },
       {
@@ -8835,6 +8835,24 @@
         "fileSpan": 2
       },
       {
+        "name": "refreshBankStatementStatus",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 9
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 10
+          }
+        ],
+        "totalHits": 19,
+        "fileSpan": 2
+      },
+      {
         "name": "TEMPLATE_LABEL",
         "defFiles": [
           "src/backend/pending-import/removed-reader.js",
@@ -8851,24 +8869,6 @@
           }
         ],
         "totalHits": 19,
-        "fileSpan": 2
-      },
-      {
-        "name": "refreshBankStatementStatus",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 9
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 9
-          }
-        ],
-        "totalHits": 18,
         "fileSpan": 2
       },
       {
@@ -18415,6 +18415,20 @@
         "fileSpan": 1
       },
       {
+        "name": "updateBankStatementUi",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
         "name": "updateNewAccountCurrencyDropdownLabel",
         "defFiles": [
           "src/renderer.js"
@@ -19178,20 +19192,6 @@
         "refFiles": [
           {
             "file": "src/backend/database/settings-repository.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
-        "name": "updateBankStatementUi",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer.js",
             "count": 5
           }
         ],
@@ -25023,6 +25023,20 @@
         "fileSpan": 1
       },
       {
+        "name": "buildAlsoLinkedFailureSummary",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "buildAlsoLinkedSummary",
         "defFiles": [
           "src/renderer.js"
@@ -30794,10 +30808,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 153
+          "count": 154
         }
       ],
-      "totalHits": 309,
+      "totalHits": 310,
       "fileSpan": 6
     },
     {
@@ -37246,6 +37260,24 @@
       "fileSpan": 2
     },
     {
+      "name": "refreshBankStatementStatus",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 9
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 10
+        }
+      ],
+      "totalHits": 19,
+      "fileSpan": 2
+    },
+    {
       "name": "TEMPLATE_LABEL",
       "defFiles": [
         "src/backend/pending-import/removed-reader.js",
@@ -37262,24 +37294,6 @@
         }
       ],
       "totalHits": 19,
-      "fileSpan": 2
-    },
-    {
-      "name": "refreshBankStatementStatus",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 9
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 9
-        }
-      ],
-      "totalHits": 18,
       "fileSpan": 2
     },
     {
