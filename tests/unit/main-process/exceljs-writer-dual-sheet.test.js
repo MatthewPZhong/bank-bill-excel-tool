@@ -84,7 +84,9 @@ test('B buildHitDetail wrap 边界：空串/负数小数/千分位/数字英文�
 });
 
 // ===== sheet1「未命中场景」：A1 提示 + 表头 + FundType 排序（B-1/B-2/B-Q1/D8）=====
-test('B sheet1 未命中场景：A1 加粗提示 + 第2行表头 + Mark without result 行排前', async () => {
+//   v3.0.8 W2：未命中 sheet 表头/数据整体右移一列（从 B 列起，getCell 第 2 参数 = colIdx+2）；
+//            A 列除 A1 提醒外留空。命中场景 sheet 不变（见下方 B sheet2 用例）。
+test('B sheet1 未命中场景：A1 加粗提示 + 第2行表头右移B列 + Mark without result 行排前（W2 右移）', async () => {
   const headers = ['MerchantId', 'FundType', 'Amount'];
   const unmatchedRows = [
     { MerchantId: 'm1', FundType: 'Ach Return', Amount: '50', _rowId: 'u1', _modifiedColumns: new Set() },
@@ -98,16 +100,20 @@ test('B sheet1 未命中场景：A1 加粗提示 + 第2行表头 + Mark without 
   assert.strictEqual(wb.worksheets[0].name, SHEET1_UNMATCHED_NAME, 'sheet1 = 未命中场景');
   assert.strictEqual(wb.worksheets[1].name, SHEET2_HIT_NAME, 'sheet2 = 命中场景');
   const s1 = wb.worksheets[0];
-  // B-1：A1 加粗提示
+  // B-1：A1 加粗提示（W2 不变）
   assert.strictEqual(s1.getCell('A1').value, SHEET1_A1_NOTICE);
   assert.ok(s1.getCell('A1').font && s1.getCell('A1').font.bold, 'A1 加粗');
-  // B-Q1：第2行表头
-  assert.strictEqual(s1.getCell(2, 1).value, 'MerchantId', '第2行表头 MerchantId');
-  assert.strictEqual(s1.getCell(2, 2).value, 'FundType', '第2行表头 FundType');
-  // B-2/D8：第3行起数据，FundType='Mark without result' 行排前
-  assert.strictEqual(s1.getCell(3, 1).value, 'm2', 'Mark without result 行排第一');
-  assert.strictEqual(s1.getCell(3, 2).value, MARK_WITHOUT_RESULT);
-  assert.strictEqual(s1.getCell(4, 1).value, 'm1', '其他未命中行随后');
+  // W2：A 列除 A1 外留空（表头行/首数据行的 A 列为空）
+  assert.ok(s1.getCell(2, 1).value === null || s1.getCell(2, 1).value === undefined, 'W2 表头行 A 列留空');
+  assert.ok(s1.getCell(3, 1).value === null || s1.getCell(3, 1).value === undefined, 'W2 数据行 A 列留空');
+  // B-Q1 + W2：第2行表头从 B 列（第2列）起
+  assert.strictEqual(s1.getCell(2, 2).value, 'MerchantId', 'W2 第2行表头 MerchantId 从 B 列起');
+  assert.strictEqual(s1.getCell(2, 3).value, 'FundType', 'W2 第2行表头 FundType（右移1）');
+  assert.strictEqual(s1.getCell(2, 4).value, 'Amount', 'W2 第2行表头 Amount（右移1）');
+  // B-2/D8 + W2：第3行起数据从 B 列起，FundType='Mark without result' 行排前
+  assert.strictEqual(s1.getCell(3, 2).value, 'm2', 'W2 Mark without result 行排第一（B 列）');
+  assert.strictEqual(s1.getCell(3, 3).value, MARK_WITHOUT_RESULT, 'W2 FundType 数据右移1');
+  assert.strictEqual(s1.getCell(4, 2).value, 'm1', 'W2 其他未命中行随后（B 列）');
 });
 
 // ===== sheet2「命中场景」：命中明细列 + 原列右移 + 标黄（B-3/B-4/D5/D9）=====

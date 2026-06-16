@@ -623,10 +623,12 @@ async function runExceljsWriterSmokeTests() {
     assert.strictEqual(wb.worksheets[0].name, '未命中场景', 'F8-W2 sheet 1 = "未命中场景"');
     assert.strictEqual(wb.worksheets[1].name, '命中场景', 'F8-W2 sheet 2 = "命中场景"');
     // 未命中场景：第1行 A1 提示、第2行表头（空数据）
+    //   v3.0.8 W2：表头/数据整体右移一列（从 B 列起）——A 列除 A1 提醒外留空。
     const s1 = wb.worksheets[0];
     assert.strictEqual(s1.getCell(1, 1).value, '请检查，导入前请删除该sheet', 'F8-W2 未命中场景 A1 提示');
-    assert.strictEqual(s1.getCell(2, 1).value, 'col1', 'F8-W2 未命中场景第2行表头 col1');
-    assert.strictEqual(s1.getCell(2, 2).value, 'col2', 'F8-W2 未命中场景第2行表头 col2');
+    assert.ok(s1.getCell(2, 1).value === null || s1.getCell(2, 1).value === undefined, 'F8-W2 W2 表头行 A 列留空');
+    assert.strictEqual(s1.getCell(2, 2).value, 'col1', 'F8-W2 W2 未命中场景第2行表头 col1（B 列）');
+    assert.strictEqual(s1.getCell(2, 3).value, 'col2', 'F8-W2 W2 未命中场景第2行表头 col2（右移1）');
   }
 
   // F8-W3：传 unmatchedRows = N 行 → 未命中场景 sheet 含 A1 + 表头 + N 行数据
@@ -644,18 +646,21 @@ async function runExceljsWriterSmokeTests() {
     assert.strictEqual(wb.worksheets.length, 2, 'F8-W3 2 sheet');
     const s1 = wb.worksheets[0];  // 未命中场景（sheet1）
     assert.strictEqual(s1.name, '未命中场景', 'F8-W3 sheet 1 名');
-    // A1 提示(第1行) + 表头(第2行) + 2 数据行(第3-4行) = 4 行
+    // A1 提示(第1行) + 表头(第2行) + 2 数据行(第3-4行) = 4 行（v3.0.8 W2 仅右移列，行数不变）
     assert.strictEqual(s1.actualRowCount, 4, 'F8-W3 未命中场景行数 = A1 + 表头 + 2 数据');
-    // 表头在第 2 行
-    assert.strictEqual(s1.getCell(2, 1).value, 'col1', 'F8-W3 表头 col1');
-    assert.strictEqual(s1.getCell(2, 2).value, 'col2', 'F8-W3 表头 col2');
-    assert.strictEqual(s1.getCell(2, 3).value, 'col3', 'F8-W3 表头 col3');
-    // 数据从第 3 行起
-    assert.strictEqual(s1.getCell(3, 1).value, 'um1-a', 'F8-W3 r1.col1 = um1-a');
-    assert.strictEqual(s1.getCell(3, 3).value, 'um1-c', 'F8-W3 r1.col3 = um1-c');
-    assert.strictEqual(s1.getCell(4, 1).value, 'um2-a', 'F8-W3 r2.col1 = um2-a');
-    // 防泄漏：表头（第2行）不含 _ 前缀字段（headers 投影自动过滤）
-    for (let c = 1; c <= 3; c++) {
+    // v3.0.8 W2：表头/数据整体右移一列（从 B 列起）——A 列除 A1 提醒外留空。
+    assert.ok(s1.getCell(2, 1).value === null || s1.getCell(2, 1).value === undefined, 'F8-W3 W2 表头行 A 列留空');
+    assert.ok(s1.getCell(3, 1).value === null || s1.getCell(3, 1).value === undefined, 'F8-W3 W2 数据行 A 列留空');
+    // 表头在第 2 行、从 B 列（第2列）起
+    assert.strictEqual(s1.getCell(2, 2).value, 'col1', 'F8-W3 W2 表头 col1（B 列）');
+    assert.strictEqual(s1.getCell(2, 3).value, 'col2', 'F8-W3 W2 表头 col2（右移1）');
+    assert.strictEqual(s1.getCell(2, 4).value, 'col3', 'F8-W3 W2 表头 col3（右移1）');
+    // 数据从第 3 行起、从 B 列起
+    assert.strictEqual(s1.getCell(3, 2).value, 'um1-a', 'F8-W3 W2 r1.col1 = um1-a（B 列）');
+    assert.strictEqual(s1.getCell(3, 4).value, 'um1-c', 'F8-W3 W2 r1.col3 = um1-c（右移1）');
+    assert.strictEqual(s1.getCell(4, 2).value, 'um2-a', 'F8-W3 W2 r2.col1 = um2-a（B 列）');
+    // 防泄漏：表头（第2行，W2 右移后从 B 列起 = 第2~4列）不含 _ 前缀字段（headers 投影自动过滤）
+    for (let c = 2; c <= 4; c++) {
       const cellHeader = String(s1.getCell(2, c).value || '');
       assert.ok(!cellHeader.startsWith('_'), `F8-W3 未命中场景表头不含 _ 前缀字段（实际 ${cellHeader}）`);
     }

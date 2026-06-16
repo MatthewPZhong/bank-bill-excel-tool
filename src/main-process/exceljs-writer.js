@@ -247,12 +247,14 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
     const sortedUnmatched = [...markFirst, ...others];
 
     // 第 2 行表头（B-Q1 已定：加表头），第 3 行起数据（headers 投影自动过滤 _ 前缀诊断列）
+    // v3.0.8 W2：未命中 sheet 表头/数据整体右移一列（从 B 列起）——A 列除 A1 提醒外留空。
+    //   仅本「未命中场景」sheet 右移（颜色/行号/A1 提醒不变）；命中场景 sheet 不受影响。
     const headerRow2 = s1.getRow(2);
-    headers.forEach((h, idx) => { headerRow2.getCell(idx + 1).value = h; });
+    headers.forEach((h, idx) => { headerRow2.getCell(idx + 2).value = h; });
     headerRow2.font = { bold: true, size: 10 };
     sortedUnmatched.forEach((row, rowIdx) => {
       const r = s1.getRow(rowIdx + 3);
-      headers.forEach((h, colIdx) => { r.getCell(colIdx + 1).value = row[h]; });
+      headers.forEach((h, colIdx) => { r.getCell(colIdx + 2).value = row[h]; });
     });
   }
 
