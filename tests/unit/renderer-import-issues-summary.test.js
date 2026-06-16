@@ -244,3 +244,53 @@ describe('buildLinkedImportSummary — 状态框合并护栏（v3.0.7 需求2d�
       'linked 汇总应以 \\n 合并进 issues.text（空 issues 时直接用 linkedSummary）');
   });
 });
+
+// v3.0.7 F1（codex review · 🔴 资金红线）：bank-deposit 副作用落库失败可见
+const buildAlsoLinkedFailureSummary = loadFn('buildAlsoLinkedFailureSummary');
+describe('buildAlsoLinkedFailureSummary — 副作用落库失败可见（v3.0.7 F1）', () => {
+  test('processed + alsoLinked.error → 提炼失败行（含文件名/错误/重导提示，半角冒号防换行）', () => {
+    const t = buildAlsoLinkedFailureSummary([
+      { status: 'ok', outcome: 'processed', fileName: 'JPMUS.xlsx', alsoLinked: { error: 'DB write failed' } }
+    ]);
+    assert.ok(t.includes('JPMUS.xlsx'), '应含文件名');
+    assert.ok(t.includes('DB write failed'), '应含底层错误');
+    assert.ok(t.includes('请重新导入'), '应提示重导');
+    assert.ok(!t.includes('：'), '🔴 段内必须半角冒号，避开 updateStatusBox 全角「：」强制换行');
+  });
+
+  test('processed + alsoLinked 成功（无 error）→ 不报失败（空串，避免与"已存入"重复误导）', () => {
+    assert.strictEqual(buildAlsoLinkedFailureSummary([
+      { status: 'ok', outcome: 'processed', fileName: 'A.xlsx', alsoLinked: { rowCount: 10 } }
+    ]), '');
+  });
+
+  test('outcome!==processed / 无 alsoLinked / 非 ok / 空入参 → 忽略（兜底空串）', () => {
+    assert.strictEqual(buildAlsoLinkedFailureSummary([
+      { status: 'ok', outcome: 'linked', fileName: 'L.xlsx', alsoLinked: { error: 'x' } }
+    ]), '', 'outcome!==processed 不计入');
+    assert.strictEqual(buildAlsoLinkedFailureSummary([
+      { status: 'ok', outcome: 'processed', fileName: 'N.xlsx' }
+    ]), '', '无 alsoLinked 不计入');
+    assert.strictEqual(buildAlsoLinkedFailureSummary([]), '');
+    assert.strictEqual(buildAlsoLinkedFailureSummary(null), '');
+  });
+
+  test('集成护栏：handler 调用本函数并把失败折进 issues + 置 hasFailed=true（转 error tone）', () => {
+    assert.ok(source.includes('const alsoLinkedFailText = buildAlsoLinkedFailureSummary(results);'),
+      'handleBankStatementBatchImport 应调用 buildAlsoLinkedFailureSummary(results)');
+    assert.ok(source.includes('issues.hasFailed = true;'),
+      '落库失败应置 issues.hasFailed = true');
+  });
+});
+
+// v3.0.7 F2（codex review）：纯 linked 成功后须 refresh（清 main 已清空的 processingResult 残留）源码护栏
+describe('linked-only 导入后状态刷新护栏（v3.0.7 F2）', () => {
+  test('handler 含「纯 linked 成功」分支，且分支内 refresh + 清 export', () => {
+    const anchor = "} else if (results.some((r) => r && r.status === 'ok' && r.outcome === 'linked')) {";
+    const idx = source.indexOf(anchor);
+    assert.ok(idx !== -1, 'handler 应有纯 linked 成功分支');
+    const branch = source.slice(idx, idx + 700);
+    assert.ok(branch.includes('state.bankStatementExport = null;'), 'linked 分支应清 export 缓存');
+    assert.ok(branch.includes('await refreshBankStatementStatus();'), 'linked 分支应 refresh 状态（清 processingResult 残留）');
+  });
+});

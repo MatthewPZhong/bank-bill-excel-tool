@@ -3718,6 +3718,21 @@ function buildAlsoLinkedSummary(results) {
   return lines.join('\n');
 }
 
+// v3.0.7 F1（codex review · 🔴 资金红线）：ADM/BOC/JPM-US 文件已对账(outcome:'processed')但 bank-deposit 副作用
+//   落库失败(alsoLinked.error)——原 buildAlsoLinkedSummary 只报成功、失败被静默丢弃 → 用户看到「成功」但链接表
+//   未更新，后续 R5 退款二跳 / ADM / BOC 对账用旧/缺数据静默错账。本函数提炼这些落库失败行，供 handler 折进 issues
+//   失败段（并置 hasFailed→error tone），使「看似成功实则链接表未更新」可见、提醒用户重导。
+//   段内一律半角冒号，避开 updateStatusBox 对全角「：」的强制换行。
+function buildAlsoLinkedFailureSummary(results) {
+  const list = Array.isArray(results) ? results : [];
+  const fails = list.filter((r) =>
+    r && r.status === 'ok' && r.outcome === 'processed' && r.alsoLinked && r.alsoLinked.error);
+  if (fails.length === 0) return '';
+  return fails.map((r) =>
+    `${String(r.fileName || '')}:已对账，但银行对账单表链接表落库失败:${r.alsoLinked.error}（请重新导入该文件）`
+  ).join('\n');
+}
+
 async function handleBankStatementBatchImport() {
   // 「导入对账单」按钮即批量入口；导入期间禁用防重复触发。
   if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = true;
@@ -3742,6 +3757,13 @@ async function handleBankStatementBatchImport() {
   const results = Array.isArray(result.results) ? result.results : [];
   // v3.0.0 需求2a：去明细确认框，改把 per-file 失败/跳过摘要并入状态框（纯文本，半角冒号防换行）。
   const issues = buildImportIssuesSummary(results);
+  // v3.0.7 F1（codex review · 🔴 资金红线）：把 ADM/BOC/JPM-US 文件的 bank-deposit 副作用落库失败折进 issues 失败段，
+  //   使「看似成功实则链接表未更新（后续对账用旧/缺数据）」可见 + 转 error tone（详见 buildAlsoLinkedFailureSummary 注释）。
+  const alsoLinkedFailText = buildAlsoLinkedFailureSummary(results);
+  if (alsoLinkedFailText) {
+    issues.text = issues.text ? `${issues.text}\n${alsoLinkedFailText}` : alsoLinkedFailText;
+    issues.hasFailed = true;
+  }
   // v3.0.7 需求2d：通用导入下，linked 落库成功（outcome==='linked'）单独提炼「已存入XX表库」段，
   //   合并进状态框 issues.text（追加在失败/跳过段之后；linked 成功非失败 → 不改 hasFailed/tone）。
   const linkedSummary = buildLinkedImportSummary(results);
@@ -3770,8 +3792,20 @@ async function handleBankStatementBatchImport() {
     } catch (refreshErr) {
       console.error('[导入对账单] 状态刷新失败（已兜底，不阻断提醒）:', refreshErr);
     }
+  } else if (results.some((r) => r && r.status === 'ok' && r.outcome === 'linked')) {
+    // v3.0.7 F2（codex review）：纯 linked 成功（中台调拨/网关/外汇，无银行单）经 importLinkedFileToRepo 已清 main 端
+    //   processingResult；若仅 updateBankStatementUi（按 renderer 缓存重绘）→ 状态框/导出按钮残留旧「已处理/可导出」。
+    //   故拉 session-status refresh（hasProcessingResult=false → state.processingResult=null → 清残留）+ 清 export 缓存。
+    //   不改 runMode（非银行单不进 R1-R5 'bank' 模式，不误覆盖 'gateway'）。
+    state.bankStatementExport = null;
+    try {
+      await refreshBankStatementStatus();
+    } catch (refreshErr) {
+      console.error('[导入文件] linked 成功后状态刷新失败（已兜底，不阻断提醒）:', refreshErr);
+      updateBankStatementUi(); // 兜底：refresh 抛错仍重绘 issues 摘要
+    }
   } else {
-    // v3.0.0 需求2a 🔴 纯失败/无 bank ok 批次：原路径不刷状态框 → 去明细框后会丢失失败/跳过信息。
+    // v3.0.0 需求2a 🔴 纯失败/无 ok 批次：原路径不刷状态框 → 去明细框后会丢失失败/跳过信息。
     //   新增分支让其也渲染 issues。仅刷 UI（不调 refreshBankStatementStatus IPC）：
     //   不改 mode（不误覆盖刚导入不平表的 'gateway'）、不清 export（无有效新数据）。
     updateBankStatementUi();
