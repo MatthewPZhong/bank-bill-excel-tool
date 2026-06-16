@@ -314,4 +314,124 @@ test.describe('channel-enum-repository（v2.1.16-beta.3 ①）', () => {
       assert.deepEqual(appDb.extractChannelRegionCombos([]), []);
     });
   });
+
+  // ===== v3.0.7 需求2d（🔴🔴 资金红线·契约 C5）：isBankDepositChannelFile（「导入文件」Channel 二次路由谓词）=====
+  //   逐行 Channel+地区 判定 bank-deposit 文件（绝不用 'Channel-地区' 组合字符串比白名单）：
+  //   ADM/BOC 按裸 Channel 忽略地区；JPM 仅 US；空 Channel 跳过；至少一行非空 Channel 且全为入金行 → true。
+  //   单行谓词 isBankDepositRow 直测 + 文件谓词 isBankDepositChannelFile 直测 + facade 透传。
+  test.describe('isBankDepositChannelFile（v3.0.7 需求2d 路由谓词）', () => {
+    // UT-BD1：单行谓词 isBankDepositRow — ADM/BOC 忽略地区、JPM 仅 US、其它 false
+    test('UT-BD1：isBankDepositRow — ADM/BOC 忽略地区均 true；JPM+US true、JPM+HK false；Other false', () => {
+      // ADM 地区空 / 非空都 true
+      assert.equal(channelEnumRepo.isBankDepositRow('ADM', ''), true, 'ADM 地区空 → true');
+      assert.equal(channelEnumRepo.isBankDepositRow('ADM', 'CN'), true, 'ADM 地区非空 → 仍 true（忽略地区）');
+      // BOC 地区 CN（真实数据）→ true；地区空也 true
+      assert.equal(channelEnumRepo.isBankDepositRow('BOC', 'CN'), true, 'BOC 地区CN → true（真实入金行）');
+      assert.equal(channelEnumRepo.isBankDepositRow('BOC', ''), true, 'BOC 地区空 → 仍 true（忽略地区）');
+      // JPM 仅 US
+      assert.equal(channelEnumRepo.isBankDepositRow('JPM', 'US'), true, 'JPM+US → true');
+      assert.equal(channelEnumRepo.isBankDepositRow('JPM', 'HK'), false, 'JPM+HK → false（排除，走预处理）');
+      assert.equal(channelEnumRepo.isBankDepositRow('JPM', ''), false, 'JPM 地区空 → false（仅 US 入金）');
+      // 其它渠道
+      assert.equal(channelEnumRepo.isBankDepositRow('Other', 'CN'), false, 'Other → false');
+      assert.equal(channelEnumRepo.isBankDepositRow('CITI', 'HK'), false, 'CITI → false');
+    });
+
+    // UT-BD2：纯 ADM/BOC/JPM-US 入金表（BOC 地区=CN）→ true
+    test('UT-BD2：纯入金表 ADM(地区空)+BOC(地区CN)+JPM(地区US) → true', () => {
+      assert.equal(
+        channelEnumRepo.isBankDepositChannelFile([
+          { Channel: 'ADM', 地区: '' },
+          { Channel: 'BOC', 地区: 'CN' }, // 真实 BOC 入金行 地区=CN
+          { Channel: 'JPM', 地区: 'US' }
+        ]),
+        true
+      );
+    });
+
+    // UT-BD3：🔴 回归——带地区的 BOC 不拖垮整份判定（旧组合实现的杀手用例）
+    test('UT-BD3：BOC 地区=CN 单行 → true（旧组合判定 BOC-CN ∉ 白名单会误判 false）', () => {
+      assert.equal(channelEnumRepo.isBankDepositChannelFile([{ Channel: 'BOC', 地区: 'CN' }]), true);
+      // ADM 也带地区（地区='US'）也不影响
+      assert.equal(channelEnumRepo.isBankDepositChannelFile([{ Channel: 'ADM', 地区: 'US' }]), true);
+    });
+
+    // UT-BD4：含任一非入金行 → false（整份走预处理）
+    test('UT-BD4：含常规渠道 Other / JPM-HK → false', () => {
+      assert.equal(
+        channelEnumRepo.isBankDepositChannelFile([
+          { Channel: 'ADM', 地区: '' },
+          { Channel: 'Other', 地区: 'CN' } // 常规渠道 → 整份预处理
+        ]),
+        false,
+        '混入常规渠道 Other → false'
+      );
+      assert.equal(
+        channelEnumRepo.isBankDepositChannelFile([
+          { Channel: 'BOC', 地区: 'CN' },
+          { Channel: 'JPM', 地区: 'HK' } // JPM-HK 非入金 → 整份预处理
+        ]),
+        false,
+        '混入 JPM-HK → false'
+      );
+    });
+
+    // UT-BD5：空 Channel 行跳过（不参与判定）；其余全入金 → 仍 true
+    test('UT-BD5：空 Channel 行（含空格/null）跳过，不影响判定', () => {
+      assert.equal(
+        channelEnumRepo.isBankDepositChannelFile([
+          { Channel: '', 地区: 'XX' },     // 空 → 跳过
+          { Channel: '   ', 地区: 'YY' },  // 纯空格 → 跳过
+          { Channel: null, 地区: 'ZZ' },   // null → 跳过
+          { Channel: 'ADM', 地区: '' }     // 唯一非空 Channel 行 → 入金
+        ]),
+        true,
+        '空 Channel 行跳过后仅 ADM 入金行 → true'
+      );
+    });
+
+    // UT-BD6：🔴 空文件 / 全空 Channel → false（保守，绝不吞为链接表；守 every-on-empty vacuous-true）
+    test('UT-BD6：空文件 / 全空 Channel / 非数组 → false（保守守卫）', () => {
+      assert.equal(channelEnumRepo.isBankDepositChannelFile([]), false, '空数组 → false');
+      assert.equal(channelEnumRepo.isBankDepositChannelFile(null), false, 'null → false');
+      assert.equal(channelEnumRepo.isBankDepositChannelFile(undefined), false, 'undefined → false');
+      assert.equal(
+        channelEnumRepo.isBankDepositChannelFile([
+          { Channel: '', 地区: 'CN' },
+          { Channel: null, 地区: 'US' }
+        ]),
+        false,
+        '全空 Channel → false（无任何非空 Channel 行）'
+      );
+    });
+
+    // UT-BD7：Channel/地区前后空格 trim 后参与判定（与拼接口径同 trim 归一）
+    test('UT-BD7：Channel/地区前后空格 trim 后判定', () => {
+      assert.equal(channelEnumRepo.isBankDepositChannelFile([{ Channel: '  BOC  ', 地区: '  CN  ' }]), true);
+      assert.equal(channelEnumRepo.isBankDepositChannelFile([{ Channel: '  JPM ', 地区: ' US ' }]), true);
+    });
+
+    // UT-BD8：非对象行（null / 字符串 / 数字）安全跳过（视作空 Channel 行），不抛
+    test('UT-BD8：rows 含非对象元素安全跳过，不抛', () => {
+      assert.equal(
+        channelEnumRepo.isBankDepositChannelFile([null, 'x', 42, { Channel: 'ADM', 地区: '' }]),
+        true,
+        '非对象元素跳过后仅 ADM 入金 → true'
+      );
+    });
+
+    // facade 透传：appDb.isBankDepositChannelFile
+    test('facade：appDb.isBankDepositChannelFile 透传一致', () => {
+      assert.equal(
+        appDb.isBankDepositChannelFile([
+          { Channel: 'ADM', 地区: '' },
+          { Channel: 'BOC', 地区: 'CN' },
+          { Channel: 'JPM', 地区: 'US' }
+        ]),
+        true
+      );
+      assert.equal(appDb.isBankDepositChannelFile([{ Channel: 'JPM', 地区: 'HK' }]), false);
+      assert.equal(appDb.isBankDepositChannelFile([]), false);
+    });
+  });
 });

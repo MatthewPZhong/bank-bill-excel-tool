@@ -1440,6 +1440,13 @@ class AppDatabase {
     return channelEnumRepository.extractChannelRegionCombos(rows);
   }
 
+  // v3.0.7 需求2d（🔴🔴 资金红线）：判定 44 列银行对账单文件是否为「入金表」（Channel 二次路由谓词）。
+  //   不依赖 db；逐行 Channel+地区 判定（ADM/BOC 按裸 Channel 忽略地区，JPM 仅 US），
+  //   命中 → 落 bank-deposit 链接表；否则 → 走 R1-R5 预处理。bank-deposit 文件判定的唯一真相。
+  isBankDepositChannelFile(rows) {
+    return channelEnumRepository.isBankDepositChannelFile(rows);
+  }
+
   // SR-backup-1 (v2.1.9)：sqlite 安全备份 API（VACUUM INTO）
   // 用法：const backupPath = appDb.createBackup('pre-N5');
   //   - label：仅支持 [A-Za-z0-9_-]（用于文件名 + 防 SQL 注入）

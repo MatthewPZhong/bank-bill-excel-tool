@@ -22,9 +22,11 @@ const assert = require('node:assert/strict');
 const {
   runReconciliation,
   bucketScenarios,
-  buildOutputRows
+  buildOutputRows,
+  buildChannelRegionHits
 } = require('../../../src/main-process/reconciliation-orchestrator');
 const { runAllScenarios } = require('../../../src/main-process/scenario-dispatcher');
+const { extractChannelRegionCombos } = require('../../../src/backend/database/channel-enum-repository');
 const { CLEANUP_COPY_HEADERS } = require('../../../src/constants/platform-cleanup-template-fields');
 
 // ---------------------------------------------------------------------------
@@ -232,6 +234,59 @@ test.describe('bucketScenarios 分桶', () => {
       assert.equal(r.r5s2.length, 0);
       assert.equal(r.r5s3.length, 0);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3.0.7 需求A：stats.r5s3Enabled / r5s4Enabled —— 供 renderer 状态框判断是否显示该行
+//   （启用即显示，含 0 条命中）。bucket 非空 ⟺ 对应 builtin 场景启用。🔴 纯只读标志位。
+// ---------------------------------------------------------------------------
+// R5 场景4（退款回填）最小启用场景：仅供 bucketScenarios 收纳 → r5s4Bucket 非空；不构造命中数据（不验回填值）。
+function makeR5RefundEnabledScenario() {
+  return {
+    id: 504,
+    name: '中台退款订单回填',
+    category: 'builtin-fixed',
+    priority: 0,
+    enabled: true,
+    config: { funcCategory: 'platform-order', subCategory: 'refund-order-backfill', roundPhase: 5 }
+  };
+}
+
+test.describe('runReconciliation stats.r5s3Enabled / r5s4Enabled（需求A）', () => {
+  test('两 bucket 皆空（无场景）→ r5s3Enabled / r5s4Enabled 均为 false', () => {
+    const bankRows = [makeBankRow({ _rowId: 'b1', FundType: 'Settlement' })];
+    const result = runReconciliation({ bankRows, gwRows: [], scenarios: [] });
+    assert.equal(result.stats.r5s3Enabled, false, 'r5s3 bucket 空 → r5s3Enabled=false');
+    assert.equal(result.stats.r5s4Enabled, false, 'r5s4 bucket 空 → r5s4Enabled=false');
+  });
+
+  test('仅启用 R5 场景3 → r5s3Enabled=true（即使 0 条命中也为 true）；r5s4Enabled=false', () => {
+    // b1 不构成 Inbound-VA 剔除命中 → r5s3CleanupCount 可能为 0，但场景已启用 → r5s3Enabled 必须 true。
+    const bankRows = [makeBankRow({ _rowId: 'b1', FundType: 'Settlement', MerchantId: 'M001' })];
+    const result = runReconciliation({ bankRows, gwRows: [], scenarios: [makeR5CleanupScenario()] });
+    assert.equal(result.stats.r5s3Enabled, true, '场景3 启用 → r5s3Enabled=true（含 0 命中）');
+    assert.equal(result.stats.r5s4Enabled, false, '场景4 未启用 → r5s4Enabled=false');
+    assert.equal(typeof result.stats.r5s3CleanupCount, 'number', 'r5s3CleanupCount 仍为数字（命中计数）');
+  });
+
+  test('仅启用 R5 场景4 → r5s4Enabled=true（即使 0 条命中也为 true）；r5s3Enabled=false', () => {
+    // 不传 refundContext → 退款池空 → r5s4BackfilledCount=0，但场景已启用 → r5s4Enabled 必须 true。
+    const bankRows = [makeBankRow({ _rowId: 'b1', FundType: 'Ach Return', MerchantId: 'M001' })];
+    const result = runReconciliation({ bankRows, gwRows: [], scenarios: [makeR5RefundEnabledScenario()] });
+    assert.equal(result.stats.r5s4Enabled, true, '场景4 启用 → r5s4Enabled=true（含 0 命中）');
+    assert.equal(result.stats.r5s3Enabled, false, '场景3 未启用 → r5s3Enabled=false');
+    assert.equal(result.stats.r5s4BackfilledCount, 0, '无 refundContext → 0 条回填（但 enabled 仍 true）');
+  });
+
+  test('两场景同时启用 → r5s3Enabled / r5s4Enabled 均为 true', () => {
+    const bankRows = [makeBankRow({ _rowId: 'b1', FundType: 'Settlement' })];
+    const result = runReconciliation({
+      bankRows, gwRows: [],
+      scenarios: [makeR5CleanupScenario(), makeR5RefundEnabledScenario()]
+    });
+    assert.equal(result.stats.r5s3Enabled, true);
+    assert.equal(result.stats.r5s4Enabled, true);
   });
 });
 
@@ -583,5 +638,208 @@ test.describe('buildOutputRows', () => {
     // 修改累积 Map 的 Set 不应影响已产出的 modifiedRows（解耦：new Set 拷贝）
     modCols.get('b1').add('LATE');
     assert.ok(!b1._modifiedColumns.has('LATE'), '产出后修改源 Set 不影响 modifiedRows（已 new Set 拷贝）');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3.0.7 需求1a：channelRegionHits 聚合（状态框「已处理」分支数据源）
+//   契约 C1 形状：Array<{ channelRegion:string, rowCount:number, scenarioNames:string[] }>
+// ---------------------------------------------------------------------------
+test.describe('buildChannelRegionHits 直接单测（需求1a）', () => {
+  // 命中行夹具：浅拷贝当前最新 bankRow（含 Channel/地区 数据列 + 可选 _hitScenarioName）
+  const mkHit = (over = {}) => ({
+    _rowId: over._rowId,
+    Channel: over.Channel,
+    地区: over['地区'],
+    _hitScenarioName: over._hitScenarioName
+  });
+
+  test('R2 命中行：scenarioNames 取 _hitScenarioName；按 渠道-地区 聚合行数', () => {
+    const modifiedRows = [
+      mkHit({ _rowId: 'b1', Channel: 'JPM', 地区: 'US', _hitScenarioName: '冲销打标' }),
+      mkHit({ _rowId: 'b2', Channel: 'JPM', 地区: 'US', _hitScenarioName: '提取调拨ID' }),
+      mkHit({ _rowId: 'b3', Channel: 'JPM', 地区: 'HK', _hitScenarioName: '冲销打标' })
+    ];
+    const allMods = [
+      { rowId: 'b1', column: 'Transaction Description', _round: 'R2' },
+      { rowId: 'b2', column: 'ReconciliationId', _round: 'R2' },
+      { rowId: 'b3', column: 'Transaction Description', _round: 'R2' }
+    ];
+    const hits = buildChannelRegionHits(modifiedRows, allMods);
+
+    // 升序：JPM-HK 在 JPM-US 前
+    assert.deepEqual(hits.map((h) => h.channelRegion), ['JPM-HK', 'JPM-US']);
+    const us = hits.find((h) => h.channelRegion === 'JPM-US');
+    assert.equal(us.rowCount, 2, 'JPM-US 命中 2 行（b1+b2）');
+    assert.deepEqual(us.scenarioNames, ['冲销打标', '提取调拨ID'], '去重+升序的 R2 场景名');
+    const hk = hits.find((h) => h.channelRegion === 'JPM-HK');
+    assert.equal(hk.rowCount, 1);
+    assert.deepEqual(hk.scenarioNames, ['冲销打标']);
+  });
+
+  test('R4/R5-only 行（无 _hitScenarioName）：scenarioNames 用 allMods 轮次中文标签兜底', () => {
+    const modifiedRows = [
+      mkHit({ _rowId: 'b1', Channel: 'ADM', 地区: 'US' }),                       // R4 + R5s2-recon
+      mkHit({ _rowId: 'b2', Channel: 'ADM', 地区: 'US' })                        // R5s2
+    ];
+    const allMods = [
+      { rowId: 'b1', column: 'FundType', _round: 'R4' },
+      { rowId: 'b1', column: 'ReconciliationId', _round: 'R5s2-recon' },
+      { rowId: 'b2', column: 'ReconciliationId', _round: 'R5s2' }
+    ];
+    const hits = buildChannelRegionHits(modifiedRows, allMods);
+    assert.equal(hits.length, 1);
+    const adm = hits[0];
+    assert.equal(adm.channelRegion, 'ADM-US');
+    assert.equal(adm.rowCount, 2);
+    // b1 两轮 → 两个中文标签；b2 一轮 → 一个；去重+升序合并
+    assert.deepEqual(adm.scenarioNames, ['调拨对账单回填', '资金性质校验', '资金划转回填'].sort());
+  });
+
+  test('混合：同一行 R2 命中名优先（不退化为轮次标签），同组兼有 R4 行', () => {
+    const modifiedRows = [
+      // b1 既是 R2 命中（带名）又被 R4 改 → 取 _hitScenarioName，不追加 R4 标签
+      mkHit({ _rowId: 'b1', Channel: 'BOC', 地区: 'CN', _hitScenarioName: '冲销打标' }),
+      // b2 仅 R4 改（无名）→ 轮次标签兜底
+      mkHit({ _rowId: 'b2', Channel: 'BOC', 地区: 'CN' })
+    ];
+    const allMods = [
+      { rowId: 'b1', column: 'Transaction Description', _round: 'R2' },
+      { rowId: 'b1', column: 'FundType', _round: 'R4' },
+      { rowId: 'b2', column: 'FundType', _round: 'R4' }
+    ];
+    const hits = buildChannelRegionHits(modifiedRows, allMods);
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].rowCount, 2);
+    // b1 用 R2 名（不含「资金性质校验」），b2 用 R4 标签 → 合并去重升序
+    assert.deepEqual(hits[0].scenarioNames, ['冲销打标', '资金性质校验'].sort());
+  });
+
+  test('地区空 → 只产 裸 Channel 组合；Channel 空 → 跳过整行（口径与枚举一致）', () => {
+    const modifiedRows = [
+      mkHit({ _rowId: 'b1', Channel: 'ADM', 地区: '', _hitScenarioName: '冲销打标' }),   // 地区空 → 'ADM'
+      mkHit({ _rowId: 'b2', Channel: '  ', 地区: 'US', _hitScenarioName: 'x' }),         // Channel 空 → 跳过
+      mkHit({ _rowId: 'b3', Channel: 'ADM', 地区: '   ', _hitScenarioName: '提取调拨ID' }) // 地区纯空格 → 'ADM'
+    ];
+    const allMods = [];
+    const hits = buildChannelRegionHits(modifiedRows, allMods);
+    assert.equal(hits.length, 1, 'Channel 空行被跳过，仅 ADM 组合');
+    assert.equal(hits[0].channelRegion, 'ADM');
+    assert.equal(hits[0].rowCount, 2, 'b1+b3 计入（b2 Channel 空跳过）');
+    assert.deepEqual(hits[0].scenarioNames, ['冲销打标', '提取调拨ID'].sort());
+  });
+
+  test('Channel 含前后空格 → trim 后聚合（与 extractChannelRegionCombos trim 口径一致）', () => {
+    const modifiedRows = [
+      mkHit({ _rowId: 'b1', Channel: ' JPM ', 地区: ' US ', _hitScenarioName: '冲销打标' })
+    ];
+    const hits = buildChannelRegionHits(modifiedRows, []);
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].channelRegion, 'JPM-US', 'Channel/地区 均 trim 后拼接');
+  });
+
+  test('空集 / 全部行 Channel 空 → []（renderer 据此回退旧格式）', () => {
+    assert.deepEqual(buildChannelRegionHits([], []), []);
+    assert.deepEqual(buildChannelRegionHits(null, null), []);
+    assert.deepEqual(
+      buildChannelRegionHits([mkHit({ _rowId: 'b1', Channel: '', 地区: 'US' })], []),
+      [],
+      '唯一命中行 Channel 空 → 空集'
+    );
+  });
+
+  test('R4/R5 行 allMods 反查不到（防御）→ scenarioNames 为空数组，不抛错', () => {
+    const modifiedRows = [mkHit({ _rowId: 'bX', Channel: 'ADM', 地区: 'US' })];
+    const hits = buildChannelRegionHits(modifiedRows, []); // allMods 空 → 反查不到
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].rowCount, 1);
+    assert.deepEqual(hits[0].scenarioNames, [], '无 _hitScenarioName 且 allMods 无记录 → 空场景名');
+  });
+
+  test('契约形状：每条均含 {channelRegion:string, rowCount:number, scenarioNames:string[]}', () => {
+    const hits = buildChannelRegionHits(
+      [mkHit({ _rowId: 'b1', Channel: 'JPM', 地区: 'US', _hitScenarioName: '冲销打标' })],
+      [{ rowId: 'b1', column: 'X', _round: 'R2' }]
+    );
+    assert.equal(hits.length, 1);
+    const h = hits[0];
+    assert.equal(typeof h.channelRegion, 'string');
+    assert.equal(typeof h.rowCount, 'number');
+    assert.ok(Array.isArray(h.scenarioNames));
+    assert.deepEqual(Object.keys(h).sort(), ['channelRegion', 'rowCount', 'scenarioNames']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3.0.7 需求1a：channelRegionHits 端到端（runReconciliation.stats.channelRegionHits）
+//   验证：(a) stats 携带该字段；(b) 口径与 extractChannelRegionCombos 同源；
+//        (c) R2 命中名 + R4/R5 轮次标签两条路在真实流水线下都能产出。
+// ---------------------------------------------------------------------------
+test.describe('runReconciliation stats.channelRegionHits 端到端（需求1a）', () => {
+  test('全链路：JPM-US 组（b1=R2+R4 取 R2 名 / b2=R5s2 取轮次标签），口径=extractChannelRegionCombos', () => {
+    // b1：R2 命中（OFFSET）+ R4 改 FundType（reconid RC-CHG）；Channel/地区 默认 → 改成 JPM/US
+    // b2：R5s2 网关回填（reconSourceMid:false 取消路）；Channel/地区 → JPM/US
+    // b4：完全不命中 → 不进 channelRegionHits
+    const bankRows = [
+      makeBankRow({ _rowId: 'b1', ReconciliationId: 'RC-CHG', FundType: 'Charge', BillTag: 'OFFSET-A', Channel: 'JPM', 地区: 'US' }),
+      makeBankRow({
+        _rowId: 'b2', ReconciliationId: '', FundType: 'FundTransfer-out',
+        MerchantId: 'M002', Currency: 'USD', 'Debit Amount': 100, 'Credit Amount': 0, BillDate: '2026-06-10',
+        Channel: 'JPM', 地区: 'US'
+      }),
+      makeBankRow({ _rowId: 'b4', ReconciliationId: '', FundType: 'Settlement', BillTag: 'NORMAL', Channel: 'JPM', 地区: 'US' })
+    ];
+    const gwRows = [
+      makeGwRow({ reconciliationid: 'RC-CHG', TradeType: 'Charge', orderid: 'ORD-CHG' }),
+      makeGwRow({ reconciliationid: 'RC-FT', TradeType: 'FundTransfer-out', merchantid: 'M002', currency: 'USD', amount: -100, Billdate: '2026-06-10' })
+    ];
+    const scenarios = [makeR2OffsetScenario(), makeR4ChargeScenario(), makeR5BackfillScenario()];
+    const result = runReconciliation({ bankRows, gwRows, scenarios });
+
+    const hits = result.stats.channelRegionHits;
+    assert.ok(Array.isArray(hits), 'stats.channelRegionHits 是数组');
+    assert.equal(hits.length, 1, '仅 JPM-US 一组（b1+b2 命中，b4 未命中不计）');
+    const us = hits[0];
+    assert.equal(us.channelRegion, 'JPM-US');
+    assert.equal(us.rowCount, 2, 'b1+b2 两行命中');
+    // b1 → R2 名「R2-冲销打标」；b2 → R5s2 轮次标签「资金划转回填」
+    assert.deepEqual(us.scenarioNames, ['R2-冲销打标', '资金划转回填'].sort());
+
+    // 口径同源：channelRegion 集合 ⊆ extractChannelRegionCombos(命中行)（命中行 Channel/地区 与枚举口径一致）
+    const combosOfHitRows = extractChannelRegionCombos(result.modifiedRows);
+    assert.deepEqual(hits.map((h) => h.channelRegion).sort(), combosOfHitRows.sort(), 'channelRegion 口径与 extractChannelRegionCombos 一致');
+  });
+
+  test('多渠道-地区：按 channelRegion 升序、rowCount 准确', () => {
+    const bankRows = [
+      makeBankRow({ _rowId: 'b1', BillTag: 'OFFSET-A', Channel: 'JPM', 地区: 'US' }),
+      makeBankRow({ _rowId: 'b2', BillTag: 'OFFSET-A', Channel: 'JPM', 地区: 'HK' }),
+      makeBankRow({ _rowId: 'b3', BillTag: 'OFFSET-A', Channel: 'ADM', 地区: 'US' }),
+      makeBankRow({ _rowId: 'b4', BillTag: 'NORMAL', Channel: 'JPM', 地区: 'US' }) // 不命中
+    ];
+    const result = runReconciliation({ bankRows, gwRows: [], scenarios: [makeR2OffsetScenario()] });
+    const hits = result.stats.channelRegionHits;
+    assert.deepEqual(hits.map((h) => h.channelRegion), ['ADM-US', 'JPM-HK', 'JPM-US'], '按 channelRegion 升序');
+    for (const h of hits) {
+      assert.equal(h.rowCount, 1);
+      assert.deepEqual(h.scenarioNames, ['R2-冲销打标']);
+    }
+  });
+
+  test('无命中 / 全部行 Channel 空 → channelRegionHits 为 []（回退旧格式）', () => {
+    // 无场景启用 → 无命中行
+    const r1 = runReconciliation({
+      bankRows: [makeBankRow({ _rowId: 'b1', Channel: 'JPM', 地区: 'US' })],
+      gwRows: [], scenarios: []
+    });
+    assert.deepEqual(r1.stats.channelRegionHits, [], '无命中 → []');
+
+    // 有命中但命中行 Channel 全空 → []
+    const r2 = runReconciliation({
+      bankRows: [makeBankRow({ _rowId: 'b1', BillTag: 'OFFSET-A', Channel: '', 地区: '' })],
+      gwRows: [], scenarios: [makeR2OffsetScenario()]
+    });
+    assert.ok(r2.stats.hitRowCount >= 1, '确有命中行（验证不是因无命中才空）');
+    assert.deepEqual(r2.stats.channelRegionHits, [], '命中行 Channel 空 → []');
   });
 });

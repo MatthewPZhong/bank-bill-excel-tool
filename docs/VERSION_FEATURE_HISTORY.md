@@ -9,6 +9,30 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.0.7（2026-06-16）
+
+v3.0.7 迭代：资金对账数据处理模块 体验/产出优化 + 一项 CI 打包红线修复——① 需求1 状态框文案重排（纯展示：「已处理」按「渠道-地区」分组多行、移除「N 警告」尾巴、新增「中台加款单脏数据处理」(R5场景3) +「中台退款订单回填」(R5场景4) 两行命中数，启用即显示含「0 条命中」）；② 需求2 面板简化 +「导入文件」通用入口（🔴 资金红线：删「导入不平表」及其「导出文件」网关按钮对，「导入对账单」改名「导入文件」并升级为按表头识别 + Channel 二次路由的通用导入——ADM/BOC/JPM-US 44 列文件落 `linked_bank_deposit` 链接表供 R1-R5 / R5 退款二跳消费、含常规渠道则走主处理；状态框合并跨两行增高、按钮零位移）；③ 需求3 命中明细格式重排（纯展示：结果文件命中明细 `字段名:旧值→新值`，数字→中文双引号 `"v"` / 否则→半角尖括号 `<v>`，多条 `; ` 单行连接、关闭 wrapText 不撑高行）；④ dist-size 守卫阈值校准（🔴 CI/打包红线：`check-dist-size` asar 上限 25MB→70MB，修复 main 自 v3.0.5 起 build 作业因 `app.asar≈57.5MB` 超阈值 `exit 1`）。质量门 `npm run release-check` 全绿（unit 2858 / integration 31 脚本 1424 用例 / smoke 全模块 PASS）。⚠️ 资金红线：仅需求2「导入文件」改了链接表数据来源（R1-R5 / R5 退款二跳）；需求1/3 纯展示/格式，不改对账值/匹配/派生。
+
+### 🔴 对外契约变更（升级必读，详见 CHANGELOG v3.0.7「对外契约变更」段）
+
+- ① 「导入对账单」改名「导入文件」并升级为通用导入入口（需求2）：id/handler/IPC 不变，升级为「识别+路由+落库桥接」——44 列文件先按 `BANK_STATEMENT` 识别再读 Channel 二次路由：非空 Channel 全 ∈ {ADM,BOC,JPM-US} → 整文件走 bank-deposit 链接表导入（+ ADM/BOC 派生，JPM-US 行落 `linked_bank_deposit` 供 R5 退款二跳）；含常规渠道 → 照旧 R1-R5 主处理。链接表是 R1-R5 / R5 退款二跳的数据来源，落库后仍进主处理；「链接表管理」入口与功能不变（两入口并存）。
+- ② 退款回填务必「一次多选」导入退款单 + 银行单（🔴 资金红线操作约束）：分两次导入（先退款单后银行单）会触发既有「导入新银行单清空退款 session」逻辑 → run 时退款池空 → 退款回填静默失败、无文件产出；需求1 新增「中台退款订单回填:0 条命中」可作运行时自检信号。
+
+### 新增
+
+- 需求1 状态框命中提醒扩展（纯展示）：「已处理」改用 `stats.channelRegionHits` 按「渠道-地区」分组多行（渠道-地区口径复用 `channelEnumRepository.extractChannelRegionCombos`，旧数据缺字段回退 `hitScenarios` 旧格式不抛错）；新增「中台加款单脏数据处理」(R5场景3) +「中台退款订单回填」(R5场景4) 两行（场景启用即显示含「0 条命中」，`r5s3Enabled`/`r5s4Enabled` 门控）。
+- 「导入文件」通用导入路由专项集成测试 `scripts/integration/bank-statement-universal-import-routing.js`。
+
+### 变更
+
+- 需求2 面板简化 +「导入文件」入口（🔴 资金红线）：删原 row2 两个网关按钮（导入不平表 / 导出文件，含 renderer DOM 缓存/事件/导出 disabled 网关分支清理）；「导入对账单」→「导入文件」（详见对外契约①）；原 row2(场景管理)+row3(链接表/状态框) 合并为单 control-row（2 列×2 行 grid），状态框跨两行 + `align-self:stretch` → 垂直高度由 110px 增至 ≈176px（上沿对齐场景管理、下沿对齐原下沿；场景管理/链接表管理/开始运行/导入文件 零位移，像素级实测复核）。
+- 需求3 命中明细模板重排（纯展示）：结果文件命中明细 `字段名:旧值→新值`（`wrapHitValue`：trim 后含 `/\d/` → 中文双引号 `"v"`、否则 → 半角尖括号 `<v>`）；多条 `; ` 单行连接、命中明细单元格关闭 `wrapText` 不撑高行；OPEN-7 跨期提醒 append 由 `\n` 改 `; `。
+- dist-size 守卫阈值（🔴 CI/打包红线）：`scripts/check-dist-size.js` `MAX_ASAR_BYTES` 25MB→70MB（实测 `app.asar≈57.5MB` + 余量），修复 main 自 v3.0.5 起 build 作业 "Check dist size" `exit 1`（PR 跳过 build job 故未暴露）；纯配置常量、零运行时改动、不删依赖、保留防回归。
+
+### 移除
+
+- 资金对账面板「导入不平表」及其右侧「导出文件」网关按钮对（网关 ReconID 修复仍可经「对账单 ReconID 修复」模块使用，后端零改动）。
+
 ## v3.0.6（2026-06-16）
 
 v3.0.6 迭代：资金对账数据处理模块，三需求 + 一项退役（team-lead 拆分委托 dev 分 T1~T11 实施）——① 需求1 调拨对账单派生（「链接表管理」导入「中台调拨订单」后自动派生隐藏表「调拨对账单」，一行中台单 → FundTransfer-in / out 两行）；② 需求2 中台调拨订单对账ID回填「数据来源二选一」（R5 场景2 新增勾选框「对账数据来源为中台调拨单表」，默认勾选，勾选用调拨对账单回填、取消沿用网关对账单）；③ 需求3 DBS-Charge 资金校验（原全渠道「Charge转outbound」整体重写为 DBS 专属，对账编排新增 R3.5 轮）；④ charge-outbound 退役（非 DBS 渠道不再 charge→outbound，v3.0.4 块 G「多 Charge 取 Debit 最大行」移除，旧库每次启动幂等删除）。质量门 `npm run release-check` 全绿（unit 2803 / integration 30 脚本 / smoke 全模块 PASS）。⚠️ 多处资金红线：需求1 派生表是需求2 / 需求3 的数据来源（大账号按方向取卡号、全角括号列名漂移=大账号全空）；需求2 / 需求3 均改写银行 `ReconciliationId`（需求3 还改 `FundType`）；需求3 R3.5 在 R4 前演化 `bankRows` 同一引用（叠加链跨轮保留）。

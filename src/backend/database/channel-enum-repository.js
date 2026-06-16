@@ -124,6 +124,54 @@ function extractChannelRegionCombos(rows) {
 }
 
 /**
+ * v3.0.7 需求2d（🔴🔴 资金红线·契约 C5）：单行「是否银行对账单入金行」谓词。
+ *   逐行取 Channel / 地区（与 extractChannelRegionCombos 同 trim 归一口径），命中以下任一即入金行：
+ *     - Channel === 'ADM'（按裸 Channel 列值，🔴 忽略地区——ADM 行地区可空可有值，统一判入金）。
+ *     - Channel === 'BOC'（同上，按裸 Channel 列值，🔴 忽略地区——真实 BOC 入金行 地区='CN'，
+ *       见 boc-fx-link-fields.js BOC_BANK_FILTER.地区='CN'；绝不能拼成 'BOC-CN' 组合去比白名单）。
+ *     - Channel === 'JPM' ∧ 地区 === 'US'（仅 JPM-US；JPM-HK 排除走 R1-R5 预处理，与退款回填 JPM-HK
+ *       另有二跳口径一致）。
+ *   🔴 大小写敏感、精确等于（与 BOC_CHANNEL_VALUE 等常量一致）。Channel 空（trim 后空）不在此判定，
+ *      由上层 isBankDepositChannelFile 跳过。
+ * @param {string} ch 已 trim 的 Channel 列值
+ * @param {string} region 已 trim 的 地区 列值
+ * @returns {boolean}
+ */
+function isBankDepositRow(ch, region) {
+  if (ch === 'ADM' || ch === 'BOC') return true; // ADM/BOC 按裸 Channel，忽略地区
+  if (ch === 'JPM' && region === 'US') return true; // 仅 JPM-US（JPM-HK 排除）
+  return false;
+}
+
+/**
+ * v3.0.7 需求2d（🔴🔴 资金红线·契约 C5）：判定一份 44 列银行对账单文件是否为「银行对账单入金表」
+ *   （命中 → 落 bank-deposit 链接表；否则 → 走 R1-R5 预处理）。「导入文件」按钮 Channel 二次路由的唯一真相。
+ *
+ *   口径（逐行 Channel+地区 判定，🔴 绝不用 'Channel-地区' 组合字符串比白名单——
+ *     ADM/BOC 真实数据会带地区，组合化会把 'BOC-CN' 判成非白名单致误路由，见本批次修复背景）：
+ *     - Channel（trim 后）为空 → 跳过该行（不参与判定，与 extractChannelRegionCombos 一致）。
+ *     - 非空 Channel 行经 isBankDepositRow 判定。
+ *   文件判为 bank-deposit ⟺ 至少有一行非空 Channel 且**所有**非空 Channel 行都 isBankDepositRow。
+ *   🔴 空文件 / 全空 Channel（无任何非空 Channel 行）→ false（保守，绝不吞为链接表；
+ *      用 sawChannel 标记守卫，避免 every-on-empty 的 vacuously-true 误判）。
+ * @param {Array<{Channel?:*, 地区?:*}>} rows readBankStatement 产物（对象数组）
+ * @returns {boolean} true=入金表（路由 bank-deposit）；false=走 R1-R5 预处理
+ */
+function isBankDepositChannelFile(rows) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  let sawChannel = false; // 是否见过至少一行非空 Channel（守卫空文件 / 全空 Channel → false）
+  for (const row of safeRows) {
+    const obj = row && typeof row === 'object' ? row : {};
+    const ch = obj.Channel === null || obj.Channel === undefined ? '' : String(obj.Channel).trim();
+    if (ch === '') continue; // Channel 空 → 跳过该行（不参与判定）
+    sawChannel = true;
+    const region = obj['地区'] === null || obj['地区'] === undefined ? '' : String(obj['地区']).trim();
+    if (!isBankDepositRow(ch, region)) return false; // 有一行非入金行 → 整份走预处理
+  }
+  return sawChannel; // 全部非空 Channel 行都是入金行（且至少有一行）
+}
+
+/**
  * 按 value_type 过滤列出枚举值（供后续引擎读库 + 审计）。
  * @param {*} db
  * @param {'channel'|'channel-region'} valueType
@@ -153,5 +201,8 @@ module.exports = {
   recordFromBankStatementRows,
   // v3.0.0 需求1：状态框渠道-地区前缀（纯函数，与枚举沉淀同拼接口径）
   extractChannelRegionCombos,
+  // v3.0.7 需求2d：「导入文件」Channel 二次路由谓词（纯函数，bank-deposit 文件判定单一真相）
+  isBankDepositRow,
+  isBankDepositChannelFile,
   listChannelEnumValues
 };

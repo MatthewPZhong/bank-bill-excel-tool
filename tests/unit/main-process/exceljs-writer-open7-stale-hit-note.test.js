@@ -1,7 +1,8 @@
 // v3.0.5 OPEN-7（T5b-2 出口②预留）单测：writeBankStatementOutput 第 7 参 staleHitNotesByRowId
 //   🔴 资金红线 parity：传空/不传时主对账链「命中明细」golden 字节不变（本批 main 即不传——
 //      主对账链无入金表来源命中，注入仅为 refund-backfill 阶段预留）。
-//   传含提醒的 Map 时：对应 rowId 行 append「\n+提醒」不覆盖原命中明细；无该 rowId 的行不变。
+//   传含提醒的 Map 时：对应 rowId 行 append「; +提醒」不覆盖原命中明细；无该 rowId 的行不变。
+//   v3.0.7 需求C 单行布局：append 分隔符由 '\n' 改为 '; '（半角分号+空格）→ 命中明细列绝不含换行。
 const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -28,7 +29,7 @@ const MODIFIED_ROWS = [
 const MODIFICATIONS = [
   { rowId: 'r1', column: 'FundType', oldValue: 'old', newValue: 'x', scenarioName: '场景1' }
 ];
-const EXPECTED_R1_DETAIL = '<命中场景:"场景1";"FundType";变更前:"old";变更后:"x">';
+const EXPECTED_R1_DETAIL = 'FundType:<old>→<x>'; // v3.0.7 需求B/C/D 格式 {字段名}:{wrap(旧)}→{wrap(新)}；old/x 均非数字→尖括号，全角箭头
 
 async function readHitDetailColumn(out) {
   const wb = new ExcelJS.Workbook();
@@ -72,30 +73,31 @@ test('OPEN-7 出口②：传空 Map → 命中明细字节不变', async () => {
   assert.strictEqual(got.r2Detail, '', 'r2 空串');
 });
 
-// ===== 注入语义：传含提醒 Map → 对应行 append \n+提醒 不覆盖；无该 rowId 行不变 =====
-test('OPEN-7 出口②：含提醒 Map → r1 append 不覆盖原命中明细 + r2 不受影响', async () => {
+// ===== 注入语义：传含提醒 Map → 对应行 append "; "+提醒 不覆盖；无该 rowId 行不变 =====
+test('OPEN-7 出口②：含提醒 Map → r1 append 不覆盖原命中明细 + r2 不受影响（单行 "; " 分隔）', async () => {
   const reminder = '⚠️ 桥接入金表行 BizId=DEP001 此前于 [2026-06-01T00:00:00Z] 已被命中，疑似历史残留';
   const noteMap = new Map([['r1', reminder]]);
   const out = tmpFile('with-note.xlsx');
   await writeBankStatementOutput(MODIFIED_ROWS, HEADERS, out, [], MODIFICATIONS, null, noteMap);
   const got = await readHitDetailColumn(out);
-  // r1：原 detail + \n + 提醒（append 不覆盖）
+  // r1：原 detail + "; " + 提醒（append 不覆盖；v3.0.7 需求C 单行布局，分隔符 '; ' 无换行）
   assert.strictEqual(
     got.r1Detail,
-    EXPECTED_R1_DETAIL + '\n' + reminder,
-    'r1 命中明细 = 原 detail + 换行 + 提醒（不覆盖）'
+    EXPECTED_R1_DETAIL + '; ' + reminder,
+    'r1 命中明细 = 原 detail + "; " + 提醒（不覆盖，单行无换行）'
   );
+  assert.ok(!String(got.r1Detail).includes('\n'), 'r1 命中明细绝不含换行');
   // r2：noteMap 无 r2 → 不变（仍空串）
   assert.strictEqual(got.r2Detail, '', 'r2 不在 noteMap → 命中明细不变');
 });
 
 // ===== 边界：原命中明细为空串的行也能注入提醒（detail ? ... : note 分支）=====
-test('OPEN-7 出口②：原命中明细空串的行注入提醒 → 直接为提醒串（无前导换行）', async () => {
+test('OPEN-7 出口②：原命中明细空串的行注入提醒 → 直接为提醒串（无前导分隔符）', async () => {
   const reminder = '⚠️ 桥接入金表行 BizId=DEP002 此前于 [t] 已被命中，疑似历史残留';
   const noteMap = new Map([['r2', reminder]]); // r2 无 modification → 原 detail 空串
   const out = tmpFile('empty-detail-note.xlsx');
   await writeBankStatementOutput(MODIFIED_ROWS, HEADERS, out, [], MODIFICATIONS, null, noteMap);
   const got = await readHitDetailColumn(out);
   assert.strictEqual(got.r1Detail, EXPECTED_R1_DETAIL, 'r1 不在 noteMap → 不变');
-  assert.strictEqual(got.r2Detail, reminder, 'r2 原空串 → 直接为提醒串（无前导 \\n）');
+  assert.strictEqual(got.r2Detail, reminder, 'r2 原空串 → 直接为提醒串（无前导 "; " 分隔符）');
 });

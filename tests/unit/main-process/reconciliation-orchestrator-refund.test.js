@@ -152,6 +152,13 @@ test.describe('runReconciliation R5 场景4 集成', () => {
 
     // stats / rounds 字段
     assert.equal(result.stats.r5s4BackfilledCount, 1, 'stats.r5s4BackfilledCount = 回填行数');
+    // v3.0.7 需求A：场景4 启用 → stats.r5s4Enabled=true（供 renderer 状态框显示该行）；与 backfillRows 计数一致。
+    assert.equal(result.stats.r5s4Enabled, true, 'stats.r5s4Enabled=true（场景4 启用）');
+    assert.equal(
+      result.stats.r5s4BackfilledCount,
+      result.refundBackfillRows.length,
+      'stats.r5s4BackfilledCount 与 refundBackfillRows.length 一致'
+    );
     assert.ok(result.rounds.r5s4 && typeof result.rounds.r5s4 === 'object', 'rounds.r5s4 存在');
     assert.equal(result.rounds.r5s4.backfilled, 1, 'rounds.r5s4.backfilled = 回填行数');
   });
@@ -215,6 +222,8 @@ test.describe('runReconciliation R5 场景4 守卫', () => {
     assert.deepEqual(result.refundBackfillRows, [], '无退款场景 → refundBackfillRows 空');
     assert.deepEqual(result.refundUnmatchedRows, [], '无退款场景 → refundUnmatchedRows 空');
     assert.equal(result.stats.r5s4BackfilledCount, 0);
+    // v3.0.7 需求A：r5s4 桶空（场景未启用）→ r5s4Enabled=false（renderer 不显示该行）。
+    assert.equal(result.stats.r5s4Enabled, false, 'r5s4 桶空 → r5s4Enabled=false');
     assert.equal(result.rounds.r5s4.backfilled, 0);
     assert.equal(
       result.modifiedRows.length + result.unmatchedRows.length,
@@ -236,5 +245,8 @@ test.describe('runReconciliation R5 场景4 守卫', () => {
     });
     assert.deepEqual(result.refundBackfillRows, [], '缺 refundContext → 空 refundOrderRows → 无回填');
     assert.equal(result.stats.r5s4BackfilledCount, 0);
+    // v3.0.7 需求A 核心：场景【启用】但 0 条命中 → r5s4Enabled 仍为 true（状态框照样显示「0 条命中」，
+    //   作为运行时自检信号——见 spec.md §二：跑了但没命中 = 退款没进）。
+    assert.equal(result.stats.r5s4Enabled, true, '场景启用但 0 命中 → r5s4Enabled 仍 true');
   });
 });

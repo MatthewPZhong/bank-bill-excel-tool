@@ -948,6 +948,25 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
    按 180px 对齐，使右列三按钮等宽。pair 内 primary+secondary 各 flex:1 平分容器自动等宽，无需额外规则。 */
 .bank-statement-board .cell.left .primary-btn { min-width: 180px; }
 
+/* v3.0.7：资金对账面板 原 row2(场景管理)+row3(链接表管理/状态框) 合并为单 control-row。作用域 #bankStatementModulePanel。
+   目标（手测拍板）：删除原 row2 网关按钮对后，状态框「上沿对齐场景管理上沿、下沿对齐原状态框下沿」→ 垂直高度增大；
+   场景管理/链接表管理 大小+位置与原 row2/row3 完全一致（像素级复刻）。
+   实现：2 列(沿用 .bank-statement-board .control-row 的 1fr 1.4fr) × 2 行 grid——
+     · 行：row1 = auto（场景管理 ≈48px）；row2 = 110px（复刻原 row3 高度 = 状态框 min-height）；
+       row-gap:18px（= 原 .control-row + .control-row margin-top:18px，复刻原行距）。
+     · col1(1fr，layout-mirrored/rtl 视觉在右)：场景管理 grid-row1（控件行内居中于 48px 行，位置同原 row2）；
+       链接表管理 grid-row2（单元格默认 align-self:center → 居中于 110px 行 → 位置同原 row3）。
+     · col2(1.4fr，rtl 视觉在左、与 row1「导入文件」列对齐)：状态框单元格 grid-row:1/3 跨两行 + align-self:stretch
+       —— 撑满 grid 区域(row1+gap+row2 ≈ 176px)，不再被默认 align-self:center 钉成内容高(110)居中；
+       .cell.right 本身是 row 向 flex(align-items 默认 stretch) → 状态框纵向填满单元格 → 高度由 110 增至 ≈176。 */
+#bankStatementModulePanel .bank-statement-board-merged-row {
+  grid-template-rows: auto 110px;
+  row-gap: 18px;
+}
+#bankStatementModulePanel .bsb-merged-scenario { grid-column: 1; grid-row: 1; }
+#bankStatementModulePanel .bsb-merged-linked   { grid-column: 1; grid-row: 2; }
+#bankStatementModulePanel .bsb-merged-status   { grid-column: 2; grid-row: 1 / 3; align-self: stretch; }
+
 /* v2.1.12 需求：VCC业务OP计算 + 月度银行对账单BU回填校验 主面板沿垂直中线镜像（文字正常，用户最终确认）
    ⚠️ 当前生效主题 = Clear（本文件 styles-gemini-extra.css）；styles.css(General)默认 disabled，同名规则在那不生效。
    实现：容器 direction:rtl 做"逻辑镜像" —— ①grid 列(cell.left↔right) ②列宽(1fr/1.4fr 随 rtl 自动换边)
@@ -3434,9 +3453,11 @@ body[data-platform="win32"] .dialog-title * {
  *   坑：.status-box 基础类（styles-gemini.css:285）为 flex + align-items:center，
  *     滚动容器内 center 对齐会把顶部内容顶到可视区外滚不到 → 这里覆盖 align-items: flex-start；
  *     再给两个 flex 子项（角标 + 文案）加垂直 margin:auto，使单行/短文案在 min-height:110px 下仍垂直居中观感，
- *     内容超 max-height 时 margin:auto 塌缩为 0、从顶部起算 → 多行可滚到顶（两全）。 */
+ *     内容超高时 margin:auto 塌缩为 0、从顶部起算 → 多行可滚到顶（两全）。
+ * v3.0.7：状态框高度改由 .bsb-merged-status 单元格(align-self:stretch, grid-row:1/3)决定（≈176px，含跨入原 row3 整高）。
+ *   去掉原 max-height:140px —— 否则会把状态框钉在 140px、无法随单元格增高到 ≈176（手测「垂直高度没变」根因之一）；
+ *   高度上界改由单元格(grid 区域 = row1+gap+110px row2)兜底，内容超出仍 overflow-y:auto 内部滚动。 */
 #bankStatementStatusBox {
-  max-height: 140px;
   overflow-y: auto;
   align-items: flex-start;
 }

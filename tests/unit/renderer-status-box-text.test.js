@@ -60,3 +60,98 @@ describe('updateBankStatementUi — N6 状态框换行修复 (v2.1.9 T31)', () =
       'updateStatusBox 内层 replace `：` → `：\\n` 必须保留（v2.1.7 round 2 R3 §8.4.2 设计）');
   });
 });
+
+// v3.0.7 需求1a：「已处理」分支改用 channelRegionHits 多行分组展示（渠道-地区:n条（场景名…））
+describe('updateBankStatementUi 已处理分支 — channelRegionHits 渲染（v3.0.7 需求1a）', () => {
+  test('refreshBankStatementStatus 解析 channelRegionHits（向后兼容空数组兜底）', () => {
+    assert.ok(source.includes('channelRegionHits: Array.isArray(status.processingStats?.channelRegionHits)'),
+      'state.processingResult 应解析 status.processingStats.channelRegionHits（Array.isArray 守卫）');
+    assert.ok(source.includes('? status.processingStats.channelRegionHits.slice()'),
+      '应 slice 拷贝 channelRegionHits（向后兼容旧持久化/旧 main → []）');
+  });
+
+  test('已处理分支按 channelRegionHits 非空走新格式 `渠道-地区:n条（场景名）`', () => {
+    assert.ok(source.includes('const crHits = Array.isArray(pr.channelRegionHits) ? pr.channelRegionHits : [];'),
+      '已处理分支应读 pr.channelRegionHits 并守卫');
+    // 每行格式：`${h.channelRegion}:${rowCount}条${namePart}`（半角冒号防换行）
+    assert.ok(source.includes('return `${h.channelRegion}:${Number(h.rowCount) || 0}条${namePart}`;'),
+      '每个 hit 应渲染为 `渠道-地区:n条（场景名…）`（半角冒号）');
+    // 🔴 分组冒号必须半角，不得全角「：」
+    assert.ok(!source.includes('${h.channelRegion}：'),
+      'channelRegionHits 分组冒号不得用全角「：」（会被 updateStatusBox 强制换行打断）');
+  });
+
+  test('channelRegionHits 为空 → 回退现有 hitScenarios 旧格式（不删旧分支）', () => {
+    // 旧 hitScenarios 分组逻辑必须仍在文件里（else 回退分支）
+    assert.ok(source.includes('const arr = Array.isArray(pr.hitScenarios) ? pr.hitScenarios : [];'),
+      '回退分支应保留 hitScenarios 解析');
+    assert.ok(source.includes("idsText = `（场景\\n${lines.join('\\n')}）`;"),
+      '回退分支应保留旧 channelName 分组格式');
+  });
+});
+
+// v3.0.7 需求1c：「已处理」分支移除「，N 警告」尾巴；tone 固定 success（不再因警告转 error）
+describe('updateBankStatementUi 已处理分支 — 移除警告 + tone 固定（v3.0.7 需求1c）', () => {
+  test('源码不再出现 `，${pr.warningCount} 警告` 尾巴', () => {
+    assert.ok(!source.includes('，${pr.warningCount} 警告'),
+      '已处理分支应移除「，N 警告」尾巴（警告仍写 error-report，不进状态框文案）');
+  });
+
+  test('已处理分支 tone 不再因 warningCount 转 error', () => {
+    assert.ok(!source.includes("tone = pr.warningCount > 0 ? 'error' : 'success';"),
+      '已处理分支不得再用 `tone = pr.warningCount > 0 ? error : success`（需固定 success）');
+  });
+});
+
+// v3.0.7 需求1b：「已导出」分支按存在性追加 加款单剔除文件 / 中台回填文件 各占一行
+describe('updateBankStatementUi 已导出分支 — 附带产物追加（v3.0.7 需求1b）', () => {
+  test('handleBankStatementExport 捕获 platformCleanupName / refundBackfillName 进 state.bankStatementExport', () => {
+    assert.ok(source.includes('platformCleanupName: result.platformCleanupName || null'),
+      'export ok 分支应捕获 platformCleanupName');
+    assert.ok(source.includes('refundBackfillName: result.refundBackfillName || null'),
+      'export ok 分支应捕获 refundBackfillName');
+  });
+
+  test('已导出分支按存在性追加两行（行间 \\n + 全角「：」与 error-report 同款）', () => {
+    assert.ok(source.includes('if (ex.platformCleanupName) text += `\\n加款单剔除文件：${ex.platformCleanupName}`;'),
+      '已导出分支应在 platformCleanupName 存在时追加「加款单剔除文件：…」行');
+    assert.ok(source.includes('if (ex.refundBackfillName) text += `\\n中台回填文件：${ex.refundBackfillName}`;'),
+      '已导出分支应在 refundBackfillName 存在时追加「中台回填文件：…」行');
+  });
+});
+
+// v3.0.7 需求2a（C2）：两个网关按钮的 DOM 缓存 / 事件绑定 / 导出 disabled 网关分支删除；handleReconIdFixExport 保留
+describe('需求2a — 网关按钮清理护栏（v3.0.7 C2）', () => {
+  test('DOM 缓存删除：bankStatementGatewayReconImportBtn / ExportBtn 不再 getElementById', () => {
+    assert.ok(!source.includes("getElementById('bankStatementGatewayReconImportBtn')"),
+      'bankStatementGatewayReconImportBtn DOM 缓存应删除');
+    assert.ok(!source.includes("getElementById('bankStatementGatewayReconExportBtn')"),
+      'bankStatementGatewayReconExportBtn DOM 缓存应删除');
+  });
+
+  test('事件绑定删除：两网关按钮 addEventListener 不再存在', () => {
+    assert.ok(!source.includes('elements.bankStatementGatewayReconImportBtn.addEventListener'),
+      '导入不平表按钮事件绑定应删除');
+    assert.ok(!source.includes('elements.bankStatementGatewayReconExportBtn.addEventListener'),
+      '网关导出按钮事件绑定应删除');
+  });
+
+  test('updateBankStatementExportButtonsDisabled 网关分支删除（不再设 GatewayReconExportBtn.disabled）', () => {
+    assert.ok(!source.includes('elements.bankStatementGatewayReconExportBtn.disabled'),
+      'updateBankStatementExportButtonsDisabled 应移除网关导出按钮 disabled 分支');
+  });
+
+  test('handleBankStatementGatewayReconImport 函数删除（宿主按钮已删）', () => {
+    assert.ok(!source.includes('async function handleBankStatementGatewayReconImport()'),
+      'handleBankStatementGatewayReconImport 函数应删除');
+  });
+
+  test('🔴 保留项：handleReconIdFixExport / handleBankStatementGatewayReconRun 仍定义', () => {
+    assert.ok(source.includes('async function handleReconIdFixExport()'),
+      'handleReconIdFixExport 必须保留（ReconID 修复面板共用）');
+    assert.ok(source.includes('async function handleBankStatementGatewayReconRun()'),
+      'handleBankStatementGatewayReconRun 必须保留（row1 mode 路由仍引用，非本契约删除项）');
+    assert.ok(source.includes('elements.reconIdFixExportBtn.addEventListener'),
+      'reconIdFixExportBtn → handleReconIdFixExport 绑定必须保留');
+  });
+});

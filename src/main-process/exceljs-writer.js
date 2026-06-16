@@ -97,14 +97,30 @@ function cellToString(value) {
   return String(value);
 }
 
-// 把一行的 modifications（多条字段级变更）拼成命中明细文本：
-//   每条 `<命中场景:"场景名";"字段名";变更前:"旧值";变更后:"新值">`，多条用换行分隔（B-Q2）
+// 命中明细单值包裹（v3.0.7 需求3 · 修复2）：
+//   含【任意数字字符】（trim 后匹配 /\d/）→ 中文双引号“v”（显示 trim 后的值）——
+//     纯数字（123）、数字英文混合（T54SWIC494447）、千分位都归此类；
+//   完全不含数字（trim 后无 /\d/，含空串/纯英文/纯符号/中文）→ 半角尖括号<v>（显示原始 cellToString 结果，不 trim，空串→<>）。
+//   例：T54SWIC494447→“T54SWIC494447”；123→“123”；Fundtransfer-out→<Fundtransfer-out>；空串→<>。
+function wrapHitValue(value) {
+  const s = cellToString(value);
+  const t = s.trim();
+  return /\d/.test(t) ? `“${t}”` : `<${s}>`;
+}
+
+// 把一行的 modifications（多条字段级变更）拼成命中明细文本（v3.0.7 需求B/C/D 格式）：
+//   每条 `{字段名}:{wrap(旧值)}→{wrap(新值)}`——
+//     · 字段名 = modification.column（原始英文列名，裸写不包裹）；
+//     · 字段名与值之间用【半角冒号 :】；旧值与新值之间用【全角箭头 →】；
+//     · wrapHitValue 规则不变（含数字→中文双引号“”、否则→尖括号<>）；
+//     · D：值不省略，完整显示，不截断。
+//   多条以 '; '（半角分号+空格，【无换行】）拼接 —— 单行紧凑布局，末条无尾分隔（join 天然保证）。
+//   🔴 命中明细列单行布局，本函数产出绝不含 '\n'（撑高行/破坏单行的元凶）。
 function buildHitDetail(mods) {
   if (!Array.isArray(mods) || mods.length === 0) return '';
   return mods
-    .map((m) => `<命中场景:"${cellToString(m.scenarioName)}";"${cellToString(m.column)}";`
-      + `变更前:"${cellToString(m.oldValue)}";变更后:"${cellToString(m.newValue)}">`)
-    .join('\n');
+    .map((m) => `${cellToString(m.column)}:${wrapHitValue(m.oldValue)}→${wrapHitValue(m.newValue)}`)
+    .join('; ');
 }
 
 // ===== v3.0.4 块 F 修订 R2 Q14：Payment线下调拨核对 3 sheet =====
@@ -263,14 +279,15 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
     let detail = buildHitDetail(mods);
     // v3.0.5 OPEN-7（出口②）：若该行有跨期重复命中提醒 → append 到命中明细（不覆盖原 detail）。
     //   🔴 staleHitNotesByRowId 为 null/无该 rowId 时不进分支 → detail 字节不变（parity）。
+    //   v3.0.7 需求C 单行布局：append 分隔符由 '\n' 改为 '; '（半角分号+空格），空 detail 时直接用提醒串 —— 确保命中明细列绝不含 '\n'。
     if (staleHitNotesByRowId && typeof staleHitNotesByRowId.get === 'function') {
       const note = staleHitNotesByRowId.get(row._rowId);
-      if (note) detail = detail ? detail + '\n' + note : note;
+      if (note) detail = detail ? detail + '; ' + note : note;
     }
     const cells = [detail, ...headers.map((h) => row[h])];
     const r = s2.addRow(cells);
-    // 命中明细列多行换行显示（B-Q2）
-    r.getCell(1).alignment = { wrapText: true, vertical: 'top' };
+    // v3.0.7 需求C：命中明细单行紧凑显示，关闭自动换行（wrapText:false）→ 不再撑高行；仅保留顶端对齐。
+    r.getCell(1).alignment = { wrapText: false, vertical: 'top' };
     // 保留原标黄（D5）：_modifiedColumns 对应单元格黄底；命中明细列后移 1 → colIdx + 2
     const modifiedColumns = row._modifiedColumns;
     if (modifiedColumns && modifiedColumns.size > 0) {

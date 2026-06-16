@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "3.0.6",
-    "scannedAt": "2026-06-15T19:02:37.351Z",
+    "version": "3.0.7",
+    "scannedAt": "2026-06-16T08:38:14.085Z",
     "root": "src",
     "totalFiles": 160,
-    "totalTopLevelNames": 1666,
+    "totalTopLevelNames": 1673,
     "buckets": {
-      "shared": 281,
-      "paired": 463,
-      "local": 798,
-      "crossFile": 744
+      "shared": 282,
+      "paired": 464,
+      "local": 803,
+      "crossFile": 746
     }
   },
   "A": {
@@ -764,7 +764,7 @@
           },
           {
             "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 12
+            "count": 13
           },
           {
             "file": "src/main-process/scenario-engines/engine-utils.js",
@@ -803,7 +803,7 @@
             "count": 45
           }
         ],
-        "totalHits": 197,
+        "totalHits": 198,
         "fileSpan": 18
       },
       {
@@ -2381,10 +2381,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 154
+            "count": 153
           }
         ],
-        "totalHits": 310,
+        "totalHits": 309,
         "fileSpan": 6
       },
       {
@@ -2789,14 +2789,14 @@
           },
           {
             "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 2
+            "count": 4
           },
           {
             "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
             "count": 4
           }
         ],
-        "totalHits": 17,
+        "totalHits": 19,
         "fileSpan": 5
       },
       {
@@ -3488,10 +3488,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 98
+            "count": 96
           }
         ],
-        "totalHits": 157,
+        "totalHits": 155,
         "fileSpan": 4
       },
       {
@@ -7748,6 +7748,29 @@
         "fileSpan": 3
       },
       {
+        "name": "ALL_TABLE_SIGNATURES",
+        "defFiles": [
+          "src/constants/table-signatures.js",
+          "src/main-process/table-type-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/table-signatures.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/table-type-detector.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
         "name": "bankCreditAmount",
         "defFiles": [
           "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js"
@@ -11158,24 +11181,6 @@
         "fileSpan": 2
       },
       {
-        "name": "reconIdFixSession",
-        "defFiles": [
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main.js",
-            "count": 1
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 2
-      },
-      {
         "name": "REFUND_RO_COLUMNS",
         "defFiles": [
           "src/constants/refund-backfill-fields.js"
@@ -11987,6 +11992,24 @@
         "fileSpan": 2
       },
       {
+        "name": "reconIdFixSession",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "REFUND_TEMPLATE_HEADERS",
         "defFiles": [
           "src/constants/refund-backfill-fields.js"
@@ -12394,25 +12417,6 @@
         "fileSpan": 2
       },
       {
-        "name": "ALL_TABLE_SIGNATURES",
-        "defFiles": [
-          "src/constants/table-signatures.js",
-          "src/main-process/table-type-detector.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/constants/table-signatures.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/table-type-detector.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 2
-      },
-      {
         "name": "applyApplicableChannelIdsInTx",
         "defFiles": [
           "src/backend/database/scenarios-repository.js"
@@ -12425,6 +12429,24 @@
           {
             "file": "src/backend/database/scenarios-repository.js",
             "count": 3
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "BANK_DEPOSIT_SIGNATURE",
+        "defFiles": [
+          "src/constants/table-signatures.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/table-signatures.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
           }
         ],
         "totalHits": 4,
@@ -13543,6 +13565,24 @@
         "fileSpan": 2
       },
       {
+        "name": "isBankDepositChannelFile",
+        "defFiles": [
+          "src/backend/database/channel-enum-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/channel-enum-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "isFilenameMappingMode",
         "defFiles": [
           "src/main.js",
@@ -14000,8 +14040,7 @@
       {
         "name": "PREPROCESS_TABLE_SIGNATURES",
         "defFiles": [
-          "src/constants/table-signatures.js",
-          "src/main.js"
+          "src/constants/table-signatures.js"
         ],
         "refFiles": [
           {
@@ -15972,8 +16011,7 @@
       {
         "name": "LINKED_IMPORT_SIGNATURES",
         "defFiles": [
-          "src/constants/table-signatures.js",
-          "src/main.js"
+          "src/constants/table-signatures.js"
         ],
         "refFiles": [
           {
@@ -17593,20 +17631,6 @@
         "fileSpan": 1
       },
       {
-        "name": "cellToString",
-        "defFiles": [
-          "src/main-process/exceljs-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/exceljs-writer.js",
-            "count": 9
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 1
-      },
-      {
         "name": "readers",
         "defFiles": [
           "src/main-process/table-type-detector.js"
@@ -17880,6 +17904,20 @@
         "refFiles": [
           {
             "file": "src/constants/boc-dispatch-order-fields.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
+        "name": "cellToString",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
             "count": 7
           }
         ],
@@ -18622,6 +18660,20 @@
         "refFiles": [
           {
             "file": "src/backend/big-table-import/row-scanner.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "channelEnumRepository",
+        "defFiles": [
+          "src/backend/database.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
             "count": 5
           }
         ],
@@ -19378,20 +19430,6 @@
         "refFiles": [
           {
             "file": "src/backend/big-table-import/row-scanner.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "channelEnumRepository",
-        "defFiles": [
-          "src/backend/database.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
             "count": 4
           }
         ],
@@ -20799,20 +20837,6 @@
         "fileSpan": 1
       },
       {
-        "name": "BANK_DEPOSIT_SIGNATURE",
-        "defFiles": [
-          "src/constants/table-signatures.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/constants/table-signatures.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "BANK_STATEMENT_SHEET_NAME",
         "defFiles": [
           "src/main-process/bank-statement-io.js"
@@ -21058,6 +21082,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-reconcile/engine.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildChannelRegionHits",
+        "defFiles": [
+          "src/main-process/reconciliation-orchestrator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/reconciliation-orchestrator.js",
             "count": 3
           }
         ],
@@ -21737,6 +21775,20 @@
         "fileSpan": 1
       },
       {
+        "name": "DISP_FUND_TYPE_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "dispatchAmountAbs",
         "defFiles": [
           "src/main-process/scenario-engines/dbs-charge-fund-check.js"
@@ -22360,6 +22412,20 @@
         "refFiles": [
           {
             "file": "src/constants/table-signatures.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "isBankDepositRow",
+        "defFiles": [
+          "src/backend/database/channel-enum-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/channel-enum-repository.js",
             "count": 3
           }
         ],
@@ -24271,6 +24337,20 @@
         "fileSpan": 1
       },
       {
+        "name": "wrapHitValue",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "writeChunkToTemp",
         "defFiles": [
           "src/main-process/run-check-multiworker-worker.js"
@@ -24943,6 +25023,20 @@
         "fileSpan": 1
       },
       {
+        "name": "buildAlsoLinkedSummary",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "buildBackgroundStyle",
         "defFiles": [
           "src/renderer.js"
@@ -24958,6 +25052,20 @@
       },
       {
         "name": "buildImportIssuesSummary",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildLinkedImportSummary",
         "defFiles": [
           "src/renderer.js"
         ],
@@ -25448,20 +25556,6 @@
       },
       {
         "name": "DISP_CURRENCY_FIELD",
-        "defFiles": [
-          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
-        "name": "DISP_FUND_TYPE_FIELD",
         "defFiles": [
           "src/main-process/scenario-engines/dbs-charge-fund-check.js"
         ],
@@ -27603,6 +27697,20 @@
         "fileSpan": 1
       },
       {
+        "name": "ROUND_LABELS",
+        "defFiles": [
+          "src/main-process/reconciliation-orchestrator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/reconciliation-orchestrator.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "rowBytesToValues",
         "defFiles": [
           "src/backend/big-table-import/row-scanner.js"
@@ -29069,7 +29177,7 @@
         },
         {
           "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "count": 12
+          "count": 13
         },
         {
           "file": "src/main-process/scenario-engines/engine-utils.js",
@@ -29108,7 +29216,7 @@
           "count": 45
         }
       ],
-      "totalHits": 197,
+      "totalHits": 198,
       "fileSpan": 18
     },
     {
@@ -30686,10 +30794,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 154
+          "count": 153
         }
       ],
-      "totalHits": 310,
+      "totalHits": 309,
       "fileSpan": 6
     },
     {
@@ -31094,14 +31202,14 @@
         },
         {
           "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "count": 2
+          "count": 4
         },
         {
           "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
           "count": 4
         }
       ],
-      "totalHits": 17,
+      "totalHits": 19,
       "fileSpan": 5
     },
     {
@@ -31793,10 +31901,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 98
+          "count": 96
         }
       ],
-      "totalHits": 157,
+      "totalHits": 155,
       "fileSpan": 4
     },
     {
@@ -36053,6 +36161,29 @@
       "fileSpan": 3
     },
     {
+      "name": "ALL_TABLE_SIGNATURES",
+      "defFiles": [
+        "src/constants/table-signatures.js",
+        "src/main-process/table-type-detector.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/table-signatures.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/table-type-detector.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
       "name": "bankCreditAmount",
       "defFiles": [
         "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js"
@@ -39461,24 +39592,6 @@
       "fileSpan": 2
     },
     {
-      "name": "reconIdFixSession",
-      "defFiles": [
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main.js",
-          "count": 1
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 5
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 2
-    },
-    {
       "name": "REFUND_RO_COLUMNS",
       "defFiles": [
         "src/constants/refund-backfill-fields.js"
@@ -40290,6 +40403,24 @@
       "fileSpan": 2
     },
     {
+      "name": "reconIdFixSession",
+      "defFiles": [
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "REFUND_TEMPLATE_HEADERS",
       "defFiles": [
         "src/constants/refund-backfill-fields.js"
@@ -40697,25 +40828,6 @@
       "fileSpan": 2
     },
     {
-      "name": "ALL_TABLE_SIGNATURES",
-      "defFiles": [
-        "src/constants/table-signatures.js",
-        "src/main-process/table-type-detector.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/constants/table-signatures.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/table-type-detector.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 2
-    },
-    {
       "name": "applyApplicableChannelIdsInTx",
       "defFiles": [
         "src/backend/database/scenarios-repository.js"
@@ -40728,6 +40840,24 @@
         {
           "file": "src/backend/database/scenarios-repository.js",
           "count": 3
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "BANK_DEPOSIT_SIGNATURE",
+      "defFiles": [
+        "src/constants/table-signatures.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/table-signatures.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
         }
       ],
       "totalHits": 4,
@@ -41846,6 +41976,24 @@
       "fileSpan": 2
     },
     {
+      "name": "isBankDepositChannelFile",
+      "defFiles": [
+        "src/backend/database/channel-enum-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/channel-enum-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "isFilenameMappingMode",
       "defFiles": [
         "src/main.js",
@@ -42303,8 +42451,7 @@
     {
       "name": "PREPROCESS_TABLE_SIGNATURES",
       "defFiles": [
-        "src/constants/table-signatures.js",
-        "src/main.js"
+        "src/constants/table-signatures.js"
       ],
       "refFiles": [
         {
@@ -44275,8 +44422,7 @@
     {
       "name": "LINKED_IMPORT_SIGNATURES",
       "defFiles": [
-        "src/constants/table-signatures.js",
-        "src/main.js"
+        "src/constants/table-signatures.js"
       ],
       "refFiles": [
         {
