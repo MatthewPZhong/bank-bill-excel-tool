@@ -4098,7 +4098,44 @@ async function shouldPromptGatewayReconAtRun() {
   }
 }
 
+// v3.0.8 需求3（运行不阻塞）：run 进度文案映射（stage = handler 阶段边界；round = 编排器轮次边界）。
+//   纯展示文案，无数据语义；未识别的事件返回 null（不刷状态框）。仿收单 formatAcquiringBillCurrencyProgress 范式。
+function formatBankStatementRunProgress(ev) {
+  if (!ev || typeof ev !== 'object') return null;
+  const STAGE_LABELS = {
+    prepare: '正在准备数据…',
+    reconcile: '正在执行对账…'
+  };
+  const ROUND_LABELS = {
+    R1: '正在匹配对账号（R1）…',
+    R2: '正在执行场景调度（R2）…',
+    'R3.5': '正在校验 DBS-Charge 资金（R3.5）…',
+    R4: '正在校验资金性质（R4）…',
+    R5s2: '正在回填资金划转（R5）…',
+    R5s2b: '正在回填线下调拨（R5）…',
+    R5s3: '正在生成剔除清单（R5）…'
+  };
+  if (ev.stage && STAGE_LABELS[ev.stage]) return STAGE_LABELS[ev.stage];
+  if (ev.round && ROUND_LABELS[ev.round]) return ROUND_LABELS[ev.round];
+  return null;
+}
+
 async function runBankStatementInternal() {
+  // v3.0.8 需求3：订阅 run 进度事件，运行期把轮次文案刷进状态框（仿收单 handleAcquiringBillCurrencyRun）；
+  //   finally 必须 unsubscribe 避免 listener 泄漏。进度文案是瞬态展示，run 完成后 refreshBankStatementStatus 覆盖回最终态。
+  let unsubscribe = null;
+  try {
+    const api = window.desktopApi && window.desktopApi.bankStatement;
+    if (api && typeof api.onRunProgress === 'function') {
+      unsubscribe = api.onRunProgress((ev) => {
+        const text = formatBankStatementRunProgress(ev);
+        if (text && elements.bankStatementStatusBox) {
+          updateStatusBox(elements.bankStatementStatusBox, text, 'info');
+        }
+      });
+    }
+  } catch (_e) { /* swallow — 订阅失败不影响 run */ }
+
   try {
     const result = await window.desktopApi.bankStatement.run();
     if (!result || result.status !== 'ok') {
@@ -4114,6 +4151,10 @@ async function runBankStatementInternal() {
   } catch (error) {
     console.error(error);
     openModal(createAlertDialog(`运行失败：${error.message || error}`));
+  } finally {
+    if (typeof unsubscribe === 'function') {
+      try { unsubscribe(); } catch (_e) { /* swallow */ }
+    }
   }
 }
 

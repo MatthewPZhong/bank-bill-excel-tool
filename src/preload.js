@@ -186,7 +186,14 @@ contextBridge.exposeInMainWorld('desktopApi', {
     // v2.1.12 需求6：数据侧预检 — 当前导入银行对账单中满足启用 C3 场景「银行条件」的候选行数
     c3CandidateCount: () => ipcRenderer.invoke('bank-statement:c3-candidate-count'),
     // v3.0.0 需求3：退款候选预检 — 当前导入银行对账单中 FundType=Ach Return 的候选行数
-    refundCandidateCount: () => ipcRenderer.invoke('bank-statement:refund-candidate-count')
+    refundCandidateCount: () => ipcRenderer.invoke('bank-statement:refund-candidate-count'),
+    // v3.0.8 需求3（运行不阻塞）：订阅 run 进度事件（仿 acquiringBillCurrency.onRunProgress）。
+    //   返回 unsubscribe 函数；renderer 必须在 finally 调用避免 listener 内存泄漏。
+    onRunProgress: (listener) => {
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('bank-statement:run:progress', wrapped);
+      return () => ipcRenderer.removeListener('bank-statement:run:progress', wrapped);
+    }
   },
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（PR-B 实装算法/IO；本 PR 占位）
   // payload 形态见 docs/iterations/v2.1.0-beta.1/spec.md §三

@@ -955,6 +955,57 @@ function readBankDepositAdmCandidates(db) {
   return out;
 }
 
+// v3.0.7 需求6（🔴 资金红线）：按 Channel 集合下推过滤读网关账单表（防 300 万行全量载入尖峰）。
+//   业务不变量（业务负责人已确认）：跨渠道对账永远不存在 —— Channel=X 的银行行只匹配 Channel=X 的网关行。
+//     故只读 Channel∈channels 的网关行：任一银行行 B 的合法网关对手 G 必有 G.Channel===B.Channel∈channels
+//     → G 必在子集内 → 不漏任何合法匹配；唯一被滤掉的是「跨渠道匹配」，业务确认其不存在。
+//   ⚠️ 三陷阱（漏一即漏对账，已逐一钉死，见 changes/v3.0.7-run-linked-memory-fix/spec.md §四）：
+//     ① 空 / 缺 Channel：channels 含空值时，网关侧「Channel=空串」与「缺 Channel 字段」两种行都要回。
+//        json_extract 对「缺字段」返回 NULL（NULL IN(...) 恒 false 漏掉），故 hasBlank 时额外加
+//        `IS NULL`（缺字段）与 `=''`（空串）两条 OR 条件。
+//     ② 归一化口径一致：channels 内值过 String().trim()（大小写敏感）；网关 raw_json 内 Channel 落库时
+//        已过 normalizeCell（= String().trim()，见 linked-table-stream-source.js / readLinkedRowsAsObjects），
+//        且表用默认 BINARY collation（无 NOCASE）→ json_extract IN 比对与引擎 normalizeCellValue 同口径，不失配。
+//     ③ 跨轮无越界网关行：R1/R5s2/R5s3 匹配键不含 Channel，但业务不变量下其合法对手必同 Channel；
+//        R3.5 先过滤 DBS 银行行（无 DBS 银行行即 no-op）；C3/R2 按渠道分组 —— 均不需「银行单未出现的 Channel」网关行。
+//   gwRows 全程只读（R1/R2/R3.5/R5s2/R5s3 仅建索引/比对，modifications 只写 bankRows）+ 每次新解析 → 调用方无需深拷。
+function readGatewayBillRowsByChannels(db, channels) {
+  const def = getDef('gateway-bill');
+  if (!def.supported) return [];
+  const set = Array.from(new Set((channels || []).map((c) => (c == null ? '' : String(c).trim()))));
+  if (set.length === 0) return [];
+  const hasBlank = set.includes('');
+  const nonBlank = set.filter((c) => c !== '');
+  const conds = [];
+  const params = [];
+  if (nonBlank.length) {
+    conds.push(`json_extract(raw_json, '$.Channel') IN (${nonBlank.map(() => '?').join(',')})`);
+    params.push(...nonBlank);
+  }
+  if (hasBlank) {
+    // 缺 Channel 字段（json_extract→NULL）与 Channel=空串两种都要回（① 陷阱）
+    conds.push(`json_extract(raw_json, '$.Channel') IS NULL`);
+    conds.push(`json_extract(raw_json, '$.Channel') = ''`);
+  }
+  // 🔴 损坏 raw_json 容错：SQLite json_extract 对非法 JSON **抛错**（malformed JSON）会中断整条查询，
+  //   而旧 readLinkedTableRows 全量读路径对损坏行只在 JS 层 JSON.parse 跳过、继续整批（资金红线 run 路径不可因
+  //   单条坏行崩整轮对账）。故 WHERE 先用 json_valid(raw_json) 短路守卫，把坏行排除在 json_extract 求值之外，
+  //   与全量读路径「损坏行跳过、不中断」口径对齐（生产恒经 JSON.stringify 落库 → 正常无坏行，本守卫是防御性兜底）。
+  const rows = db.prepare(
+    `SELECT raw_json FROM ${def.table} WHERE json_valid(raw_json) AND (${conds.join(' OR ')}) ORDER BY id ASC`
+  ).all(...params);
+  const out = [];
+  for (const r of rows) {
+    try {
+      const o = JSON.parse(r.raw_json);
+      if (o && typeof o === 'object') out.push(o);
+    } catch (_e) {
+      /* 损坏行跳过，不抛错（与 readLinkedTableRows 容错一致） */
+    }
+  }
+  return out;
+}
+
 // v3.0.0 块 B / PR-3：轻量探测某链接表是否有任意数据行（EXISTS，命中首行即停，不物化整表）。
 //   替代「readLinkedTableRows(tableKey).length > 0」——后者为判存在性把整表读回内存（大文件同样撞尖峰）。
 function hasLinkedTableRows(db, tableKey) {
@@ -1562,6 +1613,8 @@ module.exports = {
   readLinkedTableRows,
   // v3.0.0 块 B / PR-3：ADM 派生内存优化（Channel=ADM 下推过滤 + 轻量存在性探测）
   readBankDepositAdmCandidates,
+  // v3.0.7 需求6：网关账单表按 Channel 集合下推过滤读（业务不变量=对账同渠道；防 300 万行全量尖峰）
+  readGatewayBillRowsByChannels,
   hasLinkedTableRows,
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表专用仓储（6 列 INSERT / 整批幂等重写）
   replaceAdmBankDeposit,

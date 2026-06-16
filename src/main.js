@@ -3641,11 +3641,24 @@ function registerAppHandlers() {
       .join('\n');
   }
 
-  trackedIpcHandle('bank-statement:run', '银行对账单处理', '开始运行', () => {
+  // v3.0.8 需求3（运行不阻塞，🔴 资金红线·只改控制流）：handler 改 async + 取 event 供进度转发器；
+  //   数据准备阶段边界 + 编排器轮次边界 await 让出事件循环（消除运行期窗口「未响应」）。
+  //   结果零变化（golden 字节一致）—— 只插 yield/进度，不改任何数据准备值、轮次顺序、引擎入参、匹配逻辑。
+  //   processingResult 仍在 run 全程完成后一次性赋值（中途 yield 期间无并发 run：handler 入口 session 守卫 + 无新并发入口）。
+  trackedIpcHandle('bank-statement:run', '银行对账单处理', '开始运行', async (event) => {
     try {
       if (!bankStatementSession) {
         return { status: 'failed', message: '请先导入银行对账单' };
       }
+      // v3.0.8 需求3：run 进度转发器（仿 createRunProgressForwarder）。事件只读不写 processingResult。
+      const onProgress = createBankStatementRunProgressForwarder(event);
+      // 让出事件循环 + 可选进度上报的小工具（与编排器 yieldTick 同范式；onProgress 异常吞掉，绝不影响对账）。
+      const yieldRun = async (stage) => {
+        if (typeof onProgress === 'function') {
+          try { onProgress({ stage }); } catch (_e) { /* swallow — 进度上报失败不影响 run */ }
+        }
+        await new Promise((r) => setImmediate(r));
+      };
       const allScenarios = database.listScenarios();
       const enabled = allScenarios.filter((s) => s.enabled === 1 || s.enabled === true);
       // 2026-05-27 N5 fix：getScenario 不返 displayIndex / channelId（缺失）— 用 list item 的字段补
@@ -3667,19 +3680,43 @@ function registerAppHandlers() {
       // 此处 + snapshot 都过滤掉 → 银行对账与单据对账两条流水线相互独立。
       // v2.1.0-beta.3 PR #39 Finding 1（P1）：扩展到所有 C4 category（含 'gateway-recon-id-fix'）
       const dispatchScenarios = detailedEnabled.filter((s) => !C4_CATEGORIES.includes(s.category));
+      // v3.0.8 需求3：进入「数据准备」前让出一次（场景查询/枚举已就绪，下方 structuredClone + 各大表读为重活）。
+      await yieldRun('prepare');
       // 每次 run 都基于原始导入数据 deep clone 一份工作副本
       // （Codex F1 P1 修复：算法层会原地修改字段，不 clone 会让连续运行的 oldValue 漂移
       //  → first-match-wins 失效，低优先级场景可能覆盖高优先级写入的字段）
       const workingBankRows = structuredClone(bankStatementSession.rows);
       // v2.1.16-beta.2 T1：网关行数据源从「资金对账不平 gatewayReconSession」切到链接表 linked_gateway_bill。
-      //   readLinkedTableRows('gateway-bill') 无数据时返回 []（下游各轮自然 no-op）；
-      //   structuredClone 防止各引擎原地改字段污染 DB 还原对象（gatewayReconSession 本身定义/它在资金对账不平校验模块的使用不动）。
-      const workingGwRows = structuredClone(database.readLinkedTableRows('gateway-bill'));
+      //   readLinkedTableRows('gateway-bill') 无数据时返回 []（下游各轮自然 no-op）。
+      // v3.0.7 需求6 修复（🔴 资金红线）：网关账单表（可达数百万行）改「按 Channel 过滤读」根治内存尖峰
+      //   （旧 readLinkedTableRows('gateway-bill') 全量读 + structuredClone 深拷，实测 65.7万行 ~1.2GB 尖峰先例）。
+      //   业务不变量（已确认）：对账永远同 Channel → 只读本批银行单出现过的 Channel 子集，绝不漏合法匹配
+      //   （任一银行行 B 的合法网关对手 G 必有 G.Channel===B.Channel∈bankChannels → 必在子集内）。
+      //   仓储 readGatewayBillRowsByChannels 内已处理三陷阱（空/缺 Channel、归一化口径、跨轮无越界，见其注释）。
+      //   ⚠️ 删 structuredClone：gwRows 全程只读（R1/R2/R3.5/R5s2/R5s3 仅建索引/比对，modifications 只写 bankRows）
+      //     + 每次新解析 → 深拷无保护意义；银行行 structuredClone(bankStatementSession.rows)（上方 workingBankRows）
+      //     必须保留（常驻 session、引擎原地改它）。
+      const bankChannels = bankStatementSession.rows.map((r) => (r && r.Channel != null ? String(r.Channel).trim() : ''));
+      const workingGwRows = database.readGatewayBillRowsByChannels(bankChannels);
       // v2.1.16-beta.4 R5 场景4（中台退款订单回填）安全接线：
       //   入金表（链接表 tableKey='bank-deposit'，beta.3② 合法 tableKey）—— JPM-US 子链路用；无数据返回 []。
       //   refund order —— v2.1.16-beta.6 需求C 退款导入已开通：refundOrderSession 非 null 时注入真实退款行；未导入退款表时注入 []（引擎 no-op）。
       //   structuredClone 防止引擎原地改字段污染 DB 还原对象（与 workingGwRows 同口径）。
-      const workingDepositRows = structuredClone(database.readLinkedTableRows('bank-deposit') || []);
+      // v3.0.7 需求6 修复（🔴 资金红线）：bank-deposit 入金表（实测 65.7万行 ~1.2GB 尖峰）加「消费方门控」防整表无谓载入。
+      //   depositRows 仅 R5 场景4（退款回填）消费（编排器 r5s4Bucket.length 门控，reconciliation-orchestrator.js:443）；
+      //   退款场景关闭时编排器本就 no-op，注入 [] 与现状字节级等价。
+      //   谓词与 orchestrator bucketScenarios r5s4 分桶条件逐字镜像（reconciliation-orchestrator.js:173：
+      //     category==='builtin-fixed' && config.funcCategory==='platform-order' && config.subCategory==='refund-order-backfill'），
+      //   防分桶条件改了门控漏更新（gateway-channel/refund 单测钉死同源）。
+      //   dispatchScenarios 已是 enabled 过滤后集合（无须再判 enabled，与 paymentOfflineEnabled/dbsChargeScenarioEnabled 同范式）。
+      const refundBackfillEnabled = dispatchScenarios.some(
+        (s) => s && s.category === 'builtin-fixed'
+          && s.config && s.config.funcCategory === 'platform-order'
+          && s.config.subCategory === 'refund-order-backfill'
+      );
+      const workingDepositRows = refundBackfillEnabled
+        ? structuredClone(database.readLinkedTableRows('bank-deposit') || [])
+        : [];
       const workingRefundOrderRows = refundOrderSession ? structuredClone(refundOrderSession.rows) : []; // 已导退款表→真实行；未导→[]
       // v3.0.4 块 F（🔴 资金红线）：Payment线下调拨订单回填（R5s2b）数据源 = 中台调拨订单链接表 mid-allocation。
       //   gating 防整表无谓载入（bank-deposit 65.7 万行 ~1.2GB 尖峰先例）——仅当 R5s2 场景 enabled
@@ -3755,10 +3792,13 @@ function registerAppHandlers() {
       const workingDispatchReconRows = dbsChargeScenarioEnabled
         ? structuredClone(database.readFundTransferReconRows() || [])
         : [];
+      // v3.0.8 需求3：进入 R1-R5 编排前让出一次（大表读已完成，下面是 CPU 密集的多轮对账）。
+      await yieldRun('reconcile');
       // v2.1.16-beta.2 T1：改走 5 轮编排器 runReconciliation（R2 内部仍调 dispatcher，双维 first-match-wins 不变）。
       //   deps 字段名照搬原 dispatcher 调用处：channelsRepo=channelsRepository（findByNameAndLocation/getBuiltinGeneral）、db=database.db。
       //   编排器返回 modifiedRows/unmatchedRows 由「当前最新 bankRows」重建（资金红线：两者互斥且全覆盖 workingBankRows）。
-      const result = runReconciliation({
+      // v3.0.8 需求3：runReconciliation 改 async（轮次边界让出 + 进度上报）；onProgress 注入转发器（轮次推进刷新状态框）。
+      const result = await runReconciliation({
         bankRows: workingBankRows,
         gwRows: workingGwRows,
         scenarios: dispatchScenarios,
@@ -3770,7 +3810,9 @@ function registerAppHandlers() {
         // v3.0.6 需求2 R5s2 二选一：调拨对账单回填引擎入参（勾选路 workingReconRows 非空；取消路 [] → 编排器走网关现状）
         fundTransferReconContext: { reconRows: workingReconRows },
         // v3.0.6 需求3 R3.5：DBS-Charge 资金校验调拨对账单入参（语义独立于需求2，不受 reconSourceMid 控制；桶空→编排器 no-op）
-        dispatchReconContext: { dispatchReconRows: workingDispatchReconRows }
+        dispatchReconContext: { dispatchReconRows: workingDispatchReconRows },
+        // v3.0.8 需求3：轮次边界进度上报（编排器在 R1→R2→R3.5→R4→R5 各轮完成后调；只读不写 processingResult）。
+        onProgress
       });
       processingResult = {
         modifiedRows: result.modifiedRows,
@@ -12304,6 +12346,17 @@ function registerNewAccountHandlers() {
     return (ev) => {
       try { event.sender.send('acquiringBillCurrency:run:progress', { ...ev, phase: 'run' }); }
       catch (_e) { /* swallow */ }
+    };
+  }
+
+  // v3.0.8 需求3（运行不阻塞）：资金对账银行对账单 run 进度转发器（仿 createRunProgressForwarder）。
+  //   主进程在「数据准备阶段边界」+ 编排器「轮次边界」向渲染进程单向推送进度文案（通道 bank-statement:run:progress）。
+  //   🔴 只读不写 processingResult；try/catch swallow（窗口已销毁等不影响 run）。事件无节流（每 run 仅个位数轮次事件）。
+  function createBankStatementRunProgressForwarder(event) {
+    if (!event || !event.sender) return null;
+    return (ev) => {
+      try { event.sender.send('bank-statement:run:progress', { ...ev, phase: 'run' }); }
+      catch (_e) { /* swallow — 窗口已销毁等 */ }
     };
   }
 

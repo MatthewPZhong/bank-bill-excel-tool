@@ -80,7 +80,7 @@ const POB_ON = { enabled: true, bigAccount: '202782001', bankChannel: 'CITI', re
 // ---- 1. config 合并不掉桶 ----------------------------------------------
 
 test.describe('bucketScenarios：注入 paymentOfflineBackfill 后 R5s2 分桶不变', () => {
-  test('🔴 资金红线：带 paymentOfflineBackfill 子开关的场景仍落 r5s2（不掉桶/不漂移）', () => {
+  test('🔴 资金红线：带 paymentOfflineBackfill 子开关的场景仍落 r5s2（不掉桶/不漂移）', async () => {
     const { r2, r4, r5s2, r5s3, r5s4 } = bucketScenarios([makeR5s2Scenario({ paymentOfflineBackfill: POB_ON })]);
     assert.equal(r5s2.length, 1, '注入子开关后仍落 r5s2 桶');
     assert.equal(r5s2[0].config.subCategory, 'fund-transfer-backfill');
@@ -95,9 +95,9 @@ test.describe('bucketScenarios：注入 paymentOfflineBackfill 后 R5s2 分桶�
 // ---- 2 + 5. midAllocationContext 注入 + 行数守恒 ------------------------
 
 test.describe('runReconciliation R5s2b 集成', () => {
-  test('midAllocationContext 注入 → R5s2b 回填流出（modifiedRows + stats + rounds）', () => {
+  test('midAllocationContext 注入 → R5s2b 回填流出（modifiedRows + stats + rounds）', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })]; // BillDate 默认 05-26（+1 周=订单周 2623）
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [],
       scenarios: [makeR5s2Scenario({ paymentOfflineBackfill: POB_ON })],
@@ -123,9 +123,9 @@ test.describe('runReconciliation R5s2b 集成', () => {
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
 
-  test('gating：paymentOfflineBackfill.enabled !== true → R5s2b no-op', () => {
+  test('gating：paymentOfflineBackfill.enabled !== true → R5s2b no-op', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [],
       scenarios: [makeR5s2Scenario({ paymentOfflineBackfill: { ...POB_ON, enabled: false } })],
@@ -135,9 +135,9 @@ test.describe('runReconciliation R5s2b 集成', () => {
     assert.equal(bankRows[0].ReconciliationId, '');
   });
 
-  test('gating：无 paymentOfflineBackfill 子开关 → R5s2b no-op（不影响 R5s2 既有行为）', () => {
+  test('gating：无 paymentOfflineBackfill 子开关 → R5s2b no-op（不影响 R5s2 既有行为）', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [],
       scenarios: [makeR5s2Scenario()], // 不挂子开关
@@ -146,11 +146,11 @@ test.describe('runReconciliation R5s2b 集成', () => {
     assert.equal(result.stats.r5s2bBackfilledCount, 0);
   });
 
-  test('gating：midAllocationContext 缺省 → R5s2b no-op、不抛', () => {
+  test('gating：midAllocationContext 缺省 → R5s2b no-op、不抛', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })];
     let result;
-    assert.doesNotThrow(() => {
-      result = runReconciliation({
+    await assert.doesNotReject(async () => {
+      result = await runReconciliation({
         bankRows,
         gwRows: [],
         scenarios: [makeR5s2Scenario({ paymentOfflineBackfill: POB_ON })]
@@ -161,9 +161,9 @@ test.describe('runReconciliation R5s2b 集成', () => {
     assert.equal(bankRows[0].ReconciliationId, '');
   });
 
-  test('gating：midRows 空数组 → R5s2b no-op', () => {
+  test('gating：midRows 空数组 → R5s2b no-op', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [],
       scenarios: [makeR5s2Scenario({ paymentOfflineBackfill: POB_ON })],
@@ -176,7 +176,7 @@ test.describe('runReconciliation R5s2b 集成', () => {
 // ---- 6. excludeBankRowIds 互斥（Q3 网关回填优先）-----------------------
 
 test.describe('runReconciliation R5s2b — excludeBankRowIds 互斥（Q3）', () => {
-  test('🔴 R5s2（网关）先回填的银行行不被 R5s2b 覆盖（编排器从 R5s2 modifications 收集排除集）', () => {
+  test('🔴 R5s2（网关）先回填的银行行不被 R5s2b 覆盖（编排器从 R5s2 modifications 收集排除集）', async () => {
     // 构造一条银行行同时满足 R5s2（网关 in 方向）与 R5s2b 条件；网关 reconid 应胜出。
     // R5s2：网关 FundTransfer-in + merchantid/currency/金额 + 同日 → 回填 GW-RECON。
     const bankRows = [makeBankRow({
@@ -200,7 +200,7 @@ test.describe('runReconciliation R5s2b — excludeBankRowIds 互斥（Q3）', ()
     // 中台订单：也能匹配 b1（若未被排除会覆盖成 CH-OFFLINE）
     const midRows = [makeMidRow({ 渠道流水号: 'CH-OFFLINE' })];
 
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows,
       scenarios: [makeR5s2Scenario({ paymentOfflineBackfill: POB_ON })],
@@ -215,7 +215,7 @@ test.describe('runReconciliation R5s2b — excludeBankRowIds 互斥（Q3）', ()
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
 
-  test('🔴 R5s2「同值消费但未写」行不被 R5s2b 触碰（窄缺口闭合·端到端）', () => {
+  test('🔴 R5s2「同值消费但未写」行不被 R5s2b 触碰（窄缺口闭合·端到端）', async () => {
     // 构造：银行行 ReconciliationId 原值 === 网关回填值（GW-RECON）。
     //   R5s2 命中该行但 old===nv → 不 record（modifications 取不到该行），但 usedBankRowId 已消费它。
     //   若编排器只用 R5s2 modifications 收集排除集 → 该行不在排除集 → R5s2b 可二次匹配并覆盖为 CH-OFFLINE。
@@ -241,7 +241,7 @@ test.describe('runReconciliation R5s2b — excludeBankRowIds 互斥（Q3）', ()
     // 中台订单：也能匹配 b1（若该行未被排除会覆盖成 CH-OFFLINE）。
     const midRows = [makeMidRow({ 渠道流水号: 'CH-OFFLINE' })];
 
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows,
       scenarios: [makeR5s2Scenario({ paymentOfflineBackfill: POB_ON })],

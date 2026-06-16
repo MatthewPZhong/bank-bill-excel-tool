@@ -198,7 +198,7 @@ function makeR5CleanupScenario() {
 // 断言 8：bucketScenarios 分桶正确（单元测）
 // ---------------------------------------------------------------------------
 test.describe('bucketScenarios 分桶', () => {
-  test('builtin-fixed + funcCategory 正确落 R4 / R5s2 / R5s3；其余落 R2', () => {
+  test('builtin-fixed + funcCategory 正确落 R4 / R5s2 / R5s3；其余落 R2', async () => {
     const scenarios = [
       makeR2OffsetScenario(),                 // 普通 C2 → R2
       { id: 1, category: 'builtin-fixed', config: { extractByFeature: { enabled: true } } }, // 无 funcCategory builtin-fixed → R2
@@ -218,7 +218,7 @@ test.describe('bucketScenarios 分桶', () => {
     assert.equal(r5s3[0].config.subCategory, 'platform-inbound-cleanup');
   });
 
-  test('platform-order 但缺 subCategory → 落 R2（不误入 R5）', () => {
+  test('platform-order 但缺 subCategory → 落 R2（不误入 R5）', async () => {
     const s = { id: 9, category: 'builtin-fixed', config: { funcCategory: 'platform-order' } };
     const { r2, r5s2, r5s3 } = bucketScenarios([s]);
     assert.equal(r2.length, 1);
@@ -226,7 +226,7 @@ test.describe('bucketScenarios 分桶', () => {
     assert.equal(r5s3.length, 0);
   });
 
-  test('空 / null 入参 → 四桶皆空，不抛错', () => {
+  test('空 / null 入参 → 四桶皆空，不抛错', async () => {
     for (const input of [[], null, undefined]) {
       const r = bucketScenarios(input);
       assert.equal(r.r2.length, 0);
@@ -254,34 +254,34 @@ function makeR5RefundEnabledScenario() {
 }
 
 test.describe('runReconciliation stats.r5s3Enabled / r5s4Enabled（需求A）', () => {
-  test('两 bucket 皆空（无场景）→ r5s3Enabled / r5s4Enabled 均为 false', () => {
+  test('两 bucket 皆空（无场景）→ r5s3Enabled / r5s4Enabled 均为 false', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', FundType: 'Settlement' })];
-    const result = runReconciliation({ bankRows, gwRows: [], scenarios: [] });
+    const result = await runReconciliation({ bankRows, gwRows: [], scenarios: [] });
     assert.equal(result.stats.r5s3Enabled, false, 'r5s3 bucket 空 → r5s3Enabled=false');
     assert.equal(result.stats.r5s4Enabled, false, 'r5s4 bucket 空 → r5s4Enabled=false');
   });
 
-  test('仅启用 R5 场景3 → r5s3Enabled=true（即使 0 条命中也为 true）；r5s4Enabled=false', () => {
+  test('仅启用 R5 场景3 → r5s3Enabled=true（即使 0 条命中也为 true）；r5s4Enabled=false', async () => {
     // b1 不构成 Inbound-VA 剔除命中 → r5s3CleanupCount 可能为 0，但场景已启用 → r5s3Enabled 必须 true。
     const bankRows = [makeBankRow({ _rowId: 'b1', FundType: 'Settlement', MerchantId: 'M001' })];
-    const result = runReconciliation({ bankRows, gwRows: [], scenarios: [makeR5CleanupScenario()] });
+    const result = await runReconciliation({ bankRows, gwRows: [], scenarios: [makeR5CleanupScenario()] });
     assert.equal(result.stats.r5s3Enabled, true, '场景3 启用 → r5s3Enabled=true（含 0 命中）');
     assert.equal(result.stats.r5s4Enabled, false, '场景4 未启用 → r5s4Enabled=false');
     assert.equal(typeof result.stats.r5s3CleanupCount, 'number', 'r5s3CleanupCount 仍为数字（命中计数）');
   });
 
-  test('仅启用 R5 场景4 → r5s4Enabled=true（即使 0 条命中也为 true）；r5s3Enabled=false', () => {
+  test('仅启用 R5 场景4 → r5s4Enabled=true（即使 0 条命中也为 true）；r5s3Enabled=false', async () => {
     // 不传 refundContext → 退款池空 → r5s4BackfilledCount=0，但场景已启用 → r5s4Enabled 必须 true。
     const bankRows = [makeBankRow({ _rowId: 'b1', FundType: 'Ach Return', MerchantId: 'M001' })];
-    const result = runReconciliation({ bankRows, gwRows: [], scenarios: [makeR5RefundEnabledScenario()] });
+    const result = await runReconciliation({ bankRows, gwRows: [], scenarios: [makeR5RefundEnabledScenario()] });
     assert.equal(result.stats.r5s4Enabled, true, '场景4 启用 → r5s4Enabled=true（含 0 命中）');
     assert.equal(result.stats.r5s3Enabled, false, '场景3 未启用 → r5s3Enabled=false');
     assert.equal(result.stats.r5s4BackfilledCount, 0, '无 refundContext → 0 条回填（但 enabled 仍 true）');
   });
 
-  test('两场景同时启用 → r5s3Enabled / r5s4Enabled 均为 true', () => {
+  test('两场景同时启用 → r5s3Enabled / r5s4Enabled 均为 true', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', FundType: 'Settlement' })];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows, gwRows: [],
       scenarios: [makeR5CleanupScenario(), makeR5RefundEnabledScenario()]
     });
@@ -332,10 +332,10 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
     return { bankRows, gwRows, scenarios };
   }
 
-  test('断言1+2：返回结构完整 + 行数守恒', () => {
+  test('断言1+2：返回结构完整 + 行数守恒', async () => {
     const { bankRows, gwRows, scenarios } = buildFullScenarioData();
     const total = bankRows.length;
-    const result = runReconciliation({ bankRows, gwRows, scenarios });
+    const result = await runReconciliation({ bankRows, gwRows, scenarios });
 
     // 结构完整
     assert.ok(Array.isArray(result.modifiedRows), 'modifiedRows 数组');
@@ -373,9 +373,9 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
     assert.ok(result.unmatchedRows.some((r) => r._rowId === 'b4'), 'b4 应在 unmatchedRows');
   });
 
-  test('断言3：R4 改写 R2 已命中行 FundType → _modifiedColumns 跨轮合并 + 仍带 R2 命中元数据', () => {
+  test('断言3：R4 改写 R2 已命中行 FundType → _modifiedColumns 跨轮合并 + 仍带 R2 命中元数据', async () => {
     const { bankRows, gwRows, scenarios } = buildFullScenarioData();
-    const result = runReconciliation({ bankRows, gwRows, scenarios });
+    const result = await runReconciliation({ bankRows, gwRows, scenarios });
 
     const b1 = result.modifiedRows.find((r) => r._rowId === 'b1');
     assert.ok(b1, 'b1 应在 modifiedRows（既被 R2 命中又被 R4 改）');
@@ -400,9 +400,9 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
     assert.ok(b1Mods.some((m) => m.column === 'FundType' && m._round === 'R4' && m.newValue === 'outbound'), 'b1 有 R4 改 FundType→outbound');
   });
 
-  test('断言4：R5 场景2 回填 → 对应行 _modifiedColumns 含 ReconciliationId', () => {
+  test('断言4：R5 场景2 回填 → 对应行 _modifiedColumns 含 ReconciliationId', async () => {
     const { bankRows, gwRows, scenarios } = buildFullScenarioData();
-    const result = runReconciliation({ bankRows, gwRows, scenarios });
+    const result = await runReconciliation({ bankRows, gwRows, scenarios });
 
     const b2 = result.modifiedRows.find((r) => r._rowId === 'b2');
     assert.ok(b2, 'b2 应在 modifiedRows（R5s2 回填）');
@@ -416,9 +416,9 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
     assert.equal(result.stats.r5s2BackfilledCount, 1, 'R5s2 回填计数为 1');
   });
 
-  test('断言5：R5 场景3 → platformCleanupRows 含预期剔除行（A/B/C-O 正确）', () => {
+  test('断言5：R5 场景3 → platformCleanupRows 含预期剔除行（A/B/C-O 正确）', async () => {
     const { bankRows, gwRows, scenarios } = buildFullScenarioData();
-    const result = runReconciliation({ bankRows, gwRows, scenarios });
+    const result = await runReconciliation({ bankRows, gwRows, scenarios });
 
     assert.equal(result.platformCleanupRows.length, 1, '应产 1 条剔除行（b3 FundType=Refund≠Inbound）');
     const cleanup = result.platformCleanupRows[0];
@@ -436,7 +436,7 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
     }
   });
 
-  test('叠加链：R4 多 handler 顺序（HX-out priority 高于 charge）对同一行二次改 FundType', () => {
+  test('叠加链：R4 多 handler 顺序（HX-out priority 高于 charge）对同一行二次改 FundType', async () => {
     // b1 reconid=RC-HX，网关 g 同 reconid + TradeType=HX_OUTBOUND；FundType 初始=Charge
     //   两个 R4 子场景：charge(priority1, requireBankFundType=Charge→outbound) + HX-out(priority3, gwTradeType=HX_OUTBOUND→HX-out)
     //   priority 高先跑：先 HX-out（Charge→HX-out），再 charge（requireBankFundType=Charge 已不满足 → 不再改）
@@ -444,7 +444,7 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', ReconciliationId: 'RC-HX', FundType: 'Charge' })];
     const gwRows = [makeGwRow({ reconciliationid: 'RC-HX', TradeType: 'HX_OUTBOUND' })];
     const scenarios = [makeR4ChargeScenario({ priority: 1 }), makeR4HxOutScenario({ priority: 3 })];
-    const result = runReconciliation({ bankRows, gwRows, scenarios });
+    const result = await runReconciliation({ bankRows, gwRows, scenarios });
 
     const b1 = result.modifiedRows.find((r) => r._rowId === 'b1');
     assert.ok(b1);
@@ -468,7 +468,7 @@ test.describe('R2 锁定但未改值的命中行（PR#62 P1）', () => {
     makeBankRow({ _rowId: 'R1', BillTag: 'R', PairKey: 'K1', 'Transaction Description': '已对账' })
   ];
 
-  test('前置：dispatcher 确认 L1/R1 被锁定进 modifiedRows 但 modifications 为空（_modifiedColumns 空 Set）', () => {
+  test('前置：dispatcher 确认 L1/R1 被锁定进 modifiedRows 但 modifications 为空（_modifiedColumns 空 Set）', async () => {
     const result = runAllScenarios(mkRows(), [], [makeR2PairLockNoChangeScenario()], undefined);
     // modifications 为空（rightRow 已等于目标值 → 不 record）
     assert.equal(result.modifications.length, 0, 'markValue 已等于现值 → 无 modification 记录');
@@ -482,10 +482,10 @@ test.describe('R2 锁定但未改值的命中行（PR#62 P1）', () => {
     }
   });
 
-  test('编排器：R2 锁定未改值行进 modifiedRows（带 R2 元数据 + 空 Set）、不在 unmatchedRows、行数守恒', () => {
+  test('编排器：R2 锁定未改值行进 modifiedRows（带 R2 元数据 + 空 Set）、不在 unmatchedRows、行数守恒', async () => {
     const bankRows = mkRows();
     const total = bankRows.length;
-    const result = runReconciliation({ bankRows, gwRows: [], scenarios: [makeR2PairLockNoChangeScenario()] });
+    const result = await runReconciliation({ bankRows, gwRows: [], scenarios: [makeR2PairLockNoChangeScenario()] });
 
     const modIds = result.modifiedRows.map((r) => r._rowId).sort();
     // ① L1/R1 在 modifiedRows（旧逻辑只看 modColsByRowId.has 会漏掉它们 → 掉进 unmatched）
@@ -519,7 +519,7 @@ test.describe('R2 锁定但未改值的命中行（PR#62 P1）', () => {
 // 断言 6：R2 零回归（与直接调 dispatcher 一致）
 // ---------------------------------------------------------------------------
 test.describe('R2 零回归', () => {
-  test('只给一个普通 C2 → 落 R2，modifiedRows 与直接调 dispatcher 行为一致（命中元数据在）', () => {
+  test('只给一个普通 C2 → 落 R2，modifiedRows 与直接调 dispatcher 行为一致（命中元数据在）', async () => {
     const mkRows = () => [
       makeBankRow({ _rowId: 'b1', BillTag: 'OFFSET-A' }),
       makeBankRow({ _rowId: 'b2', BillTag: 'NORMAL' })
@@ -532,7 +532,7 @@ test.describe('R2 零回归', () => {
 
     // 编排器（无网关行、无 R1/R4/R5 场景 → 仅 R2 生效）
     const orchRows = mkRows();
-    const orch = runReconciliation({ bankRows: orchRows, gwRows: [], scenarios: [scenario] });
+    const orch = await runReconciliation({ bankRows: orchRows, gwRows: [], scenarios: [scenario] });
 
     // 命中行集合一致
     const baseHitIds = baseline.modifiedRows.map((r) => r._rowId).sort();
@@ -567,13 +567,13 @@ test.describe('R2 零回归', () => {
 // 断言 7：enablement 守卫（某 bucket 为空 → 该轮 no-op 不报错）
 // ---------------------------------------------------------------------------
 test.describe('enablement 守卫', () => {
-  test('scenarios 为空数组 → 全部轮 no-op，不报错，行数守恒，无修改', () => {
+  test('scenarios 为空数组 → 全部轮 no-op，不报错，行数守恒，无修改', async () => {
     const bankRows = [
       makeBankRow({ _rowId: 'b1', FundType: 'Charge' }),
       makeBankRow({ _rowId: 'b2', FundType: 'Refund' })
     ];
     const gwRows = [makeGwRow({ reconciliationid: 'RC-X', TradeType: 'Charge' })];
-    const result = runReconciliation({ bankRows, gwRows, scenarios: [] });
+    const result = await runReconciliation({ bankRows, gwRows, scenarios: [] });
 
     assert.equal(result.modifiedRows.length, 0, '无场景 → 无命中行');
     assert.equal(result.unmatchedRows.length, 2, '全部行进 unmatched');
@@ -588,13 +588,13 @@ test.describe('enablement 守卫', () => {
     assert.equal(result.stats.r5s3CleanupCount, 0);
   });
 
-  test('只启用 R5 场景3（其它 bucket 空）→ 仅产剔除文件，R2/R4/R5s2 no-op', () => {
+  test('只启用 R5 场景3（其它 bucket 空）→ 仅产剔除文件，R2/R4/R5s2 no-op', async () => {
     const bankRows = [
       makeBankRow({ _rowId: 'b1', ReconciliationId: 'RC-INB', FundType: 'Refund', MerchantId: 'M003' }),
       makeBankRow({ _rowId: 'b2', FundType: 'Charge', BillTag: 'OFFSET-A' }) // 无 R2 场景启用 → 不应被改
     ];
     const gwRows = [makeGwRow({ reconciliationid: 'RC-INB', TradeType: 'Inbound-VA', orderid: 'ORD-INB' })];
-    const result = runReconciliation({ bankRows, gwRows, scenarios: [makeR5CleanupScenario()] });
+    const result = await runReconciliation({ bankRows, gwRows, scenarios: [makeR5CleanupScenario()] });
 
     assert.equal(result.platformCleanupRows.length, 1, '场景3 启用 → 产 1 条剔除行');
     // R2 未启用 → b2 不应被打标，仍在 unmatched
@@ -610,7 +610,7 @@ test.describe('enablement 守卫', () => {
 // buildOutputRows 直接单测（重建逻辑边界）
 // ---------------------------------------------------------------------------
 test.describe('buildOutputRows', () => {
-  test('_modifiedColumns 是新建 Set（与累积 Map 解耦）+ 嫁接 R2 元数据排除 _rowId/_modifiedColumns', () => {
+  test('_modifiedColumns 是新建 Set（与累积 Map 解耦）+ 嫁接 R2 元数据排除 _rowId/_modifiedColumns', async () => {
     const bankRows = [
       { _rowId: 'b1', FundType: 'outbound', X: 1 },
       { _rowId: 'b2', FundType: 'Charge', X: 2 }
@@ -654,7 +654,7 @@ test.describe('buildChannelRegionHits 直接单测（需求1a）', () => {
     _hitScenarioName: over._hitScenarioName
   });
 
-  test('R2 命中行：scenarioNames 取 _hitScenarioName；按 渠道-地区 聚合行数', () => {
+  test('R2 命中行：scenarioNames 取 _hitScenarioName；按 渠道-地区 聚合行数', async () => {
     const modifiedRows = [
       mkHit({ _rowId: 'b1', Channel: 'JPM', 地区: 'US', _hitScenarioName: '冲销打标' }),
       mkHit({ _rowId: 'b2', Channel: 'JPM', 地区: 'US', _hitScenarioName: '提取调拨ID' }),
@@ -677,7 +677,7 @@ test.describe('buildChannelRegionHits 直接单测（需求1a）', () => {
     assert.deepEqual(hk.scenarioNames, ['冲销打标']);
   });
 
-  test('R4/R5-only 行（无 _hitScenarioName）：scenarioNames 用 allMods 轮次中文标签兜底', () => {
+  test('R4/R5-only 行（无 _hitScenarioName）：scenarioNames 用 allMods 轮次中文标签兜底', async () => {
     const modifiedRows = [
       mkHit({ _rowId: 'b1', Channel: 'ADM', 地区: 'US' }),                       // R4 + R5s2-recon
       mkHit({ _rowId: 'b2', Channel: 'ADM', 地区: 'US' })                        // R5s2
@@ -696,7 +696,7 @@ test.describe('buildChannelRegionHits 直接单测（需求1a）', () => {
     assert.deepEqual(adm.scenarioNames, ['调拨对账单回填', '资金性质校验', '资金划转回填'].sort());
   });
 
-  test('混合：同一行 R2 命中名优先（不退化为轮次标签），同组兼有 R4 行', () => {
+  test('混合：同一行 R2 命中名优先（不退化为轮次标签），同组兼有 R4 行', async () => {
     const modifiedRows = [
       // b1 既是 R2 命中（带名）又被 R4 改 → 取 _hitScenarioName，不追加 R4 标签
       mkHit({ _rowId: 'b1', Channel: 'BOC', 地区: 'CN', _hitScenarioName: '冲销打标' }),
@@ -715,7 +715,7 @@ test.describe('buildChannelRegionHits 直接单测（需求1a）', () => {
     assert.deepEqual(hits[0].scenarioNames, ['冲销打标', '资金性质校验'].sort());
   });
 
-  test('地区空 → 只产 裸 Channel 组合；Channel 空 → 跳过整行（口径与枚举一致）', () => {
+  test('地区空 → 只产 裸 Channel 组合；Channel 空 → 跳过整行（口径与枚举一致）', async () => {
     const modifiedRows = [
       mkHit({ _rowId: 'b1', Channel: 'ADM', 地区: '', _hitScenarioName: '冲销打标' }),   // 地区空 → 'ADM'
       mkHit({ _rowId: 'b2', Channel: '  ', 地区: 'US', _hitScenarioName: 'x' }),         // Channel 空 → 跳过
@@ -729,7 +729,7 @@ test.describe('buildChannelRegionHits 直接单测（需求1a）', () => {
     assert.deepEqual(hits[0].scenarioNames, ['冲销打标', '提取调拨ID'].sort());
   });
 
-  test('Channel 含前后空格 → trim 后聚合（与 extractChannelRegionCombos trim 口径一致）', () => {
+  test('Channel 含前后空格 → trim 后聚合（与 extractChannelRegionCombos trim 口径一致）', async () => {
     const modifiedRows = [
       mkHit({ _rowId: 'b1', Channel: ' JPM ', 地区: ' US ', _hitScenarioName: '冲销打标' })
     ];
@@ -738,7 +738,7 @@ test.describe('buildChannelRegionHits 直接单测（需求1a）', () => {
     assert.equal(hits[0].channelRegion, 'JPM-US', 'Channel/地区 均 trim 后拼接');
   });
 
-  test('空集 / 全部行 Channel 空 → []（renderer 据此回退旧格式）', () => {
+  test('空集 / 全部行 Channel 空 → []（renderer 据此回退旧格式）', async () => {
     assert.deepEqual(buildChannelRegionHits([], []), []);
     assert.deepEqual(buildChannelRegionHits(null, null), []);
     assert.deepEqual(
@@ -748,7 +748,7 @@ test.describe('buildChannelRegionHits 直接单测（需求1a）', () => {
     );
   });
 
-  test('R4/R5 行 allMods 反查不到（防御）→ scenarioNames 为空数组，不抛错', () => {
+  test('R4/R5 行 allMods 反查不到（防御）→ scenarioNames 为空数组，不抛错', async () => {
     const modifiedRows = [mkHit({ _rowId: 'bX', Channel: 'ADM', 地区: 'US' })];
     const hits = buildChannelRegionHits(modifiedRows, []); // allMods 空 → 反查不到
     assert.equal(hits.length, 1);
@@ -756,7 +756,7 @@ test.describe('buildChannelRegionHits 直接单测（需求1a）', () => {
     assert.deepEqual(hits[0].scenarioNames, [], '无 _hitScenarioName 且 allMods 无记录 → 空场景名');
   });
 
-  test('契约形状：每条均含 {channelRegion:string, rowCount:number, scenarioNames:string[]}', () => {
+  test('契约形状：每条均含 {channelRegion:string, rowCount:number, scenarioNames:string[]}', async () => {
     const hits = buildChannelRegionHits(
       [mkHit({ _rowId: 'b1', Channel: 'JPM', 地区: 'US', _hitScenarioName: '冲销打标' })],
       [{ rowId: 'b1', column: 'X', _round: 'R2' }]
@@ -776,7 +776,7 @@ test.describe('buildChannelRegionHits 直接单测（需求1a）', () => {
 //        (c) R2 命中名 + R4/R5 轮次标签两条路在真实流水线下都能产出。
 // ---------------------------------------------------------------------------
 test.describe('runReconciliation stats.channelRegionHits 端到端（需求1a）', () => {
-  test('全链路：JPM-US 组（b1=R2+R4 取 R2 名 / b2=R5s2 取轮次标签），口径=extractChannelRegionCombos', () => {
+  test('全链路：JPM-US 组（b1=R2+R4 取 R2 名 / b2=R5s2 取轮次标签），口径=extractChannelRegionCombos', async () => {
     // b1：R2 命中（OFFSET）+ R4 改 FundType（reconid RC-CHG）；Channel/地区 默认 → 改成 JPM/US
     // b2：R5s2 网关回填（reconSourceMid:false 取消路）；Channel/地区 → JPM/US
     // b4：完全不命中 → 不进 channelRegionHits
@@ -794,7 +794,7 @@ test.describe('runReconciliation stats.channelRegionHits 端到端（需求1a）
       makeGwRow({ reconciliationid: 'RC-FT', TradeType: 'FundTransfer-out', merchantid: 'M002', currency: 'USD', amount: -100, Billdate: '2026-06-10' })
     ];
     const scenarios = [makeR2OffsetScenario(), makeR4ChargeScenario(), makeR5BackfillScenario()];
-    const result = runReconciliation({ bankRows, gwRows, scenarios });
+    const result = await runReconciliation({ bankRows, gwRows, scenarios });
 
     const hits = result.stats.channelRegionHits;
     assert.ok(Array.isArray(hits), 'stats.channelRegionHits 是数组');
@@ -810,14 +810,14 @@ test.describe('runReconciliation stats.channelRegionHits 端到端（需求1a）
     assert.deepEqual(hits.map((h) => h.channelRegion).sort(), combosOfHitRows.sort(), 'channelRegion 口径与 extractChannelRegionCombos 一致');
   });
 
-  test('多渠道-地区：按 channelRegion 升序、rowCount 准确', () => {
+  test('多渠道-地区：按 channelRegion 升序、rowCount 准确', async () => {
     const bankRows = [
       makeBankRow({ _rowId: 'b1', BillTag: 'OFFSET-A', Channel: 'JPM', 地区: 'US' }),
       makeBankRow({ _rowId: 'b2', BillTag: 'OFFSET-A', Channel: 'JPM', 地区: 'HK' }),
       makeBankRow({ _rowId: 'b3', BillTag: 'OFFSET-A', Channel: 'ADM', 地区: 'US' }),
       makeBankRow({ _rowId: 'b4', BillTag: 'NORMAL', Channel: 'JPM', 地区: 'US' }) // 不命中
     ];
-    const result = runReconciliation({ bankRows, gwRows: [], scenarios: [makeR2OffsetScenario()] });
+    const result = await runReconciliation({ bankRows, gwRows: [], scenarios: [makeR2OffsetScenario()] });
     const hits = result.stats.channelRegionHits;
     assert.deepEqual(hits.map((h) => h.channelRegion), ['ADM-US', 'JPM-HK', 'JPM-US'], '按 channelRegion 升序');
     for (const h of hits) {
@@ -826,20 +826,182 @@ test.describe('runReconciliation stats.channelRegionHits 端到端（需求1a）
     }
   });
 
-  test('无命中 / 全部行 Channel 空 → channelRegionHits 为 []（回退旧格式）', () => {
+  test('无命中 / 全部行 Channel 空 → channelRegionHits 为 []（回退旧格式）', async () => {
     // 无场景启用 → 无命中行
-    const r1 = runReconciliation({
+    const r1 = await runReconciliation({
       bankRows: [makeBankRow({ _rowId: 'b1', Channel: 'JPM', 地区: 'US' })],
       gwRows: [], scenarios: []
     });
     assert.deepEqual(r1.stats.channelRegionHits, [], '无命中 → []');
 
     // 有命中但命中行 Channel 全空 → []
-    const r2 = runReconciliation({
+    const r2 = await runReconciliation({
       bankRows: [makeBankRow({ _rowId: 'b1', BillTag: 'OFFSET-A', Channel: '', 地区: '' })],
       gwRows: [], scenarios: [makeR2OffsetScenario()]
     });
     assert.ok(r2.stats.hitRowCount >= 1, '确有命中行（验证不是因无命中才空）');
     assert.deepEqual(r2.stats.channelRegionHits, [], '命中行 Channel 空 → []');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3.0.7 需求6（🔴 资金红线）：gwRows「全程只读」不变量 —— 删 structuredClone 安全性背书。
+//   main.js bank-statement:run 把网关数据源改为 readGatewayBillRowsByChannels 并删除了 structuredClone
+//   深拷（前提：编排器各轮对 gwRows 只建索引 / 比对，modifications 只写 bankRows，不原地改 gwRows）。
+//   本测试在 run 前 structuredClone 快照 gwRows、run 后 deepStrictEqual → 证明全程未改写任一网关行，
+//   删深拷不会让「DB 还原对象被污染 / 下次读到脏数据」。覆盖 R1/R2(C3)/R3.5/R4/R5s2/R5s3 多轮同时消费 gwRows。
+// ---------------------------------------------------------------------------
+test.describe('v3.0.7 需求6：gwRows 全程只读不变量（删 structuredClone 安全）', () => {
+  // R3.5 DBS-Charge 场景（消费 gwRows 步骤2 amount/currency 判 outbound）
+  function makeDbsChargeScenario() {
+    return {
+      id: 350, name: 'R3.5-DBS-Charge', category: 'builtin-fixed', priority: 0, enabled: true,
+      config: { funcCategory: 'dbs-charge-fund-check', channel: 'DBS', requireBankFundType: 'Charge', setFundType: 'outbound', gwOutboundTradeType: 'HX_OUTBOUND' }
+    };
+  }
+
+  test('run 前后 gwRows 逐字节不变（structuredClone 快照 deepStrictEqual）', async () => {
+    const bankRows = [
+      makeBankRow({ _rowId: 'b1', ReconciliationId: 'RC-CHG', FundType: 'Charge', BillTag: 'OFFSET-A' }),
+      makeBankRow({ _rowId: 'b2', ReconciliationId: '', FundType: 'FundTransfer-out', MerchantId: 'M002', Currency: 'USD', 'Debit Amount': 100, 'Credit Amount': 0, BillDate: '2026-06-10' }),
+      makeBankRow({ _rowId: 'b3', ReconciliationId: 'RC-INB', FundType: 'Refund', MerchantId: 'M003' }),
+      makeBankRow({ _rowId: 'b-dbs', Channel: 'DBS', ReconciliationId: '', MerchantId: 'M-DBS', Currency: 'USD', 'Debit Amount': 100, FundType: 'Charge' })
+    ];
+    const gwRows = [
+      makeGwRow({ reconciliationid: 'RC-CHG', TradeType: 'Charge', orderid: 'ORD-CHG' }),
+      makeGwRow({ reconciliationid: 'RC-FT', TradeType: 'FundTransfer-out', merchantid: 'M002', currency: 'USD', amount: -100, Billdate: '2026-06-10' }),
+      makeGwRow({ reconciliationid: 'RC-INB', TradeType: 'Inbound-VA', orderid: 'ORD-INB' }),
+      makeGwRow({ reconciliationid: 'DISP-RECON-1', TradeType: 'HX_OUTBOUND', merchantid: 'M-DBS', currency: 'USD', amount: 100 })
+    ];
+    const dispRows = [{ 付款渠道: 'DBS', 收款渠道: 'DBS', big_account: 'M-DBS', 币种: 'USD', 金额: 100, ReconID: 'DISP-RECON-1', fund_type: 'FundTransfer-out' }];
+    const scenarios = [
+      makeR2OffsetScenario(),
+      makeDbsChargeScenario(),
+      makeR4ChargeScenario(),
+      makeR5BackfillScenario(),
+      makeR5CleanupScenario()
+    ];
+
+    const gwSnapshot = structuredClone(gwRows);
+    const result = await runReconciliation({
+      bankRows, gwRows, scenarios,
+      dispatchReconContext: { dispatchReconRows: dispRows }
+    });
+
+    // 🔴 核心不变量：gwRows 全程未被任一轮原地改写
+    assert.deepStrictEqual(gwRows, gwSnapshot, 'gwRows 在 run 后必须与 run 前快照逐字节相等（全程只读）');
+    // 确保确有命中（否则只读是空对空，无意义）
+    assert.ok(result.stats.hitRowCount > 0, '确有命中行（验证 gwRows 确被多轮消费）');
+    assert.ok(result.stats.r1Matched > 0, 'R1 确有匹配（gwRows 被 R1 索引）');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v3.0.8 需求3（🔴 资金红线·只改控制流）：runReconciliation 异步化 + onProgress 轮次边界上报。
+//   核心验收：异步化 + 进度回调**绝不改变对账结果**（golden 字节一致）；onProgress 仅在轮次边界被调、
+//   顺序固定、异常被吞不影响 run；run 全程不改写 gwRows（与需求6 删深拷安全互证）。
+//   覆盖 R1/R2/R3.5/R4/R5s2/R5s3 全轮（驱动各轮真命中，确保 yield 点都过一遍）。
+// ---------------------------------------------------------------------------
+test.describe('v3.0.8 需求3：runReconciliation async + onProgress 轮次边界（结果 golden 不变）', () => {
+  // R3.5 DBS-Charge 场景（与需求6 套件同形；驱动 R3.5 yield 点）
+  function makeDbsChargeScenario() {
+    return {
+      id: 350, name: 'R3.5-DBS-Charge', category: 'builtin-fixed', priority: 0, enabled: true,
+      config: { funcCategory: 'dbs-charge-fund-check', channel: 'DBS', requireBankFundType: 'Charge', setFundType: 'outbound', gwOutboundTradeType: 'HX_OUTBOUND' }
+    };
+  }
+  // 构造能驱动 R1/R2/R3.5/R4/R5s2/R5s3 全轮真命中的输入（与需求6 gwRows 只读套件同源数据）。
+  function buildFullRoundInput() {
+    const bankRows = [
+      makeBankRow({ _rowId: 'b1', ReconciliationId: 'RC-CHG', FundType: 'Charge', BillTag: 'OFFSET-A' }),
+      makeBankRow({ _rowId: 'b2', ReconciliationId: '', FundType: 'FundTransfer-out', MerchantId: 'M002', Currency: 'USD', 'Debit Amount': 100, 'Credit Amount': 0, BillDate: '2026-06-10' }),
+      makeBankRow({ _rowId: 'b3', ReconciliationId: 'RC-INB', FundType: 'Refund', MerchantId: 'M003' }),
+      makeBankRow({ _rowId: 'b-dbs', Channel: 'DBS', ReconciliationId: '', MerchantId: 'M-DBS', Currency: 'USD', 'Debit Amount': 100, FundType: 'Charge' })
+    ];
+    const gwRows = [
+      makeGwRow({ reconciliationid: 'RC-CHG', TradeType: 'Charge', orderid: 'ORD-CHG' }),
+      makeGwRow({ reconciliationid: 'RC-FT', TradeType: 'FundTransfer-out', merchantid: 'M002', currency: 'USD', amount: -100, Billdate: '2026-06-10' }),
+      makeGwRow({ reconciliationid: 'RC-INB', TradeType: 'Inbound-VA', orderid: 'ORD-INB' }),
+      makeGwRow({ reconciliationid: 'DISP-RECON-1', TradeType: 'HX_OUTBOUND', merchantid: 'M-DBS', currency: 'USD', amount: 100 })
+    ];
+    const dispRows = [{ 付款渠道: 'DBS', 收款渠道: 'DBS', big_account: 'M-DBS', 币种: 'USD', 金额: 100, ReconID: 'DISP-RECON-1', fund_type: 'FundTransfer-out' }];
+    const scenarios = [
+      makeR2OffsetScenario(),
+      makeDbsChargeScenario(),
+      makeR4ChargeScenario(),
+      makeR5BackfillScenario(),
+      makeR5CleanupScenario()
+    ];
+    return { bankRows, gwRows, dispRows, scenarios };
+  }
+
+  test('onProgress 仅在轮次边界被调，顺序固定 R1→R2→R3.5→R4→R5s2→R5s2b→R5s3', async () => {
+    const { bankRows, gwRows, dispRows, scenarios } = buildFullRoundInput();
+    const rounds = [];
+    await runReconciliation({
+      bankRows, gwRows, scenarios,
+      dispatchReconContext: { dispatchReconRows: dispRows },
+      onProgress: (ev) => { if (ev && ev.round) rounds.push(ev.round); }
+    });
+    // 轮次边界顺序钉死（编排器各轮「执行之后」让出一次；R5s4 是末轮，其后只剩只读输出构造，无 yield）。
+    assert.deepStrictEqual(
+      rounds,
+      ['R1', 'R2', 'R3.5', 'R4', 'R5s2', 'R5s2b', 'R5s3'],
+      'onProgress round 序列必须严格等于 7 个轮次边界、顺序固定'
+    );
+  });
+
+  test('🔴 golden 不变：有 onProgress vs 无 onProgress，产物逐字节相等（异步化/进度不改结果）', async () => {
+    // 两路各独立深拷 bankRows（引擎原地改）；gwRows 只读可共享，但为干净也各传一份。
+    const a = buildFullRoundInput();
+    const b = buildFullRoundInput();
+    const resNoProgress = await runReconciliation({
+      bankRows: a.bankRows, gwRows: a.gwRows, scenarios: a.scenarios,
+      dispatchReconContext: { dispatchReconRows: a.dispRows }
+    });
+    const resWithProgress = await runReconciliation({
+      bankRows: b.bankRows, gwRows: b.gwRows, scenarios: b.scenarios,
+      dispatchReconContext: { dispatchReconRows: b.dispRows },
+      onProgress: () => { /* 上报但不影响结果 */ }
+    });
+    // _modifiedColumns 是 Set，deepStrictEqual 可比较 Set；两路产物必须逐字节一致。
+    assert.deepStrictEqual(resWithProgress, resNoProgress, '有/无 onProgress 的 runReconciliation 产物必须逐字节相等（golden）');
+    // 自检：确有多轮命中（否则等价是空对空）。
+    assert.ok(resNoProgress.stats.hitRowCount > 0, '确有命中行');
+    assert.ok(resNoProgress.stats.r1Matched > 0, 'R1 确有匹配');
+    assert.ok(resNoProgress.stats.dbsChargeChangedCount > 0, 'R3.5 确有改写');
+    assert.ok(resNoProgress.stats.r4ChangedCount > 0, 'R4 确有改写');
+    assert.ok(resNoProgress.stats.r5s2BackfilledCount > 0, 'R5s2 确有回填');
+    assert.ok(resNoProgress.stats.r5s3CleanupCount > 0, 'R5s3 确有剔除');
+  });
+
+  test('onProgress 抛异常被吞掉，不影响 run（结果与无 onProgress 一致）', async () => {
+    const a = buildFullRoundInput();
+    const b = buildFullRoundInput();
+    const resClean = await runReconciliation({
+      bankRows: a.bankRows, gwRows: a.gwRows, scenarios: a.scenarios,
+      dispatchReconContext: { dispatchReconRows: a.dispRows }
+    });
+    let result;
+    await assert.doesNotReject(async () => {
+      result = await runReconciliation({
+        bankRows: b.bankRows, gwRows: b.gwRows, scenarios: b.scenarios,
+        dispatchReconContext: { dispatchReconRows: b.dispRows },
+        onProgress: () => { throw new Error('boom — 进度回调故意抛'); }
+      });
+    });
+    assert.deepStrictEqual(result, resClean, 'onProgress 抛异常时产物仍与无 onProgress 逐字节相等（异常被吞）');
+  });
+
+  test('async 路径下 gwRows 仍全程只读（run 前快照 deepStrictEqual run 后；onProgress 存在）', async () => {
+    const { bankRows, gwRows, dispRows, scenarios } = buildFullRoundInput();
+    const gwSnapshot = structuredClone(gwRows);
+    const result = await runReconciliation({
+      bankRows, gwRows, scenarios,
+      dispatchReconContext: { dispatchReconRows: dispRows },
+      onProgress: () => {}
+    });
+    assert.deepStrictEqual(gwRows, gwSnapshot, 'async + onProgress 路径下 gwRows 全程未被改写（删深拷安全）');
+    assert.ok(result.stats.hitRowCount > 0, '确有命中（验证 gwRows 被多轮消费）');
   });
 });
