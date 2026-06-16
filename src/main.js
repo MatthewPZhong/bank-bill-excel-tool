@@ -96,8 +96,11 @@ const {
 const {
   rebuildAdmDerivation,
   rebuildBankDepositBocDerivation,
-  rebuildFxBocDerivation
+  rebuildFxBocDerivation,
+  rebuildFundTransferReconDerivation
 } = require('./main-process/linked-derive-rebuild');
+// v3.0.6 需求1（T3）：调拨对账单派生纯函数（mid-allocation 导入触发 → in/out 两行落 linked_fund_transfer_recon）。
+const { buildFundTransferReconRows } = require('./main-process/fund-transfer-recon-builder');
 const { streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
 const linkedTableReaders = require('./backend/file-service/readers');
 const { normalizeCell: normalizeLinkedCell, FileValidationError: LinkedFileValidationError } = require('./backend/file-service/common');
@@ -3686,6 +3689,22 @@ function registerAppHandlers() {
       const workingMidRows = paymentOfflineEnabled
         ? structuredClone(database.readLinkedTableRows('mid-allocation') || [])
         : [];
+      // v3.0.6 需求2（🔴 资金红线）：R5s2「对账数据来源」二选一 —— 勾选「中台调拨单表」时改走调拨对账单回填。
+      //   gating 仿 workingMidRows：默认勾选（config.reconSourceMid !== false，缺省/老库无字段视为勾选，决策 D4）；
+      //   仅勾选路才 structuredClone 读隐藏派生表 linked_fund_transfer_recon，否则注入 []（取消路不读本 context）。
+      //   structuredClone 防引擎原地改字段污染 DB 还原对象（与 workingMidRows 同口径）。
+      const reconSourceMidEnabled = !!(
+        r5s2Scenario && r5s2Scenario.config && r5s2Scenario.config.reconSourceMid !== false
+      );
+      const workingReconRows = reconSourceMidEnabled
+        ? structuredClone(database.readFundTransferReconRows() || [])
+        : [];
+      // v3.0.6 需求3（🔴 资金红线）：DBS-Charge 资金校验（R3.5）的调拨对账单入参。
+      //   数据源同为隐藏派生表 linked_fund_transfer_recon，但语义独立于需求2 —— DBS-Charge 总需调拨对账单，
+      //   **不受** reconSourceMid 二选一开关控制；故无条件单独 structuredClone 注入（与 workingReconRows 并列、互不影响）。
+      //   R3.5 实际 gating 在编排器：dbsChargeFundCheck 桶非空（DBS-Charge 场景 enabled）才跑；本批未 seed → 桶空 → no-op。
+      //   structuredClone 防引擎原地改字段污染 DB 还原对象（与 workingReconRows / workingMidRows 同口径）。
+      const workingDispatchReconRows = structuredClone(database.readFundTransferReconRows() || []);
       // v2.1.16-beta.2 T1：改走 5 轮编排器 runReconciliation（R2 内部仍调 dispatcher，双维 first-match-wins 不变）。
       //   deps 字段名照搬原 dispatcher 调用处：channelsRepo=channelsRepository（findByNameAndLocation/getBuiltinGeneral）、db=database.db。
       //   编排器返回 modifiedRows/unmatchedRows 由「当前最新 bankRows」重建（资金红线：两者互斥且全覆盖 workingBankRows）。
@@ -3697,7 +3716,11 @@ function registerAppHandlers() {
         // v2.1.16-beta.4 R5 场景4：退款回填引擎入参（refundOrderRows 非空时引擎产出回填/未匹配行；空则该路径 no-op）
         refundContext: { refundOrderRows: workingRefundOrderRows, depositRows: workingDepositRows },
         // v3.0.4 块 F R5 场景2b：Payment线下调拨回填引擎入参（gating 命中时 workingMidRows 非空；否则 [] → 引擎 no-op）
-        midAllocationContext: { midAllocationRows: workingMidRows }
+        midAllocationContext: { midAllocationRows: workingMidRows },
+        // v3.0.6 需求2 R5s2 二选一：调拨对账单回填引擎入参（勾选路 workingReconRows 非空；取消路 [] → 编排器走网关现状）
+        fundTransferReconContext: { reconRows: workingReconRows },
+        // v3.0.6 需求3 R3.5：DBS-Charge 资金校验调拨对账单入参（语义独立于需求2，不受 reconSourceMid 控制；桶空→编排器 no-op）
+        dispatchReconContext: { dispatchReconRows: workingDispatchReconRows }
       });
       processingResult = {
         modifiedRows: result.modifiedRows,
@@ -11825,6 +11848,15 @@ function registerNewAccountHandlers() {
           if (admDerive && admDerive.created) {
             reconIdFixResult = null;
           }
+        }
+        // v3.0.6 需求1（T3，🔴 资金红线）：中台调拨订单表（mid-allocation）落库成功后，派生隐藏的调拨对账单表
+        //   （linked_fund_transfer_recon）——一行中台调拨单按收/付方向拆成 FundTransfer-in + FundTransfer-out 两行，
+        //   决策 D1 固化 big_account，作为需求2（R5s2 二选一回填）/ 需求3（DBS-Charge 资金校验）匹配引擎的标准化对手方数据源。
+        //   ⚠️ 与上方 ADM 派生不同：调拨对账单只依赖 mid-allocation 本身（不需 bank-deposit 数据存在），故无条件重建。
+        //   函数内部保留 try/catch 隔离：派生抛错记 fundTransferReconDerive.created:false（不阻断 mid-allocation 导入本身）。
+        if (repoKey === 'mid-allocation') {
+          const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({ database, buildFundTransferReconRows });
+          okResult.fundTransferReconDerive = fundTransferReconDerive;
         }
         // v3.0.4 块 E 需求2（🔴 资金对账敏感，U4 拍板）：银行对账单表落库成功后，重派生 BOC调拨银行对账单表，
         //   并对现有 BOC链接表补做 2.5 全量回填资金对账不平表链接ID（交割表导入触发全跑，银行表导入只补 2.4+2.5）。

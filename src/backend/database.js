@@ -51,6 +51,10 @@ const {
   ensureJpmDispatchOrderScenarioSeed,
   // v3.0.4 块 E 需求1：BOC 调拨订单修复写死场景独立补种（默认休眠 enabled=0，category=gateway-recon-id-fix）
   ensureBocDispatchOrderScenarioSeed,
+  // v3.0.6 需求3（T9）：DBS-Charge 资金校验写死场景独立补种（默认 enabled=1，category=builtin-fixed → R3.5）
+  ensureDbsChargeFundCheckScenarioSeed,
+  // v3.0.6 需求3（T9）：每次启动幂等 DELETE 已废弃 charge-outbound 内置孤儿（含级联删关联表，无 marker；不删用户/DBS-Charge 场景）
+  retireChargeOutboundOrphans,
   // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'
   ensureFundTypeAchReturnConfigMigration,
   // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造
@@ -59,6 +63,7 @@ const {
   ensureLinkedTableSupport,
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表建表（独立幂等迁移）
   ensureAdmBankDepositSupport,
+  ensureFundTransferReconSupport,
   // v3.0.4 块 E 需求2：BOC 链接表两张隐藏表建表（独立幂等迁移；不进 ALL_TABLE_KEYS）
   ensureBocFxLinkSupport,
   // v2.1.16-beta.3 ①：Channel 枚举字典表建表
@@ -362,6 +367,17 @@ class AppDatabase {
     //   `priority DESC, id ASC` 下 BOC 排在 JPM 之后（场景管理网关 compact 序号自然 = 2）。
     //   独立 marker(boc_dispatch_order_scenario_seeded) 绕开全局 marker 短路 —— 旧库也能补种。
     this.ensureBocDispatchOrderScenarioSeed();
+    // v3.0.6 需求3（T9）：DBS-Charge 资金校验写死场景独立补种（默认 enabled=1，🔴 资金红线 — 改写 ReconciliationId + FundType）
+    //   前置：scenarios CHECK 已含 'builtin-fixed'（ensureScenariosCategoryBuiltinFixed 已扩枚举）。
+    //   独立 marker(dbs_charge_fund_check_scenario_seeded) 绕开全局 marker 短路 —— 旧库也能补种；
+    //   funcCategory/subCategory='dbs-charge-fund-check' → 编排器 R3.5 桶（reconciliation-orchestrator.bucketScenarios）。
+    this.ensureDbsChargeFundCheckScenarioSeed();
+    // v3.0.6 需求3（T9）：每次启动幂等 DELETE 已废弃 charge-outbound 内置孤儿场景（🔴 资金红线 + 破坏性 — 仅删内置孤儿）。
+    //   原全渠道 charge→outbound 已退役（重写为 DBS-Charge / R3.5）+ R4 引擎 charge-outbound 分支已于 T10 删除，
+    //   旧库残留的 charge-outbound 内置场景指向已不存在的引擎分支 → 彻底 DELETE（含级联删 scenario_applicable_channels）。
+    //   去 marker（旧实现脆弱：UPDATE 0 行也写 marker → 中间态污染则永久跳过）；每次幂等执行，无孤儿则 no-op。
+    //   WHERE 严格限 is_builtin+builtin-fixed+subCategory='charge-outbound'，绝不误删 DBS-Charge/用户场景。
+    this.retireChargeOutboundOrphans();
     // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线 — FundType 枚举值）
     //   必须在 scenarios 相关迁移之后（依赖 scenarios 表已存在、内置场景已 seed）。
     //   幂等：执行一次后 config 不再含 'Ach Ruturn'；绝大多数库无引用 → no-op（精确性防护）。
@@ -532,6 +548,8 @@ class AppDatabase {
     this.ensureLinkedTableSupport();
     // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表（紧随 linked 表；幂等 CREATE IF NOT EXISTS，无依赖、不进 ALL_TABLE_KEYS）
     this.ensureAdmBankDepositSupport();
+    // v3.0.6 需求1：调拨对账单隐藏表（紧随 ADM 表；幂等 CREATE IF NOT EXISTS，无依赖、不进 ALL_TABLE_KEYS）
+    this.ensureFundTransferReconSupport();
     // v3.0.4 块 E 需求2：BOC 链接表两张隐藏表（紧随 ADM 表；幂等 CREATE IF NOT EXISTS，无依赖、不进 ALL_TABLE_KEYS）
     this.ensureBocFxLinkSupport();
     // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀；幂等 CREATE IF NOT EXISTS，无依赖）
@@ -1041,6 +1059,16 @@ class AppDatabase {
     return ensureBocDispatchOrderScenarioSeed(this.db);
   }
 
+  // v3.0.6 需求3（T9）：DBS-Charge 资金校验写死场景独立补种（默认 enabled=1，🔴 资金红线 → R3.5）
+  ensureDbsChargeFundCheckScenarioSeed() {
+    return ensureDbsChargeFundCheckScenarioSeed(this.db);
+  }
+
+  // v3.0.6 需求3（T9）：每次启动幂等 DELETE 已废弃 charge-outbound 内置孤儿场景（含级联删关联表，🔴 资金红线 + 破坏性，不删用户/DBS-Charge 场景）
+  retireChargeOutboundOrphans() {
+    return retireChargeOutboundOrphans(this.db);
+  }
+
   // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线）
   ensureFundTypeAchReturnConfigMigration() {
     return ensureFundTypeAchReturnConfigMigration(this.db);
@@ -1313,6 +1341,21 @@ class AppDatabase {
   // JPM run 阶段整批幂等重写 ADM 行匹配标志 / 资金对账ID（可重入）
   writeAdmMatchFlags(admRows) {
     return linkedTableRepository.writeAdmMatchFlags(this.db, admRows);
+  }
+
+  // v3.0.6 需求1：调拨对账单隐藏表 facade（建表 + 仓储两函数转发）
+  ensureFundTransferReconSupport() {
+    return ensureFundTransferReconSupport(this.db);
+  }
+
+  // 调拨对账单整表覆盖写入（rows = buildFundTransferReconRows 产物，每单 in/out 两行）；7 列 INSERT，整表重建
+  replaceFundTransferReconRows(rows, options) {
+    return linkedTableRepository.replaceFundTransferReconRows(this.db, rows, options || {});
+  }
+
+  // 读回调拨对账单全部整行（raw_json → 对象）；供需求2/3 引擎匹配；损坏行跳过
+  readFundTransferReconRows() {
+    return linkedTableRepository.readFundTransferReconRows(this.db);
   }
 
   // v3.0.4 块 E 需求2：BOC 链接表两张隐藏表 facade（建表 + 仓储函数转发）

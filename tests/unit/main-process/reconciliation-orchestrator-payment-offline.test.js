@@ -56,10 +56,14 @@ function makeMidRow(o = {}) {
 }
 
 // R5s2 场景（fund-transfer-backfill），可挂 paymentOfflineBackfill 子开关
+//   v3.0.6 需求2：R5s2 数据来源二选一默认改「勾选=调拨对账单」（决策 D4）。本测试文件验证的是
+//   **网关 R5s2 → R5s2b 互斥/排除集** mechanics（gwRows / 无 fundTransferReconContext），故显式
+//   reconSourceMid:false 走取消路（旧网关引擎，行为逐字不变 / parity），与 R5s2b excludeBankRowIds 接线无关。
 function makeR5s2Scenario({ paymentOfflineBackfill } = {}) {
   const config = {
     funcCategory: 'platform-order',
     subCategory: 'fund-transfer-backfill',
+    reconSourceMid: false,
     roundPhase: 5,
     directions: [
       { gwTradeType: 'FundTransfer-out', bankFundType: 'FundTransfer-out' },

@@ -1,5 +1,40 @@
 # Changelog
 
+## 3.0.6 - 2026-06-16
+
+v3.0.6 迭代（资金对账数据处理模块，三需求 + 一项退役，team-lead 拆分委托 dev 分 T1~T11 实施）：① **需求1 调拨对账单派生**——「链接表管理」导入「中台调拨订单」后自动派生隐藏表「调拨对账单」（一行中台单 → FundTransfer-in / out 两行）；② **需求2 中台调拨订单对账ID回填「数据来源二选一」**——「中台调拨订单对账ID回填」（R5 场景2）新增勾选框「对账数据来源为中台调拨单表」（**默认勾选**），勾选用调拨对账单匹配回填、取消沿用网关对账单（原 R5s2）；③ **需求3 DBS-Charge 资金校验**——原全渠道「Charge转outbound」整体重写为 **DBS 渠道专属**校验，对账编排新增 R3.5 轮（R3 后、R4 前）；④ **charge-outbound 退役**——非 DBS 渠道不再有 charge→outbound，v3.0.4 块 G「同 reconid 多 Charge 取 Debit 最大行」逻辑移除，旧库该场景每次启动幂等删除。质量门 `npm run release-check` 全绿（**unit 2803 / integration 30 脚本 / smoke 全模块 PASS**）。⚠️ **多处资金红线**：需求1 派生表是需求2 / 需求3 回填与校验的数据来源（大账号按方向取卡号、全角括号列名漂移 = 大账号全空）；需求2 / 需求3 均**改写银行 `ReconciliationId`**（需求3 还改写 `FundType`）；需求3 R3.5 在 R4 前演化 `bankRows` 同一引用（叠加链跨轮保留）。
+
+### 🔴 对外契约变更（合并适配提示 · 升级必读）
+
+本版有 3 处对外可见的行为变更，**存量用户升级后产出会变化、既有操作习惯或下游对账口径可能需要适配**，合并成一段集中说明：
+
+1. **非 DBS 渠道不再有 charge→outbound（charge-outbound 退役）**（需求3 · 🔴 资金红线 · 行为变化，升级必读）：原「资金性质校验」内置子场景「Charge转outbound」（有 R1 匹配且 `FundType=Charge` → `outbound`，含 v3.0.4 块 G「同一 ReconciliationId 多条 Charge 行仅转 Debit Amount 最大行」边界口径）整体退役，**全渠道范围内不再发生 charge→outbound 改写**。改由**仅对 Channel=DBS 生效**的新 R3.5「DBS-Charge 资金校验」承接（见第 3 条）。⚠️ **存量非 DBS 渠道**升级后：主输出里原本被 charge→outbound 标黄的行不再被改写（`FundType` 保持 `Charge`），下游 `outbound→HX-out` 链式改写行数随之减少——依赖旧「全渠道 charge→outbound」行为的对账口径需重新核对。旧库已 seed 的 `charge-outbound` 场景条目由 `retireChargeOutboundOrphans` 每次启动**幂等 DELETE**（含级联删 `scenario_applicable_channels` 关联行），UI 场景列表不再显示该条目。
+2. **「中台调拨订单对账ID回填」默认数据源由网关对账单改为调拨对账单**（需求2 · 🔴 资金红线 · 默认行为变化，升级必读）：「中台调拨订单对账ID回填」场景（5 轮对账的 R5 场景2）的「请选择适用的银行渠道」弹窗新增勾选框「**对账数据来源为中台调拨单表**」，**默认勾选**。勾选（含老库无该字段、缺省视为勾选）→ R5 场景2 改用**需求1 派生的「调拨对账单」**与银行 `FundType=FundTransfer-in/out` 行匹配回填 `ReconciliationId`（按日期[同日优先 + ±1 天兜底] + 大账号 + 金额 + 币种，口径与原 R5s2 一致，仅对手方换源）；取消勾选 → 沿用**原 R5s2** 网关对账单匹配（`r5-fund-transfer-backfill.js` 逐字保留）。⚠️ **存量用户升级后默认走调拨对账单**——若过去依赖网关对账单回填，需在该场景「管理」弹窗里**取消勾选**以维持旧行为，并须先在「链接表管理」导入「中台调拨订单」（派生出调拨对账单）才有可匹配的数据源。
+3. **新增 R3.5「DBS-Charge 资金校验」轮次（默认启用，改写 DBS 银行行 `ReconciliationId` + `FundType`）**（需求3 · 🔴🔴 资金红线 · 新增改写轮，升级必读）：对账编排在 R3 之后、R4 之前新增 R3.5 轮，**默认启用**（写死场景 `DBS-Charge资金校验` seed `enabled=1`）。触发条件 = 银行行 `Channel=DBS`；**步骤1** 用调拨对账单（付收渠道均=DBS）与 DBS 银行单按**大账号 + 金额 + 币种**严格 1v1 匹配，命中行 `FundType` 标为该调拨行方向（`FundTransfer-in` / `-out`）并赋 `ReconciliationId`，同 `ReconID` 其他 DBS 行归 `Charge`；**步骤2** 剩余 `Charge`/`outbound` 候选行与同 `ReconID` 网关 `amount`/`currency` 相等 → `outbound`，未命中 → `Charge`（语义翻转：不再「保持原值」）。`chargeSiblingsScope` 默认 `dbs-only`（步骤1 末归并仅限 DBS 渠道行）。⚠️ DBS 渠道空 / 调拨对账单空时引擎整体 no-op（无 DBS 数据零影响）；改写 `ReconciliationId` + `FundType` 均标黄留痕，**务必用真实 DBS 数据人工核对一份样本**。
+
+### 新增
+
+- **需求1：调拨对账单派生**（🔴 资金红线 · 新增 `src/constants/fund-transfer-recon-fields.js` / `src/main-process/fund-transfer-recon-builder.js` / `migrations.js` / `linked-table-repository.js` / `database.js` / `main.js` / `renderer-dialogs.js`）：「链接表管理」导入「中台调拨订单」（mid-allocation）后自动派生隐藏表「调拨对账单」（`linked_fund_transfer_recon`，不进 `ALL_TABLE_KEYS`/`linked_table_meta` 隐藏红线，与 BOC 两张派生表同构）。
+  - **派生规则（纯函数 `buildFundTransferReconRows`，仿 `adm-bank-deposit-builder.js`）**：一行中台调拨订单 → **FundTransfer-in + FundTransfer-out 两行**；字段映射经 `FT_RECON_FIELD_MAP` 常量单一真相取值（绝不手敲，中台源列含全角括号「付款账户（卡号）」「收款账户（卡号）」，半角化即取空 → 大账号全空 → 误命中资金红线）：调拨单号 / `BillDate`（取交易时间）/ `ReconID`（取渠道流水号）/ 付款账号 / 收款账号 / 付收渠道 / 金额 / 币种；in 行渠道·金额·币种取收款侧、out 行取付款侧。
+  - **🔴 决策 D1（大账号按方向固化 `big_account`）**：派生阶段即把大账号按方向写定——**in 行 `big_account` = 收款卡号、out 行 = 付款卡号**——使下游需求2 / 需求3 匹配引擎零方向分支（直接 `big_account` ↔ 银行 `MerchantId` 比对）。
+  - **导入接线**：「中台调拨订单」导入成功后派生并落库，导入完成提示追加「**已生成 N 条调拨对账单**」（N = 中台单行数×2）。
+- **需求3：DBS-Charge 资金校验引擎**（🔴🔴 资金红线核心 · 新增 `src/main-process/scenario-engines/dbs-charge-fund-check.js` + 写死场景 seed）：对账编排新增 R3.5 轮（`runDbsChargeFundCheck`），整体替换原全渠道 charge→outbound，仅 `Channel=DBS` 生效，采用【对称模型】（用户最终拍板）：
+  - **步骤1**（调拨对账单 ↔ DBS 银行）：`dispRows` = 调拨对账单（付款渠道===DBS && 收款渠道===DBS && `big_account` 非空），与 DBS 银行行按 `big_account` + 金额 + 币种**严格 1v1**（多候选取文件原序首行 + warning）；命中行 `FundType` 标为该调拨行 `fund_type`（FundTransfer-in/out）+ 赋 `ReconciliationId`；同 `ReconID` 其他行归 `Charge`。🔴 **两阶段化**（防覆盖关键交互）：一笔调拨单 in/out 行 `ReconID` 相同，边匹配边归并会把刚标的 FundTransfer 命中行覆盖成 Charge，故拆「阶段A 先匹配+标记（命中行入 `matchedBankRows` 保护集）→ 阶段B 再归并」。
+  - **步骤2**（网关 amount/currency 找真正 outbound 行）：剩余 `FundType ∈ {Charge, outbound}` 候选行（步1 标的 FundTransfer-in/out 不在内、不被碰），与同 `ReconID` 网关 `amount`/`currency` 相等 → `outbound`，**未命中 → `Charge`**（语义翻转，不再「保持原值」）。最终每个 `ReconID` 桶 = 1 条 FundTransfer-in/out（步1命中）+ 网关确认的 outbound（步2命中）+ 其余全 Charge。
+  - **`chargeSiblingsScope` 默认 `dbs-only`**（步骤1 末归并仅遍历 DBS 渠道行；`'all'` 可切全渠道，按需保留）；改写 `ReconciliationId` + `FundType` 两列均 record 留痕标黄。
+  - **写死场景 seed**：`DBS-Charge资金校验`（`is_builtin=1` / `category='builtin-fixed'` / `funcCategory='dbs-charge-fund-check'` = 编排器 R3.5 分流键 / `subCategory='dbs-charge-fund-check'` = seed 幂等定位键，区别于已退役 `'charge-outbound'`），**默认 `enabled=1`**；独立 marker `dbs_charge_fund_check_scenario_seeded`（绕开全局 marker 短路，仿 `ensureBocDispatchOrderScenarioSeed`），老库补种。
+
+### 变更
+
+- **需求2：中台调拨订单对账ID回填「数据来源二选一」**（🔴 资金红线 · 新增 `src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js` / `reconciliation-orchestrator.js` / `migrations.js` seed / `main.js` run 注入 / `renderer-dialogs.js` UI）：
+  - **新引擎 `runRound5FundTransferReconBackfill`**（与原 R5s2 `r5-fund-transfer-backfill.js` 同口径，唯一差异：对手方=调拨对账单 `reconRows`）：调拨对账单 `fund_type=FundTransfer-out/in` 行 ↔ R4 后银行 `FundType` 同值行，命中把调拨对账单 `ReconID` 回填进银行 `ReconciliationId`（标黄）；两方向独立跑；金额绝对值精确到分（复用 `bankAmountAbs`，禁重写）；日期两阶段（Phase1 严格同日优先消费 → Phase2 仅未命中 recon 用 `±dateToleranceDays` 兜底、按天数差升序）；严格 1v1（`usedBankRowId` 单向消费）；多候选 tie-break 同日优先 → 银行行原序最前。
+  - **编排器二选一 gating**：`config.reconSourceMid !== false`（**默认勾选**，老库无字段 / 缺省视为勾选）→ 勾选路注入调拨对账单派生行（`fundTransferReconContext.reconRows`）走新引擎；`reconSourceMid === false` → 取消路沿用 `runRound5FundTransferBackfill`（对手方=网关 `gwRows`，逐字保留）。
+  - **seed 默认**：`fund-transfer-backfill` 场景 config 默认 `reconSourceMid: true`。
+  - **UI 勾选框**（`renderer-dialogs.js`）：「请选择适用的银行渠道」弹窗新增「**对账数据来源为中台调拨单表**」勾选行，仅 `config.subCategory==='fund-transfer-backfill'` 场景显示（与 Payment 行同 gating），加载口径 `cachedConfig.reconSourceMid !== false`（老库无字段 → 勾选）。
+- **charge-outbound 退役（需求3 配套）**（🔴 资金红线 · `r4-fund-nature-check.js` / `migrations.js`）：R4 资金性质校验内置子场景由 **5 → 4**（移除 `charge-outbound` 子场景及 v3.0.4 块 G「仅转 Debit Amount 最大行」边界口径），R4 退化为纯叠加链（其余四子场景 Ach Return / Wire Return / HX-out / HX-in 行为零变化）；旧库孤儿 `charge-outbound` 条目由 `retireChargeOutboundOrphans` 每次启动幂等 DELETE（含级联删关联表）。
+
+> **v3.0.6 收口**：三需求 + 退役经 team-lead 拆分委托 dev 分 T1~T11 实施、`release-check` 验收全绿。🔴 资金红线放行闸：需求1 以派生纯函数单测（in/out 字段映射 + D1 大账号方向 + 全角括号列名取值）为闸；需求2 以新引擎「与原 R5s2 同口径」单测（日期两阶段 + 严格 1v1 + 金额分比对）+ 编排器二选一 gating（默认勾选 / 取消沿用网关 / 老库无字段视为勾选）断言为闸；需求3 以 DBS-Charge 引擎对称模型单测（步骤1 两阶段防覆盖 + 步骤2 未命中归 Charge 语义翻转 + `chargeSiblingsScope` dbs-only + DBS 空/调拨空 no-op）+ R3.5 编排接线（R3 后 R4 前、改后 `bankRows` 进 R4 叠加链）+ seed 默认 enabled=1 + 旧库 charge-outbound 退役幂等删除为闸。⚠️ 关键决策（用户拍板）：① 大账号按方向取卡号（D1，匹配引擎零方向分支）；② `chargeSiblingsScope` 默认 `dbs-only`；③ 对称模型「步骤1 标 FundTransfer + 步骤2 未命中归 Charge」（替代早期「保持原值」方案）；④ 需求2 二选一默认勾选「中台调拨单表」。详见 `docs/iterations/v3.0.6/PRD.md`。
+
 ## 3.0.5 - 2026-06-15
 
 v3.0.5 迭代（三大块、约 5 个 PR 串行合入）：① **体积 / DB 治理 + 启动优化**（Part A 打包瘦身 + Part B Phase0~4：备份治理 + 主库一次性 VACUUM 止血 + acquiring/biz-op/bank-bu 对账 run 级数据迁 per-月侧库 + 启动窗口先行 + 守卫固化）；② **外汇交割表 + 银行入金表「整表覆盖 → 幂等累加」合并导入 + 跨期重复命中提醒**（🔴🔴 资金红线）；③ **中台退款订单回填规则增强 R1~R6 + 输出模板扩列 O1~O4**（🔴 资金红线）。质量门 `npm run release-check` 全绿（**unit 2673 / integration 30 脚本（含 OPEN-7 跨期命中 e2e + acquiring / biz-op / bank-bu 三套侧库 parity byte-for-byte + linked-fx 合并等价性 + refund codex 修复专项）/ smoke 全模块 PASS**）。⚠️ **多处资金红线**：块 ② 入金表 / 外汇交割表落库语义由覆盖改累加 + BOC 调拨单号全量重算 + export 新增回写链接表命中标记的写路径 + 删除扩展到三表（不可逆）；块 ③ R1~R6 匹配规则面扩张 + S4 容差方向收紧 + R6 DTD 日期按美式 MDY 解析 + 回填模板列契约 14→31；块 ① 三模块对账 run 级数据存储位置变更 + 主库一次性 VACUUM（迁移式，升级首启执行）。

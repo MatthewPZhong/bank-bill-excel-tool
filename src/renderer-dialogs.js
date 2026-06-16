@@ -5612,13 +5612,16 @@
 
     // v2.1.16 需求1：builtin-fixed 自带写死场景「功能类别」列按 config.funcCategory 映射业务分组显示。
     //   T10 落地的 RECON_ROUND_BUILTIN_SCENARIOS（migrations.js）config 含 funcCategory：
-    //     - 'fund-nature-check'  → 资金性质校验
-    //     - 'platform-order'     → 中台订单数据处理（旧称「中台订单校验」更名后的值）
+    //     - 'fund-nature-check'      → 资金性质校验
+    //     - 'platform-order'         → 中台订单数据处理（旧称「中台订单校验」更名后的值）
+    //     - 'dbs-charge-fund-check'  → 资金性质校验（v3.0.6 用户反馈：DBS-Charge 与原 charge-outbound 同类，
+    //                                  均为改 FundType 的资金校验；funcCategory 为编排器 R3.5 分桶键不可改，仅补 UI 标签）
     //   无 funcCategory 的既有 builtin-fixed 场景（如「从银行对账单提取调拨订单对账ID」）
     //   不在此表 → 回退 getCategoryLabel(category)（= '银行对账单赋值自身'），保证既有显示不回归。
     const FUNC_CATEGORY_LABELS = {
       'fund-nature-check': '资金性质校验',
-      'platform-order': '中台订单数据处理'
+      'platform-order': '中台订单数据处理',
+      'dbs-charge-fund-check': '资金性质校验'
     };
 
     // builtin-fixed 行「功能类别」取值：优先 config.funcCategory 映射，映射不到回退既有 category 标签。
@@ -6423,6 +6426,18 @@
             if (overwriteTotal > 0) tips.push(`• 有 <b>${overwriteTotal}</b> 条因 ${keyName} 已存在被覆盖更新`);
             if (rejectedEmptyTotal > 0) tips.push(`• 有 <b>${rejectedEmptyTotal}</b> 条因 ${keyName} 为空被拒绝入库`);
             lines.push(tips.join('<br/>'));
+          }
+        }
+        // v3.0.6 需求1（T3 派生 → 本次 T 显示）：中台调拨订单（mid-allocation）导入后，main 侧已派生隐藏的调拨对账单链接表
+        //   （linked_fund_transfer_recon，一单按收/付拆 FundTransfer-in/out 两行），结果挂在 okResult.fundTransferReconDerive。
+        //   仿上方累加导入提醒：成功且 total>0 才追加一行（total===0 = 空中台表，不显示「已生成 0 条」，对齐 ADM 0 行静默拍板）。
+        //   派生失败（created:false）此处不展示（与 ADM 失败弹独立报错框的口径不同：调拨对账单为纯字段重排派生，失败仅静默，不阻断导入）。
+        const ftReconHit = list.find((r) => r && r.tableKey === 'mid-allocation' && r.status === 'ok'
+          && r.fundTransferReconDerive && r.fundTransferReconDerive.created);
+        if (ftReconHit) {
+          const ftTotal = Number(ftReconHit.fundTransferReconDerive.total) || 0;
+          if (ftTotal > 0) {
+            lines.push(`已生成 <b>${ftTotal}</b> 条调拨对账单（FundTransfer-in/out）`);
           }
         }
         return lines.join('<br/><br/>');
@@ -7474,6 +7489,16 @@
               <input class="scenario-config-input scenario-config-input-narrow builtin-fixed-priority-input" type="number" min="0" max="3" data-field="priority" value="0">
             </div>
           </div>
+          <!-- v3.0.6 需求2（T6）：「对账数据来源为中台调拨单表」二选一勾选行。
+               仅 config.subCategory==='fund-transfer-backfill' 场景显示（与 payment 行同一 gating）；
+               默认勾选（加载口径 cachedConfig.reconSourceMid !== false，老库无字段→视为勾选）。
+               勾选→编排器 R5s2 用调拨对账单派生表匹配回填；取消→沿用旧网关对账单逻辑。 -->
+          <div class="builtin-fixed-payment-row builtin-fixed-recon-source-row" data-role="recon-source-row" hidden>
+            <label class="builtin-fixed-payment-check">
+              <input type="checkbox" data-field="recon-source-mid">
+              对账数据来源为中台调拨单表
+            </label>
+          </div>
           <!-- v3.0.4 块 F · F1：「Payment线下调拨订单回填处理」勾选行 + 条件展开区。
                仅 config.subCategory==='fund-transfer-backfill' 场景显示（加载 IIFE gating 控制 hidden）；
                展开区默认隐藏，勾选后显示（照 C3 extraFee 范式，取消勾选保留输入值）。 -->
@@ -7508,6 +7533,9 @@
       const dropdownButton = dialog.querySelector('.builtin-fixed-channel-dropdown-btn');
       // v2.1.16 A1：优先级输入框（0-3 整数；回填当前场景 priority，保存时随适用渠道一并 update）
       const priorityInput = dialog.querySelector('input[data-field="priority"]');
+      // v3.0.6 需求2（T6）：对账数据来源二选一 —— 勾选行（默认勾选；仅 fund-transfer-backfill 场景显示，与 payment 行同 gating）
+      const reconSourceRow = dialog.querySelector('[data-role="recon-source-row"]');
+      const reconSourceCheck = dialog.querySelector('input[data-field="recon-source-mid"]');
       // v3.0.4 块 F · F1：Payment 线下调拨订单回填处理 —— 勾选行 + 三输入框展开区（条件渲染 + 显隐联动）
       const paymentRow = dialog.querySelector('[data-role="payment-row"]');
       const paymentFields = dialog.querySelector('[data-role="payment-fields"]');
@@ -7638,6 +7666,13 @@
               ? scResult.scenario.config
               : {};
             isPaymentScenario = cachedConfig.subCategory === 'fund-transfer-backfill';
+            if (isPaymentScenario && reconSourceRow) {
+              // v3.0.6 需求2（T6）：对账数据来源勾选行与 payment 行同 gating 显示；
+              //   默认勾选口径 reconSourceMid !== false（老库无字段 undefined !== false → true → 勾选），
+              //   与编排器 R5s2 二选一 gating 完全一致。
+              reconSourceRow.hidden = false;
+              if (reconSourceCheck) reconSourceCheck.checked = cachedConfig.reconSourceMid !== false;
+            }
             if (isPaymentScenario && paymentRow) {
               paymentRow.hidden = false;
               // 回填已存配置（老库无字段 fallback enabled=false；输入框不预填生产值，仅回填用户已存值）
@@ -7711,6 +7746,13 @@
           if (paymentError) paymentError.hidden = true;
           paymentOfflineBackfill = { enabled, bankChannel, region, bigAccount };
         }
+        // v3.0.6 需求2（T6）：对账数据来源二选一勾选值（仅 payment 场景显示本控件）。
+        //   checked === true 才记 true；否则（含未勾选/控件缺失）记 false。
+        //   与 seed/编排器口径统一：写回的 reconSourceMid 直接是布尔值，后续 gating 用 !== false 判定。
+        let reconSourceMid = null;
+        if (isPaymentScenario && reconSourceCheck) {
+          reconSourceMid = reconSourceCheck.checked === true;
+        }
         // 全选 → 存空数组（= 适用全部，新增渠道自动适用）；否则存选中 ids
         const ids = (allChannels.length > 0 && selectedIds.size === allChannels.length)
           ? []
@@ -7722,12 +7764,16 @@
         }
         // v2.1.16 A1：适用渠道保存成功后，追加更新场景优先级（updateScenario 仅改 priority，不动 category/is_builtin）。
         // v3.0.4 块 F · F2（🔴 资金红线）：payment 场景额外携带 config 浅合并 ——
-        //   读-改-写：以 cachedConfig（加载时缓存的完整 config）为基底展开，仅覆盖 paymentOfflineBackfill 子对象，
+        //   读-改-写：以 cachedConfig（加载时缓存的完整 config）为基底展开，仅覆盖 reconSourceMid/paymentOfflineBackfill 子键，
         //   funcCategory/subCategory/roundPhase/directions/dateToleranceDays 等 seed 契约字段原样保留（不可丢，否则掉桶/引擎漂移）。
         //   非 payment 场景维持原行为：仅 update priority，不携带 config（不引入无谓 config 写入）。
+        // v3.0.6 需求2（T6）：reconSourceMid 二选一开关与 paymentOfflineBackfill 同属 fund-transfer-backfill 场景，
+        //   两者在同一次浅合并里写入；payment 勾选框是否启用不影响 reconSourceMid 写入（两控件独立）。
         const updateFields = { priority: priorityNum };
-        if (isPaymentScenario && paymentOfflineBackfill) {
-          updateFields.config = { ...(cachedConfig || {}), paymentOfflineBackfill };
+        if (isPaymentScenario && (reconSourceMid !== null || paymentOfflineBackfill)) {
+          updateFields.config = { ...(cachedConfig || {}) };
+          if (reconSourceMid !== null) updateFields.config.reconSourceMid = reconSourceMid;
+          if (paymentOfflineBackfill) updateFields.config.paymentOfflineBackfill = paymentOfflineBackfill;
         }
         const priorityResult = await desktopApi.scenarios.update(scenarioId, updateFields);
         if (!priorityResult || priorityResult.status !== 'ok') {

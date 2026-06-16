@@ -30,10 +30,14 @@
 const { runRound1ReconIdMatch } = require('./scenario-engines/r1-recon-id-match');
 const { runRound4FundNatureCheck } = require('./scenario-engines/r4-fund-nature-check');
 const { runRound5FundTransferBackfill } = require('./scenario-engines/r5-fund-transfer-backfill');
+// v3.0.6 需求2：R5s2 数据来源二选一 —— 勾选「对账数据来源为中台调拨单表」时改走本引擎（对手方=调拨对账单）。
+const { runRound5FundTransferReconBackfill } = require('./scenario-engines/r5-fund-transfer-recon-backfill');
 const { runRound5PlatformInboundCleanup } = require('./scenario-engines/r5-platform-inbound-cleanup');
 const { runRound5RefundOrderBackfill } = require('./scenario-engines/r5-refund-order-backfill');
 // v3.0.4 块 F：Payment线下调拨订单回填（R5 场景2b，R5s2 之后接线；🔴 网关回填优先互斥）
 const { runRound5PaymentOfflineAllocationBackfill } = require('./scenario-engines/r5-payment-offline-allocation-backfill');
+// v3.0.6 需求3：DBS-Charge 资金校验（R3.5，R3 后 R4 前；🔴 改 ReconciliationId + FundType；替换原全渠道 charge→outbound）
+const { runDbsChargeFundCheck } = require('./scenario-engines/dbs-charge-fund-check');
 const { runAllScenarios } = require('./scenario-dispatcher');
 
 // 重建 modifiedRows 时需嫁接 R2 命中元数据，但要排除这两个（_rowId 是行键、_modifiedColumns 由编排器跨轮合并重算）
@@ -43,18 +47,22 @@ const META_EXCLUDE_KEYS = new Set(['_rowId', '_modifiedColumns']);
  * 把 enabled 过的 scenarios 按轮次分桶。
  *
  * 分桶规则（TECH_DESIGN §1：funcCategory 入 config_json，不扩 scenarios.category 枚举）：
+ *   - builtin-fixed + funcCategory==='dbs-charge-fund-check'                   → R3.5（v3.0.6 需求3）
  *   - builtin-fixed + funcCategory==='fund-nature-check'                       → R4
  *   - builtin-fixed + funcCategory==='platform-order' + subCategory==='fund-transfer-backfill'  → R5 场景2
  *   - builtin-fixed + funcCategory==='platform-order' + subCategory==='platform-inbound-cleanup' → R5 场景3
  *   - builtin-fixed + funcCategory==='platform-order' + subCategory==='refund-order-backfill'    → R5 场景4
  *   - 其余（含无 funcCategory 的 builtin-fixed=现有「提取调拨ID」+ 所有 C1/C2/C3）→ R2
  *
+ * ⚠️ if/else 顺序：dbsChargeFundCheck 分支必须在最终 else（r2 兜底）之前命中，否则会漏进 R2 桶。
+ *
  * 入参 scenarios 已是 caller 过滤后的「启用(enabled)」集合 → 某 bucket 为空 = 该功能未启用/未 seed → 该轮跳过（no-op）。
  *
  * @param {Array<Object>} scenarios 已 enabled 过的场景数组
- * @returns {{ r2: Array, r4: Array, r5s2: Array, r5s3: Array, r5s4: Array }}
+ * @returns {{ dbsChargeFundCheck: Array, r2: Array, r4: Array, r5s2: Array, r5s3: Array, r5s4: Array }}
  */
 function bucketScenarios(scenarios) {
+  const dbsChargeFundCheck = []; // v3.0.6 需求3：R3.5 DBS-Charge 资金校验
   const r2 = [];
   const r4 = [];
   const r5s2 = [];
@@ -66,7 +74,9 @@ function bucketScenarios(scenarios) {
     if (!s) continue;
     const fc = s.config && s.config.funcCategory;
     const sub = s.config && s.config.subCategory;
-    if (s.category === 'builtin-fixed' && fc === 'fund-nature-check') {
+    if (s.category === 'builtin-fixed' && fc === 'dbs-charge-fund-check') {
+      dbsChargeFundCheck.push(s); // v3.0.6 需求3 → R3.5（注意：在 fund-nature-check / 兜底 else 之前命中，不漂 R4/R2）
+    } else if (s.category === 'builtin-fixed' && fc === 'fund-nature-check') {
       r4.push(s);
     } else if (s.category === 'builtin-fixed' && fc === 'platform-order' && sub === 'fund-transfer-backfill') {
       r5s2.push(s);
@@ -79,7 +89,7 @@ function bucketScenarios(scenarios) {
     }
   }
 
-  return { r2, r4, r5s2, r5s3, r5s4 };
+  return { dbsChargeFundCheck, r2, r4, r5s2, r5s3, r5s4 };
 }
 
 /**
@@ -150,6 +160,14 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
  * @param {Object} [params.midAllocationContext] v3.0.4 块 F：R5 场景2b Payment线下调拨回填引擎入参
  *   （{ midAllocationRows }）；仿 refundContext 范式。bank-statement:run 仅在勾选 gating 命中时注入真实
  *   中台调拨订单行；未勾选 / 缺省 → undefined，R5s2b 内部 gating（config.paymentOfflineBackfill）+ 空入参 no-op。
+ * @param {Object} [params.fundTransferReconContext] v3.0.6 需求2：R5s2「数据来源=调拨对账单」引擎入参
+ *   （{ reconRows }）；仿 midAllocationContext 范式。R5s2 二选一 gating（config.reconSourceMid !== false，
+ *   默认勾选）命中「勾选路」时注入调拨对账单派生行（linked_fund_transfer_recon）；取消路（reconSourceMid:false）
+ *   不读本 context，沿用现状网关回填。缺省 → 勾选路得空 reconRows → 新引擎空入参 no-op。
+ * @param {Object} [params.dispatchReconContext] v3.0.6 需求3：R3.5「DBS-Charge 资金校验」引擎入参
+ *   （{ dispatchReconRows }）；数据源同为调拨对账单派生表（linked_fund_transfer_recon），但语义独立于需求2 —
+ *   DBS-Charge 总需调拨对账单，**不受**需求2 reconSourceMid 开关控制，故 bank-statement:run 单独 structuredClone
+ *   注入。gating = dbsChargeFundCheck 桶非空（场景 enabled）。缺省 / 空 → R3.5 no-op（不抛、不改行）。
  * @returns {{
  *   modifiedRows: Array<Object>,
  *   unmatchedRows: Array<Object>,
@@ -162,12 +180,13 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
  *   rounds: Object
  * }}
  */
-function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, midAllocationContext } = {}) {
+function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, midAllocationContext, fundTransferReconContext, dispatchReconContext } = {}) {
   if (!Array.isArray(bankRows)) {
     throw new Error('runReconciliation: bankRows 必须是数组');
   }
   const safeGwRows = Array.isArray(gwRows) ? gwRows : [];
   const {
+    dbsChargeFundCheck: dbsChargeBucket,
     r2: r2Bucket, r4: r4Bucket, r5s2: r5s2Bucket, r5s3: r5s3Bucket, r5s4: r5s4Bucket
   } = bucketScenarios(scenarios);
 
@@ -202,6 +221,22 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
   // ===== R3：占位 no-op（透传全量银行行）=====
   //   r3BankRows = bankRows（同一组引用）；R4/R5 直接对全量行操作。
 
+  // ===== R3.5：DBS-Charge 资金校验（🔴 v3.0.6 需求3；R3 后 R4 前；改 ReconciliationId + FundType）=====
+  //   先用调拨对账单给 DBS 银行行赋 ReconciliationId 并归并同组 FundType=Charge（步骤1），再用网关 amount/currency
+  //   精确判定哪些转 outbound（步骤2）。落 R4 前的理由：DBS 行的 ReconciliationId/FundType 在进 R4 时已定稿，
+  //   bankRows 同一引用原地演化 → R3.5 改完 R4 接着用（先改 ReconciliationId/FundType 再进 R4，叠加链跨轮保留：
+  //   R3.5 置 outbound 的 DBS 行进 R4 后 hx-out 可续改 outbound→HX-out）。dispatchReconContext 不受需求2 开关控制。
+  let dbsChargeChangedCount = 0;
+  if (dbsChargeBucket.length) {
+    const cfg = dbsChargeBucket[0].config || {};
+    const dispRows = (dispatchReconContext && dispatchReconContext.dispatchReconRows) || [];
+    const r35 = runDbsChargeFundCheck(safeGwRows, bankRows, dispRows, { config: cfg });
+    mergeMods(r35.modifications);
+    allWarnings.push(...(r35.warnings || []));
+    for (const m of r35.modifications || []) allMods.push({ ...m, _round: 'R3.5' });
+    dbsChargeChangedCount = (r35.modifications || []).length;
+  }
+
   // ===== R4：资金性质校验（🔴，matchedGwRows × 全量 bank 按 reconid 关联，改 FundType）=====
   let r4ChangedCount = 0;
   if (r4Bucket.length) {
@@ -226,20 +261,43 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
   const r5s2ConsumedBankRowIds = new Set();
   if (r5s2Bucket.length) {
     const opt = r5s2Bucket[0].config || {};
-    const r5a = runRound5FundTransferBackfill(safeGwRows, bankRows, {
-      directions: opt.directions,
-      dateToleranceDays: opt.dateToleranceDays
-    });
-    mergeMods(r5a.modifications);
-    allWarnings.push(...(r5a.warnings || []));
-    for (const m of r5a.modifications || []) allMods.push({ ...m, _round: 'R5s2' });
-    // 引擎完整消费集（含同值未写行，已是 modifications rowId 的超集）—— 闭合「消费但未写」窄缺口（资金红线）。
-    if (r5a.usedBankRowIds) {
-      for (const rid of r5a.usedBankRowIds) {
-        if (rid !== undefined && rid !== null) r5s2ConsumedBankRowIds.add(rid);
+    // v3.0.6 需求2（决策 D4 默认勾选）：数据来源二选一 gating。
+    //   reconSourceMid !== false → 勾选路（默认/缺省/老库无字段视为勾选）：对手方=调拨对账单（reconRows）。
+    //   reconSourceMid === false → 取消路：沿用现状 runRound5FundTransferBackfill（对手方=网关 gwRows），逐字保留。
+    const useMidReconTable = opt.reconSourceMid !== false;
+    if (useMidReconTable) {
+      // —— 勾选路：调拨对账单 ReconID 回填银行 ReconciliationId（新引擎，对手方换源；口径与 R5s2 一致）——
+      const reconRows = (fundTransferReconContext && fundTransferReconContext.reconRows) || [];
+      const rA = runRound5FundTransferReconBackfill(reconRows, bankRows, {
+        dateToleranceDays: opt.dateToleranceDays
+      });
+      mergeMods(rA.modifications);
+      allWarnings.push(...(rA.warnings || []));
+      for (const m of rA.modifications || []) allMods.push({ ...m, _round: 'R5s2-recon' });
+      // 🔴 资金红线点7：勾选路消费集同样并入 r5s2ConsumedBankRowIds（下游 R5s2b excludeBankRowIds 互斥不变量）。
+      if (rA.usedBankRowIds) {
+        for (const rid of rA.usedBankRowIds) {
+          if (rid !== undefined && rid !== null) r5s2ConsumedBankRowIds.add(rid);
+        }
       }
+      r5s2BackfilledCount = (rA.modifications || []).length;
+    } else {
+      // —— 取消路：现状网关回填，逐字保留（R5s2 parity 不破）——
+      const r5a = runRound5FundTransferBackfill(safeGwRows, bankRows, {
+        directions: opt.directions,
+        dateToleranceDays: opt.dateToleranceDays
+      });
+      mergeMods(r5a.modifications);
+      allWarnings.push(...(r5a.warnings || []));
+      for (const m of r5a.modifications || []) allMods.push({ ...m, _round: 'R5s2' });
+      // 引擎完整消费集（含同值未写行，已是 modifications rowId 的超集）—— 闭合「消费但未写」窄缺口（资金红线）。
+      if (r5a.usedBankRowIds) {
+        for (const rid of r5a.usedBankRowIds) {
+          if (rid !== undefined && rid !== null) r5s2ConsumedBankRowIds.add(rid);
+        }
+      }
+      r5s2BackfilledCount = (r5a.modifications || []).length;
     }
-    r5s2BackfilledCount = (r5a.modifications || []).length;
   }
 
   // ===== R5 场景2b：Payment线下调拨订单回填（v3.0.4 块 F，🔴 资金红线）=====
@@ -329,6 +387,8 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
       unmatchedRowCount: unmatchedRows.length,
       warningCount: allWarnings.length,
       r1Matched: r1.matchedGwRows.length,
+      // v3.0.6 需求3：R3.5 DBS-Charge 改写行数（ReconciliationId + FundType modifications 总数）
+      dbsChargeChangedCount,
       r4ChangedCount,
       r5s2BackfilledCount,
       // v3.0.4 块 F：Payment线下调拨回填命中行数（进状态框可选展示）
@@ -349,6 +409,8 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
         hitRowCount: (r2.stats && r2.stats.hitRowCount) || 0,
         scenarioHitCount: (r2.stats && r2.stats.scenarioHitCount) || 0
       },
+      // v3.0.6 需求3：R3.5 DBS-Charge 资金校验轮次统计
+      r35: { changed: dbsChargeChangedCount },
       r4: { changed: r4ChangedCount },
       r5s2: { backfilled: r5s2BackfilledCount },
       // v3.0.4 块 F：Payment线下调拨回填轮次统计

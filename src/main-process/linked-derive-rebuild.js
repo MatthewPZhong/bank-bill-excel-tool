@@ -22,6 +22,11 @@
 //
 // deps 注入清单（均为 main.js 现有 require/函数，原样透传）：
 //   { database, buildAdmRows, buildBocBankRows, backfillBocReconLinkIds, rematchAllBocGroups, appendActivityLogEntry }
+//
+// v3.0.6 需求1（T3）追加第 4 个派生编排函数：
+//   4) rebuildFundTransferReconDerivation —— 调拨对账单链接表派生（mid-allocation 导入触发）。
+//      读 mid-allocation 整行 → buildFundTransferReconRows（一单→in/out 两行）→ replaceFundTransferReconRows 整表覆盖。
+//      deps = { database, buildFundTransferReconRows }，try/catch 隔离不阻断导入。
 
 'use strict';
 
@@ -243,8 +248,48 @@ function rebuildFxBocDerivation(deps, ctx = {}) {
   return { bocDerive };
 }
 
+// ============================================================================
+// 4) rebuildFundTransferReconDerivation —— 调拨对账单链接表派生（v3.0.6 需求1，🔴 资金红线）
+// ============================================================================
+//
+// mid-allocation 导入后触发：读中台调拨订单整行 → buildFundTransferReconRows（一单 → FundTransfer-in/out 两行，
+//   决策 D1 固化 big_account）→ replaceFundTransferReconRows 整表覆盖 linked_fund_transfer_recon 隐藏表。
+//   该派生表是需求2（r5-fund-transfer-recon-backfill）/ 需求3（dbs-charge-fund-check）匹配引擎的标准化对手方数据源。
+//
+// 🔴 派生阶段纯字段重排 + 方向展开（无跨表匹配），匹配推迟到需求2/3 引擎（见 fund-transfer-recon-builder.js）。
+//   与 ADM 派生同范式：函数内部保留 try/catch 隔离——派生任一步抛错记 created:false（含 error 文案），
+//   【不向外抛】，不阻断 mid-allocation 导入本身（数据已落库成功）。
+//
+// deps = { database, buildFundTransferReconRows }（均为 main.js 现有 require，原样透传）。
+//
+// 返回 { fundTransferReconDerive }，仿 admDerive 形态：
+//   成功 → { created:true, total }（total = 派生行数 = mid 行数×2）
+//   失败 → { created:false, error }
+function rebuildFundTransferReconDerivation(deps) {
+  const { database, buildFundTransferReconRows } = deps;
+  let fundTransferReconDerive;
+  try {
+    // mid-allocation 整行（中文真实表头）；builder 内部按 FT_RECON_FIELD_MAP.mid 常量取列（禁手敲全角括号）。
+    const midRows = database.readLinkedTableRows('mid-allocation');
+    const { rows } = buildFundTransferReconRows(midRows);
+    database.replaceFundTransferReconRows(rows);
+    fundTransferReconDerive = {
+      created: true,
+      total: rows.length
+    };
+  } catch (ftrErr) {
+    // 派生失败不阻断 mid-allocation 导入本身（已落库成功）；记 created:false 供前端提示。
+    fundTransferReconDerive = {
+      created: false,
+      error: ftrErr && ftrErr.message ? ftrErr.message : String(ftrErr)
+    };
+  }
+  return { fundTransferReconDerive };
+}
+
 module.exports = {
   rebuildAdmDerivation,
   rebuildBankDepositBocDerivation,
-  rebuildFxBocDerivation
+  rebuildFxBocDerivation,
+  rebuildFundTransferReconDerivation
 };

@@ -14,16 +14,16 @@ const {
 // 五子场景按 priority 降序跑可插拔 handler 改写银行 FundType；旧≠新才改才 record；
 // 允许同一银行行被多次改（叠加链，R4 唯一）。
 //
-// 五子场景默认 config（TECH_DESIGN §10 / PRD §五，TradeType 真实取值待用户核对，本次按默认实现）：
+// 四子场景默认 config（TECH_DESIGN §10 / PRD §五，TradeType 真实取值待用户核对，本次按默认实现）：
+//   v3.0.6：原 charge-outbound 子场景已迁出至 R3.5 DBS-Charge（dbs-charge-fund-check.js），R4 由 5 → 4 子场景。
 //   | subCategory      | gwTradeType   | requireBankFundType | setFundType  | priority |
 //   | ach-return       | AchReturn     | —                   | Ach Return   | 3        |
 //   | wire-return      | WireReturn    | —                   | Wire Return  | 2        |
-//   | charge-outbound  | —             | Charge              | outbound     | 1        |
 //   | hx-out           | HX_OUTBOUND   | —                   | HX-out       | 1        |
 //   | hx-in            | HX_INBOUND    | —                   | HX-in        | 0        |
 // ========================================================================
 
-// ---- 五子场景默认 config（与 seed 默认值一致；测试按需挑选/重排）----
+// ---- 四子场景默认 config（与 seed 默认值一致；测试按需挑选/重排）----
 const SCENARIO_ACH_RETURN = {
   priority: 3,
   config: { subCategory: 'ach-return', gwTradeType: 'AchReturn', setFundType: 'Ach Return' }
@@ -31,10 +31,6 @@ const SCENARIO_ACH_RETURN = {
 const SCENARIO_WIRE_RETURN = {
   priority: 2,
   config: { subCategory: 'wire-return', gwTradeType: 'WireReturn', setFundType: 'Wire Return' }
-};
-const SCENARIO_CHARGE_OUTBOUND = {
-  priority: 1,
-  config: { subCategory: 'charge-outbound', requireBankFundType: 'Charge', setFundType: 'outbound' }
 };
 const SCENARIO_HX_OUT = {
   priority: 1,
@@ -44,10 +40,9 @@ const SCENARIO_HX_IN = {
   priority: 0,
   config: { subCategory: 'hx-in', gwTradeType: 'HX_INBOUND', setFundType: 'HX-in' }
 };
-const ALL_FIVE = [
+const ALL_FOUR = [
   SCENARIO_ACH_RETURN,
   SCENARIO_WIRE_RETURN,
-  SCENARIO_CHARGE_OUTBOUND,
   SCENARIO_HX_OUT,
   SCENARIO_HX_IN
 ];
@@ -102,27 +97,17 @@ test.describe('R4 — ① 单子场景命中改 FundType + record', () => {
     assert.equal(result.modifications[0].newValue, 'Wire Return');
   });
 
-  test('charge-outbound：仅凭有 R1 匹配 + 银行 FundType=Charge → 改为 outbound（不看网关 TradeType）', () => {
-    // 网关 TradeType 随意（charge-outbound config 无 gwTradeType），仅靠进入关联 + FundType=Charge 命中
-    const g1 = gw('R-003', '任意值');
+  test('requireBankFundType 通配（hx-out 无 requireBankFundType）：仅凭有 R1 匹配 + gwTradeType 命中 → 改值（不看银行原 FundType 具体值）', () => {
+    // hx-out config 无 requireBankFundType，仅靠进入关联 + gwTradeType=HX_OUTBOUND 命中（银行原 FundType 任意）
+    const g1 = gw('R-003', 'HX_OUTBOUND');
     const b1 = bank('rid-3', 'R-003', 'Charge');
 
-    const result = runRound4FundNatureCheck([g1], [b1], [SCENARIO_CHARGE_OUTBOUND]);
+    const result = runRound4FundNatureCheck([g1], [b1], [SCENARIO_HX_OUT]);
 
-    assert.equal(b1.FundType, 'outbound');
+    assert.equal(b1.FundType, 'HX-out');
     assert.equal(result.modifications.length, 1);
     assert.equal(result.modifications[0].oldValue, 'Charge');
-    assert.equal(result.modifications[0].newValue, 'outbound');
-  });
-
-  test('charge-outbound：银行 FundType 非 Charge（requireBankFundType 不满足）→ 不命中、不改、不 record', () => {
-    const g1 = gw('R-003', '任意值');
-    const b1 = bank('rid-3', 'R-003', 'Inbound'); // 非 Charge
-
-    const result = runRound4FundNatureCheck([g1], [b1], [SCENARIO_CHARGE_OUTBOUND]);
-
-    assert.equal(b1.FundType, 'Inbound'); // 未改
-    assert.equal(result.modifications.length, 0);
+    assert.equal(result.modifications[0].newValue, 'HX-out');
   });
 
   test('hx-out / hx-in：按网关 TradeType 命中 → 分别改为 HX-out / HX-in', () => {
@@ -154,51 +139,49 @@ test.describe('R4 — ① 单子场景命中改 FundType + record', () => {
 });
 
 // ========================================================================
-// ② 二次改值链：同一银行行先 charge-outbound（Charge→outbound）再 hx-out（outbound→HX-out）
-//    断言两条 modification 都在、最终值 = HX-out
+// ② 二次改值链：同一银行行被多个 handler 顺序改 FundType（R4 唯一允许二次改）
+//    v3.0.6：原用例以 charge-outbound 作首跳，已退役；改用通用双 handler 构造叠加链（不依赖 charge-outbound）。
+//    断言两条 modification 都在、最终值 = 最后一跳目标。
 // ========================================================================
 test.describe('R4 — ② 二次改值链（同一银行行被多次改 FundType）', () => {
-  test('网关 TradeType=HX_OUTBOUND + 银行 FundType=Charge：charge-outbound 先把 Charge→outbound，hx-out 再把 outbound→HX-out', () => {
-    const g1 = gw('R-CHAIN', 'HX_OUTBOUND'); // 同时满足 hx-out 的 gwTradeType
-    const b1 = bank('rid-chain', 'R-CHAIN', 'Charge');
+  test('同一银行行被两个 gwTradeType 命中的 handler 顺序改：A→outbound→HX-out（叠加链，不 break）', () => {
+    // 两个 handler 都凭 gwTradeType=HX_OUTBOUND 命中（无 requireBankFundType，逐条全转）：
+    //   handler1：setFundType='outbound'（priority 2，先跑）→ 把初始 A→outbound
+    //   handler2：setFundType='HX-out'（priority 1，后跑）→ 把 outbound→HX-out
+    const stepOutbound = {
+      priority: 2,
+      config: { subCategory: 'step-outbound', gwTradeType: 'HX_OUTBOUND', setFundType: 'outbound' }
+    };
+    const g1 = gw('R-CHAIN', 'HX_OUTBOUND');
+    const b1 = bank('rid-chain', 'R-CHAIN', 'A');
 
-    // charge-outbound 与 hx-out 同 priority(1)；数组顺序：charge-outbound 在前 → 先执行
-    // 第一步：charge-outbound 命中（FundType=Charge）→ Charge→outbound
-    // 第二步：hx-out 命中（TradeType=HX_OUTBOUND，且此刻 FundType=outbound≠HX-out）→ outbound→HX-out
-    const result = runRound4FundNatureCheck(
-      [g1],
-      [b1],
-      [SCENARIO_CHARGE_OUTBOUND, SCENARIO_HX_OUT]
-    );
+    // priority 降序：stepOutbound(2) 先 → A→outbound；hx-out(1) 后 → outbound→HX-out
+    const result = runRound4FundNatureCheck([g1], [b1], [stepOutbound, SCENARIO_HX_OUT]);
 
     // 最终值 = HX-out（叠加链生效）
     assert.equal(b1.FundType, 'HX-out');
 
-    // 两条 modification 都在，且顺序 = Charge→outbound、outbound→HX-out
+    // 两条 modification 都在，且顺序 = A→outbound、outbound→HX-out
     const chainMods = modsFor(result, 'rid-chain', 'FundType');
     assert.equal(chainMods.length, 2, '应有两条 FundType modification（叠加链）');
     assert.deepEqual(
       chainMods.map((m) => [m.oldValue, m.newValue]),
       [
-        ['Charge', 'outbound'],
+        ['A', 'outbound'],
         ['outbound', 'HX-out']
       ]
     );
   });
 
-  test('叠加链中若某步旧值已等于目标值则跳过该步（charge-outbound 命中改值后，再遇 charge-outbound 不重复 record）', () => {
-    // 两条 charge-outbound（模拟重复 config）：第一条把 Charge→outbound；第二条此刻 FundType=outbound≠Charge → 不命中
-    const g1 = gw('R-DUP', '任意');
+  test('叠加链中若某步旧值已等于目标值则跳过该步（同一 handler 重复 → 第二次旧值==目标值不再 record）', () => {
+    // 两条同一 hx-out config（模拟重复）：第一条把 Charge→HX-out；第二条此刻 FundType=HX-out==目标值 → no-op 不 record
+    const g1 = gw('R-DUP', 'HX_OUTBOUND');
     const b1 = bank('rid-dup', 'R-DUP', 'Charge');
 
-    const result = runRound4FundNatureCheck(
-      [g1],
-      [b1],
-      [SCENARIO_CHARGE_OUTBOUND, SCENARIO_CHARGE_OUTBOUND]
-    );
+    const result = runRound4FundNatureCheck([g1], [b1], [SCENARIO_HX_OUT, SCENARIO_HX_OUT]);
 
-    assert.equal(b1.FundType, 'outbound');
-    // 仅一条 modification（第二条因 requireBankFundType=Charge 不再满足 → 不命中）
+    assert.equal(b1.FundType, 'HX-out');
+    // 仅一条 modification（第二条 oldValue==目标值 → 不 record）
     assert.equal(modsFor(result, 'rid-dup', 'FundType').length, 1);
   });
 });
@@ -229,189 +212,36 @@ test.describe('R4 — ③ 旧值==目标值 no-op（不改不 record）', () => 
 });
 
 // ========================================================================
-// ④ 一个 reconid 关联多条 Charge 行（charge-outbound）→ 仅 Debit Amount 最大那行转 outbound
-//    （v3.0.4 块 G：由「逐条全转」收紧为「仅转最大行」，G1-G7 口径）
+// ④ 一个 reconid 关联多条银行行（同桶逐条全转）
+//    v3.0.6：原 charge-outbound「仅转 Debit Amount 最大行（块 G）」已迁出至 R3.5 DBS-Charge；
+//    R4 四子场景一律「同桶逐条全转」，本节验 ach-return 同桶多行全转。
 // ========================================================================
-test.describe('R4 — ④ charge-outbound 同桶多条 Charge → 仅转 Debit Amount 最大行（v3.0.4 块 G）', () => {
-  test('同 reconid 三行（Charge[Debit 10] / Charge[Debit 99] / Inbound）→ 仅 Debit 99 那行转 outbound，1 条 modification', () => {
-    const g1 = gw('R-MULTI', '任意');
-    const b1 = bank('rid-m1', 'R-MULTI', 'Charge', { 'Debit Amount': 10 });
-    const b2 = bank('rid-m2', 'R-MULTI', 'Charge', { 'Debit Amount': 99 }); // Debit 最大
-    const b3 = bank('rid-m3', 'R-MULTI', 'Inbound'); // 非 Charge，从不参与候选
-
-    const result = runRound4FundNatureCheck([g1], [b1, b2, b3], [SCENARIO_CHARGE_OUTBOUND]);
-
-    assert.equal(b1.FundType, 'Charge');    // 非最大，未转
-    assert.equal(b2.FundType, 'outbound');  // Debit 最大，转
-    assert.equal(b3.FundType, 'Inbound');   // 非 Charge，未改
-    // 仅一条 modification（b2）
-    assert.equal(result.modifications.length, 1);
-    assert.equal(modsFor(result, 'rid-m1', 'FundType').length, 0);
-    assert.equal(modsFor(result, 'rid-m2', 'FundType').length, 1);
-    assert.equal(modsFor(result, 'rid-m3', 'FundType').length, 0);
-    assert.equal(result.modifications[0].oldValue, 'Charge');
-    assert.equal(result.modifications[0].newValue, 'outbound');
-  });
-});
-
-// ========================================================================
-// ④b charge-outbound 多行挑选细则（v3.0.4 块 G：G4/G5/G6 + 链式 + G7 + 转分边界）
-// ========================================================================
-test.describe('R4 — ④b charge-outbound 多行挑选细则（G4/G5/G6/G7 + 链式 + 转分）', () => {
-  // (1) G5 并列最大取桶内原序首行（first-wins）
-  test('并列最大：两条 Charge 的 Debit Amount 相等 → 取桶内原序首行转，第二条不转', () => {
-    const g1 = gw('R-TIE', '任意');
-    const b1 = bank('rid-t1', 'R-TIE', 'Charge', { 'Debit Amount': 50 }); // 原序首行
-    const b2 = bank('rid-t2', 'R-TIE', 'Charge', { 'Debit Amount': 50 }); // 并列最大，但靠后
-
-    const result = runRound4FundNatureCheck([g1], [b1, b2], [SCENARIO_CHARGE_OUTBOUND]);
-
-    assert.equal(b1.FundType, 'outbound'); // 原序首行
-    assert.equal(b2.FundType, 'Charge');   // 并列但靠后 → 不转
-    assert.equal(result.modifications.length, 1);
-    assert.equal(modsFor(result, 'rid-t1', 'FundType').length, 1);
-    assert.equal(modsFor(result, 'rid-t2', 'FundType').length, 0);
-  });
-
-  // (2) G4 Debit Amount 空/非数值 → parseNumber fallback 0
-  test('非数值 fallback 0：一行 Debit=非数值(fallback 0) / 一行 Debit=空(fallback 0) / 一行 Debit=0.01 → 取 0.01 那行', () => {
-    const g1 = gw('R-NAN', '任意');
-    const b1 = bank('rid-n1', 'R-NAN', 'Charge', { 'Debit Amount': 'abc' }); // 非数值 → 0
-    const b2 = bank('rid-n2', 'R-NAN', 'Charge', { 'Debit Amount': '' });    // 空 → 0
-    const b3 = bank('rid-n3', 'R-NAN', 'Charge', { 'Debit Amount': 0.01 });  // 唯一正值 → 最大
-
-    const result = runRound4FundNatureCheck([g1], [b1, b2, b3], [SCENARIO_CHARGE_OUTBOUND]);
-
-    assert.equal(b1.FundType, 'Charge');
-    assert.equal(b2.FundType, 'Charge');
-    assert.equal(b3.FundType, 'outbound'); // 0.01 > 0 > 0
-    assert.equal(result.modifications.length, 1);
-    assert.equal(modsFor(result, 'rid-n3', 'FundType').length, 1);
-  });
-
-  test('全空/非数值并列 0 → 取桶内原序首行（G5 在 fallback 0 上同样成立）', () => {
-    const g1 = gw('R-ALLNAN', '任意');
-    const b1 = bank('rid-a1', 'R-ALLNAN', 'Charge'); // 无 Debit Amount → 0
-    const b2 = bank('rid-a2', 'R-ALLNAN', 'Charge', { 'Debit Amount': 'xx' }); // 非数值 → 0
-
-    const result = runRound4FundNatureCheck([g1], [b1, b2], [SCENARIO_CHARGE_OUTBOUND]);
-
-    assert.equal(b1.FundType, 'outbound'); // 原序首行
-    assert.equal(b2.FundType, 'Charge');
-    assert.equal(result.modifications.length, 1);
-  });
-
-  // (3) G6 单行桶 → 行为与现状一致（直接转，无需比较）
-  test('单行桶：桶内仅一条 Charge（Debit 任意/缺省）→ 直接转 outbound（行为同现状）', () => {
-    const g1 = gw('R-SINGLE', '任意');
-    const b1 = bank('rid-s1', 'R-SINGLE', 'Charge'); // 单行桶，无 Debit Amount
-
-    const result = runRound4FundNatureCheck([g1], [b1], [SCENARIO_CHARGE_OUTBOUND]);
-
-    assert.equal(b1.FundType, 'outbound');
-    assert.equal(result.modifications.length, 1);
-    assert.equal(result.modifications[0].oldValue, 'Charge');
-    assert.equal(result.modifications[0].newValue, 'outbound');
-  });
-
-  // (4) G1 范围锁：非 charge-outbound 子场景（ach-return）同桶多行仍逐条全转，不受挑选影响
-  test('G1 范围锁：ach-return 同桶多条 Charge → 仍逐条全转 Ach Return（不读 Debit、不挑选）', () => {
+test.describe('R4 — ④ 同桶多行逐条全转（四子场景统一口径）', () => {
+  test('ach-return 同桶三行 Charge → 逐条全转 Ach Return（3 条 modification）', () => {
     const g1 = gw('R-ACH-MULTI', 'AchReturn');
-    const b1 = bank('rid-ac1', 'R-ACH-MULTI', 'Charge', { 'Debit Amount': 1 });
-    const b2 = bank('rid-ac2', 'R-ACH-MULTI', 'Charge', { 'Debit Amount': 100 });
-    const b3 = bank('rid-ac3', 'R-ACH-MULTI', 'Charge', { 'Debit Amount': 5 });
+    const b1 = bank('rid-ac1', 'R-ACH-MULTI', 'Charge');
+    const b2 = bank('rid-ac2', 'R-ACH-MULTI', 'Charge');
+    const b3 = bank('rid-ac3', 'R-ACH-MULTI', 'Charge');
 
     const result = runRound4FundNatureCheck([g1], [b1, b2, b3], [SCENARIO_ACH_RETURN]);
 
-    // ach-return 维持逐条全转：三条都改为 Ach Return
+    // 同桶逐条全转：三条都改为 Ach Return
     assert.equal(b1.FundType, 'Ach Return');
     assert.equal(b2.FundType, 'Ach Return');
     assert.equal(b3.FundType, 'Ach Return');
     assert.equal(result.modifications.length, 3);
   });
 
-  // (5) 链式：target 行 outbound→HX-out 仍成立；未选中 Charge 行不进链（停留 Charge）
-  test('链式：同桶 charge-outbound + hx-out → 仅 target 行转 outbound 再续改 HX-out，未选中 Charge 行不进链', () => {
-    const g1 = gw('R-CHAIN-MULTI', 'HX_OUTBOUND'); // 同时满足 hx-out 的 gwTradeType
-    const b1 = bank('rid-cm1', 'R-CHAIN-MULTI', 'Charge', { 'Debit Amount': 10 }); // 非最大
-    const b2 = bank('rid-cm2', 'R-CHAIN-MULTI', 'Charge', { 'Debit Amount': 88 }); // Debit 最大 → target
+  test('hx-out 同桶两行 → 逐条全转 HX-out（2 条 modification，桶内无挑选/无最大行收紧）', () => {
+    const g1 = gw('R-HX-MULTI', 'HX_OUTBOUND');
+    const b1 = bank('rid-hm1', 'R-HX-MULTI', 'Charge');
+    const b2 = bank('rid-hm2', 'R-HX-MULTI', 'Inbound'); // 不同原值，hx-out 无 requireBankFundType → 也命中
 
-    const result = runRound4FundNatureCheck(
-      [g1],
-      [b1, b2],
-      [SCENARIO_CHARGE_OUTBOUND, SCENARIO_HX_OUT]
-    );
+    const result = runRound4FundNatureCheck([g1], [b1, b2], [SCENARIO_HX_OUT]);
 
-    // target 行 b2 走链 Charge→outbound→HX-out；b1 未选中 → 不进 charge-outbound，
-    // 但 hx-out 子场景对 b1（仍 Charge）按 gwTradeType=HX_OUTBOUND 命中 → Charge→HX-out（hx-out 维持逐条全转，G1）。
-    assert.equal(b2.FundType, 'HX-out');
-    const b2Chain = modsFor(result, 'rid-cm2', 'FundType').map((m) => [m.oldValue, m.newValue]);
-    assert.deepEqual(b2Chain, [
-      ['Charge', 'outbound'],
-      ['outbound', 'HX-out']
-    ]);
-    // b1 未进 charge-outbound（不产 Charge→outbound），但 hx-out 命中 → 一步 Charge→HX-out
     assert.equal(b1.FundType, 'HX-out');
-    const b1Chain = modsFor(result, 'rid-cm1', 'FundType').map((m) => [m.oldValue, m.newValue]);
-    assert.deepEqual(b1Chain, [['Charge', 'HX-out']]);
-  });
-
-  test('链式（纯 charge-outbound）：未选中 Charge 行停留 Charge，不进任何后续链', () => {
-    const g1 = gw('R-CHAIN2', '任意'); // 仅 charge-outbound 场景，无 hx-out
-    const b1 = bank('rid-c21', 'R-CHAIN2', 'Charge', { 'Debit Amount': 10 });
-    const b2 = bank('rid-c22', 'R-CHAIN2', 'Charge', { 'Debit Amount': 88 }); // target
-
-    const result = runRound4FundNatureCheck([g1], [b1, b2], [SCENARIO_CHARGE_OUTBOUND]);
-
-    assert.equal(b2.FundType, 'outbound');
-    assert.equal(b1.FundType, 'Charge'); // 未选中 → 停留 Charge，不进链
-    assert.equal(result.modifications.length, 1);
-  });
-
-  // (6) G7：同桶被双网关行命中 → 仍只转同一行（第二次 target 已 outbound → no-op）
-  test('G7：同桶被两条网关行重复命中 → 仅转同一行（Debit 最大），不会因第一次改写而再转第二行', () => {
-    // charge-outbound config 无 gwTradeType，两条网关行都会进入关联并命中
-    const g1 = gw('R-DUAL', '任意1');
-    const g2 = gw('R-DUAL', '任意2'); // 同 reconid 第二条网关行
-    const b1 = bank('rid-d1', 'R-DUAL', 'Charge', { 'Debit Amount': 30 });
-    const b2 = bank('rid-d2', 'R-DUAL', 'Charge', { 'Debit Amount': 90 }); // Debit 最大 → target
-
-    const result = runRound4FundNatureCheck([g1, g2], [b1, b2], [SCENARIO_CHARGE_OUTBOUND]);
-
-    assert.equal(b2.FundType, 'outbound');
-    assert.equal(b1.FundType, 'Charge'); // 第二次命中未误转次大行
-    // 仅一条 modification（b2 第一次转；第二次 target 已是 outbound → applyHandler requireBankFundType=Charge 不满足 → no-op）
-    assert.equal(result.modifications.length, 1);
-    assert.equal(modsFor(result, 'rid-d2', 'FundType').length, 1);
-    assert.equal(modsFor(result, 'rid-d1', 'FundType').length, 0);
-  });
-
-  // (7) 转分边界：10.005 vs 10.01 → Math.round(*100)=1001 vs 1001 并列 → 取原序首行
-  test('转分边界：Debit 10.005(→1001 分) vs 10.01(→1001 分) 并列 → 取桶内原序首行', () => {
-    const g1 = gw('R-CENTS', '任意');
-    const b1 = bank('rid-ce1', 'R-CENTS', 'Charge', { 'Debit Amount': 10.005 }); // round(*100)=1001
-    const b2 = bank('rid-ce2', 'R-CENTS', 'Charge', { 'Debit Amount': 10.01 });  // round(*100)=1001
-
-    // 先核对转分前提：两者转分相等
-    assert.equal(Math.round(10.005 * 100), Math.round(10.01 * 100));
-
-    const result = runRound4FundNatureCheck([g1], [b1, b2], [SCENARIO_CHARGE_OUTBOUND]);
-
-    assert.equal(b1.FundType, 'outbound'); // 转分并列 → 原序首行
-    assert.equal(b2.FundType, 'Charge');
-    assert.equal(result.modifications.length, 1);
-  });
-
-  test('转分边界：Debit 10.01(→1001 分) > 10.004(→1000 分) → 取 10.01 那行（非并列）', () => {
-    const g1 = gw('R-CENTS2', '任意');
-    const b1 = bank('rid-cf1', 'R-CENTS2', 'Charge', { 'Debit Amount': 10.004 }); // round(*100)=1000
-    const b2 = bank('rid-cf2', 'R-CENTS2', 'Charge', { 'Debit Amount': 10.01 });  // round(*100)=1001 → 最大
-
-    const result = runRound4FundNatureCheck([g1], [b1, b2], [SCENARIO_CHARGE_OUTBOUND]);
-
-    assert.equal(b1.FundType, 'Charge');
-    assert.equal(b2.FundType, 'outbound');
-    assert.equal(result.modifications.length, 1);
+    assert.equal(b2.FundType, 'HX-out');
+    assert.equal(result.modifications.length, 2);
   });
 });
 
@@ -475,14 +305,19 @@ test.describe('R4 — ⑥ 按 priority 降序执行（高 priority 先跑）', (
     ]);
   });
 
-  test('同 priority 保持数组原序（charge-outbound 在 hx-out 前 → 先 Charge→outbound 再 outbound→HX-out）', () => {
+  test('同 priority 保持数组原序（同 priority 两 handler 数组序 step1 在前 → 先 Charge→outbound 再 outbound→HX-out）', () => {
+    // 两个同 priority(1) handler，均凭 gwTradeType=HX_OUTBOUND 命中；数组序 step1 在前 → 先执行
+    const step1 = {
+      priority: 1,
+      config: { subCategory: 'step1', gwTradeType: 'HX_OUTBOUND', setFundType: 'outbound' }
+    };
     const g1 = gw('R-TIE', 'HX_OUTBOUND');
     const b1 = bank('rid-tie', 'R-TIE', 'Charge');
 
     const result = runRound4FundNatureCheck(
       [g1],
       [b1],
-      [SCENARIO_CHARGE_OUTBOUND, SCENARIO_HX_OUT] // 同 priority(1)，数组序 charge-outbound 在前
+      [step1, SCENARIO_HX_OUT] // 同 priority(1)，数组序 step1 在前
     );
 
     const chain = modsFor(result, 'rid-tie', 'FundType').map((m) => [m.oldValue, m.newValue]);
@@ -492,16 +327,15 @@ test.describe('R4 — ⑥ 按 priority 降序执行（高 priority 先跑）', (
     ]);
   });
 
-  test('五子场景全量传入 + 银行行 Charge + 网关 HX_OUTBOUND → 叠加链最终 HX-out（默认顺序回归）', () => {
+  test('四子场景全量传入 + 银行行 Charge + 网关 HX_OUTBOUND → hx-out 命中 Charge→HX-out（默认顺序回归）', () => {
     const g1 = gw('R-ALL', 'HX_OUTBOUND');
     const b1 = bank('rid-all', 'R-ALL', 'Charge');
 
-    const result = runRound4FundNatureCheck([g1], [b1], ALL_FIVE);
+    const result = runRound4FundNatureCheck([g1], [b1], ALL_FOUR);
 
-    // ach-return/wire-return/hx-in 因 gwTradeType 不匹配不命中；
-    // charge-outbound(FundType=Charge)→outbound；hx-out(TradeType=HX_OUTBOUND)→HX-out
+    // ach-return/wire-return/hx-in 因 gwTradeType 不匹配不命中；hx-out(TradeType=HX_OUTBOUND)→HX-out（一步）
     assert.equal(b1.FundType, 'HX-out');
-    assert.equal(modsFor(result, 'rid-all', 'FundType').length, 2);
+    assert.equal(modsFor(result, 'rid-all', 'FundType').length, 1);
   });
 });
 
@@ -511,13 +345,13 @@ test.describe('R4 — ⑥ 按 priority 降序执行（高 priority 先跑）', (
 test.describe('R4 — ⑦ 空入参防御', () => {
   test('matchedGwRows 为空 → 空 modifications', () => {
     const b1 = bank('rid-1', 'R-001', 'Charge');
-    const result = runRound4FundNatureCheck([], [b1], ALL_FIVE);
+    const result = runRound4FundNatureCheck([], [b1], ALL_FOUR);
     assert.deepEqual(result.modifications, []);
     assert.equal(b1.FundType, 'Charge'); // 未改
   });
 
   test('bankRows 为空 → 空 modifications', () => {
-    const result = runRound4FundNatureCheck([gw('R-001', 'AchReturn')], [], ALL_FIVE);
+    const result = runRound4FundNatureCheck([gw('R-001', 'AchReturn')], [], ALL_FOUR);
     assert.deepEqual(result.modifications, []);
   });
 
@@ -564,13 +398,15 @@ test.describe('R4 — applyHandler 纯函数判定', () => {
     assert.equal(decision, null);
   });
 
-  test('requireBankFundType 满足才返回（charge-outbound）', () => {
+  test('requireBankFundType 满足才返回（银行 FundType 门控，通用 config 路径）', () => {
+    // 通用 config：requireBankFundType='Charge' → 仅银行 FundType=Charge 命中返回 setFundType，否则 null
+    const cfg = { subCategory: 'require-bank-fundtype', requireBankFundType: 'Charge', setFundType: 'outbound' };
     assert.equal(
-      applyHandler(gw('R', '任意'), bank('r', 'R', 'Charge'), SCENARIO_CHARGE_OUTBOUND.config),
+      applyHandler(gw('R', '任意'), bank('r', 'R', 'Charge'), cfg),
       'outbound'
     );
     assert.equal(
-      applyHandler(gw('R', '任意'), bank('r', 'R', 'Inbound'), SCENARIO_CHARGE_OUTBOUND.config),
+      applyHandler(gw('R', '任意'), bank('r', 'R', 'Inbound'), cfg),
       null
     );
   });
