@@ -163,6 +163,9 @@ function makeR5BackfillScenario() {
     config: {
       funcCategory: 'platform-order',
       subCategory: 'fund-transfer-backfill',
+      // v3.0.6 需求2：R5s2 数据来源二选一默认改「勾选=调拨对账单」（决策 D4）。本组用例验证的是**网关回填**
+      //   mechanics（gwRows → b2），故显式 reconSourceMid:false 走取消路（旧网关引擎，行为逐字不变 / parity）。
+      reconSourceMid: false,
       directions: [
         { gwTradeType: 'FundTransfer-out', bankFundType: 'FundTransfer-out' },
         { gwTradeType: 'FundTransfer-in', bankFundType: 'FundTransfer-in' }

@@ -28,6 +28,8 @@ const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields
 const { normalizeTransactionNo } = require('../../main-process/scenario-engines/engine-utils');
 // v3.0.0 块 B / PR-3：ADM 派生只需 Channel=ADM 子集 → 下推 SQL 过滤的取值常量（单一真相）。
 const { CHANNEL_VALUE } = require('../../constants/adm-bank-deposit-fields');
+// v3.0.6 需求1：调拨对账单隐藏表落列字段名单一真相（recon 中文/英文列名 → DB 列；禁手敲，防全角括号漂移）。
+const { FT_RECON_FIELD_MAP } = require('../../constants/fund-transfer-recon-fields');
 
 // v2.1.16-beta.3 ②：银行对账单入金表落库字段白名单（按字段名 pick）。
 //   🔴 裁列必须按字段名 pick（非 slice 索引切片），防 BANK_STATEMENT_FIELDS 列顺序变动裁错列。
@@ -1071,6 +1073,82 @@ function writeAdmMatchFlags(db, admRows) {
 }
 
 // ============================================================================
+// v3.0.6 需求1：调拨对账单隐藏表（linked_fund_transfer_recon）专用仓储
+//   🔴 不能复用 replaceLinkedTable（其 INSERT 硬编码 4 列：keyColumn/dateColumn/raw_json/imported_at）。
+//      本表多 allocation_no / fund_type / recon_id / big_account，故新写 replaceFundTransferReconRows（7 列 INSERT）。
+//   隐藏表：不进 ALL_TABLE_KEYS / 不写 linked_table_meta（前端弹窗不可见），故不写 meta。
+//   字段对应（raw_json 字段名经 FT_RECON_FIELD_MAP.recon.* 取，禁手敲 → DB 列）：
+//     调拨单号       → allocation_no（normalizeKey）
+//     fund_type      → fund_type（方向标记 FundTransfer-in/out，匹配热列；normalizeKey）
+//     BillDate       → bill_date（normalizeDateForRange 归一 YYYY-MM-DD；不可解析则列为 null，整行仍落库）
+//     ReconID        → recon_id（normalizeKey）
+//     big_account    → big_account（D1 按方向固化卡号；normalizeKey）
+//     整行 11 字段   → raw_json（数据真相）
+// ============================================================================
+
+const FUND_TRANSFER_RECON_TABLE = 'linked_fund_transfer_recon';
+const FTR_COL = FT_RECON_FIELD_MAP.recon; // recon 列名常量（单一真相）
+
+// 整表覆盖写入调拨对账单行：事务内 DELETE 全表 + 批量 INSERT 7 列（prepared）。
+//   rows = buildFundTransferReconRows 产物（每单 in/out 两行，recon 11 字段对象；仓储不关心字段语义，整行存 raw_json）。
+//   caller 不需持有事务；本函数自带 BEGIN/COMMIT/ROLLBACK（与 replaceAdmBankDeposit 范式一致）。
+//   🔴 重导中台调拨订单 = 调拨对账单重建（整表覆盖语义；下游匹配在需求2/3 引擎按整批重算，非增量）。
+function replaceFundTransferReconRows(db, rows, options = {}) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const importedAt = new Date().toISOString();
+
+  const insertSql = `
+    INSERT INTO ${FUND_TRANSFER_RECON_TABLE} (allocation_no, fund_type, bill_date, recon_id, big_account, raw_json, imported_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `;
+
+  db.exec('BEGIN');
+  try {
+    db.prepare(`DELETE FROM ${FUND_TRANSFER_RECON_TABLE}`).run();
+
+    const insertStmt = db.prepare(insertSql);
+    for (const row of safeRows) {
+      const obj = row && typeof row === 'object' ? row : {};
+      const allocationNo = normalizeKey(obj[FTR_COL.allocationNo]);
+      const fundType = normalizeKey(obj[FTR_COL.fundType]);
+      const billDate = normalizeDateForRange(obj[FTR_COL.billDate]); // null = 不可解析（仍落库，仅日期列为 null）
+      const reconId = normalizeKey(obj[FTR_COL.reconId]);
+      const bigAccount = normalizeKey(obj[FTR_COL.bigAccount]);
+      const rawJson = JSON.stringify(obj);
+      insertStmt.run(allocationNo, fundType, billDate, reconId, bigAccount, rawJson, importedAt);
+    }
+
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_e) { /* no active txn */ }
+    throw error;
+  }
+
+  return {
+    tableKey: 'fund-transfer-recon',
+    rowCount: safeRows.length,
+    updatedAt: importedAt
+  };
+}
+
+// 读回调拨对账单表全部整行（raw_json 还原为对象，字段名 = recon 中文/英文列名）。
+//   ORDER BY id ASC：还原派生原序（每单 in 行后接 out 行；与 readAdmBankDepositRows 同范式）；损坏行跳过不中断。
+//   供需求2（r5-fund-transfer-recon-backfill）/ 需求3（dbs-charge）引擎经 database.readFundTransferReconRows() 取数据源。
+function readFundTransferReconRows(db) {
+  const rows = db.prepare(`SELECT raw_json FROM ${FUND_TRANSFER_RECON_TABLE} ORDER BY id ASC`).all();
+  const out = [];
+  for (const r of rows) {
+    try {
+      const o = JSON.parse(r.raw_json);
+      if (o && typeof o === 'object') out.push(o);
+    } catch (_e) {
+      /* 损坏行跳过，不抛错 */
+    }
+  }
+  return out;
+}
+
+// ============================================================================
 // v3.0.4 块 E（需求2）：BOC 链接表两张隐藏表（linked_boc_fx_settlement / linked_boc_bank_deposit）专用仓储
 //   🔴 不复用 replaceLinkedTable（其 INSERT 硬编码 4 列）；两表列数不同，各写专用 replace。
 //   隐藏表：不进 ALL_TABLE_KEYS / 不写 linked_table_meta（前端弹窗不可见，与 ADM 同范式）。
@@ -1489,6 +1567,9 @@ module.exports = {
   replaceAdmBankDeposit,
   readAdmBankDepositRows,
   writeAdmMatchFlags,
+  // v3.0.6 需求1：调拨对账单隐藏表专用仓储（7 列 INSERT 整表覆盖 / raw_json 还原读回）
+  replaceFundTransferReconRows,
+  readFundTransferReconRows,
   // v3.0.4 块 E 需求2：BOC 链接表两张隐藏表专用仓储（Channel=BOC 下推 / 8 列 + 5 列 INSERT / 按 id 回写）
   readBankDepositBocCandidates,
   replaceBocFxLink,

@@ -118,10 +118,15 @@ describe('F2：config 读-改-写浅合并保存 + 加载守卫', () => {
     );
   });
 
-  test('浅合并：update 的 config 以 cachedConfig 为基底展开，仅覆盖 paymentOfflineBackfill（不丢 seed 字段）', () => {
+  test('浅合并：update 的 config 以 cachedConfig 为基底展开，仅覆盖 reconSourceMid/paymentOfflineBackfill（不丢 seed 字段）', () => {
+    // v3.0.6 需求2（T6）：基底改为 { ...(cachedConfig || {}) }，reconSourceMid 与 paymentOfflineBackfill 在同一次浅合并里逐键覆盖。
     assert.ok(
-      /updateFields\.config\s*=\s*\{\s*\.\.\.\(cachedConfig\s*\|\|\s*\{\}\)\s*,\s*paymentOfflineBackfill\s*\}/.test(dialogBody),
-      'config 必须用 { ...cachedConfig, paymentOfflineBackfill } 浅合并，保留 seed 契约字段'
+      /updateFields\.config\s*=\s*\{\s*\.\.\.\(cachedConfig\s*\|\|\s*\{\}\)\s*\}/.test(dialogBody),
+      'config 必须用 { ...(cachedConfig || {}) } 浅合并，保留 seed 契约字段'
+    );
+    assert.ok(
+      /if\s*\(paymentOfflineBackfill\)\s*updateFields\.config\.paymentOfflineBackfill\s*=\s*paymentOfflineBackfill/.test(dialogBody),
+      'paymentOfflineBackfill 在浅合并基底上逐键覆盖'
     );
     // paymentOfflineBackfill 四字段 schema 锁定
     assert.ok(
@@ -136,8 +141,43 @@ describe('F2：config 读-改-写浅合并保存 + 加载守卫', () => {
       'updateFields 基底仅 priority'
     );
     assert.ok(
-      /if\s*\(isPaymentScenario\s*&&\s*paymentOfflineBackfill\)\s*\{\s*updateFields\.config/.test(dialogBody),
-      'config 仅在 payment 场景且校验通过时才携带'
+      /if\s*\(isPaymentScenario\s*&&\s*\(reconSourceMid\s*!==\s*null\s*\|\|\s*paymentOfflineBackfill\)\)\s*\{\s*updateFields\.config/.test(dialogBody),
+      'config 仅在 payment 场景且有 reconSourceMid/paymentOfflineBackfill 可写时才携带'
+    );
+  });
+});
+
+// v3.0.6 需求2（T6）：对账数据来源二选一勾选行 + 默认勾选 + 保存浅合并（reconSourceMid）源码断言。
+//   口径统一 config.reconSourceMid !== false（与编排器 R5s2 gating / seed 默认 true 一致）。
+describe('T6：对账数据来源二选一勾选行（reconSourceMid）', () => {
+  test('HTML 含勾选行「对账数据来源为中台调拨单表」与勾选框 data-field=recon-source-mid', () => {
+    assert.ok(dialogBody.includes('对账数据来源为中台调拨单表'), '应有勾选行文案');
+    assert.ok(dialogBody.includes('data-field="recon-source-mid"'), '应有勾选框 data-field=recon-source-mid');
+    assert.ok(dialogBody.includes('data-role="recon-source-row"'), '应有 recon-source-row 容器');
+  });
+
+  test('gating：仅 fund-transfer-backfill 场景显示（与 payment 行同 gating，默认 hidden）', () => {
+    assert.ok(
+      /if\s*\(isPaymentScenario\s*&&\s*reconSourceRow\)\s*\{[\s\S]*?reconSourceRow\.hidden\s*=\s*false/.test(dialogBody),
+      '仅 payment（fund-transfer-backfill）场景才把勾选行 hidden 置 false'
+    );
+  });
+
+  test('默认勾选：加载时 checked = cachedConfig.reconSourceMid !== false（老库无字段→勾选）', () => {
+    assert.ok(
+      /reconSourceCheck\.checked\s*=\s*cachedConfig\.reconSourceMid\s*!==\s*false/.test(dialogBody),
+      '默认勾选口径必须是 reconSourceMid !== false（与编排器/seed 一致）'
+    );
+  });
+
+  test('保存：reconSourceMid = (checkbox.checked === true)，浅合并逐键写入 config', () => {
+    assert.ok(
+      /reconSourceMid\s*=\s*reconSourceCheck\.checked\s*===\s*true/.test(dialogBody),
+      'reconSourceMid 取值应为 checkbox.checked === true（布尔）'
+    );
+    assert.ok(
+      /if\s*\(reconSourceMid\s*!==\s*null\)\s*updateFields\.config\.reconSourceMid\s*=\s*reconSourceMid/.test(dialogBody),
+      'reconSourceMid 应在浅合并基底上逐键写入 config（payment 勾选与否均写）'
     );
   });
 });

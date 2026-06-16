@@ -1,13 +1,15 @@
-// v2.1.16-beta.2 §8 / v2.1.16-beta.4 ③：5 轮对账内置场景 seed（ensureReconRoundBuiltinScenariosSeed）幂等回归测试
+// v2.1.16-beta.2 §8 / v2.1.16-beta.4 ③ / v3.0.6 需求3（T9）：5 轮对账内置场景 seed（ensureReconRoundBuiltinScenariosSeed）幂等回归测试
+//   ⚠️ v3.0.6 需求3（T9）：原 R4 charge-outbound 子场景退役（重写为 DBS-Charge / R3.5）—— 内置场景由 8 → 7（R4 5 → 4）。
 //   覆盖（🔴 资金红线 —— config 字段须与引擎/编排器逐字对齐）：
-//     - 8 个内置场景（5 R4 + 2 R5 既有 + 1 R5 场景4 退款回填）插入：category='builtin-fixed' / is_builtin=1 / channel_id=1 / priority 正确
-//       · 既有 7 条 enabled=1；退款回填（refund-order-backfill）enabled=0（Layer 1 引擎层休眠）
+//     - 7 个内置场景（4 R4 + 2 R5 既有 + 1 R5 场景4 退款回填）插入：category='builtin-fixed' / is_builtin=1 / channel_id=1 / priority 正确
+//       · 既有 6 条 enabled=1；退款回填（refund-order-backfill）enabled=0（Layer 1 引擎层休眠）
 //     - config_json 含正确 funcCategory + subCategory + setFundType / directions / excludeFundType 等
-//     - 幂等：跑两次仍 8 条（不重复）
+//     - charge-outbound 不再在 RECON_ROUND_BUILTIN_SCENARIOS（seed 后该 subCategory 0 条）
+//     - 幂等：跑两次仍 7 条（不重复）
 //     - 删除一条 → 再跑 → 不复活（marker 终态保护）
 //     - 改名一条（模拟用户改名，marker 未写场景）→ 凭 subCategory 仍能定位、不重复插入、不覆盖
 //     - CHECK 未扩到 'builtin-fixed' → 跳过不报错（下次重试）
-//     - seed 出来的 8 条经编排器 bucketScenarios 正确分桶（funcCategory/subCategory 逐字一致实证）
+//     - seed 出来的 7 条经编排器 bucketScenarios 正确分桶（funcCategory/subCategory 逐字一致实证）
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
@@ -37,15 +39,15 @@ let db;
 
 const SEED_MARKER = 'recon_round_builtin_scenarios_seeded';
 
-// 期望的 8 个内置场景（subCategory → 期望字段），用于逐条断言（与 7 场景表 + v2.1.16-beta.4 ③退款场景逐字对齐）
+// 期望的 7 个内置场景（subCategory → 期望字段），用于逐条断言（与 6 场景表 + v2.1.16-beta.4 ③退款场景逐字对齐）
+//   ⚠️ v3.0.6 需求3（T9）：charge-outbound 已退役（重写为 DBS-Charge / R3.5），不在本数组。
 //   expectedEnabled 缺省按 1；退款回填场景显式 0（Layer 1 引擎层休眠）。
 const EXPECTED = {
   'ach-return':              { funcCategory: 'fund-nature-check', priority: 3, roundPhase: 4, gwTradeType: 'AchReturn',  setFundType: 'Ach Return',  name: '资金性质校验-Ach Return',  involvedFiles: ['银行对账单'] },
   'wire-return':            { funcCategory: 'fund-nature-check', priority: 2, roundPhase: 4, gwTradeType: 'WireReturn', setFundType: 'Wire Return', name: '资金性质校验-Wire Return', involvedFiles: ['银行对账单'] },
-  'charge-outbound':       { funcCategory: 'fund-nature-check', priority: 1, roundPhase: 4, requireBankFundType: 'Charge', setFundType: 'outbound', name: '资金性质校验-Charge转outbound', involvedFiles: ['银行对账单'] },
   'hx-out':                { funcCategory: 'fund-nature-check', priority: 1, roundPhase: 4, gwTradeType: 'HX_OUTBOUND', setFundType: 'HX-out', name: '资金性质校验-HX-out', involvedFiles: ['银行对账单'] },
   'hx-in':                 { funcCategory: 'fund-nature-check', priority: 0, roundPhase: 4, gwTradeType: 'HX_INBOUND', setFundType: 'HX-in', name: '资金性质校验-HX-in', involvedFiles: ['银行对账单'] },
-  'fund-transfer-backfill':{ funcCategory: 'platform-order', priority: 0, roundPhase: 5, dateToleranceDays: 1, name: '中台调拨订单对账ID回填', involvedFiles: ['银行对账单'] },
+  'fund-transfer-backfill':{ funcCategory: 'platform-order', priority: 0, roundPhase: 5, dateToleranceDays: 1, reconSourceMid: true, name: '中台调拨订单对账ID回填', involvedFiles: ['银行对账单'] },
   'platform-inbound-cleanup':{ funcCategory: 'platform-order', priority: 0, roundPhase: 5, gwTradeType: 'Inbound-VA', excludeFundType: 'Inbound', name: '中台加款单脏数据处理', involvedFiles: ['中台加款单剔除模板'] },
   // v2.1.16-beta.4 ③：退款回填场景（无 directions、无 gwTradeType，默认休眠 enabled=0）
   'refund-order-backfill': { funcCategory: 'platform-order', priority: 0, roundPhase: 5, expectedEnabled: 0, name: '中台退款订单回填', involvedFiles: ['中台退款订单', '中台退款订单回填模板', '银行对账单入金表'] },
@@ -124,20 +126,23 @@ test.afterEach(() => {
 });
 
 test.describe('v2.1.16-beta.2 §8 ensureReconRoundBuiltinScenariosSeed', () => {
-  test('首次 seed：插入 8 个内置场景，category/is_builtin/enabled/channel_id/priority 正确', () => {
+  test('首次 seed：插入 7 个内置场景，category/is_builtin/enabled/channel_id/priority 正确', () => {
     bootstrapReadyForSeed(db, makeBackupFn());
     const before = db.prepare('SELECT COUNT(*) AS c FROM scenarios').get().c; // 仅内置提取场景 1 条 + 用户 0
 
     const res = ensureReconRoundBuiltinScenariosSeed(db);
     assert.strictEqual(res.status, 'seeded');
-    assert.strictEqual(res.inserted, 8, '应插入 8 条（5 R4 + 2 R5 既有 + 1 退款回填）');
+    assert.strictEqual(res.inserted, 7, '应插入 7 条（4 R4 + 2 R5 既有 + 1 退款回填；charge-outbound 已退役）');
 
-    // 8 条新内置场景（fund-nature-check 5 + platform-order 3，含退款回填）
+    // 7 条新内置场景（fund-nature-check 4 + platform-order 3，含退款回填）
     const r4 = db.prepare("SELECT COUNT(*) AS c FROM scenarios WHERE category='builtin-fixed' AND config_json LIKE '%\"funcCategory\":\"fund-nature-check\"%'").get().c;
     const r5 = db.prepare("SELECT COUNT(*) AS c FROM scenarios WHERE category='builtin-fixed' AND config_json LIKE '%\"funcCategory\":\"platform-order\"%'").get().c;
-    assert.strictEqual(r4, 5, 'R4 资金性质校验应 5 条');
+    assert.strictEqual(r4, 4, 'R4 资金性质校验应 4 条（charge-outbound 退役）');
     assert.strictEqual(r5, 3, 'R5 中台订单数据处理应 3 条（调拨回填 + 加款单脏数据 + 退款回填）');
-    assert.strictEqual(db.prepare('SELECT COUNT(*) AS c FROM scenarios').get().c, before + 8);
+    assert.strictEqual(db.prepare('SELECT COUNT(*) AS c FROM scenarios').get().c, before + 7);
+
+    // v3.0.6 需求3（T9）：charge-outbound 不再 seed（该 subCategory 0 条）
+    assert.strictEqual(getBySubCategory(db, 'charge-outbound').length, 0, 'charge-outbound 已退役，不应被 seed');
 
     // 逐条断言字段（category / is_builtin / enabled / channel_id / priority + config 关键字段）
     for (const [sub, exp] of Object.entries(EXPECTED)) {
@@ -163,6 +168,8 @@ test.describe('v2.1.16-beta.2 §8 ensureReconRoundBuiltinScenariosSeed', () => {
       if (exp.requireBankFundType !== undefined) assert.strictEqual(cfg.requireBankFundType, exp.requireBankFundType, `${sub}.config.requireBankFundType`);
       if (exp.excludeFundType !== undefined) assert.strictEqual(cfg.excludeFundType, exp.excludeFundType, `${sub}.config.excludeFundType`);
       if (exp.dateToleranceDays !== undefined) assert.strictEqual(cfg.dateToleranceDays, exp.dateToleranceDays, `${sub}.config.dateToleranceDays`);
+      // v3.0.6 需求2（T6）：fund-transfer-backfill 场景 seed 默认 reconSourceMid=true（对账数据来源默认勾选「中台调拨单表」）
+      if (exp.reconSourceMid !== undefined) assert.strictEqual(cfg.reconSourceMid, exp.reconSourceMid, `${sub}.config.reconSourceMid`);
     }
   });
 
@@ -177,11 +184,11 @@ test.describe('v2.1.16-beta.2 §8 ensureReconRoundBuiltinScenariosSeed', () => {
     ]);
   });
 
-  test('幂等：连跑两次仍是 8 条（marker 短路 + 不重复插入）', () => {
+  test('幂等：连跑两次仍是 7 条（marker 短路 + 不重复插入）', () => {
     bootstrapReadyForSeed(db, makeBackupFn());
     const res1 = ensureReconRoundBuiltinScenariosSeed(db);
     assert.strictEqual(res1.status, 'seeded');
-    assert.strictEqual(res1.inserted, 8);
+    assert.strictEqual(res1.inserted, 7);
 
     const res2 = ensureReconRoundBuiltinScenariosSeed(db);
     assert.strictEqual(res2.status, 'already-seeded', '第二次应被 marker 短路');
@@ -233,8 +240,8 @@ test.describe('v2.1.16-beta.2 §8 ensureReconRoundBuiltinScenariosSeed', () => {
     // marker 尚未写 → seed 走逐条定位路径
     const res = ensureReconRoundBuiltinScenariosSeed(db);
     assert.strictEqual(res.status, 'seeded');
-    // hx-in 已在场 → 跳过；其余 7 条插入（含退款回填）
-    assert.strictEqual(res.inserted, 7, '已存在的 hx-in 应跳过，仅插其余 7 条');
+    // hx-in 已在场 → 跳过；其余 6 条插入（含退款回填；charge-outbound 已退役）
+    assert.strictEqual(res.inserted, 6, '已存在的 hx-in 应跳过，仅插其余 6 条');
     assert.strictEqual(res.skippedExisting, 1, 'hx-in 应被识别为已存在跳过');
 
     // hx-in 仍恰好 1 条，且名字保持用户改的名（不覆盖）
@@ -242,9 +249,9 @@ test.describe('v2.1.16-beta.2 §8 ensureReconRoundBuiltinScenariosSeed', () => {
     assert.strictEqual(rows.length, 1, 'hx-in 不应被重复插入');
     assert.strictEqual(rows[0].name, '我改名的HX入账场景', '不应覆盖用户改的名字');
 
-    // 总数 = 1（内置提取） + 1（用户改名 hx-in） + 7（新插）= 9
+    // 总数 = 1（内置提取） + 1（用户改名 hx-in） + 6（新插）= 8
     const total = db.prepare("SELECT COUNT(*) AS c FROM scenarios WHERE category='builtin-fixed'").get().c;
-    assert.strictEqual(total, 9);
+    assert.strictEqual(total, 8);
   });
 
   test('改 priority 的用户场景（marker 未写）→ 凭 subCategory 定位跳过、不覆盖 priority', () => {
@@ -278,12 +285,12 @@ test.describe('v2.1.16-beta.2 §8 ensureReconRoundBuiltinScenariosSeed', () => {
 
     const res = ensureReconRoundBuiltinScenariosSeed(db);
     assert.strictEqual(res.status, 'seeded');
-    // hx-out 因 (channel_id=1, name) UNIQUE 冲突跳过 → 只插 7 条（含退款回填）
-    assert.strictEqual(res.inserted, 7, '撞名的 hx-out 应跳过，其余 7 条仍插入');
+    // hx-out 因 (channel_id=1, name) UNIQUE 冲突跳过 → 只插 6 条（含退款回填；charge-outbound 已退役）
+    assert.strictEqual(res.inserted, 6, '撞名的 hx-out 应跳过，其余 6 条仍插入');
     assert.strictEqual(res.skippedConflict, 1, 'hx-out 应记为冲突跳过');
     // hx-out 这个 subCategory 没被插进去（用户场景 subCategory 是 user-custom）
     assert.strictEqual(getBySubCategory(db, 'hx-out').length, 0);
-    // 其余 5 个 R4 子场景 + 2 个 R5 中除 hx-out 外都在
+    // 其余 3 个 R4 子场景 + 3 个 R5 中除 hx-out 外都在
     assert.strictEqual(getBySubCategory(db, 'ach-return').length, 1);
     assert.strictEqual(getBySubCategory(db, 'fund-transfer-backfill').length, 1);
   });
@@ -305,7 +312,7 @@ test.describe('v2.1.16-beta.2 §8 ensureReconRoundBuiltinScenariosSeed', () => {
     assert.strictEqual(marker, undefined, 'CHECK 未扩时不应写 marker');
   });
 
-  test('CHECK 扩展后重试：第一次跳过、扩 CHECK 后再跑 → 成功插 8 条', () => {
+  test('CHECK 扩展后重试：第一次跳过、扩 CHECK 后再跑 → 成功插 7 条', () => {
     bootstrapFinalState(db, makeBackupFn());
     const r1 = ensureReconRoundBuiltinScenariosSeed(db);
     assert.strictEqual(r1.status, 'skipped-check-not-extended');
@@ -313,23 +320,23 @@ test.describe('v2.1.16-beta.2 §8 ensureReconRoundBuiltinScenariosSeed', () => {
     runBuiltinFixedMigrations(db); // 扩 CHECK 到含 builtin-fixed
     const r2 = ensureReconRoundBuiltinScenariosSeed(db);
     assert.strictEqual(r2.status, 'seeded');
-    assert.strictEqual(r2.inserted, 8);
+    assert.strictEqual(r2.inserted, 7);
   });
 
-  test('🔴 资金红线：seed 出来的 8 条经编排器 bucketScenarios 正确分桶（funcCategory/subCategory 逐字一致实证）', () => {
+  test('🔴 资金红线：seed 出来的 7 条经编排器 bucketScenarios 正确分桶（funcCategory/subCategory 逐字一致实证）', () => {
     bootstrapReadyForSeed(db, makeBackupFn());
     ensureReconRoundBuiltinScenariosSeed(db);
 
-    // 从库里读回 8 条新内置场景，还原成编排器需要的形态（config 反序列化）
+    // 从库里读回 7 条新内置场景，还原成编排器需要的形态（config 反序列化）
     const rows = db
       .prepare("SELECT * FROM scenarios WHERE category='builtin-fixed' AND config_json LIKE '%\"funcCategory\":%'")
       .all()
       .map((r) => ({ ...r, config: JSON.parse(r.config_json) }));
-    assert.strictEqual(rows.length, 8, '应读回 8 条带 funcCategory 的内置场景');
+    assert.strictEqual(rows.length, 7, '应读回 7 条带 funcCategory 的内置场景（charge-outbound 已退役）');
 
     const { r2, r4, r5s2, r5s3, r5s4 } = bucketScenarios(rows);
-    // R4：5 个 fund-nature-check
-    assert.strictEqual(r4.length, 5, 'R4 桶应 5 条');
+    // R4：4 个 fund-nature-check（charge-outbound 退役）
+    assert.strictEqual(r4.length, 4, 'R4 桶应 4 条');
     // R5 场景2：fund-transfer-backfill 1 条
     assert.strictEqual(r5s2.length, 1, 'R5 场景2 桶应 1 条');
     assert.strictEqual(r5s2[0].config.subCategory, 'fund-transfer-backfill');
@@ -339,14 +346,14 @@ test.describe('v2.1.16-beta.2 §8 ensureReconRoundBuiltinScenariosSeed', () => {
     // R5 场景4：refund-order-backfill 1 条
     assert.strictEqual(r5s4.length, 1, 'R5 场景4 桶应 1 条');
     assert.strictEqual(r5s4[0].config.subCategory, 'refund-order-backfill');
-    // 8 条都不应落入 R2（否则会静默走错轮次 = 资金红线偏离）
+    // 7 条都不应落入 R2（否则会静默走错轮次 = 资金红线偏离）
     assert.strictEqual(r2.length, 0, '内置 R4/R5 场景不应误落 R2');
 
-    // R4 桶 5 条的 subCategory 完整且无重复
+    // R4 桶 4 条的 subCategory 完整且无重复（charge-outbound 已退役，不在内）
     const r4Subs = r4.map((s) => s.config.subCategory).sort();
     assert.deepStrictEqual(
       r4Subs,
-      ['ach-return', 'charge-outbound', 'hx-in', 'hx-out', 'wire-return']
+      ['ach-return', 'hx-in', 'hx-out', 'wire-return']
     );
   });
 

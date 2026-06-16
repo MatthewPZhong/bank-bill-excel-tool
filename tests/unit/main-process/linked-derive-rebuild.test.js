@@ -14,11 +14,15 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const {
   rebuildAdmDerivation,
   rebuildBankDepositBocDerivation,
-  rebuildFxBocDerivation
+  rebuildFxBocDerivation,
+  rebuildFundTransferReconDerivation
 } = require('../../../src/main-process/linked-derive-rebuild');
 
 // 真实 builder（rebuildFxBocDerivation 端到端用）
@@ -28,6 +32,11 @@ const {
   backfillBocReconLinkIds,
   KEY_ORIG_GROUP
 } = require('../../../src/main-process/boc-fx-link-builder');
+
+// v3.0.6 需求1（T3）：调拨对账单派生端到端用真实 builder + 真实 in-memory AppDatabase。
+const { buildFundTransferReconRows } = require('../../../src/main-process/fund-transfer-recon-builder');
+const { AppDatabase } = require('../../../src/backend/database');
+const { FT_RECON_FIELD_MAP } = require('../../../src/constants/fund-transfer-recon-fields');
 
 // —— 工具：收集 appendActivityLogEntry 调用 ——
 function makeLogSink() {
@@ -423,5 +432,209 @@ test.describe('rebuildFxBocDerivation —— fx 全量重匹配重编号 + 2.4 +
     assert.equal(ret.bocDerive.created, true, '🔴 mid 读失败按无中台处理，不阻断');
     assert.equal(ret.bocDerive.step23MatchedGroups, 0);
     assert.ok(log.calls.some((c) => c.message.indexOf('无中台调拨订单数据') >= 0), '走无中台分支 info log');
+  });
+});
+
+// ============================================================================
+// 4) rebuildFundTransferReconDerivation —— 调拨对账单派生（v3.0.6 需求1 T3，🔴 资金红线）
+// ============================================================================
+test.describe('rebuildFundTransferReconDerivation —— 调拨对账单派生编排', () => {
+  const M = FT_RECON_FIELD_MAP.mid;
+  const R = FT_RECON_FIELD_MAP.recon;
+
+  // 构造一行中台调拨订单（中文真实表头；字段名经 FT_RECON_FIELD_MAP.mid 取，禁手敲全角括号）。
+  function midRow(overrides = {}) {
+    const base = {
+      [M.allocationNo]: 'ALLOC-1',
+      [M.txTime]: '2026-05-04',
+      [M.channelSerial]: 'SERIAL-1',
+      [M.payCard]: 'PAY-CARD-1',
+      [M.payeeCard]: 'PAYEE-CARD-1',
+      [M.receiveChannel]: 'DBS',
+      [M.receiveAmount]: '2100000',
+      [M.receiveCurrency]: 'USD',
+      [M.payChannel]: 'CITI',
+      [M.payAmount]: '2100000',
+      [M.payCurrency]: 'HKD'
+    };
+    return { ...base, ...overrides };
+  }
+
+  // —— mock 编排骨架测试（仿 rebuildAdmDerivation 风格，验证读源→builder→replace 三步 + 产物字节）——
+  test('成功：读 mid-allocation → builder → replace，fundTransferReconDerive={created:true,total}', () => {
+    let readKey = null;
+    let replacedRows = null;
+    const database = {
+      readLinkedTableRows: (key) => { readKey = key; return [{ '调拨单号': 'M1' }, { '调拨单号': 'M2' }]; },
+      replaceFundTransferReconRows: (rows) => { replacedRows = rows; return { rowCount: rows.length }; }
+    };
+    // mock builder：一单 → 两行（与真实 builder 的「in/out」语义一致，但此处只验编排透传）。
+    const fakeBuilder = (midRows) => {
+      assert.equal(midRows.length, 2, '收到 mid-allocation 整行');
+      return { rows: [{ r: 1 }, { r: 2 }, { r: 3 }, { r: 4 }], total: 4 };
+    };
+
+    const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({
+      database, buildFundTransferReconRows: fakeBuilder
+    });
+    assert.equal(readKey, 'mid-allocation', "🔴 读 'mid-allocation' 表（big_account 派生源）");
+    assert.equal(replacedRows.length, 4, 'replaceFundTransferReconRows 收到 builder.rows');
+    assert.deepEqual(fundTransferReconDerive, { created: true, total: 4 }, '🔴 fundTransferReconDerive 字节一致（total = 派生行数）');
+  });
+
+  test('mid 为空 → 派生空表不抛，total=0', () => {
+    let replacedRows = null;
+    const database = {
+      readLinkedTableRows: () => [],
+      replaceFundTransferReconRows: (rows) => { replacedRows = rows; return { rowCount: rows.length }; }
+    };
+    let ret;
+    assert.doesNotThrow(() => {
+      ret = rebuildFundTransferReconDerivation({ database, buildFundTransferReconRows });
+    });
+    assert.deepEqual(replacedRows, [], '空 mid → replaceFundTransferReconRows([]) 重建空表');
+    assert.equal(ret.fundTransferReconDerive.created, true);
+    assert.equal(ret.fundTransferReconDerive.total, 0);
+  });
+
+  test('readLinkedTableRows 抛错 → created:false + error（隔离，不向外抛）', () => {
+    const database = {
+      readLinkedTableRows: () => { throw new Error('mid-read-fail'); },
+      replaceFundTransferReconRows: () => { throw new Error('should-not-reach'); }
+    };
+    let ret;
+    assert.doesNotThrow(() => {
+      ret = rebuildFundTransferReconDerivation({ database, buildFundTransferReconRows });
+    });
+    assert.deepEqual(ret.fundTransferReconDerive, { created: false, error: 'mid-read-fail' }, '🔴 派生失败不阻断导入');
+  });
+
+  test('replaceFundTransferReconRows 抛错 → created:false（写库失败也隔离）', () => {
+    const database = {
+      readLinkedTableRows: () => [{ '调拨单号': 'M1' }],
+      replaceFundTransferReconRows: () => { throw new Error('db-write-fail'); }
+    };
+    const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({
+      database, buildFundTransferReconRows
+    });
+    assert.equal(fundTransferReconDerive.created, false);
+    assert.equal(fundTransferReconDerive.error, 'db-write-fail');
+  });
+
+  // —— 端到端（真实 builder + 真实 in-memory AppDatabase）——
+  test.describe('端到端（真实 builder + 真实 AppDatabase）', () => {
+    let appDb;
+    let tmpDir;
+
+    test.beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ftr-derive-'));
+      appDb = new AppDatabase(path.join(tmpDir, 'test.sqlite'));
+      appDb.init();
+    });
+
+    test.afterEach(() => {
+      try { if (appDb && appDb.close) appDb.close(); } catch (_e) { /* ignore */ }
+      if (tmpDir) { fs.rmSync(tmpDir, { recursive: true, force: true }); tmpDir = null; }
+    });
+
+    test('导入 mid-allocation → 派生后 readFundTransferReconRows 行数 = mid 行数×2', () => {
+      // 真实落 mid-allocation（链接表通用 replace；字段为中台中文表头）。
+      appDb.replaceLinkedTable('mid-allocation', [midRow({ [M.allocationNo]: 'A1' }), midRow({ [M.allocationNo]: 'A2' }), midRow({ [M.allocationNo]: 'A3' })]);
+
+      const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({
+        database: appDb, buildFundTransferReconRows
+      });
+
+      const back = appDb.readFundTransferReconRows();
+      assert.equal(back.length, 6, '🔴 3 行 mid → 6 行调拨对账单（每单 in/out 两行）');
+      assert.equal(fundTransferReconDerive.created, true);
+      assert.equal(fundTransferReconDerive.total, 6, 'total = mid 行数×2');
+      // in 行（A1）：方向 / big_account=收款卡号 / 币种=收款币种；out 行：big_account=付款卡号 / 币种=付款币种。
+      assert.equal(back[0][R.fundType], FT_RECON_FIELD_MAP.FUND_TYPE_IN);
+      assert.equal(back[0][R.bigAccount], 'PAYEE-CARD-1', 'D1：in 行 big_account = 收款卡号');
+      assert.equal(back[0][R.currency], 'USD');
+      assert.equal(back[1][R.fundType], FT_RECON_FIELD_MAP.FUND_TYPE_OUT);
+      assert.equal(back[1][R.bigAccount], 'PAY-CARD-1', 'D1：out 行 big_account = 付款卡号');
+      assert.equal(back[1][R.currency], 'HKD', 'out 行币种取付款币种');
+    });
+
+    // v3.0.6 codex-pr74-fix P2（🔴 资金红线）：升级/空表场景回归锁。
+    //   背景：建表迁移仅 CREATE TABLE linked_fund_transfer_recon 不回填；派生原仅在「导入 mid-allocation」时触发。
+    //   叠加 → 已有 mid-allocation 但未重导的升级用户隐藏表恒空 → run 勾选路读空表静默不回填（真实回归）。
+    //   修复：run 入口读取前实时重派生刷新持久表。本用例直接锁派生层契约 ——
+    //   「mid-allocation 有数据 ∧ linked_fund_transfer_recon 为空（模拟升级建表后未派生）→ 调用后被正确回填（行数=mid×2）」。
+    test('升级场景：mid 有数据但 recon 表为空 → 重派生后回填（行数 = mid×2）', () => {
+      // 模拟升级用户：mid-allocation 已有数据（旧库既有），但 linked_fund_transfer_recon 仅被建表迁移创建、从未派生 → 空。
+      appDb.replaceLinkedTable('mid-allocation', [
+        midRow({ [M.allocationNo]: 'UP1' }),
+        midRow({ [M.allocationNo]: 'UP2' })
+      ]);
+      // 前置断言：隐藏表当前为空（建表迁移只建表不回填 → 升级用户初始空）。
+      assert.equal(appDb.readFundTransferReconRows().length, 0, '前置：升级用户 recon 隐藏表初始为空');
+
+      // run 入口实时重派生（与 main.js bank-statement:run 入口同款调用）。
+      const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({
+        database: appDb, buildFundTransferReconRows
+      });
+
+      const back = appDb.readFundTransferReconRows();
+      assert.equal(back.length, 4, '🔴 升级回归修复：2 行 mid → 4 行调拨对账单（不再读空表）');
+      assert.equal(fundTransferReconDerive.created, true);
+      assert.equal(fundTransferReconDerive.total, 4, 'total = mid 行数×2');
+      // 回填内容正确（in/out 两行均落库）。
+      assert.equal(back[0][R.allocationNo], 'UP1');
+      assert.equal(back[0][R.fundType], FT_RECON_FIELD_MAP.FUND_TYPE_IN);
+      assert.equal(back[1][R.fundType], FT_RECON_FIELD_MAP.FUND_TYPE_OUT);
+    });
+
+    // v3.0.6 codex-pr74-fix P2：run 每次入口都重派生 → 必须幂等刷新（替换而非追加），否则连续 run 会行数翻倍污染对手方数据源。
+    test('幂等刷新：mid 不变时重复重派生 → 行数恒为 mid×2（替换非追加）', () => {
+      appDb.replaceLinkedTable('mid-allocation', [
+        midRow({ [M.allocationNo]: 'IDEM1' }),
+        midRow({ [M.allocationNo]: 'IDEM2' })
+      ]);
+
+      // 第一次重派生（首次 run）。
+      const r1 = rebuildFundTransferReconDerivation({ database: appDb, buildFundTransferReconRows });
+      assert.equal(appDb.readFundTransferReconRows().length, 4, '首次重派生 → 4 行');
+      assert.equal(r1.fundTransferReconDerive.total, 4);
+
+      // 第二、三次重派生（连续 run，mid 不变）→ 行数恒为 4，不累加。
+      rebuildFundTransferReconDerivation({ database: appDb, buildFundTransferReconRows });
+      const r3 = rebuildFundTransferReconDerivation({ database: appDb, buildFundTransferReconRows });
+      const back = appDb.readFundTransferReconRows();
+      assert.equal(back.length, 4, '🔴 幂等：重复重派生整表覆盖，行数不翻倍');
+      assert.equal(r3.fundTransferReconDerive.total, 4, 'total 恒为 mid×2');
+    });
+
+    test('整表覆盖：第二次派生（mid 减少）后调拨对账单仅含第二批，不累加', () => {
+      appDb.replaceLinkedTable('mid-allocation', [midRow({ [M.allocationNo]: 'OLD1' }), midRow({ [M.allocationNo]: 'OLD2' })]);
+      rebuildFundTransferReconDerivation({ database: appDb, buildFundTransferReconRows });
+      assert.equal(appDb.readFundTransferReconRows().length, 4, '首次派生 2 单 → 4 行');
+
+      // mid 重导为 1 单 → 重派生应整表覆盖为 2 行。
+      appDb.replaceLinkedTable('mid-allocation', [midRow({ [M.allocationNo]: 'NEW1' })]);
+      const { fundTransferReconDerive } = rebuildFundTransferReconDerivation({ database: appDb, buildFundTransferReconRows });
+      const back = appDb.readFundTransferReconRows();
+      assert.equal(back.length, 2, '🔴 整表覆盖：旧 4 行被全删，二次派生不累加');
+      assert.equal(fundTransferReconDerive.total, 2);
+      assert.equal(back[0][R.allocationNo], 'NEW1');
+    });
+
+    test('ADM 派生不受调拨对账单派生影响（共存 — 同库两隐藏表互不污染）', () => {
+      // 先建 mid-allocation（ADM 派生输入之一 + 调拨对账单派生唯一输入）。
+      appDb.replaceLinkedTable('mid-allocation', [midRow({ [M.allocationNo]: 'A1' })]);
+      // 跑调拨对账单派生 → 2 行。
+      rebuildFundTransferReconDerivation({ database: appDb, buildFundTransferReconRows });
+      assert.equal(appDb.readFundTransferReconRows().length, 2, '调拨对账单派生 2 行');
+
+      // 跑 ADM 派生（真实 buildAdmRows；无 bank-deposit 候选 → ADM 空表，但必须 created:true 不抛）。
+      const { buildAdmRows } = require('../../../src/main-process/adm-bank-deposit-builder');
+      const { admDerive } = rebuildAdmDerivation({ database: appDb, buildAdmRows });
+      assert.equal(admDerive.created, true, 'ADM 派生成功（不受调拨对账单派生干扰）');
+
+      // 调拨对账单表仍为 2 行（ADM 派生写的是另一张隐藏表 linked_adm_bank_deposit）。
+      assert.equal(appDb.readFundTransferReconRows().length, 2, '🔴 ADM 派生后调拨对账单表行数不变（两隐藏表隔离）');
+    });
   });
 });

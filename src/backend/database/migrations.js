@@ -1455,7 +1455,8 @@ function ensureScenarioApplicableChannelsTable(db) {
 //   调用顺序：必须在 ensureScenariosCategoryBuiltinFixed 之后（依赖 CHECK 已扩到含 'builtin-fixed'）。
 const RECON_ROUND_BUILTIN_SCENARIOS_SEEDED_MARKER = 'recon_round_builtin_scenarios_seeded';
 const RECON_ROUND_BUILTIN_SCENARIOS = [
-  // ===== R4 资金性质校验（5 子场景，按 priority 降序执行；详见 r4-fund-nature-check.js）=====
+  // ===== R4 资金性质校验（4 子场景，按 priority 降序执行；详见 r4-fund-nature-check.js）=====
+  //   v3.0.6 需求3（T9）：原 charge-outbound 子场景退役（重写为 DBS-Charge / R3.5），R4 由 5 → 4。
   {
     name: '资金性质校验-Ach Return',
     priority: 3,
@@ -1484,20 +1485,11 @@ const RECON_ROUND_BUILTIN_SCENARIOS = [
       involvedFiles: ['银行对账单']
     }
   },
-  {
-    name: '资金性质校验-Charge转outbound',
-    priority: 1,
-    config: {
-      funcCategory: 'fund-nature-check',
-      subCategory: 'charge-outbound',
-      roundPhase: 4,
-      // Charge→outbound：仅凭「有 R1 匹配」+ 银行 FundType=Charge 即命中（不校验网关 TradeType，PRD §八 Q3）
-      requireBankFundType: 'Charge',
-      setFundType: 'outbound',
-      function: '银行行资金性质为 Charge 且与网关对账ID匹配成功时，将 FundType 改写为「outbound」（手续费归并出账）。',
-      involvedFiles: ['银行对账单']
-    }
-  },
+  // v3.0.6 需求3（T9）：原「资金性质校验-Charge转outbound」（subCategory='charge-outbound'）已退役 ——
+  //   全渠道 charge→outbound 整体重写为 DBS 专属「DBS-Charge资金校验」（subCategory='dbs-charge-fund-check'，
+  //   funcCategory='dbs-charge-fund-check' → 编排器 R3.5 桶；见 DBS_CHARGE_FUND_CHECK_SCENARIO + ensureDbsChargeFundCheckScenarioSeed）。
+  //   R4 资金性质校验由 5 子场景退化为 4（ach-return / wire-return / hx-out / hx-in）。
+  //   旧库孤儿（已 seed 的 charge-outbound 条目）由 retireChargeOutboundOrphans 每次启动幂等 DELETE（含级联删关联表）。
   {
     name: '资金性质校验-HX-out',
     priority: 1,
@@ -1540,6 +1532,11 @@ const RECON_ROUND_BUILTIN_SCENARIOS = [
         { gwTradeType: 'FundTransfer-in', bankFundType: 'FundTransfer-in' }
       ],
       dateToleranceDays: 1,
+      // v3.0.6 需求2（T6）：对账数据来源二选一开关默认勾选「中台调拨单表」。
+      //   true → 编排器 R5s2 走调拨对账单派生表（linked_fund_transfer_recon）匹配回填 ReconciliationId；
+      //   false → 沿用旧网关对账单逻辑。口径统一 config.reconSourceMid !== false（与编排器/UI 一致），
+      //   seed 显式置 true 便于场景列表/管理弹窗回显默认勾选。
+      reconSourceMid: true,
       function: '网关 FundTransfer-out/in 与 R4 后银行同向行按商户/币种/发生额绝对值/日期(同日优先,±1日兜底)1v1 匹配，命中后把网关 reconciliationid 回填进银行 ReconciliationId。',
       involvedFiles: ['银行对账单']
     }
@@ -2028,6 +2025,208 @@ function ensureBocDispatchOrderScenarioSeed(db) {
   }
 
   return { status: 'seeded', inserted, skippedExisting, skippedConflict };
+}
+
+// v3.0.6 需求3（T9）：DBS-Charge 资金校验写死场景（🔴 资金红线 —— 改写 ReconciliationId + FundType）。
+//
+// 与 BOC/JPM 种子的差异：
+//   - category='builtin-fixed'（同 R4/R5 内置场景；前置 CHECK 须已含 'builtin-fixed'）。
+//   - config.funcCategory='dbs-charge-fund-check' 是编排器 R3.5 分流键
+//     （reconciliation-orchestrator.bucketScenarios：funcCategory==='dbs-charge-fund-check' → dbsChargeFundCheck 桶 → R3.5）。
+//   - config.subCategory='dbs-charge-fund-check' 是 seed 幂等定位键（与 funcCategory 同字面，区别于已退役的 'charge-outbound'）。
+//   - 默认 enabled=1（启用即生效；DBS 渠道空 / 调拨对账单空时引擎整体 no-op，无 DBS 数据零影响）。
+//   - 引擎 runDbsChargeFundCheck 从 scenario.config 读 dispatchChannelValue/setFundTypeCharge/setFundTypeOutbound/
+//     chargeSiblingsScope（编排器 R3.5 段直接把 scenario.config 透传给引擎），字面值须与引擎 DEFAULT_CONFIG 逐字对齐。
+//     🔴 chargeSiblingsScope='dbs-only'（默认）：步骤1末只对 Channel=DBS 行批量归并为 Charge，
+//        防跨渠道误伤非 DBS 同 reconId 行（用户决策偏离原文字面）；'all' 仍可经 config 切回全量银行单。
+const DBS_CHARGE_FUND_CHECK_SCENARIO = {
+  name: 'DBS-Charge资金校验',
+  priority: 1, // 兜底值；is_builtin 置顶机制保证场景管理视图序号稳定
+  config: {
+    funcCategory: 'dbs-charge-fund-check', // 编排器 R3.5 分流键
+    subCategory: 'dbs-charge-fund-check',  // seed 幂等定位键（区别于已退役 'charge-outbound'）
+    roundPhase: 3.5,
+    bankChannel: 'DBS',            // 步骤1 银行行门控：Channel===DBS 才进 DBS-Charge
+    dispatchChannelValue: 'DBS',  // 步骤1 调拨对账单付款渠道 + 收款渠道均须等于此值
+    setFundTypeCharge: 'Charge',  // 步骤1末归并目标 FundType（同 reconId 非 Charge 行置此值）
+    setFundTypeOutbound: 'outbound', // 步骤2 命中目标 FundType
+    chargeSiblingsScope: 'dbs-only', // 🔴 步骤1末批量置 Charge 波及范围默认仅 DBS 渠道行（防跨渠道误伤；'all' 可切回全量银行单）
+    function: 'DBS渠道银行单经调拨对账单赋ReconciliationId并归并FundType，再按网关amount/currency判定outbound（资金校验）',
+    involvedFiles: ['银行对账单', '调拨对账单', '网关对账单']
+  }
+};
+
+// v3.0.6 需求3（T9）：DBS-Charge 场景独立 seed marker（绕开全局 marker 短路，仿 ensureBocDispatchOrderScenarioSeed）。
+const DBS_CHARGE_FUND_CHECK_SCENARIO_SEEDED_MARKER = 'dbs_charge_fund_check_scenario_seeded';
+
+// v3.0.6 需求3（T9）：DBS-Charge 资金校验写死场景独立补种（🔴 资金红线 —— 改写 ReconciliationId + FundType）。
+//
+// 为何独立于 ensureReconRoundBuiltinScenariosSeed：
+//   后者带全局 marker（recon_round_builtin_scenarios_seeded）。旧库已 seed 既有 8 条 + marker=true，
+//   启动时整体短路 return → DBS-Charge 新增场景在旧库永远不会被补种。本函数用独立 marker
+//   （dbs_charge_fund_check_scenario_seeded）+ 凭 subCategory 定位幂等，专门补种这 1 条；新库走幂等定位为「已存在」跳过。
+//
+// 幂等/删除终态（与 ensureBocDispatchOrderScenarioSeed 同语义）：
+//   - 凭 is_builtin=1 + category='builtin-fixed' + config_json 含 "subCategory":"dbs-charge-fund-check" 定位，
+//     已存在 → 跳过不覆盖（保护用户对启停/改名/config 的改动）。
+//   - 独立 marker 一旦写过 → 整体不再 seed，用户删除该场景后重启不复活。
+//   - 默认 enabled=1（启用即生效；DBS 渠道空 / 调拨对账单空时引擎整体 no-op）。
+//
+// 前置：scenarios 表存在 + CHECK 已含 'builtin-fixed' + app_settings 存在。
+// 返回 { status, inserted?, skippedExisting?, skippedConflict? }（status 取值同 BOC 种子）。
+function ensureDbsChargeFundCheckScenarioSeed(db) {
+  // 前置 1：scenarios 表 CHECK 必须已含 'builtin-fixed'。
+  const tableSqlRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'"
+  ).get();
+  if (!tableSqlRow || !tableSqlRow.sql) return { status: 'skipped-no-scenarios-table' };
+  if (!tableSqlRow.sql.includes("'builtin-fixed'")) {
+    return { status: 'skipped-check-not-extended' };
+  }
+
+  // 前置 2：独立 marker 已写 → 整体不再 seed（删除终态保护：用户删该场景后重启不复活）。
+  let markerRow;
+  try {
+    markerRow = db
+      .prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?')
+      .get(DBS_CHARGE_FUND_CHECK_SCENARIO_SEEDED_MARKER);
+  } catch (_e) {
+    return { status: 'skipped-no-settings-table' };
+  }
+  if (markerRow && String(markerRow.setting_value) === 'true') {
+    return { status: 'already-seeded' };
+  }
+
+  const now = new Date().toISOString();
+  // 定位：凭 is_builtin + builtin-fixed + config_json 含特定 subCategory（已存在则跳过不覆盖用户改动）。
+  const locate = db.prepare(
+    `SELECT id FROM scenarios
+      WHERE is_builtin = 1
+        AND category = 'builtin-fixed'
+        AND config_json LIKE ?`
+  );
+  // enabled 硬编码 1（启用即生效；引擎自带 DBS 渠道空 / 调拨对账单空 no-op 门控）；category 硬编码 'builtin-fixed'。
+  const insert = db.prepare(`
+    INSERT INTO scenarios
+      (category, name, priority, enabled, config_json, is_builtin, channel_id, created_at, updated_at)
+    VALUES ('builtin-fixed', ?, ?, 1, ?, 1, 1, ?, ?)
+  `);
+
+  let inserted = 0;
+  let skippedExisting = 0;
+  let skippedConflict = 0;
+  db.exec('BEGIN');
+  try {
+    const likePattern = '%"subCategory":"dbs-charge-fund-check"%';
+    const existing = locate.get(likePattern);
+    if (existing) {
+      skippedExisting = 1;
+    } else {
+      try {
+        insert.run(
+          DBS_CHARGE_FUND_CHECK_SCENARIO.name,
+          DBS_CHARGE_FUND_CHECK_SCENARIO.priority,
+          JSON.stringify(DBS_CHARGE_FUND_CHECK_SCENARIO.config),
+          now,
+          now
+        );
+        inserted = 1;
+      } catch (insErr) {
+        // UNIQUE(channel_id, name) 冲突（用户已有同名场景）→ 跳过保留用户场景，不中断。
+        const msg = insErr && insErr.message ? insErr.message : String(insErr);
+        if (/UNIQUE constraint failed/i.test(msg)) {
+          skippedConflict = 1;
+        } else {
+          throw insErr;
+        }
+      }
+    }
+
+    // 写独立 marker（仅首次启动写一次；此后删除不复活）。
+    db.prepare(`
+      INSERT INTO app_settings (setting_key, setting_value, updated_at)
+      VALUES (?, 'true', ?)
+      ON CONFLICT(setting_key) DO UPDATE
+      SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+    `).run(DBS_CHARGE_FUND_CHECK_SCENARIO_SEEDED_MARKER, now);
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+
+  return { status: 'seeded', inserted, skippedExisting, skippedConflict };
+}
+
+// v3.0.6 需求3（T9）：每次启动幂等删除已废弃的 charge-outbound 内置孤儿场景
+//   （🔴 资金红线 + 破坏性 —— 从 DB 删内置场景行，但仅限已退役的 charge-outbound 内置孤儿）。
+//
+// 背景：原全渠道「资金性质校验-Charge转outbound」(subCategory='charge-outbound') 已整体退役（重写为
+//   DBS-Charge / R3.5），R4 引擎的 charge-outbound 分支已于 T10 删除。删 RECON_ROUND_BUILTIN_SCENARIOS
+//   数组条目只影响「新库不再 seed」；旧库（已 seed 过该条目）里仍残留一条 enabled=1 的孤儿场景 —— 它会
+//   落 R4 桶（funcCategory='fund-nature-check'）却指向已不存在的引擎分支，必须从库里彻底清除。
+//
+// 决策（用户）：彻底删除而非禁用 —— 引擎逻辑已删，该场景无任何执行价值，禁用（enabled=0）只会让它继续在
+//   场景管理 UI 露出一条死场景。改为 DELETE：场景管理 UI 不再显示，库里不留死引用。
+//
+// 去 marker（对比旧实现）：旧实现用独立 marker(charge_outbound_retired) 一次性 UPDATE enabled=0。脆弱点 ——
+//   UPDATE 影响 0 行也照写 marker；一旦出现「marker 写了但禁用没生效」的中间态（如旧库 seed 时机错位），就会
+//   永久跳过、孤儿永不清理。本实现去掉 marker，改为每次启动幂等 DELETE：无孤儿则 deleted=0 no-op，重复跑安全，
+//   不依赖任何一次性标志位，杜绝中间态污染导致的永久跳过。
+//
+// 🔴 WHERE 严格三重限定（is_builtin=1 + category='builtin-fixed' + config.subCategory='charge-outbound'），
+//   绝不误删 DBS-Charge(subCategory='dbs-charge-fund-check') / 其余 R4 子场景 / 用户自建场景。
+//   级联：scenario_applicable_channels.scenario_id 是 scenarios.id 的唯一 FK（ON DELETE CASCADE）；本实现
+//   仍在删 scenarios 前显式 DELETE 关联行（不依赖 PRAGMA foreign_keys 是否开启，防 FK 残留 / 主键悬空）。
+//
+// 前置：scenarios 表存在。无 app_settings 依赖（去 marker 后不读/写设置）。CHECK 无要求（仅 DELETE 既有行）。
+// 返回 { status, deleted? }
+//   status:
+//     - 'skipped-no-scenarios-table' : scenarios 表不存在（极早期启动）
+//     - 'retired'                    : 本次执行（deleted = 删除的孤儿场景行数，可能为 0 = no-op）
+function retireChargeOutboundOrphans(db) {
+  // 前置：scenarios 表存在（极早期启动时可能尚未建表）。
+  const tableSqlRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'"
+  ).get();
+  if (!tableSqlRow || !tableSqlRow.sql) return { status: 'skipped-no-scenarios-table' };
+
+  // 🔴 唯一定位条件：内置 charge-outbound 孤儿（严格三重限定，绝不误删 DBS-Charge / 用户场景）。
+  const ORPHAN_WHERE = `is_builtin = 1
+         AND category = 'builtin-fixed'
+         AND config_json LIKE '%"subCategory":"charge-outbound"%'`;
+
+  let deleted = 0;
+  db.exec('BEGIN');
+  try {
+    // 1) 先删关联行（scenario_applicable_channels 是 scenarios.id 的唯一 FK；显式删，不赖 PRAGMA foreign_keys）。
+    //    scenario_applicable_channels 在极旧库可能尚未建表 → IF 存在才删（CREATE 顺序晚于本迁移调用点的极端情况兜底）。
+    const hasAcTable = db.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='scenario_applicable_channels'"
+    ).get();
+    if (hasAcTable) {
+      db.prepare(`
+        DELETE FROM scenario_applicable_channels
+         WHERE scenario_id IN (
+           SELECT id FROM scenarios WHERE ${ORPHAN_WHERE}
+         )
+      `).run();
+    }
+
+    // 2) 再删孤儿场景行本身（幂等：无孤儿 → changes=0 no-op；重复跑安全）。
+    const del = db.prepare(`
+      DELETE FROM scenarios WHERE ${ORPHAN_WHERE}
+    `).run();
+    deleted = del && typeof del.changes === 'number' ? del.changes : 0;
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+
+  return { status: 'retired', deleted };
 }
 
 // v2.1.9 N5：DB schema 总迁移函数（🔴 资金红线 + 破坏性 schema 变更，不可逆）
@@ -3071,6 +3270,40 @@ function ensureAdmBankDepositSupport(db) {
   }
 }
 
+// v3.0.6 需求1：调拨对账单隐藏表（linked_fund_transfer_recon）。
+//   由中台调拨订单（mid-allocation）经 buildFundTransferReconRows 派生（一行 → FundTransfer-in + out 两行，
+//   recon 11 字段全进 raw_json），供需求2（r5-fund-transfer-recon-backfill）/ 需求3（dbs-charge）引擎读取匹配。
+//   🔴 资金/数据红线说明：纯新增隐藏表，无破坏性 DDL（CREATE TABLE / INDEX IF NOT EXISTS 幂等）；
+//      与现有链接表完全隔离、无调用顺序依赖；整表覆盖语义由 replaceFundTransferReconRows 仓储函数实现。
+//   🔴 绝不进 ALL_TABLE_KEYS / 不写 linked_table_meta（前端弹窗不可见，与 ADM 隐藏表同范式）。
+//   raw_json 存整行（数据真相）；allocation_no / fund_type / bill_date / recon_id / big_account 同时落列供索引与匹配热路径。
+//   独立于 ensureLinkedTableSupport，在 database.js 初始化序列里紧随 ensureAdmBankDepositSupport 调用。
+function ensureFundTransferReconSupport(db) {
+  db.exec('BEGIN');
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS linked_fund_transfer_recon (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        allocation_no TEXT,
+        fund_type TEXT,
+        bill_date TEXT,
+        recon_id TEXT,
+        big_account TEXT,
+        raw_json TEXT NOT NULL,
+        imported_at TEXT NOT NULL
+      );
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_lftr_alloc ON linked_fund_transfer_recon(allocation_no);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_lftr_date ON linked_fund_transfer_recon(bill_date);');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_lftr_ftype ON linked_fund_transfer_recon(fund_type);');
+
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 // v3.0.4 块 E（需求2）：BOC 链接表派生两张隐藏表（linked_boc_fx_settlement + linked_boc_bank_deposit）。
 //   linked_boc_fx_settlement：外汇交割表导入后按物理行序分组派生（33+3 字段进 raw_json，热列单列）。
 //   linked_boc_bank_deposit：银行对账单 Channel=BOC 行派生（提取「银行单交易编号」），供 2.5 回填。
@@ -3255,6 +3488,10 @@ module.exports = {
   ensureJpmDispatchOrderScenarioSeed,
   // v3.0.4 块 E 需求1：BOC 调拨订单修复写死场景独立补种（默认休眠 enabled=0，独立 marker；category=gateway-recon-id-fix）
   ensureBocDispatchOrderScenarioSeed,
+  // v3.0.6 需求3（T9）：DBS-Charge 资金校验写死场景独立补种（默认 enabled=1，独立 marker；category=builtin-fixed → R3.5）
+  ensureDbsChargeFundCheckScenarioSeed,
+  // v3.0.6 需求3（T9）：每次启动幂等 DELETE 已废弃 charge-outbound 内置孤儿（含级联删关联表，无 marker；🔴 资金红线 + 破坏性）
+  retireChargeOutboundOrphans,
   // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线）
   ensureFundTypeAchReturnConfigMigration,
   // v2.1.10 N4-cont-2：diff_rows 2 FK 加 ON DELETE CASCADE（🔴 资金红线 + 不可逆 DB schema）
@@ -3264,6 +3501,8 @@ module.exports = {
   ensureLinkedTableSupport,
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表（紧随 linked 表，独立幂等迁移函数）
   ensureAdmBankDepositSupport,
+  // v3.0.6 需求1：调拨对账单隐藏表（紧随 ADM 表，独立幂等迁移；不进 ALL_TABLE_KEYS）
+  ensureFundTransferReconSupport,
   // v3.0.4 块 E 需求2：BOC 链接表两张隐藏表（紧随 ADM 表，独立幂等迁移；不进 ALL_TABLE_KEYS）
   ensureBocFxLinkSupport,
   // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀，独立迁移函数）
