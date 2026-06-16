@@ -6867,12 +6867,65 @@
         : 1;
       state.activeScenarioChannelId = activeChannelId;
 
-      function renderRow(scenario, displayIndex) {
+      // v3.0.8 需求2（W6）：场景管理两大功能分组三角折叠。
+      //   分组键 = config.funcCategory 归并：
+      //     - 'fund-nature-check' + 'dbs-charge-fund-check' → 组「资金性质校验」（groupKey='fund-nature-check'）
+      //     - 'platform-order'                              → 组「中台订单数据处理」（groupKey='platform-order'）
+      //   无 funcCategory 或不在上述集合的场景（既有 builtin-fixed「从银行对账单提取调拨订单对账ID」/ C1 / C2 等）
+      //   → groupKey=null，保持原扁平显示（不强制分组、不折叠）。
+      //   组名复用 FUNC_CATEGORY_LABELS（renderer-dialogs.js:5621），避免硬编码漂移。
+      const SCENARIO_GROUP_DEFS = [
+        { key: 'fund-nature-check', label: FUNC_CATEGORY_LABELS['fund-nature-check'], funcCategories: ['fund-nature-check', 'dbs-charge-fund-check'] },
+        { key: 'platform-order', label: FUNC_CATEGORY_LABELS['platform-order'], funcCategories: ['platform-order'] }
+      ];
+      // 两组默认 collapsed（收纳）；折叠态为前端临时状态（不持久化，每次打开弹框默认收纳）。
+      const collapsedGroups = new Set(SCENARIO_GROUP_DEFS.map((g) => g.key));
+
+      // 取场景所属分组键（无匹配 → null = 扁平显示）。
+      function getScenarioGroupKey(scenario) {
+        const funcCategory = scenario && scenario.config && scenario.config.funcCategory;
+        if (!funcCategory) return null;
+        const hit = SCENARIO_GROUP_DEFS.find((g) => g.funcCategories.includes(funcCategory));
+        return hit ? hit.key : null;
+      }
+
+      // 当前表格可见列数（用于分组标题行 colspan）：
+      //   勾选列（始终存在，仅 display 切换）+ 序号 + 功能类别 + 场景名称 + 执行操作 = 5 基础列；
+      //   优先级（非 compact）+ 是否启动（showEnabledCol）按视图模式叠加。
+      function getScenarioTableColSpan() {
+        return 5 + (isCompactView ? 0 : 1) + (showEnabledCol ? 1 : 0);
+      }
+
+      // 渲染分组标题行（含 ▶/▼ 三角 + 组名）。子场景行带 data-group=groupKey，按折叠态显隐。
+      function renderGroupHeaderRow(groupKey, label, collapsed) {
+        const tr = document.createElement('tr');
+        tr.className = 'scenario-group-header';
+        tr.dataset.groupHeader = groupKey;
+        const triangle = collapsed ? '▶' : '▼';
+        tr.innerHTML = `
+          <td class="scenario-group-header-cell" colspan="${getScenarioTableColSpan()}">
+            <button type="button" class="scenario-group-toggle" data-action="toggle-group" data-group="${escapeHtml(groupKey)}" aria-expanded="${collapsed ? 'false' : 'true'}">
+              <span class="scenario-group-triangle">${triangle}</span>
+              <span class="scenario-group-label">${escapeHtml(label)}</span>
+            </button>
+          </td>
+        `;
+        return tr;
+      }
+
+      function renderRow(scenario, displayIndex, groupKey) {
         const tr = document.createElement('tr');
         tr.dataset.id = String(scenario.id);
         tr.dataset.category = scenario.category;
         // v2.1.16-beta.5 需求2（PR-4 修订）：标记 is_builtin → 批量收集（collectChecked*）据此双保险排除内置写死场景。
         tr.dataset.builtin = scenario.isBuiltin === true ? '1' : '0';
+        // v3.0.8 需求2（W6）：分组子场景行标记 data-group + scenario-group-row class；折叠态加 .collapsed（CSS display:none）。
+        //   扁平行 groupKey=null 不标记、恒显。
+        if (groupKey) {
+          tr.dataset.group = groupKey;
+          tr.classList.add('scenario-group-row');
+          if (collapsedGroups.has(groupKey)) tr.classList.add('collapsed');
+        }
         // v2.1.0-beta.2 PR-A Round 2：
         // - task R2-7：序号 = 列表内 1-based 顺序号（不再用真实 scenarios.id；dataset.id 仍是真实 id 用于 IPC）
         // - task R2-8：compact 模式（单类别入口）隐藏 优先级 + 是否启动 td
@@ -6982,8 +7035,12 @@
       }
 
       async function refreshTable() {
-        const scenarios = await loadScenariosOrAlert();
-        if (scenarios === null) return;
+        const scenariosRaw = await loadScenariosOrAlert();
+        if (scenariosRaw === null) return;
+        // v3.0.8 需求2（W6）：退役自带场景 C3「与网关对账单根据金额币种一对一匹配对账ID」（category='gateway-recon-join'）
+        //   —— 仅前端过滤隐藏（用户看不到、无法启用），最大可回滚、零 migration 风险。
+        //   后端引擎 / dispatcher case / CHECK 约束 / 已有库记录 / 新库 seed 全不动；新库 seed 的 enabled=0 C3 被此过滤等效退役。
+        const scenarios = scenariosRaw.filter((s) => s.category !== 'gateway-recon-join');
         // v2.1.16 需求1：listScenarios 不返 config → 为 builtin-fixed 行补 config，
         //   使「功能类别」列能按 config.funcCategory 显示业务分组（资金性质校验 / 中台订单数据处理）。
         await Promise.all(
@@ -7008,12 +7065,55 @@
         // v2.1.13 D-2：自带写死场景（builtin-fixed）置顶（序号固定 1）；其余保持 listScenarios 原序（stable sort）
         visible.sort((a, b) => (a.category === 'builtin-fixed' ? 0 : 1) - (b.category === 'builtin-fixed' ? 0 : 1));
         tbody.innerHTML = '';
-        // v2.1.0-beta.2 PR-A Round 2（task R2-7）：传 displayIndex（1-based 列表内顺序）给 renderRow
-        visible.forEach((scenario, idx) => {
-          tbody.appendChild(renderRow(scenario, idx + 1));
+        // v3.0.8 需求2（W6）：二级分组渲染（纯视觉重排，序号口径不变）。
+        //   ① 无分组场景（groupKey=null）保持原扁平显示，按上面的 builtin-first 顺序先渲染（含 C1/C2/既有 builtin-fixed）。
+        //   ② 「资金性质校验」「中台订单数据处理」两组各插一行分组标题（▶/▼ 三角），子场景行按折叠态显隐，默认 collapsed。
+        // 🔴 N3-1 一致性红线（rules/important-variables.md displayIndex）：序号列必须用 scenario.displayIndex
+        //   （scenarios-repository.listScenarios 渠道内 builtin-fixed 优先 1-based 派发口径，run 状态框 / 命中场景行报表共享同一份），
+        //   严禁用「分组重排后的位置序数」——否则 run 状态框「场景 N」与场景管理 UI 序号串号（N3-1 修复失效）。
+        //   分组只改渲染顺序与折叠显隐，不改任何场景的序号显示值；displayIndex 缺失时才回退列表位次（兜底）。
+        const displayNumberOf = (scenario, fallbackPos) =>
+          Number.isFinite(Number(scenario.displayIndex)) ? Number(scenario.displayIndex) : fallbackPos;
+        let fallbackPos = 0;
+        const flatScenarios = visible.filter((s) => getScenarioGroupKey(s) === null);
+        // v2.1.0-beta.2 PR-A Round 2（task R2-7）：序号优先取 displayIndex（派发口径），缺失才回退位次。
+        flatScenarios.forEach((scenario) => {
+          fallbackPos += 1;
+          tbody.appendChild(renderRow(scenario, displayNumberOf(scenario, fallbackPos), null));
+        });
+        SCENARIO_GROUP_DEFS.forEach((group) => {
+          const members = visible.filter((s) => getScenarioGroupKey(s) === group.key);
+          if (members.length === 0) return; // 该组无场景 → 不渲分组标题（避免空组）
+          const collapsed = collapsedGroups.has(group.key);
+          tbody.appendChild(renderGroupHeaderRow(group.key, group.label, collapsed));
+          members.forEach((scenario) => {
+            fallbackPos += 1;
+            tbody.appendChild(renderRow(scenario, displayNumberOf(scenario, fallbackPos), group.key));
+          });
         });
         // v2.1.9 N5 Phase 5 T21：refresh 后重置「全选」状态（新建 rows 都未勾）
         if (selectAllCheckbox) selectAllCheckbox.checked = false;
+      }
+
+      // v3.0.8 需求2（W6）：折叠态切换 —— 不重渲整表，仅翻转该组 collapsed 标志 + 显隐子行 + 翻转三角。
+      function toggleScenarioGroup(groupKey) {
+        if (!groupKey) return;
+        const willCollapse = !collapsedGroups.has(groupKey);
+        if (willCollapse) {
+          collapsedGroups.add(groupKey);
+        } else {
+          collapsedGroups.delete(groupKey);
+        }
+        tbody.querySelectorAll(`tr[data-group="${groupKey}"]`).forEach((tr) => {
+          tr.classList.toggle('collapsed', willCollapse);
+        });
+        const headerRow = tbody.querySelector(`tr[data-group-header="${groupKey}"]`);
+        if (headerRow) {
+          const toggleBtn = headerRow.querySelector('[data-action="toggle-group"]');
+          if (toggleBtn) toggleBtn.setAttribute('aria-expanded', willCollapse ? 'false' : 'true');
+          const triangle = headerRow.querySelector('.scenario-group-triangle');
+          if (triangle) triangle.textContent = willCollapse ? '▶' : '▼';
+        }
       }
 
       // v2.1.9 N5：拉取渠道列表 + 填充 select 下拉
@@ -7085,6 +7185,12 @@
 
       // 委托：单一 click handler 处理 tbody 内所有 row-action
       tbody.addEventListener('click', async (event) => {
+        // v3.0.8 需求2（W6）：分组标题三角折叠（不属于 row-action，先于行操作处理）。
+        const groupToggle = event.target.closest('[data-action="toggle-group"]');
+        if (groupToggle) {
+          toggleScenarioGroup(groupToggle.dataset.group);
+          return;
+        }
         const button = event.target.closest('[data-row-action]');
         if (!button) return;
         const tr = button.closest('tr');

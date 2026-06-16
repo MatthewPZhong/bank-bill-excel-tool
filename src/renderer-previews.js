@@ -807,6 +807,7 @@
     }
 
     // v2.0.0-beta.3：场景管理弹窗（含 3 内置场景）
+    // v3.0.8 需求2（W6）：默认打开即两组三角折叠收纳态（▶ 资金性质校验 / ▶ 中台订单数据处理）+ C3 已退役不显示。
     function applyScenariosManagerPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
       setTimeout(() => {
