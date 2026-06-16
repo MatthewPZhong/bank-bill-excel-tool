@@ -1,17 +1,20 @@
-// v2.1.16-beta.2 R5 场景3「中台加款单脏数据处理」引擎单测（🔴 资金红线）
+// v3.0.8 R5 场景3「中台加款单脏数据处理」引擎单测（🔴 资金红线）
 // PRD §四 需求 3（R3.1~R3.4） / TECH_DESIGN §5.4
+// W3 规则变更（spec: changes/r5s3-channelorderno-fallback-inbound-substring）
 //
 // 覆盖：
-//   ① 命中（TradeType=Inbound-VA、reconid 相同、bank.FundType≠Inbound）→ 产 1 条剔除行
+//   ① 命中（TradeType=Inbound-VA、reconid 相同、bank.FundType 不含 Inbound 子串）→ 产 1 条剔除行
 //      断言 加款单号=gw.orderid、附言=`<FundType>，中台加款单已关闭。`、C~O 13 列=对应银行行
-//   ② bank.FundType==='Inbound' → 不产剔除行
-//   ③ 严格 1v1（两条 gw 抢一条 bank → 第二条不再命中）
+//   ② bank.FundType 含 excludeFundType 子串（大小写不敏感）→ 不产剔除行（D-2/D-2a）
+//   ③ 严格 1v1（两条 gw 抢一条 bank → 第二条不再命中）；跨两级 fallback 共享（D-1c）
 //   ④ 空 reconid 跳过
 //   ⑤ TradeType 非 Inbound-VA 不参与
 //   ⑥ 漂移守卫：CLEANUP_COPY_HEADERS ⊆ BANK_STATEMENT_FIELDS
 //   ⑦ 多候选按 Credit Amount 方向消歧（PR-6 / spec §三）：唯一 Credit 行取它 /
 //      ≥2 行 Credit→multi-credit-match 警告 / 0 行 Credit→no-credit-match 警告 /
 //      单候选维持现状 / O-1 边界（0、''、'0.00'、'1,234.5'）—— 异常仅警告不阻断导出
+//   ⑧ W3 变更1：两级 fallback 匹配键（ReconId 主、ChannelOrderNo 兜底 D-1 ~ D-3）
+//   ⑨ W3 变更2：FundType 子串判定大小写不敏感（D-2 ~ D-2c）
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -37,14 +40,17 @@ function gwRow({ tradeType = 'Inbound-VA', reconId = 'R1', orderId = 'ORD-1' } =
 //   C~O = FundType / BillDate / ValueDate / Channel / 地区 / MerchantId / Currency /
 //         Credit Amount / Debit Amount / ReconciliationId / Transaction Description /
 //         Extra Information / Payment Detail
+//   channelOrderNo —— W3 变更1 二级 fallback 匹配键（默认不写入该列，保证现有用例零回归）；
+//                     ChannelOrderNo 仅作匹配键、不进剔除行结构（不影响漂移守卫）。
 function bankRow({
   rowId = 'b1',
   reconId = 'R1',
   fundType = 'Charge',
   creditAmount = 100,
-  debitAmount = 0
+  debitAmount = 0,
+  channelOrderNo
 } = {}) {
-  return {
+  const row = {
     _rowId: rowId,
     ReconciliationId: reconId,
     FundType: fundType,
@@ -60,6 +66,11 @@ function bankRow({
     'Extra Information': 'extra-info',
     'Payment Detail': 'pay-detail'
   };
+  // 默认不写入 ChannelOrderNo 列（保持 undefined，等价空键不入二级桶 → 现有用例零回归）
+  if (channelOrderNo !== undefined) {
+    row.ChannelOrderNo = channelOrderNo;
+  }
+  return row;
 }
 
 // ---- ⑥ 漂移守卫 --------------------------------------------------------
@@ -149,24 +160,31 @@ test.describe('R5场景3 — ① 命中产剔除行', () => {
 
 // ---- ② FundType=Inbound 不产 -----------------------------------------
 
-test.describe('R5场景3 — ② bank.FundType===Inbound 不产剔除行', () => {
-  test('命中但银行 FundType=Inbound → 不生成剔除行', () => {
+test.describe('R5场景3 — ② bank.FundType 含 excludeFundType 子串不产剔除行（D-2/D-2a）', () => {
+  test('命中但银行 FundType=Inbound（含 Inbound 子串）→ 不生成剔除行', () => {
     const gws = [gwRow({ reconId: 'R1' })];
     const banks = [bankRow({ rowId: 'b1', reconId: 'R1', fundType: 'Inbound' })];
 
     const { cleanupRows, modifications } = runRound5PlatformInboundCleanup(gws, banks);
-    assert.equal(cleanupRows.length, 0, 'FundType=Inbound 不应产剔除行');
+    assert.equal(cleanupRows.length, 0, 'FundType 含 Inbound 子串不应产剔除行');
     assert.deepEqual(modifications, []);
   });
 
-  test('excludeFundType 可 config 化：自定义 excludeFundType=outbound 时 outbound 不产、Inbound 反而产', () => {
-    const gws = [gwRow({ reconId: 'RA', orderId: 'OA' }), gwRow({ reconId: 'RB', orderId: 'OB' })];
+  test('excludeFundType 可 config 化（子串语义）：含 outbound 子串不产、不含则产', () => {
+    // excludeFundType='outbound'：'outbound' 含子串→不产；'Inbound' 不含 'outbound' 子串→产；
+    //   'outbound-VA' 含子串→也不产（验证「包含而非等于」）。
+    const gws = [
+      gwRow({ reconId: 'RA', orderId: 'OA' }),
+      gwRow({ reconId: 'RB', orderId: 'OB' }),
+      gwRow({ reconId: 'RC', orderId: 'OC' })
+    ];
     const banks = [
-      bankRow({ rowId: 'ba', reconId: 'RA', fundType: 'outbound' }),
-      bankRow({ rowId: 'bb', reconId: 'RB', fundType: 'Inbound' })
+      bankRow({ rowId: 'ba', reconId: 'RA', fundType: 'outbound' }),    // 含子串 → 不产
+      bankRow({ rowId: 'bb', reconId: 'RB', fundType: 'Inbound' }),     // 不含 'outbound' → 产
+      bankRow({ rowId: 'bc', reconId: 'RC', fundType: 'outbound-VA' })  // 含子串 → 不产
     ];
     const { cleanupRows } = runRound5PlatformInboundCleanup(gws, banks, { excludeFundType: 'outbound' });
-    assert.equal(cleanupRows.length, 1);
+    assert.equal(cleanupRows.length, 1, '仅 Inbound（不含 outbound 子串）这一条产出');
     assert.equal(cleanupRows[0]['加款单号'], 'OB'); // Inbound 这条产出
     assert.equal(cleanupRows[0]['附言'], 'Inbound，中台加款单已关闭。');
   });
@@ -361,6 +379,146 @@ test.describe('R5场景3 — ⑦ 多候选按 Credit Amount 方向消歧', () =>
   });
 });
 
+// ---- ⑧ W3 变更2：FundType 子串判定（大小写不敏感，D-2 ~ D-2c）------------
+
+test.describe('R5场景3 — ⑧ FundType 子串判定（D-2 ~ D-2c）', () => {
+  // 新增用例1：FundType='Inbound-VA' 命中 → 0 条（子串而非等值，变更2 核心）
+  test('FundType=Inbound-VA（含 Inbound 子串，非等值）→ 不产剔除行', () => {
+    const gws = [gwRow({ reconId: 'R1', orderId: 'ORD-1' })];
+    const banks = [bankRow({ rowId: 'b1', reconId: 'R1', fundType: 'Inbound-VA' })];
+
+    const { cleanupRows, modifications } = runRound5PlatformInboundCleanup(gws, banks);
+    assert.equal(cleanupRows.length, 0, 'FundType=Inbound-VA 含 Inbound 子串，不应产剔除行（子串判定）');
+    assert.deepEqual(modifications, []);
+  });
+
+  // 新增用例2：大小写不敏感 —— 'inbound'/'INBOUND' 命中→0 条；'outbound' 负向→产（锁 D-2a）
+  test('大小写不敏感：inbound / INBOUND 含子串不产；outbound 不含子串产（D-2a）', () => {
+    // 小写 inbound → 不产
+    {
+      const gws = [gwRow({ reconId: 'R1', orderId: 'ORD-LC' })];
+      const banks = [bankRow({ rowId: 'b1', reconId: 'R1', fundType: 'inbound' })];
+      const { cleanupRows } = runRound5PlatformInboundCleanup(gws, banks);
+      assert.equal(cleanupRows.length, 0, 'FundType=inbound（小写）应判为含子串 → 不产');
+    }
+    // 全大写 INBOUND → 不产
+    {
+      const gws = [gwRow({ reconId: 'R2', orderId: 'ORD-UC' })];
+      const banks = [bankRow({ rowId: 'b2', reconId: 'R2', fundType: 'INBOUND' })];
+      const { cleanupRows } = runRound5PlatformInboundCleanup(gws, banks);
+      assert.equal(cleanupRows.length, 0, 'FundType=INBOUND（大写）应判为含子串 → 不产');
+    }
+    // 负向 outbound（不含 inbound 子串）→ 产
+    {
+      const gws = [gwRow({ reconId: 'R3', orderId: 'ORD-OUT' })];
+      const banks = [bankRow({ rowId: 'b3', reconId: 'R3', fundType: 'outbound' })];
+      const { cleanupRows } = runRound5PlatformInboundCleanup(gws, banks);
+      assert.equal(cleanupRows.length, 1, 'FundType=outbound 不含 inbound 子串 → 应产剔除行');
+      assert.equal(cleanupRows[0]['加款单号'], 'ORD-OUT');
+    }
+  });
+});
+
+// ---- ⑨ W3 变更1：两级 fallback 匹配键（ReconId 主、ChannelOrderNo 兜底，D-1 ~ D-3）----
+
+test.describe('R5场景3 — ⑨ 两级 fallback 匹配键（D-1 ~ D-3，🔴 资金红线）', () => {
+  // 新增用例3：ReconId 不上、ChannelOrderNo 上 → 产（fallback 命中，D-1）
+  test('一级 ReconId 不上、二级 ChannelOrderNo 上 → 产 1 条（加款单号=gw.orderid）', () => {
+    const gws = [gwRow({ reconId: 'KEY-1', orderId: 'ORD-FB' })];
+    // 银行行 ReconciliationId≠key，但 ChannelOrderNo=key；FundType 非含 Inbound → 应 fallback 命中产
+    const banks = [
+      bankRow({ rowId: 'b1', reconId: 'OTHER', fundType: 'Charge', channelOrderNo: 'KEY-1' })
+    ];
+
+    const { cleanupRows, warnings } = runRound5PlatformInboundCleanup(gws, banks);
+    assert.equal(cleanupRows.length, 1, 'ReconId 不上但 ChannelOrderNo 上 → fallback 命中产 1 条');
+    assert.equal(cleanupRows[0]['加款单号'], 'ORD-FB', '加款单号取网关 orderid');
+    assert.equal(cleanupRows[0]['附言'], 'Charge，中台加款单已关闭。');
+    assert.equal(warnings.length, 0, '单候选 fallback 命中不应产警告');
+  });
+
+  // 新增用例4：两级都不上 → 0 条且无警告（静默 empty）
+  test('一级、二级都查无此行 → 0 条且无警告（静默跳过）', () => {
+    const gws = [gwRow({ reconId: 'KEY-NONE', orderId: 'ORD-X' })];
+    // ReconciliationId 与 ChannelOrderNo 都不等于 key
+    const banks = [
+      bankRow({ rowId: 'b1', reconId: 'OTHER-R', fundType: 'Charge', channelOrderNo: 'OTHER-C' })
+    ];
+
+    const { cleanupRows, warnings } = runRound5PlatformInboundCleanup(gws, banks);
+    assert.equal(cleanupRows.length, 0, '两级都不上 → 不产剔除行');
+    assert.equal(warnings.length, 0, '两级 empty 应静默跳过、不产警告');
+  });
+
+  // 新增用例5：二级 ChannelOrderNo 桶多候选方向消歧（D-1b）
+  test('二级 ChannelOrderNo 桶多候选：1 Credit 1 Debit→取 Credit 产；2 Credit→multi-credit 警告(带标记)不产', () => {
+    // (a) ReconId 桶空、ChannelOrderNo 桶 2 行（1 Credit 1 Debit）→ 取 Credit 行产 1 条
+    {
+      const gws = [gwRow({ reconId: 'CK-1', orderId: 'ORD-CK' })];
+      const banks = [
+        bankRow({ rowId: 'bd', reconId: 'NOPE', fundType: 'outbound', creditAmount: 0, debitAmount: 500, channelOrderNo: 'CK-1' }),
+        bankRow({ rowId: 'bc', reconId: 'NOPE2', fundType: 'Charge', creditAmount: 500, debitAmount: 0, channelOrderNo: 'CK-1' })
+      ];
+      const { cleanupRows, warnings } = runRound5PlatformInboundCleanup(gws, banks);
+      assert.equal(cleanupRows.length, 1, '二级桶 1 Credit 1 Debit → 取 Credit 行产 1 条');
+      assert.equal(cleanupRows[0]['附言'], 'Charge，中台加款单已关闭。', '附言来自二级桶 Credit 行');
+      assert.equal(cleanupRows[0]['Credit Amount'], 500, 'C~O 取 Credit 行');
+      assert.equal(warnings.length, 0, '二级桶唯一 Credit 行命中不产警告');
+    }
+    // (b) ReconId 桶空、ChannelOrderNo 桶 2 行都 Credit → multi-credit-match 警告（带 ChannelOrderNo 标记）+ 不产
+    {
+      const gws = [gwRow({ reconId: 'CK-2', orderId: 'ORD-CK2' })];
+      const banks = [
+        bankRow({ rowId: 'b1', reconId: 'NOPE', fundType: 'Charge', creditAmount: 100, debitAmount: 0, channelOrderNo: 'CK-2' }),
+        bankRow({ rowId: 'b2', reconId: 'NOPE2', fundType: 'outbound', creditAmount: 200, debitAmount: 0, channelOrderNo: 'CK-2' })
+      ];
+      const { cleanupRows, warnings } = runRound5PlatformInboundCleanup(gws, banks);
+      assert.equal(cleanupRows.length, 0, '二级桶 2 Credit 候选 → 不产剔除行');
+      const w = warnings.find((x) => x.code === 'multi-credit-match');
+      assert.ok(w, '应发 multi-credit-match 警告');
+      assert.equal(w.severity, 'warning', 'severity 必须是 warning（不阻断导出）');
+      assert.ok(/ChannelOrderNo/.test(w.message), '二级触发的警告 message 应带「按 ChannelOrderNo 匹配」标记');
+    }
+  });
+
+  // 新增用例6：1v1 跨两级不重复消费（D-1c）
+  test('1v1 跨两级共享：一条 bank（ReconId=key 且 ChannelOrderNo=key）→ 仅被一条 gw 消费 → 1 条', () => {
+    const gws = [
+      gwRow({ reconId: 'DUAL', orderId: 'ORD-1' }),
+      gwRow({ reconId: 'DUAL', orderId: 'ORD-2' })
+    ];
+    // 同一行两列都=key：第一条 gw 一级消费它；第二条 gw 一级 empty→二级 fallback 也因已消费捞不到
+    const banks = [
+      bankRow({ rowId: 'b1', reconId: 'DUAL', fundType: 'Charge', channelOrderNo: 'DUAL' })
+    ];
+
+    const { cleanupRows } = runRound5PlatformInboundCleanup(gws, banks);
+    assert.equal(cleanupRows.length, 1, '一条 bank 跨两级只能被消费一次（D-1c）');
+    assert.equal(cleanupRows[0]['加款单号'], 'ORD-1', '应是第一条 gw 命中');
+  });
+
+  // 新增用例7：🔴 红线锁 —— 一级消歧失败绝不 fallback（D-3）
+  test('🔴 一级 multi-credit 消歧失败 + 存在干净 ChannelOrderNo 行 → 仍 0 条 + multi-credit 警告（不退二级，锁 D-3）', () => {
+    const gws = [gwRow({ reconId: 'DIRTY', orderId: 'ORD-D3' })];
+    const banks = [
+      // 一级 ReconId 桶：2 行都 Credit 有值 → multi-credit（消歧失败）
+      bankRow({ rowId: 'br1', reconId: 'DIRTY', fundType: 'Charge', creditAmount: 100, debitAmount: 0 }),
+      bankRow({ rowId: 'br2', reconId: 'DIRTY', fundType: 'outbound', creditAmount: 200, debitAmount: 0 }),
+      // 同时存在一条 ChannelOrderNo=key 的干净行（ReconId 不等于 key，单候选可命中）
+      bankRow({ rowId: 'bc-clean', reconId: 'CLEAN-R', fundType: 'Charge', creditAmount: 300, debitAmount: 0, channelOrderNo: 'DIRTY' })
+    ];
+
+    const { cleanupRows, warnings } = runRound5PlatformInboundCleanup(gws, banks);
+    // 关键：一级消歧失败不 fallback → 干净的 ChannelOrderNo 行不被消费 → 仍 0 条
+    assert.equal(cleanupRows.length, 0, '一级消歧失败绝不退二级，干净 ChannelOrderNo 行不被消费 → 0 条（D-3）');
+    const w = warnings.find((x) => x.code === 'multi-credit-match');
+    assert.ok(w, '应发一级 multi-credit-match 警告');
+    assert.equal(w.severity, 'warning');
+    // 一级触发的警告不带 ChannelOrderNo 标记（确证是一级 ReconId 桶失败、未走二级）
+    assert.ok(!/ChannelOrderNo/.test(w.message), '一级触发的警告不应带 ChannelOrderNo 标记（证明未 fallback）');
+  });
+});
+
 // ---- 边界兜底 ----------------------------------------------------------
 
 test.describe('R5场景3 — 边界兜底', () => {
@@ -373,7 +531,7 @@ test.describe('R5场景3 — 边界兜底', () => {
   test('多条 gw 多 reconid 混合：仅 Inbound-VA + 非 Inbound + reconid 命中 才产', () => {
     const gws = [
       gwRow({ tradeType: 'Inbound-VA', reconId: 'R1', orderId: 'O1' }), // 命中 → 产
-      gwRow({ tradeType: 'Inbound-VA', reconId: 'R2', orderId: 'O2' }), // bank FundType=Inbound → 不产
+      gwRow({ tradeType: 'Inbound-VA', reconId: 'R2', orderId: 'O2' }), // bank FundType=Inbound（含子串）→ 不产
       gwRow({ tradeType: 'Inbound-VA', reconId: '', orderId: 'O3' }),   // 空 reconid → 跳过
       gwRow({ tradeType: 'FundTransfer-out', reconId: 'R4', orderId: 'O4' }), // 非 Inbound-VA → 不参与
       gwRow({ tradeType: 'Inbound-VA', reconId: 'R5', orderId: 'O5' })  // 无对应 bank → 不产
