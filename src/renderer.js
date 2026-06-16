@@ -168,7 +168,7 @@ const state = {
   //   { ready: boolean } —— 仅承载「本批是否已导退款表」就绪信号，供运行点 shouldPromptRefundAtRun 判据。
   refundOrderSession: null,      // { ready: true } | null
   processingResult: null,        // { hitRowCount, scenarioHitCount, warningCount, ranAt } | null
-  bankStatementExport: null,     // { mainFileName, errorReportName } | null（仅 renderer-side 缓存）
+  bankStatementExport: null,     // { mainFileName, errorReportName, platformCleanupName?, refundBackfillName? } | null（仅 renderer-side 缓存）
   // v3.0.0 需求2a：去导入明细框后，失败/跳过摘要并入状态框。
   //   { text: string, hasFailed: boolean } | null —— text 为纯文本（状态框 textContent，不可 HTML）。
   //   进入新动作（再次导入/run/export/导网关）时清空，避免上一批摘要残留。
@@ -305,11 +305,10 @@ const elements = {
   bankStatementRunBtn: document.getElementById('bankStatementRunBtn'),
   bankStatementExportBtn: document.getElementById('bankStatementExportBtn'),
   bankStatementStatusBox: document.getElementById('bankStatementStatusBox'),
-  // v2.1.14 B：资金对账数据处理面板新增按钮（导入不平表 / 导出文件 + 链接表管理）
-  // v2.1.16-beta.5 需求1（PR-4 修订）：row2 删除独立《开始运行》——网关场景运行改由 row1《开始运行》
-  //   (bankStatementRunBtn) 按面板模式智能路由（见 state.bankStatementProcessRunMode）。本行只剩 导入不平表 / 导出文件。
-  bankStatementGatewayReconImportBtn: document.getElementById('bankStatementGatewayReconImportBtn'),
-  bankStatementGatewayReconExportBtn: document.getElementById('bankStatementGatewayReconExportBtn'),
+  // v2.1.14 B：资金对账数据处理面板「链接表管理」按钮缓存。
+  // v3.0.7 需求2a（C2）：原 row2 两个网关按钮（导入不平表 bankStatementGatewayReconImportBtn /
+  //   导出文件 bankStatementGatewayReconExportBtn）已随面板删除——DOM 缓存、事件绑定、导出 disabled 网关分支一并清理。
+  //   网关 ReconID 修复仍由「对账单 ReconID 修复」面板入口承载（handleReconIdFixExport 等保留）。
   bankStatementLinkedTableBtn: document.getElementById('bankStatementLinkedTableBtn'),
   // v2.1.2 T2：月度银行对账单BU回填校验模块（5 项 DOM 缓存；月份选择改为对话框，无 select）
   bankBuReconModulePanel: document.getElementById('bankBuReconModulePanel'),
@@ -3376,6 +3375,19 @@ async function refreshBankStatementStatus() {
           hitScenarios: Array.isArray(status.processingStats?.hitScenarios)
             ? status.processingStats.hitScenarios.slice()
             : [],
+          // v3.0.7 需求1a：状态框「已处理」分支按 渠道-地区 分组展示命中行数 + 命中场景名。
+          //   数据源 reconciliation-orchestrator stats.channelRegionHits（经 main.js stats 整体透传）。
+          //   向后兼容：旧持久化 processingResult / 旧 main 无此字段 → []（updateBankStatementUi 据此回退旧 hitScenarios 格式）。
+          channelRegionHits: Array.isArray(status.processingStats?.channelRegionHits)
+            ? status.processingStats.channelRegionHits.slice()
+            : [],
+          // v3.0.7 需求A：R5 场景3/4 命中提醒——只读统计字段透传（main.js stats 整体透传，但此处是显式白名单解构，需逐个带出，否则丢失）。
+          //   r5s3Enabled/r5s4Enabled 决定是否显示该行（启用即显示，含 0 条）；CleanupCount/BackfilledCount 为命中数。
+          //   向后兼容：旧持久化 processingResult / 旧 main 无此字段 → false / 0（updateBankStatementUi 据 enabled=false 不渲染该行）。
+          r5s3Enabled: status.processingStats?.r5s3Enabled === true,
+          r5s4Enabled: status.processingStats?.r5s4Enabled === true,
+          r5s3CleanupCount: status.processingStats?.r5s3CleanupCount ?? 0,
+          r5s4BackfilledCount: status.processingStats?.r5s4BackfilledCount ?? 0,
           warningCount: status.processingStats?.warningCount ?? 0,
           skippedC3Count: status.processingStats?.skippedC3Count ?? 0
         }
@@ -3407,35 +3419,67 @@ function updateBankStatementUi() {
     //   外层不能再重复加 \n（否则双换行）。`\nerror-report：` 是行间换行，保留不动。
     text = `已导出：${ex.mainFileName}`;
     if (ex.errorReportName) text += `\nerror-report：${ex.errorReportName}`;
+    // v3.0.7 需求1b：导出附带产物（加款单剔除文件 / 中台回填文件）按存在性追加各占一行。
+    //   行间用 \n 续行 + 全角「：」（与 error-report 同款，updateStatusBox 在「：」后补 \n → 文件名落下一行）。
+    if (ex.platformCleanupName) text += `\n加款单剔除文件：${ex.platformCleanupName}`;
+    if (ex.refundBackfillName) text += `\n中台回填文件：${ex.refundBackfillName}`;
     tone = 'success';
   } else if (pr) {
-    // v2.1.8 N3-1：hitScenarios.displayIndex 与场景管理 UI 列表序号统一（spec.md §五 N3-D1）
-    const arr = Array.isArray(pr.hitScenarios) ? pr.hitScenarios : [];
-    // v3.0.3 PR-E：状态框命中明细按「银行渠道枚举值:场景序号」分组换行展示。
-    //   新数据（双维路径）每条 hitScenarios 带非空 channelName → 按 channelName 分组（保持首次出现顺序），
-    //     每组一行 `渠道名:序号1、序号2`，组间 \n，包进括号：`（场景\nJPM:1、3\nCITI:2）`。
-    //   🔴 换行陷阱（updateStatusBox 对全角「：」自动补 \n）：分组分隔必须用半角 ':'，绝不用全角「：」。
-    //   fallback：旧 processingResult 持久化数据 / legacy 单维路径无 channelName → 保持原格式 `（场景 1、3）` 零变化。
-    let idsText = '';
-    if (arr.length > 0 && arr.every((s) => s.channelName)) {
-      const groups = new Map(); // channelName → [displayIndex...]（保持首次出现顺序）
-      arr.forEach((s) => {
-        if (!groups.has(s.channelName)) groups.set(s.channelName, []);
-        groups.get(s.channelName).push(s.displayIndex);
+    // v3.0.7 需求1a：「已处理」分支改用 pr.channelRegionHits 按「渠道-地区」分组多行展示——
+    //   每个 hit 一行 `渠道-地区:n条（场景名1、场景名2）`，组间 \n，整体接在「已处理：」后。
+    //   数据契约（reconciliation-orchestrator stats.channelRegionHits）：
+    //     Array<{ channelRegion:string, rowCount:number, scenarioNames:string[] }>，数组本身已按 channelRegion 升序、scenarioNames 已去重升序。
+    //   🔴 换行陷阱（updateStatusBox 对全角「：」自动补 \n）：分组冒号一律半角 ':'、场景名间一律顿号 '、'，绝不用全角「：」（否则被打断换行）。
+    //   向后兼容（pr.channelRegionHits 为空数组 / 字段缺失：旧持久化 processingResult / 旧 main）→ 完全回退下方 hitScenarios 旧格式，不抛错。
+    const crHits = Array.isArray(pr.channelRegionHits) ? pr.channelRegionHits : [];
+    if (crHits.length > 0) {
+      const hitLines = crHits.map((h) => {
+        const names = Array.isArray(h.scenarioNames) ? h.scenarioNames.filter((n) => n) : [];
+        const namePart = names.length > 0 ? `（${names.join('、')}）` : '';
+        return `${h.channelRegion}:${Number(h.rowCount) || 0}条${namePart}`;
       });
-      const lines = [];
-      groups.forEach((indexes, channelName) => {
-        lines.push(`${channelName}:${indexes.join('、')}`);
-      });
-      idsText = `（场景\n${lines.join('\n')}）`;
-    } else if (arr.length > 0) {
-      idsText = `（场景 ${arr.map((s) => s.displayIndex).join('、')}）`;
+      // 「已处理：」后全角冒号已触发一次 \n（updateStatusBox），各分组再以 \n 续行。
+      text = `已处理：${hitLines.join('\n')}`;
+    } else {
+      // v2.1.8 N3-1：hitScenarios.displayIndex 与场景管理 UI 列表序号统一（spec.md §五 N3-D1）
+      const arr = Array.isArray(pr.hitScenarios) ? pr.hitScenarios : [];
+      // v3.0.3 PR-E：状态框命中明细按「银行渠道枚举值:场景序号」分组换行展示。
+      //   新数据（双维路径）每条 hitScenarios 带非空 channelName → 按 channelName 分组（保持首次出现顺序），
+      //     每组一行 `渠道名:序号1、序号2`，组间 \n，包进括号：`（场景\nJPM:1、3\nCITI:2）`。
+      //   🔴 换行陷阱（updateStatusBox 对全角「：」自动补 \n）：分组分隔必须用半角 ':'，绝不用全角「：」。
+      //   fallback：旧 processingResult 持久化数据 / legacy 单维路径无 channelName → 保持原格式 `（场景 1、3）` 零变化。
+      let idsText = '';
+      if (arr.length > 0 && arr.every((s) => s.channelName)) {
+        const groups = new Map(); // channelName → [displayIndex...]（保持首次出现顺序）
+        arr.forEach((s) => {
+          if (!groups.has(s.channelName)) groups.set(s.channelName, []);
+          groups.get(s.channelName).push(s.displayIndex);
+        });
+        const lines = [];
+        groups.forEach((indexes, channelName) => {
+          lines.push(`${channelName}:${indexes.join('、')}`);
+        });
+        idsText = `（场景\n${lines.join('\n')}）`;
+      } else if (arr.length > 0) {
+        idsText = `（场景 ${arr.map((s) => s.displayIndex).join('、')}）`;
+      }
+      // v3.0.7 需求1c：「已处理」分支移除「，N 警告」尾巴（警告仍写 error-report 不动）。
+      text = `已处理：${pr.hitRowCount} 行命中${idsText}`;
     }
-    text = `已处理：${pr.hitRowCount} 行命中${idsText}，${pr.warningCount} 警告`;
+    // v3.0.7 需求A：「已处理」命中展示之后追加 R5 场景3/4 命中行——「场景启用就显示该行（含 0 条命中）」。
+    //   每行格式 `场景名:N 条命中`，行前 \n 续行。对新（channelRegionHits）/旧（hitScenarios）两种命中格式统一生效（在 if/else 汇合后追加）。
+    //   🔴 换行陷阱（updateStatusBox 第 614 行对全角「：」自动补 \n）：分隔冒号一律半角 ':'，绝不用全角「：」——
+    //      否则「场景名」与「N 条命中」会被强制打断成两行（每场景 2 行 / 共 4 行），违背「每行独立成行、两行」诉求。
+    //      与本分支既有 channelRegionHits / hitScenarios 多行展示的半角冒号防换行约定完全一致。
+    //   🔴 纯展示：r5s3Enabled/r5s4Enabled/r5s3CleanupCount/r5s4BackfilledCount 均为 orchestrator 只读统计字段，不改任何对账值。
+    //   向后兼容：字段缺失（旧持久化 / 旧 main）→ refreshBankStatementStatus 兜底为 false / 0 → enabled=false 不渲染该行（与 channelRegionHits 回退风格一致）。
+    if (pr.r5s3Enabled) text += `\n中台加款单脏数据处理:${Number(pr.r5s3CleanupCount) || 0} 条命中`;
+    if (pr.r5s4Enabled) text += `\n中台退款订单回填:${Number(pr.r5s4BackfilledCount) || 0} 条命中`;
     if (pr.skippedC3Count > 0) {
       text += ` · 跳过 ${pr.skippedC3Count} 个对账不平场景`;
     }
-    tone = pr.warningCount > 0 ? 'error' : 'success';
+    // v3.0.7 需求1c：tone 不再因警告转 error，固定 success（警告不再进状态框文案，仍写 error-report）。
+    tone = 'success';
   } else {
     // v2.1.9 N6 (T31, D18=a)：删冒号后冗余 \n（同上）；`\n不平账结果表：` 是行间换行保留
     // v2.1.16 A5：批量合并多文件 → 显示「N 个文件合并 M 行」；单文件沿用「文件名（M 行）」
@@ -3486,17 +3530,15 @@ function updateBankStatementRunBtnDisabled() {
   elements.bankStatementRunBtn.disabled = !ready;
 }
 
-// v2.1.16-beta.6 需求A 🔴 资金红线：两个《导出文件》按钮按面板模式互斥（与 row1 路由 mode 一致）。
-//   抽成 helper，使「导入对账单成功」(updateBankStatementUi) 与「导入不平表成功」(:4109 路径) 都能刷新。
+// v2.1.16-beta.6 需求A 🔴 资金红线：《导出文件》按钮按面板模式禁用（与 row1 路由 mode 一致）。
+//   抽成 helper，使「导入对账单成功」(updateBankStatementUi) 与「导入不平表成功」路径都能刷新。
+// v3.0.7 需求2a（C2）：原 row2《导出文件》(bankStatementGatewayReconExportBtn) 已删 → 移除其网关分支；
+//   本 helper 退化为只管 row1《导出文件》(bankStatementExportBtn)：仅 bank 模式 + 已有处理结果可点（gateway 模式下仍禁用）。
 function updateBankStatementExportButtonsDisabled() {
   const isGateway = state.bankStatementProcessRunMode === 'gateway';
   // 预加工组导出：仅 bank 模式 + 已有处理结果可点
   if (elements.bankStatementExportBtn) {
     elements.bankStatementExportBtn.disabled = isGateway || !state.processingResult;
-  }
-  // 不平表组导出：仅 gateway 模式 + reconIdFixSession 就位可点
-  if (elements.bankStatementGatewayReconExportBtn) {
-    elements.bankStatementGatewayReconExportBtn.disabled = !isGateway || !state.reconIdFixSession;
   }
 }
 
@@ -3630,6 +3672,67 @@ function buildImportIssuesSummary(results) {
   return { text: parts.join('\n'), hasFailed: failed.length > 0 };
 }
 
+// v3.0.7 需求2d：「导入文件」按钮升级为通用导入后，main 端对每条成功结果回传 outcome：
+//   - 'processed' → 走 R1-R5 预处理（bank-statement / 退款订单），由状态框「已导入」主流程承载，不在此汇总；
+//   - 'linked'    → 落链接表（bank-deposit/gateway-bill/mid-allocation/fx-settlement），状态框「已导入」分支不体现（语义归银行对账单 session）。
+//   故对 linked 成功单独提炼一段「N 行已存入XX表库」纯文本，追加进状态框（与 issues 同款半角冒号防换行）。
+//   🔴 仅汇总 status==='ok' && outcome==='linked'（保持与 main 契约一致；linked 落库成功 tableKey≠'bank-statement'）。
+function buildLinkedImportSummary(results) {
+  const list = Array.isArray(results) ? results : [];
+  // 链接表 tableKey → 中文表库名（与 renderer-dialogs.js LINKED_TABLE_LABELS 同口径，避免漂移）。
+  const LINKED_TABLE_LABELS = {
+    'bank-deposit': '银行对账单表',
+    'gateway-bill': '网关对账单表库',
+    'mid-allocation': '中台调拨订单表库',
+    'fx-settlement': '外汇交割表库',
+    'fx-option': '外汇期权表库'
+  };
+  const linkedOks = list.filter((r) => r && r.status === 'ok' && r.outcome === 'linked');
+  if (linkedOks.length === 0) return '';
+  // 每文件一行「文件名 → 表库名（N 行）」；行间 \n，段内半角字符（无全角「：」，避开 updateStatusBox 强制换行）。
+  const lines = linkedOks.map((r) => {
+    const label = LINKED_TABLE_LABELS[r.tableKey] || r.tableKey || '';
+    const cnt = Number(r.rowCount) || 0;
+    return `${String(r.fileName || '')} → ${label}（${cnt} 行）`;
+  });
+  return `已存入链接表 ${linkedOks.length} 个:\n${lines.join('\n')}`;
+}
+
+// v3.0.7 修复1（🔴🔴 资金红线 · 语义）：ADM/BOC/JPM-US 银行单现在「既落表 又对账」——
+//   outcome 变为 'processed'（参与对账、出现在结果表），由状态框「已导入：渠道-地区:N行」主流程承载；
+//   同时它们【还】落了 bank-deposit 链接表（main 端经 alsoLinked 挂在 processed result 上）。
+//   为让用户也知道这层副作用，对带 alsoLinked（且无落库 error）的 processed 结果追加一行轻量提示。
+//   🔴 只汇总 outcome==='processed' && alsoLinked 非空 && 无 error（落库失败不报"已存入"，避免误导）；
+//     纯 'linked'（mid-allocation/gateway/fx / 经「链接表管理」导入的 bank-deposit）仍走 buildLinkedImportSummary，
+//     本函数不重复体现。段内一律半角冒号，避开 updateStatusBox 对全角「：」的强制换行。
+function buildAlsoLinkedSummary(results) {
+  const list = Array.isArray(results) ? results : [];
+  const alsoLinkedOks = list.filter((r) =>
+    r && r.status === 'ok' && r.outcome === 'processed'
+    && r.alsoLinked && !r.alsoLinked.error);
+  if (alsoLinkedOks.length === 0) return '';
+  const lines = alsoLinkedOks.map((r) => {
+    const cnt = Number(r.alsoLinked.rowCount) || 0;
+    return `${String(r.fileName || '')}:${cnt} 行已同时存入银行对账单表链接表`;
+  });
+  return lines.join('\n');
+}
+
+// v3.0.7 F1（codex review · 🔴 资金红线）：ADM/BOC/JPM-US 文件已对账(outcome:'processed')但 bank-deposit 副作用
+//   落库失败(alsoLinked.error)——原 buildAlsoLinkedSummary 只报成功、失败被静默丢弃 → 用户看到「成功」但链接表
+//   未更新，后续 R5 退款二跳 / ADM / BOC 对账用旧/缺数据静默错账。本函数提炼这些落库失败行，供 handler 折进 issues
+//   失败段（并置 hasFailed→error tone），使「看似成功实则链接表未更新」可见、提醒用户重导。
+//   段内一律半角冒号，避开 updateStatusBox 对全角「：」的强制换行。
+function buildAlsoLinkedFailureSummary(results) {
+  const list = Array.isArray(results) ? results : [];
+  const fails = list.filter((r) =>
+    r && r.status === 'ok' && r.outcome === 'processed' && r.alsoLinked && r.alsoLinked.error);
+  if (fails.length === 0) return '';
+  return fails.map((r) =>
+    `${String(r.fileName || '')}:已对账，但银行对账单表链接表落库失败:${r.alsoLinked.error}（请重新导入该文件）`
+  ).join('\n');
+}
+
 async function handleBankStatementBatchImport() {
   // 「导入对账单」按钮即批量入口；导入期间禁用防重复触发。
   if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = true;
@@ -3653,7 +3756,27 @@ async function handleBankStatementBatchImport() {
   }
   const results = Array.isArray(result.results) ? result.results : [];
   // v3.0.0 需求2a：去明细确认框，改把 per-file 失败/跳过摘要并入状态框（纯文本，半角冒号防换行）。
-  state.bankStatementImportIssues = buildImportIssuesSummary(results);
+  const issues = buildImportIssuesSummary(results);
+  // v3.0.7 F1（codex review · 🔴 资金红线）：把 ADM/BOC/JPM-US 文件的 bank-deposit 副作用落库失败折进 issues 失败段，
+  //   使「看似成功实则链接表未更新（后续对账用旧/缺数据）」可见 + 转 error tone（详见 buildAlsoLinkedFailureSummary 注释）。
+  const alsoLinkedFailText = buildAlsoLinkedFailureSummary(results);
+  if (alsoLinkedFailText) {
+    issues.text = issues.text ? `${issues.text}\n${alsoLinkedFailText}` : alsoLinkedFailText;
+    issues.hasFailed = true;
+  }
+  // v3.0.7 需求2d：通用导入下，linked 落库成功（outcome==='linked'）单独提炼「已存入XX表库」段，
+  //   合并进状态框 issues.text（追加在失败/跳过段之后；linked 成功非失败 → 不改 hasFailed/tone）。
+  const linkedSummary = buildLinkedImportSummary(results);
+  if (linkedSummary) {
+    issues.text = issues.text ? `${issues.text}\n${linkedSummary}` : linkedSummary;
+  }
+  // v3.0.7 修复1：ADM/BOC/JPM-US 文件（outcome:'processed'）同时落了 bank-deposit 链接表 → 追加副作用提示。
+  //   非失败 → 不改 hasFailed/tone（与 linkedSummary 同款，仅补充 text）。
+  const alsoLinkedSummary = buildAlsoLinkedSummary(results);
+  if (alsoLinkedSummary) {
+    issues.text = issues.text ? `${issues.text}\n${alsoLinkedSummary}` : alsoLinkedSummary;
+  }
+  state.bankStatementImportIssues = issues;
   // 若本批有银行对账单成功导入 → 清「已导出」缓存 + 刷新状态框（与单选导入一致）
   const hasBankStatementOk = results.some((r) => r.status === 'ok' && r.tableKey === 'bank-statement');
   if (hasBankStatementOk) {
@@ -3669,8 +3792,20 @@ async function handleBankStatementBatchImport() {
     } catch (refreshErr) {
       console.error('[导入对账单] 状态刷新失败（已兜底，不阻断提醒）:', refreshErr);
     }
+  } else if (results.some((r) => r && r.status === 'ok' && r.outcome === 'linked')) {
+    // v3.0.7 F2（codex review）：纯 linked 成功（中台调拨/网关/外汇，无银行单）经 importLinkedFileToRepo 已清 main 端
+    //   processingResult；若仅 updateBankStatementUi（按 renderer 缓存重绘）→ 状态框/导出按钮残留旧「已处理/可导出」。
+    //   故拉 session-status refresh（hasProcessingResult=false → state.processingResult=null → 清残留）+ 清 export 缓存。
+    //   不改 runMode（非银行单不进 R1-R5 'bank' 模式，不误覆盖 'gateway'）。
+    state.bankStatementExport = null;
+    try {
+      await refreshBankStatementStatus();
+    } catch (refreshErr) {
+      console.error('[导入文件] linked 成功后状态刷新失败（已兜底，不阻断提醒）:', refreshErr);
+      updateBankStatementUi(); // 兜底：refresh 抛错仍重绘 issues 摘要
+    }
   } else {
-    // v3.0.0 需求2a 🔴 纯失败/无 bank ok 批次：原路径不刷状态框 → 去明细框后会丢失失败/跳过信息。
+    // v3.0.0 需求2a 🔴 纯失败/无 ok 批次：原路径不刷状态框 → 去明细框后会丢失失败/跳过信息。
     //   新增分支让其也渲染 issues。仅刷 UI（不调 refreshBankStatementStatus IPC）：
     //   不改 mode（不误覆盖刚导入不平表的 'gateway'）、不清 export（无有效新数据）。
     updateBankStatementUi();
@@ -4009,7 +4144,11 @@ async function handleBankStatementExport() {
     if (result.status === 'ok') {
       state.bankStatementExport = {
         mainFileName: result.mainFileName || result.mainFilePath,
-        errorReportName: result.errorReportName || null
+        errorReportName: result.errorReportName || null,
+        // v3.0.7 需求1b：导出附带产物文件名（缺省/未生成 → null，状态框「已导出」分支按存在性追加）。
+        //   main.js export 结果字段：platformCleanupName（R5 场景3 中台加款单剔除文件）/ refundBackfillName（R5 场景4 中台退款订单回填文件）。
+        platformCleanupName: result.platformCleanupName || null,
+        refundBackfillName: result.refundBackfillName || null
       };
       // v3.0.0 需求2a：进入「导出」动作 → 清旧导入失败/跳过摘要（已过时）。
       state.bankStatementImportIssues = null;
@@ -4373,58 +4512,16 @@ async function handleReconIdFixExport() {
 }
 
 // ============================================================
-// v2.1.16-beta.5 需求1（PR-4 修订）：资金对账「不平校验」组接到网关 ReconID 修复链路
+// v2.1.16-beta.5 需求1（PR-4 修订）：资金对账「不平校验」运行接到网关 ReconID 修复链路
 //   - 与「对账单 ReconID 修复」网关子模式共用 main 进程 reconIdFixSession（决策1）：
-//     资金对账面板「导入不平表」固定走 subMode='gateway'；run/export 复用同一 session/引擎/导出。
-//   - 修订后 row2 仅两按钮：导入不平表 → handleBankStatementGatewayReconImport；导出文件 → handleReconIdFixExport（reconIdFix.export()）。
-//   - 网关场景运行：删除了 row2 独立《开始运行》，改由 row1《开始运行》(bankStatementRunBtn) 按 mode 智能路由
-//     （handleBankStatementRunRouted → mode='gateway' 时调 handleBankStatementGatewayReconRun()）。本函数仍保留并被复用。
-//   - ⚠️ 共用 session 语义：资金对账面板导入会覆盖 ReconID 修复面板已导入的 gateway/business 文件；
-//     run 时 main 端按 session.subMode vs scenario.category 兜底校验（不一致提示重新导入），不会误跑。
+//     run/export 复用同一 session/引擎/导出。
+//   - 网关场景运行：由 row1《开始运行》(bankStatementRunBtn) 按 mode 智能路由
+//     （handleBankStatementRunRouted → mode='gateway' 时调 handleBankStatementGatewayReconRun()）。
+//   - v3.0.7 需求2a（C2）：原 row2《导入不平表》/《导出文件》两按钮已随面板删除——
+//     对应 handleBankStatementGatewayReconImport 及其绑定一并移除。网关不平表的导入改由
+//     「链接表管理」+「对账单 ReconID 修复」面板入口承载；handleReconIdFixExport 保留（ReconID 修复面板共用）。
+//   - ⚠️ 共用 session 语义：run 时 main 端按 session.subMode vs scenario.category 兜底校验（不一致提示重新导入），不会误跑。
 // ============================================================
-
-// 导入不平表：固定 subMode='gateway'（资金对账面板语义固定网关，不读 state.reconIdFixBillCategory）。
-//   成功后 refreshReconIdFixStatus() 同步 main session → renderer state（让 ReconID 修复面板状态一致），
-//   并把结果反馈到资金对账状态框。
-async function handleBankStatementGatewayReconImport() {
-  try {
-    const result = await window.desktopApi.reconIdFix.import({ subMode: 'gateway' });
-    if (!result || result.status === 'cancelled') {
-      return; // 用户取消，状态保持
-    }
-    if (result.status === 'invalid') {
-      const detail = Array.isArray(result.detailLines) && result.detailLines.length > 0
-        ? `<br>${result.detailLines.slice(0, 5).map((l) => `• ${l}`).join('<br>')}`
-        : '';
-      openModal(createAlertDialog(`导入失败：${result.message || '文件校验未通过'}${detail}`));
-      return;
-    }
-    if (result.status !== 'ok') {
-      openModal(createAlertDialog(`导入失败：${result.message || '未知错误'}`));
-      return;
-    }
-    // 资金红线：导入新文件后清旧导出文案；刷新 main 端 session-status 同步 ReconID 修复面板 state
-    state.reconIdFixExport = null;
-    if (typeof refreshReconIdFixStatus === 'function') {
-      await refreshReconIdFixStatus();  // 写 state.reconIdFixSession（gateway recon session 镜像）= 就绪
-    }
-    // v2.1.16-beta.5 需求1（PR-4 修订）🔴 资金红线：导入不平表成功 → 面板运行模式置 'gateway'，
-    //   row1《开始运行》此后路由到 handleBankStatementGatewayReconRun()（网关场景）。基于「导入不平表成功」动作事实判定，
-    //   不依赖 session 探测。随后重算 row1 按钮 disabled —— 此时 reconIdFixSession 已就绪 → 按钮 enable。
-    state.bankStatementProcessRunMode = 'gateway';
-    updateBankStatementRunBtnDisabled();
-    updateBankStatementExportButtonsDisabled();  // v2.1.16-beta.6 需求A：mode→gateway 后刷新两个导出按钮互斥状态（本路径不走 updateBankStatementUi）
-    // 不写 bankStatementStatusBox（该状态框语义归银行对账单主流程，避免被 updateBankStatementUi 覆盖/冲突）；
-    //   用弹框反馈，与导出提示风格一致。
-    const counts = result.sheetCounts || {};
-    openModal(createAlertDialog(
-      `已导入不平表 ${result.fileName}（${counts.business || 0} 行网关账单 / ${counts.opp || 0} 行渠道账单）。<br>请点击"开始运行"运行已启用的网关对账单修复场景。`,
-      { logLevel: 'info', skipLogReport: true }
-    ));
-  } catch (error) {
-    openModal(createAlertDialog(`导入失败：${error && error.message ? error.message : error}`));
-  }
-}
 
 // 开始运行：取场景管理里「已启用」的 gateway-recon-id-fix 场景（含 JPM 调拨订单修复场景）运行。
 //   - 0 个启用 → 提示去场景管理启用；1 个 → 直接跑；≥2 个 → 弹场景选择对话框让用户挑一个（决策2/3）。
@@ -5739,25 +5836,10 @@ async function applyFullInfo(info) {
   // v2.1.16-beta.5 需求1（PR-4 修订）🔴 资金红线：row1《开始运行》改智能路由（按面板模式分流，不直接绑 handleBankStatementRun）。
   elements.bankStatementRunBtn.addEventListener('click', handleBankStatementRunRouted);
   elements.bankStatementExportBtn.addEventListener('click', handleBankStatementExport);
-  // v2.1.14 B / v2.1.16-beta.5 需求1（PR-4 修订）：资金对账不平校验组 + 链接表管理按钮绑定
-  //   - 导入不平表 → reconIdFix.import({subMode:'gateway'})，与「对账单 ReconID 修复」网关子模式共用 reconIdFixSession（后端零改动）
-  //   - 导出文件 → reconIdFix.export()，复用 handleReconIdFixExport（导出网关对账单修复文件）
-  //   - 网关场景运行：已删除本行独立《开始运行》，改由 row1《开始运行》(bankStatementRunBtn) 按 mode 路由（见 handleBankStatementRunRouted）
-  //   - 链接表管理 → 打开链接表管理弹窗
-  if (elements.bankStatementGatewayReconImportBtn) {
-    elements.bankStatementGatewayReconImportBtn.addEventListener('click', () => {
-      handleBankStatementGatewayReconImport().catch((error) => {
-        console.error('handleBankStatementGatewayReconImport failed:', error);
-      });
-    });
-  }
-  if (elements.bankStatementGatewayReconExportBtn) {
-    elements.bankStatementGatewayReconExportBtn.addEventListener('click', () => {
-      handleReconIdFixExport().catch((error) => {
-        console.error('handleReconIdFixExport (gateway recon export) failed:', error);
-      });
-    });
-  }
+  // v2.1.14 B：资金对账数据处理面板「链接表管理」按钮绑定 → 打开链接表管理弹窗。
+  // v3.0.7 需求2a（C2）：原 row2《导入不平表》/《导出文件》两按钮已随面板删除——对应事件绑定一并移除
+  //   （导入不平表绑定 handleBankStatementGatewayReconImport、导出绑定 handleReconIdFixExport 的宿主按钮均已删）。
+  //   网关 ReconID 修复仍由「对账单 ReconID 修复」面板入口承载；handleReconIdFixExport 函数本体保留（该面板 5790 行仍绑定）。
   if (elements.bankStatementLinkedTableBtn) {
     elements.bankStatementLinkedTableBtn.addEventListener('click', () => openModal(createLinkedTableManagerDialog()));
   }

@@ -288,32 +288,28 @@
                 <button id="bankStatementRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
               </div>
               <div class="cell right">
-                <!-- v2.1.16 A5：「导入对账单」改为批量入口（多选 + 按表头识别路由，spec 2.3.1 两按钮布局 + 2.4.2 导入即批量）。
-                     单选 1 个文件是批量的子集，行为等同原单选导入。布局保持 v2.1.14 两按钮（导入对账单 / 导出文件）。 -->
+                <!-- v2.1.16 A5：批量入口（多选 + 按表头识别路由，spec 2.3.1 两按钮布局 + 2.4.2 导入即批量）。单选 1 个文件是批量的子集，行为等同原单选导入。
+                     v3.0.7 C4：按钮文案「导入对账单」→「导入文件」（id/handler/IPC 不变）；C5：导入 IPC 升级为通用导入（识别+路由+落库桥接）。布局保持两按钮（导入文件 / 导出文件）。 -->
                 <div class="pending-action-pair">
-                  <button id="bankStatementImportBtn" class="primary-btn" type="button">导入对账单</button>
+                  <button id="bankStatementImportBtn" class="primary-btn" type="button">导入文件</button>
                   <button id="bankStatementExportBtn" class="secondary-btn" type="button" disabled>导出文件</button>
                 </div>
               </div>
             </div>
-            <div class="control-row">
-              <div class="cell left">
+            <!-- v3.0.7：原 row2(场景管理)+row3(链接表管理/状态框) 合并为单 control-row（2 列 2 行 grid）。
+                 ① 删除原 row2 网关按钮对（导入不平表 bankStatementGatewayReconImportBtn / 导出文件 bankStatementGatewayReconExportBtn）。
+                 ② layout-mirrored(rtl) 下 col1(1fr) 视觉在右 = 场景管理(行1)/链接表管理(行2)，大小+位置与原 row2/row3 完全一致；
+                    col2(1.4fr) 视觉在左 = 状态框，grid-row 跨两行 + 单元格 align-self:stretch →
+                    上沿对齐场景管理上沿、下沿对齐原状态框下沿（垂直高度增大，不再被 min-height:110 钉死居中）。
+                 详见 styles-gemini-extra.css .bank-statement-board-merged-row 注释。 -->
+            <div class="control-row bank-statement-board-merged-row">
+              <div class="cell left bsb-merged-scenario">
                 <button id="bankStatementScenarioBtn" class="secondary-btn" type="button">场景管理</button>
               </div>
-              <div class="cell right">
-                <div class="pending-action-pair">
-                  <button id="bankStatementGatewayReconImportBtn" class="primary-btn" type="button">导入不平表</button>
-                  <!-- v2.1.16-beta.5 需求1（PR-4 修订）：删除 row2 独立《开始运行》——改由 row1《开始运行》(bankStatementRunBtn) 按面板模式智能路由到网关场景；
-                       本行导出文案「不平校验导出」→「导出文件」（绑定保持 handleReconIdFixExport 不变）。 -->
-                  <button id="bankStatementGatewayReconExportBtn" class="secondary-btn" type="button">导出文件</button>
-                </div>
-              </div>
-            </div>
-            <div class="control-row">
-              <div class="cell left">
+              <div class="cell left bsb-merged-linked">
                 <button id="bankStatementLinkedTableBtn" class="secondary-btn" type="button">链接表管理</button>
               </div>
-              <div class="cell right">
+              <div class="cell right bsb-merged-status">
                 <div id="bankStatementStatusBox" class="status-box">
                   <span class="status-spark" aria-hidden="true">
                     <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusBankStatement" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusBankStatement)"/></svg>

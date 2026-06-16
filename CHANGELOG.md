@@ -1,5 +1,31 @@
 # Changelog
 
+## 3.0.7 - 2026-06-16
+
+v3.0.7 迭代（资金对账数据处理模块 体验/产出优化 + 一项 CI 打包红线修复）：① **需求1 状态框文案重排**（纯展示）——「已处理」按「渠道-地区」分组多行展示、移除「N 警告」尾巴（警告仍写 error-report 文件），并新增「中台加款单脏数据处理」(R5场景3) +「中台退款订单回填」(R5场景4) 两行命中数（对应场景启用即显示，含「0 条命中」）；② **需求2 面板简化 +「导入文件」通用入口**（🔴 资金红线）——删除「导入不平表」及其「导出文件」网关按钮对，「导入对账单」改名「导入文件」并升级为通用导入（按表头识别 + Channel 二次路由：ADM/BOC/JPM-US 44 列文件落 `linked_bank_deposit` 链接表供 R1-R5 / R5 退款二跳消费，含常规渠道则走 R1-R5 主处理），状态框合并跨两行增高（上沿对齐场景管理、下沿对齐原下沿，按钮零位移）；③ **需求3 命中明细格式重排**（纯展示）——结果文件命中明细改为 `字段名:旧值→新值`（含数字→中文双引号 `"v"`、否则→半角尖括号 `<v>`），多条 `; ` 单行连接、单元格关闭 wrapText 不再撑高行；④ **dist-size 守卫阈值校准**（🔴 CI/打包红线）——`check-dist-size` asar 上限 25MB→70MB，修复 main 自 v3.0.5 起 build 作业因 `app.asar≈57.5MB` 超 25MB 硬阈值 `exit 1`（PR 不跑 build job 故长期未暴露）。质量门 `npm run release-check` 全绿（**unit 2858 / integration 31 脚本 1424 用例 / smoke 全模块 PASS**）。⚠️ **资金红线**：仅需求2「导入文件」改了链接表数据来源（R1-R5 / R5 退款二跳）；需求1/3 为纯展示/格式，不改任何对账值 / 匹配 / 派生逻辑。
+
+### 🔴 对外契约变更（合并适配提示 · 升级必读）
+
+1. **「导入对账单」按钮改名「导入文件」并升级为通用导入入口**（需求2 · 🔴 资金红线 · 行为扩展，升级必读）：原仅导银行对账单的入口（id / handler / IPC 不变）升级为「识别 + 路由 + 落库桥接」通用导入——44 列银行对账单文件先按 `BANK_STATEMENT` 识别，再读 Channel 列二次路由：**非空 Channel 全 ∈ {ADM, BOC, JPM-US}** → 整文件走 **bank-deposit 链接表导入**（`replaceLinkedTable('bank-deposit', …)` + ADM/BOC 派生；JPM-US 行落 `linked_bank_deposit` 供 R5 退款回填 CustomerRef 二跳读取）；**含常规渠道** → 照旧 R1-R5 主处理。⚠️ 链接表是 R1-R5 与 R5 退款二跳的**数据来源**，落库后数据仍进主处理。「链接表管理」入口与功能完全不变（两入口并存）。
+2. **退款回填务必「一次多选」导入退款单 + 银行单**（🔴 资金红线 · 操作约束，升级必读）：R5 退款订单回填依赖退款单与 JPM-US 银行单**同批**在内存会话中共存。若**分两次**导入（先退款单、再银行单），第二次导银行单会触发既有「导入新银行单清空退款 session」逻辑（`main.js`），run 时退款池为空 → **退款回填静默失败、不产出中台退款回填文件**。需求1 新增的「中台退款订单回填:0 条命中」可作运行时自检信号（启用了却 0 命中 = 退款单没进会话）。
+
+### 新增
+
+- **需求1：状态框命中提醒扩展**（纯展示 · `reconciliation-orchestrator.js` stats / `main.js` 透传 / `renderer.js` 渲染）：
+  - 「已处理」分支改用 `stats.channelRegionHits` 按「**渠道-地区**」分组多行展示（每行 `渠道-地区:N 条命中<场景名…>`，渠道-地区口径复用 `channelEnumRepository.extractChannelRegionCombos`）；旧持久化 `processingResult` / 旧 main（无该字段）→ 完全回退原 `hitScenarios` 格式，不抛错。
+  - 新增两行（对应场景**启用即显示**，含「0 条命中」，`stats.r5s3Enabled` / `r5s4Enabled` 门控）：「**中台加款单脏数据处理**」(R5场景3 命中数) +「**中台退款订单回填**」(R5场景4 回填数)。
+- **「导入文件」通用导入路由专项集成测试**：`scripts/integration/bank-statement-universal-import-routing.js`（44 列文件 Channel 二次路由 / 链接表落库 / 主处理分流 契约守护）。
+
+### 变更
+
+- **需求2：面板简化 +「导入文件」入口**（🔴 资金红线 · `index.html` / `renderer.js` / `main.js` / `styles-gemini-extra.css` / `styles.css`）：删除原 row2 两个网关按钮（「导入不平表」`bankStatementGatewayReconImportBtn` /「导出文件」`bankStatementGatewayReconExportBtn`，含 renderer DOM 缓存 / 事件绑定 / 导出 disabled 网关分支清理）；「导入对账单」→「导入文件」（详见对外契约变更①）；原 row2(场景管理)+row3(链接表管理/状态框) 合并为单 control-row（2 列×2 行 grid），状态框跨两行 + `align-self:stretch` → **垂直高度由 110px 增至 ≈176px**（上沿对齐场景管理上沿、下沿对齐原状态框下沿；场景管理 / 链接表管理 / 开始运行 / 导入文件 零位移，像素级实测复核）。
+- **需求3：命中明细模板重排**（纯展示 · `exceljs-writer.js buildHitDetail`）：结果文件命中明细由原 `<命中场景:…;字段名:…;变更前:…;变更后:…>` 改为每条 `字段名:旧值→新值`——`wrapHitValue` 取值含任意数字字符（trim 后 `/\d/`）→ 中文双引号 `"v"`、否则（空串/纯英文/纯符号/中文）→ 半角尖括号 `<v>`；多条 `; ` 连成**单行**、命中明细单元格 `wrapText` 关闭 → **不再撑高行高**；OPEN-7 跨期提醒 append 由 `\n` 改 `; `。
+- **dist-size 守卫阈值**（🔴 CI/打包红线 · `scripts/check-dist-size.js`）：`MAX_ASAR_BYTES` 25MB→70MB（按实测 `app.asar≈57.5MB` + 余量校准）。修复 main 自 v3.0.5 起 "Build Windows Packages" 的 "Check dist size" 步骤 `exit 1`（`build` 作业 `if: github.event_name != 'pull_request'` → PR 跳过故未暴露）。纯配置常量，**零运行时行为改动**；三大 Excel 库均在用、不删依赖，守卫对「开发文档/脚本误入包」的防回归能力保留。
+
+### 移除
+
+- 资金对账面板「导入不平表」及其右侧「导出文件」网关按钮对（网关 ReconID 修复仍可经「对账单 ReconID 修复」模块使用，后端零改动）。
+
 ## 3.0.6 - 2026-06-16
 
 v3.0.6 迭代（资金对账数据处理模块，三需求 + 一项退役，team-lead 拆分委托 dev 分 T1~T11 实施）：① **需求1 调拨对账单派生**——「链接表管理」导入「中台调拨订单」后自动派生隐藏表「调拨对账单」（一行中台单 → FundTransfer-in / out 两行）；② **需求2 中台调拨订单对账ID回填「数据来源二选一」**——「中台调拨订单对账ID回填」（R5 场景2）新增勾选框「对账数据来源为中台调拨单表」（**默认勾选**），勾选用调拨对账单匹配回填、取消沿用网关对账单（原 R5s2）；③ **需求3 DBS-Charge 资金校验**——原全渠道「Charge转outbound」整体重写为 **DBS 渠道专属**校验，对账编排新增 R3.5 轮（R3 后、R4 前）；④ **charge-outbound 退役**——非 DBS 渠道不再有 charge→outbound，v3.0.4 块 G「同 reconid 多 Charge 取 Debit 最大行」逻辑移除，旧库该场景每次启动幂等删除。质量门 `npm run release-check` 全绿（**unit 2803 / integration 30 脚本 / smoke 全模块 PASS**）。⚠️ **多处资金红线**：需求1 派生表是需求2 / 需求3 回填与校验的数据来源（大账号按方向取卡号、全角括号列名漂移 = 大账号全空）；需求2 / 需求3 均**改写银行 `ReconciliationId`**（需求3 还改写 `FundType`）；需求3 R3.5 在 R4 前演化 `bankRows` 同一引用（叠加链跨轮保留）。

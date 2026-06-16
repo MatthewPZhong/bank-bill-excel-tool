@@ -2701,6 +2701,17 @@ select {
    cell.left secondary（场景管理/链接表管理）按 180px 对齐，右列三按钮等宽。 */
 .bank-statement-board .cell.left .primary-btn { min-width: 180px; }
 
+/* v3.0.7（General 镜像，disabled）：原 row2(场景管理)+row3(链接表管理/状态框)合并为单 control-row。
+   2 列(沿用 1fr 1.4fr)×2 行(auto 110px，row-gap:18px=原 .control-row 间距)：场景管理 grid-row1 / 链接表管理 grid-row2（位置同原 row2/row3）；
+   状态框单元格 grid-row:1/3 + align-self:stretch → 撑满跨两行(≈176px)、状态框垂直增高（上沿对齐场景管理上沿、下沿对齐原状态框下沿）。 */
+#bankStatementModulePanel .bank-statement-board-merged-row {
+  grid-template-rows: auto 110px;
+  row-gap: 18px;
+}
+#bankStatementModulePanel .bsb-merged-scenario { grid-column: 1; grid-row: 1; }
+#bankStatementModulePanel .bsb-merged-linked   { grid-column: 1; grid-row: 2; }
+#bankStatementModulePanel .bsb-merged-status   { grid-column: 2; grid-row: 1 / 3; align-self: stretch; }
+
 /* v2.1.12 需求：VCC业务OP计算 + 月度银行对账单BU回填校验 主面板沿垂直中线镜像（文字正常，用户最终确认）
    实现：容器 direction:rtl 仅翻 ①grid 列 ②列宽；③按钮对、④状态框 各用 direction:ltr 回正
    = ③导入文件(左)→开始运行(右)、④图标在左+文字可读（用户要求按钮对对调、状态框图标移回左）。

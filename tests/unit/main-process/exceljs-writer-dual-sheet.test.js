@@ -22,29 +22,65 @@ function tmpFile(name) {
   return path.join(dir, name);
 }
 
-// ===== buildHitDetail（命中明细拼接，D9 + B-Q2）=====
-test('B buildHitDetail 单条字段变更格式精确', () => {
+// ===== buildHitDetail（命中明细拼接，v3.0.7 需求B/C/D 格式 {字段名}:{wrap(旧)}→{wrap(新)}）=====
+test('B buildHitDetail 单条字段变更格式精确（字段名前缀 + 半角冒号 + 全角箭头；纯数字→中文双引号）', () => {
   const out = buildHitDetail([
     { scenarioName: '按字段区分发生额', column: 'Credit Amount', oldValue: '100', newValue: '0' }
   ]);
-  assert.strictEqual(out, '<命中场景:"按字段区分发生额";"Credit Amount";变更前:"100";变更后:"0">');
+  assert.strictEqual(out, 'Credit Amount:“100”→“0”');
 });
 
-test('B buildHitDetail 多字段变更换行拼接（B-Q2）', () => {
+test('B buildHitDetail 多字段变更 "; " 单行拼接（无换行，末条无尾分隔）', () => {
   const out = buildHitDetail([
     { scenarioName: 'S', column: 'A', oldValue: '1', newValue: '2' },
     { scenarioName: 'S', column: 'B', oldValue: '3', newValue: '4' }
   ]);
-  assert.strictEqual(
-    out,
-    '<命中场景:"S";"A";变更前:"1";变更后:"2">\n<命中场景:"S";"B";变更前:"3";变更后:"4">'
-  );
-  assert.ok(out.includes('\n'), '多段用换行分隔');
+  assert.strictEqual(out, 'A:“1”→“2”; B:“3”→“4”');
+  assert.ok(out.includes('; '), '多段用 "; " 分隔');
+  assert.ok(!out.includes('\n'), 'C 单行布局：命中明细绝不含换行');
 });
 
 test('B buildHitDetail 空 → 空串', () => {
   assert.strictEqual(buildHitDetail([]), '');
   assert.strictEqual(buildHitDetail(null), '');
+});
+
+// ===== wrap 含数字/不含数字边界（v3.0.7 需求B/C/D：字段名前缀 + 全角箭头 →）=====
+//   wrapHitValue 口径不变：含【任意数字字符】→ 中文双引号（trim 后）；完全不含数字 → 半角尖括号（原始 s）。
+//   前缀 = column（裸写），箭头 = 全角 →，D：值不省略。
+test('B buildHitDetail wrap 边界：空串/负数小数/千分位/数字英文混合/纯英文（字段名前缀 + 全角箭头）', () => {
+  // 空串 → <>（不含数字 → 尖括号空）；column 缺省 → 前缀空串
+  assert.strictEqual(buildHitDetail([{ oldValue: '', newValue: '' }]), ':<>→<>');
+  // 负数 / 小数（含数字）→ 中文双引号（trim 后判定）
+  assert.strictEqual(
+    buildHitDetail([{ column: 'Amount', oldValue: '-12.5', newValue: '3.0' }]),
+    'Amount:“-12.5”→“3.0”'
+  );
+  // 千分位含逗号（含数字）→ 中文双引号（按"含数字"归双引号）
+  assert.strictEqual(
+    buildHitDetail([{ column: 'Amount', oldValue: '1,000', newValue: '2,000' }]),
+    'Amount:“1,000”→“2,000”'
+  );
+  // 字母数字混合（含数字）→ 中文双引号
+  assert.strictEqual(
+    buildHitDetail([{ column: 'Ref', oldValue: 'abc123', newValue: 'x' }]),
+    'Ref:“abc123”→<x>'
+  );
+  // 数字英文混合（如交易流水号 T54SWIC494447，含数字）→ 中文双引号
+  assert.strictEqual(
+    buildHitDetail([{ column: 'ReconciliationId', oldValue: 'T54SWIC494447', newValue: '123' }]),
+    'ReconciliationId:“T54SWIC494447”→“123”'
+  );
+  // 纯英文（Fundtransfer-out，不含数字）→ 尖括号（保留原始）
+  assert.strictEqual(
+    buildHitDetail([{ column: 'FundType', oldValue: 'Fundtransfer-out', newValue: 'Refund' }]),
+    'FundType:<Fundtransfer-out>→<Refund>'
+  );
+  // 前后带空格的纯数字 → trim 后走双引号分支，显示 trim 后值
+  assert.strictEqual(
+    buildHitDetail([{ column: 'Credit Amount', oldValue: ' 100 ', newValue: '0' }]),
+    'Credit Amount:“100”→“0”'
+  );
 });
 
 // ===== sheet1「未命中场景」：A1 提示 + 表头 + FundType 排序（B-1/B-2/B-Q1/D8）=====
@@ -91,10 +127,10 @@ test('B sheet2 命中场景：第1列命中明细 + 原列右移1 + 标黄右移
   // B-3：第1列表头 = 命中明细
   assert.strictEqual(s2.getCell(1, 1).value, HIT_DETAIL_HEADER, '第1列表头=命中明细');
   assert.strictEqual(s2.getCell(1, 2).value, 'MerchantId', '原表头右移1');
-  // B-4：命中明细内容（与 modifications 逐条对应）
+  // B-4：命中明细内容（v3.0.7 需求B/C/D 格式 {字段名}:{wrap(旧)}→{wrap(新)}；old/x 均非数字→尖括号，全角箭头）
   assert.strictEqual(
     s2.getCell(2, 1).value,
-    '<命中场景:"场景1";"FundType";变更前:"old";变更后:"x">'
+    'FundType:<old>→<x>'
   );
   // 原数据右移1：MerchantId 在第2列
   assert.strictEqual(s2.getCell(2, 2).value, 'm1', '原数据列右移1');

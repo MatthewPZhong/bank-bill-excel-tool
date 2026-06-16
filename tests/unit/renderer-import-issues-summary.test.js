@@ -37,14 +37,16 @@ function extractFunctionSource(src, fnName) {
 }
 
 // 实例化：new Function 返回该纯函数（注入到一个返回它的工厂里）
-function loadBuildImportIssuesSummary() {
-  const fnSource = extractFunctionSource(source, 'buildImportIssuesSummary');
+function loadFn(fnName) {
+  const fnSource = extractFunctionSource(source, fnName);
   // eslint-disable-next-line no-new-func
-  const factory = new Function(`${fnSource}\nreturn buildImportIssuesSummary;`);
+  const factory = new Function(`${fnSource}\nreturn ${fnName};`);
   return factory();
 }
 
-const buildImportIssuesSummary = loadBuildImportIssuesSummary();
+const buildImportIssuesSummary = loadFn('buildImportIssuesSummary');
+// v3.0.7 需求2d：buildLinkedImportSummary 同为自包含纯函数（仅依赖入参 + Array/String/filter/map/join），可同款抽取执行。
+const buildLinkedImportSummary = loadFn('buildLinkedImportSummary');
 
 describe('buildImportIssuesSummary — 行为（v3.0.0 需求2a）', () => {
   test('全 ok（无跳过无失败）→ 空摘要、hasFailed=false', () => {
@@ -171,5 +173,124 @@ describe('updateBankStatementUi — issues 追加护栏（v3.0.0 需求2a）', (
       '退款提醒触发应保留（迁移到成功路径末尾）');
     assert.ok(source.includes('if (!refundPrompted) maybePromptGatewayReconImport();'),
       'C3 提醒与退款互斥触发应保留');
+  });
+});
+
+// v3.0.7 需求2d：buildLinkedImportSummary 行为（通用导入 linked 落库成功汇总）
+describe('buildLinkedImportSummary — 行为（v3.0.7 需求2d）', () => {
+  test('无 linked 成功（空 / 非数组 / 仅 processed / 仅失败）→ 空串', () => {
+    assert.strictEqual(buildLinkedImportSummary([]), '');
+    assert.strictEqual(buildLinkedImportSummary(null), '');
+    assert.strictEqual(buildLinkedImportSummary('x'), '');
+    // processed（非 linked）不计入
+    assert.strictEqual(buildLinkedImportSummary([
+      { status: 'ok', outcome: 'processed', tableKey: 'bank-statement', fileName: 'A.xlsx', rowCount: 10 }
+    ]), '');
+    // 失败的 linked（status≠ok）不计入
+    assert.strictEqual(buildLinkedImportSummary([
+      { status: 'write-error', outcome: 'linked', tableKey: 'bank-deposit', fileName: 'B.xlsx' }
+    ]), '');
+  });
+
+  test('单个 linked 成功 → 「已存入链接表 1 个:\\n文件 → 表库名（N 行）」（半角冒号 + 中文表库名）', () => {
+    const r = buildLinkedImportSummary([
+      { status: 'ok', outcome: 'linked', tableKey: 'gateway-bill', fileName: '网关.xlsx', rowCount: 33 }
+    ]);
+    assert.strictEqual(r, '已存入链接表 1 个:\n网关.xlsx → 网关对账单表库（33 行）');
+    // 🔴 半角冒号防换行：标题后必须半角 ':'，不得全角「：」
+    assert.ok(!r.includes('个：'), 'linked 汇总标题后必须用半角冒号');
+  });
+
+  test('多个 linked 成功 → 各文件一行、\\n 拼接；覆盖 bank-deposit/mid-allocation/fx-settlement 标签', () => {
+    const r = buildLinkedImportSummary([
+      { status: 'ok', outcome: 'linked', tableKey: 'bank-deposit', fileName: '入金.xlsx', rowCount: 5 },
+      { status: 'ok', outcome: 'linked', tableKey: 'mid-allocation', fileName: '调拨.xlsx', rowCount: 8 },
+      { status: 'ok', outcome: 'linked', tableKey: 'fx-settlement', fileName: '外汇.xlsx', rowCount: 2 }
+    ]);
+    assert.strictEqual(
+      r,
+      '已存入链接表 3 个:\n入金.xlsx → 银行对账单表（5 行）\n调拨.xlsx → 中台调拨订单表库（8 行）\n外汇.xlsx → 外汇交割表库（2 行）'
+    );
+  });
+
+  test('混合（processed + linked + 失败）→ 只汇总 linked 成功项', () => {
+    const r = buildLinkedImportSummary([
+      { status: 'ok', outcome: 'processed', tableKey: 'bank-statement', fileName: '对账单.xlsx', rowCount: 100 },
+      { status: 'ok', outcome: 'linked', tableKey: 'gateway-bill', fileName: '网关.xlsx', rowCount: 7 },
+      { status: 'read-error', fileName: '坏.xlsx' }
+    ]);
+    assert.strictEqual(r, '已存入链接表 1 个:\n网关.xlsx → 网关对账单表库（7 行）');
+  });
+
+  test('未知 tableKey 回落到 tableKey 字面；rowCount 非数字回落 0', () => {
+    const r = buildLinkedImportSummary([
+      { status: 'ok', outcome: 'linked', tableKey: 'unknown-table', fileName: 'U.xlsx' }
+    ]);
+    assert.strictEqual(r, '已存入链接表 1 个:\nU.xlsx → unknown-table（0 行）');
+  });
+});
+
+// 源码护栏：handleBankStatementBatchImport 把 linked 汇总并入状态框 issues（不改 hasFailed/tone）
+describe('buildLinkedImportSummary — 状态框合并护栏（v3.0.7 需求2d）', () => {
+  test('linked 汇总只在 status===ok && outcome===linked 时计入', () => {
+    assert.ok(source.includes("r.status === 'ok' && r.outcome === 'linked'"),
+      'buildLinkedImportSummary 应仅汇总 status===ok && outcome===linked');
+  });
+
+  test('linked 汇总以 \\n 合并进 issues.text（追加在失败/跳过段之后）', () => {
+    assert.ok(source.includes('const linkedSummary = buildLinkedImportSummary(results);'),
+      'handleBankStatementBatchImport 应调用 buildLinkedImportSummary(results)');
+    assert.ok(source.includes('issues.text = issues.text ? `${issues.text}\\n${linkedSummary}` : linkedSummary;'),
+      'linked 汇总应以 \\n 合并进 issues.text（空 issues 时直接用 linkedSummary）');
+  });
+});
+
+// v3.0.7 F1（codex review · 🔴 资金红线）：bank-deposit 副作用落库失败可见
+const buildAlsoLinkedFailureSummary = loadFn('buildAlsoLinkedFailureSummary');
+describe('buildAlsoLinkedFailureSummary — 副作用落库失败可见（v3.0.7 F1）', () => {
+  test('processed + alsoLinked.error → 提炼失败行（含文件名/错误/重导提示，半角冒号防换行）', () => {
+    const t = buildAlsoLinkedFailureSummary([
+      { status: 'ok', outcome: 'processed', fileName: 'JPMUS.xlsx', alsoLinked: { error: 'DB write failed' } }
+    ]);
+    assert.ok(t.includes('JPMUS.xlsx'), '应含文件名');
+    assert.ok(t.includes('DB write failed'), '应含底层错误');
+    assert.ok(t.includes('请重新导入'), '应提示重导');
+    assert.ok(!t.includes('：'), '🔴 段内必须半角冒号，避开 updateStatusBox 全角「：」强制换行');
+  });
+
+  test('processed + alsoLinked 成功（无 error）→ 不报失败（空串，避免与"已存入"重复误导）', () => {
+    assert.strictEqual(buildAlsoLinkedFailureSummary([
+      { status: 'ok', outcome: 'processed', fileName: 'A.xlsx', alsoLinked: { rowCount: 10 } }
+    ]), '');
+  });
+
+  test('outcome!==processed / 无 alsoLinked / 非 ok / 空入参 → 忽略（兜底空串）', () => {
+    assert.strictEqual(buildAlsoLinkedFailureSummary([
+      { status: 'ok', outcome: 'linked', fileName: 'L.xlsx', alsoLinked: { error: 'x' } }
+    ]), '', 'outcome!==processed 不计入');
+    assert.strictEqual(buildAlsoLinkedFailureSummary([
+      { status: 'ok', outcome: 'processed', fileName: 'N.xlsx' }
+    ]), '', '无 alsoLinked 不计入');
+    assert.strictEqual(buildAlsoLinkedFailureSummary([]), '');
+    assert.strictEqual(buildAlsoLinkedFailureSummary(null), '');
+  });
+
+  test('集成护栏：handler 调用本函数并把失败折进 issues + 置 hasFailed=true（转 error tone）', () => {
+    assert.ok(source.includes('const alsoLinkedFailText = buildAlsoLinkedFailureSummary(results);'),
+      'handleBankStatementBatchImport 应调用 buildAlsoLinkedFailureSummary(results)');
+    assert.ok(source.includes('issues.hasFailed = true;'),
+      '落库失败应置 issues.hasFailed = true');
+  });
+});
+
+// v3.0.7 F2（codex review）：纯 linked 成功后须 refresh（清 main 已清空的 processingResult 残留）源码护栏
+describe('linked-only 导入后状态刷新护栏（v3.0.7 F2）', () => {
+  test('handler 含「纯 linked 成功」分支，且分支内 refresh + 清 export', () => {
+    const anchor = "} else if (results.some((r) => r && r.status === 'ok' && r.outcome === 'linked')) {";
+    const idx = source.indexOf(anchor);
+    assert.ok(idx !== -1, 'handler 应有纯 linked 成功分支');
+    const branch = source.slice(idx, idx + 700);
+    assert.ok(branch.includes('state.bankStatementExport = null;'), 'linked 分支应清 export 缓存');
+    assert.ok(branch.includes('await refreshBankStatementStatus();'), 'linked 分支应 refresh 状态（清 processingResult 残留）');
   });
 });

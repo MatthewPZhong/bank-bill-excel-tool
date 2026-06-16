@@ -43,6 +43,94 @@ const { runAllScenarios } = require('./scenario-dispatcher');
 // 重建 modifiedRows 时需嫁接 R2 命中元数据，但要排除这两个（_rowId 是行键、_modifiedColumns 由编排器跨轮合并重算）
 const META_EXCLUDE_KEYS = new Set(['_rowId', '_modifiedColumns']);
 
+// v3.0.7 需求1a：_round（allMods 轮次标记）→ 中文轮次场景标签（钉死，禁臆造）。
+//   仅用于 R4/R5 改写行——这些行无 R2 命中元数据（stats.hitScenarios / _hitScenarioName 仅由 R2 dispatcher 产出），
+//   状态框「已处理」按 渠道-地区 分组展示场景名时，需用稳定的轮次中文标签兜底（来源 = allMods 该 rowId 的 _round）。
+//   R2 不走此表（用 _hitScenarioName）；R5s3 cleanupRows / R5s4 backfillRows 不进 modifiedRows（mergeMods 恒空 / 不 mergeMods），
+//   故几乎不会出现在 channelRegionHits（保留 R5s3 标签仅为完备，R5s4 永不出现无需标签）。
+//   标签语义与各引擎对齐：R3.5=DBS-Charge 资金校验、R4=fund-nature-check 资金性质校验、
+//   R5s2-recon=调拨对账单回填、R5s2=资金划转回填、R5s2b=Payment线下调拨回填、R5s3=平台Inbound剔除。
+const ROUND_LABELS = {
+  'R3.5': 'DBS-Charge资金校验',
+  R4: '资金性质校验',
+  'R5s2-recon': '调拨对账单回填',
+  R5s2: '资金划转回填',
+  R5s2b: 'Payment线下调拨回填',
+  R5s3: '平台Inbound剔除'
+};
+
+/**
+ * v3.0.7 需求1a：按「渠道-地区」聚合 modifiedRows，产出状态框「已处理」分支所需的命中明细。
+ *
+ * 🔴 红线：纯只读聚合——只对已产出的 modifiedRows 计行数 + 收集场景名，不改任何 bankRow 字段 /
+ *   modifications / modColsByRowId / 行数守恒。属审计/展示增强，与 R1-R5 对账匹配值/派生口径完全解耦。
+ *
+ * channelRegion 单行口径【与 channel-enum-repository.js extractChannelRegionCombos 单行逻辑逐字一致（钉死同源）】：
+ *   - Channel（trim 后）为空 → 跳过整行（不计入任何组合，与枚举/前缀口径一致）。
+ *   - 地区（trim 后）为空 → channelRegion = Channel（不拼 'JPM-' 脏值）。
+ *   - 地区非空 → channelRegion = `Channel-地区`。
+ *   列键严格用 'Channel' 与中文 '地区' 字面量（与枚举仓储同源；内联实现以避免 main-process→backend 反向依赖，
+ *   且 extractChannelRegionCombos 是「整批→去重数组」，无法直接复用于「单行→串 + 关联场景」）。
+ *
+ * 场景名来源（每行）：
+ *   - R2 命中行：r._hitScenarioName（buildOutputRows 嫁接自 r2HitByRowId，源自 dispatcher）。
+ *   - R4/R5-only 行（无 _hitScenarioName）：按 r._rowId 在 allMods 反查该行命中的 _round 集合，
+ *     经 ROUND_LABELS 映射成稳定中文标签兜底（allMods 是 rowId→轮次的唯一可靠映射）。
+ *
+ * @param {Array<Object>} modifiedRows buildOutputRows 产出的命中行（已去重，每行只计一次）
+ * @param {Array<Object>} allMods 汇总 modifications（每条带 _round 标记；行键 rowId）
+ * @returns {Array<{ channelRegion: string, rowCount: number, scenarioNames: string[] }>}
+ *   按 channelRegion 升序排序；scenarioNames 去重 + 升序排序；空集（无命中行 / 全部行 Channel 空）→ []。
+ */
+function buildChannelRegionHits(modifiedRows, allMods) {
+  const rows = Array.isArray(modifiedRows) ? modifiedRows : [];
+  // rowId → 该行命中的 _round 集合（O(allMods) 预构，供 R4/R5 行兜底反查轮次标签）
+  const roundsByRowId = new Map();
+  for (const m of Array.isArray(allMods) ? allMods : []) {
+    if (!m || m.rowId === undefined || m.rowId === null || !m._round) continue;
+    if (!roundsByRowId.has(m.rowId)) roundsByRowId.set(m.rowId, new Set());
+    roundsByRowId.get(m.rowId).add(m._round);
+  }
+
+  // channelRegion → { rowCount, scenarioNameSet }
+  const byCombo = new Map();
+  for (const r of rows) {
+    const obj = r && typeof r === 'object' ? r : {};
+    const ch = obj.Channel === null || obj.Channel === undefined ? '' : String(obj.Channel).trim();
+    if (ch === '') continue; // Channel 空 → 跳过整行（与枚举口径一致）
+    const region = obj['地区'] === null || obj['地区'] === undefined ? '' : String(obj['地区']).trim();
+    const channelRegion = region !== '' ? `${ch}-${region}` : ch;
+
+    if (!byCombo.has(channelRegion)) {
+      byCombo.set(channelRegion, { rowCount: 0, scenarioNameSet: new Set() });
+    }
+    const bucket = byCombo.get(channelRegion);
+    bucket.rowCount += 1; // modifiedRows 已去重 → 每行只计一次
+
+    // 场景名：R2 命中行用 _hitScenarioName；R4/R5-only 行用 allMods 轮次标签兜底。
+    const hitName = obj._hitScenarioName;
+    if (hitName !== null && hitName !== undefined && String(hitName) !== '') {
+      bucket.scenarioNameSet.add(String(hitName));
+    } else {
+      const rounds = roundsByRowId.get(obj._rowId);
+      if (rounds) {
+        for (const rd of rounds) {
+          const label = ROUND_LABELS[rd];
+          if (label) bucket.scenarioNameSet.add(label);
+        }
+      }
+    }
+  }
+
+  return Array.from(byCombo.entries())
+    .map(([channelRegion, v]) => ({
+      channelRegion,
+      rowCount: v.rowCount,
+      scenarioNames: Array.from(v.scenarioNameSet).sort()
+    }))
+    .sort((a, b) => (a.channelRegion < b.channelRegion ? -1 : a.channelRegion > b.channelRegion ? 1 : 0));
+}
+
 /**
  * 把 enabled 过的 scenarios 按轮次分桶。
  *
@@ -372,6 +460,10 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
   // ===== 构造输出：从「当前最新 bankRows」重建（不用 dispatcher 过时浅拷贝）=====
   const { modifiedRows, unmatchedRows } = buildOutputRows(bankRows, modColsByRowId, r2HitByRowId);
 
+  // v3.0.7 需求1a：按「渠道-地区」聚合命中行（行数 + 去重场景名），供 renderer 状态框「已处理」分支展示。
+  //   纯只读聚合（不改任何匹配/派生），口径与 channel-enum-repository.extractChannelRegionCombos 单行逻辑同源。
+  const channelRegionHits = buildChannelRegionHits(modifiedRows, allMods);
+
   return {
     modifiedRows,
     unmatchedRows,
@@ -384,6 +476,8 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
       //   须反映全部 5 轮的最终结果，否则会少计 R4/R5 改写行、多计 unmatched。
       totalRows: bankRows.length,
       hitRowCount: modifiedRows.length,
+      // v3.0.7 需求1a：状态框「已处理」分支按 渠道-地区 分组展示命中行数与场景名（空集 → []，renderer 据此回退旧格式）
+      channelRegionHits,
       unmatchedRowCount: unmatchedRows.length,
       warningCount: allWarnings.length,
       r1Matched: r1.matchedGwRows.length,
@@ -394,7 +488,12 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
       // v3.0.4 块 F：Payment线下调拨回填命中行数（进状态框可选展示）
       r5s2bBackfilledCount,
       r5s3CleanupCount: platformCleanupRows.length,
-      r5s4BackfilledCount: refundBackfillRows.length
+      r5s4BackfilledCount: refundBackfillRows.length,
+      // v3.0.7 需求A：供 renderer 状态框判断是否显示该行（启用即显示，含 0 条）。
+      //   bucket 非空 ⟺ 对应 builtin 场景启用（bucketScenarios 仅收已启用的 builtin-fixed 场景）。
+      //   🔴 纯只读标志位，不参与任何对账/匹配/派生/金额判定。
+      r5s3Enabled: r5s3Bucket.length > 0,
+      r5s4Enabled: r5s4Bucket.length > 0
     },
     platformCleanupRows,
     refundBackfillRows,
@@ -424,5 +523,7 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
 module.exports = {
   runReconciliation,
   bucketScenarios,
-  buildOutputRows
+  buildOutputRows,
+  // v3.0.7 需求1a：渠道-地区 命中聚合（供单测直接断言；状态框「已处理」分支数据源）
+  buildChannelRegionHits
 };
