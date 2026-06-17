@@ -3282,7 +3282,8 @@ select.mapping-text-input {
 
 /* === v3.0.8 需求1：工具箱🧰（合表 / 拆表）主弹框 + 拆表选字段弹框（Clear 风格副本，复用 dialog 基础样式）=== */
 .toolbox-card {
-  width: min(94vw, 460px);
+  /* v3.0.8：宽度缩小一半（原 460px） */
+  width: min(94vw, 230px);
 }
 .toolbox-body {
   display: flex;
@@ -3292,28 +3293,19 @@ select.mapping-text-input {
 }
 .toolbox-row {
   display: flex;
-  align-items: flex-start;
+  /* v3.0.8：按钮中线与左侧文本中线对齐 */
+  align-items: center;
   gap: 18px;
 }
 .toolbox-row-label {
   flex: 0 0 72px;
   font-weight: 500;
   color: var(--text, #1c1f29);
-  /* 与 primary-btn small 文本基线大致对齐（按钮 padding-top ≈ 8px） */
-  padding-top: 8px;
 }
 .toolbox-row-actions {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-/* 拆分表格行：[导出文件] 在 [导入文件] 正下方（PRD 5.1.4 mockup） */
-.toolbox-row-actions-stacked {
-  flex-direction: column;
-  align-items: stretch;
-}
-.toolbox-row-actions-stacked .primary-btn {
-  min-width: 96px;
 }
 
 /* 拆表选字段弹框 */
@@ -3331,17 +3323,12 @@ select.mapping-text-input {
   align-items: center;
   gap: 14px;
 }
-/* 值多选框较高 → 标签顶部对齐 */
-.toolbox-split-picker-row-values {
-  align-items: flex-start;
-}
 .toolbox-split-picker-label {
   flex: 0 0 40px;
   font-weight: 500;
   color: var(--text, #1c1f29);
 }
-.toolbox-split-picker-field,
-.toolbox-split-picker-values {
+.toolbox-split-picker-field {
   flex: 1 1 auto;
   padding: 8px 12px;
   border: 1px solid rgba(104, 79, 39, 0.24);
@@ -3350,13 +3337,26 @@ select.mapping-text-input {
   font-family: inherit;
   font-size: 14px;
 }
-.toolbox-split-picker-values {
-  min-height: 160px;
+/* v3.0.8（用户要求）：值多选框改用「按钮 + 浮动勾选面板」控件，外观对齐场景管理「适用银行渠道」下拉
+   （new-account-currency-dropdown-btn 同款 36px 圆角按钮 + new-account-currency-dropdown-panel 浮动面板）。 */
+.toolbox-split-values-dropdown-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
 }
-.toolbox-split-picker-values:disabled {
-  background: #f4f6fb;
-  color: #94a0b8;
-  cursor: not-allowed;
+.toolbox-split-picker-card .new-account-currency-dropdown-btn {
+  height: 36px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: #fffdf8;
+  padding: 0 32px 0 14px;
+  font-size: 13px;
+  color: var(--text);
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .toolbox-split-picker-hint {
   min-height: 18px;
@@ -3438,6 +3438,23 @@ select.mapping-text-input {
 }
 .builtin-fixed-payment-row[hidden] {
   display: none;
+}
+/* v3.0.8（用户要求）：两个勾选框（对账数据来源 / Payment线下调拨）并排一行显示。
+   容器与勾选框同 gating（仅 fund-transfer-backfill 场景 unhide）→ margin 放容器、内行清零，
+   非 payment 场景容器 hidden 不留多余间距。 */
+.builtin-fixed-checks-row {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+.builtin-fixed-checks-row[hidden] {
+  display: none;
+}
+.builtin-fixed-checks-row .builtin-fixed-payment-row {
+  margin-top: 0;
 }
 .builtin-fixed-payment-check {
   display: inline-flex;

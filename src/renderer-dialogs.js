@@ -7597,6 +7597,10 @@
               <input class="scenario-config-input scenario-config-input-narrow builtin-fixed-priority-input" type="number" min="0" max="3" data-field="priority" value="0">
             </div>
           </div>
+          <!-- v3.0.8（用户要求）：两个勾选框（对账数据来源 / Payment线下调拨）并排一行显示 → 外层 flex 容器包裹。
+               与两勾选框同 gating（仅 fund-transfer-backfill 场景显示）：加载 IIFE 里 isPaymentScenario 时 unhide，
+               避免非 payment 场景留空容器的多余间距。 -->
+          <div class="builtin-fixed-checks-row" data-role="checks-row" hidden>
           <!-- v3.0.6 需求2（T6）：「对账数据来源为中台调拨单表」二选一勾选行。
                仅 config.subCategory==='fund-transfer-backfill' 场景显示（与 payment 行同一 gating）；
                默认勾选（加载口径 cachedConfig.reconSourceMid !== false，老库无字段→视为勾选）。
@@ -7616,6 +7620,7 @@
               Payment线下调拨订单回填处理
             </label>
           </div>
+          </div><!-- /builtin-fixed-checks-row -->
           <div class="builtin-fixed-payment-fields" data-role="payment-fields" hidden>
             <div class="builtin-fixed-payment-field">
               <span class="builtin-fixed-channel-label">银行渠道</span>
@@ -7644,6 +7649,8 @@
       // v3.0.6 需求2（T6）：对账数据来源二选一 —— 勾选行（默认勾选；仅 fund-transfer-backfill 场景显示，与 payment 行同 gating）
       const reconSourceRow = dialog.querySelector('[data-role="recon-source-row"]');
       const reconSourceCheck = dialog.querySelector('input[data-field="recon-source-mid"]');
+      // v3.0.8（用户要求）：两勾选框并排一行的外层容器（与两勾选框同 gating，仅 fund-transfer-backfill 场景 unhide）
+      const checksRow = dialog.querySelector('[data-role="checks-row"]');
       // v3.0.4 块 F · F1：Payment 线下调拨订单回填处理 —— 勾选行 + 三输入框展开区（条件渲染 + 显隐联动）
       const paymentRow = dialog.querySelector('[data-role="payment-row"]');
       const paymentFields = dialog.querySelector('[data-role="payment-fields"]');
@@ -7774,6 +7781,7 @@
               ? scResult.scenario.config
               : {};
             isPaymentScenario = cachedConfig.subCategory === 'fund-transfer-backfill';
+            if (isPaymentScenario && checksRow) checksRow.hidden = false;
             if (isPaymentScenario && reconSourceRow) {
               // v3.0.6 需求2（T6）：对账数据来源勾选行与 payment 行同 gating 显示；
               //   默认勾选口径 reconSourceMid !== false（老库无字段 undefined !== false → true → 勾选），
@@ -10948,9 +10956,8 @@
           </div>
           <div class="toolbox-row">
             <span class="toolbox-row-label">拆分表格</span>
-            <div class="toolbox-row-actions toolbox-row-actions-stacked">
+            <div class="toolbox-row-actions">
               <button class="primary-btn small" type="button" data-action="split-import">导入文件</button>
-              <button class="primary-btn small" type="button" data-action="split-export" disabled>导出文件</button>
             </div>
           </div>
         </div>
@@ -10960,16 +10967,27 @@
       const closeBtn = card.querySelector('.icon-close');
       const mergeImportBtn = card.querySelector('[data-action="merge-import"]');
       const splitImportBtn = card.querySelector('[data-action="split-import"]');
-      const splitExportBtn = card.querySelector('[data-action="split-export"]');
 
-      // 拆表已选状态：splitRead 成功后存源文件路径，选字段弹框「完成」后存 field/values。
-      //   导出文件需三者齐备；任一缺失 → alert 提示先导入并选字段（不调 IPC）。
-      let splitSourceFilePath = null;
-      let splitSelectedField = null;
-      let splitSelectedValues = [];
+      // v3.0.8：拆表一气呵成——选字段弹框「完成」即直接过滤命中行另存为（去掉独立「导出文件」按钮）。
       let mergeInFlight = false;
       let splitImportInFlight = false;
       let splitExportInFlight = false;
+
+      // v3.0.8（用户要求）：工具箱反馈改用应用内弹框 createAlertDialog（有前端页面 + 统一 Clear 风格 + 可预览），
+      //   取代原生 window.alert（无前端页面、无法预览、样式不一致）。
+      //   createAlertDialog 按 innerHTML 渲染 → message/明细经 escapeHtml + <br> 拼装防注入/正确换行；
+      //   成功/提示 skipLogReport（不报 error 日志），失败默认 error 上报；点「确认」后回到工具箱主弹框。
+      function showToolboxAlert(message, { isError = false, lines = [] } = {}) {
+        const safeLines = Array.isArray(lines) ? lines.filter((l) => l != null && String(l) !== '') : [];
+        const html = [escapeHtml(String(message || ''))]
+          .concat(safeLines.map((l) => escapeHtml(String(l))))
+          .join('<br>');
+        openModal(createAlertDialog(html, {
+          skipLogReport: !isError,
+          logDomain: 'toolbox',
+          onConfirm: () => openModal(overlay)
+        }));
+      }
 
       closeBtn.addEventListener('click', () => closeModal());
       overlay.addEventListener('click', (ev) => {
@@ -10986,24 +11004,20 @@
           const result = await desktopApi.toolbox.merge();
           if (!result || result.status === 'cancelled') return;
           if (result.status === 'success') {
-            window.alert(`合并完成，已保存到：\n${result.filePath}`);
+            showToolboxAlert('合并完成，已保存到：', { lines: [result.filePath] });
             return;
           }
-          const lines = [result.message || '合并失败'];
-          if (Array.isArray(result.detailLines) && result.detailLines.length > 0) {
-            lines.push('', ...result.detailLines);
-          }
-          window.alert(lines.join('\n'));
+          showToolboxAlert(result.message || '合并失败', { isError: true, lines: result.detailLines });
         } catch (error) {
-          window.alert(`合并失败：${(error && error.message) || '未知错误'}`);
+          showToolboxAlert(`合并失败：${(error && error.message) || '未知错误'}`, { isError: true });
         } finally {
           mergeInFlight = false;
           mergeImportBtn.disabled = false;
         }
       });
 
-      // 拆表第一步：点「导入文件」→ splitRead()（main 内单选 + 读表头 + 算各字段去重值）→ 成功弹选字段弹框。
-      //   选字段弹框「完成」回传 {field,values} → 存状态 + 启用「导出文件」；「取消」回到工具箱主弹框、不改已选状态。
+      // 拆表（一气呵成）：点「导入文件」→ splitRead()（main 内单选 + 读表头 + 算各字段去重值）→ 成功弹选字段弹框。
+      //   选字段弹框「完成」→ 直接用 {源文件, field, values} 过滤命中行另存为；「取消」回到工具箱主弹框。
       splitImportBtn.addEventListener('click', async () => {
         if (splitImportInFlight) return;
         splitImportInFlight = true;
@@ -11012,7 +11026,7 @@
           const result = await desktopApi.toolbox.splitRead();
           if (!result || result.status === 'cancelled') return;
           if (result.status !== 'success') {
-            window.alert(result.message || '读取文件失败');
+            showToolboxAlert(result.message || '读取文件失败', { isError: true });
             return;
           }
           const headers = Array.isArray(result.headers) ? result.headers : [];
@@ -11022,57 +11036,44 @@
           openModal(createSplitFieldPickerDialog({
             headers,
             valuesByField,
-            onComplete: ({ field, values }) => {
-              splitSourceFilePath = result.sourceFilePath;
-              splitSelectedField = field;
-              splitSelectedValues = Array.isArray(values) ? values : [];
-              splitExportBtn.disabled = false;
-              openModal(overlay);
+            onComplete: async ({ field, values }) => {
+              // v3.0.8：选字段「完成」→ 直接过滤命中行另存为（一气呵成，无独立导出按钮）。
+              openModal(overlay); // 先回工具箱主弹框，随后弹系统保存框
+              const selectedValues = Array.isArray(values) ? values : [];
+              if (!result.sourceFilePath || !field || selectedValues.length === 0) {
+                showToolboxAlert('请选择拆分字段与至少一个值', { isError: true });
+                return;
+              }
+              if (splitExportInFlight) return;
+              splitExportInFlight = true;
+              try {
+                const exportResult = await desktopApi.toolbox.splitExport({
+                  sourceFilePath: result.sourceFilePath,
+                  field,
+                  values: selectedValues
+                });
+                if (!exportResult || exportResult.status === 'cancelled') return;
+                if (exportResult.status === 'success') {
+                  showToolboxAlert('拆分完成，已保存到：', { lines: [exportResult.filePath] });
+                  return;
+                }
+                showToolboxAlert(exportResult.message || '拆分失败', { isError: true, lines: exportResult.detailLines });
+              } catch (error) {
+                showToolboxAlert(`拆分失败：${(error && error.message) || '未知错误'}`, { isError: true });
+              } finally {
+                splitExportInFlight = false;
+              }
             },
             onCancel: () => {
-              // 取消选字段：回到工具箱主弹框，保留上一次已选状态（若有）。
+              // 取消选字段：回到工具箱主弹框。
               openModal(overlay);
             }
           }));
         } catch (error) {
-          window.alert(`读取文件失败：${(error && error.message) || '未知错误'}`);
+          showToolboxAlert(`读取文件失败：${(error && error.message) || '未知错误'}`, { isError: true });
         } finally {
           splitImportInFlight = false;
           splitImportBtn.disabled = false;
-        }
-      });
-
-      // 拆表第二步：点「导出文件」→ 用已选 field/values 调 splitExport → 过滤命中行另存为。
-      //   未先导入 + 选字段（缺源文件 / 字段 / 值）→ alert 提示先导入并选字段，不调 IPC。
-      splitExportBtn.addEventListener('click', async () => {
-        if (splitExportInFlight) return;
-        if (!splitSourceFilePath || !splitSelectedField || splitSelectedValues.length === 0) {
-          window.alert('请先点「导入文件」选择表格并选定拆分字段与值');
-          return;
-        }
-        splitExportInFlight = true;
-        splitExportBtn.disabled = true;
-        try {
-          const result = await desktopApi.toolbox.splitExport({
-            sourceFilePath: splitSourceFilePath,
-            field: splitSelectedField,
-            values: splitSelectedValues
-          });
-          if (!result || result.status === 'cancelled') return;
-          if (result.status === 'success') {
-            window.alert(`拆分完成，已保存到：\n${result.filePath}`);
-            return;
-          }
-          const lines = [result.message || '拆分失败'];
-          if (Array.isArray(result.detailLines) && result.detailLines.length > 0) {
-            lines.push('', ...result.detailLines);
-          }
-          window.alert(lines.join('\n'));
-        } catch (error) {
-          window.alert(`拆分失败：${(error && error.message) || '未知错误'}`);
-        } finally {
-          splitExportInFlight = false;
-          splitExportBtn.disabled = false;
         }
       });
 
@@ -11108,10 +11109,12 @@
             <span class="toolbox-split-picker-label">字段</span>
             <select class="toolbox-split-picker-field">${fieldOptionsHtml}</select>
           </label>
-          <label class="toolbox-split-picker-row toolbox-split-picker-row-values">
+          <div class="toolbox-split-picker-row toolbox-split-picker-row-values">
             <span class="toolbox-split-picker-label">值</span>
-            <select class="toolbox-split-picker-values" multiple size="8"></select>
-          </label>
+            <div class="new-account-currency-dropdown-wrap toolbox-split-values-dropdown-wrap">
+              <button class="new-account-currency-dropdown-btn toolbox-split-values-dropdown-btn" type="button" aria-expanded="false"> </button>
+            </div>
+          </div>
           <div class="toolbox-split-picker-hint"></div>
         </div>
         <div class="dialog-actions right">
@@ -11123,46 +11126,123 @@
 
       const closeBtn = dialog.querySelector('.icon-close');
       const fieldSelect = dialog.querySelector('.toolbox-split-picker-field');
-      const valuesSelect = dialog.querySelector('.toolbox-split-picker-values');
+      const valuesDropdownBtn = dialog.querySelector('.toolbox-split-values-dropdown-btn');
       const hintEl = dialog.querySelector('.toolbox-split-picker-hint');
       const cancelBtn = dialog.querySelector('[data-action="cancel"]');
       const completeBtn = dialog.querySelector('[data-action="complete"]');
 
-      // 按当前选中字段刷新值多选框：用 fieldSelect.value（= headers 索引）取 headers[idx] 再查 valuesByField。
-      //   用索引而非列名取值，避免重名表头 / 含特殊字符表头作为对象键时歧义（与 main 过滤按列名一致：列名唯一时等价）。
+      // v3.0.8（用户要求）：值多选框改用「按钮 + 浮动勾选面板」控件，与场景管理「资金性质校验」管理页的
+      //   「适用银行渠道」多选下拉同款（复用 new-account-currency-* class）。面板挂本弹框 overlay、position:fixed 定位。
+      const valuesPanel = document.createElement('div');
+      valuesPanel.className = 'new-account-currency-dropdown-panel toolbox-split-values-floating-panel';
+      valuesPanel.hidden = true;
+      overlay.appendChild(valuesPanel);
+
+      let currentValuesList = [];      // 当前字段的去重值列表
+      let selectedValues = new Set();  // 当前已勾选的值
+      let panelOpen = false;
+
+      // 用 fieldSelect.value（= headers 索引）取 headers[idx] 再查 valuesByField（索引而非列名，避免重名/特殊字符表头歧义）。
       function currentFieldName() {
         const idx = Number.parseInt(fieldSelect.value, 10);
         return Number.isFinite(idx) && idx >= 0 && idx < safeHeaders.length ? safeHeaders[idx] : '';
       }
 
+      // 按钮文案：未选→占位空格；全选→「全部」；部分→顿号拼接（与渠道下拉 updateLabel 同口径）。
+      function updateValuesLabel() {
+        if (selectedValues.size === 0) {
+          valuesDropdownBtn.textContent = ' ';
+        } else if (currentValuesList.length > 0 && selectedValues.size === currentValuesList.length) {
+          valuesDropdownBtn.textContent = '全部';
+        } else {
+          valuesDropdownBtn.textContent = currentValuesList.filter((v) => selectedValues.has(v)).join('、') || ' ';
+        }
+        valuesDropdownBtn.title = valuesDropdownBtn.textContent;
+      }
+
+      function renderValueOptions() {
+        valuesPanel.replaceChildren();
+        currentValuesList.forEach((v) => {
+          const option = document.createElement('label');
+          option.className = 'new-account-currency-option';
+          const text = document.createElement('span');
+          text.className = 'new-account-currency-option-text';
+          text.textContent = v;
+          const checkbox = document.createElement('input');
+          checkbox.className = 'new-account-checkbox';
+          checkbox.type = 'checkbox';
+          checkbox.checked = selectedValues.has(v);
+          checkbox.addEventListener('change', () => {
+            if (checkbox.checked) selectedValues.add(v);
+            else selectedValues.delete(v);
+            updateValuesLabel();
+            updateCompleteState();
+          });
+          option.append(text, checkbox);
+          valuesPanel.appendChild(option);
+        });
+      }
+
+      function positionValuesPanel() {
+        const rect = valuesDropdownBtn.getBoundingClientRect();
+        const margin = 12;
+        valuesPanel.style.position = 'fixed';
+        valuesPanel.style.minWidth = `${Math.max(rect.width, 188)}px`;
+        valuesPanel.style.maxWidth = `${Math.max(220, Math.min(280, window.innerWidth - margin * 2))}px`;
+        valuesPanel.hidden = false;
+        const panelHeight = valuesPanel.offsetHeight || 216;
+        const panelWidth = valuesPanel.offsetWidth || 200;
+        const left = Math.min(Math.max(margin, rect.left), Math.max(margin, window.innerWidth - panelWidth - margin));
+        const top = rect.bottom + 6 + panelHeight > window.innerHeight - margin
+          ? Math.max(margin, rect.top - panelHeight - 6)
+          : rect.bottom + 6;
+        valuesPanel.style.left = `${left}px`;
+        valuesPanel.style.top = `${top}px`;
+      }
+
+      function closeValuesPanel() {
+        panelOpen = false;
+        valuesPanel.hidden = true;
+        valuesDropdownBtn.classList.remove('is-open');
+        valuesDropdownBtn.setAttribute('aria-expanded', 'false');
+      }
+      function openValuesPanel() {
+        if (valuesDropdownBtn.disabled) return;
+        renderValueOptions();
+        panelOpen = true;
+        valuesDropdownBtn.classList.add('is-open');
+        valuesDropdownBtn.setAttribute('aria-expanded', 'true');
+        positionValuesPanel();
+      }
+      valuesDropdownBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (panelOpen) closeValuesPanel(); else openValuesPanel();
+      });
+
+      // 切换字段 → 重置值列表 + 清空已选（新字段值集不同）+ 关面板 + 边界提示（字段无值则禁用下拉）。
       function refreshValues() {
         const fieldName = currentFieldName();
-        const values = Array.isArray(safeValuesByField[fieldName]) ? safeValuesByField[fieldName] : [];
-        valuesSelect.innerHTML = values
-          .map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`)
-          .join('');
-        // 边界①：字段无去重值 → 多选框空且不可选。
-        valuesSelect.disabled = values.length === 0;
-        if (values.length === 0) {
-          hintEl.textContent = '该字段无可选值（该列为空），请改选其他字段';
-        } else {
-          hintEl.textContent = '';
-        }
+        currentValuesList = Array.isArray(safeValuesByField[fieldName]) ? safeValuesByField[fieldName] : [];
+        selectedValues = new Set();
+        closeValuesPanel();
+        valuesDropdownBtn.disabled = currentValuesList.length === 0; // 边界①：字段无去重值 → 下拉禁用
+        hintEl.textContent = currentValuesList.length === 0 ? '该字段无可选值（该列为空），请改选其他字段' : '';
+        updateValuesLabel();
         updateCompleteState();
       }
 
-      // 边界②：选中值数为 0 → [完成] 禁用（不允许空选导出）。
+      // 边界②：选中值数为 0 → [完成] 禁用（不允许空选导出，否则过滤命中 0 行产空 sheet）。
       function getSelectedValues() {
-        return Array.from(valuesSelect.selectedOptions || []).map((opt) => opt.value);
+        return currentValuesList.filter((v) => selectedValues.has(v));
       }
       function updateCompleteState() {
-        completeBtn.disabled = getSelectedValues().length === 0;
+        completeBtn.disabled = selectedValues.size === 0;
       }
 
       fieldSelect.addEventListener('change', refreshValues);
-      valuesSelect.addEventListener('change', updateCompleteState);
 
       function cancelAndClose() {
+        closeValuesPanel();
         if (typeof onCancel === 'function') {
           onCancel();
         } else {
@@ -11172,7 +11252,10 @@
       closeBtn.addEventListener('click', cancelAndClose);
       cancelBtn.addEventListener('click', cancelAndClose);
       overlay.addEventListener('click', (ev) => {
-        if (ev.target === overlay) cancelAndClose();
+        if (ev.target === overlay) {
+          if (panelOpen) { closeValuesPanel(); return; } // 面板开时点遮罩仅收起面板，不关弹框
+          cancelAndClose();
+        }
       });
 
       completeBtn.addEventListener('click', () => {
@@ -11181,6 +11264,7 @@
           hintEl.textContent = '请至少选择一个值';
           return;
         }
+        closeValuesPanel();
         if (typeof onComplete === 'function') {
           onComplete({ field: currentFieldName(), values });
         }
