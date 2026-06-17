@@ -524,6 +524,7 @@ v3.0.8 集中处理 **7 项**需求 —— 5 项新反馈 + 2 份用户已定稿
 | 2026-06-16 | 初稿：依据已批准 plan + spec A（运行内存尖峰修复）+ spec B（R5s3 规则变更）撰写 v3.0.8 PRD，覆盖 7 需求（12 章范式，37 条 AC），资金红线标注需求 3/4/5/6/7，发版文档三件套待 bump 时统一更新。 |
 | 2026-06-16 | team-lead 审查订正 7 处 file:line 出处/边界（FUNC_CATEGORY_LABELS、createScenariosManagerDialog、writeWorkbookRows facade、yield 轮次、门控谓词锚、拆表空值边界、AC 计数）。 |
 | 2026-06-16 | Reverse Sync 订正与回填（PM）：①需求2 退役方式由「migrations 不 seed」改为**纯前端过滤退役**（`migrations.js` 零改动，更可回滚、零 migration 风险），订正 §一/§2.2/§2.3/§5.2/§6.2/§八/§九相关条目；②回填 §十二实施记录（7 commit 清单 + 4 项实施期取舍/增强：C3 退役边界 OPEN-2 / json_valid 守卫 / displayIndex 序号红线 / R5s3 全角括号）。 |
+| 2026-06-17 | 发版后用户验收反馈 9 项（UI/输出/文档）+ 工程加固落地，PR #77 合入 main（codex review 1×P2 已修 + team-lead 自审无 P0-P2）。详见 §12.3 + 归档 `docs/prs/PR77-v3.0.8.md`。 |
 
 ---
 
@@ -553,6 +554,23 @@ v3.0.8 集中处理 **7 项**需求 —— 5 项新反馈 + 2 份用户已定稿
 | ② 需求6 加 `json_valid` 守卫 | 新仓储 `readGatewayBillRowsByChannels` 的 SQL 在 `json_extract` 求值前先 `json_valid(raw_json) AND (...)` 短路（linked-table-repository.js:992-995），把坏 JSON 行排除在 `json_extract` 之外，防单条坏行的 `json_extract` 报错崩整轮对账 run。原 TECHDOC §6.3a SQL 未含此守卫。 | spec 外防御性增强（防坏 JSON 崩 run） |
 | ③ W6 displayIndex 序号红线修复 | 需求2 分组折叠重排列表时，序号列严格用 `scenario.displayIndex`（派发口径）而非分组后的列表位次（renderer-dialogs.js:7071-7079 标注 N3-1 一致性红线，`displayIndex` 缺失才回退位次）→ **分组不串号**（同一场景在分组前后序号显示值不变）。 | 红线修复（命中 `rules/important-variables.md` displayIndex 软约束） |
 | ④ R5s3 二级标记用全角括号 | 需求7 二级（ChannelOrderNo）匹配的消歧警告 message 后缀，实现用**全角括号**「（按 ChannelOrderNo 匹配）」（r5-platform-inbound-cleanup.js:127），与 TECHDOC §11.3 草案的半角 `(按 ChannelOrderNo 匹配)` 不同（统一中文文案全角风格）。 | 文案细节订正 |
+
+### 12.3 本轮用户验收反馈（发版后追加，9 项 UI/输出/文档 + 工程加固；PR #77 v3.0.8→main，2026-06-17 merged）
+
+> 用户手测 v3.0.8 后提 9 项验收反馈，team-lead 直接实施 + 截图/单测验证 + codex review。归档 `docs/prs/PR77-v3.0.8.md`。
+
+| # | Hash | 标题 | 反馈项 |
+|---|------|------|------|
+| 1 | `0e3e7db` | run handler 接缝 + 进度跨进程契约护栏单测 | 工程加固（补 handler 体接缝盲区测试） |
+| 2 | `7c2d682` | release-check 加 ESLint no-undef 静态门 | 工程加固（拦跨作用域 not-defined） |
+| 3 | `f5e4fa1` | 工具箱 + 场景管理弹窗 UI 验收调整 | #1-6,8 |
+| 4 | `1b2055c` | 未命中场景 sheet 银行行数据整体上移一行 | #9（🔴 输出口径） |
+| 5 | `c5a9270` | 使用手册 v3.0.8 + 文件名版本化 + 正文术语换 UI 文本 | #7 |
+| 6 | `b4d5503` | [codex-fix] 拆分值浮动面板可滚动（P2 高基数列裁切） | #5 codex review |
+
+9 项反馈明细：①去拆表「导出文件」按钮+选字段「完成」即一气呵成 ②拆表导入按钮缩到与合表一致 ③两导入按钮中线对齐左侧文本 ④工具箱弹框宽度 460→230px ⑤拆分值多选框 原生 select multiple→浮动勾选面板控件（复用 `new-account-currency-dropdown-*`，对齐场景管理「适用银行渠道」下拉） ⑥中台调拨订单回填管理页两勾选框并排一行 ⑦使用手册导出名版本化 `使用手册-v${app.getVersion()}.html`+版本头 v3.0.8+正文内部术语换 UI 文本（仅正文，历史 changelog 保留——用户拍板） ⑧工具箱所有 `window.alert`→应用内 `createAlertDialog`（有前端页面/可预览） ⑨未命中 sheet 银行行（表头+数据）整体上移一行、表头与 A1 提醒同处第 1 行。
+
+**评审闭环**：codex review 命中 1× [P2]（#5 面板继承 `max-height:248px+overflow:hidden` 裁掉高基数列值无法选中）→ `b4d5503` 加 `overflow-y:auto` 修复；team-lead 自审无 P0-P2。release-check（lint+smoke+unit **2977/2977**+integration **1469**）+ CI smoke + 无冲突全绿 → 满足「无 P0-P2」merge。
 
 ---
 
