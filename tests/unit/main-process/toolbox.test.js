@@ -18,6 +18,8 @@ const {
   mergeAoaRows,
   computeValuesByField,
   filterRowsByFieldValues,
+  createValuesByFieldAccumulator,
+  createRowFilter,
   buildMergeFileName,
   buildSplitFileName
 } = require('../../../src/main-process/toolbox');
@@ -224,6 +226,75 @@ test.describe('filterRowsByFieldValues', () => {
     const res = filterRowsByFieldValues(aoa, 'H2', ['keep']);
     assert.equal(res.matchedCount, 1);
     assert.deepEqual(res.rows[1], ['x', 'keep']);
+  });
+});
+
+// v3.0.8 BUG3：流式增量版必须与全量版口径完全一致（逐行 feed 接口 vs 全量 aoa）。
+test.describe('createValuesByFieldAccumulator（流式去重，口径同 computeValuesByField）', () => {
+  test('逐行 feed 结果 ≡ 全量 computeValuesByField', () => {
+    const headers = ['H1', 'H2'];
+    const dataRows = [['x', '1'], ['y', '1'], ['x', '2'], [' x ', '2'], ['', '3']];
+    const acc = createValuesByFieldAccumulator(headers);
+    dataRows.forEach((r) => acc.addRow(r));
+    const streamed = acc.result();
+    // 与全量版（aoa 含表头行）对拍
+    const full = computeValuesByField(headers, [headers, ...dataRows]);
+    assert.deepEqual(streamed, full);
+    assert.deepEqual(streamed.H1, ['x', 'y'], 'trim 去重 + 首现序');
+    assert.deepEqual(streamed.H2, ['1', '2', '3']);
+  });
+
+  test('空串不计 + 每个表头都有 key', () => {
+    const acc = createValuesByFieldAccumulator(['H1', 'H2', 'H3']);
+    acc.addRow(['a', '', 'z']);
+    acc.addRow(['b', '   ', 'z']);
+    const res = acc.result();
+    assert.deepEqual(res.H1, ['a', 'b']);
+    assert.deepEqual(res.H2, [], '全空列空数组');
+    assert.deepEqual(res.H3, ['z'], '重复值去重');
+    assert.deepEqual(Object.keys(res).sort(), ['H1', 'H2', 'H3']);
+  });
+
+  test('非数组行安全跳过', () => {
+    const acc = createValuesByFieldAccumulator(['H']);
+    acc.addRow(null);
+    acc.addRow(undefined);
+    acc.addRow(['a']);
+    assert.deepEqual(acc.result().H, ['a']);
+  });
+});
+
+test.describe('createRowFilter（流式过滤，口径同 filterRowsByFieldValues）', () => {
+  test('命中行 ≡ 全量 filterRowsByFieldValues 的 matchedCount/内容', () => {
+    const headers = ['H1', 'H2'];
+    const dataRows = [['x', '1'], ['y', '2'], ['x', '3']];
+    const f = createRowFilter(headers, 'H1', ['x']);
+    assert.equal(f.fieldFound, true);
+    const matched = dataRows.filter((r) => f.matches(r));
+    // 全量对拍
+    const full = filterRowsByFieldValues([headers, ...dataRows], 'H1', ['x']);
+    assert.equal(matched.length, full.matchedCount);
+    assert.deepEqual(matched, full.rows.slice(1));
+  });
+
+  test('多选值 + normalize 比对命中（" a " 选项命中 "a" 单元格）', () => {
+    const f = createRowFilter(['C'], 'C', [' a ', 'c']);
+    assert.equal(f.matches(['a']), true);
+    assert.equal(f.matches(['c']), true);
+    assert.equal(f.matches(['b']), false);
+  });
+
+  test('字段不在表头 → fieldFound=false，matches 恒 false', () => {
+    const f = createRowFilter(['C'], 'NOPE', ['a']);
+    assert.equal(f.fieldFound, false);
+    assert.equal(f.matches(['a']), false);
+  });
+
+  test('非首列字段也能定位命中', () => {
+    const f = createRowFilter(['H1', 'H2'], 'H2', ['keep']);
+    assert.equal(f.colIdx, 1);
+    assert.equal(f.matches(['x', 'keep']), true);
+    assert.equal(f.matches(['x', 'drop']), false);
   });
 });
 

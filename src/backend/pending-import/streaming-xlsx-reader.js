@@ -51,7 +51,11 @@ function xmlUnescape(s) {
 const CELL_OPEN_RE = /<c\b([^>]*?)\/>|<c\b([^>]*?)>([\s\S]*?)<\/c>/g;
 const CELL_R_RE = /\br="([A-Z]+)\d+"/;   // 从 attrs 提取列字母（r 可在任意位置）
 const T_CONTENT_RE = /<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g;
-const V_CONTENT_RE = /<v>([\s\S]*?)<\/v>/;
+// v3.0.8 BUG3 修复：旧版 /<v>...<\/v>/ 要求 <v> 是**裸标签**，但 SheetJS / Excel 写「含首尾空格的字符串」
+//   会输出 `<c t="str"><v xml:space="preserve"> A </v></c>`（<v> 带 xml:space 属性）→ 旧正则不匹配 →
+//   该单元格被静默读成空串（工具箱合表/拆表读任意用户表头/数据时表头首格丢字、值丢失）。
+//   改为容忍 <v> 任意属性（与 T_CONTENT_RE 同款 `(?:\s[^>]*)?`）；裸 <v> 仍匹配，向后兼容。
+const V_CONTENT_RE = /<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/;
 
 function extractTypeFromAttrs(attrs) {
   if (!attrs) return '';

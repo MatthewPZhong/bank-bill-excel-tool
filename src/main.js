@@ -196,8 +196,21 @@ const {
   computeValuesByField: toolboxComputeValuesByField,
   filterRowsByFieldValues: toolboxFilterRowsByFieldValues,
   buildMergeFileName: toolboxBuildMergeFileName,
-  buildSplitFileName: toolboxBuildSplitFileName
+  buildSplitFileName: toolboxBuildSplitFileName,
+  // v3.0.8 BUG3：流式增量版（修大文件 OOM）——逐行喂去重/过滤，绝不全量物化行
+  createValuesByFieldAccumulator: toolboxCreateValuesByFieldAccumulator,
+  createRowFilter: toolboxCreateRowFilter
 } = require('./main-process/toolbox');
+// v3.0.8 BUG3：工具箱🧰 流式读写封装——.xlsx 走流式（内存常数）修 30 万行级大文件 OOM 闪退；.csv/.xls 回退全量 readRows。
+//   三个工具箱 IPC handler（toolbox:merge / split:read / split:export）改走这里：读用 readHeaderRowStreamed +
+//   streamDataRows、写用 writeRowsStreamed（by-name 格式 + 超 104 万行自动分 sheet），不再 readRows 全量 + writeToolboxTempWorkbook。
+const {
+  isStreamableXlsx: toolboxIsStreamableXlsx,
+  streamDataRows: toolboxStreamDataRows,
+  readHeaderRowStreamed: toolboxReadHeaderRowStreamed,
+  writeRowsStreamed: toolboxWriteRowsStreamed,
+  ToolboxStreamEmptyError
+} = require('./main-process/toolbox-stream-io');
 // v2.1.9 N5 T26（spec §5.4 🔴 对外契约破坏性变更）：场景命中行独立报表 writer
 //   v2.1.8 主输出 Sheet 3 撤除 → 改独立报表 命中场景行-{basename}-{ts}.xlsx
 //   v3.0.4 F2：落位由 error-reports/{date}/ 改为 bank-statement-process/{date}/（与错误报告目录互换）
@@ -12856,7 +12869,9 @@ function toolboxFailureResult(error) {
 }
 
 function registerToolboxHandlers() {
-  // IPC 1 —— 合表：多选 → 各文件 extractHeaders 校验全相同 → readRows 合并（首表头 + 各文件数据行）→ 写临时 → 另存为
+  // IPC 1 —— 合表：多选 → 各文件取表头校验全相同 → 流式逐行合并（首表头 + 各文件数据行）→ 写临时 → 另存为
+  //   v3.0.8 BUG3：.xlsx 走流式（readHeaderRowStreamed 取表头 + streamDataRows 逐行喂 + writeRowsStreamed 逐行写，内存常数），
+  //   .csv/.xls 回退全量 readRows（不撞 OOM 的纯文本/小二进制路径，且流式引擎不支持二者）。不再 readRows 全量物化 + writeToolboxTempWorkbook。
   trackedIpcHandle('toolbox:merge', '工具箱', '合并表格', async () => {
     try {
       const choice = await dialog.showOpenDialog(mainWindow, {
@@ -12870,15 +12885,37 @@ function registerToolboxHandlers() {
       const filePaths = choice.filePaths;
       const fileNames = filePaths.map((p) => path.basename(p));
 
-      // 各文件表头（extractHeaders 已 trim）→ 校验全部完全一致（列名 + 列序，大小写敏感）
-      const headersList = filePaths.map((p) => extractHeaders(p));
-      toolboxAssertHeadersIdentical(headersList, fileNames);
+      // 各文件表头（.xlsx 流式读首个有意义行；.csv/.xls 全量 extractHeaders；二者均已 normalizeCell/trim）
+      //   → 校验全部完全一致（列名 + 列序，大小写敏感）。表头不一致直接抛错（不弹保存框、不产文件）。
+      const headersList = await Promise.all(
+        filePaths.map(async (p) => (toolboxIsStreamableXlsx(p) ? await toolboxReadHeaderRowStreamed(p) : extractHeaders(p)))
+      );
+      const baseHeaders = toolboxAssertHeadersIdentical(headersList, fileNames);
 
-      // 各文件 readRows（aoa，含表头行）→ 合并 = [首文件表头, ...各文件数据行（切掉各自表头行）]
-      const aoaList = filePaths.map((p) => readRows(p));
-      const mergedRows = toolboxMergeAoaRows(aoaList);
+      // 流式逐行合并写入临时文件：首文件表头 + 各文件数据行（切掉各自表头行）。
+      //   writeRowsStreamed 内部 ExcelJS WorkbookWriter 逐行 addRow().commit()，超 104 万行自动分 sheet（by-name 格式与现状一致）。
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'));
+      const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
+      const writeRes = await toolboxWriteRowsStreamed({
+        savePath: tempPath,
+        normalizedHeaders: baseHeaders,
+        sheetBaseName: 'COMMON',
+        writeDataRows: async (emit) => {
+          for (const p of filePaths) {
+            if (toolboxIsStreamableXlsx(p)) {
+              // eslint-disable-next-line no-await-in-loop
+              await toolboxStreamDataRows(p, (cells) => emit(cells));
+            } else {
+              // .csv/.xls 回退：全量 readRows 后切表头行（slice(1)）逐行喂——与流式「切首行透传其余」口径一致。
+              const rows = readRows(p);
+              for (let r = 1; r < rows.length; r += 1) {
+                emit(Array.isArray(rows[r]) ? rows[r] : []);
+              }
+            }
+          }
+        }
+      });
 
-      const tempPath = writeToolboxTempWorkbook(mergedRows);
       const saveResult = await dialog.showSaveDialog(mainWindow, {
         defaultPath: toolboxBuildMergeFileName(),
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
@@ -12894,7 +12931,7 @@ function registerToolboxHandlers() {
         message: '工具箱合并表格成功',
         details: [
           `合并文件数：${filePaths.length}`,
-          `数据行数：${Math.max(mergedRows.length - 1, 0)}`,
+          `数据行数：${writeRes.dataRowCount}`,
           `导出路径：${saveResult.filePath}`
         ]
       });
@@ -12904,7 +12941,9 @@ function registerToolboxHandlers() {
     }
   });
 
-  // IPC 2 —— 拆表第一步：单选 → extractHeaders + readRows → 算各字段去重值 → 回传给前端选字段弹框
+  // IPC 2 —— 拆表第一步：单选 → 取表头 + 流式扫一遍累积各字段去重值 → 回传给前端选字段弹框
+  //   v3.0.8 BUG3：.xlsx 走流式（readHeaderRowStreamed 取表头 + streamDataRows 逐行喂去重累加器，内存常数），
+  //   .csv/.xls 回退全量 extractHeaders + readRows + computeValuesByField。返回契约 {status,sourceFilePath,headers,valuesByField} 不变。
   trackedIpcHandle('toolbox:split:read', '工具箱', '拆分表格', async () => {
     try {
       const choice = await dialog.showOpenDialog(mainWindow, {
@@ -12916,16 +12955,29 @@ function registerToolboxHandlers() {
         return { status: 'cancelled' };
       }
       const sourceFilePath = choice.filePaths[0];
-      const headers = extractHeaders(sourceFilePath);
-      const aoa = readRows(sourceFilePath);
-      const valuesByField = toolboxComputeValuesByField(headers, aoa);
+
+      let headers;
+      let valuesByField;
+      if (toolboxIsStreamableXlsx(sourceFilePath)) {
+        headers = await toolboxReadHeaderRowStreamed(sourceFilePath);
+        const acc = toolboxCreateValuesByFieldAccumulator(headers);
+        await toolboxStreamDataRows(sourceFilePath, (cells) => acc.addRow(cells));
+        valuesByField = acc.result();
+      } else {
+        headers = extractHeaders(sourceFilePath);
+        const aoa = readRows(sourceFilePath);
+        valuesByField = toolboxComputeValuesByField(headers, aoa);
+      }
       return { status: 'success', sourceFilePath, headers, valuesByField };
     } catch (error) {
       return toolboxFailureResult(error);
     }
   });
 
-  // IPC 3 —— 拆表第二步：{sourceFilePath, field, values[]} → readRows 过滤 row[field]∈values（多选值→单文件）→ 写临时 → 另存为
+  // IPC 3 —— 拆表第二步：{sourceFilePath, field, values[]} → 流式过滤 row[field]∈values（多选值→单文件）→ 写临时 → 另存为
+  //   v3.0.8 BUG3：.xlsx 走流式（readHeaderRowStreamed 取表头判字段是否存在 + createRowFilter 逐行过滤 + writeRowsStreamed 逐行写命中行，内存常数），
+  //   .csv/.xls 回退全量 readRows + filterRowsByFieldValues。
+  //   口径：字段不存在用「表头」判定（开始前，保留现文案）、命中数 0 用「emit 计数（writeRowsStreamed.dataRowCount）」判定（0 不产文件，删临时，保留现文案）。
   trackedIpcHandle('toolbox:split:export', '工具箱', '拆分表格', async (_event, payload = {}) => {
     try {
       const { sourceFilePath, field, values } = payload || {};
@@ -12939,16 +12991,50 @@ function registerToolboxHandlers() {
         return { status: 'failed', message: '请至少选择一个值', detailLines: [] };
       }
 
-      const aoa = readRows(sourceFilePath);
-      const filtered = toolboxFilterRowsByFieldValues(aoa, field, values);
-      if (!filtered.fieldFound) {
-        return { status: 'failed', message: `源文件中找不到字段「${field}」`, detailLines: [] };
-      }
-      if (filtered.matchedCount === 0) {
-        return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
+      let tempPath;
+      let matchedCount;
+      let splitHeaders;
+      if (toolboxIsStreamableXlsx(sourceFilePath)) {
+        // 流式：先取表头判字段是否存在（开始前），存在再流式过滤写临时；命中数由 writeRowsStreamed.dataRowCount 计。
+        splitHeaders = await toolboxReadHeaderRowStreamed(sourceFilePath);
+        const filter = toolboxCreateRowFilter(splitHeaders, field, values);
+        if (!filter.fieldFound) {
+          return { status: 'failed', message: `源文件中找不到字段「${field}」`, detailLines: [] };
+        }
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'));
+        tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
+        const writeRes = await toolboxWriteRowsStreamed({
+          savePath: tempPath,
+          normalizedHeaders: splitHeaders,
+          sheetBaseName: 'COMMON',
+          writeDataRows: async (emit) => {
+            await toolboxStreamDataRows(sourceFilePath, (cells) => {
+              if (filter.matches(cells)) {
+                emit(cells);
+              }
+            });
+          }
+        });
+        matchedCount = writeRes.dataRowCount;
+        if (matchedCount === 0) {
+          // 0 命中：删掉只含表头的临时文件、不弹保存框、不产用户文件（保留现文案）。
+          try { fs.rmSync(path.dirname(tempPath), { recursive: true, force: true }); } catch (_e) { /* swallow */ }
+          return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
+        }
+      } else {
+        // .csv/.xls 回退：全量 readRows + filterRowsByFieldValues（字段不存在 / 0 命中口径同现状）。
+        const aoa = readRows(sourceFilePath);
+        const filtered = toolboxFilterRowsByFieldValues(aoa, field, values);
+        if (!filtered.fieldFound) {
+          return { status: 'failed', message: `源文件中找不到字段「${field}」`, detailLines: [] };
+        }
+        if (filtered.matchedCount === 0) {
+          return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
+        }
+        tempPath = writeToolboxTempWorkbook(filtered.rows);
+        matchedCount = filtered.matchedCount;
       }
 
-      const tempPath = writeToolboxTempWorkbook(filtered.rows);
       const saveResult = await dialog.showSaveDialog(mainWindow, {
         defaultPath: toolboxBuildSplitFileName(values, sanitizeFileName),
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
@@ -12965,7 +13051,7 @@ function registerToolboxHandlers() {
         details: [
           `拆分字段：${field}`,
           `选中值数：${values.length}`,
-          `命中行数：${filtered.matchedCount}`,
+          `命中行数：${matchedCount}`,
           `导出路径：${saveResult.filePath}`
         ]
       });
