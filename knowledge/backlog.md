@@ -11,6 +11,30 @@
 
 ## 未实施
 
+### B21（P4）`TOOLBOX_MAX_COL_COUNT=1024` 工具箱流式静默列宽上限
+
+- **来源**：2026-06-17 v3.0.8 PR #78 self-review（F4）
+- **影响**：`src/main-process/toolbox-stream-io.js:71` `TOOLBOX_MAX_COL_COUNT = 1024`，`readXlsxStreamed` 每行补到 1024 列；列数 >1024 的表，表头（`readHeaderRowStreamed`）与数据（`streamDataRows`）均被静默截断到 1024 列、**无任何日志**。Excel 列上限为 16384
+- **现状**：工具箱面向任意 Excel，但 >1024 列的表几乎不存在；且表头/数据同宽一致截断、不致错位 → 风险极低
+- **推荐**：某行真实非空内容超 `colCount` 时 `log()` 一次告警（不静默丢列），或按需调大上界
+- **触发实施**：用户处理超宽表（>1024 列）/ 下次动 toolbox-stream-io.js 时
+
+### B20（P4）工具箱 merge/split 成功路径不清理 mkdtempSync 临时目录（既有行为，非回归）
+
+- **来源**：2026-06-17 v3.0.8 PR #78 self-review（F3）
+- **影响**：`src/main.js` `toolbox:merge`（~12897）+ `toolbox:split:export` 成功路径 `mkdtempSync` 建临时 xlsx、`copyFileSync` 到用户另存路径后**不 `rmSync` 临时目录**（仅 `toolbox:split:export` 0 命中路径清）。30 万行临时 xlsx 可达数十 MB，累积到 OS 清理 `os.tmpdir()` 为止
+- **现状**：**既有行为非本 PR 回归**——旧 `writeToolboxTempWorkbook`（main.js:12857）同样 `mkdtempSync` 无清理，BUG3 流式化沿用同模式；OS 最终会清 tmpdir
+- **推荐**：成功 / 取消路径加 `finally { rmSync(path.dirname(tempPath), {recursive,force}) }`
+- **触发实施**：下次动工具箱 handler 时一并收
+
+### B19（P3）`isMemoryLimitError` 把所有 RangeError 判「文件过大」→ 小型损坏文件可能误报
+
+- **来源**：2026-06-17 v3.0.8 PR #78 self-review（F2，BUG3 顺带新增的错误分类）
+- **影响**：`src/backend/file-service/readers.js:160` `isMemoryLimitError` 对**任意** `RangeError` 返回 true → `readWorkbookRows` catch 回「文件过大，超出处理能力，请拆分后再试」。小型损坏 / 畸形 xlsx 若恰好抛 `RangeError`，会被误标「文件过大」（改前统一「文件为空或不可读」，亦泛但不误导体积）
+- **现状**：取舍刻意（BUG3 改流式 + 优先给大文件真实文案引导拆分）；小型损坏文件正好抛 `RangeError`（而非其他错误类型）的概率低
+- **推荐**：收窄——裸 `instanceof RangeError` 叠加文件大小阈值（如 >50MB 才判内存类），或 message 关键字命中优先于裸类型判定
+- **触发实施**：用户报「小文件却提示文件过大」/ 下次动 readers.js 错误分支时
+
 ### B18（P3）导入 fx 交割表 rematch BOC 链接表后未清 reconIdFixResult（BOC 修复结果可能 stale）
 
 - **来源**：2026-06-15 v3.0.5 OPEN-4 删除扩展设计调研发现
