@@ -3358,6 +3358,12 @@ select.mapping-text-input {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* v3.0.8 codex-fix [P2]：拆分值可能很多（如按日期拆，几百个去重值）→ 浮动面板必须可滚动。
+   否则继承 .new-account-currency-dropdown-panel 的 max-height:248px + overflow:hidden 会把超出 248px 的值
+   裁掉且无法选中（原生 select multiple 本可滚动）。渠道下拉因渠道少不会溢出，故只覆盖本拆分值面板。 */
+.toolbox-split-values-floating-panel {
+  overflow-y: auto;
+}
 .toolbox-split-picker-hint {
   min-height: 18px;
   font-size: 12px;
