@@ -7,7 +7,9 @@
 // 展开/折叠端到端行为由手动测试把关（preview harness 同步 click 会扰动 modal 生命周期，无法稳定截图展开态）。
 //
 // 锁定要点（对齐 PRD v3.0.8 §5.2 + AC2-1..AC2-3；团队 W6 决策：仅前端过滤隐藏，零 migration 改动）：
-//   A. 退役 C3：refreshTable 渲染前过滤 category==='gateway-recon-join' 不显示（用户看不到、无法启用）。
+//   A. 退役自带 C3：refreshTable 渲染前过滤「category==='gateway-recon-join' 且 isBuiltin」不显示。
+//      v3.0.8 fix（用户拍板）：只隐藏软件自带的 C3，保留用户自建 C3（isBuiltin=false）可见可管理，
+//      不再一刀切隐藏全部 gateway-recon-join（避免误伤用户在 BOSH-CN 等渠道下自建的 C3）。
 //   B. 分组：两大功能分组「资金性质校验」(fund-nature-check + dbs-charge-fund-check) /
 //      「中台订单数据处理」(platform-order)，组名复用 FUNC_CATEGORY_LABELS。
 //   C. 三角折叠：分组标题行 ▶/▼ + 子场景行按折叠态显隐，两组默认 collapsed；点三角 toggle。
@@ -32,30 +34,40 @@ function sliceScenariosManagerDialog(src) {
 
 const dialogSrc = sliceScenariosManagerDialog(source);
 
-describe('W6-A：退役 C3（仅前端过滤隐藏，零 migration 改动）', () => {
-  test('refreshTable 渲染前过滤 category==="gateway-recon-join" 不显示', () => {
-    // 关键过滤行：const scenarios = scenariosRaw.filter((s) => s.category !== 'gateway-recon-join');
+describe('W6-A：退役自带 C3（仅前端过滤隐藏，零 migration 改动；用户自建 C3 保留）', () => {
+  test('refreshTable 渲染前只过滤「自带 C3」（gateway-recon-join 且 isBuiltin），用户自建 C3 不过滤', () => {
+    // 关键过滤行：
+    //   const scenarios = scenariosRaw.filter((s) => !(s.category === 'gateway-recon-join' && s.isBuiltin));
+    // 必须含 isBuiltin 条件（否则会一刀切隐藏用户自建 C3 — v3.0.8 修复前的 bug）。
     assert.ok(
-      /\.filter\(\s*\(s\)\s*=>\s*s\.category\s*!==\s*'gateway-recon-join'\s*\)/.test(dialogSrc),
-      'refreshTable 应过滤掉 category==="gateway-recon-join" 的场景（C3 退役隐藏）'
+      /\.filter\(\s*\(s\)\s*=>\s*!\(\s*s\.category\s*===\s*'gateway-recon-join'\s*&&\s*s\.isBuiltin\s*\)\s*\)/.test(dialogSrc),
+      'refreshTable 应只过滤掉「自带 C3」（category==="gateway-recon-join" 且 isBuiltin），保留用户自建 C3'
+    );
+    // 防回退：不得再出现一刀切的 s.category !== 'gateway-recon-join'（会误伤用户自建 C3）。
+    assert.ok(
+      !/\.filter\(\s*\(s\)\s*=>\s*s\.category\s*!==\s*'gateway-recon-join'\s*\)/.test(dialogSrc),
+      '不得用一刀切过滤 s.category !== "gateway-recon-join"（会隐藏用户自建 C3）'
     );
   });
 
   test('过滤发生在补 config / 白名单 / 渠道过滤之前（用 scenariosRaw → scenarios 命名）', () => {
-    // 先 load 到 scenariosRaw，过滤 C3 得到 scenarios，后续链路全部基于已剔除 C3 的 scenarios。
+    // 先 load 到 scenariosRaw，过滤自带 C3 得到 scenarios，后续链路全部基于已剔除自带 C3 的 scenarios。
     assert.ok(
       dialogSrc.includes('const scenariosRaw = await loadScenariosOrAlert();'),
       'refreshTable 应先 load 到 scenariosRaw'
     );
-    const filterIdx = dialogSrc.indexOf("s.category !== 'gateway-recon-join'");
+    const filterIdx = dialogSrc.indexOf("s.category === 'gateway-recon-join' && s.isBuiltin");
     const builtinConfigIdx = dialogSrc.indexOf(".filter((s) => s.category === 'builtin-fixed')");
     assert.ok(filterIdx >= 0 && builtinConfigIdx >= 0 && filterIdx < builtinConfigIdx,
-      'C3 过滤应早于 builtin-fixed 补 config（确保 C3 不参与任何后续渲染分支）');
+      '自带 C3 过滤应早于 builtin-fixed 补 config（确保自带 C3 不参与任何后续渲染分支）');
   });
 
   test('不触碰后端：本前端改动不引入 migrations / 引擎 / dispatcher 改动（注释明确可回滚红线）', () => {
-    // 退役策略注释应说明「仅前端过滤隐藏」「后端全不动」。
-    assert.ok(/仅前端过滤隐藏/.test(dialogSrc), '应注明退役策略为仅前端过滤隐藏（可回滚）');
+    // 退役策略注释应说明「仅隐藏软件自带的 C3」「后端全不动」「保留用户自建 C3 可见可管理」。
+    assert.ok(/仅隐藏「软件自带的 C3」|只过滤自带 C3|只隐藏自带列表项/.test(dialogSrc),
+      '应注明退役策略为仅隐藏软件自带的 C3（可回滚）');
+    assert.ok(/保留用户自建 C3/.test(dialogSrc),
+      '应注明保留用户自建 C3 可见可管理');
   });
 });
 
