@@ -4505,7 +4505,7 @@ function registerAppHandlers() {
     try {
       // v2.0.0 GA：默认 HTML（filters 第一项被 saveDialog 当默认；同时 defaultPath 带 .html 后缀加固）
       const result = await dialog.showSaveDialog(mainWindow, {
-        defaultPath: '使用手册.html',
+        defaultPath: `使用手册-v${app.getVersion()}.html`,
         filters: [
           { name: 'HTML 文件', extensions: ['html'] },
           { name: '纯文本文件', extensions: ['txt'] }
