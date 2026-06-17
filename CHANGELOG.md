@@ -2,6 +2,37 @@
 
 ## 3.0.8 - 2026-06-16
 
+> **v3.0.8 第二轮追加（2026-06-17）**（版本号并入 3.0.8 不 bump，分支 `v3.0.8-userguide-bank-2cols`）：PR #77 合入 main 后第二轮迭代，**5 项**——迭代1 使用手册去技术术语 + 1.4 总览导航 + 1.6.1 银行 46 列兼容说明（需求8，纯文档，567 处替换）；迭代2 银行对账单 44→46 列（需求9，🔴 资金红线，识别 + 字段下拉可选 + BU 回填兼容导入·不落库）；BUG2 场景管理弹窗用户自建 C3 在 v3.0.8 后误消失修复；BUG3 工具箱合并/拆分大文件（30 万行）OOM 闪退 / 误报「文件为空」改流式修复（🔴 顺带修 `streaming-xlsx-reader.js` 读值正则——银行对账单导入复用，升级必读）；工具箱弹窗尺寸微调。`npm run release-check` 全绿（unit **3040/3040** + 34 集成脚本 + smoke 全模块 PASS）+ 用户手动测试 BUG2/BUG3 通过。明细见下方「v3.0.8 第二轮追加」三段（新增 / 变更 / 修复 + 🔴 对外契约变更）。
+>
+> ---
+>
+> ### v3.0.8 第二轮追加 · 新增
+>
+> - **迭代2 银行对账单模板 44 → 46 列**（🔴 资金红线 · 详见下方「🔴 对外契约变更」① · `bank-statement-fields.js` / `preload.js` / `table-signatures.js` / `validator.js` / `reader.js` / `columns.js` / `assets/银行对账单.xlsx`）：「渠道对账单」sheet 在 `'Transaction Description'` 后插入「合并单号」「合并状态」两列。识别 + 字段下拉可选 + BU 回填兼容导入忽略两列、**不落库**——① `BANK_STATEMENT_FIELDS` 44→46（识别 `expectedHeaders` + 字段下拉单一来源）+ `preload.js` inline 副本逐列同步；② `table-signatures.js` `expectedHeaders` 复用数组自动跟随，`signatureHeaders` 指纹列保持不变（新旧 44/46 列文件均识别）；③ `validator.js buildHeaderValidator` 加 `allowSupersetColumns`（银行对账单宽容超集 = 模板列须为文件表头有序子序列、多余列忽略；Pending 默认严格、零回归）；④ `reader.js buildRowMapper` 改按列名 `headerIndexMap` 取值（防 `Extra Information` / `Remark-BU` 等后移列错位 = 资金对账错列红线）；⑤ `columns.js BANK_HEADERS` 保持 44 列**不动**=合并单号 / 合并状态读到也不写 DB。`assets/银行对账单.xlsx` 升级。新增 `header-superset-mapping.test.js` + 改 2 测。
+> - **流式 Excel 读写模块 `toolbox-stream-io.js`**（🟡 BUG3 修复载体 · 新增 `src/main-process/toolbox-stream-io.js`）：工具箱合并 / 拆分大文件改流式——读侧 `.xlsx` 复用自研 `readXlsxStreamed`（边解压 zip entry 边扫 `<row>`、内存恒定），`.csv` / `.xls` 回退全量 `readRows`；写侧 `ExcelJS.stream.xlsx.WorkbookWriter` 逐行 `addRow().commit()`，**输出与现状 `writeWorkbookRows` 完全一致**（决策① by-name 格式：numericFields / dateFields / textFields 按表头名套格式 + 表头 Courier New 10pt，与 `writers.js applyExportFieldFormats` 单一真理来源同源）；合并合计超 Excel 单页数据行硬上限（`MAX_DATA_ROWS_PER_SHEET=1048575`）自动开 sub-sheet (2)(3)（决策②，照搬 `acquiring-bill-currency-writer.js`）。`main.js` 三 IPC（`toolbox:merge`:12860 / `toolbox:split:read`:12908 / `toolbox:split:export`:12929）改走本模块流式读写。
+>
+> ### v3.0.8 第二轮追加 · 变更
+>
+> - **迭代1 使用手册 `docs/USER_GUIDE.md` 全册技术术语清理 + 总览导航 + 银行 46 列兼容说明**（🟢 纯文档 · 详见下方「🔴 对外契约变更」②）：① 1.4 新增「中台订单数据处理」总览导航小节（4 个子场景一句话作用 + 何时用，与「资金性质校验」组并列，零术语）；② **全册约 567 处技术术语 → 业务白话**（6 段并行只读审查 → 单 agent 串行应用 → grep 验证；核心禁用词全册清零；软件界面名 / Excel 真实列名 / 渠道数据真值保留并配中文解释；历史 changelog 不洗——用户拍板）；③ 1.6.1 加银行对账单 46 列兼容用户白话说明。SOP 沉淀 `knowledge/user-guide-dejargon-playbook.md`。零业务代码改动；`##`=20 / `###`=136 / 代码围栏 26（偶数）校验通过。
+> - **工具箱弹窗尺寸微调**（🟢 体验 · `styles-gemini-extra.css` `.toolbox-card` / `.toolbox-body`）：`.toolbox-card width` 由 `230` → `min(94vw, 246px)`（左右各 +8、外框宽 +16）；`.toolbox-body padding-bottom` 由 `12` → `27`（下沿往下 +15）+ `.toolbox-card transform: translateY(7.5px)`（**口径 B**：overlay 垂直居中会把上沿上移 7.5，整体下移 7.5 抵消 → 上沿回到最原始基线不动、下沿净往下 +15，卡片高净 +15）。纯样式，无逻辑改动，preview 回归。
+>
+> ### v3.0.8 第二轮追加 · 修复
+>
+> - **BUG2 场景管理弹窗用户自建 C3 在 v3.0.8 后误消失**（🟢 体验回归修复 · `renderer-dialogs.js:7051`）：v3.0.8 需求2 退役自带场景 C3 时，前端过滤一刀切隐藏了全部 `category==='gateway-recon-join'`，**误伤用户在 BOSH-CN 等渠道下自建的 C3 场景**（自建 C3 在场景管理列表看不到、无法启停 / 管理）。修复：过滤条件由 `s.category!=='gateway-recon-join'` 收窄为 `!(s.category === 'gateway-recon-join' && s.isBuiltin)` —— **仅隐藏「软件自带的 C3」（`isBuiltin=true`）、保留用户自建 C3（`isBuiltin=false`）可见可管理**。`isBuiltin` 来源 `scenarios-repository.rowToListItem → Number(row.is_builtin)===1`。运行口径 `hasC3Enabled` **未动**（已有库手动启用的 C3 仍照常运行，后端引擎 / dispatcher case / CHECK 约束全保留）；本次仅修「列表展示过滤」误伤面。
+>
+> - **BUG3 工具箱合并/拆分 30 万行 OOM 闪退 / 误报「文件为空」**（🔴 涉资金红线复用文件 · `toolbox-stream-io.js`〔新增〕 / `main.js` 三 IPC / `readers.js` / `streaming-xlsx-reader.js`）：工具箱合并 / 拆分大文件（约 30 万行）时 SheetJS 全量读撞 V8 内存上限 → 进程闪退，或被旧实现统一吞成「文件为空或不可读」误导用户（文件明明有内容、只是太大）。
+>   - **改流式**：合并 / 拆分三 IPC 改走新增 `toolbox-stream-io.js`（详见「新增」段：流式读 + `WorkbookWriter` 逐行写 + by-name 格式保留 + 超 104 万行自动分 sheet + csv/xls 回退）。
+>   - **内存错误回真实文案**：`readers.js` 新增 `isMemoryError`（:158-164，识别 `RangeError` / `Array buffer allocation failed` / `Invalid string length` / `Invalid array length` / V8 OOM 关键字），命中改回「文件过大」真实文案而非「文件为空或不可读」（:144-154），引导用户拆分后再试。
+>   - **🔴 顺带修 `streaming-xlsx-reader.js` `V_CONTENT_RE` 读值正则**（:58）：旧版 `/<v>...<\/v>/` 要求 `<v>` 是**裸标签**，但 SheetJS / Excel 写「含首尾空格的字符串」会输出 `<c t="str"><v xml:space="preserve"> A </v></c>`（`<v>` 带 `xml:space` 属性）→ 旧正则不匹配 → **隐性丢值（读空）**。改为 `/<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/` 容忍 `<v>` 任意属性（裸 `<v>` 仍匹配，向后兼容）。⚠️ **该读取器被银行对账单导入复用** → 见下方「🔴 对外契约变更」②，升级必读、建议真实数据回归。
+>
+> ### v3.0.8 第二轮追加 · 🔴 对外契约变更（合并适配提示 · 升级必读）
+>
+> 1. **银行对账单模板 44 → 46 列**（迭代2 · 🔴 资金红线 · 模板列扩展）：「渠道对账单」sheet 在 `'Transaction Description'` 后新增「合并单号」「合并状态」两列（44→46）。软件**识别 + 字段下拉可选 + BU 回填兼容导入忽略两列、不落库**——新旧 44/46 列文件均可识别（指纹列不变）；BU 回填导入校验改宽容超集（模板 44 列须为文件表头有序子序列、多余列忽略），取值改**按列名定位**（两列插在中间不影响其余列），合并单号 / 合并状态读到也**不写入 `bank_bu_recon_bank_imports`**（DB 列结构不动）。⚠️ 旧版 44 列文件行为完全不变；Pending 数据管理仍走严格校验、零波及。下游若依赖银行对账单固定 44 列的脚本，遇到 46 列新文件时需忽略多出的两列。
+> 2. **`streaming-xlsx-reader.js` 读值正则修复（含首尾空格的字符串不再被读空）**（BUG3 顺带 · 🔴 资金红线 · 影响银行对账单导入读值 · 升级必读）：自研流式 xlsx 读取器 `V_CONTENT_RE` 由 `/<v>...<\/v>/` 改为 `/<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/`，修复「`<v>` 带 `xml:space="preserve"` 属性的含首尾空格字符串单元格被旧正则漏匹配 → 读空」的隐性丢值 bug（裸 `<v>` 仍匹配，**向后兼容**）。⚠️ **该读取器不仅工具箱用，亦被银行对账单导入（Pending / BU 回填等大文件流式读路径）复用** → 升级后此前被读空的含首尾空格列会读到真实值，对账 / 校验输入可能随之变化。**强烈建议用真实银行对账单数据回归一遍导入读值**，确认无非预期口径变化（绝大多数列无首尾空格、不受影响；仅含空格 / `xml:space` 的列受益于修复）。
+> 3. **工具箱合并 / 拆分大文件改流式（30 万行不再闪退）**（BUG3 · 🟡 性能 · 行为修复）：工具箱合并 / 拆分由 SheetJS 全量读改为流式读（`readXlsxStreamed`）+ `ExcelJS WorkbookWriter` 流式写，根治约 30 万行大文件 OOM 闪退；大文件不再被误吞成「文件为空或不可读」（改回「文件过大」真实文案）。**输出与现状 `writeWorkbookRows` 完全一致**（by-name 格式 + 表头样式保留），合并合计超 Excel 单页数据行硬上限（1,048,575）自动开 sub-sheet (2)(3)；`.csv` / `.xls` 回退全量读。无对外列契约 / 文件名规则变化。
+>
+> ---
+
 v3.0.8 迭代（工具箱合表/拆表 + 场景管理体验 + 资金对账运行不阻塞 + 内存尖峰修复 + 未命中 sheet 布局 + BOC 修复行 Type + R5s3 两级 fallback）：共 **7 项**——5 项新反馈 + 2 份并入的 v3.0.7 资金红线修复 spec（team-lead 拆分委托 dev 分 W1~W6 实施，W4=需求6+需求3 合并工作流）。① **需求1 工具箱🧰（合表/拆表）**——主界面左下角新增🧰按钮，弹出脱离主对账流程的轻量 Excel 小工具：合并多个表头一致的表为一张（导入即一气呵成另存为）、按某字段的某些值从一张表拆出子集（导入 → 选字段/值 → 导出），文件名带时间戳自动规范（合并-YYYYMMDDHHmm / 拆分-值-YYYYMMDDHHmm）；新增 3 个 IPC（`toolbox:merge` / `toolbox:split:read` / `toolbox:split:export`），复用 file-service 读写，对既有对账/导出链路零影响。② **需求2 场景管理退役 C3 + 分组折叠**——自带场景 C3（`gateway-recon-join`「与网关对账单按金额币种 1v1 匹配对账ID」）退役（前端隐藏 + 新库不 seed，后端引擎/约束/已有库记录全保留，可回滚）；其余场景按「资金性质校验」「中台订单数据处理」两大组三角折叠、默认收纳。③ **需求3 资金对账「开始运行」不阻塞**（🔴 资金红线）——`bank-statement:run` handler 改 async + 轮次边界让出事件循环（R1→R2→R3.5→R4→R5 各子轮插 yield），消除运行期窗口「未响应」（不上 worker）；新增进度通道 `bank-statement:run:progress`，状态框随轮次更新文案；对账产物 golden 字节不变。④ **需求4 银行未命中场景 sheet 数据右移 B 列**（🔴 对外口径变更）——sheet1「未命中场景」A1 提醒独占首列、表头/数据整体右移到 B 列起，A 列除 A1 留空。⑤ **需求5 BOC 调拨修复行 Type 2→1**（🔴 资金红线/下游契约变更）——`boc-dispatch-order-fix.js` 修复模板输出列 `Type` 由 `2` 改 `1`（业务确认应为 1）。⑥ **需求6 运行内存尖峰修复**（🔴 资金红线，并入 spec A）——bank-deposit 入金表加消费方门控（关退款场景时不读 ~1.2GB 入金表、注入 `[]`）+ gateway-bill 网关账单表按 Channel 子集下推过滤读 + 删深拷（新增仓储 `readGatewayBillRowsByChannels`），根治 Windows「开始运行」卡死。⑦ **需求7 R5s3 两级 fallback + FundType 子串**（🔴 资金红线，并入 spec B）——中台加款单脏数据处理引擎：银行侧 `ReconciliationId` 匹配不上时用 `ChannelOrderNo` 兜底（两级 fallback、严格 1v1 跨两级共享、一级消歧失败不 fallback）+ 触发条件由精确判等 `FundType==='Inbound'` 改为子串包含判定（大小写不敏感），防 `Inbound-VA` 等入金变体被误剔除。质量门 `npm run release-check` 全绿（unit + integration + smoke）。⚠️ **资金红线**：需求 3/4/5/6/7 均涉对账 run 路径或输出口径，已人工复核 + golden/等价回归。
 
 ### 🔴 对外契约变更（合并适配提示 · 升级必读）

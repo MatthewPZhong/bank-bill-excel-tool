@@ -13,6 +13,31 @@
 
 v3.0.8 迭代：共 **7 项**——5 项新反馈 + 2 份并入的 v3.0.7 资金红线修复 spec（team-lead 拆分委托 dev 分 W1~W6 实施，W4=需求6+需求3 合并工作流）。① 需求1 工具箱🧰（合表/拆表）——主界面左下角新增🧰按钮 → 脱离主对账流程的轻量 Excel 小工具：合并多个表头一致的表为一张（导入即一气呵成另存为 `合并-YYYYMMDDHHmm.xlsx`）、按某字段的某些值从一张表拆出子集（导入 → 选字段/值 → 导出 `拆分-值-YYYYMMDDHHmm.xlsx`），3 个 IPC（`toolbox:merge`/`toolbox:split:read`/`toolbox:split:export`）复用 file-service 读写，对既有链路零影响；② 需求2 场景管理退役 C3（`gateway-recon-join`，前端隐藏 + 新库不 seed，后端引擎/约束/已有库记录全保留可回滚）+ 两大功能分组（「资金性质校验」「中台订单数据处理」）三角折叠、默认收纳；③ 需求3 资金对账「开始运行」不阻塞（🔴 资金红线）——`bank-statement:run` 改 async + 轮次边界让出事件循环（不上 worker）+ 新增进度通道 `bank-statement:run:progress`，消除运行期窗口「未响应」，对账产物 golden 字节不变；④ 需求4 银行未命中场景 sheet 数据右移 B 列（🔴 对外口径变更）——sheet1 提醒独占 A1、表头/数据整体右移 B 列起；⑤ 需求5 BOC 调拨修复行 Type 2→1（🔴 资金红线/下游契约变更）——修复模板输出列 `Type` 由 `2` 改 `1`；⑥ 需求6 运行内存尖峰修复（🔴 资金红线，并入 spec A）——bank-deposit 入金表加消费方门控（关退款场景不读 ~1.2GB、注入 `[]`）+ gateway-bill 按 Channel 子集下推过滤读 + 删深拷（新增仓储 `readGatewayBillRowsByChannels`），根治 Windows「开始运行」卡死；⑦ 需求7 R5s3 两级 fallback + FundType 子串（🔴 资金红线，并入 spec B）——中台加款单脏数据处理引擎：`ReconciliationId` 匹配不上时用 `ChannelOrderNo` 兜底（两级 fallback、严格 1v1 跨两级共享、一级消歧失败不 fallback）+ 触发条件由精确判等 `FundType==='Inbound'` 改子串包含判定（大小写不敏感），防 `Inbound-VA` 等入金变体被误剔除。质量门 `npm run release-check` 全绿（unit + integration + smoke）。⚠️ 资金红线：需求 3/4/5/6/7 均涉对账 run 路径或输出口径，已人工复核 + golden/等价回归。
 
+### v3.0.8 第二轮追加（2026-06-17，版本号并入 3.0.8 不 bump · 分支 `v3.0.8-userguide-bank-2cols`）
+
+PR #77 合入 main 后第二轮迭代，**5 项**——① 迭代1 使用手册去技术术语 + 总览导航 + 46 列兼容说明（需求8，纯文档）；② 迭代2 银行对账单 44→46 列（需求9，🔴 资金红线，识别 + 字段下拉可选 + BU 回填兼容导入·不落库）；③ BUG2 场景管理弹窗用户自建 C3 误消失修复；④ BUG3 工具箱合并/拆分大文件（30 万行）OOM 闪退 / 误报「文件为空」改流式修复（🔴 顺带修 `streaming-xlsx-reader.js` 读值正则，银行对账单导入复用、升级必读）；⑤ 工具箱弹窗尺寸微调。`npm run release-check` 全绿（unit **3040/3040** + 34 集成脚本 + smoke 全模块 PASS）+ 用户手动测试 BUG2/BUG3 通过。
+
+**🔴 对外契约变更（升级必读，详见 CHANGELOG「v3.0.8 第二轮追加 · 🔴 对外契约变更」段）**
+
+- ① 银行对账单模板 44→46 列（迭代2 · 🔴 资金红线）：「渠道对账单」sheet 在 `'Transaction Description'` 后加「合并单号」「合并状态」；软件识别 + 字段下拉可选 + BU 回填兼容导入忽略两列、不落库（新旧 44/46 列文件均识别、宽容超集校验、按列名取值防后移列错位、`bank_bu_recon_bank_imports` 列结构不动）；旧版 44 列文件行为不变、Pending 严格校验零波及。
+- ② `streaming-xlsx-reader.js` 读值正则修复（含首尾空格字符串不再被读空）（BUG3 顺带 · 🔴 资金红线 · 影响银行对账单导入读值）：`V_CONTENT_RE` 改为容忍 `<v>` 任意属性（`xml:space="preserve"` 的含首尾空格单元格旧版被读空、本次修复，裸 `<v>` 仍匹配向后兼容）；该读取器被银行对账单导入复用 → 升级后此前读空的含首尾空格列会读到真实值，**建议真实数据回归银行对账单导入读值**。
+- ③ 工具箱合并/拆分大文件改流式（30 万行不再闪退）（BUG3 · 🟡 性能）：SheetJS 全量读 → 流式读 + `WorkbookWriter` 流式写，输出与现状完全一致、超 104 万行自动分 sheet、csv/xls 回退；无对外列契约 / 文件名规则变化。
+
+**新增**
+
+- 迭代2 银行对账单 44→46 列（🔴 资金红线）：`BANK_STATEMENT_FIELDS` 44→46（「合并单号」「合并状态」插在 `'Transaction Description'` 后）+ `preload.js` inline 副本逐列同步；`table-signatures.js` `expectedHeaders` 复用自动跟随、`signatureHeaders` 指纹列不变（新旧均识别）；`validator.js` 加 `allowSupersetColumns`（银行宽容超集、Pending 严格零回归）；`reader.js` 改按列名 `headerIndexMap` 取值（防后移列错位）；`columns.js BANK_HEADERS` 保持 44 列不动=不落库。`assets/银行对账单.xlsx` 升级 + `header-superset-mapping.test.js` 新增 + 改 2 测。
+- 流式 Excel 读写模块 `toolbox-stream-io.js`（BUG3 载体）：读侧 `.xlsx` 复用 `readXlsxStreamed`（内存恒定）、`.csv`/`.xls` 回退全量；写侧 `ExcelJS.stream.xlsx.WorkbookWriter` 逐行写 + by-name 格式（与 `writeWorkbookRows` 一致）+ 超 `1048575` 行自动开 sub-sheet。`main.js` 三 IPC（`toolbox:merge`/`toolbox:split:read`/`toolbox:split:export`）改走流式。
+
+**变更**
+
+- 迭代1 使用手册 `docs/USER_GUIDE.md` 全册去技术术语 + 1.4 总览导航 + 1.6.1 银行 46 列兼容说明（🟢 纯文档）：约 567 处技术术语 → 业务白话（6 段并行只读审查 → 单 agent 串行应用 → grep 验证，核心禁用词全册清零；软件界面名 / Excel 真实列名 / 渠道数据真值保留并配中文解释；历史 changelog 不洗——用户拍板）；SOP 沉淀 `knowledge/user-guide-dejargon-playbook.md`；零业务代码改动。
+- 工具箱弹窗尺寸微调（🟢 体验）：`.toolbox-card width` 230→`min(94vw, 246px)`（左右各 +8）+ `.toolbox-body padding-bottom` 12→27 + `.toolbox-card transform: translateY(7.5px)`（口径 B：下沿净 +15、上沿不动，卡片高净 +15）；纯样式、preview 回归。
+
+**修复**
+
+- BUG2 场景管理弹窗用户自建 C3 在 v3.0.8 后误消失（🟢 体验回归 · `renderer-dialogs.js:7051`）：需求2 退役自带 C3 时前端过滤一刀切隐藏全部 `gateway-recon-join`，误伤用户自建 C3。过滤由 `s.category!=='gateway-recon-join'` 收窄为 `!(s.category === 'gateway-recon-join' && s.isBuiltin)`——仅隐藏自带 C3（`isBuiltin=true`）、保留用户自建 C3 可见可管理；运行口径 `hasC3Enabled` 未动（已有库手动启用的 C3 仍运行）。
+- BUG3 工具箱合并/拆分 30 万行 OOM 闪退 / 误报「文件为空」（🔴 涉资金红线复用文件）：改流式（新增 `toolbox-stream-io.js` + 三 IPC 改流式）+ `readers.js` 内存错误（`isMemoryError`）回「文件过大」真实文案 + 🔴 顺带修 `streaming-xlsx-reader.js V_CONTENT_RE` 读值正则（含首尾空格字符串不再读空，银行对账单导入复用，向后兼容、建议真实数据回归——详见对外契约②）。
+
 ### 🔴 对外契约变更（升级必读，详见 CHANGELOG v3.0.8「对外契约变更」段）
 
 - ① BOC 调拨订单修复模板 `Type` 列 2→1（需求5 · 🔴 资金红线 · 下游契约变更）：`boc-dispatch-order-fix.js` 修复模板输出行 `Type` 由写死 `2`（v3.0.4 块 E D9 拍板值）改为 `1`（业务确认）。`Type` 仅落输出 Excel 给下游、src/ 内无按 `Type==值` 过滤逻辑，但下游按 Type=2 解析 BOC 修复模板的脚本/流程需适配 Type=1；匹配/组失败语义零变化。

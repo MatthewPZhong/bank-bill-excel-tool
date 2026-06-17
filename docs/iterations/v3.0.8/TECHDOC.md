@@ -127,6 +127,32 @@
 | `tests/unit/main-process/scenario-engines/r5-platform-inbound-cleanup.test.js` | 修改 | 改 3（:153/:162/:373）+ 新增 7（fixture `bankRow` 加可选 `channelOrderNo`） |
 | **不动** | — | `buildCleanupRow`（:34-47）/ 配置 seed（migrations.js:1544-1556）/ `CLEANUP_COPY_HEADERS` |
 
+### 需求 8：使用手册补全 + 全册去技术术语（第二轮追加，纯文档）
+
+> 详见 §十七。文档侧需求，**不碰业务代码 / 接口 / 数据**。
+
+| 文件 | 改动类型 | 概要 |
+|------|---------|------|
+| `docs/USER_GUIDE.md` | 修改 | ① 1.4 新增「中台订单数据处理」总览导航小节（行 604+）；② 全册技术术语清理为业务白话（约 567 处替换）；③ 1.6.1 加银行对账单 46 列兼容说明 |
+| `knowledge/user-guide-dejargon-playbook.md` | 新增 | 去术语 SOP（核心原则 / 禁用词清单 / 保留清单 / 统一译法表 / ultracode 执行流程 / 易错点），供后续每次写改手册复用 |
+| **不动** | — | `src/**`（任何业务代码 / 接口 / 数据），纯文档措辞改造 |
+
+### 需求 9：银行对账单 44→46 列（第二轮追加，🔴 资金红线，识别 + 字段可选 + BU 兼容导入不落库）
+
+> 详见 §十八。`assets/银行对账单.xlsx`「渠道对账单」sheet 在 `'Transaction Description'` 后插「合并单号」「合并状态」，44→46。
+
+| 文件 | 改动类型 | 概要 |
+|------|---------|------|
+| `src/constants/bank-statement-fields.js` | 修改 | `BANK_STATEMENT_FIELDS` 44→46（「合并单号」:26 /「合并状态」:27 插在 `'Transaction Description'`:25 后） |
+| `src/preload.js` | 修改 | 暴露给渲染进程的 inline 副本（:11）逐项同步「合并单号」「合并状态」，与 bank-statement-fields 逐列一致 |
+| `src/constants/table-signatures.js` | 修改 | 注释 44→46（:36 / :179）；`expectedHeaders:[...BANK_STATEMENT_FIELDS]`（银行对账单 :41 / 入金表 :188）自动跟随；`signatureHeaders` 指纹列不变（:44） |
+| `src/backend/bank-bu-recon-import/validator.js` | 修改 | `buildHeaderValidator` 加 `options.allowSupersetColumns`（:24-25 + 宽容超集分支 :39-78）；`validateBankHeaders` 启用 `{allowSupersetColumns:true}`（:117）；`validatePendingGuanliHeaders` 保持严格（:115） |
+| `src/backend/bank-bu-recon-import/reader.js` | 修改 | `buildRowMapper` 改按列名定位取值（`headerIndexMap`，:59-65；注释 :37-40），防后移列错位 |
+| `src/backend/bank-bu-recon-db/columns.js` | **不改** | `BANK_HEADERS` 保持 44 列（不含合并单号 / 合并状态）= DB 列结构不动 = 不落库（🔴） |
+| `tests/unit/constants/bank-statement-fields.test.js` | 修改 | 断言 `BANK_STATEMENT_FIELDS` = 46 + 含两列 |
+| `tests/unit/backend/bank-bu-recon-import/validator.test.js` | 修改 | 宽容超集契约（46 列文件通过 / 乱序失败 / 缺列失败 / Pending 严格零回归） |
+| `tests/unit/backend/bank-bu-recon-import/header-superset-mapping.test.js` | 新增 | 按列名映射（46 列文件取值不错位、忽略两列、不落库） |
+
 ### 文档发版（全需求）
 
 | 文件 | 改动类型 | 概要 |
@@ -621,6 +647,143 @@ fixture `bankRow(...)`（:40-63）加可选 `channelOrderNo` 入参（默认不�
 
 ---
 
+## 十七、需求 8：使用手册补全 + 全册去技术术语（第二轮追加，纯文档）
+
+> 对应 PRD §5.8 / §6.8。文档侧需求，**零业务代码改动**。SOP 沉淀 `knowledge/user-guide-dejargon-playbook.md`。
+
+### 17.1 实现方案
+
+- **1.4 新增总览导航小节**：在 `docs/USER_GUIDE.md` 1.4 区域插入「中台订单数据处理」总览（4 个子场景一句话作用 + 何时用 + 指向各详解小节），与「资金性质校验」组并列点出，建立「这是一组同类场景」的用户认知；零术语。
+- **全册去术语（ultracode workflow，3 步）**：
+  1. **6 段并行只读审查**：USER_GUIDE 按大节（`##`）切 ~6 段，每段一个只读 agent 产出精确 `old→new` 替换对（`old` 取完整行 / 连续几行原文含足够上下文保证全文件唯一，可能多处出现的标 `uniqueRisk`），约 567 处。
+  2. **单 agent 串行应用**：一个写者收全部替换对逐个 Edit，跨段同词统一译法，`uniqueRisk` / 多匹配补上下文或 `replace_all`、无法安全定位则跳过并报告，保 markdown 结构。**禁止多 agent 并行写同一文件**（会互相覆盖）。
+  3. **grep 验证**：全册扫禁用词清零（排除保留清单 + 已配解释）；对比改前后 `##` / `###` 标题数（零丢失）、代码围栏数（偶数配对）、总行数（无大段丢失）。
+- **1.6.1 加 46 列兼容说明**：与需求 9 用户侧体感对应。
+- **为什么这样做**：读者是业务 / 财务非工程师，工程术语让人对不上软件操作；并行审查提速、串行应用防并发覆盖、grep + 标题 / 围栏数双校验防误删信息。
+
+### 17.2 改动点
+
+| 文件 | 位置 | 改动内容 |
+|------|------|---------|
+| `docs/USER_GUIDE.md` | 1.4（行 604+） | 新增「📦 中台订单数据处理总览」小节 |
+| `docs/USER_GUIDE.md` | 全册 | 约 567 处术语 → 业务白话；保留软件界面名 / Excel 列名 / 渠道真值 + 配中文解释；历史 changelog 不洗 |
+| `docs/USER_GUIDE.md` | 1.6.1 | 加银行对账单 46 列兼容用户白话说明 |
+| `knowledge/user-guide-dejargon-playbook.md` | 新增 | 去术语 SOP（禁用词 / 保留 / 译法 / 流程 / 易错点） |
+
+### 17.3 注意事项
+
+- 🔴 **只去术语、不删功能信息**：替换措辞，不删功能说明 / 不改资金敏感口径（对账 / 退款 / 剔除 / 余额 / Type 章节信息完整、口径不被洗改变义）。
+- **保留清单**：软件界面真实按钮 / 弹窗 / 场景名、Excel 真实列名（`Credit Amount` / `Remark-BU` / `Type` 等）、渠道数据真值（`ADM` / `BOC` / `Inbound-VA` / `FundType` 取值等）、给维护人员的真实命令（`sqlite3` / `jq` / settings-key，用括注隔离）——删了用户对不上屏幕 / 对不上数据。
+- **统一译法**（全册一致，节选）：sheet→工作表；字段→列；FundType→资金性质；Channel→渠道；fallback→对不上时再用…兜一道；golden / 字节一致→和以前结果一样；raw_json→原始数据。
+- **易错点**：FAQ 问题 ↔ 答案要一起改（别漏改问题行）；巨长行可顺带拆 bullet；审查 agent 只看自己段 → 给的 `old` 可能全局不唯一 → 应用阶段必须处理多匹配；team-lead 必须审 diff 兜底（标题数 / 围栏 / grep + 人眼抽查资金敏感章节）。
+- **验证证据**：`##`=20（改前后一致）、`###`=135→136（仅 1.4 新增 +1）、代码围栏=26（偶数）。
+
+---
+
+## 十八、需求 9：银行对账单 44→46 列（第二轮追加，🔴 资金红线，spec B 风格）
+
+> 对应 PRD §5.9 / §6.9。用户决策：识别 + 字段下拉可选 + BU 回填兼容导入忽略两列、**不落库**（不碰 `bank_bu_recon_bank_imports` 列结构）。
+
+### 18.1 现状基线（file:line）
+
+- `assets/银行对账单.xlsx`「渠道对账单」sheet：在 `'Transaction Description'` 后插入「合并单号」「合并状态」，44→46 列（旧版 44 列文件仍在用）。
+- `src/constants/bank-statement-fields.js`：`BANK_STATEMENT_FIELDS` 银行对账单固定字段数组（识别 `expectedHeaders` + 字段下拉的单一来源）。
+- `src/constants/table-signatures.js`：银行对账单 / 入金表两处 `expectedHeaders: [...BANK_STATEMENT_FIELDS]` 复用该数组（L1 锚点）；`signatureHeaders` 是 3-6 个指纹列（L2 模糊匹配）。
+- `src/backend/bank-bu-recon-import/validator.js`：`buildHeaderValidator(expectedHeaders, label)` 原为严格校验（列数相等 + 逐列名相等）；`validateBankHeaders` / `validatePendingGuanliHeaders` 各调一次。
+- `src/backend/bank-bu-recon-import/reader.js`：行映射原按固定列索引取值。
+- `src/backend/bank-bu-recon-db/columns.js`：`BANK_HEADERS` 44 列、`bank_bu_recon_bank_imports` DB 列结构（落库口径）。
+
+### 18.2 改动 1 — 字段定义 44→46 + 识别自动跟随 + 下拉自动跟随
+
+- `bank-statement-fields.js`：`BANK_STATEMENT_FIELDS` 在 `'Transaction Description'`（:25）后插「合并单号」（:26）「合并状态」（:27），共 46。
+- `preload.js:11`：暴露给渲染进程的 inline 副本逐项同步两列，**与 bank-statement-fields 逐列一致**（两处口径分叉会让渲染进程下拉与主进程不一致）。
+- `table-signatures.js`：注释 44→46（:36 / :179）；`expectedHeaders: [...BANK_STATEMENT_FIELDS]`（银行对账单 :41 / 入金表 :188）**自动跟随**到 46；**`signatureHeaders` 指纹列保持不变**（`ReconciliationId` / `Credit Amount` / `Debit Amount` / `拆分信息` / `关联大账号`，均非新增两列）。
+  - 🔴 **新旧文件均可识别的原理**：指纹列在新版 46 列与旧版 44 列文件里都存在（新增两列不在指纹里）→ L2 模糊匹配对两版都命中；L1 锚点 `expectedHeaders` 跟随到 46 不影响旧版命中（识别按指纹列 minScore，不要求列数全等）。
+- 字段下拉复用 `BANK_STATEMENT_FIELDS` 全枚举 → 自动多出两个可选项。
+
+### 18.3 改动 2 — BU 回填校验加 `allowSupersetColumns`（宽容超集）
+
+`validator.js` `buildHeaderValidator` 加第三参 `options.allowSupersetColumns`（:24-25）：
+
+```js
+function buildHeaderValidator(expectedHeaders, templateLabel, options = {}) {
+  const allowSupersetColumns = options.allowSupersetColumns === true;
+  return function validate(actualHeaders) {
+    // ...
+    if (allowSupersetColumns) {
+      // 宽容超集：模板列必须全部命中，且保持相对顺序（有序子序列），多余列忽略。
+      const normalizedActual = actualHeaders.map(normalizeHeaderCell);
+      let cursor = 0;            // 只前进游标，保证相对顺序
+      const missing = [];
+      let orderBroken = false;
+      for (let i = 0; i < expectedHeaders.length; i++) {
+        const expected = expectedHeaders[i];
+        const foundAt = normalizedActual.indexOf(expected, cursor);
+        if (foundAt === -1) {
+          const earlierAt = normalizedActual.indexOf(expected);
+          if (earlierAt === -1) missing.push(expected);
+          else { orderBroken = true; missing.push(expected); }
+        } else cursor = foundAt + 1;
+      }
+      if (missing.length > 0) return { ok:false, error: orderBroken ? '…顺序错乱或缺失…' : '…缺失模板列…', detailLines:[…] };
+      return { ok: true };
+    }
+    // 严格模式（Pending 用）：列数必须相等 + 逐列名相等（行为完全不变、零回归）
+    // …
+  };
+}
+const validatePendingGuanliHeaders = buildHeaderValidator(PENDING_GUANLI_HEADERS, 'Pending 数据管理');                       // 严格
+const validateBankHeaders = buildHeaderValidator(BANK_HEADERS, '银行对账单', { allowSupersetColumns: true });                // 宽容超集
+```
+
+- `allowSupersetColumns=false`（默认，**Pending 用**）：列数必须相等 + 逐列名相等 —— **行为完全不变、零回归**（🔴 Pending 不受波及）。
+- `allowSupersetColumns=true`（**银行对账单用**）：不要求列数相等；要求模板列（`BANK_HEADERS` 44 列）每个都在文件表头出现、且是文件表头的**有序子序列**（按模板顺序游标只前进 `indexOf(expected, cursor)`，保持相对顺序、防乱序文件；找不到再全局 `indexOf` 判断是缺失还是错序）；多出的列（合并单号 / 合并状态）忽略。
+
+### 18.4 改动 3 — BU 回填取值改按列名定位（防后移列错位）
+
+`reader.js` `buildRowMapper`（:59-65）改为按列名 → 文件表头索引（`headerIndexMap`）定位取值，**不再按固定列索引**：
+
+```js
+function buildRowMapper(expectedHeaders, dbColumns, headerIndexMap) {
+  return function mapRow(cells) {
+    const obj = {};
+    for (let i = 0; i < expectedHeaders.length; i++) {
+      const colIndex = headerIndexMap.get(expectedHeaders[i]); // 按列名取该列在文件中的真实位置
+      // validateHeaders 已保证每个模板列都命中；colIndex===undefined 兜底→''
+      obj[dbColumns[i]] = normalizeCell(colIndex === undefined ? undefined : cells[colIndex]);
+    }
+    return obj;
+  };
+}
+```
+
+- 🔴 **为何必须按列名**：46 列文件在中间（`'Transaction Description'` 后）插了两列，若仍按固定索引取值，`Extra Information` / `Remark-BU` 等后移列会整体错位 —— **资金对账错列 = 红线事故**。按列名定位则两列插在哪都不影响其余列取值。
+- 校验阶段（`validateBankHeaders` 宽容超集）已保证每个模板列都能在文件表头找到，故 `headerIndexMap.get(expected)` 必命中（兜底 `undefined→''` 仅防御）。
+
+### 18.5 改动 4 — 不落库（columns.js 不动）
+
+- `src/backend/bank-bu-recon-db/columns.js` 的 `BANK_HEADERS` **保持 44 列**（不含合并单号 / 合并状态）、`bank_bu_recon_bank_imports` DB 列结构不动。
+- 取值阶段 `dbColumns` 仍是 44 列对应的 DB 列名 → 合并单号 / 合并状态即使在文件里读得到也不会被写入 DB。
+- 🔴 **不落库不变量**：合并单号 / 合并状态不进 `bank_bu_recon_bank_imports`；旧版 44 列文件落库行为完全不变。
+
+### 18.6 测试矩阵
+
+| 测试 | 文件 | 覆盖 |
+|------|------|------|
+| 字段数 | `tests/unit/constants/bank-statement-fields.test.js`（改） | `BANK_STATEMENT_FIELDS` = 46 + 含「合并单号」「合并状态」+ 位于 `'Transaction Description'` 之后 |
+| 宽容超集契约 | `tests/unit/backend/bank-bu-recon-import/validator.test.js`（改） | 银行：46 列文件通过 / 乱序失败（orderBroken）/ 缺模板列失败；Pending：严格（列数不等失败、逐列名校验）零回归 |
+| 按列名映射 | `tests/unit/backend/bank-bu-recon-import/header-superset-mapping.test.js`（**新增**） | 46 列文件按列名取值不错位（后移列 `Remark-BU` 等取对）+ 忽略两列 + 不落库（DB 仍 44 列口径） |
+| release-check | — | 全绿（lint + unit + integration + smoke） |
+
+### 18.7 注意事项
+
+- 🔴 **两处字段副本必须逐列一致**：`bank-statement-fields.js` 与 `preload.js:11` inline 副本任一漏同步 → 渲染进程下拉与主进程识别口径分叉。
+- 🔴 **`signatureHeaders` 不能动**：指纹列若误加新增两列，旧版 44 列文件会因缺指纹列而识别不到（回归）。当前指纹列均为新旧两版共有列 → 安全。
+- 🔴 **columns.js `BANK_HEADERS` 不能升到 46**：一旦升列就会落库，违反用户「不落库」决策、且改 DB 列结构 = 资金对账数据结构变更。
+- Pending 路径全程走 `allowSupersetColumns=false`（默认）严格分支，本次改动对其零行为变化。
+
+---
+
 ## 十二、资金红线汇总 + GUI 手测清单
 
 ### 12.1 资金红线护栏（必须人工复核 + 回归）
@@ -634,6 +797,8 @@ fixture `bankRow(...)`（:40-63）加可选 `channelOrderNo` 入参（默认不�
 | 5 | 改 BOC 修复行 Type 值 | 用户确认语义 + golden/单测更新 |
 | 7 | fallback 误命中 / 触发方向写反 / 1v1 重复消费 | D-1a/D-1b/D-3 压误命中；新增用例 1/2 防方向反；用例 6/7 守 1v1 与不 fallback |
 | 2 | 退役 C3 | **纯前端 UI 过滤**（`migrations.js` 零改动，引擎/数据/约束/seed 全保留），可回滚、零 migration 风险 |
+| 9（第二轮） | 银行对账单 44→46 列 BU 回填兼容导入：①宽容超集校验须只放宽银行、不波及 Pending；②取值须按列名定位防后移列错位；③合并单号/合并状态不落库 | ①`allowSupersetColumns` 默认 false（Pending 严格零回归）；②`reader.js` 按列名 `headerIndexMap` 取值（防 `Extra Information`/`Remark-BU` 错位）；③`columns.js` `BANK_HEADERS` 保持 44 列不动；`signatureHeaders` 指纹列不变保新旧文件识别；validator/字段数/按列名映射三层单测 + release-check 全绿（详见 §十八） |
+| BUG3（第二轮收尾） | `streaming-xlsx-reader.js` `V_CONTENT_RE` 读值正则修复 —— **该读取器被银行对账单导入复用**，修复后含首尾空格 / `xml:space` 列由「读空」改为读到真实值，对账 / 校验输入可能随之变化 | 改正则容忍 `<v>` 任意属性（裸 `<v>` 仍匹配、向后兼容，绝大多数无空格列不受影响）；**🔴 必须用真实银行对账单数据回归银行对账单导入读值**（见 §12.2 GUI 手测 ⑨）；工具箱合并/拆分输出 by-name 格式与现状 `writeWorkbookRows` 一致（单一真理来源 `writers.js applyExportFieldFormats`）+ 30 万行大文件流式不撞 OOM（详见 §12.5 / 本日志 2026-06-17 第二轮收尾） |
 
 ### 12.2 GUI 手测（IPC 自动化盲点，必补）
 
@@ -643,10 +808,12 @@ fixture `bankRow(...)`（:40-63）加可选 `channelOrderNo` 入参（默认不�
 | ② | P0 | 准备大 bank-deposit 入金表 → 关退款场景 + 只留 BOSH-CN → 导入 → 「开始运行」**秒回不卡**、结果与修复前一致 |
 | ③ | P0 | 启用退款场景 → 「开始运行」→ 退款回填仍正常命中 |
 | ④ | P0 | 大网关账单表（多 Channel）→ 导入 BOSH 对账单 → 「开始运行」→ 对账结果（R1/R2 命中数、ReconciliationId 回填、unmatched）与修复前完全一致、峰值内存大幅下降；全程窗口可响应 + 进度更新 |
-| ⑤ | P1 | 场景管理两组默认收纳 / 可展开 / C3 消失 |
+| ⑤ | P1 | 场景管理两组默认收纳 / 可展开 / **自带** C3 消失（BUG2：在 BOSH-CN 等渠道自建一个 C3 场景 → 自建 C3 仍可见可启停可管理、不被退役误删） |
 | ⑥ | P1 | 未命中 sheet：A1 提醒 + 表头第 2 行 B 列起 + 数据第 3 行 B 列起 |
 | ⑦ | P1 | BOC 修复行 Type=1（导出 Excel 核对） |
 | ⑧ | P0 | R5s3 构造「网关 reconciliationid 只与银行 ChannelOrderNo 对得上」样例 → 导出 → 生成 `中台加款单剔除模板-*.xlsx` 且加款单号/附言/C~O 正确（资金红线，留样本） |
+| ⑨ | P0 | **🔴 BUG3 资金红线**：用真实银行对账单数据回归**银行对账单导入读值**（`streaming-xlsx-reader.js V_CONTENT_RE` 修复后）—— 重点核对含首尾空格 / `xml:space` 的字符串列由「读空」改为读到真实值后，对账 / 校验输入与修复前一致、无非预期口径变化（绝大多数无空格列不受影响） |
+| ⑩ | P0 | BUG3 工具箱合并 / 拆分**约 30 万行大文件**（.xlsx）→ 不再闪退 / 不再误报「文件为空」（超量改「文件过大」真实文案）；输出 by-name 格式与现状一致；合并合计 > 104 万行自动分 sheet (2)(3)；.csv 大文件回退路径正常 |
 
 ---
 
@@ -738,10 +905,42 @@ fixture `bankRow(...)`（:40-63）加可选 `channelOrderNo` 入参（默认不�
   4. **R5s3 二级标记用全角括号**：需求7 二级（ChannelOrderNo）消歧警告 message 后缀用全角「（按 ChannelOrderNo 匹配）」（r5-platform-inbound-cleanup.js:127），与本 TechDoc §11.3 草案的半角不同，统一中文文案全角风格。
 - **测试落地**：commit 9e67b56 新建 `tests/unit/renderer-dialogs-scenario-group-collapse.test.js`（182 行）；304c90a 新建 `tests/unit/main-process/toolbox.test.js` + `tests/unit/renderer-dialogs-toolbox.test.js` + `scripts/integration/toolbox-roundtrip.js`；fdf5635 新建 `tests/unit/backend/database/gateway-channel-filter.test.js` + `scripts/integration/gateway-channel-filter-equivalence.js`。
 
+### 2026-06-17（第二轮追加：需求 8 手册去术语 + 需求 9 银行对账单 44→46 列 — 实施后 Reverse Sync 回填）
+
+- **范围**：PR #77 合入 main 后第二轮迭代，分支 `v3.0.8-userguide-bank-2cols`（基于 main）。两需求代码 / 手册已实施完成、`release-check` 全绿、用户手测通过；本次为实施后回填 spec（PRD §5.8/§5.9·§6.8/§6.9·§12.4，TechDoc §二·§十七·§十八·§12.1）。
+- **需求 8（文档）**：`docs/USER_GUIDE.md` 1.4 新增「中台订单数据处理」总览导航小节（行 604+）+ 全册约 567 处技术术语清理（6 段并行只读审查 → 单 agent 串行应用 → grep 验证）+ 1.6.1 加 46 列兼容说明；SOP 沉淀 `knowledge/user-guide-dejargon-playbook.md`。零业务代码改动。
+- **需求 9（🔴 资金红线）**：`bank-statement-fields.js` `BANK_STATEMENT_FIELDS` 44→46（合并单号:26/合并状态:27 插在 'Transaction Description':25 后）+ `preload.js:11` inline 副本逐项同步；`table-signatures.js` 注释 44→46、`expectedHeaders` 复用自动跟随、`signatureHeaders` 指纹列不变（:36/:41/:44/:179/:188）；`validator.js` 加 `allowSupersetColumns`（:24-25/:39-78/:117，Pending :115 保持严格）；`reader.js` 改按列名 `headerIndexMap` 取值（:37-40/:59-65）；`columns.js` `BANK_HEADERS` 保持 44 列**不动**=不落库。
+- **证据**：当前分支工作树 `git diff --stat HEAD` 实测改动文件 = `docs/USER_GUIDE.md`（~2331 行）/ `src/constants/{bank-statement-fields,table-signatures}.js` / `src/preload.js` / `src/backend/bank-bu-recon-import/{validator,reader}.js` / `tests/unit/constants/bank-statement-fields.test.js`（改）/ `tests/unit/backend/bank-bu-recon-import/validator.test.js`（改）/ `tests/unit/backend/bank-bu-recon-import/header-superset-mapping.test.js`（新增，untracked）；`src/backend/bank-bu-recon-db/columns.js` **不在改动清单**（= 不落库已落实）；USER_GUIDE `##`=20 / `###`=136 / 代码围栏=26（偶数）。
+- **风险**：
+  - 🔴 需求 9 宽容超集只放宽银行（`allowSupersetColumns:true`）、Pending 默认严格零回归 —— validator.test.js 双向覆盖。
+  - 🔴 需求 9 取值按列名定位是核心红线（防后移列 `Extra Information`/`Remark-BU` 错位 = 资金对账错列）—— header-superset-mapping.test.js 守护。
+  - 🔴 需求 9 `columns.js` 不升列 = 不落库 / 不改 DB 结构；`signatureHeaders` 不动 = 新旧文件均识别。
+  - 需求 8 资金敏感章节去术语须只改措辞不改口径 —— team-lead 审 diff + 人眼抽查兜底。
+- **决策**：需求 9 按用户拍板「识别 + 字段下拉可选 + BU 回填兼容导入忽略两列、不落库」实现，未碰 `bank_bu_recon_bank_imports` 数据库结构；需求 8 历史 changelog 不洗（用户拍板，仅洗正文）。
+
+### 2026-06-17（第二轮收尾：BUG2 自建 C3 / BUG3 工具箱大文件流式 / 工具箱弹窗尺寸 — 实施后 Reverse Sync 回填）
+
+- **范围**：与需求 8/9 同属第二轮（分支 `v3.0.8-userguide-bank-2cols`）。三项均已实施完成、`release-check` 全绿（unit **3040/3040** + 34 集成脚本 + smoke 全模块 PASS）、用户手测 BUG2/BUG3 通过；本次为实施后回填 spec（PRD §12.5，TechDoc 本日志 + §12.1 资金红线汇总新增一行）。版本号并入 3.0.8 不 bump。
+- **BUG2（场景管理自建 C3 误消失，🟢 体验回归）**：`renderer-dialogs.js:7051` 退役过滤由一刀切 `s.category!=='gateway-recon-join'` 收窄为 `!(s.category === 'gateway-recon-join' && s.isBuiltin)` —— 只隐藏自带 C3（`isBuiltin=true`）、保留用户自建 C3 可见可管理。运行口径 `hasC3Enabled` **未动**；后端 C3 引擎 / dispatcher case / CHECK 约束 / 已有库记录全保留。是 §12.2① OPEN-2「退役只针对自带 C3」边界的精确落实（原实现误伤自建 C3）。
+- **BUG3（工具箱合并/拆分 30 万行 OOM 闪退 / 误报「文件为空」，🔴 涉资金红线复用文件）**：
+  - 新增 `src/main-process/toolbox-stream-io.js`——读侧 `.xlsx` 复用自研 `readXlsxStreamed`（内存恒定，:117）、`.csv`/`.xls` 回退全量 `readRows`（:124）；写侧 `ExcelJS.stream.xlsx.WorkbookWriter` 逐行 `addRow().commit()`（:322），决策① by-name 格式输出与 `writeWorkbookRows` 完全一致（与 `writers.js applyExportFieldFormats` 同源），决策② 超 `MAX_DATA_ROWS_PER_SHEET=1048575`（:55）自动开 sub-sheet (2)(3)（照搬 `acquiring-bill-currency-writer.js`）。
+  - `main.js` 三 IPC（`toolbox:merge`:12860 / `toolbox:split:read`:12908 / `toolbox:split:export`:12929）改走流式（handler 仅 dialog + IO，纯变换委托模块）。
+  - `readers.js` 新增 `isMemoryError`（:158-164）+ 内存类错误回「文件过大」真实文案（:144-154），不再统一吞成「文件为空或不可读」。
+  - 🔴 **顺带修 `src/backend/pending-import/streaming-xlsx-reader.js` `V_CONTENT_RE`**（:58，注释 :54-57）：`/<v>...<\/v>/` → `/<v(?:\s[^>]*)?>([\s\S]*?)<\/v>/`，修复「`<v>` 带 `xml:space="preserve"` 的含首尾空格字符串单元格被旧裸标签正则漏匹配 → 隐性丢值（读空）」（裸 `<v>` 仍匹配，向后兼容）。
+- **工具箱弹窗尺寸微调（🟢 纯样式）**：`styles-gemini-extra.css` `.toolbox-card width` 230→`min(94vw, 246px)`（左右各 +8，:3287）+ `.toolbox-body padding-bottom` 12→27（:3298）+ `.toolbox-card transform: translateY(7.5px)`（:3291）—— 口径 B：上沿不动、下沿净 +15、卡片高净 +15。preview 回归。
+- **风险**：
+  - 🔴🔴 **BUG3 `V_CONTENT_RE` 修复是资金红线**：该读取器被**银行对账单导入复用**（Pending / BU 回填等大文件流式读路径）→ 修复后此前被读空的「含首尾空格 / `xml:space`」列会读到真实值，对账 / 校验输入可能随之变化（绝大多数列无首尾空格、不受影响）。**必须用真实银行对账单数据回归银行对账单导入读值**——见 §12.1 资金红线汇总新增行。
+  - 🔴 BUG3 流式写须 by-name 格式与现状 `writeWorkbookRows` 一致（单一真理来源 `writers.js applyExportFieldFormats`）—— 任一格式分组分叉会让工具箱输出与主链路不一致。
+  - BUG2 仅改前端列表过滤误伤面，不碰 migration / 引擎 / 运行口径（`hasC3Enabled` 未动）—— 零资金口径影响。
+  - main.js NUL 字节：编辑前 grep -an 定位避开（`reference_mainjs_nul_grep`）。
+- **决策**：BUG2 退役收窄为「只隐藏自带 C3」（按用户拍板保留自建 C3）；BUG3 流式读写沿用 `readXlsxStreamed` + `WorkbookWriter` 既有范式（不引入新依赖），输出 by-name 格式与现状一致（决策①），超单页上限自动分 sheet（决策②）；`V_CONTENT_RE` 容忍属性而非改读取主流程（最小改动、向后兼容裸 `<v>`）。
+
 ### 可沉淀知识
 
 - [ ] 需求3+6 同 handler 协同顺序「先减载入后异步化」可沉淀为 `knowledge/`「同函数体多需求实施顺序」经验（稳定同步上下文先做精确行替换，再做整体控制流重构）。
 - [ ] gateway 按 Channel 过滤读「业务不变量优化 + 等价测试 + 只读不变量」三件套是「带行为变更优化」的标准护栏范式（继 v3.0.0 ADM Channel 下推之后第二例）。
+- [x] 手册去技术术语 SOP 已沉淀 `knowledge/user-guide-dejargon-playbook.md`（核心原则 / 禁用词清单 / 保留清单 / 统一译法表 / ultracode 6 段并行审查→串行应用→grep 验证流程 / 易错点）。
+- [ ] 固定列模板「中间插列」兼容套路：识别端 `signatureHeaders` 指纹列保持不变（新旧均识别）+ 校验端宽容超集（有序子序列、多余列忽略）+ 取值端按列名定位（防后移列错位）+ 落库端 `columns.js` 不动（不落库）—— 可沉淀为「Excel 模板加列向后兼容且不落库」标准做法。
 
 ---
 
