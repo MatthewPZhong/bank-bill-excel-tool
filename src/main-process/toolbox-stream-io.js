@@ -37,7 +37,7 @@ const {
   normalizeCell,
   trimTrailingEmptyCells
 } = require('../backend/file-service/common');
-const { readRows, extractHeaders } = require('../backend/file-service/readers');
+const { readRows, extractHeaders, readXlsxSheetMetaLite } = require('../backend/file-service/readers');
 const { WATERMARK_AUTHOR } = require('./workbook-watermark');
 // toolbox 纯逻辑（合表表头校验 / 全量合并 / 全量去重 / 全量过滤 + 流式增量去重/过滤）——
 //   去 dialog 化的三个核心组装函数（mergeFilesStreamed / readSplitFieldsStreamed / exportSplitStreamed）共用，
@@ -80,8 +80,33 @@ const TOOLBOX_HEADER_SCAN_MAX_ROWS = 256;
 // ============================================================
 
 // 是否走流式引擎：仅 .xlsx（readXlsxStreamed 读 xl/worksheets/sheet1.xml）。.csv/.xls 回退全量 readRows。
+//   ⚠️ 这是「按 API 能力」的粗筛——多 sheet 乱序场景还须叠加物理单 sheet 护栏，见 canStreamXlsx。
 function isStreamableXlsx(filePath) {
   return path.extname(filePath).toLowerCase() === '.xlsx';
+}
+
+// 🔴 F1（PR#78 review）：物理单 sheet 护栏——只对「物理单 sheet」的 .xlsx 走流式，多 sheet 一律回退全量 readRows。
+//   分叉根因：流式引擎 readXlsxStreamed 硬编码只读物理 part `xl/worksheets/sheet1.xml`；而全量 readRows 读
+//   SheetJS workbook.SheetNames[0]（= Excel 里显示顺序第一个 tab）。当文件 tab 顺序 ≠ 物理 part 命名顺序
+//   （workbook.xml 里 <sheet> 元素顺序被打乱）时，SheetNames[0] 可能指向 sheet2.xml/sheet3.xml，两条路径读到
+//   不同 sheet → 工具箱合并/拆分静默读错 sheet（相对 BUG3 之前旧工具箱走 readRows 读 SheetNames[0] 的行为回归）。
+//   故对多 sheet .xlsx 不走流式、回退 readRows（与 SheetNames[0] 同源，正确）。物理单 sheet 时 sheet1.xml 必 =
+//   SheetNames[0]（唯一一张），两路径等价，方可流式（保住 BUG3 的 OOM 修复）。
+//   本护栏与 detector 路径既有护栏同款（src/backend/file-service/readers.js readXlsxSheetMetaLite +
+//   src/main.js detectTableType 只对物理单 sheet 走流式）——此处把同一道闸补到工具箱。
+async function isPhysicallySingleSheetXlsx(filePath) {
+  try {
+    const { worksheetEntryCount } = await readXlsxSheetMetaLite(filePath);
+    return worksheetEntryCount === 1;
+  } catch (_e) {
+    return false; // 解析失败（非 zip / 缺 workbook.xml / 损坏）→ 不流式、回退全量 readRows（安全）
+  }
+}
+
+// 工具箱实际「是否走流式」的总闸：扩展名是 .xlsx 且物理单 sheet。
+//   多 sheet .xlsx 在此返回 false → streamDataRows / readHeaderRowStreamed 落入 else 分支走 readRows（读 SheetNames[0]）。
+async function canStreamXlsx(filePath) {
+  return isStreamableXlsx(filePath) && (await isPhysicallySingleSheetXlsx(filePath));
 }
 
 // 流式逐行喂「数据行」给 onDataRow（切掉表头行后，其余行原样透传——含中间空行）。
@@ -126,7 +151,7 @@ async function streamDataRows(filePath, onDataRow, onHeaderRow) {
     onDataRow(cells);
   };
 
-  if (isStreamableXlsx(filePath)) {
+  if (await canStreamXlsx(filePath)) {
     await readXlsxStreamed(
       filePath,
       (cells) => handleRow(cells),
@@ -149,7 +174,7 @@ async function streamDataRows(filePath, onDataRow, onHeaderRow) {
 async function readHeaderRowStreamed(filePath) {
   let headerCells = null;
 
-  if (isStreamableXlsx(filePath)) {
+  if (await canStreamXlsx(filePath)) {
     await readXlsxStreamed(
       filePath,
       (cells) => {
@@ -445,6 +470,8 @@ module.exports = {
   DEFAULT_FORMATTERS,
   ToolboxStreamEmptyError,
   isStreamableXlsx,
+  canStreamXlsx,
+  isPhysicallySingleSheetXlsx,
   streamDataRows,
   readHeaderRowStreamed,
   writeRowsStreamed,

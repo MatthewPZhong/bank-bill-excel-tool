@@ -746,6 +746,22 @@ v3.0.8 集中处理 **7 项**需求 —— 5 项新反馈 + 2 份用户已定稿
 
 **🔴 第二轮收尾红线提醒（§12.6 与 §12.5 同源）**：BUG3 修复的 `streaming-xlsx-reader.js V_CONTENT_RE` 为**银行对账单导入复用**的读值热点 —— 修复后此前被读空的「含首尾空格 / `xml:space`」列会读到真实值，对账 / 校验输入可能随之变化（绝大多数列无首尾空格、不受影响）。**必须用真实银行对账单数据回归银行对账单导入读值**，确认无非预期口径变化。该提醒已并入 §6 验收口径与 TECHDOC §12.1 资金红线汇总。
 
+### 12.7 v3.0.8 第二轮合并前 codex + self-review 追加修复（2026-06-17）：F1 工具箱多 sheet 乱序读错 sheet
+
+PR #78 提交后做 codex review（`codex exec review --base main`）+ self-review，发现 **F1（🟠 Important · BUG3 流式化引入的回归）** 并合并前修复。
+
+> **现象**（codex 实测复现）：构造 2-sheet 文件并交换 `xl/workbook.xml` 里 `<sheet>` 元素顺序（改 tab 显示顺序、不改物理 part 命名）后，全量 `readRows` 读 `SheetNames[0]`（显示首 tab=B），而流式 `readXlsxStreamed` 硬编码读物理 `xl/worksheets/sheet1.xml`（=A）→ 两者读**不同 sheet**。工具箱 `isStreamableXlsx` 仅判扩展名、缺「物理单 sheet」护栏 → 合并/拆分对乱序多 sheet 文件静默读错 sheet（旧工具箱走 `readRows` 读 `SheetNames[0]`，故属回归）。
+
+| 区块 | 文件:行 | 落地内容 |
+|------|---------|---------|
+| 物理单 sheet 护栏（新增） | `src/main-process/toolbox-stream-io.js`（`isPhysicallySingleSheetXlsx` / `canStreamXlsx`，isStreamableXlsx 附近） | 新增 `isPhysicallySingleSheetXlsx`（`readXlsxSheetMetaLite().worksheetEntryCount===1`，解析失败 catch→false 安全回退）+ `canStreamXlsx`（=.xlsx 且物理单 sheet）；二者导出供单测 |
+| 两处流式闸门收口 | 同文件 `streamDataRows` / `readHeaderRowStreamed` 内部 | `if (isStreamableXlsx)` → `if (await canStreamXlsx)` → 多 sheet .xlsx 自动落入既有 `else { readRows }` 读 `SheetNames[0]`（正确、与旧工具箱一致），物理单 sheet 仍流式（BUG3 OOM 修复保住）。**`src/main.js` 零改动**（三 handler 流式分支最终都经这两个函数读文件） |
+| 防回归测试（新增） | `tests/unit/main-process/toolbox-stream-io.test.js`（+102） | 「F1 乱序多 sheet 护栏」组：fork-fixture 自证分叉（`SheetNames[0]`=B 内容 vs 物理 sheet1.xml=A）+ `canStreamXlsx` 多/单/csv 三态 + `readHeaderRowStreamed`/`streamDataRows` 读到 B（SheetNames[0]）非 A + 物理单 sheet 仍流式不退化 |
+
+**与既有护栏同款**：detector 路径（`readers.js readXlsxSheetMetaLite` + `main.js detectTableType`）早已对「物理单 sheet」才走流式，F1 把同一道闸补到工具箱。**范围**：🔴 银行对账单导入（资金红线）有该护栏、不受 F1 影响；F1 只波及工具箱辅助功能。
+
+**验证**：独立对抗验证 agent 用 call-spy 实证多 sheet 期间 `readXlsxStreamed` 调 0 次（真走 readRows）、单 sheet 调 2 次（仍流式）+ 反事实证伪 bug 真实存在；team-lead 自审 diff（仅 toolbox-stream-io.js +33/-3 + 测试 +102，main.js 零改动）+ check-vars 无 Critical/Important/Risk-sensitive 行为命中 + 复跑 `release-check` exit 0（unit **3047/3047** + 集成 1484 + smoke 全绿）。
+
 ---
 
 ## 附：发版文档清单（CLAUDE.md 约定，bump 3.0.8 时统一更新）

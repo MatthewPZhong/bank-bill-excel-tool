@@ -16,6 +16,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const XLSX = require('xlsx');
+const JSZip = require('jszip');
 
 const streamIO = require('../../../src/main-process/toolbox-stream-io');
 const {
@@ -27,6 +28,7 @@ const {
   buildFormattedRow,
   computeKeepWidth,
   sanitizeSheetName,
+  canStreamXlsx,
   ToolboxStreamEmptyError,
   DEFAULT_FORMATTERS,
   MAX_DATA_ROWS_PER_SHEET,
@@ -222,6 +224,106 @@ test.describe('streamDataRows（切表头 + 其余原样透传）', () => {
     const res = await streamDataRows(f, (cells) => dataRows.push(cells.slice(0, 2)));
     assert.equal(res.dataRowCount, 2);
     assert.deepEqual(dataRows, [['a', '1'], ['b', '2']]);
+  });
+});
+
+// ============================================================
+// F1（PR#78 review）：乱序多 sheet 护栏
+//   流式引擎 readXlsxStreamed 硬编码读物理 xl/worksheets/sheet1.xml；全量 readRows 读 SheetNames[0]
+//   （= Excel 显示顺序第一个 tab）。当 workbook.xml 里 <sheet> 元素顺序被打乱、tab 顺序 ≠ 物理 part 命名顺序时，
+//   两条路径读到不同 sheet。canStreamXlsx 对多 sheet .xlsx 返回 false → readHeaderRowStreamed / streamDataRows
+//   回退全量 readRows（读 SheetNames[0]，与旧工具箱行为一致），避免静默读错 sheet。
+// ============================================================
+test.describe('F1 乱序多 sheet 护栏（canStreamXlsx + readHeaderRowStreamed/streamDataRows 回退）', () => {
+  // 造一个「tab 显示顺序 ≠ 物理 part 命名顺序」的 2-sheet 文件：
+  //   book_append_sheet A 再 B → 物理 sheet1.xml=A、sheet2.xml=B；
+  //   再读 workbook.xml 把 <sheets> 里 A、B 两个 <sheet> 元素交换顺序写回、重新 generateAsync 落盘
+  //   → SheetJS SheetNames 变 [B, A]，但物理 sheet1.xml 仍是 A（内容分叉）。
+  async function writeScrambledTwoSheetXlsx(name) {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['AH'], ['a1']]), 'A');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['BH'], ['b1']]), 'B');
+    const tmp = path.join(tmpRoot, `pre-${name}`);
+    XLSX.writeFile(wb, tmp);
+
+    const zip = await JSZip.loadAsync(fs.readFileSync(tmp));
+    let xml = await zip.file('xl/workbook.xml').async('string');
+    const sheetsBlock = xml.match(/<sheets>[\s\S]*?<\/sheets>/)[0];
+    const sheetTags = sheetsBlock.match(/<sheet\b[^>]*\/>/g);
+    assert.equal(sheetTags.length, 2, 'fixture 预期 2 个 <sheet> 元素');
+    // 交换两个 <sheet .../> 元素顺序 → SheetNames[0] 指向物理 sheet2.xml 的内容（B）。
+    const swappedBlock = `<sheets>${sheetTags[1]}${sheetTags[0]}</sheets>`;
+    xml = xml.replace(sheetsBlock, swappedBlock);
+    zip.file('xl/workbook.xml', xml);
+    const out = path.join(tmpRoot, name);
+    fs.writeFileSync(out, await zip.generateAsync({ type: 'nodebuffer' }));
+    return out;
+  }
+
+  test('fixture 自证：SheetNames[0]=B（BH）而物理 sheet1.xml=A（AH），确有分叉', async () => {
+    const out = await writeScrambledTwoSheetXlsx('scramble-selfcheck.xlsx');
+    // SheetJS（= readRows 口径）读到的第一个 tab 是 B
+    const wb = XLSX.readFile(out);
+    assert.deepEqual(wb.SheetNames, ['B', 'A']);
+    const ws0 = wb.Sheets[wb.SheetNames[0]];
+    assert.deepEqual(
+      XLSX.utils.sheet_to_json(ws0, { header: 1, blankrows: false, defval: '' })[0].map(String),
+      ['BH'],
+      'SheetNames[0] 内容是 B'
+    );
+    // 流式引擎硬编码读物理 sheet1.xml → 读到 A（证明 fixture 真构造出了分叉，否则本组测试无意义）
+    const streamedRows = [];
+    await readXlsxStreamed(out, (cells) => {
+      const nonEmpty = cells.filter((c) => c !== '');
+      if (nonEmpty.length) streamedRows.push(nonEmpty);
+    }, { colCount: TOOLBOX_MAX_COL_COUNT });
+    assert.deepEqual(streamedRows, [['AH'], ['a1']], 'readXlsxStreamed 读到的是物理 sheet1.xml=A');
+  });
+
+  test('canStreamXlsx：多 sheet → false（回退全量 readRows）', async () => {
+    const out = await writeScrambledTwoSheetXlsx('scramble-canstream-false.xlsx');
+    assert.equal(await canStreamXlsx(out), false);
+  });
+
+  test('canStreamXlsx：物理单 sheet → true（不退化 BUG3 流式修复）', async () => {
+    const single = writeXlsx('single-canstream-true.xlsx', [['H1', 'H2'], ['a', 'b']]);
+    assert.equal(await canStreamXlsx(single), true);
+  });
+
+  test('canStreamXlsx：.csv → false（非 .xlsx 不流式）', async () => {
+    const csv = writeCsv('canstream.csv', 'H1,H2\na,b\n');
+    assert.equal(await canStreamXlsx(csv), false);
+  });
+
+  test('readHeaderRowStreamed：乱序多 sheet 取 SheetNames[0]=B 的表头 [BH]，不是物理 sheet1.xml=A 的 [AH]', async () => {
+    const out = await writeScrambledTwoSheetXlsx('scramble-header.xlsx');
+    const headers = await readHeaderRowStreamed(out);
+    assert.deepEqual(headers, ['BH'], '回退 readRows 读 SheetNames[0]=B');
+  });
+
+  test('streamDataRows：乱序多 sheet 喂出 B 的数据行 [b1]，不是 A 的 [a1]', async () => {
+    const out = await writeScrambledTwoSheetXlsx('scramble-data.xlsx');
+    const dataRows = [];
+    let headerSeen = null;
+    const res = await streamDataRows(
+      out,
+      (cells) => dataRows.push(cells.filter((c) => c !== '')),
+      (h) => { headerSeen = h.filter((c) => c !== ''); }
+    );
+    assert.deepEqual(headerSeen, ['BH'], '表头回调拿到 B 的表头');
+    assert.equal(res.dataRowCount, 1);
+    assert.deepEqual(dataRows, [['b1']], '数据行是 B 的 b1，不是 A 的 a1');
+  });
+
+  test('物理单 sheet .xlsx 仍走流式且内容正确（BUG3 修复未退化）', async () => {
+    const single = writeXlsx('single-sheet-still-streams.xlsx', [['H1', 'H2'], ['x', 'y'], ['z', 'w']]);
+    assert.equal(await canStreamXlsx(single), true);
+    const headers = await readHeaderRowStreamed(single);
+    assert.deepEqual(headers, ['H1', 'H2']);
+    const dataRows = [];
+    const res = await streamDataRows(single, (cells) => dataRows.push(cells.slice(0, 2)));
+    assert.equal(res.dataRowCount, 2);
+    assert.deepEqual(dataRows, [['x', 'y'], ['z', 'w']]);
   });
 });
 
