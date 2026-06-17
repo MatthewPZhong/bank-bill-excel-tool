@@ -2328,6 +2328,53 @@ select.mapping-text-input {
   border-bottom-color: rgba(66, 133, 244, 0.32);
 }
 
+/* v3.0.8 需求2（W6）：场景管理两大功能分组三角折叠。
+ *   分组标题行（整行 colspan）淡灰底，左侧 ▶/▼ 三角 + 组名；点击整条标题（toggle 按钮铺满）展开/收纳子场景行。 */
+.scenarios-table tbody tr.scenario-group-header > .scenario-group-header-cell {
+  padding: 0;
+  background: var(--chip-bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.scenarios-table tbody tr.scenario-group-header .scenario-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-family: inherit;
+}
+
+.scenarios-table tbody tr.scenario-group-header .scenario-group-toggle:hover {
+  background: rgba(11, 87, 208, 0.06);
+}
+
+.scenarios-table tbody tr.scenario-group-header .scenario-group-triangle {
+  display: inline-block;
+  width: 14px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted);
+  text-align: center;
+  flex: 0 0 auto;
+}
+
+.scenarios-table tbody tr.scenario-group-header .scenario-group-label {
+  flex: 1 1 auto;
+}
+
+/* 折叠态子场景行隐藏：renderRow 初始 + toggleScenarioGroup 切换 .collapsed class（默认两组 collapsed） */
+.scenarios-table tbody tr.scenario-group-row.collapsed {
+  display: none;
+}
+
 .scenarios-manager-footer {
   padding-top: 12px;
 }
@@ -3233,6 +3280,97 @@ select.mapping-text-input {
   cursor: wait;
 }
 
+/* === v3.0.8 需求1：工具箱🧰（合表 / 拆表）主弹框 + 拆表选字段弹框（Clear 风格副本，复用 dialog 基础样式）=== */
+.toolbox-card {
+  /* v3.0.8：宽度缩小一半（原 460px） */
+  width: min(94vw, 230px);
+}
+.toolbox-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px 28px 12px;
+}
+.toolbox-row {
+  display: flex;
+  /* v3.0.8：按钮中线与左侧文本中线对齐 */
+  align-items: center;
+  gap: 18px;
+}
+.toolbox-row-label {
+  flex: 0 0 72px;
+  font-weight: 500;
+  color: var(--text, #1c1f29);
+}
+.toolbox-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 拆表选字段弹框 */
+.toolbox-split-picker-card {
+  width: min(94vw, 440px);
+}
+.toolbox-split-picker-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px 24px 8px;
+}
+.toolbox-split-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.toolbox-split-picker-label {
+  flex: 0 0 40px;
+  font-weight: 500;
+  color: var(--text, #1c1f29);
+}
+.toolbox-split-picker-field {
+  flex: 1 1 auto;
+  padding: 8px 12px;
+  border: 1px solid rgba(104, 79, 39, 0.24);
+  border-radius: 6px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 14px;
+}
+/* v3.0.8（用户要求）：值多选框改用「按钮 + 浮动勾选面板」控件，外观对齐场景管理「适用银行渠道」下拉
+   （new-account-currency-dropdown-btn 同款 36px 圆角按钮 + new-account-currency-dropdown-panel 浮动面板）。 */
+.toolbox-split-values-dropdown-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.toolbox-split-picker-card .new-account-currency-dropdown-btn {
+  height: 36px;
+  border-radius: 14px;
+  border: 1px solid var(--line-strong);
+  background: #fffdf8;
+  padding: 0 32px 0 14px;
+  font-size: 13px;
+  color: var(--text);
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* v3.0.8 codex-fix [P2]：拆分值可能很多（如按日期拆，几百个去重值）→ 浮动面板必须可滚动。
+   否则继承 .new-account-currency-dropdown-panel 的 max-height:248px + overflow:hidden 会把超出 248px 的值
+   裁掉且无法选中（原生 select multiple 本可滚动）。渠道下拉因渠道少不会溢出，故只覆盖本拆分值面板。 */
+.toolbox-split-values-floating-panel {
+  overflow-y: auto;
+}
+.toolbox-split-picker-hint {
+  min-height: 18px;
+  font-size: 12px;
+  color: #d32f2f;
+  line-height: 1.4;
+}
+
 /* v2.1.13 D-3：自带写死场景「适用银行渠道」管理弹窗（多选下拉复用 .new-account-currency-dropdown-* 浮动面板） */
 .builtin-fixed-channel-manage-card {
   /* v2.1.13 UI 微调：弹窗宽度缩至当前约 60%（上限 940→564；下限 420→252）*/
@@ -3306,6 +3444,23 @@ select.mapping-text-input {
 }
 .builtin-fixed-payment-row[hidden] {
   display: none;
+}
+/* v3.0.8（用户要求）：两个勾选框（对账数据来源 / Payment线下调拨）并排一行显示。
+   容器与勾选框同 gating（仅 fund-transfer-backfill 场景 unhide）→ margin 放容器、内行清零，
+   非 payment 场景容器 hidden 不留多余间距。 */
+.builtin-fixed-checks-row {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+.builtin-fixed-checks-row[hidden] {
+  display: none;
+}
+.builtin-fixed-checks-row .builtin-fixed-payment-row {
+  margin-top: 0;
 }
 .builtin-fixed-payment-check {
   display: inline-flex;

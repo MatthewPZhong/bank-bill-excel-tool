@@ -104,7 +104,7 @@ function makeR4HxOutScenario() {
 // ---- 1. bucketScenarios：DBS-Charge 落新桶，不漂 R2/R4 -------------------
 
 test.describe('bucketScenarios —— DBS-Charge 落 dbsChargeFundCheck 桶（不漂 R2/R4）', () => {
-  test('funcCategory=dbs-charge-fund-check → dbsChargeFundCheck 桶；fund-nature-check → r4；其余 → r2', () => {
+  test('funcCategory=dbs-charge-fund-check → dbsChargeFundCheck 桶；fund-nature-check → r4；其余 → r2', async () => {
     const buckets = bucketScenarios([
       makeDbsChargeScenario(),                                                   // → dbsChargeFundCheck
       makeR4HxOutScenario(),                                                     // → r4
@@ -122,7 +122,7 @@ test.describe('bucketScenarios —— DBS-Charge 落 dbsChargeFundCheck 桶（�
       'DBS-Charge 不应落 r4 桶');
   });
 
-  test('返回对象含 dbsChargeFundCheck 键（空入参也有该键）', () => {
+  test('返回对象含 dbsChargeFundCheck 键（空入参也有该键）', async () => {
     const buckets = bucketScenarios([]);
     assert.ok(Array.isArray(buckets.dbsChargeFundCheck), 'dbsChargeFundCheck 键存在且为数组');
     assert.equal(buckets.dbsChargeFundCheck.length, 0);
@@ -132,7 +132,7 @@ test.describe('bucketScenarios —— DBS-Charge 落 dbsChargeFundCheck 桶（�
 // ---- 2. 注入 dispatchReconContext + DBS-Charge 场景 → R3.5 改写流出 -------
 
 test.describe('runReconciliation R3.5 —— DBS-Charge 改写流出（modifiedRows + stats + rounds）', () => {
-  test('步骤1 赋 ReconciliationId + 标 FundTransfer-out + 步骤2 兄弟行转 outbound → 进 modifiedRows、_round=R3.5、stats/rounds 计数', () => {
+  test('步骤1 赋 ReconciliationId + 标 FundTransfer-out + 步骤2 兄弟行转 outbound → 进 modifiedRows、_round=R3.5、stats/rounds 计数', async () => {
     // 对称模型（用户最终拍板）：调拨命中行标 FundTransfer-out（非 outbound）；网关确认的 outbound 落在同桶兄弟行。
     //   b1：DBS、FundType=Charge、ReconciliationId 空 → 步骤1 调拨命中赋 DISP-RECON-1 + 标 FundTransfer-out（makeDispRow.fund_type）。
     //       命中行受两阶段保护，步骤2 不碰（FundTransfer-out ∉ 候选 {Charge,outbound}）。→ 2 列改写。
@@ -141,7 +141,7 @@ test.describe('runReconciliation R3.5 —— DBS-Charge 改写流出（modifiedR
       makeBankRow({ _rowId: 'b1', FundType: 'Charge', ReconciliationId: '', 'Debit Amount': 500 }),
       makeBankRow({ _rowId: 'b2', FundType: 'Charge', ReconciliationId: 'DISP-RECON-1', 'Debit Amount': 100 })
     ];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [makeGwRow({ reconciliationid: 'DISP-RECON-1', amount: 100, currency: 'USD' })],
       scenarios: [makeDbsChargeScenario()],
@@ -184,14 +184,14 @@ test.describe('runReconciliation R3.5 —— DBS-Charge 改写流出（modifiedR
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
 
-  test('步骤1 归并同 reconId 兄弟行为 Charge（assignChargeToSiblings 接线流出）', () => {
+  test('步骤1 归并同 reconId 兄弟行为 Charge（assignChargeToSiblings 接线流出）', async () => {
     // b1：命中行（步骤1 赋 DISP-RECON-1）；b2：同 reconId 已就位但 FundType≠Charge → 步骤1 末归并为 Charge。
     //   网关侧无对应 amount → 步骤2 不触发 outbound（保持 Charge）。
     const bankRows = [
       makeBankRow({ _rowId: 'b1', FundType: 'Charge', ReconciliationId: '', 'Debit Amount': 100 }),
       makeBankRow({ _rowId: 'b2', FundType: 'SomeOther', ReconciliationId: 'DISP-RECON-1', 'Debit Amount': 999 })
     ];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [], // 步骤2 无网关 → 不转 outbound
       scenarios: [makeDbsChargeScenario()],
@@ -211,11 +211,11 @@ test.describe('runReconciliation R3.5 —— DBS-Charge 改写流出（modifiedR
 // ---- 3. 缺省 / 空 / 无场景 → R3.5 no-op 不抛 -----------------------------
 
 test.describe('runReconciliation R3.5 —— 缺省/空/无场景 no-op（不抛、行数守恒）', () => {
-  test('无 DBS-Charge 场景（桶空）→ R3.5 不跑、stats/rounds 计数 0', () => {
+  test('无 DBS-Charge 场景（桶空）→ R3.5 不跑、stats/rounds 计数 0', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', FundType: 'Charge', 'Debit Amount': 100 })];
     let result;
-    assert.doesNotThrow(() => {
-      result = runReconciliation({
+    await assert.doesNotReject(async () => {
+      result = await runReconciliation({
         bankRows,
         gwRows: [makeGwRow()],
         scenarios: [], // 无任何 DBS-Charge 场景
@@ -229,11 +229,11 @@ test.describe('runReconciliation R3.5 —— 缺省/空/无场景 no-op（不抛
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
 
-  test('有 DBS-Charge 场景但缺省 dispatchReconContext → 空入参 no-op、不抛', () => {
+  test('有 DBS-Charge 场景但缺省 dispatchReconContext → 空入参 no-op、不抛', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', FundType: 'Charge', 'Debit Amount': 100 })];
     let result;
-    assert.doesNotThrow(() => {
-      result = runReconciliation({
+    await assert.doesNotReject(async () => {
+      result = await runReconciliation({
         bankRows,
         gwRows: [makeGwRow()],
         scenarios: [makeDbsChargeScenario()]
@@ -246,11 +246,11 @@ test.describe('runReconciliation R3.5 —— 缺省/空/无场景 no-op（不抛
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
 
-  test('dispatchReconContext.dispatchReconRows=[] 显式空数组 → no-op、不抛', () => {
+  test('dispatchReconContext.dispatchReconRows=[] 显式空数组 → no-op、不抛', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', FundType: 'Charge', 'Debit Amount': 100 })];
     let result;
-    assert.doesNotThrow(() => {
-      result = runReconciliation({
+    await assert.doesNotReject(async () => {
+      result = await runReconciliation({
         bankRows,
         gwRows: [makeGwRow()],
         scenarios: [makeDbsChargeScenario()],
@@ -265,7 +265,7 @@ test.describe('runReconciliation R3.5 —— 缺省/空/无场景 no-op（不抛
 // ---- 4. R3.5 在 R4 前（跨轮链）：R3.5 置 outbound → R4 hx-out 续改 outbound→HX-out ----
 
 test.describe('runReconciliation —— R3.5 先于 R4（跨轮链 outbound→HX-out）', () => {
-  test('🔴 R3.5 把 DBS 行 Charge→outbound（步骤2 网关确认）后，R4 hx-out 续改 outbound→HX-out（次序正确）', () => {
+  test('🔴 R3.5 把 DBS 行 Charge→outbound（步骤2 网关确认）后，R4 hx-out 续改 outbound→HX-out（次序正确）', async () => {
     // 对称模型：R3.5 步骤2 网关确认的 outbound 落在「未被调拨命中」的桶内行（调拨命中行会被标 FundTransfer 且步骤2 不碰）。
     // ⚠️ R4 只作用于 R1（reconid 1v1）匹配到的网关行：R1 在 R3.5【之前】跑，按银行行**导入时**的
     //   ReconciliationId 建索引。故 b1 须预置与网关同值的 ReconciliationId，R1 才能匹配 → matchedGwRows 非空 → R4 才有料。
@@ -287,7 +287,7 @@ test.describe('runReconciliation —— R3.5 先于 R4（跨轮链 outbound→HX
       currency: 'USD',
       TradeType: 'HX_OUTBOUND'
     })];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows,
       scenarios: [makeDbsChargeScenario(), makeR4HxOutScenario()],
@@ -328,13 +328,13 @@ test.describe('runReconciliation —— R3.5 先于 R4（跨轮链 outbound→HX
 // ---- 5. 行数守恒（混合：命中 + 未命中 + 非 DBS 渠道行）---------------------
 
 test.describe('runReconciliation R3.5 —— 行数守恒（混合行）', () => {
-  test('命中行 + 未命中 DBS 行 + 非 DBS 行 → modifiedRows + unmatchedRows === bankRows.length', () => {
+  test('命中行 + 未命中 DBS 行 + 非 DBS 行 → modifiedRows + unmatchedRows === bankRows.length', async () => {
     const bankRows = [
       makeBankRow({ _rowId: 'b1', Channel: 'DBS', FundType: 'Charge', ReconciliationId: '', 'Debit Amount': 100 }), // 命中
       makeBankRow({ _rowId: 'b2', Channel: 'DBS', FundType: 'Charge', ReconciliationId: '', 'Debit Amount': 777 }), // DBS 但金额不匹配 → 未命中
       makeBankRow({ _rowId: 'b3', Channel: 'CITI', FundType: 'Charge', ReconciliationId: '', 'Debit Amount': 100 })  // 非 DBS → 门控外
     ];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [makeGwRow({ reconciliationid: 'DISP-RECON-1', amount: 100, currency: 'USD' })],
       scenarios: [makeDbsChargeScenario()],

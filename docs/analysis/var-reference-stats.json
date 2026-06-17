@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "3.0.7",
-    "scannedAt": "2026-06-16T08:38:14.085Z",
+    "version": "3.0.8",
+    "scannedAt": "2026-06-16T15:23:44.004Z",
     "root": "src",
-    "totalFiles": 160,
-    "totalTopLevelNames": 1673,
+    "totalFiles": 161,
+    "totalTopLevelNames": 1686,
     "buckets": {
       "shared": 282,
-      "paired": 464,
-      "local": 803,
-      "crossFile": 746
+      "paired": 473,
+      "local": 807,
+      "crossFile": 755
     }
   },
   "A": {
@@ -529,7 +529,7 @@
           },
           {
             "file": "src/backend/database/linked-table-repository.js",
-            "count": 9
+            "count": 10
           },
           {
             "file": "src/backend/database/migrations.js",
@@ -612,7 +612,7 @@
             "count": 3
           }
         ],
-        "totalHits": 51,
+        "totalHits": 52,
         "fileSpan": 25
       },
       {
@@ -627,7 +627,8 @@
           "src/backend/file-service/normalizers.js",
           "src/backend/file-service/writers.js",
           "src/main-process/linked-table-stream-source.js",
-          "src/main-process/table-type-detector.js"
+          "src/main-process/table-type-detector.js",
+          "src/main-process/toolbox.js"
         ],
         "refFiles": [
           {
@@ -711,12 +712,16 @@
             "count": 5
           },
           {
+            "file": "src/main-process/toolbox.js",
+            "count": 7
+          },
+          {
             "file": "src/main.js",
             "count": 2
           }
         ],
-        "totalHits": 113,
-        "fileSpan": 21
+        "totalHits": 120,
+        "fileSpan": 22
       },
       {
         "name": "normalizeCellValue",
@@ -796,14 +801,14 @@
           },
           {
             "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
-            "count": 7
+            "count": 9
           },
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 45
           }
         ],
-        "totalHits": 198,
+        "totalHits": 200,
         "fileSpan": 18
       },
       {
@@ -1389,14 +1394,14 @@
           },
           {
             "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
-            "count": 2
+            "count": 3
           },
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 6
           }
         ],
-        "totalHits": 38,
+        "totalHits": 39,
         "fileSpan": 12
       },
       {
@@ -2381,10 +2386,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 153
+            "count": 154
           }
         ],
-        "totalHits": 309,
+        "totalHits": 310,
         "fileSpan": 6
       },
       {
@@ -2655,7 +2660,7 @@
           },
           {
             "file": "src/renderer-dialogs.js",
-            "count": 384
+            "count": 394
           },
           {
             "file": "src/renderer-pending.js",
@@ -2670,7 +2675,7 @@
             "count": 71
           }
         ],
-        "totalHits": 487,
+        "totalHits": 497,
         "fileSpan": 5
       },
       {
@@ -2694,14 +2699,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 52
+            "count": 54
           },
           {
             "file": "src/renderer.js",
             "count": 3
           }
         ],
-        "totalHits": 60,
+        "totalHits": 62,
         "fileSpan": 5
       },
       {
@@ -3438,6 +3443,39 @@
         "fileSpan": 5
       },
       {
+        "name": "sanitizeFileName",
+        "defFiles": [
+          "src/backend/balance-seed-store.js",
+          "src/main-process/bank-statement-io.js",
+          "src/main-process/recon-id-fix-io.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/balance-seed-store.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/bank-statement-io.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/toolbox.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 5
+      },
+      {
         "name": "updateRunExportPath",
         "defFiles": [
           "src/backend/bank-bu-recon-db/run-repository.js",
@@ -3488,10 +3526,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 96
+            "count": 98
           }
         ],
-        "totalHits": 155,
+        "totalHits": 157,
         "fileSpan": 4
       },
       {
@@ -3605,6 +3643,35 @@
           }
         ],
         "totalHits": 27,
+        "fileSpan": 4
+      },
+      {
+        "name": "pad2",
+        "defFiles": [
+          "src/backend/usage-stats.js",
+          "src/main-process/acquiring-bill-currency-writer.js",
+          "src/main-process/monthly-balance.js",
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/usage-stats.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 11
+          },
+          {
+            "file": "src/main-process/monthly-balance.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/toolbox.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 26,
         "fileSpan": 4
       },
       {
@@ -5423,35 +5490,6 @@
         "fileSpan": 4
       },
       {
-        "name": "sanitizeFileName",
-        "defFiles": [
-          "src/backend/balance-seed-store.js",
-          "src/main-process/bank-statement-io.js",
-          "src/main-process/recon-id-fix-io.js",
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/balance-seed-store.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/bank-statement-io.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/recon-id-fix-io.js",
-            "count": 1
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 4
-      },
-      {
         "name": "escapeHtml",
         "defFiles": [
           "src/renderer.js"
@@ -5459,7 +5497,7 @@
         "refFiles": [
           {
             "file": "src/renderer-dialogs.js",
-            "count": 144
+            "count": 149
           },
           {
             "file": "src/renderer-previews.js",
@@ -5470,7 +5508,7 @@
             "count": 29
           }
         ],
-        "totalHits": 174,
+        "totalHits": 179,
         "fileSpan": 3
       },
       {
@@ -5652,30 +5690,6 @@
           {
             "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
             "count": 2
-          }
-        ],
-        "totalHits": 21,
-        "fileSpan": 3
-      },
-      {
-        "name": "pad2",
-        "defFiles": [
-          "src/backend/usage-stats.js",
-          "src/main-process/acquiring-bill-currency-writer.js",
-          "src/main-process/monthly-balance.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/usage-stats.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-writer.js",
-            "count": 11
-          },
-          {
-            "file": "src/main-process/monthly-balance.js",
-            "count": 4
           }
         ],
         "totalHits": 21,
@@ -8693,14 +8707,14 @@
         "refFiles": [
           {
             "file": "src/renderer-previews.js",
-            "count": 53
+            "count": 55
           },
           {
             "file": "src/renderer.js",
             "count": 22
           }
         ],
-        "totalHits": 75,
+        "totalHits": 77,
         "fileSpan": 2
       },
       {
@@ -8835,6 +8849,24 @@
         "fileSpan": 2
       },
       {
+        "name": "refreshBankStatementStatus",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 9
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 10
+          }
+        ],
+        "totalHits": 19,
+        "fileSpan": 2
+      },
+      {
         "name": "TEMPLATE_LABEL",
         "defFiles": [
           "src/backend/pending-import/removed-reader.js",
@@ -8851,24 +8883,6 @@
           }
         ],
         "totalHits": 19,
-        "fileSpan": 2
-      },
-      {
-        "name": "refreshBankStatementStatus",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 9
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 9
-          }
-        ],
-        "totalHits": 18,
         "fileSpan": 2
       },
       {
@@ -12028,6 +12042,24 @@
         "fileSpan": 2
       },
       {
+        "name": "ROUND_LABELS",
+        "defFiles": [
+          "src/main-process/reconciliation-orchestrator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/reconciliation-orchestrator.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "runC2Scenario",
         "defFiles": [
           "src/main-process/scenario-engines/c2-offset-bill-mark.js",
@@ -12227,6 +12259,24 @@
           {
             "file": "src/backend/acquiring-bill-currency-import/contract-bill.js",
             "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "ToolboxHeaderMismatchError",
+        "defFiles": [
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox.js",
+            "count": 4
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
           }
         ],
         "totalHits": 5,
@@ -14165,6 +14215,24 @@
         "fileSpan": 2
       },
       {
+        "name": "readGatewayBillRowsByChannels",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "readSharedStrings",
         "defFiles": [
           "src/backend/vcc-op-calc-import/reader.js"
@@ -15284,6 +15352,24 @@
         "fileSpan": 2
       },
       {
+        "name": "assertHeadersIdentical",
+        "defFiles": [
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "BIZ_OP_BU_FIELD_DB_COLUMN",
         "defFiles": [
           "src/backend/biz-op-recon-db/columns.js"
@@ -15309,6 +15395,42 @@
         "refFiles": [
           {
             "file": "src/backend/file-service.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "buildMergeFileName",
+        "defFiles": [
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "buildSplitFileName",
+        "defFiles": [
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox.js",
             "count": 2
           },
           {
@@ -15422,6 +15544,24 @@
           },
           {
             "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "computeValuesByField",
+        "defFiles": [
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
             "count": 1
           }
         ],
@@ -15601,6 +15741,24 @@
         "refFiles": [
           {
             "file": "src/main-process/table-type-detector.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "filterRowsByFieldValues",
+        "defFiles": [
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox.js",
             "count": 2
           },
           {
@@ -16184,6 +16342,24 @@
           },
           {
             "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "mergeAoaRows",
+        "defFiles": [
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
             "count": 1
           }
         ],
@@ -17190,10 +17366,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 175
+            "count": 180
           }
         ],
-        "totalHits": 175,
+        "totalHits": 180,
         "fileSpan": 1
       },
       {
@@ -17204,10 +17380,10 @@
         "refFiles": [
           {
             "file": "src/backend/database.js",
-            "count": 38
+            "count": 39
           }
         ],
-        "totalHits": 38,
+        "totalHits": 39,
         "fileSpan": 1
       },
       {
@@ -17316,10 +17492,10 @@
         "refFiles": [
           {
             "file": "src/backend/database/linked-table-repository.js",
-            "count": 15
+            "count": 16
           }
         ],
-        "totalHits": 15,
+        "totalHits": 16,
         "fileSpan": 1
       },
       {
@@ -18415,6 +18591,20 @@
         "fileSpan": 1
       },
       {
+        "name": "updateBankStatementUi",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
         "name": "updateNewAccountCurrencyDropdownLabel",
         "defFiles": [
           "src/renderer.js"
@@ -19185,7 +19375,7 @@
         "fileSpan": 1
       },
       {
-        "name": "updateBankStatementUi",
+        "name": "updateStatusBox",
         "defFiles": [
           "src/renderer.js"
         ],
@@ -19626,6 +19816,20 @@
         "refFiles": [
           {
             "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "formatTimestamp12",
+        "defFiles": [
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox.js",
             "count": 4
           }
         ],
@@ -20277,6 +20481,20 @@
         "fileSpan": 1
       },
       {
+        "name": "SPLIT_VALUE_MAX_LEN",
+        "defFiles": [
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "STATS_FILENAME",
         "defFiles": [
           "src/backend/usage-stats.js"
@@ -20390,20 +20608,6 @@
       },
       {
         "name": "updateNewAccountCurrencySuggestion",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "updateStatusBox",
         "defFiles": [
           "src/renderer.js"
         ],
@@ -24071,6 +24275,20 @@
         "fileSpan": 1
       },
       {
+        "name": "SPLIT_VALUE_SEPARATOR",
+        "defFiles": [
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "ST_SEEK_ROW",
         "defFiles": [
           "src/backend/big-table-import/row-scanner.js"
@@ -25023,6 +25241,20 @@
         "fileSpan": 1
       },
       {
+        "name": "buildAlsoLinkedFailureSummary",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "buildAlsoLinkedSummary",
         "defFiles": [
           "src/renderer.js"
@@ -25814,6 +26046,20 @@
         "refFiles": [
           {
             "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "formatBankStatementRunProgress",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
             "count": 2
           }
         ],
@@ -27697,20 +27943,6 @@
         "fileSpan": 1
       },
       {
-        "name": "ROUND_LABELS",
-        "defFiles": [
-          "src/main-process/reconciliation-orchestrator.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/reconciliation-orchestrator.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "rowBytesToValues",
         "defFiles": [
           "src/backend/big-table-import/row-scanner.js"
@@ -28942,7 +29174,7 @@
         },
         {
           "file": "src/backend/database/linked-table-repository.js",
-          "count": 9
+          "count": 10
         },
         {
           "file": "src/backend/database/migrations.js",
@@ -29025,7 +29257,7 @@
           "count": 3
         }
       ],
-      "totalHits": 51,
+      "totalHits": 52,
       "fileSpan": 25
     },
     {
@@ -29040,7 +29272,8 @@
         "src/backend/file-service/normalizers.js",
         "src/backend/file-service/writers.js",
         "src/main-process/linked-table-stream-source.js",
-        "src/main-process/table-type-detector.js"
+        "src/main-process/table-type-detector.js",
+        "src/main-process/toolbox.js"
       ],
       "refFiles": [
         {
@@ -29124,12 +29357,16 @@
           "count": 5
         },
         {
+          "file": "src/main-process/toolbox.js",
+          "count": 7
+        },
+        {
           "file": "src/main.js",
           "count": 2
         }
       ],
-      "totalHits": 113,
-      "fileSpan": 21
+      "totalHits": 120,
+      "fileSpan": 22
     },
     {
       "name": "normalizeCellValue",
@@ -29209,14 +29446,14 @@
         },
         {
           "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
-          "count": 7
+          "count": 9
         },
         {
           "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
           "count": 45
         }
       ],
-      "totalHits": 198,
+      "totalHits": 200,
       "fileSpan": 18
     },
     {
@@ -29802,14 +30039,14 @@
         },
         {
           "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
-          "count": 2
+          "count": 3
         },
         {
           "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
           "count": 6
         }
       ],
-      "totalHits": 38,
+      "totalHits": 39,
       "fileSpan": 12
     },
     {
@@ -30794,10 +31031,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 153
+          "count": 154
         }
       ],
-      "totalHits": 309,
+      "totalHits": 310,
       "fileSpan": 6
     },
     {
@@ -31068,7 +31305,7 @@
         },
         {
           "file": "src/renderer-dialogs.js",
-          "count": 384
+          "count": 394
         },
         {
           "file": "src/renderer-pending.js",
@@ -31083,7 +31320,7 @@
           "count": 71
         }
       ],
-      "totalHits": 487,
+      "totalHits": 497,
       "fileSpan": 5
     },
     {
@@ -31107,14 +31344,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 52
+          "count": 54
         },
         {
           "file": "src/renderer.js",
           "count": 3
         }
       ],
-      "totalHits": 60,
+      "totalHits": 62,
       "fileSpan": 5
     },
     {
@@ -31851,6 +32088,39 @@
       "fileSpan": 5
     },
     {
+      "name": "sanitizeFileName",
+      "defFiles": [
+        "src/backend/balance-seed-store.js",
+        "src/main-process/bank-statement-io.js",
+        "src/main-process/recon-id-fix-io.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/balance-seed-store.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/bank-statement-io.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/toolbox.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 5
+    },
+    {
       "name": "updateRunExportPath",
       "defFiles": [
         "src/backend/bank-bu-recon-db/run-repository.js",
@@ -31901,10 +32171,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 96
+          "count": 98
         }
       ],
-      "totalHits": 155,
+      "totalHits": 157,
       "fileSpan": 4
     },
     {
@@ -32018,6 +32288,35 @@
         }
       ],
       "totalHits": 27,
+      "fileSpan": 4
+    },
+    {
+      "name": "pad2",
+      "defFiles": [
+        "src/backend/usage-stats.js",
+        "src/main-process/acquiring-bill-currency-writer.js",
+        "src/main-process/monthly-balance.js",
+        "src/main-process/toolbox.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/usage-stats.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-writer.js",
+          "count": 11
+        },
+        {
+          "file": "src/main-process/monthly-balance.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/toolbox.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 26,
       "fileSpan": 4
     },
     {
@@ -33836,35 +34135,6 @@
       "fileSpan": 4
     },
     {
-      "name": "sanitizeFileName",
-      "defFiles": [
-        "src/backend/balance-seed-store.js",
-        "src/main-process/bank-statement-io.js",
-        "src/main-process/recon-id-fix-io.js",
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/balance-seed-store.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/bank-statement-io.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/recon-id-fix-io.js",
-          "count": 1
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 4
-    },
-    {
       "name": "escapeHtml",
       "defFiles": [
         "src/renderer.js"
@@ -33872,7 +34142,7 @@
       "refFiles": [
         {
           "file": "src/renderer-dialogs.js",
-          "count": 144
+          "count": 149
         },
         {
           "file": "src/renderer-previews.js",
@@ -33883,7 +34153,7 @@
           "count": 29
         }
       ],
-      "totalHits": 174,
+      "totalHits": 179,
       "fileSpan": 3
     },
     {
@@ -34065,30 +34335,6 @@
         {
           "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
           "count": 2
-        }
-      ],
-      "totalHits": 21,
-      "fileSpan": 3
-    },
-    {
-      "name": "pad2",
-      "defFiles": [
-        "src/backend/usage-stats.js",
-        "src/main-process/acquiring-bill-currency-writer.js",
-        "src/main-process/monthly-balance.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/usage-stats.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-writer.js",
-          "count": 11
-        },
-        {
-          "file": "src/main-process/monthly-balance.js",
-          "count": 4
         }
       ],
       "totalHits": 21,
@@ -37104,14 +37350,14 @@
       "refFiles": [
         {
           "file": "src/renderer-previews.js",
-          "count": 53
+          "count": 55
         },
         {
           "file": "src/renderer.js",
           "count": 22
         }
       ],
-      "totalHits": 75,
+      "totalHits": 77,
       "fileSpan": 2
     },
     {
@@ -37246,6 +37492,24 @@
       "fileSpan": 2
     },
     {
+      "name": "refreshBankStatementStatus",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 9
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 10
+        }
+      ],
+      "totalHits": 19,
+      "fileSpan": 2
+    },
+    {
       "name": "TEMPLATE_LABEL",
       "defFiles": [
         "src/backend/pending-import/removed-reader.js",
@@ -37262,24 +37526,6 @@
         }
       ],
       "totalHits": 19,
-      "fileSpan": 2
-    },
-    {
-      "name": "refreshBankStatementStatus",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 9
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 9
-        }
-      ],
-      "totalHits": 18,
       "fileSpan": 2
     },
     {
@@ -40439,6 +40685,24 @@
       "fileSpan": 2
     },
     {
+      "name": "ROUND_LABELS",
+      "defFiles": [
+        "src/main-process/reconciliation-orchestrator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/reconciliation-orchestrator.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "runC2Scenario",
       "defFiles": [
         "src/main-process/scenario-engines/c2-offset-bill-mark.js",
@@ -40638,6 +40902,24 @@
         {
           "file": "src/backend/acquiring-bill-currency-import/contract-bill.js",
           "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "ToolboxHeaderMismatchError",
+      "defFiles": [
+        "src/main-process/toolbox.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/toolbox.js",
+          "count": 4
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
         }
       ],
       "totalHits": 5,
@@ -42576,6 +42858,24 @@
       "fileSpan": 2
     },
     {
+      "name": "readGatewayBillRowsByChannels",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "readSharedStrings",
       "defFiles": [
         "src/backend/vcc-op-calc-import/reader.js"
@@ -43695,6 +43995,24 @@
       "fileSpan": 2
     },
     {
+      "name": "assertHeadersIdentical",
+      "defFiles": [
+        "src/main-process/toolbox.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/toolbox.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "BIZ_OP_BU_FIELD_DB_COLUMN",
       "defFiles": [
         "src/backend/biz-op-recon-db/columns.js"
@@ -43720,6 +44038,42 @@
       "refFiles": [
         {
           "file": "src/backend/file-service.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "buildMergeFileName",
+      "defFiles": [
+        "src/main-process/toolbox.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/toolbox.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "buildSplitFileName",
+      "defFiles": [
+        "src/main-process/toolbox.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/toolbox.js",
           "count": 2
         },
         {
@@ -43833,6 +44187,24 @@
         },
         {
           "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "computeValuesByField",
+      "defFiles": [
+        "src/main-process/toolbox.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/toolbox.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
           "count": 1
         }
       ],
@@ -44012,6 +44384,24 @@
       "refFiles": [
         {
           "file": "src/main-process/table-type-detector.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "filterRowsByFieldValues",
+      "defFiles": [
+        "src/main-process/toolbox.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/toolbox.js",
           "count": 2
         },
         {
@@ -44595,6 +44985,24 @@
         },
         {
           "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "mergeAoaRows",
+      "defFiles": [
+        "src/main-process/toolbox.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/toolbox.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
           "count": 1
         }
       ],

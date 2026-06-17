@@ -84,7 +84,9 @@ test('B buildHitDetail wrap 边界：空串/负数小数/千分位/数字英文�
 });
 
 // ===== sheet1「未命中场景」：A1 提示 + 表头 + FundType 排序（B-1/B-2/B-Q1/D8）=====
-test('B sheet1 未命中场景：A1 加粗提示 + 第2行表头 + Mark without result 行排前', async () => {
+//   v3.0.8 W2：未命中 sheet 表头/数据整体右移一列（从 B 列起，getCell 第 2 参数 = colIdx+2）；
+//            A 列除 A1 提醒外留空。命中场景 sheet 不变（见下方 B sheet2 用例）。
+test('B sheet1 未命中场景：A1 加粗提示 + 第1行表头(B列,#9上移) + Mark without result 行排前（W2 右移）', async () => {
   const headers = ['MerchantId', 'FundType', 'Amount'];
   const unmatchedRows = [
     { MerchantId: 'm1', FundType: 'Ach Return', Amount: '50', _rowId: 'u1', _modifiedColumns: new Set() },
@@ -98,16 +100,20 @@ test('B sheet1 未命中场景：A1 加粗提示 + 第2行表头 + Mark without 
   assert.strictEqual(wb.worksheets[0].name, SHEET1_UNMATCHED_NAME, 'sheet1 = 未命中场景');
   assert.strictEqual(wb.worksheets[1].name, SHEET2_HIT_NAME, 'sheet2 = 命中场景');
   const s1 = wb.worksheets[0];
-  // B-1：A1 加粗提示
+  // B-1：A1 加粗提示（W2 不变）
   assert.strictEqual(s1.getCell('A1').value, SHEET1_A1_NOTICE);
   assert.ok(s1.getCell('A1').font && s1.getCell('A1').font.bold, 'A1 加粗');
-  // B-Q1：第2行表头
-  assert.strictEqual(s1.getCell(2, 1).value, 'MerchantId', '第2行表头 MerchantId');
-  assert.strictEqual(s1.getCell(2, 2).value, 'FundType', '第2行表头 FundType');
-  // B-2/D8：第3行起数据，FundType='Mark without result' 行排前
-  assert.strictEqual(s1.getCell(3, 1).value, 'm2', 'Mark without result 行排第一');
-  assert.strictEqual(s1.getCell(3, 2).value, MARK_WITHOUT_RESULT);
-  assert.strictEqual(s1.getCell(4, 1).value, 'm1', '其他未命中行随后');
+  // W2 + #9：A 列除 A1 外留空（表头已上移到第 1 行 B 列起；第 2 行起数据 A 列为空）
+  assert.ok(s1.getCell(2, 1).value === null || s1.getCell(2, 1).value === undefined, '#9 数据行 A 列留空');
+  assert.ok(s1.getCell(3, 1).value === null || s1.getCell(3, 1).value === undefined, '#9 数据行 A 列留空');
+  // B-Q1 + W2 + #9：表头上移到第 1 行（与 A1 提醒同行）、从 B 列（第 2 列）起
+  assert.strictEqual(s1.getCell(1, 2).value, 'MerchantId', '#9 第1行表头 MerchantId 从 B 列起');
+  assert.strictEqual(s1.getCell(1, 3).value, 'FundType', '#9 第1行表头 FundType（右移1）');
+  assert.strictEqual(s1.getCell(1, 4).value, 'Amount', '#9 第1行表头 Amount（右移1）');
+  // B-2/D8 + W2 + #9：第 2 行起数据、从 B 列起，FundType='Mark without result' 行排前
+  assert.strictEqual(s1.getCell(2, 2).value, 'm2', '#9 Mark without result 行排第一（第2行 B 列）');
+  assert.strictEqual(s1.getCell(2, 3).value, MARK_WITHOUT_RESULT, '#9 FundType 数据右移1');
+  assert.strictEqual(s1.getCell(3, 2).value, 'm1', '#9 其他未命中行随后（第3行 B 列）');
 });
 
 // ===== sheet2「命中场景」：命中明细列 + 原列右移 + 标黄（B-3/B-4/D5/D9）=====
@@ -159,9 +165,9 @@ test('B 行数守恒：未命中 + 命中 = 原始总行数', async () => {
   await writeBankStatementOutput(modifiedRows, headers, out, unmatchedRows, []);
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(out);
-  const s1 = wb.getWorksheet(SHEET1_UNMATCHED_NAME); // A1 + 表头 + 数据
+  const s1 = wb.getWorksheet(SHEET1_UNMATCHED_NAME); // 第1行(A1提醒+表头) + 数据（#9 上移）
   const s2 = wb.getWorksheet(SHEET2_HIT_NAME);       // 表头 + 数据
-  const unmatchedDataRows = s1.actualRowCount - 2;   // 减 A1 + 表头
+  const unmatchedDataRows = s1.actualRowCount - 1;   // 减第1行(表头，含 A1 提醒)（#9 上移后表头与数据各占行）
   const hitDataRows = s2.actualRowCount - 1;         // 减表头
   assert.strictEqual(unmatchedDataRows, 1, '未命中数据 1 行');
   assert.strictEqual(hitDataRows, 2, '命中数据 2 行');

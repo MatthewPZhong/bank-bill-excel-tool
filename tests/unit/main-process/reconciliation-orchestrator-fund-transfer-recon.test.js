@@ -101,9 +101,9 @@ const POB_ON = { enabled: true, bigAccount: '202782001', bankChannel: 'CITI', re
 // ---- 1. 勾选路（默认 / true）→ 走新引擎，命中回填 ----------------------
 
 test.describe('runReconciliation R5s2 二选一 —— 勾选路（reconSourceMid 缺省/true → 调拨对账单回填）', () => {
-  test('reconSourceMid 缺省（默认勾选）→ 新引擎命中 → ReconciliationId 回填、_round=R5s2-recon', () => {
+  test('reconSourceMid 缺省（默认勾选）→ 新引擎命中 → ReconciliationId 回填、_round=R5s2-recon', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [makeGwRow({ reconciliationid: 'GW-SHOULD-NOT-WIN' })], // 取消路才会用；勾选路不读 gw
       scenarios: [makeR5s2Scenario()], // 不设 reconSourceMid → 缺省默认勾选
@@ -121,9 +121,9 @@ test.describe('runReconciliation R5s2 二选一 —— 勾选路（reconSourceMi
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
 
-  test('reconSourceMid:true（显式勾选）→ 同上走新引擎', () => {
+  test('reconSourceMid:true（显式勾选）→ 同上走新引擎', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [],
       scenarios: [makeR5s2Scenario({ reconSourceMid: true })],
@@ -135,11 +135,11 @@ test.describe('runReconciliation R5s2 二选一 —— 勾选路（reconSourceMi
     assert.ok(!result.modifications.some((m) => m._round === 'R5s2'), '勾选路不产 _round=R5s2（旧网关路）');
   });
 
-  test('勾选路 fundTransferReconContext 缺省 → 新引擎空入参 no-op、不抛、行数守恒', () => {
+  test('勾选路 fundTransferReconContext 缺省 → 新引擎空入参 no-op、不抛、行数守恒', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })];
     let result;
-    assert.doesNotThrow(() => {
-      result = runReconciliation({
+    await assert.doesNotReject(async () => {
+      result = await runReconciliation({
         bankRows,
         gwRows: [],
         scenarios: [makeR5s2Scenario({ reconSourceMid: true })]
@@ -155,9 +155,9 @@ test.describe('runReconciliation R5s2 二选一 —— 勾选路（reconSourceMi
 // ---- 2. 取消路（reconSourceMid:false）→ 旧网关引擎 parity ----------------
 
 test.describe('runReconciliation R5s2 二选一 —— 取消路（reconSourceMid:false → 网关回填，现状 parity）', () => {
-  test('reconSourceMid:false → 走旧网关 runRound5FundTransferBackfill、_round=R5s2、来源=网关', () => {
+  test('reconSourceMid:false → 走旧网关 runRound5FundTransferBackfill、_round=R5s2、来源=网关', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [makeGwRow({ reconciliationid: 'GW-RECON' })],
       scenarios: [makeR5s2Scenario({ reconSourceMid: false })],
@@ -175,9 +175,9 @@ test.describe('runReconciliation R5s2 二选一 —— 取消路（reconSourceMi
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
 
-  test('reconSourceMid:false + 空网关 → no-op（现状一致）', () => {
+  test('reconSourceMid:false + 空网关 → no-op（现状一致）', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [],
       scenarios: [makeR5s2Scenario({ reconSourceMid: false })],
@@ -191,7 +191,7 @@ test.describe('runReconciliation R5s2 二选一 —— 取消路（reconSourceMi
 // ---- 3. 🔴 两路 usedBankRowIds 并入 r5s2ConsumedBankRowIds → 传 R5s2b excludeBankRowIds ----
 
 test.describe('runReconciliation R5s2 二选一 —— usedBankRowIds 并入两路（资金红线点7：R5s2b 互斥）', () => {
-  test('🔴 勾选路：新引擎消费的银行行不被 R5s2b 二次匹配/覆盖', () => {
+  test('🔴 勾选路：新引擎消费的银行行不被 R5s2b 二次匹配/覆盖', async () => {
     // b1 同时满足：调拨对账单（勾选路命中→RECON-MID）与 R5s2b 中台订单（CH-OFFLINE）。
     //   勾选路先消费 b1 → usedBankRowIds 并入 r5s2ConsumedBankRowIds → R5s2b excludeBankRowIds 剔除 → 不覆盖。
     const bankRows = [makeBankRow({
@@ -203,7 +203,7 @@ test.describe('runReconciliation R5s2 二选一 —— usedBankRowIds 并入两�
       BillDate: '2026-05-26',
       ReconciliationId: ''
     })];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [],
       scenarios: [makeR5s2Scenario({ reconSourceMid: true, paymentOfflineBackfill: POB_ON })],
@@ -219,7 +219,7 @@ test.describe('runReconciliation R5s2 二选一 —— usedBankRowIds 并入两�
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
 
-  test('🔴 勾选路「同值消费但未写」行也并入排除集 → R5s2b 不触碰（窄缺口闭合·端到端）', () => {
+  test('🔴 勾选路「同值消费但未写」行也并入排除集 → R5s2b 不触碰（窄缺口闭合·端到端）', async () => {
     // 银行行 ReconciliationId 原值 === 调拨对账单 ReconID（RECON-MID）。
     //   勾选路命中但 old===nv → 不 record（modifications 取不到），但 usedBankRowIds 已消费它。
     //   断言：该行已并入排除集 → R5s2b 不二次匹配覆盖为 CH-OFFLINE。
@@ -232,7 +232,7 @@ test.describe('runReconciliation R5s2 二选一 —— usedBankRowIds 并入两�
       BillDate: '2026-05-26',
       ReconciliationId: 'RECON-MID' // 原值已等于调拨对账单 ReconID → 勾选路同值消费不写
     })];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [],
       scenarios: [makeR5s2Scenario({ reconSourceMid: true, paymentOfflineBackfill: POB_ON })],
@@ -247,7 +247,7 @@ test.describe('runReconciliation R5s2 二选一 —— usedBankRowIds 并入两�
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
 
-  test('🔴 取消路：网关消费的银行行不被 R5s2b 二次匹配/覆盖（现状 parity，排除集接线仍生效）', () => {
+  test('🔴 取消路：网关消费的银行行不被 R5s2b 二次匹配/覆盖（现状 parity，排除集接线仍生效）', async () => {
     const bankRows = [makeBankRow({
       _rowId: 'b1',
       FundType: 'FundTransfer-in',
@@ -257,7 +257,7 @@ test.describe('runReconciliation R5s2 二选一 —— usedBankRowIds 并入两�
       BillDate: '2026-05-26',
       ReconciliationId: ''
     })];
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [makeGwRow({ reconciliationid: 'GW-RECON' })],
       scenarios: [makeR5s2Scenario({ reconSourceMid: false, paymentOfflineBackfill: POB_ON })],

@@ -104,7 +104,7 @@ function buildRefundHitData() {
 // 1. 分桶
 // ---------------------------------------------------------------------------
 test.describe('bucketScenarios：refund-order-backfill 落 r5s4', () => {
-  test('refund-order-backfill → r5s4，不误入 R2/R5s2/R5s3', () => {
+  test('refund-order-backfill → r5s4，不误入 R2/R5s2/R5s3', async () => {
     const { r2, r4, r5s2, r5s3, r5s4 } = bucketScenarios([makeR5RefundScenario()]);
     assert.equal(r5s4.length, 1, 'r5s4 应含退款场景');
     assert.equal(r5s4[0].config.subCategory, 'refund-order-backfill');
@@ -114,14 +114,14 @@ test.describe('bucketScenarios：refund-order-backfill 落 r5s4', () => {
     assert.equal(r5s3.length, 0);
   });
 
-  test('platform-order 但 subCategory 缺失 → 落 R2（不误入 r5s4）', () => {
+  test('platform-order 但 subCategory 缺失 → 落 R2（不误入 r5s4）', async () => {
     const s = { id: 9, category: 'builtin-fixed', config: { funcCategory: 'platform-order' } };
     const { r2, r5s4 } = bucketScenarios([s]);
     assert.equal(r2.length, 1);
     assert.equal(r5s4.length, 0);
   });
 
-  test('空 / null 入参 → r5s4 桶空，不抛', () => {
+  test('空 / null 入参 → r5s4 桶空，不抛', async () => {
     for (const input of [[], null, undefined]) {
       assert.equal(bucketScenarios(input).r5s4.length, 0);
     }
@@ -132,9 +132,9 @@ test.describe('bucketScenarios：refund-order-backfill 落 r5s4', () => {
 // 2 + 3 + 4：refundContext 传参 / 返回字段 / 数据隔离 + 行数守恒
 // ---------------------------------------------------------------------------
 test.describe('runReconciliation R5 场景4 集成', () => {
-  test('refundContext 传参到引擎 → backfillRows 流出到返回对象（S1 一笔命中）', () => {
+  test('refundContext 传参到引擎 → backfillRows 流出到返回对象（S1 一笔命中）', async () => {
     const { bankRows, refundOrderRows } = buildRefundHitData();
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [],
       scenarios: [makeR5RefundScenario()],
@@ -163,7 +163,7 @@ test.describe('runReconciliation R5 场景4 集成', () => {
     assert.equal(result.rounds.r5s4.backfilled, 1, 'rounds.r5s4.backfilled = 回填行数');
   });
 
-  test('🔴 数据隔离：场景4 不改 bankRows、不进 modifiedRows、行数守恒不变', () => {
+  test('🔴 数据隔离：场景4 不改 bankRows、不进 modifiedRows、行数守恒不变', async () => {
     const { bankRows, refundOrderRows } = buildRefundHitData();
     const total = bankRows.length;
     // 快照命中行的关键字段（应保持不变）
@@ -171,7 +171,7 @@ test.describe('runReconciliation R5 场景4 集成', () => {
       _rowId: r._rowId, FundType: r.FundType, ReconciliationId: r.ReconciliationId
     }));
 
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [],
       scenarios: [makeR5RefundScenario()],
@@ -209,10 +209,10 @@ test.describe('runReconciliation R5 场景4 集成', () => {
 // 5 + 6：空 bucket / 缺 refundContext 守卫
 // ---------------------------------------------------------------------------
 test.describe('runReconciliation R5 场景4 守卫', () => {
-  test('空 bucket（未启用退款场景）→ no-op、返回空数组、字段仍在', () => {
+  test('空 bucket（未启用退款场景）→ no-op、返回空数组、字段仍在', async () => {
     const { bankRows, refundOrderRows } = buildRefundHitData();
     const total = bankRows.length;
-    const result = runReconciliation({
+    const result = await runReconciliation({
       bankRows,
       gwRows: [],
       scenarios: [], // 无退款场景 → r5s4 桶空
@@ -232,11 +232,11 @@ test.describe('runReconciliation R5 场景4 守卫', () => {
     );
   });
 
-  test('启用退款场景但 refundContext 缺省 → 引擎空入参返回空、不抛', () => {
+  test('启用退款场景但 refundContext 缺省 → 引擎空入参返回空、不抛', async () => {
     const { bankRows } = buildRefundHitData();
     let result;
-    assert.doesNotThrow(() => {
-      result = runReconciliation({
+    await assert.doesNotReject(async () => {
+      result = await runReconciliation({
         bankRows,
         gwRows: [],
         scenarios: [makeR5RefundScenario()]
@@ -249,4 +249,65 @@ test.describe('runReconciliation R5 场景4 守卫', () => {
     //   作为运行时自检信号——见 spec.md §二：跑了但没命中 = 退款没进）。
     assert.equal(result.stats.r5s4Enabled, true, '场景启用但 0 命中 → r5s4Enabled 仍 true');
   });
+});
+
+// ---------------------------------------------------------------------------
+// v3.0.7 需求6（🔴 资金红线）：bank-statement:run 的 bank-deposit「消费方门控」谓词同源钉死。
+//   main.js 在读 bank-deposit 入金表（65.7万行~1.2GB 尖峰）前加 refundBackfillEnabled 门控：
+//   仅退款场景启用时才整表读 + structuredClone，否则注入 []（编排器 r5s4Bucket 空 → no-op）。
+//   本测试把门控谓词（main.js 逐字镜像）与 bucketScenarios(...).r5s4.length>0 钉死同源——
+//   防分桶条件（reconciliation-orchestrator.js:173）将来改了、门控谓词漏更新 → 退款场景启用却漏读入金表
+//   → 漏退款回填（静默资金事故）。
+// ---------------------------------------------------------------------------
+test.describe('v3.0.7 需求6：bank-deposit 门控谓词与 r5s4 分桶同源', () => {
+  // main.js bank-statement:run 内门控谓词逐字镜像（src/main.js refundBackfillEnabled）。
+  //   入参 dispatchScenarios 已是 enabled 过滤后集合 → 与生产同范式。
+  const refundBackfillEnabledPredicate = (dispatchScenarios) => dispatchScenarios.some(
+    (s) => s && s.category === 'builtin-fixed'
+      && s.config && s.config.funcCategory === 'platform-order'
+      && s.config.subCategory === 'refund-order-backfill'
+  );
+
+  // 各组「dispatchScenarios」与期望门控值；同时断言 == bucketScenarios(...).r5s4.length>0
+  const cases = [
+    { label: '含 refund-order-backfill → 门控 true', scenarios: [makeR5RefundScenario()], expected: true },
+    {
+      label: '不含 refund（仅其它 builtin/C 类）→ 门控 false',
+      scenarios: [
+        { id: 1, category: 'builtin-fixed', config: { funcCategory: 'fund-nature-check', subCategory: 'hx-out' } },
+        { id: 2, category: 'builtin-fixed', config: { funcCategory: 'platform-order', subCategory: 'fund-transfer-backfill' } },
+        { id: 3, category: 'gateway-recon-join', config: {} }
+      ],
+      expected: false
+    },
+    {
+      label: 'platform-order 但缺 subCategory → 门控 false（不误判，与分桶落 R2 一致）',
+      scenarios: [{ id: 9, category: 'builtin-fixed', config: { funcCategory: 'platform-order' } }],
+      expected: false
+    },
+    {
+      label: 'subCategory=refund-order-backfill 但 category 非 builtin-fixed → 门控 false（category 收紧一致）',
+      scenarios: [{ id: 10, category: 'extract-recon-id', config: { funcCategory: 'platform-order', subCategory: 'refund-order-backfill' } }],
+      expected: false
+    },
+    { label: '空集 → 门控 false', scenarios: [], expected: false },
+    {
+      label: '退款 + 其它场景混合 → 门控 true',
+      scenarios: [
+        { id: 1, category: 'builtin-fixed', config: { funcCategory: 'fund-nature-check', subCategory: 'hx-out' } },
+        makeR5RefundScenario()
+      ],
+      expected: true
+    }
+  ];
+
+  for (const c of cases) {
+    test(c.label, () => {
+      const gate = refundBackfillEnabledPredicate(c.scenarios);
+      assert.equal(gate, c.expected, `门控谓词期望 ${c.expected}`);
+      // 🔴 钉死同源：门控 ⟺ bucketScenarios r5s4 桶非空（编排器真正消费 depositRows 的条件）
+      const r5s4NonEmpty = bucketScenarios(c.scenarios).r5s4.length > 0;
+      assert.equal(gate, r5s4NonEmpty, '门控谓词必须与 bucketScenarios(...).r5s4.length>0 完全一致（同源）');
+    });
+  }
 });

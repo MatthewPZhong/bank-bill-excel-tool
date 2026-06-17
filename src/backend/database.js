@@ -1319,6 +1319,12 @@ class AppDatabase {
     return linkedTableRepository.readBankDepositAdmCandidates(this.db);
   }
 
+  // v3.0.7 需求6：网关账单表按 Channel 集合下推过滤读 facade（业务不变量=对账同渠道；防 300 万行全量尖峰）。
+  //   供 bank-statement:run 取网关数据源（替代 readLinkedTableRows('gateway-bill') 全量读 + 深拷）。
+  readGatewayBillRowsByChannels(channels) {
+    return linkedTableRepository.readGatewayBillRowsByChannels(this.db, channels);
+  }
+
   hasLinkedTableRows(tableKey) {
     return linkedTableRepository.hasLinkedTableRows(this.db, tableKey);
   }

@@ -268,11 +268,24 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
  *   rounds: Object
  * }}
  */
-function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, midAllocationContext, fundTransferReconContext, dispatchReconContext } = {}) {
+// v3.0.8 需求3（运行不阻塞，🔴 资金红线·只改控制流）：runReconciliation 改 async + 在「轮次边界」插
+//   `await yieldTick(round)` 让出事件循环 + 上报进度。**轮次顺序、各引擎入参、数据匹配/派生逻辑零改动**——
+//   仅在 R1→R2(dispatcher)→R3.5→R4→R5(s2/s2b/s3/s4) 各轮 *执行之后* 让出一次（结果 golden 字节不变）。
+//   onProgress 为可选回调（main.js handler 注入 forwarder；测试/脚本不传 → yieldTick 仅 setImmediate 让出、不上报）。
+async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, midAllocationContext, fundTransferReconContext, dispatchReconContext, onProgress } = {}) {
   if (!Array.isArray(bankRows)) {
     throw new Error('runReconciliation: bankRows 必须是数组');
   }
   const safeGwRows = Array.isArray(gwRows) ? gwRows : [];
+  // v3.0.8 需求3：轮次边界让出 + 进度上报。onProgress 异常吞掉（绝不影响对账结果）；
+  //   只 await setImmediate（事件循环让出，使渲染进程消息循环得以处理 → 窗口不再「未响应」）。
+  //   🔴 不在引擎内部调用、不在数据准备中途调用——只在「整轮完成」的安全点让出，无并发改写 bankRows 风险。
+  const yieldTick = async (round) => {
+    if (typeof onProgress === 'function') {
+      try { onProgress({ round }); } catch (_e) { /* swallow — 进度上报失败不影响对账 */ }
+    }
+    await new Promise((r) => setImmediate(r));
+  };
   const {
     dbsChargeFundCheck: dbsChargeBucket,
     r2: r2Bucket, r4: r4Bucket, r5s2: r5s2Bucket, r5s3: r5s3Bucket, r5s4: r5s4Bucket
@@ -293,6 +306,7 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
   // ===== R1：reconid 1v1 匹配（不改字段，仅得 matchedGwRows）=====
   const r1 = runRound1ReconIdMatch(bankRows, safeGwRows);
   allWarnings.push(...(r1.warnings || [])); // r1.modifications 恒空，不并入 allMods
+  await yieldTick('R1'); // 轮次边界让出（R1 已完成，进 R2 前）
 
   // ===== R2：现有 dispatcher（原地改 bankRows）=====
   //   只取它的 modifications / errorReport / stats + modifiedRows 的命中元数据；忽略其数据列浅拷贝（R4/R5 后会过时）。
@@ -305,6 +319,7 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
   for (const m of r2.modifications || []) allMods.push({ ...m, _round: 'R2' });
   // 留 R2 命中元数据：rowId -> dispatcher 浅拷贝行（含 _hitScenarioId / _hitScenarioName / _modifiedColumns 等）
   const r2HitByRowId = new Map((r2.modifiedRows || []).map((r) => [r._rowId, r]));
+  await yieldTick('R2'); // 轮次边界让出（R2 dispatcher 已完成，进 R3.5 前）
 
   // ===== R3：占位 no-op（透传全量银行行）=====
   //   r3BankRows = bankRows（同一组引用）；R4/R5 直接对全量行操作。
@@ -324,6 +339,7 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
     for (const m of r35.modifications || []) allMods.push({ ...m, _round: 'R3.5' });
     dbsChargeChangedCount = (r35.modifications || []).length;
   }
+  await yieldTick('R3.5'); // 轮次边界让出（R3.5 DBS-Charge 已完成，进 R4 前）
 
   // ===== R4：资金性质校验（🔴，matchedGwRows × 全量 bank 按 reconid 关联，改 FundType）=====
   let r4ChangedCount = 0;
@@ -334,6 +350,7 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
     for (const m of r4.modifications || []) allMods.push({ ...m, _round: 'R4' });
     r4ChangedCount = (r4.modifications || []).length;
   }
+  await yieldTick('R4'); // 轮次边界让出（R4 资金性质校验已完成，进 R5 前）
 
   // ===== R5 场景2：回填 ReconciliationId =====
   let r5s2BackfilledCount = 0;
@@ -387,6 +404,7 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
       r5s2BackfilledCount = (r5a.modifications || []).length;
     }
   }
+  await yieldTick('R5s2'); // 轮次边界让出（R5 场景2 回填已完成，进 R5s2b 前）
 
   // ===== R5 场景2b：Payment线下调拨订单回填（v3.0.4 块 F，🔴 资金红线）=====
   //   gating（三条件全真才跑）：r5s2Bucket 非空 ∧ config.paymentOfflineBackfill.enabled===true ∧ midRows 非空。
@@ -415,6 +433,7 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
       paymentOfflineMatchedPairs = r5ab.matchedPairs || [];
     }
   }
+  await yieldTick('R5s2b'); // 轮次边界让出（R5 场景2b Payment线下调拨回填已完成，进 R5s3 前）
 
   // ===== R5 场景3：生成剔除行（一般不改银行行）=====
   let platformCleanupRows = [];
@@ -429,6 +448,7 @@ function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, m
     for (const m of r5b.modifications || []) allMods.push({ ...m, _round: 'R5s3' });
     platformCleanupRows = r5b.cleanupRows || [];
   }
+  await yieldTick('R5s3'); // 轮次边界让出（R5 场景3 剔除已完成，进 R5s4 前）
 
   // ===== R5 场景4：中台退款订单回填（🔴 数据隔离 —— 只读 bankRows，不改任何字段、不产 modifications）=====
   //   独立产出双 sheet 模板行集合（backfillRows / unmatchedRows），引擎内部维护独立的

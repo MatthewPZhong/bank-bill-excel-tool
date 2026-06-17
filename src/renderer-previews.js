@@ -56,6 +56,9 @@
       createScenarioConfigDialogC4,
       // v2.1.4 T3：小助手功能收纳弹窗工厂
       createModuleCabinetDialog,
+      // v3.0.8 需求1：工具箱🧰 主弹框 + 拆表选字段弹框工厂（preview 直接调用）
+      createToolboxDialog,
+      createSplitFieldPickerDialog,
       // v3.0.1 需求1（D4）：删除网关对账单弹框（🔴 资金红线）preview 直接调用
       createLinkedTableDeleteRangeDialog,
       // v3.0.1 需求3：网关对账单修复场景单选框 preview 直接调用
@@ -804,6 +807,7 @@
     }
 
     // v2.0.0-beta.3：场景管理弹窗（含 3 内置场景）
+    // v3.0.8 需求2（W6）：默认打开即两组三角折叠收纳态（▶ 资金性质校验 / ▶ 中台订单数据处理）+ C3 已退役不显示。
     function applyScenariosManagerPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
       setTimeout(() => {
@@ -1298,6 +1302,33 @@
       }, 120);
     }
 
+    // v3.0.8 需求1：工具箱🧰 主弹框 preview（合并表格行 + 拆分表格行；拆分行 [导出文件] 默认禁用）
+    function applyToolboxPreviewState() {
+      setCurrentModule(MODULES.statementGenerator.id);
+      setTimeout(() => {
+        openModal(createToolboxDialog());
+      }, 120);
+    }
+
+    // v3.0.8 需求1：拆表选字段弹框 preview（字段单选 + 值多选，演示典型表头与去重值）
+    //   onComplete/onCancel preview 不真正回流（仅截图）。
+    function applyToolboxSplitFieldPickerPreviewState() {
+      setCurrentModule(MODULES.statementGenerator.id);
+      setTimeout(() => {
+        openModal(createSplitFieldPickerDialog({
+          headers: ['交易日期', '币种', '对手账号', '摘要'],
+          valuesByField: {
+            交易日期: ['2026-06-01', '2026-06-02', '2026-06-03'],
+            币种: ['USD', 'HKD', 'CNY'],
+            对手账号: ['6222000000000001', '6222000000000002'],
+            摘要: []  // 边界①：空值字段 → 多选框空且禁用
+          },
+          onComplete: () => {},
+          onCancel: () => {}
+        }));
+      }, 120);
+    }
+
     return {
       applyNewAccountPreviewState,
       applyTemplateManagerPreviewState,
@@ -1367,7 +1398,10 @@
       applyScenarioConfigC4GatewayPreviewState,
       applyScenarioConfigC4Gateway1vNPreviewState,
       // v2.1.4 T3：小助手功能收纳弹窗 preview
-      applyModuleCabinetPreviewState
+      applyModuleCabinetPreviewState,
+      // v3.0.8 需求1：工具箱🧰 主弹框 + 拆表选字段弹框 preview
+      applyToolboxPreviewState,
+      applyToolboxSplitFieldPickerPreviewState
     };
   }
 

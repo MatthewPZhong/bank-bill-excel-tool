@@ -5,7 +5,7 @@
 //     3. XLSX 现造 4 sheet「资金对账导出不平」工作簿（对账结果/网关账单/渠道账单/订单修复 严格列名）。
 //     4. readReconIdFixFile(file,'gateway') → runReconIdFix(scenario, sheets, { bocLinkRows: readBocFxLinkRows() })。
 //     5. 断言 fixedRows / stats / warnings（组1 产 2 行修复，组2 整组失败）。
-//     6. writeReconIdFixOutput({subMode:'gateway'}) 写临时 xlsx → XLSX 读回断言 14 列表头 + Type=2 + Reference/Amount 行级值。
+//     6. writeReconIdFixOutput({subMode:'gateway'}) 写临时 xlsx → XLSX 读回断言 14 列表头 + Type=1 + Reference/Amount 行级值。
 //
 //   注：run handler 是 IPC+dialog 绑定无法直接调；本测试镜像 handler 的 runOpts 注入（isBocScenario → bocLinkRows），
 //     readReconIdFixFile / runReconIdFix / writeReconIdFixOutput / 仓储 facade / 种子均调真实实现。
@@ -176,7 +176,7 @@ function run() {
 
     // Type/Reference/Amount 行级注入断言（引擎产物，写盘前）。
     const sortedByRef = [...fixedRows].sort((a, b) => String(a.Reference).localeCompare(String(b.Reference)));
-    assertEq(sortedByRef[0].Type, 2, '修复行 Type=2（number）');
+    assertEq(sortedByRef[0].Type, 1, '修复行 Type=1（number，v3.0.8 需求5：2 → 1）');
     assertEq(sortedByRef[0].Reference, 'R1', '修复行 Reference=链接ID R1');
     assertEq(sortedByRef[0].Amount, 100, '修复行 Amount=货币1金额 100（原值透传，覆盖源行 999）');
     assertEq(sortedByRef[1].Reference, 'R2', '修复行 Reference=链接ID R2');
@@ -186,7 +186,7 @@ function run() {
     assertEq(sortedByRef[0].MerchantId, 'M1', '修复行 MerchantId 从网关源行复制');
     assertEq(sortedByRef[0].Bank, 'BOC-BANK', '修复行 Bank 从网关源行复制');
 
-    // —— 步骤6：writeReconIdFixOutput 写临时 xlsx → 读回断言 14 列表头 + Type=2 + Reference/Amount 行级值 ——
+    // —— 步骤6：writeReconIdFixOutput 写临时 xlsx → 读回断言 14 列表头 + Type=1 + Reference/Amount 行级值 ——
     const outPath = path.join(tmpDir, '网关对账修复-BOC.xlsx');
     return writeReconIdFixOutput({ fixedRows, savePath: outPath, subMode: 'gateway' }).then(() => {
       assertTrue(fs.existsSync(outPath), '写盘：输出文件存在');
@@ -202,7 +202,7 @@ function run() {
       const refIdx = ORDER_REPAIR_FIELDS_GATEWAY.indexOf('Reference');
       const amtIdx = ORDER_REPAIR_FIELDS_GATEWAY.indexOf('Amount');
       const dataRows = aoa.slice(1).sort((a, b) => String(a[refIdx]).localeCompare(String(b[refIdx])));
-      assertEq(dataRows[0][typeIdx], 2, '写盘：Type 单元格=2（数值格）');
+      assertEq(dataRows[0][typeIdx], 1, '写盘：Type 单元格=1（数值格，v3.0.8 需求5：2 → 1）');
       assertEq(dataRows[0][refIdx], 'R1', '写盘：Reference=R1 行级值');
       assertEq(dataRows[0][amtIdx], 100, '写盘：Amount=100 行级值');
       assertEq(dataRows[1][refIdx], 'R2', '写盘：Reference=R2 行级值');

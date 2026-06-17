@@ -1,8 +1,9 @@
 // v3.0.4 块 E 需求3：BOC 调拨订单修复引擎（渠道账单驱动，8 步状态机）
+// v3.0.8 需求5（🔴 资金红线，用户确认业务语义）：修复行 Type 由 2 → 1。
 //
 // 🔴🔴 资金红线（spec §4 F3 / §7 失败语义）：
 //   三方自动匹配「渠道账单(channelName=BOC) ↔ BOC链接表(分组/调拨单号/资金对账不平表链接ID) ↔ 网关账单(OrderId)」，
-//   命中后复制网关命中行 N 份写资金对账修复行（Type=2 / Reference=链接ID / Amount=货币1金额）。任一字段映射 /
+//   命中后复制网关命中行 N 份写资金对账修复行（Type=1 / Reference=链接ID / Amount=货币1金额）。任一字段映射 /
 //   分组聚合 / 1v1 消耗 / OrderId 命中判定错误 → 产出错误修复行，直接污染资金对账结果。
 //
 // ⚠️⚠️ 失败语义比 JPM「从严」（防后人误对齐 JPM）：
@@ -17,7 +18,8 @@
 //   2. channelName 从 scenario.config.channelName 读，常量 BOC_CHANNEL_NAME 兜底（R-10）。
 //   3. 纯函数：不读 DB / 不写日志 / 不依赖 Electron；**入参只读**（sheets 三数组与 bocLinkRows 不被修改，
 //      单测深快照断言）；链接表只读不回写（无 JPM writeAdmMatchFlags 类比物）；同输入必同输出。
-//   4. Type 写 number 2（D9，writer 原样落数值格）；Amount 取「货币1金额」原值透传不 parseNumber 改写（D10）。
+//   4. Type 写 number 1（v3.0.8 需求5；原 D9 为 number 2，业务确认后改 1；writer 原样落数值格）；
+//      Amount 取「货币1金额」原值透传不 parseNumber 改写（D10）。
 //
 // 入参：{ sheets, bocLinkRows, scenario }
 //   sheets：{ reconResult, businessBills(=网关账单), opponentBills(=渠道账单), fixTemplate }
@@ -235,7 +237,7 @@ function runBocDispatchOrderFix({ sheets, bocLinkRows, scenario }) {
       const reference = normalizeCellValue(linkRow[FIELD_MAP.linkReconLinkId]); // Reference = 该链接表行链接ID
       const amount = linkRow[FIELD_MAP.linkCcy1Amount]; // Amount = 「货币1金额」原值透传（D10）
       fixedRows.push(buildOutputRow(gwHit, {
-        Type: 2, // number 2（D9；网关源行只有超长列名 Type(0:... 短名取不到，必须 override）
+        Type: 1, // number 1（v3.0.8 需求5，原 D9=2，业务确认后改 1；网关源行只有超长列名 Type(0:... 短名取不到，必须 override）
         Reference: reference,
         Amount: amount === null || amount === undefined ? '' : amount
       }, 'gateway'));

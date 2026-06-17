@@ -354,6 +354,8 @@ const elements = {
   saveUserGuideBtn: document.getElementById('saveUserGuideBtn'),
   // v2.1.4 T3：小助手功能收纳触发按钮（紧贴 saveUserGuideBtn 右侧）
   moduleCabinetBtn: document.getElementById('moduleCabinetBtn'),
+  // v3.0.8 需求1：工具箱🧰 触发按钮（紧贴 moduleCabinetBtn 右侧）
+  toolboxBtn: document.getElementById('toolboxBtn'),
   backgroundPalettePanel: document.getElementById('backgroundPalettePanel'),
   backgroundSpectrumArea: document.getElementById('backgroundSpectrumArea'),
   backgroundSpectrumCanvas: document.getElementById('backgroundSpectrumCanvas'),
@@ -428,6 +430,9 @@ const {
   getBizOpReconDefaultDate,
   // v2.1.4 T3：小助手功能收纳弹窗工厂
   createModuleCabinetDialog,
+  // v3.0.8 需求1：工具箱🧰 主弹框（按钮 click 用）；拆表选字段弹框（preview 直接调用需在 renderer.js 取得引用）
+  createToolboxDialog,
+  createSplitFieldPickerDialog,
   // v2.1.12 需求1：VCC业务OP计算 dialog factory（F1 确认 / F2 计算 / F3 显示余额）
   createVccOpCalcConfirmDialog,
   createVccOpCalcComputeDialog,
@@ -537,7 +542,10 @@ const {
   applyScenarioConfigC4GatewayPreviewState,
   applyScenarioConfigC4Gateway1vNPreviewState,
   // v2.1.4 T3：小助手功能收纳弹窗 preview
-  applyModuleCabinetPreviewState
+  applyModuleCabinetPreviewState,
+  // v3.0.8 需求1：工具箱🧰 主弹框 + 拆表选字段弹框 preview
+  applyToolboxPreviewState,
+  applyToolboxSplitFieldPickerPreviewState
 } = window.__rendererPreviews.createRendererPreviews({
   state,
   elements,
@@ -593,6 +601,9 @@ const {
   createScenarioConfigDialogC4,
   // v2.1.4 T3：小助手功能收纳弹窗工厂
   createModuleCabinetDialog,
+  // v3.0.8 需求1：工具箱🧰 主弹框 + 拆表选字段弹框工厂（preview 直接调用）
+  createToolboxDialog,
+  createSplitFieldPickerDialog,
   // v3.0.1 需求1（D4）：删除网关对账单弹框 preview 直接调用
   createLinkedTableDeleteRangeDialog,
   // v3.0.1 需求3：网关对账单修复场景单选框 preview 直接调用
@@ -4098,7 +4109,44 @@ async function shouldPromptGatewayReconAtRun() {
   }
 }
 
+// v3.0.8 需求3（运行不阻塞）：run 进度文案映射（stage = handler 阶段边界；round = 编排器轮次边界）。
+//   纯展示文案，无数据语义；未识别的事件返回 null（不刷状态框）。仿收单 formatAcquiringBillCurrencyProgress 范式。
+function formatBankStatementRunProgress(ev) {
+  if (!ev || typeof ev !== 'object') return null;
+  const STAGE_LABELS = {
+    prepare: '正在准备数据…',
+    reconcile: '正在执行对账…'
+  };
+  const ROUND_LABELS = {
+    R1: '正在匹配对账号（R1）…',
+    R2: '正在执行场景调度（R2）…',
+    'R3.5': '正在校验 DBS-Charge 资金（R3.5）…',
+    R4: '正在校验资金性质（R4）…',
+    R5s2: '正在回填资金划转（R5）…',
+    R5s2b: '正在回填线下调拨（R5）…',
+    R5s3: '正在生成剔除清单（R5）…'
+  };
+  if (ev.stage && STAGE_LABELS[ev.stage]) return STAGE_LABELS[ev.stage];
+  if (ev.round && ROUND_LABELS[ev.round]) return ROUND_LABELS[ev.round];
+  return null;
+}
+
 async function runBankStatementInternal() {
+  // v3.0.8 需求3：订阅 run 进度事件，运行期把轮次文案刷进状态框（仿收单 handleAcquiringBillCurrencyRun）；
+  //   finally 必须 unsubscribe 避免 listener 泄漏。进度文案是瞬态展示，run 完成后 refreshBankStatementStatus 覆盖回最终态。
+  let unsubscribe = null;
+  try {
+    const api = window.desktopApi && window.desktopApi.bankStatement;
+    if (api && typeof api.onRunProgress === 'function') {
+      unsubscribe = api.onRunProgress((ev) => {
+        const text = formatBankStatementRunProgress(ev);
+        if (text && elements.bankStatementStatusBox) {
+          updateStatusBox(elements.bankStatementStatusBox, text, 'info');
+        }
+      });
+    }
+  } catch (_e) { /* swallow — 订阅失败不影响 run */ }
+
   try {
     const result = await window.desktopApi.bankStatement.run();
     if (!result || result.status !== 'ok') {
@@ -4114,6 +4162,10 @@ async function runBankStatementInternal() {
   } catch (error) {
     console.error(error);
     openModal(createAlertDialog(`运行失败：${error.message || error}`));
+  } finally {
+    if (typeof unsubscribe === 'function') {
+      try { unsubscribe(); } catch (_e) { /* swallow */ }
+    }
   }
 }
 
@@ -6031,6 +6083,13 @@ async function applyFullInfo(info) {
     });
   }
 
+  // v3.0.8 需求1：工具箱🧰 触发按钮 → 打开工具箱主弹框（合表/拆表）
+  if (elements.toolboxBtn) {
+    elements.toolboxBtn.addEventListener('click', () => {
+      openModal(createToolboxDialog());
+    });
+  }
+
   elements.backgroundSpectrumArea.addEventListener('pointerdown', (event) => {
     event.preventDefault();
     state.isBackgroundSpectrumDragging = true;
@@ -6393,6 +6452,10 @@ async function applyFullInfo(info) {
     setTimeout(() => { applyVccOpCalcShowBalanceDialogPreviewState(); }, 120);
   } else if (info.previewModal === 'module-cabinet') {
     setTimeout(() => { applyModuleCabinetPreviewState(); }, 120);
+  } else if (info.previewModal === 'toolbox') {
+    setTimeout(() => { applyToolboxPreviewState(); }, 120);
+  } else if (info.previewModal === 'toolbox-split-field-picker') {
+    setTimeout(() => { applyToolboxSplitFieldPickerPreviewState(); }, 120);
   }
 
   markRendererStartup(RENDERER_STARTUP_MARKS.initComplete);

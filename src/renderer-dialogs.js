@@ -6867,12 +6867,65 @@
         : 1;
       state.activeScenarioChannelId = activeChannelId;
 
-      function renderRow(scenario, displayIndex) {
+      // v3.0.8 需求2（W6）：场景管理两大功能分组三角折叠。
+      //   分组键 = config.funcCategory 归并：
+      //     - 'fund-nature-check' + 'dbs-charge-fund-check' → 组「资金性质校验」（groupKey='fund-nature-check'）
+      //     - 'platform-order'                              → 组「中台订单数据处理」（groupKey='platform-order'）
+      //   无 funcCategory 或不在上述集合的场景（既有 builtin-fixed「从银行对账单提取调拨订单对账ID」/ C1 / C2 等）
+      //   → groupKey=null，保持原扁平显示（不强制分组、不折叠）。
+      //   组名复用 FUNC_CATEGORY_LABELS（renderer-dialogs.js:5621），避免硬编码漂移。
+      const SCENARIO_GROUP_DEFS = [
+        { key: 'fund-nature-check', label: FUNC_CATEGORY_LABELS['fund-nature-check'], funcCategories: ['fund-nature-check', 'dbs-charge-fund-check'] },
+        { key: 'platform-order', label: FUNC_CATEGORY_LABELS['platform-order'], funcCategories: ['platform-order'] }
+      ];
+      // 两组默认 collapsed（收纳）；折叠态为前端临时状态（不持久化，每次打开弹框默认收纳）。
+      const collapsedGroups = new Set(SCENARIO_GROUP_DEFS.map((g) => g.key));
+
+      // 取场景所属分组键（无匹配 → null = 扁平显示）。
+      function getScenarioGroupKey(scenario) {
+        const funcCategory = scenario && scenario.config && scenario.config.funcCategory;
+        if (!funcCategory) return null;
+        const hit = SCENARIO_GROUP_DEFS.find((g) => g.funcCategories.includes(funcCategory));
+        return hit ? hit.key : null;
+      }
+
+      // 当前表格可见列数（用于分组标题行 colspan）：
+      //   勾选列（始终存在，仅 display 切换）+ 序号 + 功能类别 + 场景名称 + 执行操作 = 5 基础列；
+      //   优先级（非 compact）+ 是否启动（showEnabledCol）按视图模式叠加。
+      function getScenarioTableColSpan() {
+        return 5 + (isCompactView ? 0 : 1) + (showEnabledCol ? 1 : 0);
+      }
+
+      // 渲染分组标题行（含 ▶/▼ 三角 + 组名）。子场景行带 data-group=groupKey，按折叠态显隐。
+      function renderGroupHeaderRow(groupKey, label, collapsed) {
+        const tr = document.createElement('tr');
+        tr.className = 'scenario-group-header';
+        tr.dataset.groupHeader = groupKey;
+        const triangle = collapsed ? '▶' : '▼';
+        tr.innerHTML = `
+          <td class="scenario-group-header-cell" colspan="${getScenarioTableColSpan()}">
+            <button type="button" class="scenario-group-toggle" data-action="toggle-group" data-group="${escapeHtml(groupKey)}" aria-expanded="${collapsed ? 'false' : 'true'}">
+              <span class="scenario-group-triangle">${triangle}</span>
+              <span class="scenario-group-label">${escapeHtml(label)}</span>
+            </button>
+          </td>
+        `;
+        return tr;
+      }
+
+      function renderRow(scenario, displayIndex, groupKey) {
         const tr = document.createElement('tr');
         tr.dataset.id = String(scenario.id);
         tr.dataset.category = scenario.category;
         // v2.1.16-beta.5 需求2（PR-4 修订）：标记 is_builtin → 批量收集（collectChecked*）据此双保险排除内置写死场景。
         tr.dataset.builtin = scenario.isBuiltin === true ? '1' : '0';
+        // v3.0.8 需求2（W6）：分组子场景行标记 data-group + scenario-group-row class；折叠态加 .collapsed（CSS display:none）。
+        //   扁平行 groupKey=null 不标记、恒显。
+        if (groupKey) {
+          tr.dataset.group = groupKey;
+          tr.classList.add('scenario-group-row');
+          if (collapsedGroups.has(groupKey)) tr.classList.add('collapsed');
+        }
         // v2.1.0-beta.2 PR-A Round 2：
         // - task R2-7：序号 = 列表内 1-based 顺序号（不再用真实 scenarios.id；dataset.id 仍是真实 id 用于 IPC）
         // - task R2-8：compact 模式（单类别入口）隐藏 优先级 + 是否启动 td
@@ -6982,8 +7035,14 @@
       }
 
       async function refreshTable() {
-        const scenarios = await loadScenariosOrAlert();
-        if (scenarios === null) return;
+        const scenariosRaw = await loadScenariosOrAlert();
+        if (scenariosRaw === null) return;
+        // v3.0.8 需求2（W6）：退役自带场景 C3「与网关对账单根据金额币种一对一匹配对账ID」（category='gateway-recon-join'）
+        //   —— 仅前端过滤隐藏：自带 C3 列表项在场景管理列表看不到、不可在表内启停，最大可回滚、零 migration 风险。
+        //   注意：本过滤只隐藏列表项，不是全链路屏蔽——新建场景下拉（约 8003 行）仍可建 C3，
+        //   已有库中手动启用的 C3 因后端保留仍会运行（向后兼容，属 TECHDOC OPEN-2 已知取舍）。
+        //   后端引擎 / dispatcher case / CHECK 约束 / 已有库记录 / 新库 seed 全不动；新库 seed 的 enabled=0 C3 被此过滤等效退役。
+        const scenarios = scenariosRaw.filter((s) => s.category !== 'gateway-recon-join');
         // v2.1.16 需求1：listScenarios 不返 config → 为 builtin-fixed 行补 config，
         //   使「功能类别」列能按 config.funcCategory 显示业务分组（资金性质校验 / 中台订单数据处理）。
         await Promise.all(
@@ -7008,12 +7067,55 @@
         // v2.1.13 D-2：自带写死场景（builtin-fixed）置顶（序号固定 1）；其余保持 listScenarios 原序（stable sort）
         visible.sort((a, b) => (a.category === 'builtin-fixed' ? 0 : 1) - (b.category === 'builtin-fixed' ? 0 : 1));
         tbody.innerHTML = '';
-        // v2.1.0-beta.2 PR-A Round 2（task R2-7）：传 displayIndex（1-based 列表内顺序）给 renderRow
-        visible.forEach((scenario, idx) => {
-          tbody.appendChild(renderRow(scenario, idx + 1));
+        // v3.0.8 需求2（W6）：二级分组渲染（纯视觉重排，序号口径不变）。
+        //   ① 无分组场景（groupKey=null）保持原扁平显示，按上面的 builtin-first 顺序先渲染（含 C1/C2/既有 builtin-fixed）。
+        //   ② 「资金性质校验」「中台订单数据处理」两组各插一行分组标题（▶/▼ 三角），子场景行按折叠态显隐，默认 collapsed。
+        // 🔴 N3-1 一致性红线（rules/important-variables.md displayIndex）：序号列必须用 scenario.displayIndex
+        //   （scenarios-repository.listScenarios 渠道内 builtin-fixed 优先 1-based 派发口径，run 状态框 / 命中场景行报表共享同一份），
+        //   严禁用「分组重排后的位置序数」——否则 run 状态框「场景 N」与场景管理 UI 序号串号（N3-1 修复失效）。
+        //   分组只改渲染顺序与折叠显隐，不改任何场景的序号显示值；displayIndex 缺失时才回退列表位次（兜底）。
+        const displayNumberOf = (scenario, fallbackPos) =>
+          Number.isFinite(Number(scenario.displayIndex)) ? Number(scenario.displayIndex) : fallbackPos;
+        let fallbackPos = 0;
+        const flatScenarios = visible.filter((s) => getScenarioGroupKey(s) === null);
+        // v2.1.0-beta.2 PR-A Round 2（task R2-7）：序号优先取 displayIndex（派发口径），缺失才回退位次。
+        flatScenarios.forEach((scenario) => {
+          fallbackPos += 1;
+          tbody.appendChild(renderRow(scenario, displayNumberOf(scenario, fallbackPos), null));
+        });
+        SCENARIO_GROUP_DEFS.forEach((group) => {
+          const members = visible.filter((s) => getScenarioGroupKey(s) === group.key);
+          if (members.length === 0) return; // 该组无场景 → 不渲分组标题（避免空组）
+          const collapsed = collapsedGroups.has(group.key);
+          tbody.appendChild(renderGroupHeaderRow(group.key, group.label, collapsed));
+          members.forEach((scenario) => {
+            fallbackPos += 1;
+            tbody.appendChild(renderRow(scenario, displayNumberOf(scenario, fallbackPos), group.key));
+          });
         });
         // v2.1.9 N5 Phase 5 T21：refresh 后重置「全选」状态（新建 rows 都未勾）
         if (selectAllCheckbox) selectAllCheckbox.checked = false;
+      }
+
+      // v3.0.8 需求2（W6）：折叠态切换 —— 不重渲整表，仅翻转该组 collapsed 标志 + 显隐子行 + 翻转三角。
+      function toggleScenarioGroup(groupKey) {
+        if (!groupKey) return;
+        const willCollapse = !collapsedGroups.has(groupKey);
+        if (willCollapse) {
+          collapsedGroups.add(groupKey);
+        } else {
+          collapsedGroups.delete(groupKey);
+        }
+        tbody.querySelectorAll(`tr[data-group="${groupKey}"]`).forEach((tr) => {
+          tr.classList.toggle('collapsed', willCollapse);
+        });
+        const headerRow = tbody.querySelector(`tr[data-group-header="${groupKey}"]`);
+        if (headerRow) {
+          const toggleBtn = headerRow.querySelector('[data-action="toggle-group"]');
+          if (toggleBtn) toggleBtn.setAttribute('aria-expanded', willCollapse ? 'false' : 'true');
+          const triangle = headerRow.querySelector('.scenario-group-triangle');
+          if (triangle) triangle.textContent = willCollapse ? '▶' : '▼';
+        }
       }
 
       // v2.1.9 N5：拉取渠道列表 + 填充 select 下拉
@@ -7085,6 +7187,12 @@
 
       // 委托：单一 click handler 处理 tbody 内所有 row-action
       tbody.addEventListener('click', async (event) => {
+        // v3.0.8 需求2（W6）：分组标题三角折叠（不属于 row-action，先于行操作处理）。
+        const groupToggle = event.target.closest('[data-action="toggle-group"]');
+        if (groupToggle) {
+          toggleScenarioGroup(groupToggle.dataset.group);
+          return;
+        }
         const button = event.target.closest('[data-row-action]');
         if (!button) return;
         const tr = button.closest('tr');
@@ -7489,6 +7597,10 @@
               <input class="scenario-config-input scenario-config-input-narrow builtin-fixed-priority-input" type="number" min="0" max="3" data-field="priority" value="0">
             </div>
           </div>
+          <!-- v3.0.8（用户要求）：两个勾选框（对账数据来源 / Payment线下调拨）并排一行显示 → 外层 flex 容器包裹。
+               与两勾选框同 gating（仅 fund-transfer-backfill 场景显示）：加载 IIFE 里 isPaymentScenario 时 unhide，
+               避免非 payment 场景留空容器的多余间距。 -->
+          <div class="builtin-fixed-checks-row" data-role="checks-row" hidden>
           <!-- v3.0.6 需求2（T6）：「对账数据来源为中台调拨单表」二选一勾选行。
                仅 config.subCategory==='fund-transfer-backfill' 场景显示（与 payment 行同一 gating）；
                默认勾选（加载口径 cachedConfig.reconSourceMid !== false，老库无字段→视为勾选）。
@@ -7508,6 +7620,7 @@
               Payment线下调拨订单回填处理
             </label>
           </div>
+          </div><!-- /builtin-fixed-checks-row -->
           <div class="builtin-fixed-payment-fields" data-role="payment-fields" hidden>
             <div class="builtin-fixed-payment-field">
               <span class="builtin-fixed-channel-label">银行渠道</span>
@@ -7536,6 +7649,8 @@
       // v3.0.6 需求2（T6）：对账数据来源二选一 —— 勾选行（默认勾选；仅 fund-transfer-backfill 场景显示，与 payment 行同 gating）
       const reconSourceRow = dialog.querySelector('[data-role="recon-source-row"]');
       const reconSourceCheck = dialog.querySelector('input[data-field="recon-source-mid"]');
+      // v3.0.8（用户要求）：两勾选框并排一行的外层容器（与两勾选框同 gating，仅 fund-transfer-backfill 场景 unhide）
+      const checksRow = dialog.querySelector('[data-role="checks-row"]');
       // v3.0.4 块 F · F1：Payment 线下调拨订单回填处理 —— 勾选行 + 三输入框展开区（条件渲染 + 显隐联动）
       const paymentRow = dialog.querySelector('[data-role="payment-row"]');
       const paymentFields = dialog.querySelector('[data-role="payment-fields"]');
@@ -7666,6 +7781,7 @@
               ? scResult.scenario.config
               : {};
             isPaymentScenario = cachedConfig.subCategory === 'fund-transfer-backfill';
+            if (isPaymentScenario && checksRow) checksRow.hidden = false;
             if (isPaymentScenario && reconSourceRow) {
               // v3.0.6 需求2（T6）：对账数据来源勾选行与 payment 行同 gating 显示；
               //   默认勾选口径 reconSourceMid !== false（老库无字段 undefined !== false → true → 勾选），
@@ -10812,6 +10928,353 @@
       return overlay;
     }
 
+    // v3.0.8 需求1：工具箱🧰 主弹框（合表 / 拆表）。脱离主对账流程的轻量 Excel 行级搬运小工具。
+    //   复用 modal-overlay/modal-card/dialog-* + openModal/closeModal（参考 createModuleCabinetDialog）。
+    //   IPC 契约（preload desktopApi.toolbox → main.js trackedIpcHandle）：
+    //     merge()       → {status:'success',filePath} / {status:'cancelled'} / {status:'failed',message,detailLines}
+    //     splitRead()   → {status:'success',sourceFilePath,headers,valuesByField} / {status:'cancelled'} / {status:'failed',message,detailLines}
+    //     splitExport({sourceFilePath,field,values}) → {status:'success',filePath} / {status:'cancelled'} / {status:'failed',message,detailLines}
+    //   合表「导入文件」一气呵成（多选 → 校验 → 合并 → 另存为，无独立导出）；拆表两步（导入选字段 → 导出文件）。
+    function createToolboxDialog() {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.dataset.previewModal = 'toolbox';
+
+      const card = document.createElement('div');
+      card.className = 'modal-card toolbox-card';
+      card.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">工具箱</div>
+          <button class="icon-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="dialog-body toolbox-body">
+          <div class="toolbox-row">
+            <span class="toolbox-row-label">合并表格</span>
+            <div class="toolbox-row-actions">
+              <button class="primary-btn small" type="button" data-action="merge-import">导入文件</button>
+            </div>
+          </div>
+          <div class="toolbox-row">
+            <span class="toolbox-row-label">拆分表格</span>
+            <div class="toolbox-row-actions">
+              <button class="primary-btn small" type="button" data-action="split-import">导入文件</button>
+            </div>
+          </div>
+        </div>
+      `;
+      overlay.appendChild(card);
+
+      const closeBtn = card.querySelector('.icon-close');
+      const mergeImportBtn = card.querySelector('[data-action="merge-import"]');
+      const splitImportBtn = card.querySelector('[data-action="split-import"]');
+
+      // v3.0.8：拆表一气呵成——选字段弹框「完成」即直接过滤命中行另存为（去掉独立「导出文件」按钮）。
+      let mergeInFlight = false;
+      let splitImportInFlight = false;
+      let splitExportInFlight = false;
+
+      // v3.0.8（用户要求）：工具箱反馈改用应用内弹框 createAlertDialog（有前端页面 + 统一 Clear 风格 + 可预览），
+      //   取代原生 window.alert（无前端页面、无法预览、样式不一致）。
+      //   createAlertDialog 按 innerHTML 渲染 → message/明细经 escapeHtml + <br> 拼装防注入/正确换行；
+      //   成功/提示 skipLogReport（不报 error 日志），失败默认 error 上报；点「确认」后回到工具箱主弹框。
+      function showToolboxAlert(message, { isError = false, lines = [] } = {}) {
+        const safeLines = Array.isArray(lines) ? lines.filter((l) => l != null && String(l) !== '') : [];
+        const html = [escapeHtml(String(message || ''))]
+          .concat(safeLines.map((l) => escapeHtml(String(l))))
+          .join('<br>');
+        openModal(createAlertDialog(html, {
+          skipLogReport: !isError,
+          logDomain: 'toolbox',
+          onConfirm: () => openModal(overlay)
+        }));
+      }
+
+      closeBtn.addEventListener('click', () => closeModal());
+      overlay.addEventListener('click', (ev) => {
+        if (ev.target === overlay) closeModal();
+      });
+
+      // 合表：一气呵成。点「导入文件」→ merge()（main 内多选 + 校验 + 合并 + 另存为）→ success 弹保存路径 / failed 弹差异。
+      //   detailLines（表头不一致）逐行拼进 alert；cancelled 静默。
+      mergeImportBtn.addEventListener('click', async () => {
+        if (mergeInFlight) return;
+        mergeInFlight = true;
+        mergeImportBtn.disabled = true;
+        try {
+          const result = await desktopApi.toolbox.merge();
+          if (!result || result.status === 'cancelled') return;
+          if (result.status === 'success') {
+            showToolboxAlert('合并完成，已保存到：', { lines: [result.filePath] });
+            return;
+          }
+          showToolboxAlert(result.message || '合并失败', { isError: true, lines: result.detailLines });
+        } catch (error) {
+          showToolboxAlert(`合并失败：${(error && error.message) || '未知错误'}`, { isError: true });
+        } finally {
+          mergeInFlight = false;
+          mergeImportBtn.disabled = false;
+        }
+      });
+
+      // 拆表（一气呵成）：点「导入文件」→ splitRead()（main 内单选 + 读表头 + 算各字段去重值）→ 成功弹选字段弹框。
+      //   选字段弹框「完成」→ 直接用 {源文件, field, values} 过滤命中行另存为；「取消」回到工具箱主弹框。
+      splitImportBtn.addEventListener('click', async () => {
+        if (splitImportInFlight) return;
+        splitImportInFlight = true;
+        splitImportBtn.disabled = true;
+        try {
+          const result = await desktopApi.toolbox.splitRead();
+          if (!result || result.status === 'cancelled') return;
+          if (result.status !== 'success') {
+            showToolboxAlert(result.message || '读取文件失败', { isError: true });
+            return;
+          }
+          const headers = Array.isArray(result.headers) ? result.headers : [];
+          const valuesByField = (result.valuesByField && typeof result.valuesByField === 'object')
+            ? result.valuesByField
+            : {};
+          openModal(createSplitFieldPickerDialog({
+            headers,
+            valuesByField,
+            onComplete: async ({ field, values }) => {
+              // v3.0.8：选字段「完成」→ 直接过滤命中行另存为（一气呵成，无独立导出按钮）。
+              openModal(overlay); // 先回工具箱主弹框，随后弹系统保存框
+              const selectedValues = Array.isArray(values) ? values : [];
+              if (!result.sourceFilePath || !field || selectedValues.length === 0) {
+                showToolboxAlert('请选择拆分字段与至少一个值', { isError: true });
+                return;
+              }
+              if (splitExportInFlight) return;
+              splitExportInFlight = true;
+              try {
+                const exportResult = await desktopApi.toolbox.splitExport({
+                  sourceFilePath: result.sourceFilePath,
+                  field,
+                  values: selectedValues
+                });
+                if (!exportResult || exportResult.status === 'cancelled') return;
+                if (exportResult.status === 'success') {
+                  showToolboxAlert('拆分完成，已保存到：', { lines: [exportResult.filePath] });
+                  return;
+                }
+                showToolboxAlert(exportResult.message || '拆分失败', { isError: true, lines: exportResult.detailLines });
+              } catch (error) {
+                showToolboxAlert(`拆分失败：${(error && error.message) || '未知错误'}`, { isError: true });
+              } finally {
+                splitExportInFlight = false;
+              }
+            },
+            onCancel: () => {
+              // 取消选字段：回到工具箱主弹框。
+              openModal(overlay);
+            }
+          }));
+        } catch (error) {
+          showToolboxAlert(`读取文件失败：${(error && error.message) || '未知错误'}`, { isError: true });
+        } finally {
+          splitImportInFlight = false;
+          splitImportBtn.disabled = false;
+        }
+      });
+
+      return overlay;
+    }
+
+    // v3.0.8 需求1：拆表选字段弹框。单选字段下拉（= 表头列名）+ 多选值下拉（= 该字段去重值，随字段切换刷新）+ [完成][取消]。
+    //   入参 { headers:string[], valuesByField:{[field]:string[]}, onComplete({field,values[]}), onCancel() }。
+    //   边界：① 某字段无去重值（valuesByField[f] 空）→ 多选框为空且 disabled；
+    //         ② 未选任何值（values=[]）→ [完成] 禁用（不允许空选导出，否则过滤命中 0 行产空 sheet）。
+    function createSplitFieldPickerDialog({ headers = [], valuesByField = {}, onComplete = null, onCancel = null } = {}) {
+      const safeHeaders = Array.isArray(headers) ? headers : [];
+      const safeValuesByField = (valuesByField && typeof valuesByField === 'object') ? valuesByField : {};
+
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.dataset.previewModal = 'toolbox-split-field-picker';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card toolbox-split-picker-card';
+
+      const fieldOptionsHtml = safeHeaders
+        .map((h, idx) => `<option value="${idx}">${escapeHtml(h)}</option>`)
+        .join('');
+
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">选择拆分字段</div>
+          <button class="icon-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="dialog-body toolbox-split-picker-body">
+          <label class="toolbox-split-picker-row">
+            <span class="toolbox-split-picker-label">字段</span>
+            <select class="toolbox-split-picker-field">${fieldOptionsHtml}</select>
+          </label>
+          <div class="toolbox-split-picker-row toolbox-split-picker-row-values">
+            <span class="toolbox-split-picker-label">值</span>
+            <div class="new-account-currency-dropdown-wrap toolbox-split-values-dropdown-wrap">
+              <button class="new-account-currency-dropdown-btn toolbox-split-values-dropdown-btn" type="button" aria-expanded="false"> </button>
+            </div>
+          </div>
+          <div class="toolbox-split-picker-hint"></div>
+        </div>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="complete" disabled>完成</button>
+        </div>
+      `;
+      overlay.appendChild(dialog);
+
+      const closeBtn = dialog.querySelector('.icon-close');
+      const fieldSelect = dialog.querySelector('.toolbox-split-picker-field');
+      const valuesDropdownBtn = dialog.querySelector('.toolbox-split-values-dropdown-btn');
+      const hintEl = dialog.querySelector('.toolbox-split-picker-hint');
+      const cancelBtn = dialog.querySelector('[data-action="cancel"]');
+      const completeBtn = dialog.querySelector('[data-action="complete"]');
+
+      // v3.0.8（用户要求）：值多选框改用「按钮 + 浮动勾选面板」控件，与场景管理「资金性质校验」管理页的
+      //   「适用银行渠道」多选下拉同款（复用 new-account-currency-* class）。面板挂本弹框 overlay、position:fixed 定位。
+      const valuesPanel = document.createElement('div');
+      valuesPanel.className = 'new-account-currency-dropdown-panel toolbox-split-values-floating-panel';
+      valuesPanel.hidden = true;
+      overlay.appendChild(valuesPanel);
+
+      let currentValuesList = [];      // 当前字段的去重值列表
+      let selectedValues = new Set();  // 当前已勾选的值
+      let panelOpen = false;
+
+      // 用 fieldSelect.value（= headers 索引）取 headers[idx] 再查 valuesByField（索引而非列名，避免重名/特殊字符表头歧义）。
+      function currentFieldName() {
+        const idx = Number.parseInt(fieldSelect.value, 10);
+        return Number.isFinite(idx) && idx >= 0 && idx < safeHeaders.length ? safeHeaders[idx] : '';
+      }
+
+      // 按钮文案：未选→占位空格；全选→「全部」；部分→顿号拼接（与渠道下拉 updateLabel 同口径）。
+      function updateValuesLabel() {
+        if (selectedValues.size === 0) {
+          valuesDropdownBtn.textContent = ' ';
+        } else if (currentValuesList.length > 0 && selectedValues.size === currentValuesList.length) {
+          valuesDropdownBtn.textContent = '全部';
+        } else {
+          valuesDropdownBtn.textContent = currentValuesList.filter((v) => selectedValues.has(v)).join('、') || ' ';
+        }
+        valuesDropdownBtn.title = valuesDropdownBtn.textContent;
+      }
+
+      function renderValueOptions() {
+        valuesPanel.replaceChildren();
+        currentValuesList.forEach((v) => {
+          const option = document.createElement('label');
+          option.className = 'new-account-currency-option';
+          const text = document.createElement('span');
+          text.className = 'new-account-currency-option-text';
+          text.textContent = v;
+          const checkbox = document.createElement('input');
+          checkbox.className = 'new-account-checkbox';
+          checkbox.type = 'checkbox';
+          checkbox.checked = selectedValues.has(v);
+          checkbox.addEventListener('change', () => {
+            if (checkbox.checked) selectedValues.add(v);
+            else selectedValues.delete(v);
+            updateValuesLabel();
+            updateCompleteState();
+          });
+          option.append(text, checkbox);
+          valuesPanel.appendChild(option);
+        });
+      }
+
+      function positionValuesPanel() {
+        const rect = valuesDropdownBtn.getBoundingClientRect();
+        const margin = 12;
+        valuesPanel.style.position = 'fixed';
+        valuesPanel.style.minWidth = `${Math.max(rect.width, 188)}px`;
+        valuesPanel.style.maxWidth = `${Math.max(220, Math.min(280, window.innerWidth - margin * 2))}px`;
+        valuesPanel.hidden = false;
+        const panelHeight = valuesPanel.offsetHeight || 216;
+        const panelWidth = valuesPanel.offsetWidth || 200;
+        const left = Math.min(Math.max(margin, rect.left), Math.max(margin, window.innerWidth - panelWidth - margin));
+        const top = rect.bottom + 6 + panelHeight > window.innerHeight - margin
+          ? Math.max(margin, rect.top - panelHeight - 6)
+          : rect.bottom + 6;
+        valuesPanel.style.left = `${left}px`;
+        valuesPanel.style.top = `${top}px`;
+      }
+
+      function closeValuesPanel() {
+        panelOpen = false;
+        valuesPanel.hidden = true;
+        valuesDropdownBtn.classList.remove('is-open');
+        valuesDropdownBtn.setAttribute('aria-expanded', 'false');
+      }
+      function openValuesPanel() {
+        if (valuesDropdownBtn.disabled) return;
+        renderValueOptions();
+        panelOpen = true;
+        valuesDropdownBtn.classList.add('is-open');
+        valuesDropdownBtn.setAttribute('aria-expanded', 'true');
+        positionValuesPanel();
+      }
+      valuesDropdownBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (panelOpen) closeValuesPanel(); else openValuesPanel();
+      });
+
+      // 切换字段 → 重置值列表 + 清空已选（新字段值集不同）+ 关面板 + 边界提示（字段无值则禁用下拉）。
+      function refreshValues() {
+        const fieldName = currentFieldName();
+        currentValuesList = Array.isArray(safeValuesByField[fieldName]) ? safeValuesByField[fieldName] : [];
+        selectedValues = new Set();
+        closeValuesPanel();
+        valuesDropdownBtn.disabled = currentValuesList.length === 0; // 边界①：字段无去重值 → 下拉禁用
+        hintEl.textContent = currentValuesList.length === 0 ? '该字段无可选值（该列为空），请改选其他字段' : '';
+        updateValuesLabel();
+        updateCompleteState();
+      }
+
+      // 边界②：选中值数为 0 → [完成] 禁用（不允许空选导出，否则过滤命中 0 行产空 sheet）。
+      function getSelectedValues() {
+        return currentValuesList.filter((v) => selectedValues.has(v));
+      }
+      function updateCompleteState() {
+        completeBtn.disabled = selectedValues.size === 0;
+      }
+
+      fieldSelect.addEventListener('change', refreshValues);
+
+      function cancelAndClose() {
+        closeValuesPanel();
+        if (typeof onCancel === 'function') {
+          onCancel();
+        } else {
+          closeModal();
+        }
+      }
+      closeBtn.addEventListener('click', cancelAndClose);
+      cancelBtn.addEventListener('click', cancelAndClose);
+      overlay.addEventListener('click', (ev) => {
+        if (ev.target === overlay) {
+          if (panelOpen) { closeValuesPanel(); return; } // 面板开时点遮罩仅收起面板，不关弹框
+          cancelAndClose();
+        }
+      });
+
+      completeBtn.addEventListener('click', () => {
+        const values = getSelectedValues();
+        if (values.length === 0) {
+          hintEl.textContent = '请至少选择一个值';
+          return;
+        }
+        closeValuesPanel();
+        if (typeof onComplete === 'function') {
+          onComplete({ field: currentFieldName(), values });
+        }
+      });
+
+      // 初始渲染：默认选中首个字段并刷新其值列表。
+      refreshValues();
+      return overlay;
+    }
+
     // v2.1.16-beta.5 需求1（PR-4）：资金对账面板「开始运行」检测到 ≥2 个已启用 gateway-recon-id-fix 场景时，
     //   弹单选对话框让用户挑一个运行。入参 { scenarios:[{id,name}], onPick(scenarioId) }；onPick 自行 closeModal。
     function createGatewayReconScenarioPickerDialog({ scenarios = [], onPick = null } = {}) {
@@ -10922,6 +11385,9 @@
       getBizOpReconDefaultDate,
       // v2.1.4 T3：小助手功能收纳弹窗工厂
       createModuleCabinetDialog,
+      // v3.0.8 需求1：工具箱🧰（合表 / 拆表）主弹框 + 拆表选字段弹框
+      createToolboxDialog,
+      createSplitFieldPickerDialog,
       // v2.1.12 需求1：VCC业务OP计算 dialog factory（F1 确认 / F2 计算 / F3 显示余额）
       createVccOpCalcConfirmDialog,
       createVccOpCalcComputeDialog,

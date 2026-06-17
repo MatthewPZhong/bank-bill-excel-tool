@@ -81,7 +81,7 @@ function stripInternalFields(row) {
 //   engine-utils.js record(rowId,...) → rowId 来自 ensureRowId(row)=row._rowId；
 //   bank-statement-io.js readBankStatement 注入 row._rowId='row_idx'。
 //
-// sheet1「未命中场景」：A1 加粗提示 + 第 2 行表头 + 第 3 行起 unmatchedRows
+// sheet1「未命中场景」：第 1 行 = A1 加粗提示(A列) + 表头(B列起)；第 2 行起 unmatchedRows（v3.0.8 #9 整体上移一行）
 //   （FundType==='Mark without result' 数据值的行排前，其余随后 — D8）
 // sheet2「命中场景」：第一列「命中明细」+ 原 headers；命中行保留标黄（D5）；命中明细多条以 \n 拼接（B-Q2）
 const MARK_WITHOUT_RESULT = 'Mark without result';
@@ -246,13 +246,19 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
     const others = unmatchedRows.filter((r) => cellToString(r && r['FundType']) !== MARK_WITHOUT_RESULT);
     const sortedUnmatched = [...markFirst, ...others];
 
-    // 第 2 行表头（B-Q1 已定：加表头），第 3 行起数据（headers 投影自动过滤 _ 前缀诊断列）
-    const headerRow2 = s1.getRow(2);
-    headers.forEach((h, idx) => { headerRow2.getCell(idx + 1).value = h; });
-    headerRow2.font = { bold: true, size: 10 };
+    // v3.0.8（用户要求 #9）：银行行数据整体上移一行——表头移到第 1 行（与 A1 提醒同行：A 列提醒 + B 列起表头），
+    //   数据从第 2 行起，填掉原顶部空行；headers 投影自动过滤 _ 前缀诊断列。
+    // v3.0.8 W2：未命中 sheet 表头/数据整体右移一列（从 B 列起）——A 列除 A1 提醒外留空。
+    //   仅本「未命中场景」sheet 右移 + 上移（颜色/行号/A1 提醒不变）；命中场景 sheet 不受影响。
+    const headerRow1 = s1.getRow(1);
+    headers.forEach((h, idx) => {
+      const cell = headerRow1.getCell(idx + 2);          // B1 起表头（A1 留给提醒；font 逐格设以不覆盖 A1 提醒字体）
+      cell.value = h;
+      cell.font = { bold: true, size: 10 };
+    });
     sortedUnmatched.forEach((row, rowIdx) => {
-      const r = s1.getRow(rowIdx + 3);
-      headers.forEach((h, colIdx) => { r.getCell(colIdx + 1).value = row[h]; });
+      const r = s1.getRow(rowIdx + 2);                   // 第 2 行起数据（B 列起）
+      headers.forEach((h, colIdx) => { r.getCell(colIdx + 2).value = row[h]; });
     });
   }
 
