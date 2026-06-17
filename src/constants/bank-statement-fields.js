@@ -1,4 +1,4 @@
-// v2.0.0-beta.3：银行对账单 44 列固定字段（PRD §6 D7：列结构固定，不从导入文件提取）
+// v2.0.0-beta.3：银行对账单 46 列固定字段（PRD §6 D7：列结构固定，不从导入文件提取）
 // 顺序与样例文件 银行对账单.xlsx 「渠道对账单」sheet 表头一致
 // 任何场景配置中"字段下拉"的枚举值都来自本表
 //
@@ -23,6 +23,8 @@ const BANK_STATEMENT_FIELDS = Object.freeze([
   'CustomerRef',
   'Account Reference',
   'Transaction Description',
+  '合并单号',
+  '合并状态',
   'Extra Information',
   'Payment Detail',
   'Payee Name',
@@ -56,7 +58,7 @@ const BANK_STATEMENT_FIELDS = Object.freeze([
 // C3 银行对账单字段下拉额外加的"特殊计算字段"
 const BANK_STATEMENT_VIRTUAL_AMOUNT_ABS = '发生额绝对值';
 
-// C3 银行对账单字段下拉的全枚举（44 + 1 虚拟）
+// C3 银行对账单字段下拉的全枚举（46 + 1 虚拟）
 const BANK_STATEMENT_FIELDS_FOR_C3 = Object.freeze([
   ...BANK_STATEMENT_FIELDS,
   BANK_STATEMENT_VIRTUAL_AMOUNT_ABS

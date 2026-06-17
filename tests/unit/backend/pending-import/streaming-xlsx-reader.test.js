@@ -42,3 +42,18 @@ test('parseRowXml: 自闭合 cell 属性顺序无关 <c s=.. r=../>', () => {
   assert.strictEqual(cells[0], '');
   assert.strictEqual(cells[1], '9');
 });
+
+// v3.0.8 BUG3 回归：<v> 带属性（xml:space="preserve"）的字符串不能被读成空串。
+//   SheetJS / Excel 写「含首尾空格的字符串」会输出 <c t="str"><v xml:space="preserve"> A </v></c>；
+//   旧正则 /<v>...<\/v>/ 不匹配带属性的 <v> → 该格静默丢失（工具箱合表/拆表读任意用户表头/数据时丢字）。
+test('parseRowXml: <v xml:space="preserve"> 含空格字符串不丢（BUG3 回归）', () => {
+  const cells = parseRowXml('<row r="1"><c r="A1" t="str"><v xml:space="preserve"> A </v></c><c r="B1" t="str"><v>B</v></c></row>', 28, null);
+  assert.strictEqual(cells[0], ' A ', '<v> 带属性时值不丢（含首尾空格原样）');
+  assert.strictEqual(cells[1], 'B', '裸 <v> 仍正常（向后兼容）');
+});
+
+test('parseRowXml: <v> 带属性的数字单元格不漏读（资金红线，<v> 属性容忍）', () => {
+  // 防御：理论上数字格也可能带 <v> 属性 → 必须照常读出，不能漏算金额
+  const cells = parseRowXml('<row r="1"><c r="A1" t="n"><v xml:space="preserve">123.45</v></c></row>', 28, null);
+  assert.strictEqual(cells[0], '123.45');
+});

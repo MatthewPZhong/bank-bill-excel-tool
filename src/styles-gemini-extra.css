@@ -3283,13 +3283,19 @@ select.mapping-text-input {
 /* === v3.0.8 需求1：工具箱🧰（合表 / 拆表）主弹框 + 拆表选字段弹框（Clear 风格副本，复用 dialog 基础样式）=== */
 .toolbox-card {
   /* v3.0.8：宽度缩小一半（原 460px） */
-  width: min(94vw, 230px);
+  /* v3.0.8 微调：左右各 +8（外框宽 +16，230 → 246） */
+  width: min(94vw, 246px);
+  /* v3.0.8 微调（口径 B）：卡片高 +15 由 .toolbox-body padding-bottom 承担，
+     overlay 垂直居中会把上沿上移 7.5；这里整体下移 7.5 抵消，
+     使上沿回到最原始基线、下沿净往下 +15。 */
+  transform: translateY(7.5px);
 }
 .toolbox-body {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  padding: 24px 28px 12px;
+  /* v3.0.8 微调：下沿往下 +15（padding-bottom 12 → 27） */
+  padding: 24px 28px 27px;
 }
 .toolbox-row {
   display: flex;

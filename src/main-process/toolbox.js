@@ -170,6 +170,78 @@ function filterRowsByFieldValues(aoa, field, values) {
   return { rows, headerRow, matchedCount, fieldFound: true };
 }
 
+// ============================================================
+// v3.0.8 BUG3：流式增量版（修大文件 OOM）——逐行喂，绝不全量物化行。
+//   口径与上面全量版（computeValuesByField / filterRowsByFieldValues）完全一致，仅改成「逐行 feed」接口，
+//   供 src/main.js 工具箱 handler 配合 toolbox-stream-io.streamDataRows 流式消费。
+// ============================================================
+
+// 流式去重值累加器：按列名增量收集去重值（normalizeCell 归一 + 去重 + 保留首现序，空串不计）。
+//   用法：
+//     const acc = createValuesByFieldAccumulator(headers);
+//     for (每个数据行 cells) acc.addRow(cells);
+//     const valuesByField = acc.result();   // { [header]: string[] }（与全量 computeValuesByField 同构）
+//   注：headers 为 normalize 后的表头数组（extractHeaders / readHeaderRowStreamed 结果）。
+//       同名表头重复时，后者覆盖前者的列索引（与全量版「按列名取值」语义一致）。
+function createValuesByFieldAccumulator(headers) {
+  const safeHeaders = Array.isArray(headers) ? headers : [];
+  const valuesByField = {};
+  const seenByField = {};
+  // header -> 列索引（同名后者覆盖前者，对齐全量 computeValuesByField 的对象键覆盖语义）
+  const colIdxByField = new Map();
+
+  safeHeaders.forEach((header, colIdx) => {
+    valuesByField[header] = [];
+    seenByField[header] = new Set();
+    colIdxByField.set(header, colIdx);
+  });
+
+  return {
+    addRow(cells) {
+      if (!Array.isArray(cells)) return;
+      for (const [header, colIdx] of colIdxByField.entries()) {
+        const value = normalizeCell(cells[colIdx]);
+        if (value === '') continue;
+        const seen = seenByField[header];
+        if (seen.has(value)) continue;
+        seen.add(value);
+        valuesByField[header].push(value);
+      }
+    },
+    result() {
+      return valuesByField;
+    }
+  };
+}
+
+// 流式行过滤器：定位字段列 + 预编译选中值集合，逐行判定是否命中（口径与全量 filterRowsByFieldValues 一致）。
+//   用法：
+//     const f = createRowFilter(normalizedHeaders, field, values);
+//     if (!f.fieldFound) { ...handler 回 failed... }
+//     for (每个数据行 cells) if (f.matches(cells)) emit(cells);
+//   命中口径：normalizeCell(cells[字段列索引]) ∈ normalize(values)。
+//   入参：
+//     normalizedHeaders  normalize 后的表头数组（与全量版「headerRow.map(normalizeCell)」一致）
+//     field              单选字段（= 某个表头列名）
+//     values             该字段被选中的若干值
+//   返回：{ fieldFound, colIdx, matches(cells)->boolean }
+function createRowFilter(normalizedHeaders, field, values) {
+  const headers = Array.isArray(normalizedHeaders) ? normalizedHeaders : [];
+  const colIdx = headers.indexOf(normalizeCell(field));
+  if (colIdx < 0) {
+    return { fieldFound: false, colIdx: -1, matches: () => false };
+  }
+  const valueSet = new Set((Array.isArray(values) ? values : []).map((v) => normalizeCell(v)));
+  return {
+    fieldFound: true,
+    colIdx,
+    matches(cells) {
+      if (!Array.isArray(cells)) return false;
+      return valueSet.has(normalizeCell(cells[colIdx]));
+    }
+  };
+}
+
 // 合表默认文件名：合并-YYYYMMDDHHmm.xlsx
 function buildMergeFileName(date = new Date()) {
   return `合并-${formatTimestamp12(date)}.xlsx`;
@@ -204,6 +276,9 @@ module.exports = {
   mergeAoaRows,
   computeValuesByField,
   filterRowsByFieldValues,
+  // v3.0.8 BUG3 流式增量版（修大文件 OOM）
+  createValuesByFieldAccumulator,
+  createRowFilter,
   buildMergeFileName,
   buildSplitFileName,
   SPLIT_VALUE_SEPARATOR,

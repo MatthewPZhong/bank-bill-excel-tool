@@ -7038,11 +7038,15 @@
         const scenariosRaw = await loadScenariosOrAlert();
         if (scenariosRaw === null) return;
         // v3.0.8 需求2（W6）：退役自带场景 C3「与网关对账单根据金额币种一对一匹配对账ID」（category='gateway-recon-join'）
-        //   —— 仅前端过滤隐藏：自带 C3 列表项在场景管理列表看不到、不可在表内启停，最大可回滚、零 migration 风险。
-        //   注意：本过滤只隐藏列表项，不是全链路屏蔽——新建场景下拉（约 8003 行）仍可建 C3，
+        //   —— 仅隐藏「软件自带的 C3」（isBuiltin=true）：自带 C3 列表项在场景管理列表看不到、不可在表内启停，
+        //      最大可回滚、零 migration 风险。
+        //   v3.0.8 fix（用户拍板）：保留用户自建 C3（isBuiltin=false）可见可管理——只过滤自带 C3，不再一刀切隐藏全部
+        //      gateway-recon-join，避免误伤用户在 BOSH-CN 等渠道下自建的 C3 场景。
+        //   注意：本过滤只隐藏自带列表项，不是全链路屏蔽——新建场景下拉（约 8003 行）仍可建 C3，
         //   已有库中手动启用的 C3 因后端保留仍会运行（向后兼容，属 TECHDOC OPEN-2 已知取舍）。
-        //   后端引擎 / dispatcher case / CHECK 约束 / 已有库记录 / 新库 seed 全不动；新库 seed 的 enabled=0 C3 被此过滤等效退役。
-        const scenarios = scenariosRaw.filter((s) => s.category !== 'gateway-recon-join');
+        //   后端引擎 / dispatcher case / CHECK 约束 / 已有库记录 / 新库 seed 全不动；新库 seed 的 enabled=0 自带 C3 被此过滤等效退役。
+        //   字段来源：scenarios-repository.rowToListItem → isBuiltin: Number(row.is_builtin) === 1（camelCase）。
+        const scenarios = scenariosRaw.filter((s) => !(s.category === 'gateway-recon-join' && s.isBuiltin));
         // v2.1.16 需求1：listScenarios 不返 config → 为 builtin-fixed 行补 config，
         //   使「功能类别」列能按 config.funcCategory 显示业务分组（资金性质校验 / 中台订单数据处理）。
         await Promise.all(

@@ -15,7 +15,15 @@ function normalizeHeaderCell(value) {
   return String(value).trim();
 }
 
-function buildHeaderValidator(expectedHeaders, templateLabel) {
+// v3.0.8 迭代2-B（🔴资金对账红线）— buildHeaderValidator 增加 options.allowSupersetColumns：
+//   - allowSupersetColumns=false（默认，Pending 用）：列数必须相等 + 逐列名相等（行为完全不变，零回归）
+//   - allowSupersetColumns=true（Bank 用）：兼容新版 46 列银行对账单（'Transaction Description' 后插入
+//     「合并单号」「合并状态」两列）。不要求列数相等；要求 expectedHeaders 每个列名都出现在 actualHeaders 中，
+//     且 expectedHeaders 是 actualHeaders 的"有序子序列"（按模板顺序逐个在文件表头里能依次往后找到，
+//     保持相对顺序、防乱序文件）；多出的列（合并单号/合并状态）忽略、不落库。
+function buildHeaderValidator(expectedHeaders, templateLabel, options = {}) {
+  const allowSupersetColumns = options.allowSupersetColumns === true;
+
   return function validate(actualHeaders) {
     if (!Array.isArray(actualHeaders)) {
       return {
@@ -28,6 +36,48 @@ function buildHeaderValidator(expectedHeaders, templateLabel) {
     const actualLen = actualHeaders.length;
     const expectedLen = expectedHeaders.length;
 
+    if (allowSupersetColumns) {
+      // 宽容超集模式：模板列必须全部命中，且保持相对顺序（有序子序列），多余列忽略。
+      const normalizedActual = actualHeaders.map(normalizeHeaderCell);
+
+      const missing = [];
+      let cursor = 0;             // 在 actualHeaders 中的扫描游标（只前进，保证相对顺序）
+      let orderBroken = false;
+      for (let i = 0; i < expectedLen; i++) {
+        const expected = expectedHeaders[i];
+        const foundAt = normalizedActual.indexOf(expected, cursor);
+        if (foundAt === -1) {
+          // 从当前游标往后找不到：可能整体缺失，或顺序错乱（出现在游标之前）
+          const earlierAt = normalizedActual.indexOf(expected);
+          if (earlierAt === -1) {
+            missing.push(expected);
+          } else {
+            orderBroken = true;
+            missing.push(expected);
+          }
+        } else {
+          cursor = foundAt + 1;
+        }
+      }
+
+      if (missing.length > 0) {
+        return {
+          ok: false,
+          error: orderBroken
+            ? `${templateLabel} 表头顺序错乱或缺失模板列：${missing.join('、')}`
+            : `${templateLabel} 表头缺失模板列：${missing.join('、')}`,
+          detailLines: [
+            `模板表头（${expectedLen} 列，须按此相对顺序出现）：${expectedHeaders.join(' | ')}`,
+            `文件表头（${actualLen} 列）：${normalizedActual.join(' | ')}`,
+            `缺失/错序列：${missing.join('、')}`
+          ]
+        };
+      }
+
+      return { ok: true };
+    }
+
+    // 严格模式（Pending 用）：列数必须相等 + 逐列名相等。
     if (actualLen !== expectedLen) {
       return {
         ok: false,
@@ -61,8 +111,10 @@ function buildHeaderValidator(expectedHeaders, templateLabel) {
   };
 }
 
+// Pending：保持原严格校验（列数 + 顺序 + 内容三段式），零回归
 const validatePendingGuanliHeaders = buildHeaderValidator(PENDING_GUANLI_HEADERS, 'Pending 数据管理');
-const validateBankHeaders = buildHeaderValidator(BANK_HEADERS, '银行对账单');
+// Bank：宽容超集模式，兼容新版 46 列文件（忽略多出的「合并单号」「合并状态」）
+const validateBankHeaders = buildHeaderValidator(BANK_HEADERS, '银行对账单', { allowSupersetColumns: true });
 
 module.exports = {
   validatePendingGuanliHeaders,

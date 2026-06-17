@@ -141,8 +141,27 @@ function readWorkbookRows(filePath, { blankrows = false, sheetName } = {}) {
       throw error;
     }
 
+    // v3.0.8 BUG3：大文件 SheetJS 全量读会撞 V8 内存上限——抛 RangeError（"Array buffer allocation failed" /
+    //   "Invalid string length" / "Invalid array length"）或 OOM 类错误。旧实现统一吞成"文件为空或不可读"，
+    //   误导用户（文件明明有内容、只是太大）。改为对内存类错误回真实文案，引导拆分后再试。
+    if (isMemoryLimitError(error)) {
+      throw new FileValidationError(
+        'FILE_READ',
+        '文件过大，超出处理能力，请拆分后再试'
+      );
+    }
+
     throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
   }
+}
+
+// 判定是否为内存/容量类错误（大文件全量读触顶）：RangeError（含 Array buffer / string length / array length）
+//   或 message 命中 V8 OOM 关键字。命中 → 回"文件过大"真实文案而非"文件为空或不可读"。
+function isMemoryLimitError(error) {
+  if (!error) return false;
+  if (error instanceof RangeError) return true;
+  const message = String(error.message || '');
+  return /array buffer allocation failed|invalid (string|array) length|out of memory|heap (out of memory|limit)|cannot allocate|allocation failed/i.test(message);
 }
 
 function readRows(filePath, { blankrows = false } = {}) {
@@ -475,6 +494,8 @@ module.exports = {
   extractEnumValuesFromImportedFile,
   extractHeaders,
   findHeaderMatchPosition,
+  // v3.0.8 BUG3：大文件全量读触顶内存类错误判定（导出供单测）
+  isMemoryLimitError,
   listSheetNames,
   loadEnumValues,
   readMeaningfulRowsHead,
