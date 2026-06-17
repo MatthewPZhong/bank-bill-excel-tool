@@ -8,7 +8,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const BANK_STATEMENT_FIELDS = Object.freeze([
   '账户主体', '账户BU', 'BizId', 'BillDate', 'ValueDate', 'Channel', '地区', 'MerchantId',
   'Currency', 'Credit Amount', 'Debit Amount', 'ReconciliationId', 'ChannelOrderNo',
-  'CustomerRef', 'Account Reference', 'Transaction Description', 'Extra Information',
+  'CustomerRef', 'Account Reference', 'Transaction Description', '合并单号', '合并状态', 'Extra Information',
   'Payment Detail', 'Payee Name', 'Payee CardNo', 'Drawee Name', 'Drawee CardNo',
   'By Order Of/Beneficiary', 'Extra Fee', 'tradeChannel', 'FundType', 'Remark-description',
   'Datasource', 'Remark-BU', '回填方式', '关联大账号', '自动分类规则', '分类人',

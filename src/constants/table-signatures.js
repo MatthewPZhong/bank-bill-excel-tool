@@ -33,7 +33,7 @@
 
 const { BANK_STATEMENT_FIELDS } = require('./bank-statement-fields');
 
-// 银行对账单.xlsx — sheet「渠道对账单」，44 列。复用 BANK_STATEMENT_FIELDS（实测与之逐列一致）。
+// 银行对账单.xlsx — sheet「渠道对账单」，46 列。复用 BANK_STATEMENT_FIELDS（实测与之逐列一致）。
 const BANK_STATEMENT_SIGNATURE = Object.freeze({
   tableKey: 'bank-statement',
   label: '银行对账单',
@@ -176,7 +176,7 @@ const FX_OPTION_SIGNATURE = Object.freeze({
   headerRowOffset: 1
 });
 
-// v2.1.16-beta.3 ②：银行对账单入金表 — 模板=银行对账单.xlsx，44 列与 BANK_STATEMENT_SIGNATURE 同构。
+// v2.1.16-beta.3 ②：银行对账单入金表 — 模板=银行对账单.xlsx，46 列与 BANK_STATEMENT_SIGNATURE 同构。
 // ⚠️ tableKey 与主表区分（'bank-deposit'），scope='linked'；
 //    指纹列与主表完全相同（同一份模板）→ 绝不能与主表同进 ALL_TABLE_SIGNATURES（缺省候选 ambiguous）。
 //    仅经 LINKED_IMPORT_SIGNATURES 暴露给链接表「导入」按钮候选集；ALL_TABLE_SIGNATURES 维持原样不含它。
@@ -186,7 +186,7 @@ const BANK_DEPOSIT_SIGNATURE = Object.freeze({
   label: '银行对账单表',
   scope: 'linked',
   expectedHeaders: [...BANK_STATEMENT_FIELDS],
-  // 指纹列与 BANK_STATEMENT_SIGNATURE 完全一致（同一份 44 列模板）。
+  // 指纹列与 BANK_STATEMENT_SIGNATURE 完全一致（同一份 46 列模板）。
   signatureHeaders: ['ReconciliationId', 'Credit Amount', 'Debit Amount', '拆分信息', '关联大账号'],
   dateColumn: 'BillDate',
   minScore: 0.6,
