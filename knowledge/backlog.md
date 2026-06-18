@@ -19,13 +19,14 @@
 - **推荐**：某行真实非空内容超 `colCount` 时 `log()` 一次告警（不静默丢列），或按需调大上界
 - **触发实施**：用户处理超宽表（>1024 列）/ 下次动 toolbox-stream-io.js 时
 
-### B20（P4）工具箱 merge/split 成功路径不清理 mkdtempSync 临时目录（既有行为，非回归）
+### B20（P4）工具箱 **merge** 成功路径不清理 mkdtempSync 临时目录（既有行为，非回归 · split:export 半已于 v3.0.9 修）
 
 - **来源**：2026-06-17 v3.0.8 PR #78 self-review（F3）
-- **影响**：`src/main.js` `toolbox:merge`（~12897）+ `toolbox:split:export` 成功路径 `mkdtempSync` 建临时 xlsx、`copyFileSync` 到用户另存路径后**不 `rmSync` 临时目录**（仅 `toolbox:split:export` 0 命中路径清）。30 万行临时 xlsx 可达数十 MB，累积到 OS 清理 `os.tmpdir()` 为止
-- **现状**：**既有行为非本 PR 回归**——旧 `writeToolboxTempWorkbook`（main.js:12857）同样 `mkdtempSync` 无清理，BUG3 流式化沿用同模式；OS 最终会清 tmpdir
-- **推荐**：成功 / 取消路径加 `finally { rmSync(path.dirname(tempPath), {recursive,force}) }`
-- **触发实施**：下次动工具箱 handler 时一并收
+- **进展**：✅ **`toolbox:split:export` 半已于 v3.0.9 T6 修复**（成功 / 0 命中 / 异常路径统一 `finally { rmSync(tempDir, {recursive,force}) }`）。**剩余 `toolbox:merge` 半未修**（v3.0.9 PRD §2.3 非目标「不改合并表格」，大通道仅接管 split）。
+- **影响（剩余）**：`src/main.js` `toolbox:merge`（~12897）成功路径 `mkdtempSync` 建临时 xlsx、`copyFileSync` 到用户另存路径后**不 `rmSync` 临时目录**。30 万行临时 xlsx 可达数十 MB，累积到 OS 清理 `os.tmpdir()` 为止
+- **现状**：**既有行为非回归**——旧 `writeToolboxTempWorkbook`（main.js:12857）同样 `mkdtempSync` 无清理；OS 最终会清 tmpdir
+- **推荐**：`toolbox:merge` 成功 / 取消路径加 `finally { rmSync(path.dirname(tempPath), {recursive,force}) }`（与 v3.0.9 split:export 对齐）
+- **触发实施**：下次动 `toolbox:merge` handler 时一并收
 
 ### B19（P3）`isMemoryLimitError` 把所有 RangeError 判「文件过大」→ 小型损坏文件可能误报
 

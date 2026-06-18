@@ -1,5 +1,36 @@
 # Changelog
 
+## 3.0.9 - 2026-06-18
+
+> v3.0.9 集中处理 **1 项**核心需求（无并入 spec，team-lead PM→PRD→拆 T1~T7 委托 dev 分批实施 + team-lead 审 diff/release-check/check-vars 兜底）：**工具箱「按字段值拆分」支持 800MB / ~700 万行多 sheet 大文件**。现工具箱「拆分表格」对 800MB / ~700 万行多 sheet xlsx 撞三道硬墙（多 sheet 落回 SheetJS 全量读 OOM / 2³¹ 解压上限 / 去重值累加器无界）直接闪退或读错 sheet。本迭代**新建一条隔离的、worker 化的、内存有界的工具箱大文件拆分通道**，复用 `big-table-import/` 的 yauzl 流式原语（`zip-reader.js` / `row-scanner.js`），**绝不 import/改 `streaming-xlsx-reader.js`**（🔴 隔离资金红线复用文件）、**前端零改动**（回传契约 `valuesByField={field:string[]}` 逐字节一致）、**小文件路径零回归**（路由 fail-closed）。`npm run release-check` 全绿（unit + 35 集成脚本含 700 万行多 sheet 端到端内存恒定断言 + smoke 全模块 PASS）。**无对外契约变更**（前端零改动 + 小文件零回归 + 回传契约一致）。
+>
+> ---
+>
+> ### v3.0.9 · 新增
+>
+> - **工具箱大文件按字段拆分隔离 worker 通道**（🟡 性能/能力 · 新增 `src/backend/toolbox-xlsx-stream/` 5 模块 + `src/main-process/` 2 模块）：
+>   - `multi-sheet-reader.js`（T1）：把多个物理 sheet 当**一张逻辑表**流式读（`streamLogicalTableRows`），复用 `zip-reader.js` 的 `openZipWithEntries` / `locateSheets`（按显示序定位全部 sheet）/ `loadSharedStrings` + `row-scanner.js` 的 `scanSheetRows`（边解压边逐字节扫行、内存恒定），**绕开 `openWorkbook` 的 ≥2 sheet 拒绝**；多 sheet 续页语义（表头 = 第一个非空 sheet 首个有意义行；后续 sheet 首行归一化全等表头 → 跳过、列数 > 表头 → `ToolboxHeaderMismatchError`）。
+>   - `bounded-values-accumulator.js`（T2）：split:read 去重值累加器**每列封顶 `N=1000`**（到顶丢 Set，高基数列内存恒 O(N)）+ 全局 `maxTotalDistinct=200000` 兜底；回传 `{field:string[]}` 与现状逐字节同契约（封顶只减数组长度、不改结构）。
+>   - `split-scan-fields.js` / `split-export-filter.js`（T3）：拆分两步纯逻辑——扫字段（→ `{headers, valuesByField}`）+ 按字段值过滤流式写（peek 表头 O(1) 早退 → `createRowFilter` → `writeRowsStreamed` 命中行流式写、超 104 万行自动分 sheet）。
+>   - `large-split-worker.js` + `toolbox-large-split-dispatch.js`（T4）：worker_threads 隔离执行（照搬 `big-table-import-dispatch.js` 范式，`resourceLimits.maxOldGenerationSizeMb=4096`）+ **sharedStrings 护栏**（解压 >~1.2GB 可解释拒绝 `ToolboxSharedStringsTooLargeError`）+ worker `heapUsed` >~3GB 主动抛 `ToolboxWorkerMemoryLimitError`，把数分钟扫描移出主进程、UI 不卡。
+>   - `toolbox-large-split-router.js`（T5）：`shouldUseLargeChannel` 只用 `xlsx-size-preflight.js collectEntrySizes`（读中央目录、不解压、不读文件体 → 探针自身不 OOM）判定——`.xlsx` 且（worksheet ≥2 或单 worksheet 解压 ≥1.5GB）→ 大通道；**禁用 `readXlsxSheetMetaLite`**（它全读 buffer 对 800MB 自身 OOM）；非 .xlsx / 小文件 / 探针异常 → fail-closed 回普通通道。
+>
+> ### v3.0.9 · 变更
+>
+> - **`main.js` 工具箱两 handler 加大通道路由分叉**（T6 · 唯一改动的既有 src 文件 · `toolbox:split:read` / `toolbox:split:export`）：两 handler 入口加 `await shouldUseLargeChannel(filePath)` 判定，命中走 `dispatchLargeSplit`（worker），否则**走现有小文件分支（一字未改、行为不变）**。export 路径 `mkdtempSync` 临时大文件改 `try/finally` 可靠清理。
+>
+> ### v3.0.9 · 修复
+>
+> - **B20 工具箱拆分成功路径临时目录不清理（split:export 半）**（🟢 既有行为收敛 · 随 T6 顺带修）：`toolbox:split:export` 成功 / 0 命中 / 异常路径统一 `finally { rmSync(tempDir, {recursive,force}) }`，不再累积 `os.tmpdir()` 临时 xlsx。（`toolbox:merge` 半本迭代不碰、仍留 backlog B20。）
+>
+> ### v3.0.9 · 已知限制（前端零改动的代价，详见 `docs/iterations/v3.0.9/PRD.md` §2.4）
+>
+> - **OPEN-1**：高基数列（去重值 >1000）下拉只显示最先出现的约 1000 个值、无截断提示（前端零改动 → 不加手动输入入口）；按字段拆通常用低基数维度（渠道/币种/商户/状态），影响有限。
+> - **OPEN-2**：sharedStrings 悲观解压 >~1.2GB 的极高基数全唯一长文本文件 v1 用「可解释拒绝」兜底（非崩溃），spill-to-disk 留 v2。
+> - **OPEN-3**：进度走后端 activity log、无进度条 / cancel 按钮 UI（前端零改动）。
+>
+> ---
+
 ## 3.0.8 - 2026-06-16
 
 > **v3.0.8 第二轮追加（2026-06-17）**（版本号并入 3.0.8 不 bump，分支 `v3.0.8-userguide-bank-2cols`）：PR #77 合入 main 后第二轮迭代，**5 项**——迭代1 使用手册去技术术语 + 1.4 总览导航 + 1.6.1 银行 46 列兼容说明（需求8，纯文档，567 处替换）；迭代2 银行对账单 44→46 列（需求9，🔴 资金红线，识别 + 字段下拉可选 + BU 回填兼容导入·不落库）；BUG2 场景管理弹窗用户自建 C3 在 v3.0.8 后误消失修复；BUG3 工具箱合并/拆分大文件（30 万行）OOM 闪退 / 误报「文件为空」改流式修复（🔴 顺带修 `streaming-xlsx-reader.js` 读值正则——银行对账单导入复用，升级必读）；工具箱弹窗尺寸微调。`npm run release-check` 全绿（unit **3040/3040** + 34 集成脚本 + smoke 全模块 PASS）+ 用户手动测试 BUG2/BUG3 通过。明细见下方「v3.0.8 第二轮追加」三段（新增 / 变更 / 修复 + 🔴 对外契约变更）。
