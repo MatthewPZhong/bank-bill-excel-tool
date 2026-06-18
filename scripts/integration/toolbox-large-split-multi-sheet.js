@@ -1,0 +1,372 @@
+// 工具箱「按字段值拆分」大文件多 sheet 隔离 worker 通道 —— 端到端集成测试（v3.0.9 需求 1 / T7）
+//
+// 这是【唯一】跨 main ↔ dispatch ↔ worker ↔ backend 接缝的真端到端测试。
+//
+// 为什么必须有这条（feedback_multiagent_seam_gap）：
+//   v3.0.9 大文件拆分通道跨 6 个新模块 + main.js，跨「主进程 ↔ worker_threads」进程边界协作：
+//     main.js 路由 → toolbox-large-split-dispatch（new Worker）→ large-split-worker（薄壳）
+//       → split-scan-fields / split-export-filter（T3 纯逻辑）
+//         → multi-sheet-reader（T1，yauzl 流式多 sheet）+ bounded-values-accumulator（T2，封顶 N）
+//         → writeRowsStreamed（写路径，超 104 万行自动分 sheet）。
+//   逐文件 review / 小数据单测看不见「真多 sheet 大文件跨进程接缝」的内存恒定 + 值正确 + 命中数正确 +
+//   dispatch→worker→backend 链是否真通。本脚本用【运行时程序生成的多 sheet 大 xlsx】端到端验证。
+//
+// 覆盖（两部分）：
+//   A. 直驱 backend 模块（不经 worker，以便在本进程内采样内存）：大规模 + 内存恒定。
+//      - 程序生成跨 ≥3 个物理 sheet 的 .xlsx（writeRowsStreamed 流式写，含低基数列 channel + 高基数列 seq
+//        + 已知命中行数）；scanFields 断言低基数列去重集合精确、高基数列封顶 N=1000；exportFilter 断言
+//        matchedCount = 注入命中数，产物用 multi-sheet-reader readback（避免 SheetJS 全量读大输出再 OOM）；
+//        分两档规模采样 scanFields 期间 RSS 增量，断言「内存增量有界、不随行数线性增长」。
+//      - 规模：分两档 50 万 / 150 万行跨 3 物理 sheet（在 stdout 注明）。700 万级由 PRD §7 P0 手测覆盖。
+//   B. 真 worker 拓扑（dispatch↔worker 接缝，小规模即可）：
+//      - 真 dispatchLargeSplit（内部 new Worker）跑 scanFields → 断言 done→resolve 的 {headers,valuesByField}
+//        正确；再跑 exportFilter → 断言 {matchedCount} 正确、产物可 readback。证明 main.js 走的那条
+//        dispatch→worker→backend 链真通（T6 接的就是这个）。
+//
+// 🔴 约束（rules/integration-test-policy.md）：
+//   - stdout 末尾 `N/N PASS`；全过 exit 0，任一失败 exit 1 + 打印 FAILURES。
+//   - 所有 tmp 文件 mkdtemp 建、跑完 rmSync 删（不留大文件、不进 git）。
+//   - 不 require electron（纯 node 跑）；worker 部分用真 dispatch（它内部 new Worker）。
+//
+// 用法：node scripts/integration/toolbox-large-split-multi-sheet.js
+//      可调规模（默认 50 万 / 150 万）：
+//        TBX_T7_TIER1_ROWS=500000 TBX_T7_TIER2_ROWS=1500000 node scripts/integration/toolbox-large-split-multi-sheet.js
+
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
+
+// ── 被测模块（全部纯 node，绝不 require electron）─────────────────────────────────────────────
+// 写路径（生成多 sheet 大夹具 + 写命中行；超 104 万行自动分物理 sheet）。
+const { writeRowsStreamed } = require('../../src/main-process/toolbox-stream-io');
+// T3 纯逻辑（直驱 backend：在本进程采样内存）。
+const { scanFields } = require('../../src/backend/toolbox-xlsx-stream/split-scan-fields');
+const { exportFilter } = require('../../src/backend/toolbox-xlsx-stream/split-export-filter');
+// T1 多 sheet 流式读（用作 readback：避免 SheetJS 全量读大输出再 OOM）。
+const { streamLogicalTableRows } = require('../../src/backend/toolbox-xlsx-stream/multi-sheet-reader');
+// 路由 + 中央目录探针（验证生成的多 sheet 夹具确实被判为大通道 + 数物理 sheet 数）。
+const { shouldUseLargeChannel } = require('../../src/main-process/toolbox-large-split-router');
+const { collectEntrySizes } = require('../../src/backend/pending-import/xlsx-size-preflight');
+// T4 真 dispatch（B 部分：内部 new Worker，跑真 worker 拓扑）。
+const { dispatchLargeSplit } = require('../../src/main-process/toolbox-large-split-dispatch');
+
+// ── 默认规模（CI 可接受：两档总耗时目标低几十秒）──────────────────────────────────────────────
+//   50 万 / 150 万行跨 3 物理 sheet。700 万级由 PRD §7 P0 手测覆盖（此处只需「足够大到证明流式 + 触发
+//   输出分 sheet + 能采样内存恒定」，不真跑 700 万分钟级）。
+const TIER1_ROWS = Number(process.env.TBX_T7_TIER1_ROWS || 500000);
+const TIER2_ROWS = Number(process.env.TBX_T7_TIER2_ROWS || 1500000);
+
+// 列结构：刻意全用「非 by-name 特殊字段」列名（避开 toolbox-stream-io 的 NUMERIC/DATE/TEXT 格式化分组），
+//   使 writeRowsStreamed 原样写值、normalizeCell readback 与写入值逐字节一致，便于精确断言去重集合 / 命中内容。
+//   rowKey  普通列（行序标识，用于 readback 内容校验）
+//   channel 低基数列（取值 ∈ 固定小集合，作拆分字段）
+//   seq     高基数列（每行唯一，验证有界累加器封顶 N=1000 不爆）
+//   note    填充列
+const HEADERS = ['rowKey', 'channel', 'seq', 'note'];
+const CHANNELS = ['ALIPAY', 'WECHAT', 'UNION', 'PAYPAL', 'STRIPE']; // 5 个低基数取值（去重集合已知）
+const SPLIT_FIELD = 'channel';
+const SPLIT_VALUE = 'ALIPAY'; // 拆分目标值（命中行数 = 注入数，预先算好）
+
+const WORKSHEET_RE = /^xl\/worksheets\/sheet\d+\.xml$/;
+
+// ── 断言 harness（rules/integration-test-policy.md 模板）──────────────────────────────────────
+let passed = 0;
+let failed = 0;
+const failures = [];
+function assertTrue(cond, label) {
+  if (cond) { passed += 1; return; }
+  failed += 1;
+  failures.push({ label });
+}
+function assertEq(actual, expected, label) {
+  if (actual === expected) { passed += 1; return; }
+  failed += 1;
+  failures.push({ label, actual, expected });
+}
+
+function rssBytes() {
+  return process.memoryUsage().rss;
+}
+function mb(bytes) {
+  return Math.round(bytes / 1024 / 1024);
+}
+
+// 生成跨多物理 sheet 的大 .xlsx（writeRowsStreamed 流式写，内存恒定）。
+//   maxRowsPerSheet 给「小于单 sheet 行数」的值 → 自动开物理 sub-sheet (2)(3)... → 产出 ≥3 个
+//   xl/worksheets/sheetN.xml（真多物理 sheet，触发多 sheet 续页 + 大通道路由）。
+//   返回 { hitCount }（channel===SPLIT_VALUE 的行数 = 已知命中数；预先精确计数）。
+async function genMultiSheetXlsx(filePath, rowCount, perSheet) {
+  let hitCount = 0;
+  await writeRowsStreamed({
+    savePath: filePath,
+    normalizedHeaders: HEADERS,
+    sheetBaseName: 'COMMON',
+    maxRowsPerSheet: perSheet, // 强制分物理 sheet（生成端用，非生产路径；生产 exportFilter 不传用默认 104 万）
+    writeDataRows: async (emit) => {
+      for (let i = 0; i < rowCount; i += 1) {
+        const channel = CHANNELS[i % CHANNELS.length];
+        if (channel === SPLIT_VALUE) hitCount += 1;
+        // seq 每行唯一（高基数）；rowKey 行序标识；note 填充。
+        emit([`R${i}`, channel, `S${i}`, 'fill']);
+      }
+    }
+  });
+  return { hitCount };
+}
+
+// 数物理 worksheet 数（中央目录，不解压、不读文件体）。
+async function countWorksheets(filePath) {
+  const sizes = await collectEntrySizes(filePath);
+  return [...sizes.entries()].filter(([n]) => WORKSHEET_RE.test(n)).length;
+}
+
+// 用 T1 multi-sheet-reader 做 readback（流式、内存恒定；不 SheetJS 全量读大输出）。
+//   返回 { headers, dataRowCount, allMatchSplitValue, channelColSeen }
+//     headers            readback 到的表头（应与 HEADERS 一致）
+//     dataRowCount       数据行数（多 sheet 续页：输出分 sheet 的重复表头被 reader 跳过，故 = 命中数）
+//     allMatchSplitValue 所有数据行的 channel 列是否都 = SPLIT_VALUE（命中内容正确）
+//     channelColSeen     readback 行里出现过的 channel 去重值集合（应只含 SPLIT_VALUE）
+async function readbackHits(filePath) {
+  let headers = null;
+  let dataRowCount = 0;
+  let allMatchSplitValue = true;
+  const channelColSeen = new Set();
+  const channelIdx = HEADERS.indexOf(SPLIT_FIELD);
+  await streamLogicalTableRows(filePath, {
+    onHeaderRow: (h) => { headers = h; },
+    onDataRow: (vals) => {
+      dataRowCount += 1;
+      const v = vals[channelIdx] == null ? '' : String(vals[channelIdx]).trim();
+      channelColSeen.add(v);
+      if (v !== SPLIT_VALUE) allMatchSplitValue = false;
+    }
+  });
+  return { headers, dataRowCount, allMatchSplitValue, channelColSeen };
+}
+
+// 采样 scanFields 执行期间的 RSS 增量（隔离「扫描核心」的增量内存——与生成端 ExcelJS 的进程基线无关）。
+//   返回 { beforeMB, peakMB, deltaMB, scanMs, valuesByField }
+//   deltaMB = 扫描期峰值 RSS − 扫描前 RSS：这才是「流式扫描核心」自身的增量内存（应有界、不随行数线性涨）。
+async function scanWithMemorySampling(filePath) {
+  if (global.gc) { try { global.gc(); } catch (_e) { /* swallow */ } }
+  await new Promise((r) => setTimeout(r, 80)); // 让基线稳定
+  const before = rssBytes();
+  let peak = before;
+  const sampler = setInterval(() => {
+    const m = rssBytes();
+    if (m > peak) peak = m;
+  }, 25);
+  if (sampler && typeof sampler.unref === 'function') sampler.unref();
+  const t0 = Date.now();
+  let scan;
+  try {
+    scan = await scanFields(filePath, null);
+  } finally {
+    clearInterval(sampler);
+  }
+  return {
+    beforeMB: mb(before),
+    peakMB: mb(peak),
+    deltaMB: mb(peak - before),
+    scanMs: Date.now() - t0,
+    valuesByField: scan.valuesByField,
+    headers: scan.headers
+  };
+}
+
+async function run() {
+  console.log('==== 工具箱大文件按字段拆分 · 多 sheet 隔离 worker 通道 端到端验证 ====');
+  console.log(`规模：A 部分两档 ${TIER1_ROWS.toLocaleString()} / ${TIER2_ROWS.toLocaleString()} 行（跨 3 物理 sheet）；`
+    + 'B 部分真 worker 小规模。700 万级由 PRD §7 P0 手测覆盖。\n');
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-large-split-t7-'));
+
+  try {
+    // 每档刻意用 perSheet ≈ rows/3 + 余量，确保跨 3 个物理 sheet（既测多 sheet 续页，又不至 sheet 过多拖慢）。
+    const tier1PerSheet = Math.ceil(TIER1_ROWS / 3) + 1;
+    const tier2PerSheet = Math.ceil(TIER2_ROWS / 3) + 1;
+
+    // ============================================================
+    // A. 直驱 backend：大规模 + 内存恒定（不经 worker，本进程采样内存）
+    // ============================================================
+    console.log('── A. 直驱 backend 模块（大规模 + 内存恒定）──────────────────────');
+
+    // ─ A 档 1：生成 + 路由 + scanFields（含内存采样）+ exportFilter + readback ─
+    const fileT1 = path.join(tmpDir, 'tier1.xlsx');
+    console.log(`A1 生成 tier1 多 sheet 夹具（${TIER1_ROWS.toLocaleString()} 行，perSheet=${tier1PerSheet.toLocaleString()}）...`);
+    const { hitCount: hit1 } = await genMultiSheetXlsx(fileT1, TIER1_ROWS, tier1PerSheet);
+    const ws1 = await countWorksheets(fileT1);
+    const size1 = (fs.statSync(fileT1).size / 1024 / 1024).toFixed(1);
+    console.log(`   物理 sheet 数=${ws1}，文件大小=${size1}MB，注入命中数（channel=${SPLIT_VALUE}）=${hit1.toLocaleString()}`);
+
+    assertTrue(ws1 >= 3, `A1 夹具跨 ≥3 个物理 sheet（实际 ${ws1}）`);
+    assertEq(await shouldUseLargeChannel(fileT1), true, 'A1 多 sheet 夹具被路由判为大通道（shouldUseLargeChannel=true）');
+
+    // scanFields（直驱 + 内存采样）。
+    const scan1 = await scanWithMemorySampling(fileT1);
+    console.log(`   scanFields：${scan1.scanMs}ms，RSS 扫描前=${scan1.beforeMB}MB 峰值=${scan1.peakMB}MB 增量=${scan1.deltaMB}MB`);
+    // 表头正确。
+    assertEq(JSON.stringify(scan1.headers), JSON.stringify(HEADERS), 'A1 scanFields 表头 = 注入表头');
+    // 低基数列：去重集合 = 注入的固定小集合（精确，未截断）。
+    assertEq(
+      JSON.stringify((scan1.valuesByField[SPLIT_FIELD] || []).slice().sort()),
+      JSON.stringify(CHANNELS.slice().sort()),
+      `A1 低基数列「${SPLIT_FIELD}」去重集合 = 注入的 ${CHANNELS.length} 个取值（精确、未截断）`
+    );
+    // 高基数列：封顶 N=1000（不爆——50 万唯一值不会全部进内存）。
+    assertEq((scan1.valuesByField.seq || []).length, 1000, 'A1 高基数列「seq」封顶 N=1000（有界累加器不爆）');
+
+    // exportFilter（直驱）：命中数 = 注入命中数；产物 multi-sheet-reader readback 校验。
+    const outT1 = path.join(tmpDir, 'tier1-out.xlsx');
+    const exp1 = await exportFilter({ filePath: fileT1, field: SPLIT_FIELD, values: [SPLIT_VALUE], savePath: outT1 });
+    console.log(`   exportFilter：matchedCount=${exp1.matchedCount.toLocaleString()}`);
+    assertEq(exp1.matchedCount, hit1, `A1 exportFilter matchedCount = 注入命中数（${hit1.toLocaleString()}）`);
+    const rb1 = await readbackHits(outT1);
+    assertEq(JSON.stringify(rb1.headers), JSON.stringify(HEADERS), 'A1 产物 readback 表头 = 注入表头');
+    assertEq(rb1.dataRowCount, hit1, `A1 产物 readback 数据行数 = 命中数（${hit1.toLocaleString()}）`);
+    assertTrue(rb1.allMatchSplitValue, `A1 产物所有行 channel 列均 = ${SPLIT_VALUE}（命中内容正确，仅含命中值行）`);
+    assertEq(
+      JSON.stringify([...rb1.channelColSeen]),
+      JSON.stringify([SPLIT_VALUE]),
+      `A1 产物 channel 列去重值仅含 {${SPLIT_VALUE}}（未混入其它渠道）`
+    );
+
+    // ─ A 档 2：更大规模（150 万行），重点验证内存恒定（扫描增量不随行数线性涨）+ 大输出分 sheet ─
+    const fileT2 = path.join(tmpDir, 'tier2.xlsx');
+    console.log(`A2 生成 tier2 多 sheet 夹具（${TIER2_ROWS.toLocaleString()} 行，perSheet=${tier2PerSheet.toLocaleString()}）...`);
+    const { hitCount: hit2 } = await genMultiSheetXlsx(fileT2, TIER2_ROWS, tier2PerSheet);
+    const ws2 = await countWorksheets(fileT2);
+    const size2 = (fs.statSync(fileT2).size / 1024 / 1024).toFixed(1);
+    console.log(`   物理 sheet 数=${ws2}，文件大小=${size2}MB，注入命中数=${hit2.toLocaleString()}`);
+    assertTrue(ws2 >= 3, `A2 夹具跨 ≥3 个物理 sheet（实际 ${ws2}）`);
+
+    const scan2 = await scanWithMemorySampling(fileT2);
+    console.log(`   scanFields：${scan2.scanMs}ms，RSS 扫描前=${scan2.beforeMB}MB 峰值=${scan2.peakMB}MB 增量=${scan2.deltaMB}MB`);
+    assertEq((scan2.valuesByField.seq || []).length, 1000, 'A2 高基数列「seq」封顶 N=1000（150 万行同样不爆）');
+    assertEq(
+      JSON.stringify((scan2.valuesByField[SPLIT_FIELD] || []).slice().sort()),
+      JSON.stringify(CHANNELS.slice().sort()),
+      `A2 低基数列「${SPLIT_FIELD}」去重集合 = 注入的 ${CHANNELS.length} 个取值`
+    );
+
+    // ── 内存恒定断言（两档对比 + 绝对上限）──────────────────────────────────────────────
+    //   行数从 tier1 涨到 tier2（约 ×${(TIER2_ROWS/TIER1_ROWS).toFixed(1)}）。流式扫描核心的「扫描期 RSS 增量」
+    //   应保持有界、不随行数线性增长（高基数列封顶 N=1000 + sharedStrings 全量但与「值基数」而非「行数」相关）。
+    const rowsRatio = TIER2_ROWS / TIER1_ROWS;
+    // (1) 绝对上限：任一档扫描期 RSS 增量 < 150MB（流式核心；全量 readRows 此规模会撑到 GB 级）。
+    const SCAN_DELTA_CEILING_MB = 150;
+    assertTrue(
+      scan1.deltaMB < SCAN_DELTA_CEILING_MB,
+      `A 内存恒定·绝对上限：tier1 扫描期 RSS 增量 ${scan1.deltaMB}MB < ${SCAN_DELTA_CEILING_MB}MB`
+    );
+    assertTrue(
+      scan2.deltaMB < SCAN_DELTA_CEILING_MB,
+      `A 内存恒定·绝对上限：tier2 扫描期 RSS 增量 ${scan2.deltaMB}MB < ${SCAN_DELTA_CEILING_MB}MB`
+    );
+    // (2) 亚线性：行数涨 ×rowsRatio，扫描期 RSS 增量「远小于」线性增长。
+    //     稳健写法（小增量比值噪声大，不用脆弱的 deltaMB 比值）：断言 tier2 增量 < tier1 增量按行数线性外推的
+    //     一半 + 固定噪声余量；deltaMB 接近 0 时 floor 用 8MB 噪声余量，避免「1MB→2MB」这类纯采样噪声误判。
+    const linearProjectedMB = Math.max(scan1.deltaMB, 1) * rowsRatio; // tier1 增量按行数线性外推到 tier2
+    const SUBLINEAR_SLACK_MB = 8; // GC / 采样噪声余量
+    const sublinearBudgetMB = linearProjectedMB / 2 + SUBLINEAR_SLACK_MB;
+    console.log(`   内存恒定对比：行数 ×${rowsRatio.toFixed(1)}；扫描期增量 tier1=${scan1.deltaMB}MB → tier2=${scan2.deltaMB}MB`
+      + `（线性外推应约 ${Math.round(linearProjectedMB)}MB，亚线性预算 < ${Math.round(sublinearBudgetMB)}MB）`);
+    assertTrue(
+      scan2.deltaMB < sublinearBudgetMB,
+      `A 内存恒定·亚线性：tier2 扫描期增量 ${scan2.deltaMB}MB < 线性外推一半 + 噪声余量（${Math.round(sublinearBudgetMB)}MB）→ 不随行数线性涨`
+    );
+
+    // ── A3：大输出分 sheet（验证命中子集写出时 writeRowsStreamed 自动分物理 sheet + readback 正确）──
+    //   生产路径下命中子集 >104 万行才会分 sheet（700 万级才触发，由手测覆盖）；此处用「全命中 + 小
+    //   maxRowsPerSheet」确定性触发同一条 writeRowsStreamed 分 sheet 写路径（与单测同手法，CI 快）。
+    console.log('A3 输出分 sheet 验证（全命中 + 小 maxRowsPerSheet 确定性触发 writeRowsStreamed 分物理 sheet）...');
+    const fileAllHit = path.join(tmpDir, 'all-hit.xlsx');
+    const ALL_HIT_ROWS = 2500;
+    const OUT_PER_SHEET = 1000; // 2500/1000 → 输出应 ≥3 物理 sheet
+    await writeRowsStreamed({
+      savePath: fileAllHit,
+      normalizedHeaders: HEADERS,
+      sheetBaseName: 'COMMON',
+      maxRowsPerSheet: OUT_PER_SHEET,
+      writeDataRows: async (emit) => {
+        for (let i = 0; i < ALL_HIT_ROWS; i += 1) emit([`R${i}`, SPLIT_VALUE, `S${i}`, 'fill']);
+      }
+    });
+    const outAllHit = path.join(tmpDir, 'all-hit-out.xlsx');
+    const expAll = await exportFilter({
+      filePath: fileAllHit, field: SPLIT_FIELD, values: [SPLIT_VALUE],
+      savePath: outAllHit, maxRowsPerSheet: OUT_PER_SHEET
+    });
+    assertEq(expAll.matchedCount, ALL_HIT_ROWS, `A3 全命中 matchedCount = ${ALL_HIT_ROWS}`);
+    const outWs = await countWorksheets(outAllHit);
+    console.log(`   输出物理 sheet 数=${outWs}（${ALL_HIT_ROWS}/${OUT_PER_SHEET} → 期望 ≥3）`);
+    assertTrue(outWs >= 3, `A3 命中子集超单 sheet 阈值时输出分了物理 sheet（实际 ${outWs} 个）`);
+    const rbAll = await readbackHits(outAllHit);
+    assertEq(rbAll.dataRowCount, ALL_HIT_ROWS, `A3 分 sheet 输出 readback 数据行数 = ${ALL_HIT_ROWS}（重复表头被 reader 跳过，跨 sheet 计数正确）`);
+    assertTrue(rbAll.allMatchSplitValue, 'A3 分 sheet 输出所有行内容正确');
+
+    // ============================================================
+    // B. 真 worker 拓扑（dispatch ↔ worker 接缝；小规模即可）
+    // ============================================================
+    console.log('\n── B. 真 worker 拓扑（真 dispatchLargeSplit → new Worker → backend）──────');
+    const fileWorker = path.join(tmpDir, 'worker-src.xlsx');
+    const WORKER_ROWS = 6000; // 小规模：足以跨 3 物理 sheet + seq 超 N=1000 验证封顶
+    const workerPerSheet = 2100; // 6000/2100 → 3 物理 sheet
+    const { hitCount: hitW } = await genMultiSheetXlsx(fileWorker, WORKER_ROWS, workerPerSheet);
+    const wsW = await countWorksheets(fileWorker);
+    console.log(`B 生成 worker 夹具（${WORKER_ROWS} 行，物理 sheet 数=${wsW}，注入命中数=${hitW}）...`);
+    assertTrue(wsW >= 3, `B worker 夹具跨 ≥3 物理 sheet（实际 ${wsW}）`);
+
+    // B1：真 worker 跑 scanFields → done resolve 的 {headers, valuesByField} 正确。
+    console.log('B1 真 worker scanFields（new Worker → done→resolve）...');
+    const dScan = dispatchLargeSplit({ op: 'scanFields', filePath: fileWorker });
+    const wScan = await dScan.promise;
+    assertTrue(wScan && typeof wScan === 'object', 'B1 worker scanFields 返回对象');
+    assertEq(JSON.stringify(wScan.headers), JSON.stringify(HEADERS), 'B1 worker scanFields headers 正确（跨进程回传无损）');
+    assertEq(
+      JSON.stringify((wScan.valuesByField[SPLIT_FIELD] || []).slice().sort()),
+      JSON.stringify(CHANNELS.slice().sort()),
+      `B1 worker scanFields 低基数列「${SPLIT_FIELD}」去重集合正确`
+    );
+    assertEq((wScan.valuesByField.seq || []).length, 1000, 'B1 worker scanFields 高基数列封顶 N=1000（跨进程同契约）');
+    // 🚩 前端零改动契约锁：valuesByField 只含 {field:string[]}，不含 truncated / distinctSeen 元数据。
+    const hasTruncatedMeta = Object.values(wScan.valuesByField).some(
+      (v) => !Array.isArray(v)
+    ) || ('truncated' in wScan.valuesByField) || ('distinctSeen' in wScan.valuesByField);
+    assertTrue(!hasTruncatedMeta, 'B1 worker 回传 valuesByField 仅 {field:string[]}，不含 truncated/distinctSeen 元数据（🚩 前端零改动契约锁）');
+
+    // B2：真 worker 跑 exportFilter → done resolve 的 {matchedCount} 正确 + 产物可 readback。
+    console.log('B2 真 worker exportFilter（new Worker → done→resolve + 产物 readback）...');
+    const outWorker = path.join(tmpDir, 'worker-out.xlsx');
+    const dExp = dispatchLargeSplit({
+      op: 'exportFilter', filePath: fileWorker, field: SPLIT_FIELD, values: [SPLIT_VALUE], savePath: outWorker
+    });
+    const wExp = await dExp.promise;
+    assertEq(wExp.matchedCount, hitW, `B2 worker exportFilter matchedCount = 注入命中数（${hitW}）`);
+    assertTrue(fs.existsSync(outWorker), 'B2 worker exportFilter 产物文件已写出');
+    const rbW = await readbackHits(outWorker);
+    assertEq(rbW.dataRowCount, hitW, `B2 worker 产物 readback 数据行数 = 命中数（${hitW}）`);
+    assertTrue(rbW.allMatchSplitValue, `B2 worker 产物所有行 channel 列均 = ${SPLIT_VALUE}（dispatch→worker→backend 链端到端正确）`);
+    assertEq(JSON.stringify(rbW.headers), JSON.stringify(HEADERS), 'B2 worker 产物 readback 表头正确');
+
+    // ── 汇总 ───────────────────────────────────────────────────────────────────────────────
+    const total = passed + failed;
+    console.log(`\n==== ${passed}/${total} PASS ====`);
+    if (failed > 0) {
+      console.error('\nFAILURES:');
+      failures.forEach((f) => {
+        console.error(`  - ${f.label}`);
+        if ('actual' in f) {
+          console.error(`      actual:   ${JSON.stringify(f.actual)}`);
+          console.error(`      expected: ${JSON.stringify(f.expected)}`);
+        }
+      });
+      process.exit(1);
+    }
+  } finally {
+    // 🔴 跑完删 tmp（不留大文件、不进 git）。
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { /* swallow */ }
+  }
+}
+
+run().catch((e) => { console.error('FATAL', e && e.stack ? e.stack : e); process.exit(1); });
