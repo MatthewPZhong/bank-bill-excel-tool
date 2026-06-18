@@ -22,6 +22,7 @@
 > ### v3.0.9 · 修复
 >
 > - **B20 工具箱拆分成功路径临时目录不清理（split:export 半）**（🟢 既有行为收敛 · 随 T6 顺带修）：`toolbox:split:export` 成功 / 0 命中 / 异常路径统一 `finally { rmSync(tempDir, {recursive,force}) }`，不再累积 `os.tmpdir()` 临时 xlsx。（`toolbox:merge` 半本迭代不碰、仍留 backlog B20。）
+> - **PR #79 codex review + team-lead self-review 修复（标准：无 P4 以上 finding）**（🟡 健壮性/性能 · `toolbox-large-split-router.js` / `split-export-filter.js` / `main.js`，各带单测）：① **[P2]** 单 sheet 但 `sharedStrings.xml` 解压 ≥1.2GB 的高基数长文本文件原落普通通道（`streaming-xlsx-reader` JSZip 全量载 SST → OOM、且永不到达 worker SST 护栏）→ `shouldUseLargeChannel` 判据纳入 SST 尺寸（阈值对齐 worker `SHARED_STRINGS_UNCOMPRESSED_LIMIT`），超阈值走大通道由护栏「文件文本量过大」可解释拒绝；② **[P2]** `peekNormalizedHeaders` 仅靠 `__stopParsing` 只停当前 sheet，多 sheet 下后续 sheet 仍被全量扫（peek 退化近全量、近翻倍 I/O）→ 拿到表头即置内部停扫令牌、主循环 sheet 边界 break，恢复真 O(1)；③ **[P3]** 大通道 `split:read` 遇空文件（`scanFields` 回 `headers=null`）误报 `success` → 渲染层开无列可选的无用弹框 → 改与小文件路径逐字节对齐回 `failed`「文件为空或不可读，请重新导入」。
 >
 > ### v3.0.9 · 已知限制（前端零改动的代价，详见 `docs/iterations/v3.0.9/PRD.md` §2.4）
 >

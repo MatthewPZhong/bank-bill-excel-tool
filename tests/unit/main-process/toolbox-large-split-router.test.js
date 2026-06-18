@@ -123,6 +123,36 @@ test('单 worksheet 解压 < 1.5GB（阈值 -1）→ false', async () => {
   }
 });
 
+// ---- codex P2：单 sheet 但 sharedStrings 超阈值也走大通道 ----
+
+test('常量自检：sharedStrings 阈值 = 1.2GB（1288490188）', () => {
+  assert.equal(router.SHARED_STRINGS_LARGE_BYTES, 1288490188);
+});
+
+test('单 sheet 小 worksheet 但 sharedStrings ≥1.2GB → true（codex P2：高基数长文本 SST 也走大通道，避免小路径 JSZip 全量载 SST OOM）', async () => {
+  const restore = stubSizes(new Map([
+    [SS, router.SHARED_STRINGS_LARGE_BYTES],          // SST 恰达阈值（≥）
+    ['xl/worksheets/sheet1.xml', 50000]               // worksheet 远小于 1.5GB
+  ]));
+  try {
+    assert.equal(await shouldUseLargeChannel('/tmp/bigsst.xlsx'), true);
+  } finally {
+    restore();
+  }
+});
+
+test('单 sheet sharedStrings 略低于 1.2GB（阈值 -1）→ false（🔴 小文件零回归）', async () => {
+  const restore = stubSizes(new Map([
+    [SS, router.SHARED_STRINGS_LARGE_BYTES - 1],
+    ['xl/worksheets/sheet1.xml', 50000]
+  ]));
+  try {
+    assert.equal(await shouldUseLargeChannel('/tmp/justundersst.xlsx'), false);
+  } finally {
+    restore();
+  }
+});
+
 test('.csv → false（fail-closed，不调 collectEntrySizes）', async () => {
   let called = false;
   sizePreflight.collectEntrySizes = async () => { called = true; return new Map(); };

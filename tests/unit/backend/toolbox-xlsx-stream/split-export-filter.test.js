@@ -24,6 +24,7 @@ const yazl = require('yazl');
 
 const {
   exportFilter,
+  peekNormalizedHeaders,
   ToolboxSplitFieldNotFoundError
 } = require('../../../../src/backend/toolbox-xlsx-stream/split-export-filter');
 const { streamLogicalTableRows } = require('../../../../src/backend/toolbox-xlsx-stream/multi-sheet-reader');
@@ -241,5 +242,32 @@ test.describe('toolbox-xlsx-stream split-export-filter exportFilter', () => {
     const back = await readback(save);
     assert.equal(back.sheetCount, 1, '生产路径默认硬上限 → 单 sheet');
     assert.deepEqual(back.dataRows, [['支付宝', '1'], ['支付宝', '2']]);
+  });
+
+  test('peek 表头多 sheet 提前停（codex P2）：S2 列冲突也不被扫到 → peek 不抛错、返回 S1 表头', async () => {
+    // S2 首行 4 列 > 表头 2 列：若 peek 误扫 S2 会抛 ToolboxHeaderMismatchError。修复后 peek 拿到 S1 表头即停 →
+    //   不抛、返回 [渠道,金额]（证明 peek 真 O(1)，不退化为扫全部 sheet；否则 700 万行多 sheet 文件近翻倍 I/O）。
+    const fp = await writeMultiSheetXlsx({
+      sheets: [
+        { name: 'S1', target: 'worksheets/sheet1.xml', body: rowsToSheetBody([['渠道', '金额'], ['支付宝', '10']]) },
+        { name: 'S2', target: 'worksheets/sheet2.xml', body: rowsToSheetBody([['w', 'x', 'y', 'z']]) }
+      ]
+    });
+    const headers = await peekNormalizedHeaders(fp);
+    assert.deepEqual(headers, ['渠道', '金额'], 'peek 返回 S1 表头，未因扫 S2 报列冲突（提前停生效）');
+  });
+
+  test('空文件（无有意义行）→ exportFilter 抛 ToolboxStreamEmptyError（上层归一 failed）', async () => {
+    const fp = await writeMultiSheetXlsx({
+      sheets: [{ name: 'S1', target: 'worksheets/sheet1.xml', body: rowsToSheetBody([{ selfClose: true }]) }]
+    });
+    const save = outPath();
+    let err = null;
+    try {
+      await exportFilter({ filePath: fp, field: '渠道', values: ['x'], savePath: save });
+    } catch (e) { err = e; }
+    assert.ok(err, '空文件应抛错');
+    assert.equal(err.name, 'ToolboxStreamEmptyError', 'name=ToolboxStreamEmptyError');
+    assert.match(err.message, /文件为空/, 'message 含「文件为空」');
   });
 });

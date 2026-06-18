@@ -43,16 +43,27 @@ class ToolboxSplitFieldNotFoundError extends Error {
 //   读后续 sheet。整个过程只解析到首个有意义行（首个非空 sheet 的表头行），不扫数据行。
 async function peekNormalizedHeaders(filePath, cancelToken) {
   let headers = null;
+  // codex P2：仅靠 __stopParsing 只停「当前 sheet」的 stream——多 sheet 下 streamLogicalTableRows 主循环会
+  //   继续读后续 sheet（peek 退化为近全量扫，对 700 万行多 sheet 文件几乎翻倍 I/O）。故拿到表头时同时置一个
+  //   内部停扫令牌，使主循环在当前 sheet 结束后 break、不再读后续 sheet（真正 O(1)：只扫第一个非空 sheet 到首个有意义行）。
+  const peekStopToken = { cancelled: false };
+  // 与调用方 cancelToken 兼容：peek 阶段调用方若已取消也应停（O(1) 内一般无关，纯防御）。
+  const effectiveToken = {
+    get cancelled() {
+      return peekStopToken.cancelled || !!(cancelToken && cancelToken.cancelled);
+    }
+  };
   await streamLogicalTableRows(filePath, {
     onHeaderRow: (h) => {
       headers = h;
-      // 拿到表头即早退（O(1)）：抛 __stopParsing → scanSheetRows stop + resolve（不 reject）。
+      peekStopToken.cancelled = true; // 停后续 sheet（主循环 sheet 边界检查 effectiveToken.cancelled → break）
+      // 抛 __stopParsing 停「当前 sheet」的 stream（O(1) 早退）：scanSheetRows 捕获 → stop + resolve（不 reject）。
       const stop = new Error('__toolbox_split_peek_header_done__');
       stop.__stopParsing = true;
       throw stop;
     },
-    onDataRow: () => { /* peek 阶段不消费数据行（理论上早退后不会到达） */ },
-    cancelToken: cancelToken || null
+    onDataRow: () => { /* peek 阶段不消费数据行（早退后不会到达） */ },
+    cancelToken: effectiveToken
   });
   return headers;
 }

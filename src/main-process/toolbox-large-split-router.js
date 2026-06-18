@@ -27,6 +27,13 @@ const sizePreflight = require('../backend/pending-import/xlsx-size-preflight');
 //   1.5GB = 1610612736 字节。具名常量便于实施期按真实数据微调（TechDoc OPEN-T4）。
 const SINGLE_WORKSHEET_LARGE_BYTES = 1610612736; // 1.5 GB
 
+// 单 sheet 文件的 sharedStrings.xml 解压尺寸 ≥ 该阈值 → 也判为大文件（codex P2 修复）。
+//   阈值对齐 large-split-worker 的 SHARED_STRINGS_UNCOMPRESSED_LIMIT（1.2GB），理由见 shouldUseLargeChannel 内注释。
+const SHARED_STRINGS_LARGE_BYTES = 1288490188; // ~1.2 GB（= worker SST 护栏阈值）
+
+// sharedStrings entry 名（与 collectEntrySizes / large-split-worker 口径一致）。
+const SHARED_STRINGS_ENTRY = 'xl/sharedStrings.xml';
+
 // worksheet entry 名匹配（与 collectEntrySizes 内部口径一致：xl/worksheets/sheetN.xml）。
 const WORKSHEET_ENTRY_RE = /^xl\/worksheets\/sheet\d+\.xml$/;
 
@@ -63,9 +70,20 @@ async function shouldUseLargeChannel(filePath) {
   // 多 sheet（≥2 worksheet）→ 大通道（现有普通通道对多 sheet 会 SheetJS 全量读 → 大文件 OOM）。
   if (worksheets.length >= 2) return true;
 
-  // 单 worksheet：解压尺寸 ≥1.5GB → 大通道；否则（含尺寸非数字 / 0 个 worksheet）fail-closed。
+  // 单 worksheet：解压尺寸 ≥1.5GB → 大通道；否则（含尺寸非数字 / 0 个 worksheet）继续判 sharedStrings。
   const onlySize = worksheets.length === 1 ? worksheets[0][1] : 0;
   if (typeof onlySize === 'number' && Number.isFinite(onlySize) && onlySize >= SINGLE_WORKSHEET_LARGE_BYTES) {
+    return true;
+  }
+
+  // 单 sheet 但 sharedStrings 解压尺寸超阈值（高基数长文本）→ 也走大通道（codex P2 修复）。
+  //   否则该文件落普通通道：单 sheet .xlsx 走 streaming-xlsx-reader（JSZip 全量载 sharedStrings.xml）→
+  //   GB 级 SST 直接 OOM / 撞 JSZip 2³¹ 崩（B9 类），且【永不到达】worker 的 SST 护栏（可解释拒绝）。
+  //   阈值对齐 worker 的 SHARED_STRINGS_UNCOMPRESSED_LIMIT（1.2GB）：SST ≥ 此值 → 路由到 worker，
+  //   由其护栏「文件文本量过大」可解释拒绝（OPEN-2 文档化的 v1 行为），而非进程静默消失。
+  const sharedStringsSize = sizes.get(SHARED_STRINGS_ENTRY);
+  if (typeof sharedStringsSize === 'number' && Number.isFinite(sharedStringsSize)
+    && sharedStringsSize >= SHARED_STRINGS_LARGE_BYTES) {
     return true;
   }
 
@@ -77,6 +95,8 @@ module.exports = {
   shouldUseLargeChannel,
   // 具名常量 / 正则导出供单测断言与实施期微调。
   SINGLE_WORKSHEET_LARGE_BYTES,
+  SHARED_STRINGS_LARGE_BYTES,
+  SHARED_STRINGS_ENTRY,
   WORKSHEET_ENTRY_RE,
   XLSX_EXT_RE
 };

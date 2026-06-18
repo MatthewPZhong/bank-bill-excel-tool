@@ -12966,6 +12966,12 @@ function registerToolboxHandlers() {
       //   回传契约与现有分支逐字节一致：{status,sourceFilePath,headers,valuesByField}（valuesByField={field:string[]}，无截断元数据）。
       if (await shouldUseLargeChannel(sourceFilePath)) {
         const { headers, valuesByField } = await dispatchLargeSplit({ op: 'scanFields', filePath: sourceFilePath }).promise;
+        // codex P3 / SR-1：空文件（无有意义行）scanFields 回 headers=null；与小文件流式路径
+        //   （readHeaderRowStreamed 抛 ToolboxStreamEmptyError → toolboxFailureResult）逐字节对齐为 failed，
+        //   不把 null 表头当 success 回前端（否则渲染层强转空表头、开一个无列可选的无用弹框）。
+        if (!headers || headers.length === 0) {
+          return { status: 'failed', message: '文件为空或不可读，请重新导入', detailLines: [] };
+        }
         return { status: 'success', sourceFilePath, headers, valuesByField };
       }
 

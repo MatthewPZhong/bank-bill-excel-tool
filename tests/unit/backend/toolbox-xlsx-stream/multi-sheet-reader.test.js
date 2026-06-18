@@ -400,6 +400,33 @@ test.describe('toolbox-xlsx-stream multi-sheet-reader', () => {
     assert.ok(dataRows.length >= 2 && dataRows.length < 8, `中途停（读了 ${dataRows.length} 行，未读完全部 7 行）`);
   });
 
+  test('cancelToken 在 onHeaderRow 内置位 → 当前 sheet 立即停 + 后续 sheet 不读（peek 提前停机制，codex P2）', async () => {
+    // peekNormalizedHeaders 的底层机制：拿到表头即置 cancelToken → 主循环 sheet 边界 break，不读后续 sheet。
+    //   夹具：S2 首行列数「多于」表头（若被扫到会抛 ToolboxHeaderMismatchError）。置位后 S2 绝不应被读 →
+    //   不抛错、0 数据行（证明 peek 真 O(1)，不退化为近全量扫）。
+    const fp = await writeMultiSheetXlsxAdvanced({
+      sheets: [
+        { name: 'S1', target: 'worksheets/sheet1.xml', body: rowsToSheetBody([['A', 'B'], ['1', '2'], ['3', '4']]) },
+        // S2 首行 4 列 > 表头 2 列：若 peek 误扫 S2 会抛 ToolboxHeaderMismatchError（用作「是否误扫」的探针）
+        { name: 'S2', target: 'worksheets/sheet2.xml', body: rowsToSheetBody([['w', 'x', 'y', 'z']]) }
+      ]
+    });
+    const cancelToken = { cancelled: false };
+    const dataRows = [];
+    let err = null;
+    let summary = null;
+    try {
+      summary = await streamLogicalTableRows(fp, {
+        onHeaderRow: () => { cancelToken.cancelled = true; },   // 拿到表头即置位（模拟 peek）
+        onDataRow: (v) => dataRows.push(v),
+        cancelToken
+      });
+    } catch (e) { err = e; }
+    assert.equal(err, null, '置位后不读后续行 / sheet → 不触发 S2 列冲突报错（证明 S2 未被扫）');
+    assert.equal(dataRows.length, 0, '表头后立即停：S1 数据行 + 整个 S2 都未读（0 数据行）');
+    assert.ok(summary && summary.cancelled, 'summary.cancelled=true');
+  });
+
   test('返回 summary：sheetCount / dataRowCount / headerFound 正确', async () => {
     const fp = await writeMultiSheetXlsxAdvanced({
       sheets: [

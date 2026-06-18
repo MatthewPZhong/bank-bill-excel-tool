@@ -491,6 +491,15 @@ async function shouldUseLargeChannel(filePath) {
 - OPEN-T2/T3 落地：exportFilter 采方案 (a) peek 表头 O(1) 早退（不改 `writeRowsStreamed` 签名）；`writeRowsStreamed` require 链（exceljs + file-service）确认 electron-free、worker 内 require 安全（streaming-xlsx-reader 传递性加载但本通道从不调用，纯加载无害）。
 - 质量门：`npm run release-check` 全绿（unit + 35 集成脚本含 T7 700 万行多 sheet 端到端 + 内存恒定断言 + smoke 全模块 PASS）；`/check-vars` 仅命中 `normalizeCell`（只读复用自 `file-service/common`、同语义）、无 Critical/Runtime-state/Risk-sensitive 命中。
 
+### 2026-06-18（codex review + team-lead self-review 修复，PR #79）
+
+- 提 PR #79（v3.0.9 → main）后按「无 P4 以上 finding」标准做 codex review（`codex exec review --base main`）+ team-lead self-review。codex 报 3 个 finding（P2/P2/P3）+ self-review SR-1（与 codex P3 独立撞车），全部修复 + 补单测，复跑 release-check exit 0（unit 3137 + 35 集成 + smoke）：
+  - **[P2]** `toolbox-large-split-router.js`：单 sheet 但 sharedStrings 解压 ≥1.2GB（高基数长文本）原落普通通道 → `streaming-xlsx-reader` JSZip 全量载 SST → OOM 且【永不到达】worker SST 护栏；`shouldUseLargeChannel` 判据纳入 `xl/sharedStrings.xml` 尺寸（`SHARED_STRINGS_LARGE_BYTES` 对齐 worker `SHARED_STRINGS_UNCOMPRESSED_LIMIT` 1.2GB），超阈值走大通道可解释拒绝。+2 测。
+  - **[P2]** `split-export-filter.js peekNormalizedHeaders`：`__stopParsing` 仅停当前 sheet 的 stream，多 sheet 下 `streamLogicalTableRows` 主循环仍读后续 sheet（peek 退化为近全量扫、对 700 万行多 sheet ~翻倍 I/O）；拿表头即置内部停扫令牌（与调用方 cancelToken 兼容）使主循环 sheet 边界 break，恢复真 O(1)。+2 测（reader 级 cancel-in-header 用 S2 列冲突作误扫探针 + peek 多 sheet 不误扫）。
+  - **[P3]/SR-1** `main.js toolbox:split:read` 大通道：空文件 `scanFields` 回 `headers=null` 却报 `success` → 渲染层强转空表头、开无列可选弹框；改与小文件路径（`readHeaderRowStreamed` 抛 `ToolboxStreamEmptyError` → `toolboxFailureResult`）逐字节对齐回 `failed`「文件为空或不可读，请重新导入」。空→null 后端行为已由 `split-scan-fields.test:187` 覆盖。
+- self-review 另记 2 个 P4（不阻塞、本 PR 不修）：① 小的「多 sheet」文件现也路由进大通道（按设计 = 修 v3.0.8 §12.7 F1 旧「只读 sheet1」缺陷，故"小文件零回归"精确为"**单 sheet** 小文件零回归"；异构多 tab 文件转多 sheet 续页语义）；② 字段缺失文案大通道（「字段「X」不在表头中…」）与小文件（「源文件中找不到字段「X」」）略不一致（字段恒来自下拉、极边缘）。
+- backlog 三角分诊：仅 **B20**（split:export 半）在本 PR 范围内已修；其余 P3+ 均与本通道正交——资金红线需独立 review（B17/B18/B14/B5/B8/B11）/ 大改有独立 spec（B9/B7/B10/B6）/ 前端项违反零改动（B12）/ 测试基建（B19/B13/B4/B3/B2/B1），不折叠进本 PR（rule 5 小批次 + 隔离纪律）。
+
 ### 可沉淀知识
 
 - [ ] 「隔离新通道复用旧原语」范式：复用底层 zip/scan 原语 + worker 模板，绕开 schema 强耦合的整引擎 + 绕开资金红线读取器（streaming-xlsx-reader）——可沉淀为「在不碰资金红线复用文件前提下新建隔离大文件通道」的标准做法。
