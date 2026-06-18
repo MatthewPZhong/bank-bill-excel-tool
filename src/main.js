@@ -211,6 +211,11 @@ const {
   writeRowsStreamed: toolboxWriteRowsStreamed,
   ToolboxStreamEmptyError
 } = require('./main-process/toolbox-stream-io');
+// v3.0.9 T6：工具箱「按字段值拆分」大文件隔离 worker 通道——路由判定 + 主侧 dispatch。
+//   两个 toolbox:split handler（read/export）在现有小文件分支「之前」加 if (await shouldUseLargeChannel(...)) {大通道}，
+//   现有小文件分支原样不动（🔴 小文件零回归）。回传契约逐字节一致（前端零改动）。
+const { shouldUseLargeChannel } = require('./main-process/toolbox-large-split-router');
+const { dispatchLargeSplit } = require('./main-process/toolbox-large-split-dispatch');
 // v2.1.9 N5 T26（spec §5.4 🔴 对外契约破坏性变更）：场景命中行独立报表 writer
 //   v2.1.8 主输出 Sheet 3 撤除 → 改独立报表 命中场景行-{basename}-{ts}.xlsx
 //   v3.0.4 F2：落位由 error-reports/{date}/ 改为 bank-statement-process/{date}/（与错误报告目录互换）
@@ -12956,6 +12961,20 @@ function registerToolboxHandlers() {
       }
       const sourceFilePath = choice.filePaths[0];
 
+      // v3.0.9 T6：大文件（多 sheet / 单 worksheet 解压 ≥1.5GB 的 .xlsx）走隔离 worker 通道，
+      //   绕开现有小文件路径对多 sheet 的 SheetJS 全量读 OOM。fail-closed：路由 false 时落下方现有小文件分支（原样不动）。
+      //   回传契约与现有分支逐字节一致：{status,sourceFilePath,headers,valuesByField}（valuesByField={field:string[]}，无截断元数据）。
+      if (await shouldUseLargeChannel(sourceFilePath)) {
+        const { headers, valuesByField } = await dispatchLargeSplit({ op: 'scanFields', filePath: sourceFilePath }).promise;
+        // codex P3 / SR-1：空文件（无有意义行）scanFields 回 headers=null；与小文件流式路径
+        //   （readHeaderRowStreamed 抛 ToolboxStreamEmptyError → toolboxFailureResult）逐字节对齐为 failed，
+        //   不把 null 表头当 success 回前端（否则渲染层强转空表头、开一个无列可选的无用弹框）。
+        if (!headers || headers.length === 0) {
+          return { status: 'failed', message: '文件为空或不可读，请重新导入', detailLines: [] };
+        }
+        return { status: 'success', sourceFilePath, headers, valuesByField };
+      }
+
       let headers;
       let valuesByField;
       if (toolboxIsStreamableXlsx(sourceFilePath)) {
@@ -12989,6 +13008,52 @@ function registerToolboxHandlers() {
       }
       if (!Array.isArray(values) || values.length === 0) {
         return { status: 'failed', message: '请至少选择一个值', detailLines: [] };
+      }
+
+      // v3.0.9 T6：大文件（多 sheet / 单 worksheet 解压 ≥1.5GB 的 .xlsx）走隔离 worker 通道流式过滤写临时 xlsx，再另存为。
+      //   fail-closed：路由 false 时落下方现有小文件分支（原样不动）。回传契约与现有分支逐字节一致：
+      //   {status:'success',filePath} / {status:'cancelled'} / 0 命中沿用现文案 failed。
+      //   🔴 修 B20：try/finally 可靠清 mkdtemp 临时目录（含 dispatch reject / worker crash；外层 catch→toolboxFailureResult 兜异常）。
+      if (await shouldUseLargeChannel(sourceFilePath)) {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-large-'));
+        const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
+        try {
+          const { matchedCount } = await dispatchLargeSplit({
+            op: 'exportFilter',
+            filePath: sourceFilePath,
+            field,
+            values,
+            savePath: tempPath
+          }).promise;
+          if (matchedCount === 0) {
+            // 0 命中：不弹保存框、不产用户文件（保留现文案，与小文件分支逐字节一致）。临时目录由 finally 清理。
+            return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
+          }
+          const saveResult = await dialog.showSaveDialog(mainWindow, {
+            defaultPath: toolboxBuildSplitFileName(values, sanitizeFileName),
+            filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+          });
+          if (saveResult.canceled || !saveResult.filePath) {
+            return { status: 'cancelled' };
+          }
+          fs.copyFileSync(tempPath, saveResult.filePath);
+          appendActivityLogEntry({
+            level: 'info',
+            source: 'main',
+            domain: 'toolbox',
+            message: '工具箱拆分表格成功',
+            details: [
+              `拆分字段：${field}`,
+              `选中值数：${values.length}`,
+              `命中行数：${matchedCount}`,
+              `导出路径：${saveResult.filePath}`
+            ]
+          });
+          return { status: 'success', filePath: saveResult.filePath };
+        } finally {
+          // 🔴 修 B20：可靠清临时目录（800MB 级临时大文件；含 worker crash / dispatch reject 路径）。
+          try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_e) { /* swallow */ }
+        }
       }
 
       let tempPath;

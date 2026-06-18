@@ -9,6 +9,26 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.0.9（2026-06-18）
+
+v3.0.9 集中 **1 项**核心需求（无并入 spec）：**工具箱「按字段值拆分」支持 800MB / ~700 万行多 sheet 大文件**。新建一条隔离的、worker 化的、内存有界的工具箱大文件拆分通道，复用 `big-table-import/` yauzl 流式原语（`zip-reader.js` / `row-scanner.js`），🔴 绝不碰 `streaming-xlsx-reader.js`（隔离资金红线复用文件）、🚩 前端零改动（回传契约 `valuesByField={field:string[]}` 逐字节一致）、小文件路径零回归（路由 fail-closed）。
+
+**新增**
+
+- 工具箱大文件按字段拆分隔离 worker 通道（`src/backend/toolbox-xlsx-stream/` 5 模块 + `src/main-process/` 2 模块）：① `multi-sheet-reader.js`（T1）多 sheet 当一张逻辑表流式读（复用 `openZipWithEntries`/`locateSheets`/`loadSharedStrings`/`scanSheetRows`，绕 `openWorkbook` 多 sheet 拒绝，续页语义 = 重复表头跳过 / 列数超表头报错）；② `bounded-values-accumulator.js`（T2）每列封顶 N=1000 有界去重 + 全局 maxTotalDistinct=200000，回传 `string[]` 同契约；③ `split-scan-fields.js`/`split-export-filter.js`（T3）扫字段 + 按值过滤流式写（peek 表头 O(1) 早退 + `writeRowsStreamed` 超 104 万行自动分 sheet）；④ `large-split-worker.js`+`toolbox-large-split-dispatch.js`（T4）worker_threads 隔离（`maxOldGenerationSizeMb=4096`）+ sharedStrings 护栏（>~1.2GB 可解释拒绝）+ heapUsed>~3GB 主动拒；⑤ `toolbox-large-split-router.js`（T5）`shouldUseLargeChannel` 只用 `collectEntrySizes` 判定（不解压、禁用全读 buffer 的 `readXlsxSheetMetaLite`），多 sheet 或单 worksheet ≥1.5GB → 大通道，否则 fail-closed。
+
+**变更**
+
+- `main.js` 工具箱两 handler（`toolbox:split:read`/`toolbox:split:export`）加大通道路由分叉（T6，唯一改动的既有 src 文件）：命中走 `dispatchLargeSplit`（worker），否则走现有小文件分支（一字未改、行为不变）；export 临时大文件改 `try/finally` 可靠清理。
+
+**修复**
+
+- B20 工具箱拆分成功路径临时目录不清理（split:export 半，随 T6 顺带修）：`toolbox:split:export` 各路径统一 `finally rmSync` 清临时 xlsx（`toolbox:merge` 半本迭代不碰、仍留 backlog）。
+
+**已知限制（前端零改动的代价）**：OPEN-1 高基数列下拉只显前 ~1000 值无截断提示（按字段拆通常用低基数维度，影响有限）；OPEN-2 sharedStrings >~1.2GB 全唯一长文本文件 v1 可解释拒绝；OPEN-3 进度走后端 log、无进度条/cancel UI。
+
+**无对外契约变更**（前端零改动 + 小文件零回归 + 回传契约逐字节一致）。
+
 ## v3.0.8（2026-06-16）
 
 v3.0.8 迭代：共 **7 项**——5 项新反馈 + 2 份并入的 v3.0.7 资金红线修复 spec（team-lead 拆分委托 dev 分 W1~W6 实施，W4=需求6+需求3 合并工作流）。① 需求1 工具箱🧰（合表/拆表）——主界面左下角新增🧰按钮 → 脱离主对账流程的轻量 Excel 小工具：合并多个表头一致的表为一张（导入即一气呵成另存为 `合并-YYYYMMDDHHmm.xlsx`）、按某字段的某些值从一张表拆出子集（导入 → 选字段/值 → 导出 `拆分-值-YYYYMMDDHHmm.xlsx`），3 个 IPC（`toolbox:merge`/`toolbox:split:read`/`toolbox:split:export`）复用 file-service 读写，对既有链路零影响；② 需求2 场景管理退役 C3（`gateway-recon-join`，前端隐藏 + 新库不 seed，后端引擎/约束/已有库记录全保留可回滚）+ 两大功能分组（「资金性质校验」「中台订单数据处理」）三角折叠、默认收纳；③ 需求3 资金对账「开始运行」不阻塞（🔴 资金红线）——`bank-statement:run` 改 async + 轮次边界让出事件循环（不上 worker）+ 新增进度通道 `bank-statement:run:progress`，消除运行期窗口「未响应」，对账产物 golden 字节不变；④ 需求4 银行未命中场景 sheet 数据右移 B 列（🔴 对外口径变更）——sheet1 提醒独占 A1、表头/数据整体右移 B 列起；⑤ 需求5 BOC 调拨修复行 Type 2→1（🔴 资金红线/下游契约变更）——修复模板输出列 `Type` 由 `2` 改 `1`；⑥ 需求6 运行内存尖峰修复（🔴 资金红线，并入 spec A）——bank-deposit 入金表加消费方门控（关退款场景不读 ~1.2GB、注入 `[]`）+ gateway-bill 按 Channel 子集下推过滤读 + 删深拷（新增仓储 `readGatewayBillRowsByChannels`），根治 Windows「开始运行」卡死；⑦ 需求7 R5s3 两级 fallback + FundType 子串（🔴 资金红线，并入 spec B）——中台加款单脏数据处理引擎：`ReconciliationId` 匹配不上时用 `ChannelOrderNo` 兜底（两级 fallback、严格 1v1 跨两级共享、一级消歧失败不 fallback）+ 触发条件由精确判等 `FundType==='Inbound'` 改子串包含判定（大小写不敏感），防 `Inbound-VA` 等入金变体被误剔除。质量门 `npm run release-check` 全绿（unit + integration + smoke）。⚠️ 资金红线：需求 3/4/5/6/7 均涉对账 run 路径或输出口径，已人工复核 + golden/等价回归。
