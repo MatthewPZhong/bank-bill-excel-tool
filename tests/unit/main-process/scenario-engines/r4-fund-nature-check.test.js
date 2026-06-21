@@ -372,6 +372,279 @@ test.describe('R4 — ⑦ 空入参防御', () => {
 });
 
 // ========================================================================
+// ⑧ v3.0.10 需求1：银行行借贷方向守卫（🔴 资金红线）
+//   命中网关 TradeType 后再判一层方向——config.requireBankZeroField 指定的「应为0」金额列若实际非0
+//   （方向录反）→ 不改写 FundType + 记 warning（code='r4-fund-direction-mismatch'）。
+//   口径 (parseNumber(x) || 0) === 0：空/garbage/双零 当 0 = 满足、不拦截（与全仓一致）。
+//   4 子场景方向规律：出账性质（Ach Return/HX-out）要求 Credit Amount=0；入账性质（Wire Return/HX-in）要求 Debit Amount=0。
+// ========================================================================
+
+// 取某 rowId + code 的全部 warning（按记录顺序）
+function warnsFor(result, rowId, code) {
+  return result.warnings.filter((w) => w.rowId === rowId && w.code === code);
+}
+
+// 4 子场景带方向守卫的 config（与 seed/迁移补种值逐字一致）
+const SCEN_ACH_GUARD = {
+  priority: 3,
+  config: { subCategory: 'ach-return', gwTradeType: 'AchReturn', setFundType: 'Ach Return', requireBankZeroField: 'Credit Amount' }
+};
+const SCEN_WIRE_GUARD = {
+  priority: 2,
+  config: { subCategory: 'wire-return', gwTradeType: 'WireReturn', setFundType: 'Wire Return', requireBankZeroField: 'Debit Amount' }
+};
+const SCEN_HXOUT_GUARD = {
+  priority: 1,
+  config: { subCategory: 'hx-out', gwTradeType: 'HX_OUTBOUND', setFundType: 'HX-out', requireBankZeroField: 'Credit Amount' }
+};
+const SCEN_HXIN_GUARD = {
+  priority: 0,
+  config: { subCategory: 'hx-in', gwTradeType: 'HX_INBOUND', setFundType: 'HX-in', requireBankZeroField: 'Debit Amount' }
+};
+
+test.describe('R4 — ⑧ 方向守卫：4 子场景方向满足/不满足', () => {
+  test('ach-return（要求 Credit=0）：Credit=0 → 满足，正常改写 + 无 warning', () => {
+    const g1 = gw('R-A1', 'AchReturn');
+    const b1 = bank('rid-a1', 'R-A1', 'Charge', { 'Debit Amount': '100', 'Credit Amount': '0' });
+
+    const result = runRound4FundNatureCheck([g1], [b1], [SCEN_ACH_GUARD]);
+
+    assert.equal(b1.FundType, 'Ach Return', '方向满足 → 改写');
+    assert.equal(result.modifications.length, 1);
+    assert.equal(result.warnings.length, 0, '方向满足不产 warning');
+  });
+
+  test('ach-return（要求 Credit=0）：Credit≠0 → 方向录反，不改写 + warning（code/rowId/message）', () => {
+    const g1 = gw('R-A2', 'AchReturn');
+    const b1 = bank('rid-a2', 'R-A2', 'Charge', { 'Debit Amount': '0', 'Credit Amount': '88' });
+
+    const result = runRound4FundNatureCheck([g1], [b1], [SCEN_ACH_GUARD]);
+
+    assert.equal(b1.FundType, 'Charge', '方向不符 → 不改写');
+    assert.equal(result.modifications.length, 0, '方向不符不产 modification');
+    const w = warnsFor(result, 'rid-a2', 'r4-fund-direction-mismatch');
+    assert.equal(w.length, 1, '应恰好一条方向不符 warning');
+    assert.equal(w[0].scenarioId, 'R4');
+    assert.equal(w[0].scenarioName, '资金性质校验');
+    assert.match(w[0].message, /Credit Amount/);
+    assert.match(w[0].message, /方向不符/);
+    assert.match(w[0].message, /Ach Return/);
+  });
+
+  test('wire-return（要求 Debit=0）：Debit=0 → 满足，正常改写', () => {
+    const g1 = gw('R-W1', 'WireReturn');
+    const b1 = bank('rid-w1', 'R-W1', 'Charge', { 'Debit Amount': '0', 'Credit Amount': '200' });
+
+    const result = runRound4FundNatureCheck([g1], [b1], [SCEN_WIRE_GUARD]);
+
+    assert.equal(b1.FundType, 'Wire Return');
+    assert.equal(result.modifications.length, 1);
+    assert.equal(result.warnings.length, 0);
+  });
+
+  test('wire-return（要求 Debit=0）：Debit≠0 → 方向录反，不改写 + warning', () => {
+    const g1 = gw('R-W2', 'WireReturn');
+    const b1 = bank('rid-w2', 'R-W2', 'Charge', { 'Debit Amount': '300', 'Credit Amount': '0' });
+
+    const result = runRound4FundNatureCheck([g1], [b1], [SCEN_WIRE_GUARD]);
+
+    assert.equal(b1.FundType, 'Charge');
+    assert.equal(result.modifications.length, 0);
+    const w = warnsFor(result, 'rid-w2', 'r4-fund-direction-mismatch');
+    assert.equal(w.length, 1);
+    assert.match(w[0].message, /Debit Amount/);
+  });
+
+  test('hx-out（要求 Credit=0）：Credit≠0 → 不改写 + warning；Credit=0 → 改写', () => {
+    const gBad = gw('R-HO-BAD', 'HX_OUTBOUND');
+    const bBad = bank('rid-ho-bad', 'R-HO-BAD', 'Charge', { 'Debit Amount': '0', 'Credit Amount': '5' });
+    const rBad = runRound4FundNatureCheck([gBad], [bBad], [SCEN_HXOUT_GUARD]);
+    assert.equal(bBad.FundType, 'Charge');
+    assert.equal(warnsFor(rBad, 'rid-ho-bad', 'r4-fund-direction-mismatch').length, 1);
+
+    const gOk = gw('R-HO-OK', 'HX_OUTBOUND');
+    const bOk = bank('rid-ho-ok', 'R-HO-OK', 'Charge', { 'Debit Amount': '7', 'Credit Amount': '0' });
+    const rOk = runRound4FundNatureCheck([gOk], [bOk], [SCEN_HXOUT_GUARD]);
+    assert.equal(bOk.FundType, 'HX-out');
+    assert.equal(rOk.warnings.length, 0);
+  });
+
+  test('hx-in（要求 Debit=0）：Debit≠0 → 不改写 + warning；Debit=0 → 改写', () => {
+    const gBad = gw('R-HI-BAD', 'HX_INBOUND');
+    const bBad = bank('rid-hi-bad', 'R-HI-BAD', 'Charge', { 'Debit Amount': '9', 'Credit Amount': '0' });
+    const rBad = runRound4FundNatureCheck([gBad], [bBad], [SCEN_HXIN_GUARD]);
+    assert.equal(bBad.FundType, 'Charge');
+    assert.equal(warnsFor(rBad, 'rid-hi-bad', 'r4-fund-direction-mismatch').length, 1);
+
+    const gOk = gw('R-HI-OK', 'HX_INBOUND');
+    const bOk = bank('rid-hi-ok', 'R-HI-OK', 'Charge', { 'Debit Amount': '0', 'Credit Amount': '3' });
+    const rOk = runRound4FundNatureCheck([gOk], [bOk], [SCEN_HXIN_GUARD]);
+    assert.equal(bOk.FundType, 'HX-in');
+    assert.equal(rOk.warnings.length, 0);
+  });
+});
+
+test.describe('R4 — ⑧ 方向守卫：「应为0」口径边界（garbage/空/双零/负数）', () => {
+  test('应为0列为空字符串 → 当 0 = 满足、不拦截（正常改写）', () => {
+    const g1 = gw('R-E1', 'AchReturn');
+    const b1 = bank('rid-e1', 'R-E1', 'Charge', { 'Debit Amount': '100', 'Credit Amount': '' });
+
+    const result = runRound4FundNatureCheck([g1], [b1], [SCEN_ACH_GUARD]);
+
+    assert.equal(b1.FundType, 'Ach Return', '空字符串当 0 → 满足 → 改写');
+    assert.equal(result.warnings.length, 0);
+  });
+
+  test('应为0列缺失（undefined）→ 当 0 = 满足、不拦截', () => {
+    const g1 = gw('R-E2', 'AchReturn');
+    const b1 = bank('rid-e2', 'R-E2', 'Charge', { 'Debit Amount': '100' }); // 无 Credit Amount 键
+
+    const result = runRound4FundNatureCheck([g1], [b1], [SCEN_ACH_GUARD]);
+
+    assert.equal(b1.FundType, 'Ach Return', '缺失列当 0 → 满足');
+    assert.equal(result.warnings.length, 0);
+  });
+
+  test('应为0列为 garbage（非数字文本）→ parseNumber 解析失败当 0 = 满足、不拦截', () => {
+    const g1 = gw('R-E3', 'AchReturn');
+    const b1 = bank('rid-e3', 'R-E3', 'Charge', { 'Debit Amount': '100', 'Credit Amount': 'N/A' });
+
+    const result = runRound4FundNatureCheck([g1], [b1], [SCEN_ACH_GUARD]);
+
+    assert.equal(b1.FundType, 'Ach Return', 'garbage 当 0 → 满足（与全仓 parseNumber||0 口径一致）');
+    assert.equal(result.warnings.length, 0);
+  });
+
+  test('双零（Debit=0 且 Credit=0）→ 满足、不拦截（正常改写）', () => {
+    const g1 = gw('R-E4', 'AchReturn');
+    const b1 = bank('rid-e4', 'R-E4', 'Charge', { 'Debit Amount': '0', 'Credit Amount': '0' });
+
+    const result = runRound4FundNatureCheck([g1], [b1], [SCEN_ACH_GUARD]);
+
+    assert.equal(b1.FundType, 'Ach Return', '双零 → Credit=0 满足 → 改写');
+    assert.equal(result.warnings.length, 0);
+  });
+
+  test('应为0列为负数（非0）→ 方向不符，不改写 + warning（负数也算非0）', () => {
+    const g1 = gw('R-E5', 'AchReturn');
+    const b1 = bank('rid-e5', 'R-E5', 'Charge', { 'Debit Amount': '0', 'Credit Amount': '-12.5' });
+
+    const result = runRound4FundNatureCheck([g1], [b1], [SCEN_ACH_GUARD]);
+
+    assert.equal(b1.FundType, 'Charge', '负数非0 → 方向不符 → 不改写');
+    assert.equal(warnsFor(result, 'rid-e5', 'r4-fund-direction-mismatch').length, 1);
+  });
+
+  test('应为0列带千分位（非0）→ parseNumber 解析出非0 → 方向不符拦截', () => {
+    const g1 = gw('R-E6', 'AchReturn');
+    const b1 = bank('rid-e6', 'R-E6', 'Charge', { 'Debit Amount': '0', 'Credit Amount': '1,234.50' });
+
+    const result = runRound4FundNatureCheck([g1], [b1], [SCEN_ACH_GUARD]);
+
+    assert.equal(b1.FundType, 'Charge', '千分位 1,234.50 解析为非0 → 方向不符 → 不改写');
+    assert.equal(warnsFor(result, 'rid-e6', 'r4-fund-direction-mismatch').length, 1);
+  });
+});
+
+test.describe('R4 — ⑧ 方向守卫：叠加链中途不符（停在上一跳）+ no-op 交互', () => {
+  test('叠加链：handler1 命中改值，handler2 命中但方向不符 → 停在 handler1 的值 + handler2 push warn', () => {
+    // 两个 handler 均凭 gwTradeType=HX_OUTBOUND 命中（同一银行行叠加链）：
+    //   step1（priority 2，无方向守卫）：A→step1Value
+    //   hx-out（priority 1，要求 Credit=0）：银行行 Credit≠0 → 方向不符 → 不改、push warn
+    // 最终值 = step1Value（停在上一跳），warning 来自 hx-out。
+    const step1 = {
+      priority: 2,
+      config: { subCategory: 'step1', gwTradeType: 'HX_OUTBOUND', setFundType: 'step1Value' }
+    };
+    const g1 = gw('R-CHAIN-BAD', 'HX_OUTBOUND');
+    const b1 = bank('rid-chain-bad', 'R-CHAIN-BAD', 'A', { 'Debit Amount': '0', 'Credit Amount': '50' });
+
+    const result = runRound4FundNatureCheck([g1], [b1], [step1, SCEN_HXOUT_GUARD]);
+
+    // step1 改成功（无方向守卫），hx-out 方向不符停下
+    assert.equal(b1.FundType, 'step1Value', '停在 handler1 的值（hx-out 这一跳不改）');
+    assert.equal(modsFor(result, 'rid-chain-bad', 'FundType').length, 1, '仅 step1 一条 modification');
+    assert.equal(result.modifications[0].newValue, 'step1Value');
+    assert.equal(warnsFor(result, 'rid-chain-bad', 'r4-fund-direction-mismatch').length, 1, 'hx-out 这一跳 push 一条 warn');
+  });
+
+  test('叠加链：前一跳方向不符（不改+warn），后一跳方向满足 → 后一跳基于原值改（各判各的）', () => {
+    // step-bad（priority 2，要求 Credit=0）：银行 Credit≠0 → 方向不符 → 不改、warn
+    // step-ok（priority 1，要求 Debit=0）：银行 Debit=0 → 满足 → 把原值 A→okValue
+    // 结果：最终 okValue（后一跳基于未改的原值 A 改），一条 warn + 一条 modification。
+    const stepBad = {
+      priority: 2,
+      config: { subCategory: 'step-bad', gwTradeType: 'HX_OUTBOUND', setFundType: 'badValue', requireBankZeroField: 'Credit Amount' }
+    };
+    const stepOk = {
+      priority: 1,
+      config: { subCategory: 'step-ok', gwTradeType: 'HX_OUTBOUND', setFundType: 'okValue', requireBankZeroField: 'Debit Amount' }
+    };
+    const g1 = gw('R-CHAIN-MIX', 'HX_OUTBOUND');
+    const b1 = bank('rid-chain-mix', 'R-CHAIN-MIX', 'A', { 'Debit Amount': '0', 'Credit Amount': '50' });
+
+    const result = runRound4FundNatureCheck([g1], [b1], [stepBad, stepOk]);
+
+    assert.equal(b1.FundType, 'okValue', 'step-bad 跳过（方向不符），step-ok 基于原值 A 改为 okValue');
+    const mods = modsFor(result, 'rid-chain-mix', 'FundType');
+    assert.equal(mods.length, 1, '仅 step-ok 一条 modification');
+    assert.deepEqual([mods[0].oldValue, mods[0].newValue], ['A', 'okValue'], 'step-ok 基于未被改的原值 A');
+    assert.equal(warnsFor(result, 'rid-chain-mix', 'r4-fund-direction-mismatch').length, 1, 'step-bad 一条 warn');
+  });
+
+  test('no-op 交互：方向满足但 oldValue==decision（已是目标值）→ 不 warn 不 record（既有语义不变）', () => {
+    const g1 = gw('R-NOOP-GUARD', 'AchReturn');
+    // 已是目标值 Ach Return + Credit=0（方向满足）→ 走 no-op：不 record；方向守卫只在「确实要改」前拦，不影响 no-op
+    const b1 = bank('rid-noop-guard', 'R-NOOP-GUARD', 'Ach Return', { 'Debit Amount': '100', 'Credit Amount': '0' });
+
+    const result = runRound4FundNatureCheck([g1], [b1], [SCEN_ACH_GUARD]);
+
+    assert.equal(b1.FundType, 'Ach Return', '不变');
+    assert.equal(result.modifications.length, 0, '旧值==目标值 → 无 modification');
+    assert.equal(result.warnings.length, 0, 'no-op 不 warn（方向守卫不影响 no-op）');
+  });
+
+  test('no-op 交互：方向不符但 oldValue==decision（已是目标值）→ 守卫先拦截 → push warn、不 record', () => {
+    // 守卫在改写判定之前执行：即便 oldValue 已等于 decision，方向不符也会先 push warn + continue（不进 no-op 分支）。
+    const g1 = gw('R-NOOP-BAD', 'AchReturn');
+    const b1 = bank('rid-noop-bad', 'R-NOOP-BAD', 'Ach Return', { 'Debit Amount': '0', 'Credit Amount': '5' });
+
+    const result = runRound4FundNatureCheck([g1], [b1], [SCEN_ACH_GUARD]);
+
+    assert.equal(b1.FundType, 'Ach Return', '不改（守卫拦截，且本来就等于目标值）');
+    assert.equal(result.modifications.length, 0, '无 modification');
+    assert.equal(warnsFor(result, 'rid-noop-bad', 'r4-fund-direction-mismatch').length, 1, '方向不符即便 no-op 也 push warn（守卫先于 no-op 判定）');
+  });
+
+  test('无 requireBankZeroField（老库未迁移/被清空）→ 守卫退化为不生效（走原改写，方向任意都改）', () => {
+    // config 无 requireBankZeroField → zf=undefined → 跳过守卫 → 走原改写（即便方向"录反"也照改，等同 v3.0.10 前行为）
+    const g1 = gw('R-NOFIELD', 'AchReturn');
+    const b1 = bank('rid-nofield', 'R-NOFIELD', 'Charge', { 'Debit Amount': '0', 'Credit Amount': '999' });
+    const noFieldScen = { priority: 3, config: { subCategory: 'ach-return', gwTradeType: 'AchReturn', setFundType: 'Ach Return' } };
+
+    const result = runRound4FundNatureCheck([g1], [b1], [noFieldScen]);
+
+    assert.equal(b1.FundType, 'Ach Return', '无守卫字段 → 不拦截 → 照改');
+    assert.equal(result.modifications.length, 1);
+    assert.equal(result.warnings.length, 0, '无守卫字段 → 不产 warning');
+  });
+
+  test('requireBankZeroField 为非法值（非两合法列名）→ 守卫不生效（走原改写）', () => {
+    const g1 = gw('R-BADFIELD', 'AchReturn');
+    const b1 = bank('rid-badfield', 'R-BADFIELD', 'Charge', { 'Debit Amount': '0', 'Credit Amount': '999' });
+    const badFieldScen = {
+      priority: 3,
+      config: { subCategory: 'ach-return', gwTradeType: 'AchReturn', setFundType: 'Ach Return', requireBankZeroField: 'Some Other Column' }
+    };
+
+    const result = runRound4FundNatureCheck([g1], [b1], [badFieldScen]);
+
+    assert.equal(b1.FundType, 'Ach Return', '非法守卫字段值 → 守卫不生效 → 照改');
+    assert.equal(result.warnings.length, 0);
+  });
+});
+
+// ========================================================================
 // 附：applyHandler 单元（config 判定纯函数）
 // ========================================================================
 test.describe('R4 — applyHandler 纯函数判定', () => {
@@ -418,5 +691,33 @@ test.describe('R4 — applyHandler 纯函数判定', () => {
       SCENARIO_ACH_RETURN.config
     );
     assert.equal(decision, 'Ach Return');
+  });
+
+  // v3.0.10 需求1：职责分离——applyHandler 是纯判定函数，不读金额列、不管方向守卫。
+  //   方向守卫由主循环负责（applyHandler 返回非空后再判方向）；故即便方向"录反"，applyHandler 仍照常返回 setFundType。
+  test('🔴 职责分离：applyHandler 不读金额列——即便 requireBankZeroField 指定列非0（方向录反）仍返回 setFundType', () => {
+    // config 带 requireBankZeroField，但银行行 Credit Amount=999（方向录反）：applyHandler 不看金额 → 仍命中返回 setFundType
+    const decisionAch = applyHandler(
+      gw('R', 'AchReturn'),
+      bank('r', 'R', 'Charge', { 'Debit Amount': '0', 'Credit Amount': '999' }),
+      SCEN_ACH_GUARD.config
+    );
+    assert.equal(decisionAch, 'Ach Return', 'applyHandler 不读金额：方向不符也返回 setFundType（守卫不在此层）');
+
+    // Debit Amount 非0 的 wire-return 同理：applyHandler 仍返回 setFundType
+    const decisionWire = applyHandler(
+      gw('R', 'WireReturn'),
+      bank('r', 'R', 'Charge', { 'Debit Amount': '500', 'Credit Amount': '0' }),
+      SCEN_WIRE_GUARD.config
+    );
+    assert.equal(decisionWire, 'Wire Return', 'applyHandler 不读金额：方向不符也返回 setFundType');
+
+    // 反证：applyHandler 的命中/不命中只取决于 gwTradeType + requireBankFundType，与 requireBankZeroField/金额列无关
+    const decisionMiss = applyHandler(
+      gw('R', 'NotAchReturn'),
+      bank('r', 'R', 'Charge', { 'Debit Amount': '0', 'Credit Amount': '0' }),
+      SCEN_ACH_GUARD.config
+    );
+    assert.equal(decisionMiss, null, 'gwTradeType 不匹配 → null（与金额列无关）');
   });
 });

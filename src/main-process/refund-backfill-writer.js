@@ -4,13 +4,12 @@
 //   writeRefundBackfillOutput(backfillRows, unmatchedRows, savePath)
 //     → 写到 caller 指定的绝对路径 savePath（落位/兜底由 caller bank-statement:export handler 决定）
 //     → 同一 workbook 两个 sheet：
-//        sheet1「回填模板」：第 1 行 REFUND_TEMPLATE_HEADERS（refund-backfill-rules-v2：31 列 = 固定 6 + 银行 10 + 中台 15，加粗 size10）
+//        sheet1「回填模板」：第 1 行 REFUND_TEMPLATE_HEADERS（v3.0.10：33 列 = 固定 6 + 银行 12 + 中台 15，加粗 size10）
 //           其后每行按 REFUND_TEMPLATE_HEADERS.map(h => row[h] ?? '') 投影（列顺序单一真相 = 常量）
-//        sheet2「未匹配报错」：第 1 行 UNMATCHED_HEADERS（含「结果类型」列区分 报错-人工介入/未匹配-提示）
-//           兼容引擎产出的两类异构行（详见下）：
-//             ① 银行未匹配行 { 结果类型, ...REFUND_BANK_COLUMNS 10 列, 报错/提示信息 }
-//             ② refund 提示行 { 结果类型, 退款单号, 报错/提示信息 }（无银行 10 列）
-//           UNMATCHED_HEADERS 同时含「退款单号」列与 10 列银行字段（O3 含 Payment Detail）→ 两类行各按 key 投影，缺 key → ''
+//           v3.0.10 需求3.1：命中字段标黄——按 row._matchedColumns（引擎单点过滤后的 sheet1 列）给对应单元格填黄（列偏移 i+1，无前导列）。
+//        sheet2「未匹配报错」：第 1 行 UNMATCHED_HEADERS（v3.0.10：13 列 = REFUND_BANK_COLUMNS 12 列 + 报错/提示信息）。
+//           只承接银行未匹配行（①形状 { ...REFUND_BANK_COLUMNS 12 列, 报错/提示信息 }）——报错/提示靠「报错/提示信息」前缀【报错】/【提示】区分；
+//           refund-only 提示行（旧②形状，仅退款单号）已在引擎侧静默删除，sheet2 不再有该类行。按 key 投影，缺 key → ''。
 //     → applyWatermark（与 platform-cleanup-writer 一致：lastModifiedBy='pzhong'）
 //     → atomic write：tmp 文件 + rename（防半文件，与 platform-cleanup-writer 一致）
 //     → 失败抛 Error；caller 负责 try-catch + graceful（回填文件写失败不阻塞主对账流程）
@@ -31,12 +30,18 @@ const { applyWatermark } = require('./workbook-watermark');
 const BACKFILL_SHEET_NAME = '回填模板';
 const UNMATCHED_SHEET_NAME = '未匹配报错';
 
-// sheet2 表头：含「结果类型」区分 报错-人工介入/未匹配-提示；
-//   「退款单号」列承接 refund 提示行（②形状），REFUND_BANK_COLUMNS 10 列承接银行未匹配行（①形状，O3 后含 Payment Detail，自动 12→13 列）；
-//   异构两类各按 key 投影，缺 key → ''。
+// v3.0.10 需求3.1：sheet1 命中字段标黄填充。字面与 exceljs-writer.js:24-28 一致（单一真相在彼，此处就地复制避免跨 main-process 模块耦合）。
+const YELLOW_FILL = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FFFFFF00' }
+};
+
+// sheet2 表头（v3.0.10 需求3.2：删「结果类型」+「退款单号」两列；银行段随 REFUND_BANK_COLUMNS 10→12 → 共 13 列）。
+//   报错/提示区分并入「报错/提示信息」文案前缀（【报错】/【提示】，引擎 buildUnmatchedBankRow 单点加）；
+//   refund-only 提示行（②形状，仅退款单号）已在引擎侧静默删除，故 sheet2 只剩银行未匹配行（①形状）：
+//   REFUND_BANK_COLUMNS 12 列（含 Extra Information / Payment Detail / Drawee Name）+「报错/提示信息」1 列；按 key 投影，缺 key → ''。
 const UNMATCHED_HEADERS = Object.freeze([
-  '结果类型',
-  '退款单号',
   ...REFUND_BANK_COLUMNS,
   '报错/提示信息'
 ]);
@@ -48,7 +53,7 @@ function projectRow(headers, row) {
 
 // writeRefundBackfillOutput
 //   入参：
-//     backfillRows: Array<row>（R5 场景4 buildBackfillRow 产出，每行含 REFUND_TEMPLATE_HEADERS 31 键）
+//     backfillRows: Array<row>（R5 场景4 buildBackfillRow 产出，每行含 REFUND_TEMPLATE_HEADERS 33 键）
 //     unmatchedRows: Array<row>（两类异构行；详见文件头）
 //     savePath: string（回填文件绝对路径，由 caller 决定落位）
 //   返回：{ filePath, fileName }
@@ -78,15 +83,23 @@ async function writeRefundBackfillOutput(backfillRows, unmatchedRows, savePath) 
 
   const workbook = new ExcelJS.Workbook();
 
-  // —— sheet1「回填模板」：表头 14 列（REFUND_TEMPLATE_HEADERS 单一真相），加粗 size10 ——
+  // —— sheet1「回填模板」：表头 33 列（REFUND_TEMPLATE_HEADERS 单一真相），加粗 size10；命中字段标黄（v3.0.10 需求3.1）——
   const backfillSheet = workbook.addWorksheet(BACKFILL_SHEET_NAME);
   backfillSheet.addRow(REFUND_TEMPLATE_HEADERS.slice());
   backfillSheet.getRow(1).font = { bold: true, size: 10 };
   for (const row of backfillRows) {
-    backfillSheet.addRow(projectRow(REFUND_TEMPLATE_HEADERS, row));
+    const r = backfillSheet.addRow(projectRow(REFUND_TEMPLATE_HEADERS, row));
+    // v3.0.10 需求3.1：命中字段标黄。row._matchedColumns（引擎单点过滤后的 sheet1 列数组，仿 exceljs-writer.js:298-304）。
+    //   🔴 列偏移 i+1：退款 sheet1 第 1 列即 REFUND_TEMPLATE_HEADERS[0]（无前导列）；对照主报告 sheet2 用 colIdx+2（有「命中明细」前导列）——不可照抄。
+    const m = row && row._matchedColumns;
+    if (m && m.length) {
+      REFUND_TEMPLATE_HEADERS.forEach((h, i) => {
+        if (m.includes(h)) r.getCell(i + 1).fill = YELLOW_FILL;
+      });
+    }
   }
 
-  // —— sheet2「未匹配报错」：表头含「结果类型」，兼容两类异构行 ——
+  // —— sheet2「未匹配报错」：13 列（v3.0.10：删「结果类型」+「退款单号」，银行段 10→12），只承接银行未匹配行 ——
   const unmatchedSheet = workbook.addWorksheet(UNMATCHED_SHEET_NAME);
   unmatchedSheet.addRow(UNMATCHED_HEADERS.slice());
   unmatchedSheet.getRow(1).font = { bold: true, size: 10 };

@@ -57,6 +57,8 @@ const {
   retireChargeOutboundOrphans,
   // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'
   ensureFundTypeAchReturnConfigMigration,
+  // v3.0.10 需求1：R4 方向守卫 config 字段补种（无 marker 幂等补缺失 requireBankZeroField，绝不覆盖用户值）
+  ensureR4DirectionGuardConfigMigration,
   // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造
   ensureDiffRowsCascadeMigration_v2_1_10,
   // v2.1.16 阶段一 A3：链接表持久化建表（v2.1.16-beta.3 ②：含入金表 linked_bank_deposit）
@@ -382,6 +384,10 @@ class AppDatabase {
     //   必须在 scenarios 相关迁移之后（依赖 scenarios 表已存在、内置场景已 seed）。
     //   幂等：执行一次后 config 不再含 'Ach Ruturn'；绝大多数库无引用 → no-op（精确性防护）。
     this.ensureFundTypeAchReturnConfigMigration();
+    // v3.0.10 需求1：R4 方向守卫 config 字段补种（🔴 资金红线 — 老库 4 个 R4 场景缺 requireBankZeroField 则守卫静默失效）。
+    //   必须在 scenarios 相关迁移之后（依赖 scenarios 表已存在、内置 R4 场景已 seed）。
+    //   无 marker：每次启动幂等补回缺失的 requireBankZeroField；绝不覆盖用户已改的值（已存在则跳过）。
+    this.ensureR4DirectionGuardConfigMigration();
     // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表
     // 与其他迁移完全独立，调用顺序无依赖；放在最末尾即可
     this.ensureBankBuReconTablesSupport();
@@ -1072,6 +1078,11 @@ class AppDatabase {
   // v2.1.16-beta.2 §FundType：一次性修存量 config 错拼 'Ach Ruturn' → 'Ach Return'（🔴 资金红线）
   ensureFundTypeAchReturnConfigMigration() {
     return ensureFundTypeAchReturnConfigMigration(this.db);
+  }
+
+  // v3.0.10 需求1：R4 方向守卫 config 字段补种（无 marker 幂等补缺失 requireBankZeroField，绝不覆盖用户值；🔴 资金红线）
+  ensureR4DirectionGuardConfigMigration() {
+    return ensureR4DirectionGuardConfigMigration(this.db);
   }
 
   migrateGatewayReconIdFixFieldPairs() {

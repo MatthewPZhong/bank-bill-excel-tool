@@ -469,7 +469,7 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
       bankRows,
       (refundContext && refundContext.refundOrderRows) || [],
       (refundContext && refundContext.depositRows) || [],
-      { isFundTypeChanged }
+      { isFundTypeChanged, gwRows: safeGwRows } // v3.0.10 需求2：传网关全量行，供退款引擎做 reconid 前置过滤（safeGwRows 在上文已就绪）
     );
     allWarnings.push(...(r5d.warnings || [])); // 不 mergeMods（场景4 不改 bankRows，modifications 恒空）
     refundBackfillRows = r5d.backfillRows || [];

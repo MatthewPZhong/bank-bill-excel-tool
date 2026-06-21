@@ -62,6 +62,21 @@ test.describe('CAUSE_MAP — 文件 schema 错误码（跨模块共用）', () =
   });
 });
 
+test.describe('CAUSE_MAP — v3.0.10 R4 资金性质校验方向守卫', () => {
+  test('r4-fund-direction-mismatch 已定义且文案含「方向」', () => {
+    assert.ok(CAUSE_MAP['r4-fund-direction-mismatch'], 'r4-fund-direction-mismatch 应已定义');
+    assert.match(CAUSE_MAP['r4-fund-direction-mismatch'], /方向/);
+    assert.match(CAUSE_MAP['r4-fund-direction-mismatch'], /跳过/);
+  });
+
+  test('errorCodeToCause(r4-fund-direction-mismatch) → 完整中文文案', () => {
+    assert.equal(
+      errorCodeToCause('r4-fund-direction-mismatch'),
+      '资金性质命中但银行行借贷方向不符（应为0的金额列非0），已跳过该行资金性质改写，请人工核对方向'
+    );
+  });
+});
+
 test.describe('CAUSE_MAP — 主模块粗粒度', () => {
   test('FILE_READ / FILE_TYPE 已定义', () => {
     assert.ok(CAUSE_MAP['FILE_READ']);

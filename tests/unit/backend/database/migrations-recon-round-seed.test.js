@@ -42,11 +42,13 @@ const SEED_MARKER = 'recon_round_builtin_scenarios_seeded';
 // 期望的 7 个内置场景（subCategory → 期望字段），用于逐条断言（与 6 场景表 + v2.1.16-beta.4 ③退款场景逐字对齐）
 //   ⚠️ v3.0.6 需求3（T9）：charge-outbound 已退役（重写为 DBS-Charge / R3.5），不在本数组。
 //   expectedEnabled 缺省按 1；退款回填场景显式 0（Layer 1 引擎层休眠）。
+//   v3.0.10 需求1：4 个 R4 子场景 seed 加 requireBankZeroField（方向守卫）——
+//     出账性质（Ach Return/HX-out）→ 'Credit Amount'；入账性质（Wire Return/HX-in）→ 'Debit Amount'。
 const EXPECTED = {
-  'ach-return':              { funcCategory: 'fund-nature-check', priority: 3, roundPhase: 4, gwTradeType: 'AchReturn',  setFundType: 'Ach Return',  name: '资金性质校验-Ach Return',  involvedFiles: ['银行对账单'] },
-  'wire-return':            { funcCategory: 'fund-nature-check', priority: 2, roundPhase: 4, gwTradeType: 'WireReturn', setFundType: 'Wire Return', name: '资金性质校验-Wire Return', involvedFiles: ['银行对账单'] },
-  'hx-out':                { funcCategory: 'fund-nature-check', priority: 1, roundPhase: 4, gwTradeType: 'HX_OUTBOUND', setFundType: 'HX-out', name: '资金性质校验-HX-out', involvedFiles: ['银行对账单'] },
-  'hx-in':                 { funcCategory: 'fund-nature-check', priority: 0, roundPhase: 4, gwTradeType: 'HX_INBOUND', setFundType: 'HX-in', name: '资金性质校验-HX-in', involvedFiles: ['银行对账单'] },
+  'ach-return':              { funcCategory: 'fund-nature-check', priority: 3, roundPhase: 4, gwTradeType: 'AchReturn',  setFundType: 'Ach Return',  requireBankZeroField: 'Credit Amount', name: '资金性质校验-Ach Return',  involvedFiles: ['银行对账单'] },
+  'wire-return':            { funcCategory: 'fund-nature-check', priority: 2, roundPhase: 4, gwTradeType: 'WireReturn', setFundType: 'Wire Return', requireBankZeroField: 'Debit Amount', name: '资金性质校验-Wire Return', involvedFiles: ['银行对账单'] },
+  'hx-out':                { funcCategory: 'fund-nature-check', priority: 1, roundPhase: 4, gwTradeType: 'HX_OUTBOUND', setFundType: 'HX-out', requireBankZeroField: 'Credit Amount', name: '资金性质校验-HX-out', involvedFiles: ['银行对账单'] },
+  'hx-in':                 { funcCategory: 'fund-nature-check', priority: 0, roundPhase: 4, gwTradeType: 'HX_INBOUND', setFundType: 'HX-in', requireBankZeroField: 'Debit Amount', name: '资金性质校验-HX-in', involvedFiles: ['银行对账单'] },
   'fund-transfer-backfill':{ funcCategory: 'platform-order', priority: 0, roundPhase: 5, dateToleranceDays: 1, reconSourceMid: true, name: '中台调拨订单对账ID回填', involvedFiles: ['银行对账单'] },
   'platform-inbound-cleanup':{ funcCategory: 'platform-order', priority: 0, roundPhase: 5, gwTradeType: 'Inbound-VA', excludeFundType: 'Inbound', name: '中台加款单脏数据处理', involvedFiles: ['中台加款单剔除模板'] },
   // v2.1.16-beta.4 ③：退款回填场景（无 directions、无 gwTradeType，默认休眠 enabled=0）
@@ -164,6 +166,8 @@ test.describe('v2.1.16-beta.2 §8 ensureReconRoundBuiltinScenariosSeed', () => {
       assert.deepStrictEqual(cfg.involvedFiles, exp.involvedFiles, `${sub}.config.involvedFiles`);
       assert.ok(typeof cfg.function === 'string' && cfg.function.length > 0, `${sub}.config.function 非空`);
       if (exp.setFundType !== undefined) assert.strictEqual(cfg.setFundType, exp.setFundType, `${sub}.config.setFundType`);
+      // v3.0.10 需求1：4 个 R4 子场景 seed 应含 requireBankZeroField（方向守卫字段）
+      if (exp.requireBankZeroField !== undefined) assert.strictEqual(cfg.requireBankZeroField, exp.requireBankZeroField, `${sub}.config.requireBankZeroField`);
       if (exp.gwTradeType !== undefined) assert.strictEqual(cfg.gwTradeType, exp.gwTradeType, `${sub}.config.gwTradeType`);
       if (exp.requireBankFundType !== undefined) assert.strictEqual(cfg.requireBankFundType, exp.requireBankFundType, `${sub}.config.requireBankFundType`);
       if (exp.excludeFundType !== undefined) assert.strictEqual(cfg.excludeFundType, exp.excludeFundType, `${sub}.config.excludeFundType`);

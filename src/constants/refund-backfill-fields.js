@@ -116,13 +116,19 @@ const REFUND_BACKFILL_FIELD_MAP = Object.freeze({
   })
 });
 
-// 回填模板银行字段段（✅Q4；refund-backfill-rules-v2 O3：9→10，CustomerRef 右侧加 'Payment Detail'）
+// 回填模板银行字段段（✅Q4；v3.0.10：10→12，按 BANK_STATEMENT_FIELDS 模板序在原 10 列基础上插 'Extra Information' + 'Drawee Name'）。
 //   金额列只有 Debit Amount、无 Credit Amount（资金红线）；'Payment Detail' 读银行退款行主表（44 列恒有，非入金行）。
+//   列序锚 BANK_STATEMENT_FIELDS 下标：CustomerRef=idx13 → Extra Information=idx18 → Payment Detail=idx19 → Drawee Name=idx22；
+//     故 'Extra Information' 插在 CustomerRef 后、Payment Detail 前；'Drawee Name' 接在 Payment Detail 后（末位，第 12 列）。
+//   v3.0.10 新增两列用途：把 S2/JPM-HK/S3 等命中的银行字段纳入 sheet1 → 命中即标黄（之前 Extra Information/Drawee Name
+//     虽进各 matcher 的 _matchedColumns 候选，但因不在 sheet1、被 buildBackfillRow 的交集过滤丢弃，无法标黄）。
 const REFUND_BANK_COLUMNS = Object.freeze([
   'BillDate', 'Channel', '地区', 'MerchantId', 'Currency',
   'Debit Amount',          // ⚠️ 只放 Debit Amount，不放 Credit Amount
   'ReconciliationId', 'ChannelOrderNo', 'CustomerRef',
-  'Payment Detail'         // O3 新增（第 10 列；R2/JPM-HK 提取源，配对银行行原值）
+  'Extra Information',     // v3.0.10 新增（第 10 列；插在 CustomerRef 后、Payment Detail 前；S2-MTX/JPM-HK/S2b/S3b/S3c 提取源，命中标黄）
+  'Payment Detail',        // O3（第 11 列；R2/JPM-HK 提取源，配对银行行原值）
+  'Drawee Name'           // v3.0.10 新增（第 12 列；S3 付款人名称按位被查字段，命中标黄）
 ]);
 
 // 回填模板中台退款订单字段段（refund-backfill-rules-v2 O4：新增 15 列，按用户列序，取配对 ro 原值）。
@@ -133,11 +139,11 @@ const REFUND_RO_COLUMNS = Object.freeze([
   '附言', '客户号', '账户号', '银行打款流水号', 'valueDate'
 ]);
 
-// 回填模板列（refund-backfill-rules-v2 O1/O3/O4：14→31 列 = 固定 6 列 + 银行 10 列 + 中台 15 列）。
+// 回填模板列（v3.0.10：31→33 列 = 固定 6 列 + 银行 12 列 + 中台 15 列；银行段 10→12 见上方 REFUND_BANK_COLUMNS）。
 //   A~F 固定：退款单号/状态/渠道流水号/渠道退款时间/命中类型/匹配命中详情（O1 新增「命中类型」列）。
 const REFUND_TEMPLATE_HEADERS = Object.freeze([
   '退款单号', '状态', '渠道流水号', '渠道退款时间', '命中类型', '匹配命中详情', // 固定 6 列
-  ...REFUND_BANK_COLUMNS,  // 银行 10 字段原数据（按序，非全列）
+  ...REFUND_BANK_COLUMNS,  // 银行 12 字段原数据（按序，非全列）
   ...REFUND_RO_COLUMNS     // 中台退款订单 15 字段原数据（取配对 ro 原值）
 ]);
 
@@ -150,7 +156,7 @@ const MTX_FEATURE = Object.freeze({ featureCode: 'MTX', digitCount: 19, totalLen
 //   旧 /T54SWIC\d{6}/ 是本正则真子集 → 存量零漏配；放宽只扩提取候选集，命中仍严格等值收口（matchJpmHk 不变）。
 const T54_REFUND_RE = /T54[A-Z]{4}\d{6}/g;
 
-// 启动期断言①：REFUND_BANK_COLUMNS 10 字段全部 ∈ BANK_STATEMENT_FIELDS（防常量漂移，故仍 require 全集）。
+// 启动期断言①：REFUND_BANK_COLUMNS 12 字段全部 ∈ BANK_STATEMENT_FIELDS（防常量漂移，故仍 require 全集）。
 //   任一漂移（重命名银行列 / 误把不存在的列放进银行段）→ 立刻 throw，避免静默回填错列。
 const __missingBankColumns = REFUND_BANK_COLUMNS.filter((f) => !BANK_STATEMENT_FIELDS.includes(f));
 if (__missingBankColumns.length > 0) {

@@ -21,11 +21,19 @@
 //   - record 后**不 break** —— 允许后续 handler 在已改值基础上再次改写（叠加链，R4 唯一）。
 //
 // 可插拔 handler（判定全部 config 化，存 seed config_json）：
-//   config = { subCategory, gwTradeType?, requireBankFundType?, setFundType }
+//   config = { subCategory, gwTradeType?, requireBankFundType?, setFundType, requireBankZeroField? }
 //     - gwTradeType        在 → 需 normalizeCellValue(gw.TradeType) === gwTradeType，否则不命中
 //     - requireBankFundType 在 → 需 normalizeCellValue(bank.FundType) === requireBankFundType，否则不命中
 //     - 两者都不在 → 仅凭「有 R1 匹配（即进入本关联）」即命中（如 Charge→outbound 仅看 FundType=Charge）
 //   命中 → 返回 setFundType；不命中 → 返回 null。
+//
+// v3.0.10 需求1：银行行借贷方向守卫（🔴 资金红线）
+//   - config.requireBankZeroField（'Debit Amount' | 'Credit Amount'）：命中本子场景后再判一层方向——
+//     该「应为0」金额列若实际非0（方向录反）→ 不改写 + 记 warning（B 决策：warning 进主错误报告文件）。
+//   - 口径 (parseNumber(x) || 0) === 0：空/garbage 当 0 = 满足、不拦截（与全仓口径一致）。
+//   - 🔴 守卫放主循环、**不放 applyHandler**：applyHandler 是纯函数无 warningCollector 权，且 return null 无法
+//     区分「gwTradeType 没匹配（不该 warn）」与「命中但方向不符（才该 warn）」；故 applyHandler 不读金额、
+//     职责不变，方向守卫由主循环在 applyHandler 返回非空（确实命中）之后执行。
 //
 // 子场景（v3.0.6 起 4 个）：ach-return / wire-return / hx-out / hx-in，同桶逐条全转。
 //   ⚠️ 原 charge-outbound 子场景（全渠道 Charge→outbound + v3.0.4 块 G「仅转 Debit Amount 最大行」边界口径）
@@ -35,7 +43,8 @@
 const {
   normalizeCellValue,
   makeModificationCollector,
-  makeWarningCollector
+  makeWarningCollector,
+  parseNumber // v3.0.10 需求1：方向守卫判「应为0」金额列用（与全仓 (parseNumber(x)||0)===0 口径一致）
 } = require('./engine-utils');
 
 // R4 跨表字段名常量（显式映射，绝不假设同名 —— TECH_DESIGN §4）
@@ -139,7 +148,23 @@ function runRound4FundNatureCheck(matchedGwRows, bankRows, r4Scenarios) {
       // 同一银行行逐 handler 跑：允许多次改 FundType（叠加链），故**不 break**
       for (const scenario of scenariosSorted) {
         const decision = applyHandler(gwRow, bankRow, scenario.config); // 命中 → 目标 FundType；否则 null
-        if (decision === null || decision === undefined) continue;
+        if (decision === null || decision === undefined) continue; // gwTradeType 没匹配 → 静默不 warn（R-2）
+
+        // ===== v3.0.10 需求1：银行行借贷方向守卫（🔴 资金红线）=====
+        //   命中本子场景后，若「应为0」的金额列实际非0（方向录反）→ 不改写 + 记 warning（B 决策）。
+        //   口径 (parseNumber(x) || 0) === 0：空/garbage 当 0 = 满足、不拦截（与全仓一致）。
+        //   守卫放主循环不放 applyHandler：此处才有「确实命中」事实 + warningCollector 在手，且能区分「没命中」。
+        const zf = scenario.config.requireBankZeroField; // 'Debit Amount' | 'Credit Amount' | undefined
+        if (zf === 'Debit Amount' || zf === 'Credit Amount') {
+          if ((parseNumber(bankRow[zf]) || 0) !== 0) {
+            warningCollector.push({
+              rowId: bankRow._rowId,
+              code: 'r4-fund-direction-mismatch',
+              message: `银行行(${bankRow._rowId}) 命中资金性质「${decision}」(${scenario.config.subCategory}) 但 ${zf} 非0，方向不符，跳过改写`
+            });
+            continue; // 不改写；叠加链下每 handler 各判各的（本 handler 跳过，不影响其它 handler）
+          }
+        }
 
         const oldValue = normalizeCellValue(bankRow[BANK_FUND_TYPE_FIELD]);
         // 旧 !== 新 才改、才 record（no-op 不产 modification、不标黄；与 C1/C3 一致）
