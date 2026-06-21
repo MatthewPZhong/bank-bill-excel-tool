@@ -9,6 +9,28 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.0.10（2026-06-21）
+
+v3.0.10 集中 **3 项**对账引擎收紧 + 退款回填输出改造需求（🔴 资金红线 · 无并入 spec）：① R4 资金性质校验加银行行借贷方向守卫（命中网关 TradeType 后再判银行行借贷方向——入账性质 Wire Return/HX-in 要求 `Debit Amount`=0、出账性质 Ach Return/HX-out 要求 `Credit Amount`=0，方向录反则不改写 FundType + 主错误报告告警）；② R5s4 退款回填加网关 reconid 前置过滤（银行候选行入池前先与网关 `reconciliationid` 集合匹配，命中网关的行静默移出退款池）；③ 退款回填输出文件改造（sheet1 命中字段交集标黄 + 银行段补 `Extra Information`/`Drawee Name` 两列 sheet1 31→33 + S4 命中标黄扩日期/大账号/金额/币种两侧 8 列 + sheet2 删「结果类型/退款单号」两列且银行段随之补 2 列 → 13 列 + 报错/提示并入信息列前缀 `【报错】`/`【提示】` + 删 refund-only 噪声行）。`npm run release-check` 全绿（unit **3196/3196** + integration 含跨接缝标黄 E2E + smoke 全模块 PASS）。⚠️ 资金红线：需求 1（R4 FundType 改写口径）+ 需求 2（R5s4 退款筛选口径）+ 需求 3.1（跨接缝标黄：引擎记命中列→export 浅拷贝→writer 标黄）均涉对账写口径/退款筛选/资金审计输出，已人工复核 + 跨接缝端到端测试 + codex review + `/check-vars`。
+
+### 🔴 对外契约变更（升级必读，详见 CHANGELOG v3.0.10「对外契约变更」段）
+
+- ① 退款回填报错 sheet2 改列（需求 3.2 + 退款输出细化 · 🔴 输出口径变更）：第 2 个 sheet（未匹配报错）删「结果类型」「退款单号」两列、银行段随 `REFUND_BANK_COLUMNS` 10→12（补 `Extra Information`/`Drawee Name`）→ 最终 13 列（银行 12 + 信息 1，与旧 13 列构成不同：旧 = 结果类型+退款单号+银行 10+信息）；报错/提示并入「报错/提示信息」列、按类型加前缀 `【报错】`/`【提示】`；删「只有退款单、无对应银行行」的 refund-only 收尾行（完全静默删除）。
+- ② 退款回填模板 sheet1 银行段补 2 列（需求 3.1 退款输出细化 · 🔴 输出口径变更）：sheet1（回填模板）银行段按 `BANK_STATEMENT_FIELDS` 模板序新增 `Extra Information`（CustomerRef 后）、`Drawee Name`（Payment Detail 后、银行段末位）→ sheet1 31→33 列（固定 6 + 银行 12 + 中台 15）；命中单元格另有黄色填充。外部按旧 31 列解析退款回填 sheet1、或按旧 13 列/无前缀解析报错 sheet2 的脚本需适配。
+
+**新增**
+
+- R4 方向守卫一次性幂等迁移 `ensureR4DirectionGuardConfigMigration`（需求 1 · 🔴 资金红线 · `migrations.js`+`database.js`）：4 个 R4 子场景内置 seed 各加 `requireBankZeroField`（出账性质 Ach Return/HX-out=`Credit Amount`、入账性质 Wire Return/HX-in=`Debit Amount`）。因 `ensureReconRoundBuiltinScenariosSeed` 凭全局 marker 短路、老库已 seed 过拿不到新字段 → 守卫静默失效，故新增**无 marker、每次启动幂等补回缺失字段**的专用迁移（范式照搬 `ensureFundTypeAchReturnConfigMigration`：LIKE 粗筛 + `JSON.parse` 校验 subCategory 严格相等 + 事务 + 表不存在 no-op）；🔴 绝不覆盖用户已改的值（已含字段则跳过、哪怕被改成空串），二次启动 `updated=0`。注册三点 = `database.js` require/薄壳/调用（插在 `retireChargeOutboundOrphans` 之后）。新增 `migrations-r4-direction-guard.test.js`。
+- R4 方向不符告警 cause 文案（需求 1 · `error-causes.js`）：`CAUSE_MAP` 加 `'r4-fund-direction-mismatch'`（「资金性质命中但银行行借贷方向不符（应为0的金额列非0），已跳过该行资金性质改写，请人工核对方向」），走既有主错误报告链路（场景名「资金性质校验」、5 列含对账 ID 与可读「可能原因」）。
+
+**变更**
+
+- 需求 1 R4 资金性质校验加银行行借贷方向守卫（🔴 资金红线 · `r4-fund-nature-check.js`）：R4 引擎主循环在 `applyHandler` 返回非空 decision（命中网关 TradeType）之后、改写 FundType 之前插方向守卫——读 `config.requireBankZeroField`，「应为0」金额列实际非0（`(parseNumber(bankRow[zf]) || 0) !== 0`）则不改写 + push warning（`r4-fund-direction-mismatch`）+ continue，方向满足走原有改写。「应为0」口径与全仓一致（空/garbage 当 0 = 满足）。守卫**只放主循环不放纯函数 `applyHandler`**（后者无 warning 权、且无法区分「网关没匹配（null 静默不 warn）」vs「命中但方向不符（才 warn）」）；叠加链每 handler 各判各的（某跳不符停在上一跳值）；no-op（`oldValue==decision`）不 warn 不 record。顶部 import 加 `parseNumber`。`r4-fund-nature-check.test.js` 加方向守卫组 + `applyHandler` 不读金额职责分离断言；`migrations-recon-round-seed.test.js`/`error-causes.test.js` 同步补期望。
+- 需求 2 R5s4 退款回填加网关 reconid 前置过滤（🔴 资金红线 · `reconciliation-orchestrator.js`+`r5-refund-order-backfill.js`）：编排器把网关全量行（`safeGwRows`）经第 4 参 `gwRows` 传入退款引擎；引擎建网关 `reconciliationid`（小写）集合，bankPool 在既有两道筛（`FundType==='Ach Return' && !isFundTypeChanged`）后追加第 3 道筛——银行行 `ReconciliationId`（驼峰）命中网关集合即静默 drop（不回填/不进 sheet2/不留痕）。空键不参与（照常入池）；网关集合缺省退化为原行为；大小写敏感（`normalizeCellValue` 仅 trim、精确等值）。审计不变量不破（入池前过滤、退款引擎旁路、行数守恒）。`r5-refund-order-backfill.test.js` 加网关前置过滤组（命中静默移出/空键/缺省退化/大小写敏感）。
+- 需求 3.1 退款回填 sheet1 命中字段交集标黄（🔴 资金红线跨接缝 · `r5-refund-order-backfill.js`+`refund-backfill-writer.js`）：各匹配策略命中诚实记「候选比对列」`_matchedColumns`，在 `buildBackfillRow` 单点收口过滤到「既参与匹配、又在 sheet1 列（`REFUND_TEMPLATE_HEADERS`）」交集、非空才挂；export 浅拷贝 `{...r}` 天然保 `_` 字段（main.js 不改）；writer 就地定义 `YELLOW_FILL`（argb `FFFFFF00`，注释指向 `exceljs-writer.js` 单一真相），sheet1 写循环按 `_matchedColumns` 标黄（列偏移 `getCell(i+1)`——退款 sheet1 无前导列，区别于主报告 `colIdx+2`）。交集标黄、零交集不标；命中即停单行单策略。新增跨接缝端到端集成脚本 `refund-backfill-yellow-fill-e2e.js`（引擎→浅拷贝→writer→ExcelJS readback 断言标黄列）+ 逐策略 `_matchedColumns` 链断言 + writer 标黄断言。
+- 需求 3.1 退款输出细化：银行段补 `Extra Information`/`Drawee Name` 两列 + S4 标黄扩 8 列（🔴 资金红线/输出口径 · `refund-backfill-fields.js`+`r5-refund-order-backfill.js`）：`REFUND_BANK_COLUMNS` 10→12（按 `BANK_STATEMENT_FIELDS` 模板序插 `Extra Information`（CustomerRef 后）+ `Drawee Name`（Payment Detail 后、银行段末位），均 ∈ `BANK_STATEMENT_FIELDS` 启动断言①自动通过），传播至 `REFUND_TEMPLATE_HEADERS` 31→33 / `UNMATCHED_HEADERS` 11→13；让 S2-MTX/JPM-HK/S2b/S3b/S3c 命中 `Extra Information`、S3 命中 `Drawee Name` 时也标黄（不改 matcher 候选逻辑，靠列加入 sheet1 自动生效）。S4 命中 `_matchedColumns` 由 `[BillDate, valueDate]` 扩为按命中详情文案「退款提交日期+大账号+金额+币种」口径的 8 列（bank `BillDate`/`MerchantId`/`Debit Amount`/`Currency` + ro `valueDate`/`银行大账号`/`退款金额`/`币种`）；🔴 S4「金额」实际匹配口径为 `|Credit−Debit|` 绝对值，`Debit Amount` 列仅作展示列标黄。
+- 需求 3.2 退款回填报错 sheet2 改造（🔴 输出口径，详见对外契约① · `refund-backfill-writer.js`+`r5-refund-order-backfill.js`）：`UNMATCHED_HEADERS = [...REFUND_BANK_COLUMNS, '报错/提示信息']` 删「结果类型」+「退款单号」、银行段随 `REFUND_BANK_COLUMNS` 10→12 → 最终 13 列（银行 12 + 信息 1）；报错/提示前缀（`【报错】`/`【提示】`）单点加在 `buildUnmatchedBankRow`（走该函数的 bank 形状行自动带前缀），保留 row 上 `结果类型` key（仅不进 sheet2 投影）兼容引擎内部 filter；删 refund-only 两段收尾循环（完全静默删除）；保留 bank-only NOTICE 行。审计不变量收窄为「银行侧全覆盖」（refund-only 不再产 notice 行）。`r5-refund-order-backfill.test.js` §⑩ 不变量组重写 + 文案前缀断言；`refund-backfill-writer.test.js` sheet2 13 列断言。
+
 ## v3.0.9（2026-06-18）
 
 v3.0.9 集中 **1 项**核心需求（无并入 spec）：**工具箱「按字段值拆分」支持 800MB / ~700 万行多 sheet 大文件**。新建一条隔离的、worker 化的、内存有界的工具箱大文件拆分通道，复用 `big-table-import/` yauzl 流式原语（`zip-reader.js` / `row-scanner.js`），🔴 绝不碰 `streaming-xlsx-reader.js`（隔离资金红线复用文件）、🚩 前端零改动（回传契约 `valuesByField={field:string[]}` 逐字节一致）、小文件路径零回归（路由 fail-closed）。

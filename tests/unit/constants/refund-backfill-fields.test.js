@@ -2,9 +2,9 @@
 // PRD-中台退款订单回填-v2.1.16-beta.3 §5.1.5/§5.2/§5.5/§九；TECH §3.3.1
 //
 // 覆盖：
-//   ① REFUND_BANK_COLUMNS 9 列全部 ∈ BANK_STATEMENT_FIELDS（防漂移）
-//   ② 9 列含 Debit Amount、不含 Credit Amount（✅Q4：金额列只放 Debit Amount）
-//   ③ REFUND_TEMPLATE_HEADERS 14 列顺序（A~E 固定 + F~N = REFUND_BANK_COLUMNS）
+//   ① REFUND_BANK_COLUMNS 12 列全部 ∈ BANK_STATEMENT_FIELDS（防漂移；v3.0.10：10→12 加 Extra Information + Drawee Name）
+//   ② 12 列含 Debit Amount、不含 Credit Amount（✅Q4：金额列只放 Debit Amount）
+//   ③ REFUND_TEMPLATE_HEADERS 33 列顺序（固定 6 + 银行 12 + 中台 15）
 //   ④ 常量 Object.freeze（含嵌套）
 //   ⑤ 提取参数 MTX_FEATURE / T54SWIC_FEATURE 值
 //   ⑥ 字段映射常量关键映射值（唯一值/回填/S1~S4/JPM/筛选）
@@ -23,12 +23,12 @@ const {
 const { BANK_STATEMENT_FIELDS } = require('../../../src/constants/bank-statement-fields');
 const { ZHONGTAI_REFUND_ORDER_SIGNATURE } = require('../../../src/constants/table-signatures');
 
-test.describe('REFUND_BANK_COLUMNS — 银行 10 字段（O3：9→10 加 Payment Detail）', () => {
-  test('恰好 10 列', () => {
-    assert.equal(REFUND_BANK_COLUMNS.length, 10);
+test.describe('REFUND_BANK_COLUMNS — 银行 12 字段（v3.0.10：10→12 加 Extra Information + Drawee Name）', () => {
+  test('恰好 12 列', () => {
+    assert.equal(REFUND_BANK_COLUMNS.length, 12);
   });
 
-  test('10 列全部 ∈ BANK_STATEMENT_FIELDS（防常量漂移）', () => {
+  test('12 列全部 ∈ BANK_STATEMENT_FIELDS（防常量漂移）', () => {
     const bankSet = new Set(BANK_STATEMENT_FIELDS);
     for (const f of REFUND_BANK_COLUMNS) {
       assert.ok(bankSet.has(f), `${f} 不在 BANK_STATEMENT_FIELDS 中`);
@@ -40,15 +40,23 @@ test.describe('REFUND_BANK_COLUMNS — 银行 10 字段（O3：9→10 加 Paymen
     assert.ok(!REFUND_BANK_COLUMNS.includes('Credit Amount'), '🔴 绝不能含 Credit Amount');
   });
 
-  test('O3：第 10 列为 Payment Detail，紧随 CustomerRef', () => {
-    assert.equal(REFUND_BANK_COLUMNS[9], 'Payment Detail', '第 10 列应为 Payment Detail');
-    assert.equal(REFUND_BANK_COLUMNS[8], 'CustomerRef', 'Payment Detail 应紧随 CustomerRef');
+  test('v3.0.10：含新增的 Extra Information + Drawee Name 两列', () => {
+    assert.ok(REFUND_BANK_COLUMNS.includes('Extra Information'), 'v3.0.10 应含 Extra Information');
+    assert.ok(REFUND_BANK_COLUMNS.includes('Drawee Name'), 'v3.0.10 应含 Drawee Name');
   });
 
-  test('精确顺序 = BillDate/Channel/地区/MerchantId/Currency/Debit Amount/ReconciliationId/ChannelOrderNo/CustomerRef/Payment Detail', () => {
+  test('v3.0.10 列序：CustomerRef → Extra Information → Payment Detail → Drawee Name（按 BANK_STATEMENT_FIELDS 模板序）', () => {
+    assert.equal(REFUND_BANK_COLUMNS[8], 'CustomerRef', '第 9 列应为 CustomerRef');
+    assert.equal(REFUND_BANK_COLUMNS[9], 'Extra Information', '第 10 列应为 Extra Information（插在 CustomerRef 后）');
+    assert.equal(REFUND_BANK_COLUMNS[10], 'Payment Detail', '第 11 列应为 Payment Detail（Extra Information 后）');
+    assert.equal(REFUND_BANK_COLUMNS[11], 'Drawee Name', '第 12 列应为 Drawee Name（末位，Payment Detail 后）');
+  });
+
+  test('精确顺序（v3.0.10 12 列）', () => {
     assert.deepEqual(REFUND_BANK_COLUMNS, [
       'BillDate', 'Channel', '地区', 'MerchantId', 'Currency',
-      'Debit Amount', 'ReconciliationId', 'ChannelOrderNo', 'CustomerRef', 'Payment Detail'
+      'Debit Amount', 'ReconciliationId', 'ChannelOrderNo', 'CustomerRef',
+      'Extra Information', 'Payment Detail', 'Drawee Name'
     ]);
   });
 
@@ -82,10 +90,10 @@ test.describe('REFUND_RO_COLUMNS — 中台退款订单 15 字段（O4 新增）
   });
 });
 
-test.describe('REFUND_TEMPLATE_HEADERS — sheet1 31 列（O1/O3/O4：14→31）', () => {
-  test('恰好 31 列（6 + 10 + 15）', () => {
-    assert.equal(REFUND_TEMPLATE_HEADERS.length, 31);
-    assert.equal(6 + REFUND_BANK_COLUMNS.length + REFUND_RO_COLUMNS.length, 31);
+test.describe('REFUND_TEMPLATE_HEADERS — sheet1 33 列（v3.0.10：31→33，银行段 10→12）', () => {
+  test('恰好 33 列（6 + 12 + 15）', () => {
+    assert.equal(REFUND_TEMPLATE_HEADERS.length, 33);
+    assert.equal(6 + REFUND_BANK_COLUMNS.length + REFUND_RO_COLUMNS.length, 33);
   });
 
   test('A~F 固定列顺序：退款单号/状态/渠道流水号/渠道退款时间/命中类型/匹配命中详情（O1 加命中类型列）', () => {
@@ -99,12 +107,12 @@ test.describe('REFUND_TEMPLATE_HEADERS — sheet1 31 列（O1/O3/O4：14→31）
     assert.equal(REFUND_TEMPLATE_HEADERS[5], '匹配命中详情');
   });
 
-  test('第 7 列起 10 列 = REFUND_BANK_COLUMNS', () => {
-    assert.deepEqual(REFUND_TEMPLATE_HEADERS.slice(6, 16), [...REFUND_BANK_COLUMNS]);
+  test('第 7 列起 12 列 = REFUND_BANK_COLUMNS', () => {
+    assert.deepEqual(REFUND_TEMPLATE_HEADERS.slice(6, 18), [...REFUND_BANK_COLUMNS]);
   });
 
-  test('第 17 列起 15 列 = REFUND_RO_COLUMNS', () => {
-    assert.deepEqual(REFUND_TEMPLATE_HEADERS.slice(16), [...REFUND_RO_COLUMNS]);
+  test('第 19 列起 15 列 = REFUND_RO_COLUMNS', () => {
+    assert.deepEqual(REFUND_TEMPLATE_HEADERS.slice(18), [...REFUND_RO_COLUMNS]);
   });
 
   test('Object.freeze 锁死', () => {

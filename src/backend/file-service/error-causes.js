@@ -28,6 +28,9 @@ const CAUSE_MAP = Object.freeze({
   'payment-offline-multi-candidate': '一条银行行匹配到多条调拨订单候选，已按就近取最近一条',
   'payment-offline-no-order-match': '银行行未匹配到金额币种相符且晚于交易时间的调拨订单',
 
+  // v3.0.10 需求1：R4 资金性质校验方向守卫（🔴 资金红线）—— 命中网关但银行行借贷方向不符
+  'r4-fund-direction-mismatch': '资金性质命中但银行行借贷方向不符（应为0的金额列非0），已跳过该行资金性质改写，请人工核对方向',
+
   // 主模块（FileValidationError code 粗粒度）
   'FILE_READ': '文件读取失败，可能损坏或格式不对',
   'FILE_TYPE': '文件类型不支持',

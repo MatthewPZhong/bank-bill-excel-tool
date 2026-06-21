@@ -17,12 +17,24 @@
 //   S4（链后）：单向 0 ≤ bank.BillDate − ro.valueDate ≤ 21(R4)             [模糊]
 //   产出独立的回填模板行集合 + 未匹配/报错行集合（不改 bankRows）。
 //
+// v3.0.10 变更：
+//   需求2（网关前置过滤）：银行 Ach Return 行入池前先与网关单做 reconid 匹配，命中网关 reconid 的静默移出退款池
+//     （这些行已能与网关对账，不该再走退款回填，顺手闭合已知 no-op 缝隙）。
+//   需求3.1（sheet1 标黄）：各 matcher 命中时附 `_matchedColumns`（实际参与比对的候选列，诚实列出），
+//     buildBackfillRow 单点收口过滤为「∈ sheet1 列」非空才挂 row._matchedColumns，供 writer 标黄。
+//   需求3.2（sheet2 改造）：报错/提示并入「报错/提示信息」前缀（【报错】/【提示】，单点加在 buildUnmatchedBankRow）；
+//     refund-only（无对应银行行）的 refund 不再产 notice 行（完全静默，删两段收尾循环）。
+// v3.0.10 退款回填输出细化（Change A/B）：
+//   A. REFUND_BANK_COLUMNS 10→12（在常量侧加 Extra Information + Drawee Name），各 matcher 候选 `_matchedColumns` 不动——
+//      原本被 buildBackfillRow 交集过滤丢弃的 Extra Information / Drawee Name 现入 sheet1 → 命中即自动标黄（S2-MTX/JPM-HK/S3/S3b/S3c 受益）。
+//   B. S4 命中的 `_matchedColumns` 由 [BillDate,valueDate] 扩为按固定文案口径的 8 列（bank 4 + ro 4，全∈sheet1，见 matchS4）。
+//
 // 跨表字段映射全部走 refund-backfill-fields.js（显式映射，绝不假设同名）。4 条二跳路径共用入金表双 Map 索引(depIndex)。
 //
 // 纯函数：入参 rows 数组，不读 DB/session（由 main.js 注入）；与场景2/3 独立 usedBankRowId，不串池。
 //   签名 runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, options={})
 //   返回 { backfillRows, unmatchedRows, modifications:[], warnings, hitDepositBizIds }
-//     backfillRows  —— sheet1 回填模板行（O1/O3/O4：31 列 = 固定 6 列含「命中类型」+ 银行 10 字段 + 中台 15 字段）
+//     backfillRows  —— sheet1 回填模板行（v3.0.10：33 列 = 固定 6 列含「命中类型」+ 银行 12 字段 + 中台 15 字段）
 //     unmatchedRows —— sheet2 行（含「结果类型」= 报错-人工介入 / 未匹配-提示 + 信息列）
 //     modifications —— 恒 []（本引擎不改 bankRows，保留与场景2/3 返回对称性）
 //     hitDepositBizIds —— OPEN-7：本批以入金表为来源回填成功的桥接 BizId 去重数组（含 R3/R5/R6 二跳命中）
@@ -40,9 +52,13 @@ const {
   REFUND_BACKFILL_FIELD_MAP: M,
   REFUND_BANK_COLUMNS,
   REFUND_RO_COLUMNS,
+  REFUND_TEMPLATE_HEADERS, // v3.0.10 需求3.1：buildBackfillRow 单点过滤 _matchedColumns ⊆ sheet1 列基准
   MTX_FEATURE,
   T54_REFUND_RE
 } = require('../../constants/refund-backfill-fields');
+
+// v3.0.10 需求2：网关行 reconid 字段名（真实表头小写；与 r4 引擎同名常量同值——网关侧小写、银行侧驼峰，绝不假设同名）。
+const GW_RECON_ID_FIELD = 'reconciliationid';
 
 // 提取 regex 模板（仅当模板用，每次提取前 new RegExp(source,'g') 重建，避免 lastIndex 副作用 —— 同 C1）
 const MTX_RE = buildFeatureRegex(MTX_FEATURE);          // /MTX\d{19}/g
@@ -138,12 +154,14 @@ function pickStaleHits(hitBizIds, markerMap, runId) {
   return out;
 }
 
-// —— 回填动作（§5.1.3）：1 条命中 refund order + 配对银行行 → 1 行回填模板（固定 6 列 + 银行 10 字段 + 中台 15 字段）——
+// —— 回填动作（§5.1.3）：1 条命中 refund order + 配对银行行 → 1 行回填模板（固定 6 列 + 银行 12 字段 + 中台 15 字段）——
 //   hitType：O1 命中类型（精准/模糊命中），= 命中所在策略层属性，经 consumeAndBackfill 透传（写「命中类型」列）。
 //   bridgeDepositBizId：OPEN-7（T5b-1）该回填行来源的桥接入金表 BizId（matchJpmUs 命中时非空，其他策略层为 undefined）。
 //     产物挂内部字段 `_bridgeDepositBizId`（下划线前缀；T5b-2 据此精确定位该回填行注入跨期命中提醒；不进对外回填模板列）。
 //   🔴 hitType 参数位置在 bridgeDepositBizId 之前（O1 新增；不破坏 OPEN-7 测试对 `_bridgeDepositBizId` 的断言）。
-function buildBackfillRow(refundRow, bankRow, detailText, hitType, bridgeDepositBizId) {
+//   matchedColumns（v3.0.10 需求3.1）：该命中实际参与比对的候选列（matcher 诚实记录，可含 ∉ sheet1 字段）；
+//     本函数单点收口过滤为「∈ REFUND_TEMPLATE_HEADERS」交集，非空才挂内部字段 `_matchedColumns`（仿 _bridgeDepositBizId 非空才挂），供 writer 标黄。
+function buildBackfillRow(refundRow, bankRow, detailText, hitType, bridgeDepositBizId, matchedColumns) {
   const row = {
     '退款单号': normalizeCellValue(refundRow[M.backfill.fromRoSerialNo]),
     '状态': M.backfill.statusSuccess,
@@ -152,7 +170,7 @@ function buildBackfillRow(refundRow, bankRow, detailText, hitType, bridgeDeposit
     '命中类型': hitType, // O1：精准命中 / 模糊命中
     '匹配命中详情': detailText
   };
-  // 银行段：配对银行行 10 字段原数据（按 REFUND_BANK_COLUMNS 顺序；保留原始值不 normalize，与导出口径一致）
+  // 银行段：配对银行行 12 字段原数据（按 REFUND_BANK_COLUMNS 顺序；保留原始值不 normalize，与导出口径一致）
   for (const col of REFUND_BANK_COLUMNS) {
     row[col] = bankRow[col];
   }
@@ -165,16 +183,25 @@ function buildBackfillRow(refundRow, bankRow, detailText, hitType, bridgeDeposit
   if (bridgeDepositBizId !== undefined && bridgeDepositBizId !== null && bridgeDepositBizId !== '') {
     row._bridgeDepositBizId = bridgeDepositBizId;
   }
+  // v3.0.10 需求3.1：交集标黄——单点收口过滤候选比对列为「∈ sheet1 列」交集 + 去重；零交集不挂（仿 _bridgeDepositBizId 非空才挂）。
+  //   过滤口径单一真相在此（matcher 端只管诚实记候选列，避免各 matcher 各自过滤易漏）；用数组（JSON 友好 + 浅拷贝保引用 + deepEqual 直观）。
+  //   去重：个别策略候选列含同名不同来源列（如 TwoHop 银行/入金侧均叫 'CustomerRef'）→ 投影同一 sheet1 列，去重避免重复标记。
+  if (Array.isArray(matchedColumns)) {
+    const inSheet1 = [...new Set(matchedColumns.filter((c) => REFUND_TEMPLATE_HEADERS.includes(c)))];
+    if (inSheet1.length > 0) row._matchedColumns = inSheet1;
+  }
   return row;
 }
 
-// —— sheet2 行：未匹配的银行行 9 字段 + 结果类型 + 信息列（两类输出同表用「结果类型」列区分）——
+// —— sheet2 行：未匹配的银行行 12 字段 + 信息列（v3.0.10 需求3.2：sheet2 删「结果类型」列后靠「报错/提示信息」前缀区分）——
+//   🔴 保留 row 上 '结果类型' key（仅不进 sheet2 投影，UNMATCHED_HEADERS 已无该列），以兼容引擎内部/核兼容测试的 filter(x=>x['结果类型']===...)。
+//   报错/提示前缀单点加在此：8 个 push 点里走本函数的 bank 形状行全部自动带前缀。
 function buildUnmatchedBankRow(bankRow, resultType, info) {
   const row = { '结果类型': resultType };
   for (const col of REFUND_BANK_COLUMNS) {
     row[col] = bankRow[col];
   }
-  row['报错/提示信息'] = info;
+  row['报错/提示信息'] = (resultType === RESULT_ERROR ? '【报错】' : '【提示】') + info;
   return row;
 }
 
@@ -195,7 +222,8 @@ function matchS1(bankRow, refundCands) {
     for (const bankField of M.s1.bankFields) {
       const bankVal = normalizeCellValue(bankRow[bankField]);
       if (bankVal !== '' && bankVal === payNo) {
-        hits.push({ refundRow: ro, detail: detailBankToRo(bankField, bankVal, M.s1.roKey, payNo) });
+        // v3.0.10 需求3.1：候选比对列 = 命中的银行字段（ChannelOrderNo/CustomerRef，均∈sheet1）+ ro 银行打款流水号（∈sheet1）。
+        hits.push({ refundRow: ro, detail: detailBankToRo(bankField, bankVal, M.s1.roKey, payNo), _matchedColumns: [bankField, M.s1.roKey] });
         break; // 同一 refund 命中一个被查字段即可，不重复记
       }
     }
@@ -213,7 +241,8 @@ function matchS2Mtx(bankRow, refundCands) {
     if (memo === '') continue;
     const hitMtx = mtxList.find((mtx) => memo.includes(mtx));
     if (hitMtx) {
-      hits.push({ refundRow: ro, detail: detailBankToRo(M.s2.bankExtract, hitMtx, M.s2.roField, memo) });
+      // v3.0.10 需求3.1：候选 = bank Extra Information + ro 附言；退款回填输出细化后 Extra Information 已入 sheet1 → 两列均标黄。
+      hits.push({ refundRow: ro, detail: detailBankToRo(M.s2.bankExtract, hitMtx, M.s2.roField, memo), _matchedColumns: [M.s2.bankExtract, M.s2.roField] });
     }
   }
   return hits;
@@ -239,6 +268,8 @@ function matchCustomerRefTwoHop(bankRow, refundCands, depositRows, depIndex) {
       hits.push({
         refundRow: ro,
         detail: detailBankToDeposit(M.jpm.bankCompare, bankRef, M.jpm.depositTake, depRef),
+        // v3.0.10 需求3.1：候选 = bank CustomerRef（∈sheet1）+ 入金侧取值列（同名 CustomerRef，但属入金表★，收口去重后仅标 sheet1 的 CustomerRef）。
+        _matchedColumns: [M.jpm.bankCompare, M.jpm.depositTake],
         // OPEN-7（T5b-1）：归一 = String().trim()（与仓储 normalizeKey 字节一致；引擎纯函数不 require 仓储）。
         _depositBizId: normalizeBizIdKey(dep.BizId)
       });
@@ -321,9 +352,12 @@ function matchJpmHk(bankRow, refundCands, depositRows, depIndex) {
       const hitSwic = swicList.find((swic) => swic === payNo);
       if (hitSwic) {
         // 命中详情：银行 Extra Information/Payment Detail 提取值 ↔ refund order 银行打款流水号
+        // v3.0.10 需求3.1：候选 = bank 附言来源字段（Extra Information / Payment Detail）+ ro 银行打款流水号；
+        //   提取源可能来自任一附言字段，诚实列出全部候选。退款回填输出细化后 Extra Information/Payment Detail 均∈sheet1 → 三列全标黄。
         hits.push({
           refundRow: ro,
-          detail: detailBankToRo(M.jpm.hkCleanFields.join('/'), hitSwic, M.jpm.hkRoKey, payNo)
+          detail: detailBankToRo(M.jpm.hkCleanFields.join('/'), hitSwic, M.jpm.hkRoKey, payNo),
+          _matchedColumns: [...M.jpm.hkCleanFields, M.jpm.hkRoKey]
         });
       }
     }
@@ -401,9 +435,13 @@ function matchMemoContainsDepositRef(bankRow, refundCands, depositRows, depIndex
       return v !== '' && refRe.test(v);
     });
     if (hitMemoField) {
+      // v3.0.10 需求3.1：候选 = 命中的 bank 附言字段（Payment Detail / Extra Information）；退款回填输出细化后两者均∈sheet1 → 命中哪个标哪个。
+      //   ⚠️ 比对基准是「bank 附言 .includes(入金 CustomerRef)」——入金 CustomerRef 属入金表★、且本回填行的 CustomerRef 列取自银行行（未参与本次比对），
+      //     其列名又与银行段 'CustomerRef' 同名（会被 includes 误留并错标本行 CustomerRef 列），故不列入候选（区别于 TwoHop：那里 bank.CustomerRef 本身就是比对基准）。
       hits.push({
         refundRow: ro,
         detail: detailBankToDeposit(hitMemoField, depRef, M.jpm.depositTake, depRef),
+        _matchedColumns: [hitMemoField],
         _depositBizId: normalizeBizIdKey(dep.BizId)
       });
     }
@@ -421,7 +459,9 @@ function matchS3(bankRow, refundCands) {
       if (roVal === '') continue;
       const bankVal = normalizeCellValue(bankRow[pair.bankField]);
       if (bankVal !== '' && bankVal === roVal) {
-        hits.push({ refundRow: ro, detail: detailBankToRo(pair.bankField, bankVal, pair.roKey, roVal) });
+        // v3.0.10 需求3.1：候选 = bank 付款人/卡号字段（Drawee Name/Drawee CardNo/Payee CardNo）+ 命中位 ro 列（付款人名称/付款卡号/虚拟卡号，∈sheet1，实际标黄）。
+        //   退款回填输出细化后 Drawee Name 已入 sheet1 → 命中付款人名称位时 Drawee Name + 付款人名称两列均标黄；Drawee CardNo/Payee CardNo 仍∉sheet1（过滤后只剩 ro 列）。
+        hits.push({ refundRow: ro, detail: detailBankToRo(pair.bankField, bankVal, pair.roKey, roVal), _matchedColumns: [pair.bankField, pair.roKey] });
         break; // 同一 refund 按位命中一项即可
       }
     }
@@ -468,9 +508,12 @@ function matchDraweeNameDate(bankRow, refundCands, depositRows, depIndex) {
     const dep = lookupDepositByKeys(payNo, deps, depIndex);
     if (!dep) continue;
     if (sameDay(dep[cfg.depositDateField], tokenDateStr)) {
+      // v3.0.10 需求3.1：候选 = Drawee Name（门控字段）+ 附言来源字段（Payment Detail/Extra Information，DESC DATE 提取源）+ 入金 ValueDate（★∉sheet1）；
+      //   退款回填输出细化后 Drawee Name + 两附言列均∈sheet1 → 标黄；入金 ValueDate 仍∉sheet1（过滤后丢弃）。
       hits.push({
         refundRow: ro,
         detail: detailBankToDeposit(cfg.draweeNameField + '+DESC DATE', tokenDateStr, cfg.depositDateField, normalizeCellValue(dep[cfg.depositDateField])),
+        _matchedColumns: [cfg.draweeNameField, ...cfg.memoFields, cfg.depositDateField],
         _depositBizId: normalizeBizIdKey(dep.BizId)
       });
     }
@@ -522,6 +565,10 @@ function matchMemoDateAmount(bankRow, refundCands, depositRows, depIndex) {
     hits.push({
       refundRow: ro,
       detail: detailBankToDeposit('DTD+FOR', `${dtdToken}/${amtToken}/${cfg.currency}`, cfg.depositDateField, normalizeCellValue(dep[cfg.depositDateField])),
+      // v3.0.10 需求3.1：候选 = bank 附言来源字段（DTD+FOR 提取源；Payment Detail/Extra Information）；退款回填输出细化后两者均∈sheet1 → 全标黄。
+      //   ⚠️ 入金侧比对列（ValueDate/Credit Amount/Currency）属入金表★、且非本回填行的列——其中 'Currency' 与银行段同名，
+      //     若列入候选会被 includes 误留并错标本行 Currency 列（本行 Currency 取自银行/ro，非比对基准），故不列入。
+      _matchedColumns: [...cfg.memoFields],
       _depositBizId: normalizeBizIdKey(dep.BizId)
     });
   }
@@ -540,7 +587,18 @@ function matchS4(bankRow, refundCands) {
       hits.push({
         refundRow: ro,
         dayDiff: diff,
-        detail: S4_DETAIL_TEXT // O2：S4 命中详情固定文案（底层比对仍 ro.valueDate）
+        detail: S4_DETAIL_TEXT, // O2：S4 命中详情固定文案（底层比对仍 ro.valueDate）
+        // v3.0.10：S4 命中详情固定文案为「命中唯一值:退款提交日期+大账号+金额+币种」→ 标黄按文案口径展开为 8 列
+        //   （bank 侧 4 列 + ro 侧 4 列，全 ∈ sheet1；buildBackfillRow 交集过滤全保留）：
+        //   bank：BillDate（退款提交日期/S4 日期比对列）+ MerchantId（大账号）+ Debit Amount（金额）+ Currency（币种）；
+        //   ro  ：valueDate（S4 实际日期比对列，文案口径「退款提交日期」）+ 银行大账号 + 退款金额 + 币种。
+        //   ⚠️ 资金红线说明：S4「金额」实际匹配口径是 |Credit Amount − Debit Amount| 绝对值（见 bankAmountAbs / 唯一值分组），
+        //     非单看 Debit Amount 列；此处 Debit Amount 仅作 sheet1 银行金额展示列标黄（sheet1 银行段只放 Debit Amount，无 Credit Amount）。
+        //   全部用 REFUND_BACKFILL_FIELD_MAP 常量，不硬编码中文列名；'Debit Amount' 为 sheet1 银行金额列字面（同 REFUND_BANK_COLUMNS）。
+        _matchedColumns: [
+          M.s4.bankDate, M.uniqueKey.bankAccount, 'Debit Amount', M.uniqueKey.bankCurrency,
+          M.s4.roDate, M.uniqueKey.roAccount, M.uniqueKey.roAmount, M.uniqueKey.roCurrency
+        ]
       });
     }
   }
@@ -581,15 +639,30 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
     ? options.isFundTypeChanged
     : () => false;
 
+  // v3.0.10 需求2：网关前置过滤——建网关 reconid 集合（网关侧小写 reconciliationid；空键不入，与下方银行空键对称）。
+  //   缺省退化：options.gwRows 未传（旧调用方/测试）→ safeGwRows=[] → 集合空 → 道3 永不命中 → 等同无前置过滤（与现状一致）。
+  const safeGwRows = Array.isArray(options.gwRows) ? options.gwRows : [];
+  const gwReconidSet = new Set(
+    safeGwRows
+      .map((g) => normalizeCellValue(g && g[GW_RECON_ID_FIELD]))
+      .filter((k) => k !== '')
+  );
+
   // 1) 数据筛选（§5.1.2）
   //   refund：状态 === SUBMITTED
   const refundPool = safeRefundRows.filter(
     (r) => normalizeCellValue(r[M.filter.roStatusField]) === M.filter.roSubmitted
   );
-  //   bank：FundType === Ach Return 且未被 R4 改写 FundType
-  const bankPool = safeBankRows.filter(
-    (b) => normalizeCellValue(b[M.filter.bankFundType]) === M.filter.achReturn && !isFundTypeChanged(b._rowId)
-  );
+  //   bank：FundType === Ach Return 且未被 R4 改写 FundType；且（v3.0.10 需求2）未命中网关 reconid
+  const bankPool = safeBankRows.filter((b) => {
+    if (normalizeCellValue(b[M.filter.bankFundType]) !== M.filter.achReturn) return false; // 道1：FundType=Ach Return
+    if (isFundTypeChanged(b._rowId)) return false;                                          // 道2：未被 R4 改写 FundType
+    // 道3（v3.0.10 需求2）：命中网关 reconid → 静默移出退款池（已能与网关对账，不走退款回填）。
+    //   银行侧驼峰 ReconciliationId（= M.backfill.fromBankReconId，复用单一真相，不新增别名）；空键不参与命中判定（与网关空键 filter 对称）。
+    const bankRecon = normalizeCellValue(b[M.backfill.fromBankReconId]);
+    if (bankRecon !== '' && gwReconidSet.has(bankRecon)) return false;
+    return true;
+  });
 
   // 空入参防御：任一侧空 → 无可对账，返回空（不抛）
   if (refundPool.length === 0 || bankPool.length === 0) {
@@ -637,6 +710,9 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
   // 3) 对每个唯一值分组：基数分类 → S1→S4 命中即停（✅Q3）
   //   🔴 审计完整性不变量（PR#64 Finding 1）：每条筛后 SUBMITTED refund + 每条筛后 Ach Return（未改写）银行行
   //   都必须落 backfill / error / notice 三者之一，绝不静默消失。
+  //   v3.0.10 需求3.2：refund-only（无对应银行行）的 refund 不再产 notice 行（完全静默删除，已确认），
+  //     不变量收窄为「银行侧全覆盖」——每条筛后 Ach Return（未改写、未被网关前置过滤）银行行仍必落
+  //     backfill / error / notice 之一；SUBMITTED refund 侧不再保证全覆盖（refund-only 静默）。
   for (const [key, bankGroup] of bankGroups) {
     const refundGroup = refundGroups.get(key) || [];
 
@@ -667,20 +743,8 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
     });
   }
 
-  // 4) refund-only 组收尾（PR#64 Finding 1）：某唯一值下有 SUBMITTED refund 但无银行 Ach Return 行
-  //   → 该组从未进入主循环（无对应 bankGroup），其 refund 需在此补「未匹配-提示」。
-  //   ⚠️ 只补「从未进入主循环」的 key（!bankGroups.has(key)）；已进入主循环的组里未消费 refund
-  //   由 runStrategiesForGroup 内的 per-group 收尾负责，避免重复产行。
-  for (const [key, refundGroup] of refundGroups) {
-    if (bankGroups.has(key)) continue; // 已由主循环（含其 per-group 收尾）处理
-    for (const ro of refundGroup) {
-      unmatchedRows.push({
-        '结果类型': RESULT_NOTICE,
-        '退款单号': normalizeCellValue(ro[M.backfill.fromRoSerialNo]),
-        '报错/提示信息': '该退款订单未关联到银行对账单数据，不更新并提示'
-      });
-    }
-  }
+  // 4) v3.0.10 需求3.2：删除原 refund-only 组收尾循环——某唯一值下有 SUBMITTED refund 但无银行 Ach Return 行时，
+  //   不再为这些 refund 产「未匹配-提示」notice 行（完全静默，已确认）。审计不变量收窄为「银行侧全覆盖」（见上方注释）。
 
   // OPEN-7（T5b-1）：去重数组冒泡给 orchestrator → T5b-2 在 export 阶段查标记/注入提醒。
   return {
@@ -846,16 +910,8 @@ function runStrategiesForGroup(ctx) {
     }
   }
 
-  // —— 收尾：未消费且未锁定的 refund order → 不更新并提示（锁定的 refund 已在报错行体现，不再重复产提示）——
-  for (const ro of refundGroup) {
-    const id = refundIdOf(ro);
-    if (usedRefundIdx.has(id) || lockedRefundIdx.has(id)) continue;
-    unmatchedRows.push({
-      '结果类型': RESULT_NOTICE,
-      '退款单号': normalizeCellValue(ro[M.backfill.fromRoSerialNo]),
-      '报错/提示信息': '该退款订单未关联到银行对账单数据，不更新并提示'
-    });
-  }
+  // —— v3.0.10 需求3.2：删除原 per-group refund 收尾循环——同组内未消费/未锁定的 refund 不再产「未匹配-提示」notice 行
+  //   （完全静默，已确认）。锁定的 refund 仍在报错行体现（不变）；银行侧覆盖由上方 S1~S4 + 各报错/提示分支保证（不变）。
 }
 
 // 产 1 条 bank 报错-人工介入行 + 收集 warning
@@ -904,7 +960,8 @@ function consumeAndBackfill(bankRow, hit, hitType, ctx) {
   if (hitDepositBizIdSet && bridgeBizId !== undefined && bridgeBizId !== null && bridgeBizId !== '') {
     hitDepositBizIdSet.add(bridgeBizId);
   }
-  backfillRows.push(buildBackfillRow(hit.refundRow, bankRow, hit.detail, hitType, bridgeBizId));
+  // v3.0.10 需求3.1：透传 hit._matchedColumns 给 buildBackfillRow（透传不过滤，过滤单点收口在 buildBackfillRow）。
+  backfillRows.push(buildBackfillRow(hit.refundRow, bankRow, hit.detail, hitType, bridgeBizId, hit && hit._matchedColumns));
 }
 
 // v3.0.0 需求3：退款回填「候选预检」只读 helper（与 c3-gateway-recon-join.js 的 countC3BankCandidates 对称）。
