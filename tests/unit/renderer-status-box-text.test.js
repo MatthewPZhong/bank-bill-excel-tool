@@ -47,9 +47,11 @@ describe('updateBankStatementUi — N6 状态框换行修复 (v2.1.9 T31)', () =
       '前缀拼接不得使用全角「：」（会被 updateStatusBox 自动换行打断「前缀+文件名同行」）');
   });
 
-  test('行间换行 `\\nerror-report：` 与 `\\n不平账结果表：` 保留（非冒号后冗余）', () => {
-    assert.ok(source.includes('\\nerror-report：${ex.errorReportName}'),
-      '`\\nerror-report：` 行间换行应保留');
+  // v3.0.11 需求2：导出成功框不再显示 error-report（删该显示行；文件仍照常生成）。
+  //   `\n不平账结果表：` 等其它行间换行不受影响，保留。
+  test('error-report 显示行已移除（v3.0.11 需求2）；`\\n不平账结果表：` 行间换行保留', () => {
+    assert.ok(!source.includes('error-report：${ex.errorReportName}'),
+      'v3.0.11 需求2：导出成功框 error-report 显示行应已删除（文件仍生成，仅不在状态框展示）');
     assert.ok(source.includes('\\n不平账结果表：${gw.fileName}'),
       '`\\n不平账结果表：` 行间换行应保留');
   });

@@ -9,6 +9,29 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.0.11（2026-06-23）
+
+v3.0.11 集中 **1 项资金红线规则收紧 + 3 项体验/性能需求**（team-lead 拆需求 0/1/2/3 委托 dev 实施 + team-lead 审 diff/release-check/接缝核查/preview 兜底；需求 3 异步化「分批·导出独立」，本版只交付导入+运行不阻塞，导出流式化拆独立批次）：① 需求0 R5 场景3「银行行入桶 Debit 门槛」（🔴 资金红线）——双桶（一级 `ReconciliationId`/二级 `ChannelOrderNo`）建索引前加门槛，只有「无借方发生额」的行入桶（**口径B**：`Debit Amount` 为 0 或空白入桶、仅真实非零借方排除），杜绝有出金的脏行误当入金参与剔除匹配；② 需求1 链接表导入提醒框长文件名截断修复（前端）；③ 需求2 资金对账导出成功提醒框移除 error-report 行（文件仍生成）；④ 需求3（批1+批2）资金对账「导入/运行」不阻塞 + 统一防重入锁 + 按钮禁用（🔴 资金红线）。`npm run release-check` 全绿（unit **3218/3218** + integration 1728/1728（36 脚本）+ smoke 全模块 PASS）。⚠️ 资金红线：需求 0 改 R5s3 匹配池准入（连带 Credit 消歧/两级 fallback/1v1）、需求 3 异步化涉 run 路径但产物零变化（不碰 writer），已人工复核 + 审 diff + 单测重做/op-lock 互斥单测 + 接缝核查。
+
+**无对外契约变更**：需求 0 仅收紧匹配池准入（剔除文件列结构不变、仅命中行可能减少）；需求 3 批1+批2 不碰 writer（产物 golden 字节级一致）；需求 1/2 前端展示。
+
+**新增**
+
+- 银行对账单处理统一 operation lock（需求 3 批1 · 🔴 资金红线 · `main.js`）：模块级单例锁 `bankStatementOperationLock` + `tryAcquire`/`release`，import/run/export 三 handler 入口 acquire（争用返回 `{status:'failed', message:'正在处理中…'}`）+ finally 释放，统一一把互斥锁防三动作并发撕裂共享会话态。新增 `bank-statement-op-lock.test.js`（源码接线 + 抽真实实现验互斥/可重入）。
+- 导入进度通道 `bank-statement:import:progress`（需求 3 批1）：handler 内联 100ms 节流转发器 → preload `bankStatement.onImportProgress` → renderer `formatBankStatementImportProgress` 刷「正在导入第 X/Y 个文件…」+ finally 退订。
+- 按钮禁用统一闸 `state.bankStatementInflight`（需求 3 批1 · `renderer.js`）：三动作任一进行中禁用《开始运行》《导出文件》《导入对账单》，三入口最外层设、最内层 finally 清。
+
+**变更**
+
+- 需求 0 R5s3 入桶 Debit 门槛（🔴 资金红线 · `r5-platform-inbound-cleanup.js`）：入桶循环顶端 `parseNumber(bank['Debit Amount'])` 为 `null`（空/空白/非数字）或 `0`（含 `0.00`/`-0`）才入桶、真实非零借方跳过（双桶一致）；不改剔除行结构/触发方向/默认配置，`modifications` 恒 `[]`。单测重做（多候选 fixture 适配过门槛 + 门槛边界 + 门槛×fallback×1v1 交互）。
+- 需求 3 批2 run 数据准备分块让出（🔴 资金红线 · `main.js`/`renderer.js`）：`prepare`→`reconcile` 间的同步大表准备插 `prepare-clone-bank`/`prepare-gw`/`prepare-linked` 三处步骤边界 yield（🔴 不在 `structuredClone` 中途让出、不删 clone）；renderer `STAGE_LABELS` 补文案。纯控制流，产物零变化。
+- 需求 1 文件名换行（前端 · `styles-gemini-extra.css`）：`.alert-message` 加 `overflow-wrap: anywhere; word-break: break-word;`（未动共用 `.alert-card`）。
+- 需求 2 导出框去 error-report（前端 · `renderer.js`）：`updateBankStatementUi` 已导出分支删 error-report 行；文件生成链路不动；配套单测断言反转。
+
+**延后（独立批次）**
+
+- 资金对账「导出文件」流式化（需求 3 批3+批4 · 🔴 资金红线）：「分批·导出独立」，导出异步化（`ExcelJS.stream.xlsx.WorkbookWriter` + 分块让出 + golden 字节级校验）拆独立批次/PR，不在本版。
+
 ## v3.0.10（2026-06-21）
 
 v3.0.10 集中 **3 项**对账引擎收紧 + 退款回填输出改造需求（🔴 资金红线 · 无并入 spec）：① R4 资金性质校验加银行行借贷方向守卫（命中网关 TradeType 后再判银行行借贷方向——入账性质 Wire Return/HX-in 要求 `Debit Amount`=0、出账性质 Ach Return/HX-out 要求 `Credit Amount`=0，方向录反则不改写 FundType + 主错误报告告警）；② R5s4 退款回填加网关 reconid 前置过滤（银行候选行入池前先与网关 `reconciliationid` 集合匹配，命中网关的行静默移出退款池）；③ 退款回填输出文件改造（sheet1 命中字段交集标黄 + 银行段补 `Extra Information`/`Drawee Name` 两列 sheet1 31→33 + S4 命中标黄扩日期/大账号/金额/币种两侧 8 列 + sheet2 删「结果类型/退款单号」两列且银行段随之补 2 列 → 13 列 + 报错/提示并入信息列前缀 `【报错】`/`【提示】` + 删 refund-only 噪声行）。`npm run release-check` 全绿（unit **3196/3196** + integration 含跨接缝标黄 E2E + smoke 全模块 PASS）。⚠️ 资金红线：需求 1（R4 FundType 改写口径）+ 需求 2（R5s4 退款筛选口径）+ 需求 3.1（跨接缝标黄：引擎记命中列→export 浅拷贝→writer 标黄）均涉对账写口径/退款筛选/资金审计输出，已人工复核 + 跨接缝端到端测试 + codex review + `/check-vars`。

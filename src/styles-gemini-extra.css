@@ -864,6 +864,9 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
   line-height: 1.55;
   color: var(--text);
   padding-top: 4px;
+  /* v3.0.11 需求1：长文件名（链接表导入提醒框）换行完整显示，不被卡片宽度截断 */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .alert-message strong { color: var(--primary); font-weight: 600; }
 

@@ -173,6 +173,10 @@ const state = {
   //   { text: string, hasFailed: boolean } | null —— text 为纯文本（状态框 textContent，不可 HTML）。
   //   进入新动作（再次导入/run/export/导网关）时清空，避免上一批摘要残留。
   bankStatementImportIssues: null,
+  // v3.0.11 需求3（批1 · 按钮禁用统一闸）：银行对账单 import/run/export 任一进行中为 true。
+  //   叠加进《开始运行》《导出文件》按钮的 disabled 计算（updateBankStatementRunBtnDisabled /
+  //   updateBankStatementExportButtonsDisabled）；三入口最外层设 true、最内层 finally 清。
+  bankStatementInflight: false,
   // v2.1.16-beta.5 需求1（PR-4 修订）🔴 资金红线：资金对账面板 row1《开始运行》的智能路由模式。
   //   'bank'（默认/最近一次导入对账单成功）→ bankStatementRunBtn 走 handleBankStatementRun()（R1-R5 核心引擎）；
   //   'gateway'（最近一次导入不平表成功）   → bankStatementRunBtn 走 handleBankStatementGatewayReconRun()（网关场景）。
@@ -3427,9 +3431,9 @@ function updateBankStatementUi() {
   } else if (ex) {
     // v2.1.9 N6 (T31, D18=a)：删冒号后冗余 \n
     //   updateStatusBox 内层 (`renderer.js:542-566` `String(message).replace(/：/g, '：\n')`) 已统一处理「：」后换行，
-    //   外层不能再重复加 \n（否则双换行）。`\nerror-report：` 是行间换行，保留不动。
+    //   外层不能再重复加 \n（否则双换行）。行间产物用 \n 续行（见下方加款单剔除 / 中台回填）。
+    // v3.0.11 需求2：导出成功框不再显示 error-report（文件仍照常生成，仅去掉此处提示行）。
     text = `已导出：${ex.mainFileName}`;
-    if (ex.errorReportName) text += `\nerror-report：${ex.errorReportName}`;
     // v3.0.7 需求1b：导出附带产物（加款单剔除文件 / 中台回填文件）按存在性追加各占一行。
     //   行间用 \n 续行 + 全角「：」（与 error-report 同款，updateStatusBox 在「：」后补 \n → 文件名落下一行）。
     if (ex.platformCleanupName) text += `\n加款单剔除文件：${ex.platformCleanupName}`;
@@ -3538,7 +3542,8 @@ function updateBankStatementRunBtnDisabled() {
   const ready = state.bankStatementProcessRunMode === 'gateway'
     ? !!state.reconIdFixSession
     : !!state.bankStatementSession;
-  elements.bankStatementRunBtn.disabled = !ready;
+  // v3.0.11 需求3（批1 · 按钮禁用统一闸）：操作进行中（import/run/export）一律禁用《开始运行》。
+  elements.bankStatementRunBtn.disabled = !ready || state.bankStatementInflight;
 }
 
 // v2.1.16-beta.6 需求A 🔴 资金红线：《导出文件》按钮按面板模式禁用（与 row1 路由 mode 一致）。
@@ -3548,8 +3553,9 @@ function updateBankStatementRunBtnDisabled() {
 function updateBankStatementExportButtonsDisabled() {
   const isGateway = state.bankStatementProcessRunMode === 'gateway';
   // 预加工组导出：仅 bank 模式 + 已有处理结果可点
+  // v3.0.11 需求3（批1 · 按钮禁用统一闸）：操作进行中（import/run/export）一律禁用《导出文件》。
   if (elements.bankStatementExportBtn) {
-    elements.bankStatementExportBtn.disabled = isGateway || !state.processingResult;
+    elements.bankStatementExportBtn.disabled = isGateway || !state.processingResult || state.bankStatementInflight;
   }
 }
 
@@ -3745,10 +3751,29 @@ function buildAlsoLinkedFailureSummary(results) {
 }
 
 async function handleBankStatementBatchImport() {
+  // v3.0.11 需求3（批1 · 按钮禁用统一闸）：最外层设 inflight → 运行/导出按钮随之禁用；下方 try/finally 统一清。
+  state.bankStatementInflight = true;
+  updateBankStatementRunBtnDisabled();
+  updateBankStatementExportButtonsDisabled();
   // 「导入对账单」按钮即批量入口；导入期间禁用防重复触发。
   if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = true;
   // v3.0.0 需求2a：进入新一轮导入 → 先清上一批失败/跳过摘要，避免残留串到本批状态框。
   state.bankStatementImportIssues = null;
+  // v3.0.11 需求3（批1 · 导入进度）：订阅导入进度事件，导入期把「正在导入第 X/Y 个文件…」刷进状态框；finally 退订防泄漏。
+  let importUnsubscribe = null;
+  try {
+    const api = window.desktopApi && window.desktopApi.bankStatement;
+    if (api && typeof api.onImportProgress === 'function') {
+      importUnsubscribe = api.onImportProgress((ev) => {
+        const text = formatBankStatementImportProgress(ev);
+        if (text && elements.bankStatementStatusBox) {
+          updateStatusBox(elements.bankStatementStatusBox, text, 'info');
+        }
+      });
+    }
+  } catch (_e) { /* swallow — 订阅失败不影响导入 */ }
+  // v3.0.11 需求3（批1）：包裹整个导入流程，finally 统一清 inflight / 退订进度 / 复位按钮（覆盖全部早返回路径）。
+  try {
   let result;
   try {
     result = await window.desktopApi.bankStatement.batchImport();
@@ -3829,6 +3854,16 @@ async function handleBankStatementBatchImport() {
     //   C3 在运行点 shouldPromptGatewayReconAtRun 还有兜底提醒，不会漏）。
     const refundPrompted = await maybePromptRefundOrderImport(results);
     if (!refundPrompted) maybePromptGatewayReconImport();
+  }
+  } finally {
+    // v3.0.11 需求3（批1）：清 inflight + 退订进度 + 复位按钮（覆盖 cancelled / 失败 / 成功各早返回路径）。
+    state.bankStatementInflight = false;
+    if (typeof importUnsubscribe === 'function') {
+      try { importUnsubscribe(); } catch (_e) { /* swallow */ }
+    }
+    if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = false;
+    updateBankStatementRunBtnDisabled();
+    updateBankStatementExportButtonsDisabled();
   }
 }
 
@@ -4109,12 +4144,29 @@ async function shouldPromptGatewayReconAtRun() {
   }
 }
 
+// v3.0.11 需求3（批1 · 导入不阻塞）：import 进度文案映射（仿 formatBankStatementRunProgress）。
+//   事件形态复用 run 形态 { stage:'reading', fileIndex, fileCount, filePath }；纯展示，未识别返回 null（不刷状态框）。
+function formatBankStatementImportProgress(ev) {
+  if (!ev || typeof ev !== 'object') return null;
+  if (ev.stage === 'reading') {
+    const idx = Number.isFinite(ev.fileIndex) ? ev.fileIndex + 1 : null;
+    const total = Number.isFinite(ev.fileCount) ? ev.fileCount : null;
+    if (idx && total && total > 1) return `正在导入第 ${idx}/${total} 个文件…`;
+    return '正在导入文件…';
+  }
+  return null;
+}
+
 // v3.0.8 需求3（运行不阻塞）：run 进度文案映射（stage = handler 阶段边界；round = 编排器轮次边界）。
 //   纯展示文案，无数据语义；未识别的事件返回 null（不刷状态框）。仿收单 formatAcquiringBillCurrencyProgress 范式。
 function formatBankStatementRunProgress(ev) {
   if (!ev || typeof ev !== 'object') return null;
   const STAGE_LABELS = {
     prepare: '正在准备数据…',
+    // v3.0.11 需求3（批2 · run 数据准备分块让出）：准备阶段细分步骤文案（与 main.js yieldRun stage key 一一对应）。
+    'prepare-clone-bank': '正在准备数据（银行流水）…',
+    'prepare-gw': '正在准备数据（网关账单）…',
+    'prepare-linked': '正在准备数据（关联表）…',
     reconcile: '正在执行对账…'
   };
   const ROUND_LABELS = {
@@ -4132,6 +4184,14 @@ function formatBankStatementRunProgress(ev) {
 }
 
 async function runBankStatementInternal() {
+  // v3.0.11 需求3（批1 · 按钮禁用统一闸）：本函数是「实际运行」最内层入口（前序 confirm dialog 由 modal 全屏遮罩挡住重入，
+  //   主进程统一 op-lock 兜底真并发）。最外层设 inflight → 运行/导出按钮禁用；最内层 finally 清，避免穿过 dialog 回调清理导致按钮卡死。
+  state.bankStatementInflight = true;
+  updateBankStatementRunBtnDisabled();
+  updateBankStatementExportButtonsDisabled();
+  // v3.0.11 需求3（批1）：运行期也禁用《导入对账单》——否则运行中点导入，导入 handler 的 finally 会误清共享 inflight、
+  //   让运行/导出按钮中途复活（inflight 是三入口共享布尔）。
+  if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = true;
   // v3.0.8 需求3：订阅 run 进度事件，运行期把轮次文案刷进状态框（仿收单 handleAcquiringBillCurrencyRun）；
   //   finally 必须 unsubscribe 避免 listener 泄漏。进度文案是瞬态展示，run 完成后 refreshBankStatementStatus 覆盖回最终态。
   let unsubscribe = null;
@@ -4166,6 +4226,11 @@ async function runBankStatementInternal() {
     if (typeof unsubscribe === 'function') {
       try { unsubscribe(); } catch (_e) { /* swallow */ }
     }
+    // v3.0.11 需求3（批1）：清 inflight + 复位按钮（refreshBankStatementStatus 已在 inflight=true 时重算过，此处再算一次回到可用态）。
+    state.bankStatementInflight = false;
+    if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = false;
+    updateBankStatementRunBtnDisabled();
+    updateBankStatementExportButtonsDisabled();
   }
 }
 
@@ -4174,6 +4239,12 @@ async function handleBankStatementExport() {
     openModal(createAlertDialog('请先点击"开始运行"处理对账单'));
     return;
   }
+  // v3.0.11 需求3（批1 · 按钮禁用统一闸）：最外层设 inflight → 运行/导出按钮禁用；finally 清。
+  state.bankStatementInflight = true;
+  updateBankStatementRunBtnDisabled();
+  updateBankStatementExportButtonsDisabled();
+  // v3.0.11 需求3（批1）：导出期也禁用《导入对账单》（理由同运行：防导入 handler finally 误清共享 inflight）。
+  if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = true;
   try {
     const result = await window.desktopApi.bankStatement.export();
     if (!result) return;
@@ -4211,6 +4282,12 @@ async function handleBankStatementExport() {
   } catch (error) {
     console.error(error);
     openModal(createAlertDialog(`导出失败：${error.message || error}`));
+  } finally {
+    // v3.0.11 需求3（批1）：清 inflight + 复位按钮（含 cancelled / empty / ok / failed 各早返回路径）。
+    state.bankStatementInflight = false;
+    if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = false;
+    updateBankStatementRunBtnDisabled();
+    updateBankStatementExportButtonsDisabled();
   }
 }
 

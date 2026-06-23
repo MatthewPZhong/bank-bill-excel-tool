@@ -193,6 +193,13 @@ contextBridge.exposeInMainWorld('desktopApi', {
       const wrapped = (_event, ev) => listener(ev);
       ipcRenderer.on('bank-statement:run:progress', wrapped);
       return () => ipcRenderer.removeListener('bank-statement:run:progress', wrapped);
+    },
+    // v3.0.11 需求3（批1 · 导入不阻塞）：订阅导入进度事件（仿 acquiringBillCurrency.onImportProgress，换通道名）。
+    //   返回 unsubscribe 函数；renderer 必须在 finally 调用避免 listener 内存泄漏。
+    onImportProgress: (listener) => {
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('bank-statement:import:progress', wrapped);
+      return () => ipcRenderer.removeListener('bank-statement:import:progress', wrapped);
     }
   },
   // v3.0.8 需求1：工具箱🧰（合表 / 拆表）—— 脱离主对账流程的轻量 Excel 行级搬运小工具

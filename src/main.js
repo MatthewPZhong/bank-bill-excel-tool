@@ -408,6 +408,25 @@ function releaseAcquiringBillCurrencyOpLock() {
   acquiringBillCurrencyOperationLock.monthKey = null;
 }
 
+// v3.0.11 需求3（批1 · 🔴 资金红线）：银行对账单处理模块的统一 operation lock。
+//   三动作 import(bank-statement:batch-import) / run(bank-statement:run) / export(bank-statement:export)
+//   共享同一把互斥锁 —— 它们共享全局会话态 bankStatementSession / processingResult / refundOrderSession /
+//   gatewayReconSession，并发执行会撕裂状态（如导出读到运行中途的半截 processingResult）。
+//   争用即返回 { status:'failed', message:'正在处理中…' }；handler finally 释放（仿收单 acquiringBillCurrencyOperationLock）。
+const bankStatementOperationLock = { inFlight: false, operation: null };
+function tryAcquireBankStatementOpLock(operation) {
+  if (bankStatementOperationLock.inFlight) {
+    return { acquired: false, message: '正在处理中…' };
+  }
+  bankStatementOperationLock.inFlight = true;
+  bankStatementOperationLock.operation = operation;
+  return { acquired: true };
+}
+function releaseBankStatementOpLock() {
+  bankStatementOperationLock.inFlight = false;
+  bankStatementOperationLock.operation = null;
+}
+
 const DEFAULT_BACKGROUND_COLOR = '#efe8da';
 // v2.0.0-beta.2 D16：Clear 风格的默认背景色（白）
 const CLEAR_BACKGROUND_COLOR = '#ffffff';
@@ -3676,6 +3695,11 @@ function registerAppHandlers() {
   //   结果零变化（golden 字节一致）—— 只插 yield/进度，不改任何数据准备值、轮次顺序、引擎入参、匹配逻辑。
   //   processingResult 仍在 run 全程完成后一次性赋值（中途 yield 期间无并发 run：handler 入口 session 守卫 + 无新并发入口）。
   trackedIpcHandle('bank-statement:run', '银行对账单处理', '开始运行', async (event) => {
+    // v3.0.11 需求3（批1 · 🔴 资金红线）：统一互斥锁。争用即返回失败，绝不与 import/export 并发撕裂会话态。
+    const opLock = tryAcquireBankStatementOpLock('run');
+    if (!opLock.acquired) {
+      return { status: 'failed', message: opLock.message };
+    }
     try {
       if (!bankStatementSession) {
         return { status: 'failed', message: '请先导入银行对账单' };
@@ -3720,6 +3744,8 @@ function registerAppHandlers() {
       // （Codex F1 P1 修复：算法层会原地修改字段，不 clone 会让连续运行的 oldValue 漂移
       //  → first-match-wins 失效，低优先级场景可能覆盖高优先级写入的字段）
       const workingBankRows = structuredClone(bankStatementSession.rows);
+      // v3.0.11 需求3（批2）：银行行深拷已完成（原子 clone 后的步骤边界，非 clone 内部）→ 让出一次，再读大网关表。
+      await yieldRun('prepare-clone-bank');
       // v2.1.16-beta.2 T1：网关行数据源从「资金对账不平 gatewayReconSession」切到链接表 linked_gateway_bill。
       //   readLinkedTableRows('gateway-bill') 无数据时返回 []（下游各轮自然 no-op）。
       // v3.0.7 需求6 修复（🔴 资金红线）：网关账单表（可达数百万行）改「按 Channel 过滤读」根治内存尖峰
@@ -3732,6 +3758,8 @@ function registerAppHandlers() {
       //     必须保留（常驻 session、引擎原地改它）。
       const bankChannels = bankStatementSession.rows.map((r) => (r && r.Channel != null ? String(r.Channel).trim() : ''));
       const workingGwRows = database.readGatewayBillRowsByChannels(bankChannels);
+      // v3.0.11 需求3（批2）：网关账单大表读完（步骤边界）→ 让出一次，再读入金/调拨等链接表。
+      await yieldRun('prepare-gw');
       // v2.1.16-beta.4 R5 场景4（中台退款订单回填）安全接线：
       //   入金表（链接表 tableKey='bank-deposit'，beta.3② 合法 tableKey）—— JPM-US 子链路用；无数据返回 []。
       //   refund order —— v2.1.16-beta.6 需求C 退款导入已开通：refundOrderSession 非 null 时注入真实退款行；未导入退款表时注入 []（引擎 no-op）。
@@ -3767,6 +3795,8 @@ function registerAppHandlers() {
       const workingMidRows = paymentOfflineEnabled
         ? structuredClone(database.readLinkedTableRows('mid-allocation') || [])
         : [];
+      // v3.0.11 需求3（批2）：入金/退款/调拨链接表深拷群已完成（步骤边界）→ 让出一次，再做调拨对账单重派生+读取等剩余重活。
+      await yieldRun('prepare-linked');
       // v3.0.6 需求2（🔴 资金红线）：R5s2「对账数据来源」二选一 —— 勾选「中台调拨单表」时改走调拨对账单回填。
       //   gating 仿 workingMidRows：默认勾选（config.reconSourceMid !== false，缺省/老库无字段视为勾选，决策 D4）；
       //   仅勾选路才 structuredClone 读隐藏派生表 linked_fund_transfer_recon，否则注入 []（取消路不读本 context）。
@@ -3877,10 +3907,18 @@ function registerAppHandlers() {
       };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    } finally {
+      // v3.0.11 需求3（批1）：无论成功/失败/中途让出，run 结束统一释放互斥锁。
+      releaseBankStatementOpLock();
     }
   });
 
   trackedIpcHandle('bank-statement:export', '银行对账单处理', '导出文件', async () => {
+    // v3.0.11 需求3（批1 · 🔴 资金红线）：统一互斥锁（与 import/run 共享一把）。争用即返回失败。
+    const opLock = tryAcquireBankStatementOpLock('export');
+    if (!opLock.acquired) {
+      return { status: 'failed', message: opLock.message };
+    }
     try {
       if (!processingResult) {
         return { status: 'failed', message: '请先点击"开始运行"处理对账单' };
@@ -4144,6 +4182,9 @@ function registerAppHandlers() {
       };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    } finally {
+      // v3.0.11 需求3（批1）：导出结束统一释放互斥锁（含 cancelled / empty / ok 各早返回路径）。
+      releaseBankStatementOpLock();
     }
   });
 
@@ -12030,7 +12071,27 @@ function registerNewAccountHandlers() {
   // v2.1.16 PR#61 F1：统计口径与单选 bank-statement:import 一致用「导入文件」
   //   （usage-stats FUNCTION_REGISTRY 无「批量导入」function → 原口径 incrementFunction 静默丢弃 →
   //    「导入对账单」成功不再计入 .usage-stats.txt；改用已注册的「导入文件」使统计连续）。
-  trackedIpcHandle('bank-statement:batch-import', '银行对账单处理', '导入文件', async () => {
+  trackedIpcHandle('bank-statement:batch-import', '银行对账单处理', '导入文件', async (event) => {
+    // v3.0.11 需求3（批1 · 🔴 资金红线）：统一互斥锁（与 run/export 共享一把）。争用即返回失败，绝不并发撕裂会话态。
+    const opLock = tryAcquireBankStatementOpLock('import');
+    if (!opLock.acquired) {
+      return { status: 'failed', message: opLock.message };
+    }
+    // v3.0.11 需求3（批1 · 导入让出+进度）：内联进度转发器（100ms 节流，仿收单 createImportProgressForwarder
+    //   + run 内联 onProgress）。stage==='reading' 为文件切换，必发不节流；事件只读，绝不写任何会话/对账态。
+    const onImportProgress = (!event || !event.sender) ? null : (() => {
+      let lastSentAt = 0;
+      const THROTTLE_MS = 100;
+      return (ev) => {
+        const isStageSwitch = ev && ev.stage === 'reading';
+        const now = Date.now();
+        if (!isStageSwitch && now - lastSentAt < THROTTLE_MS) return;
+        lastSentAt = now;
+        try { event.sender.send('bank-statement:import:progress', { ...ev, phase: 'import' }); }
+        catch (_e) { /* swallow — 窗口已销毁等不影响导入 */ }
+      };
+    })();
+    try {
     const choice = await dialog.showOpenDialog(mainWindow, {
       title: '选择要批量导入的文件（可多选）',
       properties: ['openFile', 'multiSelections'],
@@ -12041,6 +12102,7 @@ function registerNewAccountHandlers() {
     }
 
     const results = [];
+    const fileCount = choice.filePaths.length;
     // 本批是否已建立/合并过银行对账单 session（用于：① 第一个建 vs 后续合并的分支；
     //   ② processingResult / gatewayReconSession 整批只清一次）。
     let bankStatementMerged = false;
@@ -12048,8 +12110,14 @@ function registerNewAccountHandlers() {
     //   被银行对账单分支的「清旧退款」误清掉本批刚导入的退款 session（filePaths 顺序不可控）。
     let refundImportedThisBatch = false;
 
-    for (const filePath of choice.filePaths) {
+    for (let fileIndex = 0; fileIndex < choice.filePaths.length; fileIndex++) {
+      const filePath = choice.filePaths[fileIndex];
       const fileName = path.basename(filePath);
+      // v3.0.11 需求3（批1 · 导入让出+进度）：每文件开始前让出事件循环（消除大批量导入期窗口「未响应」）+ 上报进度。
+      //   yield 放循环体顶部 = 在「上一文件处理完、本文件重活前」让出，等价于「每文件处理完让出」（规避循环内多处 continue）。
+      //   单文件内 readBankStatement（同步 XLSX.readFile）本批不改（单个预处理对账单行数有限，留观察）。
+      if (typeof onImportProgress === 'function') onImportProgress({ stage: 'reading', fileIndex, fileCount, filePath });
+      await new Promise((r) => setImmediate(r));
 
       // 识别：v3.0.7 需求2d 通用导入候选集 ALL_TABLE_SIGNATURES（预处理 3 张 + 链接 4 张；🔴 不含 bank-deposit）。
       let detected;
@@ -12313,6 +12381,10 @@ function registerNewAccountHandlers() {
     }
 
     return { status: 'ok', results };
+    } finally {
+      // v3.0.11 需求3（批1）：无论 cancelled / ok / 抛错，导入结束统一释放互斥锁。
+      releaseBankStatementOpLock();
+    }
   });
 
   // ============================================================
