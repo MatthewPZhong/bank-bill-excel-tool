@@ -35,6 +35,16 @@ Spec：`changes/r5s3-debit-zero-bucket-gate/spec.md` ｜ `changes/bank-statement
 - `check:vars` 无 Critical/Risk-sensitive 命中（Important-skeleton 1 `ipcRenderer` + Runtime-state 8：均为需求3 触及的会话态/IPC，op-lock 强化并发安全、未改 session 写入/清空时机，自查见 PR body「关联功能 review」）。
 - `scan:vars` 已刷新；前端 preview 无回归；用户手动测试通过（大文件不卡、按钮禁用、文件名换行、导出框无 error-report、需求0 真实数据核对）。
 
-## 四、延后（独立批次）
+## 四、codex review + self-review（review-fix，2026-06-28）
+
+提 PR 后做了一轮 codex review（`codex exec review --base main`）+ 一轮 team-lead self-review，修复 2 项真问题：
+
+- **P2（codex · 🔴 资金红线）run 数据准备 linked-table 读取原子性**：批2 原在 linked-table 多步读取间插 `prepare-gw`/`prepare-linked` 让出，而 `linked-table:import`/`delete-by-date-range` 不在 `bankStatementOperationLock` 内 → 并发改动会让 run 把「改动前 gw」与「改动后 deposit/mid/recon」拼成从未真实存在的状态、存错 `processingResult`。**修复**：移除这两处内嵌让出，linked-table 多步读取保持原子；保留 `prepare-clone-bank`（在 linked-table 读取之前、银行 session 受 op-lock 护，安全）。
+- **P3（codex）导入按钮 UI 刷新复活**：中央 `updateBankStatementUi` 原无条件 `importBtn.disabled=false`，运行/导出期 UI 刷新（如切回本模块）会复活导入按钮 → 点导入被 op-lock 拒后其 finally 清掉共享 `bankStatementInflight` → 运行/导出按钮中途复活。**修复**：导入按钮 disabled 也受 `state.bankStatementInflight` 约束。
+- self-review nit（非 bug，保留）：import handler op-lock acquire 后、`try` 前夹了不可能抛的进度转发器 IIFE；不可达故不改，记录备查。
+
+修复后 `release-check` 复跑全绿；改动仅控制流 / UI 闸，产物零变化。
+
+## 五、延后（独立批次）
 
 资金对账「导出文件」流式化（需求 3 批3+批4 · 🔴 资金红线）：`ExcelJS.stream.xlsx.WorkbookWriter` + 分块让出 + golden 字节级一致校验，拆独立批次/PR。设计见 `changes/bank-statement-async-import-run/spec.md`。

@@ -3527,7 +3527,9 @@ function updateBankStatementUi() {
   updateStatusBox(elements.bankStatementStatusBox, text, tone);
 
   // 按钮 disabled 控制
-  if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = false;
+  // v3.0.11 codex-P3 修复：导入按钮也受 inflight 闸约束——否则运行/导出期间的 UI 刷新（如切回本模块）会无条件复活导入按钮，
+  //   用户点导入被主进程 op-lock 拒后其 finally 清掉共享 bankStatementInflight，导致运行/导出按钮中途复活。
+  if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = state.bankStatementInflight;
   updateBankStatementRunBtnDisabled();
   updateBankStatementExportButtonsDisabled();
 }
@@ -4163,10 +4165,9 @@ function formatBankStatementRunProgress(ev) {
   if (!ev || typeof ev !== 'object') return null;
   const STAGE_LABELS = {
     prepare: '正在准备数据…',
-    // v3.0.11 需求3（批2 · run 数据准备分块让出）：准备阶段细分步骤文案（与 main.js yieldRun stage key 一一对应）。
+    // v3.0.11 需求3（批2 · run 数据准备让出）：准备阶段文案（与 main.js yieldRun stage key 对应）。
+    //   codex-P2 修复后仅保留 prepare-clone-bank（prepare-gw / prepare-linked 因 linked-table 读取原子性已移除）。
     'prepare-clone-bank': '正在准备数据（银行流水）…',
-    'prepare-gw': '正在准备数据（网关账单）…',
-    'prepare-linked': '正在准备数据（关联表）…',
     reconcile: '正在执行对账…'
   };
   const ROUND_LABELS = {

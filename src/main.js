@@ -3758,8 +3758,10 @@ function registerAppHandlers() {
       //     必须保留（常驻 session、引擎原地改它）。
       const bankChannels = bankStatementSession.rows.map((r) => (r && r.Channel != null ? String(r.Channel).trim() : ''));
       const workingGwRows = database.readGatewayBillRowsByChannels(bankChannels);
-      // v3.0.11 需求3（批2）：网关账单大表读完（步骤边界）→ 让出一次，再读入金/调拨等链接表。
-      await yieldRun('prepare-gw');
+      // v3.0.11 codex-P2 修复（🔴 资金红线）：linked-table 多步读取（gw / deposit / mid / recon）之间绝不让出。
+      //   linked-table:import / delete-by-date-range 不在 bankStatementOperationLock 覆盖内 → 若此处让出，
+      //   并发链接表改动会让 run 把「改动前 gw」与「改动后 deposit/mid/recon」拼成从未真实存在的状态、存错 processingResult。
+      //   原批2 的 prepare-gw / prepare-linked 两个内嵌让出已移除；仅保留 prepare-clone-bank（在 linked-table 读取之前、银行 session 受 op-lock 护）。
       // v2.1.16-beta.4 R5 场景4（中台退款订单回填）安全接线：
       //   入金表（链接表 tableKey='bank-deposit'，beta.3② 合法 tableKey）—— JPM-US 子链路用；无数据返回 []。
       //   refund order —— v2.1.16-beta.6 需求C 退款导入已开通：refundOrderSession 非 null 时注入真实退款行；未导入退款表时注入 []（引擎 no-op）。
@@ -3795,8 +3797,7 @@ function registerAppHandlers() {
       const workingMidRows = paymentOfflineEnabled
         ? structuredClone(database.readLinkedTableRows('mid-allocation') || [])
         : [];
-      // v3.0.11 需求3（批2）：入金/退款/调拨链接表深拷群已完成（步骤边界）→ 让出一次，再做调拨对账单重派生+读取等剩余重活。
-      await yieldRun('prepare-linked');
+      // v3.0.11 codex-P2 修复：原批2 prepare-linked 让出已移除（见上方 prepare-gw 处说明）——linked-table 多步读取须保持原子。
       // v3.0.6 需求2（🔴 资金红线）：R5s2「对账数据来源」二选一 —— 勾选「中台调拨单表」时改走调拨对账单回填。
       //   gating 仿 workingMidRows：默认勾选（config.reconSourceMid !== false，缺省/老库无字段视为勾选，决策 D4）；
       //   仅勾选路才 structuredClone 读隐藏派生表 linked_fund_transfer_recon，否则注入 []（取消路不读本 context）。
