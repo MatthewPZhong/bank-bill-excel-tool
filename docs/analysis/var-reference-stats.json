@@ -1,7 +1,7 @@
 {
   "meta": {
     "version": "3.0.11",
-    "scannedAt": "2026-06-23T07:59:13.497Z",
+    "scannedAt": "2026-06-28T05:13:13.696Z",
     "root": "src",
     "totalFiles": 169,
     "totalTopLevelNames": 1741,
@@ -2469,10 +2469,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 162
+            "count": 163
           }
         ],
-        "totalHits": 318,
+        "totalHits": 319,
         "fileSpan": 6
       },
       {
@@ -3764,10 +3764,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 110
+            "count": 106
           }
         ],
-        "totalHits": 169,
+        "totalHits": 165,
         "fileSpan": 4
       },
       {
@@ -32179,10 +32179,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 162
+          "count": 163
         }
       ],
-      "totalHits": 318,
+      "totalHits": 319,
       "fileSpan": 6
     },
     {
@@ -33474,10 +33474,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 110
+          "count": 106
         }
       ],
-      "totalHits": 169,
+      "totalHits": 165,
       "fileSpan": 4
     },
     {

@@ -5,7 +5,7 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.0.11 |
-| 扫描时间 | 2026-6-23 15:59:13 |
+| 扫描时间 | 2026-6-28 13:13:13 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 169 |
 | 顶层声明总数 | 1741 |
@@ -55,7 +55,7 @@
 | `deserializeError` | 7 | 12 | 1 | src/main-process/serialize-error.js |
 | `getRunById` | 7 | 12 | 3 | src/backend/acquiring-bill-currency-db/run-repository.js |
 | `mapRow` | 7 | 10 | 1 | src/backend/pending-import/removed-reader.js |
-| `state` | 6 | 318 | 1 | src/renderer.js |
+| `state` | 6 | 319 | 1 | src/renderer.js |
 | `session` | 6 | 60 | 3 | src/main-process/acquiring-bill-currency-run-data.js |
 | `parseNumericValue` | 6 | 32 | 2 | src/backend/balance-seed-store.js |
 | `serializeError` | 6 | 31 | 1 | src/main-process/serialize-error.js |
@@ -94,7 +94,7 @@
 | `deleteTemplate` | 5 | 7 | 1 | src/backend/database/template-repository.js |
 | `sanitizeFileName` | 5 | 7 | 4 | src/backend/balance-seed-store.js |
 | `updateRunExportPath` | 5 | 7 | 2 | src/backend/bank-bu-recon-db/run-repository.js |
-| `elements` | 4 | 169 | 1 | src/renderer.js |
+| `elements` | 4 | 165 | 1 | src/renderer.js |
 | `runDataStore` | 4 | 61 | 4 | src/main-process/acquiring-bill-currency-run-data.js |
 | `runRepo` | 4 | 28 | 4 | src/main-process/acquiring-bill-currency-run-data.js |
 | `openSideDb` | 4 | 27 | 1 | src/backend/run-data-store.js |
@@ -1923,7 +1923,7 @@
 | `deserializeError` | 7 | 12 | 1 | src/main-process/serialize-error.js(3), src/main-process/acquiring-bill-currency-session.js(2), src/main-process/big-table-import-dispatch.js(2) |
 | `getRunById` | 7 | 12 | 3 | src/backend/acquiring-bill-currency-db/run-repository.js(2), src/backend/biz-op-recon-db/run-repository.js(2), src/backend/pending-db/diff-repository.js(2) |
 | `mapRow` | 7 | 10 | 1 | src/backend/pending-import/removed-reader.js(3), src/backend/big-table-import/contract.js(2), src/backend/acquiring-bill-currency-import/contract-bill.js(1) |
-| `state` | 6 | 318 | 1 | src/renderer.js(162), src/renderer-pending.js(55), src/renderer-previews.js(41) |
+| `state` | 6 | 319 | 1 | src/renderer.js(163), src/renderer-pending.js(55), src/renderer-previews.js(41) |
 | `session` | 6 | 60 | 3 | src/main-process/statement-session.js(28), src/main-process/statement-generation.js(10), src/main-process/acquiring-bill-currency-run-data.js(7) |
 | `parseNumericValue` | 6 | 32 | 2 | src/backend/file-service.js(14), src/backend/file-service/writers.js(6), src/main-process/toolbox-stream-io.js(6) |
 | `serializeError` | 6 | 31 | 1 | src/main-process/run-check-worker.js(7), src/main-process/run-check-multiworker-worker.js(6), src/backend/big-table-import/engine-worker-entry.js(5) |
@@ -1962,7 +1962,7 @@
 | `deleteTemplate` | 5 | 7 | 1 | src/backend/database.js(2), src/backend/database/template-repository.js(2), src/preload.js(1) |
 | `sanitizeFileName` | 5 | 7 | 4 | src/main-process/toolbox.js(3), src/backend/balance-seed-store.js(1), src/main-process/bank-statement-io.js(1) |
 | `updateRunExportPath` | 5 | 7 | 2 | src/backend/bank-bu-recon-db/run-repository.js(2), src/backend/biz-op-recon-db/run-repository.js(2), src/main-process/bank-bu-recon-run-data.js(1) |
-| `elements` | 4 | 169 | 1 | src/renderer.js(110), src/renderer-previews.js(38), src/renderer-pending.js(17) |
+| `elements` | 4 | 165 | 1 | src/renderer.js(106), src/renderer-previews.js(38), src/renderer-pending.js(17) |
 | `runDataStore` | 4 | 61 | 4 | src/main-process/biz-op-recon-run-data.js(26), src/main-process/acquiring-bill-currency-run-data.js(17), src/main-process/bank-bu-recon-run-data.js(17) |
 | `runRepo` | 4 | 28 | 4 | src/main-process/acquiring-bill-currency-session.js(21), src/main-process/acquiring-bill-currency-writer.js(4), src/main-process/acquiring-bill-currency-run-data.js(2) |
 | `openSideDb` | 4 | 27 | 1 | src/main-process/biz-op-recon-run-data.js(12), src/main-process/bank-bu-recon-run-data.js(7), src/main-process/acquiring-bill-currency-run-data.js(6) |
