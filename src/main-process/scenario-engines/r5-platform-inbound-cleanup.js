@@ -87,6 +87,10 @@ function runRound5PlatformInboundCleanup(gwRows, bankRows, options = {}) {
   const bankByReconId = new Map();
   const bankByChannelOrderNo = new Map();
   for (const bank of safeBankRows) {
+    // 需求0(v3.0.11 · 🔴资金红线)：仅「无借方发生额」的银行行可入桶。
+    // 口径B：Debit 为 0 或空白均入桶；仅真实非零 Debit 排除（= Credit 消歧 O-1「有值」判定的对称取反）。
+    const debitVal = parseNumber(bank && bank['Debit Amount']);
+    if (debitVal !== null && debitVal !== 0) continue; // 真实非零借方 → 一级/二级桶都不入
     const rk = normalizeCellValue(bank && bank.ReconciliationId);
     if (rk !== '') {
       if (!bankByReconId.has(rk)) bankByReconId.set(rk, []);

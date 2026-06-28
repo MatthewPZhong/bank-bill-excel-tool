@@ -15,6 +15,9 @@
 //      单候选维持现状 / O-1 边界（0、''、'0.00'、'1,234.5'）—— 异常仅警告不阻断导出
 //   ⑧ W3 变更1：两级 fallback 匹配键（ReconId 主、ChannelOrderNo 兜底 D-1 ~ D-3）
 //   ⑨ W3 变更2：FundType 子串判定大小写不敏感（D-2 ~ D-2c）
+//   ⑩ 需求0（v3.0.11 · 🔴资金红线，spec: changes/r5s3-debit-zero-bucket-gate）：
+//      入桶 Debit 门槛（口径B）—— Debit 为 0/空白入桶、真实非零借方排除（一级/二级桶一致）
+//   ⑪ 需求0 交互：一级被门槛清空 → 二级 ChannelOrderNo fallback；二级同样应用门槛；1v1 跨级消费不破坏
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -260,13 +263,16 @@ test.describe('R5场景3 — ⑤ TradeType 非 Inbound-VA 不参与', () => {
 // ---- ⑦ Credit Amount 方向消歧（PR-6 / spec §三，🔴 资金红线）----------
 
 test.describe('R5场景3 — ⑦ 多候选按 Credit Amount 方向消歧', () => {
-  // ① 同 reconid 一行 Credit 一行 Debit → 取 Credit 行（加款单号/附言/C~O 全来自 Credit 行）
-  test('2 行同 reconid（1 Credit 1 Debit）→ 取 Credit 行（断言加款单号沿用 gw、附言/C~O 来自 Credit 行）', () => {
+  // ① 同 reconid：1 无借方 Credit 行 + 1 真实借方行 → 借方行被「入桶 Debit 门槛」预过滤（需求0）
+  //   → 一级桶只剩 Credit 行（单候选）→ 取 Credit 行（加款单号/附言/C~O 全来自 Credit 行）。
+  //   注：需求0（v3.0.11）门槛上线后，真实借方行根本不入桶；本 case 由「多候选 Credit 消歧」
+  //       塌缩为「门槛预过滤 → 单候选命中」，输出口径不变（仍取 Credit 行）。
+  test('2 行同 reconid（1 Credit 行 + 1 真实借方行）→ 借方行被门槛预过滤 → 取 Credit 行（C~O 全来自 Credit 行）', () => {
     const gws = [gwRow({ reconId: 'R1', orderId: 'ORD-CR' })];
     const banks = [
-      // Debit 行：Credit=0、Debit 有值 → 应被排除
+      // 真实借方行：Debit=500（≠0）→ 需求0 门槛预过滤，根本不入桶
       bankRow({ rowId: 'b-debit', reconId: 'R1', fundType: 'outbound', creditAmount: 0, debitAmount: 500 }),
-      // Credit 行：Credit 有值 → 应被选中（FundType=Charge 区别于 Debit 行，便于断言附言来源）
+      // Credit 行：Debit=0 过门槛入桶，Credit 有值 → 唯一候选被选中（FundType=Charge 便于断言附言来源）
       bankRow({ rowId: 'b-credit', reconId: 'R1', fundType: 'Charge', creditAmount: 500, debitAmount: 0 })
     ];
     const creditBank = banks[1];
@@ -276,7 +282,7 @@ test.describe('R5场景3 — ⑦ 多候选按 Credit Amount 方向消歧', () =>
     assert.equal(cleanupRows.length, 1, '应只产 1 条剔除行（取 Credit 行）');
     const row = cleanupRows[0];
     assert.equal(row['加款单号'], 'ORD-CR', '加款单号来自网关 orderid');
-    // 附言用的是 Credit 行的 FundType（Charge），而非 Debit 行（outbound）
+    // 附言用的是 Credit 行的 FundType（Charge），而非借方行（outbound）
     assert.equal(row['附言'], 'Charge，中台加款单已关闭。', '附言 FundType 必须来自 Credit 行');
     // C~O 13 列逐列 = Credit 行（含 Credit Amount=500 / Debit Amount=0）
     for (const header of CLEANUP_COPY_HEADERS) {
@@ -284,8 +290,8 @@ test.describe('R5场景3 — ⑦ 多候选按 Credit Amount 方向消歧', () =>
     }
     assert.equal(row['Credit Amount'], 500, '剔除行 Credit Amount 应取自 Credit 行');
     assert.equal(row['Debit Amount'], 0, '剔除行 Debit Amount 应取自 Credit 行');
-    // 唯一 Credit 行 → 不应有任何方向消歧警告
-    assert.equal(warnings.length, 0, '唯一 Credit 行命中不应产警告');
+    // 借方行被门槛预过滤后只剩单候选 → 不应有任何方向消歧警告
+    assert.equal(warnings.length, 0, '门槛预过滤后单候选命中不应产警告');
   });
 
   // ② ≥2 行 Credit 有值 → 跳过 + multi-credit-match 警告（导出未阻断、cleanupRows 不含该 reconid）
@@ -311,14 +317,16 @@ test.describe('R5场景3 — ⑦ 多候选按 Credit Amount 方向消歧', () =>
     assert.ok(/R1/.test(w.message), '警告 message 应带冲突 reconid');
   });
 
-  // ③ 0 行 Credit 有值（全 Debit / Credit 全空）→ 跳过 + no-credit-match 警告
-  test('0 行 Credit 有值（全 Debit / Credit 全空）→ 跳过该 reconid + no-credit-match 警告（不阻断）', () => {
+  // ③ 0 行 Credit 有值（Credit 全空/全 0、但均无借方过门槛）→ 跳过 + no-credit-match 警告
+  //   注：需求0 门槛上线后，真实借方行（Debit≠0）不入桶，无法再用其制造多候选；
+  //       本 case 改用「Credit 无值 + Debit 也=0/空（过门槛）」的两行制造多候选 → 0 行 Credit 有值。
+  test('0 行 Credit 有值（Credit 全空/全 0、Debit 均 0/空过门槛）→ 跳过该 reconid + no-credit-match 警告（不阻断）', () => {
     const gws = [gwRow({ reconId: 'R1', orderId: 'ORD-NOCR' })];
     const banks = [
-      // 全 Debit 行：Credit=0
-      bankRow({ rowId: 'b1', reconId: 'R1', fundType: 'Charge', creditAmount: 0, debitAmount: 300 }),
-      // Credit 全空：Credit=''（O-1 视为无值）
-      bankRow({ rowId: 'b2', reconId: 'R1', fundType: 'outbound', creditAmount: '', debitAmount: 400 })
+      // Credit=0、Debit=0 → 过门槛入桶，但 Credit 无值
+      bankRow({ rowId: 'b1', reconId: 'R1', fundType: 'Charge', creditAmount: 0, debitAmount: 0 }),
+      // Credit=''（O-1 视为无值）、Debit='' → 过门槛入桶，但 Credit 无值
+      bankRow({ rowId: 'b2', reconId: 'R1', fundType: 'outbound', creditAmount: '', debitAmount: '' })
     ];
 
     const { cleanupRows, modifications, warnings } = runRound5PlatformInboundCleanup(gws, banks);
@@ -330,17 +338,19 @@ test.describe('R5场景3 — ⑦ 多候选按 Credit Amount 方向消歧', () =>
     assert.equal(w.severity, 'warning', 'severity 必须是 warning（不阻断导出）');
   });
 
-  // ④ 单候选维持现状：哪怕是 Debit 行（Credit=0）也照常取它，不被方向筛掉
-  test('单候选（cand.length===1）维持现状取它 —— Debit 行（Credit=0）也产剔除行（O-4）', () => {
+  // ④ 单候选维持现状：唯一过门槛候选即使 Credit=0 也照常取它，不被方向筛掉（O-4）
+  //   注：需求0 门槛上线后，真实借方行（原 Debit=700）已不入桶；故单候选 Credit=0 的场景
+  //       只能由「Credit=0 且 Debit=0/空（过门槛）」的行构成。O-4「单候选不做 Credit 筛选」口径不变。
+  test('单候选（cand.length===1）维持现状取它 —— Credit=0 且 Debit=0（过门槛）也产剔除行（O-4）', () => {
     const gws = [gwRow({ reconId: 'R1', orderId: 'ORD-SINGLE' })];
-    // 唯一候选是 Debit 行（Credit=0）：单候选路径不做 Credit 筛选
+    // 唯一候选：Credit=0、Debit=0（过门槛入桶）；单候选路径不做 Credit 筛选
     const banks = [
-      bankRow({ rowId: 'b1', reconId: 'R1', fundType: 'Charge', creditAmount: 0, debitAmount: 700 })
+      bankRow({ rowId: 'b1', reconId: 'R1', fundType: 'Charge', creditAmount: 0, debitAmount: 0 })
     ];
 
     const { cleanupRows, warnings } = runRound5PlatformInboundCleanup(gws, banks);
 
-    assert.equal(cleanupRows.length, 1, '单候选即使是 Debit 行也应产剔除行');
+    assert.equal(cleanupRows.length, 1, '单候选即使 Credit=0 也应产剔除行');
     assert.equal(cleanupRows[0]['加款单号'], 'ORD-SINGLE');
     assert.equal(cleanupRows[0]['附言'], 'Charge，中台加款单已关闭。');
     // 单候选路径不触发方向消歧警告
@@ -348,13 +358,15 @@ test.describe('R5场景3 — ⑦ 多候选按 Credit Amount 方向消歧', () =>
   });
 
   // ⑤ O-1 边界：Credit Amount = 0 / '' / '0.00' / '1,234.5' 验证 parseNumber !== null && !== 0
+  //   注：需求0 门槛上线后，制造多候选的两行必须都「无借方过门槛」（Debit=0/空），
+  //       否则真实借方行被预过滤、桶塌缩为单候选，就无法再验证 Credit 方向消歧口径。
   test('O-1 边界：0 / "" / "0.00" 视为无值；"1,234.5"（含千分位）视为有值', () => {
-    // 无值组：与一个固定 Debit 行（Credit=0）组成多候选 → 两行都无值 → no-credit-match
+    // 无值组：两行都过门槛（Debit=0）且 Credit 均无值 → no-credit-match
     for (const noValue of [0, '', '0.00']) {
       const gws = [gwRow({ reconId: 'RN', orderId: 'ORD-N' })];
       const banks = [
-        bankRow({ rowId: 'bn-1', reconId: 'RN', fundType: 'Charge', creditAmount: noValue, debitAmount: 100 }),
-        bankRow({ rowId: 'bn-2', reconId: 'RN', fundType: 'outbound', creditAmount: 0, debitAmount: 200 })
+        bankRow({ rowId: 'bn-1', reconId: 'RN', fundType: 'Charge', creditAmount: noValue, debitAmount: 0 }),
+        bankRow({ rowId: 'bn-2', reconId: 'RN', fundType: 'outbound', creditAmount: 0, debitAmount: 0 })
       ];
       const { cleanupRows, warnings } = runRound5PlatformInboundCleanup(gws, banks);
       assert.equal(cleanupRows.length, 0, `Credit Amount=${JSON.stringify(noValue)} 应判为无值 → 不产剔除行`);
@@ -364,12 +376,12 @@ test.describe('R5场景3 — ⑦ 多候选按 Credit Amount 方向消歧', () =>
       );
     }
 
-    // 有值：'1,234.5'（parseNumber 去千分位 = 1234.5 ≠ 0）→ 唯一 Credit 行被选中
+    // 有值：'1,234.5'（parseNumber 去千分位 = 1234.5 ≠ 0）→ 在 2 个过门槛候选中作唯一 Credit 行被选中
     const gws = [gwRow({ reconId: 'RY', orderId: 'ORD-Y' })];
     const banks = [
-      // 该行 Credit='1,234.5'（有值）；另一行 Credit=0（Debit 行）→ 仅本行入 creditCand
+      // by-1 Credit='1,234.5'（有值）、Debit=0 过门槛；by-2 Credit=0、Debit=0 过门槛（无值）→ 仅 by-1 入 creditCand
       bankRow({ rowId: 'by-1', reconId: 'RY', fundType: 'Charge', creditAmount: '1,234.5', debitAmount: 0 }),
-      bankRow({ rowId: 'by-2', reconId: 'RY', fundType: 'outbound', creditAmount: 0, debitAmount: 50 })
+      bankRow({ rowId: 'by-2', reconId: 'RY', fundType: 'outbound', creditAmount: 0, debitAmount: 0 })
     ];
     const { cleanupRows, warnings } = runRound5PlatformInboundCleanup(gws, banks);
     assert.equal(cleanupRows.length, 1, 'Credit Amount="1,234.5" 应判为有值 → 取该行产剔除行');
@@ -451,16 +463,17 @@ test.describe('R5场景3 — ⑨ 两级 fallback 匹配键（D-1 ~ D-3，🔴 �
   });
 
   // 新增用例5：二级 ChannelOrderNo 桶多候选方向消歧（D-1b）
-  test('二级 ChannelOrderNo 桶多候选：1 Credit 1 Debit→取 Credit 产；2 Credit→multi-credit 警告(带标记)不产', () => {
-    // (a) ReconId 桶空、ChannelOrderNo 桶 2 行（1 Credit 1 Debit）→ 取 Credit 行产 1 条
+  //   注：需求0 门槛对二级桶同样生效，故制造二级多候选的两行也必须都「无借方过门槛」（Debit=0/空）。
+  test('二级 ChannelOrderNo 桶多候选：1 Credit 1 无值(均过门槛)→取 Credit 产；2 Credit→multi-credit 警告(带标记)不产', () => {
+    // (a) ReconId 桶空、ChannelOrderNo 桶 2 行（1 Credit + 1 无值、均过门槛）→ 取 Credit 行产 1 条
     {
       const gws = [gwRow({ reconId: 'CK-1', orderId: 'ORD-CK' })];
       const banks = [
-        bankRow({ rowId: 'bd', reconId: 'NOPE', fundType: 'outbound', creditAmount: 0, debitAmount: 500, channelOrderNo: 'CK-1' }),
+        bankRow({ rowId: 'bd', reconId: 'NOPE', fundType: 'outbound', creditAmount: 0, debitAmount: 0, channelOrderNo: 'CK-1' }),
         bankRow({ rowId: 'bc', reconId: 'NOPE2', fundType: 'Charge', creditAmount: 500, debitAmount: 0, channelOrderNo: 'CK-1' })
       ];
       const { cleanupRows, warnings } = runRound5PlatformInboundCleanup(gws, banks);
-      assert.equal(cleanupRows.length, 1, '二级桶 1 Credit 1 Debit → 取 Credit 行产 1 条');
+      assert.equal(cleanupRows.length, 1, '二级桶 1 Credit + 1 无值（均过门槛）→ 取 Credit 行产 1 条');
       assert.equal(cleanupRows[0]['附言'], 'Charge，中台加款单已关闭。', '附言来自二级桶 Credit 行');
       assert.equal(cleanupRows[0]['Credit Amount'], 500, 'C~O 取 Credit 行');
       assert.equal(warnings.length, 0, '二级桶唯一 Credit 行命中不产警告');
@@ -516,6 +529,114 @@ test.describe('R5场景3 — ⑨ 两级 fallback 匹配键（D-1 ~ D-3，🔴 �
     assert.equal(w.severity, 'warning');
     // 一级触发的警告不带 ChannelOrderNo 标记（确证是一级 ReconId 桶失败、未走二级）
     assert.ok(!/ChannelOrderNo/.test(w.message), '一级触发的警告不应带 ChannelOrderNo 标记（证明未 fallback）');
+  });
+});
+
+// ---- ⑩ 需求0：入桶 Debit 门槛（口径B，🔴资金红线 v3.0.11）------------------
+
+test.describe('R5场景3 — ⑩ 入桶 Debit 门槛（口径B，🔴资金红线 需求0）', () => {
+  // 入桶组：Debit 为 0 / 空白 → 入桶（可被命中、产剔除行）。
+  //   覆盖 ''（→null）/ null（→null）/ '0'（→0）/ '0.00'（→0）/ '-0'（→0）。
+  for (const inVal of ['', null, '0', '0.00', '-0']) {
+    test(`Debit=${JSON.stringify(inVal)} → 入桶可命中（产 1 条剔除行）`, () => {
+      const gws = [gwRow({ reconId: 'R1', orderId: 'ORD-IN' })];
+      const banks = [
+        bankRow({ rowId: 'b1', reconId: 'R1', fundType: 'Charge', creditAmount: 100, debitAmount: inVal })
+      ];
+      const { cleanupRows, warnings } = runRound5PlatformInboundCleanup(gws, banks);
+      assert.equal(cleanupRows.length, 1, `Debit=${JSON.stringify(inVal)}（口径B 视为无借方）应入桶并命中`);
+      assert.equal(cleanupRows[0]['加款单号'], 'ORD-IN');
+      assert.equal(warnings.length, 0);
+    });
+  }
+
+  // 排除组：真实非零借方 → 不入桶（被预过滤）→ 桶空 → 静默跳过、0 条、无警告。
+  //   覆盖字符串 '100' / 千分位 '1,000' / number 100 / 负借方 '-100' / number 0.5。
+  for (const exVal of ['100', '1,000', 100, '-100', 0.5]) {
+    test(`Debit=${JSON.stringify(exVal)}（真实非零借方）→ 不入桶（0 条、无警告）`, () => {
+      const gws = [gwRow({ reconId: 'R1', orderId: 'ORD-EX' })];
+      const banks = [
+        bankRow({ rowId: 'b1', reconId: 'R1', fundType: 'Charge', creditAmount: 100, debitAmount: exVal })
+      ];
+      const { cleanupRows, warnings } = runRound5PlatformInboundCleanup(gws, banks);
+      assert.equal(cleanupRows.length, 0, `Debit=${JSON.stringify(exVal)} 应被门槛预过滤 → 桶空 → 0 条`);
+      // 桶空属「查无此行」→ 静默 empty（与历史 empty 行为一致），不产消歧警告
+      assert.equal(warnings.length, 0, '被门槛预过滤后桶空属静默 empty，不应产消歧警告');
+    });
+  }
+
+  // 门槛对「二级 ChannelOrderNo 桶」同样生效：真实借方的 ChannelOrderNo 行也不入二级桶。
+  test('二级桶一致：ChannelOrderNo=key 但真实借方（Debit≠0）→ 二级桶也不收 → fallback 查无此行 → 0 条', () => {
+    const gws = [gwRow({ reconId: 'KEY-C', orderId: 'ORD-C' })];
+    const banks = [
+      // ReconId≠key（一级查无），ChannelOrderNo=key 但 Debit=900（真实借方）→ 一级/二级都不入
+      bankRow({ rowId: 'b1', reconId: 'OTHER', fundType: 'Charge', creditAmount: 100, debitAmount: 900, channelOrderNo: 'KEY-C' })
+    ];
+    const { cleanupRows, warnings } = runRound5PlatformInboundCleanup(gws, banks);
+    assert.equal(cleanupRows.length, 0, '真实借方行不入二级 ChannelOrderNo 桶 → fallback 仍查无此行');
+    assert.equal(warnings.length, 0);
+  });
+
+  // 🔴 红线锁：门槛预过滤真实借方行，防其被错误消费产「错误剔除清单」。
+  //   对照（无门槛旧行为）：同 reconid 1 Credit 行 + 1 真实借方行 → 旧逻辑多候选取 Credit 行命中、
+  //   借方行残留；若第二条 gw 抢，旧逻辑会拿借方行产错误剔除行。门槛上线后借方行根本不入桶。
+  test('🔴 真实借方行被门槛预过滤 → 不会被任何 gw 消费产剔除行（防错误财务清单）', () => {
+    const gws = [
+      gwRow({ reconId: 'R1', orderId: 'ORD-1' }),
+      gwRow({ reconId: 'R1', orderId: 'ORD-2' })
+    ];
+    const banks = [
+      // Credit 行（过门槛）
+      bankRow({ rowId: 'b-credit', reconId: 'R1', fundType: 'Charge', creditAmount: 500, debitAmount: 0 }),
+      // 真实借方行（Debit=500）→ 门槛预过滤，绝不入桶，绝不被第二条 gw 消费
+      bankRow({ rowId: 'b-debit', reconId: 'R1', fundType: 'outbound', creditAmount: 0, debitAmount: 500 })
+    ];
+    const { cleanupRows } = runRound5PlatformInboundCleanup(gws, banks);
+    assert.equal(cleanupRows.length, 1, '仅 Credit 行入桶被第一条 gw 消费；借方行不入桶 → 仅 1 条');
+    assert.equal(cleanupRows[0]['加款单号'], 'ORD-1');
+    assert.equal(cleanupRows[0]['附言'], 'Charge，中台加款单已关闭。', '命中的是过门槛的 Credit 行');
+  });
+});
+
+// ---- ⑪ 需求0 交互：门槛 × 两级 fallback × 1v1 跨级消费（🔴资金红线）----------
+
+test.describe('R5场景3 — ⑪ 门槛 × 两级 fallback × 1v1 跨级（🔴资金红线 需求0）', () => {
+  // 一级 ReconId 行被门槛排除 → 一级桶 empty → 触发二级 ChannelOrderNo fallback；
+  // 二级桶同样应用门槛（真实借方的 ChannelOrderNo 行被排除）→ 命中二级唯一过门槛干净行。
+  test('一级行被门槛清空 → 二级 ChannelOrderNo fallback 命中；二级同样应用门槛', () => {
+    const gws = [gwRow({ reconId: 'KEY', orderId: 'ORD-FB' })];
+    const banks = [
+      // 一级 ReconId=KEY 但真实借方（Debit=1,000）→ 门槛排除 → 一级桶 empty（触发 fallback）
+      bankRow({ rowId: 'b-r-debit', reconId: 'KEY', fundType: 'Charge', creditAmount: 0, debitAmount: '1,000' }),
+      // 二级 ChannelOrderNo=KEY 但真实借方（Debit=800）→ 门槛排除 → 不入二级桶
+      bankRow({ rowId: 'b-c-debit', reconId: 'OTHER1', fundType: 'outbound', creditAmount: 0, debitAmount: 800, channelOrderNo: 'KEY' }),
+      // 二级 ChannelOrderNo=KEY 且无借方（Debit=0）→ 入二级桶 → fallback 唯一候选命中
+      bankRow({ rowId: 'b-c-clean', reconId: 'OTHER2', fundType: 'Charge', creditAmount: 300, debitAmount: 0, channelOrderNo: 'KEY' })
+    ];
+    const { cleanupRows, warnings } = runRound5PlatformInboundCleanup(gws, banks);
+    assert.equal(cleanupRows.length, 1, '一级被门槛清空 → 二级 fallback；二级唯一过门槛行命中');
+    assert.equal(cleanupRows[0]['加款单号'], 'ORD-FB');
+    assert.equal(cleanupRows[0]['附言'], 'Charge，中台加款单已关闭。', '命中的是二级过门槛干净行 b-c-clean');
+    assert.equal(cleanupRows[0]['Credit Amount'], 300, 'C~O 取二级过门槛干净行');
+    assert.equal(warnings.length, 0, '二级单候选命中不产警告');
+  });
+
+  // 1v1 跨两级 + 门槛：双键（ReconId=key 且 ChannelOrderNo=key）过门槛行只被消费一次；
+  //   同 key 的真实借方双键行被门槛排除（绝不被第二条 gw 二级 fallback 误消费）。
+  test('1v1 跨级：过门槛双键行仅被一条 gw 消费；同 key 真实借方双键行被门槛排除 → 共 1 条', () => {
+    const gws = [
+      gwRow({ reconId: 'KEY', orderId: 'ORD-1' }),
+      gwRow({ reconId: 'KEY', orderId: 'ORD-2' })
+    ];
+    const banks = [
+      // 双键都=KEY 且过门槛（Debit=0）：第一条 gw 一级消费它；第二条 gw 一级 empty→二级也因已消费 empty
+      bankRow({ rowId: 'b-dual', reconId: 'KEY', fundType: 'Charge', creditAmount: 100, debitAmount: 0, channelOrderNo: 'KEY' }),
+      // 同 key 的真实借方双键行（Debit=500）→ 门槛排除，绝不被第二条 gw 误消费产错误剔除行
+      bankRow({ rowId: 'b-dual-debit', reconId: 'KEY', fundType: 'outbound', creditAmount: 0, debitAmount: 500, channelOrderNo: 'KEY' })
+    ];
+    const { cleanupRows } = runRound5PlatformInboundCleanup(gws, banks);
+    assert.equal(cleanupRows.length, 1, '过门槛双键行只被消费一次；借方双键行被门槛排除 → 共 1 条');
+    assert.equal(cleanupRows[0]['加款单号'], 'ORD-1', '第一条 gw 一级命中过门槛双键行');
   });
 });
 

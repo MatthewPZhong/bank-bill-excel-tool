@@ -4,16 +4,16 @@
 
 | 字段 | 值 |
 |---|---|
-| 版本 | v3.0.9 |
-| 扫描时间 | 2026-6-18 10:11:31 |
+| 版本 | v3.0.11 |
+| 扫描时间 | 2026-6-28 13:13:13 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 169 |
-| 顶层声明总数 | 1733 |
-| ≥2 次引用 | 1609 |
-| 跨 ≥3 文件 (A-share) | 297 |
-| 跨 2 文件 (A-pair) | 480 |
-| 单文件 (A-local) | 832 |
-| 跨文件合计 (B) | 777 |
+| 顶层声明总数 | 1741 |
+| ≥2 次引用 | 1615 |
+| 跨 ≥3 文件 (A-share) | 298 |
+| 跨 2 文件 (A-pair) | 481 |
+| 单文件 (A-local) | 836 |
+| 跨文件合计 (B) | 779 |
 
 ---
 
@@ -24,7 +24,7 @@
 | `path` | 58 | 174 | 52 | src/backend/acquiring-bill-currency-import/reader-handrolled.js |
 | `fs` | 41 | 125 | 40 | src/backend/balance-adjustment-store.js |
 | `normalizeCell` | 25 | 131 | 12 | src/backend/balance-adjustment-store.js |
-| `parse` | 25 | 52 | 1 | src/backend/usage-stats.js |
+| `parse` | 25 | 53 | 1 | src/backend/usage-stats.js |
 | `normalizeCellValue` | 18 | 200 | 7 | src/main-process/adm-bank-deposit-builder.js |
 | `FileValidationError` | 18 | 83 | 9 | src/backend/balance-seed-store.js |
 | `appendModuleLog` | 15 | 77 | 11 | src/backend/database.js |
@@ -32,8 +32,8 @@
 | `FLOW_HEADERS` | 14 | 35 | 8 | src/backend/acquiring-bill-currency-db/columns.js |
 | `validateHeaders` | 14 | 34 | 3 | src/backend/pending-import/contract-pending.js |
 | `XLSX` | 13 | 69 | 13 | src/backend/bank-bu-recon-import/reader.js |
+| `parseNumber` | 13 | 42 | 4 | src/backend/pending-reconcile/removal-match.js |
 | `applyWatermark` | 13 | 31 | 13 | src/backend/file-service/writers.js |
-| `parseNumber` | 12 | 39 | 4 | src/backend/pending-reconcile/removal-match.js |
 | `DatabaseSync` | 12 | 28 | 6 | src/backend/biz-op-recon-import/import-worker.js |
 | `pad` | 10 | 66 | 2 | src/backend/logger.js |
 | `PENDING_COLUMNS` | 10 | 39 | 10 | src/backend/pending-db/migrations.js |
@@ -55,7 +55,7 @@
 | `deserializeError` | 7 | 12 | 1 | src/main-process/serialize-error.js |
 | `getRunById` | 7 | 12 | 3 | src/backend/acquiring-bill-currency-db/run-repository.js |
 | `mapRow` | 7 | 10 | 1 | src/backend/pending-import/removed-reader.js |
-| `state` | 6 | 310 | 1 | src/renderer.js |
+| `state` | 6 | 319 | 1 | src/renderer.js |
 | `session` | 6 | 60 | 3 | src/main-process/acquiring-bill-currency-run-data.js |
 | `parseNumericValue` | 6 | 32 | 2 | src/backend/balance-seed-store.js |
 | `serializeError` | 6 | 31 | 1 | src/main-process/serialize-error.js |
@@ -94,7 +94,7 @@
 | `deleteTemplate` | 5 | 7 | 1 | src/backend/database/template-repository.js |
 | `sanitizeFileName` | 5 | 7 | 4 | src/backend/balance-seed-store.js |
 | `updateRunExportPath` | 5 | 7 | 2 | src/backend/bank-bu-recon-db/run-repository.js |
-| `elements` | 4 | 157 | 1 | src/renderer.js |
+| `elements` | 4 | 165 | 1 | src/renderer.js |
 | `runDataStore` | 4 | 61 | 4 | src/main-process/acquiring-bill-currency-run-data.js |
 | `runRepo` | 4 | 28 | 4 | src/main-process/acquiring-bill-currency-run-data.js |
 | `openSideDb` | 4 | 27 | 1 | src/backend/run-data-store.js |
@@ -106,6 +106,7 @@
 | `app` | 4 | 17 | 1 | src/main.js |
 | `MERCHANT_ID_SELF_INPUT_OPTION` | 4 | 17 | 2 | src/main.js |
 | `writeErrorReport` | 4 | 17 | 1 | src/main-process/exceljs-writer.js |
+| `YELLOW_FILL` | 4 | 15 | 4 | src/main-process/bank-bu-recon-writer.js |
 | `BALANCE_CALCULATED_OPTION` | 4 | 14 | 2 | src/main.js |
 | `inferDateCellFormat` | 4 | 13 | 1 | src/backend/file-service/normalizers.js |
 | `toExcelSerial` | 4 | 13 | 1 | src/backend/file-service/normalizers.js |
@@ -120,6 +121,7 @@
 | `bankAmountAbs` | 4 | 10 | 3 | src/main-process/scenario-engines/r5-fund-transfer-backfill.js |
 | `CHANNEL_BILL_FIELDS` | 4 | 10 | 2 | src/constants/gateway-bill-recon-fields.js |
 | `getRun` | 4 | 10 | 2 | src/backend/bank-bu-recon-db/run-repository.js |
+| `GW_RECON_ID_FIELD` | 4 | 10 | 4 | src/main-process/scenario-engines/dbs-charge-fund-check.js |
 | `listSideDbFiles` | 4 | 10 | 1 | src/backend/run-data-store.js |
 | `openZipWithEntries` | 4 | 10 | 2 | src/backend/acquiring-bill-currency-import/reader.js |
 | `PENDING_GUANLI_DB_COLUMNS` | 4 | 10 | 1 | src/backend/bank-bu-recon-db/columns.js |
@@ -185,7 +187,6 @@
 | `PRAGMA_EXPECTED` | 3 | 14 | 3 | src/backend/big-table-import/engine.js |
 | `applyStatementResult` | 3 | 13 | 1 | src/renderer.js |
 | `diffRepo` | 3 | 13 | 3 | src/backend/pending-export/writer.js |
-| `YELLOW_FILL` | 3 | 13 | 3 | src/main-process/bank-bu-recon-writer.js |
 | `BANK_RECON_ID_FIELD` | 3 | 12 | 3 | src/main-process/scenario-engines/dbs-charge-fund-check.js |
 | `sideDbPath` | 3 | 12 | 1 | src/backend/run-data-store.js |
 | `PRAGMA_STATEMENTS` | 3 | 10 | 3 | src/backend/big-table-import/engine.js |
@@ -214,9 +215,9 @@
 | `GATEWAY_RECON_FIELDS` | 3 | 8 | 3 | src/constants/gateway-recon-fields.js |
 | `getMonthReadiness` | 3 | 8 | 1 | src/backend/acquiring-bill-currency-db/import-repository.js |
 | `getTemplateBigAccounts` | 3 | 8 | 1 | src/backend/database/template-repository.js |
-| `GW_RECON_ID_FIELD` | 3 | 8 | 3 | src/main-process/scenario-engines/dbs-charge-fund-check.js |
 | `listDiffRows` | 3 | 8 | 1 | src/backend/pending-db/diff-repository.js |
 | `normalizeCurrency` | 3 | 8 | 3 | src/backend/acquiring-bill-currency-db/import-repository.js |
+| `REFUND_TEMPLATE_HEADERS` | 3 | 8 | 1 | src/constants/refund-backfill-fields.js |
 | `SIGNED_AMOUNT_MAPPING_FIELD` | 3 | 8 | 2 | src/main.js |
 | `ZHONGTAI_DISPATCH_ORDER_SIGNATURE` | 3 | 8 | 3 | src/constants/fund-transfer-recon-fields.js |
 | `backfillBocReconLinkIds` | 3 | 7 | 1 | src/main-process/boc-fx-link-builder.js |
@@ -433,6 +434,7 @@
 | `ensureJpmDispatchOrderScenarioSeed` | 6 | src/backend/database/migrations.js |
 | `ensureLinkedTableSupport` | 6 | src/backend/database/migrations.js |
 | `ensureParentTemplateSupport` | 6 | src/backend/database/migrations.js |
+| `ensureR4DirectionGuardConfigMigration` | 6 | src/backend/database/migrations.js |
 | `ensureReconRoundBuiltinScenariosSeed` | 6 | src/backend/database/migrations.js |
 | `ensureRefundBackfillScenarioSeed` | 6 | src/backend/database/migrations.js |
 | `ensureScenarioApplicableChannelsTable` | 6 | src/backend/database/migrations.js |
@@ -465,6 +467,7 @@
 | `removedRepo` | 6 | src/backend/pending-export/writer.js |
 | `retireChargeOutboundOrphans` | 6 | src/backend/database/migrations.js |
 | `runC1Scenario` | 6 | src/main-process/scenario-engines/c1-extract-recon-id.js |
+| `SHARED_STRINGS_ENTRY` | 6 | src/backend/toolbox-xlsx-stream/large-split-worker.js |
 | `signedDayDiff` | 6 | src/main-process/scenario-engines/engine-date-utils.js |
 | `splitSignedAmountValue` | 6 | src/backend/file-service/normalizers.js |
 | `SUPPORTED_SCENARIO_BUNDLE_VERSION` | 6 | src/backend/scenarios-bundle-io.js |
@@ -508,7 +511,6 @@
 | `PENDING_INSERT_SQL` | 5 | src/backend/bank-bu-recon-db/month-repository.js |
 | `performance` | 5 | src/main.js |
 | `reconIdFixSession` | 5 | src/main.js |
-| `REFUND_TEMPLATE_HEADERS` | 5 | src/constants/refund-backfill-fields.js |
 | `ROUND_LABELS` | 5 | src/main-process/reconciliation-orchestrator.js |
 | `runC2Scenario` | 5 | src/main-process/scenario-engines/c2-offset-bill-mark.js |
 | `runC3Scenario` | 5 | src/main-process/scenario-engines/c3-gateway-recon-join.js |
@@ -1061,6 +1063,7 @@
 | `ensureScenariosChannelIdColumn` | 3 |
 | `JPM_DISPATCH_ORDER_SCENARIO_SEEDED_MARKER` | 3 |
 | `N5_MIGRATED_MARKER` | 3 |
+| `R4_DIRECTION_GUARD_FIELD` | 3 |
 | `RECON_ROUND_BUILTIN_SCENARIOS` | 3 |
 | `RECON_ROUND_BUILTIN_SCENARIOS_SEEDED_MARKER` | 3 |
 | `REFUND_BACKFILL_SCENARIO_SEEDED_MARKER` | 3 |
@@ -1295,7 +1298,6 @@
 | `assertSharedStringsUnderLimit` | 3 |
 | `HEAP_USED_LIMIT_BYTES` | 3 |
 | `isExplainedError` | 3 |
-| `SHARED_STRINGS_ENTRY` | 3 |
 | `SHARED_STRINGS_UNCOMPRESSED_LIMIT` | 3 |
 | `ToolboxSharedStringsTooLargeError` | 3 |
 
@@ -1700,17 +1702,17 @@
 | 名字 | 总次数 |
 |---|---:|
 | `HIT_TYPE_PRECISE` | 7 |
-| `RESULT_NOTICE` | 7 |
 | `buildUnmatchedBankRow` | 6 |
 | `detailBankToDeposit` | 6 |
 | `detailBankToRo` | 6 |
 | `lookupDepositByKeys` | 6 |
 | `normalizeBizIdKey` | 6 |
 | `extractFirstCapture` | 5 |
+| `RESULT_ERROR` | 5 |
+| `RESULT_NOTICE` | 5 |
 | `extractFeature` | 4 |
 | `HIT_TYPE_FUZZY` | 4 |
 | `matchCustomerRefTwoHop` | 4 |
-| `RESULT_ERROR` | 4 |
 | `buildBackfillRow` | 3 |
 | `buildDepIndex` | 3 |
 | `classifyCardinality` | 3 |
@@ -1783,6 +1785,7 @@
 
 | 名字 | 总次数 |
 |---|---:|
+| `SHARED_STRINGS_LARGE_BYTES` | 3 |
 | `SINGLE_WORKSHEET_LARGE_BYTES` | 3 |
 | `XLSX_EXT_RE` | 3 |
 
@@ -1822,13 +1825,14 @@
 | 名字 | 总次数 |
 |---|---:|
 | `acquiringBillCurrencyOperationLock` | 9 |
+| `bankStatementOperationLock` | 6 |
 | `startupMetrics` | 3 |
 
 ### `src/preload.js`
 
 | 名字 | 总次数 |
 |---|---:|
-| `ipcRenderer` | 180 |
+| `ipcRenderer` | 182 |
 | `contextBridge` | 3 |
 
 ### `src/renderer.js`
@@ -1846,18 +1850,20 @@
 | `clampColorChannel` | 8 |
 | `handleNewAccountFormMutation` | 8 |
 | `rendererStartupProfiler` | 8 |
+| `updateBankStatementExportButtonsDisabled` | 8 |
+| `updateBankStatementRunBtnDisabled` | 8 |
 | `applyBackgroundSettings` | 7 |
 | `closeNewAccountCurrencyDropdown` | 6 |
 | `mixColor` | 6 |
 | `STATEMENT_MODES` | 6 |
 | `updateBankStatementUi` | 6 |
 | `updateNewAccountCurrencyDropdownLabel` | 6 |
+| `updateStatusBox` | 6 |
 | `DEFAULT_BACKGROUND_SETTINGS` | 5 |
 | `DEFAULT_SPECTRUM_PICK_COLOR` | 5 |
 | `hexToRgb` | 5 |
 | `renderNewAccountCurrencyOptions` | 5 |
 | `syncNewAccountRowActionButtons` | 5 |
-| `updateStatusBox` | 5 |
 | `mixRgb` | 4 |
 | `newAccountRowStateMap` | 4 |
 | `normalizeColorHex` | 4 |
@@ -1886,7 +1892,7 @@
 | `path` | 58 | 174 | 52 | src/main-process/scenario-engines/c4-recon-id-fix.js(15), src/backend/run-data-store.js(9), src/main-process/biz-op-recon-session.js(7) |
 | `fs` | 41 | 125 | 40 | src/backend/usage-stats.js(9), src/backend/file-service/readers.js(7), src/backend/run-data-store.js(7) |
 | `normalizeCell` | 25 | 131 | 12 | src/backend/file-service.js(34), src/backend/file-service/normalizers.js(12), src/main-process/toolbox.js(11) |
-| `parse` | 25 | 52 | 1 | src/backend/database/linked-table-repository.js(10), src/backend/database/migrations.js(7), src/backend/database/settings-repository.js(3) |
+| `parse` | 25 | 53 | 1 | src/backend/database/linked-table-repository.js(10), src/backend/database/migrations.js(8), src/backend/database/settings-repository.js(3) |
 | `normalizeCellValue` | 18 | 200 | 7 | src/main-process/scenario-engines/r5-refund-order-backfill.js(45), src/main-process/scenario-engines/c4-recon-id-fix.js(21), src/main-process/boc-fx-link-builder.js(15) |
 | `FileValidationError` | 18 | 83 | 9 | src/backend/file-service/readers.js(15), src/backend/file-service/normalizers.js(7), src/main-process/bank-statement-io.js(7) |
 | `appendModuleLog` | 15 | 77 | 11 | src/backend/database.js(23), src/main-process/acquiring-bill-currency-session.js(13), src/backend/database/migrations.js(8) |
@@ -1894,8 +1900,8 @@
 | `FLOW_HEADERS` | 14 | 35 | 8 | src/backend/acquiring-bill-currency-db/columns.js(6), src/backend/vcc-op-calc-import/validator.js(4), src/backend/acquiring-bill-currency-import/reader.js(3) |
 | `validateHeaders` | 14 | 34 | 3 | src/backend/biz-op-recon-import/reader-streamed.js(7), src/backend/acquiring-bill-currency-import/reader.js(4), src/backend/bank-bu-recon-import/reader.js(4) |
 | `XLSX` | 13 | 69 | 13 | src/backend/file-service/writers.js(20), src/main-process/pending-session.js(11), src/backend/pending-export/writer.js(9) |
+| `parseNumber` | 13 | 42 | 4 | src/main-process/scenario-engines/c3-gateway-recon-join.js(6), src/main-process/scenario-engines/r5-refund-order-backfill.js(6), src/main-process/scenario-engines/engine-utils.js(4) |
 | `applyWatermark` | 13 | 31 | 13 | src/main-process/biz-op-recon-writer.js(5), src/backend/file-service/writers.js(3), src/backend/pending-export/writer.js(3) |
-| `parseNumber` | 12 | 39 | 4 | src/main-process/scenario-engines/c3-gateway-recon-join.js(6), src/main-process/scenario-engines/r5-refund-order-backfill.js(6), src/main-process/scenario-engines/engine-utils.js(4) |
 | `DatabaseSync` | 12 | 28 | 6 | src/main-process/run-check-multiworker-worker.js(6), src/backend/run-data-store.js(3), src/backend/big-table-import/engine.js(2) |
 | `pad` | 10 | 66 | 2 | src/main-process/bank-statement-io.js(14), src/backend/logger.js(11), src/main-process/biz-op-recon-session.js(10) |
 | `PENDING_COLUMNS` | 10 | 39 | 10 | src/backend/pending-export/writer.js(6), src/backend/pending-import/contract-pending.js(6), src/backend/pending-import/validator.js(6) |
@@ -1917,7 +1923,7 @@
 | `deserializeError` | 7 | 12 | 1 | src/main-process/serialize-error.js(3), src/main-process/acquiring-bill-currency-session.js(2), src/main-process/big-table-import-dispatch.js(2) |
 | `getRunById` | 7 | 12 | 3 | src/backend/acquiring-bill-currency-db/run-repository.js(2), src/backend/biz-op-recon-db/run-repository.js(2), src/backend/pending-db/diff-repository.js(2) |
 | `mapRow` | 7 | 10 | 1 | src/backend/pending-import/removed-reader.js(3), src/backend/big-table-import/contract.js(2), src/backend/acquiring-bill-currency-import/contract-bill.js(1) |
-| `state` | 6 | 310 | 1 | src/renderer.js(154), src/renderer-pending.js(55), src/renderer-previews.js(41) |
+| `state` | 6 | 319 | 1 | src/renderer.js(163), src/renderer-pending.js(55), src/renderer-previews.js(41) |
 | `session` | 6 | 60 | 3 | src/main-process/statement-session.js(28), src/main-process/statement-generation.js(10), src/main-process/acquiring-bill-currency-run-data.js(7) |
 | `parseNumericValue` | 6 | 32 | 2 | src/backend/file-service.js(14), src/backend/file-service/writers.js(6), src/main-process/toolbox-stream-io.js(6) |
 | `serializeError` | 6 | 31 | 1 | src/main-process/run-check-worker.js(7), src/main-process/run-check-multiworker-worker.js(6), src/backend/big-table-import/engine-worker-entry.js(5) |
@@ -1956,7 +1962,7 @@
 | `deleteTemplate` | 5 | 7 | 1 | src/backend/database.js(2), src/backend/database/template-repository.js(2), src/preload.js(1) |
 | `sanitizeFileName` | 5 | 7 | 4 | src/main-process/toolbox.js(3), src/backend/balance-seed-store.js(1), src/main-process/bank-statement-io.js(1) |
 | `updateRunExportPath` | 5 | 7 | 2 | src/backend/bank-bu-recon-db/run-repository.js(2), src/backend/biz-op-recon-db/run-repository.js(2), src/main-process/bank-bu-recon-run-data.js(1) |
-| `elements` | 4 | 157 | 1 | src/renderer.js(98), src/renderer-previews.js(38), src/renderer-pending.js(17) |
+| `elements` | 4 | 165 | 1 | src/renderer.js(106), src/renderer-previews.js(38), src/renderer-pending.js(17) |
 | `runDataStore` | 4 | 61 | 4 | src/main-process/biz-op-recon-run-data.js(26), src/main-process/acquiring-bill-currency-run-data.js(17), src/main-process/bank-bu-recon-run-data.js(17) |
 | `runRepo` | 4 | 28 | 4 | src/main-process/acquiring-bill-currency-session.js(21), src/main-process/acquiring-bill-currency-writer.js(4), src/main-process/acquiring-bill-currency-run-data.js(2) |
 | `openSideDb` | 4 | 27 | 1 | src/main-process/biz-op-recon-run-data.js(12), src/main-process/bank-bu-recon-run-data.js(7), src/main-process/acquiring-bill-currency-run-data.js(6) |
@@ -1968,6 +1974,7 @@
 | `app` | 4 | 17 | 1 | src/renderer.js(8), src/main.js(4), src/renderer-dialogs.js(4) |
 | `MERCHANT_ID_SELF_INPUT_OPTION` | 4 | 17 | 2 | src/renderer.js(8), src/renderer-dialogs.js(6), src/renderer-previews.js(2) |
 | `writeErrorReport` | 4 | 17 | 1 | src/main-process/biz-op-recon-session.js(13), src/main-process/exceljs-writer.js(2), src/main-process/bank-statement-io.js(1) |
+| `YELLOW_FILL` | 4 | 15 | 4 | src/main-process/bank-bu-recon-writer.js(6), src/main-process/biz-op-recon-writer.js(4), src/main-process/exceljs-writer.js(3) |
 | `BALANCE_CALCULATED_OPTION` | 4 | 14 | 2 | src/renderer-dialogs.js(5), src/renderer.js(5), src/renderer-previews.js(3) |
 | `inferDateCellFormat` | 4 | 13 | 1 | src/backend/file-service/writers.js(4), src/main-process/toolbox-stream-io.js(4), src/backend/file-service.js(3) |
 | `toExcelSerial` | 4 | 13 | 1 | src/backend/file-service/writers.js(4), src/main-process/toolbox-stream-io.js(4), src/backend/file-service.js(3) |
@@ -1982,6 +1989,7 @@
 | `bankAmountAbs` | 4 | 10 | 3 | src/main-process/scenario-engines/r5-fund-transfer-backfill.js(3), src/main-process/scenario-engines/r5-refund-order-backfill.js(3), src/main-process/scenario-engines/dbs-charge-fund-check.js(2) |
 | `CHANNEL_BILL_FIELDS` | 4 | 10 | 2 | src/renderer-dialogs.js(4), src/constants/gateway-bill-recon-fields.js(2), src/main-process/recon-id-fix-io.js(2) |
 | `getRun` | 4 | 10 | 2 | src/main-process/bank-bu-recon-session.js(4), src/backend/bank-bu-recon-db/run-repository.js(2), src/backend/vcc-op-calc-db/run-repository.js(2) |
+| `GW_RECON_ID_FIELD` | 4 | 10 | 4 | src/main-process/scenario-engines/r1-recon-id-match.js(3), src/main-process/scenario-engines/r4-fund-nature-check.js(3), src/main-process/scenario-engines/dbs-charge-fund-check.js(2) |
 | `listSideDbFiles` | 4 | 10 | 1 | src/main-process/biz-op-recon-run-data.js(4), src/backend/run-data-store.js(2), src/main-process/acquiring-bill-currency-run-data.js(2) |
 | `openZipWithEntries` | 4 | 10 | 2 | src/backend/acquiring-bill-currency-import/reader.js(4), src/backend/big-table-import/zip-reader.js(3), src/backend/toolbox-xlsx-stream/multi-sheet-reader.js(2) |
 | `PENDING_GUANLI_DB_COLUMNS` | 4 | 10 | 1 | src/backend/bank-bu-recon-db/month-repository.js(3), src/main-process/bank-bu-recon-writer.js(3), src/backend/bank-bu-recon-db/columns.js(2) |
@@ -2047,7 +2055,6 @@
 | `PRAGMA_EXPECTED` | 3 | 14 | 3 | src/main-process/run-check-multiworker-worker.js(5), src/main-process/run-check-worker.js(5), src/backend/big-table-import/engine.js(4) |
 | `applyStatementResult` | 3 | 13 | 1 | src/renderer.js(7), src/renderer-dialogs.js(5), src/renderer-previews.js(1) |
 | `diffRepo` | 3 | 13 | 3 | src/backend/pending-export/writer.js(7), src/backend/pending-reconcile/engine.js(3), src/backend/pending-reconcile/removal-match.js(3) |
-| `YELLOW_FILL` | 3 | 13 | 3 | src/main-process/bank-bu-recon-writer.js(6), src/main-process/biz-op-recon-writer.js(4), src/main-process/exceljs-writer.js(3) |
 | `BANK_RECON_ID_FIELD` | 3 | 12 | 3 | src/main-process/scenario-engines/dbs-charge-fund-check.js(6), src/main-process/scenario-engines/r1-recon-id-match.js(3), src/main-process/scenario-engines/r4-fund-nature-check.js(3) |
 | `sideDbPath` | 3 | 12 | 1 | src/main-process/biz-op-recon-run-data.js(6), src/backend/run-data-store.js(5), src/main-process/acquiring-bill-currency-run-data.js(1) |
 | `PRAGMA_STATEMENTS` | 3 | 10 | 3 | src/main-process/run-check-multiworker-worker.js(4), src/backend/big-table-import/engine.js(3), src/main-process/run-check-worker.js(3) |
@@ -2076,9 +2083,9 @@
 | `GATEWAY_RECON_FIELDS` | 3 | 8 | 3 | src/constants/gateway-recon-headers-loader.js(4), src/constants/gateway-recon-fields.js(2), src/main-process/bank-statement-io.js(2) |
 | `getMonthReadiness` | 3 | 8 | 1 | src/main-process/acquiring-bill-currency-run-data.js(3), src/main-process/acquiring-bill-currency-session.js(3), src/backend/acquiring-bill-currency-db/import-repository.js(2) |
 | `getTemplateBigAccounts` | 3 | 8 | 1 | src/backend/database/template-repository.js(4), src/backend/database.js(2), src/main-process/monthly-balance.js(2) |
-| `GW_RECON_ID_FIELD` | 3 | 8 | 3 | src/main-process/scenario-engines/r1-recon-id-match.js(3), src/main-process/scenario-engines/r4-fund-nature-check.js(3), src/main-process/scenario-engines/dbs-charge-fund-check.js(2) |
 | `listDiffRows` | 3 | 8 | 1 | src/backend/pending-export/writer.js(4), src/backend/pending-db/diff-repository.js(2), src/backend/pending-reconcile/removal-match.js(2) |
 | `normalizeCurrency` | 3 | 8 | 3 | src/backend/acquiring-bill-currency-db/import-repository.js(4), src/backend/acquiring-bill-currency-import/contract-bill.js(2), src/backend/acquiring-bill-currency-import/contract-flow.js(2) |
+| `REFUND_TEMPLATE_HEADERS` | 3 | 8 | 1 | src/main-process/refund-backfill-writer.js(4), src/constants/refund-backfill-fields.js(2), src/main-process/scenario-engines/r5-refund-order-backfill.js(2) |
 | `SIGNED_AMOUNT_MAPPING_FIELD` | 3 | 8 | 2 | src/renderer-previews.js(3), src/renderer.js(3), src/main.js(2) |
 | `ZHONGTAI_DISPATCH_ORDER_SIGNATURE` | 3 | 8 | 3 | src/constants/fund-transfer-recon-fields.js(3), src/constants/table-signatures.js(3), src/main-process/exceljs-writer.js(2) |
 | `backfillBocReconLinkIds` | 3 | 7 | 1 | src/main-process/linked-derive-rebuild.js(4), src/main-process/boc-fx-link-builder.js(2), src/main.js(1) |
@@ -2290,6 +2297,7 @@
 | `ensureJpmDispatchOrderScenarioSeed` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `ensureLinkedTableSupport` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `ensureParentTemplateSupport` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
+| `ensureR4DirectionGuardConfigMigration` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `ensureReconRoundBuiltinScenariosSeed` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `ensureRefundBackfillScenarioSeed` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `ensureScenarioApplicableChannelsTable` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
@@ -2322,6 +2330,7 @@
 | `removedRepo` | 2 | 6 | 2 | src/backend/pending-export/writer.js(4), src/backend/pending-reconcile/removal-match.js(2) |
 | `retireChargeOutboundOrphans` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `runC1Scenario` | 2 | 6 | 2 | src/main-process/scenario-engines/index.js(4), src/main-process/scenario-engines/c1-extract-recon-id.js(2) |
+| `SHARED_STRINGS_ENTRY` | 2 | 6 | 2 | src/backend/toolbox-xlsx-stream/large-split-worker.js(3), src/main-process/toolbox-large-split-router.js(3) |
 | `signedDayDiff` | 2 | 6 | 2 | src/main-process/scenario-engines/r5-refund-order-backfill.js(4), src/main-process/scenario-engines/engine-date-utils.js(2) |
 | `splitSignedAmountValue` | 2 | 6 | 1 | src/backend/file-service.js(4), src/backend/file-service/normalizers.js(2) |
 | `SUPPORTED_SCENARIO_BUNDLE_VERSION` | 2 | 6 | 1 | src/backend/scenarios-bundle-io.js(5), src/main.js(1) |
@@ -2365,7 +2374,6 @@
 | `PENDING_INSERT_SQL` | 2 | 5 | 2 | src/backend/pending-import/contract-pending.js(3), src/backend/bank-bu-recon-db/month-repository.js(2) |
 | `performance` | 2 | 5 | 1 | src/renderer.js(3), src/main.js(2) |
 | `reconIdFixSession` | 2 | 5 | 1 | src/renderer.js(4), src/main.js(1) |
-| `REFUND_TEMPLATE_HEADERS` | 2 | 5 | 1 | src/main-process/refund-backfill-writer.js(3), src/constants/refund-backfill-fields.js(2) |
 | `ROUND_LABELS` | 2 | 5 | 1 | src/renderer.js(3), src/main-process/reconciliation-orchestrator.js(2) |
 | `runC2Scenario` | 2 | 5 | 2 | src/main-process/scenario-engines/index.js(3), src/main-process/scenario-engines/c2-offset-bill-mark.js(2) |
 | `runC3Scenario` | 2 | 5 | 2 | src/main-process/scenario-engines/index.js(3), src/main-process/scenario-engines/c3-gateway-recon-join.js(2) |
