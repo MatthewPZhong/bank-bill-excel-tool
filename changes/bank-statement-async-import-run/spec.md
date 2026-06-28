@@ -49,5 +49,5 @@
 
 ## 验收
 - `npm run release-check` 全绿。
-- 新增 op-lock 互斥单测（三动作并发被挡）。
+- 新增 op-lock 互斥单测（五动作并发被挡：batch-import/run/export + linked-table:import/delete-by-date-range）。
 - 手测：大数据量「导入/运行」期间窗口保持响应、按钮禁用、二次点击被挡。

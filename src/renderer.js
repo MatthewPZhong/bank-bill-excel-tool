@@ -3781,11 +3781,11 @@ async function handleBankStatementBatchImport() {
     result = await window.desktopApi.bankStatement.batchImport();
   } catch (error) {
     console.error(error);
-    if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = false;
     openModal(createAlertDialog(`导入失败：${error.message || error}`));
-    return;
+    return; // → 外层 finally 统一清 inflight + 复位按钮
   }
-  if (elements.bankStatementImportBtn) elements.bankStatementImportBtn.disabled = false;
+  // v3.0.11 codex-P3 修复：不在此中途复位导入按钮——保持禁用直到外层 finally（覆盖 refreshBankStatementStatus /
+  //   退款·C3 提醒整段 await），否则那段 await 期间可起第二次导入，第一次的 finally 清共享 inflight 会让 run/export 中途复活。
   if (!result || result.status === 'cancelled') return; // 用户取消文件选择 → 不刷状态框
   if (result.status !== 'ok') {
     // IPC 层整体失败（非 per-file 明细），沿用弹框；不入状态框 issues（issues 只承载 per-file 明细）
