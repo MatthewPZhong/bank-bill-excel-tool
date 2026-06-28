@@ -14,9 +14,10 @@
 
 ### 1. 防重入 op-lock（main.js）
 - 现状：`bankStatementOperationLock` 零命中（无锁）。
-- 新建模块级锁（仿收单 `main.js:390` 区 `acquiringBillCurrencyOperationLock`），**统一一把互斥锁**包裹三动作：`bank-statement:batch-import`(`:12033`)、`bank-statement:run`(`:3678`)、`bank-statement:export`(`:3883`)。
+- 新建模块级锁（仿收单 `main.js:390` 区 `acquiringBillCurrencyOperationLock`），**统一一把互斥锁**包裹：`bank-statement:batch-import`、`bank-statement:run`、`bank-statement:export`，**以及（codex-P2 补强）`linked-table:import`、`linked-table:delete-by-date-range` —— 共 5 个 handler**。
 - 入口 `tryAcquire` 失败即返回 `{status:'failed', message:'正在处理中…'}`；`finally` 释放。
-- 理由：三动作共享 `bankStatementSession`/`processingResult`，并发会撕裂状态。
+- 理由：这些动作共享 bank-statement 对账数据与会话态（`bankStatementSession`/`processingResult`/`refundOrderSession`），**以及作为 R1-R5 输入的链接表**（gateway-bill/bank-deposit/mid-allocation 等）；并发会撕裂状态。
+- 🔴 **链接表写入必须在锁内**（codex-P2）：否则 run 数据准备阶段在 linked-table 多步读取间让出（批2 的 `prepare-gw`/`prepare-linked`）时，并发改表会把「改动前 gw」与「改动后 deposit/mid/recon」拼成从未真实存在的快照、存错 `processingResult`。锁住链接表写入后，三处 prepare 让出（clone-bank/gw/linked）均可安全保留。
 
 ### 2. 导入让出 + 进度（main.js / preload.js / renderer.js）
 - `main.js:12051` 多文件循环 `for (const filePath of choice.filePaths)` 体内，每文件处理完插 `await new Promise(r => setImmediate(r))`（仿 orchestrator `yieldTick` 范式）。
