@@ -41,22 +41,26 @@ describe('bank-statement op-lock — 源码接线 (v3.0.11 需求3 批1)', () =>
       'releaseBankStatementOpLock 释放函数应存在');
   });
 
-  test('三动作 handler 各自 acquire 同一把锁（import/run/export）', () => {
+  test('五动作 handler 各自 acquire 同一把锁（run/export/import + linked-import/linked-delete）', () => {
     assert.ok(source.includes("tryAcquireBankStatementOpLock('run')"), 'run handler 应 acquire');
     assert.ok(source.includes("tryAcquireBankStatementOpLock('export')"), 'export handler 应 acquire');
     assert.ok(source.includes("tryAcquireBankStatementOpLock('import')"), 'batch-import handler 应 acquire');
+    // v3.0.11 codex-P2 补强：链接表写入（import / delete-by-date-range）纳入同一把锁
+    //   —— 链接表是 bank-statement run（R1-R5）输入，防 run 数据准备让出窗口内并发改表撕裂快照。
+    assert.ok(source.includes("tryAcquireBankStatementOpLock('linked-import')"), 'linked-table:import 应 acquire');
+    assert.ok(source.includes("tryAcquireBankStatementOpLock('linked-delete')"), 'linked-table:delete-by-date-range 应 acquire');
   });
 
   test('争用返回 { status:"failed", message:"正在处理中…" }', () => {
     assert.ok(source.includes("return { acquired: false, message: '正在处理中…' };"),
       '争用时 tryAcquire 应返回固定文案');
     const contention = source.match(/return \{ status: 'failed', message: opLock\.message \};/g) || [];
-    assert.strictEqual(contention.length, 3, '三 handler 各有一处「争用即返回失败」短路');
+    assert.strictEqual(contention.length, 5, '五 handler（run/export/import + linked-import/linked-delete）各有一处「争用即返回失败」短路');
   });
 
-  test('三 handler 各在 finally 释放锁（恰 3 处 release）', () => {
+  test('五 handler 各在 finally 释放锁（恰 5 处 release）', () => {
     const releases = source.match(/releaseBankStatementOpLock\(\);/g) || [];
-    assert.strictEqual(releases.length, 3, 'import/run/export 三处 finally 各释放一次');
+    assert.strictEqual(releases.length, 5, 'run/export/import + linked-import/linked-delete 五处 finally 各释放一次');
   });
 });
 
@@ -79,8 +83,8 @@ describe('bank-statement op-lock — 互斥语义 (三动作并发被挡)', () =
     assert.strictEqual(tryAcquireBankStatementOpLock('export').acquired, true, '释放后 → 导出可获取');
   });
 
-  test('三动作两两互斥（共享同一把锁）', () => {
-    const ops = ['import', 'run', 'export'];
+  test('五动作两两互斥（共享同一把锁）', () => {
+    const ops = ['import', 'run', 'export', 'linked-import', 'linked-delete'];
     for (const first of ops) {
       const { tryAcquireBankStatementOpLock, releaseBankStatementOpLock } = loadRealLock();
       assert.strictEqual(tryAcquireBankStatementOpLock(first).acquired, true, `${first} 应可获取`);

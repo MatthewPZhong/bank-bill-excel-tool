@@ -3758,10 +3758,10 @@ function registerAppHandlers() {
       //     必须保留（常驻 session、引擎原地改它）。
       const bankChannels = bankStatementSession.rows.map((r) => (r && r.Channel != null ? String(r.Channel).trim() : ''));
       const workingGwRows = database.readGatewayBillRowsByChannels(bankChannels);
-      // v3.0.11 codex-P2 修复（🔴 资金红线）：linked-table 多步读取（gw / deposit / mid / recon）之间绝不让出。
-      //   linked-table:import / delete-by-date-range 不在 bankStatementOperationLock 覆盖内 → 若此处让出，
-      //   并发链接表改动会让 run 把「改动前 gw」与「改动后 deposit/mid/recon」拼成从未真实存在的状态、存错 processingResult。
-      //   原批2 的 prepare-gw / prepare-linked 两个内嵌让出已移除；仅保留 prepare-clone-bank（在 linked-table 读取之前、银行 session 受 op-lock 护）。
+      // v3.0.11 需求3（批2）：网关账单大表读完（步骤边界）→ 让出一次，再读入金/调拨等链接表。
+      //   🔴 原子性前提（codex-P2 → 补强）：linked-table:import / delete-by-date-range 已纳入 bankStatementOperationLock，
+      //   run 全程持锁 → 此让出窗口内并发链接表改动被锁挡住（返回「正在处理中…」）→ gw 与后续 deposit/mid/recon 仍是一致快照。
+      await yieldRun('prepare-gw');
       // v2.1.16-beta.4 R5 场景4（中台退款订单回填）安全接线：
       //   入金表（链接表 tableKey='bank-deposit'，beta.3② 合法 tableKey）—— JPM-US 子链路用；无数据返回 []。
       //   refund order —— v2.1.16-beta.6 需求C 退款导入已开通：refundOrderSession 非 null 时注入真实退款行；未导入退款表时注入 []（引擎 no-op）。
@@ -3797,7 +3797,9 @@ function registerAppHandlers() {
       const workingMidRows = paymentOfflineEnabled
         ? structuredClone(database.readLinkedTableRows('mid-allocation') || [])
         : [];
-      // v3.0.11 codex-P2 修复：原批2 prepare-linked 让出已移除（见上方 prepare-gw 处说明）——linked-table 多步读取须保持原子。
+      // v3.0.11 需求3（批2）：入金/退款/调拨链接表深拷群已完成（步骤边界）→ 让出一次，再做调拨对账单重派生+读取等剩余重活。
+      //   🔴 原子性前提同上（见 prepare-gw 处）：linked-table 写入已纳入 op-lock，run 持锁期间并发改表被挡 → 快照一致。
+      await yieldRun('prepare-linked');
       // v3.0.6 需求2（🔴 资金红线）：R5s2「对账数据来源」二选一 —— 勾选「中台调拨单表」时改走调拨对账单回填。
       //   gating 仿 workingMidRows：默认勾选（config.reconSourceMid !== false，缺省/老库无字段视为勾选，决策 D4）；
       //   仅勾选路才 structuredClone 读隐藏派生表 linked_fund_transfer_recon，否则注入 []（取消路不读本 context）。
@@ -11851,6 +11853,11 @@ function registerNewAccountHandlers() {
   //     各自开独立事务——本处调用点【不在】任何外层 DB 事务内（删除事务已提交），无嵌套事务问题。
   //   🔴 派生重建沿用导入侧语义：rebuild* 内部各自 try/catch 隔离，派生任一步抛错记 created:false 不向外抛、不阻断删除本身（行已删）。
   trackedIpcHandle('linked-table:delete-by-date-range', '链接表管理', '删除', (_event, payload) => {
+    // v3.0.11 codex-P2 补强（🔴 资金红线）：纳入 bankStatementOperationLock —— 链接表是 bank-statement run（R1-R5）输入，
+    //   run 全程持锁；本删除若在 run 数据准备让出窗口内并发执行会撕裂快照。争用即返回失败，finally 释放。
+    const opLock = tryAcquireBankStatementOpLock('linked-delete');
+    if (!opLock.acquired) return { status: 'failed', message: opLock.message };
+    try {
     if (!database || !database.db) return { status: 'failed', message: '数据库未初始化' };
     const start = payload && payload.start != null ? String(payload.start).trim() : '';
     const end = payload && payload.end != null ? String(payload.end).trim() : '';
@@ -11925,12 +11932,21 @@ function registerNewAccountHandlers() {
     } catch (err) {
       return { status: 'failed', message: err && err.message ? err.message : String(err) };
     }
+    } finally {
+      // v3.0.11 codex-P2 补强：删表结束统一释放互斥锁（含各早返回 / ok / 异常路径）。
+      releaseBankStatementOpLock();
+    }
   });
 
   // import：多选 Excel → 逐文件识别 → 命中且支持 → 读行落库 → 汇总 per-file 明细。
   //   数据红线 🔴：gateway-bill 走按 ReconBillBizId 幂等累加 upsert（重导不清空、相同 bizId 覆盖、空 bizId 拒入，v3.0.1，见下方 inline 注释）；
   //     其余 3 张表 replaceLinkedTable 整表覆盖（一张表重导 = 旧数据全删）。不整批回滚。
   trackedIpcHandle('linked-table:import', '链接表管理', '导入', async () => {
+    // v3.0.11 codex-P2 补强（🔴 资金红线）：纳入 bankStatementOperationLock —— 链接表是 bank-statement run（R1-R5）输入，
+    //   run 全程持锁；本导入若在 run 数据准备让出窗口内并发执行会撕裂快照。争用即返回失败，finally 释放。
+    const opLock = tryAcquireBankStatementOpLock('linked-import');
+    if (!opLock.acquired) return { status: 'failed', message: opLock.message };
+    try {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const res = await dialog.showOpenDialog({
       title: '选择链接表文件（可多选）',
@@ -12025,6 +12041,10 @@ function registerNewAccountHandlers() {
     }
 
     return { status: 'ok', results };
+    } finally {
+      // v3.0.11 codex-P2 补强：导入结束统一释放互斥锁（含 cancelled / ok / 异常路径）。
+      releaseBankStatementOpLock();
+    }
   });
 
   // ==========================================================================

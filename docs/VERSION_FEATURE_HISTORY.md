@@ -17,14 +17,14 @@ v3.0.11 集中 **1 项资金红线规则收紧 + 3 项体验/性能需求**（te
 
 **新增**
 
-- 银行对账单处理统一 operation lock（需求 3 批1 · 🔴 资金红线 · `main.js`）：模块级单例锁 `bankStatementOperationLock` + `tryAcquire`/`release`，import/run/export 三 handler 入口 acquire（争用返回 `{status:'failed', message:'正在处理中…'}`）+ finally 释放，统一一把互斥锁防三动作并发撕裂共享会话态。新增 `bank-statement-op-lock.test.js`（源码接线 + 抽真实实现验互斥/可重入）。
+- 银行对账单处理统一 operation lock（需求 3 批1 + codex-P2 补强 · 🔴 资金红线 · `main.js`）：模块级单例锁 `bankStatementOperationLock` + `tryAcquire`/`release`，run/export/import **+ linked-table:import/delete-by-date-range** 共 5 个 handler 入口 acquire（争用返回 `{status:'failed', message:'正在处理中…'}`）+ finally 释放，统一一把互斥锁防并发撕裂 bank-statement 对账数据/会话态（含作为 R1-R5 输入的链接表）。新增 `bank-statement-op-lock.test.js`（源码接线 + 抽真实实现验五动作互斥/可重入）。
 - 导入进度通道 `bank-statement:import:progress`（需求 3 批1）：handler 内联 100ms 节流转发器 → preload `bankStatement.onImportProgress` → renderer `formatBankStatementImportProgress` 刷「正在导入第 X/Y 个文件…」+ finally 退订。
 - 按钮禁用统一闸 `state.bankStatementInflight` + codex-P3 修复（需求 3 批1 · `renderer.js`）：三动作任一进行中禁用《开始运行》《导出文件》《导入对账单》，三入口最外层设、最内层 finally 清。**codex P3**：中央 `updateBankStatementUi` 原无条件复活导入按钮（运行/导出期 UI 刷新触发）→ 导入按钮 disabled 也受 inflight 约束，堵住「刷新复活导入→点导入被拒 finally 清共享 inflight→运行/导出按钮中途复活」。
 
 **变更**
 
 - 需求 0 R5s3 入桶 Debit 门槛（🔴 资金红线 · `r5-platform-inbound-cleanup.js`）：入桶循环顶端 `parseNumber(bank['Debit Amount'])` 为 `null`（空/空白/非数字）或 `0`（含 `0.00`/`-0`）才入桶、真实非零借方跳过（双桶一致）；不改剔除行结构/触发方向/默认配置，`modifications` 恒 `[]`。单测重做（多候选 fixture 适配过门槛 + 门槛边界 + 门槛×fallback×1v1 交互）。
-- 需求 3 批2 run 数据准备让出 + codex-P2 修复（🔴 资金红线 · `main.js`/`renderer.js`）：`prepare`→`reconcile` 间「银行行深拷后」插 `prepare-clone-bank` yield（🔴 不在 `structuredClone` 中途让出、不删 clone）。**codex P2**：原拟再插 `prepare-gw`/`prepare-linked`，但 `linked-table:import`/`delete-by-date-range` 不在 op-lock 内 → 中途让出会拼出跨改动的不一致快照存错 `processingResult`；故移除这两处、**linked-table 多步读取保持原子**（`prepare-clone-bank` 在读取前、银行 session 受 op-lock 护，保留）。纯控制流，产物零变化。
+- 需求 3 批2 run 数据准备分块让出 + codex-P2 补强（🔴 资金红线 · `main.js`/`renderer.js`）：`prepare`→`reconcile` 间插 `prepare-clone-bank`/`prepare-gw`/`prepare-linked` 三处步骤边界 yield（🔴 不在 `structuredClone` 中途让出、不删 clone）。**codex P2**：linked-table 多步读取间让出须保证读取期不被并发改写 → 把 `linked-table:import`/`delete-by-date-range` 纳入同一把 op-lock（run 持锁期间并发改表被挡）→ 多步读取一致快照、三处让出全部保留。纯控制流，产物零变化。
 - 需求 1 文件名换行（前端 · `styles-gemini-extra.css`）：`.alert-message` 加 `overflow-wrap: anywhere; word-break: break-word;`（未动共用 `.alert-card`）。
 - 需求 2 导出框去 error-report（前端 · `renderer.js`）：`updateBankStatementUi` 已导出分支删 error-report 行；文件生成链路不动；配套单测断言反转。
 

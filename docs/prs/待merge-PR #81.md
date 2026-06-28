@@ -39,7 +39,7 @@ Spec：`changes/r5s3-debit-zero-bucket-gate/spec.md` ｜ `changes/bank-statement
 
 提 PR 后做了一轮 codex review（`codex exec review --base main`）+ 一轮 team-lead self-review，修复 2 项真问题：
 
-- **P2（codex · 🔴 资金红线）run 数据准备 linked-table 读取原子性**：批2 原在 linked-table 多步读取间插 `prepare-gw`/`prepare-linked` 让出，而 `linked-table:import`/`delete-by-date-range` 不在 `bankStatementOperationLock` 内 → 并发改动会让 run 把「改动前 gw」与「改动后 deposit/mid/recon」拼成从未真实存在的状态、存错 `processingResult`。**修复**：移除这两处内嵌让出，linked-table 多步读取保持原子；保留 `prepare-clone-bank`（在 linked-table 读取之前、银行 session 受 op-lock 护，安全）。
+- **P2（codex · 🔴 资金红线）run 数据准备 linked-table 读取原子性**：批2 在 linked-table 多步读取间插 `prepare-gw`/`prepare-linked` 让出，而 `linked-table:import`/`delete-by-date-range` 原不在 `bankStatementOperationLock` 内 → 并发改动会把「改动前 gw」与「改动后 deposit/mid/recon」拼成从未真实存在的状态、存错 `processingResult`。**修复（两步）**：① 先移除这两处内嵌让出（commit 67608bc）；② 按用户「补」要求落最终方案——把 `linked-table:import`/`delete-by-date-range` 纳入同一把 op-lock（op-lock 由 3→5 handler；run 全程持锁 → 让出窗口内并发改表被锁挡住、返回「正在处理中…」）→ 三处 prepare 让出（clone-bank/gw/linked）全部恢复且 linked-table 多步读取保持一致快照。op-lock 单测同步更新为 5 handler / 5 处 release / 五动作互斥。
 - **P3（codex）导入按钮 UI 刷新复活**：中央 `updateBankStatementUi` 原无条件 `importBtn.disabled=false`，运行/导出期 UI 刷新（如切回本模块）会复活导入按钮 → 点导入被 op-lock 拒后其 finally 清掉共享 `bankStatementInflight` → 运行/导出按钮中途复活。**修复**：导入按钮 disabled 也受 `state.bankStatementInflight` 约束。
 - self-review nit（非 bug，保留）：import handler op-lock acquire 后、`try` 前夹了不可能抛的进度转发器 IIFE；不可达故不改，记录备查。
 

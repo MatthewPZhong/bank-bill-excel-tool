@@ -4165,9 +4165,11 @@ function formatBankStatementRunProgress(ev) {
   if (!ev || typeof ev !== 'object') return null;
   const STAGE_LABELS = {
     prepare: '正在准备数据…',
-    // v3.0.11 需求3（批2 · run 数据准备让出）：准备阶段文案（与 main.js yieldRun stage key 对应）。
-    //   codex-P2 修复后仅保留 prepare-clone-bank（prepare-gw / prepare-linked 因 linked-table 读取原子性已移除）。
+    // v3.0.11 需求3（批2 · run 数据准备让出）：准备阶段细分文案（与 main.js yieldRun stage key 一一对应）。
+    //   （codex-P2 补强：linked-table 写入已纳入 op-lock → run 持锁期间并发改表被挡 → 读取间让出仍快照一致，故三处让出齐备。）
     'prepare-clone-bank': '正在准备数据（银行流水）…',
+    'prepare-gw': '正在准备数据（网关账单）…',
+    'prepare-linked': '正在准备数据（关联表）…',
     reconcile: '正在执行对账…'
   };
   const ROUND_LABELS = {
