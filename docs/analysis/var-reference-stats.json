@@ -1,7 +1,7 @@
 {
   "meta": {
     "version": "3.0.12",
-    "scannedAt": "2026-06-29T00:47:20.747Z",
+    "scannedAt": "2026-06-29T02:06:58.963Z",
     "root": "src",
     "totalFiles": 171,
     "totalTopLevelNames": 1758,
@@ -762,7 +762,8 @@
           "src/main-process/scenario-engines/engine-utils.js",
           "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
           "src/main-process/scenario-engines/many-to-many-detector.js",
-          "src/main-process/scenario-engines/r1-recon-id-match.js"
+          "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "src/main.js"
         ],
         "refFiles": [
           {
@@ -844,10 +845,14 @@
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 45
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
           }
         ],
-        "totalHits": 208,
-        "fileSpan": 20
+        "totalHits": 209,
+        "fileSpan": 21
       },
       {
         "name": "FileValidationError",
@@ -30777,7 +30782,8 @@
         "src/main-process/scenario-engines/engine-utils.js",
         "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
         "src/main-process/scenario-engines/many-to-many-detector.js",
-        "src/main-process/scenario-engines/r1-recon-id-match.js"
+        "src/main-process/scenario-engines/r1-recon-id-match.js",
+        "src/main.js"
       ],
       "refFiles": [
         {
@@ -30859,10 +30865,14 @@
         {
           "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
           "count": 45
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
         }
       ],
-      "totalHits": 208,
-      "fileSpan": 20
+      "totalHits": 209,
+      "fileSpan": 21
     },
     {
       "name": "FileValidationError",

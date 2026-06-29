@@ -154,6 +154,10 @@ const {
   pickStaleHits,
   buildStaleHitReminder
 } = require('./main-process/scenario-engines/r5-refund-order-backfill');
+// v3.0.12 PR#82 codex-Minor：账户映射 IPC 预校验/去重归一化与仓储单一真相对齐（仓储 saveMappings/getMappingMap
+//   均用 normalizeCellValue：trim + String 化、数值有限化）—— 防异常非串值（如数值 0）下「IPC 去重键 ≠ DB
+//   UNIQUE(mid_account_id) 键」漏判到约束兜底。复用引擎归一化函数，禁自写。
+const { normalizeCellValue } = require('./main-process/scenario-engines/engine-utils');
 // v2.1.9 N5：dispatcher 双维调度依赖 channels-repository（findByNameAndLocation + getBuiltinGeneral）
 const channelsRepository = require('./backend/database/channels-repository');
 // v2.1.9 N7：场景模板 bundle 序列化 / 解析 / 类型识别（spec §六）
@@ -5074,8 +5078,10 @@ function validateFundTransferAccountMappings(mappings) {
   const midAccountSeen = new Set();
 
   for (const mapping of mappings) {
-    const midAccountId = String((mapping && mapping.midAccountId) || '').trim();
-    const clearingAccountId = String((mapping && mapping.clearingAccountId) || '').trim();
+    // codex-Minor：与仓储 saveMappings / getMappingMap 同口径归一化（normalizeCellValue），使下方去重判定
+    //   （midAccountSeen）与 DB UNIQUE(mid_account_id) 完全同键，杜绝异常非串值漏判到约束兜底。
+    const midAccountId = normalizeCellValue(mapping && mapping.midAccountId);
+    const clearingAccountId = normalizeCellValue(mapping && mapping.clearingAccountId);
 
     if (!midAccountId && !clearingAccountId) {
       continue;
@@ -5122,6 +5128,13 @@ function registerFundTransferAccountMappingHandlers() {
   });
 
   trackedIpcHandle('fund-transfer-account-mapping:save', '链接表管理', '账户映射管理', (_event, mappings) => {
+    // v3.0.12 PR#82 codex-P2 补强（🔴 资金红线）：纳入 bankStatementOperationLock —— 账户映射改写「中台调拨订单对账」
+    //   派生的 big_account（批B buildFundTransferReconRows 用 getMappingMap 替换），与链接表同性质、同为
+    //   bank-statement run（R1-R5 / R5s2-recon）输入。run/export 全程持锁（含轮次间 yield）；本保存若在 run 让出
+    //   窗口内并发执行，会在清 processingResult 后被仍在跑的 run 用旧映射结果覆盖回去 → 可导出 stale 对账结果。
+    //   争用即返回失败，finally 释放（与 linked-table:import / delete-by-date-range 同范式）。
+    const opLock = tryAcquireBankStatementOpLock('account-mapping-save');
+    if (!opLock.acquired) return { status: 'failed', message: opLock.message };
     try {
       const validationResult = validateFundTransferAccountMappings(mappings);
 
@@ -5159,6 +5172,9 @@ function registerFundTransferAccountMappingHandlers() {
         originalError: error,
         context: { mappings }
       });
+    } finally {
+      // v3.0.12 PR#82 codex-P2 补强：保存结束统一释放互斥锁（含校验早返回 / 成功 / 异常路径）。
+      releaseBankStatementOpLock();
     }
   });
 }

@@ -266,6 +266,47 @@ async function run() {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 
+  // ===== Step 4：检测器日期容差 = R5s2 场景配置（codex-P2-1 回归，无需写盘）=====
+  //   编排器以 r5s2Bucket[0].config.dateToleranceDays 传检测器（须 = 回填引擎实际用值）。修复前编排器漏传
+  //   options → 检测器固定回退默认 1 → 容差≠1 时复核表与回填口径不一致。走调拨侧（checked 路，与 Step1 同引擎）：
+  //     容差0：隔 1 天的 2×2 组本不该进表（旧实现按默认 1 误进 = 过报）；
+  //     容差3：隔 2 天的 2×2 组本该进表（旧实现按默认 1 漏边 = 漏报）。
+  const r5s2ScenarioTol = (dateToleranceDays) => {
+    const s = r5s2Scenario();
+    s.config = { ...s.config, dateToleranceDays };
+    return s;
+  };
+  const reconRowOn = (bigAccount, amount, reconId, billDate) => {
+    const rc = reconRow(bigAccount, amount, reconId);
+    rc[RECON.billDate] = billDate; // 覆盖夹具默认 DATE，制造隔日组
+    return rc;
+  };
+
+  // 容差0：2 银行（同日 DATE=2026-06-07）× 2 调拨（DATE+1=06-08）→ 隔 1 天，容差 0 不成边 → 不命中
+  const tol0 = await runReconciliation({
+    bankRows: [bankRow('t0a', 'TOL0', 200), bankRow('t0b', 'TOL0', 200)],
+    gwRows: [],
+    scenarios: [r5s2ScenarioTol(0)],
+    fundTransferReconContext: {
+      reconRows: [reconRowOn('TOL0', 200, 'RC-T0a', '2026-06-08'), reconRowOn('TOL0', 200, 'RC-T0b', '2026-06-08')]
+    }
+  });
+  assertEq(tol0.manyToManyReviewRows.length, 0, '容差0：隔 1 天的 2×2 组不进 reviewRows（修复前按默认1误进=过报）');
+  assertEq(tol0.stats.manyToManyReviewCount, 0, '容差0：stats.manyToManyReviewCount=0');
+
+  // 容差3：2 银行（同日 DATE）× 2 调拨（DATE+2=06-09）→ 隔 2 天，容差 3 成边 → 命中
+  const tol3 = await runReconciliation({
+    bankRows: [bankRow('t3a', 'TOL3', 300), bankRow('t3b', 'TOL3', 300)],
+    gwRows: [],
+    scenarios: [r5s2ScenarioTol(3)],
+    fundTransferReconContext: {
+      reconRows: [reconRowOn('TOL3', 300, 'RC-T3a', '2026-06-09'), reconRowOn('TOL3', 300, 'RC-T3b', '2026-06-09')]
+    }
+  });
+  const tol3Ids = tol3.manyToManyReviewRows.map((r) => r.row._rowId).sort();
+  assertEq(JSON.stringify(tol3Ids), JSON.stringify(['t3a', 't3b']), '容差3：隔 2 天的 2×2 组进 reviewRows（修复前按默认1漏边=漏报）');
+  assertEq(tol3.stats.manyToManyReviewCount, 2, '容差3：stats.manyToManyReviewCount=2');
+
   const total = passed + failed;
   console.log(`\n==== ${passed}/${total} PASS ====`);
   if (failed > 0) {

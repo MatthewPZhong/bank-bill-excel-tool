@@ -5,7 +5,7 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.0.12 |
-| 扫描时间 | 2026-6-29 08:47:20 |
+| 扫描时间 | 2026-6-29 10:06:58 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 171 |
 | 顶层声明总数 | 1758 |
@@ -25,7 +25,7 @@
 | `fs` | 41 | 125 | 40 | src/backend/balance-adjustment-store.js |
 | `normalizeCell` | 25 | 131 | 12 | src/backend/balance-adjustment-store.js |
 | `parse` | 25 | 53 | 1 | src/backend/usage-stats.js |
-| `normalizeCellValue` | 20 | 208 | 9 | src/backend/database/fund-transfer-account-mapping-repository.js |
+| `normalizeCellValue` | 21 | 209 | 10 | src/backend/database/fund-transfer-account-mapping-repository.js |
 | `FileValidationError` | 18 | 83 | 9 | src/backend/balance-seed-store.js |
 | `appendModuleLog` | 15 | 77 | 11 | src/backend/database.js |
 | `makeWarningCollector` | 15 | 30 | 4 | src/main-process/scenario-engines/boc-dispatch-order-fix.js |
@@ -1899,7 +1899,7 @@
 | `fs` | 41 | 125 | 40 | src/backend/usage-stats.js(9), src/backend/file-service/readers.js(7), src/backend/run-data-store.js(7) |
 | `normalizeCell` | 25 | 131 | 12 | src/backend/file-service.js(34), src/backend/file-service/normalizers.js(12), src/main-process/toolbox.js(11) |
 | `parse` | 25 | 53 | 1 | src/backend/database/linked-table-repository.js(10), src/backend/database/migrations.js(8), src/backend/database/settings-repository.js(3) |
-| `normalizeCellValue` | 20 | 208 | 9 | src/main-process/scenario-engines/r5-refund-order-backfill.js(45), src/main-process/scenario-engines/c4-recon-id-fix.js(21), src/main-process/boc-fx-link-builder.js(15) |
+| `normalizeCellValue` | 21 | 209 | 10 | src/main-process/scenario-engines/r5-refund-order-backfill.js(45), src/main-process/scenario-engines/c4-recon-id-fix.js(21), src/main-process/boc-fx-link-builder.js(15) |
 | `FileValidationError` | 18 | 83 | 9 | src/backend/file-service/readers.js(15), src/backend/file-service/normalizers.js(7), src/main-process/bank-statement-io.js(7) |
 | `appendModuleLog` | 15 | 77 | 11 | src/backend/database.js(23), src/main-process/acquiring-bill-currency-session.js(13), src/backend/database/migrations.js(8) |
 | `makeWarningCollector` | 15 | 30 | 4 | src/main-process/scenario-engines/boc-dispatch-order-fix.js(2), src/main-process/scenario-engines/c1-extract-recon-id.js(2), src/main-process/scenario-engines/c2-offset-bill-mark.js(2) |

@@ -488,7 +488,18 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
   //   bankRows = 最终态；gwRows = safeGwRows（恒可用）；reconRows 取 fundTransferReconContext.reconRows
   //   （需求2 取消路 / 缺省 → [] → 调拨检测自然 no-op）。
   const detectorReconRows = (fundTransferReconContext && fundTransferReconContext.reconRows) || [];
-  const manyToManyReviewRows = detectFundTransferManyToMany(bankRows, safeGwRows, detectorReconRows).reviewRows;
+  // v3.0.12 PR#82 codex-P2-1（🔴 资金红线）：检测器日期容差必须 = R5s2 回填引擎**实际用值**，否则容差≠1 时
+  //   复核表与回填口径不一致（容差3→隔2天的2×2组漏进表；容差0→过报）。网关侧 runRound5FundTransferBackfill
+  //   与调拨侧 runRound5FundTransferReconBackfill **同源同字段**：均以 r5s2Bucket[0].config.dateToleranceDays
+  //   为入参、且 `Number.isFinite?值:1` 归一化口径与检测器一致（两路 useMidReconTable 互斥择一）→ 单一容差，
+  //   无需按侧分传。R5s2 未启用（bucket 空）→ undefined → 检测器回退默认 1（与引擎缺省同口径）；
+  //   默认容差(1)路径输出逐字节不变。
+  const fundTransferDateToleranceDays = r5s2Bucket.length
+    ? (r5s2Bucket[0].config || {}).dateToleranceDays
+    : undefined;
+  const manyToManyReviewRows = detectFundTransferManyToMany(bankRows, safeGwRows, detectorReconRows, {
+    dateToleranceDays: fundTransferDateToleranceDays
+  }).reviewRows;
   await yieldTick('M2M'); // 轮次边界让出（M2M 异常-人工判断检测已完成，进 buildOutputRows 前；上游 R5s4+detector 不再挤成同步块）
 
   // ===== 构造输出：从「当前最新 bankRows」重建（不用 dispatcher 过时浅拷贝）=====

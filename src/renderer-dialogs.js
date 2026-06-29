@@ -5660,21 +5660,40 @@
         tbody.appendChild(createAddRow());
       }
 
-      // 打开即异步回填（先挂 overlay，列表随后填充；失败仅渲染空表 + 新增行，不阻塞使用）
+      // v3.0.12 PR#82 codex-P2-3（🔴 数据丢失）：list() 异步回填完成前 / 加载失败时，「完成」必须禁用——
+      //   否则点完成读到空表 → save([]) → 仓储 saveMappings 整表删+重插 → **清空用户已配映射**（映射驱动调拨
+      //   派生 big_account，污染「中台调拨订单对账ID回填」R5s2-recon + DBS-Charge R3.5 对账）。门控的是
+      //   「还没 load 出来就存」，**不是「不让存空」**：成功 load 到 [] 后照常启用、可增行 / 有意存空。
+      const doneBtn = dialog.querySelector('[data-action="done"]');
+      let loaded = false;
+      function setDoneEnabled(enabled) {
+        // 原生 disabled：既拦点击、又触发 .primary-btn:disabled 视觉禁用态（styles-gemini.css 全局规则）。
+        doneBtn.disabled = !enabled;
+      }
+      setDoneEnabled(false); // 初始禁用，待 list() 成功回填后启用
+
+      // 打开即异步回填（先挂 overlay 渲染空表占位，list() 成功后填充并启用「完成」）
       loadMappings([]);
       (async () => {
+        let result;
         try {
-          const result = await desktopApi.fundTransferAccountMappings.list();
-          if (result && result.status === 'success') {
-            loadMappings(result.mappings);
-          }
+          result = await desktopApi.fundTransferAccountMappings.list();
         } catch (_err) {
-          // 静默：保留空表 + 新增行
+          result = null;
+        }
+        if (result && result.status === 'success') {
+          loadMappings(result.mappings); // 含成功返回 [] 的合法空表
+          loaded = true;
+          setDoneEnabled(true);
+        } else {
+          // 失败 / status≠success：不再静默留空表——错误提示 + 「完成」保持禁用（绝不允许 save([]) 清空映射）。
+          showNestedAlert('账户映射加载失败，请关闭后重试');
         }
       })();
 
       dialog.querySelector('.icon-close').addEventListener('click', closeSelf);
-      dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+      doneBtn.addEventListener('click', async () => {
+        if (!loaded) return; // 防御纵深：即便禁用态被绕过，未成功 load 绝不 save（杜绝空表覆盖已存映射）。
         const mappings = Array.from(tbody.querySelectorAll('tr[data-ft-account-mapping-row="true"]')).map((row) => ({
           midAccountId: row.__rowApi.getMidAccountId(),
           clearingAccountId: row.__rowApi.getClearingAccountId()

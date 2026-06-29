@@ -158,6 +158,24 @@ test('差 2 天不成边 → 该分量对手不足 2，不命中', () => {
   assert.equal(reviewRows.length, 0);
 });
 
+// ---- ⑤b options.dateToleranceDays 透传契约（v3.0.12 PR#82 codex-P2-1）--------
+//   编排器以 R5s2 场景 config.dateToleranceDays 传入检测器（须与回填引擎实际用值一致）；下面锁死检测器契约：
+//   容差≠1 时命中集随容差走（默认容差路径见 ⑤，逐字节不变）。
+
+test('dateToleranceDays=0：隔 1 天的 2×2 组不成边 → 不命中（默认容差 1 下本应命中）', () => {
+  const banks = [bankRow({ rowId: 'b1', billDate: '2026-06-07' }), bankRow({ rowId: 'b2', billDate: '2026-06-07' })];
+  const gws = [gwRow({ billdate: '2026-06-08' }), gwRow({ billdate: '2026-06-08' })];
+  const { reviewRows } = detectFundTransferManyToMany(banks, gws, [], { dateToleranceDays: 0 });
+  assert.equal(reviewRows.length, 0, '容差 0 下隔 1 天的 2×2 组不进 reviewRows');
+});
+
+test('dateToleranceDays=3：隔 2 天的 2×2 组成边 → 命中（默认容差 1 下本应漏）', () => {
+  const banks = [bankRow({ rowId: 'b1', billDate: '2026-06-07' }), bankRow({ rowId: 'b2', billDate: '2026-06-07' })];
+  const gws = [gwRow({ billdate: '2026-06-09' }), gwRow({ billdate: '2026-06-09' })];
+  const { reviewRows } = detectFundTransferManyToMany(banks, gws, [], { dateToleranceDays: 3 });
+  assert.deepEqual(hitRowIds({ reviewRows }), ['b1', 'b2'], '容差 3 下隔 2 天的 2×2 组进 reviewRows');
+});
+
 // ---- ⑥ 网关 + 调拨同行去重 -------------------------------------------
 
 test('网关 + 调拨同一银行行命中 → 去重为一条、note 合并两侧', () => {
