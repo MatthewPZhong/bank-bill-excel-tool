@@ -237,3 +237,89 @@ test.describe('buildFundTransferReconRows - 空 / 非对象行跳过 + 多行守
     assert.equal(outRow[R.amount], '90');
   });
 });
+
+// v3.0.12 功能2（批B，🔴 资金红线）：账户映射应用（big_account 命中替换清结算账号 / 未命中原样保留）。
+//   口径：map 键值均经 normalizeCellValue；builder 内 payeeAccount/payAccount 也已 normalizeCellValue → map.get 口径一致。
+//   🔴 不变量（绝不能回退）：
+//     ① 仅 big_account 被翻译；payAccount/payeeAccount（展示字段）绝不翻译。
+//     ② 空 Map / 不传 options → 全 passthrough（映射表为空＝字节级零变化，向后兼容旧签名）。
+//     ③ in 用收款卡号查 map、out 用付款卡号查 map，两方向独立（单侧命中不影响另一侧）。
+test.describe('buildFundTransferReconRows - 账户映射应用（big_account 映射回流，🔴 资金红线）', () => {
+  test('① 命中：in/out big_account 均被替换成清结算账号', () => {
+    const map = new Map([
+      ['RECV-CARD-1', 'CLR-RECV-999'], // in 侧（收款卡号）→ 清结算账号
+      ['PAY-CARD-1', 'CLR-PAY-888'] // out 侧（付款卡号）→ 清结算账号
+    ]);
+    const out = buildFundTransferReconRows([midRow()], { accountMappingMap: map });
+    assert.equal(inRowOf(out)[R.bigAccount], 'CLR-RECV-999', '🔴 in big_account 命中替换清结算账号');
+    assert.equal(outRowOf(out)[R.bigAccount], 'CLR-PAY-888', '🔴 out big_account 命中替换清结算账号');
+  });
+
+  test('② 未命中：big_account 原样保留（map 无该键）—— in/out 两方向', () => {
+    const map = new Map([['SOME-OTHER-ACCT', 'CLR-X']]);
+    const out = buildFundTransferReconRows([midRow()], { accountMappingMap: map });
+    assert.equal(inRowOf(out)[R.bigAccount], 'RECV-CARD-1', 'in 未命中 → 原样保留收款卡号');
+    assert.equal(outRowOf(out)[R.bigAccount], 'PAY-CARD-1', 'out 未命中 → 原样保留付款卡号');
+  });
+
+  test('②b 单侧命中：in 命中替换、out 未命中原样（同一行两方向独立查 map）', () => {
+    const map = new Map([['RECV-CARD-1', 'CLR-RECV-ONLY']]); // 只配收款侧
+    const out = buildFundTransferReconRows([midRow()], { accountMappingMap: map });
+    assert.equal(inRowOf(out)[R.bigAccount], 'CLR-RECV-ONLY', 'in 命中 → 替换');
+    assert.equal(outRowOf(out)[R.bigAccount], 'PAY-CARD-1', 'out 未命中 → 原样保留');
+  });
+
+  test('③ 空 Map → 全 passthrough（in/out big_account 原样）', () => {
+    const out = buildFundTransferReconRows([midRow()], { accountMappingMap: new Map() });
+    assert.equal(inRowOf(out)[R.bigAccount], 'RECV-CARD-1');
+    assert.equal(outRowOf(out)[R.bigAccount], 'PAY-CARD-1');
+  });
+
+  test('③b 不传 options（向后兼容）→ 与「传空 Map」字节一致（映射表空＝零变化）', () => {
+    const withoutOpts = buildFundTransferReconRows([midRow()]);
+    const withEmptyMap = buildFundTransferReconRows([midRow()], { accountMappingMap: new Map() });
+    assert.deepEqual(withoutOpts, withEmptyMap, '🔴 不传 options ≡ 空 Map');
+    assert.equal(inRowOf(withoutOpts)[R.bigAccount], 'RECV-CARD-1');
+    assert.equal(outRowOf(withoutOpts)[R.bigAccount], 'PAY-CARD-1');
+  });
+
+  test('③c options.accountMappingMap 非 Map（误传普通对象 / undefined）→ 退空 Map passthrough，不崩', () => {
+    const asObj = buildFundTransferReconRows([midRow()], { accountMappingMap: { 'RECV-CARD-1': 'X' } });
+    assert.equal(inRowOf(asObj)[R.bigAccount], 'RECV-CARD-1', '普通对象非 Map → 不当映射用，passthrough');
+    const asUndef = buildFundTransferReconRows([midRow()], { accountMappingMap: undefined });
+    assert.equal(inRowOf(asUndef)[R.bigAccount], 'RECV-CARD-1');
+  });
+
+  test('④ 🔴 只翻译 big_account：payAccount/payeeAccount（展示字段）即使在 map 中也不翻译', () => {
+    const map = new Map([
+      ['RECV-CARD-1', 'CLR-RECV-999'],
+      ['PAY-CARD-1', 'CLR-PAY-888']
+    ]);
+    const out = buildFundTransferReconRows([midRow()], { accountMappingMap: map });
+    for (const r of out.rows) {
+      assert.equal(r[R.payAccount], 'PAY-CARD-1', '🔴 付款账号（展示字段）保持原值，不被映射翻译');
+      assert.equal(r[R.payeeAccount], 'RECV-CARD-1', '🔴 收款账号（展示字段）保持原值，不被映射翻译');
+    }
+    // 对照：big_account 确已翻译（排除「map 根本没生效」的假阴性）。
+    assert.equal(inRowOf(out)[R.bigAccount], 'CLR-RECV-999');
+    assert.equal(outRowOf(out)[R.bigAccount], 'CLR-PAY-888');
+  });
+
+  test('⑤ 映射值为「假值但非空」（如 "0"）也按命中替换（用 ?? 而非 ||，只在键缺失时回退）', () => {
+    // map 命中但值为 '0'：?? 仅在 undefined 时回退 → '0' 应被采纳（不回退成原账号）。
+    const map = new Map([['RECV-CARD-1', '0']]);
+    const out = buildFundTransferReconRows([midRow()], { accountMappingMap: map });
+    assert.equal(inRowOf(out)[R.bigAccount], '0', '🔴 命中即替换（?? 不因假值回退；与 getMappingMap 非空值保证一致）');
+  });
+
+  test('⑥ 多行：每行 in/out 各自按 big_account 命中映射（行间不串）', () => {
+    const map = new Map([['RECV-CARD-1', 'CLR-RECV-999'], ['PAY-CARD-1', 'CLR-PAY-888']]);
+    const out = buildFundTransferReconRows([midRow(), midRow()], { accountMappingMap: map });
+    const ins = out.rows.filter((r) => r[R.fundType] === FT_RECON_FIELD_MAP.FUND_TYPE_IN);
+    const outs = out.rows.filter((r) => r[R.fundType] === FT_RECON_FIELD_MAP.FUND_TYPE_OUT);
+    assert.equal(ins.length, 2);
+    assert.equal(outs.length, 2);
+    for (const r of ins) assert.equal(r[R.bigAccount], 'CLR-RECV-999');
+    for (const r of outs) assert.equal(r[R.bigAccount], 'CLR-PAY-888');
+  });
+});

@@ -43,6 +43,8 @@
       // 补充的 preview 所需
       openModuleMenu,
       createAccountMappingDialog,
+      // v3.0.12 功能2（批A）：账户映射管理弹窗 preview 链路所需 factory
+      createFundTransferAccountMappingDialog,
       escapeHtml,
       desktopApi,
       applyStatementResult,
@@ -801,6 +803,14 @@
       }, 120);
     }
 
+    // v3.0.12 功能2（批A）：账户映射管理弹窗 preview（「链接表管理」左下角入口打开的全局对照表弹窗）。
+    //   弹窗自管 overlay（createOverlay 返回 .modal-overlay）；openModal 先清 modalRoot 再挂这层 overlay = 单层无双壳。
+    //   打开即异步拉列表（preview 临时库为空 → 渲染空表 + 末行「新增」+ 三列表头「中台调拨单账户号/清结算系统银行账号/执行操作」）。
+    function applyFundTransferAccountMappingPreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      openModal(createFundTransferAccountMappingDialog());
+    }
+
     // v2.0.0-beta.3：银行对账单处理模块主面板
     function applyBankStatementPanelPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
@@ -1366,6 +1376,8 @@
       applyBigAccountSelectionMultiLargePreviewState,   // v2.1.7 round 3 B4
       applyExtractOrderPreviewState,
       applyAccountMappingEditingPreviewState,
+      // v3.0.12 功能2（批A）：账户映射管理弹窗 preview
+      applyFundTransferAccountMappingPreviewState,
       // v2.0.0-beta.3：银行对账单处理模块 preview（3 张）
       applyBankStatementPanelPreviewState,
       applyScenariosManagerPreviewState,

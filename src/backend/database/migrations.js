@@ -767,20 +767,50 @@ function migrateGatewayReconIdFixFieldPairs(db) {
   });
 }
 
-// v2.0.0-beta.3 PR #32b：一次性修复历史 PR #29 seed 的小写 'currency' 错误
-// 背景：PR #29 初始 seed 时把 C3 内置场景的 reconFields[0].gwField 写成小写 'currency'，
-//       PR #31 修了 seed JSON 但 marker 机制保护老库不重 seed → 用户老 DB 里仍是小写。
-//       结果：v2.0.0-beta.3 dialog 渲染时网关字段下拉的 selected 不匹配（GATEWAY_RECON_FIELDS 是 'Currency' 大写），
-//       UI 显示空选项。
-// 修复：扫描所有 'gateway-recon-join' 场景，发现 reconFields[].gwField === 'currency' → 改为 'Currency'
-// 幂等：执行一次后 'currency' 就被替换为 'Currency'，再次运行不命中 → no-op
-function ensureC3GwFieldCurrencyCaseFix(db) {
-  const rows = db.prepare(
-    `SELECT id, config_json FROM scenarios WHERE category = 'gateway-recon-join'`
-  ).all();
-  if (rows.length === 0) return;
+// v3.0.12 批E 修复C：反转 v2.0.0-beta.3 的 ensureC3GwFieldCurrencyCaseFix（"小写 currency → 大写 Currency"）
+// ⚠️ 资金红线：改 scenarios.config_json。
+//
+// 背景（旧迁移当时为何正确）：v2.0.0-beta.3 时 C3「网关对账单赋值银行对账单」(category='gateway-recon-join')
+//   的网关字段下拉枚举源是硬编码常量 GATEWAY_RECON_FIELDS（大写 'Currency'），故当时把存量小写 'currency'
+//   改成大写 'Currency' 对齐枚举是正确的。
+// 数据源变化（旧迁移变有害）：
+//   - v2.1.15 W1 把 C3 下拉枚举源改为读 assets/网关对账单.xlsx 表头（实际是小写 'currency'）；
+//   - v2.1.16-beta.2 T1 又把 C3 对账引擎的网关行数据源切到链接表 linked_gateway_bill（小写表头）。
+//   至此 UI 下拉源、引擎取数源都已统一为小写 'currency'，唯独旧迁移仍每次开机无条件把它改成大写 → 重启后
+//   大写值在小写下拉里 === 匹配不到 → 落回占位空值；且引擎按小写 key 取不到值 → currency 维度静默不比对。
+// 修复：反转语义——扫所有 'gateway-recon-join' 场景，把被旧迁移改坏的存量 reconFields[].gwField === 'Currency'
+//   （大写）改回 'currency'（小写）。仅处理 reconFields[].gwField（旧迁移只破坏了它；assign.gwField 等其余字段
+//   本就是小写、未被旧迁移触碰，不动）。引擎、UI 下拉源、normalize 一律不动（已正确对齐小写）。
+// 一次性 marker（c3_gw_field_currency_revert_done）：跑过即不再跑——避免重蹈"每次开机无条件改写"覆盖
+//   用户后续合法改动的覆辙。marker 已存在 → 整个迁移 no-op。
+const C3_GW_FIELD_CURRENCY_REVERT_KEY = 'c3_gw_field_currency_revert_done';
+function ensureC3GwFieldCurrencyCaseRevert(db) {
+  // 1. marker 幂等检查（只跑一次）
+  let markerRow;
+  try {
+    markerRow = db.prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?').get(C3_GW_FIELD_CURRENCY_REVERT_KEY);
+  } catch (_e) {
+    // app_settings 表不存在（极早期启动） → 跳过本次（等下一次启动）
+    return { status: 'skipped-no-settings-table' };
+  }
+  if (markerRow && String(markerRow.setting_value) === 'true') {
+    return { status: 'already-migrated' };
+  }
+
+  // 2. 扫 gateway-recon-join 场景（scenarios 表不存在 → 跳过、不写 marker，下次启动重试）
+  let rows;
+  try {
+    rows = db.prepare(
+      `SELECT id, config_json FROM scenarios WHERE category = 'gateway-recon-join'`
+    ).all();
+  } catch (_e) {
+    return { status: 'skipped-no-scenarios-table' };
+  }
+
+  // 3. 反转：仅把 reconFields[].gwField === 'Currency'（大写存量）改回 'currency'（小写）
   const update = db.prepare(`UPDATE scenarios SET config_json = ?, updated_at = ? WHERE id = ?`);
   const now = new Date().toISOString();
+  let updated = 0;
   rows.forEach((row) => {
     let config;
     try {
@@ -791,15 +821,26 @@ function ensureC3GwFieldCurrencyCaseFix(db) {
     if (!config || !Array.isArray(config.reconFields)) return;
     let changed = false;
     config.reconFields.forEach((rf) => {
-      if (rf && rf.gwField === 'currency') {
-        rf.gwField = 'Currency';
+      if (rf && rf.gwField === 'Currency') {
+        rf.gwField = 'currency';
         changed = true;
       }
     });
     if (changed) {
       update.run(JSON.stringify(config), now, row.id);
+      updated += 1;
     }
   });
+
+  // 4. 写 marker（即使本次 0 改动也写 — 反转迁移此后永不再跑，尊重用户后续合法改动）
+  db.prepare(`
+    INSERT INTO app_settings (setting_key, setting_value, updated_at)
+    VALUES (?, 'true', ?)
+    ON CONFLICT(setting_key) DO UPDATE
+    SET setting_value = excluded.setting_value, updated_at = excluded.updated_at
+  `).run(C3_GW_FIELD_CURRENCY_REVERT_KEY, now);
+
+  return { status: 'reverted', scanned: rows.length, updated };
 }
 
 // v2.1.8 N4：差异表瘦身 — bill_imports.raw_json 一次性 rewrite 仅保留 9 模版字段（破坏性，永久删 17 字段值）
@@ -3512,6 +3553,25 @@ function ensureChannelEnumSupport(db) {
   }
 }
 
+// v3.0.12 功能2（批A）：账户映射管理 — 全局对照表「中台调拨单账户号 → 清结算系统银行账号」。
+//   全局表（非 per-template；调拨/链接表是全局概念，与 account_mappings 的 per-template 语义不同）。
+//   🔴 风险敏感：纯新增表，幂等 CREATE TABLE IF NOT EXISTS，无破坏性 DDL、无回填（映射本就用户新配）。
+//   UNIQUE(mid_account_id)：一个中台调拨单账户号只能映射一个清结算银行账号（仓储 saveMappings 整表重建语义托底）。
+//   批B 才把映射喂给调拨对账派生（buildFundTransferReconRows）；本批仅建表 + CRUD + UI，对账暂不消费。
+function ensureFundTransferAccountMappingSupport(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS fund_transfer_account_mappings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mid_account_id TEXT NOT NULL,            -- 中台调拨单账户号（归一化后）
+      clearing_account_id TEXT NOT NULL,       -- 清结算系统银行账号（归一化后）
+      row_index INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(mid_account_id)
+    );
+  `);
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
@@ -3531,7 +3591,7 @@ module.exports = {
   migrateGatewayReconIdFixFieldPairs,
   migrateC4ReconGroupsStructure,
   migrateC4ReconGroupsAmountLockedFieldPair,
-  ensureC3GwFieldCurrencyCaseFix,
+  ensureC3GwFieldCurrencyCaseRevert,
   ensureC3AssignAddMode,
   ensureAcquiringBillCurrencyRunsCleanupPending,
   ensureAcquiringBillIdleCleanupMinutesSetting,
@@ -3586,6 +3646,8 @@ module.exports = {
   ensureBocFxLinkSupport,
   // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀，独立迁移函数）
   ensureChannelEnumSupport,
+  // v3.0.12 功能2（批A）：账户映射管理全局表（中台调拨单账户号 → 清结算系统银行账号；幂等建表，不进 ALL_TABLE_KEYS）
+  ensureFundTransferAccountMappingSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,

@@ -41,7 +41,7 @@ describe('bank-statement op-lock — 源码接线 (v3.0.11 需求3 批1)', () =>
       'releaseBankStatementOpLock 释放函数应存在');
   });
 
-  test('五动作 handler 各自 acquire 同一把锁（run/export/import + linked-import/linked-delete）', () => {
+  test('六动作 handler 各自 acquire 同一把锁（run/export/import + linked-import/linked-delete + account-mapping-save）', () => {
     assert.ok(source.includes("tryAcquireBankStatementOpLock('run')"), 'run handler 应 acquire');
     assert.ok(source.includes("tryAcquireBankStatementOpLock('export')"), 'export handler 应 acquire');
     assert.ok(source.includes("tryAcquireBankStatementOpLock('import')"), 'batch-import handler 应 acquire');
@@ -49,18 +49,20 @@ describe('bank-statement op-lock — 源码接线 (v3.0.11 需求3 批1)', () =>
     //   —— 链接表是 bank-statement run（R1-R5）输入，防 run 数据准备让出窗口内并发改表撕裂快照。
     assert.ok(source.includes("tryAcquireBankStatementOpLock('linked-import')"), 'linked-table:import 应 acquire');
     assert.ok(source.includes("tryAcquireBankStatementOpLock('linked-delete')"), 'linked-table:delete-by-date-range 应 acquire');
+    // v3.0.12 PR#82 codex-P2 补强：账户映射保存（改写调拨派生 big_account，同为 bank-statement run 输入）纳入同一把锁。
+    assert.ok(source.includes("tryAcquireBankStatementOpLock('account-mapping-save')"), 'fund-transfer-account-mapping:save 应 acquire');
   });
 
   test('争用返回 { status:"failed", message:"正在处理中…" }', () => {
     assert.ok(source.includes("return { acquired: false, message: '正在处理中…' };"),
       '争用时 tryAcquire 应返回固定文案');
     const contention = source.match(/return \{ status: 'failed', message: opLock\.message \};/g) || [];
-    assert.strictEqual(contention.length, 5, '五 handler（run/export/import + linked-import/linked-delete）各有一处「争用即返回失败」短路');
+    assert.strictEqual(contention.length, 6, '六 handler（run/export/import + linked-import/linked-delete + account-mapping-save）各有一处「争用即返回失败」短路');
   });
 
-  test('五 handler 各在 finally 释放锁（恰 5 处 release）', () => {
+  test('六 handler 各在 finally 释放锁（恰 6 处 release）', () => {
     const releases = source.match(/releaseBankStatementOpLock\(\);/g) || [];
-    assert.strictEqual(releases.length, 5, 'run/export/import + linked-import/linked-delete 五处 finally 各释放一次');
+    assert.strictEqual(releases.length, 6, 'run/export/import + linked-import/linked-delete + account-mapping-save 六处 finally 各释放一次');
   });
 });
 
@@ -83,8 +85,8 @@ describe('bank-statement op-lock — 互斥语义 (三动作并发被挡)', () =
     assert.strictEqual(tryAcquireBankStatementOpLock('export').acquired, true, '释放后 → 导出可获取');
   });
 
-  test('五动作两两互斥（共享同一把锁）', () => {
-    const ops = ['import', 'run', 'export', 'linked-import', 'linked-delete'];
+  test('六动作两两互斥（共享同一把锁）', () => {
+    const ops = ['import', 'run', 'export', 'linked-import', 'linked-delete', 'account-mapping-save'];
     for (const first of ops) {
       const { tryAcquireBankStatementOpLock, releaseBankStatementOpLock } = loadRealLock();
       assert.strictEqual(tryAcquireBankStatementOpLock(first).acquired, true, `${first} 应可获取`);
@@ -93,6 +95,21 @@ describe('bank-statement op-lock — 互斥语义 (三动作并发被挡)', () =
           `${first} 持锁时 ${second} 必被挡`);
       }
       releaseBankStatementOpLock();
+    }
+  });
+
+  // v3.0.12 PR#82 codex-P2：账户映射保存（改写调拨派生 big_account）必须在 run/export 持锁期间被拒——
+  //   否则 run 轮次间 yield 窗口内保存 → 清 processingResult 后被仍在跑的 run 用旧映射结果覆盖 → 可导出 stale。
+  test('run/export 持锁期间 account-mapping-save 被拒（防清 processingResult 后被 stale run 覆盖）', () => {
+    for (const holder of ['run', 'export']) {
+      const { tryAcquireBankStatementOpLock, releaseBankStatementOpLock } = loadRealLock();
+      assert.strictEqual(tryAcquireBankStatementOpLock(holder).acquired, true, `${holder} 应可获取`);
+      const save = tryAcquireBankStatementOpLock('account-mapping-save');
+      assert.strictEqual(save.acquired, false, `${holder} 持锁期间 account-mapping-save 必被拒`);
+      assert.strictEqual(save.message, '正在处理中…', '被拒返回统一争用文案');
+      releaseBankStatementOpLock();
+      assert.strictEqual(tryAcquireBankStatementOpLock('account-mapping-save').acquired, true,
+        '释放后 account-mapping-save 可获取（不死锁）');
     }
   });
 });

@@ -38,6 +38,8 @@ const { runRound5RefundOrderBackfill } = require('./scenario-engines/r5-refund-o
 const { runRound5PaymentOfflineAllocationBackfill } = require('./scenario-engines/r5-payment-offline-allocation-backfill');
 // v3.0.6 需求3：DBS-Charge 资金校验（R3.5，R3 后 R4 前；🔴 改 ReconciliationId + FundType；替换原全渠道 charge→outbound）
 const { runDbsChargeFundCheck } = require('./scenario-engines/dbs-charge-fund-check');
+// v3.0.12 功能1：异常-人工判断 sheet 检测器（🔴 资金红线·纯只读 —— 不改回填/字段/行数守恒）
+const { detectFundTransferManyToMany } = require('./scenario-engines/many-to-many-detector');
 const { runAllScenarios } = require('./scenario-dispatcher');
 
 // 重建 modifiedRows 时需嫁接 R2 命中元数据，但要排除这两个（_rowId 是行键、_modifiedColumns 由编排器跨轮合并重算）
@@ -476,6 +478,29 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
     refundUnmatchedRows = r5d.unmatchedRows || [];
     refundHitDepositBizIds = r5d.hitDepositBizIds || []; // OPEN-7（T5b-1）透传
   }
+  await yieldTick('R5s4'); // 轮次边界让出（R5 场景4 退款回填已完成，进 M2M 异常-人工判断检测前）
+
+  // ===== v3.0.12 功能1：异常-人工判断检测（🔴 资金红线·纯只读）=====
+  //   R5 全部跑完、bankRows 定稿后，只读检测「银行 ↔ 网关 / 调拨」多对多的银行行（现有引擎遇多对多
+  //   只发 multi-bank-match-backfill 警告就静默取 cand[0] 回填，人工无从感知）→ 汇总进结果文件新 sheet。
+  //   🔴 不 mergeMods、不进 modColsByRowId、不改任何 bankRow 字段 → modifiedRows + unmatchedRows
+  //   === bankRows.length 行数守恒不受影响（属审计/展示增强，与 R1-R5 回填值/派生口径完全解耦）。
+  //   bankRows = 最终态；gwRows = safeGwRows（恒可用）；reconRows 取 fundTransferReconContext.reconRows
+  //   （需求2 取消路 / 缺省 → [] → 调拨检测自然 no-op）。
+  const detectorReconRows = (fundTransferReconContext && fundTransferReconContext.reconRows) || [];
+  // v3.0.12 PR#82 codex-P2-1（🔴 资金红线）：检测器日期容差必须 = R5s2 回填引擎**实际用值**，否则容差≠1 时
+  //   复核表与回填口径不一致（容差3→隔2天的2×2组漏进表；容差0→过报）。网关侧 runRound5FundTransferBackfill
+  //   与调拨侧 runRound5FundTransferReconBackfill **同源同字段**：均以 r5s2Bucket[0].config.dateToleranceDays
+  //   为入参、且 `Number.isFinite?值:1` 归一化口径与检测器一致（两路 useMidReconTable 互斥择一）→ 单一容差，
+  //   无需按侧分传。R5s2 未启用（bucket 空）→ undefined → 检测器回退默认 1（与引擎缺省同口径）；
+  //   默认容差(1)路径输出逐字节不变。
+  const fundTransferDateToleranceDays = r5s2Bucket.length
+    ? (r5s2Bucket[0].config || {}).dateToleranceDays
+    : undefined;
+  const manyToManyReviewRows = detectFundTransferManyToMany(bankRows, safeGwRows, detectorReconRows, {
+    dateToleranceDays: fundTransferDateToleranceDays
+  }).reviewRows;
+  await yieldTick('M2M'); // 轮次边界让出（M2M 异常-人工判断检测已完成，进 buildOutputRows 前；上游 R5s4+detector 不再挤成同步块）
 
   // ===== 构造输出：从「当前最新 bankRows」重建（不用 dispatcher 过时浅拷贝）=====
   const { modifiedRows, unmatchedRows } = buildOutputRows(bankRows, modColsByRowId, r2HitByRowId);
@@ -513,7 +538,9 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
       //   bucket 非空 ⟺ 对应 builtin 场景启用（bucketScenarios 仅收已启用的 builtin-fixed 场景）。
       //   🔴 纯只读标志位，不参与任何对账/匹配/派生/金额判定。
       r5s3Enabled: r5s3Bucket.length > 0,
-      r5s4Enabled: r5s4Bucket.length > 0
+      r5s4Enabled: r5s4Bucket.length > 0,
+      // v3.0.12 功能1：异常-人工判断命中银行行数（🔴 只读统计，不参与对账/匹配/派生）
+      manyToManyReviewCount: manyToManyReviewRows.length
     },
     platformCleanupRows,
     refundBackfillRows,
@@ -522,6 +549,8 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
     refundHitDepositBizIds,
     // v3.0.4 块 F 修订 R2 Q14：Payment线下调拨匹配对（导出 3 核对 sheet 数据源；未勾选/无命中时 []）
     paymentOfflineMatchedPairs,
+    // v3.0.12 功能1：异常-人工判断命中银行行（{ row, note }；导出阶段写「异常-人工判断」sheet；空 → []）
+    manyToManyReviewRows,
     rounds: {
       r1: { matched: r1.matchedGwRows.length },
       r2: {

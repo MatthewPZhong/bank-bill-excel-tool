@@ -229,6 +229,11 @@ contextBridge.exposeInMainWorld('desktopApi', {
     getMigrationData: () => ipcRenderer.invoke('account-mapping:get-migration-data'),
     distributeMigration: (assignments) => ipcRenderer.invoke('account-mapping:distribute-migration', assignments)
   },
+  // v3.0.12 功能2（批A）：账户映射管理（全局：中台调拨单账户号 → 清结算系统银行账号）
+  fundTransferAccountMappings: {
+    list: () => ipcRenderer.invoke('fund-transfer-account-mapping:list'),
+    save: (mappings) => ipcRenderer.invoke('fund-transfer-account-mapping:save', mappings)
+  },
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
     toggleMaximize: () => ipcRenderer.invoke('window:toggle-maximize'),

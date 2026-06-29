@@ -9,6 +9,27 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.0.12（2026-06-28）
+
+v3.0.12 集中 **2 项资金对账新功能 + 1 项资金红线 bug 修复**（team-lead 拆批 E/A/B/C/D 委托 dev 实施）：① 功能1 异常-人工判断 sheet——资金对账（银行对账单 run / 导出）结果文件新增「异常-人工判断」sheet，5 轮对账全部跑完后只读检测「银行对账单 ↔ 网关对账单 / 调拨对账单」多对多（同账号 + 币种 + 金额 + 日期，银行≥2 × 对手≥2），把涉及银行行汇总进该 sheet 供人工复核；纯附加、不改任何回填行为 / 字段 / 行数守恒；② 功能2 账户映射管理——「链接表管理」左下角新增「账户映射管理」入口，维护全局对照表「中台调拨单账户号 → 清结算系统银行账号」，调拨对账单派生时把 `big_account` 按映射换成清结算账号再去和银行单对账（🔴 资金红线·未配置则原样保留、映射表为空＝字节级零变化）；③ 修复C——「网关对账单赋值银行对账单」对账字段 currency 重启被清空的 bug（反转一条已变有害的历史迁移）。`npm run release-check` 全绿（unit **3272/3272** + integration **1771/1771**（38 脚本）+ smoke 全模块 PASS）。⚠️ 资金红线：功能2 改调拨对账单 `big_account` 派生口径（连带「中台调拨订单对账ID回填」R5s2-recon + DBS-Charge 资金校验 R3.5），功能1 只读不改写、修复C 仅反转有害迁移，均已人工复核 + 审 diff + 单测 + 跨接缝集成脚本。
+
+**无对外契约变更**：功能1 纯附加 sheet（命中为空时主文件形态字节级零变化、既有 sheet 不动）；功能2 账户映射表为空时调拨派生字节级零变化；修复C 把存量错值改回正确值。
+
+**新增**
+
+- 异常-人工判断检测器 `detectFundTransferManyToMany`（功能1 · 🔴 资金红线·纯只读 · `scenario-engines/many-to-many-detector.js`）：5 轮对账跑完、`bankRows` 定稿后只读检测「银行 ↔ 网关 / 调拨」多对多。分组键 = 归一化账号 + 币种 + 金额（精确到分），同组内按日期 ±容差（默认 1 天、含同日）建二部图求连通分量，分量内 **银行≥2 且 对手≥2** → 该分量所有银行行命中（1v1 / 1vN / Nv1 不算）；网关、调拨各跑一遍按 `_rowId` 去重合并 + 中文说明。🔴 空值护栏（账号/币种为空、金额非有限数不进池）；🔴 绝不改任何 `bankRow` 字段 / `modifications` / 回填 / 行数守恒——只返回命中行引用 + 说明。复用既有金额/日期访问器（防字段漂移）。新增 `many-to-many-detector.test.js` + 集成脚本 `bank-statement-many-to-many-review-sheet.js`。
+- 结果文件「异常-人工判断」sheet（功能1 · `exceljs-writer.js` + `bank-statement-io.js` + `reconciliation-orchestrator.js` + `main.js`）：writer 新增 `appendManyToManyReviewSheet` + 常量 `SHEET_MANY_TO_MANY_NAME='异常-人工判断'`，列 = `[异常说明, ...BANK_STATEMENT_FIELDS]`（银行列复用 `stripInternalFields`）；`writeBankStatementOutput` 加第 8 形参 `manyToManyRows`，仅命中非空时追加（空 / null → 主文件形态零变化）。编排器 R5 后调用、产出 `manyToManyReviewRows`（`{row, note}`）+ `stats.manyToManyReviewCount`（🔴 只读统计），经 `processingResult` 透传导出。
+- 账户映射管理全局表 `fund_transfer_account_mappings`（功能2 · 🔴 风险敏感 · `migrations.js` + 仓储 + `database.js`）：新增全局对照表（`UNIQUE(mid_account_id)`，幂等 `CREATE TABLE IF NOT EXISTS`、不进 `ALL_TABLE_KEYS`）；仓储 `fund-transfer-account-mapping-repository.js`（`listMappings` / `saveMappings` 事务全删重插、空行跳过、半填抛错 / `getMappingMap` 归一化 `Map` + 🔴 空键护栏）；`database.js` facade 转发。新增 `fund-transfer-account-mapping-repository.test.js`。
+- 账户映射管理弹窗 + 「链接表管理」入口（功能2 · `renderer-dialogs.js` + `preload.js` + `main.js`）：「链接表管理」左下角新增「账户映射管理」按钮（嵌套挂载、链接表管理留底层），打开 `createFundTransferAccountMappingDialog`（3 列「中台调拨单账户号 / 清结算系统银行账号 / 执行操作」）。新增 IPC `fund-transfer-account-mapping:list` / `:save`（保存前校验完整性 / 唯一性 / 长度≤128）+ preload `fundTransferAccountMappings.list/save`。补 preview 入口 `preview:fund-transfer-account-mapping`（四处镜像 `account-mapping-editing` 接法）。
+
+**变更**
+
+- 调拨对账单派生 `big_account` 套用账户映射（功能2 批B · 🔴 资金红线 · `fund-transfer-recon-builder.js` + `linked-derive-rebuild.js`）：`buildFundTransferReconRows(midRows, { accountMappingMap })` 新增可选第 2 参——in 行（收款账户）/ out 行（付款账户）的 `big_account` 命中映射 → 替换清结算账号、未命中 → 原样保留（`accountMappingMap.get(acc) ?? acc`；展示字段不动）；键值口径与 builder 一致（均经 `normalizeCellValue`，不再二次归一化防写错对账 ID）。`linked-derive-rebuild.js`（builder 唯一生产调用处、run / mid-allocation 导入两链皆经此）实时取 `database.getFundTransferAccountMappingMap()` 注入 → 单点注入两链统一生效；facade 缺失退空 `Map`、表空＝全 passthrough＝字节级零变化。新增集成脚本 `fund-transfer-recon-account-mapping.js` + `fund-transfer-recon-builder.test.js` 补映射组。
+
+**修复**
+
+- 「网关对账单赋值银行对账单」对账字段 currency 重启被清空（修复C · 🔴 资金红线 · `migrations.js` + `database.js`）：反转 v2.0.0-beta.3 历史迁移 `ensureC3GwFieldCurrencyCaseFix`（当年把小写 `currency` 改大写 `Currency` 对齐硬编码下拉枚举，当时正确）。v2.1.15 把 C3 下拉枚举源改读 `assets/网关对账单.xlsx` 表头（小写）、v2.1.16-beta.2 把 C3 引擎取数源切到 `linked_gateway_bill`（小写表头）后，UI/引擎都统一小写，唯独旧迁移仍每次开机无条件改大写 → 重启后大写值在小写下拉匹配不到落空值、引擎按小写 key 取不到值 → currency 维度静默不比对。新增 `ensureC3GwFieldCurrencyCaseRevert`：扫 `gateway-recon-join` 把 `reconFields[].gwField === 'Currency'` 改回 `'currency'`，一次性 marker（`c3_gw_field_currency_revert_done`）跑过即不再跑（不重蹈「每次开机无条件改写」覆盖用户后续合法改动）。`database.js` 改名转发。新增 `migrations-c3-gw-field-currency-revert.test.js`。
+
 ## v3.0.11（2026-06-23）
 
 v3.0.11 集中 **1 项资金红线规则收紧 + 3 项体验/性能需求**（team-lead 拆需求 0/1/2/3 委托 dev 实施 + team-lead 审 diff/release-check/接缝核查/preview 兜底；需求 3 异步化「分批·导出独立」，本版只交付导入+运行不阻塞，导出流式化拆独立批次）：① 需求0 R5 场景3「银行行入桶 Debit 门槛」（🔴 资金红线）——双桶（一级 `ReconciliationId`/二级 `ChannelOrderNo`）建索引前加门槛，只有「无借方发生额」的行入桶（**口径B**：`Debit Amount` 为 0 或空白入桶、仅真实非零借方排除），杜绝有出金的脏行误当入金参与剔除匹配；② 需求1 链接表导入提醒框长文件名截断修复（前端）；③ 需求2 资金对账导出成功提醒框移除 error-report 行（文件仍生成）；④ 需求3（批1+批2）资金对账「导入/运行」不阻塞 + 统一防重入锁 + 按钮禁用（🔴 资金红线）。`npm run release-check` 全绿（unit **3218/3218** + integration 1728/1728（36 脚本）+ smoke 全模块 PASS）。⚠️ 资金红线：需求 0 改 R5s3 匹配池准入（连带 Credit 消歧/两级 fallback/1v1）、需求 3 异步化涉 run 路径但产物零变化（不碰 writer），已人工复核 + 审 diff + 单测重做/op-lock 互斥单测 + 接缝核查。

@@ -11,6 +11,40 @@
 
 ## 未实施
 
+### B25（P2）银行单 BillDate/ValueDate 真 Excel 日期单元格被读成序列号 → 输出三表显示数字（非回归 · 跨模块）
+
+- **来源**：2026-06-28 v3.0.12 迭代用户反馈 + 3 个复现实测 + 两份真实文件核验
+- **影响**：源账单若把 BillDate/ValueDate 存为**真 Excel 日期单元格**（`t=n` 数值序列号，如 46082，显示文本 `w="2026-03-01"`），银行单读取 `readers.js:115-138` 的 `sheet_to_json(header:1)` **未传 raw → 默认 raw:true 取底层值 46082、丢弃显示文本**，且 `cellDates:false` 不转 Date → `bankRow.BillDate=46082`；银行单 recon 链未对日期列归一化 → **命中场景 / 未命中场景 / 异常-人工判断三表全裸写 46082**。源端存为文本日期则正常可读
+- **实测证据**：源 `渠道账单_2026-06-06_…_test.xlsx` D2 `t=n v=46082 w="2026-03-01"`；输出 `银行对账单-…-处理结果.xlsx` 命中场景 E2 `t=n v=46082 w="46082"`
+- **非回归 / 非正确性问题**：命中场景主表（本次代码未改）同样 46082 → 与 v3.0.12 新 sheet 无关；R1~R5 比日期走 `engine-date-utils` 内部 `normalizeDateExportValue`，序列号照常正确匹配 → 纯「输出可读性」，对账结果正确
+- **现状**：源文件 `w` 已是 "2026-03-01"，仅读取未采用；`normalizeDateExportValue`（`normalizers.js:445`，能序列号→YYYY-MM-DD）未接进银行单 recon 列归一化链
+- **推荐**（风险从低到高）：A. 写出层对日期列套既有 `fmtDate`（源/匹配/金额不动，仅三表日期列 golden 变化需更新断言）；B. 归一化层导入时把日期列转 YYYY-MM-DD 字符串（改 bankRow 存储值，影响面更大）；C. 🔴 读取层 raw/cellDates（波及金额列破坏 parseNumber，不推荐）
+- **触发实施**：用户要求输出日期可读 / 下次动银行单读取或写出层时一并收
+
+### B22（P4）R4 方向守卫 config 映射双真相
+
+- **来源**：v3.0.10 PR #80 self-review
+- **影响**：R4 子场景 → `requireBankZeroField` 的映射在两处独立硬编码：seed `RECON_ROUND_BUILTIN_SCENARIOS` 与一次性迁移 `R4_DIRECTION_GUARD_BY_SUBCATEGORY`（均在 `src/backend/database/migrations.js`）。当前一致（ach→Credit / wire→Debit / hx-out→Credit / hx-in→Debit），但改一处漏改另一处 → 老库补错列 → 方向守卫判错（🔴 资金红线邻接）
+- **现状**：两常量各自维护同一份映射，无交叉引用注释
+- **推荐**：两处各加「改须同步另一处」注释；或抽单一导出常量供 seed + 迁移共用
+- **触发实施**：下次动 R4 子场景 / requireBankZeroField 时一并收敛
+
+### B23（P4）`scripts/prototype-refund-backfill-v2.js` 残留旧列契约注释
+
+- **来源**：v3.0.10 PR #80 self-review
+- **影响**：该 scratch 原型脚本仍引用旧 13 列 `UNMATCHED_HEADERS` / 已删的 refund-only 文案 / 旧列数（31），与 v3.0.10 实际（sheet1 33 / sheet2 13）不一致。仅误导读者，**不接入任何 runner / release-check**，无运行时影响
+- **现状**：一次性原型（非 `scripts/integration/`），最小外科式未动
+- **推荐**：删除该 scratch 脚本，或更新注释到 v3.0.10 列契约
+- **触发实施**：下次清理 scripts/ 原型 / 该脚本因别的原因复用时
+
+### B24（P4）S4 标黄银行金额取 `'Debit Amount'` 字面
+
+- **来源**：v3.0.10 PR #80 self-review
+- **影响**：退款 sheet1 S4 命中标黄的「金额」列取字面 `'Debit Amount'`（`r5-refund-order-backfill.js` matchS4 `_matchedColumns`），而 S4 实际金额匹配口径是 `|Credit Amount − Debit Amount|` 绝对值。sheet1 银行段只展示 Debit Amount（无 Credit Amount）、退款候选又都是 Ach Return 出账行（Debit 即有效金额），故展示无误，仅「列字面 vs 真实口径」概念落差（已在 matchS4 注释钉死）
+- **现状**：无「sheet1 银行金额展示列」常量，用 `'Debit Amount'` 字面 + 注释
+- **推荐**：抽 `SHEET1_BANK_AMOUNT_COL` 常量；若 sheet1 银行段将来加 Credit Amount 则重新评估
+- **触发实施**：sheet1 银行段列结构变动时
+
 ### B21（P4）`TOOLBOX_MAX_COL_COUNT=1024` 工具箱流式静默列宽上限
 
 - **来源**：2026-06-17 v3.0.8 PR #78 self-review（F4）
