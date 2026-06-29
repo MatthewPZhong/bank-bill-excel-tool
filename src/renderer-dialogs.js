@@ -5461,6 +5461,243 @@
       return overlay;
     }
 
+    // v3.0.12 功能2（批A）：账户映射管理弹窗（复刻 createAccountMappingDialog，去掉模板单选框 + 币种列）。
+    //   全局对照表「中台调拨单账户号 → 清结算系统银行账号」；3 列「中台调拨单账户号 / 清结算系统银行账号 / 执行操作」。
+    //   ⚠️ 嵌套挂载：本弹窗从「链接表管理」弹窗内打开，不能走 openModal（其实现是 modalRoot.innerHTML=''，会冲掉底层
+    //   链接表管理）。改用自建 overlay 直接 elements.modalRoot.appendChild 叠加，关闭只 overlay.remove() 不清空 modalRoot。
+    //   告警同理用嵌套 showNestedAlert（createAlertDialog 的确认按钮走 closeModal 会清空 modalRoot，不可用）。
+    function createFundTransferAccountMappingDialog() {
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manager-card account-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">账户映射管理</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>中台调拨单账户号</th>
+                <th>清结算系统银行账号</th>
+                <th>执行操作</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="done">完成</button>
+        </div>
+      `;
+
+      const tbody = dialog.querySelector('tbody');
+
+      // 关闭本层（只 remove 自身 overlay，链接表管理留底层）
+      function closeSelf() {
+        overlay.remove();
+      }
+
+      // 嵌套告警（不用 createAlertDialog —— 它的确认按钮走 closeModal 会清空 modalRoot 冲掉底层弹窗）
+      function showNestedAlert(message) {
+        const alertOverlay = createOverlay();
+        const alertCard = document.createElement('div');
+        alertCard.className = 'modal-card alert-card';
+        alertCard.innerHTML = `
+          <div class="alert-body">
+            <div class="alert-message">${escapeHtml(message)}</div>
+          </div>
+          <div class="dialog-actions center">
+            <button class="primary-btn small" type="button" data-action="ack">确认</button>
+          </div>
+        `;
+        alertCard.querySelector('[data-action="ack"]').addEventListener('click', () => alertOverlay.remove());
+        alertOverlay.appendChild(alertCard);
+        elements.modalRoot.appendChild(alertOverlay);
+      }
+
+      function createReadOnlyRow(midAccountId, clearingAccountId) {
+        const row = document.createElement('tr');
+        row.dataset.ftAccountMappingRow = 'true';
+        let isEditing = false;
+
+        const midCell = document.createElement('td');
+        const clearingCell = document.createElement('td');
+        const actionCell = document.createElement('td');
+        actionCell.className = 'account-mapping-action-cell';
+
+        const midSpan = document.createElement('span');
+        midSpan.textContent = midAccountId;
+        const clearingSpan = document.createElement('span');
+        clearingSpan.textContent = clearingAccountId;
+
+        const midInput = document.createElement('input');
+        midInput.className = 'mapping-text-input account-mapping-id-input';
+        midInput.type = 'text';
+        midInput.spellcheck = false;
+        midInput.value = midAccountId;
+        midInput.style.display = 'none';
+
+        const clearingInput = document.createElement('input');
+        clearingInput.className = 'mapping-text-input account-mapping-id-input';
+        clearingInput.type = 'text';
+        clearingInput.spellcheck = false;
+        clearingInput.value = clearingAccountId;
+        clearingInput.style.display = 'none';
+
+        const editBtn = document.createElement('button');
+        editBtn.className = 'text-action';
+        editBtn.type = 'button';
+        editBtn.textContent = '编辑';
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'text-action danger';
+        deleteBtn.type = 'button';
+        deleteBtn.textContent = '删除';
+
+        function toggleEdit() {
+          isEditing = !isEditing;
+          midSpan.style.display = isEditing ? 'none' : '';
+          clearingSpan.style.display = isEditing ? 'none' : '';
+          midInput.style.display = isEditing ? '' : 'none';
+          clearingInput.style.display = isEditing ? '' : 'none';
+          editBtn.textContent = isEditing ? '完成' : '编辑';
+
+          if (!isEditing) {
+            midSpan.textContent = midInput.value;
+            clearingSpan.textContent = clearingInput.value;
+          }
+        }
+
+        editBtn.addEventListener('click', toggleEdit);
+        deleteBtn.addEventListener('click', () => { row.remove(); });
+
+        midCell.append(midSpan, midInput);
+        clearingCell.append(clearingSpan, clearingInput);
+        actionCell.append(editBtn, deleteBtn);
+        row.append(midCell, clearingCell, actionCell);
+
+        row.__rowApi = {
+          getMidAccountId: () => midInput.value,
+          getClearingAccountId: () => clearingInput.value
+        };
+        return row;
+      }
+
+      function createEditableRow(midAccountId = '', clearingAccountId = '') {
+        const row = document.createElement('tr');
+        row.dataset.ftAccountMappingRow = 'true';
+
+        const midCell = document.createElement('td');
+        const clearingCell = document.createElement('td');
+        const actionCell = document.createElement('td');
+        actionCell.className = 'account-mapping-action-cell';
+
+        const midInput = document.createElement('input');
+        midInput.className = 'mapping-text-input account-mapping-id-input';
+        midInput.type = 'text';
+        midInput.spellcheck = false;
+        midInput.value = midAccountId;
+
+        const clearingInput = document.createElement('input');
+        clearingInput.className = 'mapping-text-input account-mapping-id-input';
+        clearingInput.type = 'text';
+        clearingInput.spellcheck = false;
+        clearingInput.value = clearingAccountId;
+
+        const doneBtn = document.createElement('button');
+        doneBtn.className = 'text-action';
+        doneBtn.type = 'button';
+        doneBtn.textContent = '完成';
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'text-action danger';
+        deleteBtn.type = 'button';
+        deleteBtn.textContent = '删除';
+
+        doneBtn.addEventListener('click', () => {
+          const newRow = createReadOnlyRow(midInput.value, clearingInput.value);
+          row.parentNode.replaceChild(newRow, row);
+        });
+        deleteBtn.addEventListener('click', () => { row.remove(); });
+
+        midCell.appendChild(midInput);
+        clearingCell.appendChild(clearingInput);
+        actionCell.append(doneBtn, deleteBtn);
+        row.append(midCell, clearingCell, actionCell);
+
+        row.__rowApi = {
+          getMidAccountId: () => midInput.value,
+          getClearingAccountId: () => clearingInput.value
+        };
+        return row;
+      }
+
+      function createAddRow() {
+        const row = document.createElement('tr');
+        row.className = 'add-row';
+        row.innerHTML = `
+          <td><button class="text-action" type="button" data-action="add">新增</button></td>
+          <td></td><td></td>
+        `;
+
+        row.querySelector('[data-action="add"]').addEventListener('click', () => {
+          tbody.insertBefore(createEditableRow('', ''), row);
+        });
+
+        return row;
+      }
+
+      function loadMappings(mappings) {
+        tbody.innerHTML = '';
+        (mappings || []).forEach((mapping) => {
+          tbody.appendChild(createReadOnlyRow(
+            mapping.midAccountId || '',
+            mapping.clearingAccountId || ''
+          ));
+        });
+        tbody.appendChild(createAddRow());
+      }
+
+      // 打开即异步回填（先挂 overlay，列表随后填充；失败仅渲染空表 + 新增行，不阻塞使用）
+      loadMappings([]);
+      (async () => {
+        try {
+          const result = await desktopApi.fundTransferAccountMappings.list();
+          if (result && result.status === 'success') {
+            loadMappings(result.mappings);
+          }
+        } catch (_err) {
+          // 静默：保留空表 + 新增行
+        }
+      })();
+
+      dialog.querySelector('.icon-close').addEventListener('click', closeSelf);
+      dialog.querySelector('[data-action="done"]').addEventListener('click', async () => {
+        const mappings = Array.from(tbody.querySelectorAll('tr[data-ft-account-mapping-row="true"]')).map((row) => ({
+          midAccountId: row.__rowApi.getMidAccountId(),
+          clearingAccountId: row.__rowApi.getClearingAccountId()
+        }));
+
+        let result;
+        try {
+          result = await desktopApi.fundTransferAccountMappings.save(mappings);
+        } catch (err) {
+          showNestedAlert(`保存失败：${err?.message || '未知错误'}`);
+          return;
+        }
+
+        showNestedAlert(result.message);
+        if (result.status === 'success') {
+          closeSelf(); // 保存成功 → 关本层，告警留在链接表管理之上，确认后回到链接表管理
+        }
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     function createRememberOrderMismatchDialog({ message, bigAccountResult }) {
       const overlay = createOverlay();
       const dialog = document.createElement('div');
@@ -6320,6 +6557,7 @@
           </table>
         </div>
         <div class="dialog-actions linked-table-manager-footer">
+          <button class="secondary-btn small" type="button" data-action="account-mapping">账户映射管理</button>
           <div class="linked-table-footer-spacer" style="flex: 1 1 auto;"></div>
           <button class="secondary-btn small" type="button" data-action="delete-range">删除</button>
           <button class="primary-btn small" type="button" data-action="import">导入</button>
@@ -6449,6 +6687,12 @@
 
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
       dialog.querySelector('[data-action="exit"]').addEventListener('click', closeModal);
+
+      // v3.0.12 功能2（批A）：账户映射管理入口（左下角）。嵌套挂载——不 closeModal，直接叠加到 modalRoot，
+      //   链接表管理留在底层；映射弹窗关闭只 remove 自身（见 createFundTransferAccountMappingDialog）。
+      dialog.querySelector('[data-action="account-mapping"]').addEventListener('click', () => {
+        elements.modalRoot.appendChild(createFundTransferAccountMappingDialog());
+      });
 
       // 删除：打开「按日期范围删除」弹框（openModal 替换当前 overlay，无需显式 closeModal，与 importBtn 链式弹窗同范式）
       deleteBtn.addEventListener('click', () => {
@@ -11339,6 +11583,8 @@
       createMappingDialog,
       createAccountMappingDialog,
       createAccountMappingMigrationDialog,
+      // v3.0.12 功能2（批A）：账户映射管理弹窗（链接表管理左下角入口；preview 链路也需此 factory）
+      createFundTransferAccountMappingDialog,
       // v1.5.3 round 6：补全 preview 所需 factory（业务代码不直接用，仅 preview 链路调）
       createAmountSplitRulesDialog,
       createBillSplitRowsDialog,

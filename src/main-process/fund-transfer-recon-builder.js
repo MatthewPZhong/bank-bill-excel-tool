@@ -17,10 +17,21 @@ const R = FT_RECON_FIELD_MAP.recon;
  * 一行中台调拨订单 → in + out 两行调拨对账单。
  *
  * @param {Array<Object>} midRows 中台调拨订单整行（中文真实表头，readLinkedTableRows('mid-allocation') 产物）
+ * @param {Object} [options]
+ * @param {Map<string,string>} [options.accountMappingMap] 全局账户映射「中台调拨账户号 → 清结算银行账号」
+ *   （v3.0.12 功能2，🔴 资金红线）。**仅作用于 big_account**：命中 → 替换为清结算账号；未命中 → 原样保留。
+ *   键值口径须与本函数一致（均经 normalizeCellValue；map 由 database.getFundTransferAccountMappingMap 提供，
+ *   与 R5s2-recon / DBS-Charge R3.5 引擎读的派生表同一真值源）。缺省 / 非 Map → 空 Map（全 passthrough，
+ *   映射表为空＝字节级零变化）。
  * @returns {{ rows: Array<Object>, total: number }} rows 按「每单 in 行后接 out 行」顺序展开（total = 行数×2）
  */
-function buildFundTransferReconRows(midRows) {
+function buildFundTransferReconRows(midRows, options = {}) {
   const src = Array.isArray(midRows) ? midRows : [];
+  // v3.0.12 功能2（批B，🔴 资金红线）：账户映射 map（中台调拨账户号 → 清结算银行账号），仅 big_account 套用。
+  //   缺省 / 非 Map → 空 Map（全 passthrough）。⚠️ map 键已归一化、下方 payAccount/payeeAccount 也已 normalizeCellValue
+  //   → map.get 口径一致，**不再二次归一化**（口径漂移＝写错对账ID，资金红线）。
+  const accountMappingMap =
+    options && options.accountMappingMap instanceof Map ? options.accountMappingMap : new Map();
   const rows = [];
   for (const m of src) {
     if (!m || typeof m !== 'object') continue;
@@ -44,7 +55,8 @@ function buildFundTransferReconRows(midRows) {
       [R.amount]: normalizeCellValue(m[M.receiveAmount]),
       [R.currency]: normalizeCellValue(m[M.receiveCurrency]),
       [R.fundType]: FT_RECON_FIELD_MAP.FUND_TYPE_IN,
-      [R.bigAccount]: payeeAccount // D1：in = 收款账户（卡号）
+      // D1：in = 收款账户（卡号）；🔴 套用账户映射：命中→清结算账号、未命中→原样保留（payeeAccount 展示字段不动）。
+      [R.bigAccount]: accountMappingMap.get(payeeAccount) ?? payeeAccount
     });
 
     // FundTransfer-out 行：渠道 / 金额 / 币种取付款侧；big_account = 付款卡号（D1）
@@ -55,7 +67,8 @@ function buildFundTransferReconRows(midRows) {
       [R.amount]: normalizeCellValue(m[M.payAmount]),
       [R.currency]: normalizeCellValue(m[M.payCurrency]), // out 币种取付款币种（纠原文笔误）
       [R.fundType]: FT_RECON_FIELD_MAP.FUND_TYPE_OUT,
-      [R.bigAccount]: payAccount // D1：out = 付款账户（卡号）
+      // D1：out = 付款账户（卡号）；🔴 套用账户映射：命中→清结算账号、未命中→原样保留（payAccount 展示字段不动）。
+      [R.bigAccount]: accountMappingMap.get(payAccount) ?? payAccount
     });
   }
   return { rows, total: rows.length };

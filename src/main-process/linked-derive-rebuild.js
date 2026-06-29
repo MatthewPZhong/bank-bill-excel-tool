@@ -260,6 +260,12 @@ function rebuildFxBocDerivation(deps, ctx = {}) {
 //   与 ADM 派生同范式：函数内部保留 try/catch 隔离——派生任一步抛错记 created:false（含 error 文案），
 //   【不向外抛】，不阻断 mid-allocation 导入本身（数据已落库成功）。
 //
+// v3.0.12 功能2（批B，🔴 资金红线）：派生 big_account 时套用全局账户映射「中台调拨账户号 → 清结算银行账号」。
+//   map 在本函数内从已注入的 database.getFundTransferAccountMappingMap() 实时取并传入 builder —— 本函数是
+//   buildFundTransferReconRows 的【唯一】生产调用处，而它被两条派生链共用（① run 入口 main.js:3830、
+//   ② mid-allocation 导入入口 main.js:11861），两链皆经此 → 单点注入即两链统一生效，结构上不存在「漏一条链」。
+//   （映射表为空＝空 Map＝全 passthrough＝字节级零变化；与 plan §2.4「派生处统一＝单一真值源」一致。）
+//
 // deps = { database, buildFundTransferReconRows }（均为 main.js 现有 require，原样透传）。
 //
 // 返回 { fundTransferReconDerive }，仿 admDerive 形态：
@@ -271,7 +277,15 @@ function rebuildFundTransferReconDerivation(deps) {
   try {
     // mid-allocation 整行（中文真实表头）；builder 内部按 FT_RECON_FIELD_MAP.mid 常量取列（禁手敲全角括号）。
     const midRows = database.readLinkedTableRows('mid-allocation');
-    const { rows } = buildFundTransferReconRows(midRows);
+    // v3.0.12 功能2（批B，🔴 资金红线）：从已注入的 database facade 实时取账户映射 map（中台调拨账户号 → 清结算银行账号），
+    //   传入 builder 在 big_account 派生处统一套用。本函数是 buildFundTransferReconRows 唯一生产调用处，run / 导入两链皆经此。
+    //   防御：facade 缺失（旧 mock database 单测）→ 退空 Map（全 passthrough，不抛）；映射表空 → 空 Map → 字节级零变化。
+    //   置于 try 内：facade 取数若抛错 → 与派生其它步骤同语义降级（created:false），绝不阻断 run / 导入。
+    const accountMappingMap =
+      typeof database.getFundTransferAccountMappingMap === 'function'
+        ? (database.getFundTransferAccountMappingMap() || new Map())
+        : new Map();
+    const { rows } = buildFundTransferReconRows(midRows, { accountMappingMap });
     database.replaceFundTransferReconRows(rows);
     fundTransferReconDerive = {
       created: true,

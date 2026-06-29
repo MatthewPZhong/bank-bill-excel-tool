@@ -3901,6 +3901,8 @@ function registerAppHandlers() {
         runId: bankStatementSession.importedAt,
         // v3.0.4 块 F 修订 R2 Q14：Payment线下调拨匹配对 → 导出阶段追加 3 核对 sheet（未勾选/无命中时为 []）
         paymentOfflineMatchedPairs: result.paymentOfflineMatchedPairs || [],
+        // v3.0.12 功能1：异常-人工判断命中银行行（🔴 只读）→ 导出阶段写「异常-人工判断」sheet（无命中时为 []）
+        manyToManyReviewRows: result.manyToManyReviewRows || [],
         scenariosSnapshot: buildScenariosSnapshot(dispatchScenarios),
         ranAt: Date.now()
       };
@@ -4018,7 +4020,9 @@ function registerAppHandlers() {
         // v2.1.16-beta.6 需求 B：透传 modifications → 命中场景 sheet「命中明细」列数据源（D9）
         modifications: processingResult.modifications,
         // v3.0.4 块 F 修订 R2 Q14：Payment线下调拨匹配对 → 主文件追加 3 核对 sheet（空/null 时不加 sheet）
-        paymentOfflinePairs: processingResult.paymentOfflineMatchedPairs
+        paymentOfflinePairs: processingResult.paymentOfflineMatchedPairs,
+        // v3.0.12 功能1：异常-人工判断命中银行行 → 主文件追加「异常-人工判断」sheet（空/null 时不加 sheet）
+        manyToManyRows: processingResult.manyToManyReviewRows
       });
 
       // v2.1.9 N5 T26（spec §5.1-5.4 🔴 对外契约破坏性变更）：场景命中行独立报表
@@ -5051,6 +5055,109 @@ function registerAccountMappingHandlers() {
         errorCode: 'MIGRATION_DISTRIBUTE_RUNTIME',
         errorType: '系统错误',
         originalError: error
+      });
+    }
+  });
+}
+
+// v3.0.12 功能2（批A）：账户映射管理保存前校验（仿 validateAccountMappings，无币种 / 无模板维度）。
+//   - 两列皆空 → 跳过（空行不保存）；仅一列为空 → 报错。
+//   - 中台调拨单账户号去重（DB UNIQUE(mid_account_id) 兜底，这里先给友好提示）。
+//   - 长度护栏（≤128，防异常脏数据；不强加字符集正则，账号格式跨系统不一）。
+//   归一化（trim + String）由仓储 saveMappings 统一执行；本函数仅做完整性 / 唯一性 / 长度校验。
+function validateFundTransferAccountMappings(mappings) {
+  if (!Array.isArray(mappings)) {
+    return { status: 'error', message: '账户映射数据格式不正确' };
+  }
+
+  const cleanedMappings = [];
+  const midAccountSeen = new Set();
+
+  for (const mapping of mappings) {
+    const midAccountId = String((mapping && mapping.midAccountId) || '').trim();
+    const clearingAccountId = String((mapping && mapping.clearingAccountId) || '').trim();
+
+    if (!midAccountId && !clearingAccountId) {
+      continue;
+    }
+
+    if (!midAccountId || !clearingAccountId) {
+      return {
+        status: 'error',
+        message: '账户映射存在未填写完整的行，请补全后再保存'
+      };
+    }
+
+    if (midAccountId.length > 128 || clearingAccountId.length > 128) {
+      return {
+        status: 'error',
+        message: '账户号长度不能超过128位'
+      };
+    }
+
+    if (midAccountSeen.has(midAccountId)) {
+      return {
+        status: 'error',
+        message: '中台调拨单账户号不可重复，请重新确认'
+      };
+    }
+
+    midAccountSeen.add(midAccountId);
+    cleanedMappings.push({ midAccountId, clearingAccountId });
+  }
+
+  return {
+    status: 'success',
+    mappings: cleanedMappings
+  };
+}
+
+// v3.0.12 功能2（批A）：账户映射管理 IPC（list 无参 / save 入参 mappings）；校验/错误处理仿 account-mapping:save。
+function registerFundTransferAccountMappingHandlers() {
+  ipcMain.handle('fund-transfer-account-mapping:list', () => {
+    return {
+      status: 'success',
+      mappings: database.listFundTransferAccountMappings()
+    };
+  });
+
+  trackedIpcHandle('fund-transfer-account-mapping:save', '链接表管理', '账户映射管理', (_event, mappings) => {
+    try {
+      const validationResult = validateFundTransferAccountMappings(mappings);
+
+      if (validationResult.status !== 'success') {
+        return createErrorResult({
+          step: '保存账户映射',
+          message: validationResult.message,
+          errorCode: 'FUND_TRANSFER_ACCOUNT_MAPPING_VALIDATE',
+          detailLines: ['账户映射存在格式或完整性问题，未执行保存。'],
+          context: { mappings }
+        });
+      }
+
+      database.saveFundTransferAccountMappings(validationResult.mappings);
+      // 🔴 资金红线：账户映射改写调拨对账派生的 big_account（批B buildFundTransferReconRows 用 getMappingMap 替换），
+      //   影响「中台调拨订单对账ID回填」R5s2-recon + DBS-Charge R3.5 → 失效已缓存对账结果，强制用户重跑后才能导出。
+      //   （同 linked-table 变更范式：bank-statement:export 守卫只校验 scenariosSnapshot、不认账户映射变更，须在此清缓存兜底。）
+      processingResult = null;
+      clearLastErrorReport();
+      appendActivityLogEntry({
+        level: 'info',
+        message: '保存账户映射管理成功',
+        details: [`映射条数：${validationResult.mappings.length}`]
+      });
+      return {
+        status: 'success',
+        message: '账户映射保存成功'
+      };
+    } catch (error) {
+      return createErrorResult({
+        step: '保存账户映射',
+        message: '账户映射保存失败，请导出报错文件查看详情',
+        errorCode: 'FUND_TRANSFER_ACCOUNT_MAPPING_RUNTIME',
+        errorType: '系统错误',
+        originalError: error,
+        context: { mappings }
       });
     }
   });
@@ -13332,6 +13439,8 @@ function registerAllIpcHandlers() {
   registerErrorHandlers();
   registerBackgroundHandlers();
   registerAccountMappingHandlers();
+  // v3.0.12 功能2（批A）：账户映射管理（中台调拨单账户号 → 清结算系统银行账号）IPC
+  registerFundTransferAccountMappingHandlers();
   registerTemplateHandlers();
   registerBigAccountHandlers();
   registerBigAccountOrderHandlers();

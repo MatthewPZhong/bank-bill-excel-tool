@@ -20,7 +20,7 @@ const {
   migrateGatewayReconIdFixFieldPairs,
   migrateC4ReconGroupsStructure,
   migrateC4ReconGroupsAmountLockedFieldPair,
-  ensureC3GwFieldCurrencyCaseFix,
+  ensureC3GwFieldCurrencyCaseRevert,
   ensureC3AssignAddMode,
   ensureAcquiringBillCurrencyRunsCleanupPending,
   ensureAcquiringBillIdleCleanupMinutesSetting,
@@ -70,6 +70,8 @@ const {
   ensureBocFxLinkSupport,
   // v2.1.16-beta.3 ①：Channel 枚举字典表建表
   ensureChannelEnumSupport,
+  // v3.0.12 功能2（批A）：账户映射管理全局表建表（中台调拨单账户号 → 清结算系统银行账号）
+  ensureFundTransferAccountMappingSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
@@ -87,6 +89,8 @@ const channelsRepository = require('./database/channels-repository');
 const linkedTableRepository = require('./database/linked-table-repository');
 // v2.1.16-beta.3 ①：Channel 枚举字典仓储
 const channelEnumRepository = require('./database/channel-enum-repository');
+// v3.0.12 功能2（批A）：账户映射管理仓储（全局：中台调拨单账户号 → 清结算系统银行账号）
+const fundTransferAccountMappingRepository = require('./database/fund-transfer-account-mapping-repository');
 const { createBackup: createBackupImpl } = require('./database/backup');
 // v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
 const { appendModuleLog } = require('./logger');
@@ -226,9 +230,9 @@ class AppDatabase {
     // v2.1.0-beta.1 PR-B Round 3（Decision 4 回写，2026-05-09）：给 C4 reconGroups 强制带 Amount 锁定字段对
     // 必须在 migrateC4ReconGroupsStructure 之后（依赖 reconGroups 结构已就位）。
     this.migrateC4ReconGroupsAmountLockedFieldPair();
-    this.ensureC3GwFieldCurrencyCaseFix();
+    this.ensureC3GwFieldCurrencyCaseRevert();
     // v2.1.8 N2：给 'gateway-recon-join' assign 对象补 mode='direct' + customValue=''
-    //   必须在 ensureC3GwFieldCurrencyCaseFix 之后（先修 currency 大小写再扩字段，互不影响）
+    //   必须在 ensureC3GwFieldCurrencyCaseRevert 之后（先修 currency 大小写再扩字段，互不影响）
     this.ensureC3AssignAddMode();
     this.ensureBuiltinScenarioNamesUpdate();
     // v2.1.9 N5：channels 表 + scenarios.channel_id FK + backfill 到「通用」
@@ -560,6 +564,8 @@ class AppDatabase {
     this.ensureBocFxLinkSupport();
     // v2.1.16-beta.3 ①：Channel 枚举字典表（纯审计沉淀；幂等 CREATE IF NOT EXISTS，无依赖）
     this.ensureChannelEnumSupport();
+    // v3.0.12 功能2（批A）：账户映射管理全局表（幂等 CREATE IF NOT EXISTS，无依赖、不进 ALL_TABLE_KEYS；批B 才接对账）
+    this.ensureFundTransferAccountMappingSupport();
     // v3.0.5 PR-2（Part B Phase 0 / B-D6）：一次性 VACUUM 主库（止血回收历史删除空洞）
     //   必须在所有 ensure*Support / migrate* 之后（VACUUM 重建文件，之后再 ANALYZE 重统计）
     //   迁移式幂等：标志位已写则跳过；成功才写标志、磁盘不足/失败不写标志 → 下次重试。
@@ -1098,8 +1104,8 @@ class AppDatabase {
     return migrateC4ReconGroupsStructure(this.db);
   }
 
-  ensureC3GwFieldCurrencyCaseFix() {
-    return ensureC3GwFieldCurrencyCaseFix(this.db);
+  ensureC3GwFieldCurrencyCaseRevert() {
+    return ensureC3GwFieldCurrencyCaseRevert(this.db);
   }
 
   ensureC3AssignAddMode() {
@@ -1438,6 +1444,24 @@ class AppDatabase {
   // v2.1.16-beta.3 ①：Channel 枚举字典 facade（纯审计沉淀，不删/不改对账数据）
   ensureChannelEnumSupport() {
     return ensureChannelEnumSupport(this.db);
+  }
+
+  // v3.0.12 功能2（批A）：账户映射管理 facade（建表 + 仓储三函数转发）。
+  //   全局对照表「中台调拨单账户号 → 清结算系统银行账号」；批B 才把 getFundTransferAccountMappingMap 喂给调拨派生。
+  ensureFundTransferAccountMappingSupport() {
+    return ensureFundTransferAccountMappingSupport(this.db);
+  }
+
+  listFundTransferAccountMappings() {
+    return fundTransferAccountMappingRepository.listMappings(this.db);
+  }
+
+  saveFundTransferAccountMappings(mappings) {
+    return fundTransferAccountMappingRepository.saveMappings(this.db, mappings);
+  }
+
+  getFundTransferAccountMappingMap() {
+    return fundTransferAccountMappingRepository.getMappingMap(this.db);
   }
 
   // 导入银行对账单成功后沉淀 Channel / Channel-地区 枚举（去重 upsert）。

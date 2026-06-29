@@ -388,6 +388,8 @@ const {
   createMappingDialog,
   createAccountMappingDialog,
   createAccountMappingMigrationDialog,
+  // v3.0.12 功能2（批A）：账户映射管理弹窗（链接表管理内部打开，renderer 侧仅供 preview 链路引用）
+  createFundTransferAccountMappingDialog,
   // v1.5.3 round 6：补全 preview 所需 factory（仅 preview 链路使用）
   createAmountSplitRulesDialog,
   createBillSplitRowsDialog,
@@ -514,6 +516,8 @@ const {
   applyBigAccountSelectionMultiLargePreviewState,   // v2.1.7 round 3 B4: ≥20 文件 fixture
   applyExtractOrderPreviewState,
   applyAccountMappingEditingPreviewState,
+  // v3.0.12 功能2（批A）：账户映射管理弹窗 preview
+  applyFundTransferAccountMappingPreviewState,
   // v2.0.0-beta.3：银行对账单处理模块 preview（3 张）
   applyBankStatementPanelPreviewState,
   applyScenariosManagerPreviewState,
@@ -593,6 +597,8 @@ const {
   // 后续 preview 扩展所需
   openModuleMenu,
   createAccountMappingDialog,
+  // v3.0.12 功能2（批A）：账户映射管理弹窗 preview 链路所需 factory
+  createFundTransferAccountMappingDialog,
   desktopApi: window.desktopApi,
   applyStatementResult,
   closeAllNewAccountCurrencyDropdowns,
@@ -4179,7 +4185,10 @@ function formatBankStatementRunProgress(ev) {
     R4: '正在校验资金性质（R4）…',
     R5s2: '正在回填资金划转（R5）…',
     R5s2b: '正在回填线下调拨（R5）…',
-    R5s3: '正在生成剔除清单（R5）…'
+    R5s3: '正在生成剔除清单（R5）…',
+    // v3.0.12：R5 退款回填后、M2M 异常-人工判断检测后各补一次让出（编排器 yieldTick），对应进度文案。
+    R5s4: '正在回填退款订单（R5）…',
+    M2M: '正在排查多对多异常（人工复核）…'
   };
   if (ev.stage && STAGE_LABELS[ev.stage]) return STAGE_LABELS[ev.stage];
   if (ev.round && ROUND_LABELS[ev.round]) return ROUND_LABELS[ev.round];
@@ -6413,6 +6422,11 @@ async function applyFullInfo(info) {
   } else if (info.previewModal === 'account-mapping-editing') {
     setTimeout(() => {
       applyAccountMappingEditingPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'fund-transfer-account-mapping') {
+    // v3.0.12 功能2（批A）：账户映射管理弹窗 preview
+    setTimeout(() => {
+      applyFundTransferAccountMappingPreviewState();
     }, 120);
   } else if (info.previewModal === 'bank-statement-panel') {
     setTimeout(() => {

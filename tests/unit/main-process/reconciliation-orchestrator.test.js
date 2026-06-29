@@ -935,7 +935,7 @@ test.describe('v3.0.8 需求3：runReconciliation async + onProgress 轮次边�
     return { bankRows, gwRows, dispRows, scenarios };
   }
 
-  test('onProgress 仅在轮次边界被调，顺序固定 R1→R2→R3.5→R4→R5s2→R5s2b→R5s3', async () => {
+  test('onProgress 仅在轮次边界被调，顺序固定 R1→R2→R3.5→R4→R5s2→R5s2b→R5s3→R5s4→M2M', async () => {
     const { bankRows, gwRows, dispRows, scenarios } = buildFullRoundInput();
     const rounds = [];
     await runReconciliation({
@@ -943,11 +943,13 @@ test.describe('v3.0.8 需求3：runReconciliation async + onProgress 轮次边�
       dispatchReconContext: { dispatchReconRows: dispRows },
       onProgress: (ev) => { if (ev && ev.round) rounds.push(ev.round); }
     });
-    // 轮次边界顺序钉死（编排器各轮「执行之后」让出一次；R5s4 是末轮，其后只剩只读输出构造，无 yield）。
+    // 轮次边界顺序钉死（编排器各轮「执行之后」让出一次）。v3.0.12 性能优化：在 R5s4 退款回填后、M2M 异常-人工
+    //   判断检测后各补一次让出，使「R5s4 + detector + buildOutputRows」不再挤成不让出的同步块；M2M 是末轮，
+    //   其后只剩只读输出构造（buildOutputRows），无 yield。
     assert.deepStrictEqual(
       rounds,
-      ['R1', 'R2', 'R3.5', 'R4', 'R5s2', 'R5s2b', 'R5s3'],
-      'onProgress round 序列必须严格等于 7 个轮次边界、顺序固定'
+      ['R1', 'R2', 'R3.5', 'R4', 'R5s2', 'R5s2b', 'R5s3', 'R5s4', 'M2M'],
+      'onProgress round 序列必须严格等于 9 个轮次边界、顺序固定'
     );
   });
 

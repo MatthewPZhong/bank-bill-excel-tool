@@ -1,0 +1,280 @@
+// 功能1「异常-人工判断 sheet」集成测试（🔴 资金红线·只读检测端到端契约）
+//   覆盖：
+//     ① 编排器 runReconciliation 产出 manyToManyReviewRows / stats.manyToManyReviewCount（NvM 命中、1v1/1vN/Nv1 不命中）
+//     ② 🔴 回填行为不变 + 纯只读：full orchestrator 与「直调 R5s2-recon 引擎」对同一夹具的 modifications /
+//        银行行最终态逐字节一致（检测器不改任何 bankRow / modifications / 行数守恒）
+//     ③ 跨接缝透传：经 io 层 writeBankStatementMainOutput（= main.js export handler 同款调用，
+//        manyToManyRows 落 writer 第 8 形参）→ 真实写盘 → ExcelJS 读回「异常-人工判断」sheet
+//     ④ 条件生成：无 NvM → reviewRows 空 → 主文件不含该 sheet（空＝形态零变化）
+//
+//   为何端到端：检测器（orchestrator 内）→ processingResult → io → writer 是 4 跳接缝（历史教训：
+//   逐文件 review 看不见接缝，writer 第 7 形参 staleHitNotesByRowId 易把 manyToManyRows 串位）。
+//   本脚本用真实 ExcelJS 读盘锁死 sheet 名/表头/命中行，并用「引擎 parity」锁死回填零变化。
+//
+//   用法：node scripts/integration/bank-statement-many-to-many-review-sheet.js
+
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const ExcelJS = require('exceljs');
+
+const { runReconciliation } = require('../../src/main-process/reconciliation-orchestrator');
+const { writeBankStatementMainOutput } = require('../../src/main-process/bank-statement-io');
+const {
+  runRound5FundTransferReconBackfill
+} = require('../../src/main-process/scenario-engines/r5-fund-transfer-recon-backfill');
+const { BANK_STATEMENT_FIELDS } = require('../../src/constants/bank-statement-fields');
+const { FT_RECON_FIELD_MAP } = require('../../src/constants/fund-transfer-recon-fields');
+
+const RECON = FT_RECON_FIELD_MAP.recon;
+const FUND_IN = FT_RECON_FIELD_MAP.FUND_TYPE_IN;
+const SHEET_NAME = '异常-人工判断';
+
+let passed = 0;
+let failed = 0;
+const failures = [];
+
+function assertEq(actual, expected, label) {
+  if (actual === expected) {
+    passed += 1;
+  } else {
+    failed += 1;
+    failures.push({ label, detail: `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}` });
+  }
+}
+function assertTrue(cond, label) {
+  if (cond) {
+    passed += 1;
+  } else {
+    failed += 1;
+    failures.push({ label, detail: 'expected truthy' });
+  }
+}
+
+const clone = (x) => JSON.parse(JSON.stringify(x));
+
+// ---- 夹具 --------------------------------------------------------------
+
+const DATE = '2026-06-07';
+
+function bankRow(rowId, merchantId, amount, fundType = FUND_IN) {
+  return {
+    _rowId: rowId,
+    MerchantId: merchantId,
+    Currency: 'USD',
+    'Credit Amount': amount,
+    'Debit Amount': 0,
+    BillDate: DATE,
+    FundType: fundType,
+    ReconciliationId: ''
+  };
+}
+function reconRow(bigAccount, amount, reconId) {
+  return {
+    [RECON.bigAccount]: bigAccount,
+    [RECON.currency]: 'USD',
+    [RECON.amount]: amount,
+    [RECON.billDate]: DATE,
+    [RECON.reconId]: reconId,
+    [RECON.fundType]: FUND_IN
+  };
+}
+function gwRow(merchantid, amount) {
+  return { merchantid, currency: 'USD', amount, Billdate: DATE, TradeType: FUND_IN, reconciliationid: '' };
+}
+
+// R5s2 场景（reconSourceMid 缺省 → 走调拨对账单回填引擎）
+function r5s2Scenario() {
+  return {
+    id: 502,
+    name: '中台调拨订单对账ID回填',
+    category: 'builtin-fixed',
+    priority: 0,
+    enabled: true,
+    config: { funcCategory: 'platform-order', subCategory: 'fund-transfer-backfill', roundPhase: 5, dateToleranceDays: 1 }
+  };
+}
+
+// 夹具分组：
+//   A 1v1（ACC_A，50）：1 银行 + 1 调拨 → 回填、不命中检测
+//   B NvM-recon（ACC_B，100）：2 银行 + 2 调拨 → 回填 cand[0]、检测命中（note=调拨）
+//   C NvM-gateway（ACC_C，200）：2 银行 + 2 网关、无调拨 → 不回填（recon 路）、检测命中（note=网关）
+//   D 1vN（ACC_D，300）：1 银行 + 2 调拨 → 回填、不命中
+//   E Nv1（ACC_E，400）：2 银行 + 1 调拨 → 回填 cand[0]、不命中
+function buildFixture() {
+  const bankRows = [
+    bankRow('bA1', 'ACC_A', 50),
+    bankRow('bB1', 'ACC_B', 100),
+    bankRow('bB2', 'ACC_B', 100),
+    bankRow('bC1', 'ACC_C', 200),
+    bankRow('bC2', 'ACC_C', 200),
+    bankRow('bD1', 'ACC_D', 300),
+    bankRow('bE1', 'ACC_E', 400),
+    bankRow('bE2', 'ACC_E', 400)
+  ];
+  const reconRows = [
+    reconRow('ACC_A', 50, 'RC-A'),
+    reconRow('ACC_B', 100, 'RC-B1'),
+    reconRow('ACC_B', 100, 'RC-B2'),
+    reconRow('ACC_D', 300, 'RC-D1'),
+    reconRow('ACC_D', 300, 'RC-D2'),
+    reconRow('ACC_E', 400, 'RC-E1')
+  ];
+  const gwRows = [gwRow('ACC_C', 200), gwRow('ACC_C', 200)];
+  return { bankRows, reconRows, gwRows };
+}
+
+async function run() {
+  console.log('==== 功能1「异常-人工判断 sheet」集成验证 ====');
+
+  // ===== Step 1：编排器产出 + 回填 parity（read-only 证据）=====
+  const fx = buildFixture();
+  const bankRows = clone(fx.bankRows);
+  const reconRows = clone(fx.reconRows);
+  const gwRows = clone(fx.gwRows);
+
+  // baseline：直调 R5s2-recon 引擎（夹具无 R2/R3.5/R4 场景 → orchestrator 的唯一回填来源就是它）
+  const baselineBank = clone(fx.bankRows);
+  const baseline = runRound5FundTransferReconBackfill(clone(fx.reconRows), baselineBank, { dateToleranceDays: 1 });
+
+  const result = await runReconciliation({
+    bankRows,
+    gwRows,
+    scenarios: [r5s2Scenario()],
+    fundTransferReconContext: { reconRows }
+  });
+
+  // ① 行数守恒（检测器只读，不破）
+  assertEq(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length, '行数守恒 modified+unmatched===bankRows');
+
+  // ② manyToManyReviewRows / stats
+  const reviewIds = result.manyToManyReviewRows.map((r) => r.row._rowId).sort();
+  assertEq(JSON.stringify(reviewIds), JSON.stringify(['bB1', 'bB2', 'bC1', 'bC2']), 'reviewRows 命中 = NvM 银行行（B+C 各2）');
+  assertEq(result.stats.manyToManyReviewCount, 4, 'stats.manyToManyReviewCount=4');
+  // 1v1 / 1vN / Nv1 不进
+  assertTrue(!reviewIds.includes('bA1'), '1v1(bA1) 不进 reviewRows');
+  assertTrue(!reviewIds.includes('bD1'), '1vN(bD1) 不进 reviewRows');
+  assertTrue(!reviewIds.includes('bE1') && !reviewIds.includes('bE2'), 'Nv1(bE) 不进 reviewRows');
+  // note 对手方正确（B=调拨、C=网关）
+  const noteById = new Map(result.manyToManyReviewRows.map((r) => [r.row._rowId, r.note]));
+  assertTrue(/调拨/.test(noteById.get('bB1')) && /多对多/.test(noteById.get('bB1')), 'bB1 note 标注调拨多对多');
+  assertTrue(/网关/.test(noteById.get('bC1')) && /多对多/.test(noteById.get('bC1')), 'bC1 note 标注网关多对多');
+
+  // ③ 🔴 回填行为不变：orchestrator 的 ReconciliationId modifications == baseline 引擎；银行行最终态逐字节一致
+  const backfillMap = (mods) => {
+    const m = {};
+    for (const x of mods) if (x.column === 'ReconciliationId') m[x.rowId] = x.newValue;
+    return m;
+  };
+  assertEq(
+    JSON.stringify(backfillMap(result.modifications)),
+    JSON.stringify(backfillMap(baseline.modifications)),
+    '回填 modifications 与 baseline 引擎逐条一致（检测器零影响）'
+  );
+  // 银行行最终态（含回填后 ReconciliationId）逐行逐字节 = baseline → 检测器纯只读不改字段
+  const projectBank = (rows) => rows.map((r) => {
+    const o = {};
+    for (const k of Object.keys(r)) if (k !== '_modifiedColumns') o[k] = r[k];
+    return o;
+  });
+  assertEq(
+    JSON.stringify(projectBank(bankRows)),
+    JSON.stringify(projectBank(baselineBank)),
+    '🔴 银行行最终态与 baseline 逐字节一致（检测器不写任何字段）'
+  );
+  // 命中行确实是回填后的「数据脏」行：bB1/bB2 已被回填（cand[0] 单向消费），bC1/bC2 recon 路未回填
+  const reconIdOf = (id) => bankRows.find((r) => r._rowId === id).ReconciliationId;
+  assertTrue(reconIdOf('bB1') !== '' && reconIdOf('bB2') !== '', 'NvM-recon 行仍按现状回填（取其一/单向消费）');
+  assertEq(reconIdOf('bC1'), '', 'NvM-gateway 行在 recon 路不回填（检测池比回填池更宽）');
+
+  // ===== Step 2：跨接缝透传 → 真实写盘 → 读回 sheet =====
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'm2m-sheet-'));
+  const mainFilePath = path.join(tmpDir, '银行对账单-异常人工判断.xlsx');
+  try {
+    await writeBankStatementMainOutput({
+      modifiedRows: result.modifiedRows,
+      headers: BANK_STATEMENT_FIELDS,
+      mainFilePath,
+      unmatchedRows: result.unmatchedRows,
+      modifications: result.modifications,
+      paymentOfflinePairs: result.paymentOfflineMatchedPairs,
+      // 🔴 接缝：main.js export handler 同款 —— manyToManyReviewRows → io manyToManyRows → writer 第 8 形参
+      manyToManyRows: result.manyToManyReviewRows
+    });
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(mainFilePath);
+    const sheet = wb.getWorksheet(SHEET_NAME);
+    assertTrue(!!sheet, `主文件含「${SHEET_NAME}」sheet`);
+
+    if (sheet) {
+      // 表头 = [异常说明, ...BANK_STATEMENT_FIELDS]
+      const headerCells = sheet.getRow(1).values.slice(1); // ExcelJS values[0] 占位
+      assertEq(headerCells[0], '异常说明', 'sheet 首列表头=异常说明');
+      assertEq(headerCells.length, BANK_STATEMENT_FIELDS.length + 1, `表头列数 = 1 + 银行 ${BANK_STATEMENT_FIELDS.length} 列`);
+      assertEq(headerCells[1], BANK_STATEMENT_FIELDS[0], '第 2 列起为银行契约列（账户主体）');
+
+      // 数据行（第 2 行起）= 4 条命中
+      assertEq(sheet.rowCount, 1 + 4, 'sheet 行数 = 表头 1 + 命中 4');
+
+      // MerchantId 列在 sheet 内的列号（异常说明在第 1 列 → 银行列整体 +1）
+      const midColIdx = 1 + (BANK_STATEMENT_FIELDS.indexOf('MerchantId') + 1);
+      const reconColIdx = 1 + (BANK_STATEMENT_FIELDS.indexOf('ReconciliationId') + 1);
+      const midsInSheet = [];
+      const notesNonEmpty = [];
+      for (let r = 2; r <= sheet.rowCount; r += 1) {
+        midsInSheet.push(sheet.getRow(r).getCell(midColIdx).value);
+        notesNonEmpty.push(String(sheet.getRow(r).getCell(1).value || ''));
+      }
+      midsInSheet.sort();
+      assertEq(JSON.stringify(midsInSheet), JSON.stringify(['ACC_B', 'ACC_B', 'ACC_C', 'ACC_C']), 'sheet 命中行 MerchantId = B/B/C/C');
+      assertTrue(notesNonEmpty.every((n) => n.includes('多对多')), '每条异常说明非空且含「多对多」');
+      // 银行行内部字段（_rowId/_modifiedColumns 等）已被 stripInternalFields 剥除（不暴露诊断列）
+      const headerHasInternal = headerCells.some((h) => typeof h === 'string' && h.startsWith('_'));
+      assertTrue(!headerHasInternal, 'sheet 表头不含 _ 内部诊断列');
+      // 回填后的 ReconciliationId 忠实写出（bB 行非空 / bC 行空）
+      const reconVals = [];
+      for (let r = 2; r <= sheet.rowCount; r += 1) reconVals.push(String(sheet.getRow(r).getCell(reconColIdx).value || ''));
+      assertTrue(reconVals.filter((v) => v !== '').length === 2, 'sheet 内 2 行(B)带回填 ReconciliationId、2 行(C)为空');
+    }
+
+    // ===== Step 3：条件生成 —— 无 NvM → 不加 sheet =====
+    const cleanBank = [bankRow('z1', 'ZZ', 9), bankRow('z2', 'ZZ2', 9)]; // 不同账号 → 无多对多
+    const cleanResult = await runReconciliation({
+      bankRows: cleanBank,
+      gwRows: [],
+      scenarios: [r5s2Scenario()],
+      fundTransferReconContext: { reconRows: [reconRow('ZZ', 9, 'RC-Z')] } // 1v1，不命中检测
+    });
+    assertEq(cleanResult.manyToManyReviewRows.length, 0, '无 NvM → manyToManyReviewRows 空');
+    assertEq(cleanResult.stats.manyToManyReviewCount, 0, '无 NvM → stats.manyToManyReviewCount=0');
+
+    const cleanPath = path.join(tmpDir, '银行对账单-无异常.xlsx');
+    await writeBankStatementMainOutput({
+      modifiedRows: cleanResult.modifiedRows,
+      headers: BANK_STATEMENT_FIELDS,
+      mainFilePath: cleanPath,
+      unmatchedRows: cleanResult.unmatchedRows,
+      modifications: cleanResult.modifications,
+      paymentOfflinePairs: cleanResult.paymentOfflineMatchedPairs,
+      manyToManyRows: cleanResult.manyToManyReviewRows
+    });
+    const wb2 = new ExcelJS.Workbook();
+    await wb2.xlsx.readFile(cleanPath);
+    assertTrue(!wb2.getWorksheet(SHEET_NAME), '条件生成：reviewRows 空 → 主文件不含「异常-人工判断」sheet');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+
+  const total = passed + failed;
+  console.log(`\n==== ${passed}/${total} PASS ====`);
+  if (failed > 0) {
+    failures.forEach((f) => console.error(`  - ${f.label}: ${f.detail}`));
+    process.exit(1);
+  }
+}
+
+run().catch((e) => {
+  console.error('FATAL', e);
+  process.exit(1);
+});

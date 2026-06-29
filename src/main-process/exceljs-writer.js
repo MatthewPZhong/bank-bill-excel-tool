@@ -222,12 +222,30 @@ function appendPaymentOfflineSheets(workbook, pairs) {
   });
 }
 
+// ===== v3.0.12 功能1：异常-人工判断 sheet（🔴 资金红线·只读检测产物）=====
+//   reviewRows 项 = { row: 银行行引用, note: 中文说明 }（many-to-many-detector 产出）。
+//   reviewRows 为 null/空数组 → 完全不加 sheet（主文件形态零变化）。
+//   列 = [异常说明, ...BANK_STATEMENT_FIELDS]（银行 46 列契约）；每行 = [note, ...银行列值]，
+//   银行列值复用 stripInternalFields 投影剥 _ 前缀内部字段（与「银行行-原始」sheet 同口径）。
+const SHEET_MANY_TO_MANY_NAME = '异常-人工判断';
+const MANY_TO_MANY_NOTE_HEADER = '异常说明';
+
+function appendManyToManyReviewSheet(workbook, reviewRows) {
+  const sheet = workbook.addWorksheet(SHEET_MANY_TO_MANY_NAME);
+  sheet.addRow([MANY_TO_MANY_NOTE_HEADER, ...BANK_STATEMENT_FIELDS]);
+  sheet.getRow(1).font = { bold: true, size: 10 };
+  reviewRows.forEach((rv) => {
+    const cleaned = stripInternalFields((rv && rv.row) || {});
+    sheet.addRow([(rv && rv.note) || '', ...BANK_STATEMENT_FIELDS.map((h) => cleaned[h])]);
+  });
+}
+
 // v3.0.4 块 F 修订 R2 Q14：paymentOfflinePairs 非空时在既有 2 sheet 后追加 3 核对 sheet；null/空 → 主文件形态零变化。
 // v3.0.5 OPEN-7（T5b-2 出口②预留）：staleHitNotesByRowId（Map<rowId, 提醒串> | null，默认 null）——
 //   主对账链命中明细行追加「跨期重复命中」提醒（同 §3.6-5 出口①口径，append 不覆盖原命中明细）。
 //   🔴 传空/不传时（本批 main 即不传，主对账链无入金表来源命中——depositRows 唯一消费者是 R5 场景4）
 //      完全不进注入分支 → 命中明细 golden 字节不变（parity 锁定，留 refund-backfill 阶段接入实际注入）。
-async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null, modifications = null, paymentOfflinePairs = null, staleHitNotesByRowId = null) {
+async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null, modifications = null, paymentOfflinePairs = null, staleHitNotesByRowId = null, manyToManyRows = null) {
   const workbook = new ExcelJS.Workbook();
 
   // ===== sheet1「未命中场景」=====
@@ -310,6 +328,11 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
     appendPaymentOfflineSheets(workbook, paymentOfflinePairs);
   }
 
+  // ===== v3.0.12 功能1：追加「异常-人工判断」sheet（仅命中非空时；空/null → 主文件形态零变化）=====
+  if (Array.isArray(manyToManyRows) && manyToManyRows.length > 0) {
+    appendManyToManyReviewSheet(workbook, manyToManyRows);
+  }
+
   applyWatermark(workbook);
   await workbook.xlsx.writeFile(savePath);
   return { filePath: savePath };
@@ -373,5 +396,8 @@ module.exports = {
   SHEET2_HIT_NAME,
   SHEET1_A1_NOTICE,
   HIT_DETAIL_HEADER,
-  MARK_WITHOUT_RESULT
+  MARK_WITHOUT_RESULT,
+  // v3.0.12 功能1：异常-人工判断 sheet（集成测试断言 + caller 引用）
+  SHEET_MANY_TO_MANY_NAME,
+  appendManyToManyReviewSheet
 };
