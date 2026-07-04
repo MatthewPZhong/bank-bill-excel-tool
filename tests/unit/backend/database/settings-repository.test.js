@@ -112,6 +112,39 @@ test.describe('getLastImportDirectory / setLastImportDirectory', () => {
     settingsRepo.setLastImportDirectory(db, 'template', '   ');
     assert.equal(settingsRepo.getLastImportDirectory(db, 'template'), '/tmp/template');
   });
+
+  test('空白 scope 等价于全局，不产生双写', () => {
+    settingsRepo.setLastImportDirectory(db, '   ', '/tmp/global-only');
+    assert.equal(
+      settingsRepo.getSetting(db, settingsRepo.LAST_IMPORT_DIRECTORY_GLOBAL_KEY),
+      '/tmp/global-only'
+    );
+    // trim 后为空的 scope 不应在 scoped key 空间留下键
+    assert.equal(settingsRepo.getSetting(db, 'last_import_directory:   '), null);
+  });
+
+  test('candidates：scoped 优先、global 兜底、同值去重', () => {
+    assert.deepEqual(settingsRepo.getLastImportDirectoryCandidates(db, 'template'), []);
+
+    settingsRepo.setLastImportDirectory(db, 'template', '/tmp/template');
+    // 写入 template 时同步写了 global，同值去重后只剩 1 个候选
+    assert.deepEqual(
+      settingsRepo.getLastImportDirectoryCandidates(db, 'template'),
+      ['/tmp/template']
+    );
+
+    settingsRepo.setLastImportDirectory(db, 'bank-statement-process', '/tmp/bank');
+    // template scoped 仍在，global 已被 bank 覆盖 → 两个候选按 scoped → global 排序
+    assert.deepEqual(
+      settingsRepo.getLastImportDirectoryCandidates(db, 'template'),
+      ['/tmp/template', '/tmp/bank']
+    );
+    // 未知 scope 只有 global 兜底
+    assert.deepEqual(
+      settingsRepo.getLastImportDirectoryCandidates(db, 'unknown-scope'),
+      ['/tmp/bank']
+    );
+  });
 });
 
 // ========================================================================

@@ -3480,7 +3480,7 @@ function registerAppHandlers() {
 
   trackedIpcHandle('scenarios:import-bundle', '银行对账单处理', '场景管理', async () => {
     try {
-      const choice = await showImportOpenDialog('bank-statement-process', {
+      const choice = await showImportOpenDialog('bank-statement-process-bundle', {
         title: '导入场景模板文件',
         properties: ['openFile'],
         filters: [{ name: 'JSON', extensions: ['json'] }]
@@ -5956,7 +5956,7 @@ function registerTemplateHandlers() {
       });
     }
 
-    const result = await showImportOpenDialog('template', {
+    const result = await showImportOpenDialog('template-bundle', {
       properties: ['openFile'],
       filters: [
         {

@@ -398,16 +398,30 @@ function buildLastImportDirectoryKey(scope) {
   return s ? `${LAST_IMPORT_DIRECTORY_PREFIX}${s}` : LAST_IMPORT_DIRECTORY_GLOBAL_KEY;
 }
 
+// 候选目录序列：scoped 优先、global 兜底（去重）。调用方逐个做存在性校验，
+// scoped 目录已被删除而 global 仍有效时才能回落到 global
+function getLastImportDirectoryCandidates(db, scope = '') {
+  const candidates = [];
+  const scopedKey = buildLastImportDirectoryKey(scope);
+  if (scopedKey !== LAST_IMPORT_DIRECTORY_GLOBAL_KEY) {
+    const scoped = getSetting(db, scopedKey);
+    if (scoped) candidates.push(scoped);
+  }
+  const global = getSetting(db, LAST_IMPORT_DIRECTORY_GLOBAL_KEY);
+  if (global && !candidates.includes(global)) candidates.push(global);
+  return candidates;
+}
+
 function getLastImportDirectory(db, scope = '') {
-  const scoped = getSetting(db, buildLastImportDirectoryKey(scope));
-  if (scoped) return scoped;
-  return getSetting(db, LAST_IMPORT_DIRECTORY_GLOBAL_KEY);
+  const candidates = getLastImportDirectoryCandidates(db, scope);
+  return candidates.length > 0 ? candidates[0] : null;
 }
 
 function setLastImportDirectory(db, scope, directory) {
   const dir = String(directory || '').trim();
   if (!dir) return;
-  if (scope) setSetting(db, buildLastImportDirectoryKey(scope), dir);
+  const scopedKey = buildLastImportDirectoryKey(scope);
+  if (scopedKey !== LAST_IMPORT_DIRECTORY_GLOBAL_KEY) setSetting(db, scopedKey, dir);
   setSetting(db, LAST_IMPORT_DIRECTORY_GLOBAL_KEY, dir);
 }
 
@@ -514,6 +528,7 @@ module.exports = {
   WIN_ONEDRIVE_STORAGE_NOTICE_SHOWN_KEY,
   buildLastImportDirectoryKey,
   getLastImportDirectory,
+  getLastImportDirectoryCandidates,
   setLastImportDirectory,
   LAST_IMPORT_DIRECTORY_GLOBAL_KEY,
   LAST_IMPORT_DIRECTORY_PREFIX,
