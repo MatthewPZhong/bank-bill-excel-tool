@@ -21,7 +21,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { buildFundTransferReconRows } = require('../../../src/main-process/fund-transfer-recon-builder');
-const { FT_RECON_FIELD_MAP } = require('../../../src/constants/fund-transfer-recon-fields');
+const {
+  FT_RECON_FIELD_MAP,
+  MID_ALLOCATION_SUCCESS_STATUS
+} = require('../../../src/constants/fund-transfer-recon-fields');
 
 const M = FT_RECON_FIELD_MAP.mid; // 中台源列名（含全角括号）
 const R = FT_RECON_FIELD_MAP.recon; // 调拨对账单派生列名
@@ -31,6 +34,7 @@ const R = FT_RECON_FIELD_MAP.recon; // 调拨对账单派生列名
 function midRow(overrides = {}) {
   return Object.assign({
     [M.allocationNo]: 'AL1', // 调拨单号
+    [M.status]: MID_ALLOCATION_SUCCESS_STATUS, // 调拨状态：仅付款成功派生
     [M.txTime]: '2026-05-04', // 交易时间 → BillDate
     [M.channelSerial]: 'SER1', // 渠道流水号 → ReconID
     [M.payCard]: 'PAY-CARD-1', // 付款账户（卡号）
@@ -140,6 +144,7 @@ test.describe('buildFundTransferReconRows - 全角括号字段名读取（资金
     // 全角括号「（）」(U+FF08/U+FF09)，半角括号「()」(U+0028/U+0029) —— 若 builder 误用半角则取空。
     const fullWidthKeyRow = {
       调拨单号: 'AL-FW',
+      调拨状态: MID_ALLOCATION_SUCCESS_STATUS,
       交易时间: '2026-06-01',
       渠道流水号: 'SER-FW',
       '付款账户（卡号）': 'PAY-FULLWIDTH', // 全角括号
@@ -173,6 +178,7 @@ test.describe('buildFundTransferReconRows - 全角括号字段名读取（资金
   test('半角括号 key 不命中（取空）—— 反证 builder 读的是全角列', () => {
     const halfWidthKeyRow = {
       调拨单号: 'AL-HW',
+      调拨状态: MID_ALLOCATION_SUCCESS_STATUS,
       交易时间: '2026-06-02',
       渠道流水号: 'SER-HW',
       '付款账户(卡号)': 'PAY-HALFWIDTH', // 半角括号 ()
@@ -204,13 +210,14 @@ test.describe('buildFundTransferReconRows - 空 / 非对象行跳过 + 多行守
   });
 
   test('入参非数组（null / undefined / 对象）→ 防御为空，不崩', () => {
-    assert.deepEqual(buildFundTransferReconRows(null), { rows: [], total: 0 });
-    assert.deepEqual(buildFundTransferReconRows(undefined), { rows: [], total: 0 });
-    assert.deepEqual(buildFundTransferReconRows({}), { rows: [], total: 0 });
+    const empty = { rows: [], total: 0, sourceTotal: 0, skippedStatusCount: 0 };
+    assert.deepEqual(buildFundTransferReconRows(null), empty);
+    assert.deepEqual(buildFundTransferReconRows(undefined), empty);
+    assert.deepEqual(buildFundTransferReconRows({}), empty);
   });
 
   test('空数组 → 空结果', () => {
-    assert.deepEqual(buildFundTransferReconRows([]), { rows: [], total: 0 });
+    assert.deepEqual(buildFundTransferReconRows([]), { rows: [], total: 0, sourceTotal: 0, skippedStatusCount: 0 });
   });
 
   test('⑥ 多行输入：total = 行数 × 2', () => {
@@ -235,6 +242,59 @@ test.describe('buildFundTransferReconRows - 空 / 非对象行跳过 + 多行守
     const outRow = outRowOf(out);
     assert.equal(inRow[R.amount], '100'); // number 100 → '100'
     assert.equal(outRow[R.amount], '90');
+  });
+});
+
+test.describe('buildFundTransferReconRows - 调拨状态过滤（v3.0.13）', () => {
+  test('调拨状态=付款成功 的一行生成 2 行', () => {
+    const out = buildFundTransferReconRows([midRow({ [M.status]: '付款成功' })]);
+    assert.equal(out.total, 2);
+    assert.equal(out.sourceTotal, 1);
+    assert.equal(out.skippedStatusCount, 0);
+    assert.equal(out.rows.length, 2);
+  });
+
+  test('处理中 / 失败 / 空值 不生成', () => {
+    const out = buildFundTransferReconRows([
+      midRow({ [M.status]: '处理中' }),
+      midRow({ [M.status]: '失败' }),
+      midRow({ [M.status]: '' })
+    ]);
+    assert.equal(out.total, 0);
+    assert.equal(out.rows.length, 0);
+    assert.equal(out.sourceTotal, 3);
+    assert.equal(out.skippedStatusCount, 3);
+  });
+
+  test('混合 3 行，其中 2 行付款成功，输出 4 行', () => {
+    const out = buildFundTransferReconRows([
+      midRow({ [M.allocationNo]: 'AL-OK-1', [M.status]: '付款成功' }),
+      midRow({ [M.allocationNo]: 'AL-SKIP', [M.status]: '失败' }),
+      midRow({ [M.allocationNo]: 'AL-OK-2', [M.status]: '付款成功' })
+    ]);
+    assert.equal(out.total, 4);
+    assert.equal(out.rows.length, 4);
+    assert.equal(out.sourceTotal, 3);
+    assert.equal(out.skippedStatusCount, 1);
+    assert.deepEqual(out.rows.map((r) => r[R.allocationNo]), ['AL-OK-1', 'AL-OK-1', 'AL-OK-2', 'AL-OK-2']);
+  });
+
+  test('状态值前后空格 trim 后识别成功', () => {
+    const out = buildFundTransferReconRows([midRow({ [M.status]: '  付款成功  ' })]);
+    assert.equal(out.total, 2);
+    assert.equal(out.skippedStatusCount, 0);
+  });
+
+  test('原字段映射不变：in 行 big_account 来自收款账户，out 行来自付款账户', () => {
+    const out = buildFundTransferReconRows([
+      midRow({
+        [M.status]: '付款成功',
+        [M.payCard]: 'PAY-UNCHANGED',
+        [M.payeeCard]: 'RECV-UNCHANGED'
+      })
+    ]);
+    assert.equal(inRowOf(out)[R.bigAccount], 'RECV-UNCHANGED');
+    assert.equal(outRowOf(out)[R.bigAccount], 'PAY-UNCHANGED');
   });
 });
 

@@ -446,6 +446,7 @@ test.describe('rebuildFundTransferReconDerivation —— 调拨对账单派生�
   function midRow(overrides = {}) {
     const base = {
       [M.allocationNo]: 'ALLOC-1',
+      [M.status]: '付款成功',
       [M.txTime]: '2026-05-04',
       [M.channelSerial]: 'SERIAL-1',
       [M.payCard]: 'PAY-CARD-1',

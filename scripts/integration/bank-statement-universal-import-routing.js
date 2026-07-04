@@ -82,7 +82,7 @@ function writeDispatchFile(filePath) {
   const headers = sig.expectedHeaders;
   const dataRow = headers.map((h) => {
     if (h === '调拨单号') return 'DSP-1';
-    if (h === '调拨状态') return '成功';
+    if (h === '调拨状态') return '付款成功';
     if (h === '交易时间') return '2026-06-01 10:00:00';
     return 'x';
   });

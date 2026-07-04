@@ -7,7 +7,10 @@
 //   匹配推迟到需求2（r5-fund-transfer-recon-backfill）/ 需求3（dbs-charge-fund-check）。
 // 字段名一律经 FT_RECON_FIELD_MAP 常量取，绝不手敲（全角括号漂移 = 大账号全空，资金红线）。
 
-const { FT_RECON_FIELD_MAP } = require('../constants/fund-transfer-recon-fields');
+const {
+  FT_RECON_FIELD_MAP,
+  MID_ALLOCATION_SUCCESS_STATUS
+} = require('../constants/fund-transfer-recon-fields');
 const { normalizeCellValue } = require('./scenario-engines/engine-utils');
 
 const M = FT_RECON_FIELD_MAP.mid;
@@ -23,7 +26,8 @@ const R = FT_RECON_FIELD_MAP.recon;
  *   键值口径须与本函数一致（均经 normalizeCellValue；map 由 database.getFundTransferAccountMappingMap 提供，
  *   与 R5s2-recon / DBS-Charge R3.5 引擎读的派生表同一真值源）。缺省 / 非 Map → 空 Map（全 passthrough，
  *   映射表为空＝字节级零变化）。
- * @returns {{ rows: Array<Object>, total: number }} rows 按「每单 in 行后接 out 行」顺序展开（total = 行数×2）
+ * @returns {{ rows: Array<Object>, total: number, sourceTotal: number, skippedStatusCount: number }}
+ *   rows 按「每单 in 行后接 out 行」顺序展开（total = 付款成功行数×2）。
  */
 function buildFundTransferReconRows(midRows, options = {}) {
   const src = Array.isArray(midRows) ? midRows : [];
@@ -33,8 +37,15 @@ function buildFundTransferReconRows(midRows, options = {}) {
   const accountMappingMap =
     options && options.accountMappingMap instanceof Map ? options.accountMappingMap : new Map();
   const rows = [];
+  let skippedStatusCount = 0;
   for (const m of src) {
     if (!m || typeof m !== 'object') continue;
+
+    const status = normalizeCellValue(m[M.status]);
+    if (status !== MID_ALLOCATION_SUCCESS_STATUS) {
+      skippedStatusCount += 1;
+      continue;
+    }
 
     // 公共字段（in / out 两行共用；normalizeCellValue 统一 trim + String 化）
     const payAccount = normalizeCellValue(m[M.payCard]); // 付款账户（卡号）
@@ -71,7 +82,12 @@ function buildFundTransferReconRows(midRows, options = {}) {
       [R.bigAccount]: accountMappingMap.get(payAccount) ?? payAccount
     });
   }
-  return { rows, total: rows.length };
+  return {
+    rows,
+    total: rows.length,
+    sourceTotal: src.length,
+    skippedStatusCount
+  };
 }
 
 module.exports = {

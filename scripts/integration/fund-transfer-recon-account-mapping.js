@@ -27,7 +27,10 @@ const { rebuildFundTransferReconDerivation } = require('../../src/main-process/l
 const {
   runRound5FundTransferReconBackfill
 } = require('../../src/main-process/scenario-engines/r5-fund-transfer-recon-backfill');
-const { FT_RECON_FIELD_MAP } = require('../../src/constants/fund-transfer-recon-fields');
+const {
+  FT_RECON_FIELD_MAP,
+  MID_ALLOCATION_SUCCESS_STATUS
+} = require('../../src/constants/fund-transfer-recon-fields');
 
 const M = FT_RECON_FIELD_MAP.mid;
 const R = FT_RECON_FIELD_MAP.recon;
@@ -49,6 +52,7 @@ function assertTrue(cond, label) {
 function midRow() {
   return {
     [M.allocationNo]: 'ALLOC-1',
+    [M.status]: MID_ALLOCATION_SUCCESS_STATUS,
     [M.txTime]: '2026-05-04', // → BillDate（与银行同日 → R5s2-recon Phase1 命中）
     [M.channelSerial]: 'RECON-1', // → ReconID（in/out 共用，回填来源）
     [M.payCard]: 'MID-PAY-002', // out big_account 源（原始付款账号）
