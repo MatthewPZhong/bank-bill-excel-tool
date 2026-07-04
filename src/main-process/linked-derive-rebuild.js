@@ -269,7 +269,7 @@ function rebuildFxBocDerivation(deps, ctx = {}) {
 // deps = { database, buildFundTransferReconRows }（均为 main.js 现有 require，原样透传）。
 //
 // 返回 { fundTransferReconDerive }，仿 admDerive 形态：
-//   成功 → { created:true, total }（total = 派生行数 = mid 行数×2）
+//   成功 → { created:true, total }（total = 派生行数 = 付款成功 mid 行数×2）
 //   失败 → { created:false, error }
 function rebuildFundTransferReconDerivation(deps) {
   const { database, buildFundTransferReconRows } = deps;
@@ -285,12 +285,24 @@ function rebuildFundTransferReconDerivation(deps) {
       typeof database.getFundTransferAccountMappingMap === 'function'
         ? (database.getFundTransferAccountMappingMap() || new Map())
         : new Map();
-    const { rows } = buildFundTransferReconRows(midRows, { accountMappingMap });
+    const {
+      rows,
+      sourceTotal = 0,
+      skippedStatusCount = 0
+    } = buildFundTransferReconRows(midRows, { accountMappingMap });
     database.replaceFundTransferReconRows(rows);
     fundTransferReconDerive = {
       created: true,
       total: rows.length
     };
+    if (sourceTotal > 0 || skippedStatusCount > 0) {
+      fundTransferReconDerive.sourceTotal = sourceTotal;
+      fundTransferReconDerive.skippedStatusCount = skippedStatusCount;
+    }
+    if (sourceTotal > 0 && rows.length === 0 && skippedStatusCount > 0) {
+      fundTransferReconDerive.warning =
+        `中台调拨订单共 ${sourceTotal} 行，但没有「调拨状态=付款成功」的数据，未生成调拨对账单。请确认中台导出状态字段。`;
+    }
   } catch (ftrErr) {
     // 派生失败不阻断 mid-allocation 导入本身（已落库成功）；记 created:false 供前端提示。
     fundTransferReconDerive = {

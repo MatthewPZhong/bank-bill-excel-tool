@@ -498,6 +498,26 @@ test.describe('rebuildFundTransferReconDerivation —— 调拨对账单派生�
     assert.equal(ret.fundTransferReconDerive.total, 0);
   });
 
+  test('mid 有数据但全部非付款成功 → 派生空表且返回状态过滤提醒', () => {
+    let replacedRows = null;
+    const database = {
+      readLinkedTableRows: () => [
+        midRow({ [M.status]: '失败' }),
+        midRow({ [M.status]: '处理中' })
+      ],
+      replaceFundTransferReconRows: (rows) => { replacedRows = rows; return { rowCount: rows.length }; }
+    };
+
+    const ret = rebuildFundTransferReconDerivation({ database, buildFundTransferReconRows });
+
+    assert.deepEqual(replacedRows, [], '全部非付款成功 → replaceFundTransferReconRows([])');
+    assert.equal(ret.fundTransferReconDerive.created, true);
+    assert.equal(ret.fundTransferReconDerive.total, 0);
+    assert.equal(ret.fundTransferReconDerive.sourceTotal, 2);
+    assert.equal(ret.fundTransferReconDerive.skippedStatusCount, 2);
+    assert.match(ret.fundTransferReconDerive.warning, /没有「调拨状态=付款成功」的数据/);
+  });
+
   test('readLinkedTableRows 抛错 → created:false + error（隔离，不向外抛）', () => {
     const database = {
       readLinkedTableRows: () => { throw new Error('mid-read-fail'); },
