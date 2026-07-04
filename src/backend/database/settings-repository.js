@@ -382,6 +382,8 @@ function setAcquiringBillRawJsonRetentionDays(db, days) {
 //   值语义：'1' = 已提示过；null / 其它 = 未提示（hasShownWinOneDriveStorageNotice 仅判 === '1'）。
 //   范式沿用本仓既有单键 get/set（不走 settings UI；无范围校验，仅布尔语义）。
 const WIN_ONEDRIVE_STORAGE_NOTICE_SHOWN_KEY = 'win_onedrive_storage_notice_shown';
+const LAST_IMPORT_DIRECTORY_GLOBAL_KEY = 'last_import_directory';
+const LAST_IMPORT_DIRECTORY_PREFIX = 'last_import_directory:';
 
 function hasShownWinOneDriveStorageNotice(db) {
   return getSetting(db, WIN_ONEDRIVE_STORAGE_NOTICE_SHOWN_KEY) === '1';
@@ -389,6 +391,38 @@ function hasShownWinOneDriveStorageNotice(db) {
 
 function markWinOneDriveStorageNoticeShown(db) {
   setSetting(db, WIN_ONEDRIVE_STORAGE_NOTICE_SHOWN_KEY, '1');
+}
+
+function buildLastImportDirectoryKey(scope) {
+  const s = String(scope || '').trim();
+  return s ? `${LAST_IMPORT_DIRECTORY_PREFIX}${s}` : LAST_IMPORT_DIRECTORY_GLOBAL_KEY;
+}
+
+// 候选目录序列：scoped 优先、global 兜底（去重）。调用方逐个做存在性校验，
+// scoped 目录已被删除而 global 仍有效时才能回落到 global
+function getLastImportDirectoryCandidates(db, scope = '') {
+  const candidates = [];
+  const scopedKey = buildLastImportDirectoryKey(scope);
+  if (scopedKey !== LAST_IMPORT_DIRECTORY_GLOBAL_KEY) {
+    const scoped = getSetting(db, scopedKey);
+    if (scoped) candidates.push(scoped);
+  }
+  const global = getSetting(db, LAST_IMPORT_DIRECTORY_GLOBAL_KEY);
+  if (global && !candidates.includes(global)) candidates.push(global);
+  return candidates;
+}
+
+function getLastImportDirectory(db, scope = '') {
+  const candidates = getLastImportDirectoryCandidates(db, scope);
+  return candidates.length > 0 ? candidates[0] : null;
+}
+
+function setLastImportDirectory(db, scope, directory) {
+  const dir = String(directory || '').trim();
+  if (!dir) return;
+  const scopedKey = buildLastImportDirectoryKey(scope);
+  if (scopedKey !== LAST_IMPORT_DIRECTORY_GLOBAL_KEY) setSetting(db, scopedKey, dir);
+  setSetting(db, LAST_IMPORT_DIRECTORY_GLOBAL_KEY, dir);
 }
 
 function listAccountMappings(db, templateId) {
@@ -492,4 +526,10 @@ module.exports = {
   hasShownWinOneDriveStorageNotice,
   markWinOneDriveStorageNoticeShown,
   WIN_ONEDRIVE_STORAGE_NOTICE_SHOWN_KEY,
+  buildLastImportDirectoryKey,
+  getLastImportDirectory,
+  getLastImportDirectoryCandidates,
+  setLastImportDirectory,
+  LAST_IMPORT_DIRECTORY_GLOBAL_KEY,
+  LAST_IMPORT_DIRECTORY_PREFIX,
 };
