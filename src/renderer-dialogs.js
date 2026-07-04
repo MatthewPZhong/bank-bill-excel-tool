@@ -6692,9 +6692,13 @@
         const ftReconHit = list.find((r) => r && r.tableKey === 'mid-allocation' && r.status === 'ok'
           && r.fundTransferReconDerive && r.fundTransferReconDerive.created);
         if (ftReconHit) {
-          const ftTotal = Number(ftReconHit.fundTransferReconDerive.total) || 0;
+          const derive = ftReconHit.fundTransferReconDerive || {};
+          const ftTotal = Number(derive.total) || 0;
           if (ftTotal > 0) {
             lines.push(`已生成 <b>${ftTotal}</b> 条调拨对账单（FundTransfer-in/out）`);
+          }
+          if (derive.warning) {
+            lines.push(`<b>调拨对账单提醒</b>：${escapeHtml(derive.warning)}`);
           }
         }
         return lines.join('<br/><br/>');

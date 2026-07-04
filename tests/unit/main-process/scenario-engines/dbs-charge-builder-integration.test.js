@@ -23,7 +23,10 @@ const assert = require('node:assert/strict');
 
 const { buildFundTransferReconRows } = require('../../../../src/main-process/fund-transfer-recon-builder');
 const { runDbsChargeFundCheck } = require('../../../../src/main-process/scenario-engines/dbs-charge-fund-check');
-const { FT_RECON_FIELD_MAP } = require('../../../../src/constants/fund-transfer-recon-fields');
+const {
+  FT_RECON_FIELD_MAP,
+  MID_ALLOCATION_SUCCESS_STATUS
+} = require('../../../../src/constants/fund-transfer-recon-fields');
 
 const M = FT_RECON_FIELD_MAP.mid;   // 中台调拨订单源列（含全角括号）
 const FT_IN = FT_RECON_FIELD_MAP.FUND_TYPE_IN;   // 'FundTransfer-in'
@@ -36,6 +39,7 @@ const OPTIONS = { config: { bankChannel: 'DBS', dispatchChannelValue: 'DBS', set
 function midRow(overrides = {}) {
   return Object.assign({
     [M.allocationNo]: 'AL1',
+    [M.status]: MID_ALLOCATION_SUCCESS_STATUS,
     [M.txTime]: '2026-06-10',
     [M.channelSerial]: 'SER1',     // 渠道流水号 → ReconID（in/out 两行同值）
     [M.payCard]: 'PAY-CARD',       // 付款账户（卡号）→ out 行 big_account

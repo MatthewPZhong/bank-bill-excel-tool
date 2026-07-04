@@ -446,6 +446,7 @@ test.describe('rebuildFundTransferReconDerivation —— 调拨对账单派生�
   function midRow(overrides = {}) {
     const base = {
       [M.allocationNo]: 'ALLOC-1',
+      [M.status]: '付款成功',
       [M.txTime]: '2026-05-04',
       [M.channelSerial]: 'SERIAL-1',
       [M.payCard]: 'PAY-CARD-1',
@@ -495,6 +496,54 @@ test.describe('rebuildFundTransferReconDerivation —— 调拨对账单派生�
     assert.deepEqual(replacedRows, [], '空 mid → replaceFundTransferReconRows([]) 重建空表');
     assert.equal(ret.fundTransferReconDerive.created, true);
     assert.equal(ret.fundTransferReconDerive.total, 0);
+  });
+
+  test('mid 有数据但全部非付款成功 → 派生空表且返回状态过滤提醒', () => {
+    let replacedRows = null;
+    const database = {
+      readLinkedTableRows: () => [
+        midRow({ [M.status]: '成功' }),
+        midRow({ [M.status]: '失败' }),
+        midRow({ [M.status]: '处理中' })
+      ],
+      replaceFundTransferReconRows: (rows) => { replacedRows = rows; return { rowCount: rows.length }; }
+    };
+
+    const ret = rebuildFundTransferReconDerivation({ database, buildFundTransferReconRows });
+
+    assert.deepEqual(replacedRows, [], '全部非付款成功 → replaceFundTransferReconRows([])');
+    assert.equal(ret.fundTransferReconDerive.created, true);
+    assert.equal(ret.fundTransferReconDerive.total, 0);
+    assert.equal(ret.fundTransferReconDerive.sourceTotal, 3);
+    assert.equal(ret.fundTransferReconDerive.skippedStatusCount, 3);
+    assert.match(ret.fundTransferReconDerive.warning, /没有「调拨状态=付款成功」的数据/);
+  });
+
+  test('mid 混合状态 → 只派生付款成功行，非成功行不进入隐藏调拨对账单', () => {
+    let replacedRows = null;
+    const database = {
+      readLinkedTableRows: () => [
+        midRow({ [M.allocationNo]: 'OK-1', [M.status]: '付款成功' }),
+        midRow({ [M.allocationNo]: 'TEXT-SUCCESS', [M.status]: '成功' }),
+        midRow({ [M.allocationNo]: 'OK-2', [M.status]: '  付款成功  ' }),
+        midRow({ [M.allocationNo]: 'FAIL-1', [M.status]: '失败' }),
+        midRow({ [M.allocationNo]: 'PENDING-1', [M.status]: '处理中' })
+      ],
+      replaceFundTransferReconRows: (rows) => { replacedRows = rows; return { rowCount: rows.length }; }
+    };
+
+    const ret = rebuildFundTransferReconDerivation({ database, buildFundTransferReconRows });
+
+    assert.equal(ret.fundTransferReconDerive.created, true);
+    assert.equal(ret.fundTransferReconDerive.total, 4);
+    assert.equal(ret.fundTransferReconDerive.sourceTotal, 5);
+    assert.equal(ret.fundTransferReconDerive.skippedStatusCount, 3);
+    assert.equal(ret.fundTransferReconDerive.warning, undefined, '仍有付款成功行时不提示全过滤 warning');
+    assert.deepEqual(
+      replacedRows.map((row) => row[R.allocationNo]),
+      ['OK-1', 'OK-1', 'OK-2', 'OK-2'],
+      '只有付款成功和 trim 后付款成功的行各拆 in/out 两行'
+    );
   });
 
   test('readLinkedTableRows 抛错 → created:false + error（隔离，不向外抛）', () => {

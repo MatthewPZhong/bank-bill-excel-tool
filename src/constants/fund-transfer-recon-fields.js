@@ -19,6 +19,7 @@ const FT_RECON_FIELD_MAP = Object.freeze({
   // —— 中台调拨订单源列（mid-allocation，readLinkedTableRows('mid-allocation') 还原的中文真实表头）——
   mid: Object.freeze({
     allocationNo: '调拨单号',
+    status: '调拨状态',
     txTime: '交易时间',
     channelSerial: '渠道流水号',
     payCard: '付款账户（卡号）', // 全角括号；out 行 big_account 来源
@@ -49,6 +50,8 @@ const FT_RECON_FIELD_MAP = Object.freeze({
   FUND_TYPE_OUT: 'FundTransfer-out'
 });
 
+const MID_ALLOCATION_SUCCESS_STATUS = '付款成功';
+
 // 启动期断言①：mid 源列全部 ∈ ZHONGTAI_DISPATCH_ORDER_SIGNATURE.expectedHeaders
 //   （防全角括号被手敲成半角 / 列名漂移 → 派生取空 → big_account 取空 → 需求2/3 引擎会误命中
 //    MerchantId 也为空的银行行（valuesEqual('','')===true），写错 ReconciliationId，资金红线；
@@ -70,5 +73,6 @@ if (__emptyRecon.length > 0) {
 }
 
 module.exports = {
-  FT_RECON_FIELD_MAP
+  FT_RECON_FIELD_MAP,
+  MID_ALLOCATION_SUCCESS_STATUS
 };
