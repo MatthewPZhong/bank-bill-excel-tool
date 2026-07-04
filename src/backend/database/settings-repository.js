@@ -382,6 +382,8 @@ function setAcquiringBillRawJsonRetentionDays(db, days) {
 //   值语义：'1' = 已提示过；null / 其它 = 未提示（hasShownWinOneDriveStorageNotice 仅判 === '1'）。
 //   范式沿用本仓既有单键 get/set（不走 settings UI；无范围校验，仅布尔语义）。
 const WIN_ONEDRIVE_STORAGE_NOTICE_SHOWN_KEY = 'win_onedrive_storage_notice_shown';
+const LAST_IMPORT_DIRECTORY_GLOBAL_KEY = 'last_import_directory';
+const LAST_IMPORT_DIRECTORY_PREFIX = 'last_import_directory:';
 
 function hasShownWinOneDriveStorageNotice(db) {
   return getSetting(db, WIN_ONEDRIVE_STORAGE_NOTICE_SHOWN_KEY) === '1';
@@ -389,6 +391,24 @@ function hasShownWinOneDriveStorageNotice(db) {
 
 function markWinOneDriveStorageNoticeShown(db) {
   setSetting(db, WIN_ONEDRIVE_STORAGE_NOTICE_SHOWN_KEY, '1');
+}
+
+function buildLastImportDirectoryKey(scope) {
+  const s = String(scope || '').trim();
+  return s ? `${LAST_IMPORT_DIRECTORY_PREFIX}${s}` : LAST_IMPORT_DIRECTORY_GLOBAL_KEY;
+}
+
+function getLastImportDirectory(db, scope = '') {
+  const scoped = getSetting(db, buildLastImportDirectoryKey(scope));
+  if (scoped) return scoped;
+  return getSetting(db, LAST_IMPORT_DIRECTORY_GLOBAL_KEY);
+}
+
+function setLastImportDirectory(db, scope, directory) {
+  const dir = String(directory || '').trim();
+  if (!dir) return;
+  if (scope) setSetting(db, buildLastImportDirectoryKey(scope), dir);
+  setSetting(db, LAST_IMPORT_DIRECTORY_GLOBAL_KEY, dir);
 }
 
 function listAccountMappings(db, templateId) {
@@ -492,4 +512,9 @@ module.exports = {
   hasShownWinOneDriveStorageNotice,
   markWinOneDriveStorageNoticeShown,
   WIN_ONEDRIVE_STORAGE_NOTICE_SHOWN_KEY,
+  buildLastImportDirectoryKey,
+  getLastImportDirectory,
+  setLastImportDirectory,
+  LAST_IMPORT_DIRECTORY_GLOBAL_KEY,
+  LAST_IMPORT_DIRECTORY_PREFIX,
 };

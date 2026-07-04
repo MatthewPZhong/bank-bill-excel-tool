@@ -84,6 +84,37 @@ test.describe('getSetting / setSetting', () => {
 });
 
 // ========================================================================
+// LastImportDirectory
+// ========================================================================
+
+test.describe('getLastImportDirectory / setLastImportDirectory', () => {
+  test('build key：空 scope 使用 global，非空 scope 加前缀', () => {
+    assert.equal(settingsRepo.buildLastImportDirectoryKey(''), settingsRepo.LAST_IMPORT_DIRECTORY_GLOBAL_KEY);
+    assert.equal(settingsRepo.buildLastImportDirectoryKey('bank-statement-process'), 'last_import_directory:bank-statement-process');
+    assert.equal(settingsRepo.buildLastImportDirectoryKey('  template  '), 'last_import_directory:template');
+  });
+
+  test('未设置时返回 null', () => {
+    assert.equal(settingsRepo.getLastImportDirectory(db, 'bank-statement-process'), null);
+  });
+
+  test('同 scope 优先读 scoped，同时写入 global fallback', () => {
+    settingsRepo.setLastImportDirectory(db, 'template', '/tmp/template');
+    settingsRepo.setLastImportDirectory(db, 'bank-statement-process', '/tmp/bank');
+
+    assert.equal(settingsRepo.getLastImportDirectory(db, 'template'), '/tmp/template');
+    assert.equal(settingsRepo.getLastImportDirectory(db, 'bank-statement-process'), '/tmp/bank');
+    assert.equal(settingsRepo.getLastImportDirectory(db, 'unknown-scope'), '/tmp/bank');
+  });
+
+  test('空目录不写入', () => {
+    settingsRepo.setLastImportDirectory(db, 'template', '/tmp/template');
+    settingsRepo.setLastImportDirectory(db, 'template', '   ');
+    assert.equal(settingsRepo.getLastImportDirectory(db, 'template'), '/tmp/template');
+  });
+});
+
+// ========================================================================
 // getEnumConfig / setEnumConfig
 // ========================================================================
 

@@ -313,6 +313,9 @@ const {
   assembleMonthlyBalance,
   toBalanceRows
 } = require('./main-process/monthly-balance');
+const {
+  showImportOpenDialog: showRememberedImportOpenDialog
+} = require('./main-process/import-dialog-state');
 
 if (process.env.APP_USER_DATA_DIR) {
   app.setPath('userData', process.env.APP_USER_DATA_DIR);
@@ -387,6 +390,16 @@ let startupMetricsReported = false;
 // v1.5.3 R2：自有账号迁移失败消息（D15）。null = 无失败；字符串 = 启动时发生失败，
 // renderer 首次 app:get-info 时读取并用 error tone 显示状态栏告警
 let lastOwnAccountsMigrationError = null;
+
+function showImportOpenDialog(scope, options) {
+  return showRememberedImportOpenDialog({
+    dialog,
+    browserWindow: mainWindow,
+    db: database && database.db,
+    scope,
+    options
+  });
+}
 
 // v2.1.6 fix3 → fix9 → fix10：收单单据币种校验模块的通用 operation lock
 // 提到 module-level 是为 fix10 启动钩子（app.whenReady 链中 setImmediate 调 cleanupOrphanData）
@@ -3467,7 +3480,7 @@ function registerAppHandlers() {
 
   trackedIpcHandle('scenarios:import-bundle', '银行对账单处理', '场景管理', async () => {
     try {
-      const choice = await dialog.showOpenDialog(mainWindow, {
+      const choice = await showImportOpenDialog('bank-statement-process', {
         title: '导入场景模板文件',
         properties: ['openFile'],
         filters: [{ name: 'JSON', extensions: ['json'] }]
@@ -3589,7 +3602,7 @@ function registerAppHandlers() {
   // v2.0.0-beta.3 PR #32a：银行对账单处理模块 IO + 调度 IPC
   trackedIpcHandle('bank-statement:import', '银行对账单处理', '导入文件', async () => {
     try {
-      const choice = await dialog.showOpenDialog(mainWindow, {
+      const choice = await showImportOpenDialog('bank-statement-process', {
         title: '选择银行对账单文件',
         properties: ['openFile'],
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
@@ -3648,7 +3661,7 @@ function registerAppHandlers() {
 
   trackedIpcHandle('gateway-recon:import', '银行对账单处理', '导入文件', async () => {
     try {
-      const choice = await dialog.showOpenDialog(mainWindow, {
+      const choice = await showImportOpenDialog('bank-statement-process', {
         title: '选择资金对账不平结果表',
         properties: ['openFile'],
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
@@ -4302,7 +4315,7 @@ function registerAppHandlers() {
       // v2.1.0-beta.3 T9：renderer 传 subMode（'business' | 'gateway'，从 state.reconIdFixBillCategory 推导）
       const subMode = (payload && payload.subMode === 'gateway') ? 'gateway' : 'business';
       const dialogTitle = subMode === 'gateway' ? '选择网关对账文件' : '选择单据对账文件';
-      const choice = await dialog.showOpenDialog(mainWindow, {
+      const choice = await showImportOpenDialog('recon-id-fix', {
         title: dialogTitle,
         properties: ['openFile'],
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
@@ -5531,7 +5544,7 @@ function registerTemplateHandlers() {
   });
 
   trackedIpcHandle('template:import', '生成网银账单', '导入模板', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
+    const result = await showImportOpenDialog('template', {
       properties: ['openFile'],
       filters: templateFileDialogFilters()
     });
@@ -5943,7 +5956,7 @@ function registerTemplateHandlers() {
       });
     }
 
-    const result = await dialog.showOpenDialog(mainWindow, {
+    const result = await showImportOpenDialog('template', {
       properties: ['openFile'],
       filters: [
         {
@@ -8296,7 +8309,7 @@ function registerBigAccountHandlers() {
       });
     }
 
-    const result = await dialog.showOpenDialog(mainWindow, {
+    const result = await showImportOpenDialog('big-account', {
       properties: ['openFile'],
       filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
     });
@@ -8634,7 +8647,7 @@ async function handleFilenameMappingImport() {
     clearPendingBigAccountSelection();
 
     // ===== 步骤 0：文件选择 =====
-    const pickResult = await dialog.showOpenDialog(mainWindow, {
+    const pickResult = await showImportOpenDialog('statement-generator', {
       properties: ['openFile', 'multiSelections'],
       filters: statementFileDialogFilters()
     });
@@ -9022,7 +9035,7 @@ function registerFileHandlers() {
         });
       }
 
-      const result = await dialog.showOpenDialog(mainWindow, {
+      const result = await showImportOpenDialog('statement-generator', {
         properties: ['openFile', 'multiSelections'],
         filters: statementFileDialogFilters()
       });
@@ -10798,7 +10811,7 @@ function registerNewAccountHandlers() {
   });
 
   ipcMain.handle('pending:import:pick-files', async () => {
-    const result = await dialog.showOpenDialog({
+    const result = await showImportOpenDialog('pending-reconciliation', {
       title: '选择 Pending 数据文件',
       filters: [{ name: 'Excel', extensions: ['xlsx'] }],
       properties: ['openFile', 'multiSelections']
@@ -10957,7 +10970,7 @@ function registerNewAccountHandlers() {
   // ============================================================
 
   ipcMain.handle('pending:removed:pick-files', async () => {
-    const result = await dialog.showOpenDialog({
+    const result = await showImportOpenDialog('pending-reconciliation', {
       title: '选择移除归档 Pending 文件',
       filters: [{ name: 'Excel', extensions: ['xlsx'] }],
       properties: ['openFile', 'multiSelections']
@@ -11046,7 +11059,7 @@ function registerNewAccountHandlers() {
     if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
       return { status: 'error', message: 'yearMonth 格式错误（应为 YYYY-MM）' };
     }
-    const res = await dialog.showOpenDialog({
+    const res = await showImportOpenDialog('bank-bu-recon', {
       title: `Pending 数据管理文件（${yearMonth}）`,
       filters: [{ name: 'Excel', extensions: ['xlsx'] }],
       properties: ['openFile']
@@ -11062,7 +11075,7 @@ function registerNewAccountHandlers() {
     if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
       return { status: 'error', message: 'yearMonth 格式错误（应为 YYYY-MM）' };
     }
-    const res = await dialog.showOpenDialog({
+    const res = await showImportOpenDialog('bank-bu-recon', {
       title: `银行对账单文件（${yearMonth}）`,
       filters: [{ name: 'Excel', extensions: ['xlsx'] }],
       properties: ['openFile']
@@ -11260,7 +11273,7 @@ function registerNewAccountHandlers() {
   ipcMain.handle('bizOpRecon:import:pick-biz-op-file', async (_event, payload = {}) => {
     const { date } = payload || {};
     try {
-      const result = await dialog.showOpenDialog({
+      const result = await showImportOpenDialog('biz-op-recon', {
         title: `选择业务OP 文件（日期 ${date || ''}）`,
         properties: ['openFile'],
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
@@ -11280,7 +11293,7 @@ function registerNewAccountHandlers() {
   ipcMain.handle('bizOpRecon:import:pick-flow-file', async (_event, payload = {}) => {
     const { date } = payload || {};
     try {
-      const result = await dialog.showOpenDialog({
+      const result = await showImportOpenDialog('biz-op-recon', {
         title: `选择流水对账单 文件（日期 ${date || ''}，可多选）`,
         properties: ['openFile', 'multiSelections'],
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
@@ -11546,7 +11559,7 @@ function registerNewAccountHandlers() {
 
   // 多选流水 xlsx（仿 bankBuRecon:import:pick-* + pending pick-files 的 multiSelections）
   ipcMain.handle('vccOpCalc:import:pick-files', async () => {
-    const res = await dialog.showOpenDialog({
+    const res = await showImportOpenDialog('vcc-op-calc', {
       title: '选择流水对账单文件（可多选）',
       filters: [{ name: 'Excel', extensions: ['xlsx'] }],
       properties: ['openFile', 'multiSelections']
@@ -12071,7 +12084,7 @@ function registerNewAccountHandlers() {
     if (!opLock.acquired) return { status: 'failed', message: opLock.message };
     try {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
-    const res = await dialog.showOpenDialog({
+    const res = await showImportOpenDialog('linked-table', {
       title: '选择链接表文件（可多选）',
       properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
@@ -12236,7 +12249,7 @@ function registerNewAccountHandlers() {
       };
     })();
     try {
-    const choice = await dialog.showOpenDialog(mainWindow, {
+    const choice = await showImportOpenDialog('bank-statement-process', {
       title: '选择要批量导入的文件（可多选）',
       properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
@@ -12679,7 +12692,7 @@ function registerNewAccountHandlers() {
     }
 
     // 分支 1：弹 dialog 选文件
-    const res = await dialog.showOpenDialog({
+    const res = await showImportOpenDialog('acquiring-bill-currency', {
       title: isFlow ? `选择收单流水表（月份 ${monthKey}，可多选）` : `选择收单流水单据表（月份 ${monthKey}，可多选）`,
       filters: [{ name: 'Excel', extensions: ['xlsx'] }],
       properties: ['openFile', 'multiSelections']
@@ -13095,7 +13108,7 @@ function registerToolboxHandlers() {
   //   .csv/.xls 回退全量 readRows（不撞 OOM 的纯文本/小二进制路径，且流式引擎不支持二者）。不再 readRows 全量物化 + writeToolboxTempWorkbook。
   trackedIpcHandle('toolbox:merge', '工具箱', '合并表格', async () => {
     try {
-      const choice = await dialog.showOpenDialog(mainWindow, {
+      const choice = await showImportOpenDialog('toolbox', {
         title: '选择要合并的表格（多选，表头需完全一致）',
         properties: ['openFile', 'multiSelections'],
         filters: statementFileDialogFilters()
@@ -13167,7 +13180,7 @@ function registerToolboxHandlers() {
   //   .csv/.xls 回退全量 extractHeaders + readRows + computeValuesByField。返回契约 {status,sourceFilePath,headers,valuesByField} 不变。
   trackedIpcHandle('toolbox:split:read', '工具箱', '拆分表格', async () => {
     try {
-      const choice = await dialog.showOpenDialog(mainWindow, {
+      const choice = await showImportOpenDialog('toolbox', {
         title: '选择要拆分的表格',
         properties: ['openFile'],
         filters: statementFileDialogFilters()
