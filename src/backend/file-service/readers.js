@@ -82,12 +82,14 @@ function parseCsvText(content, { blankrows = false } = {}) {
 // v2.1.16 PR#61 F4：可选 sheetName —— 缺省 = 第一个 sheet（行为与历史完全一致）。
 //   传入 sheetName 时读指定 sheet（detector 多 sheet 扫描用）；sheet 不存在抛 FILE_READ。
 //   ⚠️ CSV 无 sheet 概念：传 sheetName 也忽略，仍解析整份 CSV（detector 对 CSV 走单次默认读取）。
-function readWorkbookRows(filePath, { blankrows = false, sheetName } = {}) {
+function readWorkbookRows(filePath, { blankrows = false, sheetName, maxRows = 0 } = {}) {
   ensureSupportedFile(filePath);
 
   if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
     throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
   }
+
+  const rowLimit = Number.isInteger(maxRows) && maxRows > 0 ? maxRows : 0;
 
   if (path.extname(filePath).toLowerCase() === '.csv') {
     try {
@@ -100,7 +102,8 @@ function readWorkbookRows(filePath, { blankrows = false, sheetName } = {}) {
         const content = raw[0] === 0xEF && raw[1] === 0xBB && raw[2] === 0xBF
           ? raw.subarray(3).toString('utf-8')
           : raw.toString('utf-8');
-        return parseCsvText(content, { blankrows });
+        const rows = parseCsvText(content, { blankrows });
+        return rowLimit > 0 ? rows.slice(0, rowLimit) : rows;
       }
       // 否则 fall through 到下方 XLSX.readFile
     } catch (error) {
@@ -115,7 +118,8 @@ function readWorkbookRows(filePath, { blankrows = false, sheetName } = {}) {
     const workbook = XLSX.readFile(filePath, {
       cellDates: false,
       dense: true,
-      raw: false
+      raw: false,
+      ...(rowLimit > 0 ? { sheetRows: rowLimit } : {})
     });
     // 缺省读第一个 sheet（历史行为）；指定 sheetName 时读该 sheet（detector 多 sheet 扫描）。
     const targetSheetName = sheetName != null && sheetName !== ''
@@ -131,11 +135,12 @@ function readWorkbookRows(filePath, { blankrows = false, sheetName } = {}) {
       // 指定 sheet 不存在（理论上 detector 只用 listSheetNames 返回的名字，不应发生）
       throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
     }
-    return XLSX.utils.sheet_to_json(sheet, {
+    const rows = XLSX.utils.sheet_to_json(sheet, {
       header: 1,
       blankrows,
       defval: ''
     });
+    return rowLimit > 0 ? rows.slice(0, rowLimit) : rows;
   } catch (error) {
     if (error instanceof FileValidationError) {
       throw error;
@@ -164,8 +169,8 @@ function isMemoryLimitError(error) {
   return /array buffer allocation failed|invalid (string|array) length|out of memory|heap (out of memory|limit)|cannot allocate|allocation failed/i.test(message);
 }
 
-function readRows(filePath, { blankrows = false } = {}) {
-  const rows = readWorkbookRows(filePath, { blankrows });
+function readRows(filePath, { blankrows = false, maxRows = 0 } = {}) {
+  const rows = readWorkbookRows(filePath, { blankrows, maxRows });
 
   if (!Array.isArray(rows) || rows.length === 0 || !rows.some(isRowMeaningful)) {
     throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');

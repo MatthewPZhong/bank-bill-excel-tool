@@ -316,6 +316,11 @@ const {
 const {
   showImportOpenDialog: showRememberedImportOpenDialog
 } = require('./main-process/import-dialog-state');
+const {
+  matchMerchantIds,
+  normalizeMaintainedBigAccounts,
+  resolveRecognizedBigAccount
+} = require('./main-process/big-account-recognition');
 
 if (process.env.APP_USER_DATA_DIR) {
   app.setPath('userData', process.env.APP_USER_DATA_DIR);
@@ -1171,22 +1176,6 @@ function identifyAccountBlocks(detailRows, options = {}) {
   return [];
 }
 
-function stripSpecialCharsForMatch(value) {
-  return String(value || '').replace(/[\s\-_()（）[\]【】]/g, '');
-}
-
-function matchMerchantIds(cellValue, merchantId) {
-  const a = normalizeCell(cellValue);
-  const b = normalizeCell(merchantId);
-  if (!a || !b) return 'none';
-  if (a === b) return 'exact';
-  const sa = stripSpecialCharsForMatch(a);
-  const sb = stripSpecialCharsForMatch(b);
-  if (sa && sb && sa === sb) return 'fuzzy';
-  if (sa && sb && (sa.includes(sb) || sb.includes(sa))) return 'fuzzy';
-  return 'none';
-}
-
 function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
   const normalizedExpected = (expectedSourceHeaders || [])
     .map((h) => normalizeCell(h))
@@ -1210,9 +1199,25 @@ function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
   return results;
 }
 
-function identifyAccountsFromFile({ filePath, detailRows, expectedSourceHeaders, allMerchantIds }) {
-  const rawRows = readRows(filePath, { blankrows: true });
-  const headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
+const BIG_ACCOUNT_RECOGNITION_SCAN_MAX_ROWS = 64;
+
+function readRowsForBigAccountRecognition(filePath) {
+  try {
+    return readRows(filePath, { blankrows: true, maxRows: BIG_ACCOUNT_RECOGNITION_SCAN_MAX_ROWS });
+  } catch (_headReadError) {
+    return readRows(filePath, { blankrows: true });
+  }
+}
+
+function identifyAccountsFromFile({ filePath, expectedSourceHeaders, allMerchantIds, allowSubstringMatch = true }) {
+  let rawRows = readRowsForBigAccountRecognition(filePath);
+  let headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
+
+  if (!headerRowNumbers.length && rawRows.length >= BIG_ACCOUNT_RECOGNITION_SCAN_MAX_ROWS) {
+    rawRows = readRows(filePath, { blankrows: true });
+    headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
+  }
+
   const isSingleAccount = headerRowNumbers.length <= 1;
   const identified = [];
 
@@ -1229,7 +1234,7 @@ function identifyAccountsFromFile({ filePath, detailRows, expectedSourceHeaders,
         const cellStr = normalizeCell(cell);
         if (!cellStr) continue;
         for (const mid of allMerchantIds) {
-          const result = matchMerchantIds(cellStr, mid);
+          const result = matchMerchantIds(cellStr, mid, { allowSubstring: allowSubstringMatch });
           if (result === 'exact') {
             bestMatch = mid;
             bestMatchType = 'exact';
@@ -1268,6 +1273,124 @@ function identifyAccountsFromFile({ filePath, detailRows, expectedSourceHeaders,
   }
 
   return { accounts: identified, isSingleAccount };
+}
+
+function isMultiBigAccountMapping(mappings = []) {
+  return (Array.isArray(mappings) ? mappings : []).some((mapping) => {
+    return normalizeCell(mapping && mapping.templateField) === 'MerchantId'
+      && normalizeCell(mapping && mapping.mappedField)
+        === `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`;
+  });
+}
+
+function uniqueNormalizedValues(values = []) {
+  return Array.from(new Set(
+    (Array.isArray(values) ? values : [])
+      .map((value) => normalizeCell(value))
+      .filter((value) => value !== '')
+  ));
+}
+
+function resolveDirectBigAccountRecognition({
+  fileEntries = [],
+  maintainedBigAccounts = [],
+  fallbackTemplateConfig,
+  templateName
+}) {
+  const expandedOptions = expandBigAccountConfigurations(maintainedBigAccounts);
+  const allMerchantIds = uniqueNormalizedValues(expandedOptions.map((item) => item.merchantId));
+  const selectedByEntry = [];
+  const templateConfigCache = new Map();
+
+  if (!allMerchantIds.length) {
+    return { status: 'ok', selectedBigAccount: null };
+  }
+
+  for (const entry of (Array.isArray(fileEntries) ? fileEntries : [])) {
+    const entryTemplateConfig = getEntryTemplateConfig({
+      entry,
+      fallbackTemplateConfig,
+      cache: templateConfigCache
+    });
+
+    if (!isMultiBigAccountMapping(entryTemplateConfig && entryTemplateConfig.exportMappings)) {
+      continue;
+    }
+
+    const fileName = path.basename(entry.filePath || '');
+    const fileResult = entry.skipDirectMerchantLookup
+      ? { accounts: [], isSingleAccount: false }
+      : identifyAccountsFromFile({
+          filePath: entry.filePath,
+          expectedSourceHeaders: entry.matchedHeaders || entryTemplateConfig.template?.headers || [],
+          allMerchantIds,
+          allowSubstringMatch: false
+        });
+    const identifiedMerchantIds = uniqueNormalizedValues(
+      (fileResult.accounts || []).map((account) => account.merchantId)
+    );
+
+    if (identifiedMerchantIds.length === 0) {
+      return resolveRecognizedBigAccount({
+        extractedMerchantId: '',
+        maintainedBigAccounts,
+        sourceFileName: fileName,
+        templateName
+      });
+    }
+
+    if (identifiedMerchantIds.length > 1) {
+      return {
+        status: 'needs-selection',
+        candidates: expandedOptions,
+        message: '识别到多个大账号，请选择本次使用的大账号 / 币种。',
+        detailLines: [
+          `文件名：${fileName || 'N/A'}`,
+          `识别值：${identifiedMerchantIds.join('、')}`,
+          `模板名：${normalizeCell(templateName) || 'N/A'}`
+        ]
+      };
+    }
+
+    const resolution = resolveRecognizedBigAccount({
+      extractedMerchantId: identifiedMerchantIds[0],
+      extractedCurrency: '',
+      maintainedBigAccounts,
+      sourceFileName: fileName,
+      templateName
+    });
+
+    if (resolution.status !== 'ok') {
+      return resolution;
+    }
+
+    selectedByEntry.push(resolution.selectedBigAccount);
+  }
+
+  if (!selectedByEntry.length) {
+    return { status: 'ok', selectedBigAccount: null };
+  }
+
+  const uniqueSelectedKeys = uniqueNormalizedValues(
+    selectedByEntry.map((item) => `${item.merchantId}\u0000${item.currency}`)
+  );
+
+  if (uniqueSelectedKeys.length > 1) {
+    return {
+      status: 'needs-selection',
+      candidates: expandedOptions,
+      message: '识别到多个大账号，请选择本次使用的大账号 / 币种。',
+      detailLines: [
+        `识别值：${selectedByEntry.map((item) => `${item.merchantId}/${item.currency}`).join('、')}`,
+        `模板名：${normalizeCell(templateName) || 'N/A'}`
+      ]
+    };
+  }
+
+  return {
+    status: 'ok',
+    selectedBigAccount: { ...selectedByEntry[0] }
+  };
 }
 
 function buildBigAccountSelectionRows(fileEntries = [], options = {}) {
@@ -1407,6 +1530,17 @@ function createErrorResult({
     errorReportReady: true,
     errorReportFileName: report.fileName
   };
+}
+
+function createBigAccountRecognitionErrorResult(resolution, context = {}) {
+  return createErrorResult({
+    step: '识别大账号',
+    message: resolution.message || '大账号识别失败，请检查导入文件',
+    errorCode: resolution.code || 'BIG_ACCOUNT_RECOGNITION_FAILED',
+    detailLines: Array.isArray(resolution.detailLines) ? resolution.detailLines : [],
+    context,
+    templateName: context.templateName || ''
+  });
 }
 
 function createWarningResult({
@@ -1551,31 +1685,7 @@ function getTemplateLibraryFilePath() {
 }
 
 function expandBigAccountConfigurations(bigAccounts = []) {
-  const expandedRows = [];
-
-  bigAccounts.forEach((item) => {
-    const merchantId = normalizeCell(item.merchantId);
-    const currencies = Array.from(
-      new Set(
-        (Array.isArray(item.currencies) ? item.currencies : [])
-          .map((value) => normalizeCell(value))
-          .filter((value) => value !== '')
-      )
-    );
-    // v1.5.3 R2：透传 accountNature 到展平行（写入 template_big_accounts 时入库）
-    const rawNature = typeof item.accountNature === 'string' ? item.accountNature.trim() : '';
-    const accountNature = rawNature === 'own' ? 'own' : 'client';
-
-    currencies.forEach((currency) => {
-      expandedRows.push({
-        merchantId,
-        currency,
-        accountNature
-      });
-    });
-  });
-
-  return expandedRows;
+  return normalizeMaintainedBigAccounts(bigAccounts);
 }
 
 function buildTemplateLibraryPayload() {
@@ -8838,9 +8948,63 @@ async function handleFilenameMappingImport() {
     }
 
     // ===== 步骤 8：边界 — bigAccountOptions.length <= 1 直接生成 =====
-    const selectedBigAccount = bigAccountOptions.length === 1
+    let selectedBigAccount = bigAccountOptions.length === 1
       ? { merchantId: bigAccountOptions[0].merchantId, currency: bigAccountOptions[0].currency }
       : null;
+
+    if (selectedBigAccount) {
+      const recognitionResult = resolveDirectBigAccountRecognition({
+        fileEntries: trimmedProvisionalEntries,
+        maintainedBigAccounts: aggregatedBigAccounts,
+        fallbackTemplateConfig: syntheticTemplateConfig,
+        templateName: virtualTemplateName
+      });
+
+      if (recognitionResult.status === 'failed') {
+        return createBigAccountRecognitionErrorResult(recognitionResult, {
+          templateId: FILENAME_MAPPING_TEMPLATE_ID,
+          templateName: virtualTemplateName,
+          inputFilePaths: selectionResult.filePaths
+        });
+      }
+
+      if (recognitionResult.status === 'needs-selection') {
+        const selectionRows = buildBigAccountSelectionRows(trimmedProvisionalEntries);
+        if (!selectionRows.length) {
+          return createErrorResult({
+            step: '导入网银明细文件',
+            message: '导入文件中没有账号存在交易数据',
+            errorCode: 'NO_TRANSACTION_DATA',
+            templateName: virtualTemplateName
+          });
+        }
+        const selectionRowsWithEmpty = buildBigAccountSelectionRows(trimmedProvisionalEntries, { includeEmptyBlocks: true });
+
+        rememberPendingBigAccountSelection({
+          templateId: FILENAME_MAPPING_TEMPLATE_ID,
+          template: syntheticTemplateConfig.template,
+          mappings: syntheticTemplateConfig.exportMappings,
+          orderedTargetFields: syntheticTemplateConfig.exportTargetFields,
+          inputFilePaths: selectionResult.filePaths,
+          bigAccounts: aggregatedBigAccounts,
+          fixedAssignments: [],
+          fileEntries: trimmedProvisionalEntries,
+          rows: selectionRows,
+          rowsWithEmptyBlocks: selectionRowsWithEmpty
+        });
+        return buildBigAccountSelectionRequiredResult({
+          rows: selectionRows,
+          rowsWithEmptyBlocks: selectionRowsWithEmpty,
+          bigAccounts: aggregatedBigAccounts,
+          fixedAssignments: [],
+          templateId: FILENAME_MAPPING_TEMPLATE_ID
+        });
+      }
+
+      if (recognitionResult.selectedBigAccount) {
+        selectedBigAccount = recognitionResult.selectedBigAccount;
+      }
+    }
 
     // v1.5.2 #9 修复：多文件匹配不同模板时，按模板分组独立生成，确保余额账单银行名/所在地正确
     if (perTemplateConfigCache.size > 1) {
@@ -9582,12 +9746,75 @@ function registerFileHandlers() {
         }
       }
 
-      const selectedBigAccount = bigAccountOptions.length === 1
+      let selectedBigAccount = bigAccountOptions.length === 1
         ? {
             merchantId: bigAccountOptions[0].merchantId,
             currency: bigAccountOptions[0].currency
           }
         : null;
+
+      if (selectedBigAccount) {
+        const recognitionFileEntries = selectionResult.parentProvisionalEntries
+          || buildPendingBigAccountFileEntries({
+            template: templateConfig.template,
+            mappings: templateConfig.exportMappings,
+            orderedTargetFields: templateConfig.exportTargetFields,
+            inputFilePaths: selectionResult.filePaths
+          });
+        const recognitionResult = resolveDirectBigAccountRecognition({
+          fileEntries: recognitionFileEntries,
+          maintainedBigAccounts: effectiveBigAccounts,
+          fallbackTemplateConfig: templateConfig,
+          templateName: templateConfig.template.name
+        });
+
+        if (recognitionResult.status === 'failed') {
+          return createBigAccountRecognitionErrorResult(recognitionResult, {
+            templateId,
+            templateName: templateConfig.template.name,
+            inputFilePaths: selectionResult.filePaths
+          });
+        }
+
+        if (recognitionResult.status === 'needs-selection') {
+          const selectionRows = buildBigAccountSelectionRows(recognitionFileEntries);
+
+          if (!selectionRows.length) {
+            return createErrorResult({
+              step: '导入网银明细文件',
+              message: '导入文件中没有账号存在交易数据',
+              errorCode: 'NO_TRANSACTION_DATA',
+              templateName: templateConfig.template.name
+            });
+          }
+
+          const selectionRowsWithEmpty = buildBigAccountSelectionRows(recognitionFileEntries, { includeEmptyBlocks: true });
+
+          rememberPendingBigAccountSelection({
+            templateId,
+            template: templateConfig.template,
+            mappings: templateConfig.exportMappings,
+            orderedTargetFields: templateConfig.exportTargetFields,
+            inputFilePaths: selectionResult.filePaths,
+            bigAccounts: effectiveBigAccounts,
+            fixedAssignments: templateConfig.fixedAssignments,
+            fileEntries: recognitionFileEntries,
+            rows: selectionRows,
+            rowsWithEmptyBlocks: selectionRowsWithEmpty
+          });
+          return buildBigAccountSelectionRequiredResult({
+            rows: selectionRows,
+            rowsWithEmptyBlocks: selectionRowsWithEmpty,
+            bigAccounts: effectiveBigAccounts,
+            fixedAssignments: templateConfig.fixedAssignments,
+            templateId
+          });
+        }
+
+        if (recognitionResult.selectedBigAccount) {
+          selectedBigAccount = recognitionResult.selectedBigAccount;
+        }
+      }
 
       let generatedFiles;
       if (selectionResult.parentProvisionalEntries) {
