@@ -300,6 +300,126 @@ test.describe('runC3Scenario — mode=direct 行为回归（v2.1.7 baseline）',
   });
 });
 
+test.describe('runC3Scenario — v3.0.13 多候选优先同值赋值候选', () => {
+  function makeReconIdScenario(overrides = {}) {
+    return {
+      id: 301,
+      name: 'C3-多候选同值优先',
+      config: {
+        reconFields: [
+          { seq: 1, gwField: 'currency', bankField: 'Currency' },
+          { seq: 2, gwField: 'amount', bankField: BANK_STATEMENT_VIRTUAL_AMOUNT_ABS }
+        ],
+        assign: { gwField: 'reconciliationid', bankField: 'ReconciliationId', mode: 'direct' },
+        ...overrides
+      }
+    };
+  }
+
+  function bankReconRow(rowId, oldReconId, amount = 100) {
+    return {
+      _rowId: rowId,
+      Currency: 'USD',
+      'Credit Amount': 0,
+      'Debit Amount': amount,
+      ReconciliationId: oldReconId
+    };
+  }
+
+  function gwReconRow(reconId, amount = 100) {
+    return { currency: 'USD', amount, reconciliationid: reconId };
+  }
+
+  test('同值候选在后时仍优先选择同值候选：不覆盖已有 ReconciliationId，仍 warning + lock', () => {
+    const bankRows = [bankReconRow('b1', 'RC-SAME')];
+    const gwRows = [gwReconRow('RC-OTHER'), gwReconRow('RC-SAME')];
+
+    const result = runC3Scenario(makeReconIdScenario(), bankRows, gwRows);
+
+    assert.equal(bankRows[0].ReconciliationId, 'RC-SAME');
+    assert.equal(result.modifications.length, 0, '同值候选不产生 ReconciliationId modification');
+    assert.ok(result.lockedRowIds.has('b1'), '匹配成功仍 lock');
+    assert.ok(result.warnings.some((w) => w.code === 'multi-gateway-match'), '多候选 warning 仍保留');
+  });
+
+  test('同值候选在前时行为不变：消费第一条候选且不改值', () => {
+    const bankRows = [bankReconRow('b1', 'RC-SAME'), bankReconRow('b2', '')];
+    const gwRows = [gwReconRow('RC-SAME'), gwReconRow('RC-OTHER')];
+
+    const result = runC3Scenario(makeReconIdScenario(), bankRows, gwRows);
+
+    assert.equal(bankRows[0].ReconciliationId, 'RC-SAME');
+    assert.equal(bankRows[1].ReconciliationId, 'RC-OTHER', '第一行消费 gwSame 后，第二行只能消费剩余 gwOther');
+    assert.deepEqual(result.modifications.map((m) => m.rowId), ['b2']);
+  });
+
+  test('没有同值候选时沿用第一条候选并产生 modification', () => {
+    const bankRows = [bankReconRow('b1', 'RC-OLD')];
+    const gwRows = [gwReconRow('RC-1'), gwReconRow('RC-2')];
+
+    const result = runC3Scenario(makeReconIdScenario(), bankRows, gwRows);
+
+    assert.equal(bankRows[0].ReconciliationId, 'RC-1');
+    assert.equal(result.modifications.length, 1);
+    assert.equal(result.modifications[0].oldValue, 'RC-OLD');
+    assert.equal(result.modifications[0].newValue, 'RC-1');
+  });
+
+  test('银行旧值为空时沿用第一条候选', () => {
+    const bankRows = [bankReconRow('b1', '')];
+    const gwRows = [gwReconRow('RC-1'), gwReconRow('RC-2')];
+
+    const result = runC3Scenario(makeReconIdScenario(), bankRows, gwRows);
+
+    assert.equal(bankRows[0].ReconciliationId, 'RC-1');
+    assert.equal(result.modifications[0].newValue, 'RC-1');
+  });
+
+  test('custom mode 不走同值候选优先，仍写入 customValue', () => {
+    const scenario = makeReconIdScenario({
+      assign: { gwField: '__CUSTOM__', bankField: 'ReconciliationId', mode: 'custom', customValue: 'CUSTOM-RC' }
+    });
+    const bankRows = [bankReconRow('b1', 'RC-SAME')];
+    const gwRows = [gwReconRow('RC-OTHER'), gwReconRow('RC-SAME')];
+
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+
+    assert.equal(bankRows[0].ReconciliationId, 'CUSTOM-RC');
+    assert.equal(result.modifications.length, 1);
+    assert.equal(result.modifications[0].newValue, 'CUSTOM-RC');
+  });
+
+  test('Extra Fee 回归：同值候选在后，assign 不改值，Extra Fee 仍写入相反数并 lock', () => {
+    const scenario = makeReconIdScenario({ extraFee: { enabled: true, amount: 5 } });
+    const bankRows = [bankReconRow('b1', 'RC-SAME', 105)];
+    const gwRows = [gwReconRow('RC-OTHER', 100), gwReconRow('RC-SAME', 100)];
+
+    const result = runC3Scenario(scenario, bankRows, gwRows);
+
+    assert.equal(bankRows[0].ReconciliationId, 'RC-SAME');
+    assert.equal(bankRows[0]['Extra Fee'], '-5');
+    assert.equal(result.modifications.length, 1, '仅 Extra Fee 产生 modification');
+    assert.equal(result.modifications[0].column, 'Extra Fee');
+    assert.ok(result.lockedRowIds.has('b1'));
+  });
+
+  test('1v1 消费回归：第一条银行行因同值优先消费 gwSame，第二条只能消费剩余 gwOther', () => {
+    const bankRows = [
+      bankReconRow('b1', 'RC-SAME'),
+      bankReconRow('b2', '')
+    ];
+    const gwRows = [gwReconRow('RC-OTHER'), gwReconRow('RC-SAME')];
+
+    const result = runC3Scenario(makeReconIdScenario(), bankRows, gwRows);
+
+    assert.equal(bankRows[0].ReconciliationId, 'RC-SAME', 'b1 消费后置同值候选');
+    assert.equal(bankRows[1].ReconciliationId, 'RC-OTHER', 'b2 只能消费剩余第一条候选');
+    assert.equal(result.modifications.length, 1);
+    assert.equal(result.modifications[0].rowId, 'b2');
+    assert.equal(result.modifications[0].newValue, 'RC-OTHER');
+  });
+});
+
 test.describe('runC3Scenario — mode=custom（v2.1.8 N2 新增）', () => {
   test('mode=custom + customValue 非空 → newValue=customValue 写入 bank', () => {
     const scenario = makeScenario({

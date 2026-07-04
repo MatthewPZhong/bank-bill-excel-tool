@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "3.0.12",
-    "scannedAt": "2026-06-29T02:06:58.963Z",
+    "version": "3.0.13",
+    "scannedAt": "2026-07-04T15:33:08.823Z",
     "root": "src",
-    "totalFiles": 171,
-    "totalTopLevelNames": 1758,
+    "totalFiles": 173,
+    "totalTopLevelNames": 1781,
     "buckets": {
-      "shared": 299,
-      "paired": 487,
-      "local": 846,
-      "crossFile": 786
+      "shared": 300,
+      "paired": 495,
+      "local": 861,
+      "crossFile": 795
     }
   },
   "A": {
@@ -56,6 +56,7 @@
           "src/main-process/bank-statement-io.js",
           "src/main-process/biz-op-recon-session.js",
           "src/main-process/biz-op-recon-writer.js",
+          "src/main-process/import-dialog-state.js",
           "src/main-process/pending-session.js",
           "src/main-process/platform-cleanup-writer.js",
           "src/main-process/recon-id-fix-io.js",
@@ -244,6 +245,10 @@
             "count": 5
           },
           {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 3
+          },
+          {
             "file": "src/main-process/pending-session.js",
             "count": 7
           },
@@ -304,8 +309,8 @@
             "count": 2
           }
         ],
-        "totalHits": 174,
-        "fileSpan": 58
+        "totalHits": 177,
+        "fileSpan": 59
       },
       {
         "name": "fs",
@@ -341,6 +346,7 @@
           "src/main-process/biz-op-recon-run-data.js",
           "src/main-process/biz-op-recon-session.js",
           "src/main-process/biz-op-recon-writer.js",
+          "src/main-process/import-dialog-state.js",
           "src/main-process/pending-session.js",
           "src/main-process/platform-cleanup-writer.js",
           "src/main-process/recon-id-fix-io.js",
@@ -481,6 +487,10 @@
             "count": 5
           },
           {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 2
+          },
+          {
             "file": "src/main-process/pending-session.js",
             "count": 2
           },
@@ -517,8 +527,8 @@
             "count": 1
           }
         ],
-        "totalHits": 125,
-        "fileSpan": 41
+        "totalHits": 127,
+        "fileSpan": 42
       },
       {
         "name": "normalizeCell",
@@ -532,6 +542,7 @@
           "src/backend/file-service/normalizers.js",
           "src/backend/file-service/writers.js",
           "src/backend/toolbox-xlsx-stream/bounded-values-accumulator.js",
+          "src/main-process/big-account-recognition.js",
           "src/main-process/linked-table-stream-source.js",
           "src/main-process/table-type-detector.js",
           "src/main-process/toolbox.js"
@@ -606,6 +617,10 @@
             "count": 2
           },
           {
+            "file": "src/main-process/big-account-recognition.js",
+            "count": 12
+          },
+          {
             "file": "src/main-process/biz-op-recon-session.js",
             "count": 1
           },
@@ -638,8 +653,8 @@
             "count": 2
           }
         ],
-        "totalHits": 131,
-        "fileSpan": 25
+        "totalHits": 143,
+        "fileSpan": 26
       },
       {
         "name": "parse",
@@ -780,7 +795,7 @@
           },
           {
             "file": "src/main-process/fund-transfer-recon-builder.js",
-            "count": 12
+            "count": 13
           },
           {
             "file": "src/main-process/scenario-engines/boc-dispatch-order-fix.js",
@@ -796,7 +811,7 @@
           },
           {
             "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 6
+            "count": 8
           },
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
@@ -851,7 +866,7 @@
             "count": 1
           }
         ],
-        "totalHits": 209,
+        "totalHits": 212,
         "fileSpan": 21
       },
       {
@@ -1664,7 +1679,7 @@
           },
           {
             "file": "src/main-process/exceljs-writer.js",
-            "count": 5
+            "count": 3
           },
           {
             "file": "src/main-process/scenario-hit-rows-writer.js",
@@ -1679,7 +1694,7 @@
             "count": 9
           }
         ],
-        "totalHits": 33,
+        "totalHits": 31,
         "fileSpan": 10
       },
       {
@@ -2457,6 +2472,40 @@
         "fileSpan": 7
       },
       {
+        "name": "dialog",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 403
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 26
+          },
+          {
+            "file": "src/renderer-previews.js",
+            "count": 5
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 71
+          }
+        ],
+        "totalHits": 510,
+        "fileSpan": 6
+      },
+      {
         "name": "state",
         "defFiles": [
           "src/renderer.js"
@@ -2600,7 +2649,6 @@
         "defFiles": [
           "src/backend/database/linked-table-repository.js",
           "src/constants/fund-transfer-recon-fields.js",
-          "src/main-process/fund-transfer-recon-builder.js",
           "src/main-process/scenario-engines/dbs-charge-fund-check.js",
           "src/main-process/scenario-engines/many-to-many-detector.js",
           "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
@@ -2998,36 +3046,6 @@
         ],
         "totalHits": 11,
         "fileSpan": 6
-      },
-      {
-        "name": "dialog",
-        "defFiles": [
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main.js",
-            "count": 1
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 403
-          },
-          {
-            "file": "src/renderer-pending.js",
-            "count": 26
-          },
-          {
-            "file": "src/renderer-previews.js",
-            "count": 5
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 71
-          }
-        ],
-        "totalHits": 506,
-        "fileSpan": 5
       },
       {
         "name": "setCurrentModule",
@@ -5953,7 +5971,7 @@
         "refFiles": [
           {
             "file": "src/renderer-dialogs.js",
-            "count": 150
+            "count": 151
           },
           {
             "file": "src/renderer-previews.js",
@@ -5964,7 +5982,7 @@
             "count": 29
           }
         ],
-        "totalHits": 180,
+        "totalHits": 181,
         "fileSpan": 3
       },
       {
@@ -6037,6 +6055,30 @@
         "fileSpan": 3
       },
       {
+        "name": "settingsRepository",
+        "defFiles": [
+          "src/backend/database.js",
+          "src/backend/database/own-accounts-migration.js",
+          "src/main-process/import-dialog-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 29
+          },
+          {
+            "file": "src/backend/database/own-accounts-migration.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 37,
+        "fileSpan": 3
+      },
+      {
         "name": "hasColumn",
         "defFiles": [
           "src/backend/biz-op-recon-db/migrations.js",
@@ -6097,10 +6139,10 @@
           },
           {
             "file": "src/backend/database/settings-repository.js",
-            "count": 17
+            "count": 19
           }
         ],
-        "totalHits": 22,
+        "totalHits": 24,
         "fileSpan": 3
       },
       {
@@ -6143,10 +6185,10 @@
           },
           {
             "file": "src/backend/database/settings-repository.js",
-            "count": 14
+            "count": 16
           }
         ],
-        "totalHits": 18,
+        "totalHits": 20,
         "fileSpan": 3
       },
       {
@@ -9321,25 +9363,6 @@
         "fileSpan": 2
       },
       {
-        "name": "settingsRepository",
-        "defFiles": [
-          "src/backend/database.js",
-          "src/backend/database/own-accounts-migration.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
-            "count": 29
-          },
-          {
-            "file": "src/backend/database/own-accounts-migration.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 33,
-        "fileSpan": 2
-      },
-      {
         "name": "templateRepository",
         "defFiles": [
           "src/backend/database.js",
@@ -9370,10 +9393,10 @@
           },
           {
             "file": "src/main.js",
-            "count": 7
+            "count": 9
           }
         ],
-        "totalHits": 29,
+        "totalHits": 31,
         "fileSpan": 2
       },
       {
@@ -10085,6 +10108,24 @@
         "fileSpan": 2
       },
       {
+        "name": "currencyMatches",
+        "defFiles": [
+          "src/main-process/scenario-engines/c4-recon-id-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/big-account-recognition.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 2
+      },
+      {
         "name": "getLinkedTableMeta",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -10284,6 +10325,24 @@
           {
             "file": "src/backend/database/settings-repository.js",
             "count": 4
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 2
+      },
+      {
+        "name": "ALL_MODULE_IDS",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 1
           }
         ],
         "totalHits": 7,
@@ -14134,6 +14193,24 @@
         "fileSpan": 2
       },
       {
+        "name": "getLastImportDirectoryCandidates",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "getMaxBocFxOrigGroupNo",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -14681,6 +14758,24 @@
         "fileSpan": 2
       },
       {
+        "name": "MID_ALLOCATION_SUCCESS_STATUS",
+        "defFiles": [
+          "src/constants/fund-transfer-recon-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/constants/fund-transfer-recon-fields.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/fund-transfer-recon-builder.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "MTX_FEATURE",
         "defFiles": [
           "src/constants/refund-backfill-fields.js"
@@ -14711,6 +14806,24 @@
           {
             "file": "src/renderer.js",
             "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "normalizeMaintainedBigAccounts",
+        "defFiles": [
+          "src/main-process/big-account-recognition.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/big-account-recognition.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
           }
         ],
         "totalHits": 4,
@@ -15680,6 +15793,25 @@
           },
           {
             "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "showImportOpenDialog",
+        "defFiles": [
+          "src/main-process/import-dialog-state.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
             "count": 2
           }
         ],
@@ -17159,6 +17291,24 @@
         "fileSpan": 2
       },
       {
+        "name": "matchMerchantIds",
+        "defFiles": [
+          "src/main-process/big-account-recognition.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/big-account-recognition.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "mergeBankStatementRows",
         "defFiles": [
           "src/main-process/bank-statement-merge.js"
@@ -17580,6 +17730,24 @@
         "fileSpan": 2
       },
       {
+        "name": "resolveRecognizedBigAccount",
+        "defFiles": [
+          "src/main-process/big-account-recognition.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/big-account-recognition.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "runOwnAccountsMigration",
         "defFiles": [
           "src/backend/database/own-accounts-migration.js",
@@ -17684,6 +17852,24 @@
           {
             "file": "src/backend/database/scenarios-repository.js",
             "count": 2
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "setLastImportDirectory",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 1
           }
         ],
         "totalHits": 3,
@@ -18692,6 +18878,20 @@
         "fileSpan": 1
       },
       {
+        "name": "cellToString",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 8
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 1
+      },
+      {
         "name": "clampColorChannel",
         "defFiles": [
           "src/renderer.js"
@@ -18930,20 +19130,6 @@
         "fileSpan": 1
       },
       {
-        "name": "cellToString",
-        "defFiles": [
-          "src/main-process/exceljs-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/exceljs-writer.js",
-            "count": 7
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 1
-      },
-      {
         "name": "COL_COUNT",
         "defFiles": [
           "src/backend/vcc-op-calc-import/reader.js"
@@ -18993,6 +19179,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-db/removed-repository.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
+        "name": "LAST_IMPORT_DIRECTORY_GLOBAL_KEY",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
             "count": 7
           }
         ],
@@ -19091,20 +19291,6 @@
         "refFiles": [
           {
             "file": "src/backend/database/linked-table-repository.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 1
-      },
-      {
-        "name": "ALL_MODULE_IDS",
-        "defFiles": [
-          "src/backend/database/settings-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/settings-repository.js",
             "count": 6
           }
         ],
@@ -19729,20 +19915,6 @@
       },
       {
         "name": "computeCommonId",
-        "defFiles": [
-          "src/main-process/scenario-engines/c4-recon-id-fix.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
-        "name": "currencyMatches",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
         ],
@@ -20435,6 +20607,34 @@
         "refFiles": [
           {
             "file": "src/backend/database/linked-table-repository.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildDetailLines",
+        "defFiles": [
+          "src/main-process/big-account-recognition.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/big-account-recognition.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildLastImportDirectoryKey",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
             "count": 4
           }
         ],
@@ -21408,20 +21608,6 @@
         "fileSpan": 1
       },
       {
-        "name": "stripInternalFields",
-        "defFiles": [
-          "src/main-process/exceljs-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/exceljs-writer.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
         "name": "syncNewAccountDropdownFlag",
         "defFiles": [
           "src/renderer.js"
@@ -21779,20 +21965,6 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/many-to-many-detector.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "appendManyToManyReviewSheet",
-        "defFiles": [
-          "src/main-process/exceljs-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/exceljs-writer.js",
             "count": 3
           }
         ],
@@ -22388,6 +22560,20 @@
         "fileSpan": 1
       },
       {
+        "name": "buildManyToManyNoteByRowId",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "buildNumericCellSpec",
         "defFiles": [
           "src/main-process/toolbox-stream-io.js"
@@ -22465,6 +22651,20 @@
         "refFiles": [
           {
             "file": "src/main-process/run-check-multiworker-worker.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildReviewRowIdSet",
+        "defFiles": [
+          "src/main-process/reconciliation-orchestrator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/reconciliation-orchestrator.js",
             "count": 3
           }
         ],
@@ -22605,6 +22805,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-dispatcher.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "chooseC3MatchedCandidatePreferExistingAssignValue",
+        "defFiles": [
+          "src/main-process/scenario-engines/c3-gateway-recon-join.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
             "count": 3
           }
         ],
@@ -23200,6 +23414,20 @@
         "fileSpan": 1
       },
       {
+        "name": "EXTRA_IMPORT_DIALOG_SCOPES",
+        "defFiles": [
+          "src/main-process/import-dialog-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "extractChannelLocation",
         "defFiles": [
           "src/main-process/scenario-dispatcher.js"
@@ -23417,6 +23645,20 @@
         "refFiles": [
           {
             "file": "src/constants/gateway-recon-headers-loader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "getImportDialogDefaultPath",
+        "defFiles": [
+          "src/main-process/import-dialog-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/import-dialog-state.js",
             "count": 3
           }
         ],
@@ -23858,6 +24100,20 @@
         "fileSpan": 1
       },
       {
+        "name": "LAST_IMPORT_DIRECTORY_PREFIX",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "lastDayOfMonth",
         "defFiles": [
           "src/main-process/monthly-balance.js"
@@ -23977,6 +24233,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-reconcile/engine.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "MANY_TO_MANY_NOTE_HEADER",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
             "count": 3
           }
         ],
@@ -24880,6 +25150,20 @@
         "fileSpan": 1
       },
       {
+        "name": "rememberImportDialogDirectory",
+        "defFiles": [
+          "src/main-process/import-dialog-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "REMOVAL_STATUS_COLUMN",
         "defFiles": [
           "src/backend/pending-export/writer.js"
@@ -24971,6 +25255,20 @@
         "refFiles": [
           {
             "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "resolveExistingDirectory",
+        "defFiles": [
+          "src/main-process/import-dialog-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/import-dialog-state.js",
             "count": 3
           }
         ],
@@ -25230,20 +25528,6 @@
         "fileSpan": 1
       },
       {
-        "name": "SHEET_MANY_TO_MANY_NAME",
-        "defFiles": [
-          "src/main-process/exceljs-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/exceljs-writer.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "SHEET_MISSING_REMOVAL_NAME",
         "defFiles": [
           "src/backend/pending-export/writer.js"
@@ -25496,6 +25780,20 @@
         "fileSpan": 1
       },
       {
+        "name": "STAT_TIMEOUT_MS",
+        "defFiles": [
+          "src/main-process/import-dialog-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "STATS_TMP_FILENAME",
         "defFiles": [
           "src/backend/usage-stats.js"
@@ -25559,6 +25857,34 @@
         "refFiles": [
           {
             "file": "src/backend/file-service/normalizers.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "stripInternalFields",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "stripSpecialCharsForMatch",
+        "defFiles": [
+          "src/main-process/big-account-recognition.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/big-account-recognition.js",
             "count": 3
           }
         ],
@@ -27512,6 +27838,20 @@
         "fileSpan": 1
       },
       {
+        "name": "getLastImportDirectory",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "getLatestDateByBu",
         "defFiles": [
           "src/backend/biz-op-recon-db/imports-repository.js"
@@ -27771,6 +28111,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "IMPORT_DIALOG_SCOPES",
+        "defFiles": [
+          "src/main-process/import-dialog-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/import-dialog-state.js",
             "count": 2
           }
         ],
@@ -28198,6 +28552,20 @@
         "fileSpan": 1
       },
       {
+        "name": "mainWindow",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "makeStopSignal",
         "defFiles": [
           "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js"
@@ -28219,20 +28587,6 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/many-to-many-detector.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
-        "name": "MANY_TO_MANY_NOTE_HEADER",
-        "defFiles": [
-          "src/main-process/exceljs-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/exceljs-writer.js",
             "count": 2
           }
         ],
@@ -28443,6 +28797,20 @@
         "refFiles": [
           {
             "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "normalizeAccountNature",
+        "defFiles": [
+          "src/main-process/big-account-recognition.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/big-account-recognition.js",
             "count": 2
           }
         ],
@@ -29640,6 +30008,20 @@
         "fileSpan": 1
       },
       {
+        "name": "SHEET_MANY_TO_MANY_NAME",
+        "defFiles": [
+          "src/main-process/exceljs-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "SHEET_MONTHLY_BREAKDOWN_NAME",
         "defFiles": [
           "src/backend/pending-export/writer.js"
@@ -29703,6 +30085,20 @@
         "refFiles": [
           {
             "file": "src/main.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "statWithTimeout",
+        "defFiles": [
+          "src/main-process/import-dialog-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/import-dialog-state.js",
             "count": 2
           }
         ],
@@ -30076,6 +30472,7 @@
         "src/main-process/bank-statement-io.js",
         "src/main-process/biz-op-recon-session.js",
         "src/main-process/biz-op-recon-writer.js",
+        "src/main-process/import-dialog-state.js",
         "src/main-process/pending-session.js",
         "src/main-process/platform-cleanup-writer.js",
         "src/main-process/recon-id-fix-io.js",
@@ -30264,6 +30661,10 @@
           "count": 5
         },
         {
+          "file": "src/main-process/import-dialog-state.js",
+          "count": 3
+        },
+        {
           "file": "src/main-process/pending-session.js",
           "count": 7
         },
@@ -30324,8 +30725,8 @@
           "count": 2
         }
       ],
-      "totalHits": 174,
-      "fileSpan": 58
+      "totalHits": 177,
+      "fileSpan": 59
     },
     {
       "name": "fs",
@@ -30361,6 +30762,7 @@
         "src/main-process/biz-op-recon-run-data.js",
         "src/main-process/biz-op-recon-session.js",
         "src/main-process/biz-op-recon-writer.js",
+        "src/main-process/import-dialog-state.js",
         "src/main-process/pending-session.js",
         "src/main-process/platform-cleanup-writer.js",
         "src/main-process/recon-id-fix-io.js",
@@ -30501,6 +30903,10 @@
           "count": 5
         },
         {
+          "file": "src/main-process/import-dialog-state.js",
+          "count": 2
+        },
+        {
           "file": "src/main-process/pending-session.js",
           "count": 2
         },
@@ -30537,8 +30943,8 @@
           "count": 1
         }
       ],
-      "totalHits": 125,
-      "fileSpan": 41
+      "totalHits": 127,
+      "fileSpan": 42
     },
     {
       "name": "normalizeCell",
@@ -30552,6 +30958,7 @@
         "src/backend/file-service/normalizers.js",
         "src/backend/file-service/writers.js",
         "src/backend/toolbox-xlsx-stream/bounded-values-accumulator.js",
+        "src/main-process/big-account-recognition.js",
         "src/main-process/linked-table-stream-source.js",
         "src/main-process/table-type-detector.js",
         "src/main-process/toolbox.js"
@@ -30626,6 +31033,10 @@
           "count": 2
         },
         {
+          "file": "src/main-process/big-account-recognition.js",
+          "count": 12
+        },
+        {
           "file": "src/main-process/biz-op-recon-session.js",
           "count": 1
         },
@@ -30658,8 +31069,8 @@
           "count": 2
         }
       ],
-      "totalHits": 131,
-      "fileSpan": 25
+      "totalHits": 143,
+      "fileSpan": 26
     },
     {
       "name": "parse",
@@ -30800,7 +31211,7 @@
         },
         {
           "file": "src/main-process/fund-transfer-recon-builder.js",
-          "count": 12
+          "count": 13
         },
         {
           "file": "src/main-process/scenario-engines/boc-dispatch-order-fix.js",
@@ -30816,7 +31227,7 @@
         },
         {
           "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 6
+          "count": 8
         },
         {
           "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
@@ -30871,7 +31282,7 @@
           "count": 1
         }
       ],
-      "totalHits": 209,
+      "totalHits": 212,
       "fileSpan": 21
     },
     {
@@ -31684,7 +32095,7 @@
         },
         {
           "file": "src/main-process/exceljs-writer.js",
-          "count": 5
+          "count": 3
         },
         {
           "file": "src/main-process/scenario-hit-rows-writer.js",
@@ -31699,7 +32110,7 @@
           "count": 9
         }
       ],
-      "totalHits": 33,
+      "totalHits": 31,
       "fileSpan": 10
     },
     {
@@ -32477,6 +32888,40 @@
       "fileSpan": 7
     },
     {
+      "name": "dialog",
+      "defFiles": [
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/import-dialog-state.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 403
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 26
+        },
+        {
+          "file": "src/renderer-previews.js",
+          "count": 5
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 71
+        }
+      ],
+      "totalHits": 510,
+      "fileSpan": 6
+    },
+    {
       "name": "state",
       "defFiles": [
         "src/renderer.js"
@@ -32620,7 +33065,6 @@
       "defFiles": [
         "src/backend/database/linked-table-repository.js",
         "src/constants/fund-transfer-recon-fields.js",
-        "src/main-process/fund-transfer-recon-builder.js",
         "src/main-process/scenario-engines/dbs-charge-fund-check.js",
         "src/main-process/scenario-engines/many-to-many-detector.js",
         "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
@@ -33018,36 +33462,6 @@
       ],
       "totalHits": 11,
       "fileSpan": 6
-    },
-    {
-      "name": "dialog",
-      "defFiles": [
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main.js",
-          "count": 1
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 403
-        },
-        {
-          "file": "src/renderer-pending.js",
-          "count": 26
-        },
-        {
-          "file": "src/renderer-previews.js",
-          "count": 5
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 71
-        }
-      ],
-      "totalHits": 506,
-      "fileSpan": 5
     },
     {
       "name": "setCurrentModule",
@@ -35973,7 +36387,7 @@
       "refFiles": [
         {
           "file": "src/renderer-dialogs.js",
-          "count": 150
+          "count": 151
         },
         {
           "file": "src/renderer-previews.js",
@@ -35984,7 +36398,7 @@
           "count": 29
         }
       ],
-      "totalHits": 180,
+      "totalHits": 181,
       "fileSpan": 3
     },
     {
@@ -36057,6 +36471,30 @@
       "fileSpan": 3
     },
     {
+      "name": "settingsRepository",
+      "defFiles": [
+        "src/backend/database.js",
+        "src/backend/database/own-accounts-migration.js",
+        "src/main-process/import-dialog-state.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 29
+        },
+        {
+          "file": "src/backend/database/own-accounts-migration.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/import-dialog-state.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 37,
+      "fileSpan": 3
+    },
+    {
       "name": "hasColumn",
       "defFiles": [
         "src/backend/biz-op-recon-db/migrations.js",
@@ -36117,10 +36555,10 @@
         },
         {
           "file": "src/backend/database/settings-repository.js",
-          "count": 17
+          "count": 19
         }
       ],
-      "totalHits": 22,
+      "totalHits": 24,
       "fileSpan": 3
     },
     {
@@ -36163,10 +36601,10 @@
         },
         {
           "file": "src/backend/database/settings-repository.js",
-          "count": 14
+          "count": 16
         }
       ],
-      "totalHits": 18,
+      "totalHits": 20,
       "fileSpan": 3
     },
     {
@@ -39339,25 +39777,6 @@
       "fileSpan": 2
     },
     {
-      "name": "settingsRepository",
-      "defFiles": [
-        "src/backend/database.js",
-        "src/backend/database/own-accounts-migration.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database.js",
-          "count": 29
-        },
-        {
-          "file": "src/backend/database/own-accounts-migration.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 33,
-      "fileSpan": 2
-    },
-    {
       "name": "templateRepository",
       "defFiles": [
         "src/backend/database.js",
@@ -39388,10 +39807,10 @@
         },
         {
           "file": "src/main.js",
-          "count": 7
+          "count": 9
         }
       ],
-      "totalHits": 29,
+      "totalHits": 31,
       "fileSpan": 2
     },
     {
@@ -40103,6 +40522,24 @@
       "fileSpan": 2
     },
     {
+      "name": "currencyMatches",
+      "defFiles": [
+        "src/main-process/scenario-engines/c4-recon-id-fix.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/big-account-recognition.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 2
+    },
+    {
       "name": "getLinkedTableMeta",
       "defFiles": [
         "src/backend/database/linked-table-repository.js"
@@ -40302,6 +40739,24 @@
         {
           "file": "src/backend/database/settings-repository.js",
           "count": 4
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 2
+    },
+    {
+      "name": "ALL_MODULE_IDS",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/import-dialog-state.js",
+          "count": 1
         }
       ],
       "totalHits": 7,
@@ -44152,6 +44607,24 @@
       "fileSpan": 2
     },
     {
+      "name": "getLastImportDirectoryCandidates",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/import-dialog-state.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "getMaxBocFxOrigGroupNo",
       "defFiles": [
         "src/backend/database/linked-table-repository.js"
@@ -44699,6 +45172,24 @@
       "fileSpan": 2
     },
     {
+      "name": "MID_ALLOCATION_SUCCESS_STATUS",
+      "defFiles": [
+        "src/constants/fund-transfer-recon-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/constants/fund-transfer-recon-fields.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/fund-transfer-recon-builder.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "MTX_FEATURE",
       "defFiles": [
         "src/constants/refund-backfill-fields.js"
@@ -44729,6 +45220,24 @@
         {
           "file": "src/renderer.js",
           "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "normalizeMaintainedBigAccounts",
+      "defFiles": [
+        "src/main-process/big-account-recognition.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/big-account-recognition.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
         }
       ],
       "totalHits": 4,
@@ -45698,6 +46207,25 @@
         },
         {
           "file": "src/backend/database/settings-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "showImportOpenDialog",
+      "defFiles": [
+        "src/main-process/import-dialog-state.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/import-dialog-state.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
           "count": 2
         }
       ],
@@ -47177,6 +47705,24 @@
       "fileSpan": 2
     },
     {
+      "name": "matchMerchantIds",
+      "defFiles": [
+        "src/main-process/big-account-recognition.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/big-account-recognition.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "mergeBankStatementRows",
       "defFiles": [
         "src/main-process/bank-statement-merge.js"
@@ -47598,6 +48144,24 @@
       "fileSpan": 2
     },
     {
+      "name": "resolveRecognizedBigAccount",
+      "defFiles": [
+        "src/main-process/big-account-recognition.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/big-account-recognition.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "runOwnAccountsMigration",
       "defFiles": [
         "src/backend/database/own-accounts-migration.js",
@@ -47702,6 +48266,24 @@
         {
           "file": "src/backend/database/scenarios-repository.js",
           "count": 2
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "setLastImportDirectory",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/import-dialog-state.js",
+          "count": 1
         }
       ],
       "totalHits": 3,

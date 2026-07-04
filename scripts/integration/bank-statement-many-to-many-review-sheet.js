@@ -1,15 +1,15 @@
-// 功能1「异常-人工判断 sheet」集成测试（🔴 资金红线·只读检测端到端契约）
+// 功能1「异常说明并入命中场景」集成测试（🔴 资金红线·只读检测端到端契约）
 //   覆盖：
 //     ① 编排器 runReconciliation 产出 manyToManyReviewRows / stats.manyToManyReviewCount（NvM 命中、1v1/1vN/Nv1 不命中）
 //     ② 🔴 回填行为不变 + 纯只读：full orchestrator 与「直调 R5s2-recon 引擎」对同一夹具的 modifications /
 //        银行行最终态逐字节一致（检测器不改任何 bankRow / modifications / 行数守恒）
 //     ③ 跨接缝透传：经 io 层 writeBankStatementMainOutput（= main.js export handler 同款调用，
-//        manyToManyRows 落 writer 第 8 形参）→ 真实写盘 → ExcelJS 读回「异常-人工判断」sheet
-//     ④ 条件生成：无 NvM → reviewRows 空 → 主文件不含该 sheet（空＝形态零变化）
+//        manyToManyRows 落 writer 第 8 形参）→ 真实写盘 → ExcelJS 读回「命中场景」第 2 列「异常说明」
+//     ④ 条件生成：无 NvM → reviewRows 空 → 主文件不含独立异常 sheet，命中行异常说明为空
 //
 //   为何端到端：检测器（orchestrator 内）→ processingResult → io → writer 是 4 跳接缝（历史教训：
 //   逐文件 review 看不见接缝，writer 第 7 形参 staleHitNotesByRowId 易把 manyToManyRows 串位）。
-//   本脚本用真实 ExcelJS 读盘锁死 sheet 名/表头/命中行，并用「引擎 parity」锁死回填零变化。
+//   本脚本用真实 ExcelJS 读盘锁死 sheet 名/表头/异常说明列，并用「引擎 parity」锁死回填零变化。
 //
 //   用法：node scripts/integration/bank-statement-many-to-many-review-sheet.js
 
@@ -28,7 +28,8 @@ const { FT_RECON_FIELD_MAP } = require('../../src/constants/fund-transfer-recon-
 
 const RECON = FT_RECON_FIELD_MAP.recon;
 const FUND_IN = FT_RECON_FIELD_MAP.FUND_TYPE_IN;
-const SHEET_NAME = '异常-人工判断';
+const HIT_SHEET_NAME = '命中场景';
+const OLD_REVIEW_SHEET_NAME = '异常-人工判断';
 
 let passed = 0;
 let failed = 0;
@@ -125,7 +126,7 @@ function buildFixture() {
 }
 
 async function run() {
-  console.log('==== 功能1「异常-人工判断 sheet」集成验证 ====');
+  console.log('==== 功能1「异常说明并入命中场景」集成验证 ====');
 
   // ===== Step 1：编排器产出 + 回填 parity（read-only 证据）=====
   const fx = buildFixture();
@@ -204,38 +205,41 @@ async function run() {
 
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(mainFilePath);
-    const sheet = wb.getWorksheet(SHEET_NAME);
-    assertTrue(!!sheet, `主文件含「${SHEET_NAME}」sheet`);
+    assertTrue(!wb.getWorksheet(OLD_REVIEW_SHEET_NAME), '主文件不再含「异常-人工判断」独立 sheet');
+    assertTrue(!wb.getWorksheet('异常-人工处理'), '主文件不含历史别名「异常-人工处理」独立 sheet');
+    const sheet = wb.getWorksheet(HIT_SHEET_NAME);
+    assertTrue(!!sheet, `主文件含「${HIT_SHEET_NAME}」sheet`);
 
     if (sheet) {
-      // 表头 = [异常说明, ...BANK_STATEMENT_FIELDS]
+      // 表头 = [命中明细, 异常说明, ...BANK_STATEMENT_FIELDS]
       const headerCells = sheet.getRow(1).values.slice(1); // ExcelJS values[0] 占位
-      assertEq(headerCells[0], '异常说明', 'sheet 首列表头=异常说明');
-      assertEq(headerCells.length, BANK_STATEMENT_FIELDS.length + 1, `表头列数 = 1 + 银行 ${BANK_STATEMENT_FIELDS.length} 列`);
-      assertEq(headerCells[1], BANK_STATEMENT_FIELDS[0], '第 2 列起为银行契约列（账户主体）');
+      assertEq(headerCells[0], '命中明细', '命中 sheet 第 1 列=命中明细');
+      assertEq(headerCells[1], '异常说明', '命中 sheet 第 2 列=异常说明');
+      assertEq(headerCells.length, BANK_STATEMENT_FIELDS.length + 2, `表头列数 = 2 + 银行 ${BANK_STATEMENT_FIELDS.length} 列`);
+      assertEq(headerCells[2], BANK_STATEMENT_FIELDS[0], '第 3 列起为银行契约列（账户主体）');
 
-      // 数据行（第 2 行起）= 4 条命中
-      assertEq(sheet.rowCount, 1 + 4, 'sheet 行数 = 表头 1 + 命中 4');
-
-      // MerchantId 列在 sheet 内的列号（异常说明在第 1 列 → 银行列整体 +1）
-      const midColIdx = 1 + (BANK_STATEMENT_FIELDS.indexOf('MerchantId') + 1);
-      const reconColIdx = 1 + (BANK_STATEMENT_FIELDS.indexOf('ReconciliationId') + 1);
-      const midsInSheet = [];
-      const notesNonEmpty = [];
+      // MerchantId / ReconciliationId 列在命中 sheet 内的列号（命中明细+异常说明 → 银行列整体 +2）
+      const midColIdx = 2 + (BANK_STATEMENT_FIELDS.indexOf('MerchantId') + 1);
+      const reconColIdx = 2 + (BANK_STATEMENT_FIELDS.indexOf('ReconciliationId') + 1);
+      const noteRows = [];
       for (let r = 2; r <= sheet.rowCount; r += 1) {
-        midsInSheet.push(sheet.getRow(r).getCell(midColIdx).value);
-        notesNonEmpty.push(String(sheet.getRow(r).getCell(1).value || ''));
+        const note = String(sheet.getRow(r).getCell(2).value || '');
+        if (note) {
+          noteRows.push({
+            merchantId: sheet.getRow(r).getCell(midColIdx).value,
+            reconId: String(sheet.getRow(r).getCell(reconColIdx).value || ''),
+            note
+          });
+        }
       }
-      midsInSheet.sort();
-      assertEq(JSON.stringify(midsInSheet), JSON.stringify(['ACC_B', 'ACC_B', 'ACC_C', 'ACC_C']), 'sheet 命中行 MerchantId = B/B/C/C');
-      assertTrue(notesNonEmpty.every((n) => n.includes('多对多')), '每条异常说明非空且含「多对多」');
-      // 银行行内部字段（_rowId/_modifiedColumns 等）已被 stripInternalFields 剥除（不暴露诊断列）
+      const midsInSheet = noteRows.map((r) => r.merchantId).sort();
+      assertEq(JSON.stringify(midsInSheet), JSON.stringify(['ACC_B', 'ACC_B', 'ACC_C', 'ACC_C']), '异常说明行 MerchantId = B/B/C/C');
+      assertTrue(noteRows.every((r) => r.note.includes('多对多')), '每条异常说明非空且含「多对多」');
+      // 银行行内部字段（_rowId/_modifiedColumns 等）不在表头（headers 投影，不暴露诊断列）
       const headerHasInternal = headerCells.some((h) => typeof h === 'string' && h.startsWith('_'));
-      assertTrue(!headerHasInternal, 'sheet 表头不含 _ 内部诊断列');
+      assertTrue(!headerHasInternal, '命中 sheet 表头不含 _ 内部诊断列');
       // 回填后的 ReconciliationId 忠实写出（bB 行非空 / bC 行空）
-      const reconVals = [];
-      for (let r = 2; r <= sheet.rowCount; r += 1) reconVals.push(String(sheet.getRow(r).getCell(reconColIdx).value || ''));
-      assertTrue(reconVals.filter((v) => v !== '').length === 2, 'sheet 内 2 行(B)带回填 ReconciliationId、2 行(C)为空');
+      assertTrue(noteRows.filter((r) => r.reconId !== '').length === 2, '异常说明行内 2 行(B)带回填 ReconciliationId、2 行(C)为空');
     }
 
     // ===== Step 3：条件生成 —— 无 NvM → 不加 sheet =====
@@ -261,7 +265,17 @@ async function run() {
     });
     const wb2 = new ExcelJS.Workbook();
     await wb2.xlsx.readFile(cleanPath);
-    assertTrue(!wb2.getWorksheet(SHEET_NAME), '条件生成：reviewRows 空 → 主文件不含「异常-人工判断」sheet');
+    assertTrue(!wb2.getWorksheet(OLD_REVIEW_SHEET_NAME), '条件生成：reviewRows 空 → 主文件不含「异常-人工判断」独立 sheet');
+    const cleanHitSheet = wb2.getWorksheet(HIT_SHEET_NAME);
+    assertTrue(!!cleanHitSheet, '条件生成：命中场景 sheet 仍存在');
+    if (cleanHitSheet) {
+      assertEq(cleanHitSheet.getRow(1).getCell(2).value, '异常说明', '条件生成：命中 sheet 仍保留异常说明空列');
+      let hasNote = false;
+      for (let r = 2; r <= cleanHitSheet.rowCount; r += 1) {
+        if (String(cleanHitSheet.getRow(r).getCell(2).value || '').trim()) hasNote = true;
+      }
+      assertTrue(!hasNote, '条件生成：无 reviewRows 时异常说明列为空');
+    }
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
