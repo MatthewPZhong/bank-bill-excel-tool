@@ -83,12 +83,13 @@ function stripInternalFields(row) {
 //
 // sheet1「未命中场景」：第 1 行 = A1 加粗提示(A列) + 表头(B列起)；第 2 行起 unmatchedRows（v3.0.8 #9 整体上移一行）
 //   （FundType==='Mark without result' 数据值的行排前，其余随后 — D8）
-// sheet2「命中场景」：第一列「命中明细」+ 原 headers；命中行保留标黄（D5）；命中明细多条以 \n 拼接（B-Q2）
+// sheet2「命中场景」：第一列「命中明细」+ 第二列「异常说明」+ 原 headers；命中行保留标黄（D5）。
 const MARK_WITHOUT_RESULT = 'Mark without result';
 const SHEET1_UNMATCHED_NAME = '未命中场景';
 const SHEET2_HIT_NAME = '命中场景';
 const SHEET1_A1_NOTICE = '请检查，导入前请删除该sheet';
 const HIT_DETAIL_HEADER = '命中明细';
+const MANY_TO_MANY_NOTE_HEADER = '异常说明';
 
 // 单元格值规整为字符串（用于 FundType 排序判等 + 命中明细拼接）
 //   null/undefined → ''；其它原样 String()（数据值精确匹配，不 trim 不改大小写）
@@ -222,22 +223,25 @@ function appendPaymentOfflineSheets(workbook, pairs) {
   });
 }
 
-// ===== v3.0.12 功能1：异常-人工判断 sheet（🔴 资金红线·只读检测产物）=====
+// ===== v3.0.12 功能1：异常说明（🔴 资金红线·只读检测产物）=====
 //   reviewRows 项 = { row: 银行行引用, note: 中文说明 }（many-to-many-detector 产出）。
-//   reviewRows 为 null/空数组 → 完全不加 sheet（主文件形态零变化）。
-//   列 = [异常说明, ...BANK_STATEMENT_FIELDS]（银行 46 列契约）；每行 = [note, ...银行列值]，
-//   银行列值复用 stripInternalFields 投影剥 _ 前缀内部字段（与「银行行-原始」sheet 同口径）。
+//   v3.0.13 起不再追加独立「异常-人工判断」sheet；note 并入「命中场景」第 2 列。
 const SHEET_MANY_TO_MANY_NAME = '异常-人工判断';
-const MANY_TO_MANY_NOTE_HEADER = '异常说明';
 
-function appendManyToManyReviewSheet(workbook, reviewRows) {
-  const sheet = workbook.addWorksheet(SHEET_MANY_TO_MANY_NAME);
-  sheet.addRow([MANY_TO_MANY_NOTE_HEADER, ...BANK_STATEMENT_FIELDS]);
-  sheet.getRow(1).font = { bold: true, size: 10 };
-  reviewRows.forEach((rv) => {
-    const cleaned = stripInternalFields((rv && rv.row) || {});
-    sheet.addRow([(rv && rv.note) || '', ...BANK_STATEMENT_FIELDS.map((h) => cleaned[h])]);
-  });
+function buildManyToManyNoteByRowId(manyToManyRows) {
+  const map = new Map();
+  if (!Array.isArray(manyToManyRows)) return map;
+
+  for (const rv of manyToManyRows) {
+    const row = rv && rv.row;
+    if (!row || row._rowId === undefined || row._rowId === null) continue;
+    const note = cellToString(rv.note).trim();
+    if (!note) continue;
+    const prev = map.get(row._rowId);
+    map.set(row._rowId, prev ? `${prev}; ${note}` : note);
+  }
+
+  return map;
 }
 
 // v3.0.4 块 F 修订 R2 Q14：paymentOfflinePairs 非空时在既有 2 sheet 后追加 3 核对 sheet；null/空 → 主文件形态零变化。
@@ -247,6 +251,7 @@ function appendManyToManyReviewSheet(workbook, reviewRows) {
 //      完全不进注入分支 → 命中明细 golden 字节不变（parity 锁定，留 refund-backfill 阶段接入实际注入）。
 async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows = null, modifications = null, paymentOfflinePairs = null, staleHitNotesByRowId = null, manyToManyRows = null) {
   const workbook = new ExcelJS.Workbook();
+  const manyToManyNoteByRowId = buildManyToManyNoteByRowId(manyToManyRows);
 
   // ===== sheet1「未命中场景」=====
   //   仅当 caller 显式传 unmatchedRows（Array）时输出（向下兼容旧 caller 不传 → 仅命中 sheet）。
@@ -281,10 +286,10 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
   }
 
   // ===== sheet2「命中场景」=====
-  //   第一列「命中明细」+ 原 headers；命中行保留标黄（D5）。
+  //   第一列「命中明细」+ 第二列「异常说明」+ 原 headers；命中行保留标黄（D5）。
   //   空数组（全未命中）仍输出含表头的空 sheet（AC B-5）。
   const s2 = workbook.addWorksheet(SHEET2_HIT_NAME);
-  const hitHeaders = [HIT_DETAIL_HEADER, ...headers];
+  const hitHeaders = [HIT_DETAIL_HEADER, MANY_TO_MANY_NOTE_HEADER, ...headers];
   s2.addRow(hitHeaders);
   s2.getRow(1).font = { bold: true, size: 10 };
 
@@ -308,16 +313,18 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
       const note = staleHitNotesByRowId.get(row._rowId);
       if (note) detail = detail ? detail + '; ' + note : note;
     }
-    const cells = [detail, ...headers.map((h) => row[h])];
+    const abnormalNote = manyToManyNoteByRowId.get(row._rowId) || '';
+    const cells = [detail, abnormalNote, ...headers.map((h) => row[h])];
     const r = s2.addRow(cells);
     // v3.0.7 需求C：命中明细单行紧凑显示，关闭自动换行（wrapText:false）→ 不再撑高行；仅保留顶端对齐。
     r.getCell(1).alignment = { wrapText: false, vertical: 'top' };
-    // 保留原标黄（D5）：_modifiedColumns 对应单元格黄底；命中明细列后移 1 → colIdx + 2
+    r.getCell(2).alignment = { wrapText: false, vertical: 'top' };
+    // 保留原标黄（D5）：_modifiedColumns 对应单元格黄底；命中明细+异常说明两列后移 → colIdx + 3
     const modifiedColumns = row._modifiedColumns;
     if (modifiedColumns && modifiedColumns.size > 0) {
       headers.forEach((header, colIdx) => {
         if (!modifiedColumns.has(header)) return;
-        r.getCell(colIdx + 2).fill = YELLOW_FILL;
+        r.getCell(colIdx + 3).fill = YELLOW_FILL;
       });
     }
   });
@@ -326,11 +333,6 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
   //   pairs 为 null / 非数组 / 空数组 → 完全不加 sheet（未勾选/无命中时主文件形态零变化）。
   if (Array.isArray(paymentOfflinePairs) && paymentOfflinePairs.length > 0) {
     appendPaymentOfflineSheets(workbook, paymentOfflinePairs);
-  }
-
-  // ===== v3.0.12 功能1：追加「异常-人工判断」sheet（仅命中非空时；空/null → 主文件形态零变化）=====
-  if (Array.isArray(manyToManyRows) && manyToManyRows.length > 0) {
-    appendManyToManyReviewSheet(workbook, manyToManyRows);
   }
 
   applyWatermark(workbook);
@@ -396,8 +398,9 @@ module.exports = {
   SHEET2_HIT_NAME,
   SHEET1_A1_NOTICE,
   HIT_DETAIL_HEADER,
+  MANY_TO_MANY_NOTE_HEADER,
   MARK_WITHOUT_RESULT,
-  // v3.0.12 功能1：异常-人工判断 sheet（集成测试断言 + caller 引用）
+  // v3.0.13：独立异常 sheet 已停用；常量保留给回归测试断言“不出现该 sheet”。
   SHEET_MANY_TO_MANY_NAME,
-  appendManyToManyReviewSheet
+  buildManyToManyNoteByRowId
 };

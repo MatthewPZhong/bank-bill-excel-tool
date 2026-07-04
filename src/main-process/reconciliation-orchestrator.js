@@ -185,36 +185,34 @@ function bucketScenarios(scenarios) {
 /**
  * 从「当前最新 bankRows」重建 modifiedRows / unmatchedRows（🔴 关键：不用 dispatcher 的过时浅拷贝）。
  *
- *   - modifiedRows：bankRows 中「被任一轮改过列 **或** 是 R2 命中行」的行，数据列取当前最新值（经全部轮次）。
- *     · R2 命中行：把 dispatcher 浅拷贝里的 `_` 前缀命中元数据嫁接过来（排除 _rowId/_modifiedColumns）。
+ *   - modifiedRows：bankRows 中「被任一轮实际改过列，或有非空异常说明」的行，数据列取当前最新值（经全部轮次）。
+ *     · 若该行也被 R2 命中过：把 dispatcher 浅拷贝里的 `_` 前缀命中元数据嫁接过来（排除 _rowId/_modifiedColumns）。
  *     · R4/R5 改的非 R2 命中行：进 modifiedRows、标黄对应列，但不带 R2 命中元数据
  *       （符合「不进 N5 命中场景行报表」——N5 报表只认 R2 元数据行）。
  *     · _modifiedColumns：跨轮合并后的 Set（标黄来源；必须是 Set，见文件头说明）。
- *   - unmatchedRows：bankRows 中「既未被任何轮改列、又不是 R2 命中行」的行（保留原始顺序 + 原始字段）。
+ *   - unmatchedRows：bankRows 中「未被任何轮实际改过列、且无非空异常说明」的行（保留原始顺序 + 原始字段）。
  *
- * 🔴 PR#62 P1 修复（保留 R2 锁定但未改值的命中行）：
- *   R2（dispatcher）first-match-wins 会「锁定一条银行行却不改任何值」——例如 C2 reconFields≥1
- *   配对成功后无条件锁定双方（scenario-engines/c2-offset-bill-mark.js:221-222），但 rightRow 的
- *   markValue.field 已等于目标值 → 不 record（同文件 :238 `if (oldValue===newValue) return;`），
- *   于是该行在 r2.modifiedRows 里（带 `_hitScenario*` 元数据、_modifiedColumns 为空 Set）却**无 modification 记录**
- *   → modColsByRowId 收不到它 → 旧逻辑只看 modColsByRowId.has 会把它误判进 unmatchedRows，
- *   导致它从主输出 sheet1 + 命中场景行报表消失（实际它已被 R2 消费）。
- *   修法：分区判定改为「有列改动 **或** 是 R2 命中行」（isHit）。R2 锁定未改值行 → 进 modifiedRows、
- *   带 R2 命中元数据、_modifiedColumns 为空 Set（不标黄但保留为命中）。
+ * R2 dispatcher 内部仍可「锁定但不改值」（用于 first-match-wins 防止后续 R2 场景重复消费），
+ * 但导出层的「命中场景」sheet 只展示实际发生字段变更或有异常说明的行。同值 no-op 行不进入 modifiedRows；
+ * 若同一行后续被 R4/R5 改写，或被 M2M 检测器标出非空异常说明，仍会进入 modifiedRows；
+ * 若该行同时带 R2 命中元数据，也会继续嫁接。
  *
- * 行数守恒：isHit 与 !isHit 互否且全覆盖 → modifiedRows.length + unmatchedRows.length === bankRows.length。
+ * 行数守恒：shouldGoToHitSheet 与 !shouldGoToHitSheet 互否且全覆盖 → modifiedRows.length + unmatchedRows.length === bankRows.length。
  *
  * @param {Array<Object>} bankRows 经全部轮次原地演化后的银行行
  * @param {Map<string|number, Set<string>>} modColsByRowId rowId → 被改列集合
  * @param {Map<string|number, Object>} r2HitByRowId rowId → R2 dispatcher 浅拷贝命中行（含 `_` 元数据）
+ * @param {Set<string|number>} visibleReviewRowIds 有非空异常说明、需在命中 sheet 可见的银行行 rowId
  * @returns {{ modifiedRows: Array<Object>, unmatchedRows: Array<Object> }}
  */
-function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
-  // 命中判定：有列改动（任一轮 record）或 是 R2 锁定命中行（即使未改值也被 R2 消费）
-  const isHit = (r) => modColsByRowId.has(r._rowId) || r2HitByRowId.has(r._rowId);
+function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId, visibleReviewRowIds = new Set()) {
+  const hasChangedColumns = (r) => modColsByRowId.has(r._rowId);
+  const hasReviewNote = (r) => visibleReviewRowIds.has(r._rowId);
+  // 导出判定：「命中场景」只保留用户可看见结果的行：实际字段变更，或有非空异常说明。
+  const shouldGoToHitSheet = (r) => hasChangedColumns(r) || hasReviewNote(r);
 
   const modifiedRows = bankRows
-    .filter(isHit)
+    .filter(shouldGoToHitSheet)
     .map((r) => {
       const out = { ...r }; // 当前最新行数据（经全部轮次）
       const r2hit = r2HitByRowId.get(r._rowId);
@@ -227,14 +225,25 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
         }
       }
       // 跨轮合并后的标黄列：必须是 Set（exceljs-writer 标黄依赖 .size / .has；与 dispatcher 产出一致）。
-      // R2 锁定但未改值的行 modColsByRowId 无记录 → 空 Set（不标黄，但仍作为命中行保留）。
       out._modifiedColumns = new Set(modColsByRowId.get(r._rowId) || []);
       return out;
     });
 
-  const unmatchedRows = bankRows.filter((r) => !isHit(r));
+  const unmatchedRows = bankRows.filter((r) => !shouldGoToHitSheet(r));
 
   return { modifiedRows, unmatchedRows };
+}
+
+function buildReviewRowIdSet(reviewRows) {
+  const ids = new Set();
+  for (const rv of Array.isArray(reviewRows) ? reviewRows : []) {
+    const row = rv && rv.row;
+    if (!row || row._rowId === undefined || row._rowId === null) continue;
+    const note = rv.note === null || rv.note === undefined ? '' : String(rv.note);
+    if (note.trim() === '') continue;
+    ids.add(row._rowId);
+  }
+  return ids;
 }
 
 /**
@@ -503,7 +512,13 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
   await yieldTick('M2M'); // 轮次边界让出（M2M 异常-人工判断检测已完成，进 buildOutputRows 前；上游 R5s4+detector 不再挤成同步块）
 
   // ===== 构造输出：从「当前最新 bankRows」重建（不用 dispatcher 过时浅拷贝）=====
-  const { modifiedRows, unmatchedRows } = buildOutputRows(bankRows, modColsByRowId, r2HitByRowId);
+  const visibleReviewRowIds = buildReviewRowIdSet(manyToManyReviewRows);
+  const { modifiedRows, unmatchedRows } = buildOutputRows(
+    bankRows,
+    modColsByRowId,
+    r2HitByRowId,
+    visibleReviewRowIds
+  );
 
   // v3.0.7 需求1a：按「渠道-地区」聚合命中行（行数 + 去重场景名），供 renderer 状态框「已处理」分支展示。
   //   纯只读聚合（不改任何匹配/派生），口径与 channel-enum-repository.extractChannelRegionCombos 单行逻辑同源。
@@ -573,6 +588,7 @@ module.exports = {
   runReconciliation,
   bucketScenarios,
   buildOutputRows,
+  buildReviewRowIdSet,
   // v3.0.7 需求1a：渠道-地区 命中聚合（供单测直接断言；状态框「已处理」分支数据源）
   buildChannelRegionHits
 };

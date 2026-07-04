@@ -78,6 +78,21 @@ function gwMatchesBank(gwRow, bankRow, reconFields, fee = null) {
   });
 }
 
+function chooseC3MatchedCandidatePreferExistingAssignValue(matched, bankRow, assign, isCustom) {
+  if (!Array.isArray(matched) || matched.length === 0) return null;
+  if (isCustom) return matched[0];
+  if (!assign || !assign.gwField || !assign.bankField) return matched[0];
+
+  const oldValue = normalizeCellValue(bankRow && bankRow[assign.bankField]);
+  if (oldValue === '') return matched[0];
+
+  const sameValue = matched.find((x) =>
+    normalizeCellValue(x && x.row && x.row[assign.gwField]) === oldValue
+  );
+
+  return sameValue || matched[0];
+}
+
 function runC3Scenario(scenario, bankRows, gwRows) {
   const warningCollector = makeWarningCollector(scenario.id, scenario.name);
   const modCollector = makeModificationCollector();
@@ -187,7 +202,8 @@ function runC3Scenario(scenario, bankRows, gwRows) {
         message: `bankRow 在网关账单中匹配到 ${matched.length} 行可用 gw${skippedNote}，取第一条（数据脏）`
       });
     }
-    const chosen = matched[0];
+    const chosen = chooseC3MatchedCandidatePreferExistingAssignValue(matched, bankRow, assign, isCustom);
+    if (!chosen) return;
 
     // ===== v2.1.15 W2 ⚠️ 资金红线：assign 赋值 + Extra Fee 写盘解耦（spec §4 W2）=====
     //   重构前（≤v2.1.14）：assign 在 oldValue===newValue 时提前 return，会**跳过** Extra Fee 写入。
@@ -253,6 +269,7 @@ function countC3BankCandidates(config, bankRows) {
 
 module.exports = {
   evalCondition, // v2.1.5 N3 新增（暴露给 smoke）
+  chooseC3MatchedCandidatePreferExistingAssignValue,
   getBankRowValueForC3,
   gwMatchesBank,
   runC3Scenario,

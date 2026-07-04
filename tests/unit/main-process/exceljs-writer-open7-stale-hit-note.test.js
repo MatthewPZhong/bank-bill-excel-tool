@@ -40,8 +40,8 @@ async function readHitDetailColumn(out) {
     header: s2.getCell(1, 1).value,
     r1Detail: s2.getCell(2, 1).value,
     r2Detail: s2.getCell(3, 1).value,
-    // 原数据右移 1 校验仍在第 2 列（parity：列布局不变）
-    r1Merchant: s2.getCell(2, 2).value
+    // v3.0.13 起第 2 列为「异常说明」，原数据右移 2 列。
+    r1Merchant: s2.getCell(2, 3).value
   };
 }
 
@@ -53,7 +53,7 @@ test('OPEN-7 出口②：不传 staleHitNotesByRowId → 命中明细字节不�
   assert.strictEqual(got.header, HIT_DETAIL_HEADER, '第1列表头=命中明细');
   assert.strictEqual(got.r1Detail, EXPECTED_R1_DETAIL, 'r1 命中明细 = 基线（无提醒污染）');
   assert.strictEqual(got.r2Detail, '', 'r2 无 modification → 命中明细空串（不变）');
-  assert.strictEqual(got.r1Merchant, 'm1', '原数据列布局不变（右移1）');
+  assert.strictEqual(got.r1Merchant, 'm1', '原数据列右移2');
 });
 
 // ===== parity-2：传 null / 空 Map → 同样字节不变（main 本批传 null 的等价路径）=====

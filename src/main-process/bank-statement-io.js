@@ -227,7 +227,7 @@ function ensureDateDir(exportRootDir) {
 // v2.1.16-beta.6 需求 B（🔴 资金红线）：双 sheet 重构「未命中场景 / 命中场景」。
 //   新增 modifications 透传 → 命中场景 sheet「命中明细」列数据源（D9）。
 // v3.0.4 块 F 修订 R2 Q14：可选 paymentOfflinePairs（Payment线下调拨匹配对）——非空时 writer 追加 3 核对 sheet。
-// v3.0.12 功能1：可选 manyToManyRows（异常-人工判断命中银行行 {row,note}）——非空时 writer 追加「异常-人工判断」sheet。
+// v3.0.13：可选 manyToManyRows（异常说明命中银行行 {row,note}）——writer 将 note 并入「命中场景」第 2 列。
 async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePath, unmatchedRows = null, modifications = null, paymentOfflinePairs = null, manyToManyRows = null }) {
   if (!Array.isArray(modifiedRows)) {
     throw new Error('writeBankStatementMainOutput: modifiedRows 必须是数组');
@@ -241,7 +241,7 @@ async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePat
   }
   // v2.1.7 round 3 F8：透传 unmatchedRows；v2.1.16-beta.6 需求 B：透传 modifications（命中明细列）；
   //   v3.0.4 块 F 修订 R2 Q14：透传 paymentOfflinePairs（追加匹配对照/银行行-原始/订单行-原始 3 sheet）。
-  //   v3.0.12 功能1：透传 manyToManyRows（writer 第 8 形参；第 7 形参 staleHitNotesByRowId 主链不传 → 显式 null 占位）。
+  //   v3.0.13：透传 manyToManyRows（writer 第 8 形参；第 7 形参 staleHitNotesByRowId 主链不传 → 显式 null 占位）。
   const result = await writeBankStatementOutput(
     modifiedRows, headers, mainFilePath, unmatchedRows, modifications, paymentOfflinePairs, null, manyToManyRows
   );

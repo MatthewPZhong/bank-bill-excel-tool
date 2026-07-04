@@ -14,6 +14,8 @@ const {
   SHEET2_HIT_NAME,
   SHEET1_A1_NOTICE,
   HIT_DETAIL_HEADER,
+  MANY_TO_MANY_NOTE_HEADER,
+  SHEET_MANY_TO_MANY_NAME,
   MARK_WITHOUT_RESULT
 } = require('../../../src/main-process/exceljs-writer');
 
@@ -116,8 +118,8 @@ test('B sheet1 未命中场景：A1 加粗提示 + 第1行表头(B列,#9上移) 
   assert.strictEqual(s1.getCell(3, 2).value, 'm1', '#9 其他未命中行随后（第3行 B 列）');
 });
 
-// ===== sheet2「命中场景」：命中明细列 + 原列右移 + 标黄（B-3/B-4/D5/D9）=====
-test('B sheet2 命中场景：第1列命中明细 + 原列右移1 + 标黄右移', async () => {
+// ===== sheet2「命中场景」：命中明细列 + 异常说明列 + 原列右移 + 标黄（B-3/B-4/D5/D9）=====
+test('B sheet2 命中场景：第1列命中明细 + 第2列异常说明 + 原列右移2 + 标黄右移', async () => {
   const headers = ['MerchantId', 'FundType', 'Amount'];
   const modifiedRows = [
     { MerchantId: 'm1', FundType: 'x', Amount: '0', _rowId: 'r1', _modifiedColumns: new Set(['FundType']) }
@@ -130,25 +132,55 @@ test('B sheet2 命中场景：第1列命中明细 + 原列右移1 + 标黄右移
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(out);
   const s2 = wb.getWorksheet(SHEET2_HIT_NAME);
-  // B-3：第1列表头 = 命中明细
+  // B-3：第1列表头 = 命中明细，第2列表头 = 异常说明
   assert.strictEqual(s2.getCell(1, 1).value, HIT_DETAIL_HEADER, '第1列表头=命中明细');
-  assert.strictEqual(s2.getCell(1, 2).value, 'MerchantId', '原表头右移1');
+  assert.strictEqual(s2.getCell(1, 2).value, MANY_TO_MANY_NOTE_HEADER, '第2列表头=异常说明');
+  assert.strictEqual(s2.getCell(1, 3).value, 'MerchantId', '原表头右移2');
   // B-4：命中明细内容（v3.0.7 需求B/C/D 格式 {字段名}:{wrap(旧)}→{wrap(新)}；old/x 均非数字→尖括号，全角箭头）
   assert.strictEqual(
     s2.getCell(2, 1).value,
     'FundType:<old>→<x>'
   );
-  // 原数据右移1：MerchantId 在第2列
-  assert.strictEqual(s2.getCell(2, 2).value, 'm1', '原数据列右移1');
-  // D5：FundType 标黄（headers index 1 → 右移列 = 1+1+2 = 第3列）
-  const fundCell = s2.getCell(2, 3);
+  assert.strictEqual(s2.getCell(2, 2).value, '', '无异常说明时第2列为空');
+  // 原数据右移2：MerchantId 在第3列
+  assert.strictEqual(s2.getCell(2, 3).value, 'm1', '原数据列右移2');
+  // D5：FundType 标黄（headers index 1 → 右移列 = 1+3 = 第4列）
+  const fundCell = s2.getCell(2, 4);
   assert.ok(
     fundCell.fill && fundCell.fill.fgColor && fundCell.fill.fgColor.argb === 'FFFFFF00',
-    'FundType 标黄保留（右移1）'
+    'FundType 标黄保留（右移2）'
   );
-  // 未改字段 MerchantId（第2列）不标黄
-  const mCell = s2.getCell(2, 2);
+  // 未改字段 MerchantId（第3列）不标黄
+  const mCell = s2.getCell(2, 3);
   assert.ok(!mCell.fill || !mCell.fill.fgColor, 'MerchantId 未改不标黄');
+});
+
+test('B sheet2 异常说明并入命中场景：不再输出独立异常 sheet，note 按 _rowId 写第2列并拼接', async () => {
+  const headers = ['MerchantId', 'FundType', 'Amount'];
+  const modifiedRows = [
+    { MerchantId: 'm1', FundType: 'x', Amount: '0', _rowId: 'r1', _modifiedColumns: new Set(['FundType']) },
+    { MerchantId: 'm2', FundType: 'y', Amount: '0', _rowId: 'r2', _modifiedColumns: new Set() },
+    { MerchantId: 'm3', FundType: 'z', Amount: '0', _rowId: 'r3', _modifiedColumns: new Set() }
+  ];
+  const manyToManyRows = [
+    { row: { _rowId: 'r2' }, note: '调拨多对多' },
+    { row: { _rowId: 'r2' }, note: '网关多对多' },
+    { row: { _rowId: 'r3' }, note: '   ' },
+    { row: { _rowId: 'missing' }, note: '不在命中行中' }
+  ];
+  const out = tmpFile('m2m-inline.xlsx');
+
+  await writeBankStatementOutput(modifiedRows, headers, out, [], [], null, null, manyToManyRows);
+
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(out);
+  assert.ok(!wb.getWorksheet(SHEET_MANY_TO_MANY_NAME), '不再生成独立「异常-人工判断」sheet');
+  assert.ok(!wb.getWorksheet('异常-人工处理'), '不生成历史别名「异常-人工处理」sheet');
+  const s2 = wb.getWorksheet(SHEET2_HIT_NAME);
+  assert.strictEqual(s2.getCell(2, 2).value, '', '无 note 的命中行异常说明为空');
+  assert.strictEqual(s2.getCell(3, 1).value, '', '仅有异常说明、无字段修改时命中明细为空');
+  assert.strictEqual(s2.getCell(3, 2).value, '调拨多对多; 网关多对多', '同 rowId 多条 note 用 "; " 拼接');
+  assert.strictEqual(s2.getCell(4, 2).value, '', '空 note 不写入异常说明');
 });
 
 // ===== B-6 行数守恒 + B-5 空边界 =====

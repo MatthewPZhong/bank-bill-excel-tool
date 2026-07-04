@@ -538,19 +538,20 @@ async function runExceljsWriterSmokeTests() {
 
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(out);
-    // v2.1.16-beta.6 需求B：命中行在「命中场景」sheet；第1列「命中明细」，原数据列右移1（colIdx+2）
+    // v3.0.13：命中行在「命中场景」sheet；第1列「命中明细」，第2列「异常说明」，原数据列右移2（colIdx+3）
     const sheet = wb.getWorksheet('命中场景');
     assert.strictEqual(sheet.getCell(1, 1).value, '命中明细', 'I1 表头第1列=命中明细');
-    assert.strictEqual(sheet.getCell(1, 2).value, 'col1', 'I1 表头 col1（右移1）');
-    assert.strictEqual(sheet.getCell(2, 3).value, 'b', 'I1 数据 r1.col2（右移1）');
-    // r1.col2 被标黄（col2 在第3列）
-    const r1c2Fill = sheet.getCell(2, 3).fill;
+    assert.strictEqual(sheet.getCell(1, 2).value, '异常说明', 'I1 表头第2列=异常说明');
+    assert.strictEqual(sheet.getCell(1, 3).value, 'col1', 'I1 表头 col1（右移2）');
+    assert.strictEqual(sheet.getCell(2, 4).value, 'b', 'I1 数据 r1.col2（右移2）');
+    // r1.col2 被标黄（col2 在第4列）
+    const r1c2Fill = sheet.getCell(2, 4).fill;
     assert(r1c2Fill && r1c2Fill.fgColor && r1c2Fill.fgColor.argb === 'FFFFFF00', 'I1 r1.col2 应黄底');
-    // r1.col1 未标黄（col1 在第2列）
-    const r1c1Fill = sheet.getCell(2, 2).fill;
+    // r1.col1 未标黄（col1 在第3列）
+    const r1c1Fill = sheet.getCell(2, 3).fill;
     assert(!r1c1Fill || !r1c1Fill.fgColor, 'I1 r1.col1 不应黄底');
-    // r2.col1 被标黄（col1 在第2列）
-    const r2c1Fill = sheet.getCell(3, 2).fill;
+    // r2.col1 被标黄（col1 在第3列）
+    const r2c1Fill = sheet.getCell(3, 3).fill;
     assert(r2c1Fill && r2c1Fill.fgColor && r2c1Fill.fgColor.argb === 'FFFFFF00', 'I1 r2.col1 应黄底');
   }
 
@@ -588,10 +589,11 @@ async function runExceljsWriterSmokeTests() {
 
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.readFile(out);
-    // v2.1.16-beta.6 需求B：空 modifiedRows → 「命中场景」sheet 仅表头（命中明细 + 原列）
+    // v3.0.13：空 modifiedRows → 「命中场景」sheet 仅表头（命中明细 + 异常说明 + 原列）
     const sheet = wb.getWorksheet('命中场景');
     assert.strictEqual(sheet.getCell(1, 1).value, '命中明细', 'I3 表头第1列=命中明细');
-    assert.strictEqual(sheet.getCell(1, 2).value, 'col1', 'I3 表头 col1（右移1）');
+    assert.strictEqual(sheet.getCell(1, 2).value, '异常说明', 'I3 表头第2列=异常说明');
+    assert.strictEqual(sheet.getCell(1, 3).value, 'col1', 'I3 表头 col1（右移2）');
     assert.strictEqual(sheet.actualRowCount, 1, 'I3 仅表头 1 行');
   }
 
