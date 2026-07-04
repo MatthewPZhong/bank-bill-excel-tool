@@ -254,16 +254,17 @@ test.describe('buildFundTransferReconRows - 调拨状态过滤（v3.0.13）', ()
     assert.equal(out.rows.length, 2);
   });
 
-  test('处理中 / 失败 / 空值 不生成', () => {
+  test('处理中 / 失败 / 成功 / 空值 不生成', () => {
     const out = buildFundTransferReconRows([
       midRow({ [M.status]: '处理中' }),
       midRow({ [M.status]: '失败' }),
+      midRow({ [M.status]: '成功' }),
       midRow({ [M.status]: '' })
     ]);
     assert.equal(out.total, 0);
     assert.equal(out.rows.length, 0);
-    assert.equal(out.sourceTotal, 3);
-    assert.equal(out.skippedStatusCount, 3);
+    assert.equal(out.sourceTotal, 4);
+    assert.equal(out.skippedStatusCount, 4);
   });
 
   test('混合 3 行，其中 2 行付款成功，输出 4 行', () => {
