@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  matchMerchantIds,
   normalizeMaintainedBigAccounts,
   resolveRecognizedBigAccount
 } = require('../../../src/main-process/big-account-recognition');
@@ -43,7 +44,7 @@ test.describe('resolveRecognizedBigAccount', () => {
 
     assert.deepEqual(result, {
       status: 'ok',
-      selectedBigAccount: { merchantId: 'A001', currency: 'USD' }
+      selectedBigAccount: { merchantId: 'A001', currency: 'USD', accountNature: 'client' }
     });
   });
 
@@ -56,8 +57,8 @@ test.describe('resolveRecognizedBigAccount', () => {
     assert.equal(result.status, 'needs-selection');
     assert.match(result.message, /币种无法唯一确定/);
     assert.deepEqual(result.candidates, [
-      { merchantId: 'A001', currency: 'USD' },
-      { merchantId: 'A001', currency: 'EUR' }
+      { merchantId: 'A001', currency: 'USD', accountNature: 'client' },
+      { merchantId: 'A001', currency: 'EUR', accountNature: 'client' }
     ]);
   });
 
@@ -70,7 +71,7 @@ test.describe('resolveRecognizedBigAccount', () => {
 
     assert.deepEqual(result, {
       status: 'ok',
-      selectedBigAccount: { merchantId: 'A001', currency: 'USD' }
+      selectedBigAccount: { merchantId: 'A001', currency: 'USD', accountNature: 'client' }
     });
   });
 
@@ -85,11 +86,25 @@ test.describe('normalizeMaintainedBigAccounts', () => {
   test('兼容 grouped 和 expanded 两种维护表形态', () => {
     assert.deepEqual(normalizeMaintainedBigAccounts([
       { merchantId: ' A001 ', currencies: [' USD ', '', 'EUR'] },
-      { merchantId: 'B002', currency: 'HKD' }
+      { merchantId: 'B002', currency: 'HKD', accountNature: 'own' },
+      { merchantId: 'C003', currencies: [] }
     ]), [
-      { merchantId: 'A001', currency: 'USD' },
-      { merchantId: 'A001', currency: 'EUR' },
-      { merchantId: 'B002', currency: 'HKD' }
+      { merchantId: 'A001', currency: 'USD', accountNature: 'client' },
+      { merchantId: 'A001', currency: 'EUR', accountNature: 'client' },
+      { merchantId: 'B002', currency: 'HKD', accountNature: 'own' },
+      { merchantId: 'C003', currency: '', accountNature: 'client' }
     ]);
+  });
+});
+
+test.describe('matchMerchantIds', () => {
+  test('直接识别放行路径禁用子串 fuzzy，避免 NET001 误吃 NET0011', () => {
+    assert.equal(matchMerchantIds('NET001', 'NET001', { allowSubstring: false }), 'exact');
+    assert.equal(matchMerchantIds('NET-001', 'NET001', { allowSubstring: false }), 'fuzzy');
+    assert.equal(matchMerchantIds('NET0011', 'NET001', { allowSubstring: false }), 'none');
+  });
+
+  test('默认 fuzzy 仍保留子串匹配，供既有顺序提示路径使用', () => {
+    assert.equal(matchMerchantIds('NET0011', 'NET001'), 'fuzzy');
   });
 });

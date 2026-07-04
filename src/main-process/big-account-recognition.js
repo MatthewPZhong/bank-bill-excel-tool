@@ -5,25 +5,55 @@ function normalizeCell(value) {
   return String(value).trim();
 }
 
+function normalizeAccountNature(value) {
+  return normalizeCell(value) === 'own' ? 'own' : 'client';
+}
+
+function stripSpecialCharsForMatch(value) {
+  return String(value || '').replace(/[\s\-_()（）[\]【】]/g, '');
+}
+
+function matchMerchantIds(cellValue, merchantId, options = {}) {
+  const { allowSubstring = true } = options;
+  const a = normalizeCell(cellValue);
+  const b = normalizeCell(merchantId);
+  if (!a || !b) return 'none';
+  if (a === b) return 'exact';
+  const sa = stripSpecialCharsForMatch(a);
+  const sb = stripSpecialCharsForMatch(b);
+  if (sa && sb && sa === sb) return 'fuzzy';
+  if (allowSubstring && sa && sb && (sa.includes(sb) || sb.includes(sa))) return 'fuzzy';
+  return 'none';
+}
+
 function normalizeMaintainedBigAccounts(maintainedBigAccounts = []) {
   const rows = [];
 
   (Array.isArray(maintainedBigAccounts) ? maintainedBigAccounts : []).forEach((item) => {
     const merchantId = normalizeCell(item && item.merchantId);
     if (!merchantId) return;
+    const accountNature = normalizeAccountNature(item && item.accountNature);
+    const pushRow = (currency) => rows.push({
+      merchantId,
+      currency: normalizeCell(currency),
+      accountNature
+    });
 
     if (Array.isArray(item.currencies)) {
-      item.currencies
-        .map((currency) => normalizeCell(currency))
-        .filter((currency) => currency !== '')
-        .forEach((currency) => rows.push({ merchantId, currency }));
+      const currencies = Array.from(new Set(
+        item.currencies
+          .map((currency) => normalizeCell(currency))
+          .filter((currency) => currency !== '')
+      ));
+      if (currencies.length) {
+        currencies.forEach(pushRow);
+      } else {
+        pushRow(item.currency);
+      }
       return;
     }
 
-    rows.push({
-      merchantId,
-      currency: normalizeCell(item && item.currency)
-    });
+    pushRow(item && item.currency);
   });
 
   return rows;
@@ -104,5 +134,6 @@ function resolveRecognizedBigAccount({
 
 module.exports = {
   normalizeMaintainedBigAccounts,
+  matchMerchantIds,
   resolveRecognizedBigAccount
 };

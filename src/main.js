@@ -317,6 +317,8 @@ const {
   showImportOpenDialog: showRememberedImportOpenDialog
 } = require('./main-process/import-dialog-state');
 const {
+  matchMerchantIds,
+  normalizeMaintainedBigAccounts,
   resolveRecognizedBigAccount
 } = require('./main-process/big-account-recognition');
 
@@ -1174,22 +1176,6 @@ function identifyAccountBlocks(detailRows, options = {}) {
   return [];
 }
 
-function stripSpecialCharsForMatch(value) {
-  return String(value || '').replace(/[\s\-_()（）[\]【】]/g, '');
-}
-
-function matchMerchantIds(cellValue, merchantId) {
-  const a = normalizeCell(cellValue);
-  const b = normalizeCell(merchantId);
-  if (!a || !b) return 'none';
-  if (a === b) return 'exact';
-  const sa = stripSpecialCharsForMatch(a);
-  const sb = stripSpecialCharsForMatch(b);
-  if (sa && sb && sa === sb) return 'fuzzy';
-  if (sa && sb && (sa.includes(sb) || sb.includes(sa))) return 'fuzzy';
-  return 'none';
-}
-
 function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
   const normalizedExpected = (expectedSourceHeaders || [])
     .map((h) => normalizeCell(h))
@@ -1213,9 +1199,25 @@ function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
   return results;
 }
 
-function identifyAccountsFromFile({ filePath, detailRows, expectedSourceHeaders, allMerchantIds }) {
-  const rawRows = readRows(filePath, { blankrows: true });
-  const headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
+const BIG_ACCOUNT_RECOGNITION_SCAN_MAX_ROWS = 64;
+
+function readRowsForBigAccountRecognition(filePath) {
+  try {
+    return readRows(filePath, { blankrows: true, maxRows: BIG_ACCOUNT_RECOGNITION_SCAN_MAX_ROWS });
+  } catch (_headReadError) {
+    return readRows(filePath, { blankrows: true });
+  }
+}
+
+function identifyAccountsFromFile({ filePath, expectedSourceHeaders, allMerchantIds, allowSubstringMatch = true }) {
+  let rawRows = readRowsForBigAccountRecognition(filePath);
+  let headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
+
+  if (!headerRowNumbers.length && rawRows.length >= BIG_ACCOUNT_RECOGNITION_SCAN_MAX_ROWS) {
+    rawRows = readRows(filePath, { blankrows: true });
+    headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
+  }
+
   const isSingleAccount = headerRowNumbers.length <= 1;
   const identified = [];
 
@@ -1232,7 +1234,7 @@ function identifyAccountsFromFile({ filePath, detailRows, expectedSourceHeaders,
         const cellStr = normalizeCell(cell);
         if (!cellStr) continue;
         for (const mid of allMerchantIds) {
-          const result = matchMerchantIds(cellStr, mid);
+          const result = matchMerchantIds(cellStr, mid, { allowSubstring: allowSubstringMatch });
           if (result === 'exact') {
             bestMatch = mid;
             bestMatchType = 'exact';
@@ -1320,9 +1322,9 @@ function resolveDirectBigAccountRecognition({
       ? { accounts: [], isSingleAccount: false }
       : identifyAccountsFromFile({
           filePath: entry.filePath,
-          detailRows: entry.detailRows,
           expectedSourceHeaders: entry.matchedHeaders || entryTemplateConfig.template?.headers || [],
-          allMerchantIds
+          allMerchantIds,
+          allowSubstringMatch: false
         });
     const identifiedMerchantIds = uniqueNormalizedValues(
       (fileResult.accounts || []).map((account) => account.merchantId)
@@ -1683,31 +1685,7 @@ function getTemplateLibraryFilePath() {
 }
 
 function expandBigAccountConfigurations(bigAccounts = []) {
-  const expandedRows = [];
-
-  bigAccounts.forEach((item) => {
-    const merchantId = normalizeCell(item.merchantId);
-    const currencies = Array.from(
-      new Set(
-        (Array.isArray(item.currencies) ? item.currencies : [])
-          .map((value) => normalizeCell(value))
-          .filter((value) => value !== '')
-      )
-    );
-    // v1.5.3 R2：透传 accountNature 到展平行（写入 template_big_accounts 时入库）
-    const rawNature = typeof item.accountNature === 'string' ? item.accountNature.trim() : '';
-    const accountNature = rawNature === 'own' ? 'own' : 'client';
-
-    currencies.forEach((currency) => {
-      expandedRows.push({
-        merchantId,
-        currency,
-        accountNature
-      });
-    });
-  });
-
-  return expandedRows;
+  return normalizeMaintainedBigAccounts(bigAccounts);
 }
 
 function buildTemplateLibraryPayload() {
