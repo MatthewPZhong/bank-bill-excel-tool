@@ -1,15 +1,15 @@
 {
   "meta": {
     "version": "3.0.13",
-    "scannedAt": "2026-07-04T10:06:14.678Z",
+    "scannedAt": "2026-07-04T15:33:08.823Z",
     "root": "src",
     "totalFiles": 173,
-    "totalTopLevelNames": 1773,
+    "totalTopLevelNames": 1781,
     "buckets": {
       "shared": 300,
-      "paired": 492,
-      "local": 856,
-      "crossFile": 792
+      "paired": 495,
+      "local": 861,
+      "crossFile": 795
     }
   },
   "A": {
@@ -488,7 +488,7 @@
           },
           {
             "file": "src/main-process/import-dialog-state.js",
-            "count": 3
+            "count": 2
           },
           {
             "file": "src/main-process/pending-session.js",
@@ -527,7 +527,7 @@
             "count": 1
           }
         ],
-        "totalHits": 128,
+        "totalHits": 127,
         "fileSpan": 42
       },
       {
@@ -618,7 +618,7 @@
           },
           {
             "file": "src/main-process/big-account-recognition.js",
-            "count": 9
+            "count": 12
           },
           {
             "file": "src/main-process/biz-op-recon-session.js",
@@ -653,7 +653,7 @@
             "count": 2
           }
         ],
-        "totalHits": 140,
+        "totalHits": 143,
         "fileSpan": 26
       },
       {
@@ -5971,7 +5971,7 @@
         "refFiles": [
           {
             "file": "src/renderer-dialogs.js",
-            "count": 150
+            "count": 151
           },
           {
             "file": "src/renderer-previews.js",
@@ -5982,7 +5982,7 @@
             "count": 29
           }
         ],
-        "totalHits": 180,
+        "totalHits": 181,
         "fileSpan": 3
       },
       {
@@ -6072,10 +6072,10 @@
           },
           {
             "file": "src/main-process/import-dialog-state.js",
-            "count": 3
+            "count": 4
           }
         ],
-        "totalHits": 36,
+        "totalHits": 37,
         "fileSpan": 3
       },
       {
@@ -10331,6 +10331,24 @@
         "fileSpan": 2
       },
       {
+        "name": "ALL_MODULE_IDS",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 2
+      },
+      {
         "name": "applyManualBalancePromptStatus",
         "defFiles": [
           "src/renderer.js"
@@ -14175,6 +14193,24 @@
         "fileSpan": 2
       },
       {
+        "name": "getLastImportDirectoryCandidates",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "getMaxBocFxOrigGroupNo",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -14770,6 +14806,24 @@
           {
             "file": "src/renderer.js",
             "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "normalizeMaintainedBigAccounts",
+        "defFiles": [
+          "src/main-process/big-account-recognition.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/big-account-recognition.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
           }
         ],
         "totalHits": 4,
@@ -16694,24 +16748,6 @@
         "fileSpan": 2
       },
       {
-        "name": "getLastImportDirectory",
-        "defFiles": [
-          "src/backend/database/settings-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/settings-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/import-dialog-state.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 2
-      },
-      {
         "name": "getLatestRunByMonth",
         "defFiles": [
           "src/backend/vcc-op-calc-db/run-repository.js"
@@ -17248,6 +17284,24 @@
           },
           {
             "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "matchMerchantIds",
+        "defFiles": [
+          "src/main-process/big-account-recognition.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/big-account-recognition.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
             "count": 1
           }
         ],
@@ -19132,6 +19186,20 @@
         "fileSpan": 1
       },
       {
+        "name": "LAST_IMPORT_DIRECTORY_GLOBAL_KEY",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
         "name": "lastBusyEndTs",
         "defFiles": [
           "src/main-process/run-check-worker-pool.js"
@@ -19223,20 +19291,6 @@
         "refFiles": [
           {
             "file": "src/backend/database/linked-table-repository.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 1
-      },
-      {
-        "name": "ALL_MODULE_IDS",
-        "defFiles": [
-          "src/backend/database/settings-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/settings-repository.js",
             "count": 6
           }
         ],
@@ -20077,20 +20131,6 @@
         "refFiles": [
           {
             "file": "src/backend/database/scenarios-repository.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
-        "name": "LAST_IMPORT_DIRECTORY_GLOBAL_KEY",
-        "defFiles": [
-          "src/backend/database/settings-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/settings-repository.js",
             "count": 5
           }
         ],
@@ -23374,6 +23414,20 @@
         "fileSpan": 1
       },
       {
+        "name": "EXTRA_IMPORT_DIALOG_SCOPES",
+        "defFiles": [
+          "src/main-process/import-dialog-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "extractChannelLocation",
         "defFiles": [
           "src/main-process/scenario-dispatcher.js"
@@ -24648,20 +24702,6 @@
         "fileSpan": 1
       },
       {
-        "name": "normalizeMaintainedBigAccounts",
-        "defFiles": [
-          "src/main-process/big-account-recognition.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/big-account-recognition.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "normalizePositiveInt",
         "defFiles": [
           "src/backend/toolbox-xlsx-stream/bounded-values-accumulator.js"
@@ -25740,6 +25780,20 @@
         "fileSpan": 1
       },
       {
+        "name": "STAT_TIMEOUT_MS",
+        "defFiles": [
+          "src/main-process/import-dialog-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "STATS_TMP_FILENAME",
         "defFiles": [
           "src/backend/usage-stats.js"
@@ -25817,6 +25871,20 @@
         "refFiles": [
           {
             "file": "src/main-process/exceljs-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "stripSpecialCharsForMatch",
+        "defFiles": [
+          "src/main-process/big-account-recognition.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/big-account-recognition.js",
             "count": 3
           }
         ],
@@ -27770,6 +27838,20 @@
         "fileSpan": 1
       },
       {
+        "name": "getLastImportDirectory",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "getLatestDateByBu",
         "defFiles": [
           "src/backend/biz-op-recon-db/imports-repository.js"
@@ -28029,6 +28111,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "IMPORT_DIALOG_SCOPES",
+        "defFiles": [
+          "src/main-process/import-dialog-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/import-dialog-state.js",
             "count": 2
           }
         ],
@@ -28701,6 +28797,20 @@
         "refFiles": [
           {
             "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "normalizeAccountNature",
+        "defFiles": [
+          "src/main-process/big-account-recognition.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/big-account-recognition.js",
             "count": 2
           }
         ],
@@ -29982,6 +30092,20 @@
         "fileSpan": 1
       },
       {
+        "name": "statWithTimeout",
+        "defFiles": [
+          "src/main-process/import-dialog-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/import-dialog-state.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "T54_RE",
         "defFiles": [
           "src/main-process/scenario-engines/r5-refund-order-backfill.js"
@@ -30780,7 +30904,7 @@
         },
         {
           "file": "src/main-process/import-dialog-state.js",
-          "count": 3
+          "count": 2
         },
         {
           "file": "src/main-process/pending-session.js",
@@ -30819,7 +30943,7 @@
           "count": 1
         }
       ],
-      "totalHits": 128,
+      "totalHits": 127,
       "fileSpan": 42
     },
     {
@@ -30910,7 +31034,7 @@
         },
         {
           "file": "src/main-process/big-account-recognition.js",
-          "count": 9
+          "count": 12
         },
         {
           "file": "src/main-process/biz-op-recon-session.js",
@@ -30945,7 +31069,7 @@
           "count": 2
         }
       ],
-      "totalHits": 140,
+      "totalHits": 143,
       "fileSpan": 26
     },
     {
@@ -36263,7 +36387,7 @@
       "refFiles": [
         {
           "file": "src/renderer-dialogs.js",
-          "count": 150
+          "count": 151
         },
         {
           "file": "src/renderer-previews.js",
@@ -36274,7 +36398,7 @@
           "count": 29
         }
       ],
-      "totalHits": 180,
+      "totalHits": 181,
       "fileSpan": 3
     },
     {
@@ -36364,10 +36488,10 @@
         },
         {
           "file": "src/main-process/import-dialog-state.js",
-          "count": 3
+          "count": 4
         }
       ],
-      "totalHits": 36,
+      "totalHits": 37,
       "fileSpan": 3
     },
     {
@@ -40621,6 +40745,24 @@
       "fileSpan": 2
     },
     {
+      "name": "ALL_MODULE_IDS",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/import-dialog-state.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 2
+    },
+    {
       "name": "applyManualBalancePromptStatus",
       "defFiles": [
         "src/renderer.js"
@@ -44465,6 +44607,24 @@
       "fileSpan": 2
     },
     {
+      "name": "getLastImportDirectoryCandidates",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/import-dialog-state.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "getMaxBocFxOrigGroupNo",
       "defFiles": [
         "src/backend/database/linked-table-repository.js"
@@ -45060,6 +45220,24 @@
         {
           "file": "src/renderer.js",
           "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "normalizeMaintainedBigAccounts",
+      "defFiles": [
+        "src/main-process/big-account-recognition.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/big-account-recognition.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
         }
       ],
       "totalHits": 4,
@@ -46984,24 +47162,6 @@
       "fileSpan": 2
     },
     {
-      "name": "getLastImportDirectory",
-      "defFiles": [
-        "src/backend/database/settings-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database/settings-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/import-dialog-state.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 3,
-      "fileSpan": 2
-    },
-    {
       "name": "getLatestRunByMonth",
       "defFiles": [
         "src/backend/vcc-op-calc-db/run-repository.js"
@@ -47538,6 +47698,24 @@
         },
         {
           "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "matchMerchantIds",
+      "defFiles": [
+        "src/main-process/big-account-recognition.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/big-account-recognition.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
           "count": 1
         }
       ],

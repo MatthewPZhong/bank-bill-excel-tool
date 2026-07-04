@@ -290,6 +290,7 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
   //   空数组（全未命中）仍输出含表头的空 sheet（AC B-5）。
   const s2 = workbook.addWorksheet(SHEET2_HIT_NAME);
   const hitHeaders = [HIT_DETAIL_HEADER, MANY_TO_MANY_NOTE_HEADER, ...headers];
+  const hitDataColumnOffset = hitHeaders.length - headers.length + 1;
   s2.addRow(hitHeaders);
   s2.getRow(1).font = { bold: true, size: 10 };
 
@@ -319,12 +320,12 @@ async function writeBankStatementOutput(rows, headers, savePath, unmatchedRows =
     // v3.0.7 需求C：命中明细单行紧凑显示，关闭自动换行（wrapText:false）→ 不再撑高行；仅保留顶端对齐。
     r.getCell(1).alignment = { wrapText: false, vertical: 'top' };
     r.getCell(2).alignment = { wrapText: false, vertical: 'top' };
-    // 保留原标黄（D5）：_modifiedColumns 对应单元格黄底；命中明细+异常说明两列后移 → colIdx + 3
+    // 保留原标黄（D5）：_modifiedColumns 对应单元格黄底；前缀列变化时自动右移。
     const modifiedColumns = row._modifiedColumns;
     if (modifiedColumns && modifiedColumns.size > 0) {
       headers.forEach((header, colIdx) => {
         if (!modifiedColumns.has(header)) return;
-        r.getCell(colIdx + 3).fill = YELLOW_FILL;
+        r.getCell(colIdx + hitDataColumnOffset).fill = YELLOW_FILL;
       });
     }
   });
