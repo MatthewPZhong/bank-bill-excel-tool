@@ -84,6 +84,7 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     const uiEnd = renderer.indexOf('async function refreshPreFundReconciliationStatus(', uiStart);
     const updateUi = renderer.slice(uiStart, uiEnd);
     assert.match(updateUi, /let text = '欢迎使用小助手'/);
+    assert.match(updateUi, /if \(run\.unavailable\)[\s\S]*unavailableMessage/);
     assert.doesNotMatch(updateUi, /请导入银行对账单|tempBatchCount > 0 \|\| linkedRowCount > 0/);
   });
 
@@ -106,6 +107,8 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     }
     assert.match(main, /temp:count-by-date-range'[\s\S]*countTempByDateRange\(payload\)/);
     assert.match(main, /temp:delete-by-date-range'[\s\S]*tryAcquireBankStatementOpLock\('pre-fund-delete-temp-by-date-range'\)[\s\S]*deleteTempByDateRange\(payload\)/);
+    assert.match(main, /function schedulePreFundReconciliationStartupCleanup\(\)[\s\S]*getPreFundReconciliationService\(\)/);
+    assert.match(main, /database\.init\(\);[\s\S]*schedulePreFundReconciliationStartupCleanup\(\)/);
     assert.match(preload, /countTempByDateRange:\s*\(start, end, sourceType\)[\s\S]*\{ start, end, sourceType \}/);
     assert.match(preload, /deleteTempByDateRange:\s*\(start, end, sourceType\)[\s\S]*\{ start, end, sourceType \}/);
     for (const channel of [

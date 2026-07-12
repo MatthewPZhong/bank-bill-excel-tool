@@ -13323,6 +13323,23 @@ function getPreFundReconciliationService() {
   return preFundReconciliationService;
 }
 
+function schedulePreFundReconciliationStartupCleanup() {
+  setImmediate(() => {
+    try {
+      getPreFundReconciliationService();
+    } catch (error) {
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'pre-fund-reconciliation',
+        message: '前置资金对账启动结果回收失败',
+        details: [error && error.message ? error.message : String(error)],
+        stack: error && error.stack ? error.stack : undefined
+      });
+    }
+  });
+}
+
 function preFundFailureResult(error) {
   return {
     status: 'failed',
@@ -13925,6 +13942,8 @@ function runBackgroundInitChain() {
     database = new AppDatabase(dataPath);
     database.init();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
+    // 结果侧库只服务上一进程的最后一次 run；即使模块默认关闭，也要在本次启动后台立即回收。
+    schedulePreFundReconciliationStartupCleanup();
 
     // v2.0.0-beta.2 F4 / v2.1.15 W4：ui_style 收敛迁移 —— 老库存了 'General'/非法值就地迁移为 'Clear'，未写则 seed 'Clear'。
     //   General 风格已弃用，setUiStyle 写链路移除，APP_PREVIEW_STYLE 强制风格随之去除（风格恒 Clear）。

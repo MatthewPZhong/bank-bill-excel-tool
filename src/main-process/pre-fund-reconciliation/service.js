@@ -14,10 +14,8 @@ const {
 const runDataStore = require('../../backend/run-data-store');
 const {
   BANK_ROW_CLASSIFICATION,
-  BankRowValidationError,
   classifyBankRow,
-  toInvalidBothNonzeroError,
-  trimCell
+  toInvalidBothNonzeroError
 } = require('./bank-row');
 const {
   GATEWAY_SOURCE,
@@ -83,14 +81,6 @@ function requireManagedMptSourceType(value) {
 
 function rollbackQuietly(db) {
   try { db.exec('ROLLBACK'); } catch (_error) { /* no active transaction */ }
-}
-
-function statFile(filePath) {
-  const stats = fs.statSync(filePath);
-  return {
-    size: stats.size,
-    modifiedAtMs: Math.trunc(stats.mtimeMs)
-  };
 }
 
 function bankContext(row, index, fileName) {
@@ -212,7 +202,6 @@ class PreFundReconciliationService {
       fileName: parsed.fileName,
       importedAt: this.now().toISOString(),
       revision: this.bankRevision,
-      fileStat: statFile(parsed.filePath),
       rows,
       summary
     };
@@ -311,10 +300,55 @@ class PreFundReconciliationService {
     return stableHash(current) !== stableHash(this.lastRun.snapshot);
   }
 
+  inspectLastRunAvailability() {
+    if (!this.lastRun) return { available: false, message: '请先运行前置资金对账' };
+    try {
+      const storedRun = this.runStore.getRun(this.lastRun.monthKey, this.lastRun.sideRunId);
+      if (!storedRun) {
+        return {
+          available: false,
+          markUnavailable: true,
+          message: '运行结果侧库文件不存在或结果记录已丢失，请重新运行'
+        };
+      }
+      if (storedRun.status !== 'success') {
+        return {
+          available: false,
+          message: `运行结果状态为 ${storedRun.status}，请重新运行`
+        };
+      }
+      return { available: true, message: '' };
+    } catch (error) {
+      return {
+        available: false,
+        message: `运行结果无法读取，请重新运行：${error.message || error}`
+      };
+    }
+  }
+
+  recordLastRunUnavailable(availability) {
+    if (!this.lastRun || !availability || !availability.markUnavailable) return;
+    if (this.lastRun.unavailableRecorded) return;
+    try {
+      this.database.markPreFundReconciliationRunMirrorUnavailable(
+        this.lastRun.runId,
+        'missing-side-db',
+        availability.message
+      );
+      this.lastRun.unavailableRecorded = true;
+    } catch (_error) {
+      // 状态页仍会禁用导出；镜像更新失败不应把只读状态查询升级为崩溃。
+    }
+  }
+
   status() {
     const batches = this.tempStore.listBatches();
     const linkedMeta = this.database.getLinkedTableMeta('gateway-bill');
-    const stale = this.isLastRunStale();
+    const availability = this.lastRun
+      ? this.inspectLastRunAvailability()
+      : { available: false, message: '' };
+    this.recordLastRunUnavailable(availability);
+    const stale = this.lastRun && availability.available ? this.isLastRunStale() : false;
     return {
       status: 'ok',
       scenario: SCENARIO_MISSING_GATEWAY,
@@ -334,10 +368,15 @@ class PreFundReconciliationService {
         monthKey: this.lastRun.monthKey,
         runId: this.lastRun.runId,
         summary: this.lastRun.summary,
-        stale
+        stale,
+        unavailable: !availability.available,
+        unavailableMessage: availability.message
       } : null,
       canRun: !!this.bankSession && (batches.length > 0 || linkedMeta.rowCount > 0),
-      canExport: !!this.lastRun && !stale
+      canExport: !!this.lastRun
+        && availability.available
+        && !stale
+        && (Number(this.lastRun.summary && this.lastRun.summary.channelCount) || 0) > 0
     };
   }
 
@@ -550,6 +589,14 @@ class PreFundReconciliationService {
     if (!this.lastRun) {
       throw new PreFundReconciliationError('pre-fund-run-missing', '请先运行前置资金对账');
     }
+    const availability = this.inspectLastRunAvailability();
+    if (!availability.available) {
+      this.recordLastRunUnavailable(availability);
+      throw new PreFundReconciliationError(
+        'pre-fund-run-unavailable',
+        availability.message || '运行结果不可用，请重新运行'
+      );
+    }
     if (this.isLastRunStale()) {
       throw new PreFundReconciliationError('pre-fund-run-stale', '数据来源已变化，请重新运行后再导出');
     }
@@ -574,14 +621,18 @@ class PreFundReconciliationService {
 
     fs.mkdirSync(outputDirectory, { recursive: true });
     const backups = [];
+    const untouchedConflictPaths = new Set(conflicts.map((item) => item.filePath));
+    let files;
     try {
       for (const item of conflicts) {
-        const backupPath = `${item.filePath}.${process.pid}-${Date.now()}.bak`;
+        const backupNonce = `${process.pid}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}`;
+        const backupPath = `${item.filePath}.${backupNonce}.bak`;
         fs.renameSync(item.filePath, backupPath);
         backups.push({ filePath: item.filePath, backupPath });
+        untouchedConflictPaths.delete(item.filePath);
       }
       if (onProgress) onProgress({ stage: 'export-start', current: 0, total: plan.length });
-      const files = await writeChannelWorkbooks({
+      files = await writeChannelWorkbooks({
         templatePath: this.templatePath,
         outputDirectory,
         exportDate,
@@ -590,18 +641,45 @@ class PreFundReconciliationService {
           this.lastRun.sideRunId
         )
       });
-      for (const backup of backups) fs.rmSync(backup.backupPath, { force: true });
-      if (onProgress) onProgress({ stage: 'export-done', current: files.length, total: files.length });
-      return { status: 'ok', files };
     } catch (error) {
+      const rollbackIssues = [];
       for (const item of plan) {
-        try { fs.rmSync(item.filePath, { force: true }); } catch (_removeError) {}
+        if (untouchedConflictPaths.has(item.filePath)) continue;
+        try {
+          fs.rmSync(item.filePath, { force: true });
+        } catch (removeError) {
+          rollbackIssues.push(`无法清理新文件 ${item.fileName}：${removeError.message || removeError}`);
+        }
       }
       for (const backup of backups.reverse()) {
-        try { fs.renameSync(backup.backupPath, backup.filePath); } catch (_restoreError) {}
+        try {
+          fs.renameSync(backup.backupPath, backup.filePath);
+        } catch (restoreError) {
+          rollbackIssues.push(
+            `无法恢复原文件 ${path.basename(backup.filePath)}，备份保留在 ${backup.backupPath}：${restoreError.message || restoreError}`
+          );
+        }
+      }
+      if (rollbackIssues.length > 0) {
+        throw new Error(`${error.message || error}；${rollbackIssues.join('；')}`, { cause: error });
       }
       throw error;
     }
+
+    // 新文件已经全部完成，至此视为提交成功。清理备份失败只留下可人工删除的 .bak，
+    // 不能再回滚并删除已成功的新文件。
+    const warnings = [];
+    for (const backup of backups) {
+      try {
+        fs.rmSync(backup.backupPath, { force: true });
+      } catch (cleanupError) {
+        warnings.push(
+          `新文件已导出，但旧文件备份未能删除：${backup.backupPath}（${cleanupError.message || cleanupError}）`
+        );
+      }
+    }
+    if (onProgress) onProgress({ stage: 'export-done', current: files.length, total: files.length });
+    return { status: 'ok', files, warnings };
   }
 }
 

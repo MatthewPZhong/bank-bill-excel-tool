@@ -2,12 +2,16 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { once } = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const zlib = require('node:zlib');
 
-const { parseMptFile } = require('../../../../src/main-process/pre-fund-reconciliation/mpt-parser');
+const {
+  MAX_LINE_LENGTH,
+  parseMptFile,
+} = require('../../../../src/main-process/pre-fund-reconciliation/mpt-parser');
 const {
   INBOUND_FIELDS,
   MPT_DELIMITER,
@@ -104,6 +108,22 @@ function writeFixture({
   return filePath;
 }
 
+async function writeLargeGzipFixture({ fileName, header, row, rowCount }) {
+  const filePath = path.join(tmpdir, fileName);
+  const gzip = zlib.createGzip();
+  const output = fs.createWriteStream(filePath);
+  gzip.pipe(output);
+  const finished = once(output, 'finish');
+  gzip.write(`${header.join(MPT_DELIMITER)}\n`);
+  const line = `${row.join(MPT_DELIMITER)}\n`;
+  for (let index = 0; index < rowCount; index += 1) {
+    if (!gzip.write(line)) await once(gzip, 'drain');
+  }
+  gzip.end();
+  await finished;
+  return filePath;
+}
+
 async function parseCollect(filePath, options = {}) {
   const rows = [];
   const batchSizes = [];
@@ -182,6 +202,34 @@ test.describe('txt/gz、BOM、首行形状识别与批量背压', () => {
     });
     const parsed = await parseCollect(filePath, { batchSize: 2 });
     assert.deepEqual(parsed.batchSizes, [2, 2, 1]);
+  });
+
+  test('10 万行 gzip 按有界批次流式解析', async () => {
+    const rowCount = 100_000;
+    const batchSize = 1_000;
+    const filePath = await writeLargeGzipFixture({
+      fileName: 'MPT_INBOUND_GATEWAY_20260708_100000.gz',
+      header: ['20260708', 'MPT_INBOUND_20260708', String(rowCount)],
+      row: inboundRow(),
+      rowCount,
+    });
+    let deliveredRows = 0;
+    let batchCount = 0;
+    let maxBatchSize = 0;
+
+    const result = await parseMptFile(filePath, {
+      batchSize,
+      onRows(batch) {
+        deliveredRows += batch.length;
+        batchCount += 1;
+        maxBatchSize = Math.max(maxBatchSize, batch.length);
+      },
+    });
+
+    assert.equal(result.parsedRowCount, rowCount);
+    assert.equal(deliveredRows, rowCount);
+    assert.equal(batchCount, rowCount / batchSize);
+    assert.equal(maxBatchSize, batchSize);
   });
 });
 
@@ -283,5 +331,12 @@ test.describe('强校验错误', () => {
     const header = Buffer.from(`20260708${MPT_DELIMITER}MPT_INBOUND_20260708${MPT_DELIMITER}1\n`, 'utf8');
     fs.writeFileSync(filePath, Buffer.concat([header, Buffer.from([0xff, 0xfe, 0xfd])]));
     await expectCode(filePath, 'MPT_UTF8_INVALID');
+  });
+
+  test('含换行符的超长明细行仍受单行安全上限拦截', async () => {
+    const filePath = path.join(tmpdir, 'MPT_INBOUND_GATEWAY_20260708_207.txt');
+    const header = `20260708${MPT_DELIMITER}MPT_INBOUND_20260708${MPT_DELIMITER}1\n`;
+    fs.writeFileSync(filePath, `${header}${'x'.repeat(MAX_LINE_LENGTH + 1)}\n`, 'utf8');
+    await expectCode(filePath, 'MPT_LINE_TOO_LONG');
   });
 });

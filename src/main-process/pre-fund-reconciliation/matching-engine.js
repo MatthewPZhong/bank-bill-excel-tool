@@ -33,7 +33,7 @@ const FIELD_ALIASES = Object.freeze({
   reconciliationId: ['reconciliationId', 'reconciliationid', 'ReconciliationId', 'reconciliation_id'],
   date: ['date', 'BillDate', 'Billdate', 'billDate', 'bill_date'],
   channel: ['channel', 'Channel', 'Bank'],
-  merchantId: ['merchantId', 'MerchantId', 'merchant_id'],
+  merchantId: ['merchantId', 'MerchantId', 'merchantid', 'merchant_id'],
   orderId: ['orderId', 'OrderId', 'orderid', 'order_id'],
   billReconId: ['billReconId', 'ReconBillBizId', 'reconBillBizId', 'recon_bill_biz_id'],
   currency: ['currency', 'Currency'],
@@ -238,6 +238,12 @@ function fingerprintFromFields(fields) {
 
 function normalizeGatewayCandidate(entry, source, sourceIndex) {
   const location = gatewayLocation(entry, source, sourceIndex);
+  if (entry && entry.rawJsonInvalid === true) {
+    throw new GatewayRowValidationError(
+      `网关账单原始数据损坏（${formatGatewayLocation(location)}）`,
+      { code: 'pre-fund-invalid-gateway-raw-json', ...location }
+    );
+  }
   const reconciliationId = trimCell(readGatewayValue(entry, 'reconciliationId'));
   const { row } = unwrapGatewayRow(entry);
   // 空 ID 行必定排除，不应因该行无关的日期/金额脏值被升级为整次运行失败。

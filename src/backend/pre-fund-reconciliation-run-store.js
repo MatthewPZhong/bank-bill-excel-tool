@@ -23,6 +23,24 @@ function parseJson(value, fallback) {
   }
 }
 
+function parseOutputJson(value, context = {}) {
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch (error) {
+    throw new Error(
+      `前置资金对账结果行 JSON 损坏：runId=${context.runId}，${context.table}#${context.rowId}`,
+      { cause: error }
+    );
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(
+      `前置资金对账结果行结构无效：runId=${context.runId}，${context.table}#${context.rowId}`
+    );
+  }
+  return parsed;
+}
+
 function mapRun(row, monthKey) {
   if (!row) return null;
   return {
@@ -37,10 +55,6 @@ function mapRun(row, monthKey) {
     createdAt: row.created_at,
     finishedAt: row.finished_at
   };
-}
-
-function rollbackQuietly(db) {
-  try { db.exec('ROLLBACK'); } catch (_error) { /* no active transaction */ }
 }
 
 function mapGatewayPoolRow(row) {
@@ -366,12 +380,18 @@ class PreFundReconciliationRunStore {
       const db = self.open(monthKey);
       try {
         const cursor = db.prepare(`
-          SELECT ${jsonColumn} AS row_json
+          SELECT id, ${jsonColumn} AS row_json
           FROM ${table}
           WHERE run_id = ? AND channel = ?
           ORDER BY bank_ordinal ASC, id ASC
         `).iterate(runId, channel);
-        for (const row of cursor) yield parseJson(row.row_json, {});
+        for (const row of cursor) {
+          yield parseOutputJson(row.row_json, {
+            runId,
+            table,
+            rowId: row.id
+          });
+        }
       } finally {
         db.close();
       }
@@ -427,17 +447,6 @@ class PreFundReconciliationRunStore {
     return { deletedFiles, deletedRuns };
   }
 
-  runInTransaction(db, work) {
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      const value = work();
-      db.exec('COMMIT');
-      return value;
-    } catch (error) {
-      rollbackQuietly(db);
-      throw error;
-    }
-  }
 }
 
 function createPreFundReconciliationRunStore(userDataDir) {

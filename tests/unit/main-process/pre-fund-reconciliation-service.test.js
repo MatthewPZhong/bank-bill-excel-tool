@@ -20,6 +20,7 @@ const {
   SOURCE_TYPE_INBOUND
 } = require('../../../src/main-process/pre-fund-reconciliation/mpt-schema');
 const {
+  PreFundReconciliationService,
   createPreFundReconciliationService
 } = require('../../../src/main-process/pre-fund-reconciliation/service');
 
@@ -106,21 +107,24 @@ test.describe('PreFundReconciliationService', () => {
       bankRow({ Channel: 'CIT', 'Debit Amount': '2', ReconciliationId: '' }),
       bankRow({ Channel: 'CIT', 'Credit Amount': '0', 'Debit Amount': '' })
     ]);
-    const persistentRows = [{
-      id: 1,
-      reconciliationId: 'R-1',
-      billDate: '2026-07-01',
-      reconBillBizId: 'RB-1',
-      row: {
-        Billdate: '2026-07-01', Channel: 'CIT', merchantid: 'M-1', orderid: 'G-1',
-        ReconBillBizId: 'RB-1', reconciliationid: 'R-1', currency: 'USD', amount: '10.00',
-        TradeType: 'INBOUND', name: 'Gateway Name', cardNo: 'Gateway Card',
-        '真实渠道': 'CIT', '清算网络': 'VISA'
+    const persistentRows = [
+      { id: 1, reconciliationId: 'BROKEN', row: null, rawJsonInvalid: true },
+      {
+        id: 2,
+        reconciliationId: 'R-1',
+        billDate: '2026-07-01',
+        reconBillBizId: 'RB-1',
+        row: {
+          Billdate: '2026-07-01', Channel: 'CIT', merchantid: 'M-1', orderid: 'G-1',
+          ReconBillBizId: 'RB-1', reconciliationid: 'R-1', currency: 'USD', amount: '10.00',
+          TradeType: 'INBOUND', name: 'Gateway Name', cardNo: 'Gateway Card',
+          '真实渠道': 'CIT', '清算网络': 'VISA'
+        }
       }
-    }];
+    ];
     const database = attachRunMirrorRepository({
       getLinkedTableMeta: () => ({
-        tableKey: 'gateway-bill', rowCount: 1, dataDateMin: '2026-07-01',
+        tableKey: 'gateway-bill', rowCount: 2, dataDateMin: '2026-07-01',
         dataDateMax: '2026-07-01', sourceFileName: 'gateway.xlsx', updatedAt: '2026-07-10T00:00:00Z'
       }),
       iterateGatewayBillRows: () => persistentRows.values()
@@ -140,6 +144,8 @@ test.describe('PreFundReconciliationService', () => {
     const result = await service.run();
     assert.equal(result.summary.bankInputRows, 4);
     assert.equal(result.summary.bankValidRows, 2);
+    assert.equal(result.summary.linkedGatewayRawRows, 2);
+    assert.equal(result.summary.gatewayInvalidRows, 1);
     assert.equal(result.summary.matchedPairs, 1);
     assert.equal(result.summary.unmatchedBankRows, 1);
     assert.equal(result.summary.unusedGatewayRows, 0);
@@ -152,6 +158,7 @@ test.describe('PreFundReconciliationService', () => {
     const unbalanced = [...exports[0].unbalancedRows];
     const channelRows = [...exports[0].channelBillRows];
     assert.equal(balanced[0]['网关-数据来源'], '网关对账单');
+    assert.equal(balanced[0]['网关-MerchantId'], 'M-1');
     assert.equal(balanced[0]['银行-name'], 'Alice');
     assert.equal(unbalanced[0]['差错类型'], '右单边账');
     assert.equal(unbalanced[0]['交易类型'], 'DEBIT');
@@ -215,6 +222,102 @@ test.describe('PreFundReconciliationService', () => {
     const exports = [...service.runStore.iterateChannelExports(result.monthKey, service.lastRun.sideRunId)];
     assert.equal([...exports[0].balancedRows].length, 1);
     assert.equal([...exports[0].unbalancedRows].length, 3);
+  });
+
+  test('does not enable export when a successful run has no channel output', async () => {
+    writeBankFile(bankFile, [
+      bankRow({ Channel: 'CIT', Currency: 'USD', 'Credit Amount': '0', ReconciliationId: 'R-ZERO' })
+    ]);
+    const database = attachRunMirrorRepository({
+      getLinkedTableMeta: () => ({ tableKey: 'gateway-bill', rowCount: 1, updatedAt: 'x' }),
+      iterateGatewayBillRows: () => [{
+        id: 1,
+        reconciliationId: 'R-GATEWAY',
+        row: {
+          Billdate: '2026-07-01', Channel: 'CIT', reconciliationid: 'R-GATEWAY',
+          currency: 'USD', amount: '10'
+        }
+      }].values()
+    });
+    const service = createPreFundReconciliationService({
+      userDataDir,
+      database,
+      templatePath: path.join(userDataDir, 'unused.xlsx')
+    });
+    service.importBank(bankFile);
+
+    const result = await service.run();
+    assert.equal(result.summary.bankSkippedZeroRows, 1);
+    assert.equal(result.summary.channelCount, 0);
+    assert.equal(service.status().canExport, false);
+  });
+
+  test('production run consumes one million persistent gateway rows lazily', async () => {
+    const rowCount = 1_000_000;
+    let yieldedRows = 0;
+    let insertedRows = 0;
+    writeBankFile(bankFile, [
+      bankRow({ Channel: 'CIT', Currency: 'USD', 'Credit Amount': '0', ReconciliationId: 'R-ZERO' })
+    ]);
+    function* persistentRows() {
+      for (let index = 0; index < rowCount; index += 1) {
+        yieldedRows += 1;
+        yield {
+          id: index + 1,
+          reconciliationId: `R-${index}`,
+          row: {
+            Billdate: '2026-07-01', Channel: 'CIT', merchantid: 'M-1',
+            orderid: `O-${index}`, ReconBillBizId: `B-${index}`,
+            reconciliationid: `R-${index}`, currency: 'USD', amount: '10',
+            TradeType: 'INBOUND'
+          }
+        };
+      }
+    }
+    const database = attachRunMirrorRepository({
+      getLinkedTableMeta: () => ({ tableKey: 'gateway-bill', rowCount, updatedAt: 'x' }),
+      iterateGatewayBillRows: () => persistentRows()
+    });
+    const service = createPreFundReconciliationService({
+      userDataDir,
+      database,
+      templatePath: path.join(userDataDir, 'unused.xlsx')
+    });
+    service.runStore = {
+      clearAllRunData: () => ({ deletedFiles: 0, deletedRuns: 0 }),
+      open: () => ({
+        exec() {},
+        prepare: () => ({ run: () => ({ changes: 1 }) }),
+        close() {}
+      }),
+      createRun: () => 1,
+      createGatewayCandidateInserter: () => (candidate) => {
+        assert.equal(yieldedRows, insertedRows + 1, '持久游标每 yield 一行应立即下沉');
+        assert.equal(candidate.sourceOrder, insertedRows);
+        insertedRows += 1;
+        return true;
+      },
+      gatewayStats: () => ({
+        candidateCount: insertedRows,
+        unusedCount: insertedRows,
+        conflictingIdGroupCount: 0
+      }),
+      createGatewayConsumer: () => () => null,
+      createBalancedRowInserter: () => () => {},
+      createUnbalancedRowInserter: () => () => {},
+      finishRun() {},
+      failRun() {},
+      listChannelSummaries: () => []
+    };
+    service.importBank(bankFile);
+
+    const result = await service.run();
+
+    assert.equal(yieldedRows, rowCount);
+    assert.equal(insertedRows, rowCount);
+    assert.equal(result.summary.linkedGatewayRawRows, rowCount);
+    assert.equal(result.summary.gatewayEligibleRows, rowCount);
+    assert.equal(result.summary.unusedGatewayRows, rowCount);
   });
 
   test('rejects the run when gateway union has no eligible nonblank ID rows', async () => {
@@ -429,5 +532,79 @@ test.describe('PreFundReconciliationService', () => {
     } finally {
       db.close();
     }
+  });
+
+  test('runtime result side-DB loss disables export and marks the mirror unavailable', async () => {
+    writeBankFile(bankFile, [
+      bankRow({ Channel: 'CIT', Currency: 'USD', 'Credit Amount': '10', ReconciliationId: 'R-1' })
+    ]);
+    const database = attachRunMirrorRepository({
+      getLinkedTableMeta: () => ({ tableKey: 'gateway-bill', rowCount: 1, updatedAt: 'x' }),
+      iterateGatewayBillRows: () => [{
+        id: 1,
+        reconciliationId: 'R-1',
+        row: {
+          Billdate: '2026-07-01', Channel: 'CIT', reconciliationid: 'R-1',
+          currency: 'USD', amount: '10'
+        }
+      }].values()
+    });
+    const service = createPreFundReconciliationService({
+      userDataDir,
+      database,
+      templatePath: path.join(userDataDir, 'unused.xlsx'),
+      now: () => new Date(2026, 6, 10, 12, 0, 0)
+    });
+    service.importBank(bankFile);
+    const run = await service.run();
+    const resultPath = runDataStore.sideDbPath(
+      userDataDir,
+      runDataStore.MODULE_PRE_FUND_RECONCILIATION_RESULTS,
+      service.lastRun.monthKey
+    );
+    runDataStore.deleteSideDbByPath(resultPath);
+
+    const status = service.status();
+    assert.equal(status.canExport, false);
+    assert.equal(status.run.unavailable, true);
+    assert.match(status.run.unavailableMessage, /结果侧库文件不存在/);
+    assert.equal(mirrorRepository.getRunMirror(database._mirrorDb, run.runId).status, 'missing-side-db');
+    assert.throws(
+      () => service.buildExportPlan(path.join(userDataDir, 'exports')),
+      (error) => error && error.code === 'pre-fund-run-unavailable'
+    );
+  });
+
+  test('partial backup failure preserves every pre-existing export file', async () => {
+    const outputDirectory = path.join(userDataDir, 'exports');
+    fs.mkdirSync(outputDirectory, { recursive: true });
+    const firstPath = path.join(outputDirectory, 'first.xlsx');
+    const secondPath = path.join(outputDirectory, 'second.xlsx');
+    fs.writeFileSync(firstPath, 'FIRST-ORIGINAL');
+    fs.writeFileSync(secondPath, 'SECOND-ORIGINAL');
+
+    const service = Object.create(PreFundReconciliationService.prototype);
+    service.now = () => new Date(2026, 6, 10, 12, 0, 0);
+    service.buildExportPlan = () => [
+      { channel: 'A', fileName: 'first.xlsx', filePath: firstPath },
+      { channel: 'B', fileName: 'second.xlsx', filePath: secondPath }
+    ];
+
+    const originalRenameSync = fs.renameSync;
+    fs.renameSync = (source, destination) => {
+      if (source === secondPath) throw new Error('simulated second backup failure');
+      return originalRenameSync(source, destination);
+    };
+    try {
+      await assert.rejects(
+        () => service.export({ outputDirectory, overwrite: true }),
+        /simulated second backup failure/
+      );
+    } finally {
+      fs.renameSync = originalRenameSync;
+    }
+
+    assert.equal(fs.readFileSync(firstPath, 'utf8'), 'FIRST-ORIGINAL');
+    assert.equal(fs.readFileSync(secondPath, 'utf8'), 'SECOND-ORIGINAL');
   });
 });

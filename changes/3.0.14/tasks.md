@@ -1,6 +1,6 @@
 # 3.0.14 Tasks
 
-> 状态：功能实施与自动验证完成，待人工资金复核和发版
+> 状态：功能、自动验证、技术 Review 和发布资料完成，待人工资金复核和合并
 > 原则：四个可独立 review 的切片；前一切片的契约稳定后再接下一层。
 
 ## PR 1：命中行异常说明口径
@@ -44,6 +44,6 @@
 - [x] C4 读取器兼容旧 4-sheet 与新 5-sheet。
 - [x] 增加完整集成与 smoke 覆盖。
 - [x] 执行 `/check-vars` 并记录关联功能 review。
-- [x] 逻辑表库隔离完成后重新执行完整 `release-check`（3445 unit + 39 integration scripts / 1817 assertions）。
+- [x] 逻辑表库隔离及 Review 修复完成后重新执行完整 `release-check`（3452 unit + 39 integration scripts / 1817 assertions）。
 - [ ] 完成人工资金红线复核。
-- [ ] 验收通过后再更新版本号和三份发布文档。
+- [x] 更新版本号、`CHANGELOG.md` / `VERSION_FEATURE_HISTORY.md` / `USER_GUIDE.md` 和 3.0.14 预览图。

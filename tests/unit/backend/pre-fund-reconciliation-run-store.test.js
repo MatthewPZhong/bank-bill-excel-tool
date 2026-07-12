@@ -92,4 +92,27 @@ test.describe('PreFundReconciliationRunStore', () => {
     assert.deepEqual(store.clearAllRunData(), { deletedFiles: 1, deletedRuns: 1 });
     assert.equal(store.getRun('2026-07', runId), null);
   });
+
+  test('fails visibly instead of exporting a blank row when result JSON is corrupted', () => {
+    const store = createPreFundReconciliationRunStore(userDataDir);
+    const db = store.open('2026-07');
+    const runId = store.createRun(db, {
+      scenario: 'missing-gateway',
+      snapshot: {},
+      bankFiles: ['bank.xlsx']
+    });
+    db.prepare(`
+      INSERT INTO pre_fund_reconciliation_balanced_rows
+        (run_id, channel, bank_ordinal, output_json)
+      VALUES (?, 'CIT', 0, '{broken')
+    `).run(runId);
+    store.finishRun(db, runId, {});
+    db.close();
+
+    const channelExport = [...store.iterateChannelExports('2026-07', runId)][0];
+    assert.throws(
+      () => [...channelExport.balancedRows],
+      /结果行 JSON 损坏.*pre_fund_reconciliation_balanced_rows/
+    );
+  });
 });

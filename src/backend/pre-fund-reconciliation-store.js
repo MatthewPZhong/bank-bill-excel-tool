@@ -8,6 +8,7 @@ const { parseMptFile } = require('../main-process/pre-fund-reconciliation/mpt-pa
 const {
   compareFileSequences,
   MPT_SCHEMAS,
+  normalizeDate,
   parseMptFileName,
 } = require('../main-process/pre-fund-reconciliation/mpt-schema');
 
@@ -75,6 +76,9 @@ function normalizeDateRange(startDate, endDate) {
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
     throw new TypeError('日期格式非法（需 YYYY-MM-DD）');
+  }
+  if (normalizeDate(start) !== start || normalizeDate(end) !== end) {
+    throw new TypeError('日期值非法（请使用真实日历日期）');
   }
   return { start, end };
 }

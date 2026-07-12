@@ -932,7 +932,8 @@ function readLinkedTableRows(db, tableKey) {
 // v3.0.14 前置资金对账：按物理 id 稳定顺序逐行读取持久化网关账单。
 // 与 readLinkedTableRows('gateway-bill') 不同，本接口不调用 .all()、不构造全量数组；
 // caller 可边迭代边写匹配侧库，避免百万级链接表产生 raw_json + 对象数组双份内存。
-// 损坏 JSON 的容错语义与 readLinkedTableRows 保持一致：跳过该行，不中断剩余游标。
+// 损坏 JSON 不中断剩余游标，但必须交给对账引擎计入无效行，
+// 避免链接表行在资金对账时无可观测地消失。
 function* iterateGatewayBillRows(db) {
   const def = getDef('gateway-bill');
   if (!def.supported) return;
@@ -944,7 +945,17 @@ function* iterateGatewayBillRows(db) {
   for (const record of cursor) {
     try {
       const row = JSON.parse(record.raw_json);
-      if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        yield {
+          id: record.id,
+          reconciliationId: record.reconciliation_id,
+          billDate: record.bill_date,
+          reconBillBizId: record.recon_bill_biz_id,
+          row: null,
+          rawJsonInvalid: true
+        };
+        continue;
+      }
       yield {
         id: record.id,
         reconciliationId: record.reconciliation_id,
@@ -952,8 +963,15 @@ function* iterateGatewayBillRows(db) {
         reconBillBizId: record.recon_bill_biz_id,
         row
       };
-    } catch (_e) {
-      /* 损坏行跳过，不抛错（与 readLinkedTableRows 容错一致） */
+    } catch (_error) {
+      yield {
+        id: record.id,
+        reconciliationId: record.reconciliation_id,
+        billDate: record.bill_date,
+        reconBillBizId: record.recon_bill_biz_id,
+        row: null,
+        rawJsonInvalid: true
+      };
     }
   }
 }

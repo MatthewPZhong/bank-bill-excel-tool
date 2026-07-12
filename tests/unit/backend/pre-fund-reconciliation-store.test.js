@@ -430,6 +430,7 @@ test('按 sourceDate 闭区间跨月统计/删除，边界命中且范围外批�
   }, '相同范围重跑幂等');
 
   assert.throws(() => store.countByDateRange('2026/07/01', '2026/07/31'), /日期格式非法/);
+  assert.throws(() => store.countByDateRange('2026-02-30', '2026-07-31'), /日期值非法/);
   await assert.rejects(store.deleteByDateRange('2026-08-01', '2026-07-01'), /日期范围非法/);
   assert.equal(store.listBatches().length, 2, '非法范围不得继续删除');
 });

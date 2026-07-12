@@ -42,6 +42,9 @@
 | 临时链接表首页只显示一个汇总行、删除目标只有一个 | 首页改为入金/出金两个逻辑表库，汇总和日期删除均携带 `sourceType` | 用户明确两类 MPT 在临时链接表中分别对应入金/出金表库，并确认采用逻辑隔离 | 只改变管理与生命周期边界；对账运行仍联合两类临时明细 |
 | 前置模块顶部使用下拉框/导入/导出三等分专用布局 | 改为与资金对账数据处理完全相同的五槽位骨架：原导入/导出/运行/场景/链接槽位分别放下拉框/链接表管理/导入/运行/导出 | 用户给出逐槽位映射关系 | 功能 ID、事件和状态不变；只调整 DOM 位置、入口文案和专用样式 |
 | `对账场景` 文本在下拉框上方；已有网关链接数据时空会话显示统计 | 文本移到下拉框左侧；未导入银行文件且无 run/error 时固定显示欢迎语 | 用户明确前端位置和初始文案 | 不改变按钮可用性、链接表数据或对账状态，只收敛空会话展示 |
+| 导出覆盖在写入完成后统一删备份，任一异常都按整批回滚 | 备份阶段记录已移动/未移动原文件；写入失败只清理本次新文件并恢复已备份原文件；提交成功后备份清理失败改为可见提醒 | Review 发现第二个原文件备份失败时，旧逻辑可删掉尚未备份的原文件 | 修复多文件覆盖的部分失败原子性，新增原文件保全回归 |
+| 结果 side DB 只在前置模块首次打开时回收 | 主库完成初始化后立即在后台创建 service，标记上一进程镜像失效并回收结果库 | 新模块对存量用户默认关闭，不能依赖用户打开模块才执行重启生命周期 | 即使功能未启用，旧 run 结果也不会跨进程滞留 |
+| 持久网关游标沿用旧读取器语义，损坏 `raw_json` 直接跳过 | 损坏/非对象 JSON 仍不中断剩余游标，但显式交给引擎计入 `gatewayInvalidRows` | Review 确认直接跳过会使持久网关行无可观测地消失，可把银行行表现为右单边 | 保留容错遍历，同时补齐资金对账无效行统计 |
 
 ## Evidence
 
@@ -51,8 +54,8 @@
 - OUTBOUND `bankDebitCurrency/bankDebitAmount` 40,339 行有值，仅空 6 行。
 - bankDebit 与 target 币种相同 40,274/40,339；金额相同 40,292/40,339。
 - 两类差异并集 71 行，分析报告：`/Users/pzhong/Desktop/MPT_OUTBOUND_GATEWAY-目标金额与银行扣款差异.md`。
-- 针对性单元测试：158/158 PASS（MPT、side DB、1:1、输出、C4、命中口径、UI/IPC）。
-- 完整单元测试：3445/3445 PASS。
+- 本迭代针对性单元测试均 PASS（MPT、side DB、1:1、输出、C4、命中口径、UI/IPC、Review 回归和大数据合成用例）。
+- 完整单元测试：3452/3452 PASS。
 - 集成测试：39/39 脚本、1817/1817 断言 PASS；pre-fund parity 37/37 PASS。
 - smoke、ESLint 均通过。
 - 启动测量 5 次：进程总耗时平均 724.128ms，ready-to-show 平均 172.981ms，建窗到可见平均 102.506ms，低于仓库阈值。
@@ -67,18 +70,21 @@
 - 临时逻辑表库隔离不改 side DB schema：同月 INBOUND/OUTBOUND 共存时可按来源分别汇总；删除 INBOUND 后 OUTBOUND 批次、明细和共享月库均保留，未知或缺失来源在 service 边界被拒绝。
 - 每文件 MPT 导入结果把 `sourceType` 和实际 `rowCount` 提升到顶层，临时链接表导入汇总不再把成功批次误显示为 0 行。
 - 大文件工具箱集成首次受运行时内存波动影响为 14/15（878MB > 800MB）；同脚本独立复跑 15/15（681MB），随后完整 `release-check` 再跑为 15/15，最终整套检查通过。
+- 合成 100,000 行 gzip MPT 通过生产解析器验证：按 1,000 行批次交付，共100批，不累计全文件对象。
+- 合成 1,000,000 条持久网关候选通过 `PreFundReconciliationService.run()` 生产消费循环验证：游标每 yield 一行立即规范化并下沉 side-DB adapter，不预读或常驻全量数组。
+- Review 回归覆盖：真实持久网关表头 `merchantid` 可输出、损坏结果 JSON 显式失败、结果库运行中丢失禁止导出、部分备份失败保留全部原文件、成功但零渠道结果不点亮导出、超长 MPT 行无论换行分块都被拦截、非法日历删除范围被拒绝。
 
 ## Remaining unknowns
 
 - `ASSUME`：跨月删除横跨多个独立 SQLite 月库，无法提供分布式原子提交；当前每月事务原子、全程共享写锁，失败会报告已删除批次/行数，并支持同范围幂等重跑。若未来要求跨月全有或全无，需要引入删除计划/补偿日志。
-- `PROBE`：百万级持久网关表尚未用生产规模回放；当前使用 `id ASC` 迭代投影并把候选池落 side DB，需在人工验收机补一次大表耗时/内存记录。
+- `ASSUME（非阻断）`：已用百万条惰性游标跑过 service 生产消费循环，但未在验收机对真实百万行 SQLite 链接表记录耗时/RSS；这是发布后性能基线补充，不影响本版迭代/投影内存契约的自动验收。
 - `BLOCK（发布前人工）`：对账 ID/渠道/金额/币种四字段匹配、临时来源优先、10 字段重复折叠、金额/姓名/卡号派生和按渠道不串数据仍需资金红线人工复核；自动测试不能替代该确认。
 - `BLOCK（发布前人工）`：用同一账月的真实 INBOUND/OUTBOUND 各一批，分别选择入金和出金逻辑表执行日期删除，确认只删除所选 `sourceType`，另一类仍在管理页且可参与下一次对账。
 
 ## Check-vars Review
 
 - **Critical**：`unmatchedRows` 的去向按 3.0.14 改为“未实际改值即未命中”，dispatcher 锁定仍保留，命中+未命中行数守恒已有 unit/integration；`FileValidationError` 仅复用既有结构承载 MPT 文件/行级错误，没有改变公共错误类契约。
-- **Important-skeleton**：新增 preload/main IPC 8 个 invoke 与 3 个进度通道均有静态契约测试；`settingsRepository` 的模块全集扩为 10，新模块不进入默认启用列表。
+- **Important-skeleton**：新增 preload/main IPC 10 个 invoke 与 3 个进度通道均有静态契约测试；`settingsRepository` 的模块全集扩为 10，新模块不进入默认启用列表。
 - **Runtime-state**：新状态隔离在 `state.preFundReconciliation`，模块切换按需刷新；所有状态框写入继续走 `updateStatusBox`；临时批次和结果不放 renderer。
-- **Risk-sensitive**：`MODULE_PRE_FUND_RECONCILIATION` / `MODULE_PRE_FUND_RECONCILIATION_RESULTS` / side DDL、`hasActualFieldChanges` / `buildOutputRows`、`detectFundTransferManyToMany` 已按本文件 Evidence 的 unit、parity、integration 和 smoke 验证。
+- **Risk-sensitive**：`MODULE_PRE_FUND_RECONCILIATION` / `MODULE_PRE_FUND_RECONCILIATION_RESULTS` / `SIDE_DB_DDL_PRE_FUND_GATEWAY` / `SIDE_DB_DDL_PRE_FUND_RUNS`、`hasActualFieldChanges` / `buildOutputRows`、`detectFundTransferManyToMany` 已按本文件 Evidence 的 unit、parity、integration 和 smoke 验证。
 - **人工项**：严格 ID+渠道+金额+币种 1:1、临时优先、重复指纹、金额/币种 fallback、银行方向/name/cardNo、按渠道不串数据仍需业务负责人复核。

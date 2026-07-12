@@ -555,11 +555,6 @@ const SIDE_DB_DDL_PRE_FUND_RUNS = `
     ON pre_fund_reconciliation_unbalanced_rows(run_id, channel, bank_ordinal);
 `;
 
-const SIDE_DB_DDL_PRE_FUND_RECONCILIATION = `
-  ${SIDE_DB_DDL_PRE_FUND_GATEWAY}
-  ${SIDE_DB_DDL_PRE_FUND_RUNS}
-`;
-
 const MODULE_DDL = Object.freeze({
   [MODULE_ACQUIRING]: SIDE_DB_DDL_ACQUIRING,
   [MODULE_BIZ_OP]: SIDE_DB_DDL_BIZ_OP,
@@ -679,5 +674,4 @@ module.exports = {
   SIDE_DB_DDL_BANK_BU,
   SIDE_DB_DDL_PRE_FUND_GATEWAY,
   SIDE_DB_DDL_PRE_FUND_RUNS,
-  SIDE_DB_DDL_PRE_FUND_RECONCILIATION,
 };

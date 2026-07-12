@@ -45,7 +45,7 @@ test.describe('iterateGatewayBillRows', () => {
     db.close();
   });
 
-  test('skips malformed or non-object JSON without stopping the cursor', () => {
+  test('surfaces malformed or non-object JSON as invalid rows without stopping the cursor', () => {
     const db = createDb();
     const insert = db.prepare(`
       INSERT INTO linked_gateway_bill
@@ -58,8 +58,12 @@ test.describe('iterateGatewayBillRows', () => {
 
     const rows = [...iterateGatewayBillRows(db)];
 
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].reconciliationId, 'GOOD');
+    assert.equal(rows.length, 3);
+    assert.deepEqual(rows.slice(0, 2).map((row) => [row.reconciliationId, row.rawJsonInvalid]), [
+      ['BAD-JSON', true],
+      ['ARRAY', true]
+    ]);
+    assert.equal(rows[2].reconciliationId, 'GOOD');
     db.close();
   });
 });

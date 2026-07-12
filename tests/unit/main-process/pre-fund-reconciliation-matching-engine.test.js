@@ -291,7 +291,7 @@ test('持久网关游标 wrapper 的 envelope 字段和 raw row 正确合并规�
     reconBillBizId: ' WRAP-BIZ ',
     row: {
       Bank: 'GW-CHANNEL',
-      MerchantId: 'M',
+      merchantid: 'M',
       OrderId: 'O',
       Currency: 'USD',
       Amount: '2.00',

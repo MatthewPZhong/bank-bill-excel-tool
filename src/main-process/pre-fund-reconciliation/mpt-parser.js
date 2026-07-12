@@ -51,18 +51,23 @@ async function* iterateUtf8Lines(filePath, fileMetadata, hash) {
         });
       }
       carry += decoded;
-      if (carry.length > MAX_LINE_LENGTH && !carry.includes('\n')) {
-        throw validationError('MPT_LINE_TOO_LONG', 'MPT 单行长度超过安全上限', {
-          fileName: fileMetadata.sourceFileName,
-        });
-      }
 
       let newlineIndex;
       while ((newlineIndex = carry.indexOf('\n')) >= 0) {
         let line = carry.slice(0, newlineIndex);
         carry = carry.slice(newlineIndex + 1);
         if (line.endsWith('\r')) line = line.slice(0, -1);
+        if (line.length > MAX_LINE_LENGTH) {
+          throw validationError('MPT_LINE_TOO_LONG', 'MPT 单行长度超过安全上限', {
+            fileName: fileMetadata.sourceFileName,
+          });
+        }
         yield line;
+      }
+      if (carry.length > MAX_LINE_LENGTH) {
+        throw validationError('MPT_LINE_TOO_LONG', 'MPT 单行长度超过安全上限', {
+          fileName: fileMetadata.sourceFileName,
+        });
       }
     }
 
@@ -75,6 +80,11 @@ async function* iterateUtf8Lines(filePath, fileMetadata, hash) {
     }
     if (carry !== '') {
       if (carry.endsWith('\r')) carry = carry.slice(0, -1);
+      if (carry.length > MAX_LINE_LENGTH) {
+        throw validationError('MPT_LINE_TOO_LONG', 'MPT 单行长度超过安全上限', {
+          fileName: fileMetadata.sourceFileName,
+        });
+      }
       yield carry;
     }
   } finally {

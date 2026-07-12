@@ -184,7 +184,6 @@ const state = {
   // v3.0.14：前置资金对账 renderer 只缓存轻量状态，明细和结果保留在 main/side DB。
   preFundReconciliation: {
     session: null,
-    runResult: null,
     inflight: false
   },
   // v2.1.16-beta.5 需求1（PR-4 修订）🔴 资金红线：资金对账面板 row1《开始运行》的智能路由模式。
@@ -4369,7 +4368,10 @@ function updatePreFundReconciliationUi() {
     tone = 'info';
   }
   if (run) {
-    if (run.stale) {
+    if (run.unavailable) {
+      text = `结果已失效：${run.unavailableMessage || '运行结果不可用，请重新运行'}`;
+      tone = 'error';
+    } else if (run.stale) {
       text = '结果已失效：数据来源发生变化，请重新运行';
       tone = 'error';
     } else {
@@ -4526,10 +4528,12 @@ async function handlePreFundExport() {
     }
     await finishPreFundReconciliationAction();
     const names = (result.files || []).map((file) => file.fileName).join('\n');
+    const warnings = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
     updateStatusBox(
       elements.preFundReconciliationStatusBox,
-      `已导出 ${Number(result.files && result.files.length) || 0} 个文件${names ? `\n${names}` : ''}`,
-      'success'
+      `已导出 ${Number(result.files && result.files.length) || 0} 个文件${names ? `\n${names}` : ''}`
+        + `${warnings.length ? `\n提醒：${warnings.join('\n')}` : ''}`,
+      warnings.length ? 'info' : 'success'
     );
     return;
   } catch (error) {
