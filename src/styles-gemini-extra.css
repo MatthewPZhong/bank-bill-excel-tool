@@ -970,6 +970,42 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 #bankStatementModulePanel .bsb-merged-linked   { grid-column: 1; grid-row: 2; }
 #bankStatementModulePanel .bsb-merged-status   { grid-column: 2; grid-row: 1 / 3; align-self: stretch; }
 
+/* v3.0.14：前置资金对账复用资金对账数据处理五槽位；下拉框占原导入槽位。 */
+#preFundReconciliationModulePanel .pre-fund-scenario-slot {
+  position: relative;
+  flex: 1 1 0;
+  width: 140px;
+  min-width: 140px;
+}
+#preFundReconciliationModulePanel .pre-fund-scenario-label {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 8px);
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+#preFundReconciliationModulePanel .pre-fund-scenario-select-shell,
+#preFundReconciliationModulePanel .pre-fund-scenario-slot .template-select {
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+}
+#preFundReconciliationModulePanel .pre-fund-scenario-slot .template-select {
+  padding-right: 30px;
+  padding-left: 14px;
+  background-position: right 10px center;
+}
+#preFundReconciliationModulePanel .pre-fund-action-pair > :first-child { transform: translateX(-14px); }
+#preFundReconciliationModulePanel .pre-fund-action-pair > :last-child { transform: translateX(14px); }
+#preFundReconciliationModulePanel .pre-fund-board-merged-row {
+  grid-template-rows: auto 110px;
+  row-gap: 18px;
+}
+#preFundReconciliationModulePanel .pre-fund-merged-run    { grid-column: 1; grid-row: 1; }
+#preFundReconciliationModulePanel .pre-fund-merged-export { grid-column: 1; grid-row: 2; }
+#preFundReconciliationModulePanel .pre-fund-merged-status  { grid-column: 2; grid-row: 1 / 3; align-self: stretch; }
+#preFundReconciliationStatusBox .status-box-text { white-space: pre-line; }
+
 /* v2.1.12 需求：VCC业务OP计算 + 月度银行对账单BU回填校验 主面板沿垂直中线镜像（文字正常，用户最终确认）
    ⚠️ 当前生效主题 = Clear（本文件 styles-gemini-extra.css）；styles.css(General)默认 disabled，同名规则在那不生效。
    实现：容器 direction:rtl 做"逻辑镜像" —— ①grid 列(cell.left↔right) ②列宽(1fr/1.4fr 随 rtl 自动换边)

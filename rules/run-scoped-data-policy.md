@@ -1,6 +1,6 @@
 # 对账 run 级数据存储约定（run-scoped data policy）
 
-> 版本：v1（2026-06-15 v3.0.5 size-startup-optimization Part B Phase 4 立项）
+> 版本：v2（2026-07-10 v3.0.14 新增前置资金对账接入约定）
 > 关联：`changes/size-startup-optimization/spec.md`（Part B）/ `rules/important-variables.md`（per-月侧库体系条目）/ `src/backend/run-data-store.js`
 > 适用：所有「对账类模块」的 run 级批量数据存储决策。本规则为**长期硬约束**，新模块接入与既有模块改动都必须遵守。
 
@@ -17,7 +17,7 @@
    - 反例（禁止）：新对账模块直接 `INSERT INTO 主库表` 落百万行 imports，run 后 `DELETE`。
 2. 🔴 **主库只保留 runs 元数据镜像行**（轻量：summary + status + 路径 + `side_db_rel_path`）。UI 列表 / 导出下拉 / run 历史读主库镜像。
 3. 🔴 **对账算法零改动**：算法函数（`runCheckCore` / `runReconciliation` / 4 步算法 / diff JOIN / epsilon）在「侧库 db 句柄」上运行 = 在主库上运行（同库自洽）。**不得为侧库化改写算法 SQL/语义**——只换 db 句柄/dbPath。parity 锁强制 byte-for-byte。
-4. 🔴 **侧库 DDL byte-for-byte 平移主库**：`run-data-store.js` 的 `SIDE_DB_DDL_*` 必须与主库 `ensure*TablesSupport` 的对应表/索引 schema 一致（worker 直连侧库也会 `ensure*TablesSupport` 建表，schema 不一致即冲突）。
+4. 🔴 **侧库 DDL 必须有单一真相**：既有模块若由主库 schema 平移而来，`run-data-store.js` 的 `SIDE_DB_DDL_*` 必须与主库 `ensure*TablesSupport` 对应表/索引 byte-for-byte 一致。新模块若从未在主库建立 bulk 表，则侧库 DDL 直接以 `run-data-store.js` 为唯一真相，主库只建结构不同的轻量 run 镜像表，不得复制 bulk schema。
 
 ## 三、侧库管理器约定（run-data-store.js）
 
@@ -48,6 +48,7 @@
 | 收单单据币种校验 acquiring | **month**（`month_key`） | imports `UNIQUE(month_key, recon_main_id)` 按月持久化；import/run 独立 handler；一次导入多次 run 复用；`clearRunsByMonth` 按月清旧；对账 JOIN 要求 flow+bill+diff 同库 |
 | 业务OP数据核对 biz-op | **month**（`month(data_date)`） | imports 按 date 分片但数据量小；同月多 date 同库；对账要求 T-1/T-2/flow 同库 → per-month 单库自洽（免 ATTACH）；🔴 月初 T-2 跨月由月末冗余副本画清边界 |
 | 月度银行对账单BU回填校验 bank-bu | **month**（`year_month`） | 三表 `importMonthAtomic` 原子覆盖，与 acquiring 同构 |
+| 前置资金对账 pre-fund-reconciliation | **month + 双生命周期模块** | `pre-fund-reconciliation` 按账单月持久保存临时 MPT，手工删完批次即可删月文件；`pre-fund-reconciliation-results` 按运行月保存最后一次候选池/结果，主库镜像保存精确 `side_db_rel_path + side_run_id`，新 run/重启整文件回收旧结果。两者分离，禁止把可丢弃结果写进需跨重启保留的 MPT 月库 |
 
 裁定步骤（新模块）：
 1. 找该模块「重导/覆盖」的清理粒度（clearByXxx 的 Xxx）——通常即生命周期键。
@@ -60,10 +61,10 @@
 
 - [ ] 生命周期键裁定（§四）+ 在 spec 写明依据。
 - [ ] `run-data-store.js`：加 `MODULE_XXX` 常量 + 进 `KNOWN_MODULES` + `SIDE_DB_DDL_XXX`（byte-for-byte 平移主库 `ensure*TablesSupport`）+ `MODULE_DDL` 映射。
-- [ ] 主库 runs 表加 `side_db_rel_path TEXT`（`ensureXxxRunsSideDbPath` 幂等加列 + database.js init 接入）。
-- [ ] 新建编排层 `src/main-process/{module}-run-data.js`（import 落侧库 / run 路由 / 主库镜像 mirrorId / 双源读 / deleteMonth / reconcileOrphans）。
+- [ ] 主库 runs 表或专用轻量镜像表保存 `side_db_rel_path`（`ensureXxxSupport` 幂等建表/加列 + database.js init 接入）。
+- [ ] 新建明确的模块编排层（可为 `src/main-process/{module}-run-data.js`，或模块目录下唯一 service），负责 import 落侧库 / run 路由 / 主库镜像 mirrorId / 生命周期清理 / 孤儿状态处理；存在历史主库 bulk 数据时才需要双源读。
 - [ ] main.js handler 全改调编排层；whenReady 孤儿兜底扩本模块。
-- [ ] 🔴 parity 集成脚本 `scripts/integration/{module}-side-db-parity.js`：改造前冻结 golden + 改造后侧库路径 byte-for-byte（diff/导出）+ 主库表恒 0 行 + 跨生命周期边界用例。
+- [ ] 🔴 parity 集成脚本 `scripts/integration/{module}-side-db-parity.js`：侧库路径和生命周期、幂等/替换/回滚、主库 bulk 表恒 0 行（若从未建 bulk 表则验证主库业务表不受影响）+ 跨生命周期边界用例。
 - [ ] 单测覆盖编排层（双源/孤儿/生命周期边界/runId 映射）+ run-data-store DDL 断言。
 - [ ] 升格 `rules/important-variables.md` per-月侧库体系条目（加本模块符号）。
 
@@ -71,7 +72,7 @@
 
 版本号 bump / 合并前，除 `npm run release-check` + `/check-vars` + `npm run scan:vars` 外，对账侧库相关改动还须确认：
 
-- [ ] 三 parity 脚本全绿（`acquiring-side-db-parity` / `biz-op-recon-side-db-parity` / `bank-bu-recon-side-db-parity`）。
+- [ ] 四个已接入模块 parity 脚本全绿（`acquiring-side-db-parity` / `biz-op-recon-side-db-parity` / `bank-bu-recon-side-db-parity` / `pre-fund-reconciliation-side-db-parity`）。
 - [ ] `npm run startup:measure` 启动指标不退化（建窗 ≤300ms / 日常基线 ≤1.5s / 升级首启 ≤3s）。
 - [ ] 跑一次大数据量 run → 主库增量 < 10MB（run 级数据未落主库）；删整生命周期 → `run-data/` 文件消失、磁盘即时回收。
 - [ ] activity log「启动耗时」基线对比（升级首启不退化）。

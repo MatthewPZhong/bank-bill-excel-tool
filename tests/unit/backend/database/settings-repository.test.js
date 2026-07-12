@@ -38,16 +38,21 @@ test.afterEach(() => {
 // ========================================================================
 
 test.describe('ALL_MODULE_IDS / DEFAULT_ENABLED_MODULES 常量', () => {
-  test('ALL_MODULE_IDS 包含 9 个模块', () => {
-    assert.equal(settingsRepo.ALL_MODULE_IDS.length, 9);
+  test('ALL_MODULE_IDS 包含 10 个模块', () => {
+    assert.equal(settingsRepo.ALL_MODULE_IDS.length, 10);
     assert.ok(Object.isFrozen(settingsRepo.ALL_MODULE_IDS));
   });
 
-  test('ALL_MODULE_IDS 包含 statement-generator / acquiring-bill-currency / vcc-op-calc', () => {
+  test('ALL_MODULE_IDS 包含既有模块和前置资金对账', () => {
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('statement-generator'));
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('acquiring-bill-currency'));
     // v2.1.12 需求1：VCC业务OP计算模块注册（spec §8.1，修复 dev d2050b0 漏注册）
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('vcc-op-calc'));
+    assert.ok(settingsRepo.ALL_MODULE_IDS.includes('pre-fund-reconciliation'));
+  });
+
+  test('前置资金对账默认不启用，由用户从功能收纳中打开', () => {
+    assert.equal(settingsRepo.DEFAULT_ENABLED_MODULES.includes('pre-fund-reconciliation'), false);
   });
 
   test('DEFAULT_ENABLED_MODULES 是 ALL_MODULE_IDS 子集', () => {

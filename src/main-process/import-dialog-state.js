@@ -15,6 +15,7 @@ const EXTRA_IMPORT_DIALOG_SCOPES = Object.freeze([
   'big-account',
   'toolbox',
   'linked-table',
+  'pre-fund-reconciliation-export',
   'bank-statement-process-bundle' // 场景包 JSON 导入，与银行对账单 xlsx 目录分开记忆
 ]);
 
@@ -85,7 +86,17 @@ async function showImportOpenDialog({ dialog, browserWindow, db, scope, options 
     ? await dialog.showOpenDialog(browserWindow, dialogOptions)
     : await dialog.showOpenDialog(dialogOptions);
   if (!result.canceled && Array.isArray(result.filePaths) && result.filePaths.length > 0) {
-    rememberImportDialogDirectory(db, scope, result.filePaths);
+    const selectingDirectory = Array.isArray(dialogOptions.properties)
+      && dialogOptions.properties.includes('openDirectory');
+    if (selectingDirectory) {
+      try {
+        settingsRepository.setLastImportDirectory(db, scope, result.filePaths[0]);
+      } catch (_error) {
+        // 目录记忆失败不影响已完成的目录选择
+      }
+    } else {
+      rememberImportDialogDirectory(db, scope, result.filePaths);
+    }
   }
   return result;
 }

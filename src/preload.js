@@ -202,6 +202,34 @@ contextBridge.exposeInMainWorld('desktopApi', {
       return () => ipcRenderer.removeListener('bank-statement:import:progress', wrapped);
     }
   },
+  // v3.0.14：前置资金对账。银行 session 不跨重启，临时 MPT 批次保存在 side DB。
+  preFundReconciliation: {
+    importBank: () => ipcRenderer.invoke('pre-fund-reconciliation:import-bank'),
+    importMpt: () => ipcRenderer.invoke('pre-fund-reconciliation:import-mpt'),
+    listTempBatches: () => ipcRenderer.invoke('pre-fund-reconciliation:temp:list'),
+    deleteTempBatch: (payload) => ipcRenderer.invoke('pre-fund-reconciliation:temp:delete', payload),
+    countTempByDateRange: (start, end, sourceType) => ipcRenderer.invoke('pre-fund-reconciliation:temp:count-by-date-range', { start, end, sourceType }),
+    deleteTempByDateRange: (start, end, sourceType) => ipcRenderer.invoke('pre-fund-reconciliation:temp:delete-by-date-range', { start, end, sourceType }),
+    clearTemp: () => ipcRenderer.invoke('pre-fund-reconciliation:temp:clear'),
+    sessionStatus: () => ipcRenderer.invoke('pre-fund-reconciliation:session-status'),
+    run: (payload) => ipcRenderer.invoke('pre-fund-reconciliation:run', payload),
+    export: () => ipcRenderer.invoke('pre-fund-reconciliation:export'),
+    onImportProgress: (listener) => {
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('pre-fund-reconciliation:import-progress', wrapped);
+      return () => ipcRenderer.removeListener('pre-fund-reconciliation:import-progress', wrapped);
+    },
+    onRunProgress: (listener) => {
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('pre-fund-reconciliation:run-progress', wrapped);
+      return () => ipcRenderer.removeListener('pre-fund-reconciliation:run-progress', wrapped);
+    },
+    onExportProgress: (listener) => {
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('pre-fund-reconciliation:export-progress', wrapped);
+      return () => ipcRenderer.removeListener('pre-fund-reconciliation:export-progress', wrapped);
+    }
+  },
   // v3.0.8 需求1：工具箱🧰（合表 / 拆表）—— 脱离主对账流程的轻量 Excel 行级搬运小工具
   //   merge()       合表：main 内多选 → 表头校验 → 合并 → 另存为；返回 {status:'success',filePath} / {status:'cancelled'} / {status:'failed',message,detailLines}
   //   splitRead()   拆表第一步：main 内单选 → 读表头 + 各字段去重值；返回 {status:'success',sourceFilePath,headers,valuesByField} / {status:'cancelled'} / {status:'failed',message}

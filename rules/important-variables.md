@@ -9,6 +9,9 @@
 
 | 字段 | 值 |
 |---|---|
+| 当前清单版本 | v19（目标 app v3.0.14 — 2026-07-12 实施复核：**前置资金对账**严格按非空 ID + 渠道 + 金额 + 币种精确 1:1、10 字段重复折叠、临时 MPT/运行结果双 side DB 生命周期、主库 run 镜像、5-sheet 按渠道导出；**命中/异常说明口径**收紧为仅实际改值行检测并进入命中；`ALL_MODULE_IDS` 扩为 10；per-月侧库体系扩为 4 个业务模块/5 个存储模块） |
+| v19 本轮 review | 2026-07-12（自动验证：unit 3445/3445、integration 39/39 脚本/1817 断言、smoke、ESLint、Electron 预览；前置资金 parity 37/37；新增 INBOUND/OUTBOUND 逻辑表库隔离删除；资金红线仍需人工复核 ID/渠道/金额/币种匹配键、候选顺序、指纹、金额姓名卡号和渠道拆分） |
+| v19 基线数据 | `docs/analysis/var-reference-stats.md`（183 个 JS 文件 / 1959 顶层声明；A-share 320 / A-pair 532 / A-local 975 / B 852；当前 package 尚未在验收前 bump，报告版本仍显示 3.0.13） |
 | 清单版本 | v18（对应 app v3.0.13 — 2026-07-04 收尾复核 4 条：**大账号识别阻断**（`matchMerchantIds` 子串 fuzzy 不再作为自动放行依据 + `normalizeMaintainedBigAccounts` 单一展平器 + 识别优先读文件头部）；**调拨状态过滤可观测性**（`buildFundTransferReconRows` 仅派生 `付款成功` + `fundTransferReconDerive.warning` 提醒全过滤）；**`detectFundTransferManyToMany` / `manyToManyReviewRows` 输出口径**（异常说明并入「命中场景」第 2 列，note-only 行可见，独立异常 sheet 停用）；**C3 同值候选优先**（同值候选优先减少无意义覆盖）；触发：v3.0.13 收尾 check-vars 硬节点）；v17（对应 app v3.0.12 — 2026-06-28 v3.0.12 收尾升格 2 条 Risk-sensitive ⚠️🔴 资金红线：**账户映射 → 调拨对账单 `big_account` 派生**（`fund_transfer_account_mappings` 全局表 + 仓储三函数 + `database.js` facade 四方法 + `buildFundTransferReconRows` accountMappingMap 第 2 参 + `linked-derive-rebuild` 单点注入 run/导入两链 + IPC/preload/`createFundTransferAccountMappingDialog`；改「中台调拨订单对账ID回填」R5s2-recon + DBS-Charge R3.5 匹配大账号口径）+ **`detectFundTransferManyToMany` / `manyToManyReviewRows`**（异常-人工判断 sheet 检测器，纯只读不改回填/行数守恒 + writer `appendManyToManyReviewSheet`/`SHEET_MANY_TO_MANY_NAME` + orchestrator `manyToManyReviewCount` + writer 第 8 参透传）；触发：v3.0.12 收尾 check-vars 硬节点；v16（对应 app v3.0.5 — 2026-06-15 size-startup-optimization Part B 升格 2 条：**per-月侧库体系**（Risk-sensitive ⚠️🔴🔴 资金红线 — run-data-store/MODULE_*/SIDE_DB_DDL_*/三编排层/reconcileOrphans/side_db_rel_path + 三 parity 锁；Phase 1/2 三对账模块 run 级批量数据迁出主库）+ **`DEFERRED_WINDOW_STARTUP`**（Runtime-state ⚠️ 启动时序回退开关 + appInitDone/两段式 getInfo/init-done；Phase 3 启动窗口先行）；触发：v3.0.5 Phase 4 守卫固化 check-vars 节点；v15（对应 app v3.0.4 — 2026-06-11 收尾文档批升格 5 条 Critical/Risk-sensitive：`USE_BIG_TABLE_IMPORT_ENGINE_PENDING`/`USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW` + 共享 dispatch（Critical 🔴🔴 pending/biz-op flow 换引擎）/ `BANK_DEPOSIT_FIELDS` 13→14（Risk-sensitive 🔴）/ BOC调拨订单修复链（Risk-sensitive 🔴）/ R5s2b Payment线下调拨回填（Risk-sensitive 🔴 + weekTag/excludeBankRowIds）；顺带修陈旧行号（`runC3Scenario`:81 / `writeBankStatementOutput`:106 5 参 / `processingResult`:311 结构补 unmatchedRows 等）+ `acquiring-engine-migration` 34→45 断言；触发：v3.0.4 收尾 check-vars 硬节点；v14（对应 app v3.0.0 — 2026-06-08 PR-4 升格 1 条 Runtime-state：`refundOrderSession`（R5 中台退款订单回填引擎入参源 + run 阶段注入 + 🔴 PR#65 收紧生命周期：单文件导入清 main.js:3494 / batch 本批未导退款表清 :11460 严格绑定「本批有效导入」；v3.0.0 需求3 经 session-status 透出 hasRefundOrder 供运行点 shouldPromptRefundAtRun 判就绪，本迭代只读不改写入/清空时机）；触发：v3.0.0 PR-4（退款提醒对齐 C3 + 候选预检 + 运行点编排）提 PR 前 check-vars 节点；v13（对应 app v2.1.16-beta.1）= 2026-06-07 阶段一 A0 收尾升格 3 条 Runtime-state：`bankStatementSession`（资金对账数据处理银行对账单进程级 session + v2.1.16 A5 多文件合并对账语义 + 🔴 `_rowId` 全局唯一不变量）/ `gatewayReconSession`（C3 网关账单数据源 + 导入银行对账单时清空）/ `processingResult`（5 轮对账运行结果缓存 + scenarios 变更/重导入时清空）；触发：v2.1.16 阶段一提 PR 前 check-vars 节点；v12 = 2026-05-28 Phase 6 T33 升格 5 条 v2.1.10 4 主线变量（Critical 4：`runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1：`serializeError`/`deserializeError` + 更新 `bill_imports.raw_json` 内容契约）；v11 = 2026-05-26 N1' + N4 升格 7 条；v10 = 2026-05-22 Phase 0 T02 升格 11 条；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
 | 上次人工 review | 2026-07-04（v3.0.13 收尾复核 — 大账号识别阻断 / 调拨状态过滤 / 命中场景异常说明并入 / C3 同值候选优先）；2026-06-28（v3.0.12 收尾升格 2 条 — 账户映射→调拨对账单 `big_account` 派生 / `detectFundTransferManyToMany` 异常-人工判断 sheet）；2026-06-15（v3.0.5 Part B 升格 2 条 — per-月侧库体系 / DEFERRED_WINDOW_STARTUP）；2026-06-11（v3.0.4 收尾文档批升格 5 条 + 修陈旧行号）；2026-06-08（v3.0.0 PR-4 升格 1 条 Runtime-state — refundOrderSession）；2026-06-07（v2.1.16 阶段一 A0 收尾升格 3 条 Runtime-state — bankStatementSession / gatewayReconSession / processingResult）|
 | 基线数据 | `docs/analysis/var-reference-stats.md`（173 个 JS 文件 / 1781 顶层声明 — v3.0.13 `scan:vars` 重跑后；A-share 300 / A-pair 495 / A-local 861 / B 795） |
@@ -409,14 +412,14 @@
   - 与 BIZ_OP_HEADERS 同步管理（配套常量）
   - 必跑：smoke biz-op-recon Case D（流水累加 + 出入方向）+ 真实流水文件回放
 
-### `ALL_MODULE_IDS`（v2.1.4 — 7 个主模块 ID 全集 anchor）
+### `ALL_MODULE_IDS`（v2.1.4 建立；v3.0.14 扩为 10 个主模块 ID 全集 anchor）
 - 定义：`src/backend/database/settings-repository.js`
 - 关联功能：单文件定义，但被 `CURRENT_MODULE_VALID`（`setCurrentModule` 校验）+ `setEnabledModules`（启用列表校验）共用；renderer 端 `MODULES` 常量必须与之一致；新增模块时两边都要加
 - 变更 review 要点：
   - 新增模块 → 必须同步加到 `ALL_MODULE_IDS` + renderer 端 `src/renderer.js` 的 `MODULES` 常量（两边定义必须完全一致）
   - 如忘了同步 → 用户切到新模块会抛 `Invalid current_module`（v2.1.2/v2.1.3 即遗留过此 bug，v2.1.4 修复）
   - 修改 ID 字符串 → DB 内已持久化的 `current_module` / `enabled_modules` 会因 sanitize 被回退到默认值
-  - 必跑：`npm run smoke`（settings-repository 内部测试）+ 手动验证 7 个模块逐一切换 + 收纳弹窗启用各模块后切换
+  - 必跑：`npm run smoke`（settings-repository 内部测试）+ 手动验证 10 个模块逐一切换 + 收纳弹窗启用各模块后切换；新模块默认关闭时还要验证旧用户启用列表不被扩写
 
 ### `enabled_modules`（v2.1.4 — 左上角模块切换菜单的启用列表全链路）
 - 定义：
@@ -983,20 +986,21 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
   - 改派发口径（移到 UI 自算 / dispatcher 入参时算）→ 编号体系再次分裂，N3-1 修复失效
   - 必跑：smoke N3-1（main 端 displayIndex 与 UI 列表 displayIndex 字段值逐项相等）+ 手测对比场景管理 dialog 与状态框
 
-### per-月侧库体系（v3.0.5 size-startup-optimization Part B Phase 1/2 升格 Risk-sensitive ⚠️🔴🔴 资金红线 — 对账 run 级批量数据迁出主库）
+### per-月侧库体系（v3.0.5 建立；v3.0.14 接入前置资金对账，Risk-sensitive ⚠️🔴🔴 资金红线）
 - 定义：
-  - 侧库管理器 `src/backend/run-data-store.js`：`KNOWN_MODULES`（`MODULE_ACQUIRING`/`MODULE_BIZ_OP`/`MODULE_BANK_BU`）+ `SIDE_DB_DDL_*`（三模块表 DDL **byte-for-byte 平移主库** migrations）+ `openSideDb`/`deleteSideDb`/`sideDbPath`/`sideDbRelPath`/`listSideDbFiles`/`MONTH_KEY_RE`（防路径注入）。
-  - 编排层 `src/main-process/acquiring-bill-currency-run-data.js` / `biz-op-recon-run-data.js` / `bank-bu-recon-run-data.js`：`importXxx`(落侧库) / `runViaSideDb`/`runCheckViaSideDb`(对账路由侧库 + 主库镜像) / `upsertMainRunMirror`(返回 mirrorId = **对外 runId 真值**) / 双源读 / `deleteMonthSideDb` / `reconcileOrphans`。
-  - 主库 schema：`acquiring_bill_currency_runs` / `bank_bu_recon_runs` / `biz_op_recon_runs` 各加 `side_db_rel_path TEXT` 列（NULL=历史主库 run 双源过渡；非空=侧库 run 镜像）。迁移函数 `ensureAcquiringBillCurrencyRunsSideDbPath` / `ensureBankBuReconRunsSideDbPath` / `ensureBizOpReconRunsSideDbPath`（`migrations.js`）。
-- 关联功能：三对账模块（收单单据币种校验 / 业务OP数据核对 / 月度银行对账单BU回填校验）的 run 级批量数据（imports/flow/bill/diff_rows）从主库迁出到 `{userData}/run-data/{module}/month-{YYYY-MM}.sqlite`，根治主库膨胀（spec §B）。
-- 🔴 变更 review 要点（资金红线，改动前必读 + 改后跑两 parity 锁）：
+  - `src/backend/run-data-store.js`：`KNOWN_MODULES` 新增 `MODULE_PRE_FUND_RECONCILIATION`（跨重启临时 MPT）和 `MODULE_PRE_FUND_RECONCILIATION_RESULTS`（当前 run 可回收结果）；`SIDE_DB_DDL_PRE_FUND_GATEWAY` / `SIDE_DB_DDL_PRE_FUND_RUNS` 分别是两套 DDL 唯一真相。
+  - 既有三模块编排层不变；前置资金对账由 `src/main-process/pre-fund-reconciliation/service.js` 统一编排 import/run/mirror/export，`pre-fund-reconciliation-run-store.js` 只操作 side DB。
+  - 主库新增轻量 `pre_fund_reconciliation_run_mirrors`，保存 `side_db_rel_path + side_run_id + status + summary`；不保存任何 MPT/候选/结果 bulk 行。
+- `MODULE_PRE_FUND_RECONCILIATION` / `MODULE_PRE_FUND_RECONCILIATION_RESULTS` / `SIDE_DB_DDL_PRE_FUND_RECONCILIATION` / `PreFundReconciliationRunStore` — 前置资金对账双生命周期侧库入口、DDL 和结果游标。
+- 关联功能：四个对账模块的 run 级批量数据位于 `{userData}/run-data/{module}/month-{YYYY-MM}.sqlite`；前置资金对账还把跨重启临时 MPT 批次放侧库，主库 `linked_gateway_bill` 绝不被临时导入覆盖。
+- 🔴 变更 review 要点（资金红线，改动前必读）：
   - **算法零改动不变量**：`runCheckCore`（acquiring）/ `runReconciliation`（biz-op/bank-bu）/ 4 步算法 / diff JOIN / epsilon **一字不改** —— 它们在「侧库 db 句柄」上跑 = 在主库上跑（同库自洽）。改动算法须重跑 `acquiring-side-db-parity` / `biz-op-recon-side-db-parity` / `bank-bu-recon-side-db-parity` 三 parity（byte-for-byte + 主库表恒 0 行 + 冻结 golden）。
-  - **DDL byte-for-byte**：改 `SIDE_DB_DDL_*` 或主库对应 `ensure*TablesSupport` 任一侧，必须同步另一侧（worker 也会 `ensure*TablesSupport` 建侧库表，schema 不一致即冲突）。
-  - **runId 命名空间**：侧库内自增 run id ≠ 主库镜像 id。对外（UI/导出）一律用主库镜像 id（`upsertMainRunMirror` 返回值）；导出再由镜像 (month/date,BU) 反查侧库内 run id 查 diff（`openExportContextByRun.exportRunId`）。误用侧库 id 作对外 runId → 跨月导出读错 run（资金事故）。
+  - **DDL 单一真相**：既有三模块仍要求 side/main schema byte-for-byte；前置资金对账从未在主库建 bulk 表，side DDL 只在 `run-data-store.js` 定义，主库镜像 schema 有意不同。改 side DDL 后必须跑 store/run-store 两层测试和 parity。
+  - **runId 命名空间**：侧库自增 run id ≠ 主库镜像 id。对外 UI/IPC 一律返回主库镜像 id；前置资金对账导出必须使用内存绑定的 `sideRunId` 读 side DB。混用会跨月读错结果。
   - **biz-op per-month 跨月边界**（单库自洽命门）：月末 D 导入时编排层补清下月侧库 (D,BU)+(D+1,BU) 旧 run + 写 D 的 T-2 冗余副本到下月侧库；月初对账 date 的 T-2(上月末) 由该冗余副本在当月侧库保证单库自洽。改 `handleMonthEndCrossMonth` / `runViaSideDb` / 双源去重逻辑须重跑 biz-op parity 的跨月用例。
   - **双源过渡（B-D2）**：side_db_rel_path 非空读侧库、NULL 读主库旧表。双源移除 + 二次 VACUUM 顺延 v3.0.5 之后版本——届时删双源分支前确认历史主库 run 已迁清。
-  - **孤儿双向兜底**：以侧库文件存在性为准。有文件无 imports/镜像（空壳/损坏）删文件；有镜像无文件标 status='side-db-missing'（UI 降级不崩溃）。
-- 必跑：`npm run release-check`（含三 parity + 三模块 smoke）+ 三模块真实数据手测回放（用户循环）。
+  - **前置资金对账生命周期**：临时批次按账单月保存在 MPT 模块，run 结果按运行月保存在 results 模块。新 run 删除旧 results 文件并标镜像 superseded；重启标 expired 并回收 results；清临时批次只删 MPT 模块，绝不能碰独立 results。启动时 running 镜像标 interrupted，镜像有而侧库无则标 missing-side-db。
+- 必跑：`npm run release-check`（含四 parity）+ `pre-fund-reconciliation-side-db-parity.js` + 同月 MPT/import/run/export/删除来源后 stale 回归。
 
 ### `DEFERRED_WINDOW_STARTUP`（v3.0.5 Part B Phase 3 新增 Runtime-state ⚠️ 启动时序回退开关）
 - 定义：`src/main.js` 模块级 `const DEFERRED_WINDOW_STARTUP = process.env.DEFERRED_WINDOW_STARTUP === '0' ? false : true`（默认 true=新时序：窗口先行）。配套 `appInitDone`（app:get-info 两段式判定）+ `runBackgroundInitChain`/`registerAllIpcHandlers`/`markAppInitDone`/`runStartupPostSetup` + IPC `app:init-done`/`app:init-progress` + preload `app.onInitDone`/`onInitProgress` + renderer `initialize`/`applyFullInfo` 两段式。
@@ -1022,21 +1026,43 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
   - **唯一性**：`UNIQUE(mid_account_id)` + IPC validate 双重兜底；一个中台调拨单账户号只能映一个清结算银行账号。
   - 必跑：`fund-transfer-account-mapping-repository.test.js` + `fund-transfer-recon-builder.test.js`（映射组）+ 集成 `fund-transfer-recon-account-mapping.js`（导入中台单 → 配映射 → 派生 `big_account` 换值端到端）+ 真实数据手测（配映射前后调拨对账命中变化）。
 
-### `detectFundTransferManyToMany` / `manyToManyReviewRows`（v3.0.12 功能1 新增 Risk-sensitive ⚠️🔴 资金红线·纯只读；v3.0.13 改为异常说明并入命中场景）
+### `PreFundReconciliationService` / `SCENARIO_MISSING_GATEWAY`（v3.0.14 新增 Risk-sensitive ⚠️🔴🔴 资金红线）
+- 定义：
+  - `src/main-process/pre-fund-reconciliation/service.js`：银行 session、来源快照、严格 1:1、主库 run 镜像、side DB 结果和导出资格总编排。
+  - `matching-engine.js`：`GATEWAY_SOURCE` / `FINGERPRINT_FIELDS` / `normalizeGatewayCandidate`，按非空对账 ID + 渠道 + 金额 + 币种精确匹配，并用 10 字段指纹折叠完全重复。
+  - `bank-row.js`：`classifyBankRow` 派生 CREDIT/DEBIT、金额、name/cardNo、稳定追溯 ID。
+  - `mpt-schema.js` / `mpt-parser.js`：INBOUND/OUTBOUND 33 字段强校验与 OUTBOUND bankDebit -> target -> origin 成对 fallback。
+  - `excel-writer.js` / `output-mapper.js`：5-sheet、20/31/31/16/14 固定导出契约。
+- `GATEWAY_SOURCE` / `FINGERPRINT_FIELDS` / `classifyBankRow` / `buildChannelFileName` — 匹配来源、去重、银行派生和按渠道文件边界。
+- 关联功能：`前置资金对账 > 缺网关账单`，本方为本次导入银行对账单，对手方为临时 MPT + 持久网关链接表；输出按银行 Channel 拆分。
+- 🔴 变更 review 要点：
+  - **唯一平账条件**：只允许非空 `trim(bank.ReconciliationId) === trim(gateway.reconciliationId)`，且渠道、精确十进制金额、币种全部相同；字符串大小写敏感，禁止 includes、日期或其它兜底。要素不符的同 ID 候选不得消费。
+  - **严格 1:1 与顺序**：银行永不去重；临时候选优先、持久候选其次，来源内稳定顺序逐个消费。改顺序会改变哪一行平账。
+  - **重复折叠**：仅 `reconciliationId + 10字段fingerprint` 完全一致时折叠；金额按十进制数值等价，字符串只 trim。不同指纹同 ID 必须全部保留。
+  - **金额/姓名/卡号**：Credit 用 Drawee，Debit 用 Payee；双边非零整次失败，双零和空 ID 分类别排除；OUTBOUND 币种金额必须成对 fallback，禁止跨层拼接。
+  - **来源快照**：银行重导、临时批次变化、持久网关 meta 变化后旧结果必须 stale，不能导出；run 失败后不得回退导出旧结果。
+  - **临时逻辑表库隔离**：`MPT_INBOUND_GATEWAY` / `MPT_OUTBOUND_GATEWAY` 共用物理月侧库，但管理汇总、日期预统计和删除必须携带同一个 `sourceType`；删一类不得删另一类或提前回收仍非空的月库。运行时仍联合两类进入临时候选池。
+  - **结果守恒**：银行参与行 = 平账 + 不平；网关候选 = 已消费 + 未使用；不平结果和渠道账单行数一致，按渠道不得串数据。
+  - **模板契约**：sheet 名/顺序和表头固定；0 不平仍导出；来源枚举必须区分 `临时网关对账单` / `网关对账单` / `导入银行对账单`。
+  - 必跑：pre-fund 全部 unit + side-db parity + 真实 5-sheet 导出；⚠️ ID/渠道/金额/币种匹配键、候选顺序、指纹、金额/姓名/卡号和按渠道拆分必须人工资金复核。
+
+### `detectFundTransferManyToMany` / `manyToManyReviewRows`（v3.0.12 新增；v3.0.14 收紧为仅实际改值行检测/输出）
 - 定义：
   - 检测器 `src/main-process/scenario-engines/many-to-many-detector.js` `detectFundTransferManyToMany(bankRows, gwRows, reconRows, options) → { reviewRows: [{row, note}] }`（纯只读；分组键 = 归一化账号 + 币种 + 金额分，组内日期容差建二部图求连通分量、分量内 银行≥2 ∧ 对手≥2 命中；网关/调拨各跑一遍按 `_rowId` 去重）。
-  - 编排器 `reconciliation-orchestrator.js`：R5 后调用，产出 `manyToManyReviewRows` + `stats.manyToManyReviewCount`（🔴 只读统计、不参与对账/匹配/派生），经 `processingResult` 透传。
-  - 编排器 v3.0.13 输出口径：`buildReviewRowIdSet` 只取非空 note 的 rowId；`buildOutputRows` 用「实际字段修改 ∪ 非空异常说明」决定 `modifiedRows`，note-only 行进入命中场景且 `_modifiedColumns` 为空 Set，无修改且无 note 的锁定 no-op 行落 `unmatchedRows`，继续保持 `modifiedRows.length + unmatchedRows.length === bankRows.length`。
+  - 编排器 `reconciliation-orchestrator.js`：先用 `hasActualFieldChanges` 取实际改值行，再把该子集传给检测器；产出 `manyToManyReviewRows` + `stats.manyToManyReviewCount`，但不参与对账/匹配/派生。
+  - 编排器 v3.0.14 输出口径：`buildOutputRows` 只按实际字段修改决定 `modifiedRows`；note-only、dispatcher 锁定 no-op、C3/R5 同值赋值都进入 `unmatchedRows`，保持 `modifiedRows.length + unmatchedRows.length === bankRows.length`。
   - writer `exceljs-writer.js`：`MANY_TO_MANY_NOTE_HEADER='异常说明'` + `buildManyToManyNoteByRowId` 将 `manyToManyRows` 按 `_rowId` 汇总到「命中场景」第 2 列；`writeBankStatementOutput` 第 8 参仍为 `manyToManyRows`，但不再生成独立异常 sheet。`SHEET_MANY_TO_MANY_NAME='异常-人工判断'` 仅保留给回归测试断言旧 sheet 不出现。
-- 关联功能：兜底「现有引擎遇银行↔网关/调拨多对多只发一条 `multi-bank-match-backfill` 警告就静默取 `cand[0]` 回填」的人工盲区——v3.0.13 起把异常说明并入结果文件「命中场景」第 2 列；有异常说明但未改字段的银行行也会保留在「命中场景」供人工复核。
+- `hasActualFieldChanges` / `buildOutputRows` — v3.0.14 命中唯一判据和命中/未命中行守恒入口。
+- 关联功能：多对多异常说明只作为“实际改值命中行”的附加审计信息；异常候选本身不再把未改字段行提升为命中。
 - 🔴 变更 review 要点（资金红线·只读）：
-  - **绝对只读**：检测器不 mergeMods、不进 modColsByRowId、不改任何 `bankRow` 字段 / `modifications` / 回填；v3.0.13 只改变导出可见性（note rowId 并入命中场景），不改变银行行数据本身。检测器误写 row 字段 ＝ 污染资金对账输出。
+  - **绝对只读**：检测器不 mergeMods、不进 modColsByRowId、不改任何 `bankRow` 字段 / `modifications` / 回填。检测器误写 row 字段 ＝ 污染资金对账输出。
+  - **先过滤再检测**：检测器入参必须是 `hasActualFieldChanges` 子集；若传全量 bankRows，note-only 会重新出现并与 3.0.14 产品口径背离。
   - **空值护栏**：账号/币种归一化为空、金额非有限数（`!Number.isFinite`）的行不进池（否则空账号 `normalizeCellValue('')===''` 全并成巨型假组、误标一大片）。
   - **复用引擎访问器（禁自写解析）**：金额/日期一律走 `bankAmountAbs`/`gwAmountAbs`/`reconAmountAbs`/`dayDiffWithin`，防跨表字段漂移——银行驼峰 / 网关小写 / 调拨 `RECON` 常量三套表头不假设同名。
   - **偏全可接受**：金额取绝对值、不分 in/out 方向 → 同 |金额| 的 credit/debit、in/out 对手会并组可能多标；属「供人工判断」可接受偏全。
-  - **空/null → 主文件零变化**：`manyToManyRows` 空或 null 时「异常说明」列为空；不会额外制造命中场景行。空 note / 空 row / 空 `_rowId` 必须被 `buildReviewRowIdSet` 与 `buildManyToManyNoteByRowId` 同步忽略。
+  - **命中唯一判据**：`_modifiedColumns` 非空才进命中；异常说明不得改变行去向。实际改值+异常说明仍保留 note，且改值列继续标黄。
   - **输出高亮偏移**：「命中场景」新增前缀列后，标黄列必须按 `hitHeaders.length - headers.length + 1` 派生，禁止手写固定偏移，避免后续插列时黄色标错银行字段。
-  - 必跑：`many-to-many-detector.test.js`（分组/连通分量/空值护栏/去重/偏全）+ 集成 `bank-statement-many-to-many-review-sheet.js`（run → 导出 → ExcelJS readback 断言 sheet 名/列/命中行）。
+  - 必跑：`reconciliation-orchestrator.test.js`（改值+异常 / no-op+异常候选 / C3 同值 / 行数守恒）+ `many-to-many-detector.test.js` + 集成 `bank-statement-many-to-many-review-sheet.js`。
 
 ---
 

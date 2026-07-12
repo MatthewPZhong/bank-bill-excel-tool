@@ -320,6 +320,46 @@
             </div>
           </section>
 
+          <!-- v3.0.14：前置资金对账复用资金对账数据处理的五槽位结构：
+               导入/导出/运行/场景/链接槽位分别放下拉框/链接表管理/导入文件/开始运行/导出文件。
+               临时 MPT 账单统一从「链接表管理 -> 导入」进入；3.0.14 仅开放“缺网关账单”。 -->
+          <section id="preFundReconciliationModulePanel" class="control-board module-panel bank-statement-board layout-mirrored" hidden>
+            <div class="control-row">
+              <div class="cell left">
+                <button id="preFundReconciliationImportBankBtn" class="primary-btn" type="button">导入文件</button>
+              </div>
+              <div class="cell right">
+                <div class="pending-action-pair pre-fund-action-pair">
+                  <div class="pre-fund-scenario-slot">
+                    <label class="select-label pre-fund-scenario-label" for="preFundReconciliationScenarioSelect">对账场景</label>
+                    <div class="select-shell pre-fund-scenario-select-shell">
+                      <select id="preFundReconciliationScenarioSelect" class="template-select">
+                        <option value="missing-gateway" selected>缺网关账单</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button id="preFundReconciliationTempManagerBtn" class="secondary-btn" type="button">链接表管理</button>
+                </div>
+              </div>
+            </div>
+            <div class="control-row pre-fund-board-merged-row">
+              <div class="cell left pre-fund-merged-run">
+                <button id="preFundReconciliationRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
+              </div>
+              <div class="cell left pre-fund-merged-export">
+                <button id="preFundReconciliationExportBtn" class="secondary-btn" type="button" disabled>导出文件</button>
+              </div>
+              <div class="cell right pre-fund-merged-status">
+                <div id="preFundReconciliationStatusBox" class="status-box">
+                  <span class="status-spark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusPreFundRecon" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusPreFundRecon)"/></svg>
+                  </span>
+                  <span class="status-box-text">欢迎使用小助手</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <!-- v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块面板（fork bankStatementModulePanel）
                v2.1.0-beta.2 PR-B（task B1）：行 1 左 cell = [场景下拉 + 场景管理]，行 1 右 cell = [导入文件 + 开始运行]
                v2.1.0-beta.3 T3：行 1 左 cell"场景下拉"位置 → 账单类别下拉；"场景及其下拉框"下移至与"导出文件"按钮平行（行 2 左 cell）；场景管理按钮 保持在 行 1 左 cell（与账单类别同组，沿用 beta.2 视觉对齐）；其他前端结构同 beta.2 版本 -->

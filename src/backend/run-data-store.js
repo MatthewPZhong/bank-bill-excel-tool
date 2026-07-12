@@ -48,7 +48,20 @@ const MODULE_ACQUIRING = 'acquiring-bill-currency';
 //     - biz-op：imports 按 date 分片但数据量小，按「对账归属月」= month(date) 单库自洽（免 ATTACH）。
 const MODULE_BIZ_OP = 'biz-op-recon';
 const MODULE_BANK_BU = 'bank-bu-recon';
-const KNOWN_MODULES = Object.freeze([MODULE_ACQUIRING, MODULE_BIZ_OP, MODULE_BANK_BU]);
+// v3.0.14 PR2：前置资金对账双生命周期侧库。
+//   临时 MPT 生命周期键 = 账单月份；运行结果生命周期键 = 运行月份且只保留当前进程最后一次结果。
+//   两者分目录，临时明细不写 linked_gateway_bill 主表，旧运行结果可整文件回收。
+const MODULE_PRE_FUND_RECONCILIATION = 'pre-fund-reconciliation';
+// 运行候选池/结果与跨重启临时 MPT 的生命周期不同：结果只服务当前进程最后一次 run，
+// 单独放可整文件删除的 results 模块，避免反复 run 让保留临时批次的月库永久膨胀。
+const MODULE_PRE_FUND_RECONCILIATION_RESULTS = 'pre-fund-reconciliation-results';
+const KNOWN_MODULES = Object.freeze([
+  MODULE_ACQUIRING,
+  MODULE_BIZ_OP,
+  MODULE_BANK_BU,
+  MODULE_PRE_FUND_RECONCILIATION,
+  MODULE_PRE_FUND_RECONCILIATION_RESULTS,
+]);
 
 // run-data 根目录名（{userData}/run-data/）。
 const RUN_DATA_DIRNAME = 'run-data';
@@ -424,10 +437,135 @@ const SIDE_DB_DDL_BANK_BU = `
     ON bank_bu_recon_runs(year_month, run_at DESC);
 `;
 
+// ── 前置资金对账临时 MPT 网关账单（v3.0.14 PR2）──
+//   一个 side DB 对应一个账单月份。批次表负责文件身份、hash 和重推序号；规范行表保留
+//   来源血缘、未来 1:1 对账所需字段、原始 33 字段 JSON 与十字段业务指纹。
+//   同批次替换保留 batch.id，在单事务内清旧 rows + UPDATE meta + INSERT new rows，
+//   防重推改变批次稳定顺序；失败回滚后旧批次完整恢复。
+const SIDE_DB_DDL_PRE_FUND_GATEWAY = `
+  CREATE TABLE IF NOT EXISTS pre_fund_reconciliation_gateway_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_type TEXT NOT NULL,
+    source_batch TEXT NOT NULL,
+    source_date TEXT NOT NULL,
+    source_file_name TEXT NOT NULL,
+    source_file_sequence TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    declared_row_count INTEGER NOT NULL,
+    row_count INTEGER NOT NULL,
+    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (source_type, source_batch),
+    UNIQUE (source_file_name)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pre_fund_gateway_batches_date
+    ON pre_fund_reconciliation_gateway_batches(source_date, source_type, source_batch);
+
+  CREATE TABLE IF NOT EXISTS pre_fund_reconciliation_gateway_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id INTEGER NOT NULL,
+    source_type TEXT NOT NULL,
+    source_batch TEXT NOT NULL,
+    source_date TEXT NOT NULL,
+    source_file_name TEXT NOT NULL,
+    source_file_sequence TEXT NOT NULL,
+    source_row_number INTEGER NOT NULL,
+    reconciliation_id TEXT,
+    gateway_date TEXT NOT NULL,
+    channel TEXT,
+    merchant_id TEXT,
+    order_id TEXT,
+    bill_recon_id TEXT,
+    recon_bill_biz_id TEXT,
+    currency TEXT NOT NULL,
+    amount TEXT NOT NULL,
+    trade_type TEXT,
+    name TEXT,
+    card_no TEXT,
+    real_channel TEXT,
+    clearing_network TEXT,
+    raw_json TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    FOREIGN KEY (batch_id) REFERENCES pre_fund_reconciliation_gateway_batches(id) ON DELETE CASCADE,
+    UNIQUE (batch_id, source_row_number)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pre_fund_gateway_rows_recon
+    ON pre_fund_reconciliation_gateway_rows(reconciliation_id, batch_id, source_row_number);
+  CREATE INDEX IF NOT EXISTS idx_pre_fund_gateway_rows_fingerprint
+    ON pre_fund_reconciliation_gateway_rows(reconciliation_id, fingerprint);
+`;
+
+// 前置资金对账 run 级数据：候选池和结果均为 bulk，放独立 results 月侧库，主库不落明细。
+const SIDE_DB_DDL_PRE_FUND_RUNS = `
+  CREATE TABLE IF NOT EXISTS pre_fund_reconciliation_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scenario TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    bank_files_json TEXT NOT NULL,
+    status TEXT NOT NULL,
+    summary_json TEXT NOT NULL DEFAULT '{}',
+    error_message TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_pre_fund_runs_created
+    ON pre_fund_reconciliation_runs(created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS pre_fund_reconciliation_gateway_pool (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    source_priority INTEGER NOT NULL,
+    source_order INTEGER NOT NULL,
+    source_label TEXT NOT NULL,
+    reconciliation_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    fields_json TEXT NOT NULL,
+    name TEXT,
+    card_no TEXT,
+    source_location_json TEXT NOT NULL,
+    consumed_bank_ordinal INTEGER,
+    FOREIGN KEY (run_id) REFERENCES pre_fund_reconciliation_runs(id) ON DELETE CASCADE,
+    UNIQUE (run_id, reconciliation_id, fingerprint)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pre_fund_pool_match
+    ON pre_fund_reconciliation_gateway_pool(
+      run_id, reconciliation_id, consumed_bank_ordinal, source_priority, source_order
+    );
+
+  CREATE TABLE IF NOT EXISTS pre_fund_reconciliation_balanced_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    channel TEXT NOT NULL,
+    bank_ordinal INTEGER NOT NULL,
+    output_json TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES pre_fund_reconciliation_runs(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_pre_fund_balanced_channel
+    ON pre_fund_reconciliation_balanced_rows(run_id, channel, bank_ordinal);
+
+  CREATE TABLE IF NOT EXISTS pre_fund_reconciliation_unbalanced_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    channel TEXT NOT NULL,
+    bank_ordinal INTEGER NOT NULL,
+    output_json TEXT NOT NULL,
+    channel_output_json TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES pre_fund_reconciliation_runs(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_pre_fund_unbalanced_channel
+    ON pre_fund_reconciliation_unbalanced_rows(run_id, channel, bank_ordinal);
+`;
+
+const SIDE_DB_DDL_PRE_FUND_RECONCILIATION = `
+  ${SIDE_DB_DDL_PRE_FUND_GATEWAY}
+  ${SIDE_DB_DDL_PRE_FUND_RUNS}
+`;
+
 const MODULE_DDL = Object.freeze({
   [MODULE_ACQUIRING]: SIDE_DB_DDL_ACQUIRING,
   [MODULE_BIZ_OP]: SIDE_DB_DDL_BIZ_OP,
   [MODULE_BANK_BU]: SIDE_DB_DDL_BANK_BU,
+  [MODULE_PRE_FUND_RECONCILIATION]: SIDE_DB_DDL_PRE_FUND_GATEWAY,
+  [MODULE_PRE_FUND_RECONCILIATION_RESULTS]: SIDE_DB_DDL_PRE_FUND_RUNS,
 });
 
 // 打开（必要时建库）侧库连接。
@@ -516,6 +654,8 @@ module.exports = {
   MODULE_ACQUIRING,
   MODULE_BIZ_OP,
   MODULE_BANK_BU,
+  MODULE_PRE_FUND_RECONCILIATION,
+  MODULE_PRE_FUND_RECONCILIATION_RESULTS,
   KNOWN_MODULES,
   RUN_DATA_DIRNAME,
   SIDE_DB_PRAGMA_STATEMENTS,
@@ -537,4 +677,7 @@ module.exports = {
   SIDE_DB_DDL_ACQUIRING,
   SIDE_DB_DDL_BIZ_OP,
   SIDE_DB_DDL_BANK_BU,
+  SIDE_DB_DDL_PRE_FUND_GATEWAY,
+  SIDE_DB_DDL_PRE_FUND_RUNS,
+  SIDE_DB_DDL_PRE_FUND_RECONCILIATION,
 };

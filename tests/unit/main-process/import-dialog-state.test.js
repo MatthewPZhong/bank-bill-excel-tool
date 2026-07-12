@@ -53,6 +53,7 @@ test.describe('IMPORT_DIALOG_SCOPES', () => {
   test('bundle 导入使用独立 scope，与业务 xlsx 目录互不覆盖', () => {
     assert.ok(IMPORT_DIALOG_SCOPES.includes('bank-statement-process-bundle'));
     assert.ok(IMPORT_DIALOG_SCOPES.includes('template-bundle'));
+    assert.ok(IMPORT_DIALOG_SCOPES.includes('pre-fund-reconciliation-export'));
   });
 });
 
@@ -194,6 +195,25 @@ test.describe('import dialog directory state', () => {
     });
 
     assert.equal(calls[0].defaultPath, explicitDir);
+  });
+
+  test('选择导出目录时记住所选目录本身，而不是其父目录', async () => {
+    const selectedDir = path.join(tmpDir, 'exports');
+    fs.mkdirSync(selectedDir);
+    const fakeDialog = {
+      showOpenDialog: async () => ({ canceled: false, filePaths: [selectedDir] })
+    };
+    await showImportOpenDialog({
+      dialog: fakeDialog,
+      browserWindow: null,
+      db,
+      scope: 'pre-fund-reconciliation-export',
+      options: { properties: ['openDirectory', 'createDirectory'] }
+    });
+    assert.equal(
+      await getImportDialogDefaultPath(db, 'pre-fund-reconciliation-export'),
+      selectedDir
+    );
   });
 
   test('不同 scope 保留各自目录，未知 scope fallback 到 global', async () => {

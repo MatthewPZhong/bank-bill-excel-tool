@@ -2,7 +2,7 @@
 // spec §五.1 / §三 / §四
 //
 // 职责：
-//   readReconIdFixFile(filePath)   — 读 4 sheet（对账结果 / 业务部门账单 / 对手部门账单 / 订单修复）
+//   readReconIdFixFile(filePath)   — 读旧 4 sheet；gateway 模式兼容 3.0.14 新 5 sheet
 //   writeReconIdFixOutput({...})   — 写「订单修复」单 sheet（15 列）
 //
 // 读：SheetJS（与 v2.0.0-beta.3 bank-statement-io.js 同模式）
@@ -36,6 +36,25 @@ const {
   ORDER_REPAIR_SHEET_NAME_GATEWAY,
   RECON_RESULT_SHEET_NAME_GATEWAY
 } = require('../constants/gateway-bill-recon-fields');
+
+// v3.0.14「前置资金对账」导出格式。C4 只消费网关/渠道/订单修复 sheet，
+// 但导入时仍严格校验结果 sheet，避免把结构损坏的文件静默当成有效输入。
+const PRE_FUND_UNBALANCED_SHEET_NAME = '不平结果';
+const PRE_FUND_BALANCED_SHEET_NAME = '平账结果';
+const PRE_FUND_SOURCE_FIELD = '对账数据来源';
+const PRE_FUND_UNBALANCED_FIELDS = Object.freeze([
+  PRE_FUND_SOURCE_FIELD,
+  ...RECON_RESULT_FIELDS_GATEWAY
+]);
+const PRE_FUND_BALANCED_FIELDS = Object.freeze([
+  '网关-数据来源', '网关-BillDate', '网关-Channel', '网关-MerchantId', '网关-OrderId',
+  '网关-ReconBillBizId', '网关-reconciliationId', '网关-Currency', '网关-Amount',
+  '网关-TradeType', '网关-name', '网关-cardNo', '网关-真实渠道', '网关-清算网络',
+  '对账结果', '银行-数据来源', '银行-BillDate', '银行-ValueDate', '银行-Channel',
+  '银行-地区', '银行-MerchantId', '银行-ReconciliationId', '银行-ChannelOrderNo',
+  '银行-name', '银行-cardNo', '银行-Currency', '银行-Credit Amount', '银行-Debit Amount',
+  '银行-FundType', '银行-清算网络', '银行-OriginBillId'
+]);
 
 // v2.1.0-beta.3 T9：按 subMode 选择 sheet 名 + 字段常量集合
 function getSheetConfigBySubMode(subMode) {
@@ -125,6 +144,43 @@ function readSheetOrThrow(wb, sheetName) {
   return sheet;
 }
 
+function readGatewayReconResult(wb, cfg) {
+  const legacySheet = wb.Sheets[cfg.reconResultSheetName];
+  if (legacySheet) {
+    return sheetToObjects(legacySheet, cfg.reconResultFields, cfg.reconResultSheetName).rows;
+  }
+
+  const unbalancedSheet = wb.Sheets[PRE_FUND_UNBALANCED_SHEET_NAME];
+  if (!unbalancedSheet) {
+    throw new FileValidationError(
+      'missing-sheet',
+      `网关对账文件缺少 sheet「${cfg.reconResultSheetName}」或「${PRE_FUND_UNBALANCED_SHEET_NAME}」`,
+      { detailLines: [`实际 sheets：${wb.SheetNames.join(' / ')}`] }
+    );
+  }
+
+  const parsed = sheetToObjects(
+    unbalancedSheet,
+    PRE_FUND_UNBALANCED_FIELDS,
+    PRE_FUND_UNBALANCED_SHEET_NAME
+  );
+  const balancedSheet = wb.Sheets[PRE_FUND_BALANCED_SHEET_NAME];
+  if (balancedSheet) {
+    sheetToObjects(
+      balancedSheet,
+      PRE_FUND_BALANCED_FIELDS,
+      PRE_FUND_BALANCED_SHEET_NAME
+    );
+  }
+
+  // C4 既有内部契约仍是旧 19 列；新增来源列只用于前置资金对账审计。
+  return parsed.rows.map((row) => {
+    const legacyRow = {};
+    for (const field of cfg.reconResultFields) legacyRow[field] = row[field];
+    return legacyRow;
+  });
+}
+
 // ===== readReconIdFixFile =====
 // 返回 { filePath, fileName, sheets: { reconResult, businessBills, opponentBills, fixTemplate }, importedAt }
 // v2.1.0-beta.3 T9：加 subMode 参数（'business' | 'gateway'），按 mode 选 sheet 名 + 字段常量
@@ -135,13 +191,18 @@ function readReconIdFixFile(filePath, subMode = 'business') {
   }
   const wb = XLSX.readFile(filePath);
   const cfg = getSheetConfigBySubMode(subMode);
-  // spec §五.1 4 sheet 缺一即 missing-sheet
-  const reconSheet = readSheetOrThrow(wb, cfg.reconResultSheetName);
+  // business 模式仍要求旧 4 sheet；gateway 模式兼容 3.0.14 的新结果 sheet。
+  const reconResultRows = subMode === 'gateway'
+    ? readGatewayReconResult(wb, cfg)
+    : sheetToObjects(
+      readSheetOrThrow(wb, cfg.reconResultSheetName),
+      cfg.reconResultFields,
+      cfg.reconResultSheetName
+    ).rows;
   const businessSheet = readSheetOrThrow(wb, cfg.mainBillSheetName);
   const opponentSheet = readSheetOrThrow(wb, cfg.oppBillSheetName);
   const fixSheet = readSheetOrThrow(wb, cfg.orderRepairSheetName);
 
-  const reconResultObj = sheetToObjects(reconSheet, cfg.reconResultFields, cfg.reconResultSheetName);
   const businessObj = sheetToObjects(businessSheet, cfg.mainBillFields, cfg.mainBillSheetName);
   const opponentObj = sheetToObjects(opponentSheet, cfg.oppBillFields, cfg.oppBillSheetName);
   // 「订单修复」sheet 仅校验表头（PRD §六.4.1 + spec §五.1）
@@ -151,7 +212,7 @@ function readReconIdFixFile(filePath, subMode = 'business') {
     filePath,
     fileName: path.basename(filePath),
     sheets: {
-      reconResult: reconResultObj.rows,
+      reconResult: reconResultRows,
       businessBills: businessObj.rows,
       opponentBills: opponentObj.rows,
       fixTemplate: { headers: fixObj.headers, rows: [] }
@@ -341,5 +402,9 @@ module.exports = {
   RECON_RESULT_SHEET_NAME,
   BUSINESS_BILL_SHEET_NAME,
   OPPONENT_BILL_SHEET_NAME,
-  ORDER_REPAIR_SHEET_NAME
+  ORDER_REPAIR_SHEET_NAME,
+  PRE_FUND_UNBALANCED_SHEET_NAME,
+  PRE_FUND_BALANCED_SHEET_NAME,
+  PRE_FUND_UNBALANCED_FIELDS,
+  PRE_FUND_BALANCED_FIELDS
 };
