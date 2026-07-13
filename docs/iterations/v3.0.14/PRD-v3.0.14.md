@@ -1,7 +1,7 @@
-# bank-bill-excel-tool 3.0.14 Spec
+# bank-bill-excel-tool 3.0.14 PRD
 
 > 目标版本：`3.0.14`
-> 状态：已完成；PR #87 于 2026-07-12 通过 merge commit `e3ea44b` 合入 `main`，最终规格已归档
+> 状态：已完成；PR #87 于 2026-07-12 通过 merge commit `e3ea44b` 合入 `main`
 > 更新时间：2026-07-12
 > 适用仓库：`bank-bill-excel-tool`
 
