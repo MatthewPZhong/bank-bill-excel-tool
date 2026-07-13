@@ -1,15 +1,15 @@
 {
   "meta": {
     "version": "3.0.14",
-    "scannedAt": "2026-07-12T19:24:04.682Z",
+    "scannedAt": "2026-07-13T02:41:46.119Z",
     "root": "src",
     "totalFiles": 183,
-    "totalTopLevelNames": 1958,
+    "totalTopLevelNames": 1986,
     "buckets": {
-      "shared": 318,
-      "paired": 535,
-      "local": 973,
-      "crossFile": 853
+      "shared": 320,
+      "paired": 539,
+      "local": 995,
+      "crossFile": 859
     }
   },
   "A": {
@@ -278,7 +278,7 @@
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/service.js",
-            "count": 6
+            "count": 8
           },
           {
             "file": "src/main-process/recon-id-fix-io.js",
@@ -333,7 +333,7 @@
             "count": 2
           }
         ],
-        "totalHits": 214,
+        "totalHits": 216,
         "fileSpan": 64
       },
       {
@@ -527,7 +527,7 @@
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
-            "count": 6
+            "count": 12
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
@@ -535,7 +535,7 @@
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/service.js",
-            "count": 8
+            "count": 7
           },
           {
             "file": "src/main-process/recon-id-fix-io.js",
@@ -566,7 +566,7 @@
             "count": 1
           }
         ],
-        "totalHits": 143,
+        "totalHits": 148,
         "fileSpan": 45
       },
       {
@@ -645,7 +645,7 @@
           },
           {
             "file": "src/backend/pre-fund-reconciliation-run-store.js",
-            "count": 2
+            "count": 5
           },
           {
             "file": "src/backend/scenarios-bundle-io.js",
@@ -688,7 +688,7 @@
             "count": 3
           }
         ],
-        "totalHits": 58,
+        "totalHits": 61,
         "fileSpan": 28
       },
       {
@@ -1007,7 +1007,7 @@
           },
           {
             "file": "src/main-process/recon-id-fix-io.js",
-            "count": 7
+            "count": 8
           },
           {
             "file": "src/main-process/statement-generation.js",
@@ -1022,7 +1022,7 @@
             "count": 2
           }
         ],
-        "totalHits": 90,
+        "totalHits": 91,
         "fileSpan": 21
       },
       {
@@ -1383,14 +1383,14 @@
           },
           {
             "file": "src/main-process/recon-id-fix-io.js",
-            "count": 3
+            "count": 8
           },
           {
             "file": "src/main.js",
             "count": 1
           }
         ],
-        "totalHits": 69,
+        "totalHits": 74,
         "fileSpan": 13
       },
       {
@@ -2261,6 +2261,48 @@
         "fileSpan": 8
       },
       {
+        "name": "createHash",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/validator.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 1
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 8
+      },
+      {
         "name": "state",
         "defFiles": [
           "src/renderer.js"
@@ -2359,7 +2401,7 @@
           },
           {
             "file": "src/backend/pre-fund-reconciliation-store.js",
-            "count": 17
+            "count": 20
           },
           {
             "file": "src/main-process/acquiring-bill-currency-run-data.js",
@@ -2382,7 +2424,7 @@
             "count": 1
           }
         ],
-        "totalHits": 93,
+        "totalHits": 96,
         "fileSpan": 7
       },
       {
@@ -2543,6 +2585,50 @@
           }
         ],
         "totalHits": 22,
+        "fileSpan": 7
+      },
+      {
+        "name": "crypto",
+        "defFiles": [
+          "src/backend/pending-import/validator.js",
+          "src/backend/pending-reconcile/engine.js",
+          "src/backend/pre-fund-reconciliation-run-store.js",
+          "src/main-process/pre-fund-reconciliation/matching-engine.js",
+          "src/main-process/pre-fund-reconciliation/mpt-parser.js",
+          "src/main-process/pre-fund-reconciliation/mpt-schema.js",
+          "src/main-process/pre-fund-reconciliation/service.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 16,
         "fileSpan": 7
       },
       {
@@ -2741,44 +2827,6 @@
           }
         ],
         "totalHits": 10,
-        "fileSpan": 7
-      },
-      {
-        "name": "createHash",
-        "defFiles": [
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-import/validator.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/pending-reconcile/engine.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/service.js",
-            "count": 1
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 7,
         "fileSpan": 7
       },
       {
@@ -3140,39 +3188,34 @@
         "fileSpan": 6
       },
       {
-        "name": "crypto",
+        "name": "sideDbExists",
         "defFiles": [
-          "src/backend/pending-import/validator.js",
-          "src/backend/pending-reconcile/engine.js",
-          "src/main-process/pre-fund-reconciliation/matching-engine.js",
-          "src/main-process/pre-fund-reconciliation/mpt-parser.js",
-          "src/main-process/pre-fund-reconciliation/mpt-schema.js",
-          "src/main-process/pre-fund-reconciliation/service.js"
+          "src/backend/run-data-store.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/pending-import/validator.js",
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pre-fund-reconciliation-store.js",
             "count": 2
           },
           {
-            "file": "src/backend/pending-reconcile/engine.js",
+            "file": "src/backend/run-data-store.js",
             "count": 2
           },
           {
-            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "file": "src/main-process/acquiring-bill-currency-run-data.js",
             "count": 3
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-run-data.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 2
           }
         ],
         "totalHits": 13,
@@ -3313,40 +3356,6 @@
           {
             "file": "src/renderer.js",
             "count": 1
-          }
-        ],
-        "totalHits": 12,
-        "fileSpan": 6
-      },
-      {
-        "name": "sideDbExists",
-        "defFiles": [
-          "src/backend/run-data-store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pre-fund-reconciliation-run-store.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/pre-fund-reconciliation-store.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/run-data-store.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-run-data.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-run-data.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 2
           }
         ],
         "totalHits": 12,
@@ -3514,7 +3523,7 @@
           },
           {
             "file": "src/backend/pre-fund-reconciliation-store.js",
-            "count": 6
+            "count": 8
           },
           {
             "file": "src/main-process/acquiring-bill-currency-run-data.js",
@@ -3529,7 +3538,7 @@
             "count": 24
           }
         ],
-        "totalHits": 69,
+        "totalHits": 71,
         "fileSpan": 5
       },
       {
@@ -3725,6 +3734,36 @@
         "fileSpan": 5
       },
       {
+        "name": "sideDbPath",
+        "defFiles": [
+          "src/backend/run-data-store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pre-fund-reconciliation-store.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/run-data-store.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-run-data.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 15,
+        "fileSpan": 5
+      },
+      {
         "name": "TEMPLATE_BILL_HEADERS",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/columns.js",
@@ -3786,36 +3825,6 @@
           {
             "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
             "count": 5
-          }
-        ],
-        "totalHits": 14,
-        "fileSpan": 5
-      },
-      {
-        "name": "sideDbPath",
-        "defFiles": [
-          "src/backend/run-data-store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pre-fund-reconciliation-run-store.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/pre-fund-reconciliation-store.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/run-data-store.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-run-data.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 6
           }
         ],
         "totalHits": 14,
@@ -4496,14 +4505,14 @@
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-            "count": 35
+            "count": 36
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
-            "count": 6
+            "count": 11
           }
         ],
-        "totalHits": 58,
+        "totalHits": 64,
         "fileSpan": 4
       },
       {
@@ -4621,6 +4630,32 @@
         "fileSpan": 4
       },
       {
+        "name": "app",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 7
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 4
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 8
+          }
+        ],
+        "totalHits": 20,
+        "fileSpan": 4
+      },
+      {
         "name": "importRepo",
         "defFiles": [
           "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
@@ -4675,32 +4710,6 @@
           }
         ],
         "totalHits": 18,
-        "fileSpan": 4
-      },
-      {
-        "name": "app",
-        "defFiles": [
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main.js",
-            "count": 4
-          },
-          {
-            "file": "src/preload.js",
-            "count": 1
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 4
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 8
-          }
-        ],
-        "totalHits": 17,
         "fileSpan": 4
       },
       {
@@ -6465,14 +6474,14 @@
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/service.js",
-            "count": 18
+            "count": 20
           },
           {
             "file": "src/main.js",
             "count": 9
           }
         ],
-        "totalHits": 49,
+        "totalHits": 51,
         "fileSpan": 3
       },
       {
@@ -6775,6 +6784,28 @@
         "fileSpan": 3
       },
       {
+        "name": "openExistingSideDb",
+        "defFiles": [
+          "src/backend/run-data-store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pre-fund-reconciliation-store.js",
+            "count": 7
+          },
+          {
+            "file": "src/backend/run-data-store.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 11,
+        "fileSpan": 3
+      },
+      {
         "name": "getLinkedTableMeta",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -6790,28 +6821,6 @@
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/service.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 3
-      },
-      {
-        "name": "openExistingSideDb",
-        "defFiles": [
-          "src/backend/run-data-store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pre-fund-reconciliation-run-store.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/pre-fund-reconciliation-store.js",
-            "count": 6
-          },
-          {
-            "file": "src/backend/run-data-store.js",
             "count": 2
           }
         ],
@@ -7738,6 +7747,28 @@
         "fileSpan": 3
       },
       {
+        "name": "DUPLICATE_GATEWAY_HEADERS",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/output-mapper.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 3
+      },
+      {
         "name": "moduleDir",
         "defFiles": [
           "src/backend/run-data-store.js"
@@ -8216,6 +8247,28 @@
           {
             "file": "src/preload.js",
             "count": 1
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
+        "name": "getGatewayBillRawJsonById",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 2
           }
         ],
         "totalHits": 6,
@@ -10437,6 +10490,24 @@
         "fileSpan": 2
       },
       {
+        "name": "GATEWAY_SOURCE",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/matching-engine.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 7
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 2
+      },
+      {
         "name": "getCurrencyOptionEntries",
         "defFiles": [
           "src/renderer.js"
@@ -10492,6 +10563,25 @@
         "fileSpan": 2
       },
       {
+        "name": "sheetToObjects",
+        "defFiles": [
+          "src/main-process/bank-statement-io.js",
+          "src/main-process/recon-id-fix-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/bank-statement-io.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 9
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 2
+      },
+      {
         "name": "BIZ_OP_ACCOUNT_KEY_DB_COLUMN",
         "defFiles": [
           "src/backend/biz-op-recon-db/columns.js"
@@ -10504,6 +10594,24 @@
           {
             "file": "src/main-process/biz-op-recon-session.js",
             "count": 9
+          }
+        ],
+        "totalHits": 11,
+        "fileSpan": 2
+      },
+      {
+        "name": "GatewayRowValidationError",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/matching-engine.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 9
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 2
           }
         ],
         "totalHits": 11,
@@ -10528,25 +10636,6 @@
         "fileSpan": 2
       },
       {
-        "name": "sheetToObjects",
-        "defFiles": [
-          "src/main-process/bank-statement-io.js",
-          "src/main-process/recon-id-fix-io.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/bank-statement-io.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/recon-id-fix-io.js",
-            "count": 8
-          }
-        ],
-        "totalHits": 11,
-        "fileSpan": 2
-      },
-      {
         "name": "electronUtilityProcess",
         "defFiles": [
           "src/main-process/biz-op-recon-session.js",
@@ -10560,42 +10649,6 @@
           {
             "file": "src/main-process/pending-session.js",
             "count": 6
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 2
-      },
-      {
-        "name": "GATEWAY_SOURCE",
-        "defFiles": [
-          "src/main-process/pre-fund-reconciliation/matching-engine.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-            "count": 7
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/service.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 2
-      },
-      {
-        "name": "GatewayRowValidationError",
-        "defFiles": [
-          "src/main-process/pre-fund-reconciliation/matching-engine.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-            "count": 8
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/service.js",
-            "count": 2
           }
         ],
         "totalHits": 10,
@@ -10892,6 +10945,25 @@
           },
           {
             "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 2
+      },
+      {
+        "name": "DUPLICATE_FOLD_REASON",
+        "defFiles": [
+          "src/backend/pre-fund-reconciliation-run-store.js",
+          "src/main-process/pre-fund-reconciliation/output-mapper.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
             "count": 5
           }
         ],
@@ -13623,6 +13695,24 @@
         "fileSpan": 2
       },
       {
+        "name": "iterateDuplicateAuditRows",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/output-mapper.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "listImportedDates",
         "defFiles": [
           "src/backend/biz-op-recon-db/flow-imports-repository.js"
@@ -13744,6 +13834,24 @@
           {
             "file": "src/backend/run-data-store.js",
             "count": 4
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "moveFileNoClobber",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/excel-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 2
           }
         ],
         "totalHits": 5,
@@ -14848,6 +14956,24 @@
           },
           {
             "file": "src/main.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "currentFileMatchesIdentity",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/excel-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
             "count": 2
           }
         ],
@@ -19764,10 +19890,10 @@
         "refFiles": [
           {
             "file": "src/backend/database.js",
-            "count": 40
+            "count": 41
           }
         ],
-        "totalHits": 40,
+        "totalHits": 41,
         "fileSpan": 1
       },
       {
@@ -19876,10 +20002,10 @@
         "refFiles": [
           {
             "file": "src/backend/database/linked-table-repository.js",
-            "count": 17
+            "count": 18
           }
         ],
-        "totalHits": 17,
+        "totalHits": 18,
         "fileSpan": 1
       },
       {
@@ -19981,20 +20107,6 @@
         "fileSpan": 1
       },
       {
-        "name": "BOC_FX_TABLE",
-        "defFiles": [
-          "src/backend/database/linked-table-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/linked-table-repository.js",
-            "count": 12
-          }
-        ],
-        "totalHits": 12,
-        "fileSpan": 1
-      },
-      {
         "name": "formatGatewayLocation",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/matching-engine.js"
@@ -20002,6 +20114,20 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 13
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 1
+      },
+      {
+        "name": "BOC_FX_TABLE",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
             "count": 12
           }
         ],
@@ -20261,6 +20387,20 @@
         "fileSpan": 1
       },
       {
+        "name": "isPlainObject",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/matching-engine.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 9
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 1
+      },
+      {
         "name": "readers",
         "defFiles": [
           "src/main-process/table-type-detector.js"
@@ -20443,6 +20583,20 @@
         "fileSpan": 1
       },
       {
+        "name": "mainWindow",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 8
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 1
+      },
+      {
         "name": "normalizeDateForRange",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -20562,6 +20716,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertRunIdentity",
+        "defFiles": [
+          "src/backend/pre-fund-reconciliation-run-store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
             "count": 7
           }
         ],
@@ -20975,6 +21143,20 @@
         "fileSpan": 1
       },
       {
+        "name": "DUPLICATE_SHEET_NAME",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/excel-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
         "name": "ENABLED_MODULES_KEY",
         "defFiles": [
           "src/backend/database/settings-repository.js"
@@ -21066,20 +21248,6 @@
         "refFiles": [
           {
             "file": "src/main-process/acquiring-bill-currency-session.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 1
-      },
-      {
-        "name": "isPlainObject",
-        "defFiles": [
-          "src/main-process/pre-fund-reconciliation/matching-engine.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
             "count": 6
           }
         ],
@@ -21192,6 +21360,20 @@
         "refFiles": [
           {
             "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
+        "name": "readSheetOrThrow",
+        "defFiles": [
+          "src/main-process/recon-id-fix-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
             "count": 6
           }
         ],
@@ -21409,13 +21591,13 @@
         "fileSpan": 1
       },
       {
-        "name": "assertModule",
+        "name": "appendRows",
         "defFiles": [
-          "src/backend/run-data-store.js"
+          "src/main-process/pre-fund-reconciliation/excel-writer.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/run-data-store.js",
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
             "count": 5
           }
         ],
@@ -21423,13 +21605,13 @@
         "fileSpan": 1
       },
       {
-        "name": "assertRunIdentity",
+        "name": "assertModule",
         "defFiles": [
-          "src/backend/pre-fund-reconciliation-run-store.js"
+          "src/backend/run-data-store.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "file": "src/backend/run-data-store.js",
             "count": 5
           }
         ],
@@ -21927,7 +22109,7 @@
         "fileSpan": 1
       },
       {
-        "name": "readSheetOrThrow",
+        "name": "PRE_FUND_UNBALANCED_SHEET_NAME",
         "defFiles": [
           "src/main-process/recon-id-fix-io.js"
         ],
@@ -22123,6 +22305,20 @@
         "fileSpan": 1
       },
       {
+        "name": "unwrapGatewayRow",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/matching-engine.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "updatePreFundReconciliationUi",
         "defFiles": [
           "src/renderer.js"
@@ -22200,20 +22396,6 @@
         "refFiles": [
           {
             "file": "src/main-process/bank-bu-recon-writer.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "appendRows",
-        "defFiles": [
-          "src/main-process/pre-fund-reconciliation/excel-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
             "count": 4
           }
         ],
@@ -23215,13 +23397,13 @@
         "fileSpan": 1
       },
       {
-        "name": "PRE_FUND_RUN_DDL",
+        "name": "PRE_FUND_BALANCED_SHEET_NAME",
         "defFiles": [
-          "src/backend/pre-fund-reconciliation-run-store.js"
+          "src/main-process/recon-id-fix-io.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "file": "src/main-process/recon-id-fix-io.js",
             "count": 4
           }
         ],
@@ -23229,13 +23411,27 @@
         "fileSpan": 1
       },
       {
-        "name": "PRE_FUND_UNBALANCED_SHEET_NAME",
+        "name": "PRE_FUND_DUPLICATE_GATEWAY_SHEET_NAME",
         "defFiles": [
           "src/main-process/recon-id-fix-io.js"
         ],
         "refFiles": [
           {
             "file": "src/main-process/recon-id-fix-io.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "PRE_FUND_RUN_DDL",
+        "defFiles": [
+          "src/backend/pre-fund-reconciliation-run-store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
             "count": 4
           }
         ],
@@ -23586,20 +23782,6 @@
         "refFiles": [
           {
             "file": "src/main-process/refund-backfill-writer.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "unwrapGatewayRow",
-        "defFiles": [
-          "src/main-process/pre-fund-reconciliation/matching-engine.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
             "count": 4
           }
         ],
@@ -23978,6 +24160,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertExcelDataRowCapacity",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/excel-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
             "count": 3
           }
         ],
@@ -25035,6 +25231,20 @@
         "fileSpan": 1
       },
       {
+        "name": "copyWorksheetShell",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/excel-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "createInsertContext",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -25315,6 +25525,34 @@
         "fileSpan": 1
       },
       {
+        "name": "DUPLICATE_RAW_JSON_CHUNK_SIZE",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/output-mapper.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "DUPLICATE_SHEET_CONTRACT",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/excel-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "emitHeaderOrFatal",
         "defFiles": [
           "src/backend/biz-op-recon-import/import-worker.js"
@@ -25420,6 +25658,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-import/xlsx-size-preflight.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "EXCEL_MAX_DATA_ROWS",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/excel-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
             "count": 3
           }
         ],
@@ -25595,6 +25847,20 @@
         "fileSpan": 1
       },
       {
+        "name": "formatDuplicateDataPosition",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/output-mapper.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "formatLocalExportDate",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/excel-writer.js"
@@ -25672,6 +25938,20 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "gatewayFields",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/output-mapper.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
             "count": 3
           }
         ],
@@ -26435,6 +26715,20 @@
         "fileSpan": 1
       },
       {
+        "name": "mapDuplicateAuditRow",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/output-mapper.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "mapGatewayPoolRow",
         "defFiles": [
           "src/backend/pre-fund-reconciliation-run-store.js"
@@ -27093,6 +27387,20 @@
         "fileSpan": 1
       },
       {
+        "name": "parseResultObjectJson",
+        "defFiles": [
+          "src/backend/pre-fund-reconciliation-run-store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "peekNormalizedHeaders",
         "defFiles": [
           "src/backend/toolbox-xlsx-stream/split-export-filter.js"
@@ -27177,20 +27485,6 @@
         "fileSpan": 1
       },
       {
-        "name": "PRE_FUND_BALANCED_SHEET_NAME",
-        "defFiles": [
-          "src/main-process/recon-id-fix-io.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/recon-id-fix-io.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "PreFundReconciliationRunStore",
         "defFiles": [
           "src/backend/pre-fund-reconciliation-run-store.js"
@@ -27226,6 +27520,20 @@
         "refFiles": [
           {
             "file": "src/backend/pre-fund-reconciliation-store.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "prepareGatewayCandidateStager",
+        "defFiles": [
+          "src/backend/pre-fund-reconciliation-run-store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
             "count": 3
           }
         ],
@@ -27289,6 +27597,20 @@
         "fileSpan": 1
       },
       {
+        "name": "PUBLICATION_IDENTITY",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/excel-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "pushBankError",
         "defFiles": [
           "src/main-process/scenario-engines/r5-refund-order-backfill.js"
@@ -27310,6 +27632,34 @@
         "refFiles": [
           {
             "file": "src/backend/database/migrations.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "rawGatewayBusinessJson",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/matching-engine.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "rawJsonHash",
+        "defFiles": [
+          "src/backend/pre-fund-reconciliation-run-store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
             "count": 3
           }
         ],
@@ -27576,6 +27926,20 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "requireSingleInstanceLock",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
             "count": 3
           }
         ],
@@ -28150,6 +28514,20 @@
         "refFiles": [
           {
             "file": "src/main-process/toolbox.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "splitUtf16Safe",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/output-mapper.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
             "count": 3
           }
         ],
@@ -28983,6 +29361,20 @@
         "fileSpan": 1
       },
       {
+        "name": "assertValidRawObjectJson",
+        "defFiles": [
+          "src/backend/pre-fund-reconciliation-run-store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "BANK_DIFF_FIELD_HEADER",
         "defFiles": [
           "src/backend/bank-bu-recon-db/columns.js"
@@ -29669,20 +30061,6 @@
         "fileSpan": 1
       },
       {
-        "name": "copyWorksheetShell",
-        "defFiles": [
-          "src/main-process/pre-fund-reconciliation/excel-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "countAccountRows",
         "defFiles": [
           "src/main-process/biz-op-recon-session.js"
@@ -30299,20 +30677,6 @@
         "fileSpan": 1
       },
       {
-        "name": "gatewayFields",
-        "defFiles": [
-          "src/main-process/pre-fund-reconciliation/output-mapper.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "GENERAL_LOCATION",
         "defFiles": [
           "src/backend/database/channels-repository.js"
@@ -30628,6 +30992,34 @@
         "refFiles": [
           {
             "file": "src/backend/pending-import/validator.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "hashesEqual",
+        "defFiles": [
+          "src/backend/pre-fund-reconciliation-run-store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "hasSingleInstanceLock",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
             "count": 2
           }
         ],
@@ -30999,6 +31391,20 @@
         "fileSpan": 1
       },
       {
+        "name": "iterateDuplicateGroupRecords",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/output-mapper.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "iterateUnbalancedRows",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/output-mapper.js"
@@ -31230,20 +31636,6 @@
         "refFiles": [
           {
             "file": "src/backend/usage-stats.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
-        "name": "mainWindow",
-        "defFiles": [
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main.js",
             "count": 2
           }
         ],
@@ -31510,6 +31902,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/migrations.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "NO_CLOBBER_COPY_FALLBACK_CODES",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/excel-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
             "count": 2
           }
         ],
@@ -32112,6 +32518,20 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "rawJsonForCandidate",
+        "defFiles": [
+          "src/backend/pre-fund-reconciliation-run-store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
             "count": 2
           }
         ],
@@ -33281,6 +33701,20 @@
         "fileSpan": 1
       },
       {
+        "name": "validateSheetHeadersOnly",
+        "defFiles": [
+          "src/main-process/recon-id-fix-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "WORKBOOK_RELS_XML",
         "defFiles": [
           "src/backend/pending-import/streaming-xlsx-writer.js"
@@ -33631,7 +34065,7 @@
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/service.js",
-          "count": 6
+          "count": 8
         },
         {
           "file": "src/main-process/recon-id-fix-io.js",
@@ -33686,7 +34120,7 @@
           "count": 2
         }
       ],
-      "totalHits": 214,
+      "totalHits": 216,
       "fileSpan": 64
     },
     {
@@ -33880,7 +34314,7 @@
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
-          "count": 6
+          "count": 12
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
@@ -33888,7 +34322,7 @@
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/service.js",
-          "count": 8
+          "count": 7
         },
         {
           "file": "src/main-process/recon-id-fix-io.js",
@@ -33919,7 +34353,7 @@
           "count": 1
         }
       ],
-      "totalHits": 143,
+      "totalHits": 148,
       "fileSpan": 45
     },
     {
@@ -33998,7 +34432,7 @@
         },
         {
           "file": "src/backend/pre-fund-reconciliation-run-store.js",
-          "count": 2
+          "count": 5
         },
         {
           "file": "src/backend/scenarios-bundle-io.js",
@@ -34041,7 +34475,7 @@
           "count": 3
         }
       ],
-      "totalHits": 58,
+      "totalHits": 61,
       "fileSpan": 28
     },
     {
@@ -34360,7 +34794,7 @@
         },
         {
           "file": "src/main-process/recon-id-fix-io.js",
-          "count": 7
+          "count": 8
         },
         {
           "file": "src/main-process/statement-generation.js",
@@ -34375,7 +34809,7 @@
           "count": 2
         }
       ],
-      "totalHits": 90,
+      "totalHits": 91,
       "fileSpan": 21
     },
     {
@@ -34736,14 +35170,14 @@
         },
         {
           "file": "src/main-process/recon-id-fix-io.js",
-          "count": 3
+          "count": 8
         },
         {
           "file": "src/main.js",
           "count": 1
         }
       ],
-      "totalHits": 69,
+      "totalHits": 74,
       "fileSpan": 13
     },
     {
@@ -35614,6 +36048,48 @@
       "fileSpan": 8
     },
     {
+      "name": "createHash",
+      "defFiles": [
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-import/validator.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-reconcile/engine.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pre-fund-reconciliation-run-store.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 1
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 8
+    },
+    {
       "name": "state",
       "defFiles": [
         "src/renderer.js"
@@ -35712,7 +36188,7 @@
         },
         {
           "file": "src/backend/pre-fund-reconciliation-store.js",
-          "count": 17
+          "count": 20
         },
         {
           "file": "src/main-process/acquiring-bill-currency-run-data.js",
@@ -35735,7 +36211,7 @@
           "count": 1
         }
       ],
-      "totalHits": 93,
+      "totalHits": 96,
       "fileSpan": 7
     },
     {
@@ -35896,6 +36372,50 @@
         }
       ],
       "totalHits": 22,
+      "fileSpan": 7
+    },
+    {
+      "name": "crypto",
+      "defFiles": [
+        "src/backend/pending-import/validator.js",
+        "src/backend/pending-reconcile/engine.js",
+        "src/backend/pre-fund-reconciliation-run-store.js",
+        "src/main-process/pre-fund-reconciliation/matching-engine.js",
+        "src/main-process/pre-fund-reconciliation/mpt-parser.js",
+        "src/main-process/pre-fund-reconciliation/mpt-schema.js",
+        "src/main-process/pre-fund-reconciliation/service.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-reconcile/engine.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pre-fund-reconciliation-run-store.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 16,
       "fileSpan": 7
     },
     {
@@ -36094,44 +36614,6 @@
         }
       ],
       "totalHits": 10,
-      "fileSpan": 7
-    },
-    {
-      "name": "createHash",
-      "defFiles": [
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pending-import/validator.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/pending-reconcile/engine.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/service.js",
-          "count": 1
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 7,
       "fileSpan": 7
     },
     {
@@ -36493,39 +36975,34 @@
       "fileSpan": 6
     },
     {
-      "name": "crypto",
+      "name": "sideDbExists",
       "defFiles": [
-        "src/backend/pending-import/validator.js",
-        "src/backend/pending-reconcile/engine.js",
-        "src/main-process/pre-fund-reconciliation/matching-engine.js",
-        "src/main-process/pre-fund-reconciliation/mpt-parser.js",
-        "src/main-process/pre-fund-reconciliation/mpt-schema.js",
-        "src/main-process/pre-fund-reconciliation/service.js"
+        "src/backend/run-data-store.js"
       ],
       "refFiles": [
         {
-          "file": "src/backend/pending-import/validator.js",
+          "file": "src/backend/pre-fund-reconciliation-run-store.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pre-fund-reconciliation-store.js",
           "count": 2
         },
         {
-          "file": "src/backend/pending-reconcile/engine.js",
+          "file": "src/backend/run-data-store.js",
           "count": 2
         },
         {
-          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "file": "src/main-process/acquiring-bill-currency-run-data.js",
           "count": 3
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-run-data.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 2
         }
       ],
       "totalHits": 13,
@@ -36666,40 +37143,6 @@
         {
           "file": "src/renderer.js",
           "count": 1
-        }
-      ],
-      "totalHits": 12,
-      "fileSpan": 6
-    },
-    {
-      "name": "sideDbExists",
-      "defFiles": [
-        "src/backend/run-data-store.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pre-fund-reconciliation-run-store.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/pre-fund-reconciliation-store.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/run-data-store.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-run-data.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-run-data.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 2
         }
       ],
       "totalHits": 12,
@@ -36867,7 +37310,7 @@
         },
         {
           "file": "src/backend/pre-fund-reconciliation-store.js",
-          "count": 6
+          "count": 8
         },
         {
           "file": "src/main-process/acquiring-bill-currency-run-data.js",
@@ -36882,7 +37325,7 @@
           "count": 24
         }
       ],
-      "totalHits": 69,
+      "totalHits": 71,
       "fileSpan": 5
     },
     {
@@ -37078,6 +37521,36 @@
       "fileSpan": 5
     },
     {
+      "name": "sideDbPath",
+      "defFiles": [
+        "src/backend/run-data-store.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pre-fund-reconciliation-run-store.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pre-fund-reconciliation-store.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/run-data-store.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-run-data.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 6
+        }
+      ],
+      "totalHits": 15,
+      "fileSpan": 5
+    },
+    {
       "name": "TEMPLATE_BILL_HEADERS",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/columns.js",
@@ -37139,36 +37612,6 @@
         {
           "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
           "count": 5
-        }
-      ],
-      "totalHits": 14,
-      "fileSpan": 5
-    },
-    {
-      "name": "sideDbPath",
-      "defFiles": [
-        "src/backend/run-data-store.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pre-fund-reconciliation-run-store.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/pre-fund-reconciliation-store.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/run-data-store.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-run-data.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 6
         }
       ],
       "totalHits": 14,
@@ -37849,14 +38292,14 @@
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-          "count": 35
+          "count": 36
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
-          "count": 6
+          "count": 11
         }
       ],
-      "totalHits": 58,
+      "totalHits": 64,
       "fileSpan": 4
     },
     {
@@ -37974,6 +38417,32 @@
       "fileSpan": 4
     },
     {
+      "name": "app",
+      "defFiles": [
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main.js",
+          "count": 7
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 4
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 8
+        }
+      ],
+      "totalHits": 20,
+      "fileSpan": 4
+    },
+    {
       "name": "importRepo",
       "defFiles": [
         "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
@@ -38028,32 +38497,6 @@
         }
       ],
       "totalHits": 18,
-      "fileSpan": 4
-    },
-    {
-      "name": "app",
-      "defFiles": [
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main.js",
-          "count": 4
-        },
-        {
-          "file": "src/preload.js",
-          "count": 1
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 4
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 8
-        }
-      ],
-      "totalHits": 17,
       "fileSpan": 4
     },
     {
@@ -39818,14 +40261,14 @@
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/service.js",
-          "count": 18
+          "count": 20
         },
         {
           "file": "src/main.js",
           "count": 9
         }
       ],
-      "totalHits": 49,
+      "totalHits": 51,
       "fileSpan": 3
     },
     {
@@ -40128,6 +40571,28 @@
       "fileSpan": 3
     },
     {
+      "name": "openExistingSideDb",
+      "defFiles": [
+        "src/backend/run-data-store.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pre-fund-reconciliation-run-store.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pre-fund-reconciliation-store.js",
+          "count": 7
+        },
+        {
+          "file": "src/backend/run-data-store.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 11,
+      "fileSpan": 3
+    },
+    {
       "name": "getLinkedTableMeta",
       "defFiles": [
         "src/backend/database/linked-table-repository.js"
@@ -40143,28 +40608,6 @@
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/service.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 10,
-      "fileSpan": 3
-    },
-    {
-      "name": "openExistingSideDb",
-      "defFiles": [
-        "src/backend/run-data-store.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pre-fund-reconciliation-run-store.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/pre-fund-reconciliation-store.js",
-          "count": 6
-        },
-        {
-          "file": "src/backend/run-data-store.js",
           "count": 2
         }
       ],
@@ -41091,6 +41534,28 @@
       "fileSpan": 3
     },
     {
+      "name": "DUPLICATE_GATEWAY_HEADERS",
+      "defFiles": [
+        "src/main-process/pre-fund-reconciliation/output-mapper.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 3
+    },
+    {
       "name": "moduleDir",
       "defFiles": [
         "src/backend/run-data-store.js"
@@ -41569,6 +42034,28 @@
         {
           "file": "src/preload.js",
           "count": 1
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
+      "name": "getGatewayBillRawJsonById",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 2
         }
       ],
       "totalHits": 6,
@@ -43788,6 +44275,24 @@
       "fileSpan": 2
     },
     {
+      "name": "GATEWAY_SOURCE",
+      "defFiles": [
+        "src/main-process/pre-fund-reconciliation/matching-engine.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+          "count": 7
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 2
+    },
+    {
       "name": "getCurrencyOptionEntries",
       "defFiles": [
         "src/renderer.js"
@@ -43843,6 +44348,25 @@
       "fileSpan": 2
     },
     {
+      "name": "sheetToObjects",
+      "defFiles": [
+        "src/main-process/bank-statement-io.js",
+        "src/main-process/recon-id-fix-io.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/bank-statement-io.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 9
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 2
+    },
+    {
       "name": "BIZ_OP_ACCOUNT_KEY_DB_COLUMN",
       "defFiles": [
         "src/backend/biz-op-recon-db/columns.js"
@@ -43855,6 +44379,24 @@
         {
           "file": "src/main-process/biz-op-recon-session.js",
           "count": 9
+        }
+      ],
+      "totalHits": 11,
+      "fileSpan": 2
+    },
+    {
+      "name": "GatewayRowValidationError",
+      "defFiles": [
+        "src/main-process/pre-fund-reconciliation/matching-engine.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+          "count": 9
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 2
         }
       ],
       "totalHits": 11,
@@ -43879,25 +44421,6 @@
       "fileSpan": 2
     },
     {
-      "name": "sheetToObjects",
-      "defFiles": [
-        "src/main-process/bank-statement-io.js",
-        "src/main-process/recon-id-fix-io.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/bank-statement-io.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/recon-id-fix-io.js",
-          "count": 8
-        }
-      ],
-      "totalHits": 11,
-      "fileSpan": 2
-    },
-    {
       "name": "electronUtilityProcess",
       "defFiles": [
         "src/main-process/biz-op-recon-session.js",
@@ -43911,42 +44434,6 @@
         {
           "file": "src/main-process/pending-session.js",
           "count": 6
-        }
-      ],
-      "totalHits": 10,
-      "fileSpan": 2
-    },
-    {
-      "name": "GATEWAY_SOURCE",
-      "defFiles": [
-        "src/main-process/pre-fund-reconciliation/matching-engine.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-          "count": 7
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/service.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 10,
-      "fileSpan": 2
-    },
-    {
-      "name": "GatewayRowValidationError",
-      "defFiles": [
-        "src/main-process/pre-fund-reconciliation/matching-engine.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-          "count": 8
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/service.js",
-          "count": 2
         }
       ],
       "totalHits": 10,
@@ -44243,6 +44730,25 @@
         },
         {
           "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 2
+    },
+    {
+      "name": "DUPLICATE_FOLD_REASON",
+      "defFiles": [
+        "src/backend/pre-fund-reconciliation-run-store.js",
+        "src/main-process/pre-fund-reconciliation/output-mapper.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pre-fund-reconciliation-run-store.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
           "count": 5
         }
       ],
@@ -46974,6 +47480,24 @@
       "fileSpan": 2
     },
     {
+      "name": "iterateDuplicateAuditRows",
+      "defFiles": [
+        "src/main-process/pre-fund-reconciliation/output-mapper.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "listImportedDates",
       "defFiles": [
         "src/backend/biz-op-recon-db/flow-imports-repository.js"
@@ -47095,6 +47619,24 @@
         {
           "file": "src/backend/run-data-store.js",
           "count": 4
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "moveFileNoClobber",
+      "defFiles": [
+        "src/main-process/pre-fund-reconciliation/excel-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 2
         }
       ],
       "totalHits": 5,
@@ -48199,6 +48741,24 @@
         },
         {
           "file": "src/main.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "currentFileMatchesIdentity",
+      "defFiles": [
+        "src/main-process/pre-fund-reconciliation/excel-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/service.js",
           "count": 2
         }
       ],

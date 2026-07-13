@@ -9,7 +9,11 @@ const {
   UNBALANCED_HEADERS,
   BALANCED_HEADERS,
   CHANNEL_BILL_HEADERS,
+  DUPLICATE_GATEWAY_HEADERS,
+  DUPLICATE_RAW_JSON_CHUNK_SIZE,
   projectOutputRow,
+  splitUtf16Safe,
+  iterateDuplicateAuditRows,
   mapUnbalancedRow,
   mapBalancedRow,
   mapChannelBillRow,
@@ -61,6 +65,18 @@ function gateway(reconciliationId, overrides = {}) {
   };
 }
 
+function mixedRawObjectOfLength(length, fill = 'x') {
+  if (length === 2) return '{}';
+  const marker = '中文"\\\n😀';
+  const shellLength = JSON.stringify({ marker, payload: '' }).length;
+  if (!Number.isSafeInteger(length) || length < shellLength) {
+    throw new TypeError('测试 JSON 长度不足以容纳混合字符对象');
+  }
+  const rawJson = JSON.stringify({ marker, payload: fill.repeat(length - shellLength) });
+  assert.equal(rawJson.length, length);
+  return rawJson;
+}
+
 function buildResult() {
   return reconcilePreFundRows({
     bankRows: [
@@ -93,6 +109,48 @@ test('固定输出表头严格为20列不平、31列平账、16列渠道账单',
     'currency', 'requestAmount', 'receiveAmount', 'extraFee', '清算网络', 'createTime',
     'finishTime', 'additionInfo', 'remark', 'COriginalId'
   ]);
+});
+
+test('重复网关账单固定22列表头且原始JSON按UTF-16安全边界无损分片', () => {
+  assert.equal(DUPLICATE_GATEWAY_HEADERS.length, 22);
+  assert.deepEqual(DUPLICATE_GATEWAY_HEADERS, [
+    '折叠记录ID', '对象类型', '分片序号', '分片总数', '折叠原因', '重复指纹',
+    '数据来源', '数据位置', 'BillDate', 'Channel', 'MerchantId', 'OrderId',
+    'ReconBillBizId', 'reconciliationId', 'Currency', 'Amount', 'TradeType', 'name',
+    'cardNo', '真实渠道', '清算网络', '原始数据JSON分片'
+  ]);
+  const rawJson = `${'a'.repeat(DUPLICATE_RAW_JSON_CHUNK_SIZE - 1)}😀${'b'.repeat(9)}`;
+  const chunks = splitUtf16Safe(rawJson);
+  assert.equal(chunks[0].length, DUPLICATE_RAW_JSON_CHUNK_SIZE - 1);
+  assert.ok(chunks.every((chunk) => chunk.length <= DUPLICATE_RAW_JSON_CHUNK_SIZE));
+  assert.equal(chunks.join(''), rawJson);
+  assert.equal(chunks.some((chunk) => /[\uD800-\uDBFF]$/.test(chunk)), false);
+  assert.equal(chunks.some((chunk) => /^[\uDC00-\uDFFF]/.test(chunk)), false);
+});
+
+test('合法对象短值和30000边界矩阵含中英文转义字符时逐字符无损', () => {
+  for (const length of [2, 30000, 30001, 60000, 60001]) {
+    const rawJson = mixedRawObjectOfLength(length, length % 2 === 0 ? 'K' : 'F');
+    const rows = [...iterateDuplicateAuditRows([{
+      foldRecordId: `PF-${length}`,
+      objectType: '保留记录',
+      foldReason: 'reconciliationId+10字段指纹完全重复',
+      candidate: {
+        source: '网关对账单',
+        reconciliationId: `R-${length}`,
+        fingerprint: `FP-${length}`,
+        fields: { channel: 'CIT' },
+        location: { sourceRowNumber: length },
+        rawJson
+      }
+    }])];
+
+    assert.equal(rows.map((row) => row['原始数据JSON分片']).join(''), rawJson);
+    assert.ok(rows.every((row) => row['原始数据JSON分片'].length <= 30000));
+    assert.deepEqual(rows.map((row) => row['分片序号']), rows.map((_row, index) => index + 1));
+    assert.ok(rows.every((row) => row['分片总数'] === rows.length));
+    assert.deepEqual(JSON.parse(rawJson), JSON.parse(rows.map((row) => row['原始数据JSON分片']).join('')));
+  }
 });
 
 test('不平结果只映射银行右单边，固定值和稳定追溯ID正确', () => {
@@ -185,6 +243,62 @@ test('逐渠道输出暴露 generator，不复制全量数组且内容不串渠�
   assert.equal(channelBUnbalanced[0]['支付渠道'], 'CHANNEL-B');
   assert.equal(channelBBills.length, 1);
   assert.equal(channelBBills[0].channelName, 'CHANNEL-B');
+});
+
+test('导出渠道为银行渠道优先加重复专属渠道，重复审计双方逐条且不串渠道', () => {
+  const keptRaw = '{"kind":"kept"}';
+  const foldedRaw = `${'{"kind":"folded","payload":"'}${'😀'.repeat(16000)}"}`;
+  const result = reconcilePreFundRows({
+    bankRows: [bank('BANK-ONLY', 'BANK-FIRST')],
+    bankContext: { fileName: '银行.xlsx' },
+    temporaryGatewayRows: [
+      gateway('DUP', { channel: 'DUP-ONLY', rawJson: keptRaw }),
+      gateway('DUP', { channel: 'DUP-ONLY', rawJson: foldedRaw })
+    ]
+  });
+
+  assert.deepEqual(listResultChannels(result), ['BANK-FIRST', 'DUP-ONLY']);
+  const exports = [...iterateChannelExports(result)];
+  assert.equal(exports[0].hasDuplicateRecords, false);
+  assert.deepEqual([...exports[0].duplicateRows], []);
+  assert.equal(exports[1].hasDuplicateRecords, true);
+  assert.equal([...exports[1].balancedRows].length, 0);
+  assert.equal([...exports[1].unbalancedRows].length, 0);
+
+  const rows = [...exports[1].duplicateRows];
+  assert.deepEqual([...new Set(rows.map((row) => row['对象类型']))], ['保留记录', '被折叠记录']);
+  assert.equal(new Set(rows.map((row) => row['折叠记录ID'])).size, 1);
+  assert.ok(rows.every((row) => row.Channel === 'DUP-ONLY'));
+  assert.ok(rows.every((row) => projectOutputRow(DUPLICATE_GATEWAY_HEADERS, row).length === 22));
+  const foldedRows = rows.filter((row) => row['对象类型'] === '被折叠记录');
+  assert.equal(foldedRows.length, 2);
+  assert.equal(foldedRows.map((row) => row['原始数据JSON分片']).join(''), foldedRaw);
+  assert.deepEqual(foldedRows.map((row) => row['分片序号']), [1, 2]);
+  assert.ok(foldedRows.every((row) => row['分片总数'] === 2));
+});
+
+test('重复审计记录原始JSON损坏时显式失败', () => {
+  assert.throws(
+    () => [...iterateDuplicateAuditRows([{
+      foldRecordId: 'PF-1',
+      objectType: '保留记录',
+      candidate: { fields: {}, rawJson: null }
+    }])],
+    /原始JSON缺失或结构无效/
+  );
+});
+
+test('重复专属渠道按首次被折叠事件顺序追加，不按保留候选出现顺序', () => {
+  const result = reconcilePreFundRows({
+    bankRows: [bank('BANK', 'BANK')],
+    temporaryGatewayRows: [
+      gateway('A', { channel: 'DUP-A', rawJson: '{"a":0}' }),
+      gateway('B', { channel: 'DUP-B', rawJson: '{"b":0}' }),
+      gateway('B', { channel: 'DUP-B', rawJson: '{"b":1}' }),
+      gateway('A', { channel: 'DUP-A', rawJson: '{"a":1}' })
+    ]
+  });
+  assert.deepEqual(listResultChannels(result), ['BANK', 'DUP-B', 'DUP-A']);
 });
 
 test('数组行投影也必须严格匹配固定列数', () => {

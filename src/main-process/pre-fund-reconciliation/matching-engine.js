@@ -113,8 +113,27 @@ function gatewayLocation(entry, source, sourceIndex) {
     source,
     sourceFileName,
     sourceRowNumber,
+    sourceRecordId: envelope.id ?? row.id ?? null,
+    monthKey: trimCell(envelope.monthKey || row.monthKey),
     sourceIndex
   };
+}
+
+function rawGatewayBusinessJson(entry, location = {}) {
+  const nestedRow = isPlainObject(entry) && isPlainObject(entry.row) ? entry.row : null;
+  try {
+    // MPT 与持久网关游标都优先附带落库时的原始业务 JSON，必须逐字符保留。
+    if (isPlainObject(entry) && typeof entry.rawJson === 'string') return entry.rawJson;
+    // 兼容旧持久游标：envelope 只承载 DB 定位元数据，fallback 仅序列化 entry.row。
+    if (nestedRow) return JSON.stringify(nestedRow);
+    const { row } = unwrapGatewayRow(entry);
+    return JSON.stringify(row);
+  } catch (error) {
+    throw new GatewayRowValidationError(
+      `网关账单原始业务行无法序列化（${formatGatewayLocation(location)}）`,
+      { code: 'pre-fund-invalid-gateway-raw-json', cause: error, ...location }
+    );
+  }
 }
 
 function validateDateParts(year, month, day, value, location) {
@@ -272,6 +291,7 @@ function normalizeGatewayCandidate(entry, source, sourceIndex) {
     fields,
     name: trimCell(readGatewayValue(entry, 'name')),
     cardNo: trimCell(readGatewayValue(entry, 'cardNo')),
+    rawJson: rawGatewayBusinessJson(entry, location),
     rawEntry: entry,
     rawRow: row
   };
@@ -326,7 +346,9 @@ function createStats() {
 function buildGatewayPools({ temporaryGatewayRows, persistentGatewayRows }, stats = createStats()) {
   const pools = new Map();
   const seen = new Map();
+  const duplicateGroupsByKey = new Map();
   const warnings = [];
+  let eventOrder = 0;
 
   const consumeSource = (rows, source) => {
     let sourceIndex = 0;
@@ -349,11 +371,26 @@ function buildGatewayPools({ temporaryGatewayRows, persistentGatewayRows }, stat
       }
 
       const candidate = normalizeGatewayCandidate(entry, source, sourceIndex - 1);
+      candidate.sourceOrder = eventOrder;
+      eventOrder += 1;
 
       const duplicateKey = JSON.stringify([candidate.reconciliationId, candidate.fingerprint]);
       const kept = seen.get(duplicateKey);
       if (kept) {
         stats.gatewayDuplicateFoldedRows += 1;
+        let duplicateGroup = duplicateGroupsByKey.get(duplicateKey);
+        if (!duplicateGroup) {
+          duplicateGroup = {
+            foldRecordId: `PF-MEM-${duplicateGroupsByKey.size + 1}`,
+            channel: kept.fields.channel,
+            firstEventOrder: candidate.sourceOrder,
+            fingerprint: kept.fingerprint,
+            keptCandidate: kept,
+            foldedCandidates: []
+          };
+          duplicateGroupsByKey.set(duplicateKey, duplicateGroup);
+        }
+        duplicateGroup.foldedCandidates.push(candidate);
         warnings.push({
           code: 'pre-fund-gateway-complete-duplicate-folded',
           reconciliationId: candidate.reconciliationId,
@@ -375,7 +412,12 @@ function buildGatewayPools({ temporaryGatewayRows, persistentGatewayRows }, stat
 
   consumeSource(temporaryGatewayRows || [], GATEWAY_SOURCE.TEMPORARY);
   consumeSource(persistentGatewayRows || [], GATEWAY_SOURCE.PERSISTENT);
-  return { pools, warnings, stats };
+  return {
+    pools,
+    duplicateGroups: [...duplicateGroupsByKey.values()],
+    warnings,
+    stats
+  };
 }
 
 /**
@@ -388,6 +430,7 @@ function stageGatewayCandidatesIterative(options = {}) {
   }
   const stats = options.stats || createStats();
   const warnings = [];
+  let eventOrder = 0;
 
   const consumeSource = (rows, source) => {
     let sourceIndex = 0;
@@ -408,6 +451,8 @@ function stageGatewayCandidatesIterative(options = {}) {
       }
 
       const candidate = normalizeGatewayCandidate(entry, source, sourceIndex);
+      candidate.sourceOrder = eventOrder;
+      eventOrder += 1;
       sourceIndex += 1;
       if (options.insertCandidate(candidate) === false) {
         stats.gatewayDuplicateFoldedRows += 1;
@@ -545,6 +590,7 @@ function reconcilePreFundRows(options = {}) {
   const stats = createStats();
   const {
     pools,
+    duplicateGroups,
     warnings: gatewayWarnings
   } = buildGatewayPools({
     temporaryGatewayRows: options.temporaryGatewayRows || [],
@@ -641,6 +687,7 @@ function reconcilePreFundRows(options = {}) {
       zeroAmount: zeroAmountBankRows,
       emptyReconciliationId: emptyReconciliationIdBankRows
     },
+    duplicateGroups,
     warnings,
     stats
   };
@@ -654,6 +701,7 @@ module.exports = {
   GatewayRowValidationError,
   canonicalizeDecimal,
   canonicalizeDate,
+  rawGatewayBusinessJson,
   readGatewayValue,
   normalizeGatewayFingerprintFields,
   buildGatewayFingerprint,

@@ -518,6 +518,7 @@ const SIDE_DB_DDL_PRE_FUND_RUNS = `
     source_label TEXT NOT NULL,
     reconciliation_id TEXT NOT NULL,
     fingerprint TEXT NOT NULL,
+    raw_json_hash BLOB NOT NULL,
     fields_json TEXT NOT NULL,
     name TEXT,
     card_no TEXT,
@@ -530,6 +531,52 @@ const SIDE_DB_DDL_PRE_FUND_RUNS = `
     ON pre_fund_reconciliation_gateway_pool(
       run_id, reconciliation_id, consumed_bank_ordinal, source_priority, source_order
     );
+
+  -- 仅在首次发现重复组时按来源记录 ID 回读并保存保留候选原始 JSON。
+  -- 唯一候选绝不写本表，避免百万候选产生全量宽数据复制。
+  CREATE TABLE IF NOT EXISTS pre_fund_reconciliation_gateway_candidate_snapshots (
+    pool_id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL,
+    raw_json TEXT NOT NULL,
+    FOREIGN KEY (pool_id) REFERENCES pre_fund_reconciliation_gateway_pool(id) ON DELETE CASCADE,
+    FOREIGN KEY (run_id) REFERENCES pre_fund_reconciliation_runs(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_pre_fund_candidate_snapshots_run
+    ON pre_fund_reconciliation_gateway_candidate_snapshots(run_id, pool_id);
+
+  CREATE TABLE IF NOT EXISTS pre_fund_reconciliation_duplicate_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    kept_pool_id INTEGER NOT NULL,
+    channel TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    first_event_order INTEGER NOT NULL,
+    fold_reason TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES pre_fund_reconciliation_runs(id) ON DELETE CASCADE,
+    FOREIGN KEY (kept_pool_id) REFERENCES pre_fund_reconciliation_gateway_pool(id) ON DELETE CASCADE,
+    UNIQUE (run_id, kept_pool_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pre_fund_duplicate_groups_channel
+    ON pre_fund_reconciliation_duplicate_groups(run_id, channel, first_event_order, id);
+
+  CREATE TABLE IF NOT EXISTS pre_fund_reconciliation_folded_gateway_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL,
+    source_priority INTEGER NOT NULL,
+    source_order INTEGER NOT NULL,
+    source_label TEXT NOT NULL,
+    reconciliation_id TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    fields_json TEXT NOT NULL,
+    name TEXT,
+    card_no TEXT,
+    source_location_json TEXT NOT NULL,
+    raw_json TEXT NOT NULL,
+    FOREIGN KEY (group_id) REFERENCES pre_fund_reconciliation_duplicate_groups(id) ON DELETE CASCADE,
+    UNIQUE (group_id, source_priority, source_order)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pre_fund_folded_rows_group
+    ON pre_fund_reconciliation_folded_gateway_rows(group_id, source_priority, source_order, id);
 
   CREATE TABLE IF NOT EXISTS pre_fund_reconciliation_balanced_rows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

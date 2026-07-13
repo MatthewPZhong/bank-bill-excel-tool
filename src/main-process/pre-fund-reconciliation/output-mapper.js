@@ -80,6 +80,34 @@ const CHANNEL_BILL_HEADERS = Object.freeze([
   'COriginalId'
 ]);
 
+const DUPLICATE_GATEWAY_HEADERS = Object.freeze([
+  '折叠记录ID',
+  '对象类型',
+  '分片序号',
+  '分片总数',
+  '折叠原因',
+  '重复指纹',
+  '数据来源',
+  '数据位置',
+  'BillDate',
+  'Channel',
+  'MerchantId',
+  'OrderId',
+  'ReconBillBizId',
+  'reconciliationId',
+  'Currency',
+  'Amount',
+  'TradeType',
+  'name',
+  'cardNo',
+  '真实渠道',
+  '清算网络',
+  '原始数据JSON分片'
+]);
+
+const DUPLICATE_RAW_JSON_CHUNK_SIZE = 30000;
+const DUPLICATE_FOLD_REASON = 'reconciliationId+10字段指纹完全重复';
+
 function rawBankRow(derived) {
   if (!derived || typeof derived !== 'object') return {};
   return derived.rawRow && typeof derived.rawRow === 'object' ? derived.rawRow : derived;
@@ -108,6 +136,110 @@ function projectOutputRow(headers, row) {
     const value = row && row[header];
     return value === null || value === undefined ? '' : value;
   });
+}
+
+function splitUtf16Safe(value, maxLength = DUPLICATE_RAW_JSON_CHUNK_SIZE) {
+  const text = value === null || value === undefined ? '' : String(value);
+  if (!Number.isSafeInteger(maxLength) || maxLength < 2) {
+    throw new TypeError('原始JSON分片长度必须为不小于2的正整数');
+  }
+  if (text.length === 0) return [''];
+  const chunks = [];
+  let start = 0;
+  while (start < text.length) {
+    let end = Math.min(start + maxLength, text.length);
+    if (end < text.length) {
+      const left = text.charCodeAt(end - 1);
+      const right = text.charCodeAt(end);
+      if (left >= 0xD800 && left <= 0xDBFF && right >= 0xDC00 && right <= 0xDFFF) {
+        end -= 1;
+      }
+    }
+    chunks.push(text.slice(start, end));
+    start = end;
+  }
+  return chunks;
+}
+
+function formatDuplicateDataPosition(candidate) {
+  const location = candidate && candidate.location && typeof candidate.location === 'object'
+    ? candidate.location
+    : {};
+  const source = trimCell(candidate && candidate.source);
+  const fileName = trimCell(location.sourceFileName);
+  const rowNumber = location.sourceRowNumber ?? location.sourceIndex;
+  if (fileName) return `文件「${fileName}」第${rowNumber ?? '未知'}行`;
+  if (source === '网关对账单') return `linked_gateway_bill#${rowNumber ?? '未知'}`;
+  return `${source || '网关账单'}#${rowNumber ?? '未知'}`;
+}
+
+function mapDuplicateAuditRow(record, chunk, chunkIndex, chunkCount) {
+  if (!record || !record.candidate) {
+    throw new TypeError('重复网关账单映射需要折叠记录及候选快照');
+  }
+  const candidate = record.candidate;
+  const fields = gatewayFields(candidate);
+  return {
+    '折叠记录ID': record.foldRecordId || '',
+    '对象类型': record.objectType || '',
+    '分片序号': chunkIndex + 1,
+    '分片总数': chunkCount,
+    '折叠原因': record.foldReason || DUPLICATE_FOLD_REASON,
+    '重复指纹': candidate.fingerprint || '',
+    '数据来源': candidate.source || '',
+    '数据位置': formatDuplicateDataPosition(candidate),
+    BillDate: fields.date || '',
+    Channel: fields.channel || '',
+    MerchantId: fields.merchantId || '',
+    OrderId: fields.orderId || '',
+    ReconBillBizId: fields.billReconId || '',
+    reconciliationId: candidate.reconciliationId || '',
+    Currency: fields.currency || '',
+    Amount: fields.amount || '',
+    TradeType: fields.tradeType || '',
+    name: candidate.name || '',
+    cardNo: candidate.cardNo || '',
+    '真实渠道': fields.realChannel || '',
+    '清算网络': fields.clearingNetwork || '',
+    '原始数据JSON分片': chunk
+  };
+}
+
+function* iterateDuplicateAuditRows(records) {
+  for (const record of records || []) {
+    if (!record || !record.candidate || typeof record.candidate.rawJson !== 'string') {
+      throw new Error('前置资金对账重复审计原始JSON缺失或结构无效');
+    }
+    const chunks = splitUtf16Safe(record.candidate.rawJson);
+    for (let index = 0; index < chunks.length; index += 1) {
+      yield mapDuplicateAuditRow(record, chunks[index], index, chunks.length);
+    }
+  }
+}
+
+function* iterateDuplicateGroupRecords(groups, channel) {
+  const ordered = [...(groups || [])]
+    .filter((group) => trimCell(group && group.channel) === channel)
+    .sort((left, right) => (
+      (Number(left.firstEventOrder) || 0) - (Number(right.firstEventOrder) || 0)
+      || String(left.foldRecordId || '').localeCompare(String(right.foldRecordId || ''))
+    ));
+  for (const group of ordered) {
+    yield {
+      foldRecordId: group.foldRecordId,
+      objectType: '保留记录',
+      foldReason: DUPLICATE_FOLD_REASON,
+      candidate: group.keptCandidate
+    };
+    for (const candidate of group.foldedCandidates || []) {
+      yield {
+        foldRecordId: group.foldRecordId,
+        objectType: '被折叠记录',
+        foldReason: DUPLICATE_FOLD_REASON,
+        candidate
+      };
+    }
+  }
 }
 
 function mapUnbalancedRow(bankRow) {
@@ -264,8 +396,23 @@ function listResultChannels(result) {
       channels.push(channel);
     }
   };
-  for (const pair of result.balancedPairs || []) append(pair.bankRow);
-  for (const bankRow of result.unbalancedBankRows || []) append(bankRow);
+  const bankEvents = [];
+  for (const pair of result.balancedPairs || []) bankEvents.push(pair.bankRow);
+  for (const bankRow of result.unbalancedBankRows || []) bankEvents.push(bankRow);
+  bankEvents.sort((left, right) => (
+    (Number(left && left.inputIndex) || 0) - (Number(right && right.inputIndex) || 0)
+  ));
+  for (const bankRow of bankEvents) append(bankRow);
+  const duplicateGroups = [...(result.duplicateGroups || [])].sort((left, right) => (
+    (Number(left.firstEventOrder) || 0) - (Number(right.firstEventOrder) || 0)
+  ));
+  for (const group of duplicateGroups) {
+    const channel = trimCell(group && group.channel);
+    if (!seen.has(channel)) {
+      seen.add(channel);
+      channels.push(channel);
+    }
+  }
   return channels;
 }
 
@@ -276,8 +423,11 @@ function listResultChannels(result) {
 function* iterateChannelExports(result) {
   assertOutputConservation(result);
   for (const channel of listResultChannels(result)) {
+    const hasDuplicateRecords = (result.duplicateGroups || [])
+      .some((group) => trimCell(group && group.channel) === channel);
     yield {
       channel,
+      hasDuplicateRecords,
       balancedRows: (function* balanced() {
         for (const pair of result.balancedPairs || []) {
           if (bankChannel(pair.bankRow) === channel) yield mapBalancedRow(pair);
@@ -292,7 +442,10 @@ function* iterateChannelExports(result) {
         for (const bankRow of result.unbalancedBankRows || []) {
           if (bankChannel(bankRow) === channel) yield mapChannelBillRow(bankRow);
         }
-      }())
+      }()),
+      duplicateRows: hasDuplicateRecords
+        ? iterateDuplicateAuditRows(iterateDuplicateGroupRecords(result.duplicateGroups, channel))
+        : []
     };
   }
 }
@@ -302,7 +455,14 @@ module.exports = {
   UNBALANCED_HEADERS,
   BALANCED_HEADERS,
   CHANNEL_BILL_HEADERS,
+  DUPLICATE_GATEWAY_HEADERS,
+  DUPLICATE_RAW_JSON_CHUNK_SIZE,
+  DUPLICATE_FOLD_REASON,
   projectOutputRow,
+  splitUtf16Safe,
+  formatDuplicateDataPosition,
+  mapDuplicateAuditRow,
+  iterateDuplicateAuditRows,
   mapUnbalancedRow,
   mapBalancedRow,
   mapChannelBillRow,

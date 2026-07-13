@@ -406,6 +406,27 @@ class PreFundReconciliationStore {
     }
   }
 
+  getRawJsonById(monthKey, rowId) {
+    if (typeof monthKey !== 'string' || !/^\d{4}-\d{2}$/.test(monthKey)) {
+      throw new TypeError('临时网关原始行 monthKey 必须为 YYYY-MM');
+    }
+    const id = Number(rowId);
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      throw new TypeError('临时网关原始行 id 必须为正整数');
+    }
+    const filePath = runDataStore.sideDbPath(this.userDataDir, MODULE, monthKey);
+    if (!runDataStore.sideDbExists(this.userDataDir, MODULE, monthKey)) return null;
+    const db = runDataStore.openExistingSideDb(filePath);
+    try {
+      const row = db.prepare(`
+        SELECT raw_json FROM pre_fund_reconciliation_gateway_rows WHERE id = ?
+      `).get(id);
+      return row ? row.raw_json : null;
+    } finally {
+      db.close();
+    }
+  }
+
   async deleteBatch(options = {}) {
     return withMutationLock(this.userDataDir, () => this._deleteBatchUnlocked(options));
   }

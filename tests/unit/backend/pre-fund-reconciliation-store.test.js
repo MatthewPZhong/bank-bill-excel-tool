@@ -120,6 +120,8 @@ test('不同 sourceType+sourceBatch 追加，跨实例可 list，规范行按稳
   assert.equal(outRow.amount, '7.5');
   assert.equal(outRow.reconBillBizId, 'BO-1');
   assert.doesNotThrow(() => JSON.parse(outRow.rawJson));
+  assert.equal(reopened.getRawJsonById(outRow.monthKey, outRow.id), outRow.rawJson);
+  assert.equal(reopened.getRawJsonById(outRow.monthKey, 999999), null);
 });
 
 test('同文件同 hash 为 no-op；同文件名不同 hash 拒绝且旧数据不变', async () => {
@@ -474,6 +476,17 @@ test('同月 INBOUND/OUTBOUND 按 sourceType 逻辑隔离统计和删除', async
     'OUTBOUND-KEEP-SEPARATE'
   ]);
   assert.equal(runDataStore.sideDbExists(tmpdir, MODULE, '2026-07'), true, '另一逻辑表有数据时月库保留');
+
+  assert.equal((await store.importFile(inbound)).status, 'imported');
+  const reverseDeleted = await store.deleteByDateRange('2026-07-08', '2026-07-08', {
+    sourceType: SOURCE_TYPE_OUTBOUND
+  });
+  assert.deepEqual(reverseDeleted, { deletedFiles: 0, deletedBatches: 1, deletedRows: 1 });
+  assert.deepEqual(store.listBatches().map((batch) => batch.sourceType), [SOURCE_TYPE_INBOUND]);
+  assert.deepEqual([...store.iterateRows()].map((row) => row.reconciliationId), [
+    'INBOUND-KEEP-SEPARATE'
+  ]);
+  assert.equal(runDataStore.sideDbExists(tmpdir, MODULE, '2026-07'), true, '反向删除仍保留共享月库');
 
   assert.throws(
     () => store.countByDateRange('2026-07-08', '2026-07-08', { sourceType: 'MPT_UNKNOWN' }),

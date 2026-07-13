@@ -5,7 +5,8 @@ const assert = require('node:assert/strict');
 const { DatabaseSync } = require('node:sqlite');
 
 const {
-  iterateGatewayBillRows
+  iterateGatewayBillRows,
+  getGatewayBillRawJsonById
 } = require('../../../../src/backend/database/linked-table-repository');
 
 function createDb() {
@@ -31,7 +32,8 @@ test.describe('iterateGatewayBillRows', () => {
         (reconciliation_id, bill_date, raw_json, imported_at, recon_bill_biz_id)
       VALUES (?, ?, ?, '2026-07-10T00:00:00Z', ?)
     `);
-    insert.run('R-2', '2026-07-02', JSON.stringify({ reconciliationid: 'R-2', OrderId: 'O-2' }), 'B-2');
+    const rawR2 = '{ "reconciliationid": "R-2", "OrderId": "O-2" }';
+    insert.run('R-2', '2026-07-02', rawR2, 'B-2');
     insert.run('R-1', '2026-07-01', JSON.stringify({ reconciliationid: 'R-1', OrderId: 'O-1' }), 'B-1');
 
     const iterator = iterateGatewayBillRows(db);
@@ -41,6 +43,9 @@ test.describe('iterateGatewayBillRows', () => {
     assert.deepEqual(rows.map((item) => item.id), [1, 2]);
     assert.deepEqual(rows.map((item) => item.reconciliationId), ['R-2', 'R-1']);
     assert.equal(rows[0].row.OrderId, 'O-2');
+    assert.equal(rows[0].rawJson, rawR2, '原始 JSON 必须逐字符保留，不能 parse 后重新序列化');
+    assert.equal(getGatewayBillRawJsonById(db, 1), rawR2);
+    assert.equal(getGatewayBillRawJsonById(db, 999), null);
     assert.equal(rows[1].reconBillBizId, 'B-1');
     db.close();
   });
@@ -64,6 +69,29 @@ test.describe('iterateGatewayBillRows', () => {
       ['ARRAY', true]
     ]);
     assert.equal(rows[2].reconciliationId, 'GOOD');
+    db.close();
+  });
+
+  test('resolves exact raw JSON by id while the streaming cursor remains open', () => {
+    const db = createDb();
+    const insert = db.prepare(`
+      INSERT INTO linked_gateway_bill
+        (reconciliation_id, bill_date, raw_json, imported_at, recon_bill_biz_id)
+      VALUES (?, '', ?, '2026-07-10T00:00:00Z', '')
+    `);
+    const expected = new Map();
+    for (let index = 1; index <= 3; index += 1) {
+      const rawJson = `{ "reconciliationid" : "R-${index}" }`;
+      const result = insert.run(`R-${index}`, rawJson);
+      expected.set(Number(result.lastInsertRowid), rawJson);
+    }
+
+    const resolved = [];
+    for (const row of iterateGatewayBillRows(db)) {
+      resolved.push([row.id, getGatewayBillRawJsonById(db, row.id)]);
+    }
+
+    assert.deepEqual(resolved, [...expected.entries()]);
     db.close();
   });
 });

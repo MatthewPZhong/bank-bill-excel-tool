@@ -27,10 +27,13 @@ const {
 const {
   mapBalancedRow,
   mapUnbalancedRow,
-  mapChannelBillRow
+  mapChannelBillRow,
+  iterateDuplicateAuditRows
 } = require('./output-mapper');
 const {
   buildChannelFileName,
+  currentFileMatchesIdentity,
+  moveFileNoClobber,
   writeChannelWorkbooks
 } = require('./excel-writer');
 const { MPT_SCHEMAS } = require('./mpt-schema');
@@ -294,6 +297,20 @@ class PreFundReconciliationService {
     };
   }
 
+  resolveKeptRawJson({ source, location = {} }) {
+    const sourceRecordId = location.sourceRecordId;
+    if (source === GATEWAY_SOURCE.TEMPORARY) {
+      return this.tempStore.getRawJsonById(location.monthKey, sourceRecordId);
+    }
+    if (source === GATEWAY_SOURCE.PERSISTENT) {
+      if (typeof this.database.getGatewayBillRawJsonById !== 'function') {
+        throw new TypeError('前置资金对账 database 缺少 getGatewayBillRawJsonById');
+      }
+      return this.database.getGatewayBillRawJsonById(sourceRecordId);
+    }
+    throw new TypeError(`未知网关来源，无法回读原始JSON：${String(source)}`);
+  }
+
   isLastRunStale() {
     if (!this.lastRun) return false;
     const current = this.buildSourceSnapshot();
@@ -416,6 +433,8 @@ class PreFundReconciliationService {
       matchedPairs: 0,
       unmatchedBankRows: 0,
       unusedGatewayRows: 0,
+      duplicateGroupCount: 0,
+      duplicateAuditRawBytes: 0,
       channelCount: 0
     };
 
@@ -437,7 +456,9 @@ class PreFundReconciliationService {
         )
       });
       db.exec('BEGIN IMMEDIATE');
-      const insertCandidate = this.runStore.createGatewayCandidateInserter(db, sideRunId);
+      const insertCandidate = this.runStore.createGatewayCandidateInserter(db, sideRunId, {
+        resolveKeptRawJson: (kept) => this.resolveKeptRawJson(kept)
+      });
       let sourceOrder = 0;
 
       const ingestGatewayRows = async (rows, source, sourcePriority, rawCounter) => {
@@ -544,14 +565,18 @@ class PreFundReconciliationService {
         );
       }
 
+      const snapshotSummary = this.runStore.duplicateStats(db, sideRunId);
+      if (snapshotSummary.foldedRowCount !== stats.gatewayCollapsedDuplicateRows) {
+        throw new Error(
+          `前置资金对账重复审计不守恒：折叠统计${stats.gatewayCollapsedDuplicateRows}行，审计对象${snapshotSummary.foldedRowCount}行`
+        );
+      }
+      stats.duplicateGroupCount = snapshotSummary.duplicateGroupCount;
+      stats.duplicateAuditRawBytes = snapshotSummary.keptRawBytes + snapshotSummary.foldedRawBytes;
+      const channelSummaries = this.runStore.summarizeChannels(db, sideRunId);
+      stats.channelCount = channelSummaries.length;
       this.runStore.finishRun(db, sideRunId, stats);
       db.exec('COMMIT');
-      const channelSummaries = this.runStore.listChannelSummaries(monthKey, sideRunId);
-      stats.channelCount = channelSummaries.length;
-      // channelCount 在 COMMIT 后补写一次，避免 summary 与返回值口径不同。
-      db.prepare(`
-        UPDATE pre_fund_reconciliation_runs SET summary_json = ? WHERE id = ?
-      `).run(JSON.stringify(stats), sideRunId);
       this.database.finishPreFundReconciliationRunMirror(mirrorRunId, stats);
       this.lastRun = {
         monthKey,
@@ -621,7 +646,7 @@ class PreFundReconciliationService {
 
     fs.mkdirSync(outputDirectory, { recursive: true });
     const backups = [];
-    const untouchedConflictPaths = new Set(conflicts.map((item) => item.filePath));
+    const publishedFiles = new Map();
     let files;
     try {
       for (const item of conflicts) {
@@ -629,31 +654,47 @@ class PreFundReconciliationService {
         const backupPath = `${item.filePath}.${backupNonce}.bak`;
         fs.renameSync(item.filePath, backupPath);
         backups.push({ filePath: item.filePath, backupPath });
-        untouchedConflictPaths.delete(item.filePath);
       }
       if (onProgress) onProgress({ stage: 'export-start', current: 0, total: plan.length });
       files = await writeChannelWorkbooks({
         templatePath: this.templatePath,
         outputDirectory,
         exportDate,
-        channelExports: this.runStore.iterateChannelExports(
+        channelExports: (function* mapDuplicateRows(channelExports) {
+          for (const channelExport of channelExports) {
+            yield {
+              ...channelExport,
+              duplicateRows: channelExport.hasDuplicateRecords
+                ? iterateDuplicateAuditRows(channelExport.duplicateRecords)
+                : []
+            };
+          }
+        }(this.runStore.iterateChannelExports(
           this.lastRun.monthKey,
           this.lastRun.sideRunId
-        )
+        ))),
+        onFilePublished: (publication) => {
+          publishedFiles.set(publication.filePath, publication.identity);
+        }
       });
     } catch (error) {
       const rollbackIssues = [];
-      for (const item of plan) {
-        if (untouchedConflictPaths.has(item.filePath)) continue;
+      for (const [filePath, identity] of publishedFiles) {
+        if (!currentFileMatchesIdentity(filePath, identity)) {
+          rollbackIssues.push(`本次新文件已被外部替换或修改，未自动删除：${path.basename(filePath)}`);
+          continue;
+        }
         try {
-          fs.rmSync(item.filePath, { force: true });
+          fs.rmSync(filePath, { force: true });
         } catch (removeError) {
-          rollbackIssues.push(`无法清理新文件 ${item.fileName}：${removeError.message || removeError}`);
+          rollbackIssues.push(
+            `无法清理本次新文件 ${path.basename(filePath)}：${removeError.message || removeError}`
+          );
         }
       }
       for (const backup of backups.reverse()) {
         try {
-          fs.renameSync(backup.backupPath, backup.filePath);
+          moveFileNoClobber(backup.backupPath, backup.filePath);
         } catch (restoreError) {
           rollbackIssues.push(
             `无法恢复原文件 ${path.basename(backup.filePath)}，备份保留在 ${backup.backupPath}：${restoreError.message || restoreError}`

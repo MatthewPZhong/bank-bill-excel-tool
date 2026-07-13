@@ -9,18 +9,71 @@ const ExcelJS = require('exceljs');
 
 const {
   SHEET_NAMES,
+  DUPLICATE_SHEET_NAME,
   TEMPLATE_SHEETS,
   PreFundTemplateError,
   formatLocalExportDate,
   buildChannelFileName,
   loadTemplateWorkbook,
+  moveFileNoClobber,
+  currentFileMatchesIdentity,
   writeChannelWorkbook,
-  writeChannelWorkbooks
+  writeChannelWorkbooks,
+  EXCEL_MAX_DATA_ROWS,
+  assertExcelDataRowCapacity
 } = require('../../../src/main-process/pre-fund-reconciliation/excel-writer');
+const {
+  DUPLICATE_GATEWAY_HEADERS
+} = require('../../../src/main-process/pre-fund-reconciliation/output-mapper');
 
 function mappedRow(headers, prefix) {
   return Object.fromEntries(headers.map((header, index) => [header, `${prefix}-${index + 1}`]));
 }
+
+test('no-clobber 发布身份可识别外部后续修改', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pre-fund-publication-'));
+  const sourcePath = path.join(directory, 'source.xlsx');
+  const destinationPath = path.join(directory, 'destination.xlsx');
+  try {
+    fs.writeFileSync(sourcePath, 'ORIGINAL');
+    const identity = moveFileNoClobber(sourcePath, destinationPath);
+    assert.equal(fs.existsSync(sourcePath), false);
+    assert.equal(currentFileMatchesIdentity(destinationPath, identity), true);
+    fs.writeFileSync(destinationPath, 'EXTERNAL-MODIFICATION');
+    assert.equal(currentFileMatchesIdentity(destinationPath, identity), false);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('目标目录不支持硬链接时降级排他复制且仍不覆盖', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pre-fund-copy-fallback-'));
+  const sourcePath = path.join(directory, 'source.xlsx');
+  const destinationPath = path.join(directory, 'destination.xlsx');
+  const originalLinkSync = fs.linkSync;
+  try {
+    fs.writeFileSync(sourcePath, 'COPY-FALLBACK');
+    fs.linkSync = () => {
+      const error = new Error('hard links unsupported');
+      error.code = 'ENOTSUP';
+      throw error;
+    };
+    const identity = moveFileNoClobber(sourcePath, destinationPath);
+    assert.equal(fs.existsSync(sourcePath), false);
+    assert.equal(fs.readFileSync(destinationPath, 'utf8'), 'COPY-FALLBACK');
+    assert.equal(currentFileMatchesIdentity(destinationPath, identity), true);
+
+    fs.writeFileSync(sourcePath, 'MUST-NOT-CLOBBER');
+    assert.throws(
+      () => moveFileNoClobber(sourcePath, destinationPath),
+      /目标文件已存在，未覆盖/
+    );
+    assert.equal(fs.readFileSync(destinationPath, 'utf8'), 'COPY-FALLBACK');
+  } finally {
+    fs.linkSync = originalLinkSync;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 async function createTemplate(filePath, mutate) {
   const workbook = new ExcelJS.Workbook();
@@ -166,6 +219,53 @@ test('0不平仍导出：不平结果和渠道账单只有表头，平账结果�
   assert.equal(result.rowCounts.balanced, 1);
 });
 
+test('有重复时末尾动态追加22列第6 sheet，无银行行的重复专属渠道前5 sheet仅表头', async () => {
+  const duplicateRows = [
+    mappedRow(DUPLICATE_GATEWAY_HEADERS, 'KEEP'),
+    mappedRow(DUPLICATE_GATEWAY_HEADERS, 'FOLDED')
+  ];
+  const result = await writeChannelWorkbook({
+    templatePath,
+    outputDirectory: path.join(tempDir, 'duplicate-only'),
+    channel: 'DUP-ONLY',
+    exportDate: new Date(2026, 6, 10),
+    unbalancedRows: [],
+    balancedRows: [],
+    channelBillRows: [],
+    hasDuplicateRecords: true,
+    duplicateRows: (function* rows() { yield* duplicateRows; }())
+  });
+
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(result.filePath);
+  assert.deepEqual(workbook.worksheets.map((worksheet) => worksheet.name), [
+    ...SHEET_NAMES,
+    DUPLICATE_SHEET_NAME
+  ]);
+  for (const name of SHEET_NAMES) assert.equal(workbook.getWorksheet(name).rowCount, 1, name);
+  const duplicateSheet = workbook.getWorksheet(DUPLICATE_SHEET_NAME);
+  assert.deepEqual(rowValues(duplicateSheet, 1, 22), DUPLICATE_GATEWAY_HEADERS);
+  assert.deepEqual(rowValues(duplicateSheet, 2, 22), projectValues(DUPLICATE_GATEWAY_HEADERS, duplicateRows[0]));
+  assert.deepEqual(rowValues(duplicateSheet, 3, 22), projectValues(DUPLICATE_GATEWAY_HEADERS, duplicateRows[1]));
+  assert.equal(result.rowCounts.duplicateGateway, 2);
+});
+
+test('无重复时即使传入空重复 iterable 仍保持5 sheet', async () => {
+  const result = await writeChannelWorkbook({
+    templatePath,
+    outputDirectory: path.join(tempDir, 'no-duplicate'),
+    channel: 'NORMAL',
+    unbalancedRows: [],
+    balancedRows: [],
+    channelBillRows: [],
+    hasDuplicateRecords: false,
+    duplicateRows: (function* rows() { throw new Error('不应消费'); }())
+  });
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(result.filePath);
+  assert.deepEqual(workbook.worksheets.map((worksheet) => worksheet.name), SHEET_NAMES);
+});
+
 test('批量writer顺序消费逐渠道 async iterable，两个渠道文件内容不串', async () => {
   const outputDirectory = path.join(tempDir, 'batch');
   const consumed = [];
@@ -252,11 +352,56 @@ test('数据 iterable 中途抛错时不留下最终文件或临时文件', asyn
   assert.deepEqual(fs.readdirSync(outputDirectory).filter((name) => name.includes('.tmp.xlsx')), []);
 });
 
+test('目标文件在生成期间被外部创建时不覆盖且清理临时文件', async () => {
+  const outputDirectory = path.join(tempDir, 'external-conflict');
+  const exportDate = new Date(2026, 6, 10);
+  const expectedPath = path.join(outputDirectory, buildChannelFileName('RACE', exportDate));
+  fs.mkdirSync(outputDirectory, { recursive: true });
+
+  const originalLinkSync = fs.linkSync;
+  let injected = false;
+  fs.linkSync = (sourcePath, destinationPath) => {
+    if (!injected && destinationPath === expectedPath) {
+      injected = true;
+      fs.writeFileSync(expectedPath, 'EXTERNAL-CONTENT');
+    }
+    return originalLinkSync(sourcePath, destinationPath);
+  };
+  try {
+    await assert.rejects(
+      () => writeChannelWorkbook({
+        templatePath,
+        outputDirectory,
+        channel: 'RACE',
+        exportDate,
+        unbalancedRows: [],
+        balancedRows: [],
+        channelBillRows: []
+      }),
+      /目标文件已存在，未覆盖/
+    );
+  } finally {
+    fs.linkSync = originalLinkSync;
+  }
+
+  assert.equal(fs.readFileSync(expectedPath, 'utf8'), 'EXTERNAL-CONTENT');
+  assert.deepEqual(fs.readdirSync(outputDirectory).filter((name) => name.includes('.tmp.xlsx')), []);
+});
+
 test('文件名使用本机日历日并复用安全文件名规则', () => {
   const date = new Date(2026, 0, 2, 23, 59, 59);
   assert.equal(formatLocalExportDate(date), '2026年01月02日');
   assert.equal(
     buildChannelFileName('A/B:C*D?', date),
     '资金对账不平_A_B_C_D__2026年01月02日.xlsx'
+  );
+});
+
+test('单 sheet 数据行超过 Excel 上限时显式失败', () => {
+  assert.equal(EXCEL_MAX_DATA_ROWS, 1048575);
+  assert.doesNotThrow(() => assertExcelDataRowCapacity(EXCEL_MAX_DATA_ROWS, '重复网关账单'));
+  assert.throws(
+    () => assertExcelDataRowCapacity(EXCEL_MAX_DATA_ROWS + 1, '重复网关账单'),
+    /重复网关账单数据行超过 Excel 单 sheet 上限 1048575 行/
   );
 });

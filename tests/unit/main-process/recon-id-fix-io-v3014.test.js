@@ -11,8 +11,10 @@ const {
   readReconIdFixFile,
   PRE_FUND_UNBALANCED_SHEET_NAME,
   PRE_FUND_BALANCED_SHEET_NAME,
+  PRE_FUND_DUPLICATE_GATEWAY_SHEET_NAME,
   PRE_FUND_UNBALANCED_FIELDS,
-  PRE_FUND_BALANCED_FIELDS
+  PRE_FUND_BALANCED_FIELDS,
+  DUPLICATE_GATEWAY_HEADERS
 } = require('../../../src/main-process/recon-id-fix-io');
 const {
   GATEWAY_BILL_FIELDS,
@@ -31,7 +33,15 @@ function appendSheet(workbook, name, headers, rows = []) {
   XLSX.utils.book_append_sheet(workbook, sheet, name);
 }
 
-function writeGatewayWorkbook(filePath, { modern = false, balancedHeaders = PRE_FUND_BALANCED_FIELDS } = {}) {
+function writeGatewayWorkbook(filePath, {
+  modern = false,
+  balancedHeaders = PRE_FUND_BALANCED_FIELDS,
+  duplicateHeaders = null,
+  duplicateRows = [],
+  gatewayRows = [],
+  channelRows = [],
+  orderRepairRows = []
+} = {}) {
   const workbook = XLSX.utils.book_new();
   if (modern) {
     appendSheet(workbook, PRE_FUND_UNBALANCED_SHEET_NAME, PRE_FUND_UNBALANCED_FIELDS, [[
@@ -44,9 +54,22 @@ function writeGatewayWorkbook(filePath, { modern = false, balancedHeaders = PRE_
       ...RECON_RESULT_FIELDS_GATEWAY.map((field) => `legacy-${field}`)
     ]]);
   }
-  appendSheet(workbook, GATEWAY_BILL_SHEET_NAME, GATEWAY_BILL_FIELDS);
-  appendSheet(workbook, CHANNEL_BILL_SHEET_NAME, CHANNEL_BILL_FIELDS);
-  appendSheet(workbook, ORDER_REPAIR_SHEET_NAME_GATEWAY, ORDER_REPAIR_FIELDS_GATEWAY);
+  appendSheet(workbook, GATEWAY_BILL_SHEET_NAME, GATEWAY_BILL_FIELDS, gatewayRows);
+  appendSheet(workbook, CHANNEL_BILL_SHEET_NAME, CHANNEL_BILL_FIELDS, channelRows);
+  appendSheet(
+    workbook,
+    ORDER_REPAIR_SHEET_NAME_GATEWAY,
+    ORDER_REPAIR_FIELDS_GATEWAY,
+    orderRepairRows
+  );
+  if (duplicateHeaders) {
+    appendSheet(
+      workbook,
+      PRE_FUND_DUPLICATE_GATEWAY_SHEET_NAME,
+      duplicateHeaders,
+      duplicateRows
+    );
+  }
   XLSX.writeFile(workbook, filePath);
 }
 
@@ -84,7 +107,92 @@ test.describe('readReconIdFixFile gateway 3.0.14 compatibility', () => {
     assert.equal('对账数据来源' in result.sheets.reconResult[0], false);
   });
 
-  test('accepts new workbook when optional balanced sheet is absent', () => {
+  test('accepts six-sheet workbook, validates duplicate audit headers, and ignores its rows', () => {
+    const filePath = path.join(dir, 'modern-with-duplicate-audit.xlsx');
+    writeGatewayWorkbook(filePath, {
+      modern: true,
+      duplicateHeaders: DUPLICATE_GATEWAY_HEADERS,
+      duplicateRows: [[
+        'PF-1', '被折叠记录', 1, 1, 'reconciliationId+10字段指纹完全重复', 'fp',
+        '网关对账单', 'linked_gateway_bill#2', '2026-07-01', 'CIT', 'M1', 'O1',
+        'B1', 'R1', 'USD', '10', 'PAY', 'Alice', '1234', 'CIT', 'SWIFT', '{"id":2}'
+      ]]
+    });
+
+    const result = readReconIdFixFile(filePath, 'gateway');
+
+    assert.equal(result.sheets.reconResult.length, 1);
+    assert.deepEqual(Object.keys(result.sheets), [
+      'reconResult', 'businessBills', 'opponentBills', 'fixTemplate'
+    ]);
+    assert.deepEqual(result.sheets.businessBills, []);
+    assert.deepEqual(result.sheets.opponentBills, []);
+  });
+
+  test('six-sheet and five-sheet return identical non-empty C4 business data', () => {
+    const fiveSheetPath = path.join(dir, 'modern-five-non-empty.xlsx');
+    const sixSheetPath = path.join(dir, 'modern-six-non-empty.xlsx');
+    const gatewayRows = [GATEWAY_BILL_FIELDS.map((field) => `gateway-${field}`)];
+    const channelRows = [CHANNEL_BILL_FIELDS.map((field) => `channel-${field}`)];
+    const orderRepairRows = [ORDER_REPAIR_FIELDS_GATEWAY.map((field) => `repair-${field}`)];
+    const common = { modern: true, gatewayRows, channelRows, orderRepairRows };
+    writeGatewayWorkbook(fiveSheetPath, common);
+    writeGatewayWorkbook(sixSheetPath, {
+      ...common,
+      duplicateHeaders: DUPLICATE_GATEWAY_HEADERS,
+      duplicateRows: [[
+        'PF-1', '被折叠记录', 1, 1, 'reconciliationId+10字段指纹完全重复', 'fp',
+        '网关对账单', 'linked_gateway_bill#2', '2026-07-01', 'CIT', 'M1', 'O1',
+        'B1', 'R1', 'USD', '10', 'PAY', 'Alice', '1234', 'CIT', 'SWIFT', '{"id":2}'
+      ]]
+    });
+
+    assert.deepEqual(
+      readReconIdFixFile(sixSheetPath, 'gateway').sheets,
+      readReconIdFixFile(fiveSheetPath, 'gateway').sheets
+    );
+  });
+
+  test('loads only one header row first, then excludes duplicate audit data from the business read', () => {
+    const filePath = path.join(dir, 'modern-selective-read.xlsx');
+    writeGatewayWorkbook(filePath, {
+      modern: true,
+      duplicateHeaders: DUPLICATE_GATEWAY_HEADERS,
+      duplicateRows: [DUPLICATE_GATEWAY_HEADERS.map((_header, index) => `value-${index}`)]
+    });
+    const originalReadFile = XLSX.readFile;
+    const optionsSeen = [];
+    XLSX.readFile = function instrumentedReadFile(targetPath, options) {
+      optionsSeen.push(options || {});
+      return originalReadFile.call(this, targetPath, options);
+    };
+    try {
+      readReconIdFixFile(filePath, 'gateway');
+    } finally {
+      XLSX.readFile = originalReadFile;
+    }
+
+    assert.equal(optionsSeen[0].sheetRows, 1);
+    assert.ok(Array.isArray(optionsSeen[1].sheets));
+    assert.equal(optionsSeen[1].sheets.includes(PRE_FUND_DUPLICATE_GATEWAY_SHEET_NAME), false);
+  });
+
+  test('rejects six-sheet workbook when duplicate audit headers are malformed', () => {
+    const filePath = path.join(dir, 'modern-bad-duplicate-audit.xlsx');
+    writeGatewayWorkbook(filePath, {
+      modern: true,
+      duplicateHeaders: DUPLICATE_GATEWAY_HEADERS.slice(0, -1)
+    });
+
+    assert.throws(
+      () => readReconIdFixFile(filePath, 'gateway'),
+      (error) => error instanceof FileValidationError
+        && error.code === 'invalid-column-count'
+        && error.message.includes(PRE_FUND_DUPLICATE_GATEWAY_SHEET_NAME)
+    );
+  });
+
+  test('rejects modern workbook when required balanced sheet is absent', () => {
     const filePath = path.join(dir, 'modern-no-balanced.xlsx');
     const workbook = XLSX.utils.book_new();
     appendSheet(workbook, PRE_FUND_UNBALANCED_SHEET_NAME, PRE_FUND_UNBALANCED_FIELDS);
@@ -93,8 +201,12 @@ test.describe('readReconIdFixFile gateway 3.0.14 compatibility', () => {
     appendSheet(workbook, ORDER_REPAIR_SHEET_NAME_GATEWAY, ORDER_REPAIR_FIELDS_GATEWAY);
     XLSX.writeFile(workbook, filePath);
 
-    const result = readReconIdFixFile(filePath, 'gateway');
-    assert.deepEqual(result.sheets.reconResult, []);
+    assert.throws(
+      () => readReconIdFixFile(filePath, 'gateway'),
+      (error) => error instanceof FileValidationError
+        && error.code === 'missing-sheet'
+        && error.message.includes(PRE_FUND_BALANCED_SHEET_NAME)
+    );
   });
 
   test('rejects malformed balanced sheet when it is present', () => {

@@ -2,7 +2,7 @@
 // spec §五.1 / §三 / §四
 //
 // 职责：
-//   readReconIdFixFile(filePath)   — 读旧 4 sheet；gateway 模式兼容 3.0.14 新 5 sheet
+//   readReconIdFixFile(filePath)   — 读旧 4 sheet；gateway 模式兼容 3.0.14 新 5/6 sheet
 //   writeReconIdFixOutput({...})   — 写「订单修复」单 sheet（15 列）
 //
 // 读：SheetJS（与 v2.0.0-beta.3 bank-statement-io.js 同模式）
@@ -13,6 +13,9 @@ const fs = require('node:fs');
 const XLSX = require('xlsx');
 const XLSXStyle = require('xlsx-js-style');
 const { applyWatermark } = require('./workbook-watermark');
+const {
+  DUPLICATE_GATEWAY_HEADERS
+} = require('./pre-fund-reconciliation/output-mapper');
 
 const { FileValidationError } = require('../backend/file-service/common');
 const {
@@ -41,6 +44,7 @@ const {
 // 但导入时仍严格校验结果 sheet，避免把结构损坏的文件静默当成有效输入。
 const PRE_FUND_UNBALANCED_SHEET_NAME = '不平结果';
 const PRE_FUND_BALANCED_SHEET_NAME = '平账结果';
+const PRE_FUND_DUPLICATE_GATEWAY_SHEET_NAME = '重复网关账单';
 const PRE_FUND_SOURCE_FIELD = '对账数据来源';
 const PRE_FUND_UNBALANCED_FIELDS = Object.freeze([
   PRE_FUND_SOURCE_FIELD,
@@ -132,6 +136,29 @@ function sheetToObjects(sheet, expectedHeaders, sheetName) {
   return { headers: expectedHeaders.slice(), rows };
 }
 
+function validateSheetHeadersOnly(sheet, expectedHeaders, sheetName) {
+  const decodedRange = sheet && sheet['!ref']
+    ? XLSX.utils.decode_range(sheet['!ref'])
+    : { s: { r: 0, c: 0 }, e: { r: 0, c: expectedHeaders.length - 1 } };
+  const aoa = XLSX.utils.sheet_to_json(sheet, {
+    header: 1,
+    raw: true,
+    range: {
+      s: { r: 0, c: 0 },
+      e: { r: 0, c: Math.max(decodedRange.e.c, expectedHeaders.length - 1) }
+    }
+  });
+  if (!aoa.length) {
+    throw new FileValidationError(
+      'invalid-column-count',
+      `sheet「${sheetName}」为空，无法读取表头`,
+      { detailLines: [`期望表头：${expectedHeaders.join(' / ')}`] }
+    );
+  }
+  const headerOnlySheet = XLSX.utils.aoa_to_sheet([aoa[0]]);
+  sheetToObjects(headerOnlySheet, expectedHeaders, sheetName);
+}
+
 function readSheetOrThrow(wb, sheetName) {
   const sheet = wb.Sheets[sheetName];
   if (!sheet) {
@@ -164,14 +191,12 @@ function readGatewayReconResult(wb, cfg) {
     PRE_FUND_UNBALANCED_FIELDS,
     PRE_FUND_UNBALANCED_SHEET_NAME
   );
-  const balancedSheet = wb.Sheets[PRE_FUND_BALANCED_SHEET_NAME];
-  if (balancedSheet) {
-    sheetToObjects(
-      balancedSheet,
-      PRE_FUND_BALANCED_FIELDS,
-      PRE_FUND_BALANCED_SHEET_NAME
-    );
-  }
+  const balancedSheet = readSheetOrThrow(wb, PRE_FUND_BALANCED_SHEET_NAME);
+  sheetToObjects(
+    balancedSheet,
+    PRE_FUND_BALANCED_FIELDS,
+    PRE_FUND_BALANCED_SHEET_NAME
+  );
 
   // C4 既有内部契约仍是旧 19 列；新增来源列只用于前置资金对账审计。
   return parsed.rows.map((row) => {
@@ -189,9 +214,32 @@ function readReconIdFixFile(filePath, subMode = 'business') {
   if (!filePath || !fs.existsSync(filePath)) {
     throw new FileValidationError('file-not-found', `文件不存在：${filePath}`);
   }
-  const wb = XLSX.readFile(filePath);
   const cfg = getSheetConfigBySubMode(subMode);
-  // business 模式仍要求旧 4 sheet；gateway 模式兼容 3.0.14 的新结果 sheet。
+  let wb;
+  if (subMode === 'gateway') {
+    const headerWorkbook = XLSX.readFile(filePath, { sheetRows: 1 });
+    if (headerWorkbook.Sheets[PRE_FUND_DUPLICATE_GATEWAY_SHEET_NAME]) {
+      validateSheetHeadersOnly(
+        headerWorkbook.Sheets[PRE_FUND_DUPLICATE_GATEWAY_SHEET_NAME],
+        DUPLICATE_GATEWAY_HEADERS,
+        PRE_FUND_DUPLICATE_GATEWAY_SHEET_NAME
+      );
+    }
+    const businessSheetNames = [
+      cfg.reconResultSheetName,
+      PRE_FUND_UNBALANCED_SHEET_NAME,
+      PRE_FUND_BALANCED_SHEET_NAME,
+      cfg.mainBillSheetName,
+      cfg.oppBillSheetName,
+      cfg.orderRepairSheetName
+    ];
+    wb = XLSX.readFile(filePath, { sheets: businessSheetNames });
+    // 保留完整名称列表供 missing-sheet 错误展示，但重复审计数据没有进入本次解析结果。
+    wb.SheetNames = headerWorkbook.SheetNames.slice();
+  } else {
+    wb = XLSX.readFile(filePath);
+  }
+  // business 模式仍要求旧 4 sheet；gateway 模式兼容 3.0.14 的新结果和重复审计 sheet。
   const reconResultRows = subMode === 'gateway'
     ? readGatewayReconResult(wb, cfg)
     : sheetToObjects(
@@ -405,6 +453,8 @@ module.exports = {
   ORDER_REPAIR_SHEET_NAME,
   PRE_FUND_UNBALANCED_SHEET_NAME,
   PRE_FUND_BALANCED_SHEET_NAME,
+  PRE_FUND_DUPLICATE_GATEWAY_SHEET_NAME,
   PRE_FUND_UNBALANCED_FIELDS,
-  PRE_FUND_BALANCED_FIELDS
+  PRE_FUND_BALANCED_FIELDS,
+  DUPLICATE_GATEWAY_HEADERS
 };

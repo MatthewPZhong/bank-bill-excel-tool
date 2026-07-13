@@ -124,6 +124,34 @@ test('同 reconId+fingerprint 跨来源完全重复折叠，临时来源优先�
   assert.equal(pool.candidates[1].sourcePriority, 1);
   assert.equal(built.stats.gatewayDuplicateFoldedRows, 2);
   assert.equal(built.warnings.filter((item) => item.code === 'pre-fund-gateway-complete-duplicate-folded').length, 2);
+  assert.equal(built.duplicateGroups.length, 1);
+  assert.equal(built.duplicateGroups[0].keptCandidate.source, GATEWAY_SOURCE.TEMPORARY);
+  assert.equal(built.duplicateGroups[0].foldedCandidates.length, 2);
+});
+
+test('原始业务JSON只取MPT rawJson或持久entry.row，不混入包装层元数据', () => {
+  const mptRawJson = '{"source":"mpt","emoji":"😀"}';
+  const mptCandidate = normalizeGatewayCandidate(
+    { ...gateway(), rawJson: mptRawJson, sourceFileName: 'mpt.gz', id: 999 },
+    GATEWAY_SOURCE.TEMPORARY,
+    0
+  );
+  assert.equal(mptCandidate.rawJson, mptRawJson);
+
+  const persistentRow = gateway({ reconciliationId: 'P-1', amount: '2' });
+  const persistentRawJson = '{ "reconciliationId": "P-1", "amount": "2" }';
+  const persistentCandidate = normalizeGatewayCandidate({
+    id: 88,
+    reconciliationId: 'P-1',
+    billDate: '2026-07-01',
+    reconBillBizId: 'B-1',
+    rawJson: persistentRawJson,
+    row: persistentRow
+  }, GATEWAY_SOURCE.PERSISTENT, 0);
+  assert.equal(persistentCandidate.rawJson, persistentRawJson);
+  assert.equal(persistentCandidate.rawJson.includes('"id":88'), false);
+  assert.equal(persistentCandidate.rawJson.includes('"billDate"'), false);
+  assert.equal(persistentCandidate.location.sourceRecordId, 88);
 });
 
 test('两条银行同ID、一条网关：银行不去重，第一条平账、第二条右单边', () => {

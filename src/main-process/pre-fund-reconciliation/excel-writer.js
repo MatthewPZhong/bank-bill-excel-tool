@@ -14,6 +14,7 @@ const {
   UNBALANCED_HEADERS,
   BALANCED_HEADERS,
   CHANNEL_BILL_HEADERS,
+  DUPLICATE_GATEWAY_HEADERS,
   projectOutputRow
 } = require('./output-mapper');
 
@@ -25,6 +26,12 @@ const SHEET_NAMES = Object.freeze([
   '订单修复'
 ]);
 
+const DUPLICATE_SHEET_NAME = '重复网关账单';
+const DUPLICATE_SHEET_CONTRACT = Object.freeze({
+  name: DUPLICATE_SHEET_NAME,
+  headers: DUPLICATE_GATEWAY_HEADERS
+});
+
 const TEMPLATE_SHEETS = Object.freeze([
   Object.freeze({ name: SHEET_NAMES[0], headers: UNBALANCED_HEADERS }),
   Object.freeze({ name: SHEET_NAMES[1], headers: BALANCED_HEADERS }),
@@ -34,6 +41,11 @@ const TEMPLATE_SHEETS = Object.freeze([
 ]);
 
 const WATERMARK_AUTHOR = 'pzhong';
+const EXCEL_MAX_DATA_ROWS = 1048575;
+const PUBLICATION_IDENTITY = Symbol('preFundPublicationIdentity');
+const NO_CLOBBER_COPY_FALLBACK_CODES = new Set([
+  'EACCES', 'EINVAL', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP', 'EPERM', 'EXDEV'
+]);
 
 class PreFundTemplateError extends Error {
   constructor(message, details = {}) {
@@ -152,7 +164,7 @@ function buildChannelFileName(channelName, exportDate = new Date()) {
   return `资金对账不平_${safeChannel}_${formatLocalExportDate(exportDate)}.xlsx`;
 }
 
-function copyWorksheetShell(streamingWorkbook, sourceWorksheet, contract) {
+function copyWorksheetShell(streamingWorkbook, sourceWorksheet, contract, options = {}) {
   const worksheet = streamingWorkbook.addWorksheet(contract.name, {
     properties: clonePlain(sourceWorksheet.properties) || {},
     pageSetup: clonePlain(sourceWorksheet.pageSetup) || {},
@@ -171,7 +183,9 @@ function copyWorksheetShell(streamingWorkbook, sourceWorksheet, contract) {
     };
   });
 
-  if (sourceWorksheet.autoFilter) worksheet.autoFilter = clonePlain(sourceWorksheet.autoFilter);
+  if (options.copyAutoFilter !== false && sourceWorksheet.autoFilter) {
+    worksheet.autoFilter = clonePlain(sourceWorksheet.autoFilter);
+  }
 
   const sourceHeader = sourceWorksheet.getRow(1);
   const targetHeader = worksheet.addRow(contract.headers.slice());
@@ -199,10 +213,22 @@ function assertRowsIterable(rows, label) {
   return rows;
 }
 
+function assertExcelDataRowCapacity(dataRowCount, label, maxDataRows = EXCEL_MAX_DATA_ROWS) {
+  if (!Number.isSafeInteger(dataRowCount) || dataRowCount < 1) {
+    throw new TypeError('Excel 数据行序号必须为正整数');
+  }
+  if (dataRowCount > maxDataRows) {
+    throw new Error(
+      `${label}数据行超过 Excel 单 sheet 上限 ${maxDataRows} 行，请减少数据后重新导出`
+    );
+  }
+}
+
 async function appendRows(worksheet, headers, rows, label) {
   let count = 0;
   try {
     for await (const sourceRow of assertRowsIterable(rows, label)) {
+      assertExcelDataRowCapacity(count + 1, label);
       const values = projectOutputRow(headers, sourceRow);
       worksheet.addRow(values).commit();
       count += 1;
@@ -220,12 +246,83 @@ function makeTemporaryPath(finalPath) {
   return path.join(directory, `.${baseName}.${nonce}.tmp.xlsx`);
 }
 
+function moveFileNoClobber(sourcePath, destinationPath) {
+  let published = false;
+  try {
+    fs.linkSync(sourcePath, destinationPath);
+    published = true;
+  } catch (error) {
+    if (error && error.code === 'EEXIST') {
+      const conflict = new Error(`目标文件已存在，未覆盖：${destinationPath}`, { cause: error });
+      conflict.code = 'EEXIST';
+      throw conflict;
+    }
+    if (!error || !NO_CLOBBER_COPY_FALLBACK_CODES.has(error.code)) throw error;
+    try {
+      fs.copyFileSync(sourcePath, destinationPath, fs.constants.COPYFILE_EXCL);
+      published = true;
+    } catch (copyError) {
+      if (copyError && copyError.code === 'EEXIST') {
+        const conflict = new Error(
+          `目标文件已存在，未覆盖：${destinationPath}`,
+          { cause: copyError }
+        );
+        conflict.code = 'EEXIST';
+        throw conflict;
+      }
+      throw new Error(
+        `目标目录不支持硬链接，排他复制发布也失败：${destinationPath}；${copyError.message || copyError}`,
+        { cause: copyError }
+      );
+    }
+  }
+
+  if (!published) throw new Error(`文件发布未完成：${destinationPath}`);
+  const destinationStat = fs.statSync(destinationPath, { bigint: true });
+  const identity = {
+    dev: String(destinationStat.dev),
+    ino: String(destinationStat.ino),
+    size: String(destinationStat.size),
+    mtimeNs: String(destinationStat.mtimeNs)
+  };
+  try {
+    fs.unlinkSync(sourcePath);
+  } catch (error) {
+    try {
+      fs.unlinkSync(destinationPath);
+    } catch (rollbackError) {
+      throw new Error(
+        `文件已发布但源文件清理失败，且无法回滚目标文件：${destinationPath}；${rollbackError.message || rollbackError}`,
+        { cause: error }
+      );
+    }
+    throw error;
+  }
+  return identity;
+}
+
+function currentFileMatchesIdentity(filePath, identity) {
+  if (!identity || typeof identity !== 'object') return false;
+  let current;
+  try {
+    current = fs.statSync(filePath, { bigint: true });
+  } catch (_error) {
+    return false;
+  }
+  return String(current.dev) === identity.dev
+    && String(current.ino) === identity.ino
+    && String(current.size) === identity.size
+    && String(current.mtimeNs) === identity.mtimeNs;
+}
+
 async function writeWithTemplate({
   templateWorkbook,
   finalPath,
   unbalancedRows,
   balancedRows,
-  channelBillRows
+  channelBillRows,
+  duplicateRows,
+  hasDuplicateRecords = false
 }) {
   const temporaryPath = makeTemporaryPath(finalPath);
   const writer = new ExcelJS.stream.xlsx.WorkbookWriter({
@@ -242,6 +339,17 @@ async function writeWithTemplate({
       sheets.set(
         contract.name,
         copyWorksheetShell(writer, templateWorkbook.getWorksheet(contract.name), contract)
+      );
+    }
+    if (hasDuplicateRecords) {
+      sheets.set(
+        DUPLICATE_SHEET_NAME,
+        copyWorksheetShell(
+          writer,
+          templateWorkbook.getWorksheet('网关账单'),
+          DUPLICATE_SHEET_CONTRACT,
+          { copyAutoFilter: false }
+        )
       );
     }
 
@@ -263,27 +371,42 @@ async function writeWithTemplate({
       channelBillRows || [],
       '渠道账单'
     );
+    const duplicateGatewayCount = hasDuplicateRecords
+      ? await appendRows(
+          sheets.get(DUPLICATE_SHEET_NAME),
+          DUPLICATE_GATEWAY_HEADERS,
+          duplicateRows || [],
+          DUPLICATE_SHEET_NAME
+        )
+      : 0;
 
     if (channelBillCount !== unbalancedCount) {
       throw new Error(`渠道账单${channelBillCount}行与不平结果${unbalancedCount}行不守恒`);
     }
+    if (hasDuplicateRecords && duplicateGatewayCount === 0) {
+      throw new Error('重复网关账单已标记存在，但审计明细为空');
+    }
 
     for (const worksheet of sheets.values()) worksheet.commit();
     await writer.commit();
-    fs.renameSync(temporaryPath, finalPath);
+    const publicationIdentity = moveFileNoClobber(temporaryPath, finalPath);
 
-    return {
+    const rowCounts = {
+      unbalanced: unbalancedCount,
+      balanced: balancedCount,
+      gatewayBill: 0,
+      channelBill: channelBillCount,
+      orderRepair: 0
+    };
+    if (hasDuplicateRecords) rowCounts.duplicateGateway = duplicateGatewayCount;
+    const result = {
       filePath: finalPath,
       fileName: path.basename(finalPath),
       channel: null,
-      rowCounts: {
-        unbalanced: unbalancedCount,
-        balanced: balancedCount,
-        gatewayBill: 0,
-        channelBill: channelBillCount,
-        orderRepair: 0
-      }
+      rowCounts
     };
+    Object.defineProperty(result, PUBLICATION_IDENTITY, { value: publicationIdentity });
+    return result;
   } catch (error) {
     if (fs.existsSync(temporaryPath)) {
       try { fs.unlinkSync(temporaryPath); } catch (_cleanupError) {}
@@ -307,13 +430,17 @@ async function writeChannelWorkbook(options = {}) {
     throw new TypeError('前置资金对账导出必须提供 outputDirectory 或 outputPath');
   }
   fs.mkdirSync(path.dirname(finalPath), { recursive: true });
+  const hasDuplicateRecords = options.hasDuplicateRecords === true
+    || (Array.isArray(options.duplicateRows) && options.duplicateRows.length > 0);
 
   const result = await writeWithTemplate({
     templateWorkbook,
     finalPath,
     unbalancedRows: options.unbalancedRows || [],
     balancedRows: options.balancedRows || [],
-    channelBillRows: options.channelBillRows || []
+    channelBillRows: options.channelBillRows || [],
+    duplicateRows: options.duplicateRows || [],
+    hasDuplicateRecords
   });
   result.channel = trimCell(channel);
   return result;
@@ -342,26 +469,41 @@ async function writeChannelWorkbooks(options = {}) {
     }
     usedPaths.add(normalizedPath);
 
-    results.push(await writeChannelWorkbook({
+    const result = await writeChannelWorkbook({
       templateWorkbook,
       outputPath: finalPath,
       channel,
       unbalancedRows: channelExport.unbalancedRows || [],
       balancedRows: channelExport.balancedRows || [],
-      channelBillRows: channelExport.channelBillRows || []
-    }));
+      channelBillRows: channelExport.channelBillRows || [],
+      duplicateRows: channelExport.duplicateRows || [],
+      hasDuplicateRecords: channelExport.hasDuplicateRecords === true
+    });
+    results.push(result);
+    if (typeof options.onFilePublished === 'function') {
+      options.onFilePublished({
+        filePath: result.filePath,
+        identity: result[PUBLICATION_IDENTITY]
+      });
+    }
   }
   return results;
 }
 
 module.exports = {
   SHEET_NAMES,
+  DUPLICATE_SHEET_NAME,
+  DUPLICATE_SHEET_CONTRACT,
+  EXCEL_MAX_DATA_ROWS,
   TEMPLATE_SHEETS,
   PreFundTemplateError,
   formatLocalExportDate,
   buildChannelFileName,
   validateTemplateWorkbook,
   loadTemplateWorkbook,
+  moveFileNoClobber,
+  currentFileMatchesIdentity,
+  assertExcelDataRowCapacity,
   writeChannelWorkbook,
   writeChannelWorkbooks
 };

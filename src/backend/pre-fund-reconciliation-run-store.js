@@ -1,10 +1,13 @@
 'use strict';
 
+const crypto = require('node:crypto');
+
 const runDataStore = require('./run-data-store');
 
 const MODULE = runDataStore.MODULE_PRE_FUND_RECONCILIATION_RESULTS;
 
 const PRE_FUND_RUN_DDL = runDataStore.SIDE_DB_DDL_PRE_FUND_RUNS;
+const DUPLICATE_FOLD_REASON = 'reconciliationId+10字段指纹完全重复';
 
 function assertRunIdentity(monthKey, runId) {
   if (typeof monthKey !== 'string' || !/^\d{4}-\d{2}$/.test(monthKey)) {
@@ -39,6 +42,191 @@ function parseOutputJson(value, context = {}) {
     );
   }
   return parsed;
+}
+
+function parseResultObjectJson(value, context = {}) {
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch (error) {
+    throw new Error(
+      `前置资金对账重复审计 JSON 损坏：runId=${context.runId}，${context.table}#${context.rowId}，列=${context.column}`,
+      { cause: error }
+    );
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(
+      `前置资金对账重复审计 JSON 结构无效：runId=${context.runId}，${context.table}#${context.rowId}，列=${context.column}`
+    );
+  }
+  return parsed;
+}
+
+function assertValidRawObjectJson(value, context = {}) {
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch (error) {
+    throw new Error(
+      `前置资金对账重复审计原始JSON损坏：runId=${context.runId}，${context.table}#${context.rowId}`,
+      { cause: error }
+    );
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(
+      `前置资金对账重复审计原始JSON结构无效：runId=${context.runId}，${context.table}#${context.rowId}`
+    );
+  }
+}
+
+function rawJsonForCandidate(candidate) {
+  if (candidate && typeof candidate.rawJson === 'string') return candidate.rawJson;
+  throw new Error('前置资金对账被折叠候选缺少原始业务JSON');
+}
+
+function rawJsonHash(rawJson) {
+  return crypto.createHash('sha256').update(rawJson, 'utf8').digest();
+}
+
+function hashesEqual(left, right) {
+  if (!(left instanceof Uint8Array) || !(right instanceof Uint8Array)) return false;
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length
+    && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function prepareGatewayCandidateStager(db, runId, options = {}) {
+  const resolveKeptRawJson = options.resolveKeptRawJson;
+  const insertPool = db.prepare(`
+    INSERT OR IGNORE INTO pre_fund_reconciliation_gateway_pool (
+      run_id, source_priority, source_order, source_label, reconciliation_id,
+      fingerprint, raw_json_hash, fields_json, name, card_no, source_location_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertSnapshot = db.prepare(`
+    INSERT OR IGNORE INTO pre_fund_reconciliation_gateway_candidate_snapshots
+      (pool_id, run_id, raw_json)
+    VALUES (?, ?, ?)
+  `);
+  const selectKept = db.prepare(`
+    SELECT p.id, p.source_priority, p.source_order, p.source_label,
+           p.reconciliation_id, p.fingerprint, p.raw_json_hash, p.source_location_json
+    FROM pre_fund_reconciliation_gateway_pool p
+    WHERE p.run_id = ? AND p.reconciliation_id = ? AND p.fingerprint = ?
+    LIMIT 1
+  `);
+  const selectSnapshot = db.prepare(`
+    SELECT raw_json
+    FROM pre_fund_reconciliation_gateway_candidate_snapshots
+    WHERE pool_id = ? AND run_id = ?
+  `);
+  const insertGroup = db.prepare(`
+    INSERT OR IGNORE INTO pre_fund_reconciliation_duplicate_groups (
+      run_id, kept_pool_id, channel, fingerprint, first_event_order, fold_reason
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  const selectGroup = db.prepare(`
+    SELECT id FROM pre_fund_reconciliation_duplicate_groups
+    WHERE run_id = ? AND kept_pool_id = ?
+  `);
+  const insertFolded = db.prepare(`
+    INSERT INTO pre_fund_reconciliation_folded_gateway_rows (
+      group_id, source_priority, source_order, source_label, reconciliation_id,
+      fingerprint, fields_json, name, card_no, source_location_json, raw_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  return (candidate) => {
+    const candidateRawJson = rawJsonForCandidate(candidate);
+    const fieldsJson = JSON.stringify((candidate && candidate.fields) || {});
+    const locationJson = JSON.stringify((candidate && candidate.location) || {});
+    const result = insertPool.run(
+      runId,
+      candidate.sourcePriority,
+      candidate.sourceOrder,
+      candidate.source,
+      candidate.reconciliationId,
+      candidate.fingerprint,
+      rawJsonHash(candidateRawJson),
+      fieldsJson,
+      candidate.name || '',
+      candidate.cardNo || '',
+      locationJson
+    );
+    if (result.changes === 1) return true;
+
+    const kept = selectKept.get(runId, candidate.reconciliationId, candidate.fingerprint);
+    if (!kept) {
+      throw new Error(
+        `前置资金对账重复候选缺少保留行原始快照：runId=${runId}，reconciliationId=${candidate.reconciliationId}`
+      );
+    }
+    let keptSnapshot = selectSnapshot.get(kept.id, runId);
+    if (!keptSnapshot) {
+      if (typeof resolveKeptRawJson !== 'function') {
+        throw new Error(
+          `前置资金对账首次重复必须提供 resolveKeptRawJson：runId=${runId}，poolId=${kept.id}`
+        );
+      }
+      let keptLocation;
+      try {
+        keptLocation = JSON.parse(kept.source_location_json);
+      } catch (error) {
+        throw new Error(
+          `前置资金对账保留候选定位 JSON 损坏：runId=${runId}，poolId=${kept.id}`,
+          { cause: error }
+        );
+      }
+      const keptRawJson = resolveKeptRawJson({
+        poolId: kept.id,
+        source: kept.source_label,
+        sourcePriority: kept.source_priority,
+        sourceOrder: kept.source_order,
+        reconciliationId: kept.reconciliation_id,
+        fingerprint: kept.fingerprint,
+        location: keptLocation
+      });
+      if (typeof keptRawJson !== 'string') {
+        throw new Error(
+          `前置资金对账无法按来源定位保留候选原始JSON：runId=${runId}，poolId=${kept.id}`
+        );
+      }
+      if (!hashesEqual(kept.raw_json_hash, rawJsonHash(keptRawJson))) {
+        throw new Error(
+          `前置资金对账保留候选原始JSON身份校验失败：runId=${runId}，poolId=${kept.id}`
+        );
+      }
+      insertSnapshot.run(kept.id, runId, keptRawJson);
+      keptSnapshot = { raw_json: keptRawJson };
+    }
+    insertGroup.run(
+      runId,
+      kept.id,
+      String((candidate.fields && candidate.fields.channel) || ''),
+      candidate.fingerprint,
+      candidate.sourceOrder,
+      DUPLICATE_FOLD_REASON
+    );
+    const group = selectGroup.get(runId, kept.id);
+    if (!group) {
+      throw new Error(`前置资金对账重复折叠组创建失败：runId=${runId}，poolId=${kept.id}`);
+    }
+    insertFolded.run(
+      group.id,
+      candidate.sourcePriority,
+      candidate.sourceOrder,
+      candidate.source,
+      candidate.reconciliationId,
+      candidate.fingerprint,
+      fieldsJson,
+      candidate.name || '',
+      candidate.cardNo || '',
+      locationJson,
+      candidateRawJson
+    );
+    return false;
+  };
 }
 
 function mapRun(row, monthKey) {
@@ -92,6 +280,10 @@ class PreFundReconciliationRunStore {
   open(monthKey) {
     const db = runDataStore.openSideDb(this.userDataDir, MODULE, monthKey);
     db.exec(PRE_FUND_RUN_DDL);
+    const poolColumns = db.prepare('PRAGMA table_info(pre_fund_reconciliation_gateway_pool)').all();
+    if (!poolColumns.some((column) => column.name === 'raw_json_hash')) {
+      db.exec('ALTER TABLE pre_fund_reconciliation_gateway_pool ADD COLUMN raw_json_hash BLOB;');
+    }
     return db;
   }
 
@@ -108,46 +300,42 @@ class PreFundReconciliationRunStore {
     return Number(result.lastInsertRowid);
   }
 
-  insertGatewayCandidate(db, runId, candidate) {
-    const result = db.prepare(`
-      INSERT OR IGNORE INTO pre_fund_reconciliation_gateway_pool (
-        run_id, source_priority, source_order, source_label, reconciliation_id,
-        fingerprint, fields_json, name, card_no, source_location_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      runId,
-      candidate.sourcePriority,
-      candidate.sourceOrder,
-      candidate.source,
-      candidate.reconciliationId,
-      candidate.fingerprint,
-      JSON.stringify(candidate.fields || {}),
-      candidate.name || '',
-      candidate.cardNo || '',
-      JSON.stringify(candidate.location || {})
-    );
-    return result.changes === 1;
+  insertGatewayCandidate(db, runId, candidate, options = {}) {
+    return prepareGatewayCandidateStager(db, runId, options)(candidate);
   }
 
-  createGatewayCandidateInserter(db, runId) {
-    const statement = db.prepare(`
-      INSERT OR IGNORE INTO pre_fund_reconciliation_gateway_pool (
-        run_id, source_priority, source_order, source_label, reconciliation_id,
-        fingerprint, fields_json, name, card_no, source_location_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    return (candidate) => statement.run(
-      runId,
-      candidate.sourcePriority,
-      candidate.sourceOrder,
-      candidate.source,
-      candidate.reconciliationId,
-      candidate.fingerprint,
-      JSON.stringify(candidate.fields || {}),
-      candidate.name || '',
-      candidate.cardNo || '',
-      JSON.stringify(candidate.location || {})
-    ).changes === 1;
+  createGatewayCandidateInserter(db, runId, options = {}) {
+    return prepareGatewayCandidateStager(db, runId, options);
+  }
+
+  duplicateStats(db, runId) {
+    const counts = db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM pre_fund_reconciliation_gateway_candidate_snapshots WHERE run_id = ?) AS snapshot_count,
+        (SELECT COUNT(*) FROM pre_fund_reconciliation_duplicate_groups WHERE run_id = ?) AS group_count,
+        (SELECT COUNT(*) FROM pre_fund_reconciliation_folded_gateway_rows f
+          JOIN pre_fund_reconciliation_duplicate_groups g ON g.id = f.group_id
+          WHERE g.run_id = ?) AS folded_count,
+        (SELECT COALESCE(SUM(LENGTH(CAST(raw_json AS BLOB))), 0)
+          FROM pre_fund_reconciliation_gateway_candidate_snapshots WHERE run_id = ?) AS kept_raw_bytes,
+        (SELECT COALESCE(SUM(LENGTH(CAST(f.raw_json AS BLOB))), 0)
+          FROM pre_fund_reconciliation_folded_gateway_rows f
+          JOIN pre_fund_reconciliation_duplicate_groups g ON g.id = f.group_id
+          WHERE g.run_id = ?) AS folded_raw_bytes
+    `).get(runId, runId, runId, runId, runId);
+    const summary = {
+      snapshotCount: Number(counts.snapshot_count) || 0,
+      duplicateGroupCount: Number(counts.group_count) || 0,
+      foldedRowCount: Number(counts.folded_count) || 0,
+      keptRawBytes: Number(counts.kept_raw_bytes) || 0,
+      foldedRawBytes: Number(counts.folded_raw_bytes) || 0
+    };
+    if (summary.snapshotCount !== summary.duplicateGroupCount) {
+      throw new Error(
+        `前置资金对账重复快照守恒失败：保留快照${summary.snapshotCount}条，折叠组${summary.duplicateGroupCount}组`
+      );
+    }
+    return summary;
   }
 
   consumeGatewayCandidate(db, runId, criteria, bankOrdinal) {
@@ -314,7 +502,7 @@ class PreFundReconciliationRunStore {
     assertRunIdentity(monthKey, runId);
     const db = this.open(monthKey);
     try {
-      return db.prepare(`
+      const bankChannels = db.prepare(`
         SELECT channel, MIN(bank_ordinal) AS first_ordinal
         FROM (
           SELECT channel, bank_ordinal
@@ -326,6 +514,19 @@ class PreFundReconciliationRunStore {
         GROUP BY channel
         ORDER BY first_ordinal ASC, channel ASC
       `).all(runId, runId).map((row) => row.channel);
+      const duplicateChannels = db.prepare(`
+        SELECT channel, MIN(first_event_order) AS first_event_order
+        FROM pre_fund_reconciliation_duplicate_groups
+        WHERE run_id = ?
+        GROUP BY channel
+        ORDER BY first_event_order ASC, channel ASC
+      `).all(runId).map((row) => row.channel);
+      const seen = new Set(bankChannels);
+      return bankChannels.concat(duplicateChannels.filter((channel) => {
+        if (seen.has(channel)) return false;
+        seen.add(channel);
+        return true;
+      }));
     } finally {
       db.close();
     }
@@ -335,7 +536,20 @@ class PreFundReconciliationRunStore {
     assertRunIdentity(monthKey, runId);
     const db = this.open(monthKey);
     try {
-      return db.prepare(`
+      return this.summarizeChannels(db, runId);
+    } finally {
+      db.close();
+    }
+  }
+
+  summarizeChannels(db, runId) {
+    if (!db || typeof db.prepare !== 'function') {
+      throw new TypeError('前置资金对账渠道汇总需要有效数据库连接');
+    }
+    if (!Number.isSafeInteger(Number(runId)) || Number(runId) <= 0) {
+      throw new TypeError('前置资金对账渠道汇总 runId 必须为正整数');
+    }
+    const bankSummaries = db.prepare(`
         SELECT channel,
                SUM(balanced_count) AS matched_count,
                SUM(unbalanced_count) AS unmatched_count,
@@ -355,14 +569,138 @@ class PreFundReconciliationRunStore {
         )
         GROUP BY channel
         ORDER BY first_ordinal ASC, channel ASC
-      `).all(runId, runId).map((row) => ({
-        channel: row.channel,
-        matchedCount: Number(row.matched_count) || 0,
-        unmatchedCount: Number(row.unmatched_count) || 0
-      }));
+    `).all(runId, runId).map((row) => ({
+      channel: row.channel,
+      matchedCount: Number(row.matched_count) || 0,
+      unmatchedCount: Number(row.unmatched_count) || 0
+    }));
+    const byChannel = new Map(bankSummaries.map((summary) => [summary.channel, summary]));
+    const duplicateChannels = db.prepare(`
+        SELECT channel, MIN(first_event_order) AS first_event_order
+        FROM pre_fund_reconciliation_duplicate_groups
+        WHERE run_id = ?
+        GROUP BY channel
+        ORDER BY first_event_order ASC, channel ASC
+    `).all(runId);
+    for (const row of duplicateChannels) {
+      if (!byChannel.has(row.channel)) {
+        const summary = { channel: row.channel, matchedCount: 0, unmatchedCount: 0 };
+        bankSummaries.push(summary);
+        byChannel.set(row.channel, summary);
+      }
+    }
+    return bankSummaries;
+  }
+
+  channelHasDuplicates(monthKey, runId, channel) {
+    assertRunIdentity(monthKey, runId);
+    const db = this.open(monthKey);
+    try {
+      return !!db.prepare(`
+        SELECT 1
+        FROM pre_fund_reconciliation_duplicate_groups
+        WHERE run_id = ? AND channel = ?
+        LIMIT 1
+      `).get(runId, channel);
     } finally {
       db.close();
     }
+  }
+
+  iterateDuplicateRecords(monthKey, runId, channel) {
+    assertRunIdentity(monthKey, runId);
+    const self = this;
+    return (function* iterate() {
+      const db = self.open(monthKey);
+      try {
+        const cursor = db.prepare(`
+          SELECT *
+          FROM (
+            SELECT
+              g.id AS group_id,
+              g.first_event_order,
+              g.fold_reason,
+              0 AS object_rank,
+              p.id AS object_id,
+              p.source_priority,
+              p.source_order,
+              p.source_label,
+              p.reconciliation_id,
+              p.fingerprint,
+              p.fields_json,
+              p.name,
+              p.card_no,
+              p.source_location_json,
+              s.raw_json
+            FROM pre_fund_reconciliation_duplicate_groups g
+            JOIN pre_fund_reconciliation_gateway_pool p ON p.id = g.kept_pool_id
+            LEFT JOIN pre_fund_reconciliation_gateway_candidate_snapshots s ON s.pool_id = p.id
+            WHERE g.run_id = ? AND g.channel = ?
+
+            UNION ALL
+
+            SELECT
+              g.id AS group_id,
+              g.first_event_order,
+              g.fold_reason,
+              1 AS object_rank,
+              f.id AS object_id,
+              f.source_priority,
+              f.source_order,
+              f.source_label,
+              f.reconciliation_id,
+              f.fingerprint,
+              f.fields_json,
+              f.name,
+              f.card_no,
+              f.source_location_json,
+              f.raw_json
+            FROM pre_fund_reconciliation_duplicate_groups g
+            JOIN pre_fund_reconciliation_folded_gateway_rows f ON f.group_id = g.id
+            WHERE g.run_id = ? AND g.channel = ?
+          ) audit
+          ORDER BY first_event_order ASC, group_id ASC, object_rank ASC,
+                   source_priority ASC, source_order ASC, object_id ASC
+        `).iterate(runId, channel, runId, channel);
+        for (const row of cursor) {
+          const context = {
+            runId,
+            table: row.object_rank === 0
+              ? 'pre_fund_reconciliation_gateway_pool'
+              : 'pre_fund_reconciliation_folded_gateway_rows',
+            rowId: row.object_id
+          };
+          if (typeof row.raw_json !== 'string') {
+            throw new Error(
+              `前置资金对账重复审计原始JSON缺失：runId=${runId}，${context.table}#${row.object_id}`
+            );
+          }
+          assertValidRawObjectJson(row.raw_json, context);
+          yield {
+            foldRecordId: `PF-${runId}-${row.group_id}`,
+            objectType: row.object_rank === 0 ? '保留记录' : '被折叠记录',
+            foldReason: row.fold_reason,
+            candidate: {
+              source: row.source_label,
+              sourcePriority: row.source_priority,
+              sourceOrder: row.source_order,
+              reconciliationId: row.reconciliation_id,
+              fingerprint: row.fingerprint,
+              fields: parseResultObjectJson(row.fields_json, { ...context, column: 'fields_json' }),
+              name: row.name || '',
+              cardNo: row.card_no || '',
+              location: parseResultObjectJson(
+                row.source_location_json,
+                { ...context, column: 'source_location_json' }
+              ),
+              rawJson: row.raw_json
+            }
+          };
+        }
+      } finally {
+        db.close();
+      }
+    }());
   }
 
   iterateOutputRows(monthKey, runId, table, channel, jsonColumn) {
@@ -400,8 +738,10 @@ class PreFundReconciliationRunStore {
 
   *iterateChannelExports(monthKey, runId) {
     for (const channel of this.listChannels(monthKey, runId)) {
+      const hasDuplicateRecords = this.channelHasDuplicates(monthKey, runId, channel);
       yield {
         channel,
+        hasDuplicateRecords,
         balancedRows: this.iterateOutputRows(
           monthKey,
           runId,
@@ -422,7 +762,10 @@ class PreFundReconciliationRunStore {
           'pre_fund_reconciliation_unbalanced_rows',
           channel,
           'channel_output_json'
-        )
+        ),
+        duplicateRecords: hasDuplicateRecords
+          ? this.iterateDuplicateRecords(monthKey, runId, channel)
+          : []
       };
     }
   }
@@ -455,6 +798,7 @@ function createPreFundReconciliationRunStore(userDataDir) {
 
 module.exports = {
   PRE_FUND_RUN_DDL,
+  DUPLICATE_FOLD_REASON,
   PreFundReconciliationRunStore,
   createPreFundReconciliationRunStore
 };

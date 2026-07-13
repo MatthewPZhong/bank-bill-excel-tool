@@ -961,6 +961,7 @@ function* iterateGatewayBillRows(db) {
         reconciliationId: record.reconciliation_id,
         billDate: record.bill_date,
         reconBillBizId: record.recon_bill_biz_id,
+        rawJson: record.raw_json,
         row
       };
     } catch (_error) {
@@ -974,6 +975,17 @@ function* iterateGatewayBillRows(db) {
       };
     }
   }
+}
+
+function getGatewayBillRawJsonById(db, rowId) {
+  const id = Number(rowId);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new TypeError('持久网关原始行 id 必须为正整数');
+  }
+  const def = getDef('gateway-bill');
+  if (!def.supported) return null;
+  const row = db.prepare(`SELECT raw_json FROM ${def.table} WHERE id = ?`).get(id);
+  return row ? row.raw_json : null;
 }
 
 // v3.0.0 块 B / PR-3（R-3/O-3）：ADM 派生只需 bank-deposit 里 Channel=ADM 的候选子集。
@@ -1659,6 +1671,7 @@ module.exports = {
   deleteBankDepositByDateRange,
   readLinkedTableRows,
   iterateGatewayBillRows,
+  getGatewayBillRawJsonById,
   // v3.0.0 块 B / PR-3：ADM 派生内存优化（Channel=ADM 下推过滤 + 轻量存在性探测）
   readBankDepositAdmCandidates,
   // v3.0.7 需求6：网关账单表按 Channel 集合下推过滤读（业务不变量=对账同渠道；防 300 万行全量尖峰）

@@ -339,6 +339,20 @@ if (process.platform === 'win32') {
 }
 
 let mainWindow = null;
+// 运行结果 side DB 会在启动和新 run 时整库回收，必须阻止两个正式应用实例并发操作同一 userData。
+// preview/startup:measure 使用隔离临时目录，允许并行启动，避免开发工具争抢正式实例锁。
+const requireSingleInstanceLock = !process.env.APP_CAPTURE_PATH;
+const hasSingleInstanceLock = !requireSingleInstanceLock || app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else if (requireSingleInstanceLock) {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
 let database = null;
 let pendingDb = null;
 let preFundReconciliationService = null;
@@ -14010,7 +14024,7 @@ function markAppInitDone() {
   } catch (_e) { /* swallow — 窗口已销毁等 */ }
 }
 
-app.whenReady()
+if (hasSingleInstanceLock) app.whenReady()
   .then(() => {
     markStartupMetric(STARTUP_METRIC_MARKS.appReady);
     initializeActivityLog();

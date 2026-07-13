@@ -1339,6 +1339,10 @@ class AppDatabase {
     return linkedTableRepository.iterateGatewayBillRows(this.db);
   }
 
+  getGatewayBillRawJsonById(rowId) {
+    return linkedTableRepository.getGatewayBillRawJsonById(this.db, rowId);
+  }
+
   // v3.0.0 块 B / PR-3：ADM 派生内存优化 facade（Channel=ADM 下推过滤 / 轻量存在性探测）
   readBankDepositAdmCandidates() {
     return linkedTableRepository.readBankDepositAdmCandidates(this.db);
